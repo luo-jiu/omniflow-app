@@ -8,7 +8,7 @@ interface IProps {
 const AppMain: FC<IProps> = () => {
   return (
     <MainWrapper>
-      <h1>顶部工具栏</h1>
+      <h1>主区域</h1>
     </MainWrapper>
   )
 }

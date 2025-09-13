@@ -193,7 +193,9 @@ function createWindow() {
       // 启用上下文隔离
       webSecurity: true
       // 启用同源策略
-    }
+    },
+    autoHideMenuBar: true
+    // 自动隐藏菜单栏
   });
   let zoomFactor = 1;
   ipcMain.handle("zoom-adjust", (_, delta) => {

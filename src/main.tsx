@@ -3,8 +3,8 @@ import ReactDOM from 'react-dom/client'
 import App from './App.tsx'
 import 'normalize.css'
 
-// 重置 css
-import '@/assets/css/index.less'
+import '@douyinfe/semi-ui/dist/css/semi.min.css';
+import '@/assets/css/index.less' // 重置 css
 import {HashRouter} from "react-router-dom";
 import {ThemeProvider} from "styled-components";
 import theme from "./assets/theme";

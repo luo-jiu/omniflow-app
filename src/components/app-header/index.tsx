@@ -1,16 +1,33 @@
-import {FC, ReactNode} from "react";
-import {HeaderWrapper} from "@/components/app-header/style.ts";
+import { FC, useState, useEffect } from 'react';
+import { HeaderWrapper } from './style';
+import { Button } from '@douyinfe/semi-ui';
 
-interface IProps {
-  children?: ReactNode
-}
+const AppHeader: FC = () => {
+  const [theme, setTheme] = useState<'light' | 'dark'>('light');
 
-const AppHeader: FC<IProps> = () => {
+  useEffect(() => {
+    const saved = localStorage.getItem('app-theme') || 'light';
+    setTheme(saved as 'light' | 'dark');
+    document.body.setAttribute('theme-mode', saved);
+  }, []);
+
+  const toggleTheme = () => {
+    const newTheme = theme === 'light' ? 'dark' : 'light';
+    setTheme(newTheme);
+    document.body.setAttribute('theme-mode', newTheme);
+    localStorage.setItem('app-theme', newTheme);
+  };
+
   return (
     <HeaderWrapper>
-      <h1>顶部工具栏</h1>
+      <div className="content">
+        <h1>顶部工具栏</h1>
+        <Button onClick={toggleTheme} theme="borderless">
+          {theme === 'light' ? '🌙 暗色模式' : '☀️ 浅色模式'}
+        </Button>
+      </div>
     </HeaderWrapper>
-  )
-}
+  );
+};
 
-export default AppHeader
+export default AppHeader;

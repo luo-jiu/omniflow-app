@@ -36,7 +36,8 @@ function createWindow() {
       nodeIntegration: false,     // 禁用 Node.js 集成
       contextIsolation: true,     // 启用上下文隔离
       webSecurity: true           // 启用同源策略
-    }
+    },
+    autoHideMenuBar: true, // 自动隐藏菜单栏
   })
 
   // 窗口缩放因子（默认 1.0）

@@ -2,8 +2,10 @@ import styled from 'styled-components'
 
 export const MainWrapper = styled.main`
   flex: 1;
-  background: #ecf0f1;
-  display: flex;
+  padding: 16px;
+  overflow: auto;
+  background: var(--semi-color-bg-0);
+  color: var(--semi-color-text-0);
 `;
 
 export default MainWrapper;

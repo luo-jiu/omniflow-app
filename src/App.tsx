@@ -4,6 +4,7 @@ import AppHeader from "@/components/app-header";
 import AppMain from "@/components/app-main";
 import './App.css'
 import AppSidebar from "@/components/app-sidebar";
+import DirectorySidebar from "@/components/app-directory-sidebar";
 
 function App() {
   useEffect(() => {
@@ -25,6 +26,7 @@ function App() {
       <AppHeader />
       <div className="content">
         <AppSidebar />
+        <DirectorySidebar />
         <AppMain />
       </div>
     </div>
