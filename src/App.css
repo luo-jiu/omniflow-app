@@ -1,0 +1,55 @@
+/*!* 根容器，占满整个视口 *!*/
+/*.app-container {*/
+/*    display: flex;*/
+/*    flex-direction: column;*/
+/*    height: 100vh; !* 占满视口高度 *!*/
+/*    width: 100vw; !* 占满视口宽度 *!*/
+/*    overflow: hidden; !* 防止滚动条 *!*/
+/*}*/
+
+/*!* 上侧工具栏 *!*/
+/*.app-header {*/
+/*    height: 60px; !* 固定高度 *!*/
+/*    width: 100%; !* 占满宽度 *!*/
+/*    background-color: #f0f0f0;*/
+/*    display: flex;*/
+/*    align-items: center;*/
+/*    padding: 0 20px;*/
+/*    box-sizing: border-box;*/
+/*    border-bottom: 1px solid #ddd;*/
+/*}*/
+
+/*!* 下方内容区域 *!*/
+/*.app-content {*/
+/*    display: flex;*/
+/*    flex: 1; !* 占满剩余高度 *!*/
+/*    overflow: hidden; !* 防止滚动条 *!*/
+/*}*/
+
+/*!* 左侧菜单栏 *!*/
+/*.app-sidebar {*/
+/*    width: 200px; !* 固定宽度 *!*/
+/*    height: 100%; !* 占满内容区域高度 *!*/
+/*    background-color: #e0e0e0;*/
+/*    border-right: 1px solid #ddd;*/
+/*    overflow-y: auto; !* 如果内容过多，允许垂直滚动 *!*/
+/*}*/
+
+/*!* 右侧主内容区域 *!*/
+/*.app-main {*/
+/*    flex: 1; !* 占满剩余宽度 *!*/
+/*    height: 100%; !* 占满内容区域高度 *!*/
+/*    padding: 20px;*/
+/*    overflow-y: auto; !* 如果内容过多，允许垂直滚动 *!*/
+/*}*/
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.content {
+  flex: 1;
+  display: flex;
+}
