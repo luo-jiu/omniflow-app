@@ -9,8 +9,7 @@ function registerFileIpc(ipcMain2) {
   ipcMain2.handle("file:open", async () => {
     const result = await dialog.showOpenDialog({ properties: ["openFile"] });
     if (result.canceled || result.filePaths.length === 0) return null;
-    const content = await fs.readFile(result.filePaths[0], "utf-8");
-    return content;
+    return await fs.readFile(result.filePaths[0], "utf-8");
   });
   ipcMain2.handle("file:save", async (_e, path2, content) => {
     await fs.writeFile(path2, content, "utf-8");
@@ -194,8 +193,9 @@ function createWindow() {
       webSecurity: true
       // 启用同源策略
     },
-    autoHideMenuBar: true
+    autoHideMenuBar: true,
     // 自动隐藏菜单栏
+    frame: false
   });
   let zoomFactor = 1;
   ipcMain.handle("zoom-adjust", (_, delta) => {
@@ -207,6 +207,19 @@ function createWindow() {
   } else {
     win.loadFile(path.join(RENDERER_DIST, "index.html"));
   }
+  ipcMain.on("window-minimize", () => {
+    win.minimize();
+  });
+  ipcMain.on("window-maximize", () => {
+    if (win.isMaximized()) {
+      win.unmaximize();
+    } else {
+      win.maximize();
+    }
+  });
+  ipcMain.on("window-close", () => {
+    win.close();
+  });
 }
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();

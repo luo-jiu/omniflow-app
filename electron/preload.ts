@@ -1,5 +1,4 @@
 // 渲染进程中的Bridge API
-
 import { ipcRenderer, contextBridge } from 'electron'
 
 // --------- Expose some API to the Renderer process ---------
@@ -32,4 +31,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
 contextBridge.exposeInMainWorld('electronZoom', (delta: number) => {
   return ipcRenderer.invoke('zoom-adjust', delta);
 })
+
+// 窗口控制 API
+contextBridge.exposeInMainWorld('electronWindow', {
+  minimize: () => ipcRenderer.send('window-minimize'),
+  maximize: () => ipcRenderer.send('window-maximize'),
+  close: () => ipcRenderer.send('window-close'),
+});
 

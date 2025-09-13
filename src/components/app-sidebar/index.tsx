@@ -13,7 +13,7 @@ const Index: FC<IProps> = () => {
         style={{ height: '100%' }}
         bodyStyle={{ flexGrow: 1, overflow: 'auto' }}
         items={[
-          { itemKey: 'files', text: '文件管理' },
+          { itemKey: 'files', text: '文件' },
           { itemKey: 'settings', text: '设置' },
         ]}
       />

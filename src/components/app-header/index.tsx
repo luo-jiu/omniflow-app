@@ -1,6 +1,17 @@
 import { FC, useState, useEffect } from 'react';
-import { HeaderWrapper } from './style';
+import {HeaderWrapper, ThemeToggleButton} from './style';
 import { Button } from '@douyinfe/semi-ui';
+import {IconMoon, IconSun, IconMinus, IconStop, IconClose} from '@douyinfe/semi-icons';
+
+declare global {
+  interface Window {
+    electronWindow: {
+      minimize: () => void;
+      maximize: () => void;
+      close: () => void;
+    };
+  }
+}
 
 const AppHeader: FC = () => {
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
@@ -22,9 +33,29 @@ const AppHeader: FC = () => {
     <HeaderWrapper>
       <div className="content">
         <h1>顶部工具栏</h1>
-        <Button onClick={toggleTheme} theme="borderless">
-          {theme === 'light' ? '🌙 暗色模式' : '☀️ 浅色模式'}
-        </Button>
+        <div className="right-controls">
+          <ThemeToggleButton onClick={toggleTheme} theme="borderless" icon={theme === 'light' ? <IconMoon /> : <IconSun />}>
+            {theme === 'light' ? '暗色模式' : '浅色模式'}
+          </ThemeToggleButton>
+          <Button
+            onClick={() => window.electronWindow.minimize()}
+            theme="borderless"
+            size="large" // 点击范围大
+            icon={<IconMinus style={{ fontSize: 20 }} />} // 图标更大
+          />
+          <Button
+            onClick={() => window.electronWindow.maximize()}
+            theme="borderless"
+            size="large"
+            icon={<IconStop style={{ fontSize: 20 }} />}
+          />
+          <Button
+            onClick={() => window.electronWindow.close()}
+            theme="borderless"
+            size="large"
+            icon={<IconClose style={{ fontSize: 20 }} />}
+          />
+        </div>
       </div>
     </HeaderWrapper>
   );

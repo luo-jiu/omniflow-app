@@ -38,6 +38,7 @@ function createWindow() {
       webSecurity: true           // 启用同源策略
     },
     autoHideMenuBar: true, // 自动隐藏菜单栏
+    frame: false
   })
 
   // 窗口缩放因子（默认 1.0）
@@ -55,6 +56,21 @@ function createWindow() {
   } else {
     win.loadFile(path.join(RENDERER_DIST, 'index.html'))
   }
+
+  // 接收渲染进程的 IPC 调用
+  ipcMain.on('window-minimize', () => {
+    win.minimize();
+  });
+  ipcMain.on('window-maximize', () => {
+    if (win.isMaximized()) {
+      win.unmaximize();
+    } else {
+      win.maximize();
+    }
+  });
+  ipcMain.on('window-close', () => {
+    win.close();
+  });
 }
 
 /**

@@ -26,3 +26,8 @@ electron.contextBridge.exposeInMainWorld("electronAPI", {
 electron.contextBridge.exposeInMainWorld("electronZoom", (delta) => {
   return electron.ipcRenderer.invoke("zoom-adjust", delta);
 });
+electron.contextBridge.exposeInMainWorld("electronWindow", {
+  minimize: () => electron.ipcRenderer.send("window-minimize"),
+  maximize: () => electron.ipcRenderer.send("window-maximize"),
+  close: () => electron.ipcRenderer.send("window-close")
+});
