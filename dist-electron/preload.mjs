@@ -21,7 +21,8 @@ electron.contextBridge.exposeInMainWorld("ipcRenderer", {
   // ...
 });
 electron.contextBridge.exposeInMainWorld("electronAPI", {
-  getStaticData: () => electron.ipcRenderer.invoke("sys:get-static-data")
+  getStaticData: () => electron.ipcRenderer.invoke("sys:get-static-data"),
+  fetch: (url, options) => electron.ipcRenderer.invoke("http:fetch", url, options)
 });
 electron.contextBridge.exposeInMainWorld("electronZoom", (delta) => {
   return electron.ipcRenderer.invoke("zoom-adjust", delta);

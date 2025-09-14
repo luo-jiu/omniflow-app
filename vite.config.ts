@@ -31,4 +31,12 @@ export default defineConfig({
       '@': path.resolve(__dirname, 'src'),
     },
   },
+  server: {
+    port: 8080,
+    strictPort: true,
+    headers: {
+      'Content-Security-Policy':
+        "default-src 'self'; connect-src 'self' http://localhost:8848 ws://localhost:8848; img-src 'self' data: blob:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';"
+    }
+  },
 })

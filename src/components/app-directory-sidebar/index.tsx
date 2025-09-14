@@ -1,64 +1,31 @@
-import {FC, ReactNode, useEffect, useRef, useState} from "react";
-import DirectorySidebarWrapper from "@/components/app-directory-sidebar/style.ts";
-import {Tree} from "@douyinfe/semi-ui";
+import { DirectorySidebarWrapper } from './style';
+import SidebarHeader from './SidebarHeader';
+import DirectoryTree from './DirectoryTree';
+import { useRepositoryTree } from '@/hooks/directory-sidebar/useRepositoryTree';
+import { useResizableSidebar } from '@/hooks/directory-sidebar/useResizableSidebar';
 
-interface IProps {
-  children?: ReactNode
-}
+export default function DirectorySidebar() {
+  const {
+    expandedKeys,
+    currentTreeData,
+    handleExpand,
+    handleDoubleClick,
+  } = useRepositoryTree();
 
-const DirectorySidebar: FC<IProps> = () => {
-  const [width, setWidth] = useState(240);
-  const isResizing = useRef(false);
-
-  const treeData = [
-    {
-      label: 'C盘',
-      key: 'c',
-      children: [{ label: 'Users', key: 'c-1' }]
-    },
-    {
-      label: 'D盘',
-      key: 'd',
-      children: [{ label: 'Projects', key: 'd-1' }]
-    }
-  ];
-
-  const onMouseDown = () => {
-    isResizing.current = true;
-  };
-
-  const onMouseMove = (e: MouseEvent) => {
-    if (!isResizing.current) return;
-    const newWidth = e.clientX - 60; // 60 = A栏宽度
-    if (newWidth > 150 && newWidth < 400) {
-      setWidth(newWidth);
-    }
-  };
-
-  const onMouseUp = () => {
-    isResizing.current = false;
-  };
-
-  useEffect(() => {
-    window.addEventListener('mousemove', onMouseMove);
-    window.addEventListener('mouseup', onMouseUp);
-    return () => {
-      window.removeEventListener('mousemove', onMouseMove);
-      window.removeEventListener('mouseup', onMouseUp);
-    };
-  }, []);
+  const { width, isDragging, containerRef, handleMouseDown } = useResizableSidebar();
 
   return (
-    <DirectorySidebarWrapper>
-      {/* 侧边栏 */}
-      <div className="sidebar" style={{ width }}>
-        <Tree treeData={treeData} defaultExpandAll style={{ padding: 8, flex: 1 }} />
+    <DirectorySidebarWrapper ref={containerRef} $isDragging={isDragging}>
+      <div className="sidebar-container" style={{ width: `${width}px` }}>
+        <SidebarHeader />
+        <DirectoryTree
+          treeData={currentTreeData}
+          expandedKeys={expandedKeys}
+          onExpand={handleExpand}
+          onDoubleClick={handleDoubleClick}
+        />
       </div>
-
-      {/* 拖拽条 */}
-      <div className="resize-handle" onMouseDown={onMouseDown} />
+      <div className="resize-handle" onMouseDown={handleMouseDown} />
     </DirectorySidebarWrapper>
-  )
+  );
 }
-
-export default DirectorySidebar

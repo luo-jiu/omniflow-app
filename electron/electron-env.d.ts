@@ -32,5 +32,13 @@ interface Window {
       totalMemoryGB: number;
     }>;
     zoomAdjust: (delta: number) => void; // 添加 zoomAdjust 方法
+    fetch: (
+      url: string,
+      options?: any
+    ) => Promise<{
+      status: number;
+      headers: Record<string, string | string[]>;
+      body: any;
+    }>;
   };
 }

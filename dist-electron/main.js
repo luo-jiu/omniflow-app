@@ -1,4 +1,4 @@
-import { dialog, ipcMain, app, BrowserWindow } from "electron";
+import { dialog, ipcMain, app, BrowserWindow, net } from "electron";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "fs/promises";
@@ -186,12 +186,10 @@ function createWindow() {
       // 预加载脚本，用于安全地与渲染进程通信
       preload: path.join(MAIN_DIST, "preload.mjs"),
       // Electron 安全推荐配置
-      nodeIntegration: false,
-      // 禁用 Node.js 集成
-      contextIsolation: true,
-      // 启用上下文隔离
-      webSecurity: true
-      // 启用同源策略
+      webSecurity: false
+      // nodeIntegration: false,     // 禁用 Node.js 集成
+      // contextIsolation: true,     // 启用上下文隔离
+      // webSecurity: true           // 启用同源策略
     },
     autoHideMenuBar: true,
     // 自动隐藏菜单栏
@@ -219,6 +217,56 @@ function createWindow() {
   });
   ipcMain.on("window-close", () => {
     win.close();
+  });
+  ipcMain.handle("http:fetch", async (_event, url, options = {}) => {
+    console.log("start...");
+    console.log("URL:", url);
+    console.log("Options:", options);
+    return new Promise((resolve, reject) => {
+      const request = net.request({ url, method: options.method || "GET" });
+      request.setHeader("Authorization", "Bearer 906cd400-707b-4528-a8f6-ae54c8f819d2");
+      request.setHeader("username", "LJ");
+      if (options.headers) {
+        Object.entries(options.headers).forEach(([key, value]) => {
+          console.log(`set head... ${key}: ${value}`);
+          request.setHeader(key, value);
+        });
+      }
+      let body = "";
+      request.on("response", (response) => {
+        console.log("return info...");
+        console.log("Status:", response.statusCode);
+        console.log("Headers:", response.headers);
+        response.on("data", (chunk) => {
+          console.log(`data len... ${chunk.length})`);
+          body += chunk;
+        });
+        response.on("end", () => {
+          console.log("ok...");
+          console.log("Body info... ", body.slice(0, 500));
+          let parsedBody;
+          try {
+            parsedBody = JSON.parse(body);
+          } catch {
+            parsedBody = body;
+          }
+          resolve({
+            status: response.statusCode,
+            headers: response.headers,
+            body: parsedBody
+          });
+        });
+      });
+      request.on("error", (err) => {
+        console.error("err... ", err);
+        reject(err);
+      });
+      if (options.body) {
+        console.log("go go go... ", options.body);
+        request.write(options.body);
+      }
+      request.end();
+    });
   });
 }
 app.on("window-all-closed", () => {
