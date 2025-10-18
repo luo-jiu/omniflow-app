@@ -13,6 +13,10 @@ interface Node {
   children?: Node[];
   key: string;       // 唯一标识，用于树组件
   loaded?: boolean;
+  data?: {
+    rawName: string; // 保留未截断的原始名称
+    [key: string]: any; // 以后还可以加别的
+  };
 }
 
 export interface NodeRespDTO {
@@ -153,6 +157,7 @@ export function useRepositoryTree() {
       key: `${item.parentId}:${item.id}`,
       isLeaf: item.type === 'file',
       label: item.name,
+      data: { rawName: item.name },
       children: item.type === 'dir' ? [] : undefined,
       loaded: false,
     };

@@ -32,15 +32,5 @@ function App() {
     </div>
   )
 }
-    // {/* 上侧工具栏 */}
-    //   <AppHeader />
-    //   {/* 下方内容区域：左侧菜单栏 + 右侧内容 */}
-    //   <div className="app-content">
-    //     <Index />
-    //     <main className="app-main">
-    //       {/* 右侧主要内容区域 */}
-    //       <h2>主内容区域</h2>
-    //       <p>这里是右侧的内容区域，占满剩余空间。</p>
-    //     </main>
-    //   </div>
+
 export default App
