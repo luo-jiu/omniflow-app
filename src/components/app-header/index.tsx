@@ -2,6 +2,7 @@ import { FC, useState, useEffect } from 'react';
 import {HeaderWrapper, ThemeToggleButton} from './style';
 import { Button } from '@douyinfe/semi-ui';
 import {IconMoon, IconSun, IconMinus, IconStop, IconClose} from '@douyinfe/semi-icons';
+import {useNavigate} from "react-router-dom";
 
 declare global {
   interface Window {
@@ -15,6 +16,7 @@ declare global {
 
 const AppHeader: FC = () => {
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
+  const navigate = useNavigate()
 
   useEffect(() => {
     const saved = localStorage.getItem('app-theme') || 'light';
@@ -32,7 +34,9 @@ const AppHeader: FC = () => {
   return (
     <HeaderWrapper>
       <div className="content">
-        <h1>顶部工具栏</h1>
+        <h1 onClick={() => navigate('/')} title="返回首页">
+          Omniflow
+        </h1>
         <div className="right-controls">
           <ThemeToggleButton onClick={toggleTheme} theme="borderless" icon={theme === 'light' ? <IconMoon /> : <IconSun />}>
             {theme === 'light' ? '暗色模式' : '浅色模式'}

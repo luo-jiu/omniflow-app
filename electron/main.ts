@@ -106,7 +106,7 @@ function createWindow() {
     return new Promise((resolve, reject) => {
       const request = net.request({ url, method: options.method || "GET" });
       // 设置请求头
-      request.setHeader('Authorization', 'Bearer 906cd400-707b-4528-a8f6-ae54c8f819d2');
+      request.setHeader('Authorization', 'Bearer cd71f634-751c-4d37-9476-04b527dcb5fa');
       request.setHeader('username', 'LJ');
 
       if (options.headers) {

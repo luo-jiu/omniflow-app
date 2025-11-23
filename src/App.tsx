@@ -1,10 +1,10 @@
 import {useEffect} from 'react'
 
 import AppHeader from "@/components/app-header";
-import AppMain from "@/components/app-main";
+import {useRoutes} from "react-router-dom";
+import {Suspense} from "react";
+import routes from "@/router";
 import './App.css'
-import AppSidebar from "@/components/app-sidebar";
-import DirectorySidebar from "@/components/app-directory-sidebar";
 
 function App() {
   useEffect(() => {
@@ -25,9 +25,12 @@ function App() {
     <div className="app">
       <AppHeader />
       <div className="content">
-        <AppSidebar />
-        <DirectorySidebar />
-        <AppMain />
+        {/*<AppSidebar />*/}
+        <Suspense fallback={'loading...'}>
+          <div className='main'>{useRoutes(routes)}</div>
+        </Suspense>
+        {/*<DirectorySidebar />*/}
+        {/*<AppMain />*/}
       </div>
     </div>
   )

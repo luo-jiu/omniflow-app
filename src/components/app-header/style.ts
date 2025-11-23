@@ -13,6 +13,15 @@ export const HeaderWrapper = styled.div`
   flex-shrink: 0;
   -webkit-app-region: drag;
 
+  h1 {
+    font-size: 28px;
+    margin: 0;
+    color: var(--semi-color-text-0);
+    cursor: pointer;              /* 鼠标变手型 */
+    user-select: none;            /* 避免选中文字 */
+    -webkit-app-region: no-drag;  /* 避免 Electron 拖动区域冲突 */
+  }
+
   .content {
     display: flex;
     justify-content: space-between;

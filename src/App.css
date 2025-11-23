@@ -35,14 +35,6 @@
 /*    overflow-y: auto; !* 如果内容过多，允许垂直滚动 *!*/
 /*}*/
 
-/*!* 右侧主内容区域 *!*/
-/*.app-main {*/
-/*    flex: 1; !* 占满剩余宽度 *!*/
-/*    height: 100%; !* 占满内容区域高度 *!*/
-/*    padding: 20px;*/
-/*    overflow-y: auto; !* 如果内容过多，允许垂直滚动 *!*/
-/*}*/
-
 .app {
   display: flex;
   flex-direction: column;
@@ -52,5 +44,14 @@
 .content {
   flex: 1;
   display: flex;
-  height: calc(100vh - 48px);
+  overflow: hidden;
+  width: 100%;
 }
+
+.main {
+  flex: 1;          /* 占满剩余空间 */
+  display: flex;
+  flex-direction: column;
+  min-width: 0;     /* 允许内容在宽度不够时换行 */
+  overflow: hidden; /* 防止内容撑破导致右侧空白 */
+ }

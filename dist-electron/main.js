@@ -224,7 +224,7 @@ function createWindow() {
     console.log("Options:", options);
     return new Promise((resolve, reject) => {
       const request = net.request({ url, method: options.method || "GET" });
-      request.setHeader("Authorization", "Bearer 906cd400-707b-4528-a8f6-ae54c8f819d2");
+      request.setHeader("Authorization", "Bearer cd71f634-751c-4d37-9476-04b527dcb5fa");
       request.setHeader("username", "LJ");
       if (options.headers) {
         Object.entries(options.headers).forEach(([key, value]) => {

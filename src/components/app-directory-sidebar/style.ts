@@ -26,41 +26,47 @@ export const DirectorySidebarWrapper = styled.aside<{ $isDragging?: boolean }>`
     flex-shrink: 0;
   }
 
-  /* 树容器区域：允许横向滚动 */
+  /* 树容器区域：横/纵滚动条；横向仅在“有遮挡”时出现（auto） */
   .tree-container {
     flex: 1;
     overflow-y: auto;
-    overflow-x: auto;
+    overflow-x: auto;                 /* 仅在需要时出现 */
     position: relative;
+    scrollbar-gutter: stable both-edges; /* 预留轨道空间，避免布局抖动 */
+    overscroll-behavior: contain;
   }
 
-  /* 拖拽条 */
+  /* 可选：侧栏 resize handle */
   .resize-handle {
     position: absolute;
     top: 0;
     right: 0;
-    width: 4px;
+    width: 10px;
     height: 100%;
     cursor: col-resize;
     background: transparent;
-    z-index: 12; /* 比树略高，但不覆盖滚动条区域下的内容 */
-    ${props => props.$isDragging && `
-      background: rgba(0, 0, 255, 0.12);
-    `}
+    z-index: 12;
   }
-
+  .resize-handle::after {
+    content: "";
+    position: absolute;
+    left: -6px;
+    right: -6px;
+    top: 0;
+    bottom: 0;
+    cursor: col-resize;
+  }
   .resize-handle:hover {
     background: rgba(0, 0, 0, 0.06);
   }
 
-  /* wrapper：宽度由 JS measure 控制（min-width 会被设置） */
+  /* wrapper 的 min-width 将由 JS 动态设置为“视口内最大被遮挡右缘 + 冗余” */
   .custom-tree-wrapper {
     display: block;
-    min-width: max-content; /* 初始值，运行时会被 measure() 更新为更合理的值 */
+    min-width: max-content; /* 初值为内容宽，随 JS 覆盖为像素值 */
     width: auto;
   }
 
-  /* Tree 内部样式 */
   .custom-tree {
     user-select: none;
 
@@ -71,67 +77,108 @@ export const DirectorySidebarWrapper = styled.aside<{ $isDragging?: boolean }>`
       padding: 4px 8px;
     }
 
-    /* 保留 semi 的 icon 样式（文件夹/文件图标） */
     .semi-tree-option-label .semi-icon {
       font-size: 20px !important;
       margin-right: 8px;
     }
   }
 
-  /* 我们把每一行的 label 设为 flex 布局（不使用绝对定位） */
+  /* 行 label：inline-flex 以内容宽驱动，利于横向滚动 */
   .tree-node-label {
-    display: flex;
+    display: inline-flex;
     align-items: center;
     width: 100%;
-    min-width: 0; /* 关键：允许子元素触发 ellipsis */
+    min-width: 0;
     box-sizing: border-box;
-    padding-right: 8px; /* 给 + 留点空间 */
-  }
-
-  /* 文字：自动省略并且不会遮挡 + 号 */
-  .tree-node-text {
-    flex: 1 1 auto;
-    min-width: 0; /* 关键：让 text-overflow 生效 */
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
     padding-right: 8px;
   }
 
-  /* + 保留在流内，不绝对定位，避免覆盖滚动条 */
-  .tree-node-plus {
+  /* 外部文件拖拽悬停高亮 */
+  .tree-node-label.drag-over {
+    background: var(--semi-color-fill-1);
+    outline: 1px dashed var(--semi-color-primary);
+    border-radius: 6px;
+  }
+
+  /* 文字块使用 inline-block，scrollWidth 更稳定 */
+  .tree-node-text {
+    display: inline-block;
     flex: 0 0 auto;
-    margin-left: 6px;
-    width: 18px;
-    height: 18px;
-    line-height: 18px;
-    cursor: pointer;
-    color: var(--semi-color-text-2);
-    transition: color 0.16s;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
+    white-space: nowrap;
+    overflow: visible;
+    text-overflow: initial;
   }
 
-  .tree-node-plus:hover {
-    color: var(--semi-color-primary);
-  }
-
-  /* 自定义滚动条（可选） */
+  /* 滚动条更易命中（Chromium/Electron） */
   .tree-container::-webkit-scrollbar {
-    height: 10px;
-    width: 8px;
+    height: 24px;   /* 横向滚动条厚度 */
+    width: 16px;    /* 纵向滚动条厚度 */
   }
   .tree-container::-webkit-scrollbar-track {
     background: var(--semi-color-fill-0);
-    border-radius: 6px;
+    border-radius: 10px;
   }
   .tree-container::-webkit-scrollbar-thumb {
     background: var(--semi-color-fill-2);
-    border-radius: 6px;
+    border-radius: 10px;
+    min-height: 44px;
+    min-width: 44px;
   }
   .tree-container::-webkit-scrollbar-thumb:hover {
     background: var(--semi-color-fill-3);
   }
+
+  /* Firefox 兜底 */
+  .tree-container {
+    scrollbar-width: auto;
+  }
 `;
+
+/** 右键/更多 菜单（fixed 定位，大号卡片风格） */
+export const ContextMenu = styled.div`
+  position: fixed;
+  z-index: 3000;
+  min-width: 380px;
+  max-width: 440px;
+  padding: 16px;
+  border-radius: 12px;
+  background: var(--semi-color-bg-1);
+  border: 1px solid var(--semi-color-border);
+  box-shadow:
+          0 18px 48px rgba(0, 0, 0, 0.20),
+          0  6px 16px rgba(0, 0, 0, 0.16);
+
+  .menu-title {
+    font-size: 16px;
+    line-height: 24px;
+    font-weight: 600;
+    color: var(--semi-color-text-0);
+    margin: 4px 2px 10px;
+  }
+
+  .menu-item {
+    padding: 12px 14px;
+    border-radius: 8px;
+    cursor: pointer;
+    user-select: none;
+    font-size: 16px;
+    line-height: 24px;
+    color: var(--semi-color-text-0);
+    transition: background 0.12s, color 0.12s;
+  }
+
+  .menu-item + .menu-item {
+    margin-top: 6px;
+  }
+
+  .menu-item:hover {
+    background: var(--semi-color-fill-1);
+  }
+
+  .menu-item.danger:hover {
+    color: var(--semi-color-danger);
+    background: rgba(255, 0, 0, 0.08);
+  }
+`;
+
 export default DirectorySidebarWrapper;

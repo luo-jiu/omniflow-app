@@ -1,176 +1,569 @@
 import React, { ReactNode, useEffect, useRef, useState } from 'react';
-import { Modal, Tree } from '@douyinfe/semi-ui';
-import { IconPlus } from '@douyinfe/semi-icons';
+import {Modal, Tree, Toast, Descriptions} from '@douyinfe/semi-ui';
+import { ContextMenu } from './style';
+import {uploadAndCreateNode} from "@/service/directory-sidebar.api.ts";
 
 interface DirectoryTreeProps {
   treeData: any[];
   expandedKeys: string[];
   onExpand: (keys: string[]) => void;
   onDoubleClick: (e: React.MouseEvent, node: any) => void;
+  // 上传成功后，通知父组件刷新某个节点
+  onUploadSuccess?: (parentNode: any, newNode: any) => void;
 }
 
 /**
- * DirectoryTree:
- * - 使用 .custom-tree-wrapper 的宽度测量办法，保证横向滚动条宽度足够可拖拽
- * - 文本默认 ellipsis + title 提示（不使用 hover 展开以免遮挡滚动条）
+ * 仅以“视口内且被右侧遮挡的文字行”为准，计算 wrapper.minWidth
+ * - 不考虑未展开/不在当前可视垂直范围内的节点（懒加载不影响宽度）
+ * - 用 .tree-node-text 的 scrollWidth 测字宽，避免容器自放大反馈
+ * - 只要有遮挡 → 出现横向滚动条；拖到最右时刚好完全显示（+6px冗余）
  */
 export default function DirectoryTree({
   treeData,
   expandedKeys,
   onExpand,
   onDoubleClick,
+  onUploadSuccess,
 }: DirectoryTreeProps) {
-  const [hoverKey, setHoverKey] = useState<string | null>(null);
+  // 外部文件拖拽：悬停高亮 & 延迟展开
+  const [dragOverKey, setDragOverKey] = useState<string | null>(null);
+  const expandTimerRef = useRef<number | null>(null);
 
-  // wrapper 用来测量每行的 scrollWidth，从而设置合适的 minWidth
+  // 自定义菜单状态
+  type MenuState = {
+    open: boolean;
+    x: number;
+    y: number;
+    node: any | null;
+    isFolder: boolean;
+  };
+  const [menu, setMenu] = useState<MenuState>({
+    open: false,
+    x: 0,
+    y: 0,
+    node: null,
+    isFolder: false,
+  });
+
+  // ✨ 新增：上传 Modal 的状态
+  const [uploadModal, setUploadModal] = useState<{
+    visible: boolean;
+    file: File | null;
+    targetNode: any | null; // 目标文件夹节点
+    loading: boolean;
+  }>({
+    visible: false,
+    file: null,
+    targetNode: null,
+    loading: false
+  });
+
+  // Tree 内容容器（可滚动内容层在 wrapper 中）
   const wrapperRef = useRef<HTMLDivElement | null>(null);
-  const measureTimeoutRef = useRef<number | null>(null);
 
-  // 点击 + 的回调
-  const handleAdd = (node: any) => {
+  // 为每个“可见行”的 label 与其内部文字 span 保持引用
+  type RowRefs = { label: HTMLElement | null; text: HTMLElement | null };
+  const rowRefs = useRef<Map<string, RowRefs>>(new Map());
+
+  // 记录上一次应用到 wrapper 的 minWidth，避免 1px 抖动
+  const lastAppliedWidthRef = useRef<number>(0);
+
+  // 记录上一次的 expandedKeys
+  const prevExpandedKeysRef = useRef<string[]>(expandedKeys);
+
+  const H_REDUNDANCY_PX = 3; // 极小冗余，避免边界像素抖动
+  const FLOAT_EPS = 0.5;     // 浮点比较误差容忍
+
+  /** rAF 合并调度 */
+  const rafIdRef = useRef<number | null>(null);
+  const scheduleRecompute = () => {
+    if (rafIdRef.current != null) return;
+    rafIdRef.current = requestAnimationFrame(() => {
+      rafIdRef.current = null;
+      recomputeFromViewport();
+    });
+  };
+
+  /** 仅基于“当前垂直视口内的文字行”来计算需要的最小宽度（防自放大） */
+  const recomputeFromViewport = () => {
+    const wrapper = wrapperRef.current;
+    const container = wrapper?.parentElement;
+    if (!wrapper || !container) return;
+
+    const wrapperRect = wrapper.getBoundingClientRect();
+    const containerRect = container.getBoundingClientRect();
+
+    const viewLeft = container.scrollLeft;
+    const viewRight = viewLeft + container.clientWidth;
+
+    let anyOccluded = false;
+    let maxOccludedRight = 0;
+
+    rowRefs.current.forEach(({ label, text }) => {
+      if (!label || !text) return;
+      if (!label.isConnected || !text.isConnected) return;
+
+      // 仅统计与容器垂直方向相交的行
+      const textRect = text.getBoundingClientRect();
+      const verticallyVisible =
+        textRect.bottom > containerRect.top && textRect.top < containerRect.bottom;
+      if (!verticallyVisible) return;
+
+      // 以“文字 span”为基准测左缘与真实文字宽
+      const leftInWrapper = (textRect.left - wrapperRect.left) + viewLeft;
+      // 文字天然宽度（不受容器 100% 影响），设置一个极端上限保险
+      const textWidth = Math.min(Math.ceil(text.scrollWidth), 20000);
+
+      // 给一点 label 的右侧 padding 余量（避免1px抖动）
+      let padRight = 0;
+      try {
+        padRight = parseFloat(getComputedStyle(label).paddingRight || '0') || 0;
+      } catch { /* empty */ }
+
+      const rightInWrapper = leftInWrapper + textWidth + padRight;
+
+      // 只统计“被右侧遮挡”的行
+      if (rightInWrapper > viewRight + FLOAT_EPS) {
+        anyOccluded = true;
+        if (rightInWrapper > maxOccludedRight) maxOccludedRight = rightInWrapper;
+      }
+    });
+
+    const desired = anyOccluded ? Math.ceil(maxOccludedRight + H_REDUNDANCY_PX) : container.clientWidth;
+    applyMinWidth(desired, container);
+  };
+
+  // 处理文件放置逻辑
+  const handleExternalDropOnFolder = (treeNode: any, e: React.DragEvent) => {
+    const files = Array.from(e.dataTransfer.files || []);
+    if (!files.length) return;
+
+    // 目前为了简单，这里只处理第一个文件
+    // 如果需要批量上传，可以将 file 设为数组
+    const file = files[0];
+
+    // 打开确认弹框
+    setUploadModal({
+      visible: true,
+      file: file,
+      targetNode: treeNode,
+      loading: false
+    });
+  };
+
+  // const handleExternalDropOnFolder = (treeNode: any, e: React.DragEvent) => {
+  //   const files = Array.from(e.dataTransfer.files || []);
+  //   if (!files.length) return;
+  //   const payload = files.map((f: File) => ({
+  //     name: f.name,
+  //     size: f.size,
+  //     type: f.type,
+  //     // @ts-ignore (Electron File.path)
+  //     path: (f as any).path,
+  //   }));
+  //   console.log('parent_id:', treeNode.id)
+  //   console.log('📦 [UPLOAD_FILE_TO_FOLDER]', {
+  //     targetFolderKey: treeNode.key,
+  //     targetFolderName: (treeNode.data?.rawName ?? treeNode.label) || treeNode.key,
+  //     files: payload,
+  //   });
+  //   console.log('✅ 模拟上传完成，待刷新目录：', treeNode.key);
+  // };
+
+  // 外部文件拖拽
+  const isExternalFileDrag = (e: React.DragEvent) => {
+    const types = Array.from(e.dataTransfer?.types || []);
+    return types.includes('Files');
+  };
+
+  // 执行上传逻辑
+  const handleConfirmUpload = async () => {
+    const { file, targetNode } = uploadModal;
+    console.log('upload', targetNode);
+    if (!file || !targetNode) return;
+    setUploadModal(prev => ({ ...prev, loading: true }));
+    try {
+      const newNode = await uploadAndCreateNode(file, targetNode.id, targetNode.libraryId);
+      Toast.success('上传成功');
+      // 关闭弹窗
+      setUploadModal({ visible: false, file: null, targetNode: null, loading: false });
+      // 关键一步：通知父组件刷新该节点
+      if (onUploadSuccess) {
+        onUploadSuccess(targetNode, newNode);
+      }
+    } catch (error) {
+      console.error(error);
+      Toast.error('上传失败，请重试');
+      setUploadModal(prev => ({ ...prev, loading: false }));
+    }
+  };
+
+  // 取消上传
+  const handleCancelUpload = () => {
+    setUploadModal({ visible: false, file: null, targetNode: null, loading: false });
+  };
+
+  /** 应用 minWidth 并夹紧 scrollLeft */
+  const applyMinWidth = (targetWidth: number, container: HTMLElement) => {
+    const wrapper = wrapperRef.current;
+    if (!wrapper) return;
+
+    // 不小于容器宽，否则可能出现反向闪烁
+    const target = Math.max(container.clientWidth, targetWidth);
+    if (Math.abs(target - lastAppliedWidthRef.current) < 1) return;
+
+    lastAppliedWidthRef.current = target;
+    wrapper.style.minWidth = `${Math.ceil(target)}px`;
+
+    // 夹紧 scrollLeft，防止宽度缩小后残留在越界位置
+    const maxScroll = Math.max(0, wrapper.scrollWidth - container.clientWidth);
+    if (container.scrollLeft > maxScroll) {
+      container.scrollLeft = maxScroll;
+    }
+  };
+
+  /** 绑定 label & text 的 ref */
+  const bindLabelRef = (key: string) => (el: HTMLElement | null) => {
+    if (!el) {
+      const prev = rowRefs.current.get(key);
+      if (prev?.text) rowRefs.current.set(key, { label: null, text: prev.text });
+      else rowRefs.current.delete(key);
+      return;
+    }
+    const prev = rowRefs.current.get(key) ?? { label: null, text: null };
+    rowRefs.current.set(key, { ...prev, label: el });
+    scheduleRecompute();
+  };
+  const bindTextRef = (key: string) => (el: HTMLElement | null) => {
+    if (!el) {
+      const prev = rowRefs.current.get(key);
+      if (prev?.label) rowRefs.current.set(key, { label: prev.label, text: null });
+      else rowRefs.current.delete(key);
+      return;
+    }
+    const prev = rowRefs.current.get(key) ?? { label: null, text: null };
+    rowRefs.current.set(key, { ...prev, text: el });
+    scheduleRecompute();
+  };
+
+  /** 把一行内容横向滚动到“完全可见”（绝对目标 scrollLeft，不抖动） */
+  const ensureRowIntoViewHorizontally = (labelEl: HTMLElement) => {
+    const wrapper = wrapperRef.current;
+    const container = wrapper?.parentElement;
+    if (!wrapper || !container) return;
+
+    const wrapperRect = wrapper.getBoundingClientRect();
+    const labelRect = labelEl.getBoundingClientRect();
+
+    const viewLeft = container.scrollLeft;
+    const viewRight = viewLeft + container.clientWidth;
+
+    const leftInWrapper = (labelRect.left - wrapperRect.left) + viewLeft;
+    const rightInWrapper = leftInWrapper + labelEl.scrollWidth;
+
+    let target = viewLeft;
+    if (rightInWrapper > viewRight) {
+      target = rightInWrapper - container.clientWidth;
+    } else if (leftInWrapper < viewLeft) {
+      target = leftInWrapper;
+    } else {
+      return; // 已可见
+    }
+
+    const maxScroll = Math.max(0, wrapper.scrollWidth - container.clientWidth);
+    container.scrollLeft = Math.min(Math.max(0, Math.round(target)), maxScroll);
+  };
+
+  // 懒加载展开修复：先触发 onDoubleClick 再展开
+  const ensureLazyLoadThenExpand = (treeNode: any) => {
+    try {
+      const native = new MouseEvent('dblclick', { bubbles: true, cancelable: true });
+      onDoubleClick(native as unknown as React.MouseEvent, treeNode);
+    } catch (err) {
+      console.warn('onDoubleClick 触发懒加载失败（已忽略）：', err);
+    }
+    if (!expandedKeys.includes(treeNode.key)) {
+      onExpand(Array.from(new Set([...expandedKeys, treeNode.key])));
+    }
+  };
+
+  // 包装后的 onExpand：触发父回调后，下一帧仅以视口重算
+  const handleExpand = (keys: string[]) => {
+    // const prev = prevExpandedKeysRef.current;
+    onExpand(keys);
+
+    requestAnimationFrame(() => {
+      scheduleRecompute(); // 只看视口，不会被未见内容影响
+    });
+
+    prevExpandedKeysRef.current = keys;
+  };
+
+  // 菜单行为（模拟）
+  const simulateAction = (action: string, node: any) => {
+    console.log(`👉 [${action}]`, node);
+    Toast.info({ content: `模拟：${action}`, duration: 2 });
+    setMenu(m => ({ ...m, open: false }));
+
+    // 重命名/新建后，触发一次尺寸重算
+    if (action === '重命名' || action.startsWith('新建')) {
+      scheduleRecompute();
+    }
+  };
+
+  const askDelete = (node: any) => {
+    setMenu(m => ({ ...m, open: false }));
     Modal.confirm({
-      title: `在「${(node && (node.data?.rawName ?? node.label)) || '节点'}」下新增节点`,
-      content: '这里你可以放输入框或其他逻辑',
-      okText: '确认',
+      title: '确认删除？',
+      content: `将删除「${node.data?.rawName ?? node.label ?? node.key}」（模拟）`,
+      okText: '删除',
+      okType: 'danger',
       cancelText: '取消',
       onOk: () => {
-        console.log('✅ 确认新增', node);
+        console.log('🗑️ [删除]', node);
+        Toast.success({ content: '模拟删除完成', duration: 2 });
+        scheduleRecompute();
       },
     });
   };
 
-  // 计算并设置wrapper的minWidth，使其至少等于最长行的所需宽度
-  const measure = () => {
-    const wrapper = wrapperRef.current;
-    if (!wrapper) return;
+  // 打开菜单：使用鼠标位置，并把该行滚到可见
+  const MENU_WIDTH = 380;
+  const MENU_HEIGHT_GUESS = 260;
+  const openMenuAtPointer = (e: React.MouseEvent, node: any, isFolder: boolean) => {
+    e.preventDefault();
+    e.stopPropagation();
 
-    // 选择所有渲染的 label 文本元素
-    const txts = wrapper.querySelectorAll<HTMLElement>('.tree-node-text');
-    let max = 0;
-    txts.forEach(el => {
-      const textW = el.scrollWidth;
-      const option = el.closest('.semi-tree-option');
-      if (!option) return;
+    const labelEl = (e.currentTarget as HTMLElement);
+    ensureRowIntoViewHorizontally(labelEl);
 
-      const style = window.getComputedStyle(option);
-      const pl = parseFloat(style.paddingLeft);
-      const pr = parseFloat(style.paddingRight);
+    let x = e.clientX + 8;
+    let y = e.clientY + 8;
 
-      const label = el.closest('.tree-node-label');
-      if (!label) return;
-      const labelStyle = window.getComputedStyle(label);
-      const lpl = parseFloat(labelStyle.paddingLeft);
-      const lpr = parseFloat(labelStyle.paddingRight);
+    x = Math.min(x, window.innerWidth - MENU_WIDTH - 12);
+    y = Math.min(y, window.innerHeight - MENU_HEIGHT_GUESS - 12);
+    y = Math.max(8, y);
 
-      // 图标宽度（如果存在）
-      let iconW = 0;
-      const icon = option.querySelector('.semi-icon');
-      if (icon) {
-        const iconStyle = window.getComputedStyle(icon);
-        iconW = icon.offsetWidth + parseFloat(iconStyle.marginLeft) + parseFloat(iconStyle.marginRight);
-      }
-
-      // 加号宽度（包含 margin）
-      const plusW = 18 + 6;
-
-      // 计算本行所需总宽度
-      const w = pl + pr + lpl + lpr + iconW + textW + plusW;
-      if (w > max) max = w;
-    });
-    // 小缓冲以防计算误差
-    const buffer = 4;
-    const desired = max + buffer;
-    // 设置 minWidth（无需 Math.max 与 clientWidth，因为 CSS 会自动处理）
-    wrapper.style.minWidth = `${desired}px`;
+    setMenu({ open: true, x, y, node, isFolder });
   };
 
-  useEffect(() => {
-    // 初始测量
-    measure();
-
-    // debounce measurement
-    const scheduleMeasure = () => {
-      if (measureTimeoutRef.current) {
-        window.clearTimeout(measureTimeoutRef.current);
-        measureTimeoutRef.current = null;
-      }
-      measureTimeoutRef.current = window.setTimeout(measure, 16); // 更短延迟，提升实时性
-    };
-
-    // 窗口 resize
-    window.addEventListener('resize', scheduleMeasure);
-
-    // MutationObserver：内容变化时测量
-    let mo: MutationObserver | null = null;
-    const wrapper = wrapperRef.current;
-    if (wrapper) {
-      mo = new MutationObserver(scheduleMeasure);
-      mo.observe(wrapper, { childList: true, subtree: true, characterData: true, attributes: true });
-    }
-
-    // ResizeObserver：容器宽度变化时测量（关键：处理拖拽）
-    let ro: ResizeObserver | null = null;
-    const container = wrapper?.parentElement;
-    if (container) {
-      ro = new ResizeObserver(scheduleMeasure);
-      ro.observe(container);
-    }
-
-    return () => {
-      window.removeEventListener('resize', scheduleMeasure);
-      if (mo) mo.disconnect();
-      if (ro) ro.disconnect();
-      if (measureTimeoutRef.current) {
-        window.clearTimeout(measureTimeoutRef.current);
-        measureTimeoutRef.current = null;
-      }
-    };
-  }, [treeData, expandedKeys]); // 依赖数据和展开状态
-
-  // renderLabel 按 semi 的签名 (label, treeNode) => ReactNode
+  // 行 label 渲染
   const renderLabel = (label?: ReactNode, treeNode?: any): ReactNode => {
     if (!treeNode) return label;
+    const isFolder = treeNode.isLeaf !== true;
+
+    // 外部文件拖拽进入：高亮并延时 500ms 自动展开（先懒加载，再展开）
+    const onDragEnter = (e: React.DragEvent) => {
+      if (!isExternalFileDrag(e) || !isFolder) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setDragOverKey(treeNode.key);
+
+      if (!expandedKeys.includes(treeNode.key)) {
+        if (expandTimerRef.current) {
+          window.clearTimeout(expandTimerRef.current);
+          expandTimerRef.current = null;
+        }
+        expandTimerRef.current = window.setTimeout(() => {
+          ensureLazyLoadThenExpand(treeNode);
+        }, 500);
+      }
+    };
+    const onDragOver = (e: React.DragEvent) => {
+      if (!isExternalFileDrag(e) || !isFolder) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+    };
+    const clearHover = () => {
+      setDragOverKey(prev => (prev === treeNode.key ? null : prev));
+      if (expandTimerRef.current) {
+        window.clearTimeout(expandTimerRef.current);
+        expandTimerRef.current = null;
+      }
+    };
+    const onDragLeave = (e: React.DragEvent) => {
+      if (!isExternalFileDrag(e) || !isFolder) return;
+      e.stopPropagation();
+      clearHover();
+    };
+    const onDrop = (e: React.DragEvent) => {
+      if (!isExternalFileDrag(e)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      clearHover();
+      if (!isFolder) {
+        console.log('⚠️ 目标是文件，忽略上传：请投递到文件夹节点');
+        return;
+      }
+      handleExternalDropOnFolder(treeNode, e);
+    };
+
+    // 右键打开菜单
+    const onContextMenu = (e: React.MouseEvent) => {
+      openMenuAtPointer(e, treeNode, isFolder);
+    };
 
     return (
       <div
-        className="tree-node-label"
-        onMouseEnter={() => setHoverKey(treeNode.key)}
-        onMouseLeave={() => setHoverKey(null)}
+        className={`tree-node-label ${dragOverKey === treeNode.key ? 'drag-over' : ''}`}
+        ref={bindLabelRef(treeNode.key)}
+        onContextMenu={onContextMenu}
+        onDragEnter={onDragEnter}
+        onDragOver={onDragOver}
+        onDragLeave={onDragLeave}
+        onDrop={onDrop}
+        title={typeof label === 'string' ? label : undefined}
       >
         <span
           className="tree-node-text"
-          title={typeof label === 'string' ? label : undefined}
+          ref={bindTextRef(treeNode.key)}
         >
           {label}
         </span>
-
-        {hoverKey === treeNode.key && (
-          <IconPlus
-            className="tree-node-plus"
-            onClick={(e) => {
-              e.stopPropagation();
-              handleAdd(treeNode);
-            }}
-          />
-        )}
       </div>
     );
   };
+
+  // 初次挂载：首屏重算
+  useEffect(() => {
+    scheduleRecompute();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 监听容器滚动（横/纵），合并重算
+  useEffect(() => {
+    const wrapper = wrapperRef.current;
+    const container = wrapper?.parentElement;
+    if (!container) return;
+
+    const onScroll = () => scheduleRecompute();
+    container.addEventListener('scroll', onScroll, { passive: true });
+
+    return () => {
+      container.removeEventListener('scroll', onScroll as EventListener);
+    };
+  }, []);
+
+  // ResizeObserver：容器/内容尺寸变化时重算
+  useEffect(() => {
+    const wrapper = wrapperRef.current;
+    const container = wrapper?.parentElement;
+    if (!container || typeof ResizeObserver === 'undefined') return;
+
+    const ro = new ResizeObserver(() => scheduleRecompute());
+    ro.observe(container);
+    ro.observe(wrapper!); // 字体或缩放引起 wrapper 尺寸微调时也重算
+
+    return () => ro.disconnect();
+  }, []);
+
+  // 全局关闭菜单事件
+  useEffect(() => {
+    const closeMenu = () => setMenu(m => ({ ...m, open: false }));
+    const onDocMouseDown = () => closeMenu();
+    const onScroll = () => closeMenu();
+    const onResize = () => closeMenu();
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closeMenu();
+    };
+
+    document.addEventListener('mousedown', onDocMouseDown);
+    window.addEventListener('scroll', onScroll, true);
+    window.addEventListener('resize', onResize);
+    window.addEventListener('keydown', onKeyDown);
+
+    return () => {
+      document.removeEventListener('mousedown', onDocMouseDown);
+      window.removeEventListener('scroll', onScroll, true);
+      window.removeEventListener('resize', onResize);
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, []);
 
   return (
     <div className="tree-container">
       <div className="custom-tree-wrapper" ref={wrapperRef}>
         <Tree
+          draggable
+          onDragStart={(info) => console.log('开始拖拽', info)}
+          onDragEnd={(info) => console.log('拖拽结束', info)}
+          onDrop={(info) => {
+            console.log('放下节点', info);
+            // TODO: 根据 info.dropToGap / info.dropPosition 更新 treeData
+          }}
           className="custom-tree"
           treeData={treeData}
           expandedKeys={expandedKeys}
-          onExpand={onExpand}
+          onExpand={handleExpand}
           onDoubleClick={onDoubleClick}
           directory
           renderLabel={renderLabel}
           style={{ padding: 8 }}
         />
       </div>
+
+      {/* 自绘大卡片菜单（fixed） */}
+      {menu.open && menu.node ? (
+        menu.isFolder ? (
+          <ContextMenu
+            style={{ left: `${menu.x}px`, top: `${menu.y}px` }}
+            onMouseDown={(e) => e.stopPropagation()}
+            onContextMenu={(e) => e.preventDefault()}
+          >
+            <div className="menu-title">文件夹操作</div>
+            <div className="menu-item" onClick={() => simulateAction('重命名', menu.node)}>重命名</div>
+            <div className="menu-item" onClick={() => simulateAction('新建文件', menu.node)}>新建文件</div>
+            <div className="menu-item" onClick={() => simulateAction('新建文件夹', menu.node)}>新建文件夹</div>
+            <div className="menu-item danger" onClick={() => askDelete(menu.node)}>删除</div>
+          </ContextMenu>
+        ) : (
+          <ContextMenu
+            style={{ left: `${menu.x}px`, top: `${menu.y}px` }}
+            onMouseDown={(e) => e.stopPropagation()}
+            onContextMenu={(e) => e.preventDefault()}
+          >
+            <div className="menu-title">文件操作</div>
+            <div className="menu-item" onClick={() => simulateAction('重命名', menu.node)}>重命名</div>
+            <div className="menu-item" onClick={() => simulateAction('属性', menu.node)}>属性</div>
+            <div className="menu-item danger" onClick={() => askDelete(menu.node)}>删除</div>
+          </ContextMenu>
+        )
+      ) : null}
+      <Modal
+        title="文件上传确认"
+        visible={uploadModal.visible}
+        onOk={handleConfirmUpload}
+        onCancel={handleCancelUpload}
+        confirmLoading={uploadModal.loading}
+        okText="确定上传"
+        cancelText="取消"
+        maskClosable={false} // 防止误触关闭
+      >
+        {uploadModal.file && uploadModal.targetNode && (
+          <div style={{ padding: '10px 0' }}>
+            <Descriptions align="center" size="small" row>
+              <Descriptions.Item itemKey="文件名">
+                <strong>{uploadModal.file.name}</strong>
+              </Descriptions.Item>
+              <Descriptions.Item itemKey="文件大小">
+                {/* 简单的字节转换 */}
+                {(uploadModal.file.size / 1024).toFixed(2)} KB
+              </Descriptions.Item>
+              <Descriptions.Item itemKey="上传位置">
+                📂 {uploadModal.targetNode.label}
+              </Descriptions.Item>
+            </Descriptions>
+
+            <div style={{ marginTop: 12, color: 'var(--semi-color-text-2)', fontSize: 12 }}>
+              <p>即将上传文件到上述目录，是否继续？</p>
+              {/* 这里可以展示后端接口需要的 path 预览 */}
+              <code style={{ background: '#f5f5f5', padding: '2px 4px', borderRadius: 4 }}>
+                Path: {uploadModal.targetNode.data?.rawName || 'root'}/{uploadModal.file.name}
+              </code>
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

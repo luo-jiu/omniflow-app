@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { fetchRepositories, getChildrenByNodeId } from '@/service/directory-sidebar.api.ts';
+import { getChildrenByNodeId } from '@/service/directory-sidebar.api.ts';
 
 // 目录节点信息
 interface Node {
@@ -27,8 +27,8 @@ export interface NodeRespDTO {
   libraryId: number;
 }
 
-export function useRepositoryTree() {
-  const [repositories, setRepositories] = useState<{ id: string | number; name: string }[]>([]);
+export function useRepositoryTree(libraryId: number) {
+  // const [repositories, setRepositories] = useState<{ id: string | number; name: string }[]>([]);
   const [selectedRepository, setSelectedRepository] = useState<string>('');
   const [expandedKeys, setExpandedKeys] = useState<string[]>([]);
   const [treesCache, setTreesCache] = useState<Record<string, Node[]>>({});
@@ -44,14 +44,10 @@ export function useRepositoryTree() {
     expandedKeysRef.current = expandedKeys;
   }, [expandedKeys]);
 
-  // 初次加载仓库列表
+  // 初次加载目录树
   useEffect(() => {
     (async () => {
-      const list = await fetchRepositories();
-      setRepositories(list);
-      if (list.length > 0) {
-        await selectRepository(String(list[0].id));
-      }
+      await selectRepository(String(libraryId));
     })();
   }, []);
 
@@ -87,6 +83,41 @@ export function useRepositoryTree() {
       return node;
     });
   }, []);
+
+  // 按key找节点
+  function findNodeByKey(nodes: Node[], key: string): Node | null {
+    for (const node of nodes) {
+      if (node.key === key) return node;
+      if (node.children && node.children.length > 0) {
+        const found = findNodeByKey(node.children, key);
+        if (found) return found;
+      }
+    }
+    return null;
+  }
+
+  // 在某个父节点下追加一个子节点（上传成功后用）
+  const appendNodeUnderParent = useCallback(
+    (parentNodeKey: string, newNodeDTO: NodeRespDTO) => {
+      const mapped = mapToTreeNode(newNodeDTO);
+
+      setTreesCache(prev => {
+        const current = prev[selectedRepository] || [];
+        if (!current.length) return prev;
+        const parent = findNodeByKey(current, parentNodeKey);
+        if (!parent) {
+          // 父节点还没在当前树里（例如还没展开），那就先不改
+          return prev;
+        }
+        const newChildren = parent.children ? [...parent.children, mapped] : [mapped];
+        return {
+          ...prev,
+          [selectedRepository]: updateNodeChildren(current, parentNodeKey, newChildren),
+        };
+      });
+    },
+    [selectedRepository, updateNodeChildren],
+  );
 
   // 加载子节点
   const loadChildren = useCallback(async (node: Node) => {
@@ -164,12 +195,12 @@ export function useRepositoryTree() {
   }
 
   return {
-    repositories,
     selectedRepository,
     expandedKeys,
     currentTreeData,
     selectRepository,
     handleExpand,
     handleDoubleClick,
+    appendNodeUnderParent,
   };
 }
