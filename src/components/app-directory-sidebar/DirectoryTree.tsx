@@ -13,10 +13,11 @@ interface DirectoryTreeProps {
 }
 
 /**
- * 仅以“视口内且被右侧遮挡的文字行”为准，计算 wrapper.minWidth
- * - 不考虑未展开/不在当前可视垂直范围内的节点（懒加载不影响宽度）
- * - 用 .tree-node-text 的 scrollWidth 测字宽，避免容器自放大反馈
- * - 只要有遮挡 → 出现横向滚动条；拖到最右时刚好完全显示（+6px冗余）
+ * 计算目录树内容所需的最小宽度：
+ * - 以整棵树中已经渲染的节点为准（不局限于当前可视范围）
+ * - 使用真实文字宽度（而非容器）来决定 custom wrapper 的 min-width
+ * - 一旦文字被遮挡，立刻提供横向滚动条，拖到最右刚好露出全部文字
+ * - 分割线继续左拖时，文字宽度保持不动，仅拖拽条范围加大
  */
 export default function DirectoryTree({
   treeData,
@@ -71,8 +72,10 @@ export default function DirectoryTree({
   // 记录上一次的 expandedKeys
   const prevExpandedKeysRef = useRef<string[]>(expandedKeys);
 
-  const H_REDUNDANCY_PX = 3; // 极小冗余，避免边界像素抖动
-  const FLOAT_EPS = 0.5;     // 浮点比较误差容忍
+  const H_REDUNDANCY_PX = 3;        // 极小冗余，避免边界像素抖动
+  const FLOAT_EPS = 0.5;            // 浮点比较误差容忍
+  const MAX_TEXT_WIDTH_CAP = 40000; // 兜底，避免异常节点导致极大宽度
+  const ICON_BUFFER_PX = 16;        // 行内图标缓冲
 
   /** rAF 合并调度 */
   const rafIdRef = useRef<number | null>(null);
@@ -80,57 +83,47 @@ export default function DirectoryTree({
     if (rafIdRef.current != null) return;
     rafIdRef.current = requestAnimationFrame(() => {
       rafIdRef.current = null;
-      recomputeFromViewport();
+      recomputeRequiredWidth();
     });
   };
 
-  /** 仅基于“当前垂直视口内的文字行”来计算需要的最小宽度（防自放大） */
-  const recomputeFromViewport = () => {
+  /** 基于当前已经渲染的所有节点，计算内容所需的最小宽度 */
+  const recomputeRequiredWidth = () => {
     const wrapper = wrapperRef.current;
     const container = wrapper?.parentElement;
     if (!wrapper || !container) return;
 
     const wrapperRect = wrapper.getBoundingClientRect();
-    const containerRect = container.getBoundingClientRect();
-
-    const viewLeft = container.scrollLeft;
-    const viewRight = viewLeft + container.clientWidth;
-
-    let anyOccluded = false;
-    let maxOccludedRight = 0;
+    let maxRightEdge = 0;
 
     rowRefs.current.forEach(({ label, text }) => {
       if (!label || !text) return;
       if (!label.isConnected || !text.isConnected) return;
 
-      // 仅统计与容器垂直方向相交的行
-      const textRect = text.getBoundingClientRect();
-      const verticallyVisible =
-        textRect.bottom > containerRect.top && textRect.top < containerRect.bottom;
-      if (!verticallyVisible) return;
+      const labelRect = label.getBoundingClientRect();
+      const leftInWrapper = labelRect.left - wrapperRect.left;
 
-      // 以“文字 span”为基准测左缘与真实文字宽
-      const leftInWrapper = (textRect.left - wrapperRect.left) + viewLeft;
       // 文字天然宽度（不受容器 100% 影响），设置一个极端上限保险
-      const textWidth = Math.min(Math.ceil(text.scrollWidth), 20000);
+      const contentWidth = Math.min(Math.ceil(text.scrollWidth) + ICON_BUFFER_PX, MAX_TEXT_WIDTH_CAP);
 
-      // 给一点 label 的右侧 padding 余量（避免1px抖动）
+      // 给一点 label 的右侧 padding 余量（避免 1px 抖动）
       let padRight = 0;
       try {
         padRight = parseFloat(getComputedStyle(label).paddingRight || '0') || 0;
       } catch { /* empty */ }
 
-      const rightInWrapper = leftInWrapper + textWidth + padRight;
-
-      // 只统计“被右侧遮挡”的行
-      if (rightInWrapper > viewRight + FLOAT_EPS) {
-        anyOccluded = true;
-        if (rightInWrapper > maxOccludedRight) maxOccludedRight = rightInWrapper;
+      const rightEdge = leftInWrapper + contentWidth + padRight;
+      if (rightEdge > maxRightEdge) {
+        maxRightEdge = rightEdge;
       }
     });
 
-    const desired = anyOccluded ? Math.ceil(maxOccludedRight + H_REDUNDANCY_PX) : container.clientWidth;
-    applyMinWidth(desired, container);
+    const needsHorizontalScroll = maxRightEdge > container.clientWidth + FLOAT_EPS;
+    const desiredWidth = needsHorizontalScroll
+      ? Math.ceil(maxRightEdge + H_REDUNDANCY_PX)
+      : container.clientWidth;
+
+    applyMinWidth(desiredWidth, container);
   };
 
   // 处理文件放置逻辑
