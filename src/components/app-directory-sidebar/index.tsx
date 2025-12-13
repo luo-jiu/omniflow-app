@@ -29,8 +29,18 @@ const DirectorySidebar: React.FC<Props> = ({ libraryId }) => {
           onDoubleClick={handleDoubleClick}
           onUploadSuccess={(parentNode, newNode) => {
             // parentNode 就是 DirectoryTree 里传出来的 treeNode
-            appendNodeUnderParent(parentNode.key, newNode);
+            // 如果是根目录（parentNode 为 null 或 parentNode.key === 'root'），需要特殊处理
+            if (!parentNode || parentNode.key === 'root' || parentNode.id === 1) {
+              // 根目录新建，直接添加到根节点列表
+              // 由于 useRepositoryTree 的 treesCache 是私有的，我们通过 appendNodeUnderParent 传入一个虚拟的 key
+              // 但更好的方式是直接刷新根节点，这里先简单处理：添加到根节点
+              // 注意：这里需要确保 newNode 的格式正确
+              appendNodeUnderParent('root', newNode);
+            } else {
+              appendNodeUnderParent(parentNode.key, newNode);
+            }
           }}
+          libraryId={libraryId}
         />
       </div>
       <div className="resize-handle" onMouseDown={handleMouseDown} />

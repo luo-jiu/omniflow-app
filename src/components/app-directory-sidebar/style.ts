@@ -124,8 +124,10 @@ export const DirectorySidebarWrapper = styled.aside<{ $isDragging?: boolean }>`
     min-height: 44px;
     min-width: 44px;
   }
-  .tree-container::-webkit-scrollbar-thumb:hover {
-    background: var(--semi-color-fill-3);
+  .tree-container::-webkit-scrollbar-thumb:hover,
+  .tree-container::-webkit-scrollbar-thumb:active,
+  .tree-container::-webkit-scrollbar-thumb:focus {
+    background: var(--semi-color-fill-2);
   }
 
   /* Firefox 兜底 */

@@ -1,7 +1,7 @@
 import React, { ReactNode, useEffect, useRef, useState } from 'react';
-import {Modal, Tree, Toast, Descriptions} from '@douyinfe/semi-ui';
+import {Modal, Tree, Toast, Descriptions, Input} from '@douyinfe/semi-ui';
 import { ContextMenu } from './style';
-import {uploadAndCreateNode} from "@/service/directory-sidebar.api.ts";
+import {uploadAndCreateNode, createNode} from "@/service/directory-sidebar.api.ts";
 
 interface DirectoryTreeProps {
   treeData: any[];
@@ -10,6 +10,7 @@ interface DirectoryTreeProps {
   onDoubleClick: (e: React.MouseEvent, node: any) => void;
   // 上传成功后，通知父组件刷新某个节点
   onUploadSuccess?: (parentNode: any, newNode: any) => void;
+  libraryId: number; // 添加 libraryId prop
 }
 
 /**
@@ -25,6 +26,7 @@ export default function DirectoryTree({
   onExpand,
   onDoubleClick,
   onUploadSuccess,
+  libraryId,
 }: DirectoryTreeProps) {
   // 外部文件拖拽：悬停高亮 & 延迟展开
   const [dragOverKey, setDragOverKey] = useState<string | null>(null);
@@ -57,6 +59,21 @@ export default function DirectoryTree({
     file: null,
     targetNode: null,
     loading: false
+  });
+
+  // ✨ 新增：新建文件/文件夹 Modal 的状态
+  const [createModal, setCreateModal] = useState<{
+    visible: boolean;
+    type: 'file' | 'dir' | null;
+    parentNode: any | null; // 父节点，null 表示根目录
+    name: string;
+    loading: boolean;
+  }>({
+    visible: false,
+    type: null,
+    parentNode: null,
+    name: '',
+    loading: false,
   });
 
   // Tree 内容容器（可滚动内容层在 wrapper 中）
@@ -292,16 +309,74 @@ export default function DirectoryTree({
     prevExpandedKeysRef.current = keys;
   };
 
-  // 菜单行为（模拟）
-  const simulateAction = (action: string, node: any) => {
-    console.log(`👉 [${action}]`, node);
-    Toast.info({ content: `模拟：${action}`, duration: 2 });
+  // 菜单行为
+  const handleAction = async (action: string, node: any) => {
     setMenu(m => ({ ...m, open: false }));
 
-    // 重命名/新建后，触发一次尺寸重算
-    if (action === '重命名' || action.startsWith('新建')) {
-      scheduleRecompute();
+    if (action === '新建文件') {
+      setCreateModal({
+        visible: true,
+        type: 'file',
+        parentNode: node,
+        name: '',
+        loading: false,
+      });
+    } else if (action === '新建文件夹') {
+      setCreateModal({
+        visible: true,
+        type: 'dir',
+        parentNode: node,
+        name: '',
+        loading: false,
+      });
+    } else {
+      // 其他操作暂时模拟
+      console.log(`👉 [${action}]`, node);
+      Toast.info({ content: `模拟：${action}`, duration: 2 });
+      if (action === '重命名') {
+        scheduleRecompute();
+      }
     }
+  };
+
+  // 确认创建文件/文件夹
+  const handleConfirmCreate = async () => {
+    const { type, parentNode, name } = createModal;
+    if (!type || !name.trim()) {
+      Toast.warning('请输入名称');
+      return;
+    }
+
+    setCreateModal(prev => ({ ...prev, loading: true }));
+    try {
+      // 根目录的 parentId 为 1
+      const parentId = parentNode ? parentNode.id : 1;
+      const newNode = await createNode({
+        name: name.trim(),
+        parentId,
+        libraryId,
+        type,
+      });
+      
+      Toast.success(`${type === 'dir' ? '文件夹' : '文件'}创建成功`);
+      setCreateModal({ visible: false, type: null, parentNode: null, name: '', loading: false });
+      
+      // 通知父组件刷新
+      if (onUploadSuccess) {
+        onUploadSuccess(parentNode || { id: 1, key: 'root' }, newNode);
+      }
+      
+      scheduleRecompute();
+    } catch (error: any) {
+      console.error(error);
+      Toast.error(error.message || '创建失败，请重试');
+      setCreateModal(prev => ({ ...prev, loading: false }));
+    }
+  };
+
+  // 取消创建
+  const handleCancelCreate = () => {
+    setCreateModal({ visible: false, type: null, parentNode: null, name: '', loading: false });
   };
 
   const askDelete = (node: any) => {
@@ -338,6 +413,22 @@ export default function DirectoryTree({
     y = Math.max(8, y);
 
     setMenu({ open: true, x, y, node, isFolder });
+  };
+
+  // 在空区域打开菜单（根目录菜单）
+  const openEmptyAreaMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    let x = e.clientX + 8;
+    let y = e.clientY + 8;
+
+    x = Math.min(x, window.innerWidth - MENU_WIDTH - 12);
+    y = Math.min(y, window.innerHeight - MENU_HEIGHT_GUESS - 12);
+    y = Math.max(8, y);
+
+    // node 为 null 表示根目录
+    setMenu({ open: true, x, y, node: null, isFolder: true });
   };
 
   // 行 label 渲染
@@ -474,39 +565,61 @@ export default function DirectoryTree({
   }, []);
 
   return (
-    <div className="tree-container">
+    <div className="tree-container" onContextMenu={treeData.length === 0 ? openEmptyAreaMenu : undefined}>
       <div className="custom-tree-wrapper" ref={wrapperRef}>
-        <Tree
-          draggable
-          onDragStart={(info) => console.log('开始拖拽', info)}
-          onDragEnd={(info) => console.log('拖拽结束', info)}
-          onDrop={(info) => {
-            console.log('放下节点', info);
-            // TODO: 根据 info.dropToGap / info.dropPosition 更新 treeData
-          }}
-          className="custom-tree"
-          treeData={treeData}
-          expandedKeys={expandedKeys}
-          onExpand={handleExpand}
-          onDoubleClick={onDoubleClick}
-          directory
-          renderLabel={renderLabel}
-          style={{ padding: 8 }}
-        />
+        {treeData.length === 0 ? (
+          <div style={{ 
+            padding: '40px 20px', 
+            textAlign: 'center', 
+            color: 'var(--semi-color-text-2)',
+            fontSize: '14px'
+          }}>
+            目录树为空，右键菜单可新建文件或文件夹
+          </div>
+        ) : (
+          <Tree
+            draggable
+            onDragStart={(info) => console.log('开始拖拽', info)}
+            onDragEnd={(info) => console.log('拖拽结束', info)}
+            onDrop={(info) => {
+              console.log('放下节点', info);
+              // TODO: 根据 info.dropToGap / info.dropPosition 更新 treeData
+            }}
+            className="custom-tree"
+            treeData={treeData}
+            expandedKeys={expandedKeys}
+            onExpand={handleExpand}
+            onDoubleClick={onDoubleClick}
+            directory
+            renderLabel={renderLabel}
+            style={{ padding: 8 }}
+          />
+        )}
       </div>
 
       {/* 自绘大卡片菜单（fixed） */}
-      {menu.open && menu.node ? (
-        menu.isFolder ? (
+      {menu.open && (
+        menu.node === null ? (
+          // 根目录菜单（空区域右键）
+          <ContextMenu
+            style={{ left: `${menu.x}px`, top: `${menu.y}px` }}
+            onMouseDown={(e) => e.stopPropagation()}
+            onContextMenu={(e) => e.preventDefault()}
+          >
+            <div className="menu-title">根目录操作</div>
+            <div className="menu-item" onClick={() => handleAction('新建文件', null)}>新建文件</div>
+            <div className="menu-item" onClick={() => handleAction('新建文件夹', null)}>新建文件夹</div>
+          </ContextMenu>
+        ) : menu.isFolder ? (
           <ContextMenu
             style={{ left: `${menu.x}px`, top: `${menu.y}px` }}
             onMouseDown={(e) => e.stopPropagation()}
             onContextMenu={(e) => e.preventDefault()}
           >
             <div className="menu-title">文件夹操作</div>
-            <div className="menu-item" onClick={() => simulateAction('重命名', menu.node)}>重命名</div>
-            <div className="menu-item" onClick={() => simulateAction('新建文件', menu.node)}>新建文件</div>
-            <div className="menu-item" onClick={() => simulateAction('新建文件夹', menu.node)}>新建文件夹</div>
+            <div className="menu-item" onClick={() => handleAction('重命名', menu.node)}>重命名</div>
+            <div className="menu-item" onClick={() => handleAction('新建文件', menu.node)}>新建文件</div>
+            <div className="menu-item" onClick={() => handleAction('新建文件夹', menu.node)}>新建文件夹</div>
             <div className="menu-item danger" onClick={() => askDelete(menu.node)}>删除</div>
           </ContextMenu>
         ) : (
@@ -516,12 +629,12 @@ export default function DirectoryTree({
             onContextMenu={(e) => e.preventDefault()}
           >
             <div className="menu-title">文件操作</div>
-            <div className="menu-item" onClick={() => simulateAction('重命名', menu.node)}>重命名</div>
-            <div className="menu-item" onClick={() => simulateAction('属性', menu.node)}>属性</div>
+            <div className="menu-item" onClick={() => handleAction('重命名', menu.node)}>重命名</div>
+            <div className="menu-item" onClick={() => handleAction('属性', menu.node)}>属性</div>
             <div className="menu-item danger" onClick={() => askDelete(menu.node)}>删除</div>
           </ContextMenu>
         )
-      ) : null}
+      )}
       <Modal
         title="文件上传确认"
         visible={uploadModal.visible}
@@ -531,10 +644,16 @@ export default function DirectoryTree({
         okText="确定上传"
         cancelText="取消"
         maskClosable={false} // 防止误触关闭
+        style={{ top: '50%', transform: 'translateY(-80%)', width: 600 }}
+        bodyStyle={{
+          fontSize: 15,
+          lineHeight: '22px',
+          padding: '20px 28px',
+        }}
       >
         {uploadModal.file && uploadModal.targetNode && (
           <div style={{ padding: '10px 0' }}>
-            <Descriptions align="center" size="small" row>
+            <Descriptions align="center" size="medium" row>
               <Descriptions.Item itemKey="文件名">
                 <strong>{uploadModal.file.name}</strong>
               </Descriptions.Item>
@@ -547,15 +666,37 @@ export default function DirectoryTree({
               </Descriptions.Item>
             </Descriptions>
 
-            <div style={{ marginTop: 12, color: 'var(--semi-color-text-2)', fontSize: 12 }}>
+            <div style={{ marginTop: 16, color: 'var(--semi-color-text-2)', fontSize: 15 }}>
               <p>即将上传文件到上述目录，是否继续？</p>
               {/* 这里可以展示后端接口需要的 path 预览 */}
-              <code style={{ background: '#f5f5f5', padding: '2px 4px', borderRadius: 4 }}>
+              <code style={{ background: '#f5f5f5', padding: '2px 4px', borderRadius: 4, fontSize: 14, }}>
                 Path: {uploadModal.targetNode.data?.rawName || 'root'}/{uploadModal.file.name}
               </code>
             </div>
           </div>
         )}
+      </Modal>
+
+      {/* 新建文件/文件夹 Modal */}
+      <Modal
+        title={createModal.type === 'dir' ? '新建文件夹' : '新建文件'}
+        visible={createModal.visible}
+        onOk={handleConfirmCreate}
+        onCancel={handleCancelCreate}
+        confirmLoading={createModal.loading}
+        okText="确定"
+        cancelText="取消"
+        maskClosable={false}
+      >
+        <div style={{ padding: '10px 0' }}>
+          <Input
+            placeholder={createModal.type === 'dir' ? '请输入文件夹名称' : '请输入文件名称'}
+            value={createModal.name}
+            onChange={(value) => setCreateModal(prev => ({ ...prev, name: value }))}
+            onPressEnter={handleConfirmCreate}
+            autoFocus
+          />
+        </div>
       </Modal>
     </div>
   );

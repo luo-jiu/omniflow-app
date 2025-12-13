@@ -35,17 +35,13 @@ import LibraryWrapper, {
   ContextMenuActions,
   EmptyTip
 } from './style'
-import {createLibrary, deleteLibrary, fetchRepositories, renameLibrary} from "@/service/directory-sidebar.api.ts";
-
-type Library = {
-  createdAt: string
-  updatedAt: string
-  id: number
-  userId: number
-  name: string
-  delFlag: number
-  starred?: boolean
-}
+import {
+  createLibrary,
+  deleteLibrary,
+  fetchRepositories,
+  renameLibrary
+} from "@/service/directory-sidebar.api.ts";
+import type { Library } from "@/service/directory-sidebar.api.ts";
 
 type MenuState = {
   visible: boolean

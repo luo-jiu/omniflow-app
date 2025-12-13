@@ -28,6 +28,8 @@ function createWindow() {
   const win = new BrowserWindow({
     width: 1200,
     height: 800,
+    minWidth: 600,  // 最小宽度
+    minHeight: 400, // 最小高度
     webPreferences: {
       // 预加载脚本，用于安全地与渲染进程通信
       preload: path.join(MAIN_DIST, 'preload.mjs'),
@@ -106,7 +108,7 @@ function createWindow() {
     return new Promise((resolve, reject) => {
       const request = net.request({ url, method: options.method || "GET" });
       // 设置请求头
-      request.setHeader('Authorization', 'Bearer cd71f634-751c-4d37-9476-04b527dcb5fa');
+      request.setHeader('Authorization', 'Bearer 2903f327-84d0-4427-811f-f0f5c56a9aae');
       request.setHeader('username', 'LJ');
 
       if (options.headers) {

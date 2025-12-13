@@ -103,6 +103,15 @@ export function useRepositoryTree(libraryId: number) {
 
       setTreesCache(prev => {
         const current = prev[selectedRepository] || [];
+        
+        // 如果是根目录（parentNodeKey === 'root' 或 parentId === 1），直接添加到根节点列表
+        if (parentNodeKey === 'root' || newNodeDTO.parentId === 1) {
+          return {
+            ...prev,
+            [selectedRepository]: [...current, mapped],
+          };
+        }
+        
         if (!current.length) return prev;
         const parent = findNodeByKey(current, parentNodeKey);
         if (!parent) {
