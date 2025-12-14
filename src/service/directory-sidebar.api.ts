@@ -85,7 +85,7 @@ export async function getChildrenByNodeId(nodeId: number, libraryId: number) {
 export async function uploadAndCreateNode(file: File, parentId: number, libraryId: number) {
   const filePath = (file as any).path;
   if (!filePath) {
-     throw new Error("Unable to retrieve file path for upload.");
+    throw new Error("Unable to retrieve file path for upload.");
   }
 
   const json = await ipcUpload("/v1/directory/upload", filePath, {
@@ -131,4 +131,12 @@ export async function createNode(payload: {
     libraryId: body.data.libraryId,
     type: body.data.type === 0 || body.data.type === "0" ? "dir" : "file",
   };
+}
+
+// 删除节点及其后代
+export async function deleteNodeAndChildren(ancestorId: number, libraryId: number) {
+  const body = await request(`/v1/nodes/${ancestorId}/library/${libraryId}`, {
+    method: 'DELETE',
+  });
+  return body.data;
 }

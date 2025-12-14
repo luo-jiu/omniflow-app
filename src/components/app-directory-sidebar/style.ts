@@ -136,30 +136,23 @@ export const DirectorySidebarWrapper = styled.aside<{ $isDragging?: boolean }>`
   }
 `;
 
-/** 右键/更多 菜单（fixed 定位，大号卡片风格） */
-export const ContextMenu = styled.div`
-  position: fixed;
-  z-index: 3000;
-  min-width: 380px;
-  max-width: 440px;
-  padding: 16px;
-  border-radius: 12px;
-  background: var(--semi-color-bg-1);
-  border: 1px solid var(--semi-color-border);
-  box-shadow:
-          0 18px 48px rgba(0, 0, 0, 0.20),
-          0  6px 16px rgba(0, 0, 0, 0.16);
-
+/** Popover 内部菜单内容 */
+export const MenuContent = styled.div`
+  min-width: 320px;
+  padding: 8px;
+  
   .menu-title {
-    font-size: 16px;
+    font-size: 14px;
     line-height: 24px;
     font-weight: 600;
-    color: var(--semi-color-text-0);
-    margin: 4px 2px 10px;
+    color: var(--semi-color-text-2);
+    margin: 4px 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--semi-color-border);
   }
 
   .menu-item {
-    padding: 12px 14px;
+    padding: 12px 16px;
     border-radius: 8px;
     cursor: pointer;
     user-select: none;
@@ -167,19 +160,24 @@ export const ContextMenu = styled.div`
     line-height: 24px;
     color: var(--semi-color-text-0);
     transition: background 0.12s, color 0.12s;
+    display: flex;
+    align-items: center;
   }
 
   .menu-item + .menu-item {
-    margin-top: 6px;
+    margin-top: 4px;
   }
 
   .menu-item:hover {
     background: var(--semi-color-fill-1);
   }
 
-  .menu-item.danger:hover {
+  .menu-item.danger {
     color: var(--semi-color-danger);
-    background: rgba(255, 0, 0, 0.08);
+  }
+  
+  .menu-item.danger:hover {
+    background: var(--semi-color-danger-light-default);
   }
 `;
 

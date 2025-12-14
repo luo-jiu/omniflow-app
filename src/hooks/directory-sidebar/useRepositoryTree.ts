@@ -128,6 +128,40 @@ export function useRepositoryTree(libraryId: number) {
     [selectedRepository, updateNodeChildren],
   );
 
+  // 递归删除节点及其所有子节点
+  const removeNodeFromTree = useCallback((nodes: Node[], targetKey: string): Node[] => {
+    return nodes
+      .filter(node => {
+        // 如果当前节点就是要删除的节点，直接过滤掉（包括其所有子节点）
+        return node.key !== targetKey;
+      })
+      .map(node => {
+        // 如果有子节点，递归处理子节点
+        if (node.children && node.children.length > 0) {
+          const filteredChildren = removeNodeFromTree(node.children, targetKey);
+          // 如果子节点被删除，返回新的节点对象（不可变更新）
+          if (filteredChildren.length !== node.children.length) {
+            return { ...node, children: filteredChildren };
+          }
+        }
+        return node;
+      });
+  }, []);
+
+  // 删除节点（删除成功后调用）
+  const removeNode = useCallback((nodeKey: string) => {
+    setTreesCache(prev => {
+      const current = prev[selectedRepository] || [];
+      if (!current.length) return prev;
+      
+      const updated = removeNodeFromTree(current, nodeKey);
+      return {
+        ...prev,
+        [selectedRepository]: updated,
+      };
+    });
+  }, [selectedRepository, removeNodeFromTree]);
+
   // 加载子节点
   const loadChildren = useCallback(async (node: Node) => {
     if (node.loaded || node.type !== 'dir') return;
@@ -211,5 +245,6 @@ export function useRepositoryTree(libraryId: number) {
     handleExpand,
     handleDoubleClick,
     appendNodeUnderParent,
+    removeNode,
   };
 }

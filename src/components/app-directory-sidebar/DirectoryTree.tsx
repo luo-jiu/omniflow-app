@@ -1,7 +1,7 @@
 import React, { ReactNode, useEffect, useRef, useState } from 'react';
-import {Modal, Tree, Toast, Descriptions, Input} from '@douyinfe/semi-ui';
-import { ContextMenu } from './style';
-import {uploadAndCreateNode, createNode} from "@/service/directory-sidebar.api.ts";
+import { Modal, Tree, Toast, Descriptions, Input, Popover, Popconfirm } from '@douyinfe/semi-ui';
+import { MenuContent } from './style';
+import { uploadAndCreateNode, createNode, deleteNodeAndChildren } from "@/service/directory-sidebar.api.ts";
 
 interface DirectoryTreeProps {
   treeData: any[];
@@ -10,6 +10,9 @@ interface DirectoryTreeProps {
   onDoubleClick: (e: React.MouseEvent, node: any) => void;
   // 上传成功后，通知父组件刷新某个节点
   onUploadSuccess?: (parentNode: any, newNode: any) => void;
+  // 删除成功后，通知父组件刷新（通常刷新父节点或整树）
+  // deletedNodeKey 是节点的 key，格式为 `${parentId}:${id}`
+  onDeleteSuccess?: (parentNode: any, deletedNodeKey: string) => void;
   libraryId: number; // 添加 libraryId prop
 }
 
@@ -26,22 +29,22 @@ export default function DirectoryTree({
   onExpand,
   onDoubleClick,
   onUploadSuccess,
+  onDeleteSuccess,
   libraryId,
 }: DirectoryTreeProps) {
   // 外部文件拖拽：悬停高亮 & 延迟展开
   const [dragOverKey, setDragOverKey] = useState<string | null>(null);
   const expandTimerRef = useRef<number | null>(null);
 
-  // 自定义菜单状态
-  type MenuState = {
-    open: boolean;
+  // 菜单状态
+  const [menuState, setMenuState] = useState<{
+    visible: boolean;
     x: number;
     y: number;
-    node: any | null;
+    node: any | null; // null 表示根目录
     isFolder: boolean;
-  };
-  const [menu, setMenu] = useState<MenuState>({
-    open: false,
+  }>({
+    visible: false,
     x: 0,
     y: 0,
     node: null,
@@ -161,25 +164,6 @@ export default function DirectoryTree({
     });
   };
 
-  // const handleExternalDropOnFolder = (treeNode: any, e: React.DragEvent) => {
-  //   const files = Array.from(e.dataTransfer.files || []);
-  //   if (!files.length) return;
-  //   const payload = files.map((f: File) => ({
-  //     name: f.name,
-  //     size: f.size,
-  //     type: f.type,
-  //     // @ts-ignore (Electron File.path)
-  //     path: (f as any).path,
-  //   }));
-  //   console.log('parent_id:', treeNode.id)
-  //   console.log('📦 [UPLOAD_FILE_TO_FOLDER]', {
-  //     targetFolderKey: treeNode.key,
-  //     targetFolderName: (treeNode.data?.rawName ?? treeNode.label) || treeNode.key,
-  //     files: payload,
-  //   });
-  //   console.log('✅ 模拟上传完成，待刷新目录：', treeNode.key);
-  // };
-
   // 外部文件拖拽
   const isExternalFileDrag = (e: React.DragEvent) => {
     const types = Array.from(e.dataTransfer?.types || []);
@@ -256,34 +240,6 @@ export default function DirectoryTree({
     scheduleRecompute();
   };
 
-  /** 把一行内容横向滚动到“完全可见”（绝对目标 scrollLeft，不抖动） */
-  const ensureRowIntoViewHorizontally = (labelEl: HTMLElement) => {
-    const wrapper = wrapperRef.current;
-    const container = wrapper?.parentElement;
-    if (!wrapper || !container) return;
-
-    const wrapperRect = wrapper.getBoundingClientRect();
-    const labelRect = labelEl.getBoundingClientRect();
-
-    const viewLeft = container.scrollLeft;
-    const viewRight = viewLeft + container.clientWidth;
-
-    const leftInWrapper = (labelRect.left - wrapperRect.left) + viewLeft;
-    const rightInWrapper = leftInWrapper + labelEl.scrollWidth;
-
-    let target = viewLeft;
-    if (rightInWrapper > viewRight) {
-      target = rightInWrapper - container.clientWidth;
-    } else if (leftInWrapper < viewLeft) {
-      target = leftInWrapper;
-    } else {
-      return; // 已可见
-    }
-
-    const maxScroll = Math.max(0, wrapper.scrollWidth - container.clientWidth);
-    container.scrollLeft = Math.min(Math.max(0, Math.round(target)), maxScroll);
-  };
-
   // 懒加载展开修复：先触发 onDoubleClick 再展开
   const ensureLazyLoadThenExpand = (treeNode: any) => {
     try {
@@ -311,7 +267,8 @@ export default function DirectoryTree({
 
   // 菜单行为
   const handleAction = async (action: string, node: any) => {
-    setMenu(m => ({ ...m, open: false }));
+    // 关闭菜单
+    setMenuState(prev => ({ ...prev, visible: false }));
 
     if (action === '新建文件') {
       setCreateModal({
@@ -329,6 +286,27 @@ export default function DirectoryTree({
         name: '',
         loading: false,
       });
+    } else if (action === 'delete') {
+      try {
+        console.log('🗑️ [删除]', node);
+        // node.id 是 ancestorId
+        await deleteNodeAndChildren(node.id, libraryId);
+        Toast.success('删除成功');
+        
+        // 通知父组件从本地 treeData 中移除节点
+        // 直接传递 node.key，这样父组件可以直接删除，不需要查找
+        if (onDeleteSuccess) {
+           // 构造成一个类 parent 结构，或者传 null
+           const dummyParent = node.parentId ? { id: node.parentId } : { id: 1, key: 'root' }; 
+           // 传递 node.key 而不是 node.id，这样父组件可以直接删除
+           onDeleteSuccess(dummyParent, node.key);
+        }
+        
+        scheduleRecompute();
+      } catch (error) {
+        console.error(error);
+        Toast.error('删除失败');
+      }
     } else {
       // 其他操作暂时模拟
       console.log(`👉 [${action}]`, node);
@@ -379,56 +357,68 @@ export default function DirectoryTree({
     setCreateModal({ visible: false, type: null, parentNode: null, name: '', loading: false });
   };
 
-  const askDelete = (node: any) => {
-    setMenu(m => ({ ...m, open: false }));
-    Modal.confirm({
-      title: '确认删除？',
-      content: `将删除「${node.data?.rawName ?? node.label ?? node.key}」（模拟）`,
-      okText: '删除',
-      okType: 'danger',
-      cancelText: '取消',
-      onOk: () => {
-        console.log('🗑️ [删除]', node);
-        Toast.success({ content: '模拟删除完成', duration: 2 });
-        scheduleRecompute();
-      },
+  // 渲染菜单内容
+  const renderNodeMenu = (node: any, isFolder: boolean) => {
+    return (
+      <MenuContent>
+        <div className="menu-title">{isFolder ? '文件夹操作' : '文件操作'}</div>
+        <div className="menu-item" onClick={() => handleAction('重命名', node)}>重命名</div>
+        
+        {isFolder ? (
+          <>
+            <div className="menu-item" onClick={() => handleAction('新建文件', node)}>新建文件</div>
+            <div className="menu-item" onClick={() => handleAction('新建文件夹', node)}>新建文件夹</div>
+          </>
+        ) : (
+          <div className="menu-item" onClick={() => handleAction('属性', node)}>属性</div>
+        )}
+
+        <Popconfirm
+          title={<div style={{ fontSize: '16px', fontWeight: 600 }}>确认删除？</div>}
+          content={
+            <div style={{ fontSize: '14px', marginTop: '8px', width: '240px' }}>
+              将删除「{node.data?.rawName ?? node.label ?? node.key}」及其所有子内容，此操作不可恢复。
+            </div>
+          }
+          okType="danger"
+          onConfirm={() => {
+            handleAction('delete', node);
+          }}
+          position="rightBottom"
+          style={{ width: 320 }} // 尝试调整 Popconfirm 容器宽度，如果不生效可能需要 overlayStyle
+        >
+          <div className="menu-item danger">删除</div>
+        </Popconfirm>
+      </MenuContent>
+    );
+  };
+
+  const renderRootMenu = () => {
+    return (
+      <MenuContent>
+        <div className="menu-title">根目录操作</div>
+        <div className="menu-item" onClick={() => handleAction('新建文件', null)}>新建文件</div>
+        <div className="menu-item" onClick={() => handleAction('新建文件夹', null)}>新建文件夹</div>
+      </MenuContent>
+    );
+  };
+
+  // 打开菜单：记录坐标和节点
+  const openMenu = (e: React.MouseEvent, node: any, isFolder: boolean) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    // 获取鼠标位置
+    const x = e.clientX;
+    const y = e.clientY;
+    
+    setMenuState({
+      visible: true,
+      x,
+      y,
+      node,
+      isFolder,
     });
-  };
-
-  // 打开菜单：使用鼠标位置，并把该行滚到可见
-  const MENU_WIDTH = 380;
-  const MENU_HEIGHT_GUESS = 260;
-  const openMenuAtPointer = (e: React.MouseEvent, node: any, isFolder: boolean) => {
-    e.preventDefault();
-    e.stopPropagation();
-
-    const labelEl = (e.currentTarget as HTMLElement);
-    ensureRowIntoViewHorizontally(labelEl);
-
-    let x = e.clientX + 8;
-    let y = e.clientY + 8;
-
-    x = Math.min(x, window.innerWidth - MENU_WIDTH - 12);
-    y = Math.min(y, window.innerHeight - MENU_HEIGHT_GUESS - 12);
-    y = Math.max(8, y);
-
-    setMenu({ open: true, x, y, node, isFolder });
-  };
-
-  // 在空区域打开菜单（根目录菜单）
-  const openEmptyAreaMenu = (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-
-    let x = e.clientX + 8;
-    let y = e.clientY + 8;
-
-    x = Math.min(x, window.innerWidth - MENU_WIDTH - 12);
-    y = Math.min(y, window.innerHeight - MENU_HEIGHT_GUESS - 12);
-    y = Math.max(8, y);
-
-    // node 为 null 表示根目录
-    setMenu({ open: true, x, y, node: null, isFolder: true });
   };
 
   // 行 label 渲染
@@ -436,7 +426,7 @@ export default function DirectoryTree({
     if (!treeNode) return label;
     const isFolder = treeNode.isLeaf !== true;
 
-    // 外部文件拖拽进入：高亮并延时 500ms 自动展开（先懒加载，再展开）
+    // 外部文件拖拽进入：高亮并延时 500ms 自动展开
     const onDragEnter = (e: React.DragEvent) => {
       if (!isExternalFileDrag(e) || !isFolder) return;
       e.preventDefault();
@@ -482,21 +472,16 @@ export default function DirectoryTree({
       handleExternalDropOnFolder(treeNode, e);
     };
 
-    // 右键打开菜单
-    const onContextMenu = (e: React.MouseEvent) => {
-      openMenuAtPointer(e, treeNode, isFolder);
-    };
-
     return (
       <div
         className={`tree-node-label ${dragOverKey === treeNode.key ? 'drag-over' : ''}`}
         ref={bindLabelRef(treeNode.key)}
-        onContextMenu={onContextMenu}
         onDragEnter={onDragEnter}
         onDragOver={onDragOver}
         onDragLeave={onDragLeave}
         onDrop={onDrop}
         title={typeof label === 'string' ? label : undefined}
+        onContextMenu={(e) => openMenu(e, treeNode, isFolder)}
       >
         <span
           className="tree-node-text"
@@ -508,70 +493,37 @@ export default function DirectoryTree({
     );
   };
 
-  // 初次挂载：首屏重算
-  useEffect(() => {
-    scheduleRecompute();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // 监听容器滚动（横/纵），合并重算
-  useEffect(() => {
-    const wrapper = wrapperRef.current;
-    const container = wrapper?.parentElement;
-    if (!container) return;
-
-    const onScroll = () => scheduleRecompute();
-    container.addEventListener('scroll', onScroll, { passive: true });
-
-    return () => {
-      container.removeEventListener('scroll', onScroll as EventListener);
-    };
-  }, []);
-
-  // ResizeObserver：容器/内容尺寸变化时重算
-  useEffect(() => {
-    const wrapper = wrapperRef.current;
-    const container = wrapper?.parentElement;
-    if (!container || typeof ResizeObserver === 'undefined') return;
-
-    const ro = new ResizeObserver(() => scheduleRecompute());
-    ro.observe(container);
-    ro.observe(wrapper!); // 字体或缩放引起 wrapper 尺寸微调时也重算
-
-    return () => ro.disconnect();
-  }, []);
-
   // 全局关闭菜单事件
   useEffect(() => {
-    const closeMenu = () => setMenu(m => ({ ...m, open: false }));
-    const onDocMouseDown = () => closeMenu();
+    const closeMenu = () => setMenuState(prev => ({ ...prev, visible: false }));
     const onScroll = () => closeMenu();
     const onResize = () => closeMenu();
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') closeMenu();
-    };
 
-    document.addEventListener('mousedown', onDocMouseDown);
     window.addEventListener('scroll', onScroll, true);
     window.addEventListener('resize', onResize);
-    window.addEventListener('keydown', onKeyDown);
 
     return () => {
-      document.removeEventListener('mousedown', onDocMouseDown);
       window.removeEventListener('scroll', onScroll, true);
       window.removeEventListener('resize', onResize);
-      window.removeEventListener('keydown', onKeyDown);
     };
   }, []);
 
   return (
-    <div className="tree-container" onContextMenu={treeData.length === 0 ? openEmptyAreaMenu : undefined}>
+    <div 
+      className="tree-container" 
+      style={{ height: '100%', width: '100%' }}
+      onContextMenu={(e) => {
+        // 空白区域右键：打开根目录菜单
+        // 如果点在了 node 上，renderLabel 里的 onContextMenu 会 stopPropagation，所以这里不会触发
+        openMenu(e, null, true);
+      }}
+    >
       <div className="custom-tree-wrapper" ref={wrapperRef}>
         {treeData.length === 0 ? (
           <div style={{ 
             padding: '40px 20px', 
             textAlign: 'center', 
-            color: 'var(--semi-color-text-2)',
+            color: 'var(--semi-color-text-2)', 
             fontSize: '14px'
           }}>
             目录树为空，右键菜单可新建文件或文件夹
@@ -597,44 +549,37 @@ export default function DirectoryTree({
         )}
       </div>
 
-      {/* 自绘大卡片菜单（fixed） */}
-      {menu.open && (
-        menu.node === null ? (
-          // 根目录菜单（空区域右键）
-          <ContextMenu
-            style={{ left: `${menu.x}px`, top: `${menu.y}px` }}
-            onMouseDown={(e) => e.stopPropagation()}
-            onContextMenu={(e) => e.preventDefault()}
-          >
-            <div className="menu-title">根目录操作</div>
-            <div className="menu-item" onClick={() => handleAction('新建文件', null)}>新建文件</div>
-            <div className="menu-item" onClick={() => handleAction('新建文件夹', null)}>新建文件夹</div>
-          </ContextMenu>
-        ) : menu.isFolder ? (
-          <ContextMenu
-            style={{ left: `${menu.x}px`, top: `${menu.y}px` }}
-            onMouseDown={(e) => e.stopPropagation()}
-            onContextMenu={(e) => e.preventDefault()}
-          >
-            <div className="menu-title">文件夹操作</div>
-            <div className="menu-item" onClick={() => handleAction('重命名', menu.node)}>重命名</div>
-            <div className="menu-item" onClick={() => handleAction('新建文件', menu.node)}>新建文件</div>
-            <div className="menu-item" onClick={() => handleAction('新建文件夹', menu.node)}>新建文件夹</div>
-            <div className="menu-item danger" onClick={() => askDelete(menu.node)}>删除</div>
-          </ContextMenu>
-        ) : (
-          <ContextMenu
-            style={{ left: `${menu.x}px`, top: `${menu.y}px` }}
-            onMouseDown={(e) => e.stopPropagation()}
-            onContextMenu={(e) => e.preventDefault()}
-          >
-            <div className="menu-title">文件操作</div>
-            <div className="menu-item" onClick={() => handleAction('重命名', menu.node)}>重命名</div>
-            <div className="menu-item" onClick={() => handleAction('属性', menu.node)}>属性</div>
-            <div className="menu-item danger" onClick={() => askDelete(menu.node)}>删除</div>
-          </ContextMenu>
-        )
-      )}
+      {/* 
+        单个 Popover 实例，通过 position anchor 模拟“跟随鼠标”
+        Semi Popover 需要一个 trigger element。
+        我们在鼠标位置渲染一个看不见的 div，作为 anchor。
+      */}
+      <Popover
+        trigger="custom"
+        visible={menuState.visible}
+        onClickOutSide={() => setMenuState(prev => ({ ...prev, visible: false }))}
+        position="rightTop" // 默认右下展开，靠近鼠标
+        content={
+          menuState.node === null 
+            ? renderRootMenu() 
+            : renderNodeMenu(menuState.node, menuState.isFolder)
+        }
+        // 关键：不显示箭头，紧贴鼠标
+        showArrow={false}
+        spacing={2} 
+      >
+        <div 
+          style={{
+            position: 'fixed',
+            left: menuState.x,
+            top: menuState.y,
+            width: 0,
+            height: 0,
+          }} 
+        />
+      </Popover>
+
+      {/* Modal 组件 - 居中显示 */}
       <Modal
         title="文件上传确认"
         visible={uploadModal.visible}
@@ -643,8 +588,9 @@ export default function DirectoryTree({
         confirmLoading={uploadModal.loading}
         okText="确定上传"
         cancelText="取消"
-        maskClosable={false} // 防止误触关闭
-        style={{ top: '50%', transform: 'translateY(-80%)', width: 600 }}
+        maskClosable={false}
+        centered // 居中
+        width={600}
         bodyStyle={{
           fontSize: 15,
           lineHeight: '22px',
@@ -658,7 +604,6 @@ export default function DirectoryTree({
                 <strong>{uploadModal.file.name}</strong>
               </Descriptions.Item>
               <Descriptions.Item itemKey="文件大小">
-                {/* 简单的字节转换 */}
                 {(uploadModal.file.size / 1024).toFixed(2)} KB
               </Descriptions.Item>
               <Descriptions.Item itemKey="上传位置">
@@ -668,7 +613,6 @@ export default function DirectoryTree({
 
             <div style={{ marginTop: 16, color: 'var(--semi-color-text-2)', fontSize: 15 }}>
               <p>即将上传文件到上述目录，是否继续？</p>
-              {/* 这里可以展示后端接口需要的 path 预览 */}
               <code style={{ background: '#f5f5f5', padding: '2px 4px', borderRadius: 4, fontSize: 14, }}>
                 Path: {uploadModal.targetNode.data?.rawName || 'root'}/{uploadModal.file.name}
               </code>
@@ -677,7 +621,7 @@ export default function DirectoryTree({
         )}
       </Modal>
 
-      {/* 新建文件/文件夹 Modal */}
+      {/* 新建文件/文件夹 Modal - 居中显示 */}
       <Modal
         title={createModal.type === 'dir' ? '新建文件夹' : '新建文件'}
         visible={createModal.visible}
@@ -687,13 +631,18 @@ export default function DirectoryTree({
         okText="确定"
         cancelText="取消"
         maskClosable={false}
+        centered // 居中
       >
         <div style={{ padding: '10px 0' }}>
           <Input
             placeholder={createModal.type === 'dir' ? '请输入文件夹名称' : '请输入文件名称'}
             value={createModal.name}
             onChange={(value) => setCreateModal(prev => ({ ...prev, name: value }))}
-            onPressEnter={handleConfirmCreate}
+            onKeyDown={e => {
+              if (e.key === 'Enter') {
+                handleConfirmCreate();
+              }
+            }}
             autoFocus
           />
         </div>

@@ -15,6 +15,7 @@ const DirectorySidebar: React.FC<Props> = ({ libraryId }) => {
     handleExpand,
     handleDoubleClick,
     appendNodeUnderParent,
+    removeNode,
   } = useRepositoryTree(libraryId);
 
   const { width, isDragging, containerRef, handleMouseDown } = useResizableSidebar();
@@ -39,6 +40,11 @@ const DirectorySidebar: React.FC<Props> = ({ libraryId }) => {
             } else {
               appendNodeUnderParent(parentNode.key, newNode);
             }
+          }}
+          onDeleteSuccess={(parentNode, deletedNodeKey) => {
+            // 删除成功后，从本地 treeData 中移除节点
+            // deletedNodeKey 是节点的 key，格式为 `${parentId}:${id}`
+            removeNode(deletedNodeKey);
           }}
           libraryId={libraryId}
         />
