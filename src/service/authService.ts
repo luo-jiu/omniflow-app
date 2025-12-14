@@ -1,4 +1,4 @@
-import { apiRequest } from './apiRequest';
+import { apiRequest } from './request/apiRequest';
 import { auth } from '@/utils/auth';
 
 /**

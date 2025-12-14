@@ -1,6 +1,6 @@
 // main.ts (Electron 主进程入口文件)
 
-import { app, BrowserWindow, ipcMain, net } from 'electron'
+import { app, BrowserWindow, ipcMain } from 'electron'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import registerIpcHandlers from './ipc'
@@ -73,83 +73,6 @@ function createWindow() {
   });
   ipcMain.on('window-close', () => {
     win.close();
-  });
-
-  // ipcMain.handle('http:fetch', async (_event, url: string, options: any = {}) => {
-  //   return new Promise((resolve, reject) => {
-  //     const request = net.request({ url, method: options.method || 'GET' });
-  //     if (options.headers) {
-  //       Object.entries(options.headers).forEach(([key, value]) => {
-  //         request.setHeader(key, value as string);
-  //       });
-  //     }
-  //     let body = '';
-  //     request.on('response', (response) => {
-  //       response.on('data', (chunk) => { body += chunk; });
-  //       response.on('end', () => {
-  //         resolve({
-  //           status: response.statusCode,
-  //           headers: response.headers,
-  //           body,
-  //         });
-  //       });
-  //     });
-  //     request.on('error', (err) => reject(err));
-  //     if (options.body) {
-  //       request.write(options.body);
-  //     }
-  //     request.end();
-  //   });
-  // });
-  ipcMain.handle("http:fetch", async (_event, url: string, options: any = {}) => {
-    console.log("start...");
-    console.log("URL:", url);
-    console.log("Options:", options);
-    return new Promise((resolve, reject) => {
-      const request = net.request({ url, method: options.method || "GET" });
-
-      if (options.headers) {
-        Object.entries(options.headers).forEach(([key, value]) => {
-          console.log(`set head... ${key}: ${value}`);
-          request.setHeader(key, value as string);
-        });
-      }
-      let body = "";
-      request.on("response", (response) => {
-        console.log("return info...");
-        console.log("Status:", response.statusCode);
-        console.log("Headers:", response.headers);
-
-        response.on("data", (chunk) => {
-          console.log(`data len... ${chunk.length})`);
-          body += chunk;
-        });
-        response.on("end", () => {
-          console.log("ok...");
-          console.log("Body info... ", body.slice(0, 500)); // 只打印前 500 字符
-          let parsedBody: any;
-          try {
-            parsedBody = JSON.parse(body);
-          } catch {
-            parsedBody = body;
-          }
-          resolve({
-            status: response.statusCode,
-            headers: response.headers,
-            body: parsedBody,
-          });
-        });
-      });
-      request.on("error", (err) => {
-        console.error("err... ", err);
-        reject(err);
-      });
-      if (options.body) {
-        console.log("go go go... ", options.body);
-        request.write(options.body);
-      }
-      request.end();
-    });
   });
 }
 

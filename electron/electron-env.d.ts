@@ -40,5 +40,14 @@ interface Window {
       headers: Record<string, string | string[]>;
       body: any;
     }>;
+    upload: (
+      url: string,
+      filePath: string,
+      formDataParams?: Record<string, string>,
+      headers?: Record<string, string>
+    ) => Promise<{
+      status: number;
+      body: any;
+    }>;
   };
 }

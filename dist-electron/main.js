@@ -1,10 +1,11 @@
-import { dialog, ipcMain, app, BrowserWindow, net } from "electron";
+import { dialog, net, ipcMain, app, BrowserWindow } from "electron";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "fs/promises";
 import require$$0 from "os";
 import require$$1 from "child_process";
 import fs$1 from "fs";
+import fs$2 from "node:fs";
 function registerFileIpc(ipcMain2) {
   ipcMain2.handle("file:open", async () => {
     const result = await dialog.showOpenDialog({ properties: ["openFile"] });
@@ -168,9 +169,127 @@ function getStorageData() {
 function registerSystemIpc(ipcMain2) {
   ipcMain2.handle("sys:get-static-data", getStaticData);
 }
+function registerHttpIpc(ipcMain2) {
+  ipcMain2.handle("http:fetch", async (_event, url, options = {}) => {
+    console.log("start...");
+    console.log("URL:", url);
+    console.log("Options:", options);
+    return new Promise((resolve, reject) => {
+      const request = net.request({ url, method: options.method || "GET" });
+      if (options.headers) {
+        Object.entries(options.headers).forEach(([key, value]) => {
+          console.log(`set head... ${key}: ${value}`);
+          request.setHeader(key, value);
+        });
+      }
+      let body = "";
+      request.on("response", (response) => {
+        console.log("return info...");
+        console.log("Status:", response.statusCode);
+        console.log("Headers:", response.headers);
+        response.on("data", (chunk) => {
+          console.log(`data len... ${chunk.length})`);
+          body += chunk;
+        });
+        response.on("end", () => {
+          console.log("Body info... ", body.slice(0, 500));
+          let parsedBody;
+          try {
+            parsedBody = JSON.parse(body);
+          } catch {
+            parsedBody = body;
+          }
+          resolve({
+            status: response.statusCode,
+            headers: response.headers,
+            body: parsedBody
+          });
+        });
+      });
+      request.on("error", (err) => {
+        console.error("err... ", err);
+        reject(err);
+      });
+      if (options.body) {
+        request.write(options.body);
+      }
+      request.end();
+    });
+  });
+  ipcMain2.handle("http:upload", async (_event, url, filePath, formDataParams = {}, headers = {}) => {
+    return new Promise((resolve, reject) => {
+      const boundary = "----WebKitFormBoundary" + Math.random().toString(36).substring(2);
+      const request = net.request({
+        url,
+        method: "POST"
+      });
+      const finalHeaders = {
+        ...headers,
+        "Content-Type": `multipart/form-data; boundary=${boundary}`
+      };
+      Object.entries(finalHeaders).forEach(([key, value]) => {
+        request.setHeader(key, value);
+      });
+      let responseBody = "";
+      request.on("response", (response) => {
+        response.on("data", (chunk) => {
+          responseBody += chunk;
+        });
+        response.on("end", () => {
+          let parsedBody;
+          try {
+            parsedBody = JSON.parse(responseBody);
+          } catch {
+            parsedBody = responseBody;
+          }
+          resolve({
+            status: response.statusCode,
+            body: parsedBody
+          });
+        });
+      });
+      request.on("error", (err) => reject(err));
+      const writePart = (name, value) => {
+        request.write(`--${boundary}\r
+`);
+        request.write(`Content-Disposition: form-data; name="${name}"\r
+\r
+`);
+        request.write(`${value}\r
+`);
+      };
+      Object.entries(formDataParams).forEach(([key, value]) => {
+        writePart(key, value);
+      });
+      const fileName = path.basename(filePath);
+      request.write(`--${boundary}\r
+`);
+      request.write(`Content-Disposition: form-data; name="file"; filename="${fileName}"\r
+`);
+      request.write(`Content-Type: application/octet-stream\r
+\r
+`);
+      const fileStream = fs$2.createReadStream(filePath);
+      fileStream.on("data", (chunk) => {
+        request.write(chunk);
+      });
+      fileStream.on("end", () => {
+        request.write(`\r
+--${boundary}--\r
+`);
+        request.end();
+      });
+      fileStream.on("error", (err) => {
+        reject(err);
+        request.abort();
+      });
+    });
+  });
+}
 function registerIpcHandlers() {
   registerFileIpc(ipcMain);
   registerSystemIpc(ipcMain);
+  registerHttpIpc(ipcMain);
 }
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 process.env.APP_ROOT = path.join(__dirname, "..");
@@ -221,54 +340,6 @@ function createWindow() {
   });
   ipcMain.on("window-close", () => {
     win.close();
-  });
-  ipcMain.handle("http:fetch", async (_event, url, options = {}) => {
-    console.log("start...");
-    console.log("URL:", url);
-    console.log("Options:", options);
-    return new Promise((resolve, reject) => {
-      const request = net.request({ url, method: options.method || "GET" });
-      if (options.headers) {
-        Object.entries(options.headers).forEach(([key, value]) => {
-          console.log(`set head... ${key}: ${value}`);
-          request.setHeader(key, value);
-        });
-      }
-      let body = "";
-      request.on("response", (response) => {
-        console.log("return info...");
-        console.log("Status:", response.statusCode);
-        console.log("Headers:", response.headers);
-        response.on("data", (chunk) => {
-          console.log(`data len... ${chunk.length})`);
-          body += chunk;
-        });
-        response.on("end", () => {
-          console.log("ok...");
-          console.log("Body info... ", body.slice(0, 500));
-          let parsedBody;
-          try {
-            parsedBody = JSON.parse(body);
-          } catch {
-            parsedBody = body;
-          }
-          resolve({
-            status: response.statusCode,
-            headers: response.headers,
-            body: parsedBody
-          });
-        });
-      });
-      request.on("error", (err) => {
-        console.error("err... ", err);
-        reject(err);
-      });
-      if (options.body) {
-        console.log("go go go... ", options.body);
-        request.write(options.body);
-      }
-      request.end();
-    });
   });
 }
 app.on("window-all-closed", () => {

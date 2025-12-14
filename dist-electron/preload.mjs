@@ -22,7 +22,8 @@ electron.contextBridge.exposeInMainWorld("ipcRenderer", {
 });
 electron.contextBridge.exposeInMainWorld("electronAPI", {
   getStaticData: () => electron.ipcRenderer.invoke("sys:get-static-data"),
-  fetch: (url, options) => electron.ipcRenderer.invoke("http:fetch", url, options)
+  fetch: (url, options) => electron.ipcRenderer.invoke("http:fetch", url, options),
+  upload: (url, filePath, formDataParams, headers) => electron.ipcRenderer.invoke("http:upload", url, filePath, formDataParams, headers)
 });
 electron.contextBridge.exposeInMainWorld("electronZoom", (delta) => {
   return electron.ipcRenderer.invoke("zoom-adjust", delta);

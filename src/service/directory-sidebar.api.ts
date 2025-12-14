@@ -1,5 +1,4 @@
-import { ipcRequest as request } from './ipcRequest';
-import { apiRequest } from './apiRequest';
+import { ipcRequest as request, ipcUpload } from './request/ipcRequest';
 
 export type Library = {
   createdAt: string;
@@ -84,14 +83,14 @@ export async function getChildrenByNodeId(nodeId: number, libraryId: number) {
 
 // 上传文件并创建节点
 export async function uploadAndCreateNode(file: File, parentId: number, libraryId: number) {
-  const formData = new FormData();
-  formData.append("file", file);
-  formData.append("parent_id", String(parentId));
-  formData.append("library_id", String(libraryId));
+  const filePath = (file as any).path;
+  if (!filePath) {
+     throw new Error("Unable to retrieve file path for upload.");
+  }
 
-  const json = await apiRequest("/v1/directory/upload", {
-    method: "POST",
-    body: formData,
+  const json = await ipcUpload("/v1/directory/upload", filePath, {
+    parent_id: String(parentId),
+    library_id: String(libraryId),
   });
 
   if (!json.success) {

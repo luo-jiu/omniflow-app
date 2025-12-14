@@ -27,6 +27,8 @@ contextBridge.exposeInMainWorld('ipcRenderer', {
 contextBridge.exposeInMainWorld('electronAPI', {
   getStaticData: () => ipcRenderer.invoke('sys:get-static-data'),
   fetch: (url: string, options?: any) => ipcRenderer.invoke('http:fetch', url, options),
+  upload: (url: string, filePath: string, formDataParams?: Record<string, string>, headers?: Record<string, string>) => 
+    ipcRenderer.invoke('http:upload', url, filePath, formDataParams, headers),
 });
 
 contextBridge.exposeInMainWorld('electronZoom', (delta: number) => {
