@@ -1,4 +1,5 @@
 import {useEffect} from 'react'
+import { loginService } from "@/service/authService";
 
 import AppHeader from "@/components/app-header";
 import {useRoutes} from "react-router-dom";
@@ -10,6 +11,9 @@ function App() {
   useEffect(() => {
     const fetchData = async () => {
       try {
+        // 自动登录
+        await loginService.autoLogin();
+        
         const data = await window.electronAPI.getStaticData()
         console.log('totalStorage:', data.totalStorage)
         console.log('cpuModel:', data.cpuModel)

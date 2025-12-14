@@ -1,4 +1,5 @@
-import { request } from './request';
+import { ipcRequest as request } from './ipcRequest';
+import { apiRequest } from './apiRequest';
 
 export type Library = {
   createdAt: string;
@@ -88,15 +89,11 @@ export async function uploadAndCreateNode(file: File, parentId: number, libraryI
   formData.append("parent_id", String(parentId));
   formData.append("library_id", String(libraryId));
 
-  const resp = await fetch("http://localhost:8848/api/v1/directory/upload", {
+  const json = await apiRequest("/v1/directory/upload", {
     method: "POST",
     body: formData,
   });
-  if (!resp.ok) {
-    throw new Error(`HTTP ${resp.status}`);
-  }
 
-  const json = await resp.json();
   if (!json.success) {
     throw new Error(json.message || "上传失败");
   }

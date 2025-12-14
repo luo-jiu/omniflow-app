@@ -107,9 +107,6 @@ function createWindow() {
     console.log("Options:", options);
     return new Promise((resolve, reject) => {
       const request = net.request({ url, method: options.method || "GET" });
-      // 设置请求头
-      request.setHeader('Authorization', 'Bearer 2903f327-84d0-4427-811f-f0f5c56a9aae');
-      request.setHeader('username', 'LJ');
 
       if (options.headers) {
         Object.entries(options.headers).forEach(([key, value]) => {
