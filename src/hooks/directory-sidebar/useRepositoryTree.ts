@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { getChildrenByNodeId } from '@/service/directory-sidebar.api.ts';
+import { getChildrenByNodeId, getFileLink } from '@/service/directory-sidebar.api.ts';
+import { fileCache } from '@/utils/file-cache';
 
 // 目录节点信息
 interface Node {
@@ -13,6 +14,9 @@ interface Node {
   children?: Node[];
   key: string;       // 唯一标识，用于树组件
   loaded?: boolean;
+  ext?: string;
+  mimeType?: string;
+  fileSize?: number;
   data?: {
     rawName: string; // 保留未截断的原始名称
     [key: string]: any; // 以后还可以加别的
@@ -25,9 +29,12 @@ export interface NodeRespDTO {
   type: 'dir' | 'file';
   parentId: number;
   libraryId: number;
+  ext?: string;
+  mimeType?: string;
+  fileSize?: number;
 }
 
-export function useRepositoryTree(libraryId: number) {
+export function useRepositoryTree(libraryId: number, onFileOpen?: (fileUrl: string, fileName: string, fileType: 'image' | 'video' | 'other') => void) {
   // const [repositories, setRepositories] = useState<{ id: string | number; name: string }[]>([]);
   const [selectedRepository, setSelectedRepository] = useState<string>('');
   const [expandedKeys, setExpandedKeys] = useState<string[]>([]);
@@ -95,6 +102,39 @@ export function useRepositoryTree(libraryId: number) {
     }
     return null;
   }
+
+  // 更新节点名称
+  const updateNodeName = useCallback((nodeKey: string, newName: string) => {
+    setTreesCache(prev => {
+      const current = prev[selectedRepository] || [];
+      if (!current.length) return prev;
+
+      const updateNameInTree = (nodes: Node[]): Node[] => {
+        return nodes.map(node => {
+          if (node.key === nodeKey) {
+            return {
+              ...node,
+              name: newName,
+              label: newName,
+              data: { ...node.data, rawName: newName }
+            };
+          }
+          if (node.children && node.children.length > 0) {
+            const updatedChildren = updateNameInTree(node.children);
+            if (updatedChildren !== node.children) {
+              return { ...node, children: updatedChildren };
+            }
+          }
+          return node;
+        });
+      };
+
+      return {
+        ...prev,
+        [selectedRepository]: updateNameInTree(current),
+      };
+    });
+  }, [selectedRepository]);
 
   // 在某个父节点下追加一个子节点（上传成功后用）
   const appendNodeUnderParent = useCallback(
@@ -220,9 +260,62 @@ export function useRepositoryTree(libraryId: number) {
         expandedKeysRef.current = newKeys;
       }
     } else {
+      // 双击文件：获取文件临时访问链接
       console.log('📄 双击文件:', node.name);
+      try {
+        const fileName = node.name;
+        const nodeId = node.id;
+        const libraryId = Number(selectedRepository);
+        
+        // 1. 尝试从缓存获取
+        let fileUrl = fileCache.getLink(nodeId, libraryId);
+        
+        if (!fileUrl) {
+          // 2. 缓存失效或不存在，请求后端
+          console.log('🚀 缓存失效，请求后端获取新链接');
+          // 请求后端生成 60 分钟有效期的链接，但我们本地只缓存 30 分钟以确保安全
+          fileUrl = await getFileLink(nodeId, libraryId, 60);
+          
+          // 3. 存储到缓存，设置 30 分钟过期
+          if (fileUrl) {
+            fileCache.setLink(nodeId, libraryId, fileUrl, 30);
+          }
+        } else {
+          console.log('✅ 使用本地缓存的链接');
+        }
+
+        if (!fileUrl) {
+          throw new Error('无法获取文件访问链接');
+        }
+        
+        // 判断文件类型
+        let fileType: 'image' | 'video' | 'other' = 'other';
+        const mimeType = node.mimeType;
+        const ext = node.ext;
+
+        if (mimeType) {
+          if (mimeType.startsWith('image/')) fileType = 'image';
+          else if (mimeType.startsWith('video/')) fileType = 'video';
+        } 
+        
+        // 如果 mimeType 没判断出来，或者没有 mimeType，用扩展名兜底
+        if (fileType === 'other' && ext) {
+          const e = ext.toLowerCase().replace('.', '');
+          const imageExtensions = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg'];
+          const videoExtensions = ['mp4', 'webm', 'ogg', 'mov', 'avi', 'mkv'];
+          if (imageExtensions.includes(e)) fileType = 'image';
+          else if (videoExtensions.includes(e)) fileType = 'video';
+        }
+
+        // 通知父组件或 Context 打开文件
+        if (onFileOpen) {
+          onFileOpen(fileUrl, fileName, fileType);
+        }
+      } catch (error) {
+        console.error('获取文件链接失败:', error);
+      }
     }
-  }, [loadChildren]);
+  }, [loadChildren, onFileOpen]);
 
   // 节点转换
   function mapToTreeNode(item: NodeRespDTO): Node {
@@ -246,5 +339,6 @@ export function useRepositoryTree(libraryId: number) {
     handleDoubleClick,
     appendNodeUnderParent,
     removeNode,
+    updateNodeName,
   };
 }

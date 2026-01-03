@@ -193,6 +193,96 @@ export const MainWrapper = styled.main`
     transform: scaleX(1.2) scaleY(1.6); /* 扩大为原来的几倍 */
     opacity: 0;
   }
+
+  /* 文件查看器样式 */
+  .file-viewer {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    box-sizing: border-box;
+  }
+
+  .file-viewer-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+  }
+
+  .file-viewer-content {
+    width: 100%;
+    max-width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+  }
+
+  .file-viewer-image {
+    max-width: 100%;
+    max-height: calc(100% - 60px);
+    object-fit: contain;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  }
+
+  .file-viewer-video {
+    max-width: 100%;
+    max-height: calc(100% - 60px);
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  }
+
+  .file-viewer-title {
+    font-size: 16px;
+    font-weight: 500;
+    color: var(--semi-color-text-0);
+    text-align: center;
+    padding: 8px 16px;
+    background: var(--semi-color-bg-1);
+    border-radius: 6px;
+    max-width: 80%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .file-viewer-other {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    padding: 40px;
+    text-align: center;
+  }
+
+  .file-viewer-filename {
+    font-size: 14px;
+    color: var(--semi-color-text-2);
+    word-break: break-all;
+  }
+
+  .file-viewer-download {
+    display: inline-block;
+    padding: 10px 20px;
+    background: var(--semi-color-primary);
+    color: white;
+    text-decoration: none;
+    border-radius: 6px;
+    transition: background 0.2s;
+    
+    &:hover {
+      background: var(--semi-color-primary-hover);
+    }
+  }
 `
 
 export default MainWrapper;

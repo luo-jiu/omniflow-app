@@ -6,9 +6,10 @@ import React from "react";
 
 interface Props {
   libraryId: number;
+  onFileOpen?: (fileUrl: string, fileName: string, fileType: 'image' | 'video' | 'other') => void;
 }
 
-const DirectorySidebar: React.FC<Props> = ({ libraryId }) => {
+const DirectorySidebar: React.FC<Props> = ({ libraryId, onFileOpen }) => {
   const {
     expandedKeys,
     currentTreeData,
@@ -16,7 +17,8 @@ const DirectorySidebar: React.FC<Props> = ({ libraryId }) => {
     handleDoubleClick,
     appendNodeUnderParent,
     removeNode,
-  } = useRepositoryTree(libraryId);
+    updateNodeName,
+  } = useRepositoryTree(libraryId, onFileOpen);
 
   const { width, isDragging, containerRef, handleMouseDown } = useResizableSidebar();
 
@@ -41,10 +43,13 @@ const DirectorySidebar: React.FC<Props> = ({ libraryId }) => {
               appendNodeUnderParent(parentNode.key, newNode);
             }
           }}
-          onDeleteSuccess={(parentNode, deletedNodeKey) => {
+          onDeleteSuccess={(_parentNode, deletedNodeKey) => {
             // 删除成功后，从本地 treeData 中移除节点
             // deletedNodeKey 是节点的 key，格式为 `${parentId}:${id}`
             removeNode(deletedNodeKey);
+          }}
+          onRenameSuccess={(nodeKey, newName) => {
+            updateNodeName(nodeKey, newName);
           }}
           libraryId={libraryId}
         />

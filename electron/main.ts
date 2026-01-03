@@ -44,6 +44,15 @@ function createWindow() {
     frame: false
   })
 
+  win.webContents.session.webRequest.onHeadersReceived((details, callback) => {
+    callback({
+      responseHeaders: {
+        ...details.responseHeaders,
+        'Content-Security-Policy': [''] // 将其置为空
+      }
+    });
+  });
+
   // 窗口缩放因子（默认 1.0）
   let zoomFactor = 1.0
 

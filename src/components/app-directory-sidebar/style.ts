@@ -83,6 +83,15 @@ export const DirectorySidebarWrapper = styled.aside<{ $isDragging?: boolean }>`
     }
   }
 
+  .custom-tree .semi-input {
+    font-size: 22px;
+    line-height: 32px;
+  }
+
+  .custom-tree .semi-input-wrapper {
+    height: 36px;
+  }
+
   /* 行 label：inline-flex 以内容宽驱动，利于横向滚动 */
   .tree-node-label {
     display: inline-flex;

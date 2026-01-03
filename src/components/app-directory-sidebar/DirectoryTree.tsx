@@ -1,7 +1,8 @@
 import React, { ReactNode, useEffect, useRef, useState } from 'react';
-import { Modal, Tree, Toast, Descriptions, Input, Popover, Popconfirm } from '@douyinfe/semi-ui';
+import { Modal, Tree, Toast, Input, Popover, Popconfirm } from '@douyinfe/semi-ui';
 import { MenuContent } from './style';
-import { uploadAndCreateNode, createNode, deleteNodeAndChildren } from "@/service/directory-sidebar.api.ts";
+import { createNode, deleteNodeAndChildren, renameNode } from "@/service/directory-sidebar.api.ts";
+import { uploadManager } from '@/utils/upload-manager';
 
 interface DirectoryTreeProps {
   treeData: any[];
@@ -13,6 +14,8 @@ interface DirectoryTreeProps {
   // 删除成功后，通知父组件刷新（通常刷新父节点或整树）
   // deletedNodeKey 是节点的 key，格式为 `${parentId}:${id}`
   onDeleteSuccess?: (parentNode: any, deletedNodeKey: string) => void;
+  // 重命名成功后的回调
+  onRenameSuccess?: (nodeKey: string, newName: string) => void;
   libraryId: number; // 添加 libraryId prop
 }
 
@@ -30,6 +33,7 @@ export default function DirectoryTree({
   onDoubleClick,
   onUploadSuccess,
   onDeleteSuccess,
+  onRenameSuccess,
   libraryId,
 }: DirectoryTreeProps) {
   // 外部文件拖拽：悬停高亮 & 延迟展开
@@ -51,20 +55,20 @@ export default function DirectoryTree({
     isFolder: false,
   });
 
-  // ✨ 新增：上传 Modal 的状态
+  // 上传 Modal 的状态
   const [uploadModal, setUploadModal] = useState<{
     visible: boolean;
-    file: File | null;
+    files: File[]; // 支持多文件
     targetNode: any | null; // 目标文件夹节点
     loading: boolean;
   }>({
     visible: false,
-    file: null,
+    files: [],
     targetNode: null,
     loading: false
   });
 
-  // ✨ 新增：新建文件/文件夹 Modal 的状态
+  // 新建文件/文件夹 Modal 的状态
   const [createModal, setCreateModal] = useState<{
     visible: boolean;
     type: 'file' | 'dir' | null;
@@ -78,6 +82,10 @@ export default function DirectoryTree({
     name: '',
     loading: false,
   });
+
+  // 内联编辑状态（重命名用）
+  const [editingKey, setEditingKey] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState<string>('');
 
   // Tree 内容容器（可滚动内容层在 wrapper 中）
   const wrapperRef = useRef<HTMLDivElement | null>(null);
@@ -151,14 +159,10 @@ export default function DirectoryTree({
     const files = Array.from(e.dataTransfer.files || []);
     if (!files.length) return;
 
-    // 目前为了简单，这里只处理第一个文件
-    // 如果需要批量上传，可以将 file 设为数组
-    const file = files[0];
-
     // 打开确认弹框
     setUploadModal({
       visible: true,
-      file: file,
+      files: files,
       targetNode: treeNode,
       loading: false
     });
@@ -172,29 +176,45 @@ export default function DirectoryTree({
 
   // 执行上传逻辑
   const handleConfirmUpload = async () => {
-    const { file, targetNode } = uploadModal;
-    console.log('upload', targetNode);
-    if (!file || !targetNode) return;
+    const { files, targetNode } = uploadModal;
+    if (!files.length || !targetNode) return;
     setUploadModal(prev => ({ ...prev, loading: true }));
+    
     try {
-      const newNode = await uploadAndCreateNode(file, targetNode.id, targetNode.libraryId);
-      Toast.success('上传成功');
-      // 关闭弹窗
-      setUploadModal({ visible: false, file: null, targetNode: null, loading: false });
-      // 关键一步：通知父组件刷新该节点
-      if (onUploadSuccess) {
-        onUploadSuccess(targetNode, newNode);
+      const tasks = files.map(file => ({
+        file,
+        parentId: targetNode.id,
+        libraryId: targetNode.libraryId
+      }));
+
+      const results = await uploadManager.uploadFiles(tasks, (newNode) => {
+        // 每个文件上传成功后，立即通知父组件刷新该节点（实时反馈）
+        if (onUploadSuccess) {
+          onUploadSuccess(targetNode, newNode);
+        }
+      });
+
+      const failedCount = results.filter(r => r.status === 'rejected').length;
+      if (failedCount === 0) {
+        Toast.success(`成功上传 ${files.length} 个文件`);
+      } else if (failedCount < files.length) {
+        Toast.warning(`部分上传成功：成功 ${files.length - failedCount} 个，失败 ${failedCount} 个`);
+      } else {
+        Toast.error('全部文件上传失败');
       }
+
+      // 关闭弹窗
+      setUploadModal({ visible: false, files: [], targetNode: null, loading: false });
     } catch (error) {
       console.error(error);
-      Toast.error('上传失败，请重试');
+      Toast.error('上传过程中出现未知错误');
       setUploadModal(prev => ({ ...prev, loading: false }));
     }
   };
 
   // 取消上传
   const handleCancelUpload = () => {
-    setUploadModal({ visible: false, file: null, targetNode: null, loading: false });
+    setUploadModal({ visible: false, files: [], targetNode: null, loading: false });
   };
 
   /** 应用 minWidth 并夹紧 scrollLeft */
@@ -286,6 +306,9 @@ export default function DirectoryTree({
         name: '',
         loading: false,
       });
+    } else if (action === '重命名') {
+      setEditingKey(node.key);
+      setEditingName(node.data?.rawName || node.label || '');
     } else if (action === 'delete') {
       try {
         console.log('🗑️ [删除]', node);
@@ -296,10 +319,10 @@ export default function DirectoryTree({
         // 通知父组件从本地 treeData 中移除节点
         // 直接传递 node.key，这样父组件可以直接删除，不需要查找
         if (onDeleteSuccess) {
-           // 构造成一个类 parent 结构，或者传 null
-           const dummyParent = node.parentId ? { id: node.parentId } : { id: 1, key: 'root' }; 
-           // 传递 node.key 而不是 node.id，这样父组件可以直接删除
-           onDeleteSuccess(dummyParent, node.key);
+          // 构造成一个类 parent 结构，或者传 null
+          const dummyParent = node.parentId ? { id: node.parentId } : { id: 1, key: 'root' }; 
+          // 传递 node.key 而不是 node.id，这样父组件可以直接删除
+          onDeleteSuccess(dummyParent, node.key);
         }
         
         scheduleRecompute();
@@ -311,9 +334,6 @@ export default function DirectoryTree({
       // 其他操作暂时模拟
       console.log(`👉 [${action}]`, node);
       Toast.info({ content: `模拟：${action}`, duration: 2 });
-      if (action === '重命名') {
-        scheduleRecompute();
-      }
     }
   };
 
@@ -355,6 +375,46 @@ export default function DirectoryTree({
   // 取消创建
   const handleCancelCreate = () => {
     setCreateModal({ visible: false, type: null, parentNode: null, name: '', loading: false });
+  };
+
+  // 确认重命名
+  const handleRenameConfirm = async (node: any) => {
+    const newName = editingName.trim();
+    if (!newName) {
+      Toast.warning('名称不能为空');
+      setEditingKey(null);
+      return;
+    }
+    
+    // 如果名称没变，直接关闭
+    if (newName === (node.data?.rawName || node.label)) {
+      setEditingKey(null);
+      return;
+    }
+
+    try {
+      // 这里的 parentId 如果是 0 或 undefined，则传 1（根目录）
+      await renameNode({
+        id: node.id,
+        name: newName,
+      });
+      
+      Toast.success('重命名成功');
+      if (onRenameSuccess) {
+        onRenameSuccess(node.key, newName);
+      }
+      setEditingKey(null);
+      scheduleRecompute();
+    } catch (error: any) {
+      console.error(error);
+      Toast.error(error.message || '重命名失败');
+      // 失败了也不一定要关闭，可以让用户继续改或者手动取消
+    }
+  };
+
+  const handleRenameCancel = () => {
+    setEditingKey(null);
+    setEditingName('');
   };
 
   // 渲染菜单内容
@@ -471,6 +531,59 @@ export default function DirectoryTree({
       }
       handleExternalDropOnFolder(treeNode, e);
     };
+
+    if (editingKey === treeNode.key) {
+      return (
+        <div 
+          className="tree-node-label editing" 
+          ref={bindLabelRef(treeNode.key)}
+          onClick={e => e.stopPropagation()}
+          onDoubleClick={e => e.stopPropagation()}
+          style={{ width: '100%', display: 'flex', alignItems: 'center' }}
+        >
+          <Input
+            value={editingName}
+            onChange={setEditingName}
+            onBlur={() => handleRenameConfirm(treeNode)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                (e.target as HTMLInputElement).blur();
+              }
+              if (e.key === 'Escape') {
+                handleRenameCancel();
+              }
+            }}
+            autoFocus
+            // style={{ width: '100%' }}
+            style={{
+              width: '100%',
+              fontSize: '32px',
+              height: '42px',
+              // lineHeight: '32px',
+              // padding: '0 4px',
+              backgroundColor: 'var(--semi-color-bg-1)',
+              border: '1px solid var(--semi-color-primary)',
+              // borderRadius: '4px'
+            }}
+            onFocus={(e) => {
+              const input = e.target as HTMLInputElement;
+              const value = input.value;
+              if (treeNode.isLeaf) {
+                const dotIndex = value.lastIndexOf('.');
+                // 如果有后缀且不是以点开头
+                if (dotIndex > 0) {
+                  input.setSelectionRange(0, dotIndex);
+                } else {
+                  input.select();
+                }
+              } else {
+                input.select();
+              }
+            }}
+          />
+        </div>
+      );
+    }
 
     return (
       <div
@@ -597,25 +710,40 @@ export default function DirectoryTree({
           padding: '20px 28px',
         }}
       >
-        {uploadModal.file && uploadModal.targetNode && (
+        {uploadModal.files.length > 0 && uploadModal.targetNode && (
           <div style={{ padding: '10px 0' }}>
-            <Descriptions align="center" size="medium" row>
-              <Descriptions.Item itemKey="文件名">
-                <strong>{uploadModal.file.name}</strong>
-              </Descriptions.Item>
-              <Descriptions.Item itemKey="文件大小">
-                {(uploadModal.file.size / 1024).toFixed(2)} KB
-              </Descriptions.Item>
-              <Descriptions.Item itemKey="上传位置">
-                📂 {uploadModal.targetNode.label}
-              </Descriptions.Item>
-            </Descriptions>
+            <div style={{ marginBottom: 12 }}>
+              <strong>上传位置:</strong> 📂 {uploadModal.targetNode.label}
+            </div>
+
+            <div style={{ 
+              maxHeight: '200px', 
+              overflowY: 'auto', 
+              border: '1px solid var(--semi-color-border)',
+              borderRadius: '4px',
+              padding: '8px',
+              backgroundColor: 'var(--semi-color-fill-0)'
+            }}>
+              {uploadModal.files.map((f, i) => (
+                <div key={i} style={{ 
+                  display: 'flex', 
+                  justifyContent: 'space-between',
+                  padding: '4px 0',
+                  fontSize: '13px',
+                  borderBottom: i === uploadModal.files.length - 1 ? 'none' : '1px solid var(--semi-color-border-light)'
+                }}>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '380px' }}>
+                    {f.name}
+                  </span>
+                  <span style={{ color: 'var(--semi-color-text-2)', marginLeft: 8 }}>
+                    {uploadManager.formatSize(f.size)}
+                  </span>
+                </div>
+              ))}
+            </div>
 
             <div style={{ marginTop: 16, color: 'var(--semi-color-text-2)', fontSize: 15 }}>
-              <p>即将上传文件到上述目录，是否继续？</p>
-              <code style={{ background: '#f5f5f5', padding: '2px 4px', borderRadius: 4, fontSize: 14, }}>
-                Path: {uploadModal.targetNode.data?.rawName || 'root'}/{uploadModal.file.name}
-              </code>
+              <p>即将上传以上 {uploadModal.files.length} 个文件到目标目录，是否继续？</p>
             </div>
           </div>
         )}

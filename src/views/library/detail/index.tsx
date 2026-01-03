@@ -3,6 +3,23 @@ import AppMain from "@/components/app-main";
 import DirectorySidebar from "@/components/app-directory-sidebar";
 import React from "react";
 import {useParams} from "react-router-dom";
+import { FileViewerProvider, useFileViewer } from "@/contexts/FileViewerContext";
+
+const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) => {
+  const { setFileUrl } = useFileViewer();
+
+  const handleFileOpen = async (fileUrl: string, fileName: string, fileType: 'image' | 'video' | 'other') => {
+    setFileUrl(fileUrl, fileName, fileType);
+  };
+
+  return (
+    <div className="content">
+      <AppSidebar />
+      <DirectorySidebar libraryId={libraryId} onFileOpen={handleFileOpen} />
+      <AppMain />
+    </div>
+  );
+};
 
 const LibraryDetail: React.FC = () => {
   const { id = '' } = useParams<{ id: string }>()
@@ -10,11 +27,9 @@ const LibraryDetail: React.FC = () => {
   console.log("Library Detail", libraryId)
 
   return (
-    <div className="content">
-      <AppSidebar />
-      <DirectorySidebar libraryId={libraryId} />
-      <AppMain />
-    </div>
+    <FileViewerProvider>
+      <LibraryDetailContent libraryId={libraryId} />
+    </FileViewerProvider>
   )
 }
 

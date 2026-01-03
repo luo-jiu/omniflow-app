@@ -99,10 +99,7 @@ export async function uploadAndCreateNode(file: File, parentId: number, libraryI
 
   const d = json.data;
   return {
-    id: d.id,
-    name: d.name,
-    parentId: d.parentId,
-    libraryId: d.libraryId,
+    ...d,
     type: d.type === 0 || d.type === "0" ? "dir" : "file",
   };
 }
@@ -124,13 +121,26 @@ export async function createNode(payload: {
       type: payload.type === 'dir' ? 0 : 1,
     }),
   });
+  const d = body.data;
   return {
-    id: body.data.id,
-    name: body.data.name,
-    parentId: body.data.parentId,
-    libraryId: body.data.libraryId,
-    type: body.data.type === 0 || body.data.type === "0" ? "dir" : "file",
+    ...d,
+    type: d.type === 0 || d.type === "0" ? "dir" : "file",
   };
+}
+
+// 重命名节点
+export async function renameNode(payload: {
+  id: number;
+  name: string;
+}) {
+  const body = await request(`/v1/nodes/${payload.id}/rename`, {
+    method: 'PATCH',
+    body: JSON.stringify({
+      id: payload.id,
+      name: payload.name,
+    }),
+  });
+  return body.data;
 }
 
 // 删除节点及其后代
@@ -139,4 +149,18 @@ export async function deleteNodeAndChildren(ancestorId: number, libraryId: numbe
     method: 'DELETE',
   });
   return body.data;
+}
+
+// 获取文件的临时访问链接
+export async function getFileLink(nodeId: number, libraryId: number, expiry: number = 60): Promise<string> {
+  const query = new URLSearchParams({
+    node_id: String(nodeId),
+    library_id: String(libraryId),
+    expiry: String(expiry),
+  });
+  
+  const body = await request(`/v1/directory/link?${query}`, {
+    method: 'GET',
+  });
+  return body.data || body;
 }
