@@ -1,17 +1,18 @@
 import {useEffect} from 'react'
-import { loginService } from "@/service/authService";
 import MainLayout from "@/layouts/MainLayout";
 import {useRoutes} from "react-router-dom";
 import {Suspense} from "react";
 import routes from "@/router";
+import { AuthProvider } from "@/contexts/AuthContext";
+import { ThemeProvider } from "@/contexts/ThemeContext";
 import './App.css'
 
 function App() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        // 自动登录
-        await loginService.autoLogin();
+        // 注释掉自动登录，改为手动登录
+        // await loginService.autoLogin();
         
         const data = await window.electronAPI.getStaticData()
         console.log('totalStorage:', data.totalStorage)
@@ -25,11 +26,15 @@ function App() {
   }, [])
 
   return (
-    <MainLayout>
-      <Suspense fallback={'loading...'}>
-        {useRoutes(routes)}
-      </Suspense>
-    </MainLayout>
+    <ThemeProvider>
+      <AuthProvider>
+        <MainLayout>
+          <Suspense fallback={'loading...'}>
+            {useRoutes(routes)}
+          </Suspense>
+        </MainLayout>
+      </AuthProvider>
+    </ThemeProvider>
   )
 }
 

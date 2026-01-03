@@ -51,5 +51,33 @@ export const loginService = {
       console.error('❌ 自动登录请求失败:', error);
       return false;
     }
+  },
+
+  /**
+   * 执行手动登录
+   */
+  async login(username: string, password: string) {
+    try {
+      const res = await apiRequest('/v1/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ username, password })
+      });
+
+      const token = res.token || res.data?.token;
+      if (token) {
+        auth.setToken(token);
+        const finalUsername = res.username || res.data?.username || username;
+        auth.setUsername(finalUsername);
+        
+        const userInfo = res.userInfo || res.data?.userInfo || { username: finalUsername };
+        auth.setUserInfo(userInfo);
+
+        return { success: true, userInfo };
+      }
+      return { success: false, message: res.message || '登录失败' };
+    } catch (error: any) {
+      console.error('❌ 登录请求失败:', error);
+      return { success: false, message: error.message || '服务器错误' };
+    }
   }
 };

@@ -6,6 +6,7 @@ import { lazy } from 'react'
 const Libraries = lazy(() => import('@/views/library'))
 const LibraryDetail = lazy(() => import('@/views/library/detail')) // 仓库选择页
 const Settings = lazy(() => import('@/views/settings'))
+const Login = lazy(() => import('@/views/login'))
 
 
 const routes: RouteObject[] = [
@@ -25,6 +26,10 @@ const routes: RouteObject[] = [
   {
     path: '/settings',
     element: <Settings />
+  },
+  {
+    path: '/login',
+    element: <Login />
   }
 ]
 

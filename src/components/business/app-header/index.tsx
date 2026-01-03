@@ -1,8 +1,10 @@
-import { FC, useState, useEffect } from 'react';
-import {HeaderWrapper, ThemeToggleButton} from './style';
-import { Button } from '@douyinfe/semi-ui';
-import {IconMoon, IconSun, IconMinus, IconStop, IconClose, IconSetting} from '@douyinfe/semi-icons';
+import { FC } from 'react';
+import {HeaderWrapper} from './style';
+import { Button, Avatar, Popover } from '@douyinfe/semi-ui';
+import {IconMinus, IconStop, IconClose, IconSetting, IconExit} from '@douyinfe/semi-icons';
 import {useNavigate} from "react-router-dom";
+import { useAuth } from '@/contexts/AuthContext';
+import ContextMenu from '@/components/ui/context-menu';
 
 declare global {
   interface Window {
@@ -15,21 +17,31 @@ declare global {
 }
 
 const AppHeader: FC = () => {
-  const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const navigate = useNavigate()
+  const { user, isLoggedIn, logout } = useAuth();
 
-  useEffect(() => {
-    const saved = localStorage.getItem('app-theme') || 'light';
-    setTheme(saved as 'light' | 'dark');
-    document.body.setAttribute('theme-mode', saved);
-  }, []);
-
-  const toggleTheme = () => {
-    const newTheme = theme === 'light' ? 'dark' : 'light';
-    setTheme(newTheme);
-    document.body.setAttribute('theme-mode', newTheme);
-    localStorage.setItem('app-theme', newTheme);
+  const handleLogout = () => {
+    logout();
+    navigate('/login');
   };
+
+  const avatarContent = (
+    <div 
+      style={{ cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+      onClick={() => !isLoggedIn && navigate('/login')}
+    >
+      <Avatar
+        size="default" // 从 small 改为 default，稍微变大一点
+        src={user?.avatar}
+        style={{ 
+          backgroundColor: isLoggedIn ? 'var(--semi-color-primary)' : 'var(--semi-color-fill-2)',
+          marginRight: 8 
+        }}
+      >
+        {isLoggedIn ? (user?.username?.[0]?.toUpperCase() || 'U') : '未'}
+      </Avatar>
+    </div>
+  );
 
   return (
     <HeaderWrapper>
@@ -38,15 +50,42 @@ const AppHeader: FC = () => {
           Omniflow
         </h1>
         <div className="right-controls">
-          <ThemeToggleButton onClick={toggleTheme} theme="borderless" icon={theme === 'light' ? <IconMoon /> : <IconSun />}>
-            {theme === 'light' ? '暗色模式' : '浅色模式'}
-          </ThemeToggleButton>
           <Button
             onClick={() => navigate('/settings')}
             theme="borderless"
-            icon={<IconSetting style={{ fontSize: 20 }} />}
+            icon={<IconSetting style={{ fontSize: 22 }} />} // 稍微增大图标
             title="设置"
           />
+
+          <div className="user-section" style={{ margin: '0 8px', display: 'flex', alignItems: 'center' }}>
+            {isLoggedIn ? (
+              <Popover
+                showArrow={false}
+                spacing={0} // 紧贴头像
+                style={{ padding: 0 }} // 移除 Popover 默认内边距，解决“嵌套感”
+                content={
+                  <ContextMenu
+                    title={user?.username}
+                    style={{ border: 'none', boxShadow: 'none' }} // 移除 ContextMenu 内部的边框和阴影，因为 Popover 已经有了
+                    items={[
+                      {
+                        key: 'logout',
+                        label: '退出登录',
+                        icon: <IconExit />,
+                        danger: true,
+                        onClick: handleLogout
+                      }
+                    ]}
+                  />
+                }
+              >
+                {avatarContent}
+              </Popover>
+            ) : (
+              avatarContent
+            )}
+          </div>
+
           <Button
             onClick={() => window.electronWindow.minimize()}
             theme="borderless"

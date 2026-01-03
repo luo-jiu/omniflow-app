@@ -32,6 +32,7 @@ export const HeaderWrapper = styled.div`
   .right-controls {
     display: flex;
     gap: 8px;
+    align-items: center; /* 确保所有控件垂直居中对齐 */
     -webkit-app-region: no-drag;
   }
 
@@ -44,8 +45,7 @@ export const HeaderWrapper = styled.div`
 
 // 主题切换按钮
 export const ThemeToggleButton = styled(Button as ComponentType<any>)`
-  font-size: 20px;
-  margin-top: 5px; /* 你想要往下移多少就调这个 */
+  font-size: 14px; /* 调整为合适的字号 */
   padding: 0 12px;     /* 左右热区 */
 `
 
