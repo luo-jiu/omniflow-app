@@ -1,12 +1,13 @@
 import React from 'react';
 import { Spin } from "@douyinfe/semi-ui";
 import ImageViewer from "../image-viewer";
+import AudioViewer from "../audio-viewer";
 import styled from 'styled-components';
 
 interface FileDispatcherProps {
   fileUrl: string | null;
   fileName: string | null;
-  fileType: 'image' | 'video' | 'other' | null;
+  fileType: 'image' | 'video' | 'audio' | 'other' | null;
   loading: boolean;
 }
 
@@ -93,6 +94,9 @@ const FileDispatcher: React.FC<FileDispatcherProps> = ({
   switch (fileType) {
     case 'image':
       return <ImageViewer url={fileUrl} fileName={fileName} />;
+    
+    case 'audio':
+      return <AudioViewer url={fileUrl} fileName={fileName} />;
     
     case 'video':
       return (

@@ -6,7 +6,7 @@ import React from "react";
 
 interface Props {
   libraryId: number;
-  onFileOpen?: (fileUrl: string, fileName: string, fileType: 'image' | 'video' | 'other') => void;
+  onFileOpen?: (fileUrl: string, fileName: string, fileType: 'image' | 'video' | 'audio' | 'other') => void;
 }
 
 const DirectorySidebar: React.FC<Props> = ({ libraryId, onFileOpen }) => {

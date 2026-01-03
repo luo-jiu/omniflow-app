@@ -8,7 +8,7 @@ import { FileViewerProvider, useFileViewer } from "@/contexts/FileViewerContext"
 const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) => {
   const { setFileUrl } = useFileViewer();
 
-  const handleFileOpen = async (fileUrl: string, fileName: string, fileType: 'image' | 'video' | 'other') => {
+  const handleFileOpen = async (fileUrl: string, fileName: string, fileType: 'image' | 'video' | 'audio' | 'other') => {
     setFileUrl(fileUrl, fileName, fileType);
   };
 

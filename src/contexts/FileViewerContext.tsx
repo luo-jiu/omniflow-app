@@ -3,13 +3,13 @@ import React, { createContext, useContext, useState, ReactNode } from 'react';
 interface FileViewerState {
   fileUrl: string | null;
   fileName: string | null;
-  fileType: 'image' | 'video' | 'other' | null;
+  fileType: 'image' | 'video' | 'audio' | 'other' | null;
   loading: boolean;
 }
 
 interface FileViewerContextType {
   fileState: FileViewerState;
-  setFileUrl: (url: string | null, fileName: string | null, fileType: 'image' | 'video' | 'other' | null) => void;
+  setFileUrl: (url: string | null, fileName: string | null, fileType: 'image' | 'video' | 'audio' | 'other' | null) => void;
   setLoading: (loading: boolean) => void;
 }
 

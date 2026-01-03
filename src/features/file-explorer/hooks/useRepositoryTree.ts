@@ -34,7 +34,7 @@ export interface NodeRespDTO {
   fileSize?: number;
 }
 
-export function useRepositoryTree(libraryId: number, onFileOpen?: (fileUrl: string, fileName: string, fileType: 'image' | 'video' | 'other') => void) {
+export function useRepositoryTree(libraryId: number, onFileOpen?: (fileUrl: string, fileName: string, fileType: 'image' | 'video' | 'audio' | 'other') => void) {
   // const [repositories, setRepositories] = useState<{ id: string | number; name: string }[]>([]);
   const [selectedRepository, setSelectedRepository] = useState<string>('');
   const [expandedKeys, setExpandedKeys] = useState<string[]>([]);
@@ -289,13 +289,14 @@ export function useRepositoryTree(libraryId: number, onFileOpen?: (fileUrl: stri
         }
         
         // 判断文件类型
-        let fileType: 'image' | 'video' | 'other' = 'other';
+        let fileType: 'image' | 'video' | 'audio' | 'other' = 'other';
         const mimeType = node.mimeType;
         const ext = node.ext;
 
         if (mimeType) {
           if (mimeType.startsWith('image/')) fileType = 'image';
           else if (mimeType.startsWith('video/')) fileType = 'video';
+          else if (mimeType.startsWith('audio/')) fileType = 'audio';
         } 
         
         // 如果 mimeType 没判断出来，或者没有 mimeType，用扩展名兜底
@@ -303,8 +304,11 @@ export function useRepositoryTree(libraryId: number, onFileOpen?: (fileUrl: stri
           const e = ext.toLowerCase().replace('.', '');
           const imageExtensions = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg'];
           const videoExtensions = ['mp4', 'webm', 'ogg', 'mov', 'avi', 'mkv'];
+          const audioExtensions = ['mp3', 'wav', 'aac', 'flac', 'm4a'];
+          
           if (imageExtensions.includes(e)) fileType = 'image';
           else if (videoExtensions.includes(e)) fileType = 'video';
+          else if (audioExtensions.includes(e)) fileType = 'audio';
         }
 
         // 通知父组件或 Context 打开文件
