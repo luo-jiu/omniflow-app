@@ -86,9 +86,19 @@ const LibraryPage: React.FC = () => {
 
   const handleContextMenu = (e: React.MouseEvent, library: Library) => {
     e.preventDefault()
+    e.stopPropagation() // 增加：阻止冒泡
     if (editingLibraryId !== null) return
     const { x, y } = clampToViewport(e.clientX, e.clientY)
-    setMenu({ visible: true, x, y, library })
+    
+    // 如果已经可见，先重置一下状态确保位置更新
+    if (menu.visible) {
+      setMenu(m => ({ ...m, visible: false }));
+      setTimeout(() => {
+        setMenu({ visible: true, x, y, library });
+      }, 0);
+    } else {
+      setMenu({ visible: true, x, y, library });
+    }
   }
 
   const handleMoreClick = (e: React.MouseEvent, library: Library) => {
@@ -191,6 +201,7 @@ const LibraryPage: React.FC = () => {
         library={menu.library}
         onRename={enterRename}
         onDelete={doDelete}
+        onClose={() => setMenu(m => ({ ...m, visible: false, library: null }))}
       />
 
       <LibraryCreateModal

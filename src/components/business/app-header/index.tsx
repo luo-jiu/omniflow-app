@@ -1,7 +1,7 @@
 import { FC, useState, useEffect } from 'react';
 import {HeaderWrapper, ThemeToggleButton} from './style';
 import { Button } from '@douyinfe/semi-ui';
-import {IconMoon, IconSun, IconMinus, IconStop, IconClose} from '@douyinfe/semi-icons';
+import {IconMoon, IconSun, IconMinus, IconStop, IconClose, IconSetting} from '@douyinfe/semi-icons';
 import {useNavigate} from "react-router-dom";
 
 declare global {
@@ -41,6 +41,12 @@ const AppHeader: FC = () => {
           <ThemeToggleButton onClick={toggleTheme} theme="borderless" icon={theme === 'light' ? <IconMoon /> : <IconSun />}>
             {theme === 'light' ? '暗色模式' : '浅色模式'}
           </ThemeToggleButton>
+          <Button
+            onClick={() => navigate('/settings')}
+            theme="borderless"
+            icon={<IconSetting style={{ fontSize: 20 }} />}
+            title="设置"
+          />
           <Button
             onClick={() => window.electronWindow.minimize()}
             theme="borderless"

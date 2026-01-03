@@ -1,42 +1,87 @@
 import React from 'react';
 import { Popconfirm } from '@douyinfe/semi-ui';
-import MenuContent from '@/components/ui/menu-content';
+import ContextMenu, { ContextMenuItem } from '@/components/ui/context-menu';
 
 interface DirectoryContextMenuProps {
   node: any;
   isFolder: boolean;
   onAction: (action: string, node: any) => void;
+  onClose?: () => void;
 }
 
+/**
+ * 目录树右键菜单
+ * 使用通用的 ContextMenu 组件构建
+ */
 const DirectoryContextMenu: React.FC<DirectoryContextMenuProps> = ({
   node,
   isFolder,
-  onAction
+  onAction,
+  onClose
 }) => {
+  // 根目录菜单
   if (node === null) {
-    return (
-      <MenuContent>
-        <div className="menu-title">根目录操作</div>
-        <div className="menu-item" onClick={() => onAction('新建文件', null)}>新建文件</div>
-        <div className="menu-item" onClick={() => onAction('新建文件夹', null)}>新建文件夹</div>
-      </MenuContent>
-    );
+    const rootItems: ContextMenuItem[] = [
+      { 
+        key: 'new-file', 
+        label: '新建文件', 
+        icon: '📄', 
+        onClick: () => onAction('新建文件', null) 
+      },
+      { 
+        key: 'new-folder', 
+        label: '新建文件夹', 
+        icon: '📁', 
+        onClick: () => onAction('新建文件夹', null) 
+      }
+    ];
+    return <ContextMenu title="根目录操作" items={rootItems} onItemClick={onClose} />;
   }
 
-  return (
-    <MenuContent>
-      <div className="menu-title">{isFolder ? '文件夹操作' : '文件操作'}</div>
-      <div className="menu-item" onClick={() => onAction('重命名', node)}>重命名</div>
-      
-      {isFolder ? (
-        <>
-          <div className="menu-item" onClick={() => onAction('新建文件', node)}>新建文件</div>
-          <div className="menu-item" onClick={() => onAction('新建文件夹', node)}>新建文件夹</div>
-        </>
-      ) : (
-        <div className="menu-item" onClick={() => onAction('属性', node)}>属性</div>
-      )}
+  // 文件/文件夹菜单
+  const items: ContextMenuItem[] = [
+    { 
+      key: 'rename', 
+      label: '重命名', 
+      icon: '✏️', 
+      onClick: () => onAction('重命名', node) 
+    }
+  ];
 
+  if (isFolder) {
+    items.push(
+      { 
+        key: 'new-file', 
+        label: '新建文件', 
+        icon: '📄', 
+        onClick: () => onAction('新建文件', node) 
+      },
+      { 
+        key: 'new-folder', 
+        label: '新建文件夹', 
+        icon: '📁', 
+        onClick: () => onAction('新建文件夹', node) 
+      }
+    );
+  } else {
+    items.push({ 
+      key: 'props', 
+      label: '属性', 
+      icon: 'ℹ️', 
+      onClick: () => onAction('属性', node) 
+    });
+  }
+
+  // 分割线
+  items.push({ type: 'divider', key: 'divider-1' });
+
+  // 删除操作（带二次确认）
+  items.push({
+    key: 'delete',
+    label: '删除',
+    icon: '🗑️',
+    danger: true,
+    render: (content) => (
       <Popconfirm
         title={<div style={{ fontSize: '16px', fontWeight: 600 }}>确认删除？</div>}
         content={
@@ -47,15 +92,23 @@ const DirectoryContextMenu: React.FC<DirectoryContextMenuProps> = ({
         okType="danger"
         onConfirm={() => {
           onAction('delete', node);
+          onClose?.();
         }}
         position="rightBottom"
         style={{ width: 320 }}
       >
-        <div className="menu-item danger">删除</div>
+        {content}
       </Popconfirm>
-    </MenuContent>
+    )
+  });
+
+  return (
+    <ContextMenu 
+      title={isFolder ? '文件夹操作' : '文件操作'} 
+      items={items} 
+      onItemClick={onClose}
+    />
   );
 };
 
 export default DirectoryContextMenu;
-

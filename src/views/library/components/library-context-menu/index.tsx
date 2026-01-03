@@ -1,11 +1,6 @@
 import React from 'react';
-import { Button } from '@douyinfe/semi-ui';
-import { IconEdit, IconDelete } from '@douyinfe/semi-icons';
-import {
-  ContextMenu,
-  ContextMenuTitle,
-  ContextMenuActions
-} from '../../style';
+import { Popover } from '@douyinfe/semi-ui';
+import ContextMenu, { ContextMenuItem } from '@/components/ui/context-menu';
 import type { Library } from "@/features/file-explorer/services/file.api";
 
 interface LibraryContextMenuProps {
@@ -15,6 +10,7 @@ interface LibraryContextMenuProps {
   library: Library | null;
   onRename: () => void;
   onDelete: () => void;
+  onClose?: () => void;
 }
 
 const LibraryContextMenu: React.FC<LibraryContextMenuProps> = ({
@@ -23,20 +19,58 @@ const LibraryContextMenu: React.FC<LibraryContextMenuProps> = ({
   y,
   library,
   onRename,
-  onDelete
+  onDelete,
+  onClose
 }) => {
-  if (!visible || !library) return null;
+  if (!library) return null;
+
+  const items: ContextMenuItem[] = [
+    {
+      key: 'rename',
+      label: '重命名',
+      icon: '✏️',
+      onClick: onRename
+    },
+    {
+      key: 'delete',
+      label: '删除',
+      icon: '🗑️',
+      danger: true,
+      onClick: onDelete
+    }
+  ];
 
   return (
-    <ContextMenu id="library-context-menu" style={{ left: x, top: y }}>
-      <ContextMenuTitle>{library.name}</ContextMenuTitle>
-      <ContextMenuActions>
-        <Button icon={<IconEdit />} onClick={onRename}>重命名</Button>
-        <Button icon={<IconDelete />} type="danger" onClick={onDelete}>删除</Button>
-      </ContextMenuActions>
-    </ContextMenu>
+    <Popover
+      trigger="custom"
+      visible={visible}
+      onClickOutSide={onClose}
+      position="bottomLeft" // 改为 bottomLeft
+      showArrow={false}
+      spacing={4}
+      getPopupContainer={() => document.body}
+      content={
+        <ContextMenu
+          id="library-context-menu"
+          title={library.name}
+          items={items}
+          onItemClick={onClose}
+        />
+      }
+    >
+      <div
+        style={{
+          position: 'fixed',
+          left: x,
+          top: y,
+          width: 1,
+          height: 1,
+          pointerEvents: 'none',
+          zIndex: 9999
+        }}
+      />
+    </Popover>
   );
 };
 
 export default LibraryContextMenu;
-

@@ -428,13 +428,27 @@ export default function DirectoryTree({
     const x = e.clientX;
     const y = e.clientY;
     
-    setMenuState({
-      visible: true,
-      x,
-      y,
-      node,
-      isFolder,
-    });
+    // 如果已经打开，先关闭再打开，强制位置刷新
+    if (menuState.visible) {
+      setMenuState(prev => ({ ...prev, visible: false }));
+      setTimeout(() => {
+        setMenuState({
+          visible: true,
+          x,
+          y,
+          node,
+          isFolder,
+        });
+      }, 0);
+    } else {
+      setMenuState({
+        visible: true,
+        x,
+        y,
+        node,
+        isFolder,
+      });
+    }
   };
 
   // 行 label 渲染
@@ -627,25 +641,27 @@ export default function DirectoryTree({
         trigger="custom"
         visible={menuState.visible}
         onClickOutSide={() => setMenuState(prev => ({ ...prev, visible: false }))}
-        position="rightTop" // 默认右下展开，靠近鼠标
+        position="bottomLeft" // 改为 bottomLeft
+        getPopupContainer={() => document.body}
+        showArrow={false}
+        spacing={4}
         content={
           <DirectoryContextMenu 
             node={menuState.node} 
             isFolder={menuState.isFolder} 
             onAction={handleAction} 
+            onClose={() => setMenuState(prev => ({ ...prev, visible: false }))}
           />
         }
-        // 关键：不显示箭头，紧贴鼠标
-        showArrow={false}
-        spacing={2} 
       >
         <div 
           style={{
             position: 'fixed',
             left: menuState.x,
             top: menuState.y,
-            width: 0,
-            height: 0,
+            width: 1,
+            height: 1,
+            pointerEvents: 'none'
           }} 
         />
       </Popover>

@@ -1,91 +1,38 @@
-import {FC, ReactNode} from "react";
+import { FC, ReactNode } from "react";
 import MainWrapper from "./style.ts";
-import ReactLogo from "@/assets/img/React.svg";
 import { useFileViewer } from "@/contexts/FileViewerContext";
-import { Spin } from "@douyinfe/semi-ui";
+import WelcomeView from "@/features/file-viewer/components/welcome-view";
+import FileDispatcher from "@/features/file-viewer/components/file-dispatcher";
 
 interface IProps {
   children?: ReactNode;
 }
 
+/**
+ * 主工作区容器
+ * 负责在“欢迎页”和“文件预览页”之间切换
+ */
 const AppMain: FC<IProps> = () => {
   const { fileState } = useFileViewer();
 
-  // 如果有文件正在查看，显示文件内容
-  if (fileState.fileUrl) {
+  // 如果没有文件在查看，显示欢迎视图
+  if (!fileState.fileUrl && !fileState.loading) {
     return (
       <MainWrapper>
-        <div className="file-viewer">
-          {fileState.loading ? (
-            <div className="file-viewer-loading">
-              <Spin size="large" />
-            </div>
-          ) : (
-            <>
-              {fileState.fileType === 'image' && (
-                <div className="file-viewer-content">
-                  <img 
-                    src={fileState.fileUrl} 
-                    alt={fileState.fileName || 'Image'} 
-                    className="file-viewer-image"
-                  />
-                  {fileState.fileName && (
-                    <div className="file-viewer-title">{fileState.fileName}</div>
-                  )}
-                </div>
-              )}
-              {fileState.fileType === 'video' && (
-                <div className="file-viewer-content">
-                  <video 
-                    src={fileState.fileUrl} 
-                    controls 
-                    className="file-viewer-video"
-                  >
-                    您的浏览器不支持视频播放
-                  </video>
-                  {fileState.fileName && (
-                    <div className="file-viewer-title">{fileState.fileName}</div>
-                  )}
-                </div>
-              )}
-              {fileState.fileType === 'other' && (
-                <div className="file-viewer-content">
-                  <div className="file-viewer-other">
-                    <p>文件类型暂不支持预览</p>
-                    <p className="file-viewer-filename">{fileState.fileName}</p>
-                    <a 
-                      href={fileState.fileUrl} 
-                      target="_blank" 
-                      rel="noopener noreferrer"
-                      className="file-viewer-download"
-                    >
-                      下载文件
-                    </a>
-                  </div>
-                </div>
-              )}
-            </>
-          )}
-        </div>
+        <WelcomeView />
       </MainWrapper>
     );
   }
 
-  // 默认显示原来的内容
+  // 否则显示文件分发器（处理图片、视频等预览）
   return (
-    <MainWrapper>
-      <header className="header">
-        <div className="logo-box">
-          <img src={ReactLogo} alt="Logo" className="logo"/>
-        </div>
-        <div className="text-box">
-          <h1 className="heading-primary">
-            <span className="heading-primary-main">Outdoors</span>
-            <span className="heading-primary-sub">is where life happens</span>
-          </h1>
-          <a href="#" className="btn btn-white">Discover our tours</a>
-        </div>
-      </header>
+    <MainWrapper className="viewer-mode">
+      <FileDispatcher 
+        fileUrl={fileState.fileUrl}
+        fileName={fileState.fileName}
+        fileType={fileState.fileType}
+        loading={fileState.loading}
+      />
     </MainWrapper>
   );
 }
