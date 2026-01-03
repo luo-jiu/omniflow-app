@@ -1,8 +1,10 @@
 import React, { ReactNode, useEffect, useRef, useState } from 'react';
-import { Modal, Tree, Toast, Input, Popover, Popconfirm } from '@douyinfe/semi-ui';
-import { MenuContent } from './style';
-import { createNode, deleteNodeAndChildren, renameNode } from "@/service/directory-sidebar.api.ts";
-import { uploadManager } from '@/utils/upload-manager';
+import { Tree, Toast, Input, Popover } from '@douyinfe/semi-ui';
+import { createNode, deleteNodeAndChildren, renameNode } from "../../services/file.api";
+import { uploadManager } from '@/utils/uploadManager.ts';
+import UploadConfirmModal from './modals/UploadConfirmModal.tsx';
+import CreateNodeModal from './modals/CreateNodeModal.tsx';
+import DirectoryContextMenu from './context-menu/DirectoryContextMenu.tsx';
 
 interface DirectoryTreeProps {
   treeData: any[];
@@ -417,52 +419,6 @@ export default function DirectoryTree({
     setEditingName('');
   };
 
-  // 渲染菜单内容
-  const renderNodeMenu = (node: any, isFolder: boolean) => {
-    return (
-      <MenuContent>
-        <div className="menu-title">{isFolder ? '文件夹操作' : '文件操作'}</div>
-        <div className="menu-item" onClick={() => handleAction('重命名', node)}>重命名</div>
-        
-        {isFolder ? (
-          <>
-            <div className="menu-item" onClick={() => handleAction('新建文件', node)}>新建文件</div>
-            <div className="menu-item" onClick={() => handleAction('新建文件夹', node)}>新建文件夹</div>
-          </>
-        ) : (
-          <div className="menu-item" onClick={() => handleAction('属性', node)}>属性</div>
-        )}
-
-        <Popconfirm
-          title={<div style={{ fontSize: '16px', fontWeight: 600 }}>确认删除？</div>}
-          content={
-            <div style={{ fontSize: '14px', marginTop: '8px', width: '240px' }}>
-              将删除「{node.data?.rawName ?? node.label ?? node.key}」及其所有子内容，此操作不可恢复。
-            </div>
-          }
-          okType="danger"
-          onConfirm={() => {
-            handleAction('delete', node);
-          }}
-          position="rightBottom"
-          style={{ width: 320 }} // 尝试调整 Popconfirm 容器宽度，如果不生效可能需要 overlayStyle
-        >
-          <div className="menu-item danger">删除</div>
-        </Popconfirm>
-      </MenuContent>
-    );
-  };
-
-  const renderRootMenu = () => {
-    return (
-      <MenuContent>
-        <div className="menu-title">根目录操作</div>
-        <div className="menu-item" onClick={() => handleAction('新建文件', null)}>新建文件</div>
-        <div className="menu-item" onClick={() => handleAction('新建文件夹', null)}>新建文件夹</div>
-      </MenuContent>
-    );
-  };
-
   // 打开菜单：记录坐标和节点
   const openMenu = (e: React.MouseEvent, node: any, isFolder: boolean) => {
     e.preventDefault();
@@ -673,9 +629,11 @@ export default function DirectoryTree({
         onClickOutSide={() => setMenuState(prev => ({ ...prev, visible: false }))}
         position="rightTop" // 默认右下展开，靠近鼠标
         content={
-          menuState.node === null 
-            ? renderRootMenu() 
-            : renderNodeMenu(menuState.node, menuState.isFolder)
+          <DirectoryContextMenu 
+            node={menuState.node} 
+            isFolder={menuState.isFolder} 
+            onAction={handleAction} 
+          />
         }
         // 关键：不显示箭头，紧贴鼠标
         showArrow={false}
@@ -693,88 +651,25 @@ export default function DirectoryTree({
       </Popover>
 
       {/* Modal 组件 - 居中显示 */}
-      <Modal
-        title="文件上传确认"
+      <UploadConfirmModal
         visible={uploadModal.visible}
-        onOk={handleConfirmUpload}
+        files={uploadModal.files}
+        targetNode={uploadModal.targetNode}
+        loading={uploadModal.loading}
+        onConfirm={handleConfirmUpload}
         onCancel={handleCancelUpload}
-        confirmLoading={uploadModal.loading}
-        okText="确定上传"
-        cancelText="取消"
-        maskClosable={false}
-        centered // 居中
-        width={600}
-        bodyStyle={{
-          fontSize: 15,
-          lineHeight: '22px',
-          padding: '20px 28px',
-        }}
-      >
-        {uploadModal.files.length > 0 && uploadModal.targetNode && (
-          <div style={{ padding: '10px 0' }}>
-            <div style={{ marginBottom: 12 }}>
-              <strong>上传位置:</strong> 📂 {uploadModal.targetNode.label}
-            </div>
-
-            <div style={{ 
-              maxHeight: '200px', 
-              overflowY: 'auto', 
-              border: '1px solid var(--semi-color-border)',
-              borderRadius: '4px',
-              padding: '8px',
-              backgroundColor: 'var(--semi-color-fill-0)'
-            }}>
-              {uploadModal.files.map((f, i) => (
-                <div key={i} style={{ 
-                  display: 'flex', 
-                  justifyContent: 'space-between',
-                  padding: '4px 0',
-                  fontSize: '13px',
-                  borderBottom: i === uploadModal.files.length - 1 ? 'none' : '1px solid var(--semi-color-border-light)'
-                }}>
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '380px' }}>
-                    {f.name}
-                  </span>
-                  <span style={{ color: 'var(--semi-color-text-2)', marginLeft: 8 }}>
-                    {uploadManager.formatSize(f.size)}
-                  </span>
-                </div>
-              ))}
-            </div>
-
-            <div style={{ marginTop: 16, color: 'var(--semi-color-text-2)', fontSize: 15 }}>
-              <p>即将上传以上 {uploadModal.files.length} 个文件到目标目录，是否继续？</p>
-            </div>
-          </div>
-        )}
-      </Modal>
+      />
 
       {/* 新建文件/文件夹 Modal - 居中显示 */}
-      <Modal
-        title={createModal.type === 'dir' ? '新建文件夹' : '新建文件'}
+      <CreateNodeModal
         visible={createModal.visible}
-        onOk={handleConfirmCreate}
+        type={createModal.type}
+        name={createModal.name}
+        loading={createModal.loading}
+        onNameChange={(value) => setCreateModal(prev => ({ ...prev, name: value }))}
+        onConfirm={handleConfirmCreate}
         onCancel={handleCancelCreate}
-        confirmLoading={createModal.loading}
-        okText="确定"
-        cancelText="取消"
-        maskClosable={false}
-        centered // 居中
-      >
-        <div style={{ padding: '10px 0' }}>
-          <Input
-            placeholder={createModal.type === 'dir' ? '请输入文件夹名称' : '请输入文件名称'}
-            value={createModal.name}
-            onChange={(value) => setCreateModal(prev => ({ ...prev, name: value }))}
-            onKeyDown={e => {
-              if (e.key === 'Enter') {
-                handleConfirmCreate();
-              }
-            }}
-            autoFocus
-          />
-        </div>
-      </Modal>
+      />
     </div>
   );
 }

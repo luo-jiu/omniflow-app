@@ -1,7 +1,6 @@
 import {useEffect} from 'react'
 import { loginService } from "@/service/authService";
-
-import AppHeader from "@/components/app-header";
+import MainLayout from "@/layouts/MainLayout";
 import {useRoutes} from "react-router-dom";
 import {Suspense} from "react";
 import routes from "@/router";
@@ -26,17 +25,11 @@ function App() {
   }, [])
 
   return (
-    <div className="app">
-      <AppHeader />
-      <div className="content">
-        {/*<AppSidebar />*/}
-        <Suspense fallback={'loading...'}>
-          <div className='main'>{useRoutes(routes)}</div>
-        </Suspense>
-        {/*<DirectorySidebar />*/}
-        {/*<AppMain />*/}
-      </div>
-    </div>
+    <MainLayout>
+      <Suspense fallback={'loading...'}>
+        {useRoutes(routes)}
+      </Suspense>
+    </MainLayout>
   )
 }
 

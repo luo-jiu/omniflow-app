@@ -1,4 +1,4 @@
-import { ipcRequest as request, ipcUpload } from './request/ipcRequest';
+import { ipcRequest as request, ipcUpload } from '@/service/request/ipcRequest';
 
 export type Library = {
   createdAt: string;

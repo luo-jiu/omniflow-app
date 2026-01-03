@@ -318,6 +318,15 @@ function createWindow() {
     // 自动隐藏菜单栏
     frame: false
   });
+  win.webContents.session.webRequest.onHeadersReceived((details, callback) => {
+    callback({
+      responseHeaders: {
+        ...details.responseHeaders,
+        "Content-Security-Policy": [""]
+        // 将其置为空
+      }
+    });
+  });
   let zoomFactor = 1;
   ipcMain.handle("zoom-adjust", (_, delta) => {
     zoomFactor = Math.min(Math.max(zoomFactor + delta, 0.25), 3);

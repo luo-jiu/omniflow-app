@@ -1,5 +1,5 @@
 import {FC, ReactNode} from "react";
-import {SidebarWrapper} from "@/components/app-sidebar/style.ts";
+import {SidebarWrapper} from "./style.ts";
 import {Nav} from "@douyinfe/semi-ui";
 
 interface IProps {

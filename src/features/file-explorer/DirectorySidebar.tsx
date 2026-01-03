@@ -1,7 +1,7 @@
-import { DirectorySidebarWrapper } from './style';
-import DirectoryTree from './DirectoryTree';
-import { useRepositoryTree } from '@/hooks/directory-sidebar/useRepositoryTree';
-import { useResizableSidebar } from '@/hooks/directory-sidebar/useResizableSidebar';
+import { DirectorySidebarWrapper } from './components/directory-tree/style';
+import DirectoryTree from './components/directory-tree';
+import { useRepositoryTree } from './hooks/useRepositoryTree';
+import { useResizableSidebar } from './hooks/useResizableSidebar';
 import React from "react";
 
 interface Props {

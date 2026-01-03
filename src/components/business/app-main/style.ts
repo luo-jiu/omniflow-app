@@ -1,5 +1,5 @@
 import styled from 'styled-components';
-import Lemon from '@/image/lemon.jpeg';
+import Lemon from '@/assets/img/lemon.jpeg';
 
 export const MainWrapper = styled.main`
   flex: 1;

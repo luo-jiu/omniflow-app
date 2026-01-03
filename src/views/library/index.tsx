@@ -1,22 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Button, Modal, Input, Toast } from '@douyinfe/semi-ui'
-import {
-  IconFolder,
-  IconPlus,
-  IconEdit,
-  IconDelete,
-  IconStar,
-  IconStarStroked,
-  IconMore
-} from '@douyinfe/semi-icons'
+import { Button, Modal } from '@douyinfe/semi-ui'
+import { IconPlus } from '@douyinfe/semi-icons'
 
 import LibraryWrapper, {
   ContentRow,
-  SideMenu,
-  SideMenuHeader,
-  SideMenuList,
-  SideMenuItem,
   VerticalDivider,
   CardArea,
   RightHeader,
@@ -24,24 +12,15 @@ import LibraryWrapper, {
   RightHeaderDivider,
   CardScroll,
   CardGrid,
-  CardItem,
-  CardIcon,
-  CardName,
-  CardNameEdit,
-  CardActions,
-  ActionIconBtn,
-  ContextMenu,
-  ContextMenuTitle,
-  ContextMenuActions,
   EmptyTip
 } from './style'
-import {
-  createLibrary,
-  deleteLibrary,
-  fetchRepositories,
-  renameLibrary
-} from "@/service/directory-sidebar.api.ts";
-import type { Library } from "@/service/directory-sidebar.api.ts";
+
+import { useLibraryPage } from './hooks/useLibraryPage.ts'
+import QuickAccessSidebar from './components/quick-access-sidebar'
+import LibraryCard from './components/library-card'
+import LibraryContextMenu from './components/library-context-menu'
+import LibraryCreateModal from './components/library-create-modal'
+import type { Library } from "@/features/file-explorer/services/file.api"
 
 type MenuState = {
   visible: boolean
@@ -56,25 +35,21 @@ const PADDING = 10
 
 const LibraryPage: React.FC = () => {
   const navigate = useNavigate()
-  const [libraries, setLibraries] = useState<Library[]>([])
+  const {
+    libraries,
+    handleCreateLibrary,
+    handleDeleteLibrary,
+    handleRenameLibrary,
+    toggleStar
+  } = useLibraryPage()
+
   const [createVisible, setCreateVisible] = useState(false)
   const [createName, setCreateName] = useState('')
-
   const [menu, setMenu] = useState<MenuState>({ visible: false, x: 0, y: 0, library: null })
-
-  // 就地重命名
   const [editingLibraryId, setEditingLibraryId] = useState<number | null>(null)
   const [renameValue, setRenameValue] = useState('')
 
   const wrapperRef = useRef<HTMLDivElement>(null)
-
-  // 加载仓库
-  useEffect(() => {
-    (async () => {
-      const list = await fetchRepositories();
-      setLibraries(list);
-    })();
-  }, []);
 
   // 关闭右键菜单：点击空白或 ESC
   useEffect(() => {
@@ -123,30 +98,12 @@ const LibraryPage: React.FC = () => {
     setMenu({ visible: true, x, y, library })
   }
 
-  const handleDoubleClick = (libraryId: number) => {
-    if (editingLibraryId !== null) return
-    navigate(`/libraries/${libraryId}`)
-  }
-
   const handleCreate = async () => {
-    const name = createName.trim()
-    if (!name) {
-      Toast.warning('库名不能为空')
-      return
+    const success = await handleCreateLibrary(createName)
+    if (success) {
+      setCreateVisible(false)
+      setCreateName('')
     }
-    // 创建仓库
-    await createLibrary({ userId: 0, name: createName });
-    // 重新请求仓库列表
-    const list = await fetchRepositories();
-    setLibraries(list);
-
-    setCreateVisible(false)
-    setCreateName('')
-    Toast.success('已创建')
-  }
-
-  const toggleStar = (library: Library) => {
-    setLibraries(list => list.map(l => (l.id === library.id ? { ...l, starred: !l.starred } : l)))
   }
 
   const enterRename = () => {
@@ -158,26 +115,10 @@ const LibraryPage: React.FC = () => {
 
   const submitRename = async () => {
     if (editingLibraryId === null) return
-    const newName = renameValue.trim()
-    if (!newName) {
-      Toast.warning('名称不能为空')
-      return
-    }
-    try {
-      await renameLibrary(editingLibraryId, newName)
-      setLibraries(list =>
-        list.map(l =>
-          l.id === editingLibraryId
-            ? { ...l, name: newName, updatedAt: new Date().toISOString() }
-            : l
-        )
-      )
+    const success = await handleRenameLibrary(editingLibraryId, renameValue)
+    if (success) {
       setEditingLibraryId(null)
       setRenameValue('')
-      Toast.success('重命名成功')
-    } catch (err) {
-      console.error('重命名失败:', err)
-      Toast.error('重命名失败')
     }
   }
 
@@ -191,16 +132,9 @@ const LibraryPage: React.FC = () => {
       cancelText: '取消',
       okType: 'danger',
       async onOk() {
-        try {
-          await deleteLibrary(library.id);
-          // 前端直接删除
-          setLibraries(list => list.filter(l => l.id !== library.id));
-          // 关闭右键菜单
-          setMenu(m => ({ ...m, visible: false, library: null }));
-          Toast.success('删除成功');
-        } catch (err) {
-          console.error('删除失败:', err);
-          Toast.error('删除失败');
+        const success = await handleDeleteLibrary(library.id)
+        if (success) {
+          setMenu(m => ({ ...m, visible: false, library: null }))
         }
       },
     });
@@ -211,19 +145,8 @@ const LibraryPage: React.FC = () => {
   return (
     <LibraryWrapper ref={wrapperRef} onContextMenu={preventSystemMenu}>
       <ContentRow>
-        {/* 左侧：快速访问（沾满左侧） */}
-        <SideMenu>
-          <SideMenuHeader>快速访问</SideMenuHeader>
-          <SideMenuList>
-            <SideMenuItem>我的收藏</SideMenuItem>
-            <SideMenuItem>最近访问文件</SideMenuItem>
-          </SideMenuList>
-        </SideMenu>
-
-        {/* 左右分割线 */}
+        <QuickAccessSidebar />
         <VerticalDivider />
-
-        {/* 右侧：标题 + 右上角按钮 + 卡片区 */}
         <CardArea>
           <RightHeader>
             <RightHeaderTitle>我的库</RightHeaderTitle>
@@ -231,100 +154,52 @@ const LibraryPage: React.FC = () => {
               新建库
             </Button>
           </RightHeader>
-
-          {/* 右侧局部分割线（不占满宽度） */}
           <RightHeaderDivider />
-
           {isEmpty ? (
             <EmptyTip>暂无库，点击右上角「新建库」创建一个吧～</EmptyTip>
           ) : (
             <CardScroll>
               <CardGrid>
-                {libraries.map(library => {
-                  const isEditing = editingLibraryId === library.id
-                  return (
-                    <CardItem
-                      key={library.id}
-                      title={library.name}
-                      onContextMenu={(e) => handleContextMenu(e, library)}
-                      onDoubleClick={() => handleDoubleClick(library.id)}
-                    >
-                      <CardActions className="card-actions" onClick={(e) => e.stopPropagation()}>
-                        <ActionIconBtn
-                          aria-label={library.starred ? '取消收藏' : '收藏'}
-                          onClick={() => toggleStar(library)}
-                          title={library.starred ? '取消收藏' : '收藏'}
-                        >
-                          {library.starred ? <IconStar /> : <IconStarStroked />}
-                        </ActionIconBtn>
-
-                        <ActionIconBtn
-                          aria-label="更多"
-                          onClick={(e) => handleMoreClick(e, library)}
-                          title="更多操作"
-                        >
-                          <IconMore />
-                        </ActionIconBtn>
-                      </CardActions>
-
-                      <CardIcon><IconFolder size="extra-large" /></CardIcon>
-
-                      {isEditing ? (
-                        <CardNameEdit onClick={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
-                          <Input
-                            value={renameValue}
-                            onChange={(v) => setRenameValue(v)}
-                            autoFocus
-                            onEnterPress={submitRename}
-                            onBlur={submitRename}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Escape') {
-                                e.stopPropagation()
-                                setEditingLibraryId(null)
-                                setRenameValue('')
-                              }
-                            }}
-                            style={{ width: 260 }}
-                            placeholder="输入新名称"
-                          />
-                        </CardNameEdit>
-                      ) : (
-                        <CardName>{library.name}</CardName>
-                      )}
-                    </CardItem>
-                  )
-                })}
+                {libraries.map(library => (
+                  <LibraryCard
+                    key={library.id}
+                    library={library}
+                    isEditing={editingLibraryId === library.id}
+                    renameValue={renameValue}
+                    onRenameChange={setRenameValue}
+                    onRenameSubmit={submitRename}
+                    onRenameCancel={() => {
+                      setEditingLibraryId(null);
+                      setRenameValue('');
+                    }}
+                    onContextMenu={(e) => handleContextMenu(e, library)}
+                    onMoreClick={(e) => handleMoreClick(e, library)}
+                    onDoubleClick={() => navigate(`/libraries/${library.id}`)}
+                    onToggleStar={() => toggleStar(library)}
+                  />
+                ))}
               </CardGrid>
             </CardScroll>
           )}
         </CardArea>
       </ContentRow>
 
-      {/* 右键/更多 菜单（竖直按钮） */}
-      {menu.visible && (
-        <ContextMenu id="library-context-menu" style={{ left: menu.x, top: menu.y }}>
-          <ContextMenuTitle>{menu.library?.name}</ContextMenuTitle>
-          <ContextMenuActions>
-            <Button icon={<IconEdit />} onClick={enterRename}>重命名</Button>
-            <Button icon={<IconDelete />} type="danger" onClick={doDelete}>删除</Button>
-          </ContextMenuActions>
-        </ContextMenu>
-      )}
+      <LibraryContextMenu
+        visible={menu.visible}
+        x={menu.x}
+        y={menu.y}
+        library={menu.library}
+        onRename={enterRename}
+        onDelete={doDelete}
+      />
 
-      {/* 新建库对话框（模拟） */}
-      <Modal
-        title="新建库"
+      <LibraryCreateModal
         visible={createVisible}
-        onOk={handleCreate}
+        name={createName}
+        onNameChange={setCreateName}
+        onConfirm={handleCreate}
         onCancel={() => setCreateVisible(false)}
-        okText="创建"
-      >
-        <Input
-          placeholder="请输入库名称"
-          value={createName}
-          onChange={v => setCreateName(v)}
-        />
-      </Modal>
+      />
     </LibraryWrapper>
   )
 }

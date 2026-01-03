@@ -1,6 +1,6 @@
-import AppSidebar from "@/components/app-sidebar";
-import AppMain from "@/components/app-main";
-import DirectorySidebar from "@/components/app-directory-sidebar";
+import AppSidebar from "@/components/business/app-sidebar";
+import AppMain from "@/components/business/app-main";
+import { DirectorySidebar } from "@/features/file-explorer";
 import React from "react";
 import {useParams} from "react-router-dom";
 import { FileViewerProvider, useFileViewer } from "@/contexts/FileViewerContext";

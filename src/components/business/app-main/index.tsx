@@ -1,6 +1,6 @@
 import {FC, ReactNode} from "react";
-import MainWrapper from "@/components/app-main/style.ts";
-import ReactLogo from "@/image/React.svg";
+import MainWrapper from "./style.ts";
+import ReactLogo from "@/assets/img/React.svg";
 import { useFileViewer } from "@/contexts/FileViewerContext";
 import { Spin } from "@douyinfe/semi-ui";
 

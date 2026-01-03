@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { getChildrenByNodeId, getFileLink } from '@/service/directory-sidebar.api.ts';
-import { fileCache } from '@/utils/file-cache';
+import { getChildrenByNodeId, getFileLink } from '../services/file.api';
+import { fileCache } from '@/utils/fileCache.ts';
 
 // 目录节点信息
 interface Node {
