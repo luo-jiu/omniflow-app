@@ -1,149 +1,78 @@
 import styled from 'styled-components';
-import Lemon from '@/assets/img/lemon.jpeg';
 
 export const WelcomeWrapper = styled.div`
   width: 100%;
   height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
   overflow: auto;
-  position: relative;
 
-  .header {
-    height: 100%;
-    background-image: linear-gradient(
-            to right bottom,
-            rgba(227,124,155,0.7),
-            rgba(225,153,161,0.4)
-    ), url(${Lemon});
-    background-repeat: no-repeat;
-    background-position: center;
-    background-size: cover;
-    overflow: clip;
-  }
-
-  .logo-box {
-    padding: 40px;
-  }
-
-  .logo {
-    height: 55px;
-  }
-
-  .text-box {
-    position: relative;
-    top: 28%;
-    left: 50%;
-    transform: translateX(-50%);
+  .panel {
+    width: min(600px, 100%);
+    padding: 32px;
     text-align: center;
   }
 
-  .heading-primary {
-    color: #fff;
+  .eyebrow {
+    display: inline-flex;
+    align-items: center;
+    padding: 5px 12px;
+    border-radius: 4px;
+    background: var(--app-accent-soft);
+    color: var(--app-accent);
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: 0.04em;
     text-transform: uppercase;
-    margin-bottom: 50px;
   }
 
-  .heading-primary-main {
-    display: block;
-    font-size: 60px;
-    font-weight: 400;
-    letter-spacing: 35px;
-    opacity: 0.6;
-    animation: moveInLeft 3s ease;
+  h1 {
+    margin-top: 18px;
+    font-size: 28px;
+    line-height: 1.2;
+    letter-spacing: -0.02em;
+    font-weight: 600;
   }
 
-  .heading-primary-sub {
-    display: block;
-    font-size: 20px;
-    font-weight: 700;
-    letter-spacing: 17.4px;
-    opacity: 0.6;
-    animation: moveInRight 3s ease;
+  p {
+    margin-top: 12px;
+    max-width: 480px;
+    margin-left: auto;
+    margin-right: auto;
+    color: var(--app-text-secondary);
+    font-size: 15px;
+    line-height: 1.7;
   }
 
-  @keyframes moveInLeft {
-    0% {
-      opacity: 0;
-      transform: translate(-80px, 120px);
-    }
-    40% {
-      transform: translate(10px, 120px);
-    }
-    70% {
-      opacity: 1;
-      transform: translate(0, 120px);
-    }
-    100% {
-      opacity: 0.6;
-      transform: translate(0);
-    }
+  .tips {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    margin-top: 28px;
   }
 
-  @keyframes moveInRight {
-    0% {
-      opacity: 0;
-      transform: translate(80px, 120px);
-    }
-    40% {
-      transform: translate(-10px, 120px);
-    }
-    70% {
-      opacity: 1;
-      transform: translate(0, 120px);
-    }
-    100% {
-      opacity: 0.6;
-      transform: translate(0);
-    }
+  .tip {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 16px;
+    border-radius: 10px;
+    background: var(--app-bg-elevated);
+    border: 1px solid var(--app-border);
+    text-align: left;
   }
 
-  .btn:link,
-  .btn:visited {
-    display: inline-block;
-    text-transform: uppercase;
-    text-decoration: none;
-    padding: 15px 40px;
-    opacity: 0.9;
-    border-radius: 8px;
-    position: relative;
-    transition: all .2s;
-    animation: showKey 3.4s;
-    background-color: #fff;
-    color: #777;
+  .tip-label {
+    color: var(--app-text);
+    font-size: 14px;
+    font-weight: 500;
   }
 
-  .btn:hover {
-    transform: translateY(-3px);
-    box-shadow: 0 10px 20px rgba(0, 0, 0, .4);
-  }
-
-  .btn:active {
-    transform: translateY(-1px);
-    box-shadow: 0 5px 10px rgba(0, 0, 0, .8);
-  }
-
-  @keyframes showKey {
-    0% { opacity: 0; }
-    70% { opacity: 0; }
-    100% { opacity: 0.9; }
-  }
-
-  .btn::after {
-    content: "";
-    display: inline-block;
-    height: 100%;
-    width: 100%;
-    border-radius: 8px;
-    position: absolute;
-    top: 0;
-    left: 0;
-    z-index: -1;
-    transition: all .4s;
-    background-color: #fff;
-  }
-
-  .btn:hover::after {
-    transform: scaleX(1.2) scaleY(1.6);
-    opacity: 0;
+  .tip-text {
+    color: var(--app-text-muted);
+    font-size: 13px;
+    line-height: 1.5;
   }
 `;
-

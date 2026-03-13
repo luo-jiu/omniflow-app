@@ -5,43 +5,45 @@ export const DirectorySidebarWrapper = styled.aside<{ $isDragging?: boolean }>`
   display: flex;
   flex-direction: row;
   flex-shrink: 0;
+  width: 100%;
   height: 100%;
   overflow: hidden;
+  border-radius: 0;
+  background: transparent;
+  border: none;
 
-  /* 侧边栏容器 */
   .sidebar-container {
-    background: var(--semi-color-bg-0);
-    border-right: 1px solid var(--semi-color-border);
+    background: transparent;
     flex-shrink: 0;
     display: flex;
     flex-direction: column;
+    width: 100%;
     height: 100%;
     overflow: hidden;
   }
 
-  /* 仓库选择器区域 */
   .repository-selector {
-    padding: 8px;
-    border-bottom: 1px solid var(--semi-color-border);
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--app-border);
     flex-shrink: 0;
   }
 
-  /* 树容器区域：横/纵滚动条；横向仅在“有遮挡”时出现（auto） */
   .tree-container {
     flex: 1;
     overflow-y: auto;
-    overflow-x: auto;                 /* 仅在需要时出现 */
+    overflow-x: auto;
     position: relative;
-    scrollbar-gutter: stable both-edges; /* 预留轨道空间，避免布局抖动 */
+    padding: 4px 6px 10px 2px;
+    scrollbar-gutter: stable both-edges;
     overscroll-behavior: contain;
+    font-size: 17px;
   }
 
-  /* 可选：侧栏 resize handle */
   .resize-handle {
     position: absolute;
     top: 0;
     right: 0;
-    width: 10px;
+    width: 6px;
     height: 100%;
     cursor: col-resize;
     background: transparent;
@@ -50,21 +52,27 @@ export const DirectorySidebarWrapper = styled.aside<{ $isDragging?: boolean }>`
   .resize-handle::after {
     content: "";
     position: absolute;
-    left: -6px;
-    right: -6px;
+    left: -4px;
+    right: -4px;
     top: 0;
     bottom: 0;
     cursor: col-resize;
   }
   .resize-handle:hover {
-    background: rgba(0, 0, 0, 0.06);
+    background: rgba(0, 0, 0, 0.04);
   }
 
-  /* wrapper 的 min-width 将由 JS 动态设置为“视口内最大被遮挡右缘 + 冗余” */
   .custom-tree-wrapper {
     display: block;
-    min-width: max-content; /* 初值为内容宽，随 JS 覆盖为像素值 */
+    min-width: max-content;
     width: auto;
+    font-size: 17px;
+  }
+
+  /* 全局覆盖 Semi Tree 的字体大小 */
+  .custom-tree,
+  .custom-tree * {
+    font-size: 17px !important;
   }
 
   .custom-tree {
@@ -72,76 +80,126 @@ export const DirectorySidebarWrapper = styled.aside<{ $isDragging?: boolean }>`
 
     .semi-tree-option-list .semi-tree-option {
       box-sizing: border-box;
-      font-size: 22px !important;
-      line-height: 32px !important;
-      padding: 4px 8px;
+      min-height: 32px;
+      padding: 3px 6px;
+      border-radius: 8px;
+      font-size: 17px !important;
+      line-height: 26px !important;
+      color: var(--app-text-secondary);
+    }
+  }
+
+  /* 压缩 Semi Tree 内部左侧间距 */
+  .custom-tree .semi-tree-option-list {
+    padding-left: 0 !important;
+  }
+
+  .custom-tree .semi-tree-option {
+    padding-left: 4px !important;
+  }
+
+  .custom-tree .semi-tree-indent {
+    width: 16px !important;
+  }
+
+    .semi-tree-option:hover {
+      background: rgba(0, 0, 0, 0.04);
+      color: var(--app-text);
     }
 
-    .semi-tree-option-label .semi-icon {
+    .semi-tree-option-selected,
+    .semi-tree-option-selected:hover {
+      background: rgba(0, 0, 0, 0.06);
+      color: var(--app-text);
+    }
+
+    .semi-tree-option-label,
+    .semi-tree-option-label-text {
+      font-size: 17px !important;
+    }
+
+    .semi-tree-option-label .semi-icon,
+    .semi-tree-option-icon {
       font-size: 20px !important;
       margin-right: 8px;
+      color: var(--app-text-muted);
+    }
+
+    .semi-tree-option-expand-icon {
+      font-size: 20px !important;
+      color: var(--app-text-muted);
+      padding: 6px;
+      margin: -6px 2px -6px -6px;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+
+    .semi-tree-option-expand-icon:hover {
+      background: rgba(0, 0, 0, 0.06);
     }
   }
 
   .custom-tree .semi-input {
-    font-size: 22px;
-    line-height: 32px;
+    font-size: 17px;
+    line-height: 26px;
   }
 
   .custom-tree .semi-input-wrapper {
     height: 36px;
+    border-radius: 8px;
+    background: var(--app-bg-elevated);
+    border: 1px solid var(--app-border);
   }
 
-  /* 行 label：inline-flex 以内容宽驱动，利于横向滚动 */
   .tree-node-label {
     display: inline-flex;
     align-items: center;
     width: 100%;
     min-width: 0;
     box-sizing: border-box;
+    gap: 6px;
     padding-right: 8px;
   }
 
-  /* 外部文件拖拽悬停高亮 */
   .tree-node-label.drag-over {
-    background: var(--semi-color-fill-1);
-    outline: 1px dashed var(--semi-color-primary);
-    border-radius: 6px;
+    background: rgba(52, 88, 71, 0.06);
+    outline: 1px dashed var(--app-accent);
+    border-radius: 4px;
   }
 
-  /* 文字块使用 inline-block，scrollWidth 更稳定 */
   .tree-node-text {
     display: inline-block;
     flex: 0 0 auto;
     white-space: nowrap;
     overflow: visible;
     text-overflow: initial;
+    color: inherit;
+    font-size: 17px !important;
+    line-height: 26px;
   }
 
-  /* 滚动条更易命中（Chromium/Electron） */
   .tree-container::-webkit-scrollbar {
-    height: 24px;   /* 横向滚动条厚度 */
-    width: 16px;    /* 纵向滚动条厚度 */
+    height: 8px;
+    width: 8px;
   }
   .tree-container::-webkit-scrollbar-track {
-    background: var(--semi-color-fill-0);
-    border-radius: 10px;
+    background: transparent;
+    border-radius: 8px;
   }
   .tree-container::-webkit-scrollbar-thumb {
-    background: var(--semi-color-fill-2);
-    border-radius: 10px;
-    min-height: 44px;
-    min-width: 44px;
+    background: rgba(0, 0, 0, 0.1);
+    border-radius: 8px;
+    min-height: 20px;
+    min-width: 20px;
   }
   .tree-container::-webkit-scrollbar-thumb:hover,
   .tree-container::-webkit-scrollbar-thumb:active,
   .tree-container::-webkit-scrollbar-thumb:focus {
-    background: var(--semi-color-fill-2);
+    background: rgba(0, 0, 0, 0.18);
   }
 
-  /* Firefox 兜底 */
   .tree-container {
-    scrollbar-width: auto;
+    scrollbar-width: thin;
   }
 `;
 

@@ -9,14 +9,13 @@ import {
 const QuickAccessSidebar: React.FC = () => {
   return (
     <SideMenu>
-      <SideMenuHeader>快速访问</SideMenuHeader>
+      <SideMenuHeader>Quick Access</SideMenuHeader>
       <SideMenuList>
         <SideMenuItem>我的收藏</SideMenuItem>
-        <SideMenuItem>最近访问文件</SideMenuItem>
+        <SideMenuItem>最近访问</SideMenuItem>
       </SideMenuList>
     </SideMenu>
   );
 };
 
 export default QuickAccessSidebar;
-

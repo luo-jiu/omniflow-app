@@ -21,15 +21,68 @@ process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL
   ? path.join(process.env.APP_ROOT, 'public')
   : RENDERER_DIST
 
+let mainWindow: BrowserWindow | null = null
+let windowHandlersRegistered = false
+
+function registerWindowIpcHandlers() {
+  if (windowHandlersRegistered) {
+    return
+  }
+  windowHandlersRegistered = true
+
+  ipcMain.handle('zoom-adjust', (event, delta: number) => {
+    const targetWindow = BrowserWindow.fromWebContents(event.sender) ?? mainWindow
+    if (!targetWindow || targetWindow.isDestroyed()) {
+      return null
+    }
+
+    const currentZoom = targetWindow.webContents.getZoomFactor()
+    const nextZoom = Math.min(Math.max(currentZoom + delta, 0.25), 3)
+    targetWindow.webContents.setZoomFactor(nextZoom)
+    return nextZoom
+  })
+
+  ipcMain.on('window-minimize', (event) => {
+    const targetWindow = BrowserWindow.fromWebContents(event.sender) ?? mainWindow
+    targetWindow?.minimize()
+  })
+
+  ipcMain.on('window-maximize', (event) => {
+    const targetWindow = BrowserWindow.fromWebContents(event.sender) ?? mainWindow
+    if (!targetWindow || targetWindow.isDestroyed()) {
+      return
+    }
+
+    if (targetWindow.isMaximized()) {
+      targetWindow.unmaximize()
+    } else {
+      targetWindow.maximize()
+    }
+  })
+
+  ipcMain.on('window-close', (event) => {
+    const targetWindow = BrowserWindow.fromWebContents(event.sender) ?? mainWindow
+    targetWindow?.close()
+  })
+}
+
 /**
  * 创建应用窗口
  */
 function createWindow() {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.show()
+    mainWindow.focus()
+    return mainWindow
+  }
+
   const win = new BrowserWindow({
     width: 1200,
     height: 800,
     minWidth: 600,  // 最小宽度
     minHeight: 400, // 最小高度
+    backgroundColor: '#f5f5f0',
+    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     webPreferences: {
       // 预加载脚本，用于安全地与渲染进程通信
       preload: path.join(MAIN_DIST, 'preload.mjs'),
@@ -41,7 +94,13 @@ function createWindow() {
       // webSecurity: true           // 启用同源策略
     },
     autoHideMenuBar: true, // 自动隐藏菜单栏
-    frame: false
+  })
+  mainWindow = win
+
+  win.on('closed', () => {
+    if (mainWindow === win) {
+      mainWindow = null
+    }
   })
 
   win.webContents.session.webRequest.onHeadersReceived((details, callback) => {
@@ -53,15 +112,6 @@ function createWindow() {
     });
   });
 
-  // 窗口缩放因子（默认 1.0）
-  let zoomFactor = 1.0
-
-  // 处理渲染进程发来的缩放请求
-  ipcMain.handle('zoom-adjust', (_, delta: number) => {
-    zoomFactor = Math.min(Math.max(zoomFactor + delta, 0.25), 3)
-    win.webContents.setZoomFactor(zoomFactor)
-  })
-
   // 加载页面：开发环境走 Vite Dev Server，生产环境加载 dist/index.html
   if (VITE_DEV_SERVER_URL) {
     win.loadURL(VITE_DEV_SERVER_URL)
@@ -69,20 +119,7 @@ function createWindow() {
     win.loadFile(path.join(RENDERER_DIST, 'index.html'))
   }
 
-  // 接收渲染进程的 IPC 调用
-  ipcMain.on('window-minimize', () => {
-    win.minimize();
-  });
-  ipcMain.on('window-maximize', () => {
-    if (win.isMaximized()) {
-      win.unmaximize();
-    } else {
-      win.maximize();
-    }
-  });
-  ipcMain.on('window-close', () => {
-    win.close();
-  });
+  return win
 }
 
 /**
@@ -95,6 +132,15 @@ app.on('window-all-closed', () => {
 
 // 点击 Dock 图标时，如果没有窗口则重新创建
 app.on('activate', () => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.isMinimized()) {
+      mainWindow.restore()
+    }
+    mainWindow.show()
+    mainWindow.focus()
+    return
+  }
+
   if (BrowserWindow.getAllWindows().length === 0) {
     createWindow()
   }
@@ -103,5 +149,6 @@ app.on('activate', () => {
 // app 初始化完成后创建窗口
 app.whenReady().then(() => {
   registerIpcHandlers() // 注册自定义 IPC 事件
+  registerWindowIpcHandlers()
   createWindow()        // 创建主窗口
 })

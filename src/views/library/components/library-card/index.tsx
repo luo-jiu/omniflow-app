@@ -60,7 +60,7 @@ const LibraryCard: React.FC<LibraryCardProps> = ({
         </ActionIconBtn>
       </CardActions>
 
-      <CardIcon><IconFolder size="extra-large" /></CardIcon>
+      <CardIcon><IconFolder style={{ fontSize: 28 }} /></CardIcon>
 
       {isEditing ? (
         <CardNameEdit onClick={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
@@ -88,4 +88,3 @@ const LibraryCard: React.FC<LibraryCardProps> = ({
 };
 
 export default LibraryCard;
-

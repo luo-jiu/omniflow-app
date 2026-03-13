@@ -6,40 +6,48 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { useNavigate } from 'react-router-dom';
 
 const SettingsWrapper = styled.div`
-  padding: 60px 80px;
-  max-width: 1000px;
+  padding: 48px 60px;
+  padding-top: 56px;
+  max-width: 800px;
   margin: 0 auto;
   width: 100%;
   color: var(--semi-color-text-0);
+  -webkit-app-region: drag;
+
+  & > * {
+    -webkit-app-region: no-drag;
+  }
 
   .settings-header {
     display: flex;
     align-items: center;
-    gap: 20px;
-    margin-bottom: 32px;
+    gap: 16px;
+    margin-bottom: 8px;
+  }
+
+  .settings-subtitle {
+    margin-left: 52px;
+    margin-bottom: 28px;
+    color: var(--semi-color-text-2);
+    font-size: 15px;
   }
 
   .setting-item {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 24px 0;
+    padding: 20px 0;
   }
 
   .setting-title {
-    font-size: 24px;
-    font-weight: 600;
+    font-size: 16px;
+    font-weight: 500;
   }
 
   .setting-desc {
-    font-size: 18px;
-    margin-top: 6px;
+    font-size: 14px;
+    margin-top: 4px;
     color: var(--semi-color-text-2);
-  }
-
-  /* 适配大尺寸的选择框和开关 */
-  .semi-switch-large, .semi-select-large {
-    transform: none;
   }
 `;
 
@@ -51,30 +59,30 @@ const Settings: React.FC = () => {
   return (
     <SettingsWrapper>
       <div className="settings-header">
-        <Button 
-          icon={<IconChevronLeft style={{ fontSize: 28 }} />} 
-          theme="borderless" 
+        <Button
+          icon={<IconChevronLeft style={{ fontSize: 20 }} />}
+          theme="borderless"
           onClick={() => navigate(-1)}
-          style={{ padding: '8px', borderRadius: '50%' }}
+          style={{ padding: '6px', borderRadius: '8px' }}
         />
-        <Title heading={1} style={{ fontSize: 48 }}>软件设置</Title>
+        <Title heading={2} style={{ fontSize: 26, fontWeight: 600 }}>软件设置</Title>
       </div>
-      
-      <Text style={{ fontSize: 22, color: 'var(--semi-color-text-2)', marginLeft: '72px' }}>
+
+      <div className="settings-subtitle">
         在这里调整你的 Omniflow 体验
-      </Text>
-      
-      <Divider style={{ margin: '40px 0' }} />
-      
+      </div>
+
+      <Divider style={{ margin: '20px 0' }} />
+
       <div className="setting-item">
         <div>
           <div className="setting-title">深色模式</div>
           <div className="setting-desc">开启或关闭深色界面主题</div>
         </div>
-        <Switch 
+        <Switch
           size="large"
-          checked={theme === 'dark'} 
-          onChange={() => toggleTheme()} 
+          checked={theme === 'dark'}
+          onChange={() => toggleTheme()}
         />
       </div>
 
@@ -83,30 +91,30 @@ const Settings: React.FC = () => {
           <div className="setting-title">默认语言</div>
           <div className="setting-desc">选择界面显示的语言</div>
         </div>
-        <Select defaultValue="zh-CN" style={{ width: 180 }} size="large">
+        <Select defaultValue="zh-CN" style={{ width: 160 }} size="large">
           <Select.Option value="zh-CN">简体中文</Select.Option>
           <Select.Option value="en-US">English</Select.Option>
         </Select>
       </div>
-      
-      <Divider style={{ margin: '40px 0' }} />
-      
-      <div style={{ marginLeft: '4px' }}>
-        <Title heading={2} style={{ fontSize: 32, marginBottom: 16 }}>关于</Title>
-        <Text style={{ fontSize: 20 }}>Omniflow App v0.0.1</Text>
+
+      <Divider style={{ margin: '24px 0' }} />
+
+      <div>
+        <Title heading={3} style={{ fontSize: 18, marginBottom: 8 }}>关于</Title>
+        <Text style={{ fontSize: 14, color: 'var(--semi-color-text-2)' }}>Omniflow App v0.0.1</Text>
       </div>
 
-      <div style={{ marginTop: 60, textAlign: 'center' }}>
-        <Button 
-          theme="solid" 
-          type="tertiary" 
-          size="large" 
+      <div style={{ marginTop: 48, textAlign: 'center' }}>
+        <Button
+          theme="solid"
+          type="tertiary"
+          size="default"
           onClick={() => navigate(-1)}
-          style={{ 
-            fontSize: 20, 
-            padding: '12px 40px', 
+          style={{
+            fontSize: 14,
+            padding: '8px 28px',
             height: 'auto',
-            borderRadius: 10
+            borderRadius: 8
           }}
         >
           退出设置
@@ -117,4 +125,3 @@ const Settings: React.FC = () => {
 };
 
 export default Settings;
-

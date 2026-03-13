@@ -45,6 +45,12 @@ export function useRepositoryTree(libraryId: number, onFileOpen?: (fileUrl: stri
   const expandedKeysRef = useRef<string[]>([]);
   const isUpdatingTree = useRef(false);
   const preservedExpandedKeys = useRef<string[]>([]);
+  const treesCacheRef = useRef<Record<string, Node[]>>({});
+
+  // 同步 treesCache 到 ref
+  useEffect(() => {
+    treesCacheRef.current = treesCache;
+  }, [treesCache]);
 
   // 同步 expandedKeys
   useEffect(() => {
@@ -202,45 +208,66 @@ export function useRepositoryTree(libraryId: number, onFileOpen?: (fileUrl: stri
     });
   }, [selectedRepository, removeNodeFromTree]);
 
-  // 加载子节点
-  const loadChildren = useCallback(async (node: Node) => {
+  // 加载子节点，加载完成后下一帧展开（保证动画）
+  const loadChildren = useCallback(async (node: Node): Promise<void> => {
     if (node.loaded || node.type !== 'dir') return;
     if (loadingNodes.current.has(node.key)) return;
 
     loadingNodes.current.add(node.key);
-    isUpdatingTree.current = true;
-    preservedExpandedKeys.current = [...expandedKeysRef.current];
 
     try {
       const children = await getChildrenByNodeId(node.id, Number(selectedRepository));
       const mapped = children.map(mapToTreeNode);
 
+      // 第一步：先把子节点数据写入树（此时节点仍然是收起状态）
       setTreesCache(prev => ({
         ...prev,
         [selectedRepository]: updateNodeChildren(prev[selectedRepository], node.key, mapped),
       }));
 
-      // 恢复展开状态
-      setTimeout(() => {
-        const finalKeys = preservedExpandedKeys.current.includes(node.key)
-          ? preservedExpandedKeys.current
-          : [...preservedExpandedKeys.current, node.key];
-
-        setExpandedKeys(finalKeys);
-        expandedKeysRef.current = finalKeys;
-        isUpdatingTree.current = false;
-      }, 0);
+      // 第二步：等 React 渲染完子节点后，下一帧再展开 → 触发动画
+      await new Promise<void>(resolve => {
+        requestAnimationFrame(() => {
+          if (!expandedKeysRef.current.includes(node.key)) {
+            const newKeys = [...expandedKeysRef.current, node.key];
+            setExpandedKeys(newKeys);
+            expandedKeysRef.current = newKeys;
+          }
+          resolve();
+        });
+      });
     } finally {
       loadingNodes.current.delete(node.key);
     }
   }, [selectedRepository, updateNodeChildren]);
 
-  // 处理展开事件
+  // 处理展开事件（点击三角箭头）
   const handleExpand = useCallback((keys: string[]) => {
-    if (isUpdatingTree.current) return; // 更新过程中屏蔽 Tree 的事件
+    // 找出新展开的 key，如果节点未加载则拦截（由 loadData 处理）
+    const prevKeys = new Set(expandedKeysRef.current);
+    const newlyExpanded = keys.filter(k => !prevKeys.has(k));
+
+    if (newlyExpanded.length > 0) {
+      const tree = treesCacheRef.current[selectedRepository] || [];
+      const unloadedKeys = new Set<string>();
+      for (const key of newlyExpanded) {
+        const node = findNodeByKey(tree, key);
+        if (node && node.type === 'dir' && !node.loaded) {
+          unloadedKeys.add(key);
+        }
+      }
+      // 过滤掉未加载的节点，不要立即展开它们
+      if (unloadedKeys.size > 0) {
+        const filtered = keys.filter(k => !unloadedKeys.has(k));
+        setExpandedKeys(filtered);
+        expandedKeysRef.current = filtered;
+        return;
+      }
+    }
+
     setExpandedKeys(keys);
     expandedKeysRef.current = keys;
-  }, []);
+  }, [selectedRepository]);
 
   // 双击事件
   const handleDoubleClick = useCallback(async (e: React.MouseEvent, node: Node) => {
@@ -341,6 +368,7 @@ export function useRepositoryTree(libraryId: number, onFileOpen?: (fileUrl: stri
     selectRepository,
     handleExpand,
     handleDoubleClick,
+    loadChildren,
     appendNodeUnderParent,
     removeNode,
     updateNodeName,

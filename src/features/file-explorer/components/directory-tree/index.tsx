@@ -11,6 +11,8 @@ interface DirectoryTreeProps {
   expandedKeys: string[];
   onExpand: (keys: string[]) => void;
   onDoubleClick: (e: React.MouseEvent, node: any) => void;
+  // 点击箭头时异步加载子节点
+  loadData?: (node: any) => Promise<void>;
   // 上传成功后，通知父组件刷新某个节点
   onUploadSuccess?: (parentNode: any, newNode: any) => void;
   // 删除成功后，通知父组件刷新（通常刷新父节点或整树）
@@ -36,6 +38,7 @@ export default function DirectoryTree({
   onUploadSuccess,
   onDeleteSuccess,
   onRenameSuccess,
+  loadData,
   libraryId,
 }: DirectoryTreeProps) {
   // 外部文件拖拽：悬停高亮 & 延迟展开
@@ -625,9 +628,10 @@ export default function DirectoryTree({
             expandedKeys={expandedKeys}
             onExpand={handleExpand}
             onDoubleClick={onDoubleClick}
+            loadData={loadData}
             directory
             renderLabel={renderLabel}
-            style={{ padding: 8 }}
+            style={{ padding: '2px 0 2px 0' }}
           />
         )}
       </div>

@@ -1,24 +1,15 @@
 import { FC } from 'react';
 import {HeaderWrapper} from './style';
 import { Button, Avatar, Popover } from '@douyinfe/semi-ui';
-import {IconMinus, IconStop, IconClose, IconSetting, IconExit} from '@douyinfe/semi-icons';
+import {IconSetting, IconExit} from '@douyinfe/semi-icons';
 import {useNavigate} from "react-router-dom";
 import { useAuth } from '@/contexts/AuthContext';
 import ContextMenu from '@/components/ui/context-menu';
 
-declare global {
-  interface Window {
-    electronWindow: {
-      minimize: () => void;
-      maximize: () => void;
-      close: () => void;
-    };
-  }
-}
-
 const AppHeader: FC = () => {
   const navigate = useNavigate()
   const { user, isLoggedIn, logout } = useAuth();
+  const displayName = isLoggedIn ? user?.username || 'User' : '未登录';
 
   const handleLogout = () => {
     logout();
@@ -26,47 +17,52 @@ const AppHeader: FC = () => {
   };
 
   const avatarContent = (
-    <div 
-      style={{ cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+    <div
+      className="avatar-trigger"
       onClick={() => !isLoggedIn && navigate('/login')}
     >
       <Avatar
-        size="default" // 从 small 改为 default，稍微变大一点
+        size="small"
         src={user?.avatar}
-        style={{ 
-          backgroundColor: isLoggedIn ? 'var(--semi-color-primary)' : 'var(--semi-color-fill-2)',
-          marginRight: 8 
+        style={{
+          backgroundColor: isLoggedIn ? 'var(--app-accent)' : 'var(--semi-color-fill-2)',
         }}
       >
         {isLoggedIn ? (user?.username?.[0]?.toUpperCase() || 'U') : '未'}
       </Avatar>
+      <span className="avatar-name">{displayName}</span>
     </div>
   );
 
   return (
     <HeaderWrapper>
       <div className="content">
-        <h1 onClick={() => navigate('/')} title="返回首页">
-          Omniflow
-        </h1>
+        <div className="brand" onClick={() => navigate('/')} title="返回首页">
+          <span className="brand-mark" />
+          <div className="brand-copy">
+            <h1>Omniflow</h1>
+            <span className="brand-subtitle">Quiet workspace</span>
+          </div>
+        </div>
         <div className="right-controls">
           <Button
             onClick={() => navigate('/settings')}
             theme="borderless"
-            icon={<IconSetting style={{ fontSize: 22 }} />} // 稍微增大图标
+            className="header-action"
+            icon={<IconSetting />}
             title="设置"
           />
 
-          <div className="user-section" style={{ margin: '0 8px', display: 'flex', alignItems: 'center' }}>
+          <div className="user-section">
             {isLoggedIn ? (
               <Popover
                 showArrow={false}
-                spacing={0} // 紧贴头像
-                style={{ padding: 0 }} // 移除 Popover 默认内边距，解决“嵌套感”
+                spacing={8}
+                style={{ padding: 0 }}
                 content={
                   <ContextMenu
                     title={user?.username}
-                    style={{ border: 'none', boxShadow: 'none' }} // 移除 ContextMenu 内部的边框和阴影，因为 Popover 已经有了
+                    style={{ border: 'none', boxShadow: 'none' }}
                     items={[
                       {
                         key: 'logout',
@@ -86,24 +82,6 @@ const AppHeader: FC = () => {
             )}
           </div>
 
-          <Button
-            onClick={() => window.electronWindow.minimize()}
-            theme="borderless"
-            size="large" // 点击范围大
-            icon={<IconMinus style={{ fontSize: 20 }} />} // 图标更大
-          />
-          <Button
-            onClick={() => window.electronWindow.maximize()}
-            theme="borderless"
-            size="large"
-            icon={<IconStop style={{ fontSize: 20 }} />}
-          />
-          <Button
-            onClick={() => window.electronWindow.close()}
-            theme="borderless"
-            size="large"
-            icon={<IconClose style={{ fontSize: 20 }} />}
-          />
         </div>
       </div>
     </HeaderWrapper>
