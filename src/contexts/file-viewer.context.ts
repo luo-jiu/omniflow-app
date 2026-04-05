@@ -4,7 +4,8 @@ export interface FileViewerState {
   nodeId: number | null;
   fileUrl: string | null;
   fileName: string | null;
-  fileType: 'image' | 'video' | 'audio' | 'other' | null;
+  fileType: 'image' | 'video' | 'audio' | 'comic' | 'other' | null;
+  tabTypeLabel?: string | null;
   loading: boolean;
 }
 
@@ -13,7 +14,8 @@ export interface FileViewerTab {
   nodeId: number | null;
   fileUrl: string;
   fileName: string | null;
-  fileType: 'image' | 'video' | 'audio' | 'other' | null;
+  fileType: 'image' | 'video' | 'audio' | 'comic' | 'other' | null;
+  tabTypeLabel?: string | null;
   loading: boolean;
 }
 
@@ -24,8 +26,11 @@ export interface FileViewerContextType {
   setFileUrl: (
     url: string | null,
     fileName: string | null,
-    fileType: 'image' | 'video' | 'audio' | 'other' | null,
+    fileType: 'image' | 'video' | 'audio' | 'comic' | 'other' | null,
     nodeId?: number | null,
+    options?: {
+      tabTypeLabel?: string | null;
+    },
   ) => void;
   setLoading: (loading: boolean) => void;
   activateTab: (tabId: string) => void;

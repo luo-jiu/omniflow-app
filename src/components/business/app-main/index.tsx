@@ -49,6 +49,7 @@ const AppMain: FC<IProps> = () => {
       />
       <div className="main-content">
         <FileDispatcher
+          nodeId={fileState.nodeId}
           fileUrl={fileState.fileUrl}
           fileName={fileState.fileName}
           fileType={fileState.fileType}

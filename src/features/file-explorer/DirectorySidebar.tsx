@@ -8,8 +8,11 @@ interface Props {
   onFileOpen?: (
     fileUrl: string,
     fileName: string,
-    fileType: 'image' | 'video' | 'audio' | 'other',
+    fileType: 'image' | 'video' | 'audio' | 'comic' | 'other',
     nodeId: number,
+    options?: {
+      tabTypeLabel?: string | null;
+    },
   ) => void;
 }
 
@@ -23,6 +26,7 @@ const DirectorySidebar: React.FC<Props> = ({ libraryId, onFileOpen }) => {
     appendNodeUnderParent,
     removeNode,
     updateNodeName,
+    updateNodeBuiltInConfig,
     refreshAfterMove,
   } = useRepositoryTree(libraryId, onFileOpen);
 
@@ -47,6 +51,9 @@ const DirectorySidebar: React.FC<Props> = ({ libraryId, onFileOpen }) => {
           }}
           onRenameSuccess={(nodeKey, payload) => {
             updateNodeName(nodeKey, payload);
+          }}
+          onConfigSuccess={(nodeKey, payload) => {
+            updateNodeBuiltInConfig(nodeKey, payload);
           }}
           onMoveSuccess={({ oldParentId, newParentId }) => {
             void refreshAfterMove(oldParentId, newParentId);

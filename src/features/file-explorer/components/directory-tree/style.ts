@@ -157,7 +157,7 @@ export const DirectorySidebarWrapper = styled.aside<{ $isDragging?: boolean }>`
     width: 100%;
     min-width: 0;
     box-sizing: border-box;
-    gap: 6px;
+    gap: 9px;
     padding-right: 8px;
   }
 
@@ -183,6 +183,31 @@ export const DirectorySidebarWrapper = styled.aside<{ $isDragging?: boolean }>`
     height: 20px;
     display: block;
     object-fit: contain;
+    margin-right: 3px;
+  }
+
+  .tree-built-in-type-icon {
+    width: 20px;
+    height: 20px;
+    border-radius: 6px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1;
+  }
+
+  .tree-built-in-type-icon-comic {
+    color: #8a4b00;
+    background: #ffe9c4;
+    border: 1px solid #ffcf8b;
+  }
+
+  .tree-built-in-type-icon-unknown {
+    color: #8b1f1f;
+    background: #ffd8d8;
+    border: 1px solid #ffb7b7;
   }
 
   .tree-container::-webkit-scrollbar {

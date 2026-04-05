@@ -1,5 +1,5 @@
 import React from 'react';
-import { Divider } from '@douyinfe/semi-ui';
+import { Divider, Popover } from '@douyinfe/semi-ui';
 import MenuContent from '../menu-content';
 
 interface BaseMenuItem {
@@ -14,6 +14,7 @@ export interface MenuItem extends BaseMenuItem {
   danger?: boolean;
   disabled?: boolean;
   render?: (content: React.ReactNode) => React.ReactNode;
+  children?: ContextMenuItem[];
 }
 
 export interface MenuDivider extends BaseMenuItem {
@@ -64,10 +65,11 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({ items, title, data, st
         const content = (
           <div
             key={item.key || `item-${index}`}
-            className={`menu-item ${item.danger ? 'danger' : ''} ${item.disabled ? 'disabled' : ''}`}
+            className={`menu-item ${item.children?.length ? 'has-submenu' : ''} ${item.danger ? 'danger' : ''} ${item.disabled ? 'disabled' : ''}`}
             onClick={(e) => {
-              if (item.render) return; // 如果有自定义 render，由 render 内部处理点击
               e.stopPropagation();
+              if (item.render) return; // 如果有自定义 render，由 render 内部处理点击
+              if (item.children?.length) return; // 二级菜单由 hover 交互处理
               if (!item.disabled && item.onClick) {
                 item.onClick(data);
               }
@@ -76,14 +78,41 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({ items, title, data, st
           >
             {item.icon && <span className="menu-item-icon">{item.icon}</span>}
             <span className="menu-item-label">{item.label}</span>
+            {item.children?.length ? <span className="menu-item-submenu-arrow">›</span> : null}
           </div>
         );
 
-        return item.render ? <React.Fragment key={item.key || `item-${index}`}>{item.render(content)}</React.Fragment> : content;
+        if (item.render) {
+          return <React.Fragment key={item.key || `item-${index}`}>{item.render(content)}</React.Fragment>;
+        }
+
+        if (item.children?.length) {
+          return (
+            <Popover
+              key={item.key || `item-${index}`}
+              trigger="hover"
+              showArrow={false}
+              position="rightTop"
+              spacing={4}
+              getPopupContainer={() => document.body}
+              content={
+                <ContextMenu
+                  items={item.children}
+                  data={data}
+                  className={className}
+                  onItemClick={onItemClick}
+                />
+              }
+            >
+              {content}
+            </Popover>
+          );
+        }
+
+        return content;
       })}
     </MenuContent>
   );
 };
 
 export default ContextMenu;
-

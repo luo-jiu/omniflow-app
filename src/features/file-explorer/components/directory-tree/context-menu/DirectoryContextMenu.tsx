@@ -43,13 +43,64 @@ const DirectoryContextMenu: React.FC<DirectoryContextMenuProps> = ({
   }
 
   // 文件/文件夹菜单
+  const currentBuiltInType = String(node?.builtInType || 'DEF').toUpperCase();
+  const currentArchiveMode = Number(node?.archiveMode ?? 0) === 1 ? 1 : 0;
+
   const items: ContextMenuItem[] = [
     { 
       key: 'rename', 
       label: '重命名', 
       onClick: () => onAction('重命名', node) 
-    }
+    },
+    {
+      key: 'built-in-type',
+      label: '内置类型',
+      children: [
+        {
+          key: 'built-in-type-def',
+          label: currentBuiltInType === 'DEF' ? '默认（当前）' : '默认',
+          onClick: () => onAction('设置内置类型:DEF', node),
+        },
+        {
+          key: 'built-in-type-comic',
+          label: currentBuiltInType === 'COMIC' ? '漫画（当前）' : '漫画',
+          onClick: () => onAction('设置内置类型:COMIC', node),
+        },
+      ],
+    },
+    {
+      key: 'archive-mode',
+      label: '归档模式',
+      children: [
+        {
+          key: 'archive-mode-off',
+          label: currentArchiveMode === 0 ? '关闭（当前）' : '关闭',
+          onClick: () => onAction('设置归档模式:0', node),
+        },
+        {
+          key: 'archive-mode-on',
+          label: currentArchiveMode === 1 ? '开启（当前）' : '开启',
+          onClick: () => onAction('设置归档模式:1', node),
+        },
+      ],
+    },
   ];
+
+  const isBuiltInFolder = isFolder && currentBuiltInType !== 'DEF';
+  if (isBuiltInFolder) {
+    items.push({
+      key: 'open-raw-folder',
+      label: '打开原始目录',
+      onClick: () => onAction('打开原始目录', node),
+    });
+    if (currentBuiltInType === 'COMIC') {
+      items.push({
+        key: 'comic-sort-by-name',
+        label: '漫画按名称排序',
+        onClick: () => onAction('漫画按名称排序', node),
+      });
+    }
+  }
 
   if (isFolder) {
     items.push(

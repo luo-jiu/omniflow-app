@@ -10,6 +10,7 @@ const defaultFileViewerState: FileViewerState = {
   fileUrl: null,
   fileName: null,
   fileType: null,
+  tabTypeLabel: null,
   loading: false,
 };
 
@@ -51,6 +52,7 @@ function toFileState(tab: FileViewerTab | null): FileViewerState {
     fileUrl: tab.fileUrl,
     fileName: tab.fileName,
     fileType: tab.fileType,
+    tabTypeLabel: tab.tabTypeLabel ?? null,
     loading: tab.loading,
   };
 }
@@ -122,8 +124,11 @@ export const FileViewerProvider: React.FC<{ children: ReactNode; cacheKey?: stri
   const setFileUrl = (
     url: string | null,
     fileName: string | null,
-    fileType: 'image' | 'video' | 'audio' | 'other' | null,
+    fileType: 'image' | 'video' | 'audio' | 'comic' | 'other' | null,
     nodeId?: number | null,
+    options?: {
+      tabTypeLabel?: string | null;
+    },
   ) => {
     if (!url) {
       setViewerState(prev => ({
@@ -142,6 +147,7 @@ export const FileViewerProvider: React.FC<{ children: ReactNode; cacheKey?: stri
         fileUrl: url,
         fileName,
         fileType,
+        tabTypeLabel: options?.tabTypeLabel ?? null,
         loading: false,
       };
       const existingIndex = prev.tabs.findIndex(tab => tab.id === tabId);

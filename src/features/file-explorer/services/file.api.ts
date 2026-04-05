@@ -194,6 +194,23 @@ export async function renameNode(payload: {
   return body.data;
 }
 
+// 更新节点内置配置（内置类型/归档模式）
+export async function updateNodeConfig(payload: {
+  id: number;
+  builtInType?: string;
+  archiveMode?: number;
+}) {
+  const body = await request(`/v1/nodes/${payload.id}`, {
+    method: 'PUT',
+    body: JSON.stringify({
+      id: payload.id,
+      builtInType: payload.builtInType,
+      archiveMode: payload.archiveMode,
+    }),
+  });
+  return body.data;
+}
+
 // 移动节点（支持同级排序与跨目录移动）
 export async function moveNode(payload: {
   nodeId: number;
@@ -211,6 +228,14 @@ export async function moveNode(payload: {
       beforeNodeId: payload.beforeNodeId ?? null,
       libraryId: payload.libraryId,
     }),
+  });
+  return body.data;
+}
+
+// 漫画目录：按名称重排直接子项（重建 sort_order 间隔）
+export async function sortComicChildrenByName(nodeId: number) {
+  const body = await request(`/v1/nodes/${nodeId}/comic/sort-by-name`, {
+    method: 'PATCH',
   });
   return body.data;
 }

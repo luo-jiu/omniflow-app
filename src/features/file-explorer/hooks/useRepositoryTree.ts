@@ -2,7 +2,7 @@ import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { getChildrenByNodeId, getFileLink } from '../services/file.api';
 import { fileCache } from '@/utils/fileCache.ts';
 import { buildTreeNodeLabel } from '@/utils/fileTreeSettings';
-import { getFileNodeIcon } from '../utils/file-node-icon';
+import { getDirectoryBuiltInIcon, getFileNodeIconByParentBuiltInType } from '../utils/file-node-icon';
 import { runtimeLogger } from '@/utils/runtimeLogger';
 
 // 目录节点信息
@@ -26,6 +26,8 @@ interface Node {
     [key: string]: any; // 以后还可以加别的
   };
   icon?: React.ReactNode;
+  builtInType?: string;
+  archiveMode?: number;
 }
 
 export interface NodeRespDTO {
@@ -37,6 +39,8 @@ export interface NodeRespDTO {
   ext?: string;
   mimeType?: string;
   fileSize?: number;
+  builtInType?: string;
+  archiveMode?: number;
 }
 
 interface RepositoryTreeSnapshot {
@@ -48,6 +52,37 @@ interface RepositoryTreeSnapshot {
 const REPOSITORY_TREE_SNAPSHOT_MAX_ENTRIES = 20;
 const repositoryTreeSnapshotStore = new Map<number, RepositoryTreeSnapshot>();
 const repositoryTreeDirtyLibraries = new Set<number>();
+const IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg']);
+const VIDEO_EXTENSIONS = new Set(['mp4', 'webm', 'ogg', 'mov', 'avi', 'mkv']);
+const AUDIO_EXTENSIONS = new Set(['mp3', 'wav', 'aac', 'flac', 'm4a']);
+
+function normalizeExt(ext?: string): string {
+  return String(ext || '').toLowerCase().replace(/^\./, '');
+}
+
+function resolveFileType(
+  mimeType?: string,
+  ext?: string,
+): 'image' | 'video' | 'audio' | 'other' {
+  if (mimeType) {
+    if (mimeType.startsWith('image/')) return 'image';
+    if (mimeType.startsWith('video/')) return 'video';
+    if (mimeType.startsWith('audio/')) return 'audio';
+  }
+  const normalizedExt = normalizeExt(ext);
+  if (IMAGE_EXTENSIONS.has(normalizedExt)) return 'image';
+  if (VIDEO_EXTENSIONS.has(normalizedExt)) return 'video';
+  if (AUDIO_EXTENSIONS.has(normalizedExt)) return 'audio';
+  return 'other';
+}
+
+function isImageFileNode(item: Pick<NodeRespDTO, 'mimeType' | 'ext'>): boolean {
+  return resolveFileType(item.mimeType, item.ext) === 'image';
+}
+
+function isFileNodeType(type: unknown): boolean {
+  return String(type) === 'file' || Number(type) === 1;
+}
 
 export function invalidateRepositoryTreeSnapshot(libraryId: number) {
   repositoryTreeSnapshotStore.delete(libraryId);
@@ -97,8 +132,11 @@ export function useRepositoryTree(
   onFileOpen?: (
     fileUrl: string,
     fileName: string,
-    fileType: 'image' | 'video' | 'audio' | 'other',
+    fileType: 'image' | 'video' | 'audio' | 'comic' | 'other',
     nodeId: number,
+    options?: {
+      tabTypeLabel?: string | null;
+    },
   ) => void,
 ) {
   const cachedSnapshot = repositoryTreeSnapshotStore.get(libraryId);
@@ -135,10 +173,10 @@ export function useRepositoryTree(
     }
 
     if (!treesCacheRef.current[id]) {
-      const rootNodes = await getChildrenByNodeId(1, Number(id));
+      const rootNodes = (await getChildrenByNodeId(1, Number(id))) as NodeRespDTO[];
       setTreesCache(prev => ({
         ...prev,
-        [id]: rootNodes.map(mapToTreeNode),
+        [id]: rootNodes.map((item: NodeRespDTO) => mapToTreeNode(item)),
       }));
     }
   }, []);
@@ -172,7 +210,8 @@ export function useRepositoryTree(
 
   // 脏标记重建：保留展开状态，按可见展开分支重拉数据，避免“恢复后整树折叠”
   const rebuildTreeByExpandedState = useCallback(async (repoId: string, sourceExpandedKeys: string[]) => {
-    let rebuiltTree = (await getChildrenByNodeId(1, Number(repoId))).map(mapToTreeNode);
+    let rebuiltTree = ((await getChildrenByNodeId(1, Number(repoId))) as NodeRespDTO[])
+      .map((item: NodeRespDTO) => mapToTreeNode(item));
     let pendingKeys = Array.from(new Set(sourceExpandedKeys));
 
     while (pendingKeys.length > 0) {
@@ -189,8 +228,12 @@ export function useRepositoryTree(
         if (target.type !== 'dir') {
           continue;
         }
-        const children = await getChildrenByNodeId(target.id, Number(repoId));
-        rebuiltTree = updateNodeChildren(rebuiltTree, key, children.map(mapToTreeNode));
+        const children = (await getChildrenByNodeId(target.id, Number(repoId))) as NodeRespDTO[];
+        rebuiltTree = updateNodeChildren(
+          rebuiltTree,
+          key,
+          children.map((item: NodeRespDTO) => mapToTreeNode(item, target)),
+        );
         progressed = true;
       }
 
@@ -263,7 +306,9 @@ export function useRepositoryTree(
                 rawName: newName,
                 rawExt: node.type === 'file' ? nextExt : node.data?.rawExt,
               },
-              icon: node.type === 'file' ? getFileNodeIcon(nextExt) : node.icon,
+              icon: node.type === 'file'
+                ? getFileNodeIconByParentBuiltInType(nextExt, node.data?.parentBuiltInType)
+                : node.icon,
             };
           }
           if (node.children && node.children.length > 0) {
@@ -283,19 +328,74 @@ export function useRepositoryTree(
     });
   }, [selectedRepository]);
 
+  // 更新节点内置配置（内置类型/归档模式）
+  const updateNodeBuiltInConfig = useCallback((nodeKey: string, payload: {
+    builtInType?: string;
+    archiveMode?: number;
+  }) => {
+    const nextBuiltInType = payload.builtInType ? payload.builtInType.toUpperCase() : undefined;
+
+    setTreesCache(prev => {
+      const current = prev[selectedRepository] || [];
+      if (!current.length) return prev;
+
+      const updateConfigInTree = (nodes: Node[]): Node[] => {
+        return nodes.map(node => {
+          if (node.key === nodeKey) {
+            const mergedBuiltInType = nextBuiltInType ?? node.builtInType ?? 'DEF';
+            const mergedArchiveMode = payload.archiveMode ?? node.archiveMode ?? 0;
+            const mergedChildren: Node[] | undefined = node.children?.map((child: Node): Node => {
+              if (child.type !== 'file') {
+                return child;
+              }
+              return {
+                ...child,
+                icon: getFileNodeIconByParentBuiltInType(child.ext, mergedBuiltInType),
+                data: {
+                  ...(child.data || { rawName: child.name, rawExt: child.ext || '' }),
+                  rawName: child.data?.rawName || child.name,
+                  rawExt: child.data?.rawExt ?? child.ext ?? '',
+                  parentBuiltInType: mergedBuiltInType,
+                },
+              };
+            });
+            return {
+              ...node,
+              builtInType: mergedBuiltInType,
+              archiveMode: mergedArchiveMode,
+              icon: node.type === 'dir' ? getDirectoryBuiltInIcon(mergedBuiltInType) : node.icon,
+              children: mergedChildren ?? node.children,
+            };
+          }
+          if (node.children && node.children.length > 0) {
+            const updatedChildren = updateConfigInTree(node.children);
+            if (updatedChildren !== node.children) {
+              return { ...node, children: updatedChildren };
+            }
+          }
+          return node;
+        });
+      };
+
+      return {
+        ...prev,
+        [selectedRepository]: updateConfigInTree(current),
+      };
+    });
+  }, [selectedRepository]);
+
   // 在某个父节点下追加一个子节点（上传成功后用）
   const appendNodeUnderParent = useCallback(
     (parentNodeKey: string, newNodeDTO: NodeRespDTO) => {
-      const mapped = mapToTreeNode(newNodeDTO);
-
       setTreesCache(prev => {
         const current = prev[selectedRepository] || [];
         
         // 如果是根目录（parentNodeKey === 'root' 或 parentId === 1），直接添加到根节点列表
         if (parentNodeKey === 'root' || newNodeDTO.parentId === 1) {
+          const mappedRootNode = mapToTreeNode(newNodeDTO);
           return {
             ...prev,
-            [selectedRepository]: [...current, mapped],
+            [selectedRepository]: [...current, mappedRootNode],
           };
         }
         
@@ -305,7 +405,8 @@ export function useRepositoryTree(
           // 父节点还没在当前树里（例如还没展开），那就先不改
           return prev;
         }
-        const newChildren = parent.children ? [...parent.children, mapped] : [mapped];
+        const mappedForParent = mapToTreeNode(newNodeDTO, parent);
+        const newChildren = parent.children ? [...parent.children, mappedForParent] : [mappedForParent];
         return {
           ...prev,
           [selectedRepository]: updateNodeChildren(current, parentNodeKey, newChildren),
@@ -351,8 +452,15 @@ export function useRepositoryTree(
 
   // 刷新某个父节点下的直接子节点（用于移动后同步排序/归属）
   const refreshParentChildren = useCallback(async (parentId: number) => {
-    const children = await getChildrenByNodeId(parentId, Number(selectedRepository));
-    const mapped = children.map(mapToTreeNode);
+    const children = (await getChildrenByNodeId(parentId, Number(selectedRepository))) as NodeRespDTO[];
+    const mapped = children.map((item: NodeRespDTO) => {
+      if (parentId === 1) {
+        return mapToTreeNode(item);
+      }
+      const current = treesCacheRef.current[selectedRepository] || [];
+      const parentNode = findNodeById(current, parentId);
+      return mapToTreeNode(item, parentNode || undefined);
+    });
 
     setTreesCache(prev => {
       const current = prev[selectedRepository] || [];
@@ -392,7 +500,7 @@ export function useRepositoryTree(
 
     try {
       const children = await getChildrenByNodeId(node.id, Number(selectedRepository));
-      const mapped = children.map(mapToTreeNode);
+      const mapped = (children as NodeRespDTO[]).map((item: NodeRespDTO) => mapToTreeNode(item, node));
 
       // 第一步：先把子节点数据写入树（此时节点仍然是收起状态）
       setTreesCache(prev => ({
@@ -450,8 +558,75 @@ export function useRepositoryTree(
     e.stopPropagation();
 
     const isExpanded = expandedKeysRef.current.includes(node.key);
+    const selectedLibraryId = Number(selectedRepository);
+    const openFileByNodeInfo = async (payload: Pick<NodeRespDTO, 'id' | 'name' | 'ext' | 'mimeType'> & {
+      displayName?: string;
+      tabNodeId?: number;
+      linkNodeId?: number;
+      tabTypeLabel?: string | null;
+    }) => {
+      const linkNodeId = Number(payload.linkNodeId ?? payload.id);
+      const tabNodeId = Number(payload.tabNodeId ?? payload.id);
+      const fileName = payload.displayName ?? payload.name;
+
+      let fileUrl = fileCache.getLink(linkNodeId, selectedLibraryId);
+      if (!fileUrl) {
+        runtimeLogger.debug('🚀 缓存失效，请求后端获取新链接');
+        fileUrl = await getFileLink(linkNodeId, selectedLibraryId, 60);
+        if (fileUrl) {
+          fileCache.setLink(linkNodeId, selectedLibraryId, fileUrl, 30);
+        }
+      } else {
+        runtimeLogger.debug('✅ 使用本地缓存的链接');
+      }
+
+      if (!fileUrl) {
+        throw new Error('无法获取文件访问链接');
+      }
+
+      const fileType = resolveFileType(payload.mimeType, payload.ext);
+      if (onFileOpen) {
+        onFileOpen(fileUrl, fileName, fileType, tabNodeId, {
+          tabTypeLabel: payload.tabTypeLabel ?? null,
+        });
+      }
+    };
 
     if (node.type === 'dir') {
+      const builtInType = String(node.builtInType || 'DEF').toUpperCase();
+      if (builtInType === 'COMIC') {
+        if (onFileOpen) {
+          onFileOpen(
+            `comic://library/${selectedLibraryId}/node/${node.id}`,
+            `${builtInType} · ${node.name}`,
+            'comic',
+            node.id,
+            { tabTypeLabel: builtInType },
+          );
+        }
+        return;
+      }
+
+      if (builtInType !== 'DEF') {
+        try {
+          const children = (await getChildrenByNodeId(node.id, selectedLibraryId)) as NodeRespDTO[];
+          const firstImageNode = children.find(item => isFileNodeType(item.type) && isImageFileNode(item));
+          if (!firstImageNode) {
+            runtimeLogger.warn('内置目录无可打开图片:', node.name);
+            return;
+          }
+          await openFileByNodeInfo({
+            ...firstImageNode,
+            displayName: `${builtInType} · ${node.name}`,
+            tabNodeId: node.id,
+            tabTypeLabel: builtInType,
+          });
+        } catch (error) {
+          runtimeLogger.error('打开内置目录内容失败:', error);
+        }
+        return;
+      }
+
       if (!node.loaded) {
         await loadChildren(node);
       } else {
@@ -465,58 +640,12 @@ export function useRepositoryTree(
       // 双击文件：获取文件临时访问链接
       runtimeLogger.debug('📄 双击文件:', node.name);
       try {
-        const fileName = node.name;
-        const nodeId = node.id;
-        const libraryId = Number(selectedRepository);
-        
-        // 1. 尝试从缓存获取
-        let fileUrl = fileCache.getLink(nodeId, libraryId);
-        
-        if (!fileUrl) {
-          // 2. 缓存失效或不存在，请求后端
-          runtimeLogger.debug('🚀 缓存失效，请求后端获取新链接');
-          // 请求后端生成 60 分钟有效期的链接，但我们本地只缓存 30 分钟以确保安全
-          fileUrl = await getFileLink(nodeId, libraryId, 60);
-          
-          // 3. 存储到缓存，设置 30 分钟过期
-          if (fileUrl) {
-            fileCache.setLink(nodeId, libraryId, fileUrl, 30);
-          }
-        } else {
-          runtimeLogger.debug('✅ 使用本地缓存的链接');
-        }
-
-        if (!fileUrl) {
-          throw new Error('无法获取文件访问链接');
-        }
-        
-        // 判断文件类型
-        let fileType: 'image' | 'video' | 'audio' | 'other' = 'other';
-        const mimeType = node.mimeType;
-        const ext = node.ext;
-
-        if (mimeType) {
-          if (mimeType.startsWith('image/')) fileType = 'image';
-          else if (mimeType.startsWith('video/')) fileType = 'video';
-          else if (mimeType.startsWith('audio/')) fileType = 'audio';
-        } 
-        
-        // 如果 mimeType 没判断出来，或者没有 mimeType，用扩展名兜底
-        if (fileType === 'other' && ext) {
-          const e = ext.toLowerCase().replace('.', '');
-          const imageExtensions = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg'];
-          const videoExtensions = ['mp4', 'webm', 'ogg', 'mov', 'avi', 'mkv'];
-          const audioExtensions = ['mp3', 'wav', 'aac', 'flac', 'm4a'];
-          
-          if (imageExtensions.includes(e)) fileType = 'image';
-          else if (videoExtensions.includes(e)) fileType = 'video';
-          else if (audioExtensions.includes(e)) fileType = 'audio';
-        }
-
-        // 通知父组件或 Context 打开文件
-        if (onFileOpen) {
-          onFileOpen(fileUrl, fileName, fileType, node.id);
-        }
+        await openFileByNodeInfo({
+          id: node.id,
+          name: node.name,
+          ext: node.ext,
+          mimeType: node.mimeType,
+        });
       } catch (error) {
         runtimeLogger.error('获取文件链接失败:', error);
       }
@@ -524,16 +653,26 @@ export function useRepositoryTree(
   }, [loadChildren, onFileOpen, selectedRepository]);
 
   // 节点转换
-  function mapToTreeNode(item: NodeRespDTO): Node {
+  function mapToTreeNode(item: NodeRespDTO, parentNode?: Pick<Node, 'builtInType'>): Node {
+    const parentBuiltInType = String(parentNode?.builtInType || 'DEF').toUpperCase();
+    const nodeBuiltInType = String(item.builtInType || 'DEF').toUpperCase();
     return {
       ...item,
       key: `${item.parentId}:${item.id}`,
       isLeaf: item.type === 'file',
       label: buildTreeNodeLabel({ name: item.name, type: item.type, ext: item.ext }),
-      data: { rawName: item.name, rawExt: item.ext || '' },
-      icon: item.type === 'file' ? getFileNodeIcon(item.ext) : undefined,
+      data: {
+        rawName: item.name,
+        rawExt: item.ext || '',
+        parentBuiltInType,
+      },
+      icon: item.type === 'file'
+        ? getFileNodeIconByParentBuiltInType(item.ext, parentBuiltInType)
+        : getDirectoryBuiltInIcon(nodeBuiltInType),
       children: item.type === 'dir' ? [] : undefined,
       loaded: false,
+      builtInType: nodeBuiltInType,
+      archiveMode: item.archiveMode ?? 0,
     };
   }
 
@@ -548,6 +687,7 @@ export function useRepositoryTree(
     appendNodeUnderParent,
     removeNode,
     updateNodeName,
+    updateNodeBuiltInConfig,
     refreshAfterMove,
   };
 }

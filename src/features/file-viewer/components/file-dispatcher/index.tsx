@@ -3,12 +3,14 @@ import { Spin } from "@douyinfe/semi-ui";
 import ImageViewer from "../image-viewer";
 import AudioViewer from "../audio-viewer";
 import VideoViewer from "../video-viewer";
+import ComicViewer from "../comic-viewer";
 import styled from 'styled-components';
 
 interface FileDispatcherProps {
+  nodeId: number | null;
   fileUrl: string | null;
   fileName: string | null;
-  fileType: 'image' | 'video' | 'audio' | 'other' | null;
+  fileType: 'image' | 'video' | 'audio' | 'comic' | 'other' | null;
   loading: boolean;
 }
 
@@ -60,6 +62,7 @@ const DispatcherWrapper = styled.div`
  * 根据文件类型渲染对应的查看器 Feature
  */
 const FileDispatcher: React.FC<FileDispatcherProps> = ({ 
+  nodeId,
   fileUrl, 
   fileName, 
   fileType, 
@@ -86,6 +89,9 @@ const FileDispatcher: React.FC<FileDispatcherProps> = ({
     
     case 'video':
       return <VideoViewer url={fileUrl} fileName={fileName} />;
+
+    case 'comic':
+      return <ComicViewer folderNodeId={nodeId} fileUrl={fileUrl} fileName={fileName} />;
 
     default:
       return (

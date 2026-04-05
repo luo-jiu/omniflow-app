@@ -90,10 +90,15 @@ const CloseButton = styled.button`
   }
 `;
 
-function getTabTypeLabel(fileType: FileViewerTab['fileType']) {
+function getTabTypeLabel(tab: FileViewerTab) {
+  if (tab.tabTypeLabel && tab.tabTypeLabel.trim()) {
+    return tab.tabTypeLabel.trim().toUpperCase();
+  }
+  const fileType = tab.fileType;
   if (fileType === 'image') return 'IMG';
   if (fileType === 'audio') return 'MP3';
   if (fileType === 'video') return 'MP4';
+  if (fileType === 'comic') return 'COMIC';
   return 'FILE';
 }
 
@@ -119,7 +124,7 @@ const FileTabsBar: React.FC<FileTabsBarProps> = ({
           onClick={() => onActivate(tab.id)}
           title={getDisplayName(tab)}
         >
-          <FileTypeBadge>{getTabTypeLabel(tab.fileType)}</FileTypeBadge>
+          <FileTypeBadge>{getTabTypeLabel(tab)}</FileTypeBadge>
           <Name>{getDisplayName(tab)}</Name>
           <CloseButton
             type="button"

@@ -45,6 +45,14 @@ export const MenuContent = styled.div`
     .menu-item-label {
       flex: 1;
     }
+
+    .menu-item-submenu-arrow {
+      margin-left: 6px;
+      color: var(--semi-color-text-2);
+      font-size: 14px;
+      line-height: 1;
+      flex-shrink: 0;
+    }
   }
 
   .menu-item + .menu-item {

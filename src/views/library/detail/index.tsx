@@ -260,10 +260,13 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   const handleFileOpen = async (
     fileUrl: string,
     fileName: string,
-    fileType: "image" | "video" | "audio" | "other",
+    fileType: "image" | "video" | "audio" | "comic" | "other",
     nodeId: number,
+    options?: {
+      tabTypeLabel?: string | null;
+    },
   ) => {
-    setFileUrl(fileUrl, fileName, fileType, nodeId);
+    setFileUrl(fileUrl, fileName, fileType, nodeId, options);
   };
 
   const handleLogout = () => {

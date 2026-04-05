@@ -1,6 +1,13 @@
 import React, { ReactNode, useEffect, useRef, useState } from 'react';
 import { Tree, Toast, Input, Popover } from '@douyinfe/semi-ui';
-import { createNode, deleteNodeAndChildren, moveNode, renameNode } from "../../services/file.api";
+import {
+  createNode,
+  deleteNodeAndChildren,
+  moveNode,
+  renameNode,
+  sortComicChildrenByName,
+  updateNodeConfig,
+} from "../../services/file.api";
 import { uploadManager } from '@/utils/uploadManager.ts';
 import UploadConfirmModal from './modals/UploadConfirmModal.tsx';
 import CreateNodeModal from './modals/CreateNodeModal.tsx';
@@ -27,6 +34,8 @@ interface DirectoryTreeProps {
   onDeleteSuccess?: (parentNode: any, deletedNodeKey: string) => void;
   // 重命名成功后的回调
   onRenameSuccess?: (nodeKey: string, payload: { name: string; ext?: string }) => void;
+  // 配置更新成功后的回调（内置类型/归档模式）
+  onConfigSuccess?: (nodeKey: string, payload: { builtInType?: string; archiveMode?: number }) => void;
   // 拖拽移动成功后，通知父组件刷新受影响父目录
   onMoveSuccess?: (payload: { oldParentId: number; newParentId: number }) => void | Promise<void>;
   libraryId: number; // 添加 libraryId prop
@@ -47,6 +56,7 @@ export default function DirectoryTree({
   onUploadSuccess,
   onDeleteSuccess,
   onRenameSuccess,
+  onConfigSuccess,
   onMoveSuccess,
   loadData,
   libraryId,
@@ -104,6 +114,9 @@ export default function DirectoryTree({
 
   // Tree 内容容器（可滚动内容层在 wrapper 中）
   const wrapperRef = useRef<HTMLDivElement | null>(null);
+  // 仅当用户通过“右键 -> 打开原始目录”授权后，才允许内置类型目录展开
+  const rawOpenAllowedKeysRef = useRef<Set<string>>(new Set());
+  const [rawOpenVersion, setRawOpenVersion] = useState(0);
 
   // 为每个“可见行”的 label 与其内部文字 span 保持引用
   type RowRefs = { label: HTMLElement | null; text: HTMLElement | null };
@@ -202,6 +215,84 @@ export default function DirectoryTree({
     }
     return null;
   };
+
+  const findNodeByKey = (nodes: any[], targetKey: string): any | null => {
+    for (const node of nodes) {
+      if (node.key === targetKey) return node;
+      if (node.children && node.children.length > 0) {
+        const found = findNodeByKey(node.children, targetKey);
+        if (found) return found;
+      }
+    }
+    return null;
+  };
+
+  const isBuiltInFolderNode = (node: any): boolean => {
+    if (!node || String(node.type) === 'file') return false;
+    const builtInType = String(node.builtInType || 'DEF').toUpperCase();
+    return builtInType !== 'DEF';
+  };
+
+  const isRawOpenAllowed = (nodeKey: string): boolean => rawOpenAllowedKeysRef.current.has(nodeKey);
+  const allowRawOpen = (nodeKey: string) => {
+    const beforeSize = rawOpenAllowedKeysRef.current.size;
+    rawOpenAllowedKeysRef.current.add(nodeKey);
+    if (rawOpenAllowedKeysRef.current.size !== beforeSize) {
+      setRawOpenVersion(v => v + 1);
+    }
+  };
+  const revokeRawOpen = (nodeKey: string) => {
+    const changed = rawOpenAllowedKeysRef.current.delete(nodeKey);
+    if (changed) {
+      setRawOpenVersion(v => v + 1);
+    }
+  };
+
+  const handleLoadData = async (node: any) => {
+    if (!loadData) return;
+    if (isBuiltInFolderNode(node) && !isRawOpenAllowed(node.key)) {
+      return;
+    }
+    await loadData(node);
+  };
+
+  const renderTreeData = (() => {
+    // 读取版本号用于触发重算（由 allow/revoke 更新）
+    void rawOpenVersion;
+
+    const patchNodes = (nodes: any[]): any[] => {
+      return nodes.map(node => {
+        const patchedChildren = node.children && node.children.length > 0
+          ? patchNodes(node.children)
+          : node.children;
+
+        if (!isBuiltInFolderNode(node)) {
+          if (patchedChildren !== node.children) {
+            return { ...node, children: patchedChildren };
+          }
+          return node;
+        }
+
+        if (isRawOpenAllowed(node.key)) {
+          return {
+            ...node,
+            isLeaf: false,
+            children: patchedChildren,
+          };
+        }
+
+        // 回锁时清空展示态：隐藏箭头并清空当前挂载子节点
+        return {
+          ...node,
+          isLeaf: true,
+          loaded: false,
+          children: [],
+        };
+      });
+    };
+
+    return patchNodes(treeData);
+  })();
 
   const getChildrenByParentId = (parentId: number): any[] => {
     if (parentId === ROOT_PARENT_ID) {
@@ -423,6 +514,9 @@ export default function DirectoryTree({
 
   // 懒加载展开修复：先触发 onDoubleClick 再展开
   const ensureLazyLoadThenExpand = (treeNode: any) => {
+    if (isBuiltInFolderNode(treeNode) && !isRawOpenAllowed(treeNode.key)) {
+      return;
+    }
     try {
       const native = new MouseEvent('dblclick', { bubbles: true, cancelable: true });
       onDoubleClick(native as unknown as React.MouseEvent, treeNode);
@@ -436,20 +530,130 @@ export default function DirectoryTree({
 
   // 包装后的 onExpand：触发父回调后，下一帧仅以视口重算
   const handleExpand = (keys: string[]) => {
-    // const prev = prevExpandedKeysRef.current;
-    onExpand(keys);
+    const blockedNewKeys = new Set<string>();
+    for (const key of keys) {
+      if (expandedKeys.includes(key)) {
+        continue;
+      }
+      const node = findNodeByKey(renderTreeData, key);
+      if (!node) {
+        continue;
+      }
+      if (isBuiltInFolderNode(node) && !isRawOpenAllowed(key)) {
+        blockedNewKeys.add(key);
+      }
+    }
+
+    const filteredKeys = blockedNewKeys.size > 0
+      ? keys.filter(key => !blockedNewKeys.has(key))
+      : keys;
+
+    if (blockedNewKeys.size > 0) {
+      Toast.info('该目录为内置类型，请右键选择“打开原始目录”');
+    }
+
+    const collapsedKeys = expandedKeys.filter(key => !filteredKeys.includes(key));
+    for (const key of collapsedKeys) {
+      const node = findNodeByKey(renderTreeData, key);
+      if (node && isBuiltInFolderNode(node) && isRawOpenAllowed(key)) {
+        revokeRawOpen(key);
+      }
+    }
+
+    onExpand(filteredKeys);
 
     requestAnimationFrame(() => {
       scheduleRecompute(); // 只看视口，不会被未见内容影响
     });
 
-    prevExpandedKeysRef.current = keys;
+    prevExpandedKeysRef.current = filteredKeys;
+  };
+
+  const handleTreeDoubleClick = (e: React.MouseEvent, node: any) => {
+    onDoubleClick(e, node);
   };
 
   // 菜单行为
   const handleAction = async (action: string, node: any) => {
     // 关闭菜单
     setMenuState(prev => ({ ...prev, visible: false }));
+
+    if (action === '打开原始目录') {
+      if (!node || String(node.type) === 'file') {
+        return;
+      }
+      allowRawOpen(node.key);
+      try {
+        await handleLoadData(node);
+        if (!expandedKeys.includes(node.key)) {
+          onExpand(Array.from(new Set([...expandedKeys, node.key])));
+        }
+        Toast.success('已打开原始目录');
+      } catch (error: any) {
+        runtimeLogger.error('打开原始目录失败:', error);
+        Toast.error(error?.message || '打开原始目录失败');
+      }
+      return;
+    }
+
+    if (action === '漫画按名称排序') {
+      if (!node || String(node.type) === 'file') {
+        return;
+      }
+      try {
+        await sortComicChildrenByName(node.id);
+        if (onMoveSuccess) {
+          await onMoveSuccess({ oldParentId: node.id, newParentId: node.id });
+        }
+        Toast.success('漫画已按名称排序');
+      } catch (error: any) {
+        runtimeLogger.error('漫画按名称排序失败:', error);
+        Toast.error(error?.message || '漫画按名称排序失败');
+      }
+      return;
+    }
+
+    if (action.startsWith('设置内置类型:')) {
+      const nextBuiltInType = action.split(':')[1]?.trim()?.toUpperCase() || 'DEF';
+      const currentArchiveMode = Number(node?.archiveMode ?? 0);
+      try {
+        await updateNodeConfig({
+          id: node.id,
+          builtInType: nextBuiltInType,
+          archiveMode: currentArchiveMode,
+        });
+        onConfigSuccess?.(node.key, {
+          builtInType: nextBuiltInType,
+          archiveMode: currentArchiveMode,
+        });
+        Toast.success(`已设置为 ${nextBuiltInType}`);
+      } catch (error: any) {
+        runtimeLogger.error('设置内置类型失败:', error);
+        Toast.error(error?.message || '设置内置类型失败');
+      }
+      return;
+    }
+
+    if (action.startsWith('设置归档模式:')) {
+      const nextArchiveMode = Number(action.split(':')[1] || 0) === 1 ? 1 : 0;
+      const currentBuiltInType = String(node?.builtInType || 'DEF').toUpperCase();
+      try {
+        await updateNodeConfig({
+          id: node.id,
+          builtInType: currentBuiltInType,
+          archiveMode: nextArchiveMode,
+        });
+        onConfigSuccess?.(node.key, {
+          builtInType: currentBuiltInType,
+          archiveMode: nextArchiveMode,
+        });
+        Toast.success(nextArchiveMode === 1 ? '已开启归档模式' : '已关闭归档模式');
+      } catch (error: any) {
+        runtimeLogger.error('设置归档模式失败:', error);
+        Toast.error(error?.message || '设置归档模式失败');
+      }
+      return;
+    }
 
     if (action === '新建文件') {
       setCreateModal({
@@ -660,7 +864,7 @@ export default function DirectoryTree({
   // 行 label 渲染
   const renderLabel = (label?: ReactNode, treeNode?: any): ReactNode => {
     if (!treeNode) return label;
-    const isFolder = treeNode.isLeaf !== true;
+    const isFolder = String(treeNode.type) === 'dir';
 
     // 外部文件拖拽进入：高亮并延时 500ms 自动展开
     const onDragEnter = (e: React.DragEvent) => {
@@ -828,11 +1032,11 @@ export default function DirectoryTree({
               void handleTreeDrop(info);
             }}
             className="custom-tree"
-            treeData={treeData}
+            treeData={renderTreeData}
             expandedKeys={expandedKeys}
             onExpand={handleExpand}
-            onDoubleClick={onDoubleClick}
-            loadData={loadData}
+            onDoubleClick={handleTreeDoubleClick}
+            loadData={handleLoadData}
             directory
             renderLabel={renderLabel}
             style={{ padding: '2px 0 2px 0' }}
