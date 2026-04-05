@@ -39,8 +39,8 @@ const DirectorySidebar: React.FC<Props> = ({ libraryId, onFileOpen }) => {
           onDeleteSuccess={(_parentNode, deletedNodeKey) => {
             removeNode(deletedNodeKey);
           }}
-          onRenameSuccess={(nodeKey, newName) => {
-            updateNodeName(nodeKey, newName);
+          onRenameSuccess={(nodeKey, payload) => {
+            updateNodeName(nodeKey, payload);
           }}
           libraryId={libraryId}
         />

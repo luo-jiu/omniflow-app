@@ -31,6 +31,15 @@ let mainWindow: BrowserWindow | null = null
 let windowHandlersRegistered = false
 let isQuitting = false
 
+function isToggleDevToolsShortcut(input: Electron.Input) {
+  if (input.type !== 'keyDown') {
+    return false
+  }
+
+  const key = (input.key || '').toLowerCase()
+  return (input.meta || input.control) && input.shift && key === 'i'
+}
+
 function registerWindowIpcHandlers() {
   if (windowHandlersRegistered) {
     return
@@ -96,6 +105,7 @@ function createWindow() {
       preload: path.join(MAIN_DIST, 'preload.mjs'),
 
       // Electron 安全推荐配置
+      devTools: true,
       webSecurity: false,
       // nodeIntegration: false,     // 禁用 Node.js 集成
       // contextIsolation: true,     // 启用上下文隔离
@@ -128,6 +138,15 @@ function createWindow() {
       }
     });
   });
+
+  win.webContents.on('before-input-event', (event, input) => {
+    if (!isToggleDevToolsShortcut(input)) {
+      return
+    }
+
+    event.preventDefault()
+    win.webContents.toggleDevTools()
+  })
 
   // 加载页面：开发环境走 Vite Dev Server，生产环境加载 dist/index.html
   if (VITE_DEV_SERVER_URL) {

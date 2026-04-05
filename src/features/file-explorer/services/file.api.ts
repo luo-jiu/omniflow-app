@@ -181,12 +181,14 @@ export async function createNode(payload: {
 export async function renameNode(payload: {
   id: number;
   name: string;
+  ext?: string;
 }) {
   const body = await request(`/v1/nodes/${payload.id}/rename`, {
     method: 'PATCH',
     body: JSON.stringify({
       id: payload.id,
       name: payload.name,
+      ext: payload.ext ?? '',
     }),
   });
   return body.data;

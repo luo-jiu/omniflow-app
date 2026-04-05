@@ -6,6 +6,8 @@ import UploadConfirmModal from './modals/UploadConfirmModal.tsx';
 import CreateNodeModal from './modals/CreateNodeModal.tsx';
 import DirectoryContextMenu from './context-menu/DirectoryContextMenu.tsx';
 import { UPLOAD_TASK_STATUS } from '@/modules/upload-center/model/upload-task.types';
+import { buildFileFullName, splitFileBaseNameAndExt } from '@/utils/fileTreeSettings';
+import { validateWindowsLikeFileName } from '@/utils/windowsFileName';
 
 interface DirectoryTreeProps {
   treeData: any[];
@@ -20,7 +22,7 @@ interface DirectoryTreeProps {
   // deletedNodeKey 是节点的 key，格式为 `${parentId}:${id}`
   onDeleteSuccess?: (parentNode: any, deletedNodeKey: string) => void;
   // 重命名成功后的回调
-  onRenameSuccess?: (nodeKey: string, newName: string) => void;
+  onRenameSuccess?: (nodeKey: string, payload: { name: string; ext?: string }) => void;
   libraryId: number; // 添加 libraryId prop
 }
 
@@ -343,9 +345,15 @@ export default function DirectoryTree({
         loading: false,
       });
     } else if (action === '重命名') {
+      const currentBaseName = node.data?.rawName || node.label || '';
+      const currentExt = node.data?.rawExt ?? node.ext ?? '';
+      const editingFullName = node.isLeaf
+        ? buildFileFullName(currentBaseName, currentExt)
+        : currentBaseName;
+
       alignNodeStartForRename(node.key);
       setEditingKey(node.key);
-      setEditingName(node.data?.rawName || node.label || '');
+      setEditingName(editingFullName);
     } else if (action === 'delete') {
       try {
         console.log('🗑️ [删除]', node);
@@ -416,31 +424,58 @@ export default function DirectoryTree({
 
   // 确认重命名
   const handleRenameConfirm = async (node: any) => {
-    const newName = editingName.trim();
-    if (!newName) {
+    const inputName = editingName.trim();
+    if (!inputName) {
       Toast.warning('名称不能为空');
       setEditingKey(null);
       return;
     }
-    
+
+    const isFileNode = node.isLeaf === true;
+    const currentBaseName = String(node.data?.rawName || node.label || '').trim();
+    const currentExt = String(node.data?.rawExt ?? node.ext ?? '').trim().replace(/^\./, '');
+    const currentFullName = isFileNode
+      ? buildFileFullName(currentBaseName, currentExt)
+      : currentBaseName;
+
     // 如果名称没变，直接关闭
-    if (newName === (node.data?.rawName || node.label)) {
+    if (inputName === currentFullName) {
       setEditingKey(null);
+      setEditingName('');
+      return;
+    }
+
+    const validation = validateWindowsLikeFileName(inputName);
+    if (!validation.valid) {
+      Toast.warning(validation.message);
+      return;
+    }
+
+    const next = isFileNode
+      ? splitFileBaseNameAndExt(inputName)
+      : { name: inputName, ext: '' };
+
+    if (!next.name) {
+      Toast.warning('名称不能为空');
       return;
     }
 
     try {
-      // 这里的 parentId 如果是 0 或 undefined，则传 1（根目录）
       await renameNode({
         id: node.id,
-        name: newName,
+        name: next.name,
+        ext: isFileNode ? next.ext : undefined,
       });
       
       Toast.success('重命名成功');
       if (onRenameSuccess) {
-        onRenameSuccess(node.key, newName);
+        onRenameSuccess(node.key, {
+          name: next.name,
+          ext: isFileNode ? next.ext : undefined,
+        });
       }
       setEditingKey(null);
+      setEditingName('');
       scheduleRecompute();
     } catch (error: any) {
       console.error(error);

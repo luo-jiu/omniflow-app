@@ -397,6 +397,13 @@ function getAppIconPath() {
 let mainWindow = null;
 let windowHandlersRegistered = false;
 let isQuitting = false;
+function isToggleDevToolsShortcut(input) {
+  if (input.type !== "keyDown") {
+    return false;
+  }
+  const key = (input.key || "").toLowerCase();
+  return (input.meta || input.control) && input.shift && key === "i";
+}
 function registerWindowIpcHandlers() {
   if (windowHandlersRegistered) {
     return;
@@ -452,6 +459,7 @@ function createWindow() {
       // 预加载脚本，用于安全地与渲染进程通信
       preload: path.join(MAIN_DIST, "preload.mjs"),
       // Electron 安全推荐配置
+      devTools: true,
       webSecurity: false
       // nodeIntegration: false,     // 禁用 Node.js 集成
       // contextIsolation: true,     // 启用上下文隔离
@@ -481,6 +489,13 @@ function createWindow() {
         // 将其置为空
       }
     });
+  });
+  win.webContents.on("before-input-event", (event, input) => {
+    if (!isToggleDevToolsShortcut(input)) {
+      return;
+    }
+    event.preventDefault();
+    win.webContents.toggleDevTools();
   });
   if (VITE_DEV_SERVER_URL) {
     win.loadURL(VITE_DEV_SERVER_URL);
