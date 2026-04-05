@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, ReactNode } from 'react';
 
 interface FileViewerState {
+  nodeId: number | null;
   fileUrl: string | null;
   fileName: string | null;
   fileType: 'image' | 'video' | 'audio' | 'other' | null;
@@ -9,13 +10,19 @@ interface FileViewerState {
 
 interface FileViewerContextType {
   fileState: FileViewerState;
-  setFileUrl: (url: string | null, fileName: string | null, fileType: 'image' | 'video' | 'audio' | 'other' | null) => void;
+  setFileUrl: (
+    url: string | null,
+    fileName: string | null,
+    fileType: 'image' | 'video' | 'audio' | 'other' | null,
+    nodeId?: number | null,
+  ) => void;
   setLoading: (loading: boolean) => void;
 }
 
 const FileViewerContext = createContext<FileViewerContextType | undefined>(undefined);
 
 const defaultFileViewerState: FileViewerState = {
+  nodeId: null,
   fileUrl: null,
   fileName: null,
   fileType: null,
@@ -52,8 +59,14 @@ export const FileViewerProvider: React.FC<{ children: ReactNode; cacheKey?: stri
   const activeCacheKeyRef = React.useRef<string | undefined>(cacheKey);
   const skipPersistRef = React.useRef(false);
 
-  const setFileUrl = (url: string | null, fileName: string | null, fileType: 'image' | 'video' | 'audio' | 'other' | null) => {
+  const setFileUrl = (
+    url: string | null,
+    fileName: string | null,
+    fileType: 'image' | 'video' | 'audio' | 'other' | null,
+    nodeId?: number | null,
+  ) => {
     setFileState({
+      nodeId: nodeId ?? null,
       fileUrl: url,
       fileName,
       fileType,

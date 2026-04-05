@@ -5,7 +5,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { FileViewerProvider, useFileViewer } from "@/contexts/FileViewerContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { Avatar, Popover } from "@douyinfe/semi-ui";
-import { IconSetting, IconExit, IconHome, IconUpload } from "@douyinfe/semi-icons";
+import { IconSetting, IconExit, IconHome, IconUpload, IconDelete } from "@douyinfe/semi-icons";
 import ContextMenu from "@/components/ui/context-menu";
 import styled from "styled-components";
 
@@ -259,9 +259,10 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   const handleFileOpen = async (
     fileUrl: string,
     fileName: string,
-    fileType: "image" | "video" | "audio" | "other"
+    fileType: "image" | "video" | "audio" | "other",
+    nodeId: number,
   ) => {
-    setFileUrl(fileUrl, fileName, fileType);
+    setFileUrl(fileUrl, fileName, fileType, nodeId);
   };
 
   const handleLogout = () => {
@@ -320,6 +321,13 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
               title="上传中心"
             >
               <IconUpload size="large" />
+            </button>
+            <button
+              className="footer-btn"
+              onClick={() => navigate(`/libraries/${libraryId}/recycle-bin`)}
+              title="回收站"
+            >
+              <IconDelete size="large" />
             </button>
           </div>
 

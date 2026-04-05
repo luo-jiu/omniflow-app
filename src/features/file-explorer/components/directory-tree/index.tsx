@@ -8,6 +8,8 @@ import DirectoryContextMenu from './context-menu/DirectoryContextMenu.tsx';
 import { UPLOAD_TASK_STATUS } from '@/modules/upload-center/model/upload-task.types';
 import { buildFileFullName, splitFileBaseNameAndExt } from '@/utils/fileTreeSettings';
 import { validateWindowsLikeFileName } from '@/utils/windowsFileName';
+import { useFileViewer } from '@/contexts/FileViewerContext';
+import { globalAudioPlayer } from '@/features/file-viewer/services/global-audio-player';
 
 interface DirectoryTreeProps {
   treeData: any[];
@@ -44,6 +46,8 @@ export default function DirectoryTree({
   loadData,
   libraryId,
 }: DirectoryTreeProps) {
+  const { fileState, setFileUrl } = useFileViewer();
+
   // 外部文件拖拽：悬停高亮 & 延迟展开
   const [dragOverKey, setDragOverKey] = useState<string | null>(null);
   const expandTimerRef = useRef<number | null>(null);
@@ -368,6 +372,12 @@ export default function DirectoryTree({
           const dummyParent = node.parentId ? { id: node.parentId } : { id: 1, key: 'root' }; 
           // 传递 node.key 而不是 node.id，这样父组件可以直接删除
           onDeleteSuccess(dummyParent, node.key);
+        }
+
+        if (fileState.nodeId === node.id) {
+          setFileUrl(null, null, null, null);
+          globalAudioPlayer.clear();
+          Toast.info('当前预览文件已移入回收站');
         }
         
         scheduleRecompute();

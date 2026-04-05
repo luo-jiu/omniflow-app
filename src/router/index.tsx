@@ -7,6 +7,7 @@ const Libraries = lazy(() => import('@/views/library'))
 const LibraryDetail = lazy(() => import('@/views/library/detail')) // 仓库选择页
 const Settings = lazy(() => import('@/views/settings'))
 const UploadCenter = lazy(() => import('@/views/upload-center'))
+const RecycleBin = lazy(() => import('@/views/recycle-bin'))
 const Login = lazy(() => import('@/views/login'))
 
 const routes: RouteObject[] = [
@@ -44,6 +45,14 @@ const routes: RouteObject[] = [
     element: (
       <RequireAuth>
         <UploadCenter />
+      </RequireAuth>
+    )
+  },
+  {
+    path: '/libraries/:id/recycle-bin',
+    element: (
+      <RequireAuth>
+        <RecycleBin />
       </RequireAuth>
     )
   },

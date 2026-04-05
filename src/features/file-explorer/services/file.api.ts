@@ -202,6 +202,41 @@ export async function deleteNodeAndChildren(ancestorId: number, libraryId: numbe
   return body.data;
 }
 
+export interface RecycleBinItem {
+  id: number;
+  name: string;
+  ext?: string;
+  mimeType?: string;
+  fileSize?: number;
+  type: 'dir' | 'file';
+  parentId: number;
+  libraryId: number;
+  deletedAt: string;
+  deletedDescendantCount?: number;
+}
+
+export async function fetchRecycleBinItems(libraryId: number): Promise<RecycleBinItem[]> {
+  const body = await request(`/v1/nodes/recycle/library/${libraryId}`, {
+    method: 'GET',
+  });
+  const data = (body?.data || []) as RecycleBinItem[];
+  return Array.isArray(data) ? data : [];
+}
+
+export async function restoreNodeAndChildren(ancestorId: number, libraryId: number): Promise<boolean> {
+  const body = await request(`/v1/nodes/${ancestorId}/library/${libraryId}/restore`, {
+    method: 'PATCH',
+  });
+  return Boolean(body?.data);
+}
+
+export async function hardDeleteNodeAndChildren(ancestorId: number, libraryId: number): Promise<boolean> {
+  const body = await request(`/v1/nodes/${ancestorId}/library/${libraryId}/hard`, {
+    method: 'DELETE',
+  });
+  return Boolean(body?.data);
+}
+
 // 获取文件的临时访问链接
 export async function getFileLink(nodeId: number, libraryId: number, expiry: number = 60): Promise<string> {
   const query = new URLSearchParams({

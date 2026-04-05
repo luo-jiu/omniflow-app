@@ -47,6 +47,10 @@ interface RepositoryTreeSnapshot {
 const REPOSITORY_TREE_SNAPSHOT_MAX_ENTRIES = 20;
 const repositoryTreeSnapshotStore = new Map<number, RepositoryTreeSnapshot>();
 
+export function invalidateRepositoryTreeSnapshot(libraryId: number) {
+  repositoryTreeSnapshotStore.delete(libraryId);
+}
+
 function setRepositoryTreeSnapshot(libraryId: number, snapshot: RepositoryTreeSnapshot) {
   if (repositoryTreeSnapshotStore.has(libraryId)) {
     repositoryTreeSnapshotStore.delete(libraryId);
@@ -71,7 +75,15 @@ function findNodeByKey(nodes: Node[], key: string): Node | null {
   return null;
 }
 
-export function useRepositoryTree(libraryId: number, onFileOpen?: (fileUrl: string, fileName: string, fileType: 'image' | 'video' | 'audio' | 'other') => void) {
+export function useRepositoryTree(
+  libraryId: number,
+  onFileOpen?: (
+    fileUrl: string,
+    fileName: string,
+    fileType: 'image' | 'video' | 'audio' | 'other',
+    nodeId: number,
+  ) => void,
+) {
   const cachedSnapshot = repositoryTreeSnapshotStore.get(libraryId);
   const defaultRepositoryId = String(libraryId);
 
@@ -392,7 +404,7 @@ export function useRepositoryTree(libraryId: number, onFileOpen?: (fileUrl: stri
 
         // 通知父组件或 Context 打开文件
         if (onFileOpen) {
-          onFileOpen(fileUrl, fileName, fileType);
+          onFileOpen(fileUrl, fileName, fileType, node.id);
         }
       } catch (error) {
         console.error('获取文件链接失败:', error);
