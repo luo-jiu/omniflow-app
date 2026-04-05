@@ -14,7 +14,14 @@ export const MainWrapper = styled.main`
   position: relative;
 
   &.viewer-mode {
-    padding: 12px;
+    padding: 0 12px 12px;
+  }
+
+  .main-content {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    overflow: hidden;
   }
 `;
 

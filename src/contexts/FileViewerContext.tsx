@@ -1,5 +1,9 @@
 import React, { useState, ReactNode } from 'react';
-import { FileViewerContext, type FileViewerState } from './file-viewer.context';
+import {
+  FileViewerContext,
+  type FileViewerState,
+  type FileViewerTab,
+} from './file-viewer.context';
 
 const defaultFileViewerState: FileViewerState = {
   nodeId: null,
@@ -9,10 +13,22 @@ const defaultFileViewerState: FileViewerState = {
   loading: false,
 };
 
-const FILE_VIEWER_CACHE_MAX_ENTRIES = 12;
-const fileViewerStateCache = new Map<string, FileViewerState>();
+interface FileViewerStoreState {
+  fileState: FileViewerState;
+  tabs: FileViewerTab[];
+  activeTabId: string | null;
+}
 
-function setFileViewerStateCache(cacheKey: string, state: FileViewerState) {
+const defaultFileViewerStoreState: FileViewerStoreState = {
+  fileState: defaultFileViewerState,
+  tabs: [],
+  activeTabId: null,
+};
+
+const FILE_VIEWER_CACHE_MAX_ENTRIES = 12;
+const fileViewerStateCache = new Map<string, FileViewerStoreState>();
+
+function setFileViewerStateCache(cacheKey: string, state: FileViewerStoreState) {
   // Simple LRU-like behavior: refresh key order and evict the oldest when cap is exceeded.
   if (fileViewerStateCache.has(cacheKey)) {
     fileViewerStateCache.delete(cacheKey);
@@ -26,15 +42,79 @@ function setFileViewerStateCache(cacheKey: string, state: FileViewerState) {
   }
 }
 
+function toFileState(tab: FileViewerTab | null): FileViewerState {
+  if (!tab) {
+    return defaultFileViewerState;
+  }
+  return {
+    nodeId: tab.nodeId,
+    fileUrl: tab.fileUrl,
+    fileName: tab.fileName,
+    fileType: tab.fileType,
+    loading: tab.loading,
+  };
+}
+
+function resolveTabId(url: string, nodeId?: number | null): string {
+  if (nodeId !== null && nodeId !== undefined) {
+    return `node:${nodeId}`;
+  }
+  return `url:${url}`;
+}
+
+function normalizeStoreState(raw: FileViewerStoreState | null | undefined): FileViewerStoreState {
+  if (!raw) {
+    return defaultFileViewerStoreState;
+  }
+  if (raw.activeTabId === null) {
+    return raw;
+  }
+  const activeTab = raw.tabs.find(tab => tab.id === raw.activeTabId) || null;
+  if (!activeTab) {
+    return {
+      ...raw,
+      activeTabId: null,
+      fileState: defaultFileViewerState,
+    };
+  }
+  return {
+    ...raw,
+    fileState: toFileState(activeTab),
+  };
+}
+
+function closeTabInState(state: FileViewerStoreState, tabId: string): FileViewerStoreState {
+  const targetIndex = state.tabs.findIndex(tab => tab.id === tabId);
+  if (targetIndex < 0) {
+    return state;
+  }
+
+  const nextTabs = state.tabs.filter(tab => tab.id !== tabId);
+  if (state.activeTabId !== tabId) {
+    return {
+      ...state,
+      tabs: nextTabs,
+    };
+  }
+
+  const fallback = nextTabs[targetIndex] ?? nextTabs[targetIndex - 1] ?? null;
+  return {
+    ...state,
+    tabs: nextTabs,
+    activeTabId: fallback?.id ?? null,
+    fileState: toFileState(fallback),
+  };
+}
+
 export const FileViewerProvider: React.FC<{ children: ReactNode; cacheKey?: string }> = ({
   children,
   cacheKey,
 }) => {
-  const [fileState, setFileState] = useState<FileViewerState>(() => {
+  const [viewerState, setViewerState] = useState<FileViewerStoreState>(() => {
     if (!cacheKey) {
-      return defaultFileViewerState;
+      return defaultFileViewerStoreState;
     }
-    return fileViewerStateCache.get(cacheKey) ?? defaultFileViewerState;
+    return normalizeStoreState(fileViewerStateCache.get(cacheKey));
   });
   const activeCacheKeyRef = React.useRef<string | undefined>(cacheKey);
   const skipPersistRef = React.useRef(false);
@@ -45,17 +125,92 @@ export const FileViewerProvider: React.FC<{ children: ReactNode; cacheKey?: stri
     fileType: 'image' | 'video' | 'audio' | 'other' | null,
     nodeId?: number | null,
   ) => {
-    setFileState({
-      nodeId: nodeId ?? null,
-      fileUrl: url,
-      fileName,
-      fileType,
-      loading: false,
+    if (!url) {
+      setViewerState(prev => ({
+        ...prev,
+        activeTabId: null,
+        fileState: defaultFileViewerState,
+      }));
+      return;
+    }
+
+    const tabId = resolveTabId(url, nodeId);
+    setViewerState(prev => {
+      const nextTab: FileViewerTab = {
+        id: tabId,
+        nodeId: nodeId ?? null,
+        fileUrl: url,
+        fileName,
+        fileType,
+        loading: false,
+      };
+      const existingIndex = prev.tabs.findIndex(tab => tab.id === tabId);
+      const nextTabs = [...prev.tabs];
+      if (existingIndex >= 0) {
+        nextTabs[existingIndex] = nextTab;
+      } else {
+        nextTabs.push(nextTab);
+      }
+      return {
+        ...prev,
+        tabs: nextTabs,
+        activeTabId: tabId,
+        fileState: toFileState(nextTab),
+      };
     });
   };
 
   const setLoading = (loading: boolean) => {
-    setFileState(prev => ({ ...prev, loading }));
+    setViewerState(prev => {
+      if (!prev.activeTabId) {
+        return {
+          ...prev,
+          fileState: { ...prev.fileState, loading },
+        };
+      }
+
+      const nextTabs = prev.tabs.map(tab => (
+        tab.id === prev.activeTabId
+          ? { ...tab, loading }
+          : tab
+      ));
+      const activeTab = nextTabs.find(tab => tab.id === prev.activeTabId) || null;
+      return {
+        ...prev,
+        tabs: nextTabs,
+        fileState: toFileState(activeTab),
+      };
+    });
+  };
+
+  const activateTab = (tabId: string) => {
+    setViewerState(prev => {
+      const targetTab = prev.tabs.find(tab => tab.id === tabId) || null;
+      if (!targetTab) {
+        return prev;
+      }
+      return {
+        ...prev,
+        activeTabId: tabId,
+        fileState: toFileState(targetTab),
+      };
+    });
+  };
+
+  const closeTab = (tabId: string) => {
+    setViewerState(prev => closeTabInState(prev, tabId));
+  };
+
+  const closeTabByNodeId = (nodeId: number) => {
+    setViewerState(prev => {
+      const targetIds = prev.tabs
+        .filter(tab => tab.nodeId === nodeId)
+        .map(tab => tab.id);
+      if (targetIds.length === 0) {
+        return prev;
+      }
+      return targetIds.reduce((state, tabId) => closeTabInState(state, tabId), prev);
+    });
   };
 
   React.useEffect(() => {
@@ -63,10 +218,10 @@ export const FileViewerProvider: React.FC<{ children: ReactNode; cacheKey?: stri
     activeCacheKeyRef.current = cacheKey;
     skipPersistRef.current = true;
     if (!cacheKey) {
-      setFileState(defaultFileViewerState);
+      setViewerState(defaultFileViewerStoreState);
       return;
     }
-    setFileState(fileViewerStateCache.get(cacheKey) ?? defaultFileViewerState);
+    setViewerState(normalizeStoreState(fileViewerStateCache.get(cacheKey)));
   }, [cacheKey]);
 
   React.useEffect(() => {
@@ -75,11 +230,22 @@ export const FileViewerProvider: React.FC<{ children: ReactNode; cacheKey?: stri
       skipPersistRef.current = false;
       return;
     }
-    setFileViewerStateCache(cacheKey, fileState);
-  }, [cacheKey, fileState]);
+    setFileViewerStateCache(cacheKey, viewerState);
+  }, [cacheKey, viewerState]);
 
   return (
-    <FileViewerContext.Provider value={{ fileState, setFileUrl, setLoading }}>
+    <FileViewerContext.Provider
+      value={{
+        fileState: viewerState.fileState,
+        tabs: viewerState.tabs,
+        activeTabId: viewerState.activeTabId,
+        setFileUrl,
+        setLoading,
+        activateTab,
+        closeTab,
+        closeTabByNodeId,
+      }}
+    >
       {children}
     </FileViewerContext.Provider>
   );

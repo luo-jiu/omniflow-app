@@ -48,7 +48,7 @@ export default function DirectoryTree({
   loadData,
   libraryId,
 }: DirectoryTreeProps) {
-  const { fileState, setFileUrl } = useFileViewer();
+  const { closeTabByNodeId, tabs } = useFileViewer();
 
   // 外部文件拖拽：悬停高亮 & 延迟展开
   const [dragOverKey, setDragOverKey] = useState<string | null>(null);
@@ -378,11 +378,18 @@ export default function DirectoryTree({
           onDeleteSuccess(dummyParent, node.key);
         }
 
-        if (fileState.nodeId === node.id) {
-          setFileUrl(null, null, null, null);
+        const playerState = globalAudioPlayer.getState();
+        const shouldClearAudio = tabs.some(tab => (
+          tab.nodeId === node.id &&
+          tab.fileType === 'audio' &&
+          tab.fileUrl === playerState.src
+        ));
+
+        closeTabByNodeId(node.id);
+        if (shouldClearAudio) {
           globalAudioPlayer.clear();
-          Toast.info('当前预览文件已移入回收站');
         }
+        Toast.info('文件已移入回收站');
         
         scheduleRecompute();
       } catch (error) {

@@ -5,9 +5,9 @@ import { IconPlay, IconPause, IconMute, IconVolume2, IconMusic, IconClose } from
 import { globalAudioPlayer, type GlobalAudioPlayerState } from '@/features/file-viewer/services/global-audio-player';
 import { runtimeLogger } from '@/utils/runtimeLogger';
 
-const BarSlot = styled.div<{ $visible: boolean }>`
+const BarSlot = styled.div<{ $visible: boolean; $topOffset: number }>`
   position: absolute;
-  top: 12px;
+  top: ${({ $topOffset }) => `${$topOffset}px`};
   left: 50%;
   transform: translateX(-50%);
   width: min(760px, calc(100% - 24px));
@@ -69,6 +69,10 @@ const BarInner = styled.div`
   }
 `;
 
+interface GlobalAudioMiniBarProps {
+  topOffset?: number;
+}
+
 function formatTime(time: number) {
   if (!Number.isFinite(time)) return '00:00';
   const minutes = Math.floor(time / 60);
@@ -92,7 +96,7 @@ function deriveTrackName(state: GlobalAudioPlayerState): string {
   }
 }
 
-const GlobalAudioMiniBar: React.FC = () => {
+const GlobalAudioMiniBar: React.FC<GlobalAudioMiniBarProps> = ({ topOffset = 12 }) => {
   const [state, setState] = React.useState<GlobalAudioPlayerState>(() => globalAudioPlayer.getState());
 
   React.useEffect(() => globalAudioPlayer.subscribe(setState), []);
@@ -101,7 +105,7 @@ const GlobalAudioMiniBar: React.FC = () => {
   const trackName = deriveTrackName(state);
 
   return (
-    <BarSlot $visible={visible}>
+    <BarSlot $visible={visible} $topOffset={topOffset}>
       <BarInner>
         <div className="track">
           <IconMusic />
