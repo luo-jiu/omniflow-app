@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Form, Button, Card, Typography, Toast } from '@douyinfe/semi-ui';
 import { IconUser, IconLock } from '@douyinfe/semi-icons';
-import { useAuth } from '@/contexts/AuthContext';
+import { useAuth } from '@/hooks/useAuth';
 import { useNavigate } from 'react-router-dom';
 import styled from 'styled-components';
 

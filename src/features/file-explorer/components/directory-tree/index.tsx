@@ -10,7 +10,7 @@ import { buildFileFullName, splitFileBaseNameAndExt } from '@/utils/fileTreeSett
 import { validateWindowsLikeFileName } from '@/utils/windowsFileName';
 import { runtimeLogger } from '@/utils/runtimeLogger';
 import { requestDesktopWindowActivation } from '@/utils/windowActivation';
-import { useFileViewer } from '@/contexts/FileViewerContext';
+import { useFileViewer } from '@/hooks/useFileViewer';
 import { globalAudioPlayer } from '@/features/file-viewer/services/global-audio-player';
 
 interface DirectoryTreeProps {

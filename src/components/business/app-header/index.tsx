@@ -3,7 +3,7 @@ import {HeaderWrapper} from './style';
 import { Button, Avatar, Popover } from '@douyinfe/semi-ui';
 import {IconSetting, IconExit, IconUpload} from '@douyinfe/semi-icons';
 import {useNavigate} from "react-router-dom";
-import { useAuth } from '@/contexts/AuthContext';
+import { useAuth } from '@/hooks/useAuth';
 import ContextMenu from '@/components/ui/context-menu';
 
 const AppHeader: FC = () => {

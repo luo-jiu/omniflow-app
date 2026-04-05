@@ -1,6 +1,6 @@
 import { FC, ReactNode } from "react";
 import MainWrapper from "./style.ts";
-import { useFileViewer } from "@/contexts/FileViewerContext";
+import { useFileViewer } from "@/hooks/useFileViewer";
 import WelcomeView from "@/features/file-viewer/components/welcome-view";
 import FileDispatcher from "@/features/file-viewer/components/file-dispatcher";
 import GlobalAudioMiniBar from "@/components/business/global-audio-mini-bar";

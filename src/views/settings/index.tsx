@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import styled from 'styled-components';
 import { Typography, Divider, Switch, Select, Button } from '@douyinfe/semi-ui';
 import { IconChevronLeft } from '@douyinfe/semi-icons';
-import { useTheme } from '@/contexts/ThemeContext';
+import { useTheme } from '@/hooks/useTheme';
 import { useNavigate } from 'react-router-dom';
 import { getFileTreeShowSuffix, setFileTreeShowSuffix } from '@/utils/fileTreeSettings';
 

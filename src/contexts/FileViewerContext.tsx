@@ -1,25 +1,5 @@
-import React, { createContext, useContext, useState, ReactNode } from 'react';
-
-interface FileViewerState {
-  nodeId: number | null;
-  fileUrl: string | null;
-  fileName: string | null;
-  fileType: 'image' | 'video' | 'audio' | 'other' | null;
-  loading: boolean;
-}
-
-interface FileViewerContextType {
-  fileState: FileViewerState;
-  setFileUrl: (
-    url: string | null,
-    fileName: string | null,
-    fileType: 'image' | 'video' | 'audio' | 'other' | null,
-    nodeId?: number | null,
-  ) => void;
-  setLoading: (loading: boolean) => void;
-}
-
-const FileViewerContext = createContext<FileViewerContextType | undefined>(undefined);
+import React, { useState, ReactNode } from 'react';
+import { FileViewerContext, type FileViewerState } from './file-viewer.context';
 
 const defaultFileViewerState: FileViewerState = {
   nodeId: null,
@@ -103,12 +83,4 @@ export const FileViewerProvider: React.FC<{ children: ReactNode; cacheKey?: stri
       {children}
     </FileViewerContext.Provider>
   );
-};
-
-export const useFileViewer = () => {
-  const context = useContext(FileViewerContext);
-  if (!context) {
-    throw new Error('useFileViewer must be used within FileViewerProvider');
-  }
-  return context;
 };
