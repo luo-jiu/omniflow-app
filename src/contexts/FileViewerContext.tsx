@@ -15,13 +15,42 @@ interface FileViewerContextType {
 
 const FileViewerContext = createContext<FileViewerContextType | undefined>(undefined);
 
-export const FileViewerProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [fileState, setFileState] = useState<FileViewerState>({
-    fileUrl: null,
-    fileName: null,
-    fileType: null,
-    loading: false,
+const defaultFileViewerState: FileViewerState = {
+  fileUrl: null,
+  fileName: null,
+  fileType: null,
+  loading: false,
+};
+
+const FILE_VIEWER_CACHE_MAX_ENTRIES = 12;
+const fileViewerStateCache = new Map<string, FileViewerState>();
+
+function setFileViewerStateCache(cacheKey: string, state: FileViewerState) {
+  // Simple LRU-like behavior: refresh key order and evict the oldest when cap is exceeded.
+  if (fileViewerStateCache.has(cacheKey)) {
+    fileViewerStateCache.delete(cacheKey);
+  }
+  fileViewerStateCache.set(cacheKey, state);
+  if (fileViewerStateCache.size > FILE_VIEWER_CACHE_MAX_ENTRIES) {
+    const oldestKey = fileViewerStateCache.keys().next().value;
+    if (oldestKey) {
+      fileViewerStateCache.delete(oldestKey);
+    }
+  }
+}
+
+export const FileViewerProvider: React.FC<{ children: ReactNode; cacheKey?: string }> = ({
+  children,
+  cacheKey,
+}) => {
+  const [fileState, setFileState] = useState<FileViewerState>(() => {
+    if (!cacheKey) {
+      return defaultFileViewerState;
+    }
+    return fileViewerStateCache.get(cacheKey) ?? defaultFileViewerState;
   });
+  const activeCacheKeyRef = React.useRef<string | undefined>(cacheKey);
+  const skipPersistRef = React.useRef(false);
 
   const setFileUrl = (url: string | null, fileName: string | null, fileType: 'image' | 'video' | 'audio' | 'other' | null) => {
     setFileState({
@@ -35,6 +64,26 @@ export const FileViewerProvider: React.FC<{ children: ReactNode }> = ({ children
   const setLoading = (loading: boolean) => {
     setFileState(prev => ({ ...prev, loading }));
   };
+
+  React.useEffect(() => {
+    if (cacheKey === activeCacheKeyRef.current) return;
+    activeCacheKeyRef.current = cacheKey;
+    skipPersistRef.current = true;
+    if (!cacheKey) {
+      setFileState(defaultFileViewerState);
+      return;
+    }
+    setFileState(fileViewerStateCache.get(cacheKey) ?? defaultFileViewerState);
+  }, [cacheKey]);
+
+  React.useEffect(() => {
+    if (!cacheKey) return;
+    if (skipPersistRef.current) {
+      skipPersistRef.current = false;
+      return;
+    }
+    setFileViewerStateCache(cacheKey, fileState);
+  }, [cacheKey, fileState]);
 
   return (
     <FileViewerContext.Provider value={{ fileState, setFileUrl, setLoading }}>

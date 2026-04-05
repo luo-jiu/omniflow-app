@@ -10,6 +10,7 @@ import {
   IconVolume2,
 } from '@douyinfe/semi-icons';
 import { VideoViewerWrapper } from './style';
+import { globalAudioPlayer } from '@/features/file-viewer/services/global-audio-player';
 
 interface VideoViewerProps {
   url: string;
@@ -91,7 +92,10 @@ const VideoViewer: React.FC<VideoViewerProps> = ({ url, fileName }) => {
         setCurrentTime(video.currentTime || 0);
       }
     };
-    const onPlay = () => setIsPlaying(true);
+    const onPlay = () => {
+      setIsPlaying(true);
+      globalAudioPlayer.pause();
+    };
     const onPause = () => setIsPlaying(false);
     const onEnded = () => setIsPlaying(false);
     const onWaiting = () => setIsBuffering(true);
@@ -119,6 +123,12 @@ const VideoViewer: React.FC<VideoViewerProps> = ({ url, fileName }) => {
   }, []);
 
   useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    return globalAudioPlayer.registerVideo(video);
+  }, []);
+
+  useEffect(() => {
     const onFullscreenChange = () => {
       setIsFullscreen(Boolean(document.fullscreenElement));
     };
@@ -131,9 +141,6 @@ const VideoViewer: React.FC<VideoViewerProps> = ({ url, fileName }) => {
     if (!video) return;
     video.src = url;
     video.load();
-    video.playbackRate = playbackRate;
-    video.volume = volume;
-    video.muted = isMuted;
     setCurrentTime(0);
     setDuration(0);
     setIsPlaying(false);
@@ -144,19 +151,19 @@ const VideoViewer: React.FC<VideoViewerProps> = ({ url, fileName }) => {
     const video = videoRef.current;
     if (!video) return;
     video.playbackRate = playbackRate;
-  }, [playbackRate]);
+  }, [playbackRate, url]);
 
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
     video.volume = volume;
-  }, [volume]);
+  }, [volume, url]);
 
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
     video.muted = isMuted;
-  }, [isMuted]);
+  }, [isMuted, url]);
 
   const togglePlay = () => {
     const video = videoRef.current;

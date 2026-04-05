@@ -38,11 +38,49 @@ export interface NodeRespDTO {
   fileSize?: number;
 }
 
+interface RepositoryTreeSnapshot {
+  selectedRepository: string;
+  expandedKeys: string[];
+  treesCache: Record<string, Node[]>;
+}
+
+const REPOSITORY_TREE_SNAPSHOT_MAX_ENTRIES = 20;
+const repositoryTreeSnapshotStore = new Map<number, RepositoryTreeSnapshot>();
+
+function setRepositoryTreeSnapshot(libraryId: number, snapshot: RepositoryTreeSnapshot) {
+  if (repositoryTreeSnapshotStore.has(libraryId)) {
+    repositoryTreeSnapshotStore.delete(libraryId);
+  }
+  repositoryTreeSnapshotStore.set(libraryId, snapshot);
+  if (repositoryTreeSnapshotStore.size > REPOSITORY_TREE_SNAPSHOT_MAX_ENTRIES) {
+    const oldestLibraryId = repositoryTreeSnapshotStore.keys().next().value;
+    if (oldestLibraryId !== undefined) {
+      repositoryTreeSnapshotStore.delete(oldestLibraryId);
+    }
+  }
+}
+
+function findNodeByKey(nodes: Node[], key: string): Node | null {
+  for (const node of nodes) {
+    if (node.key === key) return node;
+    if (node.children && node.children.length > 0) {
+      const found = findNodeByKey(node.children, key);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
 export function useRepositoryTree(libraryId: number, onFileOpen?: (fileUrl: string, fileName: string, fileType: 'image' | 'video' | 'audio' | 'other') => void) {
+  const cachedSnapshot = repositoryTreeSnapshotStore.get(libraryId);
+  const defaultRepositoryId = String(libraryId);
+
   // const [repositories, setRepositories] = useState<{ id: string | number; name: string }[]>([]);
-  const [selectedRepository, setSelectedRepository] = useState<string>('');
-  const [expandedKeys, setExpandedKeys] = useState<string[]>([]);
-  const [treesCache, setTreesCache] = useState<Record<string, Node[]>>({});
+  const [selectedRepository, setSelectedRepository] = useState<string>(
+    cachedSnapshot?.selectedRepository || defaultRepositoryId,
+  );
+  const [expandedKeys, setExpandedKeys] = useState<string[]>(cachedSnapshot?.expandedKeys || []);
+  const [treesCache, setTreesCache] = useState<Record<string, Node[]>>(cachedSnapshot?.treesCache || {});
 
   // ref 追踪状态
   const loadingNodes = useRef<Set<string>>(new Set());
@@ -59,27 +97,38 @@ export function useRepositoryTree(libraryId: number, onFileOpen?: (fileUrl: stri
     expandedKeysRef.current = expandedKeys;
   }, [expandedKeys]);
 
-  // 初次加载目录树
-  useEffect(() => {
-    (async () => {
-      await selectRepository(String(libraryId));
-    })();
-  }, []);
-
   // 切换仓库
-  const selectRepository = useCallback(async (id: string) => {
+  const selectRepository = useCallback(async (id: string, options?: { resetExpanded?: boolean }) => {
     setSelectedRepository(id);
-    setExpandedKeys([]);
-    expandedKeysRef.current = [];
+    if (options?.resetExpanded ?? true) {
+      setExpandedKeys([]);
+      expandedKeysRef.current = [];
+    }
 
-    if (!treesCache[id]) {
+    if (!treesCacheRef.current[id]) {
       const rootNodes = await getChildrenByNodeId(1, Number(id));
       setTreesCache(prev => ({
         ...prev,
         [id]: rootNodes.map(mapToTreeNode),
       }));
     }
-  }, [treesCache]);
+  }, []);
+
+  // 初次加载目录树（支持缓存恢复）
+  useEffect(() => {
+    const repoId = String(libraryId);
+    const hasSnapshot = repositoryTreeSnapshotStore.has(libraryId);
+    void selectRepository(repoId, { resetExpanded: !hasSnapshot });
+  }, [libraryId, selectRepository]);
+
+  // 快照保存：切走页面后可恢复
+  useEffect(() => {
+    setRepositoryTreeSnapshot(libraryId, {
+      selectedRepository,
+      expandedKeys,
+      treesCache,
+    });
+  }, [libraryId, selectedRepository, expandedKeys, treesCache]);
 
   // 当前树数据（保持引用稳定）
   const currentTreeData = treesCache[selectedRepository] || [];
@@ -98,18 +147,6 @@ export function useRepositoryTree(libraryId: number, onFileOpen?: (fileUrl: stri
       return node;
     });
   }, []);
-
-  // 按key找节点
-  function findNodeByKey(nodes: Node[], key: string): Node | null {
-    for (const node of nodes) {
-      if (node.key === key) return node;
-      if (node.children && node.children.length > 0) {
-        const found = findNodeByKey(node.children, key);
-        if (found) return found;
-      }
-    }
-    return null;
-  }
 
   // 更新节点名称
   const updateNodeName = useCallback((nodeKey: string, payload: { name: string; ext?: string }) => {
@@ -361,7 +398,7 @@ export function useRepositoryTree(libraryId: number, onFileOpen?: (fileUrl: stri
         console.error('获取文件链接失败:', error);
       }
     }
-  }, [loadChildren, onFileOpen]);
+  }, [loadChildren, onFileOpen, selectedRepository]);
 
   // 节点转换
   function mapToTreeNode(item: NodeRespDTO): Node {

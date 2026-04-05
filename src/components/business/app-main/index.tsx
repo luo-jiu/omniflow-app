@@ -3,6 +3,7 @@ import MainWrapper from "./style.ts";
 import { useFileViewer } from "@/contexts/FileViewerContext";
 import WelcomeView from "@/features/file-viewer/components/welcome-view";
 import FileDispatcher from "@/features/file-viewer/components/file-dispatcher";
+import GlobalAudioMiniBar from "@/components/business/global-audio-mini-bar";
 
 interface IProps {
   children?: ReactNode;
@@ -19,6 +20,7 @@ const AppMain: FC<IProps> = () => {
   if (!fileState.fileUrl && !fileState.loading) {
     return (
       <MainWrapper>
+        <GlobalAudioMiniBar />
         <WelcomeView />
       </MainWrapper>
     );
@@ -27,6 +29,7 @@ const AppMain: FC<IProps> = () => {
   // 否则显示文件分发器（处理图片、视频等预览）
   return (
     <MainWrapper className="viewer-mode">
+      <GlobalAudioMiniBar />
       <FileDispatcher 
         fileUrl={fileState.fileUrl}
         fileName={fileState.fileName}

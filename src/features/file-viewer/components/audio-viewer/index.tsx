@@ -13,6 +13,7 @@ import {
   IconSync
 } from '@douyinfe/semi-icons';
 import { AudioViewerWrapper } from './style';
+import { globalAudioPlayer } from '@/features/file-viewer/services/global-audio-player';
 
 interface AudioViewerProps {
   url: string;
@@ -20,18 +21,13 @@ interface AudioViewerProps {
 }
 
 const AudioViewer: React.FC<AudioViewerProps> = ({ url, fileName }) => {
-  const audioRef = useRef<HTMLAudioElement>(null);
   const progressBarRef = useRef<HTMLDivElement>(null);
-  
-  // Audio state
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(0);
-  const [volume, setVolume] = useState(0.7);
-  const [isMuted, setIsMuted] = useState(false);
+  const [playerState, setPlayerState] = useState(() => globalAudioPlayer.getState());
+  const [dragPreviewTime, setDragPreviewTime] = useState<number | null>(null);
 
   // Dragging state (managed via refs to avoid re-renders during high-frequency events)
   const isDraggingRef = useRef(false);
+  const displayTime = dragPreviewTime ?? playerState.currentTime;
 
   const formatTime = (time: number) => {
     if (!isFinite(time)) return '00:00';
@@ -41,37 +37,43 @@ const AudioViewer: React.FC<AudioViewerProps> = ({ url, fileName }) => {
   };
 
   const togglePlay = () => {
-    const audio = audioRef.current;
-    if (audio) {
-      if (audio.paused) {
-        audio.play().catch(console.error);
-      } else {
-        audio.pause();
-      }
-    }
+    void globalAudioPlayer.togglePlay().catch(console.error);
   };
 
   // --- Custom Progress Bar Logic ---
 
   const updateProgress = useCallback((clientX: number) => {
-    if (!progressBarRef.current || !audioRef.current || !duration) return;
+    if (!progressBarRef.current || !playerState.duration) return;
     
     const rect = progressBarRef.current.getBoundingClientRect();
     const x = Math.max(0, Math.min(clientX - rect.left, rect.width));
     const percentage = x / rect.width;
-    const newTime = percentage * duration;
+    const newTime = percentage * playerState.duration;
     
     // Update visual immediately
-    setCurrentTime(newTime);
-    
-    // Only update audio if we are committing (mouseup) or if we want live scrubbing (optional)
-    // Here we update audio immediately for live scrubbing
-    if (isFinite(newTime)) {
-         // Optionally: audioRef.current.currentTime = newTime; 
-    }
+    setDragPreviewTime(newTime);
     
     return newTime;
-  }, [duration]);
+  }, [playerState.duration]);
+
+  const handleGlobalMouseMove = useCallback((e: MouseEvent) => {
+    if (isDraggingRef.current) {
+      updateProgress(e.clientX);
+    }
+  }, [updateProgress]);
+
+  const handleGlobalMouseUp = useCallback((e: MouseEvent) => {
+    if (isDraggingRef.current) {
+      const finalTime = updateProgress(e.clientX);
+      if (finalTime !== undefined && Number.isFinite(finalTime)) {
+        globalAudioPlayer.seekTo(finalTime);
+      }
+      isDraggingRef.current = false;
+      setDragPreviewTime(null);
+      window.removeEventListener('mousemove', handleGlobalMouseMove);
+      window.removeEventListener('mouseup', handleGlobalMouseUp);
+    }
+  }, [handleGlobalMouseMove, updateProgress]);
 
   const handleMouseDown = (e: React.MouseEvent) => {
     isDraggingRef.current = true;
@@ -82,97 +84,34 @@ const AudioViewer: React.FC<AudioViewerProps> = ({ url, fileName }) => {
     window.addEventListener('mouseup', handleGlobalMouseUp);
   };
 
-  const handleGlobalMouseMove = (e: MouseEvent) => {
-    if (isDraggingRef.current) {
-        updateProgress(e.clientX);
-    }
-  };
-
-  const handleGlobalMouseUp = (e: MouseEvent) => {
-    if (isDraggingRef.current) {
-        const finalTime = updateProgress(e.clientX);
-        if (audioRef.current && finalTime !== undefined && isFinite(finalTime)) {
-            audioRef.current.currentTime = finalTime;
-        }
-        isDraggingRef.current = false;
-        window.removeEventListener('mousemove', handleGlobalMouseMove);
-        window.removeEventListener('mouseup', handleGlobalMouseUp);
-    }
-  };
-
   // Cleanup listeners on unmount
   useEffect(() => {
       return () => {
         window.removeEventListener('mousemove', handleGlobalMouseMove);
         window.removeEventListener('mouseup', handleGlobalMouseUp);
       };
-  }, []);
+  }, [handleGlobalMouseMove, handleGlobalMouseUp]);
 
   const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const vol = parseFloat(e.target.value);
-    if (audioRef.current) {
-      audioRef.current.volume = vol;
-      setVolume(vol);
-      setIsMuted(vol === 0);
-    }
+    globalAudioPlayer.setVolume(vol);
   };
 
-  // --- Audio Event Listeners ---
-
   useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-
-    const onLoadedMetadata = () => setDuration(audio.duration);
-    
-    let lastUpdate = 0;
-    const onTimeUpdate = () => {
-      if (!isDraggingRef.current) {
-          const now = Date.now();
-          if (now - lastUpdate > 50) { // Throttle updates
-            setCurrentTime(audio.currentTime);
-            lastUpdate = now;
-          }
-      }
-    };
-    
-    const onPlay = () => setIsPlaying(true);
-    const onPause = () => setIsPlaying(false);
-    const onEnded = () => setIsPlaying(false);
-
-    audio.addEventListener('loadedmetadata', onLoadedMetadata);
-    audio.addEventListener('timeupdate', onTimeUpdate);
-    audio.addEventListener('play', onPlay);
-    audio.addEventListener('pause', onPause);
-    audio.addEventListener('ended', onEnded);
-
-    return () => {
-      audio.removeEventListener('loadedmetadata', onLoadedMetadata);
-      audio.removeEventListener('timeupdate', onTimeUpdate);
-      audio.removeEventListener('play', onPlay);
-      audio.removeEventListener('pause', onPause);
-      audio.removeEventListener('ended', onEnded);
-    };
+    return globalAudioPlayer.subscribe(setPlayerState);
   }, []);
 
-  // URL change handling
   useEffect(() => {
-    if (audioRef.current) {
-      audioRef.current.src = url;
-      audioRef.current.load();
-      setIsPlaying(false);
-      setCurrentTime(0);
-    }
-  }, [url]);
+    globalAudioPlayer.ensureSource(url, fileName || null);
+    setDragPreviewTime(null);
+  }, [url, fileName]);
 
   return (
     <AudioViewerWrapper>
-      <audio ref={audioRef} preload="metadata" />
-
       <div className="main-display">
         <div className="record-player">
-          <div className={`record-needle ${isPlaying ? 'playing' : ''}`} />
-          <div className={`album-art ${isPlaying ? 'playing' : ''}`}>
+          <div className={`record-needle ${playerState.isPlaying ? 'playing' : ''}`} />
+          <div className={`album-art ${playerState.isPlaying ? 'playing' : ''}`}>
             <div className="inner-cover">
               <IconMusic />
             </div>
@@ -196,7 +135,7 @@ const AudioViewer: React.FC<AudioViewerProps> = ({ url, fileName }) => {
           <div style={{ width: '100%', height: 4, background: 'var(--semi-color-fill-0)', position: 'relative' }}>
              {/* Track */}
              <div style={{ 
-                 width: `${(currentTime / (duration || 1)) * 100}%`, 
+                 width: `${(displayTime / (playerState.duration || 1)) * 100}%`, 
                  height: '100%', 
                  background: 'var(--semi-color-primary)',
                  position: 'absolute',
@@ -211,7 +150,7 @@ const AudioViewer: React.FC<AudioViewerProps> = ({ url, fileName }) => {
                  background: '#fff',
                  position: 'absolute',
                  top: '50%',
-                 left: `${(currentTime / (duration || 1)) * 100}%`,
+                 left: `${(displayTime / (playerState.duration || 1)) * 100}%`,
                  transform: 'translate(-50%, -50%)',
                  boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
                  pointerEvents: 'none' // Let the wrapper handle clicks
@@ -233,7 +172,7 @@ const AudioViewer: React.FC<AudioViewerProps> = ({ url, fileName }) => {
             <Button icon={<IconBackward />} theme="borderless" size="large" />
             <Button
               className="play-btn"
-              icon={isPlaying ? <IconPause /> : <IconPlay />}
+              icon={playerState.isPlaying ? <IconPause /> : <IconPlay />}
               theme="solid"
               shape="circle"
               onClick={togglePlay}
@@ -244,19 +183,15 @@ const AudioViewer: React.FC<AudioViewerProps> = ({ url, fileName }) => {
 
           <div className="extra-controls">
             <div className="time-display">
-              {formatTime(currentTime)} / {formatTime(duration)}
+              {formatTime(displayTime)} / {formatTime(playerState.duration)}
             </div>
             <div className="volume-pop">
               <Button
-                icon={isMuted ? <IconMute /> : volume < 0.5 ? <IconVolume1 /> : <IconVolume2 />}
+                icon={playerState.isMuted ? <IconMute /> : playerState.volume < 0.5 ? <IconVolume1 /> : <IconVolume2 />}
                 theme="borderless"
                 size="small"
                 onClick={() => {
-                    if (audioRef.current) {
-                        const newMute = !isMuted;
-                        setIsMuted(newMute);
-                        audioRef.current.muted = newMute;
-                    }
+                    globalAudioPlayer.setMuted(!playerState.isMuted);
                 }}
               />
               <input 
@@ -264,7 +199,7 @@ const AudioViewer: React.FC<AudioViewerProps> = ({ url, fileName }) => {
                 min="0"
                 max="1"
                 step="0.01"
-                value={isMuted ? 0 : volume}
+                value={playerState.isMuted ? 0 : playerState.volume}
                 onChange={handleVolumeChange}
                 style={{ width: 80, accentColor: 'var(--semi-color-primary)' }}
               />

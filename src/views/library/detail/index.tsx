@@ -9,6 +9,26 @@ import { IconSetting, IconExit, IconHome, IconUpload } from "@douyinfe/semi-icon
 import ContextMenu from "@/components/ui/context-menu";
 import styled from "styled-components";
 
+const DEFAULT_SIDE_PANEL_WIDTH = 300;
+const MIN_SIDE_PANEL_WIDTH = 220;
+const SIDE_PANEL_WIDTH_STORAGE_PREFIX = 'library-detail:side-panel-width:';
+
+function getSidePanelWidthStorageKey(libraryId: number) {
+  return `${SIDE_PANEL_WIDTH_STORAGE_PREFIX}${libraryId}`;
+}
+
+function loadSidePanelWidth(libraryId: number): number {
+  const raw = localStorage.getItem(getSidePanelWidthStorageKey(libraryId));
+  if (!raw) return DEFAULT_SIDE_PANEL_WIDTH;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) return DEFAULT_SIDE_PANEL_WIDTH;
+  return Math.max(MIN_SIDE_PANEL_WIDTH, Math.floor(parsed));
+}
+
+function saveSidePanelWidth(libraryId: number, width: number) {
+  localStorage.setItem(getSidePanelWidthStorageKey(libraryId), String(Math.floor(width)));
+}
+
 const DetailWrapper = styled.div`
   display: flex;
   width: 100%;
@@ -18,8 +38,8 @@ const DetailWrapper = styled.div`
 
 const SidePanel = styled.div`
   position: relative;
-  width: 300px;
-  min-width: 220px;
+  width: ${DEFAULT_SIDE_PANEL_WIDTH}px;
+  min-width: ${MIN_SIDE_PANEL_WIDTH}px;
   max-width: 80vw;
   display: flex;
   flex-direction: column;
@@ -177,31 +197,64 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   const navigate = useNavigate();
   const displayName = isLoggedIn ? user?.username || "User" : "未登录";
   const sidePanelRef = React.useRef<HTMLDivElement>(null);
+  const [sidePanelWidth, setSidePanelWidth] = React.useState<number>(() => loadSidePanelWidth(libraryId));
+  const latestPanelWidthRef = React.useRef<number>(sidePanelWidth);
+  const resizeMoveHandlerRef = React.useRef<((event: MouseEvent) => void) | null>(null);
+  const resizeUpHandlerRef = React.useRef<(() => void) | null>(null);
+
+  const cleanupResizeListeners = React.useCallback(() => {
+    if (resizeMoveHandlerRef.current) {
+      document.removeEventListener("mousemove", resizeMoveHandlerRef.current);
+      resizeMoveHandlerRef.current = null;
+    }
+    if (resizeUpHandlerRef.current) {
+      document.removeEventListener("mouseup", resizeUpHandlerRef.current);
+      resizeUpHandlerRef.current = null;
+    }
+    document.body.style.cursor = "";
+    document.body.style.userSelect = "";
+  }, []);
+
+  React.useEffect(() => {
+    const restored = loadSidePanelWidth(libraryId);
+    latestPanelWidthRef.current = restored;
+    setSidePanelWidth(restored);
+  }, [libraryId]);
+
+  React.useEffect(() => {
+    return () => {
+      cleanupResizeListeners();
+    };
+  }, [cleanupResizeListeners]);
 
   const handleResizeMouseDown = React.useCallback((e: React.MouseEvent) => {
     e.preventDefault();
+    cleanupResizeListeners();
     const startX = e.clientX;
-    const startWidth = sidePanelRef.current?.offsetWidth || 300;
+    const startWidth = sidePanelRef.current?.offsetWidth || sidePanelWidth;
 
     const onMouseMove = (ev: MouseEvent) => {
       if (!sidePanelRef.current) return;
       const maxWidth = Math.floor(window.innerWidth * 0.8);
-      const newWidth = Math.min(Math.max(startWidth + ev.clientX - startX, 220), maxWidth);
+      const newWidth = Math.min(Math.max(startWidth + ev.clientX - startX, MIN_SIDE_PANEL_WIDTH), maxWidth);
       sidePanelRef.current.style.width = `${newWidth}px`;
+      latestPanelWidthRef.current = newWidth;
     };
 
     const onMouseUp = () => {
-      document.removeEventListener("mousemove", onMouseMove);
-      document.removeEventListener("mouseup", onMouseUp);
-      document.body.style.cursor = "";
-      document.body.style.userSelect = "";
+      const finalWidth = Math.floor(latestPanelWidthRef.current);
+      setSidePanelWidth(finalWidth);
+      saveSidePanelWidth(libraryId, finalWidth);
+      cleanupResizeListeners();
     };
 
+    resizeMoveHandlerRef.current = onMouseMove;
+    resizeUpHandlerRef.current = onMouseUp;
     document.body.style.cursor = "col-resize";
     document.body.style.userSelect = "none";
     document.addEventListener("mousemove", onMouseMove);
     document.addEventListener("mouseup", onMouseUp);
-  }, []);
+  }, [cleanupResizeListeners, libraryId, sidePanelWidth]);
 
   const handleFileOpen = async (
     fileUrl: string,
@@ -238,7 +291,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
 
   return (
     <DetailWrapper>
-      <SidePanel ref={sidePanelRef}>
+      <SidePanel ref={sidePanelRef} style={{ width: `${sidePanelWidth}px` }}>
         <SidePanelHeader />
 
         <SidePanelTree>
@@ -314,10 +367,11 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
 const LibraryDetail: React.FC = () => {
   const { id = "" } = useParams<{ id: string }>();
   const libraryId = Number(id);
+  const cacheKey = `library:${id}`;
 
   return (
-    <FileViewerProvider>
-      <LibraryDetailContent libraryId={libraryId} />
+    <FileViewerProvider key={cacheKey} cacheKey={cacheKey}>
+      <LibraryDetailContent key={id} libraryId={libraryId} />
     </FileViewerProvider>
   );
 };
