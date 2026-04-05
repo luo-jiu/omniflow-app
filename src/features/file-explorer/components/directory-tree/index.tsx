@@ -250,6 +250,28 @@ export default function DirectoryTree({
     }
   };
 
+  /**
+   * 进入重命名前，仅在“名称开头被左侧遮挡”时向前滚动。
+   * 不做向后跳转，避免视觉抖动和定位丢失。
+   */
+  const alignNodeStartForRename = (nodeKey: string) => {
+    requestAnimationFrame(() => {
+      const wrapper = wrapperRef.current;
+      const container = wrapper?.parentElement;
+      const label = rowRefs.current.get(nodeKey)?.label;
+      if (!wrapper || !container || !label || !label.isConnected) return;
+
+      const wrapperRect = wrapper.getBoundingClientRect();
+      const labelRect = label.getBoundingClientRect();
+      const labelLeftInWrapper = labelRect.left - wrapperRect.left;
+      const currentScrollLeft = container.scrollLeft;
+
+      if (labelLeftInWrapper < currentScrollLeft) {
+        container.scrollLeft = Math.max(0, Math.floor(labelLeftInWrapper - 8));
+      }
+    });
+  };
+
   /** 绑定 label & text 的 ref */
   const bindLabelRef = (key: string) => (el: HTMLElement | null) => {
     if (!el) {
@@ -321,6 +343,7 @@ export default function DirectoryTree({
         loading: false,
       });
     } else if (action === '重命名') {
+      alignNodeStartForRename(node.key);
       setEditingKey(node.key);
       setEditingName(node.data?.rawName || node.label || '');
     } else if (action === 'delete') {
@@ -515,13 +538,15 @@ export default function DirectoryTree({
     };
 
     if (editingKey === treeNode.key) {
+      const renameInputWidthCh = Math.min(Math.max(editingName.length + 6, 24), 72);
+
       return (
         <div 
           className="tree-node-label editing" 
           ref={bindLabelRef(treeNode.key)}
           onClick={e => e.stopPropagation()}
           onDoubleClick={e => e.stopPropagation()}
-          style={{ width: '100%', display: 'flex', alignItems: 'center' }}
+          style={{ display: 'inline-flex', alignItems: 'center', maxWidth: '100%' }}
         >
           <Input
             value={editingName}
@@ -536,16 +561,13 @@ export default function DirectoryTree({
               }
             }}
             autoFocus
-            // style={{ width: '100%' }}
             style={{
-              width: '100%',
-              fontSize: '32px',
-              height: '42px',
-              // lineHeight: '32px',
-              // padding: '0 4px',
+              width: `${renameInputWidthCh}ch`,
+              maxWidth: '100%',
+              fontSize: '19px',
+              height: '34px',
               backgroundColor: 'var(--semi-color-bg-1)',
               border: '1px solid var(--semi-color-primary)',
-              // borderRadius: '4px'
             }}
             onFocus={(e) => {
               const input = e.target as HTMLInputElement;
@@ -561,6 +583,9 @@ export default function DirectoryTree({
               } else {
                 input.select();
               }
+              requestAnimationFrame(() => {
+                input.scrollLeft = 0;
+              });
             }}
           />
         </div>
