@@ -297,7 +297,50 @@ const VITE_DEV_SERVER_URL = process.env["VITE_DEV_SERVER_URL"];
 const MAIN_DIST = path.join(process.env.APP_ROOT, "dist-electron");
 const RENDERER_DIST = path.join(process.env.APP_ROOT, "dist");
 process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, "public") : RENDERER_DIST;
+let mainWindow = null;
+let windowHandlersRegistered = false;
+let isQuitting = false;
+function registerWindowIpcHandlers() {
+  if (windowHandlersRegistered) {
+    return;
+  }
+  windowHandlersRegistered = true;
+  ipcMain.handle("zoom-adjust", (event, delta) => {
+    const targetWindow = BrowserWindow.fromWebContents(event.sender) ?? mainWindow;
+    if (!targetWindow || targetWindow.isDestroyed()) {
+      return null;
+    }
+    const currentZoom = targetWindow.webContents.getZoomFactor();
+    const nextZoom = Math.min(Math.max(currentZoom + delta, 0.25), 3);
+    targetWindow.webContents.setZoomFactor(nextZoom);
+    return nextZoom;
+  });
+  ipcMain.on("window-minimize", (event) => {
+    const targetWindow = BrowserWindow.fromWebContents(event.sender) ?? mainWindow;
+    targetWindow == null ? void 0 : targetWindow.minimize();
+  });
+  ipcMain.on("window-maximize", (event) => {
+    const targetWindow = BrowserWindow.fromWebContents(event.sender) ?? mainWindow;
+    if (!targetWindow || targetWindow.isDestroyed()) {
+      return;
+    }
+    if (targetWindow.isMaximized()) {
+      targetWindow.unmaximize();
+    } else {
+      targetWindow.maximize();
+    }
+  });
+  ipcMain.on("window-close", (event) => {
+    const targetWindow = BrowserWindow.fromWebContents(event.sender) ?? mainWindow;
+    targetWindow == null ? void 0 : targetWindow.close();
+  });
+}
 function createWindow() {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.show();
+    mainWindow.focus();
+    return mainWindow;
+  }
   const win = new BrowserWindow({
     width: 1200,
     height: 800,
@@ -305,6 +348,8 @@ function createWindow() {
     // 最小宽度
     minHeight: 400,
     // 最小高度
+    backgroundColor: "#f5f5f0",
+    titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
     webPreferences: {
       // 预加载脚本，用于安全地与渲染进程通信
       preload: path.join(MAIN_DIST, "preload.mjs"),
@@ -314,9 +359,20 @@ function createWindow() {
       // contextIsolation: true,     // 启用上下文隔离
       // webSecurity: true           // 启用同源策略
     },
-    autoHideMenuBar: true,
+    autoHideMenuBar: true
     // 自动隐藏菜单栏
-    frame: false
+  });
+  mainWindow = win;
+  win.on("close", (event) => {
+    if (process.platform === "darwin" && !isQuitting) {
+      event.preventDefault();
+      win.hide();
+    }
+  });
+  win.on("closed", () => {
+    if (mainWindow === win) {
+      mainWindow = null;
+    }
   });
   win.webContents.session.webRequest.onHeadersReceived((details, callback) => {
     callback({
@@ -327,40 +383,35 @@ function createWindow() {
       }
     });
   });
-  let zoomFactor = 1;
-  ipcMain.handle("zoom-adjust", (_, delta) => {
-    zoomFactor = Math.min(Math.max(zoomFactor + delta, 0.25), 3);
-    win.webContents.setZoomFactor(zoomFactor);
-  });
   if (VITE_DEV_SERVER_URL) {
     win.loadURL(VITE_DEV_SERVER_URL);
   } else {
     win.loadFile(path.join(RENDERER_DIST, "index.html"));
   }
-  ipcMain.on("window-minimize", () => {
-    win.minimize();
-  });
-  ipcMain.on("window-maximize", () => {
-    if (win.isMaximized()) {
-      win.unmaximize();
-    } else {
-      win.maximize();
-    }
-  });
-  ipcMain.on("window-close", () => {
-    win.close();
-  });
+  return win;
 }
+app.on("before-quit", () => {
+  isQuitting = true;
+});
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
 app.on("activate", () => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.isMinimized()) {
+      mainWindow.restore();
+    }
+    mainWindow.show();
+    mainWindow.focus();
+    return;
+  }
   if (BrowserWindow.getAllWindows().length === 0) {
     createWindow();
   }
 });
 app.whenReady().then(() => {
   registerIpcHandlers();
+  registerWindowIpcHandlers();
   createWindow();
 });
 export {

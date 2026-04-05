@@ -40,15 +40,14 @@ export const ImageViewerWrapper = styled.div`
   }
 
   .viewer-image {
-    max-width: 100%;
-    max-height: 100%;
-    object-fit: contain;
-    /* 缩放平滑切换，平移不建议加 transition 会有延迟感 */
-    transition: transform 0.1s ease-out;
+    display: block;
+    max-width: none;
+    max-height: none;
     user-select: none;
     pointer-events: none;
-    box-shadow: 0 4px 30px rgba(0, 0, 0, 0.3);
-    border-radius: 4px;
+    box-shadow: none;
+    border-radius: 0;
+    transform-origin: center center;
     will-change: transform;
   }
 
@@ -101,5 +100,3 @@ export const ImageViewerWrapper = styled.div`
     border-radius: 10px;
   }
 `;
-
-

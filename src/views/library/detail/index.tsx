@@ -5,7 +5,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { FileViewerProvider, useFileViewer } from "@/contexts/FileViewerContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { Avatar, Popover } from "@douyinfe/semi-ui";
-import { IconSetting, IconExit, IconChevronLeft } from "@douyinfe/semi-icons";
+import { IconSetting, IconExit, IconHome } from "@douyinfe/semi-icons";
 import ContextMenu from "@/components/ui/context-menu";
 import styled from "styled-components";
 
@@ -17,13 +17,13 @@ const DetailWrapper = styled.div`
 `;
 
 const SidePanel = styled.div`
+  position: relative;
   width: 300px;
-  min-width: 260px;
-  max-width: 400px;
+  min-width: 220px;
+  max-width: 80vw;
   display: flex;
   flex-direction: column;
   background: var(--app-bg-sidebar);
-  border-right: 1px solid var(--app-border);
   flex-shrink: 0;
   height: 100%;
 
@@ -32,51 +32,28 @@ const SidePanel = styled.div`
   }
 `;
 
+const ResizeHandle = styled.div`
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 10;
+
+  &:hover {
+    background: rgba(0, 0, 0, 0.04);
+  }
+`;
+
 const SidePanelHeader = styled.div`
   padding: 14px 16px 10px;
   padding-left: 80px;
   -webkit-app-region: drag;
   flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-
-  .back-btn {
-    -webkit-app-region: no-drag;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 28px;
-    height: 28px;
-    border-radius: 6px;
-    color: var(--app-text-muted);
-    flex-shrink: 0;
-
-    &:hover {
-      background: rgba(0, 0, 0, 0.05);
-      color: var(--app-text);
-    }
-  }
-
-  .brand {
-    -webkit-app-region: no-drag;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    cursor: pointer;
-    user-select: none;
-  }
-
-  .brand-mark {
-    width: 9px;
-    height: 9px;
-    border-radius: 50%;
-    background: var(--app-accent);
-    flex-shrink: 0;
-  }
 
   h1 {
+    -webkit-app-region: no-drag;
     font-size: 16px;
     font-weight: 600;
     color: var(--app-text);
@@ -88,12 +65,30 @@ const SidePanelTree = styled.div`
   flex: 1;
   min-height: 0;
   overflow: hidden;
-  padding: 0 10px 6px;
+  padding: 8px 10px 6px;
+
+  *::-webkit-scrollbar {
+    height: 6px;
+    width: 6px;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.12);
+    border-radius: 10px;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background: rgba(0, 0, 0, 0.2);
+  }
+  *::-webkit-scrollbar-corner {
+    background: transparent;
+  }
 `;
 
 const SidePanelFooter = styled.div`
   padding: 10px 14px;
-  border-top: 1px solid var(--app-border);
+  border-top: none;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -147,10 +142,32 @@ const ContentArea = styled.div`
   min-width: 0;
   height: 100%;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: var(--app-bg);
+  border-top-left-radius: 12px;
+  border-bottom-left-radius: 12px;
+`;
+
+const ContentToolbar = styled.div`
+  height: 36px;
+  flex-shrink: 0;
+  background: var(--app-bg);
+  border-bottom: 1px solid var(--app-border);
+  border-top-left-radius: 12px;
   -webkit-app-region: drag;
+`;
+
+const ContentBody = styled.div`
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  -webkit-app-region: no-drag;
 
   & > * {
-    -webkit-app-region: no-drag;
+    flex: 1;
+    min-height: 0;
   }
 `;
 
@@ -159,6 +176,32 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   const { user, isLoggedIn, logout } = useAuth();
   const navigate = useNavigate();
   const displayName = isLoggedIn ? user?.username || "User" : "未登录";
+  const sidePanelRef = React.useRef<HTMLDivElement>(null);
+
+  const handleResizeMouseDown = React.useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = sidePanelRef.current?.offsetWidth || 300;
+
+    const onMouseMove = (ev: MouseEvent) => {
+      if (!sidePanelRef.current) return;
+      const maxWidth = Math.floor(window.innerWidth * 0.8);
+      const newWidth = Math.min(Math.max(startWidth + ev.clientX - startX, 220), maxWidth);
+      sidePanelRef.current.style.width = `${newWidth}px`;
+    };
+
+    const onMouseUp = () => {
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
+  }, []);
 
   const handleFileOpen = async (
     fileUrl: string,
@@ -195,16 +238,8 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
 
   return (
     <DetailWrapper>
-      <SidePanel>
-        <SidePanelHeader>
-          <div className="back-btn" onClick={() => navigate("/libraries")} title="返回库列表">
-            <IconChevronLeft size="large" />
-          </div>
-          <div className="brand" onClick={() => navigate("/")} title="首页">
-            <span className="brand-mark" />
-            <h1>Omniflow</h1>
-          </div>
-        </SidePanelHeader>
+      <SidePanel ref={sidePanelRef}>
+        <SidePanelHeader />
 
         <SidePanelTree>
           <DirectorySidebar libraryId={libraryId} onFileOpen={handleFileOpen} />
@@ -212,6 +247,13 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
 
         <SidePanelFooter>
           <div className="footer-left">
+            <button
+              className="footer-btn"
+              onClick={() => navigate("/libraries")}
+              title="返回库列表"
+            >
+              <IconHome size="large" />
+            </button>
             <button
               className="footer-btn"
               onClick={() => navigate("/settings")}
@@ -249,10 +291,14 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
             userContent
           )}
         </SidePanelFooter>
+        <ResizeHandle onMouseDown={handleResizeMouseDown} />
       </SidePanel>
 
       <ContentArea>
-        <AppMain />
+        <ContentToolbar />
+        <ContentBody>
+          <AppMain />
+        </ContentBody>
       </ContentArea>
     </DetailWrapper>
   );

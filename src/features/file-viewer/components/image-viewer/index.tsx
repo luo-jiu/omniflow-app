@@ -1,4 +1,4 @@
-import React, { useState, WheelEvent, MouseEvent, useEffect } from 'react';
+import React, { useState, WheelEvent, MouseEvent, useEffect, useCallback, useRef } from 'react';
 import { Popover } from '@douyinfe/semi-ui';
 import { ImageViewerWrapper } from './style';
 import ContextMenu, { ContextMenuItem } from '@/components/ui/context-menu';
@@ -8,86 +8,148 @@ interface ImageViewerProps {
   fileName?: string | null;
 }
 
+interface Point {
+  x: number;
+  y: number;
+}
+
+const MIN_ZOOM = 0.05;
+const MAX_ZOOM = 10;
+const WHEEL_ZOOM_RATIO = 0.08;
+const FIT_RETRY_FRAMES = 6;
+
 const ImageViewer: React.FC<ImageViewerProps> = ({ url, fileName }) => {
-  const [scale, setScale] = useState(1);
-  const [position, setPosition] = useState({ x: 0, y: 0 });
-  const [isSpacePressed, setIsSpacePressed] = useState(false);
+  const [baseScale, setBaseScale] = useState(1);
+  const [zoom, setZoom] = useState(1);
+  const [offset, setOffset] = useState<Point>({ x: 0, y: 0 });
+  const [naturalSize, setNaturalSize] = useState({ width: 0, height: 0 });
+  const [isPanMode, setIsPanMode] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
-  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
-  
+  const [dragAnchor, setDragAnchor] = useState<Point>({ x: 0, y: 0 });
   const [menuState, setMenuState] = useState({
     visible: false,
     x: 0,
     y: 0
   });
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const imageNaturalRef = useRef({ width: 0, height: 0 });
 
-  // 处理缩放：Ctrl + 滚轮
-  const handleWheel = (e: WheelEvent) => {
-    if (e.ctrlKey) {
+  const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
+
+  const computeContainScale = useCallback((
+    containerWidth: number,
+    containerHeight: number,
+    imageWidth: number,
+    imageHeight: number
+  ) => {
+    if (containerWidth <= 0 || containerHeight <= 0 || imageWidth <= 0 || imageHeight <= 0) return 1;
+    return Math.min(containerWidth / imageWidth, containerHeight / imageHeight);
+  }, []);
+
+  const fitToViewport = useCallback((attempt = 0) => {
+    const container = containerRef.current;
+    const { width: imageWidth, height: imageHeight } = imageNaturalRef.current;
+    if (!container || imageWidth <= 0 || imageHeight <= 0) return;
+
+    const viewportWidth = Math.round(container.clientWidth);
+    const viewportHeight = Math.round(container.clientHeight);
+
+    // 初次渲染时容器高度可能还没稳定，延后一两帧再测
+    if ((viewportWidth <= 0 || viewportHeight <= 0) && attempt < FIT_RETRY_FRAMES) {
+      requestAnimationFrame(() => fitToViewport(attempt + 1));
+      return;
+    }
+
+    const nextBase = computeContainScale(viewportWidth, viewportHeight, imageWidth, imageHeight);
+    setBaseScale(Number.isFinite(nextBase) && nextBase > 0 ? nextBase : 1);
+    setZoom(1);
+    setOffset({ x: 0, y: 0 });
+    setIsDragging(false);
+    setIsPanMode(false);
+  }, [computeContainScale]);
+
+  // 重置视图：完整显示图片（上下左右都可见）并尽量大
+  const resetView = useCallback(() => {
+    fitToViewport(0);
+  }, [fitToViewport]);
+
+  const handleImageLoad = useCallback((e: React.SyntheticEvent<HTMLImageElement>) => {
+    const img = e.currentTarget;
+    imageNaturalRef.current = {
+      width: img.naturalWidth,
+      height: img.naturalHeight,
+    };
+    setNaturalSize({
+      width: img.naturalWidth,
+      height: img.naturalHeight,
+    });
+    fitToViewport(0);
+  }, [fitToViewport]);
+
+  // 切换图片时清空上一张图的尺寸和拖拽状态，避免“旧尺寸残留”
+  useEffect(() => {
+    setNaturalSize({ width: 0, height: 0 });
+    setBaseScale(1);
+    setZoom(1);
+    setOffset({ x: 0, y: 0 });
+    setIsDragging(false);
+    setIsPanMode(false);
+    imageNaturalRef.current = { width: 0, height: 0 };
+  }, [url]);
+
+  // 滚轮缩放（不需要 Ctrl）
+  const handleWheel = useCallback((e: WheelEvent) => {
+    e.preventDefault();
+    const direction = e.deltaY > 0 ? -1 : 1;
+    setZoom(prev => clamp(prev + direction * prev * WHEEL_ZOOM_RATIO, MIN_ZOOM, MAX_ZOOM));
+  }, []);
+
+  // 鼠标按下：空格 或 中键 开始拖拽
+  const handleMouseDown = useCallback((e: MouseEvent) => {
+    if (isPanMode || e.button === 1) {
       e.preventDefault();
-      const delta = e.deltaY > 0 ? -0.1 : 0.1;
-      const newScale = Math.min(Math.max(0.1, scale + delta), 5);
-      setScale(newScale);
-    }
-  };
-
-  // 鼠标按下：开始拖拽（仅当空格按下时）
-  const handleMouseDown = (e: MouseEvent) => {
-    if (isSpacePressed) {
       setIsDragging(true);
-      setDragStart({ x: e.clientX - position.x, y: e.clientY - position.y });
+      setDragAnchor({ x: e.clientX - offset.x, y: e.clientY - offset.y });
     }
-  };
+  }, [isPanMode, offset]);
 
   // 鼠标移动
-  const handleMouseMove = (e: MouseEvent) => {
-    if (isDragging && isSpacePressed) {
-      setPosition({
-        x: e.clientX - dragStart.x,
-        y: e.clientY - dragStart.y
+  const handleMouseMove = useCallback((e: MouseEvent) => {
+    if (isDragging) {
+      setOffset({
+        x: e.clientX - dragAnchor.x,
+        y: e.clientY - dragAnchor.y
       });
     }
-  };
+  }, [isDragging, dragAnchor]);
 
   // 鼠标松开
-  const handleMouseUp = () => {
+  const handleMouseUp = useCallback(() => {
     setIsDragging(false);
-  };
+  }, []);
 
   // 处理右键菜单
   const handleContextMenu = (e: MouseEvent) => {
     e.preventDefault();
-    e.stopPropagation(); // 防止冒泡，避免触发其他地方的关闭逻辑
-    
-    // 如果菜单已经打开，先关闭再打开，确保位置更新和重新渲染
+    e.stopPropagation();
+
     if (menuState.visible) {
       setMenuState(prev => ({ ...prev, visible: false }));
       setTimeout(() => {
-        setMenuState({
-          visible: true,
-          x: e.clientX,
-          y: e.clientY
-        });
+        setMenuState({ visible: true, x: e.clientX, y: e.clientY });
       }, 0);
     } else {
-      setMenuState({
-        visible: true,
-        x: e.clientX,
-        y: e.clientY
-      });
+      setMenuState({ visible: true, x: e.clientX, y: e.clientY });
     }
   };
 
-  // 菜单项配置
+  // 菜单项
   const menuItems: ContextMenuItem[] = [
     {
       key: 'reset',
       label: '重置视图',
       icon: '🔄',
-      onClick: () => {
-        setScale(1);
-        setPosition({ x: 0, y: 0 });
-      }
+      onClick: resetView
     },
     {
       key: 'copy-link',
@@ -106,31 +168,31 @@ const ImageViewer: React.FC<ImageViewerProps> = ({ url, fileName }) => {
     }
   ];
 
-  // 监听空格键和其他快捷键
+  // 空格键平移 + 快捷键缩放
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.code === 'Space' && !e.repeat) {
-        setIsSpacePressed(true);
+        e.preventDefault();
+        setIsPanMode(true);
       }
-      
-      if (e.ctrlKey) {
+
+      if (e.ctrlKey || e.metaKey) {
         if (e.key === '=' || e.key === '+') {
           e.preventDefault();
-          setScale(s => Math.min(s + 0.1, 5));
+          setZoom(s => clamp(s * 1.15, MIN_ZOOM, MAX_ZOOM));
         } else if (e.key === '-') {
           e.preventDefault();
-          setScale(s => Math.max(s - 0.1, 0.1));
+          setZoom(s => clamp(s / 1.15, MIN_ZOOM, MAX_ZOOM));
         } else if (e.key === '0') {
           e.preventDefault();
-          setScale(1);
-          setPosition({ x: 0, y: 0 });
+          resetView();
         }
       }
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
       if (e.code === 'Space') {
-        setIsSpacePressed(false);
+        setIsPanMode(false);
         setIsDragging(false);
       }
     };
@@ -141,15 +203,16 @@ const ImageViewer: React.FC<ImageViewerProps> = ({ url, fileName }) => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, []);
+  }, [resetView]);
 
   return (
-    <ImageViewerWrapper 
-      onWheel={handleWheel} 
+    <ImageViewerWrapper
+      onWheel={handleWheel}
       onContextMenu={handleContextMenu}
-      className={`${isSpacePressed ? 'can-pan' : ''} ${isDragging ? 'is-panning' : ''}`}
+      className={`${isPanMode ? 'can-pan' : ''} ${isDragging ? 'is-panning' : ''}`}
     >
-      <div 
+      <div
+        ref={containerRef}
         className="image-container"
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
@@ -160,29 +223,31 @@ const ImageViewer: React.FC<ImageViewerProps> = ({ url, fileName }) => {
           src={url}
           alt={fileName || 'Image'}
           className="viewer-image"
-          style={{ 
-            transform: `translate(${position.x}px, ${position.y}px) scale(${scale})`,
+          onLoad={handleImageLoad}
+          style={{
+            width: naturalSize.width > 0 ? `${naturalSize.width}px` : undefined,
+            height: naturalSize.height > 0 ? `${naturalSize.height}px` : undefined,
+            transform: `translate(${offset.x}px, ${offset.y}px) scale(${baseScale * zoom})`,
             transition: isDragging ? 'none' : 'transform 0.1s ease-out'
           }}
         />
       </div>
-      
+
       {fileName && (
         <div className="viewer-floating-bar">
           <span className="info-tag">{fileName}</span>
-          <span className="scale-tag">{(scale * 100).toFixed(0)}%</span>
+          <span className="scale-tag">{(zoom * 100).toFixed(0)}%</span>
         </div>
       )}
 
-      {/* 右键菜单层 */}
       <Popover
         trigger="custom"
         visible={menuState.visible}
         onClickOutSide={() => setMenuState(prev => ({ ...prev, visible: false }))}
-        position="bottomLeft" // 改为 bottomLeft：对齐左侧，向右展开
+        position="bottomLeft"
         showArrow={false}
         spacing={4}
-        getPopupContainer={() => document.body} // 渲染到 body，避免容器溢出和遮挡
+        getPopupContainer={() => document.body}
         content={
           <ContextMenu
             items={menuItems}
@@ -196,9 +261,9 @@ const ImageViewer: React.FC<ImageViewerProps> = ({ url, fileName }) => {
             position: 'fixed',
             left: menuState.x,
             top: menuState.y,
-            width: 1, // 给 1px 宽度确保有参考点
+            width: 1,
             height: 1,
-            pointerEvents: 'none', // 不干扰点击
+            pointerEvents: 'none',
             zIndex: 9999
           }}
         />
@@ -208,4 +273,3 @@ const ImageViewer: React.FC<ImageViewerProps> = ({ url, fileName }) => {
 };
 
 export default ImageViewer;
-

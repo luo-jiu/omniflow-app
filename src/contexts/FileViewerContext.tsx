@@ -23,7 +23,7 @@ export const FileViewerProvider: React.FC<{ children: ReactNode }> = ({ children
     loading: false,
   });
 
-  const setFileUrl = (url: string | null, fileName: string | null, fileType: 'image' | 'video' | 'other' | null) => {
+  const setFileUrl = (url: string | null, fileName: string | null, fileType: 'image' | 'video' | 'audio' | 'other' | null) => {
     setFileState({
       fileUrl: url,
       fileName,

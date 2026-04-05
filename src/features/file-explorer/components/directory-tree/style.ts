@@ -36,7 +36,7 @@ export const DirectorySidebarWrapper = styled.aside<{ $isDragging?: boolean }>`
     padding: 4px 6px 10px 2px;
     scrollbar-gutter: stable both-edges;
     overscroll-behavior: contain;
-    font-size: 17px;
+    font-size: 19px;
   }
 
   .resize-handle {
@@ -66,13 +66,13 @@ export const DirectorySidebarWrapper = styled.aside<{ $isDragging?: boolean }>`
     display: block;
     min-width: max-content;
     width: auto;
-    font-size: 17px;
+    font-size: 19px;
   }
 
   /* 全局覆盖 Semi Tree 的字体大小 */
   .custom-tree,
   .custom-tree * {
-    font-size: 17px !important;
+    font-size: 19px !important;
   }
 
   .custom-tree {
@@ -80,11 +80,11 @@ export const DirectorySidebarWrapper = styled.aside<{ $isDragging?: boolean }>`
 
     .semi-tree-option-list .semi-tree-option {
       box-sizing: border-box;
-      min-height: 32px;
+      min-height: 34px;
       padding: 3px 6px;
       border-radius: 8px;
-      font-size: 17px !important;
-      line-height: 26px !important;
+      font-size: 19px !important;
+      line-height: 28px !important;
       color: var(--app-text-secondary);
     }
   }
@@ -115,18 +115,18 @@ export const DirectorySidebarWrapper = styled.aside<{ $isDragging?: boolean }>`
 
     .semi-tree-option-label,
     .semi-tree-option-label-text {
-      font-size: 17px !important;
+      font-size: 19px !important;
     }
 
     .semi-tree-option-label .semi-icon,
     .semi-tree-option-icon {
-      font-size: 20px !important;
+      font-size: 22px !important;
       margin-right: 8px;
       color: var(--app-text-muted);
     }
 
     .semi-tree-option-expand-icon {
-      font-size: 20px !important;
+      font-size: 22px !important;
       color: var(--app-text-muted);
       padding: 6px;
       margin: -6px 2px -6px -6px;
@@ -140,12 +140,12 @@ export const DirectorySidebarWrapper = styled.aside<{ $isDragging?: boolean }>`
   }
 
   .custom-tree .semi-input {
-    font-size: 17px;
-    line-height: 26px;
+    font-size: 19px;
+    line-height: 28px;
   }
 
   .custom-tree .semi-input-wrapper {
-    height: 36px;
+    height: 38px;
     border-radius: 8px;
     background: var(--app-bg-elevated);
     border: 1px solid var(--app-border);
@@ -174,32 +174,52 @@ export const DirectorySidebarWrapper = styled.aside<{ $isDragging?: boolean }>`
     overflow: visible;
     text-overflow: initial;
     color: inherit;
-    font-size: 17px !important;
-    line-height: 26px;
+    font-size: 19px !important;
+    line-height: 28px;
   }
 
   .tree-container::-webkit-scrollbar {
-    height: 8px;
-    width: 8px;
+    height: 6px;
+    width: 6px;
   }
   .tree-container::-webkit-scrollbar-track {
     background: transparent;
-    border-radius: 8px;
   }
   .tree-container::-webkit-scrollbar-thumb {
-    background: rgba(0, 0, 0, 0.1);
-    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.12);
+    border-radius: 10px;
     min-height: 20px;
     min-width: 20px;
   }
-  .tree-container::-webkit-scrollbar-thumb:hover,
-  .tree-container::-webkit-scrollbar-thumb:active,
-  .tree-container::-webkit-scrollbar-thumb:focus {
-    background: rgba(0, 0, 0, 0.18);
+  .tree-container::-webkit-scrollbar-thumb:hover {
+    background: rgba(0, 0, 0, 0.2);
+  }
+  .tree-container::-webkit-scrollbar-corner {
+    background: transparent;
   }
 
   .tree-container {
     scrollbar-width: thin;
+    scrollbar-color: rgba(0, 0, 0, 0.12) transparent;
+  }
+
+  /* 覆盖所有内部可能出现的滚动条 */
+  *::-webkit-scrollbar {
+    height: 6px;
+    width: 6px;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.12);
+    border-radius: 10px;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background: rgba(0, 0, 0, 0.2);
+  }
+  *::-webkit-scrollbar-corner {
+    background: transparent;
   }
 `;
 

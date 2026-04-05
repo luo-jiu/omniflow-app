@@ -23,6 +23,7 @@ process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL
 
 let mainWindow: BrowserWindow | null = null
 let windowHandlersRegistered = false
+let isQuitting = false
 
 function registerWindowIpcHandlers() {
   if (windowHandlersRegistered) {
@@ -97,6 +98,14 @@ function createWindow() {
   })
   mainWindow = win
 
+  // macOS: 点击关闭按钮时隐藏窗口而不是销毁，保持当前页面与状态
+  win.on('close', (event) => {
+    if (process.platform === 'darwin' && !isQuitting) {
+      event.preventDefault()
+      win.hide()
+    }
+  })
+
   win.on('closed', () => {
     if (mainWindow === win) {
       mainWindow = null
@@ -125,6 +134,10 @@ function createWindow() {
 /**
  * 应用生命周期
  */
+app.on('before-quit', () => {
+  isQuitting = true
+})
+
 // 所有窗口关闭时退出（macOS 除外）
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()

@@ -43,8 +43,6 @@ export function useRepositoryTree(libraryId: number, onFileOpen?: (fileUrl: stri
   // ref 追踪状态
   const loadingNodes = useRef<Set<string>>(new Set());
   const expandedKeysRef = useRef<string[]>([]);
-  const isUpdatingTree = useRef(false);
-  const preservedExpandedKeys = useRef<string[]>([]);
   const treesCacheRef = useRef<Record<string, Node[]>>({});
 
   // 同步 treesCache 到 ref
