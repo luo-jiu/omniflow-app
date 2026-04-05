@@ -25,17 +25,21 @@ const DirectoryContextMenu: React.FC<DirectoryContextMenuProps> = ({
       { 
         key: 'new-file', 
         label: '新建文件', 
-        icon: '📄', 
         onClick: () => onAction('新建文件', null) 
       },
       { 
         key: 'new-folder', 
         label: '新建文件夹', 
-        icon: '📁', 
         onClick: () => onAction('新建文件夹', null) 
       }
     ];
-    return <ContextMenu title="根目录操作" items={rootItems} onItemClick={onClose} />;
+    return (
+      <ContextMenu
+        items={rootItems}
+        className="directory-context-menu"
+        onItemClick={onClose}
+      />
+    );
   }
 
   // 文件/文件夹菜单
@@ -43,7 +47,6 @@ const DirectoryContextMenu: React.FC<DirectoryContextMenuProps> = ({
     { 
       key: 'rename', 
       label: '重命名', 
-      icon: '✏️', 
       onClick: () => onAction('重命名', node) 
     }
   ];
@@ -53,13 +56,11 @@ const DirectoryContextMenu: React.FC<DirectoryContextMenuProps> = ({
       { 
         key: 'new-file', 
         label: '新建文件', 
-        icon: '📄', 
         onClick: () => onAction('新建文件', node) 
       },
       { 
         key: 'new-folder', 
         label: '新建文件夹', 
-        icon: '📁', 
         onClick: () => onAction('新建文件夹', node) 
       }
     );
@@ -67,7 +68,6 @@ const DirectoryContextMenu: React.FC<DirectoryContextMenuProps> = ({
     items.push({ 
       key: 'props', 
       label: '属性', 
-      icon: 'ℹ️', 
       onClick: () => onAction('属性', node) 
     });
   }
@@ -79,7 +79,6 @@ const DirectoryContextMenu: React.FC<DirectoryContextMenuProps> = ({
   items.push({
     key: 'delete',
     label: '删除',
-    icon: '🗑️',
     danger: true,
     render: (content) => (
       <Popconfirm
@@ -104,8 +103,8 @@ const DirectoryContextMenu: React.FC<DirectoryContextMenuProps> = ({
 
   return (
     <ContextMenu 
-      title={isFolder ? '文件夹操作' : '文件操作'} 
       items={items} 
+      className="directory-context-menu"
       onItemClick={onClose}
     />
   );

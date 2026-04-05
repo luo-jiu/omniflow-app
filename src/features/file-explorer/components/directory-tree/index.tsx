@@ -850,6 +850,12 @@ export default function DirectoryTree({
         visible={menuState.visible}
         onClickOutSide={() => setMenuState(prev => ({ ...prev, visible: false }))}
         position="bottomLeft" // 改为 bottomLeft
+        style={{
+          padding: 0,
+          backgroundColor: 'transparent',
+          borderColor: 'transparent',
+          boxShadow: 'none',
+        }}
         getPopupContainer={() => document.body}
         showArrow={false}
         spacing={4}

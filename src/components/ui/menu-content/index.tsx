@@ -70,7 +70,25 @@ export const MenuContent = styled.div`
     opacity: 0.5;
     cursor: not-allowed;
   }
+
+  &.directory-context-menu {
+    padding: 5px;
+
+    .semi-divider-horizontal {
+      margin: 2px 0 !important;
+    }
+
+    .menu-item {
+      font-size: 17px;
+      font-weight: 400;
+      padding: 6px 12px;
+      line-height: 1.3;
+    }
+
+    .menu-item + .menu-item {
+      margin-top: 1px;
+    }
+  }
 `;
 
 export default MenuContent;
-
