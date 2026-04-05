@@ -2,6 +2,7 @@ import React from 'react';
 import { Spin } from "@douyinfe/semi-ui";
 import ImageViewer from "../image-viewer";
 import AudioViewer from "../audio-viewer";
+import VideoViewer from "../video-viewer";
 import styled from 'styled-components';
 
 interface FileDispatcherProps {
@@ -52,21 +53,6 @@ const DispatcherWrapper = styled.div`
     }
   }
 
-  .video-container {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: 20px;
-
-    video {
-      max-width: 100%;
-      max-height: calc(100% - 40px);
-      border-radius: 8px;
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-    }
-  }
 `;
 
 /**
@@ -99,14 +85,7 @@ const FileDispatcher: React.FC<FileDispatcherProps> = ({
       return <AudioViewer url={fileUrl} fileName={fileName} />;
     
     case 'video':
-      return (
-        <DispatcherWrapper>
-          <div className="video-container">
-            <video src={fileUrl} controls />
-            {fileName && <div style={{ marginTop: 12 }}>{fileName}</div>}
-          </div>
-        </DispatcherWrapper>
-      );
+      return <VideoViewer url={fileUrl} fileName={fileName} />;
 
     default:
       return (
@@ -124,4 +103,3 @@ const FileDispatcher: React.FC<FileDispatcherProps> = ({
 };
 
 export default FileDispatcher;
-
