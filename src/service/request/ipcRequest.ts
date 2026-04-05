@@ -6,6 +6,20 @@ interface IpcHttpResponse<T = unknown> {
   body?: T;
 }
 
+export interface IpcUploadProgressPayload {
+  uploadId: string;
+  uploadedBytes: number;
+  totalBytes: number;
+  percentage: number;
+  speedBps: number;
+}
+
+export interface IpcUploadTask<T = any> {
+  uploadId: string;
+  promise: Promise<T>;
+  abort: () => Promise<boolean>;
+}
+
 type ApiBody = {
   code?: string | number;
   message?: string | null;
@@ -101,22 +115,90 @@ export async function ipcRequest<T = any>(path: string, options?: any): Promise<
  * @param formDataParams 其他表单参数
  */
 export async function ipcUpload<T = any>(path: string, filePath: string, formDataParams?: Record<string, string>): Promise<T> {
-  try {
-    const token = auth.getToken();
-    const username = auth.getUsername();
-    const headers = {
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(username ? { username } : {}),
-    };
+  const task = createIpcUploadTask<T>(path, filePath, formDataParams);
+  return task.promise;
+}
 
-    const res = await window.electronAPI.upload(
-      `${API_CONFIG.BASE_URL}${path}`,
-      filePath,
-      formDataParams,
-      headers
-    );
-    console.log("📦 IPC Upload 收到数据:", res.body);
-    return res.body as T;
+export function createIpcUploadTask<T = any>(
+  path: string,
+  filePath: string,
+  formDataParams?: Record<string, string>,
+  onProgress?: (payload: IpcUploadProgressPayload) => void,
+): IpcUploadTask<T> {
+  const token = auth.getToken();
+  const username = auth.getUsername();
+  const headers = {
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(username ? { username } : {}),
+  };
+
+  const uploadId = `upload-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const unsubscribe = window.electronAPI.onUploadProgress((payload) => {
+    if (payload.uploadId !== uploadId) return;
+    if (onProgress) onProgress(payload);
+  });
+
+  const promise = window.electronAPI.upload(
+    `${API_CONFIG.BASE_URL}${path}`,
+    filePath,
+    formDataParams,
+    headers,
+    uploadId,
+  ).then((res) => {
+    const status = Number(res?.status ?? 0);
+    const body = res?.body as unknown;
+    const code = getApiCode(body);
+    const businessSuccess = isBusinessSuccess(body);
+
+    // 统一处理登录态失效：清空本地登录态并回到登录页
+    if (status === 401 || code === 'A00200') {
+      auth.clear();
+      if (!window.location.hash.includes('/login')) {
+        window.location.hash = '/login';
+      }
+      throw new Error(`登录状态已失效，请重新登录 (${path})`);
+    }
+
+    if (status >= 400 && !businessSuccess) {
+      const fallback = status === 413
+        ? '上传失败：文件体积超过服务端限制（HTTP 413）'
+        : `HTTP error! status: ${status}`;
+      const message = getErrorMessage(body, fallback);
+      throw new Error(`${message} (${path})`);
+    }
+
+    if (isObject(body) && (body as ApiBody).success === false && !businessSuccess) {
+      const message = getErrorMessage(body, 'Upload failed');
+      throw new Error(`${message} (${path})`);
+    }
+
+    console.log("📦 IPC Upload 收到数据:", body);
+    return body as T;
+  }).catch((err) => {
+    console.error('❌ IPC Upload 请求失败:', err);
+    throw err;
+  }).finally(() => {
+    unsubscribe();
+  });
+
+  const abort = () => window.electronAPI.uploadAbort(uploadId);
+
+  return {
+    uploadId,
+    promise,
+    abort,
+  };
+}
+
+/**
+ * IPC 上传文件封装（兼容旧调用）
+ * @param path API 路径
+ * @param filePath 文件路径
+ * @param formDataParams 其他表单参数
+ */
+export async function ipcUploadLegacy<T = any>(path: string, filePath: string, formDataParams?: Record<string, string>): Promise<T> {
+  try {
+    return await ipcUpload<T>(path, filePath, formDataParams);
   } catch (err) {
     console.error('❌ IPC Upload 请求失败:', err);
     throw err;

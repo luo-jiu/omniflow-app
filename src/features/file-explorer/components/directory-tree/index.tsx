@@ -5,6 +5,7 @@ import { uploadManager } from '@/utils/uploadManager.ts';
 import UploadConfirmModal from './modals/UploadConfirmModal.tsx';
 import CreateNodeModal from './modals/CreateNodeModal.tsx';
 import DirectoryContextMenu from './context-menu/DirectoryContextMenu.tsx';
+import { UPLOAD_TASK_STATUS } from '@/modules/upload-center/model/upload-task.types';
 
 interface DirectoryTreeProps {
   treeData: any[];
@@ -65,12 +66,10 @@ export default function DirectoryTree({
     visible: boolean;
     files: File[]; // 支持多文件
     targetNode: any | null; // 目标文件夹节点
-    loading: boolean;
   }>({
     visible: false,
     files: [],
     targetNode: null,
-    loading: false
   });
 
   // 新建文件/文件夹 Modal 的状态
@@ -169,7 +168,6 @@ export default function DirectoryTree({
       visible: true,
       files: files,
       targetNode: treeNode,
-      loading: false
     });
   };
 
@@ -180,11 +178,10 @@ export default function DirectoryTree({
   };
 
   // 执行上传逻辑
-  const handleConfirmUpload = async () => {
+  const handleConfirmUpload = () => {
     const { files, targetNode } = uploadModal;
     if (!files.length || !targetNode) return;
-    setUploadModal(prev => ({ ...prev, loading: true }));
-    
+
     try {
       const tasks = files.map(file => ({
         file,
@@ -192,34 +189,46 @@ export default function DirectoryTree({
         libraryId: targetNode.libraryId
       }));
 
-      const results = await uploadManager.uploadFiles(tasks, (newNode) => {
-        // 每个文件上传成功后，立即通知父组件刷新该节点（实时反馈）
-        if (onUploadSuccess) {
-          onUploadSuccess(targetNode, newNode);
-        }
+      const batch = uploadManager.createBatch(tasks, {
+        onSingleSuccess: (newNode) => {
+          // 每个文件上传成功后，立即通知父组件刷新该节点（实时反馈）
+          if (onUploadSuccess) {
+            onUploadSuccess(targetNode, newNode);
+          }
+        },
       });
+      setUploadModal({ visible: false, files: [], targetNode: null });
+      Toast.info(`已加入上传队列（${files.length} 个文件）`);
 
-      const failedCount = results.filter(r => r.status === 'rejected').length;
-      if (failedCount === 0) {
-        Toast.success(`成功上传 ${files.length} 个文件`);
-      } else if (failedCount < files.length) {
-        Toast.warning(`部分上传成功：成功 ${files.length - failedCount} 个，失败 ${failedCount} 个`);
-      } else {
-        Toast.error('全部文件上传失败');
-      }
+      void batch.done.then((results) => {
+        const successCount = results.filter(r => r.taskStatus === UPLOAD_TASK_STATUS.SUCCESS).length;
+        const failedCount = results.filter(r => r.taskStatus === UPLOAD_TASK_STATUS.FAILED).length;
+        const canceledCount = results.filter(r => r.taskStatus === UPLOAD_TASK_STATUS.CANCELED).length;
 
-      // 关闭弹窗
-      setUploadModal({ visible: false, files: [], targetNode: null, loading: false });
+        if (failedCount === 0 && canceledCount === 0) {
+          Toast.success(`成功上传 ${successCount} 个文件`);
+        } else if (failedCount === 0 && canceledCount > 0) {
+          Toast.info(`上传已中断：成功 ${successCount} 个，中断 ${canceledCount} 个`);
+        } else if (successCount > 0 || canceledCount > 0) {
+          Toast.warning(
+            `部分上传成功：成功 ${successCount} 个，失败 ${failedCount} 个，中断 ${canceledCount} 个`,
+          );
+        } else {
+          Toast.error('全部文件上传失败');
+        }
+      }).catch((error) => {
+        console.error(error);
+        Toast.error('上传过程中出现未知错误');
+      });
     } catch (error) {
       console.error(error);
       Toast.error('上传过程中出现未知错误');
-      setUploadModal(prev => ({ ...prev, loading: false }));
     }
   };
 
   // 取消上传
   const handleCancelUpload = () => {
-    setUploadModal({ visible: false, files: [], targetNode: null, loading: false });
+    setUploadModal({ visible: false, files: [], targetNode: null });
   };
 
   /** 应用 minWidth 并夹紧 scrollLeft */
@@ -675,7 +684,6 @@ export default function DirectoryTree({
         visible={uploadModal.visible}
         files={uploadModal.files}
         targetNode={uploadModal.targetNode}
-        loading={uploadModal.loading}
         onConfirm={handleConfirmUpload}
         onCancel={handleCancelUpload}
       />

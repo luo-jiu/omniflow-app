@@ -26,6 +26,13 @@ interface Window {
   ipcRenderer: import('electron').IpcRenderer
 
   electronAPI: {
+    onUploadProgress: (listener: (payload: {
+      uploadId: string;
+      uploadedBytes: number;
+      totalBytes: number;
+      percentage: number;
+      speedBps: number;
+    }) => void) => () => void;
     getStaticData: () => Promise<{
       totalStorage: number;
       cpuModel: string;
@@ -44,10 +51,12 @@ interface Window {
       url: string,
       filePath: string,
       formDataParams?: Record<string, string>,
-      headers?: Record<string, string>
+      headers?: Record<string, string>,
+      uploadId?: string
     ) => Promise<{
       status: number;
       body: any;
     }>;
+    uploadAbort: (uploadId: string) => Promise<boolean>;
   };
 }

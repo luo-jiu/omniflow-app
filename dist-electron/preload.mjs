@@ -23,7 +23,15 @@ electron.contextBridge.exposeInMainWorld("ipcRenderer", {
 electron.contextBridge.exposeInMainWorld("electronAPI", {
   getStaticData: () => electron.ipcRenderer.invoke("sys:get-static-data"),
   fetch: (url, options) => electron.ipcRenderer.invoke("http:fetch", url, options),
-  upload: (url, filePath, formDataParams, headers) => electron.ipcRenderer.invoke("http:upload", url, filePath, formDataParams, headers)
+  upload: (url, filePath, formDataParams, headers, uploadId) => electron.ipcRenderer.invoke("http:upload", url, filePath, formDataParams, headers, uploadId),
+  uploadAbort: (uploadId) => electron.ipcRenderer.invoke("http:upload:abort", uploadId),
+  onUploadProgress: (listener) => {
+    const wrapped = (_event, payload) => {
+      listener(payload);
+    };
+    electron.ipcRenderer.on("http:upload:progress", wrapped);
+    return () => electron.ipcRenderer.removeListener("http:upload:progress", wrapped);
+  }
 });
 electron.contextBridge.exposeInMainWorld("electronZoom", (delta) => {
   return electron.ipcRenderer.invoke("zoom-adjust", delta);

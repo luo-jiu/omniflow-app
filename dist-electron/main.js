@@ -6,6 +6,8 @@ import fs from "fs/promises";
 import require$$0 from "os";
 import require$$1 from "child_process";
 import fs$1 from "fs";
+import http from "node:http";
+import https from "node:https";
 function registerFileIpc(ipcMain2) {
   ipcMain2.handle("file:open", async () => {
     const result = await dialog.showOpenDialog({ properties: ["openFile"] });
@@ -170,6 +172,22 @@ function registerSystemIpc(ipcMain2) {
   ipcMain2.handle("sys:get-static-data", getStaticData);
 }
 function registerHttpIpc(ipcMain2) {
+  const activeUploads = /* @__PURE__ */ new Map();
+  const sendUploadProgress = (runtime, force = false) => {
+    const now = Date.now();
+    if (!force && now - runtime.lastProgressAt < 80) return;
+    runtime.lastProgressAt = now;
+    const elapsedMs = Math.max(now - runtime.startedAt, 1);
+    const speedBps = Math.floor(runtime.uploadedBytes * 1e3 / elapsedMs);
+    const percentage = runtime.totalBytes > 0 ? Math.min(runtime.uploadedBytes / runtime.totalBytes * 100, 100) : 0;
+    runtime.sender.send("http:upload:progress", {
+      uploadId: runtime.uploadId,
+      uploadedBytes: runtime.uploadedBytes,
+      totalBytes: runtime.totalBytes,
+      percentage,
+      speedBps
+    });
+  };
   ipcMain2.handle("http:fetch", async (_event, url, options = {}) => {
     console.log("start...");
     console.log("URL:", url);
@@ -216,24 +234,98 @@ function registerHttpIpc(ipcMain2) {
       request.end();
     });
   });
-  ipcMain2.handle("http:upload", async (_event, url, filePath, formDataParams = {}, headers = {}) => {
+  ipcMain2.handle("http:upload:abort", async (_event, uploadId) => {
+    const runtime = activeUploads.get(uploadId);
+    if (!runtime) return false;
+    runtime.aborted = true;
+    activeUploads.delete(uploadId);
+    try {
+      runtime.fileStream.destroy(new Error("UPLOAD_ABORTED"));
+    } catch {
+    }
+    try {
+      runtime.request.destroy(new Error("UPLOAD_ABORTED"));
+    } catch {
+    }
+    return true;
+  });
+  ipcMain2.handle("http:upload", async (event, url, filePath, formDataParams = {}, headers = {}, uploadId) => {
     return new Promise((resolve, reject) => {
+      let stat;
+      try {
+        stat = fs$2.statSync(filePath);
+      } catch (error) {
+        reject(new Error(`读取上传文件失败: ${filePath} (${String(error)})`));
+        return;
+      }
+      if (!stat.isFile()) {
+        reject(new Error(`上传目标不是文件: ${filePath}`));
+        return;
+      }
       const boundary = "----WebKitFormBoundary" + Math.random().toString(36).substring(2);
-      const request = net.request({
-        url,
-        method: "POST"
-      });
+      const currentUploadId = uploadId || `upload-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const fileName = path.basename(filePath);
+      const fieldsPrefix = Object.entries(formDataParams).map(([key, value]) => `--${boundary}\r
+Content-Disposition: form-data; name="${key}"\r
+\r
+${value}\r
+`).join("");
+      const filePrefix = `--${boundary}\r
+Content-Disposition: form-data; name="file"; filename="${fileName}"\r
+Content-Type: application/octet-stream\r
+\r
+`;
+      const fileSuffix = `\r
+--${boundary}--\r
+`;
+      const contentLength = Buffer.byteLength(fieldsPrefix) + Buffer.byteLength(filePrefix) + stat.size + Buffer.byteLength(fileSuffix);
       const finalHeaders = {
         ...headers,
-        "Content-Type": `multipart/form-data; boundary=${boundary}`
+        "Content-Type": `multipart/form-data; boundary=${boundary}`,
+        "Content-Length": String(contentLength)
       };
-      Object.entries(finalHeaders).forEach(([key, value]) => {
-        request.setHeader(key, value);
+      const parsedUrl = new URL(url);
+      const transport = parsedUrl.protocol === "https:" ? https : http;
+      const request = transport.request({
+        protocol: parsedUrl.protocol,
+        hostname: parsedUrl.hostname,
+        port: parsedUrl.port ? Number(parsedUrl.port) : void 0,
+        path: `${parsedUrl.pathname}${parsedUrl.search}`,
+        method: "POST",
+        headers: finalHeaders
       });
+      const fileStream = fs$2.createReadStream(filePath, {
+        highWaterMark: 1024 * 1024
+      });
+      const runtime = {
+        uploadId: currentUploadId,
+        request,
+        fileStream,
+        sender: event.sender,
+        totalBytes: Math.max(0, stat.size),
+        uploadedBytes: 0,
+        startedAt: Date.now(),
+        lastProgressAt: 0,
+        aborted: false
+      };
+      activeUploads.set(currentUploadId, runtime);
+      let settled = false;
+      const safeResolve = (payload) => {
+        if (settled) return;
+        settled = true;
+        activeUploads.delete(currentUploadId);
+        resolve(payload);
+      };
+      const safeReject = (error) => {
+        if (settled) return;
+        settled = true;
+        activeUploads.delete(currentUploadId);
+        reject(error);
+      };
       let responseBody = "";
       request.on("response", (response) => {
         response.on("data", (chunk) => {
-          responseBody += chunk;
+          responseBody += chunk.toString();
         });
         response.on("end", () => {
           let parsedBody;
@@ -242,47 +334,48 @@ function registerHttpIpc(ipcMain2) {
           } catch {
             parsedBody = responseBody;
           }
-          resolve({
+          safeResolve({
             status: response.statusCode,
             body: parsedBody
           });
         });
       });
-      request.on("error", (err) => reject(err));
-      const writePart = (name, value) => {
-        request.write(`--${boundary}\r
-`);
-        request.write(`Content-Disposition: form-data; name="${name}"\r
-\r
-`);
-        request.write(`${value}\r
-`);
-      };
-      Object.entries(formDataParams).forEach(([key, value]) => {
-        writePart(key, value);
+      request.on("error", (err) => {
+        if (runtime.aborted) {
+          safeReject(new Error("UPLOAD_ABORTED"));
+          return;
+        }
+        try {
+          fileStream.destroy(err);
+        } catch {
+        }
+        safeReject(err);
       });
-      const fileName = path.basename(filePath);
-      request.write(`--${boundary}\r
-`);
-      request.write(`Content-Disposition: form-data; name="file"; filename="${fileName}"\r
-`);
-      request.write(`Content-Type: application/octet-stream\r
-\r
-`);
-      const fileStream = fs$2.createReadStream(filePath);
+      request.write(fieldsPrefix);
+      request.write(filePrefix);
       fileStream.on("data", (chunk) => {
-        request.write(chunk);
+        if (runtime.aborted) return;
+        runtime.uploadedBytes += chunk.length;
+        sendUploadProgress(runtime);
       });
       fileStream.on("end", () => {
-        request.write(`\r
---${boundary}--\r
-`);
+        if (runtime.aborted) return;
+        sendUploadProgress(runtime, true);
+        request.write(fileSuffix);
         request.end();
       });
       fileStream.on("error", (err) => {
-        reject(err);
-        request.abort();
+        if (runtime.aborted) {
+          safeReject(new Error("UPLOAD_ABORTED"));
+          return;
+        }
+        safeReject(err);
+        try {
+          request.destroy(err);
+        } catch {
+        }
       });
+      fileStream.pipe(request, { end: false });
     });
   });
 }

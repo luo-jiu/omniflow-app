@@ -27,8 +27,33 @@ contextBridge.exposeInMainWorld('ipcRenderer', {
 contextBridge.exposeInMainWorld('electronAPI', {
   getStaticData: () => ipcRenderer.invoke('sys:get-static-data'),
   fetch: (url: string, options?: any) => ipcRenderer.invoke('http:fetch', url, options),
-  upload: (url: string, filePath: string, formDataParams?: Record<string, string>, headers?: Record<string, string>) => 
-    ipcRenderer.invoke('http:upload', url, filePath, formDataParams, headers),
+  upload: (
+    url: string,
+    filePath: string,
+    formDataParams?: Record<string, string>,
+    headers?: Record<string, string>,
+    uploadId?: string,
+  ) => ipcRenderer.invoke('http:upload', url, filePath, formDataParams, headers, uploadId),
+  uploadAbort: (uploadId: string) => ipcRenderer.invoke('http:upload:abort', uploadId),
+  onUploadProgress: (listener: (payload: {
+    uploadId: string;
+    uploadedBytes: number;
+    totalBytes: number;
+    percentage: number;
+    speedBps: number;
+  }) => void) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, payload: {
+      uploadId: string;
+      uploadedBytes: number;
+      totalBytes: number;
+      percentage: number;
+      speedBps: number;
+    }) => {
+      listener(payload);
+    };
+    ipcRenderer.on('http:upload:progress', wrapped);
+    return () => ipcRenderer.removeListener('http:upload:progress', wrapped);
+  },
 });
 
 contextBridge.exposeInMainWorld('electronZoom', (delta: number) => {
@@ -41,4 +66,3 @@ contextBridge.exposeInMainWorld('electronWindow', {
   maximize: () => ipcRenderer.send('window-maximize'),
   close: () => ipcRenderer.send('window-close'),
 });
-

@@ -6,7 +6,6 @@ interface UploadConfirmModalProps {
   visible: boolean;
   files: File[];
   targetNode: any;
-  loading: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -15,7 +14,6 @@ const UploadConfirmModal: React.FC<UploadConfirmModalProps> = ({
   visible,
   files,
   targetNode,
-  loading,
   onConfirm,
   onCancel
 }) => {
@@ -25,7 +23,6 @@ const UploadConfirmModal: React.FC<UploadConfirmModalProps> = ({
       visible={visible}
       onOk={onConfirm}
       onCancel={onCancel}
-      confirmLoading={loading}
       okText="确定上传"
       cancelText="取消"
       maskClosable={false}
@@ -43,17 +40,17 @@ const UploadConfirmModal: React.FC<UploadConfirmModalProps> = ({
             <strong>上传位置:</strong> 📂 {targetNode.label}
           </div>
 
-          <div style={{ 
-            maxHeight: '200px', 
-            overflowY: 'auto', 
+          <div style={{
+            maxHeight: '200px',
+            overflowY: 'auto',
             border: '1px solid var(--semi-color-border)',
             borderRadius: '4px',
             padding: '8px',
             backgroundColor: 'var(--semi-color-fill-0)'
           }}>
             {files.map((f, i) => (
-              <div key={i} style={{ 
-                display: 'flex', 
+              <div key={i} style={{
+                display: 'flex',
                 justifyContent: 'space-between',
                 padding: '4px 0',
                 fontSize: '13px',
@@ -79,4 +76,3 @@ const UploadConfirmModal: React.FC<UploadConfirmModalProps> = ({
 };
 
 export default UploadConfirmModal;
-

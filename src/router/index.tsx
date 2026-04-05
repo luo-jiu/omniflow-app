@@ -6,6 +6,7 @@ import { RequireAuth, RootRedirect } from './require-auth'
 const Libraries = lazy(() => import('@/views/library'))
 const LibraryDetail = lazy(() => import('@/views/library/detail')) // 仓库选择页
 const Settings = lazy(() => import('@/views/settings'))
+const UploadCenter = lazy(() => import('@/views/upload-center'))
 const Login = lazy(() => import('@/views/login'))
 
 const routes: RouteObject[] = [
@@ -35,6 +36,14 @@ const routes: RouteObject[] = [
     element: (
       <RequireAuth>
         <Settings />
+      </RequireAuth>
+    )
+  },
+  {
+    path: '/upload-center',
+    element: (
+      <RequireAuth>
+        <UploadCenter />
       </RequireAuth>
     )
   },

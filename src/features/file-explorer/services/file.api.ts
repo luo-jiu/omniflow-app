@@ -1,4 +1,4 @@
-import { ipcRequest as request, ipcUpload } from '@/service/request/ipcRequest';
+import { createIpcUploadTask, ipcRequest as request, ipcUpload } from '@/service/request/ipcRequest';
 
 export type Library = {
   createdAt: string;
@@ -82,13 +82,62 @@ export async function getChildrenByNodeId(nodeId: number, libraryId: number) {
 }
 
 // 上传文件并创建节点
-export async function uploadAndCreateNode(file: File, parentId: number, libraryId: number) {
+export async function uploadAndCreateNode(
+  file: File,
+  parentId: number,
+  libraryId: number,
+  options?: {
+    onProgress?: (uploadedBytes: number, totalBytes: number, percentage: number, speedBps: number) => void;
+    setAbort?: (aborter: () => void | Promise<void | boolean>) => void;
+  },
+) {
   const filePath = (file as any).path;
   if (!filePath) {
     throw new Error("Unable to retrieve file path for upload.");
   }
 
-  const json = await ipcUpload("/v1/directory/upload", filePath, {
+  const uploadTask = createIpcUploadTask<any>(
+    "/v1/directory/upload",
+    filePath,
+    {
+      parent_id: String(parentId),
+      library_id: String(libraryId),
+    },
+    (progress) => {
+      if (options?.onProgress) {
+        options.onProgress(
+          progress.uploadedBytes,
+          progress.totalBytes,
+          progress.percentage,
+          progress.speedBps,
+        );
+      }
+    },
+  );
+
+  if (options?.setAbort) {
+    options.setAbort(uploadTask.abort);
+  }
+
+  const json = await uploadTask.promise;
+  if (!json) {
+    throw new Error('上传响应为空');
+  }
+
+  if (!json.success) {
+    throw new Error(json.message || "上传失败");
+  }
+
+  const d = json.data;
+  return {
+    ...d,
+    type: d.type === 0 || d.type === "0" ? "dir" : "file",
+  };
+}
+
+// 兼容旧上传（无进度）
+export async function uploadAndCreateNodeLegacy(file: File, parentId: number, libraryId: number) {
+  const json = await ipcUpload("/v1/directory/upload", (file as any).path, {
     parent_id: String(parentId),
     library_id: String(libraryId),
   });

@@ -1,7 +1,7 @@
 import { FC } from 'react';
 import {HeaderWrapper} from './style';
 import { Button, Avatar, Popover } from '@douyinfe/semi-ui';
-import {IconSetting, IconExit} from '@douyinfe/semi-icons';
+import {IconSetting, IconExit, IconUpload} from '@douyinfe/semi-icons';
 import {useNavigate} from "react-router-dom";
 import { useAuth } from '@/contexts/AuthContext';
 import ContextMenu from '@/components/ui/context-menu';
@@ -45,6 +45,13 @@ const AppHeader: FC = () => {
           </div>
         </div>
         <div className="right-controls">
+          <Button
+            onClick={() => navigate('/upload-center')}
+            theme="borderless"
+            className="header-action"
+            icon={<IconUpload />}
+            title="上传中心"
+          />
           <Button
             onClick={() => navigate('/settings')}
             theme="borderless"
