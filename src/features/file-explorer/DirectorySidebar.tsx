@@ -23,6 +23,7 @@ const DirectorySidebar: React.FC<Props> = ({ libraryId, onFileOpen }) => {
     appendNodeUnderParent,
     removeNode,
     updateNodeName,
+    refreshAfterMove,
   } = useRepositoryTree(libraryId, onFileOpen);
 
   return (
@@ -46,6 +47,9 @@ const DirectorySidebar: React.FC<Props> = ({ libraryId, onFileOpen }) => {
           }}
           onRenameSuccess={(nodeKey, payload) => {
             updateNodeName(nodeKey, payload);
+          }}
+          onMoveSuccess={({ oldParentId, newParentId }) => {
+            void refreshAfterMove(oldParentId, newParentId);
           }}
           libraryId={libraryId}
         />

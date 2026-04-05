@@ -9,7 +9,7 @@ import {
   restoreNodeAndChildren,
   type RecycleBinItem,
 } from '@/features/file-explorer/services/file.api';
-import { invalidateRepositoryTreeSnapshot } from '@/features/file-explorer/hooks/useRepositoryTree';
+import { markRepositoryTreeSnapshotDirty } from '@/features/file-explorer/hooks/useRepositoryTree';
 import { requestDesktopWindowActivation } from '@/utils/windowActivation';
 
 const Page = styled.div`
@@ -175,7 +175,7 @@ const RecycleBin: React.FC = () => {
     try {
       await restoreNodeAndChildren(item.id, libraryId);
       setItems(prev => prev.filter(x => x.id !== item.id));
-      invalidateRepositoryTreeSnapshot(libraryId);
+      markRepositoryTreeSnapshotDirty(libraryId);
       Toast.success('已恢复');
     } catch (error: any) {
       Toast.error(error?.message || '恢复失败');
@@ -186,7 +186,7 @@ const RecycleBin: React.FC = () => {
     try {
       await hardDeleteNodeAndChildren(item.id, libraryId);
       setItems(prev => prev.filter(x => x.id !== item.id));
-      invalidateRepositoryTreeSnapshot(libraryId);
+      markRepositoryTreeSnapshotDirty(libraryId);
       Toast.success('已彻底删除');
     } catch (error: any) {
       Toast.error(error?.message || '彻底删除失败');

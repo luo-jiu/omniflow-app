@@ -1,6 +1,6 @@
 import React, { ReactNode, useEffect, useRef, useState } from 'react';
 import { Tree, Toast, Input, Popover } from '@douyinfe/semi-ui';
-import { createNode, deleteNodeAndChildren, renameNode } from "../../services/file.api";
+import { createNode, deleteNodeAndChildren, moveNode, renameNode } from "../../services/file.api";
 import { uploadManager } from '@/utils/uploadManager.ts';
 import UploadConfirmModal from './modals/UploadConfirmModal.tsx';
 import CreateNodeModal from './modals/CreateNodeModal.tsx';
@@ -27,6 +27,8 @@ interface DirectoryTreeProps {
   onDeleteSuccess?: (parentNode: any, deletedNodeKey: string) => void;
   // 重命名成功后的回调
   onRenameSuccess?: (nodeKey: string, payload: { name: string; ext?: string }) => void;
+  // 拖拽移动成功后，通知父组件刷新受影响父目录
+  onMoveSuccess?: (payload: { oldParentId: number; newParentId: number }) => void | Promise<void>;
   libraryId: number; // 添加 libraryId prop
 }
 
@@ -45,6 +47,7 @@ export default function DirectoryTree({
   onUploadSuccess,
   onDeleteSuccess,
   onRenameSuccess,
+  onMoveSuccess,
   loadData,
   libraryId,
 }: DirectoryTreeProps) {
@@ -185,6 +188,118 @@ export default function DirectoryTree({
   const isExternalFileDrag = (e: React.DragEvent) => {
     const types = Array.from(e.dataTransfer?.types || []);
     return types.includes('Files');
+  };
+
+  const ROOT_PARENT_ID = 1;
+
+  const findNodeById = (nodes: any[], targetId: number): any | null => {
+    for (const node of nodes) {
+      if (node.id === targetId) return node;
+      if (node.children && node.children.length > 0) {
+        const found = findNodeById(node.children, targetId);
+        if (found) return found;
+      }
+    }
+    return null;
+  };
+
+  const getChildrenByParentId = (parentId: number): any[] => {
+    if (parentId === ROOT_PARENT_ID) {
+      return treeData;
+    }
+    const parentNode = findNodeById(treeData, parentId);
+    return parentNode?.children || [];
+  };
+
+  const getNextSiblingId = (parentId: number, nodeId: number): number | null => {
+    const siblings = getChildrenByParentId(parentId);
+    const index = siblings.findIndex((item: any) => item.id === nodeId);
+    if (index < 0) return null;
+    const next = siblings[index + 1];
+    return next?.id ?? null;
+  };
+
+  const handleTreeDrop = async (info: any) => {
+    runtimeLogger.debug('放下节点', info);
+
+    const dragNode = info?.dragNode as any;
+    const dropNode = info?.node as any;
+    if (!dragNode || !dropNode) {
+      Toast.error('拖拽数据异常');
+      return;
+    }
+
+    const dragNodeId = Number(dragNode.id);
+    const dropNodeId = Number(dropNode.id);
+    if (!Number.isFinite(dragNodeId) || !Number.isFinite(dropNodeId)) {
+      Toast.error('拖拽节点数据异常');
+      return;
+    }
+
+    const dragPos = String(dragNode.pos || '');
+    const dropPos = String(dropNode.pos || '');
+    if (dropPos === dragPos || (dragPos && dropPos.startsWith(`${dragPos}-`))) {
+      Toast.warning('不能移动到自身或其子节点下');
+      return;
+    }
+
+    const oldParentId = Number(dragNode.parentId || ROOT_PARENT_ID);
+    const dropToGap = Boolean(info?.dropToGap);
+    const dropPosition = Number(info?.dropPosition ?? 0);
+    const dropNodeIndex = Number(String(dropNode.pos || '').split('-').pop() || 0);
+    const relativeDropPosition = Number.isFinite(dropNodeIndex)
+      ? dropPosition - dropNodeIndex
+      : dropPosition;
+
+    let newParentId = oldParentId;
+    let beforeNodeId: number | null = null;
+
+    if (dropToGap) {
+      newParentId = Number(dropNode.parentId || ROOT_PARENT_ID);
+      if (relativeDropPosition < 0) {
+        beforeNodeId = dropNodeId;
+      } else {
+        beforeNodeId = getNextSiblingId(newParentId, dropNodeId);
+      }
+    } else {
+      const dropNodeIsFolder = dropNode.isLeaf !== true;
+      if (!dropNodeIsFolder) {
+        Toast.warning('请拖到文件夹上，或拖到节点间隙进行同级排序');
+        return;
+      }
+      newParentId = dropNodeId;
+      beforeNodeId = null;
+    }
+
+    if (!Number.isFinite(newParentId) || newParentId <= 0) {
+      newParentId = ROOT_PARENT_ID;
+    }
+
+    const dragNodeName = String(
+      dragNode.data?.rawName || dragNode.name || dragNode.label || '',
+    ).trim();
+    if (!dragNodeName) {
+      Toast.error('节点名称异常，无法移动');
+      return;
+    }
+
+    try {
+      await moveNode({
+        nodeId: dragNodeId,
+        name: dragNodeName,
+        newParentId,
+        beforeNodeId,
+        libraryId,
+      });
+
+      if (onMoveSuccess) {
+        await onMoveSuccess({ oldParentId, newParentId });
+      }
+      Toast.success('移动成功');
+    } catch (error: any) {
+      runtimeLogger.error('移动节点失败:', error);
+      Toast.error(error?.message || '移动失败');
+    }
   };
 
   // 执行上传逻辑
@@ -710,8 +825,7 @@ export default function DirectoryTree({
             onDragStart={(info) => runtimeLogger.debug('开始拖拽', info)}
             onDragEnd={(info) => runtimeLogger.debug('拖拽结束', info)}
             onDrop={(info) => {
-              runtimeLogger.debug('放下节点', info);
-              // TODO: 根据 info.dropToGap / info.dropPosition 更新 treeData
+              void handleTreeDrop(info);
             }}
             className="custom-tree"
             treeData={treeData}

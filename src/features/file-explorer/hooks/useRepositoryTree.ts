@@ -47,9 +47,14 @@ interface RepositoryTreeSnapshot {
 
 const REPOSITORY_TREE_SNAPSHOT_MAX_ENTRIES = 20;
 const repositoryTreeSnapshotStore = new Map<number, RepositoryTreeSnapshot>();
+const repositoryTreeDirtyLibraries = new Set<number>();
 
 export function invalidateRepositoryTreeSnapshot(libraryId: number) {
   repositoryTreeSnapshotStore.delete(libraryId);
+}
+
+export function markRepositoryTreeSnapshotDirty(libraryId: number) {
+  repositoryTreeDirtyLibraries.add(libraryId);
 }
 
 function setRepositoryTreeSnapshot(libraryId: number, snapshot: RepositoryTreeSnapshot) {
@@ -70,6 +75,17 @@ function findNodeByKey(nodes: Node[], key: string): Node | null {
     if (node.key === key) return node;
     if (node.children && node.children.length > 0) {
       const found = findNodeByKey(node.children, key);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+function findNodeById(nodes: Node[], id: number): Node | null {
+  for (const node of nodes) {
+    if (node.id === id) return node;
+    if (node.children && node.children.length > 0) {
+      const found = findNodeById(node.children, id);
       if (found) return found;
     }
   }
@@ -127,13 +143,6 @@ export function useRepositoryTree(
     }
   }, []);
 
-  // 初次加载目录树（支持缓存恢复）
-  useEffect(() => {
-    const repoId = String(libraryId);
-    const hasSnapshot = repositoryTreeSnapshotStore.has(libraryId);
-    void selectRepository(repoId, { resetExpanded: !hasSnapshot });
-  }, [libraryId, selectRepository]);
-
   // 快照保存：切走页面后可恢复
   useEffect(() => {
     setRepositoryTreeSnapshot(libraryId, {
@@ -160,6 +169,73 @@ export function useRepositoryTree(
       return node;
     });
   }, []);
+
+  // 脏标记重建：保留展开状态，按可见展开分支重拉数据，避免“恢复后整树折叠”
+  const rebuildTreeByExpandedState = useCallback(async (repoId: string, sourceExpandedKeys: string[]) => {
+    let rebuiltTree = (await getChildrenByNodeId(1, Number(repoId))).map(mapToTreeNode);
+    let pendingKeys = Array.from(new Set(sourceExpandedKeys));
+
+    while (pendingKeys.length > 0) {
+      const nextPending: string[] = [];
+      let progressed = false;
+
+      for (const key of pendingKeys) {
+        const target = findNodeByKey(rebuiltTree, key);
+        if (!target) {
+          // 目标节点可能在上层目录加载后出现，放到下一轮重试
+          nextPending.push(key);
+          continue;
+        }
+        if (target.type !== 'dir') {
+          continue;
+        }
+        const children = await getChildrenByNodeId(target.id, Number(repoId));
+        rebuiltTree = updateNodeChildren(rebuiltTree, key, children.map(mapToTreeNode));
+        progressed = true;
+      }
+
+      if (!progressed) {
+        break;
+      }
+      pendingKeys = nextPending;
+    }
+
+    const filteredExpandedKeys = sourceExpandedKeys.filter(key => findNodeByKey(rebuiltTree, key));
+    return { rebuiltTree, filteredExpandedKeys };
+  }, [updateNodeChildren]);
+
+  // 初次加载目录树（支持缓存恢复）
+  useEffect(() => {
+    const repoId = String(libraryId);
+    const hasSnapshot = repositoryTreeSnapshotStore.has(libraryId);
+    const shouldRebuildTree = repositoryTreeDirtyLibraries.has(libraryId);
+
+    const bootstrap = async () => {
+      await selectRepository(repoId, { resetExpanded: !hasSnapshot });
+
+      if (!shouldRebuildTree) {
+        return;
+      }
+
+      repositoryTreeDirtyLibraries.delete(libraryId);
+      try {
+        const { rebuiltTree, filteredExpandedKeys } = await rebuildTreeByExpandedState(
+          repoId,
+          expandedKeysRef.current,
+        );
+        setTreesCache(prev => ({
+          ...prev,
+          [repoId]: rebuiltTree,
+        }));
+        setExpandedKeys(filteredExpandedKeys);
+        expandedKeysRef.current = filteredExpandedKeys;
+      } catch (error) {
+        runtimeLogger.warn('目录树脏重建失败，保留现有快照', error);
+      }
+    };
+
+    void bootstrap();
+  }, [libraryId, rebuildTreeByExpandedState, selectRepository]);
 
   // 更新节点名称
   const updateNodeName = useCallback((nodeKey: string, payload: { name: string; ext?: string }) => {
@@ -272,6 +348,40 @@ export function useRepositoryTree(
       };
     });
   }, [selectedRepository, removeNodeFromTree]);
+
+  // 刷新某个父节点下的直接子节点（用于移动后同步排序/归属）
+  const refreshParentChildren = useCallback(async (parentId: number) => {
+    const children = await getChildrenByNodeId(parentId, Number(selectedRepository));
+    const mapped = children.map(mapToTreeNode);
+
+    setTreesCache(prev => {
+      const current = prev[selectedRepository] || [];
+
+      // 根目录 parentId 为 1，直接替换根列表
+      if (parentId === 1) {
+        return {
+          ...prev,
+          [selectedRepository]: mapped,
+        };
+      }
+
+      if (!current.length) return prev;
+      const parentNode = findNodeById(current, parentId);
+      if (!parentNode) return prev;
+
+      return {
+        ...prev,
+        [selectedRepository]: updateNodeChildren(current, parentNode.key, mapped),
+      };
+    });
+  }, [selectedRepository, updateNodeChildren]);
+
+  const refreshAfterMove = useCallback(async (oldParentId: number, newParentId: number) => {
+    await refreshParentChildren(oldParentId);
+    if (newParentId !== oldParentId) {
+      await refreshParentChildren(newParentId);
+    }
+  }, [refreshParentChildren]);
 
   // 加载子节点，加载完成后下一帧展开（保证动画）
   const loadChildren = useCallback(async (node: Node): Promise<void> => {
@@ -438,5 +548,6 @@ export function useRepositoryTree(
     appendNodeUnderParent,
     removeNode,
     updateNodeName,
+    refreshAfterMove,
   };
 }

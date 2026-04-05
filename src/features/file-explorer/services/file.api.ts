@@ -194,6 +194,27 @@ export async function renameNode(payload: {
   return body.data;
 }
 
+// 移动节点（支持同级排序与跨目录移动）
+export async function moveNode(payload: {
+  nodeId: number;
+  name: string;
+  newParentId: number;
+  beforeNodeId?: number | null;
+  libraryId: number;
+}) {
+  const body = await request(`/v1/nodes/${payload.nodeId}/move`, {
+    method: 'PATCH',
+    body: JSON.stringify({
+      nodeId: payload.nodeId,
+      name: payload.name,
+      newParentId: payload.newParentId,
+      beforeNodeId: payload.beforeNodeId ?? null,
+      libraryId: payload.libraryId,
+    }),
+  });
+  return body.data;
+}
+
 // 删除节点及其后代
 export async function deleteNodeAndChildren(ancestorId: number, libraryId: number) {
   const body = await request(`/v1/nodes/${ancestorId}/library/${libraryId}`, {

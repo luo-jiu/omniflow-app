@@ -86,7 +86,7 @@ const DirectoryContextMenu: React.FC<DirectoryContextMenuProps> = ({
         title={<div style={{ fontSize: '16px', fontWeight: 600 }}>确认删除？</div>}
         content={
           <div style={{ fontSize: '14px', marginTop: '8px', width: '240px' }}>
-            将删除「{node.data?.rawName ?? node.label ?? node.key}」及其所有子内容，此操作不可恢复。
+            将把「{node.data?.rawName ?? node.label ?? node.key}」及其子内容移入回收站，你可在回收站恢复或彻底删除。
           </div>
         }
         okType="danger"
