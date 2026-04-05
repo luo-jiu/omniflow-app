@@ -3,6 +3,7 @@
 import { app, BrowserWindow, ipcMain } from 'electron'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
+import { existsSync } from 'node:fs'
 import registerIpcHandlers from './ipc'
 
 // __dirname 处理（因为 ESM 下没有内置 __dirname）
@@ -20,6 +21,11 @@ export const RENDERER_DIST = path.join(process.env.APP_ROOT, 'dist')
 process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL
   ? path.join(process.env.APP_ROOT, 'public')
   : RENDERER_DIST
+const APP_ICON_PATH = path.join(process.env.APP_ROOT, 'build', 'icons', 'icon.png')
+
+function getAppIconPath() {
+  return existsSync(APP_ICON_PATH) ? APP_ICON_PATH : null
+}
 
 let mainWindow: BrowserWindow | null = null
 let windowHandlersRegistered = false
@@ -76,6 +82,7 @@ function createWindow() {
     mainWindow.focus()
     return mainWindow
   }
+  const appIconPath = getAppIconPath()
 
   const win = new BrowserWindow({
     width: 1200,
@@ -95,6 +102,7 @@ function createWindow() {
       // webSecurity: true           // 启用同源策略
     },
     autoHideMenuBar: true, // 自动隐藏菜单栏
+    ...(appIconPath ? { icon: appIconPath } : {})
   })
   mainWindow = win
 
@@ -161,6 +169,11 @@ app.on('activate', () => {
 
 // app 初始化完成后创建窗口
 app.whenReady().then(() => {
+  const appIconPath = getAppIconPath()
+  if (appIconPath && process.platform === 'darwin') {
+    app.dock.setIcon(appIconPath)
+  }
+
   registerIpcHandlers() // 注册自定义 IPC 事件
   registerWindowIpcHandlers()
   createWindow()        // 创建主窗口

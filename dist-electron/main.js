@@ -1,11 +1,11 @@
 import { dialog, net, ipcMain, app, BrowserWindow } from "electron";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import fs$2, { existsSync } from "node:fs";
 import fs from "fs/promises";
 import require$$0 from "os";
 import require$$1 from "child_process";
 import fs$1 from "fs";
-import fs$2 from "node:fs";
 function registerFileIpc(ipcMain2) {
   ipcMain2.handle("file:open", async () => {
     const result = await dialog.showOpenDialog({ properties: ["openFile"] });
@@ -297,6 +297,10 @@ const VITE_DEV_SERVER_URL = process.env["VITE_DEV_SERVER_URL"];
 const MAIN_DIST = path.join(process.env.APP_ROOT, "dist-electron");
 const RENDERER_DIST = path.join(process.env.APP_ROOT, "dist");
 process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, "public") : RENDERER_DIST;
+const APP_ICON_PATH = path.join(process.env.APP_ROOT, "build", "icons", "icon.png");
+function getAppIconPath() {
+  return existsSync(APP_ICON_PATH) ? APP_ICON_PATH : null;
+}
 let mainWindow = null;
 let windowHandlersRegistered = false;
 let isQuitting = false;
@@ -341,6 +345,7 @@ function createWindow() {
     mainWindow.focus();
     return mainWindow;
   }
+  const appIconPath = getAppIconPath();
   const win = new BrowserWindow({
     width: 1200,
     height: 800,
@@ -359,8 +364,9 @@ function createWindow() {
       // contextIsolation: true,     // 启用上下文隔离
       // webSecurity: true           // 启用同源策略
     },
-    autoHideMenuBar: true
+    autoHideMenuBar: true,
     // 自动隐藏菜单栏
+    ...appIconPath ? { icon: appIconPath } : {}
   });
   mainWindow = win;
   win.on("close", (event) => {
@@ -410,6 +416,10 @@ app.on("activate", () => {
   }
 });
 app.whenReady().then(() => {
+  const appIconPath = getAppIconPath();
+  if (appIconPath && process.platform === "darwin") {
+    app.dock.setIcon(appIconPath);
+  }
   registerIpcHandlers();
   registerWindowIpcHandlers();
   createWindow();
