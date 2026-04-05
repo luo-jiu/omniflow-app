@@ -1,9 +1,10 @@
-import React from 'react';
+import React, { useState } from 'react';
 import styled from 'styled-components';
 import { Typography, Divider, Switch, Select, Button } from '@douyinfe/semi-ui';
 import { IconChevronLeft } from '@douyinfe/semi-icons';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useNavigate } from 'react-router-dom';
+import { getFileTreeShowSuffix, setFileTreeShowSuffix } from '@/utils/fileTreeSettings';
 
 const SettingsWrapper = styled.div`
   padding: 48px 60px;
@@ -55,6 +56,7 @@ const Settings: React.FC = () => {
   const { Title, Text } = Typography;
   const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
+  const [showFileSuffix, setShowFileSuffix] = useState<boolean>(() => getFileTreeShowSuffix());
 
   return (
     <SettingsWrapper>
@@ -95,6 +97,21 @@ const Settings: React.FC = () => {
           <Select.Option value="zh-CN">简体中文</Select.Option>
           <Select.Option value="en-US">English</Select.Option>
         </Select>
+      </div>
+
+      <div className="setting-item">
+        <div>
+          <div className="setting-title">目录树显示文件后缀</div>
+          <div className="setting-desc">开启后，文件节点会显示扩展名（如 .txt、.jpg）</div>
+        </div>
+        <Switch
+          size="large"
+          checked={showFileSuffix}
+          onChange={(checked) => {
+            setShowFileSuffix(checked);
+            setFileTreeShowSuffix(checked);
+          }}
+        />
       </div>
 
       <Divider style={{ margin: '24px 0' }} />

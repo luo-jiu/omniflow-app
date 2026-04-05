@@ -178,6 +178,13 @@ export const DirectorySidebarWrapper = styled.aside<{ $isDragging?: boolean }>`
     line-height: 28px;
   }
 
+  .tree-file-type-icon {
+    width: 20px;
+    height: 20px;
+    display: block;
+    object-fit: contain;
+  }
+
   .tree-container::-webkit-scrollbar {
     height: 6px;
     width: 6px;

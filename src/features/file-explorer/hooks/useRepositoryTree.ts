@@ -1,6 +1,11 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { getChildrenByNodeId, getFileLink } from '../services/file.api';
 import { fileCache } from '@/utils/fileCache.ts';
+import { buildTreeNodeLabel } from '@/utils/fileTreeSettings';
+import imageIcon from '@/assets/icons/material/image.svg';
+import audioIcon from '@/assets/icons/material/audio.svg';
+import videoIcon from '@/assets/icons/material/video.svg';
+import pdfIcon from '@/assets/icons/material/pdf.svg';
 
 // 目录节点信息
 interface Node {
@@ -21,6 +26,7 @@ interface Node {
     rawName: string; // 保留未截断的原始名称
     [key: string]: any; // 以后还可以加别的
   };
+  icon?: React.ReactNode;
 }
 
 export interface NodeRespDTO {
@@ -119,7 +125,7 @@ export function useRepositoryTree(libraryId: number, onFileOpen?: (fileUrl: stri
             return {
               ...node,
               name: newName,
-              label: newName,
+              label: buildTreeNodeLabel({ name: newName, type: node.type, ext: node.ext }),
               data: { ...node.data, rawName: newName }
             };
           }
@@ -352,8 +358,9 @@ export function useRepositoryTree(libraryId: number, onFileOpen?: (fileUrl: stri
       ...item,
       key: `${item.parentId}:${item.id}`,
       isLeaf: item.type === 'file',
-      label: item.name,
+      label: buildTreeNodeLabel({ name: item.name, type: item.type, ext: item.ext }),
       data: { rawName: item.name },
+      icon: item.type === 'file' ? getFileNodeIcon(item.ext) : undefined,
       children: item.type === 'dir' ? [] : undefined,
       loaded: false,
     };
@@ -372,3 +379,42 @@ export function useRepositoryTree(libraryId: number, onFileOpen?: (fileUrl: stri
     updateNodeName,
   };
 }
+  function getFileNodeIcon(ext?: string): React.ReactNode | undefined {
+    if (!ext) return undefined;
+    const normalized = ext.toLowerCase().replace('.', '');
+
+    const imageExtensions = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg', 'avif'];
+    if (imageExtensions.includes(normalized)) {
+      return React.createElement('img', {
+        src: imageIcon,
+        alt: 'image',
+        className: 'tree-file-type-icon',
+      });
+    }
+
+    if (normalized === 'mp3') {
+      return React.createElement('img', {
+        src: audioIcon,
+        alt: 'audio',
+        className: 'tree-file-type-icon',
+      });
+    }
+
+    if (normalized === 'mp4') {
+      return React.createElement('img', {
+        src: videoIcon,
+        alt: 'video',
+        className: 'tree-file-type-icon',
+      });
+    }
+
+    if (normalized === 'pdf') {
+      return React.createElement('img', {
+        src: pdfIcon,
+        alt: 'pdf',
+        className: 'tree-file-type-icon',
+      });
+    }
+
+    return undefined;
+  }
