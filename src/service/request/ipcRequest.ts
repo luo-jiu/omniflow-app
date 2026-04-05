@@ -1,5 +1,6 @@
 import { API_CONFIG } from '@/config/api';
 import { auth } from '@/utils/auth';
+import { runtimeLogger } from '@/utils/runtimeLogger';
 
 interface IpcHttpResponse<T = unknown> {
   status?: number;
@@ -100,10 +101,10 @@ export async function ipcRequest<T = any>(path: string, options?: any): Promise<
       throw new Error(`${message} (${path})`);
     }
 
-    console.log("📦 IPC Renderer 收到数据:", body);
+    runtimeLogger.debug("📦 IPC Renderer 收到数据:", body);
     return body as T;
   } catch (err) {
-    console.error('❌ IPC Renderer 请求失败:', err);
+    runtimeLogger.error('❌ IPC Renderer 请求失败:', err);
     throw err;
   }
 }
@@ -172,10 +173,10 @@ export function createIpcUploadTask<T = any>(
       throw new Error(`${message} (${path})`);
     }
 
-    console.log("📦 IPC Upload 收到数据:", body);
+    runtimeLogger.debug("📦 IPC Upload 收到数据:", body);
     return body as T;
   }).catch((err) => {
-    console.error('❌ IPC Upload 请求失败:', err);
+    runtimeLogger.error('❌ IPC Upload 请求失败:', err);
     throw err;
   }).finally(() => {
     unsubscribe();
@@ -200,7 +201,7 @@ export async function ipcUploadLegacy<T = any>(path: string, filePath: string, f
   try {
     return await ipcUpload<T>(path, filePath, formDataParams);
   } catch (err) {
-    console.error('❌ IPC Upload 请求失败:', err);
+    runtimeLogger.error('❌ IPC Upload 请求失败:', err);
     throw err;
   }
 }

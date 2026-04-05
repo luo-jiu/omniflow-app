@@ -7,6 +7,7 @@ import {
   createUploadTaskStoreState,
 } from '../model/upload-task.store';
 import { UploadTask, UploadTaskEvent, UploadTaskStatus, UPLOAD_TASK_STATUS } from '../model/upload-task.types';
+import { runtimeLogger } from '@/utils/runtimeLogger';
 
 export interface UploadTaskInput {
   file: File;
@@ -230,7 +231,7 @@ export class UploadManager {
       try {
         void runtime.aborter();
       } catch (error) {
-        console.warn(`abort upload task failed: ${taskId}`, error);
+        runtimeLogger.warn(`abort upload task failed: ${taskId}`, error);
       }
       runtime.aborter = undefined;
     }
@@ -444,7 +445,7 @@ export class UploadManager {
       this.emitTaskEvent(event.type, updated, current.status);
       return updated;
     } catch (error) {
-      console.warn(`upload task event ignored: ${taskId} ${event.type}`, error);
+      runtimeLogger.warn(`upload task event ignored: ${taskId} ${event.type}`, error);
       return null;
     }
   }

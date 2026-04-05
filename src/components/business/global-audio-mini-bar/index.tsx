@@ -3,6 +3,7 @@ import styled from 'styled-components';
 import { Button } from '@douyinfe/semi-ui';
 import { IconPlay, IconPause, IconMute, IconVolume2, IconMusic, IconClose } from '@douyinfe/semi-icons';
 import { globalAudioPlayer, type GlobalAudioPlayerState } from '@/features/file-viewer/services/global-audio-player';
+import { runtimeLogger } from '@/utils/runtimeLogger';
 
 const BarSlot = styled.div<{ $visible: boolean }>`
   position: absolute;
@@ -113,7 +114,9 @@ const GlobalAudioMiniBar: React.FC = () => {
             size="small"
             icon={state.isPlaying ? <IconPause /> : <IconPlay />}
             onClick={() => {
-              void globalAudioPlayer.togglePlay().catch(console.error);
+              void globalAudioPlayer.togglePlay().catch((error) => {
+                runtimeLogger.error('failed to toggle global audio playback:', error);
+              });
             }}
           />
           <Button

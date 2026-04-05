@@ -1,5 +1,6 @@
 import { apiRequest } from './request/apiRequest';
 import { auth } from '@/utils/auth';
+import { runtimeLogger } from '@/utils/runtimeLogger';
 
 /**
  * 临时登录服务
@@ -18,7 +19,7 @@ export const loginService = {
     };
 
     try {
-      console.log('开始自动登录...', loginData.username);
+      runtimeLogger.info('开始自动登录...', loginData.username);
       const res = await apiRequest('/v1/auth/login', {
         method: 'POST',
         body: JSON.stringify(loginData)
@@ -39,16 +40,16 @@ export const loginService = {
           auth.setUserInfo(res.userInfo || res.data?.userInfo);
         }
 
-        console.log('✅ 自动登录成功');
-        console.log('Token:', token);
-        console.log('Username:', username);
+        runtimeLogger.info('✅ 自动登录成功');
+        runtimeLogger.debug('Token:', token);
+        runtimeLogger.debug('Username:', username);
         return true;
       } else {
-        console.error('❌ 登录响应中未找到 Token', res);
+        runtimeLogger.error('❌ 登录响应中未找到 Token', res);
         return false;
       }
     } catch (error) {
-      console.error('❌ 自动登录请求失败:', error);
+      runtimeLogger.error('❌ 自动登录请求失败:', error);
       return false;
     }
   },
@@ -76,7 +77,7 @@ export const loginService = {
       }
       return { success: false, message: res.message || '登录失败' };
     } catch (error: any) {
-      console.error('❌ 登录请求失败:', error);
+      runtimeLogger.error('❌ 登录请求失败:', error);
       return { success: false, message: error.message || '服务器错误' };
     }
   }

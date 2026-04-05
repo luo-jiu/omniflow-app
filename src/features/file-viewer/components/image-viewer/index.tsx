@@ -2,6 +2,7 @@ import React, { useState, WheelEvent, MouseEvent, useEffect, useCallback, useRef
 import { Popover } from '@douyinfe/semi-ui';
 import { ImageViewerWrapper } from './style';
 import ContextMenu, { ContextMenuItem } from '@/components/ui/context-menu';
+import { runtimeLogger } from '@/utils/runtimeLogger';
 
 interface ImageViewerProps {
   url: string;
@@ -164,7 +165,7 @@ const ImageViewer: React.FC<ImageViewerProps> = ({ url, fileName }) => {
       key: 'save',
       label: '保存图片',
       icon: '💾',
-      onClick: () => console.log('保存功能占位')
+      onClick: () => runtimeLogger.info('保存功能占位')
     }
   ];
 

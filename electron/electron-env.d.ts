@@ -59,4 +59,11 @@ interface Window {
     }>;
     uploadAbort: (uploadId: string) => Promise<boolean>;
   };
+
+  electronWindow: {
+    minimize: () => void;
+    maximize: () => void;
+    close: () => void;
+    activate: (temporaryOnTop?: boolean) => Promise<boolean>;
+  };
 }

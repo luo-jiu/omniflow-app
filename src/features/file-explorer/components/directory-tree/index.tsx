@@ -8,6 +8,8 @@ import DirectoryContextMenu from './context-menu/DirectoryContextMenu.tsx';
 import { UPLOAD_TASK_STATUS } from '@/modules/upload-center/model/upload-task.types';
 import { buildFileFullName, splitFileBaseNameAndExt } from '@/utils/fileTreeSettings';
 import { validateWindowsLikeFileName } from '@/utils/windowsFileName';
+import { runtimeLogger } from '@/utils/runtimeLogger';
+import { requestDesktopWindowActivation } from '@/utils/windowActivation';
 import { useFileViewer } from '@/contexts/FileViewerContext';
 import { globalAudioPlayer } from '@/features/file-viewer/services/global-audio-player';
 
@@ -169,6 +171,8 @@ export default function DirectoryTree({
     const files = Array.from(e.dataTransfer.files || []);
     if (!files.length) return;
 
+    requestDesktopWindowActivation(true);
+
     // 打开确认弹框
     setUploadModal({
       visible: true,
@@ -223,11 +227,11 @@ export default function DirectoryTree({
           Toast.error('全部文件上传失败');
         }
       }).catch((error) => {
-        console.error(error);
+        runtimeLogger.error('上传结果处理失败:', error);
         Toast.error('上传过程中出现未知错误');
       });
     } catch (error) {
-      console.error(error);
+      runtimeLogger.error('上传执行失败:', error);
       Toast.error('上传过程中出现未知错误');
     }
   };
@@ -308,7 +312,7 @@ export default function DirectoryTree({
       const native = new MouseEvent('dblclick', { bubbles: true, cancelable: true });
       onDoubleClick(native as unknown as React.MouseEvent, treeNode);
     } catch (err) {
-      console.warn('onDoubleClick 触发懒加载失败（已忽略）：', err);
+      runtimeLogger.warn('onDoubleClick 触发懒加载失败（已忽略）：', err);
     }
     if (!expandedKeys.includes(treeNode.key)) {
       onExpand(Array.from(new Set([...expandedKeys, treeNode.key])));
@@ -360,7 +364,7 @@ export default function DirectoryTree({
       setEditingName(editingFullName);
     } else if (action === 'delete') {
       try {
-        console.log('🗑️ [删除]', node);
+        runtimeLogger.debug('🗑️ [删除]', node);
         // node.id 是 ancestorId
         await deleteNodeAndChildren(node.id, libraryId);
         Toast.success('删除成功');
@@ -382,12 +386,12 @@ export default function DirectoryTree({
         
         scheduleRecompute();
       } catch (error) {
-        console.error(error);
+        runtimeLogger.error('删除节点失败:', error);
         Toast.error('删除失败');
       }
     } else {
       // 其他操作暂时模拟
-      console.log(`👉 [${action}]`, node);
+      runtimeLogger.debug(`👉 [${action}]`, node);
       Toast.info({ content: `模拟：${action}`, duration: 2 });
     }
   };
@@ -421,7 +425,7 @@ export default function DirectoryTree({
       
       scheduleRecompute();
     } catch (error: any) {
-      console.error(error);
+      runtimeLogger.error('创建节点失败:', error);
       Toast.error(error.message || '创建失败，请重试');
       setCreateModal(prev => ({ ...prev, loading: false }));
     }
@@ -488,7 +492,7 @@ export default function DirectoryTree({
       setEditingName('');
       scheduleRecompute();
     } catch (error: any) {
-      console.error(error);
+      runtimeLogger.error('重命名失败:', error);
       Toast.error(error.message || '重命名失败');
       // 失败了也不一定要关闭，可以让用户继续改或者手动取消
     }
@@ -576,7 +580,7 @@ export default function DirectoryTree({
       e.stopPropagation();
       clearHover();
       if (!isFolder) {
-        console.log('⚠️ 目标是文件，忽略上传：请投递到文件夹节点');
+        runtimeLogger.info('⚠️ 目标是文件，忽略上传：请投递到文件夹节点');
         return;
       }
       handleExternalDropOnFolder(treeNode, e);
@@ -696,10 +700,10 @@ export default function DirectoryTree({
         ) : (
           <Tree
             draggable
-            onDragStart={(info) => console.log('开始拖拽', info)}
-            onDragEnd={(info) => console.log('拖拽结束', info)}
+            onDragStart={(info) => runtimeLogger.debug('开始拖拽', info)}
+            onDragEnd={(info) => runtimeLogger.debug('拖拽结束', info)}
             onDrop={(info) => {
-              console.log('放下节点', info);
+              runtimeLogger.debug('放下节点', info);
               // TODO: 根据 info.dropToGap / info.dropPosition 更新 treeData
             }}
             className="custom-tree"

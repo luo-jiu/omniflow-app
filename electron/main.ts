@@ -30,6 +30,7 @@ function getAppIconPath() {
 let mainWindow: BrowserWindow | null = null
 let windowHandlersRegistered = false
 let isQuitting = false
+const WINDOW_ACTIVATE_TOPMOST_DURATION_MS = 240
 
 function isToggleDevToolsShortcut(input: Electron.Input) {
   if (input.type !== 'keyDown') {
@@ -79,6 +80,41 @@ function registerWindowIpcHandlers() {
   ipcMain.on('window-close', (event) => {
     const targetWindow = BrowserWindow.fromWebContents(event.sender) ?? mainWindow
     targetWindow?.close()
+  })
+
+  ipcMain.handle('window-activate', (event, temporaryOnTop: boolean = false) => {
+    const targetWindow = BrowserWindow.fromWebContents(event.sender) ?? mainWindow
+    if (!targetWindow || targetWindow.isDestroyed()) {
+      return false
+    }
+
+    if (targetWindow.isMinimized()) {
+      targetWindow.restore()
+    }
+    if (!targetWindow.isVisible()) {
+      targetWindow.show()
+    }
+
+    if (process.platform === 'darwin') {
+      app.focus({ steal: true })
+    } else {
+      app.focus()
+    }
+
+    if (typeof targetWindow.moveTop === 'function') {
+      targetWindow.moveTop()
+    }
+    targetWindow.focus()
+
+    if (temporaryOnTop && !targetWindow.isAlwaysOnTop()) {
+      targetWindow.setAlwaysOnTop(true, 'screen-saver')
+      setTimeout(() => {
+        if (!targetWindow.isDestroyed()) {
+          targetWindow.setAlwaysOnTop(false)
+        }
+      }, WINDOW_ACTIVATE_TOPMOST_DURATION_MS)
+    }
+    return true
   })
 }
 

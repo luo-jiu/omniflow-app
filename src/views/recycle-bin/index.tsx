@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import styled from 'styled-components';
-import { Button, Empty, Popconfirm, Tag, Toast, Typography } from '@douyinfe/semi-ui';
+import { Button, Empty, Modal, Tag, Toast, Typography } from '@douyinfe/semi-ui';
 import { IconChevronLeft, IconDelete, IconRefresh } from '@douyinfe/semi-icons';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
@@ -10,6 +10,7 @@ import {
   type RecycleBinItem,
 } from '@/features/file-explorer/services/file.api';
 import { invalidateRepositoryTreeSnapshot } from '@/features/file-explorer/hooks/useRepositoryTree';
+import { requestDesktopWindowActivation } from '@/utils/windowActivation';
 
 const Page = styled.div`
   width: 100%;
@@ -192,6 +193,20 @@ const RecycleBin: React.FC = () => {
     }
   };
 
+  const openHardDeleteConfirm = (item: RecycleBinItem) => {
+    requestDesktopWindowActivation(true);
+    Modal.confirm({
+      title: '确认彻底删除？',
+      content: '彻底删除后无法恢复，并会清理对象存储文件。',
+      okText: '彻底删除',
+      cancelText: '取消',
+      okType: 'danger',
+      async onOk() {
+        await handleHardDelete(item);
+      },
+    });
+  };
+
   return (
     <Page>
       <div className="header">
@@ -256,20 +271,15 @@ const RecycleBin: React.FC = () => {
                 <Button size="small" theme="borderless" onClick={() => void handleRestore(item)}>
                   恢复
                 </Button>
-                <Popconfirm
-                  title="确认彻底删除？"
-                  content="彻底删除后无法恢复，并会清理对象存储文件。"
-                  onConfirm={() => void handleHardDelete(item)}
+                <Button
+                  size="small"
+                  theme="borderless"
+                  type="danger"
+                  icon={<IconDelete />}
+                  onClick={() => openHardDeleteConfirm(item)}
                 >
-                  <Button
-                    size="small"
-                    theme="borderless"
-                    type="danger"
-                    icon={<IconDelete />}
-                  >
-                    彻底删除
-                  </Button>
-                </Popconfirm>
+                  彻底删除
+                </Button>
               </div>
             </div>
           ))

@@ -3,6 +3,7 @@ import { getChildrenByNodeId, getFileLink } from '../services/file.api';
 import { fileCache } from '@/utils/fileCache.ts';
 import { buildTreeNodeLabel } from '@/utils/fileTreeSettings';
 import { getFileNodeIcon } from '../utils/file-node-icon';
+import { runtimeLogger } from '@/utils/runtimeLogger';
 
 // 目录节点信息
 interface Node {
@@ -352,7 +353,7 @@ export function useRepositoryTree(
       }
     } else {
       // 双击文件：获取文件临时访问链接
-      console.log('📄 双击文件:', node.name);
+      runtimeLogger.debug('📄 双击文件:', node.name);
       try {
         const fileName = node.name;
         const nodeId = node.id;
@@ -363,7 +364,7 @@ export function useRepositoryTree(
         
         if (!fileUrl) {
           // 2. 缓存失效或不存在，请求后端
-          console.log('🚀 缓存失效，请求后端获取新链接');
+          runtimeLogger.debug('🚀 缓存失效，请求后端获取新链接');
           // 请求后端生成 60 分钟有效期的链接，但我们本地只缓存 30 分钟以确保安全
           fileUrl = await getFileLink(nodeId, libraryId, 60);
           
@@ -372,7 +373,7 @@ export function useRepositoryTree(
             fileCache.setLink(nodeId, libraryId, fileUrl, 30);
           }
         } else {
-          console.log('✅ 使用本地缓存的链接');
+          runtimeLogger.debug('✅ 使用本地缓存的链接');
         }
 
         if (!fileUrl) {
@@ -407,7 +408,7 @@ export function useRepositoryTree(
           onFileOpen(fileUrl, fileName, fileType, node.id);
         }
       } catch (error) {
-        console.error('获取文件链接失败:', error);
+        runtimeLogger.error('获取文件链接失败:', error);
       }
     }
   }, [loadChildren, onFileOpen, selectedRepository]);

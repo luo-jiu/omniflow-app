@@ -14,6 +14,7 @@ import {
 } from '@douyinfe/semi-icons';
 import { AudioViewerWrapper } from './style';
 import { globalAudioPlayer } from '@/features/file-viewer/services/global-audio-player';
+import { runtimeLogger } from '@/utils/runtimeLogger';
 
 interface AudioViewerProps {
   url: string;
@@ -37,7 +38,9 @@ const AudioViewer: React.FC<AudioViewerProps> = ({ url, fileName }) => {
   };
 
   const togglePlay = () => {
-    void globalAudioPlayer.togglePlay().catch(console.error);
+    void globalAudioPlayer.togglePlay().catch((error) => {
+      runtimeLogger.error('failed to toggle audio playback:', error);
+    });
   };
 
   // --- Custom Progress Bar Logic ---

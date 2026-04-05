@@ -7,6 +7,7 @@ import {
   renameLibrary
 } from "@/features/file-explorer/services/file.api";
 import type { Library } from "@/features/file-explorer/services/file.api";
+import { runtimeLogger } from '@/utils/runtimeLogger';
 
 export function useLibraryPage() {
   const [libraries, setLibraries] = useState<Library[]>([]);
@@ -18,7 +19,7 @@ export function useLibraryPage() {
       const list = await fetchRepositories();
       setLibraries(list);
     } catch (error) {
-      console.error('Failed to fetch libraries:', error);
+      runtimeLogger.error('Failed to fetch libraries:', error);
       Toast.error('获取库列表失败');
     } finally {
       setLoading(false);
@@ -36,7 +37,7 @@ export function useLibraryPage() {
       Toast.success('已创建');
       return true;
     } catch (error) {
-      console.error('Failed to create library:', error);
+      runtimeLogger.error('Failed to create library:', error);
       Toast.error('创建库失败');
       return false;
     }
@@ -49,7 +50,7 @@ export function useLibraryPage() {
       Toast.success('删除成功');
       return true;
     } catch (error) {
-      console.error('Failed to delete library:', error);
+      runtimeLogger.error('Failed to delete library:', error);
       Toast.error('删除失败');
       return false;
     }
@@ -68,7 +69,7 @@ export function useLibraryPage() {
       Toast.success('重命名成功');
       return true;
     } catch (error) {
-      console.error('Failed to rename library:', error);
+      runtimeLogger.error('Failed to rename library:', error);
       Toast.error('重命名失败');
       return false;
     }
@@ -88,4 +89,3 @@ export function useLibraryPage() {
     toggleStar,
   };
 }
-

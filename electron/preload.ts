@@ -65,4 +65,5 @@ contextBridge.exposeInMainWorld('electronWindow', {
   minimize: () => ipcRenderer.send('window-minimize'),
   maximize: () => ipcRenderer.send('window-maximize'),
   close: () => ipcRenderer.send('window-close'),
+  activate: (temporaryOnTop = false) => ipcRenderer.invoke('window-activate', temporaryOnTop),
 });

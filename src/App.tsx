@@ -5,6 +5,7 @@ import {Suspense} from "react";
 import routes from "@/router";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ThemeProvider } from "@/contexts/ThemeContext";
+import { runtimeLogger } from '@/utils/runtimeLogger';
 import './App.css'
 
 function App() {
@@ -15,11 +16,11 @@ function App() {
         // await loginService.autoLogin();
         
         const data = await window.electronAPI.getStaticData()
-        console.log('totalStorage:', data.totalStorage)
-        console.log('cpuModel:', data.cpuModel)
-        console.log('totalMemoryGB:', data.totalMemoryGB)
+        runtimeLogger.debug('totalStorage:', data.totalStorage)
+        runtimeLogger.debug('cpuModel:', data.cpuModel)
+        runtimeLogger.debug('totalMemoryGB:', data.totalMemoryGB)
       } catch (error) {
-        console.error('Error:', error)
+        runtimeLogger.error('failed to get static data:', error)
       }
     }
     void fetchData()

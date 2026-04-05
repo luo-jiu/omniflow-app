@@ -18,13 +18,3 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     </ThemeProvider>
   </React.StrictMode>,
 )
-
-// Use contextBridge
-// window.ipcRenderer.on('statistics', (_event, message) => {
-//   const { cpuUsage, ramUsage, storageData } = message
-//   console.log('CPU:', cpuUsage)
-//   console.log('RAM:', ramUsage)
-//   console.log('totalStorage:', storageData.totalStorage)
-//   console.log('cpuModel:', storageData.cpuModel)
-//   console.log('totalMemoryGB:', storageData.totalMemoryGB)
-// })

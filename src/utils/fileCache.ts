@@ -2,6 +2,7 @@
  * 文件访问链接缓存工具
  * 用于缓存后端返回的临时访问链接，并支持设置过期时间
  */
+import { runtimeLogger } from './runtimeLogger';
 
 interface CacheItem<T> {
   value: T;
@@ -40,7 +41,7 @@ class FileCache {
     try {
       localStorage.setItem(key, JSON.stringify(cacheItem));
     } catch (e) {
-      console.warn('FileCache: Failed to save to localStorage', e);
+      runtimeLogger.warn('FileCache: Failed to save to localStorage', e);
       // 如果 localStorage 满了，可以尝试清理过期的
       this.clearExpired();
     }
@@ -118,4 +119,3 @@ class FileCache {
 }
 
 export const fileCache = new FileCache();
-

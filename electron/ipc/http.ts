@@ -4,6 +4,7 @@ import path from 'node:path';
 import http from 'node:http';
 import https from 'node:https';
 import type { ClientRequest, IncomingMessage } from 'node:http';
+import { runtimeLogger } from '../runtimeLogger';
 
 export function registerHttpIpc(ipcMain: Electron.IpcMain) {
   type UploadRuntime = {
@@ -41,30 +42,30 @@ export function registerHttpIpc(ipcMain: Electron.IpcMain) {
   };
 
   ipcMain.handle("http:fetch", async (_event, url: string, options: any = {}) => {
-    console.log("start...");
-    console.log("URL:", url);
-    console.log("Options:", options);
+    runtimeLogger.debug("http:fetch start");
+    runtimeLogger.debug("http:fetch URL:", url);
+    runtimeLogger.debug("http:fetch options:", options);
     return new Promise((resolve, reject) => {
       const request = net.request({ url, method: options.method || "GET" });
 
       if (options.headers) {
         Object.entries(options.headers).forEach(([key, value]) => {
-          console.log(`set head... ${key}: ${value}`);
+          runtimeLogger.debug(`http:fetch set header ${key}: ${String(value)}`);
           request.setHeader(key, value as string);
         });
       }
       let body = "";
       request.on("response", (response) => {
-        console.log("return info...");
-        console.log("Status:", response.statusCode);
-        console.log("Headers:", response.headers);
+        runtimeLogger.debug("http:fetch response");
+        runtimeLogger.debug("http:fetch status:", response.statusCode);
+        runtimeLogger.debug("http:fetch headers:", response.headers);
 
         response.on("data", (chunk) => {
-          console.log(`data len... ${chunk.length})`);
+          runtimeLogger.debug(`http:fetch chunk length: ${chunk.length}`);
           body += chunk;
         });
         response.on("end", () => {
-          console.log("Body info... ", body.slice(0, 500)); // 只打印前 500 字符
+          runtimeLogger.debug("http:fetch body preview:", body.slice(0, 500)); // 只打印前 500 字符
           let parsedBody: any;
           try {
             parsedBody = JSON.parse(body);
@@ -79,7 +80,7 @@ export function registerHttpIpc(ipcMain: Electron.IpcMain) {
         });
       });
       request.on("error", (err) => {
-        console.error("err... ", err);
+        runtimeLogger.error("http:fetch error:", err);
         reject(err);
       });
       if (options.body) {

@@ -11,6 +11,7 @@ import {
 } from '@douyinfe/semi-icons';
 import { VideoViewerWrapper } from './style';
 import { globalAudioPlayer } from '@/features/file-viewer/services/global-audio-player';
+import { runtimeLogger } from '@/utils/runtimeLogger';
 
 interface VideoViewerProps {
   url: string;
@@ -169,7 +170,9 @@ const VideoViewer: React.FC<VideoViewerProps> = ({ url, fileName }) => {
     const video = videoRef.current;
     if (!video) return;
     if (video.paused) {
-      video.play().catch(console.error);
+      video.play().catch((error) => {
+        runtimeLogger.error('failed to start video playback:', error);
+      });
     } else {
       video.pause();
     }
@@ -204,7 +207,7 @@ const VideoViewer: React.FC<VideoViewerProps> = ({ url, fileName }) => {
       }
       await containerRef.current?.requestFullscreen();
     } catch (error) {
-      console.warn('切换全屏失败:', error);
+      runtimeLogger.warn('切换全屏失败:', error);
     }
   };
 

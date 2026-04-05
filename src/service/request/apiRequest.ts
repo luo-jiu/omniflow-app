@@ -1,5 +1,6 @@
 import { API_CONFIG } from '@/config/api';
 import { auth } from '@/utils/auth';
+import { runtimeLogger } from '@/utils/runtimeLogger';
 
 /**
  * 渲染进程直接请求封装
@@ -35,18 +36,17 @@ export async function apiRequest(path: string, options?: RequestInit) {
       // 处理 401 等错误
       if (response.status === 401) {
         // 可以触发登出逻辑，或者抛出特定错误
-        console.warn('Unauthorized access');
+        runtimeLogger.warn('Unauthorized access');
         auth.removeToken();
       }
       throw new Error(`HTTP error! status: ${response.status}`);
     }
 
     const data = await response.json();
-    console.log("📦 Direct Renderer 收到数据:", data);
+    runtimeLogger.debug("📦 Direct Renderer 收到数据:", data);
     return data;
   } catch (err) {
-    console.error('❌ Direct Renderer 请求失败:', err);
+    runtimeLogger.error('❌ Direct Renderer 请求失败:', err);
     throw err;
   }
 }
-

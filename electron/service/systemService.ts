@@ -2,6 +2,7 @@ import osUtils from 'os-utils'
 import fs from 'fs'
 import os from 'os'
 import {BrowserWindow} from "electron";
+import { runtimeLogger } from '../runtimeLogger';
 
 const POLLING_INTERVAL = 1000;
 
@@ -10,7 +11,7 @@ export function pollResources(mainWindow: BrowserWindow) {
     const cpuUsage = await getCpuUsage()
     const ramUsage = getRamUsage()
     const storageData = getStorageData()
-    console.log(storageData)
+    runtimeLogger.debug('system stats storage data:', storageData)
     mainWindow.webContents.send('statistics', { cpuUsage, ramUsage, storageData })
   }, POLLING_INTERVAL)
 }
