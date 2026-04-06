@@ -42,6 +42,16 @@ const DirectoryContextMenu: React.FC<DirectoryContextMenuProps> = ({
         key: 'new-folder', 
         label: '新建文件夹', 
         onClick: () => onAction('新建文件夹', null) 
+      },
+      {
+        key: 'upload-file',
+        label: '上传文件',
+        onClick: () => onAction('上传文件', null),
+      },
+      {
+        key: 'upload-folder',
+        label: '上传文件夹',
+        onClick: () => onAction('上传文件夹', null),
       }
     ];
     return (
@@ -125,6 +135,16 @@ const DirectoryContextMenu: React.FC<DirectoryContextMenuProps> = ({
         key: 'new-folder', 
         label: '新建文件夹', 
         onClick: () => onAction('新建文件夹', node) 
+      },
+      {
+        key: 'upload-file',
+        label: '上传文件',
+        onClick: () => onAction('上传文件', node),
+      },
+      {
+        key: 'upload-folder',
+        label: '上传文件夹',
+        onClick: () => onAction('上传文件夹', node),
       }
     );
   } else {

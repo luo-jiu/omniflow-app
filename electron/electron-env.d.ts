@@ -26,6 +26,24 @@ interface Window {
   ipcRenderer: import('electron').IpcRenderer
 
   electronAPI: {
+    pickUploadFiles: () => Promise<{
+      canceled: boolean;
+      files: Array<{
+        name: string;
+        size: number;
+        localPath: string;
+        relativePath: string;
+      }>;
+    }>;
+    pickUploadFolders: () => Promise<{
+      canceled: boolean;
+      files: Array<{
+        name: string;
+        size: number;
+        localPath: string;
+        relativePath: string;
+      }>;
+    }>;
     onUploadProgress: (listener: (payload: {
       uploadId: string;
       uploadedBytes: number;

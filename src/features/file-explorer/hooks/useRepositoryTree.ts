@@ -127,6 +127,27 @@ function findNodeById(nodes: Node[], id: number): Node | null {
   return null;
 }
 
+function mergeRootNodesPreservingLoadedState(previousRoots: Node[], nextRoots: Node[]): Node[] {
+  const previousById = new Map<number, Node>(previousRoots.map(node => [node.id, node]));
+  return nextRoots.map((node) => {
+    const previous = previousById.get(node.id);
+    if (!previous) {
+      return node;
+    }
+    if (node.type !== 'dir' || previous.type !== 'dir') {
+      return node;
+    }
+    if (previous.loaded !== true) {
+      return node;
+    }
+    return {
+      ...node,
+      loaded: true,
+      children: previous.children || [],
+    };
+  });
+}
+
 export function useRepositoryTree(
   libraryId: number,
   onFileOpen?: (
@@ -194,13 +215,23 @@ export function useRepositoryTree(
   const currentTreeData = treesCache[selectedRepository] || [];
 
   // 深度更新子节点
-  const updateNodeChildren = useCallback((nodes: Node[], key: string, children: Node[]): Node[] => {
+  const updateNodeChildren = useCallback((
+    nodes: Node[],
+    key: string,
+    children: Node[],
+    options?: { markLoaded?: boolean },
+  ): Node[] => {
+    const markLoaded = options?.markLoaded ?? true;
     return nodes.map(node => {
       if (node.key === key) {
-        return { ...node, children, loaded: true };
+        return {
+          ...node,
+          children,
+          loaded: markLoaded ? true : node.loaded,
+        };
       }
       if (node.children && node.children.length > 0) {
-        const updated = updateNodeChildren(node.children, key, children);
+        const updated = updateNodeChildren(node.children, key, children, options);
         if (updated === node.children) return node;
         return { ...node, children: updated };
       }
@@ -407,9 +438,15 @@ export function useRepositoryTree(
         }
         const mappedForParent = mapToTreeNode(newNodeDTO, parent);
         const newChildren = parent.children ? [...parent.children, mappedForParent] : [mappedForParent];
+        const shouldMarkLoaded = parent.loaded === true;
         return {
           ...prev,
-          [selectedRepository]: updateNodeChildren(current, parentNodeKey, newChildren),
+          [selectedRepository]: updateNodeChildren(
+            current,
+            parentNodeKey,
+            newChildren,
+            { markLoaded: shouldMarkLoaded },
+          ),
         };
       });
     },
@@ -469,7 +506,7 @@ export function useRepositoryTree(
       if (parentId === 1) {
         return {
           ...prev,
-          [selectedRepository]: mapped,
+          [selectedRepository]: mergeRootNodesPreservingLoadedState(current, mapped),
         };
       }
 

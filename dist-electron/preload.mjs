@@ -22,6 +22,8 @@ electron.contextBridge.exposeInMainWorld("ipcRenderer", {
 });
 electron.contextBridge.exposeInMainWorld("electronAPI", {
   getStaticData: () => electron.ipcRenderer.invoke("sys:get-static-data"),
+  pickUploadFiles: () => electron.ipcRenderer.invoke("dialog:pick-upload-files"),
+  pickUploadFolders: () => electron.ipcRenderer.invoke("dialog:pick-upload-folders"),
   fetch: (url, options) => electron.ipcRenderer.invoke("http:fetch", url, options),
   upload: (url, filePath, formDataParams, headers, uploadId) => electron.ipcRenderer.invoke("http:upload", url, filePath, formDataParams, headers, uploadId),
   uploadAbort: (uploadId) => electron.ipcRenderer.invoke("http:upload:abort", uploadId),

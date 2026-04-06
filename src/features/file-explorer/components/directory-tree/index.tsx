@@ -19,6 +19,13 @@ import { runtimeLogger } from '@/utils/runtimeLogger';
 import { requestDesktopWindowActivation } from '@/utils/windowActivation';
 import { useFileViewer } from '@/hooks/useFileViewer';
 import { globalAudioPlayer } from '@/features/file-viewer/services/global-audio-player';
+import {
+  isIgnoredSystemFilePath,
+  pickUploadFilesFromDesktop,
+  pickUploadFoldersFromDesktop,
+} from '@/features/file-explorer/services/desktop-upload-picker.api';
+import type { UploadCandidateFile } from '@/features/file-explorer/services/desktop-upload-picker.api';
+import { normalizeUploadRelativePath, UploadPathResolver } from '@/features/file-explorer/services/upload-path-resolver';
 
 interface DirectoryTreeProps {
   treeData: any[];
@@ -63,6 +70,13 @@ export default function DirectoryTree({
 }: DirectoryTreeProps) {
   const { closeTabByNodeId, tabs } = useFileViewer();
 
+  interface UploadModalTargetNode {
+    id: number;
+    key: string;
+    label: string;
+    libraryId: number;
+  }
+
   // 外部文件拖拽：悬停高亮 & 延迟展开
   const [dragOverKey, setDragOverKey] = useState<string | null>(null);
   const expandTimerRef = useRef<number | null>(null);
@@ -85,12 +99,14 @@ export default function DirectoryTree({
   // 上传 Modal 的状态
   const [uploadModal, setUploadModal] = useState<{
     visible: boolean;
-    files: File[]; // 支持多文件
-    targetNode: any | null; // 目标文件夹节点
+    files: UploadCandidateFile[];
+    targetNode: UploadModalTargetNode | null;
+    loading: boolean;
   }>({
     visible: false,
     files: [],
     targetNode: null,
+    loading: false,
   });
 
   // 新建文件/文件夹 Modal 的状态
@@ -121,6 +137,7 @@ export default function DirectoryTree({
   // 为每个“可见行”的 label 与其内部文字 span 保持引用
   type RowRefs = { label: HTMLElement | null; text: HTMLElement | null };
   const rowRefs = useRef<Map<string, RowRefs>>(new Map());
+  const treeDataRef = useRef<any[]>(treeData);
 
   // 记录上一次应用到 wrapper 的 minWidth，避免 1px 抖动
   const lastAppliedWidthRef = useRef<number>(0);
@@ -132,9 +149,14 @@ export default function DirectoryTree({
   const FLOAT_EPS = 0.5;            // 浮点比较误差容忍
   const MAX_TEXT_WIDTH_CAP = 40000; // 兜底，避免异常节点导致极大宽度
   const ICON_BUFFER_PX = 16;        // 行内图标缓冲
+  const ROOT_PARENT_ID = 1;
 
   /** rAF 合并调度 */
   const rafIdRef = useRef<number | null>(null);
+  useEffect(() => {
+    treeDataRef.current = treeData;
+  }, [treeData]);
+
   const scheduleRecompute = () => {
     if (rafIdRef.current != null) return;
     rafIdRef.current = requestAnimationFrame(() => {
@@ -183,18 +205,60 @@ export default function DirectoryTree({
   };
 
   // 处理文件放置逻辑
+  const ROOT_TARGET_NODE: UploadModalTargetNode = {
+    id: ROOT_PARENT_ID,
+    key: 'root',
+    label: '根目录',
+    libraryId,
+  };
+
+  const toUploadModalTargetNode = (node: any | null): UploadModalTargetNode => {
+    if (!node) {
+      return ROOT_TARGET_NODE;
+    }
+    return {
+      id: Number(node.id || ROOT_PARENT_ID),
+      key: String(node.key || 'root'),
+      label: String(node.label || node.data?.rawName || '根目录'),
+      libraryId: Number(node.libraryId || libraryId),
+    };
+  };
+
+  const buildUploadCandidateFromDragFile = (file: File): UploadCandidateFile => {
+    const rawRelativePath = (file as any).webkitRelativePath || file.name;
+    const relativePath = normalizeUploadRelativePath(rawRelativePath || file.name);
+    return {
+      file,
+      relativePath: relativePath || file.name,
+    };
+  };
+
+  const openUploadModal = (targetNode: UploadModalTargetNode, files: UploadCandidateFile[]) => {
+    if (!files.length) {
+      Toast.warning('未选择可上传文件');
+      return;
+    }
+    setUploadModal({
+      visible: true,
+      files,
+      targetNode,
+      loading: false,
+    });
+  };
+
   const handleExternalDropOnFolder = (treeNode: any, e: React.DragEvent) => {
     const files = Array.from(e.dataTransfer.files || []);
     if (!files.length) return;
 
     requestDesktopWindowActivation(true);
-
-    // 打开确认弹框
-    setUploadModal({
-      visible: true,
-      files: files,
-      targetNode: treeNode,
-    });
+    const candidates = files
+      .map(buildUploadCandidateFromDragFile)
+      .filter(candidate => !isIgnoredSystemFilePath(candidate.relativePath || candidate.file.name));
+    if (!candidates.length) {
+      Toast.warning('拖拽内容仅包含系统隐藏文件，已忽略');
+      return;
+    }
+    openUploadModal(toUploadModalTargetNode(treeNode), candidates);
   };
 
   // 外部文件拖拽
@@ -202,8 +266,6 @@ export default function DirectoryTree({
     const types = Array.from(e.dataTransfer?.types || []);
     return types.includes('Files');
   };
-
-  const ROOT_PARENT_ID = 1;
 
   const findNodeById = (nodes: any[], targetId: number): any | null => {
     for (const node of nodes) {
@@ -393,27 +455,58 @@ export default function DirectoryTree({
     }
   };
 
+  const resolveParentNodeForAppend = (parentId: number) => {
+    if (parentId === ROOT_PARENT_ID) {
+      return ROOT_TARGET_NODE;
+    }
+    const parentNode = findNodeById(treeDataRef.current || [], parentId);
+    if (parentNode) {
+      return parentNode;
+    }
+    return null;
+  };
+
   // 执行上传逻辑
-  const handleConfirmUpload = () => {
+  const handleConfirmUpload = async () => {
     const { files, targetNode } = uploadModal;
     if (!files.length || !targetNode) return;
 
     try {
-      const tasks = files.map(file => ({
-        file,
-        parentId: targetNode.id,
-        libraryId: targetNode.libraryId
+      setUploadModal(prev => ({ ...prev, loading: true }));
+
+      const pathResolver = new UploadPathResolver({
+        libraryId: targetNode.libraryId,
+        rootParentId: targetNode.id,
+        onDirectoryCreated: ({ parentId, newDirectoryNode }) => {
+          if (!onUploadSuccess) return;
+          const parentNode = resolveParentNodeForAppend(parentId);
+          if (!parentNode) return;
+          onUploadSuccess(parentNode, newDirectoryNode);
+        },
+      });
+
+      const tasks = await Promise.all(files.map(async (candidate) => {
+        const relativePath = normalizeUploadRelativePath(candidate.relativePath || candidate.file.name);
+        const parentId = await pathResolver.resolveParentId(relativePath);
+        return {
+          file: candidate.file,
+          parentId,
+          libraryId: targetNode.libraryId,
+          relativePath,
+        };
       }));
 
       const batch = uploadManager.createBatch(tasks, {
         onSingleSuccess: (newNode) => {
-          // 每个文件上传成功后，立即通知父组件刷新该节点（实时反馈）
-          if (onUploadSuccess) {
-            onUploadSuccess(targetNode, newNode);
+          const parentId = Number((newNode as any)?.parentId || targetNode.id);
+          const parentNode = resolveParentNodeForAppend(parentId);
+          if (onUploadSuccess && parentNode) {
+            onUploadSuccess(parentNode, newNode);
           }
         },
       });
-      setUploadModal({ visible: false, files: [], targetNode: null });
+
+      setUploadModal({ visible: false, files: [], targetNode: null, loading: false });
       Toast.info(`已加入上传队列（${files.length} 个文件）`);
 
       void batch.done.then((results) => {
@@ -438,13 +531,17 @@ export default function DirectoryTree({
       });
     } catch (error) {
       runtimeLogger.error('上传执行失败:', error);
-      Toast.error('上传过程中出现未知错误');
+      Toast.error((error as any)?.message || '上传过程中出现未知错误');
+      setUploadModal(prev => ({ ...prev, loading: false }));
     }
   };
 
   // 取消上传
   const handleCancelUpload = () => {
-    setUploadModal({ visible: false, files: [], targetNode: null });
+    if (uploadModal.loading) {
+      return;
+    }
+    setUploadModal({ visible: false, files: [], targetNode: null, loading: false });
   };
 
   /** 应用 minWidth 并夹紧 scrollLeft */
@@ -573,6 +670,23 @@ export default function DirectoryTree({
     onDoubleClick(e, node);
   };
 
+  const handlePickUploadFromDesktop = async (mode: 'file' | 'folder', node: any | null) => {
+    try {
+      requestDesktopWindowActivation(true);
+      const targetNode = toUploadModalTargetNode(node);
+      const files = mode === 'file'
+        ? await pickUploadFilesFromDesktop()
+        : await pickUploadFoldersFromDesktop();
+      if (!files.length) {
+        return;
+      }
+      openUploadModal(targetNode, files);
+    } catch (error: any) {
+      runtimeLogger.error(`选择${mode === 'file' ? '文件' : '文件夹'}失败:`, error);
+      Toast.error(error?.message || `选择${mode === 'file' ? '文件' : '文件夹'}失败`);
+    }
+  };
+
   // 菜单行为
   const handleAction = async (action: string, node: any) => {
     // 关闭菜单
@@ -655,6 +769,16 @@ export default function DirectoryTree({
       return;
     }
 
+    if (action === '上传文件') {
+      await handlePickUploadFromDesktop('file', node);
+      return;
+    }
+
+    if (action === '上传文件夹') {
+      await handlePickUploadFromDesktop('folder', node);
+      return;
+    }
+
     if (action === '新建文件') {
       setCreateModal({
         visible: true,
@@ -684,6 +808,7 @@ export default function DirectoryTree({
     } else if (action === 'delete') {
       try {
         runtimeLogger.debug('🗑️ [删除]', node);
+        const parentId = Number(node?.parentId || ROOT_PARENT_ID);
         // node.id 是 ancestorId
         await deleteNodeAndChildren(node.id, libraryId);
         Toast.success('删除成功');
@@ -692,9 +817,13 @@ export default function DirectoryTree({
         // 直接传递 node.key，这样父组件可以直接删除，不需要查找
         if (onDeleteSuccess) {
           // 构造成一个类 parent 结构，或者传 null
-          const dummyParent = node.parentId ? { id: node.parentId } : { id: 1, key: 'root' }; 
+          const dummyParent = node.parentId ? { id: node.parentId } : { id: ROOT_PARENT_ID, key: 'root' };
           // 传递 node.key 而不是 node.id，这样父组件可以直接删除
           onDeleteSuccess(dummyParent, node.key);
+        }
+
+        if (onMoveSuccess && parentId !== ROOT_PARENT_ID) {
+          await onMoveSuccess({ oldParentId: parentId, newParentId: parentId });
         }
 
         const playerState = globalAudioPlayer.getState();
@@ -1089,6 +1218,7 @@ export default function DirectoryTree({
         visible={uploadModal.visible}
         files={uploadModal.files}
         targetNode={uploadModal.targetNode}
+        loading={uploadModal.loading}
         onConfirm={handleConfirmUpload}
         onCancel={handleCancelUpload}
       />

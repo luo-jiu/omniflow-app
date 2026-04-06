@@ -2,10 +2,20 @@ import React from 'react';
 import { Modal } from '@douyinfe/semi-ui';
 import { uploadManager } from '@/utils/uploadManager.ts';
 
+import type { UploadCandidateFile } from '@/features/file-explorer/services/desktop-upload-picker.api';
+
+interface UploadModalTargetNode {
+  id: number;
+  key: string;
+  label: string;
+  libraryId: number;
+}
+
 interface UploadConfirmModalProps {
   visible: boolean;
-  files: File[];
-  targetNode: any;
+  files: UploadCandidateFile[];
+  targetNode: UploadModalTargetNode | null;
+  loading?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -14,15 +24,19 @@ const UploadConfirmModal: React.FC<UploadConfirmModalProps> = ({
   visible,
   files,
   targetNode,
+  loading,
   onConfirm,
   onCancel
 }) => {
+  const containsFolderStructure = files.some(item => (item.relativePath || '').includes('/'));
+
   return (
     <Modal
-      title="文件上传确认"
+      title={containsFolderStructure ? '文件夹上传确认' : '文件上传确认'}
       visible={visible}
       onOk={onConfirm}
       onCancel={onCancel}
+      confirmLoading={Boolean(loading)}
       okText="确定上传"
       cancelText="取消"
       maskClosable={false}
@@ -49,7 +63,7 @@ const UploadConfirmModal: React.FC<UploadConfirmModalProps> = ({
             backgroundColor: 'var(--semi-color-fill-0)'
           }}>
             {files.map((f, i) => (
-              <div key={i} style={{
+              <div key={`${f.relativePath || f.file.name}-${f.file.size}-${i}`} style={{
                 display: 'flex',
                 justifyContent: 'space-between',
                 padding: '4px 0',
@@ -57,10 +71,10 @@ const UploadConfirmModal: React.FC<UploadConfirmModalProps> = ({
                 borderBottom: i === files.length - 1 ? 'none' : '1px solid var(--semi-color-border-light)'
               }}>
                 <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '380px' }}>
-                  {f.name}
+                  {f.relativePath || f.file.name}
                 </span>
                 <span style={{ color: 'var(--semi-color-text-2)', marginLeft: 8 }}>
-                  {uploadManager.formatSize(f.size)}
+                  {uploadManager.formatSize(f.file.size)}
                 </span>
               </div>
             ))}

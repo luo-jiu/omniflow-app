@@ -8,15 +8,118 @@ import require$$1 from "child_process";
 import fs$1 from "fs";
 import http from "node:http";
 import https from "node:https";
+function shouldIgnoreSystemEntry(entryName) {
+  const normalized = String(entryName || "");
+  if (!normalized) return true;
+  if (normalized === ".DS_Store") return true;
+  if (normalized.startsWith("._")) return true;
+  if (normalized === "Thumbs.db") return true;
+  return false;
+}
+function normalizeRelativePath(input) {
+  return input.replace(/\\/g, "/").split("/").filter(Boolean).join("/");
+}
+function byRelativePath(a, b) {
+  return a.relativePath.localeCompare(b.relativePath, "zh-Hans-CN");
+}
+async function collectFilesFromSelectedFilePaths(filePaths) {
+  const files = await Promise.all(filePaths.map(async (filePath) => {
+    const stat = await fs.stat(filePath);
+    if (!stat.isFile()) {
+      return null;
+    }
+    const fileName = path.basename(filePath);
+    if (shouldIgnoreSystemEntry(fileName)) {
+      return null;
+    }
+    return {
+      name: fileName,
+      size: stat.size,
+      localPath: filePath,
+      relativePath: normalizeRelativePath(fileName)
+    };
+  }));
+  return files.filter((item) => Boolean(item)).sort(byRelativePath);
+}
+async function walkDirectoryFiles(rootPath, currentPath, rootDisplayName) {
+  const entries = await fs.readdir(currentPath, { withFileTypes: true });
+  const files = [];
+  for (const entry of entries) {
+    if (entry.name === "." || entry.name === "..") {
+      continue;
+    }
+    if (shouldIgnoreSystemEntry(entry.name)) {
+      continue;
+    }
+    const absolutePath = path.join(currentPath, entry.name);
+    if (entry.isSymbolicLink()) {
+      continue;
+    }
+    if (entry.isDirectory()) {
+      const nested = await walkDirectoryFiles(rootPath, absolutePath, rootDisplayName);
+      files.push(...nested);
+      continue;
+    }
+    if (!entry.isFile()) {
+      continue;
+    }
+    const stat = await fs.stat(absolutePath);
+    if (!stat.isFile()) {
+      continue;
+    }
+    const relativeInsideRoot = normalizeRelativePath(path.relative(rootPath, absolutePath));
+    const relativePath = normalizeRelativePath(path.join(rootDisplayName, relativeInsideRoot));
+    files.push({
+      name: entry.name,
+      size: stat.size,
+      localPath: absolutePath,
+      relativePath
+    });
+  }
+  return files;
+}
+async function collectFilesFromSelectedFolders(folderPaths) {
+  const allFiles = [];
+  for (const folderPath of folderPaths) {
+    const folderStat = await fs.stat(folderPath);
+    if (!folderStat.isDirectory()) {
+      continue;
+    }
+    const folderName = path.basename(folderPath);
+    const files = await walkDirectoryFiles(folderPath, folderPath, folderName);
+    allFiles.push(...files);
+  }
+  return allFiles.sort(byRelativePath);
+}
 function registerFileIpc(ipcMain2) {
   ipcMain2.handle("file:open", async () => {
     const result = await dialog.showOpenDialog({ properties: ["openFile"] });
     if (result.canceled || result.filePaths.length === 0) return null;
     return await fs.readFile(result.filePaths[0], "utf-8");
   });
-  ipcMain2.handle("file:save", async (_e, path2, content) => {
-    await fs.writeFile(path2, content, "utf-8");
+  ipcMain2.handle("file:save", async (_e, filePath, content) => {
+    await fs.writeFile(filePath, content, "utf-8");
     return true;
+  });
+  ipcMain2.handle("dialog:pick-upload-files", async () => {
+    const result = await dialog.showOpenDialog({
+      properties: ["openFile", "multiSelections", "dontAddToRecent"]
+    });
+    if (result.canceled || result.filePaths.length === 0) {
+      return { canceled: true, files: [] };
+    }
+    const files = await collectFilesFromSelectedFilePaths(result.filePaths);
+    return { canceled: false, files };
+  });
+  ipcMain2.handle("dialog:pick-upload-folders", async () => {
+    const result = await dialog.showOpenDialog({
+      properties: ["openDirectory", "multiSelections", "dontAddToRecent"]
+    });
+    if (result.canceled || result.filePaths.length === 0) {
+      return { canceled: true, files: [] };
+    }
+    const files = await collectFilesFromSelectedFolders(result.filePaths);
+    return { canceled: false, files };
   });
 }
 var osutils = {};

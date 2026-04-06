@@ -26,6 +26,8 @@ contextBridge.exposeInMainWorld('ipcRenderer', {
 
 contextBridge.exposeInMainWorld('electronAPI', {
   getStaticData: () => ipcRenderer.invoke('sys:get-static-data'),
+  pickUploadFiles: () => ipcRenderer.invoke('dialog:pick-upload-files'),
+  pickUploadFolders: () => ipcRenderer.invoke('dialog:pick-upload-folders'),
   fetch: (url: string, options?: any) => ipcRenderer.invoke('http:fetch', url, options),
   upload: (
     url: string,
