@@ -1,6 +1,8 @@
 export interface GlobalAudioPlayerState {
   src: string | null;
   trackName: string | null;
+  ownerType: 'default' | 'asmr';
+  ownerKey: string | null;
   hasStarted: boolean;
   isPlaying: boolean;
   currentTime: number;
@@ -17,6 +19,8 @@ class GlobalAudioPlayer {
   private registeredVideos = new Set<HTMLVideoElement>();
   private sourceUrl: string | null = null;
   private trackName: string | null = null;
+  private ownerType: 'default' | 'asmr' = 'default';
+  private ownerKey: string | null = null;
   private hasStarted = false;
 
   constructor() {
@@ -41,16 +45,35 @@ class GlobalAudioPlayer {
     };
   }
 
-  ensureSource(url: string, trackName?: string | null) {
+  ensureSource(
+    url: string,
+    trackName?: string | null,
+    options?: {
+      ownerType?: 'default' | 'asmr';
+      ownerKey?: string | null;
+    },
+  ) {
+    const nextOwnerType = options?.ownerType ?? 'default';
+    const nextOwnerKey = options?.ownerKey ?? null;
     if (this.sourceUrl === url) {
-      if (trackName !== undefined && trackName !== this.trackName) {
-        this.trackName = trackName;
+      if (
+        trackName !== undefined && trackName !== this.trackName
+        || nextOwnerType !== this.ownerType
+        || nextOwnerKey !== this.ownerKey
+      ) {
+        if (trackName !== undefined) {
+          this.trackName = trackName;
+        }
+        this.ownerType = nextOwnerType;
+        this.ownerKey = nextOwnerKey;
         this.emitState();
       }
       return;
     }
     this.sourceUrl = url;
     this.trackName = trackName ?? null;
+    this.ownerType = nextOwnerType;
+    this.ownerKey = nextOwnerKey;
     this.hasStarted = false;
     this.audio.src = url;
     this.audio.load();
@@ -104,6 +127,8 @@ class GlobalAudioPlayer {
     this.audio.load();
     this.sourceUrl = null;
     this.trackName = null;
+    this.ownerType = 'default';
+    this.ownerKey = null;
     this.hasStarted = false;
     this.emitState();
   }
@@ -119,6 +144,8 @@ class GlobalAudioPlayer {
     return {
       src: this.sourceUrl,
       trackName: this.trackName,
+      ownerType: this.ownerType,
+      ownerKey: this.ownerKey,
       hasStarted: this.hasStarted,
       isPlaying: !this.audio.paused,
       currentTime: Number.isFinite(this.audio.currentTime) ? this.audio.currentTime : 0,

@@ -6,7 +6,7 @@ import { FileViewerProvider } from "@/contexts/FileViewerContext";
 import { useFileViewer } from "@/hooks/useFileViewer";
 import { useAuth } from "@/hooks/useAuth";
 import { Avatar, Popover } from "@douyinfe/semi-ui";
-import { IconSetting, IconExit, IconHome, IconUpload, IconDelete } from "@douyinfe/semi-icons";
+import { IconSetting, IconExit, IconHome, IconUpload, IconDelete, IconChevronLeft } from "@douyinfe/semi-icons";
 import ContextMenu from "@/components/ui/context-menu";
 import styled from "styled-components";
 
@@ -177,6 +177,36 @@ const ContentToolbar = styled.div`
   border-bottom: 1px solid var(--app-border);
   border-top-left-radius: 12px;
   -webkit-app-region: drag;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+
+  .toolbar-left {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    -webkit-app-region: no-drag;
+  }
+
+  .toolbar-back-btn {
+    height: 26px;
+    border-radius: 7px;
+    border: 1px solid var(--app-border);
+    background: var(--app-bg-elevated);
+    color: var(--app-text-secondary);
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 0 8px;
+    cursor: pointer;
+    font-size: 12px;
+    line-height: 1;
+  }
+
+  .toolbar-back-btn:hover {
+    border-color: var(--semi-color-primary);
+    color: var(--semi-color-primary);
+  }
 `;
 
 const ContentBody = styled.div`
@@ -193,7 +223,7 @@ const ContentBody = styled.div`
 `;
 
 const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) => {
-  const { setFileUrl } = useFileViewer();
+  const { setFileUrl, tabs, activeTabId, fileState } = useFileViewer();
   const { user, isLoggedIn, logout } = useAuth();
   const navigate = useNavigate();
   const displayName = isLoggedIn ? user?.username || "User" : "未登录";
@@ -260,10 +290,17 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   const handleFileOpen = async (
     fileUrl: string,
     fileName: string,
-    fileType: "image" | "video" | "audio" | "comic" | "asmr" | "other",
+    fileType: "image" | "video" | "audio" | "comic" | "asmr" | "asmr_archive" | "other",
     nodeId: number,
     options?: {
       tabTypeLabel?: string | null;
+      returnTarget?: {
+        fileUrl: string;
+        fileName: string | null;
+        fileType: 'image' | 'video' | 'audio' | 'comic' | 'asmr' | 'asmr_archive' | 'other';
+        nodeId: number | null;
+        tabTypeLabel?: string | null;
+      } | null;
     },
   ) => {
     setFileUrl(fileUrl, fileName, fileType, nodeId, options);
@@ -273,6 +310,17 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
     logout();
     navigate("/login");
   };
+
+  const activeTab = React.useMemo(() => {
+    if (!activeTabId) return null;
+    return tabs.find(tab => tab.id === activeTabId) || null;
+  }, [activeTabId, tabs]);
+
+  const archiveReturnTarget = activeTab?.returnTarget ?? null;
+  const showBackToArchive = (
+    fileState.fileType === 'asmr'
+    && archiveReturnTarget?.fileType === 'asmr_archive'
+  );
 
   const userContent = (
     <div
@@ -367,7 +415,29 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
       </SidePanel>
 
       <ContentArea>
-        <ContentToolbar />
+        <ContentToolbar>
+          <div className="toolbar-left">
+            {showBackToArchive && archiveReturnTarget ? (
+              <button
+                type="button"
+                className="toolbar-back-btn"
+                onClick={() => {
+                  setFileUrl(
+                    archiveReturnTarget.fileUrl,
+                    archiveReturnTarget.fileName,
+                    archiveReturnTarget.fileType,
+                    archiveReturnTarget.nodeId,
+                    { tabTypeLabel: archiveReturnTarget.tabTypeLabel ?? null },
+                  );
+                }}
+                title="返回"
+              >
+                <IconChevronLeft />
+                返回
+              </button>
+            ) : null}
+          </div>
+        </ContentToolbar>
         <ContentBody>
           <AppMain />
         </ContentBody>

@@ -23,11 +23,16 @@ interface Node {
   data?: {
     rawName: string; // 保留未截断的原始名称
     rawExt?: string;
+    parentArchiveMode?: number;
     [key: string]: any; // 以后还可以加别的
   };
   icon?: React.ReactNode;
   builtInType?: string;
   archiveMode?: number;
+}
+
+function normalizeArchiveMode(mode?: number): 0 | 1 {
+  return Number(mode ?? 0) === 1 ? 1 : 0;
 }
 
 export interface NodeRespDTO {
@@ -153,10 +158,17 @@ export function useRepositoryTree(
   onFileOpen?: (
     fileUrl: string,
     fileName: string,
-    fileType: 'image' | 'video' | 'audio' | 'comic' | 'asmr' | 'other',
+    fileType: 'image' | 'video' | 'audio' | 'comic' | 'asmr' | 'asmr_archive' | 'other',
     nodeId: number,
     options?: {
       tabTypeLabel?: string | null;
+      returnTarget?: {
+        fileUrl: string;
+        fileName: string | null;
+        fileType: 'image' | 'video' | 'audio' | 'comic' | 'asmr' | 'asmr_archive' | 'other';
+        nodeId: number | null;
+        tabTypeLabel?: string | null;
+      } | null;
     },
   ) => void,
 ) {
@@ -338,7 +350,11 @@ export function useRepositoryTree(
                 rawExt: node.type === 'file' ? nextExt : node.data?.rawExt,
               },
               icon: node.type === 'file'
-                ? getFileNodeIconByParentBuiltInType(nextExt, node.data?.parentBuiltInType)
+                ? getFileNodeIconByParentBuiltInType(
+                  nextExt,
+                  node.data?.parentBuiltInType,
+                  node.data?.parentArchiveMode,
+                )
                 : node.icon,
             };
           }
@@ -374,19 +390,22 @@ export function useRepositoryTree(
         return nodes.map(node => {
           if (node.key === nodeKey) {
             const mergedBuiltInType = nextBuiltInType ?? node.builtInType ?? 'DEF';
-            const mergedArchiveMode = payload.archiveMode ?? node.archiveMode ?? 0;
+            const mergedArchiveMode = mergedBuiltInType === 'DEF'
+              ? 0
+              : normalizeArchiveMode(payload.archiveMode ?? node.archiveMode);
             const mergedChildren: Node[] | undefined = node.children?.map((child: Node): Node => {
               if (child.type !== 'file') {
                 return child;
               }
               return {
                 ...child,
-                icon: getFileNodeIconByParentBuiltInType(child.ext, mergedBuiltInType),
+                icon: getFileNodeIconByParentBuiltInType(child.ext, mergedBuiltInType, mergedArchiveMode),
                 data: {
                   ...(child.data || { rawName: child.name, rawExt: child.ext || '' }),
                   rawName: child.data?.rawName || child.name,
                   rawExt: child.data?.rawExt ?? child.ext ?? '',
                   parentBuiltInType: mergedBuiltInType,
+                  parentArchiveMode: mergedArchiveMode,
                 },
               };
             });
@@ -394,7 +413,7 @@ export function useRepositoryTree(
               ...node,
               builtInType: mergedBuiltInType,
               archiveMode: mergedArchiveMode,
-              icon: node.type === 'dir' ? getDirectoryBuiltInIcon(mergedBuiltInType) : node.icon,
+              icon: node.type === 'dir' ? getDirectoryBuiltInIcon(mergedBuiltInType, mergedArchiveMode) : node.icon,
               children: mergedChildren ?? node.children,
             };
           }
@@ -631,6 +650,38 @@ export function useRepositoryTree(
 
     if (node.type === 'dir') {
       const builtInType = String(node.builtInType || 'DEF').toUpperCase();
+      const archiveMode = normalizeArchiveMode(node.archiveMode);
+
+      const toggleDirectoryNodeExpand = async () => {
+        if (!node.loaded) {
+          await loadChildren(node);
+        } else {
+          const newKeys = isExpanded
+            ? expandedKeysRef.current.filter(k => k !== node.key)
+            : [...expandedKeysRef.current, node.key];
+          setExpandedKeys(newKeys);
+          expandedKeysRef.current = newKeys;
+        }
+      };
+
+      if (archiveMode === 1 && builtInType === 'ASMR') {
+        if (onFileOpen) {
+          onFileOpen(
+            `asmr-archive://library/${selectedLibraryId}/node/${node.id}`,
+            `ASMR 归档 · ${node.name}`,
+            'asmr_archive',
+            node.id,
+            { tabTypeLabel: 'ASMR-ARCHIVE' },
+          );
+        }
+        return;
+      }
+
+      if (archiveMode === 1) {
+        await toggleDirectoryNodeExpand();
+        return;
+      }
+
       if (builtInType === 'COMIC') {
         if (onFileOpen) {
           onFileOpen(
@@ -677,15 +728,7 @@ export function useRepositoryTree(
         return;
       }
 
-      if (!node.loaded) {
-        await loadChildren(node);
-      } else {
-        const newKeys = isExpanded
-          ? expandedKeysRef.current.filter(k => k !== node.key)
-          : [...expandedKeysRef.current, node.key];
-        setExpandedKeys(newKeys);
-        expandedKeysRef.current = newKeys;
-      }
+      await toggleDirectoryNodeExpand();
     } else {
       // 双击文件：获取文件临时访问链接
       runtimeLogger.debug('📄 双击文件:', node.name);
@@ -703,9 +746,15 @@ export function useRepositoryTree(
   }, [loadChildren, onFileOpen, selectedRepository]);
 
   // 节点转换
-  function mapToTreeNode(item: NodeRespDTO, parentNode?: Pick<Node, 'builtInType'>): Node {
+  function mapToTreeNode(item: NodeRespDTO, parentNode?: Pick<Node, 'builtInType' | 'archiveMode'>): Node {
     const parentBuiltInType = String(parentNode?.builtInType || 'DEF').toUpperCase();
-    const nodeBuiltInType = String(item.builtInType || 'DEF').toUpperCase();
+    const parentArchiveMode = normalizeArchiveMode(parentNode?.archiveMode);
+    const nodeBuiltInType = parentArchiveMode === 1
+      ? 'DEF'
+      : String(item.builtInType || 'DEF').toUpperCase();
+    const nodeArchiveMode = nodeBuiltInType === 'DEF'
+      ? 0
+      : normalizeArchiveMode(item.archiveMode);
     return {
       ...item,
       key: `${item.parentId}:${item.id}`,
@@ -715,14 +764,15 @@ export function useRepositoryTree(
         rawName: item.name,
         rawExt: item.ext || '',
         parentBuiltInType,
+        parentArchiveMode,
       },
       icon: item.type === 'file'
-        ? getFileNodeIconByParentBuiltInType(item.ext, parentBuiltInType)
-        : getDirectoryBuiltInIcon(nodeBuiltInType),
+        ? getFileNodeIconByParentBuiltInType(item.ext, parentBuiltInType, parentArchiveMode)
+        : getDirectoryBuiltInIcon(nodeBuiltInType, nodeArchiveMode),
       children: item.type === 'dir' ? [] : undefined,
       loaded: false,
       builtInType: nodeBuiltInType,
-      archiveMode: item.archiveMode ?? 0,
+      archiveMode: nodeArchiveMode,
     };
   }
 

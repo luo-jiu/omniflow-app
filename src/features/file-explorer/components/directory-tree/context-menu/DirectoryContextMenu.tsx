@@ -123,12 +123,15 @@ const DirectoryContextMenu: React.FC<DirectoryContextMenuProps> = ({
   ];
 
   const isBuiltInFolder = isFolder && currentBuiltInType !== 'DEF';
+  const isArchiveFolder = isBuiltInFolder && currentArchiveMode === 1;
   if (isBuiltInFolder) {
-    items.push({
-      key: 'open-raw-folder',
-      label: '打开原始目录',
-      onClick: () => onAction('打开原始目录', node),
-    });
+    if (!isArchiveFolder) {
+      items.push({
+        key: 'open-raw-folder',
+        label: '打开原始目录',
+        onClick: () => onAction('打开原始目录', node),
+      });
+    }
     if (currentBuiltInType === 'COMIC') {
       items.push({
         key: 'comic-sort-by-name',

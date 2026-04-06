@@ -292,7 +292,8 @@ export default function DirectoryTree({
   const isBuiltInFolderNode = (node: any): boolean => {
     if (!node || String(node.type) === 'file') return false;
     const builtInType = String(node.builtInType || 'DEF').toUpperCase();
-    return builtInType !== 'DEF';
+    const archiveMode = Number(node.archiveMode ?? 0) === 1 ? 1 : 0;
+    return builtInType !== 'DEF' && archiveMode !== 1;
   };
 
   const isRawOpenAllowed = (nodeKey: string): boolean => rawOpenAllowedKeysRef.current.has(nodeKey);
@@ -730,17 +731,24 @@ export default function DirectoryTree({
     if (action.startsWith('设置内置类型:')) {
       const nextBuiltInType = action.split(':')[1]?.trim()?.toUpperCase() || 'DEF';
       const currentArchiveMode = Number(node?.archiveMode ?? 0);
+      const nextArchiveMode = nextBuiltInType === 'DEF'
+        ? 0
+        : (currentArchiveMode === 1 ? 1 : 0);
       try {
         await updateNodeConfig({
           id: node.id,
           builtInType: nextBuiltInType,
-          archiveMode: currentArchiveMode,
+          archiveMode: nextArchiveMode,
         });
         onConfigSuccess?.(node.key, {
           builtInType: nextBuiltInType,
-          archiveMode: currentArchiveMode,
+          archiveMode: nextArchiveMode,
         });
-        Toast.success(`已设置为 ${nextBuiltInType}`);
+        Toast.success(
+          nextBuiltInType === 'DEF' && currentArchiveMode === 1
+            ? '已设置为 DEF，并自动关闭归档模式'
+            : `已设置为 ${nextBuiltInType}`,
+        );
       } catch (error: any) {
         runtimeLogger.error('设置内置类型失败:', error);
         Toast.error(error?.message || '设置内置类型失败');
@@ -751,6 +759,10 @@ export default function DirectoryTree({
     if (action.startsWith('设置归档模式:')) {
       const nextArchiveMode = Number(action.split(':')[1] || 0) === 1 ? 1 : 0;
       const currentBuiltInType = String(node?.builtInType || 'DEF').toUpperCase();
+      if (nextArchiveMode === 1 && currentBuiltInType === 'DEF') {
+        Toast.warning('请先设置内置类型，再开启归档模式');
+        return;
+      }
       try {
         await updateNodeConfig({
           id: node.id,
@@ -994,6 +1006,7 @@ export default function DirectoryTree({
   const renderLabel = (label?: ReactNode, treeNode?: any): ReactNode => {
     if (!treeNode) return label;
     const isFolder = String(treeNode.type) === 'dir';
+    const isArchiveFolder = isFolder && Number(treeNode.archiveMode ?? 0) === 1;
 
     // 外部文件拖拽进入：高亮并延时 500ms 自动展开
     const onDragEnter = (e: React.DragEvent) => {
@@ -1108,7 +1121,7 @@ export default function DirectoryTree({
         onContextMenu={(e) => openMenu(e, treeNode, isFolder)}
       >
         <span
-          className="tree-node-text"
+          className={`tree-node-text ${isArchiveFolder ? 'tree-node-text-archive' : ''}`}
           ref={bindTextRef(treeNode.key)}
         >
           {label}

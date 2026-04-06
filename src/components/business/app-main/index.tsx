@@ -1,10 +1,12 @@
-import { FC, ReactNode } from "react";
+import React, { FC, ReactNode } from "react";
 import MainWrapper from "./style.ts";
 import { useFileViewer } from "@/hooks/useFileViewer";
 import WelcomeView from "@/features/file-viewer/components/welcome-view";
 import FileDispatcher from "@/features/file-viewer/components/file-dispatcher";
 import GlobalAudioMiniBar from "@/components/business/global-audio-mini-bar";
 import FileTabsBar from "./FileTabsBar";
+import { globalAudioPlayer } from "@/features/file-viewer/services/global-audio-player";
+import { resolveAsmrOwnerKey } from "@/features/file-viewer/utils/asmr-owner-key";
 
 interface IProps {
   children?: ReactNode;
@@ -16,7 +18,23 @@ interface IProps {
  */
 const AppMain: FC<IProps> = () => {
   const { fileState, tabs, activeTabId, activateTab, closeTab } = useFileViewer();
-  const suppressGlobalAudioBar = fileState.fileType === 'asmr';
+  const [playerState, setPlayerState] = React.useState(() => globalAudioPlayer.getState());
+
+  React.useEffect(() => globalAudioPlayer.subscribe(setPlayerState), []);
+
+  const activeAsmrViewerKey = React.useMemo(() => {
+    if (fileState.fileType !== 'asmr') {
+      return null;
+    }
+    return resolveAsmrOwnerKey(String(fileState.fileUrl || ''), fileState.nodeId);
+  }, [fileState.fileType, fileState.fileUrl, fileState.nodeId]);
+
+  const suppressGlobalAudioBar = (
+    fileState.fileType === 'asmr'
+    && playerState.ownerType === 'asmr'
+    && Boolean(activeAsmrViewerKey)
+    && playerState.ownerKey === activeAsmrViewerKey
+  );
 
   // 如果没有文件在查看，显示欢迎视图
   if (!fileState.fileUrl && !fileState.loading) {

@@ -1,0 +1,141 @@
+import styled from 'styled-components';
+
+export const AsmrArchiveViewerWrapper = styled.div`
+  --archive-card-width: 342px;
+
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  color: var(--semi-color-text-0);
+
+  .badge {
+    flex-shrink: 0;
+    font-size: 11px;
+    line-height: 1;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    color: #0b7b65;
+    background: #d8fff1;
+    border: 1px solid #9de9d2;
+    border-radius: 999px;
+    padding: 4px 8px;
+  }
+
+  .title {
+    min-width: 0;
+    margin: 0;
+    font-size: 13px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .table-surface {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    padding: 20px 20px 22px;
+    background: var(--app-bg);
+  }
+
+  .state-wrap {
+    min-height: 180px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--app-text-secondary);
+    font-size: 14px;
+    text-align: center;
+  }
+
+  .state-wrap.state-error {
+    color: var(--semi-color-danger);
+  }
+
+  .cards-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(var(--archive-card-width), var(--archive-card-width)));
+    justify-content: start;
+    gap: 22px;
+  }
+
+  .archive-card {
+    width: var(--archive-card-width);
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    background: #fefefe;
+    box-shadow:
+      0 16px 24px rgba(2, 20, 15, 0.28),
+      0 2px 0 rgba(255, 255, 255, 0.55) inset;
+    overflow: hidden;
+    cursor: pointer;
+  }
+
+  .archive-card:hover {
+    border-color: color-mix(in srgb, var(--semi-color-primary) 36%, rgba(255, 255, 255, 0.22));
+  }
+
+  .card-cover {
+    aspect-ratio: 4 / 3;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+    background: #e9edf2;
+  }
+
+  .card-cover img {
+    width: 100%;
+    height: 100%;
+    display: block;
+    object-fit: cover;
+    user-select: none;
+    pointer-events: none;
+  }
+
+  .cover-empty {
+    width: 100%;
+    height: 100%;
+    background:
+      linear-gradient(120deg, #edf2f7 0%, #e2e8f0 48%, #edf2f7 100%);
+  }
+
+  .card-title {
+    min-height: 62px;
+    max-height: 62px;
+    padding: 12px 14px 10px;
+    font-size: 15px;
+    line-height: 1.35;
+    font-weight: 600;
+    color: #1f2937;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+
+  .card-tag-slot {
+    height: 36px;
+    border-top: 1px dashed rgba(17, 24, 39, 0.16);
+    background: rgba(249, 250, 251, 0.9);
+  }
+
+  .archive-footer {
+    height: 42px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    padding: 0 12px;
+    border-top: 1px solid var(--semi-color-border);
+    background: color-mix(in srgb, var(--semi-color-bg-0) 95%, transparent);
+  }
+
+  .footer-title-group {
+    min-width: 0;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+`;

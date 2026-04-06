@@ -26,6 +26,12 @@ export function isImageExtension(ext?: string): boolean {
   return imageExtensions.includes(normalized);
 }
 
+function isAudioExtension(ext?: string): boolean {
+  const normalized = normalizeExt(ext);
+  const audioExtensions = ['mp3', 'wav', 'aac', 'flac', 'm4a', 'ogg', 'opus'];
+  return audioExtensions.includes(normalized);
+}
+
 function createWarningIconNode(title: string): React.ReactNode {
   return React.createElement(
     'span',
@@ -67,19 +73,37 @@ export function getFileNodeIcon(ext?: string): React.ReactNode {
   return createIconNode(blankFileIcon, 'file');
 }
 
-export function getFileNodeIconByParentBuiltInType(ext?: string, parentBuiltInType?: string): React.ReactNode {
+export function getFileNodeIconByParentBuiltInType(
+  ext?: string,
+  parentBuiltInType?: string,
+  parentArchiveMode?: number,
+): React.ReactNode {
   const normalizedBuiltInType = String(parentBuiltInType || 'DEF').toUpperCase();
+  const normalizedArchiveMode = Number(parentArchiveMode ?? 0) === 1 ? 1 : 0;
   if (normalizedBuiltInType === 'COMIC') {
     if (isImageExtension(ext)) {
       return getFileNodeIcon(ext);
     }
     return createWarningIconNode('与漫画模式不匹配的文件');
   }
+  if (normalizedBuiltInType === 'ASMR' && normalizedArchiveMode === 1) {
+    if (isAudioExtension(ext)) {
+      return getFileNodeIcon(ext);
+    }
+    return createWarningIconNode('与 ASMR 归档模式不匹配的文件');
+  }
   return getFileNodeIcon(ext);
 }
 
-export function getDirectoryBuiltInIcon(builtInType?: string): React.ReactNode | undefined {
+export function getDirectoryBuiltInIcon(
+  builtInType?: string,
+  archiveMode?: number,
+): React.ReactNode | undefined {
   const normalized = String(builtInType || 'DEF').toUpperCase();
+  const normalizedArchiveMode = Number(archiveMode ?? 0) === 1 ? 1 : 0;
+  if (normalizedArchiveMode === 1 && normalized === 'DEF') {
+    return undefined;
+  }
   if (normalized === 'DEF') {
     return undefined;
   }

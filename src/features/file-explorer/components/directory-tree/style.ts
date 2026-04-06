@@ -178,6 +178,11 @@ export const DirectorySidebarWrapper = styled.aside<{ $isDragging?: boolean }>`
     line-height: 28px;
   }
 
+  .tree-node-text-archive {
+    color: color-mix(in srgb, var(--semi-color-success) 78%, var(--app-text) 22%);
+    font-weight: 600;
+  }
+
   .tree-file-type-icon {
     width: 20px;
     height: 20px;

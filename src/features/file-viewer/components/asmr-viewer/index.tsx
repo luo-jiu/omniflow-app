@@ -16,6 +16,7 @@ import { AsmrViewerWrapper } from './style';
 import { useFileViewer } from '@/hooks/useFileViewer';
 import { runtimeLogger } from '@/utils/runtimeLogger';
 import { globalAudioPlayer } from '@/features/file-viewer/services/global-audio-player';
+import { parseAsmrRouteInfo, resolveAsmrOwnerKey } from '@/features/file-viewer/utils/asmr-owner-key';
 
 interface AsmrViewerProps {
   folderNodeId: number | null;
@@ -79,18 +80,8 @@ function sortNodes(items: AsmrNodeItem[]): AsmrNodeItem[] {
   });
 }
 
-function parseAsmrLibraryId(fileUrl: string): number | null {
-  const matches = /^asmr:\/\/library\/(\d+)\/node\/\d+$/i.exec(String(fileUrl || '').trim());
-  if (!matches) return null;
-  const parsed = Number(matches[1]);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function resolveAsmrViewerCacheKey(libraryId: number | null, folderNodeId: number | null): string | null {
-  if (!libraryId || !Number.isFinite(libraryId) || !folderNodeId || !Number.isFinite(folderNodeId)) {
-    return null;
-  }
-  return `asmr::lib:${libraryId}::node:${folderNodeId}`;
+function resolveAsmrViewerCacheKey(fileUrl: string, folderNodeId: number | null): string | null {
+  return resolveAsmrOwnerKey(fileUrl, folderNodeId);
 }
 
 function setAsmrViewerSnapshot(cacheKey: string, snapshot: AsmrViewerSnapshot) {
@@ -174,10 +165,11 @@ function formatDuration(time: number): string {
 
 const AsmrViewer: React.FC<AsmrViewerProps> = ({ folderNodeId, fileUrl, fileName }) => {
   const { setFileUrl } = useFileViewer();
-  const libraryId = useMemo(() => parseAsmrLibraryId(fileUrl), [fileUrl]);
+  const routeInfo = useMemo(() => parseAsmrRouteInfo(fileUrl), [fileUrl]);
+  const libraryId = routeInfo?.libraryId ?? null;
   const viewerCacheKey = useMemo(
-    () => resolveAsmrViewerCacheKey(libraryId, folderNodeId),
-    [libraryId, folderNodeId],
+    () => resolveAsmrViewerCacheKey(fileUrl, folderNodeId),
+    [fileUrl, folderNodeId],
   );
   const initialSnapshot = useMemo(
     () => (viewerCacheKey ? asmrViewerSnapshotCache.get(viewerCacheKey) ?? null : null),
@@ -297,7 +289,14 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({ folderNodeId, fileUrl, fileName
   ) => {
     try {
       const url = await resolveAudioUrl(targetAudio);
-      globalAudioPlayer.ensureSource(url, resolveDisplayName(targetAudio));
+      globalAudioPlayer.ensureSource(
+        url,
+        resolveDisplayName(targetAudio),
+        {
+          ownerType: 'asmr',
+          ownerKey: resolveAsmrOwnerKey(fileUrl, folderNodeId || targetAudio.id),
+        },
+      );
       await globalAudioPlayer.play();
       setAudioQueue(queue);
       setCurrentAudioId(targetAudio.id);
@@ -314,7 +313,7 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({ folderNodeId, fileUrl, fileName
       runtimeLogger.error('ASMR 音频播放失败:', error);
       Toast.error(error?.message || '播放音频失败');
     }
-  }, [persistViewerSnapshot, resolveAudioUrl]);
+  }, [fileUrl, folderNodeId, persistViewerSnapshot, resolveAudioUrl]);
 
   const resolveCover = useCallback(async (rootChildren: AsmrNodeItem[]) => {
     if (!libraryId) {

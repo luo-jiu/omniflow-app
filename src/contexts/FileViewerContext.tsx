@@ -3,6 +3,7 @@ import {
   FileViewerContext,
   type FileViewerState,
   type FileViewerTab,
+  type FileViewerReturnTarget,
 } from './file-viewer.context';
 
 const defaultFileViewerState: FileViewerState = {
@@ -124,10 +125,11 @@ export const FileViewerProvider: React.FC<{ children: ReactNode; cacheKey?: stri
   const setFileUrl = (
     url: string | null,
     fileName: string | null,
-    fileType: 'image' | 'video' | 'audio' | 'comic' | 'asmr' | 'other' | null,
+    fileType: 'image' | 'video' | 'audio' | 'comic' | 'asmr' | 'asmr_archive' | 'other' | null,
     nodeId?: number | null,
     options?: {
       tabTypeLabel?: string | null;
+      returnTarget?: FileViewerReturnTarget | null;
     },
   ) => {
     if (!url) {
@@ -141,6 +143,7 @@ export const FileViewerProvider: React.FC<{ children: ReactNode; cacheKey?: stri
 
     const tabId = resolveTabId(url, nodeId);
     setViewerState(prev => {
+      const existingTab = prev.tabs.find(tab => tab.id === tabId);
       const nextTab: FileViewerTab = {
         id: tabId,
         nodeId: nodeId ?? null,
@@ -148,20 +151,28 @@ export const FileViewerProvider: React.FC<{ children: ReactNode; cacheKey?: stri
         fileName,
         fileType,
         tabTypeLabel: options?.tabTypeLabel ?? null,
+        returnTarget: options?.returnTarget ?? null,
         loading: false,
       };
       const existingIndex = prev.tabs.findIndex(tab => tab.id === tabId);
       const nextTabs = [...prev.tabs];
       if (existingIndex >= 0) {
-        nextTabs[existingIndex] = nextTab;
+        nextTabs[existingIndex] = {
+          ...nextTab,
+          // 若调用者未显式透传 returnTarget，则默认清空，避免历史来源残留。
+          returnTarget: options?.returnTarget ?? null,
+          // loading 由 setLoading 统一维护，防止打开同 tab 时闪烁。
+          loading: existingTab?.loading ?? false,
+        };
       } else {
         nextTabs.push(nextTab);
       }
+      const activeTab = nextTabs.find(tab => tab.id === tabId) ?? nextTab;
       return {
         ...prev,
         tabs: nextTabs,
         activeTabId: tabId,
-        fileState: toFileState(nextTab),
+        fileState: toFileState(activeTab),
       };
     });
   };
