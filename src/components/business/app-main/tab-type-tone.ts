@@ -56,6 +56,11 @@ const LABEL_TONE_MAP: Record<string, TabTypeTone> = {
     text: 'color-mix(in srgb, var(--semi-color-success) 62%, var(--semi-color-primary) 38%)',
     border: 'color-mix(in srgb, var(--semi-color-success) 36%, var(--semi-color-primary) 32%)',
   },
+  'COMIC-ARC': {
+    background: 'color-mix(in srgb, var(--semi-color-success-light-default) 82%, var(--semi-color-warning-light-default) 18%)',
+    text: 'color-mix(in srgb, var(--semi-color-success) 72%, var(--semi-color-warning) 28%)',
+    border: 'color-mix(in srgb, var(--semi-color-success) 40%, var(--semi-color-warning) 24%)',
+  },
   IMAGE: {
     background: 'color-mix(in srgb, var(--semi-color-tertiary-light-default) 84%, transparent)',
     text: 'var(--semi-color-tertiary)',
@@ -96,6 +101,7 @@ const FILE_TYPE_TONE_MAP: Partial<Record<NonNullable<FileViewerTab['fileType']>,
   comic: LABEL_TONE_MAP.COMIC,
   asmr: LABEL_TONE_MAP.ASMR,
   asmr_archive: LABEL_TONE_MAP['ASMR-ARC'],
+  comic_archive: LABEL_TONE_MAP['COMIC-ARC'],
   other: LABEL_TONE_MAP.FILE,
 };
 
@@ -181,6 +187,7 @@ export function resolveTabTargetKey(tab: FileViewerTab, tabTypeLabel: string): s
   if (tab.fileType === 'comic') return 'COMIC';
   if (tab.fileType === 'asmr') return 'ASMR';
   if (tab.fileType === 'asmr_archive') return 'ASMR-ARC';
+  if (tab.fileType === 'comic_archive') return 'COMIC-ARC';
   return 'FILE';
 }
 

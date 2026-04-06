@@ -32,6 +32,7 @@ interface AsmrViewerProps {
   fileUrl: string;
   fileName?: string | null;
   active?: boolean;
+  reloadToken?: number;
 }
 
 interface AsmrNodeItem {
@@ -101,8 +102,14 @@ function sortNodes(items: AsmrNodeItem[]): AsmrNodeItem[] {
   });
 }
 
-function resolveAsmrViewerCacheKey(fileUrl: string, folderNodeId: number | null): string | null {
-  return resolveAsmrOwnerKey(fileUrl, folderNodeId);
+function resolveAsmrViewerCacheKey(
+  fileUrl: string,
+  folderNodeId: number | null,
+  reloadToken: number,
+): string | null {
+  const ownerKey = resolveAsmrOwnerKey(fileUrl, folderNodeId);
+  if (!ownerKey) return null;
+  return `${ownerKey}::r${Math.max(Math.floor(reloadToken), 0)}`;
 }
 
 function setAsmrViewerSnapshot(cacheKey: string, snapshot: AsmrViewerSnapshot) {
@@ -237,7 +244,13 @@ function formatDuration(time: number): string {
   return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 }
 
-const AsmrViewer: React.FC<AsmrViewerProps> = ({ folderNodeId, fileUrl, fileName, active = true }) => {
+const AsmrViewer: React.FC<AsmrViewerProps> = ({
+  folderNodeId,
+  fileUrl,
+  fileName,
+  active = true,
+  reloadToken = 0,
+}) => {
   const { setFileUrl } = useFileViewer();
   const routeInfo = useMemo(() => parseAsmrRouteInfo(fileUrl), [fileUrl]);
   const libraryId = routeInfo?.libraryId ?? null;
@@ -253,8 +266,8 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({ folderNodeId, fileUrl, fileName
     return null;
   }, [folderNodeId, routeInfo?.nodeId]);
   const viewerCacheKey = useMemo(
-    () => resolveAsmrViewerCacheKey(fileUrl, folderNodeId),
-    [fileUrl, folderNodeId],
+    () => resolveAsmrViewerCacheKey(fileUrl, folderNodeId, reloadToken),
+    [fileUrl, folderNodeId, reloadToken],
   );
   const initialSnapshot = useMemo(
     () => (viewerCacheKey ? asmrViewerSnapshotCache.get(viewerCacheKey) ?? null : null),

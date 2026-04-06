@@ -22,6 +22,17 @@ process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL
   ? path.join(process.env.APP_ROOT, 'public')
   : RENDERER_DIST
 const APP_ICON_PATH = path.join(process.env.APP_ROOT, 'build', 'icons', 'icon.png')
+const APP_DISPLAY_NAME = 'Omniflow'
+const LEGACY_USER_DATA_DIRNAME = 'omniflow-app'
+
+app.setName(APP_DISPLAY_NAME)
+// 保持沿用历史用户数据目录，避免因应用显示名变化导致 zoom / 本地偏好重置。
+try {
+  const stableUserDataPath = path.join(app.getPath('appData'), LEGACY_USER_DATA_DIRNAME)
+  app.setPath('userData', stableUserDataPath)
+} catch {
+  // ignore
+}
 
 function getAppIconPath() {
   return existsSync(APP_ICON_PATH) ? APP_ICON_PATH : null

@@ -513,6 +513,14 @@ const MAIN_DIST = path.join(process.env.APP_ROOT, "dist-electron");
 const RENDERER_DIST = path.join(process.env.APP_ROOT, "dist");
 process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, "public") : RENDERER_DIST;
 const APP_ICON_PATH = path.join(process.env.APP_ROOT, "build", "icons", "icon.png");
+const APP_DISPLAY_NAME = "Omniflow";
+const LEGACY_USER_DATA_DIRNAME = "omniflow-app";
+app.setName(APP_DISPLAY_NAME);
+try {
+  const stableUserDataPath = path.join(app.getPath("appData"), LEGACY_USER_DATA_DIRNAME);
+  app.setPath("userData", stableUserDataPath);
+} catch {
+}
 function getAppIconPath() {
   return existsSync(APP_ICON_PATH) ? APP_ICON_PATH : null;
 }

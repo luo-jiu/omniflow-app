@@ -9,6 +9,7 @@ interface ComicViewerProps {
   fileUrl: string;
   fileName?: string | null;
   active?: boolean;
+  reloadToken?: number;
 }
 
 interface ComicChildNode {
@@ -63,7 +64,20 @@ function normalizeExt(ext?: string): string {
   return String(ext || '').toLowerCase().replace(/^\./, '');
 }
 
+function isHiddenNodeName(name?: string, ext?: string): boolean {
+  const trimmedName = String(name || '').trim();
+  if (trimmedName.startsWith('.')) {
+    return true;
+  }
+  const normalizedExt = normalizeExt(ext);
+  // Back-end may split `.thumb` into name="" and ext="thumb".
+  return trimmedName.length === 0 && normalizedExt.length > 0;
+}
+
 function isImageNode(item: ComicChildNode): boolean {
+  if (isHiddenNodeName(item.name, item.ext)) {
+    return false;
+  }
   if (!(String(item.type) === 'file' || Number(item.type) === 1)) {
     return false;
   }
@@ -97,11 +111,15 @@ function normalizeComicTitle(fileName?: string | null): string {
   return raw;
 }
 
-function resolveReaderCacheKey(fileUrl: string, folderNodeId: number | null): string | null {
+function resolveReaderCacheKey(
+  fileUrl: string,
+  folderNodeId: number | null,
+  reloadToken: number,
+): string | null {
   if (!folderNodeId || !Number.isFinite(folderNodeId)) {
     return null;
   }
-  return `${String(fileUrl || '').trim()}::${folderNodeId}`;
+  return `${String(fileUrl || '').trim()}::${folderNodeId}::r${Math.max(Math.floor(reloadToken), 0)}`;
 }
 
 function setReaderSnapshotCache(cacheKey: string, snapshot: ComicReaderSnapshot) {
@@ -132,12 +150,18 @@ interface AnchorSnapshot {
   currentPageNumber: number;
 }
 
-const ComicViewer: React.FC<ComicViewerProps> = ({ folderNodeId, fileUrl, fileName, active = true }) => {
+const ComicViewer: React.FC<ComicViewerProps> = ({
+  folderNodeId,
+  fileUrl,
+  fileName,
+  active = true,
+  reloadToken = 0,
+}) => {
   const libraryId = useMemo(() => parseComicLibraryId(fileUrl), [fileUrl]);
   const displayTitle = useMemo(() => normalizeComicTitle(fileName), [fileName]);
   const readerCacheKey = useMemo(
-    () => resolveReaderCacheKey(fileUrl, folderNodeId),
-    [fileUrl, folderNodeId],
+    () => resolveReaderCacheKey(fileUrl, folderNodeId, reloadToken),
+    [fileUrl, folderNodeId, reloadToken],
   );
 
   const [pages, setPages] = useState<ComicPageItem[]>([]);

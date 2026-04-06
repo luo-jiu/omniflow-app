@@ -127,12 +127,14 @@ const AppMain: FC<IProps> = () => {
                 aria-hidden={!isActive}
               >
                 <FileDispatcher
+                  key={`${tab.id}:${tab.reloadToken ?? 0}`}
                   nodeId={tab.nodeId}
                   fileUrl={tab.fileUrl}
                   fileName={tab.fileName}
                   fileType={tab.fileType}
                   loading={tab.loading}
                   active={isActive}
+                  reloadToken={tab.reloadToken ?? 0}
                 />
               </div>
             );

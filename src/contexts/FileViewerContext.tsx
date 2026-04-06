@@ -162,7 +162,7 @@ export const FileViewerProvider: React.FC<{ children: ReactNode; cacheKey?: stri
   const setFileUrl = (
     url: string | null,
     fileName: string | null,
-    fileType: 'image' | 'video' | 'audio' | 'pdf' | 'comic' | 'asmr' | 'asmr_archive' | 'other' | null,
+    fileType: 'image' | 'video' | 'audio' | 'pdf' | 'comic' | 'asmr' | 'asmr_archive' | 'comic_archive' | 'other' | null,
     nodeId?: number | null,
     options?: {
       tabTypeLabel?: string | null;
@@ -190,6 +190,7 @@ export const FileViewerProvider: React.FC<{ children: ReactNode; cacheKey?: stri
         tabTypeLabel: options?.tabTypeLabel ?? null,
         returnTarget: options?.returnTarget ?? null,
         loading: false,
+        reloadToken: existingTab?.reloadToken ?? 0,
       };
       const existingIndex = prev.tabs.findIndex(tab => tab.id === tabId);
       const nextTabs = [...prev.tabs];
@@ -200,6 +201,7 @@ export const FileViewerProvider: React.FC<{ children: ReactNode; cacheKey?: stri
           returnTarget: options?.returnTarget ?? null,
           // loading 由 setLoading 统一维护，防止打开同 tab 时闪烁。
           loading: existingTab?.loading ?? false,
+          reloadToken: existingTab?.reloadToken ?? 0,
         };
       } else {
         nextTabs.push(nextTab);
@@ -267,6 +269,29 @@ export const FileViewerProvider: React.FC<{ children: ReactNode; cacheKey?: stri
     });
   };
 
+  const reloadActiveTab = () => {
+    setViewerState(prev => {
+      const activeId = prev.activeTabId;
+      if (!activeId) {
+        return prev;
+      }
+      const nextTabs = prev.tabs.map(tab => (
+        tab.id === activeId
+          ? { ...tab, reloadToken: (tab.reloadToken ?? 0) + 1 }
+          : tab
+      ));
+      const activeTab = nextTabs.find(tab => tab.id === activeId) || null;
+      if (!activeTab) {
+        return prev;
+      }
+      return {
+        ...prev,
+        tabs: nextTabs,
+        fileState: toFileState(activeTab),
+      };
+    });
+  };
+
   const reorderTabs = (draggedTabId: string, targetTabId: string, position: 'before' | 'after') => {
     setViewerState(prev => reorderTabsInState(prev, draggedTabId, targetTabId, position));
   };
@@ -302,6 +327,7 @@ export const FileViewerProvider: React.FC<{ children: ReactNode; cacheKey?: stri
         activateTab,
         closeTab,
         closeTabByNodeId,
+        reloadActiveTab,
         reorderTabs,
       }}
     >

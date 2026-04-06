@@ -1,6 +1,6 @@
 import styled from 'styled-components';
 
-export const AsmrArchiveViewerWrapper = styled.div`
+export const ComicArchiveViewerWrapper = styled.div`
   --archive-card-width: 342px;
   --archive-card-gap: 22px;
   --archive-column-count: 1;
@@ -19,9 +19,9 @@ export const AsmrArchiveViewerWrapper = styled.div`
     line-height: 1;
     font-weight: 700;
     letter-spacing: 0.05em;
-    color: #0b7b65;
-    background: #d8fff1;
-    border: 1px solid #9de9d2;
+    color: #116d48;
+    background: #dbfce8;
+    border: 1px solid #a8efc8;
     border-radius: 999px;
     padding: 4px 8px;
   }
@@ -79,7 +79,7 @@ export const AsmrArchiveViewerWrapper = styled.div`
   }
 
   .archive-card:hover {
-    border-color: color-mix(in srgb, var(--semi-color-primary) 36%, rgba(255, 255, 255, 0.22));
+    border-color: color-mix(in srgb, var(--semi-color-success) 40%, rgba(255, 255, 255, 0.22));
   }
 
   .card-cover {
@@ -93,6 +93,7 @@ export const AsmrArchiveViewerWrapper = styled.div`
     height: 100%;
     display: block;
     object-fit: cover;
+    object-position: top center;
     user-select: none;
     pointer-events: none;
   }
@@ -129,34 +130,6 @@ export const AsmrArchiveViewerWrapper = styled.div`
     overflow: hidden;
     border-top: 1px dashed rgba(17, 24, 39, 0.16);
     background: rgba(249, 250, 251, 0.9);
-  }
-
-  .card-tag-pill {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    max-width: calc(100% - 2px);
-    padding: 1px 9px;
-    border-radius: 999px;
-    border: 1px solid transparent;
-    font-size: 12px;
-    font-weight: 600;
-    line-height: 1.2;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .card-tag-pill.fallback {
-    color: var(--semi-color-text-0);
-    background: color-mix(in srgb, var(--semi-color-fill-0) 92%, transparent);
-    border-color: var(--semi-color-border);
-  }
-
-  .card-tag-empty {
-    color: var(--semi-color-text-2);
-    font-size: 12px;
-    line-height: 1.3;
   }
 
   .archive-footer {

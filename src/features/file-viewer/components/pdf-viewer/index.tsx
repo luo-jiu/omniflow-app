@@ -10,6 +10,7 @@ interface PdfViewerProps {
   url: string;
   fileName?: string | null;
   active?: boolean;
+  reloadToken?: number;
 }
 
 interface PdfViewerSnapshot {
@@ -63,11 +64,12 @@ function normalizeZoom(value: number): number {
   return clamp(fixed, MIN_ZOOM, MAX_ZOOM);
 }
 
-function resolveViewerCacheKey(url: string, nodeId: number | null): string {
+function resolveViewerCacheKey(url: string, nodeId: number | null, reloadToken: number): string {
+  const normalizedToken = Math.max(Math.floor(reloadToken), 0);
   if (nodeId !== null && nodeId !== undefined) {
-    return `node:${nodeId}`;
+    return `node:${nodeId}::r${normalizedToken}`;
   }
-  return `url:${String(url || '').trim()}`;
+  return `url:${String(url || '').trim()}::r${normalizedToken}`;
 }
 
 function setPdfViewerSnapshot(cacheKey: string, snapshot: PdfViewerSnapshot) {
@@ -306,8 +308,11 @@ const PdfPageCanvas: React.FC<PdfPageCanvasProps> = ({
   );
 };
 
-const PdfViewer: React.FC<PdfViewerProps> = ({ nodeId, url, fileName, active = true }) => {
-  const viewerCacheKey = useMemo(() => resolveViewerCacheKey(url, nodeId), [url, nodeId]);
+const PdfViewer: React.FC<PdfViewerProps> = ({ nodeId, url, fileName, active = true, reloadToken = 0 }) => {
+  const viewerCacheKey = useMemo(
+    () => resolveViewerCacheKey(url, nodeId, reloadToken),
+    [url, nodeId, reloadToken],
+  );
   const initialSnapshot = useMemo(
     () => pdfViewerSnapshotCache.get(viewerCacheKey) ?? null,
     [viewerCacheKey],

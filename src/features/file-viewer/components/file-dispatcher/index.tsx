@@ -7,15 +7,17 @@ import ComicViewer from "../comic-viewer";
 import PdfViewer from "../pdf-viewer";
 import AsmrViewer from "../asmr-viewer";
 import AsmrArchiveViewer from "../../../archive-viewer/components/asmr-archive-viewer";
+import ComicArchiveViewer from "../../../archive-viewer/components/comic-archive-viewer";
 import styled from 'styled-components';
 
 interface FileDispatcherProps {
   nodeId: number | null;
   fileUrl: string | null;
   fileName: string | null;
-  fileType: 'image' | 'video' | 'audio' | 'pdf' | 'comic' | 'asmr' | 'asmr_archive' | 'other' | null;
+  fileType: 'image' | 'video' | 'audio' | 'pdf' | 'comic' | 'asmr' | 'asmr_archive' | 'comic_archive' | 'other' | null;
   loading: boolean;
   active?: boolean;
+  reloadToken?: number;
 }
 
 const DispatcherWrapper = styled.div`
@@ -72,6 +74,7 @@ const FileDispatcher: React.FC<FileDispatcherProps> = ({
   fileType, 
   loading,
   active = true,
+  reloadToken = 0,
 }) => {
   if (loading) {
     return (
@@ -96,16 +99,19 @@ const FileDispatcher: React.FC<FileDispatcherProps> = ({
       return <VideoViewer url={fileUrl} fileName={fileName} active={active} />;
 
     case 'pdf':
-      return <PdfViewer nodeId={nodeId} url={fileUrl} fileName={fileName} active={active} />;
+      return <PdfViewer nodeId={nodeId} url={fileUrl} fileName={fileName} active={active} reloadToken={reloadToken} />;
 
     case 'comic':
-      return <ComicViewer folderNodeId={nodeId} fileUrl={fileUrl} fileName={fileName} active={active} />;
+      return <ComicViewer folderNodeId={nodeId} fileUrl={fileUrl} fileName={fileName} active={active} reloadToken={reloadToken} />;
 
     case 'asmr':
-      return <AsmrViewer folderNodeId={nodeId} fileUrl={fileUrl} fileName={fileName} active={active} />;
+      return <AsmrViewer folderNodeId={nodeId} fileUrl={fileUrl} fileName={fileName} active={active} reloadToken={reloadToken} />;
 
     case 'asmr_archive':
       return <AsmrArchiveViewer folderNodeId={nodeId} fileUrl={fileUrl} fileName={fileName} />;
+
+    case 'comic_archive':
+      return <ComicArchiveViewer folderNodeId={nodeId} fileUrl={fileUrl} fileName={fileName} />;
 
     default:
       return (

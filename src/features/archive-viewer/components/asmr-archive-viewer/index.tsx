@@ -1,10 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Spin } from '@douyinfe/semi-ui';
-import { getChildrenByNodeId, getFileLink } from '@/features/file-explorer/services/file.api';
+import { fetchNodeDetailById, getChildrenByNodeId, getFileLink } from '@/features/file-explorer/services/file.api';
 import { isImageExtension } from '@/features/file-explorer/utils/file-node-icon';
 import { runtimeLogger } from '@/utils/runtimeLogger';
 import { AsmrArchiveViewerWrapper } from './style';
 import { useFileViewer } from '@/hooks/useFileViewer';
+import { fetchTags, type TagItem } from '@/features/tag-management/services/tag.api';
+import { useArchiveCardGrid } from '@/features/archive-viewer/hooks/useArchiveCardGrid';
 
 interface AsmrArchiveViewerProps {
   folderNodeId: number | null;
@@ -26,6 +28,22 @@ interface AsmrArchiveCard {
   id: number;
   title: string;
   coverUrl: string | null;
+  tags: AsmrArchiveTag[];
+}
+
+interface AsmrArchiveTag {
+  id: number | null;
+  name: string;
+  color?: string | null;
+  textColor?: string | null;
+  fallback?: boolean;
+}
+
+interface AsmrViewMetaPayload {
+  tag?: string;
+  tagIds?: number[];
+  coverNodeId?: number;
+  [key: string]: unknown;
 }
 
 const NAME_COLLATOR = new Intl.Collator('zh-Hans-CN', {
@@ -44,8 +62,18 @@ function isDirectoryNode(item: ArchiveNodeItem): boolean {
   return String(item.type) === 'dir' || Number(item.type) === 0;
 }
 
+function isHiddenNodeName(name?: string, ext?: string): boolean {
+  const trimmedName = String(name || '').trim();
+  if (trimmedName.startsWith('.')) {
+    return true;
+  }
+  const normalizedExt = String(ext || '').trim().replace(/^\./, '');
+  return trimmedName.length === 0 && normalizedExt.length > 0;
+}
+
 function isImageFileNode(item: ArchiveNodeItem): boolean {
   if (isDirectoryNode(item)) return false;
+  if (isHiddenNodeName(item.name, item.ext)) return false;
   if (String(item.mimeType || '').startsWith('image/')) return true;
   return isImageExtension(item.ext);
 }
@@ -60,8 +88,101 @@ function normalizeArchiveTitle(fileName?: string | null): string {
   return raw;
 }
 
+function parseViewMeta(raw?: string | null): AsmrViewMetaPayload {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed as AsmrViewMetaPayload;
+    }
+  } catch {
+    return {};
+  }
+  return {};
+}
+
+function sanitizeMetaText(input: unknown): string {
+  return String(input || '').trim();
+}
+
+function resolveMetaNumber(input: unknown): number | null {
+  const value = Number(input);
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+function resolveMetaNumberList(input: unknown): number[] {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+  const result: number[] = [];
+  input.forEach((item) => {
+    const value = resolveMetaNumber(item);
+    if (value !== null && !result.includes(value)) {
+      result.push(value);
+    }
+  });
+  return result;
+}
+
+function resolveTagIdsFromLegacyTagText(
+  legacyTagText: string,
+  normalizedNameMap: Map<string, number>,
+): number[] {
+  const normalized = sanitizeMetaText(legacyTagText);
+  if (!normalized) return [];
+
+  const tokens = normalized
+    .split(/[/,，、|]/g)
+    .map(token => sanitizeMetaText(token).toLowerCase())
+    .filter(Boolean);
+  const ids: number[] = [];
+  tokens.forEach((token) => {
+    const tagId = normalizedNameMap.get(token);
+    if (tagId && !ids.includes(tagId)) {
+      ids.push(tagId);
+    }
+  });
+  return ids;
+}
+
+function resolveFallbackTagTexts(tagText: string): string[] {
+  return sanitizeMetaText(tagText)
+    .split(/[/,，、|]/g)
+    .map(token => sanitizeMetaText(token))
+    .filter(Boolean);
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  mapper: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  if (items.length === 0) return [];
+  const limit = Math.max(1, Math.floor(concurrency));
+  const results: R[] = new Array(items.length);
+  let nextIndex = 0;
+
+  const worker = async () => {
+    while (nextIndex < items.length) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+      results[currentIndex] = await mapper(items[currentIndex], currentIndex);
+    }
+  };
+
+  const workers = Array.from(
+    { length: Math.min(limit, items.length) },
+    () => worker(),
+  );
+  await Promise.all(workers);
+  return results;
+}
+
 const AsmrArchiveViewer: React.FC<AsmrArchiveViewerProps> = ({ folderNodeId, fileUrl, fileName }) => {
   const { setFileUrl } = useFileViewer();
+  const { viewportRef, wrapperStyle } = useArchiveCardGrid({
+    baseCardWidth: 410,
+  });
   const libraryId = useMemo(() => parseArchiveLibraryId(fileUrl), [fileUrl]);
   const title = useMemo(() => normalizeArchiveTitle(fileName), [fileName]);
 
@@ -86,6 +207,24 @@ const AsmrArchiveViewer: React.FC<AsmrArchiveViewerProps> = ({ folderNodeId, fil
       try {
         const children = (await getChildrenByNodeId(folderNodeId, libraryId)) as ArchiveNodeItem[];
         if (requestId !== requestIdRef.current) return;
+        const asmrTagOptions = await fetchTags('ASMR')
+          .then(list => list.filter(tag => (
+            Number(tag.enabled ?? 1) === 1
+            && Number(tag.ownerUserId ?? 0) > 0
+          )))
+          .catch((error) => {
+            runtimeLogger.warn('加载 ASMR 标签失败，归档卡片将仅显示文本标签:', error);
+            return [] as TagItem[];
+          });
+        const tagOptionMap = new Map<number, TagItem>();
+        const normalizedTagNameMap = new Map<string, number>();
+        asmrTagOptions.forEach((option) => {
+          tagOptionMap.set(option.id, option);
+          const normalizedName = sanitizeMetaText(option.name).toLowerCase();
+          if (normalizedName && !normalizedTagNameMap.has(normalizedName)) {
+            normalizedTagNameMap.set(normalizedName, option.id);
+          }
+        });
 
         const archiveUnits = (children || [])
           .filter(item => isDirectoryNode(item))
@@ -93,18 +232,76 @@ const AsmrArchiveViewer: React.FC<AsmrArchiveViewerProps> = ({ folderNodeId, fil
           .filter(item => Number(item.archiveMode ?? 0) !== 1)
           .sort((a, b) => NAME_COLLATOR.compare(String(a.name || ''), String(b.name || '')));
 
-        const nextCards = await Promise.all(archiveUnits.map(async (unit): Promise<AsmrArchiveCard> => {
+        const nextCards = await mapWithConcurrency(
+          archiveUnits,
+          6,
+          async (unit): Promise<AsmrArchiveCard> => {
           try {
-            const unitChildren = (await getChildrenByNodeId(unit.id, libraryId)) as ArchiveNodeItem[];
-            const coverNode = (unitChildren || []).find(isImageFileNode);
+            const [unitChildren, detail] = await Promise.all([
+              getChildrenByNodeId(unit.id, libraryId) as Promise<ArchiveNodeItem[]>,
+              fetchNodeDetailById(unit.id).catch((error) => {
+                runtimeLogger.warn('加载 ASMR 归档卡片元信息失败:', error);
+                return null;
+              }),
+            ]);
+            const parsedMeta = parseViewMeta(detail?.viewMeta);
+            const preferredCoverNodeId = resolveMetaNumber(parsedMeta.coverNodeId);
+            const fallbackCoverNode = (unitChildren || []).find(isImageFileNode);
+            const coverCandidateIds = [
+              preferredCoverNodeId,
+              fallbackCoverNode?.id ?? null,
+            ].filter((id, index, list): id is number => (
+              Number.isFinite(id)
+              && Number(id) > 0
+              && list.indexOf(id) === index
+            ));
+
             let coverUrl: string | null = null;
-            if (coverNode) {
-              coverUrl = await getFileLink(coverNode.id, libraryId, 120);
+            for (const candidateId of coverCandidateIds) {
+              try {
+                const nextUrl = await getFileLink(candidateId, libraryId, 120);
+                if (nextUrl) {
+                  coverUrl = nextUrl;
+                  break;
+                }
+              } catch (error) {
+                runtimeLogger.warn('加载 ASMR 归档卡片候选封面失败，将自动回退:', error);
+              }
             }
+
+            const nextTags: AsmrArchiveTag[] = [];
+            const metaTagText = sanitizeMetaText(parsedMeta.tag);
+            const metaTagIds = resolveMetaNumberList(parsedMeta.tagIds);
+            const resolvedTagIds = metaTagIds.length > 0
+              ? metaTagIds
+              : resolveTagIdsFromLegacyTagText(metaTagText, normalizedTagNameMap);
+
+            resolvedTagIds.forEach((tagId) => {
+              const option = tagOptionMap.get(tagId);
+              if (!option) return;
+              nextTags.push({
+                id: option.id,
+                name: option.name,
+                color: option.color,
+                textColor: option.textColor,
+              });
+            });
+            if (nextTags.length === 0 && metaTagText) {
+              resolveFallbackTagTexts(metaTagText).forEach((tagName) => {
+                if (nextTags.some(item => item.name === tagName)) return;
+                nextTags.push({
+                  id: null,
+                  name: tagName,
+                  fallback: true,
+                });
+              });
+            }
+
             return {
               id: unit.id,
               title: unit.name,
               coverUrl: coverUrl || null,
+              tags: nextTags,
             };
           } catch (error) {
             runtimeLogger.warn('加载 ASMR 归档卡片封面失败:', error);
@@ -112,9 +309,11 @@ const AsmrArchiveViewer: React.FC<AsmrArchiveViewerProps> = ({ folderNodeId, fil
               id: unit.id,
               title: unit.name,
               coverUrl: null,
+              tags: [],
             };
           }
-        }));
+          },
+        );
 
         if (requestId !== requestIdRef.current) return;
         setCards(nextCards);
@@ -133,8 +332,8 @@ const AsmrArchiveViewer: React.FC<AsmrArchiveViewerProps> = ({ folderNodeId, fil
   }, [folderNodeId, libraryId]);
 
   return (
-    <AsmrArchiveViewerWrapper>
-      <section className="table-surface">
+    <AsmrArchiveViewerWrapper style={wrapperStyle}>
+      <section className="table-surface" ref={viewportRef}>
         {loading ? (
           <div className="state-wrap">
             <Spin size="large" tip="归档加载中..." />
@@ -179,7 +378,26 @@ const AsmrArchiveViewer: React.FC<AsmrArchiveViewerProps> = ({ folderNodeId, fil
                 <div className="card-title" title={card.title}>
                   {card.title}
                 </div>
-                <div className="card-tag-slot" />
+                <div className="card-tag-slot">
+                  {card.tags.length > 0 ? (
+                    card.tags.map((tag, index) => (
+                      <span
+                        key={`tag-${card.id}-${tag.id ?? tag.name}-${index}`}
+                        className={`card-tag-pill${tag.fallback ? ' fallback' : ''}`}
+                        style={tag.fallback ? undefined : {
+                          background: tag.color || 'var(--semi-color-fill-0)',
+                          color: tag.textColor || '#fff',
+                          borderColor: tag.color || 'var(--semi-color-border)',
+                        }}
+                        title={tag.name}
+                      >
+                        {tag.name}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="card-tag-empty">暂无标签</span>
+                  )}
+                </div>
               </article>
             ))}
           </div>

@@ -69,6 +69,15 @@ function isImageFileNode(item: Pick<NodeRespDTO, 'mimeType' | 'ext'>): boolean {
   return resolveFileType(item.mimeType, item.ext) === 'image';
 }
 
+function isHiddenNodeName(name?: string, ext?: string): boolean {
+  const trimmedName = String(name || '').trim();
+  if (trimmedName.startsWith('.')) {
+    return true;
+  }
+  const normalizedExt = String(ext || '').trim().replace(/^\./, '');
+  return trimmedName.length === 0 && normalizedExt.length > 0;
+}
+
 function isFileNodeType(type: unknown): boolean {
   return String(type) === 'file' || Number(type) === 1;
 }
@@ -142,14 +151,14 @@ export function useRepositoryTree(
   onFileOpen?: (
     fileUrl: string,
     fileName: string,
-    fileType: 'image' | 'video' | 'audio' | 'pdf' | 'comic' | 'asmr' | 'asmr_archive' | 'other',
+    fileType: 'image' | 'video' | 'audio' | 'pdf' | 'comic' | 'asmr' | 'asmr_archive' | 'comic_archive' | 'other',
     nodeId: number,
     options?: {
       tabTypeLabel?: string | null;
       returnTarget?: {
         fileUrl: string;
         fileName: string | null;
-        fileType: 'image' | 'video' | 'audio' | 'pdf' | 'comic' | 'asmr' | 'asmr_archive' | 'other';
+        fileType: 'image' | 'video' | 'audio' | 'pdf' | 'comic' | 'asmr' | 'asmr_archive' | 'comic_archive' | 'other';
         nodeId: number | null;
         tabTypeLabel?: string | null;
       } | null;
@@ -661,6 +670,19 @@ export function useRepositoryTree(
         return;
       }
 
+      if (archiveMode === 1 && builtInType === 'COMIC') {
+        if (onFileOpen) {
+          onFileOpen(
+            `comic-archive://library/${selectedLibraryId}/node/${node.id}`,
+            node.name,
+            'comic_archive',
+            node.id,
+            { tabTypeLabel: 'COMIC-ARCHIVE' },
+          );
+        }
+        return;
+      }
+
       if (archiveMode === 1) {
         await toggleDirectoryNodeExpand();
         return;
@@ -695,7 +717,11 @@ export function useRepositoryTree(
       if (builtInType !== 'DEF') {
         try {
           const children = (await getChildrenByNodeId(node.id, selectedLibraryId)) as NodeRespDTO[];
-          const firstImageNode = children.find(item => isFileNodeType(item.type) && isImageFileNode(item));
+          const firstImageNode = children.find(item => (
+            isFileNodeType(item.type)
+            && !isHiddenNodeName(item.name, item.ext)
+            && isImageFileNode(item)
+          ));
           if (!firstImageNode) {
             runtimeLogger.warn('内置目录无可打开图片:', node.name);
             return;

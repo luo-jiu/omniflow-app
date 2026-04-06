@@ -10,6 +10,7 @@ export const FILE_TAB_TARGETS: FileTabTarget[] = [
   { key: 'MP4', label: '视频', description: '视频标签（MP4）' },
   { key: 'PDF', label: '文档', description: 'PDF 查看标签（PDF）' },
   { key: 'COMIC', label: '漫画', description: '漫画查看器标签（COMIC）' },
+  { key: 'COMIC-ARC', label: '漫画归档', description: '漫画归档标签（COMIC-ARC）' },
   { key: 'ASMR', label: 'ASMR', description: 'ASMR 查看器标签（ASMR）' },
   { key: 'ASMR-ARC', label: 'ASMR 归档', description: 'ASMR 归档标签（ASMR-ARC）' },
   { key: 'FILE', label: '通用文件', description: '默认文件标签（FILE）' },
@@ -24,6 +25,8 @@ const FILE_TAB_TARGET_ALIAS_MAP: Record<string, string> = {
   WEBP: 'IMG',
   ASMR_ARC: 'ASMR-ARC',
   ASMR_ARCHIVE: 'ASMR-ARC',
+  COMIC_ARC: 'COMIC-ARC',
+  COMIC_ARCHIVE: 'COMIC-ARC',
 };
 
 export function normalizeFileTabTargetKey(input: string | null | undefined): string {

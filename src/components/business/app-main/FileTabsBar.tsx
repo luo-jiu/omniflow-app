@@ -40,6 +40,7 @@ const TAB_MEMORY_FALLBACK_BY_TYPE: Record<string, number> = {
   comic: 120 * 1024 * 1024,
   asmr: 96 * 1024 * 1024,
   asmr_archive: 84 * 1024 * 1024,
+  comic_archive: 92 * 1024 * 1024,
   other: 36 * 1024 * 1024,
 };
 
@@ -306,6 +307,14 @@ function getTabTypeLabel(tab: FileViewerTab) {
     ) {
       return 'ASMR-A';
     }
+    if (
+      normalized === 'COMIC-ARCHIVE'
+      || normalized === 'COMIC ARC'
+      || normalized === 'COMIC-ARC'
+      || normalized === 'COMIC_ARCHIVE'
+    ) {
+      return 'COMIC-A';
+    }
     return normalized;
   }
   const fileType = tab.fileType;
@@ -316,6 +325,7 @@ function getTabTypeLabel(tab: FileViewerTab) {
   if (fileType === 'comic') return 'COMIC';
   if (fileType === 'asmr') return 'ASMR';
   if (fileType === 'asmr_archive') return 'ASMR-A';
+  if (fileType === 'comic_archive') return 'COMIC-A';
   return 'FILE';
 }
 
@@ -324,9 +334,11 @@ function getDisplayName(tab: FileViewerTab) {
   if (!raw) return '未命名文件';
   const trimmed = raw
     .replace(/^ASMR\s*归档\s*·\s*/iu, '')
+    .replace(/^COMIC\s*归档\s*·\s*/iu, '')
     .replace(/^ASMR\s*·\s*/iu, '')
     .replace(/^COMIC\s*·\s*/iu, '')
     .replace(/\s*[【[]\s*ASMR\s*·\s*归档\s*[】\]]\s*$/iu, '')
+    .replace(/\s*[【[]\s*COMIC\s*·\s*归档\s*[】\]]\s*$/iu, '')
     .trim();
   return trimmed || '未命名文件';
 }

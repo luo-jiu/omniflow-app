@@ -6,7 +6,7 @@ import { FileViewerProvider } from "@/contexts/FileViewerContext";
 import { useFileViewer } from "@/hooks/useFileViewer";
 import { useAuth } from "@/hooks/useAuth";
 import { Avatar, Popover } from "@douyinfe/semi-ui";
-import { IconSetting, IconExit, IconHome, IconUpload, IconDelete, IconChevronLeft } from "@douyinfe/semi-icons";
+import { IconSetting, IconExit, IconHome, IconUpload, IconDelete, IconChevronLeft, IconRefresh } from "@douyinfe/semi-icons";
 import ContextMenu from "@/components/ui/context-menu";
 import styled from "styled-components";
 
@@ -188,6 +188,19 @@ const ContentToolbar = styled.div`
     -webkit-app-region: no-drag;
   }
 
+  .toolbar-spacer {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .toolbar-right {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-right: 6px;
+    -webkit-app-region: no-drag;
+  }
+
   .toolbar-back-btn {
     height: 30px;
     border-radius: 7px;
@@ -212,6 +225,38 @@ const ContentToolbar = styled.div`
     border-color: var(--semi-color-primary);
     color: var(--semi-color-primary);
   }
+
+  .toolbar-action-btn {
+    height: 30px;
+    min-width: 30px;
+    border-radius: 7px;
+    border: 1px solid var(--app-border);
+    background: var(--app-bg-elevated);
+    color: var(--app-text-secondary);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 0 8px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1;
+  }
+
+  .toolbar-action-btn .semi-icon {
+    font-size: 15px;
+  }
+
+  .toolbar-action-btn:hover:not(:disabled) {
+    border-color: var(--semi-color-primary);
+    color: var(--semi-color-primary);
+  }
+
+  .toolbar-action-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+  }
 `;
 
 const ContentBody = styled.div`
@@ -228,7 +273,7 @@ const ContentBody = styled.div`
 `;
 
 const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) => {
-  const { setFileUrl, tabs, activeTabId, fileState } = useFileViewer();
+  const { setFileUrl, tabs, activeTabId, fileState, reloadActiveTab } = useFileViewer();
   const { user, isLoggedIn, logout } = useAuth();
   const navigate = useNavigate();
   const displayName = isLoggedIn ? user?.username || "User" : "未登录";
@@ -295,14 +340,14 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   const handleFileOpen = async (
     fileUrl: string,
     fileName: string,
-    fileType: "image" | "video" | "audio" | "pdf" | "comic" | "asmr" | "asmr_archive" | "other",
+    fileType: "image" | "video" | "audio" | "pdf" | "comic" | "asmr" | "asmr_archive" | "comic_archive" | "other",
     nodeId: number,
     options?: {
       tabTypeLabel?: string | null;
       returnTarget?: {
         fileUrl: string;
         fileName: string | null;
-        fileType: 'image' | 'video' | 'audio' | 'pdf' | 'comic' | 'asmr' | 'asmr_archive' | 'other';
+        fileType: 'image' | 'video' | 'audio' | 'pdf' | 'comic' | 'asmr' | 'asmr_archive' | 'comic_archive' | 'other';
         nodeId: number | null;
         tabTypeLabel?: string | null;
       } | null;
@@ -323,8 +368,8 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
 
   const archiveReturnTarget = activeTab?.returnTarget ?? null;
   const showBackToArchive = (
-    fileState.fileType === 'asmr'
-    && archiveReturnTarget?.fileType === 'asmr_archive'
+    (fileState.fileType === 'asmr' && archiveReturnTarget?.fileType === 'asmr_archive')
+    || (fileState.fileType === 'comic' && archiveReturnTarget?.fileType === 'comic_archive')
   );
 
   const userContent = (
@@ -441,6 +486,18 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
                 返回
               </button>
             ) : null}
+          </div>
+          <div className="toolbar-spacer" />
+          <div className="toolbar-right">
+            <button
+              type="button"
+              className="toolbar-action-btn"
+              onClick={reloadActiveTab}
+              title="刷新当前标签页"
+              disabled={!activeTabId}
+            >
+              <IconRefresh />
+            </button>
           </div>
         </ContentToolbar>
         <ContentBody>

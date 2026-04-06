@@ -1,9 +1,10 @@
 // @see - https://www.electron.build/configuration/configuration
 {
   "$schema": "https://raw.githubusercontent.com/electron-userland/electron-builder/master/packages/app-builder-lib/scheme.json",
-  "appId": "YourAppID",
+  "appId": "com.loyce.omniflow",
   "asar": true,
-  "productName": "YourAppName",
+  "productName": "Omniflow",
+  "executableName": "Omniflow",
   "icon": "build/icons/icon.png",
   "directories": {
     "output": "release/${version}"
@@ -16,6 +17,10 @@
     "target": [
       "dmg"
     ],
+    "extendInfo": {
+      "CFBundleName": "Omniflow",
+      "CFBundleDisplayName": "Omniflow"
+    },
     "artifactName": "${productName}-Mac-${version}-Installer.${ext}"
   },
   "win": {
