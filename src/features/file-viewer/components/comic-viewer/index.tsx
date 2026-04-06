@@ -1,6 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Spin } from '@douyinfe/semi-ui';
-import { getChildrenByNodeId, getFileLink } from '@/features/file-explorer/services/file.api';
+import {
+  fetchNodeDetailById,
+  getChildrenByNodeId,
+  getFileLink,
+  updateNodeConfig,
+} from '@/features/file-explorer/services/file.api';
 import { ComicViewerWrapper } from './style';
 import { runtimeLogger } from '@/utils/runtimeLogger';
 
@@ -46,6 +51,14 @@ const MAX_RESOLVE_PER_TICK = 8;
 const MIN_PAGE_WIDTH = 360;
 const MAX_PAGE_WIDTH = 980;
 const COMIC_READER_CACHE_MAX_ENTRIES = 24;
+const REMOTE_PROGRESS_SYNC_INTERVAL_MS = 3200;
+const BACK_TO_TOP_DIRECT_PAGE_THRESHOLD = 300;
+const BACK_TO_TOP_ANIMATION_MIN_MS = 180;
+const BACK_TO_TOP_ANIMATION_MAX_MS = 420;
+const VIEW_META_VIEWER_STATE_KEY = '__omniflowViewerStateV1';
+const VIEW_META_VIEWER_STATE_LEGACY_KEY = '__omniflow_viewer_state_v1';
+const VIEW_META_COMIC_READER_KEY = 'comicReader';
+const VIEW_META_COMIC_READER_LEGACY_KEY = 'comic_reader';
 const EMPTY_COMIC_READER_SNAPSHOT: ComicReaderSnapshot = {
   hasLoadedList: false,
   pages: [],
@@ -89,6 +102,11 @@ function isImageNode(item: ComicChildNode): boolean {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
+}
+
+function easeOutCubic(t: number): number {
+  const p = clamp(t, 0, 1);
+  return 1 - (1 - p) ** 3;
 }
 
 function parseComicLibraryId(fileUrl: string): number | null {
@@ -150,6 +168,111 @@ interface AnchorSnapshot {
   currentPageNumber: number;
 }
 
+interface ComicRemoteReadingProgress {
+  anchorPageId: number | null;
+  anchorOffsetRatio: number;
+  currentPageNumber: number;
+  updatedAt: string;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function parseViewMetaObject(raw: string | null | undefined): Record<string, unknown> {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return isPlainObject(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function parsePositiveNumber(value: unknown): number | null {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return null;
+  }
+  return parsed;
+}
+
+function parseRatio(value: unknown): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return 0;
+  return clamp(parsed, 0, 1);
+}
+
+function parseComicRemoteReadingProgress(viewMetaRaw: string | null | undefined): ComicRemoteReadingProgress | null {
+  const meta = parseViewMetaObject(viewMetaRaw);
+  const viewerState = meta[VIEW_META_VIEWER_STATE_KEY] ?? meta[VIEW_META_VIEWER_STATE_LEGACY_KEY];
+  if (!isPlainObject(viewerState)) {
+    return null;
+  }
+  const comicReaderState = viewerState[VIEW_META_COMIC_READER_KEY] ?? viewerState[VIEW_META_COMIC_READER_LEGACY_KEY];
+  if (!isPlainObject(comicReaderState)) {
+    return null;
+  }
+  const currentPageNumber = parsePositiveNumber(comicReaderState.currentPageNumber);
+  const anchorPageId = parsePositiveNumber(comicReaderState.anchorPageId);
+  if (!currentPageNumber && !anchorPageId) {
+    return null;
+  }
+  return {
+    anchorPageId,
+    anchorOffsetRatio: parseRatio(comicReaderState.anchorOffsetRatio),
+    currentPageNumber: currentPageNumber ?? 1,
+    updatedAt: String(comicReaderState.updatedAt || ''),
+  };
+}
+
+function buildNextViewMetaWithComicProgress(
+  baseMeta: Record<string, unknown>,
+  progress: ComicRemoteReadingProgress,
+): Record<string, unknown> {
+  const nextMeta: Record<string, unknown> = { ...baseMeta };
+  const viewerStateCandidate = nextMeta[VIEW_META_VIEWER_STATE_KEY] ?? nextMeta[VIEW_META_VIEWER_STATE_LEGACY_KEY];
+  const currentViewerState = isPlainObject(viewerStateCandidate)
+    ? { ...(viewerStateCandidate as Record<string, unknown>) }
+    : {};
+  delete currentViewerState[VIEW_META_COMIC_READER_LEGACY_KEY];
+  delete nextMeta[VIEW_META_VIEWER_STATE_LEGACY_KEY];
+  nextMeta[VIEW_META_VIEWER_STATE_KEY] = {
+    ...currentViewerState,
+    [VIEW_META_COMIC_READER_KEY]: {
+      anchorPageId: progress.anchorPageId,
+      anchorOffsetRatio: progress.anchorOffsetRatio,
+      currentPageNumber: progress.currentPageNumber,
+      updatedAt: progress.updatedAt,
+    },
+  };
+  return nextMeta;
+}
+
+function resolveRemoteRestoreTarget(
+  pages: ComicPageItem[],
+  remoteProgress: ComicRemoteReadingProgress,
+): { anchorPageId: number | null; anchorOffsetRatio: number; pageNumber: number } | null {
+  if (pages.length === 0) {
+    return null;
+  }
+
+  const targetByAnchor = remoteProgress.anchorPageId
+    ? pages.findIndex(page => page.id === remoteProgress.anchorPageId)
+    : -1;
+  const targetByPage = clamp(Math.floor(remoteProgress.currentPageNumber || 1), 1, pages.length) - 1;
+  const targetIndex = targetByAnchor >= 0 ? targetByAnchor : targetByPage;
+  const targetPage = pages[targetIndex];
+  if (!targetPage) {
+    return null;
+  }
+  return {
+    anchorPageId: targetPage.id,
+    anchorOffsetRatio: clamp(remoteProgress.anchorOffsetRatio, 0, 1),
+    pageNumber: targetIndex + 1,
+  };
+}
+
 const ComicViewer: React.FC<ComicViewerProps> = ({
   folderNodeId,
   fileUrl,
@@ -188,6 +311,12 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
   const hasLoadedListRef = useRef(false);
   const isHydratingSnapshotRef = useRef(false);
   const scrollPersistRafRef = useRef<number>(0);
+  const backTopAnimationRafRef = useRef<number>(0);
+  const viewMetaBaseRef = useRef<Record<string, unknown>>({});
+  const remoteProgressSyncTimerRef = useRef<number>(0);
+  const remoteProgressSyncInFlightRef = useRef(false);
+  const pendingRemoteProgressRef = useRef<ComicRemoteReadingProgress | null>(null);
+  const lastSyncedRemoteProgressSignatureRef = useRef<string>('');
 
   const persistReaderSnapshot = useCallback((patch: Partial<ComicReaderSnapshot>) => {
     if (!readerCacheKey) return;
@@ -202,6 +331,72 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
       anchorOffsetRatio: patch.anchorOffsetRatio ?? prev.anchorOffsetRatio,
     });
   }, [readerCacheKey]);
+
+  const flushRemoteReadingProgress = useCallback(async (force = false) => {
+    if (!folderNodeId || !Number.isFinite(folderNodeId)) {
+      pendingRemoteProgressRef.current = null;
+      return;
+    }
+    if (!active && !force) {
+      return;
+    }
+    if (remoteProgressSyncInFlightRef.current) {
+      return;
+    }
+    const pending = pendingRemoteProgressRef.current;
+    if (!pending) {
+      return;
+    }
+
+    const signature = [
+      pending.anchorPageId ?? 0,
+      pending.currentPageNumber,
+      pending.anchorOffsetRatio.toFixed(4),
+    ].join('|');
+    if (signature === lastSyncedRemoteProgressSignatureRef.current) {
+      pendingRemoteProgressRef.current = null;
+      return;
+    }
+
+    remoteProgressSyncInFlightRef.current = true;
+    try {
+      const nextMeta = buildNextViewMetaWithComicProgress(viewMetaBaseRef.current, pending);
+      await updateNodeConfig({
+        id: folderNodeId,
+        viewMeta: JSON.stringify(nextMeta),
+      });
+      viewMetaBaseRef.current = nextMeta;
+      lastSyncedRemoteProgressSignatureRef.current = signature;
+      pendingRemoteProgressRef.current = null;
+    } catch (error) {
+      runtimeLogger.warn('同步漫画阅读进度失败:', error);
+    } finally {
+      remoteProgressSyncInFlightRef.current = false;
+      if (pendingRemoteProgressRef.current && (active || force)) {
+        if (remoteProgressSyncTimerRef.current) {
+          window.clearTimeout(remoteProgressSyncTimerRef.current);
+        }
+        remoteProgressSyncTimerRef.current = window.setTimeout(() => {
+          remoteProgressSyncTimerRef.current = 0;
+          void flushRemoteReadingProgress();
+        }, REMOTE_PROGRESS_SYNC_INTERVAL_MS);
+      }
+    }
+  }, [active, folderNodeId]);
+
+  const queueRemoteReadingProgressSync = useCallback((progress: ComicRemoteReadingProgress) => {
+    pendingRemoteProgressRef.current = progress;
+    if (!active) {
+      return;
+    }
+    if (remoteProgressSyncTimerRef.current || remoteProgressSyncInFlightRef.current) {
+      return;
+    }
+    remoteProgressSyncTimerRef.current = window.setTimeout(() => {
+      remoteProgressSyncTimerRef.current = 0;
+      void flushRemoteReadingProgress();
+    }, REMOTE_PROGRESS_SYNC_INTERVAL_MS);
+  }, [active, flushRemoteReadingProgress]);
 
   const renderedPages = useMemo(() => pages.slice(0, visibleCount), [pages, visibleCount]);
 
@@ -254,6 +449,14 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
     pendingRestoreRef.current = null;
     hasLoadedListRef.current = false;
     isHydratingSnapshotRef.current = false;
+    viewMetaBaseRef.current = {};
+    pendingRemoteProgressRef.current = null;
+    lastSyncedRemoteProgressSignatureRef.current = '';
+    remoteProgressSyncInFlightRef.current = false;
+    if (remoteProgressSyncTimerRef.current) {
+      window.clearTimeout(remoteProgressSyncTimerRef.current);
+      remoteProgressSyncTimerRef.current = 0;
+    }
 
     if (!folderNodeId || !Number.isFinite(folderNodeId) || !libraryId || !Number.isFinite(libraryId)) {
       setPages([]);
@@ -265,6 +468,8 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
 
     const snapshot = readerCacheKey ? comicReaderSnapshotCache.get(readerCacheKey) : null;
     const canRestoreFromSnapshot = Boolean(snapshot?.hasLoadedList && snapshot.pages.length > 0);
+    let mounted = true;
+
     if (canRestoreFromSnapshot && snapshot) {
       isHydratingSnapshotRef.current = true;
       const restoredPages = normalizeCachedPages(snapshot.pages);
@@ -307,10 +512,50 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
 
       // Re-persist once to clear stale "loading" markers from cached pages.
       persistReaderSnapshot({ hasLoadedList: true, pages: restoredPages });
-      return;
+      const loadRemoteProgress = async () => {
+        try {
+          const detail = await fetchNodeDetailById(folderNodeId);
+          if (!mounted || sessionRef.current !== currentSession) {
+            return;
+          }
+          viewMetaBaseRef.current = parseViewMetaObject(detail?.viewMeta);
+          const remoteProgress = parseComicRemoteReadingProgress(detail?.viewMeta);
+          if (!remoteProgress || restoredPages.length === 0) {
+            return;
+          }
+          const restoreTarget = resolveRemoteRestoreTarget(restoredPages, remoteProgress);
+          if (!restoreTarget) {
+            return;
+          }
+          const minVisibleCount = restoreTarget.pageNumber;
+          const restoredVisibleCount = clamp(
+            Math.max(snapshot.visibleCount || INITIAL_VISIBLE_COUNT, minVisibleCount),
+            1,
+            restoredPages.length,
+          );
+          setVisibleCount(restoredVisibleCount);
+          setCurrentPageNumber(restoreTarget.pageNumber);
+          pendingRestoreRef.current = {
+            desiredScrollTop: 0,
+            desiredScrollRatio: 0,
+            anchorPageId: restoreTarget.anchorPageId,
+            anchorOffsetRatio: restoreTarget.anchorOffsetRatio,
+            attempts: 0,
+            lastMaxScrollable: 0,
+            stableTicks: 0,
+          };
+          setRestoreTick(prev => prev + 1);
+        } catch (error) {
+          runtimeLogger.warn('加载漫画阅读记录失败，将使用本地记录:', error);
+        }
+      };
+
+      void loadRemoteProgress();
+      return () => {
+        mounted = false;
+      };
     }
 
-    let mounted = true;
     setListLoading(true);
     setListError(null);
     setPages([]);
@@ -318,10 +563,18 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
 
     const loadComicList = async () => {
       try {
-        const children = (await getChildrenByNodeId(folderNodeId, libraryId)) as ComicChildNode[];
+        const [children, detail] = await Promise.all([
+          getChildrenByNodeId(folderNodeId, libraryId) as Promise<ComicChildNode[]>,
+          fetchNodeDetailById(folderNodeId).catch((error) => {
+            runtimeLogger.warn('加载漫画节点详情失败:', error);
+            return null;
+          }),
+        ]);
         if (!mounted || sessionRef.current !== currentSession) {
           return;
         }
+        viewMetaBaseRef.current = parseViewMetaObject(detail?.viewMeta);
+        const remoteProgress = parseComicRemoteReadingProgress(detail?.viewMeta);
         const imagePages = children
           .filter(isImageNode)
           .map((item: ComicChildNode) => ({
@@ -336,18 +589,41 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
         const initialVisibleCount = imagePages.length === 0
           ? 0
           : Math.min(INITIAL_VISIBLE_COUNT, imagePages.length);
+        const remoteRestoreTarget = remoteProgress
+          ? resolveRemoteRestoreTarget(imagePages, remoteProgress)
+          : null;
+        const restoredVisibleCount = remoteRestoreTarget
+          ? clamp(Math.max(initialVisibleCount, remoteRestoreTarget.pageNumber), 1, imagePages.length)
+          : initialVisibleCount;
         setPages(imagePages);
-        setVisibleCount(initialVisibleCount);
-        setCurrentPageNumber(imagePages.length > 0 ? 1 : 0);
-        pendingRestoreRef.current = null;
+        setVisibleCount(restoredVisibleCount);
+        setCurrentPageNumber(
+          remoteRestoreTarget
+            ? remoteRestoreTarget.pageNumber
+            : (imagePages.length > 0 ? 1 : 0),
+        );
+        pendingRestoreRef.current = remoteRestoreTarget
+          ? {
+            desiredScrollTop: 0,
+            desiredScrollRatio: 0,
+            anchorPageId: remoteRestoreTarget.anchorPageId,
+            anchorOffsetRatio: remoteRestoreTarget.anchorOffsetRatio,
+            attempts: 0,
+            lastMaxScrollable: 0,
+            stableTicks: 0,
+          }
+          : null;
+        if (pendingRestoreRef.current) {
+          setRestoreTick(prev => prev + 1);
+        }
         persistReaderSnapshot({
           hasLoadedList: true,
           pages: imagePages,
-          visibleCount: initialVisibleCount,
+          visibleCount: restoredVisibleCount,
           scrollTop: 0,
           scrollRatio: 0,
-          anchorPageId: imagePages.length > 0 ? imagePages[0].id : null,
-          anchorOffsetRatio: 0,
+          anchorPageId: remoteRestoreTarget?.anchorPageId ?? (imagePages.length > 0 ? imagePages[0].id : null),
+          anchorOffsetRatio: remoteRestoreTarget?.anchorOffsetRatio ?? 0,
         });
       } catch (error) {
         runtimeLogger.error('加载漫画列表失败:', error);
@@ -417,7 +693,7 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
     });
   }, [pages, persistReaderSnapshot, visibleCount]);
 
-  const persistCurrentScroll = useCallback(() => {
+  const persistCurrentScroll = useCallback((options?: { forceRemoteNow?: boolean }) => {
     const scrollEl = scrollRef.current;
     if (!scrollEl) return;
     if (!readerCacheKey) return;
@@ -437,7 +713,29 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
       anchorPageId: anchorSnapshot.anchorPageId,
       anchorOffsetRatio: anchorSnapshot.anchorOffsetRatio,
     });
-  }, [captureAnchorSnapshot, persistReaderSnapshot, readerCacheKey]);
+    if (active) {
+      queueRemoteReadingProgressSync({
+        anchorPageId: anchorSnapshot.anchorPageId,
+        anchorOffsetRatio: anchorSnapshot.anchorOffsetRatio,
+        currentPageNumber: anchorSnapshot.currentPageNumber,
+        updatedAt: new Date().toISOString(),
+      });
+      if (options?.forceRemoteNow) {
+        if (remoteProgressSyncTimerRef.current) {
+          window.clearTimeout(remoteProgressSyncTimerRef.current);
+          remoteProgressSyncTimerRef.current = 0;
+        }
+        void flushRemoteReadingProgress(true);
+      }
+    }
+  }, [
+    active,
+    captureAnchorSnapshot,
+    flushRemoteReadingProgress,
+    persistReaderSnapshot,
+    queueRemoteReadingProgressSync,
+    readerCacheKey,
+  ]);
 
   useEffect(() => {
     return () => {
@@ -445,9 +743,18 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
         window.cancelAnimationFrame(scrollPersistRafRef.current);
         scrollPersistRafRef.current = 0;
       }
+      if (backTopAnimationRafRef.current) {
+        window.cancelAnimationFrame(backTopAnimationRafRef.current);
+        backTopAnimationRafRef.current = 0;
+      }
       persistCurrentScroll();
+      if (remoteProgressSyncTimerRef.current) {
+        window.clearTimeout(remoteProgressSyncTimerRef.current);
+        remoteProgressSyncTimerRef.current = 0;
+      }
+      void flushRemoteReadingProgress(true);
     };
-  }, [persistCurrentScroll]);
+  }, [flushRemoteReadingProgress, persistCurrentScroll]);
 
   const handleScroll = useCallback(() => {
     if (scrollPersistRafRef.current) return;
@@ -456,6 +763,65 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
       persistCurrentScroll();
     });
   }, [persistCurrentScroll]);
+
+  const handleBackToTop = useCallback(() => {
+    const scrollEl = scrollRef.current;
+    if (!scrollEl) return;
+    if (scrollPersistRafRef.current) {
+      window.cancelAnimationFrame(scrollPersistRafRef.current);
+      scrollPersistRafRef.current = 0;
+    }
+    if (backTopAnimationRafRef.current) {
+      window.cancelAnimationFrame(backTopAnimationRafRef.current);
+      backTopAnimationRafRef.current = 0;
+    }
+    if (pages.length > BACK_TO_TOP_DIRECT_PAGE_THRESHOLD) {
+      scrollEl.scrollTop = 0;
+      persistCurrentScroll({ forceRemoteNow: true });
+      return;
+    }
+
+    const startTop = Math.max(scrollEl.scrollTop, 0);
+    if (startTop <= 1) {
+      persistCurrentScroll({ forceRemoteNow: true });
+      return;
+    }
+    const duration = clamp(
+      startTop / 10,
+      BACK_TO_TOP_ANIMATION_MIN_MS,
+      BACK_TO_TOP_ANIMATION_MAX_MS,
+    );
+    const startAt = performance.now();
+
+    const step = (now: number) => {
+      const progress = clamp((now - startAt) / duration, 0, 1);
+      const eased = easeOutCubic(progress);
+      scrollEl.scrollTop = Math.max(startTop * (1 - eased), 0);
+      if (progress < 1) {
+        backTopAnimationRafRef.current = window.requestAnimationFrame(step);
+        return;
+      }
+      backTopAnimationRafRef.current = 0;
+      scrollEl.scrollTop = 0;
+      persistCurrentScroll({ forceRemoteNow: true });
+    };
+
+    backTopAnimationRafRef.current = window.requestAnimationFrame(step);
+  }, [pages.length, persistCurrentScroll]);
+
+  useEffect(() => {
+    if (active) return;
+    if (!backTopAnimationRafRef.current) return;
+    window.cancelAnimationFrame(backTopAnimationRafRef.current);
+    backTopAnimationRafRef.current = 0;
+  }, [active]);
+
+  useEffect(() => {
+    if (active) {
+      return;
+    }
+    void flushRemoteReadingProgress(true);
+  }, [active, flushRemoteReadingProgress]);
 
   useEffect(() => {
     const scrollEl = scrollRef.current;
@@ -690,6 +1056,9 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
           </div>
         </div>
       </div>
+      <button type="button" className="back-top-btn" onClick={handleBackToTop}>
+        回到顶部
+      </button>
 
       <div className="viewer-footer">
         <div className="footer-title-group">

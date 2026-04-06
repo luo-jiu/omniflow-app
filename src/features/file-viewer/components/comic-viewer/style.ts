@@ -3,6 +3,7 @@ import styled from 'styled-components';
 export const ComicViewerWrapper = styled.div`
   width: 100%;
   height: 100%;
+  position: relative;
   display: flex;
   flex-direction: column;
   background:
@@ -96,6 +97,29 @@ export const ComicViewerWrapper = styled.div`
     padding: 0 12px;
     border-top: 1px solid var(--semi-color-border);
     background: color-mix(in srgb, var(--semi-color-bg-0) 95%, transparent);
+  }
+
+  .back-top-btn {
+    position: absolute;
+    right: 14px;
+    bottom: 52px;
+    z-index: 12;
+    height: 30px;
+    padding: 0 12px;
+    border-radius: 999px;
+    border: 1px solid color-mix(in srgb, var(--semi-color-border) 80%, transparent);
+    background: color-mix(in srgb, var(--semi-color-bg-0) 94%, transparent);
+    color: var(--semi-color-text-1);
+    font-size: 12px;
+    line-height: 1;
+    cursor: pointer;
+    transition: border-color 120ms ease, background-color 120ms ease, color 120ms ease;
+    backdrop-filter: blur(6px);
+  }
+
+  .back-top-btn:hover {
+    border-color: color-mix(in srgb, var(--semi-color-success) 52%, var(--semi-color-border));
+    color: var(--semi-color-success);
   }
 
   .footer-title-group {
