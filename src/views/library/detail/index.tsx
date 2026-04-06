@@ -171,7 +171,7 @@ const ContentArea = styled.div`
 `;
 
 const ContentToolbar = styled.div`
-  height: 36px;
+  height: 38px;
   flex-shrink: 0;
   background: var(--app-bg);
   border-bottom: 1px solid var(--app-border);
@@ -189,18 +189,23 @@ const ContentToolbar = styled.div`
   }
 
   .toolbar-back-btn {
-    height: 26px;
+    height: 30px;
     border-radius: 7px;
     border: 1px solid var(--app-border);
     background: var(--app-bg-elevated);
     color: var(--app-text-secondary);
     display: inline-flex;
     align-items: center;
-    gap: 4px;
-    padding: 0 8px;
+    gap: 6px;
+    padding: 0 10px;
     cursor: pointer;
-    font-size: 12px;
+    font-size: 13px;
+    font-weight: 500;
     line-height: 1;
+  }
+
+  .toolbar-back-btn .semi-icon {
+    font-size: 16px;
   }
 
   .toolbar-back-btn:hover {

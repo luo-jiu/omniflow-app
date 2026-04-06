@@ -153,14 +153,14 @@ const AsmrArchiveViewer: React.FC<AsmrArchiveViewerProps> = ({ folderNodeId, fil
                   if (!libraryId || !folderNodeId || !Number.isFinite(folderNodeId)) return;
                   setFileUrl(
                     `asmr://library/${libraryId}/node/${card.id}`,
-                    `ASMR · ${card.title}`,
+                    card.title,
                     'asmr',
                     card.id,
                     {
                       tabTypeLabel: 'ASMR',
                       returnTarget: {
                         fileUrl,
-                        fileName: fileName || `ASMR 归档 · ${title}`,
+                        fileName: fileName || title,
                         fileType: 'asmr_archive',
                         nodeId: folderNodeId,
                         tabTypeLabel: 'ASMR-ARCHIVE',

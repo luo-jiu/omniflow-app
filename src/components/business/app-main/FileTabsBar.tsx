@@ -23,6 +23,11 @@ const REORDER_MIN_STEP_PX = 14;
 const REORDER_COOLDOWN_MS = 90;
 const MIDPOINT_GUARD_RATIO = 0.16;
 const REORDER_FLIP_DURATION_MS = 180;
+const TAB_TOP_SCROLLBAR_HEIGHT = 12;
+const TAB_TOP_SCROLLBAR_HIDE_DELAY_MS = 900;
+const TAB_TOP_SCROLLBAR_HIDE_DELAY_ON_LEAVE_MS = 260;
+const TAB_OVERFLOW_BUTTON_WIDTH = 44;
+const TAB_OVERFLOW_GAP = 6;
 const TAB_MEMORY_SAMPLE_DELAY_MS = 900;
 const TAB_MEMORY_MAX_STALE_MS = 120_000;
 const TAB_MEMORY_GLOBAL_COOLDOWN_MS = 8_000;
@@ -38,19 +43,73 @@ const TAB_MEMORY_FALLBACK_BY_TYPE: Record<string, number> = {
   other: 36 * 1024 * 1024,
 };
 
-const TabsWrapper = styled.div`
-  height: 34px;
-  flex-shrink: 0;
+const TabsFrame = styled.div`
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+`;
+
+const TabsTopScroll = styled.div<{ $visible: boolean }>`
+  width: 100%;
+  min-width: 0;
+  height: ${TAB_TOP_SCROLLBAR_HEIGHT}px;
+  margin-bottom: -1px;
+  padding: 2px 0 0;
+  box-sizing: border-box;
+  overflow-x: scroll;
+  overflow-y: hidden;
+  opacity: ${({ $visible }) => ($visible ? 1 : 0)};
+  transition: opacity 0.16s ease;
+  pointer-events: ${({ $visible }) => ($visible ? 'auto' : 'none')};
+  scrollbar-gutter: stable both-edges;
+  scrollbar-width: auto;
+  scrollbar-color: color-mix(in srgb, var(--semi-color-fill-2) 70%, transparent) transparent;
+
+  &::-webkit-scrollbar {
+    height: 8px;
+  }
+
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--semi-color-fill-2) 70%, transparent);
+    border-radius: 999px;
+  }
+`;
+
+const TabsTopScrollInner = styled.div`
+  height: 1px;
+  min-height: 1px;
+`;
+
+const TabsContainer = styled.div`
+  width: 100%;
+  min-width: 0;
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 0 4px 0 0;
+  position: relative;
+`;
+
+const TabsWrapper = styled.div`
+  width: auto;
+  min-width: 0;
+  flex: 1 1 auto;
+  height: 46px;
+  display: flex;
+  align-items: center;
+  gap: ${TAB_OVERFLOW_GAP}px;
+  padding: 0 ${TAB_OVERFLOW_BUTTON_WIDTH + 8}px 0 0;
   border-bottom: 1px solid var(--app-border);
   overflow-x: auto;
   overflow-y: hidden;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 
   &::-webkit-scrollbar {
-    height: 4px;
+    display: none;
   }
 `;
 
@@ -60,17 +119,17 @@ const TabButton = styled.button<{
   $dropAfter?: boolean;
   $dragging?: boolean;
 }>`
-  height: 28px;
-  min-width: 130px;
-  max-width: 240px;
+  height: 42px;
+  min-width: 195px;
+  max-width: 360px;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
   border: 1px solid ${({ $active }) => ($active ? 'var(--semi-color-primary)' : 'var(--app-border)')};
   background: ${({ $active }) => ($active ? 'var(--semi-color-primary-light-default)' : 'var(--app-bg-elevated)')};
   color: var(--app-text);
-  border-radius: 8px;
-  padding: 0 9px 0 10px;
+  border-radius: 12px;
+  padding: 0 14px 0 15px;
   cursor: pointer;
   transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
   user-select: none;
@@ -97,40 +156,40 @@ const TabButton = styled.button<{
 
 const FileTypeBadge = styled.span<{ $tone: TabTypeTone }>`
   flex-shrink: 0;
-  min-width: 28px;
-  height: 18px;
+  min-width: 42px;
+  height: 27px;
   border-radius: 999px;
   background: ${({ $tone }) => $tone.background};
   color: ${({ $tone }) => $tone.text};
   border: 1px solid ${({ $tone }) => $tone.border};
-  font-size: 10px;
-  line-height: 16px;
+  font-size: 14px;
+  line-height: 24px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   text-align: center;
-  padding: 0 6px;
+  padding: 0 9px;
 `;
 
 const DragGhost = styled.div`
   position: fixed;
   pointer-events: none;
   z-index: 9999;
-  height: 28px;
+  height: 42px;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
   border: 1px solid var(--semi-color-primary);
   background: var(--semi-color-primary-light-default);
   color: var(--app-text);
-  border-radius: 8px;
-  padding: 0 9px 0 10px;
+  border-radius: 12px;
+  padding: 0 14px 0 15px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
 `;
 
 const Name = styled.span`
   min-width: 0;
   flex: 1;
-  font-size: 13px;
+  font-size: 18px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -139,8 +198,8 @@ const Name = styled.span`
 
 const CloseButton = styled.button`
   flex-shrink: 0;
-  width: 18px;
-  height: 18px;
+  width: 27px;
+  height: 27px;
   border-radius: 50%;
   border: none;
   background: transparent;
@@ -157,9 +216,97 @@ const CloseButton = styled.button`
   }
 `;
 
+const OverflowSlot = styled.div`
+  position: absolute;
+  right: 0;
+  top: 0;
+  z-index: 5;
+  height: 47px;
+  width: ${TAB_OVERFLOW_BUTTON_WIDTH}px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(
+    to right,
+    color-mix(in srgb, var(--app-bg-1) 0%, transparent),
+    var(--app-bg-1) 24%
+  );
+  border-bottom: 1px solid var(--app-border);
+`;
+
+const OverflowTrigger = styled.button<{ $open: boolean; $disabled: boolean }>`
+  width: 34px;
+  height: 34px;
+  border: 1px solid ${({ $open }) => ($open ? 'var(--semi-color-primary)' : 'var(--app-border)')};
+  border-radius: 10px;
+  background: ${({ $open }) => ($open ? 'var(--semi-color-primary-light-default)' : 'var(--app-bg-elevated)')};
+  color: ${({ $disabled }) => ($disabled ? 'var(--app-text-faint)' : 'var(--app-text-muted)')};
+  cursor: ${({ $disabled }) => ($disabled ? 'default' : 'pointer')};
+  opacity: ${({ $disabled }) => ($disabled ? 0.72 : 1)};
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  &:hover {
+    border-color: ${({ $disabled }) => ($disabled ? 'var(--app-border)' : 'var(--semi-color-primary)')};
+    color: ${({ $disabled }) => ($disabled ? 'var(--app-text-faint)' : 'var(--app-text)')};
+  }
+
+  .dot-stack {
+    display: inline-block;
+    line-height: 1;
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: 0;
+  }
+`;
+
+const OverflowMenu = styled.div`
+  position: absolute;
+  top: calc(100% - 2px);
+  right: 0;
+  width: 360px;
+  max-height: 380px;
+  overflow: auto;
+  z-index: 40;
+  padding: 8px;
+  border-radius: 10px;
+  border: 1px solid var(--app-border);
+  background: var(--app-bg-elevated);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
+`;
+
+const OverflowMenuItem = styled.button<{ $active: boolean }>`
+  width: 100%;
+  border: 1px solid ${({ $active }) => ($active ? 'var(--semi-color-primary)' : 'transparent')};
+  background: ${({ $active }) => ($active ? 'var(--semi-color-primary-light-default)' : 'transparent')};
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin: 0;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--app-text);
+
+  &:hover {
+    border-color: var(--semi-color-primary);
+    background: color-mix(in srgb, var(--semi-color-primary) 8%, transparent);
+  }
+`;
+
 function getTabTypeLabel(tab: FileViewerTab) {
   if (tab.tabTypeLabel && tab.tabTypeLabel.trim()) {
-    return tab.tabTypeLabel.trim().toUpperCase();
+    const normalized = tab.tabTypeLabel.trim().toUpperCase();
+    if (
+      normalized === 'ASMR-ARCHIVE'
+      || normalized === 'ASMR ARC'
+      || normalized === 'ASMR-ARC'
+      || normalized === 'ASMR_ARCHIVE'
+    ) {
+      return 'ASMR-A';
+    }
+    return normalized;
   }
   const fileType = tab.fileType;
   if (fileType === 'image') return 'IMG';
@@ -168,12 +315,20 @@ function getTabTypeLabel(tab: FileViewerTab) {
   if (fileType === 'pdf') return 'PDF';
   if (fileType === 'comic') return 'COMIC';
   if (fileType === 'asmr') return 'ASMR';
-  if (fileType === 'asmr_archive') return 'ASMR-ARC';
+  if (fileType === 'asmr_archive') return 'ASMR-A';
   return 'FILE';
 }
 
 function getDisplayName(tab: FileViewerTab) {
-  return tab.fileName?.trim() || '未命名文件';
+  const raw = tab.fileName?.trim() || '';
+  if (!raw) return '未命名文件';
+  const trimmed = raw
+    .replace(/^ASMR\s*归档\s*·\s*/iu, '')
+    .replace(/^ASMR\s*·\s*/iu, '')
+    .replace(/^COMIC\s*·\s*/iu, '')
+    .replace(/\s*[【[]\s*ASMR\s*·\s*归档\s*[】\]]\s*$/iu, '')
+    .trim();
+  return trimmed || '未命名文件';
 }
 
 function formatBytes(bytes: number) {
@@ -184,6 +339,16 @@ function formatBytes(bytes: number) {
   if (bytes >= gb) return `${(bytes / gb).toFixed(2)} GB`;
   if (bytes >= mb) return `${(bytes / mb).toFixed(1)} MB`;
   return `${Math.max(1, Math.round(bytes / kb))} KB`;
+}
+
+function areSameStringArray(left: string[], right: string[]) {
+  if (left.length !== right.length) return false;
+  for (let i = 0; i < left.length; i += 1) {
+    if (left[i] !== right[i]) {
+      return false;
+    }
+  }
+  return true;
 }
 
 let uaMemoryProbeAvailable: boolean | null = null;
@@ -233,6 +398,11 @@ const FileTabsBar: React.FC<FileTabsBarProps> = ({
   const [draggingTabId, setDraggingTabId] = React.useState<string | null>(null);
   const [dropTarget, setDropTarget] = React.useState<{ tabId: string; position: 'before' | 'after' } | null>(null);
   const [dragGhost, setDragGhost] = React.useState<{ left: number; top: number; width: number } | null>(null);
+  const [hasHorizontalOverflow, setHasHorizontalOverflow] = React.useState(false);
+  const [topScrollVisible, setTopScrollVisible] = React.useState(false);
+  const [tabsScrollWidth, setTabsScrollWidth] = React.useState(0);
+  const [overflowMenuTabIds, setOverflowMenuTabIds] = React.useState<string[]>([]);
+  const [overflowMenuOpen, setOverflowMenuOpen] = React.useState(false);
   const [reorderTick, setReorderTick] = React.useState(0);
   const blockClickUntilRef = React.useRef(0);
   const lastReorderSignatureRef = React.useRef('');
@@ -240,6 +410,12 @@ const FileTabsBar: React.FC<FileTabsBarProps> = ({
   const flipFromLeftRef = React.useRef<Map<string, number> | null>(null);
   const mouseMoveListenerRef = React.useRef<((event: MouseEvent) => void) | null>(null);
   const mouseUpListenerRef = React.useRef<((event: MouseEvent) => void) | null>(null);
+  const topScrollRef = React.useRef<HTMLDivElement | null>(null);
+  const tabsWrapperRef = React.useRef<HTMLDivElement | null>(null);
+  const overflowMenuRef = React.useRef<HTMLDivElement | null>(null);
+  const overflowTriggerRef = React.useRef<HTMLButtonElement | null>(null);
+  const topScrollHideTimerRef = React.useRef<number | null>(null);
+  const tabsHoveringRef = React.useRef(false);
   const tabButtonRefMap = React.useRef(new Map<string, HTMLButtonElement>());
   const tabSampleTimerRef = React.useRef<number | null>(null);
   const hoverTabIdRef = React.useRef<string | null>(null);
@@ -302,6 +478,105 @@ const FileTabsBar: React.FC<FileTabsBarProps> = ({
     }
   }, []);
 
+  const checkHorizontalOverflow = React.useCallback(() => {
+    const wrapper = tabsWrapperRef.current;
+    if (!wrapper) {
+      setHasHorizontalOverflow(false);
+      setTabsScrollWidth(0);
+      return;
+    }
+    const nextHasOverflow = wrapper.scrollWidth - wrapper.clientWidth > 1;
+    setHasHorizontalOverflow(nextHasOverflow);
+    setTabsScrollWidth((prev) => (
+      Math.abs(prev - wrapper.scrollWidth) > 0.5 ? wrapper.scrollWidth : prev
+    ));
+    const topScroll = topScrollRef.current;
+    if (topScroll && Math.abs(topScroll.scrollLeft - wrapper.scrollLeft) > 1) {
+      topScroll.scrollLeft = wrapper.scrollLeft;
+    }
+  }, []);
+
+  const collectHiddenTabIds = React.useCallback(() => {
+    const wrapper = tabsWrapperRef.current;
+    if (!wrapper || tabs.length === 0) {
+      return [] as string[];
+    }
+    if (wrapper.scrollWidth - wrapper.clientWidth <= 1) {
+      return [] as string[];
+    }
+    const leftBound = wrapper.scrollLeft + 1;
+    const rightBound = wrapper.scrollLeft + wrapper.clientWidth - 1;
+    return tabs
+      .map((tab) => {
+        const el = tabButtonRefMap.current.get(tab.id);
+        if (!el) return tab.id;
+        const tabLeft = el.offsetLeft;
+        const tabRight = tabLeft + el.offsetWidth;
+        return tabLeft < leftBound || tabRight > rightBound ? tab.id : null;
+      })
+      .filter((value): value is string => Boolean(value));
+  }, [tabs]);
+
+  const collectVisibleDropTargetTabIds = React.useCallback((draggedId: string) => {
+    const wrapper = tabsWrapperRef.current;
+    if (!wrapper || tabs.length === 0) {
+      return [] as string[];
+    }
+    const leftBound = wrapper.scrollLeft + 1;
+    const rightBound = wrapper.scrollLeft + wrapper.clientWidth - 1;
+    return tabs
+      .map((tab) => {
+        if (tab.id === draggedId) return null;
+        const el = tabButtonRefMap.current.get(tab.id);
+        if (!el) return null;
+        const tabLeft = el.offsetLeft;
+        const tabRight = tabLeft + el.offsetWidth;
+        const visible = tabRight >= leftBound && tabLeft <= rightBound;
+        return visible ? tab.id : null;
+      })
+      .filter((value): value is string => Boolean(value));
+  }, [tabs]);
+
+  const refreshOverflowMenuTabIds = React.useCallback(() => {
+    const nextTabIds = collectHiddenTabIds();
+    setOverflowMenuTabIds((prev) => (areSameStringArray(prev, nextTabIds) ? prev : nextTabIds));
+  }, [collectHiddenTabIds]);
+
+  const clearTopScrollHideTimer = React.useCallback(() => {
+    if (topScrollHideTimerRef.current !== null) {
+      window.clearTimeout(topScrollHideTimerRef.current);
+      topScrollHideTimerRef.current = null;
+    }
+  }, []);
+
+  const revealTopScrollTemporarily = React.useCallback(() => {
+    if (!hasHorizontalOverflow) {
+      clearTopScrollHideTimer();
+      setTopScrollVisible(false);
+      return;
+    }
+    setTopScrollVisible(true);
+    clearTopScrollHideTimer();
+    if (tabsHoveringRef.current) {
+      return;
+    }
+    topScrollHideTimerRef.current = window.setTimeout(() => {
+      setTopScrollVisible(false);
+      topScrollHideTimerRef.current = null;
+    }, TAB_TOP_SCROLLBAR_HIDE_DELAY_MS);
+  }, [clearTopScrollHideTimer, hasHorizontalOverflow]);
+
+  const hideTopScrollSoon = React.useCallback(() => {
+    clearTopScrollHideTimer();
+    if (tabsHoveringRef.current) {
+      return;
+    }
+    topScrollHideTimerRef.current = window.setTimeout(() => {
+      setTopScrollVisible(false);
+      topScrollHideTimerRef.current = null;
+    }, TAB_TOP_SCROLLBAR_HIDE_DELAY_ON_LEAVE_MS);
+  }, [clearTopScrollHideTimer]);
+
   React.useEffect(() => {
     void loadFileTabTones();
   }, [loadFileTabTones]);
@@ -309,6 +584,45 @@ const FileTabsBar: React.FC<FileTabsBarProps> = ({
   React.useEffect(() => {
     activeTabIdRef.current = activeTabId;
   }, [activeTabId]);
+
+  React.useLayoutEffect(() => {
+    checkHorizontalOverflow();
+  }, [checkHorizontalOverflow, tabs, remoteToneByTargetKey]);
+
+  React.useEffect(() => {
+    const wrapper = tabsWrapperRef.current;
+    if (!wrapper) return undefined;
+    const observer = new ResizeObserver(() => {
+      checkHorizontalOverflow();
+    });
+    observer.observe(wrapper);
+    return () => observer.disconnect();
+  }, [checkHorizontalOverflow]);
+
+  React.useEffect(() => {
+    const onWindowResize = () => {
+      checkHorizontalOverflow();
+    };
+    window.addEventListener('resize', onWindowResize);
+    return () => window.removeEventListener('resize', onWindowResize);
+  }, [checkHorizontalOverflow]);
+
+  React.useEffect(() => {
+    const wrapper = tabsWrapperRef.current;
+    if (!wrapper) return undefined;
+    const onScroll = () => {
+      const topScroll = topScrollRef.current;
+      if (topScroll && Math.abs(topScroll.scrollLeft - wrapper.scrollLeft) > 1) {
+        topScroll.scrollLeft = wrapper.scrollLeft;
+      }
+      revealTopScrollTemporarily();
+      if (overflowMenuOpen) {
+        refreshOverflowMenuTabIds();
+      }
+    };
+    wrapper.addEventListener('scroll', onScroll, { passive: true });
+    return () => wrapper.removeEventListener('scroll', onScroll);
+  }, [overflowMenuOpen, refreshOverflowMenuTabIds, revealTopScrollTemporarily]);
 
   React.useEffect(() => {
     const handler = () => {
@@ -319,6 +633,81 @@ const FileTabsBar: React.FC<FileTabsBarProps> = ({
       window.removeEventListener('omniflow:file-tab-tags-updated', handler as EventListener);
     };
   }, [loadFileTabTones]);
+
+  React.useEffect(() => {
+    if (!activeTabId) return;
+    const wrapper = tabsWrapperRef.current;
+    if (!wrapper) return;
+    const rafId = window.requestAnimationFrame(() => {
+      const activeEl = tabButtonRefMap.current.get(activeTabId);
+      if (!activeEl) return;
+      const targetLeft = activeEl.offsetLeft;
+      const targetRight = targetLeft + activeEl.offsetWidth;
+      const viewLeft = wrapper.scrollLeft;
+      const viewRight = viewLeft + wrapper.clientWidth;
+      if (targetRight > viewRight) {
+        wrapper.scrollTo({
+          left: targetRight - wrapper.clientWidth,
+          behavior: 'smooth',
+        });
+      } else if (targetLeft < viewLeft) {
+        wrapper.scrollTo({
+          left: targetLeft,
+          behavior: 'smooth',
+        });
+      }
+      checkHorizontalOverflow();
+    });
+    return () => window.cancelAnimationFrame(rafId);
+  }, [activeTabId, checkHorizontalOverflow, tabs.length]);
+
+  const overflowTabs = React.useMemo(() => {
+    if (overflowMenuTabIds.length === 0) return [] as FileViewerTab[];
+    const tabMap = new Map(tabs.map(tab => [tab.id, tab]));
+    return overflowMenuTabIds
+      .map(tabId => tabMap.get(tabId))
+      .filter((tab): tab is FileViewerTab => Boolean(tab));
+  }, [overflowMenuTabIds, tabs]);
+
+  React.useEffect(() => {
+    if (!hasHorizontalOverflow && overflowMenuOpen) {
+      setOverflowMenuOpen(false);
+      setOverflowMenuTabIds([]);
+    }
+  }, [hasHorizontalOverflow, overflowMenuOpen]);
+
+  React.useEffect(() => {
+    if (hasHorizontalOverflow) {
+      revealTopScrollTemporarily();
+      return;
+    }
+    clearTopScrollHideTimer();
+    setTopScrollVisible(false);
+  }, [clearTopScrollHideTimer, hasHorizontalOverflow, revealTopScrollTemporarily]);
+
+  React.useEffect(() => () => {
+    clearTopScrollHideTimer();
+  }, [clearTopScrollHideTimer]);
+
+  React.useEffect(() => {
+    if (!overflowMenuOpen) return;
+    refreshOverflowMenuTabIds();
+  }, [activeTabId, overflowMenuOpen, refreshOverflowMenuTabIds, tabs.length]);
+
+  React.useEffect(() => {
+    if (!overflowMenuOpen) {
+      return undefined;
+    }
+    const onClickOutside = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+      if (overflowMenuRef.current?.contains(target)) return;
+      if (overflowTriggerRef.current?.contains(target)) return;
+      setOverflowMenuOpen(false);
+    };
+    window.addEventListener('mousedown', onClickOutside);
+    return () => window.removeEventListener('mousedown', onClickOutside);
+  }, [overflowMenuOpen]);
 
   const clearDragState = () => {
     setDraggingTabId(null);
@@ -411,6 +800,30 @@ const FileTabsBar: React.FC<FileTabsBarProps> = ({
     }, TAB_MEMORY_SAMPLE_DELAY_MS);
   }, [clearTabSampleTimer, sampleTabMemory]);
 
+  const handleTopScroll = React.useCallback(() => {
+    const wrapper = tabsWrapperRef.current;
+    const topScroll = topScrollRef.current;
+    if (!wrapper || !topScroll) return;
+    if (Math.abs(wrapper.scrollLeft - topScroll.scrollLeft) <= 1) return;
+    wrapper.scrollLeft = topScroll.scrollLeft;
+    revealTopScrollTemporarily();
+  }, [revealTopScrollTemporarily]);
+
+  const handleTabsWheel = React.useCallback((event: React.WheelEvent<HTMLDivElement>) => {
+    if (!event.shiftKey) return;
+    const wrapper = tabsWrapperRef.current;
+    if (!wrapper) return;
+    const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
+    if (!Number.isFinite(delta) || Math.abs(delta) < 0.1) return;
+    event.preventDefault();
+    wrapper.scrollLeft += delta;
+    const topScroll = topScrollRef.current;
+    if (topScroll && Math.abs(topScroll.scrollLeft - wrapper.scrollLeft) > 1) {
+      topScroll.scrollLeft = wrapper.scrollLeft;
+    }
+    revealTopScrollTemporarily();
+  }, [revealTopScrollTemporarily]);
+
   const captureTabLefts = React.useCallback(() => {
     const positions = new Map<string, number>();
     tabs.forEach((tab) => {
@@ -426,14 +839,18 @@ const FileTabsBar: React.FC<FileTabsBarProps> = ({
     draggedId: string,
     previousTarget: { tabId: string; position: 'before' | 'after' } | null,
   ): { tabId: string; position: 'before' | 'after' } | null => {
+    const candidateTabIds = collectVisibleDropTargetTabIds(draggedId);
+    if (candidateTabIds.length === 0) {
+      return null;
+    }
+
     let hovered: { tabId: string; rect: DOMRect } | null = null;
-    for (const tab of tabs) {
-      if (tab.id === draggedId) continue;
-      const el = tabButtonRefMap.current.get(tab.id);
+    for (const tabId of candidateTabIds) {
+      const el = tabButtonRefMap.current.get(tabId);
       if (!el) continue;
       const rect = el.getBoundingClientRect();
       if (clientX >= rect.left && clientX <= rect.right) {
-        hovered = { tabId: tab.id, rect };
+        hovered = { tabId, rect };
         break;
       }
     }
@@ -454,16 +871,15 @@ const FileTabsBar: React.FC<FileTabsBarProps> = ({
     }
 
     let nearest: { tabId: string; position: 'before' | 'after'; distance: number } | null = null;
-    for (const tab of tabs) {
-      if (tab.id === draggedId) continue;
-      const el = tabButtonRefMap.current.get(tab.id);
+    for (const tabId of candidateTabIds) {
+      const el = tabButtonRefMap.current.get(tabId);
       if (!el) continue;
       const rect = el.getBoundingClientRect();
       const midpoint = rect.left + rect.width / 2;
       const position: 'before' | 'after' = clientX < midpoint ? 'before' : 'after';
       const distance = Math.abs(clientX - midpoint);
       if (!nearest || distance < nearest.distance) {
-        nearest = { tabId: tab.id, position, distance };
+        nearest = { tabId, position, distance };
       }
     }
     if (!nearest) return null;
@@ -523,8 +939,30 @@ const FileTabsBar: React.FC<FileTabsBarProps> = ({
 
   return (
     <>
-      <TabsWrapper>
-        {tabs.map(tab => {
+      <TabsFrame
+        onMouseEnter={() => {
+          tabsHoveringRef.current = true;
+          revealTopScrollTemporarily();
+        }}
+        onMouseLeave={() => {
+          tabsHoveringRef.current = false;
+          hideTopScrollSoon();
+        }}
+      >
+        <TabsTopScroll
+          ref={topScrollRef}
+          $visible={hasHorizontalOverflow && topScrollVisible}
+          onScroll={handleTopScroll}
+        >
+          <TabsTopScrollInner style={{ width: `${Math.max(tabsScrollWidth, 0)}px` }} />
+        </TabsTopScroll>
+        <TabsContainer
+        >
+        <TabsWrapper
+          ref={tabsWrapperRef}
+          onWheel={handleTabsWheel}
+        >
+          {tabs.map(tab => {
         const tabTypeLabel = getTabTypeLabel(tab);
         const badgeTone = resolveTabTypeTone(tab, tabTypeLabel, remoteToneByTargetKey);
         const isDropBefore = Boolean(
@@ -695,7 +1133,56 @@ const FileTabsBar: React.FC<FileTabsBarProps> = ({
           </TabButton>
         );
       })}
-      </TabsWrapper>
+        </TabsWrapper>
+        {tabs.length > 1 ? (
+          <OverflowSlot>
+            <OverflowTrigger
+              ref={overflowTriggerRef}
+              type="button"
+              $open={overflowMenuOpen}
+              $disabled={!hasHorizontalOverflow}
+              aria-label="更多标签"
+              onClick={() => {
+                if (!hasHorizontalOverflow) {
+                  setOverflowMenuOpen(false);
+                  setOverflowMenuTabIds([]);
+                  return;
+                }
+                const nextOpen = !overflowMenuOpen;
+                if (nextOpen) {
+                  refreshOverflowMenuTabIds();
+                }
+                setOverflowMenuOpen(nextOpen);
+              }}
+            >
+              <span className="dot-stack">⋮</span>
+            </OverflowTrigger>
+            {overflowMenuOpen ? (
+              <OverflowMenu ref={overflowMenuRef}>
+                {overflowTabs.map((tab) => {
+                  const tabTypeLabel = getTabTypeLabel(tab);
+                  const badgeTone = resolveTabTypeTone(tab, tabTypeLabel, remoteToneByTargetKey);
+                  return (
+                    <OverflowMenuItem
+                      key={`overflow-${tab.id}`}
+                      type="button"
+                      $active={tab.id === activeTabId}
+                      onClick={() => {
+                        onActivate(tab.id);
+                        setOverflowMenuOpen(false);
+                      }}
+                    >
+                      <FileTypeBadge $tone={badgeTone}>{tabTypeLabel}</FileTypeBadge>
+                      <Name title={getDisplayName(tab)}>{getDisplayName(tab)}</Name>
+                    </OverflowMenuItem>
+                  );
+                })}
+              </OverflowMenu>
+            ) : null}
+          </OverflowSlot>
+        ) : null}
+      </TabsContainer>
+      </TabsFrame>
       {draggingTab && dragGhost ? (
         <DragGhost style={{ left: `${dragGhost.left}px`, top: `${dragGhost.top}px`, width: `${dragGhost.width}px` }}>
           <FileTypeBadge $tone={resolveTabTypeTone(draggingTab, getTabTypeLabel(draggingTab), remoteToneByTargetKey)}>

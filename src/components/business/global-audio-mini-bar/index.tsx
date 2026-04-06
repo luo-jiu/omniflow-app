@@ -7,7 +7,7 @@ import { runtimeLogger } from '@/utils/runtimeLogger';
 
 const BarSlot = styled.div<{ $visible: boolean }>`
   width: 100%;
-  height: ${({ $visible }) => ($visible ? '48px' : '0')};
+  height: ${({ $visible }) => ($visible ? '54px' : '0')};
   flex-shrink: 0;
   opacity: ${props => (props.$visible ? 1 : 0)};
   pointer-events: ${props => (props.$visible ? 'auto' : 'none')};
@@ -38,7 +38,9 @@ const BarInner = styled.div`
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    font-size: 12px;
+    font-size: 14px;
+    line-height: 1.2;
+    font-weight: 500;
     color: var(--app-text);
   }
 
@@ -50,9 +52,9 @@ const BarInner = styled.div`
   }
 
   .time {
-    min-width: 108px;
+    min-width: 122px;
     text-align: right;
-    font-size: 12px;
+    font-size: 13px;
     color: var(--app-text-muted);
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     flex-shrink: 0;

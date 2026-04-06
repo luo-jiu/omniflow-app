@@ -22,7 +22,7 @@ export const AsmrViewerWrapper = styled.div`
     display: flex;
     align-items: flex-start;
     gap: 16px;
-    padding: 0 12px 12px 0;
+    padding: 8px 12px 12px 8px;
     border-bottom: 1px solid var(--semi-color-border);
     background: color-mix(in srgb, var(--semi-color-bg-0) 92%, transparent);
   }

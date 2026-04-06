@@ -652,7 +652,7 @@ export function useRepositoryTree(
         if (onFileOpen) {
           onFileOpen(
             `asmr-archive://library/${selectedLibraryId}/node/${node.id}`,
-            `ASMR 归档 · ${node.name}`,
+            node.name,
             'asmr_archive',
             node.id,
             { tabTypeLabel: 'ASMR-ARCHIVE' },
@@ -670,7 +670,7 @@ export function useRepositoryTree(
         if (onFileOpen) {
           onFileOpen(
             `comic://library/${selectedLibraryId}/node/${node.id}`,
-            `${builtInType} · ${node.name}`,
+            node.name,
             'comic',
             node.id,
             { tabTypeLabel: builtInType },
@@ -683,7 +683,7 @@ export function useRepositoryTree(
         if (onFileOpen) {
           onFileOpen(
             `asmr://library/${selectedLibraryId}/node/${node.id}`,
-            `${builtInType} · ${node.name}`,
+            node.name,
             'asmr',
             node.id,
             { tabTypeLabel: builtInType },
@@ -702,7 +702,7 @@ export function useRepositoryTree(
           }
           await openFileByNodeInfo({
             ...firstImageNode,
-            displayName: `${builtInType} · ${node.name}`,
+            displayName: node.name,
             tabNodeId: node.id,
             tabTypeLabel: builtInType,
           });
