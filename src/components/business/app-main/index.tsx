@@ -18,7 +18,7 @@ interface IProps {
  * 负责在“欢迎页”和“文件预览页”之间切换
  */
 const AppMain: FC<IProps> = () => {
-  const { fileState, tabs, activeTabId, activateTab, closeTab } = useFileViewer();
+  const { fileState, tabs, activeTabId, activateTab, closeTab, reorderTabs } = useFileViewer();
   const [playerState, setPlayerState] = React.useState(() => globalAudioPlayer.getState());
   const [keepAliveTabIds, setKeepAliveTabIds] = React.useState<string[]>(() => (
     activeTabId ? [activeTabId] : []
@@ -95,6 +95,7 @@ const AppMain: FC<IProps> = () => {
           activeTabId={activeTabId}
           onActivate={activateTab}
           onClose={closeTab}
+          onReorder={reorderTabs}
         />
         <GlobalAudioMiniBar suppressed={suppressGlobalAudioBar} />
         <div className="main-content">
@@ -112,6 +113,7 @@ const AppMain: FC<IProps> = () => {
         activeTabId={activeTabId}
         onActivate={activateTab}
         onClose={closeTab}
+        onReorder={reorderTabs}
       />
       <GlobalAudioMiniBar suppressed={suppressGlobalAudioBar} />
       <div className="main-content">

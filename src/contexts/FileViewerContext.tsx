@@ -109,6 +109,43 @@ function closeTabInState(state: FileViewerStoreState, tabId: string): FileViewer
   };
 }
 
+function reorderTabsInState(
+  state: FileViewerStoreState,
+  draggedTabId: string,
+  targetTabId: string,
+  position: 'before' | 'after',
+): FileViewerStoreState {
+  if (!draggedTabId || !targetTabId || draggedTabId === targetTabId) {
+    return state;
+  }
+  const fromIndex = state.tabs.findIndex(tab => tab.id === draggedTabId);
+  const targetIndex = state.tabs.findIndex(tab => tab.id === targetTabId);
+  if (fromIndex < 0 || targetIndex < 0) {
+    return state;
+  }
+
+  const nextTabs = [...state.tabs];
+  const [draggedTab] = nextTabs.splice(fromIndex, 1);
+  if (!draggedTab) {
+    return state;
+  }
+
+  const baseTargetIndex = nextTabs.findIndex(tab => tab.id === targetTabId);
+  if (baseTargetIndex < 0) {
+    return state;
+  }
+
+  const insertIndex = position === 'after'
+    ? baseTargetIndex + 1
+    : baseTargetIndex;
+  nextTabs.splice(insertIndex, 0, draggedTab);
+
+  return {
+    ...state,
+    tabs: nextTabs,
+  };
+}
+
 export const FileViewerProvider: React.FC<{ children: ReactNode; cacheKey?: string }> = ({
   children,
   cacheKey,
@@ -230,6 +267,10 @@ export const FileViewerProvider: React.FC<{ children: ReactNode; cacheKey?: stri
     });
   };
 
+  const reorderTabs = (draggedTabId: string, targetTabId: string, position: 'before' | 'after') => {
+    setViewerState(prev => reorderTabsInState(prev, draggedTabId, targetTabId, position));
+  };
+
   React.useEffect(() => {
     if (cacheKey === activeCacheKeyRef.current) return;
     activeCacheKeyRef.current = cacheKey;
@@ -261,6 +302,7 @@ export const FileViewerProvider: React.FC<{ children: ReactNode; cacheKey?: stri
         activateTab,
         closeTab,
         closeTabByNodeId,
+        reorderTabs,
       }}
     >
       {children}

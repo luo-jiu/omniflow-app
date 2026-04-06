@@ -46,6 +46,11 @@ export interface FileViewerContextType {
   activateTab: (tabId: string) => void;
   closeTab: (tabId: string) => void;
   closeTabByNodeId: (nodeId: number) => void;
+  reorderTabs: (
+    draggedTabId: string,
+    targetTabId: string,
+    position: 'before' | 'after',
+  ) => void;
 }
 
 export const FileViewerContext = createContext<FileViewerContextType | undefined>(undefined);
