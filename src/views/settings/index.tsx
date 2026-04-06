@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import styled from 'styled-components';
 import { Typography, Divider, Switch, Select, Button } from '@douyinfe/semi-ui';
-import { IconChevronLeft, IconForward } from '@douyinfe/semi-icons';
+import { IconChevronLeft } from '@douyinfe/semi-icons';
 import { useTheme } from '@/hooks/useTheme';
 import { useNavigate } from 'react-router-dom';
 import { getFileTreeShowSuffix, setFileTreeShowSuffix } from '@/utils/fileTreeSettings';
@@ -60,19 +60,27 @@ const SettingsWrapper = styled.div`
   }
 
   .settings-action-btn.manage {
-    border: 1px solid color-mix(in srgb, var(--semi-color-success) 34%, var(--semi-color-border) 66%);
-    color: color-mix(in srgb, var(--semi-color-success) 80%, var(--semi-color-text-0) 20%);
-    background: color-mix(in srgb, var(--semi-color-success-light-default) 72%, var(--semi-color-bg-0) 28%);
+    border: 1px solid var(--semi-color-border);
+    color: var(--semi-color-text-0);
+    background: var(--semi-color-bg-0);
   }
 
   .settings-action-btn.manage:hover {
-    background: color-mix(in srgb, var(--semi-color-success-light-default) 82%, var(--semi-color-bg-0) 18%);
-    border-color: color-mix(in srgb, var(--semi-color-success) 45%, var(--semi-color-border) 55%);
+    background: var(--semi-color-bg-0);
+    border-color: var(--semi-color-primary);
+    color: var(--semi-color-primary);
   }
 
   .settings-action-btn.manage:active {
-    background: color-mix(in srgb, var(--semi-color-success-light-default) 90%, var(--semi-color-bg-0) 10%);
-    border-color: color-mix(in srgb, var(--semi-color-success) 56%, var(--semi-color-border) 44%);
+    background: var(--semi-color-bg-0);
+    border-color: color-mix(in srgb, var(--semi-color-primary) 78%, var(--semi-color-border) 22%);
+    color: color-mix(in srgb, var(--semi-color-primary) 88%, var(--semi-color-text-0) 12%);
+  }
+
+  .settings-action-btn.manage:focus-visible {
+    background: var(--semi-color-bg-0);
+    border-color: var(--semi-color-primary);
+    color: var(--semi-color-primary);
   }
 
   .settings-action-btn.exit {
@@ -159,9 +167,7 @@ const Settings: React.FC = () => {
           <div className="setting-desc">管理标签场景、颜色、排序和启用状态</div>
         </div>
         <Button
-          icon={<IconForward />}
-          theme="solid"
-          type="primary"
+          theme="borderless"
           onClick={() => navigate('/settings/tags')}
           className="settings-action-btn manage"
         >

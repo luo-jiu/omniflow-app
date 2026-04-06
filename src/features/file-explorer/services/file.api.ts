@@ -89,6 +89,27 @@ export async function getChildrenByNodeId(nodeId: number, libraryId: number) {
   return body?.data || [];
 }
 
+export interface NodeDetailDTO {
+  id: number;
+  name: string;
+  type: 'dir' | 'file';
+  parentId: number;
+  libraryId: number;
+  ext?: string;
+  mimeType?: string;
+  fileSize?: number;
+  builtInType?: string;
+  archiveMode?: number;
+  viewMeta?: string | null;
+}
+
+export async function fetchNodeDetailById(nodeId: number): Promise<NodeDetailDTO> {
+  const body = await request(`/v1/nodes/${nodeId}`, {
+    method: 'GET',
+  });
+  return body?.data as NodeDetailDTO;
+}
+
 // 上传文件并创建节点
 export async function uploadAndCreateNode(
   file: File,
@@ -211,6 +232,7 @@ export async function updateNodeConfig(payload: {
   id: number;
   builtInType?: string;
   archiveMode?: number;
+  viewMeta?: string | null;
 }) {
   const body = await request(`/v1/nodes/${payload.id}`, {
     method: 'PUT',
@@ -218,6 +240,7 @@ export async function updateNodeConfig(payload: {
       id: payload.id,
       builtInType: payload.builtInType,
       archiveMode: payload.archiveMode,
+      viewMeta: payload.viewMeta,
     }),
   });
   return body.data;

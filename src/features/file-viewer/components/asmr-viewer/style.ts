@@ -76,67 +76,89 @@ export const AsmrViewerWrapper = styled.div`
   .meta-panel {
     flex: 1;
     min-width: 0;
+    position: relative;
     display: flex;
     flex-direction: column;
     gap: 12px;
     padding: 12px 4px 4px 0;
   }
 
+  .meta-tools {
+    position: absolute;
+    top: 6px;
+    right: 0;
+    z-index: 2;
+  }
+
   .title-row {
     min-width: 0;
     display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-
-  .badge {
-    flex-shrink: 0;
-    font-size: 12px;
-    font-weight: 700;
-    line-height: 1;
-    letter-spacing: 0.05em;
-    color: #1763d1;
-    background: #dcecff;
-    border: 1px solid #b9d8ff;
-    border-radius: 999px;
-    padding: 4px 9px;
+    align-items: flex-start;
+    gap: 12px;
+    padding-right: 64px;
   }
 
   .title {
     min-width: 0;
+    flex: 1;
     margin: 0;
     font-size: 20px;
-    line-height: 1.2;
+    line-height: 1.32;
     font-weight: 700;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
   }
 
   .subtitle {
     margin: 0;
     color: var(--semi-color-text-2);
-    font-size: 13px;
-    line-height: 1.4;
+    font-size: 14px;
+    line-height: 1.45;
+    font-weight: 500;
+    min-height: 20px;
   }
 
-  .reserved-grid {
-    margin-top: 2px;
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px;
+  .meta-divider {
+    width: 100%;
+    height: 1px;
+    background: color-mix(in srgb, var(--semi-color-border) 88%, transparent);
   }
 
-  .reserved-slot {
-    min-height: 48px;
-    border-radius: 8px;
-    border: 1px dashed var(--semi-color-border);
-    color: var(--semi-color-text-2);
-    font-size: 12px;
+  .tag-list {
     display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    min-height: 42px;
+  }
+
+  .tag-pill {
+    display: inline-flex;
     align-items: center;
     justify-content: center;
-    background: color-mix(in srgb, var(--semi-color-bg-0) 84%, transparent);
+    height: auto;
+    padding: 2px 10px;
+    border-radius: 999px;
+    border: 1px solid transparent;
+    font-size: 20px;
+    font-weight: 700;
+    line-height: 1.1;
+    white-space: nowrap;
+    max-width: min(520px, 100%);
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .tag-pill.fallback {
+    color: var(--semi-color-text-0);
+    background: color-mix(in srgb, var(--semi-color-fill-0) 90%, transparent);
+    border-color: var(--semi-color-border);
+  }
+
+  .tag-empty {
+    color: var(--semi-color-text-2);
+    font-size: 18px;
   }
 
   .bottom-section {

@@ -16,7 +16,7 @@ import {
   Toast,
   Typography,
 } from '@douyinfe/semi-ui';
-import { IconChevronLeft, IconDelete, IconEdit, IconPlus } from '@douyinfe/semi-icons';
+import { IconChevronLeft, IconDelete, IconEdit } from '@douyinfe/semi-icons';
 import {
   createTag,
   deleteTag,
@@ -112,19 +112,27 @@ const Wrapper = styled.div`
     padding: 0 16px;
     font-size: 14px;
     border-radius: 8px;
-    border: 1px solid color-mix(in srgb, var(--semi-color-success) 34%, var(--semi-color-border) 66%);
-    color: color-mix(in srgb, var(--semi-color-success) 80%, var(--semi-color-text-0) 20%);
-    background: color-mix(in srgb, var(--semi-color-success-light-default) 72%, var(--semi-color-bg-0) 28%);
+    border: 1px solid var(--semi-color-border);
+    color: var(--semi-color-text-0);
+    background: var(--semi-color-bg-0);
   }
 
   .toolbar-create-btn:hover {
-    background: color-mix(in srgb, var(--semi-color-success-light-default) 82%, var(--semi-color-bg-0) 18%);
-    border-color: color-mix(in srgb, var(--semi-color-success) 45%, var(--semi-color-border) 55%);
+    background: var(--semi-color-bg-0);
+    border-color: var(--semi-color-primary);
+    color: var(--semi-color-primary);
   }
 
   .toolbar-create-btn:active {
-    background: color-mix(in srgb, var(--semi-color-success-light-default) 90%, var(--semi-color-bg-0) 10%);
-    border-color: color-mix(in srgb, var(--semi-color-success) 56%, var(--semi-color-border) 44%);
+    background: var(--semi-color-bg-0);
+    border-color: color-mix(in srgb, var(--semi-color-primary) 78%, var(--semi-color-border) 22%);
+    color: color-mix(in srgb, var(--semi-color-primary) 88%, var(--semi-color-text-0) 12%);
+  }
+
+  .toolbar-create-btn:focus-visible {
+    background: var(--semi-color-bg-0);
+    border-color: var(--semi-color-primary);
+    color: var(--semi-color-primary);
   }
 
   .section {
@@ -483,9 +491,7 @@ const TagManagement: React.FC = () => {
           style={{ width: 340 }}
         />
         <Button
-          icon={<IconPlus />}
-          theme="solid"
-          type="primary"
+          theme="borderless"
           onClick={openCreateOther}
           className="toolbar-create-btn"
         >
