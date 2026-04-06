@@ -23,6 +23,20 @@ const REORDER_MIN_STEP_PX = 14;
 const REORDER_COOLDOWN_MS = 90;
 const MIDPOINT_GUARD_RATIO = 0.16;
 const REORDER_FLIP_DURATION_MS = 180;
+const TAB_MEMORY_SAMPLE_DELAY_MS = 900;
+const TAB_MEMORY_MAX_STALE_MS = 120_000;
+const TAB_MEMORY_GLOBAL_COOLDOWN_MS = 8_000;
+
+const TAB_MEMORY_FALLBACK_BY_TYPE: Record<string, number> = {
+  image: 64 * 1024 * 1024,
+  video: 180 * 1024 * 1024,
+  audio: 24 * 1024 * 1024,
+  pdf: 72 * 1024 * 1024,
+  comic: 120 * 1024 * 1024,
+  asmr: 96 * 1024 * 1024,
+  asmr_archive: 84 * 1024 * 1024,
+  other: 36 * 1024 * 1024,
+};
 
 const TabsWrapper = styled.div`
   height: 34px;
@@ -162,6 +176,52 @@ function getDisplayName(tab: FileViewerTab) {
   return tab.fileName?.trim() || '未命名文件';
 }
 
+function formatBytes(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '未知';
+  const kb = 1024;
+  const mb = kb * 1024;
+  const gb = mb * 1024;
+  if (bytes >= gb) return `${(bytes / gb).toFixed(2)} GB`;
+  if (bytes >= mb) return `${(bytes / mb).toFixed(1)} MB`;
+  return `${Math.max(1, Math.round(bytes / kb))} KB`;
+}
+
+let uaMemoryProbeAvailable: boolean | null = null;
+
+async function estimateRendererMemoryBytes(): Promise<number | null> {
+  const perf = performance as Performance & {
+    memory?: { usedJSHeapSize?: number };
+    measureUserAgentSpecificMemory?: () => Promise<{ bytes?: number }>;
+  };
+  const uaMemoryProbe = perf.measureUserAgentSpecificMemory;
+  const canUseUaMemoryProbe = (
+    uaMemoryProbeAvailable !== false
+    && typeof uaMemoryProbe === 'function'
+  );
+  if (canUseUaMemoryProbe) {
+    try {
+      const result = await uaMemoryProbe();
+      if (typeof result?.bytes === 'number' && Number.isFinite(result.bytes) && result.bytes > 0) {
+        uaMemoryProbeAvailable = true;
+        return result.bytes;
+      }
+    } catch {
+      // 忽略不支持或权限受限的浏览器实现，回退到 JS Heap 估算
+      uaMemoryProbeAvailable = false;
+    }
+  }
+  const usedHeap = perf.memory?.usedJSHeapSize;
+  if (typeof usedHeap === 'number' && Number.isFinite(usedHeap) && usedHeap > 0) {
+    return usedHeap;
+  }
+  return null;
+}
+
+function resolveFallbackTabMemoryBytes(tab: FileViewerTab): number {
+  const key = String(tab.fileType ?? 'other');
+  return TAB_MEMORY_FALLBACK_BY_TYPE[key] ?? TAB_MEMORY_FALLBACK_BY_TYPE.other;
+}
+
 const FileTabsBar: React.FC<FileTabsBarProps> = ({
   tabs,
   activeTabId,
@@ -181,6 +241,15 @@ const FileTabsBar: React.FC<FileTabsBarProps> = ({
   const mouseMoveListenerRef = React.useRef<((event: MouseEvent) => void) | null>(null);
   const mouseUpListenerRef = React.useRef<((event: MouseEvent) => void) | null>(null);
   const tabButtonRefMap = React.useRef(new Map<string, HTMLButtonElement>());
+  const tabSampleTimerRef = React.useRef<number | null>(null);
+  const hoverTabIdRef = React.useRef<string | null>(null);
+  const samplingTabIdRef = React.useRef<string | null>(null);
+  const activeTabIdRef = React.useRef<string | null>(activeTabId);
+  const tabMemorySamplesRef = React.useRef<Record<string, { bytes: number; sampledAt: number }>>({});
+  const lastMemoryAttemptAtRef = React.useRef(0);
+  const [tabMemorySamples, setTabMemorySamples] = React.useState<Record<string, { bytes: number; sampledAt: number }>>(
+    {},
+  );
   const pendingDragRef = React.useRef<{
     tabId: string;
     startX: number;
@@ -238,6 +307,10 @@ const FileTabsBar: React.FC<FileTabsBarProps> = ({
   }, [loadFileTabTones]);
 
   React.useEffect(() => {
+    activeTabIdRef.current = activeTabId;
+  }, [activeTabId]);
+
+  React.useEffect(() => {
     const handler = () => {
       void loadFileTabTones();
     };
@@ -254,6 +327,89 @@ const FileTabsBar: React.FC<FileTabsBarProps> = ({
     lastReorderSignatureRef.current = '';
     lastReorderAtRef.current = 0;
   };
+
+  const clearTabSampleTimer = React.useCallback(() => {
+    if (tabSampleTimerRef.current !== null) {
+      window.clearTimeout(tabSampleTimerRef.current);
+      tabSampleTimerRef.current = null;
+    }
+  }, []);
+
+  const sampleTabMemory = React.useCallback(async (tabId: string) => {
+    if (!tabId || activeTabIdRef.current !== tabId) {
+      return;
+    }
+    if (samplingTabIdRef.current === tabId) {
+      return;
+    }
+    const existing = tabMemorySamplesRef.current[tabId];
+    if (
+      existing
+      && Date.now() - existing.sampledAt < TAB_MEMORY_MAX_STALE_MS
+    ) {
+      return;
+    }
+    const now = Date.now();
+    if (now - lastMemoryAttemptAtRef.current < TAB_MEMORY_GLOBAL_COOLDOWN_MS) {
+      return;
+    }
+    lastMemoryAttemptAtRef.current = now;
+    samplingTabIdRef.current = tabId;
+    try {
+      const bytes = await estimateRendererMemoryBytes();
+      if (!bytes) {
+        return;
+      }
+      const sampledAt = Date.now();
+      setTabMemorySamples((prev) => {
+        const next = {
+          ...prev,
+          [tabId]: { bytes, sampledAt },
+        };
+        tabMemorySamplesRef.current = next;
+        return next;
+      });
+    } finally {
+      if (samplingTabIdRef.current === tabId) {
+        samplingTabIdRef.current = null;
+      }
+    }
+  }, []);
+
+  React.useEffect(() => {
+    const validTabIds = new Set(tabs.map(tab => tab.id));
+    setTabMemorySamples((prev) => {
+      let changed = false;
+      const next: Record<string, { bytes: number; sampledAt: number }> = {};
+      Object.entries(prev).forEach(([tabId, value]) => {
+        if (validTabIds.has(tabId)) {
+          next[tabId] = value;
+        } else {
+          changed = true;
+        }
+      });
+      tabMemorySamplesRef.current = changed ? next : prev;
+      return changed ? next : prev;
+    });
+  }, [tabs]);
+
+  React.useEffect(() => () => {
+    clearTabSampleTimer();
+  }, [clearTabSampleTimer]);
+
+  const scheduleTabMemorySample = React.useCallback((tabId: string) => {
+    if (!tabId || tabId !== activeTabIdRef.current) {
+      return;
+    }
+    clearTabSampleTimer();
+    tabSampleTimerRef.current = window.setTimeout(() => {
+      tabSampleTimerRef.current = null;
+      if (hoverTabIdRef.current !== tabId) {
+        return;
+      }
+      void sampleTabMemory(tabId);
+    }, TAB_MEMORY_SAMPLE_DELAY_MS);
+  }, [clearTabSampleTimer, sampleTabMemory]);
 
   const captureTabLefts = React.useCallback(() => {
     const positions = new Map<string, number>();
@@ -383,6 +539,10 @@ const FileTabsBar: React.FC<FileTabsBarProps> = ({
           && dropTarget?.tabId === tab.id
           && dropTarget.position === 'after',
         );
+        const memorySnapshot = tabMemorySamples[tab.id];
+        const memoryBytes = memorySnapshot?.bytes ?? resolveFallbackTabMemoryBytes(tab);
+        const memoryLine = `内存占用: ${formatBytes(memoryBytes)}`;
+        const tabTitle = `${getDisplayName(tab)}\n${memoryLine}`;
         return (
           <TabButton
             key={tab.id}
@@ -505,7 +665,17 @@ const FileTabsBar: React.FC<FileTabsBarProps> = ({
               }
               onActivate(tab.id);
             }}
-            title={getDisplayName(tab)}
+            onMouseEnter={() => {
+              hoverTabIdRef.current = tab.id;
+              scheduleTabMemorySample(tab.id);
+            }}
+            onMouseLeave={() => {
+              if (hoverTabIdRef.current === tab.id) {
+                hoverTabIdRef.current = null;
+              }
+              clearTabSampleTimer();
+            }}
+            title={tabTitle}
           >
             <FileTypeBadge $tone={badgeTone}>{tabTypeLabel}</FileTypeBadge>
             <Name>{getDisplayName(tab)}</Name>
