@@ -1,5 +1,5 @@
 import React, { ReactNode, useEffect, useRef, useState } from 'react';
-import { Tree, Toast, Input, Popover } from '@douyinfe/semi-ui';
+import { Tree, Toast, Input, Popover, Modal } from '@douyinfe/semi-ui';
 import {
   createNode,
   deleteNodeAndChildren,
@@ -150,6 +150,80 @@ export default function DirectoryTree({
   const MAX_TEXT_WIDTH_CAP = 40000; // 兜底，避免异常节点导致极大宽度
   const ICON_BUFFER_PX = 16;        // 行内图标缓冲
   const ROOT_PARENT_ID = 1;
+
+  const formatFileSize = (size: unknown): string => {
+    const bytes = Number(size);
+    if (!Number.isFinite(bytes) || bytes < 0) return '-';
+    if (bytes === 0) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+    const value = bytes / (1024 ** index);
+    const precision = index <= 1 ? 0 : 2;
+    return `${value.toFixed(precision)} ${units[index]}`;
+  };
+
+  const formatDateTime = (value: unknown): string => {
+    if (!value) return '-';
+    const date = new Date(String(value));
+    if (Number.isNaN(date.getTime())) return String(value);
+    return date.toLocaleString('zh-CN', { hour12: false });
+  };
+
+  const showNodeProperties = (node: any) => {
+    const isFile = node.isLeaf === true;
+    const baseName = String(node.data?.rawName || node.label || node.name || '');
+    const ext = String(node.data?.rawExt ?? node.ext ?? '').replace(/^\./, '');
+    const fullName = isFile ? buildFileFullName(baseName, ext) : baseName;
+    const typeLabel = isFile ? '文件' : '文件夹';
+    const builtInType = String(node.builtInType || 'DEF').toUpperCase();
+    const archiveMode = Number(node.archiveMode ?? 0) === 1 ? '开启' : '关闭';
+    const mimeType = String(node.data?.mimeType || node.mimeType || '');
+    const fileSize = formatFileSize(node.data?.fileSize ?? node.fileSize);
+    const createdAt = formatDateTime(node.data?.createdAt || node.createdAt);
+    const updatedAt = formatDateTime(node.data?.updatedAt || node.updatedAt);
+
+    const fieldStyle: React.CSSProperties = {
+      display: 'grid',
+      gridTemplateColumns: '88px 1fr',
+      columnGap: 10,
+      rowGap: 6,
+      alignItems: 'start',
+      fontSize: 13,
+      lineHeight: '20px',
+      marginBottom: 4,
+    };
+    const labelStyle: React.CSSProperties = {
+      color: 'var(--semi-color-text-2)',
+      userSelect: 'none',
+    };
+    const valueStyle: React.CSSProperties = {
+      color: 'var(--semi-color-text-0)',
+      wordBreak: 'break-all',
+      minWidth: 0,
+    };
+
+    Modal.info({
+      title: `属性 · ${fullName || '-'}`,
+      okText: '关闭',
+      width: 560,
+      centered: true,
+      content: (
+        <div style={{ marginTop: 4 }}>
+          <div style={fieldStyle}><span style={labelStyle}>名称</span><span style={valueStyle}>{fullName || '-'}</span></div>
+          <div style={fieldStyle}><span style={labelStyle}>类型</span><span style={valueStyle}>{typeLabel}</span></div>
+          <div style={fieldStyle}><span style={labelStyle}>后缀</span><span style={valueStyle}>{isFile ? (ext || '-') : '-'}</span></div>
+          <div style={fieldStyle}><span style={labelStyle}>MIME</span><span style={valueStyle}>{isFile ? (mimeType || '-') : '-'}</span></div>
+          <div style={fieldStyle}><span style={labelStyle}>大小</span><span style={valueStyle}>{isFile ? fileSize : '-'}</span></div>
+          <div style={fieldStyle}><span style={labelStyle}>内置类型</span><span style={valueStyle}>{builtInType}</span></div>
+          <div style={fieldStyle}><span style={labelStyle}>归档模式</span><span style={valueStyle}>{archiveMode}</span></div>
+          <div style={fieldStyle}><span style={labelStyle}>节点ID</span><span style={valueStyle}>{node.id ?? '-'}</span></div>
+          <div style={fieldStyle}><span style={labelStyle}>父节点ID</span><span style={valueStyle}>{node.parentId ?? ROOT_PARENT_ID}</span></div>
+          <div style={fieldStyle}><span style={labelStyle}>创建时间</span><span style={valueStyle}>{createdAt}</span></div>
+          <div style={fieldStyle}><span style={labelStyle}>修改时间</span><span style={valueStyle}>{updatedAt}</span></div>
+        </div>
+      ),
+    });
+  };
 
   /** rAF 合并调度 */
   const rafIdRef = useRef<number | null>(null);
@@ -817,6 +891,8 @@ export default function DirectoryTree({
       alignNodeStartForRename(node.key);
       setEditingKey(node.key);
       setEditingName(editingFullName);
+    } else if (action === '属性') {
+      showNodeProperties(node);
     } else if (action === 'delete') {
       try {
         runtimeLogger.debug('🗑️ [删除]', node);

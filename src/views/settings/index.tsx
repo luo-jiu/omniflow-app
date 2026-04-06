@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import styled from 'styled-components';
 import { Typography, Divider, Switch, Select, Button } from '@douyinfe/semi-ui';
-import { IconChevronLeft } from '@douyinfe/semi-icons';
+import { IconChevronLeft, IconForward } from '@douyinfe/semi-icons';
 import { useTheme } from '@/hooks/useTheme';
 import { useNavigate } from 'react-router-dom';
 import { getFileTreeShowSuffix, setFileTreeShowSuffix } from '@/utils/fileTreeSettings';
@@ -49,6 +49,45 @@ const SettingsWrapper = styled.div`
     font-size: 14px;
     margin-top: 4px;
     color: var(--semi-color-text-2);
+  }
+
+  .settings-action-btn {
+    min-height: 36px;
+    min-width: 96px;
+    padding: 0 16px;
+    border-radius: 8px;
+    font-size: 14px;
+  }
+
+  .settings-action-btn.manage {
+    border: 1px solid color-mix(in srgb, var(--semi-color-success) 34%, var(--semi-color-border) 66%);
+    color: color-mix(in srgb, var(--semi-color-success) 80%, var(--semi-color-text-0) 20%);
+    background: color-mix(in srgb, var(--semi-color-success-light-default) 72%, var(--semi-color-bg-0) 28%);
+  }
+
+  .settings-action-btn.manage:hover {
+    background: color-mix(in srgb, var(--semi-color-success-light-default) 82%, var(--semi-color-bg-0) 18%);
+    border-color: color-mix(in srgb, var(--semi-color-success) 45%, var(--semi-color-border) 55%);
+  }
+
+  .settings-action-btn.manage:active {
+    background: color-mix(in srgb, var(--semi-color-success-light-default) 90%, var(--semi-color-bg-0) 10%);
+    border-color: color-mix(in srgb, var(--semi-color-success) 56%, var(--semi-color-border) 44%);
+  }
+
+  .settings-action-btn.exit {
+    border: 1px solid var(--semi-color-border);
+    color: var(--semi-color-text-0);
+    background: var(--semi-color-fill-0);
+  }
+
+  .settings-action-btn.exit:hover {
+    background: var(--semi-color-fill-1);
+    border-color: color-mix(in srgb, var(--semi-color-border) 85%, var(--semi-color-text-2));
+  }
+
+  .settings-action-btn.exit:active {
+    background: var(--semi-color-fill-2);
   }
 `;
 
@@ -114,6 +153,22 @@ const Settings: React.FC = () => {
         />
       </div>
 
+      <div className="setting-item">
+        <div>
+          <div className="setting-title">标签管理</div>
+          <div className="setting-desc">管理标签场景、颜色、排序和启用状态</div>
+        </div>
+        <Button
+          icon={<IconForward />}
+          theme="solid"
+          type="primary"
+          onClick={() => navigate('/settings/tags')}
+          className="settings-action-btn manage"
+        >
+          管理
+        </Button>
+      </div>
+
       <Divider style={{ margin: '24px 0' }} />
 
       <div>
@@ -123,16 +178,11 @@ const Settings: React.FC = () => {
 
       <div style={{ marginTop: 48, textAlign: 'center' }}>
         <Button
-          theme="solid"
-          type="tertiary"
+          theme="light"
+          type="secondary"
           size="default"
           onClick={() => navigate(-1)}
-          style={{
-            fontSize: 14,
-            padding: '8px 28px',
-            height: 'auto',
-            borderRadius: 8
-          }}
+          className="settings-action-btn exit"
         >
           退出设置
         </Button>

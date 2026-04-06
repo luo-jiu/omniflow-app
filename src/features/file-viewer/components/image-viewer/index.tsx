@@ -149,13 +149,11 @@ const ImageViewer: React.FC<ImageViewerProps> = ({ url, fileName }) => {
     {
       key: 'reset',
       label: '重置视图',
-      icon: '🔄',
       onClick: resetView
     },
     {
       key: 'copy-link',
       label: '复制链接',
-      icon: '🔗',
       onClick: () => {
         navigator.clipboard.writeText(url);
       }
@@ -164,7 +162,6 @@ const ImageViewer: React.FC<ImageViewerProps> = ({ url, fileName }) => {
     {
       key: 'save',
       label: '保存图片',
-      icon: '💾',
       onClick: () => runtimeLogger.info('保存功能占位')
     }
   ];
@@ -252,7 +249,7 @@ const ImageViewer: React.FC<ImageViewerProps> = ({ url, fileName }) => {
         content={
           <ContextMenu
             items={menuItems}
-            title={fileName || '图片操作'}
+            className="directory-context-menu"
             onItemClick={() => setMenuState(prev => ({ ...prev, visible: false }))}
           />
         }

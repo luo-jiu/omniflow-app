@@ -1,6 +1,14 @@
 import React from 'react';
 import styled from 'styled-components';
 import type { FileViewerTab } from '@/contexts/file-viewer.context';
+import {
+  resolveTabTypeTone,
+  type FileTabToneConfig,
+  type TabTypeTone,
+} from './tab-type-tone';
+import { fetchTags, type TagItem } from '@/features/tag-management/services/tag.api';
+import { runtimeLogger } from '@/utils/runtimeLogger';
+import { normalizeFileTabTargetKey } from '@/features/tag-management/constants/file-tab-targets';
 
 interface FileTabsBarProps {
   tabs: FileViewerTab[];
@@ -45,15 +53,16 @@ const TabButton = styled.button<{ $active: boolean }>`
   }
 `;
 
-const FileTypeBadge = styled.span`
+const FileTypeBadge = styled.span<{ $tone: TabTypeTone }>`
   flex-shrink: 0;
   min-width: 28px;
   height: 18px;
   border-radius: 999px;
-  background: var(--semi-color-fill-1);
-  color: var(--semi-color-text-2);
+  background: ${({ $tone }) => $tone.background};
+  color: ${({ $tone }) => $tone.text};
+  border: 1px solid ${({ $tone }) => $tone.border};
   font-size: 10px;
-  line-height: 18px;
+  line-height: 16px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   text-align: center;
@@ -114,32 +123,93 @@ const FileTabsBar: React.FC<FileTabsBarProps> = ({
   onActivate,
   onClose,
 }) => {
+  const [remoteToneByTargetKey, setRemoteToneByTargetKey] = React.useState<Record<string, FileTabToneConfig>>({});
+
+  const loadFileTabTones = React.useCallback(async () => {
+    try {
+      const tags = await fetchTags('FILE_TAB');
+      const nextMap: Record<string, FileTabToneConfig> = {};
+      const chosenByTarget: Record<string, TagItem> = {};
+      tags
+        .filter((tag: TagItem) => String(tag.type || '').toUpperCase() === 'FILE_TAB')
+        .forEach((tag) => {
+          const targetKey = normalizeFileTabTargetKey(String(tag.targetKey || ''));
+          if (!targetKey) return;
+          const previous = chosenByTarget[targetKey];
+          if (previous) {
+            const previousIsSystem = previous.ownerUserId === null || previous.ownerUserId === undefined;
+            const currentIsSystem = tag.ownerUserId === null || tag.ownerUserId === undefined;
+            if (previousIsSystem && !currentIsSystem) {
+              // 用户标签覆盖系统标签
+            } else if (previousIsSystem === currentIsSystem) {
+              const previousSort = Number(previous.sortOrder ?? 0);
+              const currentSort = Number(tag.sortOrder ?? 0);
+              if (currentSort >= previousSort) {
+                return;
+              }
+            } else {
+              return;
+            }
+          }
+          chosenByTarget[targetKey] = tag;
+          nextMap[targetKey] = {
+            targetKey,
+            color: tag.color,
+            textColor: tag.textColor,
+            enabled: tag.enabled,
+          };
+        });
+      setRemoteToneByTargetKey(nextMap);
+    } catch (error) {
+      runtimeLogger.warn('加载顶部标签配色配置失败，回退默认色盘:', error);
+      setRemoteToneByTargetKey({});
+    }
+  }, []);
+
+  React.useEffect(() => {
+    void loadFileTabTones();
+  }, [loadFileTabTones]);
+
+  React.useEffect(() => {
+    const handler = () => {
+      void loadFileTabTones();
+    };
+    window.addEventListener('omniflow:file-tab-tags-updated', handler as EventListener);
+    return () => {
+      window.removeEventListener('omniflow:file-tab-tags-updated', handler as EventListener);
+    };
+  }, [loadFileTabTones]);
+
   if (tabs.length === 0) return null;
 
   return (
     <TabsWrapper>
-      {tabs.map(tab => (
-        <TabButton
-          key={tab.id}
-          type="button"
-          $active={tab.id === activeTabId}
-          onClick={() => onActivate(tab.id)}
-          title={getDisplayName(tab)}
-        >
-          <FileTypeBadge>{getTabTypeLabel(tab)}</FileTypeBadge>
-          <Name>{getDisplayName(tab)}</Name>
-          <CloseButton
+      {tabs.map(tab => {
+        const tabTypeLabel = getTabTypeLabel(tab);
+        const badgeTone = resolveTabTypeTone(tab, tabTypeLabel, remoteToneByTargetKey);
+        return (
+          <TabButton
+            key={tab.id}
             type="button"
-            aria-label="关闭标签"
-            onClick={(event) => {
-              event.stopPropagation();
-              onClose(tab.id);
-            }}
+            $active={tab.id === activeTabId}
+            onClick={() => onActivate(tab.id)}
+            title={getDisplayName(tab)}
           >
-            ×
-          </CloseButton>
-        </TabButton>
-      ))}
+            <FileTypeBadge $tone={badgeTone}>{tabTypeLabel}</FileTypeBadge>
+            <Name>{getDisplayName(tab)}</Name>
+            <CloseButton
+              type="button"
+              aria-label="关闭标签"
+              onClick={(event) => {
+                event.stopPropagation();
+                onClose(tab.id);
+              }}
+            >
+              ×
+            </CloseButton>
+          </TabButton>
+        );
+      })}
     </TabsWrapper>
   );
 };

@@ -749,9 +749,7 @@ export function useRepositoryTree(
   function mapToTreeNode(item: NodeRespDTO, parentNode?: Pick<Node, 'builtInType' | 'archiveMode'>): Node {
     const parentBuiltInType = String(parentNode?.builtInType || 'DEF').toUpperCase();
     const parentArchiveMode = normalizeArchiveMode(parentNode?.archiveMode);
-    const nodeBuiltInType = parentArchiveMode === 1
-      ? 'DEF'
-      : String(item.builtInType || 'DEF').toUpperCase();
+    const nodeBuiltInType = String(item.builtInType || 'DEF').toUpperCase();
     const nodeArchiveMode = nodeBuiltInType === 'DEF'
       ? 0
       : normalizeArchiveMode(item.archiveMode);

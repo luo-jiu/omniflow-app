@@ -51,6 +51,7 @@ const DirectoryContextMenu: React.FC<DirectoryContextMenuProps> = ({
         label: '新建文件夹', 
         onClick: () => onAction('新建文件夹', null) 
       },
+      { type: 'divider', key: 'root-divider-create-upload' },
       {
         key: 'upload-file',
         label: '上传文件',
@@ -75,12 +76,38 @@ const DirectoryContextMenu: React.FC<DirectoryContextMenuProps> = ({
   const currentBuiltInType = String(node?.builtInType || 'DEF').toUpperCase();
   const currentArchiveMode = Number(node?.archiveMode ?? 0) === 1 ? 1 : 0;
 
-  const items: ContextMenuItem[] = [
-    { 
-      key: 'rename', 
-      label: '重命名', 
-      onClick: () => onAction('重命名', node) 
-    },
+  const items: ContextMenuItem[] = isFolder
+    ? [
+      {
+        key: 'new-file',
+        label: '新建文件',
+        onClick: () => onAction('新建文件', node),
+      },
+      {
+        key: 'new-folder',
+        label: '新建文件夹',
+        onClick: () => onAction('新建文件夹', node),
+      },
+    ]
+    : [
+      {
+        key: 'rename',
+        label: '重命名',
+        onClick: () => onAction('重命名', node),
+      },
+      {
+        key: 'props',
+        label: '属性',
+        onClick: () => onAction('属性', node),
+      },
+    ];
+
+  // 文件夹：基础信息组后加分隔线，再进入模式设置组
+  if (isFolder) {
+    items.push({ type: 'divider', key: 'divider-basic-mode' });
+  }
+
+  items.push(
     {
       key: 'built-in-type',
       label: '内置类型',
@@ -104,7 +131,11 @@ const DirectoryContextMenu: React.FC<DirectoryContextMenuProps> = ({
         },
       ],
     },
-    {
+  );
+
+  // 归档模式只允许目录设置，文件不展示
+  if (isFolder) {
+    items.push({
       key: 'archive-mode',
       label: '归档模式',
       children: [
@@ -119,8 +150,8 @@ const DirectoryContextMenu: React.FC<DirectoryContextMenuProps> = ({
           onClick: () => onAction('设置归档模式:1', node),
         },
       ],
-    },
-  ];
+    });
+  }
 
   const isBuiltInFolder = isFolder && currentBuiltInType !== 'DEF';
   const isArchiveFolder = isBuiltInFolder && currentArchiveMode === 1;
@@ -143,16 +174,18 @@ const DirectoryContextMenu: React.FC<DirectoryContextMenuProps> = ({
 
   if (isFolder) {
     items.push(
-      { 
-        key: 'new-file', 
-        label: '新建文件', 
-        onClick: () => onAction('新建文件', node) 
+      { type: 'divider', key: 'divider-rename-props' },
+      {
+        key: 'rename',
+        label: '重命名',
+        onClick: () => onAction('重命名', node),
       },
-      { 
-        key: 'new-folder', 
-        label: '新建文件夹', 
-        onClick: () => onAction('新建文件夹', node) 
+      {
+        key: 'props',
+        label: '属性',
+        onClick: () => onAction('属性', node),
       },
+      { type: 'divider', key: 'divider-upload' },
       {
         key: 'upload-file',
         label: '上传文件',
@@ -164,16 +197,10 @@ const DirectoryContextMenu: React.FC<DirectoryContextMenuProps> = ({
         onClick: () => onAction('上传文件夹', node),
       }
     );
-  } else {
-    items.push({ 
-      key: 'props', 
-      label: '属性', 
-      onClick: () => onAction('属性', node) 
-    });
   }
 
-  // 分割线
-  items.push({ type: 'divider', key: 'divider-1' });
+  // 危险操作分割线
+  items.push({ type: 'divider', key: 'divider-delete' });
 
   // 删除操作（带二次确认）
   items.push({
