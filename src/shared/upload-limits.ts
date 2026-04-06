@@ -1,0 +1,3 @@
+export const MAX_SINGLE_UPLOAD_BYTES = 10 * 1024 * 1024 * 1024;
+export const MAX_SINGLE_UPLOAD_LABEL = '10GB';
+export const MAX_SINGLE_UPLOAD_ERROR_MESSAGE = `上传失败：单文件最大支持 ${MAX_SINGLE_UPLOAD_LABEL}`;

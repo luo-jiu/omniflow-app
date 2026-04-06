@@ -99,6 +99,7 @@ function getTabTypeLabel(tab: FileViewerTab) {
   if (fileType === 'audio') return 'MP3';
   if (fileType === 'video') return 'MP4';
   if (fileType === 'comic') return 'COMIC';
+  if (fileType === 'asmr') return 'ASMR';
   return 'FILE';
 }
 

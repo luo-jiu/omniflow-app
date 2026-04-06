@@ -260,7 +260,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   const handleFileOpen = async (
     fileUrl: string,
     fileName: string,
-    fileType: "image" | "video" | "audio" | "comic" | "other",
+    fileType: "image" | "video" | "audio" | "comic" | "asmr" | "other",
     nodeId: number,
     options?: {
       tabTypeLabel?: string | null;

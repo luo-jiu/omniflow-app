@@ -153,7 +153,7 @@ export function useRepositoryTree(
   onFileOpen?: (
     fileUrl: string,
     fileName: string,
-    fileType: 'image' | 'video' | 'audio' | 'comic' | 'other',
+    fileType: 'image' | 'video' | 'audio' | 'comic' | 'asmr' | 'other',
     nodeId: number,
     options?: {
       tabTypeLabel?: string | null;
@@ -637,6 +637,19 @@ export function useRepositoryTree(
             `comic://library/${selectedLibraryId}/node/${node.id}`,
             `${builtInType} · ${node.name}`,
             'comic',
+            node.id,
+            { tabTypeLabel: builtInType },
+          );
+        }
+        return;
+      }
+
+      if (builtInType === 'ASMR') {
+        if (onFileOpen) {
+          onFileOpen(
+            `asmr://library/${selectedLibraryId}/node/${node.id}`,
+            `${builtInType} · ${node.name}`,
+            'asmr',
             node.id,
             { tabTypeLabel: builtInType },
           );

@@ -2,6 +2,7 @@ import React from 'react';
 import { Popconfirm } from '@douyinfe/semi-ui';
 import ContextMenu, { ContextMenuItem } from '@/components/ui/context-menu';
 import comicFolderIcon from '@/assets/icons/material/folder-comic.svg';
+import asmrFolderIcon from '@/assets/icons/material/folder-asmr.svg';
 
 interface DirectoryContextMenuProps {
   node: any;
@@ -10,15 +11,22 @@ interface DirectoryContextMenuProps {
   onClose?: () => void;
 }
 
-const COMIC_BUILT_IN_MENU_ICON = (
-  <img
-    src={comicFolderIcon}
-    alt=""
-    width={14}
-    height={14}
-    style={{ display: 'block', objectFit: 'contain' }}
-  />
-);
+const BUILT_IN_MENU_ICON_SIZE = 16;
+
+function createBuiltInMenuIcon(src: string, alt: string): React.ReactNode {
+  return (
+    <img
+      src={src}
+      alt={alt}
+      width={BUILT_IN_MENU_ICON_SIZE}
+      height={BUILT_IN_MENU_ICON_SIZE}
+      style={{ display: 'block', width: BUILT_IN_MENU_ICON_SIZE, height: BUILT_IN_MENU_ICON_SIZE, objectFit: 'contain' }}
+    />
+  );
+}
+
+const COMIC_BUILT_IN_MENU_ICON = createBuiltInMenuIcon(comicFolderIcon, 'comic');
+const ASMR_BUILT_IN_MENU_ICON = createBuiltInMenuIcon(asmrFolderIcon, 'asmr');
 
 /**
  * 目录树右键菜单
@@ -87,6 +95,12 @@ const DirectoryContextMenu: React.FC<DirectoryContextMenuProps> = ({
           label: currentBuiltInType === 'COMIC' ? '漫画（当前）' : '漫画',
           icon: COMIC_BUILT_IN_MENU_ICON,
           onClick: () => onAction('设置内置类型:COMIC', node),
+        },
+        {
+          key: 'built-in-type-asmr',
+          label: currentBuiltInType === 'ASMR' ? 'ASMR（当前）' : 'ASMR',
+          icon: ASMR_BUILT_IN_MENU_ICON,
+          onClick: () => onAction('设置内置类型:ASMR', node),
         },
       ],
     },

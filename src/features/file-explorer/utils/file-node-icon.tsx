@@ -1,10 +1,12 @@
 import React from 'react';
 import imageIcon from '@/assets/icons/material/image.svg';
 import audioIcon from '@/assets/icons/material/audio.svg';
+import wavAudioIcon from '@/assets/icons/material/audio-wav.svg';
 import videoIcon from '@/assets/icons/material/video.svg';
 import pdfIcon from '@/assets/icons/material/pdf.svg';
 import blankFileIcon from '@/assets/icons/material/file-blank.svg';
 import comicFolderIcon from '@/assets/icons/material/folder-comic.svg';
+import asmrFolderIcon from '@/assets/icons/material/folder-asmr.svg';
 
 function createIconNode(src: string, alt: string): React.ReactNode {
   return React.createElement('img', {
@@ -50,6 +52,10 @@ export function getFileNodeIcon(ext?: string): React.ReactNode {
     return createIconNode(audioIcon, 'audio');
   }
 
+  if (normalized === 'wav') {
+    return createIconNode(wavAudioIcon, 'audio-wav');
+  }
+
   if (normalized === 'mp4') {
     return createIconNode(videoIcon, 'video');
   }
@@ -79,6 +85,9 @@ export function getDirectoryBuiltInIcon(builtInType?: string): React.ReactNode |
   }
   if (normalized === 'COMIC') {
     return createIconNode(comicFolderIcon, 'comic-folder');
+  }
+  if (normalized === 'ASMR') {
+    return createIconNode(asmrFolderIcon, 'asmr-folder');
   }
   return createWarningIconNode(`未知内置类型: ${normalized}`);
 }

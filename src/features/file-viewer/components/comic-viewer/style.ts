@@ -11,50 +11,6 @@ export const ComicViewerWrapper = styled.div`
   color: var(--semi-color-text-0);
   overflow: hidden;
 
-  .viewer-header {
-    flex-shrink: 0;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 12px 16px;
-    border-bottom: 1px solid var(--semi-color-border);
-    background: rgba(255, 255, 255, 0.02);
-    backdrop-filter: blur(8px);
-  }
-
-  .title-group {
-    min-width: 0;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .title-badge {
-    font-size: 12px;
-    line-height: 1;
-    padding: 3px 8px;
-    border-radius: 999px;
-    background: color-mix(in srgb, var(--semi-color-success) 16%, transparent);
-    color: var(--semi-color-success);
-    font-weight: 600;
-  }
-
-  .title {
-    min-width: 0;
-    font-size: 14px;
-    font-weight: 600;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .header-meta {
-    flex-shrink: 0;
-    font-size: 12px;
-    color: var(--semi-color-text-2);
-  }
-
   .pages-scroll {
     flex: 1;
     min-height: 0;
@@ -128,6 +84,54 @@ export const ComicViewerWrapper = styled.div`
     text-align: center;
     color: var(--semi-color-text-2);
     padding: 32px;
+  }
+
+  .viewer-footer {
+    height: 42px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 0 12px;
+    border-top: 1px solid var(--semi-color-border);
+    background: color-mix(in srgb, var(--semi-color-bg-0) 95%, transparent);
+  }
+
+  .footer-title-group {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+  }
+
+  .footer-title-badge {
+    font-size: 11px;
+    line-height: 1;
+    padding: 3px 8px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--semi-color-success) 16%, transparent);
+    color: var(--semi-color-success);
+    font-weight: 600;
+    flex-shrink: 0;
+  }
+
+  .footer-title {
+    min-width: 0;
+    font-size: 13px;
+    color: var(--semi-color-text-1);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .footer-page-meta {
+    flex-shrink: 0;
+    font-size: 13px;
+    color: var(--semi-color-text-2);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    white-space: nowrap;
   }
 
   @keyframes comic-placeholder {

@@ -286,6 +286,9 @@ function getStorageData() {
 function registerSystemIpc(ipcMain2) {
   ipcMain2.handle("sys:get-static-data", getStaticData);
 }
+const MAX_SINGLE_UPLOAD_BYTES = 10 * 1024 * 1024 * 1024;
+const MAX_SINGLE_UPLOAD_LABEL = "10GB";
+const MAX_SINGLE_UPLOAD_ERROR_MESSAGE = `上传失败：单文件最大支持 ${MAX_SINGLE_UPLOAD_LABEL}`;
 function registerHttpIpc(ipcMain2) {
   const activeUploads = /* @__PURE__ */ new Map();
   const sendUploadProgress = (runtime, force = false) => {
@@ -375,6 +378,10 @@ function registerHttpIpc(ipcMain2) {
       }
       if (!stat.isFile()) {
         reject(new Error(`上传目标不是文件: ${filePath}`));
+        return;
+      }
+      if (stat.size > MAX_SINGLE_UPLOAD_BYTES) {
+        reject(new Error(MAX_SINGLE_UPLOAD_ERROR_MESSAGE));
         return;
       }
       const boundary = "----WebKitFormBoundary" + Math.random().toString(36).substring(2);

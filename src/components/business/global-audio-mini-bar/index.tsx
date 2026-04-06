@@ -5,29 +5,25 @@ import { IconPlay, IconPause, IconMute, IconVolume2, IconMusic, IconClose } from
 import { globalAudioPlayer, type GlobalAudioPlayerState } from '@/features/file-viewer/services/global-audio-player';
 import { runtimeLogger } from '@/utils/runtimeLogger';
 
-const BarSlot = styled.div<{ $visible: boolean; $topOffset: number }>`
-  position: absolute;
-  top: ${({ $topOffset }) => `${$topOffset}px`};
-  left: 50%;
-  transform: translateX(-50%);
-  width: min(760px, calc(100% - 24px));
-  z-index: 20;
+const BarSlot = styled.div<{ $visible: boolean }>`
+  width: 100%;
+  height: ${({ $visible }) => ($visible ? '48px' : '0')};
+  flex-shrink: 0;
   opacity: ${props => (props.$visible ? 1 : 0)};
   pointer-events: ${props => (props.$visible ? 'auto' : 'none')};
-  transition: opacity 0.18s ease;
+  overflow: hidden;
+  transition: height 0.18s ease, opacity 0.18s ease;
 `;
 
 const BarInner = styled.div`
-  height: 48px;
+  height: 100%;
+  position: relative;
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 0 10px;
-  border-radius: 12px;
-  border: 1px solid var(--app-border);
-  background: color-mix(in srgb, var(--semi-color-bg-1) 88%, transparent);
-  backdrop-filter: blur(10px);
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.14);
+  padding: 0 12px 8px;
+  border-bottom: 1px solid var(--app-border);
+  background: color-mix(in srgb, var(--semi-color-bg-0) 94%, transparent);
 
   .track {
     min-width: 0;
@@ -54,24 +50,56 @@ const BarInner = styled.div`
   }
 
   .time {
-    width: 90px;
+    min-width: 108px;
     text-align: right;
     font-size: 12px;
     color: var(--app-text-muted);
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     flex-shrink: 0;
+    white-space: nowrap;
+    line-height: 1;
   }
 
-  .progress {
-    width: 180px;
+  .progress-line {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    margin: 0;
+    accent-color: var(--semi-color-primary);
+    height: 6px;
+  }
+
+  .progress-line::-webkit-slider-thumb {
+    width: 0;
+    height: 0;
+    opacity: 0;
+    appearance: none;
+  }
+
+  .progress-line::-moz-range-thumb {
+    width: 0;
+    height: 0;
+    opacity: 0;
+    border: none;
+  }
+
+  .progress-line::-ms-thumb {
+    width: 0;
+    height: 0;
+    opacity: 0;
+    border: none;
+  }
+
+  .volume {
+    width: 90px;
     accent-color: var(--semi-color-primary);
     flex-shrink: 0;
   }
 `;
 
-interface GlobalAudioMiniBarProps {
-  topOffset?: number;
-}
+interface GlobalAudioMiniBarProps { suppressed?: boolean; }
 
 function formatTime(time: number) {
   if (!Number.isFinite(time)) return '00:00';
@@ -96,16 +124,16 @@ function deriveTrackName(state: GlobalAudioPlayerState): string {
   }
 }
 
-const GlobalAudioMiniBar: React.FC<GlobalAudioMiniBarProps> = ({ topOffset = 12 }) => {
+const GlobalAudioMiniBar: React.FC<GlobalAudioMiniBarProps> = ({ suppressed = false }) => {
   const [state, setState] = React.useState<GlobalAudioPlayerState>(() => globalAudioPlayer.getState());
 
   React.useEffect(() => globalAudioPlayer.subscribe(setState), []);
 
-  const visible = Boolean(state.src) && state.hasStarted;
+  const visible = Boolean(state.src) && state.hasStarted && !suppressed;
   const trackName = deriveTrackName(state);
 
   return (
-    <BarSlot $visible={visible} $topOffset={topOffset}>
+    <BarSlot $visible={visible}>
       <BarInner>
         <div className="track">
           <IconMusic />
@@ -142,7 +170,24 @@ const GlobalAudioMiniBar: React.FC<GlobalAudioMiniBarProps> = ({ topOffset = 12 
         </div>
 
         <input
-          className="progress"
+          className="volume"
+          type="range"
+          min={0}
+          max={1}
+          step={0.01}
+          value={state.isMuted ? 0 : state.volume}
+          onChange={(e) => {
+            const next = Number(e.target.value);
+            globalAudioPlayer.setVolume(next);
+          }}
+        />
+
+        <div className="time">
+          {formatTime(state.currentTime)} / {formatTime(state.duration)}
+        </div>
+
+        <input
+          className="progress-line"
           type="range"
           min={0}
           max={Math.max(state.duration, 0)}
@@ -153,10 +198,6 @@ const GlobalAudioMiniBar: React.FC<GlobalAudioMiniBarProps> = ({ topOffset = 12 
             globalAudioPlayer.seekTo(next);
           }}
         />
-
-        <div className="time">
-          {formatTime(state.currentTime)} / {formatTime(state.duration)}
-        </div>
       </BarInner>
     </BarSlot>
   );

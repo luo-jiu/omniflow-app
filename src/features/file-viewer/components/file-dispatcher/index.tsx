@@ -4,13 +4,14 @@ import ImageViewer from "../image-viewer";
 import AudioViewer from "../audio-viewer";
 import VideoViewer from "../video-viewer";
 import ComicViewer from "../comic-viewer";
+import AsmrViewer from "../asmr-viewer";
 import styled from 'styled-components';
 
 interface FileDispatcherProps {
   nodeId: number | null;
   fileUrl: string | null;
   fileName: string | null;
-  fileType: 'image' | 'video' | 'audio' | 'comic' | 'other' | null;
+  fileType: 'image' | 'video' | 'audio' | 'comic' | 'asmr' | 'other' | null;
   loading: boolean;
 }
 
@@ -92,6 +93,9 @@ const FileDispatcher: React.FC<FileDispatcherProps> = ({
 
     case 'comic':
       return <ComicViewer folderNodeId={nodeId} fileUrl={fileUrl} fileName={fileName} />;
+
+    case 'asmr':
+      return <AsmrViewer folderNodeId={nodeId} fileUrl={fileUrl} fileName={fileName} />;
 
     default:
       return (

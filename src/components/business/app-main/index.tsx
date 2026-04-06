@@ -16,20 +16,19 @@ interface IProps {
  */
 const AppMain: FC<IProps> = () => {
   const { fileState, tabs, activeTabId, activateTab, closeTab } = useFileViewer();
-  const hasTabs = tabs.length > 0;
-  const audioTopOffset = hasTabs ? 38 : 12;
+  const suppressGlobalAudioBar = fileState.fileType === 'asmr';
 
   // 如果没有文件在查看，显示欢迎视图
   if (!fileState.fileUrl && !fileState.loading) {
     return (
       <MainWrapper>
-        <GlobalAudioMiniBar topOffset={audioTopOffset} />
         <FileTabsBar
           tabs={tabs}
           activeTabId={activeTabId}
           onActivate={activateTab}
           onClose={closeTab}
         />
+        <GlobalAudioMiniBar suppressed={suppressGlobalAudioBar} />
         <div className="main-content">
           <WelcomeView />
         </div>
@@ -40,13 +39,13 @@ const AppMain: FC<IProps> = () => {
   // 否则显示文件分发器（处理图片、视频等预览）
   return (
     <MainWrapper className="viewer-mode">
-      <GlobalAudioMiniBar topOffset={audioTopOffset} />
       <FileTabsBar
         tabs={tabs}
         activeTabId={activeTabId}
         onActivate={activateTab}
         onClose={closeTab}
       />
+      <GlobalAudioMiniBar suppressed={suppressGlobalAudioBar} />
       <div className="main-content">
         <FileDispatcher
           nodeId={fileState.nodeId}

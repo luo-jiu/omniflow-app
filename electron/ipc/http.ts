@@ -5,6 +5,7 @@ import http from 'node:http';
 import https from 'node:https';
 import type { ClientRequest, IncomingMessage } from 'node:http';
 import { runtimeLogger } from '../runtimeLogger';
+import { MAX_SINGLE_UPLOAD_BYTES, MAX_SINGLE_UPLOAD_ERROR_MESSAGE } from '../../src/shared/upload-limits';
 
 export function registerHttpIpc(ipcMain: Electron.IpcMain) {
   type UploadRuntime = {
@@ -127,6 +128,10 @@ export function registerHttpIpc(ipcMain: Electron.IpcMain) {
       }
       if (!stat.isFile()) {
         reject(new Error(`上传目标不是文件: ${filePath}`));
+        return;
+      }
+      if (stat.size > MAX_SINGLE_UPLOAD_BYTES) {
+        reject(new Error(MAX_SINGLE_UPLOAD_ERROR_MESSAGE));
         return;
       }
 

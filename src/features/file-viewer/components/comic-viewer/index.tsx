@@ -83,6 +83,19 @@ function parseComicLibraryId(fileUrl: string): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function normalizeComicTitle(fileName?: string | null): string {
+  const raw = String(fileName || '').trim();
+  if (!raw) return '漫画预览';
+  if (raw.toUpperCase().startsWith('COMIC ·')) {
+    const parts = raw.split('·');
+    if (parts.length >= 2) {
+      const right = parts.slice(1).join('·').trim();
+      if (right) return right;
+    }
+  }
+  return raw;
+}
+
 function resolveReaderCacheKey(fileUrl: string, folderNodeId: number | null): string | null {
   if (!folderNodeId || !Number.isFinite(folderNodeId)) {
     return null;
@@ -120,6 +133,7 @@ interface AnchorSnapshot {
 
 const ComicViewer: React.FC<ComicViewerProps> = ({ folderNodeId, fileUrl, fileName }) => {
   const libraryId = useMemo(() => parseComicLibraryId(fileUrl), [fileUrl]);
+  const displayTitle = useMemo(() => normalizeComicTitle(fileName), [fileName]);
   const readerCacheKey = useMemo(
     () => resolveReaderCacheKey(fileUrl, folderNodeId),
     [fileUrl, folderNodeId],
@@ -581,14 +595,6 @@ const ComicViewer: React.FC<ComicViewerProps> = ({ folderNodeId, fileUrl, fileNa
 
   return (
     <ComicViewerWrapper>
-      <div className="viewer-header">
-        <div className="title-group">
-          <span className="title-badge">COMIC</span>
-          <span className="title">{fileName || '漫画预览'}</span>
-        </div>
-        <div className="header-meta">{Math.max(currentPageNumber, 1)} / {pages.length} 页</div>
-      </div>
-
       <div className="pages-scroll" ref={scrollRef} onScroll={handleScroll}>
         <div className="pages-column" style={{ width: `${pageWidth}px` }}>
           {renderedPages.map((page) => (
@@ -629,6 +635,14 @@ const ComicViewer: React.FC<ComicViewerProps> = ({ folderNodeId, fileUrl, fileNa
             {visibleCount < pages.length ? '继续下滑加载更多页...' : '已加载全部页面'}
           </div>
         </div>
+      </div>
+
+      <div className="viewer-footer">
+        <div className="footer-title-group">
+          <span className="footer-title-badge">COMIC</span>
+          <span className="footer-title" title={displayTitle}>{displayTitle}</span>
+        </div>
+        <span className="footer-page-meta">{Math.max(currentPageNumber, 1)} / {pages.length} 页</span>
       </div>
     </ComicViewerWrapper>
   );

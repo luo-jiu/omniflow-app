@@ -1,4 +1,5 @@
 import { createIpcUploadTask, ipcRequest as request, ipcUpload } from '@/service/request/ipcRequest';
+import { MAX_SINGLE_UPLOAD_BYTES, MAX_SINGLE_UPLOAD_ERROR_MESSAGE } from '@/shared/upload-limits';
 
 export type Library = {
   createdAt: string;
@@ -33,6 +34,13 @@ function extractLibraryArray(payload: unknown): Library[] {
   }
 
   return [];
+}
+
+function assertUploadFileSize(file: File) {
+  const fileSize = Number(file.size || 0);
+  if (fileSize > MAX_SINGLE_UPLOAD_BYTES) {
+    throw new Error(MAX_SINGLE_UPLOAD_ERROR_MESSAGE);
+  }
 }
 
 // 获取仓库列表
@@ -91,6 +99,8 @@ export async function uploadAndCreateNode(
     setAbort?: (aborter: () => void | Promise<void | boolean>) => void;
   },
 ) {
+  assertUploadFileSize(file);
+
   const filePath = (file as any).path;
   if (!filePath) {
     throw new Error("Unable to retrieve file path for upload.");
@@ -137,6 +147,8 @@ export async function uploadAndCreateNode(
 
 // 兼容旧上传（无进度）
 export async function uploadAndCreateNodeLegacy(file: File, parentId: number, libraryId: number) {
+  assertUploadFileSize(file);
+
   const json = await ipcUpload("/v1/directory/upload", (file as any).path, {
     parent_id: String(parentId),
     library_id: String(libraryId),
