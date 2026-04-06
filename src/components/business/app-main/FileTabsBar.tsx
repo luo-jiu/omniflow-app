@@ -107,6 +107,7 @@ function getTabTypeLabel(tab: FileViewerTab) {
   if (fileType === 'image') return 'IMG';
   if (fileType === 'audio') return 'MP3';
   if (fileType === 'video') return 'MP4';
+  if (fileType === 'pdf') return 'PDF';
   if (fileType === 'comic') return 'COMIC';
   if (fileType === 'asmr') return 'ASMR';
   if (fileType === 'asmr_archive') return 'ASMR-ARC';

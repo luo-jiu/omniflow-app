@@ -4,6 +4,7 @@ import ImageViewer from "../image-viewer";
 import AudioViewer from "../audio-viewer";
 import VideoViewer from "../video-viewer";
 import ComicViewer from "../comic-viewer";
+import PdfViewer from "../pdf-viewer";
 import AsmrViewer from "../asmr-viewer";
 import AsmrArchiveViewer from "../../../archive-viewer/components/asmr-archive-viewer";
 import styled from 'styled-components';
@@ -12,8 +13,9 @@ interface FileDispatcherProps {
   nodeId: number | null;
   fileUrl: string | null;
   fileName: string | null;
-  fileType: 'image' | 'video' | 'audio' | 'comic' | 'asmr' | 'asmr_archive' | 'other' | null;
+  fileType: 'image' | 'video' | 'audio' | 'pdf' | 'comic' | 'asmr' | 'asmr_archive' | 'other' | null;
   loading: boolean;
+  active?: boolean;
 }
 
 const DispatcherWrapper = styled.div`
@@ -68,7 +70,8 @@ const FileDispatcher: React.FC<FileDispatcherProps> = ({
   fileUrl, 
   fileName, 
   fileType, 
-  loading 
+  loading,
+  active = true,
 }) => {
   if (loading) {
     return (
@@ -87,16 +90,19 @@ const FileDispatcher: React.FC<FileDispatcherProps> = ({
       return <ImageViewer url={fileUrl} fileName={fileName} />;
     
     case 'audio':
-      return <AudioViewer url={fileUrl} fileName={fileName} />;
+      return <AudioViewer nodeId={nodeId} url={fileUrl} fileName={fileName} active={active} />;
     
     case 'video':
-      return <VideoViewer url={fileUrl} fileName={fileName} />;
+      return <VideoViewer url={fileUrl} fileName={fileName} active={active} />;
+
+    case 'pdf':
+      return <PdfViewer nodeId={nodeId} url={fileUrl} fileName={fileName} active={active} />;
 
     case 'comic':
-      return <ComicViewer folderNodeId={nodeId} fileUrl={fileUrl} fileName={fileName} />;
+      return <ComicViewer folderNodeId={nodeId} fileUrl={fileUrl} fileName={fileName} active={active} />;
 
     case 'asmr':
-      return <AsmrViewer folderNodeId={nodeId} fileUrl={fileUrl} fileName={fileName} />;
+      return <AsmrViewer folderNodeId={nodeId} fileUrl={fileUrl} fileName={fileName} active={active} />;
 
     case 'asmr_archive':
       return <AsmrArchiveViewer folderNodeId={nodeId} fileUrl={fileUrl} fileName={fileName} />;

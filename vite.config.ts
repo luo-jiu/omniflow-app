@@ -37,7 +37,7 @@ export default defineConfig({
     strictPort: true,
     headers: {
       'Content-Security-Policy':
-        "default-src 'self'; connect-src 'self' http://localhost:8848 ws://localhost:8848; img-src 'self' data: blob:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';"
+        "default-src 'self'; connect-src 'self' http://localhost:8848 ws://localhost:8848 http://localhost:9000; img-src 'self' data: blob: http://localhost:9000; media-src 'self' data: blob: http://localhost:9000; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';"
     }
   },
 })

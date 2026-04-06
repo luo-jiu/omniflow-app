@@ -8,6 +8,7 @@ export const FILE_TAB_TARGETS: FileTabTarget[] = [
   { key: 'IMG', label: '图片', description: '图片查看标签（IMG）' },
   { key: 'MP3', label: '音频', description: '音频标签（MP3）' },
   { key: 'MP4', label: '视频', description: '视频标签（MP4）' },
+  { key: 'PDF', label: '文档', description: 'PDF 查看标签（PDF）' },
   { key: 'COMIC', label: '漫画', description: '漫画查看器标签（COMIC）' },
   { key: 'ASMR', label: 'ASMR', description: 'ASMR 查看器标签（ASMR）' },
   { key: 'ASMR-ARC', label: 'ASMR 归档', description: 'ASMR 归档标签（ASMR-ARC）' },

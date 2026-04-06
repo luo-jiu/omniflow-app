@@ -22,6 +22,31 @@ export const MainWrapper = styled.main`
     min-height: 0;
     display: flex;
     overflow: hidden;
+    position: relative;
+  }
+
+  .tab-stage-stack {
+    position: relative;
+    flex: 1;
+    width: 100%;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .tab-stage {
+    position: absolute;
+    inset: 0;
+    min-height: 0;
+    display: flex;
+  }
+
+  .tab-stage.inactive {
+    visibility: hidden;
+    pointer-events: none;
+  }
+
+  .tab-stage.active {
+    z-index: 1;
   }
 `;
 

@@ -8,6 +8,7 @@ interface ComicViewerProps {
   folderNodeId: number | null;
   fileUrl: string;
   fileName?: string | null;
+  active?: boolean;
 }
 
 interface ComicChildNode {
@@ -131,7 +132,7 @@ interface AnchorSnapshot {
   currentPageNumber: number;
 }
 
-const ComicViewer: React.FC<ComicViewerProps> = ({ folderNodeId, fileUrl, fileName }) => {
+const ComicViewer: React.FC<ComicViewerProps> = ({ folderNodeId, fileUrl, fileName, active = true }) => {
   const libraryId = useMemo(() => parseComicLibraryId(fileUrl), [fileUrl]);
   const displayTitle = useMemo(() => normalizeComicTitle(fileName), [fileName]);
   const readerCacheKey = useMemo(
@@ -566,6 +567,35 @@ const ComicViewer: React.FC<ComicViewerProps> = ({ folderNodeId, fileUrl, fileNa
     }, 80);
     return () => window.clearTimeout(timer);
   }, [captureAnchorSnapshot, persistReaderSnapshot, renderedPages.length, restoreTick]);
+
+  useEffect(() => {
+    if (!active) return;
+    const scrollEl = scrollRef.current;
+    if (scrollEl) {
+      setScrollWidth(Math.round(scrollEl.clientWidth));
+    }
+    if (!readerCacheKey || pages.length === 0) {
+      return;
+    }
+    const snapshot = comicReaderSnapshotCache.get(readerCacheKey);
+    if (!snapshot) {
+      return;
+    }
+    pendingRestoreRef.current = (snapshot.scrollTop > 0 || snapshot.scrollRatio > 0 || Boolean(snapshot.anchorPageId))
+      ? {
+        desiredScrollTop: snapshot.scrollTop,
+        desiredScrollRatio: snapshot.scrollRatio,
+        anchorPageId: snapshot.anchorPageId,
+        anchorOffsetRatio: snapshot.anchorOffsetRatio,
+        attempts: 0,
+        lastMaxScrollable: 0,
+        stableTicks: 0,
+      }
+      : null;
+    if (pendingRestoreRef.current) {
+      setRestoreTick(prev => prev + 1);
+    }
+  }, [active, pages.length, readerCacheKey]);
 
   if (listLoading) {
     return (

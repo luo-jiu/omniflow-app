@@ -15,20 +15,30 @@ import {
 import { AudioViewerWrapper } from './style';
 import { globalAudioPlayer } from '@/features/file-viewer/services/global-audio-player';
 import { runtimeLogger } from '@/utils/runtimeLogger';
+import { resolveAudioOwnerKey } from '@/features/file-viewer/utils/audio-owner-key';
 
 interface AudioViewerProps {
+  nodeId: number | null;
   url: string;
   fileName?: string | null;
+  active?: boolean;
 }
 
-const AudioViewer: React.FC<AudioViewerProps> = ({ url, fileName }) => {
+const AudioViewer: React.FC<AudioViewerProps> = ({ nodeId, url, fileName, active = true }) => {
   const progressBarRef = useRef<HTMLDivElement>(null);
   const [playerState, setPlayerState] = useState(() => globalAudioPlayer.getState());
   const [dragPreviewTime, setDragPreviewTime] = useState<number | null>(null);
+  const ownerKey = React.useMemo(() => resolveAudioOwnerKey(url, nodeId), [nodeId, url]);
+  const isOwnedSource = (
+    playerState.ownerType === 'default'
+    && playerState.ownerKey === ownerKey
+  );
+  const effectiveCurrentTime = isOwnedSource ? playerState.currentTime : 0;
+  const effectiveDuration = isOwnedSource ? playerState.duration : 0;
 
   // Dragging state (managed via refs to avoid re-renders during high-frequency events)
   const isDraggingRef = useRef(false);
-  const displayTime = dragPreviewTime ?? playerState.currentTime;
+  const displayTime = dragPreviewTime ?? effectiveCurrentTime;
 
   const formatTime = (time: number) => {
     if (!isFinite(time)) return '00:00';
@@ -38,26 +48,38 @@ const AudioViewer: React.FC<AudioViewerProps> = ({ url, fileName }) => {
   };
 
   const togglePlay = () => {
-    void globalAudioPlayer.togglePlay().catch((error) => {
-      runtimeLogger.error('failed to toggle audio playback:', error);
+    if (isOwnedSource) {
+      void globalAudioPlayer.togglePlay().catch((error) => {
+        runtimeLogger.error('failed to toggle audio playback:', error);
+      });
+      return;
+    }
+
+    globalAudioPlayer.ensureSource(
+      url,
+      fileName || null,
+      { ownerType: 'default', ownerKey },
+    );
+    void globalAudioPlayer.play().catch((error) => {
+      runtimeLogger.error('failed to start audio playback:', error);
     });
   };
 
   // --- Custom Progress Bar Logic ---
 
   const updateProgress = useCallback((clientX: number) => {
-    if (!progressBarRef.current || !playerState.duration) return;
+    if (!progressBarRef.current || !effectiveDuration) return;
     
     const rect = progressBarRef.current.getBoundingClientRect();
     const x = Math.max(0, Math.min(clientX - rect.left, rect.width));
     const percentage = x / rect.width;
-    const newTime = percentage * playerState.duration;
+    const newTime = percentage * effectiveDuration;
     
     // Update visual immediately
     setDragPreviewTime(newTime);
     
     return newTime;
-  }, [playerState.duration]);
+  }, [effectiveDuration]);
 
   const handleGlobalMouseMove = useCallback((e: MouseEvent) => {
     if (isDraggingRef.current) {
@@ -79,6 +101,9 @@ const AudioViewer: React.FC<AudioViewerProps> = ({ url, fileName }) => {
   }, [handleGlobalMouseMove, updateProgress]);
 
   const handleMouseDown = (e: React.MouseEvent) => {
+    if (!isOwnedSource) {
+      return;
+    }
     isDraggingRef.current = true;
     updateProgress(e.clientX);
     
@@ -101,20 +126,22 @@ const AudioViewer: React.FC<AudioViewerProps> = ({ url, fileName }) => {
   };
 
   useEffect(() => {
+    if (!active) return;
+    setPlayerState(globalAudioPlayer.getState());
     return globalAudioPlayer.subscribe(setPlayerState);
-  }, []);
+  }, [active]);
 
   useEffect(() => {
-    globalAudioPlayer.ensureSource(url, fileName || null);
+    if (!active) return;
     setDragPreviewTime(null);
-  }, [url, fileName]);
+  }, [active]);
 
   return (
     <AudioViewerWrapper>
       <div className="main-display">
         <div className="record-player">
-          <div className={`record-needle ${playerState.isPlaying ? 'playing' : ''}`} />
-          <div className={`album-art ${playerState.isPlaying ? 'playing' : ''}`}>
+          <div className={`record-needle ${isOwnedSource && playerState.isPlaying ? 'playing' : ''}`} />
+          <div className={`album-art ${isOwnedSource && playerState.isPlaying ? 'playing' : ''}`}>
             <div className="inner-cover">
               <IconMusic />
             </div>
@@ -138,7 +165,7 @@ const AudioViewer: React.FC<AudioViewerProps> = ({ url, fileName }) => {
           <div style={{ width: '100%', height: 4, background: 'var(--semi-color-fill-0)', position: 'relative' }}>
              {/* Track */}
              <div style={{ 
-                 width: `${(displayTime / (playerState.duration || 1)) * 100}%`, 
+                 width: `${(displayTime / (effectiveDuration || 1)) * 100}%`, 
                  height: '100%', 
                  background: 'var(--semi-color-primary)',
                  position: 'absolute',
@@ -153,7 +180,7 @@ const AudioViewer: React.FC<AudioViewerProps> = ({ url, fileName }) => {
                  background: '#fff',
                  position: 'absolute',
                  top: '50%',
-                 left: `${(displayTime / (playerState.duration || 1)) * 100}%`,
+                 left: `${(displayTime / (effectiveDuration || 1)) * 100}%`,
                  transform: 'translate(-50%, -50%)',
                  boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
                  pointerEvents: 'none' // Let the wrapper handle clicks
@@ -175,7 +202,7 @@ const AudioViewer: React.FC<AudioViewerProps> = ({ url, fileName }) => {
             <Button icon={<IconBackward />} theme="borderless" size="large" />
             <Button
               className="play-btn"
-              icon={playerState.isPlaying ? <IconPause /> : <IconPlay />}
+              icon={isOwnedSource && playerState.isPlaying ? <IconPause /> : <IconPlay />}
               theme="solid"
               shape="circle"
               onClick={togglePlay}
@@ -186,7 +213,7 @@ const AudioViewer: React.FC<AudioViewerProps> = ({ url, fileName }) => {
 
           <div className="extra-controls">
             <div className="time-display">
-              {formatTime(displayTime)} / {formatTime(playerState.duration)}
+              {formatTime(displayTime)} / {formatTime(effectiveDuration)}
             </div>
             <div className="volume-pop">
               <Button

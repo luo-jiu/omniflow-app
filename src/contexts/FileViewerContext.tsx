@@ -125,7 +125,7 @@ export const FileViewerProvider: React.FC<{ children: ReactNode; cacheKey?: stri
   const setFileUrl = (
     url: string | null,
     fileName: string | null,
-    fileType: 'image' | 'video' | 'audio' | 'comic' | 'asmr' | 'asmr_archive' | 'other' | null,
+    fileType: 'image' | 'video' | 'audio' | 'pdf' | 'comic' | 'asmr' | 'asmr_archive' | 'other' | null,
     nodeId?: number | null,
     options?: {
       tabTypeLabel?: string | null;

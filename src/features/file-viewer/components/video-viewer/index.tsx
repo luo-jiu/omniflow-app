@@ -16,12 +16,13 @@ import { runtimeLogger } from '@/utils/runtimeLogger';
 interface VideoViewerProps {
   url: string;
   fileName?: string | null;
+  active?: boolean;
 }
 
 const SEEK_SECONDS = 5;
 const PLAYBACK_RATES = [0.75, 1, 1.25, 1.5, 2];
 
-const VideoViewer: React.FC<VideoViewerProps> = ({ url, fileName }) => {
+const VideoViewer: React.FC<VideoViewerProps> = ({ url, fileName, active = true }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const progressRef = useRef<HTMLDivElement>(null);
@@ -147,6 +148,15 @@ const VideoViewer: React.FC<VideoViewerProps> = ({ url, fileName }) => {
     setIsPlaying(false);
     setIsBuffering(true);
   }, [url]);
+
+  useEffect(() => {
+    if (active) return;
+    const video = videoRef.current;
+    if (!video) return;
+    if (!video.paused) {
+      video.pause();
+    }
+  }, [active]);
 
   useEffect(() => {
     const video = videoRef.current;

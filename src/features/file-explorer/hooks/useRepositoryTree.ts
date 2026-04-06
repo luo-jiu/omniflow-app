@@ -4,6 +4,7 @@ import { fileCache } from '@/utils/fileCache.ts';
 import { buildTreeNodeLabel } from '@/utils/fileTreeSettings';
 import { getDirectoryBuiltInIcon, getFileNodeIconByParentBuiltInType } from '../utils/file-node-icon';
 import { runtimeLogger } from '@/utils/runtimeLogger';
+import { resolvePreviewFileType } from '@/utils/preview-file-type';
 
 // 目录节点信息
 interface Node {
@@ -57,28 +58,11 @@ interface RepositoryTreeSnapshot {
 const REPOSITORY_TREE_SNAPSHOT_MAX_ENTRIES = 20;
 const repositoryTreeSnapshotStore = new Map<number, RepositoryTreeSnapshot>();
 const repositoryTreeDirtyLibraries = new Set<number>();
-const IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg']);
-const VIDEO_EXTENSIONS = new Set(['mp4', 'webm', 'ogg', 'mov', 'avi', 'mkv']);
-const AUDIO_EXTENSIONS = new Set(['mp3', 'wav', 'aac', 'flac', 'm4a']);
-
-function normalizeExt(ext?: string): string {
-  return String(ext || '').toLowerCase().replace(/^\./, '');
-}
-
 function resolveFileType(
   mimeType?: string,
   ext?: string,
-): 'image' | 'video' | 'audio' | 'other' {
-  if (mimeType) {
-    if (mimeType.startsWith('image/')) return 'image';
-    if (mimeType.startsWith('video/')) return 'video';
-    if (mimeType.startsWith('audio/')) return 'audio';
-  }
-  const normalizedExt = normalizeExt(ext);
-  if (IMAGE_EXTENSIONS.has(normalizedExt)) return 'image';
-  if (VIDEO_EXTENSIONS.has(normalizedExt)) return 'video';
-  if (AUDIO_EXTENSIONS.has(normalizedExt)) return 'audio';
-  return 'other';
+): 'image' | 'video' | 'audio' | 'pdf' | 'other' {
+  return resolvePreviewFileType(mimeType, ext);
 }
 
 function isImageFileNode(item: Pick<NodeRespDTO, 'mimeType' | 'ext'>): boolean {
@@ -158,14 +142,14 @@ export function useRepositoryTree(
   onFileOpen?: (
     fileUrl: string,
     fileName: string,
-    fileType: 'image' | 'video' | 'audio' | 'comic' | 'asmr' | 'asmr_archive' | 'other',
+    fileType: 'image' | 'video' | 'audio' | 'pdf' | 'comic' | 'asmr' | 'asmr_archive' | 'other',
     nodeId: number,
     options?: {
       tabTypeLabel?: string | null;
       returnTarget?: {
         fileUrl: string;
         fileName: string | null;
-        fileType: 'image' | 'video' | 'audio' | 'comic' | 'asmr' | 'asmr_archive' | 'other';
+        fileType: 'image' | 'video' | 'audio' | 'pdf' | 'comic' | 'asmr' | 'asmr_archive' | 'other';
         nodeId: number | null;
         tabTypeLabel?: string | null;
       } | null;

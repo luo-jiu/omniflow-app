@@ -17,11 +17,13 @@ import { useFileViewer } from '@/hooks/useFileViewer';
 import { runtimeLogger } from '@/utils/runtimeLogger';
 import { globalAudioPlayer } from '@/features/file-viewer/services/global-audio-player';
 import { parseAsmrRouteInfo, resolveAsmrOwnerKey } from '@/features/file-viewer/utils/asmr-owner-key';
+import { resolvePreviewFileType } from '@/utils/preview-file-type';
 
 interface AsmrViewerProps {
   folderNodeId: number | null;
   fileUrl: string;
   fileName?: string | null;
+  active?: boolean;
 }
 
 interface AsmrNodeItem {
@@ -55,9 +57,6 @@ const NAME_COLLATOR = new Intl.Collator('zh-Hans-CN', {
   sensitivity: 'base',
 });
 
-const IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg', 'avif']);
-const VIDEO_EXTENSIONS = new Set(['mp4', 'webm', 'ogg', 'mov', 'avi', 'mkv']);
-const AUDIO_EXTENSIONS = new Set(['mp3', 'wav', 'aac', 'flac', 'm4a']);
 const ASMR_VIEWER_CACHE_MAX_ENTRIES = 24;
 const asmrViewerSnapshotCache = new Map<string, AsmrViewerSnapshot>();
 
@@ -124,17 +123,8 @@ function resolveRowType(item: AsmrNodeItem): string {
   return item.mimeType || '文件';
 }
 
-function resolveFileType(item: AsmrNodeItem): 'image' | 'video' | 'audio' | 'other' {
-  if (item.mimeType) {
-    if (item.mimeType.startsWith('image/')) return 'image';
-    if (item.mimeType.startsWith('video/')) return 'video';
-    if (item.mimeType.startsWith('audio/')) return 'audio';
-  }
-  const ext = normalizeExt(item.ext);
-  if (IMAGE_EXTENSIONS.has(ext)) return 'image';
-  if (VIDEO_EXTENSIONS.has(ext)) return 'video';
-  if (AUDIO_EXTENSIONS.has(ext)) return 'audio';
-  return 'other';
+function resolveFileType(item: AsmrNodeItem): 'image' | 'video' | 'audio' | 'pdf' | 'other' {
+  return resolvePreviewFileType(item.mimeType, item.ext);
 }
 
 function isImageFile(item: AsmrNodeItem): boolean {
@@ -163,7 +153,7 @@ function formatDuration(time: number): string {
   return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 }
 
-const AsmrViewer: React.FC<AsmrViewerProps> = ({ folderNodeId, fileUrl, fileName }) => {
+const AsmrViewer: React.FC<AsmrViewerProps> = ({ folderNodeId, fileUrl, fileName, active = true }) => {
   const { setFileUrl } = useFileViewer();
   const routeInfo = useMemo(() => parseAsmrRouteInfo(fileUrl), [fileUrl]);
   const libraryId = routeInfo?.libraryId ?? null;
@@ -348,8 +338,10 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({ folderNodeId, fileUrl, fileName
   }, [libraryId]);
 
   useEffect(() => {
+    if (!active) return;
+    setPlayerState(globalAudioPlayer.getState());
     return globalAudioPlayer.subscribe(setPlayerState);
-  }, []);
+  }, [active]);
 
   useEffect(() => {
     if (!folderNodeId || !Number.isFinite(folderNodeId) || !libraryId) {
