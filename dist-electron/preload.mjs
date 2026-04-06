@@ -1,1 +1,44 @@
-"use strict";const n=require("electron");n.contextBridge.exposeInMainWorld("ipcRenderer",{on(...e){const[r,o]=e;return n.ipcRenderer.on(r,(t,...i)=>o(t,...i))},off(...e){const[r,...o]=e;return n.ipcRenderer.off(r,...o)},send(...e){const[r,...o]=e;return n.ipcRenderer.send(r,...o)},invoke(...e){const[r,...o]=e;return n.ipcRenderer.invoke(r,...o)}});n.contextBridge.exposeInMainWorld("electronAPI",{getStaticData:()=>n.ipcRenderer.invoke("sys:get-static-data"),fetch:(e,r)=>n.ipcRenderer.invoke("http:fetch",e,r),upload:(e,r,o,t,i)=>n.ipcRenderer.invoke("http:upload",e,r,o,t,i),uploadAbort:e=>n.ipcRenderer.invoke("http:upload:abort",e),onUploadProgress:e=>{const r=(o,t)=>{e(t)};return n.ipcRenderer.on("http:upload:progress",r),()=>n.ipcRenderer.removeListener("http:upload:progress",r)}});n.contextBridge.exposeInMainWorld("electronZoom",e=>n.ipcRenderer.invoke("zoom-adjust",e));n.contextBridge.exposeInMainWorld("electronWindow",{minimize:()=>n.ipcRenderer.send("window-minimize"),maximize:()=>n.ipcRenderer.send("window-maximize"),close:()=>n.ipcRenderer.send("window-close"),activate:(e=!1)=>n.ipcRenderer.invoke("window-activate",e)});
+"use strict";
+const electron = require("electron");
+electron.contextBridge.exposeInMainWorld("ipcRenderer", {
+  on(...args) {
+    const [channel, listener] = args;
+    return electron.ipcRenderer.on(channel, (event, ...args2) => listener(event, ...args2));
+  },
+  off(...args) {
+    const [channel, ...omit] = args;
+    return electron.ipcRenderer.off(channel, ...omit);
+  },
+  send(...args) {
+    const [channel, ...omit] = args;
+    return electron.ipcRenderer.send(channel, ...omit);
+  },
+  invoke(...args) {
+    const [channel, ...omit] = args;
+    return electron.ipcRenderer.invoke(channel, ...omit);
+  }
+  // You can expose other APTs you need here.
+  // ...
+});
+electron.contextBridge.exposeInMainWorld("electronAPI", {
+  getStaticData: () => electron.ipcRenderer.invoke("sys:get-static-data"),
+  fetch: (url, options) => electron.ipcRenderer.invoke("http:fetch", url, options),
+  upload: (url, filePath, formDataParams, headers, uploadId) => electron.ipcRenderer.invoke("http:upload", url, filePath, formDataParams, headers, uploadId),
+  uploadAbort: (uploadId) => electron.ipcRenderer.invoke("http:upload:abort", uploadId),
+  onUploadProgress: (listener) => {
+    const wrapped = (_event, payload) => {
+      listener(payload);
+    };
+    electron.ipcRenderer.on("http:upload:progress", wrapped);
+    return () => electron.ipcRenderer.removeListener("http:upload:progress", wrapped);
+  }
+});
+electron.contextBridge.exposeInMainWorld("electronZoom", (delta) => {
+  return electron.ipcRenderer.invoke("zoom-adjust", delta);
+});
+electron.contextBridge.exposeInMainWorld("electronWindow", {
+  minimize: () => electron.ipcRenderer.send("window-minimize"),
+  maximize: () => electron.ipcRenderer.send("window-maximize"),
+  close: () => electron.ipcRenderer.send("window-close"),
+  activate: (temporaryOnTop = false) => electron.ipcRenderer.invoke("window-activate", temporaryOnTop)
+});

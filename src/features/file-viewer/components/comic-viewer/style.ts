@@ -60,25 +60,23 @@ export const ComicViewerWrapper = styled.div`
     min-height: 0;
     overflow-y: auto;
     overflow-x: hidden;
-    padding: 18px 12px 32px;
+    padding: 10px 0 20px;
   }
 
   .pages-column {
     margin: 0 auto;
     display: flex;
     flex-direction: column;
-    gap: 18px;
+    gap: 0;
   }
 
   .page-shell {
     margin: 0 auto;
-    border-radius: 12px;
+    border-radius: 0;
     overflow: hidden;
-    border: 1px solid var(--semi-color-border);
-    background: var(--semi-color-bg-1);
-    box-shadow:
-      0 10px 24px rgba(0, 0, 0, 0.14),
-      inset 0 0 0 1px rgba(255, 255, 255, 0.03);
+    border: 0;
+    background: transparent;
+    box-shadow: none;
   }
 
   .page-image {
@@ -91,7 +89,7 @@ export const ComicViewerWrapper = styled.div`
 
   .page-skeleton {
     width: 100%;
-    min-height: 220px;
+    min-height: 200px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -106,21 +104,9 @@ export const ComicViewerWrapper = styled.div`
     animation: comic-placeholder 1.4s ease-in-out infinite;
   }
 
-  .page-caption {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    padding: 8px 10px;
-    border-top: 1px solid color-mix(in srgb, var(--semi-color-border) 60%, transparent);
-    background: color-mix(in srgb, var(--semi-color-bg-2) 85%, transparent);
-    font-size: 12px;
-    color: var(--semi-color-text-2);
-  }
-
   .load-more-sentinel {
     width: 100%;
-    height: 18px;
+    height: 8px;
   }
 
   .load-state {

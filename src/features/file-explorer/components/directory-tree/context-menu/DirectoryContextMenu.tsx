@@ -1,6 +1,7 @@
 import React from 'react';
 import { Popconfirm } from '@douyinfe/semi-ui';
 import ContextMenu, { ContextMenuItem } from '@/components/ui/context-menu';
+import comicFolderIcon from '@/assets/icons/material/folder-comic.svg';
 
 interface DirectoryContextMenuProps {
   node: any;
@@ -8,6 +9,16 @@ interface DirectoryContextMenuProps {
   onAction: (action: string, node: any) => void;
   onClose?: () => void;
 }
+
+const COMIC_BUILT_IN_MENU_ICON = (
+  <img
+    src={comicFolderIcon}
+    alt=""
+    width={14}
+    height={14}
+    style={{ display: 'block', objectFit: 'contain' }}
+  />
+);
 
 /**
  * 目录树右键菜单
@@ -64,6 +75,7 @@ const DirectoryContextMenu: React.FC<DirectoryContextMenuProps> = ({
         {
           key: 'built-in-type-comic',
           label: currentBuiltInType === 'COMIC' ? '漫画（当前）' : '漫画',
+          icon: COMIC_BUILT_IN_MENU_ICON,
           onClick: () => onAction('设置内置类型:COMIC', node),
         },
       ],
