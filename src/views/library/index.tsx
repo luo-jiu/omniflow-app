@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Button, Modal, Avatar, Popover } from '@douyinfe/semi-ui'
-import { IconPlus, IconExit } from '@douyinfe/semi-icons'
+import { Modal, Avatar } from '@douyinfe/semi-ui'
 
 import LibraryWrapper, {
   ContentRow,
@@ -18,16 +17,17 @@ import LibraryWrapper, {
 import { useLibraryPage } from './hooks/useLibraryPage.ts'
 import { useAuth } from '@/hooks/useAuth'
 import QuickAccessSidebar from './components/quick-access-sidebar'
+import type { QuickAccessMode } from './components/quick-access-sidebar'
 import LibraryCard from './components/library-card'
 import LibraryContextMenu from './components/library-context-menu'
 import LibraryCreateModal from './components/library-create-modal'
-import ContextMenu from '@/components/ui/context-menu'
 import type { Library } from "@/features/file-explorer/services/file.api"
 
 type MenuState = {
   visible: boolean
   x: number
   y: number
+  mode: 'library' | 'blank'
   library: Library | null
 }
 
@@ -37,8 +37,8 @@ const PADDING = 10
 
 const LibraryPage: React.FC = () => {
   const navigate = useNavigate()
-  const { user, isLoggedIn, logout } = useAuth()
-  const displayName = isLoggedIn ? user?.username || 'User' : '未登录'
+  const { user, isLoggedIn } = useAuth()
+  const displayName = isLoggedIn ? user?.nickname || user?.username || 'User' : '未登录'
   const {
     libraries,
     handleCreateLibrary,
@@ -49,32 +49,36 @@ const LibraryPage: React.FC = () => {
 
   const [createVisible, setCreateVisible] = useState(false)
   const [createName, setCreateName] = useState('')
-  const [menu, setMenu] = useState<MenuState>({ visible: false, x: 0, y: 0, library: null })
+  const [menu, setMenu] = useState<MenuState>({
+    visible: false,
+    x: 0,
+    y: 0,
+    mode: 'blank',
+    library: null,
+  })
   const [editingLibraryId, setEditingLibraryId] = useState<number | null>(null)
   const [renameValue, setRenameValue] = useState('')
+  const [quickAccessMode, setQuickAccessMode] = useState<QuickAccessMode>('all')
 
   const wrapperRef = useRef<HTMLDivElement>(null)
-
-  const handleLogout = () => {
-    logout()
-    navigate('/login')
-  }
 
   const userContent = (
     <div
       className="user-trigger"
-      onClick={() => !isLoggedIn && navigate('/login')}
+      onClick={() => navigate(isLoggedIn ? '/profile' : '/login')}
     >
       <Avatar
-        size="extra-small"
+        size="small"
         src={user?.avatar}
         style={{
+          width: 60,
+          height: 60,
+          fontSize: 24,
           backgroundColor: isLoggedIn ? 'var(--app-accent)' : 'var(--semi-color-fill-2)',
         }}
       >
-        {isLoggedIn ? (user?.username?.[0]?.toUpperCase() || 'U') : '?'}
+        {isLoggedIn ? (displayName?.[0]?.toUpperCase() || 'U') : '?'}
       </Avatar>
-      <span className="user-name">{displayName}</span>
     </div>
   )
 
@@ -83,7 +87,7 @@ const LibraryPage: React.FC = () => {
     const onClick = (e: MouseEvent) => {
       const menuEl = document.getElementById('library-context-menu')
       if (menuEl && !menuEl.contains(e.target as Node)) {
-        setMenu(m => ({ ...m, visible: false, library: null }))
+        setMenu(m => ({ ...m, visible: false, mode: 'blank', library: null }))
       }
     }
     const onEsc = (e: KeyboardEvent) => {
@@ -92,7 +96,7 @@ const LibraryPage: React.FC = () => {
           setEditingLibraryId(null)
           setRenameValue('')
         }
-        setMenu(m => ({ ...m, visible: false, library: null }))
+        setMenu(m => ({ ...m, visible: false, mode: 'blank', library: null }))
       }
     }
     document.addEventListener('mousedown', onClick)
@@ -113,26 +117,33 @@ const LibraryPage: React.FC = () => {
 
   const handleContextMenu = (e: React.MouseEvent, library: Library) => {
     e.preventDefault()
-    e.stopPropagation() // 增加：阻止冒泡
+    e.stopPropagation()
     if (editingLibraryId !== null) return
     const { x, y } = clampToViewport(e.clientX, e.clientY)
-    
-    // 如果已经可见，先重置一下状态确保位置更新
+
     if (menu.visible) {
       setMenu(m => ({ ...m, visible: false }));
       setTimeout(() => {
-        setMenu({ visible: true, x, y, library });
+        setMenu({ visible: true, x, y, mode: 'library', library });
       }, 0);
     } else {
-      setMenu({ visible: true, x, y, library });
+      setMenu({ visible: true, x, y, mode: 'library', library });
     }
+  }
+
+  const handleBlankContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (editingLibraryId !== null) return
+    const { x, y } = clampToViewport(e.clientX, e.clientY)
+    setMenu({ visible: true, x, y, mode: 'blank', library: null })
   }
 
   const handleMoreClick = (e: React.MouseEvent, library: Library) => {
     e.stopPropagation()
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
     const { x, y } = clampToViewport(rect.right, rect.bottom)
-    setMenu({ visible: true, x, y, library })
+    setMenu({ visible: true, x, y, mode: 'library', library })
   }
 
   const handleCreate = async () => {
@@ -144,10 +155,10 @@ const LibraryPage: React.FC = () => {
   }
 
   const enterRename = () => {
-    if (!menu.library) return
+    if (menu.mode !== 'library' || !menu.library) return
     setEditingLibraryId(menu.library.id)
     setRenameValue(menu.library.name)
-    setMenu(m => ({ ...m, visible: false, library: null }))
+    setMenu(m => ({ ...m, visible: false, mode: 'blank', library: null }))
   }
 
   const submitRename = async () => {
@@ -171,62 +182,58 @@ const LibraryPage: React.FC = () => {
       async onOk() {
         const success = await handleDeleteLibrary(library.id)
         if (success) {
-          setMenu(m => ({ ...m, visible: false, library: null }))
+          setMenu(m => ({ ...m, visible: false, mode: 'blank', library: null }))
         }
       },
     });
   };
 
-  const isEmpty = useMemo(() => libraries.length === 0, [libraries])
+  const openCreateModalFromMenu = () => {
+    setMenu(m => ({ ...m, visible: false, mode: 'blank', library: null }))
+    setCreateVisible(true)
+  }
+
+  const visibleLibraries = useMemo(() => {
+    if (quickAccessMode === 'favorites') {
+      return libraries.filter(library => library.starred)
+    }
+    if (quickAccessMode === 'recent') {
+      return libraries
+    }
+    return libraries
+  }, [libraries, quickAccessMode])
+
+  const emptyTip = useMemo(() => {
+    if (quickAccessMode === 'favorites') {
+      return '暂无收藏库，点击库卡片右上角星标可收藏。'
+    }
+    if (quickAccessMode === 'recent') {
+      return '最近访问即将支持。'
+    }
+    return '暂无库，右键空白区域可新建库。'
+  }, [quickAccessMode])
+
+  const isEmpty = useMemo(() => visibleLibraries.length === 0, [visibleLibraries])
 
   return (
     <LibraryWrapper ref={wrapperRef} onContextMenu={preventSystemMenu}>
       <ContentRow>
-        <QuickAccessSidebar />
+        <QuickAccessSidebar mode={quickAccessMode} onModeChange={setQuickAccessMode} />
         <VerticalDivider />
-        <CardArea>
+        <CardArea onContextMenu={handleBlankContextMenu}>
           <RightHeader>
             <RightHeaderTitle>我的库</RightHeaderTitle>
             <div className="header-right">
-              <Button icon={<IconPlus />} theme="solid" onClick={() => setCreateVisible(true)}>
-                新建库
-              </Button>
-              {isLoggedIn ? (
-                <Popover
-                  showArrow={false}
-                  spacing={8}
-                  style={{ padding: 0 }}
-                  position="bottomRight"
-                  content={
-                    <ContextMenu
-                      title={user?.username}
-                      style={{ border: 'none', boxShadow: 'none' }}
-                      items={[
-                        {
-                          key: 'logout',
-                          label: '退出登录',
-                          icon: <IconExit />,
-                          danger: true,
-                          onClick: handleLogout,
-                        }
-                      ]}
-                    />
-                  }
-                >
-                  {userContent}
-                </Popover>
-              ) : (
-                userContent
-              )}
+              {userContent}
             </div>
           </RightHeader>
           <RightHeaderDivider />
           {isEmpty ? (
-            <EmptyTip>暂无库，点击右上角「新建库」创建一个吧～</EmptyTip>
+            <EmptyTip>{emptyTip}</EmptyTip>
           ) : (
-            <CardScroll>
+            <CardScroll onContextMenu={handleBlankContextMenu}>
               <CardGrid>
-                {libraries.map(library => (
+                {visibleLibraries.map(library => (
                   <LibraryCard
                     key={library.id}
                     library={library}
@@ -254,10 +261,12 @@ const LibraryPage: React.FC = () => {
         visible={menu.visible}
         x={menu.x}
         y={menu.y}
+        mode={menu.mode}
         library={menu.library}
+        onCreate={openCreateModalFromMenu}
         onRename={enterRename}
         onDelete={doDelete}
-        onClose={() => setMenu(m => ({ ...m, visible: false, library: null }))}
+        onClose={() => setMenu(m => ({ ...m, visible: false, mode: 'blank', library: null }))}
       />
 
       <LibraryCreateModal

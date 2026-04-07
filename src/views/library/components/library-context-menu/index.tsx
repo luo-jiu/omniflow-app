@@ -7,7 +7,9 @@ interface LibraryContextMenuProps {
   visible: boolean;
   x: number;
   y: number;
+  mode: 'library' | 'blank';
   library: Library | null;
+  onCreate: () => void;
   onRename: () => void;
   onDelete: () => void;
   onClose?: () => void;
@@ -17,28 +19,40 @@ const LibraryContextMenu: React.FC<LibraryContextMenuProps> = ({
   visible,
   x,
   y,
+  mode,
   library,
+  onCreate,
   onRename,
   onDelete,
   onClose
 }) => {
-  if (!library) return null;
+  if (mode === 'library' && !library) return null;
 
-  const items: ContextMenuItem[] = [
-    {
-      key: 'rename',
-      label: '重命名',
-      icon: '✏️',
-      onClick: onRename
-    },
-    {
-      key: 'delete',
-      label: '删除',
-      icon: '🗑️',
-      danger: true,
-      onClick: onDelete
-    }
-  ];
+  const items: ContextMenuItem[] = mode === 'blank'
+    ? [
+      {
+        key: 'create',
+        label: '新建库',
+        onClick: onCreate,
+      },
+    ]
+    : [
+      {
+        key: 'rename',
+        label: '重命名',
+        onClick: onRename,
+      },
+      {
+        type: 'divider',
+        key: 'divider-delete',
+      },
+      {
+        key: 'delete',
+        label: '删除',
+        danger: true,
+        onClick: onDelete,
+      },
+    ];
 
   return (
     <Popover
@@ -52,8 +66,8 @@ const LibraryContextMenu: React.FC<LibraryContextMenuProps> = ({
       content={
         <ContextMenu
           id="library-context-menu"
-          title={library.name}
           items={items}
+          className="directory-context-menu"
           onItemClick={onClose}
         />
       }

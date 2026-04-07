@@ -8,7 +8,7 @@ export type Library = {
   userId: number;
   name: string;
   delFlag: number;
-  starred?: boolean;
+  starred: boolean;
 };
 
 const LIST_KEYS = ['list', 'records', 'items', 'libraries', 'content', 'result', 'data'] as const;
@@ -36,6 +36,19 @@ function extractLibraryArray(payload: unknown): Library[] {
   return [];
 }
 
+function normalizeLibrary(raw: Record<string, unknown>): Library {
+  const starredValue = raw.starred;
+  return {
+    createdAt: String(raw.createdAt || ''),
+    updatedAt: String(raw.updatedAt || ''),
+    id: Number(raw.id || 0),
+    userId: Number(raw.userId || 0),
+    name: String(raw.name || ''),
+    delFlag: Number(raw.delFlag || 0),
+    starred: starredValue === true || starredValue === 1 || starredValue === '1',
+  };
+}
+
 function assertUploadFileSize(file: File) {
   const fileSize = Number(file.size || 0);
   if (fileSize > MAX_SINGLE_UPLOAD_BYTES) {
@@ -53,7 +66,7 @@ export async function fetchRepositories(lastId?: number, size = 10): Promise<Lib
     method: 'GET',
   });
   const listSource = body?.data ?? body;
-  return extractLibraryArray(listSource);
+  return extractLibraryArray(listSource).map(item => normalizeLibrary(item as Record<string, unknown>));
 }
 
 // 创建仓库
@@ -67,11 +80,19 @@ export async function createLibrary(payload: { userId: number; name: string }) {
 
 // 重命名库
 export async function renameLibrary(id: number, name: string) {
+  return updateLibrary(id, { name });
+}
+
+export async function updateLibrary(id: number, payload: { name?: string; starred?: number }) {
   const body = await request(`/v1/libraries/${id}`, {
     method: 'PUT',
-    body: JSON.stringify({ name }),
+    body: JSON.stringify(payload),
   })
   return body.data
+}
+
+export async function toggleLibraryStar(id: number, starred: boolean) {
+  return updateLibrary(id, { starred: starred ? 1 : 0 });
 }
 
 // 删除仓库

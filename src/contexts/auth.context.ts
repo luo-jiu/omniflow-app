@@ -2,7 +2,9 @@ import { createContext } from 'react';
 
 export interface User {
   username: string;
+  nickname?: string;
   avatar?: string;
+  ext?: string;
   [key: string]: any;
 }
 
@@ -16,6 +18,7 @@ export interface AuthContextType {
     email?: string;
     phone?: string;
   }) => Promise<{ success: boolean; message?: string }>;
+  setUserInfo: (userInfo: User | null) => void;
   logout: () => void;
   loading: boolean;
 }

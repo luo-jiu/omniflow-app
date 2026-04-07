@@ -25,6 +25,16 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return { success: false, message: result.message };
   };
 
+  const setUserInfo = (userInfo: User | null) => {
+    if (userInfo) {
+      auth.setUserInfo(userInfo);
+      setUser(userInfo);
+      return;
+    }
+    auth.removeUserInfo();
+    setUser(null);
+  };
+
   const register = async (payload: {
     username: string;
     password: string;
@@ -44,7 +54,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   return (
-    <AuthContext.Provider value={{ user, isLoggedIn: !!user, login, register, logout, loading }}>
+    <AuthContext.Provider value={{ user, isLoggedIn: !!user, login, register, setUserInfo, logout, loading }}>
       {children}
     </AuthContext.Provider>
   );

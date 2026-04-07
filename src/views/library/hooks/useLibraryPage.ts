@@ -4,7 +4,8 @@ import {
   fetchRepositories,
   createLibrary,
   deleteLibrary,
-  renameLibrary
+  renameLibrary,
+  toggleLibraryStar
 } from "@/features/file-explorer/services/file.api";
 import type { Library } from "@/features/file-explorer/services/file.api";
 import { runtimeLogger } from '@/utils/runtimeLogger';
@@ -75,8 +76,18 @@ export function useLibraryPage() {
     }
   };
 
-  const toggleStar = (library: Library) => {
-    setLibraries(list => list.map(l => (l.id === library.id ? { ...l, starred: !l.starred } : l)));
+  const toggleStar = async (library: Library) => {
+    const nextStarred = !library.starred;
+    const previousStarred = library.starred;
+    setLibraries(list => list.map(l => (l.id === library.id ? { ...l, starred: nextStarred } : l)));
+
+    try {
+      await toggleLibraryStar(library.id, nextStarred);
+    } catch (error) {
+      setLibraries(list => list.map(l => (l.id === library.id ? { ...l, starred: previousStarred } : l)));
+      runtimeLogger.error('Failed to toggle library star:', error);
+      Toast.error(nextStarred ? '收藏失败' : '取消收藏失败');
+    }
   };
 
   return {

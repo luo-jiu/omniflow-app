@@ -9,7 +9,7 @@ import ContextMenu from '@/components/ui/context-menu';
 const AppHeader: FC = () => {
   const navigate = useNavigate()
   const { user, isLoggedIn, logout } = useAuth();
-  const displayName = isLoggedIn ? user?.username || 'User' : '未登录';
+  const displayName = isLoggedIn ? user?.nickname || user?.username || 'User' : '未登录';
 
   const handleLogout = () => {
     logout();
@@ -28,7 +28,7 @@ const AppHeader: FC = () => {
           backgroundColor: isLoggedIn ? 'var(--app-accent)' : 'var(--semi-color-fill-2)',
         }}
       >
-        {isLoggedIn ? (user?.username?.[0]?.toUpperCase() || 'U') : '未'}
+        {isLoggedIn ? (displayName?.[0]?.toUpperCase() || 'U') : '未'}
       </Avatar>
       <span className="avatar-name">{displayName}</span>
     </div>
@@ -68,7 +68,7 @@ const AppHeader: FC = () => {
                 style={{ padding: 0 }}
                 content={
                   <ContextMenu
-                    title={user?.username}
+                    title={displayName}
                     style={{ border: 'none', boxShadow: 'none' }}
                     items={[
                       {

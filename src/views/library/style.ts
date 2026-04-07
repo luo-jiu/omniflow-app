@@ -29,6 +29,7 @@ export const ContentRow = styled.div`
 export const SideMenu = styled.aside`
   flex: 0 0 240px;
   min-width: 240px;
+  margin-top: 10px;
   background: var(--app-bg-elevated);
   border: 1px solid var(--app-border);
   border-radius: 12px;
@@ -73,6 +74,12 @@ export const SideMenuItem = styled.div`
     background: rgba(0, 0, 0, 0.04);
     color: var(--app-text);
   }
+
+  &[data-active='true'] {
+    background: rgba(0, 0, 0, 0.06);
+    color: var(--app-text);
+    font-weight: 600;
+  }
 `
 
 export const VerticalDivider = styled.div`
@@ -92,6 +99,7 @@ export const RightHeader = styled.div`
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  margin-top: -8px;
 
   .header-right {
     display: inline-flex;
@@ -111,21 +119,16 @@ export const RightHeader = styled.div`
   .user-trigger {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    padding: 4px 8px 4px 4px;
-    border-radius: 8px;
+    justify-content: center;
+    padding: 2px;
+    border-radius: 999px;
     cursor: pointer;
     color: var(--app-text-secondary);
   }
 
   .user-trigger:hover {
-    background: rgba(0, 0, 0, 0.05);
+    background: rgba(0, 0, 0, 0.04);
     color: var(--app-text);
-  }
-
-  .user-name {
-    font-size: 13px;
-    color: inherit;
   }
 `
 
