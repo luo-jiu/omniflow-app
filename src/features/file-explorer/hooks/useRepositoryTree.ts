@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { getChildrenByNodeId, getFileLink } from '../services/file.api';
+import { getChildrenByNodeId, getFileLink, getLibraryRootNodeId } from '../services/file.api';
 import { fileCache } from '@/utils/fileCache.ts';
 import { buildTreeNodeLabel } from '@/utils/fileTreeSettings';
 import { getDirectoryBuiltInIcon, getFileNodeIconByParentBuiltInType } from '../utils/file-node-icon';
@@ -51,6 +51,7 @@ export interface NodeRespDTO {
 
 interface RepositoryTreeSnapshot {
   selectedRepository: string;
+  rootNodeId: number | null;
   expandedKeys: string[];
   treesCache: Record<string, Node[]>;
 }
@@ -172,13 +173,19 @@ export function useRepositoryTree(
   const [selectedRepository, setSelectedRepository] = useState<string>(
     cachedSnapshot?.selectedRepository || defaultRepositoryId,
   );
+  const [rootNodeId, setRootNodeId] = useState<number | null>(cachedSnapshot?.rootNodeId ?? null);
   const [expandedKeys, setExpandedKeys] = useState<string[]>(cachedSnapshot?.expandedKeys || []);
   const [treesCache, setTreesCache] = useState<Record<string, Node[]>>(cachedSnapshot?.treesCache || {});
 
   // ref 追踪状态
   const loadingNodes = useRef<Set<string>>(new Set());
+  const rootNodeIdRef = useRef<number | null>(cachedSnapshot?.rootNodeId ?? null);
   const expandedKeysRef = useRef<string[]>([]);
   const treesCacheRef = useRef<Record<string, Node[]>>({});
+
+  useEffect(() => {
+    rootNodeIdRef.current = rootNodeId;
+  }, [rootNodeId]);
 
   // 同步 treesCache 到 ref
   useEffect(() => {
@@ -190,6 +197,14 @@ export function useRepositoryTree(
     expandedKeysRef.current = expandedKeys;
   }, [expandedKeys]);
 
+  const resolveLibraryRootNodeId = useCallback(async (repoLibraryId: number): Promise<number> => {
+    const remoteRootNodeId = Number(await getLibraryRootNodeId(repoLibraryId));
+    if (!Number.isFinite(remoteRootNodeId) || remoteRootNodeId <= 0) {
+      throw new Error(`Invalid root node id for library ${repoLibraryId}: ${remoteRootNodeId}`);
+    }
+    return remoteRootNodeId;
+  }, []);
+
   // 切换仓库
   const selectRepository = useCallback(async (id: string, options?: { resetExpanded?: boolean }) => {
     setSelectedRepository(id);
@@ -198,23 +213,31 @@ export function useRepositoryTree(
       expandedKeysRef.current = [];
     }
 
-    if (!treesCacheRef.current[id]) {
-      const rootNodes = (await getChildrenByNodeId(1, Number(id))) as NodeRespDTO[];
-      setTreesCache(prev => ({
+    const repoLibraryId = Number(id);
+    const nextRootNodeId = await resolveLibraryRootNodeId(repoLibraryId);
+    setRootNodeId(nextRootNodeId);
+    rootNodeIdRef.current = nextRootNodeId;
+
+    const rootNodes = (await getChildrenByNodeId(nextRootNodeId, repoLibraryId)) as NodeRespDTO[];
+    const mappedRoots = rootNodes.map((item: NodeRespDTO) => mapToTreeNode(item));
+    setTreesCache(prev => {
+      const current = prev[id] || [];
+      return {
         ...prev,
-        [id]: rootNodes.map((item: NodeRespDTO) => mapToTreeNode(item)),
-      }));
-    }
-  }, []);
+        [id]: mergeRootNodesPreservingLoadedState(current, mappedRoots),
+      };
+    });
+  }, [resolveLibraryRootNodeId]);
 
   // 快照保存：切走页面后可恢复
   useEffect(() => {
     setRepositoryTreeSnapshot(libraryId, {
       selectedRepository,
+      rootNodeId,
       expandedKeys,
       treesCache,
     });
-  }, [libraryId, selectedRepository, expandedKeys, treesCache]);
+  }, [libraryId, selectedRepository, rootNodeId, expandedKeys, treesCache]);
 
   // 当前树数据（保持引用稳定）
   const currentTreeData = treesCache[selectedRepository] || [];
@@ -245,8 +268,12 @@ export function useRepositoryTree(
   }, []);
 
   // 脏标记重建：保留展开状态，按可见展开分支重拉数据，避免“恢复后整树折叠”
-  const rebuildTreeByExpandedState = useCallback(async (repoId: string, sourceExpandedKeys: string[]) => {
-    let rebuiltTree = ((await getChildrenByNodeId(1, Number(repoId))) as NodeRespDTO[])
+  const rebuildTreeByExpandedState = useCallback(async (
+    repoId: string,
+    rootId: number,
+    sourceExpandedKeys: string[],
+  ) => {
+    let rebuiltTree = ((await getChildrenByNodeId(rootId, Number(repoId))) as NodeRespDTO[])
       .map((item: NodeRespDTO) => mapToTreeNode(item));
     let pendingKeys = Array.from(new Set(sourceExpandedKeys));
 
@@ -298,8 +325,10 @@ export function useRepositoryTree(
 
       repositoryTreeDirtyLibraries.delete(libraryId);
       try {
+        const currentRootNodeId = rootNodeIdRef.current ?? await resolveLibraryRootNodeId(Number(repoId));
         const { rebuiltTree, filteredExpandedKeys } = await rebuildTreeByExpandedState(
           repoId,
+          currentRootNodeId,
           expandedKeysRef.current,
         );
         setTreesCache(prev => ({
@@ -314,7 +343,7 @@ export function useRepositoryTree(
     };
 
     void bootstrap();
-  }, [libraryId, rebuildTreeByExpandedState, selectRepository]);
+  }, [libraryId, rebuildTreeByExpandedState, resolveLibraryRootNodeId, selectRepository]);
 
   // 更新节点名称
   const updateNodeName = useCallback((nodeKey: string, payload: { name: string; ext?: string }) => {
@@ -433,8 +462,9 @@ export function useRepositoryTree(
       setTreesCache(prev => {
         const current = prev[selectedRepository] || [];
         
-        // 如果是根目录（parentNodeKey === 'root' 或 parentId === 1），直接添加到根节点列表
-        if (parentNodeKey === 'root' || newNodeDTO.parentId === 1) {
+        const currentRootNodeId = rootNodeIdRef.current;
+        // 如果是根目录，直接添加到根节点列表
+        if (parentNodeKey === 'root' || (currentRootNodeId !== null && newNodeDTO.parentId === currentRootNodeId)) {
           const mappedRootNode = mapToTreeNode(newNodeDTO);
           return {
             ...prev,
@@ -502,8 +532,9 @@ export function useRepositoryTree(
   // 刷新某个父节点下的直接子节点（用于移动后同步排序/归属）
   const refreshParentChildren = useCallback(async (parentId: number) => {
     const children = (await getChildrenByNodeId(parentId, Number(selectedRepository))) as NodeRespDTO[];
+    const currentRootNodeId = rootNodeIdRef.current;
     const mapped = children.map((item: NodeRespDTO) => {
-      if (parentId === 1) {
+      if (currentRootNodeId !== null && parentId === currentRootNodeId) {
         return mapToTreeNode(item);
       }
       const current = treesCacheRef.current[selectedRepository] || [];
@@ -514,8 +545,8 @@ export function useRepositoryTree(
     setTreesCache(prev => {
       const current = prev[selectedRepository] || [];
 
-      // 根目录 parentId 为 1，直接替换根列表
-      if (parentId === 1) {
+      // 根目录：直接替换根列表
+      if (currentRootNodeId !== null && parentId === currentRootNodeId) {
         return {
           ...prev,
           [selectedRepository]: mergeRootNodesPreservingLoadedState(current, mapped),
@@ -786,6 +817,7 @@ export function useRepositoryTree(
 
   return {
     selectedRepository,
+    rootNodeId,
     expandedKeys,
     currentTreeData,
     selectRepository,

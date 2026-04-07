@@ -25,6 +25,7 @@ interface Props {
 
 const DirectorySidebar: React.FC<Props> = ({ libraryId, onFileOpen }) => {
   const {
+    rootNodeId,
     expandedKeys,
     currentTreeData,
     handleExpand,
@@ -47,7 +48,7 @@ const DirectorySidebar: React.FC<Props> = ({ libraryId, onFileOpen }) => {
           onDoubleClick={handleDoubleClick}
           loadData={loadChildren}
           onUploadSuccess={(parentNode, newNode) => {
-            if (!parentNode || parentNode.key === 'root' || parentNode.id === 1) {
+            if (!parentNode || parentNode.key === 'root' || (rootNodeId !== null && parentNode.id === rootNodeId)) {
               appendNodeUnderParent('root', newNode);
             } else {
               appendNodeUnderParent(parentNode.key, newNode);
@@ -66,6 +67,7 @@ const DirectorySidebar: React.FC<Props> = ({ libraryId, onFileOpen }) => {
             void refreshAfterMove(oldParentId, newParentId);
           }}
           libraryId={libraryId}
+          rootNodeId={rootNodeId}
         />
       </div>
     </DirectorySidebarWrapper>

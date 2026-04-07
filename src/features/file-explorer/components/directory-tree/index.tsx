@@ -46,6 +46,7 @@ interface DirectoryTreeProps {
   // 拖拽移动成功后，通知父组件刷新受影响父目录
   onMoveSuccess?: (payload: { oldParentId: number; newParentId: number }) => void | Promise<void>;
   libraryId: number; // 添加 libraryId prop
+  rootNodeId: number | null;
 }
 
 /**
@@ -67,6 +68,7 @@ export default function DirectoryTree({
   onMoveSuccess,
   loadData,
   libraryId,
+  rootNodeId,
 }: DirectoryTreeProps) {
   const { closeTabByNodeId, tabs } = useFileViewer();
 
@@ -149,7 +151,15 @@ export default function DirectoryTree({
   const FLOAT_EPS = 0.5;            // 浮点比较误差容忍
   const MAX_TEXT_WIDTH_CAP = 40000; // 兜底，避免异常节点导致极大宽度
   const ICON_BUFFER_PX = 16;        // 行内图标缓冲
-  const ROOT_PARENT_ID = 1;
+  const ROOT_PARENT_ID = Number.isFinite(rootNodeId) && Number(rootNodeId) > 0 ? Number(rootNodeId) : null;
+
+  const resolveRootParentId = () => {
+    if (ROOT_PARENT_ID !== null) {
+      return ROOT_PARENT_ID;
+    }
+    Toast.warning('目录根节点初始化中，请稍后重试');
+    return null;
+  };
 
   const formatFileSize = (size: unknown): string => {
     const bytes = Number(size);
@@ -217,7 +227,7 @@ export default function DirectoryTree({
           <div style={fieldStyle}><span style={labelStyle}>内置类型</span><span style={valueStyle}>{builtInType}</span></div>
           <div style={fieldStyle}><span style={labelStyle}>归档模式</span><span style={valueStyle}>{archiveMode}</span></div>
           <div style={fieldStyle}><span style={labelStyle}>节点ID</span><span style={valueStyle}>{node.id ?? '-'}</span></div>
-          <div style={fieldStyle}><span style={labelStyle}>父节点ID</span><span style={valueStyle}>{node.parentId ?? ROOT_PARENT_ID}</span></div>
+          <div style={fieldStyle}><span style={labelStyle}>父节点ID</span><span style={valueStyle}>{node.parentId ?? ROOT_PARENT_ID ?? '-'}</span></div>
           <div style={fieldStyle}><span style={labelStyle}>创建时间</span><span style={valueStyle}>{createdAt}</span></div>
           <div style={fieldStyle}><span style={labelStyle}>修改时间</span><span style={valueStyle}>{updatedAt}</span></div>
         </div>
@@ -279,19 +289,21 @@ export default function DirectoryTree({
   };
 
   // 处理文件放置逻辑
-  const ROOT_TARGET_NODE: UploadModalTargetNode = {
-    id: ROOT_PARENT_ID,
-    key: 'root',
-    label: '根目录',
-    libraryId,
-  };
-
-  const toUploadModalTargetNode = (node: any | null): UploadModalTargetNode => {
+  const toUploadModalTargetNode = (node: any | null): UploadModalTargetNode | null => {
     if (!node) {
-      return ROOT_TARGET_NODE;
+      const rootParentId = resolveRootParentId();
+      if (rootParentId === null) return null;
+      return {
+        id: rootParentId,
+        key: 'root',
+        label: '根目录',
+        libraryId,
+      };
     }
+    const rootParentId = ROOT_PARENT_ID;
+    const fallbackId = rootParentId !== null ? rootParentId : Number(node.id);
     return {
-      id: Number(node.id || ROOT_PARENT_ID),
+      id: Number(node.id || fallbackId),
       key: String(node.key || 'root'),
       label: String(node.label || node.data?.rawName || '根目录'),
       libraryId: Number(node.libraryId || libraryId),
@@ -332,7 +344,11 @@ export default function DirectoryTree({
       Toast.warning('拖拽内容仅包含系统隐藏文件，已忽略');
       return;
     }
-    openUploadModal(toUploadModalTargetNode(treeNode), candidates);
+    const targetNode = toUploadModalTargetNode(treeNode);
+    if (!targetNode) {
+      return;
+    }
+    openUploadModal(targetNode, candidates);
   };
 
   // 外部文件拖拽
@@ -432,7 +448,7 @@ export default function DirectoryTree({
   })();
 
   const getChildrenByParentId = (parentId: number): any[] => {
-    if (parentId === ROOT_PARENT_ID) {
+    if (ROOT_PARENT_ID !== null && parentId === ROOT_PARENT_ID) {
       return treeData;
     }
     const parentNode = findNodeById(treeData, parentId);
@@ -471,7 +487,10 @@ export default function DirectoryTree({
       return;
     }
 
-    const oldParentId = Number(dragNode.parentId || ROOT_PARENT_ID);
+    const oldParentCandidate = Number(dragNode.parentId);
+    const oldParentId = Number.isFinite(oldParentCandidate) && oldParentCandidate > 0
+      ? oldParentCandidate
+      : (ROOT_PARENT_ID ?? 0);
     const dropToGap = Boolean(info?.dropToGap);
     const dropPosition = Number(info?.dropPosition ?? 0);
     const dropNodeIndex = Number(String(dropNode.pos || '').split('-').pop() || 0);
@@ -483,7 +502,10 @@ export default function DirectoryTree({
     let beforeNodeId: number | null = null;
 
     if (dropToGap) {
-      newParentId = Number(dropNode.parentId || ROOT_PARENT_ID);
+      const dropParentCandidate = Number(dropNode.parentId);
+      newParentId = Number.isFinite(dropParentCandidate) && dropParentCandidate > 0
+        ? dropParentCandidate
+        : (ROOT_PARENT_ID ?? 0);
       if (relativeDropPosition < 0) {
         beforeNodeId = dropNodeId;
       } else {
@@ -500,7 +522,11 @@ export default function DirectoryTree({
     }
 
     if (!Number.isFinite(newParentId) || newParentId <= 0) {
-      newParentId = ROOT_PARENT_ID;
+      const rootParentId = resolveRootParentId();
+      if (rootParentId === null) {
+        return;
+      }
+      newParentId = rootParentId;
     }
 
     const dragNodeName = String(
@@ -531,8 +557,13 @@ export default function DirectoryTree({
   };
 
   const resolveParentNodeForAppend = (parentId: number) => {
-    if (parentId === ROOT_PARENT_ID) {
-      return ROOT_TARGET_NODE;
+    if (ROOT_PARENT_ID !== null && parentId === ROOT_PARENT_ID) {
+      return {
+        id: ROOT_PARENT_ID,
+        key: 'root',
+        label: '根目录',
+        libraryId,
+      };
     }
     const parentNode = findNodeById(treeDataRef.current || [], parentId);
     if (parentNode) {
@@ -749,6 +780,9 @@ export default function DirectoryTree({
     try {
       requestDesktopWindowActivation(true);
       const targetNode = toUploadModalTargetNode(node);
+      if (!targetNode) {
+        return;
+      }
       const files = mode === 'file'
         ? await pickUploadFilesFromDesktop()
         : await pickUploadFoldersFromDesktop();
@@ -896,7 +930,10 @@ export default function DirectoryTree({
     } else if (action === 'delete') {
       try {
         runtimeLogger.debug('🗑️ [删除]', node);
-        const parentId = Number(node?.parentId || ROOT_PARENT_ID);
+        const parentIdCandidate = Number(node?.parentId);
+        const parentId = Number.isFinite(parentIdCandidate) && parentIdCandidate > 0
+          ? parentIdCandidate
+          : (ROOT_PARENT_ID ?? 0);
         // node.id 是 ancestorId
         await deleteNodeAndChildren(node.id, libraryId);
         Toast.success('删除成功');
@@ -905,12 +942,14 @@ export default function DirectoryTree({
         // 直接传递 node.key，这样父组件可以直接删除，不需要查找
         if (onDeleteSuccess) {
           // 构造成一个类 parent 结构，或者传 null
-          const dummyParent = node.parentId ? { id: node.parentId } : { id: ROOT_PARENT_ID, key: 'root' };
+          const dummyParent = node.parentId
+            ? { id: node.parentId }
+            : (ROOT_PARENT_ID !== null ? { id: ROOT_PARENT_ID, key: 'root' } : null);
           // 传递 node.key 而不是 node.id，这样父组件可以直接删除
           onDeleteSuccess(dummyParent, node.key);
         }
 
-        if (onMoveSuccess && parentId !== ROOT_PARENT_ID) {
+        if (onMoveSuccess && parentId > 0 && (ROOT_PARENT_ID === null || parentId !== ROOT_PARENT_ID)) {
           await onMoveSuccess({ oldParentId: parentId, newParentId: parentId });
         }
 
@@ -947,10 +986,15 @@ export default function DirectoryTree({
       return;
     }
 
+    const resolvedRootParentId = ROOT_PARENT_ID;
+    if (!parentNode && resolvedRootParentId === null) {
+      Toast.warning('目录根节点初始化中，请稍后重试');
+      return;
+    }
+
     setCreateModal(prev => ({ ...prev, loading: true }));
     try {
-      // 根目录的 parentId 为 1
-      const parentId = parentNode ? parentNode.id : 1;
+      const parentId = parentNode ? parentNode.id : Number(resolvedRootParentId);
       const newNode = await createNode({
         name: name.trim(),
         parentId,
@@ -963,7 +1007,11 @@ export default function DirectoryTree({
       
       // 通知父组件刷新
       if (onUploadSuccess) {
-        onUploadSuccess(parentNode || { id: 1, key: 'root' }, newNode);
+        if (parentNode) {
+          onUploadSuccess(parentNode, newNode);
+        } else if (resolvedRootParentId !== null) {
+          onUploadSuccess({ id: resolvedRootParentId, key: 'root' }, newNode);
+        }
       }
       
       scheduleRecompute();

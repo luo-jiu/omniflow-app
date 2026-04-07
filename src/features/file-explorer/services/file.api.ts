@@ -89,6 +89,14 @@ export async function getChildrenByNodeId(nodeId: number, libraryId: number) {
   return body?.data || [];
 }
 
+// 获取库根节点（后端会在必要时自动修复根结构与闭包关系）
+export async function getLibraryRootNodeId(libraryId: number): Promise<number> {
+  const body = await request(`/v1/nodes/library/${libraryId}/root`, {
+    method: 'GET',
+  });
+  return Number(body?.data || 0);
+}
+
 export interface NodeDetailDTO {
   id: number;
   name: string;
