@@ -80,5 +80,35 @@ export const loginService = {
       runtimeLogger.error('❌ 登录请求失败:', error);
       return { success: false, message: error.message || '服务器错误' };
     }
+  },
+
+  /**
+   * 注册用户
+   */
+  async register(payload: {
+    username: string;
+    password: string;
+    email?: string;
+    phone?: string;
+  }) {
+    try {
+      const res = await apiRequest('/v1/user', {
+        method: 'POST',
+        body: JSON.stringify({
+          username: payload.username,
+          password: payload.password,
+          email: payload.email || '',
+          phone: payload.phone || '',
+        }),
+      });
+
+      if (res?.success === false) {
+        return { success: false, message: res?.message || '注册失败' };
+      }
+      return { success: true };
+    } catch (error: any) {
+      runtimeLogger.error('❌ 注册请求失败:', error);
+      return { success: false, message: error.message || '服务器错误' };
+    }
   }
 };

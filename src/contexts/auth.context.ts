@@ -10,6 +10,12 @@ export interface AuthContextType {
   user: User | null;
   isLoggedIn: boolean;
   login: (username: string, password: string) => Promise<{ success: boolean; message?: string }>;
+  register: (payload: {
+    username: string;
+    password: string;
+    email?: string;
+    phone?: string;
+  }) => Promise<{ success: boolean; message?: string }>;
   logout: () => void;
   loading: boolean;
 }

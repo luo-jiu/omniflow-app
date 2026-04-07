@@ -25,13 +25,26 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return { success: false, message: result.message };
   };
 
+  const register = async (payload: {
+    username: string;
+    password: string;
+    email?: string;
+    phone?: string;
+  }) => {
+    const result = await loginService.register(payload);
+    if (result.success) {
+      return { success: true };
+    }
+    return { success: false, message: result.message };
+  };
+
   const logout = () => {
     auth.clear();
     setUser(null);
   };
 
   return (
-    <AuthContext.Provider value={{ user, isLoggedIn: !!user, login, logout, loading }}>
+    <AuthContext.Provider value={{ user, isLoggedIn: !!user, login, register, logout, loading }}>
       {children}
     </AuthContext.Provider>
   );
