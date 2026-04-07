@@ -23,7 +23,7 @@ const REORDER_MIN_STEP_PX = 14;
 const REORDER_COOLDOWN_MS = 90;
 const MIDPOINT_GUARD_RATIO = 0.16;
 const REORDER_FLIP_DURATION_MS = 180;
-const TAB_TOP_SCROLLBAR_HEIGHT = 12;
+const TAB_TOP_SCROLLBAR_HEIGHT = 10;
 const TAB_TOP_SCROLLBAR_HIDE_DELAY_MS = 900;
 const TAB_TOP_SCROLLBAR_HIDE_DELAY_ON_LEAVE_MS = 260;
 const TAB_OVERFLOW_BUTTON_WIDTH = 44;
@@ -49,14 +49,20 @@ const TabsFrame = styled.div`
   min-width: 0;
   display: flex;
   flex-direction: column;
+  position: relative;
 `;
 
 const TabsTopScroll = styled.div<{ $visible: boolean }>`
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  z-index: 6;
   width: 100%;
   min-width: 0;
   height: ${TAB_TOP_SCROLLBAR_HEIGHT}px;
-  margin-bottom: -1px;
-  padding: 2px 0 0;
+  margin-bottom: 0;
+  padding: 0;
   box-sizing: border-box;
   overflow-x: scroll;
   overflow-y: hidden;
@@ -68,7 +74,7 @@ const TabsTopScroll = styled.div<{ $visible: boolean }>`
   scrollbar-color: color-mix(in srgb, var(--semi-color-fill-2) 70%, transparent) transparent;
 
   &::-webkit-scrollbar {
-    height: 8px;
+    height: 10px;
   }
 
   &::-webkit-scrollbar-track {
@@ -92,6 +98,8 @@ const TabsContainer = styled.div`
   display: flex;
   align-items: center;
   position: relative;
+  margin-top: 3px;
+  border-bottom: 1px solid var(--app-border);
 `;
 
 const TabsWrapper = styled.div`
@@ -103,7 +111,6 @@ const TabsWrapper = styled.div`
   align-items: center;
   gap: ${TAB_OVERFLOW_GAP}px;
   padding: 0 ${TAB_OVERFLOW_BUTTON_WIDTH + 8}px 0 0;
-  border-bottom: 1px solid var(--app-border);
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: none;
@@ -232,7 +239,6 @@ const OverflowSlot = styled.div`
     color-mix(in srgb, var(--app-bg-1) 0%, transparent),
     var(--app-bg-1) 24%
   );
-  border-bottom: 1px solid var(--app-border);
 `;
 
 const OverflowTrigger = styled.button<{ $open: boolean; $disabled: boolean }>`

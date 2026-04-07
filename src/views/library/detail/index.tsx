@@ -4,10 +4,7 @@ import React from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { FileViewerProvider } from "@/contexts/FileViewerContext";
 import { useFileViewer } from "@/hooks/useFileViewer";
-import { useAuth } from "@/hooks/useAuth";
-import { Avatar, Popover } from "@douyinfe/semi-ui";
-import { IconSetting, IconExit, IconHome, IconUpload, IconDelete, IconChevronLeft, IconRefresh } from "@douyinfe/semi-icons";
-import ContextMenu from "@/components/ui/context-menu";
+import { IconSetting, IconHome, IconUpload, IconDelete, IconChevronLeft, IconRefresh } from "@douyinfe/semi-icons";
 import styled from "styled-components";
 
 const DEFAULT_SIDE_PANEL_WIDTH = 300;
@@ -138,24 +135,6 @@ const SidePanelFooter = styled.div`
       color: var(--app-text);
     }
   }
-
-  .user-trigger {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 4px 8px 4px 4px;
-    border-radius: 8px;
-    cursor: pointer;
-
-    &:hover {
-      background: rgba(0, 0, 0, 0.05);
-    }
-  }
-
-  .user-name {
-    font-size: 13px;
-    color: var(--app-text-secondary);
-  }
 `;
 
 const ContentArea = styled.div`
@@ -202,11 +181,11 @@ const ContentToolbar = styled.div`
   }
 
   .toolbar-back-btn {
-    height: 30px;
-    border-radius: 7px;
-    border: 1px solid var(--app-border);
-    background: var(--app-bg-elevated);
-    color: var(--app-text-secondary);
+    height: 32px;
+    border-radius: 8px;
+    border: none;
+    background: transparent;
+    color: var(--app-text-muted);
     display: inline-flex;
     align-items: center;
     gap: 6px;
@@ -222,40 +201,36 @@ const ContentToolbar = styled.div`
   }
 
   .toolbar-back-btn:hover {
-    border-color: var(--semi-color-primary);
-    color: var(--semi-color-primary);
+    background: rgba(0, 0, 0, 0.05);
+    color: var(--app-text);
   }
 
   .toolbar-action-btn {
-    height: 30px;
-    min-width: 30px;
-    border-radius: 7px;
-    border: 1px solid var(--app-border);
-    background: var(--app-bg-elevated);
-    color: var(--app-text-secondary);
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    border: none;
+    background: transparent;
+    color: var(--app-text-muted);
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 6px;
-    padding: 0 8px;
+    padding: 0;
     cursor: pointer;
-    font-size: 13px;
-    font-weight: 500;
-    line-height: 1;
   }
 
   .toolbar-action-btn .semi-icon {
-    font-size: 15px;
+    font-size: 16px;
   }
 
   .toolbar-action-btn:hover:not(:disabled) {
-    border-color: var(--semi-color-primary);
-    color: var(--semi-color-primary);
+    background: rgba(0, 0, 0, 0.05);
+    color: var(--app-text);
   }
 
   .toolbar-action-btn:disabled {
     cursor: not-allowed;
-    opacity: 0.55;
+    opacity: 0.45;
   }
 `;
 
@@ -274,9 +249,7 @@ const ContentBody = styled.div`
 
 const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) => {
   const { setFileUrl, tabs, activeTabId, fileState, reloadActiveTab } = useFileViewer();
-  const { user, isLoggedIn, logout } = useAuth();
   const navigate = useNavigate();
-  const displayName = isLoggedIn ? user?.username || "User" : "未登录";
   const sidePanelRef = React.useRef<HTMLDivElement>(null);
   const [sidePanelWidth, setSidePanelWidth] = React.useState<number>(() => loadSidePanelWidth(libraryId));
   const latestPanelWidthRef = React.useRef<number>(sidePanelWidth);
@@ -356,11 +329,6 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
     setFileUrl(fileUrl, fileName, fileType, nodeId, options);
   };
 
-  const handleLogout = () => {
-    logout();
-    navigate("/login");
-  };
-
   const activeTab = React.useMemo(() => {
     if (!activeTabId) return null;
     return tabs.find(tab => tab.id === activeTabId) || null;
@@ -370,26 +338,6 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   const showBackToArchive = (
     (fileState.fileType === 'asmr' && archiveReturnTarget?.fileType === 'asmr_archive')
     || (fileState.fileType === 'comic' && archiveReturnTarget?.fileType === 'comic_archive')
-  );
-
-  const userContent = (
-    <div
-      className="user-trigger"
-      onClick={() => !isLoggedIn && navigate("/login")}
-    >
-      <Avatar
-        size="extra-small"
-        src={user?.avatar}
-        style={{
-          backgroundColor: isLoggedIn
-            ? "var(--app-accent)"
-            : "var(--semi-color-fill-2)",
-        }}
-      >
-        {isLoggedIn ? user?.username?.[0]?.toUpperCase() || "U" : "?"}
-      </Avatar>
-      <span className="user-name">{displayName}</span>
-    </div>
   );
 
   return (
@@ -433,33 +381,6 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
             </button>
           </div>
 
-          {isLoggedIn ? (
-            <Popover
-              showArrow={false}
-              spacing={8}
-              style={{ padding: 0 }}
-              position="topRight"
-              content={
-                <ContextMenu
-                  title={user?.username}
-                  style={{ border: "none", boxShadow: "none" }}
-                  items={[
-                    {
-                      key: "logout",
-                      label: "退出登录",
-                      icon: <IconExit />,
-                      danger: true,
-                      onClick: handleLogout,
-                    },
-                  ]}
-                />
-              }
-            >
-              {userContent}
-            </Popover>
-          ) : (
-            userContent
-          )}
         </SidePanelFooter>
         <ResizeHandle onMouseDown={handleResizeMouseDown} />
       </SidePanel>

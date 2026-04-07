@@ -93,6 +93,12 @@ export const RightHeader = styled.div`
   justify-content: space-between;
   gap: 12px;
 
+  .header-right {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+
   .semi-button {
     height: 38px;
     padding: 0 16px;
@@ -100,6 +106,26 @@ export const RightHeader = styled.div`
     font-size: 14px;
     font-weight: 500;
     box-shadow: none;
+  }
+
+  .user-trigger {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px 4px 4px;
+    border-radius: 8px;
+    cursor: pointer;
+    color: var(--app-text-secondary);
+  }
+
+  .user-trigger:hover {
+    background: rgba(0, 0, 0, 0.05);
+    color: var(--app-text);
+  }
+
+  .user-name {
+    font-size: 13px;
+    color: inherit;
   }
 `
 

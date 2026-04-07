@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Button, Modal } from '@douyinfe/semi-ui'
-import { IconPlus } from '@douyinfe/semi-icons'
+import { Button, Modal, Avatar, Popover } from '@douyinfe/semi-ui'
+import { IconPlus, IconExit } from '@douyinfe/semi-icons'
 
 import LibraryWrapper, {
   ContentRow,
@@ -16,10 +16,12 @@ import LibraryWrapper, {
 } from './style'
 
 import { useLibraryPage } from './hooks/useLibraryPage.ts'
+import { useAuth } from '@/hooks/useAuth'
 import QuickAccessSidebar from './components/quick-access-sidebar'
 import LibraryCard from './components/library-card'
 import LibraryContextMenu from './components/library-context-menu'
 import LibraryCreateModal from './components/library-create-modal'
+import ContextMenu from '@/components/ui/context-menu'
 import type { Library } from "@/features/file-explorer/services/file.api"
 
 type MenuState = {
@@ -35,6 +37,8 @@ const PADDING = 10
 
 const LibraryPage: React.FC = () => {
   const navigate = useNavigate()
+  const { user, isLoggedIn, logout } = useAuth()
+  const displayName = isLoggedIn ? user?.username || 'User' : '未登录'
   const {
     libraries,
     handleCreateLibrary,
@@ -50,6 +54,29 @@ const LibraryPage: React.FC = () => {
   const [renameValue, setRenameValue] = useState('')
 
   const wrapperRef = useRef<HTMLDivElement>(null)
+
+  const handleLogout = () => {
+    logout()
+    navigate('/login')
+  }
+
+  const userContent = (
+    <div
+      className="user-trigger"
+      onClick={() => !isLoggedIn && navigate('/login')}
+    >
+      <Avatar
+        size="extra-small"
+        src={user?.avatar}
+        style={{
+          backgroundColor: isLoggedIn ? 'var(--app-accent)' : 'var(--semi-color-fill-2)',
+        }}
+      >
+        {isLoggedIn ? (user?.username?.[0]?.toUpperCase() || 'U') : '?'}
+      </Avatar>
+      <span className="user-name">{displayName}</span>
+    </div>
+  )
 
   // 关闭右键菜单：点击空白或 ESC
   useEffect(() => {
@@ -160,9 +187,38 @@ const LibraryPage: React.FC = () => {
         <CardArea>
           <RightHeader>
             <RightHeaderTitle>我的库</RightHeaderTitle>
-            <Button icon={<IconPlus />} theme="solid" onClick={() => setCreateVisible(true)}>
-              新建库
-            </Button>
+            <div className="header-right">
+              <Button icon={<IconPlus />} theme="solid" onClick={() => setCreateVisible(true)}>
+                新建库
+              </Button>
+              {isLoggedIn ? (
+                <Popover
+                  showArrow={false}
+                  spacing={8}
+                  style={{ padding: 0 }}
+                  position="bottomRight"
+                  content={
+                    <ContextMenu
+                      title={user?.username}
+                      style={{ border: 'none', boxShadow: 'none' }}
+                      items={[
+                        {
+                          key: 'logout',
+                          label: '退出登录',
+                          icon: <IconExit />,
+                          danger: true,
+                          onClick: handleLogout,
+                        }
+                      ]}
+                    />
+                  }
+                >
+                  {userContent}
+                </Popover>
+              ) : (
+                userContent
+              )}
+            </div>
           </RightHeader>
           <RightHeaderDivider />
           {isEmpty ? (
