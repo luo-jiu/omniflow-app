@@ -183,17 +183,20 @@ const ComicArchiveViewer: React.FC<ComicArchiveViewerProps> = ({ folderNodeId, f
                   );
                 }}
               >
-                <div className="card-cover">
-                  {card.coverUrl ? (
-                    <img src={card.coverUrl} alt={card.title} draggable={false} />
-                  ) : (
-                    <div className="cover-empty" />
-                  )}
+                {card.coverUrl ? (
+                  <img className="card-bg-image" src={card.coverUrl} alt="" draggable={false} aria-hidden />
+                ) : (
+                  <div className="card-bg-empty" aria-hidden />
+                )}
+                <div className="card-cover" />
+                <div className="card-meta">
+                  <div className="card-tag-slot">
+                    <span className="card-tag-pill">COMIC</span>
+                  </div>
+                  <div className="card-title" title={card.title}>
+                    {card.title}
+                  </div>
                 </div>
-                <div className="card-title" title={card.title}>
-                  {card.title}
-                </div>
-                <div className="card-tag-slot" />
               </article>
             ))}
           </div>

@@ -68,6 +68,9 @@ export const ComicArchiveViewerWrapper = styled.div`
 
   .archive-card {
     width: var(--archive-card-width);
+    position: relative;
+    display: flex;
+    flex-direction: column;
     border-radius: 12px;
     border: 1px solid rgba(255, 255, 255, 0.22);
     background: #fefefe;
@@ -82,37 +85,46 @@ export const ComicArchiveViewerWrapper = styled.div`
     border-color: color-mix(in srgb, var(--semi-color-success) 40%, rgba(255, 255, 255, 0.22));
   }
 
-  .card-cover {
-    aspect-ratio: 4 / 3;
-    border-bottom: 1px solid rgba(0, 0, 0, 0.08);
-    background: #e9edf2;
-  }
-
-  .card-cover img {
+  .card-bg-image,
+  .card-bg-empty {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
     width: 100%;
     height: 100%;
+    pointer-events: none;
+    user-select: none;
+  }
+
+  .card-bg-image {
     display: block;
     object-fit: cover;
     object-position: top center;
-    user-select: none;
-    pointer-events: none;
   }
 
-  .cover-empty {
-    width: 100%;
-    height: 100%;
+  .card-bg-empty {
     background:
       linear-gradient(120deg, #edf2f7 0%, #e2e8f0 48%, #edf2f7 100%);
   }
 
+  .card-cover {
+    position: relative;
+    z-index: 1;
+    aspect-ratio: 4 / 3;
+  }
+
   .card-title {
-    min-height: 82px;
-    max-height: 82px;
+    min-height: 94px;
+    max-height: 94px;
     padding: 12px 14px 10px;
     font-size: 15px;
     line-height: 1.35;
-    font-weight: 600;
-    color: #1f2937;
+    font-weight: 700;
+    color: #0b1220;
+    text-shadow: none;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: geometricPrecision;
+    background: transparent;
     overflow: hidden;
     display: -webkit-box;
     -webkit-box-orient: vertical;
@@ -120,7 +132,7 @@ export const ComicArchiveViewerWrapper = styled.div`
   }
 
   .card-tag-slot {
-    height: 52px;
+    height: 70px;
     padding: 8px 10px;
     display: flex;
     flex-wrap: wrap;
@@ -128,8 +140,45 @@ export const ComicArchiveViewerWrapper = styled.div`
     align-content: flex-start;
     gap: 6px;
     overflow: hidden;
-    border-top: 1px dashed rgba(17, 24, 39, 0.16);
-    background: rgba(249, 250, 251, 0.9);
+    background: transparent;
+  }
+
+  .card-meta {
+    --card-meta-seam-fix: 2px;
+    position: relative;
+    z-index: 2;
+    /* 亚像素缝修正，避免封面与遮罩交界闪线 */
+    margin-top: calc(var(--card-meta-seam-fix) * -1);
+    padding-top: var(--card-meta-seam-fix);
+    overflow: hidden;
+    background: linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0) 0%,
+      rgba(255, 255, 255, 0.18) 22%,
+      rgba(255, 255, 255, 0.56) 48%,
+      rgba(255, 255, 255, 0.86) 76%,
+      #ffffff 100%
+    );
+    background-clip: padding-box;
+  }
+
+  .card-tag-pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    max-width: calc(100% - 2px);
+    padding: 2px 10px;
+    border-radius: 999px;
+    border: 1px solid rgba(30, 41, 59, 0.22);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.2;
+    color: #0b1220;
+    background: rgba(255, 255, 255, 0.9);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .archive-footer {

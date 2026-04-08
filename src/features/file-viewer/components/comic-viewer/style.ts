@@ -34,6 +34,7 @@ export const ComicViewerWrapper = styled.div`
     border: 0;
     background: transparent;
     box-shadow: none;
+    contain: paint;
   }
 
   .page-image {
@@ -41,7 +42,9 @@ export const ComicViewerWrapper = styled.div`
     width: 100%;
     height: auto;
     object-fit: contain;
-    background: color-mix(in srgb, var(--semi-color-fill-0) 76%, #000);
+    background: transparent;
+    transform: translateZ(0);
+    backface-visibility: hidden;
   }
 
   .page-skeleton {

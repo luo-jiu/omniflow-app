@@ -1035,7 +1035,8 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
                   className="page-image"
                   src={page.url}
                   alt={page.name}
-                  loading="lazy"
+                  loading="eager"
+                  decoding="sync"
                   draggable={false}
                   onLoad={() => {
                     if (pendingRestoreRef.current) {

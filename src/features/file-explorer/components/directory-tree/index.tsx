@@ -57,6 +57,18 @@ interface DirectoryTreeProps {
   rootNodeId: number | null;
 }
 
+interface DragPreviewNodeData {
+  type?: string | number;
+  isLeaf?: boolean;
+  label?: string;
+  name?: string;
+  ext?: string;
+  data?: {
+    rawName?: string;
+    rawExt?: string;
+  };
+}
+
 /**
  * 计算目录树内容所需的最小宽度：
  * - 以整棵树中已经渲染的节点为准（不局限于当前可视范围）
@@ -647,6 +659,50 @@ export default function DirectoryTree({
     } catch (error: any) {
       runtimeLogger.error('移动节点失败:', error);
       Toast.error(error?.message || '移动失败');
+    }
+  };
+
+  const createDragPreview = (label: string, textColor: string, previewWidth: number): HTMLElement => {
+    const preview = document.createElement('div');
+    preview.textContent = label;
+    preview.style.boxSizing = 'border-box';
+    preview.style.maxWidth = `${previewWidth}px`;
+    preview.style.padding = '6px 10px';
+    preview.style.borderRadius = '8px';
+    preview.style.border = '1px solid rgba(15, 23, 42, 0.18)';
+    preview.style.background = 'rgba(255, 255, 255, 0.96)';
+    preview.style.boxShadow = '0 10px 20px rgba(15, 23, 42, 0.16)';
+    preview.style.color = textColor;
+    preview.style.fontSize = '14px';
+    preview.style.fontWeight = '600';
+    preview.style.lineHeight = '20px';
+    preview.style.whiteSpace = 'nowrap';
+    preview.style.overflow = 'hidden';
+    preview.style.textOverflow = 'ellipsis';
+    preview.style.pointerEvents = 'none';
+    return preview;
+  };
+
+  const renderDraggingNode = (nodeInstance: HTMLElement, nodeData: unknown): HTMLElement => {
+
+    try {
+      const typedNodeData = (nodeData || {}) as DragPreviewNodeData;
+      const nodeType = resolveNodeType(typedNodeData);
+      const baseName = resolveNodeBaseName(typedNodeData);
+      const ext = resolveNodeExt(typedNodeData);
+      const fallbackLabel = typeof typedNodeData.label === 'string' ? typedNodeData.label : '';
+      const displayName = (
+        nodeType === 'file'
+          ? buildFileFullName(baseName, ext)
+          : baseName
+      ) || fallbackLabel || '未命名节点';
+
+      const containerWidth = wrapperRef.current?.parentElement?.clientWidth ?? 280;
+      const previewWidth = Math.max(180, Math.min(360, Math.floor(containerWidth * 0.9)));
+      const textColor = getComputedStyle(nodeInstance).color || '#1f2937';
+      return createDragPreview(displayName, textColor, previewWidth);
+    } catch {
+      return createDragPreview('移动节点', '#1f2937', 220);
     }
   };
 
@@ -1401,6 +1457,7 @@ export default function DirectoryTree({
             onDrop={(info) => {
               void handleTreeDrop(info);
             }}
+            renderDraggingNode={renderDraggingNode}
             className="custom-tree"
             treeData={renderTreeData}
             expandedKeys={expandedKeys}
