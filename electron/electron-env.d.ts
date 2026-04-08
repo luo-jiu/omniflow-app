@@ -44,6 +44,17 @@ interface Window {
         relativePath: string;
       }>;
     }>;
+    pickDownloadDirectory: () => Promise<{
+      canceled: boolean;
+      directoryPath: string;
+    }>;
+    ensureDirectory: (baseDirectory: string, relativePath: string) => Promise<string>;
+    downloadUrlToPath: (
+      url: string,
+      baseDirectory: string,
+      relativePath: string,
+      headers?: Record<string, string>,
+    ) => Promise<string>;
     onUploadProgress: (listener: (payload: {
       uploadId: string;
       uploadedBytes: number;

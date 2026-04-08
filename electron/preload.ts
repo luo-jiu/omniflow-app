@@ -28,6 +28,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getStaticData: () => ipcRenderer.invoke('sys:get-static-data'),
   pickUploadFiles: () => ipcRenderer.invoke('dialog:pick-upload-files'),
   pickUploadFolders: () => ipcRenderer.invoke('dialog:pick-upload-folders'),
+  pickDownloadDirectory: () => ipcRenderer.invoke('dialog:pick-download-directory'),
+  ensureDirectory: (baseDirectory: string, relativePath: string) =>
+    ipcRenderer.invoke('fs:ensure-directory', baseDirectory, relativePath),
+  downloadUrlToPath: (
+    url: string,
+    baseDirectory: string,
+    relativePath: string,
+    headers?: Record<string, string>,
+  ) => ipcRenderer.invoke('fs:download-url-to-path', url, baseDirectory, relativePath, headers),
   fetch: (url: string, options?: any) => ipcRenderer.invoke('http:fetch', url, options),
   upload: (
     url: string,

@@ -1,4 +1,5 @@
 const FILE_TREE_SHOW_SUFFIX_KEY = 'app-file-tree-show-file-suffix';
+const FILE_EXT_PATTERN = /^[a-z0-9][a-z0-9_-]{0,31}$/i;
 
 function normalizeExt(ext?: string): string {
   if (!ext) return '';
@@ -49,21 +50,27 @@ export function buildFileFullName(name: string, ext?: string): string {
 }
 
 export function splitFileBaseNameAndExt(fullName: string): { name: string; ext: string } {
-  const trimmed = fullName.trim();
-  if (!trimmed) {
+  if (!fullName || fullName.trim() === '') {
     return { name: '', ext: '' };
   }
 
-  const lastDotIndex = trimmed.lastIndexOf('.');
+  const lastDotIndex = fullName.lastIndexOf('.');
   if (lastDotIndex <= 0) {
-    return { name: trimmed, ext: '' };
+    return { name: fullName, ext: '' };
   }
 
-  const baseName = trimmed.slice(0, lastDotIndex).trim();
-  const ext = normalizeExt(trimmed.slice(lastDotIndex + 1));
+  const extCandidateRaw = fullName.slice(lastDotIndex + 1);
+  const extCandidate = normalizeExt(extCandidateRaw);
+  if (!extCandidate || !FILE_EXT_PATTERN.test(extCandidate)) {
+    // Treat names like "929174-[C.R] xxx" as plain strings instead of splitting at ".R]".
+    return { name: fullName, ext: '' };
+  }
+
+  const baseName = fullName.slice(0, lastDotIndex);
+  const ext = extCandidate;
 
   if (!baseName) {
-    return { name: trimmed, ext: '' };
+    return { name: fullName, ext: '' };
   }
 
   return { name: baseName, ext };

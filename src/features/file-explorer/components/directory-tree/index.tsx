@@ -3,6 +3,8 @@ import { Tree, Toast, Input, Popover, Modal } from '@douyinfe/semi-ui';
 import {
   createNode,
   deleteNodeAndChildren,
+  getAllDescendantsByNodeId,
+  getFileLink,
   moveNode,
   renameNode,
   sortComicChildrenByName,
@@ -26,6 +28,12 @@ import {
 } from '@/features/file-explorer/services/desktop-upload-picker.api';
 import type { UploadCandidateFile } from '@/features/file-explorer/services/desktop-upload-picker.api';
 import { normalizeUploadRelativePath, UploadPathResolver } from '@/features/file-explorer/services/upload-path-resolver';
+import {
+  downloadUrlToDesktopPath,
+  ensureDesktopDirectory,
+  normalizeDownloadRelativePath,
+  pickDownloadDirectoryFromDesktop,
+} from '@/features/file-explorer/services/desktop-download.api';
 
 interface DirectoryTreeProps {
   treeData: any[];
@@ -233,6 +241,92 @@ export default function DirectoryTree({
         </div>
       ),
     });
+  };
+
+  const resolveNodeType = (node: any): 'dir' | 'file' => {
+    const typeRaw = String(node?.type ?? '').toLowerCase();
+    if (typeRaw === 'file' || Number(node?.type) === 1 || node?.isLeaf === true) {
+      return 'file';
+    }
+    return 'dir';
+  };
+
+  const resolveNodeBaseName = (node: any): string =>
+    String(node?.data?.rawName ?? node?.name ?? node?.label ?? '');
+
+  const resolveNodeExt = (node: any): string =>
+    String(node?.data?.rawExt ?? node?.ext ?? '').replace(/^\./, '');
+
+  const buildNodeFileName = (node: any): string =>
+    buildFileFullName(resolveNodeBaseName(node), resolveNodeExt(node));
+
+  const handleDownloadNode = async (node: any) => {
+    if (!node) {
+      Toast.warning('请选择要下载的节点');
+      return;
+    }
+
+    const pickResult = await pickDownloadDirectoryFromDesktop();
+    if (pickResult.canceled || !pickResult.directoryPath) {
+      return;
+    }
+
+    const targetDirectory = pickResult.directoryPath;
+    const nodeType = resolveNodeType(node);
+
+    if (nodeType === 'file') {
+      const fileName = buildNodeFileName(node) || `file-${node.id}`;
+      const fileLink = await getFileLink(Number(node.id), libraryId);
+      await downloadUrlToDesktopPath(fileLink, targetDirectory, fileName);
+      Toast.success(`下载完成：${fileName}`);
+      return;
+    }
+
+    const folderNameRaw = resolveNodeBaseName(node);
+    const folderName = folderNameRaw === '' ? `folder-${node.id}` : folderNameRaw;
+    const rootRelativePath = normalizeDownloadRelativePath(folderName);
+    await ensureDesktopDirectory(targetDirectory, rootRelativePath);
+
+    const descendants = await getAllDescendantsByNodeId(Number(node.id), libraryId);
+    const rootNodeId = Number(node.id);
+    const childrenByParent = new Map<number, any[]>();
+
+    (descendants || []).forEach((item: any) => {
+      const itemId = Number(item?.id);
+      if (!Number.isFinite(itemId) || itemId <= 0 || itemId === rootNodeId) {
+        return;
+      }
+      const parentId = Number(item?.parentId);
+      if (!Number.isFinite(parentId) || parentId <= 0) {
+        return;
+      }
+      const bucket = childrenByParent.get(parentId) || [];
+      bucket.push(item);
+      childrenByParent.set(parentId, bucket);
+    });
+
+    const downloadSubtree = async (parentId: number, parentRelativePath: string): Promise<void> => {
+      const children = childrenByParent.get(parentId) || [];
+      for (const child of children) {
+        const childType = resolveNodeType(child);
+        if (childType === 'dir') {
+          const childNameRaw = String(child?.name ?? '');
+          const childName = childNameRaw === '' ? `folder-${child.id}` : childNameRaw;
+          const childRelativePath = normalizeDownloadRelativePath(`${parentRelativePath}/${childName}`);
+          await ensureDesktopDirectory(targetDirectory, childRelativePath);
+          await downloadSubtree(Number(child.id), childRelativePath);
+          continue;
+        }
+
+        const fileName = buildFileFullName(String(child?.name || ''), String(child?.ext ?? '').replace(/^\./, '')) || `file-${child.id}`;
+        const fileRelativePath = normalizeDownloadRelativePath(`${parentRelativePath}/${fileName}`);
+        const fileLink = await getFileLink(Number(child.id), libraryId);
+        await downloadUrlToDesktopPath(fileLink, targetDirectory, fileRelativePath);
+      }
+    };
+
+    await downloadSubtree(rootNodeId, rootRelativePath);
+    Toast.success(`下载完成：${folderName}`);
   };
 
   /** rAF 合并调度 */
@@ -899,6 +993,16 @@ export default function DirectoryTree({
       return;
     }
 
+    if (action === '下载') {
+      try {
+        await handleDownloadNode(node);
+      } catch (error: any) {
+        runtimeLogger.error('下载节点失败:', error);
+        Toast.error(error?.message || '下载失败');
+      }
+      return;
+    }
+
     if (action === '新建文件') {
       setCreateModal({
         visible: true,
@@ -1029,16 +1133,16 @@ export default function DirectoryTree({
 
   // 确认重命名
   const handleRenameConfirm = async (node: any) => {
-    const inputName = editingName.trim();
-    if (!inputName) {
+    const inputName = editingName;
+    if (inputName.trim() === '') {
       Toast.warning('名称不能为空');
       setEditingKey(null);
       return;
     }
 
     const isFileNode = node.isLeaf === true;
-    const currentBaseName = String(node.data?.rawName || node.label || '').trim();
-    const currentExt = String(node.data?.rawExt ?? node.ext ?? '').trim().replace(/^\./, '');
+    const currentBaseName = String(node.data?.rawName || node.label || '');
+    const currentExt = String(node.data?.rawExt ?? node.ext ?? '').replace(/^\./, '');
     const currentFullName = isFileNode
       ? buildFileFullName(currentBaseName, currentExt)
       : currentBaseName;

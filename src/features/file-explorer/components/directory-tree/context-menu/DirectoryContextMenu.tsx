@@ -100,6 +100,11 @@ const DirectoryContextMenu: React.FC<DirectoryContextMenuProps> = ({
         label: '属性',
         onClick: () => onAction('属性', node),
       },
+      {
+        key: 'download',
+        label: '下载',
+        onClick: () => onAction('下载', node),
+      },
     ];
 
   // 文件夹：基础信息组后加分隔线，再进入模式设置组
@@ -195,6 +200,11 @@ const DirectoryContextMenu: React.FC<DirectoryContextMenuProps> = ({
         key: 'upload-folder',
         label: '上传文件夹',
         onClick: () => onAction('上传文件夹', node),
+      },
+      {
+        key: 'download',
+        label: '下载',
+        onClick: () => onAction('下载', node),
       }
     );
   }

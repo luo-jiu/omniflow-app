@@ -12,6 +12,39 @@ export type Library = {
 };
 
 const LIST_KEYS = ['list', 'records', 'items', 'libraries', 'content', 'result', 'data'] as const;
+type NodeKind = 'dir' | 'file';
+
+function resolveNodeType(source: Record<string, unknown> | null | undefined, fallback: NodeKind = 'file'): NodeKind {
+  if (!source) return fallback;
+
+  const candidates = [source.type, source.nodeType, source.node_type];
+  for (const value of candidates) {
+    if (value === undefined || value === null) continue;
+    const normalized = String(value).trim().toLowerCase();
+    if (normalized === 'dir' || normalized === 'directory' || normalized === 'folder' || normalized === '0') {
+      return 'dir';
+    }
+    if (normalized === 'file' || normalized === '1') {
+      return 'file';
+    }
+  }
+
+  return fallback;
+}
+
+function normalizeNodePayload<T extends Record<string, unknown>>(source: T, fallback: NodeKind = 'file'): T & { type: NodeKind } {
+  return {
+    ...source,
+    type: resolveNodeType(source, fallback),
+  };
+}
+
+function extractDataPayload<T = unknown>(response: any): T {
+  if (response && typeof response === 'object' && 'data' in response) {
+    return response.data as T;
+  }
+  return response as T;
+}
 
 function extractLibraryArray(payload: unknown): Library[] {
   if (!payload) {
@@ -46,6 +79,55 @@ function normalizeLibrary(raw: Record<string, unknown>): Library {
     name: String(raw.name || ''),
     delFlag: Number(raw.delFlag || 0),
     starred: starredValue === true || starredValue === 1 || starredValue === '1',
+  };
+}
+
+function toOptionalString(value: unknown): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  return String(value);
+}
+
+function toOptionalNumber(value: unknown): number | undefined {
+  if (value === undefined || value === null) return undefined;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : undefined;
+}
+
+function toNumberOrDefault(value: unknown, defaultValue = 0): number {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : defaultValue;
+}
+
+function normalizeNodeDetailPayload(source: Record<string, unknown>): NodeDetailDTO {
+  const normalized = normalizeNodePayload(source);
+  return {
+    id: toNumberOrDefault(normalized.id),
+    name: String(normalized.name ?? ''),
+    type: normalized.type,
+    parentId: toNumberOrDefault(normalized.parentId ?? normalized.parent_id),
+    libraryId: toNumberOrDefault(normalized.libraryId ?? normalized.library_id),
+    ext: toOptionalString(normalized.ext),
+    mimeType: toOptionalString(normalized.mimeType ?? normalized.mime_type),
+    fileSize: toOptionalNumber(normalized.fileSize ?? normalized.file_size),
+    builtInType: toOptionalString(normalized.builtInType ?? normalized.built_in_type),
+    archiveMode: toOptionalNumber(normalized.archiveMode ?? normalized.archive_mode),
+    viewMeta: normalized.viewMeta === null ? null : toOptionalString(normalized.viewMeta ?? normalized.view_meta),
+  };
+}
+
+function normalizeRecycleBinItemPayload(source: Record<string, unknown>): RecycleBinItem {
+  const normalized = normalizeNodePayload(source);
+  return {
+    id: toNumberOrDefault(normalized.id),
+    name: String(normalized.name ?? ''),
+    ext: toOptionalString(normalized.ext),
+    mimeType: toOptionalString(normalized.mimeType ?? normalized.mime_type),
+    fileSize: toOptionalNumber(normalized.fileSize ?? normalized.file_size),
+    type: normalized.type,
+    parentId: toNumberOrDefault(normalized.parentId ?? normalized.parent_id),
+    libraryId: toNumberOrDefault(normalized.libraryId ?? normalized.library_id),
+    deletedAt: String(normalized.deletedAt ?? normalized.deleted_at ?? ''),
+    deletedDescendantCount: toOptionalNumber(normalized.deletedDescendantCount ?? normalized.deleted_descendant_count),
   };
 }
 
@@ -107,7 +189,29 @@ export async function getChildrenByNodeId(nodeId: number, libraryId: number) {
   const body = await request(`/v1/nodes/${nodeId}/children?libraryId=${libraryId}`, {
     method: 'GET',
   });
-  return body?.data || [];
+  const data = body?.data;
+  if (!Array.isArray(data)) return [];
+  return data.map((item) => {
+    if (item && typeof item === 'object') {
+      return normalizeNodePayload(item as Record<string, unknown>);
+    }
+    return item;
+  });
+}
+
+// 获取当前节点及其完整子树（包含当前节点）
+export async function getAllDescendantsByNodeId(nodeId: number, libraryId: number) {
+  const body = await request(`/v1/nodes/${nodeId}/descendants?libraryId=${libraryId}`, {
+    method: 'GET',
+  });
+  const data = body?.data;
+  if (!Array.isArray(data)) return [];
+  return data.map((item) => {
+    if (item && typeof item === 'object') {
+      return normalizeNodePayload(item as Record<string, unknown>);
+    }
+    return item;
+  });
 }
 
 // 获取库根节点（后端会在必要时自动修复根结构与闭包关系）
@@ -136,7 +240,11 @@ export async function fetchNodeDetailById(nodeId: number): Promise<NodeDetailDTO
   const body = await request(`/v1/nodes/${nodeId}`, {
     method: 'GET',
   });
-  return body?.data as NodeDetailDTO;
+  const data = body?.data;
+  if (!data || typeof data !== 'object') {
+    throw new Error('节点详情响应数据异常');
+  }
+  return normalizeNodeDetailPayload(data as Record<string, unknown>);
 }
 
 // 上传文件并创建节点
@@ -184,15 +292,11 @@ export async function uploadAndCreateNode(
     throw new Error('上传响应为空');
   }
 
-  if (!json.success) {
-    throw new Error(json.message || "上传失败");
+  const d = extractDataPayload<Record<string, unknown>>(json);
+  if (!d || typeof d !== 'object') {
+    throw new Error('上传响应数据异常');
   }
-
-  const d = json.data;
-  return {
-    ...d,
-    type: d.type === 0 || d.type === "0" ? "dir" : "file",
-  };
+  return normalizeNodePayload(d as Record<string, unknown>, 'file');
 }
 
 // 兼容旧上传（无进度）
@@ -204,15 +308,11 @@ export async function uploadAndCreateNodeLegacy(file: File, parentId: number, li
     library_id: String(libraryId),
   });
 
-  if (!json.success) {
-    throw new Error(json.message || "上传失败");
+  const d = extractDataPayload<Record<string, unknown>>(json);
+  if (!d || typeof d !== 'object') {
+    throw new Error('上传响应数据异常');
   }
-
-  const d = json.data;
-  return {
-    ...d,
-    type: d.type === 0 || d.type === "0" ? "dir" : "file",
-  };
+  return normalizeNodePayload(d as Record<string, unknown>, 'file');
 }
 
 // 创建节点（新建文件或文件夹）
@@ -233,10 +333,7 @@ export async function createNode(payload: {
     }),
   });
   const d = body.data;
-  return {
-    ...d,
-    type: d.type === 0 || d.type === "0" ? "dir" : "file",
-  };
+  return normalizeNodePayload(d as Record<string, unknown>, payload.type);
 }
 
 // 重命名节点
@@ -329,8 +426,11 @@ export async function fetchRecycleBinItems(libraryId: number): Promise<RecycleBi
   const body = await request(`/v1/nodes/recycle/library/${libraryId}`, {
     method: 'GET',
   });
-  const data = (body?.data || []) as RecycleBinItem[];
-  return Array.isArray(data) ? data : [];
+  const data = body?.data;
+  if (!Array.isArray(data)) return [];
+  return data
+    .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object'))
+    .map((item) => normalizeRecycleBinItemPayload(item));
 }
 
 export async function restoreNodeAndChildren(ancestorId: number, libraryId: number): Promise<boolean> {

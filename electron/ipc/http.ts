@@ -7,6 +7,27 @@ import type { ClientRequest, IncomingMessage } from 'node:http';
 import { runtimeLogger } from '../runtimeLogger';
 import { MAX_SINGLE_UPLOAD_BYTES, MAX_SINGLE_UPLOAD_ERROR_MESSAGE } from '../../src/shared/upload-limits';
 
+function escapeMultipartDispositionValue(value: string): string {
+  return String(value)
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/\r/g, '')
+    .replace(/\n/g, '');
+}
+
+function encodeRFC5987Value(value: string): string {
+  return encodeURIComponent(value).replace(
+    /['()*]/g,
+    (ch) => `%${ch.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+}
+
+function buildFileContentDisposition(fileName: string): string {
+  const escaped = escapeMultipartDispositionValue(fileName);
+  const encoded = encodeRFC5987Value(fileName);
+  return `Content-Disposition: form-data; name="file"; filename="${escaped}"; filename*=UTF-8''${encoded}\r\n`;
+}
+
 export function registerHttpIpc(ipcMain: Electron.IpcMain) {
   type UploadRuntime = {
     uploadId: string;
@@ -140,12 +161,12 @@ export function registerHttpIpc(ipcMain: Electron.IpcMain) {
       const fileName = path.basename(filePath);
       const fieldsPrefix = Object.entries(formDataParams).map(([key, value]) => (
         `--${boundary}\r\n` +
-        `Content-Disposition: form-data; name="${key}"\r\n\r\n` +
+        `Content-Disposition: form-data; name="${escapeMultipartDispositionValue(key)}"\r\n\r\n` +
         `${value}\r\n`
       )).join('');
       const filePrefix =
         `--${boundary}\r\n` +
-        `Content-Disposition: form-data; name="file"; filename="${fileName}"\r\n` +
+        buildFileContentDisposition(fileName) +
         `Content-Type: application/octet-stream\r\n\r\n`;
       const fileSuffix = `\r\n--${boundary}--\r\n`;
       const contentLength = Buffer.byteLength(fieldsPrefix) + Buffer.byteLength(filePrefix) + stat.size + Buffer.byteLength(fileSuffix);
