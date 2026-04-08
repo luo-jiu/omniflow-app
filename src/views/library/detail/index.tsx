@@ -4,7 +4,7 @@ import React from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { FileViewerProvider } from "@/contexts/FileViewerContext";
 import { useFileViewer } from "@/hooks/useFileViewer";
-import { IconSetting, IconHome, IconUpload, IconDelete, IconChevronLeft, IconRefresh } from "@douyinfe/semi-icons";
+import { IconHome, IconUpload, IconDelete, IconChevronLeft, IconRefresh } from "@douyinfe/semi-icons";
 import styled from "styled-components";
 
 const DEFAULT_SIDE_PANEL_WIDTH = 300;
@@ -357,13 +357,6 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
               title="返回库列表"
             >
               <IconHome size="large" />
-            </button>
-            <button
-              className="footer-btn"
-              onClick={() => navigate("/settings")}
-              title="设置"
-            >
-              <IconSetting size="large" />
             </button>
             <button
               className="footer-btn"

@@ -1,23 +1,17 @@
 import React from 'react';
-import { Input } from '@douyinfe/semi-ui';
-import { IconFolder, IconStar, IconStarStroked, IconMore } from '@douyinfe/semi-icons';
+import { IconStar, IconStarStroked, IconMore } from '@douyinfe/semi-icons';
 import {
   CardItem,
   CardActions,
   ActionIconBtn,
   CardIcon,
-  CardName,
-  CardNameEdit
+  CardName
 } from '../../style';
 import type { Library } from "@/features/file-explorer/services/file.api";
+import libraryFolderImage from '@/assets/images/library-folder-windows11.png';
 
 interface LibraryCardProps {
   library: Library;
-  isEditing: boolean;
-  renameValue: string;
-  onRenameChange: (value: string) => void;
-  onRenameSubmit: () => void;
-  onRenameCancel: () => void;
   onContextMenu: (e: React.MouseEvent) => void;
   onMoreClick: (e: React.MouseEvent) => void;
   onDoubleClick: () => void;
@@ -26,11 +20,6 @@ interface LibraryCardProps {
 
 const LibraryCard: React.FC<LibraryCardProps> = ({
   library,
-  isEditing,
-  renameValue,
-  onRenameChange,
-  onRenameSubmit,
-  onRenameCancel,
   onContextMenu,
   onMoreClick,
   onDoubleClick,
@@ -60,29 +49,14 @@ const LibraryCard: React.FC<LibraryCardProps> = ({
         </ActionIconBtn>
       </CardActions>
 
-      <CardIcon><IconFolder style={{ fontSize: 28 }} /></CardIcon>
-
-      {isEditing ? (
-        <CardNameEdit onClick={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
-          <Input
-            value={renameValue}
-            onChange={onRenameChange}
-            autoFocus
-            onEnterPress={onRenameSubmit}
-            onBlur={onRenameSubmit}
-            onKeyDown={(e) => {
-              if (e.key === 'Escape') {
-                e.stopPropagation();
-                onRenameCancel();
-              }
-            }}
-            style={{ width: 200 }}
-            placeholder="输入新名称"
-          />
-        </CardNameEdit>
-      ) : (
-        <CardName>{library.name}</CardName>
-      )}
+      <div className="card-main">
+        <CardIcon
+          style={{ backgroundImage: `url(${libraryFolderImage})` }}
+          aria-hidden
+        >
+          <CardName>{library.name}</CardName>
+        </CardIcon>
+      </div>
     </CardItem>
   );
 };

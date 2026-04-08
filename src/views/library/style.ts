@@ -33,7 +33,7 @@ export const SideMenu = styled.aside`
   background: var(--app-bg-elevated);
   border: 1px solid var(--app-border);
   border-radius: 12px;
-  padding: 16px 12px;
+  padding: 16px 12px 12px;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -79,6 +79,35 @@ export const SideMenuItem = styled.div`
     background: rgba(0, 0, 0, 0.06);
     color: var(--app-text);
     font-weight: 600;
+  }
+`
+
+export const SideMenuFooter = styled.div`
+  margin-top: auto;
+  padding-top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+`
+
+export const SideMenuAction = styled.button`
+  width: 32px;
+  height: 32px;
+  border: none;
+  outline: none;
+  background: transparent;
+  padding: 0;
+  border-radius: 8px;
+  color: var(--app-text-secondary);
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  &:hover {
+    background: rgba(0, 0, 0, 0.05);
+    color: var(--app-text);
   }
 `
 
@@ -163,61 +192,182 @@ export const CardScroll = styled.div`
 
 export const CardGrid = styled.div`
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(196px, 1fr));
+  gap: 8px;
   padding: 4px 0 10px;
   align-content: flex-start;
 `
 
 export const CardItem = styled.div`
   position: relative;
-  min-height: 160px;
+  min-height: 170px;
+  width: min(100%, 188px);
+  justify-self: center;
   box-sizing: border-box;
   border-radius: 12px;
-  background: var(--app-bg-elevated);
-  border: 1px solid var(--app-border);
+  background: transparent;
+  border: none;
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
+  align-items: stretch;
   justify-content: flex-end;
-  gap: 14px;
+  gap: 0;
   cursor: pointer;
-  transition: background-color .15s ease, border-color .15s ease;
+  transition: transform .15s ease;
   user-select: none;
-  padding: 18px;
+  padding: 0;
 
   &:hover {
-    border-color: var(--app-border-strong);
-    background: #fafaf8;
+    transform: translateY(-1px);
   }
 
   &:hover .card-actions {
     opacity: 1;
     pointer-events: auto;
   }
+
+  .card-main {
+    width: 100%;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+  }
 `
 
 export const CardIcon = styled.div`
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 46px;
-  height: 46px;
-  border-radius: 10px;
-  background: var(--app-panel-muted);
-  color: var(--app-accent);
+  width: 100%;
+  height: 170px;
+  background: transparent;
+  background-position: center;
+  background-size: contain;
+  background-repeat: no-repeat;
+  user-select: none;
+  pointer-events: none;
+
+  &::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 10px;
+    background: transparent;
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  body[theme-mode="dark"] &::after {
+    background: rgba(15, 18, 24, 0.24);
+  }
 `
 
 export const CardName = styled.div`
-  max-width: 100%;
+  position: absolute;
+  top: 82px;
+  left: 26px;
+  right: 24px;
+  min-width: 0;
   text-align: left;
   white-space: nowrap;
   text-overflow: ellipsis;
   overflow: hidden;
   font-size: 15px;
-  font-weight: 500;
+  font-weight: 700;
+  color: #6d4b0a;
+  text-shadow: 0 1px 0 rgba(255, 243, 209, 0.45);
   line-height: 1.4;
+  pointer-events: none;
+  z-index: 2;
+
+  body[theme-mode="dark"] & {
+    color: #f3e0b2;
+    text-shadow: 0 1px 0 rgba(25, 22, 14, 0.52);
+  }
 `
+
+/* 实验版文件夹样式备份（当前停用）
+const FolderArt = styled.div`
+  position: relative;
+  width: min(100%, 188px);
+  height: 136px;
+  overflow: hidden;
+
+  &::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 20px;
+    bottom: 0;
+    border-radius: 0 10px 10px 10px;
+    border: 1px solid var(--folder-border);
+    background: var(--folder-body);
+    box-shadow:
+      inset 0 1px 0 color-mix(in srgb, var(--folder-body) 22%, #ffffff 78%),
+      0 6px 12px color-mix(in srgb, var(--folder-border) 35%, transparent 65%);
+    z-index: 1;
+  }
+
+  .folder-tab-main {
+    position: absolute;
+    top: 2px;
+    left: 0;
+    width: 92px;
+    height: 20px;
+    background: var(--folder-top);
+    border: 1px solid var(--folder-border);
+    border-right: none;
+    border-bottom: none;
+    border-radius: 8px 0 0 0;
+    z-index: 4;
+
+    &::after {
+      content: '';
+      position: absolute;
+      top: -1px;
+      right: -15px;
+      width: 24px;
+      height: 21px;
+      background: var(--folder-top);
+      border-top: 1px solid var(--folder-border);
+      border-right: 1px solid var(--folder-border);
+      border-radius: 0 8px 0 0;
+      transform: skewX(30deg);
+      transform-origin: left top;
+      z-index: 5;
+    }
+  }
+
+  .folder-top-band {
+    position: absolute;
+    top: 19px;
+    left: -1px;
+    right: -1px;
+    height: 25px;
+    border-radius: 0 10px 0 0;
+    background: var(--folder-top);
+    box-shadow: none;
+    z-index: 2;
+  }
+`;
+
+const FolderLabel = styled.div`
+  position: absolute;
+  top: 53px;
+  left: 12px;
+  right: 16px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--folder-label);
+  font-size: 15px;
+  font-weight: 700;
+  text-shadow: 0 1px 0 color-mix(in srgb, var(--folder-body) 16%, #ffffff 84%);
+  z-index: 6;
+`;
+*/
 
 export const CardNameEdit = styled.div`
   display: flex;

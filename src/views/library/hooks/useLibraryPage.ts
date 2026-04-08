@@ -4,7 +4,6 @@ import {
   fetchRepositories,
   createLibrary,
   deleteLibrary,
-  renameLibrary,
   toggleLibraryStar
 } from "@/features/file-explorer/services/file.api";
 import type { Library } from "@/features/file-explorer/services/file.api";
@@ -57,23 +56,14 @@ export function useLibraryPage() {
     }
   };
 
-  const handleRenameLibrary = async (id: number, newName: string) => {
-    try {
-      await renameLibrary(id, newName);
-      setLibraries(list =>
-        list.map(l =>
-          l.id === id
-            ? { ...l, name: newName, updatedAt: new Date().toISOString() }
-            : l
-        )
-      );
-      Toast.success('重命名成功');
-      return true;
-    } catch (error) {
-      runtimeLogger.error('Failed to rename library:', error);
-      Toast.error('重命名失败');
-      return false;
-    }
+  const applyLocalLibraryEdit = (id: number, payload: { name: string; starred: boolean }) => {
+    setLibraries(list =>
+      list.map(l =>
+        l.id === id
+          ? { ...l, name: payload.name, starred: payload.starred, updatedAt: new Date().toISOString() }
+          : l
+      )
+    );
   };
 
   const toggleStar = async (library: Library) => {
@@ -96,7 +86,7 @@ export function useLibraryPage() {
     loadLibraries,
     handleCreateLibrary,
     handleDeleteLibrary,
-    handleRenameLibrary,
+    applyLocalLibraryEdit,
     toggleStar,
   };
 }

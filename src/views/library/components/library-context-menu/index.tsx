@@ -10,7 +10,7 @@ interface LibraryContextMenuProps {
   mode: 'library' | 'blank';
   library: Library | null;
   onCreate: () => void;
-  onRename: () => void;
+  onEdit: () => void;
   onDelete: () => void;
   onClose?: () => void;
 }
@@ -22,7 +22,7 @@ const LibraryContextMenu: React.FC<LibraryContextMenuProps> = ({
   mode,
   library,
   onCreate,
-  onRename,
+  onEdit,
   onDelete,
   onClose
 }) => {
@@ -38,9 +38,9 @@ const LibraryContextMenu: React.FC<LibraryContextMenuProps> = ({
     ]
     : [
       {
-        key: 'rename',
-        label: '重命名',
-        onClick: onRename,
+        key: 'edit',
+        label: '编辑',
+        onClick: onEdit,
       },
       {
         type: 'divider',

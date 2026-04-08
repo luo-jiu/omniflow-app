@@ -1,9 +1,12 @@
 import React from 'react';
+import { IconSetting } from '@douyinfe/semi-icons';
 import {
   SideMenu,
   SideMenuHeader,
   SideMenuList,
-  SideMenuItem
+  SideMenuItem,
+  SideMenuFooter,
+  SideMenuAction,
 } from '../../style';
 
 export type QuickAccessMode = 'all' | 'favorites' | 'recent';
@@ -11,9 +14,10 @@ export type QuickAccessMode = 'all' | 'favorites' | 'recent';
 interface QuickAccessSidebarProps {
   mode: QuickAccessMode;
   onModeChange: (mode: QuickAccessMode) => void;
+  onOpenSettings: () => void;
 }
 
-const QuickAccessSidebar: React.FC<QuickAccessSidebarProps> = ({ mode, onModeChange }) => {
+const QuickAccessSidebar: React.FC<QuickAccessSidebarProps> = ({ mode, onModeChange, onOpenSettings }) => {
   return (
     <SideMenu>
       <SideMenuHeader>Quick Access</SideMenuHeader>
@@ -37,6 +41,11 @@ const QuickAccessSidebar: React.FC<QuickAccessSidebarProps> = ({ mode, onModeCha
           最近访问
         </SideMenuItem>
       </SideMenuList>
+      <SideMenuFooter>
+        <SideMenuAction onClick={onOpenSettings} title="设置" aria-label="设置">
+          <IconSetting size="large" />
+        </SideMenuAction>
+      </SideMenuFooter>
     </SideMenu>
   );
 };

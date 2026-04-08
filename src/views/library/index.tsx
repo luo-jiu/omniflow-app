@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Modal, Avatar } from '@douyinfe/semi-ui'
+import { Modal, Avatar, Toast } from '@douyinfe/semi-ui'
 
 import LibraryWrapper, {
   ContentRow,
@@ -21,6 +21,7 @@ import type { QuickAccessMode } from './components/quick-access-sidebar'
 import LibraryCard from './components/library-card'
 import LibraryContextMenu from './components/library-context-menu'
 import LibraryCreateModal from './components/library-create-modal'
+import LibraryEditModal from './components/library-edit-modal'
 import type { Library } from "@/features/file-explorer/services/file.api"
 
 type MenuState = {
@@ -43,7 +44,7 @@ const LibraryPage: React.FC = () => {
     libraries,
     handleCreateLibrary,
     handleDeleteLibrary,
-    handleRenameLibrary,
+    applyLocalLibraryEdit,
     toggleStar
   } = useLibraryPage()
 
@@ -56,8 +57,10 @@ const LibraryPage: React.FC = () => {
     mode: 'blank',
     library: null,
   })
-  const [editingLibraryId, setEditingLibraryId] = useState<number | null>(null)
-  const [renameValue, setRenameValue] = useState('')
+  const [editVisible, setEditVisible] = useState(false)
+  const [editingLibrary, setEditingLibrary] = useState<Library | null>(null)
+  const [editName, setEditName] = useState('')
+  const [editStarred, setEditStarred] = useState(false)
   const [quickAccessMode, setQuickAccessMode] = useState<QuickAccessMode>('all')
 
   const wrapperRef = useRef<HTMLDivElement>(null)
@@ -92,10 +95,6 @@ const LibraryPage: React.FC = () => {
     }
     const onEsc = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        if (editingLibraryId !== null) {
-          setEditingLibraryId(null)
-          setRenameValue('')
-        }
         setMenu(m => ({ ...m, visible: false, mode: 'blank', library: null }))
       }
     }
@@ -105,7 +104,7 @@ const LibraryPage: React.FC = () => {
       document.removeEventListener('mousedown', onClick)
       document.removeEventListener('keydown', onEsc)
     }
-  }, [editingLibraryId])
+  }, [])
 
   const preventSystemMenu = (e: React.MouseEvent) => e.preventDefault()
 
@@ -118,7 +117,6 @@ const LibraryPage: React.FC = () => {
   const handleContextMenu = (e: React.MouseEvent, library: Library) => {
     e.preventDefault()
     e.stopPropagation()
-    if (editingLibraryId !== null) return
     const { x, y } = clampToViewport(e.clientX, e.clientY)
 
     if (menu.visible) {
@@ -134,7 +132,6 @@ const LibraryPage: React.FC = () => {
   const handleBlankContextMenu = (e: React.MouseEvent) => {
     e.preventDefault()
     e.stopPropagation()
-    if (editingLibraryId !== null) return
     const { x, y } = clampToViewport(e.clientX, e.clientY)
     setMenu({ visible: true, x, y, mode: 'blank', library: null })
   }
@@ -154,20 +151,28 @@ const LibraryPage: React.FC = () => {
     }
   }
 
-  const enterRename = () => {
+  const openEditModal = () => {
     if (menu.mode !== 'library' || !menu.library) return
-    setEditingLibraryId(menu.library.id)
-    setRenameValue(menu.library.name)
+    setEditingLibrary(menu.library)
+    setEditName(menu.library.name)
+    setEditStarred(!!menu.library.starred)
+    setEditVisible(true)
     setMenu(m => ({ ...m, visible: false, mode: 'blank', library: null }))
   }
 
-  const submitRename = async () => {
-    if (editingLibraryId === null) return
-    const success = await handleRenameLibrary(editingLibraryId, renameValue)
-    if (success) {
-      setEditingLibraryId(null)
-      setRenameValue('')
+  const submitEdit = () => {
+    if (!editingLibrary) return
+    const nextName = editName.trim()
+    if (!nextName) {
+      Toast.warning('仓库名称不能为空')
+      return
     }
+    applyLocalLibraryEdit(editingLibrary.id, {
+      name: nextName,
+      starred: editStarred,
+    })
+    setEditVisible(false)
+    setEditingLibrary(null)
   }
 
   const doDelete = () => {
@@ -218,7 +223,11 @@ const LibraryPage: React.FC = () => {
   return (
     <LibraryWrapper ref={wrapperRef} onContextMenu={preventSystemMenu}>
       <ContentRow>
-        <QuickAccessSidebar mode={quickAccessMode} onModeChange={setQuickAccessMode} />
+        <QuickAccessSidebar
+          mode={quickAccessMode}
+          onModeChange={setQuickAccessMode}
+          onOpenSettings={() => navigate('/settings')}
+        />
         <VerticalDivider />
         <CardArea onContextMenu={handleBlankContextMenu}>
           <RightHeader>
@@ -237,14 +246,6 @@ const LibraryPage: React.FC = () => {
                   <LibraryCard
                     key={library.id}
                     library={library}
-                    isEditing={editingLibraryId === library.id}
-                    renameValue={renameValue}
-                    onRenameChange={setRenameValue}
-                    onRenameSubmit={submitRename}
-                    onRenameCancel={() => {
-                      setEditingLibraryId(null);
-                      setRenameValue('');
-                    }}
                     onContextMenu={(e) => handleContextMenu(e, library)}
                     onMoreClick={(e) => handleMoreClick(e, library)}
                     onDoubleClick={() => navigate(`/libraries/${library.id}`)}
@@ -264,7 +265,7 @@ const LibraryPage: React.FC = () => {
         mode={menu.mode}
         library={menu.library}
         onCreate={openCreateModalFromMenu}
-        onRename={enterRename}
+        onEdit={openEditModal}
         onDelete={doDelete}
         onClose={() => setMenu(m => ({ ...m, visible: false, mode: 'blank', library: null }))}
       />
@@ -275,6 +276,19 @@ const LibraryPage: React.FC = () => {
         onNameChange={setCreateName}
         onConfirm={handleCreate}
         onCancel={() => setCreateVisible(false)}
+      />
+
+      <LibraryEditModal
+        visible={editVisible}
+        name={editName}
+        starred={editStarred}
+        onNameChange={setEditName}
+        onStarredChange={setEditStarred}
+        onConfirm={submitEdit}
+        onCancel={() => {
+          setEditVisible(false)
+          setEditingLibrary(null)
+        }}
       />
     </LibraryWrapper>
   )
