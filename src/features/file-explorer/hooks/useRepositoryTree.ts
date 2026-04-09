@@ -49,6 +49,17 @@ export interface NodeRespDTO {
   archiveMode?: number;
 }
 
+interface AppendNodeBatchItem {
+  parentNodeKey: string;
+  newNodeDTO: NodeRespDTO;
+  retryCount?: number;
+  firstQueuedAt?: number;
+}
+
+const PENDING_APPEND_RETRY_INTERVAL_MS = 420;
+const PENDING_APPEND_MAX_RETRY = 40;
+const PENDING_APPEND_MAX_AGE_MS = 2 * 60 * 1000;
+
 interface RepositoryTreeSnapshot {
   selectedRepository: string;
   rootNodeId: number | null;
@@ -182,6 +193,9 @@ export function useRepositoryTree(
   const rootNodeIdRef = useRef<number | null>(cachedSnapshot?.rootNodeId ?? null);
   const expandedKeysRef = useRef<string[]>([]);
   const treesCacheRef = useRef<Record<string, Node[]>>({});
+  const pendingAppendByRepositoryRef = useRef<Map<string, AppendNodeBatchItem[]>>(new Map());
+  const pendingAppendRetryTimerRef = useRef<number | null>(null);
+  const appendNodesByRepositoryRef = useRef<(repositoryId: string | number, items: AppendNodeBatchItem[]) => void>(() => { /* noop */ });
 
   useEffect(() => {
     rootNodeIdRef.current = rootNodeId;
@@ -196,6 +210,54 @@ export function useRepositoryTree(
   useEffect(() => {
     expandedKeysRef.current = expandedKeys;
   }, [expandedKeys]);
+
+  const schedulePendingAppendRetry = useCallback(() => {
+    if (pendingAppendRetryTimerRef.current !== null) {
+      return;
+    }
+    pendingAppendRetryTimerRef.current = window.setTimeout(() => {
+      pendingAppendRetryTimerRef.current = null;
+      const pendingEntries = Array.from(pendingAppendByRepositoryRef.current.entries());
+      pendingAppendByRepositoryRef.current.clear();
+      pendingEntries.forEach(([repositoryId, items]) => {
+        if (!items.length) return;
+        appendNodesByRepositoryRef.current(repositoryId, items);
+      });
+    }, PENDING_APPEND_RETRY_INTERVAL_MS);
+  }, []);
+
+  const mergePendingAppendItems = useCallback((repositoryId: string, items: AppendNodeBatchItem[]) => {
+    const now = Date.now();
+    const existing = pendingAppendByRepositoryRef.current.get(repositoryId) || [];
+    const merged = new Map<string, AppendNodeBatchItem>();
+
+    [...existing, ...items].forEach((item) => {
+      const retryCount = Number(item.retryCount ?? 0);
+      const firstQueuedAt = Number(item.firstQueuedAt ?? now);
+      if (retryCount > PENDING_APPEND_MAX_RETRY) {
+        return;
+      }
+      if (now - firstQueuedAt > PENDING_APPEND_MAX_AGE_MS) {
+        return;
+      }
+      const dedupeKey = `${item.parentNodeKey}:${item.newNodeDTO.id}`;
+      const previous = merged.get(dedupeKey);
+      if (!previous || (retryCount > Number(previous.retryCount ?? 0))) {
+        merged.set(dedupeKey, {
+          ...item,
+          retryCount,
+          firstQueuedAt,
+        });
+      }
+    });
+
+    if (merged.size > 0) {
+      pendingAppendByRepositoryRef.current.set(repositoryId, Array.from(merged.values()));
+      schedulePendingAppendRetry();
+      return;
+    }
+    pendingAppendByRepositoryRef.current.delete(repositoryId);
+  }, [schedulePendingAppendRetry]);
 
   const resolveLibraryRootNodeId = useCallback(async (repoLibraryId: number): Promise<number> => {
     const remoteRootNodeId = Number(await getLibraryRootNodeId(repoLibraryId));
@@ -456,44 +518,121 @@ export function useRepositoryTree(
     });
   }, [selectedRepository]);
 
+  const appendNodesByRepository = useCallback((
+    repositoryId: string | number,
+    items: AppendNodeBatchItem[],
+  ) => {
+    if (!items.length) {
+      return;
+    }
+    const repositoryKey = String(repositoryId);
+    const pendingRetryItems: AppendNodeBatchItem[] = [];
+
+    setTreesCache(prev => {
+      const current = prev[repositoryKey] || [];
+      const rootItems: NodeRespDTO[] = [];
+      const parentGroups = new Map<string, AppendNodeBatchItem[]>();
+
+      items.forEach((item) => {
+        if (item.parentNodeKey === 'root') {
+          rootItems.push(item.newNodeDTO);
+          return;
+        }
+        const group = parentGroups.get(item.parentNodeKey) || [];
+        group.push(item);
+        parentGroups.set(item.parentNodeKey, group);
+      });
+
+      let nextCurrent = current;
+      let changed = false;
+
+      if (rootItems.length > 0) {
+        const mappedRoots = rootItems.map(item => mapToTreeNode(item));
+        nextCurrent = [...nextCurrent, ...mappedRoots];
+        changed = true;
+      }
+
+      const unresolvedItems: AppendNodeBatchItem[] = [];
+
+      parentGroups.forEach((groupItems, parentNodeKey) => {
+        if (!nextCurrent.length) return;
+        const parent = findNodeByKey(nextCurrent, parentNodeKey);
+        if (!parent) {
+          groupItems.forEach((item) => {
+            unresolvedItems.push({
+              parentNodeKey,
+              newNodeDTO: item.newNodeDTO,
+              retryCount: Number(item.retryCount ?? 0),
+              firstQueuedAt: Number(item.firstQueuedAt ?? Date.now()),
+            });
+          });
+          return;
+        }
+        const mappedChildren = groupItems.map(item => mapToTreeNode(item.newNodeDTO, parent));
+        const newChildren = parent.children ? [...parent.children, ...mappedChildren] : mappedChildren;
+        nextCurrent = updateNodeChildren(
+          nextCurrent,
+          parentNodeKey,
+          newChildren,
+          { markLoaded: parent.loaded === true },
+        );
+        changed = true;
+      });
+
+      if (unresolvedItems.length > 0) {
+        pendingRetryItems.push(...unresolvedItems.map((item) => ({
+          ...item,
+          retryCount: Number(item.retryCount ?? 0) + 1,
+          firstQueuedAt: Number(item.firstQueuedAt ?? Date.now()),
+        })));
+      }
+
+      if (!changed) {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        [repositoryKey]: nextCurrent,
+      };
+    });
+
+    if (pendingRetryItems.length > 0) {
+      mergePendingAppendItems(repositoryKey, pendingRetryItems);
+    }
+  }, [mergePendingAppendItems, updateNodeChildren]);
+
+  appendNodesByRepositoryRef.current = appendNodesByRepository;
+
   // 在某个父节点下追加一个子节点（上传成功后用）
   const appendNodeUnderParent = useCallback(
     (parentNodeKey: string, newNodeDTO: NodeRespDTO) => {
-      setTreesCache(prev => {
-        const current = prev[selectedRepository] || [];
-        
-        const currentRootNodeId = rootNodeIdRef.current;
-        // 如果是根目录，直接添加到根节点列表
-        if (parentNodeKey === 'root' || (currentRootNodeId !== null && newNodeDTO.parentId === currentRootNodeId)) {
-          const mappedRootNode = mapToTreeNode(newNodeDTO);
-          return {
-            ...prev,
-            [selectedRepository]: [...current, mappedRootNode],
-          };
-        }
-        
-        if (!current.length) return prev;
-        const parent = findNodeByKey(current, parentNodeKey);
-        if (!parent) {
-          // 父节点还没在当前树里（例如还没展开），那就先不改
-          return prev;
-        }
-        const mappedForParent = mapToTreeNode(newNodeDTO, parent);
-        const newChildren = parent.children ? [...parent.children, mappedForParent] : [mappedForParent];
-        const shouldMarkLoaded = parent.loaded === true;
-        return {
-          ...prev,
-          [selectedRepository]: updateNodeChildren(
-            current,
-            parentNodeKey,
-            newChildren,
-            { markLoaded: shouldMarkLoaded },
-          ),
-        };
-      });
+      appendNodesByRepository(selectedRepository, [{ parentNodeKey, newNodeDTO }]);
     },
-    [selectedRepository, updateNodeChildren],
+    [appendNodesByRepository, selectedRepository],
   );
+
+  const appendNodesUnderParents = useCallback(
+    (items: AppendNodeBatchItem[]) => {
+      appendNodesByRepository(selectedRepository, items);
+    },
+    [appendNodesByRepository, selectedRepository],
+  );
+
+  const appendNodesUnderParentsByRepository = useCallback(
+    (repositoryId: number, items: AppendNodeBatchItem[]) => {
+      appendNodesByRepository(repositoryId, items);
+    },
+    [appendNodesByRepository],
+  );
+
+  useEffect(() => () => {
+    if (pendingAppendRetryTimerRef.current !== null) {
+      window.clearTimeout(pendingAppendRetryTimerRef.current);
+      pendingAppendRetryTimerRef.current = null;
+    }
+    pendingAppendByRepositoryRef.current.clear();
+  }, []);
 
   // 递归删除节点及其所有子节点
   const removeNodeFromTree = useCallback((nodes: Node[], targetKey: string): Node[] => {
@@ -825,6 +964,8 @@ export function useRepositoryTree(
     handleDoubleClick,
     loadChildren,
     appendNodeUnderParent,
+    appendNodesUnderParents,
+    appendNodesUnderParentsByRepository,
     removeNode,
     updateNodeName,
     updateNodeBuiltInConfig,

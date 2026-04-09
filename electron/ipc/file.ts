@@ -351,42 +351,75 @@ async function walkDirectoryFiles(
   currentPath: string,
   rootDisplayName: string,
 ): Promise<DesktopUploadFileEntry[]> {
-  const entries = await fs.readdir(currentPath, { withFileTypes: true });
-  const files: DesktopUploadFileEntry[] = [];
-
-  for (const entry of entries) {
-    if (entry.name === '.' || entry.name === '..') {
-      continue;
-    }
-    if (shouldIgnoreSystemEntry(entry.name)) {
-      continue;
-    }
-    const absolutePath = path.join(currentPath, entry.name);
-    if (entry.isSymbolicLink()) {
-      continue;
-    }
-    if (entry.isDirectory()) {
-      const nested = await walkDirectoryFiles(rootPath, absolutePath, rootDisplayName);
-      files.push(...nested);
-      continue;
-    }
-    if (!entry.isFile()) {
-      continue;
-    }
-    const stat = await fs.stat(absolutePath);
-    if (!stat.isFile()) {
-      continue;
-    }
-    const relativeInsideRoot = normalizeRelativePath(path.relative(rootPath, absolutePath));
-    const relativePath = normalizeRelativePath(path.join(rootDisplayName, relativeInsideRoot));
-    files.push({
-      name: entry.name,
-      size: stat.size,
-      localPath: absolutePath,
-      relativePath,
-    });
+  interface PendingFileCandidate {
+    absolutePath: string;
+    name: string;
   }
 
+  const pendingDirectories: string[] = [currentPath];
+  const pendingFiles: PendingFileCandidate[] = [];
+
+  while (pendingDirectories.length > 0) {
+    const directoryPath = pendingDirectories.pop() as string;
+    const entries = await fs.readdir(directoryPath, { withFileTypes: true });
+
+    for (const entry of entries) {
+      if (entry.name === '.' || entry.name === '..') {
+        continue;
+      }
+      if (shouldIgnoreSystemEntry(entry.name)) {
+        continue;
+      }
+      if (entry.isSymbolicLink()) {
+        continue;
+      }
+
+      const absolutePath = path.join(directoryPath, entry.name);
+      if (entry.isDirectory()) {
+        pendingDirectories.push(absolutePath);
+        continue;
+      }
+      if (!entry.isFile()) {
+        continue;
+      }
+
+      pendingFiles.push({
+        absolutePath,
+        name: entry.name,
+      });
+    }
+  }
+
+  const files: DesktopUploadFileEntry[] = [];
+  const STAT_CONCURRENCY = 48;
+  let currentIndex = 0;
+
+  const statWorker = async () => {
+    while (true) {
+      const workIndex = currentIndex;
+      currentIndex += 1;
+      if (workIndex >= pendingFiles.length) {
+        return;
+      }
+
+      const candidate = pendingFiles[workIndex];
+      const stat = await fs.stat(candidate.absolutePath).catch(() => null);
+      if (!stat?.isFile()) {
+        continue;
+      }
+      const relativeInsideRoot = normalizeRelativePath(path.relative(rootPath, candidate.absolutePath));
+      const relativePath = normalizeRelativePath(path.join(rootDisplayName, relativeInsideRoot));
+      files.push({
+        name: candidate.name,
+        size: stat.size,
+        localPath: candidate.absolutePath,
+        relativePath,
+      });
+    }
+  };
+
+  const workerCount = Math.min(STAT_CONCURRENCY, Math.max(1, pendingFiles.length));
+  await Promise.all(Array.from({ length: workerCount }, () => statWorker()));
   return files;
 }
 

@@ -1,6 +1,6 @@
 import {
   dispatchUploadTaskEvent,
-  enqueueUploadTask,
+  enqueueUploadTasks,
   getUploadTaskSummary,
   getUploadTasks,
   UploadTaskStoreState,
@@ -79,7 +79,7 @@ interface TaskRuntime {
   aborter?: () => void | Promise<void | boolean>;
 }
 
-const DEFAULT_MAX_CONCURRENT = 3;
+const DEFAULT_MAX_CONCURRENT = 10;
 
 const now = () => Date.now();
 
@@ -96,6 +96,7 @@ const toError = (reason: unknown) => {
 
 export class UploadManager {
   private state: UploadTaskStoreState = createUploadTaskStoreState();
+  private summary = getUploadTaskSummary(this.state);
   private queue: string[] = [];
   private runningTaskIds = new Set<string>();
   private taskInputMap = new Map<string, UploadTaskInput>();
@@ -138,7 +139,7 @@ export class UploadManager {
   }
 
   getSummary() {
-    return getUploadTaskSummary(this.state);
+    return this.summary;
   }
 
   getState() {
@@ -159,11 +160,10 @@ export class UploadManager {
     const taskIds: string[] = [];
     const done = this.createBatchRuntime(batchId, options?.onEvent);
 
-    tasks.forEach((input) => {
+    const createInputs = tasks.map((input) => {
       const taskId = buildTaskId();
       taskIds.push(taskId);
-
-      this.state = enqueueUploadTask(this.state, {
+      return {
         id: taskId,
         meta: {
           fileName: input.file.name,
@@ -175,7 +175,18 @@ export class UploadManager {
           parentId: input.parentId,
           folderGroupId: input.folderGroupId,
         },
-      });
+      };
+    });
+
+    this.state = enqueueUploadTasks(this.state, createInputs);
+    this.summary = {
+      ...this.summary,
+      total: this.summary.total + createInputs.length,
+      queued: this.summary.queued + createInputs.length,
+    };
+
+    tasks.forEach((input, index) => {
+      const taskId = taskIds[index];
 
       this.taskInputMap.set(taskId, input);
       this.taskRuntimeMap.set(taskId, {
@@ -186,12 +197,13 @@ export class UploadManager {
       });
       this.queue.push(taskId);
       this.batchRuntimeMap.get(batchId)?.taskIds.push(taskId);
-
-      const task = this.state.tasks[taskId];
-      if (task) {
-        this.emitTaskEvent('ENQUEUE', task);
-      }
     });
+
+    const firstQueuedTaskId = taskIds[0];
+    const firstQueuedTask = this.state.tasks[firstQueuedTaskId];
+    if (firstQueuedTask) {
+      this.emitTaskEvent('ENQUEUE', firstQueuedTask);
+    }
 
     this.drainQueue();
 
@@ -442,6 +454,7 @@ export class UploadManager {
       this.state = dispatchUploadTaskEvent(this.state, taskId, event);
       const updated = this.getTask(taskId);
       if (!updated) return null;
+      this.applySummaryStatusTransition(current.status, updated.status);
       this.emitTaskEvent(event.type, updated, current.status);
       return updated;
     } catch (error) {
@@ -483,5 +496,39 @@ export class UploadManager {
     const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  }
+
+  private applySummaryStatusTransition(from: UploadTaskStatus, to: UploadTaskStatus) {
+    if (from === to) {
+      return;
+    }
+    this.summary = { ...this.summary };
+    this.bumpStatusCount(from, -1);
+    this.bumpStatusCount(to, 1);
+  }
+
+  private bumpStatusCount(status: UploadTaskStatus, delta: number) {
+    switch (status) {
+      case UPLOAD_TASK_STATUS.QUEUED:
+        this.summary.queued += delta;
+        return;
+      case UPLOAD_TASK_STATUS.UPLOADING:
+        this.summary.uploading += delta;
+        return;
+      case UPLOAD_TASK_STATUS.PAUSED:
+        this.summary.paused += delta;
+        return;
+      case UPLOAD_TASK_STATUS.FAILED:
+        this.summary.failed += delta;
+        return;
+      case UPLOAD_TASK_STATUS.SUCCESS:
+        this.summary.success += delta;
+        return;
+      case UPLOAD_TASK_STATUS.CANCELED:
+        this.summary.canceled += delta;
+        return;
+      default:
+        return;
+    }
   }
 }

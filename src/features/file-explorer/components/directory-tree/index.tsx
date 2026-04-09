@@ -722,37 +722,80 @@ export default function DirectoryTree({
     return null;
   };
 
-  // 执行上传逻辑
-  const handleConfirmUpload = async () => {
-    const { files, targetNode } = uploadModal;
-    if (!files.length || !targetNode) return;
+  const hashString = (input: string): string => {
+    let hash = 0;
+    for (let i = 0; i < input.length; i += 1) {
+      hash = ((hash << 5) - hash) + input.charCodeAt(i);
+      hash |= 0;
+    }
+    return Math.abs(hash).toString(36);
+  };
 
-    try {
-      setUploadModal(prev => ({ ...prev, loading: true }));
+  const buildUploadGroupId = (
+    relativePath: string,
+    fallbackFileName: string,
+    localPath: string,
+    batchSeed: string,
+  ): string => {
+    const segments = String(relativePath || fallbackFileName || '')
+      .replace(/\\/g, '/')
+      .split('/')
+      .filter(Boolean);
+    const rootSegment = segments[0] || fallbackFileName || 'file';
+    const normalizedLocalPath = String(localPath || '').replace(/\\/g, '/');
+    const suffix = segments.slice(1).join('/');
+    const rootLocalPath = suffix && normalizedLocalPath.endsWith(`/${suffix}`)
+      ? normalizedLocalPath.slice(0, normalizedLocalPath.length - suffix.length - 1)
+      : normalizedLocalPath;
+    return `${batchSeed}:${rootSegment}:${hashString(rootLocalPath || normalizedLocalPath || relativePath)}`;
+  };
 
-      const pathResolver = new UploadPathResolver({
-        libraryId: targetNode.libraryId,
-        rootParentId: targetNode.id,
-        onDirectoryCreated: ({ parentId, newDirectoryNode }) => {
-          if (!onUploadSuccess) return;
-          const parentNode = resolveParentNodeForAppend(parentId);
-          if (!parentNode) return;
-          onUploadSuccess(parentNode, newDirectoryNode);
-        },
-      });
+  const nextMicroTask = () =>
+    new Promise<void>((resolve) => {
+      window.setTimeout(resolve, 0);
+    });
 
-      const tasks = await Promise.all(files.map(async (candidate) => {
-        const relativePath = normalizeUploadRelativePath(candidate.relativePath || candidate.file.name);
-        const parentId = await pathResolver.resolveParentId(relativePath);
-        return {
-          file: candidate.file,
-          parentId,
-          libraryId: targetNode.libraryId,
-          relativePath,
-        };
-      }));
+  const startUploadInBackground = async (
+    files: UploadCandidateFile[],
+    targetNode: UploadModalTargetNode,
+  ) => {
+    const pathResolver = new UploadPathResolver({
+      libraryId: targetNode.libraryId,
+      rootParentId: targetNode.id,
+      onDirectoryCreated: ({ parentId, newDirectoryNode }) => {
+        if (!onUploadSuccess) return;
+        const parentNode = resolveParentNodeForAppend(parentId);
+        if (!parentNode) return;
+        onUploadSuccess(parentNode, newDirectoryNode);
+      },
+    });
 
-      const batch = uploadManager.createBatch(tasks, {
+    const CHUNK_SIZE = 120;
+    const batchSeed = `upload-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const donePromises: Array<Promise<any>> = [];
+
+    for (let start = 0; start < files.length; start += CHUNK_SIZE) {
+      const chunk = files.slice(start, start + CHUNK_SIZE);
+      const chunkTasks = await Promise.all(
+        chunk.map(async (candidate) => {
+          const relativePath = normalizeUploadRelativePath(candidate.relativePath || candidate.file.name);
+          const parentId = await pathResolver.resolveParentId(relativePath);
+          return {
+            file: candidate.file,
+            parentId,
+            libraryId: targetNode.libraryId,
+            relativePath,
+            folderGroupId: buildUploadGroupId(
+              relativePath,
+              candidate.file.name,
+              String((candidate.file as any)?.path || ''),
+              batchSeed,
+            ),
+          };
+        }),
+      );
+
+      const batch = uploadManager.createBatch(chunkTasks, {
         onSingleSuccess: (newNode) => {
           const parentId = Number((newNode as any)?.parentId || targetNode.id);
           const parentNode = resolveParentNodeForAppend(parentId);
@@ -761,35 +804,40 @@ export default function DirectoryTree({
           }
         },
       });
+      donePromises.push(batch.done);
+      await nextMicroTask();
+    }
 
-      setUploadModal({ visible: false, files: [], targetNode: null, loading: false });
-      Toast.info(`已加入上传队列（${files.length} 个文件）`);
+    const results = (await Promise.all(donePromises)).flat();
+    const successCount = results.filter(r => r.taskStatus === UPLOAD_TASK_STATUS.SUCCESS).length;
+    const failedCount = results.filter(r => r.taskStatus === UPLOAD_TASK_STATUS.FAILED).length;
+    const canceledCount = results.filter(r => r.taskStatus === UPLOAD_TASK_STATUS.CANCELED).length;
 
-      void batch.done.then((results) => {
-        const successCount = results.filter(r => r.taskStatus === UPLOAD_TASK_STATUS.SUCCESS).length;
-        const failedCount = results.filter(r => r.taskStatus === UPLOAD_TASK_STATUS.FAILED).length;
-        const canceledCount = results.filter(r => r.taskStatus === UPLOAD_TASK_STATUS.CANCELED).length;
+    if (failedCount === 0 && canceledCount === 0) {
+      Toast.success(`成功上传 ${successCount} 个文件`);
+    } else if (failedCount === 0 && canceledCount > 0) {
+      Toast.info(`上传已中断：成功 ${successCount} 个，中断 ${canceledCount} 个`);
+    } else if (successCount > 0 || canceledCount > 0) {
+      Toast.warning(
+        `部分上传成功：成功 ${successCount} 个，失败 ${failedCount} 个，中断 ${canceledCount} 个`,
+      );
+    } else {
+      Toast.error('全部文件上传失败');
+    }
+  };
 
-        if (failedCount === 0 && canceledCount === 0) {
-          Toast.success(`成功上传 ${successCount} 个文件`);
-        } else if (failedCount === 0 && canceledCount > 0) {
-          Toast.info(`上传已中断：成功 ${successCount} 个，中断 ${canceledCount} 个`);
-        } else if (successCount > 0 || canceledCount > 0) {
-          Toast.warning(
-            `部分上传成功：成功 ${successCount} 个，失败 ${failedCount} 个，中断 ${canceledCount} 个`,
-          );
-        } else {
-          Toast.error('全部文件上传失败');
-        }
-      }).catch((error) => {
-        runtimeLogger.error('上传结果处理失败:', error);
-        Toast.error('上传过程中出现未知错误');
-      });
-    } catch (error) {
+  // 执行上传逻辑
+  const handleConfirmUpload = async () => {
+    const { files, targetNode } = uploadModal;
+    if (!files.length || !targetNode) return;
+
+    setUploadModal({ visible: false, files: [], targetNode: null, loading: false });
+    Toast.info(`正在准备上传队列（${files.length} 个文件）`);
+
+    void startUploadInBackground(files, targetNode).catch((error) => {
       runtimeLogger.error('上传执行失败:', error);
       Toast.error((error as any)?.message || '上传过程中出现未知错误');
-      setUploadModal(prev => ({ ...prev, loading: false }));
-    }
+    });
   };
 
   // 取消上传

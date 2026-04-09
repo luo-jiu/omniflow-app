@@ -28,6 +28,7 @@ const defaultExecutor: UploadTaskExecutor = async (payload: UploadTaskExecutorPa
 };
 
 export const uploadManager = new UploadManager(defaultExecutor);
+uploadManager.setMaxConcurrent(10);
 
 export type {
   UploadBatchHandle,

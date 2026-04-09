@@ -33,17 +33,32 @@ export function enqueueUploadTask(
   state: UploadTaskStoreState,
   input: CreateUploadTaskInput,
 ): UploadTaskStoreState {
-  if (state.tasks[input.id]) {
-    throw new Error(`Task id already exists: ${input.id}`);
+  return enqueueUploadTasks(state, [input]);
+}
+
+export function enqueueUploadTasks(
+  state: UploadTaskStoreState,
+  inputs: CreateUploadTaskInput[],
+): UploadTaskStoreState {
+  if (inputs.length === 0) {
+    return state;
   }
 
-  const task = createUploadTask(input);
+  const nextOrder = [...state.order];
+  const nextTasks: Record<string, UploadTask> = { ...state.tasks };
+
+  for (const input of inputs) {
+    if (nextTasks[input.id]) {
+      throw new Error(`Task id already exists: ${input.id}`);
+    }
+    const task = createUploadTask(input);
+    nextOrder.push(task.id);
+    nextTasks[task.id] = task;
+  }
+
   return {
-    order: [...state.order, task.id],
-    tasks: {
-      ...state.tasks,
-      [task.id]: task,
-    },
+    order: nextOrder,
+    tasks: nextTasks,
   };
 }
 
@@ -116,4 +131,3 @@ export function getUploadTaskSummary(state: UploadTaskStoreState): UploadTaskSum
 
   return summary;
 }
-

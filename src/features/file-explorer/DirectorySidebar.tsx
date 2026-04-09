@@ -48,6 +48,7 @@ const DirectorySidebar: React.FC<Props> = ({ libraryId, onFileOpen }) => {
     handleDoubleClick,
     loadChildren,
     appendNodeUnderParent,
+    appendNodesUnderParentsByRepository,
     removeNode,
     updateNodeName,
     updateNodeBuiltInConfig,
@@ -60,6 +61,68 @@ const DirectorySidebar: React.FC<Props> = ({ libraryId, onFileOpen }) => {
     }
     appendNodeUnderParent('root', newNode);
   }, [appendNodeUnderParent]);
+
+  const uploadAppendQueueRef = React.useRef<Array<{ repositoryId: number; parentNodeKey: string; newNodeDTO: NodeRespDTO }>>([]);
+  const uploadAppendTimerRef = React.useRef<number | null>(null);
+  const UPLOAD_APPEND_FLUSH_MS = 240;
+  const UPLOAD_APPEND_BATCH_SIZE = 220;
+
+  const flushUploadAppendQueue = React.useCallback(() => {
+    uploadAppendTimerRef.current = null;
+    if (uploadAppendQueueRef.current.length === 0) {
+      return;
+    }
+
+    const batch = uploadAppendQueueRef.current.splice(0, UPLOAD_APPEND_BATCH_SIZE);
+    const groupedByRepository = new Map<number, Array<{ parentNodeKey: string; newNodeDTO: NodeRespDTO }>>();
+    batch.forEach((item) => {
+      const bucket = groupedByRepository.get(item.repositoryId) || [];
+      bucket.push({ parentNodeKey: item.parentNodeKey, newNodeDTO: item.newNodeDTO });
+      groupedByRepository.set(item.repositoryId, bucket);
+    });
+    groupedByRepository.forEach((items, repositoryId) => {
+      appendNodesUnderParentsByRepository(repositoryId, items);
+    });
+
+    if (uploadAppendQueueRef.current.length > 0) {
+      uploadAppendTimerRef.current = window.setTimeout(flushUploadAppendQueue, UPLOAD_APPEND_FLUSH_MS);
+    }
+  }, [appendNodesUnderParentsByRepository]);
+
+  const enqueueUploadedNodeAppend = React.useCallback((parentNode: any, newNode: unknown) => {
+    if (!isNodeRespDTO(newNode)) {
+      return;
+    }
+
+    const parentNodeKey = (!parentNode || parentNode.key === 'root' || (rootNodeId !== null && parentNode.id === rootNodeId))
+      ? 'root'
+      : String(parentNode.key);
+
+    uploadAppendQueueRef.current.push({
+      repositoryId: libraryId,
+      parentNodeKey,
+      newNodeDTO: newNode,
+    });
+
+    if (uploadAppendQueueRef.current.length >= UPLOAD_APPEND_BATCH_SIZE && uploadAppendTimerRef.current !== null) {
+      window.clearTimeout(uploadAppendTimerRef.current);
+      uploadAppendTimerRef.current = null;
+      flushUploadAppendQueue();
+      return;
+    }
+
+    if (uploadAppendTimerRef.current === null) {
+      uploadAppendTimerRef.current = window.setTimeout(flushUploadAppendQueue, UPLOAD_APPEND_FLUSH_MS);
+    }
+  }, [flushUploadAppendQueue, libraryId, rootNodeId]);
+
+  React.useEffect(() => () => {
+    if (uploadAppendTimerRef.current !== null) {
+      window.clearTimeout(uploadAppendTimerRef.current);
+      uploadAppendTimerRef.current = null;
+    }
+    uploadAppendQueueRef.current.length = 0;
+  }, []);
 
   useDesktopAutoImport({
     libraryId,
@@ -77,11 +140,7 @@ const DirectorySidebar: React.FC<Props> = ({ libraryId, onFileOpen }) => {
           onDoubleClick={handleDoubleClick}
           loadData={loadChildren}
           onUploadSuccess={(parentNode, newNode) => {
-            if (!parentNode || parentNode.key === 'root' || (rootNodeId !== null && parentNode.id === rootNodeId)) {
-              appendNodeUnderParent('root', newNode);
-            } else {
-              appendNodeUnderParent(parentNode.key, newNode);
-            }
+            enqueueUploadedNodeAppend(parentNode, newNode);
           }}
           onDeleteSuccess={(_parentNode, deletedNodeKey) => {
             removeNode(deletedNodeKey);
