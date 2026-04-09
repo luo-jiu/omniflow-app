@@ -1,7 +1,11 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Spin } from '@douyinfe/semi-ui';
-import { fetchNodeDetailById, getChildrenByNodeId, getFileLink } from '@/features/file-explorer/services/file.api';
-import { isImageExtension } from '@/features/file-explorer/utils/file-node-icon';
+import {
+  batchGetFileLinks,
+  fetchArchiveCardsPage,
+  fetchNodeDetailById,
+  updateNodeConfig,
+} from '@/features/file-explorer/services/file.api';
 import { runtimeLogger } from '@/utils/runtimeLogger';
 import { AsmrArchiveViewerWrapper } from './style';
 import { useFileViewer } from '@/hooks/useFileViewer';
@@ -12,23 +16,7 @@ interface AsmrArchiveViewerProps {
   folderNodeId: number | null;
   fileUrl: string;
   fileName?: string | null;
-}
-
-interface ArchiveNodeItem {
-  id: number;
-  name: string;
-  type: 'dir' | 'file' | string | number;
-  ext?: string;
-  mimeType?: string;
-  builtInType?: string;
-  archiveMode?: number;
-}
-
-interface AsmrArchiveCard {
-  id: number;
-  title: string;
-  coverUrl: string | null;
-  tags: AsmrArchiveTag[];
+  active?: boolean;
 }
 
 interface AsmrArchiveTag {
@@ -39,6 +27,36 @@ interface AsmrArchiveTag {
   fallback?: boolean;
 }
 
+interface AsmrArchiveCard {
+  id: number;
+  title: string;
+  sortOrder: number;
+  coverNodeId: number | null;
+  coverUrl: string | null;
+  tags: AsmrArchiveTag[];
+  viewMeta: string;
+}
+
+interface AsmrArchiveSnapshot {
+  hasLoadedList: boolean;
+  cards: AsmrArchiveCard[];
+  nextOffset: number;
+  total: number;
+  hasMore: boolean;
+  scrollTop: number;
+  scrollRatio: number;
+  anchorCardId: number | null;
+  anchorOffsetRatio: number;
+}
+
+interface ArchiveReaderProgress {
+  anchorCardId: number | null;
+  anchorOffsetRatio: number;
+  scrollTop: number;
+  scrollRatio: number;
+  updatedAt: string;
+}
+
 interface AsmrViewMetaPayload {
   tag?: string;
   tagIds?: number[];
@@ -46,36 +64,34 @@ interface AsmrViewMetaPayload {
   [key: string]: unknown;
 }
 
-const NAME_COLLATOR = new Intl.Collator('zh-Hans-CN', {
-  numeric: true,
-  sensitivity: 'base',
-});
+const PAGE_SIZE = 24;
+const LINK_EXPIRY_MINUTES = 120;
+const VIEW_META_VIEWER_STATE_KEY = '__omniflowViewerStateV1';
+const VIEW_META_VIEWER_STATE_LEGACY_KEY = '__omniflow_viewer_state_v1';
+const VIEW_META_ASMR_ARCHIVE_READER_KEY = 'asmrArchiveReader';
+const VIEW_META_ASMR_ARCHIVE_READER_LEGACY_KEY = 'asmr_archive_reader';
+const ASMR_ARCHIVE_CACHE_MAX_ENTRIES = 24;
+const REMOTE_PROGRESS_SYNC_INTERVAL_MS = 200;
+
+const EMPTY_ASMR_ARCHIVE_SNAPSHOT: AsmrArchiveSnapshot = {
+  hasLoadedList: false,
+  cards: [],
+  nextOffset: 0,
+  total: 0,
+  hasMore: false,
+  scrollTop: 0,
+  scrollRatio: 0,
+  anchorCardId: null,
+  anchorOffsetRatio: 0,
+};
+
+const asmrArchiveSnapshotCache = new Map<string, AsmrArchiveSnapshot>();
 
 function parseArchiveLibraryId(fileUrl: string): number | null {
   const matches = /^asmr-archive:\/\/library\/(\d+)\/node\/\d+$/i.exec(String(fileUrl || '').trim());
   if (!matches) return null;
   const parsed = Number(matches[1]);
   return Number.isFinite(parsed) ? parsed : null;
-}
-
-function isDirectoryNode(item: ArchiveNodeItem): boolean {
-  return String(item.type) === 'dir' || Number(item.type) === 0;
-}
-
-function isHiddenNodeName(name?: string, ext?: string): boolean {
-  const trimmedName = String(name || '').trim();
-  if (trimmedName.startsWith('.')) {
-    return true;
-  }
-  const normalizedExt = String(ext || '').trim().replace(/^\./, '');
-  return trimmedName.length === 0 && normalizedExt.length > 0;
-}
-
-function isImageFileNode(item: ArchiveNodeItem): boolean {
-  if (isDirectoryNode(item)) return false;
-  if (isHiddenNodeName(item.name, item.ext)) return false;
-  if (String(item.mimeType || '').startsWith('image/')) return true;
-  return isImageExtension(item.ext);
 }
 
 function normalizeArchiveTitle(fileName?: string | null): string {
@@ -88,7 +104,103 @@ function normalizeArchiveTitle(fileName?: string | null): string {
   return raw;
 }
 
-function parseViewMeta(raw?: string | null): AsmrViewMetaPayload {
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
+
+function resolveReaderCacheKey(fileUrl: string, folderNodeId: number | null): string | null {
+  if (!folderNodeId || !Number.isFinite(folderNodeId)) return null;
+  return `${String(fileUrl || '').trim()}::${folderNodeId}`;
+}
+
+function setArchiveSnapshotCache(cacheKey: string, snapshot: AsmrArchiveSnapshot) {
+  if (asmrArchiveSnapshotCache.has(cacheKey)) {
+    asmrArchiveSnapshotCache.delete(cacheKey);
+  }
+  asmrArchiveSnapshotCache.set(cacheKey, snapshot);
+  if (asmrArchiveSnapshotCache.size > ASMR_ARCHIVE_CACHE_MAX_ENTRIES) {
+    const oldest = asmrArchiveSnapshotCache.keys().next().value;
+    if (oldest) {
+      asmrArchiveSnapshotCache.delete(oldest);
+    }
+  }
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function parseViewMetaObject(raw: string | null | undefined): Record<string, unknown> {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return isPlainObject(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function parsePositiveNumber(value: unknown): number | null {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return parsed;
+}
+
+function parseRatio(value: unknown): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return 0;
+  return clamp(parsed, 0, 1);
+}
+
+function parseRemoteArchiveProgress(viewMetaRaw: string | null | undefined): ArchiveReaderProgress | null {
+  const meta = parseViewMetaObject(viewMetaRaw);
+  const viewerState = meta[VIEW_META_VIEWER_STATE_KEY] ?? meta[VIEW_META_VIEWER_STATE_LEGACY_KEY];
+  if (!isPlainObject(viewerState)) return null;
+  const readerState = viewerState[VIEW_META_ASMR_ARCHIVE_READER_KEY] ?? viewerState[VIEW_META_ASMR_ARCHIVE_READER_LEGACY_KEY];
+  if (!isPlainObject(readerState)) return null;
+
+  const anchorCardId = parsePositiveNumber(readerState.anchorCardId);
+  const scrollTop = Number(readerState.scrollTop ?? 0);
+  const currentScrollTop = Number.isFinite(scrollTop) && scrollTop > 0 ? scrollTop : 0;
+  const currentScrollRatio = parseRatio(readerState.scrollRatio);
+  if (!anchorCardId && currentScrollTop <= 0 && currentScrollRatio <= 0) {
+    return null;
+  }
+
+  return {
+    anchorCardId,
+    anchorOffsetRatio: parseRatio(readerState.anchorOffsetRatio),
+    scrollTop: currentScrollTop,
+    scrollRatio: currentScrollRatio,
+    updatedAt: String(readerState.updatedAt || ''),
+  };
+}
+
+function buildViewMetaWithArchiveProgress(
+  baseMeta: Record<string, unknown>,
+  progress: ArchiveReaderProgress,
+): Record<string, unknown> {
+  const nextMeta: Record<string, unknown> = { ...baseMeta };
+  const viewerStateCandidate = nextMeta[VIEW_META_VIEWER_STATE_KEY] ?? nextMeta[VIEW_META_VIEWER_STATE_LEGACY_KEY];
+  const currentViewerState = isPlainObject(viewerStateCandidate)
+    ? { ...(viewerStateCandidate as Record<string, unknown>) }
+    : {};
+  delete currentViewerState[VIEW_META_ASMR_ARCHIVE_READER_LEGACY_KEY];
+  delete nextMeta[VIEW_META_VIEWER_STATE_LEGACY_KEY];
+  nextMeta[VIEW_META_VIEWER_STATE_KEY] = {
+    ...currentViewerState,
+    [VIEW_META_ASMR_ARCHIVE_READER_KEY]: {
+      anchorCardId: progress.anchorCardId,
+      anchorOffsetRatio: progress.anchorOffsetRatio,
+      scrollTop: progress.scrollTop,
+      scrollRatio: progress.scrollRatio,
+      updatedAt: progress.updatedAt,
+    },
+  };
+  return nextMeta;
+}
+
+function parseAsmrViewMeta(raw?: string | null): AsmrViewMetaPayload {
   if (!raw) return {};
   try {
     const parsed = JSON.parse(raw);
@@ -111,9 +223,7 @@ function resolveMetaNumber(input: unknown): number | null {
 }
 
 function resolveMetaNumberList(input: unknown): number[] {
-  if (!Array.isArray(input)) {
-    return [];
-  }
+  if (!Array.isArray(input)) return [];
   const result: number[] = [];
   input.forEach((item) => {
     const value = resolveMetaNumber(item);
@@ -124,13 +234,9 @@ function resolveMetaNumberList(input: unknown): number[] {
   return result;
 }
 
-function resolveTagIdsFromLegacyTagText(
-  legacyTagText: string,
-  normalizedNameMap: Map<string, number>,
-): number[] {
+function resolveTagIdsFromLegacyTagText(legacyTagText: string, normalizedNameMap: Map<string, number>): number[] {
   const normalized = sanitizeMetaText(legacyTagText);
   if (!normalized) return [];
-
   const tokens = normalized
     .split(/[/,，、|]/g)
     .map(token => sanitizeMetaText(token).toLowerCase())
@@ -152,189 +258,587 @@ function resolveFallbackTagTexts(tagText: string): string[] {
     .filter(Boolean);
 }
 
-async function mapWithConcurrency<T, R>(
-  items: T[],
-  concurrency: number,
-  mapper: (item: T, index: number) => Promise<R>,
-): Promise<R[]> {
-  if (items.length === 0) return [];
-  const limit = Math.max(1, Math.floor(concurrency));
-  const results: R[] = new Array(items.length);
-  let nextIndex = 0;
+function resolveAsmrCardTags(
+  viewMetaRaw: string,
+  tagOptionMap: Map<number, TagItem>,
+  normalizedTagNameMap: Map<string, number>,
+): AsmrArchiveTag[] {
+  const parsedMeta = parseAsmrViewMeta(viewMetaRaw);
+  const nextTags: AsmrArchiveTag[] = [];
+  const metaTagText = sanitizeMetaText(parsedMeta.tag);
+  const metaTagIds = resolveMetaNumberList(parsedMeta.tagIds);
+  const resolvedTagIds = metaTagIds.length > 0
+    ? metaTagIds
+    : resolveTagIdsFromLegacyTagText(metaTagText, normalizedTagNameMap);
 
-  const worker = async () => {
-    while (nextIndex < items.length) {
-      const currentIndex = nextIndex;
-      nextIndex += 1;
-      results[currentIndex] = await mapper(items[currentIndex], currentIndex);
-    }
-  };
+  resolvedTagIds.forEach((tagId) => {
+    const option = tagOptionMap.get(tagId);
+    if (!option) return;
+    nextTags.push({
+      id: option.id,
+      name: option.name,
+      color: option.color,
+      textColor: option.textColor,
+    });
+  });
 
-  const workers = Array.from(
-    { length: Math.min(limit, items.length) },
-    () => worker(),
-  );
-  await Promise.all(workers);
-  return results;
+  if (nextTags.length === 0 && metaTagText) {
+    resolveFallbackTagTexts(metaTagText).forEach((tagName) => {
+      if (nextTags.some(item => item.name === tagName)) return;
+      nextTags.push({
+        id: null,
+        name: tagName,
+        fallback: true,
+      });
+    });
+  }
+  return nextTags;
 }
 
-const AsmrArchiveViewer: React.FC<AsmrArchiveViewerProps> = ({ folderNodeId, fileUrl, fileName }) => {
+const AsmrArchiveViewer: React.FC<AsmrArchiveViewerProps> = ({
+  folderNodeId,
+  fileUrl,
+  fileName,
+  active = true,
+}) => {
   const { setFileUrl } = useFileViewer();
-  const { viewportRef, wrapperStyle } = useArchiveCardGrid({
-    baseCardWidth: 410,
-  });
+  const { viewportRef, wrapperStyle } = useArchiveCardGrid({ baseCardWidth: 410 });
   const libraryId = useMemo(() => parseArchiveLibraryId(fileUrl), [fileUrl]);
   const title = useMemo(() => normalizeArchiveTitle(fileName), [fileName]);
+  const readerCacheKey = useMemo(
+    () => resolveReaderCacheKey(fileUrl, folderNodeId),
+    [fileUrl, folderNodeId],
+  );
 
-  const [loading, setLoading] = useState(false);
+  const [listLoading, setListLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [cards, setCards] = useState<AsmrArchiveCard[]>([]);
+  const [total, setTotal] = useState(0);
+  const [nextOffset, setNextOffset] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+  const [restoreTick, setRestoreTick] = useState(0);
+
+  const [tagOptionMap, setTagOptionMap] = useState<Map<number, TagItem>>(new Map());
+  const [normalizedTagNameMap, setNormalizedTagNameMap] = useState<Map<string, number>>(new Map());
+  const tagOptionMapRef = useRef<Map<number, TagItem>>(new Map());
+  const normalizedTagNameMapRef = useRef<Map<string, number>>(new Map());
+
+  const cardRefs = useRef<Map<number, HTMLElement>>(new Map());
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
   const requestIdRef = useRef(0);
+  const isHydratingSnapshotRef = useRef(false);
+  const pendingRestoreRef = useRef<ArchiveReaderProgress | null>(null);
+  const restoreTriggeredLoadMoreRef = useRef(false);
+  const scrollPersistRafRef = useRef<number>(0);
+  const remoteSyncTimerRef = useRef<number>(0);
+  const remoteSyncInflightRef = useRef(false);
+  const pendingRemoteProgressRef = useRef<ArchiveReaderProgress | null>(null);
+  const suppressNextScrollPersistRef = useRef(false);
+  const viewMetaBaseRef = useRef<Record<string, unknown>>({});
+  const viewMetaBaseReadyRef = useRef(false);
+  const lastRemoteSyncSignatureRef = useRef('');
+
+  const persistSnapshot = useCallback((patch: Partial<AsmrArchiveSnapshot>) => {
+    if (!readerCacheKey) return;
+    const prev = asmrArchiveSnapshotCache.get(readerCacheKey) ?? EMPTY_ASMR_ARCHIVE_SNAPSHOT;
+    setArchiveSnapshotCache(readerCacheKey, {
+      hasLoadedList: patch.hasLoadedList ?? prev.hasLoadedList,
+      cards: patch.cards ?? prev.cards,
+      nextOffset: patch.nextOffset ?? prev.nextOffset,
+      total: patch.total ?? prev.total,
+      hasMore: patch.hasMore ?? prev.hasMore,
+      scrollTop: patch.scrollTop ?? prev.scrollTop,
+      scrollRatio: patch.scrollRatio ?? prev.scrollRatio,
+      anchorCardId: patch.anchorCardId ?? prev.anchorCardId,
+      anchorOffsetRatio: patch.anchorOffsetRatio ?? prev.anchorOffsetRatio,
+    });
+  }, [readerCacheKey]);
+
+  const captureAnchorFromViewport = useCallback((): {
+    anchorCardId: number | null;
+    anchorOffsetRatio: number;
+  } => {
+    const viewport = viewportRef.current;
+    if (!viewport) {
+      return { anchorCardId: null, anchorOffsetRatio: 0 };
+    }
+
+    const viewportTop = viewport.getBoundingClientRect().top;
+    for (const card of cards) {
+      const el = cardRefs.current.get(card.id);
+      if (!el) continue;
+      const rect = el.getBoundingClientRect();
+      if (rect.bottom <= viewportTop + 1) continue;
+      const ratio = rect.height > 0 ? clamp((viewportTop - rect.top) / rect.height, 0, 1) : 0;
+      return {
+        anchorCardId: card.id,
+        anchorOffsetRatio: ratio,
+      };
+    }
+
+    if (cards.length > 0) {
+      return {
+        anchorCardId: cards[0].id,
+        anchorOffsetRatio: 0,
+      };
+    }
+    return { anchorCardId: null, anchorOffsetRatio: 0 };
+  }, [cards, viewportRef]);
+
+  const flushRemoteProgress = useCallback(async (force = false) => {
+    if (!folderNodeId || !libraryId) {
+      pendingRemoteProgressRef.current = null;
+      return;
+    }
+    if (!active && !force) return;
+    if (remoteSyncInflightRef.current) return;
+
+    const pending = pendingRemoteProgressRef.current;
+    if (!pending) return;
+    const signature = JSON.stringify(pending);
+    if (!force && signature === lastRemoteSyncSignatureRef.current) return;
+
+    remoteSyncInflightRef.current = true;
+    try {
+      if (!viewMetaBaseReadyRef.current) {
+        try {
+          const detail = await fetchNodeDetailById(folderNodeId);
+          viewMetaBaseRef.current = parseViewMetaObject(detail.viewMeta);
+          viewMetaBaseReadyRef.current = true;
+        } catch (detailError) {
+          runtimeLogger.warn('同步前读取 ASMR 归档基础元信息失败:', detailError);
+          return;
+        }
+      }
+      const nextMeta = buildViewMetaWithArchiveProgress(viewMetaBaseRef.current, pending);
+      await updateNodeConfig({
+        id: folderNodeId,
+        viewMeta: JSON.stringify(nextMeta),
+      });
+      viewMetaBaseRef.current = nextMeta;
+      lastRemoteSyncSignatureRef.current = signature;
+      pendingRemoteProgressRef.current = null;
+    } catch (syncError) {
+      runtimeLogger.warn('同步 ASMR 归档阅读位置失败:', syncError);
+    } finally {
+      remoteSyncInflightRef.current = false;
+    }
+  }, [active, folderNodeId, libraryId]);
+
+  const queueRemoteProgress = useCallback((progress: ArchiveReaderProgress, force = false) => {
+    pendingRemoteProgressRef.current = progress;
+    if (!active && !force) return;
+    if (remoteSyncTimerRef.current) {
+      window.clearTimeout(remoteSyncTimerRef.current);
+    }
+    remoteSyncTimerRef.current = window.setTimeout(() => {
+      remoteSyncTimerRef.current = 0;
+      void flushRemoteProgress(force);
+    }, force ? 0 : REMOTE_PROGRESS_SYNC_INTERVAL_MS);
+  }, [active, flushRemoteProgress]);
+
+  const loadTagOptions = useCallback(async () => {
+    try {
+      const options = await fetchTags('ASMR')
+        .then(list => list.filter(tag => (
+          Number(tag.enabled ?? 1) === 1
+          && Number(tag.ownerUserId ?? 0) > 0
+        )));
+      const nextTagMap = new Map<number, TagItem>();
+      const nextNameMap = new Map<string, number>();
+      options.forEach((option) => {
+        nextTagMap.set(option.id, option);
+        const normalizedName = sanitizeMetaText(option.name).toLowerCase();
+        if (normalizedName && !nextNameMap.has(normalizedName)) {
+          nextNameMap.set(normalizedName, option.id);
+        }
+      });
+      tagOptionMapRef.current = nextTagMap;
+      normalizedTagNameMapRef.current = nextNameMap;
+      setTagOptionMap(nextTagMap);
+      setNormalizedTagNameMap(nextNameMap);
+    } catch (tagError) {
+      runtimeLogger.warn('加载 ASMR 标签失败，归档卡片将仅显示文本标签:', tagError);
+      tagOptionMapRef.current = new Map();
+      normalizedTagNameMapRef.current = new Map();
+      setTagOptionMap(new Map());
+      setNormalizedTagNameMap(new Map());
+    }
+  }, []);
+
+  const resolveCardCoverUrls = useCallback(async (inputCards: AsmrArchiveCard[]): Promise<AsmrArchiveCard[]> => {
+    if (!libraryId || inputCards.length === 0) {
+      return inputCards;
+    }
+
+    const unresolvedNodeIds = inputCards
+      .filter(card => !card.coverUrl && card.coverNodeId && card.coverNodeId > 0)
+      .map(card => card.coverNodeId as number);
+    if (unresolvedNodeIds.length === 0) {
+      return inputCards;
+    }
+
+    try {
+      const linkMap = await batchGetFileLinks({
+        libraryId,
+        nodeIds: unresolvedNodeIds,
+        expiry: LINK_EXPIRY_MINUTES,
+      });
+      if (linkMap.size === 0) {
+        return inputCards;
+      }
+      return inputCards.map((card) => {
+        if (!card.coverNodeId || card.coverUrl) return card;
+        const nextUrl = linkMap.get(card.coverNodeId);
+        if (!nextUrl) return card;
+        return {
+          ...card,
+          coverUrl: nextUrl,
+        };
+      });
+    } catch (coverError) {
+      runtimeLogger.warn('批量加载 ASMR 归档封面失败:', coverError);
+      return inputCards;
+    }
+  }, [libraryId]);
+
+  const loadPage = useCallback(async (offset: number, append: boolean) => {
+    if (!folderNodeId || !libraryId || !Number.isFinite(folderNodeId)) return;
+    const requestId = requestIdRef.current;
+    if (append) {
+      setLoadingMore(true);
+    } else {
+      setListLoading(true);
+      setError(null);
+    }
+
+    try {
+      const page = await fetchArchiveCardsPage({
+        nodeId: folderNodeId,
+        libraryId,
+        builtInType: 'ASMR',
+        offset,
+        limit: PAGE_SIZE,
+      });
+      if (requestId !== requestIdRef.current) return;
+
+      const nextCards: AsmrArchiveCard[] = page.items.map(item => {
+        const viewMeta = String(item.viewMeta || '');
+        const tags = resolveAsmrCardTags(
+          viewMeta,
+          tagOptionMapRef.current,
+          normalizedTagNameMapRef.current,
+        );
+        return {
+          id: Number(item.id),
+          title: String(item.name || ''),
+          sortOrder: Number(item.sortOrder ?? 0),
+          coverNodeId: Number.isFinite(Number(item.coverNodeId)) && Number(item.coverNodeId) > 0
+            ? Number(item.coverNodeId)
+            : null,
+          coverUrl: null,
+          tags,
+          viewMeta,
+        };
+      });
+      const cardsWithUrl = await resolveCardCoverUrls(nextCards);
+      if (requestId !== requestIdRef.current) return;
+
+      setCards((prev) => {
+        const merged = append ? [...prev, ...cardsWithUrl] : cardsWithUrl;
+        const byId = new Map<number, AsmrArchiveCard>();
+        merged.forEach((card) => {
+          const existing = byId.get(card.id);
+          if (!existing) {
+            byId.set(card.id, card);
+            return;
+          }
+          byId.set(card.id, {
+            ...existing,
+            ...card,
+            coverUrl: card.coverUrl || existing.coverUrl,
+          });
+        });
+        return Array.from(byId.values()).sort((a, b) => {
+          if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;
+          return a.id - b.id;
+        });
+      });
+      setTotal(page.total);
+      setNextOffset(page.offset + page.items.length);
+      setHasMore(page.hasMore);
+    } catch (loadError) {
+      runtimeLogger.error('加载 ASMR 归档分页失败:', loadError);
+      if (requestId !== requestIdRef.current) return;
+      setError('加载归档失败');
+      if (!append) {
+        setCards([]);
+      }
+    } finally {
+      if (requestId === requestIdRef.current) {
+        setListLoading(false);
+        setLoadingMore(false);
+      }
+    }
+  }, [folderNodeId, libraryId, resolveCardCoverUrls]);
 
   useEffect(() => {
-    if (!folderNodeId || !Number.isFinite(folderNodeId) || !libraryId) {
+    if (cards.length === 0) return;
+    setCards(prev => prev.map(card => ({
+      ...card,
+      tags: resolveAsmrCardTags(
+        card.viewMeta,
+        tagOptionMap,
+        normalizedTagNameMap,
+      ),
+    })));
+  }, [normalizedTagNameMap, tagOptionMap]);
+
+  const loadMore = useCallback(() => {
+    if (listLoading || loadingMore || !hasMore) return;
+    void loadPage(nextOffset, true);
+  }, [hasMore, listLoading, loadingMore, loadPage, nextOffset]);
+
+  useEffect(() => {
+    void loadTagOptions();
+  }, [loadTagOptions]);
+
+  useEffect(() => {
+    requestIdRef.current += 1;
+    const requestId = requestIdRef.current;
+    restoreTriggeredLoadMoreRef.current = false;
+    pendingRestoreRef.current = null;
+    cardRefs.current.clear();
+
+    if (!folderNodeId || !libraryId) {
       setCards([]);
       setError('归档参数异常');
-      setLoading(false);
+      setListLoading(false);
+      setLoadingMore(false);
+      setTotal(0);
+      setNextOffset(0);
+      setHasMore(false);
       return;
     }
 
-    const requestId = ++requestIdRef.current;
-    setLoading(true);
-    setError(null);
+    const cached = readerCacheKey ? asmrArchiveSnapshotCache.get(readerCacheKey) : null;
+    const hasCachedList = Boolean(cached?.hasLoadedList && cached.cards.length > 0);
+    if (hasCachedList && cached) {
+      isHydratingSnapshotRef.current = true;
+      setCards(cached.cards);
+      setTotal(cached.total);
+      setNextOffset(cached.nextOffset);
+      setHasMore(cached.hasMore);
+      setError(null);
+      setListLoading(false);
+      setLoadingMore(false);
+      pendingRestoreRef.current = {
+        anchorCardId: cached.anchorCardId,
+        anchorOffsetRatio: cached.anchorOffsetRatio,
+        scrollTop: cached.scrollTop,
+        scrollRatio: cached.scrollRatio,
+        updatedAt: '',
+      };
+      setRestoreTick((prev) => prev + 1);
+    } else {
+      setCards([]);
+      setTotal(0);
+      setNextOffset(0);
+      setHasMore(false);
+      setError(null);
+      void loadPage(0, false);
+    }
 
     void (async () => {
       try {
-        const children = (await getChildrenByNodeId(folderNodeId, libraryId)) as ArchiveNodeItem[];
+        const detail = await fetchNodeDetailById(folderNodeId);
         if (requestId !== requestIdRef.current) return;
-        const asmrTagOptions = await fetchTags('ASMR')
-          .then(list => list.filter(tag => (
-            Number(tag.enabled ?? 1) === 1
-            && Number(tag.ownerUserId ?? 0) > 0
-          )))
-          .catch((error) => {
-            runtimeLogger.warn('加载 ASMR 标签失败，归档卡片将仅显示文本标签:', error);
-            return [] as TagItem[];
-          });
-        const tagOptionMap = new Map<number, TagItem>();
-        const normalizedTagNameMap = new Map<string, number>();
-        asmrTagOptions.forEach((option) => {
-          tagOptionMap.set(option.id, option);
-          const normalizedName = sanitizeMetaText(option.name).toLowerCase();
-          if (normalizedName && !normalizedTagNameMap.has(normalizedName)) {
-            normalizedTagNameMap.set(normalizedName, option.id);
-          }
-        });
-
-        const archiveUnits = (children || [])
-          .filter(item => isDirectoryNode(item))
-          .filter(item => String(item.builtInType || 'DEF').toUpperCase() === 'ASMR')
-          .filter(item => Number(item.archiveMode ?? 0) !== 1)
-          .sort((a, b) => NAME_COLLATOR.compare(String(a.name || ''), String(b.name || '')));
-
-        const nextCards = await mapWithConcurrency(
-          archiveUnits,
-          6,
-          async (unit): Promise<AsmrArchiveCard> => {
-          try {
-            const [unitChildren, detail] = await Promise.all([
-              getChildrenByNodeId(unit.id, libraryId) as Promise<ArchiveNodeItem[]>,
-              fetchNodeDetailById(unit.id).catch((error) => {
-                runtimeLogger.warn('加载 ASMR 归档卡片元信息失败:', error);
-                return null;
-              }),
-            ]);
-            const parsedMeta = parseViewMeta(detail?.viewMeta);
-            const preferredCoverNodeId = resolveMetaNumber(parsedMeta.coverNodeId);
-            const fallbackCoverNode = (unitChildren || []).find(isImageFileNode);
-            const coverCandidateIds = [
-              preferredCoverNodeId,
-              fallbackCoverNode?.id ?? null,
-            ].filter((id, index, list): id is number => (
-              Number.isFinite(id)
-              && Number(id) > 0
-              && list.indexOf(id) === index
-            ));
-
-            let coverUrl: string | null = null;
-            for (const candidateId of coverCandidateIds) {
-              try {
-                const nextUrl = await getFileLink(candidateId, libraryId, 120);
-                if (nextUrl) {
-                  coverUrl = nextUrl;
-                  break;
-                }
-              } catch (error) {
-                runtimeLogger.warn('加载 ASMR 归档卡片候选封面失败，将自动回退:', error);
-              }
-            }
-
-            const nextTags: AsmrArchiveTag[] = [];
-            const metaTagText = sanitizeMetaText(parsedMeta.tag);
-            const metaTagIds = resolveMetaNumberList(parsedMeta.tagIds);
-            const resolvedTagIds = metaTagIds.length > 0
-              ? metaTagIds
-              : resolveTagIdsFromLegacyTagText(metaTagText, normalizedTagNameMap);
-
-            resolvedTagIds.forEach((tagId) => {
-              const option = tagOptionMap.get(tagId);
-              if (!option) return;
-              nextTags.push({
-                id: option.id,
-                name: option.name,
-                color: option.color,
-                textColor: option.textColor,
-              });
-            });
-            if (nextTags.length === 0 && metaTagText) {
-              resolveFallbackTagTexts(metaTagText).forEach((tagName) => {
-                if (nextTags.some(item => item.name === tagName)) return;
-                nextTags.push({
-                  id: null,
-                  name: tagName,
-                  fallback: true,
-                });
-              });
-            }
-
-            return {
-              id: unit.id,
-              title: unit.name,
-              coverUrl: coverUrl || null,
-              tags: nextTags,
-            };
-          } catch (error) {
-            runtimeLogger.warn('加载 ASMR 归档卡片封面失败:', error);
-            return {
-              id: unit.id,
-              title: unit.name,
-              coverUrl: null,
-              tags: [],
-            };
-          }
-          },
-        );
-
-        if (requestId !== requestIdRef.current) return;
-        setCards(nextCards);
-      } catch (error) {
-        runtimeLogger.error('加载 ASMR 归档失败:', error);
-        if (requestId === requestIdRef.current) {
-          setCards([]);
-          setError('加载归档失败');
+        viewMetaBaseRef.current = parseViewMetaObject(detail.viewMeta);
+        viewMetaBaseReadyRef.current = true;
+        const remoteProgress = parseRemoteArchiveProgress(detail.viewMeta);
+        if (!remoteProgress) return;
+        if (!pendingRestoreRef.current) {
+          pendingRestoreRef.current = remoteProgress;
+          setRestoreTick((prev) => prev + 1);
         }
-      } finally {
-        if (requestId === requestIdRef.current) {
-          setLoading(false);
-        }
+      } catch (detailError) {
+        runtimeLogger.warn('读取 ASMR 归档阅读位置失败:', detailError);
       }
     })();
-  }, [folderNodeId, libraryId]);
+  }, [folderNodeId, libraryId, loadPage, readerCacheKey]);
+
+  useEffect(() => {
+    if (!active) return;
+    const viewport = viewportRef.current;
+    const pending = pendingRestoreRef.current;
+    if (!viewport || !pending) return;
+
+    if (pending.anchorCardId) {
+      const targetCard = cardRefs.current.get(pending.anchorCardId);
+      if (!targetCard) {
+        if (hasMore && !listLoading && !loadingMore && !restoreTriggeredLoadMoreRef.current) {
+          restoreTriggeredLoadMoreRef.current = true;
+          void loadPage(nextOffset, true).finally(() => {
+            restoreTriggeredLoadMoreRef.current = false;
+          });
+        }
+        if ((listLoading || loadingMore) && cards.length === 0) {
+          return;
+        }
+        if (!hasMore && !listLoading && !loadingMore && pending.scrollTop > 0) {
+          suppressNextScrollPersistRef.current = true;
+          viewport.scrollTop = Math.max(Math.floor(pending.scrollTop), 0);
+          pendingRestoreRef.current = null;
+          return;
+        }
+        if (!hasMore && !listLoading && !loadingMore && pending.scrollRatio > 0) {
+          const maxScrollable = Math.max(viewport.scrollHeight - viewport.clientHeight, 0);
+          suppressNextScrollPersistRef.current = true;
+          viewport.scrollTop = Math.floor(maxScrollable * clamp(pending.scrollRatio, 0, 1));
+          pendingRestoreRef.current = null;
+          return;
+        }
+        if (!hasMore && !listLoading && !loadingMore) {
+          pendingRestoreRef.current = null;
+        }
+        return;
+      }
+      const cardTop = targetCard.offsetTop;
+      const cardHeight = targetCard.offsetHeight || 0;
+      const expectedTop = cardTop + cardHeight * clamp(pending.anchorOffsetRatio, 0, 1);
+      suppressNextScrollPersistRef.current = true;
+      viewport.scrollTop = Math.max(Math.floor(expectedTop), 0);
+      pendingRestoreRef.current = null;
+      return;
+    }
+
+    if (pending.scrollTop > 0) {
+      suppressNextScrollPersistRef.current = true;
+      viewport.scrollTop = Math.max(Math.floor(pending.scrollTop), 0);
+      pendingRestoreRef.current = null;
+      return;
+    }
+
+    if (pending.scrollRatio > 0) {
+      const maxScrollable = Math.max(viewport.scrollHeight - viewport.clientHeight, 0);
+      suppressNextScrollPersistRef.current = true;
+      viewport.scrollTop = Math.floor(maxScrollable * clamp(pending.scrollRatio, 0, 1));
+      pendingRestoreRef.current = null;
+    }
+  }, [active, cards, hasMore, listLoading, loadPage, loadingMore, nextOffset, restoreTick, viewportRef]);
+
+  useEffect(() => {
+    if (cards.length === 0) return;
+    persistSnapshot({
+      hasLoadedList: true,
+      cards,
+      nextOffset,
+      total,
+      hasMore,
+    });
+  }, [cards, hasMore, nextOffset, persistSnapshot, total]);
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    const sentinel = sentinelRef.current;
+    if (!viewport || !sentinel) return;
+
+    const observer = new IntersectionObserver((entries) => {
+      const entry = entries[0];
+      if (!entry?.isIntersecting) return;
+      loadMore();
+    }, {
+      root: viewport,
+      threshold: 0.05,
+      rootMargin: '240px',
+    });
+    observer.observe(sentinel);
+    return () => {
+      observer.disconnect();
+    };
+  }, [loadMore, viewportRef]);
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+
+    const onScroll = () => {
+      if (suppressNextScrollPersistRef.current) {
+        suppressNextScrollPersistRef.current = false;
+        return;
+      }
+      if (pendingRestoreRef.current) {
+        pendingRestoreRef.current = null;
+      }
+      if (scrollPersistRafRef.current) {
+        window.cancelAnimationFrame(scrollPersistRafRef.current);
+      }
+      scrollPersistRafRef.current = window.requestAnimationFrame(() => {
+        scrollPersistRafRef.current = 0;
+        const maxScrollable = Math.max(viewport.scrollHeight - viewport.clientHeight, 0);
+        const scrollTop = Math.max(viewport.scrollTop, 0);
+        const scrollRatio = maxScrollable > 0 ? clamp(scrollTop / maxScrollable, 0, 1) : 0;
+        const anchor = captureAnchorFromViewport();
+        persistSnapshot({
+          scrollTop,
+          scrollRatio,
+          anchorCardId: anchor.anchorCardId,
+          anchorOffsetRatio: anchor.anchorOffsetRatio,
+        });
+        queueRemoteProgress({
+          anchorCardId: anchor.anchorCardId,
+          anchorOffsetRatio: anchor.anchorOffsetRatio,
+          scrollTop,
+          scrollRatio,
+          updatedAt: new Date().toISOString(),
+        });
+      });
+    };
+
+    viewport.addEventListener('scroll', onScroll, { passive: true });
+    return () => {
+      viewport.removeEventListener('scroll', onScroll);
+      if (scrollPersistRafRef.current) {
+        window.cancelAnimationFrame(scrollPersistRafRef.current);
+        scrollPersistRafRef.current = 0;
+      }
+    };
+  }, [captureAnchorFromViewport, persistSnapshot, queueRemoteProgress, viewportRef]);
+
+  useEffect(() => {
+    if (isHydratingSnapshotRef.current) {
+      isHydratingSnapshotRef.current = false;
+      return;
+    }
+    if (!active || cards.length === 0) return;
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const maxScrollable = Math.max(viewport.scrollHeight - viewport.clientHeight, 0);
+    const scrollTop = Math.max(viewport.scrollTop, 0);
+    const scrollRatio = maxScrollable > 0 ? clamp(scrollTop / maxScrollable, 0, 1) : 0;
+    const anchor = captureAnchorFromViewport();
+    persistSnapshot({
+      hasLoadedList: true,
+      scrollTop,
+      scrollRatio,
+      anchorCardId: anchor.anchorCardId,
+      anchorOffsetRatio: anchor.anchorOffsetRatio,
+    });
+  }, [active, cards.length, captureAnchorFromViewport, persistSnapshot, viewportRef]);
+
+  useEffect(() => () => {
+    if (remoteSyncTimerRef.current) {
+      window.clearTimeout(remoteSyncTimerRef.current);
+      remoteSyncTimerRef.current = 0;
+    }
+    void flushRemoteProgress(true);
+  }, [flushRemoteProgress]);
 
   return (
     <AsmrArchiveViewerWrapper style={wrapperStyle}>
       <section className="table-surface" ref={viewportRef}>
-        {loading ? (
+        {listLoading ? (
           <div className="state-wrap">
             <Spin size="large" tip="归档加载中..." />
           </div>
@@ -343,64 +847,79 @@ const AsmrArchiveViewer: React.FC<AsmrArchiveViewerProps> = ({ folderNodeId, fil
         ) : cards.length === 0 ? (
           <div className="state-wrap">当前归档下暂无可展示的 ASMR 集合</div>
         ) : (
-          <div className="cards-grid">
-            {cards.map(card => (
-              <article
-                key={card.id}
-                className="archive-card"
-                onDoubleClick={() => {
-                  if (!libraryId || !folderNodeId || !Number.isFinite(folderNodeId)) return;
-                  setFileUrl(
-                    `asmr://library/${libraryId}/node/${card.id}`,
-                    card.title,
-                    'asmr',
-                    card.id,
-                    {
-                      tabTypeLabel: 'ASMR',
-                      returnTarget: {
-                        fileUrl,
-                        fileName: fileName || title,
-                        fileType: 'asmr_archive',
-                        nodeId: folderNodeId,
-                        tabTypeLabel: 'ASMR-ARCHIVE',
+          <>
+            <div className="cards-grid">
+              {cards.map(card => (
+                <article
+                  key={card.id}
+                  className="archive-card"
+                  ref={(el) => {
+                    if (el) {
+                      cardRefs.current.set(card.id, el);
+                    } else {
+                      cardRefs.current.delete(card.id);
+                    }
+                  }}
+                  onDoubleClick={() => {
+                    if (!libraryId || !folderNodeId || !Number.isFinite(folderNodeId)) return;
+                    setFileUrl(
+                      `asmr://library/${libraryId}/node/${card.id}`,
+                      card.title,
+                      'asmr',
+                      card.id,
+                      {
+                        tabTypeLabel: 'ASMR',
+                        returnTarget: {
+                          fileUrl,
+                          fileName: fileName || title,
+                          fileType: 'asmr_archive',
+                          nodeId: folderNodeId,
+                          tabTypeLabel: 'ASMR-ARCHIVE',
+                        },
                       },
-                    },
-                  );
-                }}
-              >
-                <div className="card-cover">
-                  {card.coverUrl ? (
-                    <img src={card.coverUrl} alt={card.title} draggable={false} />
-                  ) : (
-                    <div className="cover-empty" />
-                  )}
-                </div>
-                <div className="card-title" title={card.title}>
-                  {card.title}
-                </div>
-                <div className="card-tag-slot">
-                  {card.tags.length > 0 ? (
-                    card.tags.map((tag, index) => (
-                      <span
-                        key={`tag-${card.id}-${tag.id ?? tag.name}-${index}`}
-                        className={`card-tag-pill${tag.fallback ? ' fallback' : ''}`}
-                        style={tag.fallback ? undefined : {
-                          background: tag.color || 'var(--semi-color-fill-0)',
-                          color: tag.textColor || '#fff',
-                          borderColor: tag.color || 'var(--semi-color-border)',
-                        }}
-                        title={tag.name}
-                      >
-                        {tag.name}
-                      </span>
-                    ))
-                  ) : (
-                    <span className="card-tag-empty">暂无标签</span>
-                  )}
-                </div>
-              </article>
-            ))}
-          </div>
+                    );
+                  }}
+                >
+                  <div className="card-cover">
+                    {card.coverUrl ? (
+                      <img src={card.coverUrl} alt={card.title} draggable={false} />
+                    ) : (
+                      <div className="cover-empty" />
+                    )}
+                  </div>
+                  <div className="card-title" title={card.title}>
+                    {card.title}
+                  </div>
+                  <div className="card-tag-slot">
+                    {card.tags.length > 0 ? (
+                      card.tags.map((tag, index) => (
+                        <span
+                          key={`tag-${card.id}-${tag.id ?? tag.name}-${index}`}
+                          className={`card-tag-pill${tag.fallback ? ' fallback' : ''}`}
+                          style={tag.fallback ? undefined : {
+                            background: tag.color || 'var(--semi-color-fill-0)',
+                            color: tag.textColor || '#fff',
+                            borderColor: tag.color || 'var(--semi-color-border)',
+                          }}
+                          title={tag.name}
+                        >
+                          {tag.name}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="card-tag-empty">暂无标签</span>
+                    )}
+                  </div>
+                </article>
+              ))}
+            </div>
+            {loadingMore && (
+              <div className="state-wrap">
+                <Spin size="middle" tip="加载更多中..." />
+              </div>
+            )}
+            <div ref={sentinelRef} style={{ height: 1, width: '100%' }} />
+          </>
         )}
       </section>
 
