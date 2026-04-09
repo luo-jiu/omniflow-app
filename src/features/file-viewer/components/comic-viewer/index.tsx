@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Spin } from '@douyinfe/semi-ui';
 import {
+  batchGetFileLinks,
   fetchNodeDetailById,
   getChildrenByNodeId,
-  getFileLink,
   updateNodeConfig,
 } from '@/features/file-explorer/services/file.api';
 import { ComicViewerWrapper } from './style';
@@ -34,6 +34,9 @@ interface ComicPageItem {
   status: 'idle' | 'loading' | 'ready' | 'error';
 }
 
+type ReaderLayoutMode = 'scroll' | 'flip';
+type ScrollColumnMode = 1 | 2;
+
 interface ComicReaderSnapshot {
   hasLoadedList: boolean;
   pages: ComicPageItem[];
@@ -44,12 +47,23 @@ interface ComicReaderSnapshot {
   anchorOffsetRatio: number;
 }
 
-const INITIAL_VISIBLE_COUNT = 8;
-const LOAD_MORE_STEP = 6;
-const PREFETCH_AHEAD = 6;
-const MAX_RESOLVE_PER_TICK = 8;
+const INITIAL_VISIBLE_COUNT = 12;
+const LOAD_MORE_STEP = 10;
+const PREFETCH_AHEAD = 48;
+const MAX_RESOLVE_PER_TICK = 64;
+const COMIC_LINK_EXPIRY_MINUTES = 240;
 const MIN_PAGE_WIDTH = 360;
 const MAX_PAGE_WIDTH = 980;
+const DOUBLE_COLUMN_GAP = 10;
+const SINGLE_SCROLL_ZOOM_MIN = 0.45;
+const SINGLE_SCROLL_ZOOM_MAX = 3.2;
+const DOUBLE_SCROLL_ZOOM_MIN = 0.55;
+const DOUBLE_SCROLL_ZOOM_MAX = 1;
+const FLIP_ZOOM_MIN = 0.4;
+const FLIP_ZOOM_MAX = 4.2;
+const CTRL_WHEEL_ZOOM_STEP = 0.08;
+const FLIP_DECODE_WINDOW_BEHIND = 2;
+const FLIP_DECODE_WINDOW_AHEAD = 8;
 const COMIC_READER_CACHE_MAX_ENTRIES = 24;
 const REMOTE_PROGRESS_SYNC_INTERVAL_MS = 1000;
 const BACK_TO_TOP_DIRECT_PAGE_THRESHOLD = 300;
@@ -109,6 +123,12 @@ function easeOutCubic(t: number): number {
   return 1 - (1 - p) ** 3;
 }
 
+function getScrollZoomBounds(columnMode: ScrollColumnMode) {
+  return columnMode === 2
+    ? { min: DOUBLE_SCROLL_ZOOM_MIN, max: DOUBLE_SCROLL_ZOOM_MAX }
+    : { min: SINGLE_SCROLL_ZOOM_MIN, max: SINGLE_SCROLL_ZOOM_MAX };
+}
+
 function parseComicLibraryId(fileUrl: string): number | null {
   const matches = /^comic:\/\/library\/(\d+)\/node\/\d+$/i.exec(String(fileUrl || '').trim());
   if (!matches) return null;
@@ -166,6 +186,11 @@ interface AnchorSnapshot {
   anchorPageId: number | null;
   anchorOffsetRatio: number;
   currentPageNumber: number;
+}
+
+interface CenterPageSnapshot {
+  pageId: number | null;
+  pageIndex: number;
 }
 
 interface ComicRemoteReadingProgress {
@@ -294,10 +319,22 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
   const [scrollWidth, setScrollWidth] = useState(0);
   const [restoreTick, setRestoreTick] = useState(0);
   const [currentPageNumber, setCurrentPageNumber] = useState(0);
+  const [layoutMode, setLayoutMode] = useState<ReaderLayoutMode>('scroll');
+  const [scrollColumnMode, setScrollColumnMode] = useState<ScrollColumnMode>(1);
+  const [scrollZoomScale, setScrollZoomScale] = useState(1);
+  const [flipZoomScale, setFlipZoomScale] = useState(1);
+  const [flipZoomCustomized, setFlipZoomCustomized] = useState(false);
+  const [flipPageIndex, setFlipPageIndex] = useState(0);
+  const [flipOffset, setFlipOffset] = useState({ x: 0, y: 0 });
+  const [flipDragAnchor, setFlipDragAnchor] = useState({ x: 0, y: 0 });
+  const [flipPanMode, setFlipPanMode] = useState(false);
+  const [flipDragging, setFlipDragging] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const flipStageRef = useRef<HTMLDivElement | null>(null);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const pageRefs = useRef<Map<number, HTMLElement>>(new Map());
+  const flipWarmImageCacheRef = useRef<Map<number, HTMLImageElement>>(new Map());
   const sessionRef = useRef(0);
   const pendingRestoreRef = useRef<{
     desiredScrollTop: number;
@@ -312,11 +349,31 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
   const isHydratingSnapshotRef = useRef(false);
   const scrollPersistRafRef = useRef<number>(0);
   const backTopAnimationRafRef = useRef<number>(0);
+  const suppressNextScrollPersistRef = useRef(false);
+  const pendingZoomAnchorRef = useRef<{
+    anchorPageId: number | null;
+    anchorPageIndex: number;
+  } | null>(null);
+  const lastFocusedPageIdRef = useRef<number | null>(null);
   const viewMetaBaseRef = useRef<Record<string, unknown>>({});
   const remoteProgressSyncTimerRef = useRef<number>(0);
   const remoteProgressSyncInFlightRef = useRef(false);
   const pendingRemoteProgressRef = useRef<ComicRemoteReadingProgress | null>(null);
   const lastSyncedRemoteProgressSignatureRef = useRef<string>('');
+
+  const applyFlipZoomRatio = useCallback((ratio: number) => {
+    if (!Number.isFinite(ratio) || ratio <= 0) {
+      return;
+    }
+    setFlipZoomCustomized(true);
+    setFlipZoomScale(prev => clamp(prev * ratio, FLIP_ZOOM_MIN, FLIP_ZOOM_MAX));
+  }, []);
+
+  const resetFlipZoomToFit = useCallback(() => {
+    setFlipZoomCustomized(false);
+    setFlipZoomScale(1);
+    setFlipOffset({ x: 0, y: 0 });
+  }, []);
 
   const persistReaderSnapshot = useCallback((patch: Partial<ComicReaderSnapshot>) => {
     if (!readerCacheKey) return;
@@ -399,6 +456,23 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
   }, [active, flushRemoteReadingProgress]);
 
   const renderedPages = useMemo(() => pages.slice(0, visibleCount), [pages, visibleCount]);
+  const isFlipMode = layoutMode === 'flip';
+  const scrollZoomBounds = useMemo(
+    () => getScrollZoomBounds(scrollColumnMode),
+    [scrollColumnMode],
+  );
+  const effectiveScrollZoom = useMemo(
+    () => clamp(scrollZoomScale, scrollZoomBounds.min, scrollZoomBounds.max),
+    [scrollZoomScale, scrollZoomBounds.max, scrollZoomBounds.min],
+  );
+  const effectiveFlipZoom = useMemo(
+    () => clamp(flipZoomScale, FLIP_ZOOM_MIN, FLIP_ZOOM_MAX),
+    [flipZoomScale],
+  );
+  const normalizeFlipIndexForPageMode = useCallback((index: number) => {
+    if (scrollColumnMode !== 2) return index;
+    return Math.max(Math.floor(index / 2) * 2, 0);
+  }, [scrollColumnMode]);
 
   const captureAnchorSnapshot = useCallback((scrollEl: HTMLDivElement): AnchorSnapshot => {
     if (renderedPages.length === 0) {
@@ -443,6 +517,42 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
     };
   }, [renderedPages]);
 
+  const captureCenterPageSnapshot = useCallback((scrollEl: HTMLDivElement): CenterPageSnapshot => {
+    if (renderedPages.length === 0) {
+      return {
+        pageId: null,
+        pageIndex: 0,
+      };
+    }
+
+    const viewportCenter = scrollEl.scrollTop + scrollEl.clientHeight / 2;
+    const measured = renderedPages
+      .map((page, index) => {
+        const el = pageRefs.current.get(page.id);
+        if (!el) return null;
+        const top = Math.max(el.offsetTop, 0);
+        const height = Math.max(el.offsetHeight, 1);
+        const center = top + height / 2;
+        return { pageId: page.id, index, distance: Math.abs(center - viewportCenter) };
+      })
+      .filter((item): item is { pageId: number; index: number; distance: number } => Boolean(item));
+
+    if (measured.length === 0) {
+      const fallbackIndex = clamp(Math.max(currentPageNumber - 1, 0), 0, renderedPages.length - 1);
+      return {
+        pageId: renderedPages[fallbackIndex]?.id ?? null,
+        pageIndex: fallbackIndex,
+      };
+    }
+
+    measured.sort((a, b) => a.distance - b.distance || a.index - b.index);
+    const target = measured[0];
+    return {
+      pageId: target.pageId,
+      pageIndex: target.index,
+    };
+  }, [currentPageNumber, renderedPages]);
+
   useEffect(() => {
     const currentSession = sessionRef.current + 1;
     sessionRef.current = currentSession;
@@ -457,6 +567,15 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
       window.clearTimeout(remoteProgressSyncTimerRef.current);
       remoteProgressSyncTimerRef.current = 0;
     }
+    setLayoutMode('scroll');
+    setScrollColumnMode(1);
+    setScrollZoomScale(1);
+    setFlipZoomScale(1);
+    setFlipZoomCustomized(false);
+    setFlipPageIndex(0);
+    setFlipOffset({ x: 0, y: 0 });
+    setFlipPanMode(false);
+    setFlipDragging(false);
 
     if (!folderNodeId || !Number.isFinite(folderNodeId) || !libraryId || !Number.isFinite(libraryId)) {
       setPages([]);
@@ -655,6 +774,10 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
   }, [renderedPages]);
 
   useEffect(() => {
+    setScrollZoomScale(prev => clamp(prev, scrollZoomBounds.min, scrollZoomBounds.max));
+  }, [scrollZoomBounds.max, scrollZoomBounds.min]);
+
+  useEffect(() => {
     const scrollEl = scrollRef.current;
     if (!scrollEl) return;
 
@@ -676,6 +799,18 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
   }, [persistReaderSnapshot, visibleCount]);
 
   useEffect(() => {
+    if (!isFlipMode) return;
+    if (pages.length === 0) return;
+    const requiredVisible = Math.min(
+      Math.max(flipPageIndex + PREFETCH_AHEAD + 1, 1),
+      pages.length,
+    );
+    if (requiredVisible > visibleCount) {
+      setVisibleCount(requiredVisible);
+    }
+  }, [flipPageIndex, isFlipMode, pages.length, visibleCount]);
+
+  useEffect(() => {
     if (!hasLoadedListRef.current) return;
     if (isHydratingSnapshotRef.current) return;
     persistReaderSnapshot({ hasLoadedList: true, pages });
@@ -694,17 +829,51 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
   }, [pages, persistReaderSnapshot, visibleCount]);
 
   const persistCurrentScroll = useCallback((options?: { forceRemoteNow?: boolean }) => {
-    const scrollEl = scrollRef.current;
-    if (!scrollEl) return;
     if (!readerCacheKey) return;
     if (!hasLoadedListRef.current) return;
     if (isHydratingSnapshotRef.current) return;
+    if (isFlipMode) {
+      if (pages.length === 0) return;
+      const safeIndex = normalizeFlipIndexForPageMode(clamp(flipPageIndex, 0, pages.length - 1));
+      const currentPage = pages[safeIndex];
+      if (!currentPage) return;
+      lastFocusedPageIdRef.current = currentPage.id;
+      const pageNumber = safeIndex + 1;
+      setCurrentPageNumber(pageNumber);
+      persistReaderSnapshot({
+        hasLoadedList: true,
+        scrollTop: 0,
+        scrollRatio: 0,
+        anchorPageId: currentPage.id,
+        anchorOffsetRatio: 0,
+      });
+      if (active) {
+        queueRemoteReadingProgressSync({
+          anchorPageId: currentPage.id,
+          anchorOffsetRatio: 0,
+          currentPageNumber: pageNumber,
+          updatedAt: new Date().toISOString(),
+        });
+        if (options?.forceRemoteNow) {
+          if (remoteProgressSyncTimerRef.current) {
+            window.clearTimeout(remoteProgressSyncTimerRef.current);
+            remoteProgressSyncTimerRef.current = 0;
+          }
+          void flushRemoteReadingProgress(true);
+        }
+      }
+      return;
+    }
+
+    const scrollEl = scrollRef.current;
+    if (!scrollEl) return;
     const scrollTop = Math.max(scrollEl.scrollTop, 0);
     const maxScrollable = Math.max(scrollEl.scrollHeight - scrollEl.clientHeight, 0);
     const scrollRatio = maxScrollable > 0
       ? clamp(scrollTop / maxScrollable, 0, 1)
       : 0;
     const anchorSnapshot = captureAnchorSnapshot(scrollEl);
+    lastFocusedPageIdRef.current = anchorSnapshot.anchorPageId;
     setCurrentPageNumber(anchorSnapshot.currentPageNumber);
     persistReaderSnapshot({
       hasLoadedList: true,
@@ -731,7 +900,11 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
   }, [
     active,
     captureAnchorSnapshot,
+    flipPageIndex,
     flushRemoteReadingProgress,
+    isFlipMode,
+    normalizeFlipIndexForPageMode,
+    pages,
     persistReaderSnapshot,
     queueRemoteReadingProgressSync,
     readerCacheKey,
@@ -757,14 +930,25 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
   }, [flushRemoteReadingProgress, persistCurrentScroll]);
 
   const handleScroll = useCallback(() => {
+    if (isFlipMode) return;
+    if (suppressNextScrollPersistRef.current) {
+      suppressNextScrollPersistRef.current = false;
+      return;
+    }
     if (scrollPersistRafRef.current) return;
     scrollPersistRafRef.current = window.requestAnimationFrame(() => {
       scrollPersistRafRef.current = 0;
       persistCurrentScroll();
     });
-  }, [persistCurrentScroll]);
+  }, [isFlipMode, persistCurrentScroll]);
 
   const handleBackToTop = useCallback(() => {
+    if (isFlipMode) {
+      setFlipPageIndex(0);
+      setFlipOffset({ x: 0, y: 0 });
+      persistCurrentScroll({ forceRemoteNow: true });
+      return;
+    }
     const scrollEl = scrollRef.current;
     if (!scrollEl) return;
     if (scrollPersistRafRef.current) {
@@ -807,7 +991,7 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
     };
 
     backTopAnimationRafRef.current = window.requestAnimationFrame(step);
-  }, [pages.length, persistCurrentScroll]);
+  }, [isFlipMode, pages.length, persistCurrentScroll]);
 
   useEffect(() => {
     if (active) return;
@@ -824,6 +1008,7 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
   }, [active, flushRemoteReadingProgress]);
 
   useEffect(() => {
+    if (isFlipMode) return;
     const scrollEl = scrollRef.current;
     const sentinelEl = sentinelRef.current;
     if (!scrollEl || !sentinelEl) return;
@@ -838,12 +1023,13 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
       {
         root: scrollEl,
         threshold: 0.01,
+        rootMargin: '1200px 0px',
       },
     );
 
     observer.observe(sentinelEl);
     return () => observer.disconnect();
-  }, [pages.length, visibleCount]);
+  }, [isFlipMode, pages.length, visibleCount]);
 
   useEffect(() => {
     if (!folderNodeId || !libraryId || !Number.isFinite(libraryId)) return;
@@ -865,25 +1051,32 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
     )));
 
     const resolveLinks = async () => {
-      const results = await Promise.all(targets.map(async ({ index, page }) => {
-        try {
-          const url = await getFileLink(page.id, libraryId, 60);
-          return { index, success: true as const, url };
-        } catch (error) {
-          runtimeLogger.error('加载漫画页链接失败:', error);
-          return { index, success: false as const, url: null };
-        }
-      }));
+      const targetNodeIds = targets.map(({ page }) => page.id);
+      let linkMap = new Map<number, string>();
+      try {
+        linkMap = await batchGetFileLinks({
+          libraryId,
+          nodeIds: targetNodeIds,
+          expiry: COMIC_LINK_EXPIRY_MINUTES,
+        });
+      } catch (error) {
+        runtimeLogger.error('批量加载漫画页链接失败:', error);
+      }
 
       if (sessionRef.current !== currentSession) {
         return;
       }
 
+      const targetIndexMap = new Map<number, number>(
+        targets.map(({ index, page }) => [page.id, index]),
+      );
+
       setPages((prev) => prev.map((page, index) => {
-        const matched = results.find((result) => result.index === index);
-        if (!matched) return page;
-        if (matched.success && matched.url) {
-          return { ...page, status: 'ready', url: matched.url };
+        const targetIndex = targetIndexMap.get(page.id);
+        if (targetIndex === undefined || targetIndex !== index) return page;
+        const nextUrl = linkMap.get(page.id);
+        if (nextUrl) {
+          return { ...page, status: 'ready', url: nextUrl };
         }
         return { ...page, status: 'error', url: null };
       }));
@@ -892,12 +1085,29 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
     void resolveLinks();
   }, [folderNodeId, libraryId, pages, visibleCount]);
 
-  const pageWidth = useMemo(() => {
+  const scrollBasePageWidth = useMemo(() => {
     if (!scrollWidth) return 760;
+    if (scrollColumnMode === 2) {
+      const raw = (scrollWidth - 32 - DOUBLE_COLUMN_GAP) / 2;
+      return clamp(raw, MIN_PAGE_WIDTH * 0.7, MAX_PAGE_WIDTH);
+    }
     return clamp(scrollWidth - 32, MIN_PAGE_WIDTH, MAX_PAGE_WIDTH);
-  }, [scrollWidth]);
+  }, [scrollColumnMode, scrollWidth]);
+
+  const pageWidth = useMemo(
+    () => Math.round(scrollBasePageWidth * effectiveScrollZoom),
+    [effectiveScrollZoom, scrollBasePageWidth],
+  );
+
+  const gridWidth = useMemo(() => {
+    if (scrollColumnMode === 2) {
+      return Math.max(pageWidth * 2 + DOUBLE_COLUMN_GAP, 0);
+    }
+    return pageWidth;
+  }, [pageWidth, scrollColumnMode]);
 
   useEffect(() => {
+    if (isFlipMode) return;
     const pending = pendingRestoreRef.current;
     const scrollEl = scrollRef.current;
     if (!pending || !scrollEl) return;
@@ -956,15 +1166,19 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
       setRestoreTick(prev => prev + 1);
     }, 80);
     return () => window.clearTimeout(timer);
-  }, [captureAnchorSnapshot, persistReaderSnapshot, renderedPages.length, restoreTick]);
+  }, [captureAnchorSnapshot, isFlipMode, persistReaderSnapshot, renderedPages.length, restoreTick]);
 
   useEffect(() => {
     if (!active) return;
+    if (isFlipMode) return;
     const scrollEl = scrollRef.current;
     if (scrollEl) {
       setScrollWidth(Math.round(scrollEl.clientWidth));
     }
     if (!readerCacheKey || pages.length === 0) {
+      return;
+    }
+    if (pendingRestoreRef.current) {
       return;
     }
     const snapshot = comicReaderSnapshotCache.get(readerCacheKey);
@@ -985,7 +1199,406 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
     if (pendingRestoreRef.current) {
       setRestoreTick(prev => prev + 1);
     }
-  }, [active, pages.length, readerCacheKey]);
+  }, [active, isFlipMode, pages.length, readerCacheKey]);
+
+  const primeScrollZoomAnchor = useCallback(() => {
+    const scrollEl = scrollRef.current;
+    if (scrollEl && renderedPages.length > 0) {
+      const centerPage = captureCenterPageSnapshot(scrollEl);
+      pendingZoomAnchorRef.current = {
+        anchorPageId: centerPage.pageId,
+        anchorPageIndex: centerPage.pageIndex,
+      };
+      if (centerPage.pageIndex + 1 > visibleCount) {
+        setVisibleCount(centerPage.pageIndex + 1);
+      }
+    } else {
+      pendingZoomAnchorRef.current = null;
+    }
+  }, [captureCenterPageSnapshot, renderedPages.length, visibleCount]);
+
+  const zoomScrollByDirection = useCallback((direction: 1 | -1) => {
+    primeScrollZoomAnchor();
+    const next = scrollZoomScale * (1 + direction * CTRL_WHEEL_ZOOM_STEP);
+    setScrollZoomScale(clamp(next, scrollZoomBounds.min, scrollZoomBounds.max));
+  }, [
+    primeScrollZoomAnchor,
+    scrollZoomBounds.max,
+    scrollZoomBounds.min,
+    scrollZoomScale,
+  ]);
+
+  const resetScrollZoom = useCallback(() => {
+    primeScrollZoomAnchor();
+    setScrollZoomScale(1);
+  }, [
+    primeScrollZoomAnchor,
+  ]);
+
+  useEffect(() => {
+    if (isFlipMode) return;
+    const scrollEl = scrollRef.current;
+    if (!scrollEl) return;
+
+    const handleNativeWheel = (event: WheelEvent) => {
+      if (!(event.ctrlKey || event.metaKey)) return;
+      if (event.cancelable) {
+        event.preventDefault();
+      }
+      event.stopPropagation();
+    };
+
+    scrollEl.addEventListener('wheel', handleNativeWheel, { passive: false, capture: true });
+    return () => {
+      scrollEl.removeEventListener('wheel', handleNativeWheel, { capture: true } as EventListenerOptions);
+    };
+  }, [isFlipMode]);
+
+  const handleFlipWheel = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
+    if (!(event.ctrlKey || event.metaKey)) {
+      return;
+    }
+    event.preventDefault();
+    const direction = event.deltaY > 0 ? -1 : 1;
+    applyFlipZoomRatio(1 + direction * CTRL_WHEEL_ZOOM_STEP);
+  }, [applyFlipZoomRatio]);
+
+  const goToPrevFlipPage = useCallback(() => {
+    if (pages.length === 0) return;
+    const step = scrollColumnMode === 2 ? 2 : 1;
+    setFlipPageIndex(prev => {
+      const normalized = normalizeFlipIndexForPageMode(prev);
+      return clamp(normalized - step, 0, pages.length - 1);
+    });
+    setFlipOffset({ x: 0, y: 0 });
+  }, [normalizeFlipIndexForPageMode, pages.length, scrollColumnMode]);
+
+  const goToNextFlipPage = useCallback(() => {
+    if (pages.length === 0) return;
+    const step = scrollColumnMode === 2 ? 2 : 1;
+    setFlipPageIndex(prev => {
+      const normalized = normalizeFlipIndexForPageMode(prev);
+      return clamp(normalized + step, 0, pages.length - 1);
+    });
+    setFlipOffset({ x: 0, y: 0 });
+  }, [normalizeFlipIndexForPageMode, pages.length, scrollColumnMode]);
+
+  const toggleScrollColumnMode = useCallback(() => {
+    if (pages.length === 0) return;
+    setScrollColumnMode(prev => {
+      const nextMode: ScrollColumnMode = prev === 1 ? 2 : 1;
+      if (isFlipMode) {
+        setFlipPageIndex(current => {
+          const safe = clamp(current, 0, pages.length - 1);
+          if (nextMode === 2) {
+            return Math.max(Math.floor(safe / 2) * 2, 0);
+          }
+          return safe;
+        });
+      }
+      return nextMode;
+    });
+    if (isFlipMode && !flipZoomCustomized) {
+      setFlipZoomScale(1);
+    }
+  }, [flipZoomCustomized, isFlipMode, pages.length]);
+
+  const toggleLayoutMode = useCallback(() => {
+    if (pages.length === 0) return;
+    if (layoutMode === 'flip') {
+      setLayoutMode('scroll');
+      const restoreIndex = clamp(Math.max(flipPageIndex, 0), 0, pages.length - 1);
+      const restorePage = pages[restoreIndex];
+      if (restorePage) {
+        lastFocusedPageIdRef.current = restorePage.id;
+        const nextVisibleCount = clamp(Math.max(visibleCount, restoreIndex + 1), 1, pages.length);
+        setVisibleCount(nextVisibleCount);
+        pendingRestoreRef.current = {
+          desiredScrollTop: 0,
+          desiredScrollRatio: 0,
+          anchorPageId: restorePage.id,
+          anchorOffsetRatio: 0,
+          attempts: 0,
+          lastMaxScrollable: 0,
+          stableTicks: 0,
+        };
+        setRestoreTick(prev => prev + 1);
+      }
+      return;
+    }
+
+    const scrollEl = scrollRef.current;
+    const pageNumberBasedIndex = clamp(Math.max(currentPageNumber - 1, 0), 0, pages.length - 1);
+    let safeTargetIndex = pageNumberBasedIndex;
+    if (lastFocusedPageIdRef.current) {
+      const focusedIndex = pages.findIndex(page => page.id === lastFocusedPageIdRef.current);
+      if (focusedIndex >= 0) {
+        safeTargetIndex = focusedIndex;
+      }
+    } else if (scrollEl) {
+      const snapshot = captureAnchorSnapshot(scrollEl);
+      const targetIndex = snapshot.currentPageNumber > 0
+        ? snapshot.currentPageNumber - 1
+        : 0;
+      safeTargetIndex = clamp(targetIndex, 0, pages.length - 1);
+    }
+
+    const focusedPage = pages[safeTargetIndex];
+    if (focusedPage) {
+      lastFocusedPageIdRef.current = focusedPage.id;
+    }
+    setFlipPageIndex(normalizeFlipIndexForPageMode(safeTargetIndex));
+    setVisibleCount(prev => Math.max(prev, safeTargetIndex + 1));
+    setLayoutMode('flip');
+    if (!flipZoomCustomized) {
+      setFlipZoomScale(1);
+    }
+    setFlipOffset({ x: 0, y: 0 });
+  }, [
+    captureAnchorSnapshot,
+    currentPageNumber,
+    flipZoomCustomized,
+    layoutMode,
+    normalizeFlipIndexForPageMode,
+    pages,
+    flipPageIndex,
+    visibleCount,
+  ]);
+
+  const handleFlipMouseDown = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    if (flipPanMode || event.button === 1) {
+      event.preventDefault();
+      setFlipDragging(true);
+      setFlipDragAnchor({
+        x: event.clientX - flipOffset.x,
+        y: event.clientY - flipOffset.y,
+      });
+    }
+  }, [flipOffset.x, flipOffset.y, flipPanMode]);
+
+  const handleFlipMouseMove = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    if (!flipDragging) return;
+    setFlipOffset({
+      x: event.clientX - flipDragAnchor.x,
+      y: event.clientY - flipDragAnchor.y,
+    });
+  }, [flipDragAnchor.x, flipDragAnchor.y, flipDragging]);
+
+  const handleFlipMouseUp = useCallback(() => {
+    setFlipDragging(false);
+  }, []);
+
+  useEffect(() => {
+    if (!isFlipMode) {
+      setFlipPanMode(false);
+      setFlipDragging(false);
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.code === 'Space' && !event.repeat) {
+        event.preventDefault();
+        setFlipPanMode(true);
+      }
+      if (event.code === 'ArrowLeft') {
+        event.preventDefault();
+        goToPrevFlipPage();
+      }
+      if (event.code === 'ArrowRight') {
+        event.preventDefault();
+        goToNextFlipPage();
+      }
+    };
+
+    const handleKeyUp = (event: KeyboardEvent) => {
+      if (event.code === 'Space') {
+        setFlipPanMode(false);
+        setFlipDragging(false);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, [goToNextFlipPage, goToPrevFlipPage, isFlipMode]);
+
+  useEffect(() => {
+    const isEditableTarget = (target: EventTarget | null) => {
+      if (!(target instanceof HTMLElement)) return false;
+      const tag = target.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+      return target.isContentEditable;
+    };
+
+    const handleZoomShortcut = (event: KeyboardEvent) => {
+      if (!active) return;
+      if (!(event.ctrlKey || event.metaKey)) return;
+      if (isEditableTarget(event.target)) return;
+
+      const code = event.code;
+      const key = event.key;
+      const isPlus = key === '+' || key === '=' || code === 'Equal' || code === 'NumpadAdd';
+      const isMinus = key === '-' || key === '_' || code === 'Minus' || code === 'NumpadSubtract';
+      const isReset = key === '0' || code === 'Digit0' || code === 'Numpad0';
+      if (!isPlus && !isMinus && !isReset) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      if (isPlus) {
+        if (isFlipMode) {
+          applyFlipZoomRatio(1 + CTRL_WHEEL_ZOOM_STEP);
+        } else {
+          zoomScrollByDirection(1);
+        }
+        return;
+      }
+
+      if (isMinus) {
+        if (isFlipMode) {
+          applyFlipZoomRatio(1 - CTRL_WHEEL_ZOOM_STEP);
+        } else {
+          zoomScrollByDirection(-1);
+        }
+        return;
+      }
+
+      if (isFlipMode) {
+        resetFlipZoomToFit();
+      } else {
+        resetScrollZoom();
+      }
+    };
+
+    window.addEventListener('keydown', handleZoomShortcut, { capture: true });
+    return () => {
+      window.removeEventListener('keydown', handleZoomShortcut, { capture: true } as EventListenerOptions);
+    };
+  }, [active, applyFlipZoomRatio, isFlipMode, resetFlipZoomToFit, resetScrollZoom, zoomScrollByDirection]);
+
+  const flipStep = scrollColumnMode === 2 ? 2 : 1;
+  const flipPrimaryIndex = useMemo(
+    () => normalizeFlipIndexForPageMode(clamp(flipPageIndex, 0, Math.max(pages.length - 1, 0))),
+    [flipPageIndex, normalizeFlipIndexForPageMode, pages.length],
+  );
+  const flipDisplayPages = useMemo(() => {
+    if (pages.length === 0) return [] as Array<ComicPageItem | null>;
+    const primary = pages[flipPrimaryIndex] ?? null;
+    if (scrollColumnMode === 2) {
+      const secondary = pages[flipPrimaryIndex + 1] ?? null;
+      return [primary, secondary];
+    }
+    return [primary];
+  }, [flipPrimaryIndex, pages, scrollColumnMode]);
+
+  useEffect(() => {
+    if (!isFlipMode || pages.length === 0) {
+      flipWarmImageCacheRef.current.clear();
+      return;
+    }
+
+    const start = Math.max(flipPrimaryIndex - FLIP_DECODE_WINDOW_BEHIND, 0);
+    const end = Math.min(flipPrimaryIndex + FLIP_DECODE_WINDOW_AHEAD, pages.length - 1);
+    const keepIds = new Set<number>();
+
+    for (let i = start; i <= end; i += 1) {
+      const page = pages[i];
+      if (!page || page.status !== 'ready' || !page.url) {
+        continue;
+      }
+      keepIds.add(page.id);
+      if (flipWarmImageCacheRef.current.has(page.id)) {
+        continue;
+      }
+      const image = new Image();
+      image.decoding = 'async';
+      image.src = page.url;
+      flipWarmImageCacheRef.current.set(page.id, image);
+    }
+
+    Array.from(flipWarmImageCacheRef.current.keys()).forEach((id) => {
+      if (!keepIds.has(id)) {
+        flipWarmImageCacheRef.current.delete(id);
+      }
+    });
+  }, [flipPrimaryIndex, isFlipMode, pages]);
+
+  const canFlipPrev = flipPrimaryIndex > 0;
+  const canFlipNext = flipPrimaryIndex + flipStep < pages.length;
+
+  useEffect(() => {
+    if (!isFlipMode) return;
+    if (pages.length === 0) return;
+    if (!active) return;
+    persistCurrentScroll();
+  }, [active, flipPageIndex, isFlipMode, pages.length, persistCurrentScroll]);
+
+  useEffect(() => {
+    if (!isFlipMode) return;
+    setFlipOffset({ x: 0, y: 0 });
+  }, [flipPageIndex, isFlipMode]);
+
+  useEffect(() => {
+    if (!isFlipMode) return;
+    if (pages.length === 0) {
+      setCurrentPageNumber(0);
+      return;
+    }
+    if (flipPrimaryIndex > pages.length - 1) {
+      setFlipPageIndex(pages.length - 1);
+      return;
+    }
+    if (scrollColumnMode === 2 && flipPageIndex !== flipPrimaryIndex) {
+      setFlipPageIndex(flipPrimaryIndex);
+      return;
+    }
+    lastFocusedPageIdRef.current = pages[flipPrimaryIndex]?.id ?? null;
+    setCurrentPageNumber(clamp(flipPrimaryIndex + 1, 1, pages.length));
+  }, [flipPageIndex, flipPrimaryIndex, isFlipMode, pages, scrollColumnMode]);
+
+  useEffect(() => {
+    if (isFlipMode) return;
+    const pending = pendingZoomAnchorRef.current;
+    if (!pending) return;
+    const scrollEl = scrollRef.current;
+    if (!scrollEl) {
+      pendingZoomAnchorRef.current = null;
+      return;
+    }
+
+    const applyAnchor = () => {
+      const latest = pendingZoomAnchorRef.current;
+      if (!latest) return;
+
+      let anchorEl: HTMLElement | null = null;
+      if (latest.anchorPageId) {
+        anchorEl = pageRefs.current.get(latest.anchorPageId) ?? null;
+      }
+      if (!anchorEl && renderedPages.length > 0) {
+        const fallbackPage = renderedPages[clamp(latest.anchorPageIndex, 0, renderedPages.length - 1)];
+        if (fallbackPage) {
+          anchorEl = pageRefs.current.get(fallbackPage.id) ?? null;
+        }
+      }
+      if (!anchorEl) {
+        pendingZoomAnchorRef.current = null;
+        return;
+      }
+
+      const pageCenter = anchorEl.offsetTop + anchorEl.offsetHeight / 2;
+      const targetTop = pageCenter - scrollEl.clientHeight / 2;
+      const maxScrollable = Math.max(scrollEl.scrollHeight - scrollEl.clientHeight, 0);
+      suppressNextScrollPersistRef.current = true;
+      scrollEl.scrollTop = clamp(targetTop, 0, maxScrollable);
+      pendingZoomAnchorRef.current = null;
+    };
+
+    const rafId = window.requestAnimationFrame(applyAnchor);
+    return () => window.cancelAnimationFrame(rafId);
+  }, [effectiveScrollZoom, isFlipMode, pageWidth, renderedPages, scrollColumnMode, visibleCount]);
 
   if (listLoading) {
     return (
@@ -1013,60 +1626,144 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
     );
   }
 
+  const layoutModeSwitchLabel = isFlipMode ? '滚动模式' : '翻页模式';
+  const pageModeSwitchLabel = scrollColumnMode === 1 ? '双页' : '单页';
+
   return (
     <ComicViewerWrapper>
-      <div className="pages-scroll" ref={scrollRef} onScroll={handleScroll}>
-        <div className="pages-column" style={{ width: `${pageWidth}px` }}>
-          {renderedPages.map((page) => (
-            <article
-              className="page-shell"
-              style={{ width: `${pageWidth}px` }}
-              key={page.id}
-              ref={(el) => {
-                if (el) {
-                  pageRefs.current.set(page.id, el);
-                } else {
-                  pageRefs.current.delete(page.id);
-                }
-              }}
-            >
-              {page.status === 'ready' && page.url ? (
-                <img
-                  className="page-image"
-                  src={page.url}
-                  alt={page.name}
-                  loading="eager"
-                  decoding="sync"
-                  draggable={false}
-                  onLoad={() => {
-                    if (pendingRestoreRef.current) {
-                      setRestoreTick(prev => prev + 1);
-                    }
-                  }}
-                />
-              ) : (
-                <div className="page-skeleton">
-                  {page.status === 'error' ? '加载失败' : <Spin size="middle" />}
-                </div>
-              )}
-            </article>
-          ))}
-          <div ref={sentinelRef} className="load-more-sentinel" />
+      {isFlipMode ? (
+        <div
+          className={`flip-stage ${flipPanMode ? 'can-pan' : ''} ${flipDragging ? 'is-panning' : ''}`}
+          ref={flipStageRef}
+          onWheel={handleFlipWheel}
+          onMouseDown={handleFlipMouseDown}
+          onMouseMove={handleFlipMouseMove}
+          onMouseUp={handleFlipMouseUp}
+          onMouseLeave={handleFlipMouseUp}
+        >
+          <button
+            type="button"
+            className="flip-nav flip-nav-prev"
+            onClick={goToPrevFlipPage}
+            disabled={!canFlipPrev}
+            aria-label="上一页"
+          >
+            ‹
+          </button>
+          <div className={`flip-canvas ${scrollColumnMode === 2 ? 'double' : 'single'}`}>
+            {flipDisplayPages.map((page, index) => (
+              <div className="flip-page-panel" key={`flip-page-${index}`}>
+                {page?.status === 'ready' && page.url ? (
+                  <img
+                    className="flip-image"
+                    src={page.url}
+                    alt={page.name}
+                    loading="eager"
+                    decoding="async"
+                    draggable={false}
+                    style={{
+                      transform: `translate(${flipOffset.x}px, ${flipOffset.y}px) scale(${effectiveFlipZoom})`,
+                    }}
+                  />
+                ) : page ? (
+                  <div className="flip-image-skeleton">
+                    {page.status === 'error' ? '加载失败' : <Spin size="middle" />}
+                  </div>
+                ) : (
+                  <div className="flip-image-empty" />
+                )}
+              </div>
+            ))}
+          </div>
+          <button
+            type="button"
+            className="flip-nav flip-nav-next"
+            onClick={goToNextFlipPage}
+            disabled={!canFlipNext}
+            aria-label="下一页"
+          >
+            ›
+          </button>
+        </div>
+      ) : (
+        <div className="pages-scroll" ref={scrollRef} onScroll={handleScroll}>
+          <div
+            className={`pages-grid column-${scrollColumnMode}`}
+            style={{
+              width: `${gridWidth}px`,
+              gridTemplateColumns: `repeat(${scrollColumnMode}, minmax(0, ${pageWidth}px))`,
+              columnGap: `${scrollColumnMode === 2 ? DOUBLE_COLUMN_GAP : 0}px`,
+            }}
+          >
+            {renderedPages.map((page) => (
+              <article
+                className="page-shell"
+                style={{ width: `${pageWidth}px` }}
+                key={page.id}
+                ref={(el) => {
+                  if (el) {
+                    pageRefs.current.set(page.id, el);
+                  } else {
+                    pageRefs.current.delete(page.id);
+                  }
+                }}
+              >
+                {page.status === 'ready' && page.url ? (
+                  <img
+                    className="page-image"
+                    src={page.url}
+                    alt={page.name}
+                    loading="eager"
+                    decoding="sync"
+                    draggable={false}
+                    onLoad={() => {
+                      if (pendingRestoreRef.current) {
+                        setRestoreTick(prev => prev + 1);
+                      }
+                    }}
+                  />
+                ) : (
+                  <div className="page-skeleton">
+                    {page.status === 'error' ? '加载失败' : <Spin size="middle" />}
+                  </div>
+                )}
+              </article>
+            ))}
+            <div ref={sentinelRef} className="load-more-sentinel" />
+          </div>
           <div className="load-state">
             {visibleCount < pages.length ? '继续下滑加载更多页...' : '已加载全部页面'}
           </div>
         </div>
-      </div>
-      <button type="button" className="back-top-btn" onClick={handleBackToTop}>
-        回到顶部
-      </button>
+      )}
+      {!isFlipMode && (
+        <button type="button" className="back-top-btn" onClick={handleBackToTop}>
+          回到顶部
+        </button>
+      )}
 
       <div className="viewer-footer">
-        <div className="footer-title-group">
+        <div className="footer-side footer-side-left">
           <span className="footer-title-badge">COMIC</span>
           <span className="footer-title" title={displayTitle}>{displayTitle}</span>
         </div>
         <span className="footer-page-meta">{Math.max(currentPageNumber, 1)} / {pages.length} 页</span>
+        <div className="footer-side footer-side-right">
+          <button
+            type="button"
+            className={`footer-btn ${isFlipMode ? 'is-active' : ''}`}
+            onClick={toggleLayoutMode}
+          >
+            {layoutModeSwitchLabel}
+          </button>
+          <button
+            type="button"
+            className="footer-btn"
+            onClick={toggleScrollColumnMode}
+          >
+            {pageModeSwitchLabel}
+          </button>
+        </div>
       </div>
     </ComicViewerWrapper>
   );

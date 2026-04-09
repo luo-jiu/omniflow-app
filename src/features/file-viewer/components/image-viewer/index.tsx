@@ -168,6 +168,13 @@ const ImageViewer: React.FC<ImageViewerProps> = ({ url, fileName }) => {
 
   // 空格键平移 + 快捷键缩放
   useEffect(() => {
+    const isEditableTarget = (target: EventTarget | null) => {
+      if (!(target instanceof HTMLElement)) return false;
+      const tag = target.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+      return target.isContentEditable;
+    };
+
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.code === 'Space' && !e.repeat) {
         e.preventDefault();
@@ -175,13 +182,23 @@ const ImageViewer: React.FC<ImageViewerProps> = ({ url, fileName }) => {
       }
 
       if (e.ctrlKey || e.metaKey) {
-        if (e.key === '=' || e.key === '+') {
+        if (isEditableTarget(e.target)) {
+          return;
+        }
+
+        const code = e.code;
+        const key = e.key;
+        const isPlus = key === '+' || key === '=' || code === 'Equal' || code === 'NumpadAdd';
+        const isMinus = key === '-' || key === '_' || code === 'Minus' || code === 'NumpadSubtract';
+        const isReset = key === '0' || code === 'Digit0' || code === 'Numpad0';
+
+        if (isPlus) {
           e.preventDefault();
           setZoom(s => clamp(s * 1.15, MIN_ZOOM, MAX_ZOOM));
-        } else if (e.key === '-') {
+        } else if (isMinus) {
           e.preventDefault();
           setZoom(s => clamp(s / 1.15, MIN_ZOOM, MAX_ZOOM));
-        } else if (e.key === '0') {
+        } else if (isReset) {
           e.preventDefault();
           resetView();
         }
@@ -226,7 +243,7 @@ const ImageViewer: React.FC<ImageViewerProps> = ({ url, fileName }) => {
             width: naturalSize.width > 0 ? `${naturalSize.width}px` : undefined,
             height: naturalSize.height > 0 ? `${naturalSize.height}px` : undefined,
             transform: `translate(${offset.x}px, ${offset.y}px) scale(${baseScale * zoom})`,
-            transition: isDragging ? 'none' : 'transform 0.1s ease-out'
+            transition: 'none'
           }}
         />
       </div>

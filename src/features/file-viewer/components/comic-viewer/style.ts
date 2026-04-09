@@ -16,15 +16,23 @@ export const ComicViewerWrapper = styled.div`
     flex: 1;
     min-height: 0;
     overflow-y: auto;
-    overflow-x: hidden;
+    overflow-x: auto;
     padding: 10px 0 20px;
   }
 
-  .pages-column {
+  .pages-grid {
     margin: 0 auto;
-    display: flex;
-    flex-direction: column;
-    gap: 0;
+    display: grid;
+    align-items: start;
+    row-gap: 0;
+  }
+
+  .pages-grid.column-1 {
+    justify-content: center;
+  }
+
+  .pages-grid.column-2 {
+    justify-content: center;
   }
 
   .page-shell {
@@ -34,7 +42,6 @@ export const ComicViewerWrapper = styled.div`
     border: 0;
     background: transparent;
     box-shadow: none;
-    contain: paint;
   }
 
   .page-image {
@@ -43,8 +50,6 @@ export const ComicViewerWrapper = styled.div`
     height: auto;
     object-fit: contain;
     background: transparent;
-    transform: translateZ(0);
-    backface-visibility: hidden;
   }
 
   .page-skeleton {
@@ -65,7 +70,8 @@ export const ComicViewerWrapper = styled.div`
   }
 
   .load-more-sentinel {
-    width: 100%;
+    grid-column: 1 / -1;
+    width: 100% !important;
     height: 8px;
   }
 
@@ -95,7 +101,7 @@ export const ComicViewerWrapper = styled.div`
     flex-shrink: 0;
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    justify-content: center;
     gap: 10px;
     padding: 0 12px;
     border-top: 1px solid var(--semi-color-border);
@@ -125,12 +131,21 @@ export const ComicViewerWrapper = styled.div`
     color: var(--semi-color-success);
   }
 
-  .footer-title-group {
+  .footer-side {
     min-width: 0;
     display: flex;
     align-items: center;
     gap: 8px;
-    flex: 1;
+    flex: 1 1 0;
+  }
+
+  .footer-side-left {
+    justify-content: flex-start;
+    overflow: hidden;
+  }
+
+  .footer-side-right {
+    justify-content: flex-end;
   }
 
   .footer-title-badge {
@@ -154,11 +169,182 @@ export const ComicViewerWrapper = styled.div`
   }
 
   .footer-page-meta {
-    flex-shrink: 0;
+    flex: 0 0 auto;
+    min-width: 120px;
+    text-align: center;
     font-size: 13px;
     color: var(--semi-color-text-2);
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     white-space: nowrap;
+  }
+
+  .footer-btn {
+    height: 28px;
+    padding: 0 12px;
+    border-radius: 8px;
+    border: 1px solid var(--semi-color-border);
+    background: color-mix(in srgb, var(--semi-color-bg-0) 96%, transparent);
+    color: var(--semi-color-text-1);
+    font-size: 12px;
+    line-height: 1;
+    cursor: pointer;
+    transition: all 120ms ease;
+  }
+
+  .footer-btn:hover:not(:disabled) {
+    border-color: color-mix(in srgb, var(--semi-color-success) 52%, var(--semi-color-border));
+    color: var(--semi-color-success);
+  }
+
+  .footer-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+
+  .footer-btn.is-active {
+    border-color: color-mix(in srgb, var(--semi-color-success) 58%, var(--semi-color-border));
+    color: var(--semi-color-success);
+    background: color-mix(in srgb, var(--semi-color-success-light-default) 30%, var(--semi-color-bg-0));
+  }
+
+  .flip-stage {
+    flex: 1;
+    min-height: 0;
+    position: relative;
+    overflow: hidden;
+    background: transparent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    user-select: none;
+  }
+
+  .flip-canvas {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    gap: 6px;
+    padding: 0 44px;
+    box-sizing: border-box;
+  }
+
+  .flip-canvas.single {
+    gap: 0;
+    padding: 0 44px;
+  }
+
+  .flip-canvas.double {
+    gap: 4px;
+    padding: 0 32px;
+  }
+
+  .flip-page-panel {
+    flex: 1 1 0;
+    min-width: 0;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+
+  .flip-canvas.double .flip-page-panel:first-child {
+    justify-content: flex-end;
+  }
+
+  .flip-canvas.double .flip-page-panel:last-child {
+    justify-content: flex-start;
+  }
+
+  .flip-canvas.double .flip-page-panel:first-child .flip-image {
+    transform-origin: right center;
+  }
+
+  .flip-canvas.double .flip-page-panel:last-child .flip-image {
+    transform-origin: left center;
+  }
+
+  .flip-image {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    transform-origin: center center;
+    will-change: transform;
+  }
+
+  .flip-image-skeleton {
+    width: min(78vw, 980px);
+    height: min(80vh, 760px);
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background:
+      linear-gradient(
+        90deg,
+        color-mix(in srgb, var(--semi-color-fill-0) 84%, #000) 0%,
+        color-mix(in srgb, var(--semi-color-fill-1) 88%, #000) 48%,
+        color-mix(in srgb, var(--semi-color-fill-0) 84%, #000) 100%
+      );
+    background-size: 260% 100%;
+    animation: comic-placeholder 1.4s ease-in-out infinite;
+  }
+
+  .flip-image-empty {
+    width: min(78vw, 980px);
+    height: min(80vh, 760px);
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--semi-color-fill-0) 56%, transparent);
+    border: 1px dashed color-mix(in srgb, var(--semi-color-border) 70%, transparent);
+  }
+
+  .flip-stage.can-pan .flip-image {
+    cursor: grab;
+  }
+
+  .flip-stage.is-panning .flip-image {
+    cursor: grabbing;
+    transition: none;
+  }
+
+  .flip-nav {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 40px;
+    height: 64px;
+    border: 1px solid color-mix(in srgb, var(--semi-color-border) 85%, transparent);
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--semi-color-bg-0) 90%, transparent);
+    color: var(--semi-color-text-1);
+    font-size: 30px;
+    line-height: 1;
+    cursor: pointer;
+    z-index: 5;
+    backdrop-filter: blur(4px);
+    transition: all 120ms ease;
+  }
+
+  .flip-nav:hover:not(:disabled) {
+    border-color: color-mix(in srgb, var(--semi-color-success) 50%, var(--semi-color-border));
+    color: var(--semi-color-success);
+  }
+
+  .flip-nav:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+  }
+
+  .flip-nav-prev {
+    left: 10px;
+  }
+
+  .flip-nav-next {
+    right: 10px;
   }
 
   @keyframes comic-placeholder {
