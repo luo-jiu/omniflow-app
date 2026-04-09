@@ -9,6 +9,7 @@ import styled from "styled-components";
 
 const DEFAULT_SIDE_PANEL_WIDTH = 300;
 const MIN_SIDE_PANEL_WIDTH = 220;
+const SIDE_PANEL_TRAFFIC_LIGHT_SAFE_HEIGHT = 52;
 const SIDE_PANEL_WIDTH_STORAGE_PREFIX = 'library-detail:side-panel-width:';
 
 function getSidePanelWidthStorageKey(libraryId: number) {
@@ -65,10 +66,18 @@ const ResizeHandle = styled.div`
 `;
 
 const SidePanelHeader = styled.div`
-  padding: 14px 16px 10px;
+  height: ${SIDE_PANEL_TRAFFIC_LIGHT_SAFE_HEIGHT}px;
+  min-height: ${SIDE_PANEL_TRAFFIC_LIGHT_SAFE_HEIGHT}px;
+  padding: 0 16px;
   padding-left: 80px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  background: var(--app-bg-sidebar);
   -webkit-app-region: drag;
   flex-shrink: 0;
+  position: relative;
+  z-index: 2;
 
   h1 {
     -webkit-app-region: no-drag;
