@@ -1,12 +1,38 @@
 import React, { useState } from 'react';
 import styled from 'styled-components';
-import { Typography, Divider, Switch, Select, Button } from '@douyinfe/semi-ui';
+import { Typography, Divider, Switch, Select, Button, Input, Toast } from '@douyinfe/semi-ui';
 import { IconChevronLeft } from '@douyinfe/semi-icons';
 import { useTheme } from '@/hooks/useTheme';
 import { useNavigate } from 'react-router-dom';
 import { getFileTreeShowSuffix, setFileTreeShowSuffix } from '@/utils/fileTreeSettings';
+import {
+  getAutoImportEnabled,
+  getAutoImportWatchDirectory,
+  setAutoImportEnabled,
+  setAutoImportWatchDirectory,
+} from '@/features/file-explorer/auto-import/settings';
+import { pickAutoImportDirectoryFromDesktop } from '@/features/file-explorer/services/desktop-auto-import.api';
+
+const SettingsPageWrapper = styled.div`
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+
+  .top-drag-region {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 56px;
+    -webkit-app-region: drag;
+    z-index: 0;
+  }
+`;
 
 const SettingsWrapper = styled.div`
+  position: relative;
+  z-index: 1;
   padding: 48px 60px;
   padding-top: 56px;
   max-width: 800px;
@@ -49,6 +75,19 @@ const SettingsWrapper = styled.div`
     font-size: 14px;
     margin-top: 4px;
     color: var(--semi-color-text-2);
+  }
+
+  .setting-control-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    width: min(56vw, 420px);
+    justify-content: flex-end;
+  }
+
+  .setting-path-input {
+    flex: 1;
+    min-width: 0;
   }
 
   .settings-action-btn {
@@ -104,96 +143,163 @@ const Settings: React.FC = () => {
   const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
   const [showFileSuffix, setShowFileSuffix] = useState<boolean>(() => getFileTreeShowSuffix());
+  const [autoImportEnabled, setAutoImportEnabledState] = useState<boolean>(() => getAutoImportEnabled());
+  const [autoImportWatchDirectory, setAutoImportWatchDirectoryState] = useState<string>(() => getAutoImportWatchDirectory());
+
+  const persistAutoImportWatchDirectory = (value: string) => {
+    setAutoImportWatchDirectoryState(value);
+    setAutoImportWatchDirectory(value);
+  };
+
+  const handlePickAutoImportDirectory = async () => {
+    try {
+      const directoryPath = await pickAutoImportDirectoryFromDesktop();
+      if (!directoryPath) {
+        return;
+      }
+      persistAutoImportWatchDirectory(directoryPath);
+      Toast.success('已更新监听目录');
+    } catch (error: any) {
+      Toast.error(error?.message || '选择监听目录失败');
+    }
+  };
 
   return (
-    <SettingsWrapper>
-      <div className="settings-header">
-        <Button
-          icon={<IconChevronLeft style={{ fontSize: 20 }} />}
-          theme="borderless"
-          onClick={() => navigate(-1)}
-          style={{ padding: '6px', borderRadius: '8px' }}
-        />
-        <Title heading={2} style={{ fontSize: 26, fontWeight: 600 }}>软件设置</Title>
-      </div>
-
-      <div className="settings-subtitle">
-        在这里调整你的 Omniflow 体验
-      </div>
-
-      <Divider style={{ margin: '20px 0' }} />
-
-      <div className="setting-item">
-        <div>
-          <div className="setting-title">深色模式</div>
-          <div className="setting-desc">开启或关闭深色界面主题</div>
+    <SettingsPageWrapper>
+      <div className="top-drag-region" />
+      <SettingsWrapper>
+        <div className="settings-header">
+          <Button
+            icon={<IconChevronLeft style={{ fontSize: 20 }} />}
+            theme="borderless"
+            onClick={() => navigate(-1)}
+            style={{ padding: '6px', borderRadius: '8px' }}
+          />
+          <Title heading={2} style={{ fontSize: 26, fontWeight: 600 }}>软件设置</Title>
         </div>
-        <Switch
-          size="large"
-          checked={theme === 'dark'}
-          onChange={() => toggleTheme()}
-        />
-      </div>
 
-      <div className="setting-item">
-        <div>
-          <div className="setting-title">默认语言</div>
-          <div className="setting-desc">选择界面显示的语言</div>
+        <div className="settings-subtitle">
+          在这里调整你的 Omniflow 体验
         </div>
-        <Select defaultValue="zh-CN" style={{ width: 160 }} size="large">
-          <Select.Option value="zh-CN">简体中文</Select.Option>
-          <Select.Option value="en-US">English</Select.Option>
-        </Select>
-      </div>
 
-      <div className="setting-item">
-        <div>
-          <div className="setting-title">目录树显示文件后缀</div>
-          <div className="setting-desc">开启后，文件节点会显示扩展名（如 .txt、.jpg）</div>
+        <Divider style={{ margin: '20px 0' }} />
+
+        <div className="setting-item">
+          <div>
+            <div className="setting-title">深色模式</div>
+            <div className="setting-desc">开启或关闭深色界面主题</div>
+          </div>
+          <Switch
+            size="large"
+            checked={theme === 'dark'}
+            onChange={() => toggleTheme()}
+          />
         </div>
-        <Switch
-          size="large"
-          checked={showFileSuffix}
-          onChange={(checked) => {
-            setShowFileSuffix(checked);
-            setFileTreeShowSuffix(checked);
-          }}
-        />
-      </div>
 
-      <div className="setting-item">
-        <div>
-          <div className="setting-title">标签管理</div>
-          <div className="setting-desc">管理标签场景、颜色、排序和启用状态</div>
+        <div className="setting-item">
+          <div>
+            <div className="setting-title">默认语言</div>
+            <div className="setting-desc">选择界面显示的语言</div>
+          </div>
+          <Select defaultValue="zh-CN" style={{ width: 160 }} size="large">
+            <Select.Option value="zh-CN">简体中文</Select.Option>
+            <Select.Option value="en-US">English</Select.Option>
+          </Select>
         </div>
-        <Button
-          theme="borderless"
-          onClick={() => navigate('/settings/tags')}
-          className="settings-action-btn manage"
-        >
-          管理
-        </Button>
-      </div>
 
-      <Divider style={{ margin: '24px 0' }} />
+        <div className="setting-item">
+          <div>
+            <div className="setting-title">目录树显示文件后缀</div>
+            <div className="setting-desc">开启后，文件节点会显示扩展名（如 .txt、.jpg）</div>
+          </div>
+          <Switch
+            size="large"
+            checked={showFileSuffix}
+            onChange={(checked) => {
+              setShowFileSuffix(checked);
+              setFileTreeShowSuffix(checked);
+            }}
+          />
+        </div>
 
-      <div>
-        <Title heading={3} style={{ fontSize: 18, marginBottom: 8 }}>关于</Title>
-        <Text style={{ fontSize: 14, color: 'var(--semi-color-text-2)' }}>Omniflow App v0.0.1</Text>
-      </div>
+        <div className="setting-item">
+          <div>
+            <div className="setting-title">自动导入下载目录</div>
+            <div className="setting-desc">监控指定目录并自动加入上传队列（目标：当前库根目录）</div>
+          </div>
+          <Switch
+            size="large"
+            checked={autoImportEnabled}
+            onChange={(checked) => {
+              setAutoImportEnabledState(checked);
+              setAutoImportEnabled(checked);
+            }}
+          />
+        </div>
 
-      <div style={{ marginTop: 48, textAlign: 'center' }}>
-        <Button
-          theme="light"
-          type="secondary"
-          size="default"
-          onClick={() => navigate(-1)}
-          className="settings-action-btn exit"
-        >
-          退出设置
-        </Button>
-      </div>
-    </SettingsWrapper>
+        <div className="setting-item">
+          <div>
+            <div className="setting-title">监听目录路径</div>
+            <div className="setting-desc">未指定时将使用默认路径（下载目录/Omniflow Inbox）</div>
+          </div>
+          <div className="setting-control-group">
+            <Input
+              className="setting-path-input"
+              value={autoImportWatchDirectory}
+              placeholder="未设置（默认：下载目录/Omniflow Inbox）"
+              onChange={(value) => {
+                setAutoImportWatchDirectoryState(value);
+              }}
+              onBlur={() => {
+                persistAutoImportWatchDirectory(autoImportWatchDirectory);
+              }}
+            />
+            <Button
+              theme="borderless"
+              className="settings-action-btn manage"
+              onClick={() => {
+                void handlePickAutoImportDirectory();
+              }}
+            >
+              选择
+            </Button>
+          </div>
+        </div>
+
+        <div className="setting-item">
+          <div>
+            <div className="setting-title">标签管理</div>
+            <div className="setting-desc">管理标签场景、颜色、排序和启用状态</div>
+          </div>
+          <Button
+            theme="borderless"
+            onClick={() => navigate('/settings/tags')}
+            className="settings-action-btn manage"
+          >
+            管理
+          </Button>
+        </div>
+
+        <Divider style={{ margin: '24px 0' }} />
+
+        <div>
+          <Title heading={3} style={{ fontSize: 18, marginBottom: 8 }}>关于</Title>
+          <Text style={{ fontSize: 14, color: 'var(--semi-color-text-2)' }}>Omniflow App v0.0.1</Text>
+        </div>
+
+        <div style={{ marginTop: 48, textAlign: 'center' }}>
+          <Button
+            theme="light"
+            type="secondary"
+            size="default"
+            onClick={() => navigate(-1)}
+            className="settings-action-btn exit"
+          >
+            退出设置
+          </Button>
+        </div>
+      </SettingsWrapper>
+    </SettingsPageWrapper>
   );
 };
 

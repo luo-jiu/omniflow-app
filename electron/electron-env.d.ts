@@ -48,6 +48,10 @@ interface Window {
       canceled: boolean;
       directoryPath: string;
     }>;
+    pickAutoImportDirectory: () => Promise<{
+      canceled: boolean;
+      directoryPath: string;
+    }>;
     ensureDirectory: (baseDirectory: string, relativePath: string) => Promise<string>;
     downloadUrlToPath: (
       url: string,
@@ -55,6 +59,16 @@ interface Window {
       relativePath: string,
       headers?: Record<string, string>,
     ) => Promise<string>;
+    claimAutoImportFiles: (watchDirectory: string, maxFiles?: number) => Promise<{
+      canceled: boolean;
+      files: Array<{
+        name: string;
+        size: number;
+        localPath: string;
+        relativePath: string;
+      }>;
+    }>;
+    cleanupAutoImportStagedFile: (stagedPath: string) => Promise<boolean>;
     onUploadProgress: (listener: (payload: {
       uploadId: string;
       uploadedBytes: number;

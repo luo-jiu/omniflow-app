@@ -1,7 +1,9 @@
 import { DirectorySidebarWrapper } from './components/directory-tree/style';
 import DirectoryTree from './components/directory-tree';
 import { useRepositoryTree } from './hooks/useRepositoryTree';
-import React from "react";
+import type { NodeRespDTO } from './hooks/useRepositoryTree';
+import React from 'react';
+import { useDesktopAutoImport } from './hooks/useDesktopAutoImport';
 
 interface Props {
   libraryId: number;
@@ -23,6 +25,20 @@ interface Props {
   ) => void;
 }
 
+function isNodeRespDTO(value: unknown): value is NodeRespDTO {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+  const payload = value as Record<string, unknown>;
+  return (
+    Number.isFinite(Number(payload.id))
+    && typeof payload.name === 'string'
+    && (payload.type === 'dir' || payload.type === 'file')
+    && Number.isFinite(Number(payload.parentId))
+    && Number.isFinite(Number(payload.libraryId))
+  );
+}
+
 const DirectorySidebar: React.FC<Props> = ({ libraryId, onFileOpen }) => {
   const {
     rootNodeId,
@@ -37,6 +53,19 @@ const DirectorySidebar: React.FC<Props> = ({ libraryId, onFileOpen }) => {
     updateNodeBuiltInConfig,
     refreshAfterMove,
   } = useRepositoryTree(libraryId, onFileOpen);
+
+  const handleAutoImportNodeCreated = React.useCallback((newNode: unknown) => {
+    if (!isNodeRespDTO(newNode)) {
+      return;
+    }
+    appendNodeUnderParent('root', newNode);
+  }, [appendNodeUnderParent]);
+
+  useDesktopAutoImport({
+    libraryId,
+    rootNodeId,
+    onNodeCreated: handleAutoImportNodeCreated,
+  });
 
   return (
     <DirectorySidebarWrapper>
@@ -72,6 +101,6 @@ const DirectorySidebar: React.FC<Props> = ({ libraryId, onFileOpen }) => {
       </div>
     </DirectorySidebarWrapper>
   );
-}
+};
 
 export default DirectorySidebar;

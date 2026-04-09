@@ -1,4 +1,4 @@
-import { dialog, net, ipcMain, app, BrowserWindow } from "electron";
+import { dialog, app, net, ipcMain, BrowserWindow } from "electron";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs$1, { existsSync } from "node:fs";
@@ -9,6 +9,12 @@ import require$$0 from "os";
 import require$$1 from "child_process";
 import fs$2 from "fs";
 const DOWNLOAD_REQUEST_TIMEOUT_MS = 6e4;
+const AUTO_IMPORT_DEFAULT_DIR_NAME = "Omniflow Inbox";
+const AUTO_IMPORT_OBSERVE_TTL_MS = 10 * 60 * 1e3;
+const AUTO_IMPORT_MIN_STABLE_COUNT = 2;
+const AUTO_IMPORT_MIN_MTIME_AGE_MS = 2e3;
+const AUTO_IMPORT_DEFAULT_MAX_FILES = 12;
+const autoImportObservedFiles = /* @__PURE__ */ new Map();
 function shouldIgnoreSystemEntry(entryName) {
   const normalized = String(entryName || "");
   if (!normalized) return true;
@@ -19,6 +25,116 @@ function shouldIgnoreSystemEntry(entryName) {
 }
 function normalizeRelativePath(input) {
   return input.replace(/\\/g, "/").split("/").filter(Boolean).join("/");
+}
+function isTransientDownloadEntry(entryName) {
+  const normalized = String(entryName || "").toLowerCase();
+  if (!normalized) return true;
+  if (normalized.startsWith(".")) return true;
+  return normalized.endsWith(".crdownload") || normalized.endsWith(".part") || normalized.endsWith(".tmp") || normalized.endsWith(".opdownload") || normalized.endsWith(".download");
+}
+function getAutoImportStagingRoot() {
+  return path.join(app.getPath("userData"), "auto-import-staging");
+}
+function isPathInsideDirectory(filePath, directoryPath) {
+  const resolvedFilePath = path.resolve(filePath);
+  const resolvedDirectoryPath = path.resolve(directoryPath);
+  if (resolvedFilePath === resolvedDirectoryPath) return true;
+  return resolvedFilePath.startsWith(`${resolvedDirectoryPath}${path.sep}`);
+}
+function buildStagedFileName(fileName) {
+  const safeName = String(fileName || "unknown").replace(/[/\\]/g, "_").trim() || "unknown";
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${safeName}`;
+}
+async function moveFileSafe(sourcePath, targetPath) {
+  try {
+    await fs.rename(sourcePath, targetPath);
+  } catch (error) {
+    if ((error == null ? void 0 : error.code) !== "EXDEV") {
+      throw error;
+    }
+    await fs.copyFile(sourcePath, targetPath);
+    await fs.rm(sourcePath, { force: true });
+  }
+}
+function cleanupObservedState(seenPaths) {
+  const nowTs = Date.now();
+  for (const [observedPath, observedState] of autoImportObservedFiles.entries()) {
+    if (seenPaths.has(observedPath)) continue;
+    if (nowTs - observedState.lastSeenAt <= AUTO_IMPORT_OBSERVE_TTL_MS) continue;
+    autoImportObservedFiles.delete(observedPath);
+  }
+}
+async function claimStableInboxFiles(watchDirectory, maxFiles = AUTO_IMPORT_DEFAULT_MAX_FILES) {
+  const rawDirectory = String(watchDirectory || "").trim();
+  const normalizedDirectory = rawDirectory ? path.resolve(rawDirectory) : path.join(app.getPath("downloads"), AUTO_IMPORT_DEFAULT_DIR_NAME);
+  const stat = await fs.stat(normalizedDirectory).catch(() => null);
+  if (!(stat == null ? void 0 : stat.isDirectory())) {
+    return [];
+  }
+  const entries = await fs.readdir(normalizedDirectory, { withFileTypes: true });
+  const seenPaths = /* @__PURE__ */ new Set();
+  const nowTs = Date.now();
+  const readyCandidates = [];
+  for (const entry of entries) {
+    if (!entry.isFile()) continue;
+    if (shouldIgnoreSystemEntry(entry.name)) continue;
+    if (isTransientDownloadEntry(entry.name)) continue;
+    const sourcePath = path.join(normalizedDirectory, entry.name);
+    const fileStat = await fs.stat(sourcePath).catch(() => null);
+    if (!(fileStat == null ? void 0 : fileStat.isFile())) continue;
+    seenPaths.add(sourcePath);
+    const previous = autoImportObservedFiles.get(sourcePath);
+    const unchanged = previous ? previous.size === fileStat.size && previous.mtimeMs === fileStat.mtimeMs : false;
+    const stableCount = unchanged && previous ? previous.stableCount + 1 : 1;
+    autoImportObservedFiles.set(sourcePath, {
+      size: fileStat.size,
+      mtimeMs: fileStat.mtimeMs,
+      stableCount,
+      lastSeenAt: nowTs
+    });
+    if (stableCount < AUTO_IMPORT_MIN_STABLE_COUNT) continue;
+    if (nowTs - fileStat.mtimeMs < AUTO_IMPORT_MIN_MTIME_AGE_MS) continue;
+    readyCandidates.push({
+      sourcePath,
+      name: entry.name,
+      size: fileStat.size,
+      mtimeMs: fileStat.mtimeMs
+    });
+  }
+  cleanupObservedState(seenPaths);
+  if (readyCandidates.length === 0) {
+    return [];
+  }
+  readyCandidates.sort((a, b) => a.mtimeMs - b.mtimeMs);
+  const stagingRoot = getAutoImportStagingRoot();
+  await fs.mkdir(stagingRoot, { recursive: true });
+  const claimedFiles = [];
+  const claimLimit = Math.max(1, Math.floor(Number(maxFiles) || AUTO_IMPORT_DEFAULT_MAX_FILES));
+  for (const candidate of readyCandidates.slice(0, claimLimit)) {
+    const stagedPath = path.join(stagingRoot, buildStagedFileName(candidate.name));
+    try {
+      await moveFileSafe(candidate.sourcePath, stagedPath);
+    } catch {
+      continue;
+    }
+    autoImportObservedFiles.delete(candidate.sourcePath);
+    claimedFiles.push({
+      name: candidate.name,
+      size: candidate.size,
+      localPath: stagedPath,
+      relativePath: normalizeRelativePath(candidate.name)
+    });
+  }
+  return claimedFiles;
+}
+async function cleanupStagedFile(stagedPath) {
+  const normalizedPath = path.resolve(String(stagedPath || "").trim());
+  const stagingRoot = getAutoImportStagingRoot();
+  if (!normalizedPath || !isPathInsideDirectory(normalizedPath, stagingRoot)) {
+    return false;
+  }
+  await fs.rm(normalizedPath, { force: true });
+  return true;
 }
 function resolveTargetPath(baseDirectory, relativePath) {
   const normalizedRelativePath = normalizeRelativePath(relativePath || "");
@@ -222,6 +338,26 @@ function registerFileIpc(ipcMain2) {
       return { canceled: true, directoryPath: "" };
     }
     return { canceled: false, directoryPath: result.filePaths[0] };
+  });
+  ipcMain2.handle("dialog:pick-auto-import-directory", async () => {
+    const result = await dialog.showOpenDialog({
+      properties: ["openDirectory", "createDirectory", "dontAddToRecent"]
+    });
+    if (result.canceled || result.filePaths.length === 0) {
+      return { canceled: true, directoryPath: "" };
+    }
+    return { canceled: false, directoryPath: result.filePaths[0] };
+  });
+  ipcMain2.handle("fs:claim-auto-import-files", async (_event, watchDirectory, maxFiles = AUTO_IMPORT_DEFAULT_MAX_FILES) => {
+    const files = await claimStableInboxFiles(watchDirectory, maxFiles);
+    return { canceled: false, files };
+  });
+  ipcMain2.handle("fs:cleanup-auto-import-staged-file", async (_event, stagedPath) => {
+    try {
+      return await cleanupStagedFile(stagedPath);
+    } catch {
+      return false;
+    }
   });
   ipcMain2.handle("fs:ensure-directory", async (_event, baseDirectory, relativePath = "") => {
     const targetPath = resolveTargetPath(baseDirectory, relativePath);

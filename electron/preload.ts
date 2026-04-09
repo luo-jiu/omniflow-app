@@ -29,6 +29,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   pickUploadFiles: () => ipcRenderer.invoke('dialog:pick-upload-files'),
   pickUploadFolders: () => ipcRenderer.invoke('dialog:pick-upload-folders'),
   pickDownloadDirectory: () => ipcRenderer.invoke('dialog:pick-download-directory'),
+  pickAutoImportDirectory: () => ipcRenderer.invoke('dialog:pick-auto-import-directory'),
   ensureDirectory: (baseDirectory: string, relativePath: string) =>
     ipcRenderer.invoke('fs:ensure-directory', baseDirectory, relativePath),
   downloadUrlToPath: (
@@ -37,6 +38,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     relativePath: string,
     headers?: Record<string, string>,
   ) => ipcRenderer.invoke('fs:download-url-to-path', url, baseDirectory, relativePath, headers),
+  claimAutoImportFiles: (watchDirectory: string, maxFiles?: number) =>
+    ipcRenderer.invoke('fs:claim-auto-import-files', watchDirectory, maxFiles),
+  cleanupAutoImportStagedFile: (stagedPath: string) =>
+    ipcRenderer.invoke('fs:cleanup-auto-import-staged-file', stagedPath),
   fetch: (url: string, options?: any) => ipcRenderer.invoke('http:fetch', url, options),
   upload: (
     url: string,
