@@ -1,6 +1,7 @@
 import React, { ReactNode, useEffect, useRef, useState } from 'react';
 import { Tree, Toast, Input, Popover, Modal } from '@douyinfe/semi-ui';
 import {
+  batchSetArchiveChildrenBuiltInType,
   createNode,
   deleteNodeAndChildren,
   getAllDescendantsByNodeId,
@@ -1017,7 +1018,7 @@ export default function DirectoryTree({
       return;
     }
 
-    if (action === '漫画按名称排序') {
+    if (action === '按名称排序') {
       if (!node || String(node.type) === 'file') {
         return;
       }
@@ -1026,10 +1027,46 @@ export default function DirectoryTree({
         if (onMoveSuccess) {
           await onMoveSuccess({ oldParentId: node.id, newParentId: node.id });
         }
-        Toast.success('漫画已按名称排序');
+        Toast.success('已按名称排序');
       } catch (error: any) {
-        runtimeLogger.error('漫画按名称排序失败:', error);
-        Toast.error(error?.message || '漫画按名称排序失败');
+        runtimeLogger.error('按名称排序失败:', error);
+        Toast.error(error?.message || '按名称排序失败');
+      }
+      return;
+    }
+
+    if (action === '批量设置内置类型') {
+      if (!node || String(node.type) === 'file') {
+        Toast.warning('仅文件夹支持批量设置内置类型');
+        return;
+      }
+      const currentBuiltInType = String(node?.builtInType || 'DEF').toUpperCase();
+      const currentArchiveMode = Number(node?.archiveMode ?? 0) === 1 ? 1 : 0;
+      if (currentArchiveMode !== 1 || currentBuiltInType === 'DEF') {
+        Toast.warning('仅归档模式且非 DEF 的文件夹支持该操作');
+        return;
+      }
+      try {
+        const result = await batchSetArchiveChildrenBuiltInType(Number(node.id));
+        const visibleChildren = Array.isArray(node.children) ? node.children : [];
+        visibleChildren.forEach((child: any) => {
+          const childIsDir = String(child?.type || '').toLowerCase() === 'dir' || child?.isLeaf !== true;
+          if (!childIsDir || !child?.key) {
+            return;
+          }
+          onConfigSuccess?.(child.key, {
+            builtInType: currentBuiltInType,
+          });
+        });
+        if (onMoveSuccess) {
+          await onMoveSuccess({ oldParentId: Number(node.id), newParentId: Number(node.id) });
+        }
+        Toast.success(
+          `批量设置完成：共 ${result.dirChildren} 个子文件夹，实际更新 ${result.updatedCount} 个`,
+        );
+      } catch (error: any) {
+        runtimeLogger.error('批量设置内置类型失败:', error);
+        Toast.error(error?.message || '批量设置内置类型失败');
       }
       return;
     }

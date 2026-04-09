@@ -11,7 +11,7 @@ interface DirectoryContextMenuProps {
   onClose?: () => void;
 }
 
-const BUILT_IN_MENU_ICON_SIZE = 16;
+const BUILT_IN_MENU_ICON_SIZE = 20;
 
 function createBuiltInMenuIcon(src: string, alt: string): React.ReactNode {
   return (
@@ -27,6 +27,52 @@ function createBuiltInMenuIcon(src: string, alt: string): React.ReactNode {
 
 const COMIC_BUILT_IN_MENU_ICON = createBuiltInMenuIcon(comicFolderIcon, 'comic');
 const ASMR_BUILT_IN_MENU_ICON = createBuiltInMenuIcon(asmrFolderIcon, 'asmr');
+
+function getBuiltInTypeMenuIcon(builtInType: string): React.ReactNode | undefined {
+  const normalizedType = String(builtInType || '').toUpperCase();
+  if (normalizedType === 'COMIC') {
+    return COMIC_BUILT_IN_MENU_ICON;
+  }
+  if (normalizedType === 'ASMR') {
+    return ASMR_BUILT_IN_MENU_ICON;
+  }
+  return undefined;
+}
+
+function createTrailingBuiltInTypeLabel(
+  text: string,
+  builtInType: string,
+): React.ReactNode {
+  const icon = getBuiltInTypeMenuIcon(builtInType);
+  if (!icon) {
+    return text;
+  }
+  return (
+    <span
+      style={{
+        display: 'inline-flex',
+        width: '100%',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 10,
+      }}
+    >
+      <span>{text}</span>
+      <span
+        style={{
+          display: 'inline-flex',
+          width: BUILT_IN_MENU_ICON_SIZE,
+          height: BUILT_IN_MENU_ICON_SIZE,
+          alignItems: 'center',
+          justifyContent: 'center',
+          flexShrink: 0,
+        }}
+      >
+        {icon}
+      </span>
+    </span>
+  );
+}
 
 /**
  * 目录树右键菜单
@@ -160,6 +206,15 @@ const DirectoryContextMenu: React.FC<DirectoryContextMenuProps> = ({
 
   const isBuiltInFolder = isFolder && currentBuiltInType !== 'DEF';
   const isArchiveFolder = isBuiltInFolder && currentArchiveMode === 1;
+
+  if (isArchiveFolder) {
+    items.push({
+      key: 'batch-set-built-in-type',
+      label: createTrailingBuiltInTypeLabel('批量设置内置类型', currentBuiltInType),
+      onClick: () => onAction('批量设置内置类型', node),
+    });
+  }
+
   if (isBuiltInFolder) {
     if (!isArchiveFolder) {
       items.push({
@@ -171,8 +226,8 @@ const DirectoryContextMenu: React.FC<DirectoryContextMenuProps> = ({
     if (currentBuiltInType === 'COMIC') {
       items.push({
         key: 'comic-sort-by-name',
-        label: '漫画按名称排序',
-        onClick: () => onAction('漫画按名称排序', node),
+        label: '按名称排序',
+        onClick: () => onAction('按名称排序', node),
       });
     }
   }

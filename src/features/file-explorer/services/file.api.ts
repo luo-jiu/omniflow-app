@@ -401,6 +401,33 @@ export async function sortComicChildrenByName(nodeId: number) {
   return body.data;
 }
 
+export interface BatchSetArchiveChildrenBuiltInTypeResult {
+  nodeId: number;
+  libraryId: number;
+  builtInType: string;
+  totalChildren: number;
+  dirChildren: number;
+  updatedCount: number;
+}
+
+export async function batchSetArchiveChildrenBuiltInType(
+  nodeId: number,
+): Promise<BatchSetArchiveChildrenBuiltInTypeResult> {
+  const body = await request(`/v1/nodes/${nodeId}/archive/built-in-type/batch-set`, {
+    method: 'PATCH',
+  });
+
+  const payload = (body?.data ?? {}) as Record<string, unknown>;
+  return {
+    nodeId: toNumberOrDefault(payload.nodeId),
+    libraryId: toNumberOrDefault(payload.libraryId),
+    builtInType: String(payload.builtInType ?? ''),
+    totalChildren: toNumberOrDefault(payload.totalChildren),
+    dirChildren: toNumberOrDefault(payload.dirChildren),
+    updatedCount: toNumberOrDefault(payload.updatedCount),
+  };
+}
+
 // 删除节点及其后代
 export async function deleteNodeAndChildren(ancestorId: number, libraryId: number) {
   const body = await request(`/v1/nodes/${ancestorId}/library/${libraryId}`, {

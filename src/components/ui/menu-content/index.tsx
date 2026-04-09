@@ -96,6 +96,12 @@ export const MenuContent = styled.div`
     .menu-item + .menu-item {
       margin-top: 1px;
     }
+
+    .menu-item-icon {
+      width: 20px;
+      height: 20px;
+      font-size: 20px;
+    }
   }
 `;
 
