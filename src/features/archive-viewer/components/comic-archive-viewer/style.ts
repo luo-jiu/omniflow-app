@@ -150,6 +150,7 @@ export const ComicArchiveViewerWrapper = styled.div`
     /* 亚像素缝修正，避免封面与遮罩交界闪线 */
     margin-top: calc(var(--card-meta-seam-fix) * -1);
     padding-top: var(--card-meta-seam-fix);
+    padding-bottom: 20px;
     overflow: hidden;
     background: linear-gradient(
       180deg,

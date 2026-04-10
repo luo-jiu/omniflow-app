@@ -428,6 +428,97 @@ export async function batchSetArchiveChildrenBuiltInType(
   };
 }
 
+export interface ArchiveCardDTO {
+  id: number;
+  name: string;
+  sortOrder?: number;
+  viewMeta?: string;
+  coverNodeId?: number;
+}
+
+export interface ArchiveCardsPageResult {
+  items: ArchiveCardDTO[];
+  total: number;
+  offset: number;
+  limit: number;
+  hasMore: boolean;
+}
+
+export async function fetchArchiveCardsPage(payload: {
+  nodeId: number;
+  libraryId: number;
+  builtInType: 'COMIC' | 'ASMR';
+  offset?: number;
+  limit?: number;
+}): Promise<ArchiveCardsPageResult> {
+  const query = new URLSearchParams({
+    libraryId: String(payload.libraryId),
+    builtInType: payload.builtInType,
+    offset: String(Math.max(Math.floor(payload.offset ?? 0), 0)),
+    limit: String(Math.max(Math.floor(payload.limit ?? 24), 1)),
+  });
+  const body = await request(`/v1/nodes/${payload.nodeId}/archive/cards?${query}`, {
+    method: 'GET',
+  });
+
+  const data = (body?.data ?? {}) as Record<string, unknown>;
+  const rawItems = Array.isArray(data.items) ? data.items : [];
+  const items: ArchiveCardDTO[] = rawItems
+    .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object'))
+    .map(item => ({
+      id: toNumberOrDefault(item.id),
+      name: String(item.name ?? ''),
+      sortOrder: toOptionalNumber(item.sortOrder ?? item.sort_order),
+      viewMeta: toOptionalString(item.viewMeta ?? item.view_meta),
+      coverNodeId: toOptionalNumber(item.coverNodeId ?? item.cover_node_id),
+    }))
+    .filter(item => item.id > 0);
+
+  return {
+    items,
+    total: toNumberOrDefault(data.total),
+    offset: toNumberOrDefault(data.offset),
+    limit: toNumberOrDefault(data.limit, payload.limit ?? 24),
+    hasMore: Boolean(data.hasMore ?? data.has_more),
+  };
+}
+
+export async function batchGetFileLinks(payload: {
+  libraryId: number;
+  nodeIds: number[];
+  expiry?: number;
+}): Promise<Map<number, string>> {
+  const normalizedNodeIds = payload.nodeIds
+    .map(item => Math.floor(Number(item)))
+    .filter(item => Number.isFinite(item) && item > 0);
+  if (normalizedNodeIds.length === 0) {
+    return new Map<number, string>();
+  }
+
+  const body = await request('/v1/directory/links/batch', {
+    method: 'POST',
+    body: JSON.stringify({
+      libraryId: payload.libraryId,
+      nodeIds: normalizedNodeIds,
+      expiry: payload.expiry ?? 120,
+    }),
+  });
+
+  const data = body?.data;
+  const rows = Array.isArray(data) ? data : [];
+  const map = new Map<number, string>();
+  rows.forEach((item) => {
+    if (!item || typeof item !== 'object') return;
+    const normalized = item as Record<string, unknown>;
+    const nodeId = toNumberOrDefault(normalized.nodeId ?? normalized.node_id);
+    const url = String(normalized.url ?? '');
+    if (nodeId > 0 && url) {
+      map.set(nodeId, url);
+    }
+  });
+  return map;
+}
+
 // 删除节点及其后代
 export async function deleteNodeAndChildren(ancestorId: number, libraryId: number) {
   const body = await request(`/v1/nodes/${ancestorId}/library/${libraryId}`, {

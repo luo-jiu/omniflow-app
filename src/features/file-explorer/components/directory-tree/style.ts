@@ -167,6 +167,11 @@ export const DirectorySidebarWrapper = styled.aside<{ $isDragging?: boolean }>`
     border-radius: 4px;
   }
 
+  .tree-node-label.is-located-selected {
+    background: rgba(0, 0, 0, 0.06);
+    border-radius: 4px;
+  }
+
   .tree-node-text {
     display: inline-block;
     flex: 0 0 auto;
@@ -189,6 +194,17 @@ export const DirectorySidebarWrapper = styled.aside<{ $isDragging?: boolean }>`
     display: block;
     object-fit: contain;
     margin-right: 3px;
+    box-sizing: border-box;
+    flex: 0 0 20px;
+  }
+
+  /* Normalize perceptual size for built-in folder icons. */
+  .tree-file-type-icon-comic-folder {
+    padding: 0.5px;
+  }
+
+  .tree-file-type-icon-asmr-folder {
+    padding: 1px;
   }
 
   .tree-built-in-type-icon {

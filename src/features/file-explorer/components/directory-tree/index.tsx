@@ -1,10 +1,11 @@
-import React, { ReactNode, useEffect, useRef, useState } from 'react';
+import React, { ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { Tree, Toast, Input, Popover, Modal } from '@douyinfe/semi-ui';
 import {
   batchSetArchiveChildrenBuiltInType,
   createNode,
   deleteNodeAndChildren,
   getAllDescendantsByNodeId,
+  fetchNodeDetailById,
   getFileLink,
   moveNode,
   renameNode,
@@ -35,6 +36,7 @@ import {
   normalizeDownloadRelativePath,
   pickDownloadDirectoryFromDesktop,
 } from '@/features/file-explorer/services/desktop-download.api';
+import { TREE_LOCATE_NODE_EVENT, type TreeLocateNodeDetail } from '@/features/file-explorer/services/tree-locate';
 
 interface DirectoryTreeProps {
   treeData: any[];
@@ -68,6 +70,17 @@ interface DragPreviewNodeData {
     rawName?: string;
     rawExt?: string;
   };
+}
+
+function findNodeById(nodes: any[], targetId: number): any | null {
+  for (const node of nodes) {
+    if (node.id === targetId) return node;
+    if (node.children && node.children.length > 0) {
+      const found = findNodeById(node.children, targetId);
+      if (found) return found;
+    }
+  }
+  return null;
 }
 
 /**
@@ -150,6 +163,7 @@ export default function DirectoryTree({
   // 内联编辑状态（重命名用）
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [editingName, setEditingName] = useState<string>('');
+  const [selectedTreeKey, setSelectedTreeKey] = useState<string | undefined>(undefined);
 
   // Tree 内容容器（可滚动内容层在 wrapper 中）
   const wrapperRef = useRef<HTMLDivElement | null>(null);
@@ -464,17 +478,6 @@ export default function DirectoryTree({
     return types.includes('Files');
   };
 
-  const findNodeById = (nodes: any[], targetId: number): any | null => {
-    for (const node of nodes) {
-      if (node.id === targetId) return node;
-      if (node.children && node.children.length > 0) {
-        const found = findNodeById(node.children, targetId);
-        if (found) return found;
-      }
-    }
-    return null;
-  };
-
   const findNodeByKey = (nodes: any[], targetKey: string): any | null => {
     for (const node of nodes) {
       if (node.key === targetKey) return node;
@@ -485,6 +488,124 @@ export default function DirectoryTree({
     }
     return null;
   };
+
+  const waitForNextFrame = useCallback(() => new Promise<void>((resolve) => {
+    window.requestAnimationFrame(() => resolve());
+  }), []);
+
+  const buildAncestorPathByNodeId = useCallback(async (targetNodeId: number): Promise<number[]> => {
+    const path: number[] = [];
+    const visited = new Set<number>();
+    let currentId = Number(targetNodeId);
+
+    while (Number.isFinite(currentId) && currentId > 0 && !visited.has(currentId)) {
+      visited.add(currentId);
+      path.push(currentId);
+
+      const detail = await fetchNodeDetailById(currentId);
+      const detailLibraryId = Number(detail.libraryId);
+      if (detailLibraryId !== libraryId) {
+        throw new Error('节点不在当前资料库中');
+      }
+
+      const parentId = Number(detail.parentId || 0);
+      if (!(Number.isFinite(parentId) && parentId > 0) || parentId === currentId) {
+        break;
+      }
+      currentId = parentId;
+    }
+
+    return path.reverse();
+  }, [libraryId]);
+
+  const locateNodeInTreeById = useCallback(async (targetNodeId: number) => {
+    if (!Number.isFinite(targetNodeId) || targetNodeId <= 0) {
+      return;
+    }
+
+    const ancestorPath = await buildAncestorPathByNodeId(targetNodeId);
+    if (ancestorPath.length === 0) {
+      return;
+    }
+
+    const traversalPath = ROOT_PARENT_ID !== null
+      ? ancestorPath.filter(id => id !== ROOT_PARENT_ID)
+      : ancestorPath;
+    if (traversalPath.length === 0) {
+      return;
+    }
+
+    let expandedDraft = [...expandedKeys];
+    let targetNode: any | null = null;
+
+    for (let index = 0; index < traversalPath.length; index += 1) {
+      const nodeId = traversalPath[index];
+      const isTarget = index === traversalPath.length - 1;
+      let currentNode = findNodeById(treeDataRef.current || [], nodeId);
+
+      if (!currentNode && index > 0) {
+        const parentId = traversalPath[index - 1];
+        const parentNode = findNodeById(treeDataRef.current || [], parentId);
+        if (parentNode && loadData) {
+          await loadData(parentNode);
+          await waitForNextFrame();
+          currentNode = findNodeById(treeDataRef.current || [], nodeId);
+        }
+      }
+
+      if (!currentNode) {
+        throw new Error('目标节点暂未加载到目录树');
+      }
+
+      if (!isTarget && String(currentNode.type) !== 'file') {
+        if (loadData && !currentNode.loaded) {
+          await loadData(currentNode);
+          await waitForNextFrame();
+        }
+        if (!expandedDraft.includes(currentNode.key)) {
+          expandedDraft = [...expandedDraft, currentNode.key];
+          onExpand(expandedDraft);
+          await waitForNextFrame();
+        }
+      }
+
+      targetNode = currentNode;
+    }
+
+    if (!targetNode) {
+      return;
+    }
+    setSelectedTreeKey(targetNode.key);
+    window.requestAnimationFrame(() => {
+      const wrapper = wrapperRef.current;
+      const container = wrapper?.parentElement as HTMLElement | null;
+      const row = rowRefs.current.get(targetNode.key);
+      const label = row?.label;
+      if (!label || !wrapper || !container) {
+        return;
+      }
+
+      // Vertical: center the row for stable visibility.
+      const containerRect = container.getBoundingClientRect();
+      const labelRect = label.getBoundingClientRect();
+      const centerOffsetY = labelRect.top - (containerRect.top + (containerRect.height - labelRect.height) / 2);
+      container.scrollTo({
+        top: Math.max(0, container.scrollTop + centerOffsetY),
+        behavior: 'smooth',
+      });
+
+      // Horizontal: only adjust when the left side is clipped.
+      const wrapperRect = wrapper.getBoundingClientRect();
+      const labelLeftInWrapper = labelRect.left - wrapperRect.left;
+      const visibleLeftInWrapper = container.scrollLeft + 6;
+      if (labelLeftInWrapper < visibleLeftInWrapper) {
+        container.scrollTo({
+          left: Math.max(0, Math.floor(labelLeftInWrapper - 8)),
+          behavior: 'smooth',
+        });
+      }
+    });
+  }, [ROOT_PARENT_ID, buildAncestorPathByNodeId, expandedKeys, loadData, onExpand, waitForNextFrame]);
 
   const isBuiltInFolderNode = (node: any): boolean => {
     if (!node || String(node.type) === 'file') return false;
@@ -1480,7 +1601,7 @@ export default function DirectoryTree({
 
     return (
       <div
-        className={`tree-node-label ${dragOverKey === treeNode.key ? 'drag-over' : ''}`}
+        className={`tree-node-label ${dragOverKey === treeNode.key ? 'drag-over' : ''} ${selectedTreeKey === treeNode.key ? 'is-located-selected' : ''}`}
         ref={bindLabelRef(treeNode.key)}
         onDragEnter={onDragEnter}
         onDragOver={onDragOver}
@@ -1514,6 +1635,27 @@ export default function DirectoryTree({
     };
   }, []);
 
+  useEffect(() => {
+    const handleLocate = (event: Event) => {
+      const customEvent = event as CustomEvent<TreeLocateNodeDetail>;
+      const detail = customEvent.detail;
+      if (!detail) return;
+      if (Number(detail.libraryId) !== Number(libraryId)) return;
+      const nodeId = Number(detail.nodeId);
+      if (!Number.isFinite(nodeId) || nodeId <= 0) return;
+
+      void locateNodeInTreeById(nodeId).catch((error) => {
+        runtimeLogger.warn('目录树定位节点失败:', error);
+        Toast.warning('目录树定位失败，请稍后重试');
+      });
+    };
+
+    window.addEventListener(TREE_LOCATE_NODE_EVENT, handleLocate as EventListener);
+    return () => {
+      window.removeEventListener(TREE_LOCATE_NODE_EVENT, handleLocate as EventListener);
+    };
+  }, [libraryId, locateNodeInTreeById]);
+
   return (
     <div 
       className="tree-container" 
@@ -1546,7 +1688,11 @@ export default function DirectoryTree({
             className="custom-tree"
             treeData={renderTreeData}
             expandedKeys={expandedKeys}
+            value={selectedTreeKey}
             onExpand={handleExpand}
+            onSelect={(nextSelectedKey) => {
+              setSelectedTreeKey(nextSelectedKey || undefined);
+            }}
             onDoubleClick={handleTreeDoubleClick}
             loadData={handleLoadData}
             directory

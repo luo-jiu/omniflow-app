@@ -108,10 +108,10 @@ const FileDispatcher: React.FC<FileDispatcherProps> = ({
       return <AsmrViewer folderNodeId={nodeId} fileUrl={fileUrl} fileName={fileName} active={active} reloadToken={reloadToken} />;
 
     case 'asmr_archive':
-      return <AsmrArchiveViewer folderNodeId={nodeId} fileUrl={fileUrl} fileName={fileName} />;
+      return <AsmrArchiveViewer folderNodeId={nodeId} fileUrl={fileUrl} fileName={fileName} active={active} />;
 
     case 'comic_archive':
-      return <ComicArchiveViewer folderNodeId={nodeId} fileUrl={fileUrl} fileName={fileName} />;
+      return <ComicArchiveViewer folderNodeId={nodeId} fileUrl={fileUrl} fileName={fileName} active={active} />;
 
     default:
       return (

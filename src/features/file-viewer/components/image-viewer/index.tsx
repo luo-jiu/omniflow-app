@@ -27,6 +27,7 @@ const ImageViewer: React.FC<ImageViewerProps> = ({ url, fileName }) => {
   const [isPanMode, setIsPanMode] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [dragAnchor, setDragAnchor] = useState<Point>({ x: 0, y: 0 });
+  const [rotateSteps, setRotateSteps] = useState(0);
   const [menuState, setMenuState] = useState({
     visible: false,
     x: 0,
@@ -65,6 +66,7 @@ const ImageViewer: React.FC<ImageViewerProps> = ({ url, fileName }) => {
     setBaseScale(Number.isFinite(nextBase) && nextBase > 0 ? nextBase : 1);
     setZoom(1);
     setOffset({ x: 0, y: 0 });
+    setRotateSteps(0);
     setIsDragging(false);
     setIsPanMode(false);
   }, [computeContainScale]);
@@ -73,6 +75,10 @@ const ImageViewer: React.FC<ImageViewerProps> = ({ url, fileName }) => {
   const resetView = useCallback(() => {
     fitToViewport(0);
   }, [fitToViewport]);
+
+  const rotateCounterclockwise = useCallback(() => {
+    setRotateSteps(prev => (prev + 1) % 4);
+  }, []);
 
   const handleImageLoad = useCallback((e: React.SyntheticEvent<HTMLImageElement>) => {
     const img = e.currentTarget;
@@ -93,6 +99,7 @@ const ImageViewer: React.FC<ImageViewerProps> = ({ url, fileName }) => {
     setBaseScale(1);
     setZoom(1);
     setOffset({ x: 0, y: 0 });
+    setRotateSteps(0);
     setIsDragging(false);
     setIsPanMode(false);
     imageNaturalRef.current = { width: 0, height: 0 };
@@ -150,6 +157,11 @@ const ImageViewer: React.FC<ImageViewerProps> = ({ url, fileName }) => {
       key: 'reset',
       label: '重置视图',
       onClick: resetView
+    },
+    {
+      key: 'rotate-ccw',
+      label: '旋转（逆时针90°）',
+      onClick: rotateCounterclockwise
     },
     {
       key: 'copy-link',
@@ -242,7 +254,7 @@ const ImageViewer: React.FC<ImageViewerProps> = ({ url, fileName }) => {
           style={{
             width: naturalSize.width > 0 ? `${naturalSize.width}px` : undefined,
             height: naturalSize.height > 0 ? `${naturalSize.height}px` : undefined,
-            transform: `translate(${offset.x}px, ${offset.y}px) scale(${baseScale * zoom})`,
+            transform: `translate(${offset.x}px, ${offset.y}px) scale(${baseScale * zoom}) rotate(${-90 * rotateSteps}deg)`,
             transition: 'none'
           }}
         />

@@ -1,15 +1,19 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Spin } from '@douyinfe/semi-ui';
+import { Input, Modal, Popover, Spin, Toast } from '@douyinfe/semi-ui';
 import {
   batchGetFileLinks,
+  deleteNodeAndChildren,
   fetchArchiveCardsPage,
   fetchNodeDetailById,
+  renameNode,
   updateNodeConfig,
 } from '@/features/file-explorer/services/file.api';
 import { runtimeLogger } from '@/utils/runtimeLogger';
 import { ComicArchiveViewerWrapper } from './style';
 import { useFileViewer } from '@/hooks/useFileViewer';
 import { useArchiveCardGrid } from '@/features/archive-viewer/hooks/useArchiveCardGrid';
+import ContextMenu, { ContextMenuItem } from '@/components/ui/context-menu';
+import { locateNodeInDirectoryTree } from '@/features/file-explorer/services/tree-locate';
 
 interface ComicArchiveViewerProps {
   folderNodeId: number | null;
@@ -207,6 +211,21 @@ const ComicArchiveViewer: React.FC<ComicArchiveViewerProps> = ({
   const [nextOffset, setNextOffset] = useState(0);
   const [hasMore, setHasMore] = useState(false);
   const [restoreTick, setRestoreTick] = useState(0);
+  const [menuState, setMenuState] = useState<{
+    visible: boolean;
+    x: number;
+    y: number;
+    card: ComicArchiveCard | null;
+  }>({
+    visible: false,
+    x: 0,
+    y: 0,
+    card: null,
+  });
+  const [renameDialogVisible, setRenameDialogVisible] = useState(false);
+  const [renameSubmitting, setRenameSubmitting] = useState(false);
+  const [renameTargetCard, setRenameTargetCard] = useState<ComicArchiveCard | null>(null);
+  const [renameInput, setRenameInput] = useState('');
 
   const cardRefs = useRef<Map<number, HTMLElement>>(new Map());
   const sentinelRef = useRef<HTMLDivElement | null>(null);
@@ -238,6 +257,141 @@ const ComicArchiveViewer: React.FC<ComicArchiveViewerProps> = ({
       anchorOffsetRatio: patch.anchorOffsetRatio ?? prev.anchorOffsetRatio,
     });
   }, [readerCacheKey]);
+
+  const closeContextMenu = useCallback(() => {
+    setMenuState(prev => ({ ...prev, visible: false }));
+  }, []);
+
+  const openCardContextMenu = useCallback((e: React.MouseEvent, card: ComicArchiveCard) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const x = e.clientX;
+    const y = e.clientY;
+    if (menuState.visible) {
+      setMenuState(prev => ({ ...prev, visible: false }));
+      setTimeout(() => {
+        setMenuState({
+          visible: true,
+          x,
+          y,
+          card,
+        });
+      }, 0);
+      return;
+    }
+    setMenuState({
+      visible: true,
+      x,
+      y,
+      card,
+    });
+  }, [menuState.visible]);
+
+  const openRenameDialog = useCallback((card: ComicArchiveCard) => {
+    setRenameTargetCard(card);
+    setRenameInput(card.title);
+    setRenameDialogVisible(true);
+  }, []);
+
+  const handleRenameSubmit = useCallback(async () => {
+    if (!renameTargetCard) {
+      setRenameDialogVisible(false);
+      return;
+    }
+    const nextName = renameInput.trim();
+    if (!nextName) {
+      Toast.warning('名称不能为空');
+      return;
+    }
+    if (nextName === renameTargetCard.title) {
+      setRenameDialogVisible(false);
+      setRenameTargetCard(null);
+      return;
+    }
+
+    setRenameSubmitting(true);
+    try {
+      await renameNode({
+        id: renameTargetCard.id,
+        name: nextName,
+      });
+      setCards(prev => prev.map(card => (
+        card.id === renameTargetCard.id
+          ? { ...card, title: nextName }
+          : card
+      )));
+      Toast.success('重命名成功');
+      setRenameDialogVisible(false);
+      setRenameTargetCard(null);
+    } catch (error: any) {
+      runtimeLogger.error('漫画归档卡片重命名失败:', error);
+      Toast.error(error?.message || '重命名失败');
+    } finally {
+      setRenameSubmitting(false);
+    }
+  }, [renameInput, renameTargetCard]);
+
+  const handleDeleteCard = useCallback((card: ComicArchiveCard) => {
+    if (!libraryId) {
+      Toast.error('当前库参数异常');
+      return;
+    }
+    Modal.confirm({
+      title: '确认删除',
+      content: `确认将「${card.title || '未命名目录'}」移入回收站吗？`,
+      okButtonProps: { theme: 'solid', type: 'danger' },
+      okText: '删除',
+      cancelText: '取消',
+      centered: true,
+      onOk: async () => {
+        try {
+          await deleteNodeAndChildren(card.id, libraryId);
+          setCards(prev => prev.filter(item => item.id !== card.id));
+          setTotal(prev => Math.max(prev - 1, 0));
+          Toast.success('已移入回收站');
+        } catch (error: any) {
+          runtimeLogger.error('删除漫画归档卡片失败:', error);
+          Toast.error(error?.message || '删除失败');
+        }
+      },
+    });
+  }, [libraryId]);
+
+  const contextMenuItems = useMemo<ContextMenuItem[]>(() => {
+    const card = menuState.card;
+    if (!card || !libraryId) return [];
+    return [
+      {
+        key: 'rename',
+        label: '重命名',
+        onClick: () => {
+          closeContextMenu();
+          openRenameDialog(card);
+        },
+      },
+      {
+        key: 'locate-in-tree',
+        label: '在目录树中定位',
+        onClick: () => {
+          closeContextMenu();
+          locateNodeInDirectoryTree({
+            libraryId,
+            nodeId: card.id,
+          });
+        },
+      },
+      {
+        key: 'delete',
+        label: '删除',
+        danger: true,
+        onClick: () => {
+          closeContextMenu();
+          handleDeleteCard(card);
+        },
+      },
+    ];
+  }, [closeContextMenu, handleDeleteCard, libraryId, menuState.card, openRenameDialog]);
 
   const captureAnchorFromViewport = useCallback((): {
     anchorCardId: number | null;
@@ -534,6 +688,9 @@ const ComicArchiveViewer: React.FC<ComicArchiveViewerProps> = ({
         if (requestId !== requestIdRef.current) return;
         viewMetaBaseRef.current = parseViewMetaObject(detail.viewMeta);
         viewMetaBaseReadyRef.current = true;
+        if (!hasCachedList) {
+          return;
+        }
         const remoteProgress = parseRemoteArchiveProgress(detail.viewMeta);
         if (!remoteProgress) return;
         if (!pendingRestoreRef.current) {
@@ -731,84 +888,140 @@ const ComicArchiveViewer: React.FC<ComicArchiveViewerProps> = ({
   }, [flushRemoteProgress]);
 
   return (
-    <ComicArchiveViewerWrapper style={wrapperStyle}>
-      <section className="table-surface" ref={viewportRef}>
-        {listLoading ? (
-          <div className="state-wrap">
-            <Spin size="large" tip="归档加载中..." />
-          </div>
-        ) : error ? (
-          <div className="state-wrap state-error">{error}</div>
-        ) : cards.length === 0 ? (
-          <div className="state-wrap">当前归档下暂无可展示的漫画集合</div>
-        ) : (
-          <>
-            <div className="cards-grid">
-              {cards.map(card => (
-                <article
-                  key={card.id}
-                  className="archive-card"
-                  ref={(el) => {
-                    if (el) {
-                      cardRefs.current.set(card.id, el);
-                    } else {
-                      cardRefs.current.delete(card.id);
-                    }
-                  }}
-                  onDoubleClick={() => {
-                    if (!libraryId || !folderNodeId || !Number.isFinite(folderNodeId)) return;
-                    setFileUrl(
-                      `comic://library/${libraryId}/node/${card.id}`,
-                      card.title,
-                      'comic',
-                      card.id,
-                      {
-                        tabTypeLabel: 'COMIC',
-                        returnTarget: {
-                          fileUrl,
-                          fileName: fileName || title,
-                          fileType: 'comic_archive',
-                          nodeId: folderNodeId,
-                          tabTypeLabel: 'COMIC-ARC',
-                        },
-                      },
-                    );
-                  }}
-                >
-                  {card.coverUrl ? (
-                    <img className="card-bg-image" src={card.coverUrl} alt="" draggable={false} aria-hidden />
-                  ) : (
-                    <div className="card-bg-empty" aria-hidden />
-                  )}
-                  <div className="card-cover" />
-                  <div className="card-meta">
-                    <div className="card-tag-slot">
-                      <span className="card-tag-pill">COMIC</span>
-                    </div>
-                    <div className="card-title" title={card.title}>
-                      {card.title}
-                    </div>
-                  </div>
-                </article>
-              ))}
+    <>
+      <ComicArchiveViewerWrapper style={wrapperStyle}>
+        <section className="table-surface" ref={viewportRef}>
+          {listLoading ? (
+            <div className="state-wrap">
+              <Spin size="large" tip="归档加载中..." />
             </div>
-            {loadingMore && (
-              <div className="state-wrap">
-                <Spin size="middle" tip="加载更多中..." />
+          ) : error ? (
+            <div className="state-wrap state-error">{error}</div>
+          ) : cards.length === 0 ? (
+            <div className="state-wrap">当前归档下暂无可展示的漫画集合</div>
+          ) : (
+            <>
+              <div className="cards-grid">
+                {cards.map(card => (
+                  <article
+                    key={card.id}
+                    className="archive-card"
+                    ref={(el) => {
+                      if (el) {
+                        cardRefs.current.set(card.id, el);
+                      } else {
+                        cardRefs.current.delete(card.id);
+                      }
+                    }}
+                    onDoubleClick={() => {
+                      if (!libraryId || !folderNodeId || !Number.isFinite(folderNodeId)) return;
+                      setFileUrl(
+                        `comic://library/${libraryId}/node/${card.id}`,
+                        card.title,
+                        'comic',
+                        card.id,
+                        {
+                          tabTypeLabel: 'COMIC',
+                          returnTarget: {
+                            fileUrl,
+                            fileName: fileName || title,
+                            fileType: 'comic_archive',
+                            nodeId: folderNodeId,
+                            tabTypeLabel: 'COMIC-ARC',
+                          },
+                        },
+                      );
+                    }}
+                    onContextMenu={(e) => openCardContextMenu(e, card)}
+                  >
+                    {card.coverUrl ? (
+                      <img className="card-bg-image" src={card.coverUrl} alt="" draggable={false} aria-hidden />
+                    ) : (
+                      <div className="card-bg-empty" aria-hidden />
+                    )}
+                    <div className="card-cover" />
+                    <div className="card-meta">
+                      <div className="card-tag-slot">
+                        <span className="card-tag-pill">COMIC</span>
+                      </div>
+                      <div className="card-title" title={card.title}>
+                        {card.title}
+                      </div>
+                    </div>
+                  </article>
+                ))}
               </div>
-            )}
-            <div ref={sentinelRef} style={{ height: 1, width: '100%' }} />
-          </>
-        )}
-      </section>
+              {loadingMore && (
+                <div className="state-wrap">
+                  <Spin size="middle" tip="加载更多中..." />
+                </div>
+              )}
+              <div ref={sentinelRef} style={{ height: 1, width: '100%' }} />
+            </>
+          )}
+        </section>
 
-      <footer className="archive-footer">
-        <div className="footer-title-group">
-          <span className="badge">COMIC ARCHIVE</span>
-          <span className="title" title={title}>{title}</span>
-        </div>
-      </footer>
-    </ComicArchiveViewerWrapper>
+        <footer className="archive-footer">
+          <div className="footer-title-group">
+            <span className="badge">COMIC ARCHIVE</span>
+            <span className="title" title={title}>{title}</span>
+          </div>
+        </footer>
+      </ComicArchiveViewerWrapper>
+      <Popover
+        trigger="custom"
+        visible={menuState.visible}
+        onClickOutSide={closeContextMenu}
+        position="bottomLeft"
+        showArrow={false}
+        spacing={4}
+        getPopupContainer={() => document.body}
+        content={(
+          <ContextMenu
+            items={contextMenuItems}
+            className="directory-context-menu"
+            onItemClick={closeContextMenu}
+          />
+        )}
+      >
+        <div
+          style={{
+            position: 'fixed',
+            left: menuState.x,
+            top: menuState.y,
+            width: 1,
+            height: 1,
+            pointerEvents: 'none',
+            zIndex: 9999,
+          }}
+        />
+      </Popover>
+
+      <Modal
+        title="重命名漫画集合"
+        visible={renameDialogVisible}
+        confirmLoading={renameSubmitting}
+        okText="保存"
+        cancelText="取消"
+        centered
+        onOk={handleRenameSubmit}
+        onCancel={() => {
+          if (renameSubmitting) return;
+          setRenameDialogVisible(false);
+          setRenameTargetCard(null);
+          setRenameInput('');
+        }}
+      >
+        <Input
+          placeholder="请输入新名称"
+          value={renameInput}
+          onChange={setRenameInput}
+          autoFocus
+          onEnterPress={handleRenameSubmit}
+          maxLength={255}
+        />
+      </Modal>
+    </>
   );
 };
 

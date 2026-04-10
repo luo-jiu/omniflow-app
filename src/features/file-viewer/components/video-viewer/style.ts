@@ -5,74 +5,29 @@ export const VideoViewerWrapper = styled.div`
   height: 100%;
   display: flex;
   flex-direction: column;
-  background:
-    radial-gradient(1200px 600px at 50% -20%, rgba(99, 102, 241, 0.18), transparent 60%),
-    linear-gradient(180deg, var(--semi-color-bg-0) 0%, var(--semi-color-bg-1) 100%);
+  background: var(--semi-color-bg-0);
   color: var(--semi-color-text-0);
   overflow: hidden;
-
-  .viewer-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 14px 18px;
-    border-bottom: 1px solid var(--semi-color-border);
-    background: rgba(255, 255, 255, 0.02);
-    backdrop-filter: blur(8px);
-  }
-
-  .title-group {
-    min-width: 0;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-
-  .title-badge {
-    font-size: 12px;
-    padding: 2px 8px;
-    border-radius: 999px;
-    background: var(--semi-color-primary-light-default);
-    color: var(--semi-color-primary);
-    font-weight: 600;
-  }
-
-  .file-name {
-    min-width: 0;
-    font-size: 14px;
-    font-weight: 600;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .header-meta {
-    font-size: 12px;
-    color: var(--semi-color-text-2);
-    white-space: nowrap;
-  }
 
   .video-stage {
     flex: 1;
     min-height: 0;
-    padding: 18px;
+    padding: 0;
     display: flex;
     align-items: center;
     justify-content: center;
+    overflow: hidden;
   }
 
   .video-shell {
-    width: min(1100px, 100%);
-    height: min(100%, 760px);
-    border-radius: 16px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    width: 100%;
+    height: 100%;
+    border-radius: 0;
+    border: 0;
     overflow: hidden;
     position: relative;
     background: #000;
-    box-shadow:
-      0 18px 52px rgba(0, 0, 0, 0.35),
-      inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+    box-shadow: none;
   }
 
   .video-element {
@@ -194,10 +149,6 @@ export const VideoViewerWrapper = styled.div`
   }
 
   @media (max-width: 900px) {
-    .video-stage {
-      padding: 10px;
-    }
-
     .controls-row {
       flex-wrap: wrap;
       gap: 10px;

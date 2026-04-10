@@ -311,42 +311,6 @@ export const ComicViewerWrapper = styled.div`
     transition: none;
   }
 
-  .flip-nav {
-    position: absolute;
-    top: 50%;
-    transform: translateY(-50%);
-    width: 40px;
-    height: 64px;
-    border: 1px solid color-mix(in srgb, var(--semi-color-border) 85%, transparent);
-    border-radius: 12px;
-    background: color-mix(in srgb, var(--semi-color-bg-0) 90%, transparent);
-    color: var(--semi-color-text-1);
-    font-size: 30px;
-    line-height: 1;
-    cursor: pointer;
-    z-index: 5;
-    backdrop-filter: blur(4px);
-    transition: all 120ms ease;
-  }
-
-  .flip-nav:hover:not(:disabled) {
-    border-color: color-mix(in srgb, var(--semi-color-success) 50%, var(--semi-color-border));
-    color: var(--semi-color-success);
-  }
-
-  .flip-nav:disabled {
-    opacity: 0.35;
-    cursor: not-allowed;
-  }
-
-  .flip-nav-prev {
-    left: 10px;
-  }
-
-  .flip-nav-next {
-    right: 10px;
-  }
-
   @keyframes comic-placeholder {
     0% {
       background-position: 100% 0;

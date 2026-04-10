@@ -1,9 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Spin } from '@douyinfe/semi-ui';
+import { Input, Modal, Popover, Spin, Toast } from '@douyinfe/semi-ui';
 import {
   batchGetFileLinks,
+  deleteNodeAndChildren,
   fetchArchiveCardsPage,
   fetchNodeDetailById,
+  renameNode,
   updateNodeConfig,
 } from '@/features/file-explorer/services/file.api';
 import { runtimeLogger } from '@/utils/runtimeLogger';
@@ -11,6 +13,8 @@ import { AsmrArchiveViewerWrapper } from './style';
 import { useFileViewer } from '@/hooks/useFileViewer';
 import { fetchTags, type TagItem } from '@/features/tag-management/services/tag.api';
 import { useArchiveCardGrid } from '@/features/archive-viewer/hooks/useArchiveCardGrid';
+import ContextMenu, { ContextMenuItem } from '@/components/ui/context-menu';
+import { locateNodeInDirectoryTree } from '@/features/file-explorer/services/tree-locate';
 
 interface AsmrArchiveViewerProps {
   folderNodeId: number | null;
@@ -318,6 +322,21 @@ const AsmrArchiveViewer: React.FC<AsmrArchiveViewerProps> = ({
   const [nextOffset, setNextOffset] = useState(0);
   const [hasMore, setHasMore] = useState(false);
   const [restoreTick, setRestoreTick] = useState(0);
+  const [menuState, setMenuState] = useState<{
+    visible: boolean;
+    x: number;
+    y: number;
+    card: AsmrArchiveCard | null;
+  }>({
+    visible: false,
+    x: 0,
+    y: 0,
+    card: null,
+  });
+  const [renameDialogVisible, setRenameDialogVisible] = useState(false);
+  const [renameSubmitting, setRenameSubmitting] = useState(false);
+  const [renameTargetCard, setRenameTargetCard] = useState<AsmrArchiveCard | null>(null);
+  const [renameInput, setRenameInput] = useState('');
 
   const [tagOptionMap, setTagOptionMap] = useState<Map<number, TagItem>>(new Map());
   const [normalizedTagNameMap, setNormalizedTagNameMap] = useState<Map<string, number>>(new Map());
@@ -354,6 +373,141 @@ const AsmrArchiveViewer: React.FC<AsmrArchiveViewerProps> = ({
       anchorOffsetRatio: patch.anchorOffsetRatio ?? prev.anchorOffsetRatio,
     });
   }, [readerCacheKey]);
+
+  const closeContextMenu = useCallback(() => {
+    setMenuState(prev => ({ ...prev, visible: false }));
+  }, []);
+
+  const openCardContextMenu = useCallback((e: React.MouseEvent, card: AsmrArchiveCard) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const x = e.clientX;
+    const y = e.clientY;
+    if (menuState.visible) {
+      setMenuState(prev => ({ ...prev, visible: false }));
+      setTimeout(() => {
+        setMenuState({
+          visible: true,
+          x,
+          y,
+          card,
+        });
+      }, 0);
+      return;
+    }
+    setMenuState({
+      visible: true,
+      x,
+      y,
+      card,
+    });
+  }, [menuState.visible]);
+
+  const openRenameDialog = useCallback((card: AsmrArchiveCard) => {
+    setRenameTargetCard(card);
+    setRenameInput(card.title);
+    setRenameDialogVisible(true);
+  }, []);
+
+  const handleRenameSubmit = useCallback(async () => {
+    if (!renameTargetCard) {
+      setRenameDialogVisible(false);
+      return;
+    }
+    const nextName = renameInput.trim();
+    if (!nextName) {
+      Toast.warning('名称不能为空');
+      return;
+    }
+    if (nextName === renameTargetCard.title) {
+      setRenameDialogVisible(false);
+      setRenameTargetCard(null);
+      return;
+    }
+
+    setRenameSubmitting(true);
+    try {
+      await renameNode({
+        id: renameTargetCard.id,
+        name: nextName,
+      });
+      setCards(prev => prev.map(card => (
+        card.id === renameTargetCard.id
+          ? { ...card, title: nextName }
+          : card
+      )));
+      Toast.success('重命名成功');
+      setRenameDialogVisible(false);
+      setRenameTargetCard(null);
+    } catch (error: any) {
+      runtimeLogger.error('ASMR 归档卡片重命名失败:', error);
+      Toast.error(error?.message || '重命名失败');
+    } finally {
+      setRenameSubmitting(false);
+    }
+  }, [renameInput, renameTargetCard]);
+
+  const handleDeleteCard = useCallback((card: AsmrArchiveCard) => {
+    if (!libraryId) {
+      Toast.error('当前库参数异常');
+      return;
+    }
+    Modal.confirm({
+      title: '确认删除',
+      content: `确认将「${card.title || '未命名目录'}」移入回收站吗？`,
+      okButtonProps: { theme: 'solid', type: 'danger' },
+      okText: '删除',
+      cancelText: '取消',
+      centered: true,
+      onOk: async () => {
+        try {
+          await deleteNodeAndChildren(card.id, libraryId);
+          setCards(prev => prev.filter(item => item.id !== card.id));
+          setTotal(prev => Math.max(prev - 1, 0));
+          Toast.success('已移入回收站');
+        } catch (error: any) {
+          runtimeLogger.error('删除 ASMR 归档卡片失败:', error);
+          Toast.error(error?.message || '删除失败');
+        }
+      },
+    });
+  }, [libraryId]);
+
+  const contextMenuItems = useMemo<ContextMenuItem[]>(() => {
+    const card = menuState.card;
+    if (!card || !libraryId) return [];
+    return [
+      {
+        key: 'rename',
+        label: '重命名',
+        onClick: () => {
+          closeContextMenu();
+          openRenameDialog(card);
+        },
+      },
+      {
+        key: 'locate-in-tree',
+        label: '在目录树中定位',
+        onClick: () => {
+          closeContextMenu();
+          locateNodeInDirectoryTree({
+            libraryId,
+            nodeId: card.id,
+          });
+        },
+      },
+      {
+        key: 'delete',
+        label: '删除',
+        danger: true,
+        onClick: () => {
+          closeContextMenu();
+          handleDeleteCard(card);
+        },
+      },
+    ];
+  }, [closeContextMenu, handleDeleteCard, libraryId, menuState.card, openRenameDialog]);
 
   const captureAnchorFromViewport = useCallback((): {
     anchorCardId: number | null;
@@ -584,15 +738,17 @@ const AsmrArchiveViewer: React.FC<AsmrArchiveViewerProps> = ({
   }, [folderNodeId, libraryId, resolveCardCoverUrls]);
 
   useEffect(() => {
-    if (cards.length === 0) return;
-    setCards(prev => prev.map(card => ({
-      ...card,
-      tags: resolveAsmrCardTags(
-        card.viewMeta,
-        tagOptionMap,
-        normalizedTagNameMap,
-      ),
-    })));
+    setCards(prev => {
+      if (prev.length === 0) return prev;
+      return prev.map(card => ({
+        ...card,
+        tags: resolveAsmrCardTags(
+          card.viewMeta,
+          tagOptionMap,
+          normalizedTagNameMap,
+        ),
+      }));
+    });
   }, [normalizedTagNameMap, tagOptionMap]);
 
   const loadMore = useCallback(() => {
@@ -656,6 +812,9 @@ const AsmrArchiveViewer: React.FC<AsmrArchiveViewerProps> = ({
         if (requestId !== requestIdRef.current) return;
         viewMetaBaseRef.current = parseViewMetaObject(detail.viewMeta);
         viewMetaBaseReadyRef.current = true;
+        if (!hasCachedList) {
+          return;
+        }
         const remoteProgress = parseRemoteArchiveProgress(detail.viewMeta);
         if (!remoteProgress) return;
         if (!pendingRestoreRef.current) {
@@ -860,6 +1019,7 @@ const AsmrArchiveViewer: React.FC<AsmrArchiveViewerProps> = ({
                       cardRefs.current.delete(card.id);
                     }
                   }}
+                  onContextMenu={(e) => openCardContextMenu(e, card)}
                   onDoubleClick={() => {
                     if (!libraryId || !folderNodeId || !Number.isFinite(folderNodeId)) return;
                     setFileUrl(
@@ -922,6 +1082,65 @@ const AsmrArchiveViewer: React.FC<AsmrArchiveViewerProps> = ({
           </>
         )}
       </section>
+
+      <Popover
+        trigger="custom"
+        visible={menuState.visible}
+        onClickOutSide={closeContextMenu}
+        position="bottomLeft"
+        showArrow={false}
+        spacing={4}
+        getPopupContainer={() => document.body}
+        content={(
+          <ContextMenu
+            items={contextMenuItems}
+            className="directory-context-menu"
+            onItemClick={closeContextMenu}
+          />
+        )}
+      >
+        <div
+          style={{
+            position: 'fixed',
+            left: menuState.x,
+            top: menuState.y,
+            width: 1,
+            height: 1,
+            pointerEvents: 'none',
+            zIndex: 9999,
+          }}
+        />
+      </Popover>
+
+      <Modal
+        title="重命名"
+        visible={renameDialogVisible}
+        onCancel={() => {
+          if (renameSubmitting) return;
+          setRenameDialogVisible(false);
+          setRenameTargetCard(null);
+        }}
+        onOk={() => {
+          void handleRenameSubmit();
+        }}
+        okText="保存"
+        cancelText="取消"
+        confirmLoading={renameSubmitting}
+        centered
+      >
+        <Input
+          value={renameInput}
+          onChange={setRenameInput}
+          placeholder="请输入新名称"
+          maxLength={255}
+          autoFocus
+          onEnterPress={() => {
+            if (!renameSubmitting) {
+              void handleRenameSubmit();
+            }
+          }}
+        />
+      </Modal>
 
       <footer className="archive-footer">
         <div className="footer-title-group">

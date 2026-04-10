@@ -9,10 +9,17 @@ import comicFolderIcon from '@/assets/icons/material/folder-comic.svg';
 import asmrFolderIcon from '@/assets/icons/material/folder-asmr.svg';
 
 function createIconNode(src: string, alt: string): React.ReactNode {
+  const normalizedAltClass = String(alt || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, '-');
   return React.createElement('img', {
     src,
     alt,
-    className: 'tree-file-type-icon',
+    className: `tree-file-type-icon tree-file-type-icon-${normalizedAltClass}`,
+    width: 20,
+    height: 20,
+    draggable: false,
   });
 }
 

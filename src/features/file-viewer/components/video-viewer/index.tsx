@@ -22,7 +22,7 @@ interface VideoViewerProps {
 const SEEK_SECONDS = 5;
 const PLAYBACK_RATES = [0.75, 1, 1.25, 1.5, 2];
 
-const VideoViewer: React.FC<VideoViewerProps> = ({ url, fileName, active = true }) => {
+const VideoViewer: React.FC<VideoViewerProps> = ({ url, active = true }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const progressRef = useRef<HTMLDivElement>(null);
@@ -225,14 +225,6 @@ const VideoViewer: React.FC<VideoViewerProps> = ({ url, fileName, active = true 
 
   return (
     <VideoViewerWrapper>
-      <div className="viewer-header">
-        <div className="title-group">
-          <span className="title-badge">MP4</span>
-          <span className="file-name">{fileName || '视频文件'}</span>
-        </div>
-        <div className="header-meta">{formatTime(currentTime)} / {formatTime(duration)}</div>
-      </div>
-
       <div className="video-stage">
         <div className="video-shell" ref={containerRef}>
           <video

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Spin } from '@douyinfe/semi-ui';
+import { Modal, Popover, Slider, Spin } from '@douyinfe/semi-ui';
 import {
   batchGetFileLinks,
   fetchNodeDetailById,
@@ -7,6 +7,7 @@ import {
   updateNodeConfig,
 } from '@/features/file-explorer/services/file.api';
 import { ComicViewerWrapper } from './style';
+import ContextMenu, { type ContextMenuItem } from '@/components/ui/context-menu';
 import { runtimeLogger } from '@/utils/runtimeLogger';
 
 interface ComicViewerProps {
@@ -54,7 +55,7 @@ const MAX_RESOLVE_PER_TICK = 64;
 const COMIC_LINK_EXPIRY_MINUTES = 240;
 const MIN_PAGE_WIDTH = 360;
 const MAX_PAGE_WIDTH = 980;
-const DOUBLE_COLUMN_GAP = 10;
+const DOUBLE_COLUMN_INNER_GAP = 0;
 const SINGLE_SCROLL_ZOOM_MIN = 0.45;
 const SINGLE_SCROLL_ZOOM_MAX = 3.2;
 const DOUBLE_SCROLL_ZOOM_MIN = 0.55;
@@ -64,6 +65,8 @@ const FLIP_ZOOM_MAX = 4.2;
 const CTRL_WHEEL_ZOOM_STEP = 0.08;
 const FLIP_DECODE_WINDOW_BEHIND = 2;
 const FLIP_DECODE_WINDOW_AHEAD = 8;
+const DEFAULT_SCROLL_PAGE_GAP_PX = 0;
+const MAX_SCROLL_PAGE_GAP_PX = 100;
 const COMIC_READER_CACHE_MAX_ENTRIES = 24;
 const REMOTE_PROGRESS_SYNC_INTERVAL_MS = 1000;
 const BACK_TO_TOP_DIRECT_PAGE_THRESHOLD = 300;
@@ -326,9 +329,18 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
   const [flipZoomCustomized, setFlipZoomCustomized] = useState(false);
   const [flipPageIndex, setFlipPageIndex] = useState(0);
   const [flipOffset, setFlipOffset] = useState({ x: 0, y: 0 });
+  const [flipRotateSteps, setFlipRotateSteps] = useState(0);
   const [flipDragAnchor, setFlipDragAnchor] = useState({ x: 0, y: 0 });
   const [flipPanMode, setFlipPanMode] = useState(false);
   const [flipDragging, setFlipDragging] = useState(false);
+  const [flipMenuState, setFlipMenuState] = useState({
+    visible: false,
+    x: 0,
+    y: 0,
+  });
+  const [viewerSettingsVisible, setViewerSettingsVisible] = useState(false);
+  const [scrollPageGapPx, setScrollPageGapPx] = useState(DEFAULT_SCROLL_PAGE_GAP_PX);
+  const scrollRowGap = scrollPageGapPx;
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const flipStageRef = useRef<HTMLDivElement | null>(null);
@@ -373,6 +385,15 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
     setFlipZoomCustomized(false);
     setFlipZoomScale(1);
     setFlipOffset({ x: 0, y: 0 });
+    setFlipRotateSteps(0);
+  }, []);
+
+  const rotateFlipCounterclockwise = useCallback(() => {
+    setFlipRotateSteps(prev => (prev + 1) % 4);
+  }, []);
+
+  const openViewerSettings = useCallback(() => {
+    setViewerSettingsVisible(true);
   }, []);
 
   const persistReaderSnapshot = useCallback((patch: Partial<ComicReaderSnapshot>) => {
@@ -1088,7 +1109,7 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
   const scrollBasePageWidth = useMemo(() => {
     if (!scrollWidth) return 760;
     if (scrollColumnMode === 2) {
-      const raw = (scrollWidth - 32 - DOUBLE_COLUMN_GAP) / 2;
+      const raw = (scrollWidth - 32 - DOUBLE_COLUMN_INNER_GAP) / 2;
       return clamp(raw, MIN_PAGE_WIDTH * 0.7, MAX_PAGE_WIDTH);
     }
     return clamp(scrollWidth - 32, MIN_PAGE_WIDTH, MAX_PAGE_WIDTH);
@@ -1101,7 +1122,7 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
 
   const gridWidth = useMemo(() => {
     if (scrollColumnMode === 2) {
-      return Math.max(pageWidth * 2 + DOUBLE_COLUMN_GAP, 0);
+      return Math.max(pageWidth * 2 + DOUBLE_COLUMN_INNER_GAP, 0);
     }
     return pageWidth;
   }, [pageWidth, scrollColumnMode]);
@@ -1234,6 +1255,37 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
   }, [
     primeScrollZoomAnchor,
   ]);
+
+  const viewerMenuItems = useMemo<ContextMenuItem[]>(() => {
+    const items: ContextMenuItem[] = [];
+    if (isFlipMode) {
+      items.push({
+        key: 'reset-view',
+        label: '重制视图',
+        onClick: resetFlipZoomToFit,
+      });
+      if (scrollColumnMode === 1) {
+        items.push({
+          key: 'rotate-ccw-90',
+          label: '旋转（逆时针90°）',
+          onClick: rotateFlipCounterclockwise,
+        });
+      }
+    } else {
+      items.push({
+        key: 'reset-view',
+        label: '重制视图',
+        onClick: resetScrollZoom,
+      });
+    }
+    items.push({ key: 'd-settings', type: 'divider' });
+    items.push({
+      key: 'viewer-settings',
+      label: '设置',
+      onClick: openViewerSettings,
+    });
+    return items;
+  }, [isFlipMode, openViewerSettings, resetFlipZoomToFit, resetScrollZoom, rotateFlipCounterclockwise, scrollColumnMode]);
 
   useEffect(() => {
     if (isFlipMode) return;
@@ -1388,6 +1440,40 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
     setFlipDragging(false);
   }, []);
 
+  const handleViewerContextMenu = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const nextPosition = { x: event.clientX, y: event.clientY };
+
+    if (flipMenuState.visible) {
+      setFlipMenuState(prev => ({ ...prev, visible: false }));
+      setTimeout(() => {
+        setFlipMenuState({ ...nextPosition, visible: true });
+      }, 0);
+      return;
+    }
+    setFlipMenuState({ ...nextPosition, visible: true });
+  }, [flipMenuState.visible]);
+
+  const handleFlipStageClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    if (!isFlipMode) return;
+    if (flipPanMode || flipDragging) return;
+    if (event.button !== 0) return;
+
+    const rect = event.currentTarget.getBoundingClientRect();
+    if (rect.width <= 0) return;
+    const relativeX = event.clientX - rect.left;
+    const zoneWidth = rect.width / 3;
+
+    if (relativeX < zoneWidth) {
+      goToPrevFlipPage();
+      return;
+    }
+    if (relativeX > zoneWidth * 2) {
+      goToNextFlipPage();
+    }
+  }, [flipDragging, flipPanMode, goToNextFlipPage, goToPrevFlipPage, isFlipMode]);
+
   useEffect(() => {
     if (!isFlipMode) {
       setFlipPanMode(false);
@@ -1479,7 +1565,6 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
     };
   }, [active, applyFlipZoomRatio, isFlipMode, resetFlipZoomToFit, resetScrollZoom, zoomScrollByDirection]);
 
-  const flipStep = scrollColumnMode === 2 ? 2 : 1;
   const flipPrimaryIndex = useMemo(
     () => normalizeFlipIndexForPageMode(clamp(flipPageIndex, 0, Math.max(pages.length - 1, 0))),
     [flipPageIndex, normalizeFlipIndexForPageMode, pages.length],
@@ -1526,9 +1611,6 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
     });
   }, [flipPrimaryIndex, isFlipMode, pages]);
 
-  const canFlipPrev = flipPrimaryIndex > 0;
-  const canFlipNext = flipPrimaryIndex + flipStep < pages.length;
-
   useEffect(() => {
     if (!isFlipMode) return;
     if (pages.length === 0) return;
@@ -1539,7 +1621,20 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
   useEffect(() => {
     if (!isFlipMode) return;
     setFlipOffset({ x: 0, y: 0 });
+    setFlipRotateSteps(0);
   }, [flipPageIndex, isFlipMode]);
+
+  useEffect(() => {
+    if (!isFlipMode) return;
+    if (scrollColumnMode === 2 && flipRotateSteps !== 0) {
+      setFlipRotateSteps(0);
+    }
+  }, [flipRotateSteps, isFlipMode, scrollColumnMode]);
+
+  useEffect(() => {
+    if (isFlipMode) return;
+    setFlipMenuState(prev => (prev.visible ? { ...prev, visible: false } : prev));
+  }, [isFlipMode]);
 
   useEffect(() => {
     if (!isFlipMode) return;
@@ -1628,6 +1723,7 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
 
   const layoutModeSwitchLabel = isFlipMode ? '滚动模式' : '翻页模式';
   const pageModeSwitchLabel = scrollColumnMode === 1 ? '双页' : '单页';
+  const pageGap = scrollRowGap;
 
   return (
     <ComicViewerWrapper>
@@ -1635,21 +1731,14 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
         <div
           className={`flip-stage ${flipPanMode ? 'can-pan' : ''} ${flipDragging ? 'is-panning' : ''}`}
           ref={flipStageRef}
+          onClick={handleFlipStageClick}
+          onContextMenu={handleViewerContextMenu}
           onWheel={handleFlipWheel}
           onMouseDown={handleFlipMouseDown}
           onMouseMove={handleFlipMouseMove}
           onMouseUp={handleFlipMouseUp}
           onMouseLeave={handleFlipMouseUp}
         >
-          <button
-            type="button"
-            className="flip-nav flip-nav-prev"
-            onClick={goToPrevFlipPage}
-            disabled={!canFlipPrev}
-            aria-label="上一页"
-          >
-            ‹
-          </button>
           <div className={`flip-canvas ${scrollColumnMode === 2 ? 'double' : 'single'}`}>
             {flipDisplayPages.map((page, index) => (
               <div className="flip-page-panel" key={`flip-page-${index}`}>
@@ -1662,7 +1751,7 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
                     decoding="async"
                     draggable={false}
                     style={{
-                      transform: `translate(${flipOffset.x}px, ${flipOffset.y}px) scale(${effectiveFlipZoom})`,
+                      transform: `translate(${flipOffset.x}px, ${flipOffset.y}px) scale(${effectiveFlipZoom}) rotate(${-90 * flipRotateSteps}deg)`,
                     }}
                   />
                 ) : page ? (
@@ -1675,24 +1764,16 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
               </div>
             ))}
           </div>
-          <button
-            type="button"
-            className="flip-nav flip-nav-next"
-            onClick={goToNextFlipPage}
-            disabled={!canFlipNext}
-            aria-label="下一页"
-          >
-            ›
-          </button>
         </div>
       ) : (
-        <div className="pages-scroll" ref={scrollRef} onScroll={handleScroll}>
+        <div className="pages-scroll" ref={scrollRef} onScroll={handleScroll} onContextMenu={handleViewerContextMenu}>
           <div
             className={`pages-grid column-${scrollColumnMode}`}
             style={{
               width: `${gridWidth}px`,
               gridTemplateColumns: `repeat(${scrollColumnMode}, minmax(0, ${pageWidth}px))`,
-              columnGap: `${scrollColumnMode === 2 ? DOUBLE_COLUMN_GAP : 0}px`,
+              columnGap: `${scrollColumnMode === 2 ? DOUBLE_COLUMN_INNER_GAP : 0}px`,
+              rowGap: `${pageGap}px`,
             }}
           >
             {renderedPages.map((page) => (
@@ -1736,6 +1817,90 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
           </div>
         </div>
       )}
+      <Popover
+        trigger="custom"
+        visible={flipMenuState.visible}
+        onClickOutSide={() => setFlipMenuState(prev => ({ ...prev, visible: false }))}
+        position="bottomLeft"
+        showArrow={false}
+        spacing={4}
+        getPopupContainer={() => document.body}
+        content={(
+          <ContextMenu
+            items={viewerMenuItems}
+            className="directory-context-menu"
+            onItemClick={() => setFlipMenuState(prev => ({ ...prev, visible: false }))}
+          />
+        )}
+      >
+        <div
+          style={{
+            position: 'fixed',
+            left: flipMenuState.x,
+            top: flipMenuState.y,
+            width: 1,
+            height: 1,
+            pointerEvents: 'none',
+            zIndex: 9999,
+          }}
+        />
+      </Popover>
+      <Modal
+        visible={viewerSettingsVisible}
+        title="视图设置"
+        footer={null}
+        onCancel={() => setViewerSettingsVisible(false)}
+        centered
+        width={760}
+      >
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 28,
+            padding: '20px 20px 12px',
+          }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'stretch',
+              gap: 12,
+              padding: '20px 24px',
+              borderRadius: 8,
+              border: '1px solid var(--semi-color-border)',
+              background: 'var(--semi-color-fill-0)',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+              }}
+            >
+              <span style={{ fontSize: 14, color: 'var(--semi-color-text-0)' }}>页面间隔</span>
+            </div>
+            <Slider
+              min={0}
+              max={MAX_SCROLL_PAGE_GAP_PX}
+              step={1}
+              value={scrollPageGapPx}
+              onChange={(value) => {
+                const next = Array.isArray(value) ? value[0] : value;
+                if (typeof next !== 'number' || !Number.isFinite(next)) return;
+                setScrollPageGapPx(Math.round(Math.min(Math.max(next, 0), MAX_SCROLL_PAGE_GAP_PX)));
+              }}
+            />
+          </div>
+          <div
+            style={{
+              minHeight: 200,
+            }}
+          />
+        </div>
+      </Modal>
       {!isFlipMode && (
         <button type="button" className="back-top-btn" onClick={handleBackToTop}>
           回到顶部
