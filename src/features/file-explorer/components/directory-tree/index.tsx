@@ -72,6 +72,14 @@ interface DragPreviewNodeData {
   };
 }
 
+const TREE_DRAG_PREVIEW_ATTR = 'data-omniflow-tree-drag-preview';
+
+function removeStaleTreeDragPreviews() {
+  document
+    .querySelectorAll<HTMLElement>(`[${TREE_DRAG_PREVIEW_ATTR}]`)
+    .forEach(element => element.remove());
+}
+
 function findNodeById(nodes: any[], targetId: number): any | null {
   for (const node of nodes) {
     if (node.id === targetId) return node;
@@ -964,8 +972,14 @@ export default function DirectoryTree({
 
   const createDragPreview = (label: string, textColor: string, previewWidth: number): HTMLElement => {
     const preview = document.createElement('div');
+    preview.setAttribute(TREE_DRAG_PREVIEW_ATTR, 'true');
+    preview.setAttribute('aria-hidden', 'true');
     preview.textContent = label;
     preview.style.boxSizing = 'border-box';
+    preview.style.position = 'fixed';
+    preview.style.top = '-10000px';
+    preview.style.left = '-10000px';
+    preview.style.zIndex = '-1';
     preview.style.maxWidth = `${previewWidth}px`;
     preview.style.padding = '6px 10px';
     preview.style.borderRadius = '8px';
@@ -980,10 +994,12 @@ export default function DirectoryTree({
     preview.style.overflow = 'hidden';
     preview.style.textOverflow = 'ellipsis';
     preview.style.pointerEvents = 'none';
+    preview.style.setProperty('contain', 'layout style paint');
     return preview;
   };
 
   const renderDraggingNode = (nodeInstance: HTMLElement, nodeData: unknown): HTMLElement => {
+    removeStaleTreeDragPreviews();
 
     try {
       const selectedCount = dragSelectionNodeIdsRef.current.length;
@@ -1854,6 +1870,13 @@ export default function DirectoryTree({
     };
   }, [libraryId, locateNodeInTreeById]);
 
+  useEffect(() => {
+    removeStaleTreeDragPreviews();
+    return () => {
+      removeStaleTreeDragPreviews();
+    };
+  }, []);
+
   return (
     <div 
       className="tree-container" 
@@ -1896,8 +1919,10 @@ export default function DirectoryTree({
             onDragEnd={(info) => {
               runtimeLogger.debug('拖拽结束', info);
               dragSelectionNodeIdsRef.current = [];
+              removeStaleTreeDragPreviews();
             }}
             onDrop={(info) => {
+              removeStaleTreeDragPreviews();
               void handleTreeDrop(info);
             }}
             renderDraggingNode={renderDraggingNode}
