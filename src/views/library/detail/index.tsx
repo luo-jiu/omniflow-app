@@ -272,12 +272,12 @@ const ContentToolbar = styled.div`
     scrollbar-width: none;
   }
 
-  .browser-tabs-list::-webkit-scrollbar {
-    display: none;
+  .browser-tabs-list.scroll-mode {
+    -webkit-app-region: no-drag;
   }
 
-  .browser-tabs-list > .toolbar-action-btn {
-    flex-shrink: 0;
+  .browser-tabs-list::-webkit-scrollbar {
+    display: none;
   }
 
   .browser-tab-btn {
@@ -301,6 +301,18 @@ const ContentToolbar = styled.div`
     border-color: var(--semi-color-primary);
     background: var(--semi-color-primary-light-default);
     color: var(--app-text);
+  }
+
+  .browser-tab-btn.dragging {
+    opacity: 0.64;
+  }
+
+  .browser-tab-btn.drop-before {
+    box-shadow: inset 2px 0 0 var(--semi-color-primary);
+  }
+
+  .browser-tab-btn.drop-after {
+    box-shadow: inset -2px 0 0 var(--semi-color-primary);
   }
 
   .browser-tab-title {
@@ -412,6 +424,33 @@ function updateBrowserTabList(
   return tabs.map((tab) => (tab.id === tabId ? updater(tab) : tab));
 }
 
+function reorderBrowserTabs(
+  tabs: BrowserTab[],
+  draggedTabId: string,
+  targetTabId: string,
+  position: 'before' | 'after',
+) {
+  if (draggedTabId === targetTabId) {
+    return tabs;
+  }
+
+  const draggedIndex = tabs.findIndex((tab) => tab.id === draggedTabId);
+  const targetIndex = tabs.findIndex((tab) => tab.id === targetTabId);
+  if (draggedIndex < 0 || targetIndex < 0) {
+    return tabs;
+  }
+
+  const nextTabs = [...tabs];
+  const [draggedTab] = nextTabs.splice(draggedIndex, 1);
+  const adjustedTargetIndex = nextTabs.findIndex((tab) => tab.id === targetTabId);
+  if (adjustedTargetIndex < 0) {
+    return tabs;
+  }
+  const insertIndex = position === 'before' ? adjustedTargetIndex : adjustedTargetIndex + 1;
+  nextTabs.splice(insertIndex, 0, draggedTab);
+  return nextTabs;
+}
+
 function createEmptyBrowserTab() {
   const nextTab = createBrowserTab();
   return {
@@ -425,10 +464,24 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   const navigate = useNavigate();
   const sidePanelRef = React.useRef<HTMLDivElement>(null);
   const browserRef = React.useRef<EmbeddedBrowserHandle | null>(null);
+  const browserTabsListRef = React.useRef<HTMLDivElement | null>(null);
+  const browserTabButtonRefMap = React.useRef<Map<string, HTMLButtonElement>>(new Map());
+  const pendingBrowserTabDragRef = React.useRef<{ started: boolean; tabId: string } | null>(null);
+  const browserTabMouseMoveListenerRef = React.useRef<((event: MouseEvent) => void) | null>(null);
+  const browserTabMouseUpListenerRef = React.useRef<((event: MouseEvent) => void) | null>(null);
+  const browserTabClickBlockUntilRef = React.useRef(0);
+  const previousActiveBrowserTabIdRef = React.useRef<string | null>(null);
+  const previousBrowserTabCountRef = React.useRef(0);
   const [sidePanelWidth, setSidePanelWidth] = React.useState<number>(() => loadSidePanelWidth(libraryId));
   const [browserModeOpen, setBrowserModeOpen] = React.useState(false);
   const [browserTabs, setBrowserTabs] = React.useState<BrowserTab[]>([]);
   const [activeBrowserTabId, setActiveBrowserTabId] = React.useState<string | null>(null);
+  const [draggingBrowserTabId, setDraggingBrowserTabId] = React.useState<string | null>(null);
+  const [browserTabsScrollMode, setBrowserTabsScrollMode] = React.useState(false);
+  const [browserTabDropTarget, setBrowserTabDropTarget] = React.useState<{
+    position: 'before' | 'after';
+    tabId: string;
+  } | null>(null);
   const [browserInput, setBrowserInput] = React.useState('');
   const [searchMode, setSearchMode] = React.useState<SearchWorkspaceMode>('files');
   const [searchDraft, setSearchDraft] = React.useState('');
@@ -653,6 +706,14 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
     void window.electronEmbeddedBrowser.closeTab(tabId);
   }, [activeBrowserTabId, browserTabs]);
 
+  const reorderBrowserTabList = React.useCallback((
+    draggedTabId: string,
+    targetTabId: string,
+    position: 'before' | 'after',
+  ) => {
+    setBrowserTabs((prev) => reorderBrowserTabs(prev, draggedTabId, targetTabId, position));
+  }, []);
+
   const submitBrowserInput = React.useCallback((rawValue: string, targetTabId?: string | null) => {
     const resolvedTabId = targetTabId ?? activeBrowserTabId;
     if (!resolvedTabId) {
@@ -740,6 +801,97 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
     return browserTabs.find((tab) => tab.id === activeBrowserTabId) ?? null;
   }, [activeBrowserTabId, browserTabs]);
 
+  const detachBrowserTabDragListeners = React.useCallback(() => {
+    if (browserTabMouseMoveListenerRef.current) {
+      window.removeEventListener('mousemove', browserTabMouseMoveListenerRef.current);
+      browserTabMouseMoveListenerRef.current = null;
+    }
+    if (browserTabMouseUpListenerRef.current) {
+      window.removeEventListener('mouseup', browserTabMouseUpListenerRef.current);
+      browserTabMouseUpListenerRef.current = null;
+    }
+  }, []);
+
+  const clearBrowserTabDragState = React.useCallback(() => {
+    pendingBrowserTabDragRef.current = null;
+    setDraggingBrowserTabId(null);
+    setBrowserTabDropTarget(null);
+    detachBrowserTabDragListeners();
+  }, [detachBrowserTabDragListeners]);
+
+  const resolveBrowserTabDropTarget = React.useCallback((
+    clientX: number,
+    draggedTabId: string,
+  ): { position: 'before' | 'after'; tabId: string } | null => {
+    const candidateTabs = browserTabs.filter((tab) => tab.id !== draggedTabId);
+    if (candidateTabs.length === 0) {
+      return null;
+    }
+
+    let nearest: { distance: number; position: 'before' | 'after'; tabId: string } | null = null;
+    for (const tab of candidateTabs) {
+      const button = browserTabButtonRefMap.current.get(tab.id);
+      if (!button) {
+        continue;
+      }
+      const rect = button.getBoundingClientRect();
+      const midpoint = rect.left + rect.width / 2;
+      const position: 'before' | 'after' = clientX < midpoint ? 'before' : 'after';
+      const distance = clientX >= rect.left && clientX <= rect.right
+        ? Math.abs(clientX - midpoint) * 0.5
+        : Math.min(Math.abs(clientX - rect.left), Math.abs(clientX - rect.right)) + rect.width / 2;
+      if (!nearest || distance < nearest.distance) {
+        nearest = { distance, position, tabId: tab.id };
+      }
+    }
+
+    return nearest ? { tabId: nearest.tabId, position: nearest.position } : null;
+  }, [browserTabs]);
+
+  const handleBrowserTabsWheel = React.useCallback((event: React.WheelEvent<HTMLDivElement>) => {
+    if (!event.shiftKey) {
+      return;
+    }
+    const container = browserTabsListRef.current;
+    if (!container) {
+      return;
+    }
+    if (container.scrollWidth <= container.clientWidth + 1) {
+      return;
+    }
+    const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
+    if (!Number.isFinite(delta) || Math.abs(delta) < 0.1) {
+      return;
+    }
+    event.preventDefault();
+    container.scrollLeft += delta;
+  }, []);
+
+  React.useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Shift') {
+        setBrowserTabsScrollMode(true);
+      }
+    };
+    const handleKeyUp = (event: KeyboardEvent) => {
+      if (event.key === 'Shift') {
+        setBrowserTabsScrollMode(false);
+      }
+    };
+    const handleWindowBlur = () => {
+      setBrowserTabsScrollMode(false);
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    window.addEventListener('blur', handleWindowBlur);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener('blur', handleWindowBlur);
+    };
+  }, []);
+
   React.useEffect(() => {
     if (!browserModeOpen) {
       return;
@@ -754,6 +906,32 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   }, [activeBrowserTab, browserModeOpen]);
 
   React.useEffect(() => {
+    if (!browserModeOpen || !activeBrowserTabId) {
+      previousActiveBrowserTabIdRef.current = activeBrowserTabId;
+      previousBrowserTabCountRef.current = browserTabs.length;
+      return;
+    }
+    const activeTabChanged = previousActiveBrowserTabIdRef.current !== activeBrowserTabId;
+    const tabCountIncreased = browserTabs.length > previousBrowserTabCountRef.current;
+    previousActiveBrowserTabIdRef.current = activeBrowserTabId;
+    previousBrowserTabCountRef.current = browserTabs.length;
+    if (!activeTabChanged && !tabCountIncreased) {
+      return;
+    }
+    const button = browserTabButtonRefMap.current.get(activeBrowserTabId);
+    if (!button) {
+      return;
+    }
+    window.requestAnimationFrame(() => {
+      button.scrollIntoView({
+        behavior: 'smooth',
+        block: 'nearest',
+        inline: 'nearest',
+      });
+    });
+  }, [activeBrowserTabId, browserModeOpen, browserTabs.length]);
+
+  React.useEffect(() => {
     if (browserModeOpen) {
       return;
     }
@@ -764,9 +942,10 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
 
   React.useEffect(() => {
     return () => {
+      clearBrowserTabDragState();
       void window.electronEmbeddedBrowser.closeAll();
     };
-  }, []);
+  }, [clearBrowserTabDragState]);
 
   return (
     <DetailWrapper>
@@ -858,13 +1037,72 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
           </div>
           <div className="toolbar-spacer">
             {browserModeOpen ? (
-              <div className="browser-tabs-list">
+              <div
+                ref={browserTabsListRef}
+                className={`browser-tabs-list ${browserTabsScrollMode ? 'scroll-mode' : ''}`}
+                onWheelCapture={handleBrowserTabsWheel}
+              >
                 {browserTabs.map((tab) => (
                   <button
                     key={tab.id}
                     type="button"
-                    className={`browser-tab-btn ${tab.id === activeBrowserTabId ? 'active' : ''}`}
-                    onClick={() => activateBrowserTab(tab.id)}
+                    className={`browser-tab-btn ${tab.id === activeBrowserTabId ? 'active' : ''}${draggingBrowserTabId === tab.id ? ' dragging' : ''}${browserTabDropTarget?.tabId === tab.id && browserTabDropTarget.position === 'before' && draggingBrowserTabId !== tab.id ? ' drop-before' : ''}${browserTabDropTarget?.tabId === tab.id && browserTabDropTarget.position === 'after' && draggingBrowserTabId !== tab.id ? ' drop-after' : ''}`}
+                    ref={(element) => {
+                      if (element) {
+                        browserTabButtonRefMap.current.set(tab.id, element);
+                      } else {
+                        browserTabButtonRefMap.current.delete(tab.id);
+                      }
+                    }}
+                    onMouseDown={(event) => {
+                      if (event.button !== 0) {
+                        return;
+                      }
+                      pendingBrowserTabDragRef.current = {
+                        started: false,
+                        tabId: tab.id,
+                      };
+                      setBrowserTabDropTarget(null);
+                      detachBrowserTabDragListeners();
+
+                      const handleMouseMove = (moveEvent: MouseEvent) => {
+                        const pending = pendingBrowserTabDragRef.current;
+                        if (!pending || pending.tabId !== tab.id) {
+                          return;
+                        }
+                        if (!pending.started) {
+                          if (Math.abs(moveEvent.clientX - event.clientX) < 6) {
+                            return;
+                          }
+                          pending.started = true;
+                          setDraggingBrowserTabId(tab.id);
+                          browserTabClickBlockUntilRef.current = Date.now() + 180;
+                        }
+                        setBrowserTabDropTarget(resolveBrowserTabDropTarget(moveEvent.clientX, tab.id));
+                      };
+
+                      const handleMouseUp = (upEvent: MouseEvent) => {
+                        const pending = pendingBrowserTabDragRef.current;
+                        if (pending?.started) {
+                          const finalDropTarget = resolveBrowserTabDropTarget(upEvent.clientX, tab.id);
+                          if (finalDropTarget) {
+                            reorderBrowserTabList(tab.id, finalDropTarget.tabId, finalDropTarget.position);
+                          }
+                        }
+                        clearBrowserTabDragState();
+                      };
+
+                      browserTabMouseMoveListenerRef.current = handleMouseMove;
+                      browserTabMouseUpListenerRef.current = handleMouseUp;
+                      window.addEventListener('mousemove', handleMouseMove);
+                      window.addEventListener('mouseup', handleMouseUp);
+                    }}
+                    onClick={() => {
+                      if (Date.now() < browserTabClickBlockUntilRef.current) {
+                        return;
+                      }
+                      activateBrowserTab(tab.id);
+                    }}
                   >
                     <span className="browser-tab-title">{tab.title || tab.url || '新标签页'}</span>
                     <span
@@ -874,6 +1112,9 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
                       onClick={(event) => {
                         event.stopPropagation();
                         closeBrowserTab(tab.id);
+                      }}
+                      onMouseDown={(event) => {
+                        event.stopPropagation();
                       }}
                       onKeyDown={(event) => {
                         if (event.key === 'Enter' || event.key === ' ') {
@@ -887,19 +1128,20 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
                     </span>
                   </button>
                 ))}
-                <button
-                  type="button"
-                  className="toolbar-action-btn"
-                  onClick={createAndActivateBrowserTab}
-                  title="新建浏览器标签"
-                >
-                  <IconPlus />
-                </button>
               </div>
             ) : null}
           </div>
           <div className="toolbar-right">
-            {!browserModeOpen ? (
+            {browserModeOpen ? (
+              <button
+                type="button"
+                className="toolbar-action-btn"
+                onClick={createAndActivateBrowserTab}
+                title="新建浏览器标签"
+              >
+                <IconPlus />
+              </button>
+            ) : (
               <button
                 type="button"
                 className="toolbar-action-btn"
@@ -909,7 +1151,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
               >
                 <IconRefresh />
               </button>
-            ) : null}
+            )}
           </div>
         </ContentToolbar>
         {browserModeOpen ? (
