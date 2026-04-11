@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import registerIpcHandlers from './ipc'
+import { runtimeLogger } from './runtimeLogger'
 
 // __dirname 处理（因为 ESM 下没有内置 __dirname）
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -30,6 +31,10 @@ const MIN_WINDOW_WIDTH = 600
 const MIN_WINDOW_HEIGHT = 400
 const WINDOW_STATE_FILENAME = 'window-state.json'
 const WINDOW_STATE_SAVE_DEBOUNCE_MS = 200
+const ENABLE_EMBEDDED_BROWSER_DEBUG =
+  process.env.NODE_ENV === 'test' ||
+  Boolean(VITE_DEV_SERVER_URL || process.env.ELECTRON_RENDERER_URL) ||
+  process.env.OMNIFLOW_ENABLE_RUNTIME_LOGS === 'true'
 
 app.setName(APP_DISPLAY_NAME)
 // 保持沿用历史用户数据目录，避免因应用显示名变化导致 zoom / 本地偏好重置。
@@ -59,6 +64,13 @@ type EmbeddedBrowserStatePayload = {
   meta?: string[]
   state?: 'idle' | 'loading' | 'ready' | 'error'
   url?: string
+}
+
+type EmbeddedBrowserBounds = {
+  x: number
+  y: number
+  width: number
+  height: number
 }
 
 interface PersistedWindowState {
@@ -256,20 +268,20 @@ function registerWindowIpcHandlers() {
   })
 
   const emitEmbeddedBrowserState = (payload: EmbeddedBrowserStatePayload) => {
-    console.log('[embedded-browser:main]', payload)
+    runtimeLogger.log('[embedded-browser:main]', payload)
     if (!mainWindow || mainWindow.isDestroyed()) {
       return
     }
     mainWindow.webContents.send('embedded-browser:state', payload)
   }
 
-  const collectEmbeddedBrowserMeta = async () => {
-    if (!embeddedBrowserView || embeddedBrowserView.webContents.isDestroyed()) {
+  const collectEmbeddedBrowserDebugMeta = async (view: WebContentsView) => {
+    if (!ENABLE_EMBEDDED_BROWSER_DEBUG || view.webContents.isDestroyed()) {
       return []
     }
 
     try {
-      const snapshot = await embeddedBrowserView.webContents.executeJavaScript(`
+      const snapshot = await view.webContents.executeJavaScript(`
         (() => {
           const bodyText = document.body?.innerText?.trim() || ''
           const bodyHtmlLength = document.body?.innerHTML?.length || 0
@@ -356,11 +368,15 @@ function registerWindowIpcHandlers() {
       })
     })
     embeddedBrowserView.webContents.on('did-stop-loading', async () => {
-      embeddedBrowserLastCommittedUrl = embeddedBrowserView?.webContents.getURL() || ''
-      const meta = await collectEmbeddedBrowserMeta()
+      const view = embeddedBrowserView
+      if (!view || view.webContents.isDestroyed()) {
+        return
+      }
+      embeddedBrowserLastCommittedUrl = view.webContents.getURL() || ''
+      const meta = await collectEmbeddedBrowserDebugMeta(view)
       emitEmbeddedBrowserState({
         details: 'did-stop-loading',
-        meta,
+        ...(meta.length ? { meta } : {}),
         state: 'ready',
         url: embeddedBrowserLastCommittedUrl || undefined,
       })
@@ -393,7 +409,7 @@ function registerWindowIpcHandlers() {
       })
     })
     embeddedBrowserView.webContents.on('console-message', (_event, level, message, line, sourceId) => {
-      if (level >= 2) {
+      if (ENABLE_EMBEDDED_BROWSER_DEBUG && level >= 2) {
         emitEmbeddedBrowserState({
           details: `console:${sourceId}:${line}`,
           state: 'ready',
@@ -411,8 +427,21 @@ function registerWindowIpcHandlers() {
     return embeddedBrowserView
   }
 
-  ipcMain.handle('embedded-browser:open', async (event, url: string) => {
-    const targetWindow = BrowserWindow.fromWebContents(event.sender) ?? mainWindow
+  const attachEmbeddedBrowserView = (targetWindow: BrowserWindow) => {
+    if (!embeddedBrowserView || embeddedBrowserView.webContents.isDestroyed()) {
+      ensureEmbeddedBrowserView()
+    }
+    if (embeddedBrowserView && !targetWindow.contentView.children.includes(embeddedBrowserView)) {
+      targetWindow.contentView.addChildView(embeddedBrowserView)
+    }
+    return embeddedBrowserView
+  }
+
+  const loadEmbeddedBrowserUrl = async (
+    targetWindow: BrowserWindow | null,
+    url: string,
+    errorDetails: 'open-exception' | 'navigate-exception',
+  ) => {
     if (!targetWindow || targetWindow.isDestroyed()) {
       return
     }
@@ -420,68 +449,50 @@ function registerWindowIpcHandlers() {
     if (!normalizedUrl) {
       return
     }
-    if (!embeddedBrowserView || embeddedBrowserView.webContents.isDestroyed()) {
-      ensureEmbeddedBrowserView()
-    }
-    if (embeddedBrowserView && !targetWindow.contentView.children.includes(embeddedBrowserView)) {
-      targetWindow.contentView.addChildView(embeddedBrowserView)
-    }
-    emitEmbeddedBrowserState({ state: 'loading', url: normalizedUrl })
-    try {
-      await embeddedBrowserView?.webContents.loadURL(normalizedUrl)
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      if (message.includes('ERR_ABORTED')) {
-        return
-      }
-      emitEmbeddedBrowserState({
-        details: 'open-exception',
-        state: 'error',
-        message: `页面加载失败：${message}`,
-        url: normalizedUrl,
-      })
-      throw error
-    }
-  })
-
-  ipcMain.handle('embedded-browser:navigate', async (_event, url: string) => {
-    const normalizedUrl = String(url || '').trim()
-    if (!normalizedUrl) {
+    const view = attachEmbeddedBrowserView(targetWindow)
+    if (!view || view.webContents.isDestroyed()) {
       return
     }
-    if (!embeddedBrowserView || embeddedBrowserView.webContents.isDestroyed()) {
-      ensureEmbeddedBrowserView()
-    }
     emitEmbeddedBrowserState({ state: 'loading', url: normalizedUrl })
     try {
-      await embeddedBrowserView?.webContents.loadURL(normalizedUrl)
+      await view.webContents.loadURL(normalizedUrl)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       if (message.includes('ERR_ABORTED')) {
         return
       }
       emitEmbeddedBrowserState({
-        details: 'navigate-exception',
+        details: errorDetails,
         state: 'error',
         message: `页面加载失败：${message}`,
         url: normalizedUrl,
       })
       throw error
     }
+  }
+
+  ipcMain.handle('embedded-browser:open', async (event, url: string) => {
+    const targetWindow = BrowserWindow.fromWebContents(event.sender) ?? mainWindow
+    await loadEmbeddedBrowserUrl(targetWindow, url, 'open-exception')
+  })
+
+  ipcMain.handle('embedded-browser:navigate', async (event, url: string) => {
+    const targetWindow = BrowserWindow.fromWebContents(event.sender) ?? mainWindow
+    await loadEmbeddedBrowserUrl(targetWindow, url, 'navigate-exception')
   })
 
   ipcMain.handle('embedded-browser:reload', async () => {
     embeddedBrowserView?.webContents.reload()
   })
 
-  ipcMain.handle('embedded-browser:set-bounds', (_event, bounds: { x: number; y: number; width: number; height: number }) => {
+  ipcMain.handle('embedded-browser:set-bounds', (event, bounds: EmbeddedBrowserBounds) => {
     const nextBounds = {
       x: 0,
       y: 0,
       width: 0,
       height: 0,
     }
-    const targetWindow = BrowserWindow.fromWebContents(_event.sender) ?? mainWindow
+    const targetWindow = BrowserWindow.fromWebContents(event.sender) ?? mainWindow
     const zoomFactor = targetWindow && !targetWindow.isDestroyed()
       ? Math.max(targetWindow.webContents.getZoomFactor(), 0.01)
       : 1
@@ -490,7 +501,7 @@ function registerWindowIpcHandlers() {
     nextBounds.width = Math.max(0, Math.round(bounds.width * zoomFactor))
     nextBounds.height = Math.max(0, Math.round(bounds.height * zoomFactor))
     embeddedBrowserPendingBounds = nextBounds
-    console.log('[embedded-browser:bounds]', { raw: bounds, zoomFactor, applied: nextBounds })
+    runtimeLogger.log('[embedded-browser:bounds]', { raw: bounds, zoomFactor, applied: nextBounds })
     if (!embeddedBrowserView) {
       return
     }
@@ -537,7 +548,6 @@ function createWindow() {
 
       // Electron 安全推荐配置
       devTools: true,
-      webSecurity: false,
       // nodeIntegration: false,     // 禁用 Node.js 集成
       // contextIsolation: true,     // 启用上下文隔离
       // webSecurity: true           // 启用同源策略
@@ -581,15 +591,6 @@ function createWindow() {
       mainWindow = null
     }
   })
-
-  win.webContents.session.webRequest.onHeadersReceived((details, callback) => {
-    callback({
-      responseHeaders: {
-        ...details.responseHeaders,
-        'Content-Security-Policy': [''] // 将其置为空
-      }
-    });
-  });
 
   win.webContents.on('before-input-event', (event, input) => {
     if (!isToggleDevToolsShortcut(input)) {

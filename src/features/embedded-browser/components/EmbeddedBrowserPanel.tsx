@@ -2,7 +2,7 @@ import React from 'react';
 import styled from 'styled-components';
 
 type EmbeddedBrowserPanelProps = {
-  url: string;
+  initialUrl?: string;
   onUrlChange?: (url: string) => void;
 };
 
@@ -53,11 +53,11 @@ const BrowserSurface = styled.div`
 `;
 
 const EmbeddedBrowserPanel = React.forwardRef<EmbeddedBrowserHandle, EmbeddedBrowserPanelProps>(
-  ({ url, onUrlChange }, ref) => {
+  ({ initialUrl = '', onUrlChange }, ref) => {
     const hostRef = React.useRef<HTMLDivElement | null>(null);
-    const initialUrlRef = React.useRef(url);
+    const initialUrlRef = React.useRef(initialUrl);
     const [statusMessage, setStatusMessage] = React.useState(
-      url ? '正在打开网页...' : '输入网址后回车',
+      initialUrl ? '正在打开网页...' : '输入网址后回车',
     );
     const [statusDetails, setStatusDetails] = React.useState('');
     const [statusMeta, setStatusMeta] = React.useState<string[]>([]);
@@ -107,14 +107,6 @@ const EmbeddedBrowserPanel = React.forwardRef<EmbeddedBrowserHandle, EmbeddedBro
 
     React.useEffect(() => {
       const unsubscribe = window.electronEmbeddedBrowser.onStateChange((payload: BrowserEventPayload) => {
-        const logLabel = '[embedded-browser]';
-        if (payload.state === 'error') {
-          console.error(logLabel, payload);
-        } else if (payload.state === 'loading') {
-          console.info(logLabel, payload);
-        } else {
-          console.log(logLabel, payload);
-        }
         if (payload.url) {
           onUrlChange?.(payload.url);
         }

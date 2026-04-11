@@ -539,7 +539,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
           {browserModeOpen ? (
             <EmbeddedBrowserPanel
               ref={browserRef}
-              url={browserUrl}
+              initialUrl={browserUrl}
               onUrlChange={(nextUrl) => {
                 setBrowserUrl(nextUrl);
                 setBrowserInput(nextUrl);
