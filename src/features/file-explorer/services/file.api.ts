@@ -321,12 +321,14 @@ export async function createNode(payload: {
   parentId: number;
   libraryId: number;
   type: 'dir' | 'file';
+  ext?: string;
 }) {
   // 后端期望 type 为数字：0=文件夹，1=文件
   const body = await request('/v1/nodes', {
     method: 'POST',
     body: JSON.stringify({
       name: payload.name,
+      ext: payload.ext?.trim().replace(/^\./, ''),
       parentId: payload.parentId,
       libraryId: payload.libraryId,
       type: payload.type === 'dir' ? 0 : 1,
@@ -372,25 +374,54 @@ export async function updateNodeConfig(payload: {
   return body.data;
 }
 
-// 移动节点（支持同级排序与跨目录移动）
-export async function moveNode(payload: {
+export interface MoveNodesBatchItemPayload {
   nodeId: number;
-  name: string;
+  name?: string;
+}
+
+export interface MoveNodesBatchResult {
+  movedCount: number;
+  affectedParentIds: number[];
+  movedNodeIds: number[];
+}
+
+// 移动节点（单拖/多拖统一走批量接口）
+export async function moveNodesBatch(payload: {
+  items: MoveNodesBatchItemPayload[];
   newParentId: number;
   beforeNodeId?: number | null;
   libraryId: number;
-}) {
-  const body = await request(`/v1/nodes/${payload.nodeId}/move`, {
+}): Promise<MoveNodesBatchResult> {
+  const normalizedItems = (payload.items || [])
+    .map((item) => ({
+      nodeId: Number(item.nodeId),
+      name: String(item.name ?? ''),
+    }))
+    .filter(item => Number.isFinite(item.nodeId) && item.nodeId > 0);
+
+  const body = await request('/v1/nodes/move/batch', {
     method: 'PATCH',
     body: JSON.stringify({
-      nodeId: payload.nodeId,
-      name: payload.name,
       newParentId: payload.newParentId,
       beforeNodeId: payload.beforeNodeId ?? null,
       libraryId: payload.libraryId,
+      items: normalizedItems,
     }),
   });
-  return body.data;
+
+  const data = (body?.data ?? {}) as Record<string, unknown>;
+  const affectedRaw = Array.isArray(data.affectedParentIds) ? data.affectedParentIds : [];
+  const movedRaw = Array.isArray(data.movedNodeIds) ? data.movedNodeIds : [];
+
+  return {
+    movedCount: toNumberOrDefault(data.movedCount),
+    affectedParentIds: affectedRaw
+      .map(item => toNumberOrDefault(item))
+      .filter(item => item > 0),
+    movedNodeIds: movedRaw
+      .map(item => toNumberOrDefault(item))
+      .filter(item => item > 0),
+  };
 }
 
 // 漫画目录：按名称重排直接子项（重建 sort_order 间隔）

@@ -703,10 +703,16 @@ export function useRepositoryTree(
     });
   }, [selectedRepository, updateNodeChildren]);
 
-  const refreshAfterMove = useCallback(async (oldParentId: number, newParentId: number) => {
-    await refreshParentChildren(oldParentId);
-    if (newParentId !== oldParentId) {
-      await refreshParentChildren(newParentId);
+  const refreshAfterMove = useCallback(async (affectedParentIds: number[]) => {
+    const normalizedParentIds = Array.from(
+      new Set(
+        (affectedParentIds || [])
+          .map(item => Number(item))
+          .filter(item => Number.isFinite(item) && item > 0),
+      ),
+    );
+    for (const parentId of normalizedParentIds) {
+      await refreshParentChildren(parentId);
     }
   }, [refreshParentChildren]);
 

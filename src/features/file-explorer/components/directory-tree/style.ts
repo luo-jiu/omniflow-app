@@ -167,8 +167,9 @@ export const DirectorySidebarWrapper = styled.aside<{ $isDragging?: boolean }>`
     border-radius: 4px;
   }
 
-  .tree-node-label.is-located-selected {
-    background: rgba(0, 0, 0, 0.06);
+  .tree-node-label.is-multi-selected {
+    background: color-mix(in srgb, var(--semi-color-primary-light-default) 72%, transparent);
+    outline: 1px solid color-mix(in srgb, var(--semi-color-primary) 35%, transparent);
     border-radius: 4px;
   }
 

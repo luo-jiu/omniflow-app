@@ -151,8 +151,8 @@ const DirectorySidebar: React.FC<Props> = ({ libraryId, onFileOpen }) => {
           onConfigSuccess={(nodeKey, payload) => {
             updateNodeBuiltInConfig(nodeKey, payload);
           }}
-          onMoveSuccess={({ oldParentId, newParentId }) => {
-            void refreshAfterMove(oldParentId, newParentId);
+          onMoveSuccess={({ affectedParentIds }) => {
+            void refreshAfterMove(affectedParentIds);
           }}
           libraryId={libraryId}
           rootNodeId={rootNodeId}

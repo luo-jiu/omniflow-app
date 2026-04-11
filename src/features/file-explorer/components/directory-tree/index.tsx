@@ -7,7 +7,7 @@ import {
   getAllDescendantsByNodeId,
   fetchNodeDetailById,
   getFileLink,
-  moveNode,
+  moveNodesBatch,
   renameNode,
   sortComicChildrenByName,
   updateNodeConfig,
@@ -55,7 +55,7 @@ interface DirectoryTreeProps {
   // 配置更新成功后的回调（内置类型/归档模式）
   onConfigSuccess?: (nodeKey: string, payload: { builtInType?: string; archiveMode?: number }) => void;
   // 拖拽移动成功后，通知父组件刷新受影响父目录
-  onMoveSuccess?: (payload: { oldParentId: number; newParentId: number }) => void | Promise<void>;
+  onMoveSuccess?: (payload: { affectedParentIds: number[] }) => void | Promise<void>;
   libraryId: number; // 添加 libraryId prop
   rootNodeId: number | null;
 }
@@ -163,7 +163,9 @@ export default function DirectoryTree({
   // 内联编辑状态（重命名用）
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [editingName, setEditingName] = useState<string>('');
-  const [selectedTreeKey, setSelectedTreeKey] = useState<string | undefined>(undefined);
+  const [selectedNodeIds, setSelectedNodeIds] = useState<number[]>([]);
+  const [selectionAnchorKey, setSelectionAnchorKey] = useState<string | null>(null);
+  const dragSelectionNodeIdsRef = useRef<number[]>([]);
 
   // Tree 内容容器（可滚动内容层在 wrapper 中）
   const wrapperRef = useRef<HTMLDivElement | null>(null);
@@ -575,7 +577,8 @@ export default function DirectoryTree({
     if (!targetNode) {
       return;
     }
-    setSelectedTreeKey(targetNode.key);
+    setSelectedNodeIds([Number(targetNode.id)]);
+    setSelectionAnchorKey(String(targetNode.key || ''));
     window.requestAnimationFrame(() => {
       const wrapper = wrapperRef.current;
       const container = wrapper?.parentElement as HTMLElement | null;
@@ -675,6 +678,150 @@ export default function DirectoryTree({
     return patchNodes(treeData);
   })();
 
+  const collectVisibleTreeNodes = (nodes: any[], expandedKeySet: Set<string>, acc: any[]) => {
+    nodes.forEach((node) => {
+      acc.push(node);
+      const children = Array.isArray(node.children) ? node.children : [];
+      if (children.length === 0) return;
+      if (String(node.type) === 'file') return;
+      if (!expandedKeySet.has(String(node.key))) return;
+      collectVisibleTreeNodes(children, expandedKeySet, acc);
+    });
+  };
+
+  const getVisibleNodesLinear = (): any[] => {
+    const acc: any[] = [];
+    collectVisibleTreeNodes(renderTreeData, new Set(expandedKeys), acc);
+    return acc;
+  };
+
+  const buildParentIdMap = (nodes: any[]): Map<number, number> => {
+    const parentMap = new Map<number, number>();
+    const dfs = (currentNodes: any[]) => {
+      currentNodes.forEach((node) => {
+        const nodeId = Number(node?.id);
+        if (Number.isFinite(nodeId) && nodeId > 0) {
+          const parentId = Number(node?.parentId);
+          parentMap.set(nodeId, Number.isFinite(parentId) && parentId > 0 ? parentId : 0);
+        }
+        if (Array.isArray(node?.children) && node.children.length > 0) {
+          dfs(node.children);
+        }
+      });
+    };
+    dfs(nodes);
+    return parentMap;
+  };
+
+  const isDescendantNodeById = (
+    nodeId: number,
+    maybeAncestorId: number,
+    parentMap: Map<number, number>,
+  ): boolean => {
+    let current = Number(nodeId);
+    const visited = new Set<number>();
+    while (Number.isFinite(current) && current > 0 && !visited.has(current)) {
+      if (current === maybeAncestorId) {
+        return true;
+      }
+      visited.add(current);
+      current = Number(parentMap.get(current) || 0);
+    }
+    return false;
+  };
+
+  const normalizeMoveSelection = (candidateNodeIds: number[]): any[] => {
+    const deduped = Array.from(new Set(candidateNodeIds.filter(id => Number.isFinite(id) && id > 0)));
+    if (deduped.length === 0) return [];
+
+    const visibleNodes = getVisibleNodesLinear();
+    const visibleIndexMap = new Map<number, number>();
+    const nodeById = new Map<number, any>();
+    visibleNodes.forEach((node, index) => {
+      const nodeId = Number(node?.id);
+      if (!Number.isFinite(nodeId) || nodeId <= 0) return;
+      visibleIndexMap.set(nodeId, index);
+      nodeById.set(nodeId, node);
+    });
+
+    const orderedNodeIds = deduped
+      .map((id) => ({ id, index: visibleIndexMap.get(id) ?? Number.MAX_SAFE_INTEGER }))
+      .sort((a, b) => a.index - b.index || a.id - b.id)
+      .map(item => item.id);
+
+    const parentMap = buildParentIdMap(treeDataRef.current || []);
+    const selectedSet = new Set(orderedNodeIds);
+    return orderedNodeIds
+      .filter((nodeId) => {
+        let parentId = Number(parentMap.get(nodeId) || 0);
+        const visited = new Set<number>();
+        while (Number.isFinite(parentId) && parentId > 0 && !visited.has(parentId)) {
+          if (selectedSet.has(parentId)) {
+            return false;
+          }
+          visited.add(parentId);
+          parentId = Number(parentMap.get(parentId) || 0);
+        }
+        return true;
+      })
+      .map(nodeId => nodeById.get(nodeId))
+      .filter(Boolean);
+  };
+
+  const handleSelectionIntent = (treeNode: any, event: React.MouseEvent) => {
+    if (!treeNode) return;
+    const nodeId = Number(treeNode.id);
+    if (!Number.isFinite(nodeId) || nodeId <= 0) return;
+
+    const withToggle = event.metaKey || event.ctrlKey;
+    const withRange = event.shiftKey;
+    const targetKey = String(treeNode.key || '');
+    const visibleNodes = getVisibleNodesLinear();
+    const visibleKeys = visibleNodes.map(item => String(item.key || ''));
+    const targetIndex = visibleKeys.indexOf(targetKey);
+    const anchorKey = selectionAnchorKey;
+    const anchorIndex = anchorKey ? visibleKeys.indexOf(anchorKey) : -1;
+
+    if (withRange && targetIndex >= 0 && anchorIndex >= 0) {
+      const [start, end] = anchorIndex <= targetIndex
+        ? [anchorIndex, targetIndex]
+        : [targetIndex, anchorIndex];
+      const rangeIds = visibleNodes
+        .slice(start, end + 1)
+        .map(item => Number(item?.id))
+        .filter(id => Number.isFinite(id) && id > 0);
+      if (withToggle) {
+        const merged = Array.from(new Set([...selectedNodeIds, ...rangeIds]));
+        setSelectedNodeIds(merged);
+      } else {
+        setSelectedNodeIds(rangeIds);
+      }
+      return;
+    }
+
+    if (withRange && targetIndex >= 0 && anchorIndex < 0) {
+      setSelectedNodeIds([nodeId]);
+      setSelectionAnchorKey(targetKey || null);
+      return;
+    }
+
+    if (withToggle) {
+      setSelectedNodeIds((prev) => {
+        if (prev.includes(nodeId)) {
+          return prev.filter(item => item !== nodeId);
+        }
+        return [...prev, nodeId];
+      });
+      if (!selectionAnchorKey) {
+        setSelectionAnchorKey(targetKey || null);
+      }
+      return;
+    }
+
+    setSelectedNodeIds([nodeId]);
+    setSelectionAnchorKey(targetKey || null);
+  };
+
   const getChildrenByParentId = (parentId: number): any[] => {
     if (ROOT_PARENT_ID !== null && parentId === ROOT_PARENT_ID) {
       return treeData;
@@ -701,24 +848,12 @@ export default function DirectoryTree({
       return;
     }
 
-    const dragNodeId = Number(dragNode.id);
     const dropNodeId = Number(dropNode.id);
-    if (!Number.isFinite(dragNodeId) || !Number.isFinite(dropNodeId)) {
+    if (!Number.isFinite(dropNodeId)) {
       Toast.error('拖拽节点数据异常');
       return;
     }
 
-    const dragPos = String(dragNode.pos || '');
-    const dropPos = String(dropNode.pos || '');
-    if (dropPos === dragPos || (dragPos && dropPos.startsWith(`${dragPos}-`))) {
-      Toast.warning('不能移动到自身或其子节点下');
-      return;
-    }
-
-    const oldParentCandidate = Number(dragNode.parentId);
-    const oldParentId = Number.isFinite(oldParentCandidate) && oldParentCandidate > 0
-      ? oldParentCandidate
-      : (ROOT_PARENT_ID ?? 0);
     const dropToGap = Boolean(info?.dropToGap);
     const dropPosition = Number(info?.dropPosition ?? 0);
     const dropNodeIndex = Number(String(dropNode.pos || '').split('-').pop() || 0);
@@ -726,8 +861,21 @@ export default function DirectoryTree({
       ? dropPosition - dropNodeIndex
       : dropPosition;
 
-    let newParentId = oldParentId;
+    let newParentId = Number(dropNode.parentId || 0);
     let beforeNodeId: number | null = null;
+    const parentMap = buildParentIdMap(treeDataRef.current || []);
+
+    const draggedNodeId = Number(dragNode.id);
+    const activeSelectionIds = normalizeMoveSelection(
+      dragSelectionNodeIdsRef.current.length > 0
+        ? dragSelectionNodeIdsRef.current
+        : (Number.isFinite(draggedNodeId) && draggedNodeId > 0 ? [draggedNodeId] : selectedNodeIds),
+    ).map(node => Number(node.id));
+    if (activeSelectionIds.length === 0) {
+      Toast.warning('请选择要移动的节点');
+      return;
+    }
+    const movingNodeSet = new Set(activeSelectionIds);
 
     if (dropToGap) {
       const dropParentCandidate = Number(dropNode.parentId);
@@ -735,9 +883,17 @@ export default function DirectoryTree({
         ? dropParentCandidate
         : (ROOT_PARENT_ID ?? 0);
       if (relativeDropPosition < 0) {
-        beforeNodeId = dropNodeId;
+        let probeId: number | null = dropNodeId;
+        while (probeId && movingNodeSet.has(probeId)) {
+          probeId = getNextSiblingId(newParentId, probeId);
+        }
+        beforeNodeId = probeId;
       } else {
-        beforeNodeId = getNextSiblingId(newParentId, dropNodeId);
+        let probeId: number | null = getNextSiblingId(newParentId, dropNodeId);
+        while (probeId && movingNodeSet.has(probeId)) {
+          probeId = getNextSiblingId(newParentId, probeId);
+        }
+        beforeNodeId = probeId;
       }
     } else {
       const dropNodeIsFolder = dropNode.isLeaf !== true;
@@ -757,30 +913,52 @@ export default function DirectoryTree({
       newParentId = rootParentId;
     }
 
-    const dragNodeName = String(
-      dragNode.data?.rawName || dragNode.name || dragNode.label || '',
-    ).trim();
-    if (!dragNodeName) {
+    const normalizedMoveNodes = normalizeMoveSelection(activeSelectionIds);
+    if (normalizedMoveNodes.length === 0) {
+      Toast.warning('当前选中节点不可移动');
+      return;
+    }
+
+    for (const moveNode of normalizedMoveNodes) {
+      const moveNodeId = Number(moveNode.id);
+      if (!Number.isFinite(moveNodeId) || moveNodeId <= 0) {
+        continue;
+      }
+      if (newParentId === moveNodeId || isDescendantNodeById(newParentId, moveNodeId, parentMap)) {
+        Toast.warning('不能移动到自身或其子节点下');
+        return;
+      }
+    }
+
+    const payloadItems = normalizedMoveNodes.map((node) => {
+      const nodeName = String(node?.data?.rawName || node?.name || node?.label || '').trim();
+      return {
+        nodeId: Number(node.id),
+        name: nodeName,
+      };
+    }).filter(item => Number.isFinite(item.nodeId) && item.nodeId > 0);
+    if (payloadItems.length === 0) {
       Toast.error('节点名称异常，无法移动');
       return;
     }
 
     try {
-      await moveNode({
-        nodeId: dragNodeId,
-        name: dragNodeName,
+      const result = await moveNodesBatch({
+        items: payloadItems,
         newParentId,
         beforeNodeId,
         libraryId,
       });
 
-      if (onMoveSuccess) {
-        await onMoveSuccess({ oldParentId, newParentId });
+      if (onMoveSuccess && result.affectedParentIds.length > 0) {
+        await onMoveSuccess({ affectedParentIds: result.affectedParentIds });
       }
-      Toast.success('移动成功');
+      Toast.success(payloadItems.length > 1 ? `已移动 ${payloadItems.length} 项` : '移动成功');
     } catch (error: any) {
       runtimeLogger.error('移动节点失败:', error);
       Toast.error(error?.message || '移动失败');
+    } finally {
+      dragSelectionNodeIdsRef.current = [];
     }
   };
 
@@ -808,6 +986,14 @@ export default function DirectoryTree({
   const renderDraggingNode = (nodeInstance: HTMLElement, nodeData: unknown): HTMLElement => {
 
     try {
+      const selectedCount = dragSelectionNodeIdsRef.current.length;
+      if (selectedCount > 1) {
+        const containerWidth = wrapperRef.current?.parentElement?.clientWidth ?? 280;
+        const previewWidth = Math.max(180, Math.min(360, Math.floor(containerWidth * 0.9)));
+        const textColor = getComputedStyle(nodeInstance).color || '#1f2937';
+        return createDragPreview(`${selectedCount} 项`, textColor, previewWidth);
+      }
+
       const typedNodeData = (nodeData || {}) as DragPreviewNodeData;
       const nodeType = resolveNodeType(typedNodeData);
       const baseName = resolveNodeBaseName(typedNodeData);
@@ -1146,7 +1332,7 @@ export default function DirectoryTree({
       try {
         await sortComicChildrenByName(node.id);
         if (onMoveSuccess) {
-          await onMoveSuccess({ oldParentId: node.id, newParentId: node.id });
+          await onMoveSuccess({ affectedParentIds: [Number(node.id)] });
         }
         Toast.success('已按名称排序');
       } catch (error: any) {
@@ -1180,7 +1366,7 @@ export default function DirectoryTree({
           });
         });
         if (onMoveSuccess) {
-          await onMoveSuccess({ oldParentId: Number(node.id), newParentId: Number(node.id) });
+          await onMoveSuccess({ affectedParentIds: [Number(node.id)] });
         }
         Toast.success(
           `批量设置完成：共 ${result.dirChildren} 个子文件夹，实际更新 ${result.updatedCount} 个`,
@@ -1316,7 +1502,7 @@ export default function DirectoryTree({
         }
 
         if (onMoveSuccess && parentId > 0 && (ROOT_PARENT_ID === null || parentId !== ROOT_PARENT_ID)) {
-          await onMoveSuccess({ oldParentId: parentId, newParentId: parentId });
+          await onMoveSuccess({ affectedParentIds: [parentId] });
         }
 
         const playerState = globalAudioPlayer.getState();
@@ -1360,9 +1546,19 @@ export default function DirectoryTree({
 
     setCreateModal(prev => ({ ...prev, loading: true }));
     try {
+      const nextCreateValue = type === 'file'
+        ? splitFileBaseNameAndExt(name.trim())
+        : { name: name.trim(), ext: '' };
+      if (!nextCreateValue.name) {
+        Toast.warning('名称不能为空');
+        setCreateModal(prev => ({ ...prev, loading: false }));
+        return;
+      }
+
       const parentId = parentNode ? parentNode.id : Number(resolvedRootParentId);
       const newNode = await createNode({
-        name: name.trim(),
+        name: nextCreateValue.name,
+        ext: type === 'file' ? nextCreateValue.ext : undefined,
         parentId,
         libraryId,
         type,
@@ -1599,15 +1795,17 @@ export default function DirectoryTree({
       );
     }
 
+    const isSelected = selectedNodeIds.includes(Number(treeNode.id));
     return (
       <div
-        className={`tree-node-label ${dragOverKey === treeNode.key ? 'drag-over' : ''} ${selectedTreeKey === treeNode.key ? 'is-located-selected' : ''}`}
+        className={`tree-node-label ${dragOverKey === treeNode.key ? 'drag-over' : ''} ${isSelected ? 'is-multi-selected' : ''}`}
         ref={bindLabelRef(treeNode.key)}
         onDragEnter={onDragEnter}
         onDragOver={onDragOver}
         onDragLeave={onDragLeave}
         onDrop={onDrop}
         title={typeof label === 'string' ? label : undefined}
+        onClick={(e) => handleSelectionIntent(treeNode, e)}
         onContextMenu={(e) => openMenu(e, treeNode, isFolder)}
       >
         <span
@@ -1679,8 +1877,26 @@ export default function DirectoryTree({
         ) : (
           <Tree
             draggable
-            onDragStart={(info) => runtimeLogger.debug('开始拖拽', info)}
-            onDragEnd={(info) => runtimeLogger.debug('拖拽结束', info)}
+            onDragStart={(info) => {
+              runtimeLogger.debug('开始拖拽', info);
+              const draggedNode = (info as any)?.node || (info as any)?.dragNode;
+              const draggedNodeId = Number(draggedNode?.id);
+              if (!Number.isFinite(draggedNodeId) || draggedNodeId <= 0) {
+                dragSelectionNodeIdsRef.current = [];
+                return;
+              }
+              if (!selectedNodeIds.includes(draggedNodeId)) {
+                setSelectedNodeIds([draggedNodeId]);
+                setSelectionAnchorKey(String(draggedNode?.key || ''));
+                dragSelectionNodeIdsRef.current = [draggedNodeId];
+                return;
+              }
+              dragSelectionNodeIdsRef.current = [...selectedNodeIds];
+            }}
+            onDragEnd={(info) => {
+              runtimeLogger.debug('拖拽结束', info);
+              dragSelectionNodeIdsRef.current = [];
+            }}
             onDrop={(info) => {
               void handleTreeDrop(info);
             }}
@@ -1688,11 +1904,9 @@ export default function DirectoryTree({
             className="custom-tree"
             treeData={renderTreeData}
             expandedKeys={expandedKeys}
-            value={selectedTreeKey}
+            value={[]}
             onExpand={handleExpand}
-            onSelect={(nextSelectedKey) => {
-              setSelectedTreeKey(nextSelectedKey || undefined);
-            }}
+            onSelect={() => {}}
             onDoubleClick={handleTreeDoubleClick}
             loadData={handleLoadData}
             directory

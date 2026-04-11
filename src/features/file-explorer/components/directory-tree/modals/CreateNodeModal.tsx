@@ -50,4 +50,3 @@ const CreateNodeModal: React.FC<CreateNodeModalProps> = ({
 };
 
 export default CreateNodeModal;
-
