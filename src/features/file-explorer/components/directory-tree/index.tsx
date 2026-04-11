@@ -72,6 +72,18 @@ interface DragPreviewNodeData {
   };
 }
 
+type ExternalUploadResolution = {
+  blockedReason: 'archive' | null;
+  targetKey: string | null;
+  targetNode: any | null;
+};
+
+type VisibleRowBounds = {
+  bottom: number;
+  node: any;
+  top: number;
+};
+
 const TREE_DRAG_PREVIEW_ATTR = 'data-omniflow-tree-drag-preview';
 
 function removeStaleTreeDragPreviews() {
@@ -189,6 +201,7 @@ export default function DirectoryTree({
   // 为每个“可见行”的 label 与其内部文字 span 保持引用
   type RowRefs = { label: HTMLElement | null; text: HTMLElement | null; option: HTMLElement | null };
   const rowRefs = useRef<Map<string, RowRefs>>(new Map());
+  const visibleRowBoundsRef = useRef<VisibleRowBounds[]>([]);
   const treeDataRef = useRef<any[]>(treeData);
 
   // 记录上一次应用到 wrapper 的 minWidth，避免 1px 抖动
@@ -445,6 +458,48 @@ export default function DirectoryTree({
       label: String(node.label || node.data?.rawName || '根目录'),
       libraryId: Number(node.libraryId || libraryId),
     };
+  };
+
+  const resolveExternalUpload = (node: any | null): ExternalUploadResolution => {
+    if (!node) {
+      return {
+        blockedReason: null,
+        targetKey: null,
+        targetNode: null,
+      };
+    }
+
+    const finalize = (targetNode: any | null, blockedReason: 'archive' | null): ExternalUploadResolution => ({
+      blockedReason,
+      targetKey: targetNode?.key ? String(targetNode.key) : null,
+      targetNode,
+    });
+
+    if (String(node.type) === 'dir') {
+      if (Number(node.archiveMode ?? 0) === 1) {
+        return finalize(null, 'archive');
+      }
+      return finalize(node, null);
+    }
+
+    let parentId = Number(node.parentId || 0);
+    const visited = new Set<number>();
+    while (Number.isFinite(parentId) && parentId > 0 && !visited.has(parentId)) {
+      visited.add(parentId);
+      const parentNode = findNodeById(treeDataRef.current || [], parentId);
+      if (!parentNode) {
+        break;
+      }
+      if (String(parentNode.type) === 'dir') {
+        if (Number(parentNode.archiveMode ?? 0) === 1) {
+          return finalize(null, 'archive');
+        }
+        return finalize(parentNode, null);
+      }
+      parentId = Number(parentNode.parentId || 0);
+    }
+
+    return finalize(null, null);
   };
 
   const buildUploadCandidateFromDragFile = (file: File): UploadCandidateFile => {
@@ -762,6 +817,28 @@ export default function DirectoryTree({
         option.classList.add('tree-row-selected-middle');
       }
     });
+
+    const container = wrapperRef.current?.parentElement;
+    if (!container) {
+      visibleRowBoundsRef.current = [];
+      return;
+    }
+
+    const containerRect = container.getBoundingClientRect();
+    const scrollTop = container.scrollTop;
+    visibleRowBoundsRef.current = visibleNodesLinear.flatMap((node) => {
+      const nodeKey = String(node?.key || '');
+      const option = nodeKey ? rowRefs.current.get(nodeKey)?.option : null;
+      if (!option) {
+        return [];
+      }
+      const rect = option.getBoundingClientRect();
+      return [{
+        node,
+        top: rect.top - containerRect.top + scrollTop,
+        bottom: rect.bottom - containerRect.top + scrollTop,
+      }];
+    });
   }, [selectedNodeIds, visibleNodesLinear]);
 
   const buildParentIdMap = (nodes: any[]): Map<number, number> => {
@@ -956,6 +1033,88 @@ export default function DirectoryTree({
       expandTimerRef.current = null;
     }
     resetExternalDragExpandSession();
+  };
+
+  const clearExternalUploadHover = (targetKey?: string | null) => {
+    setDragOverKey(prev => {
+      if (targetKey === undefined) {
+        return null;
+      }
+      return prev === targetKey ? null : prev;
+    });
+    if (expandTimerRef.current) {
+      window.clearTimeout(expandTimerRef.current);
+      expandTimerRef.current = null;
+    }
+  };
+
+  const applyExternalUploadHover = (resolution: ExternalUploadResolution) => {
+    setDragOverKey(resolution.targetKey);
+    beginExternalDragExpandSession();
+  };
+
+  const notifyExternalUploadBlocked = (reason: ExternalUploadResolution['blockedReason']) => {
+    if (reason === 'archive') {
+      Toast.warning('归档模式目录不支持拖拽上传，请使用右键上传');
+    }
+  };
+
+  const handleExternalUploadDrop = (e: React.DragEvent, resolution: ExternalUploadResolution) => {
+    if (resolution.blockedReason) {
+      e.preventDefault();
+      e.stopPropagation();
+      notifyExternalUploadBlocked(resolution.blockedReason);
+      restoreExternalDragExpandedKeys();
+      return true;
+    }
+
+    if (!resolution.targetNode) {
+      clearExternalUploadHover();
+      restoreExternalDragExpandedKeys();
+      return true;
+    }
+
+    e.preventDefault();
+    e.stopPropagation();
+    try {
+      handleExternalDropOnFolder(resolution.targetNode, e);
+    } finally {
+      clearExternalUploadHover();
+      restoreExternalDragExpandedKeys();
+    }
+    return true;
+  };
+
+  const resolveVisibleTreeNodeByClientY = (clientY: number): any | null => {
+    const container = wrapperRef.current?.parentElement;
+    const visibleRows = visibleRowBoundsRef.current;
+    if (!container || visibleRows.length === 0) {
+      return null;
+    }
+
+    const containerRect = container.getBoundingClientRect();
+    const localY = clientY - containerRect.top + container.scrollTop;
+
+    for (const row of visibleRows) {
+      if (localY >= row.top && localY <= row.bottom) {
+        return row.node;
+      }
+    }
+
+    for (let index = 0; index < visibleRows.length - 1; index += 1) {
+      const current = visibleRows[index];
+      const next = visibleRows[index + 1];
+      if (localY > current.bottom && localY < next.top) {
+        return current.node;
+      }
+    }
+
+    const first = visibleRows[0];
+    if (localY < first.top) {
+      return first.node;
+    }
+
+    return visibleRows[visibleRows.length - 1]?.node ?? null;
   };
 
   const getChildrenByParentId = (parentId: number): any[] => {
@@ -1886,22 +2045,25 @@ export default function DirectoryTree({
     if (!treeNode) return label;
     const isFolder = String(treeNode.type) === 'dir';
     const isArchiveFolder = isFolder && Number(treeNode.archiveMode ?? 0) === 1;
+    const externalUpload = resolveExternalUpload(treeNode);
 
     // 拖拽悬停：外部文件和内部树节点都支持延时自动展开目录
     const onDragEnter = (e: React.DragEvent) => {
-      if (!isFolder) return;
       const isExternalDrag = isExternalFileDrag(e);
       const isInternalTreeDrag = hasActiveInternalTreeDrag();
       if (!isExternalDrag && !isInternalTreeDrag) return;
+      if (isExternalDrag && externalUpload.blockedReason) {
+        return;
+      }
+      if (!isFolder && !externalUpload.targetNode) return;
 
       if (isExternalDrag) {
         e.preventDefault();
         e.stopPropagation();
-        setDragOverKey(treeNode.key);
-        beginExternalDragExpandSession();
+        applyExternalUploadHover(externalUpload);
       }
 
-      if (isArchiveFolder) {
+      if (!isFolder || isArchiveFolder) {
         return;
       }
 
@@ -1916,46 +2078,32 @@ export default function DirectoryTree({
       }
     };
     const onDragOver = (e: React.DragEvent) => {
-      if (!isFolder) return;
       if (isExternalFileDrag(e)) {
+        if (externalUpload.blockedReason) return;
+        if (!isFolder && !externalUpload.targetNode) return;
         e.preventDefault();
         e.dataTransfer.dropEffect = 'copy';
       }
     };
-    const clearHover = () => {
-      setDragOverKey(prev => (prev === treeNode.key ? null : prev));
-      if (expandTimerRef.current) {
-        window.clearTimeout(expandTimerRef.current);
-        expandTimerRef.current = null;
-      }
-    };
     const onDragLeave = (e: React.DragEvent) => {
-      if (!isFolder) return;
       const isExternalDrag = isExternalFileDrag(e);
       const isInternalTreeDrag = hasActiveInternalTreeDrag();
       if (!isExternalDrag && !isInternalTreeDrag) return;
+      if (isExternalDrag && externalUpload.blockedReason) return;
+      if (!isFolder && !externalUpload.targetNode) return;
       if (isExternalDrag) {
         e.stopPropagation();
+        return;
       }
-      clearHover();
+      clearExternalUploadHover(externalUpload.targetKey);
     };
     const onDrop = (e: React.DragEvent) => {
       const isExternalDrag = isExternalFileDrag(e);
       const isInternalTreeDrag = hasActiveInternalTreeDrag();
       if (!isExternalDrag && !isInternalTreeDrag) return;
-      clearHover();
+      clearExternalUploadHover(externalUpload.targetKey);
       if (!isExternalDrag) return;
-      e.preventDefault();
-      e.stopPropagation();
-      try {
-        if (!isFolder) {
-          runtimeLogger.info('⚠️ 目标是文件，忽略上传：请投递到文件夹节点');
-          return;
-        }
-        handleExternalDropOnFolder(treeNode, e);
-      } finally {
-        restoreExternalDragExpandedKeys();
-      }
+      handleExternalUploadDrop(e, externalUpload);
     };
 
     if (editingKey === treeNode.key) {
@@ -2096,6 +2244,31 @@ export default function DirectoryTree({
     syncRenderedSelectionStyles();
   }, [syncRenderedSelectionStyles]);
 
+  const handleTreeContainerExternalDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    if (!isExternalFileDrag(e)) {
+      return;
+    }
+    const hoveredNode = resolveVisibleTreeNodeByClientY(e.clientY);
+    const externalUpload = resolveExternalUpload(hoveredNode);
+    if (!hoveredNode || !externalUpload.targetNode) {
+      clearExternalUploadHover();
+      return;
+    }
+
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    applyExternalUploadHover(externalUpload);
+  };
+
+  const handleTreeContainerExternalDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    if (!isExternalFileDrag(e)) {
+      return;
+    }
+
+    const hoveredNode = resolveVisibleTreeNodeByClientY(e.clientY);
+    handleExternalUploadDrop(e, resolveExternalUpload(hoveredNode));
+  };
+
   return (
     <div 
       className="tree-container" 
@@ -2106,7 +2279,12 @@ export default function DirectoryTree({
         openMenu(e, null, true);
       }}
     >
-      <div className="custom-tree-wrapper" ref={wrapperRef}>
+      <div
+        className="custom-tree-wrapper"
+        ref={wrapperRef}
+        onDragOver={handleTreeContainerExternalDragOver}
+        onDrop={handleTreeContainerExternalDrop}
+      >
         {treeData.length === 0 ? (
           <div style={{ 
             padding: '40px 20px', 
@@ -2152,6 +2330,11 @@ export default function DirectoryTree({
               removeStaleTreeDragPreviews();
             }}
             onDrop={(info) => {
+              const dropEvent = ((info as any)?.event || (info as any)?.nativeEvent || null) as React.DragEvent | null;
+              if (dropEvent && isExternalFileDrag(dropEvent)) {
+                removeStaleTreeDragPreviews();
+                return;
+              }
               dragDropPendingRef.current = true;
               removeStaleTreeDragPreviews();
               void handleTreeDrop(info);
