@@ -66,6 +66,8 @@ let activeEmbeddedBrowserTabId: string | null = null
 let embeddedBrowserPendingBounds: { x: number; y: number; width: number; height: number } | null = null
 
 type EmbeddedBrowserStatePayload = {
+  canGoBack?: boolean
+  canGoForward?: boolean
   details?: string
   message?: string
   meta?: string[]
@@ -358,8 +360,25 @@ function registerWindowIpcHandlers() {
     },
   ) => {
     emitEmbeddedBrowserState({
+      canGoBack: view.webContents.canGoBack(),
+      canGoForward: view.webContents.canGoForward(),
       tabId,
       title: payload.title ?? getEmbeddedBrowserTitle(view),
+      ...payload,
+    })
+  }
+
+  const emitEmbeddedBrowserTabSnapshot = (
+    tabId: string,
+    view: WebContentsView,
+    payload?: Omit<EmbeddedBrowserStatePayload, 'tabId' | 'title' | 'url'> & {
+      title?: string
+      url?: string
+    },
+  ) => {
+    emitEmbeddedBrowserTabState(tabId, view, {
+      state: 'ready',
+      url: payload?.url ?? (embeddedBrowserLastCommittedUrls.get(tabId) || view.webContents.getURL() || undefined),
       ...payload,
     })
   }
@@ -616,6 +635,8 @@ function registerWindowIpcHandlers() {
     const normalizedUrl = String(url || '').trim()
     if (!normalizedUrl) {
       emitEmbeddedBrowserState({
+        canGoBack: false,
+        canGoForward: false,
         state: 'ready',
         tabId,
         title: '新标签页',
@@ -640,7 +661,53 @@ function registerWindowIpcHandlers() {
     if (!normalizedTabId) {
       return
     }
-    getEmbeddedBrowserView(normalizedTabId)?.webContents.reload()
+    const view = getEmbeddedBrowserView(normalizedTabId)
+    if (!view || view.webContents.isDestroyed()) {
+      return
+    }
+    emitEmbeddedBrowserTabState(normalizedTabId, view, {
+      details: 'reload',
+      state: 'loading',
+      url: embeddedBrowserLastCommittedUrls.get(normalizedTabId) || view.webContents.getURL() || undefined,
+    })
+    view.webContents.reload()
+    emitEmbeddedBrowserTabSnapshot(normalizedTabId, view, {
+      details: 'reload-requested',
+    })
+  })
+
+  ipcMain.handle('embedded-browser:go-back', async (_event, tabId: string) => {
+    const normalizedTabId = String(tabId || '').trim()
+    if (!normalizedTabId) {
+      return
+    }
+    const view = getEmbeddedBrowserView(normalizedTabId)
+    if (!view || view.webContents.isDestroyed()) {
+      return
+    }
+    if (view.webContents.canGoBack()) {
+      view.webContents.goBack()
+    }
+    emitEmbeddedBrowserTabSnapshot(normalizedTabId, view, {
+      details: 'history-back',
+    })
+  })
+
+  ipcMain.handle('embedded-browser:go-forward', async (_event, tabId: string) => {
+    const normalizedTabId = String(tabId || '').trim()
+    if (!normalizedTabId) {
+      return
+    }
+    const view = getEmbeddedBrowserView(normalizedTabId)
+    if (!view || view.webContents.isDestroyed()) {
+      return
+    }
+    if (view.webContents.canGoForward()) {
+      view.webContents.goForward()
+    }
+    emitEmbeddedBrowserTabSnapshot(normalizedTabId, view, {
+      details: 'history-forward',
+    })
   })
 
   ipcMain.handle('embedded-browser:set-bounds', (event, bounds: EmbeddedBrowserBounds) => {

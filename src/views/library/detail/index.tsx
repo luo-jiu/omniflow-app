@@ -4,7 +4,18 @@ import React from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { FileViewerProvider } from "@/contexts/FileViewerContext";
 import { useFileViewer } from "@/hooks/useFileViewer";
-import { IconHome, IconUpload, IconDelete, IconChevronLeft, IconRefresh, IconPlus, IconClose } from "@douyinfe/semi-icons";
+import {
+  IconHome,
+  IconUpload,
+  IconDelete,
+  IconRefresh,
+  IconPlus,
+  IconClose,
+  IconArrowLeft,
+  IconArrowRight,
+  IconGlobeStroke,
+  IconApps,
+} from "@douyinfe/semi-icons";
 import styled, { css } from "styled-components";
 import EmbeddedBrowserPanel, { type EmbeddedBrowserHandle } from "@/features/embedded-browser/components/EmbeddedBrowserPanel";
 
@@ -309,6 +320,10 @@ const BrowserTabsRow = styled.div`
     display: none;
   }
 
+  .browser-tabs-list > .toolbar-action-btn {
+    flex-shrink: 0;
+  }
+
   .browser-tab-actions {
     display: inline-flex;
     align-items: center;
@@ -388,6 +403,8 @@ const ContentBody = styled.div`
 `;
 
 type BrowserTab = {
+  canGoBack?: boolean;
+  canGoForward?: boolean;
   id: string;
   title: string;
   url: string;
@@ -399,10 +416,20 @@ function createBrowserTabId() {
 
 function createBrowserTab(): BrowserTab {
   return {
+    canGoBack: false,
+    canGoForward: false,
     id: createBrowserTabId(),
     title: '新标签页',
     url: '',
   };
+}
+
+function updateBrowserTabList(
+  tabs: BrowserTab[],
+  tabId: string,
+  updater: (tab: BrowserTab) => BrowserTab,
+) {
+  return tabs.map((tab) => (tab.id === tabId ? updater(tab) : tab));
 }
 
 const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) => {
@@ -490,6 +517,8 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
       } | null;
     },
   ) => {
+    setBrowserModeOpen(false);
+    void window.electronEmbeddedBrowser.deactivate();
     setFileUrl(fileUrl, fileName, fileType, nodeId, options);
   };
 
@@ -503,6 +532,19 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
     (fileState.fileType === 'asmr' && archiveReturnTarget?.fileType === 'asmr_archive')
     || (fileState.fileType === 'comic' && archiveReturnTarget?.fileType === 'comic_archive')
   );
+
+  const handleArchiveReturn = React.useCallback(() => {
+    if (!archiveReturnTarget) {
+      return;
+    }
+    setFileUrl(
+      archiveReturnTarget.fileUrl,
+      archiveReturnTarget.fileName,
+      archiveReturnTarget.fileType,
+      archiveReturnTarget.nodeId,
+      { tabTypeLabel: archiveReturnTarget.tabTypeLabel ?? null },
+    );
+  }, [archiveReturnTarget, setFileUrl]);
 
   const normalizeBrowserUrl = React.useCallback((input: string) => {
     const trimmed = String(input || '').trim();
@@ -520,6 +562,26 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
     }
     return `https://www.google.com/search?q=${encodeURIComponent(trimmed)}`;
   }, []);
+
+  const applyBrowserTabUpdate = React.useCallback((tabId: string, updater: (tab: BrowserTab) => BrowserTab) => {
+    setBrowserTabs((prev) => updateBrowserTabList(prev, tabId, updater));
+  }, []);
+
+  const applyBrowserTabState = React.useCallback((payload: {
+    canGoBack?: boolean;
+    canGoForward?: boolean;
+    tabId: string;
+    title?: string;
+    url?: string;
+  }) => {
+    applyBrowserTabUpdate(payload.tabId, (tab) => ({
+      ...tab,
+      canGoBack: payload.canGoBack ?? tab.canGoBack,
+      canGoForward: payload.canGoForward ?? tab.canGoForward,
+      title: payload.title || tab.title || tab.url || '新标签页',
+      url: payload.url ?? tab.url,
+    }));
+  }, [applyBrowserTabUpdate]);
 
   const syncBrowserInputWithTab = React.useCallback((tabId: string | null, nextUrl: string) => {
     if (!tabId || tabId !== activeBrowserTabId) {
@@ -590,13 +652,13 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
     }
     setBrowserInput(nextUrl);
     setBrowserModeOpen(true);
-    setBrowserTabs((prev) => prev.map((tab) => (
-      tab.id === activeBrowserTabId
-        ? { ...tab, url: nextUrl, title: tab.title || nextUrl }
-        : tab
-    )));
+    applyBrowserTabUpdate(activeBrowserTabId, (tab) => ({
+      ...tab,
+      url: nextUrl,
+      title: tab.title || nextUrl,
+    }));
     browserRef.current?.navigate(activeBrowserTabId, nextUrl);
-  }, [activeBrowserTabId, normalizeBrowserUrl]);
+  }, [activeBrowserTabId, applyBrowserTabUpdate, normalizeBrowserUrl]);
 
   const handleBrowserSubmit = React.useCallback((event: React.FormEvent) => {
     event.preventDefault();
@@ -615,13 +677,31 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
     reloadActiveTab();
   }, [browserModeOpen, reloadActiveTab]);
 
+  const handleBrowserBack = React.useCallback(() => {
+    if (!activeBrowserTabId) {
+      return;
+    }
+    void window.electronEmbeddedBrowser.goBack(activeBrowserTabId);
+  }, [activeBrowserTabId]);
+
+  const handleBrowserForward = React.useCallback(() => {
+    if (!activeBrowserTabId) {
+      return;
+    }
+    void window.electronEmbeddedBrowser.goForward(activeBrowserTabId);
+  }, [activeBrowserTabId]);
+
+  const activeBrowserTab = React.useMemo(() => {
+    if (!activeBrowserTabId) {
+      return null;
+    }
+    return browserTabs.find((tab) => tab.id === activeBrowserTabId) ?? null;
+  }, [activeBrowserTabId, browserTabs]);
+
   React.useEffect(() => {
     if (!browserModeOpen) {
       return;
     }
-    const activeBrowserTab = activeBrowserTabId
-      ? browserTabs.find((tab) => tab.id === activeBrowserTabId) ?? null
-      : null;
     if (!activeBrowserTab?.url) {
       return;
     }
@@ -629,7 +709,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
       browserInputRef.current?.focus();
       browserInputRef.current?.select();
     });
-  }, [activeBrowserTabId, browserModeOpen, browserTabs]);
+  }, [activeBrowserTab, browserModeOpen]);
 
   React.useEffect(() => {
     return () => {
@@ -682,12 +762,11 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
               <div className="browser-tab-actions">
                 <button
                   type="button"
-                  className="toolbar-back-btn"
+                  className="toolbar-action-btn"
                   onClick={closeEmbeddedBrowserMode}
                   title="返回工作区"
                 >
-                  <IconChevronLeft />
-                  返回
+                  <IconApps />
                 </button>
               </div>
               <div className="browser-tabs-list">
@@ -719,18 +798,36 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
                     </span>
                   </button>
                 ))}
+                <button
+                  type="button"
+                  className="toolbar-action-btn"
+                  onClick={createAndActivateBrowserTab}
+                  title="新建浏览器标签"
+                >
+                  <IconPlus />
+                </button>
               </div>
-              <button
-                type="button"
-                className="toolbar-action-btn"
-                onClick={createAndActivateBrowserTab}
-                title="新建浏览器标签"
-              >
-                <IconPlus />
-              </button>
             </BrowserTabsRow>
             <ContentToolbar>
               <div className="toolbar-left">
+                <button
+                  type="button"
+                  className="toolbar-action-btn"
+                  onClick={handleBrowserBack}
+                  title="后退"
+                  disabled={!activeBrowserTab?.canGoBack}
+                >
+                  <IconArrowLeft />
+                </button>
+                <button
+                  type="button"
+                  className="toolbar-action-btn"
+                  onClick={handleBrowserForward}
+                  title="前进"
+                  disabled={!activeBrowserTab?.canGoForward}
+                >
+                  <IconArrowRight />
+                </button>
                 <button
                   type="button"
                   className="toolbar-action-btn"
@@ -757,36 +854,26 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
         ) : (
           <ContentToolbar>
           <div className="toolbar-left">
-            {showBackToArchive && archiveReturnTarget ? (
-              <button
-                type="button"
-                className="toolbar-back-btn"
-                onClick={() => {
-                  setFileUrl(
-                    archiveReturnTarget.fileUrl,
-                    archiveReturnTarget.fileName,
-                    archiveReturnTarget.fileType,
-                    archiveReturnTarget.nodeId,
-                    { tabTypeLabel: archiveReturnTarget.tabTypeLabel ?? null },
-                  );
-                }}
-                title="返回"
-              >
-                <IconChevronLeft />
-                返回
-              </button>
-            ) : null}
-          </div>
-          <div className="toolbar-spacer" />
-          <div className="toolbar-right">
+            <button
+              type="button"
+              className="toolbar-action-btn"
+              onClick={handleArchiveReturn}
+              title={showBackToArchive && archiveReturnTarget ? "返回上一级" : "当前无可返回内容"}
+              disabled={!showBackToArchive || !archiveReturnTarget}
+            >
+              <IconArrowLeft />
+            </button>
             <button
               type="button"
               className="toolbar-action-btn"
               onClick={openEmbeddedBrowser}
               title="打开内置浏览器"
             >
-              <IconPlus />
+              <IconGlobeStroke />
             </button>
+          </div>
+          <div className="toolbar-spacer" />
+          <div className="toolbar-right">
             <button
               type="button"
               className="toolbar-action-btn"
@@ -805,34 +892,27 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
               ref={browserRef}
               activeTabId={activeBrowserTabId}
               currentUrl={
-                activeBrowserTabId
-                  ? browserTabs.find((tab) => tab.id === activeBrowserTabId)?.url ?? ''
-                  : ''
+                activeBrowserTab?.url ?? ''
               }
               onUrlChange={(nextUrl) => {
                 if (!activeBrowserTabId) {
                   return;
                 }
-                setBrowserTabs((prev) => prev.map((tab) => (
-                  tab.id === activeBrowserTabId
-                    ? { ...tab, url: nextUrl, title: tab.title || nextUrl }
-                    : tab
-                )));
+                applyBrowserTabUpdate(activeBrowserTabId, (tab) => ({
+                  ...tab,
+                  url: nextUrl,
+                  title: tab.title || nextUrl,
+                }));
                 syncBrowserInputWithTab(activeBrowserTabId, nextUrl);
               }}
               onStateChange={(payload) => {
                 if (!payload.tabId) {
                   return;
                 }
-                setBrowserTabs((prev) => prev.map((tab) => (
-                  tab.id === payload.tabId
-                    ? {
-                        ...tab,
-                        title: payload.title || tab.title || tab.url || '新标签页',
-                        url: payload.url ?? tab.url,
-                      }
-                    : tab
-                )));
+                applyBrowserTabState({
+                  ...payload,
+                  tabId: payload.tabId,
+                });
                 if (payload.tabId === activeBrowserTabId && payload.url) {
                   setBrowserInput(payload.url);
                 }

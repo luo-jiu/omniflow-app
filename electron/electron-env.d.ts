@@ -124,8 +124,12 @@ interface Window {
     closeAll: () => Promise<void>;
     closeTab: (tabId: string) => Promise<void>;
     deactivate: () => Promise<void>;
+    goBack: (tabId: string) => Promise<void>;
+    goForward: (tabId: string) => Promise<void>;
     navigate: (tabId: string, url: string) => Promise<void>;
     onStateChange: (listener: (payload: {
+      canGoBack?: boolean;
+      canGoForward?: boolean;
       details?: string;
       message?: string;
       meta?: string[];

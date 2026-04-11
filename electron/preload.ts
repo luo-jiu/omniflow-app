@@ -89,8 +89,12 @@ contextBridge.exposeInMainWorld('electronEmbeddedBrowser', {
   closeAll: () => ipcRenderer.invoke('embedded-browser:close-all'),
   closeTab: (tabId: string) => ipcRenderer.invoke('embedded-browser:close-tab', tabId),
   deactivate: () => ipcRenderer.invoke('embedded-browser:deactivate'),
+  goBack: (tabId: string) => ipcRenderer.invoke('embedded-browser:go-back', tabId),
+  goForward: (tabId: string) => ipcRenderer.invoke('embedded-browser:go-forward', tabId),
   navigate: (tabId: string, url: string) => ipcRenderer.invoke('embedded-browser:navigate', tabId, url),
   onStateChange: (listener: (payload: {
+    canGoBack?: boolean;
+    canGoForward?: boolean;
     details?: string;
     message?: string;
     meta?: string[];
@@ -100,6 +104,8 @@ contextBridge.exposeInMainWorld('electronEmbeddedBrowser', {
     url?: string;
   }) => void) => {
     const wrapped = (_event: Electron.IpcRendererEvent, payload: {
+      canGoBack?: boolean;
+      canGoForward?: boolean;
       details?: string;
       message?: string;
       meta?: string[];

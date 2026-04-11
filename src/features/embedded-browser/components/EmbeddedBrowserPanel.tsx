@@ -15,6 +15,8 @@ export type EmbeddedBrowserHandle = {
 };
 
 type BrowserEventPayload = {
+  canGoBack?: boolean;
+  canGoForward?: boolean;
   details?: string;
   message?: string;
   meta?: string[];
@@ -23,6 +25,8 @@ type BrowserEventPayload = {
   title?: string;
   url?: string;
 };
+
+type EmbeddedBrowserPanelMode = 'idle' | 'blank' | 'attached';
 
 const BrowserSurface = styled.div`
   flex: 1;
@@ -143,6 +147,11 @@ const EmbeddedBrowserPanel = React.forwardRef<EmbeddedBrowserHandle, EmbeddedBro
     );
     const [statusDetails, setStatusDetails] = React.useState('');
     const [statusMeta, setStatusMeta] = React.useState<string[]>([]);
+    const panelMode: EmbeddedBrowserPanelMode = !activeTabId
+      ? 'idle'
+      : currentUrl
+        ? 'attached'
+        : 'blank';
 
     const requestNavigation = React.useCallback(
       async (nextTabId: string, nextUrl: string) => {
@@ -223,13 +232,13 @@ const EmbeddedBrowserPanel = React.forwardRef<EmbeddedBrowserHandle, EmbeddedBro
     }, [activeTabId, onStateChange, onUrlChange]);
 
     React.useEffect(() => {
-      if (!activeTabId) {
+      if (panelMode === 'idle') {
         setStatusMessage('输入网址后回车');
         setEmptyDraftValue('');
         void window.electronEmbeddedBrowser.deactivate();
         return;
       }
-      if (!currentUrl) {
+      if (panelMode === 'blank') {
         setStatusDetails('');
         setStatusMeta([]);
         setStatusMessage('');
@@ -242,7 +251,7 @@ const EmbeddedBrowserPanel = React.forwardRef<EmbeddedBrowserHandle, EmbeddedBro
       setStatusMeta([]);
       setStatusMessage('正在打开网页...');
       void window.electronEmbeddedBrowser.activateTab(activeTabId);
-    }, [activeTabId, currentUrl]);
+    }, [activeTabId, panelMode]);
 
     React.useLayoutEffect(() => {
       const host = hostRef.current;
@@ -292,21 +301,19 @@ const EmbeddedBrowserPanel = React.forwardRef<EmbeddedBrowserHandle, EmbeddedBro
       };
     }, []);
 
-    const showEmptyState = Boolean(activeTabId) && !currentUrl;
-
     React.useEffect(() => {
-      if (!showEmptyState) {
+      if (panelMode !== 'blank') {
         return;
       }
       window.requestAnimationFrame(() => {
         emptyInputRef.current?.focus();
       });
-    }, [showEmptyState]);
+    }, [panelMode]);
 
     return (
       <BrowserSurface>
         <div ref={hostRef} className="embedded-browser-host" />
-        {showEmptyState ? (
+        {panelMode === 'blank' ? (
           <div className="embedded-browser-empty">
             <div className="embedded-browser-empty-anchor">
               <div className="embedded-browser-empty-header">
