@@ -1,6 +1,6 @@
 // main.ts (Electron 主进程入口文件)
 
-import { app, BrowserWindow, ipcMain, screen } from 'electron'
+import { app, BrowserWindow, ipcMain, screen, WebContentsView } from 'electron'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -49,6 +49,17 @@ let windowHandlersRegistered = false
 let isQuitting = false
 const WINDOW_ACTIVATE_TOPMOST_DURATION_MS = 240
 let windowStateSaveTimer: ReturnType<typeof setTimeout> | null = null
+let embeddedBrowserView: WebContentsView | null = null
+let embeddedBrowserLastCommittedUrl = ''
+let embeddedBrowserPendingBounds: { x: number; y: number; width: number; height: number } | null = null
+
+type EmbeddedBrowserStatePayload = {
+  details?: string
+  message?: string
+  meta?: string[]
+  state?: 'idle' | 'loading' | 'ready' | 'error'
+  url?: string
+}
 
 interface PersistedWindowState {
   x?: number
@@ -242,6 +253,257 @@ function registerWindowIpcHandlers() {
       }, WINDOW_ACTIVATE_TOPMOST_DURATION_MS)
     }
     return true
+  })
+
+  const emitEmbeddedBrowserState = (payload: EmbeddedBrowserStatePayload) => {
+    console.log('[embedded-browser:main]', payload)
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      return
+    }
+    mainWindow.webContents.send('embedded-browser:state', payload)
+  }
+
+  const collectEmbeddedBrowserMeta = async () => {
+    if (!embeddedBrowserView || embeddedBrowserView.webContents.isDestroyed()) {
+      return []
+    }
+
+    try {
+      const snapshot = await embeddedBrowserView.webContents.executeJavaScript(`
+        (() => {
+          const bodyText = document.body?.innerText?.trim() || ''
+          const bodyHtmlLength = document.body?.innerHTML?.length || 0
+          return {
+            title: document.title || '',
+            readyState: document.readyState || '',
+            bodyTextPreview: bodyText.slice(0, 120),
+            bodyHtmlLength,
+            innerWidth: window.innerWidth || 0,
+            innerHeight: window.innerHeight || 0,
+            clientWidth: document.documentElement?.clientWidth || 0,
+            clientHeight: document.documentElement?.clientHeight || 0,
+            devicePixelRatio: window.devicePixelRatio || 0,
+            userAgent: navigator.userAgent || '',
+          }
+        })()
+      `, true)
+
+      const meta: string[] = []
+      if (snapshot?.title) {
+        meta.push(`title=${snapshot.title}`)
+      }
+      if (snapshot?.readyState) {
+        meta.push(`readyState=${snapshot.readyState}`)
+      }
+      if (typeof snapshot?.bodyHtmlLength === 'number') {
+        meta.push(`bodyHtml=${snapshot.bodyHtmlLength}`)
+      }
+      if (typeof snapshot?.innerWidth === 'number' && typeof snapshot?.innerHeight === 'number') {
+        meta.push(`viewport=${snapshot.innerWidth}x${snapshot.innerHeight}`)
+      }
+      if (typeof snapshot?.clientWidth === 'number' && typeof snapshot?.clientHeight === 'number') {
+        meta.push(`client=${snapshot.clientWidth}x${snapshot.clientHeight}`)
+      }
+      if (typeof snapshot?.devicePixelRatio === 'number') {
+        meta.push(`dpr=${snapshot.devicePixelRatio}`)
+      }
+      if (snapshot?.bodyTextPreview) {
+        meta.push(`preview=${snapshot.bodyTextPreview}`)
+      }
+      if (snapshot?.userAgent) {
+        meta.push(`ua=${snapshot.userAgent}`)
+      }
+      return meta
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      return [`inspect=${message}`]
+    }
+  }
+
+  const ensureEmbeddedBrowserView = () => {
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      return null
+    }
+    if (embeddedBrowserView && !embeddedBrowserView.webContents.isDestroyed()) {
+      return embeddedBrowserView
+    }
+
+    embeddedBrowserView = new WebContentsView({
+      webPreferences: {
+        devTools: true,
+      },
+    })
+    embeddedBrowserView.webContents.setZoomFactor(1)
+    const currentUserAgent = embeddedBrowserView.webContents.getUserAgent()
+    if (currentUserAgent.includes('Electron')) {
+      embeddedBrowserView.webContents.setUserAgent(
+        currentUserAgent.replace(/\sElectron\/[^\s]+/g, ''),
+      )
+    }
+    embeddedBrowserView.setBounds(embeddedBrowserPendingBounds ?? {
+      x: 0,
+      y: 0,
+      width: 0,
+      height: 0,
+    })
+    mainWindow.contentView.addChildView(embeddedBrowserView)
+
+    embeddedBrowserView.webContents.on('did-start-loading', () => {
+      emitEmbeddedBrowserState({
+        details: 'did-start-loading',
+        state: 'loading',
+        url: embeddedBrowserView?.webContents.getURL() || undefined,
+      })
+    })
+    embeddedBrowserView.webContents.on('did-stop-loading', async () => {
+      embeddedBrowserLastCommittedUrl = embeddedBrowserView?.webContents.getURL() || ''
+      const meta = await collectEmbeddedBrowserMeta()
+      emitEmbeddedBrowserState({
+        details: 'did-stop-loading',
+        meta,
+        state: 'ready',
+        url: embeddedBrowserLastCommittedUrl || undefined,
+      })
+    })
+    embeddedBrowserView.webContents.on('did-navigate', (_event, url) => {
+      embeddedBrowserLastCommittedUrl = url
+      emitEmbeddedBrowserState({ details: 'did-navigate', state: 'ready', url })
+    })
+    embeddedBrowserView.webContents.on('did-navigate-in-page', (_event, url) => {
+      embeddedBrowserLastCommittedUrl = url
+      emitEmbeddedBrowserState({ details: 'did-navigate-in-page', state: 'ready', url })
+    })
+    embeddedBrowserView.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
+      if (errorCode === -3) {
+        return
+      }
+      emitEmbeddedBrowserState({
+        details: `did-fail-load(${errorCode})`,
+        state: 'error',
+        message: `页面加载失败：${errorDescription || '未知错误'}`,
+        url: validatedURL,
+      })
+    })
+    embeddedBrowserView.webContents.on('render-process-gone', (_event, details) => {
+      emitEmbeddedBrowserState({
+        details: `render-process-gone:${details.reason}`,
+        state: 'error',
+        message: `页面渲染进程异常退出：${details.reason}`,
+        url: embeddedBrowserView?.webContents.getURL() || undefined,
+      })
+    })
+    embeddedBrowserView.webContents.on('console-message', (_event, level, message, line, sourceId) => {
+      if (level >= 2) {
+        emitEmbeddedBrowserState({
+          details: `console:${sourceId}:${line}`,
+          state: 'ready',
+          message,
+          meta: [`console-level=${level}`],
+          url: embeddedBrowserLastCommittedUrl || embeddedBrowserView?.webContents.getURL() || undefined,
+        })
+      }
+    })
+    embeddedBrowserView.webContents.setWindowOpenHandler(({ url }) => {
+      embeddedBrowserView?.webContents.loadURL(url)
+      return { action: 'deny' }
+    })
+
+    return embeddedBrowserView
+  }
+
+  ipcMain.handle('embedded-browser:open', async (event, url: string) => {
+    const targetWindow = BrowserWindow.fromWebContents(event.sender) ?? mainWindow
+    if (!targetWindow || targetWindow.isDestroyed()) {
+      return
+    }
+    const normalizedUrl = String(url || '').trim()
+    if (!normalizedUrl) {
+      return
+    }
+    if (!embeddedBrowserView || embeddedBrowserView.webContents.isDestroyed()) {
+      ensureEmbeddedBrowserView()
+    }
+    if (embeddedBrowserView && !targetWindow.contentView.children.includes(embeddedBrowserView)) {
+      targetWindow.contentView.addChildView(embeddedBrowserView)
+    }
+    emitEmbeddedBrowserState({ state: 'loading', url: normalizedUrl })
+    try {
+      await embeddedBrowserView?.webContents.loadURL(normalizedUrl)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      if (message.includes('ERR_ABORTED')) {
+        return
+      }
+      emitEmbeddedBrowserState({
+        details: 'open-exception',
+        state: 'error',
+        message: `页面加载失败：${message}`,
+        url: normalizedUrl,
+      })
+      throw error
+    }
+  })
+
+  ipcMain.handle('embedded-browser:navigate', async (_event, url: string) => {
+    const normalizedUrl = String(url || '').trim()
+    if (!normalizedUrl) {
+      return
+    }
+    if (!embeddedBrowserView || embeddedBrowserView.webContents.isDestroyed()) {
+      ensureEmbeddedBrowserView()
+    }
+    emitEmbeddedBrowserState({ state: 'loading', url: normalizedUrl })
+    try {
+      await embeddedBrowserView?.webContents.loadURL(normalizedUrl)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      if (message.includes('ERR_ABORTED')) {
+        return
+      }
+      emitEmbeddedBrowserState({
+        details: 'navigate-exception',
+        state: 'error',
+        message: `页面加载失败：${message}`,
+        url: normalizedUrl,
+      })
+      throw error
+    }
+  })
+
+  ipcMain.handle('embedded-browser:reload', async () => {
+    embeddedBrowserView?.webContents.reload()
+  })
+
+  ipcMain.handle('embedded-browser:set-bounds', (_event, bounds: { x: number; y: number; width: number; height: number }) => {
+    const nextBounds = {
+      x: 0,
+      y: 0,
+      width: 0,
+      height: 0,
+    }
+    const targetWindow = BrowserWindow.fromWebContents(_event.sender) ?? mainWindow
+    const zoomFactor = targetWindow && !targetWindow.isDestroyed()
+      ? Math.max(targetWindow.webContents.getZoomFactor(), 0.01)
+      : 1
+    nextBounds.x = Math.max(0, Math.round(bounds.x * zoomFactor))
+    nextBounds.y = Math.max(0, Math.round(bounds.y * zoomFactor))
+    nextBounds.width = Math.max(0, Math.round(bounds.width * zoomFactor))
+    nextBounds.height = Math.max(0, Math.round(bounds.height * zoomFactor))
+    embeddedBrowserPendingBounds = nextBounds
+    console.log('[embedded-browser:bounds]', { raw: bounds, zoomFactor, applied: nextBounds })
+    if (!embeddedBrowserView) {
+      return
+    }
+    embeddedBrowserView.setBounds(nextBounds)
+  })
+
+  ipcMain.handle('embedded-browser:close', () => {
+    if (!mainWindow || mainWindow.isDestroyed() || !embeddedBrowserView) {
+      return
+    }
+    mainWindow.contentView.removeChildView(embeddedBrowserView)
+    embeddedBrowserLastCommittedUrl = ''
+    emitEmbeddedBrowserState({ state: 'idle' })
   })
 }
 

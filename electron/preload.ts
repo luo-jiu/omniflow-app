@@ -83,3 +83,31 @@ contextBridge.exposeInMainWorld('electronWindow', {
   close: () => ipcRenderer.send('window-close'),
   activate: (temporaryOnTop = false) => ipcRenderer.invoke('window-activate', temporaryOnTop),
 });
+
+contextBridge.exposeInMainWorld('electronEmbeddedBrowser', {
+  close: () => ipcRenderer.invoke('embedded-browser:close'),
+  navigate: (url: string) => ipcRenderer.invoke('embedded-browser:navigate', url),
+  onStateChange: (listener: (payload: {
+    details?: string;
+    message?: string;
+    meta?: string[];
+    state?: 'idle' | 'loading' | 'ready' | 'error';
+    url?: string;
+  }) => void) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, payload: {
+      details?: string;
+      message?: string;
+      meta?: string[];
+      state?: 'idle' | 'loading' | 'ready' | 'error';
+      url?: string;
+    }) => {
+      listener(payload);
+    };
+    ipcRenderer.on('embedded-browser:state', wrapped);
+    return () => ipcRenderer.removeListener('embedded-browser:state', wrapped);
+  },
+  open: (url: string) => ipcRenderer.invoke('embedded-browser:open', url),
+  reload: () => ipcRenderer.invoke('embedded-browser:reload'),
+  setBounds: (bounds: { x: number; y: number; width: number; height: number }) =>
+    ipcRenderer.invoke('embedded-browser:set-bounds', bounds),
+});

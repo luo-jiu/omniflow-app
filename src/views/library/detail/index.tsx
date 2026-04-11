@@ -4,8 +4,9 @@ import React from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { FileViewerProvider } from "@/contexts/FileViewerContext";
 import { useFileViewer } from "@/hooks/useFileViewer";
-import { IconHome, IconUpload, IconDelete, IconChevronLeft, IconRefresh } from "@douyinfe/semi-icons";
+import { IconHome, IconUpload, IconDelete, IconChevronLeft, IconRefresh, IconPlus, IconClose } from "@douyinfe/semi-icons";
 import styled from "styled-components";
+import EmbeddedBrowserPanel, { type EmbeddedBrowserHandle } from "@/features/embedded-browser/components/EmbeddedBrowserPanel";
 
 const DEFAULT_SIDE_PANEL_WIDTH = 300;
 const MIN_SIDE_PANEL_WIDTH = 220;
@@ -179,6 +180,32 @@ const ContentToolbar = styled.div`
   .toolbar-spacer {
     flex: 1;
     min-width: 0;
+    display: flex;
+    align-items: center;
+    -webkit-app-region: no-drag;
+  }
+
+  .toolbar-browser-form {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    -webkit-app-region: no-drag;
+  }
+
+  .toolbar-browser-input {
+    width: 100%;
+    height: 30px;
+    border-radius: 8px;
+    border: 1px solid var(--app-border);
+    background: var(--app-bg-elevated);
+    color: var(--app-text);
+    padding: 0 10px;
+    outline: none;
+    font-size: 13px;
+  }
+
+  .toolbar-browser-input:focus {
+    border-color: var(--semi-color-primary);
   }
 
   .toolbar-right {
@@ -260,7 +287,12 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   const { setFileUrl, tabs, activeTabId, fileState, reloadActiveTab } = useFileViewer();
   const navigate = useNavigate();
   const sidePanelRef = React.useRef<HTMLDivElement>(null);
+  const browserRef = React.useRef<EmbeddedBrowserHandle | null>(null);
   const [sidePanelWidth, setSidePanelWidth] = React.useState<number>(() => loadSidePanelWidth(libraryId));
+  const [browserModeOpen, setBrowserModeOpen] = React.useState(false);
+  const [browserUrl, setBrowserUrl] = React.useState('');
+  const [browserInput, setBrowserInput] = React.useState('');
+  const browserInputRef = React.useRef<HTMLInputElement | null>(null);
   const latestPanelWidthRef = React.useRef<number>(sidePanelWidth);
   const resizeMoveHandlerRef = React.useRef<((event: MouseEvent) => void) | null>(null);
   const resizeUpHandlerRef = React.useRef<(() => void) | null>(null);
@@ -349,6 +381,56 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
     || (fileState.fileType === 'comic' && archiveReturnTarget?.fileType === 'comic_archive')
   );
 
+  const normalizeBrowserUrl = React.useCallback((input: string) => {
+    const trimmed = String(input || '').trim();
+    if (!trimmed) {
+      return '';
+    }
+    if (/^[a-zA-Z][a-zA-Z\d+\-.]*:/.test(trimmed)) {
+      return trimmed;
+    }
+    return `https://${trimmed}`;
+  }, []);
+
+  const openEmbeddedBrowser = React.useCallback(() => {
+    setBrowserModeOpen(true);
+    setBrowserInput((prev) => prev || browserUrl);
+  }, [browserUrl]);
+
+  const closeEmbeddedBrowser = React.useCallback(() => {
+    setBrowserModeOpen(false);
+  }, []);
+
+  const handleBrowserSubmit = React.useCallback((event: React.FormEvent) => {
+    event.preventDefault();
+    const nextUrl = normalizeBrowserUrl(browserInput);
+    if (!nextUrl) {
+      return;
+    }
+    setBrowserUrl(nextUrl);
+    setBrowserInput(nextUrl);
+    setBrowserModeOpen(true);
+    browserRef.current?.navigate(nextUrl);
+  }, [browserInput, normalizeBrowserUrl]);
+
+  const handleToolbarRefresh = React.useCallback(() => {
+    if (browserModeOpen) {
+      browserRef.current?.reload();
+      return;
+    }
+    reloadActiveTab();
+  }, [browserModeOpen, reloadActiveTab]);
+
+  React.useEffect(() => {
+    if (!browserModeOpen) {
+      return;
+    }
+    window.requestAnimationFrame(() => {
+      browserInputRef.current?.focus();
+      browserInputRef.current?.select();
+    });
+  }, [browserModeOpen]);
+
   return (
     <DetailWrapper>
       <SidePanel ref={sidePanelRef} style={{ width: `${sidePanelWidth}px` }}>
@@ -410,21 +492,62 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
               </button>
             ) : null}
           </div>
-          <div className="toolbar-spacer" />
+          <div className="toolbar-spacer">
+            {browserModeOpen ? (
+              <form className="toolbar-browser-form" onSubmit={handleBrowserSubmit}>
+                <input
+                  ref={browserInputRef}
+                  className="toolbar-browser-input"
+                  value={browserInput}
+                  onChange={(event) => setBrowserInput(event.target.value)}
+                  placeholder="输入网址后回车"
+                />
+              </form>
+            ) : null}
+          </div>
           <div className="toolbar-right">
             <button
               type="button"
               className="toolbar-action-btn"
-              onClick={reloadActiveTab}
-              title="刷新当前标签页"
-              disabled={!activeTabId}
+              onClick={openEmbeddedBrowser}
+              title="打开内置浏览器"
+            >
+              <IconPlus />
+            </button>
+            {browserModeOpen ? (
+              <button
+                type="button"
+                className="toolbar-action-btn"
+                onClick={closeEmbeddedBrowser}
+                title="关闭内置浏览器"
+              >
+                <IconClose />
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className="toolbar-action-btn"
+              onClick={handleToolbarRefresh}
+              title={browserModeOpen ? "刷新网页" : "刷新当前标签页"}
+              disabled={!browserModeOpen && !activeTabId}
             >
               <IconRefresh />
             </button>
           </div>
         </ContentToolbar>
         <ContentBody>
-          <AppMain />
+          {browserModeOpen ? (
+            <EmbeddedBrowserPanel
+              ref={browserRef}
+              url={browserUrl}
+              onUrlChange={(nextUrl) => {
+                setBrowserUrl(nextUrl);
+                setBrowserInput(nextUrl);
+              }}
+            />
+          ) : (
+            <AppMain />
+          )}
         </ContentBody>
       </ContentArea>
     </DetailWrapper>

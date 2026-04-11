@@ -110,3 +110,27 @@ interface Window {
     activate: (temporaryOnTop?: boolean) => Promise<boolean>;
   };
 }
+
+type EmbeddedBrowserBounds = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+interface Window {
+  electronEmbeddedBrowser: {
+    close: () => Promise<void>;
+    navigate: (url: string) => Promise<void>;
+    onStateChange: (listener: (payload: {
+      details?: string;
+      message?: string;
+      meta?: string[];
+      state?: 'idle' | 'loading' | 'ready' | 'error';
+      url?: string;
+    }) => void) => () => void;
+    open: (url: string) => Promise<void>;
+    reload: () => Promise<void>;
+    setBounds: (bounds: EmbeddedBrowserBounds) => Promise<void>;
+  };
+}
