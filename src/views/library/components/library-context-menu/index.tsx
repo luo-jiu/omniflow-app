@@ -11,6 +11,7 @@ interface LibraryContextMenuProps {
   library: Library | null;
   onCreate: () => void;
   onEdit: () => void;
+  onReleaseWorkspace: () => void;
   onDelete: () => void;
   onClose?: () => void;
 }
@@ -23,6 +24,7 @@ const LibraryContextMenu: React.FC<LibraryContextMenuProps> = ({
   library,
   onCreate,
   onEdit,
+  onReleaseWorkspace,
   onDelete,
   onClose
 }) => {
@@ -41,6 +43,11 @@ const LibraryContextMenu: React.FC<LibraryContextMenuProps> = ({
         key: 'edit',
         label: '编辑',
         onClick: onEdit,
+      },
+      {
+        key: 'release-workspace',
+        label: '释放工作区',
+        onClick: onReleaseWorkspace,
       },
       {
         type: 'divider',

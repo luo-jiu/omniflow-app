@@ -30,6 +30,13 @@ const defaultFileViewerStoreState: FileViewerStoreState = {
 const FILE_VIEWER_CACHE_MAX_ENTRIES = 12;
 const fileViewerStateCache = new Map<string, FileViewerStoreState>();
 
+export function clearFileViewerStateCache(cacheKey?: string) {
+  if (!cacheKey) {
+    return;
+  }
+  fileViewerStateCache.delete(cacheKey);
+}
+
 function setFileViewerStateCache(cacheKey: string, state: FileViewerStoreState) {
   // Simple LRU-like behavior: refresh key order and evict the oldest when cap is exceeded.
   if (fileViewerStateCache.has(cacheKey)) {

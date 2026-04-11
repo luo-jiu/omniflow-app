@@ -258,8 +258,11 @@ const EmbeddedBrowserPanel = React.forwardRef<EmbeddedBrowserHandle, EmbeddedBro
       setStatusDetails('');
       setStatusMeta([]);
       setStatusMessage('正在打开网页...');
-      void window.electronEmbeddedBrowser.activateTab(activeTabId);
-    }, [activeTabId, panelMode]);
+      if (!activeTabId) {
+        return;
+      }
+      void window.electronEmbeddedBrowser.openTab(activeTabId, currentUrl);
+    }, [activeTabId, currentUrl, panelMode]);
 
     React.useLayoutEffect(() => {
       const host = hostRef.current;

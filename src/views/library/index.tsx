@@ -23,6 +23,11 @@ import LibraryContextMenu from './components/library-context-menu'
 import LibraryCreateModal from './components/library-create-modal'
 import LibraryEditModal from './components/library-edit-modal'
 import type { Library } from "@/features/file-explorer/services/file.api"
+import { clearFileViewerStateCache } from '@/contexts/FileViewerContext'
+import {
+  clearLibraryDetailWorkspaceState,
+  loadLibraryDetailWorkspaceState,
+} from './detail/workspace-state'
 
 type MenuState = {
   visible: boolean
@@ -187,11 +192,46 @@ const LibraryPage: React.FC = () => {
       async onOk() {
         const success = await handleDeleteLibrary(library.id)
         if (success) {
+          await releaseLibraryWorkspace(library)
           setMenu(m => ({ ...m, visible: false, mode: 'blank', library: null }))
         }
       },
     });
   };
+
+  const releaseLibraryWorkspace = React.useCallback(async (
+    library: Pick<Library, 'id' | 'name'>,
+    options?: { showToast?: boolean },
+  ) => {
+    const cacheKey = `library:${library.id}`
+    const workspaceState = loadLibraryDetailWorkspaceState(cacheKey)
+    const browserTabIds = workspaceState.browserTabs.map((tab) => tab.id)
+    await Promise.allSettled(
+      browserTabIds.map((tabId) => window.electronEmbeddedBrowser.closeTab(tabId))
+    )
+    await window.electronEmbeddedBrowser.deactivate().catch(() => undefined)
+    clearLibraryDetailWorkspaceState(cacheKey)
+    clearFileViewerStateCache(cacheKey)
+    if (options?.showToast) {
+      Toast.success(`已释放「${library.name}」的工作区资源`)
+    }
+  }, [])
+
+  const doReleaseWorkspace = () => {
+    const library = menu.library
+    if (!library) return
+    setMenu(m => ({ ...m, visible: false, mode: 'blank', library: null }))
+    Modal.confirm({
+      title: '释放仓库工作区？',
+      content: `会清空「${library.name}」的文件页签、浏览器页签和搜索工作区状态，下次进入将从默认状态开始。`,
+      okText: '释放',
+      cancelText: '取消',
+      okType: 'danger',
+      async onOk() {
+        await releaseLibraryWorkspace(library, { showToast: true })
+      },
+    })
+  }
 
   const openCreateModalFromMenu = () => {
     setMenu(m => ({ ...m, visible: false, mode: 'blank', library: null }))
@@ -266,6 +306,7 @@ const LibraryPage: React.FC = () => {
         library={menu.library}
         onCreate={openCreateModalFromMenu}
         onEdit={openEditModal}
+        onReleaseWorkspace={doReleaseWorkspace}
         onDelete={doDelete}
         onClose={() => setMenu(m => ({ ...m, visible: false, mode: 'blank', library: null }))}
       />

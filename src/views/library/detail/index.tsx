@@ -20,6 +20,13 @@ import {
 import styled, { css } from "styled-components";
 import EmbeddedBrowserPanel, { type EmbeddedBrowserHandle } from "@/features/embedded-browser/components/EmbeddedBrowserPanel";
 import SearchWorkspace, { type SearchWorkspaceMode } from "./SearchWorkspace";
+import {
+  loadLibraryDetailWorkspaceState,
+  saveLibraryDetailWorkspaceState,
+  type BrowserTab,
+  type LibraryDetailWorkspaceState,
+  type WorkspaceDisplayMode,
+} from "./workspace-state";
 
 const DEFAULT_SIDE_PANEL_WIDTH = 300;
 const MIN_SIDE_PANEL_WIDTH = 220;
@@ -392,16 +399,6 @@ const ContentBody = styled.div`
   }
 `;
 
-type BrowserTab = {
-  canGoBack?: boolean;
-  canGoForward?: boolean;
-  id: string;
-  title: string;
-  url: string;
-};
-
-type WorkspaceDisplayMode = 'search-home' | 'file-viewer' | 'browser';
-
 function createBrowserTabId() {
   return `browser-tab:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -462,6 +459,11 @@ function createEmptyBrowserTab() {
 const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) => {
   const { setFileUrl, tabs, activeTabId, fileState, reloadActiveTab } = useFileViewer();
   const navigate = useNavigate();
+  const workspaceCacheKey = React.useMemo(() => `library:${libraryId}`, [libraryId]);
+  const initialWorkspaceState = React.useMemo(
+    () => loadLibraryDetailWorkspaceState(workspaceCacheKey),
+    [workspaceCacheKey],
+  );
   const sidePanelRef = React.useRef<HTMLDivElement>(null);
   const browserRef = React.useRef<EmbeddedBrowserHandle | null>(null);
   const browserTabsListRef = React.useRef<HTMLDivElement | null>(null);
@@ -473,20 +475,21 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   const previousActiveBrowserTabIdRef = React.useRef<string | null>(null);
   const previousBrowserTabCountRef = React.useRef(0);
   const [sidePanelWidth, setSidePanelWidth] = React.useState<number>(() => loadSidePanelWidth(libraryId));
-  const [browserModeOpen, setBrowserModeOpen] = React.useState(false);
-  const [browserTabs, setBrowserTabs] = React.useState<BrowserTab[]>([]);
-  const [activeBrowserTabId, setActiveBrowserTabId] = React.useState<string | null>(null);
+  const [browserModeOpen, setBrowserModeOpen] = React.useState(initialWorkspaceState.browserModeOpen);
+  const [browserTabs, setBrowserTabs] = React.useState<BrowserTab[]>(initialWorkspaceState.browserTabs);
+  const [activeBrowserTabId, setActiveBrowserTabId] = React.useState<string | null>(initialWorkspaceState.activeBrowserTabId);
   const [draggingBrowserTabId, setDraggingBrowserTabId] = React.useState<string | null>(null);
   const [browserTabsScrollMode, setBrowserTabsScrollMode] = React.useState(false);
   const [browserTabDropTarget, setBrowserTabDropTarget] = React.useState<{
     position: 'before' | 'after';
     tabId: string;
   } | null>(null);
-  const [browserInput, setBrowserInput] = React.useState('');
-  const [searchMode, setSearchMode] = React.useState<SearchWorkspaceMode>('files');
-  const [searchDraft, setSearchDraft] = React.useState('');
-  const [workspaceDisplayMode, setWorkspaceDisplayMode] = React.useState<WorkspaceDisplayMode>('search-home');
+  const [browserInput, setBrowserInput] = React.useState(initialWorkspaceState.browserInput);
+  const [searchMode, setSearchMode] = React.useState<SearchWorkspaceMode>(initialWorkspaceState.searchMode);
+  const [searchDraft, setSearchDraft] = React.useState(initialWorkspaceState.searchDraft);
+  const [workspaceDisplayMode, setWorkspaceDisplayMode] = React.useState<WorkspaceDisplayMode>(initialWorkspaceState.workspaceDisplayMode);
   const browserInputRef = React.useRef<HTMLInputElement | null>(null);
+  const latestWorkspaceStateRef = React.useRef<LibraryDetailWorkspaceState>(initialWorkspaceState);
   const latestPanelWidthRef = React.useRef<number>(sidePanelWidth);
   const resizeMoveHandlerRef = React.useRef<((event: MouseEvent) => void) | null>(null);
   const resizeUpHandlerRef = React.useRef<(() => void) | null>(null);
@@ -941,11 +944,35 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   }, [activeTabId, browserModeOpen, workspaceDisplayMode]);
 
   React.useEffect(() => {
+    const nextWorkspaceState: LibraryDetailWorkspaceState = {
+      activeBrowserTabId,
+      browserInput,
+      browserModeOpen,
+      browserTabs,
+      searchDraft,
+      searchMode,
+      workspaceDisplayMode,
+    };
+    latestWorkspaceStateRef.current = nextWorkspaceState;
+    saveLibraryDetailWorkspaceState(workspaceCacheKey, nextWorkspaceState);
+  }, [
+    activeBrowserTabId,
+    browserInput,
+    browserModeOpen,
+    browserTabs,
+    searchDraft,
+    searchMode,
+    workspaceCacheKey,
+    workspaceDisplayMode,
+  ]);
+
+  React.useEffect(() => {
     return () => {
       clearBrowserTabDragState();
-      void window.electronEmbeddedBrowser.closeAll();
+      saveLibraryDetailWorkspaceState(workspaceCacheKey, latestWorkspaceStateRef.current);
+      void window.electronEmbeddedBrowser.deactivate();
     };
-  }, [clearBrowserTabDragState]);
+  }, [clearBrowserTabDragState, workspaceCacheKey]);
 
   return (
     <DetailWrapper>
@@ -980,7 +1007,6 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
               <IconDelete size="large" />
             </button>
           </div>
-
         </SidePanelFooter>
         <ResizeHandle onMouseDown={handleResizeMouseDown} />
       </SidePanel>
