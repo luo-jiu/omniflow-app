@@ -86,6 +86,7 @@ contextBridge.exposeInMainWorld('electronWindow', {
 
 contextBridge.exposeInMainWorld('electronEmbeddedBrowser', {
   activateTab: (tabId: string | null) => ipcRenderer.invoke('embedded-browser:activate-tab', tabId),
+  cleanupDownloadFile: (tempPath: string) => ipcRenderer.invoke('embedded-browser:cleanup-download-file', tempPath),
   closeAll: () => ipcRenderer.invoke('embedded-browser:close-all'),
   closeTab: (tabId: string) => ipcRenderer.invoke('embedded-browser:close-tab', tabId),
   deactivate: () => ipcRenderer.invoke('embedded-browser:deactivate'),
@@ -118,6 +119,37 @@ contextBridge.exposeInMainWorld('electronEmbeddedBrowser', {
     };
     ipcRenderer.on('embedded-browser:state', wrapped);
     return () => ipcRenderer.removeListener('embedded-browser:state', wrapped);
+  },
+  onDownload: (listener: (payload: {
+    downloadId: string;
+    error?: string;
+    fileName: string;
+    mimeType?: string;
+    pageUrl?: string;
+    receivedBytes: number;
+    state: 'started' | 'progress' | 'completed' | 'cancelled' | 'failed';
+    tabId?: string;
+    tempPath?: string;
+    totalBytes: number;
+    url: string;
+  }) => void) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, payload: {
+      downloadId: string;
+      error?: string;
+      fileName: string;
+      mimeType?: string;
+      pageUrl?: string;
+      receivedBytes: number;
+      state: 'started' | 'progress' | 'completed' | 'cancelled' | 'failed';
+      tabId?: string;
+      tempPath?: string;
+      totalBytes: number;
+      url: string;
+    }) => {
+      listener(payload);
+    };
+    ipcRenderer.on('embedded-browser:download', wrapped);
+    return () => ipcRenderer.removeListener('embedded-browser:download', wrapped);
   },
   openTab: (tabId: string, url?: string) => ipcRenderer.invoke('embedded-browser:open-tab', tabId, url),
   reload: (tabId: string) => ipcRenderer.invoke('embedded-browser:reload', tabId),

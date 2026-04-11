@@ -25,6 +25,10 @@ interface Props {
   ) => void;
 }
 
+export interface DirectorySidebarHandle {
+  refreshNodeSubtree: (nodeId: number) => Promise<void>;
+}
+
 function isNodeRespDTO(value: unknown): value is NodeRespDTO {
   if (!value || typeof value !== 'object') {
     return false;
@@ -39,7 +43,7 @@ function isNodeRespDTO(value: unknown): value is NodeRespDTO {
   );
 }
 
-const DirectorySidebar: React.FC<Props> = ({ libraryId, onFileOpen }) => {
+const DirectorySidebar = React.forwardRef<DirectorySidebarHandle, Props>(({ libraryId, onFileOpen }, ref) => {
   const {
     rootNodeId,
     expandedKeys,
@@ -53,7 +57,12 @@ const DirectorySidebar: React.FC<Props> = ({ libraryId, onFileOpen }) => {
     updateNodeName,
     updateNodeBuiltInConfig,
     refreshAfterMove,
+    refreshNodeSubtree,
   } = useRepositoryTree(libraryId, onFileOpen);
+
+  React.useImperativeHandle(ref, () => ({
+    refreshNodeSubtree,
+  }), [refreshNodeSubtree]);
 
   const handleAutoImportNodeCreated = React.useCallback((newNode: unknown) => {
     if (!isNodeRespDTO(newNode)) {
@@ -154,12 +163,21 @@ const DirectorySidebar: React.FC<Props> = ({ libraryId, onFileOpen }) => {
           onMoveSuccess={({ affectedParentIds }) => {
             void refreshAfterMove(affectedParentIds);
           }}
+          onRefreshNode={(node) => {
+            const targetNodeId = Number(node?.id);
+            if (!Number.isFinite(targetNodeId) || targetNodeId <= 0) {
+              return Promise.resolve();
+            }
+            return refreshNodeSubtree(targetNodeId);
+          }}
           libraryId={libraryId}
           rootNodeId={rootNodeId}
         />
       </div>
     </DirectorySidebarWrapper>
   );
-};
+});
+
+DirectorySidebar.displayName = 'DirectorySidebar';
 
 export default DirectorySidebar;

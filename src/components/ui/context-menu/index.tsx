@@ -2,6 +2,23 @@ import React from 'react';
 import { Divider, Popover } from '@douyinfe/semi-ui';
 import MenuContent from '../menu-content';
 
+export type ContextMenuPosition =
+  | 'leftTop'
+  | 'leftBottom'
+  | 'rightTop'
+  | 'rightBottom'
+  | 'topLeft'
+  | 'topRight'
+  | 'bottomLeft'
+  | 'bottomRight';
+
+export type OverlayBoundaryRect = {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+};
+
 interface BaseMenuItem {
   key: string;
 }
@@ -39,13 +56,134 @@ interface ContextMenuProps {
   className?: string;
   id?: string;
   onItemClick?: () => void;
+  submenuPosition?: ContextMenuPosition | 'auto';
+  submenuPreferredHorizontal?: 'left' | 'right';
+  boundaryRect?: OverlayBoundaryRect | null;
 }
+
+type OverlayPlacementOptions = {
+  popupHeight?: number;
+  popupWidth?: number;
+  preferredHorizontal?: 'left' | 'right';
+  preferredVertical?: 'bottom' | 'top';
+  boundaryRect?: OverlayBoundaryRect | null;
+};
+
+const DEFAULT_POPUP_WIDTH = 280;
+const DEFAULT_POPUP_HEIGHT = 320;
+const VIEWPORT_MARGIN = 12;
+
+export function resolveOverlayPlacement(
+  triggerRect: DOMRect,
+  options?: OverlayPlacementOptions,
+): ContextMenuPosition {
+  const popupWidth = options?.popupWidth ?? DEFAULT_POPUP_WIDTH;
+  const popupHeight = options?.popupHeight ?? DEFAULT_POPUP_HEIGHT;
+  const preferredHorizontal = options?.preferredHorizontal ?? 'right';
+  const preferredVertical = options?.preferredVertical ?? 'top';
+  const boundaryRect = options?.boundaryRect;
+
+  const boundaryLeft = boundaryRect?.left ?? 0;
+  const boundaryRight = boundaryRect?.right ?? window.innerWidth;
+  const boundaryTop = boundaryRect?.top ?? 0;
+  const boundaryBottom = boundaryRect?.bottom ?? window.innerHeight;
+
+  const spaceLeft = triggerRect.left - boundaryLeft - VIEWPORT_MARGIN;
+  const spaceRight = boundaryRight - triggerRect.right - VIEWPORT_MARGIN;
+  const spaceTop = triggerRect.top - boundaryTop - VIEWPORT_MARGIN;
+  const spaceBottom = boundaryBottom - triggerRect.bottom - VIEWPORT_MARGIN;
+
+  const horizontal = preferredHorizontal === 'right'
+    ? (spaceRight >= popupWidth ? 'right' : 'left')
+    : (spaceLeft >= popupWidth ? 'left' : 'right');
+
+  const vertical = preferredVertical === 'bottom'
+    ? (spaceBottom >= popupHeight ? 'Bottom' : 'Top')
+    : (spaceTop >= popupHeight ? 'Top' : 'Bottom');
+
+  return `${horizontal}${vertical}` as ContextMenuPosition;
+}
+
+const ContextMenuSubmenuItem: React.FC<{
+  childrenItems: ContextMenuItem[];
+  className?: string;
+  content: React.ReactNode;
+  data?: any;
+  onItemClick?: () => void;
+  submenuPosition: ContextMenuPosition | 'auto';
+  submenuPreferredHorizontal: 'left' | 'right';
+  boundaryRect?: OverlayBoundaryRect | null;
+}> = ({ childrenItems, className, content, data, onItemClick, submenuPosition, submenuPreferredHorizontal, boundaryRect }) => {
+  const triggerRef = React.useRef<HTMLDivElement | null>(null);
+  const [resolvedPosition, setResolvedPosition] = React.useState<ContextMenuPosition>(
+    submenuPreferredHorizontal === 'left' ? 'leftTop' : 'rightTop',
+  );
+
+  const resolvePreferredPosition = React.useCallback(() => {
+    if (submenuPosition !== 'auto' || !triggerRef.current) {
+      return;
+    }
+    setResolvedPosition(resolveOverlayPlacement(triggerRef.current.getBoundingClientRect(), {
+      preferredHorizontal: submenuPreferredHorizontal,
+      preferredVertical: 'top',
+      boundaryRect,
+    }));
+  }, [boundaryRect, submenuPosition, submenuPreferredHorizontal]);
+
+  const handleVisibleChange = React.useCallback((visible: boolean) => {
+    if (!visible) {
+      return;
+    }
+    resolvePreferredPosition();
+  }, [resolvePreferredPosition]);
+
+  return (
+    <Popover
+      trigger="hover"
+      showArrow={false}
+      position={submenuPosition === 'auto' ? resolvedPosition : submenuPosition}
+      spacing={4}
+      getPopupContainer={() => document.body}
+      onVisibleChange={handleVisibleChange}
+      content={
+        <ContextMenu
+          items={childrenItems}
+          data={data}
+          className={className}
+          onItemClick={onItemClick}
+          submenuPosition={submenuPosition}
+          submenuPreferredHorizontal={submenuPreferredHorizontal}
+          boundaryRect={boundaryRect}
+        />
+      }
+    >
+      <div
+        ref={triggerRef}
+        onMouseEnter={resolvePreferredPosition}
+        onMouseMove={resolvePreferredPosition}
+      >
+        {content}
+      </div>
+    </Popover>
+  );
+};
 
 /**
  * 通用右键菜单/下拉菜单组件
  * 支持标题、图标、分割线、危险状态、禁用状态、自定义包装
  */
-export const ContextMenu: React.FC<ContextMenuProps> = ({ items, title, data, style, className, id, onItemClick }) => {
+export const ContextMenu: React.FC<ContextMenuProps> = ({
+  items,
+  title,
+  data,
+  style,
+  className,
+  id,
+  onItemClick,
+  submenuPosition = 'auto',
+  submenuPreferredHorizontal = 'right',
+  boundaryRect = null,
+}) => {
   return (
     <MenuContent style={style} className={className} id={id}>
       {title && <div className="menu-title">{title}</div>}
@@ -88,24 +226,17 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({ items, title, data, st
 
         if (item.children?.length) {
           return (
-            <Popover
+            <ContextMenuSubmenuItem
               key={item.key || `item-${index}`}
-              trigger="hover"
-              showArrow={false}
-              position="rightTop"
-              spacing={4}
-              getPopupContainer={() => document.body}
-              content={
-                <ContextMenu
-                  items={item.children}
-                  data={data}
-                  className={className}
-                  onItemClick={onItemClick}
-                />
-              }
-            >
-              {content}
-            </Popover>
+              childrenItems={item.children}
+              data={data}
+              className={className}
+              onItemClick={onItemClick}
+              submenuPosition={submenuPosition}
+              submenuPreferredHorizontal={submenuPreferredHorizontal}
+              boundaryRect={boundaryRect}
+              content={content}
+            />
           );
         }
 

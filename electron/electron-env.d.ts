@@ -121,6 +121,7 @@ type EmbeddedBrowserBounds = {
 interface Window {
   electronEmbeddedBrowser: {
     activateTab: (tabId: string | null) => Promise<void>;
+    cleanupDownloadFile: (tempPath: string) => Promise<boolean>;
     closeAll: () => Promise<void>;
     closeTab: (tabId: string) => Promise<void>;
     deactivate: () => Promise<void>;
@@ -137,6 +138,19 @@ interface Window {
       tabId?: string;
       title?: string;
       url?: string;
+    }) => void) => () => void;
+    onDownload: (listener: (payload: {
+      downloadId: string;
+      error?: string;
+      fileName: string;
+      mimeType?: string;
+      pageUrl?: string;
+      receivedBytes: number;
+      state: 'started' | 'progress' | 'completed' | 'cancelled' | 'failed';
+      tabId?: string;
+      tempPath?: string;
+      totalBytes: number;
+      url: string;
     }) => void) => () => void;
     openTab: (tabId: string, url?: string) => Promise<void>;
     reload: (tabId: string) => Promise<void>;

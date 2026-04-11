@@ -43,6 +43,7 @@ import {
   resolveNodeExt,
   resolveNodeType,
 } from './utils/tree-node';
+import type { ContextMenuPosition, OverlayBoundaryRect } from '@/components/ui/context-menu';
 
 interface DirectoryTreeProps {
   treeData: any[];
@@ -62,6 +63,7 @@ interface DirectoryTreeProps {
   onConfigSuccess?: (nodeKey: string, payload: { builtInType?: string; archiveMode?: number }) => void;
   // 拖拽移动成功后，通知父组件刷新受影响父目录
   onMoveSuccess?: (payload: { affectedParentIds: number[] }) => void | Promise<void>;
+  onRefreshNode?: (node: any) => void | Promise<void>;
   libraryId: number; // 添加 libraryId prop
   rootNodeId: number | null;
 }
@@ -103,6 +105,7 @@ export default function DirectoryTree({
   onRenameSuccess,
   onConfigSuccess,
   onMoveSuccess,
+  onRefreshNode,
   loadData,
   libraryId,
   rootNodeId,
@@ -118,12 +121,16 @@ export default function DirectoryTree({
     visible: boolean;
     x: number;
     y: number;
+    position: ContextMenuPosition;
+    boundaryRect: OverlayBoundaryRect | null;
     node: any | null; // null 表示根目录
     isFolder: boolean;
   }>({
     visible: false,
     x: 0,
     y: 0,
+    position: 'bottomLeft',
+    boundaryRect: null,
     node: null,
     isFolder: false,
   });
@@ -142,6 +149,7 @@ export default function DirectoryTree({
     name: '',
     loading: false,
   });
+  const treeContainerRef = useRef<HTMLDivElement | null>(null);
 
   // 内联编辑状态（重命名用）
   const [editingKey, setEditingKey] = useState<string | null>(null);
@@ -1302,6 +1310,33 @@ export default function DirectoryTree({
     onDoubleClick(e, node);
   };
 
+  const resolveTreeBoundaryRect = (): OverlayBoundaryRect | null => {
+    const rect = treeContainerRef.current?.getBoundingClientRect();
+    if (!rect) {
+      return null;
+    }
+    return {
+      left: rect.left,
+      right: rect.right,
+      top: rect.top,
+      bottom: rect.bottom,
+    };
+  };
+
+  const resolveMenuPosition = (
+    clientX: number,
+    clientY: number,
+    boundaryRect: OverlayBoundaryRect | null,
+  ): ContextMenuPosition => {
+    const containerRect = treeContainerRef.current?.getBoundingClientRect();
+    const estimatedMenuWidth = 280;
+    const estimatedMenuHeight = 420;
+    const horizontal = containerRect && (containerRect.right - clientX < estimatedMenuWidth) ? 'Right' : 'Left';
+    const boundaryBottom = boundaryRect?.bottom ?? window.innerHeight;
+    const vertical = boundaryBottom - clientY < estimatedMenuHeight ? 'top' : 'bottom';
+    return `${vertical}${horizontal}` as ContextMenuPosition;
+  };
+
   // 菜单行为
   const handleAction = async (action: string, node: any) => {
     // 关闭菜单
@@ -1447,6 +1482,21 @@ export default function DirectoryTree({
       } catch (error: any) {
         runtimeLogger.error('下载节点失败:', error);
         Toast.error(error?.message || '下载失败');
+      }
+      return;
+    }
+
+    if (action === '刷新') {
+      if (!node || resolveNodeType(node) !== 'dir') {
+        return;
+      }
+      try {
+        await onRefreshNode?.(node);
+        Toast.success('目录已刷新');
+        scheduleRecompute();
+      } catch (error: any) {
+        runtimeLogger.error('刷新目录失败:', error);
+        Toast.error(error?.message || '刷新目录失败');
       }
       return;
     }
@@ -1664,6 +1714,8 @@ export default function DirectoryTree({
     // 获取鼠标位置
     const x = e.clientX;
     const y = e.clientY;
+    const boundaryRect = resolveTreeBoundaryRect();
+    const position = resolveMenuPosition(x, y, boundaryRect);
     
     // 如果已经打开，先关闭再打开，强制位置刷新
     if (menuState.visible) {
@@ -1673,6 +1725,8 @@ export default function DirectoryTree({
           visible: true,
           x,
           y,
+          position,
+          boundaryRect,
           node,
           isFolder,
         });
@@ -1682,6 +1736,8 @@ export default function DirectoryTree({
         visible: true,
         x,
         y,
+        position,
+        boundaryRect,
         node,
         isFolder,
       });
@@ -1761,6 +1817,8 @@ export default function DirectoryTree({
         <div 
           className="tree-node-label editing" 
           ref={bindLabelRef(treeNode.key)}
+          data-node-key={String(treeNode.key || '')}
+          data-node-folder={isFolder ? 'true' : 'false'}
           onClick={e => e.stopPropagation()}
           onDoubleClick={e => e.stopPropagation()}
           style={{ display: 'inline-flex', alignItems: 'center', maxWidth: '100%' }}
@@ -1813,6 +1871,8 @@ export default function DirectoryTree({
       <div
         className={`tree-node-label ${dragOverKey === treeNode.key ? 'drag-over' : ''}`}
         ref={bindLabelRef(treeNode.key)}
+        data-node-key={String(treeNode.key || '')}
+        data-node-folder={isFolder ? 'true' : 'false'}
         onDragEnter={onDragEnter}
         onDragOver={onDragOver}
         onDragLeave={onDragLeave}
@@ -1932,10 +1992,22 @@ export default function DirectoryTree({
   return (
     <div 
       className="tree-container" 
+      ref={treeContainerRef}
       style={{ height: '100%', width: '100%' }}
       onContextMenu={(e) => {
+        const optionElement = (e.target as HTMLElement | null)?.closest('.semi-tree-option');
+        if (optionElement) {
+          const labelElement = optionElement.querySelector<HTMLElement>('.tree-node-label[data-node-key]');
+          const nodeKey = String(labelElement?.dataset.nodeKey || '').trim();
+          if (nodeKey) {
+            const fallbackNode = findNodeByKey(treeDataRef.current || [], nodeKey);
+            if (fallbackNode) {
+              openMenu(e, fallbackNode, String(labelElement?.dataset.nodeFolder) === 'true');
+              return;
+            }
+          }
+        }
         // 空白区域右键：打开根目录菜单
-        // 如果点在了 node 上，renderLabel 里的 onContextMenu 会 stopPropagation，所以这里不会触发
         openMenu(e, null, true);
       }}
     >
@@ -2024,7 +2096,7 @@ export default function DirectoryTree({
         trigger="custom"
         visible={menuState.visible}
         onClickOutSide={() => setMenuState(prev => ({ ...prev, visible: false }))}
-        position="bottomLeft" // 改为 bottomLeft
+        position={menuState.position}
         style={{
           padding: 0,
           backgroundColor: 'transparent',
@@ -2039,6 +2111,7 @@ export default function DirectoryTree({
             node={menuState.node} 
             isFolder={menuState.isFolder} 
             onAction={handleAction} 
+            boundaryRect={menuState.boundaryRect}
             onClose={() => setMenuState(prev => ({ ...prev, visible: false }))}
           />
         }

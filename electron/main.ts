@@ -6,6 +6,12 @@ import path from 'node:path'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import registerIpcHandlers from './ipc'
 import { runtimeLogger } from './runtimeLogger'
+import {
+  EMBEDDED_BROWSER_PARTITION,
+  cleanupEmbeddedBrowserDownloadFile,
+  initializeEmbeddedBrowserDownloadBridge,
+  type EmbeddedBrowserDownloadPayload,
+} from './service/embeddedBrowserService'
 
 // __dirname 处理（因为 ESM 下没有内置 __dirname）
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -82,6 +88,22 @@ type EmbeddedBrowserBounds = {
   y: number
   width: number
   height: number
+}
+
+function emitEmbeddedBrowserDownload(payload: EmbeddedBrowserDownloadPayload) {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return
+  }
+  mainWindow.webContents.send('embedded-browser:download', payload)
+}
+
+function resolveEmbeddedBrowserTabIdByWebContents(targetContents: Electron.WebContents) {
+  for (const [tabId, view] of embeddedBrowserViews.entries()) {
+    if (view.webContents === targetContents) {
+      return tabId
+    }
+  }
+  return null
 }
 
 interface PersistedWindowState {
@@ -429,6 +451,7 @@ function registerWindowIpcHandlers() {
     const view = new WebContentsView({
       webPreferences: {
         devTools: true,
+        partition: EMBEDDED_BROWSER_PARTITION,
       },
     })
     view.webContents.setZoomFactor(1)
@@ -726,7 +749,6 @@ function registerWindowIpcHandlers() {
     nextBounds.width = Math.max(0, Math.round(bounds.width * zoomFactor))
     nextBounds.height = Math.max(0, Math.round(bounds.height * zoomFactor))
     embeddedBrowserPendingBounds = nextBounds
-    runtimeLogger.log('[embedded-browser:bounds]', { raw: bounds, zoomFactor, applied: nextBounds })
     if (!activeEmbeddedBrowserTabId) {
       return
     }
@@ -740,6 +762,14 @@ function registerWindowIpcHandlers() {
   ipcMain.handle('embedded-browser:close-tab', (event, tabId: string) => {
     const targetWindow = BrowserWindow.fromWebContents(event.sender) ?? mainWindow
     closeEmbeddedBrowserTab(targetWindow, tabId)
+  })
+
+  ipcMain.handle('embedded-browser:cleanup-download-file', async (_event, tempPath: string) => {
+    try {
+      return await cleanupEmbeddedBrowserDownloadFile(tempPath)
+    } catch {
+      return false
+    }
   })
 
   ipcMain.handle('embedded-browser:deactivate', (event) => {
@@ -894,6 +924,10 @@ app.whenReady().then(() => {
     app.dock.setIcon(appIconPath)
   }
 
+  initializeEmbeddedBrowserDownloadBridge({
+    emitDownload: emitEmbeddedBrowserDownload,
+    resolveTabIdByWebContents: resolveEmbeddedBrowserTabIdByWebContents,
+  })
   registerIpcHandlers() // 注册自定义 IPC 事件
   registerWindowIpcHandlers()
   createWindow()        // 创建主窗口

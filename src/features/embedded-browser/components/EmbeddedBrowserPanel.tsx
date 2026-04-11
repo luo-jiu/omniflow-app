@@ -7,6 +7,7 @@ type EmbeddedBrowserPanelProps = {
   onUrlChange?: (url: string) => void;
   onStateChange?: (payload: BrowserEventPayload) => void;
   onSubmitDraft: (value: string) => void;
+  suspendNativeView?: boolean;
 };
 
 export type EmbeddedBrowserHandle = {
@@ -146,7 +147,7 @@ const BrowserSurface = styled.div`
 `;
 
 const EmbeddedBrowserPanel = React.forwardRef<EmbeddedBrowserHandle, EmbeddedBrowserPanelProps>(
-  ({ activeTabId, currentUrl = '', onUrlChange, onStateChange, onSubmitDraft }, ref) => {
+  ({ activeTabId, currentUrl = '', onUrlChange, onStateChange, onSubmitDraft, suspendNativeView = false }, ref) => {
     const hostRef = React.useRef<HTMLDivElement | null>(null);
     const emptyInputRef = React.useRef<HTMLInputElement | null>(null);
     const [emptyDraftValue, setEmptyDraftValue] = React.useState('');
@@ -240,6 +241,10 @@ const EmbeddedBrowserPanel = React.forwardRef<EmbeddedBrowserHandle, EmbeddedBro
     }, [activeTabId, onStateChange, onUrlChange]);
 
     React.useEffect(() => {
+      if (suspendNativeView) {
+        void window.electronEmbeddedBrowser.deactivate();
+        return;
+      }
       if (panelMode === 'idle') {
         setStatusMessage('输入网址后回车');
         setEmptyDraftValue('');
@@ -262,7 +267,7 @@ const EmbeddedBrowserPanel = React.forwardRef<EmbeddedBrowserHandle, EmbeddedBro
         return;
       }
       void window.electronEmbeddedBrowser.openTab(activeTabId, currentUrl);
-    }, [activeTabId, currentUrl, panelMode]);
+    }, [activeTabId, currentUrl, panelMode, suspendNativeView]);
 
     React.useLayoutEffect(() => {
       const host = hostRef.current;

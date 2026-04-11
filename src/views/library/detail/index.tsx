@@ -1,5 +1,5 @@
 import AppMain from "@/components/business/app-main";
-import { DirectorySidebar } from "@/features/file-explorer";
+import { DirectorySidebar, type DirectorySidebarHandle } from "@/features/file-explorer";
 import React from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { FileViewerProvider } from "@/contexts/FileViewerContext";
@@ -19,6 +19,8 @@ import {
 } from "@douyinfe/semi-icons";
 import styled, { css } from "styled-components";
 import EmbeddedBrowserPanel, { type EmbeddedBrowserHandle } from "@/features/embedded-browser/components/EmbeddedBrowserPanel";
+import EmbeddedBrowserDownloadImportModal from "@/features/embedded-browser/downloads/components/EmbeddedBrowserDownloadImportModal";
+import { useEmbeddedBrowserDownloadImport } from "@/features/embedded-browser/downloads/hooks/useEmbeddedBrowserDownloadImport";
 import SearchWorkspace, { type SearchWorkspaceMode } from "./SearchWorkspace";
 import {
   loadLibraryDetailWorkspaceState,
@@ -459,12 +461,24 @@ function createEmptyBrowserTab() {
 const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) => {
   const { setFileUrl, tabs, activeTabId, fileState, reloadActiveTab } = useFileViewer();
   const navigate = useNavigate();
+  const sidePanelRef = React.useRef<HTMLDivElement>(null);
+  const directorySidebarRef = React.useRef<DirectorySidebarHandle | null>(null);
+  const handleBrowserDownloadImportSuccess = React.useCallback(async ({ targetFolder }: { targetFolder: { id: number } }) => {
+    await directorySidebarRef.current?.refreshNodeSubtree(targetFolder.id);
+  }, []);
+  const {
+    activeDownload: activeBrowserDownload,
+    closeActiveDownload,
+    importActiveDownload,
+    importLoading: importingBrowserDownload,
+  } = useEmbeddedBrowserDownloadImport(libraryId, {
+    onImportSuccess: handleBrowserDownloadImportSuccess,
+  });
   const workspaceCacheKey = React.useMemo(() => `library:${libraryId}`, [libraryId]);
   const initialWorkspaceState = React.useMemo(
     () => loadLibraryDetailWorkspaceState(workspaceCacheKey),
     [workspaceCacheKey],
   );
-  const sidePanelRef = React.useRef<HTMLDivElement>(null);
   const browserRef = React.useRef<EmbeddedBrowserHandle | null>(null);
   const browserTabsListRef = React.useRef<HTMLDivElement | null>(null);
   const browserTabButtonRefMap = React.useRef<Map<string, HTMLButtonElement>>(new Map());
@@ -980,7 +994,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
         <SidePanelHeader />
 
         <SidePanelTree>
-          <DirectorySidebar libraryId={libraryId} onFileOpen={handleFileOpen} />
+          <DirectorySidebar ref={directorySidebarRef} libraryId={libraryId} onFileOpen={handleFileOpen} />
         </SidePanelTree>
 
         <SidePanelFooter>
@@ -1234,6 +1248,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
               currentUrl={
                 activeBrowserTab?.url ?? ''
               }
+              suspendNativeView={Boolean(activeBrowserDownload)}
               onUrlChange={(nextUrl) => {
                 if (!activeBrowserTabId) {
                   return;
@@ -1275,6 +1290,17 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
           )}
         </ContentBody>
       </ContentArea>
+      <EmbeddedBrowserDownloadImportModal
+        download={activeBrowserDownload}
+        importLoading={importingBrowserDownload}
+        libraryId={libraryId}
+        onCancel={() => {
+          void closeActiveDownload({ discardFile: true });
+        }}
+        onConfirm={(targetFolder) => {
+          void importActiveDownload(targetFolder);
+        }}
+      />
     </DetailWrapper>
   );
 };

@@ -572,6 +572,70 @@ export function useRepositoryTree(
     }
   }, [refreshParentChildren]);
 
+  const collectRefreshSubtreeIds = useCallback((parentId: number): number[] => {
+    const current = treesCacheRef.current[selectedRepository] || [];
+    const expandedKeySet = new Set(expandedKeysRef.current);
+    const currentRootNodeId = rootNodeIdRef.current;
+
+    const collectExpandedDescendantIds = (node: Node): number[] => {
+      const result = [node.id];
+      if (!node.children || node.children.length === 0) {
+        return result;
+      }
+      node.children.forEach((child) => {
+        if (child.type !== 'dir' || child.loaded !== true || !expandedKeySet.has(child.key)) {
+          return;
+        }
+        result.push(...collectExpandedDescendantIds(child));
+      });
+      return result;
+    };
+
+    if (currentRootNodeId !== null && parentId === currentRootNodeId) {
+      const result = [currentRootNodeId];
+      current.forEach((child) => {
+        if (child.type !== 'dir' || child.loaded !== true || !expandedKeySet.has(child.key)) {
+          return;
+        }
+        result.push(...collectExpandedDescendantIds(child));
+      });
+      return result;
+    }
+
+    const targetNode = findNodeById(current, parentId);
+    if (!targetNode || targetNode.type !== 'dir') {
+      return [];
+    }
+
+    return collectExpandedDescendantIds(targetNode);
+  }, [selectedRepository]);
+
+  // 刷新当前目录，并继续刷新其下已展开的子目录，避免局部刷新后可见树状态过旧。
+  const refreshNodeSubtree = useCallback(async (parentId: number) => {
+    const normalizedParentId = Number(parentId);
+    if (!Number.isFinite(normalizedParentId) || normalizedParentId <= 0) {
+      return;
+    }
+
+    const refreshTargets = collectRefreshSubtreeIds(normalizedParentId);
+    const currentRootNodeId = rootNodeIdRef.current;
+    const fallbackTargets = refreshTargets.length > 0 ? refreshTargets : [normalizedParentId];
+
+    for (const targetId of fallbackTargets) {
+      const currentTree = treesCacheRef.current[selectedRepository] || [];
+      if (currentRootNodeId !== null && targetId === currentRootNodeId) {
+        await refreshParentChildren(targetId);
+        continue;
+      }
+
+      const targetNode = findNodeById(currentTree, targetId);
+      if (!targetNode || targetNode.type !== 'dir') {
+        continue;
+      }
+      await refreshParentChildren(targetId);
+    }
+  }, [collectRefreshSubtreeIds, refreshParentChildren, selectedRepository]);
+
   // 加载子节点，加载完成后下一帧展开（保证动画）
   const loadChildren = useCallback(async (node: Node): Promise<void> => {
     if (node.loaded || node.type !== 'dir') return;
@@ -802,5 +866,6 @@ export function useRepositoryTree(
     updateNodeName,
     updateNodeBuiltInConfig,
     refreshAfterMove,
+    refreshNodeSubtree,
   };
 }
