@@ -15,6 +15,7 @@ import {
   IconArrowRight,
   IconGlobeStroke,
   IconApps,
+  IconFolder,
 } from "@douyinfe/semi-icons";
 import styled, { css } from "styled-components";
 import EmbeddedBrowserPanel, { type EmbeddedBrowserHandle } from "@/features/embedded-browser/components/EmbeddedBrowserPanel";
@@ -248,7 +249,7 @@ const ContentToolbar = styled.div`
   .toolbar-left {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 4px;
     -webkit-app-region: no-drag;
   }
 
@@ -257,54 +258,7 @@ const ContentToolbar = styled.div`
     min-width: 0;
     display: flex;
     align-items: center;
-    -webkit-app-region: no-drag;
   }
-
-  .toolbar-browser-form {
-    width: 100%;
-    display: flex;
-    align-items: center;
-    -webkit-app-region: no-drag;
-  }
-
-  .toolbar-browser-input {
-    width: 100%;
-    height: 30px;
-    border-radius: 8px;
-    border: 1px solid var(--app-border);
-    background: var(--app-bg-elevated);
-    color: var(--app-text);
-    padding: 0 10px;
-    outline: none;
-    font-size: 13px;
-  }
-
-  .toolbar-browser-input:focus {
-    border-color: var(--semi-color-primary);
-  }
-
-  .toolbar-right {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin-right: 6px;
-    -webkit-app-region: no-drag;
-  }
-  ${toolbarBackButtonStyles}
-  ${toolbarActionButtonStyles}
-`;
-
-const BrowserTabsRow = styled.div`
-  height: 44px;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 10px;
-  border-bottom: 1px solid var(--app-border);
-  background: var(--app-bg);
-  overflow: hidden;
-  -webkit-app-region: drag;
 
   .browser-tabs-list {
     flex: 1;
@@ -312,6 +266,7 @@ const BrowserTabsRow = styled.div`
     display: flex;
     align-items: center;
     gap: 8px;
+    margin-left: 4px;
     overflow-x: auto;
     overflow-y: hidden;
     scrollbar-width: none;
@@ -323,14 +278,6 @@ const BrowserTabsRow = styled.div`
 
   .browser-tabs-list > .toolbar-action-btn {
     flex-shrink: 0;
-  }
-
-  .browser-tab-actions {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    flex-shrink: 0;
-    -webkit-app-region: no-drag;
   }
 
   .browser-tab-btn {
@@ -386,6 +333,36 @@ const BrowserTabsRow = styled.div`
     color: var(--app-text);
   }
 
+  .toolbar-browser-form {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    -webkit-app-region: no-drag;
+  }
+
+  .toolbar-browser-input {
+    width: 100%;
+    height: 30px;
+    border-radius: 8px;
+    border: 1px solid var(--app-border);
+    background: var(--app-bg-elevated);
+    color: var(--app-text);
+    padding: 0 10px;
+    outline: none;
+    font-size: 13px;
+  }
+
+  .toolbar-browser-input:focus {
+    border-color: var(--semi-color-primary);
+  }
+
+  .toolbar-right {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-right: 6px;
+    -webkit-app-region: no-drag;
+  }
   ${toolbarBackButtonStyles}
   ${toolbarActionButtonStyles}
 `;
@@ -639,6 +616,16 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
     createAndActivateBrowserTab();
   }, [activeBrowserTabId, browserTabs, createAndActivateBrowserTab]);
 
+  const openFileWorkspace = React.useCallback(() => {
+    setBrowserModeOpen(false);
+    void window.electronEmbeddedBrowser.deactivate();
+    if (activeTabId) {
+      setWorkspaceDisplayMode('file-viewer');
+      return;
+    }
+    showSearchHome('files');
+  }, [activeTabId, showSearchHome]);
+
   const activateBrowserTab = React.useCallback((tabId: string) => {
     setActiveBrowserTabId(tabId);
     setBrowserModeOpen(true);
@@ -665,10 +652,6 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
     }
     void window.electronEmbeddedBrowser.closeTab(tabId);
   }, [activeBrowserTabId, browserTabs]);
-
-  const closeEmbeddedBrowserMode = React.useCallback(() => {
-    showSearchHome('web');
-  }, [showSearchHome]);
 
   const submitBrowserInput = React.useCallback((rawValue: string, targetTabId?: string | null) => {
     const resolvedTabId = targetTabId ?? activeBrowserTabId;
@@ -824,19 +807,57 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
       </SidePanel>
 
       <ContentArea>
-        {browserModeOpen ? (
-          <>
-            <BrowserTabsRow>
-              <div className="browser-tab-actions">
-                <button
-                  type="button"
-                  className="toolbar-action-btn"
-                  onClick={closeEmbeddedBrowserMode}
-                  title="返回工作区"
-                >
-                  <IconApps />
-                </button>
-              </div>
+        <ContentToolbar>
+          <div className="toolbar-left">
+            <button
+              type="button"
+              className="toolbar-action-btn"
+              onClick={() => showSearchHome()}
+              title="打开搜索主页"
+            >
+              <IconApps />
+            </button>
+            {browserModeOpen ? (
+              <button
+                type="button"
+                className="toolbar-action-btn"
+                onClick={openFileWorkspace}
+                title="打开文件模式"
+              >
+                <IconFolder />
+              </button>
+            ) : workspaceDisplayMode === 'file-viewer' && showBackToArchive && archiveReturnTarget ? (
+              <button
+                type="button"
+                className="toolbar-action-btn"
+                onClick={handleArchiveReturn}
+                title="返回上一级"
+              >
+                <IconArrowLeft />
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="toolbar-action-btn"
+                onClick={openFileWorkspace}
+                title="打开文件模式"
+              >
+                <IconFolder />
+              </button>
+            )}
+            {!browserModeOpen ? (
+              <button
+                type="button"
+                className="toolbar-action-btn"
+                onClick={openEmbeddedBrowser}
+                title="打开内置浏览器"
+              >
+                <IconGlobeStroke />
+              </button>
+            ) : null}
+          </div>
+          <div className="toolbar-spacer">
+            {browserModeOpen ? (
               <div className="browser-tabs-list">
                 {browserTabs.map((tab) => (
                   <button
@@ -875,7 +896,24 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
                   <IconPlus />
                 </button>
               </div>
-            </BrowserTabsRow>
+            ) : null}
+          </div>
+          <div className="toolbar-right">
+            {!browserModeOpen ? (
+              <button
+                type="button"
+                className="toolbar-action-btn"
+                onClick={handleToolbarRefresh}
+                title="刷新当前标签页"
+                disabled={!activeTabId}
+              >
+                <IconRefresh />
+              </button>
+            ) : null}
+          </div>
+        </ContentToolbar>
+        {browserModeOpen ? (
+          <>
             <ContentToolbar>
               <div className="toolbar-left">
                 <button
@@ -919,49 +957,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
               <div className="toolbar-right" />
             </ContentToolbar>
           </>
-        ) : (
-          <ContentToolbar>
-          <div className="toolbar-left">
-            <button
-              type="button"
-              className="toolbar-action-btn"
-              onClick={handleArchiveReturn}
-              title={showBackToArchive && archiveReturnTarget ? "返回上一级" : "当前无可返回内容"}
-              disabled={!showBackToArchive || !archiveReturnTarget}
-            >
-              <IconArrowLeft />
-            </button>
-            <button
-              type="button"
-              className="toolbar-action-btn"
-              onClick={() => showSearchHome()}
-              title="返回搜索主页"
-            >
-              <IconApps />
-            </button>
-            <button
-              type="button"
-              className="toolbar-action-btn"
-              onClick={openEmbeddedBrowser}
-              title="打开内置浏览器"
-            >
-              <IconGlobeStroke />
-            </button>
-          </div>
-          <div className="toolbar-spacer" />
-          <div className="toolbar-right">
-            <button
-              type="button"
-              className="toolbar-action-btn"
-              onClick={handleToolbarRefresh}
-              title="刷新当前标签页"
-              disabled={!activeTabId}
-            >
-              <IconRefresh />
-            </button>
-          </div>
-          </ContentToolbar>
-        )}
+        ) : null}
         <ContentBody>
           {workspaceDisplayMode === 'browser' ? (
             <EmbeddedBrowserPanel
