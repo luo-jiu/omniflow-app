@@ -96,6 +96,10 @@ export const DirectorySidebarWrapper = styled.aside<{ $isDragging?: boolean }>`
 
   .custom-tree .semi-tree-option {
     padding-left: 4px !important;
+    transition:
+      background-color 120ms ease,
+      color 120ms ease,
+      border-radius 120ms ease;
   }
 
   .custom-tree .semi-tree-indent {
@@ -107,15 +111,43 @@ export const DirectorySidebarWrapper = styled.aside<{ $isDragging?: boolean }>`
       color: var(--app-text);
     }
 
+    .semi-tree-option.tree-row-selected,
+    .semi-tree-option.tree-row-selected:hover {
+      background: color-mix(in srgb, var(--semi-color-primary-light-default) 92%, transparent);
+      color: var(--app-text);
+    }
+
+    .semi-tree-option.tree-row-selected-single {
+      border-radius: 8px;
+    }
+
+    .semi-tree-option.tree-row-selected-start {
+      border-radius: 8px 8px 2px 2px;
+    }
+
+    .semi-tree-option.tree-row-selected-middle {
+      border-radius: 2px;
+    }
+
+    .semi-tree-option.tree-row-selected-end {
+      border-radius: 2px 2px 8px 8px;
+    }
+
     .semi-tree-option-selected,
     .semi-tree-option-selected:hover {
-      background: rgba(0, 0, 0, 0.06);
-      color: var(--app-text);
+      background: transparent;
+      color: inherit;
     }
 
     .semi-tree-option-label,
     .semi-tree-option-label-text {
       font-size: 19px !important;
+    }
+
+    .semi-tree-option-label {
+      width: 100%;
+      min-width: 0;
+      flex: 1;
     }
 
     .semi-tree-option-label .semi-icon,
@@ -164,12 +196,6 @@ export const DirectorySidebarWrapper = styled.aside<{ $isDragging?: boolean }>`
   .tree-node-label.drag-over {
     background: rgba(52, 88, 71, 0.06);
     outline: 1px dashed var(--app-accent);
-    border-radius: 4px;
-  }
-
-  .tree-node-label.is-multi-selected {
-    background: color-mix(in srgb, var(--semi-color-primary-light-default) 72%, transparent);
-    outline: 1px solid color-mix(in srgb, var(--semi-color-primary) 35%, transparent);
     border-radius: 4px;
   }
 

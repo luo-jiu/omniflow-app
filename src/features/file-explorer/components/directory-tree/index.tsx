@@ -174,6 +174,11 @@ export default function DirectoryTree({
   const [selectedNodeIds, setSelectedNodeIds] = useState<number[]>([]);
   const [selectionAnchorKey, setSelectionAnchorKey] = useState<string | null>(null);
   const dragSelectionNodeIdsRef = useRef<number[]>([]);
+  const dragCollapsedKeysRef = useRef<string[]>([]);
+  const dragExpandedKeysSnapshotRef = useRef<string[]>([]);
+  const dragDropHandledRef = useRef(false);
+  const dragDropPendingRef = useRef(false);
+  const externalDragExpandedKeysSnapshotRef = useRef<string[] | null>(null);
 
   // Tree 内容容器（可滚动内容层在 wrapper 中）
   const wrapperRef = useRef<HTMLDivElement | null>(null);
@@ -182,7 +187,7 @@ export default function DirectoryTree({
   const [rawOpenVersion, setRawOpenVersion] = useState(0);
 
   // 为每个“可见行”的 label 与其内部文字 span 保持引用
-  type RowRefs = { label: HTMLElement | null; text: HTMLElement | null };
+  type RowRefs = { label: HTMLElement | null; text: HTMLElement | null; option: HTMLElement | null };
   const rowRefs = useRef<Map<string, RowRefs>>(new Map());
   const treeDataRef = useRef<any[]>(treeData);
 
@@ -191,6 +196,7 @@ export default function DirectoryTree({
 
   // 记录上一次的 expandedKeys
   const prevExpandedKeysRef = useRef<string[]>(expandedKeys);
+  const expandedKeysRef = useRef<string[]>(expandedKeys);
 
   const H_REDUNDANCY_PX = 3;        // 极小冗余，避免边界像素抖动
   const FLOAT_EPS = 0.5;            // 浮点比较误差容忍
@@ -488,6 +494,8 @@ export default function DirectoryTree({
     return types.includes('Files');
   };
 
+  const hasActiveInternalTreeDrag = () => dragSelectionNodeIdsRef.current.length > 0;
+
   const findNodeByKey = (nodes: any[], targetKey: string): any | null => {
     for (const node of nodes) {
       if (node.key === targetKey) return node;
@@ -625,6 +633,11 @@ export default function DirectoryTree({
     return builtInType !== 'DEF' && archiveMode !== 1;
   };
 
+  const isArchiveModeFolderNode = (node: any): boolean => {
+    if (!node || String(node.type) === 'file') return false;
+    return Number(node.archiveMode ?? 0) === 1;
+  };
+
   const isRawOpenAllowed = (nodeKey: string): boolean => rawOpenAllowedKeysRef.current.has(nodeKey);
   const allowRawOpen = (nodeKey: string) => {
     const beforeSize = rawOpenAllowedKeysRef.current.size;
@@ -648,7 +661,7 @@ export default function DirectoryTree({
     await loadData(node);
   };
 
-  const renderTreeData = (() => {
+  const renderTreeData = React.useMemo(() => {
     // 读取版本号用于触发重算（由 allow/revoke 更新）
     void rawOpenVersion;
 
@@ -684,7 +697,7 @@ export default function DirectoryTree({
     };
 
     return patchNodes(treeData);
-  })();
+  }, [rawOpenVersion, treeData]);
 
   const collectVisibleTreeNodes = (nodes: any[], expandedKeySet: Set<string>, acc: any[]) => {
     nodes.forEach((node) => {
@@ -697,11 +710,59 @@ export default function DirectoryTree({
     });
   };
 
-  const getVisibleNodesLinear = (): any[] => {
+  const visibleNodesLinear = React.useMemo(() => {
     const acc: any[] = [];
     collectVisibleTreeNodes(renderTreeData, new Set(expandedKeys), acc);
     return acc;
-  };
+  }, [expandedKeys, renderTreeData]);
+
+  const getVisibleNodesLinear = (): any[] => visibleNodesLinear;
+
+  useEffect(() => {
+    expandedKeysRef.current = expandedKeys;
+  }, [expandedKeys]);
+
+  const syncRenderedSelectionStyles = useCallback(() => {
+    const selectedSet = new Set(
+      selectedNodeIds.filter(id => Number.isFinite(id) && id > 0),
+    );
+    const visibleIds = visibleNodesLinear
+      .map(node => Number(node?.id))
+      .filter(id => Number.isFinite(id) && id > 0);
+
+    rowRefs.current.forEach(({ option }) => {
+      if (!option) return;
+      option.classList.remove(
+        'tree-row-selected',
+        'tree-row-selected-single',
+        'tree-row-selected-start',
+        'tree-row-selected-middle',
+        'tree-row-selected-end',
+      );
+    });
+
+    visibleIds.forEach((nodeId, index) => {
+      if (!selectedSet.has(nodeId)) return;
+      const nodeKey = String(visibleNodesLinear[index]?.key || '');
+      if (!nodeKey) return;
+      const option = rowRefs.current.get(nodeKey)?.option;
+      if (!option) return;
+
+      const prevSelected = index > 0 && selectedSet.has(visibleIds[index - 1]);
+      const nextSelected = index < visibleIds.length - 1 && selectedSet.has(visibleIds[index + 1]);
+
+      option.classList.add('tree-row-selected');
+      if (!prevSelected && !nextSelected) {
+        option.classList.add('tree-row-selected-single');
+      } else if (!prevSelected) {
+        option.classList.add('tree-row-selected-start');
+      } else if (!nextSelected) {
+        option.classList.add('tree-row-selected-end');
+      } else {
+        option.classList.add('tree-row-selected-middle');
+      }
+    });
+  }, [selectedNodeIds, visibleNodesLinear]);
 
   const buildParentIdMap = (nodes: any[]): Map<number, number> => {
     const parentMap = new Map<number, number>();
@@ -830,6 +891,73 @@ export default function DirectoryTree({
     setSelectionAnchorKey(targetKey || null);
   };
 
+  const applyTemporaryExpandedKeys = (keys: string[]) => {
+    expandedKeysRef.current = keys;
+    onExpand(keys);
+    requestAnimationFrame(() => {
+      scheduleRecompute();
+    });
+    prevExpandedKeysRef.current = keys;
+  };
+
+  const resetDragCollapseTracking = () => {
+    dragCollapsedKeysRef.current = [];
+    dragExpandedKeysSnapshotRef.current = [];
+    dragDropHandledRef.current = false;
+    dragDropPendingRef.current = false;
+  };
+
+  const restoreDragCollapsedKeys = () => {
+    const snapshot = dragExpandedKeysSnapshotRef.current;
+    if (snapshot.length > 0) {
+      applyTemporaryExpandedKeys(snapshot);
+    }
+    resetDragCollapseTracking();
+  };
+
+  const prepareDragCollapsedNodes = (candidateSelectionIds: number[]) => {
+    const normalizedMoveNodes = normalizeMoveSelection(candidateSelectionIds);
+    const expandedSnapshot = expandedKeysRef.current;
+    const collapsibleKeys = normalizedMoveNodes
+      .filter(node => String(node?.type) === 'dir' && expandedSnapshot.includes(String(node?.key || '')))
+      .map(node => String(node.key || ''))
+      .filter(Boolean);
+
+    if (collapsibleKeys.length === 0) {
+      resetDragCollapseTracking();
+      return;
+    }
+
+    dragExpandedKeysSnapshotRef.current = expandedSnapshot;
+    dragCollapsedKeysRef.current = collapsibleKeys;
+
+    const collapseSet = new Set(collapsibleKeys);
+    applyTemporaryExpandedKeys(expandedSnapshot.filter(key => !collapseSet.has(key)));
+  };
+
+  const beginExternalDragExpandSession = () => {
+    if (externalDragExpandedKeysSnapshotRef.current !== null) {
+      return;
+    }
+    externalDragExpandedKeysSnapshotRef.current = [...expandedKeysRef.current];
+  };
+
+  const resetExternalDragExpandSession = () => {
+    externalDragExpandedKeysSnapshotRef.current = null;
+  };
+
+  const restoreExternalDragExpandedKeys = () => {
+    const snapshot = externalDragExpandedKeysSnapshotRef.current;
+    if (snapshot !== null) {
+      applyTemporaryExpandedKeys(snapshot);
+    }
+    if (expandTimerRef.current) {
+      window.clearTimeout(expandTimerRef.current);
+      expandTimerRef.current = null;
+    }
+    resetExternalDragExpandSession();
+  };
+
   const getChildrenByParentId = (parentId: number): any[] => {
     if (ROOT_PARENT_ID !== null && parentId === ROOT_PARENT_ID) {
       return treeData;
@@ -849,16 +977,32 @@ export default function DirectoryTree({
   const handleTreeDrop = async (info: any) => {
     runtimeLogger.debug('放下节点', info);
 
+    const cancelDragMove = () => {
+      dragDropHandledRef.current = false;
+      dragDropPendingRef.current = false;
+      restoreDragCollapsedKeys();
+      dragSelectionNodeIdsRef.current = [];
+    };
+
+    const finishDragMove = () => {
+      dragDropHandledRef.current = true;
+      dragDropPendingRef.current = false;
+      resetDragCollapseTracking();
+      dragSelectionNodeIdsRef.current = [];
+    };
+
     const dragNode = info?.dragNode as any;
     const dropNode = info?.node as any;
     if (!dragNode || !dropNode) {
       Toast.error('拖拽数据异常');
+      cancelDragMove();
       return;
     }
 
     const dropNodeId = Number(dropNode.id);
     if (!Number.isFinite(dropNodeId)) {
       Toast.error('拖拽节点数据异常');
+      cancelDragMove();
       return;
     }
 
@@ -881,6 +1025,7 @@ export default function DirectoryTree({
     ).map(node => Number(node.id));
     if (activeSelectionIds.length === 0) {
       Toast.warning('请选择要移动的节点');
+      cancelDragMove();
       return;
     }
     const movingNodeSet = new Set(activeSelectionIds);
@@ -907,6 +1052,7 @@ export default function DirectoryTree({
       const dropNodeIsFolder = dropNode.isLeaf !== true;
       if (!dropNodeIsFolder) {
         Toast.warning('请拖到文件夹上，或拖到节点间隙进行同级排序');
+        cancelDragMove();
         return;
       }
       newParentId = dropNodeId;
@@ -916,6 +1062,7 @@ export default function DirectoryTree({
     if (!Number.isFinite(newParentId) || newParentId <= 0) {
       const rootParentId = resolveRootParentId();
       if (rootParentId === null) {
+        cancelDragMove();
         return;
       }
       newParentId = rootParentId;
@@ -924,6 +1071,7 @@ export default function DirectoryTree({
     const normalizedMoveNodes = normalizeMoveSelection(activeSelectionIds);
     if (normalizedMoveNodes.length === 0) {
       Toast.warning('当前选中节点不可移动');
+      cancelDragMove();
       return;
     }
 
@@ -934,8 +1082,16 @@ export default function DirectoryTree({
       }
       if (newParentId === moveNodeId || isDescendantNodeById(newParentId, moveNodeId, parentMap)) {
         Toast.warning('不能移动到自身或其子节点下');
+        cancelDragMove();
         return;
       }
+    }
+
+    const targetParentNode = findNodeById(treeDataRef.current || [], newParentId);
+    if (isArchiveModeFolderNode(targetParentNode)) {
+      Toast.warning('归档模式目录不支持作为移动目标');
+      cancelDragMove();
+      return;
     }
 
     const payloadItems = normalizedMoveNodes.map((node) => {
@@ -947,6 +1103,7 @@ export default function DirectoryTree({
     }).filter(item => Number.isFinite(item.nodeId) && item.nodeId > 0);
     if (payloadItems.length === 0) {
       Toast.error('节点名称异常，无法移动');
+      cancelDragMove();
       return;
     }
 
@@ -962,11 +1119,13 @@ export default function DirectoryTree({
         await onMoveSuccess({ affectedParentIds: result.affectedParentIds });
       }
       Toast.success(payloadItems.length > 1 ? `已移动 ${payloadItems.length} 项` : '移动成功');
+      finishDragMove();
     } catch (error: any) {
       runtimeLogger.error('移动节点失败:', error);
       Toast.error(error?.message || '移动失败');
+      cancelDragMove();
     } finally {
-      dragSelectionNodeIdsRef.current = [];
+      dragDropPendingRef.current = false;
     }
   };
 
@@ -1217,22 +1376,40 @@ export default function DirectoryTree({
   const bindLabelRef = (key: string) => (el: HTMLElement | null) => {
     if (!el) {
       const prev = rowRefs.current.get(key);
-      if (prev?.text) rowRefs.current.set(key, { label: null, text: prev.text });
+      if (prev?.text || prev?.option) {
+        rowRefs.current.set(key, {
+          label: null,
+          text: prev?.text ?? null,
+          option: null,
+        });
+      }
       else rowRefs.current.delete(key);
       return;
     }
-    const prev = rowRefs.current.get(key) ?? { label: null, text: null };
-    rowRefs.current.set(key, { ...prev, label: el });
+    const prev = rowRefs.current.get(key) ?? { label: null, text: null, option: null };
+    rowRefs.current.set(key, {
+      ...prev,
+      label: el,
+      // Selection background needs to cover the full tree row, so the visual
+      // state is attached to Semi's outer option element instead of the label span.
+      option: el.closest('.semi-tree-option') as HTMLElement | null,
+    });
     scheduleRecompute();
   };
   const bindTextRef = (key: string) => (el: HTMLElement | null) => {
     if (!el) {
       const prev = rowRefs.current.get(key);
-      if (prev?.label) rowRefs.current.set(key, { label: prev.label, text: null });
+      if (prev?.label || prev?.option) {
+        rowRefs.current.set(key, {
+          label: prev?.label ?? null,
+          text: null,
+          option: prev?.option ?? null,
+        });
+      }
       else rowRefs.current.delete(key);
       return;
     }
-    const prev = rowRefs.current.get(key) ?? { label: null, text: null };
+    const prev = rowRefs.current.get(key) ?? { label: null, text: null, option: null };
     rowRefs.current.set(key, { ...prev, text: el });
     scheduleRecompute();
   };
@@ -1710,12 +1887,23 @@ export default function DirectoryTree({
     const isFolder = String(treeNode.type) === 'dir';
     const isArchiveFolder = isFolder && Number(treeNode.archiveMode ?? 0) === 1;
 
-    // 外部文件拖拽进入：高亮并延时 500ms 自动展开
+    // 拖拽悬停：外部文件和内部树节点都支持延时自动展开目录
     const onDragEnter = (e: React.DragEvent) => {
-      if (!isExternalFileDrag(e) || !isFolder) return;
-      e.preventDefault();
-      e.stopPropagation();
-      setDragOverKey(treeNode.key);
+      if (!isFolder) return;
+      const isExternalDrag = isExternalFileDrag(e);
+      const isInternalTreeDrag = hasActiveInternalTreeDrag();
+      if (!isExternalDrag && !isInternalTreeDrag) return;
+
+      if (isExternalDrag) {
+        e.preventDefault();
+        e.stopPropagation();
+        setDragOverKey(treeNode.key);
+        beginExternalDragExpandSession();
+      }
+
+      if (isArchiveFolder) {
+        return;
+      }
 
       if (!expandedKeys.includes(treeNode.key)) {
         if (expandTimerRef.current) {
@@ -1728,9 +1916,11 @@ export default function DirectoryTree({
       }
     };
     const onDragOver = (e: React.DragEvent) => {
-      if (!isExternalFileDrag(e) || !isFolder) return;
-      e.preventDefault();
-      e.dataTransfer.dropEffect = 'copy';
+      if (!isFolder) return;
+      if (isExternalFileDrag(e)) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+      }
     };
     const clearHover = () => {
       setDragOverKey(prev => (prev === treeNode.key ? null : prev));
@@ -1740,20 +1930,32 @@ export default function DirectoryTree({
       }
     };
     const onDragLeave = (e: React.DragEvent) => {
-      if (!isExternalFileDrag(e) || !isFolder) return;
-      e.stopPropagation();
+      if (!isFolder) return;
+      const isExternalDrag = isExternalFileDrag(e);
+      const isInternalTreeDrag = hasActiveInternalTreeDrag();
+      if (!isExternalDrag && !isInternalTreeDrag) return;
+      if (isExternalDrag) {
+        e.stopPropagation();
+      }
       clearHover();
     };
     const onDrop = (e: React.DragEvent) => {
-      if (!isExternalFileDrag(e)) return;
+      const isExternalDrag = isExternalFileDrag(e);
+      const isInternalTreeDrag = hasActiveInternalTreeDrag();
+      if (!isExternalDrag && !isInternalTreeDrag) return;
+      clearHover();
+      if (!isExternalDrag) return;
       e.preventDefault();
       e.stopPropagation();
-      clearHover();
-      if (!isFolder) {
-        runtimeLogger.info('⚠️ 目标是文件，忽略上传：请投递到文件夹节点');
-        return;
+      try {
+        if (!isFolder) {
+          runtimeLogger.info('⚠️ 目标是文件，忽略上传：请投递到文件夹节点');
+          return;
+        }
+        handleExternalDropOnFolder(treeNode, e);
+      } finally {
+        restoreExternalDragExpandedKeys();
       }
-      handleExternalDropOnFolder(treeNode, e);
     };
 
     if (editingKey === treeNode.key) {
@@ -1811,10 +2013,9 @@ export default function DirectoryTree({
       );
     }
 
-    const isSelected = selectedNodeIds.includes(Number(treeNode.id));
     return (
       <div
-        className={`tree-node-label ${dragOverKey === treeNode.key ? 'drag-over' : ''} ${isSelected ? 'is-multi-selected' : ''}`}
+        className={`tree-node-label ${dragOverKey === treeNode.key ? 'drag-over' : ''}`}
         ref={bindLabelRef(treeNode.key)}
         onDragEnter={onDragEnter}
         onDragOver={onDragOver}
@@ -1877,6 +2078,24 @@ export default function DirectoryTree({
     };
   }, []);
 
+  useEffect(() => {
+    const endExternalDragSession = () => {
+      restoreExternalDragExpandedKeys();
+    };
+
+    window.addEventListener('drop', endExternalDragSession);
+    window.addEventListener('dragend', endExternalDragSession);
+
+    return () => {
+      window.removeEventListener('drop', endExternalDragSession);
+      window.removeEventListener('dragend', endExternalDragSession);
+    };
+  }, []);
+
+  React.useLayoutEffect(() => {
+    syncRenderedSelectionStyles();
+  }, [syncRenderedSelectionStyles]);
+
   return (
     <div 
       className="tree-container" 
@@ -1902,26 +2121,38 @@ export default function DirectoryTree({
             draggable
             onDragStart={(info) => {
               runtimeLogger.debug('开始拖拽', info);
+              dragDropHandledRef.current = false;
+              dragDropPendingRef.current = false;
               const draggedNode = (info as any)?.node || (info as any)?.dragNode;
               const draggedNodeId = Number(draggedNode?.id);
               if (!Number.isFinite(draggedNodeId) || draggedNodeId <= 0) {
                 dragSelectionNodeIdsRef.current = [];
+                resetDragCollapseTracking();
                 return;
               }
               if (!selectedNodeIds.includes(draggedNodeId)) {
                 setSelectedNodeIds([draggedNodeId]);
                 setSelectionAnchorKey(String(draggedNode?.key || ''));
                 dragSelectionNodeIdsRef.current = [draggedNodeId];
+                prepareDragCollapsedNodes([draggedNodeId]);
                 return;
               }
               dragSelectionNodeIdsRef.current = [...selectedNodeIds];
+              prepareDragCollapsedNodes(selectedNodeIds);
             }}
             onDragEnd={(info) => {
               runtimeLogger.debug('拖拽结束', info);
+              if (!dragDropPendingRef.current && !dragDropHandledRef.current) {
+                restoreDragCollapsedKeys();
+              }
+              if (!dragDropPendingRef.current) {
+                resetDragCollapseTracking();
+              }
               dragSelectionNodeIdsRef.current = [];
               removeStaleTreeDragPreviews();
             }}
             onDrop={(info) => {
+              dragDropPendingRef.current = true;
               removeStaleTreeDragPreviews();
               void handleTreeDrop(info);
             }}

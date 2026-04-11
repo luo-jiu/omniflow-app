@@ -137,10 +137,9 @@ function findNodeById(nodes: Node[], id: number): Node | null {
   return null;
 }
 
-function mergeRootNodesPreservingLoadedState(previousRoots: Node[], nextRoots: Node[]): Node[] {
-  const previousById = new Map<number, Node>(previousRoots.map(node => [node.id, node]));
-  return nextRoots.map((node) => {
-    const previous = previousById.get(node.id);
+function mergeNodesPreservingLoadedState(previousTree: Node[], nextNodes: Node[]): Node[] {
+  return nextNodes.map((node) => {
+    const previous = findNodeById(previousTree, node.id);
     if (!previous) {
       return node;
     }
@@ -286,7 +285,7 @@ export function useRepositoryTree(
       const current = prev[id] || [];
       return {
         ...prev,
-        [id]: mergeRootNodesPreservingLoadedState(current, mappedRoots),
+        [id]: mergeNodesPreservingLoadedState(current, mappedRoots),
       };
     });
   }, [resolveLibraryRootNodeId]);
@@ -688,17 +687,18 @@ export function useRepositoryTree(
       if (currentRootNodeId !== null && parentId === currentRootNodeId) {
         return {
           ...prev,
-          [selectedRepository]: mergeRootNodesPreservingLoadedState(current, mapped),
+          [selectedRepository]: mergeNodesPreservingLoadedState(current, mapped),
         };
       }
 
       if (!current.length) return prev;
       const parentNode = findNodeById(current, parentId);
       if (!parentNode) return prev;
+      const mergedChildren = mergeNodesPreservingLoadedState(current, mapped);
 
       return {
         ...prev,
-        [selectedRepository]: updateNodeChildren(current, parentNode.key, mapped),
+        [selectedRepository]: updateNodeChildren(current, parentNode.key, mergedChildren),
       };
     });
   }, [selectedRepository, updateNodeChildren]);
