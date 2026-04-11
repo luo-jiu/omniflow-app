@@ -9,7 +9,7 @@ import styled from "styled-components";
 
 const DEFAULT_SIDE_PANEL_WIDTH = 300;
 const MIN_SIDE_PANEL_WIDTH = 220;
-const SIDE_PANEL_TRAFFIC_LIGHT_SAFE_HEIGHT = 52;
+const SIDE_PANEL_TRAFFIC_LIGHT_SAFE_HEIGHT = 37;
 const SIDE_PANEL_WIDTH_STORAGE_PREFIX = 'library-detail:side-panel-width:';
 
 function getSidePanelWidthStorageKey(libraryId: number) {

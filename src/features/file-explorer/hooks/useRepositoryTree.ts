@@ -2,159 +2,44 @@ import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { getChildrenByNodeId, getFileLink, getLibraryRootNodeId } from '../services/file.api';
 import { fileCache } from '@/utils/fileCache.ts';
 import { buildTreeNodeLabel } from '@/utils/fileTreeSettings';
-import { getDirectoryBuiltInIcon, getFileNodeIconByParentBuiltInType } from '../utils/file-node-icon';
 import { runtimeLogger } from '@/utils/runtimeLogger';
-import { resolvePreviewFileType } from '@/utils/preview-file-type';
-
-// 目录节点信息
-interface Node {
-  id: number;
-  name: string;
-  type: string;      // dir=文件夹, file=文件
-  parentId: number;
-  libraryId: number;
-  label: string;
-  isLeaf: boolean;
-  children?: Node[];
-  key: string;       // 唯一标识，用于树组件
-  loaded?: boolean;
-  ext?: string;
-  mimeType?: string;
-  fileSize?: number;
-  data?: {
-    rawName: string; // 保留未截断的原始名称
-    rawExt?: string;
-    parentArchiveMode?: number;
-    [key: string]: any; // 以后还可以加别的
-  };
-  icon?: React.ReactNode;
-  builtInType?: string;
-  archiveMode?: number;
-}
-
-function normalizeArchiveMode(mode?: number): 0 | 1 {
-  return Number(mode ?? 0) === 1 ? 1 : 0;
-}
-
-export interface NodeRespDTO {
-  id: number;
-  name: string;
-  type: 'dir' | 'file';
-  parentId: number;
-  libraryId: number;
-  ext?: string;
-  mimeType?: string;
-  fileSize?: number;
-  builtInType?: string;
-  archiveMode?: number;
-}
-
-interface AppendNodeBatchItem {
-  parentNodeKey: string;
-  newNodeDTO: NodeRespDTO;
-  retryCount?: number;
-  firstQueuedAt?: number;
-}
+import { getDirectoryBuiltInIcon, getFileNodeIconByParentBuiltInType } from '../utils/file-node-icon';
+import type { AppendNodeBatchItem, Node, NodeRespDTO } from './use-repository-tree/types';
+import {
+  findNodeById,
+  findNodeByKey,
+  isFileNodeType,
+  isHiddenNodeName,
+  isImageFileNode,
+  mapToTreeNode,
+  mergeNodesPreservingLoadedState,
+  normalizeArchiveMode,
+  removeTreeNodeByKey,
+  replaceNodeChildren,
+  resolveFileType,
+} from './use-repository-tree/tree-utils';
+import {
+  clearRepositoryTreeSnapshotDirty,
+  getRepositoryTreeSnapshot,
+  invalidateRepositoryTreeSnapshot as invalidateRepositoryTreeSnapshotStore,
+  isRepositoryTreeSnapshotDirty,
+  markRepositoryTreeSnapshotDirty as markRepositoryTreeSnapshotDirtyStore,
+  saveRepositoryTreeSnapshot,
+  hasRepositoryTreeSnapshot,
+} from './use-repository-tree/snapshot-store';
 
 const PENDING_APPEND_RETRY_INTERVAL_MS = 420;
 const PENDING_APPEND_MAX_RETRY = 40;
 const PENDING_APPEND_MAX_AGE_MS = 2 * 60 * 1000;
 
-interface RepositoryTreeSnapshot {
-  selectedRepository: string;
-  rootNodeId: number | null;
-  expandedKeys: string[];
-  treesCache: Record<string, Node[]>;
-}
-
-const REPOSITORY_TREE_SNAPSHOT_MAX_ENTRIES = 20;
-const repositoryTreeSnapshotStore = new Map<number, RepositoryTreeSnapshot>();
-const repositoryTreeDirtyLibraries = new Set<number>();
-function resolveFileType(
-  mimeType?: string,
-  ext?: string,
-): 'image' | 'video' | 'audio' | 'pdf' | 'other' {
-  return resolvePreviewFileType(mimeType, ext);
-}
-
-function isImageFileNode(item: Pick<NodeRespDTO, 'mimeType' | 'ext'>): boolean {
-  return resolveFileType(item.mimeType, item.ext) === 'image';
-}
-
-function isHiddenNodeName(name?: string, ext?: string): boolean {
-  const trimmedName = String(name || '').trim();
-  if (trimmedName.startsWith('.')) {
-    return true;
-  }
-  const normalizedExt = String(ext || '').trim().replace(/^\./, '');
-  return trimmedName.length === 0 && normalizedExt.length > 0;
-}
-
-function isFileNodeType(type: unknown): boolean {
-  return String(type) === 'file' || Number(type) === 1;
-}
+export type { Node, NodeRespDTO, AppendNodeBatchItem } from './use-repository-tree/types';
 
 export function invalidateRepositoryTreeSnapshot(libraryId: number) {
-  repositoryTreeSnapshotStore.delete(libraryId);
+  invalidateRepositoryTreeSnapshotStore(libraryId);
 }
 
 export function markRepositoryTreeSnapshotDirty(libraryId: number) {
-  repositoryTreeDirtyLibraries.add(libraryId);
-}
-
-function setRepositoryTreeSnapshot(libraryId: number, snapshot: RepositoryTreeSnapshot) {
-  if (repositoryTreeSnapshotStore.has(libraryId)) {
-    repositoryTreeSnapshotStore.delete(libraryId);
-  }
-  repositoryTreeSnapshotStore.set(libraryId, snapshot);
-  if (repositoryTreeSnapshotStore.size > REPOSITORY_TREE_SNAPSHOT_MAX_ENTRIES) {
-    const oldestLibraryId = repositoryTreeSnapshotStore.keys().next().value;
-    if (oldestLibraryId !== undefined) {
-      repositoryTreeSnapshotStore.delete(oldestLibraryId);
-    }
-  }
-}
-
-function findNodeByKey(nodes: Node[], key: string): Node | null {
-  for (const node of nodes) {
-    if (node.key === key) return node;
-    if (node.children && node.children.length > 0) {
-      const found = findNodeByKey(node.children, key);
-      if (found) return found;
-    }
-  }
-  return null;
-}
-
-function findNodeById(nodes: Node[], id: number): Node | null {
-  for (const node of nodes) {
-    if (node.id === id) return node;
-    if (node.children && node.children.length > 0) {
-      const found = findNodeById(node.children, id);
-      if (found) return found;
-    }
-  }
-  return null;
-}
-
-function mergeNodesPreservingLoadedState(previousTree: Node[], nextNodes: Node[]): Node[] {
-  return nextNodes.map((node) => {
-    const previous = findNodeById(previousTree, node.id);
-    if (!previous) {
-      return node;
-    }
-    if (node.type !== 'dir' || previous.type !== 'dir') {
-      return node;
-    }
-    if (previous.loaded !== true) {
-      return node;
-    }
-    return {
-      ...node,
-      loaded: true,
-      children: previous.children || [],
-    };
-  });
+  markRepositoryTreeSnapshotDirtyStore(libraryId);
 }
 
 export function useRepositoryTree(
@@ -176,7 +61,7 @@ export function useRepositoryTree(
     },
   ) => void,
 ) {
-  const cachedSnapshot = repositoryTreeSnapshotStore.get(libraryId);
+  const cachedSnapshot = getRepositoryTreeSnapshot(libraryId);
   const defaultRepositoryId = String(libraryId);
 
   // const [repositories, setRepositories] = useState<{ id: string | number; name: string }[]>([]);
@@ -292,7 +177,7 @@ export function useRepositoryTree(
 
   // 快照保存：切走页面后可恢复
   useEffect(() => {
-    setRepositoryTreeSnapshot(libraryId, {
+    saveRepositoryTreeSnapshot(libraryId, {
       selectedRepository,
       rootNodeId,
       expandedKeys,
@@ -311,21 +196,7 @@ export function useRepositoryTree(
     options?: { markLoaded?: boolean },
   ): Node[] => {
     const markLoaded = options?.markLoaded ?? true;
-    return nodes.map(node => {
-      if (node.key === key) {
-        return {
-          ...node,
-          children,
-          loaded: markLoaded ? true : node.loaded,
-        };
-      }
-      if (node.children && node.children.length > 0) {
-        const updated = updateNodeChildren(node.children, key, children, options);
-        if (updated === node.children) return node;
-        return { ...node, children: updated };
-      }
-      return node;
-    });
+    return replaceNodeChildren(nodes, key, children, { markLoaded });
   }, []);
 
   // 脏标记重建：保留展开状态，按可见展开分支重拉数据，避免“恢复后整树折叠”
@@ -374,8 +245,8 @@ export function useRepositoryTree(
   // 初次加载目录树（支持缓存恢复）
   useEffect(() => {
     const repoId = String(libraryId);
-    const hasSnapshot = repositoryTreeSnapshotStore.has(libraryId);
-    const shouldRebuildTree = repositoryTreeDirtyLibraries.has(libraryId);
+    const hasSnapshot = hasRepositoryTreeSnapshot(libraryId);
+    const shouldRebuildTree = isRepositoryTreeSnapshotDirty(libraryId);
 
     const bootstrap = async () => {
       await selectRepository(repoId, { resetExpanded: !hasSnapshot });
@@ -384,7 +255,7 @@ export function useRepositoryTree(
         return;
       }
 
-      repositoryTreeDirtyLibraries.delete(libraryId);
+      clearRepositoryTreeSnapshotDirty(libraryId);
       try {
         const currentRootNodeId = rootNodeIdRef.current ?? await resolveLibraryRootNodeId(Number(repoId));
         const { rebuiltTree, filteredExpandedKeys } = await rebuildTreeByExpandedState(
@@ -635,22 +506,7 @@ export function useRepositoryTree(
 
   // 递归删除节点及其所有子节点
   const removeNodeFromTree = useCallback((nodes: Node[], targetKey: string): Node[] => {
-    return nodes
-      .filter(node => {
-        // 如果当前节点就是要删除的节点，直接过滤掉（包括其所有子节点）
-        return node.key !== targetKey;
-      })
-      .map(node => {
-        // 如果有子节点，递归处理子节点
-        if (node.children && node.children.length > 0) {
-          const filteredChildren = removeNodeFromTree(node.children, targetKey);
-          // 如果子节点被删除，返回新的节点对象（不可变更新）
-          if (filteredChildren.length !== node.children.length) {
-            return { ...node, children: filteredChildren };
-          }
-        }
-        return node;
-      });
+    return removeTreeNodeByKey(nodes, targetKey);
   }, []);
 
   // 删除节点（删除成功后调用）
@@ -930,36 +786,6 @@ export function useRepositoryTree(
       }
     }
   }, [loadChildren, onFileOpen, selectedRepository]);
-
-  // 节点转换
-  function mapToTreeNode(item: NodeRespDTO, parentNode?: Pick<Node, 'builtInType' | 'archiveMode'>): Node {
-    const parentBuiltInType = String(parentNode?.builtInType || 'DEF').toUpperCase();
-    const parentArchiveMode = normalizeArchiveMode(parentNode?.archiveMode);
-    const nodeBuiltInType = String(item.builtInType || 'DEF').toUpperCase();
-    const nodeArchiveMode = nodeBuiltInType === 'DEF'
-      ? 0
-      : normalizeArchiveMode(item.archiveMode);
-    return {
-      ...item,
-      key: `${item.parentId}:${item.id}`,
-      isLeaf: item.type === 'file',
-      label: buildTreeNodeLabel({ name: item.name, type: item.type, ext: item.ext }),
-      data: {
-        rawName: item.name,
-        rawExt: item.ext || '',
-        parentBuiltInType,
-        parentArchiveMode,
-      },
-      icon: item.type === 'file'
-        ? getFileNodeIconByParentBuiltInType(item.ext, parentBuiltInType, parentArchiveMode)
-        : getDirectoryBuiltInIcon(nodeBuiltInType, nodeArchiveMode),
-      children: item.type === 'dir' ? [] : undefined,
-      loaded: false,
-      builtInType: nodeBuiltInType,
-      archiveMode: nodeArchiveMode,
-    };
-  }
-
   return {
     selectedRepository,
     rootNodeId,
