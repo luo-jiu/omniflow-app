@@ -12,24 +12,14 @@ import {
   sortComicChildrenByName,
   updateNodeConfig,
 } from "../../services/file.api";
-import { uploadManager } from '@/utils/uploadManager.ts';
 import UploadConfirmModal from './modals/UploadConfirmModal.tsx';
 import CreateNodeModal from './modals/CreateNodeModal.tsx';
 import DirectoryContextMenu from './context-menu/DirectoryContextMenu.tsx';
-import { UPLOAD_TASK_STATUS } from '@/modules/upload-center/model/upload-task.types';
 import { buildFileFullName, splitFileBaseNameAndExt } from '@/utils/fileTreeSettings';
 import { validateWindowsLikeFileName } from '@/utils/windowsFileName';
 import { runtimeLogger } from '@/utils/runtimeLogger';
-import { requestDesktopWindowActivation } from '@/utils/windowActivation';
 import { useFileViewer } from '@/hooks/useFileViewer';
 import { globalAudioPlayer } from '@/features/file-viewer/services/global-audio-player';
-import {
-  isIgnoredSystemFilePath,
-  pickUploadFilesFromDesktop,
-  pickUploadFoldersFromDesktop,
-} from '@/features/file-explorer/services/desktop-upload-picker.api';
-import type { UploadCandidateFile } from '@/features/file-explorer/services/desktop-upload-picker.api';
-import { normalizeUploadRelativePath, UploadPathResolver } from '@/features/file-explorer/services/upload-path-resolver';
 import {
   downloadUrlToDesktopPath,
   ensureDesktopDirectory,
@@ -37,6 +27,22 @@ import {
   pickDownloadDirectoryFromDesktop,
 } from '@/features/file-explorer/services/desktop-download.api';
 import { TREE_LOCATE_NODE_EVENT, type TreeLocateNodeDetail } from '@/features/file-explorer/services/tree-locate';
+import { useDirectoryUpload } from './hooks/useDirectoryUpload';
+import {
+  type ExternalUploadResolution,
+  type VisibleRowBounds,
+  computeVisibleRowBounds,
+  resolveExternalUpload,
+  resolveVisibleTreeNodeByClientY,
+} from './utils/external-upload';
+import {
+  buildNodeFileName,
+  findNodeById,
+  findNodeByKey,
+  resolveNodeBaseName,
+  resolveNodeExt,
+  resolveNodeType,
+} from './utils/tree-node';
 
 interface DirectoryTreeProps {
   treeData: any[];
@@ -72,35 +78,12 @@ interface DragPreviewNodeData {
   };
 }
 
-type ExternalUploadResolution = {
-  blockedReason: 'archive' | null;
-  targetKey: string | null;
-  targetNode: any | null;
-};
-
-type VisibleRowBounds = {
-  bottom: number;
-  node: any;
-  top: number;
-};
-
 const TREE_DRAG_PREVIEW_ATTR = 'data-omniflow-tree-drag-preview';
 
 function removeStaleTreeDragPreviews() {
   document
     .querySelectorAll<HTMLElement>(`[${TREE_DRAG_PREVIEW_ATTR}]`)
     .forEach(element => element.remove());
-}
-
-function findNodeById(nodes: any[], targetId: number): any | null {
-  for (const node of nodes) {
-    if (node.id === targetId) return node;
-    if (node.children && node.children.length > 0) {
-      const found = findNodeById(node.children, targetId);
-      if (found) return found;
-    }
-  }
-  return null;
 }
 
 /**
@@ -126,13 +109,6 @@ export default function DirectoryTree({
 }: DirectoryTreeProps) {
   const { closeTabByNodeId, tabs } = useFileViewer();
 
-  interface UploadModalTargetNode {
-    id: number;
-    key: string;
-    label: string;
-    libraryId: number;
-  }
-
   // 外部文件拖拽：悬停高亮 & 延迟展开
   const [dragOverKey, setDragOverKey] = useState<string | null>(null);
   const expandTimerRef = useRef<number | null>(null);
@@ -150,19 +126,6 @@ export default function DirectoryTree({
     y: 0,
     node: null,
     isFolder: false,
-  });
-
-  // 上传 Modal 的状态
-  const [uploadModal, setUploadModal] = useState<{
-    visible: boolean;
-    files: UploadCandidateFile[];
-    targetNode: UploadModalTargetNode | null;
-    loading: boolean;
-  }>({
-    visible: false,
-    files: [],
-    targetNode: null,
-    loading: false,
   });
 
   // 新建文件/文件夹 Modal 的状态
@@ -224,6 +187,30 @@ export default function DirectoryTree({
     Toast.warning('目录根节点初始化中，请稍后重试');
     return null;
   };
+
+  const {
+    handleCancelUpload,
+    handleConfirmUpload,
+    handleExternalDropOnFolder,
+    handlePickUploadFromDesktop,
+    uploadModal,
+  } = useDirectoryUpload({
+    libraryId,
+    onUploadSuccess,
+    resolveParentNodeForAppend: (parentId: number) => {
+      if (ROOT_PARENT_ID !== null && parentId === ROOT_PARENT_ID) {
+        return {
+          id: ROOT_PARENT_ID,
+          key: 'root',
+          label: '根目录',
+          libraryId,
+        };
+      }
+      return findNodeById(treeDataRef.current || [], parentId);
+    },
+    resolveRootParentId,
+    rootNodeId: ROOT_PARENT_ID,
+  });
 
   const formatFileSize = (size: unknown): string => {
     const bytes = Number(size);
@@ -298,23 +285,6 @@ export default function DirectoryTree({
       ),
     });
   };
-
-  const resolveNodeType = (node: any): 'dir' | 'file' => {
-    const typeRaw = String(node?.type ?? '').toLowerCase();
-    if (typeRaw === 'file' || Number(node?.type) === 1 || node?.isLeaf === true) {
-      return 'file';
-    }
-    return 'dir';
-  };
-
-  const resolveNodeBaseName = (node: any): string =>
-    String(node?.data?.rawName ?? node?.name ?? node?.label ?? '');
-
-  const resolveNodeExt = (node: any): string =>
-    String(node?.data?.rawExt ?? node?.ext ?? '').replace(/^\./, '');
-
-  const buildNodeFileName = (node: any): string =>
-    buildFileFullName(resolveNodeBaseName(node), resolveNodeExt(node));
 
   const handleDownloadNode = async (node: any) => {
     if (!node) {
@@ -439,110 +409,6 @@ export default function DirectoryTree({
   };
 
   // 处理文件放置逻辑
-  const toUploadModalTargetNode = (node: any | null): UploadModalTargetNode | null => {
-    if (!node) {
-      const rootParentId = resolveRootParentId();
-      if (rootParentId === null) return null;
-      return {
-        id: rootParentId,
-        key: 'root',
-        label: '根目录',
-        libraryId,
-      };
-    }
-    const rootParentId = ROOT_PARENT_ID;
-    const fallbackId = rootParentId !== null ? rootParentId : Number(node.id);
-    return {
-      id: Number(node.id || fallbackId),
-      key: String(node.key || 'root'),
-      label: String(node.label || node.data?.rawName || '根目录'),
-      libraryId: Number(node.libraryId || libraryId),
-    };
-  };
-
-  const resolveExternalUpload = (node: any | null): ExternalUploadResolution => {
-    if (!node) {
-      return {
-        blockedReason: null,
-        targetKey: null,
-        targetNode: null,
-      };
-    }
-
-    const finalize = (targetNode: any | null, blockedReason: 'archive' | null): ExternalUploadResolution => ({
-      blockedReason,
-      targetKey: targetNode?.key ? String(targetNode.key) : null,
-      targetNode,
-    });
-
-    if (String(node.type) === 'dir') {
-      if (Number(node.archiveMode ?? 0) === 1) {
-        return finalize(null, 'archive');
-      }
-      return finalize(node, null);
-    }
-
-    let parentId = Number(node.parentId || 0);
-    const visited = new Set<number>();
-    while (Number.isFinite(parentId) && parentId > 0 && !visited.has(parentId)) {
-      visited.add(parentId);
-      const parentNode = findNodeById(treeDataRef.current || [], parentId);
-      if (!parentNode) {
-        break;
-      }
-      if (String(parentNode.type) === 'dir') {
-        if (Number(parentNode.archiveMode ?? 0) === 1) {
-          return finalize(null, 'archive');
-        }
-        return finalize(parentNode, null);
-      }
-      parentId = Number(parentNode.parentId || 0);
-    }
-
-    return finalize(null, null);
-  };
-
-  const buildUploadCandidateFromDragFile = (file: File): UploadCandidateFile => {
-    const rawRelativePath = (file as any).webkitRelativePath || file.name;
-    const relativePath = normalizeUploadRelativePath(rawRelativePath || file.name);
-    return {
-      file,
-      relativePath: relativePath || file.name,
-    };
-  };
-
-  const openUploadModal = (targetNode: UploadModalTargetNode, files: UploadCandidateFile[]) => {
-    if (!files.length) {
-      Toast.warning('未选择可上传文件');
-      return;
-    }
-    setUploadModal({
-      visible: true,
-      files,
-      targetNode,
-      loading: false,
-    });
-  };
-
-  const handleExternalDropOnFolder = (treeNode: any, e: React.DragEvent) => {
-    const files = Array.from(e.dataTransfer.files || []);
-    if (!files.length) return;
-
-    requestDesktopWindowActivation(true);
-    const candidates = files
-      .map(buildUploadCandidateFromDragFile)
-      .filter(candidate => !isIgnoredSystemFilePath(candidate.relativePath || candidate.file.name));
-    if (!candidates.length) {
-      Toast.warning('拖拽内容仅包含系统隐藏文件，已忽略');
-      return;
-    }
-    const targetNode = toUploadModalTargetNode(treeNode);
-    if (!targetNode) {
-      return;
-    }
-    openUploadModal(targetNode, candidates);
-  };
-
   // 外部文件拖拽
   const isExternalFileDrag = (e: React.DragEvent) => {
     const types = Array.from(e.dataTransfer?.types || []);
@@ -550,17 +416,6 @@ export default function DirectoryTree({
   };
 
   const hasActiveInternalTreeDrag = () => dragSelectionNodeIdsRef.current.length > 0;
-
-  const findNodeByKey = (nodes: any[], targetKey: string): any | null => {
-    for (const node of nodes) {
-      if (node.key === targetKey) return node;
-      if (node.children && node.children.length > 0) {
-        const found = findNodeByKey(node.children, targetKey);
-        if (found) return found;
-      }
-    }
-    return null;
-  };
 
   const waitForNextFrame = useCallback(() => new Promise<void>((resolve) => {
     window.requestAnimationFrame(() => resolve());
@@ -818,28 +673,15 @@ export default function DirectoryTree({
       }
     });
 
-    const container = wrapperRef.current?.parentElement;
-    if (!container) {
-      visibleRowBoundsRef.current = [];
-      return;
-    }
-
-    const containerRect = container.getBoundingClientRect();
-    const scrollTop = container.scrollTop;
-    visibleRowBoundsRef.current = visibleNodesLinear.flatMap((node) => {
-      const nodeKey = String(node?.key || '');
-      const option = nodeKey ? rowRefs.current.get(nodeKey)?.option : null;
-      if (!option) {
-        return [];
-      }
-      const rect = option.getBoundingClientRect();
-      return [{
-        node,
-        top: rect.top - containerRect.top + scrollTop,
-        bottom: rect.bottom - containerRect.top + scrollTop,
-      }];
-    });
   }, [selectedNodeIds, visibleNodesLinear]);
+
+  const refreshVisibleRowBounds = useCallback(() => {
+    visibleRowBoundsRef.current = computeVisibleRowBounds(
+      visibleNodesLinear,
+      rowRefs.current,
+      wrapperRef.current?.parentElement ?? null,
+    );
+  }, [visibleNodesLinear]);
 
   const buildParentIdMap = (nodes: any[]): Map<number, number> => {
     const parentMap = new Map<number, number>();
@@ -1085,38 +927,6 @@ export default function DirectoryTree({
     return true;
   };
 
-  const resolveVisibleTreeNodeByClientY = (clientY: number): any | null => {
-    const container = wrapperRef.current?.parentElement;
-    const visibleRows = visibleRowBoundsRef.current;
-    if (!container || visibleRows.length === 0) {
-      return null;
-    }
-
-    const containerRect = container.getBoundingClientRect();
-    const localY = clientY - containerRect.top + container.scrollTop;
-
-    for (const row of visibleRows) {
-      if (localY >= row.top && localY <= row.bottom) {
-        return row.node;
-      }
-    }
-
-    for (let index = 0; index < visibleRows.length - 1; index += 1) {
-      const current = visibleRows[index];
-      const next = visibleRows[index + 1];
-      if (localY > current.bottom && localY < next.top) {
-        return current.node;
-      }
-    }
-
-    const first = visibleRows[0];
-    if (localY < first.top) {
-      return first.node;
-    }
-
-    return visibleRows[visibleRows.length - 1]?.node ?? null;
-  };
-
   const getChildrenByParentId = (parentId: number): any[] => {
     if (ROOT_PARENT_ID !== null && parentId === ROOT_PARENT_ID) {
       return treeData;
@@ -1348,148 +1158,6 @@ export default function DirectoryTree({
     }
   };
 
-  const resolveParentNodeForAppend = (parentId: number) => {
-    if (ROOT_PARENT_ID !== null && parentId === ROOT_PARENT_ID) {
-      return {
-        id: ROOT_PARENT_ID,
-        key: 'root',
-        label: '根目录',
-        libraryId,
-      };
-    }
-    const parentNode = findNodeById(treeDataRef.current || [], parentId);
-    if (parentNode) {
-      return parentNode;
-    }
-    return null;
-  };
-
-  const hashString = (input: string): string => {
-    let hash = 0;
-    for (let i = 0; i < input.length; i += 1) {
-      hash = ((hash << 5) - hash) + input.charCodeAt(i);
-      hash |= 0;
-    }
-    return Math.abs(hash).toString(36);
-  };
-
-  const buildUploadGroupId = (
-    relativePath: string,
-    fallbackFileName: string,
-    localPath: string,
-    batchSeed: string,
-  ): string => {
-    const segments = String(relativePath || fallbackFileName || '')
-      .replace(/\\/g, '/')
-      .split('/')
-      .filter(Boolean);
-    const rootSegment = segments[0] || fallbackFileName || 'file';
-    const normalizedLocalPath = String(localPath || '').replace(/\\/g, '/');
-    const suffix = segments.slice(1).join('/');
-    const rootLocalPath = suffix && normalizedLocalPath.endsWith(`/${suffix}`)
-      ? normalizedLocalPath.slice(0, normalizedLocalPath.length - suffix.length - 1)
-      : normalizedLocalPath;
-    return `${batchSeed}:${rootSegment}:${hashString(rootLocalPath || normalizedLocalPath || relativePath)}`;
-  };
-
-  const nextMicroTask = () =>
-    new Promise<void>((resolve) => {
-      window.setTimeout(resolve, 0);
-    });
-
-  const startUploadInBackground = async (
-    files: UploadCandidateFile[],
-    targetNode: UploadModalTargetNode,
-  ) => {
-    const pathResolver = new UploadPathResolver({
-      libraryId: targetNode.libraryId,
-      rootParentId: targetNode.id,
-      onDirectoryCreated: ({ parentId, newDirectoryNode }) => {
-        if (!onUploadSuccess) return;
-        const parentNode = resolveParentNodeForAppend(parentId);
-        if (!parentNode) return;
-        onUploadSuccess(parentNode, newDirectoryNode);
-      },
-    });
-
-    const CHUNK_SIZE = 120;
-    const batchSeed = `upload-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const donePromises: Array<Promise<any>> = [];
-
-    for (let start = 0; start < files.length; start += CHUNK_SIZE) {
-      const chunk = files.slice(start, start + CHUNK_SIZE);
-      const chunkTasks = await Promise.all(
-        chunk.map(async (candidate) => {
-          const relativePath = normalizeUploadRelativePath(candidate.relativePath || candidate.file.name);
-          const parentId = await pathResolver.resolveParentId(relativePath);
-          return {
-            file: candidate.file,
-            parentId,
-            libraryId: targetNode.libraryId,
-            relativePath,
-            folderGroupId: buildUploadGroupId(
-              relativePath,
-              candidate.file.name,
-              String((candidate.file as any)?.path || ''),
-              batchSeed,
-            ),
-          };
-        }),
-      );
-
-      const batch = uploadManager.createBatch(chunkTasks, {
-        onSingleSuccess: (newNode) => {
-          const parentId = Number((newNode as any)?.parentId || targetNode.id);
-          const parentNode = resolveParentNodeForAppend(parentId);
-          if (onUploadSuccess && parentNode) {
-            onUploadSuccess(parentNode, newNode);
-          }
-        },
-      });
-      donePromises.push(batch.done);
-      await nextMicroTask();
-    }
-
-    const results = (await Promise.all(donePromises)).flat();
-    const successCount = results.filter(r => r.taskStatus === UPLOAD_TASK_STATUS.SUCCESS).length;
-    const failedCount = results.filter(r => r.taskStatus === UPLOAD_TASK_STATUS.FAILED).length;
-    const canceledCount = results.filter(r => r.taskStatus === UPLOAD_TASK_STATUS.CANCELED).length;
-
-    if (failedCount === 0 && canceledCount === 0) {
-      Toast.success(`成功上传 ${successCount} 个文件`);
-    } else if (failedCount === 0 && canceledCount > 0) {
-      Toast.info(`上传已中断：成功 ${successCount} 个，中断 ${canceledCount} 个`);
-    } else if (successCount > 0 || canceledCount > 0) {
-      Toast.warning(
-        `部分上传成功：成功 ${successCount} 个，失败 ${failedCount} 个，中断 ${canceledCount} 个`,
-      );
-    } else {
-      Toast.error('全部文件上传失败');
-    }
-  };
-
-  // 执行上传逻辑
-  const handleConfirmUpload = async () => {
-    const { files, targetNode } = uploadModal;
-    if (!files.length || !targetNode) return;
-
-    setUploadModal({ visible: false, files: [], targetNode: null, loading: false });
-    Toast.info(`正在准备上传队列（${files.length} 个文件）`);
-
-    void startUploadInBackground(files, targetNode).catch((error) => {
-      runtimeLogger.error('上传执行失败:', error);
-      Toast.error((error as any)?.message || '上传过程中出现未知错误');
-    });
-  };
-
-  // 取消上传
-  const handleCancelUpload = () => {
-    if (uploadModal.loading) {
-      return;
-    }
-    setUploadModal({ visible: false, files: [], targetNode: null, loading: false });
-  };
-
   /** 应用 minWidth 并夹紧 scrollLeft */
   const applyMinWidth = (targetWidth: number, container: HTMLElement) => {
     const wrapper = wrapperRef.current;
@@ -1632,26 +1300,6 @@ export default function DirectoryTree({
 
   const handleTreeDoubleClick = (e: React.MouseEvent, node: any) => {
     onDoubleClick(e, node);
-  };
-
-  const handlePickUploadFromDesktop = async (mode: 'file' | 'folder', node: any | null) => {
-    try {
-      requestDesktopWindowActivation(true);
-      const targetNode = toUploadModalTargetNode(node);
-      if (!targetNode) {
-        return;
-      }
-      const files = mode === 'file'
-        ? await pickUploadFilesFromDesktop()
-        : await pickUploadFoldersFromDesktop();
-      if (!files.length) {
-        return;
-      }
-      openUploadModal(targetNode, files);
-    } catch (error: any) {
-      runtimeLogger.error(`选择${mode === 'file' ? '文件' : '文件夹'}失败:`, error);
-      Toast.error(error?.message || `选择${mode === 'file' ? '文件' : '文件夹'}失败`);
-    }
   };
 
   // 菜单行为
@@ -2045,7 +1693,7 @@ export default function DirectoryTree({
     if (!treeNode) return label;
     const isFolder = String(treeNode.type) === 'dir';
     const isArchiveFolder = isFolder && Number(treeNode.archiveMode ?? 0) === 1;
-    const externalUpload = resolveExternalUpload(treeNode);
+    const externalUpload = resolveExternalUpload(treeNode, treeDataRef.current || []);
 
     // 拖拽悬停：外部文件和内部树节点都支持延时自动展开目录
     const onDragEnter = (e: React.DragEvent) => {
@@ -2244,12 +1892,20 @@ export default function DirectoryTree({
     syncRenderedSelectionStyles();
   }, [syncRenderedSelectionStyles]);
 
+  React.useLayoutEffect(() => {
+    refreshVisibleRowBounds();
+  }, [refreshVisibleRowBounds]);
+
   const handleTreeContainerExternalDragOver = (e: React.DragEvent<HTMLDivElement>) => {
     if (!isExternalFileDrag(e)) {
       return;
     }
-    const hoveredNode = resolveVisibleTreeNodeByClientY(e.clientY);
-    const externalUpload = resolveExternalUpload(hoveredNode);
+    const hoveredNode = resolveVisibleTreeNodeByClientY(
+      e.clientY,
+      wrapperRef.current?.parentElement ?? null,
+      visibleRowBoundsRef.current,
+    );
+    const externalUpload = resolveExternalUpload(hoveredNode, treeDataRef.current || []);
     if (!hoveredNode || !externalUpload.targetNode) {
       clearExternalUploadHover();
       return;
@@ -2265,8 +1921,12 @@ export default function DirectoryTree({
       return;
     }
 
-    const hoveredNode = resolveVisibleTreeNodeByClientY(e.clientY);
-    handleExternalUploadDrop(e, resolveExternalUpload(hoveredNode));
+    const hoveredNode = resolveVisibleTreeNodeByClientY(
+      e.clientY,
+      wrapperRef.current?.parentElement ?? null,
+      visibleRowBoundsRef.current,
+    );
+    handleExternalUploadDrop(e, resolveExternalUpload(hoveredNode, treeDataRef.current || []));
   };
 
   return (
