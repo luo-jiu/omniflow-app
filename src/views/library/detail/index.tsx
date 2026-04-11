@@ -5,7 +5,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { FileViewerProvider } from "@/contexts/FileViewerContext";
 import { useFileViewer } from "@/hooks/useFileViewer";
 import { IconHome, IconUpload, IconDelete, IconChevronLeft, IconRefresh, IconPlus, IconClose } from "@douyinfe/semi-icons";
-import styled from "styled-components";
+import styled, { css } from "styled-components";
 import EmbeddedBrowserPanel, { type EmbeddedBrowserHandle } from "@/features/embedded-browser/components/EmbeddedBrowserPanel";
 
 const DEFAULT_SIDE_PANEL_WIDTH = 300;
@@ -159,6 +159,69 @@ const ContentArea = styled.div`
   border-bottom-left-radius: 12px;
 `;
 
+const toolbarActionButtonStyles = css`
+  .toolbar-action-btn {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    border: none;
+    background: transparent;
+    color: var(--app-text-muted);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    cursor: pointer;
+    -webkit-app-region: no-drag;
+  }
+
+  .toolbar-action-btn .semi-icon {
+    font-size: 16px;
+  }
+
+  .toolbar-action-btn:hover:not(:disabled) {
+    background: rgba(0, 0, 0, 0.05);
+    color: var(--app-text);
+  }
+
+  .toolbar-action-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
+  }
+`;
+
+const toolbarBackButtonStyles = css`
+  .toolbar-back-btn {
+    height: 32px;
+    border-radius: 8px;
+    border: none;
+    background: transparent;
+    color: var(--app-text-muted);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 10px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1;
+    -webkit-app-region: no-drag;
+  }
+
+  .toolbar-back-btn .semi-icon {
+    font-size: 16px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+  }
+
+  .toolbar-back-btn:hover {
+    background: rgba(0, 0, 0, 0.05);
+    color: var(--app-text);
+  }
+`;
+
 const ContentToolbar = styled.div`
   height: 38px;
   flex-shrink: 0;
@@ -215,59 +278,100 @@ const ContentToolbar = styled.div`
     margin-right: 6px;
     -webkit-app-region: no-drag;
   }
+  ${toolbarBackButtonStyles}
+  ${toolbarActionButtonStyles}
+`;
 
-  .toolbar-back-btn {
+const BrowserTabsRow = styled.div`
+  height: 44px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--app-border);
+  background: var(--app-bg);
+  overflow: hidden;
+  -webkit-app-region: drag;
+
+  .browser-tabs-list {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+  }
+
+  .browser-tabs-list::-webkit-scrollbar {
+    display: none;
+  }
+
+  .browser-tab-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+    -webkit-app-region: no-drag;
+  }
+
+  .browser-tab-btn {
+    min-width: 140px;
+    max-width: 260px;
     height: 32px;
+    padding: 0 12px;
     border-radius: 8px;
-    border: none;
-    background: transparent;
+    border: 1px solid var(--app-border);
+    background: var(--app-bg-elevated);
     color: var(--app-text-muted);
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    padding: 0 10px;
+    gap: 8px;
     cursor: pointer;
-    font-size: 13px;
-    font-weight: 500;
-    line-height: 1;
+    flex-shrink: 0;
+    -webkit-app-region: no-drag;
   }
 
-  .toolbar-back-btn .semi-icon {
-    font-size: 16px;
-  }
-
-  .toolbar-back-btn:hover {
-    background: rgba(0, 0, 0, 0.05);
+  .browser-tab-btn.active {
+    border-color: var(--semi-color-primary);
+    background: var(--semi-color-primary-light-default);
     color: var(--app-text);
   }
 
-  .toolbar-action-btn {
-    width: 32px;
-    height: 32px;
-    border-radius: 8px;
+  .browser-tab-title {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 13px;
+    text-align: left;
+  }
+
+  .browser-tab-close {
+    width: 20px;
+    height: 20px;
+    margin-left: auto;
     border: none;
     background: transparent;
-    color: var(--app-text-muted);
+    color: inherit;
+    cursor: pointer;
+    padding: 0;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    padding: 0;
-    cursor: pointer;
+    flex-shrink: 0;
+    -webkit-app-region: no-drag;
   }
 
-  .toolbar-action-btn .semi-icon {
-    font-size: 16px;
-  }
-
-  .toolbar-action-btn:hover:not(:disabled) {
-    background: rgba(0, 0, 0, 0.05);
+  .browser-tab-close:hover {
     color: var(--app-text);
   }
 
-  .toolbar-action-btn:disabled {
-    cursor: not-allowed;
-    opacity: 0.45;
-  }
+  ${toolbarBackButtonStyles}
+  ${toolbarActionButtonStyles}
 `;
 
 const ContentBody = styled.div`
@@ -283,6 +387,24 @@ const ContentBody = styled.div`
   }
 `;
 
+type BrowserTab = {
+  id: string;
+  title: string;
+  url: string;
+};
+
+function createBrowserTabId() {
+  return `browser-tab:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function createBrowserTab(): BrowserTab {
+  return {
+    id: createBrowserTabId(),
+    title: '新标签页',
+    url: '',
+  };
+}
+
 const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) => {
   const { setFileUrl, tabs, activeTabId, fileState, reloadActiveTab } = useFileViewer();
   const navigate = useNavigate();
@@ -290,7 +412,8 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   const browserRef = React.useRef<EmbeddedBrowserHandle | null>(null);
   const [sidePanelWidth, setSidePanelWidth] = React.useState<number>(() => loadSidePanelWidth(libraryId));
   const [browserModeOpen, setBrowserModeOpen] = React.useState(false);
-  const [browserUrl, setBrowserUrl] = React.useState('');
+  const [browserTabs, setBrowserTabs] = React.useState<BrowserTab[]>([]);
+  const [activeBrowserTabId, setActiveBrowserTabId] = React.useState<string | null>(null);
   const [browserInput, setBrowserInput] = React.useState('');
   const browserInputRef = React.useRef<HTMLInputElement | null>(null);
   const latestPanelWidthRef = React.useRef<number>(sidePanelWidth);
@@ -386,32 +509,103 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
     if (!trimmed) {
       return '';
     }
-    if (/^[a-zA-Z][a-zA-Z\d+\-.]*:/.test(trimmed)) {
+    if (!/\s/.test(trimmed) && /^[a-zA-Z][a-zA-Z\d+\-.]*:/.test(trimmed)) {
       return trimmed;
     }
-    return `https://${trimmed}`;
+    if (!/\s/.test(trimmed) && /^(localhost|(\d{1,3}\.){3}\d{1,3})(:\d+)?([/?#].*)?$/i.test(trimmed)) {
+      return `http://${trimmed}`;
+    }
+    if (!/\s/.test(trimmed) && /^[^\s]+\.[^\s]+/.test(trimmed)) {
+      return `https://${trimmed}`;
+    }
+    return `https://www.google.com/search?q=${encodeURIComponent(trimmed)}`;
+  }, []);
+
+  const syncBrowserInputWithTab = React.useCallback((tabId: string | null, nextUrl: string) => {
+    if (!tabId || tabId !== activeBrowserTabId) {
+      return;
+    }
+    setBrowserInput(nextUrl);
+  }, [activeBrowserTabId]);
+
+  const createAndActivateBrowserTab = React.useCallback(() => {
+    const nextTab = createBrowserTab();
+    setBrowserTabs((prev) => [...prev, nextTab]);
+    setActiveBrowserTabId(nextTab.id);
+    setBrowserModeOpen(true);
+    setBrowserInput('');
+    void window.electronEmbeddedBrowser.openTab(nextTab.id);
   }, []);
 
   const openEmbeddedBrowser = React.useCallback(() => {
-    setBrowserModeOpen(true);
-    setBrowserInput((prev) => prev || browserUrl);
-  }, [browserUrl]);
+    if (browserTabs.length > 0) {
+      const fallbackTabId = activeBrowserTabId ?? browserTabs[browserTabs.length - 1]?.id ?? null;
+      setBrowserModeOpen(true);
+      setActiveBrowserTabId(fallbackTabId);
+      const fallbackTab = browserTabs.find((tab) => tab.id === fallbackTabId) ?? null;
+      setBrowserInput(fallbackTab?.url ?? '');
+      return;
+    }
+    createAndActivateBrowserTab();
+  }, [activeBrowserTabId, browserTabs, createAndActivateBrowserTab]);
 
-  const closeEmbeddedBrowser = React.useCallback(() => {
+  const activateBrowserTab = React.useCallback((tabId: string) => {
+    setActiveBrowserTabId(tabId);
+    setBrowserModeOpen(true);
+    const targetTab = browserTabs.find((tab) => tab.id === tabId) ?? null;
+    setBrowserInput(targetTab?.url ?? '');
+    void window.electronEmbeddedBrowser.activateTab(tabId);
+  }, [browserTabs]);
+
+  const closeBrowserTab = React.useCallback((tabId: string) => {
+    const nextTabs = browserTabs.filter((tab) => tab.id !== tabId);
+    const closingActive = activeBrowserTabId === tabId;
+    setBrowserTabs(nextTabs);
+    if (closingActive) {
+      const fallback = nextTabs[nextTabs.length - 1] ?? null;
+      setActiveBrowserTabId(fallback?.id ?? null);
+      setBrowserInput(fallback?.url ?? '');
+      setBrowserModeOpen(nextTabs.length > 0);
+      if (fallback) {
+        void window.electronEmbeddedBrowser.activateTab(fallback.id);
+      } else {
+        void window.electronEmbeddedBrowser.deactivate();
+      }
+    }
+    void window.electronEmbeddedBrowser.closeTab(tabId);
+  }, [activeBrowserTabId, browserTabs]);
+
+  const closeEmbeddedBrowserMode = React.useCallback(() => {
     setBrowserModeOpen(false);
+    void window.electronEmbeddedBrowser.deactivate();
   }, []);
 
-  const handleBrowserSubmit = React.useCallback((event: React.FormEvent) => {
-    event.preventDefault();
-    const nextUrl = normalizeBrowserUrl(browserInput);
+  const submitBrowserInput = React.useCallback((rawValue: string) => {
+    if (!activeBrowserTabId) {
+      return;
+    }
+    const nextUrl = normalizeBrowserUrl(rawValue);
     if (!nextUrl) {
       return;
     }
-    setBrowserUrl(nextUrl);
     setBrowserInput(nextUrl);
     setBrowserModeOpen(true);
-    browserRef.current?.navigate(nextUrl);
-  }, [browserInput, normalizeBrowserUrl]);
+    setBrowserTabs((prev) => prev.map((tab) => (
+      tab.id === activeBrowserTabId
+        ? { ...tab, url: nextUrl, title: tab.title || nextUrl }
+        : tab
+    )));
+    browserRef.current?.navigate(activeBrowserTabId, nextUrl);
+  }, [activeBrowserTabId, normalizeBrowserUrl]);
+
+  const handleBrowserSubmit = React.useCallback((event: React.FormEvent) => {
+    event.preventDefault();
+    submitBrowserInput(browserInput);
+  }, [browserInput, submitBrowserInput]);
+
+  const submitBrowserDraft = React.useCallback((draftValue: string) => {
+    submitBrowserInput(draftValue);
+  }, [submitBrowserInput]);
 
   const handleToolbarRefresh = React.useCallback(() => {
     if (browserModeOpen) {
@@ -425,11 +619,23 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
     if (!browserModeOpen) {
       return;
     }
+    const activeBrowserTab = activeBrowserTabId
+      ? browserTabs.find((tab) => tab.id === activeBrowserTabId) ?? null
+      : null;
+    if (!activeBrowserTab?.url) {
+      return;
+    }
     window.requestAnimationFrame(() => {
       browserInputRef.current?.focus();
       browserInputRef.current?.select();
     });
-  }, [browserModeOpen]);
+  }, [activeBrowserTabId, browserModeOpen, browserTabs]);
+
+  React.useEffect(() => {
+    return () => {
+      void window.electronEmbeddedBrowser.closeAll();
+    };
+  }, []);
 
   return (
     <DetailWrapper>
@@ -470,7 +676,86 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
       </SidePanel>
 
       <ContentArea>
-        <ContentToolbar>
+        {browserModeOpen ? (
+          <>
+            <BrowserTabsRow>
+              <div className="browser-tab-actions">
+                <button
+                  type="button"
+                  className="toolbar-back-btn"
+                  onClick={closeEmbeddedBrowserMode}
+                  title="返回工作区"
+                >
+                  <IconChevronLeft />
+                  返回
+                </button>
+              </div>
+              <div className="browser-tabs-list">
+                {browserTabs.map((tab) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    className={`browser-tab-btn ${tab.id === activeBrowserTabId ? 'active' : ''}`}
+                    onClick={() => activateBrowserTab(tab.id)}
+                  >
+                    <span className="browser-tab-title">{tab.title || tab.url || '新标签页'}</span>
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      className="browser-tab-close"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        closeBrowserTab(tab.id);
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          closeBrowserTab(tab.id);
+                        }
+                      }}
+                    >
+                      <IconClose />
+                    </span>
+                  </button>
+                ))}
+              </div>
+              <button
+                type="button"
+                className="toolbar-action-btn"
+                onClick={createAndActivateBrowserTab}
+                title="新建浏览器标签"
+              >
+                <IconPlus />
+              </button>
+            </BrowserTabsRow>
+            <ContentToolbar>
+              <div className="toolbar-left">
+                <button
+                  type="button"
+                  className="toolbar-action-btn"
+                  onClick={handleToolbarRefresh}
+                  title="刷新网页"
+                >
+                  <IconRefresh />
+                </button>
+              </div>
+              <div className="toolbar-spacer">
+                <form className="toolbar-browser-form" onSubmit={handleBrowserSubmit}>
+                  <input
+                    ref={browserInputRef}
+                    className="toolbar-browser-input"
+                    value={browserInput}
+                    onChange={(event) => setBrowserInput(event.target.value)}
+                    placeholder="输入网址后回车"
+                  />
+                </form>
+              </div>
+              <div className="toolbar-right" />
+            </ContentToolbar>
+          </>
+        ) : (
+          <ContentToolbar>
           <div className="toolbar-left">
             {showBackToArchive && archiveReturnTarget ? (
               <button
@@ -492,19 +777,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
               </button>
             ) : null}
           </div>
-          <div className="toolbar-spacer">
-            {browserModeOpen ? (
-              <form className="toolbar-browser-form" onSubmit={handleBrowserSubmit}>
-                <input
-                  ref={browserInputRef}
-                  className="toolbar-browser-input"
-                  value={browserInput}
-                  onChange={(event) => setBrowserInput(event.target.value)}
-                  placeholder="输入网址后回车"
-                />
-              </form>
-            ) : null}
-          </div>
+          <div className="toolbar-spacer" />
           <div className="toolbar-right">
             <button
               type="button"
@@ -514,39 +787,60 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
             >
               <IconPlus />
             </button>
-            {browserModeOpen ? (
-              <button
-                type="button"
-                className="toolbar-action-btn"
-                onClick={closeEmbeddedBrowser}
-                title="关闭内置浏览器"
-              >
-                <IconClose />
-              </button>
-            ) : null}
             <button
               type="button"
               className="toolbar-action-btn"
               onClick={handleToolbarRefresh}
-              title={browserModeOpen ? "刷新网页" : "刷新当前标签页"}
-              disabled={!browserModeOpen && !activeTabId}
+              title="刷新当前标签页"
+              disabled={!activeTabId}
             >
               <IconRefresh />
             </button>
           </div>
-        </ContentToolbar>
+          </ContentToolbar>
+        )}
         <ContentBody>
           {browserModeOpen ? (
             <EmbeddedBrowserPanel
               ref={browserRef}
-              initialUrl={browserUrl}
+              activeTabId={activeBrowserTabId}
+              currentUrl={
+                activeBrowserTabId
+                  ? browserTabs.find((tab) => tab.id === activeBrowserTabId)?.url ?? ''
+                  : ''
+              }
               onUrlChange={(nextUrl) => {
-                setBrowserUrl(nextUrl);
-                setBrowserInput(nextUrl);
+                if (!activeBrowserTabId) {
+                  return;
+                }
+                setBrowserTabs((prev) => prev.map((tab) => (
+                  tab.id === activeBrowserTabId
+                    ? { ...tab, url: nextUrl, title: tab.title || nextUrl }
+                    : tab
+                )));
+                syncBrowserInputWithTab(activeBrowserTabId, nextUrl);
               }}
+              onStateChange={(payload) => {
+                if (!payload.tabId) {
+                  return;
+                }
+                setBrowserTabs((prev) => prev.map((tab) => (
+                  tab.id === payload.tabId
+                    ? {
+                        ...tab,
+                        title: payload.title || tab.title || tab.url || '新标签页',
+                        url: payload.url ?? tab.url,
+                      }
+                    : tab
+                )));
+                if (payload.tabId === activeBrowserTabId && payload.url) {
+                  setBrowserInput(payload.url);
+                }
+              }}
+              onSubmitDraft={submitBrowserDraft}
             />
           ) : (
-            <AppMain />
+            <AppMain hideTabsBar={false} />
           )}
         </ContentBody>
       </ContentArea>

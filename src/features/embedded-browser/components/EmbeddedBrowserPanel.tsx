@@ -2,12 +2,15 @@ import React from 'react';
 import styled from 'styled-components';
 
 type EmbeddedBrowserPanelProps = {
-  initialUrl?: string;
+  activeTabId: string | null;
+  currentUrl?: string;
   onUrlChange?: (url: string) => void;
+  onStateChange?: (payload: BrowserEventPayload) => void;
+  onSubmitDraft: (value: string) => void;
 };
 
 export type EmbeddedBrowserHandle = {
-  navigate: (url: string) => void;
+  navigate: (tabId: string, url: string) => void;
   reload: () => void;
 };
 
@@ -16,6 +19,8 @@ type BrowserEventPayload = {
   message?: string;
   meta?: string[];
   state?: 'idle' | 'loading' | 'ready' | 'error';
+  tabId?: string;
+  title?: string;
   url?: string;
 };
 
@@ -50,20 +55,97 @@ const BrowserSurface = styled.div`
     text-align: center;
     pointer-events: none;
   }
+
+  .embedded-browser-empty {
+    position: absolute;
+    inset: 0;
+    background: var(--app-bg);
+  }
+
+  .embedded-browser-empty-anchor {
+    position: absolute;
+    top: 33.333%;
+    left: 50%;
+    width: min(560px, calc(100% - 64px));
+    transform: translateX(-50%);
+  }
+
+  .embedded-browser-empty-header {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+    transform: translateY(-100%);
+  }
+
+  .embedded-browser-empty-title {
+    margin: 0;
+    color: var(--app-text);
+    font-size: 32px;
+    font-weight: 700;
+    line-height: 1.1;
+  }
+
+  .embedded-browser-empty-subtitle {
+    margin: 0;
+    color: var(--app-text-muted);
+    font-size: 13px;
+    line-height: 1.4;
+  }
+
+  .embedded-browser-empty-form {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 10px;
+  }
+
+  .embedded-browser-empty-input {
+    flex: 1;
+    min-width: 0;
+    height: 40px;
+    border-radius: 8px;
+    border: 1px solid var(--app-border);
+    background: var(--app-bg-elevated);
+    color: var(--app-text);
+    padding: 0 14px;
+    outline: none;
+    font-size: 14px;
+  }
+
+  .embedded-browser-empty-input:focus {
+    border-color: var(--semi-color-primary);
+  }
+
+  .embedded-browser-empty-submit {
+    height: 40px;
+    border-radius: 8px;
+    border: none;
+    background: var(--semi-color-primary);
+    color: #fff;
+    padding: 0 18px;
+    cursor: pointer;
+    flex-shrink: 0;
+    font-size: 14px;
+    font-weight: 600;
+  }
 `;
 
 const EmbeddedBrowserPanel = React.forwardRef<EmbeddedBrowserHandle, EmbeddedBrowserPanelProps>(
-  ({ initialUrl = '', onUrlChange }, ref) => {
+  ({ activeTabId, currentUrl = '', onUrlChange, onStateChange, onSubmitDraft }, ref) => {
     const hostRef = React.useRef<HTMLDivElement | null>(null);
-    const initialUrlRef = React.useRef(initialUrl);
+    const emptyInputRef = React.useRef<HTMLInputElement | null>(null);
+    const [emptyDraftValue, setEmptyDraftValue] = React.useState('');
     const [statusMessage, setStatusMessage] = React.useState(
-      initialUrl ? '正在打开网页...' : '输入网址后回车',
+      activeTabId ? '正在打开网页...' : '输入网址后回车',
     );
     const [statusDetails, setStatusDetails] = React.useState('');
     const [statusMeta, setStatusMeta] = React.useState<string[]>([]);
 
     const requestNavigation = React.useCallback(
-      async (mode: 'open' | 'navigate', nextUrl: string) => {
+      async (nextTabId: string, nextUrl: string) => {
         const normalizedUrl = String(nextUrl || '').trim();
         if (!normalizedUrl) {
           setStatusDetails('');
@@ -77,11 +159,7 @@ const EmbeddedBrowserPanel = React.forwardRef<EmbeddedBrowserHandle, EmbeddedBro
         setStatusMessage('正在打开网页...');
 
         try {
-          if (mode === 'open') {
-            await window.electronEmbeddedBrowser.open(normalizedUrl);
-            return;
-          }
-          await window.electronEmbeddedBrowser.navigate(normalizedUrl);
+          await window.electronEmbeddedBrowser.navigate(nextTabId, normalizedUrl);
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           if (message.includes('ERR_ABORTED')) {
@@ -96,17 +174,24 @@ const EmbeddedBrowserPanel = React.forwardRef<EmbeddedBrowserHandle, EmbeddedBro
     );
 
     React.useImperativeHandle(ref, () => ({
-      navigate: (nextUrl: string) => {
-        void requestNavigation('navigate', nextUrl);
+      navigate: (nextTabId: string, nextUrl: string) => {
+        void requestNavigation(nextTabId, nextUrl);
       },
       reload: () => {
+        if (!activeTabId) {
+          return;
+        }
         setStatusMessage('正在刷新网页...');
-        void window.electronEmbeddedBrowser.reload();
+        void window.electronEmbeddedBrowser.reload(activeTabId);
       },
-    }), [requestNavigation]);
+    }), [activeTabId, requestNavigation]);
 
     React.useEffect(() => {
       const unsubscribe = window.electronEmbeddedBrowser.onStateChange((payload: BrowserEventPayload) => {
+        onStateChange?.(payload);
+        if (payload.tabId && activeTabId && payload.tabId !== activeTabId) {
+          return;
+        }
         if (payload.url) {
           onUrlChange?.(payload.url);
         }
@@ -135,15 +220,29 @@ const EmbeddedBrowserPanel = React.forwardRef<EmbeddedBrowserHandle, EmbeddedBro
         }
       });
       return unsubscribe;
-    }, [onUrlChange]);
+    }, [activeTabId, onStateChange, onUrlChange]);
 
     React.useEffect(() => {
-      if (!initialUrlRef.current) {
+      if (!activeTabId) {
         setStatusMessage('输入网址后回车');
+        setEmptyDraftValue('');
+        void window.electronEmbeddedBrowser.deactivate();
         return;
       }
-      void requestNavigation('open', initialUrlRef.current);
-    }, [requestNavigation]);
+      if (!currentUrl) {
+        setStatusDetails('');
+        setStatusMeta([]);
+        setStatusMessage('');
+        setEmptyDraftValue('');
+        void window.electronEmbeddedBrowser.deactivate();
+        return;
+      }
+      setEmptyDraftValue('');
+      setStatusDetails('');
+      setStatusMeta([]);
+      setStatusMessage('正在打开网页...');
+      void window.electronEmbeddedBrowser.activateTab(activeTabId);
+    }, [activeTabId, currentUrl]);
 
     React.useLayoutEffect(() => {
       const host = hostRef.current;
@@ -189,13 +288,52 @@ const EmbeddedBrowserPanel = React.forwardRef<EmbeddedBrowserHandle, EmbeddedBro
 
     React.useEffect(() => {
       return () => {
-        void window.electronEmbeddedBrowser.close();
+        void window.electronEmbeddedBrowser.deactivate();
       };
     }, []);
+
+    const showEmptyState = Boolean(activeTabId) && !currentUrl;
+
+    React.useEffect(() => {
+      if (!showEmptyState) {
+        return;
+      }
+      window.requestAnimationFrame(() => {
+        emptyInputRef.current?.focus();
+      });
+    }, [showEmptyState]);
 
     return (
       <BrowserSurface>
         <div ref={hostRef} className="embedded-browser-host" />
+        {showEmptyState ? (
+          <div className="embedded-browser-empty">
+            <div className="embedded-browser-empty-anchor">
+              <div className="embedded-browser-empty-header">
+                <h1 className="embedded-browser-empty-title">Omniflow</h1>
+                <p className="embedded-browser-empty-subtitle">输入网址或关键词开始</p>
+              </div>
+              <form
+                className="embedded-browser-empty-form"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  onSubmitDraft(emptyDraftValue);
+                }}
+              >
+                <input
+                  ref={emptyInputRef}
+                  className="embedded-browser-empty-input"
+                  value={emptyDraftValue}
+                  onChange={(event) => setEmptyDraftValue(event.target.value)}
+                  placeholder="输入网址或关键词"
+                />
+                <button type="submit" className="embedded-browser-empty-submit">
+                  进入
+                </button>
+              </form>
+            </div>
+          </div>
+        ) : null}
         {statusMessage ? (
           <div className="embedded-browser-status">
             <div>

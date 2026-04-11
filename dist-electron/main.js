@@ -1,665 +1,1001 @@
-import { dialog as $, app as _, net as Ee, ipcMain as E, BrowserWindow as R, WebContentsView as Te, screen as De } from "electron";
-import { fileURLToPath as Pe } from "node:url";
-import g from "node:path";
-import G, { existsSync as se, readFileSync as Se, mkdirSync as Re, writeFileSync as Ae } from "node:fs";
-import v from "fs/promises";
-import ae from "node:http";
-import ce from "node:https";
-import le from "os";
-import J from "child_process";
-import Ce from "fs";
-const k = 6e4, Me = "Omniflow Inbox", xe = 10 * 60 * 1e3, Oe = 2, Ie = 2e3, X = 12, N = /* @__PURE__ */ new Map();
-function Y(e) {
-  const n = String(e || "");
-  return !!(!n || n === ".DS_Store" || n.startsWith("._") || n === "Thumbs.db");
+import { dialog, app, net, ipcMain, BrowserWindow, screen, WebContentsView } from "electron";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
+import fs$1, { existsSync, readFileSync, mkdirSync, writeFileSync } from "node:fs";
+import fs from "fs/promises";
+import http from "node:http";
+import https from "node:https";
+import require$$0 from "os";
+import require$$1 from "child_process";
+import fs$2 from "fs";
+const DOWNLOAD_REQUEST_TIMEOUT_MS = 6e4;
+const AUTO_IMPORT_DEFAULT_DIR_NAME = "Omniflow Inbox";
+const AUTO_IMPORT_OBSERVE_TTL_MS = 10 * 60 * 1e3;
+const AUTO_IMPORT_MIN_STABLE_COUNT = 2;
+const AUTO_IMPORT_MIN_MTIME_AGE_MS = 2e3;
+const AUTO_IMPORT_DEFAULT_MAX_FILES = 12;
+const autoImportObservedFiles = /* @__PURE__ */ new Map();
+function shouldIgnoreSystemEntry(entryName) {
+  const normalized = String(entryName || "");
+  if (!normalized) return true;
+  if (normalized === ".DS_Store") return true;
+  if (normalized.startsWith("._")) return true;
+  if (normalized === "Thumbs.db") return true;
+  return false;
 }
-function z(e) {
-  return e.replace(/\\/g, "/").split("/").filter(Boolean).join("/");
+function normalizeRelativePath(input) {
+  return input.replace(/\\/g, "/").split("/").filter(Boolean).join("/");
 }
-function Le(e) {
-  const n = String(e || "").toLowerCase();
-  return !n || n.startsWith(".") ? !0 : n.endsWith(".crdownload") || n.endsWith(".part") || n.endsWith(".tmp") || n.endsWith(".opdownload") || n.endsWith(".download");
+function isTransientDownloadEntry(entryName) {
+  const normalized = String(entryName || "").toLowerCase();
+  if (!normalized) return true;
+  if (normalized.startsWith(".")) return true;
+  return normalized.endsWith(".crdownload") || normalized.endsWith(".part") || normalized.endsWith(".tmp") || normalized.endsWith(".opdownload") || normalized.endsWith(".download");
 }
-function de() {
-  return g.join(_.getPath("userData"), "auto-import-staging");
+function getAutoImportStagingRoot() {
+  return path.join(app.getPath("userData"), "auto-import-staging");
 }
-function Ue(e, n) {
-  const i = g.resolve(e), t = g.resolve(n);
-  return i === t ? !0 : i.startsWith(`${t}${g.sep}`);
+function isPathInsideDirectory(filePath, directoryPath) {
+  const resolvedFilePath = path.resolve(filePath);
+  const resolvedDirectoryPath = path.resolve(directoryPath);
+  if (resolvedFilePath === resolvedDirectoryPath) return true;
+  return resolvedFilePath.startsWith(`${resolvedDirectoryPath}${path.sep}`);
 }
-function Fe(e) {
-  const n = String(e || "unknown").replace(/[/\\]/g, "_").trim() || "unknown";
-  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${n}`;
+function buildStagedFileName(fileName) {
+  const safeName = String(fileName || "unknown").replace(/[/\\]/g, "_").trim() || "unknown";
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${safeName}`;
 }
-async function $e(e, n) {
+async function moveFileSafe(sourcePath, targetPath) {
   try {
-    await v.rename(e, n);
-  } catch (i) {
-    if ((i == null ? void 0 : i.code) !== "EXDEV")
-      throw i;
-    await v.copyFile(e, n), await v.rm(e, { force: !0 });
+    await fs.rename(sourcePath, targetPath);
+  } catch (error) {
+    if ((error == null ? void 0 : error.code) !== "EXDEV") {
+      throw error;
+    }
+    await fs.copyFile(sourcePath, targetPath);
+    await fs.rm(sourcePath, { force: true });
   }
 }
-function We(e) {
-  const n = Date.now();
-  for (const [i, t] of N.entries())
-    e.has(i) || n - t.lastSeenAt <= xe || N.delete(i);
-}
-async function Ne(e, n = X) {
-  const i = String(e || "").trim(), t = i ? g.resolve(i) : g.join(_.getPath("downloads"), Me), r = await v.stat(t).catch(() => null);
-  if (!(r != null && r.isDirectory()))
-    return [];
-  const o = await v.readdir(t, { withFileTypes: !0 }), a = /* @__PURE__ */ new Set(), c = Date.now(), m = [];
-  for (const l of o) {
-    if (!l.isFile() || Y(l.name) || Le(l.name)) continue;
-    const d = g.join(t, l.name), y = await v.stat(d).catch(() => null);
-    if (!(y != null && y.isFile())) continue;
-    a.add(d);
-    const T = N.get(d), M = (T ? T.size === y.size && T.mtimeMs === y.mtimeMs : !1) && T ? T.stableCount + 1 : 1;
-    N.set(d, {
-      size: y.size,
-      mtimeMs: y.mtimeMs,
-      stableCount: M,
-      lastSeenAt: c
-    }), !(M < Oe) && (c - y.mtimeMs < Ie || m.push({
-      sourcePath: d,
-      name: l.name,
-      size: y.size,
-      mtimeMs: y.mtimeMs
-    }));
+function cleanupObservedState(seenPaths) {
+  const nowTs = Date.now();
+  for (const [observedPath, observedState] of autoImportObservedFiles.entries()) {
+    if (seenPaths.has(observedPath)) continue;
+    if (nowTs - observedState.lastSeenAt <= AUTO_IMPORT_OBSERVE_TTL_MS) continue;
+    autoImportObservedFiles.delete(observedPath);
   }
-  if (We(a), m.length === 0)
+}
+async function claimStableInboxFiles(watchDirectory, maxFiles = AUTO_IMPORT_DEFAULT_MAX_FILES) {
+  const rawDirectory = String(watchDirectory || "").trim();
+  const normalizedDirectory = rawDirectory ? path.resolve(rawDirectory) : path.join(app.getPath("downloads"), AUTO_IMPORT_DEFAULT_DIR_NAME);
+  const stat = await fs.stat(normalizedDirectory).catch(() => null);
+  if (!(stat == null ? void 0 : stat.isDirectory())) {
     return [];
-  m.sort((l, d) => l.mtimeMs - d.mtimeMs);
-  const h = de();
-  await v.mkdir(h, { recursive: !0 });
-  const f = [], p = Math.max(1, Math.floor(Number(n) || X));
-  for (const l of m.slice(0, p)) {
-    const d = g.join(h, Fe(l.name));
+  }
+  const entries = await fs.readdir(normalizedDirectory, { withFileTypes: true });
+  const seenPaths = /* @__PURE__ */ new Set();
+  const nowTs = Date.now();
+  const readyCandidates = [];
+  for (const entry of entries) {
+    if (!entry.isFile()) continue;
+    if (shouldIgnoreSystemEntry(entry.name)) continue;
+    if (isTransientDownloadEntry(entry.name)) continue;
+    const sourcePath = path.join(normalizedDirectory, entry.name);
+    const fileStat = await fs.stat(sourcePath).catch(() => null);
+    if (!(fileStat == null ? void 0 : fileStat.isFile())) continue;
+    seenPaths.add(sourcePath);
+    const previous = autoImportObservedFiles.get(sourcePath);
+    const unchanged = previous ? previous.size === fileStat.size && previous.mtimeMs === fileStat.mtimeMs : false;
+    const stableCount = unchanged && previous ? previous.stableCount + 1 : 1;
+    autoImportObservedFiles.set(sourcePath, {
+      size: fileStat.size,
+      mtimeMs: fileStat.mtimeMs,
+      stableCount,
+      lastSeenAt: nowTs
+    });
+    if (stableCount < AUTO_IMPORT_MIN_STABLE_COUNT) continue;
+    if (nowTs - fileStat.mtimeMs < AUTO_IMPORT_MIN_MTIME_AGE_MS) continue;
+    readyCandidates.push({
+      sourcePath,
+      name: entry.name,
+      size: fileStat.size,
+      mtimeMs: fileStat.mtimeMs
+    });
+  }
+  cleanupObservedState(seenPaths);
+  if (readyCandidates.length === 0) {
+    return [];
+  }
+  readyCandidates.sort((a, b) => a.mtimeMs - b.mtimeMs);
+  const stagingRoot = getAutoImportStagingRoot();
+  await fs.mkdir(stagingRoot, { recursive: true });
+  const claimedFiles = [];
+  const claimLimit = Math.max(1, Math.floor(Number(maxFiles) || AUTO_IMPORT_DEFAULT_MAX_FILES));
+  for (const candidate of readyCandidates.slice(0, claimLimit)) {
+    const stagedPath = path.join(stagingRoot, buildStagedFileName(candidate.name));
     try {
-      await $e(l.sourcePath, d);
+      await moveFileSafe(candidate.sourcePath, stagedPath);
     } catch {
       continue;
     }
-    N.delete(l.sourcePath), f.push({
-      name: l.name,
-      size: l.size,
-      localPath: d,
-      relativePath: z(l.name)
+    autoImportObservedFiles.delete(candidate.sourcePath);
+    claimedFiles.push({
+      name: candidate.name,
+      size: candidate.size,
+      localPath: stagedPath,
+      relativePath: normalizeRelativePath(candidate.name)
     });
   }
-  return f;
+  return claimedFiles;
 }
-async function ze(e) {
-  const n = g.resolve(String(e || "").trim()), i = de();
-  return !n || !Ue(n, i) ? !1 : (await v.rm(n, { force: !0 }), !0);
-}
-function te(e, n) {
-  const i = z(n || "");
-  if (!i)
-    return e;
-  const t = i.split("/").filter(Boolean);
-  for (const r of t) {
-    if (r === "." || r === "..")
-      throw new Error(`非法下载路径片段: ${r}`);
-    if (r.includes("\0"))
-      throw new Error("非法下载路径：包含空字符");
+async function cleanupStagedFile(stagedPath) {
+  const normalizedPath = path.resolve(String(stagedPath || "").trim());
+  const stagingRoot = getAutoImportStagingRoot();
+  if (!normalizedPath || !isPathInsideDirectory(normalizedPath, stagingRoot)) {
+    return false;
   }
-  return g.join(e, ...t);
+  await fs.rm(normalizedPath, { force: true });
+  return true;
 }
-async function ue(e, n, i = {}, t = 0) {
-  const o = new URL(e);
-  if (o.protocol !== "http:" && o.protocol !== "https:")
-    throw new Error(`不支持的下载协议: ${o.protocol}`);
-  const a = o.protocol === "https:" ? ce : ae;
-  await v.mkdir(g.dirname(n), { recursive: !0 }), await new Promise((c, m) => {
-    let h = !1;
-    const f = () => {
-      h || (h = !0, c());
-    }, p = (d) => {
-      h || (h = !0, m(d));
-    }, l = a.request({
-      protocol: o.protocol,
-      hostname: o.hostname,
-      port: o.port ? Number(o.port) : void 0,
-      path: `${o.pathname}${o.search}`,
+function resolveTargetPath(baseDirectory, relativePath) {
+  const normalizedRelativePath = normalizeRelativePath(relativePath || "");
+  if (!normalizedRelativePath) {
+    return baseDirectory;
+  }
+  const segments = normalizedRelativePath.split("/").filter(Boolean);
+  for (const segment of segments) {
+    if (segment === "." || segment === "..") {
+      throw new Error(`非法下载路径片段: ${segment}`);
+    }
+    if (segment.includes("\0")) {
+      throw new Error("非法下载路径：包含空字符");
+    }
+  }
+  return path.join(baseDirectory, ...segments);
+}
+async function downloadUrlToFile(url, targetPath, headers = {}, redirectDepth = 0) {
+  const MAX_REDIRECT_DEPTH = 3;
+  const parsed = new URL(url);
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error(`不支持的下载协议: ${parsed.protocol}`);
+  }
+  const transport = parsed.protocol === "https:" ? https : http;
+  await fs.mkdir(path.dirname(targetPath), { recursive: true });
+  await new Promise((resolve, reject) => {
+    let settled = false;
+    const settleResolve = () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
+    const settleReject = (error) => {
+      if (settled) return;
+      settled = true;
+      reject(error);
+    };
+    const request = transport.request({
+      protocol: parsed.protocol,
+      hostname: parsed.hostname,
+      port: parsed.port ? Number(parsed.port) : void 0,
+      path: `${parsed.pathname}${parsed.search}`,
       method: "GET",
-      headers: i
-    }, (d) => {
-      d.setTimeout(k, () => {
-        d.destroy(new Error(`下载响应超时: ${k}ms`));
+      headers
+    }, (response) => {
+      response.setTimeout(DOWNLOAD_REQUEST_TIMEOUT_MS, () => {
+        response.destroy(new Error(`下载响应超时: ${DOWNLOAD_REQUEST_TIMEOUT_MS}ms`));
       });
-      const y = Number(d.statusCode || 0), T = d.headers.location;
-      if (y >= 300 && y < 400 && T) {
-        if (d.resume(), t >= 3) {
-          p(new Error(`下载重定向次数过多: ${e}`));
+      const statusCode = Number(response.statusCode || 0);
+      const redirectLocation = response.headers.location;
+      if (statusCode >= 300 && statusCode < 400 && redirectLocation) {
+        response.resume();
+        if (redirectDepth >= MAX_REDIRECT_DEPTH) {
+          settleReject(new Error(`下载重定向次数过多: ${url}`));
           return;
         }
-        const P = new URL(T, e).toString();
-        ue(P, n, i, t + 1).then(f).catch(p);
+        const nextUrl = new URL(redirectLocation, url).toString();
+        downloadUrlToFile(nextUrl, targetPath, headers, redirectDepth + 1).then(settleResolve).catch(settleReject);
         return;
       }
-      if (y >= 400) {
-        d.resume(), p(new Error(`下载失败: HTTP ${y} (${e})`));
+      if (statusCode >= 400) {
+        response.resume();
+        settleReject(new Error(`下载失败: HTTP ${statusCode} (${url})`));
         return;
       }
-      const C = G.createWriteStream(n), M = async (P) => {
+      const fileStream = fs$1.createWriteStream(targetPath);
+      const cleanupAndReject = async (error) => {
         try {
-          C.destroy();
+          fileStream.destroy();
         } catch {
         }
         try {
-          await v.rm(n, { force: !0 });
+          await fs.rm(targetPath, { force: true });
         } catch {
         }
-        p(P);
+        settleReject(error);
       };
-      d.on("error", (P) => {
-        M(P);
-      }), C.on("error", (P) => {
-        M(P);
-      }), C.on("finish", () => f()), d.pipe(C);
+      response.on("error", (error) => {
+        void cleanupAndReject(error);
+      });
+      fileStream.on("error", (error) => {
+        void cleanupAndReject(error);
+      });
+      fileStream.on("finish", () => settleResolve());
+      response.pipe(fileStream);
     });
-    l.setTimeout(k, () => {
-      l.destroy(new Error(`下载请求超时: ${k}ms`));
-    }), l.on("error", (d) => p(d)), l.end();
+    request.setTimeout(DOWNLOAD_REQUEST_TIMEOUT_MS, () => {
+      request.destroy(new Error(`下载请求超时: ${DOWNLOAD_REQUEST_TIMEOUT_MS}ms`));
+    });
+    request.on("error", (error) => settleReject(error));
+    request.end();
   });
 }
-function fe(e, n) {
-  return e.relativePath.localeCompare(n.relativePath, "zh-Hans-CN");
+function byRelativePath(a, b) {
+  return a.relativePath.localeCompare(b.relativePath, "zh-Hans-CN");
 }
-async function Be(e) {
-  return (await Promise.all(e.map(async (i) => {
-    const t = await v.stat(i);
-    if (!t.isFile())
+async function collectFilesFromSelectedFilePaths(filePaths) {
+  const files = await Promise.all(filePaths.map(async (filePath) => {
+    const stat = await fs.stat(filePath);
+    if (!stat.isFile()) {
       return null;
-    const r = g.basename(i);
-    return Y(r) ? null : {
-      name: r,
-      size: t.size,
-      localPath: i,
-      relativePath: z(r)
+    }
+    const fileName = path.basename(filePath);
+    if (shouldIgnoreSystemEntry(fileName)) {
+      return null;
+    }
+    return {
+      name: fileName,
+      size: stat.size,
+      localPath: filePath,
+      relativePath: normalizeRelativePath(fileName)
     };
-  }))).filter((i) => !!i).sort(fe);
+  }));
+  return files.filter((item) => Boolean(item)).sort(byRelativePath);
 }
-async function He(e, n, i) {
-  const t = [n], r = [];
-  for (; t.length > 0; ) {
-    const f = t.pop(), p = await v.readdir(f, { withFileTypes: !0 });
-    for (const l of p) {
-      if (l.name === "." || l.name === ".." || Y(l.name) || l.isSymbolicLink())
-        continue;
-      const d = g.join(f, l.name);
-      if (l.isDirectory()) {
-        t.push(d);
+async function walkDirectoryFiles(rootPath, currentPath, rootDisplayName) {
+  const pendingDirectories = [currentPath];
+  const pendingFiles = [];
+  while (pendingDirectories.length > 0) {
+    const directoryPath = pendingDirectories.pop();
+    const entries = await fs.readdir(directoryPath, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.name === "." || entry.name === "..") {
         continue;
       }
-      l.isFile() && r.push({
-        absolutePath: d,
-        name: l.name
-      });
-    }
-  }
-  const o = [], a = 48;
-  let c = 0;
-  const m = async () => {
-    for (; ; ) {
-      const f = c;
-      if (c += 1, f >= r.length)
-        return;
-      const p = r[f], l = await v.stat(p.absolutePath).catch(() => null);
-      if (!(l != null && l.isFile()))
+      if (shouldIgnoreSystemEntry(entry.name)) {
         continue;
-      const d = z(g.relative(e, p.absolutePath)), y = z(g.join(i, d));
-      o.push({
-        name: p.name,
-        size: l.size,
-        localPath: p.absolutePath,
-        relativePath: y
+      }
+      if (entry.isSymbolicLink()) {
+        continue;
+      }
+      const absolutePath = path.join(directoryPath, entry.name);
+      if (entry.isDirectory()) {
+        pendingDirectories.push(absolutePath);
+        continue;
+      }
+      if (!entry.isFile()) {
+        continue;
+      }
+      pendingFiles.push({
+        absolutePath,
+        name: entry.name
       });
     }
-  }, h = Math.min(a, Math.max(1, r.length));
-  return await Promise.all(Array.from({ length: h }, () => m())), o;
-}
-async function ke(e) {
-  const n = [];
-  for (const i of e) {
-    if (!(await v.stat(i)).isDirectory())
-      continue;
-    const r = g.basename(i), o = await He(i, i, r);
-    n.push(...o);
   }
-  return n.sort(fe);
+  const files = [];
+  const STAT_CONCURRENCY = 48;
+  let currentIndex = 0;
+  const statWorker = async () => {
+    while (true) {
+      const workIndex = currentIndex;
+      currentIndex += 1;
+      if (workIndex >= pendingFiles.length) {
+        return;
+      }
+      const candidate = pendingFiles[workIndex];
+      const stat = await fs.stat(candidate.absolutePath).catch(() => null);
+      if (!(stat == null ? void 0 : stat.isFile())) {
+        continue;
+      }
+      const relativeInsideRoot = normalizeRelativePath(path.relative(rootPath, candidate.absolutePath));
+      const relativePath = normalizeRelativePath(path.join(rootDisplayName, relativeInsideRoot));
+      files.push({
+        name: candidate.name,
+        size: stat.size,
+        localPath: candidate.absolutePath,
+        relativePath
+      });
+    }
+  };
+  const workerCount = Math.min(STAT_CONCURRENCY, Math.max(1, pendingFiles.length));
+  await Promise.all(Array.from({ length: workerCount }, () => statWorker()));
+  return files;
 }
-function je(e) {
-  e.handle("file:open", async () => {
-    const n = await $.showOpenDialog({ properties: ["openFile"] });
-    return n.canceled || n.filePaths.length === 0 ? null : await v.readFile(n.filePaths[0], "utf-8");
-  }), e.handle("file:save", async (n, i, t) => (await v.writeFile(i, t, "utf-8"), !0)), e.handle("dialog:pick-upload-files", async () => {
-    const n = await $.showOpenDialog({
+async function collectFilesFromSelectedFolders(folderPaths) {
+  const allFiles = [];
+  for (const folderPath of folderPaths) {
+    const folderStat = await fs.stat(folderPath);
+    if (!folderStat.isDirectory()) {
+      continue;
+    }
+    const folderName = path.basename(folderPath);
+    const files = await walkDirectoryFiles(folderPath, folderPath, folderName);
+    allFiles.push(...files);
+  }
+  return allFiles.sort(byRelativePath);
+}
+function registerFileIpc(ipcMain2) {
+  ipcMain2.handle("file:open", async () => {
+    const result = await dialog.showOpenDialog({ properties: ["openFile"] });
+    if (result.canceled || result.filePaths.length === 0) return null;
+    return await fs.readFile(result.filePaths[0], "utf-8");
+  });
+  ipcMain2.handle("file:save", async (_e, filePath, content) => {
+    await fs.writeFile(filePath, content, "utf-8");
+    return true;
+  });
+  ipcMain2.handle("dialog:pick-upload-files", async () => {
+    const result = await dialog.showOpenDialog({
       properties: ["openFile", "multiSelections", "dontAddToRecent"]
     });
-    return n.canceled || n.filePaths.length === 0 ? { canceled: !0, files: [] } : { canceled: !1, files: await Be(n.filePaths) };
-  }), e.handle("dialog:pick-upload-folders", async () => {
-    const n = await $.showOpenDialog({
+    if (result.canceled || result.filePaths.length === 0) {
+      return { canceled: true, files: [] };
+    }
+    const files = await collectFilesFromSelectedFilePaths(result.filePaths);
+    return { canceled: false, files };
+  });
+  ipcMain2.handle("dialog:pick-upload-folders", async () => {
+    const result = await dialog.showOpenDialog({
       properties: ["openDirectory", "multiSelections", "dontAddToRecent"]
     });
-    return n.canceled || n.filePaths.length === 0 ? { canceled: !0, files: [] } : { canceled: !1, files: await ke(n.filePaths) };
-  }), e.handle("dialog:pick-download-directory", async () => {
-    const n = await $.showOpenDialog({
-      properties: ["openDirectory", "createDirectory", "dontAddToRecent"]
-    });
-    return n.canceled || n.filePaths.length === 0 ? { canceled: !0, directoryPath: "" } : { canceled: !1, directoryPath: n.filePaths[0] };
-  }), e.handle("dialog:pick-auto-import-directory", async () => {
-    const n = await $.showOpenDialog({
-      properties: ["openDirectory", "createDirectory", "dontAddToRecent"]
-    });
-    return n.canceled || n.filePaths.length === 0 ? { canceled: !0, directoryPath: "" } : { canceled: !1, directoryPath: n.filePaths[0] };
-  }), e.handle("fs:claim-auto-import-files", async (n, i, t = X) => ({ canceled: !1, files: await Ne(i, t) })), e.handle("fs:cleanup-auto-import-staged-file", async (n, i) => {
-    try {
-      return await ze(i);
-    } catch {
-      return !1;
+    if (result.canceled || result.filePaths.length === 0) {
+      return { canceled: true, files: [] };
     }
-  }), e.handle("fs:ensure-directory", async (n, i, t = "") => {
-    const r = te(i, t);
-    return await v.mkdir(r, { recursive: !0 }), r;
-  }), e.handle("fs:download-url-to-path", async (n, i, t, r, o = {}) => {
-    const a = te(t, r);
-    return await ue(i, a, o), a;
+    const files = await collectFilesFromSelectedFolders(result.filePaths);
+    return { canceled: false, files };
+  });
+  ipcMain2.handle("dialog:pick-download-directory", async () => {
+    const result = await dialog.showOpenDialog({
+      properties: ["openDirectory", "createDirectory", "dontAddToRecent"]
+    });
+    if (result.canceled || result.filePaths.length === 0) {
+      return { canceled: true, directoryPath: "" };
+    }
+    return { canceled: false, directoryPath: result.filePaths[0] };
+  });
+  ipcMain2.handle("dialog:pick-auto-import-directory", async () => {
+    const result = await dialog.showOpenDialog({
+      properties: ["openDirectory", "createDirectory", "dontAddToRecent"]
+    });
+    if (result.canceled || result.filePaths.length === 0) {
+      return { canceled: true, directoryPath: "" };
+    }
+    return { canceled: false, directoryPath: result.filePaths[0] };
+  });
+  ipcMain2.handle("fs:claim-auto-import-files", async (_event, watchDirectory, maxFiles = AUTO_IMPORT_DEFAULT_MAX_FILES) => {
+    const files = await claimStableInboxFiles(watchDirectory, maxFiles);
+    return { canceled: false, files };
+  });
+  ipcMain2.handle("fs:cleanup-auto-import-staged-file", async (_event, stagedPath) => {
+    try {
+      return await cleanupStagedFile(stagedPath);
+    } catch {
+      return false;
+    }
+  });
+  ipcMain2.handle("fs:ensure-directory", async (_event, baseDirectory, relativePath = "") => {
+    const targetPath = resolveTargetPath(baseDirectory, relativePath);
+    await fs.mkdir(targetPath, { recursive: true });
+    return targetPath;
+  });
+  ipcMain2.handle("fs:download-url-to-path", async (_event, url, baseDirectory, relativePath, headers = {}) => {
+    const targetPath = resolveTargetPath(baseDirectory, relativePath);
+    await downloadUrlToFile(url, targetPath, headers);
+    return targetPath;
   });
 }
-var b = {}, A = le;
-b.platform = function() {
+var osutils = {};
+var _os = require$$0;
+osutils.platform = function() {
   return process.platform;
 };
-b.cpuCount = function() {
-  return A.cpus().length;
+osutils.cpuCount = function() {
+  return _os.cpus().length;
 };
-b.sysUptime = function() {
-  return A.uptime();
+osutils.sysUptime = function() {
+  return _os.uptime();
 };
-b.processUptime = function() {
+osutils.processUptime = function() {
   return process.uptime();
 };
-b.freemem = function() {
-  return A.freemem() / (1024 * 1024);
+osutils.freemem = function() {
+  return _os.freemem() / (1024 * 1024);
 };
-b.totalmem = function() {
-  return A.totalmem() / (1024 * 1024);
+osutils.totalmem = function() {
+  return _os.totalmem() / (1024 * 1024);
 };
-b.freememPercentage = function() {
-  return A.freemem() / A.totalmem();
+osutils.freememPercentage = function() {
+  return _os.freemem() / _os.totalmem();
 };
-b.freeCommand = function(e) {
-  J.exec("free -m", function(n, i, t) {
-    var r = i.split(`
-`), o = r[1].replace(/[\s\n\r]+/g, " "), a = o.split(" ");
-    total_mem = parseFloat(a[1]), free_mem = parseFloat(a[3]), buffers_mem = parseFloat(a[5]), cached_mem = parseFloat(a[6]), used_mem = total_mem - (free_mem + buffers_mem + cached_mem), e(used_mem - 2);
+osutils.freeCommand = function(callback) {
+  require$$1.exec("free -m", function(error, stdout, stderr) {
+    var lines = stdout.split("\n");
+    var str_mem_info = lines[1].replace(/[\s\n\r]+/g, " ");
+    var mem_info = str_mem_info.split(" ");
+    total_mem = parseFloat(mem_info[1]);
+    free_mem = parseFloat(mem_info[3]);
+    buffers_mem = parseFloat(mem_info[5]);
+    cached_mem = parseFloat(mem_info[6]);
+    used_mem = total_mem - (free_mem + buffers_mem + cached_mem);
+    callback(used_mem - 2);
   });
 };
-b.harddrive = function(e) {
-  J.exec("df -k", function(n, i, t) {
-    var r = 0, o = 0, a = 0, c = i.split(`
-`), m = c[1].replace(/[\s\n\r]+/g, " "), h = m.split(" ");
-    r = Math.ceil(h[1] * 1024 / Math.pow(1024, 2)), o = Math.ceil(h[2] * 1024 / Math.pow(1024, 2)), a = Math.ceil(h[3] * 1024 / Math.pow(1024, 2)), e(r, a, o);
+osutils.harddrive = function(callback) {
+  require$$1.exec("df -k", function(error, stdout, stderr) {
+    var total = 0;
+    var used = 0;
+    var free = 0;
+    var lines = stdout.split("\n");
+    var str_disk_info = lines[1].replace(/[\s\n\r]+/g, " ");
+    var disk_info = str_disk_info.split(" ");
+    total = Math.ceil(disk_info[1] * 1024 / Math.pow(1024, 2));
+    used = Math.ceil(disk_info[2] * 1024 / Math.pow(1024, 2));
+    free = Math.ceil(disk_info[3] * 1024 / Math.pow(1024, 2));
+    callback(total, free, used);
   });
 };
-b.getProcesses = function(e, n) {
-  typeof e == "function" && (n = e, e = 0), command = "ps -eo pcpu,pmem,time,args | sort -k 1 -r | head -n10", e > 0 && (command = "ps -eo pcpu,pmem,time,args | sort -k 1 -r | head -n" + (e + 1)), J.exec(command, function(i, t, r) {
-    var o = t.split(`
-`);
-    o.shift(), o.pop();
-    var a = "";
-    o.forEach(function(c, m) {
-      var h = c.replace(/[\s\n\r]+/g, " ");
-      h = h.split(" "), a += h[1] + " " + h[2] + " " + h[3] + " " + h[4].substring(h[4].length - 25) + `
-`;
-    }), n(a);
+osutils.getProcesses = function(nProcess, callback) {
+  if (typeof nProcess === "function") {
+    callback = nProcess;
+    nProcess = 0;
+  }
+  command = "ps -eo pcpu,pmem,time,args | sort -k 1 -r | head -n10";
+  if (nProcess > 0)
+    command = "ps -eo pcpu,pmem,time,args | sort -k 1 -r | head -n" + (nProcess + 1);
+  require$$1.exec(command, function(error, stdout, stderr) {
+    var lines = stdout.split("\n");
+    lines.shift();
+    lines.pop();
+    var result = "";
+    lines.forEach(function(_item, _i) {
+      var _str = _item.replace(/[\s\n\r]+/g, " ");
+      _str = _str.split(" ");
+      result += _str[1] + " " + _str[2] + " " + _str[3] + " " + _str[4].substring(_str[4].length - 25) + "\n";
+    });
+    callback(result);
   });
 };
-b.allLoadavg = function() {
-  var e = A.loadavg();
-  return e[0].toFixed(4) + "," + e[1].toFixed(4) + "," + e[2].toFixed(4);
+osutils.allLoadavg = function() {
+  var loads = _os.loadavg();
+  return loads[0].toFixed(4) + "," + loads[1].toFixed(4) + "," + loads[2].toFixed(4);
 };
-b.loadavg = function(e) {
-  (e === void 0 || e !== 5 && e !== 15) && (e = 1);
-  var n = A.loadavg(), i = 0;
-  return e == 1 && (i = n[0]), e == 5 && (i = n[1]), e == 15 && (i = n[2]), i;
+osutils.loadavg = function(_time) {
+  if (_time === void 0 || _time !== 5 && _time !== 15) _time = 1;
+  var loads = _os.loadavg();
+  var v = 0;
+  if (_time == 1) v = loads[0];
+  if (_time == 5) v = loads[1];
+  if (_time == 15) v = loads[2];
+  return v;
 };
-b.cpuFree = function(e) {
-  me(e, !0);
+osutils.cpuFree = function(callback) {
+  getCPUUsage(callback, true);
 };
-b.cpuUsage = function(e) {
-  me(e, !1);
+osutils.cpuUsage = function(callback) {
+  getCPUUsage(callback, false);
 };
-function me(e, n) {
-  var i = ne(), t = i.idle, r = i.total;
+function getCPUUsage(callback, free) {
+  var stats1 = getCPUInfo();
+  var startIdle = stats1.idle;
+  var startTotal = stats1.total;
   setTimeout(function() {
-    var o = ne(), a = o.idle, c = o.total, m = a - t, h = c - r, f = m / h;
-    e(n === !0 ? f : 1 - f);
+    var stats2 = getCPUInfo();
+    var endIdle = stats2.idle;
+    var endTotal = stats2.total;
+    var idle = endIdle - startIdle;
+    var total = endTotal - startTotal;
+    var perc = idle / total;
+    if (free === true)
+      callback(perc);
+    else
+      callback(1 - perc);
   }, 1e3);
 }
-function ne(e) {
-  var n = A.cpus(), i = 0, t = 0, r = 0, o = 0, a = 0, m = 0;
-  for (var c in n)
-    i += n[c].times.user, t += n[c].times.nice, r += n[c].times.sys, a += n[c].times.irq, o += n[c].times.idle;
-  var m = i + t + r + o + a;
+function getCPUInfo(callback) {
+  var cpus = _os.cpus();
+  var user = 0;
+  var nice = 0;
+  var sys = 0;
+  var idle = 0;
+  var irq = 0;
+  var total = 0;
+  for (var cpu in cpus) {
+    user += cpus[cpu].times.user;
+    nice += cpus[cpu].times.nice;
+    sys += cpus[cpu].times.sys;
+    irq += cpus[cpu].times.irq;
+    idle += cpus[cpu].times.idle;
+  }
+  var total = user + nice + sys + idle + irq;
   return {
-    idle: o,
-    total: m
+    "idle": idle,
+    "total": total
   };
 }
-const Ve = process.env.NODE_ENV === "test" || !!(process.env.VITE_DEV_SERVER_URL || process.env.ELECTRON_RENDERER_URL) || process.env.OMNIFLOW_ENABLE_RUNTIME_LOGS === "true", W = (e, ...n) => {
-  Ve && console[e](...n);
-}, D = {
-  debug: (...e) => W("debug", ...e),
-  info: (...e) => W("info", ...e),
-  log: (...e) => W("log", ...e),
-  warn: (...e) => W("warn", ...e),
-  error: (...e) => W("error", ...e)
+const ENABLE_RUNTIME_LOGS = process.env.NODE_ENV === "test" || Boolean(process.env.VITE_DEV_SERVER_URL || process.env.ELECTRON_RENDERER_URL) || process.env.OMNIFLOW_ENABLE_RUNTIME_LOGS === "true";
+const print = (level, ...args) => {
+  if (!ENABLE_RUNTIME_LOGS) return;
+  console[level](...args);
 };
-function qe() {
-  const e = Ge().total, n = le.cpus()[0].model, i = Math.floor(b.totalmem() / 1024);
+const runtimeLogger = {
+  debug: (...args) => print("debug", ...args),
+  info: (...args) => print("info", ...args),
+  log: (...args) => print("log", ...args),
+  warn: (...args) => print("warn", ...args),
+  error: (...args) => print("error", ...args)
+};
+function getStaticData() {
+  const totalStorage = getStorageData().total;
+  const cpuModel = require$$0.cpus()[0].model;
+  const totalMemoryGB = Math.floor(osutils.totalmem() / 1024);
   return {
-    totalStorage: e,
-    cpuModel: n,
-    totalMemoryGB: i
+    totalStorage,
+    cpuModel,
+    totalMemoryGB
   };
 }
-function Ge() {
-  const e = Ce.statfsSync(process.platform === "win32" ? "C:" : "/"), n = e.blocks * e.bsize, i = e.bfree * e.bsize;
+function getStorageData() {
+  const stats = fs$2.statfsSync(process.platform === "win32" ? "C:" : "/");
+  const total = stats.blocks * stats.bsize;
+  const free = stats.bfree * stats.bsize;
   return {
-    total: Math.floor(n / 1e9),
+    total: Math.floor(total / 1e9),
     // 换算为 GB
-    usage: 1 - i / n
+    usage: 1 - free / total
     // 使用率计算
   };
 }
-function Xe(e) {
-  e.handle("sys:get-static-data", qe);
+function registerSystemIpc(ipcMain2) {
+  ipcMain2.handle("sys:get-static-data", getStaticData);
 }
-const Ze = 10 * 1024 * 1024 * 1024, Je = "10GB", Ye = `上传失败：单文件最大支持 ${Je}`;
-function he(e) {
-  return String(e).replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\r/g, "").replace(/\n/g, "");
+const MAX_SINGLE_UPLOAD_BYTES = 10 * 1024 * 1024 * 1024;
+const MAX_SINGLE_UPLOAD_LABEL = "10GB";
+const MAX_SINGLE_UPLOAD_ERROR_MESSAGE = `上传失败：单文件最大支持 ${MAX_SINGLE_UPLOAD_LABEL}`;
+function escapeMultipartDispositionValue(value) {
+  return String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\r/g, "").replace(/\n/g, "");
 }
-function Qe(e) {
-  return encodeURIComponent(e).replace(
+function encodeRFC5987Value(value) {
+  return encodeURIComponent(value).replace(
     /['()*]/g,
-    (n) => `%${n.charCodeAt(0).toString(16).toUpperCase()}`
+    (ch) => `%${ch.charCodeAt(0).toString(16).toUpperCase()}`
   );
 }
-function Ke(e) {
-  const n = he(e), i = Qe(e);
-  return `Content-Disposition: form-data; name="file"; filename="${n}"; filename*=UTF-8''${i}\r
+function buildFileContentDisposition(fileName) {
+  const escaped = escapeMultipartDispositionValue(fileName);
+  const encoded = encodeRFC5987Value(fileName);
+  return `Content-Disposition: form-data; name="file"; filename="${escaped}"; filename*=UTF-8''${encoded}\r
 `;
 }
-function et(e) {
-  const n = /* @__PURE__ */ new Map(), i = (t, r = !1) => {
-    const o = Date.now();
-    if (!r && o - t.lastProgressAt < 80) return;
-    t.lastProgressAt = o;
-    const a = Math.max(o - t.startedAt, 1), c = Math.floor(t.uploadedBytes * 1e3 / a), m = t.totalBytes > 0 ? Math.min(t.uploadedBytes / t.totalBytes * 100, 100) : 0;
-    t.sender.send("http:upload:progress", {
-      uploadId: t.uploadId,
-      uploadedBytes: t.uploadedBytes,
-      totalBytes: t.totalBytes,
-      percentage: m,
-      speedBps: c
+function registerHttpIpc(ipcMain2) {
+  const activeUploads = /* @__PURE__ */ new Map();
+  const sendUploadProgress = (runtime, force = false) => {
+    const now = Date.now();
+    if (!force && now - runtime.lastProgressAt < 80) return;
+    runtime.lastProgressAt = now;
+    const elapsedMs = Math.max(now - runtime.startedAt, 1);
+    const speedBps = Math.floor(runtime.uploadedBytes * 1e3 / elapsedMs);
+    const percentage = runtime.totalBytes > 0 ? Math.min(runtime.uploadedBytes / runtime.totalBytes * 100, 100) : 0;
+    runtime.sender.send("http:upload:progress", {
+      uploadId: runtime.uploadId,
+      uploadedBytes: runtime.uploadedBytes,
+      totalBytes: runtime.totalBytes,
+      percentage,
+      speedBps
     });
   };
-  e.handle("http:fetch", async (t, r, o = {}) => (D.debug("http:fetch start"), D.debug("http:fetch URL:", r), D.debug("http:fetch options:", o), new Promise((a, c) => {
-    const m = Ee.request({ url: r, method: o.method || "GET" });
-    o.headers && Object.entries(o.headers).forEach(([f, p]) => {
-      D.debug(`http:fetch set header ${f}: ${String(p)}`), m.setHeader(f, p);
+  ipcMain2.handle("http:fetch", async (_event, url, options = {}) => {
+    runtimeLogger.debug("http:fetch start");
+    runtimeLogger.debug("http:fetch URL:", url);
+    runtimeLogger.debug("http:fetch options:", options);
+    return new Promise((resolve, reject) => {
+      const request = net.request({ url, method: options.method || "GET" });
+      if (options.headers) {
+        Object.entries(options.headers).forEach(([key, value]) => {
+          runtimeLogger.debug(`http:fetch set header ${key}: ${String(value)}`);
+          request.setHeader(key, value);
+        });
+      }
+      let body = "";
+      request.on("response", (response) => {
+        runtimeLogger.debug("http:fetch response");
+        runtimeLogger.debug("http:fetch status:", response.statusCode);
+        runtimeLogger.debug("http:fetch headers:", response.headers);
+        response.on("data", (chunk) => {
+          runtimeLogger.debug(`http:fetch chunk length: ${chunk.length}`);
+          body += chunk;
+        });
+        response.on("end", () => {
+          runtimeLogger.debug("http:fetch body preview:", body.slice(0, 500));
+          let parsedBody;
+          try {
+            parsedBody = JSON.parse(body);
+          } catch {
+            parsedBody = body;
+          }
+          resolve({
+            status: response.statusCode,
+            headers: response.headers,
+            body: parsedBody
+          });
+        });
+      });
+      request.on("error", (err) => {
+        runtimeLogger.error("http:fetch error:", err);
+        reject(err);
+      });
+      if (options.body) {
+        request.write(options.body);
+      }
+      request.end();
     });
-    let h = "";
-    m.on("response", (f) => {
-      D.debug("http:fetch response"), D.debug("http:fetch status:", f.statusCode), D.debug("http:fetch headers:", f.headers), f.on("data", (p) => {
-        D.debug(`http:fetch chunk length: ${p.length}`), h += p;
-      }), f.on("end", () => {
-        D.debug("http:fetch body preview:", h.slice(0, 500));
-        let p;
-        try {
-          p = JSON.parse(h);
-        } catch {
-          p = h;
-        }
-        a({
-          status: f.statusCode,
-          headers: f.headers,
-          body: p
-        });
-      });
-    }), m.on("error", (f) => {
-      D.error("http:fetch error:", f), c(f);
-    }), o.body && m.write(o.body), m.end();
-  }))), e.handle("http:upload:abort", async (t, r) => {
-    const o = n.get(r);
-    if (!o) return !1;
-    o.aborted = !0, n.delete(r);
+  });
+  ipcMain2.handle("http:upload:abort", async (_event, uploadId) => {
+    const runtime = activeUploads.get(uploadId);
+    if (!runtime) return false;
+    runtime.aborted = true;
+    activeUploads.delete(uploadId);
     try {
-      o.fileStream.destroy(new Error("UPLOAD_ABORTED"));
+      runtime.fileStream.destroy(new Error("UPLOAD_ABORTED"));
     } catch {
     }
     try {
-      o.request.destroy(new Error("UPLOAD_ABORTED"));
+      runtime.request.destroy(new Error("UPLOAD_ABORTED"));
     } catch {
     }
-    return !0;
-  }), e.handle("http:upload", async (t, r, o, a = {}, c = {}, m) => new Promise((h, f) => {
-    let p;
-    try {
-      p = G.statSync(o);
-    } catch (w) {
-      f(new Error(`读取上传文件失败: ${o} (${String(w)})`));
-      return;
-    }
-    if (!p.isFile()) {
-      f(new Error(`上传目标不是文件: ${o}`));
-      return;
-    }
-    if (p.size > Ze) {
-      f(new Error(Ye));
-      return;
-    }
-    const l = "----WebKitFormBoundary" + Math.random().toString(36).substring(2), d = m || `upload-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, y = g.basename(o), T = Object.entries(a).map(([w, L]) => `--${l}\r
-Content-Disposition: form-data; name="${he(w)}"\r
+    return true;
+  });
+  ipcMain2.handle("http:upload", async (event, url, filePath, formDataParams = {}, headers = {}, uploadId) => {
+    return new Promise((resolve, reject) => {
+      let stat;
+      try {
+        stat = fs$1.statSync(filePath);
+      } catch (error) {
+        reject(new Error(`读取上传文件失败: ${filePath} (${String(error)})`));
+        return;
+      }
+      if (!stat.isFile()) {
+        reject(new Error(`上传目标不是文件: ${filePath}`));
+        return;
+      }
+      if (stat.size > MAX_SINGLE_UPLOAD_BYTES) {
+        reject(new Error(MAX_SINGLE_UPLOAD_ERROR_MESSAGE));
+        return;
+      }
+      const boundary = "----WebKitFormBoundary" + Math.random().toString(36).substring(2);
+      const currentUploadId = uploadId || `upload-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const fileName = path.basename(filePath);
+      const fieldsPrefix = Object.entries(formDataParams).map(([key, value]) => `--${boundary}\r
+Content-Disposition: form-data; name="${escapeMultipartDispositionValue(key)}"\r
 \r
-${L}\r
-`).join(""), C = `--${l}\r
-` + Ke(y) + `Content-Type: application/octet-stream\r
+${value}\r
+`).join("");
+      const filePrefix = `--${boundary}\r
+` + buildFileContentDisposition(fileName) + `Content-Type: application/octet-stream\r
 \r
-`, M = `\r
---${l}--\r
-`, P = Buffer.byteLength(T) + Buffer.byteLength(C) + p.size + Buffer.byteLength(M), be = {
-      ...c,
-      "Content-Type": `multipart/form-data; boundary=${l}`,
-      "Content-Length": String(P)
-    }, I = new URL(r), S = (I.protocol === "https:" ? ce : ae).request({
-      protocol: I.protocol,
-      hostname: I.hostname,
-      port: I.port ? Number(I.port) : void 0,
-      path: `${I.pathname}${I.search}`,
-      method: "POST",
-      headers: be
-    }), U = G.createReadStream(o, {
-      highWaterMark: 1024 * 1024
-    }), x = {
-      uploadId: d,
-      request: S,
-      fileStream: U,
-      sender: t.sender,
-      totalBytes: Math.max(0, p.size),
-      uploadedBytes: 0,
-      startedAt: Date.now(),
-      lastProgressAt: 0,
-      aborted: !1
-    };
-    n.set(d, x);
-    let B = !1;
-    const _e = (w) => {
-      B || (B = !0, n.delete(d), h(w));
-    }, H = (w) => {
-      B || (B = !0, n.delete(d), f(w));
-    };
-    let q = "";
-    S.on("response", (w) => {
-      w.on("data", (L) => {
-        q += L.toString();
-      }), w.on("end", () => {
-        let L;
-        try {
-          L = JSON.parse(q);
-        } catch {
-          L = q;
-        }
-        _e({
-          status: w.statusCode,
-          body: L
+`;
+      const fileSuffix = `\r
+--${boundary}--\r
+`;
+      const contentLength = Buffer.byteLength(fieldsPrefix) + Buffer.byteLength(filePrefix) + stat.size + Buffer.byteLength(fileSuffix);
+      const finalHeaders = {
+        ...headers,
+        "Content-Type": `multipart/form-data; boundary=${boundary}`,
+        "Content-Length": String(contentLength)
+      };
+      const parsedUrl = new URL(url);
+      const transport = parsedUrl.protocol === "https:" ? https : http;
+      const request = transport.request({
+        protocol: parsedUrl.protocol,
+        hostname: parsedUrl.hostname,
+        port: parsedUrl.port ? Number(parsedUrl.port) : void 0,
+        path: `${parsedUrl.pathname}${parsedUrl.search}`,
+        method: "POST",
+        headers: finalHeaders
+      });
+      const fileStream = fs$1.createReadStream(filePath, {
+        highWaterMark: 1024 * 1024
+      });
+      const runtime = {
+        uploadId: currentUploadId,
+        request,
+        fileStream,
+        sender: event.sender,
+        totalBytes: Math.max(0, stat.size),
+        uploadedBytes: 0,
+        startedAt: Date.now(),
+        lastProgressAt: 0,
+        aborted: false
+      };
+      activeUploads.set(currentUploadId, runtime);
+      let settled = false;
+      const safeResolve = (payload) => {
+        if (settled) return;
+        settled = true;
+        activeUploads.delete(currentUploadId);
+        resolve(payload);
+      };
+      const safeReject = (error) => {
+        if (settled) return;
+        settled = true;
+        activeUploads.delete(currentUploadId);
+        reject(error);
+      };
+      let responseBody = "";
+      request.on("response", (response) => {
+        response.on("data", (chunk) => {
+          responseBody += chunk.toString();
+        });
+        response.on("end", () => {
+          let parsedBody;
+          try {
+            parsedBody = JSON.parse(responseBody);
+          } catch {
+            parsedBody = responseBody;
+          }
+          safeResolve({
+            status: response.statusCode,
+            body: parsedBody
+          });
         });
       });
-    }), S.on("error", (w) => {
-      if (x.aborted) {
-        H(new Error("UPLOAD_ABORTED"));
-        return;
-      }
-      try {
-        U.destroy(w);
-      } catch {
-      }
-      H(w);
-    }), S.write(T), S.write(C), U.on("data", (w) => {
-      x.aborted || (x.uploadedBytes += w.length, i(x));
-    }), U.on("end", () => {
-      x.aborted || (i(x, !0), S.write(M), S.end());
-    }), U.on("error", (w) => {
-      if (x.aborted) {
-        H(new Error("UPLOAD_ABORTED"));
-        return;
-      }
-      H(w);
-      try {
-        S.destroy(w);
-      } catch {
-      }
-    }), U.pipe(S, { end: !1 });
-  }));
-}
-function tt() {
-  je(E), Xe(E), et(E);
-}
-const nt = g.dirname(Pe(import.meta.url));
-process.env.APP_ROOT = g.join(nt, "..");
-const Z = process.env.VITE_DEV_SERVER_URL, rt = g.join(process.env.APP_ROOT, "dist-electron"), pe = g.join(process.env.APP_ROOT, "dist");
-process.env.VITE_PUBLIC = Z ? g.join(process.env.APP_ROOT, "public") : pe;
-const re = g.join(process.env.APP_ROOT, "build", "icons", "icon.png"), ot = "Omniflow", it = "omniflow-app", st = 1400, at = 920, Q = 600, K = 400, ct = "window-state.json", lt = 200;
-_.setName(ot);
-try {
-  const e = g.join(_.getPath("appData"), it);
-  _.setPath("userData", e);
-} catch {
-}
-function ge() {
-  return se(re) ? re : null;
-}
-let u = null, oe = !1, ye = !1;
-const dt = 240;
-let j = null, s = null, F = "", ie = null;
-function we() {
-  return g.join(_.getPath("userData"), ct);
-}
-function O(e) {
-  return typeof e == "number" && Number.isFinite(e);
-}
-function ut(e, n) {
-  return e >= Q && n >= K;
-}
-function ft(e) {
-  return De.getAllDisplays().some((i) => {
-    const t = i.workArea;
-    return e.x < t.x + t.width && e.x + e.width > t.x && e.y < t.y + t.height && e.y + e.height > t.y;
+      request.on("error", (err) => {
+        if (runtime.aborted) {
+          safeReject(new Error("UPLOAD_ABORTED"));
+          return;
+        }
+        try {
+          fileStream.destroy(err);
+        } catch {
+        }
+        safeReject(err);
+      });
+      request.write(fieldsPrefix);
+      request.write(filePrefix);
+      fileStream.on("data", (chunk) => {
+        if (runtime.aborted) return;
+        runtime.uploadedBytes += chunk.length;
+        sendUploadProgress(runtime);
+      });
+      fileStream.on("end", () => {
+        if (runtime.aborted) return;
+        sendUploadProgress(runtime, true);
+        request.write(fileSuffix);
+        request.end();
+      });
+      fileStream.on("error", (err) => {
+        if (runtime.aborted) {
+          safeReject(new Error("UPLOAD_ABORTED"));
+          return;
+        }
+        safeReject(err);
+        try {
+          request.destroy(err);
+        } catch {
+        }
+      });
+      fileStream.pipe(request, { end: false });
+    });
   });
 }
-function mt() {
+function registerIpcHandlers() {
+  registerFileIpc(ipcMain);
+  registerSystemIpc(ipcMain);
+  registerHttpIpc(ipcMain);
+}
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+process.env.APP_ROOT = path.join(__dirname, "..");
+const VITE_DEV_SERVER_URL = process.env["VITE_DEV_SERVER_URL"];
+const MAIN_DIST = path.join(process.env.APP_ROOT, "dist-electron");
+const RENDERER_DIST = path.join(process.env.APP_ROOT, "dist");
+process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, "public") : RENDERER_DIST;
+const APP_ICON_PATH = path.join(process.env.APP_ROOT, "build", "icons", "icon.png");
+const APP_DISPLAY_NAME = "Omniflow";
+const LEGACY_USER_DATA_DIRNAME = "omniflow-app";
+const DEFAULT_WINDOW_WIDTH = 1400;
+const DEFAULT_WINDOW_HEIGHT = 920;
+const MIN_WINDOW_WIDTH = 600;
+const MIN_WINDOW_HEIGHT = 400;
+const WINDOW_STATE_FILENAME = "window-state.json";
+const WINDOW_STATE_SAVE_DEBOUNCE_MS = 200;
+const ENABLE_EMBEDDED_BROWSER_DEBUG = process.env.NODE_ENV === "test" || Boolean(VITE_DEV_SERVER_URL || process.env.ELECTRON_RENDERER_URL) || process.env.OMNIFLOW_ENABLE_RUNTIME_LOGS === "true";
+const ENABLE_CHROMIUM_RUNTIME_LOGS = process.env.OMNIFLOW_ENABLE_CHROMIUM_LOGS === "true";
+if (!ENABLE_CHROMIUM_RUNTIME_LOGS) {
+  app.commandLine.appendSwitch("disable-logging");
+  app.commandLine.appendSwitch("log-level", "3");
+}
+app.setName(APP_DISPLAY_NAME);
+try {
+  const stableUserDataPath = path.join(app.getPath("appData"), LEGACY_USER_DATA_DIRNAME);
+  app.setPath("userData", stableUserDataPath);
+} catch {
+}
+function getAppIconPath() {
+  return existsSync(APP_ICON_PATH) ? APP_ICON_PATH : null;
+}
+let mainWindow = null;
+let windowHandlersRegistered = false;
+let isQuitting = false;
+const WINDOW_ACTIVATE_TOPMOST_DURATION_MS = 240;
+let windowStateSaveTimer = null;
+const embeddedBrowserViews = /* @__PURE__ */ new Map();
+const embeddedBrowserLastCommittedUrls = /* @__PURE__ */ new Map();
+let activeEmbeddedBrowserTabId = null;
+let embeddedBrowserPendingBounds = null;
+function getWindowStateFilePath() {
+  return path.join(app.getPath("userData"), WINDOW_STATE_FILENAME);
+}
+function isFiniteNumber(input) {
+  return typeof input === "number" && Number.isFinite(input);
+}
+function isValidWindowSize(width, height) {
+  return width >= MIN_WINDOW_WIDTH && height >= MIN_WINDOW_HEIGHT;
+}
+function isWindowWithinAnyDisplay(bounds) {
+  const displays = screen.getAllDisplays();
+  return displays.some((display) => {
+    const area = display.workArea;
+    return bounds.x < area.x + area.width && bounds.x + bounds.width > area.x && bounds.y < area.y + area.height && bounds.y + bounds.height > area.y;
+  });
+}
+function readPersistedWindowState() {
   try {
-    const e = we();
-    if (!se(e))
+    const filePath = getWindowStateFilePath();
+    if (!existsSync(filePath)) {
       return null;
-    const n = Se(e, "utf-8"), i = JSON.parse(n);
-    if (!O(i.width) || !O(i.height) || !ut(i.width, i.height))
+    }
+    const raw = readFileSync(filePath, "utf-8");
+    const parsed = JSON.parse(raw);
+    if (!isFiniteNumber(parsed.width) || !isFiniteNumber(parsed.height)) {
       return null;
-    const t = !!i.maximized, r = {
-      width: i.width,
-      height: i.height,
-      maximized: t
+    }
+    if (!isValidWindowSize(parsed.width, parsed.height)) {
+      return null;
+    }
+    const maximized = Boolean(parsed.maximized);
+    const nextState = {
+      width: parsed.width,
+      height: parsed.height,
+      maximized
     };
-    return O(i.x) && O(i.y) && (r.x = i.x, r.y = i.y), O(r.x) && O(r.y) && (ft({
-      x: r.x,
-      y: r.y,
-      width: r.width,
-      height: r.height
-    }) || (delete r.x, delete r.y)), r;
+    if (isFiniteNumber(parsed.x) && isFiniteNumber(parsed.y)) {
+      nextState.x = parsed.x;
+      nextState.y = parsed.y;
+    }
+    if (isFiniteNumber(nextState.x) && isFiniteNumber(nextState.y)) {
+      const isVisible = isWindowWithinAnyDisplay({
+        x: nextState.x,
+        y: nextState.y,
+        width: nextState.width,
+        height: nextState.height
+      });
+      if (!isVisible) {
+        delete nextState.x;
+        delete nextState.y;
+      }
+    }
+    return nextState;
   } catch {
     return null;
   }
 }
-function ee(e) {
-  if (!e.isDestroyed())
-    try {
-      const n = e.isMaximized() ? e.getNormalBounds() : e.getBounds(), i = {
-        x: n.x,
-        y: n.y,
-        width: Math.max(Math.round(n.width), Q),
-        height: Math.max(Math.round(n.height), K),
-        maximized: e.isMaximized()
-      }, t = we();
-      Re(g.dirname(t), { recursive: !0 }), Ae(t, JSON.stringify(i), "utf-8");
-    } catch {
-    }
+function saveWindowState(win) {
+  if (win.isDestroyed()) return;
+  try {
+    const normalBounds = win.isMaximized() ? win.getNormalBounds() : win.getBounds();
+    const payload = {
+      x: normalBounds.x,
+      y: normalBounds.y,
+      width: Math.max(Math.round(normalBounds.width), MIN_WINDOW_WIDTH),
+      height: Math.max(Math.round(normalBounds.height), MIN_WINDOW_HEIGHT),
+      maximized: win.isMaximized()
+    };
+    const filePath = getWindowStateFilePath();
+    mkdirSync(path.dirname(filePath), { recursive: true });
+    writeFileSync(filePath, JSON.stringify(payload), "utf-8");
+  } catch {
+  }
 }
-function V(e) {
-  j && clearTimeout(j), j = setTimeout(() => {
-    j = null, ee(e);
-  }, lt);
+function scheduleSaveWindowState(win) {
+  if (windowStateSaveTimer) {
+    clearTimeout(windowStateSaveTimer);
+  }
+  windowStateSaveTimer = setTimeout(() => {
+    windowStateSaveTimer = null;
+    saveWindowState(win);
+  }, WINDOW_STATE_SAVE_DEBOUNCE_MS);
 }
-function ht(e) {
-  if (e.type !== "keyDown")
-    return !1;
-  const n = (e.key || "").toLowerCase();
-  return (e.meta || e.control) && e.shift && n === "i";
+function isToggleDevToolsShortcut(input) {
+  if (input.type !== "keyDown") {
+    return false;
+  }
+  const key = (input.key || "").toLowerCase();
+  return (input.meta || input.control) && input.shift && key === "i";
 }
-function pt() {
-  if (oe)
+function registerWindowIpcHandlers() {
+  if (windowHandlersRegistered) {
     return;
-  oe = !0, E.handle("zoom-adjust", (t, r) => {
-    const o = R.fromWebContents(t.sender) ?? u;
-    if (!o || o.isDestroyed())
+  }
+  windowHandlersRegistered = true;
+  ipcMain.handle("zoom-adjust", (event, delta) => {
+    const targetWindow = BrowserWindow.fromWebContents(event.sender) ?? mainWindow;
+    if (!targetWindow || targetWindow.isDestroyed()) {
       return null;
-    const a = o.webContents.getZoomFactor(), c = Math.min(Math.max(a + r, 0.25), 3);
-    return o.webContents.setZoomFactor(c), c;
-  }), E.on("window-minimize", (t) => {
-    const r = R.fromWebContents(t.sender) ?? u;
-    r == null || r.minimize();
-  }), E.on("window-maximize", (t) => {
-    const r = R.fromWebContents(t.sender) ?? u;
-    !r || r.isDestroyed() || (r.isMaximized() ? r.unmaximize() : r.maximize());
-  }), E.on("window-close", (t) => {
-    const r = R.fromWebContents(t.sender) ?? u;
-    r == null || r.close();
-  }), E.handle("window-activate", (t, r = !1) => {
-    const o = R.fromWebContents(t.sender) ?? u;
-    return !o || o.isDestroyed() ? !1 : (o.isMinimized() && o.restore(), o.isVisible() || o.show(), process.platform === "darwin" ? _.focus({ steal: !0 }) : _.focus(), typeof o.moveTop == "function" && o.moveTop(), o.focus(), r && !o.isAlwaysOnTop() && (o.setAlwaysOnTop(!0, "screen-saver"), setTimeout(() => {
-      o.isDestroyed() || o.setAlwaysOnTop(!1);
-    }, dt)), !0);
+    }
+    const currentZoom = targetWindow.webContents.getZoomFactor();
+    const nextZoom = Math.min(Math.max(currentZoom + delta, 0.25), 3);
+    targetWindow.webContents.setZoomFactor(nextZoom);
+    return nextZoom;
   });
-  const e = (t) => {
-    console.log("[embedded-browser:main]", t), !(!u || u.isDestroyed()) && u.webContents.send("embedded-browser:state", t);
-  }, n = async () => {
-    if (!s || s.webContents.isDestroyed())
+  ipcMain.on("window-minimize", (event) => {
+    const targetWindow = BrowserWindow.fromWebContents(event.sender) ?? mainWindow;
+    targetWindow == null ? void 0 : targetWindow.minimize();
+  });
+  ipcMain.on("window-maximize", (event) => {
+    const targetWindow = BrowserWindow.fromWebContents(event.sender) ?? mainWindow;
+    if (!targetWindow || targetWindow.isDestroyed()) {
+      return;
+    }
+    if (targetWindow.isMaximized()) {
+      targetWindow.unmaximize();
+    } else {
+      targetWindow.maximize();
+    }
+  });
+  ipcMain.on("window-close", (event) => {
+    const targetWindow = BrowserWindow.fromWebContents(event.sender) ?? mainWindow;
+    targetWindow == null ? void 0 : targetWindow.close();
+  });
+  ipcMain.handle("window-activate", (event, temporaryOnTop = false) => {
+    const targetWindow = BrowserWindow.fromWebContents(event.sender) ?? mainWindow;
+    if (!targetWindow || targetWindow.isDestroyed()) {
+      return false;
+    }
+    if (targetWindow.isMinimized()) {
+      targetWindow.restore();
+    }
+    if (!targetWindow.isVisible()) {
+      targetWindow.show();
+    }
+    if (process.platform === "darwin") {
+      app.focus({ steal: true });
+    } else {
+      app.focus();
+    }
+    if (typeof targetWindow.moveTop === "function") {
+      targetWindow.moveTop();
+    }
+    targetWindow.focus();
+    if (temporaryOnTop && !targetWindow.isAlwaysOnTop()) {
+      targetWindow.setAlwaysOnTop(true, "screen-saver");
+      setTimeout(() => {
+        if (!targetWindow.isDestroyed()) {
+          targetWindow.setAlwaysOnTop(false);
+        }
+      }, WINDOW_ACTIVATE_TOPMOST_DURATION_MS);
+    }
+    return true;
+  });
+  const emitEmbeddedBrowserState = (payload) => {
+    runtimeLogger.log("[embedded-browser:main]", payload);
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      return;
+    }
+    mainWindow.webContents.send("embedded-browser:state", payload);
+  };
+  const collectEmbeddedBrowserDebugMeta = async (view) => {
+    if (!ENABLE_EMBEDDED_BROWSER_DEBUG || view.webContents.isDestroyed()) {
       return [];
+    }
     try {
-      const t = await s.webContents.executeJavaScript(`
+      const snapshot = await view.webContents.executeJavaScript(`
         (() => {
           const bodyText = document.body?.innerText?.trim() || ''
           const bodyHtmlLength = document.body?.innerHTML?.length || 0
@@ -676,193 +1012,461 @@ function pt() {
             userAgent: navigator.userAgent || '',
           }
         })()
-      `, !0), r = [];
-      return t != null && t.title && r.push(`title=${t.title}`), t != null && t.readyState && r.push(`readyState=${t.readyState}`), typeof (t == null ? void 0 : t.bodyHtmlLength) == "number" && r.push(`bodyHtml=${t.bodyHtmlLength}`), typeof (t == null ? void 0 : t.innerWidth) == "number" && typeof (t == null ? void 0 : t.innerHeight) == "number" && r.push(`viewport=${t.innerWidth}x${t.innerHeight}`), typeof (t == null ? void 0 : t.clientWidth) == "number" && typeof (t == null ? void 0 : t.clientHeight) == "number" && r.push(`client=${t.clientWidth}x${t.clientHeight}`), typeof (t == null ? void 0 : t.devicePixelRatio) == "number" && r.push(`dpr=${t.devicePixelRatio}`), t != null && t.bodyTextPreview && r.push(`preview=${t.bodyTextPreview}`), t != null && t.userAgent && r.push(`ua=${t.userAgent}`), r;
-    } catch (t) {
-      return [`inspect=${t instanceof Error ? t.message : String(t)}`];
-    }
-  }, i = () => {
-    if (!u || u.isDestroyed())
-      return null;
-    if (s && !s.webContents.isDestroyed())
-      return s;
-    s = new Te({
-      webPreferences: {
-        devTools: !0
+      `, true);
+      const meta = [];
+      if (snapshot == null ? void 0 : snapshot.title) {
+        meta.push(`title=${snapshot.title}`);
       }
-    }), s.webContents.setZoomFactor(1);
-    const t = s.webContents.getUserAgent();
-    return t.includes("Electron") && s.webContents.setUserAgent(
-      t.replace(/\sElectron\/[^\s]+/g, "")
-    ), s.setBounds(ie ?? {
+      if (snapshot == null ? void 0 : snapshot.readyState) {
+        meta.push(`readyState=${snapshot.readyState}`);
+      }
+      if (typeof (snapshot == null ? void 0 : snapshot.bodyHtmlLength) === "number") {
+        meta.push(`bodyHtml=${snapshot.bodyHtmlLength}`);
+      }
+      if (typeof (snapshot == null ? void 0 : snapshot.innerWidth) === "number" && typeof (snapshot == null ? void 0 : snapshot.innerHeight) === "number") {
+        meta.push(`viewport=${snapshot.innerWidth}x${snapshot.innerHeight}`);
+      }
+      if (typeof (snapshot == null ? void 0 : snapshot.clientWidth) === "number" && typeof (snapshot == null ? void 0 : snapshot.clientHeight) === "number") {
+        meta.push(`client=${snapshot.clientWidth}x${snapshot.clientHeight}`);
+      }
+      if (typeof (snapshot == null ? void 0 : snapshot.devicePixelRatio) === "number") {
+        meta.push(`dpr=${snapshot.devicePixelRatio}`);
+      }
+      if (snapshot == null ? void 0 : snapshot.bodyTextPreview) {
+        meta.push(`preview=${snapshot.bodyTextPreview}`);
+      }
+      if (snapshot == null ? void 0 : snapshot.userAgent) {
+        meta.push(`ua=${snapshot.userAgent}`);
+      }
+      return meta;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return [`inspect=${message}`];
+    }
+  };
+  const getEmbeddedBrowserTitle = (view) => {
+    const runtimeTitle = view.webContents.getTitle().trim();
+    if (runtimeTitle) {
+      return runtimeTitle;
+    }
+    return void 0;
+  };
+  const emitEmbeddedBrowserTabState = (tabId, view, payload) => {
+    emitEmbeddedBrowserState({
+      tabId,
+      title: payload.title ?? getEmbeddedBrowserTitle(view),
+      ...payload
+    });
+  };
+  const getEmbeddedBrowserView = (tabId) => {
+    const view = embeddedBrowserViews.get(tabId);
+    if (!view || view.webContents.isDestroyed()) {
+      embeddedBrowserViews.delete(tabId);
+      embeddedBrowserLastCommittedUrls.delete(tabId);
+      return null;
+    }
+    return view;
+  };
+  const syncEmbeddedBrowserViewBounds = (view) => {
+    view.setBounds(embeddedBrowserPendingBounds ?? {
       x: 0,
       y: 0,
       width: 0,
       height: 0
-    }), u.contentView.addChildView(s), s.webContents.on("did-start-loading", () => {
-      e({
+    });
+  };
+  const detachActiveEmbeddedBrowserView = (targetWindow) => {
+    if (!activeEmbeddedBrowserTabId) {
+      return;
+    }
+    const activeView = getEmbeddedBrowserView(activeEmbeddedBrowserTabId);
+    if (!activeView) {
+      activeEmbeddedBrowserTabId = null;
+      return;
+    }
+    if (targetWindow.contentView.children.includes(activeView)) {
+      targetWindow.contentView.removeChildView(activeView);
+    }
+    activeEmbeddedBrowserTabId = null;
+  };
+  const createEmbeddedBrowserView = (tabId) => {
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      return null;
+    }
+    const existingView = getEmbeddedBrowserView(tabId);
+    if (existingView) {
+      return existingView;
+    }
+    const view = new WebContentsView({
+      webPreferences: {
+        devTools: true
+      }
+    });
+    view.webContents.setZoomFactor(1);
+    const currentUserAgent = view.webContents.getUserAgent();
+    if (currentUserAgent.includes("Electron")) {
+      view.webContents.setUserAgent(
+        currentUserAgent.replace(/\sElectron\/[^\s]+/g, "")
+      );
+    }
+    syncEmbeddedBrowserViewBounds(view);
+    embeddedBrowserViews.set(tabId, view);
+    view.webContents.on("did-start-loading", () => {
+      emitEmbeddedBrowserTabState(tabId, view, {
         details: "did-start-loading",
         state: "loading",
-        url: (s == null ? void 0 : s.webContents.getURL()) || void 0
+        url: view.webContents.getURL() || embeddedBrowserLastCommittedUrls.get(tabId) || void 0
       });
-    }), s.webContents.on("did-stop-loading", async () => {
-      F = (s == null ? void 0 : s.webContents.getURL()) || "";
-      const r = await n();
-      e({
+    });
+    view.webContents.on("did-stop-loading", async () => {
+      if (view.webContents.isDestroyed()) {
+        return;
+      }
+      const committedUrl = view.webContents.getURL() || "";
+      embeddedBrowserLastCommittedUrls.set(tabId, committedUrl);
+      const meta = await collectEmbeddedBrowserDebugMeta(view);
+      emitEmbeddedBrowserTabState(tabId, view, {
         details: "did-stop-loading",
-        meta: r,
+        ...meta.length ? { meta } : {},
         state: "ready",
-        url: F || void 0
+        url: committedUrl || void 0
       });
-    }), s.webContents.on("did-navigate", (r, o) => {
-      F = o, e({ details: "did-navigate", state: "ready", url: o });
-    }), s.webContents.on("did-navigate-in-page", (r, o) => {
-      F = o, e({ details: "did-navigate-in-page", state: "ready", url: o });
-    }), s.webContents.on("did-fail-load", (r, o, a, c) => {
-      o !== -3 && e({
-        details: `did-fail-load(${o})`,
-        state: "error",
-        message: `页面加载失败：${a || "未知错误"}`,
-        url: c
-      });
-    }), s.webContents.on("render-process-gone", (r, o) => {
-      e({
-        details: `render-process-gone:${o.reason}`,
-        state: "error",
-        message: `页面渲染进程异常退出：${o.reason}`,
-        url: (s == null ? void 0 : s.webContents.getURL()) || void 0
-      });
-    }), s.webContents.on("console-message", (r, o, a, c, m) => {
-      o >= 2 && e({
-        details: `console:${m}:${c}`,
+    });
+    view.webContents.on("did-navigate", (_event, url) => {
+      embeddedBrowserLastCommittedUrls.set(tabId, url);
+      emitEmbeddedBrowserTabState(tabId, view, { details: "did-navigate", state: "ready", url });
+    });
+    view.webContents.on("did-navigate-in-page", (_event, url) => {
+      embeddedBrowserLastCommittedUrls.set(tabId, url);
+      emitEmbeddedBrowserTabState(tabId, view, { details: "did-navigate-in-page", state: "ready", url });
+    });
+    view.webContents.on("page-title-updated", (_event, title) => {
+      emitEmbeddedBrowserTabState(tabId, view, {
+        details: "page-title-updated",
         state: "ready",
-        message: a,
-        meta: [`console-level=${o}`],
-        url: F || (s == null ? void 0 : s.webContents.getURL()) || void 0
+        title: title || void 0,
+        url: embeddedBrowserLastCommittedUrls.get(tabId) || view.webContents.getURL() || void 0
       });
-    }), s.webContents.setWindowOpenHandler(({ url: r }) => (s == null || s.webContents.loadURL(r), { action: "deny" })), s;
+    });
+    view.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL) => {
+      if (errorCode === -3) {
+        return;
+      }
+      emitEmbeddedBrowserTabState(tabId, view, {
+        details: `did-fail-load(${errorCode})`,
+        state: "error",
+        message: `页面加载失败：${errorDescription || "未知错误"}`,
+        url: validatedURL
+      });
+    });
+    view.webContents.on("render-process-gone", (_event, details) => {
+      emitEmbeddedBrowserTabState(tabId, view, {
+        details: `render-process-gone:${details.reason}`,
+        state: "error",
+        message: `页面渲染进程异常退出：${details.reason}`,
+        url: embeddedBrowserLastCommittedUrls.get(tabId) || view.webContents.getURL() || void 0
+      });
+    });
+    view.webContents.on("console-message", (_event, level, message, line, sourceId) => {
+      if (ENABLE_EMBEDDED_BROWSER_DEBUG && level >= 2) {
+        emitEmbeddedBrowserTabState(tabId, view, {
+          details: `console:${sourceId}:${line}`,
+          state: "ready",
+          message,
+          meta: [`console-level=${level}`],
+          url: embeddedBrowserLastCommittedUrls.get(tabId) || view.webContents.getURL() || void 0
+        });
+      }
+    });
+    view.webContents.setWindowOpenHandler(({ url }) => {
+      void view.webContents.loadURL(url);
+      return { action: "deny" };
+    });
+    return view;
   };
-  E.handle("embedded-browser:open", async (t, r) => {
-    const o = R.fromWebContents(t.sender) ?? u;
-    if (!o || o.isDestroyed())
+  const activateEmbeddedBrowserTab = (targetWindow, tabId, options) => {
+    if (!targetWindow || targetWindow.isDestroyed()) {
+      return null;
+    }
+    if (!tabId) {
+      detachActiveEmbeddedBrowserView(targetWindow);
+      return null;
+    }
+    const createIfMissing = (options == null ? void 0 : options.createIfMissing) ?? false;
+    const nextView = createIfMissing ? createEmbeddedBrowserView(tabId) : getEmbeddedBrowserView(tabId);
+    if (!nextView) {
+      detachActiveEmbeddedBrowserView(targetWindow);
+      return null;
+    }
+    if (!nextView || nextView.webContents.isDestroyed()) {
+      return null;
+    }
+    if (activeEmbeddedBrowserTabId && activeEmbeddedBrowserTabId !== tabId) {
+      detachActiveEmbeddedBrowserView(targetWindow);
+    }
+    syncEmbeddedBrowserViewBounds(nextView);
+    if (!targetWindow.contentView.children.includes(nextView)) {
+      targetWindow.contentView.addChildView(nextView);
+    }
+    activeEmbeddedBrowserTabId = tabId;
+    return nextView;
+  };
+  const loadEmbeddedBrowserUrl = async (targetWindow, tabId, url, errorDetails, activateOnly = false) => {
+    if (!targetWindow || targetWindow.isDestroyed()) {
       return;
-    const a = String(r || "").trim();
-    if (a) {
-      (!s || s.webContents.isDestroyed()) && i(), s && !o.contentView.children.includes(s) && o.contentView.addChildView(s), e({ state: "loading", url: a });
-      try {
-        await (s == null ? void 0 : s.webContents.loadURL(a));
-      } catch (c) {
-        const m = c instanceof Error ? c.message : String(c);
-        if (m.includes("ERR_ABORTED"))
-          return;
-        throw e({
-          details: "open-exception",
-          state: "error",
-          message: `页面加载失败：${m}`,
-          url: a
-        }), c;
-      }
     }
-  }), E.handle("embedded-browser:navigate", async (t, r) => {
-    const o = String(r || "").trim();
-    if (o) {
-      (!s || s.webContents.isDestroyed()) && i(), e({ state: "loading", url: o });
-      try {
-        await (s == null ? void 0 : s.webContents.loadURL(o));
-      } catch (a) {
-        const c = a instanceof Error ? a.message : String(a);
-        if (c.includes("ERR_ABORTED"))
-          return;
-        throw e({
-          details: "navigate-exception",
-          state: "error",
-          message: `页面加载失败：${c}`,
-          url: o
-        }), a;
-      }
+    const normalizedTabId = String(tabId || "").trim();
+    if (!normalizedTabId) {
+      return;
     }
-  }), E.handle("embedded-browser:reload", async () => {
-    s == null || s.webContents.reload();
-  }), E.handle("embedded-browser:set-bounds", (t, r) => {
-    const o = {
+    const view = activateEmbeddedBrowserTab(targetWindow, normalizedTabId, { createIfMissing: true });
+    if (!view || view.webContents.isDestroyed()) {
+      return;
+    }
+    const normalizedUrl = String(url || "").trim();
+    if (!normalizedUrl) {
+      emitEmbeddedBrowserTabState(normalizedTabId, view, {
+        state: "ready",
+        title: getEmbeddedBrowserTitle(view) || "新标签页",
+        url: embeddedBrowserLastCommittedUrls.get(normalizedTabId) || void 0
+      });
+      return;
+    }
+    const currentUrl = embeddedBrowserLastCommittedUrls.get(normalizedTabId) || view.webContents.getURL();
+    if (activateOnly && currentUrl === normalizedUrl) {
+      emitEmbeddedBrowserTabState(normalizedTabId, view, {
+        state: "ready",
+        url: currentUrl || void 0
+      });
+      return;
+    }
+    emitEmbeddedBrowserTabState(normalizedTabId, view, {
+      details: "load-url",
+      state: "loading",
+      url: normalizedUrl
+    });
+    try {
+      await view.webContents.loadURL(normalizedUrl);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes("ERR_ABORTED")) {
+        return;
+      }
+      emitEmbeddedBrowserTabState(normalizedTabId, view, {
+        details: errorDetails,
+        state: "error",
+        message: `页面加载失败：${message}`,
+        url: normalizedUrl
+      });
+      throw error;
+    }
+  };
+  const closeEmbeddedBrowserTab = (targetWindow, tabId) => {
+    if (!targetWindow || targetWindow.isDestroyed()) {
+      return;
+    }
+    const normalizedTabId = String(tabId || "").trim();
+    if (!normalizedTabId) {
+      return;
+    }
+    const view = getEmbeddedBrowserView(normalizedTabId);
+    if (!view) {
+      return;
+    }
+    if (targetWindow.contentView.children.includes(view)) {
+      targetWindow.contentView.removeChildView(view);
+    }
+    if (activeEmbeddedBrowserTabId === normalizedTabId) {
+      activeEmbeddedBrowserTabId = null;
+    }
+    embeddedBrowserViews.delete(normalizedTabId);
+    embeddedBrowserLastCommittedUrls.delete(normalizedTabId);
+    if (!view.webContents.isDestroyed()) {
+      view.webContents.close({ waitForBeforeUnload: false });
+    }
+  };
+  ipcMain.handle("embedded-browser:open-tab", async (event, tabId, url) => {
+    const targetWindow = BrowserWindow.fromWebContents(event.sender) ?? mainWindow;
+    const normalizedUrl = String(url || "").trim();
+    if (!normalizedUrl) {
+      emitEmbeddedBrowserState({
+        state: "ready",
+        tabId,
+        title: "新标签页"
+      });
+      return;
+    }
+    await loadEmbeddedBrowserUrl(targetWindow, tabId, normalizedUrl, "open-exception", true);
+  });
+  ipcMain.handle("embedded-browser:activate-tab", (event, tabId) => {
+    const targetWindow = BrowserWindow.fromWebContents(event.sender) ?? mainWindow;
+    activateEmbeddedBrowserTab(targetWindow, tabId, { createIfMissing: false });
+  });
+  ipcMain.handle("embedded-browser:navigate", async (event, tabId, url) => {
+    const targetWindow = BrowserWindow.fromWebContents(event.sender) ?? mainWindow;
+    await loadEmbeddedBrowserUrl(targetWindow, tabId, url, "navigate-exception");
+  });
+  ipcMain.handle("embedded-browser:reload", async (_event, tabId) => {
+    var _a;
+    const normalizedTabId = String(tabId || "").trim();
+    if (!normalizedTabId) {
+      return;
+    }
+    (_a = getEmbeddedBrowserView(normalizedTabId)) == null ? void 0 : _a.webContents.reload();
+  });
+  ipcMain.handle("embedded-browser:set-bounds", (event, bounds) => {
+    const nextBounds = {
       x: 0,
       y: 0,
       width: 0,
       height: 0
-    }, a = R.fromWebContents(t.sender) ?? u, c = a && !a.isDestroyed() ? Math.max(a.webContents.getZoomFactor(), 0.01) : 1;
-    o.x = Math.max(0, Math.round(r.x * c)), o.y = Math.max(0, Math.round(r.y * c)), o.width = Math.max(0, Math.round(r.width * c)), o.height = Math.max(0, Math.round(r.height * c)), ie = o, console.log("[embedded-browser:bounds]", { raw: r, zoomFactor: c, applied: o }), s && s.setBounds(o);
-  }), E.handle("embedded-browser:close", () => {
-    !u || u.isDestroyed() || !s || (u.contentView.removeChildView(s), F = "", e({ state: "idle" }));
+    };
+    const targetWindow = BrowserWindow.fromWebContents(event.sender) ?? mainWindow;
+    const zoomFactor = targetWindow && !targetWindow.isDestroyed() ? Math.max(targetWindow.webContents.getZoomFactor(), 0.01) : 1;
+    nextBounds.x = Math.max(0, Math.round(bounds.x * zoomFactor));
+    nextBounds.y = Math.max(0, Math.round(bounds.y * zoomFactor));
+    nextBounds.width = Math.max(0, Math.round(bounds.width * zoomFactor));
+    nextBounds.height = Math.max(0, Math.round(bounds.height * zoomFactor));
+    embeddedBrowserPendingBounds = nextBounds;
+    runtimeLogger.log("[embedded-browser:bounds]", { raw: bounds, zoomFactor, applied: nextBounds });
+    if (!activeEmbeddedBrowserTabId) {
+      return;
+    }
+    const activeView = getEmbeddedBrowserView(activeEmbeddedBrowserTabId);
+    if (!activeView) {
+      return;
+    }
+    activeView.setBounds(nextBounds);
+  });
+  ipcMain.handle("embedded-browser:close-tab", (event, tabId) => {
+    const targetWindow = BrowserWindow.fromWebContents(event.sender) ?? mainWindow;
+    closeEmbeddedBrowserTab(targetWindow, tabId);
+  });
+  ipcMain.handle("embedded-browser:deactivate", (event) => {
+    const targetWindow = BrowserWindow.fromWebContents(event.sender) ?? mainWindow;
+    if (!targetWindow || targetWindow.isDestroyed()) {
+      return;
+    }
+    detachActiveEmbeddedBrowserView(targetWindow);
+  });
+  ipcMain.handle("embedded-browser:close-all", (event) => {
+    const targetWindow = BrowserWindow.fromWebContents(event.sender) ?? mainWindow;
+    if (!targetWindow || targetWindow.isDestroyed()) {
+      return;
+    }
+    Array.from(embeddedBrowserViews.keys()).forEach((tabId) => {
+      closeEmbeddedBrowserTab(targetWindow, tabId);
+    });
+    activeEmbeddedBrowserTabId = null;
+    emitEmbeddedBrowserState({ state: "idle" });
   });
 }
-function ve() {
-  if (u && !u.isDestroyed())
-    return u.show(), u.focus(), u;
-  const e = ge(), n = mt(), i = (n == null ? void 0 : n.width) ?? st, t = (n == null ? void 0 : n.height) ?? at, r = new R({
-    width: i,
-    height: t,
-    minWidth: Q,
-    minHeight: K,
+function createWindow() {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.show();
+    mainWindow.focus();
+    return mainWindow;
+  }
+  const appIconPath = getAppIconPath();
+  const persistedWindowState = readPersistedWindowState();
+  const initialWidth = (persistedWindowState == null ? void 0 : persistedWindowState.width) ?? DEFAULT_WINDOW_WIDTH;
+  const initialHeight = (persistedWindowState == null ? void 0 : persistedWindowState.height) ?? DEFAULT_WINDOW_HEIGHT;
+  const win = new BrowserWindow({
+    width: initialWidth,
+    height: initialHeight,
+    minWidth: MIN_WINDOW_WIDTH,
+    minHeight: MIN_WINDOW_HEIGHT,
     backgroundColor: "#f5f5f0",
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
-    ...O(n == null ? void 0 : n.x) && O(n == null ? void 0 : n.y) ? { x: n.x, y: n.y } : {},
+    ...isFiniteNumber(persistedWindowState == null ? void 0 : persistedWindowState.x) && isFiniteNumber(persistedWindowState == null ? void 0 : persistedWindowState.y) ? { x: persistedWindowState.x, y: persistedWindowState.y } : {},
     webPreferences: {
       // 预加载脚本，用于安全地与渲染进程通信
-      preload: g.join(rt, "preload.mjs"),
+      preload: path.join(MAIN_DIST, "preload.mjs"),
       // Electron 安全推荐配置
-      devTools: !0,
-      webSecurity: !1
+      devTools: true
       // nodeIntegration: false,     // 禁用 Node.js 集成
       // contextIsolation: true,     // 启用上下文隔离
       // webSecurity: true           // 启用同源策略
     },
-    autoHideMenuBar: !0,
+    autoHideMenuBar: true,
     // 自动隐藏菜单栏
-    ...e ? { icon: e } : {}
+    ...appIconPath ? { icon: appIconPath } : {}
   });
-  return u = r, n != null && n.maximized && r.maximize(), r.on("move", () => {
-    V(r);
-  }), r.on("resize", () => {
-    V(r);
-  }), r.on("maximize", () => {
-    V(r);
-  }), r.on("unmaximize", () => {
-    V(r);
-  }), r.on("close", (o) => {
-    ee(r), process.platform === "darwin" && !ye && (o.preventDefault(), r.hide());
-  }), r.on("closed", () => {
-    u === r && (u = null);
-  }), r.webContents.session.webRequest.onHeadersReceived((o, a) => {
-    a({
-      responseHeaders: {
-        ...o.responseHeaders,
-        "Content-Security-Policy": [""]
-        // 将其置为空
-      }
-    });
-  }), r.webContents.on("before-input-event", (o, a) => {
-    ht(a) && (o.preventDefault(), r.webContents.toggleDevTools());
-  }), Z ? r.loadURL(Z) : r.loadFile(g.join(pe, "index.html")), r;
+  mainWindow = win;
+  if (persistedWindowState == null ? void 0 : persistedWindowState.maximized) {
+    win.maximize();
+  }
+  win.on("move", () => {
+    scheduleSaveWindowState(win);
+  });
+  win.on("resize", () => {
+    scheduleSaveWindowState(win);
+  });
+  win.on("maximize", () => {
+    scheduleSaveWindowState(win);
+  });
+  win.on("unmaximize", () => {
+    scheduleSaveWindowState(win);
+  });
+  win.on("close", (event) => {
+    saveWindowState(win);
+    if (process.platform === "darwin" && !isQuitting) {
+      event.preventDefault();
+      win.hide();
+    }
+  });
+  win.on("closed", () => {
+    if (mainWindow === win) {
+      mainWindow = null;
+    }
+  });
+  win.webContents.on("before-input-event", (event, input) => {
+    if (!isToggleDevToolsShortcut(input)) {
+      return;
+    }
+    event.preventDefault();
+    win.webContents.toggleDevTools();
+  });
+  if (VITE_DEV_SERVER_URL) {
+    win.loadURL(VITE_DEV_SERVER_URL);
+  } else {
+    win.loadFile(path.join(RENDERER_DIST, "index.html"));
+  }
+  return win;
 }
-_.on("before-quit", () => {
-  ye = !0, u && !u.isDestroyed() && ee(u);
+app.on("before-quit", () => {
+  isQuitting = true;
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    saveWindowState(mainWindow);
+  }
 });
-_.on("window-all-closed", () => {
-  process.platform !== "darwin" && _.quit();
+app.on("window-all-closed", () => {
+  if (process.platform !== "darwin") app.quit();
 });
-_.on("activate", () => {
-  if (u && !u.isDestroyed()) {
-    u.isMinimized() && u.restore(), u.show(), u.focus();
+app.on("activate", () => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.isMinimized()) {
+      mainWindow.restore();
+    }
+    mainWindow.show();
+    mainWindow.focus();
     return;
   }
-  R.getAllWindows().length === 0 && ve();
+  if (BrowserWindow.getAllWindows().length === 0) {
+    createWindow();
+  }
 });
-_.whenReady().then(() => {
-  const e = ge();
-  e && process.platform === "darwin" && _.dock.setIcon(e), tt(), pt(), ve();
+app.whenReady().then(() => {
+  const appIconPath = getAppIconPath();
+  if (appIconPath && process.platform === "darwin") {
+    app.dock.setIcon(appIconPath);
+  }
+  registerIpcHandlers();
+  registerWindowIpcHandlers();
+  createWindow();
 });
 export {
-  rt as MAIN_DIST,
-  pe as RENDERER_DIST,
-  Z as VITE_DEV_SERVER_URL
+  MAIN_DIST,
+  RENDERER_DIST,
+  VITE_DEV_SERVER_URL
 };

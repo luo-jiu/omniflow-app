@@ -120,17 +120,22 @@ type EmbeddedBrowserBounds = {
 
 interface Window {
   electronEmbeddedBrowser: {
-    close: () => Promise<void>;
-    navigate: (url: string) => Promise<void>;
+    activateTab: (tabId: string | null) => Promise<void>;
+    closeAll: () => Promise<void>;
+    closeTab: (tabId: string) => Promise<void>;
+    deactivate: () => Promise<void>;
+    navigate: (tabId: string, url: string) => Promise<void>;
     onStateChange: (listener: (payload: {
       details?: string;
       message?: string;
       meta?: string[];
       state?: 'idle' | 'loading' | 'ready' | 'error';
+      tabId?: string;
+      title?: string;
       url?: string;
     }) => void) => () => void;
-    open: (url: string) => Promise<void>;
-    reload: () => Promise<void>;
+    openTab: (tabId: string, url?: string) => Promise<void>;
+    reload: (tabId: string) => Promise<void>;
     setBounds: (bounds: EmbeddedBrowserBounds) => Promise<void>;
   };
 }

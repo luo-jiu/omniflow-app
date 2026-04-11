@@ -11,13 +11,14 @@ import { resolveAudioOwnerKey } from "@/features/file-viewer/utils/audio-owner-k
 
 interface IProps {
   children?: ReactNode;
+  hideTabsBar?: boolean;
 }
 
 /**
  * 主工作区容器
  * 负责在“欢迎页”和“文件预览页”之间切换
  */
-const AppMain: FC<IProps> = () => {
+const AppMain: FC<IProps> = ({ hideTabsBar = false }) => {
   const { fileState, tabs, activeTabId, activateTab, closeTab, reorderTabs } = useFileViewer();
   const [playerState, setPlayerState] = React.useState(() => globalAudioPlayer.getState());
   const [keepAliveTabIds, setKeepAliveTabIds] = React.useState<string[]>(() => (
@@ -90,13 +91,15 @@ const AppMain: FC<IProps> = () => {
   if (!fileState.fileUrl && !fileState.loading) {
     return (
       <MainWrapper>
-        <FileTabsBar
-          tabs={tabs}
-          activeTabId={activeTabId}
-          onActivate={activateTab}
-          onClose={closeTab}
-          onReorder={reorderTabs}
-        />
+        {hideTabsBar ? null : (
+          <FileTabsBar
+            tabs={tabs}
+            activeTabId={activeTabId}
+            onActivate={activateTab}
+            onClose={closeTab}
+            onReorder={reorderTabs}
+          />
+        )}
         <GlobalAudioMiniBar suppressed={suppressGlobalAudioBar} />
         <div className="main-content">
           <WelcomeView />
@@ -108,13 +111,15 @@ const AppMain: FC<IProps> = () => {
   // 否则显示文件分发器（处理图片、视频等预览）
   return (
     <MainWrapper className="viewer-mode">
-      <FileTabsBar
-        tabs={tabs}
-        activeTabId={activeTabId}
-        onActivate={activateTab}
-        onClose={closeTab}
-        onReorder={reorderTabs}
-      />
+      {hideTabsBar ? null : (
+        <FileTabsBar
+          tabs={tabs}
+          activeTabId={activeTabId}
+          onActivate={activateTab}
+          onClose={closeTab}
+          onReorder={reorderTabs}
+        />
+      )}
       <GlobalAudioMiniBar suppressed={suppressGlobalAudioBar} />
       <div className="main-content">
         <div className="tab-stage-stack">

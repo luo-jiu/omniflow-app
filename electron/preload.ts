@@ -85,13 +85,18 @@ contextBridge.exposeInMainWorld('electronWindow', {
 });
 
 contextBridge.exposeInMainWorld('electronEmbeddedBrowser', {
-  close: () => ipcRenderer.invoke('embedded-browser:close'),
-  navigate: (url: string) => ipcRenderer.invoke('embedded-browser:navigate', url),
+  activateTab: (tabId: string | null) => ipcRenderer.invoke('embedded-browser:activate-tab', tabId),
+  closeAll: () => ipcRenderer.invoke('embedded-browser:close-all'),
+  closeTab: (tabId: string) => ipcRenderer.invoke('embedded-browser:close-tab', tabId),
+  deactivate: () => ipcRenderer.invoke('embedded-browser:deactivate'),
+  navigate: (tabId: string, url: string) => ipcRenderer.invoke('embedded-browser:navigate', tabId, url),
   onStateChange: (listener: (payload: {
     details?: string;
     message?: string;
     meta?: string[];
     state?: 'idle' | 'loading' | 'ready' | 'error';
+    tabId?: string;
+    title?: string;
     url?: string;
   }) => void) => {
     const wrapped = (_event: Electron.IpcRendererEvent, payload: {
@@ -99,6 +104,8 @@ contextBridge.exposeInMainWorld('electronEmbeddedBrowser', {
       message?: string;
       meta?: string[];
       state?: 'idle' | 'loading' | 'ready' | 'error';
+      tabId?: string;
+      title?: string;
       url?: string;
     }) => {
       listener(payload);
@@ -106,8 +113,8 @@ contextBridge.exposeInMainWorld('electronEmbeddedBrowser', {
     ipcRenderer.on('embedded-browser:state', wrapped);
     return () => ipcRenderer.removeListener('embedded-browser:state', wrapped);
   },
-  open: (url: string) => ipcRenderer.invoke('embedded-browser:open', url),
-  reload: () => ipcRenderer.invoke('embedded-browser:reload'),
+  openTab: (tabId: string, url?: string) => ipcRenderer.invoke('embedded-browser:open-tab', tabId, url),
+  reload: (tabId: string) => ipcRenderer.invoke('embedded-browser:reload', tabId),
   setBounds: (bounds: { x: number; y: number; width: number; height: number }) =>
     ipcRenderer.invoke('embedded-browser:set-bounds', bounds),
 });

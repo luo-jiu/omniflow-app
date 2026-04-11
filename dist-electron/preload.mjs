@@ -1,1 +1,69 @@
-"use strict";const r=require("electron");r.contextBridge.exposeInMainWorld("ipcRenderer",{on(...e){const[o,n]=e;return r.ipcRenderer.on(o,(i,...d)=>n(i,...d))},off(...e){const[o,...n]=e;return r.ipcRenderer.off(o,...n)},send(...e){const[o,...n]=e;return r.ipcRenderer.send(o,...n)},invoke(...e){const[o,...n]=e;return r.ipcRenderer.invoke(o,...n)}});r.contextBridge.exposeInMainWorld("electronAPI",{getStaticData:()=>r.ipcRenderer.invoke("sys:get-static-data"),pickUploadFiles:()=>r.ipcRenderer.invoke("dialog:pick-upload-files"),pickUploadFolders:()=>r.ipcRenderer.invoke("dialog:pick-upload-folders"),pickDownloadDirectory:()=>r.ipcRenderer.invoke("dialog:pick-download-directory"),pickAutoImportDirectory:()=>r.ipcRenderer.invoke("dialog:pick-auto-import-directory"),ensureDirectory:(e,o)=>r.ipcRenderer.invoke("fs:ensure-directory",e,o),downloadUrlToPath:(e,o,n,i)=>r.ipcRenderer.invoke("fs:download-url-to-path",e,o,n,i),claimAutoImportFiles:(e,o)=>r.ipcRenderer.invoke("fs:claim-auto-import-files",e,o),cleanupAutoImportStagedFile:e=>r.ipcRenderer.invoke("fs:cleanup-auto-import-staged-file",e),fetch:(e,o)=>r.ipcRenderer.invoke("http:fetch",e,o),upload:(e,o,n,i,d)=>r.ipcRenderer.invoke("http:upload",e,o,n,i,d),uploadAbort:e=>r.ipcRenderer.invoke("http:upload:abort",e),onUploadProgress:e=>{const o=(n,i)=>{e(i)};return r.ipcRenderer.on("http:upload:progress",o),()=>r.ipcRenderer.removeListener("http:upload:progress",o)}});r.contextBridge.exposeInMainWorld("electronZoom",e=>r.ipcRenderer.invoke("zoom-adjust",e));r.contextBridge.exposeInMainWorld("electronWindow",{minimize:()=>r.ipcRenderer.send("window-minimize"),maximize:()=>r.ipcRenderer.send("window-maximize"),close:()=>r.ipcRenderer.send("window-close"),activate:(e=!1)=>r.ipcRenderer.invoke("window-activate",e)});r.contextBridge.exposeInMainWorld("electronEmbeddedBrowser",{close:()=>r.ipcRenderer.invoke("embedded-browser:close"),navigate:e=>r.ipcRenderer.invoke("embedded-browser:navigate",e),onStateChange:e=>{const o=(n,i)=>{e(i)};return r.ipcRenderer.on("embedded-browser:state",o),()=>r.ipcRenderer.removeListener("embedded-browser:state",o)},open:e=>r.ipcRenderer.invoke("embedded-browser:open",e),reload:()=>r.ipcRenderer.invoke("embedded-browser:reload"),setBounds:e=>r.ipcRenderer.invoke("embedded-browser:set-bounds",e)});
+"use strict";
+const electron = require("electron");
+electron.contextBridge.exposeInMainWorld("ipcRenderer", {
+  on(...args) {
+    const [channel, listener] = args;
+    return electron.ipcRenderer.on(channel, (event, ...args2) => listener(event, ...args2));
+  },
+  off(...args) {
+    const [channel, ...omit] = args;
+    return electron.ipcRenderer.off(channel, ...omit);
+  },
+  send(...args) {
+    const [channel, ...omit] = args;
+    return electron.ipcRenderer.send(channel, ...omit);
+  },
+  invoke(...args) {
+    const [channel, ...omit] = args;
+    return electron.ipcRenderer.invoke(channel, ...omit);
+  }
+  // You can expose other APTs you need here.
+  // ...
+});
+electron.contextBridge.exposeInMainWorld("electronAPI", {
+  getStaticData: () => electron.ipcRenderer.invoke("sys:get-static-data"),
+  pickUploadFiles: () => electron.ipcRenderer.invoke("dialog:pick-upload-files"),
+  pickUploadFolders: () => electron.ipcRenderer.invoke("dialog:pick-upload-folders"),
+  pickDownloadDirectory: () => electron.ipcRenderer.invoke("dialog:pick-download-directory"),
+  pickAutoImportDirectory: () => electron.ipcRenderer.invoke("dialog:pick-auto-import-directory"),
+  ensureDirectory: (baseDirectory, relativePath) => electron.ipcRenderer.invoke("fs:ensure-directory", baseDirectory, relativePath),
+  downloadUrlToPath: (url, baseDirectory, relativePath, headers) => electron.ipcRenderer.invoke("fs:download-url-to-path", url, baseDirectory, relativePath, headers),
+  claimAutoImportFiles: (watchDirectory, maxFiles) => electron.ipcRenderer.invoke("fs:claim-auto-import-files", watchDirectory, maxFiles),
+  cleanupAutoImportStagedFile: (stagedPath) => electron.ipcRenderer.invoke("fs:cleanup-auto-import-staged-file", stagedPath),
+  fetch: (url, options) => electron.ipcRenderer.invoke("http:fetch", url, options),
+  upload: (url, filePath, formDataParams, headers, uploadId) => electron.ipcRenderer.invoke("http:upload", url, filePath, formDataParams, headers, uploadId),
+  uploadAbort: (uploadId) => electron.ipcRenderer.invoke("http:upload:abort", uploadId),
+  onUploadProgress: (listener) => {
+    const wrapped = (_event, payload) => {
+      listener(payload);
+    };
+    electron.ipcRenderer.on("http:upload:progress", wrapped);
+    return () => electron.ipcRenderer.removeListener("http:upload:progress", wrapped);
+  }
+});
+electron.contextBridge.exposeInMainWorld("electronZoom", (delta) => {
+  return electron.ipcRenderer.invoke("zoom-adjust", delta);
+});
+electron.contextBridge.exposeInMainWorld("electronWindow", {
+  minimize: () => electron.ipcRenderer.send("window-minimize"),
+  maximize: () => electron.ipcRenderer.send("window-maximize"),
+  close: () => electron.ipcRenderer.send("window-close"),
+  activate: (temporaryOnTop = false) => electron.ipcRenderer.invoke("window-activate", temporaryOnTop)
+});
+electron.contextBridge.exposeInMainWorld("electronEmbeddedBrowser", {
+  activateTab: (tabId) => electron.ipcRenderer.invoke("embedded-browser:activate-tab", tabId),
+  closeAll: () => electron.ipcRenderer.invoke("embedded-browser:close-all"),
+  closeTab: (tabId) => electron.ipcRenderer.invoke("embedded-browser:close-tab", tabId),
+  deactivate: () => electron.ipcRenderer.invoke("embedded-browser:deactivate"),
+  navigate: (tabId, url) => electron.ipcRenderer.invoke("embedded-browser:navigate", tabId, url),
+  onStateChange: (listener) => {
+    const wrapped = (_event, payload) => {
+      listener(payload);
+    };
+    electron.ipcRenderer.on("embedded-browser:state", wrapped);
+    return () => electron.ipcRenderer.removeListener("embedded-browser:state", wrapped);
+  },
+  openTab: (tabId, url) => electron.ipcRenderer.invoke("embedded-browser:open-tab", tabId, url),
+  reload: (tabId) => electron.ipcRenderer.invoke("embedded-browser:reload", tabId),
+  setBounds: (bounds) => electron.ipcRenderer.invoke("embedded-browser:set-bounds", bounds)
+});
