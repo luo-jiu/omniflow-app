@@ -28,6 +28,8 @@ type BrowserEventPayload = {
 
 type EmbeddedBrowserPanelMode = 'idle' | 'blank' | 'attached';
 
+const EMBEDDED_BROWSER_EMPTY_VISUAL_OFFSET_PX = -100;
+
 const BrowserSurface = styled.div`
   flex: 1;
   min-height: 0;
@@ -63,24 +65,31 @@ const BrowserSurface = styled.div`
   .embedded-browser-empty {
     position: absolute;
     inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
     background: var(--app-bg);
   }
 
   .embedded-browser-empty-anchor {
-    position: absolute;
-    top: 33.333%;
-    left: 50%;
-    width: min(560px, calc(100% - 64px));
-    transform: translateX(-50%);
-  }
-
-  .embedded-browser-empty-header {
+    width: min(720px, 100%);
     display: flex;
     flex-direction: column;
     align-items: center;
+    transform: translateY(var(--embedded-browser-empty-offset));
+  }
+
+  .embedded-browser-empty-header {
+    width: 100%;
+    min-height: 112px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
     gap: 10px;
-    margin-bottom: 10px;
-    transform: translateY(-100%);
+    margin-bottom: 16px;
+    text-align: center;
   }
 
   .embedded-browser-empty-title {
@@ -94,8 +103,8 @@ const BrowserSurface = styled.div`
   .embedded-browser-empty-subtitle {
     margin: 0;
     color: var(--app-text-muted);
-    font-size: 13px;
-    line-height: 1.4;
+    font-size: 14px;
+    line-height: 1.6;
   }
 
   .embedded-browser-empty-form {
@@ -103,13 +112,12 @@ const BrowserSurface = styled.div`
     display: flex;
     align-items: center;
     gap: 10px;
-    margin-top: 10px;
   }
 
   .embedded-browser-empty-input {
     flex: 1;
     min-width: 0;
-    height: 40px;
+    height: 48px;
     border-radius: 8px;
     border: 1px solid var(--app-border);
     background: var(--app-bg-elevated);
@@ -311,7 +319,13 @@ const EmbeddedBrowserPanel = React.forwardRef<EmbeddedBrowserHandle, EmbeddedBro
     }, [panelMode]);
 
     return (
-      <BrowserSurface>
+      <BrowserSurface
+        style={
+          {
+            ['--embedded-browser-empty-offset' as string]: `${EMBEDDED_BROWSER_EMPTY_VISUAL_OFFSET_PX}px`,
+          } as React.CSSProperties
+        }
+      >
         <div ref={hostRef} className="embedded-browser-host" />
         {panelMode === 'blank' ? (
           <div className="embedded-browser-empty">

@@ -18,6 +18,7 @@ import {
 } from "@douyinfe/semi-icons";
 import styled, { css } from "styled-components";
 import EmbeddedBrowserPanel, { type EmbeddedBrowserHandle } from "@/features/embedded-browser/components/EmbeddedBrowserPanel";
+import SearchWorkspace, { type SearchWorkspaceMode } from "./SearchWorkspace";
 
 const DEFAULT_SIDE_PANEL_WIDTH = 300;
 const MIN_SIDE_PANEL_WIDTH = 220;
@@ -410,6 +411,8 @@ type BrowserTab = {
   url: string;
 };
 
+type WorkspaceDisplayMode = 'search-home' | 'file-viewer' | 'browser';
+
 function createBrowserTabId() {
   return `browser-tab:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -432,6 +435,14 @@ function updateBrowserTabList(
   return tabs.map((tab) => (tab.id === tabId ? updater(tab) : tab));
 }
 
+function createEmptyBrowserTab() {
+  const nextTab = createBrowserTab();
+  return {
+    id: nextTab.id,
+    tab: nextTab,
+  };
+}
+
 const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) => {
   const { setFileUrl, tabs, activeTabId, fileState, reloadActiveTab } = useFileViewer();
   const navigate = useNavigate();
@@ -442,6 +453,9 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   const [browserTabs, setBrowserTabs] = React.useState<BrowserTab[]>([]);
   const [activeBrowserTabId, setActiveBrowserTabId] = React.useState<string | null>(null);
   const [browserInput, setBrowserInput] = React.useState('');
+  const [searchMode, setSearchMode] = React.useState<SearchWorkspaceMode>('files');
+  const [searchDraft, setSearchDraft] = React.useState('');
+  const [workspaceDisplayMode, setWorkspaceDisplayMode] = React.useState<WorkspaceDisplayMode>('search-home');
   const browserInputRef = React.useRef<HTMLInputElement | null>(null);
   const latestPanelWidthRef = React.useRef<number>(sidePanelWidth);
   const resizeMoveHandlerRef = React.useRef<((event: MouseEvent) => void) | null>(null);
@@ -518,6 +532,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
     },
   ) => {
     setBrowserModeOpen(false);
+    setWorkspaceDisplayMode('file-viewer');
     void window.electronEmbeddedBrowser.deactivate();
     setFileUrl(fileUrl, fileName, fileType, nodeId, options);
   };
@@ -545,6 +560,15 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
       { tabTypeLabel: archiveReturnTarget.tabTypeLabel ?? null },
     );
   }, [archiveReturnTarget, setFileUrl]);
+
+  const showSearchHome = React.useCallback((nextMode?: SearchWorkspaceMode) => {
+    setBrowserModeOpen(false);
+    if (nextMode) {
+      setSearchMode(nextMode);
+    }
+    setWorkspaceDisplayMode('search-home');
+    void window.electronEmbeddedBrowser.deactivate();
+  }, []);
 
   const normalizeBrowserUrl = React.useCallback((input: string) => {
     const trimmed = String(input || '').trim();
@@ -591,18 +615,22 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   }, [activeBrowserTabId]);
 
   const createAndActivateBrowserTab = React.useCallback(() => {
-    const nextTab = createBrowserTab();
-    setBrowserTabs((prev) => [...prev, nextTab]);
-    setActiveBrowserTabId(nextTab.id);
+    const next = createEmptyBrowserTab();
+    setBrowserTabs((prev) => [...prev, next.tab]);
+    setActiveBrowserTabId(next.id);
     setBrowserModeOpen(true);
+    setWorkspaceDisplayMode('browser');
     setBrowserInput('');
-    void window.electronEmbeddedBrowser.openTab(nextTab.id);
+    setSearchMode('web');
+    void window.electronEmbeddedBrowser.openTab(next.id);
+    return next.id;
   }, []);
 
   const openEmbeddedBrowser = React.useCallback(() => {
     if (browserTabs.length > 0) {
       const fallbackTabId = activeBrowserTabId ?? browserTabs[browserTabs.length - 1]?.id ?? null;
       setBrowserModeOpen(true);
+      setWorkspaceDisplayMode('browser');
       setActiveBrowserTabId(fallbackTabId);
       const fallbackTab = browserTabs.find((tab) => tab.id === fallbackTabId) ?? null;
       setBrowserInput(fallbackTab?.url ?? '');
@@ -614,6 +642,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   const activateBrowserTab = React.useCallback((tabId: string) => {
     setActiveBrowserTabId(tabId);
     setBrowserModeOpen(true);
+    setWorkspaceDisplayMode('browser');
     const targetTab = browserTabs.find((tab) => tab.id === tabId) ?? null;
     setBrowserInput(targetTab?.url ?? '');
     void window.electronEmbeddedBrowser.activateTab(tabId);
@@ -638,12 +667,12 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   }, [activeBrowserTabId, browserTabs]);
 
   const closeEmbeddedBrowserMode = React.useCallback(() => {
-    setBrowserModeOpen(false);
-    void window.electronEmbeddedBrowser.deactivate();
-  }, []);
+    showSearchHome('web');
+  }, [showSearchHome]);
 
-  const submitBrowserInput = React.useCallback((rawValue: string) => {
-    if (!activeBrowserTabId) {
+  const submitBrowserInput = React.useCallback((rawValue: string, targetTabId?: string | null) => {
+    const resolvedTabId = targetTabId ?? activeBrowserTabId;
+    if (!resolvedTabId) {
       return;
     }
     const nextUrl = normalizeBrowserUrl(rawValue);
@@ -652,13 +681,43 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
     }
     setBrowserInput(nextUrl);
     setBrowserModeOpen(true);
-    applyBrowserTabUpdate(activeBrowserTabId, (tab) => ({
+    setWorkspaceDisplayMode('browser');
+    applyBrowserTabUpdate(resolvedTabId, (tab) => ({
       ...tab,
       url: nextUrl,
       title: tab.title || nextUrl,
     }));
-    browserRef.current?.navigate(activeBrowserTabId, nextUrl);
+    browserRef.current?.navigate(resolvedTabId, nextUrl);
   }, [activeBrowserTabId, applyBrowserTabUpdate, normalizeBrowserUrl]);
+
+  const handleSearchWorkspaceSubmit = React.useCallback(async (rawValue: string) => {
+    const trimmed = String(rawValue || '').trim();
+    if (!trimmed) {
+      return;
+    }
+    if (searchMode === 'web') {
+      setBrowserInput(trimmed);
+      setSearchDraft(trimmed);
+      const existingTabId = activeBrowserTabId ?? browserTabs[browserTabs.length - 1]?.id ?? null;
+      const targetTabId = existingTabId ?? createAndActivateBrowserTab();
+      setBrowserModeOpen(true);
+      setWorkspaceDisplayMode('browser');
+      if (targetTabId) {
+        setActiveBrowserTabId(targetTabId);
+        window.requestAnimationFrame(() => {
+          submitBrowserInput(trimmed, targetTabId);
+        });
+      }
+      return;
+    }
+    setSearchDraft(trimmed);
+  }, [
+    activeBrowserTabId,
+    browserTabs,
+    createAndActivateBrowserTab,
+    searchMode,
+    submitBrowserInput,
+  ]);
 
   const handleBrowserSubmit = React.useCallback((event: React.FormEvent) => {
     event.preventDefault();
@@ -710,6 +769,15 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
       browserInputRef.current?.select();
     });
   }, [activeBrowserTab, browserModeOpen]);
+
+  React.useEffect(() => {
+    if (browserModeOpen) {
+      return;
+    }
+    if (workspaceDisplayMode === 'browser') {
+      setWorkspaceDisplayMode(activeTabId ? 'file-viewer' : 'search-home');
+    }
+  }, [activeTabId, browserModeOpen, workspaceDisplayMode]);
 
   React.useEffect(() => {
     return () => {
@@ -866,6 +934,14 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
             <button
               type="button"
               className="toolbar-action-btn"
+              onClick={() => showSearchHome()}
+              title="返回搜索主页"
+            >
+              <IconApps />
+            </button>
+            <button
+              type="button"
+              className="toolbar-action-btn"
               onClick={openEmbeddedBrowser}
               title="打开内置浏览器"
             >
@@ -887,7 +963,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
           </ContentToolbar>
         )}
         <ContentBody>
-          {browserModeOpen ? (
+          {workspaceDisplayMode === 'browser' ? (
             <EmbeddedBrowserPanel
               ref={browserRef}
               activeTabId={activeBrowserTabId}
@@ -918,6 +994,17 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
                 }
               }}
               onSubmitDraft={submitBrowserDraft}
+            />
+          ) : workspaceDisplayMode === 'search-home' ? (
+            <SearchWorkspace
+              mode={searchMode}
+              value={searchDraft}
+              onValueChange={setSearchDraft}
+              onModeChange={setSearchMode}
+              onSubmit={handleSearchWorkspaceSubmit}
+              placeholder={searchMode === 'web' ? '输入网址或关键词' : '搜索文件或文件夹'}
+              title="Omniflow"
+              description="输入网址或关键词开始"
             />
           ) : (
             <AppMain hideTabsBar={false} />
