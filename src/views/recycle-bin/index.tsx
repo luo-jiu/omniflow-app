@@ -4,6 +4,7 @@ import { Button, Empty, Modal, Tag, Toast, Typography } from '@douyinfe/semi-ui'
 import { IconChevronLeft, IconDelete, IconRefresh } from '@douyinfe/semi-icons';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
+  clearRecycleBin,
   fetchRecycleBinItems,
   hardDeleteNodeAndChildren,
   restoreNodeAndChildren,
@@ -15,7 +16,7 @@ import { requestDesktopWindowActivation } from '@/utils/windowActivation';
 const Page = styled.div`
   width: 100%;
   height: 100%;
-  padding: 34px 36px;
+  padding: 56px 36px 34px;
   overflow: auto;
   -webkit-app-region: drag;
 
@@ -35,6 +36,13 @@ const Page = styled.div`
     display: flex;
     align-items: center;
     gap: 12px;
+  }
+
+  .header-right {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
   }
 
   .subtitle {
@@ -100,7 +108,7 @@ const Page = styled.div`
   }
 
   @media (max-width: 980px) {
-    padding: 22px 16px;
+    padding: 44px 16px 22px;
 
     .row {
       grid-template-columns: minmax(160px, 1fr) 88px 140px 90px 150px;
@@ -207,6 +215,30 @@ const RecycleBin: React.FC = () => {
     });
   };
 
+  const handleClearRecycleBin = async () => {
+    if (!validLibraryId || items.length === 0) {
+      return;
+    }
+    requestDesktopWindowActivation(true);
+    Modal.confirm({
+      title: '确认清空回收站？',
+      content: `将彻底删除当前库回收站中的 ${items.length} 项内容，删除后无法恢复。`,
+      okText: '清空回收站',
+      cancelText: '取消',
+      okType: 'danger',
+      async onOk() {
+        try {
+          const clearedCount = await clearRecycleBin(libraryId);
+          setItems([]);
+          markRepositoryTreeSnapshotDirty(libraryId);
+          Toast.success(clearedCount > 0 ? `已清空回收站（${clearedCount} 项）` : '回收站已清空');
+        } catch (error: any) {
+          Toast.error(error?.message || '清空回收站失败');
+        }
+      },
+    });
+  };
+
   return (
     <Page>
       <div className="header">
@@ -221,14 +253,25 @@ const RecycleBin: React.FC = () => {
             回收站
           </Title>
         </div>
-        <Button
-          icon={<IconRefresh />}
-          theme="borderless"
-          loading={loading}
-          onClick={() => void loadItems()}
-        >
-          刷新
-        </Button>
+        <div className="header-right">
+          <Button
+            icon={<IconDelete />}
+            theme="borderless"
+            type="danger"
+            disabled={items.length === 0 || loading}
+            onClick={() => void handleClearRecycleBin()}
+          >
+            清空回收站
+          </Button>
+          <Button
+            icon={<IconRefresh />}
+            theme="borderless"
+            loading={loading}
+            onClick={() => void loadItems()}
+          >
+            刷新
+          </Button>
+        </div>
       </div>
 
       <div className="subtitle">{summaryText}</div>

@@ -15,6 +15,7 @@ interface DirectoryContextMenuProps {
   onAction: (action: string, node: any) => void;
   onClose?: () => void;
   boundaryRect?: OverlayBoundaryRect | null;
+  deleteCount?: number;
 }
 
 const BUILT_IN_MENU_ICON_SIZE = 20;
@@ -48,7 +49,8 @@ const AdaptiveDeleteConfirm: React.FC<{
   onAction: (action: string, node: any) => void;
   onClose?: () => void;
   boundaryRect?: OverlayBoundaryRect | null;
-}> = ({ content, node, onAction, onClose, boundaryRect }) => {
+  deleteCount?: number;
+}> = ({ content, node, onAction, onClose, boundaryRect, deleteCount = 1 }) => {
   const triggerRef = React.useRef<HTMLDivElement | null>(null);
   const [position, setPosition] = React.useState<ContextMenuPosition>('leftBottom');
   const resolveConfirmPosition = React.useCallback(() => {
@@ -81,6 +83,7 @@ const AdaptiveDeleteConfirm: React.FC<{
       </div>
     );
   const truncatedNodeName = truncateMenuText(node.data?.rawName ?? node.label ?? node.key);
+  const isBatchDelete = deleteCount > 1;
 
   return (
     <Popconfirm
@@ -88,7 +91,7 @@ const AdaptiveDeleteConfirm: React.FC<{
       title={<div style={{ fontSize: '15px', fontWeight: 600 }}>确认删除？</div>}
       content={
         <div style={{ fontSize: '13px', marginTop: '4px', width: '172px', lineHeight: 1.4 }}>
-          将「{truncatedNodeName}」移入回收站。
+          {isBatchDelete ? `将选中的 ${deleteCount} 项移入回收站。` : `将「${truncatedNodeName}」移入回收站。`}
         </div>
       }
       okType="danger"
@@ -160,6 +163,7 @@ const DirectoryContextMenu: React.FC<DirectoryContextMenuProps> = ({
   onAction,
   onClose,
   boundaryRect,
+  deleteCount = 1,
 }) => {
   // 根目录菜单
   if (node === null) {
@@ -370,6 +374,7 @@ const DirectoryContextMenu: React.FC<DirectoryContextMenuProps> = ({
         onAction={onAction}
         onClose={onClose}
         boundaryRect={boundaryRect}
+        deleteCount={deleteCount}
       />
     )
   });

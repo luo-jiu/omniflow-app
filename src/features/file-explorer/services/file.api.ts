@@ -596,6 +596,14 @@ export async function hardDeleteNodeAndChildren(ancestorId: number, libraryId: n
   return Boolean(body?.data);
 }
 
+export async function clearRecycleBin(libraryId: number): Promise<number> {
+  const body = await request(`/v1/nodes/recycle/library/${libraryId}/clear`, {
+    method: 'DELETE',
+  });
+  const count = Number(body?.data?.clearedCount ?? body?.data ?? 0);
+  return Number.isFinite(count) ? count : 0;
+}
+
 // 获取文件的临时访问链接
 export async function getFileLink(nodeId: number, libraryId: number, expiry: number = 60): Promise<string> {
   const query = new URLSearchParams({

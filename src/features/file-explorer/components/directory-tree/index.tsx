@@ -123,6 +123,7 @@ export default function DirectoryTree({
     y: number;
     position: ContextMenuPosition;
     boundaryRect: OverlayBoundaryRect | null;
+    deleteCount: number;
     node: any | null; // null 表示根目录
     isFolder: boolean;
   }>({
@@ -131,6 +132,7 @@ export default function DirectoryTree({
     y: 0,
     position: 'bottomLeft',
     boundaryRect: null,
+    deleteCount: 1,
     node: null,
     isFolder: false,
   });
@@ -816,6 +818,36 @@ export default function DirectoryTree({
 
     setSelectedNodeIds([nodeId]);
     setSelectionAnchorKey(targetKey || null);
+  };
+
+  const resolveDeleteSelection = (targetNode: any): any[] => {
+    const targetNodeId = Number(targetNode?.id);
+    if (!Number.isFinite(targetNodeId) || targetNodeId <= 0) {
+      return [];
+    }
+    if (!selectedNodeIds.includes(targetNodeId)) {
+      return [targetNode];
+    }
+    const normalizedSelection = normalizeMoveSelection(selectedNodeIds);
+    return normalizedSelection.length > 0 ? normalizedSelection : [targetNode];
+  };
+
+  const collectDeleteSubtreeNodeIds = async (targetNode: any): Promise<Set<number>> => {
+    const nodeIds = new Set<number>();
+    const targetNodeId = Number(targetNode?.id);
+    if (!Number.isFinite(targetNodeId) || targetNodeId <= 0) {
+      return nodeIds;
+    }
+
+    nodeIds.add(targetNodeId);
+    const descendants = await getAllDescendantsByNodeId(targetNodeId, libraryId);
+    (descendants || []).forEach((item: any) => {
+      const descendantId = Number(item?.id);
+      if (Number.isFinite(descendantId) && descendantId > 0) {
+        nodeIds.add(descendantId);
+      }
+    });
+    return nodeIds;
   };
 
   const applyTemporaryExpandedKeys = (keys: string[]) => {
@@ -1531,43 +1563,81 @@ export default function DirectoryTree({
       showNodeProperties(node);
     } else if (action === 'delete') {
       try {
-        runtimeLogger.debug('🗑️ [删除]', node);
-        const parentIdCandidate = Number(node?.parentId);
-        const parentId = Number.isFinite(parentIdCandidate) && parentIdCandidate > 0
-          ? parentIdCandidate
-          : (ROOT_PARENT_ID ?? 0);
-        // node.id 是 ancestorId
-        await deleteNodeAndChildren(node.id, libraryId);
-        Toast.success('删除成功');
-        
-        // 通知父组件从本地 treeData 中移除节点
-        // 直接传递 node.key，这样父组件可以直接删除，不需要查找
-        if (onDeleteSuccess) {
-          // 构造成一个类 parent 结构，或者传 null
-          const dummyParent = node.parentId
-            ? { id: node.parentId }
-            : (ROOT_PARENT_ID !== null ? { id: ROOT_PARENT_ID, key: 'root' } : null);
-          // 传递 node.key 而不是 node.id，这样父组件可以直接删除
-          onDeleteSuccess(dummyParent, node.key);
+        const deleteTargets = resolveDeleteSelection(node);
+        if (deleteTargets.length === 0) {
+          return;
         }
 
-        if (onMoveSuccess && parentId > 0 && (ROOT_PARENT_ID === null || parentId !== ROOT_PARENT_ID)) {
-          await onMoveSuccess({ affectedParentIds: [parentId] });
+        runtimeLogger.debug('🗑️ [删除]', deleteTargets);
+        const affectedParentIds = new Set<number>();
+        const deletedNodeKeys: string[] = [];
+        const deletedNodeIds = new Set<number>();
+        let deleteError: unknown = null;
+
+        for (const targetNode of deleteTargets) {
+          try {
+            const subtreeNodeIds = await collectDeleteSubtreeNodeIds(targetNode);
+            subtreeNodeIds.forEach((nodeId) => deletedNodeIds.add(nodeId));
+
+            const parentIdCandidate = Number(targetNode?.parentId);
+            const parentId = Number.isFinite(parentIdCandidate) && parentIdCandidate > 0
+              ? parentIdCandidate
+              : (ROOT_PARENT_ID ?? 0);
+            await deleteNodeAndChildren(Number(targetNode.id), libraryId);
+            if (parentId > 0) {
+              affectedParentIds.add(parentId);
+            }
+            if (targetNode?.key) {
+              deletedNodeKeys.push(String(targetNode.key));
+            }
+          } catch (error) {
+            deleteError = error;
+            break;
+          }
+        }
+
+        if (deletedNodeKeys.length > 0 && onDeleteSuccess) {
+          deletedNodeKeys.forEach((deletedNodeKey) => {
+            onDeleteSuccess(null, deletedNodeKey);
+          });
+        }
+
+        if (deletedNodeKeys.length > 0 && onMoveSuccess && affectedParentIds.size > 0) {
+          await onMoveSuccess({ affectedParentIds: Array.from(affectedParentIds) });
         }
 
         const playerState = globalAudioPlayer.getState();
         const shouldClearAudio = tabs.some(tab => (
-          tab.nodeId === node.id &&
+          deletedNodeIds.has(Number(tab.nodeId)) &&
           tab.fileType === 'audio' &&
           tab.fileUrl === playerState.src
         ));
 
-        closeTabByNodeId(node.id);
+        deletedNodeIds.forEach((deletedNodeId) => {
+          closeTabByNodeId(deletedNodeId);
+        });
         if (shouldClearAudio) {
           globalAudioPlayer.clear();
         }
-        Toast.info('文件已移入回收站');
-        
+        setSelectedNodeIds((prev) => prev.filter(id => !deletedNodeIds.has(id)));
+        const anchorNode = selectionAnchorKey
+          ? findNodeByKey(treeDataRef.current || [], selectionAnchorKey)
+          : null;
+        if (anchorNode && deletedNodeIds.has(Number(anchorNode.id))) {
+          setSelectionAnchorKey(null);
+        }
+        if (deleteError) {
+          runtimeLogger.error('删除节点失败:', deleteError);
+          if (deletedNodeKeys.length > 0) {
+            Toast.error(`已移入回收站 ${deletedNodeKeys.length} 项，剩余删除失败`);
+          } else {
+            Toast.error('删除失败');
+          }
+          scheduleRecompute();
+          return;
+        }
+
+        Toast.success(deleteTargets.length > 1 ? `已移入回收站 ${deleteTargets.length} 项` : '已移入回收站');
         scheduleRecompute();
       } catch (error) {
         runtimeLogger.error('删除节点失败:', error);
@@ -1716,6 +1786,7 @@ export default function DirectoryTree({
     const y = e.clientY;
     const boundaryRect = resolveTreeBoundaryRect();
     const position = resolveMenuPosition(x, y, boundaryRect);
+    const deleteCount = Math.max(1, resolveDeleteSelection(node).length);
     
     // 如果已经打开，先关闭再打开，强制位置刷新
     if (menuState.visible) {
@@ -1727,6 +1798,7 @@ export default function DirectoryTree({
           y,
           position,
           boundaryRect,
+          deleteCount,
           node,
           isFolder,
         });
@@ -1738,6 +1810,7 @@ export default function DirectoryTree({
         y,
         position,
         boundaryRect,
+        deleteCount,
         node,
         isFolder,
       });
@@ -2112,6 +2185,7 @@ export default function DirectoryTree({
             isFolder={menuState.isFolder} 
             onAction={handleAction} 
             boundaryRect={menuState.boundaryRect}
+            deleteCount={menuState.deleteCount}
             onClose={() => setMenuState(prev => ({ ...prev, visible: false }))}
           />
         }

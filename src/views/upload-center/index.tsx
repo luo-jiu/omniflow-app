@@ -10,7 +10,7 @@ import type { UploadTaskSummary } from '@/modules/upload-center/model/upload-tas
 const Page = styled.div`
   width: 100%;
   height: 100%;
-  padding: 34px 36px;
+  padding: 56px 36px 34px;
   overflow: auto;
   -webkit-app-region: drag;
 
@@ -163,7 +163,7 @@ const Page = styled.div`
   }
 
   @media (max-width: 900px) {
-    padding: 22px 18px;
+    padding: 44px 18px 22px;
 
     .summary {
       grid-template-columns: repeat(2, minmax(100px, 1fr));
