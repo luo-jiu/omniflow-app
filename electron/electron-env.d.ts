@@ -128,6 +128,7 @@ interface Window {
     goBack: (tabId: string) => Promise<void>;
     goForward: (tabId: string) => Promise<void>;
     navigate: (tabId: string, url: string) => Promise<void>;
+    openMappedFile: (tabId: string, pageUrl: string, sourceUrl: string, fileName: string) => Promise<void>;
     onStateChange: (listener: (payload: {
       canGoBack?: boolean;
       canGoForward?: boolean;

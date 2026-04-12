@@ -12,6 +12,11 @@ import {
   initializeEmbeddedBrowserDownloadBridge,
   type EmbeddedBrowserDownloadPayload,
 } from './service/embeddedBrowserService'
+import {
+  cleanupEmbeddedBrowserOpenFile,
+  injectEmbeddedBrowserOpenFile,
+  stageEmbeddedBrowserOpenFile,
+} from './service/embeddedBrowserOpenFile'
 
 // __dirname 处理（因为 ESM 下没有内置 __dirname）
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -68,6 +73,13 @@ const WINDOW_ACTIVATE_TOPMOST_DURATION_MS = 240
 let windowStateSaveTimer: ReturnType<typeof setTimeout> | null = null
 const embeddedBrowserViews = new Map<string, WebContentsView>()
 const embeddedBrowserLastCommittedUrls = new Map<string, string>()
+const embeddedBrowserPendingOpenFiles = new Map<string, {
+  fileName: string
+  pageUrl: string
+  stagedPath: string
+}>()
+const embeddedBrowserAttachedOpenFiles = new Map<string, string>()
+const embeddedBrowserOpenFileRequestVersions = new Map<string, number>()
 let activeEmbeddedBrowserTabId: string | null = null
 let embeddedBrowserPendingBounds: { x: number; y: number; width: number; height: number } | null = null
 
@@ -415,6 +427,80 @@ function registerWindowIpcHandlers() {
     return view
   }
 
+  const cleanupEmbeddedBrowserOpenFileForTab = (tabId: string) => {
+    const pending = embeddedBrowserPendingOpenFiles.get(tabId)
+    if (pending?.stagedPath) {
+      void cleanupEmbeddedBrowserOpenFile(pending.stagedPath).catch(() => undefined)
+    }
+    embeddedBrowserPendingOpenFiles.delete(tabId)
+
+    const attachedPath = embeddedBrowserAttachedOpenFiles.get(tabId)
+    if (attachedPath) {
+      void cleanupEmbeddedBrowserOpenFile(attachedPath).catch(() => undefined)
+    }
+    embeddedBrowserAttachedOpenFiles.delete(tabId)
+  }
+
+  const bumpEmbeddedBrowserOpenFileRequestVersion = (tabId: string) => {
+    const nextVersion = (embeddedBrowserOpenFileRequestVersions.get(tabId) ?? 0) + 1
+    embeddedBrowserOpenFileRequestVersions.set(tabId, nextVersion)
+    return nextVersion
+  }
+
+  const isEmbeddedBrowserOpenFileRequestCurrent = (tabId: string, version: number) =>
+    embeddedBrowserOpenFileRequestVersions.get(tabId) === version
+
+  const matchesEmbeddedBrowserOpenFileTargetPage = (currentUrl: string, targetUrl: string) => {
+    try {
+      const current = new URL(currentUrl)
+      const target = new URL(targetUrl)
+      if (current.origin !== target.origin) {
+        return false
+      }
+      const normalizedCurrentPath = current.pathname.replace(/\/+$/, '') || '/'
+      const normalizedTargetPath = target.pathname.replace(/\/+$/, '') || '/'
+      if (normalizedTargetPath === '/') {
+        return true
+      }
+      return (
+        normalizedCurrentPath === normalizedTargetPath
+        || normalizedCurrentPath.startsWith(`${normalizedTargetPath}/`)
+      )
+    } catch {
+      return false
+    }
+  }
+
+  const tryDispatchPendingEmbeddedBrowserOpenFile = async (tabId: string, view: WebContentsView) => {
+    const pending = embeddedBrowserPendingOpenFiles.get(tabId)
+    if (!pending || view.webContents.isDestroyed()) {
+      return false
+    }
+    const currentUrl = view.webContents.getURL() || embeddedBrowserLastCommittedUrls.get(tabId) || ''
+    if (!currentUrl) {
+      return false
+    }
+    if (!matchesEmbeddedBrowserOpenFileTargetPage(currentUrl, pending.pageUrl)) {
+      return false
+    }
+
+    try {
+      const injected = await injectEmbeddedBrowserOpenFile(view, pending.stagedPath)
+      if (!injected) {
+        return false
+      }
+      const previousAttachedPath = embeddedBrowserAttachedOpenFiles.get(tabId)
+      if (previousAttachedPath && previousAttachedPath !== pending.stagedPath) {
+        void cleanupEmbeddedBrowserOpenFile(previousAttachedPath).catch(() => undefined)
+      }
+      embeddedBrowserAttachedOpenFiles.set(tabId, pending.stagedPath)
+      embeddedBrowserPendingOpenFiles.delete(tabId)
+      return true
+    } catch {
+      return false
+    }
+  }
+
   const syncEmbeddedBrowserViewBounds = (view: WebContentsView) => {
     view.setBounds(embeddedBrowserPendingBounds ?? {
       x: 0,
@@ -477,6 +563,7 @@ function registerWindowIpcHandlers() {
       }
       const committedUrl = view.webContents.getURL() || ''
       embeddedBrowserLastCommittedUrls.set(tabId, committedUrl)
+      await tryDispatchPendingEmbeddedBrowserOpenFile(tabId, view)
       const meta = await collectEmbeddedBrowserDebugMeta(view)
       emitEmbeddedBrowserTabState(tabId, view, {
         details: 'did-stop-loading',
@@ -488,10 +575,12 @@ function registerWindowIpcHandlers() {
     view.webContents.on('did-navigate', (_event, url) => {
       embeddedBrowserLastCommittedUrls.set(tabId, url)
       emitEmbeddedBrowserTabState(tabId, view, { details: 'did-navigate', state: 'ready', url })
+      void tryDispatchPendingEmbeddedBrowserOpenFile(tabId, view)
     })
     view.webContents.on('did-navigate-in-page', (_event, url) => {
       embeddedBrowserLastCommittedUrls.set(tabId, url)
       emitEmbeddedBrowserTabState(tabId, view, { details: 'did-navigate-in-page', state: 'ready', url })
+      void tryDispatchPendingEmbeddedBrowserOpenFile(tabId, view)
     })
     view.webContents.on('page-title-updated', (_event, title) => {
       emitEmbeddedBrowserTabState(tabId, view, {
@@ -648,6 +737,8 @@ function registerWindowIpcHandlers() {
     }
     embeddedBrowserViews.delete(normalizedTabId)
     embeddedBrowserLastCommittedUrls.delete(normalizedTabId)
+    bumpEmbeddedBrowserOpenFileRequestVersion(normalizedTabId)
+    cleanupEmbeddedBrowserOpenFileForTab(normalizedTabId)
     if (!view.webContents.isDestroyed()) {
       view.webContents.close({ waitForBeforeUnload: false })
     }
@@ -655,6 +746,8 @@ function registerWindowIpcHandlers() {
 
   ipcMain.handle('embedded-browser:open-tab', async (event, tabId: string, url?: string) => {
     const targetWindow = BrowserWindow.fromWebContents(event.sender) ?? mainWindow
+    bumpEmbeddedBrowserOpenFileRequestVersion(String(tabId || '').trim())
+    cleanupEmbeddedBrowserOpenFileForTab(String(tabId || '').trim())
     const normalizedUrl = String(url || '').trim()
     if (!normalizedUrl) {
       emitEmbeddedBrowserState({
@@ -676,7 +769,50 @@ function registerWindowIpcHandlers() {
 
   ipcMain.handle('embedded-browser:navigate', async (event, tabId: string, url: string) => {
     const targetWindow = BrowserWindow.fromWebContents(event.sender) ?? mainWindow
-    await loadEmbeddedBrowserUrl(targetWindow, tabId, url, 'navigate-exception')
+    const normalizedTabId = String(tabId || '').trim()
+    bumpEmbeddedBrowserOpenFileRequestVersion(normalizedTabId)
+    cleanupEmbeddedBrowserOpenFileForTab(normalizedTabId)
+    await loadEmbeddedBrowserUrl(targetWindow, normalizedTabId, url, 'navigate-exception')
+  })
+
+  ipcMain.handle('embedded-browser:open-mapped-file', async (
+    event,
+    tabId: string,
+    pageUrl: string,
+    sourceUrl: string,
+    fileName: string,
+  ) => {
+    const targetWindow = BrowserWindow.fromWebContents(event.sender) ?? mainWindow
+    const normalizedTabId = String(tabId || '').trim()
+    const normalizedPageUrl = String(pageUrl || '').trim()
+    const normalizedSourceUrl = String(sourceUrl || '').trim()
+    const normalizedFileName = String(fileName || '').trim() || 'file'
+    if (!normalizedTabId || !normalizedPageUrl || !normalizedSourceUrl) {
+      return
+    }
+
+    const requestVersion = bumpEmbeddedBrowserOpenFileRequestVersion(normalizedTabId)
+    cleanupEmbeddedBrowserOpenFileForTab(normalizedTabId)
+    const stagedPath = await stageEmbeddedBrowserOpenFile(normalizedSourceUrl, normalizedFileName)
+    if (!isEmbeddedBrowserOpenFileRequestCurrent(normalizedTabId, requestVersion)) {
+      void cleanupEmbeddedBrowserOpenFile(stagedPath).catch(() => undefined)
+      return
+    }
+    embeddedBrowserPendingOpenFiles.set(normalizedTabId, {
+      fileName: normalizedFileName,
+      pageUrl: normalizedPageUrl,
+      stagedPath,
+    })
+
+    await loadEmbeddedBrowserUrl(targetWindow, normalizedTabId, normalizedPageUrl, 'navigate-exception')
+    if (!isEmbeddedBrowserOpenFileRequestCurrent(normalizedTabId, requestVersion)) {
+      return
+    }
+
+    const view = getEmbeddedBrowserView(normalizedTabId)
+    if (view) {
+      void tryDispatchPendingEmbeddedBrowserOpenFile(normalizedTabId, view)
+    }
   })
 
   ipcMain.handle('embedded-browser:reload', async (_event, tabId: string) => {

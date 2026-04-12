@@ -17,10 +17,13 @@ import {
   IconApps,
   IconFolder,
 } from "@douyinfe/semi-icons";
+import { Toast } from '@douyinfe/semi-ui';
 import styled, { css } from "styled-components";
 import EmbeddedBrowserPanel, { type EmbeddedBrowserHandle } from "@/features/embedded-browser/components/EmbeddedBrowserPanel";
 import EmbeddedBrowserDownloadImportModal from "@/features/embedded-browser/downloads/components/EmbeddedBrowserDownloadImportModal";
 import { useEmbeddedBrowserDownloadImport } from "@/features/embedded-browser/downloads/hooks/useEmbeddedBrowserDownloadImport";
+import { getFileLink } from '@/features/file-explorer/services/file.api';
+import { resolveBrowserFileMapping } from '@/features/browser-file-mappings/services/browser-file-mapping.api';
 import SearchWorkspace, { type SearchWorkspaceMode } from "./SearchWorkspace";
 import {
   loadLibraryDetailWorkspaceState,
@@ -500,6 +503,10 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   const [activeBrowserTabId, setActiveBrowserTabId] = React.useState<string | null>(initialWorkspaceState.activeBrowserTabId);
   const [draggingBrowserTabId, setDraggingBrowserTabId] = React.useState<string | null>(null);
   const [browserTabsScrollMode, setBrowserTabsScrollMode] = React.useState(false);
+  const [pendingBrowserFileOpenByTabId, setPendingBrowserFileOpenByTabId] = React.useState<Record<string, {
+    fileName: string;
+    sourceUrl: string;
+  }>>({});
   const [browserTabDropTarget, setBrowserTabDropTarget] = React.useState<{
     position: 'before' | 'after';
     tabId: string;
@@ -726,8 +733,27 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
         void window.electronEmbeddedBrowser.deactivate();
       }
     }
+    setPendingBrowserFileOpenByTabId((prev) => {
+      if (!prev[tabId]) {
+        return prev;
+      }
+      const next = { ...prev };
+      delete next[tabId];
+      return next;
+    });
     void window.electronEmbeddedBrowser.closeTab(tabId);
   }, [activeBrowserTabId, browserTabs]);
+
+  const clearPendingBrowserFileOpen = React.useCallback((tabId: string) => {
+    setPendingBrowserFileOpenByTabId((prev) => {
+      if (!prev[tabId]) {
+        return prev;
+      }
+      const next = { ...prev };
+      delete next[tabId];
+      return next;
+    });
+  }, []);
 
   const reorderBrowserTabList = React.useCallback((
     draggedTabId: string,
@@ -794,6 +820,57 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   const submitBrowserDraft = React.useCallback((draftValue: string) => {
     submitBrowserInput(draftValue);
   }, [submitBrowserInput]);
+
+  const handleOpenFileInBrowser = React.useCallback(async (payload: {
+    fileExt: string;
+    fileName: string;
+    nodeId: number;
+  }) => {
+    const normalizedExt = String(payload.fileExt || '').trim().replace(/^\./, '').toLowerCase();
+    if (!normalizedExt) {
+      Toast.warning('当前文件缺少后缀映射信息');
+      return;
+    }
+
+    try {
+      const mapping = await resolveBrowserFileMapping(normalizedExt);
+      let sourceUrl = '';
+      try {
+        sourceUrl = await getFileLink(payload.nodeId, libraryId, 300);
+      } catch (error: any) {
+        Toast.error(error?.message || '获取文件链接失败，请刷新后重试');
+        return;
+      }
+      const next = createEmptyBrowserTab();
+
+      setBrowserTabs((prev) => [
+        ...prev,
+        {
+          ...next.tab,
+          title: payload.fileName,
+          url: mapping.siteUrl,
+        },
+      ]);
+      setPendingBrowserFileOpenByTabId((prev) => ({
+        ...prev,
+        [next.id]: {
+          fileName: payload.fileName,
+          sourceUrl,
+        },
+      }));
+      setActiveBrowserTabId(next.id);
+      setBrowserModeOpen(true);
+      setWorkspaceDisplayMode('browser');
+      setSearchMode('web');
+      setBrowserInput(mapping.siteUrl);
+    } catch (error: any) {
+      if (String(error?.message || '').includes('resource not found')) {
+        Toast.warning(`未找到 .${normalizedExt} 的浏览器打开映射，请先到设置中配置`);
+        return;
+      }
+      Toast.error(error?.message || '在浏览器打开失败');
+    }
+  }, [libraryId]);
 
   const handleToolbarRefresh = React.useCallback(() => {
     if (browserModeOpen) {
@@ -1000,7 +1077,12 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
         <SidePanelHeader />
 
         <SidePanelTree>
-          <DirectorySidebar ref={directorySidebarRef} libraryId={libraryId} onFileOpen={handleFileOpen} />
+          <DirectorySidebar
+            ref={directorySidebarRef}
+            libraryId={libraryId}
+            onFileOpen={handleFileOpen}
+            onOpenFileInBrowser={handleOpenFileInBrowser}
+          />
         </SidePanelTree>
 
         <SidePanelFooter>
@@ -1254,6 +1336,14 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
               currentUrl={
                 activeBrowserTab?.url ?? ''
               }
+              pendingFileOpen={
+                activeBrowserTabId
+                  ? pendingBrowserFileOpenByTabId[activeBrowserTabId] ?? null
+                  : null
+              }
+              onPendingFileOpenHandled={(tabId) => {
+                clearPendingBrowserFileOpen(tabId);
+              }}
               suspendNativeView={Boolean(activeBrowserDownload)}
               onUrlChange={(nextUrl) => {
                 if (!activeBrowserTabId) {

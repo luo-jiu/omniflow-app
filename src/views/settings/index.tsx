@@ -366,6 +366,20 @@ const Settings: React.FC = () => {
           </Button>
         </div>
 
+        <div className="setting-item">
+          <div>
+            <div className="setting-title">浏览器打开映射</div>
+            <div className="setting-desc">为文件后缀绑定网站，支持目录树右键直接在浏览器模式打开</div>
+          </div>
+          <Button
+            theme="borderless"
+            onClick={() => navigate('/settings/browser-file-mappings')}
+            className="settings-action-btn manage"
+          >
+            管理
+          </Button>
+        </div>
+
         <Divider style={{ margin: '24px 0' }} />
 
         <div>

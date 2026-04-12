@@ -23,6 +23,11 @@ interface Props {
       } | null;
     },
   ) => void;
+  onOpenFileInBrowser?: (payload: {
+    fileExt: string;
+    fileName: string;
+    nodeId: number;
+  }) => void | Promise<void>;
 }
 
 export interface DirectorySidebarHandle {
@@ -43,7 +48,7 @@ function isNodeRespDTO(value: unknown): value is NodeRespDTO {
   );
 }
 
-const DirectorySidebar = React.forwardRef<DirectorySidebarHandle, Props>(({ libraryId, onFileOpen }, ref) => {
+const DirectorySidebar = React.forwardRef<DirectorySidebarHandle, Props>(({ libraryId, onFileOpen, onOpenFileInBrowser }, ref) => {
   const {
     rootNodeId,
     expandedKeys,
@@ -170,6 +175,7 @@ const DirectorySidebar = React.forwardRef<DirectorySidebarHandle, Props>(({ libr
             }
             return refreshNodeSubtree(targetNodeId);
           }}
+          onOpenFileInBrowser={onOpenFileInBrowser}
           libraryId={libraryId}
           rootNodeId={rootNodeId}
         />

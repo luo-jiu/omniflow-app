@@ -93,6 +93,12 @@ contextBridge.exposeInMainWorld('electronEmbeddedBrowser', {
   goBack: (tabId: string) => ipcRenderer.invoke('embedded-browser:go-back', tabId),
   goForward: (tabId: string) => ipcRenderer.invoke('embedded-browser:go-forward', tabId),
   navigate: (tabId: string, url: string) => ipcRenderer.invoke('embedded-browser:navigate', tabId, url),
+  openMappedFile: (
+    tabId: string,
+    pageUrl: string,
+    sourceUrl: string,
+    fileName: string,
+  ) => ipcRenderer.invoke('embedded-browser:open-mapped-file', tabId, pageUrl, sourceUrl, fileName),
   onStateChange: (listener: (payload: {
     canGoBack?: boolean;
     canGoForward?: boolean;

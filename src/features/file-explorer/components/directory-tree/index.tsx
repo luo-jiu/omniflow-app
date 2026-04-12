@@ -64,6 +64,11 @@ interface DirectoryTreeProps {
   // 拖拽移动成功后，通知父组件刷新受影响父目录
   onMoveSuccess?: (payload: { affectedParentIds: number[] }) => void | Promise<void>;
   onRefreshNode?: (node: any) => void | Promise<void>;
+  onOpenFileInBrowser?: (payload: {
+    fileExt: string;
+    fileName: string;
+    nodeId: number;
+  }) => void | Promise<void>;
   libraryId: number; // 添加 libraryId prop
   rootNodeId: number | null;
 }
@@ -106,6 +111,7 @@ export default function DirectoryTree({
   onConfigSuccess,
   onMoveSuccess,
   onRefreshNode,
+  onOpenFileInBrowser,
   loadData,
   libraryId,
   rootNodeId,
@@ -1514,6 +1520,31 @@ export default function DirectoryTree({
       } catch (error: any) {
         runtimeLogger.error('下载节点失败:', error);
         Toast.error(error?.message || '下载失败');
+      }
+      return;
+    }
+
+    if (action === '在浏览器打开') {
+      const nodeId = Number(node?.id);
+      const fileExt = String(resolveNodeExt(node) || '').trim();
+      const fileName = buildNodeFileName(node);
+      if (!Number.isFinite(nodeId) || nodeId <= 0 || !fileName) {
+        Toast.warning('当前文件暂时无法在浏览器中打开');
+        return;
+      }
+      if (!fileExt) {
+        Toast.warning('当前文件没有可用后缀，请先配置后再重试');
+        return;
+      }
+      try {
+        await onOpenFileInBrowser?.({
+          fileExt,
+          fileName,
+          nodeId,
+        });
+      } catch (error: any) {
+        runtimeLogger.error('在浏览器打开文件失败:', error);
+        Toast.error(error?.message || '在浏览器打开失败');
       }
       return;
     }

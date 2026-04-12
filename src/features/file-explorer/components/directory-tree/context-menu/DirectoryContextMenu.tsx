@@ -235,6 +235,11 @@ const DirectoryContextMenu: React.FC<DirectoryContextMenuProps> = ({
         label: '下载',
         onClick: () => onAction('下载', node),
       },
+      {
+        key: 'open-in-browser',
+        label: '在浏览器打开',
+        onClick: () => onAction('在浏览器打开', node),
+      },
     ];
 
   // 文件夹：基础信息组后加分隔线，再进入模式设置组

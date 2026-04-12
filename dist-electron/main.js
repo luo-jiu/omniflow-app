@@ -1,444 +1,445 @@
-import { dialog as W, app as T, net as xe, ipcMain as _, session as he, BrowserWindow as R, screen as Le, WebContentsView as Ue } from "electron";
-import { fileURLToPath as Ie } from "node:url";
-import y from "node:path";
-import K, { existsSync as te, mkdirSync as we, readFileSync as Ne, writeFileSync as Fe } from "node:fs";
-import D from "fs/promises";
-import ge from "node:http";
-import pe from "node:https";
-import ye from "os";
-import ne from "child_process";
-import $e from "fs";
-import We from "node:fs/promises";
-const j = 6e4, ze = "Omniflow Inbox", Ve = 10 * 60 * 1e3, He = 2, ke = 2e3, ee = 12, V = /* @__PURE__ */ new Map();
-function re(e) {
-  const n = String(e || "");
-  return !!(!n || n === ".DS_Store" || n.startsWith("._") || n === "Thumbs.db");
-}
-function H(e) {
-  return e.replace(/\\/g, "/").split("/").filter(Boolean).join("/");
-}
-function Ge(e) {
-  const n = String(e || "").toLowerCase();
-  return !n || n.startsWith(".") ? !0 : n.endsWith(".crdownload") || n.endsWith(".part") || n.endsWith(".tmp") || n.endsWith(".opdownload") || n.endsWith(".download");
-}
-function be() {
-  return y.join(T.getPath("userData"), "auto-import-staging");
-}
-function je(e, n) {
-  const s = y.resolve(e), a = y.resolve(n);
-  return s === a ? !0 : s.startsWith(`${a}${y.sep}`);
-}
-function qe(e) {
-  const n = String(e || "unknown").replace(/[/\\]/g, "_").trim() || "unknown";
-  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${n}`;
-}
-async function Xe(e, n) {
-  try {
-    await D.rename(e, n);
-  } catch (s) {
-    if ((s == null ? void 0 : s.code) !== "EXDEV")
-      throw s;
-    await D.copyFile(e, n), await D.rm(e, { force: !0 });
-  }
-}
-function Ze(e) {
-  const n = Date.now();
-  for (const [s, a] of V.entries())
-    e.has(s) || n - a.lastSeenAt <= Ve || V.delete(s);
-}
-async function Je(e, n = ee) {
-  const s = String(e || "").trim(), a = s ? y.resolve(s) : y.join(T.getPath("downloads"), ze), i = await D.stat(a).catch(() => null);
-  if (!(i != null && i.isDirectory()))
-    return [];
-  const d = await D.readdir(a, { withFileTypes: !0 }), m = /* @__PURE__ */ new Set(), p = Date.now(), b = [];
-  for (const o of d) {
-    if (!o.isFile() || re(o.name) || Ge(o.name)) continue;
-    const t = y.join(a, o.name), r = await D.stat(t).catch(() => null);
-    if (!(r != null && r.isFile())) continue;
-    m.add(t);
-    const c = V.get(t), f = (c ? c.size === r.size && c.mtimeMs === r.mtimeMs : !1) && c ? c.stableCount + 1 : 1;
-    V.set(t, {
-      size: r.size,
-      mtimeMs: r.mtimeMs,
-      stableCount: f,
-      lastSeenAt: p
-    }), !(f < He) && (p - r.mtimeMs < ke || b.push({
-      sourcePath: t,
-      name: o.name,
-      size: r.size,
-      mtimeMs: r.mtimeMs
-    }));
-  }
-  if (Ze(m), b.length === 0)
-    return [];
-  b.sort((o, t) => o.mtimeMs - t.mtimeMs);
-  const h = be();
-  await D.mkdir(h, { recursive: !0 });
-  const l = [], w = Math.max(1, Math.floor(Number(n) || ee));
-  for (const o of b.slice(0, w)) {
-    const t = y.join(h, qe(o.name));
-    try {
-      await Xe(o.sourcePath, t);
-    } catch {
-      continue;
-    }
-    V.delete(o.sourcePath), l.push({
-      name: o.name,
-      size: o.size,
-      localPath: t,
-      relativePath: H(o.name)
-    });
-  }
-  return l;
-}
-async function Ye(e) {
-  const n = y.resolve(String(e || "").trim()), s = be();
-  return !n || !je(n, s) ? !1 : (await D.rm(n, { force: !0 }), !0);
-}
-function ae(e, n) {
-  const s = H(n || "");
-  if (!s)
-    return e;
-  const a = s.split("/").filter(Boolean);
-  for (const i of a) {
-    if (i === "." || i === "..")
-      throw new Error(`非法下载路径片段: ${i}`);
-    if (i.includes("\0"))
-      throw new Error("非法下载路径：包含空字符");
-  }
-  return y.join(e, ...a);
-}
-async function ve(e, n, s = {}, a = 0) {
+import { dialog as H, app as R, net as We, ipcMain as P, session as Te, BrowserWindow as M, screen as ze, WebContentsView as ke } from "electron";
+import { fileURLToPath as Ve } from "node:url";
+import g from "node:path";
+import ie, { existsSync as re, mkdirSync as de, readFileSync as He, writeFileSync as je } from "node:fs";
+import B from "fs/promises";
+import te from "node:fs/promises";
+import _e from "node:http";
+import Se from "node:https";
+import Ce from "os";
+import ce from "child_process";
+import Ge from "fs";
+const J = 6e4;
+async function le(e, t, o = {}, i = 0) {
   const d = new URL(e);
   if (d.protocol !== "http:" && d.protocol !== "https:")
     throw new Error(`不支持的下载协议: ${d.protocol}`);
-  const m = d.protocol === "https:" ? pe : ge;
-  await D.mkdir(y.dirname(n), { recursive: !0 }), await new Promise((p, b) => {
-    let h = !1;
-    const l = () => {
-      h || (h = !0, p());
-    }, w = (t) => {
-      h || (h = !0, b(t));
-    }, o = m.request({
+  const f = d.protocol === "https:" ? Se : _e;
+  await te.mkdir(g.dirname(t), { recursive: !0 }), await new Promise((p, E) => {
+    let v = !1;
+    const m = () => {
+      v || (v = !0, p());
+    }, y = (h) => {
+      v || (v = !0, E(h));
+    }, u = f.request({
       protocol: d.protocol,
       hostname: d.hostname,
       port: d.port ? Number(d.port) : void 0,
       path: `${d.pathname}${d.search}`,
       method: "GET",
-      headers: s
-    }, (t) => {
-      t.setTimeout(j, () => {
-        t.destroy(new Error(`下载响应超时: ${j}ms`));
+      headers: o
+    }, (h) => {
+      h.setTimeout(J, () => {
+        h.destroy(new Error(`下载响应超时: ${J}ms`));
       });
-      const r = Number(t.statusCode || 0), c = t.headers.location;
-      if (r >= 300 && r < 400 && c) {
-        if (t.resume(), a >= 3) {
-          w(new Error(`下载重定向次数过多: ${e}`));
+      const T = Number(h.statusCode || 0), _ = h.headers.location;
+      if (T >= 300 && T < 400 && _) {
+        if (h.resume(), i >= 3) {
+          y(new Error(`下载重定向次数过多: ${e}`));
           return;
         }
-        const v = new URL(c, e).toString();
-        ve(v, n, s, a + 1).then(l).catch(w);
+        const n = new URL(_, e).toString();
+        le(n, t, o, i + 1).then(m).catch(y);
         return;
       }
-      if (r >= 400) {
-        t.resume(), w(new Error(`下载失败: HTTP ${r} (${e})`));
+      if (T >= 400) {
+        h.resume(), y(new Error(`下载失败: HTTP ${T} (${e})`));
         return;
       }
-      const u = K.createWriteStream(n), f = async (v) => {
+      const L = ie.createWriteStream(t), s = async (n) => {
         try {
-          u.destroy();
+          L.destroy();
         } catch {
         }
         try {
-          await D.rm(n, { force: !0 });
+          await te.rm(t, { force: !0 });
         } catch {
         }
-        w(v);
+        y(n);
       };
-      t.on("error", (v) => {
-        f(v);
-      }), u.on("error", (v) => {
-        f(v);
-      }), u.on("finish", () => l()), t.pipe(u);
+      h.on("error", (n) => {
+        s(n);
+      }), L.on("error", (n) => {
+        s(n);
+      }), L.on("finish", () => m()), h.pipe(L);
     });
-    o.setTimeout(j, () => {
-      o.destroy(new Error(`下载请求超时: ${j}ms`));
-    }), o.on("error", (t) => w(t)), o.end();
+    u.setTimeout(J, () => {
+      u.destroy(new Error(`下载请求超时: ${J}ms`));
+    }), u.on("error", (h) => y(h)), u.end();
   });
 }
-function Ee(e, n) {
-  return e.relativePath.localeCompare(n.relativePath, "zh-Hans-CN");
+const qe = "Omniflow Inbox", Xe = 10 * 60 * 1e3, Je = 2, Ye = 2e3, ae = 12, q = /* @__PURE__ */ new Map();
+function ue(e) {
+  const t = String(e || "");
+  return !!(!t || t === ".DS_Store" || t.startsWith("._") || t === "Thumbs.db");
 }
-async function Qe(e) {
-  return (await Promise.all(e.map(async (s) => {
-    const a = await D.stat(s);
-    if (!a.isFile())
-      return null;
-    const i = y.basename(s);
-    return re(i) ? null : {
-      name: i,
-      size: a.size,
-      localPath: s,
-      relativePath: H(i)
-    };
-  }))).filter((s) => !!s).sort(Ee);
+function X(e) {
+  return e.replace(/\\/g, "/").split("/").filter(Boolean).join("/");
 }
-async function Ke(e, n, s) {
-  const a = [n], i = [];
-  for (; a.length > 0; ) {
-    const l = a.pop(), w = await D.readdir(l, { withFileTypes: !0 });
-    for (const o of w) {
-      if (o.name === "." || o.name === ".." || re(o.name) || o.isSymbolicLink())
-        continue;
-      const t = y.join(l, o.name);
-      if (o.isDirectory()) {
-        a.push(t);
-        continue;
-      }
-      o.isFile() && i.push({
-        absolutePath: t,
-        name: o.name
-      });
-    }
+function Ze(e) {
+  const t = String(e || "").toLowerCase();
+  return !t || t.startsWith(".") ? !0 : t.endsWith(".crdownload") || t.endsWith(".part") || t.endsWith(".tmp") || t.endsWith(".opdownload") || t.endsWith(".download");
+}
+function Pe() {
+  return g.join(R.getPath("userData"), "auto-import-staging");
+}
+function Ke(e, t) {
+  const o = g.resolve(e), i = g.resolve(t);
+  return o === i ? !0 : o.startsWith(`${i}${g.sep}`);
+}
+function Qe(e) {
+  const t = String(e || "unknown").replace(/[/\\]/g, "_").trim() || "unknown";
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${t}`;
+}
+async function et(e, t) {
+  try {
+    await B.rename(e, t);
+  } catch (o) {
+    if ((o == null ? void 0 : o.code) !== "EXDEV")
+      throw o;
+    await B.copyFile(e, t), await B.rm(e, { force: !0 });
   }
-  const d = [], m = 48;
-  let p = 0;
-  const b = async () => {
-    for (; ; ) {
-      const l = p;
-      if (p += 1, l >= i.length)
-        return;
-      const w = i[l], o = await D.stat(w.absolutePath).catch(() => null);
-      if (!(o != null && o.isFile()))
-        continue;
-      const t = H(y.relative(e, w.absolutePath)), r = H(y.join(s, t));
-      d.push({
-        name: w.name,
-        size: o.size,
-        localPath: w.absolutePath,
-        relativePath: r
-      });
-    }
-  }, h = Math.min(m, Math.max(1, i.length));
-  return await Promise.all(Array.from({ length: h }, () => b())), d;
-}
-async function et(e) {
-  const n = [];
-  for (const s of e) {
-    if (!(await D.stat(s)).isDirectory())
-      continue;
-    const i = y.basename(s), d = await Ke(s, s, i);
-    n.push(...d);
-  }
-  return n.sort(Ee);
 }
 function tt(e) {
+  const t = Date.now();
+  for (const [o, i] of q.entries())
+    e.has(o) || t - i.lastSeenAt <= Xe || q.delete(o);
+}
+async function nt(e, t = ae) {
+  const o = String(e || "").trim(), i = o ? g.resolve(o) : g.join(R.getPath("downloads"), qe), a = await B.stat(i).catch(() => null);
+  if (!(a != null && a.isDirectory()))
+    return [];
+  const d = await B.readdir(i, { withFileTypes: !0 }), f = /* @__PURE__ */ new Set(), p = Date.now(), E = [];
+  for (const u of d) {
+    if (!u.isFile() || ue(u.name) || Ze(u.name)) continue;
+    const h = g.join(i, u.name), T = await B.stat(h).catch(() => null);
+    if (!(T != null && T.isFile())) continue;
+    f.add(h);
+    const _ = q.get(h), s = (_ ? _.size === T.size && _.mtimeMs === T.mtimeMs : !1) && _ ? _.stableCount + 1 : 1;
+    q.set(h, {
+      size: T.size,
+      mtimeMs: T.mtimeMs,
+      stableCount: s,
+      lastSeenAt: p
+    }), !(s < Je) && (p - T.mtimeMs < Ye || E.push({
+      sourcePath: h,
+      name: u.name,
+      size: T.size,
+      mtimeMs: T.mtimeMs
+    }));
+  }
+  if (tt(f), E.length === 0)
+    return [];
+  E.sort((u, h) => u.mtimeMs - h.mtimeMs);
+  const v = Pe();
+  await B.mkdir(v, { recursive: !0 });
+  const m = [], y = Math.max(1, Math.floor(Number(t) || ae));
+  for (const u of E.slice(0, y)) {
+    const h = g.join(v, Qe(u.name));
+    try {
+      await et(u.sourcePath, h);
+    } catch {
+      continue;
+    }
+    q.delete(u.sourcePath), m.push({
+      name: u.name,
+      size: u.size,
+      localPath: h,
+      relativePath: X(u.name)
+    });
+  }
+  return m;
+}
+async function rt(e) {
+  const t = g.resolve(String(e || "").trim()), o = Pe();
+  return !t || !Ke(t, o) ? !1 : (await B.rm(t, { force: !0 }), !0);
+}
+function we(e, t) {
+  const o = X(t || "");
+  if (!o)
+    return e;
+  const i = o.split("/").filter(Boolean);
+  for (const a of i) {
+    if (a === "." || a === "..")
+      throw new Error(`非法下载路径片段: ${a}`);
+    if (a.includes("\0"))
+      throw new Error("非法下载路径：包含空字符");
+  }
+  return g.join(e, ...i);
+}
+function Re(e, t) {
+  return e.relativePath.localeCompare(t.relativePath, "zh-Hans-CN");
+}
+async function ot(e) {
+  return (await Promise.all(e.map(async (o) => {
+    const i = await B.stat(o);
+    if (!i.isFile())
+      return null;
+    const a = g.basename(o);
+    return ue(a) ? null : {
+      name: a,
+      size: i.size,
+      localPath: o,
+      relativePath: X(a)
+    };
+  }))).filter((o) => !!o).sort(Re);
+}
+async function st(e, t, o) {
+  const i = [t], a = [];
+  for (; i.length > 0; ) {
+    const m = i.pop(), y = await B.readdir(m, { withFileTypes: !0 });
+    for (const u of y) {
+      if (u.name === "." || u.name === ".." || ue(u.name) || u.isSymbolicLink())
+        continue;
+      const h = g.join(m, u.name);
+      if (u.isDirectory()) {
+        i.push(h);
+        continue;
+      }
+      u.isFile() && a.push({
+        absolutePath: h,
+        name: u.name
+      });
+    }
+  }
+  const d = [], f = 48;
+  let p = 0;
+  const E = async () => {
+    for (; p < a.length; ) {
+      const m = p;
+      if (p += 1, m >= a.length)
+        return;
+      const y = a[m], u = await B.stat(y.absolutePath).catch(() => null);
+      if (!(u != null && u.isFile()))
+        continue;
+      const h = X(g.relative(e, y.absolutePath)), T = X(g.join(o, h));
+      d.push({
+        name: y.name,
+        size: u.size,
+        localPath: y.absolutePath,
+        relativePath: T
+      });
+    }
+  }, v = Math.min(f, Math.max(1, a.length));
+  return await Promise.all(Array.from({ length: v }, () => E())), d;
+}
+async function it(e) {
+  const t = [];
+  for (const o of e) {
+    if (!(await B.stat(o)).isDirectory())
+      continue;
+    const a = g.basename(o), d = await st(o, o, a);
+    t.push(...d);
+  }
+  return t.sort(Re);
+}
+function at(e) {
   e.handle("file:open", async () => {
-    const n = await W.showOpenDialog({ properties: ["openFile"] });
-    return n.canceled || n.filePaths.length === 0 ? null : await D.readFile(n.filePaths[0], "utf-8");
-  }), e.handle("file:save", async (n, s, a) => (await D.writeFile(s, a, "utf-8"), !0)), e.handle("dialog:pick-upload-files", async () => {
-    const n = await W.showOpenDialog({
+    const t = await H.showOpenDialog({ properties: ["openFile"] });
+    return t.canceled || t.filePaths.length === 0 ? null : await B.readFile(t.filePaths[0], "utf-8");
+  }), e.handle("file:save", async (t, o, i) => (await B.writeFile(o, i, "utf-8"), !0)), e.handle("dialog:pick-upload-files", async () => {
+    const t = await H.showOpenDialog({
       properties: ["openFile", "multiSelections", "dontAddToRecent"]
     });
-    return n.canceled || n.filePaths.length === 0 ? { canceled: !0, files: [] } : { canceled: !1, files: await Qe(n.filePaths) };
+    return t.canceled || t.filePaths.length === 0 ? { canceled: !0, files: [] } : { canceled: !1, files: await ot(t.filePaths) };
   }), e.handle("dialog:pick-upload-folders", async () => {
-    const n = await W.showOpenDialog({
+    const t = await H.showOpenDialog({
       properties: ["openDirectory", "multiSelections", "dontAddToRecent"]
     });
-    return n.canceled || n.filePaths.length === 0 ? { canceled: !0, files: [] } : { canceled: !1, files: await et(n.filePaths) };
+    return t.canceled || t.filePaths.length === 0 ? { canceled: !0, files: [] } : { canceled: !1, files: await it(t.filePaths) };
   }), e.handle("dialog:pick-download-directory", async () => {
-    const n = await W.showOpenDialog({
+    const t = await H.showOpenDialog({
       properties: ["openDirectory", "createDirectory", "dontAddToRecent"]
     });
-    return n.canceled || n.filePaths.length === 0 ? { canceled: !0, directoryPath: "" } : { canceled: !1, directoryPath: n.filePaths[0] };
+    return t.canceled || t.filePaths.length === 0 ? { canceled: !0, directoryPath: "" } : { canceled: !1, directoryPath: t.filePaths[0] };
   }), e.handle("dialog:pick-auto-import-directory", async () => {
-    const n = await W.showOpenDialog({
+    const t = await H.showOpenDialog({
       properties: ["openDirectory", "createDirectory", "dontAddToRecent"]
     });
-    return n.canceled || n.filePaths.length === 0 ? { canceled: !0, directoryPath: "" } : { canceled: !1, directoryPath: n.filePaths[0] };
-  }), e.handle("fs:claim-auto-import-files", async (n, s, a = ee) => ({ canceled: !1, files: await Je(s, a) })), e.handle("fs:cleanup-auto-import-staged-file", async (n, s) => {
+    return t.canceled || t.filePaths.length === 0 ? { canceled: !0, directoryPath: "" } : { canceled: !1, directoryPath: t.filePaths[0] };
+  }), e.handle("fs:claim-auto-import-files", async (t, o, i = ae) => ({ canceled: !1, files: await nt(o, i) })), e.handle("fs:cleanup-auto-import-staged-file", async (t, o) => {
     try {
-      return await Ye(s);
+      return await rt(o);
     } catch {
       return !1;
     }
-  }), e.handle("fs:ensure-directory", async (n, s, a = "") => {
-    const i = ae(s, a);
-    return await D.mkdir(i, { recursive: !0 }), i;
-  }), e.handle("fs:download-url-to-path", async (n, s, a, i, d = {}) => {
-    const m = ae(a, i);
-    return await ve(s, m, d), m;
+  }), e.handle("fs:ensure-directory", async (t, o, i = "") => {
+    const a = we(o, i);
+    return await B.mkdir(a, { recursive: !0 }), a;
+  }), e.handle("fs:download-url-to-path", async (t, o, i, a, d = {}) => {
+    const f = we(i, a);
+    return await le(o, f, d), f;
   });
 }
-var S = {}, x = ye;
-S.platform = function() {
+var O = {}, $ = Ce;
+O.platform = function() {
   return process.platform;
 };
-S.cpuCount = function() {
-  return x.cpus().length;
+O.cpuCount = function() {
+  return $.cpus().length;
 };
-S.sysUptime = function() {
-  return x.uptime();
+O.sysUptime = function() {
+  return $.uptime();
 };
-S.processUptime = function() {
+O.processUptime = function() {
   return process.uptime();
 };
-S.freemem = function() {
-  return x.freemem() / (1024 * 1024);
+O.freemem = function() {
+  return $.freemem() / (1024 * 1024);
 };
-S.totalmem = function() {
-  return x.totalmem() / (1024 * 1024);
+O.totalmem = function() {
+  return $.totalmem() / (1024 * 1024);
 };
-S.freememPercentage = function() {
-  return x.freemem() / x.totalmem();
+O.freememPercentage = function() {
+  return $.freemem() / $.totalmem();
 };
-S.freeCommand = function(e) {
-  ne.exec("free -m", function(n, s, a) {
-    var i = s.split(`
-`), d = i[1].replace(/[\s\n\r]+/g, " "), m = d.split(" ");
-    total_mem = parseFloat(m[1]), free_mem = parseFloat(m[3]), buffers_mem = parseFloat(m[5]), cached_mem = parseFloat(m[6]), used_mem = total_mem - (free_mem + buffers_mem + cached_mem), e(used_mem - 2);
+O.freeCommand = function(e) {
+  ce.exec("free -m", function(t, o, i) {
+    var a = o.split(`
+`), d = a[1].replace(/[\s\n\r]+/g, " "), f = d.split(" ");
+    total_mem = parseFloat(f[1]), free_mem = parseFloat(f[3]), buffers_mem = parseFloat(f[5]), cached_mem = parseFloat(f[6]), used_mem = total_mem - (free_mem + buffers_mem + cached_mem), e(used_mem - 2);
   });
 };
-S.harddrive = function(e) {
-  ne.exec("df -k", function(n, s, a) {
-    var i = 0, d = 0, m = 0, p = s.split(`
-`), b = p[1].replace(/[\s\n\r]+/g, " "), h = b.split(" ");
-    i = Math.ceil(h[1] * 1024 / Math.pow(1024, 2)), d = Math.ceil(h[2] * 1024 / Math.pow(1024, 2)), m = Math.ceil(h[3] * 1024 / Math.pow(1024, 2)), e(i, m, d);
+O.harddrive = function(e) {
+  ce.exec("df -k", function(t, o, i) {
+    var a = 0, d = 0, f = 0, p = o.split(`
+`), E = p[1].replace(/[\s\n\r]+/g, " "), v = E.split(" ");
+    a = Math.ceil(v[1] * 1024 / Math.pow(1024, 2)), d = Math.ceil(v[2] * 1024 / Math.pow(1024, 2)), f = Math.ceil(v[3] * 1024 / Math.pow(1024, 2)), e(a, f, d);
   });
 };
-S.getProcesses = function(e, n) {
-  typeof e == "function" && (n = e, e = 0), command = "ps -eo pcpu,pmem,time,args | sort -k 1 -r | head -n10", e > 0 && (command = "ps -eo pcpu,pmem,time,args | sort -k 1 -r | head -n" + (e + 1)), ne.exec(command, function(s, a, i) {
-    var d = a.split(`
+O.getProcesses = function(e, t) {
+  typeof e == "function" && (t = e, e = 0), command = "ps -eo pcpu,pmem,time,args | sort -k 1 -r | head -n10", e > 0 && (command = "ps -eo pcpu,pmem,time,args | sort -k 1 -r | head -n" + (e + 1)), ce.exec(command, function(o, i, a) {
+    var d = i.split(`
 `);
     d.shift(), d.pop();
-    var m = "";
-    d.forEach(function(p, b) {
-      var h = p.replace(/[\s\n\r]+/g, " ");
-      h = h.split(" "), m += h[1] + " " + h[2] + " " + h[3] + " " + h[4].substring(h[4].length - 25) + `
+    var f = "";
+    d.forEach(function(p, E) {
+      var v = p.replace(/[\s\n\r]+/g, " ");
+      v = v.split(" "), f += v[1] + " " + v[2] + " " + v[3] + " " + v[4].substring(v[4].length - 25) + `
 `;
-    }), n(m);
+    }), t(f);
   });
 };
-S.allLoadavg = function() {
-  var e = x.loadavg();
+O.allLoadavg = function() {
+  var e = $.loadavg();
   return e[0].toFixed(4) + "," + e[1].toFixed(4) + "," + e[2].toFixed(4);
 };
-S.loadavg = function(e) {
+O.loadavg = function(e) {
   (e === void 0 || e !== 5 && e !== 15) && (e = 1);
-  var n = x.loadavg(), s = 0;
-  return e == 1 && (s = n[0]), e == 5 && (s = n[1]), e == 15 && (s = n[2]), s;
+  var t = $.loadavg(), o = 0;
+  return e == 1 && (o = t[0]), e == 5 && (o = t[1]), e == 15 && (o = t[2]), o;
 };
-S.cpuFree = function(e) {
-  _e(e, !0);
+O.cpuFree = function(e) {
+  Me(e, !0);
 };
-S.cpuUsage = function(e) {
-  _e(e, !1);
+O.cpuUsage = function(e) {
+  Me(e, !1);
 };
-function _e(e, n) {
-  var s = de(), a = s.idle, i = s.total;
+function Me(e, t) {
+  var o = pe(), i = o.idle, a = o.total;
   setTimeout(function() {
-    var d = de(), m = d.idle, p = d.total, b = m - a, h = p - i, l = b / h;
-    e(n === !0 ? l : 1 - l);
+    var d = pe(), f = d.idle, p = d.total, E = f - i, v = p - a, m = E / v;
+    e(t === !0 ? m : 1 - m);
   }, 1e3);
 }
-function de(e) {
-  var n = x.cpus(), s = 0, a = 0, i = 0, d = 0, m = 0, b = 0;
-  for (var p in n)
-    s += n[p].times.user, a += n[p].times.nice, i += n[p].times.sys, m += n[p].times.irq, d += n[p].times.idle;
-  var b = s + a + i + d + m;
+function pe(e) {
+  var t = $.cpus(), o = 0, i = 0, a = 0, d = 0, f = 0, E = 0;
+  for (var p in t)
+    o += t[p].times.user, i += t[p].times.nice, a += t[p].times.sys, f += t[p].times.irq, d += t[p].times.idle;
+  var E = o + i + a + d + f;
   return {
     idle: d,
-    total: b
+    total: E
   };
 }
-const nt = process.env.NODE_ENV === "test" || !!(process.env.VITE_DEV_SERVER_URL || process.env.ELECTRON_RENDERER_URL) || process.env.OMNIFLOW_ENABLE_RUNTIME_LOGS === "true", z = (e, ...n) => {
-  nt && console[e](...n);
-}, O = {
-  debug: (...e) => z("debug", ...e),
-  info: (...e) => z("info", ...e),
-  log: (...e) => z("log", ...e),
-  warn: (...e) => z("warn", ...e),
-  error: (...e) => z("error", ...e)
+const dt = process.env.NODE_ENV === "test" || !!(process.env.VITE_DEV_SERVER_URL || process.env.ELECTRON_RENDERER_URL) || process.env.OMNIFLOW_ENABLE_RUNTIME_LOGS === "true", j = (e, ...t) => {
+  dt && console[e](...t);
+}, U = {
+  debug: (...e) => j("debug", ...e),
+  info: (...e) => j("info", ...e),
+  log: (...e) => j("log", ...e),
+  warn: (...e) => j("warn", ...e),
+  error: (...e) => j("error", ...e)
 };
-function rt() {
-  const e = ot().total, n = ye.cpus()[0].model, s = Math.floor(S.totalmem() / 1024);
+function ct() {
+  const e = lt().total, t = Ce.cpus()[0].model, o = Math.floor(O.totalmem() / 1024);
   return {
     totalStorage: e,
-    cpuModel: n,
-    totalMemoryGB: s
+    cpuModel: t,
+    totalMemoryGB: o
   };
 }
-function ot() {
-  const e = $e.statfsSync(process.platform === "win32" ? "C:" : "/"), n = e.blocks * e.bsize, s = e.bfree * e.bsize;
+function lt() {
+  const e = Ge.statfsSync(process.platform === "win32" ? "C:" : "/"), t = e.blocks * e.bsize, o = e.bfree * e.bsize;
   return {
-    total: Math.floor(n / 1e9),
+    total: Math.floor(t / 1e9),
     // 换算为 GB
-    usage: 1 - s / n
+    usage: 1 - o / t
     // 使用率计算
   };
 }
-function st(e) {
-  e.handle("sys:get-static-data", rt);
+function ut(e) {
+  e.handle("sys:get-static-data", ct);
 }
-const it = 10 * 1024 * 1024 * 1024, at = "10GB", dt = `上传失败：单文件最大支持 ${at}`;
-function De(e) {
+const ft = 10 * 1024 * 1024 * 1024, mt = "10GB", ht = `上传失败：单文件最大支持 ${mt}`;
+function Be(e) {
   return String(e).replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\r/g, "").replace(/\n/g, "");
 }
-function ct(e) {
+function wt(e) {
   return encodeURIComponent(e).replace(
     /['()*]/g,
-    (n) => `%${n.charCodeAt(0).toString(16).toUpperCase()}`
+    (t) => `%${t.charCodeAt(0).toString(16).toUpperCase()}`
   );
 }
-function lt(e) {
-  const n = De(e), s = ct(e);
-  return `Content-Disposition: form-data; name="file"; filename="${n}"; filename*=UTF-8''${s}\r
+function pt(e) {
+  const t = Be(e), o = wt(e);
+  return `Content-Disposition: form-data; name="file"; filename="${t}"; filename*=UTF-8''${o}\r
 `;
 }
-function ut(e) {
-  const n = /* @__PURE__ */ new Map(), s = (a, i = !1) => {
+function gt(e) {
+  const t = /* @__PURE__ */ new Map(), o = (i, a = !1) => {
     const d = Date.now();
-    if (!i && d - a.lastProgressAt < 80) return;
-    a.lastProgressAt = d;
-    const m = Math.max(d - a.startedAt, 1), p = Math.floor(a.uploadedBytes * 1e3 / m), b = a.totalBytes > 0 ? Math.min(a.uploadedBytes / a.totalBytes * 100, 100) : 0;
-    a.sender.send("http:upload:progress", {
-      uploadId: a.uploadId,
-      uploadedBytes: a.uploadedBytes,
-      totalBytes: a.totalBytes,
-      percentage: b,
+    if (!a && d - i.lastProgressAt < 80) return;
+    i.lastProgressAt = d;
+    const f = Math.max(d - i.startedAt, 1), p = Math.floor(i.uploadedBytes * 1e3 / f), E = i.totalBytes > 0 ? Math.min(i.uploadedBytes / i.totalBytes * 100, 100) : 0;
+    i.sender.send("http:upload:progress", {
+      uploadId: i.uploadId,
+      uploadedBytes: i.uploadedBytes,
+      totalBytes: i.totalBytes,
+      percentage: E,
       speedBps: p
     });
   };
-  e.handle("http:fetch", async (a, i, d = {}) => (O.debug("http:fetch start"), O.debug("http:fetch URL:", i), O.debug("http:fetch options:", d), new Promise((m, p) => {
-    const b = xe.request({ url: i, method: d.method || "GET" });
-    d.headers && Object.entries(d.headers).forEach(([l, w]) => {
-      O.debug(`http:fetch set header ${l}: ${String(w)}`), b.setHeader(l, w);
+  e.handle("http:fetch", async (i, a, d = {}) => (U.debug("http:fetch start"), U.debug("http:fetch URL:", a), U.debug("http:fetch options:", d), new Promise((f, p) => {
+    const E = We.request({ url: a, method: d.method || "GET" });
+    d.headers && Object.entries(d.headers).forEach(([m, y]) => {
+      U.debug(`http:fetch set header ${m}: ${String(y)}`), E.setHeader(m, y);
     });
-    let h = "";
-    b.on("response", (l) => {
-      O.debug("http:fetch response"), O.debug("http:fetch status:", l.statusCode), O.debug("http:fetch headers:", l.headers), l.on("data", (w) => {
-        O.debug(`http:fetch chunk length: ${w.length}`), h += w;
-      }), l.on("end", () => {
-        O.debug("http:fetch body preview:", h.slice(0, 500));
-        let w;
+    let v = "";
+    E.on("response", (m) => {
+      U.debug("http:fetch response"), U.debug("http:fetch status:", m.statusCode), U.debug("http:fetch headers:", m.headers), m.on("data", (y) => {
+        U.debug(`http:fetch chunk length: ${y.length}`), v += y;
+      }), m.on("end", () => {
+        U.debug("http:fetch body preview:", v.slice(0, 500));
+        let y;
         try {
-          w = JSON.parse(h);
+          y = JSON.parse(v);
         } catch {
-          w = h;
+          y = v;
         }
-        m({
-          status: l.statusCode,
-          headers: l.headers,
-          body: w
+        f({
+          status: m.statusCode,
+          headers: m.headers,
+          body: y
         });
       });
-    }), b.on("error", (l) => {
-      O.error("http:fetch error:", l), p(l);
-    }), d.body && b.write(d.body), b.end();
-  }))), e.handle("http:upload:abort", async (a, i) => {
-    const d = n.get(i);
+    }), E.on("error", (m) => {
+      U.error("http:fetch error:", m), p(m);
+    }), d.body && E.write(d.body), E.end();
+  }))), e.handle("http:upload:abort", async (i, a) => {
+    const d = t.get(a);
     if (!d) return !1;
-    d.aborted = !0, n.delete(i);
+    d.aborted = !0, t.delete(a);
     try {
       d.fileStream.destroy(new Error("UPLOAD_ABORTED"));
     } catch {
@@ -448,334 +449,476 @@ function ut(e) {
     } catch {
     }
     return !0;
-  }), e.handle("http:upload", async (a, i, d, m = {}, p = {}, b) => new Promise((h, l) => {
-    let w;
+  }), e.handle("http:upload", async (i, a, d, f = {}, p = {}, E) => new Promise((v, m) => {
+    let y;
     try {
-      w = K.statSync(d);
-    } catch (E) {
-      l(new Error(`读取上传文件失败: ${d} (${String(E)})`));
+      y = ie.statSync(d);
+    } catch (C) {
+      m(new Error(`读取上传文件失败: ${d} (${String(C)})`));
       return;
     }
-    if (!w.isFile()) {
-      l(new Error(`上传目标不是文件: ${d}`));
+    if (!y.isFile()) {
+      m(new Error(`上传目标不是文件: ${d}`));
       return;
     }
-    if (w.size > it) {
-      l(new Error(dt));
+    if (y.size > ft) {
+      m(new Error(ht));
       return;
     }
-    const o = "----WebKitFormBoundary" + Math.random().toString(36).substring(2), t = b || `upload-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, r = y.basename(d), c = Object.entries(m).map(([E, I]) => `--${o}\r
-Content-Disposition: form-data; name="${De(E)}"\r
+    const u = "----WebKitFormBoundary" + Math.random().toString(36).substring(2), h = E || `upload-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, T = g.basename(d), _ = Object.entries(f).map(([C, z]) => `--${u}\r
+Content-Disposition: form-data; name="${Be(C)}"\r
 \r
-${I}\r
-`).join(""), u = `--${o}\r
-` + lt(r) + `Content-Type: application/octet-stream\r
+${z}\r
+`).join(""), L = `--${u}\r
+` + pt(T) + `Content-Type: application/octet-stream\r
 \r
-`, f = `\r
---${o}--\r
-`, v = Buffer.byteLength(c) + Buffer.byteLength(u) + w.size + Buffer.byteLength(f), A = {
+`, s = `\r
+--${u}--\r
+`, n = Buffer.byteLength(_) + Buffer.byteLength(L) + y.size + Buffer.byteLength(s), r = {
       ...p,
-      "Content-Type": `multipart/form-data; boundary=${o}`,
-      "Content-Length": String(v)
-    }, P = new URL(i), M = (P.protocol === "https:" ? pe : ge).request({
-      protocol: P.protocol,
-      hostname: P.hostname,
-      port: P.port ? Number(P.port) : void 0,
-      path: `${P.pathname}${P.search}`,
+      "Content-Type": `multipart/form-data; boundary=${u}`,
+      "Content-Length": String(n)
+    }, c = new URL(a), l = (c.protocol === "https:" ? Se : _e).request({
+      protocol: c.protocol,
+      hostname: c.hostname,
+      port: c.port ? Number(c.port) : void 0,
+      path: `${c.pathname}${c.search}`,
       method: "POST",
-      headers: A
-    }), N = K.createReadStream(d, {
+      headers: r
+    }), D = ie.createReadStream(d, {
       highWaterMark: 1024 * 1024
-    }), L = {
-      uploadId: t,
-      request: M,
-      fileStream: N,
-      sender: a.sender,
-      totalBytes: Math.max(0, w.size),
+    }), S = {
+      uploadId: h,
+      request: l,
+      fileStream: D,
+      sender: i.sender,
+      totalBytes: Math.max(0, y.size),
       uploadedBytes: 0,
       startedAt: Date.now(),
       lastProgressAt: 0,
       aborted: !1
     };
-    n.set(t, L);
-    let k = !1;
-    const Oe = (E) => {
-      k || (k = !0, n.delete(t), h(E));
-    }, G = (E) => {
-      k || (k = !0, n.delete(t), l(E));
+    t.set(h, S);
+    let F = !1;
+    const N = (C) => {
+      F || (F = !0, t.delete(h), v(C));
+    }, I = (C) => {
+      F || (F = !0, t.delete(h), m(C));
     };
-    let Y = "";
-    M.on("response", (E) => {
-      E.on("data", (I) => {
-        Y += I.toString();
-      }), E.on("end", () => {
-        let I;
+    let k = "";
+    l.on("response", (C) => {
+      C.on("data", (z) => {
+        k += z.toString();
+      }), C.on("end", () => {
+        let z;
         try {
-          I = JSON.parse(Y);
+          z = JSON.parse(k);
         } catch {
-          I = Y;
+          z = k;
         }
-        Oe({
-          status: E.statusCode,
-          body: I
+        N({
+          status: C.statusCode,
+          body: z
         });
       });
-    }), M.on("error", (E) => {
-      if (L.aborted) {
-        G(new Error("UPLOAD_ABORTED"));
+    }), l.on("error", (C) => {
+      if (S.aborted) {
+        I(new Error("UPLOAD_ABORTED"));
         return;
       }
       try {
-        N.destroy(E);
+        D.destroy(C);
       } catch {
       }
-      G(E);
-    }), M.write(c), M.write(u), N.on("data", (E) => {
-      L.aborted || (L.uploadedBytes += E.length, s(L));
-    }), N.on("end", () => {
-      L.aborted || (s(L, !0), M.write(f), M.end());
-    }), N.on("error", (E) => {
-      if (L.aborted) {
-        G(new Error("UPLOAD_ABORTED"));
+      I(C);
+    }), l.write(_), l.write(L), D.on("data", (C) => {
+      S.aborted || (S.uploadedBytes += C.length, o(S));
+    }), D.on("end", () => {
+      S.aborted || (o(S, !0), l.write(s), l.end());
+    }), D.on("error", (C) => {
+      if (S.aborted) {
+        I(new Error("UPLOAD_ABORTED"));
         return;
       }
-      G(E);
+      I(C);
       try {
-        M.destroy(E);
+        l.destroy(C);
       } catch {
       }
-    }), N.pipe(M, { end: !1 });
+    }), D.pipe(l, { end: !1 });
   }));
 }
-function ft() {
-  tt(_), st(_), ut(_);
+function yt() {
+  at(P), ut(P), gt(P);
 }
-const Te = "persist:omniflow-embedded-browser", mt = "embedded-browser-downloads";
-let Q = null, ce = !1;
-function Se() {
-  return y.join(T.getPath("userData"), mt);
+const Oe = "persist:omniflow-embedded-browser", bt = "embedded-browser-downloads";
+let oe = null, ge = !1;
+function Ae() {
+  return g.join(R.getPath("userData"), bt);
 }
-function ht() {
-  const e = Se();
-  return te(e) || we(e, { recursive: !0 }), e;
+function vt() {
+  const e = Ae();
+  return re(e) || de(e, { recursive: !0 }), e;
 }
-function wt() {
+function Et() {
   return `embedded-browser-download-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
-function gt(e) {
-  const n = String(e).replace(/[/\\]/g, "_").trim() || "download";
-  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${n}`;
+function Dt(e) {
+  const t = String(e).replace(/[/\\]/g, "_").trim() || "download";
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${t}`;
 }
-function q(e, n) {
-  var s, a;
+function Y(e, t) {
+  var o, i;
   return {
-    downloadId: n.downloadId,
-    fileName: n.fileName,
-    mimeType: n.mimeType,
-    pageUrl: n.pageUrl,
-    receivedBytes: n.receivedBytes ?? Math.max(0, Number(((s = e.getReceivedBytes) == null ? void 0 : s.call(e)) || 0)),
-    state: n.state,
-    tabId: n.tabId,
-    tempPath: n.tempPath,
-    totalBytes: n.totalBytes ?? Math.max(0, Number(((a = e.getTotalBytes) == null ? void 0 : a.call(e)) || 0)),
-    url: n.url,
-    ...n.error ? { error: n.error } : {}
+    downloadId: t.downloadId,
+    fileName: t.fileName,
+    mimeType: t.mimeType,
+    pageUrl: t.pageUrl,
+    receivedBytes: t.receivedBytes ?? Math.max(0, Number(((o = e.getReceivedBytes) == null ? void 0 : o.call(e)) || 0)),
+    state: t.state,
+    tabId: t.tabId,
+    tempPath: t.tempPath,
+    totalBytes: t.totalBytes ?? Math.max(0, Number(((i = e.getTotalBytes) == null ? void 0 : i.call(e)) || 0)),
+    url: t.url,
+    ...t.error ? { error: t.error } : {}
   };
 }
-function pt() {
-  return Q || (Q = he.fromPartition(Te)), Q;
+function Tt() {
+  return oe || (oe = Te.fromPartition(Oe)), oe;
 }
-async function Re(e) {
-  const n = y.resolve(String(e || "").trim());
-  if (!n)
+async function Fe(e) {
+  const t = g.resolve(String(e || "").trim());
+  if (!t)
     return !1;
-  const s = y.resolve(Se());
-  return n !== s && !n.startsWith(`${s}${y.sep}`) ? !1 : (await We.rm(n, { force: !0 }), !0);
+  const o = g.resolve(Ae());
+  return t !== o && !t.startsWith(`${o}${g.sep}`) ? !1 : (await te.rm(t, { force: !0 }), !0);
 }
-function yt(e) {
-  if (ce)
+function _t(e) {
+  if (ge)
     return;
-  ce = !0;
-  const n = (i, d, m) => {
-    const p = e.resolveTabIdByWebContents(m) || void 0;
+  ge = !0;
+  const t = (a, d, f) => {
+    const p = e.resolveTabIdByWebContents(f) || void 0;
     if (!p)
       return;
-    const b = ht(), h = wt(), l = d.getFilename() || "download", w = d.getURL() || "", o = m.getURL() || void 0, t = y.join(b, gt(l));
-    d.setSavePath(t), e.emitDownload(q(d, {
-      downloadId: h,
-      fileName: l,
+    const E = vt(), v = Et(), m = d.getFilename() || "download", y = d.getURL() || "", u = f.getURL() || void 0, h = g.join(E, Dt(m));
+    d.setSavePath(h), e.emitDownload(Y(d, {
+      downloadId: v,
+      fileName: m,
       mimeType: d.getMimeType() || void 0,
-      pageUrl: o,
+      pageUrl: u,
       state: "started",
       tabId: p,
-      tempPath: t,
-      url: w
-    })), d.on("updated", (r, c) => {
-      c === "progressing" && e.emitDownload(q(d, {
-        downloadId: h,
-        fileName: l,
+      tempPath: h,
+      url: y
+    })), d.on("updated", (T, _) => {
+      _ === "progressing" && e.emitDownload(Y(d, {
+        downloadId: v,
+        fileName: m,
         mimeType: d.getMimeType() || void 0,
-        pageUrl: o,
+        pageUrl: u,
         state: "progress",
         tabId: p,
-        tempPath: t,
-        url: w
+        tempPath: h,
+        url: y
       }));
-    }), d.once("done", (r, c) => {
-      if (c === "completed") {
-        e.emitDownload(q(d, {
-          downloadId: h,
-          fileName: l,
+    }), d.once("done", (T, _) => {
+      if (_ === "completed") {
+        e.emitDownload(Y(d, {
+          downloadId: v,
+          fileName: m,
           mimeType: d.getMimeType() || void 0,
-          pageUrl: o,
+          pageUrl: u,
           state: "completed",
           tabId: p,
-          tempPath: t,
-          url: w
+          tempPath: h,
+          url: y
         }));
         return;
       }
-      Re(t).catch(() => {
-      }), e.emitDownload(q(d, {
-        downloadId: h,
-        error: c === "cancelled" ? "下载已取消" : `下载失败：${c}`,
-        fileName: l,
+      Fe(h).catch(() => {
+      }), e.emitDownload(Y(d, {
+        downloadId: v,
+        error: _ === "cancelled" ? "下载已取消" : `下载失败：${_}`,
+        fileName: m,
         mimeType: d.getMimeType() || void 0,
-        pageUrl: o,
-        state: c === "cancelled" ? "cancelled" : "failed",
+        pageUrl: u,
+        state: _ === "cancelled" ? "cancelled" : "failed",
         tabId: p,
-        tempPath: t,
-        url: w
+        tempPath: h,
+        url: y
       }));
     });
-  }, s = /* @__PURE__ */ new Set();
-  [he.defaultSession, pt()].filter(Boolean).forEach((i) => {
-    s.has(i) || (s.add(i), i.on("will-download", n));
+  }, o = /* @__PURE__ */ new Set();
+  [Te.defaultSession, Tt()].filter(Boolean).forEach((a) => {
+    o.has(a) || (o.add(a), a.on("will-download", t));
   });
 }
-const bt = y.dirname(Ie(import.meta.url));
-process.env.APP_ROOT = y.join(bt, "..");
-const J = process.env.VITE_DEV_SERVER_URL, vt = y.join(process.env.APP_ROOT, "dist-electron"), Ce = y.join(process.env.APP_ROOT, "dist");
-process.env.VITE_PUBLIC = J ? y.join(process.env.APP_ROOT, "public") : Ce;
-const le = y.join(process.env.APP_ROOT, "build", "icons", "icon.png"), Et = "Omniflow", _t = "omniflow-app", Dt = 1400, Tt = 920, oe = 600, se = 400, St = "window-state.json", Rt = 200, ue = process.env.NODE_ENV === "test" || !!(J || process.env.ELECTRON_RENDERER_URL) || process.env.OMNIFLOW_ENABLE_RUNTIME_LOGS === "true", Ct = process.env.OMNIFLOW_ENABLE_CHROMIUM_LOGS === "true";
-Ct || (T.commandLine.appendSwitch("disable-logging"), T.commandLine.appendSwitch("log-level", "3"));
-T.setName(Et);
+const St = "embedded-browser-open-files", ye = 'input[data-omniflow-browser-open-fallback="true"]';
+function xe() {
+  return g.join(R.getPath("userData"), St);
+}
+function Ct() {
+  const e = xe();
+  return re(e) || de(e, { recursive: !0 }), e;
+}
+function Pt(e) {
+  const t = String(e).replace(/[/\\]/g, "_").trim() || "file";
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${t}`;
+}
+function Rt(e, t) {
+  const o = g.resolve(e), i = g.resolve(t);
+  return o === i ? !0 : o.startsWith(`${i}${g.sep}`);
+}
+async function Mt(e) {
+  const t = await e.webContents.executeJavaScript(`
+    (() => {
+      const existingInput = document.querySelector('input[type="file"]:not([disabled])')
+      if (existingInput instanceof HTMLInputElement) {
+        existingInput.setAttribute('data-omniflow-browser-open-target', 'true')
+        return 'input[data-omniflow-browser-open-target="true"]'
+      }
+
+      let fallback = document.querySelector('${ye}') 
+      if (!(fallback instanceof HTMLInputElement)) {
+        fallback = document.createElement('input')
+        fallback.type = 'file'
+        fallback.multiple = false
+        fallback.setAttribute('data-omniflow-browser-open-fallback', 'true')
+        fallback.style.position = 'fixed'
+        fallback.style.left = '-9999px'
+        fallback.style.top = '-9999px'
+        fallback.style.width = '1px'
+        fallback.style.height = '1px'
+        fallback.style.opacity = '0'
+        fallback.style.pointerEvents = 'none'
+        document.body.appendChild(fallback)
+      }
+      return '${ye}'
+    })()
+  `, !0);
+  return typeof t == "string" && t.trim() ? t.trim() : null;
+}
+async function Bt(e, t, o) {
+  var p;
+  if (!t || o.length === 0)
+    return !1;
+  try {
+    e.webContents.debugger.isAttached() || e.webContents.debugger.attach("1.3");
+  } catch (E) {
+    if (!String(E).includes("Already attached"))
+      throw E;
+  }
+  const i = await e.webContents.debugger.sendCommand("DOM.getDocument", {
+    depth: 1
+  }), a = Number(((p = i == null ? void 0 : i.root) == null ? void 0 : p.nodeId) || 0);
+  if (!Number.isFinite(a) || a <= 0)
+    return !1;
+  const d = await e.webContents.debugger.sendCommand("DOM.querySelector", {
+    nodeId: a,
+    selector: t
+  }), f = Number((d == null ? void 0 : d.nodeId) || 0);
+  return !Number.isFinite(f) || f <= 0 ? !1 : (await e.webContents.debugger.sendCommand("DOM.setFileInputFiles", {
+    nodeId: f,
+    files: o
+  }), !0);
+}
+async function Ot(e, t) {
+  const o = await e.webContents.executeJavaScript(`
+    (() => {
+      const inputSelector = ${JSON.stringify(t)}
+      const input = document.querySelector(inputSelector)
+      if (!(input instanceof HTMLInputElement) || !input.files || input.files.length === 0) {
+        return { ok: false }
+      }
+
+      const dataTransfer = new DataTransfer()
+      Array.from(input.files).forEach((file) => dataTransfer.items.add(file))
+
+      const centerX = Math.max(1, Math.floor(window.innerWidth / 2))
+      const centerY = Math.max(1, Math.floor(window.innerHeight / 2))
+      const centerTarget = document.elementFromPoint(centerX, centerY)
+
+      const candidates = []
+      const pushCandidate = (candidate) => {
+        if (!(candidate instanceof Element)) {
+          return
+        }
+        if (candidates.includes(candidate)) {
+          return
+        }
+        candidates.push(candidate)
+      }
+
+      pushCandidate(input)
+      pushCandidate(input.closest('label'))
+      pushCandidate(centerTarget)
+      pushCandidate(document.querySelector('[data-testid*="drop"], [class*="drop"], [class*="upload"], [data-upload], main, [role="main"]'))
+      pushCandidate(document.body)
+      pushCandidate(document.documentElement)
+
+      candidates.forEach((target) => {
+        ['dragenter', 'dragover', 'drop'].forEach((eventType) => {
+          const event = new DragEvent(eventType, {
+            bubbles: true,
+            cancelable: true,
+            dataTransfer,
+          })
+          target.dispatchEvent(event)
+        })
+      })
+
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+      input.dispatchEvent(new Event('change', { bubbles: true }))
+
+      return {
+        ok: true,
+        candidateCount: candidates.length,
+      }
+    })()
+  `, !0);
+  return !!(o != null && o.ok);
+}
+async function At(e, t, o = {}) {
+  const i = Ct(), a = g.join(i, Pt(t));
+  return await le(e, a, o), a;
+}
+async function Z(e) {
+  const t = g.resolve(String(e || "").trim());
+  if (!t)
+    return !1;
+  const o = g.resolve(xe());
+  return Rt(t, o) ? (await te.rm(t, { force: !0 }), !0) : !1;
+}
+async function Ft(e, t) {
+  if (!e || e.webContents.isDestroyed())
+    return !1;
+  const o = await Mt(e);
+  return !o || !await Bt(e, o, [t]) ? !1 : Ot(e, o);
+}
+const xt = g.dirname(Ve(import.meta.url));
+process.env.APP_ROOT = g.join(xt, "..");
+const ne = process.env.VITE_DEV_SERVER_URL, Lt = g.join(process.env.APP_ROOT, "dist-electron"), Le = g.join(process.env.APP_ROOT, "dist");
+process.env.VITE_PUBLIC = ne ? g.join(process.env.APP_ROOT, "public") : Le;
+const be = g.join(process.env.APP_ROOT, "build", "icons", "icon.png"), Ut = "Omniflow", It = "omniflow-app", Nt = 1400, $t = 920, fe = 600, me = 400, Wt = "window-state.json", zt = 200, ve = process.env.NODE_ENV === "test" || !!(ne || process.env.ELECTRON_RENDERER_URL) || process.env.OMNIFLOW_ENABLE_RUNTIME_LOGS === "true", kt = process.env.OMNIFLOW_ENABLE_CHROMIUM_LOGS === "true";
+kt || (R.commandLine.appendSwitch("disable-logging"), R.commandLine.appendSwitch("log-level", "3"));
+R.setName(Ut);
 try {
-  const e = y.join(T.getPath("appData"), _t);
-  T.setPath("userData", e);
+  const e = g.join(R.getPath("appData"), It);
+  R.setPath("userData", e);
 } catch {
 }
-function Pe() {
-  return te(le) ? le : null;
+function Ue() {
+  return re(be) ? be : null;
 }
-let g = null, fe = !1, Me = !1;
-const Pt = 240;
-let X = null;
-const F = /* @__PURE__ */ new Map(), C = /* @__PURE__ */ new Map();
-let B = null, me = null;
-function Mt(e) {
-  !g || g.isDestroyed() || g.webContents.send("embedded-browser:download", e);
+let b = null, Ee = !1, Ie = !1;
+const Vt = 240;
+let K = null;
+const V = /* @__PURE__ */ new Map(), A = /* @__PURE__ */ new Map(), G = /* @__PURE__ */ new Map(), Q = /* @__PURE__ */ new Map(), se = /* @__PURE__ */ new Map();
+let x = null, De = null;
+function Ht(e) {
+  !b || b.isDestroyed() || b.webContents.send("embedded-browser:download", e);
 }
-function Bt(e) {
-  for (const [n, s] of F.entries())
-    if (s.webContents === e)
-      return n;
+function jt(e) {
+  for (const [t, o] of V.entries())
+    if (o.webContents === e)
+      return t;
   return null;
 }
-function Be() {
-  return y.join(T.getPath("userData"), St);
+function Ne() {
+  return g.join(R.getPath("userData"), Wt);
 }
-function U(e) {
+function W(e) {
   return typeof e == "number" && Number.isFinite(e);
 }
-function At(e, n) {
-  return e >= oe && n >= se;
+function Gt(e, t) {
+  return e >= fe && t >= me;
 }
-function Ot(e) {
-  return Le.getAllDisplays().some((s) => {
-    const a = s.workArea;
-    return e.x < a.x + a.width && e.x + e.width > a.x && e.y < a.y + a.height && e.y + e.height > a.y;
+function qt(e) {
+  return ze.getAllDisplays().some((o) => {
+    const i = o.workArea;
+    return e.x < i.x + i.width && e.x + e.width > i.x && e.y < i.y + i.height && e.y + e.height > i.y;
   });
 }
-function xt() {
+function Xt() {
   try {
-    const e = Be();
-    if (!te(e))
+    const e = Ne();
+    if (!re(e))
       return null;
-    const n = Ne(e, "utf-8"), s = JSON.parse(n);
-    if (!U(s.width) || !U(s.height) || !At(s.width, s.height))
+    const t = He(e, "utf-8"), o = JSON.parse(t);
+    if (!W(o.width) || !W(o.height) || !Gt(o.width, o.height))
       return null;
-    const a = !!s.maximized, i = {
-      width: s.width,
-      height: s.height,
-      maximized: a
+    const i = !!o.maximized, a = {
+      width: o.width,
+      height: o.height,
+      maximized: i
     };
-    return U(s.x) && U(s.y) && (i.x = s.x, i.y = s.y), U(i.x) && U(i.y) && (Ot({
-      x: i.x,
-      y: i.y,
-      width: i.width,
-      height: i.height
-    }) || (delete i.x, delete i.y)), i;
+    return W(o.x) && W(o.y) && (a.x = o.x, a.y = o.y), W(a.x) && W(a.y) && (qt({
+      x: a.x,
+      y: a.y,
+      width: a.width,
+      height: a.height
+    }) || (delete a.x, delete a.y)), a;
   } catch {
     return null;
   }
 }
-function ie(e) {
+function he(e) {
   if (!e.isDestroyed())
     try {
-      const n = e.isMaximized() ? e.getNormalBounds() : e.getBounds(), s = {
-        x: n.x,
-        y: n.y,
-        width: Math.max(Math.round(n.width), oe),
-        height: Math.max(Math.round(n.height), se),
+      const t = e.isMaximized() ? e.getNormalBounds() : e.getBounds(), o = {
+        x: t.x,
+        y: t.y,
+        width: Math.max(Math.round(t.width), fe),
+        height: Math.max(Math.round(t.height), me),
         maximized: e.isMaximized()
-      }, a = Be();
-      we(y.dirname(a), { recursive: !0 }), Fe(a, JSON.stringify(s), "utf-8");
+      }, i = Ne();
+      de(g.dirname(i), { recursive: !0 }), je(i, JSON.stringify(o), "utf-8");
     } catch {
     }
 }
-function Z(e) {
-  X && clearTimeout(X), X = setTimeout(() => {
-    X = null, ie(e);
-  }, Rt);
+function ee(e) {
+  K && clearTimeout(K), K = setTimeout(() => {
+    K = null, he(e);
+  }, zt);
 }
-function Lt(e) {
+function Jt(e) {
   if (e.type !== "keyDown")
     return !1;
-  const n = (e.key || "").toLowerCase();
-  return (e.meta || e.control) && e.shift && n === "i";
+  const t = (e.key || "").toLowerCase();
+  return (e.meta || e.control) && e.shift && t === "i";
 }
-function Ut() {
-  if (fe)
+function Yt() {
+  if (Ee)
     return;
-  fe = !0, _.handle("zoom-adjust", (o, t) => {
-    const r = R.fromWebContents(o.sender) ?? g;
+  Ee = !0, P.handle("zoom-adjust", (s, n) => {
+    const r = M.fromWebContents(s.sender) ?? b;
     if (!r || r.isDestroyed())
       return null;
-    const c = r.webContents.getZoomFactor(), u = Math.min(Math.max(c + t, 0.25), 3);
-    return r.webContents.setZoomFactor(u), u;
-  }), _.on("window-minimize", (o) => {
-    const t = R.fromWebContents(o.sender) ?? g;
-    t == null || t.minimize();
-  }), _.on("window-maximize", (o) => {
-    const t = R.fromWebContents(o.sender) ?? g;
-    !t || t.isDestroyed() || (t.isMaximized() ? t.unmaximize() : t.maximize());
-  }), _.on("window-close", (o) => {
-    const t = R.fromWebContents(o.sender) ?? g;
-    t == null || t.close();
-  }), _.handle("window-activate", (o, t = !1) => {
-    const r = R.fromWebContents(o.sender) ?? g;
-    return !r || r.isDestroyed() ? !1 : (r.isMinimized() && r.restore(), r.isVisible() || r.show(), process.platform === "darwin" ? T.focus({ steal: !0 }) : T.focus(), typeof r.moveTop == "function" && r.moveTop(), r.focus(), t && !r.isAlwaysOnTop() && (r.setAlwaysOnTop(!0, "screen-saver"), setTimeout(() => {
+    const c = r.webContents.getZoomFactor(), w = Math.min(Math.max(c + n, 0.25), 3);
+    return r.webContents.setZoomFactor(w), w;
+  }), P.on("window-minimize", (s) => {
+    const n = M.fromWebContents(s.sender) ?? b;
+    n == null || n.minimize();
+  }), P.on("window-maximize", (s) => {
+    const n = M.fromWebContents(s.sender) ?? b;
+    !n || n.isDestroyed() || (n.isMaximized() ? n.unmaximize() : n.maximize());
+  }), P.on("window-close", (s) => {
+    const n = M.fromWebContents(s.sender) ?? b;
+    n == null || n.close();
+  }), P.handle("window-activate", (s, n = !1) => {
+    const r = M.fromWebContents(s.sender) ?? b;
+    return !r || r.isDestroyed() ? !1 : (r.isMinimized() && r.restore(), r.isVisible() || r.show(), process.platform === "darwin" ? R.focus({ steal: !0 }) : R.focus(), typeof r.moveTop == "function" && r.moveTop(), r.focus(), n && !r.isAlwaysOnTop() && (r.setAlwaysOnTop(!0, "screen-saver"), setTimeout(() => {
       r.isDestroyed() || r.setAlwaysOnTop(!1);
-    }, Pt)), !0);
+    }, Vt)), !0);
   });
-  const e = (o) => {
-    O.log("[embedded-browser:main]", o), !(!g || g.isDestroyed()) && g.webContents.send("embedded-browser:state", o);
-  }, n = async (o) => {
-    if (!ue || o.webContents.isDestroyed())
+  const e = (s) => {
+    U.log("[embedded-browser:main]", s), !(!b || b.isDestroyed()) && b.webContents.send("embedded-browser:state", s);
+  }, t = async (s) => {
+    if (!ve || s.webContents.isDestroyed())
       return [];
     try {
-      const t = await o.webContents.executeJavaScript(`
+      const n = await s.webContents.executeJavaScript(`
         (() => {
           const bodyText = document.body?.innerText?.trim() || ''
           const bodyHtmlLength = document.body?.innerHTML?.length || 0
@@ -793,266 +936,324 @@ function Ut() {
           }
         })()
       `, !0), r = [];
-      return t != null && t.title && r.push(`title=${t.title}`), t != null && t.readyState && r.push(`readyState=${t.readyState}`), typeof (t == null ? void 0 : t.bodyHtmlLength) == "number" && r.push(`bodyHtml=${t.bodyHtmlLength}`), typeof (t == null ? void 0 : t.innerWidth) == "number" && typeof (t == null ? void 0 : t.innerHeight) == "number" && r.push(`viewport=${t.innerWidth}x${t.innerHeight}`), typeof (t == null ? void 0 : t.clientWidth) == "number" && typeof (t == null ? void 0 : t.clientHeight) == "number" && r.push(`client=${t.clientWidth}x${t.clientHeight}`), typeof (t == null ? void 0 : t.devicePixelRatio) == "number" && r.push(`dpr=${t.devicePixelRatio}`), t != null && t.bodyTextPreview && r.push(`preview=${t.bodyTextPreview}`), t != null && t.userAgent && r.push(`ua=${t.userAgent}`), r;
-    } catch (t) {
-      return [`inspect=${t instanceof Error ? t.message : String(t)}`];
+      return n != null && n.title && r.push(`title=${n.title}`), n != null && n.readyState && r.push(`readyState=${n.readyState}`), typeof (n == null ? void 0 : n.bodyHtmlLength) == "number" && r.push(`bodyHtml=${n.bodyHtmlLength}`), typeof (n == null ? void 0 : n.innerWidth) == "number" && typeof (n == null ? void 0 : n.innerHeight) == "number" && r.push(`viewport=${n.innerWidth}x${n.innerHeight}`), typeof (n == null ? void 0 : n.clientWidth) == "number" && typeof (n == null ? void 0 : n.clientHeight) == "number" && r.push(`client=${n.clientWidth}x${n.clientHeight}`), typeof (n == null ? void 0 : n.devicePixelRatio) == "number" && r.push(`dpr=${n.devicePixelRatio}`), n != null && n.bodyTextPreview && r.push(`preview=${n.bodyTextPreview}`), n != null && n.userAgent && r.push(`ua=${n.userAgent}`), r;
+    } catch (n) {
+      return [`inspect=${n instanceof Error ? n.message : String(n)}`];
     }
-  }, s = (o) => {
-    const t = o.webContents.getTitle().trim();
-    if (t)
-      return t;
-  }, a = (o, t, r) => {
+  }, o = (s) => {
+    const n = s.webContents.getTitle().trim();
+    if (n)
+      return n;
+  }, i = (s, n, r) => {
     e({
-      canGoBack: t.webContents.canGoBack(),
-      canGoForward: t.webContents.canGoForward(),
-      tabId: o,
-      title: r.title ?? s(t),
+      canGoBack: n.webContents.canGoBack(),
+      canGoForward: n.webContents.canGoForward(),
+      tabId: s,
+      title: r.title ?? o(n),
       ...r
     });
-  }, i = (o, t, r) => {
-    a(o, t, {
+  }, a = (s, n, r) => {
+    i(s, n, {
       state: "ready",
-      url: (r == null ? void 0 : r.url) ?? (C.get(o) || t.webContents.getURL() || void 0),
+      url: (r == null ? void 0 : r.url) ?? (A.get(s) || n.webContents.getURL() || void 0),
       ...r
     });
-  }, d = (o) => {
-    const t = F.get(o);
-    return !t || t.webContents.isDestroyed() ? (F.delete(o), C.delete(o), null) : t;
-  }, m = (o) => {
-    o.setBounds(me ?? {
+  }, d = (s) => {
+    const n = V.get(s);
+    return !n || n.webContents.isDestroyed() ? (V.delete(s), A.delete(s), null) : n;
+  }, f = (s) => {
+    const n = G.get(s);
+    n != null && n.stagedPath && Z(n.stagedPath).catch(() => {
+    }), G.delete(s);
+    const r = Q.get(s);
+    r && Z(r).catch(() => {
+    }), Q.delete(s);
+  }, p = (s) => {
+    const n = (se.get(s) ?? 0) + 1;
+    return se.set(s, n), n;
+  }, E = (s, n) => se.get(s) === n, v = (s, n) => {
+    try {
+      const r = new URL(s), c = new URL(n);
+      if (r.origin !== c.origin)
+        return !1;
+      const w = r.pathname.replace(/\/+$/, "") || "/", l = c.pathname.replace(/\/+$/, "") || "/";
+      return l === "/" ? !0 : w === l || w.startsWith(`${l}/`);
+    } catch {
+      return !1;
+    }
+  }, m = async (s, n) => {
+    const r = G.get(s);
+    if (!r || n.webContents.isDestroyed())
+      return !1;
+    const c = n.webContents.getURL() || A.get(s) || "";
+    if (!c || !v(c, r.pageUrl))
+      return !1;
+    try {
+      if (!await Ft(n, r.stagedPath))
+        return !1;
+      const l = Q.get(s);
+      return l && l !== r.stagedPath && Z(l).catch(() => {
+      }), Q.set(s, r.stagedPath), G.delete(s), !0;
+    } catch {
+      return !1;
+    }
+  }, y = (s) => {
+    s.setBounds(De ?? {
       x: 0,
       y: 0,
       width: 0,
       height: 0
     });
-  }, p = (o) => {
-    if (!B)
+  }, u = (s) => {
+    if (!x)
       return;
-    const t = d(B);
-    if (!t) {
-      B = null;
+    const n = d(x);
+    if (!n) {
+      x = null;
       return;
     }
-    o.contentView.children.includes(t) && o.contentView.removeChildView(t), B = null;
-  }, b = (o) => {
-    if (!g || g.isDestroyed())
+    s.contentView.children.includes(n) && s.contentView.removeChildView(n), x = null;
+  }, h = (s) => {
+    if (!b || b.isDestroyed())
       return null;
-    const t = d(o);
-    if (t)
-      return t;
-    const r = new Ue({
+    const n = d(s);
+    if (n)
+      return n;
+    const r = new ke({
       webPreferences: {
         devTools: !0,
-        partition: Te
+        partition: Oe
       }
     });
     r.webContents.setZoomFactor(1);
     const c = r.webContents.getUserAgent();
     return c.includes("Electron") && r.webContents.setUserAgent(
       c.replace(/\sElectron\/[^\s]+/g, "")
-    ), m(r), F.set(o, r), r.webContents.on("did-start-loading", () => {
-      a(o, r, {
+    ), y(r), V.set(s, r), r.webContents.on("did-start-loading", () => {
+      i(s, r, {
         details: "did-start-loading",
         state: "loading",
-        url: r.webContents.getURL() || C.get(o) || void 0
+        url: r.webContents.getURL() || A.get(s) || void 0
       });
     }), r.webContents.on("did-stop-loading", async () => {
       if (r.webContents.isDestroyed())
         return;
-      const u = r.webContents.getURL() || "";
-      C.set(o, u);
-      const f = await n(r);
-      a(o, r, {
+      const w = r.webContents.getURL() || "";
+      A.set(s, w), await m(s, r);
+      const l = await t(r);
+      i(s, r, {
         details: "did-stop-loading",
-        ...f.length ? { meta: f } : {},
+        ...l.length ? { meta: l } : {},
         state: "ready",
-        url: u || void 0
+        url: w || void 0
       });
-    }), r.webContents.on("did-navigate", (u, f) => {
-      C.set(o, f), a(o, r, { details: "did-navigate", state: "ready", url: f });
-    }), r.webContents.on("did-navigate-in-page", (u, f) => {
-      C.set(o, f), a(o, r, { details: "did-navigate-in-page", state: "ready", url: f });
-    }), r.webContents.on("page-title-updated", (u, f) => {
-      a(o, r, {
+    }), r.webContents.on("did-navigate", (w, l) => {
+      A.set(s, l), i(s, r, { details: "did-navigate", state: "ready", url: l }), m(s, r);
+    }), r.webContents.on("did-navigate-in-page", (w, l) => {
+      A.set(s, l), i(s, r, { details: "did-navigate-in-page", state: "ready", url: l }), m(s, r);
+    }), r.webContents.on("page-title-updated", (w, l) => {
+      i(s, r, {
         details: "page-title-updated",
         state: "ready",
-        title: f || void 0,
-        url: C.get(o) || r.webContents.getURL() || void 0
+        title: l || void 0,
+        url: A.get(s) || r.webContents.getURL() || void 0
       });
-    }), r.webContents.on("did-fail-load", (u, f, v, A) => {
-      f !== -3 && a(o, r, {
-        details: `did-fail-load(${f})`,
+    }), r.webContents.on("did-fail-load", (w, l, D, S) => {
+      l !== -3 && i(s, r, {
+        details: `did-fail-load(${l})`,
         state: "error",
-        message: `页面加载失败：${v || "未知错误"}`,
-        url: A
+        message: `页面加载失败：${D || "未知错误"}`,
+        url: S
       });
-    }), r.webContents.on("render-process-gone", (u, f) => {
-      a(o, r, {
-        details: `render-process-gone:${f.reason}`,
+    }), r.webContents.on("render-process-gone", (w, l) => {
+      i(s, r, {
+        details: `render-process-gone:${l.reason}`,
         state: "error",
-        message: `页面渲染进程异常退出：${f.reason}`,
-        url: C.get(o) || r.webContents.getURL() || void 0
+        message: `页面渲染进程异常退出：${l.reason}`,
+        url: A.get(s) || r.webContents.getURL() || void 0
       });
-    }), r.webContents.on("console-message", (u, f, v, A, P) => {
-      ue && f >= 2 && a(o, r, {
-        details: `console:${P}:${A}`,
+    }), r.webContents.on("console-message", (w, l, D, S, F) => {
+      ve && l >= 2 && i(s, r, {
+        details: `console:${F}:${S}`,
         state: "ready",
-        message: v,
-        meta: [`console-level=${f}`],
-        url: C.get(o) || r.webContents.getURL() || void 0
+        message: D,
+        meta: [`console-level=${l}`],
+        url: A.get(s) || r.webContents.getURL() || void 0
       });
-    }), r.webContents.setWindowOpenHandler(({ url: u }) => (r.webContents.loadURL(u), { action: "deny" })), r;
-  }, h = (o, t, r) => {
-    if (!o || o.isDestroyed())
+    }), r.webContents.setWindowOpenHandler(({ url: w }) => (r.webContents.loadURL(w), { action: "deny" })), r;
+  }, T = (s, n, r) => {
+    if (!s || s.isDestroyed())
       return null;
-    if (!t)
-      return p(o), null;
-    const u = (r == null ? void 0 : r.createIfMissing) ?? !1 ? b(t) : d(t);
-    return u ? !u || u.webContents.isDestroyed() ? null : (B && B !== t && p(o), m(u), o.contentView.children.includes(u) || o.contentView.addChildView(u), B = t, u) : (p(o), null);
-  }, l = async (o, t, r, c, u = !1) => {
-    if (!o || o.isDestroyed())
+    if (!n)
+      return u(s), null;
+    const w = (r == null ? void 0 : r.createIfMissing) ?? !1 ? h(n) : d(n);
+    return w ? !w || w.webContents.isDestroyed() ? null : (x && x !== n && u(s), y(w), s.contentView.children.includes(w) || s.contentView.addChildView(w), x = n, w) : (u(s), null);
+  }, _ = async (s, n, r, c, w = !1) => {
+    if (!s || s.isDestroyed())
       return;
-    const f = String(t || "").trim();
-    if (!f)
+    const l = String(n || "").trim();
+    if (!l)
       return;
-    const v = h(o, f, { createIfMissing: !0 });
-    if (!v || v.webContents.isDestroyed())
+    const D = T(s, l, { createIfMissing: !0 });
+    if (!D || D.webContents.isDestroyed())
       return;
-    const A = String(r || "").trim();
-    if (!A) {
-      a(f, v, {
+    const S = String(r || "").trim();
+    if (!S) {
+      i(l, D, {
         state: "ready",
-        title: s(v) || "新标签页",
-        url: C.get(f) || void 0
+        title: o(D) || "新标签页",
+        url: A.get(l) || void 0
       });
       return;
     }
-    const P = C.get(f) || v.webContents.getURL();
-    if (u && P === A) {
-      a(f, v, {
+    const F = A.get(l) || D.webContents.getURL();
+    if (w && F === S) {
+      i(l, D, {
         state: "ready",
-        url: P || void 0
+        url: F || void 0
       });
       return;
     }
-    a(f, v, {
+    i(l, D, {
       details: "load-url",
       state: "loading",
-      url: A
+      url: S
     });
     try {
-      await v.webContents.loadURL(A);
-    } catch ($) {
-      const M = $ instanceof Error ? $.message : String($);
-      if (M.includes("ERR_ABORTED"))
+      await D.webContents.loadURL(S);
+    } catch (N) {
+      const I = N instanceof Error ? N.message : String(N);
+      if (I.includes("ERR_ABORTED"))
         return;
-      throw a(f, v, {
+      throw i(l, D, {
         details: c,
         state: "error",
-        message: `页面加载失败：${M}`,
-        url: A
-      }), $;
+        message: `页面加载失败：${I}`,
+        url: S
+      }), N;
     }
-  }, w = (o, t) => {
-    if (!o || o.isDestroyed())
+  }, L = (s, n) => {
+    if (!s || s.isDestroyed())
       return;
-    const r = String(t || "").trim();
+    const r = String(n || "").trim();
     if (!r)
       return;
     const c = d(r);
-    c && (o.contentView.children.includes(c) && o.contentView.removeChildView(c), B === r && (B = null), F.delete(r), C.delete(r), c.webContents.isDestroyed() || c.webContents.close({ waitForBeforeUnload: !1 }));
+    c && (s.contentView.children.includes(c) && s.contentView.removeChildView(c), x === r && (x = null), V.delete(r), A.delete(r), p(r), f(r), c.webContents.isDestroyed() || c.webContents.close({ waitForBeforeUnload: !1 }));
   };
-  _.handle("embedded-browser:open-tab", async (o, t, r) => {
-    const c = R.fromWebContents(o.sender) ?? g, u = String(r || "").trim();
-    if (!u) {
+  P.handle("embedded-browser:open-tab", async (s, n, r) => {
+    const c = M.fromWebContents(s.sender) ?? b;
+    p(String(n || "").trim()), f(String(n || "").trim());
+    const w = String(r || "").trim();
+    if (!w) {
       e({
         canGoBack: !1,
         canGoForward: !1,
         state: "ready",
-        tabId: t,
+        tabId: n,
         title: "新标签页"
       });
       return;
     }
-    await l(c, t, u, "open-exception", !0);
-  }), _.handle("embedded-browser:activate-tab", (o, t) => {
-    const r = R.fromWebContents(o.sender) ?? g;
-    h(r, t, { createIfMissing: !1 });
-  }), _.handle("embedded-browser:navigate", async (o, t, r) => {
-    const c = R.fromWebContents(o.sender) ?? g;
-    await l(c, t, r, "navigate-exception");
-  }), _.handle("embedded-browser:reload", async (o, t) => {
-    const r = String(t || "").trim();
+    await _(c, n, w, "open-exception", !0);
+  }), P.handle("embedded-browser:activate-tab", (s, n) => {
+    const r = M.fromWebContents(s.sender) ?? b;
+    T(r, n, { createIfMissing: !1 });
+  }), P.handle("embedded-browser:navigate", async (s, n, r) => {
+    const c = M.fromWebContents(s.sender) ?? b, w = String(n || "").trim();
+    p(w), f(w), await _(c, w, r, "navigate-exception");
+  }), P.handle("embedded-browser:open-mapped-file", async (s, n, r, c, w) => {
+    const l = M.fromWebContents(s.sender) ?? b, D = String(n || "").trim(), S = String(r || "").trim(), F = String(c || "").trim(), N = String(w || "").trim() || "file";
+    if (!D || !S || !F)
+      return;
+    const I = p(D);
+    f(D);
+    const k = await At(F, N);
+    if (!E(D, I)) {
+      Z(k).catch(() => {
+      });
+      return;
+    }
+    if (G.set(D, {
+      fileName: N,
+      pageUrl: S,
+      stagedPath: k
+    }), await _(l, D, S, "navigate-exception"), !E(D, I))
+      return;
+    const C = d(D);
+    C && m(D, C);
+  }), P.handle("embedded-browser:reload", async (s, n) => {
+    const r = String(n || "").trim();
     if (!r)
       return;
     const c = d(r);
-    !c || c.webContents.isDestroyed() || (a(r, c, {
+    !c || c.webContents.isDestroyed() || (i(r, c, {
       details: "reload",
       state: "loading",
-      url: C.get(r) || c.webContents.getURL() || void 0
-    }), c.webContents.reload(), i(r, c, {
+      url: A.get(r) || c.webContents.getURL() || void 0
+    }), c.webContents.reload(), a(r, c, {
       details: "reload-requested"
     }));
-  }), _.handle("embedded-browser:go-back", async (o, t) => {
-    const r = String(t || "").trim();
+  }), P.handle("embedded-browser:go-back", async (s, n) => {
+    const r = String(n || "").trim();
     if (!r)
       return;
     const c = d(r);
-    !c || c.webContents.isDestroyed() || (c.webContents.canGoBack() && c.webContents.goBack(), i(r, c, {
+    !c || c.webContents.isDestroyed() || (c.webContents.canGoBack() && c.webContents.goBack(), a(r, c, {
       details: "history-back"
     }));
-  }), _.handle("embedded-browser:go-forward", async (o, t) => {
-    const r = String(t || "").trim();
+  }), P.handle("embedded-browser:go-forward", async (s, n) => {
+    const r = String(n || "").trim();
     if (!r)
       return;
     const c = d(r);
-    !c || c.webContents.isDestroyed() || (c.webContents.canGoForward() && c.webContents.goForward(), i(r, c, {
+    !c || c.webContents.isDestroyed() || (c.webContents.canGoForward() && c.webContents.goForward(), a(r, c, {
       details: "history-forward"
     }));
-  }), _.handle("embedded-browser:set-bounds", (o, t) => {
+  }), P.handle("embedded-browser:set-bounds", (s, n) => {
     const r = {
       x: 0,
       y: 0,
       width: 0,
       height: 0
-    }, c = R.fromWebContents(o.sender) ?? g, u = c && !c.isDestroyed() ? Math.max(c.webContents.getZoomFactor(), 0.01) : 1;
-    if (r.x = Math.max(0, Math.round(t.x * u)), r.y = Math.max(0, Math.round(t.y * u)), r.width = Math.max(0, Math.round(t.width * u)), r.height = Math.max(0, Math.round(t.height * u)), me = r, !B)
+    }, c = M.fromWebContents(s.sender) ?? b, w = c && !c.isDestroyed() ? Math.max(c.webContents.getZoomFactor(), 0.01) : 1;
+    if (r.x = Math.max(0, Math.round(n.x * w)), r.y = Math.max(0, Math.round(n.y * w)), r.width = Math.max(0, Math.round(n.width * w)), r.height = Math.max(0, Math.round(n.height * w)), De = r, !x)
       return;
-    const f = d(B);
-    f && f.setBounds(r);
-  }), _.handle("embedded-browser:close-tab", (o, t) => {
-    const r = R.fromWebContents(o.sender) ?? g;
-    w(r, t);
-  }), _.handle("embedded-browser:cleanup-download-file", async (o, t) => {
+    const l = d(x);
+    l && l.setBounds(r);
+  }), P.handle("embedded-browser:close-tab", (s, n) => {
+    const r = M.fromWebContents(s.sender) ?? b;
+    L(r, n);
+  }), P.handle("embedded-browser:cleanup-download-file", async (s, n) => {
     try {
-      return await Re(t);
+      return await Fe(n);
     } catch {
       return !1;
     }
-  }), _.handle("embedded-browser:deactivate", (o) => {
-    const t = R.fromWebContents(o.sender) ?? g;
-    !t || t.isDestroyed() || p(t);
-  }), _.handle("embedded-browser:close-all", (o) => {
-    const t = R.fromWebContents(o.sender) ?? g;
-    !t || t.isDestroyed() || (Array.from(F.keys()).forEach((r) => {
-      w(t, r);
-    }), B = null, e({ state: "idle" }));
+  }), P.handle("embedded-browser:deactivate", (s) => {
+    const n = M.fromWebContents(s.sender) ?? b;
+    !n || n.isDestroyed() || u(n);
+  }), P.handle("embedded-browser:close-all", (s) => {
+    const n = M.fromWebContents(s.sender) ?? b;
+    !n || n.isDestroyed() || (Array.from(V.keys()).forEach((r) => {
+      L(n, r);
+    }), x = null, e({ state: "idle" }));
   });
 }
-function Ae() {
-  if (g && !g.isDestroyed())
-    return g.show(), g.focus(), g;
-  const e = Pe(), n = xt(), s = (n == null ? void 0 : n.width) ?? Dt, a = (n == null ? void 0 : n.height) ?? Tt, i = new R({
-    width: s,
-    height: a,
-    minWidth: oe,
-    minHeight: se,
+function $e() {
+  if (b && !b.isDestroyed())
+    return b.show(), b.focus(), b;
+  const e = Ue(), t = Xt(), o = (t == null ? void 0 : t.width) ?? Nt, i = (t == null ? void 0 : t.height) ?? $t, a = new M({
+    width: o,
+    height: i,
+    minWidth: fe,
+    minHeight: me,
     backgroundColor: "#f5f5f0",
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
-    ...U(n == null ? void 0 : n.x) && U(n == null ? void 0 : n.y) ? { x: n.x, y: n.y } : {},
+    ...W(t == null ? void 0 : t.x) && W(t == null ? void 0 : t.y) ? { x: t.x, y: t.y } : {},
     webPreferences: {
       // 预加载脚本，用于安全地与渲染进程通信
-      preload: y.join(vt, "preload.mjs"),
+      preload: g.join(Lt, "preload.mjs"),
       // Electron 安全推荐配置
       devTools: !0
       // nodeIntegration: false,     // 禁用 Node.js 集成
@@ -1063,44 +1264,44 @@ function Ae() {
     // 自动隐藏菜单栏
     ...e ? { icon: e } : {}
   });
-  return g = i, n != null && n.maximized && i.maximize(), i.on("move", () => {
-    Z(i);
-  }), i.on("resize", () => {
-    Z(i);
-  }), i.on("maximize", () => {
-    Z(i);
-  }), i.on("unmaximize", () => {
-    Z(i);
-  }), i.on("close", (d) => {
-    ie(i), process.platform === "darwin" && !Me && (d.preventDefault(), i.hide());
-  }), i.on("closed", () => {
-    g === i && (g = null);
-  }), i.webContents.on("before-input-event", (d, m) => {
-    Lt(m) && (d.preventDefault(), i.webContents.toggleDevTools());
-  }), J ? i.loadURL(J) : i.loadFile(y.join(Ce, "index.html")), i;
+  return b = a, t != null && t.maximized && a.maximize(), a.on("move", () => {
+    ee(a);
+  }), a.on("resize", () => {
+    ee(a);
+  }), a.on("maximize", () => {
+    ee(a);
+  }), a.on("unmaximize", () => {
+    ee(a);
+  }), a.on("close", (d) => {
+    he(a), process.platform === "darwin" && !Ie && (d.preventDefault(), a.hide());
+  }), a.on("closed", () => {
+    b === a && (b = null);
+  }), a.webContents.on("before-input-event", (d, f) => {
+    Jt(f) && (d.preventDefault(), a.webContents.toggleDevTools());
+  }), ne ? a.loadURL(ne) : a.loadFile(g.join(Le, "index.html")), a;
 }
-T.on("before-quit", () => {
-  Me = !0, g && !g.isDestroyed() && ie(g);
+R.on("before-quit", () => {
+  Ie = !0, b && !b.isDestroyed() && he(b);
 });
-T.on("window-all-closed", () => {
-  process.platform !== "darwin" && T.quit();
+R.on("window-all-closed", () => {
+  process.platform !== "darwin" && R.quit();
 });
-T.on("activate", () => {
-  if (g && !g.isDestroyed()) {
-    g.isMinimized() && g.restore(), g.show(), g.focus();
+R.on("activate", () => {
+  if (b && !b.isDestroyed()) {
+    b.isMinimized() && b.restore(), b.show(), b.focus();
     return;
   }
-  R.getAllWindows().length === 0 && Ae();
+  M.getAllWindows().length === 0 && $e();
 });
-T.whenReady().then(() => {
-  const e = Pe();
-  e && process.platform === "darwin" && T.dock.setIcon(e), yt({
-    emitDownload: Mt,
-    resolveTabIdByWebContents: Bt
-  }), ft(), Ut(), Ae();
+R.whenReady().then(() => {
+  const e = Ue();
+  e && process.platform === "darwin" && R.dock.setIcon(e), _t({
+    emitDownload: Ht,
+    resolveTabIdByWebContents: jt
+  }), yt(), Yt(), $e();
 });
 export {
-  vt as MAIN_DIST,
-  Ce as RENDERER_DIST,
-  J as VITE_DEV_SERVER_URL
+  Lt as MAIN_DIST,
+  Le as RENDERER_DIST,
+  ne as VITE_DEV_SERVER_URL
 };

@@ -6,7 +6,12 @@ type EmbeddedBrowserPanelProps = {
   currentUrl?: string;
   onUrlChange?: (url: string) => void;
   onStateChange?: (payload: BrowserEventPayload) => void;
+  onPendingFileOpenHandled?: (tabId: string) => void;
   onSubmitDraft: (value: string) => void;
+  pendingFileOpen?: {
+    fileName: string;
+    sourceUrl: string;
+  } | null;
   suspendNativeView?: boolean;
 };
 
@@ -147,9 +152,25 @@ const BrowserSurface = styled.div`
 `;
 
 const EmbeddedBrowserPanel = React.forwardRef<EmbeddedBrowserHandle, EmbeddedBrowserPanelProps>(
-  ({ activeTabId, currentUrl = '', onUrlChange, onStateChange, onSubmitDraft, suspendNativeView = false }, ref) => {
+  ({
+    activeTabId,
+    currentUrl = '',
+    onUrlChange,
+    onStateChange,
+    onPendingFileOpenHandled,
+    onSubmitDraft,
+    pendingFileOpen = null,
+    suspendNativeView = false,
+  }, ref) => {
     const hostRef = React.useRef<HTMLDivElement | null>(null);
     const emptyInputRef = React.useRef<HTMLInputElement | null>(null);
+    const lastNativeAttachRef = React.useRef<{
+      pendingKey: string | null;
+      tabId: string | null;
+    }>({
+      pendingKey: null,
+      tabId: null,
+    });
     const [emptyDraftValue, setEmptyDraftValue] = React.useState('');
     const [statusMessage, setStatusMessage] = React.useState(
       activeTabId ? '正在打开网页...' : '输入网址后回车',
@@ -242,12 +263,20 @@ const EmbeddedBrowserPanel = React.forwardRef<EmbeddedBrowserHandle, EmbeddedBro
 
     React.useEffect(() => {
       if (suspendNativeView) {
+        lastNativeAttachRef.current = {
+          pendingKey: null,
+          tabId: null,
+        };
         void window.electronEmbeddedBrowser.deactivate();
         return;
       }
       if (panelMode === 'idle') {
         setStatusMessage('输入网址后回车');
         setEmptyDraftValue('');
+        lastNativeAttachRef.current = {
+          pendingKey: null,
+          tabId: null,
+        };
         void window.electronEmbeddedBrowser.deactivate();
         return;
       }
@@ -256,6 +285,10 @@ const EmbeddedBrowserPanel = React.forwardRef<EmbeddedBrowserHandle, EmbeddedBro
         setStatusMeta([]);
         setStatusMessage('');
         setEmptyDraftValue('');
+        lastNativeAttachRef.current = {
+          pendingKey: null,
+          tabId: null,
+        };
         void window.electronEmbeddedBrowser.deactivate();
         return;
       }
@@ -266,8 +299,44 @@ const EmbeddedBrowserPanel = React.forwardRef<EmbeddedBrowserHandle, EmbeddedBro
       if (!activeTabId) {
         return;
       }
-      void window.electronEmbeddedBrowser.openTab(activeTabId, currentUrl);
-    }, [activeTabId, currentUrl, panelMode, suspendNativeView]);
+      const pendingKey = pendingFileOpen
+        ? `${activeTabId}::${currentUrl}::${pendingFileOpen.sourceUrl}::${pendingFileOpen.fileName}`
+        : null;
+      const needsPendingDispatch = pendingKey !== null && lastNativeAttachRef.current.pendingKey !== pendingKey;
+      const needsTabAttach = lastNativeAttachRef.current.tabId !== activeTabId;
+      if (!needsPendingDispatch && !needsTabAttach) {
+        return;
+      }
+      const openCurrentTab = async () => {
+        try {
+          if (pendingFileOpen) {
+            await window.electronEmbeddedBrowser.openMappedFile(
+              activeTabId,
+              currentUrl,
+              pendingFileOpen.sourceUrl,
+              pendingFileOpen.fileName,
+            );
+          } else {
+            await window.electronEmbeddedBrowser.openTab(activeTabId, currentUrl);
+          }
+          lastNativeAttachRef.current = {
+            pendingKey,
+            tabId: activeTabId,
+          };
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          setStatusMessage('页面加载失败');
+          setStatusDetails(message);
+          setStatusMeta([]);
+        } finally {
+          if (pendingFileOpen) {
+            onPendingFileOpenHandled?.(activeTabId);
+          }
+        }
+      };
+
+      void openCurrentTab();
+    }, [activeTabId, currentUrl, onPendingFileOpenHandled, panelMode, pendingFileOpen, suspendNativeView]);
 
     React.useLayoutEffect(() => {
       const host = hostRef.current;
