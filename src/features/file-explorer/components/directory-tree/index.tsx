@@ -93,6 +93,17 @@ function removeStaleTreeDragPreviews() {
     .forEach(element => element.remove());
 }
 
+function collectVisibleTreeNodes(nodes: any[], expandedKeySet: Set<string>, acc: any[]) {
+  nodes.forEach((node) => {
+    acc.push(node);
+    const children = Array.isArray(node.children) ? node.children : [];
+    if (children.length === 0) return;
+    if (String(node.type) === 'file') return;
+    if (!expandedKeySet.has(String(node.key))) return;
+    collectVisibleTreeNodes(children, expandedKeySet, acc);
+  });
+}
+
 /**
  * 计算目录树内容所需的最小宽度：
  * - 以整棵树中已经渲染的节点为准（不局限于当前可视范围）
@@ -377,16 +388,8 @@ export default function DirectoryTree({
     treeDataRef.current = treeData;
   }, [treeData]);
 
-  const scheduleRecompute = () => {
-    if (rafIdRef.current != null) return;
-    rafIdRef.current = requestAnimationFrame(() => {
-      rafIdRef.current = null;
-      recomputeRequiredWidth();
-    });
-  };
-
   /** 基于当前已经渲染的所有节点，计算内容所需的最小宽度 */
-  const recomputeRequiredWidth = () => {
+  const recomputeRequiredWidth = useCallback(() => {
     const wrapper = wrapperRef.current;
     const container = wrapper?.parentElement;
     if (!wrapper || !container) return;
@@ -422,7 +425,15 @@ export default function DirectoryTree({
       : container.clientWidth;
 
     applyMinWidth(desiredWidth, container);
-  };
+  }, []);
+
+  const scheduleRecompute = useCallback(() => {
+    if (rafIdRef.current != null) return;
+    rafIdRef.current = requestAnimationFrame(() => {
+      rafIdRef.current = null;
+      recomputeRequiredWidth();
+    });
+  }, [recomputeRequiredWidth]);
 
   // 处理文件放置逻辑
   // 外部文件拖拽
@@ -624,17 +635,6 @@ export default function DirectoryTree({
 
     return patchNodes(treeData);
   }, [rawOpenVersion, treeData]);
-
-  const collectVisibleTreeNodes = (nodes: any[], expandedKeySet: Set<string>, acc: any[]) => {
-    nodes.forEach((node) => {
-      acc.push(node);
-      const children = Array.isArray(node.children) ? node.children : [];
-      if (children.length === 0) return;
-      if (String(node.type) === 'file') return;
-      if (!expandedKeySet.has(String(node.key))) return;
-      collectVisibleTreeNodes(children, expandedKeySet, acc);
-    });
-  };
 
   const visibleNodesLinear = React.useMemo(() => {
     const acc: any[] = [];
@@ -856,14 +856,14 @@ export default function DirectoryTree({
     return nodeIds;
   };
 
-  const applyTemporaryExpandedKeys = (keys: string[]) => {
+  const applyTemporaryExpandedKeys = useCallback((keys: string[]) => {
     expandedKeysRef.current = keys;
     onExpand(keys);
     requestAnimationFrame(() => {
       scheduleRecompute();
     });
     prevExpandedKeysRef.current = keys;
-  };
+  }, [onExpand, scheduleRecompute]);
 
   const resetDragCollapseTracking = () => {
     dragCollapsedKeysRef.current = [];
@@ -911,7 +911,7 @@ export default function DirectoryTree({
     externalDragExpandedKeysSnapshotRef.current = null;
   };
 
-  const restoreExternalDragExpandedKeys = () => {
+  const restoreExternalDragExpandedKeys = useCallback(() => {
     const snapshot = externalDragExpandedKeysSnapshotRef.current;
     if (snapshot !== null) {
       applyTemporaryExpandedKeys(snapshot);
@@ -921,7 +921,7 @@ export default function DirectoryTree({
       expandTimerRef.current = null;
     }
     resetExternalDragExpandSession();
-  };
+  }, [applyTemporaryExpandedKeys]);
 
   const clearExternalUploadHover = (targetKey?: string | null) => {
     setDragOverKey(prev => {
@@ -2050,7 +2050,7 @@ export default function DirectoryTree({
       window.removeEventListener('drop', endExternalDragSession);
       window.removeEventListener('dragend', endExternalDragSession);
     };
-  }, []);
+  }, [restoreExternalDragExpandedKeys]);
 
   React.useLayoutEffect(() => {
     syncRenderedSelectionStyles();

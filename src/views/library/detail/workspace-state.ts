@@ -4,6 +4,8 @@ export type BrowserTab = {
   canGoBack?: boolean;
   canGoForward?: boolean;
   id: string;
+  iconSourceUrl?: string;
+  iconUrl?: string;
   title: string;
   url: string;
 };
@@ -51,6 +53,8 @@ function normalizeBrowserTab(raw: BrowserTab | null | undefined): BrowserTab | n
     canGoBack: Boolean(raw.canGoBack),
     canGoForward: Boolean(raw.canGoForward),
     id,
+    iconSourceUrl: String(raw.iconSourceUrl || '').trim() || undefined,
+    iconUrl: String(raw.iconUrl || '').trim() || undefined,
     title: String(raw.title || '').trim() || '新标签页',
     url: String(raw.url || '').trim(),
   };

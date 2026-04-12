@@ -23,7 +23,7 @@ import LibraryContextMenu from './components/library-context-menu'
 import LibraryCreateModal from './components/library-create-modal'
 import LibraryEditModal from './components/library-edit-modal'
 import type { Library } from "@/features/file-explorer/services/file.api"
-import { clearFileViewerStateCache } from '@/contexts/FileViewerContext'
+import { clearFileViewerStateCache } from '@/contexts/file-viewer-cache'
 import {
   clearLibraryDetailWorkspaceState,
   loadLibraryDetailWorkspaceState,

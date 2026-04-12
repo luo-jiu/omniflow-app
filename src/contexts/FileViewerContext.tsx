@@ -5,6 +5,10 @@ import {
   type FileViewerTab,
   type FileViewerReturnTarget,
 } from './file-viewer.context';
+import {
+  getFileViewerStateCache,
+  setFileViewerStateCache,
+} from './file-viewer-cache';
 
 const defaultFileViewerState: FileViewerState = {
   nodeId: null,
@@ -26,30 +30,6 @@ const defaultFileViewerStoreState: FileViewerStoreState = {
   tabs: [],
   activeTabId: null,
 };
-
-const FILE_VIEWER_CACHE_MAX_ENTRIES = 12;
-const fileViewerStateCache = new Map<string, FileViewerStoreState>();
-
-export function clearFileViewerStateCache(cacheKey?: string) {
-  if (!cacheKey) {
-    return;
-  }
-  fileViewerStateCache.delete(cacheKey);
-}
-
-function setFileViewerStateCache(cacheKey: string, state: FileViewerStoreState) {
-  // Simple LRU-like behavior: refresh key order and evict the oldest when cap is exceeded.
-  if (fileViewerStateCache.has(cacheKey)) {
-    fileViewerStateCache.delete(cacheKey);
-  }
-  fileViewerStateCache.set(cacheKey, state);
-  if (fileViewerStateCache.size > FILE_VIEWER_CACHE_MAX_ENTRIES) {
-    const oldestKey = fileViewerStateCache.keys().next().value;
-    if (oldestKey) {
-      fileViewerStateCache.delete(oldestKey);
-    }
-  }
-}
 
 function toFileState(tab: FileViewerTab | null): FileViewerState {
   if (!tab) {
@@ -161,7 +141,7 @@ export const FileViewerProvider: React.FC<{ children: ReactNode; cacheKey?: stri
     if (!cacheKey) {
       return defaultFileViewerStoreState;
     }
-    return normalizeStoreState(fileViewerStateCache.get(cacheKey));
+    return normalizeStoreState(getFileViewerStateCache<FileViewerStoreState>(cacheKey));
   });
   const activeCacheKeyRef = React.useRef<string | undefined>(cacheKey);
   const skipPersistRef = React.useRef(false);
@@ -311,7 +291,7 @@ export const FileViewerProvider: React.FC<{ children: ReactNode; cacheKey?: stri
       setViewerState(defaultFileViewerStoreState);
       return;
     }
-    setViewerState(normalizeStoreState(fileViewerStateCache.get(cacheKey)));
+    setViewerState(normalizeStoreState(getFileViewerStateCache<FileViewerStoreState>(cacheKey)));
   }, [cacheKey]);
 
   React.useEffect(() => {
@@ -320,7 +300,7 @@ export const FileViewerProvider: React.FC<{ children: ReactNode; cacheKey?: stri
       skipPersistRef.current = false;
       return;
     }
-    setFileViewerStateCache(cacheKey, viewerState);
+    setFileViewerStateCache<FileViewerStoreState>(cacheKey, viewerState);
   }, [cacheKey, viewerState]);
 
   return (

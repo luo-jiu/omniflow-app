@@ -1,6 +1,7 @@
 // main.ts (Electron 主进程入口文件)
 
-import { app, BrowserWindow, ipcMain, screen, WebContentsView } from 'electron'
+import { app, BrowserWindow, ipcMain, screen, session, WebContentsView } from 'electron'
+import { Buffer } from 'node:buffer'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -73,6 +74,8 @@ const WINDOW_ACTIVATE_TOPMOST_DURATION_MS = 240
 let windowStateSaveTimer: ReturnType<typeof setTimeout> | null = null
 const embeddedBrowserViews = new Map<string, WebContentsView>()
 const embeddedBrowserLastCommittedUrls = new Map<string, string>()
+const embeddedBrowserIconUrls = new Map<string, string>()
+const embeddedBrowserIconSourceUrls = new Map<string, string>()
 const embeddedBrowserPendingOpenFiles = new Map<string, {
   fileName: string
   pageUrl: string
@@ -87,12 +90,24 @@ type EmbeddedBrowserStatePayload = {
   canGoBack?: boolean
   canGoForward?: boolean
   details?: string
+  iconSourceUrl?: string
+  iconUrl?: string
   message?: string
   meta?: string[]
   state?: 'idle' | 'loading' | 'ready' | 'error'
   tabId?: string
   title?: string
   url?: string
+}
+
+type EmbeddedBrowserFaviconResolvePayload = {
+  iconUrl?: string
+  pageUrl?: string
+}
+
+type EmbeddedBrowserFaviconResolveResult = {
+  dataUrl: string
+  iconUrl: string
 }
 
 type EmbeddedBrowserBounds = {
@@ -236,23 +251,24 @@ function isToggleDevToolsShortcut(input: Electron.Input) {
   return (input.meta || input.control) && input.shift && key === 'i'
 }
 
+function isZoomShortcut(input: Electron.Input) {
+  if (input.type !== 'keyDown') {
+    return false
+  }
+
+  if (!(input.meta || input.control)) {
+    return false
+  }
+
+  const key = (input.key || '').toLowerCase()
+  return key === '+' || key === '=' || key === '-' || key === '_' || key === '0'
+}
+
 function registerWindowIpcHandlers() {
   if (windowHandlersRegistered) {
     return
   }
   windowHandlersRegistered = true
-
-  ipcMain.handle('zoom-adjust', (event, delta: number) => {
-    const targetWindow = BrowserWindow.fromWebContents(event.sender) ?? mainWindow
-    if (!targetWindow || targetWindow.isDestroyed()) {
-      return null
-    }
-
-    const currentZoom = targetWindow.webContents.getZoomFactor()
-    const nextZoom = Math.min(Math.max(currentZoom + delta, 0.25), 3)
-    targetWindow.webContents.setZoomFactor(nextZoom)
-    return nextZoom
-  })
 
   ipcMain.on('window-minimize', (event) => {
     const targetWindow = BrowserWindow.fromWebContents(event.sender) ?? mainWindow
@@ -385,10 +401,160 @@ function registerWindowIpcHandlers() {
     return undefined
   }
 
+  const resolveEmbeddedBrowserFaviconUrl = (rawIconUrl: string, pageUrl?: string) => {
+    const iconUrl = rawIconUrl.trim()
+    if (!iconUrl) {
+      return ''
+    }
+    if (iconUrl.startsWith('data:')) {
+      return iconUrl
+    }
+    try {
+      return new URL(iconUrl, pageUrl || undefined).toString()
+    } catch {
+      return iconUrl
+    }
+  }
+
+  const getEmbeddedBrowserFaviconMimeType = (iconUrl: string, contentType?: string | null) => {
+    const normalizedContentType = String(contentType || '').split(';')[0]?.trim()
+    if (normalizedContentType?.startsWith('image/')) {
+      return normalizedContentType
+    }
+    const pathname = (() => {
+      try {
+        return new URL(iconUrl).pathname.toLowerCase()
+      } catch {
+        return iconUrl.toLowerCase()
+      }
+    })()
+    if (pathname.endsWith('.svg')) {
+      return 'image/svg+xml'
+    }
+    if (pathname.endsWith('.ico')) {
+      return 'image/x-icon'
+    }
+    if (pathname.endsWith('.webp')) {
+      return 'image/webp'
+    }
+    if (pathname.endsWith('.jpg') || pathname.endsWith('.jpeg')) {
+      return 'image/jpeg'
+    }
+    return 'image/png'
+  }
+
+  const fetchEmbeddedBrowserFaviconDataUrl = async (browserSession: Electron.Session, iconUrl: string) => {
+    if (!iconUrl || iconUrl.startsWith('data:')) {
+      return iconUrl
+    }
+    try {
+      const response = await browserSession.fetch(iconUrl)
+      if (!response.ok) {
+        return ''
+      }
+      const content = Buffer.from(await response.arrayBuffer())
+      if (content.length === 0) {
+        return ''
+      }
+      const mimeType = getEmbeddedBrowserFaviconMimeType(iconUrl, response.headers.get('content-type'))
+      return `data:${mimeType};base64,${content.toString('base64')}`
+    } catch (error) {
+      runtimeLogger.warn('embedded browser favicon load failed', {
+        error: error instanceof Error ? error.message : String(error),
+        iconUrl,
+      })
+      return ''
+    }
+  }
+
+  const loadEmbeddedBrowserFaviconDataUrl = async (view: WebContentsView, iconUrl: string) => (
+    fetchEmbeddedBrowserFaviconDataUrl(view.webContents.session, iconUrl)
+  )
+
+  const extractEmbeddedBrowserFaviconCandidates = (html: string, pageUrl: string) => {
+    const candidates: string[] = []
+    const linkRegex = /<link\b[^>]*>/gi
+    const attrRegex = /([a-zA-Z_:][-a-zA-Z0-9_:.]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/g
+    let linkMatch: RegExpExecArray | null
+    while ((linkMatch = linkRegex.exec(html))) {
+      const tag = linkMatch[0]
+      const attrs = new Map<string, string>()
+      let attrMatch: RegExpExecArray | null
+      attrRegex.lastIndex = 0
+      while ((attrMatch = attrRegex.exec(tag))) {
+        attrs.set(attrMatch[1].toLowerCase(), attrMatch[2] || attrMatch[3] || attrMatch[4] || '')
+      }
+      const rel = attrs.get('rel') || ''
+      const href = attrs.get('href') || ''
+      if (!href || !/(^|\s)(shortcut\s+icon|icon|apple-touch-icon|mask-icon)(\s|$)/i.test(rel)) {
+        continue
+      }
+      const iconUrl = resolveEmbeddedBrowserFaviconUrl(href, pageUrl)
+      if (iconUrl) {
+        candidates.push(iconUrl)
+      }
+    }
+    return candidates
+  }
+
+  const resolveEmbeddedBrowserBookmarkFavicon = async (
+    payload: EmbeddedBrowserFaviconResolvePayload,
+  ): Promise<EmbeddedBrowserFaviconResolveResult> => {
+    const pageUrl = String(payload?.pageUrl || '').trim()
+    const browserSession = session.fromPartition(EMBEDDED_BROWSER_PARTITION)
+    const candidates: string[] = []
+    const providedIconUrl = resolveEmbeddedBrowserFaviconUrl(String(payload?.iconUrl || ''), pageUrl || undefined)
+    if (providedIconUrl && !providedIconUrl.startsWith('data:')) {
+      candidates.push(providedIconUrl)
+    }
+
+    if (pageUrl) {
+      try {
+        const response = await browserSession.fetch(pageUrl)
+        const contentType = response.headers.get('content-type') || ''
+        if (response.ok && /text\/html|application\/xhtml\+xml/i.test(contentType)) {
+          candidates.push(...extractEmbeddedBrowserFaviconCandidates(await response.text(), pageUrl))
+        }
+      } catch (error) {
+        runtimeLogger.warn('embedded browser favicon page inspect failed', {
+          error: error instanceof Error ? error.message : String(error),
+          pageUrl,
+        })
+      }
+      try {
+        const origin = new URL(pageUrl).origin
+        candidates.push(`${origin}/favicon.ico`)
+      } catch {
+        // ignore
+      }
+    }
+
+    const visited = new Set<string>()
+    for (const candidate of candidates) {
+      if (!candidate || visited.has(candidate)) {
+        continue
+      }
+      visited.add(candidate)
+      const faviconDataUrl = await fetchEmbeddedBrowserFaviconDataUrl(browserSession, candidate)
+      if (faviconDataUrl) {
+        return {
+          dataUrl: faviconDataUrl,
+          iconUrl: candidate,
+        }
+      }
+    }
+    return {
+      dataUrl: providedIconUrl.startsWith('data:') ? providedIconUrl : '',
+      iconUrl: '',
+    }
+  }
+
   const emitEmbeddedBrowserTabState = (
     tabId: string,
     view: WebContentsView,
     payload: Omit<EmbeddedBrowserStatePayload, 'tabId' | 'title' | 'url'> & {
+      iconSourceUrl?: string
+      iconUrl?: string
       title?: string
       url?: string
     },
@@ -396,6 +562,8 @@ function registerWindowIpcHandlers() {
     emitEmbeddedBrowserState({
       canGoBack: view.webContents.canGoBack(),
       canGoForward: view.webContents.canGoForward(),
+      iconSourceUrl: payload.iconSourceUrl ?? embeddedBrowserIconSourceUrls.get(tabId),
+      iconUrl: payload.iconUrl ?? embeddedBrowserIconUrls.get(tabId),
       tabId,
       title: payload.title ?? getEmbeddedBrowserTitle(view),
       ...payload,
@@ -406,6 +574,8 @@ function registerWindowIpcHandlers() {
     tabId: string,
     view: WebContentsView,
     payload?: Omit<EmbeddedBrowserStatePayload, 'tabId' | 'title' | 'url'> & {
+      iconSourceUrl?: string
+      iconUrl?: string
       title?: string
       url?: string
     },
@@ -422,6 +592,8 @@ function registerWindowIpcHandlers() {
     if (!view || view.webContents.isDestroyed()) {
       embeddedBrowserViews.delete(tabId)
       embeddedBrowserLastCommittedUrls.delete(tabId)
+      embeddedBrowserIconUrls.delete(tabId)
+      embeddedBrowserIconSourceUrls.delete(tabId)
       return null
     }
     return view
@@ -590,6 +762,29 @@ function registerWindowIpcHandlers() {
         url: embeddedBrowserLastCommittedUrls.get(tabId) || view.webContents.getURL() || undefined,
       })
     })
+    view.webContents.on('page-favicon-updated', (_event, favicons) => {
+      const pageUrl = embeddedBrowserLastCommittedUrls.get(tabId) || view.webContents.getURL() || undefined
+      const iconUrl = favicons
+        .map((item) => resolveEmbeddedBrowserFaviconUrl(String(item || ''), pageUrl))
+        .find((item) => item.trim()) || ''
+      if (!iconUrl) {
+        return
+      }
+      void loadEmbeddedBrowserFaviconDataUrl(view, iconUrl).then((faviconDataUrl) => {
+        if (!faviconDataUrl || view.webContents.isDestroyed()) {
+          return
+        }
+        embeddedBrowserIconSourceUrls.set(tabId, iconUrl)
+        embeddedBrowserIconUrls.set(tabId, faviconDataUrl)
+        emitEmbeddedBrowserTabState(tabId, view, {
+          details: 'page-favicon-updated',
+          iconSourceUrl: iconUrl,
+          iconUrl: faviconDataUrl,
+          state: 'ready',
+          url: embeddedBrowserLastCommittedUrls.get(tabId) || view.webContents.getURL() || undefined,
+        })
+      })
+    })
     view.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
       if (errorCode === -3) {
         return
@@ -737,6 +932,8 @@ function registerWindowIpcHandlers() {
     }
     embeddedBrowserViews.delete(normalizedTabId)
     embeddedBrowserLastCommittedUrls.delete(normalizedTabId)
+    embeddedBrowserIconUrls.delete(normalizedTabId)
+    embeddedBrowserIconSourceUrls.delete(normalizedTabId)
     bumpEmbeddedBrowserOpenFileRequestVersion(normalizedTabId)
     cleanupEmbeddedBrowserOpenFileForTab(normalizedTabId)
     if (!view.webContents.isDestroyed()) {
@@ -774,6 +971,10 @@ function registerWindowIpcHandlers() {
     cleanupEmbeddedBrowserOpenFileForTab(normalizedTabId)
     await loadEmbeddedBrowserUrl(targetWindow, normalizedTabId, url, 'navigate-exception')
   })
+
+  ipcMain.handle('embedded-browser:resolve-favicon', async (_event, payload: EmbeddedBrowserFaviconResolvePayload) => (
+    resolveEmbeddedBrowserBookmarkFavicon(payload)
+  ))
 
   ipcMain.handle('embedded-browser:open-mapped-file', async (
     event,
@@ -1003,7 +1204,13 @@ function createWindow() {
     }
   })
 
+  win.webContents.setZoomFactor(1)
+  void win.webContents.setVisualZoomLevelLimits(1, 1).catch(() => undefined)
   win.webContents.on('before-input-event', (event, input) => {
+    if (isZoomShortcut(input)) {
+      event.preventDefault()
+      return
+    }
     if (!isToggleDevToolsShortcut(input)) {
       return
     }

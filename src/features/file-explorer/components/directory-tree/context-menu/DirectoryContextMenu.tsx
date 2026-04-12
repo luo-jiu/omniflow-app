@@ -1,11 +1,11 @@
 import React from 'react';
 import { Popconfirm } from '@douyinfe/semi-ui';
-import ContextMenu, {
-  ContextMenuItem,
+import ContextMenu, { ContextMenuItem } from '@/components/ui/context-menu';
+import {
   resolveOverlayPlacement,
   type ContextMenuPosition,
   type OverlayBoundaryRect,
-} from '@/components/ui/context-menu';
+} from '@/components/ui/context-menu/overlay';
 import comicFolderIcon from '@/assets/icons/material/folder-comic.svg';
 import asmrFolderIcon from '@/assets/icons/material/folder-asmr.svg';
 

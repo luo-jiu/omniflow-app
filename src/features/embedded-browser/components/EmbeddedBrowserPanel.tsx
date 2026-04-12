@@ -24,6 +24,8 @@ type BrowserEventPayload = {
   canGoBack?: boolean;
   canGoForward?: boolean;
   details?: string;
+  iconSourceUrl?: string;
+  iconUrl?: string;
   message?: string;
   meta?: string[];
   state?: 'idle' | 'loading' | 'ready' | 'error';

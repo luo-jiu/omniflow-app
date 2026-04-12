@@ -81,7 +81,6 @@ interface Window {
       cpuModel: string;
       totalMemoryGB: number;
     }>;
-    zoomAdjust: (delta: number) => void; // 添加 zoomAdjust 方法
     fetch: (
       url: string,
       options?: any
@@ -129,10 +128,16 @@ interface Window {
     goForward: (tabId: string) => Promise<void>;
     navigate: (tabId: string, url: string) => Promise<void>;
     openMappedFile: (tabId: string, pageUrl: string, sourceUrl: string, fileName: string) => Promise<void>;
+    resolveFavicon: (payload: { iconUrl?: string; pageUrl?: string }) => Promise<{
+      dataUrl: string;
+      iconUrl: string;
+    }>;
     onStateChange: (listener: (payload: {
       canGoBack?: boolean;
       canGoForward?: boolean;
       details?: string;
+      iconSourceUrl?: string;
+      iconUrl?: string;
       message?: string;
       meta?: string[];
       state?: 'idle' | 'loading' | 'ready' | 'error';

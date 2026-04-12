@@ -8,6 +8,7 @@ import {
   IconHome,
   IconUpload,
   IconDelete,
+  IconSetting,
   IconRefresh,
   IconPlus,
   IconClose,
@@ -16,14 +17,47 @@ import {
   IconGlobeStroke,
   IconApps,
   IconFolder,
+  IconStar,
+  IconStarStroked,
+  IconMore,
+  IconEdit,
 } from "@douyinfe/semi-icons";
-import { Toast } from '@douyinfe/semi-ui';
+import { Input, Modal, Popover, Select, Toast } from '@douyinfe/semi-ui';
 import styled, { css } from "styled-components";
+import ContextMenu, { type ContextMenuItem } from "@/components/ui/context-menu";
 import EmbeddedBrowserPanel, { type EmbeddedBrowserHandle } from "@/features/embedded-browser/components/EmbeddedBrowserPanel";
 import EmbeddedBrowserDownloadImportModal from "@/features/embedded-browser/downloads/components/EmbeddedBrowserDownloadImportModal";
 import { useEmbeddedBrowserDownloadImport } from "@/features/embedded-browser/downloads/hooks/useEmbeddedBrowserDownloadImport";
+import {
+  createBrowserBookmark,
+  deleteBrowserBookmark,
+  fetchBrowserBookmarkTree,
+  matchBrowserBookmark,
+  moveBrowserBookmark,
+  updateBrowserBookmark,
+  type BrowserBookmarkItem,
+  type BrowserBookmarkKind,
+  type BrowserBookmarkMatchResult,
+} from "@/features/embedded-browser/services/browser-bookmark.api";
+import {
+  buildBookmarkParentOptions,
+  collectBookmarkFolderIds,
+  collectURLBookmarkItems,
+  getDefaultBookmarkTitle,
+  getPersistableBookmarkIconUrl,
+  getURLHost,
+  isURLBookmark,
+  replaceBookmarkIconInTree,
+  resolveVisibleBookmarkCount,
+  ROOT_BOOKMARK_PARENT_VALUE,
+} from "@/features/embedded-browser/bookmarks/tree";
+import {
+  cacheResolvedFaviconDataUrl,
+  getCachedFaviconDataUrl,
+} from "@/features/embedded-browser/services/favicon-cache";
 import { getFileLink } from '@/features/file-explorer/services/file.api';
 import { resolveBrowserFileMapping } from '@/features/browser-file-mappings/services/browser-file-mapping.api';
+import { useAuth } from '@/hooks/useAuth';
 import SearchWorkspace, { type SearchWorkspaceMode } from "./SearchWorkspace";
 import {
   loadLibraryDetailWorkspaceState,
@@ -298,6 +332,31 @@ const ContentToolbar = styled.div`
     display: none;
   }
 
+  .browser-tabs-add {
+    position: sticky;
+    right: 0;
+    z-index: 1;
+    width: 32px;
+    height: 32px;
+    margin-left: 4px;
+    border-radius: 8px;
+    border: 1px solid var(--app-border);
+    background: color-mix(in srgb, var(--app-bg) 92%, transparent);
+    color: var(--app-text-muted);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    cursor: pointer;
+    -webkit-app-region: no-drag;
+    backdrop-filter: blur(8px);
+  }
+
+  .browser-tabs-add:hover {
+    background: var(--app-bg-elevated);
+    color: var(--app-text);
+  }
+
   .browser-tab-btn {
     min-width: 140px;
     max-width: 260px;
@@ -313,6 +372,29 @@ const ContentToolbar = styled.div`
     cursor: pointer;
     flex-shrink: 0;
     -webkit-app-region: no-drag;
+  }
+
+  .browser-tab-favicon {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+  }
+
+  .browser-tab-favicon {
+    border-radius: 4px;
+    object-fit: contain;
+  }
+
+  .browser-tab-favicon.favicon-fallback {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: #8c9099;
+    background: rgba(140, 144, 153, 0.08);
+  }
+
+  .browser-tab-favicon.favicon-fallback .semi-icon {
+    font-size: 12px;
   }
 
   .browser-tab-btn.active {
@@ -397,6 +479,398 @@ const ContentToolbar = styled.div`
   ${toolbarActionButtonStyles}
 `;
 
+const BookmarkToolbar = styled.div`
+  height: 38px;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--app-border);
+  background: var(--app-bg);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  -webkit-app-region: no-drag;
+
+  .bookmark-bar-list {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    overflow: hidden;
+  }
+
+  .bookmark-item {
+    height: 28px;
+    min-width: 0;
+    max-width: 180px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--app-text);
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 0 9px;
+    cursor: pointer;
+    flex-shrink: 0;
+    user-select: none;
+  }
+
+  .bookmark-item:hover,
+  .bookmark-more-btn:hover {
+    background: var(--semi-color-fill-0);
+    border-color: var(--app-border);
+  }
+
+  .bookmark-item.dragging {
+    opacity: 0.62;
+  }
+
+  .bookmark-item.drop-before {
+    box-shadow: inset 2px 0 0 var(--semi-color-primary);
+  }
+
+  .bookmark-item.drop-after {
+    box-shadow: inset -2px 0 0 var(--semi-color-primary);
+  }
+
+  .bookmark-item.drop-inside {
+    border-color: var(--semi-color-primary);
+    background: var(--semi-color-primary-light-default);
+  }
+
+  .bookmark-favicon {
+    width: 16px;
+    height: 16px;
+    border-radius: 4px;
+    flex-shrink: 0;
+    object-fit: contain;
+  }
+
+  .bookmark-favicon.favicon-fallback {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: #8c9099;
+    background: rgba(140, 144, 153, 0.08);
+  }
+
+  .bookmark-favicon.favicon-fallback .semi-icon {
+    font-size: 12px;
+  }
+
+  .bookmark-folder-glyph {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+    position: relative;
+    display: inline-block;
+  }
+
+  .bookmark-folder-glyph::before {
+    content: "";
+    position: absolute;
+    left: 1px;
+    top: 5px;
+    width: 13px;
+    height: 9px;
+    border-radius: 3px;
+    border: 1.5px solid currentColor;
+    background: transparent;
+    box-sizing: border-box;
+  }
+
+  .bookmark-folder-glyph::after {
+    content: "";
+    position: absolute;
+    left: 2px;
+    top: 2px;
+    width: 8px;
+    height: 4px;
+    border: 1.5px solid currentColor;
+    border-bottom: none;
+    border-radius: 3px 3px 0 0;
+    background: transparent;
+    box-sizing: border-box;
+  }
+
+  .bookmark-title {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 13px;
+    line-height: 1;
+  }
+
+  .bookmark-more-btn {
+    width: 32px;
+    height: 28px;
+    border-radius: 8px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--app-text-muted);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+`;
+
+const BookmarkContextMenuLayer = styled.div`
+  position: fixed;
+  z-index: 3000;
+
+  .bookmark-favicon,
+  .bookmark-folder-glyph {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+    position: relative;
+    display: inline-block;
+    color: var(--app-text-muted);
+  }
+
+  .bookmark-favicon {
+    border-radius: 4px;
+    object-fit: contain;
+  }
+
+  .bookmark-favicon.favicon-fallback {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: #8c9099;
+    background: rgba(140, 144, 153, 0.08);
+  }
+
+  .bookmark-favicon.favicon-fallback .semi-icon {
+    font-size: 12px;
+  }
+
+  .bookmark-folder-glyph::before {
+    content: "";
+    position: absolute;
+    left: 1px;
+    top: 5px;
+    width: 13px;
+    height: 9px;
+    border-radius: 3px;
+    border: 1.5px solid currentColor;
+    background: transparent;
+    box-sizing: border-box;
+  }
+
+  .bookmark-folder-glyph::after {
+    content: "";
+    position: absolute;
+    left: 2px;
+    top: 2px;
+    width: 8px;
+    height: 4px;
+    border: 1.5px solid currentColor;
+    border-bottom: none;
+    border-radius: 3px 3px 0 0;
+    background: transparent;
+    box-sizing: border-box;
+  }
+`;
+
+const BookmarkManagerContent = styled.div`
+  min-height: 460px;
+  max-height: 520px;
+  overflow: auto;
+  padding: 2px 0;
+
+  .bookmark-manager-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 4px 4px 12px;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--app-bg);
+  }
+
+  .bookmark-manager-toolbar-actions,
+  .bookmark-manager-toolbar-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .bookmark-manager-empty {
+    color: var(--app-text-muted);
+    padding: 18px 4px;
+    text-align: center;
+  }
+
+  .bookmark-manager-row {
+    min-height: 42px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 8px;
+  }
+
+  .bookmark-manager-row:hover {
+    background: var(--semi-color-fill-0);
+  }
+
+  .bookmark-manager-disclosure {
+    width: 24px;
+    height: 24px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--app-text-muted);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+
+  .bookmark-manager-disclosure.placeholder {
+    cursor: default;
+    opacity: 0;
+  }
+
+  .bookmark-manager-disclosure:hover {
+    background: var(--semi-color-fill-1);
+  }
+
+  .bookmark-manager-disclosure-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transform: rotate(0deg);
+    transition: transform 120ms ease;
+  }
+
+  .bookmark-manager-disclosure-icon.expanded {
+    transform: rotate(90deg);
+  }
+
+  .bookmark-favicon,
+  .bookmark-folder-glyph {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+  }
+
+  .bookmark-favicon {
+    border-radius: 4px;
+    object-fit: contain;
+  }
+
+  .bookmark-favicon.favicon-fallback {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: #8c9099;
+    background: rgba(140, 144, 153, 0.08);
+  }
+
+  .bookmark-favicon.favicon-fallback .semi-icon {
+    font-size: 12px;
+  }
+
+  .bookmark-folder-glyph {
+    position: relative;
+    display: inline-block;
+    color: var(--app-text-muted);
+  }
+
+  .bookmark-folder-glyph::before {
+    content: "";
+    position: absolute;
+    left: 1px;
+    top: 5px;
+    width: 13px;
+    height: 9px;
+    border-radius: 3px;
+    border: 1.5px solid currentColor;
+    background: transparent;
+    box-sizing: border-box;
+  }
+
+  .bookmark-folder-glyph::after {
+    content: "";
+    position: absolute;
+    left: 2px;
+    top: 2px;
+    width: 8px;
+    height: 4px;
+    border: 1.5px solid currentColor;
+    border-bottom: none;
+    border-radius: 3px 3px 0 0;
+    background: transparent;
+    box-sizing: border-box;
+  }
+
+  .bookmark-manager-title {
+    font-size: 13px;
+    line-height: 1.2;
+    font-weight: 500;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .bookmark-manager-body {
+    min-width: 0;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .bookmark-manager-meta {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12px;
+    color: var(--app-text-muted);
+  }
+
+  .bookmark-manager-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .bookmark-manager-action {
+    height: 26px;
+    border-radius: 8px;
+    border: 1px solid var(--app-border);
+    background: var(--app-bg-elevated);
+    color: var(--app-text);
+    cursor: pointer;
+    padding: 0 8px;
+  }
+
+  .bookmark-manager-action.danger {
+    color: var(--semi-color-danger);
+  }
+
+  .bookmark-manager-action:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
+  }
+`;
+
 const ContentBody = styled.div`
   flex: 1;
   min-height: 0;
@@ -467,7 +941,162 @@ function createEmptyBrowserTab() {
   };
 }
 
+type BookmarkContextMenuState = {
+  item: BrowserBookmarkItem | null;
+  x: number;
+  y: number;
+} | null;
+
+type BookmarkDropTarget = {
+  bookmarkId: number | null;
+  position: 'before' | 'after' | 'inside' | 'end';
+} | null;
+
+type BookmarkMenuDropTarget = {
+  bookmarkId: number;
+  parentId: number | null;
+  position: 'before' | 'after' | 'inside';
+} | null;
+
+type BookmarkEditDraft = {
+  item: BrowserBookmarkItem | null;
+  kind: BrowserBookmarkKind;
+  parentId: number | null;
+  title: string;
+  url: string;
+  iconUrl: string;
+} | null;
+
+type BookmarkIconDisplayEntry = {
+  dataUrl: string;
+  signature: string;
+};
+
+function countBookmarkChildren(item: BrowserBookmarkItem) {
+  let count = 0;
+  const visit = (nodes: BrowserBookmarkItem[]) => {
+    nodes.forEach((node) => {
+      count += 1;
+      if (node.children?.length) {
+        visit(node.children);
+      }
+    });
+  };
+  visit(item.children || []);
+  return count;
+}
+
+function getBookmarkManagerMeta(item: BrowserBookmarkItem) {
+  if (item.kind === 'folder') {
+    const childCount = countBookmarkChildren(item);
+    return childCount > 0 ? `${childCount} 项` : '空文件夹';
+  }
+  return getURLHost(item.url || '') || item.url || '未设置网址';
+}
+
+const FaviconImage: React.FC<{
+  alt?: string;
+  className: string;
+  src?: string | null;
+  style?: React.CSSProperties;
+}> = ({ alt = '', className, src, style }) => {
+  const normalizedSrc = String(src || '').trim();
+  const [loadState, setLoadState] = React.useState<'idle' | 'loaded' | 'error'>(() => (
+    normalizedSrc ? 'idle' : 'error'
+  ));
+
+  React.useEffect(() => {
+    setLoadState(normalizedSrc ? 'idle' : 'error');
+  }, [normalizedSrc]);
+
+  const showFallback = !normalizedSrc || loadState !== 'loaded';
+
+  if (showFallback && !normalizedSrc) {
+    return (
+      <span
+        aria-hidden="true"
+        className={`${className} favicon-fallback`}
+        style={style}
+      >
+        <IconGlobeStroke size="small" />
+      </span>
+    );
+  }
+
+  return (
+    <>
+      {showFallback ? (
+        <span
+          aria-hidden="true"
+          className={`${className} favicon-fallback`}
+          style={style}
+        >
+          <IconGlobeStroke size="small" />
+        </span>
+      ) : null}
+      {normalizedSrc ? (
+        <img
+          alt={alt}
+          className={className}
+          draggable={false}
+          src={normalizedSrc}
+          style={{
+            ...style,
+            display: loadState === 'loaded' ? undefined : 'none',
+          }}
+          onLoad={() => setLoadState('loaded')}
+          onError={() => setLoadState('error')}
+        />
+      ) : null}
+    </>
+  );
+};
+
+function getBookmarkIconDisplaySignature(input: { iconUrl?: string | null; url?: string | null }) {
+  return `${String(input.url || '').trim()}::${getPersistableBookmarkIconUrl(input.iconUrl)}`;
+}
+
+const BookmarkVisual: React.FC<{
+  cacheOwnerKey?: string;
+  displayIcon?: BookmarkIconDisplayEntry;
+  item: BrowserBookmarkItem;
+}> = ({ cacheOwnerKey, displayIcon, item }) => {
+  if (item.kind === 'folder') {
+    return <span className="bookmark-folder-glyph" aria-hidden="true" />;
+  }
+  const displayIconUrl = displayIcon?.dataUrl || '';
+  const iconUrl = displayIconUrl
+    || getCachedFaviconDataUrl({
+      ownerKey: cacheOwnerKey,
+      iconUrl: item.iconUrl,
+      pageUrl: item.url,
+    })
+    || getPersistableBookmarkIconUrl(item.iconUrl);
+  return (
+    <FaviconImage
+      className="bookmark-favicon"
+      src={iconUrl}
+      style={{ height: 16, width: 16 }}
+    />
+  );
+};
+
+const BrowserTabVisual: React.FC<{ cacheOwnerKey?: string; tab: BrowserTab }> = ({ cacheOwnerKey, tab }) => {
+  const iconUrl = tab.iconUrl || getCachedFaviconDataUrl({
+    ownerKey: cacheOwnerKey,
+    iconUrl: tab.iconSourceUrl,
+    pageUrl: tab.url,
+  });
+  return (
+    <FaviconImage
+      className="browser-tab-favicon"
+      src={iconUrl}
+    />
+  );
+};
+
 const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) => {
+  const { user } = useAuth();
   const { setFileUrl, tabs, activeTabId, fileState, reloadActiveTab } = useFileViewer();
   const navigate = useNavigate();
   const sidePanelRef = React.useRef<HTMLDivElement>(null);
@@ -491,10 +1120,23 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   const browserRef = React.useRef<EmbeddedBrowserHandle | null>(null);
   const browserTabsListRef = React.useRef<HTMLDivElement | null>(null);
   const browserTabButtonRefMap = React.useRef<Map<string, HTMLButtonElement>>(new Map());
+  const bookmarkBarListRef = React.useRef<HTMLDivElement | null>(null);
+  const bookmarkButtonRefMap = React.useRef<Map<number, HTMLButtonElement>>(new Map());
+  const bookmarkMenuItemRefMap = React.useRef<Map<number, HTMLDivElement>>(new Map());
   const pendingBrowserTabDragRef = React.useRef<{ started: boolean; tabId: string } | null>(null);
   const browserTabMouseMoveListenerRef = React.useRef<((event: MouseEvent) => void) | null>(null);
   const browserTabMouseUpListenerRef = React.useRef<((event: MouseEvent) => void) | null>(null);
   const browserTabClickBlockUntilRef = React.useRef(0);
+  const bookmarkIconHydrateKeysRef = React.useRef<Set<string>>(new Set());
+  const bookmarkIconSyncKeyRef = React.useRef('');
+  const pendingBookmarkDragRef = React.useRef<{ bookmarkId: number; started: boolean } | null>(null);
+  const bookmarkMouseMoveListenerRef = React.useRef<((event: MouseEvent) => void) | null>(null);
+  const bookmarkMouseUpListenerRef = React.useRef<((event: MouseEvent) => void) | null>(null);
+  const bookmarkClickBlockUntilRef = React.useRef(0);
+  const pendingBookmarkMenuDragRef = React.useRef<{ bookmarkId: number; parentId: number | null; started: boolean } | null>(null);
+  const bookmarkMenuMouseMoveListenerRef = React.useRef<((event: MouseEvent) => void) | null>(null);
+  const bookmarkMenuMouseUpListenerRef = React.useRef<((event: MouseEvent) => void) | null>(null);
+  const bookmarkMenuClickBlockUntilRef = React.useRef(0);
   const previousActiveBrowserTabIdRef = React.useRef<string | null>(null);
   const previousBrowserTabCountRef = React.useRef(0);
   const [sidePanelWidth, setSidePanelWidth] = React.useState<number>(() => loadSidePanelWidth(libraryId));
@@ -503,6 +1145,18 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   const [activeBrowserTabId, setActiveBrowserTabId] = React.useState<string | null>(initialWorkspaceState.activeBrowserTabId);
   const [draggingBrowserTabId, setDraggingBrowserTabId] = React.useState<string | null>(null);
   const [browserTabsScrollMode, setBrowserTabsScrollMode] = React.useState(false);
+  const [bookmarks, setBookmarks] = React.useState<BrowserBookmarkItem[]>([]);
+  const [bookmarkIconDisplayUrls, setBookmarkIconDisplayUrls] = React.useState<Record<number, BookmarkIconDisplayEntry>>({});
+  const [bookmarkMatch, setBookmarkMatch] = React.useState<BrowserBookmarkMatchResult>({ matched: false, bookmark: null });
+  const [bookmarkBarVisible, setBookmarkBarVisible] = React.useState(true);
+  const [visibleBookmarkCount, setVisibleBookmarkCount] = React.useState<number>(999);
+  const [bookmarkContextMenu, setBookmarkContextMenu] = React.useState<BookmarkContextMenuState>(null);
+  const [bookmarkEditDraft, setBookmarkEditDraft] = React.useState<BookmarkEditDraft>(null);
+  const [bookmarkManagerOpen, setBookmarkManagerOpen] = React.useState(false);
+  const [collapsedBookmarkFolderIds, setCollapsedBookmarkFolderIds] = React.useState<number[]>([]);
+  const [draggingBookmarkId, setDraggingBookmarkId] = React.useState<number | null>(null);
+  const [bookmarkDropTarget, setBookmarkDropTarget] = React.useState<BookmarkDropTarget>(null);
+  const [bookmarkMenuDropTarget, setBookmarkMenuDropTarget] = React.useState<BookmarkMenuDropTarget>(null);
   const [pendingBrowserFileOpenByTabId, setPendingBrowserFileOpenByTabId] = React.useState<Record<string, {
     fileName: string;
     sourceUrl: string;
@@ -520,6 +1174,48 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   const latestPanelWidthRef = React.useRef<number>(sidePanelWidth);
   const resizeMoveHandlerRef = React.useRef<((event: MouseEvent) => void) | null>(null);
   const resizeUpHandlerRef = React.useRef<(() => void) | null>(null);
+
+  const activeBrowserTab = React.useMemo(() => {
+    if (!activeBrowserTabId) {
+      return null;
+    }
+    return browserTabs.find((tab) => tab.id === activeBrowserTabId) ?? null;
+  }, [activeBrowserTabId, browserTabs]);
+
+  const faviconCacheOwnerKey = React.useMemo(() => {
+    const userId = Number(user?.id);
+    if (Number.isFinite(userId) && userId > 0) {
+      return `user:${userId}`;
+    }
+    const username = String(user?.username || '').trim();
+    return username ? `user:${username}` : '';
+  }, [user?.id, user?.username]);
+
+  const bookmarkFolderIds = React.useMemo(() => collectBookmarkFolderIds(bookmarks), [bookmarks]);
+
+  const getResolvedBookmarkDisplayIcon = React.useCallback((item: BrowserBookmarkItem) => {
+    const entry = bookmarkIconDisplayUrls[item.id];
+    if (!entry || entry.signature !== getBookmarkIconDisplaySignature(item)) {
+      return undefined;
+    }
+    return entry;
+  }, [bookmarkIconDisplayUrls]);
+
+  const invalidateBookmarkDisplayIcon = React.useCallback((bookmarkId: number) => {
+    setBookmarkIconDisplayUrls((current) => {
+      if (!current[bookmarkId]) {
+        return current;
+      }
+      const next = { ...current };
+      delete next[bookmarkId];
+      return next;
+    });
+  }, []);
+
+  const bookmarkParentOptions = React.useMemo(
+    () => buildBookmarkParentOptions(bookmarks, bookmarkEditDraft?.item ?? null),
+    [bookmarkEditDraft?.item, bookmarks],
+  );
 
   const cleanupResizeListeners = React.useCallback(() => {
     if (resizeMoveHandlerRef.current) {
@@ -545,6 +1241,27 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
       cleanupResizeListeners();
     };
   }, [cleanupResizeListeners]);
+
+  React.useEffect(() => {
+    setCollapsedBookmarkFolderIds((current) => current.filter((id) => bookmarkFolderIds.includes(id)));
+  }, [bookmarkFolderIds]);
+
+  React.useEffect(() => {
+    const validBookmarkIds = new Set(collectURLBookmarkItems(bookmarks).map((item) => item.id));
+    setBookmarkIconDisplayUrls((current) => {
+      let changed = false;
+      const nextEntries: Record<number, BookmarkIconDisplayEntry> = {};
+      Object.entries(current).forEach(([rawId, entry]) => {
+        const bookmarkId = Number(rawId);
+        if (validBookmarkIds.has(bookmarkId)) {
+          nextEntries[bookmarkId] = entry;
+          return;
+        }
+        changed = true;
+      });
+      return changed ? nextEntries : current;
+    });
+  }, [bookmarks]);
 
   const handleResizeMouseDown = React.useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -647,6 +1364,611 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
     return `https://www.google.com/search?q=${encodeURIComponent(trimmed)}`;
   }, []);
 
+  const reloadBookmarks = React.useCallback(async () => {
+    try {
+      const tree = await fetchBrowserBookmarkTree();
+      setBookmarks(tree);
+    } catch (error: any) {
+      Toast.error(error?.message || '书签加载失败');
+    }
+  }, []);
+
+  const refreshBookmarkMatch = React.useCallback(async (rawUrl: string) => {
+    const normalizedUrl = String(rawUrl || '').trim();
+    if (!normalizedUrl) {
+      setBookmarkMatch({ matched: false, bookmark: null });
+      return;
+    }
+    try {
+      const result = await matchBrowserBookmark(normalizedUrl);
+      setBookmarkMatch(result);
+    } catch {
+      setBookmarkMatch({ matched: false, bookmark: null });
+    }
+  }, []);
+
+  const openBookmarkEdit = React.useCallback((item: BrowserBookmarkItem) => {
+    setBookmarkEditDraft({
+      item,
+      kind: item.kind,
+      parentId: item.parentId ?? null,
+      title: item.title || '',
+      url: item.url || '',
+      iconUrl: getPersistableBookmarkIconUrl(item.iconUrl),
+    });
+  }, []);
+
+  const openBookmarkCreate = React.useCallback((kind: BrowserBookmarkKind, parentId: number | null = null) => {
+    const activeUrl = activeBrowserTab?.url || browserInput;
+    if (parentId != null) {
+      setCollapsedBookmarkFolderIds((current) => current.filter((id) => id !== parentId));
+    }
+    setBookmarkEditDraft({
+      item: null,
+      kind,
+      parentId,
+      title: kind === 'url' && activeUrl ? getDefaultBookmarkTitle(activeUrl, activeBrowserTab?.title) : '',
+      url: kind === 'url' ? activeUrl : '',
+      iconUrl: kind === 'url' && activeUrl ? getPersistableBookmarkIconUrl(activeBrowserTab?.iconSourceUrl) : '',
+    });
+  }, [activeBrowserTab, browserInput]);
+
+  const closeBookmarkContextMenu = React.useCallback(() => {
+    setBookmarkContextMenu(null);
+  }, []);
+
+  const saveBookmarkEditDraft = React.useCallback(async () => {
+    if (!bookmarkEditDraft) {
+      return;
+    }
+    const title = bookmarkEditDraft.title.trim();
+    if (!title) {
+      Toast.warning('请输入书签名称');
+      return;
+    }
+    const normalizedUrl = bookmarkEditDraft.url.trim();
+    const normalizedIconUrl = getPersistableBookmarkIconUrl(bookmarkEditDraft.iconUrl);
+    if (bookmarkEditDraft.kind === 'url' && !normalizedUrl) {
+      Toast.warning('请输入网址');
+      return;
+    }
+    const shouldInvalidateDisplayIcon = Boolean(
+      bookmarkEditDraft.kind === 'url'
+      && bookmarkEditDraft.item
+      && (
+        normalizedUrl !== String(bookmarkEditDraft.item.url || '').trim()
+        || normalizedIconUrl !== getPersistableBookmarkIconUrl(bookmarkEditDraft.item.iconUrl)
+      )
+    );
+    try {
+      if (bookmarkEditDraft.item) {
+        await updateBrowserBookmark(bookmarkEditDraft.item.id, {
+          title,
+          ...(bookmarkEditDraft.kind === 'url' ? { url: normalizedUrl } : {}),
+          iconUrl: normalizedIconUrl,
+        });
+        const currentParentId = bookmarkEditDraft.item.parentId ?? null;
+        if (bookmarkEditDraft.parentId !== currentParentId) {
+          await moveBrowserBookmark(bookmarkEditDraft.item.id, {
+            parentId: bookmarkEditDraft.parentId,
+          });
+        }
+        Toast.success('书签已更新');
+      } else {
+        await createBrowserBookmark({
+          parentId: bookmarkEditDraft.parentId,
+          kind: bookmarkEditDraft.kind,
+          title,
+          url: bookmarkEditDraft.kind === 'url' ? normalizedUrl : null,
+          iconUrl: normalizedIconUrl || null,
+        });
+        Toast.success(bookmarkEditDraft.kind === 'folder' ? '文件夹已创建' : '书签已创建');
+      }
+      if (shouldInvalidateDisplayIcon && bookmarkEditDraft.item) {
+        invalidateBookmarkDisplayIcon(bookmarkEditDraft.item.id);
+      }
+      setBookmarkEditDraft(null);
+      await reloadBookmarks();
+      await refreshBookmarkMatch(activeBrowserTab?.url || '');
+    } catch (error: any) {
+      Toast.error(error?.message || '书签保存失败');
+    }
+  }, [activeBrowserTab, bookmarkEditDraft, invalidateBookmarkDisplayIcon, refreshBookmarkMatch, reloadBookmarks]);
+
+  const removeBookmark = React.useCallback(async (item: BrowserBookmarkItem) => {
+    try {
+      await deleteBrowserBookmark(item.id);
+      Toast.success('书签已删除');
+      await reloadBookmarks();
+      await refreshBookmarkMatch(activeBrowserTab?.url || '');
+    } catch (error: any) {
+      Toast.error(error?.message || '书签删除失败');
+    }
+  }, [activeBrowserTab, refreshBookmarkMatch, reloadBookmarks]);
+
+  const toggleActiveBookmark = React.useCallback(async () => {
+    const activeUrl = activeBrowserTab?.url || browserInput;
+    const normalizedUrl = String(activeUrl || '').trim();
+    if (!normalizedUrl) {
+      Toast.warning('当前没有可收藏的网址');
+      return;
+    }
+    try {
+      if (bookmarkMatch.matched && bookmarkMatch.bookmark?.id) {
+        await deleteBrowserBookmark(bookmarkMatch.bookmark.id);
+        invalidateBookmarkDisplayIcon(bookmarkMatch.bookmark.id);
+        setBookmarkMatch({ matched: false, bookmark: null });
+        Toast.success('已取消收藏');
+      } else {
+        const title = getDefaultBookmarkTitle(normalizedUrl, activeBrowserTab?.title);
+        const created = await createBrowserBookmark({
+          kind: 'url',
+          title,
+          url: normalizedUrl,
+          iconUrl: getPersistableBookmarkIconUrl(activeBrowserTab?.iconSourceUrl) || null,
+        });
+        if (activeBrowserTab?.iconUrl) {
+          setBookmarkIconDisplayUrls((current) => ({
+            ...current,
+            [created.id]: {
+              dataUrl: activeBrowserTab.iconUrl as string,
+              signature: getBookmarkIconDisplaySignature(created),
+            },
+          }));
+        }
+        setBookmarkMatch({ matched: true, bookmark: created });
+        Toast.success('已加入书签栏');
+      }
+      await reloadBookmarks();
+    } catch (error: any) {
+      Toast.error(error?.message || '收藏操作失败');
+    }
+  }, [activeBrowserTab, bookmarkMatch, browserInput, invalidateBookmarkDisplayIcon, reloadBookmarks]);
+
+  const openBookmarkURL = React.useCallback((item: BrowserBookmarkItem) => {
+    if (!isURLBookmark(item)) {
+      return;
+    }
+    const rawTargetUrl = item.url || '';
+    const nextUrl = normalizeBrowserUrl(rawTargetUrl);
+    if (!nextUrl) {
+      Toast.warning('当前书签缺少有效网址');
+      return;
+    }
+    const existingTabId = activeBrowserTabId ?? browserTabs[browserTabs.length - 1]?.id ?? null;
+    let targetTabId = existingTabId;
+    if (!targetTabId) {
+      const next = createEmptyBrowserTab();
+      targetTabId = next.id;
+      setBrowserTabs((prev) => [
+        ...prev,
+        {
+          ...next.tab,
+          title: item.title || nextUrl,
+          url: nextUrl,
+        },
+      ]);
+      void window.electronEmbeddedBrowser.openTab(targetTabId);
+    } else {
+      setBrowserTabs((prev) => updateBrowserTabList(prev, targetTabId!, (tab) => ({
+        ...tab,
+        title: item.title || tab.title || nextUrl,
+        url: nextUrl,
+      })));
+    }
+    setActiveBrowserTabId(targetTabId);
+    setBrowserInput(nextUrl);
+    setBrowserModeOpen(true);
+    setBookmarkBarVisible(false);
+    setWorkspaceDisplayMode('browser');
+    setSearchMode('web');
+    window.requestAnimationFrame(() => {
+      if (targetTabId) {
+        browserRef.current?.navigate(targetTabId, nextUrl);
+      }
+    });
+  }, [activeBrowserTabId, browserTabs, normalizeBrowserUrl]);
+
+  const buildBookmarkContextMenuItems = React.useCallback((item: BrowserBookmarkItem | null): ContextMenuItem[] => {
+    const items: ContextMenuItem[] = [];
+    if (item) {
+      items.push({
+        key: 'edit',
+        label: '编辑',
+        icon: <IconEdit />,
+        onClick: () => openBookmarkEdit(item),
+      });
+      if (item.kind === 'folder') {
+        items.push({
+          key: 'new-url-inside',
+          label: '新建书签',
+          onClick: () => openBookmarkCreate('url', item.id),
+        });
+        items.push({
+          key: 'new-folder-inside',
+          label: '新建文件夹',
+          onClick: () => openBookmarkCreate('folder', item.id),
+        });
+      }
+      items.push({ key: 'divider-item', type: 'divider' });
+      items.push({
+        key: 'delete',
+        label: '删除',
+        danger: true,
+        onClick: () => {
+          void removeBookmark(item);
+        },
+      });
+    } else {
+      items.push({
+        key: 'new-url',
+        label: '新建书签',
+        onClick: () => openBookmarkCreate('url'),
+      });
+      items.push({
+        key: 'new-folder',
+        label: '新建文件夹',
+        onClick: () => openBookmarkCreate('folder'),
+      });
+    }
+    items.push({ key: 'divider-manager', type: 'divider' });
+    items.push({
+      key: 'manager',
+      label: '书签管理',
+      onClick: () => setBookmarkManagerOpen(true),
+    });
+    return items;
+  }, [openBookmarkCreate, openBookmarkEdit, removeBookmark]);
+
+  const toggleBookmarkFolderCollapsed = React.useCallback((folderId: number) => {
+    setCollapsedBookmarkFolderIds((current) => (
+      current.includes(folderId)
+        ? current.filter((id) => id !== folderId)
+        : [...current, folderId]
+    ));
+  }, []);
+
+  const expandAllBookmarkFolders = React.useCallback(() => {
+    setCollapsedBookmarkFolderIds([]);
+  }, []);
+
+  const collapseAllBookmarkFolders = React.useCallback(() => {
+    setCollapsedBookmarkFolderIds(bookmarkFolderIds);
+  }, [bookmarkFolderIds]);
+
+  const detachBookmarkDragListeners = React.useCallback(() => {
+    if (bookmarkMouseMoveListenerRef.current) {
+      window.removeEventListener('mousemove', bookmarkMouseMoveListenerRef.current);
+      bookmarkMouseMoveListenerRef.current = null;
+    }
+    if (bookmarkMouseUpListenerRef.current) {
+      window.removeEventListener('mouseup', bookmarkMouseUpListenerRef.current);
+      bookmarkMouseUpListenerRef.current = null;
+    }
+  }, []);
+
+  const clearBookmarkDragState = React.useCallback(() => {
+    pendingBookmarkDragRef.current = null;
+    setDraggingBookmarkId(null);
+    setBookmarkDropTarget(null);
+    detachBookmarkDragListeners();
+  }, [detachBookmarkDragListeners]);
+
+  const detachBookmarkMenuDragListeners = React.useCallback(() => {
+    if (bookmarkMenuMouseMoveListenerRef.current) {
+      window.removeEventListener('mousemove', bookmarkMenuMouseMoveListenerRef.current);
+      bookmarkMenuMouseMoveListenerRef.current = null;
+    }
+    if (bookmarkMenuMouseUpListenerRef.current) {
+      window.removeEventListener('mouseup', bookmarkMenuMouseUpListenerRef.current);
+      bookmarkMenuMouseUpListenerRef.current = null;
+    }
+  }, []);
+
+  const clearBookmarkMenuDragState = React.useCallback(() => {
+    pendingBookmarkMenuDragRef.current = null;
+    setBookmarkMenuDropTarget(null);
+    setBookmarkDropTarget(null);
+    detachBookmarkMenuDragListeners();
+  }, [detachBookmarkMenuDragListeners]);
+
+  const resolveBookmarkDropTarget = React.useCallback((
+    clientX: number,
+    draggedBookmarkId: number,
+  ): BookmarkDropTarget => {
+    const visibleRoots = bookmarks.slice(0, Math.min(visibleBookmarkCount, bookmarks.length));
+    const candidateItems = visibleRoots.filter((item) => item.id !== draggedBookmarkId);
+    if (candidateItems.length === 0) {
+      return null;
+    }
+
+    let nearest: { bookmarkId: number; distance: number; position: 'before' | 'after' | 'inside' } | null = null;
+    for (const item of candidateItems) {
+      const button = bookmarkButtonRefMap.current.get(item.id);
+      if (!button) {
+        continue;
+      }
+      const rect = button.getBoundingClientRect();
+      const midpoint = rect.left + rect.width / 2;
+      const folderInsideLeft = rect.left + rect.width * 0.28;
+      const folderInsideRight = rect.right - rect.width * 0.28;
+      const position: 'before' | 'after' | 'inside' = item.kind === 'folder' && clientX >= folderInsideLeft && clientX <= folderInsideRight
+        ? 'inside'
+        : (clientX < midpoint ? 'before' : 'after');
+      const distance = position === 'inside'
+        ? Math.abs(clientX - midpoint) * 0.25
+        : (clientX >= rect.left && clientX <= rect.right
+          ? Math.abs(clientX - midpoint) * 0.5
+          : Math.min(Math.abs(clientX - rect.left), Math.abs(clientX - rect.right)) + rect.width / 2);
+      if (!nearest || distance < nearest.distance) {
+        nearest = { bookmarkId: item.id, distance, position };
+      }
+    }
+    return nearest ? { bookmarkId: nearest.bookmarkId, position: nearest.position } : null;
+  }, [bookmarks, visibleBookmarkCount]);
+
+  const moveRootBookmark = React.useCallback(async (
+    draggedBookmarkId: number,
+    target: Exclude<BookmarkDropTarget, null>,
+  ) => {
+    try {
+      await moveBrowserBookmark(draggedBookmarkId, {
+        parentId: target.position === 'inside' ? target.bookmarkId : null,
+        beforeId: target.position === 'before' ? target.bookmarkId : null,
+        afterId: target.position === 'after' || target.position === 'end' ? target.bookmarkId : null,
+      });
+      await reloadBookmarks();
+    } catch (error: any) {
+      Toast.error(error?.message || '书签移动失败');
+    }
+  }, [reloadBookmarks]);
+
+  const resolveBookmarkBarDropTarget = React.useCallback((
+    clientX: number,
+    clientY: number,
+    draggedBookmarkId: number,
+  ): BookmarkDropTarget => {
+    const container = bookmarkBarListRef.current;
+    if (!container) {
+      return null;
+    }
+    const rect = container.getBoundingClientRect();
+    const verticalMargin = 16;
+    const horizontalMargin = 12;
+    if (
+      clientY < rect.top - verticalMargin
+      || clientY > rect.bottom + verticalMargin
+      || clientX < rect.left - horizontalMargin
+      || clientX > rect.right + horizontalMargin
+    ) {
+      return null;
+    }
+
+    const visibleRoots = bookmarks.slice(0, Math.min(visibleBookmarkCount, bookmarks.length));
+    const candidateItems = visibleRoots.filter((item) => item.id !== draggedBookmarkId);
+    if (!candidateItems.length) {
+      return { bookmarkId: null, position: 'end' };
+    }
+
+    const nearest = resolveBookmarkDropTarget(clientX, draggedBookmarkId);
+    if (nearest) {
+      return nearest;
+    }
+    const lastVisible = candidateItems[candidateItems.length - 1];
+    return {
+      bookmarkId: lastVisible?.id ?? null,
+      position: 'end',
+    };
+  }, [bookmarks, resolveBookmarkDropTarget, visibleBookmarkCount]);
+
+  const resolveBookmarkMenuDropTarget = React.useCallback((
+    clientX: number,
+    clientY: number,
+    parentId: number | null,
+    siblings: BrowserBookmarkItem[],
+    draggedBookmarkId: number,
+  ): BookmarkMenuDropTarget => {
+    const candidateItems = siblings.filter((item) => item.id !== draggedBookmarkId);
+    if (!candidateItems.length) {
+      return null;
+    }
+    let nearest: { bookmarkId: number; distance: number; position: 'before' | 'after' | 'inside' } | null = null;
+    let minTop = Number.POSITIVE_INFINITY;
+    let maxBottom = Number.NEGATIVE_INFINITY;
+    let minLeft = Number.POSITIVE_INFINITY;
+    let maxRight = Number.NEGATIVE_INFINITY;
+    for (const item of candidateItems) {
+      const element = bookmarkMenuItemRefMap.current.get(item.id);
+      if (!element) {
+        continue;
+      }
+      const rect = element.getBoundingClientRect();
+      minTop = Math.min(minTop, rect.top);
+      maxBottom = Math.max(maxBottom, rect.bottom);
+      minLeft = Math.min(minLeft, rect.left);
+      maxRight = Math.max(maxRight, rect.right);
+      const midpoint = rect.top + rect.height / 2;
+      const folderInsideLeft = rect.left + rect.width * 0.24;
+      const folderInsideRight = rect.right - rect.width * 0.2;
+      const position: 'before' | 'after' | 'inside' = item.kind === 'folder'
+        && clientX >= folderInsideLeft
+        && clientX <= folderInsideRight
+        && clientY >= rect.top
+        && clientY <= rect.bottom
+        ? 'inside'
+        : (clientY < midpoint ? 'before' : 'after');
+      const distance = position === 'inside'
+        ? Math.abs(clientY - midpoint) * 0.2
+        : (clientY >= rect.top && clientY <= rect.bottom
+          ? Math.abs(clientY - midpoint) * 0.5
+          : Math.min(Math.abs(clientY - rect.top), Math.abs(clientY - rect.bottom)) + rect.height / 2);
+      if (!nearest || distance < nearest.distance) {
+        nearest = { bookmarkId: item.id, distance, position };
+      }
+    }
+    if (!Number.isFinite(minTop) || !Number.isFinite(maxBottom) || !Number.isFinite(minLeft) || !Number.isFinite(maxRight)) {
+      return null;
+    }
+    const verticalMargin = 10;
+    const horizontalMargin = 16;
+    if (
+      clientY < minTop - verticalMargin
+      || clientY > maxBottom + verticalMargin
+      || clientX < minLeft - horizontalMargin
+      || clientX > maxRight + horizontalMargin
+    ) {
+      return null;
+    }
+    return nearest ? { bookmarkId: nearest.bookmarkId, parentId, position: nearest.position } : null;
+  }, []);
+
+  const moveBookmarkWithinFolder = React.useCallback(async (
+    draggedBookmarkId: number,
+    target: Exclude<BookmarkMenuDropTarget, null>,
+  ) => {
+    try {
+      await moveBrowserBookmark(draggedBookmarkId, {
+        parentId: target.position === 'inside' ? target.bookmarkId : target.parentId,
+        beforeId: target.position === 'before' ? target.bookmarkId : null,
+        afterId: target.position === 'after' ? target.bookmarkId : null,
+      });
+      await reloadBookmarks();
+    } catch (error: any) {
+      Toast.error(error?.message || '书签移动失败');
+    }
+  }, [reloadBookmarks]);
+
+  const buildBookmarkFolderMenuItems = React.useCallback((items: BrowserBookmarkItem[], parentId: number | null = null): ContextMenuItem[] => {
+    if (!items.length) {
+      return [{ key: 'empty', type: 'title', label: '空文件夹' }];
+    }
+    return items.map((item) => {
+      const renderDraggableItem = (content: React.ReactNode, onSelect?: () => void) => {
+        const isDropTarget = bookmarkMenuDropTarget?.bookmarkId === item.id && bookmarkMenuDropTarget.parentId === parentId;
+        const boxShadow = isDropTarget && bookmarkMenuDropTarget?.position !== 'inside'
+          ? (bookmarkMenuDropTarget?.position === 'before'
+            ? 'inset 0 2px 0 var(--semi-color-primary)'
+            : 'inset 0 -2px 0 var(--semi-color-primary)')
+          : undefined;
+        const background = isDropTarget && bookmarkMenuDropTarget?.position === 'inside'
+          ? 'var(--semi-color-primary-light-default)'
+          : undefined;
+        const border = isDropTarget && bookmarkMenuDropTarget?.position === 'inside'
+          ? '1px solid var(--semi-color-primary)'
+          : '1px solid transparent';
+        return (
+          <div
+            ref={(element) => {
+              if (element) {
+                bookmarkMenuItemRefMap.current.set(item.id, element);
+              } else {
+                bookmarkMenuItemRefMap.current.delete(item.id);
+              }
+            }}
+            style={{ background, border, borderRadius: 8, boxShadow }}
+            onClickCapture={() => {
+              if (!onSelect) {
+                return;
+              }
+              if (Date.now() < bookmarkMenuClickBlockUntilRef.current) {
+                return;
+              }
+              onSelect();
+            }}
+            onClick={() => {
+              // noop: click is handled in capture phase so the wrapped menu item
+              // cannot swallow it before navigation fires.
+            }}
+            onMouseDown={(event) => {
+              if (event.button !== 0) {
+                return;
+              }
+              pendingBookmarkMenuDragRef.current = {
+                bookmarkId: item.id,
+                parentId,
+                started: false,
+              };
+              setBookmarkMenuDropTarget(null);
+              detachBookmarkMenuDragListeners();
+
+              const handleMouseMove = (moveEvent: MouseEvent) => {
+                const pending = pendingBookmarkMenuDragRef.current;
+                if (!pending || pending.bookmarkId !== item.id) {
+                  return;
+                }
+                if (!pending.started) {
+                  if (Math.abs(moveEvent.clientY - event.clientY) < 6) {
+                    return;
+                  }
+                  pending.started = true;
+                  bookmarkMenuClickBlockUntilRef.current = Date.now() + 180;
+                }
+                const rootDropTarget = resolveBookmarkBarDropTarget(moveEvent.clientX, moveEvent.clientY, item.id);
+                setBookmarkDropTarget(rootDropTarget);
+                if (rootDropTarget) {
+                  setBookmarkMenuDropTarget(null);
+                  return;
+                }
+                setBookmarkMenuDropTarget(resolveBookmarkMenuDropTarget(moveEvent.clientX, moveEvent.clientY, parentId, items, item.id));
+              };
+
+              const handleMouseUp = (upEvent: MouseEvent) => {
+                const pending = pendingBookmarkMenuDragRef.current;
+                if (pending?.started) {
+                  const rootDropTarget = resolveBookmarkBarDropTarget(upEvent.clientX, upEvent.clientY, item.id);
+                  if (rootDropTarget) {
+                    void moveRootBookmark(item.id, rootDropTarget);
+                    clearBookmarkMenuDragState();
+                    return;
+                  }
+                  const finalDropTarget = resolveBookmarkMenuDropTarget(upEvent.clientX, upEvent.clientY, parentId, items, item.id);
+                  if (finalDropTarget) {
+                    void moveBookmarkWithinFolder(item.id, finalDropTarget);
+                  }
+                }
+                clearBookmarkMenuDragState();
+              };
+
+              bookmarkMenuMouseMoveListenerRef.current = handleMouseMove;
+              bookmarkMenuMouseUpListenerRef.current = handleMouseUp;
+              window.addEventListener('mousemove', handleMouseMove);
+              window.addEventListener('mouseup', handleMouseUp);
+            }}
+          >
+            {content}
+          </div>
+        );
+      };
+
+      if (item.kind === 'folder') {
+        return {
+          key: `folder:${item.id}`,
+          label: item.title || '未命名文件夹',
+          icon: <BookmarkVisual cacheOwnerKey={faviconCacheOwnerKey} displayIcon={getResolvedBookmarkDisplayIcon(item)} item={item} />,
+          children: buildBookmarkFolderMenuItems(item.children || [], item.id),
+          render: renderDraggableItem,
+        };
+      }
+      return {
+        key: `url:${item.id}`,
+        label: item.title || item.url || '未命名书签',
+        icon: <BookmarkVisual cacheOwnerKey={faviconCacheOwnerKey} displayIcon={getResolvedBookmarkDisplayIcon(item)} item={item} />,
+        render: (content) => renderDraggableItem(content, () => openBookmarkURL(item)),
+      };
+    });
+  }, [
+    bookmarkMenuDropTarget,
+    clearBookmarkMenuDragState,
+    detachBookmarkMenuDragListeners,
+    faviconCacheOwnerKey,
+    getResolvedBookmarkDisplayIcon,
+    moveBookmarkWithinFolder,
+    moveRootBookmark,
+    openBookmarkURL,
+    resolveBookmarkBarDropTarget,
+    resolveBookmarkMenuDropTarget,
+  ]);
+
   const applyBrowserTabUpdate = React.useCallback((tabId: string, updater: (tab: BrowserTab) => BrowserTab) => {
     setBrowserTabs((prev) => updateBrowserTabList(prev, tabId, updater));
   }, []);
@@ -654,18 +1976,30 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   const applyBrowserTabState = React.useCallback((payload: {
     canGoBack?: boolean;
     canGoForward?: boolean;
+    iconSourceUrl?: string;
+    iconUrl?: string;
     tabId: string;
-    title?: string;
-    url?: string;
+      title?: string;
+      url?: string;
   }) => {
+    if (payload.iconUrl) {
+      cacheResolvedFaviconDataUrl({
+        ownerKey: faviconCacheOwnerKey,
+        dataUrl: payload.iconUrl,
+        iconUrl: payload.iconSourceUrl,
+        pageUrl: payload.url,
+      });
+    }
     applyBrowserTabUpdate(payload.tabId, (tab) => ({
       ...tab,
       canGoBack: payload.canGoBack ?? tab.canGoBack,
       canGoForward: payload.canGoForward ?? tab.canGoForward,
+      iconSourceUrl: payload.iconSourceUrl || tab.iconSourceUrl,
+      iconUrl: payload.iconUrl || tab.iconUrl,
       title: payload.title || tab.title || tab.url || '新标签页',
       url: payload.url ?? tab.url,
     }));
-  }, [applyBrowserTabUpdate]);
+  }, [applyBrowserTabUpdate, faviconCacheOwnerKey]);
 
   const syncBrowserInputWithTab = React.useCallback((tabId: string | null, nextUrl: string) => {
     if (!tabId || tabId !== activeBrowserTabId) {
@@ -679,6 +2013,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
     setBrowserTabs((prev) => [...prev, next.tab]);
     setActiveBrowserTabId(next.id);
     setBrowserModeOpen(true);
+    setBookmarkBarVisible(true);
     setWorkspaceDisplayMode('browser');
     setBrowserInput('');
     setSearchMode('web');
@@ -689,10 +2024,11 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   const openEmbeddedBrowser = React.useCallback(() => {
     if (browserTabs.length > 0) {
       const fallbackTabId = activeBrowserTabId ?? browserTabs[browserTabs.length - 1]?.id ?? null;
+      const fallbackTab = browserTabs.find((tab) => tab.id === fallbackTabId) ?? null;
       setBrowserModeOpen(true);
+      setBookmarkBarVisible(!fallbackTab?.url);
       setWorkspaceDisplayMode('browser');
       setActiveBrowserTabId(fallbackTabId);
-      const fallbackTab = browserTabs.find((tab) => tab.id === fallbackTabId) ?? null;
       setBrowserInput(fallbackTab?.url ?? '');
       return;
     }
@@ -714,6 +2050,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
     setBrowserModeOpen(true);
     setWorkspaceDisplayMode('browser');
     const targetTab = browserTabs.find((tab) => tab.id === tabId) ?? null;
+    setBookmarkBarVisible(!targetTab?.url);
     setBrowserInput(targetTab?.url ?? '');
     void window.electronEmbeddedBrowser.activateTab(tabId);
   }, [browserTabs]);
@@ -727,6 +2064,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
       setActiveBrowserTabId(fallback?.id ?? null);
       setBrowserInput(fallback?.url ?? '');
       setBrowserModeOpen(nextTabs.length > 0);
+      setBookmarkBarVisible(!fallback?.url);
       if (fallback) {
         void window.electronEmbeddedBrowser.activateTab(fallback.id);
       } else {
@@ -774,6 +2112,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
     }
     setBrowserInput(nextUrl);
     setBrowserModeOpen(true);
+    setBookmarkBarVisible(false);
     setWorkspaceDisplayMode('browser');
     applyBrowserTabUpdate(resolvedTabId, (tab) => ({
       ...tab,
@@ -894,13 +2233,6 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
     void window.electronEmbeddedBrowser.goForward(activeBrowserTabId);
   }, [activeBrowserTabId]);
 
-  const activeBrowserTab = React.useMemo(() => {
-    if (!activeBrowserTabId) {
-      return null;
-    }
-    return browserTabs.find((tab) => tab.id === activeBrowserTabId) ?? null;
-  }, [activeBrowserTabId, browserTabs]);
-
   const detachBrowserTabDragListeners = React.useCallback(() => {
     if (browserTabMouseMoveListenerRef.current) {
       window.removeEventListener('mousemove', browserTabMouseMoveListenerRef.current);
@@ -993,6 +2325,209 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   }, []);
 
   React.useEffect(() => {
+    void reloadBookmarks();
+  }, [reloadBookmarks]);
+
+  React.useEffect(() => {
+    const candidates = collectURLBookmarkItems(bookmarks)
+      .filter((item) => {
+        return Boolean(item.url) && bookmarkIconDisplayUrls[item.id]?.signature !== getBookmarkIconDisplaySignature(item);
+      })
+      .slice(0, 24);
+    if (!candidates.length) {
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      let updated = false;
+      for (const item of candidates) {
+        const cacheKey = `${item.id}:${item.url || ''}:${item.iconUrl || ''}`;
+        if (bookmarkIconHydrateKeysRef.current.has(cacheKey)) {
+          continue;
+        }
+        bookmarkIconHydrateKeysRef.current.add(cacheKey);
+        try {
+          const result = await window.electronEmbeddedBrowser.resolveFavicon({
+            iconUrl: item.iconUrl || undefined,
+            pageUrl: item.url || undefined,
+          });
+          if (cancelled || !result?.dataUrl) {
+            continue;
+          }
+          cacheResolvedFaviconDataUrl({
+            ownerKey: faviconCacheOwnerKey,
+            dataUrl: result.dataUrl,
+            iconUrl: result.iconUrl || item.iconUrl,
+            pageUrl: item.url,
+          });
+          setBookmarkIconDisplayUrls((current) => ({
+            ...current,
+            [item.id]: {
+              dataUrl: result.dataUrl,
+              signature: getBookmarkIconDisplaySignature(item),
+            },
+          }));
+          const sourceIconUrl = getPersistableBookmarkIconUrl(result.iconUrl);
+          if (!sourceIconUrl || sourceIconUrl === item.iconUrl) {
+            continue;
+          }
+          await updateBrowserBookmark(item.id, { iconUrl: sourceIconUrl });
+          if (cancelled) {
+            return;
+          }
+          updated = true;
+          setBookmarkIconDisplayUrls((current) => ({
+            ...current,
+            [item.id]: {
+              dataUrl: result.dataUrl,
+              signature: getBookmarkIconDisplaySignature({
+                iconUrl: sourceIconUrl,
+                url: item.url,
+              }),
+            },
+          }));
+          setBookmarks((current) => replaceBookmarkIconInTree(current, item.id, sourceIconUrl));
+          setBookmarkMatch((current) => {
+            if (!current.bookmark || current.bookmark.id !== item.id) {
+              return current;
+            }
+            return {
+              ...current,
+              bookmark: {
+                ...current.bookmark,
+                iconUrl: sourceIconUrl,
+              },
+            };
+          });
+        } catch {
+          // Keep the old value visible for troubleshooting; the next URL/icon change will retry.
+          bookmarkIconHydrateKeysRef.current.delete(cacheKey);
+        }
+      }
+      if (updated && !cancelled) {
+        void reloadBookmarks();
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [bookmarkIconDisplayUrls, bookmarks, faviconCacheOwnerKey, reloadBookmarks]);
+
+  React.useEffect(() => {
+    void refreshBookmarkMatch(activeBrowserTab?.url || '');
+  }, [activeBrowserTab?.url, refreshBookmarkMatch]);
+
+  React.useEffect(() => {
+    if (browserModeOpen && activeBrowserTab?.url && bookmarkBarVisible) {
+      setBookmarkBarVisible(false);
+    }
+  }, [activeBrowserTab?.url, bookmarkBarVisible, browserModeOpen]);
+
+  React.useEffect(() => {
+    const displayIconUrl = String(activeBrowserTab?.iconUrl || '').trim();
+    const sourceIconUrl = getPersistableBookmarkIconUrl(activeBrowserTab?.iconSourceUrl);
+    const bookmark = bookmarkMatch.bookmark;
+    if (displayIconUrl) {
+      cacheResolvedFaviconDataUrl({
+        ownerKey: faviconCacheOwnerKey,
+        dataUrl: displayIconUrl,
+        iconUrl: sourceIconUrl,
+        pageUrl: activeBrowserTab?.url,
+      });
+    }
+    if (!bookmarkMatch.matched || !bookmark?.id || (!displayIconUrl && !sourceIconUrl)) {
+      return;
+    }
+    if (displayIconUrl) {
+      setBookmarkIconDisplayUrls((current) => (
+        current[bookmark.id]?.dataUrl === displayIconUrl
+        && current[bookmark.id]?.signature === getBookmarkIconDisplaySignature(bookmark)
+          ? current
+          : {
+            ...current,
+            [bookmark.id]: {
+              dataUrl: displayIconUrl,
+              signature: getBookmarkIconDisplaySignature(bookmark),
+            },
+          }
+      ));
+    }
+    if (!sourceIconUrl || bookmark.iconUrl === sourceIconUrl) {
+      return;
+    }
+    const syncKey = `${bookmark.id}:${sourceIconUrl}`;
+    if (bookmarkIconSyncKeyRef.current === syncKey) {
+      return;
+    }
+    bookmarkIconSyncKeyRef.current = syncKey;
+    void updateBrowserBookmark(bookmark.id, { iconUrl: sourceIconUrl })
+      .then(() => {
+        setBookmarkIconDisplayUrls((current) => {
+          const nextSignature = getBookmarkIconDisplaySignature({
+            iconUrl: sourceIconUrl,
+            url: bookmark.url,
+          });
+          const currentEntry = current[bookmark.id];
+          if (!currentEntry?.dataUrl || currentEntry.signature === nextSignature) {
+            return current;
+          }
+          return {
+            ...current,
+            [bookmark.id]: {
+              ...currentEntry,
+              signature: nextSignature,
+            },
+          };
+        });
+        setBookmarkMatch((current) => {
+          if (!current.bookmark || current.bookmark.id !== bookmark.id) {
+            return current;
+          }
+          return {
+            ...current,
+            bookmark: {
+              ...current.bookmark,
+              iconUrl: sourceIconUrl,
+            },
+          };
+        });
+        void reloadBookmarks();
+      })
+      .catch(() => undefined);
+  }, [activeBrowserTab?.iconSourceUrl, activeBrowserTab?.iconUrl, activeBrowserTab?.url, bookmarkMatch, faviconCacheOwnerKey, reloadBookmarks]);
+
+  React.useEffect(() => {
+    const container = bookmarkBarListRef.current;
+    if (!container) {
+      return;
+    }
+    const syncVisibleCount = () => {
+      setVisibleBookmarkCount(resolveVisibleBookmarkCount(bookmarks, container.clientWidth));
+    };
+    const resizeObserver = new ResizeObserver(syncVisibleCount);
+    resizeObserver.observe(container);
+    syncVisibleCount();
+    window.addEventListener('resize', syncVisibleCount);
+    return () => {
+      resizeObserver.disconnect();
+      window.removeEventListener('resize', syncVisibleCount);
+    };
+  }, [bookmarks]);
+
+  React.useEffect(() => {
+    if (!bookmarkContextMenu) {
+      return;
+    }
+    const close = () => setBookmarkContextMenu(null);
+    window.addEventListener('click', close);
+    window.addEventListener('blur', close);
+    return () => {
+      window.removeEventListener('click', close);
+      window.removeEventListener('blur', close);
+    };
+  }, [bookmarkContextMenu]);
+
+  React.useEffect(() => {
     if (!browserModeOpen) {
       return;
     }
@@ -1001,7 +2536,6 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
     }
     window.requestAnimationFrame(() => {
       browserInputRef.current?.focus();
-      browserInputRef.current?.select();
     });
   }, [activeBrowserTab, browserModeOpen]);
 
@@ -1066,10 +2600,239 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   React.useEffect(() => {
     return () => {
       clearBrowserTabDragState();
+      clearBookmarkDragState();
+      clearBookmarkMenuDragState();
       saveLibraryDetailWorkspaceState(workspaceCacheKey, latestWorkspaceStateRef.current);
       void window.electronEmbeddedBrowser.deactivate();
     };
-  }, [clearBrowserTabDragState, workspaceCacheKey]);
+  }, [clearBookmarkDragState, clearBookmarkMenuDragState, clearBrowserTabDragState, workspaceCacheKey]);
+
+  const visibleBookmarks = bookmarks.slice(0, Math.min(visibleBookmarkCount, bookmarks.length));
+  const overflowBookmarks = bookmarks.slice(visibleBookmarks.length);
+
+  const renderBookmarkButton = (item: BrowserBookmarkItem) => {
+    const isFolder = item.kind === 'folder';
+    const dropClass = bookmarkDropTarget?.bookmarkId === item.id && draggingBookmarkId !== item.id
+      ? ` drop-${bookmarkDropTarget.position}`
+      : '';
+    const button = (
+      <button
+        key={item.id}
+        ref={(element) => {
+          if (element) {
+            bookmarkButtonRefMap.current.set(item.id, element);
+          } else {
+            bookmarkButtonRefMap.current.delete(item.id);
+          }
+        }}
+        type="button"
+        className={`bookmark-item${draggingBookmarkId === item.id ? ' dragging' : ''}${dropClass}`}
+        title={item.title}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          setBookmarkContextMenu({ item, x: event.clientX, y: event.clientY });
+        }}
+        onMouseDown={(event) => {
+          if (event.button !== 0) {
+            return;
+          }
+          pendingBookmarkDragRef.current = {
+            bookmarkId: item.id,
+            started: false,
+          };
+          setBookmarkDropTarget(null);
+          detachBookmarkDragListeners();
+
+          const handleMouseMove = (moveEvent: MouseEvent) => {
+            const pending = pendingBookmarkDragRef.current;
+            if (!pending || pending.bookmarkId !== item.id) {
+              return;
+            }
+            if (!pending.started) {
+              if (Math.abs(moveEvent.clientX - event.clientX) < 6) {
+                return;
+              }
+              pending.started = true;
+              setDraggingBookmarkId(item.id);
+              bookmarkClickBlockUntilRef.current = Date.now() + 180;
+            }
+            setBookmarkDropTarget(resolveBookmarkDropTarget(moveEvent.clientX, item.id));
+          };
+
+          const handleMouseUp = (upEvent: MouseEvent) => {
+            const pending = pendingBookmarkDragRef.current;
+            if (pending?.started) {
+              const finalDropTarget = resolveBookmarkDropTarget(upEvent.clientX, item.id);
+              if (finalDropTarget) {
+                void moveRootBookmark(item.id, finalDropTarget);
+              }
+            }
+            clearBookmarkDragState();
+          };
+
+          bookmarkMouseMoveListenerRef.current = handleMouseMove;
+          bookmarkMouseUpListenerRef.current = handleMouseUp;
+          window.addEventListener('mousemove', handleMouseMove);
+          window.addEventListener('mouseup', handleMouseUp);
+        }}
+        onClick={() => {
+          if (Date.now() < bookmarkClickBlockUntilRef.current) {
+            return;
+          }
+          if (!isFolder) {
+            openBookmarkURL(item);
+          }
+        }}
+      >
+        <BookmarkVisual cacheOwnerKey={faviconCacheOwnerKey} displayIcon={getResolvedBookmarkDisplayIcon(item)} item={item} />
+        <span className="bookmark-title">{item.title || item.url || '未命名'}</span>
+      </button>
+    );
+
+    if (!isFolder) {
+      return button;
+    }
+    return (
+      <Popover
+        key={item.id}
+        trigger="click"
+        showArrow={false}
+        position="bottomLeft"
+        spacing={6}
+        getPopupContainer={() => document.body}
+          content={
+            <ContextMenu
+              items={buildBookmarkFolderMenuItems(item.children || [], item.id)}
+              className="directory-context-menu"
+            />
+          }
+        >
+        {button}
+      </Popover>
+    );
+  };
+
+  const moveBookmarkInManager = async (
+    item: BrowserBookmarkItem,
+    siblings: BrowserBookmarkItem[],
+    index: number,
+    direction: 'up' | 'down',
+    parentId: number | null,
+  ) => {
+    const target = direction === 'up' ? siblings[index - 1] : siblings[index + 1];
+    if (!target) {
+      return;
+    }
+    try {
+      await moveBrowserBookmark(item.id, {
+        parentId,
+        beforeId: direction === 'up' ? target.id : null,
+        afterId: direction === 'down' ? target.id : null,
+      });
+      await reloadBookmarks();
+    } catch (error: any) {
+      Toast.error(error?.message || '书签移动失败');
+    }
+  };
+
+  const renderBookmarkManagerRows = (
+    items: BrowserBookmarkItem[],
+    depth = 0,
+    parentId: number | null = null,
+  ): React.ReactNode => {
+    if (!items.length && depth === 0) {
+      return <div className="bookmark-manager-empty">暂无书签</div>;
+    }
+    return items.map((item, index) => (
+      <React.Fragment key={item.id}>
+        <div className="bookmark-manager-row" style={{ paddingLeft: 8 + depth * 18 }}>
+          {item.kind === 'folder' ? (
+            <button
+              type="button"
+              className="bookmark-manager-disclosure"
+              onClick={() => toggleBookmarkFolderCollapsed(item.id)}
+              title={collapsedBookmarkFolderIds.includes(item.id) ? '展开文件夹' : '收起文件夹'}
+            >
+              <span className={`bookmark-manager-disclosure-icon ${collapsedBookmarkFolderIds.includes(item.id) ? '' : 'expanded'}`}>
+                <IconArrowRight size="small" />
+              </span>
+            </button>
+          ) : (
+            <span className="bookmark-manager-disclosure placeholder" aria-hidden="true" />
+          )}
+          <BookmarkVisual cacheOwnerKey={faviconCacheOwnerKey} displayIcon={getResolvedBookmarkDisplayIcon(item)} item={item} />
+          <div className="bookmark-manager-body">
+            <span className="bookmark-manager-title" title={item.title || item.url || ''}>
+              {item.title || item.url || '未命名'}
+            </span>
+            <span className="bookmark-manager-meta" title={item.kind === 'folder' ? '' : item.url || ''}>
+              {getBookmarkManagerMeta(item)}
+            </span>
+          </div>
+          <span className="bookmark-manager-actions">
+            {item.kind === 'folder' ? (
+              <>
+                <button
+                  type="button"
+                  className="bookmark-manager-action"
+                  onClick={() => openBookmarkCreate('url', item.id)}
+                >
+                  新建书签
+                </button>
+                <button
+                  type="button"
+                  className="bookmark-manager-action"
+                  onClick={() => openBookmarkCreate('folder', item.id)}
+                >
+                  新建文件夹
+                </button>
+              </>
+            ) : null}
+            <button
+              type="button"
+              className="bookmark-manager-action"
+              disabled={index === 0}
+              onClick={() => {
+                void moveBookmarkInManager(item, items, index, 'up', parentId);
+              }}
+            >
+              上移
+            </button>
+            <button
+              type="button"
+              className="bookmark-manager-action"
+              disabled={index >= items.length - 1}
+              onClick={() => {
+                void moveBookmarkInManager(item, items, index, 'down', parentId);
+              }}
+            >
+              下移
+            </button>
+            <button
+              type="button"
+              className="bookmark-manager-action"
+              onClick={() => openBookmarkEdit(item)}
+            >
+              编辑
+            </button>
+            <button
+              type="button"
+              className="bookmark-manager-action danger"
+              onClick={() => {
+                void removeBookmark(item);
+              }}
+            >
+              删除
+            </button>
+          </span>
+        </div>
+        {item.children?.length && !collapsedBookmarkFolderIds.includes(item.id)
+          ? renderBookmarkManagerRows(item.children, depth + 1, item.id)
+          : null}
+      </React.Fragment>
+    ));
+  };
 
   return (
     <DetailWrapper>
@@ -1107,6 +2870,13 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
               title="回收站"
             >
               <IconDelete size="large" />
+            </button>
+            <button
+              className="footer-btn"
+              onClick={() => navigate("/settings")}
+              title="设置"
+            >
+              <IconSetting size="large" />
             </button>
           </div>
         </SidePanelFooter>
@@ -1232,6 +3002,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
                       activateBrowserTab(tab.id);
                     }}
                   >
+                    <BrowserTabVisual cacheOwnerKey={faviconCacheOwnerKey} tab={tab} />
                     <span className="browser-tab-title">{tab.title || tab.url || '新标签页'}</span>
                     <span
                       role="button"
@@ -1256,20 +3027,19 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
                     </span>
                   </button>
                 ))}
+                <button
+                  type="button"
+                  className="browser-tabs-add"
+                  onClick={createAndActivateBrowserTab}
+                  title="新建浏览器标签"
+                >
+                  <IconPlus />
+                </button>
               </div>
             ) : null}
           </div>
           <div className="toolbar-right">
-            {browserModeOpen ? (
-              <button
-                type="button"
-                className="toolbar-action-btn"
-                onClick={createAndActivateBrowserTab}
-                title="新建浏览器标签"
-              >
-                <IconPlus />
-              </button>
-            ) : (
+            {browserModeOpen ? null : (
               <button
                 type="button"
                 className="toolbar-action-btn"
@@ -1321,11 +3091,55 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
                     value={browserInput}
                     onChange={(event) => setBrowserInput(event.target.value)}
                     placeholder="输入网址后回车"
+                    spellCheck={false}
+                    autoCorrect="off"
+                    autoCapitalize="off"
                   />
                 </form>
               </div>
-              <div className="toolbar-right" />
+              <div className="toolbar-right">
+                <button
+                  type="button"
+                  className="toolbar-action-btn"
+                  onClick={toggleActiveBookmark}
+                  title={bookmarkMatch.matched ? '取消收藏' : '加入书签栏'}
+                  disabled={!String(activeBrowserTab?.url || '').trim()}
+                >
+                  {bookmarkMatch.matched ? <IconStar /> : <IconStarStroked />}
+                </button>
+              </div>
             </ContentToolbar>
+            {bookmarkBarVisible && !activeBrowserTab?.url ? (
+              <BookmarkToolbar
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  setBookmarkContextMenu({ item: null, x: event.clientX, y: event.clientY });
+                }}
+              >
+                <div ref={bookmarkBarListRef} className="bookmark-bar-list">
+                  {visibleBookmarks.map((item) => renderBookmarkButton(item))}
+                </div>
+                {overflowBookmarks.length ? (
+                  <Popover
+                    trigger="click"
+                    showArrow={false}
+                    position="bottomRight"
+                    spacing={6}
+                    getPopupContainer={() => document.body}
+                    content={
+                      <ContextMenu
+                        items={buildBookmarkFolderMenuItems(overflowBookmarks)}
+                        className="directory-context-menu"
+                      />
+                    }
+                  >
+                    <button type="button" className="bookmark-more-btn" title="更多书签">
+                      <IconMore />
+                    </button>
+                  </Popover>
+                ) : null}
+              </BookmarkToolbar>
+            ) : null}
           </>
         ) : null}
         <ContentBody>
@@ -1386,6 +3200,125 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
           )}
         </ContentBody>
       </ContentArea>
+      {bookmarkContextMenu ? (
+        <BookmarkContextMenuLayer
+          style={{ left: bookmarkContextMenu.x, top: bookmarkContextMenu.y }}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <ContextMenu
+            items={buildBookmarkContextMenuItems(bookmarkContextMenu.item)}
+            className="directory-context-menu"
+            onItemClick={closeBookmarkContextMenu}
+          />
+        </BookmarkContextMenuLayer>
+      ) : null}
+      <Modal
+        title={
+          bookmarkEditDraft?.item
+            ? (bookmarkEditDraft.kind === 'folder' ? '编辑文件夹' : '编辑书签')
+            : (bookmarkEditDraft?.kind === 'folder' ? '新建文件夹' : '新建书签')
+        }
+        visible={Boolean(bookmarkEditDraft)}
+        onCancel={() => setBookmarkEditDraft(null)}
+        onOk={() => {
+          void saveBookmarkEditDraft();
+        }}
+        okText="保存"
+        cancelText="取消"
+      >
+        {bookmarkEditDraft ? (
+          <form
+            style={{ display: 'flex', flexDirection: 'column', gap: 12 }}
+            onSubmit={(event) => {
+              event.preventDefault();
+              void saveBookmarkEditDraft();
+            }}
+          >
+            <Input
+              value={bookmarkEditDraft.title}
+              placeholder="名称"
+              onChange={(value) => setBookmarkEditDraft((draft) => draft ? { ...draft, title: value } : draft)}
+            />
+            <Select
+              value={bookmarkEditDraft.parentId == null ? ROOT_BOOKMARK_PARENT_VALUE : String(bookmarkEditDraft.parentId)}
+              onChange={(value) => {
+                const nextValue = String(value);
+                setBookmarkEditDraft((draft) => draft ? {
+                  ...draft,
+                  parentId: nextValue === ROOT_BOOKMARK_PARENT_VALUE ? null : Number(nextValue),
+                } : draft);
+              }}
+            >
+              {bookmarkParentOptions.map((option) => (
+                <Select.Option key={option.value} value={option.value}>
+                  {option.label}
+                </Select.Option>
+              ))}
+            </Select>
+            {bookmarkEditDraft.kind === 'url' ? (
+              <>
+                <Input
+                  value={bookmarkEditDraft.url}
+                  placeholder="网址"
+                  onChange={(value) => setBookmarkEditDraft((draft) => draft ? { ...draft, url: value } : draft)}
+                />
+                <Input
+                  value={bookmarkEditDraft.iconUrl}
+                  placeholder="图标地址"
+                  onChange={(value) => setBookmarkEditDraft((draft) => draft ? { ...draft, iconUrl: value } : draft)}
+                />
+              </>
+            ) : null}
+          </form>
+        ) : null}
+      </Modal>
+      <Modal
+        title="书签管理"
+        visible={bookmarkManagerOpen}
+        onCancel={() => setBookmarkManagerOpen(false)}
+        footer={null}
+        width={860}
+      >
+        <BookmarkManagerContent>
+          <div className="bookmark-manager-toolbar">
+            <div className="bookmark-manager-toolbar-actions">
+              <button
+                type="button"
+                className="bookmark-manager-action"
+                onClick={() => openBookmarkCreate('url')}
+              >
+                新建书签
+              </button>
+              <button
+                type="button"
+                className="bookmark-manager-action"
+                onClick={() => openBookmarkCreate('folder')}
+              >
+                新建文件夹
+              </button>
+            </div>
+            <div className="bookmark-manager-toolbar-right">
+              <button
+                type="button"
+                className="bookmark-manager-action"
+                onClick={expandAllBookmarkFolders}
+                disabled={!bookmarkFolderIds.length || collapsedBookmarkFolderIds.length === 0}
+              >
+                展开全部
+              </button>
+              <button
+                type="button"
+                className="bookmark-manager-action"
+                onClick={collapseAllBookmarkFolders}
+                disabled={!bookmarkFolderIds.length || collapsedBookmarkFolderIds.length === bookmarkFolderIds.length}
+              >
+                收起全部
+              </button>
+            </div>
+          </div>
+          {renderBookmarkManagerRows(bookmarks)}
+        </BookmarkManagerContent>
+      </Modal>
       <EmbeddedBrowserDownloadImportModal
         download={activeBrowserDownload}
         importLoading={importingBrowserDownload}

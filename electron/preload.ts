@@ -70,10 +70,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('http:upload:progress', wrapped);
     return () => ipcRenderer.removeListener('http:upload:progress', wrapped);
   },
-});
-
-contextBridge.exposeInMainWorld('electronZoom', (delta: number) => {
-  return ipcRenderer.invoke('zoom-adjust', delta);
 })
 
 // 窗口控制 API
@@ -99,10 +95,14 @@ contextBridge.exposeInMainWorld('electronEmbeddedBrowser', {
     sourceUrl: string,
     fileName: string,
   ) => ipcRenderer.invoke('embedded-browser:open-mapped-file', tabId, pageUrl, sourceUrl, fileName),
+  resolveFavicon: (payload: { iconUrl?: string; pageUrl?: string }) =>
+    ipcRenderer.invoke('embedded-browser:resolve-favicon', payload),
   onStateChange: (listener: (payload: {
     canGoBack?: boolean;
     canGoForward?: boolean;
     details?: string;
+    iconSourceUrl?: string;
+    iconUrl?: string;
     message?: string;
     meta?: string[];
     state?: 'idle' | 'loading' | 'ready' | 'error';
@@ -114,6 +114,8 @@ contextBridge.exposeInMainWorld('electronEmbeddedBrowser', {
       canGoBack?: boolean;
       canGoForward?: boolean;
       details?: string;
+      iconSourceUrl?: string;
+      iconUrl?: string;
       message?: string;
       meta?: string[];
       state?: 'idle' | 'loading' | 'ready' | 'error';
