@@ -69,16 +69,17 @@ export const ThemeProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const toggleTheme = useCallback(() => {
     if (theme === 'light') {
       applyTheme('system', 'light');
-      return;
+      return 'system';
     }
 
     if (theme === 'dark') {
       applyTheme('system', 'dark');
-      return;
+      return 'system';
     }
 
     const nextTheme: ResolvedThemeMode = toggleAnchor === 'light' ? 'dark' : 'light';
     applyTheme(nextTheme, nextTheme);
+    return nextTheme;
   }, [applyTheme, theme, toggleAnchor]);
 
   const setTheme = useCallback((mode: ThemeMode) => {

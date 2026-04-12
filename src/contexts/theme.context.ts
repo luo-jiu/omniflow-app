@@ -6,7 +6,7 @@ export type ResolvedThemeMode = 'light' | 'dark';
 export interface ThemeContextType {
   theme: ThemeMode;
   resolvedTheme: ResolvedThemeMode;
-  toggleTheme: () => void;
+  toggleTheme: () => ThemeMode;
   setTheme: (theme: ThemeMode) => void;
 }
 

@@ -5,6 +5,7 @@ import {Suspense} from "react";
 import routes from "@/router";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ThemeProvider } from "@/contexts/ThemeContext";
+import UserPreferencesBootstrap from '@/features/user/preferences/UserPreferencesBootstrap';
 import { runtimeLogger } from '@/utils/runtimeLogger';
 import './App.css'
 
@@ -29,6 +30,7 @@ function App() {
   return (
     <ThemeProvider>
       <AuthProvider>
+        <UserPreferencesBootstrap />
         <MainLayout>
           <Suspense fallback={'loading...'}>
             {useRoutes(routes)}

@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import styled from 'styled-components';
 import { Typography, Divider, Switch, Select, Button, Input, Toast } from '@douyinfe/semi-ui';
 import { IconChevronLeft } from '@douyinfe/semi-icons';
 import { useTheme } from '@/hooks/useTheme';
+import { useAuth } from '@/hooks/useAuth';
 import { useNavigate } from 'react-router-dom';
 import { getFileTreeShowSuffix, setFileTreeShowSuffix } from '@/utils/fileTreeSettings';
 import type { ThemeMode } from '@/contexts/theme.context';
@@ -13,6 +14,15 @@ import {
   setAutoImportWatchDirectory,
 } from '@/features/file-explorer/auto-import/settings';
 import { pickAutoImportDirectoryFromDesktop } from '@/features/file-explorer/services/desktop-auto-import.api';
+import { updateCurrentUserProfile, type UserProfile } from '@/features/user/services/user.api';
+import {
+  getAppLanguage,
+  mergeUserPreferencesIntoExt,
+  resolveUserPreferences,
+  setAppLanguage,
+  type AppLanguage,
+  type UserPreferences,
+} from '@/features/user/preferences/user-preferences';
 
 const SettingsPageWrapper = styled.div`
   position: relative;
@@ -219,14 +229,90 @@ const THEME_LABEL_MAP: Record<ThemeMode, string> = {
 const Settings: React.FC = () => {
   const { Title, Text } = Typography;
   const { theme, toggleTheme } = useTheme();
+  const { user, setUserInfo } = useAuth();
   const navigate = useNavigate();
+  const userRef = useRef(user);
+  const userExtRef = useRef<string | undefined>(user?.ext);
+  const persistQueueRef = useRef<Promise<boolean>>(Promise.resolve(true));
+  const [language, setLanguage] = useState<AppLanguage>(() => getAppLanguage());
   const [showFileSuffix, setShowFileSuffix] = useState<boolean>(() => getFileTreeShowSuffix());
   const [autoImportEnabled, setAutoImportEnabledState] = useState<boolean>(() => getAutoImportEnabled());
   const [autoImportWatchDirectory, setAutoImportWatchDirectoryState] = useState<string>(() => getAutoImportWatchDirectory());
 
-  const persistAutoImportWatchDirectory = (value: string) => {
+  useEffect(() => {
+    userRef.current = user;
+    userExtRef.current = user?.ext;
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) {
+      return;
+    }
+
+    const preferences = resolveUserPreferences(user.ext);
+    setLanguage(preferences.language);
+    setShowFileSuffix(preferences.fileTreeShowSuffix);
+    setAutoImportEnabledState(preferences.autoImportEnabled);
+    setAutoImportWatchDirectoryState(preferences.autoImportWatchDirectory);
+  }, [user]);
+
+  const syncAuthUser = (profile: UserProfile) => {
+    const currentUser = userRef.current;
+    setUserInfo({
+      ...(currentUser || {}),
+      id: profile.id,
+      username: profile.username,
+      nickname: profile.nickname || currentUser?.nickname || profile.username,
+      avatar: profile.avatar || currentUser?.avatar,
+      ext: profile.ext || undefined,
+      email: profile.email ?? currentUser?.email,
+      phone: profile.phone ?? currentUser?.phone,
+    });
+  };
+
+  const persistPreferences = async (patch: UserPreferences, successMessage?: string) => {
+    const currentUser = userRef.current;
+    if (!currentUser) {
+      return true;
+    }
+
+    const ownerUserID = currentUser.id;
+    const nextExt = mergeUserPreferencesIntoExt(userExtRef.current, patch);
+    userExtRef.current = nextExt;
+
+    const runPersist = async () => {
+      if (userRef.current?.id !== ownerUserID) {
+        return false;
+      }
+
+      try {
+        const nextProfile = await updateCurrentUserProfile({ ext: nextExt });
+        if (userRef.current?.id !== ownerUserID) {
+          return false;
+        }
+        userExtRef.current = nextProfile.ext || nextExt;
+        syncAuthUser(nextProfile);
+        if (successMessage) {
+          Toast.success(successMessage);
+        }
+        return true;
+      } catch (error: any) {
+        if (userRef.current?.id === ownerUserID) {
+          Toast.warning(error?.message || '本地已生效，云端保存失败');
+        }
+        return false;
+      }
+    };
+
+    const queuedPersist = persistQueueRef.current.then(runPersist, runPersist);
+    persistQueueRef.current = queuedPersist;
+    return queuedPersist;
+  };
+
+  const persistAutoImportWatchDirectory = async (value: string) => {
     setAutoImportWatchDirectoryState(value);
     setAutoImportWatchDirectory(value);
+    return persistPreferences({ autoImportWatchDirectory: value });
   };
 
   const handlePickAutoImportDirectory = async () => {
@@ -235,8 +321,10 @@ const Settings: React.FC = () => {
       if (!directoryPath) {
         return;
       }
-      persistAutoImportWatchDirectory(directoryPath);
-      Toast.success('已更新监听目录');
+      const saved = await persistAutoImportWatchDirectory(directoryPath);
+      if (saved) {
+        Toast.success('已更新监听目录');
+      }
     } catch (error: any) {
       Toast.error(error?.message || '选择监听目录失败');
     }
@@ -272,7 +360,10 @@ const Settings: React.FC = () => {
               type="button"
               className="theme-toggle"
               data-mode={theme}
-              onClick={() => toggleTheme()}
+              onClick={() => {
+                const nextTheme = toggleTheme();
+                void persistPreferences({ theme: nextTheme });
+              }}
               aria-label={`切换主题，当前为${THEME_LABEL_MAP[theme]}`}
               title={`当前主题：${THEME_LABEL_MAP[theme]}`}
             >
@@ -287,7 +378,17 @@ const Settings: React.FC = () => {
             <div className="setting-title">默认语言</div>
             <div className="setting-desc">选择界面显示的语言</div>
           </div>
-          <Select defaultValue="zh-CN" style={{ width: 160 }} size="large">
+          <Select
+            value={language}
+            style={{ width: 160 }}
+            size="large"
+            onChange={(value) => {
+              const nextLanguage = value as AppLanguage;
+              setLanguage(nextLanguage);
+              setAppLanguage(nextLanguage);
+              void persistPreferences({ language: nextLanguage });
+            }}
+          >
             <Select.Option value="zh-CN">简体中文</Select.Option>
             <Select.Option value="en-US">English</Select.Option>
           </Select>
@@ -304,6 +405,7 @@ const Settings: React.FC = () => {
             onChange={(checked) => {
               setShowFileSuffix(checked);
               setFileTreeShowSuffix(checked);
+              void persistPreferences({ fileTreeShowSuffix: checked });
             }}
           />
         </div>
@@ -319,6 +421,7 @@ const Settings: React.FC = () => {
             onChange={(checked) => {
               setAutoImportEnabledState(checked);
               setAutoImportEnabled(checked);
+              void persistPreferences({ autoImportEnabled: checked });
             }}
           />
         </div>
@@ -337,7 +440,7 @@ const Settings: React.FC = () => {
                 setAutoImportWatchDirectoryState(value);
               }}
               onBlur={() => {
-                persistAutoImportWatchDirectory(autoImportWatchDirectory);
+                void persistAutoImportWatchDirectory(autoImportWatchDirectory);
               }}
             />
             <Button
