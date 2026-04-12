@@ -1218,6 +1218,16 @@ function createWindow() {
     event.preventDefault()
     win.webContents.toggleDevTools()
   })
+  win.on('app-command', (event, command) => {
+    if (command === 'browser-backward' || command === 'browser-forward') {
+      event.preventDefault()
+    }
+  })
+  win.on('swipe', (event, direction) => {
+    if (direction === 'left' || direction === 'right') {
+      event.preventDefault()
+    }
+  })
 
   // 加载页面：开发环境走 Vite Dev Server，生产环境加载 dist/index.html
   if (VITE_DEV_SERVER_URL) {

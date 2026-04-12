@@ -9,6 +9,10 @@ import UserPreferencesBootstrap from '@/features/user/preferences/UserPreference
 import { runtimeLogger } from '@/utils/runtimeLogger';
 import './App.css'
 
+function isBrowserHistoryMouseEvent(event: MouseEvent) {
+  return event.button === 3 || event.button === 4
+}
+
 function App() {
   useEffect(() => {
     const fetchData = async () => {
@@ -25,6 +29,34 @@ function App() {
       }
     }
     void fetchData()
+  }, [])
+
+  useEffect(() => {
+    const preventBrowserHistoryMouseNavigation = (event: MouseEvent) => {
+      if (!isBrowserHistoryMouseEvent(event)) {
+        return
+      }
+      event.preventDefault()
+      event.stopPropagation()
+      event.stopImmediatePropagation()
+    }
+
+    const listenerOptions: AddEventListenerOptions = {
+      capture: true,
+      passive: false,
+    }
+
+    window.addEventListener('mousedown', preventBrowserHistoryMouseNavigation, listenerOptions)
+    window.addEventListener('mouseup', preventBrowserHistoryMouseNavigation, listenerOptions)
+    window.addEventListener('auxclick', preventBrowserHistoryMouseNavigation, listenerOptions)
+    window.addEventListener('click', preventBrowserHistoryMouseNavigation, listenerOptions)
+
+    return () => {
+      window.removeEventListener('mousedown', preventBrowserHistoryMouseNavigation, listenerOptions)
+      window.removeEventListener('mouseup', preventBrowserHistoryMouseNavigation, listenerOptions)
+      window.removeEventListener('auxclick', preventBrowserHistoryMouseNavigation, listenerOptions)
+      window.removeEventListener('click', preventBrowserHistoryMouseNavigation, listenerOptions)
+    }
   }, [])
 
   return (
