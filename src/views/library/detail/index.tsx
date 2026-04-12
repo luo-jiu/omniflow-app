@@ -34,6 +34,11 @@ const DEFAULT_SIDE_PANEL_WIDTH = 300;
 const MIN_SIDE_PANEL_WIDTH = 220;
 const SIDE_PANEL_TRAFFIC_LIGHT_SAFE_HEIGHT = 37;
 const SIDE_PANEL_WIDTH_STORAGE_PREFIX = 'library-detail:side-panel-width:';
+const CONTENT_TOOLBAR_HEIGHT = 46;
+const TOOLBAR_ACTION_BUTTON_SIZE = 36;
+const TOOLBAR_ACTION_ICON_SIZE = 18;
+const BROWSER_TAB_HEIGHT = 36;
+const BROWSER_INPUT_HEIGHT = 34;
 
 function getSidePanelWidthStorageKey(libraryId: number) {
   return `${SIDE_PANEL_WIDTH_STORAGE_PREFIX}${libraryId}`;
@@ -56,6 +61,7 @@ const DetailWrapper = styled.div`
   width: 100%;
   height: 100%;
   overflow: hidden;
+  background: var(--app-bg);
 `;
 
 const SidePanel = styled.div`
@@ -122,14 +128,14 @@ const SidePanelTree = styled.div`
     width: 6px;
   }
   *::-webkit-scrollbar-track {
-    background: transparent;
+    background: var(--app-scrollbar-track);
   }
   *::-webkit-scrollbar-thumb {
-    background: rgba(0, 0, 0, 0.12);
+    background: var(--app-scrollbar-thumb);
     border-radius: 10px;
   }
   *::-webkit-scrollbar-thumb:hover {
-    background: rgba(0, 0, 0, 0.2);
+    background: var(--app-scrollbar-thumb-hover);
   }
   *::-webkit-scrollbar-corner {
     background: transparent;
@@ -183,8 +189,8 @@ const ContentArea = styled.div`
 
 const toolbarActionButtonStyles = css`
   .toolbar-action-btn {
-    width: 32px;
-    height: 32px;
+    width: ${TOOLBAR_ACTION_BUTTON_SIZE}px;
+    height: ${TOOLBAR_ACTION_BUTTON_SIZE}px;
     border-radius: 8px;
     border: none;
     background: transparent;
@@ -198,7 +204,7 @@ const toolbarActionButtonStyles = css`
   }
 
   .toolbar-action-btn .semi-icon {
-    font-size: 16px;
+    font-size: ${TOOLBAR_ACTION_ICON_SIZE}px;
   }
 
   .toolbar-action-btn:hover:not(:disabled) {
@@ -214,7 +220,7 @@ const toolbarActionButtonStyles = css`
 
 const toolbarBackButtonStyles = css`
   .toolbar-back-btn {
-    height: 32px;
+    height: ${TOOLBAR_ACTION_BUTTON_SIZE}px;
     border-radius: 8px;
     border: none;
     background: transparent;
@@ -231,7 +237,7 @@ const toolbarBackButtonStyles = css`
   }
 
   .toolbar-back-btn .semi-icon {
-    font-size: 16px;
+    font-size: ${TOOLBAR_ACTION_ICON_SIZE}px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -245,7 +251,7 @@ const toolbarBackButtonStyles = css`
 `;
 
 const ContentToolbar = styled.div`
-  height: 38px;
+  height: ${CONTENT_TOOLBAR_HEIGHT}px;
   flex-shrink: 0;
   background: var(--app-bg);
   border-bottom: 1px solid var(--app-border);
@@ -253,7 +259,7 @@ const ContentToolbar = styled.div`
   -webkit-app-region: drag;
   display: flex;
   align-items: center;
-  padding: 0 8px;
+  padding: 0 10px;
 
   .toolbar-left {
     display: flex;
@@ -292,8 +298,8 @@ const ContentToolbar = styled.div`
   .browser-tab-btn {
     min-width: 140px;
     max-width: 260px;
-    height: 32px;
-    padding: 0 12px;
+    height: ${BROWSER_TAB_HEIGHT}px;
+    padding: 0 13px;
     border-radius: 8px;
     border: 1px solid var(--app-border);
     background: var(--app-bg-elevated);
@@ -335,8 +341,8 @@ const ContentToolbar = styled.div`
   }
 
   .browser-tab-close {
-    width: 20px;
-    height: 20px;
+    width: 22px;
+    height: 22px;
     margin-left: auto;
     border: none;
     background: transparent;
@@ -363,14 +369,14 @@ const ContentToolbar = styled.div`
 
   .toolbar-browser-input {
     width: 100%;
-    height: 30px;
+    height: ${BROWSER_INPUT_HEIGHT}px;
     border-radius: 8px;
     border: 1px solid var(--app-border);
     background: var(--app-bg-elevated);
     color: var(--app-text);
-    padding: 0 10px;
+    padding: 0 12px;
     outline: none;
-    font-size: 13px;
+    font-size: 14px;
   }
 
   .toolbar-browser-input:focus {

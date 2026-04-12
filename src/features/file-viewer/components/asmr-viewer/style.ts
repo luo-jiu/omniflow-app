@@ -214,6 +214,40 @@ export const AsmrViewerWrapper = styled.div`
     min-height: 0;
     overflow: auto;
     padding: 6px 8px 8px;
+    scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
+  }
+
+  .list-shell::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  .list-shell::-webkit-scrollbar-track {
+    background: var(--app-scrollbar-track);
+  }
+
+  .list-shell::-webkit-scrollbar-thumb {
+    background: transparent;
+    border-radius: 999px;
+  }
+
+  .list-shell:hover,
+  .list-shell:focus-within,
+  .list-shell:active {
+    scrollbar-color: var(--app-scrollbar-thumb) var(--app-scrollbar-track);
+  }
+
+  .list-shell:hover::-webkit-scrollbar-thumb,
+  .list-shell:focus-within::-webkit-scrollbar-thumb,
+  .list-shell:active::-webkit-scrollbar-thumb {
+    background: var(--app-scrollbar-thumb);
+  }
+
+  .list-shell:hover::-webkit-scrollbar-thumb:hover,
+  .list-shell:focus-within::-webkit-scrollbar-thumb:hover,
+  .list-shell:active::-webkit-scrollbar-thumb:hover {
+    background: var(--app-scrollbar-thumb-hover);
   }
 
   .state-loading,

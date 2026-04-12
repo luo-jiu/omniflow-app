@@ -71,19 +71,37 @@ const TabsTopScroll = styled.div<{ $visible: boolean }>`
   pointer-events: ${({ $visible }) => ($visible ? 'auto' : 'none')};
   scrollbar-gutter: stable both-edges;
   scrollbar-width: auto;
-  scrollbar-color: color-mix(in srgb, var(--semi-color-fill-2) 70%, transparent) transparent;
+  scrollbar-color: transparent transparent;
 
   &::-webkit-scrollbar {
     height: 10px;
   }
 
   &::-webkit-scrollbar-track {
-    background: transparent;
+    background: var(--app-scrollbar-track);
   }
 
   &::-webkit-scrollbar-thumb {
-    background: color-mix(in srgb, var(--semi-color-fill-2) 70%, transparent);
+    background: transparent;
     border-radius: 999px;
+  }
+
+  &:hover,
+  &:focus-within,
+  &:active {
+    scrollbar-color: var(--app-scrollbar-thumb) var(--app-scrollbar-track);
+  }
+
+  &:hover::-webkit-scrollbar-thumb,
+  &:focus-within::-webkit-scrollbar-thumb,
+  &:active::-webkit-scrollbar-thumb {
+    background: var(--app-scrollbar-thumb);
+  }
+
+  &:hover::-webkit-scrollbar-thumb:hover,
+  &:focus-within::-webkit-scrollbar-thumb:hover,
+  &:active::-webkit-scrollbar-thumb:hover {
+    background: var(--app-scrollbar-thumb-hover);
   }
 `;
 

@@ -263,16 +263,23 @@ export const DirectorySidebarWrapper = styled.aside<{ $isDragging?: boolean }>`
     width: 6px;
   }
   .tree-container::-webkit-scrollbar-track {
-    background: transparent;
+    background: var(--app-scrollbar-track);
   }
   .tree-container::-webkit-scrollbar-thumb {
-    background: rgba(0, 0, 0, 0.12);
+    background: transparent;
     border-radius: 10px;
     min-height: 20px;
     min-width: 20px;
   }
-  .tree-container::-webkit-scrollbar-thumb:hover {
-    background: rgba(0, 0, 0, 0.2);
+  .tree-container:hover::-webkit-scrollbar-thumb,
+  .tree-container:focus-within::-webkit-scrollbar-thumb,
+  .tree-container:active::-webkit-scrollbar-thumb {
+    background: var(--app-scrollbar-thumb);
+  }
+  .tree-container:hover::-webkit-scrollbar-thumb:hover,
+  .tree-container:focus-within::-webkit-scrollbar-thumb:hover,
+  .tree-container:active::-webkit-scrollbar-thumb:hover {
+    background: var(--app-scrollbar-thumb-hover);
   }
   .tree-container::-webkit-scrollbar-corner {
     background: transparent;
@@ -280,7 +287,13 @@ export const DirectorySidebarWrapper = styled.aside<{ $isDragging?: boolean }>`
 
   .tree-container {
     scrollbar-width: thin;
-    scrollbar-color: rgba(0, 0, 0, 0.12) transparent;
+    scrollbar-color: transparent transparent;
+  }
+
+  .tree-container:hover,
+  .tree-container:focus-within,
+  .tree-container:active {
+    scrollbar-color: var(--app-scrollbar-thumb) var(--app-scrollbar-track);
   }
 
   /* 覆盖所有内部可能出现的滚动条 */
@@ -289,14 +302,21 @@ export const DirectorySidebarWrapper = styled.aside<{ $isDragging?: boolean }>`
     width: 6px;
   }
   *::-webkit-scrollbar-track {
-    background: transparent;
+    background: var(--app-scrollbar-track);
   }
   *::-webkit-scrollbar-thumb {
-    background: rgba(0, 0, 0, 0.12);
+    background: transparent;
     border-radius: 10px;
   }
-  *::-webkit-scrollbar-thumb:hover {
-    background: rgba(0, 0, 0, 0.2);
+  *:hover::-webkit-scrollbar-thumb,
+  *:focus-within::-webkit-scrollbar-thumb,
+  *:active::-webkit-scrollbar-thumb {
+    background: var(--app-scrollbar-thumb);
+  }
+  *:hover::-webkit-scrollbar-thumb:hover,
+  *:focus-within::-webkit-scrollbar-thumb:hover,
+  *:active::-webkit-scrollbar-thumb:hover {
+    background: var(--app-scrollbar-thumb-hover);
   }
   *::-webkit-scrollbar-corner {
     background: transparent;

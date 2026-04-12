@@ -46,7 +46,7 @@ const BrowserSurface = styled.div`
     min-width: 0;
     min-height: 0;
     position: relative;
-    background: #fff;
+    background: var(--app-bg);
   }
 
   .embedded-browser-status {

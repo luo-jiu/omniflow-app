@@ -18,6 +18,40 @@ export const ComicViewerWrapper = styled.div`
     overflow-y: auto;
     overflow-x: auto;
     padding: 10px 0 20px;
+    scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
+  }
+
+  .pages-scroll::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  .pages-scroll::-webkit-scrollbar-track {
+    background: var(--app-scrollbar-track);
+  }
+
+  .pages-scroll::-webkit-scrollbar-thumb {
+    background: transparent;
+    border-radius: 999px;
+  }
+
+  .pages-scroll:hover,
+  .pages-scroll:focus-within,
+  .pages-scroll:active {
+    scrollbar-color: var(--app-scrollbar-thumb) var(--app-scrollbar-track);
+  }
+
+  .pages-scroll:hover::-webkit-scrollbar-thumb,
+  .pages-scroll:focus-within::-webkit-scrollbar-thumb,
+  .pages-scroll:active::-webkit-scrollbar-thumb {
+    background: var(--app-scrollbar-thumb);
+  }
+
+  .pages-scroll:hover::-webkit-scrollbar-thumb:hover,
+  .pages-scroll:focus-within::-webkit-scrollbar-thumb:hover,
+  .pages-scroll:active::-webkit-scrollbar-thumb:hover {
+    background: var(--app-scrollbar-thumb-hover);
   }
 
   .pages-grid {

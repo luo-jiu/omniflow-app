@@ -5,6 +5,7 @@ import { IconChevronLeft } from '@douyinfe/semi-icons';
 import { useTheme } from '@/hooks/useTheme';
 import { useNavigate } from 'react-router-dom';
 import { getFileTreeShowSuffix, setFileTreeShowSuffix } from '@/utils/fileTreeSettings';
+import type { ThemeMode } from '@/contexts/theme.context';
 import {
   getAutoImportEnabled,
   getAutoImportWatchDirectory,
@@ -136,7 +137,84 @@ const SettingsWrapper = styled.div`
   .settings-action-btn.exit:active {
     background: var(--semi-color-fill-2);
   }
+
+  .theme-control-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .theme-toggle {
+    position: relative;
+    width: 90px;
+    height: 34px;
+    padding: 3px;
+    border-radius: 999px;
+    border: 1px solid var(--semi-color-border);
+    background: var(--semi-color-fill-0);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: space-between;
+    transition: background-color 0.2s ease, border-color 0.2s ease;
+  }
+
+  .theme-toggle:hover {
+    border-color: color-mix(in srgb, var(--semi-color-primary) 48%, var(--semi-color-border) 52%);
+  }
+
+  .theme-toggle::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 17px;
+    width: 6px;
+    height: 6px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--semi-color-text-2) 72%, transparent);
+    box-shadow:
+      28px 0 0 color-mix(in srgb, var(--semi-color-text-2) 72%, transparent),
+      56px 0 0 color-mix(in srgb, var(--semi-color-text-2) 72%, transparent);
+    transform: translateY(-50%);
+    pointer-events: none;
+  }
+
+  .theme-toggle-thumb {
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 26px;
+    height: 26px;
+    border-radius: 999px;
+    background: var(--semi-color-bg-0);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.14);
+    transition: transform 0.2s ease, background-color 0.2s ease;
+    pointer-events: none;
+  }
+
+  .theme-toggle[data-mode='system'] .theme-toggle-thumb {
+    transform: translateX(28px);
+    background: color-mix(in srgb, var(--semi-color-primary) 18%, var(--semi-color-bg-0) 82%);
+  }
+
+  .theme-toggle[data-mode='dark'] .theme-toggle-thumb {
+    transform: translateX(56px);
+    background: var(--semi-color-primary);
+  }
+
+  .theme-toggle-label {
+    min-width: 64px;
+    font-size: 14px;
+    color: var(--semi-color-text-1);
+    text-align: right;
+  }
 `;
+
+const THEME_LABEL_MAP: Record<ThemeMode, string> = {
+  light: '白天',
+  system: '跟随系统',
+  dark: '夜间',
+};
 
 const Settings: React.FC = () => {
   const { Title, Text } = Typography;
@@ -186,14 +264,22 @@ const Settings: React.FC = () => {
 
         <div className="setting-item">
           <div>
-            <div className="setting-title">深色模式</div>
-            <div className="setting-desc">开启或关闭深色界面主题</div>
+            <div className="setting-title">界面主题</div>
+            <div className="setting-desc">白天、跟随系统、夜间三种显示方式</div>
           </div>
-          <Switch
-            size="large"
-            checked={theme === 'dark'}
-            onChange={() => toggleTheme()}
-          />
+          <div className="theme-control-group">
+            <button
+              type="button"
+              className="theme-toggle"
+              data-mode={theme}
+              onClick={() => toggleTheme()}
+              aria-label={`切换主题，当前为${THEME_LABEL_MAP[theme]}`}
+              title={`当前主题：${THEME_LABEL_MAP[theme]}`}
+            >
+              <span className="theme-toggle-thumb" />
+            </button>
+            <span className="theme-toggle-label">{THEME_LABEL_MAP[theme]}</span>
+          </div>
         </div>
 
         <div className="setting-item">
