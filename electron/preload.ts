@@ -26,12 +26,18 @@ contextBridge.exposeInMainWorld('ipcRenderer', {
 
 contextBridge.exposeInMainWorld('electronAPI', {
   getStaticData: () => ipcRenderer.invoke('sys:get-static-data'),
+  openTextFile: () => ipcRenderer.invoke('file:open'),
+  readLocalChromeBookmarks: () => ipcRenderer.invoke('file:read-local-chrome-bookmarks'),
+  readTextFile: (filePath: string) => ipcRenderer.invoke('file:read-text', filePath),
   pickUploadFiles: () => ipcRenderer.invoke('dialog:pick-upload-files'),
   pickUploadFolders: () => ipcRenderer.invoke('dialog:pick-upload-folders'),
   pickDownloadDirectory: () => ipcRenderer.invoke('dialog:pick-download-directory'),
+  saveDownloadFile: (defaultFileName: string) => ipcRenderer.invoke('dialog:save-download-file', defaultFileName),
   pickAutoImportDirectory: () => ipcRenderer.invoke('dialog:pick-auto-import-directory'),
   ensureDirectory: (baseDirectory: string, relativePath: string) =>
     ipcRenderer.invoke('fs:ensure-directory', baseDirectory, relativePath),
+  saveStagedDownloadFile: (stagedPath: string, targetFilePath: string) =>
+    ipcRenderer.invoke('fs:save-staged-download-file', stagedPath, targetFilePath),
   downloadUrlToPath: (
     url: string,
     baseDirectory: string,

@@ -26,6 +26,21 @@ interface Window {
   ipcRenderer: import('electron').IpcRenderer
 
   electronAPI: {
+    openTextFile: () => Promise<{
+      canceled: boolean;
+      content: string;
+      filePath: string;
+    }>;
+    readLocalChromeBookmarks: () => Promise<{
+      canceled: boolean;
+      content: string;
+      filePath: string;
+    }>;
+    readTextFile: (filePath: string) => Promise<{
+      canceled: boolean;
+      content: string;
+      filePath: string;
+    }>;
     pickUploadFiles: () => Promise<{
       canceled: boolean;
       files: Array<{
@@ -48,11 +63,16 @@ interface Window {
       canceled: boolean;
       directoryPath: string;
     }>;
+    saveDownloadFile: (defaultFileName: string) => Promise<{
+      canceled: boolean;
+      filePath: string;
+    }>;
     pickAutoImportDirectory: () => Promise<{
       canceled: boolean;
       directoryPath: string;
     }>;
     ensureDirectory: (baseDirectory: string, relativePath: string) => Promise<string>;
+    saveStagedDownloadFile: (stagedPath: string, targetFilePath: string) => Promise<string>;
     downloadUrlToPath: (
       url: string,
       baseDirectory: string,

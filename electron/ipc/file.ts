@@ -23,11 +23,30 @@ interface DesktopDirectoryPickResult {
   directoryPath: string;
 }
 
+interface DesktopTextFileReadResult {
+  canceled: boolean;
+  content: string;
+  filePath: string;
+}
+
+interface DesktopSaveFileResult {
+  canceled: boolean;
+  filePath: string;
+}
+
 const AUTO_IMPORT_DEFAULT_DIR_NAME = 'Omniflow Inbox';
 const AUTO_IMPORT_OBSERVE_TTL_MS = 10 * 60 * 1000;
 const AUTO_IMPORT_MIN_STABLE_COUNT = 2;
 const AUTO_IMPORT_MIN_MTIME_AGE_MS = 2_000;
 const AUTO_IMPORT_DEFAULT_MAX_FILES = 12;
+const MAC_CHROME_BOOKMARK_RELATIVE_PATH = path.join(
+  'Library',
+  'Application Support',
+  'Google',
+  'Chrome',
+  'Default',
+  'Bookmarks',
+);
 
 interface AutoImportObservedFileState {
   size: number;
@@ -70,6 +89,10 @@ function isTransientDownloadEntry(entryName: string): boolean {
 
 function getAutoImportStagingRoot(): string {
   return path.join(app.getPath('userData'), 'auto-import-staging');
+}
+
+function getEmbeddedBrowserDownloadStagingRoot(): string {
+  return path.join(app.getPath('userData'), 'embedded-browser-downloads');
 }
 
 function isPathInsideDirectory(filePath: string, directoryPath: string): boolean {
@@ -339,15 +362,46 @@ async function collectFilesFromSelectedFolders(folderPaths: string[]): Promise<D
 }
 
 export function registerFileIpc(ipcMain: Electron.IpcMain) {
-  ipcMain.handle('file:open', async () => {
-    const result = await dialog.showOpenDialog({ properties: ['openFile'] });
-    if (result.canceled || result.filePaths.length === 0) return null;
-    return await fs.readFile(result.filePaths[0], 'utf-8');
+  ipcMain.handle('file:open', async (): Promise<DesktopTextFileReadResult> => {
+    const result = await dialog.showOpenDialog({
+      properties: ['openFile', 'dontAddToRecent'],
+      filters: [
+        { name: 'JSON', extensions: ['json'] },
+        { name: 'All Files', extensions: ['*'] },
+      ],
+    });
+    if (result.canceled || result.filePaths.length === 0) {
+      return { canceled: true, content: '', filePath: '' };
+    }
+    const filePath = result.filePaths[0];
+    return {
+      canceled: false,
+      content: await fs.readFile(filePath, 'utf-8'),
+      filePath,
+    };
   });
 
   ipcMain.handle('file:save', async (_e, filePath: string, content: string) => {
     await fs.writeFile(filePath, content, 'utf-8');
     return true;
+  });
+
+  ipcMain.handle('file:read-text', async (_event, filePath: string): Promise<DesktopTextFileReadResult> => {
+    const normalizedPath = path.resolve(String(filePath || '').trim());
+    return {
+      canceled: false,
+      content: await fs.readFile(normalizedPath, 'utf-8'),
+      filePath: normalizedPath,
+    };
+  });
+
+  ipcMain.handle('file:read-local-chrome-bookmarks', async (): Promise<DesktopTextFileReadResult> => {
+    const filePath = path.join(app.getPath('home'), MAC_CHROME_BOOKMARK_RELATIVE_PATH);
+    return {
+      canceled: false,
+      content: await fs.readFile(filePath, 'utf-8'),
+      filePath,
+    };
   });
 
   ipcMain.handle('dialog:pick-upload-files', async (): Promise<DesktopUploadPickResult> => {
@@ -380,6 +434,20 @@ export function registerFileIpc(ipcMain: Electron.IpcMain) {
       return { canceled: true, directoryPath: '' };
     }
     return { canceled: false, directoryPath: result.filePaths[0] };
+  });
+
+  ipcMain.handle('dialog:save-download-file', async (
+    _event,
+    defaultFileName: string,
+  ): Promise<DesktopSaveFileResult> => {
+    const result = await dialog.showSaveDialog({
+      defaultPath: String(defaultFileName || 'download'),
+      showsTagField: false,
+    });
+    if (result.canceled || !result.filePath) {
+      return { canceled: true, filePath: '' };
+    }
+    return { canceled: false, filePath: result.filePath };
   });
 
   ipcMain.handle('dialog:pick-auto-import-directory', async (): Promise<DesktopDirectoryPickResult> => {
@@ -432,5 +500,26 @@ export function registerFileIpc(ipcMain: Electron.IpcMain) {
     const targetPath = resolveTargetPath(baseDirectory, relativePath);
     await downloadUrlToFile(url, targetPath, headers);
     return targetPath;
+  });
+
+  ipcMain.handle('fs:save-staged-download-file', async (
+    _event,
+    stagedPath: string,
+    targetFilePath: string,
+  ): Promise<string> => {
+    const normalizedSourcePath = path.resolve(String(stagedPath || '').trim());
+    const normalizedTargetPath = path.resolve(String(targetFilePath || '').trim());
+    const stagingRoot = getEmbeddedBrowserDownloadStagingRoot();
+
+    if (!normalizedSourcePath || !isPathInsideDirectory(normalizedSourcePath, stagingRoot)) {
+      throw new Error('无效的下载临时文件');
+    }
+    if (!normalizedTargetPath) {
+      throw new Error('无效的保存路径');
+    }
+
+    await fs.mkdir(path.dirname(normalizedTargetPath), { recursive: true });
+    await fs.copyFile(normalizedSourcePath, normalizedTargetPath);
+    return normalizedTargetPath;
   });
 }

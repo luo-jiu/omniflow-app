@@ -3,7 +3,11 @@ import { Toast } from '@douyinfe/semi-ui';
 import { uploadManager } from '@/utils/uploadManager';
 import { runtimeLogger } from '@/utils/runtimeLogger';
 import { UPLOAD_TASK_STATUS } from '@/modules/upload-center/model/upload-task.types';
-import { cleanupEmbeddedBrowserDownloadedFile, subscribeEmbeddedBrowserDownloads } from '../services/embedded-browser-download.api';
+import {
+  cleanupEmbeddedBrowserDownloadedFile,
+  saveEmbeddedBrowserDownloadToDesktop,
+  subscribeEmbeddedBrowserDownloads,
+} from '../services/embedded-browser-download.api';
 import type { EmbeddedBrowserDownloadEvent, LibraryFolderEntry } from '../types';
 
 type FileWithPath = File & { path: string };
@@ -30,6 +34,7 @@ export function useEmbeddedBrowserDownloadImport(
 ) {
   const [queue, setQueue] = React.useState<EmbeddedBrowserDownloadEvent[]>([]);
   const [importingDownloadId, setImportingDownloadId] = React.useState<string | null>(null);
+  const [savingDownloadId, setSavingDownloadId] = React.useState<string | null>(null);
   const activeDownload = queue[0] ?? null;
 
   React.useEffect(() => {
@@ -112,10 +117,35 @@ export function useEmbeddedBrowserDownloadImport(
       });
   }, [activeDownload, closeActiveDownload, libraryId, options]);
 
+  const saveActiveDownloadToDesktop = React.useCallback(async () => {
+    const current = activeDownload;
+    if (!current?.tempPath) {
+      await closeActiveDownload();
+      return;
+    }
+
+    setSavingDownloadId(current.downloadId);
+    try {
+      const result = await saveEmbeddedBrowserDownloadToDesktop(current.tempPath, current.fileName);
+      if (result.canceled) {
+        return;
+      }
+      await cleanupEmbeddedBrowserDownloadedFile(current.tempPath).catch(() => undefined);
+      setQueue((prev) => prev.filter((item) => item.downloadId !== current.downloadId));
+      Toast.success('已保存到本地');
+    } catch (error: any) {
+      Toast.error(error?.message || `保存失败：${current.fileName}`);
+    } finally {
+      setSavingDownloadId((prev) => (prev === current.downloadId ? null : prev));
+    }
+  }, [activeDownload, closeActiveDownload]);
+
   return {
     activeDownload,
     importLoading: importingDownloadId === activeDownload?.downloadId,
+    savingLoading: savingDownloadId === activeDownload?.downloadId,
     importActiveDownload,
+    saveActiveDownloadToDesktop,
     closeActiveDownload,
   };
 }

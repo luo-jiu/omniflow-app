@@ -9,9 +9,11 @@ type FolderCrumb = LibraryFolderEntry;
 interface EmbeddedBrowserDownloadImportModalProps {
   download: EmbeddedBrowserDownloadEvent | null;
   importLoading: boolean;
+  savingLoading: boolean;
   libraryId: number;
   onCancel: () => void;
   onConfirm: (target: LibraryFolderEntry) => void;
+  onSaveToDesktop: () => void;
 }
 
 const BrowserDownloadImportModalBody = styled.div`
@@ -150,9 +152,11 @@ function formatPageSource(url?: string) {
 const EmbeddedBrowserDownloadImportModal: React.FC<EmbeddedBrowserDownloadImportModalProps> = ({
   download,
   importLoading,
+  savingLoading,
   libraryId,
   onCancel,
   onConfirm,
+  onSaveToDesktop,
 }) => {
   const [rootFolder, setRootFolder] = React.useState<FolderCrumb | null>(null);
   const [folderStack, setFolderStack] = React.useState<FolderCrumb[]>([]);
@@ -256,13 +260,42 @@ const EmbeddedBrowserDownloadImportModal: React.FC<EmbeddedBrowserDownloadImport
       style={{ maxWidth: 'calc(100vw - 48px)' }}
       bodyStyle={{ padding: '8px 20px 10px', minHeight: 480 }}
       okButtonProps={{ disabled: !currentFolder || loading || importLoading }}
-      cancelButtonProps={{ disabled: importLoading }}
+      cancelButtonProps={{ disabled: importLoading || savingLoading }}
+      footer={
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, width: '100%' }}>
+          <button
+            type="button"
+            className="semi-button semi-button-tertiary"
+            disabled={importLoading || savingLoading || !download?.tempPath}
+            onClick={onSaveToDesktop}
+          >
+            {savingLoading ? '保存中...' : '保存到本地'}
+          </button>
+          <div style={{ display: 'flex', gap: 12 }}>
+            <button
+              type="button"
+              className="semi-button semi-button-tertiary"
+              disabled={importLoading || savingLoading}
+              onClick={onCancel}
+            >
+              丢弃
+            </button>
+            <button
+              type="button"
+              className="semi-button semi-button-primary"
+              disabled={!currentFolder || loading || importLoading || savingLoading}
+              onClick={() => {
+                if (currentFolder) {
+                  onConfirm(currentFolder);
+                }
+              }}
+            >
+              {importLoading ? '导入中...' : '导入这里'}
+            </button>
+          </div>
+        </div>
+      }
       onCancel={onCancel}
-      onOk={() => {
-        if (currentFolder) {
-          onConfirm(currentFolder);
-        }
-      }}
     >
       <BrowserDownloadImportModalBody>
         <div className="download-meta">

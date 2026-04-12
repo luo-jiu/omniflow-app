@@ -20,3 +20,19 @@ export async function cleanupEmbeddedBrowserDownloadedFile(tempPath?: string) {
   assertDesktopSupport();
   return window.electronEmbeddedBrowser.cleanupDownloadFile(tempPath);
 }
+
+export async function saveEmbeddedBrowserDownloadToDesktop(
+  tempPath: string,
+  defaultFileName: string,
+): Promise<{ canceled: boolean; filePath: string }> {
+  assertDesktopSupport();
+  const saveResult = await window.electronAPI.saveDownloadFile(defaultFileName);
+  if (!saveResult || saveResult.canceled || !saveResult.filePath) {
+    return { canceled: true, filePath: '' };
+  }
+  const filePath = await window.electronAPI.saveStagedDownloadFile(tempPath, String(saveResult.filePath));
+  return {
+    canceled: false,
+    filePath: String(filePath),
+  };
+}

@@ -1,6 +1,6 @@
 // main.ts (Electron 主进程入口文件)
 
-import { app, BrowserWindow, ipcMain, screen, session, WebContentsView } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, screen, session, WebContentsView } from 'electron'
 import { Buffer } from 'node:buffer'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
@@ -85,6 +85,8 @@ const embeddedBrowserAttachedOpenFiles = new Map<string, string>()
 const embeddedBrowserOpenFileRequestVersions = new Map<string, number>()
 let activeEmbeddedBrowserTabId: string | null = null
 let embeddedBrowserPendingBounds: { x: number; y: number; width: number; height: number } | null = null
+let embeddedBrowserSessionConfigured = false
+const embeddedBrowserFileSystemOriginDecisions = new Map<string, boolean>()
 
 type EmbeddedBrowserStatePayload = {
   canGoBack?: boolean
@@ -262,6 +264,111 @@ function isZoomShortcut(input: Electron.Input) {
 
   const key = (input.key || '').toLowerCase()
   return key === '+' || key === '=' || key === '-' || key === '_' || key === '0'
+}
+
+function resolveEmbeddedBrowserOrigin(rawValue: string) {
+  const value = String(rawValue || '').trim()
+  if (!value) {
+    return ''
+  }
+  try {
+    return new URL(value).origin
+  } catch {
+    return ''
+  }
+}
+
+function isEmbeddedBrowserFileSystemPermission(permission: string) {
+  return permission === 'fileSystem'
+}
+
+async function confirmEmbeddedBrowserFileSystemOrigin(origin: string) {
+  const normalizedOrigin = resolveEmbeddedBrowserOrigin(origin)
+  if (!normalizedOrigin) {
+    return false
+  }
+
+  const cachedDecision = embeddedBrowserFileSystemOriginDecisions.get(normalizedOrigin)
+  if (typeof cachedDecision === 'boolean') {
+    return cachedDecision
+  }
+
+  const focusedWindow = BrowserWindow.getFocusedWindow()
+    ?? mainWindow
+    ?? BrowserWindow.getAllWindows()[0]
+    ?? undefined
+  const { response } = await dialog.showMessageBox(focusedWindow, {
+    type: 'question',
+    buttons: ['拒绝', '允许'],
+    defaultId: 1,
+    cancelId: 0,
+    title: '允许网页访问本地目录',
+    message: `${normalizedOrigin} 想要访问你选择的本地目录。`,
+    detail: '仅在你信任这个网站时允许。之后本次运行期间会记住这个选择。',
+    noLink: true,
+  })
+  const granted = response === 1
+  embeddedBrowserFileSystemOriginDecisions.set(normalizedOrigin, granted)
+  return granted
+}
+
+async function resolveRestrictedPathAccessAction(details: { origin: string; path: string }) {
+  const normalizedOrigin = resolveEmbeddedBrowserOrigin(details.origin)
+  if (!normalizedOrigin) {
+    return 'deny' as const
+  }
+
+  const focusedWindow = BrowserWindow.getFocusedWindow()
+    ?? mainWindow
+    ?? BrowserWindow.getAllWindows()[0]
+    ?? undefined
+  const { response } = await dialog.showMessageBox(focusedWindow, {
+    type: 'question',
+    buttons: ['换个目录', '允许这次访问', '拒绝'],
+    defaultId: 0,
+    cancelId: 2,
+    title: '网页请求访问受限路径',
+    message: `${normalizedOrigin} 想要访问受限路径。`,
+    detail: String(details.path || ''),
+    noLink: true,
+  })
+  if (response === 0) {
+    return 'tryAgain' as const
+  }
+  if (response === 1) {
+    return 'allow' as const
+  }
+  return 'deny' as const
+}
+
+function configureEmbeddedBrowserSession() {
+  if (embeddedBrowserSessionConfigured) {
+    return
+  }
+  embeddedBrowserSessionConfigured = true
+
+  const browserSession = session.fromPartition(EMBEDDED_BROWSER_PARTITION)
+
+  browserSession.setPermissionRequestHandler((_webContents, permission, callback, details) => {
+    if (!isEmbeddedBrowserFileSystemPermission(String(permission))) {
+      callback(false)
+      return
+    }
+    void confirmEmbeddedBrowserFileSystemOrigin(details.requestingUrl || '').then((granted) => {
+      callback(granted)
+    }).catch(() => {
+      callback(false)
+    })
+  })
+
+  browserSession.on('file-system-access-restricted', (event, details, callback) => {
+    event.preventDefault()
+    void resolveRestrictedPathAccessAction(details).then((action) => {
+      callback(action)
+    }).catch(() => {
+      callback('deny')
+    })
+  })
 }
 
 function registerWindowIpcHandlers() {
@@ -1277,6 +1384,7 @@ app.whenReady().then(() => {
     app.dock.setIcon(appIconPath)
   }
 
+  configureEmbeddedBrowserSession()
   initializeEmbeddedBrowserDownloadBridge({
     emitDownload: emitEmbeddedBrowserDownload,
     resolveTabIdByWebContents: resolveEmbeddedBrowserTabIdByWebContents,

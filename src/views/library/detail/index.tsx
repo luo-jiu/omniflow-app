@@ -57,6 +57,7 @@ import {
 } from "@/features/embedded-browser/services/favicon-cache";
 import { getFileLink } from '@/features/file-explorer/services/file.api';
 import { resolveBrowserFileMapping } from '@/features/browser-file-mappings/services/browser-file-mapping.api';
+import { getAppPopupContainer } from '@/utils/popup-container';
 import { useAuth } from '@/hooks/useAuth';
 import SearchWorkspace, { type SearchWorkspaceMode } from "./SearchWorkspace";
 import {
@@ -74,7 +75,11 @@ const SIDE_PANEL_WIDTH_STORAGE_PREFIX = 'library-detail:side-panel-width:';
 const CONTENT_TOOLBAR_HEIGHT = 46;
 const TOOLBAR_ACTION_BUTTON_SIZE = 36;
 const TOOLBAR_ACTION_ICON_SIZE = 18;
-const BROWSER_TAB_HEIGHT = 36;
+const HEADER_ITEM_ICON_SIZE = 18;
+const HEADER_ITEM_FONT_SIZE = 14;
+const BROWSER_TAB_HEIGHT = 38;
+const BOOKMARK_TOOLBAR_HEIGHT = 42;
+const BOOKMARK_ITEM_HEIGHT = 38;
 const BROWSER_INPUT_HEIGHT = 34;
 
 function getSidePanelWidthStorageKey(libraryId: number) {
@@ -336,8 +341,8 @@ const ContentToolbar = styled.div`
     position: sticky;
     right: 0;
     z-index: 1;
-    width: 32px;
-    height: 32px;
+    width: 34px;
+    height: 34px;
     margin-left: 4px;
     border-radius: 8px;
     border: 1px solid var(--app-border);
@@ -375,8 +380,8 @@ const ContentToolbar = styled.div`
   }
 
   .browser-tab-favicon {
-    width: 16px;
-    height: 16px;
+    width: ${HEADER_ITEM_ICON_SIZE}px;
+    height: ${HEADER_ITEM_ICON_SIZE}px;
     flex-shrink: 0;
   }
 
@@ -394,7 +399,7 @@ const ContentToolbar = styled.div`
   }
 
   .browser-tab-favicon.favicon-fallback .semi-icon {
-    font-size: 12px;
+    font-size: 13px;
   }
 
   .browser-tab-btn.active {
@@ -421,7 +426,9 @@ const ContentToolbar = styled.div`
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: 13px;
+    font-size: ${HEADER_ITEM_FONT_SIZE}px;
+    line-height: 1.2;
+    font-weight: 500;
     text-align: left;
   }
 
@@ -480,7 +487,7 @@ const ContentToolbar = styled.div`
 `;
 
 const BookmarkToolbar = styled.div`
-  height: 38px;
+  height: ${BOOKMARK_TOOLBAR_HEIGHT}px;
   flex-shrink: 0;
   border-bottom: 1px solid var(--app-border);
   background: var(--app-bg);
@@ -500,7 +507,7 @@ const BookmarkToolbar = styled.div`
   }
 
   .bookmark-item {
-    height: 28px;
+    height: ${BOOKMARK_ITEM_HEIGHT}px;
     min-width: 0;
     max-width: 180px;
     border: 1px solid transparent;
@@ -509,8 +516,8 @@ const BookmarkToolbar = styled.div`
     color: var(--app-text);
     display: inline-flex;
     align-items: center;
-    gap: 7px;
-    padding: 0 9px;
+    gap: 8px;
+    padding: 0 11px;
     cursor: pointer;
     flex-shrink: 0;
     user-select: none;
@@ -540,11 +547,13 @@ const BookmarkToolbar = styled.div`
   }
 
   .bookmark-favicon {
-    width: 16px;
-    height: 16px;
+    width: ${HEADER_ITEM_ICON_SIZE}px;
+    height: ${HEADER_ITEM_ICON_SIZE}px;
     border-radius: 4px;
     flex-shrink: 0;
     object-fit: contain;
+    display: block;
+    align-self: center;
   }
 
   .bookmark-favicon.favicon-fallback {
@@ -556,12 +565,12 @@ const BookmarkToolbar = styled.div`
   }
 
   .bookmark-favicon.favicon-fallback .semi-icon {
-    font-size: 12px;
+    font-size: 13px;
   }
 
   .bookmark-folder-glyph {
-    width: 16px;
-    height: 16px;
+    width: ${HEADER_ITEM_ICON_SIZE}px;
+    height: ${HEADER_ITEM_ICON_SIZE}px;
     flex-shrink: 0;
     position: relative;
     display: inline-block;
@@ -571,9 +580,9 @@ const BookmarkToolbar = styled.div`
     content: "";
     position: absolute;
     left: 1px;
-    top: 5px;
-    width: 13px;
-    height: 9px;
+    top: 6px;
+    width: 15px;
+    height: 10px;
     border-radius: 3px;
     border: 1.5px solid currentColor;
     background: transparent;
@@ -585,8 +594,8 @@ const BookmarkToolbar = styled.div`
     position: absolute;
     left: 2px;
     top: 2px;
-    width: 8px;
-    height: 4px;
+    width: 9px;
+    height: 5px;
     border: 1.5px solid currentColor;
     border-bottom: none;
     border-radius: 3px 3px 0 0;
@@ -599,13 +608,14 @@ const BookmarkToolbar = styled.div`
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: 13px;
-    line-height: 1;
+    font-size: ${HEADER_ITEM_FONT_SIZE}px;
+    line-height: 1.2;
+    font-weight: 500;
   }
 
   .bookmark-more-btn {
-    width: 32px;
-    height: 28px;
+    width: 34px;
+    height: 34px;
     border-radius: 8px;
     border: 1px solid transparent;
     background: transparent;
@@ -624,8 +634,8 @@ const BookmarkContextMenuLayer = styled.div`
 
   .bookmark-favicon,
   .bookmark-folder-glyph {
-    width: 16px;
-    height: 16px;
+    width: ${HEADER_ITEM_ICON_SIZE}px;
+    height: ${HEADER_ITEM_ICON_SIZE}px;
     flex-shrink: 0;
     position: relative;
     display: inline-block;
@@ -635,6 +645,8 @@ const BookmarkContextMenuLayer = styled.div`
   .bookmark-favicon {
     border-radius: 4px;
     object-fit: contain;
+    display: block;
+    align-self: center;
   }
 
   .bookmark-favicon.favicon-fallback {
@@ -646,16 +658,16 @@ const BookmarkContextMenuLayer = styled.div`
   }
 
   .bookmark-favicon.favicon-fallback .semi-icon {
-    font-size: 12px;
+    font-size: 13px;
   }
 
   .bookmark-folder-glyph::before {
     content: "";
     position: absolute;
     left: 1px;
-    top: 5px;
-    width: 13px;
-    height: 9px;
+    top: 6px;
+    width: 15px;
+    height: 10px;
     border-radius: 3px;
     border: 1.5px solid currentColor;
     background: transparent;
@@ -667,8 +679,8 @@ const BookmarkContextMenuLayer = styled.div`
     position: absolute;
     left: 2px;
     top: 2px;
-    width: 8px;
-    height: 4px;
+    width: 9px;
+    height: 5px;
     border: 1.5px solid currentColor;
     border-bottom: none;
     border-radius: 3px 3px 0 0;
@@ -1109,6 +1121,8 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
     closeActiveDownload,
     importActiveDownload,
     importLoading: importingBrowserDownload,
+    saveActiveDownloadToDesktop,
+    savingLoading: savingBrowserDownload,
   } = useEmbeddedBrowserDownloadImport(libraryId, {
     onImportSuccess: handleBrowserDownloadImportSuccess,
   });
@@ -1494,36 +1508,29 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
       return;
     }
     try {
-      if (bookmarkMatch.matched && bookmarkMatch.bookmark?.id) {
-        await deleteBrowserBookmark(bookmarkMatch.bookmark.id);
-        invalidateBookmarkDisplayIcon(bookmarkMatch.bookmark.id);
-        setBookmarkMatch({ matched: false, bookmark: null });
-        Toast.success('已取消收藏');
-      } else {
-        const title = getDefaultBookmarkTitle(normalizedUrl, activeBrowserTab?.title);
-        const created = await createBrowserBookmark({
-          kind: 'url',
-          title,
-          url: normalizedUrl,
-          iconUrl: getPersistableBookmarkIconUrl(activeBrowserTab?.iconSourceUrl) || null,
-        });
-        if (activeBrowserTab?.iconUrl) {
-          setBookmarkIconDisplayUrls((current) => ({
-            ...current,
-            [created.id]: {
-              dataUrl: activeBrowserTab.iconUrl as string,
-              signature: getBookmarkIconDisplaySignature(created),
-            },
-          }));
-        }
-        setBookmarkMatch({ matched: true, bookmark: created });
-        Toast.success('已加入书签栏');
+      const title = getDefaultBookmarkTitle(normalizedUrl, activeBrowserTab?.title);
+      const created = await createBrowserBookmark({
+        kind: 'url',
+        title,
+        url: normalizedUrl,
+        iconUrl: getPersistableBookmarkIconUrl(activeBrowserTab?.iconSourceUrl) || null,
+      });
+      if (activeBrowserTab?.iconUrl) {
+        setBookmarkIconDisplayUrls((current) => ({
+          ...current,
+          [created.id]: {
+            dataUrl: activeBrowserTab.iconUrl as string,
+            signature: getBookmarkIconDisplaySignature(created),
+          },
+        }));
       }
+      setBookmarkMatch({ matched: true, bookmark: created });
+      Toast.success(bookmarkMatch.matched ? '已追加到书签栏' : '已加入书签栏');
       await reloadBookmarks();
     } catch (error: any) {
       Toast.error(error?.message || '收藏操作失败');
     }
-  }, [activeBrowserTab, bookmarkMatch, browserInput, invalidateBookmarkDisplayIcon, reloadBookmarks]);
+  }, [activeBrowserTab, bookmarkMatch.matched, browserInput, reloadBookmarks]);
 
   const openBookmarkURL = React.useCallback((item: BrowserBookmarkItem) => {
     if (!isURLBookmark(item)) {
@@ -1943,15 +1950,15 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
       if (item.kind === 'folder') {
         return {
           key: `folder:${item.id}`,
-          label: item.title || '未命名文件夹',
-          icon: <BookmarkVisual cacheOwnerKey={faviconCacheOwnerKey} displayIcon={getResolvedBookmarkDisplayIcon(item)} item={item} />,
+          label: <span title={item.title || '未命名文件夹'}>{item.title || '未命名文件夹'}</span>,
+          icon: <span className="bookmark-folder-glyph" aria-hidden="true" />,
           children: buildBookmarkFolderMenuItems(item.children || [], item.id),
           render: renderDraggableItem,
         };
       }
       return {
         key: `url:${item.id}`,
-        label: item.title || item.url || '未命名书签',
+        label: <span title={item.title || item.url || '未命名书签'}>{item.title || item.url || '未命名书签'}</span>,
         icon: <BookmarkVisual cacheOwnerKey={faviconCacheOwnerKey} displayIcon={getResolvedBookmarkDisplayIcon(item)} item={item} />,
         render: (content) => renderDraggableItem(content, () => openBookmarkURL(item)),
       };
@@ -2700,7 +2707,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
         showArrow={false}
         position="bottomLeft"
         spacing={6}
-        getPopupContainer={() => document.body}
+        getPopupContainer={getAppPopupContainer}
           content={
             <ContextMenu
               items={buildBookmarkFolderMenuItems(item.children || [], item.id)}
@@ -3125,7 +3132,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
                     showArrow={false}
                     position="bottomRight"
                     spacing={6}
-                    getPopupContainer={() => document.body}
+                    getPopupContainer={getAppPopupContainer}
                     content={
                       <ContextMenu
                         items={buildBookmarkFolderMenuItems(overflowBookmarks)}
@@ -3322,12 +3329,16 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
       <EmbeddedBrowserDownloadImportModal
         download={activeBrowserDownload}
         importLoading={importingBrowserDownload}
+        savingLoading={savingBrowserDownload}
         libraryId={libraryId}
         onCancel={() => {
           void closeActiveDownload({ discardFile: true });
         }}
         onConfirm={(targetFolder) => {
           void importActiveDownload(targetFolder);
+        }}
+        onSaveToDesktop={() => {
+          void saveActiveDownloadToDesktop();
         }}
       />
     </DetailWrapper>
