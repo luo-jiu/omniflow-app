@@ -809,6 +809,8 @@ const Jr = /* @__PURE__ */ new Set(["m3u8", "m3u", "mpd"]), Gr = /* @__PURE__ */
   "avi",
   "ts",
   "flv",
+  "hlv",
+  "f4v",
   "wma",
   "mpeg",
   "wmv",
@@ -819,7 +821,8 @@ const Jr = /* @__PURE__ */ new Set(["m3u8", "m3u", "mpd"]), Gr = /* @__PURE__ */
   "vid",
   "weba",
   "opus",
-  "acc"
+  "acc",
+  "3gp"
 ]), Xr = /* @__PURE__ */ new Set(["jpg", "jpeg", "png", "gif", "webp", "bmp", "svg", "avif", "ico"]), Zr = /* @__PURE__ */ new Set(["vtt", "srt", "ass", "ssa", "ttml"]), Yr = /* @__PURE__ */ new Set(["key", "base64key"]), Qr = /* @__PURE__ */ new Set([
   "accept",
   "accept-language",
@@ -854,7 +857,7 @@ function Ze(e) {
 }
 function _t(e) {
   const t = ke(e.mimeType), r = Ze(e.url);
-  return Jr.has(r) || t.includes("mpegurl") || t.includes("dash+xml") ? "manifest" : Gr.has(r) || t.startsWith("video/") || t.startsWith("audio/") || e.resourceType === "media" || String(e.url || "").startsWith("blob:") ? "media" : Xr.has(r) || t.startsWith("image/") ? "image" : Zr.has(r) || t.includes("text/vtt") ? "subtitle" : r === "pdf" || t === "application/pdf" ? "document" : Yr.has(r) || e.resourceType === "key" || t === "application/octet-stream" ? "key" : "other";
+  return Jr.has(r) || t.includes("mpegurl") || t.includes("dash+xml") ? "manifest" : Gr.has(r) || t.startsWith("video/") || t.startsWith("audio/") || t === "application/ogg" || t === "application/m4s" || e.resourceType === "media" || String(e.url || "").startsWith("blob:") ? "media" : Xr.has(r) || t.startsWith("image/") ? "image" : Zr.has(r) || t.includes("text/vtt") ? "subtitle" : r === "pdf" || t === "application/pdf" ? "document" : Yr.has(r) || e.resourceType === "key" || t === "application/octet-stream" ? "key" : "other";
 }
 function xt(e) {
   return !e.url || e.url.startsWith("data:") ? !1 : e.kind !== "other" ? !0 : e.resourceType === "media" || e.url.startsWith("blob:");

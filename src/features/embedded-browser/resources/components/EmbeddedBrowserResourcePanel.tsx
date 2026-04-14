@@ -25,7 +25,7 @@ type EmbeddedBrowserResourcePanelProps = {
 };
 
 const RESOURCE_FILTER_STORAGE_KEY = 'embedded-browser:resource-filter-regex';
-const DEFAULT_MEDIA_RESOURCE_REGEX = String.raw`(blob:|key|base64key|\.((m3u8|mpd|m4s|mp4|m4v|m4a|mp3|aac|flac|wav|ogg|oga|ogv|webm|mkv|mov|avi|ts|flv|vtt|srt))(?:$|[?#]))`;
+const DEFAULT_MEDIA_RESOURCE_REGEX = String.raw`(blob:|key|base64key|\.((m3u8|m3u|mpd|m4s|mp4|m4v|m4a|mp3|aac|flac|wav|ogg|oga|ogv|webm|mkv|mov|avi|ts|flv|hlv|f4v|wma|mpeg|wmv|asf|movie|divx|mpeg4|vid|weba|opus|acc|3gp|vtt|srt))(?:$|[?#]))`;
 
 const PanelShell = styled.aside`
   width: 360px;

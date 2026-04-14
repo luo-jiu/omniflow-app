@@ -67,18 +67,20 @@ export function embeddedBrowserResourceProbeRuntimeCoreBody() {
   const manifestExtensions = new Set(['m3u8', 'm3u', 'mpd'])
   const mediaExtensions = new Set([
     'mp4', 'm4v', 'm4a', 'm4s', 'mp3', 'aac', 'flac', 'wav', 'ogg', 'oga', 'ogv',
-    'webm', 'mkv', 'mov', 'avi', 'ts', 'flv', 'wma', 'mpeg', 'wmv', 'asf', 'movie',
-    'divx', 'mpeg4', 'vid', 'weba', 'opus', 'acc',
+    'webm', 'mkv', 'mov', 'avi', 'ts', 'flv', 'hlv', 'f4v', 'wma', 'mpeg', 'wmv',
+    'asf', 'movie', 'divx', 'mpeg4', 'vid', 'weba', 'opus', 'acc', '3gp',
   ])
   const imageExtensions = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'avif', 'ico'])
   const subtitleExtensions = new Set(['vtt', 'srt', 'ass', 'ssa', 'ttml'])
+  const keyExtensions = new Set(['key', 'base64key'])
   const dataUrlPattern = /^data:(application|video|audio)\//i
   const likelyUrlPattern = /^(https?:\/\/|blob:|\/\/|\/|\.\/|\.\.\/)/i
   const manifestPattern = /\.(m3u8|m3u|mpd)(\?|#|$)/i
-  const mediaPattern = /\.(mp4|m4v|m4a|m4s|mp3|aac|flac|wav|ogg|oga|ogv|webm|mkv|mov|avi|ts|flv|wma|mpeg|wmv|asf|movie|divx|mpeg4|vid|weba|opus|acc)(\?|#|$)/i
+  const mediaPattern = /\.(mp4|m4v|m4a|m4s|mp3|aac|flac|wav|ogg|oga|ogv|webm|mkv|mov|avi|ts|flv|hlv|f4v|wma|mpeg|wmv|asf|movie|divx|mpeg4|vid|weba|opus|acc|3gp)(\?|#|$)/i
   const imagePattern = /\.(jpg|jpeg|png|gif|webp|bmp|svg|avif|ico)(\?|#|$)/i
   const subtitlePattern = /\.(vtt|srt|ass|ssa|ttml)(\?|#|$)/i
   const pdfPattern = /\.pdf(\?|#|$)/i
+  const keyPattern = /\.(key|base64key)(\?|#|$)/i
   const originalJSONParse = JSON.parse.bind(JSON)
   const originalConsoleInfo = typeof console.info === 'function'
     ? console.info.bind(console)
@@ -356,6 +358,7 @@ export function embeddedBrowserResourceProbeRuntimeCoreBody() {
         || imagePattern.test(value)
         || subtitlePattern.test(value)
         || pdfPattern.test(value)
+        || keyPattern.test(value)
       ) {
         return new URL(value, currentLocationHref).toString()
       }
@@ -394,10 +397,15 @@ export function embeddedBrowserResourceProbeRuntimeCoreBody() {
       mediaExtensions.has(extension)
       || normalizedMimeType.startsWith('video/')
       || normalizedMimeType.startsWith('audio/')
+      || normalizedMimeType === 'application/ogg'
+      || normalizedMimeType === 'application/m4s'
       || mediaPattern.test(url)
       || url.startsWith('blob:')
     ) {
       return 'media'
+    }
+    if (keyExtensions.has(extension) || keyPattern.test(url)) {
+      return 'key'
     }
     if (imageExtensions.has(extension) || normalizedMimeType.startsWith('image/') || imagePattern.test(url)) {
       return 'image'
@@ -433,6 +441,9 @@ export function embeddedBrowserResourceProbeRuntimeCoreBody() {
     }
     if (normalizedMimeType.endsWith('/ogg')) {
       return 'ogg'
+    }
+    if (normalizedMimeType === 'application/m4s') {
+      return 'm4s'
     }
     if (normalizedMimeType.endsWith('/wav')) {
       return 'wav'
