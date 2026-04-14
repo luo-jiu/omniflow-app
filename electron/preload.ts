@@ -170,7 +170,7 @@ contextBridge.exposeInMainWorld('electronEmbeddedBrowser', {
     contentLength?: number;
     ext?: string;
     id: string;
-    kind: 'manifest' | 'media' | 'image' | 'subtitle' | 'document' | 'other';
+    kind: 'manifest' | 'media' | 'image' | 'subtitle' | 'document' | 'key' | 'other';
     method?: string;
     mimeType?: string;
     pageUrl?: string;
@@ -189,7 +189,7 @@ contextBridge.exposeInMainWorld('electronEmbeddedBrowser', {
       contentLength?: number;
       ext?: string;
       id: string;
-      kind: 'manifest' | 'media' | 'image' | 'subtitle' | 'document' | 'other';
+      kind: 'manifest' | 'media' | 'image' | 'subtitle' | 'document' | 'key' | 'other';
       method?: string;
       mimeType?: string;
       pageUrl?: string;
@@ -220,6 +220,26 @@ contextBridge.exposeInMainWorld('electronEmbeddedBrowser', {
     title?: string;
     url: string;
   }) => ipcRenderer.invoke('embedded-browser:resource:preview', tabId, payload),
+  getCatchToolkitState: (tabId: string) => ipcRenderer.invoke('embedded-browser:resource:catch-toolkit:get-state', tabId),
+  updateCatchToolkitState: (tabId: string, payload: {
+    autoSeekToBufferedEnd?: boolean;
+    autoDownloadOnComplete?: boolean;
+    capturedMediaSizeBytes?: number;
+    clearCacheOnComplete?: boolean;
+    currentFileName?: string;
+    isCaptureComplete?: boolean;
+    manualFileName?: string;
+    regexWarning?: string;
+    regexRule?: string;
+    restartAlwaysFromBeginning?: boolean;
+    selectorWarning?: string;
+    selectorRule?: string;
+    streamCount?: number;
+    trimExtraMediaHeaders?: boolean;
+  }) => ipcRenderer.invoke('embedded-browser:resource:catch-toolkit:update-state', tabId, payload),
+  clearCatchMediaCache: (tabId: string) => ipcRenderer.invoke('embedded-browser:resource:catch-toolkit:clear-cache', tabId),
+  downloadCatchMedia: (tabId: string) => ipcRenderer.invoke('embedded-browser:resource:catch-toolkit:download', tabId),
+  restartCatchMediaCapture: (tabId: string) => ipcRenderer.invoke('embedded-browser:resource:catch-toolkit:restart', tabId),
   mergeCapturedMseResources: (tabId: string, payload: {
     audioResourceKey?: string;
     ffmpegPath?: string;

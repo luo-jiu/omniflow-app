@@ -34,3 +34,20 @@ export type EmbeddedBrowserResourceCaptureSnapshot = {
   enabled: boolean;
   resources: EmbeddedBrowserCapturedResource[];
 };
+
+export type EmbeddedBrowserCatchToolkitState = {
+  autoSeekToBufferedEnd: boolean;
+  autoDownloadOnComplete: boolean;
+  capturedMediaSizeBytes: number;
+  clearCacheOnComplete: boolean;
+  currentFileName: string;
+  isCaptureComplete: boolean;
+  manualFileName: string;
+  regexWarning: string;
+  regexRule: string;
+  restartAlwaysFromBeginning: boolean;
+  selectorWarning: string;
+  selectorRule: string;
+  streamCount: number;
+  trimExtraMediaHeaders: boolean;
+};

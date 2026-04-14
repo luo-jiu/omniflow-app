@@ -1,254 +1,254 @@
-import { dialog as ne, app as $, net as qr, ipcMain as O, session as _e, webContents as Xr, BrowserWindow as W, screen as Gr, WebContentsView as Jr } from "electron";
-import { Buffer as er } from "node:buffer";
-import { fileURLToPath as Zr } from "node:url";
-import T from "node:path";
-import ot, { existsSync as Ke, mkdirSync as ct, constants as Yr, readFileSync as Qr, writeFileSync as en } from "node:fs";
-import N from "fs/promises";
-import He, { mkdtemp as tn, writeFile as rn, rm as nn, access as on } from "node:fs/promises";
-import tr from "node:http";
-import rr from "node:https";
-import nr from "os";
-import dt from "child_process";
-import sn from "fs";
-import { spawn as or } from "node:child_process";
-import an from "node:os";
-const Me = 6e4;
-async function ut(t, e, o = {}, a = 0) {
-  const l = new URL(t);
-  if (l.protocol !== "http:" && l.protocol !== "https:")
-    throw new Error(`不支持的下载协议: ${l.protocol}`);
-  const y = l.protocol === "https:" ? rr : tr;
-  await He.mkdir(T.dirname(e), { recursive: !0 }), await new Promise((R, _) => {
-    let h = !1;
-    const v = () => {
-      h || (h = !0, R());
-    }, w = (B) => {
-      h || (h = !0, _(B));
+import { dialog as ie, app as N, net as wn, ipcMain as U, session as Oe, webContents as bn, BrowserWindow as z, screen as Sn, WebContentsView as En } from "electron";
+import { Buffer as gr } from "node:buffer";
+import { fileURLToPath as vn } from "node:url";
+import B from "node:path";
+import ht, { existsSync as Xe, mkdirSync as Et, constants as Tn, readFileSync as Rn, writeFileSync as Cn } from "node:fs";
+import $ from "fs/promises";
+import qe, { mkdtemp as Bn, writeFile as xn, rm as _n, access as On } from "node:fs/promises";
+import yr from "node:http";
+import hr from "node:https";
+import wr from "os";
+import vt from "child_process";
+import Dn from "fs";
+import { spawn as br } from "node:child_process";
+import Mn from "node:os";
+const Ne = 6e4;
+async function Tt(t, e, o = {}, c = 0) {
+  const m = new URL(t);
+  if (m.protocol !== "http:" && m.protocol !== "https:")
+    throw new Error(`不支持的下载协议: ${m.protocol}`);
+  const y = m.protocol === "https:" ? hr : yr;
+  await qe.mkdir(B.dirname(e), { recursive: !0 }), await new Promise((v, x) => {
+    let w = !1;
+    const R = () => {
+      w || (w = !0, v());
+    }, S = (C) => {
+      w || (w = !0, x(C));
     }, b = y.request({
-      protocol: l.protocol,
-      hostname: l.hostname,
-      port: l.port ? Number(l.port) : void 0,
-      path: `${l.pathname}${l.search}`,
+      protocol: m.protocol,
+      hostname: m.hostname,
+      port: m.port ? Number(m.port) : void 0,
+      path: `${m.pathname}${m.search}`,
       method: "GET",
       headers: o
-    }, (B) => {
-      B.setTimeout(Me, () => {
-        B.destroy(new Error(`下载响应超时: ${Me}ms`));
+    }, (C) => {
+      C.setTimeout(Ne, () => {
+        C.destroy(new Error(`下载响应超时: ${Ne}ms`));
       });
-      const A = Number(B.statusCode || 0), L = B.headers.location;
-      if (A >= 300 && A < 400 && L) {
-        if (B.resume(), a >= 3) {
-          w(new Error(`下载重定向次数过多: ${t}`));
+      const k = Number(C.statusCode || 0), L = C.headers.location;
+      if (k >= 300 && k < 400 && L) {
+        if (C.resume(), c >= 3) {
+          S(new Error(`下载重定向次数过多: ${t}`));
           return;
         }
-        const K = new URL(L, t).toString();
-        ut(K, e, o, a + 1).then(v).catch(w);
+        const J = new URL(L, t).toString();
+        Tt(J, e, o, c + 1).then(R).catch(S);
         return;
       }
-      if (A >= 400) {
-        B.resume(), w(new Error(`下载失败: HTTP ${A} (${t})`));
+      if (k >= 400) {
+        C.resume(), S(new Error(`下载失败: HTTP ${k} (${t})`));
         return;
       }
-      const z = ot.createWriteStream(e), V = async (K) => {
+      const H = ht.createWriteStream(e), q = async (J) => {
         try {
-          z.destroy();
+          H.destroy();
         } catch {
         }
         try {
-          await He.rm(e, { force: !0 });
+          await qe.rm(e, { force: !0 });
         } catch {
         }
-        w(K);
+        S(J);
       };
-      B.on("error", (K) => {
-        V(K);
-      }), z.on("error", (K) => {
-        V(K);
-      }), z.on("finish", () => v()), B.pipe(z);
+      C.on("error", (J) => {
+        q(J);
+      }), H.on("error", (J) => {
+        q(J);
+      }), H.on("finish", () => R()), C.pipe(H);
     });
-    b.setTimeout(Me, () => {
-      b.destroy(new Error(`下载请求超时: ${Me}ms`));
-    }), b.on("error", (B) => w(B)), b.end();
+    b.setTimeout(Ne, () => {
+      b.destroy(new Error(`下载请求超时: ${Ne}ms`));
+    }), b.on("error", (C) => S(C)), b.end();
   });
 }
-const cn = "Omniflow Inbox", dn = 10 * 60 * 1e3, un = 2, ln = 2e3, st = 12, fn = T.join(
+const Un = "Omniflow Inbox", Pn = 10 * 60 * 1e3, kn = 2, Ln = 2e3, wt = 12, An = B.join(
   "Library",
   "Application Support",
   "Google",
   "Chrome",
   "Default",
   "Bookmarks"
-), Te = /* @__PURE__ */ new Map();
-function lt(t) {
+), Be = /* @__PURE__ */ new Map();
+function Rt(t) {
   const e = String(t || "");
   return !!(!e || e === ".DS_Store" || e.startsWith("._") || e === "Thumbs.db");
 }
-function Re(t) {
+function xe(t) {
   return t.replace(/\\/g, "/").split("/").filter(Boolean).join("/");
 }
-function mn(t) {
+function Fn(t) {
   const e = String(t || "").toLowerCase();
   return !e || e.startsWith(".") ? !0 : e.endsWith(".crdownload") || e.endsWith(".part") || e.endsWith(".tmp") || e.endsWith(".opdownload") || e.endsWith(".download");
 }
-function sr() {
-  return T.join($.getPath("userData"), "auto-import-staging");
+function Sr() {
+  return B.join(N.getPath("userData"), "auto-import-staging");
 }
-function pn() {
-  return T.join($.getPath("userData"), "embedded-browser-downloads");
+function Nn() {
+  return B.join(N.getPath("userData"), "embedded-browser-downloads");
 }
-function ir(t, e) {
-  const o = T.resolve(t), a = T.resolve(e);
-  return o === a ? !0 : o.startsWith(`${a}${T.sep}`);
+function Er(t, e) {
+  const o = B.resolve(t), c = B.resolve(e);
+  return o === c ? !0 : o.startsWith(`${c}${B.sep}`);
 }
-function yn(t) {
+function $n(t) {
   const e = String(t || "unknown").replace(/[/\\]/g, "_").trim() || "unknown";
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${e}`;
 }
-async function gn(t, e) {
+async function Wn(t, e) {
   try {
-    await N.rename(t, e);
+    await $.rename(t, e);
   } catch (o) {
     if ((o == null ? void 0 : o.code) !== "EXDEV")
       throw o;
-    await N.copyFile(t, e), await N.rm(t, { force: !0 });
+    await $.copyFile(t, e), await $.rm(t, { force: !0 });
   }
 }
-function hn(t) {
+function In(t) {
   const e = Date.now();
-  for (const [o, a] of Te.entries())
-    t.has(o) || e - a.lastSeenAt <= dn || Te.delete(o);
+  for (const [o, c] of Be.entries())
+    t.has(o) || e - c.lastSeenAt <= Pn || Be.delete(o);
 }
-async function wn(t, e = st) {
-  const o = String(t || "").trim(), a = o ? T.resolve(o) : T.join($.getPath("downloads"), cn), d = await N.stat(a).catch(() => null);
-  if (!(d != null && d.isDirectory()))
+async function zn(t, e = wt) {
+  const o = String(t || "").trim(), c = o ? B.resolve(o) : B.join(N.getPath("downloads"), Un), u = await $.stat(c).catch(() => null);
+  if (!(u != null && u.isDirectory()))
     return [];
-  const l = await N.readdir(a, { withFileTypes: !0 }), y = /* @__PURE__ */ new Set(), R = Date.now(), _ = [];
-  for (const b of l) {
-    if (!b.isFile() || lt(b.name) || mn(b.name)) continue;
-    const B = T.join(a, b.name), A = await N.stat(B).catch(() => null);
-    if (!(A != null && A.isFile())) continue;
-    y.add(B);
-    const L = Te.get(B), V = (L ? L.size === A.size && L.mtimeMs === A.mtimeMs : !1) && L ? L.stableCount + 1 : 1;
-    Te.set(B, {
-      size: A.size,
-      mtimeMs: A.mtimeMs,
-      stableCount: V,
-      lastSeenAt: R
-    }), !(V < un) && (R - A.mtimeMs < ln || _.push({
-      sourcePath: B,
+  const m = await $.readdir(c, { withFileTypes: !0 }), y = /* @__PURE__ */ new Set(), v = Date.now(), x = [];
+  for (const b of m) {
+    if (!b.isFile() || Rt(b.name) || Fn(b.name)) continue;
+    const C = B.join(c, b.name), k = await $.stat(C).catch(() => null);
+    if (!(k != null && k.isFile())) continue;
+    y.add(C);
+    const L = Be.get(C), q = (L ? L.size === k.size && L.mtimeMs === k.mtimeMs : !1) && L ? L.stableCount + 1 : 1;
+    Be.set(C, {
+      size: k.size,
+      mtimeMs: k.mtimeMs,
+      stableCount: q,
+      lastSeenAt: v
+    }), !(q < kn) && (v - k.mtimeMs < Ln || x.push({
+      sourcePath: C,
       name: b.name,
-      size: A.size,
-      mtimeMs: A.mtimeMs
+      size: k.size,
+      mtimeMs: k.mtimeMs
     }));
   }
-  if (hn(y), _.length === 0)
+  if (In(y), x.length === 0)
     return [];
-  _.sort((b, B) => b.mtimeMs - B.mtimeMs);
-  const h = sr();
-  await N.mkdir(h, { recursive: !0 });
-  const v = [], w = Math.max(1, Math.floor(Number(e) || st));
-  for (const b of _.slice(0, w)) {
-    const B = T.join(h, yn(b.name));
+  x.sort((b, C) => b.mtimeMs - C.mtimeMs);
+  const w = Sr();
+  await $.mkdir(w, { recursive: !0 });
+  const R = [], S = Math.max(1, Math.floor(Number(e) || wt));
+  for (const b of x.slice(0, S)) {
+    const C = B.join(w, $n(b.name));
     try {
-      await gn(b.sourcePath, B);
+      await Wn(b.sourcePath, C);
     } catch {
       continue;
     }
-    Te.delete(b.sourcePath), v.push({
+    Be.delete(b.sourcePath), R.push({
       name: b.name,
       size: b.size,
-      localPath: B,
-      relativePath: Re(b.name)
+      localPath: C,
+      relativePath: xe(b.name)
     });
   }
-  return v;
+  return R;
 }
-async function bn(t) {
-  const e = T.resolve(String(t || "").trim()), o = sr();
-  return !e || !ir(e, o) ? !1 : (await N.rm(e, { force: !0 }), !0);
+async function Hn(t) {
+  const e = B.resolve(String(t || "").trim()), o = Sr();
+  return !e || !Er(e, o) ? !1 : (await $.rm(e, { force: !0 }), !0);
 }
-function Nt(t, e) {
-  const o = Re(e || "");
+function er(t, e) {
+  const o = xe(e || "");
   if (!o)
     return t;
-  const a = o.split("/").filter(Boolean);
-  for (const d of a) {
-    if (d === "." || d === "..")
-      throw new Error(`非法下载路径片段: ${d}`);
-    if (d.includes("\0"))
+  const c = o.split("/").filter(Boolean);
+  for (const u of c) {
+    if (u === "." || u === "..")
+      throw new Error(`非法下载路径片段: ${u}`);
+    if (u.includes("\0"))
       throw new Error("非法下载路径：包含空字符");
   }
-  return T.join(t, ...a);
+  return B.join(t, ...c);
 }
-function ar(t, e) {
+function vr(t, e) {
   return t.relativePath.localeCompare(e.relativePath, "zh-Hans-CN");
 }
-async function vn(t) {
+async function jn(t) {
   return (await Promise.all(t.map(async (o) => {
-    const a = await N.stat(o);
-    if (!a.isFile())
+    const c = await $.stat(o);
+    if (!c.isFile())
       return null;
-    const d = T.basename(o);
-    return lt(d) ? null : {
-      name: d,
-      size: a.size,
+    const u = B.basename(o);
+    return Rt(u) ? null : {
+      name: u,
+      size: c.size,
       localPath: o,
-      relativePath: Re(d)
+      relativePath: xe(u)
     };
-  }))).filter((o) => !!o).sort(ar);
+  }))).filter((o) => !!o).sort(vr);
 }
-async function Sn(t, e, o) {
-  const a = [e], d = [];
-  for (; a.length > 0; ) {
-    const v = a.pop(), w = await N.readdir(v, { withFileTypes: !0 });
-    for (const b of w) {
-      if (b.name === "." || b.name === ".." || lt(b.name) || b.isSymbolicLink())
+async function Vn(t, e, o) {
+  const c = [e], u = [];
+  for (; c.length > 0; ) {
+    const R = c.pop(), S = await $.readdir(R, { withFileTypes: !0 });
+    for (const b of S) {
+      if (b.name === "." || b.name === ".." || Rt(b.name) || b.isSymbolicLink())
         continue;
-      const B = T.join(v, b.name);
+      const C = B.join(R, b.name);
       if (b.isDirectory()) {
-        a.push(B);
+        c.push(C);
         continue;
       }
-      b.isFile() && d.push({
-        absolutePath: B,
+      b.isFile() && u.push({
+        absolutePath: C,
         name: b.name
       });
     }
   }
-  const l = [], y = 48;
-  let R = 0;
-  const _ = async () => {
-    for (; R < d.length; ) {
-      const v = R;
-      if (R += 1, v >= d.length)
+  const m = [], y = 48;
+  let v = 0;
+  const x = async () => {
+    for (; v < u.length; ) {
+      const R = v;
+      if (v += 1, R >= u.length)
         return;
-      const w = d[v], b = await N.stat(w.absolutePath).catch(() => null);
+      const S = u[R], b = await $.stat(S.absolutePath).catch(() => null);
       if (!(b != null && b.isFile()))
         continue;
-      const B = Re(T.relative(t, w.absolutePath)), A = Re(T.join(o, B));
-      l.push({
-        name: w.name,
+      const C = xe(B.relative(t, S.absolutePath)), k = xe(B.join(o, C));
+      m.push({
+        name: S.name,
         size: b.size,
-        localPath: w.absolutePath,
-        relativePath: A
+        localPath: S.absolutePath,
+        relativePath: k
       });
     }
-  }, h = Math.min(y, Math.max(1, d.length));
-  return await Promise.all(Array.from({ length: h }, () => _())), l;
+  }, w = Math.min(y, Math.max(1, u.length));
+  return await Promise.all(Array.from({ length: w }, () => x())), m;
 }
-async function En(t) {
+async function Kn(t) {
   const e = [];
   for (const o of t) {
-    if (!(await N.stat(o)).isDirectory())
+    if (!(await $.stat(o)).isDirectory())
       continue;
-    const d = T.basename(o), l = await Sn(o, o, d);
-    e.push(...l);
+    const u = B.basename(o), m = await Vn(o, o, u);
+    e.push(...m);
   }
-  return e.sort(ar);
+  return e.sort(vr);
 }
-function Tn(t) {
+function qn(t) {
   t.handle("file:open", async () => {
-    const e = await ne.showOpenDialog({
+    const e = await ie.showOpenDialog({
       properties: ["openFile", "dontAddToRecent"],
       filters: [
         { name: "JSON", extensions: ["json"] },
@@ -260,170 +260,170 @@ function Tn(t) {
     const o = e.filePaths[0];
     return {
       canceled: !1,
-      content: await N.readFile(o, "utf-8"),
+      content: await $.readFile(o, "utf-8"),
       filePath: o
     };
-  }), t.handle("file:save", async (e, o, a) => (await N.writeFile(o, a, "utf-8"), !0)), t.handle("file:read-text", async (e, o) => {
-    const a = T.resolve(String(o || "").trim());
+  }), t.handle("file:save", async (e, o, c) => (await $.writeFile(o, c, "utf-8"), !0)), t.handle("file:read-text", async (e, o) => {
+    const c = B.resolve(String(o || "").trim());
     return {
       canceled: !1,
-      content: await N.readFile(a, "utf-8"),
-      filePath: a
+      content: await $.readFile(c, "utf-8"),
+      filePath: c
     };
   }), t.handle("file:read-local-chrome-bookmarks", async () => {
-    const e = T.join($.getPath("home"), fn);
+    const e = B.join(N.getPath("home"), An);
     return {
       canceled: !1,
-      content: await N.readFile(e, "utf-8"),
+      content: await $.readFile(e, "utf-8"),
       filePath: e
     };
   }), t.handle("dialog:pick-upload-files", async () => {
-    const e = await ne.showOpenDialog({
+    const e = await ie.showOpenDialog({
       properties: ["openFile", "multiSelections", "dontAddToRecent"]
     });
-    return e.canceled || e.filePaths.length === 0 ? { canceled: !0, files: [] } : { canceled: !1, files: await vn(e.filePaths) };
+    return e.canceled || e.filePaths.length === 0 ? { canceled: !0, files: [] } : { canceled: !1, files: await jn(e.filePaths) };
   }), t.handle("dialog:pick-upload-folders", async () => {
-    const e = await ne.showOpenDialog({
+    const e = await ie.showOpenDialog({
       properties: ["openDirectory", "multiSelections", "dontAddToRecent"]
     });
-    return e.canceled || e.filePaths.length === 0 ? { canceled: !0, files: [] } : { canceled: !1, files: await En(e.filePaths) };
+    return e.canceled || e.filePaths.length === 0 ? { canceled: !0, files: [] } : { canceled: !1, files: await Kn(e.filePaths) };
   }), t.handle("dialog:pick-download-directory", async () => {
-    const e = await ne.showOpenDialog({
+    const e = await ie.showOpenDialog({
       properties: ["openDirectory", "createDirectory", "dontAddToRecent"]
     });
     return e.canceled || e.filePaths.length === 0 ? { canceled: !0, directoryPath: "" } : { canceled: !1, directoryPath: e.filePaths[0] };
   }), t.handle("dialog:save-download-file", async (e, o) => {
-    const a = await ne.showSaveDialog({
+    const c = await ie.showSaveDialog({
       defaultPath: String(o || "download"),
       showsTagField: !1
     });
-    return a.canceled || !a.filePath ? { canceled: !0, filePath: "" } : { canceled: !1, filePath: a.filePath };
+    return c.canceled || !c.filePath ? { canceled: !0, filePath: "" } : { canceled: !1, filePath: c.filePath };
   }), t.handle("dialog:pick-auto-import-directory", async () => {
-    const e = await ne.showOpenDialog({
+    const e = await ie.showOpenDialog({
       properties: ["openDirectory", "createDirectory", "dontAddToRecent"]
     });
     return e.canceled || e.filePaths.length === 0 ? { canceled: !0, directoryPath: "" } : { canceled: !1, directoryPath: e.filePaths[0] };
-  }), t.handle("fs:claim-auto-import-files", async (e, o, a = st) => ({ canceled: !1, files: await wn(o, a) })), t.handle("fs:cleanup-auto-import-staged-file", async (e, o) => {
+  }), t.handle("fs:claim-auto-import-files", async (e, o, c = wt) => ({ canceled: !1, files: await zn(o, c) })), t.handle("fs:cleanup-auto-import-staged-file", async (e, o) => {
     try {
-      return await bn(o);
+      return await Hn(o);
     } catch {
       return !1;
     }
-  }), t.handle("fs:ensure-directory", async (e, o, a = "") => {
-    const d = Nt(o, a);
-    return await N.mkdir(d, { recursive: !0 }), d;
-  }), t.handle("fs:download-url-to-path", async (e, o, a, d, l = {}) => {
-    const y = Nt(a, d);
-    return await ut(o, y, l), y;
-  }), t.handle("fs:save-staged-download-file", async (e, o, a) => {
-    const d = T.resolve(String(o || "").trim()), l = T.resolve(String(a || "").trim()), y = pn();
-    if (!d || !ir(d, y))
+  }), t.handle("fs:ensure-directory", async (e, o, c = "") => {
+    const u = er(o, c);
+    return await $.mkdir(u, { recursive: !0 }), u;
+  }), t.handle("fs:download-url-to-path", async (e, o, c, u, m = {}) => {
+    const y = er(c, u);
+    return await Tt(o, y, m), y;
+  }), t.handle("fs:save-staged-download-file", async (e, o, c) => {
+    const u = B.resolve(String(o || "").trim()), m = B.resolve(String(c || "").trim()), y = Nn();
+    if (!u || !Er(u, y))
       throw new Error("无效的下载临时文件");
-    if (!l)
+    if (!m)
       throw new Error("无效的保存路径");
-    return await N.mkdir(T.dirname(l), { recursive: !0 }), await N.copyFile(d, l), l;
+    return await $.mkdir(B.dirname(m), { recursive: !0 }), await $.copyFile(u, m), m;
   });
 }
-var H = {}, ce = nr;
-H.platform = function() {
+var j = {}, de = wr;
+j.platform = function() {
   return process.platform;
 };
-H.cpuCount = function() {
-  return ce.cpus().length;
+j.cpuCount = function() {
+  return de.cpus().length;
 };
-H.sysUptime = function() {
-  return ce.uptime();
+j.sysUptime = function() {
+  return de.uptime();
 };
-H.processUptime = function() {
+j.processUptime = function() {
   return process.uptime();
 };
-H.freemem = function() {
-  return ce.freemem() / (1024 * 1024);
+j.freemem = function() {
+  return de.freemem() / (1024 * 1024);
 };
-H.totalmem = function() {
-  return ce.totalmem() / (1024 * 1024);
+j.totalmem = function() {
+  return de.totalmem() / (1024 * 1024);
 };
-H.freememPercentage = function() {
-  return ce.freemem() / ce.totalmem();
+j.freememPercentage = function() {
+  return de.freemem() / de.totalmem();
 };
-H.freeCommand = function(t) {
-  dt.exec("free -m", function(e, o, a) {
-    var d = o.split(`
-`), l = d[1].replace(/[\s\n\r]+/g, " "), y = l.split(" ");
+j.freeCommand = function(t) {
+  vt.exec("free -m", function(e, o, c) {
+    var u = o.split(`
+`), m = u[1].replace(/[\s\n\r]+/g, " "), y = m.split(" ");
     total_mem = parseFloat(y[1]), free_mem = parseFloat(y[3]), buffers_mem = parseFloat(y[5]), cached_mem = parseFloat(y[6]), used_mem = total_mem - (free_mem + buffers_mem + cached_mem), t(used_mem - 2);
   });
 };
-H.harddrive = function(t) {
-  dt.exec("df -k", function(e, o, a) {
-    var d = 0, l = 0, y = 0, R = o.split(`
-`), _ = R[1].replace(/[\s\n\r]+/g, " "), h = _.split(" ");
-    d = Math.ceil(h[1] * 1024 / Math.pow(1024, 2)), l = Math.ceil(h[2] * 1024 / Math.pow(1024, 2)), y = Math.ceil(h[3] * 1024 / Math.pow(1024, 2)), t(d, y, l);
+j.harddrive = function(t) {
+  vt.exec("df -k", function(e, o, c) {
+    var u = 0, m = 0, y = 0, v = o.split(`
+`), x = v[1].replace(/[\s\n\r]+/g, " "), w = x.split(" ");
+    u = Math.ceil(w[1] * 1024 / Math.pow(1024, 2)), m = Math.ceil(w[2] * 1024 / Math.pow(1024, 2)), y = Math.ceil(w[3] * 1024 / Math.pow(1024, 2)), t(u, y, m);
   });
 };
-H.getProcesses = function(t, e) {
-  typeof t == "function" && (e = t, t = 0), command = "ps -eo pcpu,pmem,time,args | sort -k 1 -r | head -n10", t > 0 && (command = "ps -eo pcpu,pmem,time,args | sort -k 1 -r | head -n" + (t + 1)), dt.exec(command, function(o, a, d) {
-    var l = a.split(`
+j.getProcesses = function(t, e) {
+  typeof t == "function" && (e = t, t = 0), command = "ps -eo pcpu,pmem,time,args | sort -k 1 -r | head -n10", t > 0 && (command = "ps -eo pcpu,pmem,time,args | sort -k 1 -r | head -n" + (t + 1)), vt.exec(command, function(o, c, u) {
+    var m = c.split(`
 `);
-    l.shift(), l.pop();
+    m.shift(), m.pop();
     var y = "";
-    l.forEach(function(R, _) {
-      var h = R.replace(/[\s\n\r]+/g, " ");
-      h = h.split(" "), y += h[1] + " " + h[2] + " " + h[3] + " " + h[4].substring(h[4].length - 25) + `
+    m.forEach(function(v, x) {
+      var w = v.replace(/[\s\n\r]+/g, " ");
+      w = w.split(" "), y += w[1] + " " + w[2] + " " + w[3] + " " + w[4].substring(w[4].length - 25) + `
 `;
     }), e(y);
   });
 };
-H.allLoadavg = function() {
-  var t = ce.loadavg();
+j.allLoadavg = function() {
+  var t = de.loadavg();
   return t[0].toFixed(4) + "," + t[1].toFixed(4) + "," + t[2].toFixed(4);
 };
-H.loadavg = function(t) {
+j.loadavg = function(t) {
   (t === void 0 || t !== 5 && t !== 15) && (t = 1);
-  var e = ce.loadavg(), o = 0;
+  var e = de.loadavg(), o = 0;
   return t == 1 && (o = e[0]), t == 5 && (o = e[1]), t == 15 && (o = e[2]), o;
 };
-H.cpuFree = function(t) {
-  cr(t, !0);
+j.cpuFree = function(t) {
+  Tr(t, !0);
 };
-H.cpuUsage = function(t) {
-  cr(t, !1);
+j.cpuUsage = function(t) {
+  Tr(t, !1);
 };
-function cr(t, e) {
-  var o = Wt(), a = o.idle, d = o.total;
+function Tr(t, e) {
+  var o = tr(), c = o.idle, u = o.total;
   setTimeout(function() {
-    var l = Wt(), y = l.idle, R = l.total, _ = y - a, h = R - d, v = _ / h;
-    t(e === !0 ? v : 1 - v);
+    var m = tr(), y = m.idle, v = m.total, x = y - c, w = v - u, R = x / w;
+    t(e === !0 ? R : 1 - R);
   }, 1e3);
 }
-function Wt(t) {
-  var e = ce.cpus(), o = 0, a = 0, d = 0, l = 0, y = 0, _ = 0;
-  for (var R in e)
-    o += e[R].times.user, a += e[R].times.nice, d += e[R].times.sys, y += e[R].times.irq, l += e[R].times.idle;
-  var _ = o + a + d + l + y;
+function tr(t) {
+  var e = de.cpus(), o = 0, c = 0, u = 0, m = 0, y = 0, x = 0;
+  for (var v in e)
+    o += e[v].times.user, c += e[v].times.nice, u += e[v].times.sys, y += e[v].times.irq, m += e[v].times.idle;
+  var x = o + c + u + m + y;
   return {
-    idle: l,
-    total: _
+    idle: m,
+    total: x
   };
 }
-const Rn = process.env.NODE_ENV === "test" || !!(process.env.VITE_DEV_SERVER_URL || process.env.ELECTRON_RENDERER_URL) || process.env.OMNIFLOW_ENABLE_RUNTIME_LOGS === "true", Se = (t, ...e) => {
-  Rn && console[t](...e);
+const Jn = process.env.NODE_ENV === "test" || !!(process.env.VITE_DEV_SERVER_URL || process.env.ELECTRON_RENDERER_URL) || process.env.OMNIFLOW_ENABLE_RUNTIME_LOGS === "true", Re = (t, ...e) => {
+  Jn && console[t](...e);
 }, F = {
-  debug: (...t) => Se("debug", ...t),
-  info: (...t) => Se("info", ...t),
-  log: (...t) => Se("log", ...t),
-  warn: (...t) => Se("warn", ...t),
-  error: (...t) => Se("error", ...t)
+  debug: (...t) => Re("debug", ...t),
+  info: (...t) => Re("info", ...t),
+  log: (...t) => Re("log", ...t),
+  warn: (...t) => Re("warn", ...t),
+  error: (...t) => Re("error", ...t)
 };
-function Bn() {
-  const t = _n().total, e = nr.cpus()[0].model, o = Math.floor(H.totalmem() / 1024);
+function Gn() {
+  const t = Xn().total, e = wr.cpus()[0].model, o = Math.floor(j.totalmem() / 1024);
   return {
     totalStorage: t,
     cpuModel: e,
     totalMemoryGB: o
   };
 }
-function _n() {
-  const t = sn.statfsSync(process.platform === "win32" ? "C:" : "/"), e = t.blocks * t.bsize, o = t.bfree * t.bsize;
+function Xn() {
+  const t = Dn.statfsSync(process.platform === "win32" ? "C:" : "/"), e = t.blocks * t.bsize, o = t.bfree * t.bsize;
   return {
     total: Math.floor(e / 1e9),
     // 换算为 GB
@@ -431,197 +431,197 @@ function _n() {
     // 使用率计算
   };
 }
-function Cn(t) {
-  t.handle("sys:get-static-data", Bn);
+function Zn(t) {
+  t.handle("sys:get-static-data", Gn);
 }
-const xn = 10 * 1024 * 1024 * 1024, Dn = "10GB", Pn = `上传失败：单文件最大支持 ${Dn}`;
-function dr(t) {
+const Yn = 10 * 1024 * 1024 * 1024, Qn = "10GB", eo = `上传失败：单文件最大支持 ${Qn}`;
+function Rr(t) {
   return String(t).replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\r/g, "").replace(/\n/g, "");
 }
-function Un(t) {
+function to(t) {
   return encodeURIComponent(t).replace(
     /['()*]/g,
     (e) => `%${e.charCodeAt(0).toString(16).toUpperCase()}`
   );
 }
-function On(t) {
-  const e = dr(t), o = Un(t);
+function ro(t) {
+  const e = Rr(t), o = to(t);
   return `Content-Disposition: form-data; name="file"; filename="${e}"; filename*=UTF-8''${o}\r
 `;
 }
-function Ln(t) {
-  const e = /* @__PURE__ */ new Map(), o = (a, d = !1) => {
-    const l = Date.now();
-    if (!d && l - a.lastProgressAt < 80) return;
-    a.lastProgressAt = l;
-    const y = Math.max(l - a.startedAt, 1), R = Math.floor(a.uploadedBytes * 1e3 / y), _ = a.totalBytes > 0 ? Math.min(a.uploadedBytes / a.totalBytes * 100, 100) : 0;
-    a.sender.send("http:upload:progress", {
-      uploadId: a.uploadId,
-      uploadedBytes: a.uploadedBytes,
-      totalBytes: a.totalBytes,
-      percentage: _,
-      speedBps: R
+function no(t) {
+  const e = /* @__PURE__ */ new Map(), o = (c, u = !1) => {
+    const m = Date.now();
+    if (!u && m - c.lastProgressAt < 80) return;
+    c.lastProgressAt = m;
+    const y = Math.max(m - c.startedAt, 1), v = Math.floor(c.uploadedBytes * 1e3 / y), x = c.totalBytes > 0 ? Math.min(c.uploadedBytes / c.totalBytes * 100, 100) : 0;
+    c.sender.send("http:upload:progress", {
+      uploadId: c.uploadId,
+      uploadedBytes: c.uploadedBytes,
+      totalBytes: c.totalBytes,
+      percentage: x,
+      speedBps: v
     });
   };
-  t.handle("http:fetch", async (a, d, l = {}) => (F.debug("http:fetch start"), F.debug("http:fetch URL:", d), F.debug("http:fetch options:", l), new Promise((y, R) => {
-    const _ = qr.request({ url: d, method: l.method || "GET" });
-    l.headers && Object.entries(l.headers).forEach(([v, w]) => {
-      F.debug(`http:fetch set header ${v}: ${String(w)}`), _.setHeader(v, w);
+  t.handle("http:fetch", async (c, u, m = {}) => (F.debug("http:fetch start"), F.debug("http:fetch URL:", u), F.debug("http:fetch options:", m), new Promise((y, v) => {
+    const x = wn.request({ url: u, method: m.method || "GET" });
+    m.headers && Object.entries(m.headers).forEach(([R, S]) => {
+      F.debug(`http:fetch set header ${R}: ${String(S)}`), x.setHeader(R, S);
     });
-    let h = "";
-    _.on("response", (v) => {
-      F.debug("http:fetch response"), F.debug("http:fetch status:", v.statusCode), F.debug("http:fetch headers:", v.headers), v.on("data", (w) => {
-        F.debug(`http:fetch chunk length: ${w.length}`), h += w;
-      }), v.on("end", () => {
-        F.debug("http:fetch body preview:", h.slice(0, 500));
-        let w;
+    let w = "";
+    x.on("response", (R) => {
+      F.debug("http:fetch response"), F.debug("http:fetch status:", R.statusCode), F.debug("http:fetch headers:", R.headers), R.on("data", (S) => {
+        F.debug(`http:fetch chunk length: ${S.length}`), w += S;
+      }), R.on("end", () => {
+        F.debug("http:fetch body preview:", w.slice(0, 500));
+        let S;
         try {
-          w = JSON.parse(h);
+          S = JSON.parse(w);
         } catch {
-          w = h;
+          S = w;
         }
         y({
-          status: v.statusCode,
-          headers: v.headers,
-          body: w
+          status: R.statusCode,
+          headers: R.headers,
+          body: S
         });
       });
-    }), _.on("error", (v) => {
-      F.error("http:fetch error:", v), R(v);
-    }), l.body && _.write(l.body), _.end();
-  }))), t.handle("http:upload:abort", async (a, d) => {
-    const l = e.get(d);
-    if (!l) return !1;
-    l.aborted = !0, e.delete(d);
+    }), x.on("error", (R) => {
+      F.error("http:fetch error:", R), v(R);
+    }), m.body && x.write(m.body), x.end();
+  }))), t.handle("http:upload:abort", async (c, u) => {
+    const m = e.get(u);
+    if (!m) return !1;
+    m.aborted = !0, e.delete(u);
     try {
-      l.fileStream.destroy(new Error("UPLOAD_ABORTED"));
+      m.fileStream.destroy(new Error("UPLOAD_ABORTED"));
     } catch {
     }
     try {
-      l.request.destroy(new Error("UPLOAD_ABORTED"));
+      m.request.destroy(new Error("UPLOAD_ABORTED"));
     } catch {
     }
     return !0;
-  }), t.handle("http:upload", async (a, d, l, y = {}, R = {}, _) => new Promise((h, v) => {
-    let w;
+  }), t.handle("http:upload", async (c, u, m, y = {}, v = {}, x) => new Promise((w, R) => {
+    let S;
     try {
-      w = ot.statSync(l);
+      S = ht.statSync(m);
     } catch (f) {
-      v(new Error(`读取上传文件失败: ${l} (${String(f)})`));
+      R(new Error(`读取上传文件失败: ${m} (${String(f)})`));
       return;
     }
-    if (!w.isFile()) {
-      v(new Error(`上传目标不是文件: ${l}`));
+    if (!S.isFile()) {
+      R(new Error(`上传目标不是文件: ${m}`));
       return;
     }
-    if (w.size > xn) {
-      v(new Error(Pn));
+    if (S.size > Yn) {
+      R(new Error(eo));
       return;
     }
-    const b = "----WebKitFormBoundary" + Math.random().toString(36).substring(2), B = _ || `upload-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, A = T.basename(l), L = Object.entries(y).map(([f, p]) => `--${b}\r
-Content-Disposition: form-data; name="${dr(f)}"\r
+    const b = "----WebKitFormBoundary" + Math.random().toString(36).substring(2), C = x || `upload-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, k = B.basename(m), L = Object.entries(y).map(([f, g]) => `--${b}\r
+Content-Disposition: form-data; name="${Rr(f)}"\r
 \r
-${p}\r
-`).join(""), z = `--${b}\r
-` + On(A) + `Content-Type: application/octet-stream\r
+${g}\r
+`).join(""), H = `--${b}\r
+` + ro(k) + `Content-Type: application/octet-stream\r
 \r
-`, V = `\r
+`, q = `\r
 --${b}--\r
-`, K = Buffer.byteLength(L) + Buffer.byteLength(z) + w.size + Buffer.byteLength(V), de = {
-      ...R,
+`, J = Buffer.byteLength(L) + Buffer.byteLength(H) + S.size + Buffer.byteLength(q), ae = {
+      ...v,
       "Content-Type": `multipart/form-data; boundary=${b}`,
-      "Content-Length": String(K)
-    }, q = new URL(d), X = (q.protocol === "https:" ? rr : tr).request({
-      protocol: q.protocol,
-      hostname: q.hostname,
-      port: q.port ? Number(q.port) : void 0,
-      path: `${q.pathname}${q.search}`,
+      "Content-Length": String(J)
+    }, ee = new URL(u), G = (ee.protocol === "https:" ? hr : yr).request({
+      protocol: ee.protocol,
+      hostname: ee.hostname,
+      port: ee.port ? Number(ee.port) : void 0,
+      path: `${ee.pathname}${ee.search}`,
       method: "POST",
-      headers: de
-    }), Y = ot.createReadStream(l, {
+      headers: ae
+    }), re = ht.createReadStream(m, {
       highWaterMark: 1024 * 1024
-    }), j = {
-      uploadId: B,
-      request: X,
-      fileStream: Y,
-      sender: a.sender,
-      totalBytes: Math.max(0, w.size),
+    }), V = {
+      uploadId: C,
+      request: G,
+      fileStream: re,
+      sender: c.sender,
+      totalBytes: Math.max(0, S.size),
       uploadedBytes: 0,
       startedAt: Date.now(),
       lastProgressAt: 0,
       aborted: !1
     };
-    e.set(B, j);
-    let se = !1;
-    const c = (f) => {
-      se || (se = !0, e.delete(B), h(f));
+    e.set(C, V);
+    let ce = !1;
+    const l = (f) => {
+      ce || (ce = !0, e.delete(C), w(f));
     }, s = (f) => {
-      se || (se = !0, e.delete(B), v(f));
+      ce || (ce = !0, e.delete(C), R(f));
     };
     let i = "";
-    X.on("response", (f) => {
-      f.on("data", (p) => {
-        i += p.toString();
+    G.on("response", (f) => {
+      f.on("data", (g) => {
+        i += g.toString();
       }), f.on("end", () => {
-        let p;
+        let g;
         try {
-          p = JSON.parse(i);
+          g = JSON.parse(i);
         } catch {
-          p = i;
+          g = i;
         }
-        c({
+        l({
           status: f.statusCode,
-          body: p
+          body: g
         });
       });
-    }), X.on("error", (f) => {
-      if (j.aborted) {
+    }), G.on("error", (f) => {
+      if (V.aborted) {
         s(new Error("UPLOAD_ABORTED"));
         return;
       }
       try {
-        Y.destroy(f);
+        re.destroy(f);
       } catch {
       }
       s(f);
-    }), X.write(L), X.write(z), Y.on("data", (f) => {
-      j.aborted || (j.uploadedBytes += f.length, o(j));
-    }), Y.on("end", () => {
-      j.aborted || (o(j, !0), X.write(V), X.end());
-    }), Y.on("error", (f) => {
-      if (j.aborted) {
+    }), G.write(L), G.write(H), re.on("data", (f) => {
+      V.aborted || (V.uploadedBytes += f.length, o(V));
+    }), re.on("end", () => {
+      V.aborted || (o(V, !0), G.write(q), G.end());
+    }), re.on("error", (f) => {
+      if (V.aborted) {
         s(new Error("UPLOAD_ABORTED"));
         return;
       }
       s(f);
       try {
-        X.destroy(f);
+        G.destroy(f);
       } catch {
       }
-    }), Y.pipe(X, { end: !1 });
+    }), re.pipe(G, { end: !1 });
   }));
 }
-function Mn() {
-  Tn(O), Cn(O), Ln(O);
+function oo() {
+  qn(U), Zn(U), no(U);
 }
-const Be = "persist:omniflow-embedded-browser", An = "embedded-browser-downloads";
-let tt = null, It = !1;
-function ur() {
-  return T.join($.getPath("userData"), An);
+const _e = "persist:omniflow-embedded-browser", io = "embedded-browser-downloads";
+let mt = null, rr = !1;
+function Cr() {
+  return B.join(N.getPath("userData"), io);
 }
-function $n() {
-  const t = ur();
-  return Ke(t) || ct(t, { recursive: !0 }), t;
+function so() {
+  const t = Cr();
+  return Xe(t) || Et(t, { recursive: !0 }), t;
 }
-function kn() {
+function ao() {
   return `embedded-browser-download-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
-function Fn(t) {
+function co(t) {
   const e = String(t).replace(/[/\\]/g, "_").trim() || "download";
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${e}`;
 }
-function Ae(t, e) {
-  var o, a;
+function $e(t, e) {
+  var o, c;
   return {
     downloadId: e.downloadId,
     fileName: e.fileName,
@@ -631,83 +631,83 @@ function Ae(t, e) {
     state: e.state,
     tabId: e.tabId,
     tempPath: e.tempPath,
-    totalBytes: e.totalBytes ?? Math.max(0, Number(((a = t.getTotalBytes) == null ? void 0 : a.call(t)) || 0)),
+    totalBytes: e.totalBytes ?? Math.max(0, Number(((c = t.getTotalBytes) == null ? void 0 : c.call(t)) || 0)),
     url: e.url,
     ...e.error ? { error: e.error } : {}
   };
 }
-function Nn() {
-  return tt || (tt = _e.fromPartition(Be)), tt;
+function lo() {
+  return mt || (mt = Oe.fromPartition(_e)), mt;
 }
-async function lr(t) {
-  const e = T.resolve(String(t || "").trim());
+async function Br(t) {
+  const e = B.resolve(String(t || "").trim());
   if (!e)
     return !1;
-  const o = T.resolve(ur());
-  return e !== o && !e.startsWith(`${o}${T.sep}`) ? !1 : (await He.rm(e, { force: !0 }), !0);
+  const o = B.resolve(Cr());
+  return e !== o && !e.startsWith(`${o}${B.sep}`) ? !1 : (await qe.rm(e, { force: !0 }), !0);
 }
-function Wn(t) {
-  if (It)
+function uo(t) {
+  if (rr)
     return;
-  It = !0;
-  const e = (d, l, y) => {
-    const R = t.resolveTabIdByWebContents(y) || void 0;
-    if (!R)
+  rr = !0;
+  const e = (u, m, y) => {
+    const v = t.resolveTabIdByWebContents(y) || void 0;
+    if (!v)
       return;
-    const _ = $n(), h = kn(), v = l.getFilename() || "download", w = l.getURL() || "", b = y.getURL() || void 0, B = T.join(_, Fn(v));
-    l.setSavePath(B), t.emitDownload(Ae(l, {
-      downloadId: h,
-      fileName: v,
-      mimeType: l.getMimeType() || void 0,
+    const x = so(), w = ao(), R = m.getFilename() || "download", S = m.getURL() || "", b = y.getURL() || void 0, C = B.join(x, co(R));
+    m.setSavePath(C), t.emitDownload($e(m, {
+      downloadId: w,
+      fileName: R,
+      mimeType: m.getMimeType() || void 0,
       pageUrl: b,
       state: "started",
-      tabId: R,
-      tempPath: B,
-      url: w
-    })), l.on("updated", (A, L) => {
-      L === "progressing" && t.emitDownload(Ae(l, {
-        downloadId: h,
-        fileName: v,
-        mimeType: l.getMimeType() || void 0,
+      tabId: v,
+      tempPath: C,
+      url: S
+    })), m.on("updated", (k, L) => {
+      L === "progressing" && t.emitDownload($e(m, {
+        downloadId: w,
+        fileName: R,
+        mimeType: m.getMimeType() || void 0,
         pageUrl: b,
         state: "progress",
-        tabId: R,
-        tempPath: B,
-        url: w
+        tabId: v,
+        tempPath: C,
+        url: S
       }));
-    }), l.once("done", (A, L) => {
+    }), m.once("done", (k, L) => {
       if (L === "completed") {
-        t.emitDownload(Ae(l, {
-          downloadId: h,
-          fileName: v,
-          mimeType: l.getMimeType() || void 0,
+        t.emitDownload($e(m, {
+          downloadId: w,
+          fileName: R,
+          mimeType: m.getMimeType() || void 0,
           pageUrl: b,
           state: "completed",
-          tabId: R,
-          tempPath: B,
-          url: w
+          tabId: v,
+          tempPath: C,
+          url: S
         }));
         return;
       }
-      lr(B).catch(() => {
-      }), t.emitDownload(Ae(l, {
-        downloadId: h,
+      Br(C).catch(() => {
+      }), t.emitDownload($e(m, {
+        downloadId: w,
         error: L === "cancelled" ? "下载已取消" : `下载失败：${L}`,
-        fileName: v,
-        mimeType: l.getMimeType() || void 0,
+        fileName: R,
+        mimeType: m.getMimeType() || void 0,
         pageUrl: b,
         state: L === "cancelled" ? "cancelled" : "failed",
-        tabId: R,
-        tempPath: B,
-        url: w
+        tabId: v,
+        tempPath: C,
+        url: S
       }));
     });
   }, o = /* @__PURE__ */ new Set();
-  [_e.defaultSession, Nn()].filter(Boolean).forEach((d) => {
-    o.has(d) || (o.add(d), d.on("will-download", e));
+  [Oe.defaultSession, lo()].filter(Boolean).forEach((u) => {
+    o.has(u) || (o.add(u), u.on("will-download", e));
   });
 }
-function In(t, e) {
+function fo(t, e) {
   return `
     (() => {
       const probe = window.__OMNIFLOW_EMBEDDED_BROWSER_RESOURCE_PROBE__
@@ -718,7 +718,7 @@ function In(t, e) {
     })()
   `;
 }
-function zn(t) {
+function mo(t) {
   return `
     (() => {
       const preview = ${JSON.stringify(t)}
@@ -829,7 +829,7 @@ function zn(t) {
     })()
   `;
 }
-function Hn(t) {
+function po(t) {
   return `
     (() => {
       const probe = window.__OMNIFLOW_EMBEDDED_BROWSER_RESOURCE_PROBE__
@@ -840,47 +840,116 @@ function Hn(t) {
     })()
   `;
 }
-async function zt(t, e, o) {
-  const a = String(o || "").trim();
-  return a ? !!await t(
-    In(e, a)
+async function nr(t, e, o) {
+  const c = String(o || "").trim();
+  return c ? !!await t(
+    fo(e, c)
   ) : !1;
 }
-async function jn(t, e) {
+async function go(t, e) {
   return String(e.url || "").trim() ? !!await t(
-    zn(e)
+    mo(e)
   ) : !1;
 }
-async function Ht(t, e) {
+async function or(t, e) {
   const o = String(e || "").trim();
   if (!o)
     return null;
-  const a = await t(
-    Hn(o)
+  const c = await t(
+    po(o)
   );
-  if (!a || typeof a != "object")
+  if (!c || typeof c != "object")
     return null;
-  const d = a;
-  return typeof d.base64 != "string" || typeof d.fileName != "string" ? null : {
-    base64: d.base64,
-    fileName: d.fileName,
-    mimeType: typeof d.mimeType == "string" ? d.mimeType : void 0,
-    resourceKey: typeof d.resourceKey == "string" ? d.resourceKey : o,
-    streamType: d.streamType === "audio" || d.streamType === "video" ? d.streamType : void 0
+  const u = c;
+  return typeof u.base64 != "string" || typeof u.fileName != "string" ? null : {
+    base64: u.base64,
+    fileName: u.fileName,
+    mimeType: typeof u.mimeType == "string" ? u.mimeType : void 0,
+    resourceKey: typeof u.resourceKey == "string" ? u.resourceKey : o,
+    streamType: u.streamType === "audio" || u.streamType === "video" ? u.streamType : void 0
   };
 }
-const it = "__OMNIFLOW_EMBEDDED_BROWSER_RESOURCE__:";
-function Vn() {
-  return `(${fr.toString()})(${JSON.stringify(it)});`;
+function yo() {
+  return `
+    (() => {
+      const probe = window.__OMNIFLOW_EMBEDDED_BROWSER_RESOURCE_PROBE__
+      const handler = probe && typeof probe.getCatchToolkitState === 'function'
+        ? probe.getCatchToolkitState
+        : null
+      return handler ? handler() : null
+    })()
+  `;
 }
-function fr(t) {
-  var Mt, At, $t, kt, Ft;
-  const e = globalThis, o = typeof document > "u" && typeof e.importScripts == "function", a = typeof ((Mt = e.location) == null ? void 0 : Mt.href) == "string" ? e.location.href : "", d = typeof ((At = e.location) == null ? void 0 : At.hostname) == "string" ? e.location.hostname : "resource", l = typeof (($t = e.location) == null ? void 0 : $t.protocol) == "string" ? e.location.protocol : "https:", y = typeof document < "u" && typeof document.title == "string" ? document.title : "", R = "__OMNIFLOW_EMBEDDED_BROWSER_RESOURCE_RELAY__", _ = typeof e.open == "function" ? e.open.bind(e) : null;
+function ho(t) {
+  return `
+    (() => {
+      const probe = window.__OMNIFLOW_EMBEDDED_BROWSER_RESOURCE_PROBE__
+      const handler = probe && typeof probe.updateCatchToolkitState === 'function'
+        ? probe.updateCatchToolkitState
+        : null
+      return handler ? handler(${JSON.stringify(t)}) : null
+    })()
+  `;
+}
+function wo(t) {
+  return `
+    (() => {
+      const probe = window.__OMNIFLOW_EMBEDDED_BROWSER_RESOURCE_PROBE__
+      const handler = probe && typeof probe[${JSON.stringify(t)}] === 'function'
+        ? probe[${JSON.stringify(t)}]
+        : null
+      return handler ? handler() : false
+    })()
+  `;
+}
+function xr(t) {
+  if (!t || typeof t != "object")
+    return null;
+  const e = t;
+  return typeof e.autoSeekToBufferedEnd != "boolean" || typeof e.autoDownloadOnComplete != "boolean" || typeof e.capturedMediaSizeBytes != "number" || typeof e.clearCacheOnComplete != "boolean" || typeof e.currentFileName != "string" || typeof e.isCaptureComplete != "boolean" || typeof e.manualFileName != "string" || typeof e.regexWarning != "string" || typeof e.regexRule != "string" || typeof e.restartAlwaysFromBeginning != "boolean" || typeof e.selectorWarning != "string" || typeof e.selectorRule != "string" || typeof e.streamCount != "number" || typeof e.trimExtraMediaHeaders != "boolean" ? null : {
+    autoSeekToBufferedEnd: e.autoSeekToBufferedEnd,
+    autoDownloadOnComplete: e.autoDownloadOnComplete,
+    capturedMediaSizeBytes: e.capturedMediaSizeBytes,
+    clearCacheOnComplete: e.clearCacheOnComplete,
+    currentFileName: e.currentFileName,
+    isCaptureComplete: e.isCaptureComplete,
+    manualFileName: e.manualFileName,
+    regexWarning: e.regexWarning,
+    regexRule: e.regexRule,
+    restartAlwaysFromBeginning: e.restartAlwaysFromBeginning,
+    selectorWarning: e.selectorWarning,
+    selectorRule: e.selectorRule,
+    streamCount: e.streamCount,
+    trimExtraMediaHeaders: e.trimExtraMediaHeaders
+  };
+}
+async function bo(t) {
+  const e = await t(yo());
+  return xr(e);
+}
+async function So(t, e) {
+  const o = await t(
+    ho(e)
+  );
+  return xr(o);
+}
+async function pt(t, e) {
+  return !!await t(
+    wo(e)
+  );
+}
+const bt = "__OMNIFLOW_EMBEDDED_BROWSER_RESOURCE__:";
+function Eo() {
+  return `(${_r.toString()})(${JSON.stringify(bt)});`;
+}
+function _r(t) {
+  var Gt, Xt, Zt, Yt, Qt;
+  const e = globalThis, o = typeof document > "u" && typeof e.importScripts == "function", c = typeof ((Gt = e.location) == null ? void 0 : Gt.href) == "string" ? e.location.href : "", u = typeof ((Xt = e.location) == null ? void 0 : Xt.hostname) == "string" ? e.location.hostname : "resource", m = typeof ((Zt = e.location) == null ? void 0 : Zt.protocol) == "string" ? e.location.protocol : "https:", y = "__OMNIFLOW_EMBEDDED_BROWSER_RESOURCE_RELAY__", v = typeof e.open == "function" ? e.open.bind(e) : null;
   if (e.__OMNIFLOW_EMBEDDED_BROWSER_RESOURCE_PROBE__)
     return "already-installed";
-  const h = /* @__PURE__ */ new Set(), v = /* @__PURE__ */ new Map(), w = /* @__PURE__ */ new Map(), b = /* @__PURE__ */ new Map(), B = /* @__PURE__ */ new WeakMap();
-  let A = 0, L = 0;
-  const z = /* @__PURE__ */ new Set(["m3u8", "mpd"]), V = /* @__PURE__ */ new Set([
+  const x = /* @__PURE__ */ new Set(), w = /* @__PURE__ */ new Map(), R = /* @__PURE__ */ new Map(), S = /* @__PURE__ */ new Map(), b = /* @__PURE__ */ new WeakMap();
+  let C = 0, k = 0;
+  const L = /* @__PURE__ */ new Set(["m3u8", "mpd"]), H = /* @__PURE__ */ new Set([
     "mp4",
     "m4v",
     "m4a",
@@ -898,799 +967,1124 @@ function fr(t) {
     "avi",
     "ts",
     "flv"
-  ]), K = /* @__PURE__ */ new Set(["jpg", "jpeg", "png", "gif", "webp", "bmp", "svg", "avif", "ico"]), de = /* @__PURE__ */ new Set(["vtt", "srt", "ass", "ssa", "ttml"]), q = /^data:(application|video|audio)\//i, pe = /^(https?:\/\/|blob:|\/\/|\/|\.\/|\.\.\/)/i, X = /(m3u8|mpd)(\?|$)/i, Y = /\.(mp4|m4v|m4a|m4s|mp3|aac|flac|wav|ogg|oga|ogv|webm|mkv|mov|avi|ts|flv)(\?|$)/i, j = /\.(jpg|jpeg|png|gif|webp|bmp|svg|avif|ico)(\?|$)/i, se = /\.(vtt|srt|ass|ssa|ttml)(\?|$)/i, c = /\.pdf(\?|$)/i, s = JSON.parse.bind(JSON), i = typeof console.info == "function" ? console.info.bind(console) : console.log.bind(console);
-  let f = "";
-  function p(n) {
-    if (typeof n != "string")
-      return "";
-    const r = n.trim();
-    if (!r || r.startsWith("data:"))
-      return "";
-    if (r.startsWith("//"))
-      return `${l}${r}`;
-    if (r.startsWith("blob:"))
-      return r;
+  ]), q = /* @__PURE__ */ new Set(["jpg", "jpeg", "png", "gif", "webp", "bmp", "svg", "avif", "ico"]), J = /* @__PURE__ */ new Set(["vtt", "srt", "ass", "ssa", "ttml"]), ae = /^data:(application|video|audio)\//i, ee = /^(https?:\/\/|blob:|\/\/|\/|\.\/|\.\.\/)/i, ye = /(m3u8|mpd)(\?|$)/i, G = /\.(mp4|m4v|m4a|m4s|mp3|aac|flac|wav|ogg|oga|ogv|webm|mkv|mov|avi|ts|flv)(\?|$)/i, re = /\.(jpg|jpeg|png|gif|webp|bmp|svg|avif|ico)(\?|$)/i, V = /\.(vtt|srt|ass|ssa|ttml)(\?|$)/i, ce = /\.pdf(\?|$)/i, l = JSON.parse.bind(JSON), s = typeof console.info == "function" ? console.info.bind(console) : console.log.bind(console), i = {
+    autoDownloadOnComplete: "OmniflowCatchToolkit:autoDownloadOnComplete",
+    autoSeekToBufferedEnd: "OmniflowCatchToolkit:autoSeekToBufferedEnd",
+    clearCacheOnComplete: "OmniflowCatchToolkit:clearCacheOnComplete",
+    manualFileName: "OmniflowCatchToolkit:manualFileName",
+    regexRule: "OmniflowCatchToolkit:regexRule",
+    restartAlwaysFromBeginning: "OmniflowCatchToolkit:restartAlwaysFromBeginning",
+    selectorRule: "OmniflowCatchToolkit:selectorRule",
+    trimExtraMediaHeaders: "OmniflowCatchToolkit:trimExtraMediaHeaders"
+  };
+  let f = "", g = !1;
+  const d = {
+    autoSeekToBufferedEnd: !1,
+    autoDownloadOnComplete: !1,
+    clearCacheOnComplete: !1,
+    manualFileName: "",
+    regexRule: "",
+    restartAlwaysFromBeginning: !1,
+    selectorRule: "",
+    trimExtraMediaHeaders: !0
+  }, T = /* @__PURE__ */ new WeakSet(), M = /* @__PURE__ */ new WeakSet();
+  let P = null;
+  function W(r) {
     try {
-      if (pe.test(r))
-        return new URL(r, a).toString();
-      if (/^https?:\/\//i.test(r))
-        return r;
+      return typeof localStorage > "u" ? "" : String(localStorage.getItem(r) || "").trim();
+    } catch {
+      return "";
+    }
+  }
+  function O(r, n = !1) {
+    try {
+      return typeof localStorage > "u" ? n : localStorage.getItem(r) === "checked";
+    } catch {
+      return n;
+    }
+  }
+  function X(r, n) {
+    try {
+      if (typeof localStorage > "u")
+        return;
+      const a = String(n || "").trim();
+      if (!a) {
+        localStorage.removeItem(r);
+        return;
+      }
+      localStorage.setItem(r, a);
+    } catch {
+    }
+  }
+  function ne(r, n) {
+    try {
+      if (typeof localStorage > "u")
+        return;
+      localStorage.setItem(r, n ? "checked" : "");
+    } catch {
+    }
+  }
+  function we(r) {
+    var a;
+    const n = String(r || "").trim();
+    if (!n)
+      return {
+        rule: "",
+        warning: ""
+      };
+    if (typeof document > "u")
+      return {
+        rule: n,
+        warning: ""
+      };
+    try {
+      const p = document.querySelector(n), h = ((a = p == null ? void 0 : p.textContent) == null ? void 0 : a.trim()) || "";
+      return {
+        rule: n,
+        warning: h ? "" : "表达式暂时没有命中可用内容"
+      };
+    } catch {
+      return {
+        rule: "",
+        warning: "选择器语法错误"
+      };
+    }
+  }
+  function Qe(r) {
+    const n = String(r || "").trim();
+    if (!n)
+      return {
+        rule: "",
+        warning: ""
+      };
+    try {
+      return new RegExp(n, "g"), {
+        rule: n,
+        warning: ""
+      };
+    } catch {
+      return {
+        rule: "",
+        warning: "正则表达式错误"
+      };
+    }
+  }
+  function Ir() {
+    o || (d.autoDownloadOnComplete = O(
+      i.autoDownloadOnComplete,
+      d.autoDownloadOnComplete
+    ), d.autoSeekToBufferedEnd = O(
+      i.autoSeekToBufferedEnd,
+      d.autoSeekToBufferedEnd
+    ), d.clearCacheOnComplete = O(
+      i.clearCacheOnComplete,
+      d.clearCacheOnComplete
+    ), d.manualFileName = W(i.manualFileName), d.restartAlwaysFromBeginning = O(
+      i.restartAlwaysFromBeginning,
+      d.restartAlwaysFromBeginning
+    ), d.trimExtraMediaHeaders = O(
+      i.trimExtraMediaHeaders,
+      d.trimExtraMediaHeaders
+    ), d.selectorRule = we(
+      W(i.selectorRule)
+    ).rule, d.regexRule = Qe(
+      W(i.regexRule)
+    ).rule);
+  }
+  function zr() {
+    o || (ne(
+      i.autoDownloadOnComplete,
+      d.autoDownloadOnComplete
+    ), ne(
+      i.autoSeekToBufferedEnd,
+      d.autoSeekToBufferedEnd
+    ), ne(
+      i.clearCacheOnComplete,
+      d.clearCacheOnComplete
+    ), X(
+      i.manualFileName,
+      d.manualFileName
+    ), X(
+      i.regexRule,
+      d.regexRule
+    ), ne(
+      i.restartAlwaysFromBeginning,
+      d.restartAlwaysFromBeginning
+    ), X(
+      i.selectorRule,
+      d.selectorRule
+    ), ne(
+      i.trimExtraMediaHeaders,
+      d.trimExtraMediaHeaders
+    ));
+  }
+  Ir();
+  function et() {
+    return typeof document > "u" || typeof document.title != "string" ? "" : document.title.trim();
+  }
+  function tt() {
+    var h, E;
+    const r = nt(d.manualFileName);
+    if (r !== "media")
+      return r;
+    let n = "";
+    const a = String(d.selectorRule || "").trim();
+    if (a && typeof document < "u")
+      try {
+        const D = document.querySelector(a), I = ((h = D == null ? void 0 : D.textContent) == null ? void 0 : h.trim()) || "";
+        I && (n = I);
+      } catch {
+      }
+    const p = String(d.regexRule || "").trim();
+    if (p && typeof document < "u")
+      try {
+        const D = n || ((E = document.documentElement) == null ? void 0 : E.outerHTML) || "";
+        if (D) {
+          const I = new RegExp(p, "g"), le = Array.from(D.matchAll(I)).flatMap((K) => K.length > 1 ? K.slice(1).filter((ue) => typeof ue == "string" && ue.trim()) : K[0] ? [K[0]] : []);
+          le.length > 0 && (n = le.join("_"));
+        }
+      } catch {
+      }
+    return nt(n || et() || u || "media");
+  }
+  function Me(r) {
+    if (typeof r != "string")
+      return "";
+    const n = r.trim();
+    if (!n || n.startsWith("data:"))
+      return "";
+    if (n.startsWith("//"))
+      return `${m}${n}`;
+    if (n.startsWith("blob:"))
+      return n;
+    try {
+      if (ee.test(n))
+        return new URL(n, c).toString();
+      if (/^https?:\/\//i.test(n))
+        return n;
     } catch {
       return "";
     }
     return "";
   }
-  function g(n) {
+  function Hr(r) {
     try {
-      const u = (new URL(n, a).pathname || "").toLowerCase().match(/\.([a-z0-9]+)$/i);
-      return (u == null ? void 0 : u[1]) || "";
+      const a = (new URL(r, c).pathname || "").toLowerCase().match(/\.([a-z0-9]+)$/i);
+      return (a == null ? void 0 : a[1]) || "";
     } catch {
-      const r = n.toLowerCase().match(/\.([a-z0-9]+)(?:\?|#|$)/i);
-      return (r == null ? void 0 : r[1]) || "";
+      const n = r.toLowerCase().match(/\.([a-z0-9]+)(?:\?|#|$)/i);
+      return (n == null ? void 0 : n[1]) || "";
     }
   }
-  function E(n, r) {
-    var S;
-    const u = g(n), m = (S = String(r || "").split(";")[0]) == null ? void 0 : S.trim().toLowerCase();
-    return z.has(u) || m.includes("mpegurl") || m.includes("dash+xml") || X.test(n) ? "manifest" : V.has(u) || m.startsWith("video/") || m.startsWith("audio/") || Y.test(n) || n.startsWith("blob:") ? "media" : K.has(u) || m.startsWith("image/") || j.test(n) ? "image" : de.has(u) || m.includes("text/vtt") || se.test(n) ? "subtitle" : u === "pdf" || m === "application/pdf" || c.test(n) ? "document" : "other";
+  function Ot(r, n) {
+    var h;
+    const a = Hr(r), p = (h = String(n || "").split(";")[0]) == null ? void 0 : h.trim().toLowerCase();
+    return L.has(a) || p.includes("mpegurl") || p.includes("dash+xml") || ye.test(r) ? "manifest" : H.has(a) || p.startsWith("video/") || p.startsWith("audio/") || G.test(r) || r.startsWith("blob:") ? "media" : q.has(a) || p.startsWith("image/") || re.test(r) ? "image" : J.has(a) || p.includes("text/vtt") || V.test(r) ? "subtitle" : a === "pdf" || p === "application/pdf" || ce.test(r) ? "document" : "other";
   }
-  function P(n, r) {
-    var m;
-    const u = (m = String(n || "").split(";")[0]) == null ? void 0 : m.trim().toLowerCase();
-    return u === "audio/mp4" ? "m4a" : u === "video/mp4" ? "mp4" : u === "audio/mpeg" ? "mp3" : u === "audio/aac" ? "aac" : u.endsWith("/webm") ? "webm" : u.endsWith("/ogg") ? "ogg" : u.endsWith("/wav") ? "wav" : r === "audio" ? "m4a" : "mp4";
+  function rt(r, n) {
+    var p;
+    const a = (p = String(r || "").split(";")[0]) == null ? void 0 : p.trim().toLowerCase();
+    return a === "audio/mp4" ? "m4a" : a === "video/mp4" ? "mp4" : a === "audio/mpeg" ? "mp3" : a === "audio/aac" ? "aac" : a.endsWith("/webm") ? "webm" : a.endsWith("/ogg") ? "ogg" : a.endsWith("/wav") ? "wav" : n === "audio" ? "m4a" : "mp4";
   }
-  function M(n) {
-    return String(n || "").replace(/[\\/:*?"<>|]+/g, "_").trim() || "media";
+  function nt(r) {
+    return String(r || "").replace(/[\\/:*?"<>|]+/g, "_").trim() || "media";
   }
-  function I(n) {
-    return n instanceof ArrayBuffer ? n.slice(0) : ArrayBuffer.isView(n) ? n.buffer.slice(n.byteOffset, n.byteOffset + n.byteLength) : null;
+  function Dt() {
+    const r = we(d.selectorRule), n = Qe(d.regexRule), a = Array.from(w.values()).reduce((p, h) => p + Math.max(0, Number(h.totalBytes || 0)), 0);
+    return {
+      autoSeekToBufferedEnd: d.autoSeekToBufferedEnd,
+      autoDownloadOnComplete: d.autoDownloadOnComplete,
+      capturedMediaSizeBytes: a,
+      clearCacheOnComplete: d.clearCacheOnComplete,
+      currentFileName: tt(),
+      isCaptureComplete: g,
+      manualFileName: d.manualFileName,
+      regexWarning: n.warning,
+      regexRule: n.rule,
+      restartAlwaysFromBeginning: d.restartAlwaysFromBeginning,
+      selectorWarning: r.warning,
+      selectorRule: r.rule,
+      streamCount: w.size,
+      trimExtraMediaHeaders: d.trimExtraMediaHeaders
+    };
   }
-  function D(n) {
-    const r = new Uint8Array(n), u = 32768;
-    let m = "";
-    for (let S = 0; S < r.length; S += u) {
-      const x = r.subarray(S, Math.min(S + u, r.length));
-      m += String.fromCharCode(...x);
+  function jr(r) {
+    return r instanceof ArrayBuffer ? r.slice(0) : ArrayBuffer.isView(r) ? r.buffer.slice(r.byteOffset, r.byteOffset + r.byteLength) : null;
+  }
+  function Ue(r) {
+    const n = new Uint8Array(r), a = 32768;
+    let p = "";
+    for (let h = 0; h < n.length; h += a) {
+      const E = n.subarray(h, Math.min(h + a, n.length));
+      p += String.fromCharCode(...E);
     }
-    return btoa(m);
+    return btoa(p);
   }
-  function Q(n) {
-    return D(new TextEncoder().encode(n).buffer);
+  function Vr(r) {
+    return Ue(new TextEncoder().encode(r).buffer);
   }
-  function ie(n) {
-    const r = atob(n), u = new Uint8Array(r.length);
-    for (let m = 0; m < r.length; m += 1)
-      u[m] = r.charCodeAt(m);
-    return u.buffer;
+  function ot(r) {
+    const n = atob(r), a = new Uint8Array(n.length);
+    for (let p = 0; p < n.length; p += 1)
+      a[p] = n.charCodeAt(p);
+    return a.buffer;
   }
-  function xe(n) {
-    const r = String(n || "").trim();
-    return r.length === 24 && r.endsWith("==") && /^[A-Za-z0-9+/]+={0,2}$/.test(r);
+  function Kr(r) {
+    const n = String(r || "").trim();
+    return n.length === 24 && n.endsWith("==") && /^[A-Za-z0-9+/]+={0,2}$/.test(n);
   }
-  function Br(n) {
-    return /^[A-Fa-f0-9]{32}$/.test(String(n || "").trim());
+  function qr(r) {
+    return /^[A-Fa-f0-9]{32}$/.test(String(r || "").trim());
   }
-  function _r(n) {
+  function Jr(r) {
     try {
-      const u = new URL(n, a).toString().split("/");
-      return u.pop(), `${u.join("/")}/`;
+      const a = new URL(r, c).toString().split("/");
+      return a.pop(), `${a.join("/")}/`;
     } catch {
       return "";
     }
   }
-  function Cr(n, r) {
-    return !n || !r ? r : r.split(`
-`).map((u) => {
-      const m = u.trim();
-      if (!m || m.startsWith("#"))
-        return m.includes('URI="') ? m.replace(/URI="(.*)"/, (S, x) => p(x) ? `URI="${x}"` : `URI="${n}${x}"`) : u;
-      if (p(m))
-        return m;
-      if (m.startsWith("/"))
+  function Gr(r, n) {
+    return !r || !n ? n : n.split(`
+`).map((a) => {
+      const p = a.trim();
+      if (!p || p.startsWith("#"))
+        return p.includes('URI="') ? p.replace(/URI="(.*)"/, (h, E) => Me(E) ? `URI="${E}"` : `URI="${r}${E}"`) : a;
+      if (Me(p))
+        return p;
+      if (p.startsWith("/"))
         try {
-          const S = new URL(n);
-          return `${S.protocol}//${S.host}${m}`;
+          const h = new URL(r);
+          return `${h.protocol}//${h.host}${p}`;
         } catch {
-          return `${n}${m.replace(/^\//, "")}`;
+          return `${r}${p.replace(/^\//, "")}`;
         }
-      return `${n}${m}`;
+      return `${r}${p}`;
     }).join(`
 `);
   }
-  function xr(n) {
-    const r = String(n || "").trim();
-    if (!r || !/^[\[{]/.test(r))
+  function Xr(r) {
+    const n = String(r || "").trim();
+    if (!n || !/^[\[{]/.test(n))
       return null;
     try {
-      return s(r);
+      return l(n);
     } catch {
       return null;
     }
   }
-  function Dr(n) {
-    const r = String(n || "").trim();
-    if (!q.test(r))
+  function Zr(r) {
+    const n = String(r || "").trim();
+    if (!ae.test(n))
       return "";
-    const u = r.indexOf(",");
-    if (u === -1)
+    const a = n.indexOf(",");
+    if (a === -1)
       return "";
-    const m = r.slice(0, u), S = r.slice(u + 1);
+    const p = n.slice(0, a), h = n.slice(a + 1);
     try {
-      return /;base64/i.test(m) ? new TextDecoder().decode(ie(S)) : decodeURIComponent(S);
+      return /;base64/i.test(p) ? new TextDecoder().decode(ot(h)) : decodeURIComponent(h);
     } catch {
       return "";
     }
   }
-  function gt(n, r = 16) {
-    if (n.byteLength <= r || n.byteLength % r !== 0)
+  function Mt(r, n = 16) {
+    if (r.byteLength <= n || r.byteLength % n !== 0)
       return null;
-    const u = new Uint8Array(n), m = u.slice(0, r);
-    for (let S = r; S < u.length; S += r)
-      for (let x = 0; x < r; x += 1)
-        if (u[S + x] !== m[x])
+    const a = new Uint8Array(r), p = a.slice(0, n);
+    for (let h = n; h < a.length; h += n)
+      for (let E = 0; E < n; E += 1)
+        if (a[h + E] !== p[E])
           return null;
-    return m.buffer;
+    return p.buffer;
   }
-  function Pr(n) {
-    return n.byteLength === 16 ? n.slice(0) : n.byteLength === 32 ? gt(n, 16) || n.slice(0, 16) : n.byteLength === 128 || n.byteLength === 256 ? gt(n, 16) : null;
+  function Yr(r) {
+    return r.byteLength === 16 ? r.slice(0) : r.byteLength === 32 ? Mt(r, 16) || r.slice(0, 16) : r.byteLength === 128 || r.byteLength === 256 ? Mt(r, 16) : null;
   }
-  function Ur() {
-    return L += 1, `probe-resource:${Date.now()}-${L}`;
+  function Qr() {
+    return k += 1, `probe-resource:${Date.now()}-${k}`;
   }
-  function Or(n, r) {
-    const u = n === "key" ? `${y || d || "resource"}-key` : y || d || "resource";
-    return `${M(u)}.${r}`;
+  function en(r, n) {
+    const a = r === "key" ? `${et() || u || "resource"}-key` : et() || u || "resource";
+    return `${nt(a)}.${n}`;
   }
-  function Lr(n) {
-    const r = b.get(n.signature);
-    if (r) {
-      const U = w.get(r);
-      if (U)
+  function tn(r) {
+    const n = S.get(r.signature);
+    if (n) {
+      const D = R.get(n);
+      if (D)
         return {
-          contentLength: U.contentLength,
-          fileName: U.fileName,
-          resourceKey: r,
-          url: U.blobUrl
+          contentLength: D.contentLength,
+          fileName: D.fileName,
+          resourceKey: n,
+          url: D.blobUrl
         };
     }
-    const u = new Blob([ie(n.base64)], { type: n.mimeType }), m = Ur(), S = Or(n.kind, n.ext), x = URL.createObjectURL(u);
-    return b.set(n.signature, m), w.set(m, {
-      base64: n.base64,
-      blobUrl: x,
-      contentLength: u.size,
-      fileName: S,
-      mimeType: n.mimeType,
-      streamType: n.streamType
+    const a = new Blob([ot(r.base64)], { type: r.mimeType }), p = Qr(), h = en(r.kind, r.ext), E = URL.createObjectURL(a);
+    return S.set(r.signature, p), R.set(p, {
+      base64: r.base64,
+      blobUrl: E,
+      contentLength: a.size,
+      fileName: h,
+      mimeType: r.mimeType,
+      streamType: r.streamType
     }), {
-      contentLength: u.size,
-      fileName: S,
-      resourceKey: m,
-      url: x
+      contentLength: a.size,
+      fileName: h,
+      resourceKey: p,
+      url: E
     };
   }
-  function Ge(n) {
+  function it(r) {
     if (!o || typeof e.postMessage != "function")
       return !1;
     try {
-      return e.postMessage({ [R]: n }), !0;
+      return e.postMessage({ [y]: r }), !0;
     } catch {
       return !1;
     }
   }
-  function be(n, r = !1) {
-    if (o && !r) {
-      Ge({ payload: n, type: "generated-resource" });
+  function Ee(r, n = !1) {
+    if (o && !n) {
+      it({ payload: r, type: "generated-resource" });
       return;
     }
-    const u = Lr(n);
-    Pe({
-      contentLength: u.contentLength,
-      ext: n.ext,
-      kind: n.kind,
-      mimeType: n.mimeType,
-      resourceKey: u.resourceKey,
-      resourceType: n.resourceType,
+    const a = tn(r);
+    ke({
+      contentLength: a.contentLength,
+      ext: r.ext,
+      kind: r.kind,
+      mimeType: r.mimeType,
+      resourceKey: a.resourceKey,
+      resourceType: r.resourceType,
       source: "probe",
-      streamType: n.streamType,
-      url: u.url
-    }, r);
+      streamType: r.streamType,
+      url: a.url
+    }, n);
   }
-  function ue(n, r = "key") {
-    const u = Pr(n);
-    if (!u)
+  function fe(r, n = "key") {
+    const a = Yr(r);
+    if (!a)
       return !1;
-    const m = D(u);
-    return be({
-      base64: m,
-      ext: r,
+    const p = Ue(a);
+    return Ee({
+      base64: p,
+      ext: n,
       kind: "key",
       mimeType: "application/octet-stream",
       resourceType: "key",
-      signature: `key:${m}`
+      signature: `key:${p}`
     }), !0;
   }
-  function De(n) {
-    if (!xe(n))
+  function Pe(r) {
+    if (!Kr(r))
       return !1;
     try {
-      return ie(n).byteLength !== 16 ? !1 : (be({
-        base64: n,
+      return ot(r).byteLength !== 16 ? !1 : (Ee({
+        base64: r,
         ext: "base64key",
         kind: "key",
         mimeType: "application/octet-stream",
         resourceType: "key",
-        signature: `key:${n}`
+        signature: `key:${r}`
       }), !0);
     } catch {
       return !1;
     }
   }
-  function ht(n) {
-    const r = String(n || "").trim().toLowerCase();
-    if (!Br(r))
+  function Ut(r) {
+    const n = String(r || "").trim().toLowerCase();
+    if (!qr(n))
       return !1;
-    const u = new Uint8Array(16);
-    for (let m = 0; m < 16; m += 1)
-      u[m] = Number.parseInt(r.slice(m * 2, m * 2 + 2), 16);
-    return be({
-      base64: D(u.buffer),
+    const a = new Uint8Array(16);
+    for (let p = 0; p < 16; p += 1)
+      a[p] = Number.parseInt(n.slice(p * 2, p * 2 + 2), 16);
+    return Ee({
+      base64: Ue(a.buffer),
       ext: "key",
       kind: "key",
       mimeType: "application/octet-stream",
       resourceType: "key",
-      signature: `key:${r}`
+      signature: `key:${n}`
     }), !0;
   }
-  function Je(n, r, u) {
-    const m = r === "m3u8" ? Cr(_r(u || a), n) : n;
-    be({
-      base64: Q(m),
-      ext: r,
+  function st(r, n, a) {
+    const p = n === "m3u8" ? Gr(Jr(a || c), r) : r;
+    Ee({
+      base64: Vr(p),
+      ext: n,
       kind: "manifest",
-      mimeType: r === "m3u8" ? "application/vnd.apple.mpegurl" : "application/dash+xml",
+      mimeType: n === "m3u8" ? "application/vnd.apple.mpegurl" : "application/dash+xml",
       resourceType: "inline-manifest",
-      signature: `${r}:${m}`
+      signature: `${n}:${p}`
     });
   }
-  function Mr(n) {
-    const r = new Uint8Array(n);
-    return r.length > 8 && r[4] === 102 && r[5] === 116 && r[6] === 121 && r[7] === 112;
+  function rn(r) {
+    const n = new Uint8Array(r);
+    return n.length > 8 && n[4] === 102 && n[5] === 116 && n[6] === 121 && n[7] === 112;
   }
-  function Ar(n) {
-    const r = new Uint8Array(n);
-    return r.length > 4 && r[0] === 26 && r[1] === 69 && r[2] === 223 && r[3] === 163;
+  function nn(r) {
+    const n = new Uint8Array(r);
+    return n.length > 4 && n[0] === 26 && n[1] === 69 && n[2] === 223 && n[3] === 163;
   }
-  function wt(n) {
-    if (!Array.isArray(n) || n.length <= 1)
-      return n;
-    let r = -1;
-    return n.forEach((u, m) => {
-      (Mr(u) || Ar(u)) && (r = m);
-    }), r > 0 ? n.slice(r) : n;
+  function at(r) {
+    if (!d.trimExtraMediaHeaders || !Array.isArray(r) || r.length <= 1)
+      return r;
+    let n = -1;
+    return r.forEach((a, p) => {
+      (rn(a) || nn(a)) && (n = p);
+    }), n > 0 ? r.slice(n) : r;
   }
-  function Pe(n, r = !1) {
-    if (n.url) {
-      if (n.resourceType !== "mse-stream") {
-        const u = `${n.resourceKey || n.source}:${n.resourceType || "unknown"}:${n.url}`;
-        if (h.has(u))
+  function ke(r, n = !1) {
+    if (r.url) {
+      if (r.resourceType !== "mse-stream") {
+        const a = `${r.resourceKey || r.source}:${r.resourceType || "unknown"}:${r.url}`;
+        if (x.has(a))
           return;
-        h.add(u), h.size > 2e3 && (h.clear(), h.add(u));
+        x.add(a), x.size > 2e3 && (x.clear(), x.add(a));
       }
-      if (o && !r) {
-        Ge({ payload: n, type: "capture" });
+      if (o && !n) {
+        it({ payload: r, type: "capture" });
         return;
       }
       try {
-        i(t + JSON.stringify({
+        s(t + JSON.stringify({
           capturedAt: Date.now(),
-          contentLength: n.contentLength,
-          ext: n.ext,
-          kind: n.kind || E(n.url, n.mimeType),
-          mimeType: n.mimeType,
-          pageUrl: a,
-          resourceKey: n.resourceKey,
-          resourceType: n.resourceType || "probe",
-          source: n.source,
-          streamType: n.streamType,
-          url: n.url
+          contentLength: r.contentLength,
+          ext: r.ext,
+          kind: r.kind || Ot(r.url, r.mimeType),
+          mimeType: r.mimeType,
+          pageUrl: c,
+          resourceKey: r.resourceKey,
+          resourceType: r.resourceType || "probe",
+          source: r.source,
+          streamType: r.streamType,
+          url: r.url
         }));
       } catch {
       }
     }
   }
-  function $r(n) {
-    const r = n.map((u) => String(u || "").toLowerCase());
-    if (r.some((u) => u === "audio" || u.includes("audio")))
+  function on(r) {
+    const n = r.map((a) => String(a || "").toLowerCase());
+    if (n.some((a) => a === "audio" || a.includes("audio")))
       return "audio";
-    if (r.some((u) => u === "video" || u.includes("video")))
+    if (n.some((a) => a === "video" || a.includes("video")))
       return "video";
   }
-  function kr(n) {
-    return `mse-stream:${n}`;
+  function ct(r) {
+    if (T.has(r))
+      return;
+    T.add(r), r.addEventListener("progress", () => {
+      if (d.autoSeekToBufferedEnd)
+        try {
+          if (!r.buffered || r.buffered.length === 0)
+            return;
+          const p = r.buffered.end(r.buffered.length - 1), h = Math.max(p - 5, 0), E = Number.isFinite(r.duration) ? r.duration : 0;
+          if (E > 0 && p >= E)
+            return;
+          Math.abs(r.currentTime - h) > 1 && (r.currentTime = h);
+        } catch {
+        }
+    });
+    const n = () => {
+      if (!(!d.restartAlwaysFromBeginning || M.has(r)))
+        try {
+          M.add(r), be(), r.currentTime = 0;
+        } catch {
+        }
+    };
+    r.addEventListener("play", () => {
+      n();
+    }, { once: !0 });
+    const a = window.setInterval(() => {
+      if (M.has(r) || !d.restartAlwaysFromBeginning) {
+        window.clearInterval(a);
+        return;
+      }
+      r.paused || (n(), window.clearInterval(a));
+    }, 500);
+    window.setTimeout(() => {
+      window.clearInterval(a);
+    }, 5e3);
   }
-  function Ze(n) {
-    const r = v.get(n);
-    r && Pe({
-      contentLength: r.totalBytes,
-      ext: P(r.mimeType, r.streamType),
-      kind: "media",
-      mimeType: r.mimeType,
-      resourceKey: kr(n),
-      resourceType: "mse-stream",
-      source: "probe",
-      streamType: r.streamType,
-      url: r.blobUrl || `mse://capturing/${n}`
+  function sn() {
+    typeof document > "u" || document.querySelectorAll("video, audio").forEach((r) => {
+      r instanceof HTMLMediaElement && ct(r);
     });
   }
-  function bt(n) {
-    const r = v.get(n);
-    if (!r || r.buffers.length === 0)
+  function lt() {
+    o || typeof MutationObserver > "u" || P || typeof document > "u" || (sn(), P = new MutationObserver((r) => {
+      r.forEach((n) => {
+        n.addedNodes.forEach((a) => {
+          if (a instanceof Element) {
+            if (a instanceof HTMLMediaElement) {
+              ct(a);
+              return;
+            }
+            a.querySelectorAll("video, audio").forEach((p) => {
+              p instanceof HTMLMediaElement && ct(p);
+            });
+          }
+        });
+      });
+    }), P.observe(document.body || document.documentElement, {
+      childList: !0,
+      subtree: !0
+    }));
+  }
+  function be() {
+    let r = !1;
+    return w.forEach((n) => {
+      if (n.blobUrl && (URL.revokeObjectURL(n.blobUrl), n.blobUrl = ""), g) {
+        r = r || n.buffers.length > 0, n.buffers = [], n.bufferCount = 0, n.lastReportedBufferCount = 0, n.lastReportedBytes = 0, n.totalBytes = 0, ve(n.streamId);
+        return;
+      }
+      if (n.buffers.length > 1) {
+        const a = n.buffers[0];
+        n.buffers = a ? [a] : [], n.bufferCount = n.buffers.length, n.totalBytes = (a == null ? void 0 : a.byteLength) || 0, n.lastReportedBufferCount = n.bufferCount, n.lastReportedBytes = n.totalBytes, r = !0, ve(n.streamId);
+      }
+    }), g = !1, r;
+  }
+  function Pt() {
+    if (typeof document > "u")
       return !1;
-    r.blobUrl && (URL.revokeObjectURL(r.blobUrl), r.blobUrl = "");
+    const r = Array.from(w.values()).filter((a) => a.buffers.length > 0);
+    if (r.length === 0)
+      return !1;
+    const n = tt();
+    return r.forEach((a) => {
+      const p = at(a.buffers), h = new Blob(p, { type: a.mimeType }), E = document.createElement("a"), D = URL.createObjectURL(h), I = rt(a.mimeType, a.streamType), Y = r.length > 1 && a.streamType ? `-${a.streamType}` : "";
+      E.href = D, E.download = `${n}${Y}.${I}`, E.click(), E.remove(), setTimeout(() => {
+        URL.revokeObjectURL(D);
+      }, 1e3);
+    }), d.clearCacheOnComplete && setTimeout(() => {
+      be();
+    }, 0), !0;
+  }
+  function an() {
+    if (typeof document > "u")
+      return !1;
+    be();
+    let r = !1;
+    return document.querySelectorAll("video, audio").forEach((n) => {
+      if (n instanceof HTMLMediaElement)
+        try {
+          n.currentTime = 0, n.play().catch(() => {
+          }), r = !0;
+        } catch {
+        }
+    }), r;
+  }
+  function cn(r) {
+    return `mse-stream:${r}`;
+  }
+  function ve(r) {
+    const n = w.get(r);
+    n && ke({
+      contentLength: n.totalBytes,
+      ext: rt(n.mimeType, n.streamType),
+      kind: "media",
+      mimeType: n.mimeType,
+      resourceKey: cn(r),
+      resourceType: "mse-stream",
+      source: "probe",
+      streamType: n.streamType,
+      url: n.blobUrl || `mse://capturing/${r}`
+    });
+  }
+  function kt(r) {
+    const n = w.get(r);
+    if (!n || n.buffers.length === 0)
+      return !1;
+    n.blobUrl && (URL.revokeObjectURL(n.blobUrl), n.blobUrl = "");
     try {
-      const u = wt(r.buffers);
-      return r.blobUrl = URL.createObjectURL(new Blob(u, { type: r.mimeType })), Ze(n), !0;
+      const a = at(n.buffers);
+      return n.blobUrl = URL.createObjectURL(new Blob(a, { type: n.mimeType })), ve(r), !0;
     } catch {
       return !1;
     }
   }
-  function vt(n) {
-    const r = v.get(n);
-    return r ? (r.blobUrl || bt(n), r.blobUrl) : "";
+  function Lt(r) {
+    const n = w.get(r);
+    return n ? (n.blobUrl || kt(r), n.blobUrl) : "";
   }
-  function St(n) {
-    const r = v.get(n);
-    if (!r)
+  function At(r) {
+    const n = w.get(r);
+    if (!n)
       return "media.bin";
-    const u = M(y || d || "media"), m = r.streamType ? `-${r.streamType}` : "", S = P(r.mimeType, r.streamType);
-    return `${u}${m}.${S}`;
+    const a = tt(), p = n.streamType ? `-${n.streamType}` : "", h = rt(n.mimeType, n.streamType);
+    return `${a}${p}.${h}`;
   }
-  function Fr(n) {
-    const r = String(n || "").replace(/^mse-stream:/, ""), u = vt(r);
-    if (!u || typeof document > "u")
+  function ln(r) {
+    const n = String(r || "").replace(/^mse-stream:/, ""), a = Lt(n);
+    if (!a || typeof document > "u")
       return !1;
-    const m = document.createElement("a");
-    return m.href = u, m.download = St(r), m.click(), m.remove(), !0;
+    const p = document.createElement("a");
+    return p.href = a, p.download = At(n), p.click(), p.remove(), d.clearCacheOnComplete && setTimeout(() => {
+      be();
+    }, 0), !0;
   }
-  function Nr(n) {
-    const r = String(n || "").replace(/^mse-stream:/, ""), u = vt(r);
-    return !u || !_ ? !1 : (_(u, "_blank", "noopener,noreferrer"), !0);
+  function un(r) {
+    const n = String(r || "").replace(/^mse-stream:/, ""), a = Lt(n);
+    return !a || !v ? !1 : (v(a, "_blank", "noopener,noreferrer"), !0);
   }
-  async function Wr(n) {
-    const r = String(n || "").replace(/^mse-stream:/, ""), u = v.get(r);
-    if (!u || u.buffers.length === 0)
+  async function dn(r) {
+    const n = String(r || "").replace(/^mse-stream:/, ""), a = w.get(n);
+    if (!a || a.buffers.length === 0)
       return null;
     try {
-      const m = wt(u.buffers), x = await new Blob(m, { type: u.mimeType }).arrayBuffer();
+      const p = at(a.buffers), E = await new Blob(p, { type: a.mimeType }).arrayBuffer();
       return {
-        base64: D(x),
-        fileName: St(r),
-        mimeType: u.mimeType,
-        resourceKey: n,
-        streamType: u.streamType
+        base64: Ue(E),
+        fileName: At(n),
+        mimeType: a.mimeType,
+        resourceKey: r,
+        streamType: a.streamType
       };
     } catch {
       return null;
     }
   }
-  function Ir(n) {
-    const r = w.get(n);
-    return !(r != null && r.blobUrl) || !_ ? !1 : (_(r.blobUrl, "_blank", "noopener,noreferrer"), !0);
+  function fn(r) {
+    const n = R.get(r);
+    return !(n != null && n.blobUrl) || !v ? !1 : (v(n.blobUrl, "_blank", "noopener,noreferrer"), !0);
   }
-  function zr(n) {
-    const r = w.get(n);
-    if (!(r != null && r.blobUrl) || typeof document > "u")
+  function mn(r) {
+    const n = R.get(r);
+    if (!(n != null && n.blobUrl) || typeof document > "u")
       return !1;
-    const u = document.createElement("a");
-    return u.href = r.blobUrl, u.download = r.fileName, u.click(), u.remove(), !0;
+    const a = document.createElement("a");
+    return a.href = n.blobUrl, a.download = n.fileName, a.click(), a.remove(), !0;
   }
-  function Hr(n) {
-    const r = w.get(n);
-    return r ? Promise.resolve({
-      base64: r.base64,
-      fileName: r.fileName,
-      mimeType: r.mimeType,
-      resourceKey: n,
-      streamType: r.streamType
+  function pn(r) {
+    const n = R.get(r);
+    return n ? Promise.resolve({
+      base64: n.base64,
+      fileName: n.fileName,
+      mimeType: n.mimeType,
+      resourceKey: r,
+      streamType: n.streamType
     }) : Promise.resolve(null);
   }
-  function jr(n) {
-    if (!n || typeof n != "object")
+  function gn(r) {
+    if (!r || typeof r != "object")
       return !1;
-    const r = n[R];
-    return !r || typeof r != "object" || !("type" in r) ? !1 : o ? Ge(r) : r.type === "capture" ? (Pe(r.payload, !0), !0) : r.type === "generated-resource" ? (be(r.payload, !0), !0) : !1;
+    const n = r[y];
+    return !n || typeof n != "object" || !("type" in n) ? !1 : o ? it(n) : n.type === "capture" ? (ke(n.payload, !0), !0) : n.type === "generated-resource" ? (Ee(n.payload, !0), !0) : !1;
   }
-  const Ye = e.Worker;
-  typeof Ye == "function" && (e.Worker = new Proxy(Ye, {
-    construct(n, r, u) {
-      const [m, S] = r, x = () => {
-        const re = typeof m == "string" ? m : String(m), ge = p(re) || re;
-        if (!ge)
+  const ut = e.Worker;
+  typeof ut == "function" && (e.Worker = new Proxy(ut, {
+    construct(r, n, a) {
+      const [p, h] = n, E = () => {
+        const Y = typeof p == "string" ? p : String(p), le = Me(Y) || Y;
+        if (!le)
           return "";
-        const ae = `;(${fr.toString()})(${JSON.stringify(t)});
+        const K = `;(${_r.toString()})(${JSON.stringify(t)});
 `;
-        let he = "";
-        if ((S == null ? void 0 : S.type) === "module")
-          he = `${ae}import ${JSON.stringify(ge)};
+        let ue = "";
+        if ((h == null ? void 0 : h.type) === "module")
+          ue = `${K}import ${JSON.stringify(le)};
 `;
         else {
-          const le = new XMLHttpRequest();
-          if (le.open("GET", ge, !1), le.send(), le.status < 200 || le.status >= 300 || !le.responseText)
+          const me = new XMLHttpRequest();
+          if (me.open("GET", le, !1), me.send(), me.status < 200 || me.status >= 300 || !me.responseText)
             return "";
-          he = `${ae}${le.responseText}`;
+          ue = `${K}${me.responseText}`;
         }
-        return URL.createObjectURL(new Blob([he], { type: "text/javascript" }));
+        return URL.createObjectURL(new Blob([ue], { type: "text/javascript" }));
       };
-      let U = "";
+      let D = "";
       try {
-        U = x();
+        D = E();
       } catch {
-        U = "";
+        D = "";
       }
-      const ee = U ? Reflect.construct(n, [U, S], u) : Reflect.construct(n, r, u);
-      return ee.addEventListener("message", (re) => {
-        jr(re.data) && re.stopImmediatePropagation();
-      }, { capture: !0 }), U && setTimeout(() => {
-        URL.revokeObjectURL(U);
-      }, 6e4), ee;
+      const I = D ? Reflect.construct(r, [D, h], a) : Reflect.construct(r, n, a);
+      return I.addEventListener("message", (Y) => {
+        gn(Y.data) && Y.stopImmediatePropagation();
+      }, { capture: !0 }), D && setTimeout(() => {
+        URL.revokeObjectURL(D);
+      }, 6e4), I;
     }
   }), e.Worker.toString = function() {
-    return Ye.toString();
+    return ut.toString();
   });
-  const te = e.MediaSource;
-  if ((kt = te == null ? void 0 : te.prototype) != null && kt.addSourceBuffer) {
-    const n = te.prototype.addSourceBuffer;
-    te.prototype.addSourceBuffer = new Proxy(n, {
-      apply(r, u, m) {
-        var x;
-        const S = Reflect.apply(r, u, m);
+  const oe = e.MediaSource;
+  if ((Yt = oe == null ? void 0 : oe.prototype) != null && Yt.addSourceBuffer) {
+    const r = oe.prototype.addSourceBuffer;
+    oe.prototype.addSourceBuffer = new Proxy(r, {
+      apply(n, a, p) {
+        var E;
+        const h = Reflect.apply(n, a, p);
         try {
-          const U = u, ee = String((m == null ? void 0 : m[0]) || "").trim(), re = ((x = ee.split(";")[0]) == null ? void 0 : x.trim().toLowerCase()) || "", ge = re.startsWith("audio/") ? "audio" : re.startsWith("video/") ? "video" : void 0, ae = `${Date.now()}-${++A}`, he = B.get(U) || [];
-          if (he.push(ae), B.set(U, he), v.set(ae, {
+          lt(), g = !1;
+          const D = a, I = String((p == null ? void 0 : p[0]) || "").trim(), Y = ((E = I.split(";")[0]) == null ? void 0 : E.trim().toLowerCase()) || "", le = Y.startsWith("audio/") ? "audio" : Y.startsWith("video/") ? "video" : void 0, K = `${Date.now()}-${++C}`, ue = b.get(D) || [];
+          if (ue.push(K), b.set(D, ue), w.set(K, {
             blobUrl: "",
             bufferCount: 0,
             buffers: [],
             lastReportedBufferCount: 0,
             lastReportedBytes: 0,
-            mimeType: ee || (ge === "audio" ? "audio/mp4" : "video/mp4"),
-            streamId: ae,
-            streamType: ge,
+            mimeType: I || (le === "audio" ? "audio/mp4" : "video/mp4"),
+            streamId: K,
+            streamType: le,
             totalBytes: 0
-          }), Ze(ae), S && typeof S.appendBuffer == "function") {
-            const le = S.appendBuffer;
-            S.appendBuffer = new Proxy(le, {
-              apply(Vr, Kr, Oe) {
-                const et = Reflect.apply(Vr, Kr, Oe), J = v.get(ae);
-                if (!J)
-                  return et;
-                const Le = I(Oe == null ? void 0 : Oe[0]);
-                return !Le || Le.byteLength === 0 || (J.buffers.push(Le), J.bufferCount += 1, J.totalBytes += Le.byteLength, (J.bufferCount <= 3 || J.bufferCount - J.lastReportedBufferCount >= 8 || J.totalBytes - J.lastReportedBytes >= 1024 * 512) && (J.lastReportedBufferCount = J.bufferCount, J.lastReportedBytes = J.totalBytes, Ze(ae))), et;
+          }), ve(K), h && typeof h.appendBuffer == "function") {
+            const me = h.appendBuffer;
+            h.appendBuffer = new Proxy(me, {
+              apply(yn, hn, Ae) {
+                const ft = Reflect.apply(yn, hn, Ae), Q = w.get(K);
+                if (!Q)
+                  return ft;
+                const Fe = jr(Ae == null ? void 0 : Ae[0]);
+                return !Fe || Fe.byteLength === 0 || (Q.buffers.push(Fe), Q.bufferCount += 1, Q.totalBytes += Fe.byteLength, (Q.bufferCount <= 3 || Q.bufferCount - Q.lastReportedBufferCount >= 8 || Q.totalBytes - Q.lastReportedBytes >= 1024 * 512) && (Q.lastReportedBufferCount = Q.bufferCount, Q.lastReportedBytes = Q.totalBytes, ve(K))), ft;
               }
             });
           }
         } catch {
         }
-        return S;
+        return h;
       }
     });
   }
-  if ((Ft = te == null ? void 0 : te.prototype) != null && Ft.endOfStream) {
-    const n = te.prototype.endOfStream;
-    te.prototype.endOfStream = new Proxy(n, {
-      apply(r, u, m) {
-        const S = Reflect.apply(r, u, m);
+  if ((Qt = oe == null ? void 0 : oe.prototype) != null && Qt.endOfStream) {
+    const r = oe.prototype.endOfStream;
+    oe.prototype.endOfStream = new Proxy(r, {
+      apply(n, a, p) {
+        const h = Reflect.apply(n, a, p);
         try {
-          (B.get(u) || []).forEach((U) => {
-            bt(U);
-          });
+          if (g = !0, (b.get(a) || []).forEach((D) => {
+            kt(D);
+          }), d.autoDownloadOnComplete)
+            return setTimeout(() => {
+              Pt();
+            }, 500), h;
+          d.clearCacheOnComplete && setTimeout(() => {
+            be();
+          }, 0);
         } catch {
         }
-        return S;
+        return h;
       }
     });
   }
-  function G(n, r) {
-    if (typeof n != "string")
+  function Z(r, n) {
+    if (typeof r != "string")
       return;
-    const u = n.trim();
-    if (!u || De(u))
+    const a = r.trim();
+    if (!a || Pe(a))
       return;
-    const m = u.split("").join("").trim();
-    if (ht(m))
+    const p = a.split("").join("").trim();
+    if (Ut(p))
       return;
-    if (q.test(u)) {
-      const ee = Dr(u);
-      ee && G(ee, r);
-      return;
-    }
-    const S = xr(u);
-    if (S) {
-      ve(S);
+    if (ae.test(a)) {
+      const I = Zr(a);
+      I && Z(I, n);
       return;
     }
-    const x = u.toUpperCase();
-    if (x.startsWith("#EXTM3U") || x.includes("#EXTINF:")) {
-      Je(u, "m3u8", r == null ? void 0 : r.baseUrl);
+    const h = Xr(a);
+    if (h) {
+      Te(h);
       return;
     }
-    if (u.toLowerCase().includes("urn:mpeg:dash:schema:mpd") || u.includes("<MPD") && u.includes("</MPD>")) {
-      Je(u, "mpd", r == null ? void 0 : r.baseUrl);
+    const E = a.toUpperCase();
+    if (E.startsWith("#EXTM3U") || E.includes("#EXTINF:")) {
+      st(a, "m3u8", n == null ? void 0 : n.baseUrl);
       return;
     }
-    const U = p(u);
-    U && Pe({
-      kind: E(U, r == null ? void 0 : r.mimeType),
-      mimeType: r == null ? void 0 : r.mimeType,
-      resourceType: r == null ? void 0 : r.resourceType,
+    if (a.toLowerCase().includes("urn:mpeg:dash:schema:mpd") || a.includes("<MPD") && a.includes("</MPD>")) {
+      st(a, "mpd", n == null ? void 0 : n.baseUrl);
+      return;
+    }
+    const D = Me(a);
+    D && ke({
+      kind: Ot(D, n == null ? void 0 : n.mimeType),
+      mimeType: n == null ? void 0 : n.mimeType,
+      resourceType: n == null ? void 0 : n.resourceType,
       source: "probe",
-      streamType: r == null ? void 0 : r.streamType,
-      url: U
+      streamType: n == null ? void 0 : n.streamType,
+      url: D
     });
   }
-  function ve(n, r = 0, u = /* @__PURE__ */ new WeakSet(), m = []) {
-    if (r > 6 || n == null)
+  function Te(r, n = 0, a = /* @__PURE__ */ new WeakSet(), p = []) {
+    if (n > 6 || r == null)
       return;
-    if (n instanceof ArrayBuffer) {
-      ue(n);
-      return;
-    }
-    if (ArrayBuffer.isView(n)) {
-      ue(n.buffer.slice(n.byteOffset, n.byteOffset + n.byteLength));
+    if (r instanceof ArrayBuffer) {
+      fe(r);
       return;
     }
-    if (typeof n == "string") {
-      G(n, {
-        baseUrl: a,
+    if (ArrayBuffer.isView(r)) {
+      fe(r.buffer.slice(r.byteOffset, r.byteOffset + r.byteLength));
+      return;
+    }
+    if (typeof r == "string") {
+      Z(r, {
+        baseUrl: c,
         resourceType: "json",
-        streamType: $r(m)
+        streamType: on(p)
       });
       return;
     }
-    if (typeof n != "object")
+    if (typeof r != "object")
       return;
-    const S = n;
-    if (!u.has(S)) {
-      if (u.add(S), Array.isArray(n)) {
-        if (n.length === 16 && n.every((x) => typeof x == "number" && Number.isFinite(x) && x >= 0 && x <= 255)) {
-          ue(Uint8Array.from(n).buffer);
+    const h = r;
+    if (!a.has(h)) {
+      if (a.add(h), Array.isArray(r)) {
+        if (r.length === 16 && r.every((E) => typeof E == "number" && Number.isFinite(E) && E >= 0 && E <= 255)) {
+          fe(Uint8Array.from(r).buffer);
           return;
         }
-        n.slice(0, 80).forEach((x, U) => {
-          ve(x, r + 1, u, m.concat(String(U)));
+        r.slice(0, 80).forEach((E, D) => {
+          Te(E, n + 1, a, p.concat(String(D)));
         });
         return;
       }
-      Object.keys(n).slice(0, 80).forEach((x) => {
-        ve(n[x], r + 1, u, m.concat(x));
+      Object.keys(r).slice(0, 80).forEach((E) => {
+        Te(r[E], n + 1, a, p.concat(E));
       });
     }
   }
-  const Qe = typeof e.fetch == "function" ? e.fetch.bind(e) : null;
-  Qe && (e.fetch = async function(n, r) {
-    const u = typeof n == "string" ? n : n instanceof Request ? n.url : String(n);
-    G(u, { resourceType: "fetch" });
-    const m = await Qe(n, r);
-    return G(m.url || u, {
-      mimeType: m.headers.get("content-type") || void 0,
+  const dt = typeof e.fetch == "function" ? e.fetch.bind(e) : null;
+  dt && (e.fetch = async function(r, n) {
+    const a = typeof r == "string" ? r : r instanceof Request ? r.url : String(r);
+    Z(a, { resourceType: "fetch" });
+    const p = await dt(r, n);
+    return Z(p.url || a, {
+      mimeType: p.headers.get("content-type") || void 0,
       resourceType: "fetch"
-    }), m.clone().arrayBuffer().then((x) => {
-      if (!x.byteLength || ue(x))
+    }), p.clone().arrayBuffer().then((E) => {
+      if (!E.byteLength || fe(E))
         return;
-      const U = new TextDecoder().decode(x);
-      U.trim() && G(U, {
-        baseUrl: m.url || u,
-        mimeType: m.headers.get("content-type") || void 0,
+      const D = new TextDecoder().decode(E);
+      D.trim() && Z(D, {
+        baseUrl: p.url || a,
+        mimeType: p.headers.get("content-type") || void 0,
         resourceType: "fetch-body"
       });
     }).catch(() => {
-    }), m;
+    }), p;
   }, e.fetch.toString = function() {
-    return Qe.toString();
+    return dt.toString();
   });
-  const Et = "__OMNIFLOW_RESOURCE_PROBE_XHR_URL__", Tt = XMLHttpRequest.prototype.open;
-  XMLHttpRequest.prototype.open = function(n, r) {
-    return this[Et] = typeof r == "string" ? r : String(r), Tt.apply(this, arguments);
+  const Ft = "__OMNIFLOW_RESOURCE_PROBE_XHR_URL__", Nt = XMLHttpRequest.prototype.open;
+  XMLHttpRequest.prototype.open = function(r, n) {
+    return this[Ft] = typeof n == "string" ? n : String(n), Nt.apply(this, arguments);
   };
-  const Rt = XMLHttpRequest.prototype.send;
+  const $t = XMLHttpRequest.prototype.send;
   XMLHttpRequest.prototype.send = function() {
     return this.addEventListener("loadend", function() {
       if (this.status < 200 || this.status >= 400)
         return;
-      const n = this[Et], r = this.responseURL || (typeof n == "string" ? n : "");
-      if (G(r, {
+      const r = this[Ft], n = this.responseURL || (typeof r == "string" ? r : "");
+      if (Z(n, {
         mimeType: this.getResponseHeader("content-type") || void 0,
         resourceType: "xhr"
       }), this.response instanceof ArrayBuffer) {
-        if (ue(this.response))
+        if (fe(this.response))
           return;
-        const u = new TextDecoder().decode(this.response);
-        u && G(u, {
-          baseUrl: r,
+        const a = new TextDecoder().decode(this.response);
+        a && Z(a, {
+          baseUrl: n,
           mimeType: this.getResponseHeader("content-type") || void 0,
           resourceType: "xhr-body"
         });
         return;
       }
       if (typeof this.response == "string") {
-        G(this.response, {
-          baseUrl: r,
+        Z(this.response, {
+          baseUrl: n,
           mimeType: this.getResponseHeader("content-type") || void 0,
           resourceType: "xhr-body"
         });
         return;
       }
       if (this.response && typeof this.response == "object") {
-        ve(this.response);
+        Te(this.response);
         return;
       }
-      typeof this.responseText == "string" && this.responseText.trim() && G(this.responseText, {
-        baseUrl: r,
+      typeof this.responseText == "string" && this.responseText.trim() && Z(this.responseText, {
+        baseUrl: n,
         mimeType: this.getResponseHeader("content-type") || void 0,
         resourceType: "xhr-body"
       });
-    }, { once: !0 }), Rt.apply(this, arguments);
+    }, { once: !0 }), $t.apply(this, arguments);
   }, XMLHttpRequest.prototype.open.toString = function() {
-    return Tt.toString();
+    return Nt.toString();
   }, XMLHttpRequest.prototype.send.toString = function() {
-    return Rt.toString();
+    return $t.toString();
   }, JSON.parse = function() {
-    const n = s.apply(this, arguments);
-    return ve(n), n;
+    const r = l.apply(this, arguments);
+    return Te(r), r;
   }, JSON.parse.toString = function() {
-    return s.toString();
+    return l.toString();
   };
-  const Bt = btoa;
-  e.btoa = function(n) {
-    const r = Bt.apply(this, arguments);
-    return De(r), G(n, { baseUrl: a, resourceType: "btoa" }), r;
+  const Wt = btoa;
+  e.btoa = function(r) {
+    const n = Wt.apply(this, arguments);
+    return Pe(n), Z(r, { baseUrl: c, resourceType: "btoa" }), n;
   }, btoa.toString = function() {
-    return Bt.toString();
+    return Wt.toString();
   };
-  const _t = atob;
-  e.atob = function(n) {
-    const r = _t.apply(this, arguments);
-    return De(n), G(r, { baseUrl: a, resourceType: "atob" }), r;
+  const It = atob;
+  e.atob = function(r) {
+    const n = It.apply(this, arguments);
+    return Pe(r), Z(n, { baseUrl: c, resourceType: "atob" }), n;
   }, atob.toString = function() {
-    return _t.toString();
+    return It.toString();
   };
-  const Ct = String.fromCharCode;
-  String.fromCharCode = new Proxy(Ct, {
-    apply(n, r, u) {
-      const m = Reflect.apply(n, r, u);
-      if (m.length >= 7) {
-        if ((m.startsWith("#EXTM3U") || m.includes("#EXTINF:")) && (f += m, f.includes("#EXT-X-ENDLIST"))) {
-          const x = f.split("#EXT-X-ENDLIST")[0] + "#EXT-X-ENDLIST";
-          Je(x, "m3u8", a), f = "";
+  const zt = String.fromCharCode;
+  String.fromCharCode = new Proxy(zt, {
+    apply(r, n, a) {
+      const p = Reflect.apply(r, n, a);
+      if (p.length >= 7) {
+        if ((p.startsWith("#EXTM3U") || p.includes("#EXTINF:")) && (f += p, f.includes("#EXT-X-ENDLIST"))) {
+          const E = f.split("#EXT-X-ENDLIST")[0] + "#EXT-X-ENDLIST";
+          st(E, "m3u8", c), f = "";
         }
-        const S = m.split("").join("").trim();
-        ht(S);
+        const h = p.split("").join("").trim();
+        Ut(h);
       }
-      return m;
+      return p;
     }
   }), String.fromCharCode.toString = function() {
-    return Ct.toString();
+    return zt.toString();
   };
-  const xt = Array.prototype.slice;
+  const Ht = Array.prototype.slice;
   Array.prototype.slice = function() {
-    const n = xt.apply(this, arguments);
-    return Array.isArray(n) && n.length === 16 && n.every((r) => typeof r == "number" && Number.isFinite(r) && r >= 0 && r <= 255) && ue(Uint8Array.from(n).buffer), n;
+    const r = Ht.apply(this, arguments);
+    return Array.isArray(r) && r.length === 16 && r.every((n) => typeof n == "number" && Number.isFinite(n) && n >= 0 && n <= 255) && fe(Uint8Array.from(r).buffer), r;
   }, Array.prototype.slice.toString = function() {
-    return xt.toString();
+    return Ht.toString();
   };
-  const Dt = Array.prototype.join;
+  const jt = Array.prototype.join;
   Array.prototype.join = function() {
-    const n = Dt.apply(this, arguments);
-    return typeof n == "string" && ((n.startsWith("#EXTM3U") || n.includes("#EXTINF:")) && G(n, { baseUrl: a, resourceType: "array-join" }), De(n)), n;
+    const r = jt.apply(this, arguments);
+    return typeof r == "string" && ((r.startsWith("#EXTM3U") || r.includes("#EXTINF:")) && Z(r, { baseUrl: c, resourceType: "array-join" }), Pe(r)), r;
   }, Array.prototype.join.toString = function() {
-    return Dt.toString();
+    return jt.toString();
   };
-  const Ue = e.DataView;
-  if (typeof Ue == "function") {
-    const n = function(r, u, m) {
-      const S = new Ue(r, u, m), x = () => {
-        const U = S.buffer.slice(S.byteOffset, S.byteOffset + S.byteLength);
-        ue(U);
+  const Le = e.DataView;
+  if (typeof Le == "function") {
+    const r = function(n, a, p) {
+      const h = new Le(n, a, p), E = () => {
+        const D = h.buffer.slice(h.byteOffset, h.byteOffset + h.byteLength);
+        fe(D);
       };
-      return ["setInt8", "setUint8", "setInt16", "setUint16", "setInt32", "setUint32"].forEach((U) => {
-        const ee = S[U];
-        typeof ee == "function" && (S[U] = function() {
-          const re = ee.apply(this, arguments);
-          return x(), re;
+      return ["setInt8", "setUint8", "setInt16", "setUint16", "setInt32", "setUint32"].forEach((D) => {
+        const I = h[D];
+        typeof I == "function" && (h[D] = function() {
+          const Y = I.apply(this, arguments);
+          return E(), Y;
         });
-      }), x(), S;
+      }), E(), h;
     };
-    n.prototype = Ue.prototype, n.toString = function() {
-      return Ue.toString();
-    }, e.DataView = n;
+    r.prototype = Le.prototype, r.toString = function() {
+      return Le.toString();
+    }, e.DataView = r;
   }
-  function Pt(n) {
+  function Vt(r) {
     return function() {
-      const r = n.apply(this, arguments);
-      return (r == null ? void 0 : r.byteLength) === 16 && ue(r.buffer.slice(r.byteOffset, r.byteOffset + r.byteLength)), r;
+      const n = r.apply(this, arguments);
+      return (n == null ? void 0 : n.byteLength) === 16 && fe(n.buffer.slice(n.byteOffset, n.byteOffset + n.byteLength)), n;
     };
   }
-  const Ut = Int8Array.prototype.subarray;
-  Int8Array.prototype.subarray = Pt(Ut), Int8Array.prototype.subarray.toString = function() {
-    return Ut.toString();
+  const Kt = Int8Array.prototype.subarray;
+  Int8Array.prototype.subarray = Vt(Kt), Int8Array.prototype.subarray.toString = function() {
+    return Kt.toString();
   };
-  const Ot = Uint8Array.prototype.subarray;
-  Uint8Array.prototype.subarray = Pt(Ot), Uint8Array.prototype.subarray.toString = function() {
-    return Ot.toString();
+  const qt = Uint8Array.prototype.subarray;
+  Uint8Array.prototype.subarray = Vt(qt), Uint8Array.prototype.subarray.toString = function() {
+    return qt.toString();
   };
-  const Lt = String.prototype.indexOf;
-  return String.prototype.indexOf = function(n, r) {
-    const u = Lt.apply(this, arguments);
-    if (n === "#EXTM3U" && u !== -1) {
-      const m = String(this);
-      G(m.slice(Math.max(r ?? 0, 0)), {
-        baseUrl: a,
+  const Jt = String.prototype.indexOf;
+  return String.prototype.indexOf = function(r, n) {
+    const a = Jt.apply(this, arguments);
+    if (r === "#EXTM3U" && a !== -1) {
+      const p = String(this);
+      Z(p.slice(Math.max(n ?? 0, 0)), {
+        baseUrl: c,
         resourceType: "string-indexof"
       });
     }
-    return u;
+    return a;
   }, String.prototype.indexOf.toString = function() {
-    return Lt.toString();
-  }, e.__OMNIFLOW_EMBEDDED_BROWSER_RESOURCE_PROBE__ = {
-    exportResource(n) {
-      const r = String(n || "");
-      return r.startsWith("mse-stream:") ? Fr(r) : r.startsWith("probe-resource:") ? zr(r) : !1;
+    return Jt.toString();
+  }, o || lt(), e.__OMNIFLOW_EMBEDDED_BROWSER_RESOURCE_PROBE__ = {
+    clearCatchMediaCache() {
+      return be();
+    },
+    downloadCatchMedia() {
+      return Pt();
+    },
+    exportResource(r) {
+      const n = String(r || "");
+      return n.startsWith("mse-stream:") ? ln(n) : n.startsWith("probe-resource:") ? mn(n) : !1;
+    },
+    getCatchToolkitState() {
+      return Dt();
     },
     installedAt: Date.now(),
-    openResource(n) {
-      const r = String(n || "");
-      return r.startsWith("mse-stream:") ? Nr(r) : r.startsWith("probe-resource:") ? Ir(r) : !1;
+    openResource(r) {
+      const n = String(r || "");
+      return n.startsWith("mse-stream:") ? un(n) : n.startsWith("probe-resource:") ? fn(n) : !1;
     },
-    readResource(n) {
-      const r = String(n || "");
-      return r.startsWith("mse-stream:") ? Wr(r) : r.startsWith("probe-resource:") ? Hr(r) : Promise.resolve(null);
+    readResource(r) {
+      const n = String(r || "");
+      return n.startsWith("mse-stream:") ? dn(n) : n.startsWith("probe-resource:") ? pn(n) : Promise.resolve(null);
     },
-    seen: h
+    restartCatchMediaCapture() {
+      return an();
+    },
+    seen: x,
+    updateCatchToolkitState(r) {
+      return typeof r.autoSeekToBufferedEnd == "boolean" && (d.autoSeekToBufferedEnd = r.autoSeekToBufferedEnd), typeof r.autoDownloadOnComplete == "boolean" && (d.autoDownloadOnComplete = r.autoDownloadOnComplete), typeof r.clearCacheOnComplete == "boolean" && (d.clearCacheOnComplete = r.clearCacheOnComplete), typeof r.manualFileName == "string" && (d.manualFileName = r.manualFileName), typeof r.regexRule == "string" && (d.regexRule = Qe(r.regexRule).rule), typeof r.restartAlwaysFromBeginning == "boolean" && (d.restartAlwaysFromBeginning = r.restartAlwaysFromBeginning), typeof r.selectorRule == "string" && (d.selectorRule = we(r.selectorRule).rule), typeof r.trimExtraMediaHeaders == "boolean" && (d.trimExtraMediaHeaders = r.trimExtraMediaHeaders), zr(), o || lt(), Dt();
+    }
   }, "installed";
 }
-const Kn = [
+const vo = [
   process.env.OMNIFLOW_FFMPEG_PATH,
   "/opt/homebrew/bin/ffmpeg",
   "/usr/local/bin/ffmpeg",
   "/usr/bin/ffmpeg",
   "ffmpeg"
 ].filter((t) => !!t);
-function at(t) {
+function St(t) {
   return String(t || "").trim().replace(/[\\/:*?"<>|]+/g, "_") || "media";
 }
-async function qn(t) {
+async function To(t) {
   if (!t || t === "ffmpeg")
     return !1;
   try {
-    return await on(t, Yr.X_OK), !0;
+    return await On(t, Tn.X_OK), !0;
   } catch {
     return !1;
   }
 }
-async function Xn(t) {
+async function Ro(t) {
   return new Promise((e) => {
-    const o = or(t, ["-version"], {
+    const o = br(t, ["-version"], {
       stdio: "ignore"
     });
-    o.once("error", () => e(!1)), o.once("exit", (a) => e(a === 0));
+    o.once("error", () => e(!1)), o.once("exit", (c) => e(c === 0));
   });
 }
-async function Gn(t) {
+async function Co(t) {
   const e = [
     String(t || "").trim() || void 0,
-    ...Kn
-  ].filter((o, a, d) => !!o && d.indexOf(o) === a);
+    ...vo
+  ].filter((o, c, u) => !!o && u.indexOf(o) === c);
   for (const o of e) {
     if (o === "ffmpeg") {
-      if (await Xn(o))
+      if (await Ro(o))
         return o;
       continue;
     }
-    if (await qn(o))
+    if (await To(o))
       return o;
   }
   return null;
 }
-function Jn(t) {
+function Bo(t) {
   return [
     "-y",
     "-i",
@@ -1702,67 +2096,67 @@ function Jn(t) {
     t.outputPath
   ];
 }
-function Zn(t, e) {
-  const o = at(T.parse(t).name), a = at(T.parse(e).name);
-  return `${o.replace(/-video$/i, "").replace(/_video$/i, "") || a.replace(/-audio$/i, "").replace(/_audio$/i, "") || "merged-media"}.mp4`;
+function xo(t, e) {
+  const o = St(B.parse(t).name), c = St(B.parse(e).name);
+  return `${o.replace(/-video$/i, "").replace(/_video$/i, "") || c.replace(/-audio$/i, "").replace(/_audio$/i, "") || "merged-media"}.mp4`;
 }
-async function Yn() {
-  return tn(T.join(an.tmpdir(), "omniflow-resource-merge-"));
+async function _o() {
+  return Bn(B.join(Mn.tmpdir(), "omniflow-resource-merge-"));
 }
-async function Qn(t) {
-  t && await nn(t, {
+async function Oo(t) {
+  t && await _n(t, {
     force: !0,
     recursive: !0
   });
 }
-async function jt(t, e) {
-  const o = T.join(t, at(e.fileName));
-  return await rn(o, er.from(e.base64, "base64")), o;
+async function ir(t, e) {
+  const o = B.join(t, St(e.fileName));
+  return await xn(o, gr.from(e.base64, "base64")), o;
 }
-async function eo(t) {
-  const e = await Gn(t.ffmpegPath);
+async function Do(t) {
+  const e = await Co(t.ffmpegPath);
   if (!e)
     throw new Error("未找到可用的 ffmpeg，可在系统环境变量里配置，或确认 /opt/homebrew/bin/ffmpeg 可执行");
-  const o = await Yn();
+  const o = await _o();
   try {
-    const [a, d] = await Promise.all([
-      jt(o, t.audio),
-      jt(o, t.video)
-    ]), l = Jn({
-      audioPath: a,
+    const [c, u] = await Promise.all([
+      ir(o, t.audio),
+      ir(o, t.video)
+    ]), m = Bo({
+      audioPath: c,
       outputPath: t.outputPath,
-      videoPath: d
+      videoPath: u
     });
-    return await new Promise((R, _) => {
-      const h = [], v = [], w = or(e, l, {
+    return await new Promise((v, x) => {
+      const w = [], R = [], S = br(e, m, {
         stdio: ["ignore", "pipe", "pipe"]
       });
-      w.stdout.on("data", (b) => {
-        h.push(String(b));
-      }), w.stderr.on("data", (b) => {
-        v.push(String(b));
-      }), w.once("error", (b) => {
-        _(b);
-      }), w.once("exit", (b) => {
+      S.stdout.on("data", (b) => {
+        w.push(String(b));
+      }), S.stderr.on("data", (b) => {
+        R.push(String(b));
+      }), S.once("error", (b) => {
+        x(b);
+      }), S.once("exit", (b) => {
         if (b === 0) {
-          R({
-            commandArgs: l,
+          v({
+            commandArgs: m,
             ffmpegPath: e,
             outputPath: t.outputPath,
-            stderr: v.join(""),
-            stdout: h.join("")
+            stderr: R.join(""),
+            stdout: w.join("")
           });
           return;
         }
-        _(new Error(v.join("").trim() || `ffmpeg 退出码异常: ${b}`));
+        x(new Error(R.join("").trim() || `ffmpeg 退出码异常: ${b}`));
       });
     });
   } finally {
-    await Qn(o).catch(() => {
+    await Oo(o).catch(() => {
     });
   }
 }
-const to = /* @__PURE__ */ new Set(["m3u8", "mpd"]), ro = /* @__PURE__ */ new Set([
+const Mo = /* @__PURE__ */ new Set(["m3u8", "mpd"]), Uo = /* @__PURE__ */ new Set([
   "mp4",
   "m4v",
   "m4a",
@@ -1780,7 +2174,7 @@ const to = /* @__PURE__ */ new Set(["m3u8", "mpd"]), ro = /* @__PURE__ */ new Se
   "avi",
   "ts",
   "flv"
-]), no = /* @__PURE__ */ new Set(["jpg", "jpeg", "png", "gif", "webp", "bmp", "svg", "avif", "ico"]), oo = /* @__PURE__ */ new Set(["vtt", "srt", "ass", "ssa", "ttml"]), so = /* @__PURE__ */ new Set(["key", "base64key"]), io = /* @__PURE__ */ new Set([
+]), Po = /* @__PURE__ */ new Set(["jpg", "jpeg", "png", "gif", "webp", "bmp", "svg", "avif", "ico"]), ko = /* @__PURE__ */ new Set(["vtt", "srt", "ass", "ssa", "ttml"]), Lo = /* @__PURE__ */ new Set(["key", "base64key"]), Ao = /* @__PURE__ */ new Set([
   "accept",
   "accept-language",
   "authorization",
@@ -1789,43 +2183,43 @@ const to = /* @__PURE__ */ new Set(["m3u8", "mpd"]), ro = /* @__PURE__ */ new Se
   "range",
   "referer",
   "user-agent"
-]), je = /* @__PURE__ */ new Map(), fe = /* @__PURE__ */ new Map();
-let Vt = !1, ze = null;
-function we() {
+]), Je = /* @__PURE__ */ new Map(), pe = /* @__PURE__ */ new Map();
+let sr = !1, Ke = null;
+function Se() {
   return {
     deepCaptureEnabled: !1,
     enabled: !1,
     resources: /* @__PURE__ */ new Map()
   };
 }
-function qe(t) {
+function Ze(t) {
   const e = String(t || "").trim();
   if (!e)
     return null;
-  const o = je.get(e);
+  const o = Je.get(e);
   if (o)
     return o;
-  const a = we();
-  return je.set(e, a), a;
+  const c = Se();
+  return Je.set(e, c), c;
 }
-function Ce(t) {
+function De(t) {
   const e = String(t || "").trim();
-  return e && je.get(e) || null;
+  return e && Je.get(e) || null;
 }
-function rt(t, e) {
+function gt(t, e) {
   if (!t)
     return "";
   const o = e.toLowerCase();
-  for (const [a, d] of Object.entries(t))
-    if (a.toLowerCase() === o)
-      return Array.isArray(d) ? String(d[0] || "") : String(d || "");
+  for (const [c, u] of Object.entries(t))
+    if (c.toLowerCase() === o)
+      return Array.isArray(u) ? String(u[0] || "") : String(u || "");
   return "";
 }
-function Xe(t) {
+function Ye(t) {
   var e;
   return ((e = String(t || "").split(";")[0]) == null ? void 0 : e.trim().toLowerCase()) || "";
 }
-function ft(t) {
+function Ct(t) {
   try {
     const o = new URL(t).pathname.toLowerCase().match(/\.([a-z0-9]+)$/i);
     return (o == null ? void 0 : o[1]) || "";
@@ -1834,66 +2228,66 @@ function ft(t) {
     return (e == null ? void 0 : e[1]) || "";
   }
 }
-function mr(t) {
-  const e = Xe(t.mimeType), o = ft(t.url);
-  return to.has(o) || e.includes("mpegurl") || e.includes("dash+xml") ? "manifest" : ro.has(o) || e.startsWith("video/") || e.startsWith("audio/") || t.resourceType === "media" || String(t.url || "").startsWith("blob:") ? "media" : no.has(o) || e.startsWith("image/") ? "image" : oo.has(o) || e.includes("text/vtt") ? "subtitle" : o === "pdf" || e === "application/pdf" ? "document" : so.has(o) || t.resourceType === "key" || e === "application/octet-stream" ? "key" : "other";
+function Or(t) {
+  const e = Ye(t.mimeType), o = Ct(t.url);
+  return Mo.has(o) || e.includes("mpegurl") || e.includes("dash+xml") ? "manifest" : Uo.has(o) || e.startsWith("video/") || e.startsWith("audio/") || t.resourceType === "media" || String(t.url || "").startsWith("blob:") ? "media" : Po.has(o) || e.startsWith("image/") ? "image" : ko.has(o) || e.includes("text/vtt") ? "subtitle" : o === "pdf" || e === "application/pdf" ? "document" : Lo.has(o) || t.resourceType === "key" || e === "application/octet-stream" ? "key" : "other";
 }
-function pr(t) {
+function Dr(t) {
   return !t.url || t.url.startsWith("data:") ? !1 : t.kind !== "other" ? !0 : t.resourceType === "media" || t.url.startsWith("blob:");
 }
-function yr(t, e, o, a) {
-  return a ? `${t}::${e}::${a}` : `${t}::${e}::${o}`;
+function Mr(t, e, o, c) {
+  return c ? `${t}::${e}::${c}` : `${t}::${e}::${o}`;
 }
-function ao(t, e, o, a) {
-  return yr(t, e, o, a);
+function Fo(t, e, o, c) {
+  return Mr(t, e, o, c);
 }
-function co(t) {
+function No(t) {
   return Array.from(t.values()).sort((e, o) => o.capturedAt - e.capturedAt);
 }
-function oe(t) {
+function se(t) {
   return {
     deepCaptureEnabled: t.deepCaptureEnabled,
     enabled: t.enabled,
-    resources: co(t.resources)
+    resources: No(t.resources)
   };
 }
-function gr(t, e) {
-  const o = Ce(t);
+function Ur(t, e) {
+  const o = De(t);
   if (!(o != null && o.enabled))
     return null;
-  const a = String(e.url || "").trim();
-  if (!a)
+  const c = String(e.url || "").trim();
+  if (!c)
     return null;
-  const d = String(e.resourceKey || "").trim() || void 0, l = yr(t, e.source, a, d), y = o.resources.get(l), R = {
+  const u = String(e.resourceKey || "").trim() || void 0, m = Mr(t, e.source, c, u), y = o.resources.get(m), v = {
     ...y,
     ...e,
-    ext: e.ext || (y == null ? void 0 : y.ext) || ft(a) || void 0,
-    id: ao(t, e.source, a, d),
+    ext: e.ext || (y == null ? void 0 : y.ext) || Ct(c) || void 0,
+    id: Fo(t, e.source, c, u),
     kind: e.kind,
-    resourceKey: d,
+    resourceKey: u,
     tabId: t,
-    url: a
+    url: c
   };
-  return JSON.stringify(y) !== JSON.stringify(R) ? (o.resources.set(l, R), ze == null || ze(R), R) : y || null;
+  return JSON.stringify(y) !== JSON.stringify(v) ? (o.resources.set(m, v), Ke == null || Ke(v), v) : y || null;
 }
-function uo(t) {
+function $o(t) {
   const e = Number(t);
   return Number.isFinite(e) && e > 0 ? e : void 0;
 }
-function lo(t) {
+function Wo(t) {
   const e = String(t || "").trim();
   if (!e)
     return;
   const o = e.match(/\/(\d+)\s*$/);
   if (!(o != null && o[1]))
     return;
-  const a = Number(o[1]);
-  return Number.isFinite(a) && a > 0 ? a : void 0;
+  const c = Number(o[1]);
+  return Number.isFinite(c) && c > 0 ? c : void 0;
 }
-function hr(t) {
+function Pr(t) {
   if (t.streamType)
     return t.streamType;
-  const e = Xe(t.mimeType);
+  const e = Ye(t.mimeType);
   if (e.startsWith("audio/"))
     return "audio";
   if (e.startsWith("video/"))
@@ -1904,148 +2298,148 @@ function hr(t) {
   if (/(^|[\/_.-])video([\/_.-]|$)/.test(o) || t.resourceType === "media")
     return "video";
 }
-function fo(t) {
+function Io(t) {
   if (!t)
     return;
   const e = {};
-  return Object.entries(t).forEach(([o, a]) => {
-    const d = o.toLowerCase();
-    if (!io.has(d))
+  return Object.entries(t).forEach(([o, c]) => {
+    const u = o.toLowerCase();
+    if (!Ao.has(u))
       return;
-    const l = String(a || "").trim();
-    l && (e[d] = l);
+    const m = String(c || "").trim();
+    m && (e[u] = m);
   }), Object.keys(e).length ? e : void 0;
 }
-function mo(t) {
-  const e = Ce(t);
-  return oe(e || we());
+function zo(t) {
+  const e = De(t);
+  return se(e || Se());
 }
-function po(t) {
-  const e = qe(t);
-  return e ? (e.enabled = !0, oe(e)) : oe(we());
+function Ho(t) {
+  const e = Ze(t);
+  return e ? (e.enabled = !0, se(e)) : se(Se());
 }
-function yo(t) {
-  const e = qe(t);
-  return e ? (e.enabled = !0, e.deepCaptureEnabled = !0, oe(e)) : oe(we());
+function jo(t) {
+  const e = Ze(t);
+  return e ? (e.enabled = !0, e.deepCaptureEnabled = !0, se(e)) : se(Se());
 }
-function go(t) {
-  const e = qe(t);
-  return e ? (e.enabled = !1, e.deepCaptureEnabled = !1, oe(e)) : oe(we());
+function Vo(t) {
+  const e = Ze(t);
+  return e ? (e.enabled = !1, e.deepCaptureEnabled = !1, se(e)) : se(Se());
 }
-function ho(t) {
-  const e = qe(t);
-  return e ? (e.resources.clear(), oe(e)) : oe(we());
+function Ko(t) {
+  const e = Ze(t);
+  return e ? (e.resources.clear(), se(e)) : se(Se());
 }
-function Kt(t) {
-  je.delete(String(t || "").trim());
+function ar(t) {
+  Je.delete(String(t || "").trim());
 }
-function wo(t) {
+function qo(t) {
   var e;
-  return !!((e = Ce(t)) != null && e.deepCaptureEnabled);
+  return !!((e = De(t)) != null && e.deepCaptureEnabled);
 }
-function bo(t, e) {
-  const o = Ce(t);
+function Jo(t, e) {
+  const o = De(t);
   if (!(o != null && o.enabled) || !o.deepCaptureEnabled)
     return null;
-  const a = String(e.url || "").trim();
-  if (!a)
+  const c = String(e.url || "").trim();
+  if (!c)
     return null;
-  const d = e.kind || mr({
+  const u = e.kind || Or({
     mimeType: e.mimeType,
     resourceType: e.resourceType,
-    url: a
+    url: c
   });
-  return pr({ kind: d, resourceType: e.resourceType, url: a }) ? gr(t, {
+  return Dr({ kind: u, resourceType: e.resourceType, url: c }) ? Ur(t, {
     capturedAt: Number(e.capturedAt) || Date.now(),
     contentLength: e.contentLength,
     ext: e.ext,
-    kind: d,
+    kind: u,
     method: e.method,
-    mimeType: Xe(e.mimeType),
+    mimeType: Ye(e.mimeType),
     pageUrl: e.pageUrl,
     resourceType: e.resourceType,
     resourceKey: e.resourceKey,
     source: e.source || "probe",
     statusCode: e.statusCode,
-    streamType: hr({
+    streamType: Pr({
       mimeType: e.mimeType,
       resourceType: e.resourceType,
       streamType: e.streamType,
-      url: a
+      url: c
     }),
-    url: a
+    url: c
   }) : null;
 }
-function vo(t) {
-  Vt || (Vt = !0, ze = t.emitResource, t.browserSession.webRequest.onBeforeSendHeaders((e, o) => {
-    fe.set(e.id, {
+function Go(t) {
+  sr || (sr = !0, Ke = t.emitResource, t.browserSession.webRequest.onBeforeSendHeaders((e, o) => {
+    pe.set(e.id, {
       referer: e.referrer || void 0,
-      requestHeaders: fo(e.requestHeaders)
+      requestHeaders: Io(e.requestHeaders)
     }), o({ cancel: !1, requestHeaders: e.requestHeaders });
   }), t.browserSession.webRequest.onCompleted((e) => {
     if (!e.webContentsId) {
-      fe.delete(e.id);
+      pe.delete(e.id);
       return;
     }
-    const o = t.resolveTabIdByWebContentsId(e.webContentsId), a = o ? Ce(o) : null;
-    if (!o || !(a != null && a.enabled)) {
-      fe.delete(e.id);
+    const o = t.resolveTabIdByWebContentsId(e.webContentsId), c = o ? De(o) : null;
+    if (!o || !(c != null && c.enabled)) {
+      pe.delete(e.id);
       return;
     }
     if (e.statusCode < 200 || e.statusCode >= 400) {
-      fe.delete(e.id);
+      pe.delete(e.id);
       return;
     }
-    const d = Xr.fromId(e.webContentsId), l = String(e.url || "").trim(), y = fe.get(e.id), R = Xe(rt(e.responseHeaders, "content-type")), _ = mr({
-      mimeType: R,
+    const u = bn.fromId(e.webContentsId), m = String(e.url || "").trim(), y = pe.get(e.id), v = Ye(gt(e.responseHeaders, "content-type")), x = Or({
+      mimeType: v,
       resourceType: e.resourceType,
-      url: l
+      url: m
     });
-    if (!pr({ kind: _, resourceType: e.resourceType, url: l })) {
-      fe.delete(e.id);
+    if (!Dr({ kind: x, resourceType: e.resourceType, url: m })) {
+      pe.delete(e.id);
       return;
     }
-    gr(o, {
+    Ur(o, {
       capturedAt: Date.now(),
-      contentLength: lo(rt(e.responseHeaders, "content-range")) || uo(rt(e.responseHeaders, "content-length")),
-      ext: ft(l) || void 0,
-      kind: _,
+      contentLength: Wo(gt(e.responseHeaders, "content-range")) || $o(gt(e.responseHeaders, "content-length")),
+      ext: Ct(m) || void 0,
+      kind: x,
       method: e.method || void 0,
-      mimeType: R,
-      pageUrl: (d == null ? void 0 : d.getURL()) || void 0,
+      mimeType: v,
+      pageUrl: (u == null ? void 0 : u.getURL()) || void 0,
       referer: (y == null ? void 0 : y.referer) || e.referrer || void 0,
       requestHeaders: y == null ? void 0 : y.requestHeaders,
       resourceType: e.resourceType || void 0,
       source: "network",
       statusCode: e.statusCode || void 0,
-      streamType: hr({
-        mimeType: R,
+      streamType: Pr({
+        mimeType: v,
         resourceType: e.resourceType,
-        url: l
+        url: m
       }),
-      url: l
-    }), fe.delete(e.id);
+      url: m
+    }), pe.delete(e.id);
   }), t.browserSession.webRequest.onErrorOccurred((e) => {
-    fe.delete(e.id);
+    pe.delete(e.id);
   }));
 }
-const So = "embedded-browser-open-files", qt = 'input[data-omniflow-browser-open-fallback="true"]';
-function wr() {
-  return T.join($.getPath("userData"), So);
+const Xo = "embedded-browser-open-files", cr = 'input[data-omniflow-browser-open-fallback="true"]';
+function kr() {
+  return B.join(N.getPath("userData"), Xo);
 }
-function Eo() {
-  const t = wr();
-  return Ke(t) || ct(t, { recursive: !0 }), t;
+function Zo() {
+  const t = kr();
+  return Xe(t) || Et(t, { recursive: !0 }), t;
 }
-function To(t) {
+function Yo(t) {
   const e = String(t).replace(/[/\\]/g, "_").trim() || "file";
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${e}`;
 }
-function Ro(t, e) {
-  const o = T.resolve(t), a = T.resolve(e);
-  return o === a ? !0 : o.startsWith(`${a}${T.sep}`);
+function Qo(t, e) {
+  const o = B.resolve(t), c = B.resolve(e);
+  return o === c ? !0 : o.startsWith(`${c}${B.sep}`);
 }
-async function Bo(t) {
+async function ei(t) {
   const e = await t.webContents.executeJavaScript(`
     (() => {
       const existingInput = document.querySelector('input[type="file"]:not([disabled])')
@@ -2054,7 +2448,7 @@ async function Bo(t) {
         return 'input[data-omniflow-browser-open-target="true"]'
       }
 
-      let fallback = document.querySelector('${qt}') 
+      let fallback = document.querySelector('${cr}') 
       if (!(fallback instanceof HTMLInputElement)) {
         fallback = document.createElement('input')
         fallback.type = 'file'
@@ -2069,36 +2463,36 @@ async function Bo(t) {
         fallback.style.pointerEvents = 'none'
         document.body.appendChild(fallback)
       }
-      return '${qt}'
+      return '${cr}'
     })()
   `, !0);
   return typeof e == "string" && e.trim() ? e.trim() : null;
 }
-async function _o(t, e, o) {
-  var R;
+async function ti(t, e, o) {
+  var v;
   if (!e || o.length === 0)
     return !1;
   try {
     t.webContents.debugger.isAttached() || t.webContents.debugger.attach("1.3");
-  } catch (_) {
-    if (!String(_).includes("Already attached"))
-      throw _;
+  } catch (x) {
+    if (!String(x).includes("Already attached"))
+      throw x;
   }
-  const a = await t.webContents.debugger.sendCommand("DOM.getDocument", {
+  const c = await t.webContents.debugger.sendCommand("DOM.getDocument", {
     depth: 1
-  }), d = Number(((R = a == null ? void 0 : a.root) == null ? void 0 : R.nodeId) || 0);
-  if (!Number.isFinite(d) || d <= 0)
+  }), u = Number(((v = c == null ? void 0 : c.root) == null ? void 0 : v.nodeId) || 0);
+  if (!Number.isFinite(u) || u <= 0)
     return !1;
-  const l = await t.webContents.debugger.sendCommand("DOM.querySelector", {
-    nodeId: d,
+  const m = await t.webContents.debugger.sendCommand("DOM.querySelector", {
+    nodeId: u,
     selector: e
-  }), y = Number((l == null ? void 0 : l.nodeId) || 0);
+  }), y = Number((m == null ? void 0 : m.nodeId) || 0);
   return !Number.isFinite(y) || y <= 0 ? !1 : (await t.webContents.debugger.sendCommand("DOM.setFileInputFiles", {
     nodeId: y,
     files: o
   }), !0);
 }
-async function Co(t, e) {
+async function ri(t, e) {
   const o = await t.webContents.executeJavaScript(`
     (() => {
       const inputSelector = ${JSON.stringify(e)}
@@ -2154,132 +2548,132 @@ async function Co(t, e) {
   `, !0);
   return !!(o != null && o.ok);
 }
-async function xo(t, e, o = {}) {
-  const a = Eo(), d = T.join(a, To(e));
-  return await ut(t, d, o), d;
+async function ni(t, e, o = {}) {
+  const c = Zo(), u = B.join(c, Yo(e));
+  return await Tt(t, u, o), u;
 }
-async function $e(t) {
-  const e = T.resolve(String(t || "").trim());
+async function We(t) {
+  const e = B.resolve(String(t || "").trim());
   if (!e)
     return !1;
-  const o = T.resolve(wr());
-  return Ro(e, o) ? (await He.rm(e, { force: !0 }), !0) : !1;
+  const o = B.resolve(kr());
+  return Qo(e, o) ? (await qe.rm(e, { force: !0 }), !0) : !1;
 }
-async function Do(t, e) {
+async function oi(t, e) {
   if (!t || t.webContents.isDestroyed())
     return !1;
-  const o = await Bo(t);
-  return !o || !await _o(t, o, [e]) ? !1 : Co(t, o);
+  const o = await ei(t);
+  return !o || !await ti(t, o, [e]) ? !1 : ri(t, o);
 }
-const Po = T.dirname(Zr(import.meta.url));
-process.env.APP_ROOT = T.join(Po, "..");
-const Ve = process.env.VITE_DEV_SERVER_URL, Uo = T.join(process.env.APP_ROOT, "dist-electron"), br = T.join(process.env.APP_ROOT, "dist");
-process.env.VITE_PUBLIC = Ve ? T.join(process.env.APP_ROOT, "public") : br;
-const Xt = T.join(process.env.APP_ROOT, "build", "icons", "icon.png"), Oo = "Omniflow", Lo = "omniflow-app", Mo = 1400, Ao = 920, mt = 600, pt = 400, $o = "window-state.json", ko = 200, Gt = process.env.NODE_ENV === "test" || !!(Ve || process.env.ELECTRON_RENDERER_URL) || process.env.OMNIFLOW_ENABLE_RUNTIME_LOGS === "true", Fo = process.env.OMNIFLOW_ENABLE_CHROMIUM_LOGS === "true";
-Fo || ($.commandLine.appendSwitch("disable-logging"), $.commandLine.appendSwitch("log-level", "3"));
-$.setName(Oo);
+const ii = B.dirname(vn(import.meta.url));
+process.env.APP_ROOT = B.join(ii, "..");
+const Ge = process.env.VITE_DEV_SERVER_URL, si = B.join(process.env.APP_ROOT, "dist-electron"), Lr = B.join(process.env.APP_ROOT, "dist");
+process.env.VITE_PUBLIC = Ge ? B.join(process.env.APP_ROOT, "public") : Lr;
+const lr = B.join(process.env.APP_ROOT, "build", "icons", "icon.png"), ai = "Omniflow", ci = "omniflow-app", li = 1400, ui = 920, Bt = 600, xt = 400, di = "window-state.json", fi = 200, ur = process.env.NODE_ENV === "test" || !!(Ge || process.env.ELECTRON_RENDERER_URL) || process.env.OMNIFLOW_ENABLE_RUNTIME_LOGS === "true", mi = process.env.OMNIFLOW_ENABLE_CHROMIUM_LOGS === "true";
+mi || (N.commandLine.appendSwitch("disable-logging"), N.commandLine.appendSwitch("log-level", "3"));
+N.setName(ai);
 try {
-  const t = T.join($.getPath("appData"), Lo);
-  $.setPath("userData", t);
+  const t = B.join(N.getPath("appData"), ci);
+  N.setPath("userData", t);
 } catch {
 }
-function vr() {
-  return Ke(Xt) ? Xt : null;
+function Ar() {
+  return Xe(lr) ? lr : null;
 }
-let C = null, Jt = !1, Sr = !1;
-const No = 240;
-let ke = null;
-const ye = /* @__PURE__ */ new Map(), k = /* @__PURE__ */ new Map(), Fe = /* @__PURE__ */ new Map(), Ne = /* @__PURE__ */ new Map(), Ee = /* @__PURE__ */ new Map(), We = /* @__PURE__ */ new Map(), nt = /* @__PURE__ */ new Map();
-let Z = null, Zt = null, Yt = !1;
-const Qt = /* @__PURE__ */ new Map();
-function Wo(t) {
-  !C || C.isDestroyed() || C.webContents.send("embedded-browser:download", t);
+let _ = null, dr = !1, Fr = !1;
+const pi = 240;
+let Ie = null;
+const he = /* @__PURE__ */ new Map(), A = /* @__PURE__ */ new Map(), ze = /* @__PURE__ */ new Map(), He = /* @__PURE__ */ new Map(), Ce = /* @__PURE__ */ new Map(), je = /* @__PURE__ */ new Map(), yt = /* @__PURE__ */ new Map();
+let te = null, fr = null, mr = !1;
+const pr = /* @__PURE__ */ new Map();
+function gi(t) {
+  !_ || _.isDestroyed() || _.webContents.send("embedded-browser:download", t);
 }
-function Io(t) {
-  for (const [e, o] of ye.entries())
+function yi(t) {
+  for (const [e, o] of he.entries())
     if (o.webContents === t)
       return e;
   return null;
 }
-function zo(t) {
-  for (const [e, o] of ye.entries())
+function hi(t) {
+  for (const [e, o] of he.entries())
     if (o.webContents.id === t)
       return e;
   return null;
 }
-function Ho(t) {
-  !C || C.isDestroyed() || C.webContents.send("embedded-browser:resource", t);
+function wi(t) {
+  !_ || _.isDestroyed() || _.webContents.send("embedded-browser:resource", t);
 }
-function Er() {
-  return T.join($.getPath("userData"), $o);
+function Nr() {
+  return B.join(N.getPath("userData"), di);
 }
-function me(t) {
+function ge(t) {
   return typeof t == "number" && Number.isFinite(t);
 }
-function jo(t, e) {
-  return t >= mt && e >= pt;
+function bi(t, e) {
+  return t >= Bt && e >= xt;
 }
-function Vo(t) {
-  return Gr.getAllDisplays().some((o) => {
-    const a = o.workArea;
-    return t.x < a.x + a.width && t.x + t.width > a.x && t.y < a.y + a.height && t.y + t.height > a.y;
+function Si(t) {
+  return Sn.getAllDisplays().some((o) => {
+    const c = o.workArea;
+    return t.x < c.x + c.width && t.x + t.width > c.x && t.y < c.y + c.height && t.y + t.height > c.y;
   });
 }
-function Ko() {
+function Ei() {
   try {
-    const t = Er();
-    if (!Ke(t))
+    const t = Nr();
+    if (!Xe(t))
       return null;
-    const e = Qr(t, "utf-8"), o = JSON.parse(e);
-    if (!me(o.width) || !me(o.height) || !jo(o.width, o.height))
+    const e = Rn(t, "utf-8"), o = JSON.parse(e);
+    if (!ge(o.width) || !ge(o.height) || !bi(o.width, o.height))
       return null;
-    const a = !!o.maximized, d = {
+    const c = !!o.maximized, u = {
       width: o.width,
       height: o.height,
-      maximized: a
+      maximized: c
     };
-    return me(o.x) && me(o.y) && (d.x = o.x, d.y = o.y), me(d.x) && me(d.y) && (Vo({
-      x: d.x,
-      y: d.y,
-      width: d.width,
-      height: d.height
-    }) || (delete d.x, delete d.y)), d;
+    return ge(o.x) && ge(o.y) && (u.x = o.x, u.y = o.y), ge(u.x) && ge(u.y) && (Si({
+      x: u.x,
+      y: u.y,
+      width: u.width,
+      height: u.height
+    }) || (delete u.x, delete u.y)), u;
   } catch {
     return null;
   }
 }
-function yt(t) {
+function _t(t) {
   if (!t.isDestroyed())
     try {
       const e = t.isMaximized() ? t.getNormalBounds() : t.getBounds(), o = {
         x: e.x,
         y: e.y,
-        width: Math.max(Math.round(e.width), mt),
-        height: Math.max(Math.round(e.height), pt),
+        width: Math.max(Math.round(e.width), Bt),
+        height: Math.max(Math.round(e.height), xt),
         maximized: t.isMaximized()
-      }, a = Er();
-      ct(T.dirname(a), { recursive: !0 }), en(a, JSON.stringify(o), "utf-8");
+      }, c = Nr();
+      Et(B.dirname(c), { recursive: !0 }), Cn(c, JSON.stringify(o), "utf-8");
     } catch {
     }
 }
-function Ie(t) {
-  ke && clearTimeout(ke), ke = setTimeout(() => {
-    ke = null, yt(t);
-  }, ko);
+function Ve(t) {
+  Ie && clearTimeout(Ie), Ie = setTimeout(() => {
+    Ie = null, _t(t);
+  }, fi);
 }
-function qo(t) {
+function vi(t) {
   if (t.type !== "keyDown")
     return !1;
   const e = (t.key || "").toLowerCase();
   return (t.meta || t.control) && t.shift && e === "i";
 }
-function Xo(t) {
+function Ti(t) {
   if (t.type !== "keyDown" || !(t.meta || t.control))
     return !1;
   const e = (t.key || "").toLowerCase();
   return e === "+" || e === "=" || e === "-" || e === "_" || e === "0";
 }
-function Tr(t) {
+function $r(t) {
   const e = String(t || "").trim();
   if (!e)
     return "";
@@ -2289,17 +2683,17 @@ function Tr(t) {
     return "";
   }
 }
-function Go(t) {
+function Ri(t) {
   return t === "fileSystem";
 }
-async function Jo(t) {
-  const e = Tr(t);
+async function Ci(t) {
+  const e = $r(t);
   if (!e)
     return !1;
-  const o = Qt.get(e);
+  const o = pr.get(e);
   if (typeof o == "boolean")
     return o;
-  const a = W.getFocusedWindow() ?? C ?? W.getAllWindows()[0] ?? void 0, { response: d } = await ne.showMessageBox(a, {
+  const c = z.getFocusedWindow() ?? _ ?? z.getAllWindows()[0] ?? void 0, { response: u } = await ie.showMessageBox(c, {
     type: "question",
     buttons: ["拒绝", "允许"],
     defaultId: 1,
@@ -2308,14 +2702,14 @@ async function Jo(t) {
     message: `${e} 想要访问你选择的本地目录。`,
     detail: "仅在你信任这个网站时允许。之后本次运行期间会记住这个选择。",
     noLink: !0
-  }), l = d === 1;
-  return Qt.set(e, l), l;
+  }), m = u === 1;
+  return pr.set(e, m), m;
 }
-async function Zo(t) {
-  const e = Tr(t.origin);
+async function Bi(t) {
+  const e = $r(t.origin);
   if (!e)
     return "deny";
-  const o = W.getFocusedWindow() ?? C ?? W.getAllWindows()[0] ?? void 0, { response: a } = await ne.showMessageBox(o, {
+  const o = z.getFocusedWindow() ?? _ ?? z.getAllWindows()[0] ?? void 0, { response: c } = await ie.showMessageBox(o, {
     type: "question",
     buttons: ["换个目录", "允许这次访问", "拒绝"],
     defaultId: 0,
@@ -2325,56 +2719,56 @@ async function Zo(t) {
     detail: String(t.path || ""),
     noLink: !0
   });
-  return a === 0 ? "tryAgain" : a === 1 ? "allow" : "deny";
+  return c === 0 ? "tryAgain" : c === 1 ? "allow" : "deny";
 }
-function Yo() {
-  if (Yt)
+function xi() {
+  if (mr)
     return;
-  Yt = !0;
-  const t = _e.fromPartition(Be);
-  t.setPermissionRequestHandler((e, o, a, d) => {
-    if (!Go(String(o))) {
-      a(!1);
+  mr = !0;
+  const t = Oe.fromPartition(_e);
+  t.setPermissionRequestHandler((e, o, c, u) => {
+    if (!Ri(String(o))) {
+      c(!1);
       return;
     }
-    Jo(d.requestingUrl || "").then((l) => {
-      a(l);
+    Ci(u.requestingUrl || "").then((m) => {
+      c(m);
     }).catch(() => {
-      a(!1);
+      c(!1);
     });
-  }), t.on("file-system-access-restricted", (e, o, a) => {
-    e.preventDefault(), Zo(o).then((d) => {
-      a(d);
+  }), t.on("file-system-access-restricted", (e, o, c) => {
+    e.preventDefault(), Bi(o).then((u) => {
+      c(u);
     }).catch(() => {
-      a("deny");
+      c("deny");
     });
   });
 }
-function Qo() {
-  if (Jt)
+function _i() {
+  if (dr)
     return;
-  Jt = !0, O.on("window-minimize", (c) => {
-    const s = W.fromWebContents(c.sender) ?? C;
+  dr = !0, U.on("window-minimize", (l) => {
+    const s = z.fromWebContents(l.sender) ?? _;
     s == null || s.minimize();
-  }), O.on("window-maximize", (c) => {
-    const s = W.fromWebContents(c.sender) ?? C;
+  }), U.on("window-maximize", (l) => {
+    const s = z.fromWebContents(l.sender) ?? _;
     !s || s.isDestroyed() || (s.isMaximized() ? s.unmaximize() : s.maximize());
-  }), O.on("window-close", (c) => {
-    const s = W.fromWebContents(c.sender) ?? C;
+  }), U.on("window-close", (l) => {
+    const s = z.fromWebContents(l.sender) ?? _;
     s == null || s.close();
-  }), O.handle("window-activate", (c, s = !1) => {
-    const i = W.fromWebContents(c.sender) ?? C;
-    return !i || i.isDestroyed() ? !1 : (i.isMinimized() && i.restore(), i.isVisible() || i.show(), process.platform === "darwin" ? $.focus({ steal: !0 }) : $.focus(), typeof i.moveTop == "function" && i.moveTop(), i.focus(), s && !i.isAlwaysOnTop() && (i.setAlwaysOnTop(!0, "screen-saver"), setTimeout(() => {
+  }), U.handle("window-activate", (l, s = !1) => {
+    const i = z.fromWebContents(l.sender) ?? _;
+    return !i || i.isDestroyed() ? !1 : (i.isMinimized() && i.restore(), i.isVisible() || i.show(), process.platform === "darwin" ? N.focus({ steal: !0 }) : N.focus(), typeof i.moveTop == "function" && i.moveTop(), i.focus(), s && !i.isAlwaysOnTop() && (i.setAlwaysOnTop(!0, "screen-saver"), setTimeout(() => {
       i.isDestroyed() || i.setAlwaysOnTop(!1);
-    }, No)), !0);
+    }, pi)), !0);
   });
-  const t = (c) => {
-    F.log("[embedded-browser:main]", c), !(!C || C.isDestroyed()) && C.webContents.send("embedded-browser:state", c);
-  }, e = async (c) => {
-    if (!Gt || c.webContents.isDestroyed())
+  const t = (l) => {
+    F.log("[embedded-browser:main]", l), !(!_ || _.isDestroyed()) && _.webContents.send("embedded-browser:state", l);
+  }, e = async (l) => {
+    if (!ur || l.webContents.isDestroyed())
       return [];
     try {
-      const s = await c.webContents.executeJavaScript(`
+      const s = await l.webContents.executeJavaScript(`
         (() => {
           const bodyText = document.body?.innerText?.trim() || ''
           const bodyHtmlLength = document.body?.innerHTML?.length || 0
@@ -2396,12 +2790,12 @@ function Qo() {
     } catch (s) {
       return [`inspect=${s instanceof Error ? s.message : String(s)}`];
     }
-  }, o = (c) => {
-    const s = c.webContents.getTitle().trim();
+  }, o = (l) => {
+    const s = l.webContents.getTitle().trim();
     if (s)
       return s;
-  }, a = (c, s) => {
-    const i = c.trim();
+  }, c = (l, s) => {
+    const i = l.trim();
     if (!i)
       return "";
     if (i.startsWith("data:"))
@@ -2411,397 +2805,397 @@ function Qo() {
     } catch {
       return i;
     }
-  }, d = (c, s) => {
-    var p;
-    const i = (p = String(s || "").split(";")[0]) == null ? void 0 : p.trim();
+  }, u = (l, s) => {
+    var g;
+    const i = (g = String(s || "").split(";")[0]) == null ? void 0 : g.trim();
     if (i != null && i.startsWith("image/"))
       return i;
     const f = (() => {
       try {
-        return new URL(c).pathname.toLowerCase();
+        return new URL(l).pathname.toLowerCase();
       } catch {
-        return c.toLowerCase();
+        return l.toLowerCase();
       }
     })();
     return f.endsWith(".svg") ? "image/svg+xml" : f.endsWith(".ico") ? "image/x-icon" : f.endsWith(".webp") ? "image/webp" : f.endsWith(".jpg") || f.endsWith(".jpeg") ? "image/jpeg" : "image/png";
-  }, l = async (c, s) => {
+  }, m = async (l, s) => {
     if (!s || s.startsWith("data:"))
       return s;
     try {
-      const i = await c.fetch(s);
+      const i = await l.fetch(s);
       if (!i.ok)
         return "";
-      const f = er.from(await i.arrayBuffer());
-      return f.length === 0 ? "" : `data:${d(s, i.headers.get("content-type"))};base64,${f.toString("base64")}`;
+      const f = gr.from(await i.arrayBuffer());
+      return f.length === 0 ? "" : `data:${u(s, i.headers.get("content-type"))};base64,${f.toString("base64")}`;
     } catch (i) {
       return F.warn("embedded browser favicon load failed", {
         error: i instanceof Error ? i.message : String(i),
         iconUrl: s
       }), "";
     }
-  }, y = async (c, s) => l(c.webContents.session, s), R = (c, s) => {
-    const i = [], f = /<link\b[^>]*>/gi, p = /([a-zA-Z_:][-a-zA-Z0-9_:.]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/g;
-    let g;
-    for (; g = f.exec(c); ) {
-      const E = g[0], P = /* @__PURE__ */ new Map();
-      let M;
-      for (p.lastIndex = 0; M = p.exec(E); )
-        P.set(M[1].toLowerCase(), M[2] || M[3] || M[4] || "");
-      const I = P.get("rel") || "", D = P.get("href") || "";
-      if (!D || !/(^|\s)(shortcut\s+icon|icon|apple-touch-icon|mask-icon)(\s|$)/i.test(I))
+  }, y = async (l, s) => m(l.webContents.session, s), v = (l, s) => {
+    const i = [], f = /<link\b[^>]*>/gi, g = /([a-zA-Z_:][-a-zA-Z0-9_:.]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/g;
+    let d;
+    for (; d = f.exec(l); ) {
+      const T = d[0], M = /* @__PURE__ */ new Map();
+      let P;
+      for (g.lastIndex = 0; P = g.exec(T); )
+        M.set(P[1].toLowerCase(), P[2] || P[3] || P[4] || "");
+      const W = M.get("rel") || "", O = M.get("href") || "";
+      if (!O || !/(^|\s)(shortcut\s+icon|icon|apple-touch-icon|mask-icon)(\s|$)/i.test(W))
         continue;
-      const Q = a(D, s);
-      Q && i.push(Q);
+      const X = c(O, s);
+      X && i.push(X);
     }
     return i;
-  }, _ = async (c) => {
-    const s = String((c == null ? void 0 : c.pageUrl) || "").trim(), i = _e.fromPartition(Be), f = [], p = a(String((c == null ? void 0 : c.iconUrl) || ""), s || void 0);
-    if (p && !p.startsWith("data:") && f.push(p), s) {
+  }, x = async (l) => {
+    const s = String((l == null ? void 0 : l.pageUrl) || "").trim(), i = Oe.fromPartition(_e), f = [], g = c(String((l == null ? void 0 : l.iconUrl) || ""), s || void 0);
+    if (g && !g.startsWith("data:") && f.push(g), s) {
       try {
-        const E = await i.fetch(s), P = E.headers.get("content-type") || "";
-        E.ok && /text\/html|application\/xhtml\+xml/i.test(P) && f.push(...R(await E.text(), s));
-      } catch (E) {
+        const T = await i.fetch(s), M = T.headers.get("content-type") || "";
+        T.ok && /text\/html|application\/xhtml\+xml/i.test(M) && f.push(...v(await T.text(), s));
+      } catch (T) {
         F.warn("embedded browser favicon page inspect failed", {
-          error: E instanceof Error ? E.message : String(E),
+          error: T instanceof Error ? T.message : String(T),
           pageUrl: s
         });
       }
       try {
-        const E = new URL(s).origin;
-        f.push(`${E}/favicon.ico`);
+        const T = new URL(s).origin;
+        f.push(`${T}/favicon.ico`);
       } catch {
       }
     }
-    const g = /* @__PURE__ */ new Set();
-    for (const E of f) {
-      if (!E || g.has(E))
+    const d = /* @__PURE__ */ new Set();
+    for (const T of f) {
+      if (!T || d.has(T))
         continue;
-      g.add(E);
-      const P = await l(i, E);
-      if (P)
+      d.add(T);
+      const M = await m(i, T);
+      if (M)
         return {
-          dataUrl: P,
-          iconUrl: E
+          dataUrl: M,
+          iconUrl: T
         };
     }
     return {
-      dataUrl: p.startsWith("data:") ? p : "",
+      dataUrl: g.startsWith("data:") ? g : "",
       iconUrl: ""
     };
-  }, h = (c, s, i) => {
+  }, w = (l, s, i) => {
     t({
       canGoBack: s.webContents.canGoBack(),
       canGoForward: s.webContents.canGoForward(),
-      iconSourceUrl: i.iconSourceUrl ?? Ne.get(c),
-      iconUrl: i.iconUrl ?? Fe.get(c),
-      tabId: c,
+      iconSourceUrl: i.iconSourceUrl ?? He.get(l),
+      iconUrl: i.iconUrl ?? ze.get(l),
+      tabId: l,
       title: i.title ?? o(s),
       ...i
     });
-  }, v = (c, s, i) => {
-    h(c, s, {
+  }, R = (l, s, i) => {
+    w(l, s, {
       state: "ready",
-      url: (i == null ? void 0 : i.url) ?? (k.get(c) || s.webContents.getURL() || void 0),
+      url: (i == null ? void 0 : i.url) ?? (A.get(l) || s.webContents.getURL() || void 0),
       ...i
     });
-  }, w = (c) => {
-    const s = ye.get(c);
-    return !s || s.webContents.isDestroyed() ? (ye.delete(c), k.delete(c), Fe.delete(c), Ne.delete(c), Kt(c), null) : s;
-  }, b = async (c, s) => {
-    if (!wo(c) || s.webContents.isDestroyed())
+  }, S = (l) => {
+    const s = he.get(l);
+    return !s || s.webContents.isDestroyed() ? (he.delete(l), A.delete(l), ze.delete(l), He.delete(l), ar(l), null) : s;
+  }, b = async (l, s) => {
+    if (!qo(l) || s.webContents.isDestroyed())
       return !1;
     try {
-      return await s.webContents.executeJavaScript(Vn(), !0), !0;
+      return await s.webContents.executeJavaScript(Eo(), !0), !0;
     } catch (i) {
       return F.warn("embedded browser resource probe install failed", {
         error: i instanceof Error ? i.message : String(i),
-        tabId: c,
-        url: s.webContents.getURL() || k.get(c) || ""
+        tabId: l,
+        url: s.webContents.getURL() || A.get(l) || ""
       }), !1;
     }
-  }, B = async (c, s) => {
-    const i = String(c || "").trim();
+  }, C = async (l, s) => {
+    const i = String(l || "").trim();
     if (!i)
       return null;
-    const f = w(i);
-    return !f || f.webContents.isDestroyed() ? null : s((g) => f.webContents.executeJavaScript(g, !0), f);
-  }, A = async (c, s) => {
-    const i = String(c || "").trim(), f = String(s.audioResourceKey || "").trim(), p = String(s.videoResourceKey || "").trim();
-    if (!i || !f || !p)
+    const f = S(i);
+    return !f || f.webContents.isDestroyed() ? null : s((d) => f.webContents.executeJavaScript(d, !0), f);
+  }, k = async (l, s) => {
+    const i = String(l || "").trim(), f = String(s.audioResourceKey || "").trim(), g = String(s.videoResourceKey || "").trim();
+    if (!i || !f || !g)
       return {
         error: "缺少要合并的音频或视频资源",
         ok: !1
       };
     try {
-      const g = await B(
+      const d = await C(
         i,
-        async (xe) => Promise.all([
-          Ht(xe, f),
-          Ht(xe, p)
+        async (we) => Promise.all([
+          or(we, f),
+          or(we, g)
         ])
-      ), [E, P] = g || [];
-      if (!E || !P)
+      ), [T, M] = d || [];
+      if (!T || !M)
         return {
           error: "当前页面里的音频或视频轨还没有整理完成，先继续播放几秒再试试",
           ok: !1
         };
-      const M = String(s.suggestedFileName || "").trim() || Zn(P.fileName, E.fileName), I = C && !C.isDestroyed() ? C : void 0, D = {
-        defaultPath: T.join($.getPath("downloads"), M),
+      const P = String(s.suggestedFileName || "").trim() || xo(M.fileName, T.fileName), W = _ && !_.isDestroyed() ? _ : void 0, O = {
+        defaultPath: B.join(N.getPath("downloads"), P),
         filters: [
           { extensions: ["mp4"], name: "MP4 Video" }
         ],
         showsTagField: !1
-      }, Q = I ? await ne.showSaveDialog(I, D) : await ne.showSaveDialog(D);
-      if (Q.canceled || !Q.filePath)
+      }, X = W ? await ie.showSaveDialog(W, O) : await ie.showSaveDialog(O);
+      if (X.canceled || !X.filePath)
         return {
           cancelled: !0,
           ok: !1
         };
-      const ie = await eo({
-        audio: E,
+      const ne = await Do({
+        audio: T,
         ffmpegPath: s.ffmpegPath,
-        outputPath: Q.filePath,
-        video: P
+        outputPath: X.filePath,
+        video: M
       });
       return {
-        ffmpegPath: ie.ffmpegPath,
+        ffmpegPath: ne.ffmpegPath,
         ok: !0,
-        outputPath: ie.outputPath
+        outputPath: ne.outputPath
       };
-    } catch (g) {
+    } catch (d) {
       return F.warn("embedded browser resource merge failed", {
         audioResourceKey: f,
-        error: g instanceof Error ? g.message : String(g),
+        error: d instanceof Error ? d.message : String(d),
         tabId: i,
-        videoResourceKey: p
+        videoResourceKey: g
       }), {
-        error: g instanceof Error ? g.message : String(g),
+        error: d instanceof Error ? d.message : String(d),
         ok: !1
       };
     }
-  }, L = (c) => {
-    const s = Ee.get(c);
-    s != null && s.stagedPath && $e(s.stagedPath).catch(() => {
-    }), Ee.delete(c);
-    const i = We.get(c);
-    i && $e(i).catch(() => {
-    }), We.delete(c);
-  }, z = (c) => {
-    const s = (nt.get(c) ?? 0) + 1;
-    return nt.set(c, s), s;
-  }, V = (c, s) => nt.get(c) === s, K = (c, s) => {
+  }, L = (l) => {
+    const s = Ce.get(l);
+    s != null && s.stagedPath && We(s.stagedPath).catch(() => {
+    }), Ce.delete(l);
+    const i = je.get(l);
+    i && We(i).catch(() => {
+    }), je.delete(l);
+  }, H = (l) => {
+    const s = (yt.get(l) ?? 0) + 1;
+    return yt.set(l, s), s;
+  }, q = (l, s) => yt.get(l) === s, J = (l, s) => {
     try {
-      const i = new URL(c), f = new URL(s);
+      const i = new URL(l), f = new URL(s);
       if (i.origin !== f.origin)
         return !1;
-      const p = i.pathname.replace(/\/+$/, "") || "/", g = f.pathname.replace(/\/+$/, "") || "/";
-      return g === "/" ? !0 : p === g || p.startsWith(`${g}/`);
+      const g = i.pathname.replace(/\/+$/, "") || "/", d = f.pathname.replace(/\/+$/, "") || "/";
+      return d === "/" ? !0 : g === d || g.startsWith(`${d}/`);
     } catch {
       return !1;
     }
-  }, de = async (c, s) => {
-    const i = Ee.get(c);
+  }, ae = async (l, s) => {
+    const i = Ce.get(l);
     if (!i || s.webContents.isDestroyed())
       return !1;
-    const f = s.webContents.getURL() || k.get(c) || "";
-    if (!f || !K(f, i.pageUrl))
+    const f = s.webContents.getURL() || A.get(l) || "";
+    if (!f || !J(f, i.pageUrl))
       return !1;
     try {
-      if (!await Do(s, i.stagedPath))
+      if (!await oi(s, i.stagedPath))
         return !1;
-      const g = We.get(c);
-      return g && g !== i.stagedPath && $e(g).catch(() => {
-      }), We.set(c, i.stagedPath), Ee.delete(c), !0;
+      const d = je.get(l);
+      return d && d !== i.stagedPath && We(d).catch(() => {
+      }), je.set(l, i.stagedPath), Ce.delete(l), !0;
     } catch {
       return !1;
     }
-  }, q = (c) => {
-    c.setBounds(Zt ?? {
+  }, ee = (l) => {
+    l.setBounds(fr ?? {
       x: 0,
       y: 0,
       width: 0,
       height: 0
     });
-  }, pe = (c) => {
-    if (!Z)
+  }, ye = (l) => {
+    if (!te)
       return;
-    const s = w(Z);
+    const s = S(te);
     if (!s) {
-      Z = null;
+      te = null;
       return;
     }
-    c.contentView.children.includes(s) && c.contentView.removeChildView(s), Z = null;
-  }, X = (c) => {
-    if (!C || C.isDestroyed())
+    l.contentView.children.includes(s) && l.contentView.removeChildView(s), te = null;
+  }, G = (l) => {
+    if (!_ || _.isDestroyed())
       return null;
-    const s = w(c);
+    const s = S(l);
     if (s)
       return s;
-    const i = new Jr({
+    const i = new En({
       webPreferences: {
         devTools: !0,
-        partition: Be
+        partition: _e
       }
     });
     i.webContents.setZoomFactor(1);
     const f = i.webContents.getUserAgent();
     return f.includes("Electron") && i.webContents.setUserAgent(
       f.replace(/\sElectron\/[^\s]+/g, "")
-    ), q(i), ye.set(c, i), i.webContents.on("did-start-loading", () => {
-      h(c, i, {
+    ), ee(i), he.set(l, i), i.webContents.on("did-start-loading", () => {
+      w(l, i, {
         details: "did-start-loading",
         state: "loading",
-        url: i.webContents.getURL() || k.get(c) || void 0
+        url: i.webContents.getURL() || A.get(l) || void 0
       });
     }), i.webContents.on("dom-ready", () => {
-      b(c, i);
+      b(l, i);
     }), i.webContents.on("did-stop-loading", async () => {
       if (i.webContents.isDestroyed())
         return;
-      const p = i.webContents.getURL() || "";
-      k.set(c, p), await de(c, i);
-      const g = await e(i);
-      h(c, i, {
+      const g = i.webContents.getURL() || "";
+      A.set(l, g), await ae(l, i);
+      const d = await e(i);
+      w(l, i, {
         details: "did-stop-loading",
-        ...g.length ? { meta: g } : {},
+        ...d.length ? { meta: d } : {},
         state: "ready",
-        url: p || void 0
+        url: g || void 0
       });
-    }), i.webContents.on("did-navigate", (p, g) => {
-      k.set(c, g), h(c, i, { details: "did-navigate", state: "ready", url: g }), de(c, i);
-    }), i.webContents.on("did-navigate-in-page", (p, g) => {
-      k.set(c, g), h(c, i, { details: "did-navigate-in-page", state: "ready", url: g }), de(c, i);
-    }), i.webContents.on("page-title-updated", (p, g) => {
-      h(c, i, {
+    }), i.webContents.on("did-navigate", (g, d) => {
+      A.set(l, d), w(l, i, { details: "did-navigate", state: "ready", url: d }), ae(l, i);
+    }), i.webContents.on("did-navigate-in-page", (g, d) => {
+      A.set(l, d), w(l, i, { details: "did-navigate-in-page", state: "ready", url: d }), ae(l, i);
+    }), i.webContents.on("page-title-updated", (g, d) => {
+      w(l, i, {
         details: "page-title-updated",
         state: "ready",
-        title: g || void 0,
-        url: k.get(c) || i.webContents.getURL() || void 0
+        title: d || void 0,
+        url: A.get(l) || i.webContents.getURL() || void 0
       });
-    }), i.webContents.on("page-favicon-updated", (p, g) => {
-      const E = k.get(c) || i.webContents.getURL() || void 0, P = g.map((M) => a(String(M || ""), E)).find((M) => M.trim()) || "";
-      P && y(i, P).then((M) => {
-        !M || i.webContents.isDestroyed() || (Ne.set(c, P), Fe.set(c, M), h(c, i, {
+    }), i.webContents.on("page-favicon-updated", (g, d) => {
+      const T = A.get(l) || i.webContents.getURL() || void 0, M = d.map((P) => c(String(P || ""), T)).find((P) => P.trim()) || "";
+      M && y(i, M).then((P) => {
+        !P || i.webContents.isDestroyed() || (He.set(l, M), ze.set(l, P), w(l, i, {
           details: "page-favicon-updated",
-          iconSourceUrl: P,
-          iconUrl: M,
+          iconSourceUrl: M,
+          iconUrl: P,
           state: "ready",
-          url: k.get(c) || i.webContents.getURL() || void 0
+          url: A.get(l) || i.webContents.getURL() || void 0
         }));
       });
-    }), i.webContents.on("did-fail-load", (p, g, E, P) => {
-      g !== -3 && h(c, i, {
-        details: `did-fail-load(${g})`,
+    }), i.webContents.on("did-fail-load", (g, d, T, M) => {
+      d !== -3 && w(l, i, {
+        details: `did-fail-load(${d})`,
         state: "error",
-        message: `页面加载失败：${E || "未知错误"}`,
-        url: P
+        message: `页面加载失败：${T || "未知错误"}`,
+        url: M
       });
-    }), i.webContents.on("render-process-gone", (p, g) => {
-      h(c, i, {
-        details: `render-process-gone:${g.reason}`,
+    }), i.webContents.on("render-process-gone", (g, d) => {
+      w(l, i, {
+        details: `render-process-gone:${d.reason}`,
         state: "error",
-        message: `页面渲染进程异常退出：${g.reason}`,
-        url: k.get(c) || i.webContents.getURL() || void 0
+        message: `页面渲染进程异常退出：${d.reason}`,
+        url: A.get(l) || i.webContents.getURL() || void 0
       });
-    }), i.webContents.on("console-message", (p, g, E, P, M) => {
-      if (typeof E == "string" && E.startsWith(it)) {
-        const I = E.slice(it.length);
+    }), i.webContents.on("console-message", (g, d, T, M, P) => {
+      if (typeof T == "string" && T.startsWith(bt)) {
+        const W = T.slice(bt.length);
         try {
-          const D = JSON.parse(I);
-          bo(c, {
-            capturedAt: Number(D.capturedAt) || Date.now(),
-            contentLength: typeof D.contentLength == "number" ? D.contentLength : void 0,
-            ext: typeof D.ext == "string" ? D.ext : void 0,
-            kind: typeof D.kind == "string" ? D.kind : void 0,
-            mimeType: typeof D.mimeType == "string" ? D.mimeType : void 0,
-            pageUrl: typeof D.pageUrl == "string" ? D.pageUrl : void 0,
-            resourceKey: typeof D.resourceKey == "string" ? D.resourceKey : void 0,
-            resourceType: typeof D.resourceType == "string" ? D.resourceType : void 0,
+          const O = JSON.parse(W);
+          Jo(l, {
+            capturedAt: Number(O.capturedAt) || Date.now(),
+            contentLength: typeof O.contentLength == "number" ? O.contentLength : void 0,
+            ext: typeof O.ext == "string" ? O.ext : void 0,
+            kind: typeof O.kind == "string" ? O.kind : void 0,
+            mimeType: typeof O.mimeType == "string" ? O.mimeType : void 0,
+            pageUrl: typeof O.pageUrl == "string" ? O.pageUrl : void 0,
+            resourceKey: typeof O.resourceKey == "string" ? O.resourceKey : void 0,
+            resourceType: typeof O.resourceType == "string" ? O.resourceType : void 0,
             source: "probe",
-            streamType: D.streamType === "audio" || D.streamType === "video" ? D.streamType : void 0,
-            url: typeof D.url == "string" ? D.url : ""
+            streamType: O.streamType === "audio" || O.streamType === "video" ? O.streamType : void 0,
+            url: typeof O.url == "string" ? O.url : ""
           });
-        } catch (D) {
+        } catch (O) {
           F.warn("embedded browser resource payload parse failed", {
-            error: D instanceof Error ? D.message : String(D),
-            tabId: c
+            error: O instanceof Error ? O.message : String(O),
+            tabId: l
           });
         }
         return;
       }
-      Gt && g >= 2 && h(c, i, {
-        details: `console:${M}:${P}`,
+      ur && d >= 2 && w(l, i, {
+        details: `console:${P}:${M}`,
         state: "ready",
-        message: E,
-        meta: [`console-level=${g}`],
-        url: k.get(c) || i.webContents.getURL() || void 0
+        message: T,
+        meta: [`console-level=${d}`],
+        url: A.get(l) || i.webContents.getURL() || void 0
       });
-    }), i.webContents.setWindowOpenHandler(({ url: p }) => (i.webContents.loadURL(p), { action: "deny" })), i;
-  }, Y = (c, s, i) => {
-    if (!c || c.isDestroyed())
+    }), i.webContents.setWindowOpenHandler(({ url: g }) => (i.webContents.loadURL(g), { action: "deny" })), i;
+  }, re = (l, s, i) => {
+    if (!l || l.isDestroyed())
       return null;
     if (!s)
-      return pe(c), null;
-    const p = (i == null ? void 0 : i.createIfMissing) ?? !1 ? X(s) : w(s);
-    return p ? !p || p.webContents.isDestroyed() ? null : (Z && Z !== s && pe(c), q(p), c.contentView.children.includes(p) || c.contentView.addChildView(p), Z = s, p) : (pe(c), null);
-  }, j = async (c, s, i, f, p = !1) => {
-    if (!c || c.isDestroyed())
+      return ye(l), null;
+    const g = (i == null ? void 0 : i.createIfMissing) ?? !1 ? G(s) : S(s);
+    return g ? !g || g.webContents.isDestroyed() ? null : (te && te !== s && ye(l), ee(g), l.contentView.children.includes(g) || l.contentView.addChildView(g), te = s, g) : (ye(l), null);
+  }, V = async (l, s, i, f, g = !1) => {
+    if (!l || l.isDestroyed())
       return;
-    const g = String(s || "").trim();
-    if (!g)
+    const d = String(s || "").trim();
+    if (!d)
       return;
-    const E = Y(c, g, { createIfMissing: !0 });
-    if (!E || E.webContents.isDestroyed())
+    const T = re(l, d, { createIfMissing: !0 });
+    if (!T || T.webContents.isDestroyed())
       return;
-    const P = String(i || "").trim();
-    if (!P) {
-      h(g, E, {
+    const M = String(i || "").trim();
+    if (!M) {
+      w(d, T, {
         state: "ready",
-        title: o(E) || "新标签页",
-        url: k.get(g) || void 0
+        title: o(T) || "新标签页",
+        url: A.get(d) || void 0
       });
       return;
     }
-    const M = k.get(g) || E.webContents.getURL();
-    if (p && M === P) {
-      h(g, E, {
+    const P = A.get(d) || T.webContents.getURL();
+    if (g && P === M) {
+      w(d, T, {
         state: "ready",
-        url: M || void 0
+        url: P || void 0
       });
       return;
     }
-    h(g, E, {
+    w(d, T, {
       details: "load-url",
       state: "loading",
-      url: P
+      url: M
     });
     try {
-      await E.webContents.loadURL(P);
-    } catch (I) {
-      const D = I instanceof Error ? I.message : String(I);
-      if (D.includes("ERR_ABORTED"))
+      await T.webContents.loadURL(M);
+    } catch (W) {
+      const O = W instanceof Error ? W.message : String(W);
+      if (O.includes("ERR_ABORTED"))
         return;
-      throw h(g, E, {
+      throw w(d, T, {
         details: f,
         state: "error",
-        message: `页面加载失败：${D}`,
-        url: P
-      }), I;
+        message: `页面加载失败：${O}`,
+        url: M
+      }), W;
     }
-  }, se = (c, s) => {
-    if (!c || c.isDestroyed())
+  }, ce = (l, s) => {
+    if (!l || l.isDestroyed())
       return;
     const i = String(s || "").trim();
     if (!i)
       return;
-    const f = w(i);
-    f && (c.contentView.children.includes(f) && c.contentView.removeChildView(f), Z === i && (Z = null), ye.delete(i), k.delete(i), Fe.delete(i), Ne.delete(i), Kt(i), z(i), L(i), f.webContents.isDestroyed() || f.webContents.close({ waitForBeforeUnload: !1 }));
+    const f = S(i);
+    f && (l.contentView.children.includes(f) && l.contentView.removeChildView(f), te === i && (te = null), he.delete(i), A.delete(i), ze.delete(i), He.delete(i), ar(i), H(i), L(i), f.webContents.isDestroyed() || f.webContents.close({ waitForBeforeUnload: !1 }));
   };
-  O.handle("embedded-browser:open-tab", async (c, s, i) => {
-    const f = W.fromWebContents(c.sender) ?? C;
-    z(String(s || "").trim()), L(String(s || "").trim());
-    const p = String(i || "").trim();
-    if (!p) {
+  U.handle("embedded-browser:open-tab", async (l, s, i) => {
+    const f = z.fromWebContents(l.sender) ?? _;
+    H(String(s || "").trim()), L(String(s || "").trim());
+    const g = String(i || "").trim();
+    if (!g) {
       t({
         canGoBack: !1,
         canGoForward: !1,
@@ -2811,145 +3205,199 @@ function Qo() {
       });
       return;
     }
-    await j(f, s, p, "open-exception", !0);
-  }), O.handle("embedded-browser:activate-tab", (c, s) => {
-    const i = W.fromWebContents(c.sender) ?? C;
-    Y(i, s, { createIfMissing: !1 });
-  }), O.handle("embedded-browser:navigate", async (c, s, i) => {
-    const f = W.fromWebContents(c.sender) ?? C, p = String(s || "").trim();
-    z(p), L(p), await j(f, p, i, "navigate-exception");
-  }), O.handle("embedded-browser:resolve-favicon", async (c, s) => _(s)), O.handle("embedded-browser:open-mapped-file", async (c, s, i, f, p) => {
-    const g = W.fromWebContents(c.sender) ?? C, E = String(s || "").trim(), P = String(i || "").trim(), M = String(f || "").trim(), I = String(p || "").trim() || "file";
-    if (!E || !P || !M)
+    await V(f, s, g, "open-exception", !0);
+  }), U.handle("embedded-browser:activate-tab", (l, s) => {
+    const i = z.fromWebContents(l.sender) ?? _;
+    re(i, s, { createIfMissing: !1 });
+  }), U.handle("embedded-browser:navigate", async (l, s, i) => {
+    const f = z.fromWebContents(l.sender) ?? _, g = String(s || "").trim();
+    H(g), L(g), await V(f, g, i, "navigate-exception");
+  }), U.handle("embedded-browser:resolve-favicon", async (l, s) => x(s)), U.handle("embedded-browser:open-mapped-file", async (l, s, i, f, g) => {
+    const d = z.fromWebContents(l.sender) ?? _, T = String(s || "").trim(), M = String(i || "").trim(), P = String(f || "").trim(), W = String(g || "").trim() || "file";
+    if (!T || !M || !P)
       return;
-    const D = z(E);
-    L(E);
-    const Q = await xo(M, I);
-    if (!V(E, D)) {
-      $e(Q).catch(() => {
+    const O = H(T);
+    L(T);
+    const X = await ni(P, W);
+    if (!q(T, O)) {
+      We(X).catch(() => {
       });
       return;
     }
-    if (Ee.set(E, {
-      fileName: I,
-      pageUrl: P,
-      stagedPath: Q
-    }), await j(g, E, P, "navigate-exception"), !V(E, D))
+    if (Ce.set(T, {
+      fileName: W,
+      pageUrl: M,
+      stagedPath: X
+    }), await V(d, T, M, "navigate-exception"), !q(T, O))
       return;
-    const ie = w(E);
-    ie && de(E, ie);
-  }), O.handle("embedded-browser:reload", async (c, s) => {
+    const ne = S(T);
+    ne && ae(T, ne);
+  }), U.handle("embedded-browser:reload", async (l, s) => {
     const i = String(s || "").trim();
     if (!i)
       return;
-    const f = w(i);
-    !f || f.webContents.isDestroyed() || (h(i, f, {
+    const f = S(i);
+    !f || f.webContents.isDestroyed() || (w(i, f, {
       details: "reload",
       state: "loading",
-      url: k.get(i) || f.webContents.getURL() || void 0
-    }), f.webContents.reload(), v(i, f, {
+      url: A.get(i) || f.webContents.getURL() || void 0
+    }), f.webContents.reload(), R(i, f, {
       details: "reload-requested"
     }));
-  }), O.handle("embedded-browser:go-back", async (c, s) => {
+  }), U.handle("embedded-browser:go-back", async (l, s) => {
     const i = String(s || "").trim();
     if (!i)
       return;
-    const f = w(i);
-    !f || f.webContents.isDestroyed() || (f.webContents.canGoBack() && f.webContents.goBack(), v(i, f, {
+    const f = S(i);
+    !f || f.webContents.isDestroyed() || (f.webContents.canGoBack() && f.webContents.goBack(), R(i, f, {
       details: "history-back"
     }));
-  }), O.handle("embedded-browser:go-forward", async (c, s) => {
+  }), U.handle("embedded-browser:go-forward", async (l, s) => {
     const i = String(s || "").trim();
     if (!i)
       return;
-    const f = w(i);
-    !f || f.webContents.isDestroyed() || (f.webContents.canGoForward() && f.webContents.goForward(), v(i, f, {
+    const f = S(i);
+    !f || f.webContents.isDestroyed() || (f.webContents.canGoForward() && f.webContents.goForward(), R(i, f, {
       details: "history-forward"
     }));
-  }), O.handle("embedded-browser:resource:list", (c, s) => mo(String(s || "").trim())), O.handle("embedded-browser:resource:start", (c, s) => po(String(s || "").trim())), O.handle("embedded-browser:resource:stop", (c, s) => go(String(s || "").trim())), O.handle("embedded-browser:resource:clear", (c, s) => ho(String(s || "").trim())), O.handle("embedded-browser:resource:open", async (c, s, i) => B(s, async (f, p) => {
+  }), U.handle("embedded-browser:resource:list", (l, s) => zo(String(s || "").trim())), U.handle("embedded-browser:resource:start", (l, s) => Ho(String(s || "").trim())), U.handle("embedded-browser:resource:stop", (l, s) => Vo(String(s || "").trim())), U.handle("embedded-browser:resource:clear", (l, s) => Ko(String(s || "").trim())), U.handle("embedded-browser:resource:open", async (l, s, i) => C(s, async (f, g) => {
     try {
-      return await zt(f, "openResource", i);
-    } catch (g) {
+      return await nr(f, "openResource", i);
+    } catch (d) {
       return F.warn("embedded browser resource probe action failed", {
         action: "openResource",
-        error: g instanceof Error ? g.message : String(g),
+        error: d instanceof Error ? d.message : String(d),
         resourceKey: String(i || "").trim(),
         tabId: String(s || "").trim(),
-        url: p.webContents.getURL() || k.get(String(s || "").trim()) || ""
+        url: g.webContents.getURL() || A.get(String(s || "").trim()) || ""
       }), !1;
     }
-  }).then((f) => !!f)), O.handle("embedded-browser:resource:export", async (c, s, i) => B(s, async (f, p) => {
+  }).then((f) => !!f)), U.handle("embedded-browser:resource:export", async (l, s, i) => C(s, async (f, g) => {
     try {
-      return await zt(f, "exportResource", i);
-    } catch (g) {
+      return await nr(f, "exportResource", i);
+    } catch (d) {
       return F.warn("embedded browser resource probe action failed", {
         action: "exportResource",
-        error: g instanceof Error ? g.message : String(g),
+        error: d instanceof Error ? d.message : String(d),
         resourceKey: String(i || "").trim(),
         tabId: String(s || "").trim(),
-        url: p.webContents.getURL() || k.get(String(s || "").trim()) || ""
+        url: g.webContents.getURL() || A.get(String(s || "").trim()) || ""
       }), !1;
     }
-  }).then((f) => !!f)), O.handle("embedded-browser:resource:preview", async (c, s, i) => B(s, async (f) => {
+  }).then((f) => !!f)), U.handle("embedded-browser:resource:preview", async (l, s, i) => C(s, async (f) => {
     try {
-      return await jn(f, i);
-    } catch (p) {
+      return await go(f, i);
+    } catch (g) {
       return F.warn("embedded browser network resource preview failed", {
-        error: p instanceof Error ? p.message : String(p),
+        error: g instanceof Error ? g.message : String(g),
         tabId: String(s || "").trim(),
         url: String(i.url || "").trim()
       }), !1;
     }
-  }).then((f) => !!f)), O.handle(
+  }).then((f) => !!f)), U.handle("embedded-browser:resource:catch-toolkit:get-state", async (l, s) => C(s, async (i, f) => {
+    try {
+      return await bo(i);
+    } catch (g) {
+      return F.warn("embedded browser catch toolkit get state failed", {
+        error: g instanceof Error ? g.message : String(g),
+        tabId: String(s || "").trim(),
+        url: f.webContents.getURL() || A.get(String(s || "").trim()) || ""
+      }), null;
+    }
+  })), U.handle(
+    "embedded-browser:resource:catch-toolkit:update-state",
+    async (l, s, i) => C(s, async (f, g) => {
+      try {
+        return await So(f, i);
+      } catch (d) {
+        return F.warn("embedded browser catch toolkit update state failed", {
+          error: d instanceof Error ? d.message : String(d),
+          payload: i,
+          tabId: String(s || "").trim(),
+          url: g.webContents.getURL() || A.get(String(s || "").trim()) || ""
+        }), null;
+      }
+    })
+  ), U.handle("embedded-browser:resource:catch-toolkit:clear-cache", async (l, s) => C(s, async (i, f) => {
+    try {
+      return await pt(i, "clearCatchMediaCache");
+    } catch (g) {
+      return F.warn("embedded browser catch toolkit clear cache failed", {
+        error: g instanceof Error ? g.message : String(g),
+        tabId: String(s || "").trim(),
+        url: f.webContents.getURL() || A.get(String(s || "").trim()) || ""
+      }), !1;
+    }
+  }).then((i) => !!i)), U.handle("embedded-browser:resource:catch-toolkit:download", async (l, s) => C(s, async (i, f) => {
+    try {
+      return await pt(i, "downloadCatchMedia");
+    } catch (g) {
+      return F.warn("embedded browser catch toolkit download failed", {
+        error: g instanceof Error ? g.message : String(g),
+        tabId: String(s || "").trim(),
+        url: f.webContents.getURL() || A.get(String(s || "").trim()) || ""
+      }), !1;
+    }
+  }).then((i) => !!i)), U.handle("embedded-browser:resource:catch-toolkit:restart", async (l, s) => C(s, async (i, f) => {
+    try {
+      return await pt(i, "restartCatchMediaCapture");
+    } catch (g) {
+      return F.warn("embedded browser catch toolkit restart failed", {
+        error: g instanceof Error ? g.message : String(g),
+        tabId: String(s || "").trim(),
+        url: f.webContents.getURL() || A.get(String(s || "").trim()) || ""
+      }), !1;
+    }
+  }).then((i) => !!i)), U.handle(
     "embedded-browser:resource:merge-mse",
-    async (c, s, i) => A(s, i)
-  ), O.handle("embedded-browser:resource:start-deep-capture", async (c, s) => {
-    const i = String(s || "").trim(), f = yo(i), p = w(i);
-    return p && !p.webContents.isDestroyed() && (p.webContents.getURL() ? p.webContents.reload() : await b(i, p)), f;
-  }), O.handle("embedded-browser:set-bounds", (c, s) => {
+    async (l, s, i) => k(s, i)
+  ), U.handle("embedded-browser:resource:start-deep-capture", async (l, s) => {
+    const i = String(s || "").trim(), f = jo(i), g = S(i);
+    return g && !g.webContents.isDestroyed() && (g.webContents.getURL() ? g.webContents.reload() : await b(i, g)), f;
+  }), U.handle("embedded-browser:set-bounds", (l, s) => {
     const i = {
       x: 0,
       y: 0,
       width: 0,
       height: 0
-    }, f = W.fromWebContents(c.sender) ?? C, p = f && !f.isDestroyed() ? Math.max(f.webContents.getZoomFactor(), 0.01) : 1;
-    if (i.x = Math.max(0, Math.round(s.x * p)), i.y = Math.max(0, Math.round(s.y * p)), i.width = Math.max(0, Math.round(s.width * p)), i.height = Math.max(0, Math.round(s.height * p)), Zt = i, !Z)
+    }, f = z.fromWebContents(l.sender) ?? _, g = f && !f.isDestroyed() ? Math.max(f.webContents.getZoomFactor(), 0.01) : 1;
+    if (i.x = Math.max(0, Math.round(s.x * g)), i.y = Math.max(0, Math.round(s.y * g)), i.width = Math.max(0, Math.round(s.width * g)), i.height = Math.max(0, Math.round(s.height * g)), fr = i, !te)
       return;
-    const g = w(Z);
-    g && g.setBounds(i);
-  }), O.handle("embedded-browser:close-tab", (c, s) => {
-    const i = W.fromWebContents(c.sender) ?? C;
-    se(i, s);
-  }), O.handle("embedded-browser:cleanup-download-file", async (c, s) => {
+    const d = S(te);
+    d && d.setBounds(i);
+  }), U.handle("embedded-browser:close-tab", (l, s) => {
+    const i = z.fromWebContents(l.sender) ?? _;
+    ce(i, s);
+  }), U.handle("embedded-browser:cleanup-download-file", async (l, s) => {
     try {
-      return await lr(s);
+      return await Br(s);
     } catch {
       return !1;
     }
-  }), O.handle("embedded-browser:deactivate", (c) => {
-    const s = W.fromWebContents(c.sender) ?? C;
-    !s || s.isDestroyed() || pe(s);
-  }), O.handle("embedded-browser:close-all", (c) => {
-    const s = W.fromWebContents(c.sender) ?? C;
-    !s || s.isDestroyed() || (Array.from(ye.keys()).forEach((i) => {
-      se(s, i);
-    }), Z = null, t({ state: "idle" }));
+  }), U.handle("embedded-browser:deactivate", (l) => {
+    const s = z.fromWebContents(l.sender) ?? _;
+    !s || s.isDestroyed() || ye(s);
+  }), U.handle("embedded-browser:close-all", (l) => {
+    const s = z.fromWebContents(l.sender) ?? _;
+    !s || s.isDestroyed() || (Array.from(he.keys()).forEach((i) => {
+      ce(s, i);
+    }), te = null, t({ state: "idle" }));
   });
 }
-function Rr() {
-  if (C && !C.isDestroyed())
-    return C.show(), C.focus(), C;
-  const t = vr(), e = Ko(), o = (e == null ? void 0 : e.width) ?? Mo, a = (e == null ? void 0 : e.height) ?? Ao, d = new W({
+function Wr() {
+  if (_ && !_.isDestroyed())
+    return _.show(), _.focus(), _;
+  const t = Ar(), e = Ei(), o = (e == null ? void 0 : e.width) ?? li, c = (e == null ? void 0 : e.height) ?? ui, u = new z({
     width: o,
-    height: a,
-    minWidth: mt,
-    minHeight: pt,
+    height: c,
+    minWidth: Bt,
+    minHeight: xt,
     backgroundColor: "#f5f5f0",
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
-    ...me(e == null ? void 0 : e.x) && me(e == null ? void 0 : e.y) ? { x: e.x, y: e.y } : {},
+    ...ge(e == null ? void 0 : e.x) && ge(e == null ? void 0 : e.y) ? { x: e.x, y: e.y } : {},
     webPreferences: {
       // 预加载脚本，用于安全地与渲染进程通信
-      preload: T.join(Uo, "preload.mjs"),
+      preload: B.join(si, "preload.mjs"),
       // Electron 安全推荐配置
       devTools: !0
       // nodeIntegration: false,     // 禁用 Node.js 集成
@@ -2960,57 +3408,57 @@ function Rr() {
     // 自动隐藏菜单栏
     ...t ? { icon: t } : {}
   });
-  return C = d, e != null && e.maximized && d.maximize(), d.on("move", () => {
-    Ie(d);
-  }), d.on("resize", () => {
-    Ie(d);
-  }), d.on("maximize", () => {
-    Ie(d);
-  }), d.on("unmaximize", () => {
-    Ie(d);
-  }), d.on("close", (l) => {
-    yt(d), process.platform === "darwin" && !Sr && (l.preventDefault(), d.hide());
-  }), d.on("closed", () => {
-    C === d && (C = null);
-  }), d.webContents.setZoomFactor(1), d.webContents.setVisualZoomLevelLimits(1, 1).catch(() => {
-  }), d.webContents.on("before-input-event", (l, y) => {
-    if (Xo(y)) {
-      l.preventDefault();
+  return _ = u, e != null && e.maximized && u.maximize(), u.on("move", () => {
+    Ve(u);
+  }), u.on("resize", () => {
+    Ve(u);
+  }), u.on("maximize", () => {
+    Ve(u);
+  }), u.on("unmaximize", () => {
+    Ve(u);
+  }), u.on("close", (m) => {
+    _t(u), process.platform === "darwin" && !Fr && (m.preventDefault(), u.hide());
+  }), u.on("closed", () => {
+    _ === u && (_ = null);
+  }), u.webContents.setZoomFactor(1), u.webContents.setVisualZoomLevelLimits(1, 1).catch(() => {
+  }), u.webContents.on("before-input-event", (m, y) => {
+    if (Ti(y)) {
+      m.preventDefault();
       return;
     }
-    qo(y) && (l.preventDefault(), d.webContents.toggleDevTools());
-  }), d.on("app-command", (l, y) => {
-    (y === "browser-backward" || y === "browser-forward") && l.preventDefault();
-  }), d.on("swipe", (l, y) => {
-    (y === "left" || y === "right") && l.preventDefault();
-  }), Ve ? d.loadURL(Ve) : d.loadFile(T.join(br, "index.html")), d;
+    vi(y) && (m.preventDefault(), u.webContents.toggleDevTools());
+  }), u.on("app-command", (m, y) => {
+    (y === "browser-backward" || y === "browser-forward") && m.preventDefault();
+  }), u.on("swipe", (m, y) => {
+    (y === "left" || y === "right") && m.preventDefault();
+  }), Ge ? u.loadURL(Ge) : u.loadFile(B.join(Lr, "index.html")), u;
 }
-$.on("before-quit", () => {
-  Sr = !0, C && !C.isDestroyed() && yt(C);
+N.on("before-quit", () => {
+  Fr = !0, _ && !_.isDestroyed() && _t(_);
 });
-$.on("window-all-closed", () => {
-  process.platform !== "darwin" && $.quit();
+N.on("window-all-closed", () => {
+  process.platform !== "darwin" && N.quit();
 });
-$.on("activate", () => {
-  if (C && !C.isDestroyed()) {
-    C.isMinimized() && C.restore(), C.show(), C.focus();
+N.on("activate", () => {
+  if (_ && !_.isDestroyed()) {
+    _.isMinimized() && _.restore(), _.show(), _.focus();
     return;
   }
-  W.getAllWindows().length === 0 && Rr();
+  z.getAllWindows().length === 0 && Wr();
 });
-$.whenReady().then(() => {
-  const t = vr();
-  t && process.platform === "darwin" && $.dock.setIcon(t), Yo(), Wn({
-    emitDownload: Wo,
-    resolveTabIdByWebContents: Io
-  }), vo({
-    browserSession: _e.fromPartition(Be),
-    emitResource: Ho,
-    resolveTabIdByWebContentsId: zo
-  }), Mn(), Qo(), Rr();
+N.whenReady().then(() => {
+  const t = Ar();
+  t && process.platform === "darwin" && N.dock.setIcon(t), xi(), uo({
+    emitDownload: gi,
+    resolveTabIdByWebContents: yi
+  }), Go({
+    browserSession: Oe.fromPartition(_e),
+    emitResource: wi,
+    resolveTabIdByWebContentsId: hi
+  }), oo(), _i(), Wr();
 });
 export {
-  Uo as MAIN_DIST,
-  br as RENDERER_DIST,
-  Ve as VITE_DEV_SERVER_URL
+  si as MAIN_DIST,
+  Lr as RENDERER_DIST,
+  Ge as VITE_DEV_SERVER_URL
 };

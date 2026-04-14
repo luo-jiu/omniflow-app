@@ -171,6 +171,23 @@ type EmbeddedBrowserCapturedResourceMergeResponse = {
   outputPath?: string;
 };
 
+type EmbeddedBrowserCatchToolkitState = {
+  autoSeekToBufferedEnd: boolean;
+  autoDownloadOnComplete: boolean;
+  capturedMediaSizeBytes: number;
+  clearCacheOnComplete: boolean;
+  currentFileName: string;
+  isCaptureComplete: boolean;
+  manualFileName: string;
+  regexWarning: string;
+  regexRule: string;
+  restartAlwaysFromBeginning: boolean;
+  selectorWarning: string;
+  selectorRule: string;
+  streamCount: number;
+  trimExtraMediaHeaders: boolean;
+};
+
 interface Window {
   electronEmbeddedBrowser: {
     activateTab: (tabId: string | null) => Promise<void>;
@@ -197,6 +214,14 @@ interface Window {
       suggestedFileName?: string;
       videoResourceKey?: string;
     }) => Promise<EmbeddedBrowserCapturedResourceMergeResponse>;
+    getCatchToolkitState: (tabId: string) => Promise<EmbeddedBrowserCatchToolkitState | null>;
+    updateCatchToolkitState: (
+      tabId: string,
+      payload: Partial<EmbeddedBrowserCatchToolkitState>,
+    ) => Promise<EmbeddedBrowserCatchToolkitState | null>;
+    clearCatchMediaCache: (tabId: string) => Promise<boolean>;
+    downloadCatchMedia: (tabId: string) => Promise<boolean>;
+    restartCatchMediaCapture: (tabId: string) => Promise<boolean>;
     openMappedFile: (tabId: string, pageUrl: string, sourceUrl: string, fileName: string) => Promise<void>;
     resolveFavicon: (payload: { iconUrl?: string; pageUrl?: string }) => Promise<{
       dataUrl: string;

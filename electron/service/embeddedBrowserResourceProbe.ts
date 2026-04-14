@@ -31,6 +31,22 @@ function embeddedBrowserResourceProbe(consolePrefix: string) {
     signature: string
     streamType?: ProbeStreamType
   }
+  type ProbeCatchToolkitState = {
+    autoSeekToBufferedEnd: boolean
+    autoDownloadOnComplete: boolean
+    capturedMediaSizeBytes: number
+    clearCacheOnComplete: boolean
+    currentFileName: string
+    isCaptureComplete: boolean
+    manualFileName: string
+    regexWarning: string
+    regexRule: string
+    restartAlwaysFromBeginning: boolean
+    selectorWarning: string
+    selectorRule: string
+    streamCount: number
+    trimExtraMediaHeaders: boolean
+  }
   type ProbeRelayEnvelope =
     | { payload: ProbeEmitPayload; type: 'capture' }
     | { payload: ProbeGeneratedResourcePayload; type: 'generated-resource' }
@@ -38,7 +54,10 @@ function embeddedBrowserResourceProbe(consolePrefix: string) {
   const globalScope = globalThis as typeof globalThis & {
     __OMNIFLOW_EMBEDDED_BROWSER_RESOURCE_PROBE__?: {
       exportResource?: (resourceKey: string) => boolean
+      getCatchToolkitState?: () => ProbeCatchToolkitState
       installedAt: number
+      clearCatchMediaCache?: () => boolean
+      downloadCatchMedia?: () => boolean
       openResource?: (resourceKey: string) => boolean
       readResource?: (resourceKey: string) => Promise<null | {
         base64: string
@@ -47,7 +66,9 @@ function embeddedBrowserResourceProbe(consolePrefix: string) {
         resourceKey: string
         streamType?: ProbeStreamType
       }>
+      restartCatchMediaCapture?: () => boolean
       seen: Set<string>
+      updateCatchToolkitState?: (payload: Partial<ProbeCatchToolkitState>) => ProbeCatchToolkitState
     }
   }
   const isWorkerScope = typeof document === 'undefined'
@@ -55,9 +76,6 @@ function embeddedBrowserResourceProbe(consolePrefix: string) {
   const currentLocationHref = typeof globalScope.location?.href === 'string' ? globalScope.location.href : ''
   const currentLocationHost = typeof globalScope.location?.hostname === 'string' ? globalScope.location.hostname : 'resource'
   const currentLocationProtocol = typeof globalScope.location?.protocol === 'string' ? globalScope.location.protocol : 'https:'
-  const currentDocumentTitle = typeof document !== 'undefined' && typeof document.title === 'string'
-    ? document.title
-    : ''
   const workerRelayKey = '__OMNIFLOW_EMBEDDED_BROWSER_RESOURCE_RELAY__'
   const openWindow = typeof globalScope.open === 'function'
     ? globalScope.open.bind(globalScope)
@@ -110,7 +128,256 @@ function embeddedBrowserResourceProbe(consolePrefix: string) {
   const originalConsoleInfo = typeof console.info === 'function'
     ? console.info.bind(console)
     : console.log.bind(console)
+  const catchToolkitStorageKeys = {
+    autoDownloadOnComplete: 'OmniflowCatchToolkit:autoDownloadOnComplete',
+    autoSeekToBufferedEnd: 'OmniflowCatchToolkit:autoSeekToBufferedEnd',
+    clearCacheOnComplete: 'OmniflowCatchToolkit:clearCacheOnComplete',
+    manualFileName: 'OmniflowCatchToolkit:manualFileName',
+    regexRule: 'OmniflowCatchToolkit:regexRule',
+    restartAlwaysFromBeginning: 'OmniflowCatchToolkit:restartAlwaysFromBeginning',
+    selectorRule: 'OmniflowCatchToolkit:selectorRule',
+    trimExtraMediaHeaders: 'OmniflowCatchToolkit:trimExtraMediaHeaders',
+  } as const
   let m3u8Accumulator = ''
+  let isCaptureComplete = false
+  const catchToolkitState = {
+    autoSeekToBufferedEnd: false,
+    autoDownloadOnComplete: false,
+    clearCacheOnComplete: false,
+    manualFileName: '',
+    regexRule: '',
+    restartAlwaysFromBeginning: false,
+    selectorRule: '',
+    trimExtraMediaHeaders: true,
+  }
+  const trackedMediaElements = new WeakSet<HTMLMediaElement>()
+  const autoRestartHandledMediaElements = new WeakSet<HTMLMediaElement>()
+  let trackedMediaObserver: MutationObserver | null = null
+
+  function readCatchToolkitStorageString(key: string) {
+    try {
+      if (typeof localStorage === 'undefined') {
+        return ''
+      }
+      return String(localStorage.getItem(key) || '').trim()
+    } catch {
+      return ''
+    }
+  }
+
+  function readCatchToolkitStorageChecked(key: string, fallback = false) {
+    try {
+      if (typeof localStorage === 'undefined') {
+        return fallback
+      }
+      return localStorage.getItem(key) === 'checked'
+    } catch {
+      return fallback
+    }
+  }
+
+  function writeCatchToolkitStorageString(key: string, value: string) {
+    try {
+      if (typeof localStorage === 'undefined') {
+        return
+      }
+      const normalizedValue = String(value || '').trim()
+      if (!normalizedValue) {
+        localStorage.removeItem(key)
+        return
+      }
+      localStorage.setItem(key, normalizedValue)
+    } catch {
+      // ignore storage write failures
+    }
+  }
+
+  function writeCatchToolkitStorageChecked(key: string, checked: boolean) {
+    try {
+      if (typeof localStorage === 'undefined') {
+        return
+      }
+      localStorage.setItem(key, checked ? 'checked' : '')
+    } catch {
+      // ignore storage write failures
+    }
+  }
+
+  function evaluateSelectorRule(rule: string) {
+    const normalizedRule = String(rule || '').trim()
+    if (!normalizedRule) {
+      return {
+        rule: '',
+        warning: '',
+      }
+    }
+    if (typeof document === 'undefined') {
+      return {
+        rule: normalizedRule,
+        warning: '',
+      }
+    }
+    try {
+      const matchedNode = document.querySelector(normalizedRule)
+      const matchedText = matchedNode?.textContent?.trim() || ''
+      return {
+        rule: normalizedRule,
+        warning: matchedText ? '' : '表达式暂时没有命中可用内容',
+      }
+    } catch {
+      return {
+        rule: '',
+        warning: '选择器语法错误',
+      }
+    }
+  }
+
+  function evaluateRegexRule(rule: string) {
+    const normalizedRule = String(rule || '').trim()
+    if (!normalizedRule) {
+      return {
+        rule: '',
+        warning: '',
+      }
+    }
+    try {
+      new RegExp(normalizedRule, 'g')
+      return {
+        rule: normalizedRule,
+        warning: '',
+      }
+    } catch {
+      return {
+        rule: '',
+        warning: '正则表达式错误',
+      }
+    }
+  }
+
+  function hydrateCatchToolkitStateFromStorage() {
+    if (isWorkerScope) {
+      return
+    }
+    catchToolkitState.autoDownloadOnComplete = readCatchToolkitStorageChecked(
+      catchToolkitStorageKeys.autoDownloadOnComplete,
+      catchToolkitState.autoDownloadOnComplete,
+    )
+    catchToolkitState.autoSeekToBufferedEnd = readCatchToolkitStorageChecked(
+      catchToolkitStorageKeys.autoSeekToBufferedEnd,
+      catchToolkitState.autoSeekToBufferedEnd,
+    )
+    catchToolkitState.clearCacheOnComplete = readCatchToolkitStorageChecked(
+      catchToolkitStorageKeys.clearCacheOnComplete,
+      catchToolkitState.clearCacheOnComplete,
+    )
+    catchToolkitState.manualFileName = readCatchToolkitStorageString(catchToolkitStorageKeys.manualFileName)
+    catchToolkitState.restartAlwaysFromBeginning = readCatchToolkitStorageChecked(
+      catchToolkitStorageKeys.restartAlwaysFromBeginning,
+      catchToolkitState.restartAlwaysFromBeginning,
+    )
+    catchToolkitState.trimExtraMediaHeaders = readCatchToolkitStorageChecked(
+      catchToolkitStorageKeys.trimExtraMediaHeaders,
+      catchToolkitState.trimExtraMediaHeaders,
+    )
+    catchToolkitState.selectorRule = evaluateSelectorRule(
+      readCatchToolkitStorageString(catchToolkitStorageKeys.selectorRule),
+    ).rule
+    catchToolkitState.regexRule = evaluateRegexRule(
+      readCatchToolkitStorageString(catchToolkitStorageKeys.regexRule),
+    ).rule
+  }
+
+  function persistCatchToolkitState() {
+    if (isWorkerScope) {
+      return
+    }
+    writeCatchToolkitStorageChecked(
+      catchToolkitStorageKeys.autoDownloadOnComplete,
+      catchToolkitState.autoDownloadOnComplete,
+    )
+    writeCatchToolkitStorageChecked(
+      catchToolkitStorageKeys.autoSeekToBufferedEnd,
+      catchToolkitState.autoSeekToBufferedEnd,
+    )
+    writeCatchToolkitStorageChecked(
+      catchToolkitStorageKeys.clearCacheOnComplete,
+      catchToolkitState.clearCacheOnComplete,
+    )
+    writeCatchToolkitStorageString(
+      catchToolkitStorageKeys.manualFileName,
+      catchToolkitState.manualFileName,
+    )
+    writeCatchToolkitStorageString(
+      catchToolkitStorageKeys.regexRule,
+      catchToolkitState.regexRule,
+    )
+    writeCatchToolkitStorageChecked(
+      catchToolkitStorageKeys.restartAlwaysFromBeginning,
+      catchToolkitState.restartAlwaysFromBeginning,
+    )
+    writeCatchToolkitStorageString(
+      catchToolkitStorageKeys.selectorRule,
+      catchToolkitState.selectorRule,
+    )
+    writeCatchToolkitStorageChecked(
+      catchToolkitStorageKeys.trimExtraMediaHeaders,
+      catchToolkitState.trimExtraMediaHeaders,
+    )
+  }
+
+  hydrateCatchToolkitStateFromStorage()
+
+  function getCurrentDocumentTitle() {
+    if (typeof document === 'undefined' || typeof document.title !== 'string') {
+      return ''
+    }
+    return document.title.trim()
+  }
+
+  function resolveCatchToolkitFileName() {
+    const manualFileName = sanitizeFileName(catchToolkitState.manualFileName)
+    if (manualFileName && manualFileName !== 'media') {
+      return manualFileName
+    }
+
+    let candidateName = ''
+    const selectorRule = String(catchToolkitState.selectorRule || '').trim()
+    if (selectorRule && typeof document !== 'undefined') {
+      try {
+        const matchedNode = document.querySelector(selectorRule)
+        const matchedText = matchedNode?.textContent?.trim() || ''
+        if (matchedText) {
+          candidateName = matchedText
+        }
+      } catch {
+        // ignore invalid selector syntax and fall back to other rules
+      }
+    }
+
+    const regexRule = String(catchToolkitState.regexRule || '').trim()
+    if (regexRule && typeof document !== 'undefined') {
+      try {
+        const sourceText = candidateName || document.documentElement?.outerHTML || ''
+        if (sourceText) {
+          const expression = new RegExp(regexRule, 'g')
+          const matches = Array.from(sourceText.matchAll(expression))
+          const extractedValues = matches.flatMap((match) => {
+            if (match.length > 1) {
+              return match.slice(1).filter((item) => typeof item === 'string' && item.trim())
+            }
+            return match[0] ? [match[0]] : []
+          })
+          if (extractedValues.length > 0) {
+            candidateName = extractedValues.join('_')
+          }
+        }
+      } catch {
+        // ignore invalid regular expressions and fall back to the title
+      }
+    }
+
+    return sanitizeFileName(candidateName || getCurrentDocumentTitle() || currentLocationHost || 'media')
+  }
 
   function toAbsoluteUrl(input: unknown): string {
     if (typeof input !== 'string') {
@@ -217,6 +484,30 @@ function embeddedBrowserResourceProbe(consolePrefix: string) {
   function sanitizeFileName(input: string) {
     const safeName = String(input || '').replace(/[\\/:*?"<>|]+/g, '_').trim()
     return safeName || 'media'
+  }
+
+  function buildCatchToolkitState(): ProbeCatchToolkitState {
+    const selectorEvaluation = evaluateSelectorRule(catchToolkitState.selectorRule)
+    const regexEvaluation = evaluateRegexRule(catchToolkitState.regexRule)
+    const capturedMediaSizeBytes = Array.from(mseStreams.values()).reduce((totalBytes, stream) => {
+      return totalBytes + Math.max(0, Number(stream.totalBytes || 0))
+    }, 0)
+    return {
+      autoSeekToBufferedEnd: catchToolkitState.autoSeekToBufferedEnd,
+      autoDownloadOnComplete: catchToolkitState.autoDownloadOnComplete,
+      capturedMediaSizeBytes,
+      clearCacheOnComplete: catchToolkitState.clearCacheOnComplete,
+      currentFileName: resolveCatchToolkitFileName(),
+      isCaptureComplete,
+      manualFileName: catchToolkitState.manualFileName,
+      regexWarning: regexEvaluation.warning,
+      regexRule: regexEvaluation.rule,
+      restartAlwaysFromBeginning: catchToolkitState.restartAlwaysFromBeginning,
+      selectorWarning: selectorEvaluation.warning,
+      selectorRule: selectorEvaluation.rule,
+      streamCount: mseStreams.size,
+      trimExtraMediaHeaders: catchToolkitState.trimExtraMediaHeaders,
+    }
   }
 
   function cloneChunk(input: unknown) {
@@ -377,8 +668,8 @@ function embeddedBrowserResourceProbe(consolePrefix: string) {
 
   function createProbeResourceFileName(kind: 'manifest' | 'key', ext: string) {
     const fileStem = kind === 'key'
-      ? `${currentDocumentTitle || currentLocationHost || 'resource'}-key`
-      : currentDocumentTitle || currentLocationHost || 'resource'
+      ? `${getCurrentDocumentTitle() || currentLocationHost || 'resource'}-key`
+      : getCurrentDocumentTitle() || currentLocationHost || 'resource'
     return `${sanitizeFileName(fileStem)}.${ext}`
   }
 
@@ -550,6 +841,9 @@ function embeddedBrowserResourceProbe(consolePrefix: string) {
   }
 
   function normalizeBuffersForPlayback(buffers: ArrayBuffer[]) {
+    if (!catchToolkitState.trimExtraMediaHeaders) {
+      return buffers
+    }
     if (!Array.isArray(buffers) || buffers.length <= 1) {
       return buffers
     }
@@ -614,6 +908,196 @@ function embeddedBrowserResourceProbe(consolePrefix: string) {
     return undefined
   }
 
+  function attachTrackedMediaElement(element: HTMLMediaElement) {
+    if (trackedMediaElements.has(element)) {
+      return
+    }
+    trackedMediaElements.add(element)
+
+    element.addEventListener('progress', () => {
+      if (!catchToolkitState.autoSeekToBufferedEnd) {
+        return
+      }
+      try {
+        if (!element.buffered || element.buffered.length === 0) {
+          return
+        }
+        const bufferedEnd = element.buffered.end(element.buffered.length - 1)
+        const targetTime = Math.max(bufferedEnd - 5, 0)
+        const duration = Number.isFinite(element.duration) ? element.duration : 0
+        if (duration > 0 && bufferedEnd >= duration) {
+          return
+        }
+        if (Math.abs(element.currentTime - targetTime) > 1) {
+          element.currentTime = targetTime
+        }
+      } catch {
+        // ignore seek failures caused by sparse or transient buffer ranges
+      }
+    })
+
+    const attemptRestartFromBeginning = () => {
+      if (!catchToolkitState.restartAlwaysFromBeginning || autoRestartHandledMediaElements.has(element)) {
+        return
+      }
+      try {
+        autoRestartHandledMediaElements.add(element)
+        clearCatchMediaCacheInternal()
+        element.currentTime = 0
+      } catch {
+        // ignore media elements that cannot be controlled programmatically
+      }
+    }
+
+    element.addEventListener('play', () => {
+      attemptRestartFromBeginning()
+    }, { once: true })
+
+    const initialRestartTimer = window.setInterval(() => {
+      if (autoRestartHandledMediaElements.has(element) || !catchToolkitState.restartAlwaysFromBeginning) {
+        window.clearInterval(initialRestartTimer)
+        return
+      }
+      if (!element.paused) {
+        attemptRestartFromBeginning()
+        window.clearInterval(initialRestartTimer)
+      }
+    }, 500)
+    window.setTimeout(() => {
+      window.clearInterval(initialRestartTimer)
+    }, 5000)
+  }
+
+  function bindTrackedMediaElements() {
+    if (typeof document === 'undefined') {
+      return
+    }
+    document.querySelectorAll('video, audio').forEach((node) => {
+      if (node instanceof HTMLMediaElement) {
+        attachTrackedMediaElement(node)
+      }
+    })
+  }
+
+  function ensureTrackedMediaObserver() {
+    if (isWorkerScope || typeof MutationObserver === 'undefined' || trackedMediaObserver || typeof document === 'undefined') {
+      return
+    }
+    bindTrackedMediaElements()
+    trackedMediaObserver = new MutationObserver((mutations) => {
+      mutations.forEach((mutation) => {
+        mutation.addedNodes.forEach((node) => {
+          if (!(node instanceof Element)) {
+            return
+          }
+          if (node instanceof HTMLMediaElement) {
+            attachTrackedMediaElement(node)
+            return
+          }
+          node.querySelectorAll('video, audio').forEach((childNode) => {
+            if (childNode instanceof HTMLMediaElement) {
+              attachTrackedMediaElement(childNode)
+            }
+          })
+        })
+      })
+    })
+    trackedMediaObserver.observe(document.body || document.documentElement, {
+      childList: true,
+      subtree: true,
+    })
+  }
+
+  function clearCatchMediaCacheInternal() {
+    let cleared = false
+    mseStreams.forEach((stream) => {
+      if (stream.blobUrl) {
+        URL.revokeObjectURL(stream.blobUrl)
+        stream.blobUrl = ''
+      }
+      if (isCaptureComplete) {
+        cleared = cleared || stream.buffers.length > 0
+        stream.buffers = []
+        stream.bufferCount = 0
+        stream.lastReportedBufferCount = 0
+        stream.lastReportedBytes = 0
+        stream.totalBytes = 0
+        emitMseStream(stream.streamId)
+        return
+      }
+      if (stream.buffers.length > 1) {
+        const firstChunk = stream.buffers[0]
+        stream.buffers = firstChunk ? [firstChunk] : []
+        stream.bufferCount = stream.buffers.length
+        stream.totalBytes = firstChunk?.byteLength || 0
+        stream.lastReportedBufferCount = stream.bufferCount
+        stream.lastReportedBytes = stream.totalBytes
+        cleared = true
+        emitMseStream(stream.streamId)
+      }
+    })
+    isCaptureComplete = false
+    return cleared
+  }
+
+  function downloadCatchMediaInternal() {
+    if (typeof document === 'undefined') {
+      return false
+    }
+    const downloadableStreams = Array.from(mseStreams.values()).filter((stream) => stream.buffers.length > 0)
+    if (downloadableStreams.length === 0) {
+      return false
+    }
+
+    const baseName = resolveCatchToolkitFileName()
+    downloadableStreams.forEach((stream) => {
+      const playableBuffers = normalizeBuffersForPlayback(stream.buffers)
+      const blob = new Blob(playableBuffers, { type: stream.mimeType })
+      const anchor = document.createElement('a')
+      const blobUrl = URL.createObjectURL(blob)
+      const extension = guessExtensionFromMimeType(stream.mimeType, stream.streamType)
+      const fileSuffix = downloadableStreams.length > 1 && stream.streamType
+        ? `-${stream.streamType}`
+        : ''
+      anchor.href = blobUrl
+      anchor.download = `${baseName}${fileSuffix}.${extension}`
+      anchor.click()
+      anchor.remove()
+      setTimeout(() => {
+        URL.revokeObjectURL(blobUrl)
+      }, 1000)
+    })
+
+    if (catchToolkitState.clearCacheOnComplete) {
+      setTimeout(() => {
+        clearCatchMediaCacheInternal()
+      }, 0)
+    }
+
+    return true
+  }
+
+  function restartCatchMediaCaptureInternal() {
+    if (typeof document === 'undefined') {
+      return false
+    }
+    clearCatchMediaCacheInternal()
+    let restarted = false
+    document.querySelectorAll('video, audio').forEach((node) => {
+      if (!(node instanceof HTMLMediaElement)) {
+        return
+      }
+      try {
+        node.currentTime = 0
+        void node.play().catch(() => undefined)
+        restarted = true
+      } catch {
+        // ignore media elements that cannot be controlled programmatically
+      }
+    })
+    return restarted
+  }
+
   function createMseResourceKey(streamId: string) {
     return `mse-stream:${streamId}`
   }
@@ -671,7 +1155,7 @@ function embeddedBrowserResourceProbe(consolePrefix: string) {
     if (!stream) {
       return 'media.bin'
     }
-    const baseName = sanitizeFileName(currentDocumentTitle || currentLocationHost || 'media')
+    const baseName = resolveCatchToolkitFileName()
     const streamSuffix = stream.streamType ? `-${stream.streamType}` : ''
     const extension = guessExtensionFromMimeType(stream.mimeType, stream.streamType)
     return `${baseName}${streamSuffix}.${extension}`
@@ -691,6 +1175,11 @@ function embeddedBrowserResourceProbe(consolePrefix: string) {
     anchor.download = createMseExportName(streamId)
     anchor.click()
     anchor.remove()
+    if (catchToolkitState.clearCacheOnComplete) {
+      setTimeout(() => {
+        clearCatchMediaCacheInternal()
+      }, 0)
+    }
     return true
   }
 
@@ -864,6 +1353,8 @@ function embeddedBrowserResourceProbe(consolePrefix: string) {
           appendBuffer?: SourceBuffer['appendBuffer']
         }
         try {
+          ensureTrackedMediaObserver()
+          isCaptureComplete = false
           const mediaSource = thisArg as MediaSource
           const mimeType = String(argumentsList?.[0] || '').trim()
           const normalizedMimeType = mimeType.split(';')[0]?.trim().toLowerCase() || ''
@@ -934,10 +1425,22 @@ function embeddedBrowserResourceProbe(consolePrefix: string) {
       apply(target, thisArg, argumentsList) {
         const result = Reflect.apply(target, thisArg, argumentsList)
         try {
+          isCaptureComplete = true
           const streamIds = mediaSourceStreams.get(thisArg as MediaSource) || []
           streamIds.forEach((streamId) => {
             finalizeMseStream(streamId)
           })
+          if (catchToolkitState.autoDownloadOnComplete) {
+            setTimeout(() => {
+              downloadCatchMediaInternal()
+            }, 500)
+            return result
+          }
+          if (catchToolkitState.clearCacheOnComplete) {
+            setTimeout(() => {
+              clearCatchMediaCacheInternal()
+            }, 0)
+          }
         } catch {
           // ignore MSE hook failures and keep playback usable
         }
@@ -1303,7 +1806,17 @@ function embeddedBrowserResourceProbe(consolePrefix: string) {
     return originalStringIndexOf.toString()
   }
 
+  if (!isWorkerScope) {
+    ensureTrackedMediaObserver()
+  }
+
   globalScope.__OMNIFLOW_EMBEDDED_BROWSER_RESOURCE_PROBE__ = {
+    clearCatchMediaCache() {
+      return clearCatchMediaCacheInternal()
+    },
+    downloadCatchMedia() {
+      return downloadCatchMediaInternal()
+    },
     exportResource(resourceKey: string) {
       const normalizedResourceKey = String(resourceKey || '')
       if (normalizedResourceKey.startsWith('mse-stream:')) {
@@ -1313,6 +1826,9 @@ function embeddedBrowserResourceProbe(consolePrefix: string) {
         return exportProbeResource(normalizedResourceKey)
       }
       return false
+    },
+    getCatchToolkitState() {
+      return buildCatchToolkitState()
     },
     installedAt: Date.now(),
     openResource(resourceKey: string) {
@@ -1335,7 +1851,41 @@ function embeddedBrowserResourceProbe(consolePrefix: string) {
       }
       return Promise.resolve(null)
     },
+    restartCatchMediaCapture() {
+      return restartCatchMediaCaptureInternal()
+    },
     seen,
+    updateCatchToolkitState(payload: Partial<ProbeCatchToolkitState>) {
+      if (typeof payload.autoSeekToBufferedEnd === 'boolean') {
+        catchToolkitState.autoSeekToBufferedEnd = payload.autoSeekToBufferedEnd
+      }
+      if (typeof payload.autoDownloadOnComplete === 'boolean') {
+        catchToolkitState.autoDownloadOnComplete = payload.autoDownloadOnComplete
+      }
+      if (typeof payload.clearCacheOnComplete === 'boolean') {
+        catchToolkitState.clearCacheOnComplete = payload.clearCacheOnComplete
+      }
+      if (typeof payload.manualFileName === 'string') {
+        catchToolkitState.manualFileName = payload.manualFileName
+      }
+      if (typeof payload.regexRule === 'string') {
+        catchToolkitState.regexRule = evaluateRegexRule(payload.regexRule).rule
+      }
+      if (typeof payload.restartAlwaysFromBeginning === 'boolean') {
+        catchToolkitState.restartAlwaysFromBeginning = payload.restartAlwaysFromBeginning
+      }
+      if (typeof payload.selectorRule === 'string') {
+        catchToolkitState.selectorRule = evaluateSelectorRule(payload.selectorRule).rule
+      }
+      if (typeof payload.trimExtraMediaHeaders === 'boolean') {
+        catchToolkitState.trimExtraMediaHeaders = payload.trimExtraMediaHeaders
+      }
+      persistCatchToolkitState()
+      if (!isWorkerScope) {
+        ensureTrackedMediaObserver()
+      }
+      return buildCatchToolkitState()
+    },
   }
 
   return 'installed'

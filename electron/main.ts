@@ -16,11 +16,17 @@ import {
 import {
   type EmbeddedBrowserResourcePreviewPayload,
 } from './service/embeddedBrowserResourcePageBridge'
+import type { EmbeddedBrowserCatchToolkitStatePayload } from './service/embeddedBrowserCatchToolkitPageBridge'
 import {
   extractEmbeddedBrowserResourceFromPage,
   runEmbeddedBrowserResourcePreview,
   runEmbeddedBrowserResourceProbeAction,
 } from './service/embeddedBrowserResourceActionService'
+import {
+  getEmbeddedBrowserCatchToolkitState,
+  runEmbeddedBrowserCatchToolkitAction,
+  updateEmbeddedBrowserCatchToolkitState,
+} from './service/embeddedBrowserCatchToolkitActionService'
 import { EMBEDDED_BROWSER_RESOURCE_CONSOLE_PREFIX, createEmbeddedBrowserResourceProbeScript } from './service/embeddedBrowserResourceProbe'
 import {
   deriveEmbeddedBrowserMergedFileName,
@@ -1438,6 +1444,85 @@ function registerWindowIpcHandlers() {
           error: error instanceof Error ? error.message : String(error),
           tabId: String(tabId || '').trim(),
           url: String(payload.url || '').trim(),
+        })
+        return false
+      }
+    }).then((result) => Boolean(result))
+  ))
+
+  ipcMain.handle('embedded-browser:resource:catch-toolkit:get-state', async (_event, tabId: string) => (
+    withEmbeddedBrowserResourceScriptExecutor(tabId, async (executeScript, view) => {
+      try {
+        return await getEmbeddedBrowserCatchToolkitState(executeScript)
+      } catch (error) {
+        runtimeLogger.warn('embedded browser catch toolkit get state failed', {
+          error: error instanceof Error ? error.message : String(error),
+          tabId: String(tabId || '').trim(),
+          url: view.webContents.getURL() || embeddedBrowserLastCommittedUrls.get(String(tabId || '').trim()) || '',
+        })
+        return null
+      }
+    })
+  ))
+
+  ipcMain.handle(
+    'embedded-browser:resource:catch-toolkit:update-state',
+    async (_event, tabId: string, payload: Partial<EmbeddedBrowserCatchToolkitStatePayload>) => (
+      withEmbeddedBrowserResourceScriptExecutor(tabId, async (executeScript, view) => {
+        try {
+          return await updateEmbeddedBrowserCatchToolkitState(executeScript, payload)
+        } catch (error) {
+          runtimeLogger.warn('embedded browser catch toolkit update state failed', {
+            error: error instanceof Error ? error.message : String(error),
+            payload,
+            tabId: String(tabId || '').trim(),
+            url: view.webContents.getURL() || embeddedBrowserLastCommittedUrls.get(String(tabId || '').trim()) || '',
+          })
+          return null
+        }
+      })
+    ),
+  )
+
+  ipcMain.handle('embedded-browser:resource:catch-toolkit:clear-cache', async (_event, tabId: string) => (
+    withEmbeddedBrowserResourceScriptExecutor(tabId, async (executeScript, view) => {
+      try {
+        return await runEmbeddedBrowserCatchToolkitAction(executeScript, 'clearCatchMediaCache')
+      } catch (error) {
+        runtimeLogger.warn('embedded browser catch toolkit clear cache failed', {
+          error: error instanceof Error ? error.message : String(error),
+          tabId: String(tabId || '').trim(),
+          url: view.webContents.getURL() || embeddedBrowserLastCommittedUrls.get(String(tabId || '').trim()) || '',
+        })
+        return false
+      }
+    }).then((result) => Boolean(result))
+  ))
+
+  ipcMain.handle('embedded-browser:resource:catch-toolkit:download', async (_event, tabId: string) => (
+    withEmbeddedBrowserResourceScriptExecutor(tabId, async (executeScript, view) => {
+      try {
+        return await runEmbeddedBrowserCatchToolkitAction(executeScript, 'downloadCatchMedia')
+      } catch (error) {
+        runtimeLogger.warn('embedded browser catch toolkit download failed', {
+          error: error instanceof Error ? error.message : String(error),
+          tabId: String(tabId || '').trim(),
+          url: view.webContents.getURL() || embeddedBrowserLastCommittedUrls.get(String(tabId || '').trim()) || '',
+        })
+        return false
+      }
+    }).then((result) => Boolean(result))
+  ))
+
+  ipcMain.handle('embedded-browser:resource:catch-toolkit:restart', async (_event, tabId: string) => (
+    withEmbeddedBrowserResourceScriptExecutor(tabId, async (executeScript, view) => {
+      try {
+        return await runEmbeddedBrowserCatchToolkitAction(executeScript, 'restartCatchMediaCapture')
+      } catch (error) {
+        runtimeLogger.warn('embedded browser catch toolkit restart failed', {
+          error: error instanceof Error ? error.message : String(error),
+          tabId: String(tabId || '').trim(),
+          url: view.webContents.getURL() || embeddedBrowserLastCommittedUrls.get(String(tabId || '').trim()) || '',
         })
         return false
       }

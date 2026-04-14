@@ -1,6 +1,8 @@
 import { Toast } from '@douyinfe/semi-ui';
 import React from 'react';
 import styled from 'styled-components';
+import EmbeddedBrowserCatchToolkitCard from './EmbeddedBrowserCatchToolkitCard';
+import { useEmbeddedBrowserCatchToolkit } from '../hooks/useEmbeddedBrowserCatchToolkit';
 import { useEmbeddedBrowserResources } from '../hooks/useEmbeddedBrowserResources';
 import {
   createEmbeddedBrowserResourceSections,
@@ -228,6 +230,115 @@ const PanelShell = styled.aside`
     font-size: 13px;
     line-height: 1.7;
     background: var(--app-bg);
+  }
+
+  .resource-toolkit-card {
+    border: 1px solid var(--app-border);
+    border-radius: 12px;
+    background: var(--app-bg);
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .resource-toolkit-header {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .resource-toolkit-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--app-text);
+  }
+
+  .resource-toolkit-description {
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--app-text-muted);
+  }
+
+  .resource-toolkit-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .resource-toolkit-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 10px;
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--app-bg-elevated) 70%, white);
+  }
+
+  .resource-toolkit-meta-label {
+    font-size: 11px;
+    color: var(--app-text-muted);
+  }
+
+  .resource-toolkit-meta-value {
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--app-text);
+    word-break: break-all;
+  }
+
+  .resource-toolkit-settings {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .resource-toolkit-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--app-text);
+  }
+
+  .resource-toolkit-toggle input {
+    margin: 0;
+  }
+
+  .resource-toolkit-input-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--app-text);
+  }
+
+  .resource-toolkit-input {
+    height: 32px;
+    border-radius: 8px;
+    border: 1px solid var(--app-border);
+    background: var(--app-bg);
+    color: var(--app-text);
+    padding: 0 10px;
+    font-size: 12px;
+  }
+
+  .resource-toolkit-input:focus {
+    outline: none;
+    border-color: var(--semi-color-primary);
+  }
+
+  .resource-toolkit-warning {
+    font-size: 11px;
+    line-height: 1.5;
+    color: #c93c37;
+  }
+
+  .resource-toolkit-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
   }
 
   .resource-card {
@@ -601,6 +712,7 @@ const EmbeddedBrowserResourcePanel: React.FC<EmbeddedBrowserResourcePanelProps> 
     startDeepCapture,
     stopCapture,
   } = useEmbeddedBrowserResources(activeTabId);
+  const catchToolkit = useEmbeddedBrowserCatchToolkit(activeTabId, deepCaptureEnabled);
   const [actionLoading, setActionLoading] = React.useState<'start' | 'deep' | 'stop' | 'clear' | null>(null);
   const [filterDraft, setFilterDraft] = React.useState(loadResourceFilterDraft);
 
@@ -770,6 +882,17 @@ const EmbeddedBrowserResourcePanel: React.FC<EmbeddedBrowserResourcePanelProps> 
         </div>
       </div>
       <div className="resource-panel-body">
+        {activeTabId && deepCaptureEnabled ? (
+          <EmbeddedBrowserCatchToolkitCard
+            disabled={disabled}
+            loading={catchToolkit.loading}
+            onClearCache={catchToolkit.clearCache}
+            onDownloadMedia={catchToolkit.downloadMedia}
+            onRestartCapture={catchToolkit.restartCapture}
+            onUpdateState={catchToolkit.updateState}
+            state={catchToolkit.state}
+          />
+        ) : null}
         {!activeTabId ? (
           <div className="resource-panel-empty">
             先打开一个内置浏览器标签页，再开始捕获。
