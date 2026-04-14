@@ -51,6 +51,17 @@ export async function exportEmbeddedBrowserCapturedResource(tabId: string, resou
   return window.electronEmbeddedBrowser.exportCapturedResource(tabId, resourceKey) as Promise<boolean>;
 }
 
+export async function readEmbeddedBrowserCapturedResource(tabId: string, resourceKey: string) {
+  assertDesktopSupport();
+  return window.electronEmbeddedBrowser.readCapturedResource(tabId, resourceKey) as Promise<{
+    base64: string;
+    fileName: string;
+    mimeType?: string;
+    resourceKey: string;
+    streamType?: 'audio' | 'video';
+  } | null>;
+}
+
 export async function previewEmbeddedBrowserCapturedResource(
   tabId: string,
   payload: {

@@ -214,6 +214,8 @@ contextBridge.exposeInMainWorld('electronEmbeddedBrowser', {
   listCapturedResources: (tabId: string) => ipcRenderer.invoke('embedded-browser:resource:list', tabId),
   openCapturedResource: (tabId: string, resourceKey: string) =>
     ipcRenderer.invoke('embedded-browser:resource:open', tabId, resourceKey),
+  readCapturedResource: (tabId: string, resourceKey: string) =>
+    ipcRenderer.invoke('embedded-browser:resource:read', tabId, resourceKey),
   previewCapturedResource: (tabId: string, payload: {
     mimeType?: string;
     streamType?: 'audio' | 'video';

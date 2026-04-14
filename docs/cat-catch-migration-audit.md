@@ -20,7 +20,7 @@
 | 深度搜索注入 | `catch-script/search.js` | 部分夺舍 | 补更多经验规则、特殊 JSON、站点边角 |
 | Worker 注入嗅探 | `catch-script/search.js` | 已夺舍 | 测 worker-heavy 页面 |
 | fetch / XHR / JSON 扫描 | `catch-script/search.js` | 已夺舍 | 测相对 URL、嵌套 JSON、一次性 m3u8 |
-| HLS/m3u8 内联识别 | `catch-script/search.js`, `js/m3u8.js` | 部分夺舍 | 补 parser / downloader 能力 |
+| HLS/m3u8 内联识别 | `catch-script/search.js`, `js/m3u8.js` | 部分夺舍 | parser / 测试入口已补，继续补 downloader 能力 |
 | DASH/mpd 内联识别 | `catch-script/search.js`, `js/mpd.js` | 部分夺舍 | 补 mpd parser 选择音视频轨 |
 | Vimeo playlist.json 转 m3u8 | `catch-script/search.js` | 已夺舍 | 测 Vimeo 页面 |
 | key 候选捕获 | `catch-script/search.js`, `js/content-script.js`, `js/m3u8.js` | 部分夺舍 | 补真实 key 验证 / 自定义 key |
@@ -85,10 +85,10 @@ Cat Catch 里这块很厚，主要在 `m3u8.html`、`js/m3u8.js`、`js/m3u8.down
 
 OmniFlow 当前有 manifest 捕获、key 候选和 ffmpeg 合并基础，但还缺：
 
-- m3u8 parser 的层级 playlist 展开。
-- 多 variant / 多清晰度选择。
-- `EXT-X-KEY` 下载、验证、替换、自定义 key。
-- `EXT-X-MAP` 下载与解密处理。
+- m3u8 parser 的层级 playlist 展开：已补纯函数解析与资源卡测试入口，能输出 variants / renditions / keys / maps / segments。
+- 多 variant / 多清晰度选择：已能解析 variant 元数据，正式选择 UI 未定。
+- `EXT-X-KEY` 下载、验证、替换、自定义 key：已能解析 key 元数据，真实 key 下载/验证未完成。
+- `EXT-X-MAP` 下载与解密处理：已能解析 map 与 byterange 元数据，下载/解密拼接未完成。
 - 下载范围：序号范围、时间范围 `HH:MM:SS`。
 - 下载队列、并发线程、失败重试、重下失败项。
 - 直播录制与直播结束处理。

@@ -672,6 +672,22 @@ export function createEmbeddedBrowserMainController(
     }).then((result) => Boolean(result))
   }
 
+  async function handleReadResource(tabId: string, resourceKey: string) {
+    return withEmbeddedBrowserResourceScriptExecutor(tabId, async (executeScript, view) => {
+      try {
+        return await extractEmbeddedBrowserResourceFromPage(executeScript, resourceKey)
+      } catch (error) {
+        runtimeLogger.warn('embedded browser resource read failed', {
+          error: error instanceof Error ? error.message : String(error),
+          resourceKey: String(resourceKey || '').trim(),
+          tabId: String(tabId || '').trim(),
+          url: view.webContents.getURL() || embeddedBrowserLastCommittedUrls.get(String(tabId || '').trim()) || '',
+        })
+        return null
+      }
+    })
+  }
+
   async function handlePreviewResource(tabId: string, payload: EmbeddedBrowserResourcePreviewPayload) {
     return withEmbeddedBrowserResourceScriptExecutor(tabId, async (executeScript) => {
       try {
@@ -834,6 +850,7 @@ export function createEmbeddedBrowserMainController(
       openResource: handleOpenResource,
       openTab: handleOpenTab,
       previewResource: handlePreviewResource,
+      readResource: handleReadResource,
       reload: handleReload,
       resolveFavicon: resolveEmbeddedBrowserBookmarkFavicon,
       restartCatchMediaCapture: (tabId) => handleCatchToolkitAction(tabId, 'restartCatchMediaCapture', 'restart'),

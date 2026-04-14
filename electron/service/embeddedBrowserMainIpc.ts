@@ -5,7 +5,10 @@ import type {
   EmbeddedBrowserFaviconResolvePayload,
 } from './embeddedBrowserMainTypes'
 import type { EmbeddedBrowserCatchToolkitStatePayload } from './embeddedBrowserCatchToolkitPageBridge'
-import type { EmbeddedBrowserResourcePreviewPayload } from './embeddedBrowserResourcePageBridge'
+import type {
+  EmbeddedBrowserExtractedResourcePayload,
+  EmbeddedBrowserResourcePreviewPayload,
+} from './embeddedBrowserResourcePageBridge'
 
 type EmbeddedBrowserMainIpcHandlers = {
   activateTab: (sender: Electron.WebContents, tabId: string | null) => void | Promise<void>
@@ -36,6 +39,7 @@ type EmbeddedBrowserMainIpcHandlers = {
   openResource: (tabId: string, resourceKey: string) => Promise<boolean>
   openTab: (sender: Electron.WebContents, tabId: string, url?: string) => Promise<void>
   previewResource: (tabId: string, payload: EmbeddedBrowserResourcePreviewPayload) => Promise<boolean>
+  readResource: (tabId: string, resourceKey: string) => Promise<EmbeddedBrowserExtractedResourcePayload | null>
   reload: (tabId: string) => Promise<void>
   resolveFavicon: (payload: EmbeddedBrowserFaviconResolvePayload) => Promise<unknown>
   restartCatchMediaCapture: (tabId: string) => Promise<boolean>
@@ -87,6 +91,9 @@ export function registerEmbeddedBrowserMainIpcHandlers(handlers: EmbeddedBrowser
   ))
   ipcMain.handle('embedded-browser:resource:export', async (_event, tabId: string, resourceKey: string) => (
     handlers.exportResource(tabId, resourceKey)
+  ))
+  ipcMain.handle('embedded-browser:resource:read', async (_event, tabId: string, resourceKey: string) => (
+    handlers.readResource(tabId, resourceKey)
   ))
   ipcMain.handle(
     'embedded-browser:resource:preview',

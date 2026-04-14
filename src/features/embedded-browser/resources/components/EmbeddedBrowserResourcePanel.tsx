@@ -12,10 +12,16 @@ import {
   isPreviewableResource,
 } from '../model/embedded-browser-resource.presentation';
 import {
+  createEmbeddedBrowserHlsDownloadPlan,
+  parseEmbeddedBrowserHlsManifest,
+  type EmbeddedBrowserHlsManifest,
+} from '../model/embedded-browser-hls-manifest';
+import {
   exportEmbeddedBrowserCapturedResource,
   mergeEmbeddedBrowserCapturedMseResources,
   openEmbeddedBrowserCapturedResource,
   previewEmbeddedBrowserCapturedResource,
+  readEmbeddedBrowserCapturedResource,
 } from '../services/embedded-browser-resource.api';
 import type { EmbeddedBrowserCapturedResource } from '../types';
 
@@ -389,9 +395,34 @@ const PanelShell = styled.aside`
     word-break: break-all;
   }
 
+  .resource-hls-analysis {
+    border: 1px dashed var(--app-border);
+    border-radius: 8px;
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    color: var(--app-text-muted);
+    font-size: 11px;
+    line-height: 1.6;
+    background: color-mix(in srgb, var(--app-bg-elevated) 70%, white);
+  }
+
+  .resource-hls-analysis strong {
+    color: var(--app-text);
+    font-weight: 700;
+  }
+
+  .resource-hls-analysis code {
+    color: var(--app-text);
+    word-break: break-all;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  }
+
   .resource-card-actions {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 8px;
   }
 
@@ -463,6 +494,88 @@ function buildResourceCurlCommand(resource: EmbeddedBrowserCapturedResource) {
 async function copyResourceCurl(resource: EmbeddedBrowserCapturedResource) {
   await navigator.clipboard.writeText(buildResourceCurlCommand(resource));
   Toast.success('curl 已复制');
+}
+
+function decodeBase64Text(base64: string) {
+  const binary = window.atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return new TextDecoder().decode(bytes);
+}
+
+function isHlsResource(resource: EmbeddedBrowserCapturedResource) {
+  const extension = String(resource.ext || '').toLowerCase();
+  const mimeType = String(resource.mimeType || '').toLowerCase();
+  const url = String(resource.url || '').toLowerCase();
+  return resource.kind === 'manifest' && (
+    extension === 'm3u8'
+    || extension === 'm3u'
+    || mimeType.includes('mpegurl')
+    || /\.m3u8(?:$|[?#])/.test(url)
+    || /\.m3u(?:$|[?#])/.test(url)
+  );
+}
+
+function withResourceRefererHeader(resource: EmbeddedBrowserCapturedResource) {
+  const headers = {
+    ...(resource.requestHeaders || {}),
+  };
+  const hasReferer = Object.keys(headers).some((key) => key.toLowerCase() === 'referer');
+  if (resource.referer && !hasReferer) {
+    headers.referer = resource.referer;
+  }
+  return headers;
+}
+
+async function readHlsManifestText(resource: EmbeddedBrowserCapturedResource) {
+  if (resource.resourceKey && isPageContextManagedResource(resource)) {
+    const extracted = await readEmbeddedBrowserCapturedResource(resource.tabId, resource.resourceKey);
+    if (!extracted?.base64) {
+      throw new Error('页面里的 manifest 暂时读不到，先重新深度捕获一次');
+    }
+    return {
+      text: decodeBase64Text(extracted.base64),
+      url: resource.pageUrl || resource.url,
+    };
+  }
+
+  const headers = withResourceRefererHeader(resource);
+  const response = await window.electronAPI.fetch(resource.url, { headers });
+  if (response.status < 200 || response.status >= 400) {
+    throw new Error(`manifest 请求失败：HTTP ${response.status}`);
+  }
+  const text = typeof response.body === 'string'
+    ? response.body
+    : JSON.stringify(response.body || '');
+  return {
+    text,
+    url: resource.url,
+  };
+}
+
+async function analyzeHlsResource(resource: EmbeddedBrowserCapturedResource) {
+  const { text, url } = await readHlsManifestText(resource);
+  if (!text.includes('#EXTM3U')) {
+    throw new Error('这条资源不像 HLS manifest');
+  }
+  const manifest = parseEmbeddedBrowserHlsManifest({
+    baseUrl: url || resource.pageUrl || resource.url,
+    text,
+  });
+  const plan = createEmbeddedBrowserHlsDownloadPlan({
+    headers: withResourceRefererHeader(resource),
+    manifest,
+    manifestUrl: resource.url,
+    pageUrl: resource.pageUrl,
+  });
+  const planText = JSON.stringify(plan, null, 2);
+  await navigator.clipboard.writeText(planText);
+  return {
+    manifest,
+    planText,
+  };
 }
 
 function openResourceUrl(url: string) {
@@ -560,95 +673,110 @@ function matchesResourceFilter(resource: EmbeddedBrowserCapturedResource, patter
   return pattern.test(candidate);
 }
 
+type HlsAnalysisState = {
+  error?: string
+  loading: boolean
+  manifest?: EmbeddedBrowserHlsManifest
+  planText?: string
+}
 
-const ResourceCard: React.FC<{ resource: EmbeddedBrowserCapturedResource }> = ({ resource }) => (
-  <div className="resource-card">
-    <div className="resource-card-meta">
-      <span className="resource-chip">{resource.kind}</span>
-      {resource.streamType ? <span className="resource-chip">{resource.streamType}</span> : null}
-      {isMseCapturedResource(resource) ? <span className="resource-chip">playable</span> : null}
-      <span className="resource-chip">{resource.source}</span>
-      {resource.ext ? <span className="resource-chip">.{resource.ext}</span> : null}
-      {resource.statusCode ? <span className="resource-chip">{resource.statusCode}</span> : null}
-      {resource.contentLength ? <span className="resource-chip">{formatBytes(resource.contentLength)}</span> : null}
-      <span className="resource-chip">{formatCapturedAt(resource.capturedAt)}</span>
-    </div>
-    <div className="resource-url">{resource.url}</div>
-    {resource.pageUrl ? (
-      <div className="resource-page-url">来源页面：{resource.pageUrl}</div>
-    ) : null}
-    {resource.referer ? (
-      <div className="resource-request-meta">Referer：{resource.referer}</div>
-    ) : null}
-    {resource.requestHeaders && Object.keys(resource.requestHeaders).length ? (
-      <div className="resource-request-meta">
-        请求头：{Object.keys(resource.requestHeaders).join(', ')}
+const ResourceCard: React.FC<{ resource: EmbeddedBrowserCapturedResource }> = ({ resource }) => {
+  const [hlsAnalysis, setHlsAnalysis] = React.useState<HlsAnalysisState>({ loading: false });
+  const canAnalyzeHls = isHlsResource(resource);
+
+  const handleAnalyzeHls = React.useCallback(() => {
+    setHlsAnalysis((previous) => ({
+      ...previous,
+      error: undefined,
+      loading: true,
+    }));
+    void analyzeHlsResource(resource)
+      .then((result) => {
+        setHlsAnalysis({
+          loading: false,
+          manifest: result.manifest,
+          planText: result.planText,
+        });
+        Toast.success('HLS 解析完成，下载计划 JSON 已复制');
+      })
+      .catch((error: any) => {
+        setHlsAnalysis({
+          error: error?.message || 'HLS 解析失败',
+          loading: false,
+        });
+        Toast.error(error?.message || 'HLS 解析失败');
+      });
+  }, [resource]);
+
+  return (
+    <div className="resource-card">
+      <div className="resource-card-meta">
+        <span className="resource-chip">{resource.kind}</span>
+        {resource.streamType ? <span className="resource-chip">{resource.streamType}</span> : null}
+        {isMseCapturedResource(resource) ? <span className="resource-chip">playable</span> : null}
+        <span className="resource-chip">{resource.source}</span>
+        {resource.ext ? <span className="resource-chip">.{resource.ext}</span> : null}
+        {resource.statusCode ? <span className="resource-chip">{resource.statusCode}</span> : null}
+        {resource.contentLength ? <span className="resource-chip">{formatBytes(resource.contentLength)}</span> : null}
+        <span className="resource-chip">{formatCapturedAt(resource.capturedAt)}</span>
       </div>
-    ) : null}
-    <div className="resource-card-actions">
-      {isPreviewableResource(resource) ? (
-        <>
-          <button
-            type="button"
-            className="resource-card-btn"
-            onClick={() => {
-              void previewResource(resource).catch((error: any) => {
-                Toast.error(error?.message || '预览失败');
-              });
-            }}
-          >
-            预览
-          </button>
-          {isPageContextManagedResource(resource) ? (
+      <div className="resource-url">{resource.url}</div>
+      {resource.pageUrl ? (
+        <div className="resource-page-url">来源页面：{resource.pageUrl}</div>
+      ) : null}
+      {resource.referer ? (
+        <div className="resource-request-meta">Referer：{resource.referer}</div>
+      ) : null}
+      {resource.requestHeaders && Object.keys(resource.requestHeaders).length ? (
+        <div className="resource-request-meta">
+          请求头：{Object.keys(resource.requestHeaders).join(', ')}
+        </div>
+      ) : null}
+      {hlsAnalysis.manifest ? (
+        <div className="resource-hls-analysis">
+          <div>
+            <strong>HLS：</strong>
+            {hlsAnalysis.manifest.isMaster ? 'Master playlist' : 'Media playlist'}
+            {' · '}
+            {hlsAnalysis.manifest.isLive ? '直播' : '点播'}
+          </div>
+          <div>
+            variants {hlsAnalysis.manifest.variants.length}
+            {' · '}
+            segments {hlsAnalysis.manifest.segmentCount}
+            {' · '}
+            keys {hlsAnalysis.manifest.keys.length}
+            {' · '}
+            maps {hlsAnalysis.manifest.maps.length}
+            {' · '}
+            {Math.round(hlsAnalysis.manifest.durationSeconds)}s
+          </div>
+          {hlsAnalysis.manifest.variants[0] ? (
+            <code>{hlsAnalysis.manifest.variants[0].url}</code>
+          ) : hlsAnalysis.manifest.segments[0] ? (
+            <code>{hlsAnalysis.manifest.segments[0].url}</code>
+          ) : null}
+        </div>
+      ) : hlsAnalysis.error ? (
+        <div className="resource-hls-analysis">
+          HLS 解析失败：{hlsAnalysis.error}
+        </div>
+      ) : null}
+      <div className="resource-card-actions">
+        {isPreviewableResource(resource) ? (
+          <>
             <button
               type="button"
               className="resource-card-btn"
               onClick={() => {
-                void exportCapturedResource(resource).catch((error: any) => {
-                  Toast.error(error?.message || '导出失败');
+                void previewResource(resource).catch((error: any) => {
+                  Toast.error(error?.message || '预览失败');
                 });
               }}
             >
-              页内导出
+              预览
             </button>
-          ) : (
-            <button
-              type="button"
-              className="resource-card-btn"
-              onClick={() => {
-                void copyResourceCurl(resource);
-              }}
-            >
-              复制 curl
-            </button>
-          )}
-          {!isPageContextManagedResource(resource) ? (
-            <button
-              type="button"
-              className="resource-card-btn"
-              onClick={() => {
-                void copyResourceUrl(resource.url);
-              }}
-            >
-              复制链接
-            </button>
-          ) : null}
-        </>
-      ) : (
-        <>
-          {isPageContextManagedResource(resource) ? (
-            <>
-              <button
-                type="button"
-                className="resource-card-btn"
-                onClick={() => {
-                  void openCapturedResource(resource).catch((error: any) => {
-                    Toast.error(error?.message || '打开失败');
-                  });
-                }}
-              >
-                页内打开
-              </button>
+            {isPageContextManagedResource(resource) ? (
               <button
                 type="button"
                 className="resource-card-btn"
@@ -660,18 +788,7 @@ const ResourceCard: React.FC<{ resource: EmbeddedBrowserCapturedResource }> = ({
               >
                 页内导出
               </button>
-            </>
-          ) : (
-            <>
-              <button
-                type="button"
-                className="resource-card-btn"
-                onClick={() => {
-                  void copyResourceUrl(resource.url);
-                }}
-              >
-                复制链接
-              </button>
+            ) : (
               <button
                 type="button"
                 className="resource-card-btn"
@@ -681,22 +798,108 @@ const ResourceCard: React.FC<{ resource: EmbeddedBrowserCapturedResource }> = ({
               >
                 复制 curl
               </button>
+            )}
+            {!isPageContextManagedResource(resource) ? (
               <button
                 type="button"
                 className="resource-card-btn"
                 onClick={() => {
-                  openResourceUrl(resource.url);
+                  void copyResourceUrl(resource.url);
                 }}
               >
-                打开
+                复制链接
               </button>
-            </>
-          )}
-        </>
-      )}
+            ) : null}
+          </>
+        ) : (
+          <>
+            {isPageContextManagedResource(resource) ? (
+              <>
+                <button
+                  type="button"
+                  className="resource-card-btn"
+                  onClick={() => {
+                    void openCapturedResource(resource).catch((error: any) => {
+                      Toast.error(error?.message || '打开失败');
+                    });
+                  }}
+                >
+                  页内打开
+                </button>
+                <button
+                  type="button"
+                  className="resource-card-btn"
+                  onClick={() => {
+                    void exportCapturedResource(resource).catch((error: any) => {
+                      Toast.error(error?.message || '导出失败');
+                    });
+                  }}
+                >
+                  页内导出
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  className="resource-card-btn"
+                  onClick={() => {
+                    void copyResourceUrl(resource.url);
+                  }}
+                >
+                  复制链接
+                </button>
+                <button
+                  type="button"
+                  className="resource-card-btn"
+                  onClick={() => {
+                    void copyResourceCurl(resource);
+                  }}
+                >
+                  复制 curl
+                </button>
+                <button
+                  type="button"
+                  className="resource-card-btn"
+                  onClick={() => {
+                    openResourceUrl(resource.url);
+                  }}
+                >
+                  打开
+                </button>
+              </>
+            )}
+          </>
+        )}
+        {canAnalyzeHls ? (
+          <>
+            <button
+              type="button"
+              className="resource-card-btn"
+              disabled={hlsAnalysis.loading}
+              onClick={handleAnalyzeHls}
+            >
+              {hlsAnalysis.loading ? '解析中' : '解析 HLS'}
+            </button>
+            {hlsAnalysis.planText ? (
+              <button
+                type="button"
+                className="resource-card-btn"
+                onClick={() => {
+                  void navigator.clipboard.writeText(hlsAnalysis.planText || '').then(() => {
+                    Toast.success('下载计划 JSON 已复制');
+                  });
+                }}
+              >
+                复制计划
+              </button>
+            ) : null}
+          </>
+        ) : null}
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
 const EmbeddedBrowserResourcePanel: React.FC<EmbeddedBrowserResourcePanelProps> = ({
   activeTabId,

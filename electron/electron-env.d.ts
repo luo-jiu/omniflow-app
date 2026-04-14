@@ -208,6 +208,13 @@ interface Window {
       title?: string;
       url: string;
     }) => Promise<boolean>;
+    readCapturedResource: (tabId: string, resourceKey: string) => Promise<{
+      base64: string;
+      fileName: string;
+      mimeType?: string;
+      resourceKey: string;
+      streamType?: 'audio' | 'video';
+    } | null>;
     mergeCapturedMseResources: (tabId: string, payload: {
       audioResourceKey?: string;
       ffmpegPath?: string;
