@@ -14,6 +14,31 @@ import {
   type EmbeddedBrowserDownloadPayload,
 } from './service/embeddedBrowserService'
 import {
+  type EmbeddedBrowserResourcePreviewPayload,
+} from './service/embeddedBrowserResourcePageBridge'
+import {
+  extractEmbeddedBrowserResourceFromPage,
+  runEmbeddedBrowserResourcePreview,
+  runEmbeddedBrowserResourceProbeAction,
+} from './service/embeddedBrowserResourceActionService'
+import { EMBEDDED_BROWSER_RESOURCE_CONSOLE_PREFIX, createEmbeddedBrowserResourceProbeScript } from './service/embeddedBrowserResourceProbe'
+import {
+  deriveEmbeddedBrowserMergedFileName,
+  mergeEmbeddedBrowserResourceTracks,
+} from './service/embeddedBrowserResourceMergeService'
+import {
+  clearEmbeddedBrowserCapturedResources,
+  disposeEmbeddedBrowserCapturedResources,
+  getEmbeddedBrowserResourceCaptureSnapshot,
+  initializeEmbeddedBrowserResourceBridge,
+  isEmbeddedBrowserDeepCaptureEnabled,
+  recordEmbeddedBrowserProbeResource,
+  startEmbeddedBrowserDeepResourceCapture,
+  startEmbeddedBrowserResourceCapture,
+  stopEmbeddedBrowserResourceCapture,
+  type EmbeddedBrowserCapturedResource,
+} from './service/embeddedBrowserResourceService'
+import {
   cleanupEmbeddedBrowserOpenFile,
   injectEmbeddedBrowserOpenFile,
   stageEmbeddedBrowserOpenFile,
@@ -119,6 +144,21 @@ type EmbeddedBrowserBounds = {
   height: number
 }
 
+type EmbeddedBrowserCapturedResourceMergePayload = {
+  audioResourceKey?: string
+  ffmpegPath?: string
+  suggestedFileName?: string
+  videoResourceKey?: string
+}
+
+type EmbeddedBrowserCapturedResourceMergeResponse = {
+  cancelled?: boolean
+  error?: string
+  ffmpegPath?: string
+  ok: boolean
+  outputPath?: string
+}
+
 function emitEmbeddedBrowserDownload(payload: EmbeddedBrowserDownloadPayload) {
   if (!mainWindow || mainWindow.isDestroyed()) {
     return
@@ -133,6 +173,22 @@ function resolveEmbeddedBrowserTabIdByWebContents(targetContents: Electron.WebCo
     }
   }
   return null
+}
+
+function resolveEmbeddedBrowserTabIdByWebContentsId(targetWebContentsId: number) {
+  for (const [tabId, view] of embeddedBrowserViews.entries()) {
+    if (view.webContents.id === targetWebContentsId) {
+      return tabId
+    }
+  }
+  return null
+}
+
+function emitEmbeddedBrowserResource(payload: EmbeddedBrowserCapturedResource) {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return
+  }
+  mainWindow.webContents.send('embedded-browser:resource', payload)
 }
 
 interface PersistedWindowState {
@@ -701,9 +757,118 @@ function registerWindowIpcHandlers() {
       embeddedBrowserLastCommittedUrls.delete(tabId)
       embeddedBrowserIconUrls.delete(tabId)
       embeddedBrowserIconSourceUrls.delete(tabId)
+      disposeEmbeddedBrowserCapturedResources(tabId)
       return null
     }
     return view
+  }
+
+  const tryInstallEmbeddedBrowserResourceProbe = async (tabId: string, view: WebContentsView) => {
+    if (!isEmbeddedBrowserDeepCaptureEnabled(tabId) || view.webContents.isDestroyed()) {
+      return false
+    }
+    try {
+      await view.webContents.executeJavaScript(createEmbeddedBrowserResourceProbeScript(), true)
+      return true
+    } catch (error) {
+      runtimeLogger.warn('embedded browser resource probe install failed', {
+        error: error instanceof Error ? error.message : String(error),
+        tabId,
+        url: view.webContents.getURL() || embeddedBrowserLastCommittedUrls.get(tabId) || '',
+      })
+      return false
+    }
+  }
+
+  const withEmbeddedBrowserResourceScriptExecutor = async <Result>(
+    tabId: string,
+    runner: (executeScript: (script: string) => Promise<unknown>, view: WebContentsView) => Promise<Result>,
+  ) => {
+    const normalizedTabId = String(tabId || '').trim()
+    if (!normalizedTabId) {
+      return null
+    }
+    const view = getEmbeddedBrowserView(normalizedTabId)
+    if (!view || view.webContents.isDestroyed()) {
+      return null
+    }
+    const executeScript = (script: string) => view.webContents.executeJavaScript(script, true)
+    return runner(executeScript, view)
+  }
+
+  const mergeEmbeddedBrowserCapturedMseResources = async (
+    tabId: string,
+    payload: EmbeddedBrowserCapturedResourceMergePayload,
+  ): Promise<EmbeddedBrowserCapturedResourceMergeResponse> => {
+    const normalizedTabId = String(tabId || '').trim()
+    const audioResourceKey = String(payload.audioResourceKey || '').trim()
+    const videoResourceKey = String(payload.videoResourceKey || '').trim()
+    if (!normalizedTabId || !audioResourceKey || !videoResourceKey) {
+      return {
+        error: '缺少要合并的音频或视频资源',
+        ok: false,
+      }
+    }
+
+    try {
+      const extractedResources = await withEmbeddedBrowserResourceScriptExecutor(
+        normalizedTabId,
+        async (executeScript) => Promise.all([
+          extractEmbeddedBrowserResourceFromPage(executeScript, audioResourceKey),
+          extractEmbeddedBrowserResourceFromPage(executeScript, videoResourceKey),
+        ]),
+      )
+      const [audioResource, videoResource] = extractedResources || []
+      if (!audioResource || !videoResource) {
+        return {
+          error: '当前页面里的音频或视频轨还没有整理完成，先继续播放几秒再试试',
+          ok: false,
+        }
+      }
+
+      const defaultFileName = String(payload.suggestedFileName || '').trim()
+        || deriveEmbeddedBrowserMergedFileName(videoResource.fileName, audioResource.fileName)
+      const targetWindow = mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined
+      const saveDialogOptions = {
+        defaultPath: path.join(app.getPath('downloads'), defaultFileName),
+        filters: [
+          { extensions: ['mp4'], name: 'MP4 Video' },
+        ],
+        showsTagField: false,
+      }
+      const saveResult = targetWindow
+        ? await dialog.showSaveDialog(targetWindow, saveDialogOptions)
+        : await dialog.showSaveDialog(saveDialogOptions)
+      if (saveResult.canceled || !saveResult.filePath) {
+        return {
+          cancelled: true,
+          ok: false,
+        }
+      }
+
+      const mergeResult = await mergeEmbeddedBrowserResourceTracks({
+        audio: audioResource,
+        ffmpegPath: payload.ffmpegPath,
+        outputPath: saveResult.filePath,
+        video: videoResource,
+      })
+      return {
+        ffmpegPath: mergeResult.ffmpegPath,
+        ok: true,
+        outputPath: mergeResult.outputPath,
+      }
+    } catch (error) {
+      runtimeLogger.warn('embedded browser resource merge failed', {
+        audioResourceKey,
+        error: error instanceof Error ? error.message : String(error),
+        tabId: normalizedTabId,
+        videoResourceKey,
+      })
+      return {
+        error: error instanceof Error ? error.message : String(error),
+        ok: false,
+      }
+    }
   }
 
   const cleanupEmbeddedBrowserOpenFileForTab = (tabId: string) => {
@@ -836,6 +1001,9 @@ function registerWindowIpcHandlers() {
         url: view.webContents.getURL() || embeddedBrowserLastCommittedUrls.get(tabId) || undefined,
       })
     })
+    view.webContents.on('dom-ready', () => {
+      void tryInstallEmbeddedBrowserResourceProbe(tabId, view)
+    })
     view.webContents.on('did-stop-loading', async () => {
       if (view.webContents.isDestroyed()) {
         return
@@ -912,6 +1080,35 @@ function registerWindowIpcHandlers() {
       })
     })
     view.webContents.on('console-message', (_event, level, message, line, sourceId) => {
+      if (typeof message === 'string' && message.startsWith(EMBEDDED_BROWSER_RESOURCE_CONSOLE_PREFIX)) {
+        const rawPayload = message.slice(EMBEDDED_BROWSER_RESOURCE_CONSOLE_PREFIX.length)
+        try {
+          const payload = JSON.parse(rawPayload) as Record<string, unknown>
+          recordEmbeddedBrowserProbeResource(tabId, {
+            capturedAt: Number(payload.capturedAt) || Date.now(),
+            contentLength: typeof payload.contentLength === 'number' ? payload.contentLength : undefined,
+            ext: typeof payload.ext === 'string' ? payload.ext : undefined,
+            kind: typeof payload.kind === 'string'
+              ? payload.kind as EmbeddedBrowserCapturedResource['kind']
+              : undefined,
+            mimeType: typeof payload.mimeType === 'string' ? payload.mimeType : undefined,
+            pageUrl: typeof payload.pageUrl === 'string' ? payload.pageUrl : undefined,
+            resourceKey: typeof payload.resourceKey === 'string' ? payload.resourceKey : undefined,
+            resourceType: typeof payload.resourceType === 'string' ? payload.resourceType : undefined,
+            source: 'probe',
+            streamType: payload.streamType === 'audio' || payload.streamType === 'video'
+              ? payload.streamType
+              : undefined,
+            url: typeof payload.url === 'string' ? payload.url : '',
+          })
+        } catch (error) {
+          runtimeLogger.warn('embedded browser resource payload parse failed', {
+            error: error instanceof Error ? error.message : String(error),
+            tabId,
+          })
+        }
+        return
+      }
       if (ENABLE_EMBEDDED_BROWSER_DEBUG && level >= 2) {
         emitEmbeddedBrowserTabState(tabId, view, {
           details: `console:${sourceId}:${line}`,
@@ -1041,6 +1238,7 @@ function registerWindowIpcHandlers() {
     embeddedBrowserLastCommittedUrls.delete(normalizedTabId)
     embeddedBrowserIconUrls.delete(normalizedTabId)
     embeddedBrowserIconSourceUrls.delete(normalizedTabId)
+    disposeEmbeddedBrowserCapturedResources(normalizedTabId)
     bumpEmbeddedBrowserOpenFileRequestVersion(normalizedTabId)
     cleanupEmbeddedBrowserOpenFileForTab(normalizedTabId)
     if (!view.webContents.isDestroyed()) {
@@ -1175,6 +1373,96 @@ function registerWindowIpcHandlers() {
     emitEmbeddedBrowserTabSnapshot(normalizedTabId, view, {
       details: 'history-forward',
     })
+  })
+
+  ipcMain.handle('embedded-browser:resource:list', (_event, tabId: string) => (
+    getEmbeddedBrowserResourceCaptureSnapshot(String(tabId || '').trim())
+  ))
+
+  ipcMain.handle('embedded-browser:resource:start', (_event, tabId: string) => (
+    startEmbeddedBrowserResourceCapture(String(tabId || '').trim())
+  ))
+
+  ipcMain.handle('embedded-browser:resource:stop', (_event, tabId: string) => (
+    stopEmbeddedBrowserResourceCapture(String(tabId || '').trim())
+  ))
+
+  ipcMain.handle('embedded-browser:resource:clear', (_event, tabId: string) => (
+    clearEmbeddedBrowserCapturedResources(String(tabId || '').trim())
+  ))
+
+  ipcMain.handle('embedded-browser:resource:open', async (_event, tabId: string, resourceKey: string) => (
+    withEmbeddedBrowserResourceScriptExecutor(tabId, async (executeScript, view) => {
+      try {
+        return await runEmbeddedBrowserResourceProbeAction(executeScript, 'openResource', resourceKey)
+      } catch (error) {
+        runtimeLogger.warn('embedded browser resource probe action failed', {
+          action: 'openResource',
+          error: error instanceof Error ? error.message : String(error),
+          resourceKey: String(resourceKey || '').trim(),
+          tabId: String(tabId || '').trim(),
+          url: view.webContents.getURL() || embeddedBrowserLastCommittedUrls.get(String(tabId || '').trim()) || '',
+        })
+        return false
+      }
+    }).then((result) => Boolean(result))
+  ))
+
+  ipcMain.handle('embedded-browser:resource:export', async (_event, tabId: string, resourceKey: string) => (
+    withEmbeddedBrowserResourceScriptExecutor(tabId, async (executeScript, view) => {
+      try {
+        return await runEmbeddedBrowserResourceProbeAction(executeScript, 'exportResource', resourceKey)
+      } catch (error) {
+        runtimeLogger.warn('embedded browser resource probe action failed', {
+          action: 'exportResource',
+          error: error instanceof Error ? error.message : String(error),
+          resourceKey: String(resourceKey || '').trim(),
+          tabId: String(tabId || '').trim(),
+          url: view.webContents.getURL() || embeddedBrowserLastCommittedUrls.get(String(tabId || '').trim()) || '',
+        })
+        return false
+      }
+    }).then((result) => Boolean(result))
+  ))
+
+  ipcMain.handle('embedded-browser:resource:preview', async (
+    _event,
+    tabId: string,
+    payload: EmbeddedBrowserResourcePreviewPayload,
+  ) => (
+    withEmbeddedBrowserResourceScriptExecutor(tabId, async (executeScript) => {
+      try {
+        return await runEmbeddedBrowserResourcePreview(executeScript, payload)
+      } catch (error) {
+        runtimeLogger.warn('embedded browser network resource preview failed', {
+          error: error instanceof Error ? error.message : String(error),
+          tabId: String(tabId || '').trim(),
+          url: String(payload.url || '').trim(),
+        })
+        return false
+      }
+    }).then((result) => Boolean(result))
+  ))
+
+  ipcMain.handle(
+    'embedded-browser:resource:merge-mse',
+    async (_event, tabId: string, payload: EmbeddedBrowserCapturedResourceMergePayload) => (
+      mergeEmbeddedBrowserCapturedMseResources(tabId, payload)
+    ),
+  )
+
+  ipcMain.handle('embedded-browser:resource:start-deep-capture', async (_event, tabId: string) => {
+    const normalizedTabId = String(tabId || '').trim()
+    const snapshot = startEmbeddedBrowserDeepResourceCapture(normalizedTabId)
+    const view = getEmbeddedBrowserView(normalizedTabId)
+    if (view && !view.webContents.isDestroyed()) {
+      if (view.webContents.getURL()) {
+        view.webContents.reload()
+      } else {
+        await tryInstallEmbeddedBrowserResourceProbe(normalizedTabId, view)
+      }
+    }
+    return snapshot
   })
 
   ipcMain.handle('embedded-browser:set-bounds', (event, bounds: EmbeddedBrowserBounds) => {
@@ -1388,6 +1676,11 @@ app.whenReady().then(() => {
   initializeEmbeddedBrowserDownloadBridge({
     emitDownload: emitEmbeddedBrowserDownload,
     resolveTabIdByWebContents: resolveEmbeddedBrowserTabIdByWebContents,
+  })
+  initializeEmbeddedBrowserResourceBridge({
+    browserSession: session.fromPartition(EMBEDDED_BROWSER_PARTITION),
+    emitResource: emitEmbeddedBrowserResource,
+    resolveTabIdByWebContentsId: resolveEmbeddedBrowserTabIdByWebContentsId,
   })
   registerIpcHandlers() // 注册自定义 IPC 事件
   registerWindowIpcHandlers()

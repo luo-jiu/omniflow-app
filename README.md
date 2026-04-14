@@ -1,30 +1,41 @@
-# React + TypeScript + Vite
+# Omniflow App
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Omniflow App is the desktop client for browsing, collecting, previewing, and managing resources inside Omniflow.
 
-Currently, two official plugins are available:
+## Current Resource Capture Status
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react/README.md) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+The embedded browser currently includes a first production-oriented version of resource capture inspired by cat-catch:
 
-## Expanding the ESLint configuration
+- Network resource capture for common media and manifest formats
+- Deep capture from `fetch`, `XMLHttpRequest`, `JSON.parse`, and `MediaSource`
+- `MSE` audio/video stream collection with in-page preview and export
+- Main audio/video track pairing with local `ffmpeg` merge into `mp4`
+- Resource filtering and grouped presentation inside the embedded browser panel
 
-If you are developing a production application, we recommend updating the configuration to enable type aware lint rules:
+### Formats Currently Recognized
 
-- Configure the top-level `parserOptions` property like this:
+- Manifest: `m3u8`, `mpd`
+- Media: `mp4`, `m4v`, `m4a`, `m4s`, `mp3`, `aac`, `flac`, `wav`, `ogg`, `webm`, `mkv`, `mov`, `avi`, `ts`, `flv`
+- Subtitle: `vtt`, `srt`, `ass`, `ssa`, `ttml`
 
-```js
-export default {
-  // other rules...
-  parserOptions: {
-    ecmaVersion: 'latest',
-    sourceType: 'module',
-    project: ['./tsconfig.json', './tsconfig.node.json'],
-    tsconfigRootDir: __dirname,
-  },
-}
+## Known Limitations
+
+- The current merge path extracts captured `MSE` tracks through page-side `base64`, so very large videos can consume a lot of memory.
+- Multi-audio, multi-quality, or more advanced track-selection scenarios are not fully handled yet. The UI currently prioritizes the main playable audio/video pair.
+- Manifest parsing, segment reconstruction, key capture, and broader worker-level probing are planned but not complete.
+
+## Attribution
+
+Some embedded-browser resource-capture logic in this project is adapted from cat-catch:
+
+- Project: [cat-catch](https://github.com/xifangczy/cat-catch)
+- License: `AGPL-3.0`
+
+Please preserve attribution and review AGPL-3.0 obligations carefully before redistributing derived work.
+
+## Development
+
+```bash
+npm install
+npm run build
 ```
-
-- Replace `plugin:@typescript-eslint/recommended` to `plugin:@typescript-eslint/recommended-type-checked` or `plugin:@typescript-eslint/strict-type-checked`
-- Optionally add `plugin:@typescript-eslint/stylistic-type-checked`
-- Install [eslint-plugin-react](https://github.com/jsx-eslint/eslint-plugin-react) and add `plugin:react/recommended` & `plugin:react/jsx-runtime` to the `extends` list

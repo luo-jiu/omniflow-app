@@ -23,6 +23,12 @@ import {
   type AppLanguage,
   type UserPreferences,
 } from '@/features/user/preferences/user-preferences';
+import {
+  getLocalChromeBookmarkImportHint,
+  importChromeBookmarksFromText,
+  loadLocalChromeBookmarkFile,
+  pickChromeBookmarkImportFile,
+} from '@/features/embedded-browser/bookmarks/import/chrome-bookmark-import';
 
 const SettingsPageWrapper = styled.div`
   position: relative;
@@ -330,6 +336,24 @@ const Settings: React.FC = () => {
     }
   };
 
+  const handleImportChromeBookmarks = async (sourceMode: 'local' | 'file') => {
+    try {
+      const picked = sourceMode === 'local'
+        ? await loadLocalChromeBookmarkFile()
+        : await pickChromeBookmarkImportFile();
+      if (!picked) {
+        return;
+      }
+      const source = sourceMode === 'local'
+        ? `chrome-local:${picked.filePath || getLocalChromeBookmarkImportHint()}`
+        : `chrome-file:${picked.filePath || 'selected-file'}`;
+      const result = await importChromeBookmarksFromText(picked.content, source);
+      Toast.success(`已导入 ${result.importedCount} 条书签`);
+    } catch (error: any) {
+      Toast.error(error?.message || '导入 Chrome 书签失败');
+    }
+  };
+
   return (
     <SettingsPageWrapper>
       <div className="top-drag-region" />
@@ -481,6 +505,33 @@ const Settings: React.FC = () => {
           >
             管理
           </Button>
+        </div>
+
+        <div className="setting-item">
+          <div>
+            <div className="setting-title">导入 Chrome 书签</div>
+            <div className="setting-desc">支持导入本地书签文件，或手动选择任意 Chrome 导出的书签 JSON</div>
+          </div>
+          <div className="setting-control-group">
+            <Button
+              theme="borderless"
+              onClick={() => {
+                void handleImportChromeBookmarks('local');
+              }}
+              className="settings-action-btn manage"
+            >
+              导入本地书签
+            </Button>
+            <Button
+              theme="borderless"
+              onClick={() => {
+                void handleImportChromeBookmarks('file');
+              }}
+              className="settings-action-btn manage"
+            >
+              指定文件导入
+            </Button>
+          </div>
         </div>
 
         <Divider style={{ margin: '24px 0' }} />

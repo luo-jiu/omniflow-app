@@ -1,0 +1,776 @@
+import { Toast } from '@douyinfe/semi-ui';
+import React from 'react';
+import styled from 'styled-components';
+import { useEmbeddedBrowserResources } from '../hooks/useEmbeddedBrowserResources';
+import {
+  createEmbeddedBrowserResourceSections,
+  findMergeableResourcePair,
+  isMseCapturedResource,
+  isPreviewableResource,
+} from '../model/embedded-browser-resource.presentation';
+import {
+  exportEmbeddedBrowserCapturedResource,
+  mergeEmbeddedBrowserCapturedMseResources,
+  openEmbeddedBrowserCapturedResource,
+  previewEmbeddedBrowserCapturedResource,
+} from '../services/embedded-browser-resource.api';
+import type { EmbeddedBrowserCapturedResource } from '../types';
+
+type EmbeddedBrowserResourcePanelProps = {
+  activeTabId: string | null;
+  currentPageUrl?: string;
+};
+
+const RESOURCE_FILTER_STORAGE_KEY = 'embedded-browser:resource-filter-regex';
+const DEFAULT_MEDIA_RESOURCE_REGEX = String.raw`(blob:|\.((m3u8|mpd|m4s|mp4|m4v|m4a|mp3|aac|flac|wav|ogg|oga|ogv|webm|mkv|mov|avi|ts|flv|vtt|srt))(?:$|[?#]))`;
+
+const PanelShell = styled.aside`
+  width: 360px;
+  min-width: 320px;
+  max-width: 420px;
+  border-left: 1px solid var(--app-border);
+  background: var(--app-bg-elevated);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+
+  .resource-panel-header {
+    padding: 16px 16px 12px;
+    border-bottom: 1px solid var(--app-border);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .resource-panel-title-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .resource-panel-title {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--app-text);
+  }
+
+  .resource-panel-subtitle {
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--app-text-muted);
+    word-break: break-all;
+  }
+
+  .resource-panel-badges {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .resource-panel-badge {
+    padding: 4px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    line-height: 1;
+    border: 1px solid var(--app-border);
+    color: var(--app-text-muted);
+    background: var(--app-bg);
+  }
+
+  .resource-panel-badge.is-active {
+    border-color: var(--semi-color-primary);
+    color: var(--semi-color-primary);
+    background: color-mix(in srgb, var(--semi-color-primary) 10%, white);
+  }
+
+  .resource-panel-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .resource-panel-filter {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .resource-panel-filter-label {
+    font-size: 12px;
+    color: var(--app-text-muted);
+    line-height: 1.4;
+  }
+
+  .resource-panel-filter-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .resource-panel-filter-input {
+    flex: 1;
+    min-width: 0;
+    height: 34px;
+    border-radius: 8px;
+    border: 1px solid var(--app-border);
+    background: var(--app-bg);
+    color: var(--app-text);
+    padding: 0 10px;
+    font-size: 12px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  }
+
+  .resource-panel-filter-input:focus {
+    outline: none;
+    border-color: var(--semi-color-primary);
+  }
+
+  .resource-panel-filter-reset {
+    height: 34px;
+    padding: 0 10px;
+    border-radius: 8px;
+    border: 1px solid var(--app-border);
+    background: transparent;
+    color: var(--app-text-muted);
+    cursor: pointer;
+    font-size: 12px;
+    flex-shrink: 0;
+  }
+
+  .resource-panel-filter-error {
+    font-size: 12px;
+    color: #c93c37;
+    line-height: 1.5;
+  }
+
+  .resource-panel-btn {
+    height: 34px;
+    border-radius: 8px;
+    border: 1px solid var(--app-border);
+    background: var(--app-bg);
+    color: var(--app-text);
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .resource-panel-btn.primary {
+    border-color: var(--semi-color-primary);
+    background: var(--semi-color-primary);
+    color: #fff;
+  }
+
+  .resource-panel-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .resource-panel-body {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .resource-section {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .resource-section-header {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 2px 4px 0;
+  }
+
+  .resource-section-title-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .resource-section-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--app-text);
+  }
+
+  .resource-section-count {
+    font-size: 11px;
+    line-height: 1;
+    padding: 4px 7px;
+    border-radius: 999px;
+    background: rgba(0, 0, 0, 0.05);
+    color: var(--app-text-muted);
+  }
+
+  .resource-section-description {
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--app-text-muted);
+  }
+
+  .resource-panel-empty {
+    padding: 16px;
+    border-radius: 12px;
+    border: 1px dashed var(--app-border);
+    color: var(--app-text-muted);
+    font-size: 13px;
+    line-height: 1.7;
+    background: var(--app-bg);
+  }
+
+  .resource-card {
+    border: 1px solid var(--app-border);
+    border-radius: 12px;
+    background: var(--app-bg);
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .resource-card-meta {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .resource-chip {
+    padding: 4px 7px;
+    border-radius: 999px;
+    font-size: 11px;
+    line-height: 1;
+    background: rgba(0, 0, 0, 0.05);
+    color: var(--app-text-muted);
+  }
+
+  .resource-url {
+    color: var(--app-text);
+    font-size: 12px;
+    line-height: 1.6;
+    word-break: break-all;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  }
+
+  .resource-page-url {
+    color: var(--app-text-muted);
+    font-size: 11px;
+    line-height: 1.6;
+    word-break: break-all;
+  }
+
+  .resource-request-meta {
+    color: var(--app-text-muted);
+    font-size: 11px;
+    line-height: 1.6;
+    word-break: break-all;
+  }
+
+  .resource-card-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .resource-card-btn {
+    height: 28px;
+    padding: 0 10px;
+    border-radius: 8px;
+    border: 1px solid var(--app-border);
+    background: transparent;
+    color: var(--app-text-muted);
+    cursor: pointer;
+    font-size: 12px;
+  }
+`;
+
+function formatBytes(value?: number) {
+  if (!value || value <= 0) {
+    return '未知大小';
+  }
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let size = value;
+  let unitIndex = 0;
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
+  }
+  const decimals = size >= 100 || unitIndex === 0 ? 0 : 1;
+  return `${size.toFixed(decimals)} ${units[unitIndex]}`;
+}
+
+function formatCapturedAt(value: number) {
+  if (!value) {
+    return '刚刚';
+  }
+  return new Date(value).toLocaleTimeString();
+}
+
+async function copyResourceUrl(url: string) {
+  await navigator.clipboard.writeText(url);
+  Toast.success('链接已复制');
+}
+
+function shellEscape(value: string) {
+  return `'${String(value || '').replace(/'/g, `'\"'\"'`)}'`;
+}
+
+function buildResourceCurlCommand(resource: EmbeddedBrowserCapturedResource) {
+  const lines = ['curl'];
+  const method = String(resource.method || 'GET').trim().toUpperCase();
+  if (method && method !== 'GET') {
+    lines.push(`  -X ${method}`);
+  }
+  const requestHeaders = {
+    ...(resource.requestHeaders || {}),
+  };
+  if (resource.referer && !requestHeaders.referer) {
+    requestHeaders.referer = resource.referer;
+  }
+  Object.entries(requestHeaders).forEach(([headerName, headerValue]) => {
+    if (!headerValue) {
+      return;
+    }
+    lines.push(`  -H ${shellEscape(`${headerName}: ${headerValue}`)}`);
+  });
+  lines.push(`  ${shellEscape(resource.url)}`);
+  return lines.join(' \\\n');
+}
+
+async function copyResourceCurl(resource: EmbeddedBrowserCapturedResource) {
+  await navigator.clipboard.writeText(buildResourceCurlCommand(resource));
+  Toast.success('curl 已复制');
+}
+
+function openResourceUrl(url: string) {
+  window.open(url, '_blank', 'noopener,noreferrer');
+}
+
+async function previewResource(resource: EmbeddedBrowserCapturedResource) {
+  if (isMseCapturedResource(resource)) {
+    await openCapturedResource(resource);
+    return;
+  }
+  const previewed = await previewEmbeddedBrowserCapturedResource(resource.tabId, {
+    mimeType: resource.mimeType,
+    streamType: resource.streamType,
+    title: resource.pageUrl || resource.url,
+    url: resource.url,
+  });
+  if (!previewed) {
+    throw new Error('页面内预览失败');
+  }
+}
+
+async function openCapturedResource(resource: EmbeddedBrowserCapturedResource) {
+  if (!isMseCapturedResource(resource) || !resource.resourceKey) {
+    openResourceUrl(resource.url);
+    return;
+  }
+  const opened = await openEmbeddedBrowserCapturedResource(resource.tabId, resource.resourceKey);
+  if (!opened) {
+    throw new Error('当前页面里的流还没有准备好，先继续播放几秒再试试');
+  }
+  Toast.success('已打开预览');
+}
+
+async function exportCapturedResource(resource: EmbeddedBrowserCapturedResource) {
+  if (!isMseCapturedResource(resource) || !resource.resourceKey) {
+    await copyResourceUrl(resource.url);
+    return;
+  }
+  const exported = await exportEmbeddedBrowserCapturedResource(resource.tabId, resource.resourceKey);
+  if (!exported) {
+    throw new Error('当前页面里的流还没有准备好，先继续播放几秒再试试');
+  }
+  Toast.success('已触发导出');
+}
+
+async function mergeCapturedResources(resources: {
+  audio: EmbeddedBrowserCapturedResource;
+  video: EmbeddedBrowserCapturedResource;
+}) {
+  const mergeResult = await mergeEmbeddedBrowserCapturedMseResources(resources.video.tabId, {
+    audioResourceKey: resources.audio.resourceKey,
+    videoResourceKey: resources.video.resourceKey,
+  });
+  if (mergeResult.cancelled) {
+    return;
+  }
+  if (!mergeResult.ok) {
+    throw new Error(mergeResult.error || '合并失败');
+  }
+  Toast.success('已完成音视频合并');
+}
+
+function loadResourceFilterDraft() {
+  const value = window.localStorage.getItem(RESOURCE_FILTER_STORAGE_KEY);
+  return String(value || DEFAULT_MEDIA_RESOURCE_REGEX);
+}
+
+function isMediaLikeResource(resource: EmbeddedBrowserCapturedResource) {
+  if (resource.kind === 'media' || resource.kind === 'manifest' || resource.kind === 'subtitle') {
+    return true;
+  }
+  const mimeType = String(resource.mimeType || '').toLowerCase();
+  if (mimeType.startsWith('video/') || mimeType.startsWith('audio/')) {
+    return true;
+  }
+  return false;
+}
+
+function matchesResourceFilter(resource: EmbeddedBrowserCapturedResource, pattern: RegExp | null) {
+  if (!isMediaLikeResource(resource)) {
+    return false;
+  }
+  if (!pattern) {
+    return true;
+  }
+  const candidate = [
+    resource.url,
+    resource.mimeType || '',
+    resource.ext || '',
+    resource.resourceType || '',
+    resource.kind,
+    resource.streamType || '',
+  ].join('\n');
+  return pattern.test(candidate);
+}
+
+
+const ResourceCard: React.FC<{ resource: EmbeddedBrowserCapturedResource }> = ({ resource }) => (
+  <div className="resource-card">
+    <div className="resource-card-meta">
+      <span className="resource-chip">{resource.kind}</span>
+      {resource.streamType ? <span className="resource-chip">{resource.streamType}</span> : null}
+      {isMseCapturedResource(resource) ? <span className="resource-chip">playable</span> : null}
+      <span className="resource-chip">{resource.source}</span>
+      {resource.ext ? <span className="resource-chip">.{resource.ext}</span> : null}
+      {resource.statusCode ? <span className="resource-chip">{resource.statusCode}</span> : null}
+      {resource.contentLength ? <span className="resource-chip">{formatBytes(resource.contentLength)}</span> : null}
+      <span className="resource-chip">{formatCapturedAt(resource.capturedAt)}</span>
+    </div>
+    <div className="resource-url">{resource.url}</div>
+    {resource.pageUrl ? (
+      <div className="resource-page-url">来源页面：{resource.pageUrl}</div>
+    ) : null}
+    {resource.referer ? (
+      <div className="resource-request-meta">Referer：{resource.referer}</div>
+    ) : null}
+    {resource.requestHeaders && Object.keys(resource.requestHeaders).length ? (
+      <div className="resource-request-meta">
+        请求头：{Object.keys(resource.requestHeaders).join(', ')}
+      </div>
+    ) : null}
+    <div className="resource-card-actions">
+      {isPreviewableResource(resource) ? (
+        <>
+          <button
+            type="button"
+            className="resource-card-btn"
+            onClick={() => {
+              void previewResource(resource).catch((error: any) => {
+                Toast.error(error?.message || '预览失败');
+              });
+            }}
+          >
+            预览
+          </button>
+          {isMseCapturedResource(resource) ? (
+            <button
+              type="button"
+              className="resource-card-btn"
+              onClick={() => {
+                void exportCapturedResource(resource).catch((error: any) => {
+                  Toast.error(error?.message || '导出失败');
+                });
+              }}
+            >
+              页内导出
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="resource-card-btn"
+              onClick={() => {
+                void copyResourceCurl(resource);
+              }}
+            >
+              复制 curl
+            </button>
+          )}
+          {!isMseCapturedResource(resource) ? (
+            <button
+              type="button"
+              className="resource-card-btn"
+              onClick={() => {
+                void copyResourceUrl(resource.url);
+              }}
+            >
+              复制链接
+            </button>
+          ) : null}
+        </>
+      ) : (
+        <>
+          <button
+            type="button"
+            className="resource-card-btn"
+            onClick={() => {
+              void copyResourceUrl(resource.url);
+            }}
+          >
+            复制链接
+          </button>
+          <button
+            type="button"
+            className="resource-card-btn"
+            onClick={() => {
+              void copyResourceCurl(resource);
+            }}
+          >
+            复制 curl
+          </button>
+          <button
+            type="button"
+            className="resource-card-btn"
+            onClick={() => {
+              openResourceUrl(resource.url);
+            }}
+          >
+            打开
+          </button>
+        </>
+      )}
+    </div>
+  </div>
+);
+
+const EmbeddedBrowserResourcePanel: React.FC<EmbeddedBrowserResourcePanelProps> = ({
+  activeTabId,
+  currentPageUrl = '',
+}) => {
+  const {
+    captureEnabled,
+    clearResources,
+    deepCaptureEnabled,
+    loading,
+    resources,
+    startCapture,
+    startDeepCapture,
+    stopCapture,
+  } = useEmbeddedBrowserResources(activeTabId);
+  const [actionLoading, setActionLoading] = React.useState<'start' | 'deep' | 'stop' | 'clear' | null>(null);
+  const [filterDraft, setFilterDraft] = React.useState(loadResourceFilterDraft);
+
+  React.useEffect(() => {
+    window.localStorage.setItem(RESOURCE_FILTER_STORAGE_KEY, filterDraft);
+  }, [filterDraft]);
+
+  const filterPattern = React.useMemo(() => {
+    try {
+      return new RegExp(filterDraft, 'i');
+    } catch {
+      return null;
+    }
+  }, [filterDraft]);
+
+  const filterError = React.useMemo(() => {
+    try {
+      new RegExp(filterDraft, 'i');
+      return '';
+    } catch (error: any) {
+      return error?.message || '正则无效';
+    }
+  }, [filterDraft]);
+
+  const filteredResources = React.useMemo(() => {
+    if (filterError) {
+      return [];
+    }
+    return resources.filter((resource) => matchesResourceFilter(resource, filterPattern));
+  }, [filterError, filterPattern, resources]);
+
+  const resourceSections = React.useMemo(
+    () => createEmbeddedBrowserResourceSections(filteredResources),
+    [filteredResources],
+  );
+  const mergeablePair = React.useMemo(
+    () => findMergeableResourcePair(filteredResources),
+    [filteredResources],
+  );
+
+  const runAction = React.useCallback(async (
+    nextAction: 'start' | 'deep' | 'stop' | 'clear',
+    runner: () => Promise<unknown>,
+    successMessage?: string,
+  ) => {
+    setActionLoading(nextAction);
+    try {
+      await runner();
+      if (successMessage) {
+        Toast.success(successMessage);
+      }
+    } catch (error: any) {
+      Toast.error(error?.message || '资源捕获操作失败');
+    } finally {
+      setActionLoading(null);
+    }
+  }, []);
+
+  const disabled = !activeTabId;
+
+  return (
+    <PanelShell>
+      <div className="resource-panel-header">
+        <div className="resource-panel-title-row">
+          <h3 className="resource-panel-title">资源捕获</h3>
+        </div>
+        <p className="resource-panel-subtitle">
+          {currentPageUrl
+            ? `当前页面：${currentPageUrl}`
+            : '选中一个浏览器标签后，可以在这里查看本页捕获到的资源。'}
+        </p>
+        <div className="resource-panel-badges">
+          <span className={`resource-panel-badge ${captureEnabled ? 'is-active' : ''}`}>
+            {captureEnabled ? '网络捕获已开启' : '网络捕获未开启'}
+          </span>
+          <span className={`resource-panel-badge ${deepCaptureEnabled ? 'is-active' : ''}`}>
+            {deepCaptureEnabled ? '深度探测已开启' : '深度探测未开启'}
+          </span>
+          <span className="resource-panel-badge">
+            {loading ? '同步中...' : `显示 ${filteredResources.length} / ${resources.length} 条`}
+          </span>
+        </div>
+        <div className="resource-panel-filter">
+          <div className="resource-panel-filter-label">
+            正则过滤，默认只保留媒体相关资源。
+          </div>
+          <div className="resource-panel-filter-row">
+            <input
+              className="resource-panel-filter-input"
+              value={filterDraft}
+              onChange={(event) => {
+                setFilterDraft(event.target.value);
+              }}
+              placeholder="输入正则，例如 m4s|m3u8|mpd"
+            />
+            <button
+              type="button"
+              className="resource-panel-filter-reset"
+              onClick={() => {
+                setFilterDraft(DEFAULT_MEDIA_RESOURCE_REGEX);
+              }}
+            >
+              重置
+            </button>
+          </div>
+          {filterError ? (
+            <div className="resource-panel-filter-error">
+              正则解析失败：{filterError}
+            </div>
+          ) : null}
+        </div>
+        <div className="resource-panel-actions">
+          <button
+            type="button"
+            className="resource-panel-btn primary"
+            disabled={disabled || actionLoading !== null}
+            onClick={() => {
+              void runAction('start', startCapture, '已开启资源捕获');
+            }}
+          >
+            开启捕获
+          </button>
+          <button
+            type="button"
+            className="resource-panel-btn"
+            disabled={disabled || actionLoading !== null}
+            onClick={() => {
+              void runAction('deep', startDeepCapture, '已刷新页面并开启深度探测');
+            }}
+          >
+            深度捕获
+          </button>
+          <button
+            type="button"
+            className="resource-panel-btn"
+            disabled={disabled || actionLoading !== null}
+            onClick={() => {
+              void runAction('stop', stopCapture, '已停止资源捕获');
+            }}
+          >
+            停止捕获
+          </button>
+          <button
+            type="button"
+            className="resource-panel-btn"
+            disabled={disabled || actionLoading !== null}
+            onClick={() => {
+              void runAction('clear', clearResources, '已清空资源列表');
+            }}
+            >
+              清空列表
+            </button>
+          {mergeablePair ? (
+            <button
+              type="button"
+              className="resource-panel-btn"
+              disabled={disabled || actionLoading !== null}
+              onClick={() => {
+                void mergeCapturedResources(mergeablePair).catch((error: any) => {
+                  Toast.error(error?.message || '合并失败');
+                });
+              }}
+            >
+              合并主音视频
+            </button>
+          ) : null}
+        </div>
+      </div>
+      <div className="resource-panel-body">
+        {!activeTabId ? (
+          <div className="resource-panel-empty">
+            先打开一个内置浏览器标签页，再开始捕获。
+          </div>
+        ) : filteredResources.length === 0 ? (
+          <div className="resource-panel-empty">
+            {filterError
+              ? '当前正则无效，先修正过滤规则。'
+              : captureEnabled
+                ? '当前过滤条件下还没有命中资源。可以继续浏览页面，或者点“深度捕获”后刷新页面。'
+                : '点击“开启捕获”后，网络层资源会开始进入这个面板。'}
+          </div>
+        ) : (
+          resourceSections.map((section) => (
+            <div key={section.key} className="resource-section">
+              <div className="resource-section-header">
+                <div className="resource-section-title-row">
+                  <div className="resource-section-title">{section.title}</div>
+                  <div className="resource-section-count">{section.items.length}</div>
+                </div>
+                <div className="resource-section-description">{section.description}</div>
+              </div>
+              {section.items.map((resource) => (
+                <ResourceCard key={resource.id} resource={resource} />
+              ))}
+            </div>
+          ))
+        )}
+      </div>
+    </PanelShell>
+  );
+};
+
+export default EmbeddedBrowserResourcePanel;

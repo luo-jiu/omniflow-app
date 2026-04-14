@@ -137,16 +137,66 @@ type EmbeddedBrowserBounds = {
   height: number;
 };
 
+type EmbeddedBrowserCapturedResource = {
+  capturedAt: number;
+  contentLength?: number;
+  ext?: string;
+  id: string;
+  kind: 'manifest' | 'media' | 'image' | 'subtitle' | 'document' | 'other';
+  method?: string;
+  mimeType?: string;
+  pageUrl?: string;
+  referer?: string;
+  resourceKey?: string;
+  requestHeaders?: Record<string, string>;
+  resourceType?: string;
+  source: 'network' | 'probe';
+  statusCode?: number;
+  streamType?: 'audio' | 'video';
+  tabId: string;
+  url: string;
+};
+
+type EmbeddedBrowserResourceCaptureSnapshot = {
+  deepCaptureEnabled: boolean;
+  enabled: boolean;
+  resources: EmbeddedBrowserCapturedResource[];
+};
+
+type EmbeddedBrowserCapturedResourceMergeResponse = {
+  cancelled?: boolean;
+  error?: string;
+  ffmpegPath?: string;
+  ok: boolean;
+  outputPath?: string;
+};
+
 interface Window {
   electronEmbeddedBrowser: {
     activateTab: (tabId: string | null) => Promise<void>;
     cleanupDownloadFile: (tempPath: string) => Promise<boolean>;
+    clearCapturedResources: (tabId: string) => Promise<EmbeddedBrowserResourceCaptureSnapshot>;
     closeAll: () => Promise<void>;
     closeTab: (tabId: string) => Promise<void>;
     deactivate: () => Promise<void>;
+    exportCapturedResource: (tabId: string, resourceKey: string) => Promise<boolean>;
     goBack: (tabId: string) => Promise<void>;
     goForward: (tabId: string) => Promise<void>;
+    listCapturedResources: (tabId: string) => Promise<EmbeddedBrowserResourceCaptureSnapshot>;
     navigate: (tabId: string, url: string) => Promise<void>;
+    openCapturedResource: (tabId: string, resourceKey: string) => Promise<boolean>;
+    previewCapturedResource: (tabId: string, payload: {
+      mimeType?: string;
+      streamType?: 'audio' | 'video';
+      title?: string;
+      url: string;
+    }) => Promise<boolean>;
+    mergeCapturedMseResources: (tabId: string, payload: {
+      audioResourceKey?: string;
+      ffmpegPath?: string;
+      suggestedFileName?: string;
+      videoResourceKey?: string;
+    }) => Promise<EmbeddedBrowserCapturedResourceMergeResponse>;
     openMappedFile: (tabId: string, pageUrl: string, sourceUrl: string, fileName: string) => Promise<void>;
     resolveFavicon: (payload: { iconUrl?: string; pageUrl?: string }) => Promise<{
       dataUrl: string;
@@ -178,8 +228,12 @@ interface Window {
       totalBytes: number;
       url: string;
     }) => void) => () => void;
+    onResourceCaptured: (listener: (payload: EmbeddedBrowserCapturedResource) => void) => () => void;
     openTab: (tabId: string, url?: string) => Promise<void>;
     reload: (tabId: string) => Promise<void>;
     setBounds: (bounds: EmbeddedBrowserBounds) => Promise<void>;
+    startDeepResourceCapture: (tabId: string) => Promise<EmbeddedBrowserResourceCaptureSnapshot>;
+    startResourceCapture: (tabId: string) => Promise<EmbeddedBrowserResourceCaptureSnapshot>;
+    stopResourceCapture: (tabId: string) => Promise<EmbeddedBrowserResourceCaptureSnapshot>;
   };
 }

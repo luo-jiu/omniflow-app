@@ -42,6 +42,23 @@ export interface MoveBrowserBookmarkPayload {
   afterId?: number | null;
 }
 
+export interface BrowserBookmarkImportItem {
+  kind: BrowserBookmarkKind;
+  title: string;
+  url?: string | null;
+  iconUrl?: string | null;
+  children?: BrowserBookmarkImportItem[];
+}
+
+export interface ImportBrowserBookmarksPayload {
+  source?: string;
+  items: BrowserBookmarkImportItem[];
+}
+
+export interface ImportBrowserBookmarksResult {
+  importedCount: number;
+}
+
 export async function fetchBrowserBookmarkTree(): Promise<BrowserBookmarkItem[]> {
   const body = await request('/v1/browser-bookmarks/tree', { method: 'GET' });
   const list = body?.data;
@@ -92,4 +109,14 @@ export async function moveBrowserBookmark(
 
 export async function deleteBrowserBookmark(id: number): Promise<void> {
   await request(`/v1/browser-bookmarks/${id}`, { method: 'DELETE' });
+}
+
+export async function importBrowserBookmarks(
+  payload: ImportBrowserBookmarksPayload,
+): Promise<ImportBrowserBookmarksResult> {
+  const body = await request('/v1/browser-bookmarks/import', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+  return (body?.data ?? { importedCount: 0 }) as ImportBrowserBookmarksResult;
 }

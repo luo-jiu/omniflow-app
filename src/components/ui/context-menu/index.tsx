@@ -1,6 +1,7 @@
 import React from 'react';
 import { Divider, Popover } from '@douyinfe/semi-ui';
 import MenuContent from '../menu-content';
+import { getAppPopupContainer } from '@/utils/popup-container';
 import {
   resolveOverlayPlacement,
   type ContextMenuPosition,
@@ -90,7 +91,7 @@ const ContextMenuSubmenuItem: React.FC<{
       showArrow={false}
       position={submenuPosition === 'auto' ? resolvedPosition : submenuPosition}
       spacing={4}
-      getPopupContainer={() => document.body}
+      getPopupContainer={getAppPopupContainer}
       onVisibleChange={handleVisibleChange}
       content={
         <ContextMenu

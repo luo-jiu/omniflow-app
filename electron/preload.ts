@@ -165,8 +165,72 @@ contextBridge.exposeInMainWorld('electronEmbeddedBrowser', {
     ipcRenderer.on('embedded-browser:download', wrapped);
     return () => ipcRenderer.removeListener('embedded-browser:download', wrapped);
   },
+  onResourceCaptured: (listener: (payload: {
+    capturedAt: number;
+    contentLength?: number;
+    ext?: string;
+    id: string;
+    kind: 'manifest' | 'media' | 'image' | 'subtitle' | 'document' | 'other';
+    method?: string;
+    mimeType?: string;
+    pageUrl?: string;
+    referer?: string;
+    resourceKey?: string;
+    requestHeaders?: Record<string, string>;
+    resourceType?: string;
+    source: 'network' | 'probe';
+    statusCode?: number;
+    streamType?: 'audio' | 'video';
+    tabId: string;
+    url: string;
+  }) => void) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, payload: {
+      capturedAt: number;
+      contentLength?: number;
+      ext?: string;
+      id: string;
+      kind: 'manifest' | 'media' | 'image' | 'subtitle' | 'document' | 'other';
+      method?: string;
+      mimeType?: string;
+      pageUrl?: string;
+      referer?: string;
+      resourceKey?: string;
+      requestHeaders?: Record<string, string>;
+      resourceType?: string;
+      source: 'network' | 'probe';
+      statusCode?: number;
+      streamType?: 'audio' | 'video';
+      tabId: string;
+      url: string;
+    }) => {
+      listener(payload);
+    };
+    ipcRenderer.on('embedded-browser:resource', wrapped);
+    return () => ipcRenderer.removeListener('embedded-browser:resource', wrapped);
+  },
   openTab: (tabId: string, url?: string) => ipcRenderer.invoke('embedded-browser:open-tab', tabId, url),
+  exportCapturedResource: (tabId: string, resourceKey: string) =>
+    ipcRenderer.invoke('embedded-browser:resource:export', tabId, resourceKey),
+  listCapturedResources: (tabId: string) => ipcRenderer.invoke('embedded-browser:resource:list', tabId),
+  openCapturedResource: (tabId: string, resourceKey: string) =>
+    ipcRenderer.invoke('embedded-browser:resource:open', tabId, resourceKey),
+  previewCapturedResource: (tabId: string, payload: {
+    mimeType?: string;
+    streamType?: 'audio' | 'video';
+    title?: string;
+    url: string;
+  }) => ipcRenderer.invoke('embedded-browser:resource:preview', tabId, payload),
+  mergeCapturedMseResources: (tabId: string, payload: {
+    audioResourceKey?: string;
+    ffmpegPath?: string;
+    suggestedFileName?: string;
+    videoResourceKey?: string;
+  }) => ipcRenderer.invoke('embedded-browser:resource:merge-mse', tabId, payload),
   reload: (tabId: string) => ipcRenderer.invoke('embedded-browser:reload', tabId),
+  startDeepResourceCapture: (tabId: string) => ipcRenderer.invoke('embedded-browser:resource:start-deep-capture', tabId),
+  startResourceCapture: (tabId: string) => ipcRenderer.invoke('embedded-browser:resource:start', tabId),
+  stopResourceCapture: (tabId: string) => ipcRenderer.invoke('embedded-browser:resource:stop', tabId),
+  clearCapturedResources: (tabId: string) => ipcRenderer.invoke('embedded-browser:resource:clear', tabId),
   setBounds: (bounds: { x: number; y: number; width: number; height: number }) =>
     ipcRenderer.invoke('embedded-browser:set-bounds', bounds),
 });

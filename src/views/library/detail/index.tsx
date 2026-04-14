@@ -28,6 +28,7 @@ import ContextMenu, { type ContextMenuItem } from "@/components/ui/context-menu"
 import EmbeddedBrowserPanel, { type EmbeddedBrowserHandle } from "@/features/embedded-browser/components/EmbeddedBrowserPanel";
 import EmbeddedBrowserDownloadImportModal from "@/features/embedded-browser/downloads/components/EmbeddedBrowserDownloadImportModal";
 import { useEmbeddedBrowserDownloadImport } from "@/features/embedded-browser/downloads/hooks/useEmbeddedBrowserDownloadImport";
+import EmbeddedBrowserResourcePanel from "@/features/embedded-browser/resources/components/EmbeddedBrowserResourcePanel";
 import {
   createBrowserBookmark,
   deleteBrowserBookmark,
@@ -468,7 +469,7 @@ const ContentToolbar = styled.div`
     color: var(--app-text);
     padding: 0 12px;
     outline: none;
-    font-size: 14px;
+    font-size: 16px;
   }
 
   .toolbar-browser-input:focus {
@@ -894,6 +895,22 @@ const ContentBody = styled.div`
     flex: 1;
     min-height: 0;
   }
+`;
+
+const BrowserWorkspace = styled.div`
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+`;
+
+const BrowserWorkspaceMain = styled.div`
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
 `;
 
 function createBrowserTabId() {
@@ -3151,46 +3168,54 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
         ) : null}
         <ContentBody>
           {workspaceDisplayMode === 'browser' ? (
-            <EmbeddedBrowserPanel
-              ref={browserRef}
-              activeTabId={activeBrowserTabId}
-              currentUrl={
-                activeBrowserTab?.url ?? ''
-              }
-              pendingFileOpen={
-                activeBrowserTabId
-                  ? pendingBrowserFileOpenByTabId[activeBrowserTabId] ?? null
-                  : null
-              }
-              onPendingFileOpenHandled={(tabId) => {
-                clearPendingBrowserFileOpen(tabId);
-              }}
-              suspendNativeView={Boolean(activeBrowserDownload)}
-              onUrlChange={(nextUrl) => {
-                if (!activeBrowserTabId) {
-                  return;
-                }
-                applyBrowserTabUpdate(activeBrowserTabId, (tab) => ({
-                  ...tab,
-                  url: nextUrl,
-                  title: tab.title || nextUrl,
-                }));
-                syncBrowserInputWithTab(activeBrowserTabId, nextUrl);
-              }}
-              onStateChange={(payload) => {
-                if (!payload.tabId) {
-                  return;
-                }
-                applyBrowserTabState({
-                  ...payload,
-                  tabId: payload.tabId,
-                });
-                if (payload.tabId === activeBrowserTabId && payload.url) {
-                  setBrowserInput(payload.url);
-                }
-              }}
-              onSubmitDraft={submitBrowserDraft}
-            />
+            <BrowserWorkspace>
+              <BrowserWorkspaceMain>
+                <EmbeddedBrowserPanel
+                  ref={browserRef}
+                  activeTabId={activeBrowserTabId}
+                  currentUrl={
+                    activeBrowserTab?.url ?? ''
+                  }
+                  pendingFileOpen={
+                    activeBrowserTabId
+                      ? pendingBrowserFileOpenByTabId[activeBrowserTabId] ?? null
+                      : null
+                  }
+                  onPendingFileOpenHandled={(tabId) => {
+                    clearPendingBrowserFileOpen(tabId);
+                  }}
+                  suspendNativeView={Boolean(activeBrowserDownload)}
+                  onUrlChange={(nextUrl) => {
+                    if (!activeBrowserTabId) {
+                      return;
+                    }
+                    applyBrowserTabUpdate(activeBrowserTabId, (tab) => ({
+                      ...tab,
+                      url: nextUrl,
+                      title: tab.title || nextUrl,
+                    }));
+                    syncBrowserInputWithTab(activeBrowserTabId, nextUrl);
+                  }}
+                  onStateChange={(payload) => {
+                    if (!payload.tabId) {
+                      return;
+                    }
+                    applyBrowserTabState({
+                      ...payload,
+                      tabId: payload.tabId,
+                    });
+                    if (payload.tabId === activeBrowserTabId && payload.url) {
+                      setBrowserInput(payload.url);
+                    }
+                  }}
+                  onSubmitDraft={submitBrowserDraft}
+                />
+              </BrowserWorkspaceMain>
+              <EmbeddedBrowserResourcePanel
+                activeTabId={activeBrowserTabId}
+                currentPageUrl={activeBrowserTab?.url ?? ''}
+              />
+            </BrowserWorkspace>
           ) : workspaceDisplayMode === 'search-home' ? (
             <SearchWorkspace
               mode={searchMode}
