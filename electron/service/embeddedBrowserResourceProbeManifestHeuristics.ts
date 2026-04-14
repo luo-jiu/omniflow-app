@@ -175,13 +175,32 @@ export function embeddedBrowserResourceProbeManifestHeuristicsBody() {
       .replace(/&gt;/g, '>')
   }
 
-  function emitMpdReferenceResource(reference: string, resourceType: string, baseUrl: string) {
+  function resolveMpdReferenceUrl(reference: string, baseUrl: string) {
     const normalizedReference = decodeXmlEntities(reference).trim()
     if (!normalizedReference || normalizedReference.includes('$')) {
-      return
+      return ''
     }
     const absoluteUrl = resolveM3u8Reference(baseUrl, normalizedReference)
     if (!absoluteUrl || !toAbsoluteUrl(absoluteUrl)) {
+      return ''
+    }
+    return absoluteUrl
+  }
+
+  function resolveMpdBaseUrl(reference: string, baseUrl: string) {
+    const absoluteUrl = resolveMpdReferenceUrl(reference, baseUrl)
+    if (!absoluteUrl) {
+      return ''
+    }
+    if (getExtension(absoluteUrl)) {
+      return getBaseUrl(absoluteUrl)
+    }
+    return absoluteUrl.endsWith('/') ? absoluteUrl : `${absoluteUrl}/`
+  }
+
+  function emitMpdReferenceResource(reference: string, resourceType: string, baseUrl: string) {
+    const absoluteUrl = resolveMpdReferenceUrl(reference, baseUrl)
+    if (!absoluteUrl) {
       return
     }
     const kind = classifyKind(absoluteUrl)
@@ -201,8 +220,19 @@ export function embeddedBrowserResourceProbeManifestHeuristicsBody() {
   function emitMpdReferenceResources(text: string, baseUrl: string) {
     const normalizedText = String(text || '')
     const referenceBaseUrl = baseUrl || getBaseUrl(currentLocationHref)
-    Array.from(normalizedText.matchAll(/<(?:BaseURL|Location)>([^<]+)<\/(?:BaseURL|Location)>/gi))
+    const referenceBaseUrls = new Set([referenceBaseUrl])
+    Array.from(normalizedText.matchAll(/<BaseURL>([^<]+)<\/BaseURL>/gi))
       .slice(0, 80)
+      .forEach((match) => {
+        const reference = String(match[1] || '')
+        emitMpdReferenceResource(reference, 'mpd-url', referenceBaseUrl)
+        const nestedBaseUrl = resolveMpdBaseUrl(reference, referenceBaseUrl)
+        if (nestedBaseUrl) {
+          referenceBaseUrls.add(nestedBaseUrl)
+        }
+      })
+    Array.from(normalizedText.matchAll(/<Location>([^<]+)<\/Location>/gi))
+      .slice(0, 20)
       .forEach((match) => {
         emitMpdReferenceResource(String(match[1] || ''), 'mpd-url', referenceBaseUrl)
       })
@@ -215,7 +245,9 @@ export function embeddedBrowserResourceProbeManifestHeuristicsBody() {
           : rawInput.includes('sourceurl=')
             ? 'mpd-source-url'
             : 'mpd-media'
-        emitMpdReferenceResource(String(match[1] || ''), resourceType, referenceBaseUrl)
+        referenceBaseUrls.forEach((currentBaseUrl) => {
+          emitMpdReferenceResource(String(match[1] || ''), resourceType, currentBaseUrl)
+        })
       })
   }
 
