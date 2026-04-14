@@ -43,7 +43,7 @@ async function ensureInputSelector(view: WebContentsView): Promise<string | null
         return 'input[data-omniflow-browser-open-target="true"]'
       }
 
-      let fallback = document.querySelector('${FALLBACK_FILE_INPUT_SELECTOR}') 
+      let fallback = document.querySelector('${FALLBACK_FILE_INPUT_SELECTOR}')
       if (!(fallback instanceof HTMLInputElement)) {
         fallback = document.createElement('input')
         fallback.type = 'file'

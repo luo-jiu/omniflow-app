@@ -18,12 +18,17 @@ import {
   type EmbeddedBrowserStatePayload,
 } from './embeddedBrowserMainTypes'
 import {
-  collectEmbeddedBrowserDebugMeta,
   configureEmbeddedBrowserSession,
   initializeEmbeddedBrowserMainBridges,
-  loadEmbeddedBrowserFaviconDataUrl,
   resolveEmbeddedBrowserBookmarkFavicon,
 } from './embeddedBrowserMainSupport'
+import {
+  bumpEmbeddedBrowserOpenFileRequestVersion,
+  cleanupEmbeddedBrowserOpenFileForTab,
+  isEmbeddedBrowserOpenFileRequestCurrent,
+  tryDispatchPendingEmbeddedBrowserOpenFile,
+  type EmbeddedBrowserPendingOpenFile,
+} from './embeddedBrowserOpenFileFlow'
 import {
   extractEmbeddedBrowserResourceFromPage,
   runEmbeddedBrowserResourcePreview,
@@ -33,11 +38,6 @@ import {
   type EmbeddedBrowserResourcePreviewPayload,
 } from './embeddedBrowserResourcePageBridge'
 import {
-  EMBEDDED_BROWSER_RESOURCE_CONSOLE_PREFIX,
-  createEmbeddedBrowserResourceProbeScript,
-} from './embeddedBrowserResourceProbe'
-import {
-  EMBEDDED_BROWSER_PARTITION,
   cleanupEmbeddedBrowserDownloadFile,
   type EmbeddedBrowserDownloadPayload,
 } from './embeddedBrowserService'
@@ -46,19 +46,22 @@ import {
   disposeEmbeddedBrowserCapturedResources,
   getEmbeddedBrowserResourceCaptureSnapshot,
   isEmbeddedBrowserDeepCaptureEnabled,
-  recordEmbeddedBrowserProbeResource,
   startEmbeddedBrowserDeepResourceCapture,
   startEmbeddedBrowserResourceCapture,
   stopEmbeddedBrowserResourceCapture,
   type EmbeddedBrowserCapturedResource,
 } from './embeddedBrowserResourceService'
 import {
+  buildEmbeddedBrowserProbeResourceRecorder,
+  createEmbeddedBrowserView as createEmbeddedBrowserManagedView,
+  installEmbeddedBrowserResourceProbe,
+} from './embeddedBrowserViewLifecycle'
+import {
   deriveEmbeddedBrowserMergedFileName,
   mergeEmbeddedBrowserResourceTracks,
 } from './embeddedBrowserResourceMergeService'
 import {
   cleanupEmbeddedBrowserOpenFile,
-  injectEmbeddedBrowserOpenFile,
   stageEmbeddedBrowserOpenFile,
 } from './embeddedBrowserOpenFile'
 
@@ -69,11 +72,7 @@ export function createEmbeddedBrowserMainController(
   const embeddedBrowserLastCommittedUrls = new Map<string, string>()
   const embeddedBrowserIconUrls = new Map<string, string>()
   const embeddedBrowserIconSourceUrls = new Map<string, string>()
-  const embeddedBrowserPendingOpenFiles = new Map<string, {
-    fileName: string
-    pageUrl: string
-    stagedPath: string
-  }>()
+  const embeddedBrowserPendingOpenFiles = new Map<string, EmbeddedBrowserPendingOpenFile>()
   const embeddedBrowserAttachedOpenFiles = new Map<string, string>()
   const embeddedBrowserOpenFileRequestVersions = new Map<string, number>()
   const embeddedBrowserFileSystemOriginDecisions = new Map<string, boolean>()
@@ -204,20 +203,11 @@ export function createEmbeddedBrowserMainController(
   }
 
   async function tryInstallEmbeddedBrowserResourceProbe(tabId: string, view: WebContentsView) {
-    if (!isEmbeddedBrowserDeepCaptureEnabled(tabId) || view.webContents.isDestroyed()) {
-      return false
-    }
-    try {
-      await view.webContents.executeJavaScript(createEmbeddedBrowserResourceProbeScript(), true)
-      return true
-    } catch (error) {
-      runtimeLogger.warn('embedded browser resource probe install failed', {
-        error: error instanceof Error ? error.message : String(error),
-        tabId,
-        url: view.webContents.getURL() || embeddedBrowserLastCommittedUrls.get(tabId) || '',
-      })
-      return false
-    }
+    return installEmbeddedBrowserResourceProbe(
+      tabId,
+      view,
+      isEmbeddedBrowserDeepCaptureEnabled,
+    )
   }
 
   async function withEmbeddedBrowserResourceScriptExecutor<Result>(
@@ -314,81 +304,6 @@ export function createEmbeddedBrowserMainController(
     }
   }
 
-  function cleanupEmbeddedBrowserOpenFileForTab(tabId: string) {
-    const pending = embeddedBrowserPendingOpenFiles.get(tabId)
-    if (pending?.stagedPath) {
-      void cleanupEmbeddedBrowserOpenFile(pending.stagedPath).catch(() => undefined)
-    }
-    embeddedBrowserPendingOpenFiles.delete(tabId)
-
-    const attachedPath = embeddedBrowserAttachedOpenFiles.get(tabId)
-    if (attachedPath) {
-      void cleanupEmbeddedBrowserOpenFile(attachedPath).catch(() => undefined)
-    }
-    embeddedBrowserAttachedOpenFiles.delete(tabId)
-  }
-
-  function bumpEmbeddedBrowserOpenFileRequestVersion(tabId: string) {
-    const nextVersion = (embeddedBrowserOpenFileRequestVersions.get(tabId) ?? 0) + 1
-    embeddedBrowserOpenFileRequestVersions.set(tabId, nextVersion)
-    return nextVersion
-  }
-
-  function isEmbeddedBrowserOpenFileRequestCurrent(tabId: string, version: number) {
-    return embeddedBrowserOpenFileRequestVersions.get(tabId) === version
-  }
-
-  function matchesEmbeddedBrowserOpenFileTargetPage(currentUrl: string, targetUrl: string) {
-    try {
-      const current = new URL(currentUrl)
-      const target = new URL(targetUrl)
-      if (current.origin !== target.origin) {
-        return false
-      }
-      const normalizedCurrentPath = current.pathname.replace(/\/+$/, '') || '/'
-      const normalizedTargetPath = target.pathname.replace(/\/+$/, '') || '/'
-      if (normalizedTargetPath === '/') {
-        return true
-      }
-      return (
-        normalizedCurrentPath === normalizedTargetPath
-        || normalizedCurrentPath.startsWith(`${normalizedTargetPath}/`)
-      )
-    } catch {
-      return false
-    }
-  }
-
-  async function tryDispatchPendingEmbeddedBrowserOpenFile(tabId: string, view: WebContentsView) {
-    const pending = embeddedBrowserPendingOpenFiles.get(tabId)
-    if (!pending || view.webContents.isDestroyed()) {
-      return false
-    }
-    const currentUrl = view.webContents.getURL() || embeddedBrowserLastCommittedUrls.get(tabId) || ''
-    if (!currentUrl) {
-      return false
-    }
-    if (!matchesEmbeddedBrowserOpenFileTargetPage(currentUrl, pending.pageUrl)) {
-      return false
-    }
-
-    try {
-      const injected = await injectEmbeddedBrowserOpenFile(view, pending.stagedPath)
-      if (!injected) {
-        return false
-      }
-      const previousAttachedPath = embeddedBrowserAttachedOpenFiles.get(tabId)
-      if (previousAttachedPath && previousAttachedPath !== pending.stagedPath) {
-        void cleanupEmbeddedBrowserOpenFile(previousAttachedPath).catch(() => undefined)
-      }
-      embeddedBrowserAttachedOpenFiles.set(tabId, pending.stagedPath)
-      embeddedBrowserPendingOpenFiles.delete(tabId)
-      return true
-    } catch {
-      return false
-    }
-  }
-
   function syncEmbeddedBrowserViewBounds(view: WebContentsView) {
     view.setBounds(embeddedBrowserPendingBounds ?? {
       x: 0,
@@ -418,157 +333,25 @@ export function createEmbeddedBrowserMainController(
     if (!mainWindow || mainWindow.isDestroyed()) {
       return null
     }
-    const existingView = getEmbeddedBrowserView(tabId)
-    if (existingView) {
-      return existingView
-    }
-
-    const view = new WebContentsView({
-        webPreferences: {
-          devTools: true,
-          partition: EMBEDDED_BROWSER_PARTITION,
-        },
+    return createEmbeddedBrowserManagedView({
+      createIfMissingProbe: tryInstallEmbeddedBrowserResourceProbe,
+      currentUrls: embeddedBrowserLastCommittedUrls,
+      debugEnabled: options.debugEnabled,
+      emitTabState: emitEmbeddedBrowserTabState,
+      iconSourceUrls: embeddedBrowserIconSourceUrls,
+      iconUrls: embeddedBrowserIconUrls,
+      onProbePayload: buildEmbeddedBrowserProbeResourceRecorder(tabId),
+      syncBounds: syncEmbeddedBrowserViewBounds,
+      tabId,
+      tryDispatchPendingOpenFile: async (targetTabId, view) => tryDispatchPendingEmbeddedBrowserOpenFile({
+        attachedOpenFiles: embeddedBrowserAttachedOpenFiles,
+        currentUrls: embeddedBrowserLastCommittedUrls,
+        pendingOpenFiles: embeddedBrowserPendingOpenFiles,
+        tabId: targetTabId,
+        view,
+      }),
+      views: embeddedBrowserViews,
     })
-    view.webContents.setZoomFactor(1)
-    const currentUserAgent = view.webContents.getUserAgent()
-    if (currentUserAgent.includes('Electron')) {
-      view.webContents.setUserAgent(
-        currentUserAgent.replace(/\sElectron\/[^\s]+/g, ''),
-      )
-    }
-    syncEmbeddedBrowserViewBounds(view)
-    embeddedBrowserViews.set(tabId, view)
-
-    view.webContents.on('did-start-loading', () => {
-      emitEmbeddedBrowserTabState(tabId, view, {
-        details: 'did-start-loading',
-        state: 'loading',
-        url: view.webContents.getURL() || embeddedBrowserLastCommittedUrls.get(tabId) || undefined,
-      })
-    })
-    view.webContents.on('dom-ready', () => {
-      void tryInstallEmbeddedBrowserResourceProbe(tabId, view)
-    })
-    view.webContents.on('did-stop-loading', async () => {
-      if (view.webContents.isDestroyed()) {
-        return
-      }
-      const committedUrl = view.webContents.getURL() || ''
-      embeddedBrowserLastCommittedUrls.set(tabId, committedUrl)
-      await tryDispatchPendingEmbeddedBrowserOpenFile(tabId, view)
-      const meta = await collectEmbeddedBrowserDebugMeta(view, options.debugEnabled)
-      emitEmbeddedBrowserTabState(tabId, view, {
-        details: 'did-stop-loading',
-        ...(meta.length ? { meta } : {}),
-        state: 'ready',
-        url: committedUrl || undefined,
-      })
-    })
-    view.webContents.on('did-navigate', (_event, url) => {
-      embeddedBrowserLastCommittedUrls.set(tabId, url)
-      emitEmbeddedBrowserTabState(tabId, view, { details: 'did-navigate', state: 'ready', url })
-      void tryDispatchPendingEmbeddedBrowserOpenFile(tabId, view)
-    })
-    view.webContents.on('did-navigate-in-page', (_event, url) => {
-      embeddedBrowserLastCommittedUrls.set(tabId, url)
-      emitEmbeddedBrowserTabState(tabId, view, { details: 'did-navigate-in-page', state: 'ready', url })
-      void tryDispatchPendingEmbeddedBrowserOpenFile(tabId, view)
-    })
-    view.webContents.on('page-title-updated', (_event, title) => {
-      emitEmbeddedBrowserTabState(tabId, view, {
-        details: 'page-title-updated',
-        state: 'ready',
-        title: title || undefined,
-        url: embeddedBrowserLastCommittedUrls.get(tabId) || view.webContents.getURL() || undefined,
-      })
-    })
-    view.webContents.on('page-favicon-updated', (_event, favicons) => {
-      const iconUrl = favicons
-        .map((item) => String(item || '').trim())
-        .find((item) => item) || ''
-      if (!iconUrl) {
-        return
-      }
-      void loadEmbeddedBrowserFaviconDataUrl(view, iconUrl).then((faviconDataUrl) => {
-        if (!faviconDataUrl || view.webContents.isDestroyed()) {
-          return
-        }
-        embeddedBrowserIconSourceUrls.set(tabId, iconUrl)
-        embeddedBrowserIconUrls.set(tabId, faviconDataUrl)
-        emitEmbeddedBrowserTabState(tabId, view, {
-          details: 'page-favicon-updated',
-          iconSourceUrl: iconUrl,
-          iconUrl: faviconDataUrl,
-          state: 'ready',
-          url: embeddedBrowserLastCommittedUrls.get(tabId) || view.webContents.getURL() || undefined,
-        })
-      })
-    })
-    view.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
-      if (errorCode === -3) {
-        return
-      }
-      emitEmbeddedBrowserTabState(tabId, view, {
-        details: `did-fail-load(${errorCode})`,
-        state: 'error',
-        message: `页面加载失败：${errorDescription || '未知错误'}`,
-        url: validatedURL,
-      })
-    })
-    view.webContents.on('render-process-gone', (_event, details) => {
-      emitEmbeddedBrowserTabState(tabId, view, {
-        details: `render-process-gone:${details.reason}`,
-        state: 'error',
-        message: `页面渲染进程异常退出：${details.reason}`,
-        url: embeddedBrowserLastCommittedUrls.get(tabId) || view.webContents.getURL() || undefined,
-      })
-    })
-    view.webContents.on('console-message', (_event, level, message, line, sourceId) => {
-      if (typeof message === 'string' && message.startsWith(EMBEDDED_BROWSER_RESOURCE_CONSOLE_PREFIX)) {
-        const rawPayload = message.slice(EMBEDDED_BROWSER_RESOURCE_CONSOLE_PREFIX.length)
-        try {
-          const payload = JSON.parse(rawPayload) as Record<string, unknown>
-          recordEmbeddedBrowserProbeResource(tabId, {
-            capturedAt: Number(payload.capturedAt) || Date.now(),
-            contentLength: typeof payload.contentLength === 'number' ? payload.contentLength : undefined,
-            ext: typeof payload.ext === 'string' ? payload.ext : undefined,
-            kind: typeof payload.kind === 'string'
-              ? payload.kind as EmbeddedBrowserCapturedResource['kind']
-              : undefined,
-            mimeType: typeof payload.mimeType === 'string' ? payload.mimeType : undefined,
-            pageUrl: typeof payload.pageUrl === 'string' ? payload.pageUrl : undefined,
-            resourceKey: typeof payload.resourceKey === 'string' ? payload.resourceKey : undefined,
-            resourceType: typeof payload.resourceType === 'string' ? payload.resourceType : undefined,
-            source: 'probe',
-            streamType: payload.streamType === 'audio' || payload.streamType === 'video'
-              ? payload.streamType
-              : undefined,
-            url: typeof payload.url === 'string' ? payload.url : '',
-          })
-        } catch (error) {
-          runtimeLogger.warn('embedded browser resource payload parse failed', {
-            error: error instanceof Error ? error.message : String(error),
-            tabId,
-          })
-        }
-        return
-      }
-      if (options.debugEnabled && level >= 2) {
-        emitEmbeddedBrowserTabState(tabId, view, {
-          details: `console:${sourceId}:${line}`,
-          state: 'ready',
-          message,
-          meta: [`console-level=${level}`],
-          url: embeddedBrowserLastCommittedUrls.get(tabId) || view.webContents.getURL() || undefined,
-        })
-      }
-    })
-    view.webContents.setWindowOpenHandler(({ url }) => {
-      void view.webContents.loadURL(url)
-      return { action: 'deny' }
-    })
-
-    return view
   }
 
   function activateEmbeddedBrowserTab(
@@ -680,8 +463,15 @@ export function createEmbeddedBrowserMainController(
     embeddedBrowserIconUrls.delete(normalizedTabId)
     embeddedBrowserIconSourceUrls.delete(normalizedTabId)
     disposeEmbeddedBrowserCapturedResources(normalizedTabId)
-    bumpEmbeddedBrowserOpenFileRequestVersion(normalizedTabId)
-    cleanupEmbeddedBrowserOpenFileForTab(normalizedTabId)
+    bumpEmbeddedBrowserOpenFileRequestVersion({
+      requestVersions: embeddedBrowserOpenFileRequestVersions,
+      tabId: normalizedTabId,
+    })
+    cleanupEmbeddedBrowserOpenFileForTab({
+      attachedOpenFiles: embeddedBrowserAttachedOpenFiles,
+      pendingOpenFiles: embeddedBrowserPendingOpenFiles,
+      tabId: normalizedTabId,
+    })
     if (!view.webContents.isDestroyed()) {
       view.webContents.close({ waitForBeforeUnload: false })
     }
@@ -689,20 +479,28 @@ export function createEmbeddedBrowserMainController(
 
   async function handleOpenTab(sender: Electron.WebContents, tabId: string, url?: string) {
     const targetWindow = BrowserWindow.fromWebContents(sender) ?? options.getMainWindow()
-    bumpEmbeddedBrowserOpenFileRequestVersion(String(tabId || '').trim())
-    cleanupEmbeddedBrowserOpenFileForTab(String(tabId || '').trim())
+    const normalizedTabId = String(tabId || '').trim()
+    bumpEmbeddedBrowserOpenFileRequestVersion({
+      requestVersions: embeddedBrowserOpenFileRequestVersions,
+      tabId: normalizedTabId,
+    })
+    cleanupEmbeddedBrowserOpenFileForTab({
+      attachedOpenFiles: embeddedBrowserAttachedOpenFiles,
+      pendingOpenFiles: embeddedBrowserPendingOpenFiles,
+      tabId: normalizedTabId,
+    })
     const normalizedUrl = String(url || '').trim()
     if (!normalizedUrl) {
       emitEmbeddedBrowserState({
         canGoBack: false,
         canGoForward: false,
         state: 'ready',
-        tabId,
+        tabId: normalizedTabId,
         title: '新标签页',
       })
       return
     }
-    await loadEmbeddedBrowserUrl(targetWindow, tabId, normalizedUrl, 'open-exception', true)
+    await loadEmbeddedBrowserUrl(targetWindow, normalizedTabId, normalizedUrl, 'open-exception', true)
   }
 
   function handleActivateTab(sender: Electron.WebContents, tabId: string | null) {
@@ -713,8 +511,15 @@ export function createEmbeddedBrowserMainController(
   async function handleNavigate(sender: Electron.WebContents, tabId: string, url: string) {
     const targetWindow = BrowserWindow.fromWebContents(sender) ?? options.getMainWindow()
     const normalizedTabId = String(tabId || '').trim()
-    bumpEmbeddedBrowserOpenFileRequestVersion(normalizedTabId)
-    cleanupEmbeddedBrowserOpenFileForTab(normalizedTabId)
+    bumpEmbeddedBrowserOpenFileRequestVersion({
+      requestVersions: embeddedBrowserOpenFileRequestVersions,
+      tabId: normalizedTabId,
+    })
+    cleanupEmbeddedBrowserOpenFileForTab({
+      attachedOpenFiles: embeddedBrowserAttachedOpenFiles,
+      pendingOpenFiles: embeddedBrowserPendingOpenFiles,
+      tabId: normalizedTabId,
+    })
     await loadEmbeddedBrowserUrl(targetWindow, normalizedTabId, url, 'navigate-exception')
   }
 
@@ -734,10 +539,21 @@ export function createEmbeddedBrowserMainController(
       return
     }
 
-    const requestVersion = bumpEmbeddedBrowserOpenFileRequestVersion(normalizedTabId)
-    cleanupEmbeddedBrowserOpenFileForTab(normalizedTabId)
+    const requestVersion = bumpEmbeddedBrowserOpenFileRequestVersion({
+      requestVersions: embeddedBrowserOpenFileRequestVersions,
+      tabId: normalizedTabId,
+    })
+    cleanupEmbeddedBrowserOpenFileForTab({
+      attachedOpenFiles: embeddedBrowserAttachedOpenFiles,
+      pendingOpenFiles: embeddedBrowserPendingOpenFiles,
+      tabId: normalizedTabId,
+    })
     const stagedPath = await stageEmbeddedBrowserOpenFile(normalizedSourceUrl, normalizedFileName)
-    if (!isEmbeddedBrowserOpenFileRequestCurrent(normalizedTabId, requestVersion)) {
+    if (!isEmbeddedBrowserOpenFileRequestCurrent({
+      requestVersions: embeddedBrowserOpenFileRequestVersions,
+      tabId: normalizedTabId,
+      version: requestVersion,
+    })) {
       void cleanupEmbeddedBrowserOpenFile(stagedPath).catch(() => undefined)
       return
     }
@@ -748,13 +564,23 @@ export function createEmbeddedBrowserMainController(
     })
 
     await loadEmbeddedBrowserUrl(targetWindow, normalizedTabId, normalizedPageUrl, 'navigate-exception')
-    if (!isEmbeddedBrowserOpenFileRequestCurrent(normalizedTabId, requestVersion)) {
+    if (!isEmbeddedBrowserOpenFileRequestCurrent({
+      requestVersions: embeddedBrowserOpenFileRequestVersions,
+      tabId: normalizedTabId,
+      version: requestVersion,
+    })) {
       return
     }
 
     const view = getEmbeddedBrowserView(normalizedTabId)
     if (view) {
-      void tryDispatchPendingEmbeddedBrowserOpenFile(normalizedTabId, view)
+      void tryDispatchPendingEmbeddedBrowserOpenFile({
+        attachedOpenFiles: embeddedBrowserAttachedOpenFiles,
+        currentUrls: embeddedBrowserLastCommittedUrls,
+        pendingOpenFiles: embeddedBrowserPendingOpenFiles,
+        tabId: normalizedTabId,
+        view,
+      })
     }
   }
 

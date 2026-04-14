@@ -1,5 +1,3 @@
-// main.ts (Electron 主进程入口文件)
-
 import { app, BrowserWindow, screen } from 'electron'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
