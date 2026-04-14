@@ -21,7 +21,7 @@
 | Worker 注入嗅探 | `catch-script/search.js` | 已夺舍 | 测 worker-heavy 页面 |
 | fetch / XHR / JSON 扫描 | `catch-script/search.js` | 已夺舍 | 测相对 URL、嵌套 JSON、一次性 m3u8 |
 | HLS/m3u8 内联识别 | `catch-script/search.js`, `js/m3u8.js` | 部分夺舍 | parser / 测试入口已补，继续补 downloader 能力 |
-| DASH/mpd 内联识别 | `catch-script/search.js`, `js/mpd.js` | 部分夺舍 | 补 mpd parser 选择音视频轨 |
+| DASH/mpd 内联识别 | `catch-script/search.js`, `js/mpd.js` | 部分夺舍 | 基础 mpd parser / 测试入口已补，继续补轨道选择与下载 |
 | Vimeo playlist.json 转 m3u8 | `catch-script/search.js` | 已夺舍 | 测 Vimeo 页面 |
 | key 候选捕获 | `catch-script/search.js`, `js/content-script.js`, `js/m3u8.js` | 部分夺舍 | 真实 key 验证入口已补，继续补自定义 key |
 | MSE 缓存捕获 | `catch-script/catch.js` | 已夺舍 | 测长视频、直播、异常重试 |
@@ -87,7 +87,7 @@ OmniFlow 当前有 manifest 捕获、key 候选和 ffmpeg 合并基础，但还�
 
 - m3u8 parser 的层级 playlist 展开：已补纯函数解析与资源卡测试入口，能输出 variants / renditions / keys / maps / segments。
 - 多 variant / 多清晰度选择：已能解析 variant 元数据，正式选择 UI 未定。
-- `EXT-X-KEY` 下载、验证、替换、自定义 key：已能解析 key 元数据，真实 key 下载/验证未完成。
+- `EXT-X-KEY` 下载、验证、替换、自定义 key：已能解析 key 元数据并做真实 key 验证，自定义 key 未完成。
 - `EXT-X-MAP` 下载与解密处理：已能解析 map 与 byterange 元数据，下载/解密拼接未完成。
 - 下载范围：序号范围、时间范围 `HH:MM:SS`。
 - 下载队列、并发线程、失败重试、重下失败项。
@@ -106,13 +106,17 @@ OmniFlow 当前有 manifest 捕获、key 候选和 ffmpeg 合并基础，但还�
 
 Cat Catch 依赖 `lib/mpd-parser.min.js` 和 `js/mpd.js`。
 
-OmniFlow 当前只做了 MPD 捕获与浅引用解析，还缺：
+OmniFlow 当前已补基础 MPD parser 与资源卡测试入口：
 
-- MPD 解析为 audio/video representation。
+- 已能解析 audio/video representation、DRM ContentProtection、BaseURL。
+- 已能展开常见 `SegmentTemplate` / `SegmentTimeline` 与 `SegmentList`。
+- 已能输出 MPD 下载计划 JSON。
+
+还缺：
+
 - 视频轨 / 音频轨选择。
-- init segment 和 media segment 的模板展开。
-- SegmentTemplate / SegmentTimeline。
 - headers / referer 透传到下载器。
+- 更完整的 DASH 规范覆盖与真实站点压测。
 
 建议：优先引入稳定 parser 或迁移最小解析器，不手写完整 DASH 规范。
 

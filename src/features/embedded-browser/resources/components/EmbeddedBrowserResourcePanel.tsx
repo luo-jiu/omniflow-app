@@ -23,6 +23,11 @@ import {
   type EmbeddedBrowserHlsKeyVerificationResult,
 } from '../model/embedded-browser-hls-key-verifier';
 import {
+  createEmbeddedBrowserMpdDownloadPlan,
+  parseEmbeddedBrowserMpdManifest,
+  type EmbeddedBrowserMpdManifest,
+} from '../model/embedded-browser-mpd-manifest';
+import {
   exportEmbeddedBrowserCapturedResource,
   mergeEmbeddedBrowserCapturedMseResources,
   openEmbeddedBrowserCapturedResource,
@@ -524,6 +529,17 @@ function isHlsResource(resource: EmbeddedBrowserCapturedResource) {
   );
 }
 
+function isMpdResource(resource: EmbeddedBrowserCapturedResource) {
+  const extension = String(resource.ext || '').toLowerCase();
+  const mimeType = String(resource.mimeType || '').toLowerCase();
+  const url = String(resource.url || '').toLowerCase();
+  return resource.kind === 'manifest' && (
+    extension === 'mpd'
+    || mimeType.includes('dash+xml')
+    || /\.mpd(?:$|[?#])/.test(url)
+  );
+}
+
 function withResourceRefererHeader(resource: EmbeddedBrowserCapturedResource) {
   const headers = {
     ...(resource.requestHeaders || {}),
@@ -535,7 +551,7 @@ function withResourceRefererHeader(resource: EmbeddedBrowserCapturedResource) {
   return headers;
 }
 
-async function readHlsManifestText(resource: EmbeddedBrowserCapturedResource) {
+async function readManifestResourceText(resource: EmbeddedBrowserCapturedResource) {
   if (resource.resourceKey && isPageContextManagedResource(resource)) {
     const extracted = await readEmbeddedBrowserCapturedResource(resource.tabId, resource.resourceKey);
     if (!extracted?.base64) {
@@ -562,7 +578,7 @@ async function readHlsManifestText(resource: EmbeddedBrowserCapturedResource) {
 }
 
 async function analyzeHlsResource(resource: EmbeddedBrowserCapturedResource) {
-  const { text, url } = await readHlsManifestText(resource);
+  const { text, url } = await readManifestResourceText(resource);
   if (!text.includes('#EXTM3U')) {
     throw new Error('这条资源不像 HLS manifest');
   }
@@ -571,6 +587,26 @@ async function analyzeHlsResource(resource: EmbeddedBrowserCapturedResource) {
     text,
   });
   const plan = createEmbeddedBrowserHlsDownloadPlan({
+    headers: withResourceRefererHeader(resource),
+    manifest,
+    manifestUrl: resource.url,
+    pageUrl: resource.pageUrl,
+  });
+  const planText = JSON.stringify(plan, null, 2);
+  await navigator.clipboard.writeText(planText);
+  return {
+    manifest,
+    planText,
+  };
+}
+
+async function analyzeMpdResource(resource: EmbeddedBrowserCapturedResource) {
+  const { text, url } = await readManifestResourceText(resource);
+  const manifest = parseEmbeddedBrowserMpdManifest({
+    baseUrl: url || resource.pageUrl || resource.url,
+    text,
+  });
+  const plan = createEmbeddedBrowserMpdDownloadPlan({
     headers: withResourceRefererHeader(resource),
     manifest,
     manifestUrl: resource.url,
@@ -827,12 +863,21 @@ type HlsAnalysisState = {
   planText?: string
 }
 
+type MpdAnalysisState = {
+  error?: string
+  loading: boolean
+  manifest?: EmbeddedBrowserMpdManifest
+  planText?: string
+}
+
 const ResourceCard: React.FC<{
   resource: EmbeddedBrowserCapturedResource
   resources: EmbeddedBrowserCapturedResource[]
 }> = ({ resource, resources }) => {
   const [hlsAnalysis, setHlsAnalysis] = React.useState<HlsAnalysisState>({ loading: false });
+  const [mpdAnalysis, setMpdAnalysis] = React.useState<MpdAnalysisState>({ loading: false });
   const canAnalyzeHls = isHlsResource(resource);
+  const canAnalyzeMpd = isMpdResource(resource);
 
   const handleAnalyzeHls = React.useCallback(() => {
     setHlsAnalysis((previous) => ({
@@ -858,6 +903,30 @@ const ResourceCard: React.FC<{
           loading: false,
         });
         Toast.error(error?.message || 'HLS 解析失败');
+      });
+  }, [resource]);
+
+  const handleAnalyzeMpd = React.useCallback(() => {
+    setMpdAnalysis((previous) => ({
+      ...previous,
+      error: undefined,
+      loading: true,
+    }));
+    void analyzeMpdResource(resource)
+      .then((result) => {
+        setMpdAnalysis({
+          loading: false,
+          manifest: result.manifest,
+          planText: result.planText,
+        });
+        Toast.success('MPD 解析完成，下载计划 JSON 已复制');
+      })
+      .catch((error: any) => {
+        setMpdAnalysis({
+          error: error?.message || 'MPD 解析失败',
+          loading: false,
+        });
+        Toast.error(error?.message || 'MPD 解析失败');
       });
   }, [resource]);
 
@@ -968,6 +1037,34 @@ const ResourceCard: React.FC<{
       ) : hlsAnalysis.error ? (
         <div className="resource-hls-analysis">
           HLS 解析失败：{hlsAnalysis.error}
+        </div>
+      ) : null}
+      {mpdAnalysis.manifest ? (
+        <div className="resource-hls-analysis">
+          <div>
+            <strong>MPD：</strong>
+            {mpdAnalysis.manifest.hasDrm ? '检测到 DRM' : '未检测到 DRM'}
+            {' · '}
+            representations {mpdAnalysis.manifest.representations.length}
+            {' · '}
+            {Math.round(mpdAnalysis.manifest.durationSeconds || 0)}s
+          </div>
+          <div>
+            video {mpdAnalysis.manifest.representations.filter((item) => item.contentType === 'video').length}
+            {' · '}
+            audio {mpdAnalysis.manifest.representations.filter((item) => item.contentType === 'audio').length}
+          </div>
+          {mpdAnalysis.manifest.protections[0] ? (
+            <code>{mpdAnalysis.manifest.protections[0].encryptionType}</code>
+          ) : mpdAnalysis.manifest.representations[0]?.segments[0] ? (
+            <code>{mpdAnalysis.manifest.representations[0].segments[0].url}</code>
+          ) : mpdAnalysis.manifest.representations[0]?.initializationUrl ? (
+            <code>{mpdAnalysis.manifest.representations[0].initializationUrl}</code>
+          ) : null}
+        </div>
+      ) : mpdAnalysis.error ? (
+        <div className="resource-hls-analysis">
+          MPD 解析失败：{mpdAnalysis.error}
         </div>
       ) : null}
       <div className="resource-card-actions">
@@ -1110,6 +1207,31 @@ const ResourceCard: React.FC<{
                 onClick={handleVerifyHlsKey}
               >
                 {hlsAnalysis.keyVerificationLoading ? '验证中' : '验证 key'}
+              </button>
+            ) : null}
+          </>
+        ) : null}
+        {canAnalyzeMpd ? (
+          <>
+            <button
+              type="button"
+              className="resource-card-btn"
+              disabled={mpdAnalysis.loading}
+              onClick={handleAnalyzeMpd}
+            >
+              {mpdAnalysis.loading ? '解析中' : '解析 MPD'}
+            </button>
+            {mpdAnalysis.planText ? (
+              <button
+                type="button"
+                className="resource-card-btn"
+                onClick={() => {
+                  void navigator.clipboard.writeText(mpdAnalysis.planText || '').then(() => {
+                    Toast.success('下载计划 JSON 已复制');
+                  });
+                }}
+              >
+                复制计划
               </button>
             ) : null}
           </>
