@@ -4,6 +4,7 @@ export type EmbeddedBrowserCapturedResourceKind =
   | 'image'
   | 'subtitle'
   | 'document'
+  | 'key'
   | 'other';
 
 export type EmbeddedBrowserCapturedResourceSource = 'network' | 'probe';

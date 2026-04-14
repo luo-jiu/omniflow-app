@@ -6,6 +6,7 @@ import {
   createEmbeddedBrowserResourceSections,
   findMergeableResourcePair,
   isMseCapturedResource,
+  isPageContextManagedResource,
   isPreviewableResource,
 } from '../model/embedded-browser-resource.presentation';
 import {
@@ -22,7 +23,7 @@ type EmbeddedBrowserResourcePanelProps = {
 };
 
 const RESOURCE_FILTER_STORAGE_KEY = 'embedded-browser:resource-filter-regex';
-const DEFAULT_MEDIA_RESOURCE_REGEX = String.raw`(blob:|\.((m3u8|mpd|m4s|mp4|m4v|m4a|mp3|aac|flac|wav|ogg|oga|ogv|webm|mkv|mov|avi|ts|flv|vtt|srt))(?:$|[?#]))`;
+const DEFAULT_MEDIA_RESOURCE_REGEX = String.raw`(blob:|key|base64key|\.((m3u8|mpd|m4s|mp4|m4v|m4a|mp3|aac|flac|wav|ogg|oga|ogv|webm|mkv|mov|avi|ts|flv|vtt|srt))(?:$|[?#]))`;
 
 const PanelShell = styled.aside`
   width: 360px;
@@ -374,7 +375,7 @@ async function previewResource(resource: EmbeddedBrowserCapturedResource) {
 }
 
 async function openCapturedResource(resource: EmbeddedBrowserCapturedResource) {
-  if (!isMseCapturedResource(resource) || !resource.resourceKey) {
+  if (!resource.resourceKey) {
     openResourceUrl(resource.url);
     return;
   }
@@ -386,7 +387,7 @@ async function openCapturedResource(resource: EmbeddedBrowserCapturedResource) {
 }
 
 async function exportCapturedResource(resource: EmbeddedBrowserCapturedResource) {
-  if (!isMseCapturedResource(resource) || !resource.resourceKey) {
+  if (!resource.resourceKey) {
     await copyResourceUrl(resource.url);
     return;
   }
@@ -420,7 +421,7 @@ function loadResourceFilterDraft() {
 }
 
 function isMediaLikeResource(resource: EmbeddedBrowserCapturedResource) {
-  if (resource.kind === 'media' || resource.kind === 'manifest' || resource.kind === 'subtitle') {
+  if (resource.kind === 'media' || resource.kind === 'manifest' || resource.kind === 'subtitle' || resource.kind === 'key') {
     return true;
   }
   const mimeType = String(resource.mimeType || '').toLowerCase();
@@ -487,7 +488,7 @@ const ResourceCard: React.FC<{ resource: EmbeddedBrowserCapturedResource }> = ({
           >
             预览
           </button>
-          {isMseCapturedResource(resource) ? (
+          {isPageContextManagedResource(resource) ? (
             <button
               type="button"
               className="resource-card-btn"
@@ -510,7 +511,7 @@ const ResourceCard: React.FC<{ resource: EmbeddedBrowserCapturedResource }> = ({
               复制 curl
             </button>
           )}
-          {!isMseCapturedResource(resource) ? (
+          {!isPageContextManagedResource(resource) ? (
             <button
               type="button"
               className="resource-card-btn"
@@ -524,33 +525,62 @@ const ResourceCard: React.FC<{ resource: EmbeddedBrowserCapturedResource }> = ({
         </>
       ) : (
         <>
-          <button
-            type="button"
-            className="resource-card-btn"
-            onClick={() => {
-              void copyResourceUrl(resource.url);
-            }}
-          >
-            复制链接
-          </button>
-          <button
-            type="button"
-            className="resource-card-btn"
-            onClick={() => {
-              void copyResourceCurl(resource);
-            }}
-          >
-            复制 curl
-          </button>
-          <button
-            type="button"
-            className="resource-card-btn"
-            onClick={() => {
-              openResourceUrl(resource.url);
-            }}
-          >
-            打开
-          </button>
+          {isPageContextManagedResource(resource) ? (
+            <>
+              <button
+                type="button"
+                className="resource-card-btn"
+                onClick={() => {
+                  void openCapturedResource(resource).catch((error: any) => {
+                    Toast.error(error?.message || '打开失败');
+                  });
+                }}
+              >
+                页内打开
+              </button>
+              <button
+                type="button"
+                className="resource-card-btn"
+                onClick={() => {
+                  void exportCapturedResource(resource).catch((error: any) => {
+                    Toast.error(error?.message || '导出失败');
+                  });
+                }}
+              >
+                页内导出
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                type="button"
+                className="resource-card-btn"
+                onClick={() => {
+                  void copyResourceUrl(resource.url);
+                }}
+              >
+                复制链接
+              </button>
+              <button
+                type="button"
+                className="resource-card-btn"
+                onClick={() => {
+                  void copyResourceCurl(resource);
+                }}
+              >
+                复制 curl
+              </button>
+              <button
+                type="button"
+                className="resource-card-btn"
+                onClick={() => {
+                  openResourceUrl(resource.url);
+                }}
+              >
+                打开
+              </button>
+            </>
+          )}
         </>
       )}
     </div>

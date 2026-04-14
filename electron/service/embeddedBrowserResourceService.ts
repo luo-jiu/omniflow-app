@@ -1,6 +1,6 @@
 import { webContents, type OnBeforeSendHeadersListenerDetails, type Session } from 'electron'
 
-export type EmbeddedBrowserCapturedResourceKind = 'manifest' | 'media' | 'image' | 'subtitle' | 'document' | 'other'
+export type EmbeddedBrowserCapturedResourceKind = 'manifest' | 'media' | 'image' | 'subtitle' | 'document' | 'key' | 'other'
 export type EmbeddedBrowserCapturedResourceSource = 'network' | 'probe'
 export type EmbeddedBrowserCapturedRequestHeaders = Record<string, string>
 export type EmbeddedBrowserCapturedStreamType = 'audio' | 'video'
@@ -44,6 +44,7 @@ const mediaExtensions = new Set([
 ])
 const imageExtensions = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'avif', 'ico'])
 const subtitleExtensions = new Set(['vtt', 'srt', 'ass', 'ssa', 'ttml'])
+const keyExtensions = new Set(['key', 'base64key'])
 const relevantRequestHeaders = new Set([
   'accept',
   'accept-language',
@@ -159,6 +160,13 @@ function classifyCapturedResource(input: {
   }
   if (extension === 'pdf' || normalizedMimeType === 'application/pdf') {
     return 'document'
+  }
+  if (
+    keyExtensions.has(extension)
+    || input.resourceType === 'key'
+    || normalizedMimeType === 'application/octet-stream'
+  ) {
+    return 'key'
   }
   return 'other'
 }

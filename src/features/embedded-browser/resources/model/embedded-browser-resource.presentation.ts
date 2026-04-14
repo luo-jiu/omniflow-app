@@ -12,6 +12,10 @@ export type EmbeddedBrowserMergeableResourcePair = {
   video: EmbeddedBrowserCapturedResource
 }
 
+export function isPageContextManagedResource(resource: EmbeddedBrowserCapturedResource) {
+  return resource.source === 'probe' && Boolean(resource.resourceKey)
+}
+
 export function isMseCapturedResource(resource: EmbeddedBrowserCapturedResource) {
   return resource.resourceType === 'mse-stream' && Boolean(resource.resourceKey)
 }
@@ -29,6 +33,10 @@ export function isPreviewableResource(resource: EmbeddedBrowserCapturedResource)
 
 function isManifestResource(resource: EmbeddedBrowserCapturedResource) {
   return resource.kind === 'manifest'
+}
+
+function isKeyResource(resource: EmbeddedBrowserCapturedResource) {
+  return resource.kind === 'key'
 }
 
 function isInitSegmentCandidate(resource: EmbeddedBrowserCapturedResource) {
@@ -111,8 +119,9 @@ export function createEmbeddedBrowserResourceSections(
   resources: EmbeddedBrowserCapturedResource[],
 ): EmbeddedBrowserResourceSection[] {
   const primaryPlayableResources = pickPrimaryPlayableResources(resources)
+  const keys = resources.filter(isKeyResource)
   if (primaryPlayableResources.length > 0) {
-    return [
+    const sections: EmbeddedBrowserResourceSection[] = [
       {
         description: '已经优先收敛成最终可播流，先看这几条。原始抓包先不展示，避免把视线打散。',
         items: primaryPlayableResources,
@@ -120,6 +129,15 @@ export function createEmbeddedBrowserResourceSections(
         title: '可直接预览',
       },
     ]
+    if (keys.length > 0) {
+      sections.push({
+        description: '深度探测中捕获到的密钥或疑似密钥。后续做 m3u8/mpd 解密时会用到这些数据。',
+        items: keys,
+        key: 'keys',
+        title: '密钥候选',
+      })
+    }
+    return sections
   }
 
   const manifests = resources.filter(isManifestResource)
@@ -127,11 +145,18 @@ export function createEmbeddedBrowserResourceSections(
   const mediaSegments = resources.filter(isMediaSegmentCandidate)
   const otherMedia = resources.filter((resource) => (
     !isManifestResource(resource)
+    && !isKeyResource(resource)
     && !isInitSegmentCandidate(resource)
     && !isMediaSegmentCandidate(resource)
   ))
 
   return [
+    {
+      description: '深度探测中捕获到的密钥或疑似密钥。后续做 m3u8/mpd 解密时会用到这些数据。',
+      items: keys,
+      key: 'keys',
+      title: '密钥候选',
+    },
     {
       description: '优先看这里。抓到 m3u8 或 mpd，后面下载和重组都会轻松很多。',
       items: manifests,

@@ -142,7 +142,7 @@ type EmbeddedBrowserCapturedResource = {
   contentLength?: number;
   ext?: string;
   id: string;
-  kind: 'manifest' | 'media' | 'image' | 'subtitle' | 'document' | 'other';
+  kind: 'manifest' | 'media' | 'image' | 'subtitle' | 'document' | 'key' | 'other';
   method?: string;
   mimeType?: string;
   pageUrl?: string;
