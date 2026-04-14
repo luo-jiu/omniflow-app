@@ -3,26 +3,12 @@ import type {
   EmbeddedBrowserCapturedResourceKind,
   EmbeddedBrowserCapturedStreamType,
 } from './embeddedBrowserResourceTypes'
-
-const manifestExtensions = new Set(['m3u8', 'm3u', 'mpd'])
-const mediaExtensions = new Set([
-  'mp4', 'm4v', 'm4a', 'm4s', 'mp3', 'aac', 'flac', 'wav', 'ogg', 'oga', 'ogv',
-  'webm', 'mkv', 'mov', 'avi', 'ts', 'flv', 'hlv', 'f4v', 'wma', 'mpeg', 'wmv',
-  'asf', 'movie', 'divx', 'mpeg4', 'vid', 'weba', 'opus', 'acc', '3gp',
-])
-const imageExtensions = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'avif', 'ico'])
-const subtitleExtensions = new Set(['vtt', 'srt', 'ass', 'ssa', 'ttml'])
-const keyExtensions = new Set(['key', 'base64key'])
-const relevantRequestHeaders = new Set([
-  'accept',
-  'accept-language',
-  'authorization',
-  'cookie',
-  'origin',
-  'range',
-  'referer',
-  'user-agent',
-])
+import {
+  catCatchRelevantRequestHeaderSet,
+  classifyCatCatchExtensionKind,
+  isCatCatchManifestMimeType,
+  isCatCatchMediaMimeType,
+} from './embeddedBrowserResourceCaptureRules'
 
 export function getHeaderValue(
   headers: Record<string, string | string[] | undefined> | undefined,
@@ -66,35 +52,32 @@ export function classifyCapturedResource(input: {
 }): EmbeddedBrowserCapturedResourceKind {
   const normalizedMimeType = normalizeMimeType(input.mimeType)
   const extension = getResourceExtension(input.url)
+  const extensionKind = classifyCatCatchExtensionKind(extension)
   if (
-    manifestExtensions.has(extension)
-    || normalizedMimeType.includes('mpegurl')
-    || normalizedMimeType.includes('dash+xml')
+    extensionKind === 'manifest'
+    || isCatCatchManifestMimeType(normalizedMimeType)
   ) {
     return 'manifest'
   }
   if (
-    mediaExtensions.has(extension)
-    || normalizedMimeType.startsWith('video/')
-    || normalizedMimeType.startsWith('audio/')
-    || normalizedMimeType === 'application/ogg'
-    || normalizedMimeType === 'application/m4s'
+    extensionKind === 'media'
+    || isCatCatchMediaMimeType(normalizedMimeType)
     || input.resourceType === 'media'
     || String(input.url || '').startsWith('blob:')
   ) {
     return 'media'
   }
-  if (imageExtensions.has(extension) || normalizedMimeType.startsWith('image/')) {
+  if (extensionKind === 'image' || normalizedMimeType.startsWith('image/')) {
     return 'image'
   }
-  if (subtitleExtensions.has(extension) || normalizedMimeType.includes('text/vtt')) {
+  if (extensionKind === 'subtitle' || normalizedMimeType.includes('text/vtt')) {
     return 'subtitle'
   }
   if (extension === 'pdf' || normalizedMimeType === 'application/pdf') {
     return 'document'
   }
   if (
-    keyExtensions.has(extension)
+    extensionKind === 'key'
     || input.resourceType === 'key'
     || normalizedMimeType === 'application/octet-stream'
   ) {
@@ -173,7 +156,7 @@ export function pickRelevantRequestHeaders(
   const result: EmbeddedBrowserCapturedRequestHeaders = {}
   Object.entries(headers).forEach(([headerName, headerValue]) => {
     const normalizedName = headerName.toLowerCase()
-    if (!relevantRequestHeaders.has(normalizedName)) {
+    if (!catCatchRelevantRequestHeaderSet.has(normalizedName)) {
       return
     }
     const normalizedValue = String(headerValue || '').trim()
