@@ -200,7 +200,7 @@ export function embeddedBrowserResourceProbeRuntimeHooksBody() {
       if (emitVimeoPlaylistManifest(meta?.baseUrl || currentLocationHref, parsedJson)) {
         return
       }
-      walkValue(parsedJson)
+      walkValue(parsedJson, 0, new WeakSet<object>(), [], meta?.baseUrl || currentLocationHref)
       return
     }
     const uppercaseValue = value.toUpperCase()
@@ -227,7 +227,13 @@ export function embeddedBrowserResourceProbeRuntimeHooksBody() {
     })
   }
 
-  function walkValue(value: unknown, depth = 0, visited = new WeakSet<object>(), path: string[] = []) {
+  function walkValue(
+    value: unknown,
+    depth = 0,
+    visited = new WeakSet<object>(),
+    path: string[] = [],
+    baseUrl = currentLocationHref,
+  ) {
     if (depth > 6 || value == null) {
       return
     }
@@ -241,7 +247,7 @@ export function embeddedBrowserResourceProbeRuntimeHooksBody() {
     }
     if (typeof value === 'string') {
       reportCandidate(value, {
-        baseUrl: currentLocationHref,
+        baseUrl,
         resourceType: 'json',
         streamType: inferStreamTypeFromPath(path),
       })
@@ -265,13 +271,13 @@ export function embeddedBrowserResourceProbeRuntimeHooksBody() {
         return
       }
       value.slice(0, 80).forEach((item, index) => {
-        walkValue(item, depth + 1, visited, path.concat(String(index)))
+        walkValue(item, depth + 1, visited, path.concat(String(index)), baseUrl)
       })
       return
     }
 
     Object.keys(value as Record<string, unknown>).slice(0, 80).forEach((key) => {
-      walkValue((value as Record<string, unknown>)[key], depth + 1, visited, path.concat(key))
+      walkValue((value as Record<string, unknown>)[key], depth + 1, visited, path.concat(key), baseUrl)
     })
   }
 

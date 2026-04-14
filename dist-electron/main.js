@@ -1,8 +1,8 @@
-import { dialog as te, app as W, net as Jt, ipcMain as x, session as Se, webContents as Gt, BrowserWindow as z, WebContentsView as Xt, screen as Zt } from "electron";
+import { dialog as te, app as W, net as Jt, ipcMain as D, session as Se, webContents as Gt, BrowserWindow as z, WebContentsView as Xt, screen as Zt } from "electron";
 import { fileURLToPath as Yt } from "node:url";
 import C from "node:path";
 import ze, { existsSync as Fe, mkdirSync as Ke, constants as Qt, readFileSync as er, writeFileSync as tr } from "node:fs";
-import $ from "fs/promises";
+import H from "fs/promises";
 import De, { mkdtemp as rr, writeFile as nr, rm as or, access as ir } from "node:fs/promises";
 import yt from "node:http";
 import bt from "node:https";
@@ -18,10 +18,10 @@ async function Ge(e, t, r = {}, n = 0) {
   if (i.protocol !== "http:" && i.protocol !== "https:")
     throw new Error(`不支持的下载协议: ${i.protocol}`);
   const c = i.protocol === "https:" ? bt : yt;
-  await De.mkdir(C.dirname(t), { recursive: !0 }), await new Promise((m, w) => {
+  await De.mkdir(C.dirname(t), { recursive: !0 }), await new Promise((p, w) => {
     let b = !1;
     const y = () => {
-      b || (b = !0, m());
+      b || (b = !0, p());
     }, S = (R) => {
       b || (b = !0, w(R));
     }, h = c.request({
@@ -106,11 +106,11 @@ function gr(e) {
 }
 async function yr(e, t) {
   try {
-    await $.rename(e, t);
+    await H.rename(e, t);
   } catch (r) {
     if ((r == null ? void 0 : r.code) !== "EXDEV")
       throw r;
-    await $.copyFile(e, t), await $.rm(e, { force: !0 });
+    await H.copyFile(e, t), await H.rm(e, { force: !0 });
   }
 }
 function br(e) {
@@ -119,13 +119,13 @@ function br(e) {
     e.has(r) || t - n.lastSeenAt <= dr || he.delete(r);
 }
 async function hr(e, t = je) {
-  const r = String(e || "").trim(), n = r ? C.resolve(r) : C.join(W.getPath("downloads"), cr), o = await $.stat(n).catch(() => null);
+  const r = String(e || "").trim(), n = r ? C.resolve(r) : C.join(W.getPath("downloads"), cr), o = await H.stat(n).catch(() => null);
   if (!(o != null && o.isDirectory()))
     return [];
-  const i = await $.readdir(n, { withFileTypes: !0 }), c = /* @__PURE__ */ new Set(), m = Date.now(), w = [];
+  const i = await H.readdir(n, { withFileTypes: !0 }), c = /* @__PURE__ */ new Set(), p = Date.now(), w = [];
   for (const h of i) {
     if (!h.isFile() || Xe(h.name) || mr(h.name)) continue;
-    const R = C.join(n, h.name), U = await $.stat(R).catch(() => null);
+    const R = C.join(n, h.name), U = await H.stat(R).catch(() => null);
     if (!(U != null && U.isFile())) continue;
     c.add(R);
     const F = he.get(R), l = (F ? F.size === U.size && F.mtimeMs === U.mtimeMs : !1) && F ? F.stableCount + 1 : 1;
@@ -133,8 +133,8 @@ async function hr(e, t = je) {
       size: U.size,
       mtimeMs: U.mtimeMs,
       stableCount: l,
-      lastSeenAt: m
-    }), !(l < lr) && (m - U.mtimeMs < ur || w.push({
+      lastSeenAt: p
+    }), !(l < lr) && (p - U.mtimeMs < ur || w.push({
       sourcePath: R,
       name: h.name,
       size: U.size,
@@ -145,7 +145,7 @@ async function hr(e, t = je) {
     return [];
   w.sort((h, R) => h.mtimeMs - R.mtimeMs);
   const b = vt();
-  await $.mkdir(b, { recursive: !0 });
+  await H.mkdir(b, { recursive: !0 });
   const y = [], S = Math.max(1, Math.floor(Number(t) || je));
   for (const h of w.slice(0, S)) {
     const R = C.join(b, gr(h.name));
@@ -165,7 +165,7 @@ async function hr(e, t = je) {
 }
 async function wr(e) {
   const t = C.resolve(String(e || "").trim()), r = vt();
-  return !t || !Et(t, r) ? !1 : (await $.rm(t, { force: !0 }), !0);
+  return !t || !Et(t, r) ? !1 : (await H.rm(t, { force: !0 }), !0);
 }
 function ot(e, t) {
   const r = we(t || "");
@@ -185,7 +185,7 @@ function Tt(e, t) {
 }
 async function Sr(e) {
   return (await Promise.all(e.map(async (r) => {
-    const n = await $.stat(r);
+    const n = await H.stat(r);
     if (!n.isFile())
       return null;
     const o = C.basename(r);
@@ -200,7 +200,7 @@ async function Sr(e) {
 async function vr(e, t, r) {
   const n = [t], o = [];
   for (; n.length > 0; ) {
-    const y = n.pop(), S = await $.readdir(y, { withFileTypes: !0 });
+    const y = n.pop(), S = await H.readdir(y, { withFileTypes: !0 });
     for (const h of S) {
       if (h.name === "." || h.name === ".." || Xe(h.name) || h.isSymbolicLink())
         continue;
@@ -216,13 +216,13 @@ async function vr(e, t, r) {
     }
   }
   const i = [], c = 48;
-  let m = 0;
+  let p = 0;
   const w = async () => {
-    for (; m < o.length; ) {
-      const y = m;
-      if (m += 1, y >= o.length)
+    for (; p < o.length; ) {
+      const y = p;
+      if (p += 1, y >= o.length)
         return;
-      const S = o[y], h = await $.stat(S.absolutePath).catch(() => null);
+      const S = o[y], h = await H.stat(S.absolutePath).catch(() => null);
       if (!(h != null && h.isFile()))
         continue;
       const R = we(C.relative(e, S.absolutePath)), U = we(C.join(r, R));
@@ -239,7 +239,7 @@ async function vr(e, t, r) {
 async function Er(e) {
   const t = [];
   for (const r of e) {
-    if (!(await $.stat(r)).isDirectory())
+    if (!(await H.stat(r)).isDirectory())
       continue;
     const o = C.basename(r), i = await vr(r, r, o);
     t.push(...i);
@@ -260,21 +260,21 @@ function Tr(e) {
     const r = t.filePaths[0];
     return {
       canceled: !1,
-      content: await $.readFile(r, "utf-8"),
+      content: await H.readFile(r, "utf-8"),
       filePath: r
     };
-  }), e.handle("file:save", async (t, r, n) => (await $.writeFile(r, n, "utf-8"), !0)), e.handle("file:read-text", async (t, r) => {
+  }), e.handle("file:save", async (t, r, n) => (await H.writeFile(r, n, "utf-8"), !0)), e.handle("file:read-text", async (t, r) => {
     const n = C.resolve(String(r || "").trim());
     return {
       canceled: !1,
-      content: await $.readFile(n, "utf-8"),
+      content: await H.readFile(n, "utf-8"),
       filePath: n
     };
   }), e.handle("file:read-local-chrome-bookmarks", async () => {
     const t = C.join(W.getPath("home"), fr);
     return {
       canceled: !1,
-      content: await $.readFile(t, "utf-8"),
+      content: await H.readFile(t, "utf-8"),
       filePath: t
     };
   }), e.handle("dialog:pick-upload-files", async () => {
@@ -311,7 +311,7 @@ function Tr(e) {
     }
   }), e.handle("fs:ensure-directory", async (t, r, n = "") => {
     const o = ot(r, n);
-    return await $.mkdir(o, { recursive: !0 }), o;
+    return await H.mkdir(o, { recursive: !0 }), o;
   }), e.handle("fs:download-url-to-path", async (t, r, n, o, i = {}) => {
     const c = ot(n, o);
     return await Ge(r, c, i), c;
@@ -321,7 +321,7 @@ function Tr(e) {
       throw new Error("无效的下载临时文件");
     if (!i)
       throw new Error("无效的保存路径");
-    return await $.mkdir(C.dirname(i), { recursive: !0 }), await $.copyFile(o, i), i;
+    return await H.mkdir(C.dirname(i), { recursive: !0 }), await H.copyFile(o, i), i;
   });
 }
 var J = {}, ne = ht;
@@ -355,8 +355,8 @@ J.freeCommand = function(e) {
 };
 J.harddrive = function(e) {
   Je.exec("df -k", function(t, r, n) {
-    var o = 0, i = 0, c = 0, m = r.split(`
-`), w = m[1].replace(/[\s\n\r]+/g, " "), b = w.split(" ");
+    var o = 0, i = 0, c = 0, p = r.split(`
+`), w = p[1].replace(/[\s\n\r]+/g, " "), b = w.split(" ");
     o = Math.ceil(b[1] * 1024 / Math.pow(1024, 2)), i = Math.ceil(b[2] * 1024 / Math.pow(1024, 2)), c = Math.ceil(b[3] * 1024 / Math.pow(1024, 2)), e(o, c, i);
   });
 };
@@ -366,8 +366,8 @@ J.getProcesses = function(e, t) {
 `);
     i.shift(), i.pop();
     var c = "";
-    i.forEach(function(m, w) {
-      var b = m.replace(/[\s\n\r]+/g, " ");
+    i.forEach(function(p, w) {
+      var b = p.replace(/[\s\n\r]+/g, " ");
       b = b.split(" "), c += b[1] + " " + b[2] + " " + b[3] + " " + b[4].substring(b[4].length - 25) + `
 `;
     }), t(c);
@@ -391,14 +391,14 @@ J.cpuUsage = function(e) {
 function Ct(e, t) {
   var r = it(), n = r.idle, o = r.total;
   setTimeout(function() {
-    var i = it(), c = i.idle, m = i.total, w = c - n, b = m - o, y = w / b;
+    var i = it(), c = i.idle, p = i.total, w = c - n, b = p - o, y = w / b;
     e(t === !0 ? y : 1 - y);
   }, 1e3);
 }
 function it(e) {
   var t = ne.cpus(), r = 0, n = 0, o = 0, i = 0, c = 0, w = 0;
-  for (var m in t)
-    r += t[m].times.user, n += t[m].times.nice, o += t[m].times.sys, c += t[m].times.irq, i += t[m].times.idle;
+  for (var p in t)
+    r += t[p].times.user, n += t[p].times.nice, o += t[p].times.sys, c += t[p].times.irq, i += t[p].times.idle;
   var w = r + n + o + i + c;
   return {
     idle: i,
@@ -454,16 +454,16 @@ function Ir(e) {
     const i = Date.now();
     if (!o && i - n.lastProgressAt < 80) return;
     n.lastProgressAt = i;
-    const c = Math.max(i - n.startedAt, 1), m = Math.floor(n.uploadedBytes * 1e3 / c), w = n.totalBytes > 0 ? Math.min(n.uploadedBytes / n.totalBytes * 100, 100) : 0;
+    const c = Math.max(i - n.startedAt, 1), p = Math.floor(n.uploadedBytes * 1e3 / c), w = n.totalBytes > 0 ? Math.min(n.uploadedBytes / n.totalBytes * 100, 100) : 0;
     n.sender.send("http:upload:progress", {
       uploadId: n.uploadId,
       uploadedBytes: n.uploadedBytes,
       totalBytes: n.totalBytes,
       percentage: w,
-      speedBps: m
+      speedBps: p
     });
   };
-  e.handle("http:fetch", async (n, o, i = {}) => (A.debug("http:fetch start"), A.debug("http:fetch URL:", o), A.debug("http:fetch options:", i), new Promise((c, m) => {
+  e.handle("http:fetch", async (n, o, i = {}) => (A.debug("http:fetch start"), A.debug("http:fetch URL:", o), A.debug("http:fetch options:", i), new Promise((c, p) => {
     const w = Jt.request({ url: o, method: i.method || "GET" });
     i.headers && Object.entries(i.headers).forEach(([y, S]) => {
       A.debug(`http:fetch set header ${y}: ${String(S)}`), w.setHeader(y, S);
@@ -487,7 +487,7 @@ function Ir(e) {
         });
       });
     }), w.on("error", (y) => {
-      A.error("http:fetch error:", y), m(y);
+      A.error("http:fetch error:", y), p(y);
     }), i.body && w.write(i.body), w.end();
   }))), e.handle("http:upload:abort", async (n, o) => {
     const i = t.get(o);
@@ -502,7 +502,7 @@ function Ir(e) {
     } catch {
     }
     return !0;
-  }), e.handle("http:upload", async (n, o, i, c = {}, m = {}, w) => new Promise((b, y) => {
+  }), e.handle("http:upload", async (n, o, i, c = {}, p = {}, w) => new Promise((b, y) => {
     let S;
     try {
       S = ze.statSync(i);
@@ -528,21 +528,21 @@ ${B}\r
 `, l = `\r
 --${h}--\r
 `, s = Buffer.byteLength(F) + Buffer.byteLength(j) + S.size + Buffer.byteLength(l), v = {
-      ...m,
+      ...p,
       "Content-Type": `multipart/form-data; boundary=${h}`,
       "Content-Length": String(s)
-    }, _ = new URL(o), D = (_.protocol === "https:" ? bt : yt).request({
-      protocol: _.protocol,
-      hostname: _.hostname,
-      port: _.port ? Number(_.port) : void 0,
-      path: `${_.pathname}${_.search}`,
+    }, x = new URL(o), P = (x.protocol === "https:" ? bt : yt).request({
+      protocol: x.protocol,
+      hostname: x.hostname,
+      port: x.port ? Number(x.port) : void 0,
+      path: `${x.pathname}${x.search}`,
       method: "POST",
       headers: v
     }), K = ze.createReadStream(i, {
       highWaterMark: 1024 * 1024
     }), L = {
       uploadId: R,
-      request: D,
+      request: P,
       fileStream: K,
       sender: n.sender,
       totalBytes: Math.max(0, S.size),
@@ -558,23 +558,23 @@ ${B}\r
     }, f = (g) => {
       Z || (Z = !0, t.delete(R), y(g));
     };
-    let p = "";
-    D.on("response", (g) => {
+    let m = "";
+    P.on("response", (g) => {
       g.on("data", (B) => {
-        p += B.toString();
+        m += B.toString();
       }), g.on("end", () => {
         let B;
         try {
-          B = JSON.parse(p);
+          B = JSON.parse(m);
         } catch {
-          B = p;
+          B = m;
         }
         de({
           status: g.statusCode,
           body: B
         });
       });
-    }), D.on("error", (g) => {
+    }), P.on("error", (g) => {
       if (L.aborted) {
         f(new Error("UPLOAD_ABORTED"));
         return;
@@ -584,10 +584,10 @@ ${B}\r
       } catch {
       }
       f(g);
-    }), D.write(F), D.write(j), K.on("data", (g) => {
+    }), P.write(F), P.write(j), K.on("data", (g) => {
       L.aborted || (L.uploadedBytes += g.length, r(L));
     }), K.on("end", () => {
-      L.aborted || (r(L, !0), D.write(l), D.end());
+      L.aborted || (r(L, !0), P.write(l), P.end());
     }), K.on("error", (g) => {
       if (L.aborted) {
         f(new Error("UPLOAD_ABORTED"));
@@ -595,14 +595,14 @@ ${B}\r
       }
       f(g);
       try {
-        D.destroy(g);
+        P.destroy(g);
       } catch {
       }
-    }), K.pipe(D, { end: !1 });
+    }), K.pipe(P, { end: !1 });
   }));
 }
 function Ur() {
-  Tr(x), Or(x), Ir(x);
+  Tr(D), Or(D), Ir(D);
 }
 function Fr() {
   return `
@@ -674,19 +674,19 @@ async function Nr(e, t) {
   );
 }
 function $r(e) {
-  x.handle("embedded-browser:open-tab", async (t, r, n) => e.openTab(t.sender, r, n)), x.handle("embedded-browser:activate-tab", (t, r) => e.activateTab(t.sender, r)), x.handle("embedded-browser:navigate", async (t, r, n) => e.navigate(t.sender, r, n)), x.handle("embedded-browser:resolve-favicon", async (t, r) => e.resolveFavicon(r)), x.handle(
+  D.handle("embedded-browser:open-tab", async (t, r, n) => e.openTab(t.sender, r, n)), D.handle("embedded-browser:activate-tab", (t, r) => e.activateTab(t.sender, r)), D.handle("embedded-browser:navigate", async (t, r, n) => e.navigate(t.sender, r, n)), D.handle("embedded-browser:resolve-favicon", async (t, r) => e.resolveFavicon(r)), D.handle(
     "embedded-browser:open-mapped-file",
     async (t, r, n, o, i) => e.openMappedFile(t.sender, r, n, o, i)
-  ), x.handle("embedded-browser:reload", async (t, r) => e.reload(r)), x.handle("embedded-browser:go-back", async (t, r) => e.goBack(r)), x.handle("embedded-browser:go-forward", async (t, r) => e.goForward(r)), x.handle("embedded-browser:resource:list", (t, r) => e.listCapturedResources(r)), x.handle("embedded-browser:resource:start", (t, r) => e.startCapturedResources(r)), x.handle("embedded-browser:resource:stop", (t, r) => e.stopCapturedResources(r)), x.handle("embedded-browser:resource:clear", (t, r) => e.clearCapturedResources(r)), x.handle("embedded-browser:resource:open", async (t, r, n) => e.openResource(r, n)), x.handle("embedded-browser:resource:export", async (t, r, n) => e.exportResource(r, n)), x.handle(
+  ), D.handle("embedded-browser:reload", async (t, r) => e.reload(r)), D.handle("embedded-browser:go-back", async (t, r) => e.goBack(r)), D.handle("embedded-browser:go-forward", async (t, r) => e.goForward(r)), D.handle("embedded-browser:resource:list", (t, r) => e.listCapturedResources(r)), D.handle("embedded-browser:resource:start", (t, r) => e.startCapturedResources(r)), D.handle("embedded-browser:resource:stop", (t, r) => e.stopCapturedResources(r)), D.handle("embedded-browser:resource:clear", (t, r) => e.clearCapturedResources(r)), D.handle("embedded-browser:resource:open", async (t, r, n) => e.openResource(r, n)), D.handle("embedded-browser:resource:export", async (t, r, n) => e.exportResource(r, n)), D.handle(
     "embedded-browser:resource:preview",
     async (t, r, n) => e.previewResource(r, n)
-  ), x.handle("embedded-browser:resource:catch-toolkit:get-state", async (t, r) => e.getCatchToolkitState(r)), x.handle(
+  ), D.handle("embedded-browser:resource:catch-toolkit:get-state", async (t, r) => e.getCatchToolkitState(r)), D.handle(
     "embedded-browser:resource:catch-toolkit:update-state",
     async (t, r, n) => e.updateCatchToolkitState(r, n)
-  ), x.handle("embedded-browser:resource:catch-toolkit:clear-cache", async (t, r) => e.clearCatchMediaCache(r)), x.handle("embedded-browser:resource:catch-toolkit:download", async (t, r) => e.downloadCatchMedia(r)), x.handle("embedded-browser:resource:catch-toolkit:restart", async (t, r) => e.restartCatchMediaCapture(r)), x.handle(
+  ), D.handle("embedded-browser:resource:catch-toolkit:clear-cache", async (t, r) => e.clearCatchMediaCache(r)), D.handle("embedded-browser:resource:catch-toolkit:download", async (t, r) => e.downloadCatchMedia(r)), D.handle("embedded-browser:resource:catch-toolkit:restart", async (t, r) => e.restartCatchMediaCapture(r)), D.handle(
     "embedded-browser:resource:merge-mse",
     async (t, r, n) => e.mergeMseResources(r, n)
-  ), x.handle("embedded-browser:resource:start-deep-capture", async (t, r) => e.startDeepResourceCapture(r)), x.handle("embedded-browser:set-bounds", (t, r) => e.setBounds(t.sender, r)), x.handle("embedded-browser:close-tab", (t, r) => e.closeTab(t.sender, r)), x.handle("embedded-browser:cleanup-download-file", async (t, r) => e.cleanupDownloadFile(r)), x.handle("embedded-browser:deactivate", (t) => e.deactivate(t.sender)), x.handle("embedded-browser:close-all", (t) => e.closeAll(t.sender));
+  ), D.handle("embedded-browser:resource:start-deep-capture", async (t, r) => e.startDeepResourceCapture(r)), D.handle("embedded-browser:set-bounds", (t, r) => e.setBounds(t.sender, r)), D.handle("embedded-browser:close-tab", (t, r) => e.closeTab(t.sender, r)), D.handle("embedded-browser:cleanup-download-file", async (t, r) => e.cleanupDownloadFile(r)), D.handle("embedded-browser:deactivate", (t) => e.deactivate(t.sender)), D.handle("embedded-browser:close-all", (t) => e.closeAll(t.sender));
 }
 const ve = "persist:omniflow-embedded-browser", Hr = "embedded-browser-downloads";
 let Ne = null, at = !1;
@@ -735,8 +735,8 @@ function Kr(e) {
     return;
   at = !0;
   const t = (o, i, c) => {
-    const m = e.resolveTabIdByWebContents(c) || void 0;
-    if (!m)
+    const p = e.resolveTabIdByWebContents(c) || void 0;
+    if (!p)
       return;
     const w = zr(), b = jr(), y = i.getFilename() || "download", S = i.getURL() || "", h = c.getURL() || void 0, R = C.join(w, Vr(y));
     i.setSavePath(R), e.emitDownload(Ce(i, {
@@ -745,7 +745,7 @@ function Kr(e) {
       mimeType: i.getMimeType() || void 0,
       pageUrl: h,
       state: "started",
-      tabId: m,
+      tabId: p,
       tempPath: R,
       url: S
     })), i.on("updated", (U, F) => {
@@ -755,7 +755,7 @@ function Kr(e) {
         mimeType: i.getMimeType() || void 0,
         pageUrl: h,
         state: "progress",
-        tabId: m,
+        tabId: p,
         tempPath: R,
         url: S
       }));
@@ -767,7 +767,7 @@ function Kr(e) {
           mimeType: i.getMimeType() || void 0,
           pageUrl: h,
           state: "completed",
-          tabId: m,
+          tabId: p,
           tempPath: R,
           url: S
         }));
@@ -781,7 +781,7 @@ function Kr(e) {
         mimeType: i.getMimeType() || void 0,
         pageUrl: h,
         state: F === "cancelled" ? "cancelled" : "failed",
-        tabId: m,
+        tabId: p,
         tempPath: R,
         url: S
       }));
@@ -951,7 +951,7 @@ function It(e, t) {
   const n = String(t.url || "").trim();
   if (!n)
     return null;
-  const o = String(t.resourceKey || "").trim() || void 0, i = Pt(e, t.source, n, o), c = r.resources.get(i), m = {
+  const o = String(t.resourceKey || "").trim() || void 0, i = Pt(e, t.source, n, o), c = r.resources.get(i), p = {
     ...c,
     ...t,
     ext: t.ext || (c == null ? void 0 : c.ext) || Ze(n) || void 0,
@@ -961,7 +961,7 @@ function It(e, t) {
     tabId: e,
     url: n
   };
-  return JSON.stringify(c) !== JSON.stringify(m) ? (r.resources.set(i, m), xe == null || xe(m), m) : c || null;
+  return JSON.stringify(c) !== JSON.stringify(p) ? (r.resources.set(i, p), xe == null || xe(p), p) : c || null;
 }
 function sn(e) {
   const t = Ee(e);
@@ -1012,8 +1012,8 @@ function mn(e) {
       se.delete(t.id);
       return;
     }
-    const o = Gt.fromId(t.webContentsId), i = String(t.url || "").trim(), c = se.get(t.id), m = ke($e(t.responseHeaders, "content-type")), w = _t({
-      mimeType: m,
+    const o = Gt.fromId(t.webContentsId), i = String(t.url || "").trim(), c = se.get(t.id), p = ke($e(t.responseHeaders, "content-type")), w = _t({
+      mimeType: p,
       resourceType: t.resourceType,
       url: i
     });
@@ -1027,7 +1027,7 @@ function mn(e) {
       ext: Ze(i) || void 0,
       kind: w,
       method: t.method || void 0,
-      mimeType: m,
+      mimeType: p,
       pageUrl: (o == null ? void 0 : o.getURL()) || void 0,
       referer: (c == null ? void 0 : c.referer) || t.referrer || void 0,
       requestHeaders: c == null ? void 0 : c.requestHeaders,
@@ -1035,7 +1035,7 @@ function mn(e) {
       source: "network",
       statusCode: t.statusCode || void 0,
       streamType: Dt({
-        mimeType: m,
+        mimeType: p,
         resourceType: t.resourceType,
         url: i
       }),
@@ -1232,11 +1232,11 @@ function Tn(e, t) {
   const r = [], n = /<link\b[^>]*>/gi, o = /([a-zA-Z_:][-a-zA-Z0-9_:.]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/g;
   let i;
   for (; i = n.exec(e); ) {
-    const c = i[0], m = /* @__PURE__ */ new Map();
+    const c = i[0], p = /* @__PURE__ */ new Map();
     let w;
     for (o.lastIndex = 0; w = o.exec(c); )
-      m.set(w[1].toLowerCase(), w[2] || w[3] || w[4] || "");
-    const b = m.get("rel") || "", y = m.get("href") || "";
+      p.set(w[1].toLowerCase(), w[2] || w[3] || w[4] || "");
+    const b = p.get("rel") || "", y = p.get("href") || "";
     if (!y || !/(^|\s)(shortcut\s+icon|icon|apple-touch-icon|mask-icon)(\s|$)/i.test(b))
       continue;
     const S = Ft(y, t);
@@ -1248,8 +1248,8 @@ async function Cn(e) {
   const t = String((e == null ? void 0 : e.pageUrl) || "").trim(), r = Se.fromPartition(ve), n = [], o = Ft(String((e == null ? void 0 : e.iconUrl) || ""), t || void 0);
   if (o && !o.startsWith("data:") && n.push(o), t) {
     try {
-      const c = await r.fetch(t), m = c.headers.get("content-type") || "";
-      c.ok && /text\/html|application\/xhtml\+xml/i.test(m) && n.push(...Tn(await c.text(), t));
+      const c = await r.fetch(t), p = c.headers.get("content-type") || "";
+      c.ok && /text\/html|application\/xhtml\+xml/i.test(p) && n.push(...Tn(await c.text(), t));
     } catch (c) {
       A.warn("embedded browser favicon page inspect failed", {
         error: c instanceof Error ? c.message : String(c),
@@ -1267,10 +1267,10 @@ async function Cn(e) {
     if (!c || i.has(c))
       continue;
     i.add(c);
-    const m = await kt(r, c);
-    if (m)
+    const p = await kt(r, c);
+    if (p)
       return {
-        dataUrl: m,
+        dataUrl: p,
         iconUrl: c
       };
   }
@@ -1325,7 +1325,7 @@ async function _n(e) {
   return typeof t == "string" && t.trim() ? t.trim() : null;
 }
 async function xn(e, t, r) {
-  var m;
+  var p;
   if (!t || r.length === 0)
     return !1;
   try {
@@ -1336,7 +1336,7 @@ async function xn(e, t, r) {
   }
   const n = await e.webContents.debugger.sendCommand("DOM.getDocument", {
     depth: 1
-  }), o = Number(((m = n == null ? void 0 : n.root) == null ? void 0 : m.nodeId) || 0);
+  }), o = Number(((p = n == null ? void 0 : n.root) == null ? void 0 : p.nodeId) || 0);
   if (!Number.isFinite(o) || o <= 0)
     return !1;
   const i = await e.webContents.debugger.sendCommand("DOM.querySelector", {
@@ -1635,8 +1635,8 @@ function Wn() {
         try {
           if (!l.buffered || l.buffered.length === 0)
             return;
-          const _ = l.buffered.end(l.buffered.length - 1), q = Math.max(_ - 5, 0), D = Number.isFinite(l.duration) ? l.duration : 0;
-          if (D > 0 && _ >= D)
+          const x = l.buffered.end(l.buffered.length - 1), q = Math.max(x - 5, 0), P = Number.isFinite(l.duration) ? l.duration : 0;
+          if (P > 0 && x >= P)
             return;
           Math.abs(l.currentTime - q) > 1 && (l.currentTime = q);
         } catch {
@@ -1677,8 +1677,8 @@ function Wn() {
               e(v);
               return;
             }
-            v.querySelectorAll("video, audio").forEach((_) => {
-              _ instanceof HTMLMediaElement && e(_);
+            v.querySelectorAll("video, audio").forEach((x) => {
+              x instanceof HTMLMediaElement && e(x);
             });
           }
         });
@@ -1692,12 +1692,12 @@ function Wn() {
     let l = !1;
     return mseStreams.forEach((s) => {
       if (s.blobUrl && (URL.revokeObjectURL(s.blobUrl), s.blobUrl = ""), isCaptureComplete) {
-        l = l || s.buffers.length > 0, s.buffers = [], s.bufferCount = 0, s.lastReportedBufferCount = 0, s.lastReportedBytes = 0, s.totalBytes = 0, m(s.streamId);
+        l = l || s.buffers.length > 0, s.buffers = [], s.bufferCount = 0, s.lastReportedBufferCount = 0, s.lastReportedBytes = 0, s.totalBytes = 0, p(s.streamId);
         return;
       }
       if (s.buffers.length > 1) {
         const v = s.buffers[0];
-        s.buffers = v ? [v] : [], s.bufferCount = s.buffers.length, s.totalBytes = (v == null ? void 0 : v.byteLength) || 0, s.lastReportedBufferCount = s.bufferCount, s.lastReportedBytes = s.totalBytes, l = !0, m(s.streamId);
+        s.buffers = v ? [v] : [], s.bufferCount = s.buffers.length, s.totalBytes = (v == null ? void 0 : v.byteLength) || 0, s.lastReportedBufferCount = s.bufferCount, s.lastReportedBytes = s.totalBytes, l = !0, p(s.streamId);
       }
     }), isCaptureComplete = !1, l;
   }
@@ -1709,8 +1709,8 @@ function Wn() {
       return !1;
     const s = resolveCatchToolkitFileName();
     return l.forEach((v) => {
-      const _ = normalizeBuffersForPlayback(v.buffers), q = new Blob(_, { type: v.mimeType }), D = document.createElement("a"), K = URL.createObjectURL(q), L = guessExtensionFromMimeType(v.mimeType, v.streamType), Z = l.length > 1 && v.streamType ? `-${v.streamType}` : "";
-      D.href = K, D.download = `${s}${Z}.${L}`, D.click(), D.remove(), setTimeout(() => {
+      const x = normalizeBuffersForPlayback(v.buffers), q = new Blob(x, { type: v.mimeType }), P = document.createElement("a"), K = URL.createObjectURL(q), L = guessExtensionFromMimeType(v.mimeType, v.streamType), Z = l.length > 1 && v.streamType ? `-${v.streamType}` : "";
+      P.href = K, P.download = `${s}${Z}.${L}`, P.click(), P.remove(), setTimeout(() => {
         URL.revokeObjectURL(K);
       }, 1e3);
     }), catchToolkitState.clearCacheOnComplete && setTimeout(() => {
@@ -1734,7 +1734,7 @@ function Wn() {
   function c(l) {
     return `mse-stream:${l}`;
   }
-  function m(l) {
+  function p(l) {
     const s = mseStreams.get(l);
     s && emit({
       contentLength: s.totalBytes,
@@ -1755,7 +1755,7 @@ function Wn() {
     s.blobUrl && (URL.revokeObjectURL(s.blobUrl), s.blobUrl = "");
     try {
       const v = normalizeBuffersForPlayback(s.buffers);
-      return s.blobUrl = URL.createObjectURL(new Blob(v, { type: s.mimeType })), m(l), !0;
+      return s.blobUrl = URL.createObjectURL(new Blob(v, { type: s.mimeType })), p(l), !0;
     } catch {
       return !1;
     }
@@ -1768,15 +1768,15 @@ function Wn() {
     const s = mseStreams.get(l);
     if (!s)
       return "media.bin";
-    const v = resolveCatchToolkitFileName(), _ = s.streamType ? `-${s.streamType}` : "", q = guessExtensionFromMimeType(s.mimeType, s.streamType);
-    return `${v}${_}.${q}`;
+    const v = resolveCatchToolkitFileName(), x = s.streamType ? `-${s.streamType}` : "", q = guessExtensionFromMimeType(s.mimeType, s.streamType);
+    return `${v}${x}.${q}`;
   }
   function S(l) {
     const s = String(l || "").replace(/^mse-stream:/, ""), v = b(s);
     if (!v || typeof document > "u")
       return !1;
-    const _ = document.createElement("a");
-    return _.href = v, _.download = y(s), _.click(), _.remove(), catchToolkitState.clearCacheOnComplete && setTimeout(() => {
+    const x = document.createElement("a");
+    return x.href = v, x.download = y(s), x.click(), x.remove(), catchToolkitState.clearCacheOnComplete && setTimeout(() => {
       n();
     }, 0), !0;
   }
@@ -1789,9 +1789,9 @@ function Wn() {
     if (!v || v.buffers.length === 0)
       return null;
     try {
-      const _ = normalizeBuffersForPlayback(v.buffers), D = await new Blob(_, { type: v.mimeType }).arrayBuffer();
+      const x = normalizeBuffersForPlayback(v.buffers), P = await new Blob(x, { type: v.mimeType }).arrayBuffer();
       return {
-        base64: arrayBufferToBase64(D),
+        base64: arrayBufferToBase64(P),
         fileName: y(s),
         mimeType: v.mimeType,
         resourceKey: l,
@@ -1920,7 +1920,7 @@ function $n() {
       };
     }
   }
-  function m(b) {
+  function p(b) {
     const y = String(b || "").trim();
     if (!y)
       return {
@@ -1957,7 +1957,7 @@ function $n() {
       n.trimExtraMediaHeaders
     ), n.selectorRule = c(
       o(r.selectorRule)
-    ).rule, n.regexRule = m(
+    ).rule, n.regexRule = p(
       o(r.regexRule)
     ).rule);
   }
@@ -1967,8 +1967,8 @@ function Hn() {
   var Z, de;
   const e = globalScope.Worker;
   typeof e == "function" && (globalScope.Worker = new Proxy(e, {
-    construct(f, p, g) {
-      const [B, E] = p, O = () => {
+    construct(f, m, g) {
+      const [B, E] = m, _ = () => {
         const X = typeof B == "string" ? B : String(B), oe = toAbsoluteUrl(X) || X;
         if (!oe)
           return "";
@@ -1985,18 +1985,18 @@ function Hn() {
         }
         return URL.createObjectURL(new Blob([ie], { type: "text/javascript" }));
       };
-      let P = "";
+      let M = "";
       try {
-        P = O();
+        M = _();
       } catch {
-        P = "";
+        M = "";
       }
-      const H = P ? Reflect.construct(f, [P, E], g) : Reflect.construct(f, p, g);
-      return H.addEventListener("message", (X) => {
+      const N = M ? Reflect.construct(f, [M, E], g) : Reflect.construct(f, m, g);
+      return N.addEventListener("message", (X) => {
         consumeWorkerRelayMessage(X.data) && X.stopImmediatePropagation();
-      }, { capture: !0 }), P && setTimeout(() => {
-        URL.revokeObjectURL(P);
-      }, 6e4), H;
+      }, { capture: !0 }), M && setTimeout(() => {
+        URL.revokeObjectURL(M);
+      }, 6e4), N;
     }
   }), globalScope.Worker.toString = function() {
     return e.toString();
@@ -2005,19 +2005,19 @@ function Hn() {
   if ((Z = t == null ? void 0 : t.prototype) != null && Z.addSourceBuffer) {
     const f = t.prototype.addSourceBuffer;
     t.prototype.addSourceBuffer = new Proxy(f, {
-      apply(p, g, B) {
-        var O;
-        const E = Reflect.apply(p, g, B);
+      apply(m, g, B) {
+        var _;
+        const E = Reflect.apply(m, g, B);
         try {
           ensureTrackedMediaObserver(), isCaptureComplete = !1;
-          const P = g, H = String((B == null ? void 0 : B[0]) || "").trim(), X = ((O = H.split(";")[0]) == null ? void 0 : O.trim().toLowerCase()) || "", oe = X.startsWith("audio/") ? "audio" : X.startsWith("video/") ? "video" : void 0, Y = `${Date.now()}-${++mseSequence}`, ie = mediaSourceStreams.get(P) || [];
-          if (ie.push(Y), mediaSourceStreams.set(P, ie), mseStreams.set(Y, {
+          const M = g, N = String((B == null ? void 0 : B[0]) || "").trim(), X = ((_ = N.split(";")[0]) == null ? void 0 : _.trim().toLowerCase()) || "", oe = X.startsWith("audio/") ? "audio" : X.startsWith("video/") ? "video" : void 0, Y = `${Date.now()}-${++mseSequence}`, ie = mediaSourceStreams.get(M) || [];
+          if (ie.push(Y), mediaSourceStreams.set(M, ie), mseStreams.set(Y, {
             blobUrl: "",
             bufferCount: 0,
             buffers: [],
             lastReportedBufferCount: 0,
             lastReportedBytes: 0,
-            mimeType: H || (oe === "audio" ? "audio/mp4" : "video/mp4"),
+            mimeType: N || (oe === "audio" ? "audio/mp4" : "video/mp4"),
             streamId: Y,
             streamType: oe,
             totalBytes: 0
@@ -2042,11 +2042,11 @@ function Hn() {
   if ((de = t == null ? void 0 : t.prototype) != null && de.endOfStream) {
     const f = t.prototype.endOfStream;
     t.prototype.endOfStream = new Proxy(f, {
-      apply(p, g, B) {
-        const E = Reflect.apply(p, g, B);
+      apply(m, g, B) {
+        const E = Reflect.apply(m, g, B);
         try {
-          if (isCaptureComplete = !0, (mediaSourceStreams.get(g) || []).forEach((P) => {
-            finalizeMseStream(P);
+          if (isCaptureComplete = !0, (mediaSourceStreams.get(g) || []).forEach((M) => {
+            finalizeMseStream(M);
           }), catchToolkitState.autoDownloadOnComplete)
             return setTimeout(() => {
               downloadCatchMediaInternal();
@@ -2060,7 +2060,7 @@ function Hn() {
       }
     });
   }
-  function r(f, p) {
+  function r(f, m) {
     if (typeof f != "string")
       return;
     const g = f.trim();
@@ -2070,38 +2070,38 @@ function Hn() {
     if (emitKeyCandidateFromHex(B))
       return;
     if (dataUrlPattern.test(g)) {
-      const H = decodeDataUrlText(g);
-      H && r(H, p);
+      const N = decodeDataUrlText(g);
+      N && r(N, m);
       return;
     }
     const E = parseMaybeJson(g);
     if (E) {
-      if (emitVimeoPlaylistManifest((p == null ? void 0 : p.baseUrl) || currentLocationHref, E))
+      if (emitVimeoPlaylistManifest((m == null ? void 0 : m.baseUrl) || currentLocationHref, E))
         return;
-      n(E);
+      n(E, 0, /* @__PURE__ */ new WeakSet(), [], (m == null ? void 0 : m.baseUrl) || currentLocationHref);
       return;
     }
-    const O = g.toUpperCase();
-    if (O.startsWith("#EXTM3U") || O.includes("#EXTINF:")) {
-      emitInlineManifest(g, "m3u8", p == null ? void 0 : p.baseUrl);
+    const _ = g.toUpperCase();
+    if (_.startsWith("#EXTM3U") || _.includes("#EXTINF:")) {
+      emitInlineManifest(g, "m3u8", m == null ? void 0 : m.baseUrl);
       return;
     }
     if (g.toLowerCase().includes("urn:mpeg:dash:schema:mpd") || g.includes("<MPD") && g.includes("</MPD>")) {
-      emitInlineManifest(g, "mpd", p == null ? void 0 : p.baseUrl);
+      emitInlineManifest(g, "mpd", m == null ? void 0 : m.baseUrl);
       return;
     }
-    const P = toAbsoluteUrl(g);
-    P && (registerManifestBaseUrl(P), emit({
-      kind: classifyKind(P, p == null ? void 0 : p.mimeType),
-      mimeType: p == null ? void 0 : p.mimeType,
-      resourceType: p == null ? void 0 : p.resourceType,
+    const M = toAbsoluteUrl(g);
+    M && (registerManifestBaseUrl(M), emit({
+      kind: classifyKind(M, m == null ? void 0 : m.mimeType),
+      mimeType: m == null ? void 0 : m.mimeType,
+      resourceType: m == null ? void 0 : m.resourceType,
       source: "probe",
-      streamType: p == null ? void 0 : p.streamType,
-      url: P
+      streamType: m == null ? void 0 : m.streamType,
+      url: M
     }));
   }
-  function n(f, p = 0, g = /* @__PURE__ */ new WeakSet(), B = []) {
-    if (p > 6 || f == null)
+  function n(f, m = 0, g = /* @__PURE__ */ new WeakSet(), B = [], E = currentLocationHref) {
+    if (m > 6 || f == null)
       return;
     if (f instanceof ArrayBuffer) {
       emitKeyCandidateFromBuffer(f);
@@ -2113,7 +2113,7 @@ function Hn() {
     }
     if (typeof f == "string") {
       r(f, {
-        baseUrl: currentLocationHref,
+        baseUrl: E,
         resourceType: "json",
         streamType: inferStreamTypeFromPath(B)
       });
@@ -2121,36 +2121,36 @@ function Hn() {
     }
     if (typeof f != "object")
       return;
-    const E = f;
-    if (!g.has(E)) {
-      if (g.add(E), Array.isArray(f)) {
-        if (f.length === 16 && f.every((O) => typeof O == "number" && Number.isFinite(O) && O >= 0 && O <= 255)) {
+    const _ = f;
+    if (!g.has(_)) {
+      if (g.add(_), Array.isArray(f)) {
+        if (f.length === 16 && f.every((M) => typeof M == "number" && Number.isFinite(M) && M >= 0 && M <= 255)) {
           emitKeyCandidateFromBuffer(Uint8Array.from(f).buffer);
           return;
         }
-        f.slice(0, 80).forEach((O, P) => {
-          n(O, p + 1, g, B.concat(String(P)));
+        f.slice(0, 80).forEach((M, N) => {
+          n(M, m + 1, g, B.concat(String(N)), E);
         });
         return;
       }
-      Object.keys(f).slice(0, 80).forEach((O) => {
-        n(f[O], p + 1, g, B.concat(O));
+      Object.keys(f).slice(0, 80).forEach((M) => {
+        n(f[M], m + 1, g, B.concat(M), E);
       });
     }
   }
   const o = typeof globalScope.fetch == "function" ? globalScope.fetch.bind(globalScope) : null;
-  o && (globalScope.fetch = async function(f, p) {
+  o && (globalScope.fetch = async function(f, m) {
     const g = typeof f == "string" ? f : f instanceof Request ? f.url : String(f);
     r(g, { resourceType: "fetch" });
-    const B = await o(f, p);
+    const B = await o(f, m);
     return r(B.url || g, {
       mimeType: B.headers.get("content-type") || void 0,
       resourceType: "fetch"
-    }), B.clone().arrayBuffer().then((O) => {
-      if (!O.byteLength || emitKeyCandidateFromBuffer(O))
+    }), B.clone().arrayBuffer().then((_) => {
+      if (!_.byteLength || emitKeyCandidateFromBuffer(_))
         return;
-      const P = new TextDecoder().decode(O);
-      P.trim() && r(P, {
+      const M = new TextDecoder().decode(_);
+      M.trim() && r(M, {
         baseUrl: B.url || g,
         mimeType: B.headers.get("content-type") || void 0,
         resourceType: "fetch-body"
@@ -2161,16 +2161,16 @@ function Hn() {
     return o.toString();
   });
   const i = "__OMNIFLOW_RESOURCE_PROBE_XHR_URL__", c = XMLHttpRequest.prototype.open;
-  XMLHttpRequest.prototype.open = function(f, p) {
-    return this[i] = typeof p == "string" ? p : String(p), c.apply(this, arguments);
+  XMLHttpRequest.prototype.open = function(f, m) {
+    return this[i] = typeof m == "string" ? m : String(m), c.apply(this, arguments);
   };
-  const m = XMLHttpRequest.prototype.send;
+  const p = XMLHttpRequest.prototype.send;
   XMLHttpRequest.prototype.send = function() {
     return this.addEventListener("loadend", function() {
       if (this.status < 200 || this.status >= 400)
         return;
-      const f = this[i], p = this.responseURL || (typeof f == "string" ? f : "");
-      if (r(p, {
+      const f = this[i], m = this.responseURL || (typeof f == "string" ? f : "");
+      if (r(m, {
         mimeType: this.getResponseHeader("content-type") || void 0,
         resourceType: "xhr"
       }), this.response instanceof ArrayBuffer) {
@@ -2178,7 +2178,7 @@ function Hn() {
           return;
         const g = new TextDecoder().decode(this.response);
         g && r(g, {
-          baseUrl: p,
+          baseUrl: m,
           mimeType: this.getResponseHeader("content-type") || void 0,
           resourceType: "xhr-body"
         });
@@ -2186,7 +2186,7 @@ function Hn() {
       }
       if (typeof this.response == "string") {
         r(this.response, {
-          baseUrl: p,
+          baseUrl: m,
           mimeType: this.getResponseHeader("content-type") || void 0,
           resourceType: "xhr-body"
         });
@@ -2197,15 +2197,15 @@ function Hn() {
         return;
       }
       typeof this.responseText == "string" && this.responseText.trim() && r(this.responseText, {
-        baseUrl: p,
+        baseUrl: m,
         mimeType: this.getResponseHeader("content-type") || void 0,
         resourceType: "xhr-body"
       });
-    }, { once: !0 }), m.apply(this, arguments);
+    }, { once: !0 }), p.apply(this, arguments);
   }, XMLHttpRequest.prototype.open.toString = function() {
     return c.toString();
   }, XMLHttpRequest.prototype.send.toString = function() {
-    return m.toString();
+    return p.toString();
   }, JSON.parse = function() {
     const f = originalJSONParse.apply(this, arguments);
     return n(f), f;
@@ -2214,26 +2214,26 @@ function Hn() {
   };
   const w = btoa;
   globalScope.btoa = function(f) {
-    const p = w.apply(this, arguments);
-    return emitKeyCandidateFromBase64(p), r(f, { baseUrl: currentLocationHref, resourceType: "btoa" }), p;
+    const m = w.apply(this, arguments);
+    return emitKeyCandidateFromBase64(m), r(f, { baseUrl: currentLocationHref, resourceType: "btoa" }), m;
   }, btoa.toString = function() {
     return w.toString();
   };
   const b = atob;
   globalScope.atob = function(f) {
-    const p = b.apply(this, arguments);
-    return emitKeyCandidateFromBase64(f), r(p, { baseUrl: currentLocationHref, resourceType: "atob" }), p;
+    const m = b.apply(this, arguments);
+    return emitKeyCandidateFromBase64(f), r(m, { baseUrl: currentLocationHref, resourceType: "atob" }), m;
   }, atob.toString = function() {
     return b.toString();
   };
   const y = String.fromCharCode;
   String.fromCharCode = new Proxy(y, {
-    apply(f, p, g) {
-      const B = Reflect.apply(f, p, g);
+    apply(f, m, g) {
+      const B = Reflect.apply(f, m, g);
       if (B.length >= 7) {
         if ((B.startsWith("#EXTM3U") || B.includes("#EXTINF:")) && (m3u8Accumulator += B, m3u8Accumulator.includes("#EXT-X-ENDLIST"))) {
-          const O = m3u8Accumulator.split("#EXT-X-ENDLIST")[0] + "#EXT-X-ENDLIST";
-          emitInlineManifest(O, "m3u8", currentLocationHref), m3u8Accumulator = "";
+          const _ = m3u8Accumulator.split("#EXT-X-ENDLIST")[0] + "#EXT-X-ENDLIST";
+          emitInlineManifest(_, "m3u8", currentLocationHref), m3u8Accumulator = "";
         }
         const E = B.split("").join("").trim();
         emitKeyCandidateFromHex(E);
@@ -2246,7 +2246,7 @@ function Hn() {
   const S = Array.prototype.slice;
   Array.prototype.slice = function() {
     const f = S.apply(this, arguments);
-    return Array.isArray(f) && f.length === 16 && f.every((p) => typeof p == "number" && Number.isFinite(p) && p >= 0 && p <= 255) && emitKeyCandidateFromBuffer(Uint8Array.from(f).buffer), f;
+    return Array.isArray(f) && f.length === 16 && f.every((m) => typeof m == "number" && Number.isFinite(m) && m >= 0 && m <= 255) && emitKeyCandidateFromBuffer(Uint8Array.from(f).buffer), f;
   }, Array.prototype.slice.toString = function() {
     return S.toString();
   };
@@ -2259,18 +2259,18 @@ function Hn() {
   };
   const R = globalScope.DataView;
   if (typeof R == "function") {
-    const f = function(p, g, B) {
-      const E = new R(p, g, B), O = () => {
-        const P = E.buffer.slice(E.byteOffset, E.byteOffset + E.byteLength);
-        emitKeyCandidateFromBuffer(P);
+    const f = function(m, g, B) {
+      const E = new R(m, g, B), _ = () => {
+        const M = E.buffer.slice(E.byteOffset, E.byteOffset + E.byteLength);
+        emitKeyCandidateFromBuffer(M);
       };
-      return ["setInt8", "setUint8", "setInt16", "setUint16", "setInt32", "setUint32"].forEach((P) => {
-        const H = E[P];
-        typeof H == "function" && (E[P] = function() {
-          const X = H.apply(this, arguments);
-          return O(), X;
+      return ["setInt8", "setUint8", "setInt16", "setUint16", "setInt32", "setUint32"].forEach((M) => {
+        const N = E[M];
+        typeof N == "function" && (E[M] = function() {
+          const X = N.apply(this, arguments);
+          return _(), X;
         });
-      }), O(), E;
+      }), _(), E;
     };
     f.prototype = R.prototype, f.toString = function() {
       return R.toString();
@@ -2278,17 +2278,17 @@ function Hn() {
   }
   function U(f) {
     return new Proxy(f, {
-      construct(p, g, B) {
-        const E = Reflect.construct(p, g, B);
+      construct(m, g, B) {
+        const E = Reflect.construct(m, g, B);
         try {
           if (isEmittingKeyCandidate)
             return E;
-          const O = g == null ? void 0 : g[0];
-          if (Array.isArray(O) && O.length === 16 && O.every((H) => typeof H == "number" && Number.isFinite(H) && H >= 0 && H <= 255))
-            return emitKeyCandidateFromBuffer(new j(O).buffer), E;
-          if (O instanceof ArrayBuffer && O.byteLength === 16)
-            return emitKeyCandidateFromBuffer(O), E;
-          E.byteLength === 16 && (p.name === "Uint32Array" && E.length === 4 ? emitKeyCandidateFromBuffer(uint32ArrayToUint8Array(E).buffer) : p.name === "Uint16Array" && E.length === 8 ? emitKeyCandidateFromBuffer(uint16ArrayToUint8Array(E).buffer) : emitKeyCandidateFromBuffer(E.buffer.slice(E.byteOffset, E.byteOffset + E.byteLength)));
+          const _ = g == null ? void 0 : g[0];
+          if (Array.isArray(_) && _.length === 16 && _.every((N) => typeof N == "number" && Number.isFinite(N) && N >= 0 && N <= 255))
+            return emitKeyCandidateFromBuffer(new j(_).buffer), E;
+          if (_ instanceof ArrayBuffer && _.byteLength === 16)
+            return emitKeyCandidateFromBuffer(_), E;
+          E.byteLength === 16 && (m.name === "Uint32Array" && E.length === 4 ? emitKeyCandidateFromBuffer(uint32ArrayToUint8Array(E).buffer) : m.name === "Uint16Array" && E.length === 8 ? emitKeyCandidateFromBuffer(uint16ArrayToUint8Array(E).buffer) : emitKeyCandidateFromBuffer(E.buffer.slice(E.byteOffset, E.byteOffset + E.byteLength)));
         } catch {
         }
         return E;
@@ -2311,26 +2311,26 @@ function Hn() {
   }, globalScope.escape.toString = function() {
     return v.toString();
   });
-  function _(f) {
+  function x(f) {
     return function() {
-      const p = f.apply(this, arguments);
-      return (p == null ? void 0 : p.byteLength) === 16 && emitKeyCandidateFromBuffer(p.buffer.slice(p.byteOffset, p.byteOffset + p.byteLength)), p;
+      const m = f.apply(this, arguments);
+      return (m == null ? void 0 : m.byteLength) === 16 && emitKeyCandidateFromBuffer(m.buffer.slice(m.byteOffset, m.byteOffset + m.byteLength)), m;
     };
   }
   const q = Int8Array.prototype.subarray;
-  Int8Array.prototype.subarray = _(q), Int8Array.prototype.subarray.toString = function() {
+  Int8Array.prototype.subarray = x(q), Int8Array.prototype.subarray.toString = function() {
     return q.toString();
   };
-  const D = Uint8Array.prototype.subarray;
-  Uint8Array.prototype.subarray = _(D), Uint8Array.prototype.subarray.toString = function() {
-    return D.toString();
+  const P = Uint8Array.prototype.subarray;
+  Uint8Array.prototype.subarray = x(P), Uint8Array.prototype.subarray.toString = function() {
+    return P.toString();
   };
   const K = String.prototype.indexOf;
-  String.prototype.indexOf = function(f, p) {
+  String.prototype.indexOf = function(f, m) {
     const g = K.apply(this, arguments);
     if (f === "#EXTM3U" && g !== -1) {
       const B = String(this);
-      r(B.slice(Math.max(p ?? 0, 0)), {
+      r(B.slice(Math.max(m ?? 0, 0)), {
         baseUrl: currentLocationHref,
         resourceType: "string-indexof"
       });
@@ -2345,13 +2345,13 @@ function Hn() {
         const f = [
           /["']((?:(?:https?:)?\/\/)?[^"'\s]*?\.(?:m3u8|mp4|flv)(?:\?[^"'\s]*)?)["']/gi
         ];
-        document.querySelectorAll("script:not([src])").forEach((p) => {
-          const g = p.textContent || "";
+        document.querySelectorAll("script:not([src])").forEach((m) => {
+          const g = m.textContent || "";
           g && f.forEach((B) => {
             let E = B.exec(g);
             for (; E; ) {
-              const O = String(E[1] || E[0] || "").replace(/['"]/g, "").trim(), P = O && !/^https?:\/\//i.test(O) && O.startsWith("//") ? `${currentLocationProtocol}${O}` : O;
-              r(P, {
+              const _ = String(E[1] || E[0] || "").replace(/['"]/g, "").trim(), M = _ && !/^https?:\/\//i.test(_) && _.startsWith("//") ? `${currentLocationProtocol}${_}` : _;
+              r(M, {
                 baseUrl: currentLocationHref,
                 resourceType: "inline-script"
               }), E = B.exec(g);
@@ -2460,22 +2460,22 @@ function qn(e) {
       url: e.currentUrls.get(e.tabId) || r.webContents.getURL() || void 0
     });
   }), r.webContents.on("page-favicon-updated", (o, i) => {
-    const c = i.map((m) => String(m || "").trim()).find((m) => m) || "";
-    c && En(r, c).then((m) => {
-      !m || r.webContents.isDestroyed() || (e.iconSourceUrls.set(e.tabId, c), e.iconUrls.set(e.tabId, m), e.emitTabState(e.tabId, r, {
+    const c = i.map((p) => String(p || "").trim()).find((p) => p) || "";
+    c && En(r, c).then((p) => {
+      !p || r.webContents.isDestroyed() || (e.iconSourceUrls.set(e.tabId, c), e.iconUrls.set(e.tabId, p), e.emitTabState(e.tabId, r, {
         details: "page-favicon-updated",
         iconSourceUrl: c,
-        iconUrl: m,
+        iconUrl: p,
         state: "ready",
         url: e.currentUrls.get(e.tabId) || r.webContents.getURL() || void 0
       }));
     });
-  }), r.webContents.on("did-fail-load", (o, i, c, m) => {
+  }), r.webContents.on("did-fail-load", (o, i, c, p) => {
     i !== -3 && e.emitTabState(e.tabId, r, {
       details: `did-fail-load(${i})`,
       state: "error",
       message: `页面加载失败：${c || "未知错误"}`,
-      url: m
+      url: p
     });
   }), r.webContents.on("render-process-gone", (o, i) => {
     e.emitTabState(e.tabId, r, {
@@ -2484,7 +2484,7 @@ function qn(e) {
       message: `页面渲染进程异常退出：${i.reason}`,
       url: e.currentUrls.get(e.tabId) || r.webContents.getURL() || void 0
     });
-  }), r.webContents.on("console-message", (o, i, c, m, w) => {
+  }), r.webContents.on("console-message", (o, i, c, p, w) => {
     if (typeof c == "string" && c.startsWith(Ve)) {
       const b = c.slice(Ve.length);
       try {
@@ -2498,7 +2498,7 @@ function qn(e) {
       return;
     }
     e.debugEnabled && i >= 2 && e.emitTabState(e.tabId, r, {
-      details: `console:${w}:${m}`,
+      details: `console:${w}:${p}`,
       state: "ready",
       message: c,
       meta: [`console-level=${i}`],
@@ -2622,7 +2622,7 @@ async function no(e) {
       outputPath: e.outputPath,
       videoPath: o
     });
-    return await new Promise((m, w) => {
+    return await new Promise((p, w) => {
       const b = [], y = [], S = St(t, i, {
         stdio: ["ignore", "pipe", "pipe"]
       });
@@ -2634,7 +2634,7 @@ async function no(e) {
         w(h);
       }), S.once("exit", (h) => {
         if (h === 0) {
-          m({
+          p({
             commandArgs: i,
             ffmpegPath: t,
             outputPath: e.outputPath,
@@ -2652,7 +2652,7 @@ async function no(e) {
   }
 }
 function oo(e) {
-  const t = /* @__PURE__ */ new Map(), r = /* @__PURE__ */ new Map(), n = /* @__PURE__ */ new Map(), o = /* @__PURE__ */ new Map(), i = /* @__PURE__ */ new Map(), c = /* @__PURE__ */ new Map(), m = /* @__PURE__ */ new Map(), w = /* @__PURE__ */ new Map();
+  const t = /* @__PURE__ */ new Map(), r = /* @__PURE__ */ new Map(), n = /* @__PURE__ */ new Map(), o = /* @__PURE__ */ new Map(), i = /* @__PURE__ */ new Map(), c = /* @__PURE__ */ new Map(), p = /* @__PURE__ */ new Map(), w = /* @__PURE__ */ new Map();
   let b = null, y = null, S = !1;
   function h(a) {
     A.log("[embedded-browser:main]", a);
@@ -2698,7 +2698,7 @@ function oo(e) {
     if (d)
       return d;
   }
-  function _(a, d, u) {
+  function x(a, d, u) {
     h({
       canGoBack: d.webContents.canGoBack(),
       canGoForward: d.webContents.canGoForward(),
@@ -2710,13 +2710,13 @@ function oo(e) {
     });
   }
   function q(a, d, u) {
-    _(a, d, {
+    x(a, d, {
       state: "ready",
       url: (u == null ? void 0 : u.url) ?? (r.get(a) || d.webContents.getURL() || void 0),
       ...u
     });
   }
-  function D(a) {
+  function P(a) {
     const d = t.get(a);
     return !d || d.webContents.isDestroyed() ? (t.delete(a), r.delete(a), n.delete(a), o.delete(a), st(a), null) : d;
   }
@@ -2731,12 +2731,12 @@ function oo(e) {
     const u = String(a || "").trim();
     if (!u)
       return null;
-    const T = D(u);
+    const T = P(u);
     return !T || T.webContents.isDestroyed() ? null : d((I) => T.webContents.executeJavaScript(I, !0), T);
   }
   async function Z(a, d) {
-    const u = String(a || "").trim(), T = String(d.audioResourceKey || "").trim(), M = String(d.videoResourceKey || "").trim();
-    if (!u || !T || !M)
+    const u = String(a || "").trim(), T = String(d.audioResourceKey || "").trim(), O = String(d.videoResourceKey || "").trim();
+    if (!u || !T || !O)
       return {
         error: "缺少要合并的音频或视频资源",
         ok: !1
@@ -2746,7 +2746,7 @@ function oo(e) {
         u,
         async (nt) => Promise.all([
           mt(nt, T),
-          mt(nt, M)
+          mt(nt, O)
         ])
       ), [k, G] = I || [];
       if (!k || !G)
@@ -2782,7 +2782,7 @@ function oo(e) {
         audioResourceKey: T,
         error: I instanceof Error ? I.message : String(I),
         tabId: u,
-        videoResourceKey: M
+        videoResourceKey: O
       }), {
         error: I instanceof Error ? I.message : String(I),
         ok: !1
@@ -2800,20 +2800,20 @@ function oo(e) {
   function f(a) {
     if (!b)
       return;
-    const d = D(b);
+    const d = P(b);
     if (!d) {
       b = null;
       return;
     }
     a.contentView.children.includes(d) && a.contentView.removeChildView(d), b = null;
   }
-  function p(a) {
+  function m(a) {
     const d = e.getMainWindow();
     return !d || d.isDestroyed() ? null : qn({
       createIfMissingProbe: K,
       currentUrls: r,
       debugEnabled: e.debugEnabled,
-      emitTabState: _,
+      emitTabState: x,
       iconSourceUrls: o,
       iconUrls: n,
       onProbePayload: Kn(a),
@@ -2834,10 +2834,10 @@ function oo(e) {
       return null;
     if (!d)
       return f(a), null;
-    const M = u.createIfMissing ?? !1 ? p(d) : D(d);
-    return M ? (b && b !== d && f(a), de(M), a.contentView.children.includes(M) || a.contentView.addChildView(M), b = d, M) : (f(a), null);
+    const O = u.createIfMissing ?? !1 ? m(d) : P(d);
+    return O ? (b && b !== d && f(a), de(O), a.contentView.children.includes(O) || a.contentView.addChildView(O), b = d, O) : (f(a), null);
   }
-  async function B(a, d, u, T, M = !1) {
+  async function B(a, d, u, T, O = !1) {
     if (!a || a.isDestroyed())
       return;
     const I = String(d || "").trim();
@@ -2848,7 +2848,7 @@ function oo(e) {
       return;
     const G = String(u || "").trim();
     if (!G) {
-      _(I, k, {
+      x(I, k, {
         state: "ready",
         title: v(k) || "新标签页",
         url: r.get(I) || void 0
@@ -2856,14 +2856,14 @@ function oo(e) {
       return;
     }
     const le = r.get(I) || k.webContents.getURL();
-    if (M && le === G) {
-      _(I, k, {
+    if (O && le === G) {
+      x(I, k, {
         state: "ready",
         url: le || void 0
       });
       return;
     }
-    _(I, k, {
+    x(I, k, {
       details: "load-url",
       state: "loading",
       url: G
@@ -2874,7 +2874,7 @@ function oo(e) {
       const ae = Q instanceof Error ? Q.message : String(Q);
       if (ae.includes("ERR_ABORTED"))
         return;
-      throw _(I, k, {
+      throw x(I, k, {
         details: T,
         state: "error",
         message: `页面加载失败：${ae}`,
@@ -2888,9 +2888,9 @@ function oo(e) {
     const u = String(d || "").trim();
     if (!u)
       return;
-    const T = D(u);
+    const T = P(u);
     T && (a.contentView.children.includes(T) && a.contentView.removeChildView(T), b === u && (b = null), t.delete(u), r.delete(u), n.delete(u), o.delete(u), st(u), Be({
-      requestVersions: m,
+      requestVersions: p,
       tabId: u
     }), Re({
       attachedOpenFiles: c,
@@ -2898,15 +2898,15 @@ function oo(e) {
       tabId: u
     }), T.webContents.isDestroyed() || T.webContents.close({ waitForBeforeUnload: !1 }));
   }
-  async function O(a, d, u) {
-    const T = z.fromWebContents(a) ?? e.getMainWindow(), M = String(d || "").trim();
+  async function _(a, d, u) {
+    const T = z.fromWebContents(a) ?? e.getMainWindow(), O = String(d || "").trim();
     Be({
-      requestVersions: m,
-      tabId: M
+      requestVersions: p,
+      tabId: O
     }), Re({
       attachedOpenFiles: c,
       pendingOpenFiles: i,
-      tabId: M
+      tabId: O
     });
     const I = String(u || "").trim();
     if (!I) {
@@ -2914,34 +2914,34 @@ function oo(e) {
         canGoBack: !1,
         canGoForward: !1,
         state: "ready",
-        tabId: M,
+        tabId: O,
         title: "新标签页"
       });
       return;
     }
-    await B(T, M, I, "open-exception", !0);
+    await B(T, O, I, "open-exception", !0);
   }
-  function P(a, d) {
+  function M(a, d) {
     const u = z.fromWebContents(a) ?? e.getMainWindow();
     g(u, d, { createIfMissing: !1 });
   }
-  async function H(a, d, u) {
-    const T = z.fromWebContents(a) ?? e.getMainWindow(), M = String(d || "").trim();
+  async function N(a, d, u) {
+    const T = z.fromWebContents(a) ?? e.getMainWindow(), O = String(d || "").trim();
     Be({
-      requestVersions: m,
-      tabId: M
+      requestVersions: p,
+      tabId: O
     }), Re({
       attachedOpenFiles: c,
       pendingOpenFiles: i,
-      tabId: M
-    }), await B(T, M, u, "navigate-exception");
+      tabId: O
+    }), await B(T, O, u, "navigate-exception");
   }
-  async function X(a, d, u, T, M) {
-    const I = z.fromWebContents(a) ?? e.getMainWindow(), k = String(d || "").trim(), G = String(u || "").trim(), le = String(T || "").trim(), Q = String(M || "").trim() || "file";
+  async function X(a, d, u, T, O) {
+    const I = z.fromWebContents(a) ?? e.getMainWindow(), k = String(d || "").trim(), G = String(u || "").trim(), le = String(T || "").trim(), Q = String(O || "").trim() || "file";
     if (!k || !G || !le)
       return;
     const ae = Be({
-      requestVersions: m,
+      requestVersions: p,
       tabId: k
     });
     Re({
@@ -2951,7 +2951,7 @@ function oo(e) {
     });
     const ye = await Pn(le, Q);
     if (!lt({
-      requestVersions: m,
+      requestVersions: p,
       tabId: k,
       version: ae
     })) {
@@ -2964,12 +2964,12 @@ function oo(e) {
       pageUrl: G,
       stagedPath: ye
     }), await B(I, k, G, "navigate-exception"), !lt({
-      requestVersions: m,
+      requestVersions: p,
       tabId: k,
       version: ae
     }))
       return;
-    const me = D(k);
+    const me = P(k);
     me && ut({
       attachedOpenFiles: c,
       currentUrls: r,
@@ -2982,8 +2982,8 @@ function oo(e) {
     const d = String(a || "").trim();
     if (!d)
       return;
-    const u = D(d);
-    !u || u.webContents.isDestroyed() || (_(d, u, {
+    const u = P(d);
+    !u || u.webContents.isDestroyed() || (x(d, u, {
       details: "reload",
       state: "loading",
       url: r.get(d) || u.webContents.getURL() || void 0
@@ -2995,7 +2995,7 @@ function oo(e) {
     const d = String(a || "").trim();
     if (!d)
       return;
-    const u = D(d);
+    const u = P(d);
     !u || u.webContents.isDestroyed() || (u.webContents.canGoBack() && u.webContents.goBack(), q(d, u, {
       details: "history-back"
     }));
@@ -3004,7 +3004,7 @@ function oo(e) {
     const d = String(a || "").trim();
     if (!d)
       return;
-    const u = D(d);
+    const u = P(d);
     !u || u.webContents.isDestroyed() || (u.webContents.canGoForward() && u.webContents.goForward(), q(d, u, {
       details: "history-forward"
     }));
@@ -3013,10 +3013,10 @@ function oo(e) {
     return L(a, async (u, T) => {
       try {
         return await ft(u, "openResource", d);
-      } catch (M) {
+      } catch (O) {
         return A.warn("embedded browser resource probe action failed", {
           action: "openResource",
-          error: M instanceof Error ? M.message : String(M),
+          error: O instanceof Error ? O.message : String(O),
           resourceKey: String(d || "").trim(),
           tabId: String(a || "").trim(),
           url: T.webContents.getURL() || r.get(String(a || "").trim()) || ""
@@ -3028,10 +3028,10 @@ function oo(e) {
     return L(a, async (u, T) => {
       try {
         return await ft(u, "exportResource", d);
-      } catch (M) {
+      } catch (O) {
         return A.warn("embedded browser resource probe action failed", {
           action: "exportResource",
-          error: M instanceof Error ? M.message : String(M),
+          error: O instanceof Error ? O.message : String(O),
           resourceKey: String(d || "").trim(),
           tabId: String(a || "").trim(),
           url: T.webContents.getURL() || r.get(String(a || "").trim()) || ""
@@ -3069,9 +3069,9 @@ function oo(e) {
     return L(a, async (u, T) => {
       try {
         return await Wr(u, d);
-      } catch (M) {
+      } catch (O) {
         return A.warn("embedded browser catch toolkit update state failed", {
-          error: M instanceof Error ? M.message : String(M),
+          error: O instanceof Error ? O.message : String(O),
           payload: d,
           tabId: String(a || "").trim(),
           url: T.webContents.getURL() || r.get(String(a || "").trim()) || ""
@@ -3080,20 +3080,20 @@ function oo(e) {
     });
   }
   async function V(a, d, u) {
-    return L(a, async (T, M) => {
+    return L(a, async (T, O) => {
       try {
         return await Nr(T, d);
       } catch (I) {
         return A.warn(`embedded browser catch toolkit ${u} failed`, {
           error: I instanceof Error ? I.message : String(I),
           tabId: String(a || "").trim(),
-          url: M.webContents.getURL() || r.get(String(a || "").trim()) || ""
+          url: O.webContents.getURL() || r.get(String(a || "").trim()) || ""
         }), !1;
       }
     }).then((T) => !!T);
   }
   async function fe(a) {
-    const d = String(a || "").trim(), u = dn(d), T = D(d);
+    const d = String(a || "").trim(), u = dn(d), T = P(d);
     return T && !T.webContents.isDestroyed() && (T.webContents.getURL() ? T.webContents.reload() : await K(d, T)), u;
   }
   function tt(a, d) {
@@ -3102,10 +3102,10 @@ function oo(e) {
       y: 0,
       width: 0,
       height: 0
-    }, T = z.fromWebContents(a) ?? e.getMainWindow(), M = T && !T.isDestroyed() ? Math.max(T.webContents.getZoomFactor(), 0.01) : 1;
-    if (u.x = Math.max(0, Math.round(d.x * M)), u.y = Math.max(0, Math.round(d.y * M)), u.width = Math.max(0, Math.round(d.width * M)), u.height = Math.max(0, Math.round(d.height * M)), y = u, !b)
+    }, T = z.fromWebContents(a) ?? e.getMainWindow(), O = T && !T.isDestroyed() ? Math.max(T.webContents.getZoomFactor(), 0.01) : 1;
+    if (u.x = Math.max(0, Math.round(d.x * O)), u.y = Math.max(0, Math.round(d.y * O)), u.width = Math.max(0, Math.round(d.width * O)), u.height = Math.max(0, Math.round(d.height * O)), y = u, !b)
       return;
-    const I = D(b);
+    const I = P(b);
     I && I.setBounds(u);
   }
   function zt(a, d) {
@@ -3131,7 +3131,7 @@ function oo(e) {
   }
   function Kt() {
     $r({
-      activateTab: P,
+      activateTab: M,
       cleanupDownloadFile: jt,
       clearCapturedResources: (a) => un(String(a || "").trim()),
       clearCatchMediaCache: (a) => V(a, "clearCatchMediaCache", "clear cache"),
@@ -3145,10 +3145,10 @@ function oo(e) {
       goForward: ie,
       listCapturedResources: (a) => sn(String(a || "").trim()),
       mergeMseResources: Z,
-      navigate: H,
+      navigate: N,
       openMappedFile: X,
       openResource: ee,
-      openTab: O,
+      openTab: _,
       previewResource: We,
       reload: oe,
       resolveFavicon: Cn,
@@ -3168,16 +3168,16 @@ function oo(e) {
 }
 const io = 240;
 function ao(e) {
-  x.on("window-minimize", (t) => {
+  D.on("window-minimize", (t) => {
     const r = z.fromWebContents(t.sender) ?? e.getMainWindow();
     r == null || r.minimize();
-  }), x.on("window-maximize", (t) => {
+  }), D.on("window-maximize", (t) => {
     const r = z.fromWebContents(t.sender) ?? e.getMainWindow();
     !r || r.isDestroyed() || (r.isMaximized() ? r.unmaximize() : r.maximize());
-  }), x.on("window-close", (t) => {
+  }), D.on("window-close", (t) => {
     const r = z.fromWebContents(t.sender) ?? e.getMainWindow();
     r == null || r.close();
-  }), x.handle("window-activate", (t, r = !1) => {
+  }), D.handle("window-activate", (t, r = !1) => {
     const n = z.fromWebContents(t.sender) ?? e.getMainWindow();
     return !n || n.isDestroyed() ? !1 : (n.isMinimized() && n.restore(), n.isVisible() || n.show(), process.platform === "darwin" ? W.focus({ steal: !0 }) : W.focus(), typeof n.moveTop == "function" && n.moveTop(), n.focus(), r && !n.isAlwaysOnTop() && (n.setAlwaysOnTop(!0, "screen-saver"), setTimeout(() => {
       n.isDestroyed() || n.setAlwaysOnTop(!1);
@@ -3199,7 +3199,7 @@ try {
 function Wt() {
   return Fe(gt) ? gt : null;
 }
-let N = null, Nt = !1, Me = null;
+let $ = null, Nt = !1, Me = null;
 function $t() {
   return C.join(W.getPath("userData"), po);
 }
@@ -3271,11 +3271,11 @@ function Eo(e) {
 }
 const He = oo({
   debugEnabled: yo,
-  getMainWindow: () => N
+  getMainWindow: () => $
 });
 function Ht() {
-  if (N && !N.isDestroyed())
-    return N.show(), N.focus(), N;
+  if ($ && !$.isDestroyed())
+    return $.show(), $.focus(), $;
   const e = Wt(), t = So(), r = (t == null ? void 0 : t.width) ?? fo, n = (t == null ? void 0 : t.height) ?? mo, o = new z({
     width: r,
     height: n,
@@ -3291,7 +3291,7 @@ function Ht() {
     autoHideMenuBar: !0,
     ...e ? { icon: e } : {}
   });
-  return N = o, t != null && t.maximized && o.maximize(), o.on("move", () => {
+  return $ = o, t != null && t.maximized && o.maximize(), o.on("move", () => {
     _e(o);
   }), o.on("resize", () => {
     _e(o);
@@ -3302,7 +3302,7 @@ function Ht() {
   }), o.on("close", (i) => {
     et(o), process.platform === "darwin" && !Nt && (i.preventDefault(), o.hide());
   }), o.on("closed", () => {
-    N === o && (N = null);
+    $ === o && ($ = null);
   }), o.webContents.setZoomFactor(1), o.webContents.setVisualZoomLevelLimits(1, 1).catch(() => {
   }), o.webContents.on("before-input-event", (i, c) => {
     if (Eo(c)) {
@@ -3317,14 +3317,14 @@ function Ht() {
   }), Ue ? o.loadURL(Ue) : o.loadFile(C.join(Lt, "index.html")), o;
 }
 W.on("before-quit", () => {
-  Nt = !0, N && !N.isDestroyed() && et(N);
+  Nt = !0, $ && !$.isDestroyed() && et($);
 });
 W.on("window-all-closed", () => {
   process.platform !== "darwin" && W.quit();
 });
 W.on("activate", () => {
-  if (N && !N.isDestroyed()) {
-    N.isMinimized() && N.restore(), N.show(), N.focus();
+  if ($ && !$.isDestroyed()) {
+    $.isMinimized() && $.restore(), $.show(), $.focus();
     return;
   }
   z.getAllWindows().length === 0 && Ht();
@@ -3332,7 +3332,7 @@ W.on("activate", () => {
 W.whenReady().then(() => {
   const e = Wt();
   e && process.platform === "darwin" && W.dock.setIcon(e), He.configureSession(), He.initializeBridges(), Ur(), ao({
-    getMainWindow: () => N
+    getMainWindow: () => $
   }), He.registerIpcHandlers(), Ht();
 });
 export {
