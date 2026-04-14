@@ -36,6 +36,11 @@ export default defineConfig(({ mode }) => {
       main: {
         // Shortcut of `build.lib.entry`.
         entry: 'electron/main.ts',
+        vite: {
+          build: {
+            minify: false,
+          },
+        },
       },
       preload: {
         // Shortcut of `build.rollupOptions.input`.

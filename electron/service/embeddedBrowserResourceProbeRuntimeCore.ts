@@ -8,8 +8,8 @@ export function embeddedBrowserResourceProbeRuntimeCoreBody() {
   const globalScope = globalThis as typeof globalThis & {
     __OMNIFLOW_EMBEDDED_BROWSER_RESOURCE_PROBE__?: {
       exportResource?: (resourceKey: string) => boolean
-      getCatchToolkitState?: () => ProbeCatchToolkitState
-      installedAt: number
+	      getCatchToolkitState?: () => ProbeCatchToolkitState
+	      installedAt: number
       clearCatchMediaCache?: () => boolean
       downloadCatchMedia?: () => boolean
       openResource?: (resourceKey: string) => boolean
@@ -40,6 +40,15 @@ export function embeddedBrowserResourceProbeRuntimeCoreBody() {
   }
 
   const seen = new Set<string>()
+  const probeDiagnostics = {
+    appendBufferCount: 0,
+    hookErrors: 0,
+    mediaSourceAvailable: typeof globalScope.MediaSource !== 'undefined',
+    mediaSourceHooked: false,
+    sourceBufferCount: 0,
+    lastAppendAt: 0,
+    lastError: '',
+  }
   const mseStreams = new Map<string, {
     blobUrl: string
     bufferCount: number
@@ -465,14 +474,40 @@ export function embeddedBrowserResourceProbeRuntimeCoreBody() {
     const capturedMediaSizeBytes = Array.from(mseStreams.values()).reduce((totalBytes, stream) => {
       return totalBytes + Math.max(0, Number(stream.totalBytes || 0))
     }, 0)
+    const sortedStreams = Array.from(mseStreams.values())
+      .filter((stream) => stream.buffers.length > 0 || stream.totalBytes > 0)
+      .sort((left, right) => {
+        const sizeDelta = Math.max(0, Number(right.totalBytes || 0)) - Math.max(0, Number(left.totalBytes || 0))
+        if (sizeDelta !== 0) {
+          return sizeDelta
+        }
+        return String(left.streamId).localeCompare(String(right.streamId))
+      })
+    const primaryStream = sortedStreams[0]
+    const audioStream = sortedStreams.find((stream) => stream.streamType === 'audio')
+    const videoStream = sortedStreams.find((stream) => stream.streamType === 'video')
     return {
+      audioResourceKey: audioStream ? createMseResourceKey(audioStream.streamId) : '',
+      audioSizeBytes: audioStream ? Math.max(0, Number(audioStream.totalBytes || 0)) : 0,
       autoSeekToBufferedEnd: catchToolkitState.autoSeekToBufferedEnd,
       autoDownloadOnComplete: catchToolkitState.autoDownloadOnComplete,
       capturedMediaSizeBytes,
       clearCacheOnComplete: catchToolkitState.clearCacheOnComplete,
       currentFileName: resolveCatchToolkitFileName(),
+      diagnostics: {
+        appendBufferCount: probeDiagnostics.appendBufferCount,
+        frameUrl: currentLocationHref,
+        hookErrors: probeDiagnostics.hookErrors,
+        installedAt: globalScope.__OMNIFLOW_EMBEDDED_BROWSER_RESOURCE_PROBE__?.installedAt || Date.now(),
+        lastAppendAt: probeDiagnostics.lastAppendAt,
+        lastError: probeDiagnostics.lastError,
+        mediaSourceAvailable: probeDiagnostics.mediaSourceAvailable,
+        mediaSourceHooked: probeDiagnostics.mediaSourceHooked,
+        sourceBufferCount: probeDiagnostics.sourceBufferCount,
+      },
       isCaptureComplete,
       manualFileName: catchToolkitState.manualFileName,
+      primaryResourceKey: primaryStream ? createMseResourceKey(primaryStream.streamId) : '',
       regexWarning: regexEvaluation.warning,
       regexRule: regexEvaluation.rule,
       restartAlwaysFromBeginning: catchToolkitState.restartAlwaysFromBeginning,
@@ -480,17 +515,26 @@ export function embeddedBrowserResourceProbeRuntimeCoreBody() {
       selectorRule: selectorEvaluation.rule,
       streamCount: mseStreams.size,
       trimExtraMediaHeaders: catchToolkitState.trimExtraMediaHeaders,
+      videoResourceKey: videoStream ? createMseResourceKey(videoStream.streamId) : '',
+      videoSizeBytes: videoStream ? Math.max(0, Number(videoStream.totalBytes || 0)) : 0,
     }
   }
 
   function cloneChunk(input: unknown) {
     if (input instanceof ArrayBuffer) {
-      return input.slice(0)
+      return input
     }
     if (ArrayBuffer.isView(input)) {
-      return input.buffer.slice(input.byteOffset, input.byteOffset + input.byteLength)
+      return input
     }
     return null
+  }
+
+  function getChunkBytes(input: ArrayBuffer | ArrayBufferView) {
+    if (input instanceof ArrayBuffer) {
+      return new Uint8Array(input)
+    }
+    return new Uint8Array(input.buffer, input.byteOffset, input.byteLength)
   }
 
   function arrayBufferToBase64(buffer: ArrayBuffer) {
@@ -785,7 +829,7 @@ export function embeddedBrowserResourceProbeRuntimeCoreBody() {
   }
 
   function isMp4HeaderChunk(chunk: ArrayBuffer) {
-    const data = new Uint8Array(chunk)
+    const data = getChunkBytes(chunk)
     return (
       data.length > 8
       && data[4] === 0x66
@@ -796,7 +840,7 @@ export function embeddedBrowserResourceProbeRuntimeCoreBody() {
   }
 
   function isWebmHeaderChunk(chunk: ArrayBuffer) {
-    const data = new Uint8Array(chunk)
+    const data = getChunkBytes(chunk)
     return (
       data.length > 4
       && data[0] === 0x1A
@@ -874,4 +918,81 @@ export function embeddedBrowserResourceProbeRuntimeCoreBody() {
     return undefined
   }
 
+  ;(globalScope as typeof globalScope & {
+    __OMNIFLOW_EMBEDDED_BROWSER_PROBE_CORE_KEEP_ALIVE__?: unknown[]
+  }).__OMNIFLOW_EMBEDDED_BROWSER_PROBE_CORE_KEEP_ALIVE__ = [
+    arrayBufferToBase64,
+    autoRestartHandledMediaElements,
+    base64ToArrayBuffer,
+    buildCatchToolkitState,
+    catchToolkitState,
+    catchToolkitStorageKeys,
+    classifyKind,
+    cloneChunk,
+    currentLocationHost,
+    currentLocationHref,
+    currentLocationProtocol,
+    dataUrlPattern,
+    decodeDataUrlText,
+    emit,
+    emitGeneratedResource,
+    emitKeyCandidateFromBase64,
+    emitKeyCandidateFromBuffer,
+    emitKeyCandidateFromHex,
+    getChunkBytes,
+    getCurrentDocumentTitle,
+    getExtension,
+    globalScope,
+    guessExtensionFromMimeType,
+    hydrateCatchToolkitStateFromStorage,
+    imageExtensions,
+    imagePattern,
+    inferStreamTypeFromPath,
+    isCaptureComplete,
+    isEmittingKeyCandidate,
+    isLikelyBase64Key,
+    isLikelyHexKey,
+    isMp4HeaderChunk,
+    isRepeatedExpansion,
+    isWebmHeaderChunk,
+    isWorkerScope,
+    keyExtensions,
+    keyPattern,
+    likelyUrlPattern,
+    manifestExtensions,
+    manifestPattern,
+    mediaExtensions,
+    mediaPattern,
+    mediaSourceStreams,
+    mseSequence,
+    mseStreams,
+    normalizeBuffersForPlayback,
+    normalizePotentialKeyBuffer,
+    openWindow,
+    originalConsoleInfo,
+    originalJSONParse,
+    pdfPattern,
+    persistCatchToolkitState,
+    probeDiagnostics,
+    probeResourceKeysBySignature,
+    probeResourceSequence,
+    probeResources,
+    readCatchToolkitStorageChecked,
+    readCatchToolkitStorageString,
+    relayEnvelope,
+    resolveCatchToolkitFileName,
+    sanitizeFileName,
+    seen,
+    subtitleExtensions,
+    subtitlePattern,
+    textToBase64,
+    toAbsoluteUrl,
+    trackedMediaElements,
+    trackedMediaObserver,
+    uint16ArrayToUint8Array,
+    uint32ArrayToUint8Array,
+    workerRelayKey,
+    writeCatchToolkitStorageChecked,
+    writeCatchToolkitStorageString,
+  ]
 }

@@ -71,8 +71,13 @@ import {
 
 const DEFAULT_SIDE_PANEL_WIDTH = 300;
 const MIN_SIDE_PANEL_WIDTH = 220;
+const DEFAULT_BROWSER_RESOURCE_PANEL_WIDTH = 360;
+const MIN_BROWSER_RESOURCE_PANEL_WIDTH = DEFAULT_BROWSER_RESOURCE_PANEL_WIDTH;
+const MAX_BROWSER_RESOURCE_PANEL_WIDTH = DEFAULT_BROWSER_RESOURCE_PANEL_WIDTH * 2;
 const SIDE_PANEL_TRAFFIC_LIGHT_SAFE_HEIGHT = 37;
 const SIDE_PANEL_WIDTH_STORAGE_PREFIX = 'library-detail:side-panel-width:';
+const BROWSER_RESOURCE_PANEL_WIDTH_STORAGE_PREFIX = 'library-detail:browser-resource-panel-width:';
+const BROWSER_RESOURCE_PANEL_VISIBLE_STORAGE_PREFIX = 'library-detail:browser-resource-panel-visible:';
 const CONTENT_TOOLBAR_HEIGHT = 46;
 const TOOLBAR_ACTION_BUTTON_SIZE = 36;
 const TOOLBAR_ACTION_ICON_SIZE = 18;
@@ -87,6 +92,14 @@ function getSidePanelWidthStorageKey(libraryId: number) {
   return `${SIDE_PANEL_WIDTH_STORAGE_PREFIX}${libraryId}`;
 }
 
+function getBrowserResourcePanelWidthStorageKey(libraryId: number) {
+  return `${BROWSER_RESOURCE_PANEL_WIDTH_STORAGE_PREFIX}${libraryId}`;
+}
+
+function getBrowserResourcePanelVisibleStorageKey(libraryId: number) {
+  return `${BROWSER_RESOURCE_PANEL_VISIBLE_STORAGE_PREFIX}${libraryId}`;
+}
+
 function loadSidePanelWidth(libraryId: number): number {
   const raw = localStorage.getItem(getSidePanelWidthStorageKey(libraryId));
   if (!raw) return DEFAULT_SIDE_PANEL_WIDTH;
@@ -97,6 +110,39 @@ function loadSidePanelWidth(libraryId: number): number {
 
 function saveSidePanelWidth(libraryId: number, width: number) {
   localStorage.setItem(getSidePanelWidthStorageKey(libraryId), String(Math.floor(width)));
+}
+
+function loadBrowserResourcePanelWidth(libraryId: number): number {
+  const raw = localStorage.getItem(getBrowserResourcePanelWidthStorageKey(libraryId));
+  if (!raw) return DEFAULT_BROWSER_RESOURCE_PANEL_WIDTH;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) return DEFAULT_BROWSER_RESOURCE_PANEL_WIDTH;
+  return Math.max(
+    MIN_BROWSER_RESOURCE_PANEL_WIDTH,
+    Math.min(MAX_BROWSER_RESOURCE_PANEL_WIDTH, Math.floor(parsed)),
+  );
+}
+
+function saveBrowserResourcePanelWidth(libraryId: number, width: number) {
+  localStorage.setItem(
+    getBrowserResourcePanelWidthStorageKey(libraryId),
+    String(
+      Math.max(
+        MIN_BROWSER_RESOURCE_PANEL_WIDTH,
+        Math.min(MAX_BROWSER_RESOURCE_PANEL_WIDTH, Math.floor(width)),
+      ),
+    ),
+  );
+}
+
+function loadBrowserResourcePanelVisible(libraryId: number): boolean {
+  const raw = localStorage.getItem(getBrowserResourcePanelVisibleStorageKey(libraryId));
+  if (!raw) return true;
+  return raw !== '0';
+}
+
+function saveBrowserResourcePanelVisible(libraryId: number, visible: boolean) {
+  localStorage.setItem(getBrowserResourcePanelVisibleStorageKey(libraryId), visible ? '1' : '0');
 }
 
 const DetailWrapper = styled.div`
@@ -482,6 +528,38 @@ const ContentToolbar = styled.div`
     gap: 6px;
     margin-right: 6px;
     -webkit-app-region: no-drag;
+  }
+
+  .toolbar-pill-btn {
+    height: ${TOOLBAR_ACTION_BUTTON_SIZE}px;
+    border-radius: 8px;
+    border: 1px solid var(--app-border);
+    background: transparent;
+    color: var(--app-text-muted);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 12px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    -webkit-app-region: no-drag;
+  }
+
+  .toolbar-pill-btn:hover:not(:disabled) {
+    background: rgba(0, 0, 0, 0.05);
+    color: var(--app-text);
+  }
+
+  .toolbar-pill-btn.is-active {
+    border-color: var(--semi-color-primary);
+    color: var(--semi-color-primary);
+    background: var(--semi-color-primary-light-default);
+  }
+
+  .toolbar-pill-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
   }
   ${toolbarBackButtonStyles}
   ${toolbarActionButtonStyles}
@@ -913,6 +991,29 @@ const BrowserWorkspaceMain = styled.div`
   display: flex;
 `;
 
+const BrowserWorkspaceAside = styled.div`
+  position: relative;
+  flex-shrink: 0;
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  background: var(--app-bg-elevated);
+`;
+
+const BrowserWorkspaceAsideResizeHandle = styled.div`
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 8px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 2;
+
+  &:hover {
+    background: rgba(0, 0, 0, 0.04);
+  }
+`;
+
 function createBrowserTabId() {
   return `browser-tab:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -1129,6 +1230,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   const { setFileUrl, tabs, activeTabId, fileState, reloadActiveTab } = useFileViewer();
   const navigate = useNavigate();
   const sidePanelRef = React.useRef<HTMLDivElement>(null);
+  const browserResourcePanelRef = React.useRef<HTMLDivElement>(null);
   const directorySidebarRef = React.useRef<DirectorySidebarHandle | null>(null);
   const handleBrowserDownloadImportSuccess = React.useCallback(async ({ targetFolder }: { targetFolder: { id: number } }) => {
     await directorySidebarRef.current?.refreshNodeSubtree(targetFolder.id);
@@ -1171,6 +1273,12 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   const previousActiveBrowserTabIdRef = React.useRef<string | null>(null);
   const previousBrowserTabCountRef = React.useRef(0);
   const [sidePanelWidth, setSidePanelWidth] = React.useState<number>(() => loadSidePanelWidth(libraryId));
+  const [browserResourcePanelVisible, setBrowserResourcePanelVisible] = React.useState<boolean>(() => (
+    loadBrowserResourcePanelVisible(libraryId)
+  ));
+  const [browserResourcePanelWidth, setBrowserResourcePanelWidth] = React.useState<number>(() => (
+    loadBrowserResourcePanelWidth(libraryId)
+  ));
   const [browserModeOpen, setBrowserModeOpen] = React.useState(initialWorkspaceState.browserModeOpen);
   const [browserTabs, setBrowserTabs] = React.useState<BrowserTab[]>(initialWorkspaceState.browserTabs);
   const [activeBrowserTabId, setActiveBrowserTabId] = React.useState<string | null>(initialWorkspaceState.activeBrowserTabId);
@@ -1203,8 +1311,11 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   const browserInputRef = React.useRef<HTMLInputElement | null>(null);
   const latestWorkspaceStateRef = React.useRef<LibraryDetailWorkspaceState>(initialWorkspaceState);
   const latestPanelWidthRef = React.useRef<number>(sidePanelWidth);
+  const latestBrowserResourcePanelWidthRef = React.useRef<number>(browserResourcePanelWidth);
   const resizeMoveHandlerRef = React.useRef<((event: MouseEvent) => void) | null>(null);
   const resizeUpHandlerRef = React.useRef<(() => void) | null>(null);
+  const browserResourcePanelResizeMoveHandlerRef = React.useRef<((event: MouseEvent) => void) | null>(null);
+  const browserResourcePanelResizeUpHandlerRef = React.useRef<(() => void) | null>(null);
 
   const activeBrowserTab = React.useMemo(() => {
     if (!activeBrowserTabId) {
@@ -1261,6 +1372,19 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
     document.body.style.userSelect = "";
   }, []);
 
+  const cleanupBrowserResourcePanelResizeListeners = React.useCallback(() => {
+    if (browserResourcePanelResizeMoveHandlerRef.current) {
+      document.removeEventListener("mousemove", browserResourcePanelResizeMoveHandlerRef.current);
+      browserResourcePanelResizeMoveHandlerRef.current = null;
+    }
+    if (browserResourcePanelResizeUpHandlerRef.current) {
+      document.removeEventListener("mouseup", browserResourcePanelResizeUpHandlerRef.current);
+      browserResourcePanelResizeUpHandlerRef.current = null;
+    }
+    document.body.style.cursor = "";
+    document.body.style.userSelect = "";
+  }, []);
+
   React.useEffect(() => {
     const restored = loadSidePanelWidth(libraryId);
     latestPanelWidthRef.current = restored;
@@ -1268,10 +1392,24 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   }, [libraryId]);
 
   React.useEffect(() => {
+    const restoredWidth = loadBrowserResourcePanelWidth(libraryId);
+    const restoredVisible = loadBrowserResourcePanelVisible(libraryId);
+    latestBrowserResourcePanelWidthRef.current = restoredWidth;
+    setBrowserResourcePanelWidth(restoredWidth);
+    setBrowserResourcePanelVisible(restoredVisible);
+  }, [libraryId]);
+
+  React.useEffect(() => {
     return () => {
       cleanupResizeListeners();
     };
   }, [cleanupResizeListeners]);
+
+  React.useEffect(() => {
+    return () => {
+      cleanupBrowserResourcePanelResizeListeners();
+    };
+  }, [cleanupBrowserResourcePanelResizeListeners]);
 
   React.useEffect(() => {
     setCollapsedBookmarkFolderIds((current) => current.filter((id) => bookmarkFolderIds.includes(id)));
@@ -1322,6 +1460,46 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
     document.addEventListener("mousemove", onMouseMove);
     document.addEventListener("mouseup", onMouseUp);
   }, [cleanupResizeListeners, libraryId, sidePanelWidth]);
+
+  const handleBrowserResourcePanelResizeMouseDown = React.useCallback((event: React.MouseEvent) => {
+    event.preventDefault();
+    cleanupBrowserResourcePanelResizeListeners();
+    const startX = event.clientX;
+    const startWidth = browserResourcePanelRef.current?.offsetWidth || browserResourcePanelWidth;
+
+    const onMouseMove = (moveEvent: MouseEvent) => {
+      if (!browserResourcePanelRef.current) {
+        return;
+      }
+      const nextWidth = Math.max(
+        MIN_BROWSER_RESOURCE_PANEL_WIDTH,
+        Math.min(
+          MAX_BROWSER_RESOURCE_PANEL_WIDTH,
+          startWidth - (moveEvent.clientX - startX),
+        ),
+      );
+      browserResourcePanelRef.current.style.width = `${nextWidth}px`;
+      latestBrowserResourcePanelWidthRef.current = nextWidth;
+    };
+
+    const onMouseUp = () => {
+      const finalWidth = Math.floor(latestBrowserResourcePanelWidthRef.current);
+      setBrowserResourcePanelWidth(finalWidth);
+      saveBrowserResourcePanelWidth(libraryId, finalWidth);
+      cleanupBrowserResourcePanelResizeListeners();
+    };
+
+    browserResourcePanelResizeMoveHandlerRef.current = onMouseMove;
+    browserResourcePanelResizeUpHandlerRef.current = onMouseUp;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
+  }, [
+    browserResourcePanelWidth,
+    cleanupBrowserResourcePanelResizeListeners,
+    libraryId,
+  ]);
 
   const handleFileOpen = async (
     fileUrl: string,
@@ -1548,6 +1726,14 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
       Toast.error(error?.message || '收藏操作失败');
     }
   }, [activeBrowserTab, bookmarkMatch.matched, browserInput, reloadBookmarks]);
+
+  const toggleBrowserResourcePanel = React.useCallback(() => {
+    setBrowserResourcePanelVisible((current) => {
+      const nextValue = !current;
+      saveBrowserResourcePanelVisible(libraryId, nextValue);
+      return nextValue;
+    });
+  }, [libraryId]);
 
   const openBookmarkURL = React.useCallback((item: BrowserBookmarkItem) => {
     if (!isURLBookmark(item)) {
@@ -3131,6 +3317,14 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
                 >
                   {bookmarkMatch.matched ? <IconStar /> : <IconStarStroked />}
                 </button>
+                <button
+                  type="button"
+                  className={`toolbar-pill-btn ${browserResourcePanelVisible ? 'is-active' : ''}`}
+                  onClick={toggleBrowserResourcePanel}
+                  title={browserResourcePanelVisible ? '折叠资源捕获面板' : '展开资源捕获面板'}
+                >
+                  资源
+                </button>
               </div>
             </ContentToolbar>
             {bookmarkBarVisible && !activeBrowserTab?.url ? (
@@ -3211,10 +3405,20 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
                   onSubmitDraft={submitBrowserDraft}
                 />
               </BrowserWorkspaceMain>
-              <EmbeddedBrowserResourcePanel
-                activeTabId={activeBrowserTabId}
-                currentPageUrl={activeBrowserTab?.url ?? ''}
-              />
+              {browserResourcePanelVisible ? (
+                <BrowserWorkspaceAside
+                  ref={browserResourcePanelRef}
+                  style={{ width: `${browserResourcePanelWidth}px` }}
+                >
+                  <BrowserWorkspaceAsideResizeHandle
+                    onMouseDown={handleBrowserResourcePanelResizeMouseDown}
+                  />
+                  <EmbeddedBrowserResourcePanel
+                    activeTabId={activeBrowserTabId}
+                    currentPageUrl={activeBrowserTab?.url ?? ''}
+                  />
+                </BrowserWorkspaceAside>
+              ) : null}
             </BrowserWorkspace>
           ) : workspaceDisplayMode === 'search-home' ? (
             <SearchWorkspace

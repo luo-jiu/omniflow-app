@@ -1,4 +1,4 @@
-import { WebContentsView } from 'electron'
+import { WebContentsView, type WebContents } from 'electron'
 import { runtimeLogger } from '../runtimeLogger'
 import {
   EMBEDDED_BROWSER_PARTITION,
@@ -13,6 +13,8 @@ import {
   createEmbeddedBrowserResourceProbeScript,
 } from './embeddedBrowserResourceProbe'
 import { type EmbeddedBrowserCapturedResource, recordEmbeddedBrowserProbeResource } from './embeddedBrowserResourceService'
+
+const embeddedBrowserProbeNewDocumentScriptIds = new WeakMap<WebContents, string>()
 
 type CreateEmbeddedBrowserViewOptions = {
   createIfMissingProbe: (tabId: string, view: WebContentsView) => Promise<boolean>
@@ -145,6 +147,9 @@ export function createEmbeddedBrowserView(
       url: options.currentUrls.get(options.tabId) || view.webContents.getURL() || undefined,
     })
   })
+  view.webContents.debugger.on('detach', () => {
+    embeddedBrowserProbeNewDocumentScriptIds.delete(view.webContents)
+  })
   view.webContents.on('console-message', (_event, level, message, line, sourceId) => {
     if (typeof message === 'string' && message.startsWith(EMBEDDED_BROWSER_RESOURCE_CONSOLE_PREFIX)) {
       const rawPayload = message.slice(EMBEDDED_BROWSER_RESOURCE_CONSOLE_PREFIX.length)
@@ -208,8 +213,52 @@ export async function installEmbeddedBrowserResourceProbe(
   if (!isDeepCaptureEnabled(tabId) || view.webContents.isDestroyed()) {
     return false
   }
+  const probeScript = createEmbeddedBrowserResourceProbeScript()
   try {
-    await view.webContents.executeJavaScript(createEmbeddedBrowserResourceProbeScript(), true)
+    if (!view.webContents.debugger.isAttached()) {
+      view.webContents.debugger.attach('1.3')
+    }
+    const existingScriptId = embeddedBrowserProbeNewDocumentScriptIds.get(view.webContents)
+    if (existingScriptId) {
+      try {
+        await view.webContents.debugger.sendCommand('Page.removeScriptToEvaluateOnNewDocument', {
+          identifier: existingScriptId,
+        })
+      } catch {
+        // The previous script may belong to a detached or already reset debugger session.
+      }
+      embeddedBrowserProbeNewDocumentScriptIds.delete(view.webContents)
+    }
+    await view.webContents.debugger.sendCommand('Page.enable')
+    const result = await view.webContents.debugger.sendCommand('Page.addScriptToEvaluateOnNewDocument', {
+      source: probeScript,
+    }) as { identifier?: string }
+    if (result.identifier) {
+      embeddedBrowserProbeNewDocumentScriptIds.set(view.webContents, result.identifier)
+    }
+  } catch (error) {
+    runtimeLogger.warn('embedded browser resource probe document-start install failed', {
+      error: error instanceof Error ? error.message : String(error),
+      tabId,
+      url: view.webContents.getURL() || '',
+    })
+  }
+  try {
+    const mainFrame = view.webContents.mainFrame
+    const frames = mainFrame
+      ? [mainFrame, ...mainFrame.framesInSubtree.filter((frame) => frame !== mainFrame)]
+      : []
+    if (frames.length) {
+      await Promise.all(frames.map(async (frame) => {
+        try {
+          await frame.executeJavaScript(probeScript, true)
+        } catch {
+          // Cross-origin or transient frames can disappear during injection.
+        }
+      }))
+    } else {
+      await view.webContents.executeJavaScript(probeScript, true)
+    }
     return true
   } catch (error) {
     runtimeLogger.warn('embedded browser resource probe install failed', {

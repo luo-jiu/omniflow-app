@@ -5,8 +5,9 @@
 // These body fragments are compiled to JavaScript, sliced, and injected into the page runtime.
 // @ts-nocheck
 export function embeddedBrowserResourceProbeRuntimeHooksBody() {
+  const enableDeepRuntimeHooks = false
   const nativeWorker = globalScope.Worker
-  if (typeof nativeWorker === 'function') {
+  if (enableDeepRuntimeHooks && typeof nativeWorker === 'function') {
     globalScope.Worker = new Proxy(nativeWorker, {
       construct(target, argumentsList, newTarget) {
         const [scriptURL, options] = argumentsList as [string | URL, WorkerOptions | undefined]
@@ -76,6 +77,8 @@ export function embeddedBrowserResourceProbeRuntimeHooksBody() {
           appendBuffer?: SourceBuffer['appendBuffer']
         }
         try {
+          probeDiagnostics.mediaSourceHooked = true
+          probeDiagnostics.sourceBufferCount += 1
           ensureTrackedMediaObserver()
           isCaptureComplete = false
           const mediaSource = thisArg as MediaSource
@@ -120,6 +123,8 @@ export function embeddedBrowserResourceProbeRuntimeHooksBody() {
                 stream.buffers.push(chunk)
                 stream.bufferCount += 1
                 stream.totalBytes += chunk.byteLength
+                probeDiagnostics.appendBufferCount += 1
+                probeDiagnostics.lastAppendAt = Date.now()
                 const shouldReport = (
                   stream.bufferCount <= 3
                   || stream.bufferCount - stream.lastReportedBufferCount >= 8
@@ -134,7 +139,9 @@ export function embeddedBrowserResourceProbeRuntimeHooksBody() {
               },
             })
           }
-        } catch {
+        } catch (error) {
+          probeDiagnostics.hookErrors += 1
+          probeDiagnostics.lastError = error instanceof Error ? error.message : String(error)
           // ignore MSE hook failures and keep playback usable
         }
         return sourceBuffer
@@ -154,9 +161,6 @@ export function embeddedBrowserResourceProbeRuntimeHooksBody() {
             finalizeMseStream(streamId)
           })
           if (catchToolkitState.autoDownloadOnComplete) {
-            setTimeout(() => {
-              downloadCatchMediaInternal()
-            }, 500)
             return result
           }
           if (catchToolkitState.clearCacheOnComplete) {
@@ -171,6 +175,8 @@ export function embeddedBrowserResourceProbeRuntimeHooksBody() {
       },
     })
   }
+
+  if (enableDeepRuntimeHooks) {
 
   function reportCandidate(
     input: unknown,
@@ -659,4 +665,5 @@ export function embeddedBrowserResourceProbeRuntimeHooksBody() {
     }
   }
 
+  }
 }

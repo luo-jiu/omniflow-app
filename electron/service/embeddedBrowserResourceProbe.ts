@@ -4,5 +4,6 @@
  */
 export {
   EMBEDDED_BROWSER_RESOURCE_CONSOLE_PREFIX,
+  EMBEDDED_BROWSER_RESOURCE_INSTALL_ERROR_KEY,
   createEmbeddedBrowserResourceProbeScript,
 } from './embeddedBrowserResourceProbeScriptTemplate'

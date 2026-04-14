@@ -2,7 +2,10 @@ import { ipcMain } from 'electron'
 import type {
   EmbeddedBrowserBounds,
   EmbeddedBrowserCapturedResourceMergePayload,
+  EmbeddedBrowserCapturedResourceSavePayload,
   EmbeddedBrowserFaviconResolvePayload,
+  EmbeddedBrowserHlsDownloadPayload,
+  EmbeddedBrowserMpdDownloadPayload,
 } from './embeddedBrowserMainTypes'
 import type { EmbeddedBrowserCatchToolkitStatePayload } from './embeddedBrowserCatchToolkitPageBridge'
 import type {
@@ -19,6 +22,14 @@ type EmbeddedBrowserMainIpcHandlers = {
   closeTab: (sender: Electron.WebContents, tabId: string) => void | Promise<void>
   deactivate: (sender: Electron.WebContents) => void | Promise<void>
   downloadCatchMedia: (tabId: string) => Promise<boolean>
+  downloadHlsManifest: (
+    tabId: string,
+    payload: EmbeddedBrowserHlsDownloadPayload,
+  ) => Promise<unknown>
+  downloadMpdManifest: (
+    tabId: string,
+    payload: EmbeddedBrowserMpdDownloadPayload,
+  ) => Promise<unknown>
   exportResource: (tabId: string, resourceKey: string) => Promise<boolean>
   getCatchToolkitState: (tabId: string) => Promise<unknown>
   goBack: (tabId: string) => Promise<void>
@@ -43,6 +54,10 @@ type EmbeddedBrowserMainIpcHandlers = {
   reload: (tabId: string) => Promise<void>
   resolveFavicon: (payload: EmbeddedBrowserFaviconResolvePayload) => Promise<unknown>
   restartCatchMediaCapture: (tabId: string) => Promise<boolean>
+  saveResource: (
+    tabId: string,
+    payload: EmbeddedBrowserCapturedResourceSavePayload,
+  ) => Promise<unknown>
   setBounds: (sender: Electron.WebContents, bounds: EmbeddedBrowserBounds) => void | Promise<void>
   startCapturedResources: (tabId: string) => unknown
   startDeepResourceCapture: (tabId: string) => Promise<unknown>
@@ -123,6 +138,24 @@ export function registerEmbeddedBrowserMainIpcHandlers(handlers: EmbeddedBrowser
     'embedded-browser:resource:merge-mse',
     async (_event, tabId: string, payload: EmbeddedBrowserCapturedResourceMergePayload) => (
       handlers.mergeMseResources(tabId, payload)
+    ),
+  )
+  ipcMain.handle(
+    'embedded-browser:resource:save',
+    async (_event, tabId: string, payload: EmbeddedBrowserCapturedResourceSavePayload) => (
+      handlers.saveResource(tabId, payload)
+    ),
+  )
+  ipcMain.handle(
+    'embedded-browser:resource:download-hls',
+    async (_event, tabId: string, payload: EmbeddedBrowserHlsDownloadPayload) => (
+      handlers.downloadHlsManifest(tabId, payload)
+    ),
+  )
+  ipcMain.handle(
+    'embedded-browser:resource:download-mpd',
+    async (_event, tabId: string, payload: EmbeddedBrowserMpdDownloadPayload) => (
+      handlers.downloadMpdManifest(tabId, payload)
     ),
   )
   ipcMain.handle('embedded-browser:resource:start-deep-capture', async (_event, tabId: string) => (

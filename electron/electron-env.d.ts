@@ -182,6 +182,8 @@ type EmbeddedBrowserCapturedResourceMergeResponse = {
 };
 
 type EmbeddedBrowserCatchToolkitState = {
+  audioResourceKey: string;
+  audioSizeBytes: number;
   autoSeekToBufferedEnd: boolean;
   autoDownloadOnComplete: boolean;
   capturedMediaSizeBytes: number;
@@ -189,6 +191,7 @@ type EmbeddedBrowserCatchToolkitState = {
   currentFileName: string;
   isCaptureComplete: boolean;
   manualFileName: string;
+  primaryResourceKey: string;
   regexWarning: string;
   regexRule: string;
   restartAlwaysFromBeginning: boolean;
@@ -196,6 +199,8 @@ type EmbeddedBrowserCatchToolkitState = {
   selectorRule: string;
   streamCount: number;
   trimExtraMediaHeaders: boolean;
+  videoResourceKey: string;
+  videoSizeBytes: number;
 };
 
 interface Window {
@@ -225,11 +230,48 @@ interface Window {
       resourceKey: string;
       streamType?: 'audio' | 'video';
     } | null>;
+    saveCapturedResource: (tabId: string, payload: {
+      resourceKey?: string;
+      suggestedFileName?: string;
+    }) => Promise<{
+      cancelled?: boolean;
+      error?: string;
+      ok: boolean;
+      outputPath?: string;
+    }>;
     mergeCapturedMseResources: (tabId: string, payload: {
+      audioResource?: {
+        fileName?: string;
+        mimeType?: string;
+        requestHeaders?: Record<string, string>;
+        resourceKey?: string;
+        streamType?: 'audio' | 'video';
+        url?: string;
+      };
       audioResourceKey?: string;
       ffmpegPath?: string;
       suggestedFileName?: string;
+      videoResource?: {
+        fileName?: string;
+        mimeType?: string;
+        requestHeaders?: Record<string, string>;
+        resourceKey?: string;
+        streamType?: 'audio' | 'video';
+        url?: string;
+      };
       videoResourceKey?: string;
+    }) => Promise<EmbeddedBrowserCapturedResourceMergeResponse>;
+    downloadHlsManifest: (tabId: string, payload: {
+      ffmpegPath?: string;
+      headers?: Record<string, string>;
+      manifestUrl?: string;
+      suggestedFileName?: string;
+    }) => Promise<EmbeddedBrowserCapturedResourceMergeResponse>;
+    downloadMpdManifest: (tabId: string, payload: {
+      ffmpegPath?: string;
+      headers?: Record<string, string>;
+      manifestUrl?: string;
+      suggestedFileName?: string;
     }) => Promise<EmbeddedBrowserCapturedResourceMergeResponse>;
     getCatchToolkitState: (tabId: string) => Promise<EmbeddedBrowserCatchToolkitState | null>;
     updateCatchToolkitState: (

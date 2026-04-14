@@ -67,31 +67,43 @@ function isMediaSegmentCandidate(resource: EmbeddedBrowserCapturedResource) {
   )
 }
 
+function inferPlayableResourceRole(resource: EmbeddedBrowserCapturedResource) {
+  if (resource.streamType === 'audio' || resource.streamType === 'video') {
+    return resource.streamType
+  }
+  const mimeType = String(resource.mimeType || '').toLowerCase()
+  if (mimeType.startsWith('audio/')) {
+    return 'audio' as const
+  }
+  if (mimeType.startsWith('video/')) {
+    return 'video' as const
+  }
+  if (/(^|[\/_.-])audio([\/_.-]|$)/i.test(resource.url)) {
+    return 'audio' as const
+  }
+  if (/(^|[\/_.-])video([\/_.-]|$)/i.test(resource.url)) {
+    return 'video' as const
+  }
+  if (/(mp4a|aac|opus|vorbis|mp3|flac)/i.test(mimeType)) {
+    return 'audio' as const
+  }
+  if (/(avc1|av01|hev1|hvc1|vp8|vp9|theora)/i.test(mimeType)) {
+    return 'video' as const
+  }
+  return undefined
+}
+
 function pickPrimaryPlayableResources(resources: EmbeddedBrowserCapturedResource[]) {
   const playableResources = resources.filter(isMseCapturedResource)
   if (!playableResources.length) {
     return []
   }
 
-  const picked = new Map<string, EmbeddedBrowserCapturedResource>()
-  playableResources.forEach((resource) => {
-    const bucketKey = resource.streamType || resource.mimeType || resource.ext || resource.id
-    const previous = picked.get(bucketKey)
-    if (!previous) {
-      picked.set(bucketKey, resource)
-      return
-    }
-    const previousSize = previous.contentLength || 0
-    const currentSize = resource.contentLength || 0
-    if (currentSize > previousSize || (currentSize === previousSize && resource.capturedAt > previous.capturedAt)) {
-      picked.set(bucketKey, resource)
-    }
-  })
-
-  return Array.from(picked.values()).sort((left, right) => {
+  return [...playableResources].sort((left, right) => {
     const getStreamOrder = (value: EmbeddedBrowserCapturedResource) => {
-      if (value.streamType === 'video') return 0
-      if (value.streamType === 'audio') return 1
+      const role = inferPlayableResourceRole(value)
+      if (role === 'video') return 0
+      if (role === 'audio') return 1
       return 2
     }
     const orderDelta = getStreamOrder(left) - getStreamOrder(right)
@@ -104,14 +116,36 @@ function pickPrimaryPlayableResources(resources: EmbeddedBrowserCapturedResource
 
 export function findMergeableResourcePair(resources: EmbeddedBrowserCapturedResource[]) {
   const primaryPlayableResources = pickPrimaryPlayableResources(resources)
-  const video = primaryPlayableResources.find((resource) => resource.streamType === 'video')
-  const audio = primaryPlayableResources.find((resource) => resource.streamType === 'audio')
-  if (!video || !audio) {
+  const inferredVideo = primaryPlayableResources.find((resource) => inferPlayableResourceRole(resource) === 'video')
+  const inferredAudio = primaryPlayableResources.find((resource) => (
+    resource.id !== inferredVideo?.id && inferPlayableResourceRole(resource) === 'audio'
+  ))
+  if (inferredVideo && inferredAudio) {
+    return {
+      audio: inferredAudio,
+      video: inferredVideo,
+    } satisfies EmbeddedBrowserMergeableResourcePair
+  }
+
+  if (primaryPlayableResources.length < 2) {
     return null
   }
+
+  const sortedBySize = [...primaryPlayableResources].sort((left, right) => {
+    const sizeDelta = (right.contentLength || 0) - (left.contentLength || 0)
+    if (sizeDelta !== 0) {
+      return sizeDelta
+    }
+    return right.capturedAt - left.capturedAt
+  })
+  const [largestResource, secondLargestResource] = sortedBySize
+  if (!largestResource || !secondLargestResource || largestResource.id === secondLargestResource.id) {
+    return null
+  }
+
   return {
-    audio,
-    video,
+    audio: inferPlayableResourceRole(largestResource) === 'audio' ? largestResource : secondLargestResource,
+    video: inferPlayableResourceRole(secondLargestResource) === 'video' ? secondLargestResource : largestResource,
   } satisfies EmbeddedBrowserMergeableResourcePair
 }
 

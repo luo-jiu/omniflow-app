@@ -62,6 +62,22 @@ export async function readEmbeddedBrowserCapturedResource(tabId: string, resourc
   } | null>;
 }
 
+export async function saveEmbeddedBrowserCapturedResource(
+  tabId: string,
+  payload: {
+    resourceKey?: string;
+    suggestedFileName?: string;
+  },
+) {
+  assertDesktopSupport();
+  return window.electronEmbeddedBrowser.saveCapturedResource(tabId, payload) as Promise<{
+    cancelled?: boolean;
+    error?: string;
+    ok: boolean;
+    outputPath?: string;
+  }>;
+}
+
 export async function previewEmbeddedBrowserCapturedResource(
   tabId: string,
   payload: {
@@ -78,14 +94,68 @@ export async function previewEmbeddedBrowserCapturedResource(
 export async function mergeEmbeddedBrowserCapturedMseResources(
   tabId: string,
   payload: {
+    audioResource?: {
+      fileName?: string;
+      mimeType?: string;
+      requestHeaders?: Record<string, string>;
+      resourceKey?: string;
+      streamType?: 'audio' | 'video';
+      url?: string;
+    };
     audioResourceKey?: string;
     ffmpegPath?: string;
     suggestedFileName?: string;
+    videoResource?: {
+      fileName?: string;
+      mimeType?: string;
+      requestHeaders?: Record<string, string>;
+      resourceKey?: string;
+      streamType?: 'audio' | 'video';
+      url?: string;
+    };
     videoResourceKey?: string;
   },
 ) {
   assertDesktopSupport();
   return window.electronEmbeddedBrowser.mergeCapturedMseResources(tabId, payload) as Promise<{
+    cancelled?: boolean;
+    error?: string;
+    ffmpegPath?: string;
+    ok: boolean;
+    outputPath?: string;
+  }>;
+}
+
+export async function downloadEmbeddedBrowserHlsManifest(
+  tabId: string,
+  payload: {
+    ffmpegPath?: string;
+    headers?: Record<string, string>;
+    manifestUrl?: string;
+    suggestedFileName?: string;
+  },
+) {
+  assertDesktopSupport();
+  return window.electronEmbeddedBrowser.downloadHlsManifest(tabId, payload) as Promise<{
+    cancelled?: boolean;
+    error?: string;
+    ffmpegPath?: string;
+    ok: boolean;
+    outputPath?: string;
+  }>;
+}
+
+export async function downloadEmbeddedBrowserMpdManifest(
+  tabId: string,
+  payload: {
+    ffmpegPath?: string;
+    headers?: Record<string, string>;
+    manifestUrl?: string;
+    suggestedFileName?: string;
+  },
+) {
+  assertDesktopSupport();
+  return window.electronEmbeddedBrowser.downloadMpdManifest(tabId, payload) as Promise<{
     cancelled?: boolean;
     error?: string;
     ffmpegPath?: string;

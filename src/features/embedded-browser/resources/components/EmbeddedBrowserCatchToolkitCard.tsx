@@ -7,7 +7,18 @@ type EmbeddedBrowserCatchToolkitCardProps = {
   loading: boolean;
   state: EmbeddedBrowserCatchToolkitState;
   onClearCache: () => Promise<boolean>;
-  onDownloadMedia: () => Promise<boolean>;
+  onMergeCapturedMedia: () => Promise<{
+    cancelled?: boolean;
+    error?: string;
+    ok: boolean;
+    outputPath?: string;
+  } | null>;
+  onSaveCapturedMedia: () => Promise<{
+    cancelled?: boolean;
+    error?: string;
+    ok: boolean;
+    outputPath?: string;
+  } | null>;
   onRestartCapture: () => Promise<boolean>;
   onUpdateState: (payload: Partial<EmbeddedBrowserCatchToolkitState>) => Promise<EmbeddedBrowserCatchToolkitState>;
 };
@@ -31,7 +42,8 @@ const EmbeddedBrowserCatchToolkitCard: React.FC<EmbeddedBrowserCatchToolkitCardP
   loading,
   state,
   onClearCache,
-  onDownloadMedia,
+  onMergeCapturedMedia,
+  onSaveCapturedMedia,
   onRestartCapture,
   onUpdateState,
 }) => {
@@ -51,13 +63,110 @@ const EmbeddedBrowserCatchToolkitCard: React.FC<EmbeddedBrowserCatchToolkitCardP
     setRegexDraft(state.regexRule);
   }, [state.regexRule]);
 
+  const canMergeCapturedMedia = Boolean(state.videoResourceKey && state.audioResourceKey);
+  const canDownloadCapturedMedia = state.capturedMediaSizeBytes > 0;
+  const primaryActionText = canMergeCapturedMedia
+    ? '合并并下载'
+    : '下载捕捉文件';
+  const captureProgressText = state.capturedMediaSizeBytes > 0
+    ? `${formatCaptureBytes(state.capturedMediaSizeBytes)} 已捕捉`
+    : '等待播放器产生缓存数据';
+
   return (
   <section className="resource-toolkit-card">
+    <div className="resource-toolkit-recorder">
+      <div className="resource-toolkit-recorder-main">
+        <div className="resource-toolkit-status">
+          <span className={`resource-toolkit-status-dot ${state.isCaptureComplete ? 'is-complete' : 'is-recording'}`} />
+          <span>{state.isCaptureComplete ? '捕捉完成' : '正在缓存捕捉'}</span>
+        </div>
+        <div className="resource-toolkit-size">{formatCaptureBytes(state.capturedMediaSizeBytes)}</div>
+        <div className="resource-toolkit-progress" aria-label={captureProgressText}>
+          <div
+            className="resource-toolkit-progress-bar"
+            style={{
+              width: state.capturedMediaSizeBytes > 0 ? '100%' : '0%',
+            }}
+          />
+        </div>
+        <div className="resource-toolkit-track-summary">
+          <span>视频 {state.videoSizeBytes ? formatCaptureBytes(state.videoSizeBytes) : '等待中'}</span>
+          <span>音频 {state.audioSizeBytes ? formatCaptureBytes(state.audioSizeBytes) : '等待中'}</span>
+          <span>{state.streamCount} 条流</span>
+          <span>{state.diagnostics.frameCount || 0} 个 frame</span>
+          <span>SourceBuffer {state.diagnostics.sourceBufferCount}</span>
+          <span>append {state.diagnostics.appendBufferCount}</span>
+        </div>
+        <div className="resource-toolkit-track-summary">
+          <span>MediaSource {state.diagnostics.mediaSourceAvailable ? '存在' : '未见'}</span>
+          <span>hook {state.diagnostics.mediaSourceHooked ? '已触发' : '未触发'}</span>
+          {state.diagnostics.hookErrors ? <span>hook 错误 {state.diagnostics.hookErrors}</span> : null}
+        </div>
+        {state.diagnostics.lastError ? (
+          <div className="resource-toolkit-warning">{state.diagnostics.lastError}</div>
+        ) : null}
+      </div>
+      <div className="resource-toolkit-primary-actions">
+        <button
+          type="button"
+          className="resource-card-btn primary"
+          disabled={disabled || loading || !canDownloadCapturedMedia}
+          onClick={() => {
+            if (canMergeCapturedMedia) {
+              void onMergeCapturedMedia().then((result) => {
+                if (!result || result.cancelled) {
+                  return;
+                }
+                if (!result.ok) {
+                  Toast.error(result.error || '合并下载失败');
+                  return;
+                }
+                Toast.success('已合并并保存捕捉文件');
+              }).catch((error: any) => {
+                Toast.error(error?.message || '合并下载失败');
+              });
+              return;
+            }
+            void onSaveCapturedMedia().then((result) => {
+              if (!result || result.cancelled) {
+                return;
+              }
+              if (!result.ok) {
+                Toast.error(result.error || '保存捕捉文件失败');
+                return;
+              }
+              Toast.success('已保存捕捉文件');
+            }).catch((error: any) => {
+              Toast.error(error?.message || '保存捕捉文件失败');
+            });
+          }}
+        >
+          {primaryActionText}
+        </button>
+        <button
+          type="button"
+          className="resource-card-btn"
+          disabled={disabled || loading}
+          onClick={() => {
+            void onRestartCapture().then((success) => {
+              if (success) {
+                Toast.success('已从头重启当前页捕捉');
+              }
+            }).catch((error: any) => {
+              Toast.error(error?.message || '从头重捕失败');
+            });
+          }}
+        >
+          从头重捕
+        </button>
+      </div>
+    </div>
+
     <div className="resource-toolkit-header">
       <div>
         <div className="resource-toolkit-title">当前页捕捉工具</div>
         <div className="resource-toolkit-description">
-          这部分对应猫抓 `catch.js` 那类页内缓存捕捉能力，只作用在当前页。
+          播放器播放时会把缓存片段收进这里，大小会随捕捉增长；完成后优先合并音视频并弹出保存位置。
         </div>
       </div>
       <div className="resource-toolkit-badges">
@@ -74,6 +183,8 @@ const EmbeddedBrowserCatchToolkitCard: React.FC<EmbeddedBrowserCatchToolkitCardP
       </div>
     </div>
 
+    <details className="resource-toolkit-advanced">
+      <summary>捕捉设置</summary>
     <div className="resource-toolkit-settings">
       <label className="resource-toolkit-toggle">
         <input
@@ -103,7 +214,7 @@ const EmbeddedBrowserCatchToolkitCard: React.FC<EmbeddedBrowserCatchToolkitCardP
             });
           }}
         />
-        <span>捕获完成后自动导出</span>
+        <span>捕获完成后自动合并下载</span>
       </label>
       <label className="resource-toolkit-toggle">
         <input
@@ -237,24 +348,9 @@ const EmbeddedBrowserCatchToolkitCard: React.FC<EmbeddedBrowserCatchToolkitCardP
         </button>
       </div>
     </div>
+    </details>
 
     <div className="resource-toolkit-actions">
-      <button
-        type="button"
-        className="resource-card-btn"
-        disabled={disabled || loading}
-        onClick={() => {
-          void onDownloadMedia().then((success) => {
-            if (success) {
-              Toast.success('已触发当前页捕捉导出');
-            }
-          }).catch((error: any) => {
-            Toast.error(error?.message || '导出捕捉结果失败');
-          });
-        }}
-      >
-        导出当前捕捉
-      </button>
       <button
         type="button"
         className="resource-card-btn"
@@ -270,22 +366,6 @@ const EmbeddedBrowserCatchToolkitCard: React.FC<EmbeddedBrowserCatchToolkitCardP
         }}
       >
         清理页内缓存
-      </button>
-      <button
-        type="button"
-        className="resource-card-btn"
-        disabled={disabled || loading}
-        onClick={() => {
-          void onRestartCapture().then((success) => {
-            if (success) {
-              Toast.success('已从头重启当前页捕捉');
-            }
-          }).catch((error: any) => {
-            Toast.error(error?.message || '从头重捕失败');
-          });
-        }}
-      >
-        从头重捕
       </button>
     </div>
   </section>

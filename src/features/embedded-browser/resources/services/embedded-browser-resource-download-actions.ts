@@ -1,0 +1,198 @@
+import { Toast } from '@douyinfe/semi-ui';
+import {
+  isMseCapturedResource,
+  isPageContextManagedResource,
+} from '../model/embedded-browser-resource.presentation';
+import { formatResourceTitle } from '../model/embedded-browser-resource-display';
+import {
+  exportEmbeddedBrowserCapturedResource,
+  mergeEmbeddedBrowserCapturedMseResources,
+  openEmbeddedBrowserCapturedResource,
+  previewEmbeddedBrowserCapturedResource,
+} from './embedded-browser-resource.api';
+import {
+  isHttpResource,
+  withDownloadRequestHeaders,
+} from './embedded-browser-resource-request';
+import type { EmbeddedBrowserCapturedResource } from '../types';
+
+function sanitizeDownloadFileName(input: string) {
+  return String(input || '')
+    .trim()
+    .replace(/[\\/:*?"<>|]+/g, '_')
+    .replace(/\s+/g, ' ')
+    || 'resource';
+}
+
+function getResourceDownloadFileName(resource: EmbeddedBrowserCapturedResource, index = 0) {
+  const rawTitle = formatResourceTitle(resource);
+  const hasExtension = /\.[a-z0-9]{2,8}(?:$|[?#])/i.test(rawTitle);
+  const fallbackExtension = resource.ext || (resource.kind === 'manifest' ? 'm3u8' : 'bin');
+  const fallbackName = hasExtension ? rawTitle : `${rawTitle}.${fallbackExtension}`;
+  const prefix = index > 0 ? `${String(index + 1).padStart(2, '0')}-` : '';
+  return sanitizeDownloadFileName(`${prefix}${fallbackName}`);
+}
+
+export async function copyResourceUrl(url: string) {
+  await navigator.clipboard.writeText(url);
+  Toast.success('链接已复制');
+}
+
+function shellEscape(value: string) {
+  return `'${String(value || '').replace(/'/g, `'\"'\"'`)}'`;
+}
+
+function buildResourceCurlCommand(resource: EmbeddedBrowserCapturedResource) {
+  const lines = ['curl'];
+  const method = String(resource.method || 'GET').trim().toUpperCase();
+  if (method && method !== 'GET') {
+    lines.push(`  -X ${method}`);
+  }
+  const requestHeaders = {
+    ...(resource.requestHeaders || {}),
+  };
+  if (resource.referer && !requestHeaders.referer) {
+    requestHeaders.referer = resource.referer;
+  }
+  Object.entries(requestHeaders).forEach(([headerName, headerValue]) => {
+    if (!headerValue) {
+      return;
+    }
+    lines.push(`  -H ${shellEscape(`${headerName}: ${headerValue}`)}`);
+  });
+  lines.push(`  ${shellEscape(resource.url)}`);
+  return lines.join(' \\\n');
+}
+
+export async function copyResourceCurl(resource: EmbeddedBrowserCapturedResource) {
+  await navigator.clipboard.writeText(buildResourceCurlCommand(resource));
+  Toast.success('curl 已复制');
+}
+
+export function openResourceUrl(url: string) {
+  window.open(url, '_blank', 'noopener,noreferrer');
+}
+
+export async function previewResource(resource: EmbeddedBrowserCapturedResource) {
+  if (isMseCapturedResource(resource)) {
+    await openCapturedResource(resource);
+    return;
+  }
+  const previewed = await previewEmbeddedBrowserCapturedResource(resource.tabId, {
+    mimeType: resource.mimeType,
+    streamType: resource.streamType,
+    title: resource.pageUrl || resource.url,
+    url: resource.url,
+  });
+  if (!previewed) {
+    throw new Error('页面内预览失败');
+  }
+}
+
+export async function openCapturedResource(resource: EmbeddedBrowserCapturedResource) {
+  if (!resource.resourceKey) {
+    openResourceUrl(resource.url);
+    return;
+  }
+  const opened = await openEmbeddedBrowserCapturedResource(resource.tabId, resource.resourceKey);
+  if (!opened) {
+    throw new Error('当前页面里的流还没有准备好，先继续播放几秒再试试');
+  }
+  Toast.success('已打开预览');
+}
+
+export async function exportCapturedResource(resource: EmbeddedBrowserCapturedResource) {
+  if (!resource.resourceKey) {
+    await copyResourceUrl(resource.url);
+    return;
+  }
+  const exported = await exportEmbeddedBrowserCapturedResource(resource.tabId, resource.resourceKey);
+  if (!exported) {
+    throw new Error('当前页面里的流还没有准备好，先继续播放几秒再试试');
+  }
+  Toast.success('已触发导出');
+}
+
+export async function downloadSelectedResources(resources: EmbeddedBrowserCapturedResource[]) {
+  if (!resources.length) {
+    Toast.warning('先勾选要下载的资源');
+    return;
+  }
+  const pageManagedResources = resources.filter((resource) => (
+    isPageContextManagedResource(resource) && !isHttpResource(resource)
+  ));
+  const httpResources = resources.filter(isHttpResource);
+  const unsupportedResources = resources.filter((resource) => (
+    !isHttpResource(resource) && !isPageContextManagedResource(resource)
+  ));
+
+  for (const resource of pageManagedResources) {
+    await exportCapturedResource(resource);
+  }
+
+  if (httpResources.length > 0) {
+    if (!window.electronAPI?.pickDownloadDirectory || !window.electronAPI?.downloadUrlToPath) {
+      throw new Error('当前环境不支持下载已选资源');
+    }
+    const pickResult = await window.electronAPI.pickDownloadDirectory();
+    if (!pickResult || pickResult.canceled || !pickResult.directoryPath) {
+      return;
+    }
+    for (const [index, resource] of httpResources.entries()) {
+      await window.electronAPI.downloadUrlToPath(
+        resource.url,
+        pickResult.directoryPath,
+        getResourceDownloadFileName(resource, httpResources.length > 1 ? index : 0),
+        withDownloadRequestHeaders(resource),
+      );
+    }
+  }
+
+  if (unsupportedResources.length > 0) {
+    Toast.warning(`${unsupportedResources.length} 条资源暂时不能直接下载，已跳过`);
+  }
+  Toast.success(`已处理 ${resources.length - unsupportedResources.length} 条资源`);
+}
+
+function getManualMergeResourceFileName(resource: EmbeddedBrowserCapturedResource) {
+  try {
+    const fileName = decodeURIComponent(new URL(resource.url).pathname.split('/').filter(Boolean).pop() || '');
+    if (fileName) {
+      return fileName;
+    }
+  } catch {
+    // Ignore invalid URLs and use a stable local fallback below.
+  }
+  const ext = resource.ext || (resource.streamType === 'audio' ? 'm4a' : 'm4s');
+  return `${resource.streamType || resource.kind}-${resource.id}.${ext}`;
+}
+
+function createManualMergeResourcePayload(resource: EmbeddedBrowserCapturedResource) {
+  return {
+    fileName: getManualMergeResourceFileName(resource),
+    mimeType: resource.mimeType,
+    requestHeaders: resource.requestHeaders,
+    resourceKey: resource.resourceKey,
+    streamType: resource.streamType,
+    url: resource.url,
+  };
+}
+
+export async function mergeCapturedResources(resources: {
+  audio: EmbeddedBrowserCapturedResource;
+  video: EmbeddedBrowserCapturedResource;
+}) {
+  const mergeResult = await mergeEmbeddedBrowserCapturedMseResources(resources.video.tabId, {
+    audioResource: createManualMergeResourcePayload(resources.audio),
+    audioResourceKey: resources.audio.resourceKey,
+    videoResource: createManualMergeResourcePayload(resources.video),
+    videoResourceKey: resources.video.resourceKey,
+  });
+  if (mergeResult.cancelled) {
+    return;
+  }
+  if (!mergeResult.ok) {
+    throw new Error(mergeResult.error || '合并失败');
+  }
+  Toast.success('已完成音视频合并');
+}

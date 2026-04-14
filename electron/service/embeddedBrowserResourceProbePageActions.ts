@@ -81,6 +81,13 @@ export function embeddedBrowserResourceProbePageActionsBody() {
       return
     }
     bindTrackedMediaElements()
+    const observerTarget = document.body || document.documentElement
+    if (!observerTarget) {
+      window.setTimeout(() => {
+        ensureTrackedMediaObserver()
+      }, 250)
+      return
+    }
     trackedMediaObserver = new MutationObserver((mutations) => {
       mutations.forEach((mutation) => {
         mutation.addedNodes.forEach((node) => {
@@ -99,7 +106,7 @@ export function embeddedBrowserResourceProbePageActionsBody() {
         })
       })
     })
-    trackedMediaObserver.observe(document.body || document.documentElement, {
+    trackedMediaObserver.observe(observerTarget, {
       childList: true,
       subtree: true,
     })

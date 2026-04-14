@@ -450,4 +450,32 @@ export function embeddedBrowserResourceProbeManifestHeuristicsBody() {
     }
   }
 
+  ;(globalScope as typeof globalScope & {
+    __OMNIFLOW_EMBEDDED_BROWSER_PROBE_MANIFEST_KEEP_ALIVE__?: unknown[]
+  }).__OMNIFLOW_EMBEDDED_BROWSER_PROBE_MANIFEST_KEEP_ALIVE__ = [
+    addBaseUrl,
+    createVimeoManifestBlobUrl,
+    decodeXmlEntities,
+    emitInlineManifest,
+    emitM3u8DataKeyReference,
+    emitM3u8ManifestWithBase,
+    emitM3u8ReferenceResource,
+    emitM3u8ReferenceResources,
+    emitMpdReferenceResource,
+    emitMpdReferenceResources,
+    emitVimeoPlaylistManifest,
+    getBaseUrl,
+    getM3u8PendingSignature,
+    getM3u8References,
+    hasRelativeM3u8References,
+    knownManifestBaseUrls,
+    m3u8Accumulator,
+    pendingM3u8TextsBySignature,
+    registerManifestBaseUrl,
+    resolveM3u8Reference,
+    resolveMpdBaseUrl,
+    resolveMpdReferenceUrl,
+    vimeoPlaylistPattern,
+    vimeoPlaylistUrls,
+  ]
 }

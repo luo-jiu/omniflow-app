@@ -1,11 +1,26 @@
 export type EmbeddedBrowserCatchToolkitStatePayload = {
+  audioResourceKey: string
+  audioSizeBytes: number
   autoSeekToBufferedEnd: boolean
   autoDownloadOnComplete: boolean
   capturedMediaSizeBytes: number
   clearCacheOnComplete: boolean
   currentFileName: string
+  diagnostics: {
+    appendBufferCount: number
+    frameCount?: number
+    frameUrl: string
+    hookErrors: number
+    installedAt: number
+    lastAppendAt: number
+    lastError: string
+    mediaSourceAvailable: boolean
+    mediaSourceHooked: boolean
+    sourceBufferCount: number
+  }
   isCaptureComplete: boolean
   manualFileName: string
+  primaryResourceKey: string
   regexWarning: string
   regexRule: string
   restartAlwaysFromBeginning: boolean
@@ -13,6 +28,8 @@ export type EmbeddedBrowserCatchToolkitStatePayload = {
   selectorRule: string
   streamCount: number
   trimExtraMediaHeaders: boolean
+  videoResourceKey: string
+  videoSizeBytes: number
 }
 
 export function createEmbeddedBrowserCatchToolkitGetStateScript() {

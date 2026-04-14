@@ -217,6 +217,10 @@ contextBridge.exposeInMainWorld('electronEmbeddedBrowser', {
     ipcRenderer.invoke('embedded-browser:resource:open', tabId, resourceKey),
   readCapturedResource: (tabId: string, resourceKey: string) =>
     ipcRenderer.invoke('embedded-browser:resource:read', tabId, resourceKey),
+  saveCapturedResource: (tabId: string, payload: {
+    resourceKey?: string;
+    suggestedFileName?: string;
+  }) => ipcRenderer.invoke('embedded-browser:resource:save', tabId, payload),
   previewCapturedResource: (tabId: string, payload: {
     mimeType?: string;
     streamType?: 'audio' | 'video';
@@ -244,11 +248,39 @@ contextBridge.exposeInMainWorld('electronEmbeddedBrowser', {
   downloadCatchMedia: (tabId: string) => ipcRenderer.invoke('embedded-browser:resource:catch-toolkit:download', tabId),
   restartCatchMediaCapture: (tabId: string) => ipcRenderer.invoke('embedded-browser:resource:catch-toolkit:restart', tabId),
   mergeCapturedMseResources: (tabId: string, payload: {
+    audioResource?: {
+      fileName?: string;
+      mimeType?: string;
+      requestHeaders?: Record<string, string>;
+      resourceKey?: string;
+      streamType?: 'audio' | 'video';
+      url?: string;
+    };
     audioResourceKey?: string;
     ffmpegPath?: string;
     suggestedFileName?: string;
+    videoResource?: {
+      fileName?: string;
+      mimeType?: string;
+      requestHeaders?: Record<string, string>;
+      resourceKey?: string;
+      streamType?: 'audio' | 'video';
+      url?: string;
+    };
     videoResourceKey?: string;
   }) => ipcRenderer.invoke('embedded-browser:resource:merge-mse', tabId, payload),
+  downloadHlsManifest: (tabId: string, payload: {
+    ffmpegPath?: string;
+    headers?: Record<string, string>;
+    manifestUrl?: string;
+    suggestedFileName?: string;
+  }) => ipcRenderer.invoke('embedded-browser:resource:download-hls', tabId, payload),
+  downloadMpdManifest: (tabId: string, payload: {
+    ffmpegPath?: string;
+    headers?: Record<string, string>;
+    manifestUrl?: string;
+    suggestedFileName?: string;
+  }) => ipcRenderer.invoke('embedded-browser:resource:download-mpd', tabId, payload),
   reload: (tabId: string) => ipcRenderer.invoke('embedded-browser:reload', tabId),
   startDeepResourceCapture: (tabId: string) => ipcRenderer.invoke('embedded-browser:resource:start-deep-capture', tabId),
   startResourceCapture: (tabId: string) => ipcRenderer.invoke('embedded-browser:resource:start', tabId),

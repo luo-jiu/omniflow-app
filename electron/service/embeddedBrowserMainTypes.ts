@@ -37,10 +37,21 @@ export type EmbeddedBrowserBounds = {
 }
 
 export type EmbeddedBrowserCapturedResourceMergePayload = {
+  audioResource?: EmbeddedBrowserCapturedResourceMergeTrackPayload
   audioResourceKey?: string
   ffmpegPath?: string
   suggestedFileName?: string
+  videoResource?: EmbeddedBrowserCapturedResourceMergeTrackPayload
   videoResourceKey?: string
+}
+
+export type EmbeddedBrowserCapturedResourceMergeTrackPayload = {
+  fileName?: string
+  mimeType?: string
+  requestHeaders?: Record<string, string>
+  resourceKey?: string
+  streamType?: 'audio' | 'video'
+  url?: string
 }
 
 export type EmbeddedBrowserCapturedResourceMergeResponse = {
@@ -50,3 +61,34 @@ export type EmbeddedBrowserCapturedResourceMergeResponse = {
   ok: boolean
   outputPath?: string
 }
+
+export type EmbeddedBrowserCapturedResourceSavePayload = {
+  resourceKey?: string
+  suggestedFileName?: string
+}
+
+export type EmbeddedBrowserCapturedResourceSaveResponse = {
+  cancelled?: boolean
+  error?: string
+  ok: boolean
+  outputPath?: string
+}
+
+export type EmbeddedBrowserHlsDownloadPayload = {
+  ffmpegPath?: string
+  headers?: Record<string, string>
+  manifestUrl?: string
+  suggestedFileName?: string
+}
+
+export type EmbeddedBrowserHlsDownloadResponse = {
+  cancelled?: boolean
+  error?: string
+  ffmpegPath?: string
+  ok: boolean
+  outputPath?: string
+}
+
+export type EmbeddedBrowserMpdDownloadPayload = EmbeddedBrowserHlsDownloadPayload
+
+export type EmbeddedBrowserMpdDownloadResponse = EmbeddedBrowserHlsDownloadResponse

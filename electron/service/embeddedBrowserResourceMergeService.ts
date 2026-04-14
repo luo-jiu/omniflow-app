@@ -6,11 +6,13 @@ import path from 'node:path'
 import { Buffer } from 'node:buffer'
 
 export type EmbeddedBrowserExtractedResourceFile = {
-  base64: string
+  base64?: string
   fileName: string
   mimeType?: string
-  resourceKey: string
+  requestHeaders?: Record<string, string>
+  resourceKey?: string
   streamType?: 'audio' | 'video'
+  url?: string
 }
 
 export type EmbeddedBrowserResourceMergeRequest = {
@@ -35,6 +37,13 @@ const COMMON_FFMPEG_PATHS = [
   '/usr/bin/ffmpeg',
   'ffmpeg',
 ].filter((value): value is string => Boolean(value))
+
+const FFMPEG_HTTP_HEADER_BLACKLIST = new Set([
+  'accept-encoding',
+  'connection',
+  'host',
+  'range',
+])
 
 function sanitizeFileName(input: string) {
   const normalized = String(input || '').trim().replace(/[\\/:*?"<>|]+/g, '_')
@@ -84,16 +93,18 @@ export async function resolveEmbeddedBrowserFfmpegPath(preferredPath?: string) {
 }
 
 export function buildEmbeddedBrowserResourceMergeArgs(request: {
-  audioPath: string
+  audio: EmbeddedBrowserPreparedMergeInput
   outputPath: string
-  videoPath: string
+  video: EmbeddedBrowserPreparedMergeInput
 }) {
   return [
     '-y',
+    ...request.video.inputArgs,
     '-i',
-    request.videoPath,
+    request.video.path,
+    ...request.audio.inputArgs,
     '-i',
-    request.audioPath,
+    request.audio.path,
     '-c',
     'copy',
     request.outputPath,
@@ -132,9 +143,65 @@ async function writeExtractedResourceToTempFile(
   tempDir: string,
   resource: EmbeddedBrowserExtractedResourceFile,
 ) {
+  if (!resource.base64) {
+    throw new Error('缺少可写入的资源内容')
+  }
   const filePath = path.join(tempDir, sanitizeFileName(resource.fileName))
   await writeFile(filePath, Buffer.from(resource.base64, 'base64'))
   return filePath
+}
+
+type EmbeddedBrowserPreparedMergeInput = {
+  inputArgs: string[]
+  path: string
+}
+
+function isHttpResourceUrl(input: string) {
+  return /^https?:\/\//i.test(String(input || '').trim())
+}
+
+function sanitizeHeaderValue(input: string) {
+  return String(input || '').replace(/[\r\n]+/g, ' ').trim()
+}
+
+function buildFfmpegHttpInputArgs(resource: EmbeddedBrowserExtractedResourceFile) {
+  const url = String(resource.url || '').trim()
+  if (!isHttpResourceUrl(url)) {
+    return []
+  }
+
+  const headers = resource.requestHeaders || {}
+  const inputArgs: string[] = []
+  const headerLines: string[] = []
+  Object.entries(headers).forEach(([rawName, rawValue]) => {
+    const headerName = String(rawName || '').trim().toLowerCase()
+    const headerValue = sanitizeHeaderValue(rawValue)
+    if (!headerName || !headerValue || FFMPEG_HTTP_HEADER_BLACKLIST.has(headerName)) {
+      return
+    }
+    headerLines.push(`${headerName}: ${headerValue}`)
+  })
+  if (headerLines.length) {
+    inputArgs.push('-headers', `${headerLines.join('\r\n')}\r\n`)
+  }
+  return inputArgs
+}
+
+async function prepareResourceMergeInput(
+  tempDir: string,
+  resource: EmbeddedBrowserExtractedResourceFile,
+): Promise<EmbeddedBrowserPreparedMergeInput> {
+  const url = String(resource.url || '').trim()
+  if (url && isHttpResourceUrl(url) && !resource.base64) {
+    return {
+      inputArgs: buildFfmpegHttpInputArgs(resource),
+      path: url,
+    }
+  }
+  return {
+    inputArgs: [],
+    path: await writeExtractedResourceToTempFile(tempDir, resource),
+  }
 }
 
 export async function mergeEmbeddedBrowserResourceTracks(
@@ -147,14 +214,14 @@ export async function mergeEmbeddedBrowserResourceTracks(
 
   const tempDir = await createEmbeddedBrowserResourceMergeTempDir()
   try {
-    const [audioPath, videoPath] = await Promise.all([
-      writeExtractedResourceToTempFile(tempDir, request.audio),
-      writeExtractedResourceToTempFile(tempDir, request.video),
+    const [audio, video] = await Promise.all([
+      prepareResourceMergeInput(tempDir, request.audio),
+      prepareResourceMergeInput(tempDir, request.video),
     ])
     const commandArgs = buildEmbeddedBrowserResourceMergeArgs({
-      audioPath,
+      audio,
       outputPath: request.outputPath,
-      videoPath,
+      video,
     })
 
     const result = await new Promise<EmbeddedBrowserResourceMergeResult>((resolve, reject) => {
