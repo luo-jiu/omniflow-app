@@ -513,6 +513,7 @@ export function embeddedBrowserResourceProbeRuntimeCoreBody() {
     const normalizedValue = String(value || '').trim()
     return normalizedValue.length === 24
       && normalizedValue.endsWith('==')
+      && !normalizedValue.startsWith('AAAAAAAAAAAAAAAAAAAA')
       && /^[A-Za-z0-9+/]+={0,2}$/.test(normalizedValue)
   }
 
@@ -735,6 +736,9 @@ export function embeddedBrowserResourceProbeRuntimeCoreBody() {
 
   function emitKeyCandidateFromBuffer(buffer: ArrayBuffer, ext = 'key') {
     if (isEmittingKeyCandidate) {
+      return false
+    }
+    if (isMp4HeaderChunk(buffer)) {
       return false
     }
     isEmittingKeyCandidate = true
