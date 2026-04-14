@@ -216,6 +216,7 @@ export function embeddedBrowserResourceProbeRuntimeHooksBody() {
     if (!absoluteUrl) {
       return
     }
+    registerManifestBaseUrl(absoluteUrl)
     emit({
       kind: classifyKind(absoluteUrl, meta?.mimeType),
       mimeType: meta?.mimeType,

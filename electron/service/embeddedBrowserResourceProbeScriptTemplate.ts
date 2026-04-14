@@ -3,6 +3,7 @@
  * Licensed under AGPL-3.0
  */
 import { embeddedBrowserResourceProbePageActionsBody } from './embeddedBrowserResourceProbePageActions'
+import { embeddedBrowserResourceProbeManifestHeuristicsBody } from './embeddedBrowserResourceProbeManifestHeuristics'
 import { embeddedBrowserResourceProbeRuntimeCoreBody } from './embeddedBrowserResourceProbeRuntimeCore'
 import { embeddedBrowserResourceProbeRuntimeHooksBody } from './embeddedBrowserResourceProbeRuntimeHooks'
 
@@ -24,10 +25,12 @@ function createProbeBootstrapFunctionSource() {
     ';(() => {',
     'const consolePrefix = ' + JSON.stringify(String(nextConsolePrefix || '')) + ';',
     'const probeRuntimeCoreBodySource = ' + JSON.stringify(probeRuntimeCoreBodySource) + ';',
+    'const probeManifestHeuristicsBodySource = ' + JSON.stringify(probeManifestHeuristicsBodySource) + ';',
     'const probePageActionsBodySource = ' + JSON.stringify(probePageActionsBodySource) + ';',
     'const probeRuntimeHooksBodySource = ' + JSON.stringify(probeRuntimeHooksBodySource) + ';',
     createProbeBootstrapSource.toString(),
     probeRuntimeCoreBodySource,
+    probeManifestHeuristicsBodySource,
     probeRuntimeHooksBodySource,
     probePageActionsBodySource,
     "return 'installed';",
@@ -38,6 +41,7 @@ function createProbeBootstrapFunctionSource() {
 
 export function createProbeScriptTemplate(input: {
   consolePrefix: string
+  manifestHeuristicsBodySource: string
   pageActionsBodySource: string
   runtimeCoreBodySource: string
   runtimeHooksBodySource: string
@@ -46,10 +50,12 @@ export function createProbeScriptTemplate(input: {
     ';(() => {',
     `const consolePrefix = ${JSON.stringify(input.consolePrefix)};`,
     `const probeRuntimeCoreBodySource = ${JSON.stringify(input.runtimeCoreBodySource)};`,
+    `const probeManifestHeuristicsBodySource = ${JSON.stringify(input.manifestHeuristicsBodySource)};`,
     `const probePageActionsBodySource = ${JSON.stringify(input.pageActionsBodySource)};`,
     `const probeRuntimeHooksBodySource = ${JSON.stringify(input.runtimeHooksBodySource)};`,
     createProbeBootstrapFunctionSource(),
     input.runtimeCoreBodySource,
+    input.manifestHeuristicsBodySource,
     input.runtimeHooksBodySource,
     input.pageActionsBodySource,
     "return 'installed';",
@@ -60,6 +66,7 @@ export function createProbeScriptTemplate(input: {
 export function createEmbeddedBrowserResourceProbeScript() {
   return createProbeScriptTemplate({
     consolePrefix: EMBEDDED_BROWSER_RESOURCE_CONSOLE_PREFIX,
+    manifestHeuristicsBodySource: getScriptFunctionBody(embeddedBrowserResourceProbeManifestHeuristicsBody),
     pageActionsBodySource: getScriptFunctionBody(embeddedBrowserResourceProbePageActionsBody),
     runtimeCoreBodySource: getScriptFunctionBody(embeddedBrowserResourceProbeRuntimeCoreBody),
     runtimeHooksBodySource: getScriptFunctionBody(embeddedBrowserResourceProbeRuntimeHooksBody),

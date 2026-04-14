@@ -60,7 +60,6 @@ export function embeddedBrowserResourceProbeRuntimeCoreBody() {
     streamType?: 'audio' | 'video'
   }>()
   const probeResourceKeysBySignature = new Map<string, string>()
-  const vimeoPlaylistUrls = new Set<string>()
   const mediaSourceStreams = new WeakMap<MediaSource, string[]>()
   let mseSequence = 0
   let probeResourceSequence = 0
@@ -80,7 +79,6 @@ export function embeddedBrowserResourceProbeRuntimeCoreBody() {
   const imagePattern = /\.(jpg|jpeg|png|gif|webp|bmp|svg|avif|ico)(\?|#|$)/i
   const subtitlePattern = /\.(vtt|srt|ass|ssa|ttml)(\?|#|$)/i
   const pdfPattern = /\.pdf(\?|#|$)/i
-  const vimeoPlaylistPattern = /^https:\/\/[^.]*\.vimeocdn\.com\/exp=.*\/playlist\.json\?/i
   const originalJSONParse = JSON.parse.bind(JSON)
   const originalConsoleInfo = typeof console.info === 'function'
     ? console.info.bind(console)
@@ -95,7 +93,6 @@ export function embeddedBrowserResourceProbeRuntimeCoreBody() {
     selectorRule: 'OmniflowCatchToolkit:selectorRule',
     trimExtraMediaHeaders: 'OmniflowCatchToolkit:trimExtraMediaHeaders',
   } as const
-  let m3u8Accumulator = ''
   let isEmittingKeyCandidate = false
   let isCaptureComplete = false
   const catchToolkitState = {
@@ -521,49 +518,6 @@ export function embeddedBrowserResourceProbeRuntimeCoreBody() {
     return /^[A-Fa-f0-9]{32}$/.test(String(value || '').trim())
   }
 
-  function getBaseUrl(url: string) {
-    try {
-      const currentUrl = new URL(url, currentLocationHref)
-      const parts = currentUrl.toString().split('/')
-      parts.pop()
-      return `${parts.join('/')}/`
-    } catch {
-      return ''
-    }
-  }
-
-  function addBaseUrl(baseUrl: string, m3u8Text: string) {
-    if (!baseUrl || !m3u8Text) {
-      return m3u8Text
-    }
-    return m3u8Text.split('\n').map((line) => {
-      const currentLine = line.trim()
-      if (!currentLine || currentLine.startsWith('#')) {
-        if (currentLine.includes('URI="')) {
-          return currentLine.replace(/URI="(.*)"/, (_input, keyUrl) => {
-            if (toAbsoluteUrl(keyUrl)) {
-              return `URI="${keyUrl}"`
-            }
-            return `URI="${baseUrl}${keyUrl}"`
-          })
-        }
-        return line
-      }
-      if (toAbsoluteUrl(currentLine)) {
-        return currentLine
-      }
-      if (currentLine.startsWith('/')) {
-        try {
-          const parsedBaseUrl = new URL(baseUrl)
-          return `${parsedBaseUrl.protocol}//${parsedBaseUrl.host}${currentLine}`
-        } catch {
-          return `${baseUrl}${currentLine.replace(/^\//, '')}`
-        }
-      }
-      return `${baseUrl}${currentLine}`
-    }).join('\n')
-  }
-
   function parseMaybeJson(value: string) {
     const normalizedValue = String(value || '').trim()
     if (!normalizedValue || !/^[\[{]/.test(normalizedValue)) {
@@ -816,136 +770,6 @@ export function embeddedBrowserResourceProbeRuntimeCoreBody() {
       return true
     } finally {
       isEmittingKeyCandidate = false
-    }
-  }
-
-  function emitInlineManifest(text: string, ext: 'm3u8' | 'mpd', baseUrl?: string) {
-    const normalizedText = ext === 'm3u8' ? addBaseUrl(getBaseUrl(baseUrl || currentLocationHref), text) : text
-    emitGeneratedResource({
-      base64: textToBase64(normalizedText),
-      ext,
-      kind: 'manifest',
-      mimeType: ext === 'm3u8' ? 'application/vnd.apple.mpegurl' : 'application/dash+xml',
-      resourceType: 'inline-manifest',
-      signature: `${ext}:${normalizedText}`,
-    })
-  }
-
-  function createVimeoManifestBlobUrl(text: string, signature: string) {
-    const resource = createProbeBlobResource({
-      base64: textToBase64(text),
-      ext: 'm3u8',
-      kind: 'manifest',
-      mimeType: 'application/vnd.apple.mpegurl',
-      signature,
-    })
-    return resource.url
-  }
-
-  function emitVimeoPlaylistManifest(originalUrl: string, payload: unknown) {
-    const normalizedOriginalUrl = String(originalUrl || '').trim()
-    if (!normalizedOriginalUrl || !vimeoPlaylistPattern.test(normalizedOriginalUrl) || vimeoPlaylistUrls.has(normalizedOriginalUrl)) {
-      return false
-    }
-    const data = typeof payload === 'string' ? parseMaybeJson(payload) : payload
-    if (!data || typeof data !== 'object') {
-      return false
-    }
-    const playlist = data as Record<string, unknown>
-    if (typeof playlist.base_url !== 'string' || !Array.isArray(playlist.video)) {
-      return false
-    }
-
-    try {
-      const parsedUrl = new URL(normalizedOriginalUrl)
-      const pathBase = parsedUrl.pathname.slice(0, parsedUrl.pathname.lastIndexOf('/') + 1)
-      const baseUrl = new URL(`${parsedUrl.origin}${pathBase}${playlist.base_url}`).href
-      const masterLines = ['#EXTM3U', '#EXT-X-INDEPENDENT-SEGMENTS', '#EXT-X-VERSION:3']
-
-      const createStreamManifestUrl = (stream: Record<string, unknown>) => {
-        const segments = Array.isArray(stream.segments) ? stream.segments : []
-        if (segments.length === 0) {
-          return ''
-        }
-        const streamBaseUrl = String(stream.base_url || '')
-        const manifestLines = [
-          '#EXTM3U',
-          '#EXT-X-VERSION:3',
-          `#EXT-X-TARGETDURATION:${Number(stream.duration) || 0}`,
-          '#EXT-X-MEDIA-SEQUENCE:0',
-          '#EXT-X-PLAYLIST-TYPE:VOD',
-        ]
-        if (typeof stream.init_segment === 'string' && stream.init_segment) {
-          manifestLines.push(`#EXT-X-MAP:URI="data:application/octet-stream;base64,${stream.init_segment}"`)
-        } else if (typeof stream.init_segment_url === 'string' && stream.init_segment_url) {
-          manifestLines.push(`#EXT-X-MAP:URI="${baseUrl}${streamBaseUrl}${stream.init_segment_url}"`)
-        }
-
-        segments.forEach((segment) => {
-          if (!segment || typeof segment !== 'object') {
-            return
-          }
-          const currentSegment = segment as Record<string, unknown>
-          const segmentUrl = String(currentSegment.url || '')
-          if (!segmentUrl) {
-            return
-          }
-          const start = Number(currentSegment.start) || 0
-          const end = Number(currentSegment.end) || start
-          manifestLines.push(`#EXTINF:${Math.max(end - start, 0)},`)
-          manifestLines.push(`${baseUrl}${streamBaseUrl}${segmentUrl}`)
-        })
-        manifestLines.push('#EXT-X-ENDLIST')
-        const manifestText = manifestLines.join('\n')
-        return createVimeoManifestBlobUrl(manifestText, `vimeo-stream:${manifestText}`)
-      }
-
-      playlist.video.forEach((stream) => {
-        if (!stream || typeof stream !== 'object') {
-          return
-        }
-        const currentStream = stream as Record<string, unknown>
-        const streamUrl = createStreamManifestUrl(currentStream)
-        if (!streamUrl) {
-          return
-        }
-        masterLines.push(
-          `#EXT-X-STREAM-INF:BANDWIDTH=${Number(currentStream.bitrate) || 0},RESOLUTION=${Number(currentStream.width) || 0}x${Number(currentStream.height) || 0},CODECS="${String(currentStream.codecs || '')}"`,
-        )
-        masterLines.push(streamUrl)
-      })
-
-      const audioStreams = Array.isArray(playlist.audio) ? playlist.audio : []
-      audioStreams.forEach((stream) => {
-        if (!stream || typeof stream !== 'object') {
-          return
-        }
-        const currentStream = stream as Record<string, unknown>
-        const streamUrl = createStreamManifestUrl(currentStream)
-        if (!streamUrl) {
-          return
-        }
-        masterLines.push(
-          `#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="${String(currentStream.id || '')}",NAME="${String(currentStream.bitrate || '')}",URI="${streamUrl}"`,
-        )
-      })
-
-      if (masterLines.length <= 3) {
-        return false
-      }
-      const masterText = masterLines.join('\n')
-      vimeoPlaylistUrls.add(normalizedOriginalUrl)
-      emitGeneratedResource({
-        base64: textToBase64(masterText),
-        ext: 'm3u8',
-        kind: 'manifest',
-        mimeType: 'application/vnd.apple.mpegurl',
-        resourceType: 'inline-manifest',
-        signature: `vimeo-master:${masterText}`,
-      })
-      return true
-    } catch {
-      return false
     }
   }
 
