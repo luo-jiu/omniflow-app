@@ -166,6 +166,59 @@ export function embeddedBrowserResourceProbeManifestHeuristicsBody() {
     })
   }
 
+  function decodeXmlEntities(value: string) {
+    return String(value || '')
+      .replace(/&amp;/g, '&')
+      .replace(/&quot;/g, '"')
+      .replace(/&apos;/g, "'")
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+  }
+
+  function emitMpdReferenceResource(reference: string, resourceType: string, baseUrl: string) {
+    const normalizedReference = decodeXmlEntities(reference).trim()
+    if (!normalizedReference || normalizedReference.includes('$')) {
+      return
+    }
+    const absoluteUrl = resolveM3u8Reference(baseUrl, normalizedReference)
+    if (!absoluteUrl || !toAbsoluteUrl(absoluteUrl)) {
+      return
+    }
+    const kind = classifyKind(absoluteUrl)
+    if (kind === 'other') {
+      return
+    }
+    registerManifestBaseUrl(absoluteUrl)
+    emit({
+      ext: getExtension(absoluteUrl),
+      kind,
+      resourceType,
+      source: 'probe',
+      url: absoluteUrl,
+    })
+  }
+
+  function emitMpdReferenceResources(text: string, baseUrl: string) {
+    const normalizedText = String(text || '')
+    const referenceBaseUrl = baseUrl || getBaseUrl(currentLocationHref)
+    Array.from(normalizedText.matchAll(/<(?:BaseURL|Location)>([^<]+)<\/(?:BaseURL|Location)>/gi))
+      .slice(0, 80)
+      .forEach((match) => {
+        emitMpdReferenceResource(String(match[1] || ''), 'mpd-url', referenceBaseUrl)
+      })
+    Array.from(normalizedText.matchAll(/\s(?:media|initialization|sourceURL)=["']([^"']+)["']/gi))
+      .slice(0, 300)
+      .forEach((match) => {
+        const rawInput = String(match[0] || '').toLowerCase()
+        const resourceType = rawInput.includes('initialization=')
+          ? 'mpd-init-segment'
+          : rawInput.includes('sourceurl=')
+            ? 'mpd-source-url'
+            : 'mpd-media'
+        emitMpdReferenceResource(String(match[1] || ''), resourceType, referenceBaseUrl)
+      })
+  }
+
   function emitM3u8ManifestWithBase(text: string, baseUrl: string, emitReferences = true) {
     const normalizedText = addBaseUrl(baseUrl, text)
     emitGeneratedResource({
@@ -204,6 +257,7 @@ export function embeddedBrowserResourceProbeManifestHeuristicsBody() {
       return
     }
     if (ext === 'mpd') {
+      const explicitBaseUrl = getBaseUrl(baseUrl || currentLocationHref)
       emitGeneratedResource({
         base64: textToBase64(normalizedText),
         ext,
@@ -212,6 +266,7 @@ export function embeddedBrowserResourceProbeManifestHeuristicsBody() {
         resourceType: 'inline-manifest',
         signature: `${ext}:${normalizedText}`,
       })
+      emitMpdReferenceResources(normalizedText, explicitBaseUrl)
       return
     }
 
