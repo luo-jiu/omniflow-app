@@ -109,6 +109,16 @@ interface Window {
       headers: Record<string, string | string[]>;
       body: any;
     }>;
+    fetchBinary: (
+      url: string,
+      options?: any
+    ) => Promise<{
+      status: number;
+      headers: Record<string, string | string[]>;
+      base64: string;
+      receivedBytes: number;
+      truncated: boolean;
+    }>;
     upload: (
       url: string,
       filePath: string,

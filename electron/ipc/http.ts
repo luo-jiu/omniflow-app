@@ -112,6 +112,86 @@ export function registerHttpIpc(ipcMain: Electron.IpcMain) {
     });
   });
 
+  ipcMain.handle("http:fetch-binary", async (_event, url: string, options: any = {}) => {
+    runtimeLogger.debug("http:fetch-binary start");
+    runtimeLogger.debug("http:fetch-binary URL:", url);
+    return new Promise((resolve, reject) => {
+      const request = net.request({ url, method: options.method || "GET" });
+      const maxBytes = Math.max(0, Number(options.maxBytes || 0));
+      const chunks: Buffer[] = [];
+      let receivedBytes = 0;
+      let settled = false;
+
+      const safeResolve = (payload: unknown) => {
+        if (settled) return;
+        settled = true;
+        resolve(payload);
+      };
+      const safeReject = (error: unknown) => {
+        if (settled) return;
+        settled = true;
+        reject(error);
+      };
+
+      if (options.headers) {
+        Object.entries(options.headers).forEach(([key, value]) => {
+          request.setHeader(key, value as string);
+        });
+      }
+      request.on("response", (response) => {
+        response.on("data", (chunk: Buffer) => {
+          if (settled) {
+            return;
+          }
+          let nextChunk = chunk;
+          let truncated = false;
+          if (maxBytes > 0 && receivedBytes + chunk.length > maxBytes) {
+            nextChunk = chunk.subarray(0, Math.max(0, maxBytes - receivedBytes));
+            truncated = true;
+          }
+          if (nextChunk.length > 0) {
+            chunks.push(nextChunk);
+            receivedBytes += nextChunk.length;
+          }
+          if (truncated) {
+            try {
+              request.abort();
+            } catch {
+              // ignore
+            }
+            safeResolve({
+              base64: Buffer.concat(chunks).toString('base64'),
+              headers: response.headers,
+              receivedBytes,
+              status: response.statusCode,
+              truncated: true,
+            });
+          }
+        });
+        response.on("end", () => {
+          safeResolve({
+            base64: Buffer.concat(chunks).toString('base64'),
+            headers: response.headers,
+            receivedBytes,
+            status: response.statusCode,
+            truncated: false,
+          });
+        });
+      });
+      request.on("error", (err) => {
+        if (settled) {
+          return;
+        }
+        runtimeLogger.error("http:fetch-binary error:", err);
+        safeReject(err);
+      });
+      if (options.body) {
+        request.write(options.body);
+      }
+      request.end();
+    });
+  });
+
   ipcMain.handle("http:upload:abort", async (_event, uploadId: string) => {
     const runtime = activeUploads.get(uploadId);
     if (!runtime) return false;

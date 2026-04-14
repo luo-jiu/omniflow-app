@@ -17,6 +17,12 @@ import {
   type EmbeddedBrowserHlsManifest,
 } from '../model/embedded-browser-hls-manifest';
 import {
+  normalizeHlsKeyCandidateValue,
+  verifyEmbeddedBrowserHlsKeyCandidates,
+  type EmbeddedBrowserHlsKeyCandidate,
+  type EmbeddedBrowserHlsKeyVerificationResult,
+} from '../model/embedded-browser-hls-key-verifier';
+import {
   exportEmbeddedBrowserCapturedResource,
   mergeEmbeddedBrowserCapturedMseResources,
   openEmbeddedBrowserCapturedResource,
@@ -578,6 +584,145 @@ async function analyzeHlsResource(resource: EmbeddedBrowserCapturedResource) {
   };
 }
 
+async function fetchResourceBinaryBase64(
+  url: string,
+  headers: Record<string, string>,
+  maxBytes?: number,
+) {
+  const response = await window.electronAPI.fetchBinary(url, {
+    headers,
+    maxBytes,
+  });
+  if (response.status < 200 || response.status >= 400) {
+    throw new Error(`二进制资源请求失败：HTTP ${response.status}`);
+  }
+  return response.base64;
+}
+
+function addHlsKeyCandidate(
+  candidates: Map<string, EmbeddedBrowserHlsKeyCandidate>,
+  candidate: EmbeddedBrowserHlsKeyCandidate,
+) {
+  const normalizedBase64 = normalizeHlsKeyCandidateValue(candidate.base64);
+  if (!normalizedBase64) {
+    return;
+  }
+  candidates.set(normalizedBase64, {
+    ...candidate,
+    base64: normalizedBase64,
+  });
+}
+
+async function readCapturedKeyCandidate(resource: EmbeddedBrowserCapturedResource) {
+  if (resource.resourceKey && isPageContextManagedResource(resource)) {
+    const extracted = await readEmbeddedBrowserCapturedResource(resource.tabId, resource.resourceKey);
+    if (!extracted?.base64) {
+      return null;
+    }
+    return {
+      base64: extracted.base64,
+      label: extracted.fileName || resource.url,
+      source: 'captured-key',
+    } satisfies EmbeddedBrowserHlsKeyCandidate;
+  }
+  const normalizedFromValue = normalizeHlsKeyCandidateValue(resource.url);
+  if (normalizedFromValue) {
+    return {
+      base64: normalizedFromValue,
+      label: resource.url,
+      source: 'captured-key',
+    } satisfies EmbeddedBrowserHlsKeyCandidate;
+  }
+  if (!/^https?:\/\//i.test(resource.url)) {
+    return null;
+  }
+  const base64 = await fetchResourceBinaryBase64(
+    resource.url,
+    withResourceRefererHeader(resource),
+    64,
+  );
+  return {
+    base64,
+    label: resource.url,
+    source: 'captured-key',
+  } satisfies EmbeddedBrowserHlsKeyCandidate;
+}
+
+async function collectHlsKeyCandidates(input: {
+  manifest: EmbeddedBrowserHlsManifest
+  manifestResource: EmbeddedBrowserCapturedResource
+  resources: EmbeddedBrowserCapturedResource[]
+}) {
+  const candidates = new Map<string, EmbeddedBrowserHlsKeyCandidate>();
+  const headers = withResourceRefererHeader(input.manifestResource);
+  await Promise.all(input.manifest.keys.map(async (key) => {
+    const inlineKey = normalizeHlsKeyCandidateValue(key.uri || '');
+    if (inlineKey) {
+      addHlsKeyCandidate(candidates, {
+        base64: inlineKey,
+        label: key.uri || 'manifest inline key',
+        source: 'manifest-key-url',
+      });
+      return;
+    }
+    if (!key.url || !/^https?:\/\//i.test(key.url)) {
+      return;
+    }
+    try {
+      const base64 = await fetchResourceBinaryBase64(key.url, headers, 64);
+      addHlsKeyCandidate(candidates, {
+        base64,
+        label: key.url,
+        source: 'manifest-key-url',
+      });
+    } catch {
+      // Network key fetch can fail on hotlink-protected sites; captured candidates may still work.
+    }
+  }));
+
+  const keyResources = input.resources.filter((resource) => resource.kind === 'key');
+  await Promise.all(keyResources.map(async (resource) => {
+    try {
+      const candidate = await readCapturedKeyCandidate(resource);
+      if (candidate) {
+        addHlsKeyCandidate(candidates, candidate);
+      }
+    } catch {
+      // Keep the verifier best-effort; one bad candidate should not block the rest.
+    }
+  }));
+
+  return Array.from(candidates.values());
+}
+
+async function verifyHlsResourceKey(input: {
+  manifest: EmbeddedBrowserHlsManifest
+  manifestResource: EmbeddedBrowserCapturedResource
+  resources: EmbeddedBrowserCapturedResource[]
+}) {
+  const encryptedSegment = input.manifest.segments.find((segment) => (
+    segment.key && segment.key.method.toUpperCase() === 'AES-128'
+  ));
+  if (!encryptedSegment?.key) {
+    throw new Error('这个 manifest 没有 AES-128 key 片段需要验证');
+  }
+  const candidates = await collectHlsKeyCandidates(input);
+  if (candidates.length === 0) {
+    throw new Error('还没有可验证的 key 候选');
+  }
+  const encryptedSegmentBase64 = await fetchResourceBinaryBase64(
+    encryptedSegment.url,
+    withResourceRefererHeader(input.manifestResource),
+    16 * 1024 * 1024,
+  );
+  return verifyEmbeddedBrowserHlsKeyCandidates({
+    candidates,
+    encryptedSegmentBase64,
+    iv: encryptedSegment.key.iv,
+    sequence: encryptedSegment.sequence,
+  });
+}
+
 function openResourceUrl(url: string) {
   window.open(url, '_blank', 'noopener,noreferrer');
 }
@@ -675,12 +820,17 @@ function matchesResourceFilter(resource: EmbeddedBrowserCapturedResource, patter
 
 type HlsAnalysisState = {
   error?: string
+  keyVerification?: EmbeddedBrowserHlsKeyVerificationResult
+  keyVerificationLoading?: boolean
   loading: boolean
   manifest?: EmbeddedBrowserHlsManifest
   planText?: string
 }
 
-const ResourceCard: React.FC<{ resource: EmbeddedBrowserCapturedResource }> = ({ resource }) => {
+const ResourceCard: React.FC<{
+  resource: EmbeddedBrowserCapturedResource
+  resources: EmbeddedBrowserCapturedResource[]
+}> = ({ resource, resources }) => {
   const [hlsAnalysis, setHlsAnalysis] = React.useState<HlsAnalysisState>({ loading: false });
   const canAnalyzeHls = isHlsResource(resource);
 
@@ -693,6 +843,8 @@ const ResourceCard: React.FC<{ resource: EmbeddedBrowserCapturedResource }> = ({
     void analyzeHlsResource(resource)
       .then((result) => {
         setHlsAnalysis({
+          keyVerification: undefined,
+          keyVerificationLoading: false,
           loading: false,
           manifest: result.manifest,
           planText: result.planText,
@@ -702,11 +854,57 @@ const ResourceCard: React.FC<{ resource: EmbeddedBrowserCapturedResource }> = ({
       .catch((error: any) => {
         setHlsAnalysis({
           error: error?.message || 'HLS 解析失败',
+          keyVerificationLoading: false,
           loading: false,
         });
         Toast.error(error?.message || 'HLS 解析失败');
       });
   }, [resource]);
+
+  const handleVerifyHlsKey = React.useCallback(() => {
+    if (!hlsAnalysis.manifest) {
+      return;
+    }
+    setHlsAnalysis((previous) => ({
+      ...previous,
+      error: undefined,
+      keyVerification: undefined,
+      keyVerificationLoading: true,
+    }));
+    void verifyHlsResourceKey({
+      manifest: hlsAnalysis.manifest,
+      manifestResource: resource,
+      resources,
+    })
+      .then((result) => {
+        setHlsAnalysis((previous) => ({
+          ...previous,
+          keyVerification: result,
+          keyVerificationLoading: false,
+        }));
+        if (result.mediaAlreadyReadable) {
+          Toast.success('片段本身可读，不需要 key');
+          return;
+        }
+        if (result.ok && result.candidate) {
+          Toast.success('已验证到可用 key');
+          return;
+        }
+        Toast.warning(result.error || '没有验证到可用 key');
+      })
+      .catch((error: any) => {
+        setHlsAnalysis((previous) => ({
+          ...previous,
+          keyVerification: {
+            error: error?.message || 'key 验证失败',
+            mediaAlreadyReadable: false,
+            ok: false,
+          },
+          keyVerificationLoading: false,
+        }));
+        Toast.error(error?.message || 'key 验证失败');
+      });
+  }, [hlsAnalysis.manifest, resource, resources]);
 
   return (
     <div className="resource-card">
@@ -755,6 +953,16 @@ const ResourceCard: React.FC<{ resource: EmbeddedBrowserCapturedResource }> = ({
             <code>{hlsAnalysis.manifest.variants[0].url}</code>
           ) : hlsAnalysis.manifest.segments[0] ? (
             <code>{hlsAnalysis.manifest.segments[0].url}</code>
+          ) : null}
+          {hlsAnalysis.keyVerification ? (
+            <div>
+              <strong>key 验证：</strong>
+              {hlsAnalysis.keyVerification.mediaAlreadyReadable
+                ? '片段本身可读，不需要 key'
+                : hlsAnalysis.keyVerification.ok && hlsAnalysis.keyVerification.candidate
+                  ? `命中 ${hlsAnalysis.keyVerification.candidate.label}`
+                  : hlsAnalysis.keyVerification.error || '未命中'}
+            </div>
           ) : null}
         </div>
       ) : hlsAnalysis.error ? (
@@ -892,6 +1100,16 @@ const ResourceCard: React.FC<{ resource: EmbeddedBrowserCapturedResource }> = ({
                 }}
               >
                 复制计划
+              </button>
+            ) : null}
+            {hlsAnalysis.manifest?.keys.length ? (
+              <button
+                type="button"
+                className="resource-card-btn"
+                disabled={hlsAnalysis.keyVerificationLoading}
+                onClick={handleVerifyHlsKey}
+              >
+                {hlsAnalysis.keyVerificationLoading ? '验证中' : '验证 key'}
               </button>
             ) : null}
           </>
@@ -1119,7 +1337,7 @@ const EmbeddedBrowserResourcePanel: React.FC<EmbeddedBrowserResourcePanelProps> 
                 <div className="resource-section-description">{section.description}</div>
               </div>
               {section.items.map((resource) => (
-                <ResourceCard key={resource.id} resource={resource} />
+                <ResourceCard key={resource.id} resource={resource} resources={filteredResources} />
               ))}
             </div>
           ))

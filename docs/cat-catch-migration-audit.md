@@ -23,7 +23,7 @@
 | HLS/m3u8 内联识别 | `catch-script/search.js`, `js/m3u8.js` | 部分夺舍 | parser / 测试入口已补，继续补 downloader 能力 |
 | DASH/mpd 内联识别 | `catch-script/search.js`, `js/mpd.js` | 部分夺舍 | 补 mpd parser 选择音视频轨 |
 | Vimeo playlist.json 转 m3u8 | `catch-script/search.js` | 已夺舍 | 测 Vimeo 页面 |
-| key 候选捕获 | `catch-script/search.js`, `js/content-script.js`, `js/m3u8.js` | 部分夺舍 | 补真实 key 验证 / 自定义 key |
+| key 候选捕获 | `catch-script/search.js`, `js/content-script.js`, `js/m3u8.js` | 部分夺舍 | 真实 key 验证入口已补，继续补自定义 key |
 | MSE 缓存捕获 | `catch-script/catch.js` | 已夺舍 | 测长视频、直播、异常重试 |
 | 自动跳缓冲末尾 | `catch-script/catch.js` | 已夺舍 | 真实播放页验证 |
 | 去额外媒体头 | `catch-script/catch.js` | 已夺舍 | 多格式验证 |
@@ -120,12 +120,16 @@ OmniFlow 当前只做了 MPD 捕获与浅引用解析，还缺：
 
 Cat Catch 的 m3u8 页面支持“疑似密钥验证真实 key”。
 
-OmniFlow 当前只收集 key 候选，还缺：
+OmniFlow 当前已收集 key 候选，并补了资源卡内的 HLS key 验证入口：
 
-- key 候选池与 manifest 关联。
-- 用 m3u8 fragment 解密尝试验证 key。
+- 已能把 manifest key URL 与当前资源列表里的 key 候选合并去重。
+- 已能抓取第一个 AES-128 片段，用候选 key 尝试解密并按 Cat Catch 的媒体魔数经验验证。
+
+还缺：
+
 - 自定义 key 输入/选择。
 - key 格式展示：hex / base64。
+- 更完整的错误分类和多片段验证。
 
 建议先做内部 API：`manifest + keyCandidates -> verifiedKey?`，UI 后置。
 

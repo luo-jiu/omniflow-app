@@ -49,6 +49,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   cleanupAutoImportStagedFile: (stagedPath: string) =>
     ipcRenderer.invoke('fs:cleanup-auto-import-staged-file', stagedPath),
   fetch: (url: string, options?: any) => ipcRenderer.invoke('http:fetch', url, options),
+  fetchBinary: (url: string, options?: any) => ipcRenderer.invoke('http:fetch-binary', url, options),
   upload: (
     url: string,
     filePath: string,
