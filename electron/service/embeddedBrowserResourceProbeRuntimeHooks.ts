@@ -197,6 +197,9 @@ export function embeddedBrowserResourceProbeRuntimeHooksBody() {
     }
     const parsedJson = parseMaybeJson(value)
     if (parsedJson) {
+      if (emitVimeoPlaylistManifest(meta?.baseUrl || currentLocationHref, parsedJson)) {
+        return
+      }
       walkValue(parsedJson)
       return
     }

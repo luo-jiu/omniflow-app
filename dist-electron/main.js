@@ -791,7 +791,7 @@ function Kr(e) {
     r.has(o) || (r.add(o), o.on("will-download", t));
   });
 }
-const Jr = /* @__PURE__ */ new Set(["m3u8", "mpd"]), Gr = /* @__PURE__ */ new Set([
+const Jr = /* @__PURE__ */ new Set(["m3u8", "m3u", "mpd"]), Gr = /* @__PURE__ */ new Set([
   "mp4",
   "m4v",
   "m4a",
@@ -808,7 +808,18 @@ const Jr = /* @__PURE__ */ new Set(["m3u8", "mpd"]), Gr = /* @__PURE__ */ new Se
   "mov",
   "avi",
   "ts",
-  "flv"
+  "flv",
+  "wma",
+  "mpeg",
+  "wmv",
+  "asf",
+  "movie",
+  "divx",
+  "mpeg4",
+  "vid",
+  "weba",
+  "opus",
+  "acc"
 ]), Xr = /* @__PURE__ */ new Set(["jpg", "jpeg", "png", "gif", "webp", "bmp", "svg", "avif", "ico"]), Zr = /* @__PURE__ */ new Set(["vtt", "srt", "ass", "ssa", "ttml"]), Yr = /* @__PURE__ */ new Set(["key", "base64key"]), Qr = /* @__PURE__ */ new Set([
   "accept",
   "accept-language",
@@ -1952,13 +1963,13 @@ function $n() {
   const e = globalScope.Worker;
   typeof e == "function" && (globalScope.Worker = new Proxy(e, {
     construct(f, p, g) {
-      const [B, T] = p, O = () => {
+      const [B, E] = p, O = () => {
         const X = typeof B == "string" ? B : String(B), oe = toAbsoluteUrl(X) || X;
         if (!oe)
           return "";
         const Y = createProbeBootstrapSource(consolePrefix);
         let ie = "";
-        if ((T == null ? void 0 : T.type) === "module")
+        if ((E == null ? void 0 : E.type) === "module")
           ie = `${Y}import ${JSON.stringify(oe)};
 `;
         else {
@@ -1975,7 +1986,7 @@ function $n() {
       } catch {
         U = "";
       }
-      const z = U ? Reflect.construct(f, [U, T], g) : Reflect.construct(f, p, g);
+      const z = U ? Reflect.construct(f, [U, E], g) : Reflect.construct(f, p, g);
       return z.addEventListener("message", (X) => {
         consumeWorkerRelayMessage(X.data) && X.stopImmediatePropagation();
       }, { capture: !0 }), U && setTimeout(() => {
@@ -1991,7 +2002,7 @@ function $n() {
     t.prototype.addSourceBuffer = new Proxy(f, {
       apply(p, g, B) {
         var O;
-        const T = Reflect.apply(p, g, B);
+        const E = Reflect.apply(p, g, B);
         try {
           ensureTrackedMediaObserver(), isCaptureComplete = !1;
           const U = g, z = String((B == null ? void 0 : B[0]) || "").trim(), X = ((O = z.split(";")[0]) == null ? void 0 : O.trim().toLowerCase()) || "", oe = X.startsWith("audio/") ? "audio" : X.startsWith("video/") ? "video" : void 0, Y = `${Date.now()}-${++mseSequence}`, ie = mediaSourceStreams.get(U) || [];
@@ -2005,9 +2016,9 @@ function $n() {
             streamId: Y,
             streamType: oe,
             totalBytes: 0
-          }), emitMseStream(Y), T && typeof T.appendBuffer == "function") {
-            const ee = T.appendBuffer;
-            T.appendBuffer = new Proxy(ee, {
+          }), emitMseStream(Y), E && typeof E.appendBuffer == "function") {
+            const ee = E.appendBuffer;
+            E.appendBuffer = new Proxy(ee, {
               apply(Ae, Le, ue) {
                 const ge = Reflect.apply(Ae, Le, ue), V = mseStreams.get(Y);
                 if (!V)
@@ -2019,7 +2030,7 @@ function $n() {
           }
         } catch {
         }
-        return T;
+        return E;
       }
     });
   }
@@ -2027,20 +2038,20 @@ function $n() {
     const f = t.prototype.endOfStream;
     t.prototype.endOfStream = new Proxy(f, {
       apply(p, g, B) {
-        const T = Reflect.apply(p, g, B);
+        const E = Reflect.apply(p, g, B);
         try {
           if (isCaptureComplete = !0, (mediaSourceStreams.get(g) || []).forEach((U) => {
             finalizeMseStream(U);
           }), catchToolkitState.autoDownloadOnComplete)
             return setTimeout(() => {
               downloadCatchMediaInternal();
-            }, 500), T;
+            }, 500), E;
           catchToolkitState.clearCacheOnComplete && setTimeout(() => {
             clearCatchMediaCacheInternal();
           }, 0);
         } catch {
         }
-        return T;
+        return E;
       }
     });
   }
@@ -2058,9 +2069,11 @@ function $n() {
       z && r(z, p);
       return;
     }
-    const T = parseMaybeJson(g);
-    if (T) {
-      n(T);
+    const E = parseMaybeJson(g);
+    if (E) {
+      if (emitVimeoPlaylistManifest((p == null ? void 0 : p.baseUrl) || currentLocationHref, E))
+        return;
+      n(E);
       return;
     }
     const O = g.toUpperCase();
@@ -2103,9 +2116,9 @@ function $n() {
     }
     if (typeof f != "object")
       return;
-    const T = f;
-    if (!g.has(T)) {
-      if (g.add(T), Array.isArray(f)) {
+    const E = f;
+    if (!g.has(E)) {
+      if (g.add(E), Array.isArray(f)) {
         if (f.length === 16 && f.every((O) => typeof O == "number" && Number.isFinite(O) && O >= 0 && O <= 255)) {
           emitKeyCandidateFromBuffer(Uint8Array.from(f).buffer);
           return;
@@ -2217,8 +2230,8 @@ function $n() {
           const O = m3u8Accumulator.split("#EXT-X-ENDLIST")[0] + "#EXT-X-ENDLIST";
           emitInlineManifest(O, "m3u8", currentLocationHref), m3u8Accumulator = "";
         }
-        const T = B.split("").join("").trim();
-        emitKeyCandidateFromHex(T);
+        const E = B.split("").join("").trim();
+        emitKeyCandidateFromHex(E);
       }
       return B;
     }
@@ -2242,17 +2255,17 @@ function $n() {
   const R = globalScope.DataView;
   if (typeof R == "function") {
     const f = function(p, g, B) {
-      const T = new R(p, g, B), O = () => {
-        const U = T.buffer.slice(T.byteOffset, T.byteOffset + T.byteLength);
+      const E = new R(p, g, B), O = () => {
+        const U = E.buffer.slice(E.byteOffset, E.byteOffset + E.byteLength);
         emitKeyCandidateFromBuffer(U);
       };
       return ["setInt8", "setUint8", "setInt16", "setUint16", "setInt32", "setUint32"].forEach((U) => {
-        const z = T[U];
-        typeof z == "function" && (T[U] = function() {
+        const z = E[U];
+        typeof z == "function" && (E[U] = function() {
           const X = z.apply(this, arguments);
           return O(), X;
         });
-      }), O(), T;
+      }), O(), E;
     };
     f.prototype = R.prototype, f.toString = function() {
       return R.toString();
@@ -2261,19 +2274,19 @@ function $n() {
   function I(f) {
     return new Proxy(f, {
       construct(p, g, B) {
-        const T = Reflect.construct(p, g, B);
+        const E = Reflect.construct(p, g, B);
         try {
           if (isEmittingKeyCandidate)
-            return T;
+            return E;
           const O = g == null ? void 0 : g[0];
           if (Array.isArray(O) && O.length === 16 && O.every((z) => typeof z == "number" && Number.isFinite(z) && z >= 0 && z <= 255))
-            return emitKeyCandidateFromBuffer(new j(O).buffer), T;
+            return emitKeyCandidateFromBuffer(new j(O).buffer), E;
           if (O instanceof ArrayBuffer && O.byteLength === 16)
-            return emitKeyCandidateFromBuffer(O), T;
-          T.byteLength === 16 && (p.name === "Uint32Array" && T.length === 4 ? emitKeyCandidateFromBuffer(uint32ArrayToUint8Array(T).buffer) : p.name === "Uint16Array" && T.length === 8 ? emitKeyCandidateFromBuffer(uint16ArrayToUint8Array(T).buffer) : emitKeyCandidateFromBuffer(T.buffer.slice(T.byteOffset, T.byteOffset + T.byteLength)));
+            return emitKeyCandidateFromBuffer(O), E;
+          E.byteLength === 16 && (p.name === "Uint32Array" && E.length === 4 ? emitKeyCandidateFromBuffer(uint32ArrayToUint8Array(E).buffer) : p.name === "Uint16Array" && E.length === 8 ? emitKeyCandidateFromBuffer(uint16ArrayToUint8Array(E).buffer) : emitKeyCandidateFromBuffer(E.buffer.slice(E.byteOffset, E.byteOffset + E.byteLength)));
         } catch {
         }
-        return T;
+        return E;
       }
     });
   }
@@ -2330,13 +2343,13 @@ function $n() {
         document.querySelectorAll("script:not([src])").forEach((p) => {
           const g = p.textContent || "";
           g && f.forEach((B) => {
-            let T = B.exec(g);
-            for (; T; ) {
-              const O = String(T[1] || T[0] || "").replace(/['"]/g, "").trim(), U = O && !/^https?:\/\//i.test(O) && O.startsWith("//") ? `${currentLocationProtocol}${O}` : O;
+            let E = B.exec(g);
+            for (; E; ) {
+              const O = String(E[1] || E[0] || "").replace(/['"]/g, "").trim(), U = O && !/^https?:\/\//i.test(O) && O.startsWith("//") ? `${currentLocationProtocol}${O}` : O;
               r(U, {
                 baseUrl: currentLocationHref,
                 resourceType: "inline-script"
-              }), T = B.exec(g);
+              }), E = B.exec(g);
             }
           });
         });
@@ -2708,12 +2721,12 @@ function no(e) {
     const u = String(a || "").trim();
     if (!u)
       return null;
-    const E = D(u);
-    return !E || E.webContents.isDestroyed() ? null : d((P) => E.webContents.executeJavaScript(P, !0), E);
+    const T = D(u);
+    return !T || T.webContents.isDestroyed() ? null : d((P) => T.webContents.executeJavaScript(P, !0), T);
   }
   async function Z(a, d) {
-    const u = String(a || "").trim(), E = String(d.audioResourceKey || "").trim(), M = String(d.videoResourceKey || "").trim();
-    if (!u || !E || !M)
+    const u = String(a || "").trim(), T = String(d.audioResourceKey || "").trim(), M = String(d.videoResourceKey || "").trim();
+    if (!u || !T || !M)
       return {
         error: "缺少要合并的音频或视频资源",
         ok: !1
@@ -2722,7 +2735,7 @@ function no(e) {
       const P = await L(
         u,
         async (nt) => Promise.all([
-          mt(nt, E),
+          mt(nt, T),
           mt(nt, M)
         ])
       ), [k, G] = P || [];
@@ -2756,7 +2769,7 @@ function no(e) {
       };
     } catch (P) {
       return A.warn("embedded browser resource merge failed", {
-        audioResourceKey: E,
+        audioResourceKey: T,
         error: P instanceof Error ? P.message : String(P),
         tabId: u,
         videoResourceKey: M
@@ -2796,12 +2809,12 @@ function no(e) {
       onProbePayload: qn(a),
       syncBounds: de,
       tabId: a,
-      tryDispatchPendingOpenFile: async (u, E) => ut({
+      tryDispatchPendingOpenFile: async (u, T) => ut({
         attachedOpenFiles: c,
         currentUrls: r,
         pendingOpenFiles: i,
         tabId: u,
-        view: E
+        view: T
       }),
       views: t
     });
@@ -2814,7 +2827,7 @@ function no(e) {
     const M = u.createIfMissing ?? !1 ? p(d) : D(d);
     return M ? (b && b !== d && f(a), de(M), a.contentView.children.includes(M) || a.contentView.addChildView(M), b = d, M) : (f(a), null);
   }
-  async function B(a, d, u, E, M = !1) {
+  async function B(a, d, u, T, M = !1) {
     if (!a || a.isDestroyed())
       return;
     const P = String(d || "").trim();
@@ -2852,31 +2865,31 @@ function no(e) {
       if (ae.includes("ERR_ABORTED"))
         return;
       throw _(P, k, {
-        details: E,
+        details: T,
         state: "error",
         message: `页面加载失败：${ae}`,
         url: G
       }), Q;
     }
   }
-  function T(a, d) {
+  function E(a, d) {
     if (!a || a.isDestroyed())
       return;
     const u = String(d || "").trim();
     if (!u)
       return;
-    const E = D(u);
-    E && (a.contentView.children.includes(E) && a.contentView.removeChildView(E), b === u && (b = null), t.delete(u), r.delete(u), n.delete(u), o.delete(u), st(u), Be({
+    const T = D(u);
+    T && (a.contentView.children.includes(T) && a.contentView.removeChildView(T), b === u && (b = null), t.delete(u), r.delete(u), n.delete(u), o.delete(u), st(u), Be({
       requestVersions: m,
       tabId: u
     }), Re({
       attachedOpenFiles: c,
       pendingOpenFiles: i,
       tabId: u
-    }), E.webContents.isDestroyed() || E.webContents.close({ waitForBeforeUnload: !1 }));
+    }), T.webContents.isDestroyed() || T.webContents.close({ waitForBeforeUnload: !1 }));
   }
   async function O(a, d, u) {
-    const E = H.fromWebContents(a) ?? e.getMainWindow(), M = String(d || "").trim();
+    const T = H.fromWebContents(a) ?? e.getMainWindow(), M = String(d || "").trim();
     Be({
       requestVersions: m,
       tabId: M
@@ -2896,14 +2909,14 @@ function no(e) {
       });
       return;
     }
-    await B(E, M, P, "open-exception", !0);
+    await B(T, M, P, "open-exception", !0);
   }
   function U(a, d) {
     const u = H.fromWebContents(a) ?? e.getMainWindow();
     g(u, d, { createIfMissing: !1 });
   }
   async function z(a, d, u) {
-    const E = H.fromWebContents(a) ?? e.getMainWindow(), M = String(d || "").trim();
+    const T = H.fromWebContents(a) ?? e.getMainWindow(), M = String(d || "").trim();
     Be({
       requestVersions: m,
       tabId: M
@@ -2911,10 +2924,10 @@ function no(e) {
       attachedOpenFiles: c,
       pendingOpenFiles: i,
       tabId: M
-    }), await B(E, M, u, "navigate-exception");
+    }), await B(T, M, u, "navigate-exception");
   }
-  async function X(a, d, u, E, M) {
-    const P = H.fromWebContents(a) ?? e.getMainWindow(), k = String(d || "").trim(), G = String(u || "").trim(), le = String(E || "").trim(), Q = String(M || "").trim() || "file";
+  async function X(a, d, u, T, M) {
+    const P = H.fromWebContents(a) ?? e.getMainWindow(), k = String(d || "").trim(), G = String(u || "").trim(), le = String(T || "").trim(), Q = String(M || "").trim() || "file";
     if (!k || !G || !le)
       return;
     const ae = Be({
@@ -2987,7 +3000,7 @@ function no(e) {
     }));
   }
   async function ee(a, d) {
-    return L(a, async (u, E) => {
+    return L(a, async (u, T) => {
       try {
         return await ft(u, "openResource", d);
       } catch (M) {
@@ -2996,13 +3009,13 @@ function no(e) {
           error: M instanceof Error ? M.message : String(M),
           resourceKey: String(d || "").trim(),
           tabId: String(a || "").trim(),
-          url: E.webContents.getURL() || r.get(String(a || "").trim()) || ""
+          url: T.webContents.getURL() || r.get(String(a || "").trim()) || ""
         }), !1;
       }
     }).then((u) => !!u);
   }
   async function Ae(a, d) {
-    return L(a, async (u, E) => {
+    return L(a, async (u, T) => {
       try {
         return await ft(u, "exportResource", d);
       } catch (M) {
@@ -3011,7 +3024,7 @@ function no(e) {
           error: M instanceof Error ? M.message : String(M),
           resourceKey: String(d || "").trim(),
           tabId: String(a || "").trim(),
-          url: E.webContents.getURL() || r.get(String(a || "").trim()) || ""
+          url: T.webContents.getURL() || r.get(String(a || "").trim()) || ""
         }), !1;
       }
     }).then((u) => !!u);
@@ -3020,9 +3033,9 @@ function no(e) {
     return L(a, async (u) => {
       try {
         return await Ln(u, d);
-      } catch (E) {
+      } catch (T) {
         return A.warn("embedded browser network resource preview failed", {
-          error: E instanceof Error ? E.message : String(E),
+          error: T instanceof Error ? T.message : String(T),
           tabId: String(a || "").trim(),
           url: String(d.url || "").trim()
         }), !1;
@@ -3033,9 +3046,9 @@ function no(e) {
     return L(a, async (d, u) => {
       try {
         return await Lr(d);
-      } catch (E) {
+      } catch (T) {
         return A.warn("embedded browser catch toolkit get state failed", {
-          error: E instanceof Error ? E.message : String(E),
+          error: T instanceof Error ? T.message : String(T),
           tabId: String(a || "").trim(),
           url: u.webContents.getURL() || r.get(String(a || "").trim()) || ""
         }), null;
@@ -3043,7 +3056,7 @@ function no(e) {
     });
   }
   async function ge(a, d) {
-    return L(a, async (u, E) => {
+    return L(a, async (u, T) => {
       try {
         return await Wr(u, d);
       } catch (M) {
@@ -3051,15 +3064,15 @@ function no(e) {
           error: M instanceof Error ? M.message : String(M),
           payload: d,
           tabId: String(a || "").trim(),
-          url: E.webContents.getURL() || r.get(String(a || "").trim()) || ""
+          url: T.webContents.getURL() || r.get(String(a || "").trim()) || ""
         }), null;
       }
     });
   }
   async function V(a, d, u) {
-    return L(a, async (E, M) => {
+    return L(a, async (T, M) => {
       try {
-        return await Nr(E, d);
+        return await Nr(T, d);
       } catch (P) {
         return A.warn(`embedded browser catch toolkit ${u} failed`, {
           error: P instanceof Error ? P.message : String(P),
@@ -3067,11 +3080,11 @@ function no(e) {
           url: M.webContents.getURL() || r.get(String(a || "").trim()) || ""
         }), !1;
       }
-    }).then((E) => !!E);
+    }).then((T) => !!T);
   }
   async function fe(a) {
-    const d = String(a || "").trim(), u = dn(d), E = D(d);
-    return E && !E.webContents.isDestroyed() && (E.webContents.getURL() ? E.webContents.reload() : await K(d, E)), u;
+    const d = String(a || "").trim(), u = dn(d), T = D(d);
+    return T && !T.webContents.isDestroyed() && (T.webContents.getURL() ? T.webContents.reload() : await K(d, T)), u;
   }
   function tt(a, d) {
     const u = {
@@ -3079,7 +3092,7 @@ function no(e) {
       y: 0,
       width: 0,
       height: 0
-    }, E = H.fromWebContents(a) ?? e.getMainWindow(), M = E && !E.isDestroyed() ? Math.max(E.webContents.getZoomFactor(), 0.01) : 1;
+    }, T = H.fromWebContents(a) ?? e.getMainWindow(), M = T && !T.isDestroyed() ? Math.max(T.webContents.getZoomFactor(), 0.01) : 1;
     if (u.x = Math.max(0, Math.round(d.x * M)), u.y = Math.max(0, Math.round(d.y * M)), u.width = Math.max(0, Math.round(d.width * M)), u.height = Math.max(0, Math.round(d.height * M)), y = u, !b)
       return;
     const P = D(b);
@@ -3087,7 +3100,7 @@ function no(e) {
   }
   function Ht(a, d) {
     const u = H.fromWebContents(a) ?? e.getMainWindow();
-    T(u, d);
+    E(u, d);
   }
   async function jt(a) {
     try {
@@ -3103,7 +3116,7 @@ function no(e) {
   function qt(a) {
     const d = H.fromWebContents(a) ?? e.getMainWindow();
     !d || d.isDestroyed() || (Array.from(t.keys()).forEach((u) => {
-      T(d, u);
+      E(d, u);
     }), b = null, h({ state: "idle" }));
   }
   function Kt() {

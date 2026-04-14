@@ -60,24 +60,27 @@ export function embeddedBrowserResourceProbeRuntimeCoreBody() {
     streamType?: 'audio' | 'video'
   }>()
   const probeResourceKeysBySignature = new Map<string, string>()
+  const vimeoPlaylistUrls = new Set<string>()
   const mediaSourceStreams = new WeakMap<MediaSource, string[]>()
   let mseSequence = 0
   let probeResourceSequence = 0
 
-  const manifestExtensions = new Set(['m3u8', 'mpd'])
+  const manifestExtensions = new Set(['m3u8', 'm3u', 'mpd'])
   const mediaExtensions = new Set([
     'mp4', 'm4v', 'm4a', 'm4s', 'mp3', 'aac', 'flac', 'wav', 'ogg', 'oga', 'ogv',
-    'webm', 'mkv', 'mov', 'avi', 'ts', 'flv',
+    'webm', 'mkv', 'mov', 'avi', 'ts', 'flv', 'wma', 'mpeg', 'wmv', 'asf', 'movie',
+    'divx', 'mpeg4', 'vid', 'weba', 'opus', 'acc',
   ])
   const imageExtensions = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'avif', 'ico'])
   const subtitleExtensions = new Set(['vtt', 'srt', 'ass', 'ssa', 'ttml'])
   const dataUrlPattern = /^data:(application|video|audio)\//i
   const likelyUrlPattern = /^(https?:\/\/|blob:|\/\/|\/|\.\/|\.\.\/)/i
-  const manifestPattern = /(m3u8|mpd)(\?|$)/i
-  const mediaPattern = /\.(mp4|m4v|m4a|m4s|mp3|aac|flac|wav|ogg|oga|ogv|webm|mkv|mov|avi|ts|flv)(\?|$)/i
-  const imagePattern = /\.(jpg|jpeg|png|gif|webp|bmp|svg|avif|ico)(\?|$)/i
-  const subtitlePattern = /\.(vtt|srt|ass|ssa|ttml)(\?|$)/i
-  const pdfPattern = /\.pdf(\?|$)/i
+  const manifestPattern = /\.(m3u8|m3u|mpd)(\?|#|$)/i
+  const mediaPattern = /\.(mp4|m4v|m4a|m4s|mp3|aac|flac|wav|ogg|oga|ogv|webm|mkv|mov|avi|ts|flv|wma|mpeg|wmv|asf|movie|divx|mpeg4|vid|weba|opus|acc)(\?|#|$)/i
+  const imagePattern = /\.(jpg|jpeg|png|gif|webp|bmp|svg|avif|ico)(\?|#|$)/i
+  const subtitlePattern = /\.(vtt|srt|ass|ssa|ttml)(\?|#|$)/i
+  const pdfPattern = /\.pdf(\?|#|$)/i
+  const vimeoPlaylistPattern = /^https:\/\/[^.]*\.vimeocdn\.com\/exp=.*\/playlist\.json\?/i
   const originalJSONParse = JSON.parse.bind(JSON)
   const originalConsoleInfo = typeof console.info === 'function'
     ? console.info.bind(console)
@@ -349,7 +352,14 @@ export function embeddedBrowserResourceProbeRuntimeCoreBody() {
       return value
     }
     try {
-      if (likelyUrlPattern.test(value)) {
+      if (
+        likelyUrlPattern.test(value)
+        || manifestPattern.test(value)
+        || mediaPattern.test(value)
+        || imagePattern.test(value)
+        || subtitlePattern.test(value)
+        || pdfPattern.test(value)
+      ) {
         return new URL(value, currentLocationHref).toString()
       }
       if (/^https?:\/\//i.test(value)) {
@@ -815,6 +825,124 @@ export function embeddedBrowserResourceProbeRuntimeCoreBody() {
       resourceType: 'inline-manifest',
       signature: `${ext}:${normalizedText}`,
     })
+  }
+
+  function createVimeoManifestBlobUrl(text: string, signature: string) {
+    const resource = createProbeBlobResource({
+      base64: textToBase64(text),
+      ext: 'm3u8',
+      kind: 'manifest',
+      mimeType: 'application/vnd.apple.mpegurl',
+      signature,
+    })
+    return resource.url
+  }
+
+  function emitVimeoPlaylistManifest(originalUrl: string, payload: unknown) {
+    const normalizedOriginalUrl = String(originalUrl || '').trim()
+    if (!normalizedOriginalUrl || !vimeoPlaylistPattern.test(normalizedOriginalUrl) || vimeoPlaylistUrls.has(normalizedOriginalUrl)) {
+      return false
+    }
+    const data = typeof payload === 'string' ? parseMaybeJson(payload) : payload
+    if (!data || typeof data !== 'object') {
+      return false
+    }
+    const playlist = data as Record<string, unknown>
+    if (typeof playlist.base_url !== 'string' || !Array.isArray(playlist.video)) {
+      return false
+    }
+
+    try {
+      const parsedUrl = new URL(normalizedOriginalUrl)
+      const pathBase = parsedUrl.pathname.slice(0, parsedUrl.pathname.lastIndexOf('/') + 1)
+      const baseUrl = new URL(`${parsedUrl.origin}${pathBase}${playlist.base_url}`).href
+      const masterLines = ['#EXTM3U', '#EXT-X-INDEPENDENT-SEGMENTS', '#EXT-X-VERSION:3']
+
+      const createStreamManifestUrl = (stream: Record<string, unknown>) => {
+        const segments = Array.isArray(stream.segments) ? stream.segments : []
+        if (segments.length === 0) {
+          return ''
+        }
+        const streamBaseUrl = String(stream.base_url || '')
+        const manifestLines = [
+          '#EXTM3U',
+          '#EXT-X-VERSION:3',
+          `#EXT-X-TARGETDURATION:${Number(stream.duration) || 0}`,
+          '#EXT-X-MEDIA-SEQUENCE:0',
+          '#EXT-X-PLAYLIST-TYPE:VOD',
+        ]
+        if (typeof stream.init_segment === 'string' && stream.init_segment) {
+          manifestLines.push(`#EXT-X-MAP:URI="data:application/octet-stream;base64,${stream.init_segment}"`)
+        } else if (typeof stream.init_segment_url === 'string' && stream.init_segment_url) {
+          manifestLines.push(`#EXT-X-MAP:URI="${baseUrl}${streamBaseUrl}${stream.init_segment_url}"`)
+        }
+
+        segments.forEach((segment) => {
+          if (!segment || typeof segment !== 'object') {
+            return
+          }
+          const currentSegment = segment as Record<string, unknown>
+          const segmentUrl = String(currentSegment.url || '')
+          if (!segmentUrl) {
+            return
+          }
+          const start = Number(currentSegment.start) || 0
+          const end = Number(currentSegment.end) || start
+          manifestLines.push(`#EXTINF:${Math.max(end - start, 0)},`)
+          manifestLines.push(`${baseUrl}${streamBaseUrl}${segmentUrl}`)
+        })
+        manifestLines.push('#EXT-X-ENDLIST')
+        const manifestText = manifestLines.join('\n')
+        return createVimeoManifestBlobUrl(manifestText, `vimeo-stream:${manifestText}`)
+      }
+
+      playlist.video.forEach((stream) => {
+        if (!stream || typeof stream !== 'object') {
+          return
+        }
+        const currentStream = stream as Record<string, unknown>
+        const streamUrl = createStreamManifestUrl(currentStream)
+        if (!streamUrl) {
+          return
+        }
+        masterLines.push(
+          `#EXT-X-STREAM-INF:BANDWIDTH=${Number(currentStream.bitrate) || 0},RESOLUTION=${Number(currentStream.width) || 0}x${Number(currentStream.height) || 0},CODECS="${String(currentStream.codecs || '')}"`,
+        )
+        masterLines.push(streamUrl)
+      })
+
+      const audioStreams = Array.isArray(playlist.audio) ? playlist.audio : []
+      audioStreams.forEach((stream) => {
+        if (!stream || typeof stream !== 'object') {
+          return
+        }
+        const currentStream = stream as Record<string, unknown>
+        const streamUrl = createStreamManifestUrl(currentStream)
+        if (!streamUrl) {
+          return
+        }
+        masterLines.push(
+          `#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="${String(currentStream.id || '')}",NAME="${String(currentStream.bitrate || '')}",URI="${streamUrl}"`,
+        )
+      })
+
+      if (masterLines.length <= 3) {
+        return false
+      }
+      const masterText = masterLines.join('\n')
+      vimeoPlaylistUrls.add(normalizedOriginalUrl)
+      emitGeneratedResource({
+        base64: textToBase64(masterText),
+        ext: 'm3u8',
+        kind: 'manifest',
+        mimeType: 'application/vnd.apple.mpegurl',
+        resourceType: 'inline-manifest',
+        signature: `vimeo-master:${masterText}`,
+      })
+      return true
+    } catch {
+      return false
+    }
   }
 
   function isMp4HeaderChunk(chunk: ArrayBuffer) {

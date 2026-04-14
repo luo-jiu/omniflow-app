@@ -4,10 +4,11 @@ import type {
   EmbeddedBrowserCapturedStreamType,
 } from './embeddedBrowserResourceTypes'
 
-const manifestExtensions = new Set(['m3u8', 'mpd'])
+const manifestExtensions = new Set(['m3u8', 'm3u', 'mpd'])
 const mediaExtensions = new Set([
   'mp4', 'm4v', 'm4a', 'm4s', 'mp3', 'aac', 'flac', 'wav', 'ogg', 'oga', 'ogv',
-  'webm', 'mkv', 'mov', 'avi', 'ts', 'flv',
+  'webm', 'mkv', 'mov', 'avi', 'ts', 'flv', 'wma', 'mpeg', 'wmv', 'asf', 'movie',
+  'divx', 'mpeg4', 'vid', 'weba', 'opus', 'acc',
 ])
 const imageExtensions = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'avif', 'ico'])
 const subtitleExtensions = new Set(['vtt', 'srt', 'ass', 'ssa', 'ttml'])
