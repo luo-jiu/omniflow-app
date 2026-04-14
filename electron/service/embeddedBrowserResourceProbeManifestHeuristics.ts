@@ -92,7 +92,81 @@ export function embeddedBrowserResourceProbeManifestHeuristicsBody() {
     })
   }
 
-  function emitM3u8ManifestWithBase(text: string, baseUrl: string) {
+  function emitM3u8DataKeyReference(reference: string) {
+    const normalizedReference = String(reference || '').trim()
+    if (!/^data:application\/octet-stream/i.test(normalizedReference)) {
+      return false
+    }
+    const commaIndex = normalizedReference.indexOf(',')
+    if (commaIndex === -1) {
+      return false
+    }
+    const metadata = normalizedReference.slice(0, commaIndex)
+    const data = normalizedReference.slice(commaIndex + 1).trim()
+    if (!data || !/;base64/i.test(metadata)) {
+      return false
+    }
+    return emitKeyCandidateFromBase64(data)
+  }
+
+  function emitM3u8ReferenceResource(reference: string, sourceLine: string, baseUrl: string) {
+    const normalizedReference = String(reference || '').trim()
+    if (!normalizedReference) {
+      return
+    }
+    const normalizedSourceLine = String(sourceLine || '').trim().toUpperCase()
+    if (normalizedReference.startsWith('data:')) {
+      if (normalizedSourceLine.startsWith('#EXT-X-KEY')) {
+        emitM3u8DataKeyReference(normalizedReference)
+      }
+      return
+    }
+    const absoluteUrl = resolveM3u8Reference(baseUrl, normalizedReference)
+    if (!absoluteUrl || !toAbsoluteUrl(absoluteUrl)) {
+      return
+    }
+    const inferredKind = classifyKind(absoluteUrl)
+    const kind = normalizedSourceLine.startsWith('#EXT-X-KEY')
+      ? 'key'
+      : normalizedSourceLine.startsWith('#EXT-X-MAP')
+        ? 'media'
+        : inferredKind
+    if (kind === 'other') {
+      return
+    }
+    registerManifestBaseUrl(absoluteUrl)
+    emit({
+      ext: kind === 'key' ? 'key' : getExtension(absoluteUrl),
+      kind,
+      resourceType: normalizedSourceLine.startsWith('#EXT-X-KEY')
+        ? 'm3u8-key'
+        : normalizedSourceLine.startsWith('#EXT-X-MAP')
+          ? 'm3u8-map'
+          : normalizedSourceLine.startsWith('#')
+            ? 'm3u8-uri'
+            : 'm3u8-reference',
+      source: 'probe',
+      url: absoluteUrl,
+    })
+  }
+
+  function emitM3u8ReferenceResources(text: string, baseUrl: string) {
+    String(text || '').split('\n').slice(0, 500).forEach((line) => {
+      const currentLine = line.trim()
+      if (!currentLine) {
+        return
+      }
+      if (currentLine.startsWith('#')) {
+        Array.from(currentLine.matchAll(/URI="([^"]*)"/g)).forEach((match) => {
+          emitM3u8ReferenceResource(String(match[1] || ''), currentLine, baseUrl)
+        })
+        return
+      }
+      emitM3u8ReferenceResource(currentLine, currentLine, baseUrl)
+    })
+  }
+
+  function emitM3u8ManifestWithBase(text: string, baseUrl: string, emitReferences = true) {
     const normalizedText = addBaseUrl(baseUrl, text)
     emitGeneratedResource({
       base64: textToBase64(normalizedText),
@@ -102,6 +176,9 @@ export function embeddedBrowserResourceProbeManifestHeuristicsBody() {
       resourceType: 'inline-manifest',
       signature: `m3u8:${normalizedText}`,
     })
+    if (emitReferences) {
+      emitM3u8ReferenceResources(text, baseUrl)
+    }
   }
 
   function registerManifestBaseUrl(url: string) {
@@ -150,7 +227,7 @@ export function embeddedBrowserResourceProbeManifestHeuristicsBody() {
 
     if (hasRelativeReferences) {
       pendingM3u8TextsBySignature.set(getM3u8PendingSignature(normalizedText), normalizedText)
-      emitM3u8ManifestWithBase(normalizedText, explicitBaseUrl || getBaseUrl(currentLocationHref))
+      emitM3u8ManifestWithBase(normalizedText, explicitBaseUrl || getBaseUrl(currentLocationHref), !isWeakPageBaseUrl)
       knownManifestBaseUrls.forEach((knownBaseUrl) => {
         emitM3u8ManifestWithBase(normalizedText, knownBaseUrl)
       })
@@ -165,6 +242,7 @@ export function embeddedBrowserResourceProbeManifestHeuristicsBody() {
       resourceType: 'inline-manifest',
       signature: `${ext}:${normalizedText}`,
     })
+    emitM3u8ReferenceResources(normalizedText, '')
   }
 
   function createVimeoManifestBlobUrl(text: string, signature: string) {
