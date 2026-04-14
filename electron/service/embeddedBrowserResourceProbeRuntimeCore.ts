@@ -93,6 +93,7 @@ export function embeddedBrowserResourceProbeRuntimeCoreBody() {
     trimExtraMediaHeaders: 'OmniflowCatchToolkit:trimExtraMediaHeaders',
   } as const
   let m3u8Accumulator = ''
+  let isEmittingKeyCandidate = false
   let isCaptureComplete = false
   const catchToolkitState = {
     autoSeekToBufferedEnd: false,
@@ -615,6 +616,28 @@ export function embeddedBrowserResourceProbeRuntimeCoreBody() {
     return null
   }
 
+  function uint32ArrayToUint8Array(input: Uint32Array) {
+    const bytes = new Uint8Array(16)
+    for (let index = 0; index < 4; index += 1) {
+      const value = input[index] || 0
+      bytes[index * 4] = (value >> 24) & 0xff
+      bytes[index * 4 + 1] = (value >> 16) & 0xff
+      bytes[index * 4 + 2] = (value >> 8) & 0xff
+      bytes[index * 4 + 3] = value & 0xff
+    }
+    return bytes
+  }
+
+  function uint16ArrayToUint8Array(input: Uint16Array) {
+    const bytes = new Uint8Array(16)
+    for (let index = 0; index < 8; index += 1) {
+      const value = input[index] || 0
+      bytes[index * 2] = (value >> 8) & 0xff
+      bytes[index * 2 + 1] = value & 0xff
+    }
+    return bytes
+  }
+
   function createProbeResourceKey() {
     probeResourceSequence += 1
     return `probe-resource:${Date.now()}-${probeResourceSequence}`
@@ -701,26 +724,38 @@ export function embeddedBrowserResourceProbeRuntimeCoreBody() {
   }
 
   function emitKeyCandidateFromBuffer(buffer: ArrayBuffer, ext = 'key') {
-    const normalizedKeyBuffer = normalizePotentialKeyBuffer(buffer)
-    if (!normalizedKeyBuffer) {
+    if (isEmittingKeyCandidate) {
       return false
     }
-    const base64 = arrayBufferToBase64(normalizedKeyBuffer)
-    emitGeneratedResource({
-      base64,
-      ext,
-      kind: 'key',
-      mimeType: 'application/octet-stream',
-      resourceType: 'key',
-      signature: `key:${base64}`,
-    })
-    return true
+    isEmittingKeyCandidate = true
+    try {
+      const normalizedKeyBuffer = normalizePotentialKeyBuffer(buffer)
+      if (!normalizedKeyBuffer) {
+        return false
+      }
+      const base64 = arrayBufferToBase64(normalizedKeyBuffer)
+      emitGeneratedResource({
+        base64,
+        ext,
+        kind: 'key',
+        mimeType: 'application/octet-stream',
+        resourceType: 'key',
+        signature: `key:${base64}`,
+      })
+      return true
+    } finally {
+      isEmittingKeyCandidate = false
+    }
   }
 
   function emitKeyCandidateFromBase64(base64: string) {
+    if (isEmittingKeyCandidate) {
+      return false
+    }
     if (!isLikelyBase64Key(base64)) {
       return false
     }
+    isEmittingKeyCandidate = true
     try {
       const keyBuffer = base64ToArrayBuffer(base64)
       if (keyBuffer.byteLength !== 16) {
@@ -737,27 +772,37 @@ export function embeddedBrowserResourceProbeRuntimeCoreBody() {
       return true
     } catch {
       return false
+    } finally {
+      isEmittingKeyCandidate = false
     }
   }
 
   function emitKeyCandidateFromHex(hex: string) {
+    if (isEmittingKeyCandidate) {
+      return false
+    }
     const normalizedValue = String(hex || '').trim().toLowerCase()
     if (!isLikelyHexKey(normalizedValue)) {
       return false
     }
-    const bytes = new Uint8Array(16)
-    for (let index = 0; index < 16; index += 1) {
-      bytes[index] = Number.parseInt(normalizedValue.slice(index * 2, index * 2 + 2), 16)
+    isEmittingKeyCandidate = true
+    try {
+      const bytes = new Uint8Array(16)
+      for (let index = 0; index < 16; index += 1) {
+        bytes[index] = Number.parseInt(normalizedValue.slice(index * 2, index * 2 + 2), 16)
+      }
+      emitGeneratedResource({
+        base64: arrayBufferToBase64(bytes.buffer),
+        ext: 'key',
+        kind: 'key',
+        mimeType: 'application/octet-stream',
+        resourceType: 'key',
+        signature: `key:${normalizedValue}`,
+      })
+      return true
+    } finally {
+      isEmittingKeyCandidate = false
     }
-    emitGeneratedResource({
-      base64: arrayBufferToBase64(bytes.buffer),
-      ext: 'key',
-      kind: 'key',
-      mimeType: 'application/octet-stream',
-      resourceType: 'key',
-      signature: `key:${normalizedValue}`,
-    })
-    return true
   }
 
   function emitInlineManifest(text: string, ext: 'm3u8' | 'mpd', baseUrl?: string) {

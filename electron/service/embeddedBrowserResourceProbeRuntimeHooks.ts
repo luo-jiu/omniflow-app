@@ -489,6 +489,85 @@ export function embeddedBrowserResourceProbeRuntimeHooksBody() {
     globalScope.DataView = wrappedDataView
   }
 
+  function createTypedArrayConstructorWrapper<T extends typeof Int8Array | typeof Uint8Array | typeof Uint16Array | typeof Uint32Array>(
+    nativeConstructor: T,
+  ) {
+    return new Proxy(nativeConstructor, {
+      construct(target, argumentsList, newTarget) {
+        const instance = Reflect.construct(target, argumentsList, newTarget) as InstanceType<T>
+        try {
+          if (isEmittingKeyCandidate) {
+            return instance
+          }
+          const input = argumentsList?.[0]
+          if (Array.isArray(input) && input.length === 16) {
+            const isByteArray = input.every((item) => typeof item === 'number' && Number.isFinite(item) && item >= 0 && item <= 255)
+            if (isByteArray) {
+              emitKeyCandidateFromBuffer(new nativeUint8Array(input).buffer)
+              return instance
+            }
+          }
+          if (input instanceof ArrayBuffer && input.byteLength === 16) {
+            emitKeyCandidateFromBuffer(input)
+            return instance
+          }
+          if (instance.byteLength === 16) {
+            if (target.name === 'Uint32Array' && instance.length === 4) {
+              emitKeyCandidateFromBuffer(uint32ArrayToUint8Array(instance as unknown as Uint32Array).buffer)
+            } else if (target.name === 'Uint16Array' && instance.length === 8) {
+              emitKeyCandidateFromBuffer(uint16ArrayToUint8Array(instance as unknown as Uint16Array).buffer)
+            } else {
+              emitKeyCandidateFromBuffer(instance.buffer.slice(instance.byteOffset, instance.byteOffset + instance.byteLength))
+            }
+          }
+        } catch {
+          // ignore typed-array hook failures and keep native behavior
+        }
+        return instance
+      },
+    }) as T
+  }
+
+  const nativeInt8Array = globalScope.Int8Array
+  const nativeUint8Array = globalScope.Uint8Array
+  const nativeUint16Array = globalScope.Uint16Array
+  const nativeUint32Array = globalScope.Uint32Array
+  if (typeof nativeInt8Array === 'function') {
+    globalScope.Int8Array = createTypedArrayConstructorWrapper(nativeInt8Array)
+    globalScope.Int8Array.toString = function () {
+      return nativeInt8Array.toString()
+    }
+  }
+  if (typeof nativeUint8Array === 'function') {
+    globalScope.Uint8Array = createTypedArrayConstructorWrapper(nativeUint8Array)
+    globalScope.Uint8Array.toString = function () {
+      return nativeUint8Array.toString()
+    }
+  }
+  if (typeof nativeUint16Array === 'function') {
+    globalScope.Uint16Array = createTypedArrayConstructorWrapper(nativeUint16Array)
+    globalScope.Uint16Array.toString = function () {
+      return nativeUint16Array.toString()
+    }
+  }
+  if (typeof nativeUint32Array === 'function') {
+    globalScope.Uint32Array = createTypedArrayConstructorWrapper(nativeUint32Array)
+    globalScope.Uint32Array.toString = function () {
+      return nativeUint32Array.toString()
+    }
+  }
+
+  const originalEscape = typeof globalScope.escape === 'function' ? globalScope.escape.bind(globalScope) : null
+  if (originalEscape) {
+    ;((globalScope as unknown) as { escape: typeof escape }).escape = function (input: string) {
+      emitKeyCandidateFromBase64(input)
+      return originalEscape.apply(this, arguments as any)
+    }
+    globalScope.escape.toString = function () {
+      return originalEscape.toString()
+    }
+  }
+
   function createSubarrayWrapper(
     originalSubarray: (begin?: number, end?: number) => ArrayBufferView,
   ) {
@@ -527,6 +606,47 @@ export function embeddedBrowserResourceProbeRuntimeHooksBody() {
   }
   String.prototype.indexOf.toString = function () {
     return originalStringIndexOf.toString()
+  }
+
+  function scanInlineScriptResourceCandidates() {
+    if (isWorkerScope || typeof document === 'undefined') {
+      return
+    }
+    try {
+      const patterns = [
+        /["']((?:(?:https?:)?\/\/)?[^"'\s]*?\.(?:m3u8|mp4|flv)(?:\?[^"'\s]*)?)["']/gi,
+      ]
+      document.querySelectorAll('script:not([src])').forEach((script) => {
+        const scriptText = script.textContent || ''
+        if (!scriptText) {
+          return
+        }
+        patterns.forEach((pattern) => {
+          let match = pattern.exec(scriptText)
+          while (match) {
+            const rawUrl = String(match[1] || match[0] || '').replace(/['"]/g, '').trim()
+            const url = rawUrl && !/^https?:\/\//i.test(rawUrl) && rawUrl.startsWith('//')
+              ? `${currentLocationProtocol}${rawUrl}`
+              : rawUrl
+            reportCandidate(url, {
+              baseUrl: currentLocationHref,
+              resourceType: 'inline-script',
+            })
+            match = pattern.exec(scriptText)
+          }
+        })
+      })
+    } catch {
+      // ignore DOM scan failures
+    }
+  }
+
+  if (!isWorkerScope && typeof document !== 'undefined') {
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', scanInlineScriptResourceCandidates, { once: true })
+    } else {
+      setTimeout(scanInlineScriptResourceCandidates, 0)
+    }
   }
 
 }
