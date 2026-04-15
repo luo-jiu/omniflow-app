@@ -1,0 +1,295 @@
+# Library Detail 工作区状态说明
+
+更新时间：2026-04-15
+
+适用范围：`src/views/library/detail/` 页面中的工作区显示模式、浏览器 tab、搜索模式、地址栏、缓存恢复，以及和文件预览/内置浏览器之间的切换逻辑。
+
+## 1. 概述
+
+`library detail` 不是一个单一页面，而是一个“页面级工作区容器”。  
+它同时承载：
+
+- 文件树侧栏
+- 文件预览
+- 搜索主页
+- 内置浏览器
+- 浏览器资源面板和下载导入
+
+因此这页最重要的不是某个局部组件，而是“工作区状态 owner”。  
+当前这份 owner 仍然应该留在页面层，不要拆散到多个 feature 里各自保存一份。
+
+## 2. 当前状态模型
+
+工作区持久化模型定义在：
+
+- `src/views/library/detail/workspace-state.ts`
+
+当前核心字段：
+
+- `activeBrowserTabId`
+- `browserInput`
+- `browserModeOpen`
+- `browserTabs`
+- `searchDraft`
+- `searchMode`
+- `workspaceDisplayMode`
+
+当前 `workspaceDisplayMode` 有 3 种：
+
+- `search-home`
+- `file-viewer`
+- `browser`
+
+这个模型是页面级 source of truth，不是通用组件状态。
+
+## 3. 状态 owner 规则
+
+### 3.1 页面层 owner
+
+下面这些状态的 owner 都在 `src/views/library/detail/index.tsx`：
+
+- 浏览器 tab 列表
+- 当前激活的浏览器 tab
+- 浏览器地址栏输入
+- 搜索模式与搜索草稿
+- 当前工作区显示模式
+- 浏览器资源面板展开与宽度
+- 书签栏展开与管理 UI
+- pending browser file open
+
+规则：
+
+- 这些状态可以分给子组件消费，但不要把写入权分散出去。
+- 子组件若需要改变模式、tab、地址栏，应通过页面层回调完成。
+
+### 3.2 子组件职责
+
+当前主要子组件职责：
+
+- `DirectorySidebar`
+  - 文件树与选择入口
+- `SearchWorkspace`
+  - 搜索主页和搜索模式切换
+- `EmbeddedBrowserPanel`
+  - 浏览器显示载体，不拥有 tab 列表
+- `EmbeddedBrowserResourcePanel`
+  - 当前 active tab 的资源捕捉面板
+
+其中最容易误判的是 `EmbeddedBrowserPanel`。  
+它看起来像“浏览器组件”，但它不是 tab state owner，它只是“当前激活浏览器 tab 的承载面板”。
+
+## 4. 显示模式规则
+
+### 4.1 `search-home`
+
+表示当前显示搜索主页，不显示文件预览，也不显示浏览器页面。
+
+典型进入路径：
+
+- 页面初始无 active file / 无 browser
+- 文件模式返回搜索主页
+- 搜索模式明确切回主页
+
+### 4.2 `file-viewer`
+
+表示当前以文件预览为主工作区。
+
+典型进入路径：
+
+- 用户在目录树中打开文件
+- 浏览器模式关闭后，若仍有活动文件，则 fallback 到 `file-viewer`
+
+### 4.3 `browser`
+
+表示当前工作区显示内置浏览器。
+
+进入条件通常同时满足：
+
+- `browserModeOpen = true`
+- 有有效浏览器 tab，或正在创建浏览器 tab
+
+页面里有一条保护规则：
+
+- 如果 `browserModeOpen = false`，但 `workspaceDisplayMode` 仍是 `browser`，会自动 fallback 到：
+  - 有 active file 时：`file-viewer`
+  - 否则：`search-home`
+
+这条规则保证“显示模式”不会比“浏览器真实开关”更激进。
+
+## 5. 浏览器 tab 规则
+
+### 5.1 tab 模型
+
+当前浏览器 tab 是页面内的轻量模型，字段包括：
+
+- `id`
+- `title`
+- `url`
+- `canGoBack`
+- `canGoForward`
+- `iconUrl`
+- `iconSourceUrl`
+
+它是 renderer 侧投影，不是 main 里的真实 view。
+
+### 5.2 创建 tab
+
+当前创建新 tab 的标准动作会同时做：
+
+- 新增一个空 tab
+- `setActiveBrowserTabId`
+- `setBrowserModeOpen(true)`
+- `setWorkspaceDisplayMode('browser')`
+- `setBrowserInput('')`
+- `setSearchMode('web')`
+- 调 `window.electronEmbeddedBrowser.openTab(next.id)`
+
+这说明“开 tab”本身就是一个页面级复合动作，不要把它拆成多个分散更新。
+
+### 5.3 激活 tab
+
+激活 tab 时，页面会同步更新：
+
+- `activeBrowserTabId`
+- `browserModeOpen`
+- `workspaceDisplayMode`
+- `bookmarkBarVisible`
+- `browserInput`
+
+并调用：
+
+- `window.electronEmbeddedBrowser.activateTab(tabId)`
+
+因此“切换激活 tab”不是只改一个 id，而是一次页面工作区上下文切换。
+
+### 5.4 关闭 tab
+
+关闭 tab 时当前逻辑会同步处理：
+
+- 从 `browserTabs` 中移除
+- 如果关的是 active tab，则选择 fallback tab
+- 更新 `activeBrowserTabId`
+- 更新 `browserInput`
+- 更新 `browserModeOpen`
+- 更新 `bookmarkBarVisible`
+- 清理 `pendingBrowserFileOpenByTabId`
+- 调 main 关闭真实 tab
+
+规则：
+
+- 不能只删数组项。
+- 关闭行为必须同时处理 renderer 投影和 main 真实资源。
+
+## 6. 搜索与浏览器的关系
+
+### 6.1 `searchMode`
+
+当前搜索模式至少有：
+
+- `files`
+- `web`
+
+它决定搜索框提交后，结果是进入文件搜索还是进入浏览器导航。
+
+### 6.2 web 搜索提交
+
+当 `searchMode = web` 时，搜索提交会：
+
+- 确保存在一个 browser tab
+- 打开浏览器模式
+- 把工作区切到 `browser`
+- 把输入内容交给浏览器地址栏处理
+
+也就是说，`searchMode = web` 不是单纯的 UI 筛选项，它会改变整个工作区行为。
+
+### 6.3 文件工作区返回
+
+`openFileWorkspace()` 的行为是：
+
+- `setBrowserModeOpen(false)`
+- `deactivate()` 原生浏览器 view
+- 若当前有 active file，则切到 `file-viewer`
+- 否则回 `search-home(files)`
+
+这说明“回到文件区”本质上是工作区级切换，而不是只把浏览器组件隐藏掉。
+
+## 7. 持久化与恢复
+
+### 7.1 页面工作区缓存
+
+当前工作区状态按资源库维度缓存：
+
+- cache key: `library:${libraryId}`
+
+行为规则：
+
+- 进入页面时读取缓存，作为初始状态
+- 关键状态变化后持续写回缓存
+- 页面卸载时再次保存最新状态
+
+被缓存的字段是：
+
+- `activeBrowserTabId`
+- `browserInput`
+- `browserModeOpen`
+- `browserTabs`
+- `searchDraft`
+- `searchMode`
+- `workspaceDisplayMode`
+
+### 7.2 非工作区字段的本地持久化
+
+另有一些 UI 偏好单独存在 `localStorage`：
+
+- 左侧栏宽度
+- 浏览器资源面板宽度
+
+这些状态不是工作区业务事实，更接近用户布局偏好，因此与 `workspace-state.ts` 分开是合理的。
+
+## 8. 和浏览器资源面板的关系
+
+浏览器资源面板当前是“浏览器工作区的附属面板”，但它自己的显示宽度和展开状态是页面层管理的。
+
+当前规则：
+
+- 资源面板只在浏览器工作区中有意义
+- 面板的显示宽度按 library 维度持久化
+- 面板进入浏览器工作区时默认折叠，是否展开只保留当前页面运行时状态
+
+这说明它属于“页面布局状态”，不是 `embedded-browser` feature 自己的全局状态。
+
+## 9. 高风险改动点
+
+后续改动以下地方时，必须额外小心：
+
+1. `workspaceDisplayMode` 和 `browserModeOpen` 的关系
+原因：这两个字段相关但不等价，最容易改出互相打架。
+
+2. `browserTabs / activeBrowserTabId / browserInput` 的组合更新
+原因：这三者在 tab 创建、激活、关闭时必须同步，不适合拆成分散副作用。
+
+3. 缓存恢复逻辑
+原因：一旦恢复逻辑和运行时规则不一致，很容易出现“页面一进来状态就飘”。
+
+4. `pendingBrowserFileOpenByTabId`
+原因：这是页面层和浏览器打开文件流程的衔接状态，清理不完整会把旧请求带到新 tab。
+
+5. 资源面板布局状态
+原因：这是工作区布局偏好，不要混进业务状态 owner。
+
+## 10. 维护规则
+
+出现以下变化时，必须回写本文：
+
+- 新增或删除工作区显示模式
+- `searchMode` 语义变化
+- 浏览器 tab 创建/激活/关闭规则变化
+- 工作区缓存字段变化
+- 浏览器资源面板归属变化
+- `library detail` 被进一步拆分出新的页面级状态 owner
+
+后续如果继续治理这页，优先方向应该是：
+
+- 固定“哪些状态是页面 owner，哪些只是子组件消费”
+- 把浏览器、文件预览、搜索主页之间的切换规则继续显式化
+- 避免把页面级复合动作拆成多个互相不知道对方的局部 `setState`

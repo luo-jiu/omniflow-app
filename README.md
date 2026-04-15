@@ -39,3 +39,16 @@ Please preserve attribution and review AGPL-3.0 obligations carefully before red
 npm install
 npm run build
 ```
+
+## Documentation
+
+Key frontend documents live in the repo and should be treated as part of the development baseline:
+
+- `docs/frontend-architecture-baseline.md`: current renderer / Electron layering, state ownership, and IPC boundary rules
+- `docs/embedded-browser-architecture.md`: embedded browser lifecycle, capture, download, and main/preload responsibilities
+- `docs/library-detail-workspace.md`: library detail workspace modes, browser tab ownership, and persistence rules
+- `docs/file-explorer-file-viewer-boundary.md`: file tree, file-open flow, viewer tabs, and dispatcher ownership
+- `docs/frontend-validation-matrix.md`: manual verification baseline for frontend and Electron changes
+- `docs/cat-catch-migration-audit.md`: embedded-browser resource-capture migration status
+- `.agent-docs/frontend-review-standard.md`: review gate for frontend and Electron changes
+- `.agent-docs/frontend-handoff.md`: maintenance handoff and entry map

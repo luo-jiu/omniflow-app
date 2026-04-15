@@ -21,6 +21,7 @@ import {
   IconStarStroked,
   IconMore,
   IconEdit,
+  IconPulse,
 } from "@douyinfe/semi-icons";
 import { Input, Modal, Popover, Select, Toast } from '@douyinfe/semi-ui';
 import styled, { css } from "styled-components";
@@ -77,7 +78,6 @@ const MAX_BROWSER_RESOURCE_PANEL_WIDTH = DEFAULT_BROWSER_RESOURCE_PANEL_WIDTH * 
 const SIDE_PANEL_TRAFFIC_LIGHT_SAFE_HEIGHT = 37;
 const SIDE_PANEL_WIDTH_STORAGE_PREFIX = 'library-detail:side-panel-width:';
 const BROWSER_RESOURCE_PANEL_WIDTH_STORAGE_PREFIX = 'library-detail:browser-resource-panel-width:';
-const BROWSER_RESOURCE_PANEL_VISIBLE_STORAGE_PREFIX = 'library-detail:browser-resource-panel-visible:';
 const CONTENT_TOOLBAR_HEIGHT = 46;
 const TOOLBAR_ACTION_BUTTON_SIZE = 36;
 const TOOLBAR_ACTION_ICON_SIZE = 18;
@@ -94,10 +94,6 @@ function getSidePanelWidthStorageKey(libraryId: number) {
 
 function getBrowserResourcePanelWidthStorageKey(libraryId: number) {
   return `${BROWSER_RESOURCE_PANEL_WIDTH_STORAGE_PREFIX}${libraryId}`;
-}
-
-function getBrowserResourcePanelVisibleStorageKey(libraryId: number) {
-  return `${BROWSER_RESOURCE_PANEL_VISIBLE_STORAGE_PREFIX}${libraryId}`;
 }
 
 function loadSidePanelWidth(libraryId: number): number {
@@ -133,16 +129,6 @@ function saveBrowserResourcePanelWidth(libraryId: number, width: number) {
       ),
     ),
   );
-}
-
-function loadBrowserResourcePanelVisible(libraryId: number): boolean {
-  const raw = localStorage.getItem(getBrowserResourcePanelVisibleStorageKey(libraryId));
-  if (!raw) return true;
-  return raw !== '0';
-}
-
-function saveBrowserResourcePanelVisible(libraryId: number, visible: boolean) {
-  localStorage.setItem(getBrowserResourcePanelVisibleStorageKey(libraryId), visible ? '1' : '0');
 }
 
 const DetailWrapper = styled.div`
@@ -299,6 +285,11 @@ const toolbarActionButtonStyles = css`
   .toolbar-action-btn:hover:not(:disabled) {
     background: rgba(0, 0, 0, 0.05);
     color: var(--app-text);
+  }
+
+  .toolbar-action-btn.is-active {
+    background: var(--semi-color-primary-light-default);
+    color: var(--semi-color-primary);
   }
 
   .toolbar-action-btn:disabled {
@@ -528,38 +519,6 @@ const ContentToolbar = styled.div`
     gap: 6px;
     margin-right: 6px;
     -webkit-app-region: no-drag;
-  }
-
-  .toolbar-pill-btn {
-    height: ${TOOLBAR_ACTION_BUTTON_SIZE}px;
-    border-radius: 8px;
-    border: 1px solid var(--app-border);
-    background: transparent;
-    color: var(--app-text-muted);
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0 12px;
-    cursor: pointer;
-    font-size: 12px;
-    font-weight: 600;
-    -webkit-app-region: no-drag;
-  }
-
-  .toolbar-pill-btn:hover:not(:disabled) {
-    background: rgba(0, 0, 0, 0.05);
-    color: var(--app-text);
-  }
-
-  .toolbar-pill-btn.is-active {
-    border-color: var(--semi-color-primary);
-    color: var(--semi-color-primary);
-    background: var(--semi-color-primary-light-default);
-  }
-
-  .toolbar-pill-btn:disabled {
-    cursor: not-allowed;
-    opacity: 0.45;
   }
   ${toolbarBackButtonStyles}
   ${toolbarActionButtonStyles}
@@ -1273,9 +1232,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   const previousActiveBrowserTabIdRef = React.useRef<string | null>(null);
   const previousBrowserTabCountRef = React.useRef(0);
   const [sidePanelWidth, setSidePanelWidth] = React.useState<number>(() => loadSidePanelWidth(libraryId));
-  const [browserResourcePanelVisible, setBrowserResourcePanelVisible] = React.useState<boolean>(() => (
-    loadBrowserResourcePanelVisible(libraryId)
-  ));
+  const [browserResourcePanelVisible, setBrowserResourcePanelVisible] = React.useState<boolean>(false);
   const [browserResourcePanelWidth, setBrowserResourcePanelWidth] = React.useState<number>(() => (
     loadBrowserResourcePanelWidth(libraryId)
   ));
@@ -1393,10 +1350,9 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
 
   React.useEffect(() => {
     const restoredWidth = loadBrowserResourcePanelWidth(libraryId);
-    const restoredVisible = loadBrowserResourcePanelVisible(libraryId);
     latestBrowserResourcePanelWidthRef.current = restoredWidth;
     setBrowserResourcePanelWidth(restoredWidth);
-    setBrowserResourcePanelVisible(restoredVisible);
+    setBrowserResourcePanelVisible(false);
   }, [libraryId]);
 
   React.useEffect(() => {
@@ -1728,12 +1684,8 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   }, [activeBrowserTab, bookmarkMatch.matched, browserInput, reloadBookmarks]);
 
   const toggleBrowserResourcePanel = React.useCallback(() => {
-    setBrowserResourcePanelVisible((current) => {
-      const nextValue = !current;
-      saveBrowserResourcePanelVisible(libraryId, nextValue);
-      return nextValue;
-    });
-  }, [libraryId]);
+    setBrowserResourcePanelVisible((current) => !current);
+  }, []);
 
   const openBookmarkURL = React.useCallback((item: BrowserBookmarkItem) => {
     if (!isURLBookmark(item)) {
@@ -3319,11 +3271,12 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
                 </button>
                 <button
                   type="button"
-                  className={`toolbar-pill-btn ${browserResourcePanelVisible ? 'is-active' : ''}`}
+                  className={`toolbar-action-btn ${browserResourcePanelVisible ? 'is-active' : ''}`}
                   onClick={toggleBrowserResourcePanel}
                   title={browserResourcePanelVisible ? '折叠资源捕获面板' : '展开资源捕获面板'}
+                  aria-label={browserResourcePanelVisible ? '折叠资源捕获面板' : '展开资源捕获面板'}
                 >
-                  资源
+                  <IconPulse />
                 </button>
               </div>
             </ContentToolbar>

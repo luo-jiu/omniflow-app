@@ -1,0 +1,335 @@
+# Embedded Browser 架构说明
+
+更新时间：2026-04-15
+
+适用范围：`omniflow-app` 内置浏览器的 renderer UI、preload bridge、Electron main controller、资源捕捉、下载导入与缓存捕捉工具链。
+
+## 1. 概述
+
+OmniFlow 的 embedded browser 不是单纯的 React 组件，而是“renderer 控制台 + main process 原生浏览器视图”的组合体。
+
+当前架构的核心原则：
+
+- 浏览器 tab、工具栏、资源面板和交互反馈在 renderer。
+- 真正的页面承载体是 Electron main 中的 `WebContentsView`。
+- renderer 只能通过 preload 暴露的桥接能力驱动浏览器，不直接依赖 main 内部结构。
+- 资源捕捉分为网络捕捉和深度捕捉两条链路，最终都汇总回 renderer 里的资源面板。
+
+## 2. 模块地图
+
+当前关键模块：
+
+- Renderer 页面编排
+  - `src/views/library/detail/index.tsx`
+- Renderer 浏览器载体
+  - `src/features/embedded-browser/components/EmbeddedBrowserPanel.tsx`
+- Renderer 资源捕捉 hook / service
+  - `src/features/embedded-browser/resources/hooks/useEmbeddedBrowserResources.ts`
+  - `src/features/embedded-browser/resources/hooks/useEmbeddedBrowserCatchToolkit.ts`
+  - `src/features/embedded-browser/resources/services/embedded-browser-resource.api.ts`
+- Renderer 下载导入 hook
+  - `src/features/embedded-browser/downloads/hooks/useEmbeddedBrowserDownloadImport.ts`
+- Preload bridge
+  - `electron/preload.ts`
+- IPC 注册
+  - `electron/service/embeddedBrowserMainIpc.ts`
+- Main controller
+  - `electron/service/embeddedBrowserMainController.ts`
+- View 生命周期
+  - `electron/service/embeddedBrowserViewLifecycle.ts`
+
+建议按下面的方向理解：
+
+```text
+library detail page
+  -> EmbeddedBrowserPanel / resources / downloads hooks
+    -> preload: window.electronEmbeddedBrowser
+      -> ipcMain handlers
+        -> embeddedBrowserMainController
+          -> WebContentsView / capture / download / ffmpeg / file system
+```
+
+## 3. 分层职责
+
+### 3.1 Renderer 页面层
+
+`src/views/library/detail/index.tsx` 是浏览器工作区的页面 owner，负责：
+
+- 浏览器 tab 列表和激活 tab id
+- 浏览器模式开关与工作区显示模式
+- 地址栏输入草稿
+- 书签栏和资源面板是否显示
+- 下载导入 modal 的展示与目标目录选择
+
+它可以编排浏览器行为，但不应该直接理解 main 里的 view 生命周期细节。
+
+### 3.2 Renderer 浏览器载体
+
+`EmbeddedBrowserPanel.tsx` 的职责很专一：
+
+- 提供一个 DOM host 作为原生 view 的 bounds 参考。
+- 根据 `activeTabId/currentUrl/pendingFileOpen/suspendNativeView` 决定当前面板处于：
+  - `idle`
+  - `blank`
+  - `attached`
+- 监听 `embedded-browser:state`，把导航状态、错误、标题、URL 变化回传给页面。
+- 通过 `ResizeObserver + requestAnimationFrame` 持续同步 host 区域给 main 的 `setBounds`。
+- 在空白、停用或卸载时调用 `deactivate()`，确保原生 view 从窗口中移除。
+
+它不负责维护 tab 列表，也不负责资源列表。
+
+### 3.3 Renderer 业务域
+
+资源和下载各自有独立 hook：
+
+- `useEmbeddedBrowserResources`
+  - 订阅资源事件
+  - 按 `tabId` 维护资源快照
+  - 启动 / 停止 / 清空 / 深度捕捉
+- `useEmbeddedBrowserCatchToolkit`
+  - 管理当前页缓存捕捉状态
+  - 拉取捕捉诊断信息
+  - 执行清缓存、重捕、保存、合并、自动导出
+- `useEmbeddedBrowserDownloadImport`
+  - 订阅下载完成事件
+  - 维护导入队列
+  - 把下载结果导入资源库，或保存到桌面
+
+这些 hook 应继续通过 `services/*.api.ts` 调 preload bridge，不要直接在 hook 或组件里散落原始 bridge 调用。
+
+### 3.4 Preload / IPC / Main
+
+`electron/preload.ts` 当前提供三类嵌入浏览器相关桥接：
+
+- 页面和 tab 控制
+- 下载事件和资源事件订阅
+- 资源捕捉、缓存捕捉、预览、导出、合并、manifest 下载
+
+`embeddedBrowserMainIpc.ts` 只负责 channel 到 handler 的转发，不承担业务规则。
+
+`embeddedBrowserMainController.ts` 负责：
+
+- `tabId -> WebContentsView` 的真实映射
+- 当前激活 view 的 attach / detach
+- state / download / resource 事件向 renderer 投影
+- 深度捕捉启动、probe 安装和 reload
+- MSE 读取、导出、保存、合并、manifest 下载
+
+## 4. 核心概念
+
+### 4.1 Tab 与 View
+
+这里有两层状态：
+
+- renderer tab
+  - 页面里维护的 tab 元数据：`id/title/url/canGoBack/canGoForward/...`
+- main view
+  - `tabId` 对应的 `WebContentsView`
+
+它们不是同一层对象。renderer 只能维护“投影”，真正的页面内容、session 和浏览器生命周期在 main。
+
+### 4.2 激活中的 view
+
+当前窗口同一时间只有一个 active embedded browser view 会被挂进窗口内容树。  
+切换 tab 时，main 会先 detach 旧 view，再 attach 新 view。
+
+这意味着：
+
+- renderer 的 tab 列表可以有多个
+- 但窗口里同一时刻只显示一个原生页面
+
+### 4.3 资源捕捉快照
+
+资源面板的数据也有分层：
+
+- 网络和 probe 捕捉事件由 main 发回 renderer
+- renderer 里的 `useEmbeddedBrowserResources` 再按 `tabId` 聚合成 snapshot
+- 当前页面资源面板只读“活动 tab 的快照”
+
+### 4.4 缓存捕捉工具态
+
+缓存捕捉工具态不是 React 本地拼出来的，它来自页面中注入的 probe runtime。  
+renderer 只是拉取和更新这份 page-side 状态，包括：
+
+- `autoSeekToBufferedEnd`
+- `autoDownloadOnComplete`
+- `clearCacheOnComplete`
+- `restartAlwaysFromBeginning`
+- `trimExtraMediaHeaders`
+- 文件名规则与诊断信息
+
+## 5. 关键链路
+
+### 5.1 导航链路
+
+链路如下：
+
+```text
+library detail submit / click
+  -> EmbeddedBrowserPanel.navigate()
+    -> preload navigate(tabId, url)
+      -> main controller loadURL()
+        -> WebContentsView lifecycle events
+          -> embedded-browser:state
+            -> renderer 更新 tab 投影和地址栏
+```
+
+关键点：
+
+- 地址栏和 tab URL 的 source of truth 在页面层，不在 `EmbeddedBrowserPanel`。
+- `EmbeddedBrowserPanel` 只负责把“当前应该显示哪个 tab、应该打开什么 URL”转给 main。
+- 真正导航结果以后续 `state` 事件为准。
+
+### 5.2 Bounds 同步链路
+
+原生 view 不在 React 树里，所以 bounds 必须单独同步：
+
+```text
+EmbeddedBrowserPanel host DOM
+  -> ResizeObserver / window resize
+    -> preload setBounds(bounds)
+      -> main controller set active view bounds
+```
+
+规则：
+
+- 所有宿主尺寸同步都应通过 host rect 推导。
+- 不要在页面层硬编码原生 view 的像素位置。
+
+### 5.3 下载导入链路
+
+下载链路的关键事实：
+
+- download 事件由 main 发给 renderer。
+- `useEmbeddedBrowserDownloadImport` 只把 `completed` 事件放进队列。
+- 失败、取消会优先清理临时文件。
+- 成功后有两条出口：
+  - 导入资源库
+  - 保存到本地桌面
+
+当前导入链路并不是浏览器自己写库，而是：
+
+```text
+tempPath
+  -> uploadManager.createBatch(...)
+    -> 走现有上传体系进入资源库
+```
+
+这意味着 embedded browser download import 依赖当前上传中心，不应单独造第二套导入状态机。
+
+### 5.4 资源捕捉链路
+
+资源捕捉分两类：
+
+#### 网络捕捉
+
+- 由 main 侧的浏览器网络能力记录
+- 以 `embedded-browser:resource` 事件推回 renderer
+
+#### 深度捕捉
+
+- 页面开启 deep capture
+- main 安装 probe 并在需要时 reload
+- probe 通过 console payload / page action 输出资源和缓存工具状态
+- main 解析并汇总回 renderer
+
+renderer 的资源列表不应该关心“这个资源是来自网络还是来自 probe 的哪一种 hook”，只关心统一的捕捉模型。
+
+### 5.5 缓存捕捉与合并链路
+
+缓存捕捉工具链路：
+
+```text
+renderer catch toolkit action
+  -> preload catch-toolkit api
+    -> main controller 在 frame 中执行 page action script
+      -> page-side probe runtime 处理 MSE / catch state
+        -> 需要时 read/export/save/merge
+```
+
+主线能力：
+
+- 清理当前页缓存
+- 从头重捕
+- 直接导出捕捉流
+- 读取捕捉流内容
+- 调 `ffmpeg` 合并音视频
+
+规则：
+
+- renderer 不直接假设页面里只有一个 frame。
+- main controller 会优先在 frame 列表里执行 page action，再汇总结果。
+
+## 6. 生命周期规则
+
+### 6.1 面板停用规则
+
+以下情况必须 `deactivate()`：
+
+- `suspendNativeView = true`
+- `panelMode = idle`
+- `panelMode = blank`
+- 组件卸载
+
+这条规则非常重要，因为它保证：
+
+- 原生 view 不会在看不见时继续挂在窗口里
+- 文件模式和搜索模式不会被浏览器 view 覆盖
+
+### 6.2 深度捕捉启动规则
+
+当前 deep capture 的行为是：
+
+1. main 先把 tab 的 deep capture 标记打开
+2. 对已存在 view 安装 probe
+3. 如果页面已加载 URL，则 `reloadIgnoringCache()`
+
+因此“深度捕捉”不是纯前端状态切换，而是会影响页面生命周期。  
+未来改这个交互时，必须写清楚是否仍然要求刷新。
+
+### 6.3 关闭 tab 规则
+
+页面关闭 tab 时，需要同步处理：
+
+- renderer tab 列表移除
+- 当前激活 tab fallback
+- 地址栏内容 fallback
+- pending file open 清理
+- main 中真实 view 关闭
+
+不要只删 renderer tab，而忘了 main 的 view。
+
+## 7. 高风险变更点
+
+后续改动以下地方时，必须额外小心：
+
+1. `EmbeddedBrowserPanel.tsx`
+原因：这里同时管理 bounds、attach/deactivate、状态订阅和空白页行为。
+
+2. `embeddedBrowserMainController.ts`
+原因：这里是浏览器真实 owner，tab/view/capture/download 生命周期都在这里收口。
+
+3. `electron/preload.ts`
+原因：bridge 一旦发散，renderer 很快会绕过 service 层直接依赖原始 API。
+
+4. `useEmbeddedBrowserResources` / `useEmbeddedBrowserCatchToolkit`
+原因：这两层如果重复缓存或重建 source of truth，会把资源列表和页面真实状态搞成双源。
+
+5. 下载导入与上传中心的衔接
+原因：当前下载导入是复用上传体系，如果擅自拆开，很容易产生重复状态机和清理遗漏。
+
+## 8. 维护规则
+
+出现以下变化时，必须回写本文：
+
+- tab / view attach 规则变化
+- preload 暴露面变化
+- resource / download / state 事件 payload 变化
+- deep capture 是否仍需要刷新页面的语义变化
+- MSE 合并、manifest 下载、下载导入链路变化
+
+如果未来 embedded browser 继续扩展，优先方向应该是：
+
+- 把 renderer 侧桥接调用继续收敛到 service
+- 把复杂能力文档化，而不是让页面组件直接知道更多 main 细节
+- 把 tab 生命周期、资源捕捉和下载导入继续保持为 3 条边界清晰的链路
