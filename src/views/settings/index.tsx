@@ -48,11 +48,13 @@ const SettingsPageWrapper = styled.div`
 `;
 
 const SettingsWrapper = styled.div`
+  --page-heading-indent: 58px;
+
   position: relative;
   z-index: 1;
-  padding: 48px 60px;
-  padding-top: 56px;
-  max-width: 800px;
+  padding: 56px 68px;
+  padding-top: 64px;
+  max-width: 920px;
   margin: 0 auto;
   width: 100%;
   color: var(--semi-color-text-0);
@@ -65,40 +67,58 @@ const SettingsWrapper = styled.div`
   .settings-header {
     display: flex;
     align-items: center;
-    gap: 16px;
-    margin-bottom: 8px;
+    gap: 18px;
+    margin-bottom: 10px;
+  }
+
+  .page-back-button {
+    flex-shrink: 0;
+    padding: 8px;
+    border-radius: 10px;
+  }
+
+  .page-title {
+    margin: 0;
+    font-size: 34px;
+    font-weight: 700;
+    line-height: 1.15;
   }
 
   .settings-subtitle {
-    margin-left: 52px;
-    margin-bottom: 28px;
+    margin-left: var(--page-heading-indent);
+    margin-bottom: 34px;
+    max-width: 720px;
     color: var(--semi-color-text-2);
-    font-size: 15px;
+    font-size: 17px;
+    line-height: 1.6;
   }
 
   .setting-item {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 20px 0;
+    gap: 24px;
+    padding: 24px 0;
   }
 
   .setting-title {
-    font-size: 16px;
-    font-weight: 500;
+    font-size: 19px;
+    font-weight: 600;
+    line-height: 1.35;
   }
 
   .setting-desc {
-    font-size: 14px;
-    margin-top: 4px;
+    font-size: 16px;
+    margin-top: 6px;
     color: var(--semi-color-text-2);
+    line-height: 1.6;
   }
 
   .setting-control-group {
     display: inline-flex;
     align-items: center;
-    gap: 8px;
-    width: min(56vw, 420px);
+    gap: 10px;
+    width: min(56vw, 460px);
     justify-content: flex-end;
   }
 
@@ -107,12 +127,22 @@ const SettingsWrapper = styled.div`
     min-width: 0;
   }
 
+  .setting-path-input .semi-input-wrapper,
+  .setting-path-input .semi-input {
+    font-size: 16px;
+  }
+
+  .setting-path-input .semi-input-wrapper {
+    min-height: 44px;
+  }
+
   .settings-action-btn {
-    min-height: 36px;
-    min-width: 96px;
-    padding: 0 16px;
+    min-height: 42px;
+    min-width: 108px;
+    padding: 0 18px;
     border-radius: 8px;
-    font-size: 14px;
+    font-size: 15px;
+    font-weight: 600;
   }
 
   .settings-action-btn.manage {
@@ -157,14 +187,14 @@ const SettingsWrapper = styled.div`
   .theme-control-group {
     display: inline-flex;
     align-items: center;
-    gap: 12px;
+    gap: 14px;
   }
 
   .theme-toggle {
     position: relative;
-    width: 90px;
-    height: 34px;
-    padding: 3px;
+    width: 102px;
+    height: 40px;
+    padding: 4px;
     border-radius: 999px;
     border: 1px solid var(--semi-color-border);
     background: var(--semi-color-fill-0);
@@ -183,24 +213,24 @@ const SettingsWrapper = styled.div`
     content: '';
     position: absolute;
     top: 50%;
-    left: 17px;
-    width: 6px;
-    height: 6px;
+    left: 18px;
+    width: 7px;
+    height: 7px;
     border-radius: 999px;
     background: color-mix(in srgb, var(--semi-color-text-2) 72%, transparent);
     box-shadow:
-      28px 0 0 color-mix(in srgb, var(--semi-color-text-2) 72%, transparent),
-      56px 0 0 color-mix(in srgb, var(--semi-color-text-2) 72%, transparent);
+      32px 0 0 color-mix(in srgb, var(--semi-color-text-2) 72%, transparent),
+      64px 0 0 color-mix(in srgb, var(--semi-color-text-2) 72%, transparent);
     transform: translateY(-50%);
     pointer-events: none;
   }
 
   .theme-toggle-thumb {
     position: absolute;
-    top: 3px;
-    left: 3px;
-    width: 26px;
-    height: 26px;
+    top: 4px;
+    left: 4px;
+    width: 30px;
+    height: 30px;
     border-radius: 999px;
     background: var(--semi-color-bg-0);
     box-shadow: 0 2px 6px rgba(0, 0, 0, 0.14);
@@ -209,18 +239,18 @@ const SettingsWrapper = styled.div`
   }
 
   .theme-toggle[data-mode='system'] .theme-toggle-thumb {
-    transform: translateX(28px);
+    transform: translateX(32px);
     background: color-mix(in srgb, var(--semi-color-primary) 18%, var(--semi-color-bg-0) 82%);
   }
 
   .theme-toggle[data-mode='dark'] .theme-toggle-thumb {
-    transform: translateX(56px);
+    transform: translateX(64px);
     background: var(--semi-color-primary);
   }
 
   .theme-toggle-label {
-    min-width: 64px;
-    font-size: 14px;
+    min-width: 76px;
+    font-size: 16px;
     color: var(--semi-color-text-1);
     text-align: right;
   }
@@ -363,9 +393,9 @@ const Settings: React.FC = () => {
             icon={<IconChevronLeft style={{ fontSize: 20 }} />}
             theme="borderless"
             onClick={() => navigate(-1)}
-            style={{ padding: '6px', borderRadius: '8px' }}
+            className="page-back-button"
           />
-          <Title heading={2} style={{ fontSize: 26, fontWeight: 600 }}>软件设置</Title>
+          <Title heading={2} className="page-title">软件设置</Title>
         </div>
 
         <div className="settings-subtitle">
@@ -404,7 +434,7 @@ const Settings: React.FC = () => {
           </div>
           <Select
             value={language}
-            style={{ width: 160 }}
+            style={{ width: 186, fontSize: 16 }}
             size="large"
             onChange={(value) => {
               const nextLanguage = value as AppLanguage;
@@ -537,15 +567,15 @@ const Settings: React.FC = () => {
         <Divider style={{ margin: '24px 0' }} />
 
         <div>
-          <Title heading={3} style={{ fontSize: 18, marginBottom: 8 }}>关于</Title>
-          <Text style={{ fontSize: 14, color: 'var(--semi-color-text-2)' }}>Omniflow App v0.0.1</Text>
+          <Title heading={3} style={{ fontSize: 24, marginBottom: 10, lineHeight: 1.2 }}>关于</Title>
+          <Text style={{ fontSize: 16, color: 'var(--semi-color-text-2)' }}>Omniflow App v0.0.1</Text>
         </div>
 
-        <div style={{ marginTop: 48, textAlign: 'center' }}>
+        <div style={{ marginTop: 56, textAlign: 'center' }}>
           <Button
             theme="light"
             type="secondary"
-            size="default"
+            size="large"
             onClick={() => navigate(-1)}
             className="settings-action-btn exit"
           >

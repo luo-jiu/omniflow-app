@@ -27,7 +27,7 @@ const SearchWorkspaceRoot = styled.div`
   background: var(--app-bg);
 
   .search-workspace-panel {
-    width: min(720px, 100%);
+    width: min(860px, 100%);
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -35,27 +35,27 @@ const SearchWorkspaceRoot = styled.div`
 
   .search-workspace-header {
     width: 100%;
-    min-height: 112px;
+    min-height: 152px;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 10px;
-    margin-bottom: 16px;
+    gap: 14px;
+    margin-bottom: 20px;
     text-align: center;
   }
 
   .search-workspace-title {
     margin: 0;
     color: var(--app-text);
-    font-size: 32px;
+    font-size: 60px;
     font-weight: 700;
     line-height: 1.1;
   }
 
   .search-workspace-description {
     color: var(--app-text-muted);
-    font-size: 14px;
+    font-size: 20px;
     line-height: 1.6;
   }
 
@@ -68,17 +68,17 @@ const SearchWorkspaceRoot = styled.div`
   }
 
   .search-workspace-mode-btn {
-    height: 40px;
-    min-width: 120px;
+    height: 46px;
+    min-width: 136px;
     border: none;
     border-radius: 999px;
-    padding: 0 14px;
+    padding: 0 16px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     gap: 10px;
     cursor: pointer;
-    font-size: 13px;
+    font-size: 15px;
     font-weight: 600;
     transition: background-color 140ms ease, color 140ms ease, box-shadow 140ms ease;
   }
@@ -105,12 +105,16 @@ const SearchWorkspaceRoot = styled.div`
     gap: 8px;
   }
 
+  .search-workspace-mode-label .semi-icon {
+    font-size: 18px;
+  }
+
   .search-workspace-mode-switch {
     display: inline-flex;
     align-items: center;
     justify-content: center;
     min-width: 18px;
-    font-size: 17px;
+    font-size: 19px;
     font-weight: 700;
     letter-spacing: 0;
     line-height: 1;
@@ -119,14 +123,14 @@ const SearchWorkspaceRoot = styled.div`
 
   .search-workspace-input {
     width: 100%;
-    height: 48px;
+    height: 56px;
     border-radius: 8px;
     border: 1px solid var(--app-border);
     background: var(--app-bg-elevated);
     color: var(--app-text);
-    padding: 0 14px;
+    padding: 0 16px;
     outline: none;
-    font-size: 14px;
+    font-size: 17px;
   }
 
   .search-workspace-input:focus {
@@ -134,21 +138,21 @@ const SearchWorkspaceRoot = styled.div`
   }
 
   .search-workspace-submit {
-    height: 40px;
+    height: 46px;
     border-radius: 8px;
     border: none;
     background: var(--semi-color-primary);
     color: #fff;
-    padding: 0 18px;
+    padding: 0 20px;
     cursor: pointer;
-    font-size: 14px;
+    font-size: 16px;
     font-weight: 600;
   }
 
   .search-workspace-below {
     width: 100%;
     min-height: 240px;
-    margin-top: 20px;
+    margin-top: 40px;
   }
 
   .search-workspace-file-tips {
@@ -199,7 +203,7 @@ export default function SearchWorkspace({
     onModeChange(mode === 'files' ? 'web' : 'files');
   }, [mode, onModeChange]);
   const isFilesMode = mode === 'files';
-  const heading = isFilesMode ? '选择左侧文件开始预览' : title;
+  const heading = isFilesMode ? '从左侧打开文件' : title;
   const subheading = isFilesMode ? null : description;
 
   React.useEffect(() => {

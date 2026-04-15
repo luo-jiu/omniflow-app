@@ -3942,14 +3942,14 @@ function embeddedBrowserResourceProbeRuntimeCoreBody() {
     if (!Array.isArray(buffers) || buffers.length <= 1) {
       return buffers;
     }
-    const firstHeaderIndex = buffers.findIndex((chunk) => {
+    let lastHeaderIndex = -1;
+    buffers.forEach((chunk, index) => {
       if (isMp4HeaderChunk(chunk) || isWebmHeaderChunk(chunk)) {
-        return true;
+        lastHeaderIndex = index;
       }
-      return false;
     });
-    if (firstHeaderIndex > 0) {
-      return buffers.slice(firstHeaderIndex);
+    if (lastHeaderIndex > 0) {
+      return buffers.slice(lastHeaderIndex);
     }
     return buffers;
   }

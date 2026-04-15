@@ -81,7 +81,7 @@ const BrowserSurface = styled.div`
   }
 
   .embedded-browser-empty-anchor {
-    width: min(720px, 100%);
+    width: min(860px, 100%);
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -90,20 +90,20 @@ const BrowserSurface = styled.div`
 
   .embedded-browser-empty-header {
     width: 100%;
-    min-height: 112px;
+    min-height: 152px;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 10px;
-    margin-bottom: 16px;
+    gap: 14px;
+    margin-bottom: 20px;
     text-align: center;
   }
 
   .embedded-browser-empty-title {
     margin: 0;
     color: var(--app-text);
-    font-size: 32px;
+    font-size: 60px;
     font-weight: 700;
     line-height: 1.1;
   }
@@ -111,7 +111,7 @@ const BrowserSurface = styled.div`
   .embedded-browser-empty-subtitle {
     margin: 0;
     color: var(--app-text-muted);
-    font-size: 14px;
+    font-size: 20px;
     line-height: 1.6;
   }
 
@@ -125,14 +125,14 @@ const BrowserSurface = styled.div`
   .embedded-browser-empty-input {
     flex: 1;
     min-width: 0;
-    height: 48px;
+    height: 56px;
     border-radius: 8px;
     border: 1px solid var(--app-border);
     background: var(--app-bg-elevated);
     color: var(--app-text);
-    padding: 0 14px;
+    padding: 0 16px;
     outline: none;
-    font-size: 14px;
+    font-size: 17px;
   }
 
   .embedded-browser-empty-input:focus {
@@ -140,15 +140,15 @@ const BrowserSurface = styled.div`
   }
 
   .embedded-browser-empty-submit {
-    height: 40px;
+    height: 46px;
     border-radius: 8px;
     border: none;
     background: var(--semi-color-primary);
     color: #fff;
-    padding: 0 18px;
+    padding: 0 20px;
     cursor: pointer;
     flex-shrink: 0;
-    font-size: 14px;
+    font-size: 16px;
     font-weight: 600;
   }
 `;

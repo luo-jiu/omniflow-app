@@ -14,9 +14,13 @@ import { markRepositoryTreeSnapshotDirty } from '@/features/file-explorer/hooks/
 import { requestDesktopWindowActivation } from '@/utils/windowActivation';
 
 const Page = styled.div`
+  --page-heading-indent: 58px;
+
   width: 100%;
   height: 100%;
-  padding: 56px 36px 34px;
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 56px 48px 40px;
   overflow: auto;
   -webkit-app-region: drag;
 
@@ -28,32 +32,56 @@ const Page = styled.div`
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 12px;
-    margin-bottom: 16px;
+    gap: 16px;
+    margin-bottom: 18px;
   }
 
   .header-left {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 16px;
   }
 
   .header-right {
     display: flex;
     align-items: center;
     justify-content: flex-end;
-    gap: 6px;
+    gap: 8px;
+  }
+
+  .page-back-button {
+    flex-shrink: 0;
+    padding: 8px;
+    border-radius: 10px;
+  }
+
+  .page-title {
+    margin: 0;
+    font-size: 34px;
+    font-weight: 700;
+    line-height: 1.15;
   }
 
   .subtitle {
-    margin-bottom: 18px;
+    margin-left: var(--page-heading-indent);
+    margin-bottom: 22px;
+    max-width: 720px;
     color: var(--semi-color-text-2);
-    font-size: 14px;
+    font-size: 16px;
+    line-height: 1.6;
+  }
+
+  .toolbar-button {
+    min-height: 40px;
+    padding: 0 14px;
+    border-radius: 10px;
+    font-size: 15px;
+    font-weight: 600;
   }
 
   .list {
     border: 1px solid var(--semi-color-border);
-    border-radius: 12px;
+    border-radius: 14px;
     overflow: hidden;
     background: var(--semi-color-bg-0);
   }
@@ -62,13 +90,13 @@ const Page = styled.div`
     display: grid;
     grid-template-columns: minmax(200px, 1.3fr) 100px 180px 120px 180px;
     align-items: center;
-    gap: 12px;
-    padding: 12px 16px;
+    gap: 14px;
+    padding: 16px 18px;
     border-bottom: 1px solid var(--semi-color-border-light);
   }
 
   .row.header-row {
-    font-size: 12px;
+    font-size: 14px;
     color: var(--semi-color-text-2);
     background: var(--semi-color-fill-0);
     font-weight: 600;
@@ -86,34 +114,47 @@ const Page = styled.div`
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: 14px;
+    font-size: 16px;
+    font-weight: 500;
   }
 
   .name-meta {
-    margin-top: 4px;
-    font-size: 12px;
+    margin-top: 6px;
+    font-size: 14px;
     color: var(--semi-color-text-2);
   }
 
   .size,
   .time {
-    font-size: 12px;
+    font-size: 14px;
     color: var(--semi-color-text-2);
   }
 
   .actions {
     display: flex;
     justify-content: flex-end;
-    gap: 6px;
+    gap: 8px;
+  }
+
+  .row-action-button {
+    min-height: 38px;
+    padding: 0 10px;
+    border-radius: 8px;
+    font-size: 15px;
+    font-weight: 600;
+  }
+
+  .empty-state {
+    padding: 56px 24px;
   }
 
   @media (max-width: 980px) {
-    padding: 44px 16px 22px;
+    padding: 44px 20px 24px;
 
     .row {
       grid-template-columns: minmax(160px, 1fr) 88px 140px 90px 150px;
       gap: 8px;
-      padding: 10px 12px;
+      padding: 12px 14px;
     }
   }
 `;
@@ -247,9 +288,9 @@ const RecycleBin: React.FC = () => {
             icon={<IconChevronLeft style={{ fontSize: 20 }} />}
             theme="borderless"
             onClick={() => navigate(-1)}
-            style={{ padding: 6, borderRadius: 8 }}
+            className="page-back-button"
           />
-          <Title heading={2} style={{ fontSize: 26, fontWeight: 600, margin: 0 }}>
+          <Title heading={2} className="page-title">
             回收站
           </Title>
         </div>
@@ -260,6 +301,7 @@ const RecycleBin: React.FC = () => {
             type="danger"
             disabled={items.length === 0 || loading}
             onClick={() => void handleClearRecycleBin()}
+            className="toolbar-button"
           >
             清空回收站
           </Button>
@@ -268,6 +310,7 @@ const RecycleBin: React.FC = () => {
             theme="borderless"
             loading={loading}
             onClick={() => void loadItems()}
+            className="toolbar-button"
           >
             刷新
           </Button>
@@ -286,7 +329,7 @@ const RecycleBin: React.FC = () => {
         </div>
 
         {items.length === 0 ? (
-          <div style={{ padding: 36 }}>
+          <div className="empty-state">
             <Empty description="回收站为空" />
           </div>
         ) : (
@@ -311,14 +354,15 @@ const RecycleBin: React.FC = () => {
               <div className="time">{formatDeletedAt(item.deletedAt)}</div>
               <div className="size">{item.type === 'file' ? formatBytes(item.fileSize) : '--'}</div>
               <div className="actions">
-                <Button size="small" theme="borderless" onClick={() => void handleRestore(item)}>
+                <Button size="default" theme="borderless" className="row-action-button" onClick={() => void handleRestore(item)}>
                   恢复
                 </Button>
                 <Button
-                  size="small"
+                  size="default"
                   theme="borderless"
                   type="danger"
                   icon={<IconDelete />}
+                  className="row-action-button"
                   onClick={() => openHardDeleteConfirm(item)}
                 >
                   彻底删除

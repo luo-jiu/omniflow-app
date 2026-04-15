@@ -81,12 +81,15 @@ const BROWSER_RESOURCE_PANEL_WIDTH_STORAGE_PREFIX = 'library-detail:browser-reso
 const CONTENT_TOOLBAR_HEIGHT = 46;
 const TOOLBAR_ACTION_BUTTON_SIZE = 36;
 const TOOLBAR_ACTION_ICON_SIZE = 18;
-const HEADER_ITEM_ICON_SIZE = 18;
-const HEADER_ITEM_FONT_SIZE = 14;
+const BROWSER_TAB_ICON_SIZE = 20;
+const BROWSER_TAB_FONT_SIZE = 16;
+const BOOKMARK_ICON_SIZE = 20;
+const BOOKMARK_FONT_SIZE = 17;
+const BROWSER_INPUT_FONT_SIZE = 18;
 const BROWSER_TAB_HEIGHT = 38;
 const BOOKMARK_TOOLBAR_HEIGHT = 42;
 const BOOKMARK_ITEM_HEIGHT = 38;
-const BROWSER_INPUT_HEIGHT = 34;
+const BROWSER_INPUT_HEIGHT = 38;
 
 function getSidePanelWidthStorageKey(libraryId: number) {
   return `${SIDE_PANEL_WIDTH_STORAGE_PREFIX}${libraryId}`;
@@ -395,6 +398,10 @@ const ContentToolbar = styled.div`
     backdrop-filter: blur(8px);
   }
 
+  .browser-tabs-add .semi-icon {
+    font-size: 18px;
+  }
+
   .browser-tabs-add:hover {
     background: var(--app-bg-elevated);
     color: var(--app-text);
@@ -418,8 +425,8 @@ const ContentToolbar = styled.div`
   }
 
   .browser-tab-favicon {
-    width: ${HEADER_ITEM_ICON_SIZE}px;
-    height: ${HEADER_ITEM_ICON_SIZE}px;
+    width: ${BROWSER_TAB_ICON_SIZE}px;
+    height: ${BROWSER_TAB_ICON_SIZE}px;
     flex-shrink: 0;
   }
 
@@ -437,7 +444,7 @@ const ContentToolbar = styled.div`
   }
 
   .browser-tab-favicon.favicon-fallback .semi-icon {
-    font-size: 13px;
+    font-size: 15px;
   }
 
   .browser-tab-btn.active {
@@ -464,7 +471,7 @@ const ContentToolbar = styled.div`
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: ${HEADER_ITEM_FONT_SIZE}px;
+    font-size: ${BROWSER_TAB_FONT_SIZE}px;
     line-height: 1.2;
     font-weight: 500;
     text-align: left;
@@ -490,6 +497,10 @@ const ContentToolbar = styled.div`
     color: var(--app-text);
   }
 
+  .browser-tab-close .semi-icon {
+    font-size: 15px;
+  }
+
   .toolbar-browser-form {
     width: 100%;
     display: flex;
@@ -506,7 +517,7 @@ const ContentToolbar = styled.div`
     color: var(--app-text);
     padding: 0 12px;
     outline: none;
-    font-size: 16px;
+    font-size: ${BROWSER_INPUT_FONT_SIZE}px;
   }
 
   .toolbar-browser-input:focus {
@@ -585,8 +596,8 @@ const BookmarkToolbar = styled.div`
   }
 
   .bookmark-favicon {
-    width: ${HEADER_ITEM_ICON_SIZE}px;
-    height: ${HEADER_ITEM_ICON_SIZE}px;
+    width: ${BOOKMARK_ICON_SIZE}px;
+    height: ${BOOKMARK_ICON_SIZE}px;
     border-radius: 4px;
     flex-shrink: 0;
     object-fit: contain;
@@ -603,12 +614,12 @@ const BookmarkToolbar = styled.div`
   }
 
   .bookmark-favicon.favicon-fallback .semi-icon {
-    font-size: 13px;
+    font-size: 15px;
   }
 
   .bookmark-folder-glyph {
-    width: ${HEADER_ITEM_ICON_SIZE}px;
-    height: ${HEADER_ITEM_ICON_SIZE}px;
+    width: ${BOOKMARK_ICON_SIZE}px;
+    height: ${BOOKMARK_ICON_SIZE}px;
     flex-shrink: 0;
     position: relative;
     display: inline-block;
@@ -618,9 +629,9 @@ const BookmarkToolbar = styled.div`
     content: "";
     position: absolute;
     left: 1px;
-    top: 6px;
-    width: 15px;
-    height: 10px;
+    top: 7px;
+    width: 17px;
+    height: 11px;
     border-radius: 3px;
     border: 1.5px solid currentColor;
     background: transparent;
@@ -632,8 +643,8 @@ const BookmarkToolbar = styled.div`
     position: absolute;
     left: 2px;
     top: 2px;
-    width: 9px;
-    height: 5px;
+    width: 10px;
+    height: 6px;
     border: 1.5px solid currentColor;
     border-bottom: none;
     border-radius: 3px 3px 0 0;
@@ -646,7 +657,7 @@ const BookmarkToolbar = styled.div`
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: ${HEADER_ITEM_FONT_SIZE}px;
+    font-size: ${BOOKMARK_FONT_SIZE}px;
     line-height: 1.2;
     font-weight: 500;
   }
@@ -664,6 +675,10 @@ const BookmarkToolbar = styled.div`
     cursor: pointer;
     flex-shrink: 0;
   }
+
+  .bookmark-more-btn .semi-icon {
+    font-size: 18px;
+  }
 `;
 
 const BookmarkContextMenuLayer = styled.div`
@@ -672,8 +687,8 @@ const BookmarkContextMenuLayer = styled.div`
 
   .bookmark-favicon,
   .bookmark-folder-glyph {
-    width: ${HEADER_ITEM_ICON_SIZE}px;
-    height: ${HEADER_ITEM_ICON_SIZE}px;
+    width: ${BOOKMARK_ICON_SIZE}px;
+    height: ${BOOKMARK_ICON_SIZE}px;
     flex-shrink: 0;
     position: relative;
     display: inline-block;
@@ -696,16 +711,16 @@ const BookmarkContextMenuLayer = styled.div`
   }
 
   .bookmark-favicon.favicon-fallback .semi-icon {
-    font-size: 13px;
+    font-size: 15px;
   }
 
   .bookmark-folder-glyph::before {
     content: "";
     position: absolute;
     left: 1px;
-    top: 6px;
-    width: 15px;
-    height: 10px;
+    top: 7px;
+    width: 17px;
+    height: 11px;
     border-radius: 3px;
     border: 1.5px solid currentColor;
     background: transparent;
@@ -717,8 +732,8 @@ const BookmarkContextMenuLayer = styled.div`
     position: absolute;
     left: 2px;
     top: 2px;
-    width: 9px;
-    height: 5px;
+    width: 10px;
+    height: 6px;
     border: 1.5px solid currentColor;
     border-bottom: none;
     border-radius: 3px 3px 0 0;

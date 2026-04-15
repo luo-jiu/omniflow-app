@@ -8,9 +8,13 @@ import type { UploadTask } from '@/modules/upload-center/model/upload-task.types
 import type { UploadTaskSummary } from '@/modules/upload-center/model/upload-task.store';
 
 const Page = styled.div`
+  --page-heading-indent: 58px;
+
   width: 100%;
   height: 100%;
-  padding: 56px 36px 34px;
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 56px 48px 40px;
   overflow: auto;
   -webkit-app-region: drag;
 
@@ -21,50 +25,66 @@ const Page = styled.div`
   .header {
     display: flex;
     align-items: center;
-    gap: 12px;
-    margin-bottom: 18px;
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+
+  .page-back-button {
+    flex-shrink: 0;
+    padding: 8px;
+    border-radius: 10px;
+  }
+
+  .page-title {
+    margin: 0;
+    font-size: 34px;
+    font-weight: 700;
+    line-height: 1.15;
   }
 
   .subtitle {
-    margin-bottom: 18px;
+    margin-left: var(--page-heading-indent);
+    margin-bottom: 22px;
+    max-width: 720px;
     color: var(--semi-color-text-2);
-    font-size: 14px;
+    font-size: 16px;
+    line-height: 1.6;
   }
 
   .summary {
     display: grid;
     grid-template-columns: repeat(4, minmax(120px, 1fr));
-    gap: 10px;
-    margin-bottom: 18px;
+    gap: 14px;
+    margin-bottom: 22px;
   }
 
   .summary-card {
     border: 1px solid var(--semi-color-border);
-    border-radius: 10px;
-    padding: 10px 12px;
+    border-radius: 12px;
+    padding: 14px 16px;
     background: var(--semi-color-bg-0);
   }
 
   .summary-label {
-    font-size: 12px;
+    font-size: 14px;
     color: var(--semi-color-text-2);
   }
 
   .summary-value {
-    margin-top: 4px;
-    font-size: 20px;
-    font-weight: 600;
+    margin-top: 6px;
+    font-size: 26px;
+    font-weight: 700;
   }
 
   .list {
     border: 1px solid var(--semi-color-border);
-    border-radius: 12px;
+    border-radius: 14px;
     overflow: hidden;
     background: var(--semi-color-bg-0);
   }
 
   .group-row {
-    padding: 14px 16px;
+    padding: 18px 20px;
     border-bottom: 1px solid var(--semi-color-border-light);
   }
 
@@ -82,26 +102,26 @@ const Page = styled.div`
   .name-wrap {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
     min-width: 0;
     flex: 1;
   }
 
   .name {
-    font-size: 14px;
-    font-weight: 500;
+    font-size: 16px;
+    font-weight: 600;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
   .row-meta {
-    margin-top: 8px;
+    margin-top: 10px;
     display: flex;
     justify-content: space-between;
-    gap: 10px;
+    gap: 12px;
     color: var(--semi-color-text-2);
-    font-size: 12px;
+    font-size: 14px;
     align-items: center;
   }
 
@@ -111,11 +131,19 @@ const Page = styled.div`
     flex-shrink: 0;
   }
 
-  .tree {
-    margin-top: 12px;
-    border: 1px solid var(--semi-color-border-light);
+  .row-action-button {
+    min-height: 38px;
+    padding: 0 10px;
     border-radius: 8px;
-    padding: 8px;
+    font-size: 15px;
+    font-weight: 600;
+  }
+
+  .tree {
+    margin-top: 14px;
+    border: 1px solid var(--semi-color-border-light);
+    border-radius: 10px;
+    padding: 10px;
     background: var(--semi-color-fill-0);
   }
 
@@ -124,9 +152,9 @@ const Page = styled.div`
     align-items: center;
     justify-content: space-between;
     gap: 10px;
-    min-height: 30px;
+    min-height: 34px;
     border-radius: 6px;
-    padding: 3px 6px;
+    padding: 4px 8px;
   }
 
   .tree-row:hover {
@@ -136,7 +164,7 @@ const Page = styled.div`
   .tree-left {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     min-width: 0;
     flex: 1;
   }
@@ -145,11 +173,11 @@ const Page = styled.div`
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: 13px;
+    font-size: 14px;
   }
 
   .tree-meta {
-    font-size: 12px;
+    font-size: 13px;
     color: var(--semi-color-text-2);
     display: flex;
     align-items: center;
@@ -158,12 +186,16 @@ const Page = styled.div`
   }
 
   .tree-more {
-    margin-left: 18px;
-    margin-top: 2px;
+    margin-left: 20px;
+    margin-top: 4px;
+  }
+
+  .empty-state {
+    padding: 56px 24px;
   }
 
   @media (max-width: 900px) {
-    padding: 44px 18px 22px;
+    padding: 44px 20px 24px;
 
     .summary {
       grid-template-columns: repeat(2, minmax(100px, 1fr));
@@ -712,9 +744,9 @@ const UploadCenter: React.FC = () => {
           icon={<IconChevronLeft style={{ fontSize: 20 }} />}
           theme="borderless"
           onClick={() => navigate(-1)}
-          style={{ padding: 6, borderRadius: 8 }}
+          className="page-back-button"
         />
-        <Title heading={2} style={{ fontSize: 26, fontWeight: 600, margin: 0 }}>
+        <Title heading={2} className="page-title">
           上传中心
         </Title>
       </div>
@@ -744,7 +776,7 @@ const UploadCenter: React.FC = () => {
 
       <div className="list">
         {groups.length === 0 ? (
-          <div style={{ padding: 36 }}>
+          <div className="empty-state">
             <Empty description="暂无上传任务" />
           </div>
         ) : (
@@ -769,7 +801,7 @@ const UploadCenter: React.FC = () => {
                     ) : (
                       <span style={{ width: 24 }} />
                     )}
-                    <span style={{ fontSize: 14 }}>{group.isFolder ? '📁' : '📄'}</span>
+                    <span style={{ fontSize: 16 }}>{group.isFolder ? '📁' : '📄'}</span>
                     <div className="name" title={group.label}>{group.label}</div>
                   </div>
                   <Tag color={STATUS_COLOR[status]}>{STATUS_LABEL[status]}</Tag>
@@ -789,12 +821,23 @@ const UploadCenter: React.FC = () => {
                   <span>{percent.toFixed(1)}%</span>
                   <div className="row-actions">
                     {(group.uploading > 0 || group.queued > 0 || group.paused > 0) && (
-                      <Button size="small" type="danger" theme="borderless" onClick={() => handleCancelGroup(group)}>
+                      <Button
+                        size="default"
+                        type="danger"
+                        theme="borderless"
+                        className="row-action-button"
+                        onClick={() => handleCancelGroup(group)}
+                      >
                         中断
                       </Button>
                     )}
                     {group.failed > 0 && (
-                      <Button size="small" theme="borderless" onClick={() => handleRetryGroup(group)}>
+                      <Button
+                        size="default"
+                        theme="borderless"
+                        className="row-action-button"
+                        onClick={() => handleRetryGroup(group)}
+                      >
                         重试失败项
                       </Button>
                     )}
