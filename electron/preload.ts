@@ -26,13 +26,27 @@ contextBridge.exposeInMainWorld('ipcRenderer', {
 
 contextBridge.exposeInMainWorld('electronAPI', {
   getStaticData: () => ipcRenderer.invoke('sys:get-static-data'),
-  openTextFile: () => ipcRenderer.invoke('file:open'),
+  openTextFile: (options?: {
+    filters?: Array<{
+      name: string;
+      extensions: string[];
+    }>;
+  }) => ipcRenderer.invoke('file:open', options),
   readLocalChromeBookmarks: () => ipcRenderer.invoke('file:read-local-chrome-bookmarks'),
   readTextFile: (filePath: string) => ipcRenderer.invoke('file:read-text', filePath),
+  writeTextFile: (filePath: string, content: string) => ipcRenderer.invoke('fs:write-text-file', filePath, content),
   pickUploadFiles: () => ipcRenderer.invoke('dialog:pick-upload-files'),
   pickUploadFolders: () => ipcRenderer.invoke('dialog:pick-upload-folders'),
   pickDownloadDirectory: () => ipcRenderer.invoke('dialog:pick-download-directory'),
-  saveDownloadFile: (defaultFileName: string) => ipcRenderer.invoke('dialog:save-download-file', defaultFileName),
+  saveDownloadFile: (
+    defaultFileName: string,
+    options?: {
+      filters?: Array<{
+        name: string;
+        extensions: string[];
+      }>;
+    },
+  ) => ipcRenderer.invoke('dialog:save-download-file', defaultFileName, options),
   pickAutoImportDirectory: () => ipcRenderer.invoke('dialog:pick-auto-import-directory'),
   ensureDirectory: (baseDirectory: string, relativePath: string) =>
     ipcRenderer.invoke('fs:ensure-directory', baseDirectory, relativePath),
@@ -48,6 +62,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('fs:claim-auto-import-files', watchDirectory, maxFiles),
   cleanupAutoImportStagedFile: (stagedPath: string) =>
     ipcRenderer.invoke('fs:cleanup-auto-import-staged-file', stagedPath),
+  createStagedTextFile: (fileName: string, content: string) =>
+    ipcRenderer.invoke('fs:create-staged-text-file', fileName, content),
+  cleanupStagedTextFile: (stagedPath: string) =>
+    ipcRenderer.invoke('fs:cleanup-staged-text-file', stagedPath),
   fetch: (url: string, options?: any) => ipcRenderer.invoke('http:fetch', url, options),
   fetchBinary: (url: string, options?: any) => ipcRenderer.invoke('http:fetch-binary', url, options),
   upload: (
@@ -85,6 +103,7 @@ contextBridge.exposeInMainWorld('electronWindow', {
   maximize: () => ipcRenderer.send('window-maximize'),
   close: () => ipcRenderer.send('window-close'),
   activate: (temporaryOnTop = false) => ipcRenderer.invoke('window-activate', temporaryOnTop),
+  setThemeSource: (source: 'light' | 'dark' | 'system') => ipcRenderer.send('window-set-theme-source', source),
 });
 
 contextBridge.exposeInMainWorld('electronEmbeddedBrowser', {

@@ -209,7 +209,8 @@ function createWindow() {
     height: initialHeight,
     minWidth: MIN_WINDOW_WIDTH,
     minHeight: MIN_WINDOW_HEIGHT,
-    backgroundColor: '#f5f5f0',
+    vibrancy: 'sidebar',
+    visualEffectState: 'active',
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     ...(isFiniteNumber(persistedWindowState?.x) && isFiniteNumber(persistedWindowState?.y)
       ? { x: persistedWindowState.x, y: persistedWindowState.y }

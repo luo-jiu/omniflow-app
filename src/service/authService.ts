@@ -1,6 +1,16 @@
 import { apiRequest } from './request/apiRequest';
+import { ipcRequest } from './request/ipcRequest';
 import { auth } from '@/utils/auth';
 import { runtimeLogger } from '@/utils/runtimeLogger';
+
+function requestAuthApi(path: string, options?: RequestInit) {
+  // 桌面端登录优先走主进程转发，避免 renderer 直连后端时触发跨域失败。
+  if (typeof window !== 'undefined' && typeof window.electronAPI?.fetch === 'function') {
+    return ipcRequest(path, options);
+  }
+
+  return apiRequest(path, options);
+}
 
 /**
  * 临时登录服务
@@ -20,7 +30,7 @@ export const loginService = {
 
     try {
       runtimeLogger.info('开始自动登录...', loginData.username);
-      const res = await apiRequest('/v1/auth/login', {
+      const res = await requestAuthApi('/v1/auth/login', {
         method: 'POST',
         body: JSON.stringify(loginData)
       });
@@ -59,7 +69,7 @@ export const loginService = {
    */
   async login(username: string, password: string) {
     try {
-      const res = await apiRequest('/v1/auth/login', {
+      const res = await requestAuthApi('/v1/auth/login', {
         method: 'POST',
         body: JSON.stringify({ username, password })
       });
@@ -92,7 +102,7 @@ export const loginService = {
     phone?: string;
   }) {
     try {
-      const res = await apiRequest('/v1/user', {
+      const res = await requestAuthApi('/v1/user', {
         method: 'POST',
         body: JSON.stringify({
           username: payload.username,

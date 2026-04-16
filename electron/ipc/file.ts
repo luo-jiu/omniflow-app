@@ -34,6 +34,24 @@ interface DesktopSaveFileResult {
   filePath: string;
 }
 
+interface DesktopDialogFileFilter {
+  name: string;
+  extensions: string[];
+}
+
+interface DesktopTextFileOpenOptions {
+  filters?: DesktopDialogFileFilter[];
+}
+
+interface DesktopSaveFileOptions {
+  filters?: DesktopDialogFileFilter[];
+}
+
+interface DesktopStagedTextFileResult {
+  filePath: string;
+  size: number;
+}
+
 const AUTO_IMPORT_DEFAULT_DIR_NAME = 'Omniflow Inbox';
 const AUTO_IMPORT_OBSERVE_TTL_MS = 10 * 60 * 1000;
 const AUTO_IMPORT_MIN_STABLE_COUNT = 2;
@@ -93,6 +111,30 @@ function getAutoImportStagingRoot(): string {
 
 function getEmbeddedBrowserDownloadStagingRoot(): string {
   return path.join(app.getPath('userData'), 'embedded-browser-downloads');
+}
+
+function getTextFileStagingRoot(): string {
+  return path.join(app.getPath('userData'), 'text-file-staging');
+}
+
+function normalizeDialogFilters(
+  filters: DesktopDialogFileFilter[] | undefined,
+  fallback: DesktopDialogFileFilter[],
+): DesktopDialogFileFilter[] {
+  const normalized = Array.isArray(filters)
+    ? filters
+        .map((filter) => ({
+          name: String(filter?.name || '').trim() || 'Files',
+          extensions: Array.isArray(filter?.extensions)
+            ? filter.extensions
+                .map((extension) => String(extension || '').trim().replace(/^\./, ''))
+                .filter(Boolean)
+            : [],
+        }))
+        .filter((filter) => filter.extensions.length > 0)
+    : [];
+
+  return normalized.length > 0 ? normalized : fallback;
 }
 
 function isPathInsideDirectory(filePath: string, directoryPath: string): boolean {
@@ -362,13 +404,16 @@ async function collectFilesFromSelectedFolders(folderPaths: string[]): Promise<D
 }
 
 export function registerFileIpc(ipcMain: Electron.IpcMain) {
-  ipcMain.handle('file:open', async (): Promise<DesktopTextFileReadResult> => {
+  ipcMain.handle('file:open', async (
+    _event,
+    options?: DesktopTextFileOpenOptions,
+  ): Promise<DesktopTextFileReadResult> => {
     const result = await dialog.showOpenDialog({
       properties: ['openFile', 'dontAddToRecent'],
-      filters: [
+      filters: normalizeDialogFilters(options?.filters, [
         { name: 'JSON', extensions: ['json'] },
         { name: 'All Files', extensions: ['*'] },
-      ],
+      ]),
     });
     if (result.canceled || result.filePaths.length === 0) {
       return { canceled: true, content: '', filePath: '' };
@@ -384,6 +429,20 @@ export function registerFileIpc(ipcMain: Electron.IpcMain) {
   ipcMain.handle('file:save', async (_e, filePath: string, content: string) => {
     await fs.writeFile(filePath, content, 'utf-8');
     return true;
+  });
+
+  ipcMain.handle('fs:write-text-file', async (
+    _event,
+    filePath: string,
+    content: string,
+  ): Promise<string> => {
+    const normalizedPath = path.resolve(String(filePath || '').trim());
+    if (!normalizedPath) {
+      throw new Error('无效的文本保存路径');
+    }
+    await fs.mkdir(path.dirname(normalizedPath), { recursive: true });
+    await fs.writeFile(normalizedPath, String(content ?? ''), 'utf-8');
+    return normalizedPath;
   });
 
   ipcMain.handle('file:read-text', async (_event, filePath: string): Promise<DesktopTextFileReadResult> => {
@@ -439,9 +498,13 @@ export function registerFileIpc(ipcMain: Electron.IpcMain) {
   ipcMain.handle('dialog:save-download-file', async (
     _event,
     defaultFileName: string,
+    options?: DesktopSaveFileOptions,
   ): Promise<DesktopSaveFileResult> => {
     const result = await dialog.showSaveDialog({
       defaultPath: String(defaultFileName || 'download'),
+      filters: normalizeDialogFilters(options?.filters, [
+        { name: 'All Files', extensions: ['*'] },
+      ]),
       showsTagField: false,
     });
     if (result.canceled || !result.filePath) {
@@ -521,5 +584,35 @@ export function registerFileIpc(ipcMain: Electron.IpcMain) {
     await fs.mkdir(path.dirname(normalizedTargetPath), { recursive: true });
     await fs.copyFile(normalizedSourcePath, normalizedTargetPath);
     return normalizedTargetPath;
+  });
+
+  ipcMain.handle('fs:create-staged-text-file', async (
+    _event,
+    fileName: string,
+    content: string,
+  ): Promise<DesktopStagedTextFileResult> => {
+    const stagingRoot = getTextFileStagingRoot();
+    await fs.mkdir(stagingRoot, { recursive: true });
+
+    const stagedPath = path.join(stagingRoot, buildStagedFileName(fileName || 'subtitle.txt'));
+    const normalizedContent = String(content ?? '');
+    await fs.writeFile(stagedPath, normalizedContent, 'utf-8');
+    return {
+      filePath: stagedPath,
+      size: Buffer.byteLength(normalizedContent, 'utf-8'),
+    };
+  });
+
+  ipcMain.handle('fs:cleanup-staged-text-file', async (
+    _event,
+    stagedPath: string,
+  ): Promise<boolean> => {
+    const normalizedPath = path.resolve(String(stagedPath || '').trim());
+    const stagingRoot = getTextFileStagingRoot();
+    if (!normalizedPath || !isPathInsideDirectory(normalizedPath, stagingRoot)) {
+      return false;
+    }
+    await fs.rm(normalizedPath, { force: true });
+    return true;
   });
 }

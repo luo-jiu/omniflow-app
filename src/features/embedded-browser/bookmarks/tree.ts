@@ -29,7 +29,7 @@ export function getDefaultBookmarkTitle(rawUrl: string, fallback?: string | null
 
 export function estimateBookmarkWidth(item: BrowserBookmarkItem) {
   const titleLength = String(item.title || '').length;
-  return Math.min(Math.max(74 + titleLength * 8, 104), 190);
+  return Math.min(Math.max(60 + titleLength * 7, 88), 180);
 }
 
 export function resolveVisibleBookmarkCount(items: BrowserBookmarkItem[], containerWidth: number) {

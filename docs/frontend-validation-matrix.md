@@ -63,8 +63,11 @@ npm run build
 
 - `search-home -> file-viewer`
 - `search-home -> browser`
+- `search-home -> tools`
 - `browser -> file-viewer`
 - `browser -> search-home`
+- `browser -> tools`
+- `tools -> file-viewer`
 - 页面切走再回来，workspace 缓存恢复正常
 
 边界路径：

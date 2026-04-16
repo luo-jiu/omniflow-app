@@ -1,5 +1,6 @@
 import React from 'react';
 import styled from 'styled-components';
+import OpaquePageContainer from '@/components/OpaquePageContainer';
 import { useNavigate } from 'react-router-dom';
 import {
   Button,
@@ -463,6 +464,7 @@ const TagManagement: React.FC = () => {
   const isEditingFileTab = editingType === 'FILE_TAB';
 
   return (
+    <OpaquePageContainer>
     <Wrapper>
       <div className="header">
         <div className="header-left">
@@ -829,6 +831,7 @@ const TagManagement: React.FC = () => {
         </div>
       </Modal>
     </Wrapper>
+    </OpaquePageContainer>
   );
 };
 

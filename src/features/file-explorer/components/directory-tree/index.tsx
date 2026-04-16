@@ -69,6 +69,10 @@ interface DirectoryTreeProps {
     fileName: string;
     nodeId: number;
   }) => void | Promise<void>;
+  onSelectionChange?: (payload: {
+    primaryNode: any | null;
+    selectedNodeIds: number[];
+  }) => void;
   libraryId: number; // 添加 libraryId prop
   rootNodeId: number | null;
 }
@@ -123,6 +127,7 @@ export default function DirectoryTree({
   onMoveSuccess,
   onRefreshNode,
   onOpenFileInBrowser,
+  onSelectionChange,
   loadData,
   libraryId,
   rootNodeId,
@@ -387,6 +392,20 @@ export default function DirectoryTree({
   useEffect(() => {
     treeDataRef.current = treeData;
   }, [treeData]);
+
+  useEffect(() => {
+    if (!onSelectionChange) {
+      return;
+    }
+    const primaryNodeId = selectedNodeIds[selectedNodeIds.length - 1] ?? null;
+    const primaryNode = primaryNodeId
+      ? findNodeById(treeDataRef.current || [], Number(primaryNodeId))
+      : null;
+    onSelectionChange({
+      primaryNode,
+      selectedNodeIds,
+    });
+  }, [onSelectionChange, selectedNodeIds, treeData]);
 
   /** 基于当前已经渲染的所有节点，计算内容所需的最小宽度 */
   const recomputeRequiredWidth = useCallback(() => {

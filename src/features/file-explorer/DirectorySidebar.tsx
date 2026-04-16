@@ -29,10 +29,28 @@ interface Props {
     fileName: string;
     nodeId: number;
   }) => void | Promise<void>;
+  onSelectionChange?: (payload: {
+    primaryNode: SelectedTreeNode | null;
+    rootNodeId: number | null;
+    selectedNodeIds: number[];
+  }) => void;
 }
 
 export interface DirectorySidebarHandle {
   refreshNodeSubtree: (nodeId: number) => Promise<void>;
+}
+
+export interface SelectedTreeNode {
+  archiveMode?: number;
+  builtInType?: string;
+  ext?: string;
+  id: number;
+  key: string;
+  libraryId: number;
+  mimeType?: string;
+  name: string;
+  parentId: number;
+  type: 'dir' | 'file';
 }
 
 function isNodeRespDTO(value: unknown): value is NodeRespDTO {
@@ -49,7 +67,12 @@ function isNodeRespDTO(value: unknown): value is NodeRespDTO {
   );
 }
 
-const DirectorySidebar = React.forwardRef<DirectorySidebarHandle, Props>(({ libraryId, onFileOpen, onOpenFileInBrowser }, ref) => {
+const DirectorySidebar = React.forwardRef<DirectorySidebarHandle, Props>(({
+  libraryId,
+  onFileOpen,
+  onOpenFileInBrowser,
+  onSelectionChange,
+}, ref) => {
   const {
     rootNodeId,
     expandedKeys,
@@ -177,6 +200,26 @@ const DirectorySidebar = React.forwardRef<DirectorySidebarHandle, Props>(({ libr
             return refreshNodeSubtree(targetNodeId);
           }}
           onOpenFileInBrowser={onOpenFileInBrowser}
+          onSelectionChange={(payload) => {
+            onSelectionChange?.({
+              primaryNode: payload.primaryNode
+                ? {
+                  archiveMode: Number(payload.primaryNode.archiveMode ?? 0),
+                  builtInType: String(payload.primaryNode.builtInType || 'DEF'),
+                  ext: payload.primaryNode.ext ? String(payload.primaryNode.ext) : undefined,
+                  id: Number(payload.primaryNode.id),
+                  key: String(payload.primaryNode.key || ''),
+                  libraryId: Number(payload.primaryNode.libraryId || libraryId),
+                  mimeType: payload.primaryNode.mimeType ? String(payload.primaryNode.mimeType) : undefined,
+                  name: String(payload.primaryNode.name || ''),
+                  parentId: Number(payload.primaryNode.parentId || 0),
+                  type: payload.primaryNode.type === 'dir' ? 'dir' : 'file',
+                }
+                : null,
+              rootNodeId,
+              selectedNodeIds: payload.selectedNodeIds,
+            });
+          }}
           libraryId={libraryId}
           rootNodeId={rootNodeId}
         />

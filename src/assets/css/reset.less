@@ -2,6 +2,7 @@
 :root {
   --app-bg: #f5f5f0;
   --app-bg-sidebar: #ededea;
+  --app-sidebar-vibrancy: rgba(245, 245, 240, 0.08);
   --app-bg-elevated: #ffffff;
   --app-panel: #ffffff;
   --app-panel-muted: #f0f0ec;
@@ -38,6 +39,7 @@
 body[theme-mode="dark"] {
   --app-bg: #1e1e1e;
   --app-bg-sidebar: #252525;
+  --app-sidebar-vibrancy: rgba(30, 30, 30, 0.2);
   --app-bg-elevated: #2a2a2a;
   --app-panel: #2a2a2a;
   --app-panel-muted: #333333;
@@ -69,7 +71,7 @@ body[theme-mode="dark"] {
   --semi-color-primary-hover: #4a8a6a;
   --semi-color-primary-active: #3d7a5c;
 
-  background: var(--app-bg);
+  background: transparent;
 }
 
 body, html, h1, h2, h3, h4, h5, h6, ul, ol, li, dl, dt, dd, header, menu, section, p, input, td,
@@ -84,13 +86,14 @@ html, body, #root {
   overflow: hidden;
 }
 
-body, textarea, select, input, button {
+body {
   color: var(--semi-color-text-0);
-  background-color: var(--semi-color-bg-0);
+  background: transparent;
 }
 
-body {
-  background: var(--app-bg);
+textarea, select, input, button {
+  color: var(--semi-color-text-0);
+  background-color: var(--semi-color-bg-0);
 }
 
 body, body * {

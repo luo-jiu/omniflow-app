@@ -57,6 +57,9 @@ export const ThemeProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     document.body.setAttribute('theme-source', theme);
     localStorage.setItem(THEME_STORAGE_KEY, theme);
     localStorage.setItem(THEME_TOGGLE_ANCHOR_STORAGE_KEY, toggleAnchor);
+    if (window.electronWindow?.setThemeSource) {
+      window.electronWindow.setThemeSource(theme === 'system' ? 'system' : resolvedTheme);
+    }
   }, [resolvedTheme, theme, toggleAnchor]);
 
   const applyTheme = useCallback((mode: ThemeMode, nextToggleAnchor?: ResolvedThemeMode) => {

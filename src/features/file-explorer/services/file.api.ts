@@ -316,6 +316,28 @@ export async function uploadAndCreateNodeLegacy(file: File, parentId: number, li
   return normalizeNodePayload(d as Record<string, unknown>, 'file');
 }
 
+export async function uploadLocalPathAndCreateNode(
+  filePath: string,
+  parentId: number,
+  libraryId: number,
+) {
+  const normalizedFilePath = String(filePath || '').trim();
+  if (!normalizedFilePath) {
+    throw new Error('上传路径不能为空');
+  }
+
+  const json = await ipcUpload("/v1/directory/upload", normalizedFilePath, {
+    parent_id: String(parentId),
+    library_id: String(libraryId),
+  });
+
+  const d = extractDataPayload<Record<string, unknown>>(json);
+  if (!d || typeof d !== 'object') {
+    throw new Error('上传响应数据异常');
+  }
+  return normalizeNodePayload(d as Record<string, unknown>, 'file');
+}
+
 // 创建节点（新建文件或文件夹）
 export async function createNode(payload: {
   name: string;

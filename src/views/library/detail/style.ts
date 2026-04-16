@@ -10,7 +10,7 @@ export const DirectorySidebarWrapper = styled.aside<{ $isDragging?: boolean }>`
 
   /* 侧边栏容器 */
   .sidebar-container {
-    background: var(--semi-color-bg-0);
+    background: transparent;
     border-right: 1px solid var(--semi-color-border);
     flex-shrink: 0;
     display: flex;

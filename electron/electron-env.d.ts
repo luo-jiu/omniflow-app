@@ -26,7 +26,12 @@ interface Window {
   ipcRenderer: import('electron').IpcRenderer
 
   electronAPI: {
-    openTextFile: () => Promise<{
+    openTextFile: (options?: {
+      filters?: Array<{
+        name: string;
+        extensions: string[];
+      }>;
+    }) => Promise<{
       canceled: boolean;
       content: string;
       filePath: string;
@@ -41,6 +46,7 @@ interface Window {
       content: string;
       filePath: string;
     }>;
+    writeTextFile: (filePath: string, content: string) => Promise<string>;
     pickUploadFiles: () => Promise<{
       canceled: boolean;
       files: Array<{
@@ -63,7 +69,12 @@ interface Window {
       canceled: boolean;
       directoryPath: string;
     }>;
-    saveDownloadFile: (defaultFileName: string) => Promise<{
+    saveDownloadFile: (defaultFileName: string, options?: {
+      filters?: Array<{
+        name: string;
+        extensions: string[];
+      }>;
+    }) => Promise<{
       canceled: boolean;
       filePath: string;
     }>;
@@ -89,6 +100,11 @@ interface Window {
       }>;
     }>;
     cleanupAutoImportStagedFile: (stagedPath: string) => Promise<boolean>;
+    createStagedTextFile: (fileName: string, content: string) => Promise<{
+      filePath: string;
+      size: number;
+    }>;
+    cleanupStagedTextFile: (stagedPath: string) => Promise<boolean>;
     onUploadProgress: (listener: (payload: {
       uploadId: string;
       uploadedBytes: number;
@@ -137,6 +153,7 @@ interface Window {
     maximize: () => void;
     close: () => void;
     activate: (temporaryOnTop?: boolean) => Promise<boolean>;
+    setThemeSource: (source: 'light' | 'dark' | 'system') => void;
   };
 }
 

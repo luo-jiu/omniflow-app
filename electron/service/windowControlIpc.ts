@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow, ipcMain, nativeTheme } from 'electron'
 
 type WindowControlIpcOptions = {
   getMainWindow: () => BrowserWindow | null
@@ -28,6 +28,12 @@ export function registerWindowControlIpcHandlers(options: WindowControlIpcOption
   ipcMain.on('window-close', (event) => {
     const targetWindow = BrowserWindow.fromWebContents(event.sender) ?? options.getMainWindow()
     targetWindow?.close()
+  })
+
+  ipcMain.on('window-set-theme-source', (_event, source: 'light' | 'dark' | 'system') => {
+    if (['light', 'dark', 'system'].includes(source)) {
+      nativeTheme.themeSource = source
+    }
   })
 
   ipcMain.handle('window-activate', (event, temporaryOnTop: boolean = false) => {

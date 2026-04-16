@@ -30,6 +30,8 @@
   - 漫画 viewer 的阅读模式、进度恢复、远端同步和视图设置
 - `pdf-viewer.md`
   - PDF viewer 的 pdf.js 渲染、窗口化分页、锚点恢复和缩放重排
+- `video-viewer.md`
+  - 普通视频 viewer 的底部控制条、右侧操作台和字幕覆盖层
 - `video-archive-viewer.md`
   - 视频归档 viewer 的卡片来源、封面策略、缓存恢复和返回链路
 
@@ -44,6 +46,7 @@
    - `docs/viewers/asmr-viewer.md`
    - `docs/viewers/comic-viewer.md`
    - `docs/viewers/pdf-viewer.md`
+   - `docs/viewers/video-viewer.md`
    - `docs/viewers/video-archive-viewer.md`
 
 ## 4. 落点规则

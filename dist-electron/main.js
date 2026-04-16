@@ -1,4 +1,4 @@
-import { dialog, app, net, ipcMain, session, webContents, BrowserWindow, WebContentsView, screen } from "electron";
+import { dialog, app, net, ipcMain, session, webContents, BrowserWindow, WebContentsView, nativeTheme, screen } from "electron";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs$1, { existsSync, mkdirSync, constants, readFileSync, writeFileSync } from "node:fs";
@@ -125,6 +125,16 @@ function getAutoImportStagingRoot() {
 }
 function getEmbeddedBrowserDownloadStagingRoot() {
   return path.join(app.getPath("userData"), "embedded-browser-downloads");
+}
+function getTextFileStagingRoot() {
+  return path.join(app.getPath("userData"), "text-file-staging");
+}
+function normalizeDialogFilters(filters, fallback) {
+  const normalized = Array.isArray(filters) ? filters.map((filter) => ({
+    name: String((filter == null ? void 0 : filter.name) || "").trim() || "Files",
+    extensions: Array.isArray(filter == null ? void 0 : filter.extensions) ? filter.extensions.map((extension) => String(extension || "").trim().replace(/^\./, "")).filter(Boolean) : []
+  })).filter((filter) => filter.extensions.length > 0) : [];
+  return normalized.length > 0 ? normalized : fallback;
 }
 function isPathInsideDirectory$1(filePath, directoryPath) {
   const resolvedFilePath = path.resolve(filePath);
@@ -338,13 +348,13 @@ async function collectFilesFromSelectedFolders(folderPaths) {
   return allFiles.sort(byRelativePath);
 }
 function registerFileIpc(ipcMain2) {
-  ipcMain2.handle("file:open", async () => {
+  ipcMain2.handle("file:open", async (_event, options) => {
     const result = await dialog.showOpenDialog({
       properties: ["openFile", "dontAddToRecent"],
-      filters: [
+      filters: normalizeDialogFilters(options == null ? void 0 : options.filters, [
         { name: "JSON", extensions: ["json"] },
         { name: "All Files", extensions: ["*"] }
-      ]
+      ])
     });
     if (result.canceled || result.filePaths.length === 0) {
       return { canceled: true, content: "", filePath: "" };
@@ -359,6 +369,15 @@ function registerFileIpc(ipcMain2) {
   ipcMain2.handle("file:save", async (_e, filePath, content) => {
     await fs$2.writeFile(filePath, content, "utf-8");
     return true;
+  });
+  ipcMain2.handle("fs:write-text-file", async (_event, filePath, content) => {
+    const normalizedPath = path.resolve(String(filePath || "").trim());
+    if (!normalizedPath) {
+      throw new Error("无效的文本保存路径");
+    }
+    await fs$2.mkdir(path.dirname(normalizedPath), { recursive: true });
+    await fs$2.writeFile(normalizedPath, String(content ?? ""), "utf-8");
+    return normalizedPath;
   });
   ipcMain2.handle("file:read-text", async (_event, filePath) => {
     const normalizedPath = path.resolve(String(filePath || "").trim());
@@ -405,9 +424,12 @@ function registerFileIpc(ipcMain2) {
     }
     return { canceled: false, directoryPath: result.filePaths[0] };
   });
-  ipcMain2.handle("dialog:save-download-file", async (_event, defaultFileName) => {
+  ipcMain2.handle("dialog:save-download-file", async (_event, defaultFileName, options) => {
     const result = await dialog.showSaveDialog({
       defaultPath: String(defaultFileName || "download"),
+      filters: normalizeDialogFilters(options == null ? void 0 : options.filters, [
+        { name: "All Files", extensions: ["*"] }
+      ]),
       showsTagField: false
     });
     if (result.canceled || !result.filePath) {
@@ -458,6 +480,26 @@ function registerFileIpc(ipcMain2) {
     await fs$2.mkdir(path.dirname(normalizedTargetPath), { recursive: true });
     await fs$2.copyFile(normalizedSourcePath, normalizedTargetPath);
     return normalizedTargetPath;
+  });
+  ipcMain2.handle("fs:create-staged-text-file", async (_event, fileName, content) => {
+    const stagingRoot = getTextFileStagingRoot();
+    await fs$2.mkdir(stagingRoot, { recursive: true });
+    const stagedPath = path.join(stagingRoot, buildStagedFileName$1(fileName || "subtitle.txt"));
+    const normalizedContent = String(content ?? "");
+    await fs$2.writeFile(stagedPath, normalizedContent, "utf-8");
+    return {
+      filePath: stagedPath,
+      size: Buffer.byteLength(normalizedContent, "utf-8")
+    };
+  });
+  ipcMain2.handle("fs:cleanup-staged-text-file", async (_event, stagedPath) => {
+    const normalizedPath = path.resolve(String(stagedPath || "").trim());
+    const stagingRoot = getTextFileStagingRoot();
+    if (!normalizedPath || !isPathInsideDirectory$1(normalizedPath, stagingRoot)) {
+      return false;
+    }
+    await fs$2.rm(normalizedPath, { force: true });
+    return true;
   });
 }
 var osutils = {};
@@ -5976,6 +6018,11 @@ function registerWindowControlIpcHandlers(options) {
     const targetWindow = BrowserWindow.fromWebContents(event.sender) ?? options.getMainWindow();
     targetWindow == null ? void 0 : targetWindow.close();
   });
+  ipcMain.on("window-set-theme-source", (_event, source) => {
+    if (["light", "dark", "system"].includes(source)) {
+      nativeTheme.themeSource = source;
+    }
+  });
   ipcMain.handle("window-activate", (event, temporaryOnTop = false) => {
     const targetWindow = BrowserWindow.fromWebContents(event.sender) ?? options.getMainWindow();
     if (!targetWindow || targetWindow.isDestroyed()) {
@@ -6161,7 +6208,8 @@ function createWindow() {
     height: initialHeight,
     minWidth: MIN_WINDOW_WIDTH,
     minHeight: MIN_WINDOW_HEIGHT,
-    backgroundColor: "#f5f5f0",
+    vibrancy: "sidebar",
+    visualEffectState: "active",
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
     ...isFiniteNumber(persistedWindowState == null ? void 0 : persistedWindowState.x) && isFiniteNumber(persistedWindowState == null ? void 0 : persistedWindowState.y) ? { x: persistedWindowState.x, y: persistedWindowState.y } : {},
     webPreferences: {

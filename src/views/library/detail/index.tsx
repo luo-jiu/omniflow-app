@@ -1,5 +1,9 @@
 import AppMain from "@/components/business/app-main";
-import { DirectorySidebar, type DirectorySidebarHandle } from "@/features/file-explorer";
+import {
+  DirectorySidebar,
+  type DirectorySidebarHandle,
+  type SelectedTreeNode,
+} from "@/features/file-explorer";
 import React from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { FileViewerProvider } from "@/contexts/FileViewerContext";
@@ -62,6 +66,7 @@ import { resolveBrowserFileMapping } from '@/features/browser-file-mappings/serv
 import { getAppPopupContainer } from '@/utils/popup-container';
 import { useAuth } from '@/hooks/useAuth';
 import SearchWorkspace, { type SearchWorkspaceMode } from "./SearchWorkspace";
+import ToolWorkspace from "@/features/tool-workspace";
 import {
   loadLibraryDetailWorkspaceState,
   saveLibraryDetailWorkspaceState,
@@ -1282,6 +1287,8 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   const [browserInput, setBrowserInput] = React.useState(initialWorkspaceState.browserInput);
   const [searchMode, setSearchMode] = React.useState<SearchWorkspaceMode>(initialWorkspaceState.searchMode);
   const [searchDraft, setSearchDraft] = React.useState(initialWorkspaceState.searchDraft);
+  const [selectedTreeNode, setSelectedTreeNode] = React.useState<SelectedTreeNode | null>(null);
+  const [treeRootNodeId, setTreeRootNodeId] = React.useState<number | null>(null);
   const [workspaceDisplayMode, setWorkspaceDisplayMode] = React.useState<WorkspaceDisplayMode>(initialWorkspaceState.workspaceDisplayMode);
   const browserInputRef = React.useRef<HTMLInputElement | null>(null);
   const latestWorkspaceStateRef = React.useRef<LibraryDetailWorkspaceState>(initialWorkspaceState);
@@ -2226,6 +2233,12 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
     showSearchHome('files');
   }, [activeTabId, showSearchHome]);
 
+  const openToolsWorkspace = React.useCallback(() => {
+    setBrowserModeOpen(false);
+    setWorkspaceDisplayMode('tools');
+    void window.electronEmbeddedBrowser.deactivate();
+  }, []);
+
   const activateBrowserTab = React.useCallback((tabId: string) => {
     setActiveBrowserTabId(tabId);
     setBrowserModeOpen(true);
@@ -3063,6 +3076,10 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
             ref={directorySidebarRef}
             libraryId={libraryId}
             onFileOpen={handleFileOpen}
+            onSelectionChange={(payload) => {
+              setSelectedTreeNode(payload.primaryNode);
+              setTreeRootNodeId(payload.rootNodeId);
+            }}
             onOpenFileInBrowser={handleOpenFileInBrowser}
           />
         </SidePanelTree>
@@ -3151,6 +3168,14 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
                 <IconGlobeStroke />
               </button>
             ) : null}
+            <button
+              type="button"
+              className={`toolbar-action-btn ${workspaceDisplayMode === 'tools' ? 'is-active' : ''}`}
+              onClick={openToolsWorkspace}
+              title="打开工具区"
+            >
+              <IconPulse />
+            </button>
           </div>
           <div className="toolbar-spacer">
             {browserModeOpen ? (
@@ -3264,7 +3289,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
                 className="toolbar-action-btn"
                 onClick={handleToolbarRefresh}
                 title="刷新当前标签页"
-                disabled={!activeTabId}
+                disabled={!activeTabId || workspaceDisplayMode === 'tools'}
               >
                 <IconRefresh />
               </button>
@@ -3441,6 +3466,13 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
               placeholder={searchMode === 'web' ? '输入网址或关键词' : '搜索文件或文件夹'}
               title="Omniflow"
               description="输入网址或关键词开始"
+            />
+          ) : workspaceDisplayMode === 'tools' ? (
+            <ToolWorkspace
+              libraryId={libraryId}
+              onOpenFileWorkspace={openFileWorkspace}
+              rootNodeId={treeRootNodeId}
+              selectedTreeNode={selectedTreeNode}
             />
           ) : (
             <AppMain hideTabsBar={false} />

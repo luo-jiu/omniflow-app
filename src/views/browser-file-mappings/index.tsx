@@ -1,5 +1,6 @@
 import React from 'react';
 import styled from 'styled-components';
+import OpaquePageContainer from '@/components/OpaquePageContainer';
 import { useNavigate } from 'react-router-dom';
 import { Button, Empty, Input, Modal, Table, Toast, Typography } from '@douyinfe/semi-ui';
 import { IconChevronLeft, IconDelete, IconEdit } from '@douyinfe/semi-icons';
@@ -283,6 +284,7 @@ const BrowserFileMappingsPage: React.FC = () => {
   }, [loadList]);
 
   return (
+    <OpaquePageContainer>
     <Wrapper>
       <div className="header">
         <Button
@@ -411,6 +413,7 @@ const BrowserFileMappingsPage: React.FC = () => {
         </div>
       </Modal>
     </Wrapper>
+    </OpaquePageContainer>
   );
 };
 

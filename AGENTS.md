@@ -29,6 +29,9 @@
 - Embedded Browser 专题：`docs/embedded-browser-architecture.md`
 - Library Detail 工作区专题：`docs/library-detail-workspace.md`
 - 文件树与预览边界：`docs/file-explorer-file-viewer-boundary.md`
+- 内置类型与归档模式：`docs/built-in-type-and-archive-mode.md`
+- Viewer 映射专题：`docs/file-viewer-and-archive-viewer-map.md`
+- Viewer 文档入口：`docs/viewers/README.md`
 - 前端验证矩阵：`docs/frontend-validation-matrix.md`
 - 资源捕捉迁移审计：`docs/cat-catch-migration-audit.md`
 - 上传中心局部说明：`src/modules/upload-center/README.md`

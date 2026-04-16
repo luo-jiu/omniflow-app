@@ -6,6 +6,7 @@ import { useNavigate } from 'react-router-dom';
 import { uploadManager } from '@/utils/uploadManager';
 import type { UploadTask } from '@/modules/upload-center/model/upload-task.types';
 import type { UploadTaskSummary } from '@/modules/upload-center/model/upload-task.store';
+import OpaquePageContainer from '@/components/OpaquePageContainer';
 
 const Page = styled.div`
   --page-heading-indent: 58px;
@@ -738,6 +739,7 @@ const UploadCenter: React.FC = () => {
   };
 
   return (
+    <OpaquePageContainer>
     <Page>
       <div className="header">
         <Button
@@ -872,6 +874,7 @@ const UploadCenter: React.FC = () => {
         )}
       </div>
     </Page>
+    </OpaquePageContainer>
   );
 };
 

@@ -27,6 +27,9 @@
    - `docs/embedded-browser-architecture.md`
    - `docs/library-detail-workspace.md`
    - `docs/file-explorer-file-viewer-boundary.md`
+   - `docs/built-in-type-and-archive-mode.md`
+   - `docs/file-viewer-and-archive-viewer-map.md`
+   - `docs/viewers/README.md`
    - `docs/frontend-validation-matrix.md`
    - `docs/cat-catch-migration-audit.md`
 
@@ -54,6 +57,12 @@
   - `docs/library-detail-workspace.md`
 - 文件树、文件打开、预览 tab、viewer 分发边界：
   - `docs/file-explorer-file-viewer-boundary.md`
+- 内置类型、归档模式、目录树特殊语义：
+  - `docs/built-in-type-and-archive-mode.md`
+- viewer 与归档 viewer 映射：
+  - `docs/file-viewer-and-archive-viewer-map.md`
+- viewer 体系总入口与细分 viewer 文档：
+  - `docs/viewers/README.md`
 - 手工验证基线：
   - `docs/frontend-validation-matrix.md`
 

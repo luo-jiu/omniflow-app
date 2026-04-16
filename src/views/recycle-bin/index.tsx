@@ -12,6 +12,7 @@ import {
 } from '@/features/file-explorer/services/file.api';
 import { markRepositoryTreeSnapshotDirty } from '@/features/file-explorer/hooks/useRepositoryTree';
 import { requestDesktopWindowActivation } from '@/utils/windowActivation';
+import OpaquePageContainer from '@/components/OpaquePageContainer';
 
 const Page = styled.div`
   --page-heading-indent: 58px;
@@ -281,6 +282,7 @@ const RecycleBin: React.FC = () => {
   };
 
   return (
+    <OpaquePageContainer>
     <Page>
       <div className="header">
         <div className="header-left">
@@ -373,6 +375,7 @@ const RecycleBin: React.FC = () => {
         )}
       </div>
     </Page>
+    </OpaquePageContainer>
   );
 };
 

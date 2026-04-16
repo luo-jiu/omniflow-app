@@ -40,6 +40,8 @@ npm install
 npm run build
 ```
 
+本地联调默认后端地址是 `http://127.0.0.1:8850/api`。如果需要改成其他地址，请调整 `VITE_API_BASE_URL`。
+
 ## Documentation
 
 Key frontend documents live in the repo and should be treated as part of the development baseline:

@@ -50,6 +50,7 @@ src/main.tsx
 - 搜索工作区
 - 内置浏览器
 - 浏览器资源捕捉
+- 工具工作区
 
 ## 3. 目录语义
 
@@ -103,6 +104,7 @@ views -> features -> components / hooks -> service / preload bridge -> electron 
 - `search-home`
 - `file-viewer`
 - `browser`
+- `tools`
 
 对应状态定义位于：
 
@@ -147,6 +149,20 @@ views -> features -> components / hooks -> service / preload bridge -> electron 
   - 图片、视频、音频、PDF、归档等预览分发。
 
 不要把“文件树状态”和“预览器内部状态”做成双 source of truth。
+
+### 4.4 Tools Workspace
+
+`features/tool-workspace` 是当前新增的工具域壳层，首个承载工具为 `AI 字幕翻译`。
+
+当前边界：
+
+- `library detail` 页面只拥有“是否进入 tools 模式”的状态。
+- 工具内部草稿、模型配置和字幕工作台状态由 `features/tool-workspace` 持有。
+- 目录树当前选中节点只做只读透传，不在页面层复制一份树结构事实。
+
+专题说明见：
+
+- `docs/tools-workspace.md`
 
 ### 4.4 Upload Center
 
@@ -247,6 +263,12 @@ Renderer 只能持有这些状态的投影，不要把 main 的内部结构当�
 - Renderer 不直接知道 main 里的内部 service 结构。
 - 新增能力时先设计 preload 暴露面，再设计 renderer 的 service 包装。
 - 页面和通用组件不要到处散落 `window.electronEmbeddedBrowser.*` 原始调用。
+
+当前新增的通用文件桥接包括：
+
+- 文本文件选择（支持自定义 filters）
+- 文本文件写入
+- 文本 staging 文件创建与清理
 
 ### 6.3 Electron Main
 

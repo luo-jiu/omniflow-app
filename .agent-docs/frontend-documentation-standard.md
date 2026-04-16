@@ -17,6 +17,7 @@
 
 - `.agent-docs/`：前端长期规范、review 标准、交接说明。
 - `docs/`：专题说明、专项审计、跨模块设计记录。
+- `docs/viewers/`：viewer 体系总入口和各 viewer 细分文档，优先集中管理，不在 `src/features/**` 下分散沉淀长期 viewer 文档。
 - `src/modules/**/README.md`：复杂模块的局部说明，例如上传中心。
 - `README.md`：项目介绍、构建方式、能力概览，不承担前端治理规则。
 
