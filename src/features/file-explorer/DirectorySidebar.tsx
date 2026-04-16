@@ -4,20 +4,21 @@ import { useRepositoryTree } from './hooks/useRepositoryTree';
 import type { NodeRespDTO } from './hooks/useRepositoryTree';
 import React from 'react';
 import { useDesktopAutoImport } from './hooks/useDesktopAutoImport';
+import type { FileViewerFileType } from '@/shared/file-viewer-types';
 
 interface Props {
   libraryId: number;
   onFileOpen?: (
     fileUrl: string,
     fileName: string,
-    fileType: 'image' | 'video' | 'audio' | 'pdf' | 'comic' | 'asmr' | 'asmr_archive' | 'comic_archive' | 'other',
+    fileType: FileViewerFileType,
     nodeId: number,
     options?: {
       tabTypeLabel?: string | null;
       returnTarget?: {
         fileUrl: string;
         fileName: string | null;
-        fileType: 'image' | 'video' | 'audio' | 'pdf' | 'comic' | 'asmr' | 'asmr_archive' | 'comic_archive' | 'other';
+        fileType: FileViewerFileType;
         nodeId: number | null;
         tabTypeLabel?: string | null;
       } | null;

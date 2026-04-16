@@ -7,6 +7,7 @@ import pdfIcon from '@/assets/icons/material/pdf.svg';
 import blankFileIcon from '@/assets/icons/material/file-blank.svg';
 import comicFolderIcon from '@/assets/icons/material/folder-comic.svg';
 import asmrFolderIcon from '@/assets/icons/material/folder-asmr.svg';
+import { resolvePreviewFileType } from '@/utils/preview-file-type';
 
 function createIconNode(src: string, alt: string): React.ReactNode {
   const normalizedAltClass = String(alt || '')
@@ -39,6 +40,10 @@ function isAudioExtension(ext?: string): boolean {
   return audioExtensions.includes(normalized);
 }
 
+function isVideoExtension(ext?: string): boolean {
+  return resolvePreviewFileType(undefined, ext) === 'video';
+}
+
 function createWarningIconNode(title: string): React.ReactNode {
   return React.createElement(
     'span',
@@ -69,7 +74,7 @@ export function getFileNodeIcon(ext?: string): React.ReactNode {
     return createIconNode(wavAudioIcon, 'audio-wav');
   }
 
-  if (normalized === 'mp4') {
+  if (isVideoExtension(normalized)) {
     return createIconNode(videoIcon, 'video');
   }
 
@@ -99,6 +104,16 @@ export function getFileNodeIconByParentBuiltInType(
     }
     return createWarningIconNode('与 ASMR 归档模式不匹配的文件');
   }
+  if (normalizedBuiltInType === 'VIDEO') {
+    if (isVideoExtension(ext)) {
+      return getFileNodeIcon(ext);
+    }
+    return createWarningIconNode(
+      normalizedArchiveMode === 1
+        ? '与视频归档模式不匹配的文件'
+        : '与视频模式不匹配的文件',
+    );
+  }
   return getFileNodeIcon(ext);
 }
 
@@ -119,6 +134,9 @@ export function getDirectoryBuiltInIcon(
   }
   if (normalized === 'ASMR') {
     return createIconNode(asmrFolderIcon, 'asmr-folder');
+  }
+  if (normalized === 'VIDEO') {
+    return createIconNode(videoIcon, 'video-folder');
   }
   return createWarningIconNode(`未知内置类型: ${normalized}`);
 }

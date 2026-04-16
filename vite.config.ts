@@ -9,7 +9,7 @@ function normalizeBaseUrl(url: string): string {
 
 function resolveApiOrigins(mode: string): { apiOrigin: string; apiWsOrigin: string } {
   const env = loadEnv(mode, process.cwd(), '');
-  const fallbackBaseUrl = 'http://localhost:8850/api';
+  const fallbackBaseUrl = 'http://127.0.0.1:8850/api';
   const baseUrl = normalizeBaseUrl(env.VITE_API_BASE_URL || fallbackBaseUrl);
   try {
     const parsed = new URL(baseUrl);
@@ -20,8 +20,8 @@ function resolveApiOrigins(mode: string): { apiOrigin: string; apiWsOrigin: stri
     };
   } catch {
     return {
-      apiOrigin: 'http://localhost:8850',
-      apiWsOrigin: 'ws://localhost:8850',
+      apiOrigin: 'http://127.0.0.1:8850',
+      apiWsOrigin: 'ws://127.0.0.1:8850',
     };
   }
 }

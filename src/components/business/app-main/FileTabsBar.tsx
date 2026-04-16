@@ -39,6 +39,7 @@ const TAB_MEMORY_FALLBACK_BY_TYPE: Record<string, number> = {
   pdf: 72 * 1024 * 1024,
   comic: 120 * 1024 * 1024,
   asmr: 96 * 1024 * 1024,
+  video_archive: 118 * 1024 * 1024,
   asmr_archive: 84 * 1024 * 1024,
   comic_archive: 92 * 1024 * 1024,
   other: 36 * 1024 * 1024,
@@ -324,6 +325,14 @@ function getTabTypeLabel(tab: FileViewerTab) {
   if (tab.tabTypeLabel && tab.tabTypeLabel.trim()) {
     const normalized = tab.tabTypeLabel.trim().toUpperCase();
     if (
+      normalized === 'VIDEO-ARCHIVE'
+      || normalized === 'VIDEO ARC'
+      || normalized === 'VIDEO-ARC'
+      || normalized === 'VIDEO_ARCHIVE'
+    ) {
+      return 'VIDEO-A';
+    }
+    if (
       normalized === 'ASMR-ARCHIVE'
       || normalized === 'ASMR ARC'
       || normalized === 'ASMR-ARC'
@@ -348,6 +357,7 @@ function getTabTypeLabel(tab: FileViewerTab) {
   if (fileType === 'pdf') return 'PDF';
   if (fileType === 'comic') return 'COMIC';
   if (fileType === 'asmr') return 'ASMR';
+  if (fileType === 'video_archive') return 'VIDEO-A';
   if (fileType === 'asmr_archive') return 'ASMR-A';
   if (fileType === 'comic_archive') return 'COMIC-A';
   return 'FILE';
@@ -357,10 +367,13 @@ function getDisplayName(tab: FileViewerTab) {
   const raw = tab.fileName?.trim() || '';
   if (!raw) return '未命名文件';
   const trimmed = raw
+    .replace(/^VIDEO\s*归档\s*·\s*/iu, '')
     .replace(/^ASMR\s*归档\s*·\s*/iu, '')
     .replace(/^COMIC\s*归档\s*·\s*/iu, '')
+    .replace(/^VIDEO\s*·\s*/iu, '')
     .replace(/^ASMR\s*·\s*/iu, '')
     .replace(/^COMIC\s*·\s*/iu, '')
+    .replace(/\s*[【[]\s*VIDEO\s*·\s*归档\s*[】\]]\s*$/iu, '')
     .replace(/\s*[【[]\s*ASMR\s*·\s*归档\s*[】\]]\s*$/iu, '')
     .replace(/\s*[【[]\s*COMIC\s*·\s*归档\s*[】\]]\s*$/iu, '')
     .trim();

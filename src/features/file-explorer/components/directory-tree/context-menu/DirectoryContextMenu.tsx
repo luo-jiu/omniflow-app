@@ -8,6 +8,7 @@ import {
 } from '@/components/ui/context-menu/overlay';
 import comicFolderIcon from '@/assets/icons/material/folder-comic.svg';
 import asmrFolderIcon from '@/assets/icons/material/folder-asmr.svg';
+import videoIcon from '@/assets/icons/material/video.svg';
 
 interface DirectoryContextMenuProps {
   node: any;
@@ -34,6 +35,7 @@ function createBuiltInMenuIcon(src: string, alt: string): React.ReactNode {
 
 const COMIC_BUILT_IN_MENU_ICON = createBuiltInMenuIcon(comicFolderIcon, 'comic');
 const ASMR_BUILT_IN_MENU_ICON = createBuiltInMenuIcon(asmrFolderIcon, 'asmr');
+const VIDEO_BUILT_IN_MENU_ICON = createBuiltInMenuIcon(videoIcon, 'video');
 
 function truncateMenuText(value: unknown, maxLength = 16): string {
   const text = String(value || '').trim();
@@ -114,6 +116,9 @@ function getBuiltInTypeMenuIcon(builtInType: string): React.ReactNode | undefine
   }
   if (normalizedType === 'ASMR') {
     return ASMR_BUILT_IN_MENU_ICON;
+  }
+  if (normalizedType === 'VIDEO') {
+    return VIDEO_BUILT_IN_MENU_ICON;
   }
   return undefined;
 }
@@ -268,6 +273,12 @@ const DirectoryContextMenu: React.FC<DirectoryContextMenuProps> = ({
           label: currentBuiltInType === 'ASMR' ? 'ASMR（当前）' : 'ASMR',
           icon: ASMR_BUILT_IN_MENU_ICON,
           onClick: () => onAction('设置内置类型:ASMR', node),
+        },
+        {
+          key: 'built-in-type-video',
+          label: currentBuiltInType === 'VIDEO' ? '视频（当前）' : '视频',
+          icon: VIDEO_BUILT_IN_MENU_ICON,
+          onClick: () => onAction('设置内置类型:VIDEO', node),
         },
       ],
     },

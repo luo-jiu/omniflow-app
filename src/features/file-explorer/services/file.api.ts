@@ -1,4 +1,5 @@
 import { createIpcUploadTask, ipcRequest as request, ipcUpload } from '@/service/request/ipcRequest';
+import type { ArchiveBuiltInType } from '@/shared/file-viewer-types';
 import { MAX_SINGLE_UPLOAD_BYTES, MAX_SINGLE_UPLOAD_ERROR_MESSAGE } from '@/shared/upload-limits';
 
 export type Library = {
@@ -478,7 +479,7 @@ export interface ArchiveCardsPageResult {
 export async function fetchArchiveCardsPage(payload: {
   nodeId: number;
   libraryId: number;
-  builtInType: 'COMIC' | 'ASMR';
+  builtInType: ArchiveBuiltInType;
   offset?: number;
   limit?: number;
 }): Promise<ArchiveCardsPageResult> {

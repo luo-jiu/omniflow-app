@@ -36,6 +36,11 @@ const LABEL_TONE_MAP: Record<string, TabTypeTone> = {
     text: 'var(--semi-color-info)',
     border: 'color-mix(in srgb, var(--semi-color-info) 42%, transparent)',
   },
+  VIDEO: {
+    background: 'color-mix(in srgb, var(--semi-color-info-light-default) 82%, transparent)',
+    text: 'var(--semi-color-info)',
+    border: 'color-mix(in srgb, var(--semi-color-info) 42%, transparent)',
+  },
   PDF: {
     background: 'color-mix(in srgb, var(--semi-color-danger-light-default) 82%, transparent)',
     text: 'var(--semi-color-danger)',
@@ -60,6 +65,11 @@ const LABEL_TONE_MAP: Record<string, TabTypeTone> = {
     background: 'color-mix(in srgb, var(--semi-color-success-light-default) 82%, var(--semi-color-warning-light-default) 18%)',
     text: 'color-mix(in srgb, var(--semi-color-success) 72%, var(--semi-color-warning) 28%)',
     border: 'color-mix(in srgb, var(--semi-color-success) 40%, var(--semi-color-warning) 24%)',
+  },
+  'VIDEO-ARC': {
+    background: 'color-mix(in srgb, var(--semi-color-info-light-default) 74%, var(--semi-color-tertiary-light-default) 26%)',
+    text: 'color-mix(in srgb, var(--semi-color-info) 70%, var(--semi-color-tertiary) 30%)',
+    border: 'color-mix(in srgb, var(--semi-color-info) 40%, var(--semi-color-tertiary) 24%)',
   },
   IMAGE: {
     background: 'color-mix(in srgb, var(--semi-color-tertiary-light-default) 84%, transparent)',
@@ -100,6 +110,7 @@ const FILE_TYPE_TONE_MAP: Partial<Record<NonNullable<FileViewerTab['fileType']>,
   pdf: LABEL_TONE_MAP.PDF,
   comic: LABEL_TONE_MAP.COMIC,
   asmr: LABEL_TONE_MAP.ASMR,
+  video_archive: LABEL_TONE_MAP['VIDEO-ARC'],
   asmr_archive: LABEL_TONE_MAP['ASMR-ARC'],
   comic_archive: LABEL_TONE_MAP['COMIC-ARC'],
   other: LABEL_TONE_MAP.FILE,
@@ -186,6 +197,7 @@ export function resolveTabTargetKey(tab: FileViewerTab, tabTypeLabel: string): s
   if (tab.fileType === 'pdf') return 'PDF';
   if (tab.fileType === 'comic') return 'COMIC';
   if (tab.fileType === 'asmr') return 'ASMR';
+  if (tab.fileType === 'video_archive') return 'VIDEO-ARC';
   if (tab.fileType === 'asmr_archive') return 'ASMR-ARC';
   if (tab.fileType === 'comic_archive') return 'COMIC-ARC';
   return 'FILE';

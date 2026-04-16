@@ -69,6 +69,7 @@ import {
   type LibraryDetailWorkspaceState,
   type WorkspaceDisplayMode,
 } from "./workspace-state";
+import type { FileViewerFileType } from '@/shared/file-viewer-types';
 
 const DEFAULT_SIDE_PANEL_WIDTH = 300;
 const MIN_SIDE_PANEL_WIDTH = 220;
@@ -90,6 +91,7 @@ const BROWSER_TAB_HEIGHT = 38;
 const BOOKMARK_TOOLBAR_HEIGHT = 42;
 const BOOKMARK_ITEM_HEIGHT = 38;
 const BROWSER_INPUT_HEIGHT = 38;
+const BOOKMARK_TOOLBAR_HORIZONTAL_PADDING = 20;
 
 function getSidePanelWidthStorageKey(libraryId: number) {
   return `${SIDE_PANEL_WIDTH_STORAGE_PREFIX}${libraryId}`;
@@ -139,7 +141,7 @@ const DetailWrapper = styled.div`
   width: 100%;
   height: 100%;
   overflow: hidden;
-  background: var(--app-bg);
+  background: transparent;
 `;
 
 const SidePanel = styled.div`
@@ -149,12 +151,12 @@ const SidePanel = styled.div`
   max-width: 80vw;
   display: flex;
   flex-direction: column;
-  background: var(--app-bg-sidebar);
+  background: var(--app-sidebar-vibrancy);
   flex-shrink: 0;
   height: 100%;
 
   body[theme-mode="dark"] & {
-    background: var(--app-bg-sidebar);
+    background: var(--app-sidebar-vibrancy);
   }
 `;
 
@@ -180,7 +182,7 @@ const SidePanelHeader = styled.div`
   box-sizing: border-box;
   display: flex;
   align-items: center;
-  background: var(--app-bg-sidebar);
+  background: transparent;
   -webkit-app-region: drag;
   flex-shrink: 0;
   position: relative;
@@ -539,7 +541,7 @@ const BookmarkToolbar = styled.div`
   height: ${BOOKMARK_TOOLBAR_HEIGHT}px;
   flex-shrink: 0;
   border-bottom: 1px solid var(--app-border);
-  background: var(--app-bg);
+  background: color-mix(in srgb, var(--app-bg) 94%, var(--semi-color-fill-0) 6%);
   display: flex;
   align-items: center;
   gap: 6px;
@@ -1227,6 +1229,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   const browserRef = React.useRef<EmbeddedBrowserHandle | null>(null);
   const browserTabsListRef = React.useRef<HTMLDivElement | null>(null);
   const browserTabButtonRefMap = React.useRef<Map<string, HTMLButtonElement>>(new Map());
+  const bookmarkToolbarRef = React.useRef<HTMLDivElement | null>(null);
   const bookmarkBarListRef = React.useRef<HTMLDivElement | null>(null);
   const bookmarkButtonRefMap = React.useRef<Map<number, HTMLButtonElement>>(new Map());
   const bookmarkMenuItemRefMap = React.useRef<Map<number, HTMLDivElement>>(new Map());
@@ -1475,14 +1478,14 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   const handleFileOpen = async (
     fileUrl: string,
     fileName: string,
-    fileType: "image" | "video" | "audio" | "pdf" | "comic" | "asmr" | "asmr_archive" | "comic_archive" | "other",
+    fileType: FileViewerFileType,
     nodeId: number,
     options?: {
       tabTypeLabel?: string | null;
       returnTarget?: {
         fileUrl: string;
         fileName: string | null;
-        fileType: 'image' | 'video' | 'audio' | 'pdf' | 'comic' | 'asmr' | 'asmr_archive' | 'comic_archive' | 'other';
+        fileType: FileViewerFileType;
         nodeId: number | null;
         tabTypeLabel?: string | null;
       } | null;
@@ -1503,6 +1506,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   const showBackToArchive = (
     (fileState.fileType === 'asmr' && archiveReturnTarget?.fileType === 'asmr_archive')
     || (fileState.fileType === 'comic' && archiveReturnTarget?.fileType === 'comic_archive')
+    || (fileState.fileType === 'video' && archiveReturnTarget?.fileType === 'video_archive')
   );
 
   const handleArchiveReturn = React.useCallback(() => {
@@ -2674,22 +2678,60 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   }, [activeBrowserTab?.iconSourceUrl, activeBrowserTab?.iconUrl, activeBrowserTab?.url, bookmarkMatch, faviconCacheOwnerKey, reloadBookmarks]);
 
   React.useEffect(() => {
+    const toolbar = bookmarkToolbarRef.current;
     const container = bookmarkBarListRef.current;
-    if (!container) {
+    if (!toolbar && !container) {
       return;
     }
     const syncVisibleCount = () => {
-      setVisibleBookmarkCount(resolveVisibleBookmarkCount(bookmarks, container.clientWidth));
+      const availableWidth = Math.max(
+        0,
+        Number((toolbar ?? container)?.clientWidth || 0) - BOOKMARK_TOOLBAR_HORIZONTAL_PADDING,
+      );
+      setVisibleBookmarkCount(resolveVisibleBookmarkCount(bookmarks, availableWidth));
     };
     const resizeObserver = new ResizeObserver(syncVisibleCount);
-    resizeObserver.observe(container);
+    if (toolbar) {
+      resizeObserver.observe(toolbar);
+    }
+    if (container) {
+      resizeObserver.observe(container);
+    }
     syncVisibleCount();
     window.addEventListener('resize', syncVisibleCount);
     return () => {
       resizeObserver.disconnect();
       window.removeEventListener('resize', syncVisibleCount);
     };
-  }, [bookmarks]);
+  }, [
+    activeBrowserTab?.url,
+    bookmarkBarVisible,
+    bookmarks,
+    browserModeOpen,
+    browserResourcePanelVisible,
+    browserResourcePanelWidth,
+  ]);
+
+  React.useEffect(() => {
+    const container = bookmarkBarListRef.current;
+    if (!container) {
+      return;
+    }
+    if (container.scrollWidth <= container.clientWidth + 1) {
+      return;
+    }
+    setVisibleBookmarkCount((current) => {
+      const renderedCount = Math.min(current, bookmarks.length);
+      return Math.max(0, renderedCount - 1);
+    });
+  }, [
+    bookmarks,
+    visibleBookmarkCount,
+    bookmarkBarVisible,
+    browserModeOpen,
+    browserResourcePanelVisible,
+    browserResourcePanelWidth,
+  ]);
 
   React.useEffect(() => {
     if (!bookmarkContextMenu) {
@@ -3297,6 +3339,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
             </ContentToolbar>
             {bookmarkBarVisible && !activeBrowserTab?.url ? (
               <BookmarkToolbar
+                ref={bookmarkToolbarRef}
                 onContextMenu={(event) => {
                   event.preventDefault();
                   setBookmarkContextMenu({ item: null, x: event.clientX, y: event.clientY });

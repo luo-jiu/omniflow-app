@@ -18,6 +18,10 @@ export function isImageFileNode(item: Pick<NodeRespDTO, 'mimeType' | 'ext'>): bo
   return resolveFileType(item.mimeType, item.ext) === 'image';
 }
 
+export function isVideoFileNode(item: Pick<NodeRespDTO, 'mimeType' | 'ext'>): boolean {
+  return resolveFileType(item.mimeType, item.ext) === 'video';
+}
+
 export function isHiddenNodeName(name?: string, ext?: string): boolean {
   const trimmedName = String(name || '').trim();
   if (trimmedName.startsWith('.')) {

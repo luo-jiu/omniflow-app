@@ -1,8 +1,29 @@
 export type PreviewFileType = 'image' | 'video' | 'audio' | 'pdf' | 'other';
 
 const IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg', 'avif']);
-const VIDEO_EXTENSIONS = new Set(['mp4', 'webm', 'ogg', 'mov', 'avi', 'mkv']);
-const AUDIO_EXTENSIONS = new Set(['mp3', 'wav', 'aac', 'flac', 'm4a']);
+const VIDEO_EXTENSIONS = new Set([
+  'mp4',
+  'm4v',
+  'webm',
+  'mkv',
+  'mov',
+  'avi',
+  'ts',
+  'flv',
+  'hlv',
+  'f4v',
+  'mpeg',
+  'mpg',
+  'wmv',
+  'asf',
+  'movie',
+  'divx',
+  'mpeg4',
+  'vid',
+  'ogv',
+  '3gp',
+]);
+const AUDIO_EXTENSIONS = new Set(['mp3', 'wav', 'aac', 'flac', 'm4a', 'ogg', 'oga', 'opus']);
 const PDF_EXTENSIONS = new Set(['pdf']);
 
 export function normalizeFileExtension(ext?: string): string {

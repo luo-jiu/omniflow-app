@@ -9,6 +9,7 @@ import {
   getFileViewerStateCache,
   setFileViewerStateCache,
 } from './file-viewer-cache';
+import type { FileViewerFileType } from '@/shared/file-viewer-types';
 
 const defaultFileViewerState: FileViewerState = {
   nodeId: null,
@@ -149,7 +150,7 @@ export const FileViewerProvider: React.FC<{ children: ReactNode; cacheKey?: stri
   const setFileUrl = (
     url: string | null,
     fileName: string | null,
-    fileType: 'image' | 'video' | 'audio' | 'pdf' | 'comic' | 'asmr' | 'asmr_archive' | 'comic_archive' | 'other' | null,
+    fileType: FileViewerFileType | null,
     nodeId?: number | null,
     options?: {
       tabTypeLabel?: string | null;

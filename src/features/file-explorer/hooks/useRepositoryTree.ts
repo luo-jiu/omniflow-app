@@ -11,6 +11,7 @@ import {
   isFileNodeType,
   isHiddenNodeName,
   isImageFileNode,
+  isVideoFileNode,
   mapToTreeNode,
   mergeNodesPreservingLoadedState,
   normalizeArchiveMode,
@@ -27,6 +28,7 @@ import {
   saveRepositoryTreeSnapshot,
   hasRepositoryTreeSnapshot,
 } from './use-repository-tree/snapshot-store';
+import type { FileViewerFileType } from '@/shared/file-viewer-types';
 
 const PENDING_APPEND_RETRY_INTERVAL_MS = 420;
 const PENDING_APPEND_MAX_RETRY = 40;
@@ -47,14 +49,14 @@ export function useRepositoryTree(
   onFileOpen?: (
     fileUrl: string,
     fileName: string,
-    fileType: 'image' | 'video' | 'audio' | 'pdf' | 'comic' | 'asmr' | 'asmr_archive' | 'comic_archive' | 'other',
+    fileType: FileViewerFileType,
     nodeId: number,
     options?: {
       tabTypeLabel?: string | null;
       returnTarget?: {
         fileUrl: string;
         fileName: string | null;
-        fileType: 'image' | 'video' | 'audio' | 'pdf' | 'comic' | 'asmr' | 'asmr_archive' | 'comic_archive' | 'other';
+        fileType: FileViewerFileType;
         nodeId: number | null;
         tabTypeLabel?: string | null;
       } | null;
@@ -779,6 +781,19 @@ export function useRepositoryTree(
         return;
       }
 
+      if (archiveMode === 1 && builtInType === 'VIDEO') {
+        if (onFileOpen) {
+          onFileOpen(
+            `video-archive://library/${selectedLibraryId}/node/${node.id}`,
+            node.name,
+            'video_archive',
+            node.id,
+            { tabTypeLabel: 'VIDEO-ARCHIVE' },
+          );
+        }
+        return;
+      }
+
       if (archiveMode === 1) {
         await toggleDirectoryNodeExpand();
         return;
@@ -806,6 +821,30 @@ export function useRepositoryTree(
             node.id,
             { tabTypeLabel: builtInType },
           );
+        }
+        return;
+      }
+
+      if (builtInType === 'VIDEO') {
+        try {
+          const children = (await getChildrenByNodeId(node.id, selectedLibraryId)) as NodeRespDTO[];
+          const firstVideoNode = children.find(item => (
+            isFileNodeType(item.type)
+            && !isHiddenNodeName(item.name, item.ext)
+            && isVideoFileNode(item)
+          ));
+          if (!firstVideoNode) {
+            runtimeLogger.warn('视频目录无可打开视频:', node.name);
+            return;
+          }
+          await openFileByNodeInfo({
+            ...firstVideoNode,
+            displayName: node.name,
+            tabNodeId: node.id,
+            tabTypeLabel: builtInType,
+          });
+        } catch (error) {
+          runtimeLogger.error('打开视频目录内容失败:', error);
         }
         return;
       }

@@ -1,4 +1,4 @@
-const DEFAULT_API_BASE_URL = 'http://localhost:8850/api';
+const DEFAULT_API_BASE_URL = 'http://127.0.0.1:8850/api';
 
 const envBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim();
 

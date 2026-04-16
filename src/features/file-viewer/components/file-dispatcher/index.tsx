@@ -8,13 +8,15 @@ import PdfViewer from "../pdf-viewer";
 import AsmrViewer from "../asmr-viewer";
 import AsmrArchiveViewer from "../../../archive-viewer/components/asmr-archive-viewer";
 import ComicArchiveViewer from "../../../archive-viewer/components/comic-archive-viewer";
+import VideoArchiveViewer from "../../../archive-viewer/components/video-archive-viewer";
 import styled from 'styled-components';
+import type { FileViewerFileType } from '@/shared/file-viewer-types';
 
 interface FileDispatcherProps {
   nodeId: number | null;
   fileUrl: string | null;
   fileName: string | null;
-  fileType: 'image' | 'video' | 'audio' | 'pdf' | 'comic' | 'asmr' | 'asmr_archive' | 'comic_archive' | 'other' | null;
+  fileType: FileViewerFileType | null;
   loading: boolean;
   active?: boolean;
   reloadToken?: number;
@@ -112,6 +114,9 @@ const FileDispatcher: React.FC<FileDispatcherProps> = ({
 
     case 'comic_archive':
       return <ComicArchiveViewer folderNodeId={nodeId} fileUrl={fileUrl} fileName={fileName} active={active} />;
+
+    case 'video_archive':
+      return <VideoArchiveViewer folderNodeId={nodeId} fileUrl={fileUrl} fileName={fileName} active={active} />;
 
     default:
       return (

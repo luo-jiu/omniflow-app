@@ -1,0 +1,263 @@
+# Video Archive Viewer 说明
+
+更新时间：2026-04-16
+适用范围：`src/features/archive-viewer/components/video-archive-viewer/` 下的视频归档卡片视图、封面解析、缓存恢复和返回链路能力。
+
+## 1. 概述
+
+`video-archive-viewer` 不是普通视频播放器，而是一个归档目录下的视频墙 viewer。
+
+它当前同时承担：
+
+- 解析 `video-archive://library/:libraryId/node/:nodeId` 路由
+- 读取归档目录下的视频卡片分页数据
+- 用卡片墙方式展示直属视频资源
+- 解析并补齐 `coverNodeId` 对应封面
+- 维护局部列表缓存和滚动位置
+- 提供重命名、删除、目录树定位等卡片级操作
+- 双击卡片后打开普通 `video` viewer，并带上 `returnTarget`
+
+如果只把它当成“卡片列表”来改，最容易把返回链路、封面策略和分页缓存改坏。
+
+## 2. 当前结构
+
+- `index.tsx`
+  - 主体实现，包含分页加载、封面解析、右键菜单、缓存恢复和打开视频链路
+- `style.ts`
+  - 视频墙卡片布局和视觉样式
+- `docs/viewers/video-archive-viewer.md`
+  - 当前说明
+
+## 3. 关键概念
+
+### 3.1 路由语义
+
+当前 viewer 依赖：
+
+- `video-archive://library/:libraryId/node/:nodeId`
+
+其中：
+
+- `libraryId`
+  - 用于请求分页卡片和视频文件链接
+- `nodeId`
+  - 代表当前视频归档目录
+
+所以这不是通用目录页，而是“某个归档目录下的视频墙”。
+
+### 3.2 卡片来源
+
+当前卡片数据来自：
+
+- `fetchArchiveCardsPage`
+- `builtInType = 'VIDEO'`
+
+它表达的是：
+
+- 当前归档目录下的直属视频媒体文件
+
+也就是说现在的模型不是“递归抓整棵子树所有视频”，而是按归档目录自己的卡片结果来展示。
+
+### 3.3 封面策略
+
+当前卡片封面优先使用：
+
+- `coverNodeId`
+
+具体策略是：
+
+1. 卡片初始只带 `coverNodeId`
+2. 再通过 `batchGetFileLinks` 批量解析封面 URL
+3. 如果没有封面，则显示占位卡面
+
+这说明当前封面不是现场生成首帧，而是优先依赖已有封面节点。
+
+### 3.4 局部缓存
+
+`video-archive-viewer` 当前有一层局部 snapshot cache，key 由：
+
+- `fileUrl`
+- `folderNodeId`
+
+共同组成。
+
+缓存内容包括：
+
+- 是否已加载列表
+- 当前卡片数组
+- `nextOffset`
+- `total`
+- `hasMore`
+- `scrollTop`
+
+它的目标是让用户切 tab 或切工作区再回来时，能恢复视频墙列表和滚动位置，而不是每次都重新从头加载。
+
+### 3.5 返回链路
+
+双击卡片打开的不是 `video_archive` 自己，而是普通：
+
+- `video`
+
+但会通过 `returnTarget` 把归档来源一并传过去。
+
+这意味着：
+
+- 视频详情播放页和视频归档页是两层不同 viewer
+- 归档页负责“视频墙入口”
+- 普通 `video` viewer 负责真正播放
+- 返回归档依赖 `returnTarget.fileType = video_archive`
+
+## 4. 当前职责边界
+
+`video-archive-viewer` 当前负责：
+
+- 分页加载视频归档卡片
+- 批量解析封面
+- 卡片网格展示和滚动恢复
+- 卡片级右键菜单
+- 重命名、删除、目录树定位
+- 双击打开普通视频 viewer
+
+它当前不负责：
+
+- 真正的视频播放
+- 顶层 `fileType` 分发
+- 归档目录 built-in type 规则定义
+- 工作区 tab 生命周期
+
+这几块分别优先看：
+
+- 普通视频 viewer
+- `src/features/file-viewer/components/file-dispatcher/index.tsx`
+- `docs/built-in-type-and-archive-mode.md`
+- `src/components/business/app-main/index.tsx`
+
+## 5. 关键流程
+
+### 5.1 初次进入
+
+建议顺着这条链路阅读：
+
+1. 从 `fileUrl` 解析 `libraryId`
+2. 用 `fileUrl + folderNodeId` 计算 cache key
+3. 如果命中本地 snapshot：
+   - 直接恢复卡片、分页信息和 `scrollTop`
+4. 如果未命中：
+   - 从 offset 0 开始请求第一页
+   - 把 `coverNodeId` 批量补成 `coverUrl`
+   - 初始化 `nextOffset / total / hasMore`
+
+### 5.2 分页加载
+
+当前 viewer 的分页特点是：
+
+- 固定 `PAGE_SIZE = 24`
+- sentinel 进入视口后触发 `loadMore`
+- 新数据 append 到当前卡片列表
+- 合并时按 id 去重
+- 最终按 `sortOrder` 和 `id` 排序
+
+这说明它不是单纯的“滚动到底就拼接”，而是有基本的去重和排序保护。
+
+### 5.3 封面补齐
+
+分页接口返回的卡片初始结构里，封面重点是：
+
+- `coverNodeId`
+- `coverUrl = null`
+
+后续通过 `resolveCardCoverUrls`：
+
+- 收集未解析封面的 `coverNodeId`
+- 批量拿链接
+- 回填 `coverUrl`
+
+失败时当前会：
+
+- 保留卡片
+- 只是不显示封面
+- 用占位卡面兜底
+
+### 5.4 双击打开视频
+
+双击卡片后当前链路是：
+
+1. 调用 `getFileLink(card.id, libraryId, expiry)`
+2. 用 `setFileUrl` 打开普通 `video` viewer
+3. 透传 `returnTarget`
+
+`returnTarget` 当前关键内容包括：
+
+- 归档页 `fileUrl`
+- 归档页 `fileName`
+- `fileType = 'video_archive'`
+- `nodeId`
+- `tabTypeLabel = 'VIDEO-ARCHIVE'`
+
+这部分如果丢了，用户从视频页返回归档页的体验就会断掉。
+
+### 5.5 卡片右键菜单
+
+当前右键菜单支持：
+
+- 重命名
+- 在目录树中定位
+- 删除
+
+这些操作不是单独页面级功能，而是跟具体卡片绑定的资源管理动作。
+
+## 6. 当前最值得小心的点
+
+- `video_archive` 和普通 `video` 是两层 viewer，不要混成一个页面
+- 卡片来源当前是归档分页接口，不是目录树递归扫描
+- `coverNodeId` 和 `coverUrl` 是两阶段模型，不能假设一开始就有可显示封面
+- 返回链路依赖 `returnTarget`，改打开逻辑时必须一起验证
+- snapshot cache 里不只存卡片，还存滚动位置和分页信息
+
+## 7. 阅读顺序
+
+建议按这个顺序读：
+
+1. `src/features/archive-viewer/components/video-archive-viewer/index.tsx`
+2. `src/features/archive-viewer/components/video-archive-viewer/style.ts`
+3. `src/features/file-viewer/components/file-dispatcher/index.tsx`
+4. `src/views/library/detail/index.tsx`
+5. `docs/viewers/archive-viewer.md`
+
+## 8. 何时继续细分文档
+
+当下面任一项继续膨胀时，应该继续在 `docs/viewers/` 下拆子文档：
+
+- 归档卡片来源和分页协议
+- 封面策略
+- 返回链路
+- 卡片级资源操作
+
+建议未来的拆分方向：
+
+- `docs/viewers/video-archive-cover-strategy.md`
+- `docs/viewers/video-archive-return-target.md`
+
+## 9. 验证方式
+
+涉及 `video-archive-viewer` 改动时，至少手工验证：
+
+1. 归档页能正确展示视频卡片。
+2. 滚动加载更多仍然正常。
+3. 有 `coverNodeId` 的卡片能正确补出封面。
+4. 无封面的卡片会走占位卡面，不会白块。
+5. 双击卡片能打开普通视频 viewer。
+6. 从普通视频 viewer 返回时，仍能回到原视频归档页。
+7. 重命名、删除、目录树定位仍然正常。
+8. 切换 tab 再回来后，列表和滚动位置仍能恢复。
+
+## 10. 维护规则
+
+出现以下任一变化时，必须回写本文：
+
+- `video-archive://` 路由格式变化
+- 分页协议变化
+- 封面策略变化
+- `returnTarget` 结构变化
+- 右键菜单能力变化
+- snapshot cache 结构变化

@@ -1,9 +1,10 @@
 import { createContext } from 'react';
+import type { FileViewerFileType } from '@/shared/file-viewer-types';
 
 export interface FileViewerReturnTarget {
   fileUrl: string;
   fileName: string | null;
-  fileType: 'image' | 'video' | 'audio' | 'pdf' | 'comic' | 'asmr' | 'asmr_archive' | 'comic_archive' | 'other';
+  fileType: FileViewerFileType;
   nodeId: number | null;
   tabTypeLabel?: string | null;
 }
@@ -12,7 +13,7 @@ export interface FileViewerState {
   nodeId: number | null;
   fileUrl: string | null;
   fileName: string | null;
-  fileType: 'image' | 'video' | 'audio' | 'pdf' | 'comic' | 'asmr' | 'asmr_archive' | 'comic_archive' | 'other' | null;
+  fileType: FileViewerFileType | null;
   tabTypeLabel?: string | null;
   loading: boolean;
 }
@@ -22,7 +23,7 @@ export interface FileViewerTab {
   nodeId: number | null;
   fileUrl: string;
   fileName: string | null;
-  fileType: 'image' | 'video' | 'audio' | 'pdf' | 'comic' | 'asmr' | 'asmr_archive' | 'comic_archive' | 'other' | null;
+  fileType: FileViewerFileType | null;
   tabTypeLabel?: string | null;
   returnTarget?: FileViewerReturnTarget | null;
   loading: boolean;
@@ -36,7 +37,7 @@ export interface FileViewerContextType {
   setFileUrl: (
     url: string | null,
     fileName: string | null,
-    fileType: 'image' | 'video' | 'audio' | 'pdf' | 'comic' | 'asmr' | 'asmr_archive' | 'comic_archive' | 'other' | null,
+    fileType: FileViewerFileType | null,
     nodeId?: number | null,
     options?: {
       tabTypeLabel?: string | null;
