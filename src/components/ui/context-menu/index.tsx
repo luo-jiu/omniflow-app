@@ -82,7 +82,7 @@ const ContextMenuSubmenuItem: React.FC<{
     if (!visible) {
       return;
     }
-    resolvePreferredPosition();
+    queueMicrotask(resolvePreferredPosition);
   }, [resolvePreferredPosition]);
 
   return (
@@ -139,7 +139,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
         if (item.type === 'divider') {
           return <Divider key={`divider-${index}`} style={{ margin: '4px 0' }} />;
         }
-        
+
         if (item.type === 'title') {
           return (
             <div key={`title-${index}`} className="menu-title">
@@ -148,9 +148,9 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
           );
         }
 
+        const itemKey = item.key || `item-${index}`;
         const content = (
           <div
-            key={item.key || `item-${index}`}
             className={`menu-item ${item.children?.length ? 'has-submenu' : ''} ${item.danger ? 'danger' : ''} ${item.disabled ? 'disabled' : ''}`}
             onClick={(e) => {
               e.stopPropagation();
@@ -173,7 +173,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
         if (item.children?.length) {
           return (
             <ContextMenuSubmenuItem
-              key={item.key || `item-${index}`}
+              key={itemKey}
               childrenItems={item.children}
               data={data}
               className={className}
@@ -186,7 +186,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
           );
         }
 
-        return renderedContent;
+        return <React.Fragment key={itemKey}>{renderedContent}</React.Fragment>;
       })}
     </MenuContent>
   );

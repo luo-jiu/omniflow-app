@@ -141,6 +141,25 @@ function saveBrowserResourcePanelWidth(libraryId: number, width: number) {
   );
 }
 
+const ArchiveReturnIconSlot = styled.span`
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
+
+  svg,
+  svg path {
+    fill: #16a34a;
+    stroke: #16a34a;
+  }
+
+  body[theme-mode="dark"] & svg,
+  body[theme-mode="dark"] & svg path {
+    fill: #4ade80;
+    stroke: #4ade80;
+  }
+`;
+
 const DetailWrapper = styled.div`
   display: flex;
   width: 100%;
@@ -3081,6 +3100,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
               setTreeRootNodeId(payload.rootNodeId);
             }}
             onOpenFileInBrowser={handleOpenFileInBrowser}
+            browserModeOpen={browserModeOpen}
           />
         </SidePanelTree>
 
@@ -3142,11 +3162,13 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
             ) : workspaceDisplayMode === 'file-viewer' && showBackToArchive && archiveReturnTarget ? (
               <button
                 type="button"
-                className="toolbar-action-btn"
+                className="toolbar-action-btn is-archive-return"
                 onClick={handleArchiveReturn}
                 title="返回上一级"
               >
-                <IconArrowLeft />
+                <ArchiveReturnIconSlot>
+                  <IconArrowLeft />
+                </ArchiveReturnIconSlot>
               </button>
             ) : (
               <button

@@ -17,6 +17,7 @@ interface DirectoryContextMenuProps {
   onClose?: () => void;
   boundaryRect?: OverlayBoundaryRect | null;
   deleteCount?: number;
+  submenuPreferredHorizontal?: 'left' | 'right';
 }
 
 const BUILT_IN_MENU_ICON_SIZE = 20;
@@ -169,6 +170,7 @@ const DirectoryContextMenu: React.FC<DirectoryContextMenuProps> = ({
   onClose,
   boundaryRect,
   deleteCount = 1,
+  submenuPreferredHorizontal = 'left',
 }) => {
   // 根目录菜单
   if (node === null) {
@@ -201,7 +203,7 @@ const DirectoryContextMenu: React.FC<DirectoryContextMenuProps> = ({
         className="directory-context-menu"
         onItemClick={onClose}
         submenuPosition="auto"
-        submenuPreferredHorizontal="left"
+        submenuPreferredHorizontal={submenuPreferredHorizontal}
         boundaryRect={boundaryRect}
       />
     );

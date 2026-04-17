@@ -75,6 +75,10 @@ interface DirectoryTreeProps {
   }) => void;
   libraryId: number; // 添加 libraryId prop
   rootNodeId: number | null;
+  // 浏览器模式开关；决定右键菜单展开方向与 boundary
+  // - 关闭：菜单延主工作区向右展开（用 window 作 boundary）
+  // - 开启：菜单沿侧栏向左展开（用 tree 容器作 boundary，避开 BrowserView）
+  browserModeOpen?: boolean;
 }
 
 interface DragPreviewNodeData {
@@ -131,6 +135,7 @@ export default function DirectoryTree({
   loadData,
   libraryId,
   rootNodeId,
+  browserModeOpen = false,
 }: DirectoryTreeProps) {
   const { closeTabByNodeId, tabs } = useFileViewer();
 
@@ -393,19 +398,25 @@ export default function DirectoryTree({
     treeDataRef.current = treeData;
   }, [treeData]);
 
+  const onSelectionChangeRef = useRef(onSelectionChange);
   useEffect(() => {
-    if (!onSelectionChange) {
+    onSelectionChangeRef.current = onSelectionChange;
+  }, [onSelectionChange]);
+
+  useEffect(() => {
+    const handler = onSelectionChangeRef.current;
+    if (!handler) {
       return;
     }
     const primaryNodeId = selectedNodeIds[selectedNodeIds.length - 1] ?? null;
     const primaryNode = primaryNodeId
       ? findNodeById(treeDataRef.current || [], Number(primaryNodeId))
       : null;
-    onSelectionChange({
+    handler({
       primaryNode,
       selectedNodeIds,
     });
-  }, [onSelectionChange, selectedNodeIds, treeData]);
+  }, [selectedNodeIds]);
 
   /** 基于当前已经渲染的所有节点，计算内容所需的最小宽度 */
   const recomputeRequiredWidth = useCallback(() => {
@@ -1368,6 +1379,16 @@ export default function DirectoryTree({
   };
 
   const resolveTreeBoundaryRect = (): OverlayBoundaryRect | null => {
+    // 非浏览器模式：菜单可进入主工作区，以视口为边界
+    if (!browserModeOpen) {
+      return {
+        left: 0,
+        right: window.innerWidth,
+        top: 0,
+        bottom: window.innerHeight,
+      };
+    }
+    // 浏览器模式：BrowserView 压在 DOM 之上，菜单必须呆在侧栏内
     const rect = treeContainerRef.current?.getBoundingClientRect();
     if (!rect) {
       return null;
@@ -1385,12 +1406,23 @@ export default function DirectoryTree({
     clientY: number,
     boundaryRect: OverlayBoundaryRect | null,
   ): ContextMenuPosition => {
-    const containerRect = treeContainerRef.current?.getBoundingClientRect();
-    const estimatedMenuWidth = 280;
-    const estimatedMenuHeight = 420;
-    const horizontal = containerRect && (containerRect.right - clientX < estimatedMenuWidth) ? 'Right' : 'Left';
+    const MENU_WIDTH = 280;
+    const MENU_HEIGHT = 420;
+    const MARGIN = 12;
+    const boundaryLeft = boundaryRect?.left ?? 0;
+    const boundaryRight = boundaryRect?.right ?? window.innerWidth;
     const boundaryBottom = boundaryRect?.bottom ?? window.innerHeight;
-    const vertical = boundaryBottom - clientY < estimatedMenuHeight ? 'top' : 'bottom';
+
+    const spaceLeft = clientX - boundaryLeft - MARGIN;
+    const spaceRight = boundaryRight - clientX - MARGIN;
+
+    // 非浏览器模式：优先向右（菜单落在 clientX 右侧，即 position 以 Left 结尾）
+    // 浏览器模式：优先向左（菜单落在 clientX 左侧，即 position 以 Right 结尾）
+    const horizontal = browserModeOpen
+      ? (spaceLeft >= MENU_WIDTH ? 'Right' : 'Left')
+      : (spaceRight >= MENU_WIDTH ? 'Left' : 'Right');
+
+    const vertical = (boundaryBottom - clientY - MARGIN) >= MENU_HEIGHT ? 'bottom' : 'top';
     return `${vertical}${horizontal}` as ContextMenuPosition;
   };
 
@@ -2230,12 +2262,13 @@ export default function DirectoryTree({
         showArrow={false}
         spacing={4}
         content={
-          <DirectoryContextMenu 
-            node={menuState.node} 
-            isFolder={menuState.isFolder} 
-            onAction={handleAction} 
+          <DirectoryContextMenu
+            node={menuState.node}
+            isFolder={menuState.isFolder}
+            onAction={handleAction}
             boundaryRect={menuState.boundaryRect}
             deleteCount={menuState.deleteCount}
+            submenuPreferredHorizontal={browserModeOpen ? 'left' : 'right'}
             onClose={() => setMenuState(prev => ({ ...prev, visible: false }))}
           />
         }

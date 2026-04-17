@@ -34,6 +34,7 @@ interface Props {
     rootNodeId: number | null;
     selectedNodeIds: number[];
   }) => void;
+  browserModeOpen?: boolean;
 }
 
 export interface DirectorySidebarHandle {
@@ -72,6 +73,7 @@ const DirectorySidebar = React.forwardRef<DirectorySidebarHandle, Props>(({
   onFileOpen,
   onOpenFileInBrowser,
   onSelectionChange,
+  browserModeOpen = false,
 }, ref) => {
   const {
     rootNodeId,
@@ -222,6 +224,7 @@ const DirectorySidebar = React.forwardRef<DirectorySidebarHandle, Props>(({
           }}
           libraryId={libraryId}
           rootNodeId={rootNodeId}
+          browserModeOpen={browserModeOpen}
         />
       </div>
     </DirectorySidebarWrapper>
