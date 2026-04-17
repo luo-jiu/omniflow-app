@@ -98,7 +98,7 @@ const FileDispatcher: React.FC<FileDispatcherProps> = ({
       return <AudioViewer nodeId={nodeId} url={fileUrl} fileName={fileName} active={active} />;
     
     case 'video':
-      return <VideoViewer url={fileUrl} fileName={fileName} active={active} />;
+      return <VideoViewer nodeId={nodeId} url={fileUrl} fileName={fileName} active={active} />;
 
     case 'pdf':
       return <PdfViewer nodeId={nodeId} url={fileUrl} fileName={fileName} active={active} reloadToken={reloadToken} />;

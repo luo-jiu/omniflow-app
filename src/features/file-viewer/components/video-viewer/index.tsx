@@ -12,13 +12,21 @@ import {
 } from '@douyinfe/semi-icons';
 import { VideoViewerWrapper } from './style';
 import { globalAudioPlayer } from '@/features/file-viewer/services/global-audio-player';
+import { fetchNodeDetailById, updateNodeConfig } from '@/features/file-explorer/services/file.api';
 import { runtimeLogger } from '@/utils/runtimeLogger';
 import { findActiveSubtitleCue, parseVideoSubtitle, type VideoSubtitleCue } from './subtitle';
 
 interface VideoViewerProps {
+  nodeId?: number | null;
   url: string;
   fileName?: string | null;
   active?: boolean;
+}
+
+interface VideoPlaybackProgress {
+  currentTime: number;
+  duration: number;
+  updatedAt: string;
 }
 
 const SEEK_SECONDS = 5;
@@ -30,8 +38,124 @@ const MAX_SUBTITLE_FONT_SIZE = 72;
 const DEFAULT_SUBTITLE_BOTTOM_OFFSET = 72;
 const MIN_SUBTITLE_BOTTOM_OFFSET = 36;
 const MAX_SUBTITLE_BOTTOM_OFFSET = 160;
+const VIDEO_PROGRESS_CACHE_MAX_ENTRIES = 48;
+const VIDEO_PROGRESS_REMOTE_SYNC_INTERVAL_MS = 8000;
+const RESTORE_MIN_SECONDS = 2;
+const RESTORE_END_GUARD_SECONDS = 5;
+const RESTORE_END_GUARD_RATIO = 0.98;
+const VIEW_META_VIEWER_STATE_KEY = '__omniflowViewerStateV1';
+const VIEW_META_VIEWER_STATE_LEGACY_KEY = '__omniflow_viewer_state_v1';
+const VIEW_META_VIDEO_PLAYER_KEY = 'videoPlayer';
+const VIEW_META_VIDEO_PLAYER_LEGACY_KEY = 'video_player';
 
-const VideoViewer: React.FC<VideoViewerProps> = ({ url, fileName, active = true }) => {
+const videoProgressCache = new Map<string, VideoPlaybackProgress>();
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
+function parseViewMetaObject(raw: string | null | undefined): Record<string, unknown> {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return isPlainObject(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function parseFiniteNumber(value: unknown): number | null {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function resolveVideoProgressCacheKey(url: string, nodeId?: number | null): string {
+  if (nodeId !== null && nodeId !== undefined && Number.isFinite(nodeId)) {
+    return `node:${nodeId}`;
+  }
+  return `url:${String(url || '').trim()}`;
+}
+
+function setVideoProgressSnapshot(cacheKey: string, progress: VideoPlaybackProgress) {
+  if (videoProgressCache.has(cacheKey)) {
+    videoProgressCache.delete(cacheKey);
+  }
+  videoProgressCache.set(cacheKey, progress);
+  if (videoProgressCache.size > VIDEO_PROGRESS_CACHE_MAX_ENTRIES) {
+    const oldestKey = videoProgressCache.keys().next().value;
+    if (oldestKey) {
+      videoProgressCache.delete(oldestKey);
+    }
+  }
+}
+
+function parseVideoRemoteProgress(viewMetaRaw: string | null | undefined): VideoPlaybackProgress | null {
+  const meta = parseViewMetaObject(viewMetaRaw);
+  const viewerState = meta[VIEW_META_VIEWER_STATE_KEY] ?? meta[VIEW_META_VIEWER_STATE_LEGACY_KEY];
+  if (!isPlainObject(viewerState)) return null;
+
+  const videoState = viewerState[VIEW_META_VIDEO_PLAYER_KEY] ?? viewerState[VIEW_META_VIDEO_PLAYER_LEGACY_KEY];
+  if (!isPlainObject(videoState)) return null;
+
+  const currentTime = parseFiniteNumber(videoState.currentTime);
+  const duration = parseFiniteNumber(videoState.duration);
+  if (currentTime === null || duration === null || currentTime < 0 || duration <= 0) {
+    return null;
+  }
+
+  return {
+    currentTime,
+    duration,
+    updatedAt: String(videoState.updatedAt || ''),
+  };
+}
+
+function buildNextViewMetaWithVideoProgress(
+  baseMeta: Record<string, unknown>,
+  progress: VideoPlaybackProgress,
+): Record<string, unknown> {
+  const nextMeta: Record<string, unknown> = { ...baseMeta };
+  const viewerStateCandidate = nextMeta[VIEW_META_VIEWER_STATE_KEY] ?? nextMeta[VIEW_META_VIEWER_STATE_LEGACY_KEY];
+  const currentViewerState = isPlainObject(viewerStateCandidate)
+    ? { ...(viewerStateCandidate as Record<string, unknown>) }
+    : {};
+  delete currentViewerState[VIEW_META_VIDEO_PLAYER_LEGACY_KEY];
+  delete nextMeta[VIEW_META_VIEWER_STATE_LEGACY_KEY];
+  nextMeta[VIEW_META_VIEWER_STATE_KEY] = {
+    ...currentViewerState,
+    [VIEW_META_VIDEO_PLAYER_KEY]: {
+      currentTime: progress.currentTime,
+      duration: progress.duration,
+      updatedAt: progress.updatedAt,
+    },
+  };
+  return nextMeta;
+}
+
+function resolveRestorableTime(progress: VideoPlaybackProgress | null | undefined): number | null {
+  if (!progress) return null;
+  const currentTime = parseFiniteNumber(progress.currentTime);
+  const duration = parseFiniteNumber(progress.duration);
+  if (currentTime === null || duration === null || duration <= 0) return null;
+  if (currentTime < RESTORE_MIN_SECONDS) return null;
+  if (currentTime >= duration - RESTORE_END_GUARD_SECONDS) return null;
+  if (currentTime / duration >= RESTORE_END_GUARD_RATIO) return null;
+  return Math.min(Math.max(currentTime, 0), duration);
+}
+
+function isProgressNewer(
+  candidate: VideoPlaybackProgress,
+  current: VideoPlaybackProgress | null | undefined,
+): boolean {
+  if (!current) return true;
+  const candidateTime = Date.parse(candidate.updatedAt || '');
+  const currentTime = Date.parse(current.updatedAt || '');
+  if (!Number.isFinite(candidateTime)) return false;
+  if (!Number.isFinite(currentTime)) return true;
+  return candidateTime > currentTime;
+}
+
+const VideoViewer: React.FC<VideoViewerProps> = ({ nodeId, url, fileName, active = true }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const progressRef = useRef<HTMLDivElement>(null);
@@ -39,7 +163,16 @@ const VideoViewer: React.FC<VideoViewerProps> = ({ url, fileName, active = true 
   const volumeControlRef = useRef<HTMLDivElement>(null);
   const rateControlRef = useRef<HTMLDivElement>(null);
   const subtitleLoadRequestIdRef = useRef(0);
+  const remoteProgressRequestIdRef = useRef(0);
+  const remoteProgressSyncTimerRef = useRef<number>(0);
+  const remoteProgressSyncInFlightRef = useRef(false);
+  const viewMetaBaseReadyRef = useRef(false);
+  const viewMetaBaseRef = useRef<Record<string, unknown>>({});
+  const pendingRemoteProgressRef = useRef<VideoPlaybackProgress | null>(null);
+  const pendingRestoreTimeRef = useRef<number | null>(null);
+  const lastSyncedRemoteProgressSignatureRef = useRef('');
   const isMountedRef = useRef(true);
+  const activeRef = useRef(active);
   const isDraggingProgress = useRef(false);
 
   const [isPlaying, setIsPlaying] = useState(false);
@@ -60,6 +193,8 @@ const VideoViewer: React.FC<VideoViewerProps> = ({ url, fileName, active = true 
   const [isVolumePanelOpen, setIsVolumePanelOpen] = useState(false);
   const [isRatePanelOpen, setIsRatePanelOpen] = useState(false);
 
+  const progressCacheKey = useMemo(() => resolveVideoProgressCacheKey(url, nodeId), [nodeId, url]);
+
   const formatTime = (value: number) => {
     if (!Number.isFinite(value) || value < 0) return '00:00';
     const hours = Math.floor(value / 3600);
@@ -70,6 +205,113 @@ const VideoViewer: React.FC<VideoViewerProps> = ({ url, fileName, active = true 
     }
     return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
   };
+
+  useEffect(() => {
+    activeRef.current = active;
+  }, [active]);
+
+  const flushRemoteVideoProgress = useCallback(async (force = false) => {
+    if (!nodeId || !Number.isFinite(nodeId)) {
+      pendingRemoteProgressRef.current = null;
+      return;
+    }
+    if (!activeRef.current && !force) {
+      return;
+    }
+    if (!viewMetaBaseReadyRef.current || remoteProgressSyncInFlightRef.current) {
+      return;
+    }
+
+    const pending = pendingRemoteProgressRef.current;
+    if (!pending) return;
+
+    const signature = [
+      pending.currentTime.toFixed(1),
+      pending.duration.toFixed(1),
+    ].join('|');
+    if (signature === lastSyncedRemoteProgressSignatureRef.current) {
+      pendingRemoteProgressRef.current = null;
+      return;
+    }
+
+    remoteProgressSyncInFlightRef.current = true;
+    try {
+      const nextMeta = buildNextViewMetaWithVideoProgress(viewMetaBaseRef.current, pending);
+      await updateNodeConfig({
+        id: nodeId,
+        viewMeta: JSON.stringify(nextMeta),
+      });
+      viewMetaBaseRef.current = nextMeta;
+      lastSyncedRemoteProgressSignatureRef.current = signature;
+      pendingRemoteProgressRef.current = null;
+    } catch (error) {
+      runtimeLogger.warn('同步视频观看进度失败:', error);
+    } finally {
+      remoteProgressSyncInFlightRef.current = false;
+      if (pendingRemoteProgressRef.current && (activeRef.current || force)) {
+        if (remoteProgressSyncTimerRef.current) {
+          window.clearTimeout(remoteProgressSyncTimerRef.current);
+        }
+        remoteProgressSyncTimerRef.current = window.setTimeout(() => {
+          remoteProgressSyncTimerRef.current = 0;
+          void flushRemoteVideoProgress(force);
+        }, VIDEO_PROGRESS_REMOTE_SYNC_INTERVAL_MS);
+      }
+    }
+  }, [nodeId]);
+
+  const queueRemoteVideoProgressSync = useCallback((progress: VideoPlaybackProgress, force = false) => {
+    pendingRemoteProgressRef.current = progress;
+    if (force) {
+      if (remoteProgressSyncTimerRef.current) {
+        window.clearTimeout(remoteProgressSyncTimerRef.current);
+        remoteProgressSyncTimerRef.current = 0;
+      }
+      void flushRemoteVideoProgress(true);
+      return;
+    }
+    if (!activeRef.current || remoteProgressSyncTimerRef.current || remoteProgressSyncInFlightRef.current) {
+      return;
+    }
+    remoteProgressSyncTimerRef.current = window.setTimeout(() => {
+      remoteProgressSyncTimerRef.current = 0;
+      void flushRemoteVideoProgress();
+    }, VIDEO_PROGRESS_REMOTE_SYNC_INTERVAL_MS);
+  }, [flushRemoteVideoProgress]);
+
+  const persistVideoProgress = useCallback((forceRemoteSync = false) => {
+    const video = videoRef.current;
+    if (!video) return;
+    const durationValue = Number.isFinite(video.duration) ? video.duration : 0;
+    if (durationValue <= 0) return;
+
+    const currentValue = video.ended ? 0 : (Number.isFinite(video.currentTime) ? video.currentTime : 0);
+    const progress: VideoPlaybackProgress = {
+      currentTime: Math.min(Math.max(currentValue, 0), durationValue),
+      duration: durationValue,
+      updatedAt: new Date().toISOString(),
+    };
+    setVideoProgressSnapshot(progressCacheKey, progress);
+    queueRemoteVideoProgressSync(progress, forceRemoteSync);
+  }, [progressCacheKey, queueRemoteVideoProgressSync]);
+
+  const applyPendingRestoreTime = useCallback(() => {
+    const video = videoRef.current;
+    const pendingTime = pendingRestoreTimeRef.current;
+    if (!video || pendingTime === null) return;
+
+    const durationValue = Number.isFinite(video.duration) ? video.duration : 0;
+    const nextTime = resolveRestorableTime({
+      currentTime: pendingTime,
+      duration: durationValue,
+      updatedAt: '',
+    });
+    pendingRestoreTimeRef.current = null;
+    if (nextTime === null) return;
+
+    video.currentTime = nextTime;
+    setCurrentTime(nextTime);
+  }, []);
 
   const seekToByClientX = useCallback((clientX: number) => {
     const video = videoRef.current;
@@ -92,9 +334,10 @@ const VideoViewer: React.FC<VideoViewerProps> = ({ url, fileName, active = true 
     if (!isDraggingProgress.current) return;
     seekToByClientX(event.clientX);
     isDraggingProgress.current = false;
+    persistVideoProgress(true);
     window.removeEventListener('mousemove', handleGlobalMouseMove);
     window.removeEventListener('mouseup', handleGlobalMouseUp);
-  }, [handleGlobalMouseMove, seekToByClientX]);
+  }, [handleGlobalMouseMove, persistVideoProgress, seekToByClientX]);
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -117,6 +360,7 @@ const VideoViewer: React.FC<VideoViewerProps> = ({ url, fileName, active = true 
 
     const onLoadedMetadata = () => {
       setDuration(video.duration || 0);
+      applyPendingRestoreTime();
       setCurrentTime(video.currentTime || 0);
       setIsBuffering(false);
     };
@@ -124,13 +368,17 @@ const VideoViewer: React.FC<VideoViewerProps> = ({ url, fileName, active = true 
       if (!isDraggingProgress.current) {
         setCurrentTime(video.currentTime || 0);
       }
+      persistVideoProgress(false);
     };
     const onPlay = () => {
       setIsPlaying(true);
       globalAudioPlayer.pause();
     };
     const onPause = () => setIsPlaying(false);
-    const onEnded = () => setIsPlaying(false);
+    const onEnded = () => {
+      setIsPlaying(false);
+      persistVideoProgress(true);
+    };
     const onWaiting = () => setIsBuffering(true);
     const onCanPlay = () => setIsBuffering(false);
 
@@ -153,7 +401,7 @@ const VideoViewer: React.FC<VideoViewerProps> = ({ url, fileName, active = true 
       video.removeEventListener('canplay', onCanPlay);
       video.removeEventListener('playing', onCanPlay);
     };
-  }, []);
+  }, [applyPendingRestoreTime, persistVideoProgress]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -173,6 +421,12 @@ const VideoViewer: React.FC<VideoViewerProps> = ({ url, fileName, active = true 
     const video = videoRef.current;
     if (!video) return;
     subtitleLoadRequestIdRef.current += 1;
+    remoteProgressRequestIdRef.current += 1;
+    viewMetaBaseReadyRef.current = false;
+    viewMetaBaseRef.current = {};
+    pendingRemoteProgressRef.current = null;
+    lastSyncedRemoteProgressSignatureRef.current = '';
+    pendingRestoreTimeRef.current = resolveRestorableTime(videoProgressCache.get(progressCacheKey));
     video.src = url;
     video.load();
     setCurrentTime(0);
@@ -183,7 +437,52 @@ const VideoViewer: React.FC<VideoViewerProps> = ({ url, fileName, active = true 
     setSubtitleError(null);
     setSubtitleCues([]);
     setSubtitleEnabled(true);
-  }, [url]);
+  }, [progressCacheKey, url]);
+
+  useEffect(() => {
+    remoteProgressRequestIdRef.current += 1;
+    const requestId = remoteProgressRequestIdRef.current;
+
+    if (!nodeId || !Number.isFinite(nodeId)) {
+      viewMetaBaseReadyRef.current = true;
+      viewMetaBaseRef.current = {};
+      return;
+    }
+
+    fetchNodeDetailById(nodeId)
+      .then((detail) => {
+        if (!isMountedRef.current || requestId !== remoteProgressRequestIdRef.current) return;
+        const baseMeta = parseViewMetaObject(detail.viewMeta);
+        viewMetaBaseRef.current = baseMeta;
+        viewMetaBaseReadyRef.current = true;
+
+        const remoteProgress = parseVideoRemoteProgress(detail.viewMeta);
+        if (remoteProgress) {
+          const cachedProgress = videoProgressCache.get(progressCacheKey);
+          const shouldUseRemoteProgress = isProgressNewer(remoteProgress, cachedProgress);
+          if (shouldUseRemoteProgress) {
+            setVideoProgressSnapshot(progressCacheKey, remoteProgress);
+            const pendingTime = resolveRestorableTime(remoteProgress);
+            if (pendingTime !== null) {
+              pendingRestoreTimeRef.current = pendingTime;
+              applyPendingRestoreTime();
+            }
+          }
+          lastSyncedRemoteProgressSignatureRef.current = [
+            remoteProgress.currentTime.toFixed(1),
+            remoteProgress.duration.toFixed(1),
+          ].join('|');
+        }
+
+        if (pendingRemoteProgressRef.current) {
+          void flushRemoteVideoProgress();
+        }
+      })
+      .catch((error) => {
+        if (!isMountedRef.current || requestId !== remoteProgressRequestIdRef.current) return;
+        runtimeLogger.warn('加载视频观看进度失败:', error);
+      });
+  }, [applyPendingRestoreTime, flushRemoteVideoProgress, nodeId, progressCacheKey]);
 
   useEffect(() => {
     if (active) return;
@@ -192,7 +491,8 @@ const VideoViewer: React.FC<VideoViewerProps> = ({ url, fileName, active = true 
     if (!video.paused) {
       video.pause();
     }
-  }, [active]);
+    persistVideoProgress(true);
+  }, [active, persistVideoProgress]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -227,6 +527,16 @@ const VideoViewer: React.FC<VideoViewerProps> = ({ url, fileName, active = true 
     return () => document.removeEventListener('mousedown', handlePointerDown);
   }, []);
 
+  useEffect(() => {
+    return () => {
+      persistVideoProgress(true);
+      if (remoteProgressSyncTimerRef.current) {
+        window.clearTimeout(remoteProgressSyncTimerRef.current);
+        remoteProgressSyncTimerRef.current = 0;
+      }
+    };
+  }, [persistVideoProgress]);
+
   const togglePlay = () => {
     const video = videoRef.current;
     if (!video) return;
@@ -245,6 +555,7 @@ const VideoViewer: React.FC<VideoViewerProps> = ({ url, fileName, active = true 
     const next = Math.min(Math.max((video.currentTime || 0) + delta, 0), duration || 0);
     video.currentTime = next;
     setCurrentTime(next);
+    persistVideoProgress(true);
   };
 
   const handleVolumeChange = (event: React.ChangeEvent<HTMLInputElement>) => {
