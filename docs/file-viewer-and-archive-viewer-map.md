@@ -108,6 +108,8 @@ OmniFlow 当前不是“一个万能 viewer”，而是多种 viewer 共同组�
 
 决定是否显示“返回归档”的路径。
 
+当普通 `asmr / comic / video` viewer 来自对应归档 viewer 时，顶部文件系统按钮会切换成绿色返回按钮：按钮背景保持透明，返回箭头图标本身常态显示为绿色，用来提示当前文件可以返回原归档入口。
+
 这说明归档 viewer 不只是视觉差异，它还携带额外导航语义。
 
 ## 6. 当前最值得读的文件
@@ -150,7 +152,8 @@ OmniFlow 当前不是“一个万能 viewer”，而是多种 viewer 共同组�
 2. `comic / asmr` 仍进入普通 viewer。
 3. `video_archive / comic_archive / asmr_archive` 仍进入归档 viewer。
 4. 归档 viewer 返回链路仍然成立。
-5. 不支持预览的文件仍进入降级态，而不是白屏。
+5. 从 `asmr / comic / video` 归档打开普通 viewer 后，顶部返回按钮显示绿色提示态。
+6. 不支持预览的文件仍进入降级态，而不是白屏。
 
 ## 9. 维护规则
 

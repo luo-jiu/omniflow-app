@@ -174,6 +174,28 @@ export const MenuContent = styled.div`
       font-size: 20px;
     }
   }
+
+  &.bookmark-folder-context-menu {
+    width: min(290px, calc(100vw - 24px));
+    max-width: calc(100vw - 24px);
+
+    .menu-item {
+      width: 100%;
+      box-sizing: border-box;
+    }
+
+    .menu-item-label {
+      text-overflow: ellipsis;
+    }
+
+    .menu-item-label > span {
+      display: block;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+  }
 `;
 
 export default MenuContent;

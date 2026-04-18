@@ -140,7 +140,7 @@ const TabsWrapper = styled.div`
   }
 `;
 
-const TabButton = styled.button<{
+const TabButton = styled.div<{
   $active: boolean;
   $dropBefore?: boolean;
   $dropAfter?: boolean;
@@ -465,7 +465,7 @@ const FileTabsBar: React.FC<FileTabsBarProps> = ({
   const overflowTriggerRef = React.useRef<HTMLButtonElement | null>(null);
   const topScrollHideTimerRef = React.useRef<number | null>(null);
   const tabsHoveringRef = React.useRef(false);
-  const tabButtonRefMap = React.useRef(new Map<string, HTMLButtonElement>());
+  const tabButtonRefMap = React.useRef(new Map<string, HTMLDivElement>());
   const tabSampleTimerRef = React.useRef<number | null>(null);
   const hoverTabIdRef = React.useRef<string | null>(null);
   const samplingTabIdRef = React.useRef<string | null>(null);
@@ -1033,7 +1033,8 @@ const FileTabsBar: React.FC<FileTabsBarProps> = ({
         return (
           <TabButton
             key={tab.id}
-            type="button"
+            role="button"
+            tabIndex={0}
             $active={tab.id === activeTabId}
             $dropBefore={isDropBefore}
             $dropAfter={isDropAfter}
@@ -1147,6 +1148,19 @@ const FileTabsBar: React.FC<FileTabsBarProps> = ({
               window.addEventListener('mouseup', handleMouseUp);
             }}
             onClick={() => {
+              if (Date.now() < blockClickUntilRef.current) {
+                return;
+              }
+              onActivate(tab.id);
+            }}
+            onKeyDown={(event) => {
+              if (event.target !== event.currentTarget) {
+                return;
+              }
+              if (event.key !== 'Enter' && event.key !== ' ') {
+                return;
+              }
+              event.preventDefault();
               if (Date.now() < blockClickUntilRef.current) {
                 return;
               }

@@ -79,6 +79,7 @@
 - 当前已渲染页数
 - 滚动位置与滚动比例
 - anchor page 和 offset ratio
+- 本地快照更新时间
 
 它的目的不是持久化全部阅读器设置，而是让 tab 切换、重渲染后能尽可能恢复到原阅读位置。
 
@@ -100,8 +101,13 @@
 
 - `anchorPageId`
 - `anchorOffsetRatio`
+- `scrollTop`
+- `scrollRatio`
 - `currentPageNumber`
 - `updatedAt`
+
+远端恢复会和本地快照的 `updatedAt` 比较：当本地快照更新时，旧的远端记录不能覆盖本地恢复点。
+`anchorPageId + anchorOffsetRatio` 是优先恢复依据，`scrollTop / scrollRatio` 作为页面顺序变化或 anchor 不可用时的兜底。
 
 所以后续如果你改阅读进度模型，要同时确认：
 

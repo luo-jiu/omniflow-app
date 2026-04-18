@@ -1124,6 +1124,27 @@ function getBookmarkManagerMeta(item: BrowserBookmarkItem) {
   return getURLHost(item.url || '') || item.url || '未设置网址';
 }
 
+function canRenderImageUnderAppCsp(rawSrc: string) {
+  if (!rawSrc) {
+    return false;
+  }
+  if (rawSrc.startsWith('data:') || rawSrc.startsWith('blob:')) {
+    return true;
+  }
+  if (rawSrc.startsWith('//')) {
+    return false;
+  }
+  if (rawSrc.startsWith('/') || rawSrc.startsWith('./') || rawSrc.startsWith('../')) {
+    return true;
+  }
+  try {
+    const url = new URL(rawSrc);
+    return url.hostname === 'localhost' || url.hostname === '127.0.0.1';
+  } catch {
+    return false;
+  }
+}
+
 const FaviconImage: React.FC<{
   alt?: string;
   className: string;
@@ -1131,17 +1152,18 @@ const FaviconImage: React.FC<{
   style?: React.CSSProperties;
 }> = ({ alt = '', className, src, style }) => {
   const normalizedSrc = String(src || '').trim();
+  const renderableSrc = canRenderImageUnderAppCsp(normalizedSrc) ? normalizedSrc : '';
   const [loadState, setLoadState] = React.useState<'idle' | 'loaded' | 'error'>(() => (
-    normalizedSrc ? 'idle' : 'error'
+    renderableSrc ? 'idle' : 'error'
   ));
 
   React.useEffect(() => {
-    setLoadState(normalizedSrc ? 'idle' : 'error');
-  }, [normalizedSrc]);
+    setLoadState(renderableSrc ? 'idle' : 'error');
+  }, [renderableSrc]);
 
-  const showFallback = !normalizedSrc || loadState !== 'loaded';
+  const showFallback = !renderableSrc || loadState !== 'loaded';
 
-  if (showFallback && !normalizedSrc) {
+  if (showFallback && !renderableSrc) {
     return (
       <span
         aria-hidden="true"
@@ -1164,12 +1186,12 @@ const FaviconImage: React.FC<{
           <IconGlobeStroke size="small" />
         </span>
       ) : null}
-      {normalizedSrc ? (
+      {renderableSrc ? (
         <img
           alt={alt}
           className={className}
           draggable={false}
-          src={normalizedSrc}
+          src={renderableSrc}
           style={{
             ...style,
             display: loadState === 'loaded' ? undefined : 'none',
@@ -2426,11 +2448,15 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
 
   const handleToolbarRefresh = React.useCallback(() => {
     if (browserModeOpen) {
+      if (!activeBrowserTab?.url) {
+        setBrowserInput('');
+        setBookmarkBarVisible(true);
+      }
       browserRef.current?.reload();
       return;
     }
     reloadActiveTab();
-  }, [browserModeOpen, reloadActiveTab]);
+  }, [activeBrowserTab?.url, browserModeOpen, reloadActiveTab]);
 
   const handleBrowserBack = React.useCallback(() => {
     if (!activeBrowserTabId) {
@@ -2955,7 +2981,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
           content={
             <ContextMenu
               items={buildBookmarkFolderMenuItems(item.children || [], item.id)}
-              className="directory-context-menu"
+              className="directory-context-menu bookmark-folder-context-menu"
             />
           }
         >
@@ -3405,7 +3431,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
                     content={
                       <ContextMenu
                         items={buildBookmarkFolderMenuItems(overflowBookmarks)}
-                        className="directory-context-menu"
+                        className="directory-context-menu bookmark-folder-context-menu"
                       />
                     }
                   >

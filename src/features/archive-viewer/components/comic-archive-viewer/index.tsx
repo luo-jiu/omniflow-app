@@ -20,6 +20,7 @@ interface ComicArchiveViewerProps {
   fileUrl: string;
   fileName?: string | null;
   active?: boolean;
+  reloadToken?: number;
 }
 
 interface ComicArchiveCard {
@@ -94,11 +95,11 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
 }
 
-function resolveReaderCacheKey(fileUrl: string, folderNodeId: number | null): string | null {
+function resolveReaderCacheKey(fileUrl: string, folderNodeId: number | null, reloadToken: number): string | null {
   if (!folderNodeId || !Number.isFinite(folderNodeId)) {
     return null;
   }
-  return `${String(fileUrl || '').trim()}::${folderNodeId}`;
+  return `${String(fileUrl || '').trim()}::${folderNodeId}::r${Math.max(Math.floor(reloadToken), 0)}`;
 }
 
 function setArchiveSnapshotCache(cacheKey: string, snapshot: ComicArchiveSnapshot) {
@@ -193,14 +194,15 @@ const ComicArchiveViewer: React.FC<ComicArchiveViewerProps> = ({
   fileUrl,
   fileName,
   active = true,
+  reloadToken = 0,
 }) => {
   const { setFileUrl } = useFileViewer();
   const { viewportRef, wrapperStyle } = useArchiveCardGrid({ baseCardWidth: 410 });
   const libraryId = useMemo(() => parseArchiveLibraryId(fileUrl), [fileUrl]);
   const title = useMemo(() => normalizeArchiveTitle(fileName), [fileName]);
   const readerCacheKey = useMemo(
-    () => resolveReaderCacheKey(fileUrl, folderNodeId),
-    [fileUrl, folderNodeId],
+    () => resolveReaderCacheKey(fileUrl, folderNodeId, reloadToken),
+    [fileUrl, folderNodeId, reloadToken],
   );
 
   const [listLoading, setListLoading] = useState(false);

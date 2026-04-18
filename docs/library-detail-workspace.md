@@ -165,6 +165,8 @@
 
 这说明“开 tab”本身就是一个页面级复合动作，不要把它拆成多个分散更新。
 
+空 tab 没有真实网页 URL，刷新时应视为重新加载浏览器主页：保留浏览器工作区，清空地址栏草稿，显示书签栏和空页主题，不触发原生 `webContents.reload()`。
+
 ### 5.3 激活 tab
 
 激活 tab 时，页面会同步更新：
@@ -198,6 +200,14 @@
 
 - 不能只删数组项。
 - 关闭行为必须同时处理 renderer 投影和 main 真实资源。
+
+### 5.5 书签栏菜单与图标
+
+书签栏文件夹和“更多书签”使用通用 `ContextMenu`，但会额外挂 `bookmark-folder-context-menu` class。
+这类菜单的宽度应保持为受控展开：比基础菜单略宽，长标题用省略号截断；二级目录继承同一限制，避免 hover 后被长书签完整撑开。
+
+浏览器 tab 和书签栏 favicon 在 renderer 里只直接渲染当前 CSP 允许的地址，例如 `data:`、`blob:`、同源或本地地址。
+远程 favicon 需要先通过 embedded browser 主进程解析成 `data:image/...` 后再显示；解析完成前使用 fallback 图标，避免 renderer 直接触发 `img-src` CSP 拒绝。
 
 ## 6. 搜索与浏览器的关系
 

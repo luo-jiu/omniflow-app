@@ -63,6 +63,7 @@ const ContextMenuSubmenuItem: React.FC<{
   boundaryRect?: OverlayBoundaryRect | null;
 }> = ({ childrenItems, className, content, data, onItemClick, submenuPosition, submenuPreferredHorizontal, boundaryRect }) => {
   const triggerRef = React.useRef<HTMLDivElement | null>(null);
+  const resolveFrameRef = React.useRef<number | null>(null);
   const [resolvedPosition, setResolvedPosition] = React.useState<ContextMenuPosition>(
     submenuPreferredHorizontal === 'left' ? 'leftTop' : 'rightTop',
   );
@@ -71,19 +72,39 @@ const ContextMenuSubmenuItem: React.FC<{
     if (submenuPosition !== 'auto' || !triggerRef.current) {
       return;
     }
-    setResolvedPosition(resolveOverlayPlacement(triggerRef.current.getBoundingClientRect(), {
+    const nextPosition = resolveOverlayPlacement(triggerRef.current.getBoundingClientRect(), {
       preferredHorizontal: submenuPreferredHorizontal,
       preferredVertical: 'top',
       boundaryRect,
-    }));
+    });
+    setResolvedPosition((currentPosition) => (
+      currentPosition === nextPosition ? currentPosition : nextPosition
+    ));
   }, [boundaryRect, submenuPosition, submenuPreferredHorizontal]);
+
+  const scheduleResolvePreferredPosition = React.useCallback(() => {
+    if (resolveFrameRef.current != null) {
+      window.cancelAnimationFrame(resolveFrameRef.current);
+    }
+    resolveFrameRef.current = window.requestAnimationFrame(() => {
+      resolveFrameRef.current = null;
+      resolvePreferredPosition();
+    });
+  }, [resolvePreferredPosition]);
 
   const handleVisibleChange = React.useCallback((visible: boolean) => {
     if (!visible) {
       return;
     }
-    queueMicrotask(resolvePreferredPosition);
-  }, [resolvePreferredPosition]);
+    scheduleResolvePreferredPosition();
+  }, [scheduleResolvePreferredPosition]);
+
+  React.useEffect(() => () => {
+    if (resolveFrameRef.current != null) {
+      window.cancelAnimationFrame(resolveFrameRef.current);
+      resolveFrameRef.current = null;
+    }
+  }, []);
 
   return (
     <Popover
@@ -107,8 +128,8 @@ const ContextMenuSubmenuItem: React.FC<{
     >
       <div
         ref={triggerRef}
-        onMouseEnter={resolvePreferredPosition}
-        onMouseMove={resolvePreferredPosition}
+        onMouseEnter={scheduleResolvePreferredPosition}
+        onMouseMove={scheduleResolvePreferredPosition}
       >
         {content}
       </div>

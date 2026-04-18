@@ -32,6 +32,8 @@
 - `hooks/useArchiveCardGrid.ts`
 - `utils/archive-sort.ts`
 
+`comic_archive` 会保存归档卡片列表和滚动位置的本地快照，用于切换 tab 或离开页面后快速恢复。工作区刷新按钮会把 `reloadToken` 传入漫画归档 viewer，刷新后的缓存键会随 token 变化，因此会重新请求第一页归档卡片，避免上传新漫画目录并设置为漫画内置类型后仍命中旧列表。
+
 ## 3. 阅读顺序
 
 建议按这个顺序读：

@@ -222,10 +222,18 @@ const EmbeddedBrowserPanel = React.forwardRef<EmbeddedBrowserHandle, EmbeddedBro
         if (!activeTabId) {
           return;
         }
+        if (!String(currentUrl || '').trim()) {
+          setEmptyDraftValue('');
+          setStatusDetails('');
+          setStatusMeta([]);
+          setStatusMessage('');
+          void window.electronEmbeddedBrowser.deactivate();
+          return;
+        }
         setStatusMessage('正在刷新网页...');
         void window.electronEmbeddedBrowser.reload(activeTabId);
       },
-    }), [activeTabId, requestNavigation]);
+    }), [activeTabId, currentUrl, requestNavigation]);
 
     React.useEffect(() => {
       const unsubscribe = window.electronEmbeddedBrowser.onStateChange((payload: BrowserEventPayload) => {

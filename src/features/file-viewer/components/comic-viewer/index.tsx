@@ -46,6 +46,7 @@ interface ComicReaderSnapshot {
   scrollRatio: number;
   anchorPageId: number | null;
   anchorOffsetRatio: number;
+  updatedAt: string;
 }
 
 const INITIAL_VISIBLE_COUNT = 12;
@@ -84,6 +85,7 @@ const EMPTY_COMIC_READER_SNAPSHOT: ComicReaderSnapshot = {
   scrollRatio: 0,
   anchorPageId: null,
   anchorOffsetRatio: 0,
+  updatedAt: '',
 };
 
 const comicReaderSnapshotCache = new Map<string, ComicReaderSnapshot>();
@@ -199,7 +201,10 @@ interface CenterPageSnapshot {
 interface ComicRemoteReadingProgress {
   anchorPageId: number | null;
   anchorOffsetRatio: number;
+  scrollTop: number;
+  scrollRatio: number;
   currentPageNumber: number;
+  hasCurrentPageNumber?: boolean;
   updatedAt: string;
 }
 
@@ -243,13 +248,19 @@ function parseComicRemoteReadingProgress(viewMetaRaw: string | null | undefined)
   }
   const currentPageNumber = parsePositiveNumber(comicReaderState.currentPageNumber);
   const anchorPageId = parsePositiveNumber(comicReaderState.anchorPageId);
-  if (!currentPageNumber && !anchorPageId) {
+  const scrollTop = Number(comicReaderState.scrollTop ?? 0);
+  const currentScrollTop = Number.isFinite(scrollTop) && scrollTop > 0 ? scrollTop : 0;
+  const currentScrollRatio = parseRatio(comicReaderState.scrollRatio);
+  if (!currentPageNumber && !anchorPageId && currentScrollTop <= 0 && currentScrollRatio <= 0) {
     return null;
   }
   return {
     anchorPageId,
     anchorOffsetRatio: parseRatio(comicReaderState.anchorOffsetRatio),
+    scrollTop: currentScrollTop,
+    scrollRatio: currentScrollRatio,
     currentPageNumber: currentPageNumber ?? 1,
+    hasCurrentPageNumber: Boolean(currentPageNumber),
     updatedAt: String(comicReaderState.updatedAt || ''),
   };
 }
@@ -270,6 +281,8 @@ function buildNextViewMetaWithComicProgress(
     [VIEW_META_COMIC_READER_KEY]: {
       anchorPageId: progress.anchorPageId,
       anchorOffsetRatio: progress.anchorOffsetRatio,
+      scrollTop: progress.scrollTop,
+      scrollRatio: progress.scrollRatio,
       currentPageNumber: progress.currentPageNumber,
       updatedAt: progress.updatedAt,
     },
@@ -280,7 +293,14 @@ function buildNextViewMetaWithComicProgress(
 function resolveRemoteRestoreTarget(
   pages: ComicPageItem[],
   remoteProgress: ComicRemoteReadingProgress,
-): { anchorPageId: number | null; anchorOffsetRatio: number; pageNumber: number } | null {
+): {
+  anchorPageId: number | null;
+  anchorOffsetRatio: number;
+  scrollTop: number;
+  scrollRatio: number;
+  pageNumber: number;
+  updatedAt: string;
+} | null {
   if (pages.length === 0) {
     return null;
   }
@@ -288,17 +308,41 @@ function resolveRemoteRestoreTarget(
   const targetByAnchor = remoteProgress.anchorPageId
     ? pages.findIndex(page => page.id === remoteProgress.anchorPageId)
     : -1;
-  const targetByPage = clamp(Math.floor(remoteProgress.currentPageNumber || 1), 1, pages.length) - 1;
+  const targetByPage = remoteProgress.hasCurrentPageNumber
+    ? clamp(Math.floor(remoteProgress.currentPageNumber || 1), 1, pages.length) - 1
+    : -1;
   const targetIndex = targetByAnchor >= 0 ? targetByAnchor : targetByPage;
-  const targetPage = pages[targetIndex];
+  const targetPage = targetIndex >= 0 ? pages[targetIndex] : null;
   if (!targetPage) {
-    return null;
+    return {
+      anchorPageId: null,
+      anchorOffsetRatio: 0,
+      scrollTop: Math.max(remoteProgress.scrollTop, 0),
+      scrollRatio: clamp(remoteProgress.scrollRatio, 0, 1),
+      pageNumber: 1,
+      updatedAt: remoteProgress.updatedAt,
+    };
   }
   return {
     anchorPageId: targetPage.id,
     anchorOffsetRatio: clamp(remoteProgress.anchorOffsetRatio, 0, 1),
+    scrollTop: Math.max(remoteProgress.scrollTop, 0),
+    scrollRatio: clamp(remoteProgress.scrollRatio, 0, 1),
     pageNumber: targetIndex + 1,
+    updatedAt: remoteProgress.updatedAt,
   };
+}
+
+function isComicProgressNewer(
+  candidate: ComicRemoteReadingProgress,
+  current: ComicReaderSnapshot | null | undefined,
+): boolean {
+  if (!current?.updatedAt) return true;
+  const candidateTime = Date.parse(candidate.updatedAt || '');
+  const currentTime = Date.parse(current.updatedAt || '');
+  if (!Number.isFinite(candidateTime)) return false;
+  if (!Number.isFinite(currentTime)) return true;
+  return candidateTime > currentTime;
 }
 
 const ComicViewer: React.FC<ComicViewerProps> = ({
@@ -407,6 +451,7 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
       scrollRatio: patch.scrollRatio ?? prev.scrollRatio,
       anchorPageId: patch.anchorPageId ?? prev.anchorPageId,
       anchorOffsetRatio: patch.anchorOffsetRatio ?? prev.anchorOffsetRatio,
+      updatedAt: patch.updatedAt ?? prev.updatedAt,
     });
   }, [readerCacheKey]);
 
@@ -663,6 +708,9 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
           if (!remoteProgress || restoredPages.length === 0) {
             return;
           }
+          if (!isComicProgressNewer(remoteProgress, snapshot)) {
+            return;
+          }
           const restoreTarget = resolveRemoteRestoreTarget(restoredPages, remoteProgress);
           if (!restoreTarget) {
             return;
@@ -676,8 +724,8 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
           setVisibleCount(restoredVisibleCount);
           setCurrentPageNumber(restoreTarget.pageNumber);
           pendingRestoreRef.current = {
-            desiredScrollTop: 0,
-            desiredScrollRatio: 0,
+            desiredScrollTop: restoreTarget.scrollTop,
+            desiredScrollRatio: restoreTarget.scrollRatio,
             anchorPageId: restoreTarget.anchorPageId,
             anchorOffsetRatio: restoreTarget.anchorOffsetRatio,
             attempts: 0,
@@ -744,8 +792,8 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
         );
         pendingRestoreRef.current = remoteRestoreTarget
           ? {
-            desiredScrollTop: 0,
-            desiredScrollRatio: 0,
+            desiredScrollTop: remoteRestoreTarget.scrollTop,
+            desiredScrollRatio: remoteRestoreTarget.scrollRatio,
             anchorPageId: remoteRestoreTarget.anchorPageId,
             anchorOffsetRatio: remoteRestoreTarget.anchorOffsetRatio,
             attempts: 0,
@@ -764,6 +812,7 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
           scrollRatio: 0,
           anchorPageId: remoteRestoreTarget?.anchorPageId ?? (imagePages.length > 0 ? imagePages[0].id : null),
           anchorOffsetRatio: remoteRestoreTarget?.anchorOffsetRatio ?? 0,
+          updatedAt: remoteRestoreTarget?.updatedAt ?? '',
         });
       } catch (error) {
         runtimeLogger.error('加载漫画列表失败:', error);
@@ -853,6 +902,7 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
     if (!readerCacheKey) return;
     if (!hasLoadedListRef.current) return;
     if (isHydratingSnapshotRef.current) return;
+    const updatedAt = new Date().toISOString();
     if (isFlipMode) {
       if (pages.length === 0) return;
       const safeIndex = normalizeFlipIndexForPageMode(clamp(flipPageIndex, 0, pages.length - 1));
@@ -867,13 +917,16 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
         scrollRatio: 0,
         anchorPageId: currentPage.id,
         anchorOffsetRatio: 0,
+        updatedAt,
       });
       if (active) {
         queueRemoteReadingProgressSync({
           anchorPageId: currentPage.id,
           anchorOffsetRatio: 0,
+          scrollTop: 0,
+          scrollRatio: 0,
           currentPageNumber: pageNumber,
-          updatedAt: new Date().toISOString(),
+          updatedAt,
         });
         if (options?.forceRemoteNow) {
           if (remoteProgressSyncTimerRef.current) {
@@ -902,13 +955,16 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
       scrollRatio,
       anchorPageId: anchorSnapshot.anchorPageId,
       anchorOffsetRatio: anchorSnapshot.anchorOffsetRatio,
+      updatedAt,
     });
     if (active) {
       queueRemoteReadingProgressSync({
         anchorPageId: anchorSnapshot.anchorPageId,
         anchorOffsetRatio: anchorSnapshot.anchorOffsetRatio,
+        scrollTop,
+        scrollRatio,
         currentPageNumber: anchorSnapshot.currentPageNumber,
-        updatedAt: new Date().toISOString(),
+        updatedAt,
       });
       if (options?.forceRemoteNow) {
         if (remoteProgressSyncTimerRef.current) {
