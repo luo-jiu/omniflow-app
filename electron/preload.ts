@@ -38,6 +38,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   pickUploadFiles: () => ipcRenderer.invoke('dialog:pick-upload-files'),
   pickUploadFolders: () => ipcRenderer.invoke('dialog:pick-upload-folders'),
   pickDownloadDirectory: () => ipcRenderer.invoke('dialog:pick-download-directory'),
+  getDownloadDirectory: () => ipcRenderer.invoke('fs:get-download-directory'),
   saveDownloadFile: (
     defaultFileName: string,
     options?: {

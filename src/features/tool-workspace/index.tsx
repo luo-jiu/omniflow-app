@@ -10,7 +10,7 @@ import {
   TextArea,
   Toast,
 } from '@douyinfe/semi-ui';
-import { IconDownload, IconPlus } from '@douyinfe/semi-icons';
+import { IconDownload, IconFolder, IconPlus } from '@douyinfe/semi-icons';
 
 import {
   LibraryNodePickerModal,
@@ -28,7 +28,10 @@ import {
 import {
   uploadLocalPathAndCreateNode,
 } from '@/features/file-explorer/services/file.api';
-import { pickDownloadDirectoryFromDesktop } from '@/features/file-explorer/services/desktop-download.api';
+import {
+  getDesktopDefaultDownloadDirectory,
+  pickDownloadDirectoryFromDesktop,
+} from '@/features/file-explorer/services/desktop-download.api';
 import {
   findMergeableResourcePair,
 } from '@/features/embedded-browser/resources/model/embedded-browser-resource.presentation';
@@ -68,7 +71,7 @@ import type {
 
 const Wrapper = styled.div`
   display: grid;
-  grid-template-columns: 220px minmax(0, 1fr);
+  grid-template-columns: 240px minmax(0, 1fr);
   height: 100%;
   min-height: 0;
   background: var(--app-bg);
@@ -83,25 +86,19 @@ const ToolNav = styled.aside`
   gap: 14px;
 
   .title {
-    font-size: 17px;
+    font-size: 20px;
     font-weight: 700;
     color: var(--app-text);
-  }
-
-  .desc {
-    font-size: 14px;
-    line-height: 1.7;
-    color: var(--app-text-muted);
   }
 
   .tool-card {
     appearance: none;
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 0;
     width: 100%;
     text-align: left;
-    padding: 14px 12px;
+    padding: 16px 12px;
     border-radius: 12px;
     border: 1px solid var(--app-border);
     background: color-mix(in srgb, var(--app-bg-elevated) 88%, transparent);
@@ -118,20 +115,14 @@ const ToolNav = styled.aside`
   }
 
   .tool-card-title {
-    font-size: 15px;
+    font-size: 17px;
     font-weight: 700;
     color: var(--semi-color-primary);
   }
 
-  .tool-card-copy {
-    font-size: 13px;
-    line-height: 1.7;
-    color: var(--app-text-muted);
-  }
-
   .semi-button {
-    min-height: 40px;
-    font-size: 14px;
+    min-height: 42px;
+    font-size: 15px;
   }
 `;
 
@@ -155,7 +146,7 @@ const MediaResourceList = styled.div`
 
   .media-title {
     min-width: 0;
-    font-size: 15px;
+    font-size: 16px;
     font-weight: 700;
     color: var(--app-text);
     overflow: hidden;
@@ -164,7 +155,7 @@ const MediaResourceList = styled.div`
   }
 
   .media-meta {
-    font-size: 13px;
+    font-size: 14px;
     color: var(--app-text-muted);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -194,14 +185,14 @@ const WorkspaceHeader = styled.div`
   }
 
   .header-title {
-    font-size: 27px;
+    font-size: clamp(30px, 2.2vw, 36px);
     font-weight: 700;
     color: var(--app-text);
     line-height: 1.2;
   }
 
   .header-desc {
-    font-size: 14px;
+    font-size: 16px;
     line-height: 1.75;
     color: var(--app-text-muted);
   }
@@ -221,7 +212,7 @@ const WorkspaceBody = styled.div`
   padding: 18px 20px 24px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 18px;
 `;
 
 const Panel = styled.section`
@@ -231,14 +222,14 @@ const Panel = styled.section`
   padding: 18px;
 
   .panel-title {
-    font-size: 17px;
+    font-size: 20px;
     font-weight: 700;
     color: var(--app-text);
     margin-bottom: 12px;
   }
 
   .panel-desc {
-    font-size: 14px;
+    font-size: 16px;
     line-height: 1.75;
     color: var(--app-text-muted);
     margin-bottom: 14px;
@@ -262,7 +253,7 @@ const ConfigGrid = styled.div`
   }
 
   .label {
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 600;
     color: var(--app-text-muted);
   }
@@ -277,12 +268,12 @@ const ConfigGrid = styled.div`
   .semi-input,
   .semi-input-number,
   .semi-input-number-input {
-    font-size: 14px;
+    font-size: 15px;
   }
 
   .semi-input-wrapper,
   .semi-input-number {
-    min-height: 40px;
+    min-height: 42px;
   }
 `;
 
@@ -293,22 +284,100 @@ const ActionRow = styled.div`
   flex-wrap: wrap;
 
   .semi-button {
-    min-height: 40px;
-    font-size: 14px;
+    min-height: 42px;
+    font-size: 15px;
   }
 
   .semi-tag {
-    font-size: 13px;
+    font-size: 14px;
   }
 
-  .save-target-toggle {
+  .merge-status {
+    font-size: 14px;
+    line-height: 1.5;
+    color: var(--app-text-muted);
+  }
+
+  .merge-status.ok {
+    color: var(--app-text);
+  }
+
+  .save-target-mode-btn {
+    height: 40px;
+    min-width: 164px;
+    border: none;
+    border-radius: 999px;
+    padding: 0 14px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 600;
+    transition: background-color 160ms ease, color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+  }
+
+  .save-target-mode-btn.local {
+    background: color-mix(in srgb, #2f6fed 14%, var(--app-bg-elevated));
+    color: color-mix(in srgb, #2f6fed 88%, var(--app-text));
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, #2f6fed 28%, transparent);
+  }
+
+  .save-target-mode-btn.internal {
+    background: color-mix(in srgb, #1f9d63 16%, var(--app-bg-elevated));
+    color: color-mix(in srgb, #1f9d63 86%, var(--app-text));
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, #1f9d63 30%, transparent);
+  }
+
+  .save-target-mode-btn:hover {
+    color: var(--app-text);
+    transform: translateY(-1px);
+  }
+
+  .save-target-mode-btn:active {
+    transform: translateY(0);
+  }
+
+  .save-target-mode-btn:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--semi-color-primary) 66%, transparent);
+    outline-offset: 2px;
+  }
+
+  .save-target-mode-label {
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    padding: 4px;
-    border: 1px solid var(--app-border);
-    border-radius: 12px;
-    background: color-mix(in srgb, var(--app-bg) 90%, transparent);
+  }
+
+  .save-target-mode-label .semi-icon {
+    font-size: 17px;
+    transition: transform 180ms ease, opacity 180ms ease;
+  }
+
+  .save-target-mode-btn.local .save-target-mode-label .semi-icon {
+    transform: rotate(0deg) scale(1);
+  }
+
+  .save-target-mode-btn.internal .save-target-mode-label .semi-icon {
+    transform: rotate(-8deg) scale(1.06);
+  }
+
+  .save-target-mode-switch {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    font-size: 17px;
+    font-weight: 700;
+    line-height: 1;
+    opacity: 0.88;
+    transition: transform 160ms ease, opacity 160ms ease;
+  }
+
+  .save-target-mode-btn:hover .save-target-mode-switch {
+    opacity: 1;
+    transform: translateX(1px);
   }
 
   .save-target-tip {
@@ -343,6 +412,296 @@ const ActionRow = styled.div`
     display: inline-flex;
     align-items: center;
     gap: 6px;
+  }
+`;
+
+const MediaActionComposer = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+
+  .save-lane,
+  .operations-lane {
+    display: grid;
+    gap: 12px;
+  }
+
+  .save-lane {
+    grid-template-columns: 1fr;
+  }
+
+  .operations-lane {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
+  }
+
+  .action-cluster {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    min-height: 64px;
+    padding: 12px 14px;
+    border-radius: 14px;
+    border: 1px solid color-mix(in srgb, var(--app-border) 86%, transparent);
+    background: color-mix(in srgb, var(--app-bg) 84%, var(--app-bg-elevated));
+  }
+
+  .save-target-cluster {
+    min-width: 0;
+    background: color-mix(in srgb, #2f6fed 7%, var(--app-bg));
+  }
+
+  .merge-cluster {
+    background: color-mix(in srgb, #f2a93a 8%, var(--app-bg));
+  }
+
+  .transcode-cluster {
+    background: color-mix(in srgb, #2f6fed 8%, var(--app-bg));
+    align-items: center;
+  }
+
+  .transcode-controls {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    min-width: 0;
+  }
+
+  .cluster-label {
+    display: inline-flex;
+    align-items: center;
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--app-text);
+    white-space: nowrap;
+  }
+
+  .semi-button {
+    min-height: 42px;
+    font-size: 15px;
+  }
+
+  .semi-tag {
+    font-size: 14px;
+  }
+
+  .save-target-mode-btn {
+    height: 44px;
+    min-width: 182px;
+    border: none;
+    border-radius: 999px;
+    padding: 0 14px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    cursor: pointer;
+    font-size: 15px;
+    font-weight: 600;
+    transition: background-color 180ms ease, color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+  }
+
+  .save-target-mode-btn.local {
+    background: color-mix(in srgb, #2f6fed 14%, var(--app-bg-elevated));
+    color: color-mix(in srgb, #2f6fed 88%, var(--app-text));
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, #2f6fed 28%, transparent);
+  }
+
+  .save-target-mode-btn.internal {
+    background: color-mix(in srgb, #1f9d63 16%, var(--app-bg-elevated));
+    color: color-mix(in srgb, #1f9d63 86%, var(--app-text));
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, #1f9d63 30%, transparent);
+  }
+
+  .save-target-mode-btn:hover {
+    color: var(--app-text);
+    transform: translateY(-1px);
+  }
+
+  .save-target-mode-btn:active {
+    transform: translateY(0);
+  }
+
+  .save-target-mode-btn:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--semi-color-primary) 66%, transparent);
+    outline-offset: 2px;
+  }
+
+  .save-target-mode-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .save-target-mode-icon {
+    width: 19px;
+    height: 19px;
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .save-target-mode-icon .mode-icon {
+    position: absolute;
+    inset: 0;
+    margin: auto;
+    font-size: 19px;
+    transition: transform 180ms ease, opacity 180ms ease;
+    opacity: 0;
+    transform: scale(0.74) rotate(-18deg);
+  }
+
+  .save-target-mode-icon .mode-icon.active {
+    opacity: 1;
+    transform: scale(1) rotate(0deg);
+  }
+
+  .save-target-mode-btn.internal .save-target-mode-icon .mode-icon.active {
+    transform: scale(1) rotate(-12deg);
+  }
+
+  .save-target-mode-switch {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    font-size: 17px;
+    font-weight: 700;
+    line-height: 1;
+    opacity: 0.92;
+    transition: transform 180ms ease, opacity 180ms ease;
+  }
+
+  .save-target-mode-btn.local .save-target-mode-switch {
+    transform: rotate(0deg);
+  }
+
+  .save-target-mode-btn.internal .save-target-mode-switch {
+    transform: rotate(180deg);
+  }
+
+  .save-target-mode-btn:hover .save-target-mode-switch {
+    opacity: 1;
+  }
+
+  .save-path-line {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1 1 360px;
+    min-width: 260px;
+  }
+
+  .save-path-trigger {
+    flex: 1;
+    min-width: 220px;
+    height: 42px;
+    border: 1px solid color-mix(in srgb, var(--app-border) 82%, transparent);
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--app-bg) 90%, var(--app-bg-elevated));
+    color: var(--app-text);
+    padding: 0 12px;
+    text-align: left;
+    cursor: pointer;
+    transition: border-color 150ms ease, box-shadow 150ms ease, background-color 150ms ease;
+  }
+
+  .save-path-trigger:hover {
+    border-color: color-mix(in srgb, var(--semi-color-primary) 52%, var(--app-border));
+  }
+
+  .save-path-trigger:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--semi-color-primary) 66%, transparent);
+    outline-offset: 2px;
+  }
+
+  .save-path-trigger.is-empty {
+    color: var(--app-text-muted);
+  }
+
+  .save-path-trigger.is-error {
+    border-color: color-mix(in srgb, #db4652 80%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, #db4652 36%, transparent);
+    background: color-mix(in srgb, #db4652 10%, var(--app-bg));
+  }
+
+  .save-path-value {
+    display: block;
+    width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 14px;
+    line-height: 1.4;
+  }
+
+  .save-path-required {
+    font-size: 13px;
+    font-weight: 600;
+    color: #db4652;
+    white-space: nowrap;
+  }
+
+  .transcode-type-block {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .transcode-format-label {
+    font-size: 14px;
+    color: var(--app-text-muted);
+    white-space: nowrap;
+  }
+
+  .transcode-format-input {
+    width: 140px;
+  }
+
+  .transcode-presets {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .transcode-pill {
+    height: 32px;
+    border: 1px solid color-mix(in srgb, var(--app-border) 82%, transparent);
+    border-radius: 999px;
+    padding: 0 12px;
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1;
+    background: color-mix(in srgb, var(--app-bg) 86%, var(--app-bg-elevated));
+    color: var(--app-text-muted);
+    cursor: pointer;
+    transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease, box-shadow 150ms ease;
+  }
+
+  .transcode-pill:hover:not(:disabled) {
+    color: var(--app-text);
+    border-color: color-mix(in srgb, var(--semi-color-primary) 52%, var(--app-border));
+  }
+
+  .transcode-pill.active {
+    background: color-mix(in srgb, var(--semi-color-primary) 20%, var(--app-bg-elevated));
+    border-color: color-mix(in srgb, var(--semi-color-primary) 68%, transparent);
+    color: color-mix(in srgb, var(--semi-color-primary) 86%, var(--app-text));
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--semi-color-primary) 38%, transparent);
+  }
+
+  .transcode-pill:disabled {
+    cursor: not-allowed;
+    opacity: 0.56;
+  }
+
+  @media (max-width: 1400px) {
+    .operations-lane {
+      grid-template-columns: 1fr;
+    }
   }
 `;
 
@@ -858,7 +1217,7 @@ function getLibrarySaveTarget(payload: {
   }
   if (rootNodeId && rootNodeId > 0) {
     return {
-      label: '当前库根目录',
+      label: '/',
       parentId: rootNodeId,
     };
   }
@@ -893,20 +1252,44 @@ const MediaProcessingTool: React.FC<MediaProcessingToolProps> = ({
   const [transcodeFormatDraft, setTranscodeFormatDraft] = React.useState('m4a');
   const [saveTargetType, setSaveTargetType] = React.useState<MediaSaveTargetType>('local');
   const [localOutputDirectory, setLocalOutputDirectory] = React.useState('');
+  const [defaultLocalOutputDirectory, setDefaultLocalOutputDirectory] = React.useState('');
   const [internalDirectory, setInternalDirectory] = React.useState<LibraryNodePickerSelection | null>(null);
   const [internalPickerVisible, setInternalPickerVisible] = React.useState(false);
+  const [internalPathRequired, setInternalPathRequired] = React.useState(false);
 
   const mergePair = React.useMemo(() => (
     createManualMergePair(resources) || findMergeableResourcePair(resources)
   ), [resources]);
 
+  const isLocalSaveTarget = saveTargetType === 'local';
   const internalTargetMissing = saveTargetType === 'internal' && !internalDirectory;
-  const localOutputPathHint = localOutputDirectory || '默认下载目录';
+  const localOutputPathHint = localOutputDirectory || defaultLocalOutputDirectory || '默认下载目录';
+
+  React.useEffect(() => {
+    let cancelled = false;
+    void getDesktopDefaultDownloadDirectory()
+      .then((directoryPath) => {
+        if (!cancelled && directoryPath) {
+          setDefaultLocalOutputDirectory(directoryPath);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   React.useEffect(() => {
     setInternalDirectory(null);
     setInternalPickerVisible(false);
+    setInternalPathRequired(false);
   }, [libraryId]);
+
+  React.useEffect(() => {
+    if (saveTargetType !== 'internal' || internalDirectory) {
+      setInternalPathRequired(false);
+    }
+  }, [internalDirectory, saveTargetType]);
 
   const persistMediaOutputBySaveTarget = React.useCallback(async (
     outputPath: string,
@@ -930,8 +1313,8 @@ const MediaProcessingTool: React.FC<MediaProcessingToolProps> = ({
     } catch (error: any) {
       Toast.error(
         error?.message
-          ? `已完成${actionName}并保存到本地下载目录，但上传到库内失败：${error.message}`
-          : `已完成${actionName}并保存到本地下载目录，但上传到库内失败`,
+          ? `已完成${actionName}，但上传到库内失败：${error.message}`
+          : `已完成${actionName}，但上传到库内失败`,
       );
     }
   }, [internalDirectory, libraryId, localOutputPathHint, onRefreshDirectory, saveTargetType]);
@@ -955,7 +1338,8 @@ const MediaProcessingTool: React.FC<MediaProcessingToolProps> = ({
       return;
     }
     if (saveTargetType === 'internal' && !internalDirectory) {
-      Toast.warning('请先选择内部保存目录');
+      setInternalPathRequired(true);
+      Toast.warning('内部保存路径必须选择');
       return;
     }
     setMerging(true);
@@ -995,7 +1379,8 @@ const MediaProcessingTool: React.FC<MediaProcessingToolProps> = ({
       return;
     }
     if (saveTargetType === 'internal' && !internalDirectory) {
-      Toast.warning('请先选择内部保存目录');
+      setInternalPathRequired(true);
+      Toast.warning('内部保存路径必须选择');
       return;
     }
     const outputFormat = normalizeMediaTranscodeFormat(transcodeFormatDraft);
@@ -1037,6 +1422,26 @@ const MediaProcessingTool: React.FC<MediaProcessingToolProps> = ({
     setTranscodeFormatDraft(String(value || '').trimStart().replace(/^\.+/, '').slice(0, 12));
   }, []);
 
+  const normalizedTranscodeFormat = React.useMemo(() => (
+    normalizeMediaTranscodeFormat(transcodeFormatDraft) || ''
+  ), [transcodeFormatDraft]);
+
+  const toggleSaveTargetType = React.useCallback(() => {
+    setSaveTargetType((current) => (current === 'local' ? 'internal' : 'local'));
+  }, []);
+
+  const handlePickSavePath = React.useCallback(() => {
+    if (saveTargetType === 'local') {
+      void handlePickLocalOutputDirectory();
+      return;
+    }
+    setInternalPickerVisible(true);
+  }, [handlePickLocalOutputDirectory, saveTargetType]);
+
+  const savePathDisplay = saveTargetType === 'local'
+    ? localOutputPathHint
+    : (internalDirectory?.pathLabel || '');
+
   return (
     <>
       <WorkspaceHeader>
@@ -1058,87 +1463,92 @@ const MediaProcessingTool: React.FC<MediaProcessingToolProps> = ({
         <Panel>
           <div className="panel-title">处理动作</div>
           <div className="panel-desc">
-            先切换保存目标：本地或内部系统。本地可选系统目录，未选择时默认落到下载目录；
-            内部系统需先选目录后才能执行，输出会自动上传到所选内部目录。
+            先切换保存目标：本地或内部。保存位置点击路径即可更改；
+            内部保存未选目录时会提示“必须选择”，输出会自动上传到所选内部目录。
             类型输入仅支持 1-12 位字母或数字（例如 mp3、m4a、mp4）；ffmpeg 不支持时会直接报错。
           </div>
-          <ActionRow>
-            <div className="save-target-toggle">
-              <Button
-                type={saveTargetType === 'local' ? 'primary' : 'tertiary'}
-                theme={saveTargetType === 'local' ? 'solid' : 'borderless'}
-                onClick={() => setSaveTargetType('local')}
-              >
-                保存到本地
-              </Button>
-              <Button
-                type={saveTargetType === 'internal' ? 'primary' : 'tertiary'}
-                theme={saveTargetType === 'internal' ? 'solid' : 'borderless'}
-                onClick={() => setSaveTargetType('internal')}
-              >
-                保存到内部系统
-              </Button>
-            </div>
-            {saveTargetType === 'local' ? (
-              <>
-                <Button onClick={() => void handlePickLocalOutputDirectory()}>
-                  选择本地目录
-                </Button>
-                <Button
-                  theme="borderless"
-                  disabled={!localOutputDirectory}
-                  onClick={() => setLocalOutputDirectory('')}
+          <MediaActionComposer>
+            <div className="save-lane">
+              <div className="action-cluster save-target-cluster">
+                <span className="cluster-label">保存目标</span>
+                <button
+                  type="button"
+                  className={`save-target-mode-btn ${isLocalSaveTarget ? 'local' : 'internal'}`}
+                  onClick={toggleSaveTargetType}
+                  onKeyDown={(event) => {
+                    if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+                      event.preventDefault();
+                      toggleSaveTargetType();
+                    }
+                  }}
+                  aria-label="切换保存目标"
+                  title="切换保存目标"
                 >
-                  使用默认下载目录
+                  <span className="save-target-mode-label">
+                    <span className="save-target-mode-icon" aria-hidden>
+                      <IconDownload className={`mode-icon ${isLocalSaveTarget ? 'active' : ''}`} />
+                      <IconFolder className={`mode-icon ${isLocalSaveTarget ? '' : 'active'}`} />
+                    </span>
+                    {isLocalSaveTarget ? '保存到本地' : '保存到内部'}
+                  </span>
+                  <span className="save-target-mode-switch">⇄</span>
+                </button>
+                <div className="save-path-line">
+                  <button
+                    type="button"
+                    className={`save-path-trigger ${saveTargetType === 'internal' && !internalDirectory ? 'is-empty' : ''} ${internalPathRequired && internalTargetMissing ? 'is-error' : ''}`}
+                    onClick={handlePickSavePath}
+                    title={savePathDisplay || '点击选择内部保存路径'}
+                  >
+                    <span className="save-path-value">{savePathDisplay || '\u00A0'}</span>
+                  </button>
+                  {internalPathRequired && internalTargetMissing ? (
+                    <span className="save-path-required">必须选择</span>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+            <div className="operations-lane">
+              <div className="action-cluster merge-cluster">
+                <Button loading={merging} disabled={!mergePair} type="primary" onClick={() => void handleMerge()}>
+                  合并&保存
                 </Button>
-                <Tag className="save-target-tip" color="light-blue">
-                  本地位置：{localOutputPathHint}
-                </Tag>
-              </>
-            ) : (
-              <>
-                <Button onClick={() => setInternalPickerVisible(true)}>
-                  选择内部目录
-                </Button>
-                <Tag className="save-target-tip" color={internalDirectory ? 'green' : 'orange'}>
-                  {internalDirectory
-                    ? `内部位置：${internalDirectory.pathLabel}`
-                    : '内部位置：未选择（未选择时不可执行）'}
-                </Tag>
-              </>
-            )}
-            <Button loading={merging} disabled={!mergePair || internalTargetMissing} type="primary" onClick={() => void handleMerge()}>
-              合并音视频
-            </Button>
-            <div className="transcode-format-field">
-              <span className="transcode-format-label">类型</span>
-              <Input
-                className="transcode-format-input"
-                value={transcodeFormatDraft}
-                placeholder="mp3 / m4a / mp4"
-                onChange={handleTranscodeFormatChange}
-              />
-              <div className="transcode-presets">
-                <Button theme="borderless" disabled={transcoding} onClick={() => setTranscodeFormatDraft('m4a')}>
-                  m4a
-                </Button>
-                <Button theme="borderless" disabled={transcoding} onClick={() => setTranscodeFormatDraft('mp3')}>
-                  mp3
-                </Button>
-                <Button theme="borderless" disabled={transcoding} onClick={() => setTranscodeFormatDraft('mp4')}>
-                  mp4
+                <span className={`merge-status ${mergePair ? 'ok' : ''}`}>
+                  {mergePair ? '已识别可合并音视频' : '未识别到可合并组合'}
+                </span>
+              </div>
+              <div className="action-cluster transcode-cluster">
+                <span className="cluster-label">转格式</span>
+                <div className="transcode-controls">
+                  <div className="transcode-type-block">
+                    <span className="transcode-format-label">类型</span>
+                    <Input
+                      className="transcode-format-input"
+                      value={transcodeFormatDraft}
+                      placeholder="mp3 / m4a / mp4"
+                      onChange={handleTranscodeFormatChange}
+                    />
+                  </div>
+                  <div className="transcode-presets">
+                    {['m4a', 'mp3', 'mp4'].map((format) => (
+                      <button
+                        key={format}
+                        type="button"
+                        className={`transcode-pill ${normalizedTranscodeFormat === format ? 'active' : ''}`}
+                        disabled={transcoding}
+                        onClick={() => setTranscodeFormatDraft(format)}
+                      >
+                        {format}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <Button loading={transcoding} disabled={resources.length === 0} onClick={() => void handleTranscode()}>
+                  转换&保存
                 </Button>
               </div>
             </div>
-            <Button loading={transcoding} disabled={resources.length === 0 || internalTargetMissing} onClick={() => void handleTranscode()}>
-              转换格式
-            </Button>
-            {mergePair ? (
-              <Tag color="green">已识别可合并音视频</Tag>
-            ) : (
-              <Tag color="orange">未识别到可合并组合</Tag>
-            )}
-          </ActionRow>
+          </MediaActionComposer>
         </Panel>
 
         <Panel>
@@ -1170,11 +1580,12 @@ const MediaProcessingTool: React.FC<MediaProcessingToolProps> = ({
         visible={internalPickerVisible}
         libraryId={libraryId}
         displayMode="folders"
-        title="选择内部保存目录"
-        confirmText="选择此目录"
+        title="选择保存位置"
+        confirmText="选择此位置"
         onCancel={() => setInternalPickerVisible(false)}
         onConfirm={(selection) => {
           setInternalDirectory(selection);
+          setInternalPathRequired(false);
           setInternalPickerVisible(false);
         }}
       />
@@ -1187,14 +1598,12 @@ type ToolWorkspaceProps = {
   rootNodeId: number | null;
   selectedTreeNode: SelectedTreeNode | null;
   mediaProcessingRequest?: ToolWorkspaceMediaRequest | null;
-  onOpenFileWorkspace: () => void;
   onRefreshDirectory?: (directoryId: number) => Promise<void> | void;
 };
 
 const ToolWorkspace: React.FC<ToolWorkspaceProps> = ({
   libraryId,
   mediaProcessingRequest = null,
-  onOpenFileWorkspace,
   onRefreshDirectory,
   rootNodeId,
   selectedTreeNode,
@@ -1579,14 +1988,13 @@ const ToolWorkspace: React.FC<ToolWorkspaceProps> = ({
     }
   }, [draft.fileFormat, draft.fileName, draft.rows, libraryId, librarySaveTarget]);
 
-  const renderToolCard = (toolId: ToolWorkspaceToolId, title: string, copy: string) => (
+  const renderToolCard = (toolId: ToolWorkspaceToolId, title: string) => (
     <button
       type="button"
       className={`tool-card ${activeToolId === toolId ? 'is-active' : ''}`}
       onClick={() => openTool(toolId)}
     >
       <div className="tool-card-title">{title}</div>
-      <div className="tool-card-copy">{copy}</div>
     </button>
   );
 
@@ -1594,14 +2002,8 @@ const ToolWorkspace: React.FC<ToolWorkspaceProps> = ({
     <Wrapper>
       <ToolNav>
         <div className="title">工具区</div>
-        <div className="desc">
-          目录树继续保留在左侧，工具工作流集中在这里承接。后续可以继续扩字幕处理、批处理和转写整理能力。
-        </div>
-        {renderToolCard('subtitle-translation', 'AI 字幕翻译', '导入本地或库内字幕，按句翻译，并将结果另存为本地文件或库内文件。')}
-        {renderToolCard('media-processing', '媒体处理', '承接浏览器捕获资源，做保存、合并和后续转码。')}
-        <Button theme="borderless" onClick={onOpenFileWorkspace}>
-          返回文件区
-        </Button>
+        {renderToolCard('subtitle-translation', 'AI 字幕翻译')}
+        {renderToolCard('media-processing', '媒体处理')}
       </ToolNav>
 
       <WorkspaceMain>

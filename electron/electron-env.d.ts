@@ -69,6 +69,7 @@ interface Window {
       canceled: boolean;
       directoryPath: string;
     }>;
+    getDownloadDirectory: () => Promise<string>;
     saveDownloadFile: (defaultFileName: string, options?: {
       filters?: Array<{
         name: string;

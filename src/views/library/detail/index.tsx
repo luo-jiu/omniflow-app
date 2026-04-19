@@ -3782,7 +3782,6 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
             <ToolWorkspace
               libraryId={libraryId}
               mediaProcessingRequest={mediaProcessingRequest}
-              onOpenFileWorkspace={openFileWorkspace}
               onRefreshDirectory={(directoryId) => (
                 directorySidebarRef.current?.refreshNodeSubtree(directoryId)
               )}

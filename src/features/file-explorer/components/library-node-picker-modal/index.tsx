@@ -1,6 +1,7 @@
 import React from 'react';
 import styled from 'styled-components';
 import { Empty, Modal, Spin } from '@douyinfe/semi-ui';
+import { IconFile, IconFolder } from '@douyinfe/semi-icons';
 
 import {
   getChildrenByNodeId,
@@ -41,12 +42,6 @@ const ModalBody = styled.div`
   gap: 14px;
   min-height: 0;
   padding-top: 4px;
-
-  .picker-tip {
-    color: var(--app-text-muted);
-    font-size: 13px;
-    line-height: 1.5;
-  }
 
   .breadcrumbs {
     display: flex;
@@ -125,19 +120,18 @@ const ModalBody = styled.div`
     gap: 8px;
   }
 
-  .node-kind {
+  .node-kind-icon {
     flex-shrink: 0;
-    border-radius: 999px;
-    border: 1px solid var(--app-border);
-    padding: 0 8px;
-    font-size: 11px;
-    line-height: 20px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
     color: var(--app-text-muted);
   }
 
-  .node-kind.is-dir {
+  .node-kind-icon.is-dir {
     color: var(--semi-color-primary);
-    border-color: color-mix(in srgb, var(--semi-color-primary) 28%, var(--app-border) 72%);
   }
 
   .node-name {
@@ -193,10 +187,21 @@ function buildPickerPathLabel(
   if (!currentCrumb || currentCrumb.id !== targetNode.id) {
     names.push(targetNode.name);
   }
-  return names.join(' / ');
+  const normalizedSegments = names
+    .filter(Boolean)
+    .filter((segment, index) => !(
+      index === 0 && (segment === '/' || segment.toLowerCase() === 'root')
+    ));
+  if (normalizedSegments.length === 0) {
+    return '/';
+  }
+  return `/${normalizedSegments.join('/')}`;
 }
 
-function matchDisplayMode(node: LibraryNodePickerNode, displayMode: LibraryNodePickerDisplayMode) {
+function matchDisplayMode(
+  node: LibraryNodePickerNode,
+  displayMode: LibraryNodePickerDisplayMode,
+) {
   if (displayMode === 'all') {
     return true;
   }
@@ -215,16 +220,6 @@ function isSelectableNode(node: LibraryNodePickerNode, displayMode: LibraryNodeP
     return node.type === 'dir';
   }
   return node.type === 'file';
-}
-
-function getModeTip(displayMode: LibraryNodePickerDisplayMode) {
-  if (displayMode === 'folders') {
-    return '仅显示文件夹。单击可选择，双击可进入子文件夹。';
-  }
-  if (displayMode === 'files') {
-    return '文件可选择；文件夹仅用于双击进入子目录。';
-  }
-  return '显示文件夹和文件。双击文件夹可进入子目录。';
 }
 
 const LibraryNodePickerModal: React.FC<LibraryNodePickerModalProps> = ({
@@ -281,7 +276,7 @@ const LibraryNodePickerModal: React.FC<LibraryNodePickerModalProps> = ({
         const root: LibraryNodePickerNode = {
           id: Number(rootNodeId),
           libraryId,
-          name: '根目录',
+          name: 'root',
           parentId: 0,
           type: 'dir',
         };
@@ -382,7 +377,6 @@ const LibraryNodePickerModal: React.FC<LibraryNodePickerModalProps> = ({
       }}
     >
       <ModalBody>
-        <div className="picker-tip">{getModeTip(displayMode)}</div>
         <div className="breadcrumbs">
           {breadcrumbs.map((crumb, index) => {
             const isCurrent = index === breadcrumbs.length - 1;
@@ -435,8 +429,8 @@ const LibraryNodePickerModal: React.FC<LibraryNodePickerModalProps> = ({
                   }}
                 >
                   <span className="node-label">
-                    <span className={`node-kind ${node.type === 'dir' ? 'is-dir' : ''}`}>
-                      {node.type === 'dir' ? '目录' : '文件'}
+                    <span className={`node-kind-icon ${node.type === 'dir' ? 'is-dir' : ''}`}>
+                      {node.type === 'dir' ? <IconFolder /> : <IconFile />}
                     </span>
                     <span className="node-name">
                       {node.type === 'file' && node.ext ? `${node.name}.${node.ext}` : node.name}

@@ -495,6 +495,10 @@ export function registerFileIpc(ipcMain: Electron.IpcMain) {
     return { canceled: false, directoryPath: result.filePaths[0] };
   });
 
+  ipcMain.handle('fs:get-download-directory', async (): Promise<string> => (
+    app.getPath('downloads')
+  ));
+
   ipcMain.handle('dialog:save-download-file', async (
     _event,
     defaultFileName: string,

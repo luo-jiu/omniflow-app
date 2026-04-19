@@ -105,8 +105,32 @@ const SearchWorkspaceRoot = styled.div`
     gap: 8px;
   }
 
-  .search-workspace-mode-label .semi-icon {
+  .search-workspace-mode-icon {
+    width: 18px;
+    height: 18px;
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .search-workspace-mode-icon .mode-icon {
+    position: absolute;
+    inset: 0;
+    margin: auto;
     font-size: 18px;
+    transition: transform 180ms ease, opacity 180ms ease;
+    opacity: 0;
+    transform: scale(0.74) rotate(-18deg);
+  }
+
+  .search-workspace-mode-icon .mode-icon.active {
+    opacity: 1;
+    transform: scale(1) rotate(0deg);
+  }
+
+  .search-workspace-mode-btn.web .search-workspace-mode-icon .mode-icon.active {
+    transform: scale(1) rotate(-12deg);
   }
 
   .search-workspace-mode-switch {
@@ -118,6 +142,19 @@ const SearchWorkspaceRoot = styled.div`
     font-weight: 700;
     letter-spacing: 0;
     line-height: 1;
+    opacity: 0.92;
+    transition: transform 180ms ease, opacity 180ms ease;
+  }
+
+  .search-workspace-mode-btn.files .search-workspace-mode-switch {
+    transform: rotate(0deg);
+  }
+
+  .search-workspace-mode-btn.web .search-workspace-mode-switch {
+    transform: rotate(180deg);
+  }
+
+  .search-workspace-mode-btn:hover .search-workspace-mode-switch {
     opacity: 1;
   }
 
@@ -245,7 +282,10 @@ export default function SearchWorkspace({
             title="切换模式"
           >
             <span className="search-workspace-mode-label">
-              {isFilesMode ? <IconApps /> : <IconGlobeStroke />}
+              <span className="search-workspace-mode-icon" aria-hidden>
+                <IconApps className={`mode-icon ${isFilesMode ? 'active' : ''}`} />
+                <IconGlobeStroke className={`mode-icon ${isFilesMode ? '' : 'active'}`} />
+              </span>
               {isFilesMode ? '文件' : '网页'}
             </span>
             <span className="search-workspace-mode-switch">⇄</span>

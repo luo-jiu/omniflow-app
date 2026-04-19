@@ -29,6 +29,11 @@ export async function pickDownloadDirectoryFromDesktop(): Promise<DesktopDownloa
   };
 }
 
+export async function getDesktopDefaultDownloadDirectory(): Promise<string> {
+  assertDesktopSupport();
+  return String(await window.electronAPI.getDownloadDirectory() || '').trim();
+}
+
 export async function ensureDesktopDirectory(baseDirectory: string, relativePath: string): Promise<string> {
   assertDesktopSupport();
   const normalized = normalizeRelativePath(relativePath);
