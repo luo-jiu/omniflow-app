@@ -26,6 +26,7 @@ import {
   IconMore,
   IconEdit,
   IconPulse,
+  IconWrench,
 } from "@douyinfe/semi-icons";
 import { Input, Modal, Popover, Select, Toast } from '@douyinfe/semi-ui';
 import styled, { css } from "styled-components";
@@ -296,7 +297,7 @@ const toolbarActionButtonStyles = css`
     width: ${TOOLBAR_ACTION_BUTTON_SIZE}px;
     height: ${TOOLBAR_ACTION_BUTTON_SIZE}px;
     border-radius: 8px;
-    border: none;
+    border: 1px solid transparent;
     background: transparent;
     color: var(--app-text-muted);
     display: inline-flex;
@@ -312,13 +313,32 @@ const toolbarActionButtonStyles = css`
   }
 
   .toolbar-action-btn:hover:not(:disabled) {
-    background: rgba(0, 0, 0, 0.05);
+    background: color-mix(in srgb, var(--app-text) 8%, transparent);
     color: var(--app-text);
   }
 
   .toolbar-action-btn.is-active {
-    background: var(--semi-color-primary-light-default);
-    color: var(--semi-color-primary);
+    background: #e8f7ff;
+    border-color: #9bdcff;
+    color: #0876c9;
+    box-shadow: inset 0 0 0 1px rgba(8, 118, 201, 0.08);
+  }
+
+  .toolbar-action-btn.is-active:hover:not(:disabled) {
+    background: #d9f1ff;
+    color: #0568b3;
+  }
+
+  body[theme-mode="dark"] & .toolbar-action-btn.is-active {
+    background: #17384a;
+    border-color: #3aa7d8;
+    color: #7dd8ff;
+    box-shadow: inset 0 0 0 1px rgba(125, 216, 255, 0.12);
+  }
+
+  body[theme-mode="dark"] & .toolbar-action-btn.is-active:hover:not(:disabled) {
+    background: #1d4358;
+    color: #a2e4ff;
   }
 
   .toolbar-action-btn:disabled {
@@ -3170,7 +3190,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
           <div className="toolbar-left">
             <button
               type="button"
-              className="toolbar-action-btn"
+              className={`toolbar-action-btn ${workspaceDisplayMode === 'search-home' ? 'is-active' : ''}`}
               onClick={() => showSearchHome()}
               title="打开搜索主页"
             >
@@ -3181,7 +3201,8 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
                 type="button"
                 className="toolbar-action-btn"
                 onClick={openFileWorkspace}
-                title="打开文件模式"
+                title={activeTabId ? '打开文件模式' : '暂无打开的文件'}
+                disabled={!activeTabId}
               >
                 <IconFolder />
               </button>
@@ -3199,13 +3220,22 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
             ) : (
               <button
                 type="button"
-                className="toolbar-action-btn"
+                className={`toolbar-action-btn ${workspaceDisplayMode === 'file-viewer' ? 'is-active' : ''}`}
                 onClick={openFileWorkspace}
-                title="打开文件模式"
+                title={activeTabId ? '打开文件模式' : '暂无打开的文件'}
+                disabled={!activeTabId}
               >
                 <IconFolder />
               </button>
             )}
+            <button
+              type="button"
+              className={`toolbar-action-btn ${workspaceDisplayMode === 'tools' ? 'is-active' : ''}`}
+              onClick={openToolsWorkspace}
+              title="打开工具区"
+            >
+              <IconWrench />
+            </button>
             {!browserModeOpen ? (
               <button
                 type="button"
@@ -3216,14 +3246,6 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
                 <IconGlobeStroke />
               </button>
             ) : null}
-            <button
-              type="button"
-              className={`toolbar-action-btn ${workspaceDisplayMode === 'tools' ? 'is-active' : ''}`}
-              onClick={openToolsWorkspace}
-              title="打开工具区"
-            >
-              <IconPulse />
-            </button>
           </div>
           <div className="toolbar-spacer">
             {browserModeOpen ? (

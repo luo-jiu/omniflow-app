@@ -1,6 +1,6 @@
 # Library Detail 工作区状态说明
 
-更新时间：2026-04-15
+更新时间：2026-04-19
 
 适用范围：`src/views/library/detail/` 页面中的工作区显示模式、浏览器 tab、搜索模式、地址栏、缓存恢复，以及和文件预览/内置浏览器之间的切换逻辑。
 
@@ -34,7 +34,7 @@
 - `searchMode`
 - `workspaceDisplayMode`
 
-当前 `workspaceDisplayMode` 有 3 种：
+当前 `workspaceDisplayMode` 有 4 种：
 
 - `search-home`
 - `file-viewer`
@@ -134,6 +134,16 @@
 更详细的工具区规则见：
 
 - `docs/tools-workspace.md`
+
+### 4.5 主内容头部模式按钮
+
+主内容头部按钮只表达页面级工作区模式，不单独创造第二份状态：
+
+- 搜索主页按钮在 `workspaceDisplayMode = search-home` 时高亮。
+- 文件按钮只在 `workspaceDisplayMode = file-viewer` 时高亮；如果没有活动文件 tab，它会禁用，避免和搜索主页产生同页但双入口的歧义。
+- 归档返回按钮会替代文件按钮位置，但只保留绿色返回箭头，不复用模式按钮的 active 背景。
+- 工具按钮在 `workspaceDisplayMode = tools` 时高亮。
+- 浏览器入口进入浏览器后会被浏览器 tab 栏替代，不做常驻高亮。
 
 ## 5. 浏览器 tab 规则
 
