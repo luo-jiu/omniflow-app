@@ -50,6 +50,7 @@ interface ContextMenuProps {
   submenuPosition?: ContextMenuPosition | 'auto';
   submenuPreferredHorizontal?: 'left' | 'right';
   boundaryRect?: OverlayBoundaryRect | null;
+  getPopupContainer?: () => HTMLElement;
 }
 
 const ContextMenuSubmenuItem: React.FC<{
@@ -61,7 +62,8 @@ const ContextMenuSubmenuItem: React.FC<{
   submenuPosition: ContextMenuPosition | 'auto';
   submenuPreferredHorizontal: 'left' | 'right';
   boundaryRect?: OverlayBoundaryRect | null;
-}> = ({ childrenItems, className, content, data, onItemClick, submenuPosition, submenuPreferredHorizontal, boundaryRect }) => {
+  getPopupContainer?: () => HTMLElement;
+}> = ({ childrenItems, className, content, data, onItemClick, submenuPosition, submenuPreferredHorizontal, boundaryRect, getPopupContainer: getPopupContainerProp }) => {
   const triggerRef = React.useRef<HTMLDivElement | null>(null);
   const resolveFrameRef = React.useRef<number | null>(null);
   const [resolvedPosition, setResolvedPosition] = React.useState<ContextMenuPosition>(
@@ -112,7 +114,7 @@ const ContextMenuSubmenuItem: React.FC<{
       showArrow={false}
       position={submenuPosition === 'auto' ? resolvedPosition : submenuPosition}
       spacing={4}
-      getPopupContainer={getAppPopupContainer}
+      getPopupContainer={getPopupContainerProp ?? getAppPopupContainer}
       onVisibleChange={handleVisibleChange}
       content={
         <ContextMenu
@@ -123,6 +125,7 @@ const ContextMenuSubmenuItem: React.FC<{
           submenuPosition={submenuPosition}
           submenuPreferredHorizontal={submenuPreferredHorizontal}
           boundaryRect={boundaryRect}
+          getPopupContainer={getPopupContainerProp}
         />
       }
     >
@@ -152,6 +155,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
   submenuPosition = 'auto',
   submenuPreferredHorizontal = 'right',
   boundaryRect = null,
+  getPopupContainer: getPopupContainerProp,
 }) => {
   return (
     <MenuContent style={style} className={className} id={id}>
@@ -202,6 +206,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
               submenuPosition={submenuPosition}
               submenuPreferredHorizontal={submenuPreferredHorizontal}
               boundaryRect={boundaryRect}
+              getPopupContainer={getPopupContainerProp}
               content={renderedContent}
             />
           );

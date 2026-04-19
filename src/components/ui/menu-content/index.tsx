@@ -151,27 +151,37 @@ export const MenuContent = styled.div`
   }
 
   &.directory-context-menu {
-    padding: 5px;
+    min-width: 240px;
+    padding: 4px;
+    border-radius: 8px;
 
     .semi-divider-horizontal {
-      margin: 2px 0 !important;
+      margin: 1px 0 !important;
     }
 
     .menu-item {
-      font-size: 17px;
+      min-height: 28px;
+      font-size: 18px;
       font-weight: 400;
-      padding: 6px 12px;
-      line-height: 1.3;
+      padding: 3px 10px;
+      line-height: 1.12;
+      gap: 6px;
     }
 
     .menu-item + .menu-item {
-      margin-top: 1px;
+      margin-top: 0;
     }
 
     .menu-item-icon {
-      width: 20px;
-      height: 20px;
-      font-size: 20px;
+      width: 18px;
+      height: 18px;
+      flex-basis: 18px;
+      font-size: 18px;
+    }
+
+    .menu-item-submenu-arrow {
+      margin-left: 4px;
+      font-size: 13px;
     }
   }
 

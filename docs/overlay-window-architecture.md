@@ -84,6 +84,8 @@ src/overlay/main.tsx
        └─ registry.tsx          (type → component 映射)
              └─ UploadConfirmOverlayAdapter
                   └─ UploadConfirmModal  (复用原组件,props 已 serializable 化)
+             └─ DirectoryContextMenuOverlayAdapter
+                  └─ DirectoryContextMenu  (右键动作通过 result 回主 renderer 执行)
 ```
 
 ### 2.5 主题同步
@@ -405,10 +407,9 @@ if (result.type === 'confirm') {
 - 并发策略从串行队列改为其他模式
 - 新增跨窗口能力(如拖拽跨窗口、文件拖入 overlay 等)
 
-后续扩展方向(明确排除在本次范围外,留给未来迭代):
+后续扩展方向:
 
-- 右键菜单批量迁移(`DirectoryContextMenu` / `library-context-menu`)
-- 嵌套 Popconfirm(`AdaptiveDeleteConfirm`)
+- `DirectoryContextMenu` 已迁移到 overlay 子窗口；后续仍可迁移 `library-context-menu`
 - Tooltip / Select 下拉的条件迁移
 - 栈叠支持(如需在 Modal 上再开右键菜单)
 - macOS 动态 vibrancy 实验

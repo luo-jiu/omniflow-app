@@ -18,6 +18,7 @@ interface DirectoryContextMenuProps {
   boundaryRect?: OverlayBoundaryRect | null;
   deleteCount?: number;
   submenuPreferredHorizontal?: 'left' | 'right';
+  getPopupContainer?: () => HTMLElement;
 }
 
 const BUILT_IN_MENU_ICON_SIZE = 20;
@@ -53,7 +54,8 @@ const AdaptiveDeleteConfirm: React.FC<{
   onClose?: () => void;
   boundaryRect?: OverlayBoundaryRect | null;
   deleteCount?: number;
-}> = ({ content, node, onAction, onClose, boundaryRect, deleteCount = 1 }) => {
+  getPopupContainer?: () => HTMLElement;
+}> = ({ content, node, onAction, onClose, boundaryRect, deleteCount = 1, getPopupContainer: getPopupContainerProp }) => {
   const triggerRef = React.useRef<HTMLDivElement | null>(null);
   const [position, setPosition] = React.useState<ContextMenuPosition>('leftBottom');
   const resolveConfirmPosition = React.useCallback(() => {
@@ -104,6 +106,7 @@ const AdaptiveDeleteConfirm: React.FC<{
       }}
       position={position}
       style={{ width: 248 }}
+      {...(getPopupContainerProp ? { getPopupContainer: getPopupContainerProp } : {})}
     >
       {triggerContent}
     </Popconfirm>
@@ -171,6 +174,7 @@ const DirectoryContextMenu: React.FC<DirectoryContextMenuProps> = ({
   boundaryRect,
   deleteCount = 1,
   submenuPreferredHorizontal = 'left',
+  getPopupContainer: getPopupContainerProp,
 }) => {
   // 根目录菜单
   if (node === null) {
@@ -205,6 +209,7 @@ const DirectoryContextMenu: React.FC<DirectoryContextMenuProps> = ({
         submenuPosition="auto"
         submenuPreferredHorizontal={submenuPreferredHorizontal}
         boundaryRect={boundaryRect}
+        getPopupContainer={getPopupContainerProp}
       />
     );
   }
@@ -393,6 +398,7 @@ const DirectoryContextMenu: React.FC<DirectoryContextMenuProps> = ({
         onClose={onClose}
         boundaryRect={boundaryRect}
         deleteCount={deleteCount}
+        getPopupContainer={getPopupContainerProp}
       />
     )
   });
@@ -403,8 +409,9 @@ const DirectoryContextMenu: React.FC<DirectoryContextMenuProps> = ({
       className="directory-context-menu"
       onItemClick={onClose}
       submenuPosition="auto"
-      submenuPreferredHorizontal="left"
+      submenuPreferredHorizontal={submenuPreferredHorizontal}
       boundaryRect={boundaryRect}
+      getPopupContainer={getPopupContainerProp}
     />
   );
 };

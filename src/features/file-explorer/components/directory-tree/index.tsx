@@ -1,5 +1,5 @@
 import React, { ReactNode, useCallback, useEffect, useRef, useState } from 'react';
-import { Tree, Toast, Input, Popover, Modal } from '@douyinfe/semi-ui';
+import { Tree, Toast, Input, Modal } from '@douyinfe/semi-ui';
 import {
   batchSetArchiveChildrenBuiltInType,
   createNode,
@@ -13,7 +13,6 @@ import {
   updateNodeConfig,
 } from "../../services/file.api";
 import CreateNodeModal from './modals/CreateNodeModal.tsx';
-import DirectoryContextMenu from './context-menu/DirectoryContextMenu.tsx';
 import { buildFileFullName, splitFileBaseNameAndExt } from '@/utils/fileTreeSettings';
 import { validateWindowsLikeFileName } from '@/utils/windowsFileName';
 import { runtimeLogger } from '@/utils/runtimeLogger';
@@ -43,6 +42,12 @@ import {
   resolveNodeType,
 } from './utils/tree-node';
 import type { ContextMenuPosition, OverlayBoundaryRect } from '@/components/ui/context-menu';
+import { openOverlay } from '@/service/overlay/overlay.api';
+import type {
+  DirectoryContextMenuNodeSnapshot,
+  DirectoryContextMenuResult,
+  OverlayContextMenuPosition,
+} from '@/service/overlay/types';
 
 interface DirectoryTreeProps {
   treeData: any[];
@@ -141,27 +146,6 @@ export default function DirectoryTree({
   // 外部文件拖拽：悬停高亮 & 延迟展开
   const [dragOverKey, setDragOverKey] = useState<string | null>(null);
   const expandTimerRef = useRef<number | null>(null);
-
-  // 菜单状态
-  const [menuState, setMenuState] = useState<{
-    visible: boolean;
-    x: number;
-    y: number;
-    position: ContextMenuPosition;
-    boundaryRect: OverlayBoundaryRect | null;
-    deleteCount: number;
-    node: any | null; // null 表示根目录
-    isFolder: boolean;
-  }>({
-    visible: false,
-    x: 0,
-    y: 0,
-    position: 'bottomLeft',
-    boundaryRect: null,
-    deleteCount: 1,
-    node: null,
-    isFolder: false,
-  });
 
   // 新建文件/文件夹 Modal 的状态
   const [createModal, setCreateModal] = useState<{
@@ -1422,11 +1406,35 @@ export default function DirectoryTree({
     return `${vertical}${horizontal}` as ContextMenuPosition;
   };
 
+  const createContextMenuNodeSnapshot = (node: any | null): DirectoryContextMenuNodeSnapshot | null => {
+    if (!node) {
+      return null;
+    }
+
+    const nodeId = Number(node.id);
+    const parentId = Number(node.parentId);
+    const rawName = String(node.data?.rawName ?? node.label ?? node.key ?? '').trim();
+    const rawExt = String(node.data?.rawExt ?? node.ext ?? '').replace(/^\./, '');
+
+    return {
+      archiveMode: Number(node.archiveMode ?? 0) === 1 ? 1 : 0,
+      builtInType: String(node.builtInType || 'DEF').toUpperCase(),
+      data: {
+        rawExt,
+        rawName,
+      },
+      ext: rawExt,
+      id: Number.isFinite(nodeId) ? nodeId : undefined,
+      isLeaf: node.isLeaf === true,
+      key: String(node.key || ''),
+      label: rawName,
+      parentId: Number.isFinite(parentId) ? parentId : null,
+      type: String(resolveNodeType(node) || node.type || ''),
+    };
+  };
+
   // 菜单行为
   const handleAction = async (action: string, node: any) => {
-    // 关闭菜单
-    setMenuState(prev => ({ ...prev, visible: false }));
-
     if (action === '打开原始目录') {
       if (!node || String(node.type) === 'file') {
         return;
@@ -1858,41 +1866,39 @@ export default function DirectoryTree({
   const openMenu = (e: React.MouseEvent, node: any, isFolder: boolean) => {
     e.preventDefault();
     e.stopPropagation();
-    
-    // 获取鼠标位置
+
     const x = e.clientX;
     const y = e.clientY;
     const boundaryRect = resolveTreeBoundaryRect();
     const position = resolveMenuPosition(x, y, boundaryRect);
     const deleteCount = Math.max(1, resolveDeleteSelection(node).length);
-    
-    // 如果已经打开，先关闭再打开，强制位置刷新
-    if (menuState.visible) {
-      setMenuState(prev => ({ ...prev, visible: false }));
-      setTimeout(() => {
-        setMenuState({
-          visible: true,
-          x,
-          y,
-          position,
+
+    void (async () => {
+      let result: DirectoryContextMenuResult;
+
+      try {
+        result = await openOverlay('directory-context-menu', {
           boundaryRect,
           deleteCount,
-          node,
           isFolder,
+          node: createContextMenuNodeSnapshot(node),
+          position: position as OverlayContextMenuPosition,
+          submenuPreferredHorizontal: browserModeOpen ? 'left' : 'right',
+          x,
+          y,
         });
-      }, 0);
-    } else {
-      setMenuState({
-        visible: true,
-        x,
-        y,
-        position,
-        boundaryRect,
-        deleteCount,
-        node,
-        isFolder,
-      });
-    }
+      } catch (error: any) {
+        runtimeLogger.error('打开目录右键菜单失败:', error);
+        Toast.error(error?.message || '打开右键菜单失败');
+        return;
+      }
+
+      if (result.type !== 'action') {
+        return;
+      }
+
+      await handleAction(result.action, node);
+    })();
   };
 
   // 行 label 渲染
@@ -2041,21 +2047,6 @@ export default function DirectoryTree({
       </div>
     );
   };
-
-  // 全局关闭菜单事件
-  useEffect(() => {
-    const closeMenu = () => setMenuState(prev => ({ ...prev, visible: false }));
-    const onScroll = () => closeMenu();
-    const onResize = () => closeMenu();
-
-    window.addEventListener('scroll', onScroll, true);
-    window.addEventListener('resize', onResize);
-
-    return () => {
-      window.removeEventListener('scroll', onScroll, true);
-      window.removeEventListener('resize', onResize);
-    };
-  }, []);
 
   useEffect(() => {
     const handleLocate = (event: Event) => {
@@ -2238,49 +2229,7 @@ export default function DirectoryTree({
         )}
       </div>
 
-      {/* 
-        单个 Popover 实例，通过 position anchor 模拟“跟随鼠标”
-        Semi Popover 需要一个 trigger element。
-        我们在鼠标位置渲染一个看不见的 div，作为 anchor。
-      */}
-      <Popover
-        trigger="custom"
-        visible={menuState.visible}
-        onClickOutSide={() => setMenuState(prev => ({ ...prev, visible: false }))}
-        position={menuState.position}
-        style={{
-          padding: 0,
-          backgroundColor: 'transparent',
-          borderColor: 'transparent',
-          boxShadow: 'none',
-        }}
-        getPopupContainer={() => document.body}
-        showArrow={false}
-        spacing={4}
-        content={
-          <DirectoryContextMenu
-            node={menuState.node}
-            isFolder={menuState.isFolder}
-            onAction={handleAction}
-            boundaryRect={menuState.boundaryRect}
-            deleteCount={menuState.deleteCount}
-            submenuPreferredHorizontal={browserModeOpen ? 'left' : 'right'}
-            onClose={() => setMenuState(prev => ({ ...prev, visible: false }))}
-          />
-        }
-      >
-        <div 
-          style={{
-            position: 'fixed',
-            left: menuState.x,
-            top: menuState.y,
-            width: 1,
-            height: 1,
-            pointerEvents: 'none'
-          }} 
-        />
-      </Popover>
-
+      {/* 目录树右键菜单已迁移至 overlay 子窗口（见 docs/overlay-window-architecture.md） */}
       {/* 上传确认弹框已迁移至 overlay 子窗口（见 docs/overlay-window-architecture.md） */}
 
       {/* 新建文件/文件夹 Modal - 居中显示 */}
