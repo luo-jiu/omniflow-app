@@ -5,6 +5,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import registerIpcHandlers from './ipc'
 import { createEmbeddedBrowserMainController } from './service/embeddedBrowserMainController'
 import { registerWindowControlIpcHandlers } from './service/windowControlIpc'
+import { createOverlayWindowController } from './service/overlayWindowController'
+import { registerOverlayWindowIpcHandlers } from './service/overlayWindowIpc'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -192,6 +194,13 @@ const embeddedBrowserMainController = createEmbeddedBrowserMainController({
   getMainWindow: () => mainWindow,
 })
 
+const overlayWindowController = createOverlayWindowController({
+  getMainWindow: () => mainWindow,
+  preloadPath: path.join(MAIN_DIST, 'preload.mjs'),
+  rendererDist: RENDERER_DIST,
+  devServerUrl: VITE_DEV_SERVER_URL,
+})
+
 function createWindow() {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.show()
@@ -230,15 +239,46 @@ function createWindow() {
 
   win.on('move', () => {
     scheduleSaveWindowState(win)
+    overlayWindowController.syncBoundsFromMain()
   })
   win.on('resize', () => {
     scheduleSaveWindowState(win)
+    overlayWindowController.syncBoundsFromMain()
   })
   win.on('maximize', () => {
     scheduleSaveWindowState(win)
+    overlayWindowController.syncBoundsFromMain()
   })
   win.on('unmaximize', () => {
     scheduleSaveWindowState(win)
+    overlayWindowController.syncBoundsFromMain()
+  })
+  win.on('enter-full-screen', () => {
+    overlayWindowController.syncBoundsFromMain()
+    // macOS fullscreen transition is animated; resync after it settles
+    setTimeout(() => overlayWindowController.syncBoundsFromMain(), 300)
+  })
+  win.on('leave-full-screen', () => {
+    overlayWindowController.syncBoundsFromMain()
+    setTimeout(() => overlayWindowController.syncBoundsFromMain(), 300)
+  })
+  win.on('minimize', () => {
+    const overlay = overlayWindowController.getWindow()
+    if (overlay && !overlay.isDestroyed() && overlay.isVisible()) {
+      overlay.hide()
+    }
+  })
+  win.on('restore', () => {
+    overlayWindowController.syncBoundsFromMain()
+  })
+  win.on('hide', () => {
+    const overlay = overlayWindowController.getWindow()
+    if (overlay && !overlay.isDestroyed() && overlay.isVisible()) {
+      overlay.hide()
+    }
+  })
+  win.on('show', () => {
+    overlayWindowController.syncBoundsFromMain()
   })
 
   win.on('close', (event) => {
@@ -253,6 +293,7 @@ function createWindow() {
     if (mainWindow === win) {
       mainWindow = null
     }
+    overlayWindowController.destroy()
   })
 
   win.webContents.setZoomFactor(1)
@@ -294,6 +335,7 @@ app.on('before-quit', () => {
   if (mainWindow && !mainWindow.isDestroyed()) {
     saveWindowState(mainWindow)
   }
+  overlayWindowController.destroy()
 })
 
 app.on('window-all-closed', () => {
@@ -330,5 +372,8 @@ app.whenReady().then(() => {
     getMainWindow: () => mainWindow,
   })
   embeddedBrowserMainController.registerIpcHandlers()
+  registerOverlayWindowIpcHandlers(overlayWindowController)
   createWindow()
+  // Pre-create overlay window so it's ready when first spec arrives
+  void overlayWindowController.ensureReady()
 })

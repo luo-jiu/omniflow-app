@@ -1,20 +1,15 @@
 import React from 'react';
 import { Modal } from '@douyinfe/semi-ui';
-import { uploadManager } from '@/utils/uploadManager.ts';
-
-import type { UploadCandidateFile } from '@/features/file-explorer/services/desktop-upload-picker.api';
-
-interface UploadModalTargetNode {
-  id: number;
-  key: string;
-  label: string;
-  libraryId: number;
-}
+import { formatSize } from '@/utils/formatSize';
+import type {
+  OverlayFileSummary,
+  OverlayTargetNode,
+} from '@/service/overlay/types';
 
 interface UploadConfirmModalProps {
   visible: boolean;
-  files: UploadCandidateFile[];
-  targetNode: UploadModalTargetNode | null;
+  fileSummaries: OverlayFileSummary[];
+  targetNode: OverlayTargetNode | null;
   loading?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
@@ -22,24 +17,24 @@ interface UploadConfirmModalProps {
 
 const UploadConfirmModal: React.FC<UploadConfirmModalProps> = ({
   visible,
-  files,
+  fileSummaries,
   targetNode,
   loading,
   onConfirm,
-  onCancel
+  onCancel,
 }) => {
-  const containsFolderStructure = files.some(item => (item.relativePath || '').includes('/'));
+  const containsFolderStructure = fileSummaries.some(item => (item.relativePath || '').includes('/'));
 
   const summaryItems = React.useMemo(() => {
     const folderMap = new Map<string, { name: string; fileCount: number; totalBytes: number }>();
     const fileItems: Array<{ key: string; name: string; totalBytes: number }> = [];
 
-    files.forEach((item, index) => {
-      const normalizedPath = String(item.relativePath || item.file.name || '')
+    fileSummaries.forEach((item, index) => {
+      const normalizedPath = String(item.relativePath || item.name || '')
         .replace(/\\/g, '/')
         .split('/')
         .filter(Boolean);
-      const firstSegment = normalizedPath[0] || item.file.name || `file-${index + 1}`;
+      const firstSegment = normalizedPath[0] || item.name || `file-${index + 1}`;
       const isFolderFile = normalizedPath.length > 1;
       if (isFolderFile) {
         const current = folderMap.get(firstSegment) || {
@@ -48,14 +43,14 @@ const UploadConfirmModal: React.FC<UploadConfirmModalProps> = ({
           totalBytes: 0,
         };
         current.fileCount += 1;
-        current.totalBytes += Number(item.file.size || 0);
+        current.totalBytes += Number(item.size || 0);
         folderMap.set(firstSegment, current);
         return;
       }
       fileItems.push({
         key: `${firstSegment}-${index}`,
         name: firstSegment,
-        totalBytes: Number(item.file.size || 0),
+        totalBytes: Number(item.size || 0),
       });
     });
 
@@ -65,11 +60,11 @@ const UploadConfirmModal: React.FC<UploadConfirmModalProps> = ({
       folders,
       files: filesList,
     };
-  }, [files]);
+  }, [fileSummaries]);
 
   const totalBytes = React.useMemo(
-    () => files.reduce((sum, item) => sum + Number(item.file.size || 0), 0),
-    [files],
+    () => fileSummaries.reduce((sum, item) => sum + Number(item.size || 0), 0),
+    [fileSummaries],
   );
 
   return (
@@ -90,7 +85,7 @@ const UploadConfirmModal: React.FC<UploadConfirmModalProps> = ({
         padding: '20px 28px',
       }}
     >
-      {files.length > 0 && targetNode && (
+      {fileSummaries.length > 0 && targetNode && (
         <div style={{ padding: '10px 0' }}>
           <div style={{ marginBottom: 12 }}>
             <strong>上传位置:</strong> 📂 {targetNode.label}
@@ -116,7 +111,7 @@ const UploadConfirmModal: React.FC<UploadConfirmModalProps> = ({
                   📁 {folder.name}
                 </span>
                 <span style={{ color: 'var(--semi-color-text-2)', marginLeft: 8 }}>
-                  {folder.fileCount} 个文件 · {uploadManager.formatSize(folder.totalBytes)}
+                  {folder.fileCount} 个文件 · {formatSize(folder.totalBytes)}
                 </span>
               </div>
             ))}
@@ -132,7 +127,7 @@ const UploadConfirmModal: React.FC<UploadConfirmModalProps> = ({
                   📄 {file.name}
                 </span>
                 <span style={{ color: 'var(--semi-color-text-2)', marginLeft: 8 }}>
-                  {uploadManager.formatSize(file.totalBytes)}
+                  {formatSize(file.totalBytes)}
                 </span>
               </div>
             ))}
@@ -140,8 +135,8 @@ const UploadConfirmModal: React.FC<UploadConfirmModalProps> = ({
 
           <div style={{ marginTop: 16, color: 'var(--semi-color-text-2)', fontSize: 15 }}>
             <p>
-              共 {summaryItems.folders.length} 个文件夹、{summaryItems.files.length} 个文件、{files.length} 个上传任务，
-              总大小 {uploadManager.formatSize(totalBytes)}。是否继续？
+              共 {summaryItems.folders.length} 个文件夹、{summaryItems.files.length} 个文件、{fileSummaries.length} 个上传任务，
+              总大小 {formatSize(totalBytes)}。是否继续？
             </p>
           </div>
         </div>

@@ -106,6 +106,33 @@ contextBridge.exposeInMainWorld('electronWindow', {
   setThemeSource: (source: 'light' | 'dark' | 'system') => ipcRenderer.send('window-set-theme-source', source),
 });
 
+contextBridge.exposeInMainWorld('electronOverlay', {
+  open: (type: string, props: unknown) =>
+    ipcRenderer.invoke('overlay:open', { type, props }),
+});
+
+contextBridge.exposeInMainWorld('electronOverlayHost', {
+  onShow: (listener: (spec: { requestId: string; type: string; props: unknown }) => void) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, spec: { requestId: string; type: string; props: unknown }) => {
+      listener(spec);
+    };
+    ipcRenderer.on('overlay:host:show', wrapped);
+    return () => ipcRenderer.removeListener('overlay:host:show', wrapped);
+  },
+  onDismissFromMain: (listener: (payload: { requestId: string }) => void) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, payload: { requestId: string }) => {
+      listener(payload);
+    };
+    ipcRenderer.on('overlay:host:dismiss-from-main', wrapped);
+    return () => ipcRenderer.removeListener('overlay:host:dismiss-from-main', wrapped);
+  },
+  resolve: (requestId: string, result: unknown) =>
+    ipcRenderer.send('overlay:host:resolve', { requestId, result }),
+  dismiss: (requestId: string, reason?: string) =>
+    ipcRenderer.send('overlay:host:dismiss', { requestId, reason }),
+  reportReady: () => ipcRenderer.send('overlay:host:ready'),
+});
+
 contextBridge.exposeInMainWorld('electronEmbeddedBrowser', {
   activateTab: (tabId: string | null) => ipcRenderer.invoke('embedded-browser:activate-tab', tabId),
   cleanupDownloadFile: (tempPath: string) => ipcRenderer.invoke('embedded-browser:cleanup-download-file', tempPath),

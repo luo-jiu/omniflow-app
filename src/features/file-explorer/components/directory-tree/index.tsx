@@ -12,7 +12,6 @@ import {
   sortComicChildrenByName,
   updateNodeConfig,
 } from "../../services/file.api";
-import UploadConfirmModal from './modals/UploadConfirmModal.tsx';
 import CreateNodeModal from './modals/CreateNodeModal.tsx';
 import DirectoryContextMenu from './context-menu/DirectoryContextMenu.tsx';
 import { buildFileFullName, splitFileBaseNameAndExt } from '@/utils/fileTreeSettings';
@@ -226,11 +225,8 @@ export default function DirectoryTree({
   };
 
   const {
-    handleCancelUpload,
-    handleConfirmUpload,
     handleExternalDropOnFolder,
     handlePickUploadFromDesktop,
-    uploadModal,
   } = useDirectoryUpload({
     libraryId,
     onUploadSuccess,
@@ -2285,15 +2281,7 @@ export default function DirectoryTree({
         />
       </Popover>
 
-      {/* Modal 组件 - 居中显示 */}
-      <UploadConfirmModal
-        visible={uploadModal.visible}
-        files={uploadModal.files}
-        targetNode={uploadModal.targetNode}
-        loading={uploadModal.loading}
-        onConfirm={handleConfirmUpload}
-        onCancel={handleCancelUpload}
-      />
+      {/* 上传确认弹框已迁移至 overlay 子窗口（见 docs/overlay-window-architecture.md） */}
 
       {/* 新建文件/文件夹 Modal - 居中显示 */}
       <CreateNodeModal

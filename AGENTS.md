@@ -27,6 +27,7 @@
 - 前端文档规范：`.agent-docs/frontend-documentation-standard.md`
 - 前端架构基线：`docs/frontend-architecture-baseline.md`
 - Embedded Browser 专题：`docs/embedded-browser-architecture.md`
+- Overlay 窗口专题与迁移规范：`docs/overlay-window-architecture.md`
 - Library Detail 工作区专题：`docs/library-detail-workspace.md`
 - 文件树与预览边界：`docs/file-explorer-file-viewer-boundary.md`
 - 内置类型与归档模式：`docs/built-in-type-and-archive-mode.md`

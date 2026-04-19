@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback } from 'react';
 import { Toast } from '@douyinfe/semi-ui';
 import { requestDesktopWindowActivation } from '@/utils/windowActivation';
 import { runtimeLogger } from '@/utils/runtimeLogger';
@@ -11,6 +11,8 @@ import {
 } from '@/features/file-explorer/services/desktop-upload-picker.api';
 import type { UploadCandidateFile } from '@/features/file-explorer/services/desktop-upload-picker.api';
 import { normalizeUploadRelativePath, UploadPathResolver } from '@/features/file-explorer/services/upload-path-resolver';
+import { openOverlay } from '@/service/overlay/overlay.api';
+import type { UploadConfirmResult } from '@/service/overlay/types';
 
 type UploadModalTargetNode = {
   id: number;
@@ -67,18 +69,6 @@ export function useDirectoryUpload({
   resolveRootParentId,
   rootNodeId,
 }: UseDirectoryUploadArgs) {
-  const [uploadModal, setUploadModal] = useState<{
-    visible: boolean;
-    files: UploadCandidateFile[];
-    targetNode: UploadModalTargetNode | null;
-    loading: boolean;
-  }>({
-    visible: false,
-    files: [],
-    targetNode: null,
-    loading: false,
-  });
-
   const toUploadModalTargetNode = useCallback((node: any | null): UploadModalTargetNode | null => {
     if (!node) {
       const rootParentId = resolveRootParentId();
@@ -107,38 +97,6 @@ export function useDirectoryUpload({
       relativePath: relativePath || file.name,
     };
   }, []);
-
-  const openUploadModal = useCallback((targetNode: UploadModalTargetNode, files: UploadCandidateFile[]) => {
-    if (!files.length) {
-      Toast.warning('未选择可上传文件');
-      return;
-    }
-    setUploadModal({
-      visible: true,
-      files,
-      targetNode,
-      loading: false,
-    });
-  }, []);
-
-  const handleExternalDropOnFolder = useCallback((treeNode: any, e: React.DragEvent) => {
-    const files = Array.from(e.dataTransfer.files || []);
-    if (!files.length) return;
-
-    requestDesktopWindowActivation(true);
-    const candidates = files
-      .map(buildUploadCandidateFromDragFile)
-      .filter(candidate => !isIgnoredSystemFilePath(candidate.relativePath || candidate.file.name));
-    if (!candidates.length) {
-      Toast.warning('拖拽内容仅包含系统隐藏文件，已忽略');
-      return;
-    }
-    const targetNode = toUploadModalTargetNode(treeNode);
-    if (!targetNode) {
-      return;
-    }
-    openUploadModal(targetNode, candidates);
-  }, [buildUploadCandidateFromDragFile, openUploadModal, toUploadModalTargetNode]);
 
   const startUploadInBackground = useCallback(async (
     files: UploadCandidateFile[],
@@ -211,25 +169,56 @@ export function useDirectoryUpload({
     }
   }, [onUploadSuccess, resolveParentNodeForAppend]);
 
-  const handleConfirmUpload = useCallback(async () => {
-    const { files, targetNode } = uploadModal;
-    if (!files.length || !targetNode) return;
+  const openUploadModal = useCallback(async (
+    targetNode: UploadModalTargetNode,
+    files: UploadCandidateFile[],
+  ) => {
+    if (!files.length) {
+      Toast.warning('未选择可上传文件');
+      return;
+    }
+    const fileSummaries = files.map((candidate) => ({
+      name: candidate.file.name,
+      size: Number(candidate.file.size || 0),
+      relativePath: candidate.relativePath || candidate.file.name,
+    }));
 
-    setUploadModal({ visible: false, files: [], targetNode: null, loading: false });
+    let result: UploadConfirmResult;
+    try {
+      result = await openOverlay('upload-confirm', { fileSummaries, targetNode });
+    } catch (error) {
+      runtimeLogger.error('上传确认弹框无法打开:', error);
+      Toast.error('上传确认弹框无法打开');
+      return;
+    }
+
+    if (result.type !== 'confirm') return;
+
     Toast.info(`正在准备上传队列（${files.length} 个文件）`);
-
     void startUploadInBackground(files, targetNode).catch((error) => {
       runtimeLogger.error('上传执行失败:', error);
       Toast.error((error as any)?.message || '上传过程中出现未知错误');
     });
-  }, [startUploadInBackground, uploadModal]);
+  }, [startUploadInBackground]);
 
-  const handleCancelUpload = useCallback(() => {
-    if (uploadModal.loading) {
+  const handleExternalDropOnFolder = useCallback((treeNode: any, e: React.DragEvent) => {
+    const files = Array.from(e.dataTransfer.files || []);
+    if (!files.length) return;
+
+    requestDesktopWindowActivation(true);
+    const candidates = files
+      .map(buildUploadCandidateFromDragFile)
+      .filter(candidate => !isIgnoredSystemFilePath(candidate.relativePath || candidate.file.name));
+    if (!candidates.length) {
+      Toast.warning('拖拽内容仅包含系统隐藏文件，已忽略');
       return;
     }
-    setUploadModal({ visible: false, files: [], targetNode: null, loading: false });
-  }, [uploadModal.loading]);
+    const targetNode = toUploadModalTargetNode(treeNode);
+    if (!targetNode) {
+      return;
+    }
+    void openUploadModal(targetNode, candidates);
+  }, [buildUploadCandidateFromDragFile, openUploadModal, toUploadModalTargetNode]);
 
   const handlePickUploadFromDesktop = useCallback(async (mode: 'file' | 'folder', node: any | null) => {
     try {
@@ -244,7 +233,7 @@ export function useDirectoryUpload({
       if (!files.length) {
         return;
       }
-      openUploadModal(targetNode, files);
+      await openUploadModal(targetNode, files);
     } catch (error: any) {
       runtimeLogger.error(`选择${mode === 'file' ? '文件' : '文件夹'}失败:`, error);
       Toast.error(error?.message || `选择${mode === 'file' ? '文件' : '文件夹'}失败`);
@@ -252,10 +241,7 @@ export function useDirectoryUpload({
   }, [openUploadModal, toUploadModalTargetNode]);
 
   return {
-    handleCancelUpload,
-    handleConfirmUpload,
     handleExternalDropOnFolder,
     handlePickUploadFromDesktop,
-    uploadModal,
   };
 }

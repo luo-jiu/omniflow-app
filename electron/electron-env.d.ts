@@ -155,6 +155,18 @@ interface Window {
     activate: (temporaryOnTop?: boolean) => Promise<boolean>;
     setThemeSource: (source: 'light' | 'dark' | 'system') => void;
   };
+
+  electronOverlay: {
+    open: <T = unknown>(type: string, props: unknown) => Promise<T>;
+  };
+
+  electronOverlayHost: {
+    onShow: (listener: (spec: { requestId: string; type: string; props: unknown }) => void) => () => void;
+    onDismissFromMain: (listener: (payload: { requestId: string }) => void) => () => void;
+    resolve: (requestId: string, result: unknown) => void;
+    dismiss: (requestId: string, reason?: string) => void;
+    reportReady: () => void;
+  };
 }
 
 type EmbeddedBrowserBounds = {
