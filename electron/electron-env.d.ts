@@ -279,7 +279,9 @@ interface Window {
       };
       audioResourceKey?: string;
       ffmpegPath?: string;
+      outputDirectoryPath?: string;
       suggestedFileName?: string;
+      useSystemSaveDialog?: boolean;
       videoResource?: {
         fileName?: string;
         mimeType?: string;
@@ -292,6 +294,7 @@ interface Window {
     }) => Promise<EmbeddedBrowserCapturedResourceMergeResponse>;
     transcodeCapturedResource: (tabId: string, payload: {
       ffmpegPath?: string;
+      outputDirectoryPath?: string;
       outputFormat?: string;
       resource?: {
         fileName?: string;
@@ -303,6 +306,7 @@ interface Window {
       };
       resourceKey?: string;
       suggestedFileName?: string;
+      useSystemSaveDialog?: boolean;
     }) => Promise<EmbeddedBrowserCapturedResourceMergeResponse>;
     downloadHlsManifest: (tabId: string, payload: {
       ffmpegPath?: string;

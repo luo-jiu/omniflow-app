@@ -3783,6 +3783,9 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
               libraryId={libraryId}
               mediaProcessingRequest={mediaProcessingRequest}
               onOpenFileWorkspace={openFileWorkspace}
+              onRefreshDirectory={(directoryId) => (
+                directorySidebarRef.current?.refreshNodeSubtree(directoryId)
+              )}
               rootNodeId={treeRootNodeId}
               selectedTreeNode={selectedTreeNode}
             />

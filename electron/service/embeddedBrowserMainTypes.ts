@@ -40,7 +40,9 @@ export type EmbeddedBrowserCapturedResourceMergePayload = {
   audioResource?: EmbeddedBrowserCapturedResourceMergeTrackPayload
   audioResourceKey?: string
   ffmpegPath?: string
+  outputDirectoryPath?: string
   suggestedFileName?: string
+  useSystemSaveDialog?: boolean
   videoResource?: EmbeddedBrowserCapturedResourceMergeTrackPayload
   videoResourceKey?: string
 }
@@ -66,10 +68,12 @@ export type EmbeddedBrowserCapturedResourceTranscodeFormat = string
 
 export type EmbeddedBrowserCapturedResourceTranscodePayload = {
   ffmpegPath?: string
+  outputDirectoryPath?: string
   outputFormat?: EmbeddedBrowserCapturedResourceTranscodeFormat
   resource?: EmbeddedBrowserCapturedResourceMergeTrackPayload
   resourceKey?: string
   suggestedFileName?: string
+  useSystemSaveDialog?: boolean
 }
 
 export type EmbeddedBrowserCapturedResourceTranscodeResponse = EmbeddedBrowserCapturedResourceMergeResponse

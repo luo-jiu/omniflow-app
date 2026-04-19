@@ -1,6 +1,6 @@
 # Embedded Browser 架构说明
 
-更新时间：2026-04-15
+更新时间：2026-04-19
 
 适用范围：`omniflow-app` 内置浏览器的 renderer UI、preload bridge、Electron main controller、资源捕捉、下载导入与缓存捕捉工具链。
 
@@ -256,6 +256,7 @@ renderer catch toolkit action
 - 直接导出捕捉流
 - 读取捕捉流内容
 - 调 `ffmpeg` 合并音视频
+- 合并 / 转格式支持 renderer 传 `useSystemSaveDialog=false` 与 `outputDirectoryPath`，由 main 直接生成输出路径（不弹系统保存框）
 - 清理 embedded browser 会话缓存并 `reloadIgnoringCache`，用于排查页面从 HTTP cache / Cache Storage / Service Worker 复用旧媒体导致网络层不再触发的问题
 - 重置当前网页：清理 Cache Storage / Service Worker / IndexedDB 等站点缓存，销毁并重建当前 tab 的 `WebContentsView`，再加载同一个 URL；该操作保留 cookie，但可能清掉站点播放器内部缓存状态
 

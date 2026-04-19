@@ -114,7 +114,9 @@ export async function mergeEmbeddedBrowserCapturedMseResources(
     };
     audioResourceKey?: string;
     ffmpegPath?: string;
+    outputDirectoryPath?: string;
     suggestedFileName?: string;
+    useSystemSaveDialog?: boolean;
     videoResource?: {
       fileName?: string;
       mimeType?: string;
@@ -140,6 +142,7 @@ export async function transcodeEmbeddedBrowserCapturedResource(
   tabId: string,
   payload: {
     ffmpegPath?: string;
+    outputDirectoryPath?: string;
     outputFormat?: string;
     resource?: {
       fileName?: string;
@@ -151,6 +154,7 @@ export async function transcodeEmbeddedBrowserCapturedResource(
     };
     resourceKey?: string;
     suggestedFileName?: string;
+    useSystemSaveDialog?: boolean;
   },
 ) {
   assertDesktopSupport();

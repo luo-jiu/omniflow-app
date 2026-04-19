@@ -179,23 +179,34 @@ function createManualMergeResourcePayload(resource: EmbeddedBrowserCapturedResou
   };
 }
 
+type EmbeddedBrowserResourceOutputOptions = {
+  outputDirectoryPath?: string;
+  suppressSuccessToast?: boolean;
+  useSystemSaveDialog?: boolean;
+};
+
 export async function mergeCapturedResources(resources: {
   audio: EmbeddedBrowserCapturedResource;
   video: EmbeddedBrowserCapturedResource;
-}) {
+}, options?: EmbeddedBrowserResourceOutputOptions) {
   const mergeResult = await mergeEmbeddedBrowserCapturedMseResources(resources.video.tabId, {
     audioResource: createManualMergeResourcePayload(resources.audio),
     audioResourceKey: resources.audio.resourceKey,
+    outputDirectoryPath: options?.outputDirectoryPath,
     videoResource: createManualMergeResourcePayload(resources.video),
     videoResourceKey: resources.video.resourceKey,
+    useSystemSaveDialog: options?.useSystemSaveDialog,
   });
   if (mergeResult.cancelled) {
-    return;
+    return mergeResult;
   }
   if (!mergeResult.ok) {
     throw new Error(mergeResult.error || '合并失败');
   }
-  Toast.success('已完成音视频合并');
+  if (!options?.suppressSuccessToast) {
+    Toast.success('已完成音视频合并');
+  }
+  return mergeResult;
 }
 
 function normalizeTranscodeOutputFormat(input: string) {
@@ -217,19 +228,25 @@ function deriveTranscodeSuggestedFileName(fileName: string, outputFormat: string
 export async function transcodeCapturedResource(
   resource: EmbeddedBrowserCapturedResource,
   outputFormat: string,
+  options?: EmbeddedBrowserResourceOutputOptions,
 ) {
   const normalizedFormat = normalizeTranscodeOutputFormat(outputFormat);
   const result = await transcodeEmbeddedBrowserCapturedResource(resource.tabId, {
+    outputDirectoryPath: options?.outputDirectoryPath,
     outputFormat: normalizedFormat,
     resource: createManualMergeResourcePayload(resource),
     resourceKey: resource.resourceKey,
     suggestedFileName: deriveTranscodeSuggestedFileName(getResourceDownloadFileName(resource), normalizedFormat),
+    useSystemSaveDialog: options?.useSystemSaveDialog,
   });
   if (result.cancelled) {
-    return;
+    return result;
   }
   if (!result.ok) {
     throw new Error(result.error || '转格式失败');
   }
-  Toast.success('已完成转格式');
+  if (!options?.suppressSuccessToast) {
+    Toast.success('已完成转格式');
+  }
+  return result;
 }

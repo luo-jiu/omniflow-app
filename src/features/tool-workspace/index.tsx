@@ -12,16 +12,23 @@ import {
 } from '@douyinfe/semi-ui';
 import { IconDownload, IconPlus } from '@douyinfe/semi-icons';
 
-import type { SelectedTreeNode } from '@/features/file-explorer';
+import {
+  LibraryNodePickerModal,
+  type LibraryNodePickerSelection,
+  type SelectedTreeNode,
+} from '@/features/file-explorer';
 import type { EmbeddedBrowserCapturedResource } from '@/features/embedded-browser/resources/types';
 import {
   createManualMergePair,
-  downloadSelectedResources,
   formatBytes,
   formatResourceTitle,
   mergeCapturedResources,
   transcodeCapturedResource,
 } from '@/features/embedded-browser/resources/services/embedded-browser-resource-panel-actions';
+import {
+  uploadLocalPathAndCreateNode,
+} from '@/features/file-explorer/services/file.api';
+import { pickDownloadDirectoryFromDesktop } from '@/features/file-explorer/services/desktop-download.api';
 import {
   findMergeableResourcePair,
 } from '@/features/embedded-browser/resources/model/embedded-browser-resource.presentation';
@@ -294,8 +301,48 @@ const ActionRow = styled.div`
     font-size: 13px;
   }
 
+  .save-target-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px;
+    border: 1px solid var(--app-border);
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--app-bg) 90%, transparent);
+  }
+
+  .save-target-tip {
+    max-width: min(560px, 95vw);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .transcode-format-field {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 40px;
+    padding: 0 10px;
+    border: 1px solid var(--app-border);
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--app-bg) 92%, transparent);
+  }
+
+  .transcode-format-label {
+    font-size: 13px;
+    color: var(--app-text-muted);
+    white-space: nowrap;
+  }
+
   .transcode-format-input {
     width: 128px;
+  }
+
+  .transcode-presets {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
   }
 `;
 
@@ -821,8 +868,12 @@ function getLibrarySaveTarget(payload: {
 /* ---------- ToolWorkspace ---------- */
 
 type MediaProcessingToolProps = {
+  libraryId: number;
   resources: EmbeddedBrowserCapturedResource[];
+  onRefreshDirectory?: (directoryId: number) => Promise<void> | void;
 };
+
+type MediaSaveTargetType = 'local' | 'internal';
 
 function normalizeMediaTranscodeFormat(input: string) {
   const normalized = String(input || '').trim().replace(/^\.+/, '').toLowerCase();
@@ -832,45 +883,103 @@ function normalizeMediaTranscodeFormat(input: string) {
   return normalized;
 }
 
-const MediaProcessingTool: React.FC<MediaProcessingToolProps> = ({ resources }) => {
-  const [saving, setSaving] = React.useState(false);
+const MediaProcessingTool: React.FC<MediaProcessingToolProps> = ({
+  libraryId,
+  onRefreshDirectory,
+  resources,
+}) => {
   const [merging, setMerging] = React.useState(false);
   const [transcoding, setTranscoding] = React.useState(false);
   const [transcodeFormatDraft, setTranscodeFormatDraft] = React.useState('m4a');
+  const [saveTargetType, setSaveTargetType] = React.useState<MediaSaveTargetType>('local');
+  const [localOutputDirectory, setLocalOutputDirectory] = React.useState('');
+  const [internalDirectory, setInternalDirectory] = React.useState<LibraryNodePickerSelection | null>(null);
+  const [internalPickerVisible, setInternalPickerVisible] = React.useState(false);
 
   const mergePair = React.useMemo(() => (
     createManualMergePair(resources) || findMergeableResourcePair(resources)
   ), [resources]);
 
-  const handleSaveSelected = React.useCallback(async () => {
-    if (!resources.length) {
-      Toast.warning('先从资源面板送入要处理的媒体');
+  const internalTargetMissing = saveTargetType === 'internal' && !internalDirectory;
+  const localOutputPathHint = localOutputDirectory || '默认下载目录';
+
+  React.useEffect(() => {
+    setInternalDirectory(null);
+    setInternalPickerVisible(false);
+  }, [libraryId]);
+
+  const persistMediaOutputBySaveTarget = React.useCallback(async (
+    outputPath: string,
+    actionName: '合并' | '转格式',
+  ) => {
+    if (saveTargetType === 'local') {
+      Toast.success(`已完成${actionName}，文件已保存到本地：${localOutputPathHint}`);
       return;
     }
-    setSaving(true);
-    try {
-      await downloadSelectedResources(resources);
-    } catch (error: any) {
-      Toast.error(error?.message || '保存已选失败');
-    } finally {
-      setSaving(false);
+    if (!internalDirectory) {
+      throw new Error('请选择内部保存目录');
     }
-  }, [resources]);
+    try {
+      await uploadLocalPathAndCreateNode(outputPath, internalDirectory.node.id, libraryId);
+      try {
+        await onRefreshDirectory?.(internalDirectory.node.id);
+      } catch (error: any) {
+        Toast.warning(error?.message || '目录刷新失败，请稍后手动刷新目录树');
+      }
+      Toast.success(`已完成${actionName}，并保存到内部目录：${internalDirectory.pathLabel}`);
+    } catch (error: any) {
+      Toast.error(
+        error?.message
+          ? `已完成${actionName}并保存到本地下载目录，但上传到库内失败：${error.message}`
+          : `已完成${actionName}并保存到本地下载目录，但上传到库内失败`,
+      );
+    }
+  }, [internalDirectory, libraryId, localOutputPathHint, onRefreshDirectory, saveTargetType]);
+
+  const handlePickLocalOutputDirectory = React.useCallback(async () => {
+    try {
+      const result = await pickDownloadDirectoryFromDesktop();
+      if (result.canceled || !result.directoryPath) {
+        return;
+      }
+      setLocalOutputDirectory(result.directoryPath);
+      Toast.success('已选择本地保存目录');
+    } catch (error: any) {
+      Toast.error(error?.message || '选择本地目录失败');
+    }
+  }, []);
 
   const handleMerge = React.useCallback(async () => {
     if (!mergePair) {
       Toast.warning('需要一条视频和一条音频，或可识别的 MSE 音视频流');
       return;
     }
+    if (saveTargetType === 'internal' && !internalDirectory) {
+      Toast.warning('请先选择内部保存目录');
+      return;
+    }
     setMerging(true);
     try {
-      await mergeCapturedResources(mergePair);
+      const result = await mergeCapturedResources(mergePair, {
+        outputDirectoryPath: saveTargetType === 'local' && localOutputDirectory
+          ? localOutputDirectory
+          : undefined,
+        suppressSuccessToast: true,
+        useSystemSaveDialog: false,
+      });
+      if (result?.cancelled) {
+        return;
+      }
+      if (!result?.outputPath) {
+        throw new Error('合并已完成，但未返回输出路径');
+      }
+      await persistMediaOutputBySaveTarget(result.outputPath, '合并');
     } catch (error: any) {
       Toast.error(error?.message || '合并失败');
     } finally {
       setMerging(false);
     }
-  }, [mergePair]);
+  }, [internalDirectory, localOutputDirectory, mergePair, persistMediaOutputBySaveTarget, saveTargetType]);
 
   const handleTranscode = React.useCallback(async () => {
     if (resources.length === 0) {
@@ -885,6 +994,10 @@ const MediaProcessingTool: React.FC<MediaProcessingToolProps> = ({ resources }) 
     if (!resource) {
       return;
     }
+    if (saveTargetType === 'internal' && !internalDirectory) {
+      Toast.warning('请先选择内部保存目录');
+      return;
+    }
     const outputFormat = normalizeMediaTranscodeFormat(transcodeFormatDraft);
     if (!outputFormat) {
       Toast.warning('请输入 1-12 位字母或数字格式，例如 mp3、m4a、mp4');
@@ -892,13 +1005,33 @@ const MediaProcessingTool: React.FC<MediaProcessingToolProps> = ({ resources }) 
     }
     setTranscoding(true);
     try {
-      await transcodeCapturedResource(resource, outputFormat);
+      const result = await transcodeCapturedResource(resource, outputFormat, {
+        outputDirectoryPath: saveTargetType === 'local' && localOutputDirectory
+          ? localOutputDirectory
+          : undefined,
+        suppressSuccessToast: true,
+        useSystemSaveDialog: false,
+      });
+      if (result?.cancelled) {
+        return;
+      }
+      if (!result?.outputPath) {
+        throw new Error('转格式已完成，但未返回输出路径');
+      }
+      await persistMediaOutputBySaveTarget(result.outputPath, '转格式');
     } catch (error: any) {
       Toast.error(error?.message || '转格式失败');
     } finally {
       setTranscoding(false);
     }
-  }, [resources, transcodeFormatDraft]);
+  }, [
+    internalDirectory,
+    localOutputDirectory,
+    persistMediaOutputBySaveTarget,
+    resources,
+    saveTargetType,
+    transcodeFormatDraft,
+  ]);
 
   const handleTranscodeFormatChange = React.useCallback((value: string) => {
     setTranscodeFormatDraft(String(value || '').trimStart().replace(/^\.+/, '').slice(0, 12));
@@ -925,33 +1058,80 @@ const MediaProcessingTool: React.FC<MediaProcessingToolProps> = ({ resources }) 
         <Panel>
           <div className="panel-title">处理动作</div>
           <div className="panel-desc">
-            保存会按资源类型走本地下载或页内导出；合并会调用本机 ffmpeg，并在完成后保存到你选择的位置。
-            转格式可以自己输入输出格式并保存到你选择的位置；ffmpeg 不支持时会直接报错。
+            先切换保存目标：本地或内部系统。本地可选系统目录，未选择时默认落到下载目录；
+            内部系统需先选目录后才能执行，输出会自动上传到所选内部目录。
+            类型输入仅支持 1-12 位字母或数字（例如 mp3、m4a、mp4）；ffmpeg 不支持时会直接报错。
           </div>
           <ActionRow>
-            <Button loading={saving} disabled={resources.length === 0} onClick={() => void handleSaveSelected()}>
-              保存已选
-            </Button>
-            <Button loading={merging} disabled={!mergePair} type="primary" onClick={() => void handleMerge()}>
+            <div className="save-target-toggle">
+              <Button
+                type={saveTargetType === 'local' ? 'primary' : 'tertiary'}
+                theme={saveTargetType === 'local' ? 'solid' : 'borderless'}
+                onClick={() => setSaveTargetType('local')}
+              >
+                保存到本地
+              </Button>
+              <Button
+                type={saveTargetType === 'internal' ? 'primary' : 'tertiary'}
+                theme={saveTargetType === 'internal' ? 'solid' : 'borderless'}
+                onClick={() => setSaveTargetType('internal')}
+              >
+                保存到内部系统
+              </Button>
+            </div>
+            {saveTargetType === 'local' ? (
+              <>
+                <Button onClick={() => void handlePickLocalOutputDirectory()}>
+                  选择本地目录
+                </Button>
+                <Button
+                  theme="borderless"
+                  disabled={!localOutputDirectory}
+                  onClick={() => setLocalOutputDirectory('')}
+                >
+                  使用默认下载目录
+                </Button>
+                <Tag className="save-target-tip" color="light-blue">
+                  本地位置：{localOutputPathHint}
+                </Tag>
+              </>
+            ) : (
+              <>
+                <Button onClick={() => setInternalPickerVisible(true)}>
+                  选择内部目录
+                </Button>
+                <Tag className="save-target-tip" color={internalDirectory ? 'green' : 'orange'}>
+                  {internalDirectory
+                    ? `内部位置：${internalDirectory.pathLabel}`
+                    : '内部位置：未选择（未选择时不可执行）'}
+                </Tag>
+              </>
+            )}
+            <Button loading={merging} disabled={!mergePair || internalTargetMissing} type="primary" onClick={() => void handleMerge()}>
               合并音视频
             </Button>
-            <Input
-              className="transcode-format-input"
-              value={transcodeFormatDraft}
-              placeholder="mp3 / m4a / mp4"
-              onChange={handleTranscodeFormatChange}
-            />
-            <Button loading={transcoding} disabled={resources.length === 0} onClick={() => void handleTranscode()}>
-              按输入格式转换
-            </Button>
-            <Button theme="borderless" disabled={transcoding} onClick={() => setTranscodeFormatDraft('m4a')}>
-              m4a
-            </Button>
-            <Button theme="borderless" disabled={transcoding} onClick={() => setTranscodeFormatDraft('mp3')}>
-              mp3
-            </Button>
-            <Button theme="borderless" disabled={transcoding} onClick={() => setTranscodeFormatDraft('mp4')}>
-              mp4
+            <div className="transcode-format-field">
+              <span className="transcode-format-label">类型</span>
+              <Input
+                className="transcode-format-input"
+                value={transcodeFormatDraft}
+                placeholder="mp3 / m4a / mp4"
+                onChange={handleTranscodeFormatChange}
+              />
+              <div className="transcode-presets">
+                <Button theme="borderless" disabled={transcoding} onClick={() => setTranscodeFormatDraft('m4a')}>
+                  m4a
+                </Button>
+                <Button theme="borderless" disabled={transcoding} onClick={() => setTranscodeFormatDraft('mp3')}>
+                  mp3
+                </Button>
+                <Button theme="borderless" disabled={transcoding} onClick={() => setTranscodeFormatDraft('mp4')}>
+                  mp4
+                </Button>
+              </div>
+            </div>
+            <Button loading={transcoding} disabled={resources.length === 0 || internalTargetMissing} onClick={() => void handleTranscode()}>
+              转换格式
             </Button>
             {mergePair ? (
               <Tag color="green">已识别可合并音视频</Tag>
@@ -985,6 +1165,19 @@ const MediaProcessingTool: React.FC<MediaProcessingToolProps> = ({ resources }) 
           )}
         </Panel>
       </WorkspaceBody>
+
+      <LibraryNodePickerModal
+        visible={internalPickerVisible}
+        libraryId={libraryId}
+        displayMode="folders"
+        title="选择内部保存目录"
+        confirmText="选择此目录"
+        onCancel={() => setInternalPickerVisible(false)}
+        onConfirm={(selection) => {
+          setInternalDirectory(selection);
+          setInternalPickerVisible(false);
+        }}
+      />
     </>
   );
 };
@@ -995,12 +1188,14 @@ type ToolWorkspaceProps = {
   selectedTreeNode: SelectedTreeNode | null;
   mediaProcessingRequest?: ToolWorkspaceMediaRequest | null;
   onOpenFileWorkspace: () => void;
+  onRefreshDirectory?: (directoryId: number) => Promise<void> | void;
 };
 
 const ToolWorkspace: React.FC<ToolWorkspaceProps> = ({
   libraryId,
   mediaProcessingRequest = null,
   onOpenFileWorkspace,
+  onRefreshDirectory,
   rootNodeId,
   selectedTreeNode,
 }) => {
@@ -1411,7 +1606,11 @@ const ToolWorkspace: React.FC<ToolWorkspaceProps> = ({
 
       <WorkspaceMain>
         {activeToolId === 'media-processing' ? (
-          <MediaProcessingTool resources={mediaProcessingResources} />
+          <MediaProcessingTool
+            libraryId={libraryId}
+            onRefreshDirectory={onRefreshDirectory}
+            resources={mediaProcessingResources}
+          />
         ) : (
           <>
         <WorkspaceHeader>

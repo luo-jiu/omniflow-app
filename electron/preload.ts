@@ -306,7 +306,9 @@ contextBridge.exposeInMainWorld('electronEmbeddedBrowser', {
     };
     audioResourceKey?: string;
     ffmpegPath?: string;
+    outputDirectoryPath?: string;
     suggestedFileName?: string;
+    useSystemSaveDialog?: boolean;
     videoResource?: {
       fileName?: string;
       mimeType?: string;
@@ -319,6 +321,7 @@ contextBridge.exposeInMainWorld('electronEmbeddedBrowser', {
   }) => ipcRenderer.invoke('embedded-browser:resource:merge-mse', tabId, payload),
   transcodeCapturedResource: (tabId: string, payload: {
     ffmpegPath?: string;
+    outputDirectoryPath?: string;
     outputFormat?: string;
     resource?: {
       fileName?: string;
@@ -330,6 +333,7 @@ contextBridge.exposeInMainWorld('electronEmbeddedBrowser', {
     };
     resourceKey?: string;
     suggestedFileName?: string;
+    useSystemSaveDialog?: boolean;
   }) => ipcRenderer.invoke('embedded-browser:resource:transcode', tabId, payload),
   downloadHlsManifest: (tabId: string, payload: {
     ffmpegPath?: string;

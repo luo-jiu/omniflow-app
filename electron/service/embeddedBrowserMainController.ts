@@ -1,4 +1,5 @@
 import path from 'node:path'
+import { access, mkdir } from 'node:fs/promises'
 import { app, BrowserWindow, dialog, WebContentsView, type WebFrameMain } from 'electron'
 import { runtimeLogger } from '../runtimeLogger'
 import type { EmbeddedBrowserCatchToolkitStatePayload } from './embeddedBrowserCatchToolkitPageBridge'
@@ -419,6 +420,72 @@ export function createEmbeddedBrowserMainController(
     return null
   }
 
+  function sanitizeEmbeddedBrowserOutputFileName(input: string) {
+    return String(input || '')
+      .trim()
+      .replace(/[\\/:*?"<>|]+/g, '_')
+      || 'download'
+  }
+
+  async function deriveEmbeddedBrowserPreferredOutputPath(
+    directoryPath: string,
+    fileName: string,
+  ) {
+    const normalizedDirectory = path.resolve(String(directoryPath || '').trim())
+    if (!normalizedDirectory) {
+      throw new Error('无效的输出目录')
+    }
+    await mkdir(normalizedDirectory, { recursive: true })
+    const parsedName = path.parse(sanitizeEmbeddedBrowserOutputFileName(fileName))
+    const extension = parsedName.ext || ''
+    const baseName = parsedName.name || parsedName.base || 'download'
+
+    for (let attempt = 0; attempt < 5000; attempt += 1) {
+      const suffix = attempt === 0 ? '' : ` (${attempt})`
+      const candidatePath = path.join(normalizedDirectory, `${baseName}${suffix}${extension}`)
+      const exists = await access(candidatePath)
+        .then(() => true)
+        .catch(() => false)
+      if (!exists) {
+        return candidatePath
+      }
+    }
+    return path.join(normalizedDirectory, `${baseName}-${Date.now()}${extension}`)
+  }
+
+  async function resolveEmbeddedBrowserOutputPath(payload: {
+    defaultFileName: string
+    filters?: Array<{ extensions: string[]; name: string }>
+    outputDirectoryPath?: string
+    useSystemSaveDialog?: boolean
+  }): Promise<string | null> {
+    const defaultFileName = sanitizeEmbeddedBrowserOutputFileName(payload.defaultFileName)
+    const preferredDirectory = String(payload.outputDirectoryPath || '').trim()
+    const shouldUseSystemSaveDialog = payload.useSystemSaveDialog !== false && !preferredDirectory
+
+    if (!shouldUseSystemSaveDialog) {
+      const targetDirectory = preferredDirectory || app.getPath('downloads')
+      return deriveEmbeddedBrowserPreferredOutputPath(targetDirectory, defaultFileName)
+    }
+
+    const mainWindow = options.getMainWindow()
+    const targetWindow = mainWindow && !mainWindow.isDestroyed()
+      ? mainWindow
+      : undefined
+    const saveDialogOptions = {
+      defaultPath: path.join(app.getPath('downloads'), defaultFileName),
+      filters: payload.filters,
+      showsTagField: false,
+    }
+    const saveResult = targetWindow
+      ? await dialog.showSaveDialog(targetWindow, saveDialogOptions)
+      : await dialog.showSaveDialog(saveDialogOptions)
+    if (saveResult.canceled || !saveResult.filePath) {
+      return null
+    }
+    return saveResult.filePath
+  }
+
   async function mergeEmbeddedBrowserCapturedMseResources(
     tabId: string,
     payload: EmbeddedBrowserCapturedResourceMergePayload,
@@ -485,21 +552,15 @@ export function createEmbeddedBrowserMainController(
 
       const defaultFileName = String(payload.suggestedFileName || '').trim()
         || deriveEmbeddedBrowserMergedFileName(videoResource.fileName, audioResource.fileName)
-      const mainWindow = options.getMainWindow()
-      const targetWindow = mainWindow && !mainWindow.isDestroyed()
-        ? mainWindow
-        : undefined
-      const saveDialogOptions = {
-        defaultPath: path.join(app.getPath('downloads'), defaultFileName),
+      const outputPath = await resolveEmbeddedBrowserOutputPath({
+        defaultFileName,
         filters: [
           { extensions: ['mp4'], name: 'MP4 Video' },
         ],
-        showsTagField: false,
-      }
-      const saveResult = targetWindow
-        ? await dialog.showSaveDialog(targetWindow, saveDialogOptions)
-        : await dialog.showSaveDialog(saveDialogOptions)
-      if (saveResult.canceled || !saveResult.filePath) {
+        outputDirectoryPath: payload.outputDirectoryPath,
+        useSystemSaveDialog: payload.useSystemSaveDialog,
+      })
+      if (!outputPath) {
         return {
           cancelled: true,
           ok: false,
@@ -509,7 +570,7 @@ export function createEmbeddedBrowserMainController(
       const mergeResult = await mergeEmbeddedBrowserResourceTracks({
         audio: audioResource,
         ffmpegPath: payload.ffmpegPath,
-        outputPath: saveResult.filePath,
+        outputPath,
         video: videoResource,
       })
       return {
@@ -665,21 +726,15 @@ export function createEmbeddedBrowserMainController(
 
       const defaultFileName = String(payload.suggestedFileName || '').trim()
         || deriveTranscodedFileName(resource.fileName, outputFormat)
-      const mainWindow = options.getMainWindow()
-      const targetWindow = mainWindow && !mainWindow.isDestroyed()
-        ? mainWindow
-        : undefined
-      const saveDialogOptions = {
-        defaultPath: path.join(app.getPath('downloads'), defaultFileName),
+      const outputPath = await resolveEmbeddedBrowserOutputPath({
+        defaultFileName,
         filters: [
           { extensions: [outputFormat], name: `${outputFormat.toUpperCase()} Media` },
         ],
-        showsTagField: false,
-      }
-      const saveResult = targetWindow
-        ? await dialog.showSaveDialog(targetWindow, saveDialogOptions)
-        : await dialog.showSaveDialog(saveDialogOptions)
-      if (saveResult.canceled || !saveResult.filePath) {
+        outputDirectoryPath: payload.outputDirectoryPath,
+        useSystemSaveDialog: payload.useSystemSaveDialog,
+      })
+      if (!outputPath) {
         return {
           cancelled: true,
           ok: false,
@@ -689,7 +744,7 @@ export function createEmbeddedBrowserMainController(
       const result = await transcodeEmbeddedBrowserResource({
         ffmpegPath: payload.ffmpegPath,
         outputFormat,
-        outputPath: saveResult.filePath,
+        outputPath,
         resource,
       })
       return {
