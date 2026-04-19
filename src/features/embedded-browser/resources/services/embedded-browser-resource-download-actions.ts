@@ -9,6 +9,7 @@ import {
   mergeEmbeddedBrowserCapturedMseResources,
   openEmbeddedBrowserCapturedResource,
   previewEmbeddedBrowserCapturedResource,
+  transcodeEmbeddedBrowserCapturedResource,
 } from './embedded-browser-resource.api';
 import {
   isHttpResource,
@@ -39,7 +40,7 @@ export async function copyResourceUrl(url: string) {
 }
 
 function shellEscape(value: string) {
-  return `'${String(value || '').replace(/'/g, `'\"'\"'`)}'`;
+  return `'${String(value || '').replace(/'/g, `'"'"'`)}'`;
 }
 
 function buildResourceCurlCommand(resource: EmbeddedBrowserCapturedResource) {
@@ -195,4 +196,40 @@ export async function mergeCapturedResources(resources: {
     throw new Error(mergeResult.error || '合并失败');
   }
   Toast.success('已完成音视频合并');
+}
+
+function normalizeTranscodeOutputFormat(input: string) {
+  const normalized = String(input || '').trim().replace(/^\.+/, '').toLowerCase();
+  if (!/^[a-z0-9]{1,12}$/.test(normalized)) {
+    throw new Error('请输入 1-12 位字母或数字格式，例如 mp3、m4a、mp4');
+  }
+  return normalized;
+}
+
+function deriveTranscodeSuggestedFileName(fileName: string, outputFormat: string) {
+  const normalizedName = String(fileName || '').trim() || 'media';
+  if (/\.[a-z0-9]{2,12}$/i.test(normalizedName)) {
+    return normalizedName.replace(/\.[a-z0-9]{2,12}$/i, `.${outputFormat}`);
+  }
+  return `${normalizedName}.${outputFormat}`;
+}
+
+export async function transcodeCapturedResource(
+  resource: EmbeddedBrowserCapturedResource,
+  outputFormat: string,
+) {
+  const normalizedFormat = normalizeTranscodeOutputFormat(outputFormat);
+  const result = await transcodeEmbeddedBrowserCapturedResource(resource.tabId, {
+    outputFormat: normalizedFormat,
+    resource: createManualMergeResourcePayload(resource),
+    resourceKey: resource.resourceKey,
+    suggestedFileName: deriveTranscodeSuggestedFileName(getResourceDownloadFileName(resource), normalizedFormat),
+  });
+  if (result.cancelled) {
+    return;
+  }
+  if (!result.ok) {
+    throw new Error(result.error || '转格式失败');
+  }
+  Toast.success('已完成转格式');
 }

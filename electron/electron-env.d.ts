@@ -290,6 +290,20 @@ interface Window {
       };
       videoResourceKey?: string;
     }) => Promise<EmbeddedBrowserCapturedResourceMergeResponse>;
+    transcodeCapturedResource: (tabId: string, payload: {
+      ffmpegPath?: string;
+      outputFormat?: string;
+      resource?: {
+        fileName?: string;
+        mimeType?: string;
+        requestHeaders?: Record<string, string>;
+        resourceKey?: string;
+        streamType?: 'audio' | 'video';
+        url?: string;
+      };
+      resourceKey?: string;
+      suggestedFileName?: string;
+    }) => Promise<EmbeddedBrowserCapturedResourceMergeResponse>;
     downloadHlsManifest: (tabId: string, payload: {
       ffmpegPath?: string;
       headers?: Record<string, string>;
@@ -308,6 +322,8 @@ interface Window {
       payload: Partial<EmbeddedBrowserCatchToolkitState>,
     ) => Promise<EmbeddedBrowserCatchToolkitState | null>;
     clearCatchMediaCache: (tabId: string) => Promise<boolean>;
+    clearCacheAndReload: (tabId: string) => Promise<boolean>;
+    resetPageStorageAndReload: (tabId: string) => Promise<boolean>;
     downloadCatchMedia: (tabId: string) => Promise<boolean>;
     restartCatchMediaCapture: (tabId: string) => Promise<boolean>;
     openMappedFile: (tabId: string, pageUrl: string, sourceUrl: string, fileName: string) => Promise<void>;

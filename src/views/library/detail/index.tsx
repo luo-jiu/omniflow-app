@@ -35,6 +35,8 @@ import EmbeddedBrowserPanel, { type EmbeddedBrowserHandle } from "@/features/emb
 import EmbeddedBrowserDownloadImportModal from "@/features/embedded-browser/downloads/components/EmbeddedBrowserDownloadImportModal";
 import { useEmbeddedBrowserDownloadImport } from "@/features/embedded-browser/downloads/hooks/useEmbeddedBrowserDownloadImport";
 import EmbeddedBrowserResourcePanel from "@/features/embedded-browser/resources/components/EmbeddedBrowserResourcePanel";
+import type { EmbeddedBrowserCapturedResource } from "@/features/embedded-browser/resources/types";
+import type { ToolWorkspaceMediaRequest } from "@/features/tool-workspace/types";
 import {
   createBrowserBookmark,
   deleteBrowserBookmark,
@@ -1496,6 +1498,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   const [selectedTreeNode, setSelectedTreeNode] = React.useState<SelectedTreeNode | null>(null);
   const [treeRootNodeId, setTreeRootNodeId] = React.useState<number | null>(null);
   const [workspaceDisplayMode, setWorkspaceDisplayMode] = React.useState<WorkspaceDisplayMode>(initialWorkspaceState.workspaceDisplayMode);
+  const [mediaProcessingRequest, setMediaProcessingRequest] = React.useState<ToolWorkspaceMediaRequest | null>(null);
   const browserInputRef = React.useRef<HTMLInputElement | null>(null);
   const latestWorkspaceStateRef = React.useRef<LibraryDetailWorkspaceState>(initialWorkspaceState);
   const latestPanelWidthRef = React.useRef<number>(sidePanelWidth);
@@ -2479,6 +2482,19 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   }, [activeTabId, showSearchHome]);
 
   const openToolsWorkspace = React.useCallback(() => {
+    setBrowserModeOpen(false);
+    setWorkspaceDisplayMode('tools');
+    void window.electronEmbeddedBrowser.deactivate();
+  }, []);
+
+  const openMediaProcessingWorkspace = React.useCallback((resources: EmbeddedBrowserCapturedResource[]) => {
+    if (!resources.length) {
+      return;
+    }
+    setMediaProcessingRequest({
+      id: Date.now(),
+      resources,
+    });
     setBrowserModeOpen(false);
     setWorkspaceDisplayMode('tools');
     void window.electronEmbeddedBrowser.deactivate();
@@ -3729,6 +3745,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
                   <EmbeddedBrowserResourcePanel
                     activeTabId={activeBrowserTabId}
                     currentPageUrl={activeBrowserTab?.url ?? ''}
+                    onOpenMediaProcessing={openMediaProcessingWorkspace}
                   />
                 </BrowserWorkspaceAside>
               ) : null}
@@ -3747,6 +3764,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
           ) : workspaceDisplayMode === 'tools' ? (
             <ToolWorkspace
               libraryId={libraryId}
+              mediaProcessingRequest={mediaProcessingRequest}
               onOpenFileWorkspace={openFileWorkspace}
               rootNodeId={treeRootNodeId}
               selectedTreeNode={selectedTreeNode}

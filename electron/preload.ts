@@ -291,6 +291,8 @@ contextBridge.exposeInMainWorld('electronEmbeddedBrowser', {
     trimExtraMediaHeaders?: boolean;
   }) => ipcRenderer.invoke('embedded-browser:resource:catch-toolkit:update-state', tabId, payload),
   clearCatchMediaCache: (tabId: string) => ipcRenderer.invoke('embedded-browser:resource:catch-toolkit:clear-cache', tabId),
+  clearCacheAndReload: (tabId: string) => ipcRenderer.invoke('embedded-browser:clear-cache-reload', tabId),
+  resetPageStorageAndReload: (tabId: string) => ipcRenderer.invoke('embedded-browser:reset-page-storage', tabId),
   downloadCatchMedia: (tabId: string) => ipcRenderer.invoke('embedded-browser:resource:catch-toolkit:download', tabId),
   restartCatchMediaCapture: (tabId: string) => ipcRenderer.invoke('embedded-browser:resource:catch-toolkit:restart', tabId),
   mergeCapturedMseResources: (tabId: string, payload: {
@@ -315,6 +317,20 @@ contextBridge.exposeInMainWorld('electronEmbeddedBrowser', {
     };
     videoResourceKey?: string;
   }) => ipcRenderer.invoke('embedded-browser:resource:merge-mse', tabId, payload),
+  transcodeCapturedResource: (tabId: string, payload: {
+    ffmpegPath?: string;
+    outputFormat?: string;
+    resource?: {
+      fileName?: string;
+      mimeType?: string;
+      requestHeaders?: Record<string, string>;
+      resourceKey?: string;
+      streamType?: 'audio' | 'video';
+      url?: string;
+    };
+    resourceKey?: string;
+    suggestedFileName?: string;
+  }) => ipcRenderer.invoke('embedded-browser:resource:transcode', tabId, payload),
   downloadHlsManifest: (tabId: string, payload: {
     ffmpegPath?: string;
     headers?: Record<string, string>;

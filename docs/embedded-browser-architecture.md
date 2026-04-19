@@ -145,6 +145,7 @@ library detail page
 - 网络和 probe 捕捉事件由 main 发回 renderer
 - renderer 里的 `useEmbeddedBrowserResources` 再按 `tabId` 聚合成 snapshot
 - 当前页面资源面板只读“活动 tab 的快照”
+- 资源面板的筛选正则和“筛除同名同大小”开关是 renderer 本地偏好，分别持久化在 `embedded-browser:resource-filter-regex` 和 `embedded-browser:resource-dedupe-same-name`，不改变 main 侧捕捉快照
 
 ### 4.4 缓存捕捉工具态
 
@@ -255,6 +256,8 @@ renderer catch toolkit action
 - 直接导出捕捉流
 - 读取捕捉流内容
 - 调 `ffmpeg` 合并音视频
+- 清理 embedded browser 会话缓存并 `reloadIgnoringCache`，用于排查页面从 HTTP cache / Cache Storage / Service Worker 复用旧媒体导致网络层不再触发的问题
+- 重置当前网页：清理 Cache Storage / Service Worker / IndexedDB 等站点缓存，销毁并重建当前 tab 的 `WebContentsView`，再加载同一个 URL；该操作保留 cookie，但可能清掉站点播放器内部缓存状态
 
 规则：
 

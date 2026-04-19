@@ -18,6 +18,7 @@ export {
   openCapturedResource,
   openResourceUrl,
   previewResource,
+  transcodeCapturedResource,
 } from './embedded-browser-resource-download-actions';
 export {
   analyzeHlsResource,

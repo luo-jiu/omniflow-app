@@ -1,6 +1,12 @@
 import type { SelectedTreeNode } from '@/features/file-explorer';
+import type { EmbeddedBrowserCapturedResource } from '@/features/embedded-browser/resources/types';
 
-export type ToolWorkspaceToolId = 'subtitle-translation';
+export type ToolWorkspaceToolId = 'subtitle-translation' | 'media-processing';
+
+export interface ToolWorkspaceMediaRequest {
+  id: number;
+  resources: EmbeddedBrowserCapturedResource[];
+}
 
 export type SubtitleFileFormat = 'srt' | 'vtt';
 

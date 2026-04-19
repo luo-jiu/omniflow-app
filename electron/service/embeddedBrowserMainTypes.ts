@@ -62,6 +62,18 @@ export type EmbeddedBrowserCapturedResourceMergeResponse = {
   outputPath?: string
 }
 
+export type EmbeddedBrowserCapturedResourceTranscodeFormat = string
+
+export type EmbeddedBrowserCapturedResourceTranscodePayload = {
+  ffmpegPath?: string
+  outputFormat?: EmbeddedBrowserCapturedResourceTranscodeFormat
+  resource?: EmbeddedBrowserCapturedResourceMergeTrackPayload
+  resourceKey?: string
+  suggestedFileName?: string
+}
+
+export type EmbeddedBrowserCapturedResourceTranscodeResponse = EmbeddedBrowserCapturedResourceMergeResponse
+
 export type EmbeddedBrowserCapturedResourceSavePayload = {
   resourceKey?: string
   suggestedFileName?: string

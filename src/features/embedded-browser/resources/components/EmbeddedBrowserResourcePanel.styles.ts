@@ -181,6 +181,13 @@ const PanelShell = styled.aside`
     gap: 10px;
   }
 
+  .resource-panel-bulk-shell {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--app-border);
+    background: var(--app-bg-elevated);
+    flex: 0 0 auto;
+  }
+
   .resource-section {
     display: flex;
     flex-direction: column;
@@ -576,19 +583,6 @@ const PanelShell = styled.aside`
     word-break: break-all;
   }
 
-  .resource-merge-selection {
-    border: 1px dashed var(--app-border);
-    border-radius: 8px;
-    padding: 12px;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    color: var(--app-text-muted);
-    font-size: 15px;
-    line-height: 1.6;
-    background: var(--app-bg);
-  }
-
   .resource-hls-analysis {
     border: 1px dashed var(--app-border);
     border-radius: 8px;
@@ -663,9 +657,6 @@ const PanelShell = styled.aside`
   }
 
   .resource-bulk-bar {
-    position: sticky;
-    top: 0;
-    z-index: 3;
     display: flex;
     flex-direction: column;
     gap: 10px;
@@ -676,9 +667,25 @@ const PanelShell = styled.aside`
   }
 
   .resource-bulk-summary {
+    min-height: 22px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    white-space: nowrap;
     font-size: 16px;
     font-weight: 700;
     color: var(--app-text);
+  }
+
+  .resource-bulk-status {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--app-text-muted);
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.4;
   }
 
   .resource-bulk-actions {
@@ -686,6 +693,33 @@ const PanelShell = styled.aside`
     align-items: center;
     flex-wrap: wrap;
     gap: 8px;
+  }
+
+  .resource-bulk-bar .resource-card-btn {
+    border-color: color-mix(in srgb, var(--app-text-muted) 45%, var(--app-border));
+    background: color-mix(in srgb, var(--app-bg) 84%, var(--app-text) 16%);
+    color: var(--app-text);
+  }
+
+  .resource-bulk-bar .resource-card-btn:not(:disabled):hover {
+    border-color: var(--semi-color-primary);
+    color: var(--semi-color-primary);
+  }
+
+  .resource-bulk-bar .resource-card-btn.is-active {
+    border-color: var(--semi-color-primary);
+    background: color-mix(in srgb, var(--semi-color-primary) 12%, var(--app-bg));
+    color: var(--semi-color-primary);
+  }
+
+  .resource-bulk-bar .resource-card-btn.primary {
+    border-color: var(--semi-color-primary);
+    background: var(--semi-color-primary);
+    color: #fff;
+  }
+
+  .resource-bulk-bar .resource-card-btn:disabled {
+    opacity: 0.38;
   }
 
   .resource-more-shell {

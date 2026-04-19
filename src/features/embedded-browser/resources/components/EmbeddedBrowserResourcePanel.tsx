@@ -7,13 +7,17 @@ import EmbeddedBrowserResourceCard from './EmbeddedBrowserResourceCard';
 import { useEmbeddedBrowserCatchToolkit } from '../hooks/useEmbeddedBrowserCatchToolkit';
 import { useEmbeddedBrowserResources } from '../hooks/useEmbeddedBrowserResources';
 import {
+  clearEmbeddedBrowserCacheAndReload,
+  resetEmbeddedBrowserPageStorageAndReload,
+} from '../services/embedded-browser-resource.api';
+import {
   createEmbeddedBrowserResourceSections,
   findMergeableResourcePair,
 } from '../model/embedded-browser-resource.presentation';
 import {
   createManualMergePair,
   downloadSelectedResources,
-  formatMergeResourceLabel,
+  formatResourceTitle,
   getResourceExtensionFilterKey,
   isManuallyMergeableResource,
   matchesResourceFilter,
@@ -25,9 +29,11 @@ type EmbeddedBrowserResourcePanelProps = {
   activeTabId: string | null;
   className?: string;
   currentPageUrl?: string;
+  onOpenMediaProcessing?: (resources: EmbeddedBrowserCapturedResource[]) => void;
 };
 
 const RESOURCE_FILTER_STORAGE_KEY = 'embedded-browser:resource-filter-regex';
+const RESOURCE_DEDUPE_SAME_NAME_STORAGE_KEY = 'embedded-browser:resource-dedupe-same-name';
 const DEFAULT_MEDIA_RESOURCE_REGEX = String.raw`(blob:|key|base64key|\.((m3u8|m3u|mpd|m4s|mp4|m4v|m4a|mp3|aac|flac|wav|ogg|oga|ogv|webm|mkv|mov|avi|ts|flv|hlv|f4v|wma|mpeg|wmv|asf|movie|divx|mpeg4|vid|weba|opus|acc|3gp|vtt|srt))(?:$|[?#]))`;
 
 function loadResourceFilterDraft() {
@@ -35,10 +41,27 @@ function loadResourceFilterDraft() {
   return String(value || DEFAULT_MEDIA_RESOURCE_REGEX);
 }
 
+function loadDedupeSameName() {
+  return window.localStorage.getItem(RESOURCE_DEDUPE_SAME_NAME_STORAGE_KEY) !== 'false';
+}
+
+function getSameNameDedupeKey(resource: EmbeddedBrowserCapturedResource) {
+  const size = resource.contentLength || 0;
+  if (size <= 0) {
+    return `${resource.source}::${resource.id}`;
+  }
+  return [
+    resource.source,
+    formatResourceTitle(resource).trim().toLowerCase(),
+    String(size),
+  ].join('::');
+}
+
 const EmbeddedBrowserResourcePanel: React.FC<EmbeddedBrowserResourcePanelProps> = ({
   activeTabId,
   className,
   currentPageUrl = '',
+  onOpenMediaProcessing,
 }) => {
   const {
     captureEnabled,
@@ -51,8 +74,9 @@ const EmbeddedBrowserResourcePanel: React.FC<EmbeddedBrowserResourcePanelProps> 
     stopCapture,
   } = useEmbeddedBrowserResources(activeTabId);
   const catchToolkit = useEmbeddedBrowserCatchToolkit(activeTabId, deepCaptureEnabled);
-  const [actionLoading, setActionLoading] = React.useState<'start' | 'deep' | 'stop' | 'clear' | null>(null);
+  const [actionLoading, setActionLoading] = React.useState<'start' | 'deep' | 'stop' | 'clear' | 'cache' | 'reset' | null>(null);
   const [filterDraft, setFilterDraft] = React.useState(loadResourceFilterDraft);
+  const [dedupeSameName, setDedupeSameName] = React.useState(loadDedupeSameName);
   const [extensionFilterIds, setExtensionFilterIds] = React.useState<string[]>([]);
   const [expandedResourceIds, setExpandedResourceIds] = React.useState<string[]>([]);
   const [manualMergeSelectedIds, setManualMergeSelectedIds] = React.useState<string[]>([]);
@@ -60,6 +84,10 @@ const EmbeddedBrowserResourcePanel: React.FC<EmbeddedBrowserResourcePanelProps> 
   React.useEffect(() => {
     window.localStorage.setItem(RESOURCE_FILTER_STORAGE_KEY, filterDraft);
   }, [filterDraft]);
+
+  React.useEffect(() => {
+    window.localStorage.setItem(RESOURCE_DEDUPE_SAME_NAME_STORAGE_KEY, dedupeSameName ? 'true' : 'false');
+  }, [dedupeSameName]);
 
   const filterPattern = React.useMemo(() => {
     try {
@@ -85,9 +113,26 @@ const EmbeddedBrowserResourcePanel: React.FC<EmbeddedBrowserResourcePanelProps> 
     return resources.filter((resource) => matchesResourceFilter(resource, filterPattern));
   }, [filterError, filterPattern, resources]);
 
+  const dedupedResources = React.useMemo(() => {
+    if (!dedupeSameName) {
+      return regexFilteredResources;
+    }
+    const seenKeys = new Set<string>();
+    return regexFilteredResources.filter((resource) => {
+      const key = getSameNameDedupeKey(resource);
+      if (seenKeys.has(key)) {
+        return false;
+      }
+      seenKeys.add(key);
+      return true;
+    });
+  }, [dedupeSameName, regexFilteredResources]);
+
+  const sameNameHiddenCount = regexFilteredResources.length - dedupedResources.length;
+
   const extensionOptions = React.useMemo(() => {
     const optionCounts = new Map<string, number>();
-    regexFilteredResources.forEach((resource) => {
+    dedupedResources.forEach((resource) => {
       const key = getResourceExtensionFilterKey(resource);
       optionCounts.set(key, (optionCounts.get(key) || 0) + 1);
     });
@@ -100,7 +145,7 @@ const EmbeddedBrowserResourcePanel: React.FC<EmbeddedBrowserResourcePanelProps> 
         return leftKey.localeCompare(rightKey);
       })
       .map(([key, count]) => ({ count, key }));
-  }, [regexFilteredResources]);
+  }, [dedupedResources]);
 
   React.useEffect(() => {
     const availableKeys = new Set(extensionOptions.map((option) => option.key));
@@ -109,13 +154,13 @@ const EmbeddedBrowserResourcePanel: React.FC<EmbeddedBrowserResourcePanelProps> 
 
   const filteredResources = React.useMemo(() => {
     if (!extensionFilterIds.length) {
-      return regexFilteredResources;
+      return dedupedResources;
     }
     const enabledExtensions = new Set(extensionFilterIds);
-    return regexFilteredResources.filter((resource) => (
+    return dedupedResources.filter((resource) => (
       enabledExtensions.has(getResourceExtensionFilterKey(resource))
     ));
-  }, [extensionFilterIds, regexFilteredResources]);
+  }, [extensionFilterIds, dedupedResources]);
 
   const resourceSections = React.useMemo(
     () => createEmbeddedBrowserResourceSections(filteredResources),
@@ -211,7 +256,7 @@ const EmbeddedBrowserResourcePanel: React.FC<EmbeddedBrowserResourcePanelProps> 
   }, []);
 
   const runAction = React.useCallback(async (
-    nextAction: 'start' | 'deep' | 'stop' | 'clear',
+    nextAction: 'start' | 'deep' | 'stop' | 'clear' | 'cache' | 'reset',
     runner: () => Promise<unknown>,
     successMessage?: string,
   ) => {
@@ -231,55 +276,64 @@ const EmbeddedBrowserResourcePanel: React.FC<EmbeddedBrowserResourcePanelProps> 
   const disabled = !activeTabId;
   const recorderMode = Boolean(activeTabId && deepCaptureEnabled);
 
+  const bulkBar = (
+    <EmbeddedBrowserResourceBulkBar
+      canMerge={Boolean(manualMergePair)}
+      dedupeSameName={dedupeSameName}
+      disabled={disabled || actionLoading !== null}
+      hasExpandedResources={expandedResourceIds.length > 0}
+      hasResources={filteredResources.length > 0}
+      onClearSelection={() => {
+        setManualMergeSelectedIds([]);
+      }}
+      onCopySelected={() => {
+        void copySelectedResourceLinks();
+      }}
+      onDownloadSelected={() => {
+        void downloadSelectedResources(manualMergeSelectedResources).catch((error: any) => {
+          Toast.error(error?.message || '下载已选失败');
+        });
+      }}
+      onInvertSelection={invertFilteredResourceSelection}
+      onMergeSelected={() => {
+        if (!manualMergePair) {
+          Toast.warning('勾选一条视频和一条音频后再合并');
+          return;
+        }
+        void mergeCapturedResources(manualMergePair).catch((error: any) => {
+          Toast.error(error?.message || '合并失败');
+        });
+      }}
+      onProcessSelected={() => {
+        if (!manualMergeSelectedResources.length) {
+          Toast.warning('先勾选要处理的资源');
+          return;
+        }
+        if (!onOpenMediaProcessing) {
+          Toast.warning('当前没有可用的媒体处理工作区');
+          return;
+        }
+        onOpenMediaProcessing(manualMergeSelectedResources);
+      }}
+      onSelectAll={selectAllFilteredResources}
+      onToggleDedupeSameName={() => {
+        setDedupeSameName((value) => !value);
+      }}
+      onToggleExpandAll={() => {
+        if (expandedResourceIds.length > 0) {
+          collapseAllResourceDetails();
+          return;
+        }
+        expandAllFilteredResources();
+      }}
+      sameNameHiddenCount={sameNameHiddenCount}
+      selectedCount={manualMergeSelectedResources.length}
+      selectedMergeableCount={selectedMergeableCount}
+    />
+  );
+
   const resourceExplorer = (
     <>
-      <EmbeddedBrowserResourceBulkBar
-        canMerge={Boolean(manualMergePair)}
-        disabled={disabled || actionLoading !== null}
-        hasExpandedResources={expandedResourceIds.length > 0}
-        hasResources={filteredResources.length > 0}
-        onClearSelection={() => {
-          setManualMergeSelectedIds([]);
-        }}
-        onCollapseAll={collapseAllResourceDetails}
-        onCopySelected={() => {
-          void copySelectedResourceLinks();
-        }}
-        onDownloadSelected={() => {
-          void downloadSelectedResources(manualMergeSelectedResources).catch((error: any) => {
-            Toast.error(error?.message || '下载已选失败');
-          });
-        }}
-        onExpandAll={expandAllFilteredResources}
-        onInvertSelection={invertFilteredResourceSelection}
-        onMergeSelected={() => {
-          if (!manualMergePair) {
-            Toast.warning('勾选一条视频和一条音频后再合并');
-            return;
-          }
-          void mergeCapturedResources(manualMergePair).catch((error: any) => {
-            Toast.error(error?.message || '合并失败');
-          });
-        }}
-        onSelectAll={selectAllFilteredResources}
-        selectedCount={manualMergeSelectedResources.length}
-        selectedMergeableCount={selectedMergeableCount}
-      />
-      {manualMergeSelectedResources.length > 0 ? (
-        <div className="resource-merge-selection">
-          <div>已勾选 {manualMergeSelectedResources.length} 条资源；合并需要正好 2 条可合并媒体。</div>
-          {manualMergeSelectedResources.map((resource, index) => (
-            <div key={resource.id}>
-              {index + 1}：{formatMergeResourceLabel(resource)}
-            </div>
-          ))}
-          {manualMergePair ? (
-            <div>
-              将按：视频 {formatMergeResourceLabel(manualMergePair.video)}；音频 {formatMergeResourceLabel(manualMergePair.audio)}
-            </div>
-          ) : null}
-        </div>
-      ) : null}
       {!activeTabId ? (
         <div className="resource-panel-empty">
           先打开一个内置浏览器标签页，再开始捕获。
@@ -378,7 +432,7 @@ const EmbeddedBrowserResourcePanel: React.FC<EmbeddedBrowserResourcePanelProps> 
                   setExtensionFilterIds([]);
                 }}
               >
-                全部 {regexFilteredResources.length}
+                全部 {dedupedResources.length}
               </button>
               {extensionOptions.map((option) => {
                 const active = extensionFilterIds.includes(option.key);
@@ -438,6 +492,36 @@ const EmbeddedBrowserResourcePanel: React.FC<EmbeddedBrowserResourcePanelProps> 
             }}
           >
             清空列表
+          </button>
+          <button
+            type="button"
+            className="resource-panel-btn"
+            disabled={disabled || actionLoading !== null}
+            onClick={() => {
+              void runAction('cache', async () => {
+                if (!activeTabId) {
+                  return false;
+                }
+                return clearEmbeddedBrowserCacheAndReload(activeTabId);
+              }, '已清理浏览器缓存并重新加载');
+            }}
+          >
+            清缓存重载
+          </button>
+          <button
+            type="button"
+            className="resource-panel-btn"
+            disabled={disabled || actionLoading !== null}
+            onClick={() => {
+              void runAction('reset', async () => {
+                if (!activeTabId) {
+                  return false;
+                }
+                return resetEmbeddedBrowserPageStorageAndReload(activeTabId);
+              }, '已重置网页缓存并重建页面');
+            }}
+          >
+            重置网页
           </button>
           {mergeablePair ? (
             <button
@@ -505,6 +589,9 @@ const EmbeddedBrowserResourcePanel: React.FC<EmbeddedBrowserResourcePanelProps> 
             </button>
           </div>
         </details>
+      </div>
+      <div className="resource-panel-bulk-shell">
+        {bulkBar}
       </div>
       <div className="resource-panel-body">
         {recorderMode ? (

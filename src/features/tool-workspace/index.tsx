@@ -13,6 +13,18 @@ import {
 import { IconDownload, IconPlus } from '@douyinfe/semi-icons';
 
 import type { SelectedTreeNode } from '@/features/file-explorer';
+import type { EmbeddedBrowserCapturedResource } from '@/features/embedded-browser/resources/types';
+import {
+  createManualMergePair,
+  downloadSelectedResources,
+  formatBytes,
+  formatResourceTitle,
+  mergeCapturedResources,
+  transcodeCapturedResource,
+} from '@/features/embedded-browser/resources/services/embedded-browser-resource-panel-actions';
+import {
+  findMergeableResourcePair,
+} from '@/features/embedded-browser/resources/model/embedded-browser-resource.presentation';
 
 import {
   fetchAvailableTranslationModels,
@@ -42,7 +54,9 @@ import type {
   SubtitleTranslationConfig,
   SubtitleTranslationDraft,
   SubtitleTranslationRow,
+  ToolWorkspaceMediaRequest,
   ToolWorkspaceState,
+  ToolWorkspaceToolId,
 } from './types';
 
 const Wrapper = styled.div`
@@ -74,13 +88,26 @@ const ToolNav = styled.aside`
   }
 
   .tool-card {
+    appearance: none;
     display: flex;
     flex-direction: column;
     gap: 8px;
+    width: 100%;
+    text-align: left;
     padding: 14px 12px;
     border-radius: 12px;
-    border: 1px solid var(--semi-color-primary);
+    border: 1px solid var(--app-border);
+    background: color-mix(in srgb, var(--app-bg-elevated) 88%, transparent);
+    cursor: pointer;
+  }
+
+  .tool-card.is-active {
+    border-color: var(--semi-color-primary);
     background: var(--semi-color-primary-light-default);
+  }
+
+  .tool-card:disabled {
+    cursor: default;
   }
 
   .tool-card-title {
@@ -98,6 +125,43 @@ const ToolNav = styled.aside`
   .semi-button {
     min-height: 40px;
     font-size: 14px;
+  }
+`;
+
+const MediaResourceList = styled.div`
+  border: 1px solid var(--app-border);
+  border-radius: 14px;
+  overflow: hidden;
+
+  .media-row {
+    display: grid;
+    grid-template-columns: minmax(220px, 1fr) 112px 120px 144px;
+    gap: 12px;
+    align-items: center;
+    padding: 12px 14px;
+    border-bottom: 1px solid color-mix(in srgb, var(--app-border) 72%, transparent);
+  }
+
+  .media-row:last-child {
+    border-bottom: none;
+  }
+
+  .media-title {
+    min-width: 0;
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--app-text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .media-meta {
+    font-size: 13px;
+    color: var(--app-text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 `;
 
@@ -228,6 +292,10 @@ const ActionRow = styled.div`
 
   .semi-tag {
     font-size: 13px;
+  }
+
+  .transcode-format-input {
+    width: 128px;
   }
 `;
 
@@ -752,15 +820,186 @@ function getLibrarySaveTarget(payload: {
 
 /* ---------- ToolWorkspace ---------- */
 
+type MediaProcessingToolProps = {
+  resources: EmbeddedBrowserCapturedResource[];
+};
+
+function normalizeMediaTranscodeFormat(input: string) {
+  const normalized = String(input || '').trim().replace(/^\.+/, '').toLowerCase();
+  if (!/^[a-z0-9]{1,12}$/.test(normalized)) {
+    return null;
+  }
+  return normalized;
+}
+
+const MediaProcessingTool: React.FC<MediaProcessingToolProps> = ({ resources }) => {
+  const [saving, setSaving] = React.useState(false);
+  const [merging, setMerging] = React.useState(false);
+  const [transcoding, setTranscoding] = React.useState(false);
+  const [transcodeFormatDraft, setTranscodeFormatDraft] = React.useState('m4a');
+
+  const mergePair = React.useMemo(() => (
+    createManualMergePair(resources) || findMergeableResourcePair(resources)
+  ), [resources]);
+
+  const handleSaveSelected = React.useCallback(async () => {
+    if (!resources.length) {
+      Toast.warning('先从资源面板送入要处理的媒体');
+      return;
+    }
+    setSaving(true);
+    try {
+      await downloadSelectedResources(resources);
+    } catch (error: any) {
+      Toast.error(error?.message || '保存已选失败');
+    } finally {
+      setSaving(false);
+    }
+  }, [resources]);
+
+  const handleMerge = React.useCallback(async () => {
+    if (!mergePair) {
+      Toast.warning('需要一条视频和一条音频，或可识别的 MSE 音视频流');
+      return;
+    }
+    setMerging(true);
+    try {
+      await mergeCapturedResources(mergePair);
+    } catch (error: any) {
+      Toast.error(error?.message || '合并失败');
+    } finally {
+      setMerging(false);
+    }
+  }, [mergePair]);
+
+  const handleTranscode = React.useCallback(async () => {
+    if (resources.length === 0) {
+      Toast.warning('先从资源面板送入要处理的媒体');
+      return;
+    }
+    if (resources.length > 1) {
+      Toast.warning('转格式先支持单个媒体资源；多条资源请先只勾选一条');
+      return;
+    }
+    const [resource] = resources;
+    if (!resource) {
+      return;
+    }
+    const outputFormat = normalizeMediaTranscodeFormat(transcodeFormatDraft);
+    if (!outputFormat) {
+      Toast.warning('请输入 1-12 位字母或数字格式，例如 mp3、m4a、mp4');
+      return;
+    }
+    setTranscoding(true);
+    try {
+      await transcodeCapturedResource(resource, outputFormat);
+    } catch (error: any) {
+      Toast.error(error?.message || '转格式失败');
+    } finally {
+      setTranscoding(false);
+    }
+  }, [resources, transcodeFormatDraft]);
+
+  const handleTranscodeFormatChange = React.useCallback((value: string) => {
+    setTranscodeFormatDraft(String(value || '').trimStart().replace(/^\.+/, '').slice(0, 12));
+  }, []);
+
+  return (
+    <>
+      <WorkspaceHeader>
+        <div className="header-copy">
+          <div className="header-title">媒体处理</div>
+          <div className="header-desc">
+            从浏览器资源面板接收已选资源，集中做保存、音视频合并和后续转码处理。当前先复用已有本地
+            ffmpeg 合并链路，避免把资源捕捉面板塞成工具箱。
+          </div>
+        </div>
+        <div className="header-tags">
+          <Tag color="blue">工作区模式</Tag>
+          <Tag color="green">本地 ffmpeg</Tag>
+          <Tag color="cyan">{resources.length} 条资源</Tag>
+        </div>
+      </WorkspaceHeader>
+
+      <WorkspaceBody>
+        <Panel>
+          <div className="panel-title">处理动作</div>
+          <div className="panel-desc">
+            保存会按资源类型走本地下载或页内导出；合并会调用本机 ffmpeg，并在完成后保存到你选择的位置。
+            转格式可以自己输入输出格式并保存到你选择的位置；ffmpeg 不支持时会直接报错。
+          </div>
+          <ActionRow>
+            <Button loading={saving} disabled={resources.length === 0} onClick={() => void handleSaveSelected()}>
+              保存已选
+            </Button>
+            <Button loading={merging} disabled={!mergePair} type="primary" onClick={() => void handleMerge()}>
+              合并音视频
+            </Button>
+            <Input
+              className="transcode-format-input"
+              value={transcodeFormatDraft}
+              placeholder="mp3 / m4a / mp4"
+              onChange={handleTranscodeFormatChange}
+            />
+            <Button loading={transcoding} disabled={resources.length === 0} onClick={() => void handleTranscode()}>
+              按输入格式转换
+            </Button>
+            <Button theme="borderless" disabled={transcoding} onClick={() => setTranscodeFormatDraft('m4a')}>
+              m4a
+            </Button>
+            <Button theme="borderless" disabled={transcoding} onClick={() => setTranscodeFormatDraft('mp3')}>
+              mp3
+            </Button>
+            <Button theme="borderless" disabled={transcoding} onClick={() => setTranscodeFormatDraft('mp4')}>
+              mp4
+            </Button>
+            {mergePair ? (
+              <Tag color="green">已识别可合并音视频</Tag>
+            ) : (
+              <Tag color="orange">未识别到可合并组合</Tag>
+            )}
+          </ActionRow>
+        </Panel>
+
+        <Panel>
+          <div className="panel-title">已送入资源</div>
+          <div className="panel-desc">
+            这里不重新筛选、不改后缀、不替换资源，只展示从抓包面板送来的原始条目。
+          </div>
+          {resources.length === 0 ? (
+            <Empty
+              title="还没有媒体资源"
+              description="回到浏览器资源面板，勾选资源后点击“处理已选”。"
+            />
+          ) : (
+            <MediaResourceList>
+              {resources.map((resource) => (
+                <div className="media-row" key={resource.id}>
+                  <div className="media-title" title={resource.url}>{formatResourceTitle(resource)}</div>
+                  <div className="media-meta">{resource.streamType || resource.kind}</div>
+                  <div className="media-meta">{resource.contentLength ? formatBytes(resource.contentLength) : '未知大小'}</div>
+                  <div className="media-meta">{resource.source}{resource.ext ? ` · .${resource.ext}` : ''}</div>
+                </div>
+              ))}
+            </MediaResourceList>
+          )}
+        </Panel>
+      </WorkspaceBody>
+    </>
+  );
+};
+
 type ToolWorkspaceProps = {
   libraryId: number;
   rootNodeId: number | null;
   selectedTreeNode: SelectedTreeNode | null;
+  mediaProcessingRequest?: ToolWorkspaceMediaRequest | null;
   onOpenFileWorkspace: () => void;
 };
 
 const ToolWorkspace: React.FC<ToolWorkspaceProps> = ({
   libraryId,
+  mediaProcessingRequest = null,
   onOpenFileWorkspace,
   rootNodeId,
   selectedTreeNode,
@@ -768,6 +1007,7 @@ const ToolWorkspace: React.FC<ToolWorkspaceProps> = ({
   const [workspaceState, setWorkspaceState] = React.useState<ToolWorkspaceState>(() => (
     loadToolWorkspaceState(libraryId)
   ));
+  const [mediaProcessingResources, setMediaProcessingResources] = React.useState<EmbeddedBrowserCapturedResource[]>([]);
   const [config, setConfig] = React.useState<SubtitleTranslationConfig>(() => loadSubtitleTranslationPreferences());
   const [availableModels, setAvailableModels] = React.useState<string[]>([]);
   const [loadingModels, setLoadingModels] = React.useState(false);
@@ -784,6 +1024,7 @@ const ToolWorkspace: React.FC<ToolWorkspaceProps> = ({
   const pendingSubtitleListScrollRef = React.useRef(false);
 
   const draft = workspaceState.subtitleTranslationDraft;
+  const activeToolId = workspaceState.activeToolId;
   const deferredRows = React.useDeferredValue(draft.rows);
   const librarySaveTarget = React.useMemo(() => getLibrarySaveTarget({
     draft,
@@ -809,6 +1050,17 @@ const ToolWorkspace: React.FC<ToolWorkspaceProps> = ({
   React.useEffect(() => {
     saveToolWorkspaceState(libraryId, workspaceState);
   }, [libraryId, workspaceState]);
+
+  React.useEffect(() => {
+    if (!mediaProcessingRequest) {
+      return;
+    }
+    setMediaProcessingResources(mediaProcessingRequest.resources);
+    setWorkspaceState((current) => ({
+      ...current,
+      activeToolId: 'media-processing',
+    }));
+  }, [mediaProcessingRequest]);
 
   React.useEffect(() => {
     if (!pendingSubtitleListScrollRef.current || draft.rows.length === 0) {
@@ -846,6 +1098,13 @@ const ToolWorkspace: React.FC<ToolWorkspaceProps> = ({
     bumpSubtitleDatasetVersion();
     patchDraft(() => nextDraft);
   }, [patchDraft]);
+
+  const openTool = React.useCallback((toolId: ToolWorkspaceToolId) => {
+    setWorkspaceState((current) => ({
+      ...current,
+      activeToolId: toolId,
+    }));
+  }, []);
 
   const applyRunnerResults = React.useCallback(() => {
     const drained = subtitleTranslationRunner.drainResults();
@@ -1125,6 +1384,17 @@ const ToolWorkspace: React.FC<ToolWorkspaceProps> = ({
     }
   }, [draft.fileFormat, draft.fileName, draft.rows, libraryId, librarySaveTarget]);
 
+  const renderToolCard = (toolId: ToolWorkspaceToolId, title: string, copy: string) => (
+    <button
+      type="button"
+      className={`tool-card ${activeToolId === toolId ? 'is-active' : ''}`}
+      onClick={() => openTool(toolId)}
+    >
+      <div className="tool-card-title">{title}</div>
+      <div className="tool-card-copy">{copy}</div>
+    </button>
+  );
+
   return (
     <Wrapper>
       <ToolNav>
@@ -1132,16 +1402,18 @@ const ToolWorkspace: React.FC<ToolWorkspaceProps> = ({
         <div className="desc">
           目录树继续保留在左侧，工具工作流集中在这里承接。后续可以继续扩字幕处理、批处理和转写整理能力。
         </div>
-        <div className="tool-card">
-          <div className="tool-card-title">AI 字幕翻译</div>
-          <div className="tool-card-copy">导入本地或库内字幕，按句翻译，并将结果另存为本地文件或库内文件。</div>
-        </div>
+        {renderToolCard('subtitle-translation', 'AI 字幕翻译', '导入本地或库内字幕，按句翻译，并将结果另存为本地文件或库内文件。')}
+        {renderToolCard('media-processing', '媒体处理', '承接浏览器捕获资源，做保存、合并和后续转码。')}
         <Button theme="borderless" onClick={onOpenFileWorkspace}>
           返回文件区
         </Button>
       </ToolNav>
 
       <WorkspaceMain>
+        {activeToolId === 'media-processing' ? (
+          <MediaProcessingTool resources={mediaProcessingResources} />
+        ) : (
+          <>
         <WorkspaceHeader>
           <div className="header-copy">
             <div className="header-title">AI 字幕翻译</div>
@@ -1328,6 +1600,8 @@ const ToolWorkspace: React.FC<ToolWorkspaceProps> = ({
             )}
           </Panel>
         </WorkspaceBody>
+          </>
+        )}
       </WorkspaceMain>
     </Wrapper>
   );

@@ -16,6 +16,8 @@ import {
   type EmbeddedBrowserCapturedResourceMergeResponse,
   type EmbeddedBrowserCapturedResourceSavePayload,
   type EmbeddedBrowserCapturedResourceSaveResponse,
+  type EmbeddedBrowserCapturedResourceTranscodePayload,
+  type EmbeddedBrowserCapturedResourceTranscodeResponse,
   type EmbeddedBrowserHlsDownloadPayload,
   type EmbeddedBrowserHlsDownloadResponse,
   type EmbeddedBrowserMainControllerOptions,
@@ -68,6 +70,8 @@ import {
 import {
   deriveEmbeddedBrowserMergedFileName,
   mergeEmbeddedBrowserResourceTracks,
+  normalizeEmbeddedBrowserResourceTranscodeFormat,
+  transcodeEmbeddedBrowserResource,
   type EmbeddedBrowserExtractedResourceFile,
 } from './embeddedBrowserResourceMergeService'
 import {
@@ -592,6 +596,120 @@ export function createEmbeddedBrowserMainController(
     }
   }
 
+  function createPayloadTranscodeResource(
+    input: EmbeddedBrowserCapturedResourceTranscodePayload['resource'],
+  ): EmbeddedBrowserExtractedResourceFile | null {
+    const url = String(input?.url || '').trim()
+    if (!url) {
+      return null
+    }
+    let fileName = String(input?.fileName || '').trim()
+    if (!fileName) {
+      try {
+        fileName = decodeURIComponent(path.basename(new URL(url).pathname))
+      } catch {
+        fileName = ''
+      }
+    }
+    return {
+      fileName: fileName || 'media',
+      mimeType: input?.mimeType,
+      requestHeaders: input?.requestHeaders,
+      resourceKey: input?.resourceKey,
+      streamType: input?.streamType,
+      url,
+    }
+  }
+
+  function deriveTranscodedFileName(fileName: string, outputFormat: string) {
+    const parsedName = path.parse(String(fileName || '').trim() || 'media')
+    const baseName = parsedName.name || parsedName.base || 'media'
+    return `${baseName}.${outputFormat}`
+  }
+
+  async function transcodeEmbeddedBrowserCapturedResourceForRenderer(
+    tabId: string,
+    payload: EmbeddedBrowserCapturedResourceTranscodePayload,
+  ): Promise<EmbeddedBrowserCapturedResourceTranscodeResponse> {
+    const normalizedTabId = String(tabId || '').trim()
+    const resourceKey = String(payload.resourceKey || payload.resource?.resourceKey || '').trim()
+    const outputFormat = normalizeEmbeddedBrowserResourceTranscodeFormat(payload.outputFormat || 'mp4')
+    if (!normalizedTabId || (!resourceKey && !payload.resource?.url)) {
+      return {
+        error: '缺少要转格式的媒体资源',
+        ok: false,
+      }
+    }
+    if (!outputFormat) {
+      return {
+        error: '请输入 1-12 位字母或数字格式，例如 mp3、m4a、mp4',
+        ok: false,
+      }
+    }
+
+    try {
+      let resource = createPayloadTranscodeResource(payload.resource)
+      if (resourceKey) {
+        const extractedResource = await withEmbeddedBrowserView(
+          normalizedTabId,
+          async (view) => extractEmbeddedBrowserResourceFromFrames(view, resourceKey),
+        )
+        resource = extractedResource || resource
+      }
+      if (!resource) {
+        return {
+          error: '当前媒体资源还没有整理完成，先继续播放几秒再试试',
+          ok: false,
+        }
+      }
+
+      const defaultFileName = String(payload.suggestedFileName || '').trim()
+        || deriveTranscodedFileName(resource.fileName, outputFormat)
+      const mainWindow = options.getMainWindow()
+      const targetWindow = mainWindow && !mainWindow.isDestroyed()
+        ? mainWindow
+        : undefined
+      const saveDialogOptions = {
+        defaultPath: path.join(app.getPath('downloads'), defaultFileName),
+        filters: [
+          { extensions: [outputFormat], name: `${outputFormat.toUpperCase()} Media` },
+        ],
+        showsTagField: false,
+      }
+      const saveResult = targetWindow
+        ? await dialog.showSaveDialog(targetWindow, saveDialogOptions)
+        : await dialog.showSaveDialog(saveDialogOptions)
+      if (saveResult.canceled || !saveResult.filePath) {
+        return {
+          cancelled: true,
+          ok: false,
+        }
+      }
+
+      const result = await transcodeEmbeddedBrowserResource({
+        ffmpegPath: payload.ffmpegPath,
+        outputFormat,
+        outputPath: saveResult.filePath,
+        resource,
+      })
+      return {
+        ffmpegPath: result.ffmpegPath,
+        ok: true,
+        outputPath: result.outputPath,
+      }
+    } catch (error) {
+      runtimeLogger.warn('embedded browser resource transcode failed', {
+        error: error instanceof Error ? error.message : String(error),
+        resourceKey,
+        tabId: normalizedTabId,
+      })
+      return {
+        error: error instanceof Error ? error.message : String(error),
+        ok: false,
+      }
+    }
+  }
+
   async function downloadEmbeddedBrowserManifestResourceForRenderer(
     tabId: string,
     payload: EmbeddedBrowserHlsDownloadPayload | EmbeddedBrowserMpdDownloadPayload,
@@ -964,10 +1082,88 @@ export function createEmbeddedBrowserMainController(
       state: 'loading',
       url: embeddedBrowserLastCommittedUrls.get(normalizedTabId) || view.webContents.getURL() || undefined,
     })
-	        view.webContents.reloadIgnoringCache()
+    view.webContents.reloadIgnoringCache()
     emitEmbeddedBrowserTabSnapshot(normalizedTabId, view, {
       details: 'reload-requested',
     })
+  }
+
+  async function handleClearCacheAndReload(tabId: string) {
+    const normalizedTabId = String(tabId || '').trim()
+    if (!normalizedTabId) {
+      return false
+    }
+    const view = getEmbeddedBrowserView(normalizedTabId)
+    if (!view || view.webContents.isDestroyed()) {
+      return false
+    }
+    const browserSession = view.webContents.session
+    await browserSession.clearCache()
+    await browserSession.clearStorageData({
+      storages: ['cachestorage', 'serviceworkers'] as any,
+    }).catch(() => undefined)
+    const clearHostResolverCache = (browserSession as any).clearHostResolverCache
+    if (typeof clearHostResolverCache === 'function') {
+      await clearHostResolverCache.call(browserSession).catch(() => undefined)
+    }
+    emitEmbeddedBrowserTabState(normalizedTabId, view, {
+      details: 'clear-cache-reload',
+      state: 'loading',
+      url: embeddedBrowserLastCommittedUrls.get(normalizedTabId) || view.webContents.getURL() || undefined,
+    })
+    view.webContents.reloadIgnoringCache()
+    emitEmbeddedBrowserTabSnapshot(normalizedTabId, view, {
+      details: 'clear-cache-reload-requested',
+    })
+    return true
+  }
+
+  async function handleResetPageStorageAndReload(tabId: string) {
+    const normalizedTabId = String(tabId || '').trim()
+    if (!normalizedTabId) {
+      return false
+    }
+    const currentView = getEmbeddedBrowserView(normalizedTabId)
+    if (!currentView || currentView.webContents.isDestroyed()) {
+      return false
+    }
+    const targetWindow = options.getMainWindow()
+    if (!targetWindow || targetWindow.isDestroyed()) {
+      return false
+    }
+    const reloadUrl = embeddedBrowserLastCommittedUrls.get(normalizedTabId) || currentView.webContents.getURL() || ''
+    if (!reloadUrl) {
+      return false
+    }
+    let reloadOrigin = ''
+    try {
+      const parsedUrl = new URL(reloadUrl)
+      reloadOrigin = parsedUrl.origin === 'null' ? '' : parsedUrl.origin
+    } catch {
+      reloadOrigin = ''
+    }
+    if (!reloadOrigin) {
+      return false
+    }
+    const previousCaptureState = getEmbeddedBrowserResourceCaptureSnapshot(normalizedTabId)
+    const browserSession = currentView.webContents.session
+    await browserSession.clearStorageData({
+      origin: reloadOrigin,
+      storages: ['cachestorage', 'serviceworkers', 'indexdb', 'websql'] as any,
+    }).catch(() => undefined)
+    emitEmbeddedBrowserTabState(normalizedTabId, currentView, {
+      details: 'reset-page-storage',
+      state: 'loading',
+      url: reloadUrl,
+    })
+    closeEmbeddedBrowserTab(targetWindow, normalizedTabId)
+    if (previousCaptureState.deepCaptureEnabled) {
+      startEmbeddedBrowserDeepResourceCapture(normalizedTabId)
+    } else if (previousCaptureState.enabled) {
+      startEmbeddedBrowserResourceCapture(normalizedTabId)
+    }
+    await loadEmbeddedBrowserUrl(targetWindow, normalizedTabId, reloadUrl, 'navigate-exception')
+    return true
   }
 
   async function handleGoBack(tabId: string) {
@@ -1295,6 +1491,7 @@ export function createEmbeddedBrowserMainController(
     registerEmbeddedBrowserMainIpcHandlers({
       activateTab: handleActivateTab,
       cleanupDownloadFile: handleCleanupDownloadFile,
+      clearBrowserCache: handleClearCacheAndReload,
       clearCapturedResources: (tabId) => clearEmbeddedBrowserCapturedResources(String(tabId || '').trim()),
       clearCatchMediaCache: (tabId) => handleCatchToolkitAction(tabId, 'clearCatchMediaCache', 'clear cache'),
       closeAll: handleCloseAll,
@@ -1316,6 +1513,7 @@ export function createEmbeddedBrowserMainController(
       previewResource: handlePreviewResource,
       readResource: handleReadResource,
       reload: handleReload,
+      resetPageStorage: handleResetPageStorageAndReload,
       resolveFavicon: resolveEmbeddedBrowserBookmarkFavicon,
       restartCatchMediaCapture: (tabId) => handleCatchToolkitAction(tabId, 'restartCatchMediaCapture', 'restart'),
       saveResource: saveEmbeddedBrowserCapturedResourceForRenderer,
@@ -1323,6 +1521,7 @@ export function createEmbeddedBrowserMainController(
       startCapturedResources: (tabId) => startEmbeddedBrowserResourceCapture(String(tabId || '').trim()),
       startDeepResourceCapture: handleStartDeepResourceCapture,
       stopCapturedResources: (tabId) => stopEmbeddedBrowserResourceCapture(String(tabId || '').trim()),
+      transcodeResource: transcodeEmbeddedBrowserCapturedResourceForRenderer,
       updateCatchToolkitState: handleUpdateCatchToolkitState,
     })
   }

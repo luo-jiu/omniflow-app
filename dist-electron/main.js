@@ -12,6 +12,7 @@ import fs$3 from "fs";
 import { Buffer as Buffer$1 } from "node:buffer";
 import { spawn } from "node:child_process";
 import os from "node:os";
+import { randomUUID } from "node:crypto";
 const DOWNLOAD_REQUEST_TIMEOUT_MS = 6e4;
 async function downloadUrlToFile(url, targetPath, headers = {}, redirectDepth = 0) {
   const MAX_REDIRECT_DEPTH = 3;
@@ -1077,6 +1078,8 @@ function registerEmbeddedBrowserMainIpcHandlers(handlers) {
     async (event, tabId, pageUrl, sourceUrl, fileName) => handlers.openMappedFile(event.sender, tabId, pageUrl, sourceUrl, fileName)
   );
   ipcMain.handle("embedded-browser:reload", async (_event, tabId) => handlers.reload(tabId));
+  ipcMain.handle("embedded-browser:clear-cache-reload", async (_event, tabId) => handlers.clearBrowserCache(tabId));
+  ipcMain.handle("embedded-browser:reset-page-storage", async (_event, tabId) => handlers.resetPageStorage(tabId));
   ipcMain.handle("embedded-browser:go-back", async (_event, tabId) => handlers.goBack(tabId));
   ipcMain.handle("embedded-browser:go-forward", async (_event, tabId) => handlers.goForward(tabId));
   ipcMain.handle("embedded-browser:resource:list", (_event, tabId) => handlers.listCapturedResources(tabId));
@@ -1105,6 +1108,10 @@ function registerEmbeddedBrowserMainIpcHandlers(handlers) {
   ipcMain.handle(
     "embedded-browser:resource:save",
     async (_event, tabId, payload) => handlers.saveResource(tabId, payload)
+  );
+  ipcMain.handle(
+    "embedded-browser:resource:transcode",
+    async (_event, tabId, payload) => handlers.transcodeResource(tabId, payload)
   );
   ipcMain.handle(
     "embedded-browser:resource:download-hls",
@@ -4415,6 +4422,17 @@ function createEmbeddedBrowserResourceProbeScript() {
   });
 }
 const embeddedBrowserProbeNewDocumentScriptIds = /* @__PURE__ */ new WeakMap();
+const EMBEDDED_BROWSER_POPUP_PLACEHOLDER_URLS = /* @__PURE__ */ new Set(["", "about:blank"]);
+function isEmbeddedBrowserPopupPlaceholderUrl(url) {
+  return EMBEDDED_BROWSER_POPUP_PLACEHOLDER_URLS.has(String(url || "").trim().toLowerCase());
+}
+function isEmbeddedBrowserPopupNavigableUrl(url) {
+  const normalizedUrl = String(url || "").trim();
+  if (!normalizedUrl || isEmbeddedBrowserPopupPlaceholderUrl(normalizedUrl)) {
+    return false;
+  }
+  return !normalizedUrl.toLowerCase().startsWith("javascript:");
+}
 function createEmbeddedBrowserView(options) {
   const existingView = options.views.get(options.tabId);
   if (existingView && !existingView.webContents.isDestroyed()) {
@@ -4543,9 +4561,78 @@ function createEmbeddedBrowserView(options) {
       });
     }
   });
+  const loadPopupUrlInCurrentTab = (url, details) => {
+    const normalizedUrl = String(url || "").trim();
+    if (!isEmbeddedBrowserPopupNavigableUrl(normalizedUrl) || view.webContents.isDestroyed()) {
+      return false;
+    }
+    options.currentUrls.set(options.tabId, normalizedUrl);
+    options.emitTabState(options.tabId, view, {
+      details,
+      state: "loading",
+      url: normalizedUrl
+    });
+    void view.webContents.loadURL(normalizedUrl).catch((error) => {
+      runtimeLogger.warn("embedded browser popup navigation failed", {
+        error: error instanceof Error ? error.message : String(error),
+        tabId: options.tabId,
+        url: normalizedUrl
+      });
+    });
+    return true;
+  };
   view.webContents.setWindowOpenHandler(({ url }) => {
-    void view.webContents.loadURL(url);
+    if (isEmbeddedBrowserPopupPlaceholderUrl(url)) {
+      return {
+        action: "allow",
+        overrideBrowserWindowOptions: {
+          frame: false,
+          show: false,
+          skipTaskbar: true
+        }
+      };
+    }
+    loadPopupUrlInCurrentTab(url, "window-open");
     return { action: "deny" };
+  });
+  view.webContents.on("did-create-window", (popupWindow, details) => {
+    let closeTimer = null;
+    const cleanupPopup = () => {
+      if (closeTimer) {
+        clearTimeout(closeTimer);
+        closeTimer = null;
+      }
+      if (!popupWindow.webContents.isDestroyed()) {
+        popupWindow.webContents.removeListener("will-navigate", handlePopupNavigation);
+        popupWindow.webContents.removeListener("did-start-navigation", handlePopupNavigation);
+      }
+      popupWindow.removeListener("closed", cleanupPopup);
+    };
+    const closePopup = () => {
+      cleanupPopup();
+      if (!popupWindow.isDestroyed()) {
+        popupWindow.close();
+      }
+    };
+    const handlePopupNavigation = (event, url, _isInPlace, isMainFrame) => {
+      const targetIsMainFrame = typeof event.isMainFrame === "boolean" ? event.isMainFrame : isMainFrame;
+      if (targetIsMainFrame === false) {
+        return;
+      }
+      const targetUrl = String(event.url || url || "").trim();
+      if (!loadPopupUrlInCurrentTab(targetUrl, "window-open-placeholder")) {
+        return;
+      }
+      event.preventDefault();
+      closePopup();
+    };
+    popupWindow.on("closed", cleanupPopup);
+    popupWindow.webContents.on("will-navigate", handlePopupNavigation);
+    popupWindow.webContents.on("did-start-navigation", handlePopupNavigation);
+    closeTimer = setTimeout(closePopup, 15e3);
+    if (loadPopupUrlInCurrentTab(details.url, "window-open-created")) {
+      closePopup();
+    }
   });
   return view;
 }
@@ -4635,6 +4722,13 @@ const FFMPEG_HTTP_HEADER_BLACKLIST = /* @__PURE__ */ new Set([
   "host",
   "range"
 ]);
+function normalizeEmbeddedBrowserResourceTranscodeFormat(input) {
+  const normalized = String(input || "").trim().replace(/^\.+/, "").toLowerCase();
+  if (!/^[a-z0-9]{1,12}$/.test(normalized)) {
+    return null;
+  }
+  return normalized;
+}
 function sanitizeFileName$1(input) {
   const normalized = String(input || "").trim().replace(/[\\/:*?"<>|]+/g, "_");
   return normalized || "media";
@@ -4688,6 +4782,35 @@ function buildEmbeddedBrowserResourceMergeArgs(request) {
     request.audio.path,
     "-c",
     "copy",
+    request.outputPath
+  ];
+}
+function buildEmbeddedBrowserResourceTranscodeArgs(request) {
+  const normalizedFormat = normalizeEmbeddedBrowserResourceTranscodeFormat(request.outputFormat);
+  if (!normalizedFormat) {
+    throw new Error("请输入 1-12 位字母或数字格式，例如 mp3、m4a、mp4");
+  }
+  const outputArgsByFormat = {
+    aac: ["-vn", "-c:a", "aac", "-b:a", "192k"],
+    aiff: ["-vn"],
+    alac: ["-vn", "-c:a", "alac"],
+    flac: ["-vn", "-c:a", "flac"],
+    m4a: ["-vn", "-c:a", "aac", "-b:a", "192k"],
+    mp3: ["-vn", "-c:a", "libmp3lame", "-b:a", "192k"],
+    ogg: ["-vn", "-c:a", "libvorbis", "-q:a", "5"],
+    opus: ["-vn", "-c:a", "libopus", "-b:a", "128k"],
+    wav: ["-vn", "-c:a", "pcm_s16le"],
+    weba: ["-vn", "-c:a", "libopus", "-b:a", "128k"],
+    webm: ["-map", "0:v:0?", "-map", "0:a:0?", "-c:v", "libvpx-vp9", "-c:a", "libopus"],
+    wma: ["-vn"]
+  };
+  const outputArgs = outputArgsByFormat[normalizedFormat] || ["-map", "0:v:0?", "-map", "0:a:0?", "-c:v", "libx264", "-c:a", "aac", "-movflags", "+faststart"];
+  return [
+    "-y",
+    ...request.input.inputArgs,
+    "-i",
+    request.input.path,
+    ...outputArgs,
     request.outputPath
   ];
 }
@@ -4773,6 +4896,53 @@ async function mergeEmbeddedBrowserResourceTracks(request) {
       audio,
       outputPath: request.outputPath,
       video
+    });
+    const result = await new Promise((resolve, reject) => {
+      const stdout = [];
+      const stderr = [];
+      const child = spawn(ffmpegPath, commandArgs, {
+        stdio: ["ignore", "pipe", "pipe"]
+      });
+      child.stdout.on("data", (chunk) => {
+        stdout.push(String(chunk));
+      });
+      child.stderr.on("data", (chunk) => {
+        stderr.push(String(chunk));
+      });
+      child.once("error", (error) => {
+        reject(error);
+      });
+      child.once("exit", (code) => {
+        if (code === 0) {
+          resolve({
+            commandArgs,
+            ffmpegPath,
+            outputPath: request.outputPath,
+            stderr: stderr.join(""),
+            stdout: stdout.join("")
+          });
+          return;
+        }
+        reject(new Error(stderr.join("").trim() || `ffmpeg 退出码异常: ${code}`));
+      });
+    });
+    return result;
+  } finally {
+    await cleanupEmbeddedBrowserResourceMergeTempDir(tempDir).catch(() => void 0);
+  }
+}
+async function transcodeEmbeddedBrowserResource(request) {
+  const ffmpegPath = await resolveEmbeddedBrowserFfmpegPath(request.ffmpegPath);
+  if (!ffmpegPath) {
+    throw new Error("未找到可用的 ffmpeg，可在系统环境变量里配置，或确认 /opt/homebrew/bin/ffmpeg 可执行");
+  }
+  const tempDir = await createEmbeddedBrowserResourceMergeTempDir();
+  try {
+    const input = await prepareResourceMergeInput(tempDir, request.resource);
+    const commandArgs = buildEmbeddedBrowserResourceTranscodeArgs({
+      input,
+      outputFormat: request.outputFormat,
+      outputPath: request.outputPath
     });
     const result = await new Promise((resolve, reject) => {
       const stdout = [];
@@ -5331,6 +5501,105 @@ function createEmbeddedBrowserMainController(options) {
       };
     }
   }
+  function createPayloadTranscodeResource(input) {
+    const url = String((input == null ? void 0 : input.url) || "").trim();
+    if (!url) {
+      return null;
+    }
+    let fileName = String((input == null ? void 0 : input.fileName) || "").trim();
+    if (!fileName) {
+      try {
+        fileName = decodeURIComponent(path.basename(new URL(url).pathname));
+      } catch {
+        fileName = "";
+      }
+    }
+    return {
+      fileName: fileName || "media",
+      mimeType: input == null ? void 0 : input.mimeType,
+      requestHeaders: input == null ? void 0 : input.requestHeaders,
+      resourceKey: input == null ? void 0 : input.resourceKey,
+      streamType: input == null ? void 0 : input.streamType,
+      url
+    };
+  }
+  function deriveTranscodedFileName(fileName, outputFormat) {
+    const parsedName = path.parse(String(fileName || "").trim() || "media");
+    const baseName = parsedName.name || parsedName.base || "media";
+    return `${baseName}.${outputFormat}`;
+  }
+  async function transcodeEmbeddedBrowserCapturedResourceForRenderer(tabId, payload) {
+    var _a, _b;
+    const normalizedTabId = String(tabId || "").trim();
+    const resourceKey = String(payload.resourceKey || ((_a = payload.resource) == null ? void 0 : _a.resourceKey) || "").trim();
+    const outputFormat = normalizeEmbeddedBrowserResourceTranscodeFormat(payload.outputFormat || "mp4");
+    if (!normalizedTabId || !resourceKey && !((_b = payload.resource) == null ? void 0 : _b.url)) {
+      return {
+        error: "缺少要转格式的媒体资源",
+        ok: false
+      };
+    }
+    if (!outputFormat) {
+      return {
+        error: "请输入 1-12 位字母或数字格式，例如 mp3、m4a、mp4",
+        ok: false
+      };
+    }
+    try {
+      let resource = createPayloadTranscodeResource(payload.resource);
+      if (resourceKey) {
+        const extractedResource = await withEmbeddedBrowserView(
+          normalizedTabId,
+          async (view) => extractEmbeddedBrowserResourceFromFrames(view, resourceKey)
+        );
+        resource = extractedResource || resource;
+      }
+      if (!resource) {
+        return {
+          error: "当前媒体资源还没有整理完成，先继续播放几秒再试试",
+          ok: false
+        };
+      }
+      const defaultFileName = String(payload.suggestedFileName || "").trim() || deriveTranscodedFileName(resource.fileName, outputFormat);
+      const mainWindow2 = options.getMainWindow();
+      const targetWindow = mainWindow2 && !mainWindow2.isDestroyed() ? mainWindow2 : void 0;
+      const saveDialogOptions = {
+        defaultPath: path.join(app.getPath("downloads"), defaultFileName),
+        filters: [
+          { extensions: [outputFormat], name: `${outputFormat.toUpperCase()} Media` }
+        ],
+        showsTagField: false
+      };
+      const saveResult = targetWindow ? await dialog.showSaveDialog(targetWindow, saveDialogOptions) : await dialog.showSaveDialog(saveDialogOptions);
+      if (saveResult.canceled || !saveResult.filePath) {
+        return {
+          cancelled: true,
+          ok: false
+        };
+      }
+      const result = await transcodeEmbeddedBrowserResource({
+        ffmpegPath: payload.ffmpegPath,
+        outputFormat,
+        outputPath: saveResult.filePath,
+        resource
+      });
+      return {
+        ffmpegPath: result.ffmpegPath,
+        ok: true,
+        outputPath: result.outputPath
+      };
+    } catch (error) {
+      runtimeLogger.warn("embedded browser resource transcode failed", {
+        error: error instanceof Error ? error.message : String(error),
+        resourceKey,
+        tabId: normalizedTabId
+      });
+      return {
+        error: error instanceof Error ? error.message : String(error),
+        ok: false
+      };
+    }
+  }
   async function downloadEmbeddedBrowserManifestResourceForRenderer(tabId, payload, kind) {
     const normalizedTabId = String(tabId || "").trim();
     const manifestUrl = String(payload.manifestUrl || "").trim();
@@ -5659,6 +5928,82 @@ function createEmbeddedBrowserMainController(options) {
       details: "reload-requested"
     });
   }
+  async function handleClearCacheAndReload(tabId) {
+    const normalizedTabId = String(tabId || "").trim();
+    if (!normalizedTabId) {
+      return false;
+    }
+    const view = getEmbeddedBrowserView(normalizedTabId);
+    if (!view || view.webContents.isDestroyed()) {
+      return false;
+    }
+    const browserSession = view.webContents.session;
+    await browserSession.clearCache();
+    await browserSession.clearStorageData({
+      storages: ["cachestorage", "serviceworkers"]
+    }).catch(() => void 0);
+    const clearHostResolverCache = browserSession.clearHostResolverCache;
+    if (typeof clearHostResolverCache === "function") {
+      await clearHostResolverCache.call(browserSession).catch(() => void 0);
+    }
+    emitEmbeddedBrowserTabState(normalizedTabId, view, {
+      details: "clear-cache-reload",
+      state: "loading",
+      url: embeddedBrowserLastCommittedUrls.get(normalizedTabId) || view.webContents.getURL() || void 0
+    });
+    view.webContents.reloadIgnoringCache();
+    emitEmbeddedBrowserTabSnapshot(normalizedTabId, view, {
+      details: "clear-cache-reload-requested"
+    });
+    return true;
+  }
+  async function handleResetPageStorageAndReload(tabId) {
+    const normalizedTabId = String(tabId || "").trim();
+    if (!normalizedTabId) {
+      return false;
+    }
+    const currentView = getEmbeddedBrowserView(normalizedTabId);
+    if (!currentView || currentView.webContents.isDestroyed()) {
+      return false;
+    }
+    const targetWindow = options.getMainWindow();
+    if (!targetWindow || targetWindow.isDestroyed()) {
+      return false;
+    }
+    const reloadUrl = embeddedBrowserLastCommittedUrls.get(normalizedTabId) || currentView.webContents.getURL() || "";
+    if (!reloadUrl) {
+      return false;
+    }
+    let reloadOrigin = "";
+    try {
+      const parsedUrl = new URL(reloadUrl);
+      reloadOrigin = parsedUrl.origin === "null" ? "" : parsedUrl.origin;
+    } catch {
+      reloadOrigin = "";
+    }
+    if (!reloadOrigin) {
+      return false;
+    }
+    const previousCaptureState = getEmbeddedBrowserResourceCaptureSnapshot(normalizedTabId);
+    const browserSession = currentView.webContents.session;
+    await browserSession.clearStorageData({
+      origin: reloadOrigin,
+      storages: ["cachestorage", "serviceworkers", "indexdb", "websql"]
+    }).catch(() => void 0);
+    emitEmbeddedBrowserTabState(normalizedTabId, currentView, {
+      details: "reset-page-storage",
+      state: "loading",
+      url: reloadUrl
+    });
+    closeEmbeddedBrowserTab(targetWindow, normalizedTabId);
+    if (previousCaptureState.deepCaptureEnabled) {
+      startEmbeddedBrowserDeepResourceCapture(normalizedTabId);
+    } else if (previousCaptureState.enabled) {
+      startEmbeddedBrowserResourceCapture(normalizedTabId);
+    }
+    await loadEmbeddedBrowserUrl(targetWindow, normalizedTabId, reloadUrl, "navigate-exception");
+    return true;
+  }
   async function handleGoBack(tabId) {
     const normalizedTabId = String(tabId || "").trim();
     if (!normalizedTabId) {
@@ -5960,6 +6305,7 @@ function createEmbeddedBrowserMainController(options) {
     registerEmbeddedBrowserMainIpcHandlers({
       activateTab: handleActivateTab,
       cleanupDownloadFile: handleCleanupDownloadFile,
+      clearBrowserCache: handleClearCacheAndReload,
       clearCapturedResources: (tabId) => clearEmbeddedBrowserCapturedResources(String(tabId || "").trim()),
       clearCatchMediaCache: (tabId) => handleCatchToolkitAction(tabId, "clearCatchMediaCache", "clear cache"),
       closeAll: handleCloseAll,
@@ -5981,6 +6327,7 @@ function createEmbeddedBrowserMainController(options) {
       previewResource: handlePreviewResource,
       readResource: handleReadResource,
       reload: handleReload,
+      resetPageStorage: handleResetPageStorageAndReload,
       resolveFavicon: resolveEmbeddedBrowserBookmarkFavicon,
       restartCatchMediaCapture: (tabId) => handleCatchToolkitAction(tabId, "restartCatchMediaCapture", "restart"),
       saveResource: saveEmbeddedBrowserCapturedResourceForRenderer,
@@ -5988,6 +6335,7 @@ function createEmbeddedBrowserMainController(options) {
       startCapturedResources: (tabId) => startEmbeddedBrowserResourceCapture(String(tabId || "").trim()),
       startDeepResourceCapture: handleStartDeepResourceCapture,
       stopCapturedResources: (tabId) => stopEmbeddedBrowserResourceCapture(String(tabId || "").trim()),
+      transcodeResource: transcodeEmbeddedBrowserCapturedResourceForRenderer,
       updateCatchToolkitState: handleUpdateCatchToolkitState
     });
   }
@@ -6052,6 +6400,252 @@ function registerWindowControlIpcHandlers(options) {
       }, WINDOW_ACTIVATE_TOPMOST_DURATION_MS);
     }
     return true;
+  });
+}
+function createOverlayWindowController(options) {
+  let overlayWin = null;
+  let readyPromise = null;
+  let readyResolve = null;
+  let boundsSyncScheduled = false;
+  let screenListenerAttached = false;
+  function ensureCreated() {
+    if (overlayWin && !overlayWin.isDestroyed()) {
+      return overlayWin;
+    }
+    const mainWindow2 = options.getMainWindow();
+    if (!mainWindow2 || mainWindow2.isDestroyed()) {
+      return null;
+    }
+    if (!screenListenerAttached) {
+      screen.on("display-metrics-changed", () => {
+        syncBoundsFromMain();
+      });
+      screenListenerAttached = true;
+    }
+    const win = new BrowserWindow({
+      parent: mainWindow2,
+      transparent: true,
+      frame: false,
+      resizable: false,
+      movable: false,
+      minimizable: false,
+      maximizable: false,
+      closable: false,
+      skipTaskbar: true,
+      hasShadow: false,
+      focusable: true,
+      show: false,
+      backgroundColor: "#00000000",
+      acceptFirstMouse: true,
+      webPreferences: {
+        preload: options.preloadPath,
+        devTools: true
+      }
+    });
+    overlayWin = win;
+    win.setIgnoreMouseEvents(true, { forward: true });
+    win.setContentBounds(mainWindow2.getContentBounds());
+    readyPromise = new Promise((resolve) => {
+      readyResolve = resolve;
+    });
+    win.webContents.on("render-process-gone", (_event, details) => {
+      console.error("[overlay] render-process-gone", details);
+    });
+    if (options.devServerUrl) {
+      const url = options.devServerUrl.replace(/\/$/, "") + "/overlay.html";
+      void win.loadURL(url);
+    } else {
+      void win.loadFile(path.join(options.rendererDist, "overlay.html"));
+    }
+    win.on("closed", () => {
+      if (overlayWin === win) {
+        overlayWin = null;
+        readyPromise = null;
+        readyResolve = null;
+      }
+    });
+    return win;
+  }
+  async function ensureReady() {
+    const win = ensureCreated();
+    if (!win) return;
+    if (readyPromise) await readyPromise;
+  }
+  function markReady(fromWebContents) {
+    if (!overlayWin || overlayWin.isDestroyed()) return;
+    if (fromWebContents !== overlayWin.webContents) return;
+    if (readyResolve) {
+      const resolve = readyResolve;
+      readyResolve = null;
+      resolve();
+    }
+  }
+  function syncBoundsFromMain() {
+    if (boundsSyncScheduled) return;
+    boundsSyncScheduled = true;
+    setImmediate(() => {
+      boundsSyncScheduled = false;
+      if (!overlayWin || overlayWin.isDestroyed()) return;
+      const mainWindow2 = options.getMainWindow();
+      if (!mainWindow2 || mainWindow2.isDestroyed()) return;
+      try {
+        overlayWin.setContentBounds(mainWindow2.getContentBounds());
+      } catch {
+      }
+    });
+  }
+  function showSpec(spec) {
+    const win = ensureCreated();
+    if (!win) return;
+    void (async () => {
+      await ensureReady();
+      if (!overlayWin || overlayWin.isDestroyed()) return;
+      syncBoundsFromMain();
+      if (!overlayWin.isVisible()) {
+        overlayWin.show();
+      }
+      overlayWin.webContents.send("overlay:host:show", spec);
+      overlayWin.focus();
+    })();
+  }
+  function dismissSpec(payload) {
+    if (!overlayWin || overlayWin.isDestroyed()) return;
+    overlayWin.webContents.send("overlay:host:dismiss-from-main", payload);
+  }
+  function setClickThrough(ignore) {
+    if (!overlayWin || overlayWin.isDestroyed()) return;
+    if (ignore) {
+      overlayWin.setIgnoreMouseEvents(true, { forward: true });
+      const mainWindow2 = options.getMainWindow();
+      if (mainWindow2 && !mainWindow2.isDestroyed()) {
+        mainWindow2.focus();
+      }
+    } else {
+      overlayWin.setIgnoreMouseEvents(false);
+    }
+  }
+  function hideIdle() {
+    if (!overlayWin || overlayWin.isDestroyed()) return;
+    if (overlayWin.isVisible()) {
+      overlayWin.hide();
+    }
+  }
+  function destroy() {
+    if (overlayWin && !overlayWin.isDestroyed()) {
+      overlayWin.destroy();
+    }
+    overlayWin = null;
+    readyPromise = null;
+  }
+  return {
+    ensureReady,
+    markReady,
+    getWindow: () => overlayWin,
+    showSpec,
+    dismissSpec,
+    setClickThrough,
+    hideIdle,
+    syncBoundsFromMain,
+    destroy
+  };
+}
+const OVERLAY_REQUEST_TIMEOUT_MS = 10 * 60 * 1e3;
+function registerOverlayWindowIpcHandlers(controller) {
+  let currentRequest = null;
+  const queue = [];
+  function cleanupPending(pending) {
+    clearTimeout(pending.timeoutTimer);
+    if (!pending.senderContents.isDestroyed()) {
+      pending.senderContents.removeListener("destroyed", pending.senderDestroyedListener);
+    }
+  }
+  function promote(next) {
+    currentRequest = next;
+    controller.setClickThrough(false);
+    const spec = {
+      requestId: next.requestId,
+      type: next.type,
+      props: next.props
+    };
+    controller.showSpec(spec);
+  }
+  function advanceQueueOrIdle() {
+    const next = queue.shift();
+    if (next) {
+      promote(next);
+    } else {
+      currentRequest = null;
+      controller.setClickThrough(true);
+      controller.hideIdle();
+    }
+  }
+  function rejectAndDrop(pending, reason) {
+    cleanupPending(pending);
+    pending.reject(reason);
+  }
+  function handleSenderDestroyed(pending) {
+    if (currentRequest === pending) {
+      controller.dismissSpec({ requestId: pending.requestId });
+      rejectAndDrop(pending, new Error("overlay sender destroyed"));
+      advanceQueueOrIdle();
+      return;
+    }
+    const index = queue.indexOf(pending);
+    if (index >= 0) {
+      queue.splice(index, 1);
+      rejectAndDrop(pending, new Error("overlay sender destroyed"));
+    }
+  }
+  function handleTimeout(pending) {
+    if (currentRequest === pending) {
+      controller.dismissSpec({ requestId: pending.requestId });
+      rejectAndDrop(pending, new Error("overlay request timed out"));
+      advanceQueueOrIdle();
+      return;
+    }
+    const index = queue.indexOf(pending);
+    if (index >= 0) {
+      queue.splice(index, 1);
+      rejectAndDrop(pending, new Error("overlay request timed out"));
+    }
+  }
+  ipcMain.handle("overlay:open", async (event, payload) => {
+    const requestId = randomUUID();
+    return new Promise((resolve, reject) => {
+      const pending = {
+        requestId,
+        type: payload == null ? void 0 : payload.type,
+        props: payload == null ? void 0 : payload.props,
+        resolve,
+        reject,
+        senderContents: event.sender,
+        senderDestroyedListener: () => handleSenderDestroyed(pending),
+        timeoutTimer: setTimeout(() => handleTimeout(pending), OVERLAY_REQUEST_TIMEOUT_MS)
+      };
+      event.sender.once("destroyed", pending.senderDestroyedListener);
+      if (currentRequest) {
+        queue.push(pending);
+      } else {
+        promote(pending);
+      }
+    });
+  });
+  ipcMain.on("overlay:host:resolve", (_event, payload) => {
+    if (!currentRequest || currentRequest.requestId !== (payload == null ? void 0 : payload.requestId)) return;
+    const pending = currentRequest;
+    cleanupPending(pending);
+    pending.resolve(payload.result);
+    advanceQueueOrIdle();
+  });
+  ipcMain.on("overlay:host:ready", (event) => {
+    controller.markReady(event.sender);
+  });
+  ipcMain.on("overlay:host:dismiss", (_event, payload) => {
+    if (!currentRequest || currentRequest.requestId !== (payload == null ? void 0 : payload.requestId)) return;
+    const pending = currentRequest;
+    cleanupPending(pending);
+    pending.resolve({ type: "cancel", reason: payload.reason ?? "dismiss" });
+    advanceQueueOrIdle();
   });
 }
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -6193,6 +6787,12 @@ const embeddedBrowserMainController = createEmbeddedBrowserMainController({
   debugEnabled: ENABLE_EMBEDDED_BROWSER_DEBUG,
   getMainWindow: () => mainWindow
 });
+const overlayWindowController = createOverlayWindowController({
+  getMainWindow: () => mainWindow,
+  preloadPath: path.join(MAIN_DIST, "preload.mjs"),
+  rendererDist: RENDERER_DIST,
+  devServerUrl: VITE_DEV_SERVER_URL
+});
 function createWindow() {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.show();
@@ -6225,15 +6825,45 @@ function createWindow() {
   }
   win.on("move", () => {
     scheduleSaveWindowState(win);
+    overlayWindowController.syncBoundsFromMain();
   });
   win.on("resize", () => {
     scheduleSaveWindowState(win);
+    overlayWindowController.syncBoundsFromMain();
   });
   win.on("maximize", () => {
     scheduleSaveWindowState(win);
+    overlayWindowController.syncBoundsFromMain();
   });
   win.on("unmaximize", () => {
     scheduleSaveWindowState(win);
+    overlayWindowController.syncBoundsFromMain();
+  });
+  win.on("enter-full-screen", () => {
+    overlayWindowController.syncBoundsFromMain();
+    setTimeout(() => overlayWindowController.syncBoundsFromMain(), 300);
+  });
+  win.on("leave-full-screen", () => {
+    overlayWindowController.syncBoundsFromMain();
+    setTimeout(() => overlayWindowController.syncBoundsFromMain(), 300);
+  });
+  win.on("minimize", () => {
+    const overlay = overlayWindowController.getWindow();
+    if (overlay && !overlay.isDestroyed() && overlay.isVisible()) {
+      overlay.hide();
+    }
+  });
+  win.on("restore", () => {
+    overlayWindowController.syncBoundsFromMain();
+  });
+  win.on("hide", () => {
+    const overlay = overlayWindowController.getWindow();
+    if (overlay && !overlay.isDestroyed() && overlay.isVisible()) {
+      overlay.hide();
+    }
+  });
+  win.on("show", () => {
+    overlayWindowController.syncBoundsFromMain();
   });
   win.on("close", (event) => {
     saveWindowState(win);
@@ -6246,6 +6876,7 @@ function createWindow() {
     if (mainWindow === win) {
       mainWindow = null;
     }
+    overlayWindowController.destroy();
   });
   win.webContents.setZoomFactor(1);
   void win.webContents.setVisualZoomLevelLimits(1, 1).catch(() => void 0);
@@ -6282,6 +6913,7 @@ app.on("before-quit", () => {
   if (mainWindow && !mainWindow.isDestroyed()) {
     saveWindowState(mainWindow);
   }
+  overlayWindowController.destroy();
 });
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
@@ -6313,7 +6945,9 @@ app.whenReady().then(() => {
     getMainWindow: () => mainWindow
   });
   embeddedBrowserMainController.registerIpcHandlers();
+  registerOverlayWindowIpcHandlers(overlayWindowController);
   createWindow();
+  void overlayWindowController.ensureReady();
 });
 export {
   MAIN_DIST,

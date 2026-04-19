@@ -41,6 +41,16 @@ export async function clearEmbeddedBrowserCapturedResources(tabId: string) {
   return window.electronEmbeddedBrowser.clearCapturedResources(tabId) as Promise<EmbeddedBrowserResourceCaptureSnapshot>;
 }
 
+export async function clearEmbeddedBrowserCacheAndReload(tabId: string) {
+  assertDesktopSupport();
+  return window.electronEmbeddedBrowser.clearCacheAndReload(tabId) as Promise<boolean>;
+}
+
+export async function resetEmbeddedBrowserPageStorageAndReload(tabId: string) {
+  assertDesktopSupport();
+  return window.electronEmbeddedBrowser.resetPageStorageAndReload(tabId) as Promise<boolean>;
+}
+
 export async function openEmbeddedBrowserCapturedResource(tabId: string, resourceKey: string) {
   assertDesktopSupport();
   return window.electronEmbeddedBrowser.openCapturedResource(tabId, resourceKey) as Promise<boolean>;
@@ -118,6 +128,33 @@ export async function mergeEmbeddedBrowserCapturedMseResources(
 ) {
   assertDesktopSupport();
   return window.electronEmbeddedBrowser.mergeCapturedMseResources(tabId, payload) as Promise<{
+    cancelled?: boolean;
+    error?: string;
+    ffmpegPath?: string;
+    ok: boolean;
+    outputPath?: string;
+  }>;
+}
+
+export async function transcodeEmbeddedBrowserCapturedResource(
+  tabId: string,
+  payload: {
+    ffmpegPath?: string;
+    outputFormat?: string;
+    resource?: {
+      fileName?: string;
+      mimeType?: string;
+      requestHeaders?: Record<string, string>;
+      resourceKey?: string;
+      streamType?: 'audio' | 'video';
+      url?: string;
+    };
+    resourceKey?: string;
+    suggestedFileName?: string;
+  },
+) {
+  assertDesktopSupport();
+  return window.electronEmbeddedBrowser.transcodeCapturedResource(tabId, payload) as Promise<{
     cancelled?: boolean;
     error?: string;
     ffmpegPath?: string;

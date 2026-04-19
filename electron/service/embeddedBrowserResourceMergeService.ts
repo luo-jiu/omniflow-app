@@ -30,6 +30,15 @@ export type EmbeddedBrowserResourceMergeResult = {
   stdout: string
 }
 
+export type EmbeddedBrowserResourceTranscodeFormat = string
+
+export type EmbeddedBrowserResourceTranscodeRequest = {
+  ffmpegPath?: string
+  outputFormat: EmbeddedBrowserResourceTranscodeFormat
+  outputPath: string
+  resource: EmbeddedBrowserExtractedResourceFile
+}
+
 const COMMON_FFMPEG_PATHS = [
   process.env.OMNIFLOW_FFMPEG_PATH,
   '/opt/homebrew/bin/ffmpeg',
@@ -44,6 +53,14 @@ const FFMPEG_HTTP_HEADER_BLACKLIST = new Set([
   'host',
   'range',
 ])
+
+export function normalizeEmbeddedBrowserResourceTranscodeFormat(input: string) {
+  const normalized = String(input || '').trim().replace(/^\.+/, '').toLowerCase()
+  if (!/^[a-z0-9]{1,12}$/.test(normalized)) {
+    return null
+  }
+  return normalized
+}
 
 function sanitizeFileName(input: string) {
   const normalized = String(input || '').trim().replace(/[\\/:*?"<>|]+/g, '_')
@@ -107,6 +124,41 @@ export function buildEmbeddedBrowserResourceMergeArgs(request: {
     request.audio.path,
     '-c',
     'copy',
+    request.outputPath,
+  ]
+}
+
+export function buildEmbeddedBrowserResourceTranscodeArgs(request: {
+  input: EmbeddedBrowserPreparedMergeInput
+  outputFormat: EmbeddedBrowserResourceTranscodeFormat
+  outputPath: string
+}) {
+  const normalizedFormat = normalizeEmbeddedBrowserResourceTranscodeFormat(request.outputFormat)
+  if (!normalizedFormat) {
+    throw new Error('请输入 1-12 位字母或数字格式，例如 mp3、m4a、mp4')
+  }
+  const outputArgsByFormat: Record<string, string[]> = {
+    aac: ['-vn', '-c:a', 'aac', '-b:a', '192k'],
+    aiff: ['-vn'],
+    alac: ['-vn', '-c:a', 'alac'],
+    flac: ['-vn', '-c:a', 'flac'],
+    m4a: ['-vn', '-c:a', 'aac', '-b:a', '192k'],
+    mp3: ['-vn', '-c:a', 'libmp3lame', '-b:a', '192k'],
+    ogg: ['-vn', '-c:a', 'libvorbis', '-q:a', '5'],
+    opus: ['-vn', '-c:a', 'libopus', '-b:a', '128k'],
+    wav: ['-vn', '-c:a', 'pcm_s16le'],
+    weba: ['-vn', '-c:a', 'libopus', '-b:a', '128k'],
+    webm: ['-map', '0:v:0?', '-map', '0:a:0?', '-c:v', 'libvpx-vp9', '-c:a', 'libopus'],
+    wma: ['-vn'],
+  }
+  const outputArgs = outputArgsByFormat[normalizedFormat]
+    || ['-map', '0:v:0?', '-map', '0:a:0?', '-c:v', 'libx264', '-c:a', 'aac', '-movflags', '+faststart']
+  return [
+    '-y',
+    ...request.input.inputArgs,
+    '-i',
+    request.input.path,
+    ...outputArgs,
     request.outputPath,
   ]
 }
@@ -222,6 +274,60 @@ export async function mergeEmbeddedBrowserResourceTracks(
       audio,
       outputPath: request.outputPath,
       video,
+    })
+
+    const result = await new Promise<EmbeddedBrowserResourceMergeResult>((resolve, reject) => {
+      const stdout: string[] = []
+      const stderr: string[] = []
+      const child = spawn(ffmpegPath, commandArgs, {
+        stdio: ['ignore', 'pipe', 'pipe'],
+      })
+
+      child.stdout.on('data', (chunk) => {
+        stdout.push(String(chunk))
+      })
+      child.stderr.on('data', (chunk) => {
+        stderr.push(String(chunk))
+      })
+      child.once('error', (error) => {
+        reject(error)
+      })
+      child.once('exit', (code) => {
+        if (code === 0) {
+          resolve({
+            commandArgs,
+            ffmpegPath,
+            outputPath: request.outputPath,
+            stderr: stderr.join(''),
+            stdout: stdout.join(''),
+          })
+          return
+        }
+        reject(new Error(stderr.join('').trim() || `ffmpeg 退出码异常: ${code}`))
+      })
+    })
+
+    return result
+  } finally {
+    await cleanupEmbeddedBrowserResourceMergeTempDir(tempDir).catch(() => undefined)
+  }
+}
+
+export async function transcodeEmbeddedBrowserResource(
+  request: EmbeddedBrowserResourceTranscodeRequest,
+): Promise<EmbeddedBrowserResourceMergeResult> {
+  const ffmpegPath = await resolveEmbeddedBrowserFfmpegPath(request.ffmpegPath)
+  if (!ffmpegPath) {
+    throw new Error('未找到可用的 ffmpeg，可在系统环境变量里配置，或确认 /opt/homebrew/bin/ffmpeg 可执行')
+  }
+
+  const tempDir = await createEmbeddedBrowserResourceMergeTempDir()
+  try {
+    const input = await prepareResourceMergeInput(tempDir, request.resource)
+    const commandArgs = buildEmbeddedBrowserResourceTranscodeArgs({
+      input,
+      outputFormat: request.outputFormat,
+      outputPath: request.outputPath,
     })
 
     const result = await new Promise<EmbeddedBrowserResourceMergeResult>((resolve, reject) => {

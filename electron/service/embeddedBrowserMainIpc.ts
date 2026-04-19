@@ -3,6 +3,7 @@ import type {
   EmbeddedBrowserBounds,
   EmbeddedBrowserCapturedResourceMergePayload,
   EmbeddedBrowserCapturedResourceSavePayload,
+  EmbeddedBrowserCapturedResourceTranscodePayload,
   EmbeddedBrowserFaviconResolvePayload,
   EmbeddedBrowserHlsDownloadPayload,
   EmbeddedBrowserMpdDownloadPayload,
@@ -17,6 +18,7 @@ type EmbeddedBrowserMainIpcHandlers = {
   activateTab: (sender: Electron.WebContents, tabId: string | null) => void | Promise<void>
   cleanupDownloadFile: (tempPath: string) => Promise<boolean>
   clearCapturedResources: (tabId: string) => unknown
+  clearBrowserCache: (tabId: string) => Promise<boolean>
   clearCatchMediaCache: (tabId: string) => Promise<boolean>
   closeAll: (sender: Electron.WebContents) => void | Promise<void>
   closeTab: (sender: Electron.WebContents, tabId: string) => void | Promise<void>
@@ -52,6 +54,7 @@ type EmbeddedBrowserMainIpcHandlers = {
   previewResource: (tabId: string, payload: EmbeddedBrowserResourcePreviewPayload) => Promise<boolean>
   readResource: (tabId: string, resourceKey: string) => Promise<EmbeddedBrowserExtractedResourcePayload | null>
   reload: (tabId: string) => Promise<void>
+  resetPageStorage: (tabId: string) => Promise<boolean>
   resolveFavicon: (payload: EmbeddedBrowserFaviconResolvePayload) => Promise<unknown>
   restartCatchMediaCapture: (tabId: string) => Promise<boolean>
   saveResource: (
@@ -62,6 +65,10 @@ type EmbeddedBrowserMainIpcHandlers = {
   startCapturedResources: (tabId: string) => unknown
   startDeepResourceCapture: (tabId: string) => Promise<unknown>
   stopCapturedResources: (tabId: string) => unknown
+  transcodeResource: (
+    tabId: string,
+    payload: EmbeddedBrowserCapturedResourceTranscodePayload,
+  ) => Promise<unknown>
   updateCatchToolkitState: (
     tabId: string,
     payload: Partial<EmbeddedBrowserCatchToolkitStatePayload>,
@@ -93,6 +100,8 @@ export function registerEmbeddedBrowserMainIpcHandlers(handlers: EmbeddedBrowser
   )
 
   ipcMain.handle('embedded-browser:reload', async (_event, tabId: string) => handlers.reload(tabId))
+  ipcMain.handle('embedded-browser:clear-cache-reload', async (_event, tabId: string) => handlers.clearBrowserCache(tabId))
+  ipcMain.handle('embedded-browser:reset-page-storage', async (_event, tabId: string) => handlers.resetPageStorage(tabId))
   ipcMain.handle('embedded-browser:go-back', async (_event, tabId: string) => handlers.goBack(tabId))
   ipcMain.handle('embedded-browser:go-forward', async (_event, tabId: string) => handlers.goForward(tabId))
 
@@ -144,6 +153,12 @@ export function registerEmbeddedBrowserMainIpcHandlers(handlers: EmbeddedBrowser
     'embedded-browser:resource:save',
     async (_event, tabId: string, payload: EmbeddedBrowserCapturedResourceSavePayload) => (
       handlers.saveResource(tabId, payload)
+    ),
+  )
+  ipcMain.handle(
+    'embedded-browser:resource:transcode',
+    async (_event, tabId: string, payload: EmbeddedBrowserCapturedResourceTranscodePayload) => (
+      handlers.transcodeResource(tabId, payload)
     ),
   )
   ipcMain.handle(
