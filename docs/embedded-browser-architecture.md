@@ -179,6 +179,7 @@ library detail submit / click
 - 地址栏和 tab URL 的 source of truth 在页面层，不在 `EmbeddedBrowserPanel`。
 - `EmbeddedBrowserPanel` 只负责把“当前应该显示哪个 tab、应该打开什么 URL”转给 main。
 - 真正导航结果以后续 `state` 事件为准。
+- 页面触发 `window.open` / `_blank` 时，main 侧会把普通目标 URL 收敛到当前 tab；如果新窗口先是 `about:blank` 占位窗口，会短暂创建隐藏窗口承接后续脚本导航，拿到真实 URL 后再回灌当前 tab 并关闭隐藏窗口，避免地址栏停在 `about:blank`。
 
 ### 5.2 Bounds 同步链路
 

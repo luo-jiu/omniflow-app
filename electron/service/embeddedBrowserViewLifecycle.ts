@@ -15,6 +15,7 @@ import {
 import { type EmbeddedBrowserCapturedResource, recordEmbeddedBrowserProbeResource } from './embeddedBrowserResourceService'
 
 const embeddedBrowserProbeNewDocumentScriptIds = new WeakMap<WebContents, string>()
+const EMBEDDED_BROWSER_POPUP_PLACEHOLDER_URLS = new Set(['', 'about:blank'])
 
 type CreateEmbeddedBrowserViewOptions = {
   createIfMissingProbe: (tabId: string, view: WebContentsView) => Promise<boolean>
@@ -37,6 +38,18 @@ type CreateEmbeddedBrowserViewOptions = {
   tabId: string
   tryDispatchPendingOpenFile: (tabId: string, view: WebContentsView) => Promise<boolean>
   views: Map<string, WebContentsView>
+}
+
+function isEmbeddedBrowserPopupPlaceholderUrl(url: string) {
+  return EMBEDDED_BROWSER_POPUP_PLACEHOLDER_URLS.has(String(url || '').trim().toLowerCase())
+}
+
+function isEmbeddedBrowserPopupNavigableUrl(url: string) {
+  const normalizedUrl = String(url || '').trim()
+  if (!normalizedUrl || isEmbeddedBrowserPopupPlaceholderUrl(normalizedUrl)) {
+    return false
+  }
+  return !normalizedUrl.toLowerCase().startsWith('javascript:')
 }
 
 export function createEmbeddedBrowserView(
@@ -173,9 +186,86 @@ export function createEmbeddedBrowserView(
       })
     }
   })
+  const loadPopupUrlInCurrentTab = (url: string, details: string) => {
+    const normalizedUrl = String(url || '').trim()
+    if (!isEmbeddedBrowserPopupNavigableUrl(normalizedUrl) || view.webContents.isDestroyed()) {
+      return false
+    }
+    options.currentUrls.set(options.tabId, normalizedUrl)
+    options.emitTabState(options.tabId, view, {
+      details,
+      state: 'loading',
+      url: normalizedUrl,
+    })
+    void view.webContents.loadURL(normalizedUrl).catch((error) => {
+      runtimeLogger.warn('embedded browser popup navigation failed', {
+        error: error instanceof Error ? error.message : String(error),
+        tabId: options.tabId,
+        url: normalizedUrl,
+      })
+    })
+    return true
+  }
+
   view.webContents.setWindowOpenHandler(({ url }) => {
-    void view.webContents.loadURL(url)
+    if (isEmbeddedBrowserPopupPlaceholderUrl(url)) {
+      return {
+        action: 'allow',
+        overrideBrowserWindowOptions: {
+          frame: false,
+          show: false,
+          skipTaskbar: true,
+        },
+      }
+    }
+    loadPopupUrlInCurrentTab(url, 'window-open')
     return { action: 'deny' }
+  })
+  view.webContents.on('did-create-window', (popupWindow, details) => {
+    let closeTimer: ReturnType<typeof setTimeout> | null = null
+    const cleanupPopup = () => {
+      if (closeTimer) {
+        clearTimeout(closeTimer)
+        closeTimer = null
+      }
+      if (!popupWindow.webContents.isDestroyed()) {
+        popupWindow.webContents.removeListener('will-navigate', handlePopupNavigation)
+        popupWindow.webContents.removeListener('did-start-navigation', handlePopupNavigation)
+      }
+      popupWindow.removeListener('closed', cleanupPopup)
+    }
+    const closePopup = () => {
+      cleanupPopup()
+      if (!popupWindow.isDestroyed()) {
+        popupWindow.close()
+      }
+    }
+    const handlePopupNavigation = (
+      event: Electron.Event & { isMainFrame?: boolean; url?: string },
+      url?: string,
+      _isInPlace?: boolean,
+      isMainFrame?: boolean,
+    ) => {
+      const targetIsMainFrame = typeof event.isMainFrame === 'boolean' ? event.isMainFrame : isMainFrame
+      if (targetIsMainFrame === false) {
+        return
+      }
+      const targetUrl = String(event.url || url || '').trim()
+      if (!loadPopupUrlInCurrentTab(targetUrl, 'window-open-placeholder')) {
+        return
+      }
+      event.preventDefault()
+      closePopup()
+    }
+
+    popupWindow.on('closed', cleanupPopup)
+    popupWindow.webContents.on('will-navigate', handlePopupNavigation)
+    popupWindow.webContents.on('did-start-navigation', handlePopupNavigation)
+    closeTimer = setTimeout(closePopup, 15000)
+
+    if (loadPopupUrlInCurrentTab(details.url, 'window-open-created')) {
+      closePopup()
+    }
   })
 
   return view
