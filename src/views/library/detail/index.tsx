@@ -199,11 +199,16 @@ const TitlebarSidePanelToggleHost = styled.div`
   position: absolute;
   left: ${SIDE_PANEL_TOGGLE_LEFT}px;
   top: ${SIDE_PANEL_TOGGLE_TOP}px;
-  z-index: 100;
+  z-index: 3200;
   width: ${SIDE_PANEL_TOGGLE_SIZE}px;
   height: ${SIDE_PANEL_TOGGLE_SIZE}px;
   pointer-events: auto;
   -webkit-app-region: no-drag !important;
+
+  &,
+  * {
+    -webkit-app-region: no-drag !important;
+  }
 `;
 
 const TitlebarSidePanelToggleButton = styled.button`
@@ -497,7 +502,8 @@ const ContentToolbar = styled.div`
   background: var(--app-bg);
   border-bottom: 1px solid var(--app-border);
   border-top-left-radius: clamp(0px, var(--side-panel-visual-width), 12px);
-  -webkit-app-region: no-drag;
+  -webkit-app-region: drag;
+  position: relative;
   display: flex;
   align-items: center;
   padding: 0 10px;
@@ -505,6 +511,17 @@ const ContentToolbar = styled.div`
     10px,
     calc(var(--content-toolbar-collapsed-safe-space) - var(--side-panel-visual-width))
   );
+
+  &::before {
+    content: "";
+    position: absolute;
+    left: ${SIDE_PANEL_TOGGLE_LEFT - 6}px;
+    top: 0;
+    width: ${SIDE_PANEL_TOGGLE_SIZE + 12}px;
+    height: 100%;
+    -webkit-app-region: no-drag;
+    pointer-events: none;
+  }
 
   &.browser-url-toolbar {
     padding-left: 10px;
