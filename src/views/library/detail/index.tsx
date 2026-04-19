@@ -29,7 +29,7 @@ import {
   IconWrench,
 } from "@douyinfe/semi-icons";
 import { Input, Modal, Popover, Select, Toast } from '@douyinfe/semi-ui';
-import styled, { css } from "styled-components";
+import styled, { createGlobalStyle, css } from "styled-components";
 import ContextMenu, { type ContextMenuItem } from "@/components/ui/context-menu";
 import EmbeddedBrowserPanel, { type EmbeddedBrowserHandle } from "@/features/embedded-browser/components/EmbeddedBrowserPanel";
 import EmbeddedBrowserDownloadImportModal from "@/features/embedded-browser/downloads/components/EmbeddedBrowserDownloadImportModal";
@@ -77,15 +77,15 @@ import {
 } from "./workspace-state";
 import type { FileViewerFileType } from '@/shared/file-viewer-types';
 
-const DEFAULT_SIDE_PANEL_WIDTH = 300;
-const MIN_SIDE_PANEL_WIDTH = 220;
+const DEFAULT_SIDE_PANEL_WIDTH = 360;
+const MIN_SIDE_PANEL_WIDTH = 360;
 const DEFAULT_BROWSER_RESOURCE_PANEL_WIDTH = 360;
 const MIN_BROWSER_RESOURCE_PANEL_WIDTH = DEFAULT_BROWSER_RESOURCE_PANEL_WIDTH;
 const MAX_BROWSER_RESOURCE_PANEL_WIDTH = DEFAULT_BROWSER_RESOURCE_PANEL_WIDTH * 2;
 const SIDE_PANEL_TRAFFIC_LIGHT_SAFE_HEIGHT = 37;
 const SIDE_PANEL_WIDTH_STORAGE_PREFIX = 'library-detail:side-panel-width:';
 const BROWSER_RESOURCE_PANEL_WIDTH_STORAGE_PREFIX = 'library-detail:browser-resource-panel-width:';
-const CONTENT_TOOLBAR_HEIGHT = 46;
+const CONTENT_TOOLBAR_HEIGHT = 56;
 const TOOLBAR_ACTION_BUTTON_SIZE = 36;
 const TOOLBAR_ACTION_ICON_SIZE = 18;
 const BROWSER_TAB_ICON_SIZE = 20;
@@ -98,6 +98,20 @@ const BOOKMARK_TOOLBAR_HEIGHT = 42;
 const BOOKMARK_ITEM_HEIGHT = 38;
 const BROWSER_INPUT_HEIGHT = 38;
 const BOOKMARK_TOOLBAR_HORIZONTAL_PADDING = 20;
+const SIDE_PANEL_TOGGLE_LEFT = 110;
+const SIDE_PANEL_TOGGLE_TOP = (CONTENT_TOOLBAR_HEIGHT - TOOLBAR_ACTION_BUTTON_SIZE) / 2 - 1;
+const SIDE_PANEL_TOGGLE_SIZE = TOOLBAR_ACTION_BUTTON_SIZE;
+const SIDE_PANEL_TOGGLE_ICON_SIZE = 24;
+const CONTENT_TOOLBAR_COLLAPSED_SAFE_SPACE = SIDE_PANEL_TOGGLE_LEFT + SIDE_PANEL_TOGGLE_SIZE + 8;
+const SIDE_PANEL_COLLAPSE_ANIMATION_MS = 260;
+
+const SidePanelMotionProperty = createGlobalStyle`
+  @property --side-panel-visual-width {
+    syntax: '<length>';
+    inherits: true;
+    initial-value: ${DEFAULT_SIDE_PANEL_WIDTH}px;
+  }
+`;
 
 function getSidePanelWidthStorageKey(libraryId: number) {
   return `${SIDE_PANEL_WIDTH_STORAGE_PREFIX}${libraryId}`;
@@ -167,18 +181,92 @@ const DetailWrapper = styled.div`
   height: 100%;
   overflow: hidden;
   background: transparent;
+  position: relative;
+  --side-panel-visual-width: ${DEFAULT_SIDE_PANEL_WIDTH}px;
+  --content-toolbar-collapsed-safe-space: ${CONTENT_TOOLBAR_COLLAPSED_SAFE_SPACE}px;
+  --side-panel-transition-duration: ${SIDE_PANEL_COLLAPSE_ANIMATION_MS}ms;
+  --side-panel-transition-easing: cubic-bezier(0.22, 1, 0.36, 1);
+  transition: --side-panel-visual-width var(--side-panel-transition-duration) var(--side-panel-transition-easing);
+
+  &.is-side-panel-resizing {
+    --side-panel-transition-duration: 0ms;
+  }
+`;
+
+const TitlebarSidePanelToggleHost = styled.div`
+  position: absolute;
+  left: ${SIDE_PANEL_TOGGLE_LEFT}px;
+  top: ${SIDE_PANEL_TOGGLE_TOP}px;
+  z-index: 100;
+  width: ${SIDE_PANEL_TOGGLE_SIZE}px;
+  height: ${SIDE_PANEL_TOGGLE_SIZE}px;
+  pointer-events: auto;
+  -webkit-app-region: no-drag !important;
+`;
+
+const TitlebarSidePanelToggleButton = styled.button`
+  width: 100%;
+  height: 100%;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--app-text-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  cursor: pointer;
+  pointer-events: auto;
+  user-select: none;
+  -webkit-app-region: no-drag !important;
+
+  &:hover {
+    background: color-mix(in srgb, var(--app-text) 8%, transparent);
+    color: var(--app-text);
+  }
+
+  &.is-active {
+    background: #e8f7ff;
+    border-color: #9bdcff;
+    color: #0876c9;
+    box-shadow: inset 0 0 0 1px rgba(8, 118, 201, 0.08);
+  }
+
+  &.is-active:hover {
+    background: #d9f1ff;
+    color: #0568b3;
+  }
+
+  body[theme-mode="dark"] &.is-active {
+    background: #17384a;
+    border-color: #3aa7d8;
+    color: #7dd8ff;
+    box-shadow: inset 0 0 0 1px rgba(125, 216, 255, 0.12);
+  }
+
+  body[theme-mode="dark"] &.is-active:hover {
+    background: #1d4358;
+    color: #a2e4ff;
+  }
+
+  svg {
+    width: ${SIDE_PANEL_TOGGLE_ICON_SIZE}px;
+    height: ${SIDE_PANEL_TOGGLE_ICON_SIZE}px;
+    display: block;
+  }
 `;
 
 const SidePanel = styled.div`
   position: relative;
-  width: ${DEFAULT_SIDE_PANEL_WIDTH}px;
-  min-width: ${MIN_SIDE_PANEL_WIDTH}px;
+  width: var(--side-panel-visual-width);
+  min-width: 0;
   max-width: 80vw;
   display: flex;
   flex-direction: column;
   background: var(--app-sidebar-vibrancy);
   flex-shrink: 0;
   height: 100%;
+  overflow: hidden;
 
   body[theme-mode="dark"] & {
     background: var(--app-sidebar-vibrancy);
@@ -208,12 +296,34 @@ const SidePanelHeader = styled.div`
   display: flex;
   align-items: center;
   background: transparent;
-  -webkit-app-region: drag;
+  -webkit-app-region: no-drag;
   flex-shrink: 0;
   position: relative;
   z-index: 2;
 
+  &::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: ${SIDE_PANEL_TOGGLE_LEFT - 8}px;
+    height: 100%;
+    -webkit-app-region: drag;
+  }
+
+  &::after {
+    content: "";
+    position: absolute;
+    left: ${SIDE_PANEL_TOGGLE_LEFT + SIDE_PANEL_TOGGLE_SIZE + 8}px;
+    right: 0;
+    top: 0;
+    height: 100%;
+    -webkit-app-region: drag;
+  }
+
   h1 {
+    position: relative;
+    z-index: 1;
     -webkit-app-region: no-drag;
     font-size: 16px;
     font-weight: 600;
@@ -288,8 +398,8 @@ const ContentArea = styled.div`
   display: flex;
   flex-direction: column;
   background: var(--app-bg);
-  border-top-left-radius: 12px;
-  border-bottom-left-radius: 12px;
+  border-top-left-radius: clamp(0px, var(--side-panel-visual-width), 12px);
+  border-bottom-left-radius: clamp(0px, var(--side-panel-visual-width), 12px);
 `;
 
 const toolbarActionButtonStyles = css`
@@ -384,11 +494,19 @@ const ContentToolbar = styled.div`
   flex-shrink: 0;
   background: var(--app-bg);
   border-bottom: 1px solid var(--app-border);
-  border-top-left-radius: 12px;
-  -webkit-app-region: drag;
+  border-top-left-radius: clamp(0px, var(--side-panel-visual-width), 12px);
+  -webkit-app-region: no-drag;
   display: flex;
   align-items: center;
   padding: 0 10px;
+  padding-left: max(
+    10px,
+    calc(var(--content-toolbar-collapsed-safe-space) - var(--side-panel-visual-width))
+  );
+
+  &.browser-url-toolbar {
+    padding-left: 10px;
+  }
 
   .toolbar-left {
     display: flex;
@@ -402,6 +520,7 @@ const ContentToolbar = styled.div`
     min-width: 0;
     display: flex;
     align-items: center;
+    -webkit-app-region: drag;
   }
 
   .browser-tabs-list {
@@ -787,6 +906,26 @@ const BookmarkContextMenuLayer = styled.div`
     box-sizing: border-box;
   }
 `;
+
+const SidebarCollapseIcon: React.FC = () => (
+  <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" focusable="false">
+    <rect
+      x="3.25"
+      y="4.25"
+      width="13.5"
+      height="11.5"
+      rx="2.25"
+      stroke="currentColor"
+      strokeWidth="1.35"
+    />
+    <path
+      d="M7.5 4.75V15.25"
+      stroke="currentColor"
+      strokeWidth="1.35"
+      strokeLinecap="round"
+    />
+  </svg>
+);
 
 const BookmarkManagerContent = styled.div`
   min-height: 460px;
@@ -1316,6 +1455,12 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   const previousActiveBrowserTabIdRef = React.useRef<string | null>(null);
   const previousBrowserTabCountRef = React.useRef(0);
   const [sidePanelWidth, setSidePanelWidth] = React.useState<number>(() => loadSidePanelWidth(libraryId));
+  const [sidePanelCollapsed, setSidePanelCollapsed] = React.useState(false);
+  const [sidePanelMotionSyncSignal, setSidePanelMotionSyncSignal] = React.useState(0);
+  const [sidePanelResizing, setSidePanelResizing] = React.useState(false);
+  const [sidePanelVisualWidth, setSidePanelVisualWidthState] = React.useState<number>(() => (
+    loadSidePanelWidth(libraryId)
+  ));
   const [browserResourcePanelVisible, setBrowserResourcePanelVisible] = React.useState<boolean>(false);
   const [browserResourcePanelWidth, setBrowserResourcePanelWidth] = React.useState<number>(() => (
     loadBrowserResourcePanelWidth(libraryId)
@@ -1354,6 +1499,8 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   const browserInputRef = React.useRef<HTMLInputElement | null>(null);
   const latestWorkspaceStateRef = React.useRef<LibraryDetailWorkspaceState>(initialWorkspaceState);
   const latestPanelWidthRef = React.useRef<number>(sidePanelWidth);
+  const sidePanelCollapsedRef = React.useRef<boolean>(sidePanelCollapsed);
+  const sidePanelVisualWidthRef = React.useRef<number>(sidePanelVisualWidth);
   const latestBrowserResourcePanelWidthRef = React.useRef<number>(browserResourcePanelWidth);
   const resizeMoveHandlerRef = React.useRef<((event: MouseEvent) => void) | null>(null);
   const resizeUpHandlerRef = React.useRef<(() => void) | null>(null);
@@ -1428,11 +1575,43 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
     document.body.style.userSelect = "";
   }, []);
 
+  const setSidePanelVisualWidth = React.useCallback((nextWidth: number) => {
+    const normalizedWidth = Math.max(0, Math.floor(nextWidth));
+    sidePanelVisualWidthRef.current = normalizedWidth;
+    setSidePanelVisualWidthState(normalizedWidth);
+  }, []);
+
+  const toggleSidePanelCollapsed = React.useCallback(() => {
+    cleanupResizeListeners();
+    setSidePanelResizing(false);
+    const nextCollapsed = !sidePanelCollapsedRef.current;
+    sidePanelCollapsedRef.current = nextCollapsed;
+    setSidePanelCollapsed(nextCollapsed);
+    setSidePanelMotionSyncSignal((current) => current + 1);
+
+    if (nextCollapsed) {
+      setSidePanelVisualWidth(0);
+      return;
+    }
+
+    const restoredWidth = Math.max(MIN_SIDE_PANEL_WIDTH, latestPanelWidthRef.current || sidePanelWidth);
+    setSidePanelWidth(restoredWidth);
+    latestPanelWidthRef.current = restoredWidth;
+    setSidePanelVisualWidth(restoredWidth);
+  }, [cleanupResizeListeners, setSidePanelVisualWidth, sidePanelWidth]);
+
+  React.useEffect(() => {
+    sidePanelCollapsedRef.current = sidePanelCollapsed;
+  }, [sidePanelCollapsed]);
+
   React.useEffect(() => {
     const restored = loadSidePanelWidth(libraryId);
     latestPanelWidthRef.current = restored;
     setSidePanelWidth(restored);
-  }, [libraryId]);
+    if (!sidePanelCollapsedRef.current) {
+      setSidePanelVisualWidth(restored);
+    }
+  }, [libraryId, setSidePanelVisualWidth]);
 
   React.useEffect(() => {
     const restoredWidth = loadBrowserResourcePanelWidth(libraryId);
@@ -1477,21 +1656,26 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   const handleResizeMouseDown = React.useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     cleanupResizeListeners();
+    setSidePanelResizing(true);
+    setSidePanelCollapsed(false);
+    sidePanelCollapsedRef.current = false;
     const startX = e.clientX;
-    const startWidth = sidePanelRef.current?.offsetWidth || sidePanelWidth;
+    const startWidth = sidePanelRef.current?.getBoundingClientRect().width || sidePanelWidth;
 
     const onMouseMove = (ev: MouseEvent) => {
       if (!sidePanelRef.current) return;
       const maxWidth = Math.floor(window.innerWidth * 0.8);
       const newWidth = Math.min(Math.max(startWidth + ev.clientX - startX, MIN_SIDE_PANEL_WIDTH), maxWidth);
-      sidePanelRef.current.style.width = `${newWidth}px`;
+      setSidePanelVisualWidth(newWidth);
       latestPanelWidthRef.current = newWidth;
     };
 
     const onMouseUp = () => {
       const finalWidth = Math.floor(latestPanelWidthRef.current);
       setSidePanelWidth(finalWidth);
+      setSidePanelVisualWidth(finalWidth);
       saveSidePanelWidth(libraryId, finalWidth);
+      setSidePanelResizing(false);
       cleanupResizeListeners();
     };
 
@@ -1501,7 +1685,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
     document.body.style.userSelect = "none";
     document.addEventListener("mousemove", onMouseMove);
     document.addEventListener("mouseup", onMouseUp);
-  }, [cleanupResizeListeners, libraryId, sidePanelWidth]);
+  }, [cleanupResizeListeners, libraryId, setSidePanelVisualWidth, sidePanelWidth]);
 
   const handleBrowserResourcePanelResizeMouseDown = React.useCallback((event: React.MouseEvent) => {
     event.preventDefault();
@@ -3131,9 +3315,30 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
     ));
   };
 
+  const detailWrapperStyle = {
+    '--side-panel-visual-width': `${sidePanelVisualWidth}px`,
+  } as React.CSSProperties;
+
   return (
-    <DetailWrapper>
-      <SidePanel ref={sidePanelRef} style={{ width: `${sidePanelWidth}px` }}>
+    <>
+      <SidePanelMotionProperty />
+      <DetailWrapper
+        className={sidePanelResizing ? 'is-side-panel-resizing' : ''}
+        style={detailWrapperStyle}
+      >
+      <TitlebarSidePanelToggleHost>
+        <TitlebarSidePanelToggleButton
+          type="button"
+          className={sidePanelCollapsed ? 'is-active' : ''}
+          onClick={toggleSidePanelCollapsed}
+          title={sidePanelCollapsed ? '展开目录树' : '折叠目录树'}
+          aria-label={sidePanelCollapsed ? '展开目录树' : '折叠目录树'}
+          aria-pressed={sidePanelCollapsed}
+        >
+          <SidebarCollapseIcon />
+        </TitlebarSidePanelToggleButton>
+      </TitlebarSidePanelToggleHost>
+      <SidePanel ref={sidePanelRef}>
         <SidePanelHeader />
 
         <SidePanelTree>
@@ -3182,7 +3387,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
             </button>
           </div>
         </SidePanelFooter>
-        <ResizeHandle onMouseDown={handleResizeMouseDown} />
+        {sidePanelVisualWidth > 0 ? <ResizeHandle onMouseDown={handleResizeMouseDown} /> : null}
       </SidePanel>
 
       <ContentArea>
@@ -3368,7 +3573,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
         </ContentToolbar>
         {browserModeOpen ? (
           <>
-            <ContentToolbar>
+            <ContentToolbar className="browser-url-toolbar">
               <div className="toolbar-left">
                 <button
                   type="button"
@@ -3473,6 +3678,8 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
                 <EmbeddedBrowserPanel
                   ref={browserRef}
                   activeTabId={activeBrowserTabId}
+                  boundsSyncDurationMs={SIDE_PANEL_COLLAPSE_ANIMATION_MS}
+                  boundsSyncSignal={sidePanelMotionSyncSignal}
                   currentUrl={
                     activeBrowserTab?.url ?? ''
                   }
@@ -3683,7 +3890,8 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
           void saveActiveDownloadToDesktop();
         }}
       />
-    </DetailWrapper>
+      </DetailWrapper>
+    </>
   );
 };
 

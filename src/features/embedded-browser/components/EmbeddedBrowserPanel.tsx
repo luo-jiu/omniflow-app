@@ -3,6 +3,8 @@ import styled from 'styled-components';
 
 type EmbeddedBrowserPanelProps = {
   activeTabId: string | null;
+  boundsSyncDurationMs?: number;
+  boundsSyncSignal?: number;
   currentUrl?: string;
   onUrlChange?: (url: string) => void;
   onStateChange?: (payload: BrowserEventPayload) => void;
@@ -37,6 +39,16 @@ type BrowserEventPayload = {
 type EmbeddedBrowserPanelMode = 'idle' | 'blank' | 'attached';
 
 const EMBEDDED_BROWSER_EMPTY_VISUAL_OFFSET_PX = -100;
+
+function syncEmbeddedBrowserBounds(host: HTMLElement) {
+  const rect = host.getBoundingClientRect();
+  void window.electronEmbeddedBrowser.setBounds({
+    x: Math.round(rect.left),
+    y: Math.round(rect.top),
+    width: Math.round(rect.width),
+    height: Math.round(rect.height),
+  });
+}
 
 const BrowserSurface = styled.div`
   flex: 1;
@@ -156,6 +168,8 @@ const BrowserSurface = styled.div`
 const EmbeddedBrowserPanel = React.forwardRef<EmbeddedBrowserHandle, EmbeddedBrowserPanelProps>(
   ({
     activeTabId,
+    boundsSyncDurationMs = 0,
+    boundsSyncSignal = 0,
     currentUrl = '',
     onUrlChange,
     onStateChange,
@@ -357,14 +371,7 @@ const EmbeddedBrowserPanel = React.forwardRef<EmbeddedBrowserHandle, EmbeddedBro
       let rafId = 0;
       const syncBounds = () => {
         rafId = 0;
-        const rect = host.getBoundingClientRect();
-        const nextBounds = {
-          x: Math.round(rect.left),
-          y: Math.round(rect.top),
-          width: Math.round(rect.width),
-          height: Math.round(rect.height),
-        };
-        void window.electronEmbeddedBrowser.setBounds(nextBounds);
+        syncEmbeddedBrowserBounds(host);
       };
 
       const requestSync = () => {
@@ -389,6 +396,38 @@ const EmbeddedBrowserPanel = React.forwardRef<EmbeddedBrowserHandle, EmbeddedBro
         }
       };
     }, []);
+
+    React.useLayoutEffect(() => {
+      if (!boundsSyncSignal) {
+        return;
+      }
+
+      const host = hostRef.current;
+      if (!host) {
+        return;
+      }
+
+      let rafId = 0;
+      const startedAt = window.performance.now();
+      const syncUntil = startedAt + Math.max(0, boundsSyncDurationMs) + 80;
+
+      const syncFrame = () => {
+        syncEmbeddedBrowserBounds(host);
+        if (window.performance.now() < syncUntil) {
+          rafId = window.requestAnimationFrame(syncFrame);
+          return;
+        }
+        rafId = 0;
+      };
+
+      rafId = window.requestAnimationFrame(syncFrame);
+
+      return () => {
+        if (rafId) {
+          window.cancelAnimationFrame(rafId);
+        }
+      };
+    }, [boundsSyncDurationMs, boundsSyncSignal]);
 
     React.useEffect(() => {
       return () => {
