@@ -1148,40 +1148,40 @@ const BrowserSettingsContent = styled.div`
   overflow: auto;
   display: flex;
   flex-direction: column;
-  gap: 18px;
-  padding: 22px 24px 28px;
+  gap: 24px;
+  padding: 30px 32px 36px;
   background: var(--app-bg);
 
   .browser-settings-hero {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 12px;
     padding-bottom: 4px;
   }
 
   .browser-settings-intro {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 10px;
   }
 
   .browser-settings-eyebrow {
-    font-size: 12px;
-    line-height: 1.4;
-    font-weight: 600;
+    font-size: 16px;
+    line-height: 1.45;
+    font-weight: 700;
     color: var(--semi-color-primary);
   }
 
   .browser-settings-title {
-    font-size: 24px;
-    font-weight: 600;
+    font-size: 30px;
+    font-weight: 700;
     color: var(--app-text);
-    line-height: 1.25;
+    line-height: 1.2;
   }
 
   .browser-settings-description {
     max-width: 720px;
-    font-size: 14px;
+    font-size: 18px;
     line-height: 1.6;
     color: var(--app-text-muted);
   }
@@ -1189,28 +1189,29 @@ const BrowserSettingsContent = styled.div`
   .browser-settings-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 12px;
+    gap: 18px;
   }
 
   .browser-settings-card {
-    min-height: 132px;
+    min-height: 172px;
     border: 1px solid var(--app-border);
-    border-radius: 8px;
+    border-radius: 10px;
     background: var(--app-bg-elevated);
-    padding: 14px;
+    padding: 18px 18px 20px;
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 12px;
   }
 
   .browser-settings-card-title {
-    font-size: 14px;
-    font-weight: 600;
+    font-size: 20px;
+    font-weight: 700;
+    line-height: 1.3;
     color: var(--app-text);
   }
 
   .browser-settings-card-body {
-    font-size: 13px;
+    font-size: 17px;
     line-height: 1.6;
     color: var(--app-text-muted);
   }
@@ -1218,23 +1219,46 @@ const BrowserSettingsContent = styled.div`
   .browser-settings-chip {
     width: fit-content;
     max-width: 100%;
-    height: 24px;
-    padding: 0 8px;
+    min-height: 30px;
+    padding: 4px 12px;
     border-radius: 999px;
     border: 1px solid var(--app-border);
     background: color-mix(in srgb, var(--app-bg-elevated) 82%, var(--semi-color-fill-0) 18%);
     color: var(--app-text-muted);
     display: inline-flex;
     align-items: center;
-    font-size: 12px;
-    font-weight: 500;
+    font-size: 16px;
+    line-height: 1.4;
+    font-weight: 600;
   }
 
   .browser-settings-footer {
-    padding-top: 4px;
-    font-size: 13px;
+    padding-top: 2px;
+    font-size: 17px;
     line-height: 1.6;
     color: var(--app-text-muted);
+  }
+
+  @media (max-width: 1040px) {
+    padding: 24px 24px 30px;
+
+    .browser-settings-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .browser-settings-title {
+      font-size: 28px;
+    }
+
+    .browser-settings-description,
+    .browser-settings-card-body,
+    .browser-settings-footer {
+      font-size: 16px;
+    }
+
+    .browser-settings-card-title {
+      font-size: 18px;
+    }
   }
 `;
 

@@ -26,6 +26,7 @@
 - 前端交接说明：`.agent-docs/frontend-handoff.md`
 - 前端文档规范：`.agent-docs/frontend-documentation-standard.md`
 - 前端架构基线：`docs/frontend-architecture-baseline.md`
+- 显示与可读性基线：`docs/ui-display-readability-baseline.md`
 - Embedded Browser 专题：`docs/embedded-browser-architecture.md`
 - Overlay 窗口专题与迁移规范：`docs/overlay-window-architecture.md`
 - Library Detail 工作区专题：`docs/library-detail-workspace.md`
@@ -53,6 +54,8 @@
   2. `.agent-docs/frontend-handoff.md`
   3. `.agent-docs/frontend-documentation-standard.md`
 - 涉及整体分层、状态 owner、API / IPC、Electron、工作区模式、文件树 / 文件预览、embedded browser、资源捕捉、上传或验证时，必须继续查阅对应专题文档。
+- 涉及字号、排版、控件密度、目录树宽度、工具栏高度、弹框观感、亮暗主题可见性时，必须先阅读 `docs/ui-display-readability-baseline.md`。
+- 新页面和新模块默认遵守当前临时显示基线：任何文本不得低于 `16px`；主正文默认应高于 `16px`；按钮 / tab / 输入框文字不得低于 `16px`，按钮和输入框高度优先使用 `40px`；说明文本和正文段落的松紧不得低于设置页“白天、跟随系统、夜间三种显示方式”说明文本的当前标准（`font-size: 16px; line-height: 1.6; margin-top: 6px`）；除非页面场景能明确证明需要偏离。
 - 按当前前端依赖方向开发：
 
 ```text
