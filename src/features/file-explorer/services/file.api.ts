@@ -237,6 +237,8 @@ export interface NodeDetailDTO {
   viewMeta?: string | null;
 }
 
+export type NodeNameConflictPolicy = 'error' | 'auto_rename';
+
 export async function fetchNodeDetailById(nodeId: number): Promise<NodeDetailDTO> {
   const body = await request(`/v1/nodes/${nodeId}`, {
     method: 'GET',
@@ -254,6 +256,7 @@ export async function uploadAndCreateNode(
   parentId: number,
   libraryId: number,
   options?: {
+    conflictPolicy?: NodeNameConflictPolicy;
     onProgress?: (uploadedBytes: number, totalBytes: number, percentage: number, speedBps: number) => void;
     setAbort?: (aborter: () => void | Promise<void | boolean>) => void;
   },
@@ -265,13 +268,18 @@ export async function uploadAndCreateNode(
     throw new Error("Unable to retrieve file path for upload.");
   }
 
+  const formDataParams: Record<string, string> = {
+    parent_id: String(parentId),
+    library_id: String(libraryId),
+  };
+  if (options?.conflictPolicy) {
+    formDataParams.conflictPolicy = options.conflictPolicy;
+  }
+
   const uploadTask = createIpcUploadTask<any>(
     "/v1/directory/upload",
     filePath,
-    {
-      parent_id: String(parentId),
-      library_id: String(libraryId),
-    },
+    formDataParams,
     (progress) => {
       if (options?.onProgress) {
         options.onProgress(
@@ -320,16 +328,24 @@ export async function uploadLocalPathAndCreateNode(
   filePath: string,
   parentId: number,
   libraryId: number,
+  options?: {
+    conflictPolicy?: NodeNameConflictPolicy;
+  },
 ) {
   const normalizedFilePath = String(filePath || '').trim();
   if (!normalizedFilePath) {
     throw new Error('上传路径不能为空');
   }
 
-  const json = await ipcUpload("/v1/directory/upload", normalizedFilePath, {
+  const formDataParams: Record<string, string> = {
     parent_id: String(parentId),
     library_id: String(libraryId),
-  });
+  };
+  if (options?.conflictPolicy) {
+    formDataParams.conflictPolicy = options.conflictPolicy;
+  }
+
+  const json = await ipcUpload("/v1/directory/upload", normalizedFilePath, formDataParams);
 
   const d = extractDataPayload<Record<string, unknown>>(json);
   if (!d || typeof d !== 'object') {
@@ -345,6 +361,7 @@ export async function createNode(payload: {
   libraryId: number;
   type: 'dir' | 'file';
   ext?: string;
+  conflictPolicy?: NodeNameConflictPolicy;
 }) {
   // 后端期望 type 为数字：0=文件夹，1=文件
   const body = await request('/v1/nodes', {
@@ -355,6 +372,7 @@ export async function createNode(payload: {
       parentId: payload.parentId,
       libraryId: payload.libraryId,
       type: payload.type === 'dir' ? 0 : 1,
+      conflictPolicy: payload.conflictPolicy,
     }),
   });
   const d = body.data;

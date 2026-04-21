@@ -56,6 +56,7 @@
 - 当前工作区显示模式
 - 浏览器资源面板展开与宽度
 - 书签栏展开与管理 UI
+- 浏览器设置入口与 settings 标签页显示
 - pending browser file open
 
 规则：

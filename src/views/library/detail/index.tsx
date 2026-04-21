@@ -106,6 +106,7 @@ const SIDE_PANEL_TOGGLE_SIZE = TOOLBAR_ACTION_BUTTON_SIZE;
 const SIDE_PANEL_TOGGLE_ICON_SIZE = 24;
 const CONTENT_TOOLBAR_COLLAPSED_SAFE_SPACE = SIDE_PANEL_TOGGLE_LEFT + SIDE_PANEL_TOGGLE_SIZE + 8;
 const SIDE_PANEL_COLLAPSE_ANIMATION_MS = 260;
+const BROWSER_SETTINGS_TAB_ID = 'browser-internal:settings';
 
 const SidePanelMotionProperty = createGlobalStyle`
   @property --side-panel-visual-width {
@@ -1140,6 +1141,103 @@ const BookmarkManagerContent = styled.div`
   }
 `;
 
+const BrowserSettingsContent = styled.div`
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 22px 24px 28px;
+  background: var(--app-bg);
+
+  .browser-settings-hero {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding-bottom: 4px;
+  }
+
+  .browser-settings-intro {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .browser-settings-eyebrow {
+    font-size: 12px;
+    line-height: 1.4;
+    font-weight: 600;
+    color: var(--semi-color-primary);
+  }
+
+  .browser-settings-title {
+    font-size: 24px;
+    font-weight: 600;
+    color: var(--app-text);
+    line-height: 1.25;
+  }
+
+  .browser-settings-description {
+    max-width: 720px;
+    font-size: 14px;
+    line-height: 1.6;
+    color: var(--app-text-muted);
+  }
+
+  .browser-settings-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .browser-settings-card {
+    min-height: 132px;
+    border: 1px solid var(--app-border);
+    border-radius: 8px;
+    background: var(--app-bg-elevated);
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .browser-settings-card-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--app-text);
+  }
+
+  .browser-settings-card-body {
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--app-text-muted);
+  }
+
+  .browser-settings-chip {
+    width: fit-content;
+    max-width: 100%;
+    height: 24px;
+    padding: 0 8px;
+    border-radius: 999px;
+    border: 1px solid var(--app-border);
+    background: color-mix(in srgb, var(--app-bg-elevated) 82%, var(--semi-color-fill-0) 18%);
+    color: var(--app-text-muted);
+    display: inline-flex;
+    align-items: center;
+    font-size: 12px;
+    font-weight: 500;
+  }
+
+  .browser-settings-footer {
+    padding-top: 4px;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--app-text-muted);
+  }
+`;
+
 const ContentBody = styled.div`
   flex: 1;
   min-height: 0;
@@ -1201,9 +1299,25 @@ function createBrowserTab(): BrowserTab {
     canGoBack: false,
     canGoForward: false,
     id: createBrowserTabId(),
+    kind: 'page',
     title: '新标签页',
     url: '',
   };
+}
+
+function createBrowserSettingsTab(): BrowserTab {
+  return {
+    canGoBack: false,
+    canGoForward: false,
+    id: BROWSER_SETTINGS_TAB_ID,
+    kind: 'settings',
+    title: '设置',
+    url: '',
+  };
+}
+
+function isBrowserSettingsTab(tab: BrowserTab | null | undefined) {
+  return tab?.kind === 'settings';
 }
 
 function updateBrowserTabList(
@@ -1412,6 +1526,13 @@ const BookmarkVisual: React.FC<{
 };
 
 const BrowserTabVisual: React.FC<{ cacheOwnerKey?: string; tab: BrowserTab }> = ({ cacheOwnerKey, tab }) => {
+  if (isBrowserSettingsTab(tab)) {
+    return (
+      <span className="browser-tab-favicon favicon-fallback" aria-hidden="true">
+        <IconSetting size="small" />
+      </span>
+    );
+  }
   const iconUrl = tab.iconUrl || getCachedFaviconDataUrl({
     ownerKey: cacheOwnerKey,
     iconUrl: tab.iconSourceUrl,
@@ -1532,6 +1653,25 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
       return null;
     }
     return browserTabs.find((tab) => tab.id === activeBrowserTabId) ?? null;
+  }, [activeBrowserTabId, browserTabs]);
+  const activeBrowserTabIsSettings = isBrowserSettingsTab(activeBrowserTab);
+  const getPreferredBrowserPageTabId = React.useCallback(() => {
+    const activePageTabId = (
+      activeBrowserTabId
+      && browserTabs.some((tab) => tab.id === activeBrowserTabId && !isBrowserSettingsTab(tab))
+    )
+      ? activeBrowserTabId
+      : null;
+    if (activePageTabId) {
+      return activePageTabId;
+    }
+    for (let index = browserTabs.length - 1; index >= 0; index -= 1) {
+      const candidate = browserTabs[index];
+      if (!isBrowserSettingsTab(candidate)) {
+        return candidate.id;
+      }
+    }
+    return null;
   }, [activeBrowserTabId, browserTabs]);
 
   const faviconCacheOwnerKey = React.useMemo(() => {
@@ -1988,7 +2128,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
       Toast.warning('当前书签缺少有效网址');
       return;
     }
-    const existingTabId = activeBrowserTabId ?? browserTabs[browserTabs.length - 1]?.id ?? null;
+    const existingTabId = getPreferredBrowserPageTabId();
     let targetTabId = existingTabId;
     if (!targetTabId) {
       const next = createEmptyBrowserTab();
@@ -2020,7 +2160,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
         browserRef.current?.navigate(targetTabId, nextUrl);
       }
     });
-  }, [activeBrowserTabId, browserTabs, normalizeBrowserUrl]);
+  }, [getPreferredBrowserPageTabId, normalizeBrowserUrl]);
 
   const buildBookmarkContextMenuItems = React.useCallback((item: BrowserBookmarkItem | null): ContextMenuItem[] => {
     const items: ContextMenuItem[] = [];
@@ -2478,11 +2618,19 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
     if (browserTabs.length > 0) {
       const fallbackTabId = activeBrowserTabId ?? browserTabs[browserTabs.length - 1]?.id ?? null;
       const fallbackTab = browserTabs.find((tab) => tab.id === fallbackTabId) ?? null;
+      const fallbackIsSettings = isBrowserSettingsTab(fallbackTab);
       setBrowserModeOpen(true);
-      setBookmarkBarVisible(!fallbackTab?.url);
+      setBookmarkBarVisible(Boolean(fallbackTab && !fallbackIsSettings && !fallbackTab.url));
       setWorkspaceDisplayMode('browser');
       setActiveBrowserTabId(fallbackTabId);
-      setBrowserInput(fallbackTab?.url ?? '');
+      setBrowserInput(fallbackIsSettings ? '' : (fallbackTab?.url ?? ''));
+      if (fallbackTabId) {
+        if (fallbackIsSettings) {
+          void window.electronEmbeddedBrowser.deactivate();
+        } else {
+          void window.electronEmbeddedBrowser.activateTab(fallbackTabId);
+        }
+      }
       return;
     }
     createAndActivateBrowserTab();
@@ -2522,23 +2670,51 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
     setBrowserModeOpen(true);
     setWorkspaceDisplayMode('browser');
     const targetTab = browserTabs.find((tab) => tab.id === tabId) ?? null;
-    setBookmarkBarVisible(!targetTab?.url);
-    setBrowserInput(targetTab?.url ?? '');
+    const targetIsSettings = isBrowserSettingsTab(targetTab);
+    setBookmarkBarVisible(Boolean(targetTab && !targetIsSettings && !targetTab.url));
+    setBrowserInput(targetIsSettings ? '' : (targetTab?.url ?? ''));
+    if (targetIsSettings) {
+      void window.electronEmbeddedBrowser.deactivate();
+      return;
+    }
     void window.electronEmbeddedBrowser.activateTab(tabId);
   }, [browserTabs]);
 
+  const openBrowserSettings = React.useCallback(() => {
+    const existingTab = browserTabs.find((tab) => isBrowserSettingsTab(tab)) ?? null;
+    if (existingTab) {
+      activateBrowserTab(existingTab.id);
+      return;
+    }
+    const settingsTab = createBrowserSettingsTab();
+    setBrowserTabs((prev) => [...prev, settingsTab]);
+    setActiveBrowserTabId(settingsTab.id);
+    setBrowserModeOpen(true);
+    setBookmarkBarVisible(false);
+    setWorkspaceDisplayMode('browser');
+    setBrowserInput('');
+    setSearchMode('web');
+    void window.electronEmbeddedBrowser.deactivate();
+  }, [activateBrowserTab, browserTabs]);
+
   const closeBrowserTab = React.useCallback((tabId: string) => {
+    const closingTab = browserTabs.find((tab) => tab.id === tabId) ?? null;
     const nextTabs = browserTabs.filter((tab) => tab.id !== tabId);
     const closingActive = activeBrowserTabId === tabId;
     setBrowserTabs(nextTabs);
     if (closingActive) {
       const fallback = nextTabs[nextTabs.length - 1] ?? null;
+      const fallbackIsSettings = isBrowserSettingsTab(fallback);
       setActiveBrowserTabId(fallback?.id ?? null);
-      setBrowserInput(fallback?.url ?? '');
+      setBrowserInput(fallbackIsSettings ? '' : (fallback?.url ?? ''));
       setBrowserModeOpen(nextTabs.length > 0);
-      setBookmarkBarVisible(!fallback?.url);
+      setBookmarkBarVisible(Boolean(fallback && !fallbackIsSettings && !fallback.url));
       if (fallback) {
-        void window.electronEmbeddedBrowser.activateTab(fallback.id);
+        if (fallbackIsSettings) {
+          void window.electronEmbeddedBrowser.deactivate();
+        } else {
+          void window.electronEmbeddedBrowser.activateTab(fallback.id);
+        }
       } else {
         void window.electronEmbeddedBrowser.deactivate();
       }
@@ -2551,7 +2727,9 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
       delete next[tabId];
       return next;
     });
-    void window.electronEmbeddedBrowser.closeTab(tabId);
+    if (!isBrowserSettingsTab(closingTab)) {
+      void window.electronEmbeddedBrowser.closeTab(tabId);
+    }
   }, [activeBrowserTabId, browserTabs]);
 
   const clearPendingBrowserFileOpen = React.useCallback((tabId: string) => {
@@ -2574,7 +2752,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   }, []);
 
   const submitBrowserInput = React.useCallback((rawValue: string, targetTabId?: string | null) => {
-    const resolvedTabId = targetTabId ?? activeBrowserTabId;
+    const resolvedTabId = targetTabId ?? getPreferredBrowserPageTabId();
     if (!resolvedTabId) {
       return;
     }
@@ -2588,11 +2766,12 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
     setWorkspaceDisplayMode('browser');
     applyBrowserTabUpdate(resolvedTabId, (tab) => ({
       ...tab,
+      kind: 'page',
       url: nextUrl,
       title: tab.title || nextUrl,
     }));
     browserRef.current?.navigate(resolvedTabId, nextUrl);
-  }, [activeBrowserTabId, applyBrowserTabUpdate, normalizeBrowserUrl]);
+  }, [applyBrowserTabUpdate, getPreferredBrowserPageTabId, normalizeBrowserUrl]);
 
   const handleSearchWorkspaceSubmit = React.useCallback(async (rawValue: string) => {
     const trimmed = String(rawValue || '').trim();
@@ -2602,7 +2781,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
     if (searchMode === 'web') {
       setBrowserInput(trimmed);
       setSearchDraft(trimmed);
-      const existingTabId = activeBrowserTabId ?? browserTabs[browserTabs.length - 1]?.id ?? null;
+      const existingTabId = getPreferredBrowserPageTabId();
       const targetTabId = existingTabId ?? createAndActivateBrowserTab();
       setBrowserModeOpen(true);
       setWorkspaceDisplayMode('browser');
@@ -2616,9 +2795,8 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
     }
     setSearchDraft(trimmed);
   }, [
-    activeBrowserTabId,
-    browserTabs,
     createAndActivateBrowserTab,
+    getPreferredBrowserPageTabId,
     searchMode,
     submitBrowserInput,
   ]);
@@ -3604,7 +3782,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
             )}
           </div>
         </ContentToolbar>
-        {browserModeOpen ? (
+        {browserModeOpen && !activeBrowserTabIsSettings ? (
           <>
             <ContentToolbar className="browser-url-toolbar">
               <div className="toolbar-left">
@@ -3668,6 +3846,15 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
                 >
                   <IconPulse />
                 </button>
+                <button
+                  type="button"
+                  className="toolbar-action-btn"
+                  onClick={openBrowserSettings}
+                  title="浏览器设置"
+                  aria-label="浏览器设置"
+                >
+                  <IconSetting size="large" />
+                </button>
               </div>
             </ContentToolbar>
             {bookmarkBarVisible && !activeBrowserTab?.url ? (
@@ -3708,50 +3895,97 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
           {workspaceDisplayMode === 'browser' ? (
             <BrowserWorkspace>
               <BrowserWorkspaceMain>
-                <EmbeddedBrowserPanel
-                  ref={browserRef}
-                  activeTabId={activeBrowserTabId}
-                  boundsSyncDurationMs={SIDE_PANEL_COLLAPSE_ANIMATION_MS}
-                  boundsSyncSignal={sidePanelMotionSyncSignal}
-                  currentUrl={
-                    activeBrowserTab?.url ?? ''
-                  }
-                  pendingFileOpen={
-                    activeBrowserTabId
-                      ? pendingBrowserFileOpenByTabId[activeBrowserTabId] ?? null
-                      : null
-                  }
-                  onPendingFileOpenHandled={(tabId) => {
-                    clearPendingBrowserFileOpen(tabId);
-                  }}
-                  suspendNativeView={Boolean(activeBrowserDownload)}
-                  onUrlChange={(nextUrl) => {
-                    if (!activeBrowserTabId) {
-                      return;
+                {activeBrowserTabIsSettings ? (
+                  <BrowserSettingsContent>
+                    <div className="browser-settings-hero">
+                      <span className="browser-settings-eyebrow">浏览器设置</span>
+                      <div className="browser-settings-intro">
+                        <div className="browser-settings-title">像浏览器内页一样放在主内容区域里</div>
+                        <div className="browser-settings-description">
+                          这里会逐步承接内置浏览器自己的配置。目录树和主框架不被遮挡，顶部也保留熟悉的标签页心智。
+                        </div>
+                      </div>
+                    </div>
+                    <div className="browser-settings-grid">
+                      <div className="browser-settings-card">
+                        <span className="browser-settings-chip">下一步优先做</span>
+                        <div className="browser-settings-card-title">Cookie 与站点数据</div>
+                        <div className="browser-settings-card-body">
+                          适合放站点级清理、登录态查看、缓存清空和定向排障。你前面提到的“播放过后抓不到资源”，这类能力也能从这里继续收口。
+                        </div>
+                      </div>
+                      <div className="browser-settings-card">
+                        <span className="browser-settings-chip">需要更谨慎</span>
+                        <div className="browser-settings-card-title">密码管理</div>
+                        <div className="browser-settings-card-body">
+                          可以做，但不适合先拍脑袋上。更稳的方向是明确本地加密存储、查看授权和导出边界，再决定是否做成浏览器内建密码库。
+                        </div>
+                      </div>
+                      <div className="browser-settings-card">
+                        <span className="browser-settings-chip">比较顺手</span>
+                        <div className="browser-settings-card-title">下载与文件行为</div>
+                        <div className="browser-settings-card-body">
+                          后续可以继续补默认下载位置、下载完成后的导入策略，以及网页文件打开时的处理偏好。
+                        </div>
+                      </div>
+                      <div className="browser-settings-card">
+                        <span className="browser-settings-chip">调试向</span>
+                        <div className="browser-settings-card-title">网页调试与兼容开关</div>
+                        <div className="browser-settings-card-body">
+                          比如 User-Agent、权限提示、资源捕获偏好、缓存重载和页面诊断，也比较适合集中放在这里。
+                        </div>
+                      </div>
+                    </div>
+                    <div className="browser-settings-footer">
+                      现在先把结构做对，后面我们可以把每一项浏览器能力顺着这里往下加，不用再改头部布局。
+                    </div>
+                  </BrowserSettingsContent>
+                ) : (
+                  <EmbeddedBrowserPanel
+                    ref={browserRef}
+                    activeTabId={activeBrowserTabId}
+                    boundsSyncDurationMs={SIDE_PANEL_COLLAPSE_ANIMATION_MS}
+                    boundsSyncSignal={sidePanelMotionSyncSignal}
+                    currentUrl={
+                      activeBrowserTab?.url ?? ''
                     }
-                    applyBrowserTabUpdate(activeBrowserTabId, (tab) => ({
-                      ...tab,
-                      url: nextUrl,
-                      title: tab.title || nextUrl,
-                    }));
-                    syncBrowserInputWithTab(activeBrowserTabId, nextUrl);
-                  }}
-                  onStateChange={(payload) => {
-                    if (!payload.tabId) {
-                      return;
+                    pendingFileOpen={
+                      activeBrowserTabId
+                        ? pendingBrowserFileOpenByTabId[activeBrowserTabId] ?? null
+                        : null
                     }
-                    applyBrowserTabState({
-                      ...payload,
-                      tabId: payload.tabId,
-                    });
-                    if (payload.tabId === activeBrowserTabId && payload.url) {
-                      setBrowserInput(payload.url);
-                    }
-                  }}
-                  onSubmitDraft={submitBrowserDraft}
-                />
+                    onPendingFileOpenHandled={(tabId) => {
+                      clearPendingBrowserFileOpen(tabId);
+                    }}
+                    suspendNativeView={Boolean(activeBrowserDownload)}
+                    onUrlChange={(nextUrl) => {
+                      if (!activeBrowserTabId) {
+                        return;
+                      }
+                      applyBrowserTabUpdate(activeBrowserTabId, (tab) => ({
+                        ...tab,
+                        url: nextUrl,
+                        title: tab.title || nextUrl,
+                      }));
+                      syncBrowserInputWithTab(activeBrowserTabId, nextUrl);
+                    }}
+                    onStateChange={(payload) => {
+                      if (!payload.tabId) {
+                        return;
+                      }
+                      applyBrowserTabState({
+                        ...payload,
+                        tabId: payload.tabId,
+                      });
+                      if (payload.tabId === activeBrowserTabId && payload.url) {
+                        setBrowserInput(payload.url);
+                      }
+                    }}
+                    onSubmitDraft={submitBrowserDraft}
+                  />
+                )}
               </BrowserWorkspaceMain>
-              {browserResourcePanelVisible ? (
+              {browserResourcePanelVisible && !activeBrowserTabIsSettings ? (
                 <BrowserWorkspaceAside
                   ref={browserResourcePanelRef}
                   style={{ width: `${browserResourcePanelWidth}px` }}

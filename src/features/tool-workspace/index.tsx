@@ -1303,7 +1303,9 @@ const MediaProcessingTool: React.FC<MediaProcessingToolProps> = ({
       throw new Error('请选择内部保存目录');
     }
     try {
-      await uploadLocalPathAndCreateNode(outputPath, internalDirectory.node.id, libraryId);
+      await uploadLocalPathAndCreateNode(outputPath, internalDirectory.node.id, libraryId, {
+        conflictPolicy: 'auto_rename',
+      });
       try {
         await onRefreshDirectory?.(internalDirectory.node.id);
       } catch (error: any) {

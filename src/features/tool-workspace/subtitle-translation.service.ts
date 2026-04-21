@@ -327,7 +327,9 @@ export async function saveSubtitleToLibraryNode(payload: {
   const content = buildTranslatedSubtitleContent(payload.format, payload.rows);
   const staged = await window.electronAPI.createStagedTextFile(payload.fileName, content);
   try {
-    return await uploadLocalPathAndCreateNode(staged.filePath, payload.parentId, payload.libraryId);
+    return await uploadLocalPathAndCreateNode(staged.filePath, payload.parentId, payload.libraryId, {
+      conflictPolicy: 'auto_rename',
+    });
   } finally {
     await window.electronAPI.cleanupStagedTextFile(staged.filePath).catch(() => false);
   }
@@ -341,7 +343,9 @@ export async function uploadGeneratedSubtitleContent(
 ) {
   const staged = await window.electronAPI.createStagedTextFile(fileName, content);
   try {
-    return await uploadLocalPathAndCreateNode(staged.filePath, parentId, libraryId);
+    return await uploadLocalPathAndCreateNode(staged.filePath, parentId, libraryId, {
+      conflictPolicy: 'auto_rename',
+    });
   } finally {
     await window.electronAPI.cleanupStagedTextFile(staged.filePath).catch(() => false);
   }

@@ -162,6 +162,7 @@ renderer tool workspace
 
 - Electron main 只负责“通用文本文件 staging / 写入”。
 - 上传业务仍由 renderer 侧现有上传链路负责。
+- 工具区生成内容属于系统插入，库内另存调用 `/v1/directory/upload` 时传 `conflictPolicy=auto_rename`；同目录重名由后端返回最终名称，例如 `字幕 (1).srt`。
 
 ## 7. 状态 owner
 
@@ -196,7 +197,7 @@ renderer tool workspace
   - 内部未选目录时，点击“合并&保存 / 转换&保存”会把路径框标红并提示“必须选择”
 - 内部保存链路：
   - 合并/转格式先在本地落盘
-  - 再自动上传到所选内部目录（上传失败时提示“本地已保存，内部上传失败”）
+  - 再以 `conflictPolicy=auto_rename` 自动上传到所选内部目录（上传失败时提示“本地已保存，内部上传失败”）
   - 上传成功后会触发目录树目标目录局部刷新，立即可见新文件
 
 ### 8.2 边界

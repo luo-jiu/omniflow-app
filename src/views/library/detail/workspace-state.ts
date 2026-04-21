@@ -1,11 +1,14 @@
 import type { SearchWorkspaceMode } from './SearchWorkspace';
 
+export type BrowserTabKind = 'page' | 'settings';
+
 export type BrowserTab = {
   canGoBack?: boolean;
   canGoForward?: boolean;
   id: string;
   iconSourceUrl?: string;
   iconUrl?: string;
+  kind?: BrowserTabKind;
   title: string;
   url: string;
 };
@@ -55,6 +58,7 @@ function normalizeBrowserTab(raw: BrowserTab | null | undefined): BrowserTab | n
     id,
     iconSourceUrl: String(raw.iconSourceUrl || '').trim() || undefined,
     iconUrl: String(raw.iconUrl || '').trim() || undefined,
+    kind: raw.kind === 'settings' ? 'settings' : 'page',
     title: String(raw.title || '').trim() || '新标签页',
     url: String(raw.url || '').trim(),
   };
