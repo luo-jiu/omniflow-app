@@ -29,6 +29,11 @@ OmniFlow 的 embedded browser 不是单纯的 React 组件，而是“renderer �
   - `src/features/embedded-browser/resources/services/embedded-browser-resource.api.ts`
 - Renderer 下载导入 hook
   - `src/features/embedded-browser/downloads/hooks/useEmbeddedBrowserDownloadImport.ts`
+- Renderer Cookie 管理
+  - `src/features/embedded-browser/cookies/services/embedded-browser-cookie.api.ts`
+  - `src/features/embedded-browser/cookies/components/EmbeddedBrowserCookieSettings.tsx`
+- Main Cookie 服务
+  - `electron/service/embeddedBrowserCookieService.ts`
 - Preload bridge
   - `electron/preload.ts`
 - IPC 注册
@@ -100,11 +105,12 @@ library detail page
 
 ### 3.4 Preload / IPC / Main
 
-`electron/preload.ts` 当前提供三类嵌入浏览器相关桥接：
+`electron/preload.ts` 当前提供四类嵌入浏览器相关桥接：
 
 - 页面和 tab 控制
 - 下载事件和资源事件订阅
 - 资源捕捉、缓存捕捉、预览、导出、合并、manifest 下载
+- Cookie 管理（查询、删除单条、按域名删除、全部清除）
 
 `embeddedBrowserMainIpc.ts` 只负责 channel 到 handler 的转发，不承担业务规则。
 

@@ -8,6 +8,10 @@ import type {
   EmbeddedBrowserHlsDownloadPayload,
   EmbeddedBrowserMpdDownloadPayload,
 } from './embeddedBrowserMainTypes'
+import type {
+  EmbeddedBrowserCookie,
+  EmbeddedBrowserCookieFilter,
+} from './embeddedBrowserCookieService'
 import type { EmbeddedBrowserCatchToolkitStatePayload } from './embeddedBrowserCatchToolkitPageBridge'
 import type {
   EmbeddedBrowserExtractedResourcePayload,
@@ -73,6 +77,10 @@ type EmbeddedBrowserMainIpcHandlers = {
     tabId: string,
     payload: Partial<EmbeddedBrowserCatchToolkitStatePayload>,
   ) => Promise<unknown>
+  getCookies: (filter?: EmbeddedBrowserCookieFilter) => Promise<EmbeddedBrowserCookie[]>
+  removeCookie: (url: string, name: string) => Promise<void>
+  removeCookiesByDomain: (domain: string) => Promise<void>
+  removeAllCookies: () => Promise<void>
 }
 
 export function registerEmbeddedBrowserMainIpcHandlers(handlers: EmbeddedBrowserMainIpcHandlers) {
@@ -187,4 +195,17 @@ export function registerEmbeddedBrowserMainIpcHandlers(handlers: EmbeddedBrowser
   ))
   ipcMain.handle('embedded-browser:deactivate', (event) => handlers.deactivate(event.sender))
   ipcMain.handle('embedded-browser:close-all', (event) => handlers.closeAll(event.sender))
+
+  ipcMain.handle('embedded-browser:cookie:get', async (_event, filter?: EmbeddedBrowserCookieFilter) => (
+    handlers.getCookies(filter)
+  ))
+  ipcMain.handle('embedded-browser:cookie:remove', async (_event, url: string, name: string) => (
+    handlers.removeCookie(url, name)
+  ))
+  ipcMain.handle('embedded-browser:cookie:remove-domain', async (_event, domain: string) => (
+    handlers.removeCookiesByDomain(domain)
+  ))
+  ipcMain.handle('embedded-browser:cookie:remove-all', async () => (
+    handlers.removeAllCookies()
+  ))
 }

@@ -12,6 +12,12 @@ import {
   registerEmbeddedBrowserMainIpcHandlers,
 } from './embeddedBrowserMainIpc'
 import {
+  getEmbeddedBrowserCookies,
+  removeAllEmbeddedBrowserCookies,
+  removeEmbeddedBrowserCookie,
+  removeEmbeddedBrowserCookiesByDomain,
+} from './embeddedBrowserCookieService'
+import {
   type EmbeddedBrowserBounds,
   type EmbeddedBrowserCapturedResourceMergePayload,
   type EmbeddedBrowserCapturedResourceMergeResponse,
@@ -1578,6 +1584,10 @@ export function createEmbeddedBrowserMainController(
       stopCapturedResources: (tabId) => stopEmbeddedBrowserResourceCapture(String(tabId || '').trim()),
       transcodeResource: transcodeEmbeddedBrowserCapturedResourceForRenderer,
       updateCatchToolkitState: handleUpdateCatchToolkitState,
+      getCookies: getEmbeddedBrowserCookies,
+      removeCookie: removeEmbeddedBrowserCookie,
+      removeCookiesByDomain: removeEmbeddedBrowserCookiesByDomain,
+      removeAllCookies: removeAllEmbeddedBrowserCookies,
     })
   }
 

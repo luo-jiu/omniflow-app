@@ -170,6 +170,25 @@ interface Window {
   };
 }
 
+type EmbeddedBrowserCookie = {
+  name: string;
+  value: string;
+  domain: string;
+  path: string;
+  secure: boolean;
+  httpOnly: boolean;
+  sameSite: 'unspecified' | 'no_restriction' | 'lax' | 'strict';
+  expirationDate?: number;
+  session: boolean;
+};
+
+type EmbeddedBrowserCookieFilter = {
+  domain?: string;
+  name?: string;
+  url?: string;
+  path?: string;
+};
+
 type EmbeddedBrowserBounds = {
   x: number;
   y: number;
@@ -369,5 +388,9 @@ interface Window {
     startDeepResourceCapture: (tabId: string) => Promise<EmbeddedBrowserResourceCaptureSnapshot>;
     startResourceCapture: (tabId: string) => Promise<EmbeddedBrowserResourceCaptureSnapshot>;
     stopResourceCapture: (tabId: string) => Promise<EmbeddedBrowserResourceCaptureSnapshot>;
+    getCookies: (filter?: EmbeddedBrowserCookieFilter) => Promise<EmbeddedBrowserCookie[]>;
+    removeCookie: (url: string, name: string) => Promise<void>;
+    removeCookiesByDomain: (domain: string) => Promise<void>;
+    removeAllCookies: () => Promise<void>;
   };
 }

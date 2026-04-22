@@ -355,4 +355,12 @@ contextBridge.exposeInMainWorld('electronEmbeddedBrowser', {
   clearCapturedResources: (tabId: string) => ipcRenderer.invoke('embedded-browser:resource:clear', tabId),
   setBounds: (bounds: { x: number; y: number; width: number; height: number }) =>
     ipcRenderer.invoke('embedded-browser:set-bounds', bounds),
+  getCookies: (filter?: { domain?: string; name?: string; url?: string; path?: string }) =>
+    ipcRenderer.invoke('embedded-browser:cookie:get', filter),
+  removeCookie: (url: string, name: string) =>
+    ipcRenderer.invoke('embedded-browser:cookie:remove', url, name),
+  removeCookiesByDomain: (domain: string) =>
+    ipcRenderer.invoke('embedded-browser:cookie:remove-domain', domain),
+  removeAllCookies: () =>
+    ipcRenderer.invoke('embedded-browser:cookie:remove-all'),
 });

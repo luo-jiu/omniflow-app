@@ -32,6 +32,7 @@ import { Input, Modal, Popover, Select, Toast } from '@douyinfe/semi-ui';
 import styled, { createGlobalStyle, css } from "styled-components";
 import ContextMenu, { type ContextMenuItem } from "@/components/ui/context-menu";
 import EmbeddedBrowserPanel, { type EmbeddedBrowserHandle } from "@/features/embedded-browser/components/EmbeddedBrowserPanel";
+import EmbeddedBrowserCookieSettings from "@/features/embedded-browser/cookies/components/EmbeddedBrowserCookieSettings";
 import EmbeddedBrowserDownloadImportModal from "@/features/embedded-browser/downloads/components/EmbeddedBrowserDownloadImportModal";
 import { useEmbeddedBrowserDownloadImport } from "@/features/embedded-browser/downloads/hooks/useEmbeddedBrowserDownloadImport";
 import EmbeddedBrowserResourcePanel from "@/features/embedded-browser/resources/components/EmbeddedBrowserResourcePanel";
@@ -1201,6 +1202,16 @@ const BrowserSettingsContent = styled.div`
     display: flex;
     flex-direction: column;
     gap: 12px;
+
+    &.browser-settings-card-clickable {
+      cursor: pointer;
+      transition: border-color 0.15s, box-shadow 0.15s;
+
+      &:hover {
+        border-color: var(--semi-color-primary);
+        box-shadow: 0 0 0 1px var(--semi-color-primary);
+      }
+    }
   }
 
   .browser-settings-card-title {
@@ -1679,6 +1690,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
     return browserTabs.find((tab) => tab.id === activeBrowserTabId) ?? null;
   }, [activeBrowserTabId, browserTabs]);
   const activeBrowserTabIsSettings = isBrowserSettingsTab(activeBrowserTab);
+  const [browserSettingsSection, setBrowserSettingsSection] = React.useState<string | null>(null);
   const getPreferredBrowserPageTabId = React.useCallback(() => {
     const activePageTabId = (
       activeBrowserTabId
@@ -3921,48 +3933,65 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
               <BrowserWorkspaceMain>
                 {activeBrowserTabIsSettings ? (
                   <BrowserSettingsContent>
-                    <div className="browser-settings-hero">
-                      <span className="browser-settings-eyebrow">浏览器设置</span>
-                      <div className="browser-settings-intro">
-                        <div className="browser-settings-title">像浏览器内页一样放在主内容区域里</div>
-                        <div className="browser-settings-description">
-                          这里会逐步承接内置浏览器自己的配置。目录树和主框架不被遮挡，顶部也保留熟悉的标签页心智。
+                    {browserSettingsSection === 'cookies' ? (
+                      <EmbeddedBrowserCookieSettings onBack={() => setBrowserSettingsSection(null)} />
+                    ) : (
+                      <>
+                        <div className="browser-settings-hero">
+                          <span className="browser-settings-eyebrow">浏览器设置</span>
+                          <div className="browser-settings-intro">
+                            <div className="browser-settings-title">像浏览器内页一样放在主内容区域里</div>
+                            <div className="browser-settings-description">
+                              这里会逐步承接内置浏览器自己的配置。目录树和主框架不被遮挡，顶部也保留熟悉的标签页心智。
+                            </div>
+                          </div>
                         </div>
-                      </div>
-                    </div>
-                    <div className="browser-settings-grid">
-                      <div className="browser-settings-card">
-                        <span className="browser-settings-chip">下一步优先做</span>
-                        <div className="browser-settings-card-title">Cookie 与站点数据</div>
-                        <div className="browser-settings-card-body">
-                          适合放站点级清理、登录态查看、缓存清空和定向排障。你前面提到的“播放过后抓不到资源”，这类能力也能从这里继续收口。
+                        <div className="browser-settings-grid">
+                          <div
+                            className="browser-settings-card browser-settings-card-clickable"
+                            onClick={() => setBrowserSettingsSection('cookies')}
+                            role="button"
+                            tabIndex={0}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault()
+                                setBrowserSettingsSection('cookies')
+                              }
+                            }}
+                          >
+                            <span className="browser-settings-chip">Cookie 管理</span>
+                            <div className="browser-settings-card-title">Cookie 与站点数据</div>
+                            <div className="browser-settings-card-body">
+                              查看、搜索和清除内置浏览器的 Cookie，按域名管理站点登录态和站点数据。
+                            </div>
+                          </div>
+                          <div className="browser-settings-card">
+                            <span className="browser-settings-chip">需要更谨慎</span>
+                            <div className="browser-settings-card-title">密码管理</div>
+                            <div className="browser-settings-card-body">
+                              可以做，但不适合先拍脑袋上。更稳的方向是明确本地加密存储、查看授权和导出边界，再决定是否做成浏览器内建密码库。
+                            </div>
+                          </div>
+                          <div className="browser-settings-card">
+                            <span className="browser-settings-chip">比较顺手</span>
+                            <div className="browser-settings-card-title">下载与文件行为</div>
+                            <div className="browser-settings-card-body">
+                              后续可以继续补默认下载位置、下载完成后的导入策略，以及网页文件打开时的处理偏好。
+                            </div>
+                          </div>
+                          <div className="browser-settings-card">
+                            <span className="browser-settings-chip">调试向</span>
+                            <div className="browser-settings-card-title">网页调试与兼容开关</div>
+                            <div className="browser-settings-card-body">
+                              比如 User-Agent、权限提示、资源捕获偏好、缓存重载和页面诊断，也比较适合集中放在这里。
+                            </div>
+                          </div>
                         </div>
-                      </div>
-                      <div className="browser-settings-card">
-                        <span className="browser-settings-chip">需要更谨慎</span>
-                        <div className="browser-settings-card-title">密码管理</div>
-                        <div className="browser-settings-card-body">
-                          可以做，但不适合先拍脑袋上。更稳的方向是明确本地加密存储、查看授权和导出边界，再决定是否做成浏览器内建密码库。
+                        <div className="browser-settings-footer">
+                          现在先把结构做对，后面我们可以把每一项浏览器能力顺着这里往下加，不用再改头部布局。
                         </div>
-                      </div>
-                      <div className="browser-settings-card">
-                        <span className="browser-settings-chip">比较顺手</span>
-                        <div className="browser-settings-card-title">下载与文件行为</div>
-                        <div className="browser-settings-card-body">
-                          后续可以继续补默认下载位置、下载完成后的导入策略，以及网页文件打开时的处理偏好。
-                        </div>
-                      </div>
-                      <div className="browser-settings-card">
-                        <span className="browser-settings-chip">调试向</span>
-                        <div className="browser-settings-card-title">网页调试与兼容开关</div>
-                        <div className="browser-settings-card-body">
-                          比如 User-Agent、权限提示、资源捕获偏好、缓存重载和页面诊断，也比较适合集中放在这里。
-                        </div>
-                      </div>
-                    </div>
-                    <div className="browser-settings-footer">
-                      现在先把结构做对，后面我们可以把每一项浏览器能力顺着这里往下加，不用再改头部布局。
-                    </div>
+                      </>
+                    )}
                   </BrowserSettingsContent>
                 ) : (
                   <EmbeddedBrowserPanel
