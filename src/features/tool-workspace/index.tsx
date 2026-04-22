@@ -31,6 +31,7 @@ import {
   downloadEmbeddedBrowserHlsManifest,
   downloadEmbeddedBrowserHlsPlan,
   listEmbeddedBrowserCapturedResources,
+  retryEmbeddedBrowserHlsPlanFailed,
   subscribeEmbeddedBrowserHlsTask,
 } from '@/features/embedded-browser/resources/services/embedded-browser-resource.api';
 import {
@@ -47,6 +48,8 @@ import {
   findMergeableResourcePair,
 } from '@/features/embedded-browser/resources/model/embedded-browser-resource.presentation';
 import {
+  describeEmbeddedBrowserHlsKeyVerificationResult,
+  getEmbeddedBrowserHlsKeyVerificationTone,
   normalizeHlsKeyCandidateValue,
   type EmbeddedBrowserHlsKeyVerificationResult,
 } from '@/features/embedded-browser/resources/model/embedded-browser-hls-key-verifier';
@@ -1283,14 +1286,33 @@ type MediaProcessingToolProps = {
   onRefreshDirectory?: (directoryId: number) => Promise<void> | void;
 };
 
-type HlsTaskStatus = {
-  completedFragments: number;
-  error?: string;
-  lastOutputPath?: string;
-  logs: string[];
+type HlsTaskStage = 'preparing' | 'downloading-fragments' | 'rewriting-playlist' | 'ffmpeg' | 'completed' | 'error';
+
+type HlsTaskLogEntry = {
+  createdAt: number;
+  id: string;
+  level: 'error' | 'info' | 'success';
   mode?: 'direct-manifest' | 'local-plan';
+  stage?: HlsTaskStage;
+  text: string;
+};
+
+type HlsTaskStatus = {
+  bytesReceived?: number;
+  bytesTotal?: number;
+  completedFragments: number;
+  durationSeconds?: number;
+  error?: string;
+  etaSeconds?: number;
+  ffmpegSpeedText?: string;
+  failedFragments?: number[];
+  lastOutputPath?: string;
+  logs: HlsTaskLogEntry[];
+  mode?: 'direct-manifest' | 'local-plan';
+  processedSeconds?: number;
   requestId?: string;
-  stage?: 'preparing' | 'downloading-fragments' | 'rewriting-playlist' | 'ffmpeg' | 'completed' | 'error';
+  speedBps?: number;
+  stage?: HlsTaskStage;
   state: 'idle' | 'running' | 'success' | 'error';
   totalFragments: number;
 };
@@ -1325,8 +1347,10 @@ function deriveHlsOutputFileName(url: string) {
 }
 
 function formatHlsVariantLabel(variant: {
+  averageBandwidth?: number;
   bandwidth?: number;
   codecs?: string;
+  frameRate?: number;
   resolution?: string;
   url: string;
 }, index: number) {
@@ -1334,15 +1358,252 @@ function formatHlsVariantLabel(variant: {
   if (variant.resolution) {
     parts.push(variant.resolution);
   }
-  if (variant.bandwidth && Number.isFinite(variant.bandwidth)) {
-    const mbps = variant.bandwidth / 1000 / 1000;
-    parts.push(`${mbps >= 1 ? mbps.toFixed(1) : (variant.bandwidth / 1000).toFixed(0)} ${mbps >= 1 ? 'Mbps' : 'Kbps'}`);
+  const preferredBandwidth = variant.averageBandwidth || variant.bandwidth;
+  if (preferredBandwidth && Number.isFinite(preferredBandwidth)) {
+    const mbps = preferredBandwidth / 1000 / 1000;
+    parts.push(`${mbps >= 1 ? mbps.toFixed(1) : (preferredBandwidth / 1000).toFixed(0)} ${mbps >= 1 ? 'Mbps' : 'Kbps'}`);
   }
   if (variant.codecs) {
     parts.push(variant.codecs);
   }
+  if (variant.frameRate && Number.isFinite(variant.frameRate)) {
+    parts.push(`${variant.frameRate.toFixed(2)} fps`);
+  }
   const title = parts.length ? parts.join(' · ') : `变体 ${index + 1}`;
   return `${title} · ${deriveHlsOutputFileName(variant.url)}`;
+}
+
+function formatHlsRenditionLabel(rendition: {
+  autoselect?: boolean;
+  default?: boolean;
+  forced?: boolean;
+  groupId?: string;
+  language?: string;
+  name?: string;
+  type?: string;
+}) {
+  const parts: string[] = [];
+  if (rendition.name) {
+    parts.push(rendition.name);
+  }
+  if (rendition.language) {
+    parts.push(rendition.language);
+  }
+  if (rendition.groupId) {
+    parts.push(`group:${rendition.groupId}`);
+  }
+  if (rendition.default) {
+    parts.push('default');
+  }
+  if (rendition.autoselect) {
+    parts.push('autoselect');
+  }
+  if (rendition.forced) {
+    parts.push('forced');
+  }
+  return parts.join(' · ') || rendition.type || '未命名轨道';
+}
+
+function createHlsTaskLogEntry(input: {
+  level?: HlsTaskLogEntry['level'];
+  mode?: HlsTaskLogEntry['mode'];
+  stage?: HlsTaskStage;
+  text: string;
+}) {
+  return {
+    createdAt: Date.now(),
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    level: input.level || 'info',
+    mode: input.mode,
+    stage: input.stage,
+    text: input.text,
+  } satisfies HlsTaskLogEntry;
+}
+
+function appendHlsTaskLogs(logs: HlsTaskLogEntry[], ...entries: HlsTaskLogEntry[]) {
+  return [...logs, ...entries].slice(-14);
+}
+
+function formatHlsTaskStageLabel(stage?: HlsTaskStage) {
+  switch (stage) {
+    case 'preparing':
+      return '准备任务';
+    case 'downloading-fragments':
+      return '下载分片';
+    case 'rewriting-playlist':
+      return '重写本地播放列表';
+    case 'ffmpeg':
+      return 'ffmpeg 合成';
+    case 'completed':
+      return '已完成';
+    case 'error':
+      return '执行失败';
+    default:
+      return '尚未开始';
+  }
+}
+
+function formatHlsTaskModeLabel(mode?: HlsTaskStatus['mode']) {
+  switch (mode) {
+    case 'local-plan':
+      return '本地 downloader';
+    case 'direct-manifest':
+      return 'ffmpeg 直拉';
+    default:
+      return '-';
+  }
+}
+
+function getHlsTaskProgressPercent(status: HlsTaskStatus) {
+  if (status.state === 'success' || status.stage === 'completed') {
+    return 100;
+  }
+  if (status.stage === 'preparing') {
+    return 6;
+  }
+  if (status.stage === 'downloading-fragments') {
+    if (status.totalFragments > 0) {
+      return Math.max(8, Math.min(82, Math.round((status.completedFragments / status.totalFragments) * 82)));
+    }
+    return 24;
+  }
+  if (status.stage === 'rewriting-playlist') {
+    return 88;
+  }
+  if (status.stage === 'ffmpeg') {
+    if (status.durationSeconds && status.processedSeconds && status.durationSeconds > 0) {
+      const ratio = Math.max(0, Math.min(1, status.processedSeconds / status.durationSeconds));
+      return Math.max(90, Math.min(99, Math.round(90 + ratio * 9)));
+    }
+    return 95;
+  }
+  if (status.state === 'error') {
+    if (status.totalFragments > 0) {
+      return Math.max(6, Math.min(95, Math.round((status.completedFragments / status.totalFragments) * 82)));
+    }
+    return 0;
+  }
+  return 0;
+}
+
+function describeHlsTaskProgress(status: HlsTaskStatus) {
+  if (status.state === 'idle') {
+    return '等待你发起 HLS 处理任务。';
+  }
+  if (status.stage === 'downloading-fragments' && status.totalFragments > 0) {
+    return `正在拉取分片，已完成 ${Math.min(status.completedFragments, status.totalFragments)} / ${status.totalFragments}。`;
+  }
+  if (status.stage === 'rewriting-playlist') {
+    return '本地分片已经齐了，正在整理成本地播放列表。';
+  }
+  if (status.stage === 'ffmpeg') {
+    if (status.durationSeconds && status.processedSeconds) {
+      return `分片准备完成，ffmpeg 正在合成，已处理 ${Math.min(status.processedSeconds, status.durationSeconds).toFixed(1)} / ${status.durationSeconds.toFixed(1)} 秒。`;
+    }
+    return '分片准备完成，正在交给 ffmpeg 合成最终文件。';
+  }
+  if (status.state === 'success') {
+    return '本次 HLS 任务已经完成，可以直接看产物路径或继续导入。';
+  }
+  if (status.state === 'error') {
+    return '任务中途失败了，可以先看最近日志和错误说明，再决定是否重试。';
+  }
+  return '任务正在准备阶段。';
+}
+
+function formatHlsTaskLogTime(timestamp: number) {
+  try {
+    return new Intl.DateTimeFormat('zh-CN', {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    }).format(new Date(timestamp));
+  } catch {
+    return '';
+  }
+}
+
+function formatFailedFragmentList(failedFragments: number[]) {
+  return failedFragments.map((value) => `#${value}`).join(', ')
+}
+
+function formatEtaSeconds(seconds?: number) {
+  if (!seconds || seconds <= 0) {
+    return '';
+  }
+  if (seconds < 60) {
+    return `${seconds}s`;
+  }
+  const minutes = Math.floor(seconds / 60);
+  const remainSeconds = seconds % 60;
+  if (minutes < 60) {
+    return remainSeconds ? `${minutes}m ${remainSeconds}s` : `${minutes}m`;
+  }
+  const hours = Math.floor(minutes / 60);
+  const remainMinutes = minutes % 60;
+  return remainMinutes ? `${hours}h ${remainMinutes}m` : `${hours}h`;
+}
+
+function clampHlsFragmentRangeValue(value: number, total: number) {
+  if (!Number.isFinite(value) || total <= 0) {
+    return 1;
+  }
+  return Math.min(total, Math.max(1, Math.round(value)));
+}
+
+function createHlsPlanSlice(
+  plan: ToolWorkspaceMediaHlsRequest['plan'],
+  input: {
+    endFragment: number;
+    startFragment: number;
+    threadCount: number;
+  },
+) {
+  const totalFragments = plan.fragments.length;
+  const startFragment = clampHlsFragmentRangeValue(input.startFragment, totalFragments);
+  const endFragment = clampHlsFragmentRangeValue(input.endFragment, totalFragments);
+  if (endFragment < startFragment) {
+    return {
+      error: '结束分片不能早于起始分片',
+      ok: false as const,
+    };
+  }
+
+  const startIndex = startFragment - 1;
+  const endIndex = endFragment - 1;
+  const selectedFragments = plan.fragments.filter((fragment, index) => {
+    const sourceIndex = typeof fragment.index === 'number' ? fragment.index : index;
+    return sourceIndex >= startIndex && sourceIndex <= endIndex;
+  });
+  if (!selectedFragments.length) {
+    return {
+      error: '当前分片范围内没有可下载的片段',
+      ok: false as const,
+    };
+  }
+
+  const selectedSourceIndexes = new Set(
+    selectedFragments.map((fragment, index) => (
+      typeof fragment.index === 'number' ? fragment.index : index
+    )),
+  );
+  const selectedSegments = plan.segments.filter((_, index) => selectedSourceIndexes.has(index));
+  const durationSeconds = selectedFragments.reduce((total, fragment) => total + Number(fragment.duration || 0), 0);
+
+  return {
+    ok: true as const,
+    plan: {
+      ...plan,
+      durationSeconds,
+      encryptedSegmentCount: selectedFragments.filter((fragment) => Boolean(fragment.key?.url || fragment.key?.method)).length,
+      fragmentCount: selectedFragments.length,
+      fragments: selectedFragments,
+      partCount: selectedFragments.filter((fragment) => fragment.part).length,
+      segmentCount: selectedSegments.length,
+      segments: selectedSegments,
+      suggestedThreadCount: Math.max(1, Math.round(input.threadCount)),
+    },
+  };
 }
 
 const MediaProcessingTool: React.FC<MediaProcessingToolProps> = ({
@@ -1359,11 +1620,21 @@ const MediaProcessingTool: React.FC<MediaProcessingToolProps> = ({
   const [verifyingHlsKey, setVerifyingHlsKey] = React.useState(false);
   const [hlsManualKeyDraft, setHlsManualKeyDraft] = React.useState('');
   const [selectedHlsVariantUrl, setSelectedHlsVariantUrl] = React.useState('');
+  const [hlsThreadCountDraft, setHlsThreadCountDraft] = React.useState(6);
+  const [hlsRangeStartDraft, setHlsRangeStartDraft] = React.useState(1);
+  const [hlsRangeEndDraft, setHlsRangeEndDraft] = React.useState(1);
   const [hlsKeyVerificationResult, setHlsKeyVerificationResult] = React.useState<EmbeddedBrowserHlsKeyVerificationResult | null>(null);
   const [hlsTaskStatus, setHlsTaskStatus] = React.useState<HlsTaskStatus>({
+    bytesReceived: undefined,
+    bytesTotal: undefined,
     completedFragments: 0,
+    durationSeconds: undefined,
+    etaSeconds: undefined,
+    ffmpegSpeedText: undefined,
     logs: [],
+    processedSeconds: undefined,
     state: 'idle',
+    speedBps: undefined,
     totalFragments: 0,
   });
   const activeHlsTaskRequestIdRef = React.useRef('');
@@ -1416,11 +1687,48 @@ const MediaProcessingTool: React.FC<MediaProcessingToolProps> = ({
     }
     return hlsVariantOptions.find((option) => option.value === selectedHlsVariantUrl)?.label || '';
   }, [hlsVariantOptions, selectedHlsVariantUrl]);
+  const hlsAudioRenditions = React.useMemo(() => (
+    (hlsRequest?.plan.renditions || []).filter((rendition) => String(rendition.type || '').toUpperCase() === 'AUDIO')
+  ), [hlsRequest]);
+  const hlsSubtitleRenditions = React.useMemo(() => (
+    (hlsRequest?.plan.renditions || []).filter((rendition) => String(rendition.type || '').toUpperCase() === 'SUBTITLES')
+  ), [hlsRequest]);
+  const hlsSelectedVariant = React.useMemo(() => {
+    if (!selectedHlsVariantUrl) {
+      return null;
+    }
+    return hlsRequest?.plan.variants.find((variant) => variant.url === selectedHlsVariantUrl) || null;
+  }, [hlsRequest, selectedHlsVariantUrl]);
   const hlsCanSelectVariant = Boolean(
     hlsRequest?.plan.isMaster
     && /^https?:\/\//i.test(hlsRequest?.plan.manifestUrl || '')
     && hlsVariantOptions.length > 0,
   );
+  const hlsCanTuneLocalDownloader = Boolean(hlsRequest && !hlsRequest.plan.isMaster && hlsRequest.plan.fragmentCount > 0);
+  const normalizedHlsThreadCount = Math.max(1, Math.round(Number(hlsThreadCountDraft || 0) || 0));
+  const normalizedHlsRangeStart = hlsRequest?.plan.fragmentCount
+    ? clampHlsFragmentRangeValue(hlsRangeStartDraft, hlsRequest.plan.fragmentCount)
+    : 1;
+  const normalizedHlsRangeEnd = hlsRequest?.plan.fragmentCount
+    ? clampHlsFragmentRangeValue(hlsRangeEndDraft, hlsRequest.plan.fragmentCount)
+    : 1;
+  const hlsUsingCustomThreadCount = Boolean(
+    hlsCanTuneLocalDownloader
+    && normalizedHlsThreadCount !== Math.max(1, hlsRequest?.plan.suggestedThreadCount || 6),
+  );
+  const hlsUsingFragmentRange = Boolean(
+    hlsCanTuneLocalDownloader
+    && (
+      normalizedHlsRangeStart !== 1
+      || normalizedHlsRangeEnd !== Math.max(1, hlsRequest?.plan.fragmentCount || 1)
+    ),
+  );
+  const hlsTaskProgressPercent = React.useMemo(() => (
+    getHlsTaskProgressPercent(hlsTaskStatus)
+  ), [hlsTaskStatus]);
+  const hlsTaskProgressSummary = React.useMemo(() => (
+    describeHlsTaskProgress(hlsTaskStatus)
+  ), [hlsTaskStatus]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -1451,18 +1759,28 @@ const MediaProcessingTool: React.FC<MediaProcessingToolProps> = ({
   React.useEffect(() => {
     setHlsManualKeyDraft('');
     setSelectedHlsVariantUrl('');
+    setHlsThreadCountDraft(Math.max(1, hlsRequest?.plan.suggestedThreadCount || 6));
+    setHlsRangeStartDraft(1);
+    setHlsRangeEndDraft(Math.max(1, hlsRequest?.plan.fragmentCount || 1));
     setHlsKeyVerificationResult(null);
     setVerifyingHlsKey(false);
     activeHlsTaskRequestIdRef.current = '';
     activeHlsTaskManifestUrlRef.current = '';
     activeHlsKeyVerificationTokenRef.current = '';
     setHlsTaskStatus({
+      bytesReceived: undefined,
+      bytesTotal: undefined,
       completedFragments: 0,
+      durationSeconds: hlsRequest?.plan.durationSeconds || undefined,
+      etaSeconds: undefined,
+      ffmpegSpeedText: undefined,
       logs: [],
+      processedSeconds: undefined,
       state: 'idle',
+      speedBps: undefined,
       totalFragments: hlsRequest?.plan.fragmentCount || 0,
     });
-  }, [hlsRequest?.id, hlsRequest?.plan.fragmentCount]);
+  }, [hlsRequest?.id, hlsRequest?.plan.durationSeconds, hlsRequest?.plan.fragmentCount, hlsRequest?.plan.suggestedThreadCount]);
 
   React.useEffect(() => {
     if (!hlsRequest) {
@@ -1486,15 +1804,33 @@ const MediaProcessingTool: React.FC<MediaProcessingToolProps> = ({
       }
       setHlsTaskStatus((previous) => {
         const nextLog = payload.message
-          ? [...previous.logs, payload.message].slice(-12)
+          ? appendHlsTaskLogs(
+            previous.logs,
+            createHlsTaskLogEntry({
+              level: payload.status === 'error' ? 'error' : payload.status === 'success' ? 'success' : 'info',
+              mode: payload.mode,
+              stage: payload.stage,
+              text: payload.message,
+            }),
+          )
           : previous.logs;
         return {
+          bytesReceived: payload.bytesReceived ?? (payload.status === 'running' ? previous.bytesReceived : undefined),
+          bytesTotal: payload.bytesTotal ?? (payload.status === 'running' ? previous.bytesTotal : undefined),
           completedFragments: payload.completedFragments ?? previous.completedFragments,
-          error: payload.error,
+          durationSeconds: payload.durationSeconds ?? previous.durationSeconds,
+          error: payload.status === 'error' ? payload.error : undefined,
+          etaSeconds: payload.etaSeconds ?? (payload.status === 'running' ? previous.etaSeconds : undefined),
+          ffmpegSpeedText: payload.ffmpegSpeedText ?? (payload.stage === 'ffmpeg' && payload.status === 'running' ? previous.ffmpegSpeedText : undefined),
+          failedFragments: payload.status === 'error'
+            ? (payload.failedFragments ?? previous.failedFragments)
+            : (payload.failedFragments ?? undefined),
           lastOutputPath: payload.outputPath || previous.lastOutputPath,
           logs: nextLog,
           mode: payload.mode,
+          processedSeconds: payload.processedSeconds ?? (payload.stage === 'ffmpeg' && payload.status === 'running' ? previous.processedSeconds : undefined),
           requestId: payload.requestId || previous.requestId,
+          speedBps: payload.speedBps ?? (payload.status === 'running' ? previous.speedBps : undefined),
           stage: payload.stage,
           state: payload.status === 'running'
             ? 'running'
@@ -1655,27 +1991,65 @@ const MediaProcessingTool: React.FC<MediaProcessingToolProps> = ({
       Toast.warning('当前 master playlist 的手动 key 仍需先收敛到具体媒体 playlist，先不要直接走本地主链');
       return;
     }
+    const shouldUseLocalPlanForControls = hlsCanTuneLocalDownloader && (hlsUsingCustomThreadCount || hlsUsingFragmentRange);
+    let effectivePlan = hlsRequest.plan;
+    if (shouldUseLocalPlanForControls) {
+      const slicedPlanResult = createHlsPlanSlice(hlsRequest.plan, {
+        endFragment: normalizedHlsRangeEnd,
+        startFragment: normalizedHlsRangeStart,
+        threadCount: normalizedHlsThreadCount,
+      });
+      if (!slicedPlanResult.ok) {
+        Toast.warning(slicedPlanResult.error);
+        return;
+      }
+      effectivePlan = slicedPlanResult.plan;
+    }
     setSavingHls(true);
     try {
       const requestId = `hls-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const effectiveManifestUrl = selectedHlsVariantUrl || hlsRequest.plan.manifestUrl;
       activeHlsTaskRequestIdRef.current = requestId;
       activeHlsTaskManifestUrlRef.current = effectiveManifestUrl;
+      const shouldUseDirectManifestDownload = /^https?:\/\//i.test(effectiveManifestUrl) && !normalizedHlsManualKey && !shouldUseLocalPlanForControls;
       setHlsTaskStatus({
+        bytesReceived: undefined,
+        bytesTotal: undefined,
         completedFragments: 0,
+        durationSeconds: effectivePlan.durationSeconds,
+        error: undefined,
+        etaSeconds: undefined,
+        ffmpegSpeedText: undefined,
+        failedFragments: undefined,
+        lastOutputPath: undefined,
         logs: [
-          '已创建 HLS 处理任务',
-          selectedHlsVariantUrl ? `已选择变体：${hlsSelectedVariantLabel || selectedHlsVariantUrl}` : '当前使用自动变体策略',
+          createHlsTaskLogEntry({
+            mode: shouldUseDirectManifestDownload ? 'direct-manifest' : 'local-plan',
+            stage: 'preparing',
+            text: '已创建 HLS 处理任务',
+          }),
+          createHlsTaskLogEntry({
+            mode: shouldUseDirectManifestDownload ? 'direct-manifest' : 'local-plan',
+            stage: 'preparing',
+            text: selectedHlsVariantUrl ? `已选择变体：${hlsSelectedVariantLabel || selectedHlsVariantUrl}` : '当前使用自动变体策略',
+          }),
+          ...(shouldUseLocalPlanForControls ? [createHlsTaskLogEntry({
+            mode: 'local-plan',
+            stage: 'preparing',
+            text: `使用下载控制：线程 ${normalizedHlsThreadCount}，分片 #${normalizedHlsRangeStart}-#${normalizedHlsRangeEnd}`,
+          })] : []),
         ],
-        mode: /^https?:\/\//i.test(effectiveManifestUrl) && !normalizedHlsManualKey ? 'direct-manifest' : 'local-plan',
+        mode: shouldUseDirectManifestDownload ? 'direct-manifest' : 'local-plan',
+        processedSeconds: undefined,
         requestId,
+        speedBps: undefined,
         stage: 'preparing',
         state: 'running',
-        totalFragments: hlsRequest.plan.fragmentCount,
+        totalFragments: effectivePlan.fragmentCount,
       });
-      const shouldUseDirectManifestDownload = /^https?:\/\//i.test(effectiveManifestUrl) && !normalizedHlsManualKey;
       const result = shouldUseDirectManifestDownload
         ? await downloadEmbeddedBrowserHlsManifest(hlsRequest.resource.tabId, {
+            durationSeconds: effectivePlan.durationSeconds,
             headers: withResourceRefererHeader(hlsRequest.resource),
             manifestUrl: effectiveManifestUrl,
             outputDirectoryPath: saveTargetType === 'local' && localOutputDirectory
@@ -1690,7 +2064,7 @@ const MediaProcessingTool: React.FC<MediaProcessingToolProps> = ({
             outputDirectoryPath: saveTargetType === 'local' && localOutputDirectory
               ? localOutputDirectory
               : undefined,
-            plan: hlsRequest.plan,
+            plan: effectivePlan,
             requestId,
             suggestedFileName: deriveHlsOutputFileName(effectiveManifestUrl),
             useSystemSaveDialog: false,
@@ -1698,7 +2072,12 @@ const MediaProcessingTool: React.FC<MediaProcessingToolProps> = ({
       if (result?.cancelled) {
         setHlsTaskStatus((previous) => ({
           ...previous,
-          logs: [...previous.logs, '任务已取消'].slice(-12),
+          logs: appendHlsTaskLogs(previous.logs, createHlsTaskLogEntry({
+            level: 'info',
+            mode: previous.mode,
+            stage: previous.stage,
+            text: '任务已取消',
+          })),
           state: 'idle',
         }));
         return;
@@ -1710,10 +2089,21 @@ const MediaProcessingTool: React.FC<MediaProcessingToolProps> = ({
     } catch (error: any) {
       setHlsTaskStatus((previous) => ({
         ...previous,
+        bytesReceived: undefined,
+        bytesTotal: undefined,
         error: error?.message || 'HLS 下载失败',
-        logs: [...previous.logs, error?.message || 'HLS 下载失败'].slice(-12),
+        etaSeconds: undefined,
+        ffmpegSpeedText: undefined,
+        logs: appendHlsTaskLogs(previous.logs, createHlsTaskLogEntry({
+          level: 'error',
+          mode: previous.mode,
+          stage: 'error',
+          text: error?.message || 'HLS 下载失败',
+        })),
+        processedSeconds: undefined,
         stage: 'error',
         state: 'error',
+        speedBps: undefined,
       }));
       Toast.error(error?.message || 'HLS 下载失败');
     } finally {
@@ -1729,7 +2119,85 @@ const MediaProcessingTool: React.FC<MediaProcessingToolProps> = ({
     persistMediaOutputBySaveTarget,
     saveTargetType,
     selectedHlsVariantUrl,
+    hlsCanTuneLocalDownloader,
+    hlsUsingCustomThreadCount,
+    hlsUsingFragmentRange,
+    normalizedHlsRangeEnd,
+    normalizedHlsRangeStart,
+    normalizedHlsThreadCount,
   ]);
+
+  const handleRetryFailedHls = React.useCallback(async () => {
+    if (!hlsRequest) {
+      Toast.warning('先从资源面板解析 HLS，再送到工具页');
+      return;
+    }
+    if (hlsTaskStatus.mode !== 'local-plan' || hlsTaskStatus.state !== 'error' || !hlsTaskStatus.requestId) {
+      void handleSaveHls();
+      return;
+    }
+    if (!hlsTaskStatus.failedFragments?.length) {
+      void handleSaveHls();
+      return;
+    }
+
+    setSavingHls(true);
+    try {
+      activeHlsTaskRequestIdRef.current = hlsTaskStatus.requestId;
+      activeHlsTaskManifestUrlRef.current = hlsRequest.plan.manifestUrl;
+      setHlsTaskStatus((previous) => ({
+        ...previous,
+        bytesReceived: previous.bytesReceived,
+        bytesTotal: previous.bytesTotal,
+        error: undefined,
+        etaSeconds: previous.etaSeconds,
+        ffmpegSpeedText: undefined,
+        logs: appendHlsTaskLogs(previous.logs, createHlsTaskLogEntry({
+          level: 'info',
+          mode: 'local-plan',
+          stage: 'downloading-fragments',
+          text: `开始重试 ${previous.failedFragments?.length || 0} 个失败分片`,
+        })),
+        processedSeconds: undefined,
+        stage: 'downloading-fragments',
+        state: 'running',
+        speedBps: previous.speedBps,
+      }));
+
+      const result = await retryEmbeddedBrowserHlsPlanFailed(hlsRequest.resource.tabId, {
+        requestId: hlsTaskStatus.requestId,
+      });
+      if (result?.cancelled) {
+        return;
+      }
+      if (!result?.outputPath) {
+        throw new Error('HLS 重试已完成，但未返回输出路径');
+      }
+      await persistMediaOutputBySaveTarget(result.outputPath, 'HLS 下载');
+    } catch (error: any) {
+      setHlsTaskStatus((previous) => ({
+        ...previous,
+        bytesReceived: undefined,
+        bytesTotal: undefined,
+        error: error?.message || 'HLS 重试失败',
+        etaSeconds: undefined,
+        ffmpegSpeedText: undefined,
+        logs: appendHlsTaskLogs(previous.logs, createHlsTaskLogEntry({
+          level: 'error',
+          mode: previous.mode,
+          stage: 'error',
+          text: error?.message || 'HLS 重试失败',
+        })),
+        processedSeconds: undefined,
+        stage: 'error',
+        state: 'error',
+        speedBps: undefined,
+      }));
+      Toast.error(error?.message || 'HLS 重试失败');
+    } finally {
+      setSavingHls(false);
+    }
+  }, [handleSaveHls, hlsRequest, hlsTaskStatus, persistMediaOutputBySaveTarget]);
 
   const handleVerifyHlsKey = React.useCallback(async () => {
     if (!hlsRequest) {
@@ -1759,12 +2227,17 @@ const MediaProcessingTool: React.FC<MediaProcessingToolProps> = ({
         Toast.success(`已验证到可用 key：${result.candidate.label}`);
         return;
       }
-      Toast.warning(result.error || '没有验证到可用 key');
+      if (getEmbeddedBrowserHlsKeyVerificationTone(result) === 'danger') {
+        Toast.error(describeEmbeddedBrowserHlsKeyVerificationResult(result));
+        return;
+      }
+      Toast.warning(describeEmbeddedBrowserHlsKeyVerificationResult(result));
     } catch (error: any) {
       const fallbackResult = {
         error: error?.message || 'key 验证失败',
         mediaAlreadyReadable: false,
         ok: false,
+        reason: 'verify-failed',
       } satisfies EmbeddedBrowserHlsKeyVerificationResult;
       if (activeHlsKeyVerificationTokenRef.current !== verificationToken) {
         return;
@@ -2015,6 +2488,12 @@ const MediaProcessingTool: React.FC<MediaProcessingToolProps> = ({
                     ) : null}
                     {hlsKeyVerificationResult?.ok && hlsKeyVerificationResult.candidate ? (
                       <Tag color="green">已验证可用 key</Tag>
+                    ) : hlsKeyVerificationResult?.reason === 'no-candidates' ? (
+                      <Tag color="orange">还没有 key 候选</Tag>
+                    ) : hlsKeyVerificationResult?.reason === 'no-match' ? (
+                      <Tag color="orange">候选 key 未命中</Tag>
+                    ) : hlsKeyVerificationResult?.reason === 'no-aes-segment' ? (
+                      <Tag color="grey">不需要验证 key</Tag>
                     ) : null}
                   </ActionRow>
                   {hlsCanSelectVariant ? (
@@ -2041,6 +2520,105 @@ const MediaProcessingTool: React.FC<MediaProcessingToolProps> = ({
                         ) : (
                           <Tag color="grey">自动选清晰度</Tag>
                         )}
+                      </ActionRow>
+                    </>
+                  ) : null}
+                  {(hlsAudioRenditions.length || hlsSubtitleRenditions.length || hlsSelectedVariant) ? (
+                    <>
+                      <div className="panel-desc" style={{ marginBottom: 10 }}>
+                        这块是 `master playlist` 里的轨道视图。当前先把音轨/字幕轨信息和所选 variant 的 group 关系展示清楚，后续再继续补更细的轨道选择。
+                      </div>
+                      {hlsSelectedVariant ? (
+                        <ActionRow>
+                          {hlsSelectedVariant.audioGroupId ? (
+                            <Tag color="blue">音轨组：{hlsSelectedVariant.audioGroupId}</Tag>
+                          ) : (
+                            <Tag color="grey">当前变体未声明音轨组</Tag>
+                          )}
+                          {hlsSelectedVariant.subtitlesGroupId ? (
+                            <Tag color="purple">字幕组：{hlsSelectedVariant.subtitlesGroupId}</Tag>
+                          ) : (
+                            <Tag color="grey">当前变体未声明字幕组</Tag>
+                          )}
+                        </ActionRow>
+                      ) : null}
+                      {hlsAudioRenditions.length ? (
+                        <>
+                          <div className="panel-desc" style={{ marginBottom: 8 }}>音轨候选</div>
+                          <ActionRow>
+                            {hlsAudioRenditions.map((rendition, index) => (
+                              <Tag
+                                key={`audio-${rendition.groupId || 'none'}-${rendition.name || index}`}
+                                color={hlsSelectedVariant?.audioGroupId && rendition.groupId === hlsSelectedVariant.audioGroupId ? 'blue' : 'white'}
+                              >
+                                {formatHlsRenditionLabel(rendition)}
+                              </Tag>
+                            ))}
+                          </ActionRow>
+                        </>
+                      ) : null}
+                      {hlsSubtitleRenditions.length ? (
+                        <>
+                          <div className="panel-desc" style={{ marginBottom: 8 }}>字幕候选</div>
+                          <ActionRow>
+                            {hlsSubtitleRenditions.map((rendition, index) => (
+                              <Tag
+                                key={`sub-${rendition.groupId || 'none'}-${rendition.name || index}`}
+                                color={hlsSelectedVariant?.subtitlesGroupId && rendition.groupId === hlsSelectedVariant.subtitlesGroupId ? 'purple' : 'white'}
+                              >
+                                {formatHlsRenditionLabel(rendition)}
+                              </Tag>
+                            ))}
+                          </ActionRow>
+                        </>
+                      ) : null}
+                    </>
+                  ) : null}
+                  {hlsCanTuneLocalDownloader ? (
+                    <>
+                      <div className="panel-desc" style={{ marginBottom: 10 }}>
+                        这是 Cat Catch 那套最常用的下载控制。当前先补线程数和分片范围；一旦改了这里，就会切到本地 downloader 主链，不再让 ffmpeg 直接拉整条 manifest。
+                      </div>
+                      <ActionRow>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          <div style={{ fontSize: 16, color: 'var(--app-text-muted)' }}>线程数</div>
+                          <InputNumber
+                            min={1}
+                            max={32}
+                            step={1}
+                            value={normalizedHlsThreadCount}
+                            onNumberChange={(value) => setHlsThreadCountDraft(Number(value || 1))}
+                            style={{ width: 140 }}
+                          />
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          <div style={{ fontSize: 16, color: 'var(--app-text-muted)' }}>起始分片</div>
+                          <InputNumber
+                            min={1}
+                            max={Math.max(1, hlsRequest.plan.fragmentCount)}
+                            step={1}
+                            value={normalizedHlsRangeStart}
+                            onNumberChange={(value) => setHlsRangeStartDraft(Number(value || 1))}
+                            style={{ width: 140 }}
+                          />
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          <div style={{ fontSize: 16, color: 'var(--app-text-muted)' }}>结束分片</div>
+                          <InputNumber
+                            min={1}
+                            max={Math.max(1, hlsRequest.plan.fragmentCount)}
+                            step={1}
+                            value={normalizedHlsRangeEnd}
+                            onNumberChange={(value) => setHlsRangeEndDraft(Number(value || 1))}
+                            style={{ width: 140 }}
+                          />
+                        </div>
+                        <Tag color={hlsUsingCustomThreadCount ? 'blue' : 'grey'}>
+                          线程 {normalizedHlsThreadCount}
+                        </Tag>
+                        <Tag color={hlsUsingFragmentRange ? 'orange' : 'grey'}>
+                          范围 #{normalizedHlsRangeStart}-#{normalizedHlsRangeEnd}
+                        </Tag>
                       </ActionRow>
                     </>
                   ) : null}
@@ -2077,8 +2655,21 @@ const MediaProcessingTool: React.FC<MediaProcessingToolProps> = ({
                     <Button loading={savingHls} type="primary" onClick={() => void handleSaveHls()}>
                       下载&保存
                     </Button>
-                    <Button disabled={savingHls} onClick={() => void handleSaveHls()}>
-                      重新执行
+                    <Button
+                      disabled={savingHls || hlsTaskStatus.state === 'running'}
+                      onClick={() => void (
+                        hlsTaskStatus.state === 'error'
+                          ? handleRetryFailedHls()
+                          : handleSaveHls()
+                      )}
+                    >
+                      {hlsTaskStatus.state === 'error'
+                        && hlsTaskStatus.mode === 'local-plan'
+                        && hlsTaskStatus.failedFragments?.length
+                        ? '重试失败分片'
+                        : hlsTaskStatus.state === 'error'
+                          ? '重试失败任务'
+                          : '重新执行'}
                     </Button>
                     <Button
                       onClick={() => {
@@ -2089,8 +2680,19 @@ const MediaProcessingTool: React.FC<MediaProcessingToolProps> = ({
                     >
                       复制计划
                     </Button>
-                    <Tag color={!/^https?:\/\//i.test(hlsRequest.plan.manifestUrl) || normalizedHlsManualKey ? 'orange' : 'green'}>
-                      {!/^https?:\/\//i.test(selectedHlsVariantUrl || hlsRequest.plan.manifestUrl) || normalizedHlsManualKey ? '本地 downloader 主链' : '网络 manifest 主链'}
+                    {hlsTaskStatus.failedFragments?.length ? (
+                      <Button
+                        onClick={() => {
+                          void navigator.clipboard.writeText(formatFailedFragmentList(hlsTaskStatus.failedFragments || [])).then(() => {
+                            Toast.success('失败分片编号已复制');
+                          });
+                        }}
+                      >
+                        复制失败分片
+                      </Button>
+                    ) : null}
+                    <Tag color={!/^https?:\/\//i.test(hlsRequest.plan.manifestUrl) || normalizedHlsManualKey || hlsUsingCustomThreadCount || hlsUsingFragmentRange ? 'orange' : 'green'}>
+                      {!/^https?:\/\//i.test(selectedHlsVariantUrl || hlsRequest.plan.manifestUrl) || normalizedHlsManualKey || hlsUsingCustomThreadCount || hlsUsingFragmentRange ? '本地 downloader 主链' : '网络 manifest 主链'}
                     </Tag>
                     {selectedHlsVariantUrl ? (
                       <Tag color="white">
@@ -2111,21 +2713,92 @@ const MediaProcessingTool: React.FC<MediaProcessingToolProps> = ({
                             : '尚未执行'}
                     </Tag>
                     {hlsTaskStatus.stage ? (
-                      <Tag color="white">阶段：{hlsTaskStatus.stage}</Tag>
+                      <Tag color="white">阶段：{formatHlsTaskStageLabel(hlsTaskStatus.stage)}</Tag>
                     ) : null}
                     {hlsTaskStatus.totalFragments > 0 ? (
                       <Tag color="white">
                         分片：{Math.min(hlsTaskStatus.completedFragments, hlsTaskStatus.totalFragments)} / {hlsTaskStatus.totalFragments}
                       </Tag>
                     ) : null}
+                    {typeof hlsTaskStatus.processedSeconds === 'number' && hlsTaskStatus.processedSeconds > 0 ? (
+                      <Tag color="white">
+                        ffmpeg：{hlsTaskStatus.processedSeconds.toFixed(1)}s
+                        {typeof hlsTaskStatus.durationSeconds === 'number' && hlsTaskStatus.durationSeconds > 0
+                          ? ` / ${hlsTaskStatus.durationSeconds.toFixed(1)}s`
+                          : ''}
+                      </Tag>
+                    ) : null}
+                    {typeof hlsTaskStatus.bytesReceived === 'number' && hlsTaskStatus.bytesReceived > 0 ? (
+                      <Tag color="white">
+                        已收：{formatBytes(hlsTaskStatus.bytesReceived)}
+                        {typeof hlsTaskStatus.bytesTotal === 'number' && hlsTaskStatus.bytesTotal > 0
+                          ? ` / ${formatBytes(hlsTaskStatus.bytesTotal)}`
+                          : ''}
+                      </Tag>
+                    ) : null}
+                    {typeof hlsTaskStatus.speedBps === 'number' && hlsTaskStatus.speedBps > 0 ? (
+                      <Tag color="white">速度：{formatBytes(hlsTaskStatus.speedBps)}/s</Tag>
+                    ) : null}
+                    {hlsTaskStatus.ffmpegSpeedText ? (
+                      <Tag color="white">ffmpeg：{hlsTaskStatus.ffmpegSpeedText}</Tag>
+                    ) : null}
+                    {typeof hlsTaskStatus.etaSeconds === 'number' && hlsTaskStatus.etaSeconds > 0 ? (
+                      <Tag color="white">预计剩余：{formatEtaSeconds(hlsTaskStatus.etaSeconds)}</Tag>
+                    ) : null}
+                    <Tag color="white">执行链：{formatHlsTaskModeLabel(hlsTaskStatus.mode)}</Tag>
                   </ActionRow>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+                      <div style={{ fontSize: 17, color: 'var(--app-text)' }}>
+                        {hlsTaskProgressSummary}
+                      </div>
+                      <div style={{ fontSize: 16, color: 'var(--app-text-muted)' }}>
+                        阶段进度 {hlsTaskProgressPercent}%
+                      </div>
+                    </div>
+                    <div
+                      aria-hidden
+                      style={{
+                        width: '100%',
+                        height: 10,
+                        borderRadius: 999,
+                        background: 'color-mix(in srgb, var(--app-border) 72%, transparent)',
+                        overflow: 'hidden',
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: `${hlsTaskProgressPercent}%`,
+                          height: '100%',
+                          borderRadius: 999,
+                          background: hlsTaskStatus.state === 'error'
+                            ? 'color-mix(in srgb, var(--semi-color-danger) 72%, transparent)'
+                            : hlsTaskStatus.state === 'success'
+                              ? 'color-mix(in srgb, #1f9d63 78%, transparent)'
+                              : 'color-mix(in srgb, var(--semi-color-primary) 78%, transparent)',
+                          transition: 'width 180ms ease',
+                        }}
+                      />
+                    </div>
+                    <div style={{ fontSize: 15, lineHeight: 1.7, color: 'var(--app-text-muted)' }}>
+                      这里显示的是阶段进度；本地 downloader 会补充当前下载速度和预计剩余时间，ffmpeg 阶段会额外显示处理秒数和速度，但仍以阶段状态为主。
+                    </div>
+                  </div>
                   <MediaResourceList>
-                    {(hlsTaskStatus.logs.length ? hlsTaskStatus.logs : ['等待执行 HLS 任务']).map((line, index) => (
-                      <div className="media-row" key={`${index}-${line}`}>
-                        <div className="media-title" title={line}>{line}</div>
-                        <div className="media-meta">{hlsTaskStatus.mode === 'local-plan' ? 'local' : hlsTaskStatus.mode === 'direct-manifest' ? 'ffmpeg' : 'idle'}</div>
-                        <div className="media-meta">{hlsTaskStatus.stage || '-'}</div>
-                        <div className="media-meta">{index === hlsTaskStatus.logs.length - 1 ? 'latest' : ''}</div>
+                    {(hlsTaskStatus.logs.length
+                      ? hlsTaskStatus.logs
+                      : [{
+                        createdAt: 0,
+                        id: 'waiting',
+                        level: 'info' as const,
+                        text: '等待执行 HLS 任务',
+                      }]
+                    ).map((entry, index, array) => (
+                      <div className="media-row" key={entry.id}>
+                        <div className="media-title" title={entry.text}>{entry.text}</div>
+                        <div className="media-meta">{formatHlsTaskModeLabel(entry.mode)}</div>
+                        <div className="media-meta">{formatHlsTaskStageLabel(entry.stage)}</div>
+                        <div className="media-meta">{formatHlsTaskLogTime(entry.createdAt) || (index === array.length - 1 ? 'latest' : '')}</div>
                       </div>
                     ))}
                   </MediaResourceList>
@@ -2134,21 +2807,28 @@ const MediaProcessingTool: React.FC<MediaProcessingToolProps> = ({
                       最近错误：{hlsTaskStatus.error}
                     </div>
                   ) : null}
+                  {hlsTaskStatus.failedFragments?.length ? (
+                    <div className="panel-desc" style={{ color: 'var(--app-text-muted)' }}>
+                      失败分片：#{hlsTaskStatus.failedFragments.slice(0, 12).join(', #')}
+                      {hlsTaskStatus.failedFragments.length > 12 ? ` 等 ${hlsTaskStatus.failedFragments.length} 个` : ''}
+                    </div>
+                  ) : null}
                   {hlsKeyVerificationResult ? (
                     <div
                       className="panel-desc"
                       style={{
-                        color: hlsKeyVerificationResult.ok || hlsKeyVerificationResult.mediaAlreadyReadable
+                        color: getEmbeddedBrowserHlsKeyVerificationTone(hlsKeyVerificationResult) === 'success'
                           ? 'var(--semi-color-success)'
-                          : 'var(--semi-color-warning)',
+                          : getEmbeddedBrowserHlsKeyVerificationTone(hlsKeyVerificationResult) === 'warning'
+                            ? 'var(--semi-color-warning)'
+                            : 'var(--semi-color-danger)',
                       }}
                     >
-                      key 验证：
-                      {hlsKeyVerificationResult.mediaAlreadyReadable
-                        ? ' 片段本身可读，不需要 key'
-                        : hlsKeyVerificationResult.ok && hlsKeyVerificationResult.candidate
-                          ? ` 命中 ${hlsKeyVerificationResult.candidate.label}`
-                          : ` ${hlsKeyVerificationResult.error || '未命中可用 key'}`}
+                      key 验证： {describeEmbeddedBrowserHlsKeyVerificationResult(hlsKeyVerificationResult)}
+                      {typeof hlsKeyVerificationResult.testedCandidateCount === 'number'
+                        || typeof hlsKeyVerificationResult.testedSegmentCount === 'number'
+                        ? `（已试 ${hlsKeyVerificationResult.testedCandidateCount ?? 0} 个候选，抽查 ${hlsKeyVerificationResult.testedSegmentCount ?? 0} 个分片）`
+                        : ''}
                     </div>
                   ) : null}
                   {hlsTaskStatus.lastOutputPath ? (

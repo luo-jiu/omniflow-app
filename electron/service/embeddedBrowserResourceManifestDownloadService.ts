@@ -5,10 +5,15 @@ import { resolveEmbeddedBrowserFfmpegPath } from './embeddedBrowserResourceMerge
 export type EmbeddedBrowserManifestDownloadKind = 'hls' | 'mpd'
 
 export type EmbeddedBrowserManifestDownloadRequest = {
+  durationSeconds?: number
   ffmpegPath?: string
   headers?: Record<string, string>
   kind: EmbeddedBrowserManifestDownloadKind
   manifestUrl: string
+  onProgress?: (payload: {
+    processedSeconds?: number
+    speedText?: string
+  }) => void
   outputPath: string
 }
 
@@ -63,11 +68,14 @@ export function deriveEmbeddedBrowserManifestOutputFileName(input: string, kind:
 export function buildEmbeddedBrowserManifestDownloadArgs(request: EmbeddedBrowserManifestDownloadRequest) {
   return [
     '-y',
+    '-nostats',
     '-protocol_whitelist',
     'file,http,https,tcp,tls,crypto,data',
     '-allowed_extensions',
     'ALL',
     ...buildFfmpegHttpHeaderArgs(request.headers),
+    '-progress',
+    'pipe:1',
     '-i',
     request.manifestUrl,
     '-map',
@@ -82,6 +90,37 @@ export function buildEmbeddedBrowserManifestDownloadArgs(request: EmbeddedBrowse
   ]
 }
 
+function parseFfmpegProgressChunk(
+  state: {
+    processedSeconds?: number
+    speedText?: string
+  },
+  chunkText: string,
+) {
+  String(chunkText || '').split(/\r?\n/).forEach((line) => {
+    const normalizedLine = String(line || '').trim()
+    if (!normalizedLine || !normalizedLine.includes('=')) {
+      return
+    }
+    const separatorIndex = normalizedLine.indexOf('=')
+    const key = normalizedLine.slice(0, separatorIndex).trim()
+    const value = normalizedLine.slice(separatorIndex + 1).trim()
+    if (!key) {
+      return
+    }
+    if (key === 'out_time_ms' || key === 'out_time_us') {
+      const rawValue = Number(value)
+      if (Number.isFinite(rawValue) && rawValue >= 0) {
+        state.processedSeconds = rawValue / 1_000_000
+      }
+      return
+    }
+    if (key === 'speed') {
+      state.speedText = value
+    }
+  })
+}
+
 export async function downloadEmbeddedBrowserManifestResource(
   request: EmbeddedBrowserManifestDownloadRequest,
 ): Promise<EmbeddedBrowserManifestDownloadResult> {
@@ -93,12 +132,42 @@ export async function downloadEmbeddedBrowserManifestResource(
   return new Promise<EmbeddedBrowserManifestDownloadResult>((resolve, reject) => {
     const stdout: string[] = []
     const stderr: string[] = []
+    let lastProcessedSeconds = -1
+    let lastSpeedText = ''
+    const progressState: {
+      processedSeconds?: number
+      speedText?: string
+    } = {}
     const child = spawn(ffmpegPath, commandArgs, {
       stdio: ['ignore', 'pipe', 'pipe'],
     })
 
     child.stdout.on('data', (chunk) => {
-      stdout.push(String(chunk))
+      const chunkText = String(chunk)
+      stdout.push(chunkText)
+      parseFfmpegProgressChunk(progressState, chunkText)
+      const nextProcessedSeconds = progressState.processedSeconds
+      const nextSpeedText = progressState.speedText || ''
+      const progressChanged = (
+        (typeof nextProcessedSeconds === 'number'
+          && Math.abs(nextProcessedSeconds - lastProcessedSeconds) >= 0.5)
+        || (nextSpeedText && nextSpeedText !== lastSpeedText)
+      )
+      if (!progressChanged) {
+        return
+      }
+      if (typeof nextProcessedSeconds === 'number') {
+        lastProcessedSeconds = nextProcessedSeconds
+      }
+      if (nextSpeedText) {
+        lastSpeedText = nextSpeedText
+      }
+      request.onProgress?.({
+        processedSeconds: typeof nextProcessedSeconds === 'number'
+          ? Math.min(nextProcessedSeconds, request.durationSeconds || Number.POSITIVE_INFINITY)
+          : undefined,
+        speedText: nextSpeedText || undefined,
+      })
     })
     child.stderr.on('data', (chunk) => {
       stderr.push(String(chunk))

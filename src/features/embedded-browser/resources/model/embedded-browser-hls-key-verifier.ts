@@ -10,11 +10,23 @@ export type EmbeddedBrowserHlsKeyCandidate = {
   source: 'manifest-key-url' | 'captured-key' | 'manual'
 }
 
+export type EmbeddedBrowserHlsKeyVerificationReason =
+  | 'media-readable'
+  | 'verified'
+  | 'no-aes-segment'
+  | 'no-candidates'
+  | 'no-match'
+  | 'verify-failed'
+
 export type EmbeddedBrowserHlsKeyVerificationResult = {
   candidate?: EmbeddedBrowserHlsKeyCandidate
+  candidateCount?: number
   error?: string
   mediaAlreadyReadable: boolean
   ok: boolean
+  reason: EmbeddedBrowserHlsKeyVerificationReason
+  testedCandidateCount?: number
+  testedSegmentCount?: number
 }
 
 function base64ToBytes(base64: string) {
@@ -156,34 +168,65 @@ async function decryptHlsAes128(
 
 export async function verifyEmbeddedBrowserHlsKeyCandidates(input: {
   candidates: EmbeddedBrowserHlsKeyCandidate[]
-  encryptedSegmentBase64: string
-  iv?: string
-  sequence: number
+  encryptedSegments: Array<{
+    encryptedSegmentBase64: string
+    iv?: string
+    sequence: number
+  }>
 }): Promise<EmbeddedBrowserHlsKeyVerificationResult> {
-  const encryptedBytes = base64ToBytes(input.encryptedSegmentBase64)
-  if (looksLikeDecodedHlsMedia(encryptedBytes)) {
+  const encryptedSamples = input.encryptedSegments.map((segment) => ({
+    bytes: base64ToBytes(segment.encryptedSegmentBase64),
+    iv: segment.iv,
+    sequence: segment.sequence,
+  }))
+
+  if (encryptedSamples.every((sample) => looksLikeDecodedHlsMedia(sample.bytes))) {
     return {
+      candidateCount: input.candidates.length,
       mediaAlreadyReadable: true,
       ok: true,
+      reason: 'media-readable',
+      testedCandidateCount: 0,
+      testedSegmentCount: encryptedSamples.length,
     }
   }
-  const ivBytes = parseHlsIv(input.iv, input.sequence)
+
+  let testedCandidateCount = 0
   for (const candidate of input.candidates) {
     const normalizedBase64 = normalizeHlsKeyCandidateValue(candidate.base64)
     if (!normalizedBase64) {
       continue
     }
+    testedCandidateCount += 1
     try {
       const keyBytes = base64ToBytes(normalizedBase64)
-      const decrypted = await decryptHlsAes128(encryptedBytes, keyBytes, ivBytes)
-      if (decrypted && looksLikeDecodedHlsMedia(decrypted)) {
+      let matchedAllSegments = true
+      for (const sample of encryptedSamples) {
+        if (looksLikeDecodedHlsMedia(sample.bytes)) {
+          continue
+        }
+        const decrypted = await decryptHlsAes128(
+          sample.bytes,
+          keyBytes,
+          parseHlsIv(sample.iv, sample.sequence),
+        )
+        if (!decrypted || !looksLikeDecodedHlsMedia(decrypted)) {
+          matchedAllSegments = false
+          break
+        }
+      }
+      if (matchedAllSegments) {
         return {
           candidate: {
             ...candidate,
             base64: normalizedBase64,
           },
+          candidateCount: input.candidates.length,
           mediaAlreadyReadable: false,
           ok: true,
+          reason: 'verified',
+          testedCandidateCount,
+          testedSegmentCount: encryptedSamples.length,
         }
       }
     } catch {
@@ -191,8 +234,50 @@ export async function verifyEmbeddedBrowserHlsKeyCandidates(input: {
     }
   }
   return {
-    error: '未在候选 key 里验证出可用密钥',
+    candidateCount: input.candidates.length,
+    error: testedCandidateCount > 0
+      ? `已尝试 ${testedCandidateCount} 个候选 key，验证了 ${encryptedSamples.length} 个分片，仍未验证出可用密钥`
+      : '候选 key 无法用于 AES-128 验证',
     mediaAlreadyReadable: false,
     ok: false,
+    reason: 'no-match',
+    testedCandidateCount,
+    testedSegmentCount: encryptedSamples.length,
   }
+}
+
+export function describeEmbeddedBrowserHlsKeyVerificationResult(
+  result: EmbeddedBrowserHlsKeyVerificationResult,
+) {
+  switch (result.reason) {
+    case 'media-readable':
+      return result.testedSegmentCount && result.testedSegmentCount > 1
+        ? `抽查了 ${result.testedSegmentCount} 个分片，片段本身可读，不需要 key`
+        : '片段本身可读，不需要 key'
+    case 'verified':
+      return result.candidate
+        ? `${result.testedSegmentCount && result.testedSegmentCount > 1 ? `已用 ${result.testedSegmentCount} 个分片验证，` : ''}命中 ${result.candidate.label}`
+        : '已经验证到可用 key'
+    case 'no-aes-segment':
+      return result.error || '这个 manifest 没有 AES-128 片段，不需要验证 key'
+    case 'no-candidates':
+      return result.error || '还没有可验证的 key 候选'
+    case 'no-match':
+      return result.error || '未在候选 key 里验证出可用密钥'
+    case 'verify-failed':
+    default:
+      return result.error || 'key 验证失败'
+  }
+}
+
+export function getEmbeddedBrowserHlsKeyVerificationTone(
+  result: EmbeddedBrowserHlsKeyVerificationResult,
+) {
+  if (result.ok || result.mediaAlreadyReadable) {
+    return 'success'
+  }
+  if (result.reason === 'no-candidates' || result.reason === 'no-match') {
+    return 'warning'
+  }
+  return 'danger'
 }

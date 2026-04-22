@@ -23,8 +23,10 @@ export type EmbeddedBrowserHlsLocalDownloadFragment = EmbeddedBrowserDownloadFra
   discontinuitySequence: number
   initSegment?: EmbeddedBrowserHlsLocalDownloadMapRef
   key?: EmbeddedBrowserHlsLocalDownloadKeyRef
+  outputRelativePath?: string
   part: boolean
   sequence: number
+  sourceIndex?: number
   title?: string
 }
 
@@ -36,18 +38,25 @@ export type EmbeddedBrowserHlsLocalDownloadPlan = {
 }
 
 export type EmbeddedBrowserHlsLocalDownloadRequest = {
+  fragmentIndexes?: number[]
   manualKeyBase64?: string
   maxRetries?: number
   onEvent?: (event: {
+    bytesReceived?: number
+    bytesTotal?: number
     completedFragments?: number
+    etaSeconds?: number
     error?: string
+    failedFragments?: number[]
     message: string
+    speedBps?: number
     stage: 'preparing' | 'downloading-fragments' | 'rewriting-playlist' | 'completed' | 'error'
     status: 'running' | 'success' | 'error'
     totalFragments?: number
   }) => void
   outputDirectoryPath?: string
   plan: EmbeddedBrowserHlsLocalDownloadPlan
+  workDirectoryPath?: string
 }
 
 export type EmbeddedBrowserHlsLocalDownloadResult = {
@@ -56,6 +65,13 @@ export type EmbeddedBrowserHlsLocalDownloadResult = {
   mapCount: number
   playlistPath: string
   workDirectoryPath: string
+}
+
+function getFragmentSourceIndex(fragment: EmbeddedBrowserDownloadFragment | EmbeddedBrowserHlsLocalDownloadFragment) {
+  if ('sourceIndex' in fragment && typeof fragment.sourceIndex === 'number') {
+    return fragment.sourceIndex
+  }
+  return typeof fragment.index === 'number' ? fragment.index : -1
 }
 
 type ResourceRefRecord = {
@@ -339,13 +355,18 @@ export async function downloadEmbeddedBrowserHlsToLocalWorkDirectory(
   request: EmbeddedBrowserHlsLocalDownloadRequest,
 ): Promise<EmbeddedBrowserHlsLocalDownloadResult> {
   const { plan } = request
+  const requestedFragmentIndexes = Array.isArray(request.fragmentIndexes)
+    ? new Set(request.fragmentIndexes.filter((value) => Number.isFinite(value) && value >= 0))
+    : null
   request.onEvent?.({
     message: '开始准备本地 HLS 工作目录',
     stage: 'preparing',
     status: 'running',
     totalFragments: plan.fragments.length,
   })
-  const outputDirectoryPath = request.outputDirectoryPath
+  const outputDirectoryPath = request.workDirectoryPath
+    ? path.resolve(request.workDirectoryPath)
+    : request.outputDirectoryPath
     ? path.resolve(request.outputDirectoryPath)
     : await mkdtemp(path.join(os.tmpdir(), 'omniflow-hls-download-'))
 
@@ -386,9 +407,31 @@ export async function downloadEmbeddedBrowserHlsToLocalWorkDirectory(
     const fileName = `${String(fragmentIndex + 1).padStart(5, '0')}.${extension}`
     return path.posix.join('segments', fileName)
   })
+  const fragmentsToDownload = requestedFragmentIndexes
+    ? plan.fragments
+      .filter((fragment, index) => requestedFragmentIndexes.has(typeof fragment.index === 'number' ? fragment.index : index))
+      .map((fragment) => {
+        const sourceIndex = typeof fragment.index === 'number' ? fragment.index : plan.fragments.indexOf(fragment)
+        return {
+          ...fragment,
+          outputRelativePath: fragmentPaths[sourceIndex],
+          sourceIndex,
+        }
+      })
+    : plan.fragments.map((fragment, index) => {
+      const sourceIndex = typeof fragment.index === 'number' ? fragment.index : index
+      return {
+        ...fragment,
+        outputRelativePath: fragmentPaths[sourceIndex],
+        sourceIndex,
+      }
+    })
+  const initialCompletedFragments = requestedFragmentIndexes
+    ? Math.max(0, plan.fragments.length - fragmentsToDownload.length)
+    : 0
 
   const downloader = new EmbeddedBrowserFragmentDownloader({
-    fragments: plan.fragments,
+    fragments: fragmentsToDownload,
     headers: plan.headers,
     maxRetries: request.maxRetries,
     thread: plan.suggestedThreadCount || 6,
@@ -397,18 +440,52 @@ export async function downloadEmbeddedBrowserHlsToLocalWorkDirectory(
   const pendingWrites: Promise<void>[] = []
   let downloadError: Error | null = null
   let downloadErrorMessage = ''
+  const fragmentReceivedBytes = new Map<number, number>()
+  const fragmentTotalBytes = new Map<number, number>()
+  const downloadStartedAt = Date.now()
+  let lastProgressEmitAt = 0
+
+  const emitDownloadProgress = (force = false) => {
+    const now = Date.now()
+    if (!force && now - lastProgressEmitAt < 220) {
+      return
+    }
+    lastProgressEmitAt = now
+    const bytesReceived = Array.from(fragmentReceivedBytes.values()).reduce((sum, value) => sum + value, 0)
+    const bytesTotal = Array.from(fragmentTotalBytes.values()).reduce((sum, value) => sum + value, 0)
+    const elapsedSeconds = Math.max((now - downloadStartedAt) / 1000, 0.001)
+    const speedBps = bytesReceived > 0 ? bytesReceived / elapsedSeconds : 0
+    const etaSeconds = bytesTotal > 0 && speedBps > 0
+      ? Math.max(0, Math.round((bytesTotal - bytesReceived) / speedBps))
+      : undefined
+    request.onEvent?.({
+      bytesReceived,
+      bytesTotal: bytesTotal > 0 ? bytesTotal : undefined,
+      completedFragments: initialCompletedFragments + downloader.success,
+      etaSeconds,
+      message: '',
+      speedBps: speedBps > 0 ? speedBps : undefined,
+      stage: 'downloading-fragments',
+      status: 'running',
+      totalFragments: plan.fragments.length,
+    })
+  }
+
   request.onEvent?.({
-    completedFragments: 0,
-    message: '开始下载 HLS 分片',
+    completedFragments: initialCompletedFragments,
+    message: requestedFragmentIndexes?.size
+      ? `开始重试 ${fragmentsToDownload.length} 个失败分片`
+      : '开始下载 HLS 分片',
     stage: 'downloading-fragments',
     status: 'running',
     totalFragments: plan.fragments.length,
   })
   downloader.on('downloadError', (fragment, error, attempt) => {
+    const sourceIndex = Math.max(0, getFragmentSourceIndex(fragment))
     request.onEvent?.({
-      completedFragments: downloader.success,
+      completedFragments: initialCompletedFragments + downloader.success,
       error: error.message,
-      message: `分片 #${(fragment.index || 0) + 1} 第 ${attempt} 次下载失败：${error.message}`,
+      message: `分片 #${sourceIndex + 1} 第 ${attempt} 次下载失败：${error.message}`,
       stage: 'downloading-fragments',
       status: 'running',
       totalFragments: plan.fragments.length,
@@ -416,13 +493,22 @@ export async function downloadEmbeddedBrowserHlsToLocalWorkDirectory(
     if (downloadError || attempt <= (request.maxRetries || 2)) {
       return
     }
-    const fragmentIndex = typeof fragment.index === 'number' ? fragment.index : 0
-    downloadErrorMessage = `下载分片失败：#${fragmentIndex + 1} ${error.message}`
+    downloadErrorMessage = `下载分片失败：#${sourceIndex + 1} ${error.message}`
     downloadError = new Error(downloadErrorMessage)
   })
+  downloader.on('itemProgress', (fragment, done, receivedLength, contentLength) => {
+    const sourceIndex = Math.max(0, getFragmentSourceIndex(fragment))
+    fragmentReceivedBytes.set(sourceIndex, receivedLength)
+    const knownTotal = fragment.byteRange?.length || contentLength || fragmentTotalBytes.get(sourceIndex) || 0
+    if (knownTotal > 0) {
+      fragmentTotalBytes.set(sourceIndex, knownTotal)
+    }
+    emitDownloadProgress(done)
+  })
   downloader.on('sequentialPush', (buffer, fragment) => {
-    const fragmentIndex = typeof fragment.index === 'number' ? fragment.index : -1
-    const relativePath = fragmentIndex >= 0 ? fragmentPaths[fragmentIndex] : undefined
+    const hlsFragment = fragment as EmbeddedBrowserHlsLocalDownloadFragment
+    const sourceIndex = getFragmentSourceIndex(fragment)
+    const relativePath = hlsFragment.outputRelativePath || (sourceIndex >= 0 ? fragmentPaths[sourceIndex] : undefined)
     if (!relativePath) {
       return
     }
@@ -431,8 +517,8 @@ export async function downloadEmbeddedBrowserHlsToLocalWorkDirectory(
       new Uint8Array(buffer),
     ))
     request.onEvent?.({
-      completedFragments: fragmentIndex + 1,
-      message: `已写入分片 #${fragmentIndex + 1}`,
+      completedFragments: Math.min(plan.fragments.length, initialCompletedFragments + downloader.success + 1),
+      message: `已写入分片 #${sourceIndex + 1}`,
       stage: 'downloading-fragments',
       status: 'running',
       totalFragments: plan.fragments.length,
@@ -448,8 +534,8 @@ export async function downloadEmbeddedBrowserHlsToLocalWorkDirectory(
     })
     downloader.on('failed', (_, errors) => {
       const firstErrorFragment = Array.from(errors)[0]
-      const fragmentIndex = typeof firstErrorFragment?.index === 'number'
-        ? firstErrorFragment.index
+      const fragmentIndex = firstErrorFragment
+        ? Math.max(0, getFragmentSourceIndex(firstErrorFragment))
         : 0
       reject(downloadError || new Error(`下载分片失败：#${fragmentIndex + 1}`))
     })
@@ -457,11 +543,15 @@ export async function downloadEmbeddedBrowserHlsToLocalWorkDirectory(
   })
 
   await Promise.all(pendingWrites)
+  emitDownloadProgress(true)
   if (downloadError || downloader.errorItem.size > 0) {
     const failureMessage = downloadErrorMessage || `仍有 ${downloader.errorItem.size} 个分片下载失败`
     request.onEvent?.({
-      completedFragments: downloader.success,
+      completedFragments: initialCompletedFragments + downloader.success,
       error: failureMessage,
+      failedFragments: Array.from(downloader.errorItem)
+        .map((fragment) => getFragmentSourceIndex(fragment) + 1)
+        .filter((value) => value > 0),
       message: failureMessage,
       stage: 'error',
       status: 'error',

@@ -302,25 +302,79 @@ export async function verifyHlsResourceKey(input: {
   manifestResource: EmbeddedBrowserCapturedResource
   resources: EmbeddedBrowserCapturedResource[]
 }) {
-  const encryptedSegment = input.manifest.segments.find((segment) => (
+  const encryptedSegments = input.manifest.segments.filter((segment) => (
     segment.key && segment.key.method.toUpperCase() === 'AES-128'
-  ));
-  if (!encryptedSegment?.key) {
-    throw new Error('这个 manifest 没有 AES-128 key 片段需要验证');
+  )).slice(0, 3);
+  if (!encryptedSegments[0]?.key) {
+    return {
+      candidateCount: 0,
+      error: '这个 manifest 没有 AES-128 片段，不需要验证 key',
+      mediaAlreadyReadable: false,
+      ok: false,
+      reason: 'no-aes-segment',
+      testedCandidateCount: 0,
+      testedSegmentCount: 0,
+    } as const;
   }
   const candidates = await collectHlsKeyCandidates(input);
   if (candidates.length === 0) {
-    throw new Error('还没有可验证的 key 候选');
+    return {
+      candidateCount: 0,
+      error: '还没有可验证的 key 候选',
+      mediaAlreadyReadable: false,
+      ok: false,
+      reason: 'no-candidates',
+      testedCandidateCount: 0,
+      testedSegmentCount: 0,
+    } as const;
   }
-  const encryptedSegmentBase64 = await fetchResourceBinaryBase64(
-    encryptedSegment.url,
-    withResourceRefererHeader(input.manifestResource),
-    16 * 1024 * 1024,
-  );
-  return verifyEmbeddedBrowserHlsKeyCandidates({
-    candidates,
-    encryptedSegmentBase64,
-    iv: encryptedSegment.key.iv,
-    sequence: encryptedSegment.sequence,
-  });
+  try {
+    const fetchedSegments: Array<{
+      encryptedSegmentBase64: string
+      iv?: string
+      sequence: number
+    }> = [];
+    let lastFetchError: string | undefined;
+    for (const segment of encryptedSegments) {
+      try {
+        const encryptedSegmentBase64 = await fetchResourceBinaryBase64(
+          segment.url,
+          withResourceRefererHeader(input.manifestResource),
+          16 * 1024 * 1024,
+        );
+        fetchedSegments.push({
+          encryptedSegmentBase64,
+          iv: segment.key?.iv,
+          sequence: segment.sequence,
+        });
+      } catch (error: any) {
+        lastFetchError = error?.message || '读取加密分片失败';
+      }
+    }
+    if (fetchedSegments.length === 0) {
+      return {
+        candidateCount: candidates.length,
+        error: lastFetchError || 'key 验证失败：无法读取任何 AES-128 分片',
+        mediaAlreadyReadable: false,
+        ok: false,
+        reason: 'verify-failed',
+        testedCandidateCount: 0,
+        testedSegmentCount: 0,
+      } as const;
+    }
+    return verifyEmbeddedBrowserHlsKeyCandidates({
+      candidates,
+      encryptedSegments: fetchedSegments,
+    });
+  } catch (error: any) {
+    return {
+      candidateCount: candidates.length,
+      error: error?.message || 'key 验证失败',
+      mediaAlreadyReadable: false,
+      ok: false,
+      reason: 'verify-failed',
+      testedCandidateCount: 0,
+      testedSegmentCount: 0,
+    } as const;
+  }
 }

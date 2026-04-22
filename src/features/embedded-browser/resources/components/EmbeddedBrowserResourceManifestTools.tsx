@@ -4,7 +4,11 @@ import type {
   EmbeddedBrowserHlsDownloadPlan,
   EmbeddedBrowserHlsManifest,
 } from '../model/embedded-browser-hls-manifest';
-import type { EmbeddedBrowserHlsKeyVerificationResult } from '../model/embedded-browser-hls-key-verifier';
+import {
+  describeEmbeddedBrowserHlsKeyVerificationResult,
+  getEmbeddedBrowserHlsKeyVerificationTone,
+  type EmbeddedBrowserHlsKeyVerificationResult,
+} from '../model/embedded-browser-hls-key-verifier';
 import type { EmbeddedBrowserMpdManifest } from '../model/embedded-browser-mpd-manifest';
 import {
   analyzeHlsResource,
@@ -137,7 +141,11 @@ const EmbeddedBrowserResourceManifestTools: React.FC<EmbeddedBrowserResourceMani
           Toast.success('已验证到可用 key');
           return;
         }
-        Toast.warning(result.error || '没有验证到可用 key');
+        if (getEmbeddedBrowserHlsKeyVerificationTone(result) === 'danger') {
+          Toast.error(describeEmbeddedBrowserHlsKeyVerificationResult(result));
+          return;
+        }
+        Toast.warning(describeEmbeddedBrowserHlsKeyVerificationResult(result));
       })
       .catch((error: any) => {
         setHlsAnalysis((previous) => ({
@@ -146,6 +154,7 @@ const EmbeddedBrowserResourceManifestTools: React.FC<EmbeddedBrowserResourceMani
             error: error?.message || 'key 验证失败',
             mediaAlreadyReadable: false,
             ok: false,
+            reason: 'verify-failed',
           },
           keyVerificationLoading: false,
         }));
@@ -232,11 +241,11 @@ const EmbeddedBrowserResourceManifestTools: React.FC<EmbeddedBrowserResourceMani
           {hlsAnalysis.keyVerification ? (
             <div>
               <strong>key 验证：</strong>
-              {hlsAnalysis.keyVerification.mediaAlreadyReadable
-                ? '片段本身可读，不需要 key'
-                : hlsAnalysis.keyVerification.ok && hlsAnalysis.keyVerification.candidate
-                  ? `命中 ${hlsAnalysis.keyVerification.candidate.label}`
-                  : hlsAnalysis.keyVerification.error || '未命中'}
+              {describeEmbeddedBrowserHlsKeyVerificationResult(hlsAnalysis.keyVerification)}
+              {(typeof hlsAnalysis.keyVerification.testedCandidateCount === 'number'
+                || typeof hlsAnalysis.keyVerification.testedSegmentCount === 'number')
+                ? `（已试 ${hlsAnalysis.keyVerification.testedCandidateCount ?? 0} 个候选，抽查 ${hlsAnalysis.keyVerification.testedSegmentCount ?? 0} 个分片）`
+                : ''}
             </div>
           ) : null}
         </div>

@@ -244,21 +244,24 @@ Electron main / 本地工具 / ffmpeg
 
 - 已能识别 `m3u8`
 - 已能解析 variants / renditions / keys / maps / segments
-- 已能把 HLS 计划送入工具区
+- 已能把 HLS 计划送入工具区，并在工具区看到阶段进度、执行链、结构化最近日志、失败分片编号、本地下载速度/ETA、ffmpeg 处理反馈，以及本地任务的失败分片重试入口
+- 对媒体 playlist，工具区已补第一版 Cat Catch 风格的线程数和分片范围控制；只要改了这里，就会切到本地 downloader 主链
 - 已有两条执行主线：
   - 网络 manifest：`ffmpeg` 直拉
   - 页内 / blob manifest：本地 downloader -> local playlist -> `ffmpeg`
+- key 验证已经开始细分结果：不需要 key、还没有候选、候选未命中、验证过程失败
+- key 验证现在会抽前面几段 AES-128 分片一起验证，不再只看第一段
 - 工具区已支持手动输入 AES-128 自定义 key；一旦填写，会切到本地 downloader 主链，用本地 key 文件重写 playlist 后再交给 `ffmpeg`
 - 工具区也能直接做一轮 key 验证；会同时尝试 manifest key URL、当前 tab 已捕获 key，以及手动输入 key
-- 工具区已补基础执行反馈：当前阶段、最近日志、分片完成数，以及失败后重新执行
-- 网络 master playlist 已补第一版 variant / 清晰度选择：默认保持“自动”，也可以锁到某个具体 variant URL 再交给 ffmpeg
+- 工具区已补基础执行反馈：当前阶段、最近日志、分片完成数；本地 downloader 失败后已能直接重试失败分片
+- 网络 master playlist 已补第一版 variant / 清晰度选择：默认保持“自动”，也可以锁到某个具体 variant URL 再交给 ffmpeg；同时工具区会展示该 variant 关联的音轨组 / 字幕组和现有 renditions 摘要
 - 当前 `master playlist + 手动 key` 仍不是完整支持场景，工具区会先显式拦住，避免误走错误主链
 
 #### 还缺什么
 
 - 更完整 key / map 体验
 - 更完整的轨道 / variant / 清晰度选择
-- 更细的日志 / 进度 / 失败重试 UI
+- 更细的日志 / 进度 / 执行控制 UI
 - 边下边存 / 更稳的大文件策略
 
 ### 7.2 DASH / `mpd`

@@ -29,13 +29,13 @@
 | HLS/m3u8 内联识别 | `catch-script/search.js`, `js/m3u8.js` | 部分夺舍 | parser / 测试入口已补，继续补 downloader 能力 |
 | DASH/mpd 内联识别 | `catch-script/search.js`, `js/mpd.js` | 部分夺舍 | 基础 mpd parser / 测试入口已补，继续补轨道选择与下载 |
 | Vimeo playlist.json 转 m3u8 | `catch-script/search.js` | 已夺舍 | 测 Vimeo 页面 |
-| key 候选捕获 | `catch-script/search.js`, `js/content-script.js`, `js/m3u8.js` | 部分夺舍 | 真实 key 验证入口、工具区自定义 key 和工具区二次验证已补，继续补更完整验证体验 |
+| key 候选捕获 | `catch-script/search.js`, `js/content-script.js`, `js/m3u8.js` | 部分夺舍 | 真实 key 验证入口、工具区自定义 key 和工具区二次验证已补；当前已能区分“不需要 key / 无候选 / 候选未命中 / 验证失败”，并已开始抽前面几段 AES-128 分片一起验证 |
 | MSE 缓存捕获 | `catch-script/catch.js` | 已夺舍 | 长视频继续测；1GB 自动保存策略暂不作为默认同步目标 |
 | 自动跳缓冲末尾 | `catch-script/catch.js` | 已夺舍 | 真实播放页验证 |
 | 去额外媒体头 | `catch-script/catch.js` | 已夺舍 | 多格式验证 |
 | 本地 ffmpeg 合并 MSE 音视频 | `catch-script/catch.js`, `js/m3u8.js` | 部分夺舍 | 从 B 站 m4s 扩到 HLS/DASH |
 | m3u8 parser 页面 | `m3u8.html`, `js/m3u8.js` | 部分夺舍 | 先做功能/demo，不急着定正式 UI |
-| m3u8 downloader | `js/m3u8.downloader.js` | 部分夺舍 | 已补下载任务模型、Electron 下载队列内核，并把网络/本地 manifest 两条 HLS 主线接进工具区；工具区已补基础日志/进度和网络 master playlist 第一版 variant 选择，继续补更细的重试与执行反馈 |
+| m3u8 downloader | `js/m3u8.downloader.js` | 部分夺舍 | 已补下载任务模型、Electron 下载队列内核，并把网络/本地 manifest 两条 HLS 主线接进工具区；工具区已补阶段进度、结构化日志、失败分片编号（含复制）、失败分片重试、下载速度/ETA、ffmpeg 处理反馈、媒体 playlist 的线程数/分片范围控制，以及网络 master playlist 第一版 variant 选择和轨道关系展示，继续补真正轨道选择 |
 | mpd parser 页面 | `mpd.html`, `js/mpd.js` | 未夺舍 | 迁轨道解析/选择，或引入等价 parser |
 | N_m3u8DL 协议调用 | `options.html`, `js/popup.js`, `js/m3u8.js` | 未夺舍 | 评估是否作为外部工具导出 |
 | aria2 RPC | `js/function.js`, `js/popup.js`, `js/preview.js` | 未夺舍 | 可作为外部下载器适配 |
@@ -72,6 +72,7 @@
 - HLS 自定义 key：工具区已支持手动输入 16 字节 AES-128 key（hex / base64）；填写后会切到本地 downloader 主链，用本地 key 文件重写 playlist。
 - HLS 工具区 key 验证：工具区已可直接发起 key 验证；候选来源会合并 manifest key URL、当前 tab 已捕获 key 资源，以及工具区手动输入 key。
 - HLS variant 选择：工具区已支持网络 master playlist 的第一版变体选择，默认保持“自动”，也可锁到具体 variant URL 后再交给 ffmpeg。
+- HLS 下载控制：对媒体 playlist，工具区已补第一版 Cat Catch 风格的线程数和分片范围控制；只要改了这里，就会切到本地 downloader 主链。
 - DASH inline mpd：已能生成 manifest resource。
 - MPD 引用：已解析 `BaseURL`、`Location`、`media`、`initialization`、`sourceURL`，并跳过 `$Number$` 这类模板 URL。
 - MPD BaseURL：已让 `BaseURL` 参与后续相对分片 URL 解析。
@@ -101,20 +102,20 @@ OmniFlow 当前有 manifest 捕获、key 候选和 ffmpeg 合并基础，但还�
 
 - m3u8 parser 的层级 playlist 展开：已补纯函数解析与资源卡测试入口，能输出 variants / renditions / keys / maps / segments；下载计划 JSON 已开始对齐 Cat Catch downloader 的 fragment 任务模型。
 - Electron 端下载队列内核：已补并发、范围、重试、顺序推送与停止能力，并已接入 HLS 本地 manifest 执行主链。
-- 多 variant / 多清晰度选择：已能解析 variant 元数据，工具区已补网络 master playlist 的第一版 variant 选择；音轨/字幕组和更细粒度选择仍未完成。
+- 多 variant / 多清晰度选择：已能解析 variant 与 rendition 元数据，工具区已补网络 master playlist 的第一版 variant 选择，并能展示关联的音轨/字幕 group；更细粒度的真正轨道选择仍未完成。
 - `EXT-X-KEY` 下载、验证、替换、自定义 key：已能解析 key 元数据、做真实 key 验证，并在工具区支持手动输入自定义 key和直接二次验证；当前 `master playlist + 手动 key` 仍会显式拦住，避免误走错误主链；更完整的验证和选择体验仍未完成。
 - `EXT-X-MAP` 下载与解密处理：已能解析 map 与 byterange 元数据，并在本地 manifest 重写时生成独立本地文件引用；更完整的解密与验证仍未完成。
 - 下载范围：序号范围、时间范围 `HH:MM:SS`。
-- 下载队列、并发线程、失败重试、重下失败项。
+- 下载队列、并发线程：已补基础内核；工具区已支持本地 HLS 任务的失败分片重试，并补了第一版线程数 / 分片范围控制；时间范围和更细的下载器控制面还没有补。
 - 直播录制与直播结束处理。
-- 估算大小、进度、速度、剩余时间。
+- 估算大小、进度、速度、剩余时间：本地 downloader 已补字节进度、速度和 ETA；`ffmpeg` 阶段已补处理秒数和速度文本，但还没有真正媒体级精确百分比。
 - 只要音频、转码为 mp4、ffmpeg 转码参数。
 - 边下边存 / 大文件分片写入。
 
 当前下一步重点：
 
 1. 补更完整的 key 错误分类与多片段验证 UI。
-2. 完成工具区内的失败重试与更细的执行反馈。
+2. 继续补更细的执行反馈，不要让 ffmpeg 阶段继续像黑盒。
 3. 继续把 variant 选择扩到更完整的轨道/清晰度场景，不要先横向扩散到更多 UI。
 
 ### 2. mpd parser

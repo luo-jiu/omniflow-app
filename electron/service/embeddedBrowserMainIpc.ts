@@ -7,6 +7,7 @@ import type {
   EmbeddedBrowserFaviconResolvePayload,
   EmbeddedBrowserHlsDownloadPayload,
   EmbeddedBrowserHlsPlanDownloadPayload,
+  EmbeddedBrowserHlsPlanRetryPayload,
   EmbeddedBrowserMpdDownloadPayload,
 } from './embeddedBrowserMainTypes'
 import type {
@@ -37,6 +38,10 @@ type EmbeddedBrowserMainIpcHandlers = {
   downloadHlsPlan: (
     tabId: string,
     payload: EmbeddedBrowserHlsPlanDownloadPayload,
+  ) => Promise<unknown>
+  retryHlsPlanFailed: (
+    tabId: string,
+    payload: EmbeddedBrowserHlsPlanRetryPayload,
   ) => Promise<unknown>
   downloadMpdManifest: (
     tabId: string,
@@ -193,6 +198,12 @@ export function registerEmbeddedBrowserMainIpcHandlers(handlers: EmbeddedBrowser
     'embedded-browser:resource:download-hls-plan',
     async (_event, tabId: string, payload: EmbeddedBrowserHlsPlanDownloadPayload) => (
       handlers.downloadHlsPlan(tabId, payload)
+    ),
+  )
+  ipcMain.handle(
+    'embedded-browser:resource:retry-hls-plan-failed',
+    async (_event, tabId: string, payload: EmbeddedBrowserHlsPlanRetryPayload) => (
+      handlers.retryHlsPlanFailed(tabId, payload)
     ),
   )
   ipcMain.handle(

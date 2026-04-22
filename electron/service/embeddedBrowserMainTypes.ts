@@ -92,6 +92,7 @@ export type EmbeddedBrowserCapturedResourceSaveResponse = {
 }
 
 export type EmbeddedBrowserHlsDownloadPayload = {
+  durationSeconds?: number
   ffmpegPath?: string
   headers?: Record<string, string>
   manifestUrl?: string
@@ -121,14 +122,32 @@ export type EmbeddedBrowserHlsPlanDownloadPayload = {
 
 export type EmbeddedBrowserHlsPlanDownloadResponse = EmbeddedBrowserHlsDownloadResponse
 
+export type EmbeddedBrowserHlsPlanRetryPayload = {
+  requestId?: string
+}
+
+export type EmbeddedBrowserHlsPlanRetryResponse = EmbeddedBrowserHlsDownloadResponse
+
+export type EmbeddedBrowserHlsRetrySessionCleanupPayload = {
+  requestId?: string
+}
+
 export type EmbeddedBrowserHlsTaskEventPayload = {
+  bytesReceived?: number
+  bytesTotal?: number
   completedFragments?: number
+  durationSeconds?: number
   error?: string
+  etaSeconds?: number
+  ffmpegSpeedText?: string
+  failedFragments?: number[]
   manifestUrl: string
-  message: string
+  message?: string
   mode: 'direct-manifest' | 'local-plan'
   outputPath?: string
+  processedSeconds?: number
   requestId?: string
+  speedBps?: number
   stage:
     | 'preparing'
     | 'downloading-fragments'

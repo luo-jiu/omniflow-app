@@ -228,13 +228,21 @@ contextBridge.exposeInMainWorld('electronEmbeddedBrowser', {
     return () => ipcRenderer.removeListener('embedded-browser:download', wrapped);
   },
   onHlsTask: (listener: (payload: {
+    bytesReceived?: number;
+    bytesTotal?: number;
     completedFragments?: number;
+    durationSeconds?: number;
     error?: string;
+    etaSeconds?: number;
+    ffmpegSpeedText?: string;
+    failedFragments?: number[];
     manifestUrl: string;
-    message: string;
+    message?: string;
     mode: 'direct-manifest' | 'local-plan';
     outputPath?: string;
+    processedSeconds?: number;
     requestId?: string;
+    speedBps?: number;
     stage: 'preparing' | 'downloading-fragments' | 'rewriting-playlist' | 'ffmpeg' | 'completed' | 'error';
     status: 'running' | 'success' | 'error';
     tabId: string;
@@ -242,13 +250,21 @@ contextBridge.exposeInMainWorld('electronEmbeddedBrowser', {
     usingManualKey?: boolean;
   }) => void) => {
     const wrapped = (_event: Electron.IpcRendererEvent, payload: {
+      bytesReceived?: number;
+      bytesTotal?: number;
       completedFragments?: number;
+      durationSeconds?: number;
       error?: string;
+      etaSeconds?: number;
+      ffmpegSpeedText?: string;
+      failedFragments?: number[];
       manifestUrl: string;
-      message: string;
+      message?: string;
       mode: 'direct-manifest' | 'local-plan';
       outputPath?: string;
+      processedSeconds?: number;
       requestId?: string;
+      speedBps?: number;
       stage: 'preparing' | 'downloading-fragments' | 'rewriting-playlist' | 'ffmpeg' | 'completed' | 'error';
       status: 'running' | 'success' | 'error';
       tabId: string;
@@ -384,6 +400,7 @@ contextBridge.exposeInMainWorld('electronEmbeddedBrowser', {
     useSystemSaveDialog?: boolean;
   }) => ipcRenderer.invoke('embedded-browser:resource:transcode', tabId, payload),
   downloadHlsManifest: (tabId: string, payload: {
+    durationSeconds?: number;
     ffmpegPath?: string;
     headers?: Record<string, string>;
     manifestUrl?: string;
@@ -401,6 +418,9 @@ contextBridge.exposeInMainWorld('electronEmbeddedBrowser', {
     suggestedFileName?: string;
     useSystemSaveDialog?: boolean;
   }) => ipcRenderer.invoke('embedded-browser:resource:download-hls-plan', tabId, payload),
+  retryHlsPlanFailed: (tabId: string, payload: {
+    requestId?: string;
+  }) => ipcRenderer.invoke('embedded-browser:resource:retry-hls-plan-failed', tabId, payload),
   downloadMpdManifest: (tabId: string, payload: {
     ffmpegPath?: string;
     headers?: Record<string, string>;

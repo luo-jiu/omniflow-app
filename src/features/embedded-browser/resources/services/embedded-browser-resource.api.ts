@@ -23,13 +23,21 @@ export async function listEmbeddedBrowserCapturedResources(tabId: string) {
 
 export function subscribeEmbeddedBrowserHlsTask(
   listener: (payload: {
+    bytesReceived?: number;
+    bytesTotal?: number;
     completedFragments?: number;
+    durationSeconds?: number;
     error?: string;
+    etaSeconds?: number;
+    ffmpegSpeedText?: string;
+    failedFragments?: number[];
     manifestUrl: string;
-    message: string;
+    message?: string;
     mode: 'direct-manifest' | 'local-plan';
     outputPath?: string;
+    processedSeconds?: number;
     requestId?: string;
+    speedBps?: number;
     stage: 'preparing' | 'downloading-fragments' | 'rewriting-playlist' | 'ffmpeg' | 'completed' | 'error';
     status: 'running' | 'success' | 'error';
     tabId: string;
@@ -190,6 +198,7 @@ export async function transcodeEmbeddedBrowserCapturedResource(
 export async function downloadEmbeddedBrowserHlsManifest(
   tabId: string,
   payload: {
+    durationSeconds?: number;
     ffmpegPath?: string;
     headers?: Record<string, string>;
     manifestUrl?: string;
@@ -223,6 +232,22 @@ export async function downloadEmbeddedBrowserHlsPlan(
 ) {
   assertDesktopSupport();
   return window.electronEmbeddedBrowser.downloadHlsPlan(tabId, payload) as Promise<{
+    cancelled?: boolean;
+    error?: string;
+    ffmpegPath?: string;
+    ok: boolean;
+    outputPath?: string;
+  }>;
+}
+
+export async function retryEmbeddedBrowserHlsPlanFailed(
+  tabId: string,
+  payload: {
+    requestId?: string;
+  },
+) {
+  assertDesktopSupport();
+  return window.electronEmbeddedBrowser.retryHlsPlanFailed(tabId, payload) as Promise<{
     cancelled?: boolean;
     error?: string;
     ffmpegPath?: string;
