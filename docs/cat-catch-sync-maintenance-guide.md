@@ -3,7 +3,7 @@
 更新时间：2026-04-22
 适用范围：`omniflow-app` 内置浏览器、资源嗅探、缓存捕捉、manifest 解析、下载执行、外部工具适配相关开发与维护。
 
-目标：给后续维护 Cat Catch 同步工作的 Agent 一个稳定判断基线。重点不是“Cat Catch 有什么功能”，而是“Cat Catch 的改动在 OmniFlow 当前环境里是否值得迁、应该迁到哪一层、应该以什么形态迁”。
+目标：给后续维护 Cat Catch 同步工作的 Agent 一个稳定判断基线。最终目标不是“尽量像 Cat Catch”，而是“把 Cat Catch 的能力尽量完整迁入 OmniFlow，并按客户端最佳实践重组，不照搬浏览器扩展 workaround”。
 
 ## 1. 核心原则
 

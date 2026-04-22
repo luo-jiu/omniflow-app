@@ -197,11 +197,18 @@ renderer tool workspace
   - `媒体处理` 内部新增 `直接资源 / HLS 计划` 模式切换，不新开第三个工具。
   - 资源卡中的 HLS manifest 在解析后可点击“送到工具页”。
   - 工具页显示 HLS 计划摘要：playlist 类型、是否直播、分片数、key/map/part 数量、建议线程数。
+  - 网络 `master playlist` 已支持第一版 variant / 清晰度选择：
+    - 默认保持“自动”，继续把原始 manifest 交给 ffmpeg。
+    - 也可以明确锁到某个 variant URL，再按该清晰度执行下载。
+  - 工具页支持手动输入 16 字节 AES-128 自定义 key（hex / base64）。
+  - 工具页会显示当前执行状态、最近日志、当前阶段，以及分片完成数；失败后可直接重新执行。
   - 网络 manifest：
     - 继续走现有 `ffmpeg` 直拉主链。
   - blob / 页内内存 manifest：
     - 走 Electron main 的本地 downloader 主链：
       `plan -> local workdir -> rewritten local-playlist.m3u8 -> ffmpeg`。
+  - 如果填写了自定义 key，也会强制走本地 downloader 主链，让本地 playlist 引用手动写入的 key 文件。
+  - 当前 `master playlist + 手动 key` 仍不作为可用组合；需要先收敛到具体媒体 playlist，再走本地 downloader 主链。
   - HLS 计划模式仍复用统一“保存到本地 / 保存到内部”的保存目标切换，不单独弹第二套保存 UI。
 - 保存目标切换：
   - 本地：保存位置显示为一行路径，点击路径可切换到系统目录
@@ -217,7 +224,7 @@ renderer tool workspace
 - 媒体处理工具不重新捕捉资源，不修改资源 URL、后缀或来源。
 - 当前转格式一次只处理一个媒体资源；多资源批量转码后续再扩展。
 - HLS 第一版只把“计划解析后的重处理”收进工具区；资源面板仍只负责解析、复制计划和发起，不承载长时间下载 UI。
-- 当前 HLS 计划模式还没有完整日志面板、分片级进度和失败重试 UI，这些属于后续增强项，不影响第一版主链。
+- 当前 HLS 计划模式已补一版基础执行反馈（阶段 / 最近日志 / 分片完成数 / 重新执行），并补了网络 master playlist 的第一版清晰度选择；但还没有更细的实时速度、ETA、失败项单独重试和完整日志面板。
 
 ## 9. 验证方式
 

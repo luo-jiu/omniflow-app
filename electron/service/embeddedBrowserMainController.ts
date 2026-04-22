@@ -41,6 +41,7 @@ import {
   type EmbeddedBrowserCapturedResourceTranscodePayload,
   type EmbeddedBrowserCapturedResourceTranscodeResponse,
   type EmbeddedBrowserHlsDownloadPayload,
+  type EmbeddedBrowserHlsTaskEventPayload,
   type EmbeddedBrowserHlsPlanDownloadPayload,
   type EmbeddedBrowserHlsPlanDownloadResponse,
   type EmbeddedBrowserHlsDownloadResponse,
@@ -153,6 +154,14 @@ export function createEmbeddedBrowserMainController(
       return
     }
     mainWindow.webContents.send('embedded-browser:resource', payload)
+  }
+
+  function emitEmbeddedBrowserHlsTask(payload: EmbeddedBrowserHlsTaskEventPayload) {
+    const mainWindow = options.getMainWindow()
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      return
+    }
+    mainWindow.webContents.send('embedded-browser:hls-task', payload)
   }
 
   function emitCredentialCaptured(payload: EmbeddedBrowserCapturedCredentialEvent) {
@@ -827,6 +836,7 @@ export function createEmbeddedBrowserMainController(
     }
 
     try {
+      const requestId = String(payload.requestId || '').trim() || undefined
       const defaultFileName = String(payload.suggestedFileName || '').trim()
         || deriveEmbeddedBrowserManifestOutputFileName(manifestUrl, kind)
       const outputPath = await resolveEmbeddedBrowserOutputPath({
@@ -844,6 +854,27 @@ export function createEmbeddedBrowserMainController(
         }
       }
 
+      if (kind === 'hls') {
+        emitEmbeddedBrowserHlsTask({
+          manifestUrl,
+          message: '开始准备网络 manifest 下载',
+          mode: 'direct-manifest',
+          requestId,
+          stage: 'preparing',
+          status: 'running',
+          tabId: normalizedTabId,
+        })
+        emitEmbeddedBrowserHlsTask({
+          manifestUrl,
+          message: '已交给 ffmpeg 直拉处理',
+          mode: 'direct-manifest',
+          requestId,
+          stage: 'ffmpeg',
+          status: 'running',
+          tabId: normalizedTabId,
+        })
+      }
+
       const result = await downloadEmbeddedBrowserManifestResource({
         ffmpegPath: payload.ffmpegPath,
         headers: payload.headers,
@@ -851,12 +882,36 @@ export function createEmbeddedBrowserMainController(
         manifestUrl,
         outputPath,
       })
+      if (kind === 'hls') {
+        emitEmbeddedBrowserHlsTask({
+          manifestUrl,
+          message: 'HLS 下载完成',
+          mode: 'direct-manifest',
+          outputPath: result.outputPath,
+          requestId,
+          stage: 'completed',
+          status: 'success',
+          tabId: normalizedTabId,
+        })
+      }
       return {
         ffmpegPath: result.ffmpegPath,
         ok: true,
         outputPath: result.outputPath,
       }
     } catch (error) {
+      if (kind === 'hls') {
+        emitEmbeddedBrowserHlsTask({
+          error: error instanceof Error ? error.message : String(error),
+          manifestUrl,
+          message: error instanceof Error ? error.message : String(error),
+          mode: 'direct-manifest',
+          requestId: String(payload.requestId || '').trim() || undefined,
+          stage: 'error',
+          status: 'error',
+          tabId: normalizedTabId,
+        })
+      }
       runtimeLogger.warn('embedded browser manifest download failed', {
         error: error instanceof Error ? error.message : String(error),
         kind,
@@ -890,6 +945,7 @@ export function createEmbeddedBrowserMainController(
     }
 
     let workDirectoryPath = ''
+    const requestId = String(payload.requestId || '').trim() || undefined
     try {
       const defaultFileName = String(payload.suggestedFileName || '').trim()
         || deriveEmbeddedBrowserManifestOutputFileName(payload.plan.manifestUrl, 'hls')
@@ -908,7 +964,35 @@ export function createEmbeddedBrowserMainController(
         }
       }
 
+      emitEmbeddedBrowserHlsTask({
+        manifestUrl: payload.plan.manifestUrl,
+        message: '开始准备本地 HLS 下载任务',
+        mode: 'local-plan',
+        requestId,
+        stage: 'preparing',
+        status: 'running',
+        tabId: normalizedTabId,
+        totalFragments: payload.plan.fragmentCount,
+        usingManualKey: Boolean(payload.manualKeyBase64),
+      })
+
       const localDownloadResult = await downloadEmbeddedBrowserHlsToLocalWorkDirectory({
+        onEvent: (event) => {
+          emitEmbeddedBrowserHlsTask({
+            completedFragments: event.completedFragments,
+            error: event.error,
+            manifestUrl: payload.plan.manifestUrl,
+            message: event.message,
+            mode: 'local-plan',
+            requestId,
+            stage: event.stage,
+            status: event.status,
+            tabId: normalizedTabId,
+            totalFragments: event.totalFragments || payload.plan.fragmentCount,
+            usingManualKey: Boolean(payload.manualKeyBase64),
+          })
+        },
+        manualKeyBase64: payload.manualKeyBase64,
         plan: {
           fragments: payload.plan.fragments,
           headers: payload.plan.headers,
@@ -918,11 +1002,37 @@ export function createEmbeddedBrowserMainController(
       })
       workDirectoryPath = localDownloadResult.workDirectoryPath
 
+      emitEmbeddedBrowserHlsTask({
+        completedFragments: payload.plan.fragmentCount,
+        manifestUrl: payload.plan.manifestUrl,
+        message: '本地 playlist 已生成，开始交给 ffmpeg',
+        mode: 'local-plan',
+        requestId,
+        stage: 'ffmpeg',
+        status: 'running',
+        tabId: normalizedTabId,
+        totalFragments: payload.plan.fragmentCount,
+        usingManualKey: Boolean(payload.manualKeyBase64),
+      })
+
       const result = await downloadEmbeddedBrowserManifestResource({
         ffmpegPath: payload.ffmpegPath,
         kind: 'hls',
         manifestUrl: localDownloadResult.playlistPath,
         outputPath,
+      })
+      emitEmbeddedBrowserHlsTask({
+        completedFragments: payload.plan.fragmentCount,
+        manifestUrl: payload.plan.manifestUrl,
+        message: 'HLS 下载完成',
+        mode: 'local-plan',
+        outputPath: result.outputPath,
+        requestId,
+        stage: 'completed',
+        status: 'success',
+        tabId: normalizedTabId,
+        totalFragments: payload.plan.fragmentCount,
+        usingManualKey: Boolean(payload.manualKeyBase64),
       })
       return {
         ffmpegPath: result.ffmpegPath,
@@ -930,6 +1040,18 @@ export function createEmbeddedBrowserMainController(
         outputPath: result.outputPath,
       }
     } catch (error) {
+      emitEmbeddedBrowserHlsTask({
+        error: error instanceof Error ? error.message : String(error),
+        manifestUrl: payload.plan.manifestUrl,
+        message: error instanceof Error ? error.message : String(error),
+        mode: 'local-plan',
+        requestId,
+        stage: 'error',
+        status: 'error',
+        tabId: normalizedTabId,
+        totalFragments: payload.plan.fragmentCount,
+        usingManualKey: Boolean(payload.manualKeyBase64),
+      })
       runtimeLogger.warn('embedded browser hls plan download failed', {
         error: error instanceof Error ? error.message : String(error),
         manifestUrl: payload.plan.manifestUrl,

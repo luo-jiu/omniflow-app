@@ -227,6 +227,39 @@ contextBridge.exposeInMainWorld('electronEmbeddedBrowser', {
     ipcRenderer.on('embedded-browser:download', wrapped);
     return () => ipcRenderer.removeListener('embedded-browser:download', wrapped);
   },
+  onHlsTask: (listener: (payload: {
+    completedFragments?: number;
+    error?: string;
+    manifestUrl: string;
+    message: string;
+    mode: 'direct-manifest' | 'local-plan';
+    outputPath?: string;
+    requestId?: string;
+    stage: 'preparing' | 'downloading-fragments' | 'rewriting-playlist' | 'ffmpeg' | 'completed' | 'error';
+    status: 'running' | 'success' | 'error';
+    tabId: string;
+    totalFragments?: number;
+    usingManualKey?: boolean;
+  }) => void) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, payload: {
+      completedFragments?: number;
+      error?: string;
+      manifestUrl: string;
+      message: string;
+      mode: 'direct-manifest' | 'local-plan';
+      outputPath?: string;
+      requestId?: string;
+      stage: 'preparing' | 'downloading-fragments' | 'rewriting-playlist' | 'ffmpeg' | 'completed' | 'error';
+      status: 'running' | 'success' | 'error';
+      tabId: string;
+      totalFragments?: number;
+      usingManualKey?: boolean;
+    }) => {
+      listener(payload);
+    };
+    ipcRenderer.on('embedded-browser:hls-task', wrapped);
+    return () => ipcRenderer.removeListener('embedded-browser:hls-task', wrapped);
+  },
   onResourceCaptured: (listener: (payload: {
     capturedAt: number;
     contentLength?: number;
@@ -355,13 +388,16 @@ contextBridge.exposeInMainWorld('electronEmbeddedBrowser', {
     headers?: Record<string, string>;
     manifestUrl?: string;
     outputDirectoryPath?: string;
+    requestId?: string;
     suggestedFileName?: string;
     useSystemSaveDialog?: boolean;
   }) => ipcRenderer.invoke('embedded-browser:resource:download-hls', tabId, payload),
   downloadHlsPlan: (tabId: string, payload: {
     ffmpegPath?: string;
+    manualKeyBase64?: string;
     outputDirectoryPath?: string;
     plan: import('@/features/embedded-browser/resources/model/embedded-browser-hls-manifest').EmbeddedBrowserHlsDownloadPlan;
+    requestId?: string;
     suggestedFileName?: string;
     useSystemSaveDialog?: boolean;
   }) => ipcRenderer.invoke('embedded-browser:resource:download-hls-plan', tabId, payload),

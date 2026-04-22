@@ -96,6 +96,7 @@ export type EmbeddedBrowserHlsDownloadPayload = {
   headers?: Record<string, string>
   manifestUrl?: string
   outputDirectoryPath?: string
+  requestId?: string
   suggestedFileName?: string
   useSystemSaveDialog?: boolean
 }
@@ -110,13 +111,36 @@ export type EmbeddedBrowserHlsDownloadResponse = {
 
 export type EmbeddedBrowserHlsPlanDownloadPayload = {
   ffmpegPath?: string
+  manualKeyBase64?: string
   outputDirectoryPath?: string
   plan: EmbeddedBrowserHlsDownloadPlan
+  requestId?: string
   suggestedFileName?: string
   useSystemSaveDialog?: boolean
 }
 
 export type EmbeddedBrowserHlsPlanDownloadResponse = EmbeddedBrowserHlsDownloadResponse
+
+export type EmbeddedBrowserHlsTaskEventPayload = {
+  completedFragments?: number
+  error?: string
+  manifestUrl: string
+  message: string
+  mode: 'direct-manifest' | 'local-plan'
+  outputPath?: string
+  requestId?: string
+  stage:
+    | 'preparing'
+    | 'downloading-fragments'
+    | 'rewriting-playlist'
+    | 'ffmpeg'
+    | 'completed'
+    | 'error'
+  status: 'running' | 'success' | 'error'
+  tabId: string
+  totalFragments?: number
+  usingManualKey?: boolean
+}
 
 export type EmbeddedBrowserMpdDownloadPayload = EmbeddedBrowserHlsDownloadPayload
 

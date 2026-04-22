@@ -374,13 +374,16 @@ interface Window {
       headers?: Record<string, string>;
       manifestUrl?: string;
       outputDirectoryPath?: string;
+      requestId?: string;
       suggestedFileName?: string;
       useSystemSaveDialog?: boolean;
     }) => Promise<EmbeddedBrowserCapturedResourceMergeResponse>;
     downloadHlsPlan: (tabId: string, payload: {
       ffmpegPath?: string;
+      manualKeyBase64?: string;
       outputDirectoryPath?: string;
       plan: import('@/features/embedded-browser/resources/model/embedded-browser-hls-manifest').EmbeddedBrowserHlsDownloadPlan;
+      requestId?: string;
       suggestedFileName?: string;
       useSystemSaveDialog?: boolean;
     }) => Promise<EmbeddedBrowserCapturedResourceMergeResponse>;
@@ -432,6 +435,20 @@ interface Window {
       tempPath?: string;
       totalBytes: number;
       url: string;
+    }) => void) => () => void;
+    onHlsTask: (listener: (payload: {
+      completedFragments?: number;
+      error?: string;
+      manifestUrl: string;
+      message: string;
+      mode: 'direct-manifest' | 'local-plan';
+      outputPath?: string;
+      requestId?: string;
+      stage: 'preparing' | 'downloading-fragments' | 'rewriting-playlist' | 'ffmpeg' | 'completed' | 'error';
+      status: 'running' | 'success' | 'error';
+      tabId: string;
+      totalFragments?: number;
+      usingManualKey?: boolean;
     }) => void) => () => void;
     onResourceCaptured: (listener: (payload: EmbeddedBrowserCapturedResource) => void) => () => void;
     openTab: (tabId: string, url?: string) => Promise<void>;

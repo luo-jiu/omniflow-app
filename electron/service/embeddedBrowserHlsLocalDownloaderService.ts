@@ -36,7 +36,16 @@ export type EmbeddedBrowserHlsLocalDownloadPlan = {
 }
 
 export type EmbeddedBrowserHlsLocalDownloadRequest = {
+  manualKeyBase64?: string
   maxRetries?: number
+  onEvent?: (event: {
+    completedFragments?: number
+    error?: string
+    message: string
+    stage: 'preparing' | 'downloading-fragments' | 'rewriting-playlist' | 'completed' | 'error'
+    status: 'running' | 'success' | 'error'
+    totalFragments?: number
+  }) => void
   outputDirectoryPath?: string
   plan: EmbeddedBrowserHlsLocalDownloadPlan
 }
@@ -52,6 +61,19 @@ export type EmbeddedBrowserHlsLocalDownloadResult = {
 type ResourceRefRecord = {
   localPath: string
   playlistPath: string
+}
+
+function normalizeManualAes128KeyBase64(base64: string | undefined) {
+  const normalizedBase64 = String(base64 || '').trim()
+  if (!normalizedBase64) {
+    return null
+  }
+  try {
+    const decoded = Buffer.from(normalizedBase64, 'base64')
+    return decoded.byteLength === 16 ? decoded.toString('base64') : null
+  } catch {
+    return null
+  }
 }
 
 function createByteRangeHeader(byteRange?: EmbeddedBrowserDownloadByteRange) {
@@ -75,6 +97,21 @@ function createResourceCacheKey(input: {
     String(input.byteRange?.length || ''),
     String(input.byteRange?.offset || ''),
   ].join('|')
+}
+
+function createKeyRefCacheKey(input: {
+  manualKeyBase64?: string
+  method?: string
+  url?: string
+}) {
+  const normalizedMethod = String(input.method || '').trim().toUpperCase()
+  if (input.manualKeyBase64 && normalizedMethod === 'AES-128') {
+    return `manual:${input.manualKeyBase64}:${normalizedMethod}`
+  }
+  return createResourceCacheKey({
+    method: normalizedMethod,
+    url: input.url,
+  })
 }
 
 function inferExtensionFromUrl(input: string, fallback: string) {
@@ -174,10 +211,70 @@ async function prepareStaticRefs(input: {
   return records
 }
 
+async function prepareKeyRefs(input: {
+  headers?: Record<string, string>
+  manualKeyBase64?: string
+  outputDirectoryPath: string
+  refs: Array<{
+    method?: string
+    url?: string
+  }>
+}) {
+  const records = new Map<string, ResourceRefRecord>()
+  const keysDirectoryPath = path.join(input.outputDirectoryPath, 'keys')
+  await mkdir(keysDirectoryPath, { recursive: true })
+
+  const normalizedManualKeyBase64 = normalizeManualAes128KeyBase64(input.manualKeyBase64)
+  const manualKeyBytes = normalizedManualKeyBase64
+    ? Buffer.from(normalizedManualKeyBase64, 'base64')
+    : null
+
+  let resourceIndex = 0
+  for (const ref of input.refs) {
+    const normalizedMethod = String(ref.method || '').trim().toUpperCase()
+    if (!normalizedMethod || normalizedMethod === 'NONE') {
+      continue
+    }
+    const cacheKey = createKeyRefCacheKey({
+      manualKeyBase64: normalizedManualKeyBase64 || undefined,
+      method: normalizedMethod,
+      url: ref.url,
+    })
+    if (records.has(cacheKey)) {
+      continue
+    }
+
+    const extension = normalizedMethod === 'AES-128' ? 'key' : inferExtensionFromUrl(ref.url || '', 'key')
+    const fileName = `key-${String(resourceIndex + 1).padStart(3, '0')}.${extension}`
+    resourceIndex += 1
+    const outputPath = path.join(keysDirectoryPath, fileName)
+
+    if (manualKeyBytes && normalizedMethod === 'AES-128') {
+      await writeFile(outputPath, manualKeyBytes)
+    } else if (ref.url) {
+      await downloadStaticResource({
+        headers: input.headers,
+        outputPath,
+        url: ref.url,
+      })
+    } else {
+      continue
+    }
+
+    records.set(cacheKey, {
+      localPath: path.posix.join('keys', fileName),
+      playlistPath: path.posix.join('keys', fileName),
+    })
+  }
+
+  return records
+}
+
 function buildLocalPlaylist(input: {
   fragmentPaths: string[]
   fragments: EmbeddedBrowserHlsLocalDownloadFragment[]
   keyRefs: Map<string, ResourceRefRecord>
+  manualKeyBase64?: string
   mapRefs: Map<string, ResourceRefRecord>
 }) {
   const lines = ['#EXTM3U', '#EXT-X-VERSION:3']
@@ -196,8 +293,9 @@ function buildLocalPlaylist(input: {
       previousDiscontinuity = fragment.discontinuitySequence
     }
 
-    const nextKeyCacheKey = fragment.key?.url
-      ? createResourceCacheKey({
+    const nextKeyCacheKey = fragment.key
+      ? createKeyRefCacheKey({
+          manualKeyBase64: input.manualKeyBase64,
           method: fragment.key.method,
           url: fragment.key.url,
         })
@@ -241,6 +339,12 @@ export async function downloadEmbeddedBrowserHlsToLocalWorkDirectory(
   request: EmbeddedBrowserHlsLocalDownloadRequest,
 ): Promise<EmbeddedBrowserHlsLocalDownloadResult> {
   const { plan } = request
+  request.onEvent?.({
+    message: '开始准备本地 HLS 工作目录',
+    stage: 'preparing',
+    status: 'running',
+    totalFragments: plan.fragments.length,
+  })
   const outputDirectoryPath = request.outputDirectoryPath
     ? path.resolve(request.outputDirectoryPath)
     : await mkdtemp(path.join(os.tmpdir(), 'omniflow-hls-download-'))
@@ -248,22 +352,14 @@ export async function downloadEmbeddedBrowserHlsToLocalWorkDirectory(
   const segmentsDirectoryPath = path.join(outputDirectoryPath, 'segments')
   await mkdir(segmentsDirectoryPath, { recursive: true })
 
-  const keyRefs = await prepareStaticRefs({
-    directoryName: 'keys',
+  const keyRefs = await prepareKeyRefs({
     headers: plan.headers,
+    manualKeyBase64: request.manualKeyBase64,
     outputDirectoryPath,
     refs: plan.fragments.map((fragment) => ({
       method: fragment.key?.method,
       url: fragment.key?.url,
     })),
-    resourcePathBuilder: (index, ref) => {
-      const extension = inferExtensionFromUrl(ref.url || '', 'key')
-      const fileName = `key-${String(index + 1).padStart(3, '0')}.${extension}`
-      return {
-        localPath: path.posix.join('keys', fileName),
-        outputPath: path.join(outputDirectoryPath, 'keys', fileName),
-      }
-    },
   })
 
   const mapRefs = await prepareStaticRefs({
@@ -300,12 +396,29 @@ export async function downloadEmbeddedBrowserHlsToLocalWorkDirectory(
 
   const pendingWrites: Promise<void>[] = []
   let downloadError: Error | null = null
+  let downloadErrorMessage = ''
+  request.onEvent?.({
+    completedFragments: 0,
+    message: '开始下载 HLS 分片',
+    stage: 'downloading-fragments',
+    status: 'running',
+    totalFragments: plan.fragments.length,
+  })
   downloader.on('downloadError', (fragment, error, attempt) => {
+    request.onEvent?.({
+      completedFragments: downloader.success,
+      error: error.message,
+      message: `分片 #${(fragment.index || 0) + 1} 第 ${attempt} 次下载失败：${error.message}`,
+      stage: 'downloading-fragments',
+      status: 'running',
+      totalFragments: plan.fragments.length,
+    })
     if (downloadError || attempt <= (request.maxRetries || 2)) {
       return
     }
     const fragmentIndex = typeof fragment.index === 'number' ? fragment.index : 0
-    downloadError = new Error(`下载分片失败：#${fragmentIndex + 1} ${error.message}`)
+    downloadErrorMessage = `下载分片失败：#${fragmentIndex + 1} ${error.message}`
+    downloadError = new Error(downloadErrorMessage)
   })
   downloader.on('sequentialPush', (buffer, fragment) => {
     const fragmentIndex = typeof fragment.index === 'number' ? fragment.index : -1
@@ -317,6 +430,13 @@ export async function downloadEmbeddedBrowserHlsToLocalWorkDirectory(
       path.join(outputDirectoryPath, relativePath),
       new Uint8Array(buffer),
     ))
+    request.onEvent?.({
+      completedFragments: fragmentIndex + 1,
+      message: `已写入分片 #${fragmentIndex + 1}`,
+      stage: 'downloading-fragments',
+      status: 'running',
+      totalFragments: plan.fragments.length,
+    })
   })
 
   await new Promise<void>((resolve, reject) => {
@@ -338,17 +458,42 @@ export async function downloadEmbeddedBrowserHlsToLocalWorkDirectory(
 
   await Promise.all(pendingWrites)
   if (downloadError || downloader.errorItem.size > 0) {
-    throw downloadError || new Error(`仍有 ${downloader.errorItem.size} 个分片下载失败`)
+    const failureMessage = downloadErrorMessage || `仍有 ${downloader.errorItem.size} 个分片下载失败`
+    request.onEvent?.({
+      completedFragments: downloader.success,
+      error: failureMessage,
+      message: failureMessage,
+      stage: 'error',
+      status: 'error',
+      totalFragments: plan.fragments.length,
+    })
+    throw downloadError || new Error(failureMessage)
   }
 
+  request.onEvent?.({
+    completedFragments: plan.fragments.length,
+    message: '开始重写本地 playlist',
+    stage: 'rewriting-playlist',
+    status: 'running',
+    totalFragments: plan.fragments.length,
+  })
   const playlistText = buildLocalPlaylist({
     fragmentPaths,
     fragments: plan.fragments,
     keyRefs,
+    manualKeyBase64: request.manualKeyBase64,
     mapRefs,
   })
   const playlistPath = path.join(outputDirectoryPath, 'local-playlist.m3u8')
   await writeFile(playlistPath, playlistText, 'utf8')
+
+  request.onEvent?.({
+    completedFragments: plan.fragments.length,
+    message: '本地 playlist 重写完成',
+    stage: 'rewriting-playlist',
+    status: 'running',
+    totalFragments: plan.fragments.length,
+  })
 
   return {
     downloadedFragmentCount: plan.fragments.length,

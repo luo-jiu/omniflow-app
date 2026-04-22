@@ -5,6 +5,7 @@ import {
   Button,
   Input,
   InputNumber,
+  Select,
   Switch,
   Tag,
   TextArea,
@@ -28,6 +29,7 @@ import {
 import {
   downloadEmbeddedBrowserHlsManifest,
   downloadEmbeddedBrowserHlsPlan,
+  subscribeEmbeddedBrowserHlsTask,
 } from '@/features/embedded-browser/resources/services/embedded-browser-resource.api';
 import {
   withResourceRefererHeader,
@@ -42,6 +44,9 @@ import {
 import {
   findMergeableResourcePair,
 } from '@/features/embedded-browser/resources/model/embedded-browser-resource.presentation';
+import {
+  normalizeHlsKeyCandidateValue,
+} from '@/features/embedded-browser/resources/model/embedded-browser-hls-key-verifier';
 
 import {
   fetchAvailableTranslationModels,
@@ -1275,7 +1280,23 @@ type MediaProcessingToolProps = {
   onRefreshDirectory?: (directoryId: number) => Promise<void> | void;
 };
 
+type HlsTaskStatus = {
+  completedFragments: number;
+  error?: string;
+  lastOutputPath?: string;
+  logs: string[];
+  mode?: 'direct-manifest' | 'local-plan';
+  requestId?: string;
+  stage?: 'preparing' | 'downloading-fragments' | 'rewriting-playlist' | 'ffmpeg' | 'completed' | 'error';
+  state: 'idle' | 'running' | 'success' | 'error';
+  totalFragments: number;
+};
+
 type MediaSaveTargetType = 'local' | 'internal';
+type HlsVariantOption = {
+  label: string;
+  value: string;
+};
 
 function normalizeMediaTranscodeFormat(input: string) {
   const normalized = String(input || '').trim().replace(/^\.+/, '').toLowerCase();
@@ -1300,6 +1321,27 @@ function deriveHlsOutputFileName(url: string) {
   return 'hls-media.mp4';
 }
 
+function formatHlsVariantLabel(variant: {
+  bandwidth?: number;
+  codecs?: string;
+  resolution?: string;
+  url: string;
+}, index: number) {
+  const parts: string[] = [];
+  if (variant.resolution) {
+    parts.push(variant.resolution);
+  }
+  if (variant.bandwidth && Number.isFinite(variant.bandwidth)) {
+    const mbps = variant.bandwidth / 1000 / 1000;
+    parts.push(`${mbps >= 1 ? mbps.toFixed(1) : (variant.bandwidth / 1000).toFixed(0)} ${mbps >= 1 ? 'Mbps' : 'Kbps'}`);
+  }
+  if (variant.codecs) {
+    parts.push(variant.codecs);
+  }
+  const title = parts.length ? parts.join(' · ') : `变体 ${index + 1}`;
+  return `${title} · ${deriveHlsOutputFileName(variant.url)}`;
+}
+
 const MediaProcessingTool: React.FC<MediaProcessingToolProps> = ({
   activeMode,
   hlsRequest,
@@ -1311,6 +1353,16 @@ const MediaProcessingTool: React.FC<MediaProcessingToolProps> = ({
   const [merging, setMerging] = React.useState(false);
   const [transcoding, setTranscoding] = React.useState(false);
   const [savingHls, setSavingHls] = React.useState(false);
+  const [hlsManualKeyDraft, setHlsManualKeyDraft] = React.useState('');
+  const [selectedHlsVariantUrl, setSelectedHlsVariantUrl] = React.useState('');
+  const [hlsTaskStatus, setHlsTaskStatus] = React.useState<HlsTaskStatus>({
+    completedFragments: 0,
+    logs: [],
+    state: 'idle',
+    totalFragments: 0,
+  });
+  const activeHlsTaskRequestIdRef = React.useRef('');
+  const activeHlsTaskManifestUrlRef = React.useRef('');
   const [transcodeFormatDraft, setTranscodeFormatDraft] = React.useState('m4a');
   const [saveTargetType, setSaveTargetType] = React.useState<MediaSaveTargetType>('local');
   const [localOutputDirectory, setLocalOutputDirectory] = React.useState('');
@@ -1326,6 +1378,43 @@ const MediaProcessingTool: React.FC<MediaProcessingToolProps> = ({
   const isLocalSaveTarget = saveTargetType === 'local';
   const internalTargetMissing = saveTargetType === 'internal' && !internalDirectory;
   const localOutputPathHint = localOutputDirectory || defaultLocalOutputDirectory || '默认下载目录';
+  const normalizedHlsManualKey = React.useMemo(() => (
+    normalizeHlsKeyCandidateValue(hlsManualKeyDraft) || ''
+  ), [hlsManualKeyDraft]);
+  const hlsManualKeyInputMode = React.useMemo(() => {
+    const normalizedDraft = String(hlsManualKeyDraft || '').trim();
+    if (!normalizedDraft) {
+      return '';
+    }
+    return /^(?:0x)?[0-9a-f]{32}$/i.test(normalizedDraft) ? 'hex' : 'base64';
+  }, [hlsManualKeyDraft]);
+  const hlsManualKeyInvalid = Boolean(String(hlsManualKeyDraft || '').trim()) && !normalizedHlsManualKey;
+  const hlsAes128KeyCount = React.useMemo(() => (
+    hlsRequest?.plan.keys.filter((key) => String(key.method || '').toUpperCase() === 'AES-128').length || 0
+  ), [hlsRequest]);
+  const hlsNonAesKeyCount = React.useMemo(() => (
+    hlsRequest?.plan.keys.filter((key) => String(key.method || '').toUpperCase() !== 'AES-128').length || 0
+  ), [hlsRequest]);
+  const hlsVariantOptions = React.useMemo<HlsVariantOption[]>(() => {
+    if (!hlsRequest?.plan.variants.length) {
+      return [];
+    }
+    return hlsRequest.plan.variants.map((variant, index) => ({
+      label: formatHlsVariantLabel(variant, index),
+      value: variant.url,
+    }));
+  }, [hlsRequest]);
+  const hlsSelectedVariantLabel = React.useMemo(() => {
+    if (!selectedHlsVariantUrl) {
+      return '';
+    }
+    return hlsVariantOptions.find((option) => option.value === selectedHlsVariantUrl)?.label || '';
+  }, [hlsVariantOptions, selectedHlsVariantUrl]);
+  const hlsCanSelectVariant = Boolean(
+    hlsRequest?.plan.isMaster
+    && /^https?:\/\//i.test(hlsRequest?.plan.manifestUrl || '')
+    && hlsVariantOptions.length > 0,
+  );
 
   React.useEffect(() => {
     let cancelled = false;
@@ -1352,6 +1441,54 @@ const MediaProcessingTool: React.FC<MediaProcessingToolProps> = ({
       setInternalPathRequired(false);
     }
   }, [internalDirectory, saveTargetType]);
+
+  React.useEffect(() => {
+    setHlsManualKeyDraft('');
+    setSelectedHlsVariantUrl('');
+    activeHlsTaskRequestIdRef.current = '';
+    activeHlsTaskManifestUrlRef.current = '';
+    setHlsTaskStatus({
+      completedFragments: 0,
+      logs: [],
+      state: 'idle',
+      totalFragments: hlsRequest?.plan.fragmentCount || 0,
+    });
+  }, [hlsRequest?.id, hlsRequest?.plan.fragmentCount]);
+
+  React.useEffect(() => {
+    const unsubscribe = subscribeEmbeddedBrowserHlsTask((payload) => {
+      if (!hlsRequest || payload.tabId !== hlsRequest.resource.tabId) {
+        return;
+      }
+      if (payload.requestId && activeHlsTaskRequestIdRef.current && payload.requestId !== activeHlsTaskRequestIdRef.current) {
+        return;
+      }
+      if (payload.manifestUrl !== (activeHlsTaskManifestUrlRef.current || hlsRequest.plan.manifestUrl)) {
+        return;
+      }
+      setHlsTaskStatus((previous) => {
+        const nextLog = payload.message
+          ? [...previous.logs, payload.message].slice(-12)
+          : previous.logs;
+        return {
+          completedFragments: payload.completedFragments ?? previous.completedFragments,
+          error: payload.error,
+          lastOutputPath: payload.outputPath || previous.lastOutputPath,
+          logs: nextLog,
+          mode: payload.mode,
+          requestId: payload.requestId || previous.requestId,
+          stage: payload.stage,
+          state: payload.status === 'running'
+            ? 'running'
+            : payload.status === 'success'
+              ? 'success'
+              : 'error',
+          totalFragments: payload.totalFragments ?? previous.totalFragments,
+        };
+      });
+    });
+    return unsubscribe;
+  }, [hlsRequest]);
 
   const persistMediaOutputBySaveTarget = React.useCallback(async (
     outputPath: string,
@@ -1487,32 +1624,65 @@ const MediaProcessingTool: React.FC<MediaProcessingToolProps> = ({
       Toast.warning('先从资源面板解析 HLS，再送到工具页');
       return;
     }
+    if (hlsManualKeyInvalid) {
+      Toast.warning('自定义 key 需要是 16 字节 AES-128，支持 hex 或 base64');
+      return;
+    }
     if (saveTargetType === 'internal' && !internalDirectory) {
       setInternalPathRequired(true);
       Toast.warning('内部保存路径必须选择');
       return;
     }
+    if (hlsRequest.plan.isMaster && normalizedHlsManualKey) {
+      Toast.warning('当前 master playlist 的手动 key 仍需先收敛到具体媒体 playlist，先不要直接走本地主链');
+      return;
+    }
     setSavingHls(true);
     try {
-      const result = /^https?:\/\//i.test(hlsRequest.plan.manifestUrl)
+      const requestId = `hls-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const effectiveManifestUrl = selectedHlsVariantUrl || hlsRequest.plan.manifestUrl;
+      activeHlsTaskRequestIdRef.current = requestId;
+      activeHlsTaskManifestUrlRef.current = effectiveManifestUrl;
+      setHlsTaskStatus({
+        completedFragments: 0,
+        logs: [
+          '已创建 HLS 处理任务',
+          selectedHlsVariantUrl ? `已选择变体：${hlsSelectedVariantLabel || selectedHlsVariantUrl}` : '当前使用自动变体策略',
+        ],
+        mode: /^https?:\/\//i.test(effectiveManifestUrl) && !normalizedHlsManualKey ? 'direct-manifest' : 'local-plan',
+        requestId,
+        stage: 'preparing',
+        state: 'running',
+        totalFragments: hlsRequest.plan.fragmentCount,
+      });
+      const shouldUseDirectManifestDownload = /^https?:\/\//i.test(effectiveManifestUrl) && !normalizedHlsManualKey;
+      const result = shouldUseDirectManifestDownload
         ? await downloadEmbeddedBrowserHlsManifest(hlsRequest.resource.tabId, {
             headers: withResourceRefererHeader(hlsRequest.resource),
-            manifestUrl: hlsRequest.plan.manifestUrl,
+            manifestUrl: effectiveManifestUrl,
             outputDirectoryPath: saveTargetType === 'local' && localOutputDirectory
               ? localOutputDirectory
               : undefined,
-            suggestedFileName: deriveHlsOutputFileName(hlsRequest.plan.manifestUrl),
+            requestId,
+            suggestedFileName: deriveHlsOutputFileName(effectiveManifestUrl),
             useSystemSaveDialog: false,
           })
         : await downloadEmbeddedBrowserHlsPlan(hlsRequest.resource.tabId, {
+            manualKeyBase64: normalizedHlsManualKey || undefined,
             outputDirectoryPath: saveTargetType === 'local' && localOutputDirectory
               ? localOutputDirectory
               : undefined,
             plan: hlsRequest.plan,
-            suggestedFileName: deriveHlsOutputFileName(hlsRequest.plan.manifestUrl),
+            requestId,
+            suggestedFileName: deriveHlsOutputFileName(effectiveManifestUrl),
             useSystemSaveDialog: false,
           });
       if (result?.cancelled) {
+        setHlsTaskStatus((previous) => ({
+          ...previous,
+          logs: [...previous.logs, '任务已取消'].slice(-12),
+          state: 'idle',
+        }));
         return;
       }
       if (!result?.outputPath) {
@@ -1520,16 +1690,27 @@ const MediaProcessingTool: React.FC<MediaProcessingToolProps> = ({
       }
       await persistMediaOutputBySaveTarget(result.outputPath, 'HLS 下载');
     } catch (error: any) {
+      setHlsTaskStatus((previous) => ({
+        ...previous,
+        error: error?.message || 'HLS 下载失败',
+        logs: [...previous.logs, error?.message || 'HLS 下载失败'].slice(-12),
+        stage: 'error',
+        state: 'error',
+      }));
       Toast.error(error?.message || 'HLS 下载失败');
     } finally {
       setSavingHls(false);
     }
   }, [
+    hlsManualKeyInvalid,
+    hlsSelectedVariantLabel,
+    normalizedHlsManualKey,
     hlsRequest,
     internalDirectory,
     localOutputDirectory,
     persistMediaOutputBySaveTarget,
     saveTargetType,
+    selectedHlsVariantUrl,
   ]);
 
   const handleTranscodeFormatChange = React.useCallback((value: string) => {
@@ -1754,8 +1935,71 @@ const MediaProcessingTool: React.FC<MediaProcessingToolProps> = ({
                     <Tag color="white">{Math.round(hlsRequest.plan.durationSeconds)}s</Tag>
                   </ActionRow>
                   <ActionRow>
+                    <Tag color={hlsAes128KeyCount > 0 ? 'orange' : 'green'}>
+                      {hlsAes128KeyCount > 0 ? `AES-128 key ${hlsAes128KeyCount}` : '无 AES-128 key'}
+                    </Tag>
+                    <Tag color={hlsRequest.plan.maps.length > 0 ? 'blue' : 'grey'}>
+                      {hlsRequest.plan.maps.length > 0 ? '含 init segment / map' : '无 map'}
+                    </Tag>
+                    {hlsNonAesKeyCount > 0 ? (
+                      <Tag color="red">存在 {hlsNonAesKeyCount} 个非 AES-128 key，当前主链未完整覆盖</Tag>
+                    ) : null}
+                  </ActionRow>
+                  {hlsCanSelectVariant ? (
+                    <>
+                      <div className="panel-desc" style={{ marginBottom: 10 }}>
+                        这是一个网络 master playlist。默认保持“自动”让 ffmpeg 自己选；如果你想明确锁到某个清晰度，可以在这里指定变体。
+                      </div>
+                      <ActionRow>
+                        <Select
+                          value={selectedHlsVariantUrl || undefined}
+                          placeholder="自动（沿用原始 manifest）"
+                          onChange={(value) => setSelectedHlsVariantUrl(String(value || ''))}
+                          style={{ minWidth: 320 }}
+                        >
+                          <Select.Option value="">自动（沿用原始 manifest）</Select.Option>
+                          {hlsVariantOptions.map((option) => (
+                            <Select.Option key={option.value} value={option.value}>
+                              {option.label}
+                            </Select.Option>
+                          ))}
+                        </Select>
+                        {selectedHlsVariantUrl ? (
+                          <Tag color="blue">已锁定变体</Tag>
+                        ) : (
+                          <Tag color="grey">自动选清晰度</Tag>
+                        )}
+                      </ActionRow>
+                    </>
+                  ) : null}
+                  <div className="panel-desc" style={{ marginBottom: 10 }}>
+                    如果站点的 AES-128 key 没被自动识别，可以在这里手动粘贴 16 字节 key。
+                    支持 32 位 hex，或 16 字节 base64。填写后会自动切到本地 downloader 主链。
+                    目前 master playlist 还不支持直接带手动 key 落本地主链，需要先收敛到具体媒体 playlist。
+                  </div>
+                  <ActionRow>
+                    <Input
+                      value={hlsManualKeyDraft}
+                      placeholder="可选：输入 16 字节 AES-128 key（hex / base64）"
+                      onChange={(value) => setHlsManualKeyDraft(value)}
+                    />
+                    {hlsManualKeyDraft ? (
+                      <Button onClick={() => setHlsManualKeyDraft('')}>
+                        清空 key
+                      </Button>
+                    ) : null}
+                    {normalizedHlsManualKey ? (
+                      <Tag color="green">已识别自定义 key（{hlsManualKeyInputMode || 'base64'}）</Tag>
+                    ) : hlsManualKeyInvalid ? (
+                      <Tag color="red">key 格式无效</Tag>
+                    ) : null}
+                  </ActionRow>
+                  <ActionRow>
                     <Button loading={savingHls} type="primary" onClick={() => void handleSaveHls()}>
                       下载&保存
+                    </Button>
+                    <Button disabled={savingHls} onClick={() => void handleSaveHls()}>
+                      重新执行
                     </Button>
                     <Button
                       onClick={() => {
@@ -1766,10 +2010,56 @@ const MediaProcessingTool: React.FC<MediaProcessingToolProps> = ({
                     >
                       复制计划
                     </Button>
-                    <Tag color={!/^https?:\/\//i.test(hlsRequest.plan.manifestUrl) ? 'orange' : 'green'}>
-                      {!/^https?:\/\//i.test(hlsRequest.plan.manifestUrl) ? '本地 downloader 主链' : '网络 manifest 主链'}
+                    <Tag color={!/^https?:\/\//i.test(hlsRequest.plan.manifestUrl) || normalizedHlsManualKey ? 'orange' : 'green'}>
+                      {!/^https?:\/\//i.test(selectedHlsVariantUrl || hlsRequest.plan.manifestUrl) || normalizedHlsManualKey ? '本地 downloader 主链' : '网络 manifest 主链'}
                     </Tag>
+                    {selectedHlsVariantUrl ? (
+                      <Tag color="white">
+                        <span title={hlsSelectedVariantLabel || selectedHlsVariantUrl}>
+                          变体：{hlsSelectedVariantLabel || selectedHlsVariantUrl}
+                        </span>
+                      </Tag>
+                    ) : null}
                   </ActionRow>
+                  <ActionRow>
+                    <Tag color={hlsTaskStatus.state === 'success' ? 'green' : hlsTaskStatus.state === 'error' ? 'red' : hlsTaskStatus.state === 'running' ? 'blue' : 'grey'}>
+                      {hlsTaskStatus.state === 'success'
+                        ? '执行成功'
+                        : hlsTaskStatus.state === 'error'
+                          ? '执行失败'
+                          : hlsTaskStatus.state === 'running'
+                            ? '执行中'
+                            : '尚未执行'}
+                    </Tag>
+                    {hlsTaskStatus.stage ? (
+                      <Tag color="white">阶段：{hlsTaskStatus.stage}</Tag>
+                    ) : null}
+                    {hlsTaskStatus.totalFragments > 0 ? (
+                      <Tag color="white">
+                        分片：{Math.min(hlsTaskStatus.completedFragments, hlsTaskStatus.totalFragments)} / {hlsTaskStatus.totalFragments}
+                      </Tag>
+                    ) : null}
+                  </ActionRow>
+                  <MediaResourceList>
+                    {(hlsTaskStatus.logs.length ? hlsTaskStatus.logs : ['等待执行 HLS 任务']).map((line, index) => (
+                      <div className="media-row" key={`${index}-${line}`}>
+                        <div className="media-title" title={line}>{line}</div>
+                        <div className="media-meta">{hlsTaskStatus.mode === 'local-plan' ? 'local' : hlsTaskStatus.mode === 'direct-manifest' ? 'ffmpeg' : 'idle'}</div>
+                        <div className="media-meta">{hlsTaskStatus.stage || '-'}</div>
+                        <div className="media-meta">{index === hlsTaskStatus.logs.length - 1 ? 'latest' : ''}</div>
+                      </div>
+                    ))}
+                  </MediaResourceList>
+                  {hlsTaskStatus.error ? (
+                    <div className="panel-desc" style={{ color: 'var(--semi-color-danger)' }}>
+                      最近错误：{hlsTaskStatus.error}
+                    </div>
+                  ) : null}
+                  {hlsTaskStatus.lastOutputPath ? (
+                    <div className="panel-desc">
+                      最近产物：{hlsTaskStatus.lastOutputPath}
+                    </div>
+                  ) : null}
                 </>
               ) : (
                 <Empty

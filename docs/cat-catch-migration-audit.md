@@ -7,6 +7,7 @@
 
 维护方式补充：
 
+- “如果不熟悉 Cat Catch、媒体格式或 OmniFlow 当前主线，想先快速建立全局视角” 先看 `docs/cat-catch-overview-and-migration-map.md`。
 - “当前已经迁了什么、还缺什么” 看本文档。
 - “某个 Cat Catch 提交该不该迁、迁到哪一层、是否只是浏览器扩展 workaround” 先看 `docs/cat-catch-sync-maintenance-guide.md`。
 
@@ -28,13 +29,13 @@
 | HLS/m3u8 内联识别 | `catch-script/search.js`, `js/m3u8.js` | 部分夺舍 | parser / 测试入口已补，继续补 downloader 能力 |
 | DASH/mpd 内联识别 | `catch-script/search.js`, `js/mpd.js` | 部分夺舍 | 基础 mpd parser / 测试入口已补，继续补轨道选择与下载 |
 | Vimeo playlist.json 转 m3u8 | `catch-script/search.js` | 已夺舍 | 测 Vimeo 页面 |
-| key 候选捕获 | `catch-script/search.js`, `js/content-script.js`, `js/m3u8.js` | 部分夺舍 | 真实 key 验证入口已补，继续补自定义 key |
+| key 候选捕获 | `catch-script/search.js`, `js/content-script.js`, `js/m3u8.js` | 部分夺舍 | 真实 key 验证入口和工具区自定义 key 已补，继续补更完整验证体验 |
 | MSE 缓存捕获 | `catch-script/catch.js` | 已夺舍 | 长视频继续测；1GB 自动保存策略暂不作为默认同步目标 |
 | 自动跳缓冲末尾 | `catch-script/catch.js` | 已夺舍 | 真实播放页验证 |
 | 去额外媒体头 | `catch-script/catch.js` | 已夺舍 | 多格式验证 |
 | 本地 ffmpeg 合并 MSE 音视频 | `catch-script/catch.js`, `js/m3u8.js` | 部分夺舍 | 从 B 站 m4s 扩到 HLS/DASH |
 | m3u8 parser 页面 | `m3u8.html`, `js/m3u8.js` | 部分夺舍 | 先做功能/demo，不急着定正式 UI |
-| m3u8 downloader | `js/m3u8.downloader.js` | 部分夺舍 | 已补下载任务模型、Electron 下载队列内核，并把网络/本地 manifest 两条 HLS 主线接进工具区；继续补 key、日志与进度 UI |
+| m3u8 downloader | `js/m3u8.downloader.js` | 部分夺舍 | 已补下载任务模型、Electron 下载队列内核，并把网络/本地 manifest 两条 HLS 主线接进工具区；工具区已补基础日志/进度和网络 master playlist 第一版 variant 选择，继续补更细的重试与执行反馈 |
 | mpd parser 页面 | `mpd.html`, `js/mpd.js` | 未夺舍 | 迁轨道解析/选择，或引入等价 parser |
 | N_m3u8DL 协议调用 | `options.html`, `js/popup.js`, `js/m3u8.js` | 未夺舍 | 评估是否作为外部工具导出 |
 | aria2 RPC | `js/function.js`, `js/popup.js`, `js/preview.js` | 未夺舍 | 可作为外部下载器适配 |
@@ -68,6 +69,8 @@
 - HLS 执行分流：
   - 网络 manifest：继续走 `ffmpeg` 直拉。
   - blob / 页内内存 manifest：已接本地 downloader，执行链为 `plan -> local workdir -> rewritten local-playlist.m3u8 -> ffmpeg`。
+- HLS 自定义 key：工具区已支持手动输入 16 字节 AES-128 key（hex / base64）；填写后会切到本地 downloader 主链，用本地 key 文件重写 playlist。
+- HLS variant 选择：工具区已支持网络 master playlist 的第一版变体选择，默认保持“自动”，也可锁到具体 variant URL 后再交给 ffmpeg。
 - DASH inline mpd：已能生成 manifest resource。
 - MPD 引用：已解析 `BaseURL`、`Location`、`media`、`initialization`、`sourceURL`，并跳过 `$Number$` 这类模板 URL。
 - MPD BaseURL：已让 `BaseURL` 参与后续相对分片 URL 解析。
@@ -97,8 +100,8 @@ OmniFlow 当前有 manifest 捕获、key 候选和 ffmpeg 合并基础，但还�
 
 - m3u8 parser 的层级 playlist 展开：已补纯函数解析与资源卡测试入口，能输出 variants / renditions / keys / maps / segments；下载计划 JSON 已开始对齐 Cat Catch downloader 的 fragment 任务模型。
 - Electron 端下载队列内核：已补并发、范围、重试、顺序推送与停止能力，并已接入 HLS 本地 manifest 执行主链。
-- 多 variant / 多清晰度选择：已能解析 variant 元数据，正式选择 UI 未定。
-- `EXT-X-KEY` 下载、验证、替换、自定义 key：已能解析 key 元数据并做真实 key 验证，自定义 key 未完成。
+- 多 variant / 多清晰度选择：已能解析 variant 元数据，工具区已补网络 master playlist 的第一版 variant 选择；音轨/字幕组和更细粒度选择仍未完成。
+- `EXT-X-KEY` 下载、验证、替换、自定义 key：已能解析 key 元数据、做真实 key 验证，并在工具区支持手动输入自定义 key；当前 `master playlist + 手动 key` 仍会显式拦住，避免误走错误主链；更完整的验证和选择体验仍未完成。
 - `EXT-X-MAP` 下载与解密处理：已能解析 map 与 byterange 元数据，并在本地 manifest 重写时生成独立本地文件引用；更完整的解密与验证仍未完成。
 - 下载范围：序号范围、时间范围 `HH:MM:SS`。
 - 下载队列、并发线程、失败重试、重下失败项。
@@ -109,9 +112,9 @@ OmniFlow 当前有 manifest 捕获、key 候选和 ffmpeg 合并基础，但还�
 
 当前下一步重点：
 
-1. 补 key / 日志 / 进度 UI。
+1. 补更完整的 key 验证与错误反馈 UI。
 2. 完成工具区内的失败重试与更细的执行反馈。
-3. 再做 variant / 轨道选择，不要先横向扩散到更多 UI。
+3. 继续把 variant 选择扩到更完整的轨道/清晰度场景，不要先横向扩散到更多 UI。
 
 ### 2. mpd parser
 
@@ -142,7 +145,6 @@ OmniFlow 当前已收集 key 候选，并补了资源卡内的 HLS key 验证入
 
 还缺：
 
-- 自定义 key 输入/选择。
 - key 格式展示：hex / base64。
 - 更完整的错误分类和多片段验证。
 

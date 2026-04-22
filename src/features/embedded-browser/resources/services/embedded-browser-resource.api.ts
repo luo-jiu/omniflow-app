@@ -21,6 +21,26 @@ export async function listEmbeddedBrowserCapturedResources(tabId: string) {
   return window.electronEmbeddedBrowser.listCapturedResources(tabId) as Promise<EmbeddedBrowserResourceCaptureSnapshot>;
 }
 
+export function subscribeEmbeddedBrowserHlsTask(
+  listener: (payload: {
+    completedFragments?: number;
+    error?: string;
+    manifestUrl: string;
+    message: string;
+    mode: 'direct-manifest' | 'local-plan';
+    outputPath?: string;
+    requestId?: string;
+    stage: 'preparing' | 'downloading-fragments' | 'rewriting-playlist' | 'ffmpeg' | 'completed' | 'error';
+    status: 'running' | 'success' | 'error';
+    tabId: string;
+    totalFragments?: number;
+    usingManualKey?: boolean;
+  }) => void,
+) {
+  assertDesktopSupport();
+  return window.electronEmbeddedBrowser.onHlsTask(listener);
+}
+
 export async function startEmbeddedBrowserResourceCapture(tabId: string) {
   assertDesktopSupport();
   return window.electronEmbeddedBrowser.startResourceCapture(tabId) as Promise<EmbeddedBrowserResourceCaptureSnapshot>;
@@ -174,6 +194,7 @@ export async function downloadEmbeddedBrowserHlsManifest(
     headers?: Record<string, string>;
     manifestUrl?: string;
     outputDirectoryPath?: string;
+    requestId?: string;
     suggestedFileName?: string;
     useSystemSaveDialog?: boolean;
   },
@@ -192,8 +213,10 @@ export async function downloadEmbeddedBrowserHlsPlan(
   tabId: string,
   payload: {
     ffmpegPath?: string;
+    manualKeyBase64?: string;
     outputDirectoryPath?: string;
     plan: import('../model/embedded-browser-hls-manifest').EmbeddedBrowserHlsDownloadPlan;
+    requestId?: string;
     suggestedFileName?: string;
     useSystemSaveDialog?: boolean;
   },
