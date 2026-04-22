@@ -5,6 +5,11 @@
 
 目标：先把 Cat Catch 的功能能力尽量完整迁过来，再统一调整正式 UI。正式资源面板 UI 暂不定型；如需验证，优先做薄 demo / debug 入口。
 
+维护方式补充：
+
+- “当前已经迁了什么、还缺什么” 看本文档。
+- “某个 Cat Catch 提交该不该迁、迁到哪一层、是否只是浏览器扩展 workaround” 先看 `docs/cat-catch-sync-maintenance-guide.md`。
+
 状态说明：
 
 - `已夺舍`：主链路已经在 OmniFlow 内可用，后续主要靠真实站点压测补边角。
@@ -24,7 +29,7 @@
 | DASH/mpd 内联识别 | `catch-script/search.js`, `js/mpd.js` | 部分夺舍 | 基础 mpd parser / 测试入口已补，继续补轨道选择与下载 |
 | Vimeo playlist.json 转 m3u8 | `catch-script/search.js` | 已夺舍 | 测 Vimeo 页面 |
 | key 候选捕获 | `catch-script/search.js`, `js/content-script.js`, `js/m3u8.js` | 部分夺舍 | 真实 key 验证入口已补，继续补自定义 key |
-| MSE 缓存捕获 | `catch-script/catch.js` | 已夺舍 | 测长视频、直播、异常重试 |
+| MSE 缓存捕获 | `catch-script/catch.js` | 已夺舍 | 长视频继续测；1GB 自动保存策略暂不作为默认同步目标 |
 | 自动跳缓冲末尾 | `catch-script/catch.js` | 已夺舍 | 真实播放页验证 |
 | 去额外媒体头 | `catch-script/catch.js` | 已夺舍 | 多格式验证 |
 | 本地 ffmpeg 合并 MSE 音视频 | `catch-script/catch.js`, `js/m3u8.js` | 部分夺舍 | 从 B 站 m4s 扩到 HLS/DASH |
@@ -75,6 +80,7 @@
 - 已捕获 `MediaSource.addSourceBuffer` / `SourceBuffer.appendBuffer`。
 - 已识别 audio/video stream。
 - 已支持 MSE 流导出、清缓存、自动跳缓冲末尾、捕获完成后自动下载、去额外媒体头。
+- Cat Catch 的“每 1GB 自动保存一次”当前只记录为可选保险策略，不作为 OmniFlow 默认主链能力。
 - 已打通本地 ffmpeg 合并音视频流，B 站 m4s 链路已跑通。
 
 ## 部分夺舍，优先补齐

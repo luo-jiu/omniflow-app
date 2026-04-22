@@ -28,6 +28,7 @@
 - 前端架构基线：`docs/frontend-architecture-baseline.md`
 - 显示与可读性基线：`docs/ui-display-readability-baseline.md`
 - Embedded Browser 专题：`docs/embedded-browser-architecture.md`
+- Cat Catch 同步维护指南：`docs/cat-catch-sync-maintenance-guide.md`
 - Overlay 窗口专题与迁移规范：`docs/overlay-window-architecture.md`
 - Library Detail 工作区专题：`docs/library-detail-workspace.md`
 - 文件树与预览边界：`docs/file-explorer-file-viewer-boundary.md`
