@@ -1,12 +1,27 @@
 import type { SelectedTreeNode } from '@/features/file-explorer';
+import type { EmbeddedBrowserHlsDownloadPlan } from '@/features/embedded-browser/resources/model/embedded-browser-hls-manifest';
 import type { EmbeddedBrowserCapturedResource } from '@/features/embedded-browser/resources/types';
 
 export type ToolWorkspaceToolId = 'subtitle-translation' | 'media-processing';
 
-export interface ToolWorkspaceMediaRequest {
+export type ToolWorkspaceMediaMode = 'resources' | 'hls-download';
+
+export interface ToolWorkspaceMediaResourceRequest {
   id: number;
+  kind: 'resources';
   resources: EmbeddedBrowserCapturedResource[];
 }
+
+export interface ToolWorkspaceMediaHlsRequest {
+  id: number;
+  kind: 'hls-download';
+  plan: EmbeddedBrowserHlsDownloadPlan;
+  resource: EmbeddedBrowserCapturedResource;
+}
+
+export type ToolWorkspaceMediaRequest =
+  | ToolWorkspaceMediaResourceRequest
+  | ToolWorkspaceMediaHlsRequest;
 
 export type SubtitleFileFormat = 'srt' | 'vtt';
 

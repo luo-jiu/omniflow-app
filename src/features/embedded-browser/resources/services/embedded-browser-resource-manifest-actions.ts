@@ -4,6 +4,7 @@ import {
 import {
   createEmbeddedBrowserHlsDownloadPlan,
   parseEmbeddedBrowserHlsManifest,
+  type EmbeddedBrowserHlsDownloadPlan,
   type EmbeddedBrowserHlsManifest,
 } from '../model/embedded-browser-hls-manifest';
 import {
@@ -126,7 +127,12 @@ export async function analyzeHlsResource(resource: EmbeddedBrowserCapturedResour
   await navigator.clipboard.writeText(planText);
   return {
     manifest,
+    plan,
     planText,
+  } satisfies {
+    manifest: EmbeddedBrowserHlsManifest
+    plan: EmbeddedBrowserHlsDownloadPlan
+    planText: string
   };
 }
 

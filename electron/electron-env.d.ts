@@ -373,13 +373,24 @@ interface Window {
       ffmpegPath?: string;
       headers?: Record<string, string>;
       manifestUrl?: string;
+      outputDirectoryPath?: string;
       suggestedFileName?: string;
+      useSystemSaveDialog?: boolean;
+    }) => Promise<EmbeddedBrowserCapturedResourceMergeResponse>;
+    downloadHlsPlan: (tabId: string, payload: {
+      ffmpegPath?: string;
+      outputDirectoryPath?: string;
+      plan: import('@/features/embedded-browser/resources/model/embedded-browser-hls-manifest').EmbeddedBrowserHlsDownloadPlan;
+      suggestedFileName?: string;
+      useSystemSaveDialog?: boolean;
     }) => Promise<EmbeddedBrowserCapturedResourceMergeResponse>;
     downloadMpdManifest: (tabId: string, payload: {
       ffmpegPath?: string;
       headers?: Record<string, string>;
       manifestUrl?: string;
+      outputDirectoryPath?: string;
       suggestedFileName?: string;
+      useSystemSaveDialog?: boolean;
     }) => Promise<EmbeddedBrowserCapturedResourceMergeResponse>;
     getCatchToolkitState: (tabId: string) => Promise<EmbeddedBrowserCatchToolkitState | null>;
     updateCatchToolkitState: (

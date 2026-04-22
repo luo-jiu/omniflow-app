@@ -173,11 +173,33 @@ export async function downloadEmbeddedBrowserHlsManifest(
     ffmpegPath?: string;
     headers?: Record<string, string>;
     manifestUrl?: string;
+    outputDirectoryPath?: string;
     suggestedFileName?: string;
+    useSystemSaveDialog?: boolean;
   },
 ) {
   assertDesktopSupport();
   return window.electronEmbeddedBrowser.downloadHlsManifest(tabId, payload) as Promise<{
+    cancelled?: boolean;
+    error?: string;
+    ffmpegPath?: string;
+    ok: boolean;
+    outputPath?: string;
+  }>;
+}
+
+export async function downloadEmbeddedBrowserHlsPlan(
+  tabId: string,
+  payload: {
+    ffmpegPath?: string;
+    outputDirectoryPath?: string;
+    plan: import('../model/embedded-browser-hls-manifest').EmbeddedBrowserHlsDownloadPlan;
+    suggestedFileName?: string;
+    useSystemSaveDialog?: boolean;
+  },
+) {
+  assertDesktopSupport();
+  return window.electronEmbeddedBrowser.downloadHlsPlan(tabId, payload) as Promise<{
     cancelled?: boolean;
     error?: string;
     ffmpegPath?: string;
@@ -192,7 +214,9 @@ export async function downloadEmbeddedBrowserMpdManifest(
     ffmpegPath?: string;
     headers?: Record<string, string>;
     manifestUrl?: string;
+    outputDirectoryPath?: string;
     suggestedFileName?: string;
+    useSystemSaveDialog?: boolean;
   },
 ) {
   assertDesktopSupport();

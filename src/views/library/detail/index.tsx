@@ -40,6 +40,7 @@ import { subscribeCredentialAutoFilled, subscribeCredentialCaptured } from "@/fe
 import EmbeddedBrowserDownloadImportModal from "@/features/embedded-browser/downloads/components/EmbeddedBrowserDownloadImportModal";
 import { useEmbeddedBrowserDownloadImport } from "@/features/embedded-browser/downloads/hooks/useEmbeddedBrowserDownloadImport";
 import EmbeddedBrowserResourcePanel from "@/features/embedded-browser/resources/components/EmbeddedBrowserResourcePanel";
+import type { EmbeddedBrowserHlsDownloadPlan } from "@/features/embedded-browser/resources/model/embedded-browser-hls-manifest";
 import type { EmbeddedBrowserCapturedResource } from "@/features/embedded-browser/resources/types";
 import type { ToolWorkspaceMediaRequest } from "@/features/tool-workspace/types";
 import {
@@ -2738,7 +2739,23 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
     }
     setMediaProcessingRequest({
       id: Date.now(),
+      kind: 'resources',
       resources,
+    });
+    setBrowserModeOpen(false);
+    setWorkspaceDisplayMode('tools');
+    void window.electronEmbeddedBrowser.deactivate();
+  }, []);
+
+  const openHlsDownloadWorkspace = React.useCallback((
+    resource: EmbeddedBrowserCapturedResource,
+    plan: EmbeddedBrowserHlsDownloadPlan,
+  ) => {
+    setMediaProcessingRequest({
+      id: Date.now(),
+      kind: 'hls-download',
+      plan,
+      resource,
     });
     setBrowserModeOpen(false);
     setWorkspaceDisplayMode('tools');
@@ -4124,6 +4141,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
                   <EmbeddedBrowserResourcePanel
                     activeTabId={activeBrowserTabId}
                     currentPageUrl={activeBrowserTab?.url ?? ''}
+                    onOpenHlsDownloadWorkspace={openHlsDownloadWorkspace}
                     onOpenMediaProcessing={openMediaProcessingWorkspace}
                   />
                 </BrowserWorkspaceAside>

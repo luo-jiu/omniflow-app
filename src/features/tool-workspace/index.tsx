@@ -26,6 +26,13 @@ import {
   transcodeCapturedResource,
 } from '@/features/embedded-browser/resources/services/embedded-browser-resource-panel-actions';
 import {
+  downloadEmbeddedBrowserHlsManifest,
+  downloadEmbeddedBrowserHlsPlan,
+} from '@/features/embedded-browser/resources/services/embedded-browser-resource.api';
+import {
+  withResourceRefererHeader,
+} from '@/features/embedded-browser/resources/services/embedded-browser-resource-request';
+import {
   uploadLocalPathAndCreateNode,
 } from '@/features/file-explorer/services/file.api';
 import {
@@ -64,6 +71,8 @@ import type {
   SubtitleTranslationConfig,
   SubtitleTranslationDraft,
   SubtitleTranslationRow,
+  ToolWorkspaceMediaHlsRequest,
+  ToolWorkspaceMediaMode,
   ToolWorkspaceMediaRequest,
   ToolWorkspaceState,
   ToolWorkspaceToolId,
@@ -412,6 +421,37 @@ const ActionRow = styled.div`
     display: inline-flex;
     align-items: center;
     gap: 6px;
+  }
+`;
+
+const ToolModeSwitch = styled.div`
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+
+  .mode-btn {
+    min-height: 42px;
+    padding: 0 16px;
+    border-radius: 10px;
+    border: 1px solid var(--app-border);
+    background: color-mix(in srgb, var(--app-bg) 88%, var(--app-bg-elevated));
+    color: var(--app-text-muted);
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: border-color 160ms ease, background-color 160ms ease, color 160ms ease;
+  }
+
+  .mode-btn.is-active {
+    border-color: var(--semi-color-primary);
+    background: color-mix(in srgb, var(--semi-color-primary-light-default) 82%, var(--app-bg));
+    color: var(--app-text);
+  }
+
+  .mode-btn:disabled {
+    cursor: default;
+    opacity: 0.48;
   }
 `;
 
@@ -1227,7 +1267,10 @@ function getLibrarySaveTarget(payload: {
 /* ---------- ToolWorkspace ---------- */
 
 type MediaProcessingToolProps = {
+  activeMode: ToolWorkspaceMediaMode;
+  hlsRequest: ToolWorkspaceMediaHlsRequest | null;
   libraryId: number;
+  onModeChange: (mode: ToolWorkspaceMediaMode) => void;
   resources: EmbeddedBrowserCapturedResource[];
   onRefreshDirectory?: (directoryId: number) => Promise<void> | void;
 };
@@ -1242,13 +1285,32 @@ function normalizeMediaTranscodeFormat(input: string) {
   return normalized;
 }
 
+function deriveHlsOutputFileName(url: string) {
+  try {
+    const fileName = decodeURIComponent(new URL(url).pathname.split('/').filter(Boolean).pop() || '')
+      .replace(/\.(m3u8|m3u)$/i, '')
+      .replace(/[\\/:*?"<>|]+/g, '_')
+      .trim();
+    if (fileName) {
+      return `${fileName}.mp4`;
+    }
+  } catch {
+    // Fall through to a stable fallback.
+  }
+  return 'hls-media.mp4';
+}
+
 const MediaProcessingTool: React.FC<MediaProcessingToolProps> = ({
+  activeMode,
+  hlsRequest,
   libraryId,
+  onModeChange,
   onRefreshDirectory,
   resources,
 }) => {
   const [merging, setMerging] = React.useState(false);
   const [transcoding, setTranscoding] = React.useState(false);
+  const [savingHls, setSavingHls] = React.useState(false);
   const [transcodeFormatDraft, setTranscodeFormatDraft] = React.useState('m4a');
   const [saveTargetType, setSaveTargetType] = React.useState<MediaSaveTargetType>('local');
   const [localOutputDirectory, setLocalOutputDirectory] = React.useState('');
@@ -1293,7 +1355,7 @@ const MediaProcessingTool: React.FC<MediaProcessingToolProps> = ({
 
   const persistMediaOutputBySaveTarget = React.useCallback(async (
     outputPath: string,
-    actionName: '合并' | '转格式',
+    actionName: '合并' | '转格式' | 'HLS 下载',
   ) => {
     if (saveTargetType === 'local') {
       Toast.success(`已完成${actionName}，文件已保存到本地：${localOutputPathHint}`);
@@ -1420,6 +1482,56 @@ const MediaProcessingTool: React.FC<MediaProcessingToolProps> = ({
     transcodeFormatDraft,
   ]);
 
+  const handleSaveHls = React.useCallback(async () => {
+    if (!hlsRequest) {
+      Toast.warning('先从资源面板解析 HLS，再送到工具页');
+      return;
+    }
+    if (saveTargetType === 'internal' && !internalDirectory) {
+      setInternalPathRequired(true);
+      Toast.warning('内部保存路径必须选择');
+      return;
+    }
+    setSavingHls(true);
+    try {
+      const result = /^https?:\/\//i.test(hlsRequest.plan.manifestUrl)
+        ? await downloadEmbeddedBrowserHlsManifest(hlsRequest.resource.tabId, {
+            headers: withResourceRefererHeader(hlsRequest.resource),
+            manifestUrl: hlsRequest.plan.manifestUrl,
+            outputDirectoryPath: saveTargetType === 'local' && localOutputDirectory
+              ? localOutputDirectory
+              : undefined,
+            suggestedFileName: deriveHlsOutputFileName(hlsRequest.plan.manifestUrl),
+            useSystemSaveDialog: false,
+          })
+        : await downloadEmbeddedBrowserHlsPlan(hlsRequest.resource.tabId, {
+            outputDirectoryPath: saveTargetType === 'local' && localOutputDirectory
+              ? localOutputDirectory
+              : undefined,
+            plan: hlsRequest.plan,
+            suggestedFileName: deriveHlsOutputFileName(hlsRequest.plan.manifestUrl),
+            useSystemSaveDialog: false,
+          });
+      if (result?.cancelled) {
+        return;
+      }
+      if (!result?.outputPath) {
+        throw new Error('HLS 下载已完成，但未返回输出路径');
+      }
+      await persistMediaOutputBySaveTarget(result.outputPath, 'HLS 下载');
+    } catch (error: any) {
+      Toast.error(error?.message || 'HLS 下载失败');
+    } finally {
+      setSavingHls(false);
+    }
+  }, [
+    hlsRequest,
+    internalDirectory,
+    localOutputDirectory,
+    persistMediaOutputBySaveTarget,
+    saveTargetType,
+  ]);
+
   const handleTranscodeFormatChange = React.useCallback((value: string) => {
     setTranscodeFormatDraft(String(value || '').trimStart().replace(/^\.+/, '').slice(0, 12));
   }, []);
@@ -1450,24 +1562,53 @@ const MediaProcessingTool: React.FC<MediaProcessingToolProps> = ({
         <div className="header-copy">
           <div className="header-title">媒体处理</div>
           <div className="header-desc">
-            从浏览器资源面板接收已选资源，集中做保存、音视频合并和后续转码处理。当前先复用已有本地
-            ffmpeg 合并链路，避免把资源捕捉面板塞成工具箱。
+            侧边资源面板只负责发现和发起，真正的下载、合并、转格式这类重处理都收在这里。当前先接两条主线：
+            直接资源处理，以及 HLS 计划处理。
           </div>
         </div>
         <div className="header-tags">
           <Tag color="blue">工作区模式</Tag>
           <Tag color="green">本地 ffmpeg</Tag>
-          <Tag color="cyan">{resources.length} 条资源</Tag>
+          {activeMode === 'resources' ? (
+            <Tag color="cyan">{resources.length} 条资源</Tag>
+          ) : (
+            <Tag color="cyan">{hlsRequest?.plan.fragmentCount || 0} 个分片</Tag>
+          )}
         </div>
       </WorkspaceHeader>
 
       <WorkspaceBody>
         <Panel>
-          <div className="panel-title">处理动作</div>
+          <div className="panel-title">处理模式</div>
           <div className="panel-desc">
-            先切换保存目标：本地或内部。保存位置点击路径即可更改；
-            内部保存未选目录时会提示“必须选择”，输出会自动上传到所选内部目录。
-            类型输入仅支持 1-12 位字母或数字（例如 mp3、m4a、mp4）；ffmpeg 不支持时会直接报错。
+            同一个媒体处理壳里分两条路：直接资源保留现在的合并与转格式；HLS 计划承接 manifest 解析后的下载任务，
+            后面 MPD 也会沿这条路继续长。
+          </div>
+          <ToolModeSwitch>
+            <button
+              type="button"
+              className={`mode-btn ${activeMode === 'resources' ? 'is-active' : ''}`}
+              disabled={resources.length === 0}
+              onClick={() => onModeChange('resources')}
+            >
+              直接资源
+            </button>
+            <button
+              type="button"
+              className={`mode-btn ${activeMode === 'hls-download' ? 'is-active' : ''}`}
+              disabled={!hlsRequest}
+              onClick={() => onModeChange('hls-download')}
+            >
+              HLS 计划
+            </button>
+          </ToolModeSwitch>
+        </Panel>
+
+        <Panel>
+          <div className="panel-title">保存目标</div>
+          <div className="panel-desc">
+            先切换保存目标：本地或内部。保存位置点击路径即可更改；内部保存未选目录时会提示“必须选择”，
+            输出会自动上传到所选内部目录。
           </div>
           <MediaActionComposer>
             <div className="save-lane">
@@ -1510,6 +1651,18 @@ const MediaProcessingTool: React.FC<MediaProcessingToolProps> = ({
                 </div>
               </div>
             </div>
+          </MediaActionComposer>
+        </Panel>
+
+        {activeMode === 'resources' ? (
+          <>
+        <Panel>
+          <div className="panel-title">处理动作</div>
+          <div className="panel-desc">
+            这里先承接已经抓到的单个或成对媒体资源。类型输入仅支持 1-12 位字母或数字
+            （例如 mp3、m4a、mp4）；ffmpeg 不支持时会直接报错。
+          </div>
+          <MediaActionComposer>
             <div className="operations-lane">
               <div className="action-cluster merge-cluster">
                 <Button loading={merging} disabled={!mergePair} type="primary" onClick={() => void handleMerge()}>
@@ -1576,6 +1729,57 @@ const MediaProcessingTool: React.FC<MediaProcessingToolProps> = ({
             </MediaResourceList>
           )}
         </Panel>
+          </>
+        ) : (
+          <>
+            <Panel>
+              <div className="panel-title">HLS 计划摘要</div>
+              <div className="panel-desc">
+                这里显示从资源面板解析后送来的 HLS 下载计划。网络 manifest 继续走 ffmpeg 主链；
+                blob 或页内内存 manifest 现在会走本地 downloader + 本地 playlist + ffmpeg。
+              </div>
+              {hlsRequest ? (
+                <>
+                  <ActionRow>
+                    <Tag color="light-blue">{hlsRequest.plan.isMaster ? 'Master playlist' : 'Media playlist'}</Tag>
+                    <Tag color={hlsRequest.plan.isLive ? 'orange' : 'green'}>{hlsRequest.plan.isLive ? '直播' : '点播'}</Tag>
+                    <Tag color="cyan">{hlsRequest.plan.fragmentCount} 个分片</Tag>
+                    <Tag color="grey">keys {hlsRequest.plan.keys.length}</Tag>
+                    <Tag color="grey">maps {hlsRequest.plan.maps.length}</Tag>
+                    <Tag color="grey">parts {hlsRequest.plan.partCount}</Tag>
+                    <Tag color="grey">建议线程 {hlsRequest.plan.suggestedThreadCount}</Tag>
+                  </ActionRow>
+                  <ActionRow>
+                    <Tag color="white">来源：{formatResourceTitle(hlsRequest.resource)}</Tag>
+                    <Tag color="white">{Math.round(hlsRequest.plan.durationSeconds)}s</Tag>
+                  </ActionRow>
+                  <ActionRow>
+                    <Button loading={savingHls} type="primary" onClick={() => void handleSaveHls()}>
+                      下载&保存
+                    </Button>
+                    <Button
+                      onClick={() => {
+                        void navigator.clipboard.writeText(JSON.stringify(hlsRequest.plan, null, 2)).then(() => {
+                          Toast.success('HLS 计划 JSON 已复制');
+                        });
+                      }}
+                    >
+                      复制计划
+                    </Button>
+                    <Tag color={!/^https?:\/\//i.test(hlsRequest.plan.manifestUrl) ? 'orange' : 'green'}>
+                      {!/^https?:\/\//i.test(hlsRequest.plan.manifestUrl) ? '本地 downloader 主链' : '网络 manifest 主链'}
+                    </Tag>
+                  </ActionRow>
+                </>
+              ) : (
+                <Empty
+                  title="还没有 HLS 计划"
+                  description="先回到资源面板解析 HLS，然后点击“送到工具页”。"
+                />
+              )}
+            </Panel>
+          </>
+        )}
       </WorkspaceBody>
 
       <LibraryNodePickerModal
@@ -1614,6 +1818,8 @@ const ToolWorkspace: React.FC<ToolWorkspaceProps> = ({
     loadToolWorkspaceState(libraryId)
   ));
   const [mediaProcessingResources, setMediaProcessingResources] = React.useState<EmbeddedBrowserCapturedResource[]>([]);
+  const [mediaProcessingHlsRequest, setMediaProcessingHlsRequest] = React.useState<ToolWorkspaceMediaHlsRequest | null>(null);
+  const [mediaProcessingMode, setMediaProcessingMode] = React.useState<ToolWorkspaceMediaMode>('resources');
   const [config, setConfig] = React.useState<SubtitleTranslationConfig>(() => loadSubtitleTranslationPreferences());
   const [availableModels, setAvailableModels] = React.useState<string[]>([]);
   const [loadingModels, setLoadingModels] = React.useState(false);
@@ -1661,7 +1867,13 @@ const ToolWorkspace: React.FC<ToolWorkspaceProps> = ({
     if (!mediaProcessingRequest) {
       return;
     }
-    setMediaProcessingResources(mediaProcessingRequest.resources);
+    if (mediaProcessingRequest.kind === 'resources') {
+      setMediaProcessingResources(mediaProcessingRequest.resources);
+      setMediaProcessingMode('resources');
+    } else if (mediaProcessingRequest.kind === 'hls-download') {
+      setMediaProcessingHlsRequest(mediaProcessingRequest);
+      setMediaProcessingMode('hls-download');
+    }
     setWorkspaceState((current) => ({
       ...current,
       activeToolId: 'media-processing',
@@ -2011,7 +2223,10 @@ const ToolWorkspace: React.FC<ToolWorkspaceProps> = ({
       <WorkspaceMain>
         {activeToolId === 'media-processing' ? (
           <MediaProcessingTool
+            activeMode={mediaProcessingMode}
+            hlsRequest={mediaProcessingHlsRequest}
             libraryId={libraryId}
+            onModeChange={setMediaProcessingMode}
             onRefreshDirectory={onRefreshDirectory}
             resources={mediaProcessingResources}
           />

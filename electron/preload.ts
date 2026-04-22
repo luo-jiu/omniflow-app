@@ -354,13 +354,24 @@ contextBridge.exposeInMainWorld('electronEmbeddedBrowser', {
     ffmpegPath?: string;
     headers?: Record<string, string>;
     manifestUrl?: string;
+    outputDirectoryPath?: string;
     suggestedFileName?: string;
+    useSystemSaveDialog?: boolean;
   }) => ipcRenderer.invoke('embedded-browser:resource:download-hls', tabId, payload),
+  downloadHlsPlan: (tabId: string, payload: {
+    ffmpegPath?: string;
+    outputDirectoryPath?: string;
+    plan: import('@/features/embedded-browser/resources/model/embedded-browser-hls-manifest').EmbeddedBrowserHlsDownloadPlan;
+    suggestedFileName?: string;
+    useSystemSaveDialog?: boolean;
+  }) => ipcRenderer.invoke('embedded-browser:resource:download-hls-plan', tabId, payload),
   downloadMpdManifest: (tabId: string, payload: {
     ffmpegPath?: string;
     headers?: Record<string, string>;
     manifestUrl?: string;
+    outputDirectoryPath?: string;
     suggestedFileName?: string;
+    useSystemSaveDialog?: boolean;
   }) => ipcRenderer.invoke('embedded-browser:resource:download-mpd', tabId, payload),
   reload: (tabId: string) => ipcRenderer.invoke('embedded-browser:reload', tabId),
   startDeepResourceCapture: (tabId: string) => ipcRenderer.invoke('embedded-browser:resource:start-deep-capture', tabId),

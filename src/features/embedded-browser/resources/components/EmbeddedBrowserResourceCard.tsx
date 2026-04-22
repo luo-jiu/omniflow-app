@@ -1,6 +1,7 @@
 import { Toast } from '@douyinfe/semi-ui';
 import React from 'react';
 import EmbeddedBrowserResourceManifestTools from './EmbeddedBrowserResourceManifestTools';
+import type { EmbeddedBrowserHlsDownloadPlan } from '../model/embedded-browser-hls-manifest';
 import {
   isMseCapturedResource,
   isPageContextManagedResource,
@@ -22,6 +23,10 @@ import type { EmbeddedBrowserCapturedResource } from '../types';
 
 type EmbeddedBrowserResourceCardProps = {
   expanded: boolean
+  onOpenHlsDownloadWorkspace?: (
+    resource: EmbeddedBrowserCapturedResource,
+    plan: EmbeddedBrowserHlsDownloadPlan,
+  ) => void
   onToggleDetails: (resource: EmbeddedBrowserCapturedResource, expanded: boolean) => void
   onToggleSelection: (resource: EmbeddedBrowserCapturedResource) => void
   resource: EmbeddedBrowserCapturedResource
@@ -31,6 +36,7 @@ type EmbeddedBrowserResourceCardProps = {
 
 const EmbeddedBrowserResourceCard: React.FC<EmbeddedBrowserResourceCardProps> = ({
   expanded,
+  onOpenHlsDownloadWorkspace,
   onToggleDetails,
   onToggleSelection,
   resource,
@@ -200,6 +206,7 @@ const EmbeddedBrowserResourceCard: React.FC<EmbeddedBrowserResourceCardProps> = 
         )}
       </div>
       <EmbeddedBrowserResourceManifestTools
+        onOpenHlsDownloadWorkspace={onOpenHlsDownloadWorkspace}
         resource={resource}
         resources={resources}
       />

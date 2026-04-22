@@ -6,6 +6,7 @@ import type {
   EmbeddedBrowserCapturedResourceTranscodePayload,
   EmbeddedBrowserFaviconResolvePayload,
   EmbeddedBrowserHlsDownloadPayload,
+  EmbeddedBrowserHlsPlanDownloadPayload,
   EmbeddedBrowserMpdDownloadPayload,
 } from './embeddedBrowserMainTypes'
 import type {
@@ -32,6 +33,10 @@ type EmbeddedBrowserMainIpcHandlers = {
   downloadHlsManifest: (
     tabId: string,
     payload: EmbeddedBrowserHlsDownloadPayload,
+  ) => Promise<unknown>
+  downloadHlsPlan: (
+    tabId: string,
+    payload: EmbeddedBrowserHlsPlanDownloadPayload,
   ) => Promise<unknown>
   downloadMpdManifest: (
     tabId: string,
@@ -182,6 +187,12 @@ export function registerEmbeddedBrowserMainIpcHandlers(handlers: EmbeddedBrowser
     'embedded-browser:resource:download-hls',
     async (_event, tabId: string, payload: EmbeddedBrowserHlsDownloadPayload) => (
       handlers.downloadHlsManifest(tabId, payload)
+    ),
+  )
+  ipcMain.handle(
+    'embedded-browser:resource:download-hls-plan',
+    async (_event, tabId: string, payload: EmbeddedBrowserHlsPlanDownloadPayload) => (
+      handlers.downloadHlsPlan(tabId, payload)
     ),
   )
   ipcMain.handle(

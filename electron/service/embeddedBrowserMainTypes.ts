@@ -1,4 +1,5 @@
 import type { BrowserWindow } from 'electron'
+import type { EmbeddedBrowserHlsDownloadPlan } from '@/features/embedded-browser/resources/model/embedded-browser-hls-manifest'
 
 export type EmbeddedBrowserMainControllerOptions = {
   debugEnabled: boolean
@@ -94,7 +95,9 @@ export type EmbeddedBrowserHlsDownloadPayload = {
   ffmpegPath?: string
   headers?: Record<string, string>
   manifestUrl?: string
+  outputDirectoryPath?: string
   suggestedFileName?: string
+  useSystemSaveDialog?: boolean
 }
 
 export type EmbeddedBrowserHlsDownloadResponse = {
@@ -104,6 +107,16 @@ export type EmbeddedBrowserHlsDownloadResponse = {
   ok: boolean
   outputPath?: string
 }
+
+export type EmbeddedBrowserHlsPlanDownloadPayload = {
+  ffmpegPath?: string
+  outputDirectoryPath?: string
+  plan: EmbeddedBrowserHlsDownloadPlan
+  suggestedFileName?: string
+  useSystemSaveDialog?: boolean
+}
+
+export type EmbeddedBrowserHlsPlanDownloadResponse = EmbeddedBrowserHlsDownloadResponse
 
 export type EmbeddedBrowserMpdDownloadPayload = EmbeddedBrowserHlsDownloadPayload
 

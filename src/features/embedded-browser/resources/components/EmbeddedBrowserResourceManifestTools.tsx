@@ -1,6 +1,9 @@
 import { Toast } from '@douyinfe/semi-ui';
 import React from 'react';
-import type { EmbeddedBrowserHlsManifest } from '../model/embedded-browser-hls-manifest';
+import type {
+  EmbeddedBrowserHlsDownloadPlan,
+  EmbeddedBrowserHlsManifest,
+} from '../model/embedded-browser-hls-manifest';
 import type { EmbeddedBrowserHlsKeyVerificationResult } from '../model/embedded-browser-hls-key-verifier';
 import type { EmbeddedBrowserMpdManifest } from '../model/embedded-browser-mpd-manifest';
 import {
@@ -20,6 +23,7 @@ type HlsAnalysisState = {
   keyVerificationLoading?: boolean
   loading: boolean
   manifest?: EmbeddedBrowserHlsManifest
+  plan?: EmbeddedBrowserHlsDownloadPlan
   planText?: string
   saveLoading?: boolean
 }
@@ -33,11 +37,16 @@ type MpdAnalysisState = {
 }
 
 type EmbeddedBrowserResourceManifestToolsProps = {
+  onOpenHlsDownloadWorkspace?: (
+    resource: EmbeddedBrowserCapturedResource,
+    plan: EmbeddedBrowserHlsDownloadPlan,
+  ) => void
   resource: EmbeddedBrowserCapturedResource
   resources: EmbeddedBrowserCapturedResource[]
 }
 
 const EmbeddedBrowserResourceManifestTools: React.FC<EmbeddedBrowserResourceManifestToolsProps> = ({
+  onOpenHlsDownloadWorkspace,
   resource,
   resources,
 }) => {
@@ -59,6 +68,7 @@ const EmbeddedBrowserResourceManifestTools: React.FC<EmbeddedBrowserResourceMani
           keyVerificationLoading: false,
           loading: false,
           manifest: result.manifest,
+          plan: result.plan,
           planText: result.planText,
         });
         Toast.success('HLS 解析完成，下载计划 JSON 已复制');
@@ -292,6 +302,17 @@ const EmbeddedBrowserResourceManifestTools: React.FC<EmbeddedBrowserResourceMani
                 }}
               >
                 复制计划
+              </button>
+            ) : null}
+            {hlsAnalysis.plan && onOpenHlsDownloadWorkspace ? (
+              <button
+                type="button"
+                className="resource-card-btn"
+                onClick={() => {
+                  onOpenHlsDownloadWorkspace(resource, hlsAnalysis.plan!);
+                }}
+              >
+                送到工具页
               </button>
             ) : null}
             {hlsAnalysis.manifest?.keys.length ? (

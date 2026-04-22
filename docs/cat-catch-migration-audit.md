@@ -1,6 +1,6 @@
 # Cat Catch 功能夺舍对照表
 
-更新时间：2026-04-14  
+更新时间：2026-04-22
 功能实现基线：截至 `omniflow-app` 提交 `2805ccf`，对照对象 `project/cat-catch`
 
 目标：先把 Cat Catch 的功能能力尽量完整迁过来，再统一调整正式 UI。正式资源面板 UI 暂不定型；如需验证，优先做薄 demo / debug 入口。
@@ -34,7 +34,7 @@
 | 去额外媒体头 | `catch-script/catch.js` | 已夺舍 | 多格式验证 |
 | 本地 ffmpeg 合并 MSE 音视频 | `catch-script/catch.js`, `js/m3u8.js` | 部分夺舍 | 从 B 站 m4s 扩到 HLS/DASH |
 | m3u8 parser 页面 | `m3u8.html`, `js/m3u8.js` | 部分夺舍 | 先做功能/demo，不急着定正式 UI |
-| m3u8 downloader | `js/m3u8.downloader.js` | 未夺舍 | 迁下载队列、重试、范围、key、EXT-X-MAP |
+| m3u8 downloader | `js/m3u8.downloader.js` | 部分夺舍 | 已补下载任务模型、Electron 下载队列内核，并把网络/本地 manifest 两条 HLS 主线接进工具区；继续补 key、日志与进度 UI |
 | mpd parser 页面 | `mpd.html`, `js/mpd.js` | 未夺舍 | 迁轨道解析/选择，或引入等价 parser |
 | N_m3u8DL 协议调用 | `options.html`, `js/popup.js`, `js/m3u8.js` | 未夺舍 | 评估是否作为外部工具导出 |
 | aria2 RPC | `js/function.js`, `js/popup.js`, `js/preview.js` | 未夺舍 | 可作为外部下载器适配 |
@@ -64,6 +64,10 @@
 - HLS inline m3u8：已能生成 page-context blob resource。
 - m3u8 baseUrl：已实现 Cat Catch 类似的 `joinBaseUrlTask` 思路，先缓存相对 m3u8，后续看到真实 media/manifest URL 时补发。
 - HLS 引用：已解析 `EXT-X-KEY`、`EXT-X-MAP`、普通分片/子 playlist URI。
+- HLS 工具区承接：已能把资源卡解析出的 HLS 计划送入工具区媒体处理模式。
+- HLS 执行分流：
+  - 网络 manifest：继续走 `ffmpeg` 直拉。
+  - blob / 页内内存 manifest：已接本地 downloader，执行链为 `plan -> local workdir -> rewritten local-playlist.m3u8 -> ffmpeg`。
 - DASH inline mpd：已能生成 manifest resource。
 - MPD 引用：已解析 `BaseURL`、`Location`、`media`、`initialization`、`sourceURL`，并跳过 `$Number$` 这类模板 URL。
 - MPD BaseURL：已让 `BaseURL` 参与后续相对分片 URL 解析。
@@ -91,10 +95,11 @@ Cat Catch 里这块很厚，主要在 `m3u8.html`、`js/m3u8.js`、`js/m3u8.down
 
 OmniFlow 当前有 manifest 捕获、key 候选和 ffmpeg 合并基础，但还缺：
 
-- m3u8 parser 的层级 playlist 展开：已补纯函数解析与资源卡测试入口，能输出 variants / renditions / keys / maps / segments。
+- m3u8 parser 的层级 playlist 展开：已补纯函数解析与资源卡测试入口，能输出 variants / renditions / keys / maps / segments；下载计划 JSON 已开始对齐 Cat Catch downloader 的 fragment 任务模型。
+- Electron 端下载队列内核：已补并发、范围、重试、顺序推送与停止能力，并已接入 HLS 本地 manifest 执行主链。
 - 多 variant / 多清晰度选择：已能解析 variant 元数据，正式选择 UI 未定。
 - `EXT-X-KEY` 下载、验证、替换、自定义 key：已能解析 key 元数据并做真实 key 验证，自定义 key 未完成。
-- `EXT-X-MAP` 下载与解密处理：已能解析 map 与 byterange 元数据，下载/解密拼接未完成。
+- `EXT-X-MAP` 下载与解密处理：已能解析 map 与 byterange 元数据，并在本地 manifest 重写时生成独立本地文件引用；更完整的解密与验证仍未完成。
 - 下载范围：序号范围、时间范围 `HH:MM:SS`。
 - 下载队列、并发线程、失败重试、重下失败项。
 - 直播录制与直播结束处理。
@@ -102,11 +107,11 @@ OmniFlow 当前有 manifest 捕获、key 候选和 ffmpeg 合并基础，但还�
 - 只要音频、转码为 mp4、ffmpeg 转码参数。
 - 边下边存 / 大文件分片写入。
 
-建议顺序：
+当前下一步重点：
 
-1. 先做一个 HLS parser service / demo，输入 m3u8 URL 或内联内容，输出 segments / keys / maps。
-2. 接入已有 captured resource，能从资源列表选一个 manifest 送进 demo。
-3. 再接下载队列与本地 ffmpeg。
+1. 补 key / 日志 / 进度 UI。
+2. 完成工具区内的失败重试与更细的执行反馈。
+3. 再做 variant / 轨道选择，不要先横向扩散到更多 UI。
 
 ### 2. mpd parser
 

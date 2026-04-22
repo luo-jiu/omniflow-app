@@ -1,6 +1,6 @@
 # Embedded Browser 架构说明
 
-更新时间：2026-04-19
+更新时间：2026-04-22
 
 适用范围：`omniflow-app` 内置浏览器的 renderer UI、preload bridge、Electron main controller、资源捕捉、下载导入与缓存捕捉工具链。
 
@@ -14,6 +14,7 @@ OmniFlow 的 embedded browser 不是单纯的 React 组件，而是“renderer �
 - 真正的页面承载体是 Electron main 中的 `WebContentsView`。
 - renderer 只能通过 preload 暴露的桥接能力驱动浏览器，不直接依赖 main 内部结构。
 - 资源捕捉分为网络捕捉和深度捕捉两条链路，最终都汇总回 renderer 里的资源面板。
+- 资源面板负责“发现和发起”，长时间下载、合并、转格式等重处理优先下沉到工具区。
 
 ## 2. 模块地图
 
@@ -109,6 +110,14 @@ library detail page
   - 维护导入队列
   - 把下载结果导入资源库，或保存到桌面
 
+当前资源面板与工具区的协作补充：
+
+- 资源面板可以把“已选资源”送到工具区媒体处理模式。
+- HLS manifest 解析后，可以把“下载计划”送到工具区。
+- 工具区当前承接两条 HLS 主线：
+  - 网络 manifest：继续走 `ffmpeg` 直拉。
+  - blob / 页内内存 manifest：走 Electron main 本地 downloader，先生成 local workdir 和 rewritten local playlist，再交给 `ffmpeg`。
+
 这些 hook 应继续通过 `services/*.api.ts` 调 preload bridge，不要直接在 hook 或组件里散落原始 bridge 调用。
 
 ### 3.4 Preload / IPC / Main
@@ -130,6 +139,7 @@ library detail page
 - state / download / resource 事件向 renderer 投影
 - 深度捕捉启动、probe 安装和 reload
 - MSE 读取、导出、保存、合并、manifest 下载
+- HLS 本地计划下载：`plan -> local workdir -> local playlist -> ffmpeg`
 
 ## 4. 核心概念
 

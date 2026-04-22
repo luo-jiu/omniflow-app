@@ -91,6 +91,80 @@ export type EmbeddedBrowserHlsManifest = {
   variants: EmbeddedBrowserHlsVariant[]
 }
 
+export type EmbeddedBrowserHlsDownloadKeyRef = {
+  iv?: string
+  keyFormat?: string
+  method: string
+  url?: string
+}
+
+export type EmbeddedBrowserHlsDownloadMapRef = {
+  byteRange?: EmbeddedBrowserHlsByteRange
+  url: string
+}
+
+export type EmbeddedBrowserHlsDownloadFragment = {
+  byteRange?: EmbeddedBrowserHlsByteRange
+  discontinuitySequence: number
+  duration: number
+  index: number
+  initSegment?: EmbeddedBrowserHlsDownloadMapRef
+  key?: EmbeddedBrowserHlsDownloadKeyRef
+  part: boolean
+  sequence: number
+  title?: string
+  url: string
+}
+
+export type EmbeddedBrowserHlsDownloadPlan = {
+  durationSeconds: number
+  encryptedSegmentCount: number
+  fragmentCount: number
+  fragments: EmbeddedBrowserHlsDownloadFragment[]
+  headers: Record<string, string>
+  isLive: boolean
+  isMaster: boolean
+  keys: Array<{
+    iv?: string
+    keyFormat?: string
+    method: string
+    url?: string
+  }>
+  manifestUrl: string
+  mapTag: string
+  maps: Array<{
+    byteRange?: EmbeddedBrowserHlsByteRange
+    url: string
+  }>
+  pageUrl?: string
+  partCount: number
+  renditions: Array<{
+    groupId?: string
+    name?: string
+    type?: string
+    url?: string
+  }>
+  segmentCount: number
+  segments: Array<{
+    byteRange?: EmbeddedBrowserHlsByteRange
+    discontinuitySequence: number
+    duration: number
+    keyUrl?: string
+    mapUrl?: string
+    part: boolean
+    sequence: number
+    url: string
+  }>
+  suggestedThreadCount: number
+  variants: Array<{
+    audioGroupId?: string
+    bandwidth?: number
+    codecs?: string
+    resolution?: string
+    url: string
+  }>
+}
+
 type PendingSegment = {
   duration: number
   title?: string
@@ -453,10 +527,34 @@ export function createEmbeddedBrowserHlsDownloadPlan(input: {
   manifest: EmbeddedBrowserHlsManifest
   manifestUrl: string
   pageUrl?: string
-}) {
+}): EmbeddedBrowserHlsDownloadPlan {
   const { manifest } = input
+  const fragments = manifest.segments.map((segment) => ({
+    byteRange: segment.byteRange,
+    discontinuitySequence: segment.discontinuitySequence,
+    duration: segment.duration,
+    index: segment.index,
+    initSegment: segment.map ? {
+      byteRange: segment.map.byteRange,
+      url: segment.map.url,
+    } : undefined,
+    key: segment.key ? {
+      iv: segment.key.iv,
+      keyFormat: segment.key.keyFormat,
+      method: segment.key.method,
+      url: segment.key.url,
+    } : undefined,
+    part: segment.part,
+    sequence: segment.sequence,
+    title: segment.title,
+    url: segment.url,
+  }))
+  const suggestedThreadCount = Math.min(6, Math.max(1, fragments.length || 1))
   return {
     durationSeconds: manifest.durationSeconds,
+    encryptedSegmentCount: fragments.filter((fragment) => fragment.key?.url || fragment.key?.method === 'AES-128').length,
+    fragmentCount: fragments.length,
+    fragments,
     headers: input.headers || {},
     isLive: manifest.isLive,
     isMaster: manifest.isMaster,
@@ -471,7 +569,9 @@ export function createEmbeddedBrowserHlsDownloadPlan(input: {
       byteRange: map.byteRange,
       url: map.url,
     })),
+    mapTag: manifest.maps[0]?.url || '',
     pageUrl: input.pageUrl,
+    partCount: fragments.filter((fragment) => fragment.part).length,
     renditions: manifest.renditions.map((rendition) => ({
       groupId: rendition.groupId,
       name: rendition.name,
@@ -489,6 +589,7 @@ export function createEmbeddedBrowserHlsDownloadPlan(input: {
       sequence: segment.sequence,
       url: segment.url,
     })),
+    suggestedThreadCount,
     variants: manifest.variants.map((variant) => ({
       audioGroupId: variant.audioGroupId,
       bandwidth: variant.bandwidth,

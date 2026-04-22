@@ -1,5 +1,5 @@
 import path from 'node:path'
-import { access, mkdir } from 'node:fs/promises'
+import { access, mkdir, rm } from 'node:fs/promises'
 import { app, BrowserWindow, dialog, WebContentsView, type WebFrameMain } from 'electron'
 import { runtimeLogger } from '../runtimeLogger'
 import type { EmbeddedBrowserCatchToolkitStatePayload } from './embeddedBrowserCatchToolkitPageBridge'
@@ -41,6 +41,8 @@ import {
   type EmbeddedBrowserCapturedResourceTranscodePayload,
   type EmbeddedBrowserCapturedResourceTranscodeResponse,
   type EmbeddedBrowserHlsDownloadPayload,
+  type EmbeddedBrowserHlsPlanDownloadPayload,
+  type EmbeddedBrowserHlsPlanDownloadResponse,
   type EmbeddedBrowserHlsDownloadResponse,
   type EmbeddedBrowserMainControllerOptions,
   type EmbeddedBrowserMpdDownloadPayload,
@@ -105,6 +107,9 @@ import {
   downloadEmbeddedBrowserManifestResource,
   type EmbeddedBrowserManifestDownloadKind,
 } from './embeddedBrowserResourceManifestDownloadService'
+import {
+  downloadEmbeddedBrowserHlsToLocalWorkDirectory,
+} from './embeddedBrowserHlsLocalDownloaderService'
 import {
   cleanupEmbeddedBrowserOpenFile,
   stageEmbeddedBrowserOpenFile,
@@ -824,21 +829,15 @@ export function createEmbeddedBrowserMainController(
     try {
       const defaultFileName = String(payload.suggestedFileName || '').trim()
         || deriveEmbeddedBrowserManifestOutputFileName(manifestUrl, kind)
-      const mainWindow = options.getMainWindow()
-      const targetWindow = mainWindow && !mainWindow.isDestroyed()
-        ? mainWindow
-        : undefined
-      const saveDialogOptions = {
-        defaultPath: path.join(app.getPath('downloads'), defaultFileName),
+      const outputPath = await resolveEmbeddedBrowserOutputPath({
+        defaultFileName,
         filters: [
           { extensions: ['mp4'], name: 'MP4 Video' },
         ],
-        showsTagField: false,
-      }
-      const saveResult = targetWindow
-        ? await dialog.showSaveDialog(targetWindow, saveDialogOptions)
-        : await dialog.showSaveDialog(saveDialogOptions)
-      if (saveResult.canceled || !saveResult.filePath) {
+        outputDirectoryPath: payload.outputDirectoryPath,
+        useSystemSaveDialog: payload.useSystemSaveDialog,
+      })
+      if (!outputPath) {
         return {
           cancelled: true,
           ok: false,
@@ -850,7 +849,7 @@ export function createEmbeddedBrowserMainController(
         headers: payload.headers,
         kind,
         manifestUrl,
-        outputPath: saveResult.filePath,
+        outputPath,
       })
       return {
         ffmpegPath: result.ffmpegPath,
@@ -876,6 +875,75 @@ export function createEmbeddedBrowserMainController(
     payload: EmbeddedBrowserHlsDownloadPayload,
   ): Promise<EmbeddedBrowserHlsDownloadResponse> {
     return downloadEmbeddedBrowserManifestResourceForRenderer(tabId, payload, 'hls')
+  }
+
+  async function downloadEmbeddedBrowserHlsPlanResource(
+    tabId: string,
+    payload: EmbeddedBrowserHlsPlanDownloadPayload,
+  ): Promise<EmbeddedBrowserHlsPlanDownloadResponse> {
+    const normalizedTabId = String(tabId || '').trim()
+    if (!normalizedTabId || !payload.plan || !Array.isArray(payload.plan.fragments) || payload.plan.fragments.length === 0) {
+      return {
+        error: '缺少可下载的 HLS 计划',
+        ok: false,
+      }
+    }
+
+    let workDirectoryPath = ''
+    try {
+      const defaultFileName = String(payload.suggestedFileName || '').trim()
+        || deriveEmbeddedBrowserManifestOutputFileName(payload.plan.manifestUrl, 'hls')
+      const outputPath = await resolveEmbeddedBrowserOutputPath({
+        defaultFileName,
+        filters: [
+          { extensions: ['mp4'], name: 'MP4 Video' },
+        ],
+        outputDirectoryPath: payload.outputDirectoryPath,
+        useSystemSaveDialog: payload.useSystemSaveDialog,
+      })
+      if (!outputPath) {
+        return {
+          cancelled: true,
+          ok: false,
+        }
+      }
+
+      const localDownloadResult = await downloadEmbeddedBrowserHlsToLocalWorkDirectory({
+        plan: {
+          fragments: payload.plan.fragments,
+          headers: payload.plan.headers,
+          manifestUrl: payload.plan.manifestUrl,
+          suggestedThreadCount: payload.plan.suggestedThreadCount,
+        },
+      })
+      workDirectoryPath = localDownloadResult.workDirectoryPath
+
+      const result = await downloadEmbeddedBrowserManifestResource({
+        ffmpegPath: payload.ffmpegPath,
+        kind: 'hls',
+        manifestUrl: localDownloadResult.playlistPath,
+        outputPath,
+      })
+      return {
+        ffmpegPath: result.ffmpegPath,
+        ok: true,
+        outputPath: result.outputPath,
+      }
+    } catch (error) {
+      runtimeLogger.warn('embedded browser hls plan download failed', {
+        error: error instanceof Error ? error.message : String(error),
+        manifestUrl: payload.plan.manifestUrl,
+        tabId: normalizedTabId,
+      })
+      return {
+        error: error instanceof Error ? error.message : String(error),
+        ok: false,
+      }
+    } finally {
+      if (workDirectoryPath) {
+        await rm(workDirectoryPath, { force: true, recursive: true }).catch(() => undefined)
+      }
+    }
   }
 
   async function downloadEmbeddedBrowserMpdResource(
@@ -1650,6 +1718,7 @@ export function createEmbeddedBrowserMainController(
       deactivate: handleDeactivate,
       downloadCatchMedia: (tabId) => handleCatchToolkitAction(tabId, 'downloadCatchMedia', 'download'),
       downloadHlsManifest: downloadEmbeddedBrowserHlsResource,
+      downloadHlsPlan: downloadEmbeddedBrowserHlsPlanResource,
       downloadMpdManifest: downloadEmbeddedBrowserMpdResource,
       exportResource: handleExportResource,
       getCatchToolkitState: handleGetCatchToolkitState,

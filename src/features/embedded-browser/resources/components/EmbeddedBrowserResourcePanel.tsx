@@ -4,6 +4,7 @@ import PanelShell from './EmbeddedBrowserResourcePanel.styles';
 import EmbeddedBrowserCatchToolkitCard from './EmbeddedBrowserCatchToolkitCard';
 import EmbeddedBrowserResourceBulkBar from './EmbeddedBrowserResourceBulkBar';
 import EmbeddedBrowserResourceCard from './EmbeddedBrowserResourceCard';
+import type { EmbeddedBrowserHlsDownloadPlan } from '../model/embedded-browser-hls-manifest';
 import { useEmbeddedBrowserCatchToolkit } from '../hooks/useEmbeddedBrowserCatchToolkit';
 import { useEmbeddedBrowserResources } from '../hooks/useEmbeddedBrowserResources';
 import {
@@ -29,6 +30,10 @@ type EmbeddedBrowserResourcePanelProps = {
   activeTabId: string | null;
   className?: string;
   currentPageUrl?: string;
+  onOpenHlsDownloadWorkspace?: (
+    resource: EmbeddedBrowserCapturedResource,
+    plan: EmbeddedBrowserHlsDownloadPlan,
+  ) => void;
   onOpenMediaProcessing?: (resources: EmbeddedBrowserCapturedResource[]) => void;
 };
 
@@ -61,6 +66,7 @@ const EmbeddedBrowserResourcePanel: React.FC<EmbeddedBrowserResourcePanelProps> 
   activeTabId,
   className,
   currentPageUrl = '',
+  onOpenHlsDownloadWorkspace,
   onOpenMediaProcessing,
 }) => {
   const {
@@ -360,6 +366,7 @@ const EmbeddedBrowserResourcePanel: React.FC<EmbeddedBrowserResourcePanelProps> 
               <EmbeddedBrowserResourceCard
                 expanded={expandedResourceIds.includes(resource.id)}
                 key={resource.id}
+                onOpenHlsDownloadWorkspace={onOpenHlsDownloadWorkspace}
                 onToggleDetails={toggleResourceDetails}
                 onToggleSelection={toggleResourceSelection}
                 resource={resource}
