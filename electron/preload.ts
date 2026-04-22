@@ -77,6 +77,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
     uploadId?: string,
   ) => ipcRenderer.invoke('http:upload', url, filePath, formDataParams, headers, uploadId),
   uploadAbort: (uploadId: string) => ipcRenderer.invoke('http:upload:abort', uploadId),
+  chunkedUpload: (
+    baseUrl: string,
+    filePath: string,
+    params: {
+      libraryId: number;
+      parentId: number;
+      fileName: string;
+      fileSize: number;
+      conflictPolicy?: string;
+    },
+    headers?: Record<string, string>,
+    uploadId?: string,
+  ) => ipcRenderer.invoke('http:chunked-upload', baseUrl, filePath, params, headers, uploadId),
+  chunkedUploadAbort: (uploadId: string) => ipcRenderer.invoke('http:chunked-upload:abort', uploadId),
   onUploadProgress: (listener: (payload: {
     uploadId: string;
     uploadedBytes: number;

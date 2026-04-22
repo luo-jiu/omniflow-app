@@ -1,6 +1,6 @@
-import { createIpcUploadTask, ipcRequest as request, ipcUpload } from '@/service/request/ipcRequest';
+import { createIpcChunkedUploadTask, createIpcUploadTask, ipcRequest as request, ipcUpload } from '@/service/request/ipcRequest';
 import type { ArchiveBuiltInType } from '@/shared/file-viewer-types';
-import { MAX_SINGLE_UPLOAD_BYTES, MAX_SINGLE_UPLOAD_ERROR_MESSAGE } from '@/shared/upload-limits';
+import { CHUNKED_UPLOAD_THRESHOLD_BYTES, MAX_SINGLE_UPLOAD_BYTES, MAX_SINGLE_UPLOAD_ERROR_MESSAGE } from '@/shared/upload-limits';
 
 export type Library = {
   createdAt: string;
@@ -270,6 +270,39 @@ export async function uploadAndCreateNode(
   const filePath = (file as any).path;
   if (!filePath) {
     throw new Error("Unable to retrieve file path for upload.");
+  }
+
+  if (file.size >= CHUNKED_UPLOAD_THRESHOLD_BYTES) {
+    const uploadTask = createIpcChunkedUploadTask<any>(
+      filePath,
+      {
+        libraryId,
+        parentId,
+        fileName: file.name,
+        fileSize: file.size,
+        conflictPolicy: options?.conflictPolicy,
+      },
+      (progress) => {
+        if (options?.onProgress) {
+          options.onProgress(
+            progress.uploadedBytes,
+            progress.totalBytes,
+            progress.percentage,
+            progress.speedBps,
+          );
+        }
+      },
+    );
+
+    if (options?.setAbort) {
+      options.setAbort(uploadTask.abort);
+    }
+
+    const json = await uploadTask.promise;
+    if (!json) throw new Error('上传响应为空');
+    const d = extractDataPayload<Record<string, unknown>>(json);
+    if (!d || typeof d !== 'object') throw new Error('上传响应数据异常');
+    return normalizeNodePayload(d as Record<string, unknown>, 'file');
   }
 
   const formDataParams: Record<string, string> = {

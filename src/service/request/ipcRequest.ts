@@ -120,6 +120,37 @@ export async function ipcUpload<T = any>(path: string, filePath: string, formDat
   return task.promise;
 }
 
+function validateIpcUploadResponse<T>(res: IpcHttpResponse, label: string): T {
+  const status = Number(res?.status ?? 0);
+  const body = res?.body as unknown;
+  const code = getApiCode(body);
+  const businessSuccess = isBusinessSuccess(body);
+
+  if (status === 401 || code === 'A00200') {
+    auth.clear();
+    if (!window.location.hash.includes('/login')) {
+      window.location.hash = '/login';
+    }
+    throw new Error(`登录状态已失效，请重新登录 (${label})`);
+  }
+
+  if (status >= 400 && !businessSuccess) {
+    const fallback = status === 413
+      ? '上传失败：文件体积超过服务端限制（HTTP 413）'
+      : `HTTP error! status: ${status}`;
+    const message = getErrorMessage(body, fallback);
+    throw new Error(`${message} (${label})`);
+  }
+
+  if (isObject(body) && (body as ApiBody).success === false && !businessSuccess) {
+    const message = getErrorMessage(body, 'Upload failed');
+    throw new Error(`${message} (${label})`);
+  }
+
+  runtimeLogger.debug("📦 IPC Upload 收到数据:", body);
+  return body as T;
+}
+
 export function createIpcUploadTask<T = any>(
   path: string,
   filePath: string,
@@ -146,35 +177,7 @@ export function createIpcUploadTask<T = any>(
     headers,
     uploadId,
   ).then((res) => {
-    const status = Number(res?.status ?? 0);
-    const body = res?.body as unknown;
-    const code = getApiCode(body);
-    const businessSuccess = isBusinessSuccess(body);
-
-    // 统一处理登录态失效：清空本地登录态并回到登录页
-    if (status === 401 || code === 'A00200') {
-      auth.clear();
-      if (!window.location.hash.includes('/login')) {
-        window.location.hash = '/login';
-      }
-      throw new Error(`登录状态已失效，请重新登录 (${path})`);
-    }
-
-    if (status >= 400 && !businessSuccess) {
-      const fallback = status === 413
-        ? '上传失败：文件体积超过服务端限制（HTTP 413）'
-        : `HTTP error! status: ${status}`;
-      const message = getErrorMessage(body, fallback);
-      throw new Error(`${message} (${path})`);
-    }
-
-    if (isObject(body) && (body as ApiBody).success === false && !businessSuccess) {
-      const message = getErrorMessage(body, 'Upload failed');
-      throw new Error(`${message} (${path})`);
-    }
-
-    runtimeLogger.debug("📦 IPC Upload 收到数据:", body);
-    return body as T;
+    return validateIpcUploadResponse<T>(res, path);
   }).catch((err) => {
     runtimeLogger.error('❌ IPC Upload 请求失败:', err);
     throw err;
@@ -183,6 +186,54 @@ export function createIpcUploadTask<T = any>(
   });
 
   const abort = () => window.electronAPI.uploadAbort(uploadId);
+
+  return {
+    uploadId,
+    promise,
+    abort,
+  };
+}
+
+export function createIpcChunkedUploadTask<T = any>(
+  filePath: string,
+  params: {
+    libraryId: number;
+    parentId: number;
+    fileName: string;
+    fileSize: number;
+    conflictPolicy?: string;
+  },
+  onProgress?: (payload: IpcUploadProgressPayload) => void,
+): IpcUploadTask<T> {
+  const token = auth.getToken();
+  const username = auth.getUsername();
+  const headers = {
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(username ? { username } : {}),
+  };
+
+  const uploadId = `chunked-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const unsubscribe = window.electronAPI.onUploadProgress((payload) => {
+    if (payload.uploadId !== uploadId) return;
+    if (onProgress) onProgress(payload);
+  });
+
+  const promise = window.electronAPI.chunkedUpload(
+    API_CONFIG.BASE_URL,
+    filePath,
+    params,
+    headers,
+    uploadId,
+  ).then((res) => {
+    return validateIpcUploadResponse<T>(res, 'chunked-upload');
+  }).catch((err) => {
+    runtimeLogger.error('❌ IPC Chunked Upload 请求失败:', err);
+    throw err;
+  }).finally(() => {
+    unsubscribe();
+  });
+
+  const abort = () => window.electronAPI.chunkedUploadAbort(uploadId);
 
   return {
     uploadId,

@@ -147,6 +147,23 @@ interface Window {
       body: any;
     }>;
     uploadAbort: (uploadId: string) => Promise<boolean>;
+    chunkedUpload: (
+      baseUrl: string,
+      filePath: string,
+      params: {
+        libraryId: number;
+        parentId: number;
+        fileName: string;
+        fileSize: number;
+        conflictPolicy?: string;
+      },
+      headers?: Record<string, string>,
+      uploadId?: string,
+    ) => Promise<{
+      status: number;
+      body: any;
+    }>;
+    chunkedUploadAbort: (uploadId: string) => Promise<boolean>;
   };
 
   electronWindow: {
