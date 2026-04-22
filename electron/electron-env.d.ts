@@ -206,6 +206,13 @@ type EmbeddedBrowserCapturedCredentialEvent = {
   tabId: string;
 };
 
+type EmbeddedBrowserAutoFilledEvent = {
+  tabId: string;
+  domain: string;
+  filledUsername: string;
+  alternatives: Array<{ id: string; username: string }>;
+};
+
 type EmbeddedBrowserBounds = {
   x: number;
   y: number;
@@ -416,6 +423,8 @@ interface Window {
     deleteAllPasswords: () => Promise<void>;
     blacklistDomain: (domain: string) => Promise<void>;
     isBlacklistedDomain: (domain: string) => Promise<boolean>;
+    autoFillPassword: (tabId: string, passwordId: string) => Promise<{ username: string } | null>;
     onCredentialCaptured: (listener: (payload: EmbeddedBrowserCapturedCredentialEvent) => void) => () => void;
+    onCredentialAutoFilled: (listener: (payload: EmbeddedBrowserAutoFilledEvent) => void) => () => void;
   };
 }

@@ -51,6 +51,23 @@ export function subscribeCredentialCaptured(
   return window.electronEmbeddedBrowser.onCredentialCaptured(listener)
 }
 
+export function subscribeCredentialAutoFilled(
+  listener: (payload: EmbeddedBrowserAutoFilledEvent) => void,
+): () => void {
+  if (!window.electronEmbeddedBrowser) {
+    return () => {}
+  }
+  return window.electronEmbeddedBrowser.onCredentialAutoFilled(listener)
+}
+
+export async function requestAutoFillPassword(
+  tabId: string,
+  passwordId: string,
+): Promise<{ username: string } | null> {
+  assertDesktopSupport()
+  return window.electronEmbeddedBrowser.autoFillPassword(tabId, passwordId)
+}
+
 export function groupPasswordsByDomain(
   entries: EmbeddedBrowserSavedPasswordEntry[],
 ): EmbeddedBrowserPasswordDomainGroup[] {

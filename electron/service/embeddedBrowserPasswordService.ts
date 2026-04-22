@@ -75,6 +75,45 @@ export function listEmbeddedBrowserPasswords(): EmbeddedBrowserSavedPasswordEntr
   return store.passwords.map(toEntry)
 }
 
+export function getEmbeddedBrowserPasswordsForDomain(domain: string): EmbeddedBrowserSavedPasswordEntry[] {
+  const normalizedDomain = String(domain || '').trim().toLowerCase()
+  if (!normalizedDomain) {
+    return []
+  }
+  const store = loadPasswordStore()
+  return store.passwords
+    .filter((p) => p.domain === normalizedDomain)
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+    .map(toEntry)
+}
+
+export function decryptEmbeddedBrowserPasswordForAutoFill(id: string): string | null {
+  if (!safeStorage.isEncryptionAvailable()) {
+    return null
+  }
+  const store = loadPasswordStore()
+  const entry = store.passwords.find((p) => p.id === id)
+  if (!entry) {
+    return null
+  }
+  try {
+    const buffer = Buffer.from(entry.encryptedPassword, 'base64')
+    return safeStorage.decryptString(buffer)
+  } catch {
+    return null
+  }
+}
+
+export function hasEmbeddedBrowserMatchingPassword(domain: string, username: string): boolean {
+  const normalizedDomain = String(domain || '').trim().toLowerCase()
+  const normalizedUsername = String(username || '').trim()
+  if (!normalizedDomain || !normalizedUsername) {
+    return false
+  }
+  const store = loadPasswordStore()
+  return store.passwords.some((p) => p.domain === normalizedDomain && p.username === normalizedUsername)
+}
+
 export function saveEmbeddedBrowserPassword(
   credential: EmbeddedBrowserCapturedCredential,
 ): EmbeddedBrowserSavedPasswordEntry {

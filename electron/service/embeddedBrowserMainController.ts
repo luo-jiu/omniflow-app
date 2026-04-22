@@ -22,9 +22,12 @@ import {
   addEmbeddedBrowserBlacklistedDomain,
   cacheEmbeddedBrowserCredential,
   consumeEmbeddedBrowserCachedCredential,
+  decryptEmbeddedBrowserPasswordForAutoFill,
   deleteAllEmbeddedBrowserPasswords,
   deleteEmbeddedBrowserPassword,
   getEmbeddedBrowserDecryptedPassword,
+  getEmbeddedBrowserPasswordsForDomain,
+  hasEmbeddedBrowserMatchingPassword,
   isEmbeddedBrowserBlacklistedDomain,
   listEmbeddedBrowserPasswords,
   saveEmbeddedBrowserPassword,
@@ -153,6 +156,19 @@ export function createEmbeddedBrowserMainController(
       return
     }
     mainWindow.webContents.send('embedded-browser:credential-captured', payload)
+  }
+
+  function emitCredentialAutoFilled(payload: {
+    tabId: string
+    domain: string
+    filledUsername: string
+    alternatives: Array<{ id: string; username: string }>
+  }) {
+    const mainWindow = options.getMainWindow()
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      return
+    }
+    mainWindow.webContents.send('embedded-browser:credential-autofilled', payload)
   }
 
   function resolveEmbeddedBrowserTabIdByWebContents(targetContents: Electron.WebContents) {
@@ -905,6 +921,31 @@ export function createEmbeddedBrowserMainController(
       emitTabState: emitEmbeddedBrowserTabState,
       iconSourceUrls: embeddedBrowserIconSourceUrls,
       iconUrls: embeddedBrowserIconUrls,
+      onAutoFillReady: (autoFillTabId, domain) => {
+        const entries = getEmbeddedBrowserPasswordsForDomain(domain)
+        if (!entries.length) {
+          return
+        }
+        const target = entries[0]
+        const password = decryptEmbeddedBrowserPasswordForAutoFill(target.id)
+        if (!password) {
+          return
+        }
+        const view = getEmbeddedBrowserView(autoFillTabId)
+        if (!view || view.webContents.isDestroyed()) {
+          return
+        }
+        const fillScript = `window.__OMNIFLOW_FILL_CREDENTIAL__(${JSON.stringify(target.username)}, ${JSON.stringify(password)})`
+        view.webContents.executeJavaScript(fillScript, true).catch(() => {})
+        if (entries.length > 1) {
+          emitCredentialAutoFilled({
+            tabId: autoFillTabId,
+            domain,
+            filledUsername: target.username,
+            alternatives: entries.map((e) => ({ id: e.id, username: e.username })),
+          })
+        }
+      },
       onCredentialPayload: (credentialTabId, payload) => {
         const username = typeof payload.username === 'string' ? payload.username.trim() : ''
         const password = typeof payload.password === 'string' ? payload.password : ''
@@ -914,6 +955,9 @@ export function createEmbeddedBrowserMainController(
           return
         }
         if (isEmbeddedBrowserBlacklistedDomain(domain)) {
+          return
+        }
+        if (hasEmbeddedBrowserMatchingPassword(domain, username)) {
           return
         }
         const credentialRequestId = cacheEmbeddedBrowserCredential({
@@ -1647,6 +1691,24 @@ export function createEmbeddedBrowserMainController(
       deleteAllPasswords: deleteAllEmbeddedBrowserPasswords,
       blacklistDomain: addEmbeddedBrowserBlacklistedDomain,
       isBlacklistedDomain: isEmbeddedBrowserBlacklistedDomain,
+      autoFillPassword: async (autoFillTabId, passwordId) => {
+        const store = listEmbeddedBrowserPasswords()
+        const entry = store.find((p) => p.id === passwordId)
+        if (!entry) {
+          return null
+        }
+        const password = decryptEmbeddedBrowserPasswordForAutoFill(passwordId)
+        if (!password) {
+          return null
+        }
+        const view = getEmbeddedBrowserView(autoFillTabId)
+        if (!view || view.webContents.isDestroyed()) {
+          return null
+        }
+        const fillScript = `window.__OMNIFLOW_FILL_CREDENTIAL__(${JSON.stringify(entry.username)}, ${JSON.stringify(password)})`
+        await view.webContents.executeJavaScript(fillScript, true).catch(() => {})
+        return { username: entry.username }
+      },
     })
   }
 

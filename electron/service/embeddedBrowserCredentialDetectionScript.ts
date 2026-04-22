@@ -1,14 +1,19 @@
 export const EMBEDDED_BROWSER_CREDENTIAL_CONSOLE_PREFIX = '__OMNIFLOW_CREDENTIAL__:'
+export const EMBEDDED_BROWSER_AUTOFILL_CONSOLE_PREFIX = '__OMNIFLOW_AUTOFILL_READY__:'
 
 export function createCredentialDetectionScript(): string {
   const prefix = EMBEDDED_BROWSER_CREDENTIAL_CONSOLE_PREFIX
+  const autofillPrefix = EMBEDDED_BROWSER_AUTOFILL_CONSOLE_PREFIX
   return `(function(){
   if(window.__OMNIFLOW_CREDENTIAL_DETECTION__)return;
   window.__OMNIFLOW_CREDENTIAL_DETECTION__=true;
   var PREFIX=${JSON.stringify(prefix)};
+  var AUTOFILL_PREFIX=${JSON.stringify(autofillPrefix)};
   var USERNAME_PATTERN=/user|email|login|account|phone|name|identifier|usr|uname/i;
   var lastSent='';
   var lastSentAt=0;
+  var autoFillSignalSent=false;
+  var nativeSetter=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set;
   function findPasswordFields(root){
     try{return Array.from((root||document).querySelectorAll('input[type="password"]'))}catch(e){return[]}
   }
@@ -37,6 +42,33 @@ export function createCredentialDetectionScript(): string {
     });
     scored.sort(function(a,b){return b.score-a.score});
     return scored.length?scored[0].el:null;
+  }
+  window.__OMNIFLOW_FILL_CREDENTIAL__=function(username,password){
+    var pwFields=findPasswordFields();
+    if(!pwFields.length)return false;
+    var filled=false;
+    pwFields.forEach(function(pwField){
+      var usernameField=findUsernameField(pwField);
+      if(usernameField&&username){
+        nativeSetter.call(usernameField,username);
+        usernameField.dispatchEvent(new Event('input',{bubbles:true}));
+        usernameField.dispatchEvent(new Event('change',{bubbles:true}));
+      }
+      nativeSetter.call(pwField,password);
+      pwField.dispatchEvent(new Event('input',{bubbles:true}));
+      pwField.dispatchEvent(new Event('change',{bubbles:true}));
+      filled=true;
+    });
+    return filled;
+  };
+  function signalAutoFillReady(){
+    if(autoFillSignalSent)return;
+    var pwFields=findPasswordFields();
+    if(!pwFields.length)return;
+    autoFillSignalSent=true;
+    var domain='';
+    try{domain=location.hostname}catch(e){}
+    console.info(AUTOFILL_PREFIX+JSON.stringify({domain:domain}));
   }
   function sendCredential(username,password){
     if(!username||!password)return;
@@ -76,8 +108,9 @@ export function createCredentialDetectionScript(): string {
   }
   function scanAndObserve(){
     observePasswordFields();
+    signalAutoFillReady();
     try{
-      var observer=new MutationObserver(function(){});
+      var observer=new MutationObserver(function(){signalAutoFillReady()});
       observer.observe(document.documentElement||document.body||document,{childList:true,subtree:true});
     }catch(e){}
   }

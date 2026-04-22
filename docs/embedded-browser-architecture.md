@@ -301,6 +301,16 @@ renderer catch toolkit action
 
 密码明文不会到达 renderer 进程。
 
+#### 自动填充
+
+- 检测脚本发现密码输入框后通过 `console.info(__OMNIFLOW_AUTOFILL_READY__:JSON)` 通知 main
+- main 按域名查找已保存凭据，`decryptEmbeddedBrowserPasswordForAutoFill()` 解密（不触发 Touch ID）
+- 通过 `executeJavaScript` 直接在 WebContentsView 页面调用 `window.__OMNIFLOW_FILL_CREDENTIAL__()` 填充表单
+- 使用 `nativeSetter`（HTMLInputElement.prototype.value 的原始 setter）兼容 React 等框架
+- 多账号时通知 renderer 显示切换通知条；renderer 可通过 `autoFillPassword` IPC 切换
+- 已保存的 domain+username 提交时不再弹出保存提示（`hasEmbeddedBrowserMatchingPassword` 检查）
+- MutationObserver 确保 SPA 动态渲染的登录表单也能触发自动填充
+
 ## 6. 生命周期规则
 
 ### 6.1 面板停用规则

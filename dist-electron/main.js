@@ -1,18 +1,18 @@
-import { dialog, app, net, ipcMain, session, webContents, BrowserWindow, WebContentsView, nativeTheme, screen } from "electron";
+import { dialog, app, net, ipcMain, session, systemPreferences, safeStorage, webContents, BrowserWindow, WebContentsView, nativeTheme, screen } from "electron";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import fs$1, { existsSync, mkdirSync, constants, readFileSync, writeFileSync } from "node:fs";
+import fs$1, { existsSync, mkdirSync, readFileSync, writeFileSync, constants } from "node:fs";
 import fs$2 from "fs/promises";
-import fs, { mkdtemp, rm, access, writeFile } from "node:fs/promises";
+import fs, { mkdtemp, rm, access, writeFile, mkdir } from "node:fs/promises";
 import http from "node:http";
 import https from "node:https";
 import require$$0 from "os";
 import require$$1 from "child_process";
 import fs$3 from "fs";
+import crypto, { randomUUID } from "node:crypto";
 import { Buffer as Buffer$1 } from "node:buffer";
 import { spawn } from "node:child_process";
 import os from "node:os";
-import { randomUUID } from "node:crypto";
 const DOWNLOAD_REQUEST_TIMEOUT_MS = 6e4;
 async function downloadUrlToFile(url, targetPath, headers = {}, redirectDepth = 0) {
   const MAX_REDIRECT_DEPTH = 3;
@@ -425,6 +425,7 @@ function registerFileIpc(ipcMain2) {
     }
     return { canceled: false, directoryPath: result.filePaths[0] };
   });
+  ipcMain2.handle("fs:get-download-directory", async () => app.getPath("downloads"));
   ipcMain2.handle("dialog:save-download-file", async (_event, defaultFileName, options) => {
     const result = await dialog.showSaveDialog({
       defaultPath: String(defaultFileName || "download"),
@@ -1127,6 +1128,18 @@ function registerEmbeddedBrowserMainIpcHandlers(handlers) {
   ipcMain.handle("embedded-browser:cleanup-download-file", async (_event, tempPath) => handlers.cleanupDownloadFile(tempPath));
   ipcMain.handle("embedded-browser:deactivate", (event) => handlers.deactivate(event.sender));
   ipcMain.handle("embedded-browser:close-all", (event) => handlers.closeAll(event.sender));
+  ipcMain.handle("embedded-browser:cookie:get", async (_event, filter) => handlers.getCookies(filter));
+  ipcMain.handle("embedded-browser:cookie:remove", async (_event, url, name) => handlers.removeCookie(url, name));
+  ipcMain.handle("embedded-browser:cookie:remove-domain", async (_event, domain) => handlers.removeCookiesByDomain(domain));
+  ipcMain.handle("embedded-browser:cookie:remove-all", async () => handlers.removeAllCookies());
+  ipcMain.handle("embedded-browser:password:list", () => handlers.listPasswords());
+  ipcMain.handle("embedded-browser:password:get-decrypted", async (_event, id) => handlers.getDecryptedPassword(id));
+  ipcMain.handle("embedded-browser:password:save-captured", async (_event, credentialRequestId) => handlers.saveCapturedCredential(credentialRequestId));
+  ipcMain.handle("embedded-browser:password:delete", (_event, id) => handlers.deletePassword(id));
+  ipcMain.handle("embedded-browser:password:delete-all", () => handlers.deleteAllPasswords());
+  ipcMain.handle("embedded-browser:password:blacklist-domain", (_event, domain) => handlers.blacklistDomain(domain));
+  ipcMain.handle("embedded-browser:password:is-blacklisted", (_event, domain) => handlers.isBlacklistedDomain(domain));
+  ipcMain.handle("embedded-browser:password:auto-fill", async (_event, tabId, passwordId) => handlers.autoFillPassword(tabId, passwordId));
 }
 const EMBEDDED_BROWSER_PARTITION = "persist:omniflow-embedded-browser";
 const EMBEDDED_BROWSER_DOWNLOAD_DIRNAME = "embedded-browser-downloads";
@@ -1262,6 +1275,234 @@ function initializeEmbeddedBrowserDownloadBridge(options) {
     handledSessions.add(candidate);
     candidate.on("will-download", handleWillDownload);
   });
+}
+function buildCookieRemoveUrl(cookie) {
+  const domain = cookie.domain.replace(/^\./, "");
+  const scheme = cookie.secure ? "https" : "http";
+  return `${scheme}://${domain}${cookie.path}`;
+}
+function mapElectronCookie(raw) {
+  return {
+    name: raw.name,
+    value: raw.value,
+    domain: raw.domain ?? "",
+    path: raw.path ?? "/",
+    secure: raw.secure ?? false,
+    httpOnly: raw.httpOnly ?? false,
+    sameSite: raw.sameSite ?? "unspecified",
+    expirationDate: raw.expirationDate,
+    session: raw.session ?? false
+  };
+}
+async function getEmbeddedBrowserCookies(filter) {
+  const browserSession = getEmbeddedBrowserSession();
+  const raw = await browserSession.cookies.get(filter ?? {});
+  return raw.map(mapElectronCookie);
+}
+async function removeEmbeddedBrowserCookie(url, name) {
+  const browserSession = getEmbeddedBrowserSession();
+  await browserSession.cookies.remove(url, name);
+}
+async function removeEmbeddedBrowserCookiesByDomain(domain) {
+  const normalizedDomain = String(domain || "").trim();
+  if (!normalizedDomain) {
+    return;
+  }
+  const cookies = await getEmbeddedBrowserCookies({ domain: normalizedDomain });
+  for (const cookie of cookies) {
+    await removeEmbeddedBrowserCookie(buildCookieRemoveUrl(cookie), cookie.name);
+  }
+}
+async function removeAllEmbeddedBrowserCookies() {
+  const cookies = await getEmbeddedBrowserCookies();
+  for (const cookie of cookies) {
+    await removeEmbeddedBrowserCookie(buildCookieRemoveUrl(cookie), cookie.name);
+  }
+  await getEmbeddedBrowserSession().cookies.flushStore();
+}
+const STORE_FILE_NAME = "embedded-browser-passwords.json";
+const CREDENTIAL_CACHE_TTL_MS = 6e4;
+let cachedStore = null;
+const credentialCache = /* @__PURE__ */ new Map();
+function getStorePath() {
+  return path.join(app.getPath("userData"), STORE_FILE_NAME);
+}
+function loadPasswordStore() {
+  if (cachedStore) {
+    return cachedStore;
+  }
+  const storePath = getStorePath();
+  if (!existsSync(storePath)) {
+    cachedStore = { passwords: [], blacklistedDomains: [] };
+    return cachedStore;
+  }
+  try {
+    const raw = readFileSync(storePath, "utf-8");
+    const parsed = JSON.parse(raw);
+    cachedStore = {
+      passwords: Array.isArray(parsed.passwords) ? parsed.passwords : [],
+      blacklistedDomains: Array.isArray(parsed.blacklistedDomains) ? parsed.blacklistedDomains : []
+    };
+    return cachedStore;
+  } catch (error) {
+    runtimeLogger.warn("embedded browser password store load failed", {
+      error: error instanceof Error ? error.message : String(error)
+    });
+    cachedStore = { passwords: [], blacklistedDomains: [] };
+    return cachedStore;
+  }
+}
+function savePasswordStore(store) {
+  cachedStore = store;
+  const storePath = getStorePath();
+  const storeDir = path.dirname(storePath);
+  if (!existsSync(storeDir)) {
+    mkdirSync(storeDir, { recursive: true });
+  }
+  writeFileSync(storePath, JSON.stringify(store, null, 2), "utf-8");
+}
+function toEntry(saved) {
+  return {
+    id: saved.id,
+    domain: saved.domain,
+    username: saved.username,
+    pageUrl: saved.pageUrl,
+    createdAt: saved.createdAt,
+    updatedAt: saved.updatedAt
+  };
+}
+function listEmbeddedBrowserPasswords() {
+  const store = loadPasswordStore();
+  return store.passwords.map(toEntry);
+}
+function getEmbeddedBrowserPasswordsForDomain(domain) {
+  const normalizedDomain = String(domain || "").trim().toLowerCase();
+  if (!normalizedDomain) {
+    return [];
+  }
+  const store = loadPasswordStore();
+  return store.passwords.filter((p) => p.domain === normalizedDomain).sort((a, b) => b.updatedAt - a.updatedAt).map(toEntry);
+}
+function decryptEmbeddedBrowserPasswordForAutoFill(id) {
+  if (!safeStorage.isEncryptionAvailable()) {
+    return null;
+  }
+  const store = loadPasswordStore();
+  const entry = store.passwords.find((p) => p.id === id);
+  if (!entry) {
+    return null;
+  }
+  try {
+    const buffer = Buffer.from(entry.encryptedPassword, "base64");
+    return safeStorage.decryptString(buffer);
+  } catch {
+    return null;
+  }
+}
+function hasEmbeddedBrowserMatchingPassword(domain, username) {
+  const normalizedDomain = String(domain || "").trim().toLowerCase();
+  const normalizedUsername = String(username || "").trim();
+  if (!normalizedDomain || !normalizedUsername) {
+    return false;
+  }
+  const store = loadPasswordStore();
+  return store.passwords.some((p) => p.domain === normalizedDomain && p.username === normalizedUsername);
+}
+function saveEmbeddedBrowserPassword(credential) {
+  if (!safeStorage.isEncryptionAvailable()) {
+    throw new Error("系统加密服务不可用，无法保存密码");
+  }
+  const store = loadPasswordStore();
+  const encryptedPassword = safeStorage.encryptString(credential.password).toString("base64");
+  const now = Date.now();
+  const existing = store.passwords.find(
+    (p) => p.domain === credential.domain && p.username === credential.username
+  );
+  if (existing) {
+    existing.encryptedPassword = encryptedPassword;
+    existing.pageUrl = credential.pageUrl;
+    existing.updatedAt = now;
+    savePasswordStore(store);
+    return toEntry(existing);
+  }
+  const newEntry = {
+    id: crypto.randomUUID(),
+    domain: credential.domain,
+    username: credential.username,
+    encryptedPassword,
+    pageUrl: credential.pageUrl,
+    createdAt: now,
+    updatedAt: now
+  };
+  store.passwords.push(newEntry);
+  savePasswordStore(store);
+  return toEntry(newEntry);
+}
+function deleteEmbeddedBrowserPassword(id) {
+  const store = loadPasswordStore();
+  const index = store.passwords.findIndex((p) => p.id === id);
+  if (index === -1) {
+    return false;
+  }
+  store.passwords.splice(index, 1);
+  savePasswordStore(store);
+  return true;
+}
+function deleteAllEmbeddedBrowserPasswords() {
+  const store = loadPasswordStore();
+  store.passwords = [];
+  savePasswordStore(store);
+}
+async function getEmbeddedBrowserDecryptedPassword(id) {
+  if (process.platform === "darwin") {
+    await systemPreferences.promptTouchID("查看已保存的密码");
+  }
+  if (!safeStorage.isEncryptionAvailable()) {
+    throw new Error("系统加密服务不可用");
+  }
+  const store = loadPasswordStore();
+  const entry = store.passwords.find((p) => p.id === id);
+  if (!entry) {
+    throw new Error("密码条目不存在");
+  }
+  const buffer = Buffer.from(entry.encryptedPassword, "base64");
+  return safeStorage.decryptString(buffer);
+}
+function addEmbeddedBrowserBlacklistedDomain(domain) {
+  const normalizedDomain = String(domain || "").trim().toLowerCase();
+  if (!normalizedDomain) {
+    return;
+  }
+  const store = loadPasswordStore();
+  if (!store.blacklistedDomains.includes(normalizedDomain)) {
+    store.blacklistedDomains.push(normalizedDomain);
+    savePasswordStore(store);
+  }
+}
+function isEmbeddedBrowserBlacklistedDomain(domain) {
+  const normalizedDomain = String(domain || "").trim().toLowerCase();
+  if (!normalizedDomain) {
+    return false;
+  }
+  const store = loadPasswordStore();
+  return store.blacklistedDomains.includes(normalizedDomain);
+}
+function cacheEmbeddedBrowserCredential(credential) {
+  const requestId = crypto.randomUUID();
+  const timer = setTimeout(() => {
+    credentialCache.delete(requestId);
+  }, CREDENTIAL_CACHE_TTL_MS);
+  credentialCache.set(requestId, { credential, timer });
+  return requestId;
+}
+function consumeEmbeddedBrowserCachedCredential(requestId) {
+  const entry = credentialCache.get(requestId);
+  if (!entry) {
+    return null;
+  }
+  clearTimeout(entry.timer);
+  credentialCache.delete(requestId);
+  return entry.credential;
 }
 const catCatchManifestExtensions = [
   "m3u8",
@@ -4421,6 +4662,128 @@ function createEmbeddedBrowserResourceProbeScript() {
     runtimeHooksBodySource: restoreProbeRuntimeNames(getScriptFunctionBody(embeddedBrowserResourceProbeRuntimeHooksBody))
   });
 }
+const EMBEDDED_BROWSER_CREDENTIAL_CONSOLE_PREFIX = "__OMNIFLOW_CREDENTIAL__:";
+const EMBEDDED_BROWSER_AUTOFILL_CONSOLE_PREFIX = "__OMNIFLOW_AUTOFILL_READY__:";
+function createCredentialDetectionScript() {
+  const prefix = EMBEDDED_BROWSER_CREDENTIAL_CONSOLE_PREFIX;
+  const autofillPrefix = EMBEDDED_BROWSER_AUTOFILL_CONSOLE_PREFIX;
+  return `(function(){
+  if(window.__OMNIFLOW_CREDENTIAL_DETECTION__)return;
+  window.__OMNIFLOW_CREDENTIAL_DETECTION__=true;
+  var PREFIX=${JSON.stringify(prefix)};
+  var AUTOFILL_PREFIX=${JSON.stringify(autofillPrefix)};
+  var USERNAME_PATTERN=/user|email|login|account|phone|name|identifier|usr|uname/i;
+  var lastSent='';
+  var lastSentAt=0;
+  var autoFillSignalSent=false;
+  var nativeSetter=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set;
+  function findPasswordFields(root){
+    try{return Array.from((root||document).querySelectorAll('input[type="password"]'))}catch(e){return[]}
+  }
+  function findUsernameField(passwordField){
+    var form=passwordField.closest('form');
+    var container=form||passwordField.parentElement&&passwordField.parentElement.parentElement||document;
+    var candidates=[];
+    try{candidates=Array.from(container.querySelectorAll('input[type="email"],input[type="text"],input[type="tel"]'))}catch(e){return null}
+    var scored=candidates.filter(function(input){
+      if(input===passwordField||input.type==='hidden')return false;
+      var rect=input.getBoundingClientRect();
+      if(rect.width===0&&rect.height===0)return false;
+      return true;
+    }).map(function(input){
+      var score=0;
+      var attrs=(input.name||'')+'|'+(input.id||'')+'|'+(input.getAttribute('autocomplete')||'')+'|'+(input.getAttribute('aria-label')||'')+'|'+(input.placeholder||'');
+      if(USERNAME_PATTERN.test(attrs))score+=10;
+      if(input.type==='email')score+=5;
+      if(form&&form.contains(input)){
+        var inputs=Array.from(form.querySelectorAll('input'));
+        var pwIdx=inputs.indexOf(passwordField);
+        var myIdx=inputs.indexOf(input);
+        if(myIdx>=0&&pwIdx>=0&&myIdx<pwIdx)score+=3;
+      }
+      return{el:input,score:score};
+    });
+    scored.sort(function(a,b){return b.score-a.score});
+    return scored.length?scored[0].el:null;
+  }
+  window.__OMNIFLOW_FILL_CREDENTIAL__=function(username,password){
+    var pwFields=findPasswordFields();
+    if(!pwFields.length)return false;
+    var filled=false;
+    pwFields.forEach(function(pwField){
+      var usernameField=findUsernameField(pwField);
+      if(usernameField&&username){
+        nativeSetter.call(usernameField,username);
+        usernameField.dispatchEvent(new Event('input',{bubbles:true}));
+        usernameField.dispatchEvent(new Event('change',{bubbles:true}));
+      }
+      nativeSetter.call(pwField,password);
+      pwField.dispatchEvent(new Event('input',{bubbles:true}));
+      pwField.dispatchEvent(new Event('change',{bubbles:true}));
+      filled=true;
+    });
+    return filled;
+  };
+  function signalAutoFillReady(){
+    if(autoFillSignalSent)return;
+    var pwFields=findPasswordFields();
+    if(!pwFields.length)return;
+    autoFillSignalSent=true;
+    var domain='';
+    try{domain=location.hostname}catch(e){}
+    console.info(AUTOFILL_PREFIX+JSON.stringify({domain:domain}));
+  }
+  function sendCredential(username,password){
+    if(!username||!password)return;
+    var key=username+'\\n'+password;
+    var now=Date.now();
+    if(key===lastSent&&now-lastSentAt<3000)return;
+    lastSent=key;
+    lastSentAt=now;
+    var domain='';
+    try{domain=location.hostname}catch(e){}
+    var pageUrl='';
+    try{pageUrl=location.href}catch(e){}
+    console.info(PREFIX+JSON.stringify({username:username,password:password,domain:domain,pageUrl:pageUrl}));
+  }
+  function captureFromPasswordField(pwField){
+    var usernameField=findUsernameField(pwField);
+    var username=usernameField?usernameField.value:'';
+    var password=pwField.value;
+    sendCredential(username,password);
+  }
+  function handleSubmit(event){
+    var form=event.target;
+    var pwFields=findPasswordFields(form);
+    pwFields.forEach(function(pwField){captureFromPasswordField(pwField)});
+  }
+  function handleClick(event){
+    var btn=event.target.closest('button[type="submit"],input[type="submit"],button:not([type])');
+    if(!btn)return;
+    var form=btn.closest('form');
+    if(!form)return;
+    var pwFields=findPasswordFields(form);
+    pwFields.forEach(function(pwField){captureFromPasswordField(pwField)});
+  }
+  function observePasswordFields(){
+    document.addEventListener('submit',handleSubmit,true);
+    document.addEventListener('click',handleClick,true);
+  }
+  function scanAndObserve(){
+    observePasswordFields();
+    signalAutoFillReady();
+    try{
+      var observer=new MutationObserver(function(){signalAutoFillReady()});
+      observer.observe(document.documentElement||document.body||document,{childList:true,subtree:true});
+    }catch(e){}
+  }
+  if(document.readyState==='loading'){
+    document.addEventListener('DOMContentLoaded',scanAndObserve);
+  }else{
+    scanAndObserve();
+  }
+})();`;
+}
 const embeddedBrowserProbeNewDocumentScriptIds = /* @__PURE__ */ new WeakMap();
 const EMBEDDED_BROWSER_POPUP_PLACEHOLDER_URLS = /* @__PURE__ */ new Set(["", "about:blank"]);
 function isEmbeddedBrowserPopupPlaceholderUrl(url) {
@@ -4462,6 +4825,8 @@ function createEmbeddedBrowserView(options) {
   });
   view.webContents.on("dom-ready", () => {
     void options.createIfMissingProbe(options.tabId, view);
+    view.webContents.executeJavaScript(createCredentialDetectionScript(), true).catch(() => {
+    });
   });
   view.webContents.on("did-stop-loading", async () => {
     if (view.webContents.isDestroyed()) {
@@ -4548,6 +4913,24 @@ function createEmbeddedBrowserView(options) {
           error: error instanceof Error ? error.message : String(error),
           tabId: options.tabId
         });
+      }
+      return;
+    }
+    if (typeof message === "string" && message.startsWith(EMBEDDED_BROWSER_CREDENTIAL_CONSOLE_PREFIX)) {
+      try {
+        options.onCredentialPayload(options.tabId, JSON.parse(message.slice(EMBEDDED_BROWSER_CREDENTIAL_CONSOLE_PREFIX.length)));
+      } catch {
+      }
+      return;
+    }
+    if (typeof message === "string" && message.startsWith(EMBEDDED_BROWSER_AUTOFILL_CONSOLE_PREFIX)) {
+      try {
+        const payload = JSON.parse(message.slice(EMBEDDED_BROWSER_AUTOFILL_CONSOLE_PREFIX.length));
+        const domain = typeof payload.domain === "string" ? payload.domain.trim() : "";
+        if (domain) {
+          options.onAutoFillReady(options.tabId, domain);
+        }
+      } catch {
       }
       return;
     }
@@ -5121,6 +5504,20 @@ function createEmbeddedBrowserMainController(options) {
     }
     mainWindow2.webContents.send("embedded-browser:resource", payload);
   }
+  function emitCredentialCaptured(payload) {
+    const mainWindow2 = options.getMainWindow();
+    if (!mainWindow2 || mainWindow2.isDestroyed()) {
+      return;
+    }
+    mainWindow2.webContents.send("embedded-browser:credential-captured", payload);
+  }
+  function emitCredentialAutoFilled(payload) {
+    const mainWindow2 = options.getMainWindow();
+    if (!mainWindow2 || mainWindow2.isDestroyed()) {
+      return;
+    }
+    mainWindow2.webContents.send("embedded-browser:credential-autofilled", payload);
+  }
   function resolveEmbeddedBrowserTabIdByWebContents(targetContents) {
     for (const [tabId, view] of embeddedBrowserViews.entries()) {
       if (view.webContents === targetContents) {
@@ -5353,6 +5750,49 @@ function createEmbeddedBrowserMainController(options) {
     }
     return null;
   }
+  function sanitizeEmbeddedBrowserOutputFileName(input) {
+    return String(input || "").trim().replace(/[\\/:*?"<>|]+/g, "_") || "download";
+  }
+  async function deriveEmbeddedBrowserPreferredOutputPath(directoryPath, fileName) {
+    const normalizedDirectory = path.resolve(String(directoryPath || "").trim());
+    if (!normalizedDirectory) {
+      throw new Error("无效的输出目录");
+    }
+    await mkdir(normalizedDirectory, { recursive: true });
+    const parsedName = path.parse(sanitizeEmbeddedBrowserOutputFileName(fileName));
+    const extension = parsedName.ext || "";
+    const baseName = parsedName.name || parsedName.base || "download";
+    for (let attempt = 0; attempt < 5e3; attempt += 1) {
+      const suffix = attempt === 0 ? "" : ` (${attempt})`;
+      const candidatePath = path.join(normalizedDirectory, `${baseName}${suffix}${extension}`);
+      const exists = await access(candidatePath).then(() => true).catch(() => false);
+      if (!exists) {
+        return candidatePath;
+      }
+    }
+    return path.join(normalizedDirectory, `${baseName}-${Date.now()}${extension}`);
+  }
+  async function resolveEmbeddedBrowserOutputPath(payload) {
+    const defaultFileName = sanitizeEmbeddedBrowserOutputFileName(payload.defaultFileName);
+    const preferredDirectory = String(payload.outputDirectoryPath || "").trim();
+    const shouldUseSystemSaveDialog = payload.useSystemSaveDialog !== false && !preferredDirectory;
+    if (!shouldUseSystemSaveDialog) {
+      const targetDirectory = preferredDirectory || app.getPath("downloads");
+      return deriveEmbeddedBrowserPreferredOutputPath(targetDirectory, defaultFileName);
+    }
+    const mainWindow2 = options.getMainWindow();
+    const targetWindow = mainWindow2 && !mainWindow2.isDestroyed() ? mainWindow2 : void 0;
+    const saveDialogOptions = {
+      defaultPath: path.join(app.getPath("downloads"), defaultFileName),
+      filters: payload.filters,
+      showsTagField: false
+    };
+    const saveResult = targetWindow ? await dialog.showSaveDialog(targetWindow, saveDialogOptions) : await dialog.showSaveDialog(saveDialogOptions);
+    if (saveResult.canceled || !saveResult.filePath) {
+      return null;
+    }
+    return saveResult.filePath;
+  }
   async function mergeEmbeddedBrowserCapturedMseResources(tabId, payload) {
     var _a, _b, _c, _d;
     const normalizedTabId = String(tabId || "").trim();
@@ -5407,17 +5847,15 @@ function createEmbeddedBrowserMainController(options) {
         };
       }
       const defaultFileName = String(payload.suggestedFileName || "").trim() || deriveEmbeddedBrowserMergedFileName(videoResource.fileName, audioResource.fileName);
-      const mainWindow2 = options.getMainWindow();
-      const targetWindow = mainWindow2 && !mainWindow2.isDestroyed() ? mainWindow2 : void 0;
-      const saveDialogOptions = {
-        defaultPath: path.join(app.getPath("downloads"), defaultFileName),
+      const outputPath = await resolveEmbeddedBrowserOutputPath({
+        defaultFileName,
         filters: [
           { extensions: ["mp4"], name: "MP4 Video" }
         ],
-        showsTagField: false
-      };
-      const saveResult = targetWindow ? await dialog.showSaveDialog(targetWindow, saveDialogOptions) : await dialog.showSaveDialog(saveDialogOptions);
-      if (saveResult.canceled || !saveResult.filePath) {
+        outputDirectoryPath: payload.outputDirectoryPath,
+        useSystemSaveDialog: payload.useSystemSaveDialog
+      });
+      if (!outputPath) {
         return {
           cancelled: true,
           ok: false
@@ -5426,7 +5864,7 @@ function createEmbeddedBrowserMainController(options) {
       const mergeResult = await mergeEmbeddedBrowserResourceTracks({
         audio: audioResource,
         ffmpegPath: payload.ffmpegPath,
-        outputPath: saveResult.filePath,
+        outputPath,
         video: videoResource
       });
       return {
@@ -5561,17 +5999,15 @@ function createEmbeddedBrowserMainController(options) {
         };
       }
       const defaultFileName = String(payload.suggestedFileName || "").trim() || deriveTranscodedFileName(resource.fileName, outputFormat);
-      const mainWindow2 = options.getMainWindow();
-      const targetWindow = mainWindow2 && !mainWindow2.isDestroyed() ? mainWindow2 : void 0;
-      const saveDialogOptions = {
-        defaultPath: path.join(app.getPath("downloads"), defaultFileName),
+      const outputPath = await resolveEmbeddedBrowserOutputPath({
+        defaultFileName,
         filters: [
           { extensions: [outputFormat], name: `${outputFormat.toUpperCase()} Media` }
         ],
-        showsTagField: false
-      };
-      const saveResult = targetWindow ? await dialog.showSaveDialog(targetWindow, saveDialogOptions) : await dialog.showSaveDialog(saveDialogOptions);
-      if (saveResult.canceled || !saveResult.filePath) {
+        outputDirectoryPath: payload.outputDirectoryPath,
+        useSystemSaveDialog: payload.useSystemSaveDialog
+      });
+      if (!outputPath) {
         return {
           cancelled: true,
           ok: false
@@ -5580,7 +6016,7 @@ function createEmbeddedBrowserMainController(options) {
       const result = await transcodeEmbeddedBrowserResource({
         ffmpegPath: payload.ffmpegPath,
         outputFormat,
-        outputPath: saveResult.filePath,
+        outputPath,
         resource
       });
       return {
@@ -5692,6 +6128,61 @@ function createEmbeddedBrowserMainController(options) {
       emitTabState: emitEmbeddedBrowserTabState,
       iconSourceUrls: embeddedBrowserIconSourceUrls,
       iconUrls: embeddedBrowserIconUrls,
+      onAutoFillReady: (autoFillTabId, domain) => {
+        const entries = getEmbeddedBrowserPasswordsForDomain(domain);
+        if (!entries.length) {
+          return;
+        }
+        const target = entries[0];
+        const password = decryptEmbeddedBrowserPasswordForAutoFill(target.id);
+        if (!password) {
+          return;
+        }
+        const view = getEmbeddedBrowserView(autoFillTabId);
+        if (!view || view.webContents.isDestroyed()) {
+          return;
+        }
+        const fillScript = `window.__OMNIFLOW_FILL_CREDENTIAL__(${JSON.stringify(target.username)}, ${JSON.stringify(password)})`;
+        view.webContents.executeJavaScript(fillScript, true).catch(() => {
+        });
+        if (entries.length > 1) {
+          emitCredentialAutoFilled({
+            tabId: autoFillTabId,
+            domain,
+            filledUsername: target.username,
+            alternatives: entries.map((e) => ({ id: e.id, username: e.username }))
+          });
+        }
+      },
+      onCredentialPayload: (credentialTabId, payload) => {
+        const username = typeof payload.username === "string" ? payload.username.trim() : "";
+        const password = typeof payload.password === "string" ? payload.password : "";
+        const domain = typeof payload.domain === "string" ? payload.domain.trim().toLowerCase() : "";
+        const pageUrl = typeof payload.pageUrl === "string" ? payload.pageUrl : "";
+        if (!username || !password || !domain) {
+          return;
+        }
+        if (isEmbeddedBrowserBlacklistedDomain(domain)) {
+          return;
+        }
+        if (hasEmbeddedBrowserMatchingPassword(domain, username)) {
+          return;
+        }
+        const credentialRequestId = cacheEmbeddedBrowserCredential({
+          domain,
+          username,
+          password,
+          pageUrl,
+          tabId: credentialTabId
+        });
+        emitCredentialCaptured({
+          credentialRequestId,
+          domain,
+          username,
+          pageUrl,
+          tabId: credentialTabId
+        });
+      },
       onProbePayload: buildEmbeddedBrowserProbeResourceRecorder(tabId),
       syncBounds: syncEmbeddedBrowserViewBounds,
       tabId,
@@ -6336,7 +6827,43 @@ function createEmbeddedBrowserMainController(options) {
       startDeepResourceCapture: handleStartDeepResourceCapture,
       stopCapturedResources: (tabId) => stopEmbeddedBrowserResourceCapture(String(tabId || "").trim()),
       transcodeResource: transcodeEmbeddedBrowserCapturedResourceForRenderer,
-      updateCatchToolkitState: handleUpdateCatchToolkitState
+      updateCatchToolkitState: handleUpdateCatchToolkitState,
+      getCookies: getEmbeddedBrowserCookies,
+      removeCookie: removeEmbeddedBrowserCookie,
+      removeCookiesByDomain: removeEmbeddedBrowserCookiesByDomain,
+      removeAllCookies: removeAllEmbeddedBrowserCookies,
+      listPasswords: listEmbeddedBrowserPasswords,
+      getDecryptedPassword: getEmbeddedBrowserDecryptedPassword,
+      saveCapturedCredential: async (credentialRequestId) => {
+        const credential = consumeEmbeddedBrowserCachedCredential(credentialRequestId);
+        if (!credential) {
+          throw new Error("凭据已过期或不存在，请重新登录后再保存");
+        }
+        return saveEmbeddedBrowserPassword(credential);
+      },
+      deletePassword: deleteEmbeddedBrowserPassword,
+      deleteAllPasswords: deleteAllEmbeddedBrowserPasswords,
+      blacklistDomain: addEmbeddedBrowserBlacklistedDomain,
+      isBlacklistedDomain: isEmbeddedBrowserBlacklistedDomain,
+      autoFillPassword: async (autoFillTabId, passwordId) => {
+        const store = listEmbeddedBrowserPasswords();
+        const entry = store.find((p) => p.id === passwordId);
+        if (!entry) {
+          return null;
+        }
+        const password = decryptEmbeddedBrowserPasswordForAutoFill(passwordId);
+        if (!password) {
+          return null;
+        }
+        const view = getEmbeddedBrowserView(autoFillTabId);
+        if (!view || view.webContents.isDestroyed()) {
+          return null;
+        }
+        const fillScript = `window.__OMNIFLOW_FILL_CREDENTIAL__(${JSON.stringify(entry.username)}, ${JSON.stringify(password)})`;
+        await view.webContents.executeJavaScript(fillScript, true).catch(() => {
+        });
+        return { username: entry.username };
+      }
     });
   }
   return {

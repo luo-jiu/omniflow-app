@@ -13,6 +13,7 @@ import {
   createEmbeddedBrowserResourceProbeScript,
 } from './embeddedBrowserResourceProbe'
 import {
+  EMBEDDED_BROWSER_AUTOFILL_CONSOLE_PREFIX,
   EMBEDDED_BROWSER_CREDENTIAL_CONSOLE_PREFIX,
   createCredentialDetectionScript,
 } from './embeddedBrowserCredentialDetectionScript'
@@ -37,6 +38,7 @@ type CreateEmbeddedBrowserViewOptions = {
   ) => void
   iconSourceUrls: Map<string, string>
   iconUrls: Map<string, string>
+  onAutoFillReady: (tabId: string, domain: string) => void
   onCredentialPayload: (tabId: string, payload: Record<string, unknown>) => void
   onProbePayload: (payload: Record<string, unknown>) => void
   syncBounds: (view: WebContentsView) => void
@@ -187,6 +189,18 @@ export function createEmbeddedBrowserView(
         options.onCredentialPayload(options.tabId, JSON.parse(message.slice(EMBEDDED_BROWSER_CREDENTIAL_CONSOLE_PREFIX.length)))
       } catch {
         // Malformed credential payload — ignore silently.
+      }
+      return
+    }
+    if (typeof message === 'string' && message.startsWith(EMBEDDED_BROWSER_AUTOFILL_CONSOLE_PREFIX)) {
+      try {
+        const payload = JSON.parse(message.slice(EMBEDDED_BROWSER_AUTOFILL_CONSOLE_PREFIX.length)) as Record<string, unknown>
+        const domain = typeof payload.domain === 'string' ? payload.domain.trim() : ''
+        if (domain) {
+          options.onAutoFillReady(options.tabId, domain)
+        }
+      } catch {
+        // Malformed autofill-ready payload.
       }
       return
     }

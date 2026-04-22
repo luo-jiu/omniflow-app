@@ -34,8 +34,9 @@ import ContextMenu, { type ContextMenuItem } from "@/components/ui/context-menu"
 import EmbeddedBrowserPanel, { type EmbeddedBrowserHandle } from "@/features/embedded-browser/components/EmbeddedBrowserPanel";
 import EmbeddedBrowserCookieSettings from "@/features/embedded-browser/cookies/components/EmbeddedBrowserCookieSettings";
 import EmbeddedBrowserPasswordSettings from "@/features/embedded-browser/passwords/components/EmbeddedBrowserPasswordSettings";
+import EmbeddedBrowserAutoFillBar from "@/features/embedded-browser/passwords/components/EmbeddedBrowserAutoFillBar";
 import EmbeddedBrowserPasswordSaveBar from "@/features/embedded-browser/passwords/components/EmbeddedBrowserPasswordSaveBar";
-import { subscribeCredentialCaptured } from "@/features/embedded-browser/passwords/services/embedded-browser-password.api";
+import { subscribeCredentialAutoFilled, subscribeCredentialCaptured } from "@/features/embedded-browser/passwords/services/embedded-browser-password.api";
 import EmbeddedBrowserDownloadImportModal from "@/features/embedded-browser/downloads/components/EmbeddedBrowserDownloadImportModal";
 import { useEmbeddedBrowserDownloadImport } from "@/features/embedded-browser/downloads/hooks/useEmbeddedBrowserDownloadImport";
 import EmbeddedBrowserResourcePanel from "@/features/embedded-browser/resources/components/EmbeddedBrowserResourcePanel";
@@ -1712,8 +1713,27 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
       }
     })
   }, [activeBrowserTabId])
+  const [autoFilledCredential, setAutoFilledCredential] = React.useState<{
+    tabId: string
+    domain: string
+    filledUsername: string
+    alternatives: Array<{ id: string; username: string }>
+  } | null>(null);
+  React.useEffect(() => {
+    return subscribeCredentialAutoFilled((payload) => {
+      if (payload.tabId && payload.tabId === activeBrowserTabId) {
+        setAutoFilledCredential({
+          tabId: payload.tabId,
+          domain: payload.domain,
+          filledUsername: payload.filledUsername,
+          alternatives: payload.alternatives,
+        })
+      }
+    })
+  }, [activeBrowserTabId])
   React.useEffect(() => {
     setPendingCredential(null)
+    setAutoFilledCredential(null)
   }, [activeBrowserTabId])
   const getPreferredBrowserPageTabId = React.useCallback(() => {
     const activePageTabId = (
@@ -3957,6 +3977,16 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
             domain={pendingCredential.domain}
             username={pendingCredential.username}
             onDismiss={() => setPendingCredential(null)}
+          />
+        ) : !pendingCredential && autoFilledCredential && workspaceDisplayMode === 'browser' && !activeBrowserTabIsSettings ? (
+          <EmbeddedBrowserAutoFillBar
+            tabId={autoFilledCredential.tabId}
+            filledUsername={autoFilledCredential.filledUsername}
+            alternatives={autoFilledCredential.alternatives}
+            onDismiss={() => setAutoFilledCredential(null)}
+            onUsernameFilled={(username) => setAutoFilledCredential((prev) =>
+              prev ? { ...prev, filledUsername: username } : null
+            )}
           />
         ) : null}
         <ContentBody>

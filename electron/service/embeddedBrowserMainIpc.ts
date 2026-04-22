@@ -89,6 +89,7 @@ type EmbeddedBrowserMainIpcHandlers = {
   deleteAllPasswords: () => void
   blacklistDomain: (domain: string) => void
   isBlacklistedDomain: (domain: string) => boolean
+  autoFillPassword: (tabId: string, passwordId: string) => Promise<{ username: string } | null>
 }
 
 export function registerEmbeddedBrowserMainIpcHandlers(handlers: EmbeddedBrowserMainIpcHandlers) {
@@ -237,5 +238,8 @@ export function registerEmbeddedBrowserMainIpcHandlers(handlers: EmbeddedBrowser
   ))
   ipcMain.handle('embedded-browser:password:is-blacklisted', (_event, domain: string) => (
     handlers.isBlacklistedDomain(domain)
+  ))
+  ipcMain.handle('embedded-browser:password:auto-fill', async (_event, tabId: string, passwordId: string) => (
+    handlers.autoFillPassword(tabId, passwordId)
   ))
 }

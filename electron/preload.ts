@@ -377,6 +377,8 @@ contextBridge.exposeInMainWorld('electronEmbeddedBrowser', {
     ipcRenderer.invoke('embedded-browser:password:blacklist-domain', domain),
   isBlacklistedDomain: (domain: string) =>
     ipcRenderer.invoke('embedded-browser:password:is-blacklisted', domain),
+  autoFillPassword: (tabId: string, passwordId: string) =>
+    ipcRenderer.invoke('embedded-browser:password:auto-fill', tabId, passwordId),
   onCredentialCaptured: (listener: (payload: {
     credentialRequestId: string;
     domain: string;
@@ -395,5 +397,22 @@ contextBridge.exposeInMainWorld('electronEmbeddedBrowser', {
     };
     ipcRenderer.on('embedded-browser:credential-captured', wrapped);
     return () => ipcRenderer.removeListener('embedded-browser:credential-captured', wrapped);
+  },
+  onCredentialAutoFilled: (listener: (payload: {
+    tabId: string;
+    domain: string;
+    filledUsername: string;
+    alternatives: Array<{ id: string; username: string }>;
+  }) => void) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, payload: {
+      tabId: string;
+      domain: string;
+      filledUsername: string;
+      alternatives: Array<{ id: string; username: string }>;
+    }) => {
+      listener(payload);
+    };
+    ipcRenderer.on('embedded-browser:credential-autofilled', wrapped);
+    return () => ipcRenderer.removeListener('embedded-browser:credential-autofilled', wrapped);
   },
 });
