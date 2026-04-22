@@ -12,6 +12,7 @@ import type {
   EmbeddedBrowserCookie,
   EmbeddedBrowserCookieFilter,
 } from './embeddedBrowserCookieService'
+import type { EmbeddedBrowserSavedPasswordEntry } from './embeddedBrowserPasswordTypes'
 import type { EmbeddedBrowserCatchToolkitStatePayload } from './embeddedBrowserCatchToolkitPageBridge'
 import type {
   EmbeddedBrowserExtractedResourcePayload,
@@ -81,6 +82,13 @@ type EmbeddedBrowserMainIpcHandlers = {
   removeCookie: (url: string, name: string) => Promise<void>
   removeCookiesByDomain: (domain: string) => Promise<void>
   removeAllCookies: () => Promise<void>
+  listPasswords: () => EmbeddedBrowserSavedPasswordEntry[]
+  getDecryptedPassword: (id: string) => Promise<string>
+  saveCapturedCredential: (credentialRequestId: string) => Promise<EmbeddedBrowserSavedPasswordEntry>
+  deletePassword: (id: string) => boolean
+  deleteAllPasswords: () => void
+  blacklistDomain: (domain: string) => void
+  isBlacklistedDomain: (domain: string) => boolean
 }
 
 export function registerEmbeddedBrowserMainIpcHandlers(handlers: EmbeddedBrowserMainIpcHandlers) {
@@ -207,5 +215,27 @@ export function registerEmbeddedBrowserMainIpcHandlers(handlers: EmbeddedBrowser
   ))
   ipcMain.handle('embedded-browser:cookie:remove-all', async () => (
     handlers.removeAllCookies()
+  ))
+
+  ipcMain.handle('embedded-browser:password:list', () => (
+    handlers.listPasswords()
+  ))
+  ipcMain.handle('embedded-browser:password:get-decrypted', async (_event, id: string) => (
+    handlers.getDecryptedPassword(id)
+  ))
+  ipcMain.handle('embedded-browser:password:save-captured', async (_event, credentialRequestId: string) => (
+    handlers.saveCapturedCredential(credentialRequestId)
+  ))
+  ipcMain.handle('embedded-browser:password:delete', (_event, id: string) => (
+    handlers.deletePassword(id)
+  ))
+  ipcMain.handle('embedded-browser:password:delete-all', () => (
+    handlers.deleteAllPasswords()
+  ))
+  ipcMain.handle('embedded-browser:password:blacklist-domain', (_event, domain: string) => (
+    handlers.blacklistDomain(domain)
+  ))
+  ipcMain.handle('embedded-browser:password:is-blacklisted', (_event, domain: string) => (
+    handlers.isBlacklistedDomain(domain)
   ))
 }

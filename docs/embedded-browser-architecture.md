@@ -32,8 +32,16 @@ OmniFlow 的 embedded browser 不是单纯的 React 组件，而是“renderer �
 - Renderer Cookie 管理
   - `src/features/embedded-browser/cookies/services/embedded-browser-cookie.api.ts`
   - `src/features/embedded-browser/cookies/components/EmbeddedBrowserCookieSettings.tsx`
+- Renderer 密码管理
+  - `src/features/embedded-browser/passwords/services/embedded-browser-password.api.ts`
+  - `src/features/embedded-browser/passwords/components/EmbeddedBrowserPasswordSaveBar.tsx`
+  - `src/features/embedded-browser/passwords/components/EmbeddedBrowserPasswordSettings.tsx`
 - Main Cookie 服务
   - `electron/service/embeddedBrowserCookieService.ts`
+- Main 密码服务
+  - `electron/service/embeddedBrowserPasswordTypes.ts`
+  - `electron/service/embeddedBrowserPasswordService.ts`
+  - `electron/service/embeddedBrowserCredentialDetectionScript.ts`
 - Preload bridge
   - `electron/preload.ts`
 - IPC 注册
@@ -105,12 +113,13 @@ library detail page
 
 ### 3.4 Preload / IPC / Main
 
-`electron/preload.ts` 当前提供四类嵌入浏览器相关桥接：
+`electron/preload.ts` 当前提供五类嵌入浏览器相关桥接：
 
 - 页面和 tab 控制
 - 下载事件和资源事件订阅
 - 资源捕捉、缓存捕捉、预览、导出、合并、manifest 下载
 - Cookie 管理（查询、删除单条、按域名删除、全部清除）
+- 密码管理（列表、解密查看、保存凭据、删除、黑名��、凭据捕获事件）
 
 `embeddedBrowserMainIpc.ts` 只负责 channel 到 handler 的转发，不承担业务规则。
 
@@ -271,6 +280,26 @@ renderer catch toolkit action
 
 - renderer 不直接假设页面里只有一个 frame。
 - main controller 会优先在 frame 列表里执行 page action，再汇总结果。
+
+### 5.6 密码管理链路
+
+密码管理分为凭据检测和密码存储两部分：
+
+#### 凭据检测
+
+- `dom-ready` 时注入轻量检测脚本（`embeddedBrowserCredentialDetectionScript.ts`）
+- 脚本在 capture 阶段监听 `submit` 和 submit 按钮 `click`
+- 通过 `console.info(__OMNIFLOW_CREDENTIAL__:JSON)` 发送凭据到 main
+- main 校验后缓存凭据（60 秒 TTL），只发 `credentialRequestId` 给 renderer
+- renderer 显示保存通知条
+
+#### 密码存储
+
+- renderer 用 `credentialRequestId` 请求保存
+- main 从缓存取出明文 → `safeStorage.encryptString()` → 写入 `embedded-browser-passwords.json`
+- 查看密码需 `systemPreferences.promptTouchID()` 后 `safeStorage.decryptString()`
+
+密码明文不会到达 renderer 进程。
 
 ## 6. 生命周期规则
 

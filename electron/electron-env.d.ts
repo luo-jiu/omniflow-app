@@ -189,6 +189,23 @@ type EmbeddedBrowserCookieFilter = {
   path?: string;
 };
 
+type EmbeddedBrowserSavedPasswordEntry = {
+  id: string;
+  domain: string;
+  username: string;
+  pageUrl: string;
+  createdAt: number;
+  updatedAt: number;
+};
+
+type EmbeddedBrowserCapturedCredentialEvent = {
+  credentialRequestId: string;
+  domain: string;
+  username: string;
+  pageUrl: string;
+  tabId: string;
+};
+
 type EmbeddedBrowserBounds = {
   x: number;
   y: number;
@@ -392,5 +409,13 @@ interface Window {
     removeCookie: (url: string, name: string) => Promise<void>;
     removeCookiesByDomain: (domain: string) => Promise<void>;
     removeAllCookies: () => Promise<void>;
+    listPasswords: () => Promise<EmbeddedBrowserSavedPasswordEntry[]>;
+    getDecryptedPassword: (id: string) => Promise<string>;
+    saveCapturedCredential: (credentialRequestId: string) => Promise<EmbeddedBrowserSavedPasswordEntry>;
+    deletePassword: (id: string) => Promise<boolean>;
+    deleteAllPasswords: () => Promise<void>;
+    blacklistDomain: (domain: string) => Promise<void>;
+    isBlacklistedDomain: (domain: string) => Promise<boolean>;
+    onCredentialCaptured: (listener: (payload: EmbeddedBrowserCapturedCredentialEvent) => void) => () => void;
   };
 }

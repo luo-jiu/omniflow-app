@@ -17,6 +17,18 @@ import {
   removeEmbeddedBrowserCookie,
   removeEmbeddedBrowserCookiesByDomain,
 } from './embeddedBrowserCookieService'
+import type { EmbeddedBrowserCapturedCredentialEvent } from './embeddedBrowserPasswordTypes'
+import {
+  addEmbeddedBrowserBlacklistedDomain,
+  cacheEmbeddedBrowserCredential,
+  consumeEmbeddedBrowserCachedCredential,
+  deleteAllEmbeddedBrowserPasswords,
+  deleteEmbeddedBrowserPassword,
+  getEmbeddedBrowserDecryptedPassword,
+  isEmbeddedBrowserBlacklistedDomain,
+  listEmbeddedBrowserPasswords,
+  saveEmbeddedBrowserPassword,
+} from './embeddedBrowserPasswordService'
 import {
   type EmbeddedBrowserBounds,
   type EmbeddedBrowserCapturedResourceMergePayload,
@@ -133,6 +145,14 @@ export function createEmbeddedBrowserMainController(
       return
     }
     mainWindow.webContents.send('embedded-browser:resource', payload)
+  }
+
+  function emitCredentialCaptured(payload: EmbeddedBrowserCapturedCredentialEvent) {
+    const mainWindow = options.getMainWindow()
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      return
+    }
+    mainWindow.webContents.send('embedded-browser:credential-captured', payload)
   }
 
   function resolveEmbeddedBrowserTabIdByWebContents(targetContents: Electron.WebContents) {
@@ -885,6 +905,32 @@ export function createEmbeddedBrowserMainController(
       emitTabState: emitEmbeddedBrowserTabState,
       iconSourceUrls: embeddedBrowserIconSourceUrls,
       iconUrls: embeddedBrowserIconUrls,
+      onCredentialPayload: (credentialTabId, payload) => {
+        const username = typeof payload.username === 'string' ? payload.username.trim() : ''
+        const password = typeof payload.password === 'string' ? payload.password : ''
+        const domain = typeof payload.domain === 'string' ? payload.domain.trim().toLowerCase() : ''
+        const pageUrl = typeof payload.pageUrl === 'string' ? payload.pageUrl : ''
+        if (!username || !password || !domain) {
+          return
+        }
+        if (isEmbeddedBrowserBlacklistedDomain(domain)) {
+          return
+        }
+        const credentialRequestId = cacheEmbeddedBrowserCredential({
+          domain,
+          username,
+          password,
+          pageUrl,
+          tabId: credentialTabId,
+        })
+        emitCredentialCaptured({
+          credentialRequestId,
+          domain,
+          username,
+          pageUrl,
+          tabId: credentialTabId,
+        })
+      },
       onProbePayload: buildEmbeddedBrowserProbeResourceRecorder(tabId),
       syncBounds: syncEmbeddedBrowserViewBounds,
       tabId,
@@ -1588,6 +1634,19 @@ export function createEmbeddedBrowserMainController(
       removeCookie: removeEmbeddedBrowserCookie,
       removeCookiesByDomain: removeEmbeddedBrowserCookiesByDomain,
       removeAllCookies: removeAllEmbeddedBrowserCookies,
+      listPasswords: listEmbeddedBrowserPasswords,
+      getDecryptedPassword: getEmbeddedBrowserDecryptedPassword,
+      saveCapturedCredential: async (credentialRequestId) => {
+        const credential = consumeEmbeddedBrowserCachedCredential(credentialRequestId)
+        if (!credential) {
+          throw new Error('凭据已过期或不存在，请重新登录后再保存')
+        }
+        return saveEmbeddedBrowserPassword(credential)
+      },
+      deletePassword: deleteEmbeddedBrowserPassword,
+      deleteAllPasswords: deleteAllEmbeddedBrowserPasswords,
+      blacklistDomain: addEmbeddedBrowserBlacklistedDomain,
+      isBlacklistedDomain: isEmbeddedBrowserBlacklistedDomain,
     })
   }
 

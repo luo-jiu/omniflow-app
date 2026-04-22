@@ -33,6 +33,9 @@ import styled, { createGlobalStyle, css } from "styled-components";
 import ContextMenu, { type ContextMenuItem } from "@/components/ui/context-menu";
 import EmbeddedBrowserPanel, { type EmbeddedBrowserHandle } from "@/features/embedded-browser/components/EmbeddedBrowserPanel";
 import EmbeddedBrowserCookieSettings from "@/features/embedded-browser/cookies/components/EmbeddedBrowserCookieSettings";
+import EmbeddedBrowserPasswordSettings from "@/features/embedded-browser/passwords/components/EmbeddedBrowserPasswordSettings";
+import EmbeddedBrowserPasswordSaveBar from "@/features/embedded-browser/passwords/components/EmbeddedBrowserPasswordSaveBar";
+import { subscribeCredentialCaptured } from "@/features/embedded-browser/passwords/services/embedded-browser-password.api";
 import EmbeddedBrowserDownloadImportModal from "@/features/embedded-browser/downloads/components/EmbeddedBrowserDownloadImportModal";
 import { useEmbeddedBrowserDownloadImport } from "@/features/embedded-browser/downloads/hooks/useEmbeddedBrowserDownloadImport";
 import EmbeddedBrowserResourcePanel from "@/features/embedded-browser/resources/components/EmbeddedBrowserResourcePanel";
@@ -1691,6 +1694,27 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   }, [activeBrowserTabId, browserTabs]);
   const activeBrowserTabIsSettings = isBrowserSettingsTab(activeBrowserTab);
   const [browserSettingsSection, setBrowserSettingsSection] = React.useState<string | null>(null);
+  const [pendingCredential, setPendingCredential] = React.useState<{
+    credentialRequestId: string
+    domain: string
+    username: string
+    tabId: string
+  } | null>(null);
+  React.useEffect(() => {
+    return subscribeCredentialCaptured((payload) => {
+      if (payload.tabId && payload.tabId === activeBrowserTabId) {
+        setPendingCredential({
+          credentialRequestId: payload.credentialRequestId,
+          domain: payload.domain,
+          username: payload.username,
+          tabId: payload.tabId,
+        })
+      }
+    })
+  }, [activeBrowserTabId])
+  React.useEffect(() => {
+    setPendingCredential(null)
+  }, [activeBrowserTabId])
   const getPreferredBrowserPageTabId = React.useCallback(() => {
     const activePageTabId = (
       activeBrowserTabId
@@ -3927,6 +3951,14 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
             ) : null}
           </>
         ) : null}
+        {pendingCredential && workspaceDisplayMode === 'browser' && !activeBrowserTabIsSettings ? (
+          <EmbeddedBrowserPasswordSaveBar
+            credentialRequestId={pendingCredential.credentialRequestId}
+            domain={pendingCredential.domain}
+            username={pendingCredential.username}
+            onDismiss={() => setPendingCredential(null)}
+          />
+        ) : null}
         <ContentBody>
           {workspaceDisplayMode === 'browser' ? (
             <BrowserWorkspace>
@@ -3935,6 +3967,8 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
                   <BrowserSettingsContent>
                     {browserSettingsSection === 'cookies' ? (
                       <EmbeddedBrowserCookieSettings onBack={() => setBrowserSettingsSection(null)} />
+                    ) : browserSettingsSection === 'passwords' ? (
+                      <EmbeddedBrowserPasswordSettings onBack={() => setBrowserSettingsSection(null)} />
                     ) : (
                       <>
                         <div className="browser-settings-hero">
@@ -3965,11 +3999,22 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
                               查看、搜索和清除内置浏览器的 Cookie，按域名管理站点登录态和站点数据。
                             </div>
                           </div>
-                          <div className="browser-settings-card">
-                            <span className="browser-settings-chip">需要更谨慎</span>
-                            <div className="browser-settings-card-title">密码管理</div>
+                          <div
+                            className="browser-settings-card browser-settings-card-clickable"
+                            onClick={() => setBrowserSettingsSection('passwords')}
+                            role="button"
+                            tabIndex={0}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault()
+                                setBrowserSettingsSection('passwords')
+                              }
+                            }}
+                          >
+                            <span className="browser-settings-chip">密码管理</span>
+                            <div className="browser-settings-card-title">已保存的密码</div>
                             <div className="browser-settings-card-body">
-                              可以做，但不适合先拍脑袋上。更稳的方向是明确本地加密存储、查看授权和导出边界，再决定是否做成浏览器内建密码库。
+                              查看和管理内置浏览器保存的网站登录密码，查看密码需要通过 Touch ID 验证。
                             </div>
                           </div>
                           <div className="browser-settings-card">

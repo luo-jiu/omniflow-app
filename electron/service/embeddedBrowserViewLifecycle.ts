@@ -12,6 +12,10 @@ import {
   EMBEDDED_BROWSER_RESOURCE_CONSOLE_PREFIX,
   createEmbeddedBrowserResourceProbeScript,
 } from './embeddedBrowserResourceProbe'
+import {
+  EMBEDDED_BROWSER_CREDENTIAL_CONSOLE_PREFIX,
+  createCredentialDetectionScript,
+} from './embeddedBrowserCredentialDetectionScript'
 import { type EmbeddedBrowserCapturedResource, recordEmbeddedBrowserProbeResource } from './embeddedBrowserResourceService'
 
 const embeddedBrowserProbeNewDocumentScriptIds = new WeakMap<WebContents, string>()
@@ -33,6 +37,7 @@ type CreateEmbeddedBrowserViewOptions = {
   ) => void
   iconSourceUrls: Map<string, string>
   iconUrls: Map<string, string>
+  onCredentialPayload: (tabId: string, payload: Record<string, unknown>) => void
   onProbePayload: (payload: Record<string, unknown>) => void
   syncBounds: (view: WebContentsView) => void
   tabId: string
@@ -85,6 +90,7 @@ export function createEmbeddedBrowserView(
   })
   view.webContents.on('dom-ready', () => {
     void options.createIfMissingProbe(options.tabId, view)
+    view.webContents.executeJavaScript(createCredentialDetectionScript(), true).catch(() => {})
   })
   view.webContents.on('did-stop-loading', async () => {
     if (view.webContents.isDestroyed()) {
@@ -173,6 +179,14 @@ export function createEmbeddedBrowserView(
           error: error instanceof Error ? error.message : String(error),
           tabId: options.tabId,
         })
+      }
+      return
+    }
+    if (typeof message === 'string' && message.startsWith(EMBEDDED_BROWSER_CREDENTIAL_CONSOLE_PREFIX)) {
+      try {
+        options.onCredentialPayload(options.tabId, JSON.parse(message.slice(EMBEDDED_BROWSER_CREDENTIAL_CONSOLE_PREFIX.length)))
+      } catch {
+        // Malformed credential payload — ignore silently.
       }
       return
     }

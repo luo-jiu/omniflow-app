@@ -363,4 +363,37 @@ contextBridge.exposeInMainWorld('electronEmbeddedBrowser', {
     ipcRenderer.invoke('embedded-browser:cookie:remove-domain', domain),
   removeAllCookies: () =>
     ipcRenderer.invoke('embedded-browser:cookie:remove-all'),
+  listPasswords: () =>
+    ipcRenderer.invoke('embedded-browser:password:list'),
+  getDecryptedPassword: (id: string) =>
+    ipcRenderer.invoke('embedded-browser:password:get-decrypted', id),
+  saveCapturedCredential: (credentialRequestId: string) =>
+    ipcRenderer.invoke('embedded-browser:password:save-captured', credentialRequestId),
+  deletePassword: (id: string) =>
+    ipcRenderer.invoke('embedded-browser:password:delete', id),
+  deleteAllPasswords: () =>
+    ipcRenderer.invoke('embedded-browser:password:delete-all'),
+  blacklistDomain: (domain: string) =>
+    ipcRenderer.invoke('embedded-browser:password:blacklist-domain', domain),
+  isBlacklistedDomain: (domain: string) =>
+    ipcRenderer.invoke('embedded-browser:password:is-blacklisted', domain),
+  onCredentialCaptured: (listener: (payload: {
+    credentialRequestId: string;
+    domain: string;
+    username: string;
+    pageUrl: string;
+    tabId: string;
+  }) => void) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, payload: {
+      credentialRequestId: string;
+      domain: string;
+      username: string;
+      pageUrl: string;
+      tabId: string;
+    }) => {
+      listener(payload);
+    };
+    ipcRenderer.on('embedded-browser:credential-captured', wrapped);
+    return () => ipcRenderer.removeListener('embedded-browser:credential-captured', wrapped);
+  },
 });
