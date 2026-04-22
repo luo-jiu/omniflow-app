@@ -1,5 +1,8 @@
 import type { SelectedTreeNode } from '@/features/file-explorer';
-import type { EmbeddedBrowserHlsDownloadPlan } from '@/features/embedded-browser/resources/model/embedded-browser-hls-manifest';
+import type {
+  EmbeddedBrowserHlsDownloadPlan,
+  EmbeddedBrowserHlsManifest,
+} from '@/features/embedded-browser/resources/model/embedded-browser-hls-manifest';
 import type { EmbeddedBrowserCapturedResource } from '@/features/embedded-browser/resources/types';
 
 export type ToolWorkspaceToolId = 'subtitle-translation' | 'media-processing';
@@ -15,6 +18,7 @@ export interface ToolWorkspaceMediaResourceRequest {
 export interface ToolWorkspaceMediaHlsRequest {
   id: number;
   kind: 'hls-download';
+  manifest: EmbeddedBrowserHlsManifest;
   plan: EmbeddedBrowserHlsDownloadPlan;
   resource: EmbeddedBrowserCapturedResource;
 }

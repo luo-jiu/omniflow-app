@@ -39,6 +39,7 @@ type MpdAnalysisState = {
 type EmbeddedBrowserResourceManifestToolsProps = {
   onOpenHlsDownloadWorkspace?: (
     resource: EmbeddedBrowserCapturedResource,
+    manifest: EmbeddedBrowserHlsManifest,
     plan: EmbeddedBrowserHlsDownloadPlan,
   ) => void
   resource: EmbeddedBrowserCapturedResource
@@ -309,7 +310,7 @@ const EmbeddedBrowserResourceManifestTools: React.FC<EmbeddedBrowserResourceMani
                 type="button"
                 className="resource-card-btn"
                 onClick={() => {
-                  onOpenHlsDownloadWorkspace(resource, hlsAnalysis.plan!);
+                  onOpenHlsDownloadWorkspace(resource, hlsAnalysis.manifest!, hlsAnalysis.plan!);
                 }}
               >
                 送到工具页

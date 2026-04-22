@@ -25,10 +25,12 @@ import {
   formatResourceTitle,
   mergeCapturedResources,
   transcodeCapturedResource,
+  verifyHlsResourceKey,
 } from '@/features/embedded-browser/resources/services/embedded-browser-resource-panel-actions';
 import {
   downloadEmbeddedBrowserHlsManifest,
   downloadEmbeddedBrowserHlsPlan,
+  listEmbeddedBrowserCapturedResources,
   subscribeEmbeddedBrowserHlsTask,
 } from '@/features/embedded-browser/resources/services/embedded-browser-resource.api';
 import {
@@ -46,6 +48,7 @@ import {
 } from '@/features/embedded-browser/resources/model/embedded-browser-resource.presentation';
 import {
   normalizeHlsKeyCandidateValue,
+  type EmbeddedBrowserHlsKeyVerificationResult,
 } from '@/features/embedded-browser/resources/model/embedded-browser-hls-key-verifier';
 
 import {
@@ -1353,8 +1356,10 @@ const MediaProcessingTool: React.FC<MediaProcessingToolProps> = ({
   const [merging, setMerging] = React.useState(false);
   const [transcoding, setTranscoding] = React.useState(false);
   const [savingHls, setSavingHls] = React.useState(false);
+  const [verifyingHlsKey, setVerifyingHlsKey] = React.useState(false);
   const [hlsManualKeyDraft, setHlsManualKeyDraft] = React.useState('');
   const [selectedHlsVariantUrl, setSelectedHlsVariantUrl] = React.useState('');
+  const [hlsKeyVerificationResult, setHlsKeyVerificationResult] = React.useState<EmbeddedBrowserHlsKeyVerificationResult | null>(null);
   const [hlsTaskStatus, setHlsTaskStatus] = React.useState<HlsTaskStatus>({
     completedFragments: 0,
     logs: [],
@@ -1363,6 +1368,7 @@ const MediaProcessingTool: React.FC<MediaProcessingToolProps> = ({
   });
   const activeHlsTaskRequestIdRef = React.useRef('');
   const activeHlsTaskManifestUrlRef = React.useRef('');
+  const activeHlsKeyVerificationTokenRef = React.useRef('');
   const [transcodeFormatDraft, setTranscodeFormatDraft] = React.useState('m4a');
   const [saveTargetType, setSaveTargetType] = React.useState<MediaSaveTargetType>('local');
   const [localOutputDirectory, setLocalOutputDirectory] = React.useState('');
@@ -1445,8 +1451,11 @@ const MediaProcessingTool: React.FC<MediaProcessingToolProps> = ({
   React.useEffect(() => {
     setHlsManualKeyDraft('');
     setSelectedHlsVariantUrl('');
+    setHlsKeyVerificationResult(null);
+    setVerifyingHlsKey(false);
     activeHlsTaskRequestIdRef.current = '';
     activeHlsTaskManifestUrlRef.current = '';
+    activeHlsKeyVerificationTokenRef.current = '';
     setHlsTaskStatus({
       completedFragments: 0,
       logs: [],
@@ -1454,6 +1463,15 @@ const MediaProcessingTool: React.FC<MediaProcessingToolProps> = ({
       totalFragments: hlsRequest?.plan.fragmentCount || 0,
     });
   }, [hlsRequest?.id, hlsRequest?.plan.fragmentCount]);
+
+  React.useEffect(() => {
+    if (!hlsRequest) {
+      return;
+    }
+    setHlsKeyVerificationResult(null);
+    activeHlsKeyVerificationTokenRef.current = '';
+    setVerifyingHlsKey(false);
+  }, [hlsManualKeyDraft, selectedHlsVariantUrl, hlsRequest]);
 
   React.useEffect(() => {
     const unsubscribe = subscribeEmbeddedBrowserHlsTask((payload) => {
@@ -1713,6 +1731,54 @@ const MediaProcessingTool: React.FC<MediaProcessingToolProps> = ({
     selectedHlsVariantUrl,
   ]);
 
+  const handleVerifyHlsKey = React.useCallback(async () => {
+    if (!hlsRequest) {
+      Toast.warning('先从资源面板解析 HLS，再送到工具页');
+      return;
+    }
+    const verificationToken = `${hlsRequest.id}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    activeHlsKeyVerificationTokenRef.current = verificationToken;
+    setVerifyingHlsKey(true);
+    try {
+      const snapshot = await listEmbeddedBrowserCapturedResources(hlsRequest.resource.tabId);
+      const result = await verifyHlsResourceKey({
+        manualKeyBase64: normalizedHlsManualKey || undefined,
+        manifest: hlsRequest.manifest,
+        manifestResource: hlsRequest.resource,
+        resources: snapshot.resources,
+      });
+      if (activeHlsKeyVerificationTokenRef.current !== verificationToken) {
+        return;
+      }
+      setHlsKeyVerificationResult(result);
+      if (result.mediaAlreadyReadable) {
+        Toast.success('片段本身可读，不需要 key');
+        return;
+      }
+      if (result.ok && result.candidate) {
+        Toast.success(`已验证到可用 key：${result.candidate.label}`);
+        return;
+      }
+      Toast.warning(result.error || '没有验证到可用 key');
+    } catch (error: any) {
+      const fallbackResult = {
+        error: error?.message || 'key 验证失败',
+        mediaAlreadyReadable: false,
+        ok: false,
+      } satisfies EmbeddedBrowserHlsKeyVerificationResult;
+      if (activeHlsKeyVerificationTokenRef.current !== verificationToken) {
+        return;
+      }
+      setHlsKeyVerificationResult(fallbackResult);
+      Toast.error(fallbackResult.error);
+    } finally {
+      if (activeHlsKeyVerificationTokenRef.current === verificationToken) {
+        activeHlsKeyVerificationTokenRef.current = '';
+        setVerifyingHlsKey(false);
+      }
+    }
+  }, [hlsRequest, normalizedHlsManualKey]);
+
   const handleTranscodeFormatChange = React.useCallback((value: string) => {
     setTranscodeFormatDraft(String(value || '').trimStart().replace(/^\.+/, '').slice(0, 12));
   }, []);
@@ -1944,6 +2010,12 @@ const MediaProcessingTool: React.FC<MediaProcessingToolProps> = ({
                     {hlsNonAesKeyCount > 0 ? (
                       <Tag color="red">存在 {hlsNonAesKeyCount} 个非 AES-128 key，当前主链未完整覆盖</Tag>
                     ) : null}
+                    {hlsKeyVerificationResult?.mediaAlreadyReadable ? (
+                      <Tag color="green">片段本身可读</Tag>
+                    ) : null}
+                    {hlsKeyVerificationResult?.ok && hlsKeyVerificationResult.candidate ? (
+                      <Tag color="green">已验证可用 key</Tag>
+                    ) : null}
                   </ActionRow>
                   {hlsCanSelectVariant ? (
                     <>
@@ -1995,6 +2067,13 @@ const MediaProcessingTool: React.FC<MediaProcessingToolProps> = ({
                     ) : null}
                   </ActionRow>
                   <ActionRow>
+                    <Button
+                      disabled={hlsAes128KeyCount === 0}
+                      loading={verifyingHlsKey}
+                      onClick={() => void handleVerifyHlsKey()}
+                    >
+                      {verifyingHlsKey ? '验证中' : '验证 key'}
+                    </Button>
                     <Button loading={savingHls} type="primary" onClick={() => void handleSaveHls()}>
                       下载&保存
                     </Button>
@@ -2053,6 +2132,23 @@ const MediaProcessingTool: React.FC<MediaProcessingToolProps> = ({
                   {hlsTaskStatus.error ? (
                     <div className="panel-desc" style={{ color: 'var(--semi-color-danger)' }}>
                       最近错误：{hlsTaskStatus.error}
+                    </div>
+                  ) : null}
+                  {hlsKeyVerificationResult ? (
+                    <div
+                      className="panel-desc"
+                      style={{
+                        color: hlsKeyVerificationResult.ok || hlsKeyVerificationResult.mediaAlreadyReadable
+                          ? 'var(--semi-color-success)'
+                          : 'var(--semi-color-warning)',
+                      }}
+                    >
+                      key 验证：
+                      {hlsKeyVerificationResult.mediaAlreadyReadable
+                        ? ' 片段本身可读，不需要 key'
+                        : hlsKeyVerificationResult.ok && hlsKeyVerificationResult.candidate
+                          ? ` 命中 ${hlsKeyVerificationResult.candidate.label}`
+                          : ` ${hlsKeyVerificationResult.error || '未命中可用 key'}`}
                     </div>
                   ) : null}
                   {hlsTaskStatus.lastOutputPath ? (

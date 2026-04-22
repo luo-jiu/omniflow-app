@@ -242,11 +242,19 @@ async function readCapturedKeyCandidate(resource: EmbeddedBrowserCapturedResourc
 }
 
 async function collectHlsKeyCandidates(input: {
+  manualKeyBase64?: string
   manifest: EmbeddedBrowserHlsManifest
   manifestResource: EmbeddedBrowserCapturedResource
   resources: EmbeddedBrowserCapturedResource[]
 }) {
   const candidates = new Map<string, EmbeddedBrowserHlsKeyCandidate>();
+  if (input.manualKeyBase64) {
+    addHlsKeyCandidate(candidates, {
+      base64: input.manualKeyBase64,
+      label: '工具区手动输入 key',
+      source: 'manual',
+    });
+  }
   const headers = withResourceRefererHeader(input.manifestResource);
   await Promise.all(input.manifest.keys.map(async (key) => {
     const inlineKey = normalizeHlsKeyCandidateValue(key.uri || '');
@@ -289,6 +297,7 @@ async function collectHlsKeyCandidates(input: {
 }
 
 export async function verifyHlsResourceKey(input: {
+  manualKeyBase64?: string
   manifest: EmbeddedBrowserHlsManifest
   manifestResource: EmbeddedBrowserCapturedResource
   resources: EmbeddedBrowserCapturedResource[]

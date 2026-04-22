@@ -201,6 +201,9 @@ renderer tool workspace
     - 默认保持“自动”，继续把原始 manifest 交给 ffmpeg。
     - 也可以明确锁到某个 variant URL，再按该清晰度执行下载。
   - 工具页支持手动输入 16 字节 AES-128 自定义 key（hex / base64）。
+  - 工具页也可以直接做一轮 key 验证：
+    - 自动候选来源于 manifest 自带 key URL 和当前 tab 已捕获的 key 资源。
+    - 如果你已经手动输入了 key，也会一起作为候选参与验证。
   - 工具页会显示当前执行状态、最近日志、当前阶段，以及分片完成数；失败后可直接重新执行。
   - 网络 manifest：
     - 继续走现有 `ffmpeg` 直拉主链。

@@ -119,6 +119,7 @@ library detail page
   - blob / 页内内存 manifest：走 Electron main 本地 downloader，先生成 local workdir 和 rewritten local playlist，再交给 `ffmpeg`。
 - 网络 master playlist 已补第一版 variant 选择；默认保持“自动”，也可锁到具体 variant URL 后再走 `ffmpeg`。
 - 如果用户在工具区填写了手动 AES-128 key，也会切到本地 downloader 主链，由 Electron main 写本地 key 文件后重写 playlist。
+- 工具区也可直接发起 HLS key 验证；候选会合并 manifest key URL、当前 tab 已捕获 key 资源和工具区手动输入 key。
 - 当前 `master playlist + 手动 key` 仍会显式拦住，避免误走错误主链。
 - main 侧会把 HLS 执行阶段事件回推给 renderer；工具区据此展示当前阶段、最近日志、分片完成数和错误状态。
 

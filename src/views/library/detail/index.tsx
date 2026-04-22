@@ -41,6 +41,7 @@ import EmbeddedBrowserDownloadImportModal from "@/features/embedded-browser/down
 import { useEmbeddedBrowserDownloadImport } from "@/features/embedded-browser/downloads/hooks/useEmbeddedBrowserDownloadImport";
 import EmbeddedBrowserResourcePanel from "@/features/embedded-browser/resources/components/EmbeddedBrowserResourcePanel";
 import type { EmbeddedBrowserHlsDownloadPlan } from "@/features/embedded-browser/resources/model/embedded-browser-hls-manifest";
+import type { EmbeddedBrowserHlsManifest } from "@/features/embedded-browser/resources/model/embedded-browser-hls-manifest";
 import type { EmbeddedBrowserCapturedResource } from "@/features/embedded-browser/resources/types";
 import type { ToolWorkspaceMediaRequest } from "@/features/tool-workspace/types";
 import {
@@ -2749,11 +2750,13 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
 
   const openHlsDownloadWorkspace = React.useCallback((
     resource: EmbeddedBrowserCapturedResource,
+    manifest: EmbeddedBrowserHlsManifest,
     plan: EmbeddedBrowserHlsDownloadPlan,
   ) => {
     setMediaProcessingRequest({
       id: Date.now(),
       kind: 'hls-download',
+      manifest,
       plan,
       resource,
     });

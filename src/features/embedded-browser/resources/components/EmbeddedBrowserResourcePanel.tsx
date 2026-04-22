@@ -4,7 +4,10 @@ import PanelShell from './EmbeddedBrowserResourcePanel.styles';
 import EmbeddedBrowserCatchToolkitCard from './EmbeddedBrowserCatchToolkitCard';
 import EmbeddedBrowserResourceBulkBar from './EmbeddedBrowserResourceBulkBar';
 import EmbeddedBrowserResourceCard from './EmbeddedBrowserResourceCard';
-import type { EmbeddedBrowserHlsDownloadPlan } from '../model/embedded-browser-hls-manifest';
+import type {
+  EmbeddedBrowserHlsDownloadPlan,
+  EmbeddedBrowserHlsManifest,
+} from '../model/embedded-browser-hls-manifest';
 import { useEmbeddedBrowserCatchToolkit } from '../hooks/useEmbeddedBrowserCatchToolkit';
 import { useEmbeddedBrowserResources } from '../hooks/useEmbeddedBrowserResources';
 import {
@@ -32,6 +35,7 @@ type EmbeddedBrowserResourcePanelProps = {
   currentPageUrl?: string;
   onOpenHlsDownloadWorkspace?: (
     resource: EmbeddedBrowserCapturedResource,
+    manifest: EmbeddedBrowserHlsManifest,
     plan: EmbeddedBrowserHlsDownloadPlan,
   ) => void;
   onOpenMediaProcessing?: (resources: EmbeddedBrowserCapturedResource[]) => void;

@@ -249,6 +249,7 @@ Electron main / 本地工具 / ffmpeg
   - 网络 manifest：`ffmpeg` 直拉
   - 页内 / blob manifest：本地 downloader -> local playlist -> `ffmpeg`
 - 工具区已支持手动输入 AES-128 自定义 key；一旦填写，会切到本地 downloader 主链，用本地 key 文件重写 playlist 后再交给 `ffmpeg`
+- 工具区也能直接做一轮 key 验证；会同时尝试 manifest key URL、当前 tab 已捕获 key，以及手动输入 key
 - 工具区已补基础执行反馈：当前阶段、最近日志、分片完成数，以及失败后重新执行
 - 网络 master playlist 已补第一版 variant / 清晰度选择：默认保持“自动”，也可以锁到某个具体 variant URL 再交给 ffmpeg
 - 当前 `master playlist + 手动 key` 仍不是完整支持场景，工具区会先显式拦住，避免误走错误主链
