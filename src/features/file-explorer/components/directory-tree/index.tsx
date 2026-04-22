@@ -1,10 +1,12 @@
 import React, { ReactNode, useCallback, useEffect, useRef, useState } from 'react';
-import { Tree, Toast, Input, Modal } from '@douyinfe/semi-ui';
+import { Tree, Toast, Input } from '@douyinfe/semi-ui';
 import {
   batchSetArchiveChildrenBuiltInType,
   createNode,
   deleteNodeAndChildren,
+  type NodeDetailDTO,
   getAllDescendantsByNodeId,
+  getChildrenByNodeId,
   fetchNodeDetailById,
   getFileLink,
   moveNodesBatch,
@@ -46,6 +48,7 @@ import { openOverlay } from '@/service/overlay/overlay.api';
 import type {
   DirectoryContextMenuNodeSnapshot,
   DirectoryContextMenuResult,
+  NodePropertiesOverlayProps,
   OverlayContextMenuPosition,
 } from '@/service/overlay/types';
 
@@ -253,61 +256,224 @@ export default function DirectoryTree({
     return date.toLocaleString('zh-CN', { hour12: false });
   };
 
-  const showNodeProperties = (node: any) => {
-    const isFile = node.isLeaf === true;
-    const baseName = String(node.data?.rawName || node.label || node.name || '');
-    const ext = String(node.data?.rawExt ?? node.ext ?? '').replace(/^\./, '');
-    const fullName = isFile ? buildFileFullName(baseName, ext) : baseName;
-    const typeLabel = isFile ? '文件' : '文件夹';
-    const builtInType = String(node.builtInType || 'DEF').toUpperCase();
-    const archiveMode = Number(node.archiveMode ?? 0) === 1 ? '开启' : '关闭';
-    const mimeType = String(node.data?.mimeType || node.mimeType || '');
-    const fileSize = formatFileSize(node.data?.fileSize ?? node.fileSize);
-    const createdAt = formatDateTime(node.data?.createdAt || node.createdAt);
-    const updatedAt = formatDateTime(node.data?.updatedAt || node.updatedAt);
-
-    const fieldStyle: React.CSSProperties = {
-      display: 'grid',
-      gridTemplateColumns: '88px 1fr',
-      columnGap: 10,
-      rowGap: 6,
-      alignItems: 'start',
-      fontSize: 13,
-      lineHeight: '20px',
-      marginBottom: 4,
-    };
-    const labelStyle: React.CSSProperties = {
-      color: 'var(--semi-color-text-2)',
-      userSelect: 'none',
-    };
-    const valueStyle: React.CSSProperties = {
-      color: 'var(--semi-color-text-0)',
-      wordBreak: 'break-all',
-      minWidth: 0,
-    };
-
-    Modal.info({
-      title: `属性 · ${fullName || '-'}`,
-      okText: '关闭',
-      width: 560,
-      centered: true,
-      content: (
-        <div style={{ marginTop: 4 }}>
-          <div style={fieldStyle}><span style={labelStyle}>名称</span><span style={valueStyle}>{fullName || '-'}</span></div>
-          <div style={fieldStyle}><span style={labelStyle}>类型</span><span style={valueStyle}>{typeLabel}</span></div>
-          <div style={fieldStyle}><span style={labelStyle}>后缀</span><span style={valueStyle}>{isFile ? (ext || '-') : '-'}</span></div>
-          <div style={fieldStyle}><span style={labelStyle}>MIME</span><span style={valueStyle}>{isFile ? (mimeType || '-') : '-'}</span></div>
-          <div style={fieldStyle}><span style={labelStyle}>大小</span><span style={valueStyle}>{isFile ? fileSize : '-'}</span></div>
-          <div style={fieldStyle}><span style={labelStyle}>内置类型</span><span style={valueStyle}>{builtInType}</span></div>
-          <div style={fieldStyle}><span style={labelStyle}>归档模式</span><span style={valueStyle}>{archiveMode}</span></div>
-          <div style={fieldStyle}><span style={labelStyle}>节点ID</span><span style={valueStyle}>{node.id ?? '-'}</span></div>
-          <div style={fieldStyle}><span style={labelStyle}>父节点ID</span><span style={valueStyle}>{node.parentId ?? ROOT_PARENT_ID ?? '-'}</span></div>
-          <div style={fieldStyle}><span style={labelStyle}>创建时间</span><span style={valueStyle}>{createdAt}</span></div>
-          <div style={fieldStyle}><span style={labelStyle}>修改时间</span><span style={valueStyle}>{updatedAt}</span></div>
-        </div>
-      ),
-    });
+  const formatBuiltInTypeLabel = (value: unknown): string => {
+    const normalized = String(value || 'DEF').trim().toUpperCase();
+    if (normalized === 'COMIC') return '漫画';
+    if (normalized === 'ASMR') return 'ASMR';
+    if (normalized === 'VIDEO') return '视频';
+    return '默认';
   };
+
+  const formatArchiveModeLabel = (value: unknown): string => (
+    Number(value ?? 0) === 1 ? '开启' : '关闭'
+  );
+
+  const getNodeFullName = (params: {
+    baseName: string;
+    ext?: string | null;
+    isFile: boolean;
+  }): string => {
+    const normalizedExt = String(params.ext || '').replace(/^\./, '');
+    return params.isFile ? buildFileFullName(params.baseName, normalizedExt) : params.baseName;
+  };
+
+  const buildAncestorDetailPathByNodeId = useCallback(async (targetNodeId: number): Promise<NodeDetailDTO[]> => {
+    const path: NodeDetailDTO[] = [];
+    const visited = new Set<number>();
+    let currentId = Number(targetNodeId);
+
+    while (Number.isFinite(currentId) && currentId > 0 && !visited.has(currentId)) {
+      visited.add(currentId);
+      const detail = await fetchNodeDetailById(currentId);
+      const detailLibraryId = Number(detail.libraryId);
+      if (detailLibraryId !== libraryId) {
+        throw new Error('节点不在当前资料库中');
+      }
+      path.push(detail);
+
+      const parentId = Number(detail.parentId || 0);
+      if (!(Number.isFinite(parentId) && parentId > 0) || parentId === currentId) {
+        break;
+      }
+      currentId = parentId;
+    }
+
+    return path.reverse();
+  }, [libraryId]);
+
+  const buildNodePropertiesOverlayProps = useCallback((params: {
+    detail: NodeDetailDTO;
+    directChildren: any[];
+    descendants: any[];
+    node: any;
+    pathDetails: NodeDetailDTO[];
+  }): NodePropertiesOverlayProps => {
+    const { detail, directChildren, descendants, node, pathDetails } = params;
+    const isFile = detail.type === 'file';
+    const baseName = String(detail.name || node?.data?.rawName || node?.label || node?.name || '');
+    const ext = String(detail.ext ?? node?.data?.rawExt ?? node?.ext ?? '').replace(/^\./, '');
+    const fullName = getNodeFullName({ isFile, baseName, ext });
+    const builtInTypeLabel = formatBuiltInTypeLabel(detail.builtInType ?? node?.builtInType);
+    const archiveModeLabel = formatArchiveModeLabel(detail.archiveMode ?? node?.archiveMode);
+    const mimeType = String(detail.mimeType || node?.data?.mimeType || node?.mimeType || '').trim();
+    const createdAt = formatDateTime(detail.createdAt || node?.data?.createdAt || node?.createdAt);
+    const updatedAt = formatDateTime(detail.updatedAt || node?.data?.updatedAt || node?.updatedAt);
+    const viewMetaState = detail.viewMeta ? '已记录' : '未记录';
+
+    const directFileCount = directChildren.filter((item) => resolveNodeType(item) === 'file').length;
+    const directDirCount = directChildren.filter((item) => resolveNodeType(item) === 'dir').length;
+    const directFileBytes = directChildren.reduce((sum, item) => (
+      resolveNodeType(item) === 'file' ? sum + Number(item?.fileSize || 0) : sum
+    ), 0);
+    const descendantsWithoutSelf = descendants.filter((item) => Number(item?.id) !== Number(detail.id));
+    const totalFileCount = descendantsWithoutSelf.filter((item) => resolveNodeType(item) === 'file').length;
+    const totalDirCount = descendantsWithoutSelf.filter((item) => resolveNodeType(item) === 'dir').length;
+    const totalFileBytes = descendantsWithoutSelf.reduce((sum, item) => (
+      resolveNodeType(item) === 'file' ? sum + Number(item?.fileSize || 0) : sum
+    ), 0);
+
+    const renderPathName = (item: NodeDetailDTO): string => {
+      const itemBaseName = String(item.name || '').trim();
+      if (Number(item.id) === ROOT_PARENT_ID && itemBaseName === '') {
+        return '根目录';
+      }
+      return getNodeFullName({
+        isFile: item.type === 'file',
+        baseName: itemBaseName || '根目录',
+        ext: item.ext,
+      });
+    };
+
+    const path = pathDetails.map(renderPathName).filter(Boolean).join(' / ') || '根目录';
+    const parentPath = pathDetails.slice(0, -1).map(renderPathName).filter(Boolean).join(' / ') || '根目录';
+
+    const sections = isFile
+      ? [
+        {
+          title: '基本信息',
+          items: [
+            { label: '名称', value: fullName || '-' },
+            { label: '文件大小', value: formatFileSize(detail.fileSize ?? node?.data?.fileSize ?? node?.fileSize) },
+            { label: '后缀', value: ext || '-' },
+            { label: 'MIME', value: mimeType || '-' },
+          ],
+        },
+        {
+          title: '视图与模式',
+          items: [
+            { label: '内置类型', value: builtInTypeLabel },
+            { label: '归档模式', value: archiveModeLabel },
+            { label: '视图配置', value: viewMetaState },
+            { label: '所属类型', value: '文件' },
+          ],
+        },
+        {
+          title: '位置',
+          items: [
+            { label: '所在目录', value: parentPath },
+            { label: '路径深度', value: `${Math.max(pathDetails.length - 1, 0)} 层` },
+          ],
+        },
+        {
+          title: '时间',
+          items: [
+            { label: '创建时间', value: createdAt },
+            { label: '修改时间', value: updatedAt },
+          ],
+        },
+      ]
+      : [
+        {
+          title: '基本信息',
+          items: [
+            { label: '名称', value: fullName || '-' },
+            { label: '内置类型', value: builtInTypeLabel },
+            { label: '归档模式', value: archiveModeLabel },
+            { label: '视图配置', value: viewMetaState },
+          ],
+        },
+        {
+          title: '内容统计',
+          items: [
+            { label: '直接子项', value: `${directChildren.length} 项` },
+            { label: '其中文件', value: `${directFileCount} 个` },
+            { label: '其中文件夹', value: `${directDirCount} 个` },
+            { label: '直接文件大小', value: directFileCount > 0 ? formatFileSize(directFileBytes) : '-' },
+            { label: '子树总项数', value: `${descendantsWithoutSelf.length} 项` },
+            { label: '子树文件数', value: `${totalFileCount} 个` },
+            { label: '子树文件夹数', value: `${totalDirCount} 个` },
+            { label: '子树文件总大小', value: totalFileCount > 0 ? formatFileSize(totalFileBytes) : '-' },
+          ],
+        },
+        {
+          title: '位置',
+          items: [
+            { label: '所在目录', value: parentPath },
+            { label: '路径深度', value: `${Math.max(pathDetails.length - 1, 0)} 层` },
+          ],
+        },
+        {
+          title: '时间',
+          items: [
+            { label: '创建时间', value: createdAt },
+            { label: '修改时间', value: updatedAt },
+          ],
+        },
+      ];
+
+    return {
+      chips: [
+        isFile ? '文件' : '文件夹',
+        builtInTypeLabel,
+        `归档模式 ${archiveModeLabel}`,
+      ],
+      fullName: fullName || '-',
+      path,
+      sections,
+      subtitle: isFile
+        ? `${builtInTypeLabel} · ${mimeType || '未知内容类型'} · ${formatFileSize(detail.fileSize ?? node?.data?.fileSize ?? node?.fileSize)}`
+        : `${builtInTypeLabel} · 共 ${descendantsWithoutSelf.length} 项内容 · 归档模式 ${archiveModeLabel}`,
+      title: isFile ? '文件属性' : '文件夹属性',
+    };
+  }, [ROOT_PARENT_ID]);
+
+  const showNodeProperties = useCallback(async (node: any) => {
+    const nodeId = Number(node?.id);
+    if (!Number.isFinite(nodeId) || nodeId <= 0) {
+      Toast.warning('当前节点暂时无法查看属性');
+      return;
+    }
+
+    try {
+      const detail = await fetchNodeDetailById(nodeId);
+      const pathDetails = await buildAncestorDetailPathByNodeId(nodeId);
+      let directChildren: any[] = [];
+      let descendants: any[] = [detail];
+
+      if (detail.type === 'dir') {
+        const [directChildrenResult, descendantsResult] = await Promise.all([
+          getChildrenByNodeId(nodeId, libraryId),
+          getAllDescendantsByNodeId(nodeId, libraryId),
+        ]);
+        directChildren = Array.isArray(directChildrenResult) ? directChildrenResult : [];
+        descendants = Array.isArray(descendantsResult) && descendantsResult.length > 0
+          ? descendantsResult
+          : [detail];
+      }
+
+      const props = buildNodePropertiesOverlayProps({
+        detail,
+        directChildren,
+        descendants,
+        node,
+        pathDetails,
+      });
+      await openOverlay('node-properties', props);
+    } catch (error: any) {
+      runtimeLogger.error('加载节点属性失败:', error);
+      Toast.error(error?.message || '加载属性失败');
+    }
+  }, [buildAncestorDetailPathByNodeId, buildNodePropertiesOverlayProps, libraryId]);
 
   const handleDownloadNode = async (node: any) => {
     if (!node) {

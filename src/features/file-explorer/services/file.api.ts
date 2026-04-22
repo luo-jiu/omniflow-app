@@ -102,6 +102,7 @@ function toNumberOrDefault(value: unknown, defaultValue = 0): number {
 function normalizeNodeDetailPayload(source: Record<string, unknown>): NodeDetailDTO {
   const normalized = normalizeNodePayload(source);
   return {
+    createdAt: toOptionalString(normalized.createdAt ?? normalized.created_at),
     id: toNumberOrDefault(normalized.id),
     name: String(normalized.name ?? ''),
     type: normalized.type,
@@ -112,6 +113,7 @@ function normalizeNodeDetailPayload(source: Record<string, unknown>): NodeDetail
     fileSize: toOptionalNumber(normalized.fileSize ?? normalized.file_size),
     builtInType: toOptionalString(normalized.builtInType ?? normalized.built_in_type),
     archiveMode: toOptionalNumber(normalized.archiveMode ?? normalized.archive_mode),
+    updatedAt: toOptionalString(normalized.updatedAt ?? normalized.updated_at),
     viewMeta: normalized.viewMeta === null ? null : toOptionalString(normalized.viewMeta ?? normalized.view_meta),
   };
 }
@@ -224,6 +226,7 @@ export async function getLibraryRootNodeId(libraryId: number): Promise<number> {
 }
 
 export interface NodeDetailDTO {
+  createdAt?: string;
   id: number;
   name: string;
   type: 'dir' | 'file';
@@ -234,6 +237,7 @@ export interface NodeDetailDTO {
   fileSize?: number;
   builtInType?: string;
   archiveMode?: number;
+  updatedAt?: string;
   viewMeta?: string | null;
 }
 

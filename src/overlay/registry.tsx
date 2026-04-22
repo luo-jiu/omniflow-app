@@ -1,5 +1,6 @@
 import React from 'react';
 import { DirectoryContextMenuOverlayAdapter } from './components/DirectoryContextMenuOverlayAdapter';
+import { NodePropertiesOverlayAdapter } from './components/NodePropertiesOverlayAdapter';
 import { UploadConfirmOverlayAdapter } from './components/UploadConfirmOverlayAdapter';
 
 export type OverlayComponentProps<TProps = unknown, TResult = unknown> = {
@@ -14,5 +15,6 @@ export type OverlayRegistryEntry = {
 
 export const overlayRegistry: Record<string, OverlayRegistryEntry> = {
   'directory-context-menu': { component: DirectoryContextMenuOverlayAdapter },
+  'node-properties': { component: NodePropertiesOverlayAdapter },
   'upload-confirm': { component: UploadConfirmOverlayAdapter },
 };

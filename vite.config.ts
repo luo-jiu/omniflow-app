@@ -70,7 +70,7 @@ export default defineConfig(({ mode }) => {
     },
   },
   server: {
-    port: 8080,
+    port: 8849,
     host: '127.0.0.1',
     strictPort: true,
     headers: {

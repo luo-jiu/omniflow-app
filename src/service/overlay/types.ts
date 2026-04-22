@@ -20,6 +20,29 @@ export type UploadConfirmResult =
   | { type: 'confirm' }
   | { type: 'cancel' };
 
+export type NodePropertiesOverlayField = {
+  label: string;
+  value: string;
+};
+
+export type NodePropertiesOverlaySection = {
+  title: string;
+  items: NodePropertiesOverlayField[];
+};
+
+export type NodePropertiesOverlayProps = {
+  chips: string[];
+  fullName: string;
+  path: string;
+  sections: NodePropertiesOverlaySection[];
+  subtitle: string;
+  title: string;
+};
+
+export type NodePropertiesOverlayResult =
+  | { type: 'close' }
+  | { type: 'cancel' };
+
 export type OverlayContextMenuPosition =
   | 'leftTop'
   | 'leftBottom'
@@ -70,11 +93,13 @@ export type DirectoryContextMenuResult =
 
 export type OverlayResultMap = {
   'directory-context-menu': DirectoryContextMenuResult;
+  'node-properties': NodePropertiesOverlayResult;
   'upload-confirm': UploadConfirmResult;
 };
 
 export type OverlayPropsMap = {
   'directory-context-menu': DirectoryContextMenuOverlayProps;
+  'node-properties': NodePropertiesOverlayProps;
   'upload-confirm': UploadConfirmOverlayProps;
 };
 
