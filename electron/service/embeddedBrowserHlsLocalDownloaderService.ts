@@ -502,7 +502,10 @@ export async function downloadEmbeddedBrowserHlsToLocalWorkDirectory(
     thread: plan.suggestedThreadCount || 6,
   })
 
-  const pendingWrites: Promise<void>[] = []
+  const pendingWrites: Array<{
+    promise: Promise<void>
+    sourceIndex: number
+  }> = []
   let downloadError: Error | null = null
   let downloadErrorMessage = ''
   const fragmentReceivedBytes = new Map<number, number>()
@@ -577,10 +580,13 @@ export async function downloadEmbeddedBrowserHlsToLocalWorkDirectory(
     if (!relativePath) {
       return
     }
-    pendingWrites.push(writeFile(
-      path.join(outputDirectoryPath, relativePath),
-      new Uint8Array(buffer),
-    ))
+    pendingWrites.push({
+      promise: writeFile(
+        path.join(outputDirectoryPath, relativePath),
+        new Uint8Array(buffer),
+      ),
+      sourceIndex,
+    })
     request.onEvent?.({
       completedFragments: Math.min(plan.fragments.length, initialCompletedFragments + downloader.success + 1),
       message: `已写入分片 #${sourceIndex + 1}`,
@@ -607,7 +613,34 @@ export async function downloadEmbeddedBrowserHlsToLocalWorkDirectory(
     downloader.start()
   })
 
-  await Promise.all(pendingWrites)
+  const pendingWriteResults = await Promise.allSettled(
+    pendingWrites.map((entry) => entry.promise),
+  )
+  const completedWrittenFragments = pendingWriteResults.reduce<number>((sum, result) => (
+    result.status === 'fulfilled' ? sum + 1 : sum
+  ), 0)
+  const failedWriteFragments = pendingWriteResults.reduce<number[]>((accumulator, result, index) => {
+    if (result.status === 'rejected') {
+      const sourceIndex = pendingWrites[index]?.sourceIndex
+      if (typeof sourceIndex === 'number' && sourceIndex >= 0) {
+        accumulator.push(sourceIndex + 1)
+      }
+    }
+    return accumulator
+  }, [])
+  if (failedWriteFragments.length > 0) {
+    const failureMessage = `写入分片失败：${failedWriteFragments.map((value) => `#${value}`).join(', ')}`
+    request.onEvent?.({
+      completedFragments: initialCompletedFragments + completedWrittenFragments,
+      error: failureMessage,
+      failedFragments: failedWriteFragments,
+      message: failureMessage,
+      stage: 'error',
+      status: 'error',
+      totalFragments: plan.fragments.length,
+    })
+    throw new Error(failureMessage)
+  }
   emitDownloadProgress(true)
   if (downloadError || downloader.errorItem.size > 0) {
     const failureMessage = downloadErrorMessage || `仍有 ${downloader.errorItem.size} 个分片下载失败`

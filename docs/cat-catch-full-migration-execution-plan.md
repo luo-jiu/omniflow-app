@@ -388,6 +388,12 @@ segments/segment-000001.ts
 
 **目标**：HLS 分片下载时，已完成的分片立即写入磁盘而非全部积累在内存。
 
+> 2026-04-23 当前主线复核说明：
+> - 当前主线已经是逐片写盘：`embeddedBrowserFragmentDownloader.ts` 会按顺序 `sequentialPush`，`embeddedBrowserHlsLocalDownloaderService.ts` 收到后立刻 `writeFile` 到本地 `segments/`。
+> - `buffer` 释放也已经在 downloader 的 `sequentialPush()` 中完成，因此这包当前不需要再额外补“emit 后置 null”的修复。
+> - 本工作包真正需要收口的是“写盘失败后的处理语义”：避免 `Promise.all` 在第一处失败时提前中断收尾，并明确把失败分片回传给上层，而不是让任务看起来像普通下载失败。
+> - 因此 WP-05 当前应按“已有流式写盘主线补稳健性”理解，而不是按“从零实现流式写盘”理解。
+
 ### 背景
 
 Cat Catch 在浏览器环境下用 StreamSaver.js 绕过内存限制。OmniFlow 运行在 Electron（Node.js）中，可以直接用 `fs.createWriteStream` 或逐片 `fs.writeFile`。
