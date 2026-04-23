@@ -46,12 +46,13 @@ export function getResourceExtension(url: string) {
 }
 
 export function classifyCapturedResource(input: {
+  extHint?: string
   mimeType?: string
   resourceType?: string
   url: string
 }): EmbeddedBrowserCapturedResourceKind {
   const normalizedMimeType = normalizeMimeType(input.mimeType)
-  const extension = getResourceExtension(input.url)
+  const extension = String(input.extHint || '').trim().toLowerCase() || getResourceExtension(input.url)
   const extensionKind = classifyCatCatchExtensionKind(extension)
   if (
     extensionKind === 'manifest'
@@ -135,10 +136,10 @@ export function inferStreamType(input: {
     return 'video' as const
   }
   const normalizedUrl = String(input.url || '').toLowerCase()
-  if (/(^|[\/_.-])audio([\/_.-]|$)/.test(normalizedUrl)) {
+  if (/(^|[/_.-])audio([/_.-]|$)/.test(normalizedUrl)) {
     return 'audio' as const
   }
-  if (/(^|[\/_.-])video([\/_.-]|$)/.test(normalizedUrl)) {
+  if (/(^|[/_.-])video([/_.-]|$)/.test(normalizedUrl)) {
     return 'video' as const
   }
   if (input.resourceType === 'media') {

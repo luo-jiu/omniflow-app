@@ -20,6 +20,9 @@ import type {
   EmbeddedBrowserCookie,
   EmbeddedBrowserCookieFilter,
 } from './embeddedBrowserCookieService'
+import type {
+  EmbeddedBrowserCaptureRuleSet,
+} from '@/features/embedded-browser/resources/model/embedded-browser-capture-rules'
 import type { EmbeddedBrowserSavedPasswordEntry } from './embeddedBrowserPasswordTypes'
 import type { EmbeddedBrowserCatchToolkitStatePayload } from './embeddedBrowserCatchToolkitPageBridge'
 import type {
@@ -122,6 +125,9 @@ type EmbeddedBrowserMainIpcHandlers = {
   removeCookie: (url: string, name: string) => Promise<void>
   removeCookiesByDomain: (domain: string) => Promise<void>
   removeAllCookies: () => Promise<void>
+  getResourceCaptureRules: () => Promise<EmbeddedBrowserCaptureRuleSet>
+  updateResourceCaptureRules: (ruleSet: EmbeddedBrowserCaptureRuleSet) => Promise<EmbeddedBrowserCaptureRuleSet>
+  resetResourceCaptureRules: () => Promise<EmbeddedBrowserCaptureRuleSet>
   listPasswords: () => EmbeddedBrowserSavedPasswordEntry[]
   getDecryptedPassword: (id: string) => Promise<string>
   saveCapturedCredential: (credentialRequestId: string) => Promise<EmbeddedBrowserSavedPasswordEntry>
@@ -304,6 +310,15 @@ export function registerEmbeddedBrowserMainIpcHandlers(handlers: EmbeddedBrowser
   ))
   ipcMain.handle('embedded-browser:cookie:remove-all', async () => (
     handlers.removeAllCookies()
+  ))
+  ipcMain.handle('embedded-browser:resource-capture-rules:get', async () => (
+    handlers.getResourceCaptureRules()
+  ))
+  ipcMain.handle('embedded-browser:resource-capture-rules:update', async (_event, ruleSet: EmbeddedBrowserCaptureRuleSet) => (
+    handlers.updateResourceCaptureRules(ruleSet)
+  ))
+  ipcMain.handle('embedded-browser:resource-capture-rules:reset', async () => (
+    handlers.resetResourceCaptureRules()
   ))
 
   ipcMain.handle('embedded-browser:password:list', () => (

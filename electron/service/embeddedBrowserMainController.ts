@@ -100,6 +100,11 @@ import {
   type EmbeddedBrowserCapturedResource,
 } from './embeddedBrowserResourceService'
 import {
+  listEmbeddedBrowserResourceCaptureRules,
+  resetEmbeddedBrowserResourceCaptureRules,
+  updateEmbeddedBrowserResourceCaptureRules,
+} from './embeddedBrowserResourceCaptureRules'
+import {
   buildEmbeddedBrowserProbeResourceRecorder,
   createEmbeddedBrowserView as createEmbeddedBrowserManagedView,
   installEmbeddedBrowserResourceProbe,
@@ -2747,6 +2752,9 @@ export function createEmbeddedBrowserMainController(
       removeCookie: removeEmbeddedBrowserCookie,
       removeCookiesByDomain: removeEmbeddedBrowserCookiesByDomain,
       removeAllCookies: removeAllEmbeddedBrowserCookies,
+      getResourceCaptureRules: async () => listEmbeddedBrowserResourceCaptureRules(),
+      updateResourceCaptureRules: async (ruleSet) => updateEmbeddedBrowserResourceCaptureRules(ruleSet),
+      resetResourceCaptureRules: async () => resetEmbeddedBrowserResourceCaptureRules(),
       listPasswords: listEmbeddedBrowserPasswords,
       getDecryptedPassword: getEmbeddedBrowserDecryptedPassword,
       saveCapturedCredential: async (credentialRequestId) => {

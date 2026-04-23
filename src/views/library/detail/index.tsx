@@ -40,6 +40,7 @@ import { subscribeCredentialAutoFilled, subscribeCredentialCaptured } from "@/fe
 import EmbeddedBrowserDownloadImportModal from "@/features/embedded-browser/downloads/components/EmbeddedBrowserDownloadImportModal";
 import { useEmbeddedBrowserDownloadImport } from "@/features/embedded-browser/downloads/hooks/useEmbeddedBrowserDownloadImport";
 import EmbeddedBrowserResourcePanel from "@/features/embedded-browser/resources/components/EmbeddedBrowserResourcePanel";
+import EmbeddedBrowserCaptureRuleSettings from "@/features/embedded-browser/resources/components/EmbeddedBrowserCaptureRuleSettings";
 import type { EmbeddedBrowserHlsDownloadPlan } from "@/features/embedded-browser/resources/model/embedded-browser-hls-manifest";
 import type { EmbeddedBrowserHlsManifest } from "@/features/embedded-browser/resources/model/embedded-browser-hls-manifest";
 import type { EmbeddedBrowserMpdDownloadPlan } from "@/features/embedded-browser/resources/model/embedded-browser-mpd-manifest";
@@ -4038,6 +4039,8 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
                       <EmbeddedBrowserCookieSettings onBack={() => setBrowserSettingsSection(null)} />
                     ) : browserSettingsSection === 'passwords' ? (
                       <EmbeddedBrowserPasswordSettings onBack={() => setBrowserSettingsSection(null)} />
+                    ) : browserSettingsSection === 'capture-rules' ? (
+                      <EmbeddedBrowserCaptureRuleSettings onBack={() => setBrowserSettingsSection(null)} />
                     ) : (
                       <>
                         <div className="browser-settings-hero">
@@ -4050,6 +4053,24 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
                           </div>
                         </div>
                         <div className="browser-settings-grid">
+                          <div
+                            className="browser-settings-card browser-settings-card-clickable"
+                            onClick={() => setBrowserSettingsSection('capture-rules')}
+                            role="button"
+                            tabIndex={0}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault()
+                                setBrowserSettingsSection('capture-rules')
+                              }
+                            }}
+                          >
+                            <span className="browser-settings-chip">资源捕获</span>
+                            <div className="browser-settings-card-title">捕获规则</div>
+                            <div className="browser-settings-card-body">
+                              管理扩展名、MIME、正则规则和域名黑白名单，决定哪些网页资源会进入捕获列表。
+                            </div>
+                          </div>
                           <div
                             className="browser-settings-card browser-settings-card-clickable"
                             onClick={() => setBrowserSettingsSection('cookies')}

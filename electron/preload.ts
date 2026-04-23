@@ -1,5 +1,6 @@
 // 渲染进程中的Bridge API
 import { ipcRenderer, contextBridge } from 'electron'
+import type { EmbeddedBrowserCaptureRuleSet } from '@/features/embedded-browser/resources/model/embedded-browser-capture-rules'
 
 // --------- Expose some API to the Renderer process ---------
 contextBridge.exposeInMainWorld('ipcRenderer', {
@@ -490,6 +491,12 @@ contextBridge.exposeInMainWorld('electronEmbeddedBrowser', {
     ipcRenderer.invoke('embedded-browser:cookie:remove-domain', domain),
   removeAllCookies: () =>
     ipcRenderer.invoke('embedded-browser:cookie:remove-all'),
+  getResourceCaptureRules: () =>
+    ipcRenderer.invoke('embedded-browser:resource-capture-rules:get') as Promise<EmbeddedBrowserCaptureRuleSet>,
+  updateResourceCaptureRules: (ruleSet: EmbeddedBrowserCaptureRuleSet) =>
+    ipcRenderer.invoke('embedded-browser:resource-capture-rules:update', ruleSet) as Promise<EmbeddedBrowserCaptureRuleSet>,
+  resetResourceCaptureRules: () =>
+    ipcRenderer.invoke('embedded-browser:resource-capture-rules:reset') as Promise<EmbeddedBrowserCaptureRuleSet>,
   listPasswords: () =>
     ipcRenderer.invoke('embedded-browser:password:list'),
   getDecryptedPassword: (id: string) =>

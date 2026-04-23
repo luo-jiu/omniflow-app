@@ -527,6 +527,11 @@ interface Window {
     removeCookie: (url: string, name: string) => Promise<void>;
     removeCookiesByDomain: (domain: string) => Promise<void>;
     removeAllCookies: () => Promise<void>;
+    getResourceCaptureRules: () => Promise<import('@/features/embedded-browser/resources/model/embedded-browser-capture-rules').EmbeddedBrowserCaptureRuleSet>;
+    updateResourceCaptureRules: (
+      ruleSet: import('@/features/embedded-browser/resources/model/embedded-browser-capture-rules').EmbeddedBrowserCaptureRuleSet,
+    ) => Promise<import('@/features/embedded-browser/resources/model/embedded-browser-capture-rules').EmbeddedBrowserCaptureRuleSet>;
+    resetResourceCaptureRules: () => Promise<import('@/features/embedded-browser/resources/model/embedded-browser-capture-rules').EmbeddedBrowserCaptureRuleSet>;
     listPasswords: () => Promise<EmbeddedBrowserSavedPasswordEntry[]>;
     getDecryptedPassword: (id: string) => Promise<string>;
     saveCapturedCredential: (credentialRequestId: string) => Promise<EmbeddedBrowserSavedPasswordEntry>;

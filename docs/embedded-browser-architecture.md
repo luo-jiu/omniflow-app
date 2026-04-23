@@ -28,6 +28,8 @@ OmniFlow 的 embedded browser 不是单纯的 React 组件，而是“renderer �
   - `src/features/embedded-browser/resources/hooks/useEmbeddedBrowserResources.ts`
   - `src/features/embedded-browser/resources/hooks/useEmbeddedBrowserCatchToolkit.ts`
   - `src/features/embedded-browser/resources/services/embedded-browser-resource.api.ts`
+  - `src/features/embedded-browser/resources/services/embedded-browser-capture-rule.api.ts`
+  - `src/features/embedded-browser/resources/components/EmbeddedBrowserCaptureRuleSettings.tsx`
 - Renderer 下载导入 hook
   - `src/features/embedded-browser/downloads/hooks/useEmbeddedBrowserDownloadImport.ts`
 - Renderer Cookie 管理
@@ -49,6 +51,8 @@ OmniFlow 的 embedded browser 不是单纯的 React 组件，而是“renderer �
   - `electron/service/embeddedBrowserMainIpc.ts`
 - Main controller
   - `electron/service/embeddedBrowserMainController.ts`
+- Main 规则过滤
+  - `electron/service/embeddedBrowserResourceCaptureRules.ts`
 - View 生命周期
   - `electron/service/embeddedBrowserViewLifecycle.ts`
 
@@ -113,6 +117,7 @@ library detail page
 当前资源面板与工具区的协作补充：
 
 - 资源面板可以把“已选资源”送到工具区媒体处理模式。
+- 浏览器设置页里的“捕获规则”也归资源域负责；renderer 只管理规则草稿和保存动作，真正的过滤判定仍在 main。
 - HLS manifest 解析后，可以把“下载计划”送到工具区。
 - MPD manifest 解析后，也可以把“下载计划”送到工具区；工具区当前提供第一版 representation 选择，并在 main 侧执行 `init segment + media segments` 本地下载，再交给 `ffmpeg` 合并。
 - 工具区当前承接两条 HLS 主线：
@@ -134,6 +139,7 @@ library detail page
 - 页面和 tab 控制
 - 下载事件和资源事件订阅
 - 资源捕捉、缓存捕捉、预览、导出、合并、manifest 下载
+- 资源捕捉规则管理（读取、更新、恢复默认）
 - Cookie 管理（查询、删除单条、按域名删除、全部清除）
 - 密码管理（列表、解密查看、保存凭据、删除、黑名��、凭据捕获事件）
 
@@ -144,6 +150,7 @@ library detail page
 - `tabId -> WebContentsView` 的真实映射
 - 当前激活 view 的 attach / detach
 - state / download / resource 事件向 renderer 投影
+- 资源捕捉规则的持久化读取，以及网络捕捉 / probe 捕捉前的过滤判定
 - 深度捕捉启动、probe 安装和 reload
 - MSE 读取、导出、保存、合并、manifest 下载
 - HLS 本地计划下载：`plan -> local workdir -> local playlist -> ffmpeg`
@@ -177,6 +184,7 @@ library detail page
 资源面板的数据也有分层：
 
 - 网络和 probe 捕捉事件由 main 发回 renderer
+- 在发回 renderer 前，main 会先经过统一的规则过滤：域名黑白名单、regex 规则、扩展名与 MIME 白名单
 - renderer 里的 `useEmbeddedBrowserResources` 再按 `tabId` 聚合成 snapshot
 - 当前页面资源面板只读“活动 tab 的快照”
 - 资源面板的筛选正则和“筛除同名同大小”开关是 renderer 本地偏好，分别持久化在 `embedded-browser:resource-filter-regex` 和 `embedded-browser:resource-dedupe-same-name`，不改变 main 侧捕捉快照

@@ -11,6 +11,9 @@ import {
   shouldCaptureResource,
 } from './embeddedBrowserResourceClassifier'
 import {
+  evaluateEmbeddedBrowserResourceCapture,
+} from './embeddedBrowserResourceCaptureRules'
+import {
   getEmbeddedBrowserTabCaptureState,
   setEmbeddedBrowserCapturedResourceEmitter,
   updateEmbeddedBrowserCapturedResource,
@@ -62,15 +65,29 @@ export function initializeEmbeddedBrowserResourceBridge(options: {
     }
 
     const targetWebContents = webContents.fromId(details.webContentsId)
-    const url = String(details.url || '').trim()
+    const rawUrl = String(details.url || '').trim()
     const requestContext = requestContextsByRequestId.get(details.id)
     const mimeType = normalizeMimeType(getHeaderValue(details.responseHeaders, 'content-type'))
+    const pageUrl = targetWebContents?.getURL() || undefined
+    const captureEvaluation = evaluateEmbeddedBrowserResourceCapture({
+      ext: getResourceExtension(rawUrl) || undefined,
+      mimeType,
+      pageUrl,
+      resourceType: details.resourceType,
+      url: rawUrl,
+    })
+    if (!captureEvaluation) {
+      requestContextsByRequestId.delete(details.id)
+      return
+    }
+    const url = captureEvaluation.url
     const kind = classifyCapturedResource({
+      extHint: captureEvaluation.extHint,
       mimeType,
       resourceType: details.resourceType,
       url,
     })
-    if (!shouldCaptureResource({ kind, resourceType: details.resourceType, url })) {
+    if (!captureEvaluation.matchedByRuleSet && !shouldCaptureResource({ kind, resourceType: details.resourceType, url })) {
       requestContextsByRequestId.delete(details.id)
       return
     }
@@ -80,11 +97,11 @@ export function initializeEmbeddedBrowserResourceBridge(options: {
       contentLength:
         parseContentRangeTotal(getHeaderValue(details.responseHeaders, 'content-range'))
         || parseContentLength(getHeaderValue(details.responseHeaders, 'content-length')),
-      ext: getResourceExtension(url) || undefined,
+      ext: captureEvaluation.extHint || getResourceExtension(url) || undefined,
       kind,
       method: details.method || undefined,
       mimeType,
-      pageUrl: targetWebContents?.getURL() || undefined,
+      pageUrl,
       referer: requestContext?.referer || details.referrer || undefined,
       requestHeaders: requestContext?.requestHeaders,
       resourceType: details.resourceType || undefined,
