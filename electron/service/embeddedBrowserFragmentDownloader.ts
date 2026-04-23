@@ -253,10 +253,6 @@ export class EmbeddedBrowserFragmentDownloader {
     return this.errorList
   }
 
-  get mapTag() {
-    return ''
-  }
-
   push(fragment: EmbeddedBrowserDownloadFragment) {
     const nextFragment = {
       ...fragment,

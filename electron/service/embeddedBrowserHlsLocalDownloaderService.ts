@@ -1,6 +1,6 @@
 import os from 'node:os'
 import path from 'node:path'
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, writeFile } from 'node:fs/promises'
 import {
   EmbeddedBrowserFragmentDownloader,
   type EmbeddedBrowserDownloadByteRange,
@@ -351,6 +351,36 @@ function buildLocalPlaylist(input: {
   return `${lines.filter(Boolean).join('\n')}\n`
 }
 
+async function filterExistingPlaylistFragments(input: {
+  fragmentPaths: string[]
+  fragments: EmbeddedBrowserHlsLocalDownloadFragment[]
+  outputDirectoryPath: string
+}) {
+  const existence = await Promise.all(input.fragmentPaths.map(async (relativePath) => {
+    try {
+      await access(path.join(input.outputDirectoryPath, relativePath))
+      return true
+    } catch {
+      return false
+    }
+  }))
+
+  return input.fragments.reduce<{
+    fragmentPaths: string[]
+    fragments: EmbeddedBrowserHlsLocalDownloadFragment[]
+  }>((accumulator, fragment, index) => {
+    if (!existence[index]) {
+      return accumulator
+    }
+    accumulator.fragments.push(fragment)
+    accumulator.fragmentPaths.push(input.fragmentPaths[index] || '')
+    return accumulator
+  }, {
+    fragmentPaths: [],
+    fragments: [],
+  })
+}
+
 export async function downloadEmbeddedBrowserHlsToLocalWorkDirectory(
   request: EmbeddedBrowserHlsLocalDownloadRequest,
 ): Promise<EmbeddedBrowserHlsLocalDownloadResult> {
@@ -427,7 +457,20 @@ export async function downloadEmbeddedBrowserHlsToLocalWorkDirectory(
       }
     })
   const initialCompletedFragments = requestedFragmentIndexes
-    ? Math.max(0, plan.fragments.length - fragmentsToDownload.length)
+    ? (await Promise.all(fragmentPaths.map(async (relativePath, index): Promise<number> => {
+      const sourceIndex = typeof plan.fragments[index]?.index === 'number'
+        ? Number(plan.fragments[index]?.index)
+        : index
+      if (requestedFragmentIndexes.has(sourceIndex)) {
+        return 0
+      }
+      try {
+        await access(path.join(outputDirectoryPath, relativePath))
+        return 1
+      } catch {
+        return 0
+      }
+    }))).reduce<number>((sum, value) => sum + value, 0)
     : 0
 
   const downloader = new EmbeddedBrowserFragmentDownloader({
@@ -567,9 +610,14 @@ export async function downloadEmbeddedBrowserHlsToLocalWorkDirectory(
     status: 'running',
     totalFragments: plan.fragments.length,
   })
-  const playlistText = buildLocalPlaylist({
+  const existingPlaylistContent = await filterExistingPlaylistFragments({
     fragmentPaths,
     fragments: plan.fragments,
+    outputDirectoryPath,
+  })
+  const playlistText = buildLocalPlaylist({
+    fragmentPaths: existingPlaylistContent.fragmentPaths,
+    fragments: existingPlaylistContent.fragments,
     keyRefs,
     manualKeyBase64: request.manualKeyBase64,
     mapRefs,
