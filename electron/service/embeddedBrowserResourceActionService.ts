@@ -1,7 +1,9 @@
 import {
+  createEmbeddedBrowserResourceDrainMseScript,
   createEmbeddedBrowserResourceExtractScript,
   createEmbeddedBrowserResourcePreviewScript,
   createEmbeddedBrowserResourceProbeActionScript,
+  type EmbeddedBrowserDrainedMseResourcePayload,
   type EmbeddedBrowserExtractedResourcePayload,
   type EmbeddedBrowserResourcePreviewPayload,
 } from './embeddedBrowserResourcePageBridge'
@@ -66,4 +68,33 @@ export async function extractEmbeddedBrowserResourceFromPage(
       ? payload.streamType
       : undefined,
   } satisfies EmbeddedBrowserExtractedResourcePayload
+}
+
+export async function drainEmbeddedBrowserMseResourceFromPage(
+  executeScript: EmbeddedBrowserPageScriptExecutor,
+  resourceKey: string,
+) {
+  const normalizedResourceKey = String(resourceKey || '').trim()
+  if (!normalizedResourceKey) {
+    return null
+  }
+  const result = await executeScript(
+    createEmbeddedBrowserResourceDrainMseScript(normalizedResourceKey),
+  )
+  if (!result || typeof result !== 'object') {
+    return null
+  }
+  const payload = result as Partial<EmbeddedBrowserDrainedMseResourcePayload>
+  if (typeof payload.fileName !== 'string') {
+    return null
+  }
+  return {
+    base64: typeof payload.base64 === 'string' ? payload.base64 : undefined,
+    fileName: payload.fileName,
+    mimeType: typeof payload.mimeType === 'string' ? payload.mimeType : undefined,
+    resourceKey: typeof payload.resourceKey === 'string' ? payload.resourceKey : normalizedResourceKey,
+    streamType: payload.streamType === 'audio' || payload.streamType === 'video'
+      ? payload.streamType
+      : undefined,
+  } satisfies EmbeddedBrowserDrainedMseResourcePayload
 }

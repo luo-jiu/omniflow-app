@@ -136,6 +136,7 @@ library detail page
 - 工具区也可直接发起 HLS key 验证；候选会合并 manifest key URL、当前 tab 已捕获 key 资源和工具区手动输入 key。
 - 当前 `master playlist + 手动 key` 已要求先明确选择具体 variant，再回到现有本地主链。
 - main 侧会把 HLS 执行阶段事件回推给 renderer；工具区据此展示当前阶段、最近日志、分片完成数和错误状态。
+- MSE 深度捕捉当前已补第一版增量写盘：page runtime 在 `appendBuffer` 累积超过阈值后，会通过 probe console payload 把 chunk flush 给 main，main 落到 temp spool file；后续 `save / merge / transcode` 优先读取 file-backed 资源，而不是再次整段 base64 提取。
 
 这些 hook 应继续通过 `services/*.api.ts` 调 preload bridge，不要直接在 hook 或组件里散落原始 bridge 调用。
 

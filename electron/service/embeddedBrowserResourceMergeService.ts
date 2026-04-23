@@ -8,6 +8,7 @@ import { Buffer } from 'node:buffer'
 export type EmbeddedBrowserExtractedResourceFile = {
   base64?: string
   fileName: string
+  filePath?: string
   mimeType?: string
   requestHeaders?: Record<string, string>
   resourceKey?: string
@@ -195,6 +196,9 @@ async function writeExtractedResourceToTempFile(
   tempDir: string,
   resource: EmbeddedBrowserExtractedResourceFile,
 ) {
+  if (resource.filePath) {
+    return resource.filePath
+  }
   if (!resource.base64) {
     throw new Error('缺少可写入的资源内容')
   }

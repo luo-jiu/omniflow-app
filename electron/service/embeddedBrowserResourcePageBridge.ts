@@ -13,6 +13,14 @@ export type EmbeddedBrowserExtractedResourcePayload = {
   streamType?: 'audio' | 'video'
 }
 
+export type EmbeddedBrowserDrainedMseResourcePayload = {
+  base64?: string
+  fileName: string
+  mimeType?: string
+  resourceKey: string
+  streamType?: 'audio' | 'video'
+}
+
 export function createEmbeddedBrowserResourceProbeActionScript(
   action: 'exportResource' | 'openResource',
   resourceKey: string,
@@ -148,6 +156,18 @@ export function createEmbeddedBrowserResourceExtractScript(resourceKey: string) 
       const probe = window.__OMNIFLOW_EMBEDDED_BROWSER_RESOURCE_PROBE__
       const handler = probe && typeof probe.readResource === 'function'
         ? probe.readResource
+        : null
+      return handler ? handler(${JSON.stringify(resourceKey)}) : null
+    })()
+  `
+}
+
+export function createEmbeddedBrowserResourceDrainMseScript(resourceKey: string) {
+  return `
+    (() => {
+      const probe = window.__OMNIFLOW_EMBEDDED_BROWSER_RESOURCE_PROBE__
+      const handler = probe && typeof probe.drainResource === 'function'
+        ? probe.drainResource
         : null
       return handler ? handler(${JSON.stringify(resourceKey)}) : null
     })()

@@ -97,9 +97,12 @@ export function embeddedBrowserResourceProbeRuntimeHooksBody() {
             blobUrl: '',
             bufferCount: 0,
             buffers: [],
+            flushTimer: null,
+            flushedBytes: 0,
             lastReportedBufferCount: 0,
             lastReportedBytes: 0,
             mimeType: mimeType || (streamType === 'audio' ? 'audio/mp4' : 'video/mp4'),
+            retainedBytes: 0,
             streamId,
             streamType,
             totalBytes: 0,
@@ -122,6 +125,7 @@ export function embeddedBrowserResourceProbeRuntimeHooksBody() {
                 }
                 stream.buffers.push(chunk)
                 stream.bufferCount += 1
+                stream.retainedBytes += chunk.byteLength
                 stream.totalBytes += chunk.byteLength
                 probeDiagnostics.appendBufferCount += 1
                 probeDiagnostics.lastAppendAt = Date.now()
@@ -134,6 +138,9 @@ export function embeddedBrowserResourceProbeRuntimeHooksBody() {
                   stream.lastReportedBufferCount = stream.bufferCount
                   stream.lastReportedBytes = stream.totalBytes
                   emitMseStream(streamId)
+                }
+                if (stream.retainedBytes >= MSE_FLUSH_THRESHOLD_BYTES) {
+                  scheduleMseStreamFlush(streamId)
                 }
                 return appendResult
               },

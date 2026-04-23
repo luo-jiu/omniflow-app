@@ -1,7 +1,7 @@
 import os from 'node:os'
 import path from 'node:path'
-import { access, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
-import { app, BrowserWindow, dialog, WebContentsView, type WebFrameMain } from 'electron'
+import { access, appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { app, BrowserWindow, dialog, shell, WebContentsView, type WebFrameMain } from 'electron'
 import { runtimeLogger } from '../runtimeLogger'
 import type { EmbeddedBrowserCatchToolkitStatePayload } from './embeddedBrowserCatchToolkitPageBridge'
 import {
@@ -78,6 +78,7 @@ import {
   type EmbeddedBrowserPendingOpenFile,
 } from './embeddedBrowserOpenFileFlow'
 import {
+  drainEmbeddedBrowserMseResourceFromPage,
   extractEmbeddedBrowserResourceFromPage,
   runEmbeddedBrowserResourcePreview,
   runEmbeddedBrowserResourceProbeAction,
@@ -174,6 +175,17 @@ export function createEmbeddedBrowserMainController(
     workDirectoryPath?: string
   }
 
+  type EmbeddedBrowserMseSpoolFile = {
+    bytesWritten: number
+    directoryPath: string
+    fileName: string
+    filePath: string
+    mimeType?: string
+    resourceKey: string
+    streamType?: 'audio' | 'video'
+    tabId: string
+  }
+
   const embeddedBrowserViews = new Map<string, WebContentsView>()
   const embeddedBrowserLastCommittedUrls = new Map<string, string>()
   const embeddedBrowserIconUrls = new Map<string, string>()
@@ -184,6 +196,8 @@ export function createEmbeddedBrowserMainController(
   const embeddedBrowserFileSystemOriginDecisions = new Map<string, boolean>()
   const embeddedBrowserHlsRetrySessions = new Map<string, EmbeddedBrowserHlsRetrySession>()
   const embeddedBrowserHlsLiveRecordingSessions = new Map<string, EmbeddedBrowserHlsLiveRecordingSession>()
+  const embeddedBrowserMseSpoolFiles = new Map<string, EmbeddedBrowserMseSpoolFile>()
+  const embeddedBrowserMseSpoolWriteQueues = new Map<string, Promise<EmbeddedBrowserMseSpoolFile | null>>()
   let activeEmbeddedBrowserTabId: string | null = null
   let embeddedBrowserPendingBounds: EmbeddedBrowserBounds | null = null
   let embeddedBrowserSessionConfigured = false
@@ -219,6 +233,96 @@ export function createEmbeddedBrowserMainController(
       return
     }
     mainWindow.webContents.send('embedded-browser:hls-task', payload)
+  }
+
+  function buildEmbeddedBrowserMseSpoolKey(tabId: string, resourceKey: string) {
+    return `${String(tabId || '').trim()}:${String(resourceKey || '').trim()}`
+  }
+
+  async function clearEmbeddedBrowserMseSpoolFiles(options: {
+    resourceKey?: string
+    tabId?: string
+  }) {
+    const normalizedTabId = String(options.tabId || '').trim()
+    const normalizedResourceKey = String(options.resourceKey || '').trim()
+    if (!normalizedTabId && !normalizedResourceKey) {
+      return
+    }
+    const matchedEntries = Array.from(embeddedBrowserMseSpoolFiles.entries()).filter(([, file]) => {
+      if (normalizedTabId && file.tabId !== normalizedTabId) {
+        return false
+      }
+      if (normalizedResourceKey && file.resourceKey !== normalizedResourceKey) {
+        return false
+      }
+      return true
+    })
+    await Promise.all(matchedEntries.map(async ([key, file]) => {
+      embeddedBrowserMseSpoolFiles.delete(key)
+      embeddedBrowserMseSpoolWriteQueues.delete(key)
+      await rm(file.directoryPath, { force: true, recursive: true }).catch(() => undefined)
+    }))
+  }
+
+  async function waitForEmbeddedBrowserMseSpoolWrites(tabId: string, resourceKey: string) {
+    const spoolKey = buildEmbeddedBrowserMseSpoolKey(tabId, resourceKey)
+    const pendingWrite = embeddedBrowserMseSpoolWriteQueues.get(spoolKey)
+    if (!pendingWrite) {
+      return
+    }
+    await pendingWrite.catch(() => undefined)
+  }
+
+  async function appendEmbeddedBrowserMseSpoolChunk(tabId: string, payload: {
+    base64: string
+    fileName?: string
+    mimeType?: string
+    resourceKey: string
+    streamType?: 'audio' | 'video'
+  }) {
+    const normalizedTabId = String(tabId || '').trim()
+    const normalizedResourceKey = String(payload.resourceKey || '').trim()
+    const normalizedBase64 = String(payload.base64 || '').trim()
+    if (!normalizedTabId || !normalizedResourceKey || !normalizedBase64) {
+      return null
+    }
+    const spoolKey = buildEmbeddedBrowserMseSpoolKey(normalizedTabId, normalizedResourceKey)
+    const chunk = Buffer.from(normalizedBase64, 'base64')
+    const nextWrite = (embeddedBrowserMseSpoolWriteQueues.get(spoolKey) || Promise.resolve(null))
+      .then(async (existingSpoolFile) => {
+        let spoolFile = existingSpoolFile || embeddedBrowserMseSpoolFiles.get(spoolKey) || null
+        if (!spoolFile) {
+          const directoryPath = await mkdtemp(path.join(os.tmpdir(), 'omniflow-mse-spool-'))
+          const fileName = sanitizeEmbeddedBrowserOutputFileName(
+            String(payload.fileName || normalizedResourceKey || 'media').trim(),
+          )
+          spoolFile = {
+            bytesWritten: 0,
+            directoryPath,
+            fileName,
+            filePath: path.join(directoryPath, fileName),
+            mimeType: payload.mimeType,
+            resourceKey: normalizedResourceKey,
+            streamType: payload.streamType,
+            tabId: normalizedTabId,
+          }
+          embeddedBrowserMseSpoolFiles.set(spoolKey, spoolFile)
+        }
+        if (chunk.byteLength) {
+          await appendFile(spoolFile.filePath, chunk)
+          spoolFile.bytesWritten += chunk.byteLength
+        }
+        if (payload.mimeType) {
+          spoolFile.mimeType = payload.mimeType
+        }
+        if (payload.streamType === 'audio' || payload.streamType === 'video') {
+          spoolFile.streamType = payload.streamType
+        }
+        return spoolFile
+      })
+    embeddedBrowserMseSpoolWriteQueues.set(spoolKey, nextWrite)
+    const spoolFile = await nextWrite
+    return spoolFile
   }
 
   async function clearEmbeddedBrowserHlsRetrySessions(options: {
@@ -574,10 +678,82 @@ export function createEmbeddedBrowserMainController(
     }
   }
 
+  async function extractEmbeddedBrowserMseResourceFromFrames(
+    tabId: string,
+    view: WebContentsView,
+    resourceKey: string,
+  ): Promise<EmbeddedBrowserExtractedResourceFile | null> {
+    const spoolKey = buildEmbeddedBrowserMseSpoolKey(tabId, resourceKey)
+    const currentSpoolFile = embeddedBrowserMseSpoolFiles.get(spoolKey)
+    if (currentSpoolFile) {
+      await waitForEmbeddedBrowserMseSpoolWrites(tabId, resourceKey)
+    }
+    const frames = getEmbeddedBrowserFrameList(view)
+    const drainFromExecutor = async (
+      executeScript: (script: string) => Promise<unknown>,
+    ) => drainEmbeddedBrowserMseResourceFromPage(executeScript, resourceKey)
+
+    const drained = !frames.length
+      ? await drainFromExecutor((script) => view.webContents.executeJavaScript(script, true))
+      : await (async () => {
+          for (const frame of frames) {
+            try {
+              const resource = await drainFromExecutor((script) => frame.executeJavaScript(script, true))
+              if (resource) {
+                return resource
+              }
+            } catch {
+              // Ignore frames that navigated or do not contain the probe.
+            }
+          }
+          return null
+        })()
+
+    if (!currentSpoolFile) {
+      if (!drained?.base64) {
+        return null
+      }
+      return {
+        base64: drained.base64,
+        fileName: drained.fileName,
+        mimeType: drained.mimeType,
+        resourceKey,
+        streamType: drained.streamType,
+      }
+    }
+
+    if (drained?.base64) {
+      await appendEmbeddedBrowserMseSpoolChunk(tabId, {
+        base64: drained.base64,
+        fileName: drained.fileName,
+        mimeType: drained.mimeType,
+        resourceKey,
+        streamType: drained.streamType,
+      })
+    }
+
+    await waitForEmbeddedBrowserMseSpoolWrites(tabId, resourceKey)
+    const nextSpoolFile = embeddedBrowserMseSpoolFiles.get(spoolKey) || currentSpoolFile
+    return {
+      fileName: drained?.fileName || nextSpoolFile.fileName,
+      filePath: nextSpoolFile.filePath,
+      mimeType: drained?.mimeType || nextSpoolFile.mimeType,
+      resourceKey,
+      streamType: drained?.streamType || nextSpoolFile.streamType,
+    }
+  }
+
   async function extractEmbeddedBrowserResourceFromFrames(
+    tabId: string,
     view: WebContentsView,
     resourceKey: string,
   ) {
+    if (String(resourceKey || '').startsWith('mse-stream:')) {
+      const mseResource = await extractEmbeddedBrowserMseResourceFromFrames(tabId, view, resourceKey)
+      if (mseResource) {
+        return mseResource
+      }
+    }
     const frames = getEmbeddedBrowserFrameList(view)
     if (!frames.length) {
       return extractEmbeddedBrowserResourceFromPage(
@@ -773,8 +949,8 @@ export function createEmbeddedBrowserMainController(
         const extractedResources = await withEmbeddedBrowserView(
           normalizedTabId,
           async (view) => Promise.all([
-            audioResourceKey ? extractEmbeddedBrowserResourceFromFrames(view, audioResourceKey) : null,
-            videoResourceKey ? extractEmbeddedBrowserResourceFromFrames(view, videoResourceKey) : null,
+            audioResourceKey ? extractEmbeddedBrowserResourceFromFrames(normalizedTabId, view, audioResourceKey) : null,
+            videoResourceKey ? extractEmbeddedBrowserResourceFromFrames(normalizedTabId, view, videoResourceKey) : null,
           ]),
         )
         audioResource = extractedResources?.[0] || audioResource
@@ -845,7 +1021,7 @@ export function createEmbeddedBrowserMainController(
     try {
       const resource = await withEmbeddedBrowserView(
         normalizedTabId,
-        async (view) => extractEmbeddedBrowserResourceFromFrames(view, resourceKey),
+        async (view) => extractEmbeddedBrowserResourceFromFrames(normalizedTabId, view, resourceKey),
       )
       if (!resource) {
         return {
@@ -950,7 +1126,7 @@ export function createEmbeddedBrowserMainController(
       if (resourceKey) {
         const extractedResource = await withEmbeddedBrowserView(
           normalizedTabId,
-          async (view) => extractEmbeddedBrowserResourceFromFrames(view, resourceKey),
+          async (view) => extractEmbeddedBrowserResourceFromFrames(normalizedTabId, view, resourceKey),
         )
         resource = extractedResource || resource
       }
@@ -1985,6 +2161,7 @@ export function createEmbeddedBrowserMainController(
     if (!mainWindow || mainWindow.isDestroyed()) {
       return null
     }
+    const recordProbeResource = buildEmbeddedBrowserProbeResourceRecorder(tabId)
     return createEmbeddedBrowserManagedView({
       createIfMissingProbe: tryInstallEmbeddedBrowserResourceProbe,
       currentUrls: embeddedBrowserLastCommittedUrls,
@@ -2046,7 +2223,27 @@ export function createEmbeddedBrowserMainController(
           tabId: credentialTabId,
         })
       },
-      onProbePayload: buildEmbeddedBrowserProbeResourceRecorder(tabId),
+      onProbePayload: (payload) => {
+        const event = typeof payload.event === 'string' ? payload.event : ''
+        const resourceKey = typeof payload.resourceKey === 'string' ? payload.resourceKey : ''
+        if (event === 'mse-flush') {
+          void appendEmbeddedBrowserMseSpoolChunk(tabId, {
+            base64: typeof payload.base64 === 'string' ? payload.base64 : '',
+            fileName: typeof payload.fileName === 'string' ? payload.fileName : undefined,
+            mimeType: typeof payload.mimeType === 'string' ? payload.mimeType : undefined,
+            resourceKey,
+            streamType: payload.streamType === 'audio' || payload.streamType === 'video'
+              ? payload.streamType
+              : undefined,
+          })
+          return
+        }
+        if (event === 'mse-reset') {
+          void clearEmbeddedBrowserMseSpoolFiles({ resourceKey, tabId })
+          return
+        }
+        recordProbeResource(payload)
+      },
       syncBounds: syncEmbeddedBrowserViewBounds,
       tabId,
       tryDispatchPendingOpenFile: async (targetTabId, view) => tryDispatchPendingEmbeddedBrowserOpenFile({
@@ -2180,6 +2377,7 @@ export function createEmbeddedBrowserMainController(
     })
     void clearEmbeddedBrowserHlsRetrySessions({ tabId: normalizedTabId })
     void clearEmbeddedBrowserHlsLiveRecordingSessions({ tabId: normalizedTabId })
+    void clearEmbeddedBrowserMseSpoolFiles({ tabId: normalizedTabId })
     if (!view.webContents.isDestroyed()) {
       view.webContents.close({ waitForBeforeUnload: false })
     }
@@ -2427,6 +2625,15 @@ export function createEmbeddedBrowserMainController(
   async function handleOpenResource(tabId: string, resourceKey: string) {
     return withEmbeddedBrowserView(tabId, async (view) => {
       try {
+        const normalizedTabId = String(tabId || '').trim()
+        const normalizedResourceKey = String(resourceKey || '').trim()
+        if (normalizedResourceKey.startsWith('mse-stream:')) {
+          const resource = await extractEmbeddedBrowserResourceFromFrames(normalizedTabId, view, normalizedResourceKey)
+          if (resource && 'filePath' in resource && resource.filePath) {
+            const openError = await shell.openPath(resource.filePath)
+            return !openError
+          }
+        }
         const frames = getEmbeddedBrowserFrameList(view)
         if (!frames.length) {
           return await runEmbeddedBrowserResourceProbeAction(
@@ -2463,6 +2670,32 @@ export function createEmbeddedBrowserMainController(
   async function handleExportResource(tabId: string, resourceKey: string) {
     return withEmbeddedBrowserView(tabId, async (view) => {
       try {
+        const normalizedTabId = String(tabId || '').trim()
+        const normalizedResourceKey = String(resourceKey || '').trim()
+        if (normalizedResourceKey.startsWith('mse-stream:')) {
+          const resource = await extractEmbeddedBrowserResourceFromFrames(normalizedTabId, view, normalizedResourceKey)
+          if (resource) {
+            const defaultFileName = deriveEmbeddedBrowserExtractedResourceOutputFileName(
+              resource.fileName,
+            )
+            const mainWindow = options.getMainWindow()
+            const targetWindow = mainWindow && !mainWindow.isDestroyed()
+              ? mainWindow
+              : undefined
+            const saveDialogOptions = {
+              defaultPath: path.join(app.getPath('downloads'), defaultFileName),
+              showsTagField: false,
+            }
+            const saveResult = targetWindow
+              ? await dialog.showSaveDialog(targetWindow, saveDialogOptions)
+              : await dialog.showSaveDialog(saveDialogOptions)
+            if (saveResult.canceled || !saveResult.filePath) {
+              return false
+            }
+            await saveEmbeddedBrowserExtractedResourceFile(resource, saveResult.filePath)
+            return true
+          }
+        }
         const frames = getEmbeddedBrowserFrameList(view)
         if (!frames.length) {
           return await runEmbeddedBrowserResourceProbeAction(
@@ -2499,7 +2732,30 @@ export function createEmbeddedBrowserMainController(
   async function handleReadResource(tabId: string, resourceKey: string) {
     return withEmbeddedBrowserView(tabId, async (view) => {
       try {
-        return await extractEmbeddedBrowserResourceFromFrames(view, resourceKey)
+        const resource = await extractEmbeddedBrowserResourceFromFrames(String(tabId || '').trim(), view, resourceKey)
+        if (!resource) {
+          return null
+        }
+        if (typeof resource.base64 === 'string') {
+          return {
+            base64: resource.base64,
+            fileName: resource.fileName,
+            mimeType: resource.mimeType,
+            resourceKey: resource.resourceKey || String(resourceKey || '').trim(),
+            streamType: resource.streamType,
+          }
+        }
+        if (!('filePath' in resource) || !resource.filePath) {
+          return null
+        }
+        const fileBuffer = await readFile(resource.filePath)
+        return {
+          base64: fileBuffer.toString('base64'),
+          fileName: resource.fileName,
+          mimeType: resource.mimeType,
+          resourceKey: resource.resourceKey || String(resourceKey || '').trim(),
+          streamType: resource.streamType,
+        }
       } catch (error) {
         runtimeLogger.warn('embedded browser resource read failed', {
           error: error instanceof Error ? error.message : String(error),

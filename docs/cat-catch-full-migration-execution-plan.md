@@ -951,6 +951,13 @@ Cat Catch 在 `js/init.js` 中定义默认规则，在 `js/background.js` 中执
 
 **目标**：将 MSE 捕获从"全量积累后一次性提取"改为"增量写盘"，支持大视频捕获。
 
+> 2026-04-23 当前进度（Codex）：
+> - 已把 page-side MSE 捕获改成“超阈值 flush -> probe console payload -> main 追加写入 temp spool file”的第一版主线，当前阈值采用 50MB。
+> - `save / merge / transcode` 现在会优先读取 main 侧 file-backed MSE 资源，不再要求整段 MSE 都以 base64 从 page 回捞。
+> - 当前实现刻意复用现有资源保存、MSE 合并和转码链路，没有为 MSE 单独再起一套下载器或工具页模式。
+> - `clear cache / restart capture / 关闭 tab` 已补对应 spool 清理，避免 page cache 清空后 main 临时文件继续残留。
+> - 仍待统一人工验真的点：超长视频内存曲线，以及资源卡“直接导出 / 打开”在大 MSE 场景下的黑盒体验。
+
 ### 当前问题
 
 MSE 捕获数据链路：

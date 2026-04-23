@@ -11,6 +11,13 @@ export function embeddedBrowserResourceProbeRuntimeCoreBody() {
 	      getCatchToolkitState?: () => ProbeCatchToolkitState
 	      installedAt: number
       clearCatchMediaCache?: () => boolean
+      drainResource?: (resourceKey: string) => null | {
+        base64?: string
+        fileName: string
+        mimeType?: string
+        resourceKey: string
+        streamType?: ProbeStreamType
+      }
       downloadCatchMedia?: () => boolean
       openResource?: (resourceKey: string) => boolean
       readResource?: (resourceKey: string) => Promise<null | {
@@ -49,13 +56,17 @@ export function embeddedBrowserResourceProbeRuntimeCoreBody() {
     lastAppendAt: 0,
     lastError: '',
   }
+  const MSE_FLUSH_THRESHOLD_BYTES = 50 * 1024 * 1024
   const mseStreams = new Map<string, {
     blobUrl: string
     bufferCount: number
     buffers: ArrayBuffer[]
+    flushTimer: number | null
+    flushedBytes: number
     lastReportedBufferCount: number
     lastReportedBytes: number
     mimeType: string
+    retainedBytes: number
     streamId: string
     streamType?: 'audio' | 'video'
     totalBytes: number
@@ -548,6 +559,26 @@ export function embeddedBrowserResourceProbeRuntimeCoreBody() {
     return btoa(binary)
   }
 
+  function emitProbeConsolePayload(payload: Record<string, unknown>) {
+    try {
+      originalConsoleInfo(consolePrefix + JSON.stringify(payload))
+    } catch {
+      // ignore probe transport failures
+    }
+  }
+
+  function combineArrayBuffers(buffers: ArrayBuffer[]) {
+    const totalBytes = buffers.reduce((sum, buffer) => sum + (buffer?.byteLength || 0), 0)
+    const combined = new Uint8Array(totalBytes)
+    let offset = 0
+    buffers.forEach((buffer) => {
+      const bytes = getChunkBytes(buffer)
+      combined.set(bytes, offset)
+      offset += bytes.byteLength
+    })
+    return combined.buffer
+  }
+
   function textToBase64(text: string) {
     return arrayBufferToBase64(new TextEncoder().encode(text).buffer)
   }
@@ -869,6 +900,68 @@ export function embeddedBrowserResourceProbeRuntimeCoreBody() {
     return buffers
   }
 
+  function clearMseFlushTimer(streamId: string) {
+    const stream = mseStreams.get(streamId)
+    if (!stream || stream.flushTimer == null) {
+      return
+    }
+    clearTimeout(stream.flushTimer)
+    stream.flushTimer = null
+  }
+
+  function emitMseStreamReset(streamId: string) {
+    emitProbeConsolePayload({
+      capturedAt: Date.now(),
+      event: 'mse-reset',
+      pageUrl: currentLocationHref,
+      resourceKey: createMseResourceKey(streamId),
+    })
+  }
+
+  function flushMseStreamBuffers(streamId: string) {
+    const stream = mseStreams.get(streamId)
+    if (!stream || stream.buffers.length === 0) {
+      return 0
+    }
+    clearMseFlushTimer(streamId)
+    const combinedBuffer = combineArrayBuffers(stream.buffers)
+    const flushedBytes = combinedBuffer.byteLength
+    if (!flushedBytes) {
+      return 0
+    }
+    emitProbeConsolePayload({
+      base64: arrayBufferToBase64(combinedBuffer),
+      capturedAt: Date.now(),
+      event: 'mse-flush',
+      fileName: `${resolveCatchToolkitFileName()}${stream.streamType ? `-${stream.streamType}` : ''}.${guessExtensionFromMimeType(stream.mimeType, stream.streamType)}`,
+      mimeType: stream.mimeType,
+      pageUrl: currentLocationHref,
+      resourceKey: createMseResourceKey(streamId),
+      streamType: stream.streamType,
+    })
+    stream.buffers = []
+    stream.retainedBytes = 0
+    stream.flushedBytes += flushedBytes
+    stream.lastReportedBufferCount = stream.bufferCount
+    stream.lastReportedBytes = stream.totalBytes
+    return flushedBytes
+  }
+
+  function scheduleMseStreamFlush(streamId: string) {
+    const stream = mseStreams.get(streamId)
+    if (!stream || stream.flushTimer != null) {
+      return
+    }
+    stream.flushTimer = setTimeout(() => {
+      const latestStream = mseStreams.get(streamId)
+      if (!latestStream) {
+        return
+      }
+      latestStream.flushTimer = null
+      flushMseStreamBuffers(streamId)
+    }, 0) as unknown as number
+  }
+
   function emit(payload: ProbeEmitPayload, fromRelay = false) {
     if (!payload.url) {
       return
@@ -888,23 +981,19 @@ export function embeddedBrowserResourceProbeRuntimeCoreBody() {
       relayEnvelope({ payload, type: 'capture' })
       return
     }
-    try {
-      originalConsoleInfo(consolePrefix + JSON.stringify({
-        capturedAt: Date.now(),
-        contentLength: payload.contentLength,
-        ext: payload.ext,
-        kind: payload.kind || classifyKind(payload.url, payload.mimeType),
-        mimeType: payload.mimeType,
-        pageUrl: currentLocationHref,
-        resourceKey: payload.resourceKey,
-        resourceType: payload.resourceType || 'probe',
-        source: payload.source,
-        streamType: payload.streamType,
-        url: payload.url,
-      }))
-    } catch {
-      // ignore probe transport failures
-    }
+    emitProbeConsolePayload({
+      capturedAt: Date.now(),
+      contentLength: payload.contentLength,
+      ext: payload.ext,
+      kind: payload.kind || classifyKind(payload.url, payload.mimeType),
+      mimeType: payload.mimeType,
+      pageUrl: currentLocationHref,
+      resourceKey: payload.resourceKey,
+      resourceType: payload.resourceType || 'probe',
+      source: payload.source,
+      streamType: payload.streamType,
+      url: payload.url,
+    })
   }
 
   function inferStreamTypeFromPath(path: string[]) {
@@ -935,6 +1024,7 @@ export function embeddedBrowserResourceProbeRuntimeCoreBody() {
     dataUrlPattern,
     decodeDataUrlText,
     emit,
+    emitMseStreamReset,
     emitGeneratedResource,
     emitKeyCandidateFromBase64,
     emitKeyCandidateFromBuffer,

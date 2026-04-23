@@ -115,16 +115,20 @@ export function embeddedBrowserResourceProbePageActionsBody() {
   function clearCatchMediaCacheInternal() {
     let cleared = false
     mseStreams.forEach((stream) => {
+      clearMseFlushTimer(stream.streamId)
       if (stream.blobUrl) {
         URL.revokeObjectURL(stream.blobUrl)
         stream.blobUrl = ''
       }
+      emitMseStreamReset(stream.streamId)
+      stream.flushedBytes = 0
       if (isCaptureComplete) {
         cleared = cleared || stream.buffers.length > 0
         stream.buffers = []
         stream.bufferCount = 0
         stream.lastReportedBufferCount = 0
         stream.lastReportedBytes = 0
+        stream.retainedBytes = 0
         stream.totalBytes = 0
         emitMseStream(stream.streamId)
         return
@@ -133,6 +137,7 @@ export function embeddedBrowserResourceProbePageActionsBody() {
         const firstChunk = stream.buffers[0]
         stream.buffers = firstChunk ? [firstChunk] : []
         stream.bufferCount = stream.buffers.length
+        stream.retainedBytes = firstChunk?.byteLength || 0
         stream.totalBytes = firstChunk?.byteLength || 0
         stream.lastReportedBufferCount = stream.bufferCount
         stream.lastReportedBytes = stream.totalBytes
@@ -322,6 +327,31 @@ export function embeddedBrowserResourceProbePageActionsBody() {
     }
   }
 
+  function drainMseResource(resourceKey: string) {
+    const streamId = String(resourceKey || '').replace(/^mse-stream:/, '')
+    const stream = mseStreams.get(streamId)
+    if (!stream) {
+      return null
+    }
+    clearMseFlushTimer(streamId)
+    const retainedBuffers = normalizeBuffersForPlayback(stream.buffers)
+    const retainedBuffer = retainedBuffers.length > 0
+      ? combineArrayBuffers(retainedBuffers)
+      : null
+    stream.buffers = []
+    stream.retainedBytes = 0
+    stream.lastReportedBufferCount = stream.bufferCount
+    stream.lastReportedBytes = stream.totalBytes
+    emitMseStream(streamId)
+    return {
+      base64: retainedBuffer && retainedBuffer.byteLength > 0 ? arrayBufferToBase64(retainedBuffer) : undefined,
+      fileName: createMseExportName(streamId),
+      mimeType: stream.mimeType,
+      resourceKey,
+      streamType: stream.streamType,
+    }
+  }
+
   function openProbeResource(resourceKey: string) {
     const resource = probeResources.get(resourceKey)
     if (!resource?.blobUrl) {
@@ -397,6 +427,13 @@ export function embeddedBrowserResourceProbePageActionsBody() {
     },
     downloadCatchMedia() {
       return downloadCatchMediaInternal()
+    },
+    drainResource(resourceKey: string) {
+      const normalizedResourceKey = String(resourceKey || '')
+      if (normalizedResourceKey.startsWith('mse-stream:')) {
+        return drainMseResource(normalizedResourceKey)
+      }
+      return null
     },
     exportResource(resourceKey: string) {
       const normalizedResourceKey = String(resourceKey || '')
