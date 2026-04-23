@@ -326,6 +326,12 @@ Cat Catch 使用自实现的 `AESDecryptor`（来自 `lib/m3u8-decrypt.js`，299
 
 **目标**：修复本地 playlist 重写中的缺陷，确保 ffmpeg 能正确读取重写后的 m3u8。
 
+> 2026-04-23 当前主线复核说明：
+> - 当前主线已经覆盖了这包里的大部分核心点：本地 playlist 只引用磁盘上真实存在的分片；`EXT-X-KEY` 和 `EXT-X-MAP` 只在变化时写入；本地 key / map 都会写成相对路径；`BYTERANGE` 语义也已在前序修复中去掉，避免对已裁好的本地文件再次切片。
+> - 本工作包当前剩余的重点，不是“从零重写整个 playlist”，而是把 playlist 生成进一步收口到更稳定的规范形态，例如显式写出 `TARGETDURATION`、统一从 `MEDIA-SEQUENCE:0` 开始，以及继续确认包含 `EXT-X-MAP` / `EXT-X-KEY` / 范围下载的样本都能被 ffmpeg 正确消费。
+> - 当前主线也应保持“宁可显式失败，不产出坏 playlist”的原则：如果本地 key / map / segment 文件缺失，重写阶段应直接报错，而不是静默写出 ffmpeg 无法正确消费的本地 m3u8。
+> - 因此 WP-04 现在应按“已有主线补规范、补验真”理解，而不是按“Manifest 重写完全不可用”理解。
+
 ### 当前问题
 
 `buildLocalPlaylist()` 在 `embeddedBrowserHlsLocalDownloaderService.ts` 中生成本地 m3u8 文件，但存在以下缺陷：

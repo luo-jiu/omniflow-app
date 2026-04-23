@@ -161,6 +161,17 @@ function createHlsMapLine(uri: string) {
   return `#EXT-X-MAP:URI="${uri}"`
 }
 
+function getRequiredLocalRef<T extends ResourceRefRecord>(
+  collectionName: 'key' | 'map',
+  record: T | undefined,
+  fragmentSequence: number,
+) {
+  if (record?.playlistPath) {
+    return record
+  }
+  throw new Error(`重写本地 playlist 失败：分片序号 ${fragmentSequence} 缺少对应的本地${collectionName}文件`)
+}
+
 async function downloadStaticResource(input: {
   byteRange?: EmbeddedBrowserDownloadByteRange
   headers?: Record<string, string>
@@ -293,10 +304,21 @@ function buildLocalPlaylist(input: {
   manualKeyBase64?: string
   mapRefs: Map<string, ResourceRefRecord>
 }) {
-  const lines = ['#EXTM3U', '#EXT-X-VERSION:3']
-  if (input.fragments[0]) {
-    lines.push(`#EXT-X-MEDIA-SEQUENCE:${input.fragments[0].sequence}`)
+  if (!input.fragments.length || !input.fragmentPaths.length) {
+    throw new Error('重写本地 playlist 失败：当前没有可写入 playlist 的本地分片')
   }
+  const targetDuration = Math.max(
+    1,
+    Math.ceil(input.fragments.reduce((maxDuration, fragment) => (
+      Math.max(maxDuration, Number(fragment.duration || 0))
+    ), 0)),
+  )
+  const lines = [
+    '#EXTM3U',
+    '#EXT-X-VERSION:3',
+    `#EXT-X-TARGETDURATION:${targetDuration}`,
+    '#EXT-X-MEDIA-SEQUENCE:0',
+  ]
 
   let previousDiscontinuity = input.fragments[0]?.discontinuitySequence ?? 0
   let previousKeyCacheKey = ''
@@ -317,12 +339,10 @@ function buildLocalPlaylist(input: {
         })
       : ''
     if (fragment.key && nextKeyCacheKey !== previousKeyCacheKey) {
-      const keyRecord = input.keyRefs.get(nextKeyCacheKey)
-      if (keyRecord) {
-        lines.push(createHlsKeyLine(fragment.key, keyRecord.playlistPath))
-        previousKeyCacheKey = nextKeyCacheKey
-        hadKey = true
-      }
+      const keyRecord = getRequiredLocalRef('key', input.keyRefs.get(nextKeyCacheKey), fragment.sequence)
+      lines.push(createHlsKeyLine(fragment.key, keyRecord.playlistPath))
+      previousKeyCacheKey = nextKeyCacheKey
+      hadKey = true
     } else if (!fragment.key && hadKey) {
       lines.push('#EXT-X-KEY:METHOD=NONE')
       previousKeyCacheKey = ''
@@ -336,15 +356,17 @@ function buildLocalPlaylist(input: {
         })
       : ''
     if (fragment.initSegment && nextMapCacheKey !== previousMapCacheKey) {
-      const mapRecord = input.mapRefs.get(nextMapCacheKey)
-      if (mapRecord) {
-        lines.push(createHlsMapLine(mapRecord.playlistPath))
-        previousMapCacheKey = nextMapCacheKey
-      }
+      const mapRecord = getRequiredLocalRef('map', input.mapRefs.get(nextMapCacheKey), fragment.sequence)
+      lines.push(createHlsMapLine(mapRecord.playlistPath))
+      previousMapCacheKey = nextMapCacheKey
     }
 
+    const fragmentPath = input.fragmentPaths[index]
+    if (!fragmentPath) {
+      throw new Error(`重写本地 playlist 失败：分片序号 ${fragment.sequence} 缺少本地输出路径`)
+    }
     lines.push(`#EXTINF:${fragment.duration || 0},${fragment.title || ''}`)
-    lines.push(input.fragmentPaths[index] || '')
+    lines.push(fragmentPath)
   })
 
   lines.push('#EXT-X-ENDLIST')
