@@ -218,6 +218,59 @@ export async function downloadEmbeddedBrowserHlsManifest(
   }>;
 }
 
+export async function startEmbeddedBrowserHlsRecording(
+  tabId: string,
+  payload: {
+    ffmpegPath?: string;
+    headers?: Record<string, string>;
+    manifestUrl?: string;
+    manualKeyBase64?: string;
+    outputDirectoryPath?: string;
+    pageUrl?: string;
+    requestId?: string;
+    suggestedFileName?: string;
+    suggestedThreadCount?: number;
+    useSystemSaveDialog?: boolean;
+  },
+) {
+  assertDesktopSupport();
+  return window.electronEmbeddedBrowser.startHlsRecording(tabId, payload) as Promise<{
+    cancelled?: boolean;
+    error?: string;
+    ok: boolean;
+    requestId?: string;
+  }>;
+}
+
+export async function stopEmbeddedBrowserHlsRecording(
+  tabId: string,
+  payload: {
+    requestId?: string;
+  },
+) {
+  assertDesktopSupport();
+  return window.electronEmbeddedBrowser.stopHlsRecording(tabId, payload) as Promise<{
+    cancelled?: boolean;
+    error?: string;
+    ffmpegPath?: string;
+    ok: boolean;
+    outputPath?: string;
+  }>;
+}
+
+export async function discardEmbeddedBrowserHlsRecording(
+  tabId: string,
+  payload: {
+    requestId?: string;
+  },
+) {
+  assertDesktopSupport();
+  return window.electronEmbeddedBrowser.discardHlsRecording(tabId, payload) as Promise<{
+    error?: string;
+    ok: boolean;
+  }>;
+}
+
 export async function downloadEmbeddedBrowserHlsTracks(
   tabId: string,
   payload: {

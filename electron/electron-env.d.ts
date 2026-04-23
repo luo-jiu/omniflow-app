@@ -379,6 +379,32 @@ interface Window {
       suggestedFileName?: string;
       useSystemSaveDialog?: boolean;
     }) => Promise<EmbeddedBrowserCapturedResourceMergeResponse>;
+    startHlsRecording: (tabId: string, payload: {
+      ffmpegPath?: string;
+      headers?: Record<string, string>;
+      manifestUrl?: string;
+      manualKeyBase64?: string;
+      outputDirectoryPath?: string;
+      pageUrl?: string;
+      requestId?: string;
+      suggestedFileName?: string;
+      suggestedThreadCount?: number;
+      useSystemSaveDialog?: boolean;
+    }) => Promise<{
+      cancelled?: boolean;
+      error?: string;
+      ok: boolean;
+      requestId?: string;
+    }>;
+    stopHlsRecording: (tabId: string, payload: {
+      requestId?: string;
+    }) => Promise<EmbeddedBrowserCapturedResourceMergeResponse>;
+    discardHlsRecording: (tabId: string, payload: {
+      requestId?: string;
+    }) => Promise<{
+      error?: string;
+      ok: boolean;
+    }>;
     downloadHlsTracks: (tabId: string, payload: {
       audioManifestUrl?: string;
       durationSeconds?: number;

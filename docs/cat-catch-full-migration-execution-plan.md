@@ -448,6 +448,12 @@ Cat Catch 在 `m3u8.js` 中使用 HLS.js 解析 master playlist 后：
 - 已支持选择字幕轨并单独下载到本地
 - **剩余**：更完整的轨道联动验真与边角修正
 
+> 2026-04-23 当前进度（Codex）：
+> - 已落地：工具区可选择独立音轨，并通过 `video manifest + audio manifest -> ffmpeg` 完成合并；字幕轨按 Cat Catch 的思路单独下载到本地，不强行并入视频成品。
+> - 已落地：variant 切换会按 `audioGroupId / subtitlesGroupId` 收窄可选轨道；如果旧选择不再匹配当前 group，会自动清掉，避免脏状态沿用。
+> - 当前保持的边界：没有额外发明新的下载器模式，也没有把字幕强行塞进视频输出；这里只做 Cat Catch 对应能力的客户端最小适配。
+> - 待验真：真实站点下的轨道联动、带 Cookie/Referer 的独立音轨 manifest、字幕轨下载样本。
+
 ### 实现方案
 
 在 `ToolWorkspaceHls.tsx`（WP-02 拆分后）中实现：
@@ -513,6 +519,12 @@ Master Manifest
 2. Media playlist 中有 `EXT-X-KEY` → 用户输入手动 key
 3. 走本地 downloader → client 模式解密 → ffmpeg 合并
 
+> 2026-04-23 当前进度（Codex）：
+> - 已落地：`master playlist + 手动 key` 不再一刀切拦死；当前要求先明确选择一个具体 variant，再继续执行。
+> - 已落地：选定 variant 后，工具区会先请求该 variant 对应的 media playlist，并基于它重新生成 media-level HLS plan，然后接回现有 `local-plan -> 本地 key 文件 -> ffmpeg` 主链。
+> - 当前保持的边界：没有额外引入新的 `decryptionMode` 或主进程预解密实现；这里只是把 `master + manual key` 收敛到现有本地主链，避免为 WP-07 单独再起一套解密体系。
+> - 待验真：真实样本下的 `master + selected variant + manual key` 下载成功与产物可播放。
+
 ### 实现方案
 
 1. 移除 UI 拦截逻辑
@@ -549,6 +561,15 @@ Cat Catch 在 `m3u8.js` 中实现了 `recorder` 模式：
 - 录制结束后可选合并所有分片
 
 ### OmniFlow 实现方案
+
+> **2026-04-23 当前进度（Codex）**
+>
+> - 已新增 `embeddedBrowserHlsLiveRecorder.ts`，采用“轮询 media playlist -> 只补新增分片 -> 复用现有 local-plan downloader”的最小主线。
+> - 已接上 `start-hls-recording` / `stop-hls-recording` IPC、main 侧 session 生命周期、工具区“开始录制 / 停止录制”入口。
+> - 当前实现刻意复用现有 `local-plan -> 本地 playlist -> ffmpeg` 主链，没有为直播录制另起新的下载器或解密模式。
+> - 已修正两条边界：同一 tab 重复开始时不再静默清掉旧录制；停止后若 ffmpeg 导出失败，会保留当前 workdir，工具区允许直接“重试导出”。
+> - 当前离开工具区或切换到别的 HLS 请求时，会把未导出的直播录制视为放弃任务并清理 session，而不是偷偷自动导出结果。
+> - 本轮主要目标是先把“开始录制 -> 持续追加新分片 -> 停止后交给 ffmpeg 导出”闭环接通；5 分钟以上稳定性和真实样本验真仍待后续统一测试。
 
 1. **检测直播流**
 

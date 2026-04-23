@@ -72,6 +72,7 @@ type ToolWorkspaceHlsProps = {
   hlsAudioRenditions: ToolWorkspaceMediaHlsRequest['plan']['renditions'];
   hlsAudioRenditionOptions: HlsRenditionOption[];
   hlsKeyVerificationResult: EmbeddedBrowserHlsKeyVerificationResult | null;
+  hlsLiveRecordingState: 'idle' | 'starting' | 'recording' | 'stopping';
   hlsManualKeyDraft: string;
   hlsManualKeyInputMode: string;
   hlsManualKeyInvalid: boolean;
@@ -103,6 +104,8 @@ type ToolWorkspaceHlsProps = {
   onDownloadSelectedSubtitle: () => void;
   onRetryFailed: () => void;
   onSaveHls: () => void;
+  onStartLiveRecording: () => void;
+  onStopLiveRecording: () => void;
   onSetSelectedHlsAudioRenditionUrl: (value: string) => void;
   onSetSelectedHlsSubtitleRenditionUrl: (value: string) => void;
   onSetHlsManualKeyDraft: (value: string) => void;
@@ -228,6 +231,7 @@ const ToolWorkspaceHls: React.FC<ToolWorkspaceHlsProps> = ({
   hlsAudioRenditions,
   hlsAudioRenditionOptions,
   hlsKeyVerificationResult,
+  hlsLiveRecordingState,
   hlsManualKeyDraft,
   hlsManualKeyInputMode,
   hlsManualKeyInvalid,
@@ -254,6 +258,8 @@ const ToolWorkspaceHls: React.FC<ToolWorkspaceHlsProps> = ({
   onDownloadSelectedSubtitle,
   onRetryFailed,
   onSaveHls,
+  onStartLiveRecording,
+  onStopLiveRecording,
   onSetSelectedHlsAudioRenditionUrl,
   onSetSelectedHlsSubtitleRenditionUrl,
   onSetHlsManualKeyDraft,
@@ -268,6 +274,12 @@ const ToolWorkspaceHls: React.FC<ToolWorkspaceHlsProps> = ({
   selectedHlsVariantUrl,
   verifyingHlsKey,
 }) => {
+  const canRetryLiveExport = Boolean(
+    hlsRequest?.plan.isLive
+    && hlsTaskStatus.state === 'error'
+    && hlsTaskStatus.requestId,
+  );
+
   if (!hlsRequest) {
     return (
       <Panel>
@@ -523,6 +535,23 @@ const ToolWorkspaceHls: React.FC<ToolWorkspaceHlsProps> = ({
         ) : null}
       </ActionRow>
       <ActionRow>
+        {hlsRequest.plan.isLive ? (
+          <Button
+            loading={savingHls && (hlsLiveRecordingState === 'starting' || hlsLiveRecordingState === 'stopping')}
+            type={hlsLiveRecordingState === 'recording' ? 'danger' : 'primary'}
+            onClick={hlsLiveRecordingState === 'recording' || canRetryLiveExport ? onStopLiveRecording : onStartLiveRecording}
+          >
+            {canRetryLiveExport
+              ? '重试导出'
+              : hlsLiveRecordingState === 'recording'
+              ? '停止录制'
+              : hlsLiveRecordingState === 'starting'
+                ? '开始录制中'
+                : hlsLiveRecordingState === 'stopping'
+                  ? '停止录制中'
+                  : '开始录制'}
+          </Button>
+        ) : null}
         <Button
           disabled={hlsAes128KeyCount === 0}
           loading={verifyingHlsKey}
@@ -530,11 +559,11 @@ const ToolWorkspaceHls: React.FC<ToolWorkspaceHlsProps> = ({
         >
           {verifyingHlsKey ? '验证中' : '验证 key'}
         </Button>
-        <Button loading={savingHls} type="primary" onClick={onSaveHls}>
+        <Button disabled={hlsRequest.plan.isLive} loading={savingHls && !hlsRequest.plan.isLive} type="primary" onClick={onSaveHls}>
           下载&保存
         </Button>
         <Button
-          disabled={savingHls || hlsTaskStatus.state === 'running'}
+          disabled={savingHls || hlsTaskStatus.state === 'running' || hlsLiveRecordingState === 'recording' || hlsLiveRecordingState === 'stopping'}
           onClick={onRetryFailed}
         >
           {hlsTaskStatus.state === 'error'
@@ -568,6 +597,19 @@ const ToolWorkspaceHls: React.FC<ToolWorkspaceHlsProps> = ({
         ) : null}
         {hlsSelectedSubtitleRendition ? (
           <Tag color="purple">字幕：{formatHlsRenditionLabel(hlsSelectedSubtitleRendition)}</Tag>
+        ) : null}
+        {hlsRequest.plan.isLive ? (
+          <Tag color={canRetryLiveExport ? 'orange' : hlsLiveRecordingState === 'recording' ? 'red' : hlsLiveRecordingState === 'starting' || hlsLiveRecordingState === 'stopping' ? 'orange' : 'grey'}>
+            {canRetryLiveExport
+              ? '等待重试导出'
+              : hlsLiveRecordingState === 'recording'
+              ? '直播录制中'
+              : hlsLiveRecordingState === 'starting'
+                ? '启动录制'
+                : hlsLiveRecordingState === 'stopping'
+                  ? '停止录制'
+                  : '未开始录制'}
+          </Tag>
         ) : null}
       </ActionRow>
       <ActionRow>

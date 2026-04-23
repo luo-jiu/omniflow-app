@@ -6,6 +6,9 @@ import type {
   EmbeddedBrowserCapturedResourceTranscodePayload,
   EmbeddedBrowserFaviconResolvePayload,
   EmbeddedBrowserHlsDownloadPayload,
+  EmbeddedBrowserHlsRecordingDiscardPayload,
+  EmbeddedBrowserHlsRecordingStartPayload,
+  EmbeddedBrowserHlsRecordingStopPayload,
   EmbeddedBrowserHlsTrackMergePayload,
   EmbeddedBrowserHlsPlanDownloadPayload,
   EmbeddedBrowserHlsPlanRetryPayload,
@@ -36,6 +39,18 @@ type EmbeddedBrowserMainIpcHandlers = {
   downloadHlsManifest: (
     tabId: string,
     payload: EmbeddedBrowserHlsDownloadPayload,
+  ) => Promise<unknown>
+  startHlsRecording: (
+    tabId: string,
+    payload: EmbeddedBrowserHlsRecordingStartPayload,
+  ) => Promise<unknown>
+  stopHlsRecording: (
+    tabId: string,
+    payload: EmbeddedBrowserHlsRecordingStopPayload,
+  ) => Promise<unknown>
+  discardHlsRecording: (
+    tabId: string,
+    payload: EmbeddedBrowserHlsRecordingDiscardPayload,
   ) => Promise<unknown>
   downloadHlsTracks: (
     tabId: string,
@@ -202,6 +217,24 @@ export function registerEmbeddedBrowserMainIpcHandlers(handlers: EmbeddedBrowser
     'embedded-browser:resource:download-hls',
     async (_event, tabId: string, payload: EmbeddedBrowserHlsDownloadPayload) => (
       handlers.downloadHlsManifest(tabId, payload)
+    ),
+  )
+  ipcMain.handle(
+    'embedded-browser:resource:start-hls-recording',
+    async (_event, tabId: string, payload: EmbeddedBrowserHlsRecordingStartPayload) => (
+      handlers.startHlsRecording(tabId, payload)
+    ),
+  )
+  ipcMain.handle(
+    'embedded-browser:resource:stop-hls-recording',
+    async (_event, tabId: string, payload: EmbeddedBrowserHlsRecordingStopPayload) => (
+      handlers.stopHlsRecording(tabId, payload)
+    ),
+  )
+  ipcMain.handle(
+    'embedded-browser:resource:discard-hls-recording',
+    async (_event, tabId: string, payload: EmbeddedBrowserHlsRecordingDiscardPayload) => (
+      handlers.discardHlsRecording(tabId, payload)
     ),
   )
   ipcMain.handle(

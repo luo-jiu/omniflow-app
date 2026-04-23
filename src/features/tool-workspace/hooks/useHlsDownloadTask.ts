@@ -9,8 +9,11 @@ import {
   parseEmbeddedBrowserHlsManifest,
 } from '@/features/embedded-browser/resources/model/embedded-browser-hls-manifest';
 import {
+  discardEmbeddedBrowserHlsRecording,
   downloadEmbeddedBrowserDirectFile,
   downloadEmbeddedBrowserHlsManifest,
+  startEmbeddedBrowserHlsRecording,
+  stopEmbeddedBrowserHlsRecording,
   downloadEmbeddedBrowserHlsTracks,
   downloadEmbeddedBrowserHlsPlan,
   listEmbeddedBrowserCapturedResources,
@@ -55,6 +58,8 @@ export type HlsTaskStatus = {
   state: 'idle' | 'running' | 'success' | 'error';
   totalFragments: number;
 };
+
+export type HlsLiveRecordingState = 'idle' | 'starting' | 'recording' | 'stopping';
 
 export type HlsVariantOption = {
   label: string;
@@ -345,6 +350,7 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
   const [hlsRangeStartDraft, setHlsRangeStartDraft] = React.useState(1);
   const [hlsRangeEndDraft, setHlsRangeEndDraft] = React.useState(1);
   const [hlsKeyVerificationResult, setHlsKeyVerificationResult] = React.useState<EmbeddedBrowserHlsKeyVerificationResult | null>(null);
+  const [hlsLiveRecordingState, setHlsLiveRecordingState] = React.useState<HlsLiveRecordingState>('idle');
   const [hlsTaskStatus, setHlsTaskStatus] = React.useState<HlsTaskStatus>({
     bytesReceived: undefined,
     bytesTotal: undefined,
@@ -361,6 +367,8 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
   const activeHlsTaskRequestIdRef = React.useRef('');
   const activeHlsTaskManifestUrlRef = React.useRef('');
   const activeHlsKeyVerificationTokenRef = React.useRef('');
+  const hlsLiveRecordingStateRef = React.useRef<HlsLiveRecordingState>('idle');
+  const hlsTaskStateRef = React.useRef<HlsTaskStatus['state']>('idle');
 
   const normalizedHlsManualKey = React.useMemo(() => (
     normalizeHlsKeyCandidateValue(hlsManualKeyDraft) || ''
@@ -468,6 +476,43 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
   ), [hlsTaskStatus]);
 
   React.useEffect(() => {
+    hlsLiveRecordingStateRef.current = hlsLiveRecordingState;
+  }, [hlsLiveRecordingState]);
+
+  React.useEffect(() => {
+    hlsTaskStateRef.current = hlsTaskStatus.state;
+  }, [hlsTaskStatus.state]);
+
+  React.useEffect(() => {
+    const previousRequest = hlsRequest;
+    return () => {
+      const requestId = activeHlsTaskRequestIdRef.current;
+      const liveState = hlsLiveRecordingStateRef.current;
+      const shouldDiscardLiveSession = (
+        previousRequest?.plan.isLive
+        && (
+        liveState === 'recording'
+        || liveState === 'starting'
+        || (liveState === 'idle' && hlsTaskStateRef.current === 'error')
+        )
+      );
+      if (!previousRequest || !requestId || !shouldDiscardLiveSession) {
+        return;
+      }
+      void discardEmbeddedBrowserHlsRecording(previousRequest.resource.tabId, {
+        requestId,
+      })
+        .catch(() => undefined)
+        .finally(() => {
+          if (activeHlsTaskRequestIdRef.current === requestId) {
+            activeHlsTaskRequestIdRef.current = '';
+            activeHlsTaskManifestUrlRef.current = '';
+          }
+        });
+    };
+  }, [hlsRequest]);
+
+  React.useEffect(() => {
     setHlsManualKeyDraft('');
     setSelectedHlsVariantUrl('');
     setSelectedHlsAudioRenditionUrl('');
@@ -477,6 +522,7 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
     setHlsRangeEndDraft(Math.max(1, hlsRequest?.plan.fragmentCount || 1));
     setHlsKeyVerificationResult(null);
     setVerifyingHlsKey(false);
+    setHlsLiveRecordingState('idle');
     activeHlsTaskRequestIdRef.current = '';
     activeHlsTaskManifestUrlRef.current = '';
     activeHlsKeyVerificationTokenRef.current = '';
@@ -529,6 +575,11 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
       if (payload.manifestUrl !== (activeHlsTaskManifestUrlRef.current || hlsRequest.plan.manifestUrl)) {
         return;
       }
+      if (payload.requestId && payload.requestId === activeHlsTaskRequestIdRef.current) {
+        if (payload.status === 'error' || payload.status === 'success') {
+          setHlsLiveRecordingState('idle');
+        }
+      }
       setHlsTaskStatus((previous) => {
         const nextLog = payload.message
           ? appendHlsTaskLogs(
@@ -574,6 +625,10 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
   const handleSaveHls = React.useCallback(async () => {
     if (!hlsRequest) {
       Toast.warning('先从资源面板解析 HLS，再送到工具页');
+      return;
+    }
+    if (hlsRequest.plan.isLive) {
+      Toast.warning('直播流先用“开始录制 / 停止录制”，再导出最终文件');
       return;
     }
     if (hlsManualKeyInvalid) {
@@ -858,6 +913,188 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
     }
   }, [handleSaveHls, hlsRequest, hlsTaskStatus, onPersistOutput]);
 
+  const handleStartLiveRecording = React.useCallback(async () => {
+    if (!hlsRequest) {
+      Toast.warning('先从资源面板解析 HLS，再送到工具页');
+      return;
+    }
+    if (!hlsRequest.plan.isLive) {
+      Toast.warning('当前不是直播 HLS，直接用“下载&保存”即可');
+      return;
+    }
+    if (hlsManualKeyInvalid) {
+      Toast.warning('自定义 key 需要是 16 字节 AES-128，支持 hex 或 base64');
+      return;
+    }
+    if (selectedHlsAudioRenditionUrl) {
+      Toast.warning('直播录制第一版先不混用独立音轨选择，先录主视频流');
+      return;
+    }
+
+    let effectiveManifestUrl = selectedHlsVariantUrl || hlsRequest.plan.manifestUrl;
+    if (hlsRequest.plan.isMaster) {
+      if (!selectedHlsVariantUrl || !/^https?:\/\//i.test(selectedHlsVariantUrl)) {
+        Toast.warning('直播 master playlist 先明确选择一个具体变体');
+        return;
+      }
+      effectiveManifestUrl = selectedHlsVariantUrl;
+    }
+
+    setSavingHls(true);
+    setHlsLiveRecordingState('starting');
+    const previousActiveRequestId = activeHlsTaskRequestIdRef.current;
+    const previousActiveManifestUrl = activeHlsTaskManifestUrlRef.current;
+    const previousTaskStatus = hlsTaskStatus;
+    const previousLiveState = hlsLiveRecordingStateRef.current;
+    try {
+      const requestId = `hls-live-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const resourceHeaders = withResourceRefererHeader(hlsRequest.resource);
+      activeHlsTaskRequestIdRef.current = requestId;
+      activeHlsTaskManifestUrlRef.current = effectiveManifestUrl;
+      setHlsTaskStatus({
+        bytesReceived: undefined,
+        bytesTotal: undefined,
+        completedFragments: 0,
+        durationSeconds: undefined,
+        error: undefined,
+        etaSeconds: undefined,
+        ffmpegSpeedText: undefined,
+        failedFragments: undefined,
+        lastOutputPath: undefined,
+        logs: [
+          createHlsTaskLogEntry({
+            mode: 'local-plan',
+            stage: 'preparing',
+            text: '已创建直播录制任务',
+          }),
+          ...(selectedHlsVariantUrl ? [createHlsTaskLogEntry({
+            mode: 'local-plan',
+            stage: 'preparing',
+            text: `录制变体：${hlsSelectedVariantLabel || selectedHlsVariantUrl}`,
+          })] : []),
+        ],
+        mode: 'local-plan',
+        processedSeconds: undefined,
+        requestId,
+        speedBps: undefined,
+        stage: 'preparing',
+        state: 'running',
+        totalFragments: 0,
+      });
+      const result = await startEmbeddedBrowserHlsRecording(hlsRequest.resource.tabId, {
+        headers: resourceHeaders,
+        manifestUrl: effectiveManifestUrl,
+        manualKeyBase64: normalizedHlsManualKey || undefined,
+        outputDirectoryPath,
+        pageUrl: hlsRequest.resource.pageUrl,
+        requestId,
+        suggestedFileName: deriveHlsOutputFileName(effectiveManifestUrl),
+        suggestedThreadCount: hlsCanTuneLocalDownloader ? normalizedHlsThreadCount : hlsRequest.plan.suggestedThreadCount,
+        useSystemSaveDialog: false,
+      });
+      if (result?.cancelled) {
+        activeHlsTaskRequestIdRef.current = previousActiveRequestId;
+        activeHlsTaskManifestUrlRef.current = previousActiveManifestUrl;
+        if (previousActiveRequestId) {
+          setHlsLiveRecordingState(previousLiveState);
+          setHlsTaskStatus(previousTaskStatus);
+        } else {
+          setHlsLiveRecordingState('idle');
+          setHlsTaskStatus((previous) => ({
+            ...previous,
+            logs: appendHlsTaskLogs(previous.logs, createHlsTaskLogEntry({
+              level: 'info',
+              mode: 'local-plan',
+              stage: 'preparing',
+              text: '直播录制已取消',
+            })),
+            state: 'idle',
+          }));
+        }
+        return;
+      }
+      if (!result?.ok) {
+        throw new Error(result?.error || '启动直播录制失败');
+      }
+      setHlsLiveRecordingState('recording');
+    } catch (error: any) {
+      activeHlsTaskRequestIdRef.current = previousActiveRequestId;
+      activeHlsTaskManifestUrlRef.current = previousActiveManifestUrl;
+      if (previousActiveRequestId) {
+        setHlsLiveRecordingState(previousLiveState);
+        setHlsTaskStatus(previousTaskStatus);
+      } else {
+        setHlsLiveRecordingState('idle');
+        setHlsTaskStatus((previous) => ({
+          ...previous,
+          error: error?.message || '启动直播录制失败',
+          logs: appendHlsTaskLogs(previous.logs, createHlsTaskLogEntry({
+            level: 'error',
+            mode: 'local-plan',
+            stage: 'error',
+            text: error?.message || '启动直播录制失败',
+          })),
+          stage: 'error',
+          state: 'error',
+        }));
+      }
+      Toast.error(error?.message || '启动直播录制失败');
+    } finally {
+      setSavingHls(false);
+    }
+  }, [
+    hlsCanTuneLocalDownloader,
+    hlsManualKeyInvalid,
+    hlsRequest,
+    hlsTaskStatus,
+    hlsSelectedVariantLabel,
+    normalizedHlsManualKey,
+    normalizedHlsThreadCount,
+    outputDirectoryPath,
+    selectedHlsAudioRenditionUrl,
+    selectedHlsVariantUrl,
+  ]);
+
+  const handleStopLiveRecording = React.useCallback(async () => {
+    if (!hlsRequest || !hlsTaskStatus.requestId) {
+      Toast.warning('当前没有可停止的直播录制任务');
+      return;
+    }
+    setSavingHls(true);
+    setHlsLiveRecordingState('stopping');
+    try {
+      const result = await stopEmbeddedBrowserHlsRecording(hlsRequest.resource.tabId, {
+        requestId: hlsTaskStatus.requestId,
+      });
+      if (result?.cancelled) {
+        setHlsLiveRecordingState('idle');
+        return;
+      }
+      if (!result?.outputPath) {
+        throw new Error(result?.error || '直播录制停止后未生成输出文件');
+      }
+      await onPersistOutput(result.outputPath);
+      setHlsLiveRecordingState('idle');
+    } catch (error: any) {
+      setHlsLiveRecordingState('idle');
+      setHlsTaskStatus((previous) => ({
+        ...previous,
+        error: error?.message || '停止直播录制失败',
+        logs: appendHlsTaskLogs(previous.logs, createHlsTaskLogEntry({
+          level: 'error',
+          mode: previous.mode,
+          stage: 'error',
+          text: `${error?.message || '停止直播录制失败'}；可再次点击“重试导出”继续`,
+        })),
+        stage: 'error',
+        state: 'error',
+      }));
+      Toast.error(error?.message || '停止直播录制失败');
+    } finally {
+      setSavingHls(false);
+    }
+  }, [hlsRequest, hlsTaskStatus.requestId, onPersistOutput]);
+
   const handleVerifyHlsKey = React.useCallback(async () => {
     if (!hlsRequest) {
       Toast.warning('先从资源面板解析 HLS，再送到工具页');
@@ -914,6 +1151,7 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
     hlsAudioRenditions,
     hlsAudioRenditionOptions,
     hlsKeyVerificationResult,
+    hlsLiveRecordingState,
     hlsManualKeyDraft,
     hlsManualKeyInputMode,
     hlsManualKeyInvalid,
@@ -941,6 +1179,8 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
     selectedHlsVariantUrl,
     verifyingHlsKey,
     handlers: {
+      onStartLiveRecording: () => void handleStartLiveRecording(),
+      onStopLiveRecording: () => void handleStopLiveRecording(),
       onDownloadSelectedSubtitle: () => void handleDownloadSelectedSubtitle(),
       onRetryFailed: () => void (
         hlsTaskStatus.state === 'error'

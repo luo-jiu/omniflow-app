@@ -119,8 +119,9 @@ library detail page
   - blob / 页内内存 manifest：走 Electron main 本地 downloader，先生成 local workdir 和 rewritten local playlist，再交给 `ffmpeg`。
 - 网络 master playlist 已补第一版 variant 选择；默认保持“自动”，也可锁到具体 variant URL 后再走 `ffmpeg`。
 - 如果用户在工具区填写了手动 AES-128 key，也会切到本地 downloader 主链，由 Electron main 写本地 key 文件后重写 playlist。
+- live HLS 第一版走显式“开始录制 / 停止录制”主线；停止后才交给 `ffmpeg` 导出。切换到别的 HLS 请求或离开工具区时，会把未导出的 live session 当作放弃处理，不做隐式自动导出。
 - 工具区也可直接发起 HLS key 验证；候选会合并 manifest key URL、当前 tab 已捕获 key 资源和工具区手动输入 key。
-- 当前 `master playlist + 手动 key` 仍会显式拦住，避免误走错误主链。
+- 当前 `master playlist + 手动 key` 已要求先明确选择具体 variant，再回到现有本地主链。
 - main 侧会把 HLS 执行阶段事件回推给 renderer；工具区据此展示当前阶段、最近日志、分片完成数和错误状态。
 
 这些 hook 应继续通过 `services/*.api.ts` 调 preload bridge，不要直接在 hook 或组件里散落原始 bridge 调用。
@@ -145,6 +146,7 @@ library detail page
 - 深度捕捉启动、probe 安装和 reload
 - MSE 读取、导出、保存、合并、manifest 下载
 - HLS 本地计划下载：`plan -> local workdir -> local playlist -> ffmpeg`
+- HLS live 录制：`轮询 media playlist -> 增量补分片 -> 手动停止 -> ffmpeg 导出`
 
 ## 4. 核心概念
 

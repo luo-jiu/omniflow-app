@@ -49,6 +49,12 @@ import {
   type EmbeddedBrowserHlsPlanDownloadResponse,
   type EmbeddedBrowserHlsPlanRetryPayload,
   type EmbeddedBrowserHlsPlanRetryResponse,
+  type EmbeddedBrowserHlsRecordingDiscardPayload,
+  type EmbeddedBrowserHlsRecordingDiscardResponse,
+  type EmbeddedBrowserHlsRecordingStartPayload,
+  type EmbeddedBrowserHlsRecordingStartResponse,
+  type EmbeddedBrowserHlsRecordingStopPayload,
+  type EmbeddedBrowserHlsRecordingStopResponse,
   type EmbeddedBrowserHlsDownloadResponse,
   type EmbeddedBrowserDirectFileDownloadPayload,
   type EmbeddedBrowserDirectFileDownloadResponse,
@@ -120,6 +126,9 @@ import {
   downloadEmbeddedBrowserHlsToLocalWorkDirectory,
 } from './embeddedBrowserHlsLocalDownloaderService'
 import {
+  EmbeddedBrowserHlsLiveRecorder,
+} from './embeddedBrowserHlsLiveRecorder'
+import {
   cleanupEmbeddedBrowserOpenFile,
   stageEmbeddedBrowserOpenFile,
 } from './embeddedBrowserOpenFile'
@@ -138,6 +147,16 @@ export function createEmbeddedBrowserMainController(
     workDirectoryPath: string
   }
 
+  type EmbeddedBrowserHlsLiveRecordingSession = {
+    ffmpegPath?: string
+    manifestUrl: string
+    outputPath: string
+    recorder: EmbeddedBrowserHlsLiveRecorder
+    requestId: string
+    tabId: string
+    workDirectoryPath?: string
+  }
+
   const embeddedBrowserViews = new Map<string, WebContentsView>()
   const embeddedBrowserLastCommittedUrls = new Map<string, string>()
   const embeddedBrowserIconUrls = new Map<string, string>()
@@ -147,6 +166,7 @@ export function createEmbeddedBrowserMainController(
   const embeddedBrowserOpenFileRequestVersions = new Map<string, number>()
   const embeddedBrowserFileSystemOriginDecisions = new Map<string, boolean>()
   const embeddedBrowserHlsRetrySessions = new Map<string, EmbeddedBrowserHlsRetrySession>()
+  const embeddedBrowserHlsLiveRecordingSessions = new Map<string, EmbeddedBrowserHlsLiveRecordingSession>()
   let activeEmbeddedBrowserTabId: string | null = null
   let embeddedBrowserPendingBounds: EmbeddedBrowserBounds | null = null
   let embeddedBrowserSessionConfigured = false
@@ -211,6 +231,44 @@ export function createEmbeddedBrowserMainController(
     await Promise.all(matchedSessions.map(async ([requestId, session]) => {
       embeddedBrowserHlsRetrySessions.delete(requestId)
       await rm(session.workDirectoryPath, { force: true, recursive: true }).catch(() => undefined)
+    }))
+  }
+
+  async function clearEmbeddedBrowserHlsLiveRecordingSessions(options: {
+    requestId?: string
+    tabId?: string
+  }) {
+    const normalizedRequestId = String(options.requestId || '').trim()
+    const normalizedTabId = String(options.tabId || '').trim()
+    if (!normalizedRequestId && !normalizedTabId) {
+      return
+    }
+
+    const matchedSessions = Array.from(embeddedBrowserHlsLiveRecordingSessions.entries()).filter(([requestId, session]) => {
+      if (normalizedRequestId && requestId === normalizedRequestId) {
+        return true
+      }
+      if (normalizedTabId && session.tabId === normalizedTabId) {
+        return true
+      }
+      return false
+    })
+
+    if (!matchedSessions.length) {
+      return
+    }
+
+    await Promise.all(matchedSessions.map(async ([requestId, session]) => {
+      embeddedBrowserHlsLiveRecordingSessions.delete(requestId)
+      try {
+        await session.recorder.stop().catch(() => undefined)
+      } catch {
+        // ignore cleanup stop errors
+      }
+      const workDirectoryPath = session.workDirectoryPath || session.recorder.getCurrentWorkDirectoryPath()
+      if (workDirectoryPath) {
+        await rm(workDirectoryPath, { force: true, recursive: true }).catch(() => undefined)
+      }
     }))
   }
 
@@ -1351,6 +1409,280 @@ export function createEmbeddedBrowserMainController(
     }
   }
 
+  async function startEmbeddedBrowserHlsRecordingResource(
+    tabId: string,
+    payload: EmbeddedBrowserHlsRecordingStartPayload,
+  ): Promise<EmbeddedBrowserHlsRecordingStartResponse> {
+    const normalizedTabId = String(tabId || '').trim()
+    const manifestUrl = String(payload.manifestUrl || '').trim()
+    const requestId = String(payload.requestId || '').trim() || undefined
+    if (!normalizedTabId || !requestId || !/^https?:\/\//i.test(manifestUrl)) {
+      return {
+        error: '缺少可录制的直播 manifest',
+        ok: false,
+      }
+    }
+
+    const existingSession = Array.from(embeddedBrowserHlsLiveRecordingSessions.values()).find((session) => (
+      session.tabId === normalizedTabId
+    ))
+    if (existingSession) {
+      return {
+        error: '当前 tab 仍有未完成的直播录制，请先停止录制或重试导出',
+        ok: false,
+      }
+    }
+
+    let outputPath: string | null = null
+    try {
+      const suggestedFileName = String(payload.suggestedFileName || '').trim()
+        || deriveEmbeddedBrowserManifestOutputFileName(manifestUrl, 'hls')
+      outputPath = await resolveEmbeddedBrowserOutputPath({
+        defaultFileName: suggestedFileName,
+        filters: [
+          { extensions: ['mp4'], name: 'MP4 Video' },
+        ],
+        outputDirectoryPath: payload.outputDirectoryPath,
+        useSystemSaveDialog: payload.useSystemSaveDialog,
+      })
+      if (!outputPath) {
+        return {
+          cancelled: true,
+          ok: false,
+        }
+      }
+
+      emitEmbeddedBrowserHlsTask({
+        manifestUrl,
+        message: '开始准备直播录制任务',
+        mode: 'local-plan',
+        requestId,
+        stage: 'preparing',
+        status: 'running',
+        tabId: normalizedTabId,
+        usingManualKey: Boolean(payload.manualKeyBase64),
+      })
+
+      const recorder = new EmbeddedBrowserHlsLiveRecorder({
+        headers: payload.headers,
+        manifestUrl,
+        manualKeyBase64: payload.manualKeyBase64,
+        onEvent: (event) => {
+          emitEmbeddedBrowserHlsTask({
+            bytesReceived: event.bytesReceived,
+            bytesTotal: event.bytesTotal,
+            completedFragments: event.completedFragments,
+            durationSeconds: event.durationSeconds,
+            error: event.error,
+            etaSeconds: event.etaSeconds,
+            failedFragments: event.failedFragments,
+            manifestUrl,
+            message: event.message,
+            mode: 'local-plan',
+            requestId,
+            speedBps: event.speedBps,
+            stage: event.stage,
+            status: event.status,
+            tabId: normalizedTabId,
+            totalFragments: event.totalFragments,
+            usingManualKey: Boolean(payload.manualKeyBase64),
+          })
+        },
+        pageUrl: payload.pageUrl,
+        suggestedThreadCount: payload.suggestedThreadCount,
+      })
+
+      embeddedBrowserHlsLiveRecordingSessions.set(requestId, {
+        ffmpegPath: payload.ffmpegPath,
+        manifestUrl,
+        outputPath,
+        recorder,
+        requestId,
+        tabId: normalizedTabId,
+      })
+      await recorder.start()
+      embeddedBrowserHlsLiveRecordingSessions.set(requestId, {
+        ffmpegPath: payload.ffmpegPath,
+        manifestUrl,
+        outputPath,
+        recorder,
+        requestId,
+        tabId: normalizedTabId,
+        workDirectoryPath: recorder.getCurrentWorkDirectoryPath(),
+      })
+      emitEmbeddedBrowserHlsTask({
+        manifestUrl,
+        message: '直播录制已开始，继续等待你手动停止',
+        mode: 'local-plan',
+        requestId,
+        stage: 'downloading-fragments',
+        status: 'running',
+        tabId: normalizedTabId,
+        usingManualKey: Boolean(payload.manualKeyBase64),
+      })
+      return {
+        ok: true,
+        requestId,
+      }
+    } catch (error) {
+      await clearEmbeddedBrowserHlsLiveRecordingSessions({ requestId, tabId: normalizedTabId })
+      emitEmbeddedBrowserHlsTask({
+        error: error instanceof Error ? error.message : String(error),
+        manifestUrl,
+        message: error instanceof Error ? error.message : String(error),
+        mode: 'local-plan',
+        requestId,
+        stage: 'error',
+        status: 'error',
+        tabId: normalizedTabId,
+        usingManualKey: Boolean(payload.manualKeyBase64),
+      })
+      return {
+        error: error instanceof Error ? error.message : String(error),
+        ok: false,
+      }
+    }
+  }
+
+  async function stopEmbeddedBrowserHlsRecordingResource(
+    tabId: string,
+    payload: EmbeddedBrowserHlsRecordingStopPayload,
+  ): Promise<EmbeddedBrowserHlsRecordingStopResponse> {
+    const normalizedTabId = String(tabId || '').trim()
+    const requestId = String(payload.requestId || '').trim()
+    if (!normalizedTabId || !requestId) {
+      return {
+        error: '缺少可停止的直播录制任务',
+        ok: false,
+      }
+    }
+    const session = embeddedBrowserHlsLiveRecordingSessions.get(requestId)
+    if (!session || session.tabId !== normalizedTabId) {
+      return {
+        error: '直播录制任务不存在或已结束',
+        ok: false,
+      }
+    }
+
+    let stopResult: Awaited<ReturnType<EmbeddedBrowserHlsLiveRecorder['stop']>> | null = null
+    try {
+      emitEmbeddedBrowserHlsTask({
+        manifestUrl: session.manifestUrl,
+        message: '正在停止直播录制并整理本地 playlist',
+        mode: 'local-plan',
+        requestId,
+        stage: 'rewriting-playlist',
+        status: 'running',
+        tabId: normalizedTabId,
+      })
+      stopResult = await session.recorder.stop()
+      const completedRecording = stopResult
+      session.workDirectoryPath = completedRecording.workDirectoryPath
+      emitEmbeddedBrowserHlsTask({
+        completedFragments: completedRecording.totalFragments,
+        durationSeconds: completedRecording.durationSeconds,
+        manifestUrl: session.manifestUrl,
+        message: '直播录制已停止，开始交给 ffmpeg',
+        mode: 'local-plan',
+        requestId,
+        stage: 'ffmpeg',
+        status: 'running',
+        tabId: normalizedTabId,
+        totalFragments: completedRecording.totalFragments,
+      })
+
+      const result = await downloadEmbeddedBrowserManifestResource({
+        durationSeconds: completedRecording.durationSeconds,
+        ffmpegPath: session.ffmpegPath,
+        kind: 'hls',
+        manifestUrl: completedRecording.playlistPath,
+        onProgress: (progress) => {
+          emitEmbeddedBrowserHlsTask({
+            completedFragments: completedRecording.totalFragments,
+            durationSeconds: completedRecording.durationSeconds,
+            ffmpegSpeedText: progress.speedText,
+            manifestUrl: session.manifestUrl,
+            mode: 'local-plan',
+            processedSeconds: progress.processedSeconds,
+            requestId,
+            stage: 'ffmpeg',
+            status: 'running',
+            tabId: normalizedTabId,
+            totalFragments: completedRecording.totalFragments,
+          })
+        },
+        outputPath: session.outputPath,
+      })
+      emitEmbeddedBrowserHlsTask({
+        completedFragments: completedRecording.totalFragments,
+        durationSeconds: completedRecording.durationSeconds,
+        manifestUrl: session.manifestUrl,
+        message: '直播录制文件已完成',
+        mode: 'local-plan',
+        outputPath: result.outputPath,
+        requestId,
+        stage: 'completed',
+        status: 'success',
+        tabId: normalizedTabId,
+        totalFragments: completedRecording.totalFragments,
+      })
+      embeddedBrowserHlsLiveRecordingSessions.delete(requestId)
+      await rm(completedRecording.workDirectoryPath, { force: true, recursive: true }).catch(() => undefined)
+      return {
+        ffmpegPath: result.ffmpegPath,
+        ok: true,
+        outputPath: result.outputPath,
+      }
+    } catch (error) {
+      emitEmbeddedBrowserHlsTask({
+        error: error instanceof Error ? error.message : String(error),
+        manifestUrl: session.manifestUrl,
+        message: error instanceof Error ? error.message : String(error),
+        mode: 'local-plan',
+        requestId,
+        stage: 'error',
+        status: 'error',
+        tabId: normalizedTabId,
+      })
+      if (!stopResult) {
+        embeddedBrowserHlsLiveRecordingSessions.delete(requestId)
+      }
+      if (!stopResult && session.workDirectoryPath) {
+        await rm(session.workDirectoryPath, { force: true, recursive: true }).catch(() => undefined)
+      }
+      return {
+        error: error instanceof Error ? error.message : String(error),
+        ok: false,
+      }
+    }
+  }
+
+  async function discardEmbeddedBrowserHlsRecordingResource(
+    tabId: string,
+    payload: EmbeddedBrowserHlsRecordingDiscardPayload,
+  ): Promise<EmbeddedBrowserHlsRecordingDiscardResponse> {
+    const normalizedTabId = String(tabId || '').trim()
+    const requestId = String(payload.requestId || '').trim()
+    if (!normalizedTabId || !requestId) {
+      return {
+        error: '缺少可清理的直播录制任务',
+        ok: false,
+      }
+    }
+
+    const session = embeddedBrowserHlsLiveRecordingSessions.get(requestId)
+    if (!session || session.tabId !== normalizedTabId) {
+      return {
+        ok: true,
+      }
+    }
+
+    await clearEmbeddedBrowserHlsLiveRecordingSessions({ requestId })
+    return {
+      ok: true,
+    }
+  }
+
   async function retryEmbeddedBrowserHlsPlanFailedFragments(
     tabId: string,
     payload: EmbeddedBrowserHlsPlanRetryPayload,
@@ -1752,6 +2084,7 @@ export function createEmbeddedBrowserMainController(
       tabId: normalizedTabId,
     })
     void clearEmbeddedBrowserHlsRetrySessions({ tabId: normalizedTabId })
+    void clearEmbeddedBrowserHlsLiveRecordingSessions({ tabId: normalizedTabId })
     if (!view.webContents.isDestroyed()) {
       view.webContents.close({ waitForBeforeUnload: false })
     }
@@ -2295,6 +2628,9 @@ export function createEmbeddedBrowserMainController(
       deactivate: handleDeactivate,
       downloadCatchMedia: (tabId) => handleCatchToolkitAction(tabId, 'downloadCatchMedia', 'download'),
       downloadHlsManifest: downloadEmbeddedBrowserHlsResource,
+      startHlsRecording: startEmbeddedBrowserHlsRecordingResource,
+      stopHlsRecording: stopEmbeddedBrowserHlsRecordingResource,
+      discardHlsRecording: discardEmbeddedBrowserHlsRecordingResource,
       downloadHlsTracks: downloadEmbeddedBrowserHlsTracksResource,
       downloadHlsPlan: downloadEmbeddedBrowserHlsPlanResource,
       retryHlsPlanFailed: retryEmbeddedBrowserHlsPlanFailedFragments,
