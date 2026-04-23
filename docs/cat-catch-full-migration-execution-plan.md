@@ -119,6 +119,19 @@ Cat Catch 是一个成熟的浏览器扩展，核心能力是"识别资源 → �
 
 **目标**：将 3494 行的 `tool-workspace/index.tsx` 拆为独立子模块。
 
+> 2026-04-23 当前进度：
+> - `index.tsx` 已收成 workspace shell，并恢复原来的条件渲染语义；切换工具时不会再因为常驻挂载而保留旧弹窗、旧日志和旧本地状态。
+> - 当前 `index.tsx` 已从 3494 行降到约 **165 行**。
+> - 字幕翻译 owner 已下沉到 `hooks/useSubtitleTranslation.ts`，shell 不再承载 runner 订阅、导入、翻译、保存这些副作用。
+> - HLS 已从 `ToolWorkspaceMedia.tsx` 中继续拆出 `ToolWorkspaceHls.tsx`，并抽出 `hooks/useHlsDownloadTask.ts` 承接任务状态、订阅和处理逻辑。
+> - 当前主要子模块行数：
+>   - `ToolWorkspaceMedia.tsx`：约 669 行
+>   - `ToolWorkspaceSubtitle.tsx`：约 764 行
+>   - `ToolWorkspaceHls.tsx`：约 645 行
+>   - `useSubtitleTranslation.ts`：约 455 行
+>   - `useHlsDownloadTask.ts`：约 737 行
+> - 因此 **WP-02 的结构性目标已经基本完成**；剩余只是一点 shell 行数压缩和后续按需继续细拆，不再是阻塞后续工作包的前置问题。
+
 ### 当前结构分析
 
 `index.tsx` 混合了三大块互不相关的逻辑：
@@ -181,6 +194,14 @@ src/features/tool-workspace/
 - 各子模块不超过 800 行
 - 所有现有功能（字幕翻译、HLS 下载、媒体处理）行为不变
 - `npm run lint && npm run build` 通过
+
+### 收口说明
+
+- 这一步之后，WP-06 / WP-09 已经可以在独立 HLS 模块上继续推进，不必再穿过 `index.tsx` 或旧媒体壳理解状态 owner。
+- 如果后续还要继续优化 WP-02，优先做的只剩：
+  1. 继续压缩 `index.tsx` 到 150 行以内
+  2. 视需要把 `ToolWorkspaceSaveTarget.tsx`、`ToolWorkspaceNav.tsx` 的共享壳继续抽到更稳定的位置
+  3. 根据后续工作包再决定是否继续拆细 `ToolWorkspaceSubtitle.tsx`
 
 ---
 
