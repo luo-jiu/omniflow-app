@@ -35,12 +35,17 @@ OmniFlow 的 embedded browser 不是单纯的 React 组件，而是“renderer �
 - Renderer Cookie 管理
   - `src/features/embedded-browser/cookies/services/embedded-browser-cookie.api.ts`
   - `src/features/embedded-browser/cookies/components/EmbeddedBrowserCookieSettings.tsx`
+- Renderer 外部工具设置
+  - `src/features/embedded-browser/external-tools/services/embedded-browser-external-tool.api.ts`
+  - `src/features/embedded-browser/external-tools/components/EmbeddedBrowserExternalToolSettings.tsx`
 - Renderer 密码管理
   - `src/features/embedded-browser/passwords/services/embedded-browser-password.api.ts`
   - `src/features/embedded-browser/passwords/components/EmbeddedBrowserPasswordSaveBar.tsx`
   - `src/features/embedded-browser/passwords/components/EmbeddedBrowserPasswordSettings.tsx`
 - Main Cookie 服务
   - `electron/service/embeddedBrowserCookieService.ts`
+- Main 外部工具执行器
+  - `electron/service/embeddedBrowserExternalTools.ts`
 - Main 密码服务
   - `electron/service/embeddedBrowserPasswordTypes.ts`
   - `electron/service/embeddedBrowserPasswordService.ts`
@@ -118,6 +123,8 @@ library detail page
 
 - 资源面板可以把“已选资源”送到工具区媒体处理模式。
 - 浏览器设置页里的“捕获规则”也归资源域负责；renderer 只管理规则草稿和保存动作，真正的过滤判定仍在 main。
+- 浏览器设置页里的“外部工具”也归资源域负责；renderer 只管理 aria2 / 命令模板 / URL 协议的配置草稿，真正的执行仍在 main。
+- 外部工具当前有两处入口：资源卡可直接转发原始资源；工具区执行面板也可把当前 HLS / MPD / 直接资源上下文发送给已启用工具，但暂不扩展成新的“结果出口”模式。
 - HLS manifest 解析后，可以把“下载计划”送到工具区。
 - MPD manifest 解析后，也可以把“下载计划”送到工具区；工具区当前提供第一版 representation 选择，并在 main 侧执行 `init segment + media segments` 本地下载，再交给 `ffmpeg` 合并。
 - 工具区当前承接两条 HLS 主线：
@@ -140,6 +147,7 @@ library detail page
 - 下载事件和资源事件订阅
 - 资源捕捉、缓存捕捉、预览、导出、合并、manifest 下载
 - 资源捕捉规则管理（读取、更新、恢复默认）
+- 外部工具管理（读取设置、更新设置、恢复默认、列出已启用工具、执行分发）
 - Cookie 管理（查询、删除单条、按域名删除、全部清除）
 - 密码管理（列表、解密查看、保存凭据、删除、黑名��、凭据捕获事件）
 

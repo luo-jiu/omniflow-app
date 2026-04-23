@@ -1,6 +1,8 @@
-import { Toast } from '@douyinfe/semi-ui';
+import { Popover, Toast } from '@douyinfe/semi-ui';
 import React from 'react';
+import ContextMenu, { type ContextMenuItem } from '@/components/ui/context-menu';
 import EmbeddedBrowserResourceManifestTools from './EmbeddedBrowserResourceManifestTools';
+import type { EmbeddedBrowserExternalToolOption } from '@/features/embedded-browser/external-tools/model/embedded-browser-external-tools';
 import type {
   EmbeddedBrowserHlsDownloadPlan,
   EmbeddedBrowserHlsManifest,
@@ -26,10 +28,16 @@ import {
   openResourceUrl,
   previewResource,
 } from '../services/embedded-browser-resource-panel-actions';
+import { isHttpResource } from '../services/embedded-browser-resource-request';
 import type { EmbeddedBrowserCapturedResource } from '../types';
 
 type EmbeddedBrowserResourceCardProps = {
+  externalToolOptions?: EmbeddedBrowserExternalToolOption[]
   expanded: boolean
+  onDispatchExternalTool?: (
+    toolKey: EmbeddedBrowserExternalToolOption['key'],
+    resource: EmbeddedBrowserCapturedResource,
+  ) => Promise<void>
   onOpenHlsDownloadWorkspace?: (
     resource: EmbeddedBrowserCapturedResource,
     manifest: EmbeddedBrowserHlsManifest,
@@ -48,7 +56,9 @@ type EmbeddedBrowserResourceCardProps = {
 }
 
 const EmbeddedBrowserResourceCard: React.FC<EmbeddedBrowserResourceCardProps> = ({
+  externalToolOptions = [],
   expanded,
+  onDispatchExternalTool,
   onOpenHlsDownloadWorkspace,
   onOpenMpdDownloadWorkspace,
   onToggleDetails,
@@ -57,6 +67,23 @@ const EmbeddedBrowserResourceCard: React.FC<EmbeddedBrowserResourceCardProps> = 
   resources,
   selected,
 }) => {
+  const canSendToExternalTools = isHttpResource(resource) && externalToolOptions.length > 0 && Boolean(onDispatchExternalTool)
+
+  const externalToolMenuItems = React.useMemo<ContextMenuItem[]>(() => (
+    externalToolOptions.map((tool) => ({
+      key: tool.key,
+      label: tool.label,
+      onClick: () => {
+        if (!onDispatchExternalTool) {
+          return
+        }
+        void onDispatchExternalTool(tool.key, resource).catch((error: any) => {
+          Toast.error(error?.message || '发送到外部工具失败')
+        })
+      },
+    }))
+  ), [externalToolOptions, onDispatchExternalTool, resource])
+
   return (
     <div className={`resource-card ${selected ? 'is-selected' : ''}`}>
       <div className="resource-card-top">
@@ -218,6 +245,26 @@ const EmbeddedBrowserResourceCard: React.FC<EmbeddedBrowserResourceCardProps> = 
             )}
           </>
         )}
+        {canSendToExternalTools ? (
+          <Popover
+            trigger="click"
+            showArrow={false}
+            position="bottomLeft"
+            content={(
+              <ContextMenu
+                items={externalToolMenuItems}
+                className="directory-context-menu"
+              />
+            )}
+          >
+            <button
+              type="button"
+              className="resource-card-btn"
+            >
+              发送到外部工具
+            </button>
+          </Popover>
+        ) : null}
       </div>
       <EmbeddedBrowserResourceManifestTools
         onOpenHlsDownloadWorkspace={onOpenHlsDownloadWorkspace}

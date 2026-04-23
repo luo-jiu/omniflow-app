@@ -23,6 +23,12 @@ import type {
 import type {
   EmbeddedBrowserCaptureRuleSet,
 } from '@/features/embedded-browser/resources/model/embedded-browser-capture-rules'
+import type {
+  EmbeddedBrowserExternalToolDispatchPayload,
+  EmbeddedBrowserExternalToolKey,
+  EmbeddedBrowserExternalToolOption,
+  EmbeddedBrowserExternalToolSettings,
+} from '@/features/embedded-browser/external-tools/model/embedded-browser-external-tools'
 import type { EmbeddedBrowserSavedPasswordEntry } from './embeddedBrowserPasswordTypes'
 import type { EmbeddedBrowserCatchToolkitStatePayload } from './embeddedBrowserCatchToolkitPageBridge'
 import type {
@@ -128,6 +134,14 @@ type EmbeddedBrowserMainIpcHandlers = {
   getResourceCaptureRules: () => Promise<EmbeddedBrowserCaptureRuleSet>
   updateResourceCaptureRules: (ruleSet: EmbeddedBrowserCaptureRuleSet) => Promise<EmbeddedBrowserCaptureRuleSet>
   resetResourceCaptureRules: () => Promise<EmbeddedBrowserCaptureRuleSet>
+  getExternalToolSettings: () => Promise<EmbeddedBrowserExternalToolSettings>
+  updateExternalToolSettings: (settings: EmbeddedBrowserExternalToolSettings) => Promise<EmbeddedBrowserExternalToolSettings>
+  resetExternalToolSettings: () => Promise<EmbeddedBrowserExternalToolSettings>
+  listEnabledExternalTools: () => Promise<EmbeddedBrowserExternalToolOption[]>
+  dispatchExternalTool: (
+    toolKey: EmbeddedBrowserExternalToolKey,
+    payload: EmbeddedBrowserExternalToolDispatchPayload,
+  ) => Promise<void>
   listPasswords: () => EmbeddedBrowserSavedPasswordEntry[]
   getDecryptedPassword: (id: string) => Promise<string>
   saveCapturedCredential: (credentialRequestId: string) => Promise<EmbeddedBrowserSavedPasswordEntry>
@@ -320,6 +334,24 @@ export function registerEmbeddedBrowserMainIpcHandlers(handlers: EmbeddedBrowser
   ipcMain.handle('embedded-browser:resource-capture-rules:reset', async () => (
     handlers.resetResourceCaptureRules()
   ))
+  ipcMain.handle('embedded-browser:external-tools:get', async () => (
+    handlers.getExternalToolSettings()
+  ))
+  ipcMain.handle('embedded-browser:external-tools:update', async (_event, settings: EmbeddedBrowserExternalToolSettings) => (
+    handlers.updateExternalToolSettings(settings)
+  ))
+  ipcMain.handle('embedded-browser:external-tools:reset', async () => (
+    handlers.resetExternalToolSettings()
+  ))
+  ipcMain.handle('embedded-browser:external-tools:list-enabled', async () => (
+    handlers.listEnabledExternalTools()
+  ))
+  ipcMain.handle(
+    'embedded-browser:external-tools:dispatch',
+    async (_event, toolKey: EmbeddedBrowserExternalToolKey, payload: EmbeddedBrowserExternalToolDispatchPayload) => (
+      handlers.dispatchExternalTool(toolKey, payload)
+    ),
+  )
 
   ipcMain.handle('embedded-browser:password:list', () => (
     handlers.listPasswords()

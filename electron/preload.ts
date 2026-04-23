@@ -1,6 +1,12 @@
 // 渲染进程中的Bridge API
 import { ipcRenderer, contextBridge } from 'electron'
 import type { EmbeddedBrowserCaptureRuleSet } from '@/features/embedded-browser/resources/model/embedded-browser-capture-rules'
+import type {
+  EmbeddedBrowserExternalToolDispatchPayload,
+  EmbeddedBrowserExternalToolKey,
+  EmbeddedBrowserExternalToolOption,
+  EmbeddedBrowserExternalToolSettings,
+} from '@/features/embedded-browser/external-tools/model/embedded-browser-external-tools'
 
 // --------- Expose some API to the Renderer process ---------
 contextBridge.exposeInMainWorld('ipcRenderer', {
@@ -503,6 +509,16 @@ contextBridge.exposeInMainWorld('electronEmbeddedBrowser', {
     ipcRenderer.invoke('embedded-browser:resource-capture-rules:update', ruleSet) as Promise<EmbeddedBrowserCaptureRuleSet>,
   resetResourceCaptureRules: () =>
     ipcRenderer.invoke('embedded-browser:resource-capture-rules:reset') as Promise<EmbeddedBrowserCaptureRuleSet>,
+  getExternalToolSettings: () =>
+    ipcRenderer.invoke('embedded-browser:external-tools:get') as Promise<EmbeddedBrowserExternalToolSettings>,
+  updateExternalToolSettings: (settings: EmbeddedBrowserExternalToolSettings) =>
+    ipcRenderer.invoke('embedded-browser:external-tools:update', settings) as Promise<EmbeddedBrowserExternalToolSettings>,
+  resetExternalToolSettings: () =>
+    ipcRenderer.invoke('embedded-browser:external-tools:reset') as Promise<EmbeddedBrowserExternalToolSettings>,
+  listEnabledExternalTools: () =>
+    ipcRenderer.invoke('embedded-browser:external-tools:list-enabled') as Promise<EmbeddedBrowserExternalToolOption[]>,
+  dispatchExternalTool: (toolKey: EmbeddedBrowserExternalToolKey, payload: EmbeddedBrowserExternalToolDispatchPayload) =>
+    ipcRenderer.invoke('embedded-browser:external-tools:dispatch', toolKey, payload) as Promise<void>,
   listPasswords: () =>
     ipcRenderer.invoke('embedded-browser:password:list'),
   getDecryptedPassword: (id: string) =>

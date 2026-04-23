@@ -105,6 +105,13 @@ import {
   updateEmbeddedBrowserResourceCaptureRules,
 } from './embeddedBrowserResourceCaptureRules'
 import {
+  dispatchEmbeddedBrowserExternalTool,
+  listEmbeddedBrowserExternalToolSettings,
+  listEnabledEmbeddedBrowserExternalToolOptions,
+  resetEmbeddedBrowserExternalToolSettings,
+  updateEmbeddedBrowserExternalToolSettings,
+} from './embeddedBrowserExternalTools'
+import {
   buildEmbeddedBrowserProbeResourceRecorder,
   createEmbeddedBrowserView as createEmbeddedBrowserManagedView,
   installEmbeddedBrowserResourceProbe,
@@ -2755,6 +2762,11 @@ export function createEmbeddedBrowserMainController(
       getResourceCaptureRules: async () => listEmbeddedBrowserResourceCaptureRules(),
       updateResourceCaptureRules: async (ruleSet) => updateEmbeddedBrowserResourceCaptureRules(ruleSet),
       resetResourceCaptureRules: async () => resetEmbeddedBrowserResourceCaptureRules(),
+      getExternalToolSettings: async () => listEmbeddedBrowserExternalToolSettings(),
+      updateExternalToolSettings: async (settings) => updateEmbeddedBrowserExternalToolSettings(settings),
+      resetExternalToolSettings: async () => resetEmbeddedBrowserExternalToolSettings(),
+      listEnabledExternalTools: async () => listEnabledEmbeddedBrowserExternalToolOptions(),
+      dispatchExternalTool: async (toolKey, payload) => dispatchEmbeddedBrowserExternalTool(toolKey, payload),
       listPasswords: listEmbeddedBrowserPasswords,
       getDecryptedPassword: getEmbeddedBrowserDecryptedPassword,
       saveCapturedCredential: async (credentialRequestId) => {

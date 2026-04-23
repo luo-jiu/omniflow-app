@@ -3,11 +3,16 @@ import styled from 'styled-components';
 import {
   Button,
   Empty,
+  Popover,
   Select,
   Tag,
+  Toast,
 } from '@douyinfe/semi-ui';
+import ContextMenu, { type ContextMenuItem } from '@/components/ui/context-menu';
+import type { EmbeddedBrowserExternalToolOption } from '@/features/embedded-browser/external-tools/model/embedded-browser-external-tools';
 
 import { formatResourceTitle } from '@/features/embedded-browser/resources/model/embedded-browser-resource-display';
+import { isHttpResource } from '@/features/embedded-browser/resources/services/embedded-browser-resource-request';
 
 import type { ToolWorkspaceMediaMpdRequest } from './types';
 import {
@@ -84,7 +89,9 @@ type ToolWorkspaceMpdProps = {
   selectedAudioRepresentationId: string;
   selectedVideoRepresentationId: string;
   videoRepresentationOptions: MpdRepresentationOption[];
+  externalToolOptions?: EmbeddedBrowserExternalToolOption[];
   onCopyPlan: () => void;
+  onDispatchExternalTool?: (toolKey: EmbeddedBrowserExternalToolOption['key']) => Promise<void>;
   onSaveMpd: () => void;
   onSetSelectedAudioRepresentationId: (value: string) => void;
   onSetSelectedVideoRepresentationId: (value: string) => void;
@@ -112,11 +119,34 @@ const ToolWorkspaceMpd: React.FC<ToolWorkspaceMpdProps> = ({
   selectedAudioRepresentationId,
   selectedVideoRepresentationId,
   videoRepresentationOptions,
+  externalToolOptions = [],
   onCopyPlan,
+  onDispatchExternalTool,
   onSaveMpd,
   onSetSelectedAudioRepresentationId,
   onSetSelectedVideoRepresentationId,
 }) => {
+  const externalToolMenuItems = React.useMemo<ContextMenuItem[]>(() => (
+    externalToolOptions.map((tool) => ({
+      key: tool.key,
+      label: tool.label,
+      onClick: () => {
+        if (!onDispatchExternalTool) {
+          return;
+        }
+        void onDispatchExternalTool(tool.key).catch((error: any) => {
+          Toast.error(error?.message || '发送到外部工具失败');
+        });
+      },
+    }))
+  ), [externalToolOptions, onDispatchExternalTool]);
+  const canSendToExternalTools = Boolean(
+    mpdRequest
+    && isHttpResource(mpdRequest.resource)
+    && externalToolOptions.length > 0
+    && onDispatchExternalTool,
+  );
+
   if (!mpdRequest) {
     return (
       <Panel>
@@ -214,6 +244,21 @@ const ToolWorkspaceMpd: React.FC<ToolWorkspaceMpdProps> = ({
           <Button type="primary" loading={savingMpd} disabled={!canSave} onClick={onSaveMpd}>
             {saveActionLabel}
           </Button>
+          {canSendToExternalTools ? (
+            <Popover
+              trigger="click"
+              showArrow={false}
+              position="bottomLeft"
+              content={(
+                <ContextMenu
+                  items={externalToolMenuItems}
+                  className="directory-context-menu"
+                />
+              )}
+            >
+              <Button>发送到外部工具</Button>
+            </Popover>
+          ) : null}
           <Button onClick={onCopyPlan}>复制计划</Button>
           {mpdRequest.plan.hasDrm ? (
             <Tag color="red">DRM 先不处理</Tag>

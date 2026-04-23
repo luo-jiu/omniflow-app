@@ -41,6 +41,7 @@ import EmbeddedBrowserDownloadImportModal from "@/features/embedded-browser/down
 import { useEmbeddedBrowserDownloadImport } from "@/features/embedded-browser/downloads/hooks/useEmbeddedBrowserDownloadImport";
 import EmbeddedBrowserResourcePanel from "@/features/embedded-browser/resources/components/EmbeddedBrowserResourcePanel";
 import EmbeddedBrowserCaptureRuleSettings from "@/features/embedded-browser/resources/components/EmbeddedBrowserCaptureRuleSettings";
+import EmbeddedBrowserExternalToolSettings from "@/features/embedded-browser/external-tools/components/EmbeddedBrowserExternalToolSettings";
 import type { EmbeddedBrowserHlsDownloadPlan } from "@/features/embedded-browser/resources/model/embedded-browser-hls-manifest";
 import type { EmbeddedBrowserHlsManifest } from "@/features/embedded-browser/resources/model/embedded-browser-hls-manifest";
 import type { EmbeddedBrowserMpdDownloadPlan } from "@/features/embedded-browser/resources/model/embedded-browser-mpd-manifest";
@@ -4041,6 +4042,8 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
                       <EmbeddedBrowserPasswordSettings onBack={() => setBrowserSettingsSection(null)} />
                     ) : browserSettingsSection === 'capture-rules' ? (
                       <EmbeddedBrowserCaptureRuleSettings onBack={() => setBrowserSettingsSection(null)} />
+                    ) : browserSettingsSection === 'external-tools' ? (
+                      <EmbeddedBrowserExternalToolSettings onBack={() => setBrowserSettingsSection(null)} />
                     ) : (
                       <>
                         <div className="browser-settings-hero">
@@ -4069,6 +4072,24 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
                             <div className="browser-settings-card-title">捕获规则</div>
                             <div className="browser-settings-card-body">
                               管理扩展名、MIME、正则规则和域名黑白名单，决定哪些网页资源会进入捕获列表。
+                            </div>
+                          </div>
+                          <div
+                            className="browser-settings-card browser-settings-card-clickable"
+                            onClick={() => setBrowserSettingsSection('external-tools')}
+                            role="button"
+                            tabIndex={0}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault()
+                                setBrowserSettingsSection('external-tools')
+                              }
+                            }}
+                          >
+                            <span className="browser-settings-chip">外部工具</span>
+                            <div className="browser-settings-card-title">发送到外部下载器</div>
+                            <div className="browser-settings-card-body">
+                              配置 aria2 RPC、本地命令和 URL 协议，把当前资源直接发给外部下载工具。
                             </div>
                           </div>
                           <div

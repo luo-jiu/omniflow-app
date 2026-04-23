@@ -4,6 +4,7 @@ import PanelShell from './EmbeddedBrowserResourcePanel.styles';
 import EmbeddedBrowserCatchToolkitCard from './EmbeddedBrowserCatchToolkitCard';
 import EmbeddedBrowserResourceBulkBar from './EmbeddedBrowserResourceBulkBar';
 import EmbeddedBrowserResourceCard from './EmbeddedBrowserResourceCard';
+import type { EmbeddedBrowserExternalToolOption } from '@/features/embedded-browser/external-tools/model/embedded-browser-external-tools';
 import type {
   EmbeddedBrowserHlsDownloadPlan,
   EmbeddedBrowserHlsManifest,
@@ -14,6 +15,11 @@ import type {
 } from '../model/embedded-browser-mpd-manifest';
 import { useEmbeddedBrowserCatchToolkit } from '../hooks/useEmbeddedBrowserCatchToolkit';
 import { useEmbeddedBrowserResources } from '../hooks/useEmbeddedBrowserResources';
+import {
+  dispatchEmbeddedBrowserExternalTool,
+  listEmbeddedBrowserEnabledExternalTools,
+  subscribeEmbeddedBrowserExternalToolsUpdated,
+} from '@/features/embedded-browser/external-tools/services/embedded-browser-external-tool.api';
 import {
   clearEmbeddedBrowserCacheAndReload,
   resetEmbeddedBrowserPageStorageAndReload,
@@ -31,6 +37,7 @@ import {
   matchesResourceFilter,
   mergeCapturedResources,
 } from '../services/embedded-browser-resource-panel-actions';
+import { withDownloadRequestHeaders } from '../services/embedded-browser-resource-request';
 import type { EmbeddedBrowserCapturedResource } from '../types';
 
 type EmbeddedBrowserResourcePanelProps = {
@@ -100,6 +107,7 @@ const EmbeddedBrowserResourcePanel: React.FC<EmbeddedBrowserResourcePanelProps> 
   const [extensionFilterIds, setExtensionFilterIds] = React.useState<string[]>([]);
   const [expandedResourceIds, setExpandedResourceIds] = React.useState<string[]>([]);
   const [manualMergeSelectedIds, setManualMergeSelectedIds] = React.useState<string[]>([]);
+  const [externalToolOptions, setExternalToolOptions] = React.useState<EmbeddedBrowserExternalToolOption[]>([])
 
   React.useEffect(() => {
     window.localStorage.setItem(RESOURCE_FILTER_STORAGE_KEY, filterDraft);
@@ -108,6 +116,30 @@ const EmbeddedBrowserResourcePanel: React.FC<EmbeddedBrowserResourcePanelProps> 
   React.useEffect(() => {
     window.localStorage.setItem(RESOURCE_DEDUPE_SAME_NAME_STORAGE_KEY, dedupeSameName ? 'true' : 'false');
   }, [dedupeSameName]);
+
+  React.useEffect(() => {
+    let cancelled = false
+    const loadExternalToolOptions = async () => {
+      try {
+        const nextOptions = await listEmbeddedBrowserEnabledExternalTools()
+        if (!cancelled) {
+          setExternalToolOptions(nextOptions)
+        }
+      } catch {
+        if (!cancelled) {
+          setExternalToolOptions([])
+        }
+      }
+    }
+    void loadExternalToolOptions()
+    const unsubscribe = subscribeEmbeddedBrowserExternalToolsUpdated(() => {
+      void loadExternalToolOptions()
+    })
+    return () => {
+      cancelled = true
+      unsubscribe()
+    }
+  }, [])
 
   const filterPattern = React.useMemo(() => {
     try {
@@ -267,6 +299,24 @@ const EmbeddedBrowserResourcePanel: React.FC<EmbeddedBrowserResourcePanelProps> 
     });
   }, []);
 
+  const handleDispatchExternalTool = React.useCallback(async (
+    toolKey: EmbeddedBrowserExternalToolOption['key'],
+    resource: EmbeddedBrowserCapturedResource,
+  ) => {
+    await dispatchEmbeddedBrowserExternalTool(toolKey, {
+      fileName: formatResourceTitle(resource),
+      headers: withDownloadRequestHeaders(resource),
+      kind: resource.kind,
+      mimeType: resource.mimeType,
+      pageUrl: resource.pageUrl,
+      referer: resource.referer,
+      title: formatResourceTitle(resource),
+      url: resource.url,
+    })
+    const option = externalToolOptions.find((item) => item.key === toolKey)
+    Toast.success(`已发送到${option?.label || '外部工具'}`)
+  }, [externalToolOptions])
+
   const expandAllFilteredResources = React.useCallback(() => {
     setExpandedResourceIds(filteredResources.map((resource) => resource.id));
   }, [filteredResources]);
@@ -378,8 +428,10 @@ const EmbeddedBrowserResourcePanel: React.FC<EmbeddedBrowserResourcePanelProps> 
             </div>
             {section.items.map((resource) => (
               <EmbeddedBrowserResourceCard
+                externalToolOptions={externalToolOptions}
                 expanded={expandedResourceIds.includes(resource.id)}
                 key={resource.id}
+                onDispatchExternalTool={handleDispatchExternalTool}
                 onOpenHlsDownloadWorkspace={onOpenHlsDownloadWorkspace}
                 onOpenMpdDownloadWorkspace={onOpenMpdDownloadWorkspace}
                 onToggleDetails={toggleResourceDetails}

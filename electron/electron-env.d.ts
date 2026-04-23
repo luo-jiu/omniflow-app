@@ -539,6 +539,16 @@ interface Window {
       ruleSet: import('@/features/embedded-browser/resources/model/embedded-browser-capture-rules').EmbeddedBrowserCaptureRuleSet,
     ) => Promise<import('@/features/embedded-browser/resources/model/embedded-browser-capture-rules').EmbeddedBrowserCaptureRuleSet>;
     resetResourceCaptureRules: () => Promise<import('@/features/embedded-browser/resources/model/embedded-browser-capture-rules').EmbeddedBrowserCaptureRuleSet>;
+    getExternalToolSettings: () => Promise<import('@/features/embedded-browser/external-tools/model/embedded-browser-external-tools').EmbeddedBrowserExternalToolSettings>;
+    updateExternalToolSettings: (
+      settings: import('@/features/embedded-browser/external-tools/model/embedded-browser-external-tools').EmbeddedBrowserExternalToolSettings,
+    ) => Promise<import('@/features/embedded-browser/external-tools/model/embedded-browser-external-tools').EmbeddedBrowserExternalToolSettings>;
+    resetExternalToolSettings: () => Promise<import('@/features/embedded-browser/external-tools/model/embedded-browser-external-tools').EmbeddedBrowserExternalToolSettings>;
+    listEnabledExternalTools: () => Promise<import('@/features/embedded-browser/external-tools/model/embedded-browser-external-tools').EmbeddedBrowserExternalToolOption[]>;
+    dispatchExternalTool: (
+      toolKey: import('@/features/embedded-browser/external-tools/model/embedded-browser-external-tools').EmbeddedBrowserExternalToolKey,
+      payload: import('@/features/embedded-browser/external-tools/model/embedded-browser-external-tools').EmbeddedBrowserExternalToolDispatchPayload,
+    ) => Promise<void>;
     listPasswords: () => Promise<EmbeddedBrowserSavedPasswordEntry[]>;
     getDecryptedPassword: (id: string) => Promise<string>;
     saveCapturedCredential: (credentialRequestId: string) => Promise<EmbeddedBrowserSavedPasswordEntry>;

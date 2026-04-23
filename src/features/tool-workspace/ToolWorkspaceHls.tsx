@@ -4,9 +4,13 @@ import {
   Empty,
   Input,
   InputNumber,
+  Popover,
   Select,
   Tag,
+  Toast,
 } from '@douyinfe/semi-ui';
+import ContextMenu, { type ContextMenuItem } from '@/components/ui/context-menu';
+import type { EmbeddedBrowserExternalToolOption } from '@/features/embedded-browser/external-tools/model/embedded-browser-external-tools';
 
 import {
   describeEmbeddedBrowserHlsKeyVerificationResult,
@@ -14,6 +18,7 @@ import {
   type EmbeddedBrowserHlsKeyVerificationResult,
 } from '@/features/embedded-browser/resources/model/embedded-browser-hls-key-verifier';
 import { formatResourceTitle } from '@/features/embedded-browser/resources/model/embedded-browser-resource-display';
+import { isHttpResource } from '@/features/embedded-browser/resources/services/embedded-browser-resource-request';
 
 import type {
   ToolWorkspaceMediaHlsRequest,
@@ -102,9 +107,11 @@ type ToolWorkspaceHlsProps = {
   selectedHlsSubtitleRenditionUrl: string;
   selectedHlsVariantUrl: string;
   verifyingHlsKey: boolean;
+  externalToolOptions?: EmbeddedBrowserExternalToolOption[];
   onCopyFailedFragments: () => void;
   onCopyPlan: () => void;
   onDownloadSelectedSubtitle: () => void;
+  onDispatchExternalTool?: (toolKey: EmbeddedBrowserExternalToolOption['key']) => Promise<void>;
   onRetryFailed: () => void;
   onSaveHls: () => void;
   onStartLiveRecording: () => void;
@@ -258,9 +265,11 @@ const ToolWorkspaceHls: React.FC<ToolWorkspaceHlsProps> = ({
   hlsVariantOptions,
   normalizedHlsManualKey,
   disableSaveAction = false,
+  externalToolOptions = [],
   onCopyFailedFragments,
   onCopyPlan,
   onDownloadSelectedSubtitle,
+  onDispatchExternalTool,
   onRetryFailed,
   onSaveHls,
   onStartLiveRecording,
@@ -284,6 +293,26 @@ const ToolWorkspaceHls: React.FC<ToolWorkspaceHlsProps> = ({
     hlsRequest?.plan.isLive
     && hlsTaskStatus.state === 'error'
     && hlsTaskStatus.requestId,
+  );
+  const externalToolMenuItems = React.useMemo<ContextMenuItem[]>(() => (
+    externalToolOptions.map((tool) => ({
+      key: tool.key,
+      label: tool.label,
+      onClick: () => {
+        if (!onDispatchExternalTool) {
+          return;
+        }
+        void onDispatchExternalTool(tool.key).catch((error: any) => {
+          Toast.error(error?.message || '发送到外部工具失败');
+        });
+      },
+    }))
+  ), [externalToolOptions, onDispatchExternalTool]);
+  const canSendToExternalTools = Boolean(
+    hlsRequest
+    && isHttpResource(hlsRequest.resource)
+    && externalToolOptions.length > 0
+    && onDispatchExternalTool,
   );
 
   if (!hlsRequest) {
@@ -569,6 +598,21 @@ const ToolWorkspaceHls: React.FC<ToolWorkspaceHlsProps> = ({
         <Button disabled={hlsRequest.plan.isLive || disableSaveAction} loading={savingHls && !hlsRequest.plan.isLive} type="primary" onClick={onSaveHls}>
           {saveActionLabel}
         </Button>
+        {canSendToExternalTools ? (
+          <Popover
+            trigger="click"
+            showArrow={false}
+            position="bottomLeft"
+            content={(
+              <ContextMenu
+                items={externalToolMenuItems}
+                className="directory-context-menu"
+              />
+            )}
+          >
+            <Button>发送到外部工具</Button>
+          </Popover>
+        ) : null}
         <Button
           disabled={savingHls || hlsTaskStatus.state === 'running' || hlsLiveRecordingState === 'recording' || hlsLiveRecordingState === 'stopping'}
           onClick={onRetryFailed}

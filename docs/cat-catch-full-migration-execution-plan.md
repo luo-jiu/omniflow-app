@@ -942,6 +942,9 @@ Cat Catch 在 `js/init.js` 中定义默认规则，在 `js/background.js` 中执
 - 未配置时，"发送到外部工具"菜单不显示
 - `npm run lint && npm run build` 通过
 
+> 2026-04-23 当前进度（Codex）：
+> 已补第一版外部工具适配层闭环：main 侧新增 `embeddedBrowserExternalTools.ts`，先只实现 `aria2 RPC / 本地命令 / URL 协议` 三种出口，不扩成更重的通用工具平台；renderer 侧已把“外部工具”接入浏览器设置页，并在资源卡与工具区执行面板里增加“发送到外部工具”入口，只展示已启用工具。当前刻意保持最小闭环，`send2local` 暂不提前扩展，等第一版黑盒样本验证后再决定是否继续补。
+
 ---
 
 ## WP-13：MSE 增量写盘优化

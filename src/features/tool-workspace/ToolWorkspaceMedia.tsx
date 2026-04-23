@@ -4,15 +4,23 @@ import {
   Button,
   Empty,
   Input,
+  Popover,
   Tag,
   Toast,
 } from '@douyinfe/semi-ui';
+import ContextMenu, { type ContextMenuItem } from '@/components/ui/context-menu';
 
 import {
   LibraryNodePickerModal,
   type LibraryNodePickerSelection,
 } from '@/features/file-explorer';
 import type { EmbeddedBrowserCapturedResource } from '@/features/embedded-browser/resources/types';
+import type { EmbeddedBrowserExternalToolOption } from '@/features/embedded-browser/external-tools/model/embedded-browser-external-tools';
+import {
+  dispatchEmbeddedBrowserExternalTool,
+  listEmbeddedBrowserEnabledExternalTools,
+  subscribeEmbeddedBrowserExternalToolsUpdated,
+} from '@/features/embedded-browser/external-tools/services/embedded-browser-external-tool.api';
 import {
   createManualMergePair,
   formatBytes,
@@ -20,6 +28,10 @@ import {
   mergeCapturedResources,
   transcodeCapturedResource,
 } from '@/features/embedded-browser/resources/services/embedded-browser-resource-panel-actions';
+import {
+  isHttpResource,
+  withDownloadRequestHeaders,
+} from '@/features/embedded-browser/resources/services/embedded-browser-resource-request';
 import {
   getDesktopDefaultDownloadDirectory,
   pickDownloadDirectoryFromDesktop,
@@ -277,6 +289,7 @@ const ToolWorkspaceMedia: React.FC<MediaProcessingToolProps> = ({
   const [internalDirectory, setInternalDirectory] = React.useState<LibraryNodePickerSelection | null>(null);
   const [internalPickerVisible, setInternalPickerVisible] = React.useState(false);
   const [internalPathRequired, setInternalPathRequired] = React.useState(false);
+  const [externalToolOptions, setExternalToolOptions] = React.useState<EmbeddedBrowserExternalToolOption[]>([]);
   const {
     cleanupTaskTempImportDirectory,
     createTaskTempImportDirectory,
@@ -322,6 +335,83 @@ const ToolWorkspaceMedia: React.FC<MediaProcessingToolProps> = ({
       setInternalPathRequired(false);
     }
   }, [internalDirectory, saveTargetType]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    const loadExternalToolOptions = async () => {
+      try {
+        const nextOptions = await listEmbeddedBrowserEnabledExternalTools();
+        if (!cancelled) {
+          setExternalToolOptions(nextOptions);
+        }
+      } catch {
+        if (!cancelled) {
+          setExternalToolOptions([]);
+        }
+      }
+    };
+    void loadExternalToolOptions();
+    const unsubscribe = subscribeEmbeddedBrowserExternalToolsUpdated(() => {
+      void loadExternalToolOptions();
+    });
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, []);
+
+  const dispatchResourceToExternalTool = React.useCallback(async (
+    toolKey: EmbeddedBrowserExternalToolOption['key'],
+    resource: EmbeddedBrowserCapturedResource,
+  ) => {
+    await dispatchEmbeddedBrowserExternalTool(toolKey, {
+      fileName: formatResourceTitle(resource),
+      headers: withDownloadRequestHeaders(resource),
+      kind: resource.kind,
+      mimeType: resource.mimeType,
+      pageUrl: resource.pageUrl,
+      referer: resource.referer,
+      title: formatResourceTitle(resource),
+      url: resource.url,
+    });
+    const option = externalToolOptions.find((item) => item.key === toolKey);
+    Toast.success(`已发送到${option?.label || '外部工具'}`);
+  }, [externalToolOptions]);
+
+  const activeExternalToolResources = React.useMemo<EmbeddedBrowserCapturedResource[]>(() => {
+    if (activeMode === 'resources') {
+      return resources;
+    }
+    if (activeMode === 'hls-download') {
+      return hlsRequest ? [hlsRequest.resource] : [];
+    }
+    return mpdRequest ? [mpdRequest.resource] : [];
+  }, [activeMode, hlsRequest, mpdRequest, resources]);
+  const sendableExternalToolResources = React.useMemo(
+    () => activeExternalToolResources.filter((resource) => isHttpResource(resource)),
+    [activeExternalToolResources],
+  );
+  const canSendToExternalTools = externalToolOptions.length > 0 && sendableExternalToolResources.length > 0;
+
+  const externalToolMenuItems = React.useMemo<ContextMenuItem[]>(() => (
+    externalToolOptions.map((tool) => ({
+      key: tool.key,
+      label: tool.label,
+      onClick: () => {
+        void (async () => {
+          if (!sendableExternalToolResources.length) {
+            Toast.warning('还没有可发送的资源');
+            return;
+          }
+          for (const resource of sendableExternalToolResources) {
+            await dispatchResourceToExternalTool(tool.key, resource);
+          }
+        })().catch((error: any) => {
+          Toast.error(error?.message || '发送到外部工具失败');
+        });
+      },
+    }))
+  ), [dispatchResourceToExternalTool, externalToolOptions, sendableExternalToolResources]);
 
   const createMediaOutputTargetSnapshot = React.useCallback(async (
     actionName: '合并' | '转格式' | 'HLS 下载' | 'MPD 下载',
@@ -597,6 +687,21 @@ const ToolWorkspaceMedia: React.FC<MediaProcessingToolProps> = ({
                     <Button loading={merging} disabled={!mergePair} type="primary" onClick={() => void handleMerge()}>
                       {`合并&${primaryActionLabelSuffix}`}
                     </Button>
+                    {canSendToExternalTools ? (
+                      <Popover
+                        trigger="click"
+                        showArrow={false}
+                        position="bottomLeft"
+                        content={(
+                          <ContextMenu
+                            items={externalToolMenuItems}
+                            className="directory-context-menu"
+                          />
+                        )}
+                      >
+                        <Button>发送到外部工具</Button>
+                      </Popover>
+                    ) : null}
                     <span className={`merge-status ${mergePair ? 'ok' : ''}`}>
                       {mergePair ? '已识别可合并音视频' : '未识别到可合并组合'}
                     </span>
@@ -691,6 +796,7 @@ const ToolWorkspaceMedia: React.FC<MediaProcessingToolProps> = ({
             hlsVariantOptions={hlsTask.hlsVariantOptions}
             normalizedHlsManualKey={hlsTask.normalizedHlsManualKey}
             disableSaveAction={false}
+            externalToolOptions={externalToolOptions}
             savingHls={hlsTask.savingHls}
             selectedHlsAudioRenditionUrl={hlsTask.selectedHlsAudioRenditionUrl}
             selectedHlsSubtitleRenditionUrl={hlsTask.selectedHlsSubtitleRenditionUrl}
@@ -710,6 +816,12 @@ const ToolWorkspaceMedia: React.FC<MediaProcessingToolProps> = ({
               });
             }}
             onDownloadSelectedSubtitle={hlsTask.handlers.onDownloadSelectedSubtitle}
+            onDispatchExternalTool={async (toolKey) => {
+              if (!hlsTask.hlsRequest) {
+                throw new Error('当前没有可发送的 HLS 资源');
+              }
+              await dispatchResourceToExternalTool(toolKey, hlsTask.hlsRequest.resource);
+            }}
             onRetryFailed={hlsTask.handlers.onRetryFailed}
             onSaveHls={hlsTask.handlers.onSaveHls}
             saveActionLabel={`下载&${primaryActionLabelSuffix}`}
@@ -728,6 +840,7 @@ const ToolWorkspaceMedia: React.FC<MediaProcessingToolProps> = ({
           <ToolWorkspaceMpd
             audioRepresentationOptions={mpdTask.audioRepresentationOptions}
             disableSaveAction={false}
+            externalToolOptions={externalToolOptions}
             mpdRequest={mpdTask.mpdRequest}
             mpdTaskStatus={mpdTask.mpdTaskStatus}
             savingMpd={mpdTask.savingMpd}
@@ -742,6 +855,12 @@ const ToolWorkspaceMedia: React.FC<MediaProcessingToolProps> = ({
               void navigator.clipboard.writeText(JSON.stringify(mpdTask.mpdRequest.plan, null, 2)).then(() => {
                 Toast.success('MPD 计划 JSON 已复制');
               });
+            }}
+            onDispatchExternalTool={async (toolKey) => {
+              if (!mpdTask.mpdRequest) {
+                throw new Error('当前没有可发送的 MPD 资源');
+              }
+              await dispatchResourceToExternalTool(toolKey, mpdTask.mpdRequest.resource);
             }}
             onSaveMpd={mpdTask.handlers.onSaveMpd}
             onSetSelectedAudioRepresentationId={mpdTask.handlers.onSetSelectedAudioRepresentationId}
