@@ -209,6 +209,13 @@ src/features/tool-workspace/
 
 **目标**：在 HLS 本地下载链路中实现真正的 AES-128 分片解密，让加密 HLS 流可以正确下载并播放。
 
+> 2026-04-23 当前主线复核说明：
+> - 当前 OmniFlow 主线已经是“本地 downloader 下载 key 到本地 + 重写本地 playlist + 交给 ffmpeg 解密/合成”，不是完全没有 AES-128 处理能力。
+> - 手动 key 目前也已经会被写成本地 key 文件，并通过重写后的 `EXT-X-KEY` 交给 ffmpeg 消费。
+> - 因此本工作包当前不默认直接落 `embeddedBrowserAesDecryptor.ts` 和“主进程预解密分片”这条增强分支，避免在还没有真实样本证明 ffmpeg 主线不够用时先引入额外复杂度。
+> - 当前更稳的执行顺序是：先按本文的“方式一（ffmpeg 解密）”完成真实样本验真；只有确认存在 ffmpeg 无法正确消费本地 key / playlist 的具体场景，再继续补“方式二（主进程内 AES-128 解密）”。
+> - 验收时应优先覆盖：普通 AES-128 URL key、带 Cookie / Referer 的 key URL、手动 key、包含 `EXT-X-MAP` 的加密 HLS。若这些都能通过，则 WP-03 以现有主线即可视为基本完成，不强制新增客户端预解密实现。
+
 ### 背景
 
 Cat Catch 使用自实现的 `AESDecryptor`（来自 `lib/m3u8-decrypt.js`，299 行）在下载管线中透明解密每个分片：
