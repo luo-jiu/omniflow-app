@@ -132,6 +132,30 @@ export type EmbeddedBrowserHlsRetrySessionCleanupPayload = {
   requestId?: string
 }
 
+export type EmbeddedBrowserHlsTrackMergePayload = {
+  audioManifestUrl?: string
+  durationSeconds?: number
+  ffmpegPath?: string
+  headers?: Record<string, string>
+  outputDirectoryPath?: string
+  requestId?: string
+  suggestedFileName?: string
+  useSystemSaveDialog?: boolean
+  videoManifestUrl?: string
+}
+
+export type EmbeddedBrowserHlsTrackMergeResponse = EmbeddedBrowserHlsDownloadResponse
+
+export type EmbeddedBrowserDirectFileDownloadPayload = {
+  headers?: Record<string, string>
+  outputDirectoryPath?: string
+  suggestedFileName?: string
+  url?: string
+  useSystemSaveDialog?: boolean
+}
+
+export type EmbeddedBrowserDirectFileDownloadResponse = EmbeddedBrowserHlsDownloadResponse
+
 export type EmbeddedBrowserHlsTaskEventPayload = {
   bytesReceived?: number
   bytesTotal?: number

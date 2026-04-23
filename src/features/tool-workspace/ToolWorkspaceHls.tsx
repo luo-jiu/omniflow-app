@@ -59,11 +59,18 @@ type HlsVariantOption = {
   value: string;
 };
 
+type HlsRenditionOption = {
+  groupId?: string;
+  label: string;
+  value: string;
+};
+
 type ToolWorkspaceHlsProps = {
   canSelectVariant: boolean;
   canTuneLocalDownloader: boolean;
   hlsAes128KeyCount: number;
   hlsAudioRenditions: ToolWorkspaceMediaHlsRequest['plan']['renditions'];
+  hlsAudioRenditionOptions: HlsRenditionOption[];
   hlsKeyVerificationResult: EmbeddedBrowserHlsKeyVerificationResult | null;
   hlsManualKeyDraft: string;
   hlsManualKeyInputMode: string;
@@ -72,9 +79,12 @@ type ToolWorkspaceHlsProps = {
   hlsRangeEnd: number;
   hlsRangeStart: number;
   hlsRequest: ToolWorkspaceMediaHlsRequest | null;
+  hlsSelectedAudioRendition: ToolWorkspaceMediaHlsRequest['plan']['renditions'][number] | null;
+  hlsSelectedSubtitleRendition: ToolWorkspaceMediaHlsRequest['plan']['renditions'][number] | null;
   hlsSelectedVariant: ToolWorkspaceMediaHlsRequest['plan']['variants'][number] | null;
   hlsSelectedVariantLabel: string;
   hlsSubtitleRenditions: ToolWorkspaceMediaHlsRequest['plan']['renditions'];
+  hlsSubtitleRenditionOptions: HlsRenditionOption[];
   hlsTaskProgressPercent: number;
   hlsTaskProgressSummary: string;
   hlsTaskStatus: HlsTaskStatus;
@@ -84,12 +94,17 @@ type ToolWorkspaceHlsProps = {
   hlsVariantOptions: HlsVariantOption[];
   normalizedHlsManualKey: string;
   savingHls: boolean;
+  selectedHlsAudioRenditionUrl: string;
+  selectedHlsSubtitleRenditionUrl: string;
   selectedHlsVariantUrl: string;
   verifyingHlsKey: boolean;
   onCopyFailedFragments: () => void;
   onCopyPlan: () => void;
+  onDownloadSelectedSubtitle: () => void;
   onRetryFailed: () => void;
   onSaveHls: () => void;
+  onSetSelectedHlsAudioRenditionUrl: (value: string) => void;
+  onSetSelectedHlsSubtitleRenditionUrl: (value: string) => void;
   onSetHlsManualKeyDraft: (value: string) => void;
   onSetHlsRangeEnd: (value: number) => void;
   onSetHlsRangeStart: (value: number) => void;
@@ -211,6 +226,7 @@ const ToolWorkspaceHls: React.FC<ToolWorkspaceHlsProps> = ({
   canTuneLocalDownloader,
   hlsAes128KeyCount,
   hlsAudioRenditions,
+  hlsAudioRenditionOptions,
   hlsKeyVerificationResult,
   hlsManualKeyDraft,
   hlsManualKeyInputMode,
@@ -219,9 +235,12 @@ const ToolWorkspaceHls: React.FC<ToolWorkspaceHlsProps> = ({
   hlsRangeEnd,
   hlsRangeStart,
   hlsRequest,
+  hlsSelectedAudioRendition,
+  hlsSelectedSubtitleRendition,
   hlsSelectedVariant,
   hlsSelectedVariantLabel,
   hlsSubtitleRenditions,
+  hlsSubtitleRenditionOptions,
   hlsTaskProgressPercent,
   hlsTaskProgressSummary,
   hlsTaskStatus,
@@ -232,8 +251,11 @@ const ToolWorkspaceHls: React.FC<ToolWorkspaceHlsProps> = ({
   normalizedHlsManualKey,
   onCopyFailedFragments,
   onCopyPlan,
+  onDownloadSelectedSubtitle,
   onRetryFailed,
   onSaveHls,
+  onSetSelectedHlsAudioRenditionUrl,
+  onSetSelectedHlsSubtitleRenditionUrl,
   onSetHlsManualKeyDraft,
   onSetHlsRangeEnd,
   onSetHlsRangeStart,
@@ -241,6 +263,8 @@ const ToolWorkspaceHls: React.FC<ToolWorkspaceHlsProps> = ({
   onSetSelectedHlsVariantUrl,
   onVerifyHlsKey,
   savingHls,
+  selectedHlsAudioRenditionUrl,
+  selectedHlsSubtitleRenditionUrl,
   selectedHlsVariantUrl,
   verifyingHlsKey,
 }) => {
@@ -328,7 +352,7 @@ const ToolWorkspaceHls: React.FC<ToolWorkspaceHlsProps> = ({
       {(hlsAudioRenditions.length || hlsSubtitleRenditions.length || hlsSelectedVariant) ? (
         <>
           <div className="panel-desc" style={{ marginBottom: 10 }}>
-            这块是 `master playlist` 里的轨道视图。当前先把音轨/字幕轨信息和所选 variant 的 group 关系展示清楚，后续再继续补更细的轨道选择。
+            这块是 `master playlist` 里的轨道视图。现在可以在这里锁定独立音轨，并把字幕轨单独下载；音轨选择会尽量跟着当前变体的 group 关系走。
           </div>
           {hlsSelectedVariant ? (
             <ActionRow>
@@ -347,11 +371,37 @@ const ToolWorkspaceHls: React.FC<ToolWorkspaceHlsProps> = ({
           {hlsAudioRenditions.length ? (
             <>
               <div className="panel-desc" style={{ marginBottom: 8 }}>音轨候选</div>
+              {hlsAudioRenditionOptions.length ? (
+                <ActionRow>
+                  <Select
+                    value={selectedHlsAudioRenditionUrl || undefined}
+                    placeholder="自动（沿用默认音轨）"
+                    onChange={(value) => onSetSelectedHlsAudioRenditionUrl(String(value || ''))}
+                    style={{ minWidth: 320 }}
+                  >
+                    <Select.Option value="">自动（沿用默认音轨）</Select.Option>
+                    {hlsAudioRenditionOptions.map((option) => (
+                      <Select.Option key={option.value} value={option.value}>
+                        {option.label}
+                      </Select.Option>
+                    ))}
+                  </Select>
+                  {hlsSelectedAudioRendition ? (
+                    <Tag color="blue">已选独立音轨</Tag>
+                  ) : (
+                    <Tag color="grey">默认音轨策略</Tag>
+                  )}
+                </ActionRow>
+              ) : null}
               <ActionRow>
                 {hlsAudioRenditions.map((rendition, index) => (
                   <Tag
                     key={`audio-${rendition.groupId || 'none'}-${rendition.name || index}`}
-                    color={hlsSelectedVariant?.audioGroupId && rendition.groupId === hlsSelectedVariant.audioGroupId ? 'blue' : 'white'}
+                    color={hlsSelectedAudioRendition?.url === rendition.url
+                      ? 'blue'
+                      : hlsSelectedVariant?.audioGroupId && rendition.groupId === hlsSelectedVariant.audioGroupId
+                        ? 'cyan'
+                        : 'white'}
                   >
                     {formatHlsRenditionLabel(rendition)}
                   </Tag>
@@ -362,11 +412,37 @@ const ToolWorkspaceHls: React.FC<ToolWorkspaceHlsProps> = ({
           {hlsSubtitleRenditions.length ? (
             <>
               <div className="panel-desc" style={{ marginBottom: 8 }}>字幕候选</div>
+              {hlsSubtitleRenditionOptions.length ? (
+                <ActionRow>
+                  <Select
+                    value={selectedHlsSubtitleRenditionUrl || undefined}
+                    placeholder="不下载字幕轨"
+                    onChange={(value) => onSetSelectedHlsSubtitleRenditionUrl(String(value || ''))}
+                    style={{ minWidth: 320 }}
+                  >
+                    <Select.Option value="">不下载字幕轨</Select.Option>
+                    {hlsSubtitleRenditionOptions.map((option) => (
+                      <Select.Option key={option.value} value={option.value}>
+                        {option.label}
+                      </Select.Option>
+                    ))}
+                  </Select>
+                  {hlsSelectedSubtitleRendition ? (
+                    <Button onClick={onDownloadSelectedSubtitle}>下载字幕轨</Button>
+                  ) : (
+                    <Tag color="grey">未选择字幕轨</Tag>
+                  )}
+                </ActionRow>
+              ) : null}
               <ActionRow>
                 {hlsSubtitleRenditions.map((rendition, index) => (
                   <Tag
                     key={`sub-${rendition.groupId || 'none'}-${rendition.name || index}`}
-                    color={hlsSelectedVariant?.subtitlesGroupId && rendition.groupId === hlsSelectedVariant.subtitlesGroupId ? 'purple' : 'white'}
+                    color={hlsSelectedSubtitleRendition?.url === rendition.url
+                      ? 'purple'
+                      : hlsSelectedVariant?.subtitlesGroupId && rendition.groupId === hlsSelectedVariant.subtitlesGroupId
+                        ? 'violet'
+                        : 'white'}
                   >
                     {formatHlsRenditionLabel(rendition)}
                   </Tag>
@@ -486,6 +562,12 @@ const ToolWorkspaceHls: React.FC<ToolWorkspaceHlsProps> = ({
               变体：{hlsSelectedVariantLabel || selectedHlsVariantUrl}
             </span>
           </Tag>
+        ) : null}
+        {hlsSelectedAudioRendition ? (
+          <Tag color="blue">音轨：{formatHlsRenditionLabel(hlsSelectedAudioRendition)}</Tag>
+        ) : null}
+        {hlsSelectedSubtitleRendition ? (
+          <Tag color="purple">字幕：{formatHlsRenditionLabel(hlsSelectedSubtitleRendition)}</Tag>
         ) : null}
       </ActionRow>
       <ActionRow>

@@ -35,7 +35,7 @@
 | 去额外媒体头 | `catch-script/catch.js` | 已夺舍 | 多格式验证 |
 | 本地 ffmpeg 合并 MSE 音视频 | `catch-script/catch.js`, `js/m3u8.js` | 部分夺舍 | 从 B 站 m4s 扩到 HLS/DASH |
 | m3u8 parser 页面 | `m3u8.html`, `js/m3u8.js` | 部分夺舍 | 先做功能/demo，不急着定正式 UI |
-| m3u8 downloader | `js/m3u8.downloader.js` | 部分夺舍 | 已补下载任务模型、Electron 下载队列内核，并把网络/本地 manifest 两条 HLS 主线接进工具区；工具区已补阶段进度、结构化日志、失败分片编号（含复制）、失败分片重试、下载速度/ETA、ffmpeg 处理反馈、媒体 playlist 的线程数/分片范围控制，以及网络 master playlist 第一版 variant 选择和轨道关系展示，继续补真正轨道选择 |
+| m3u8 downloader | `js/m3u8.downloader.js` | 部分夺舍 | 已补下载任务模型、Electron 下载队列内核，并把网络/本地 manifest 两条 HLS 主线接进工具区；工具区已补阶段进度、结构化日志、失败分片编号（含复制）、失败分片重试、下载速度/ETA、ffmpeg 处理反馈、媒体 playlist 的线程数/分片范围控制，以及网络 master playlist 的 variant 选择、独立音轨选择与 ffmpeg 合并、字幕轨单独下载，继续补轨道联动验真 |
 | mpd parser 页面 | `mpd.html`, `js/mpd.js` | 未夺舍 | 迁轨道解析/选择，或引入等价 parser |
 | N_m3u8DL 协议调用 | `options.html`, `js/popup.js`, `js/m3u8.js` | 未夺舍 | 评估是否作为外部工具导出 |
 | aria2 RPC | `js/function.js`, `js/popup.js`, `js/preview.js` | 未夺舍 | 可作为外部下载器适配 |
@@ -102,7 +102,7 @@ OmniFlow 当前有 manifest 捕获、key 候选和 ffmpeg 合并基础，但还�
 
 - m3u8 parser 的层级 playlist 展开：已补纯函数解析与资源卡测试入口，能输出 variants / renditions / keys / maps / segments；下载计划 JSON 已开始对齐 Cat Catch downloader 的 fragment 任务模型。
 - Electron 端下载队列内核：已补并发、范围、重试、顺序推送与停止能力，并已接入 HLS 本地 manifest 执行主链。
-- 多 variant / 多清晰度选择：已能解析 variant 与 rendition 元数据，工具区已补网络 master playlist 的第一版 variant 选择，并能展示关联的音轨/字幕 group；更细粒度的真正轨道选择仍未完成。
+- 多 variant / 多清晰度选择：已能解析 variant 与 rendition 元数据，工具区已补网络 master playlist 的 variant 选择、独立音轨选择与 ffmpeg 合并、字幕轨单独下载，并能展示关联的音轨/字幕 group；剩余重点是轨道联动验真。
 - `EXT-X-KEY` 下载、验证、替换、自定义 key：已能解析 key 元数据、做真实 key 验证，并在工具区支持手动输入自定义 key和直接二次验证；当前 `master playlist + 手动 key` 仍会显式拦住，避免误走错误主链；更完整的验证和选择体验仍未完成。
 - `EXT-X-MAP` 下载与解密处理：已能解析 map 与 byterange 元数据，并在本地 manifest 重写时生成独立本地文件引用；更完整的解密与验证仍未完成。
 - 下载范围：序号范围、时间范围 `HH:MM:SS`。

@@ -1,6 +1,6 @@
 import os from 'node:os'
 import path from 'node:path'
-import { access, mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { app, BrowserWindow, dialog, WebContentsView, type WebFrameMain } from 'electron'
 import { runtimeLogger } from '../runtimeLogger'
 import type { EmbeddedBrowserCatchToolkitStatePayload } from './embeddedBrowserCatchToolkitPageBridge'
@@ -42,12 +42,16 @@ import {
   type EmbeddedBrowserCapturedResourceTranscodePayload,
   type EmbeddedBrowserCapturedResourceTranscodeResponse,
   type EmbeddedBrowserHlsDownloadPayload,
+  type EmbeddedBrowserHlsTrackMergePayload,
+  type EmbeddedBrowserHlsTrackMergeResponse,
   type EmbeddedBrowserHlsTaskEventPayload,
   type EmbeddedBrowserHlsPlanDownloadPayload,
   type EmbeddedBrowserHlsPlanDownloadResponse,
   type EmbeddedBrowserHlsPlanRetryPayload,
   type EmbeddedBrowserHlsPlanRetryResponse,
   type EmbeddedBrowserHlsDownloadResponse,
+  type EmbeddedBrowserDirectFileDownloadPayload,
+  type EmbeddedBrowserDirectFileDownloadResponse,
   type EmbeddedBrowserMainControllerOptions,
   type EmbeddedBrowserMpdDownloadPayload,
   type EmbeddedBrowserMpdDownloadResponse,
@@ -109,6 +113,7 @@ import {
 import {
   deriveEmbeddedBrowserManifestOutputFileName,
   downloadEmbeddedBrowserManifestResource,
+  downloadEmbeddedBrowserManifestTracks,
   type EmbeddedBrowserManifestDownloadKind,
 } from './embeddedBrowserResourceManifestDownloadService'
 import {
@@ -587,6 +592,62 @@ export function createEmbeddedBrowserMainController(
     return saveResult.filePath
   }
 
+  function deriveEmbeddedBrowserDirectFileName(url: string, fallbackName: string) {
+    try {
+      const fileName = decodeURIComponent(path.basename(new URL(url).pathname)).trim()
+      if (fileName) {
+        return sanitizeEmbeddedBrowserOutputFileName(fileName)
+      }
+    } catch {
+      // Fall through to fallback.
+    }
+    return sanitizeEmbeddedBrowserOutputFileName(fallbackName)
+  }
+
+  async function downloadEmbeddedBrowserDirectFile(
+    _tabId: string,
+    payload: EmbeddedBrowserDirectFileDownloadPayload,
+  ): Promise<EmbeddedBrowserDirectFileDownloadResponse> {
+    const resourceUrl = String(payload.url || '').trim()
+    if (!/^https?:\/\//i.test(resourceUrl)) {
+      return {
+        error: '缺少可下载的字幕或文件链接',
+        ok: false,
+      }
+    }
+
+    try {
+      const outputPath = await resolveEmbeddedBrowserOutputPath({
+        defaultFileName: deriveEmbeddedBrowserDirectFileName(resourceUrl, String(payload.suggestedFileName || '').trim() || 'resource.txt'),
+        outputDirectoryPath: payload.outputDirectoryPath,
+        useSystemSaveDialog: payload.useSystemSaveDialog,
+      })
+      if (!outputPath) {
+        return {
+          cancelled: true,
+          ok: false,
+        }
+      }
+      const response = await fetch(resourceUrl, {
+        headers: payload.headers,
+      })
+      if (!response.ok) {
+        throw new Error(`下载失败：HTTP ${response.status}`)
+      }
+      const buffer = Buffer.from(await response.arrayBuffer())
+      await writeFile(outputPath, buffer)
+      return {
+        ok: true,
+        outputPath,
+      }
+    } catch (error) {
+      return {
+        error: error instanceof Error ? error.message : String(error),
+        ok: false,
+      }
+    }
+  }
+
   async function mergeEmbeddedBrowserCapturedMseResources(
     tabId: string,
     payload: EmbeddedBrowserCapturedResourceMergePayload,
@@ -995,6 +1056,110 @@ export function createEmbeddedBrowserMainController(
     payload: EmbeddedBrowserHlsDownloadPayload,
   ): Promise<EmbeddedBrowserHlsDownloadResponse> {
     return downloadEmbeddedBrowserManifestResourceForRenderer(tabId, payload, 'hls')
+  }
+
+  async function downloadEmbeddedBrowserHlsTracksResource(
+    tabId: string,
+    payload: EmbeddedBrowserHlsTrackMergePayload,
+  ): Promise<EmbeddedBrowserHlsTrackMergeResponse> {
+    const normalizedTabId = String(tabId || '').trim()
+    const videoManifestUrl = String(payload.videoManifestUrl || '').trim()
+    const audioManifestUrl = String(payload.audioManifestUrl || '').trim()
+    const requestId = String(payload.requestId || '').trim() || undefined
+    if (!normalizedTabId || !/^https?:\/\//i.test(videoManifestUrl) || !/^https?:\/\//i.test(audioManifestUrl)) {
+      return {
+        error: '缺少可合并的视频或音轨 manifest',
+        ok: false,
+      }
+    }
+
+    let outputPath: string | null = null
+    try {
+      outputPath = await resolveEmbeddedBrowserOutputPath({
+        defaultFileName: String(payload.suggestedFileName || '').trim() || deriveEmbeddedBrowserManifestOutputFileName(videoManifestUrl, 'hls'),
+        filters: [
+          { extensions: ['mp4'], name: 'MP4 Video' },
+        ],
+        outputDirectoryPath: payload.outputDirectoryPath,
+        useSystemSaveDialog: payload.useSystemSaveDialog,
+      })
+      if (!outputPath) {
+        return {
+          cancelled: true,
+          ok: false,
+        }
+      }
+
+      emitEmbeddedBrowserHlsTask({
+        durationSeconds: payload.durationSeconds,
+        manifestUrl: videoManifestUrl,
+        message: '开始下载并合并视频/音轨',
+        mode: 'direct-manifest',
+        requestId,
+        stage: 'preparing',
+        status: 'running',
+        tabId: normalizedTabId,
+      })
+
+      const result = await downloadEmbeddedBrowserManifestTracks({
+        audioManifestUrl,
+        durationSeconds: payload.durationSeconds,
+        ffmpegPath: payload.ffmpegPath,
+        headers: payload.headers,
+        onProgress: payload.durationSeconds
+          ? (progress) => {
+            emitEmbeddedBrowserHlsTask({
+              durationSeconds: payload.durationSeconds,
+              ffmpegSpeedText: progress.speedText,
+              manifestUrl: videoManifestUrl,
+              message: '正在通过 ffmpeg 合并视频和音轨',
+              mode: 'direct-manifest',
+              processedSeconds: progress.processedSeconds,
+              requestId,
+              stage: 'ffmpeg',
+              status: 'running',
+              tabId: normalizedTabId,
+            })
+          }
+          : undefined,
+        outputPath,
+        videoManifestUrl,
+      })
+
+      emitEmbeddedBrowserHlsTask({
+        durationSeconds: payload.durationSeconds,
+        manifestUrl: videoManifestUrl,
+        message: 'HLS 视频/音轨合并完成',
+        mode: 'direct-manifest',
+        outputPath: result.outputPath,
+        requestId,
+        stage: 'completed',
+        status: 'success',
+        tabId: normalizedTabId,
+      })
+      return {
+        ffmpegPath: result.ffmpegPath,
+        ok: true,
+        outputPath: result.outputPath,
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      emitEmbeddedBrowserHlsTask({
+        durationSeconds: payload.durationSeconds,
+        error: message,
+        manifestUrl: videoManifestUrl,
+        message,
+        mode: 'direct-manifest',
+        requestId,
+        stage: 'error',
+        status: 'error',
+        tabId: normalizedTabId,
+      })
+      return {
+        error: message,
+        ok: false,
+      }
+    }
   }
 
   async function downloadEmbeddedBrowserHlsPlanResource(
@@ -2130,9 +2295,11 @@ export function createEmbeddedBrowserMainController(
       deactivate: handleDeactivate,
       downloadCatchMedia: (tabId) => handleCatchToolkitAction(tabId, 'downloadCatchMedia', 'download'),
       downloadHlsManifest: downloadEmbeddedBrowserHlsResource,
+      downloadHlsTracks: downloadEmbeddedBrowserHlsTracksResource,
       downloadHlsPlan: downloadEmbeddedBrowserHlsPlanResource,
       retryHlsPlanFailed: retryEmbeddedBrowserHlsPlanFailedFragments,
       downloadMpdManifest: downloadEmbeddedBrowserMpdResource,
+      downloadDirectFile: downloadEmbeddedBrowserDirectFile,
       exportResource: handleExportResource,
       getCatchToolkitState: handleGetCatchToolkitState,
       goBack: handleGoBack,

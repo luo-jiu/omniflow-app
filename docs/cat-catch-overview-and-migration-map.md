@@ -254,13 +254,13 @@ Electron main / 本地工具 / ffmpeg
 - 工具区已支持手动输入 AES-128 自定义 key；一旦填写，会切到本地 downloader 主链，用本地 key 文件重写 playlist 后再交给 `ffmpeg`
 - 工具区也能直接做一轮 key 验证；会同时尝试 manifest key URL、当前 tab 已捕获 key，以及手动输入 key
 - 工具区已补基础执行反馈：当前阶段、最近日志、分片完成数；本地 downloader 失败后已能直接重试失败分片
-- 网络 master playlist 已补第一版 variant / 清晰度选择：默认保持“自动”，也可以锁到某个具体 variant URL 再交给 ffmpeg；同时工具区会展示该 variant 关联的音轨组 / 字幕组和现有 renditions 摘要
+- 网络 master playlist 已补第一版完整轨道处理：默认保持“自动”，也可以锁到某个具体 variant URL；当前还支持选择独立音轨并走 ffmpeg 合并，以及选择字幕轨单独下载；工具区会展示该 variant 关联的音轨组 / 字幕组和现有 renditions 摘要
 - 当前 `master playlist + 手动 key` 仍不是完整支持场景，工具区会先显式拦住，避免误走错误主链
 
 #### 还缺什么
 
 - 更完整 key / map 体验
-- 更完整的轨道 / variant / 清晰度选择
+- 轨道联动和真实样本验真
 - 更细的日志 / 进度 / 执行控制 UI
 - 边下边存 / 更稳的大文件策略
 

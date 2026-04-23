@@ -444,7 +444,9 @@ Cat Catch 在 `m3u8.js` 中使用 HLS.js 解析 master playlist 后：
 - 已能解析 variant 和 rendition 元数据
 - 工具区已有第一版 variant 选择（默认"自动"，可锁定具体 variant URL）
 - 已展示关联的音轨组 / 字幕组摘要
-- **缺失**：真正的多轨道独立选择、音频轨单独下载、字幕轨下载
+- 已支持按当前 variant 关联的 group 选择独立音轨，并走 `ffmpeg` 下载+合并主链
+- 已支持选择字幕轨并单独下载到本地
+- **剩余**：更完整的轨道联动验真与边角修正
 
 ### 实现方案
 
@@ -457,12 +459,12 @@ Cat Catch 在 `m3u8.js` 中使用 HLS.js 解析 master playlist 后：
 
 2. **音频轨选择**
    - 展示所有 audio renditions：`{language} · {name} · {groupId}`
-   - 默认选中与视频 variant 关联的 default audio
-   - 如果音频轨有独立 URI（独立 media playlist），支持同时下载视频+音频然后 ffmpeg 合并
+   - 默认沿用当前 variant 对应的默认音轨
+   - 如果用户明确选中独立音轨 URI，则下载视频 manifest + 音频 manifest，并用 ffmpeg 合并
 
 3. **字幕轨选择**（可选下载）
    - 展示所有 subtitle renditions：`{language} · {name}`
-   - 勾选后下载字幕文件（通常是 WebVTT）
+   - 勾选后单独下载字幕文件（通常是 WebVTT）
 
 4. **联动逻辑**
    - 选择 variant 后自动更新关联的 audio group
@@ -492,8 +494,8 @@ Master Manifest
 ### 验收标准
 
 - Master playlist 展示所有视频/音频/字幕 variant
-- 选择不同分辨率后正确加载对应 media playlist
-- 视频 + 独立音频轨下载后 ffmpeg 合并成功
+- 选择不同分辨率后，variant / audio group / subtitle group 关系正确联动
+- 选择独立音频轨后，视频 + 音频 manifest 下载并 ffmpeg 合并成功
 - 字幕轨可单独下载
 - `npm run lint && npm run build` 通过
 

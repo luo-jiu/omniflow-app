@@ -5,7 +5,9 @@ import {
   verifyHlsResourceKey,
 } from '@/features/embedded-browser/resources/services/embedded-browser-resource-panel-actions';
 import {
+  downloadEmbeddedBrowserDirectFile,
   downloadEmbeddedBrowserHlsManifest,
+  downloadEmbeddedBrowserHlsTracks,
   downloadEmbeddedBrowserHlsPlan,
   listEmbeddedBrowserCapturedResources,
   retryEmbeddedBrowserHlsPlanFailed,
@@ -51,6 +53,12 @@ export type HlsTaskStatus = {
 };
 
 export type HlsVariantOption = {
+  label: string;
+  value: string;
+};
+
+export type HlsRenditionOption = {
+  groupId?: string;
   label: string;
   value: string;
 };
@@ -101,6 +109,48 @@ function formatHlsVariantLabel(variant: {
   }
   const title = parts.length ? parts.join(' · ') : `变体 ${index + 1}`;
   return `${title} · ${deriveHlsOutputFileName(variant.url)}`;
+}
+
+function formatHlsRenditionOptionLabel(rendition: {
+  autoselect?: boolean;
+  default?: boolean;
+  forced?: boolean;
+  groupId?: string;
+  language?: string;
+  name?: string;
+  url?: string;
+}, index: number) {
+  const parts: string[] = [];
+  if (rendition.name) {
+    parts.push(rendition.name);
+  }
+  if (rendition.language) {
+    parts.push(rendition.language);
+  }
+  if (rendition.groupId) {
+    parts.push(`group:${rendition.groupId}`);
+  }
+  if (rendition.default) {
+    parts.push('default');
+  }
+  if (rendition.autoselect) {
+    parts.push('autoselect');
+  }
+  if (rendition.forced) {
+    parts.push('forced');
+  }
+  return parts.join(' · ') || `轨道 ${index + 1}`;
+}
+
+function pickDefaultHlsVariant(
+  variants: ToolWorkspaceMediaHlsRequest['plan']['variants'],
+) {
+  if (!variants.length) {
+    return null;
+  }
+  return [...variants].sort((left, right) => (
+    Number(right.averageBandwidth || right.bandwidth || 0) - Number(left.averageBandwidth || left.bandwidth || 0)
+  ))[0] || variants[0] || null;
 }
 
 function createHlsTaskLogEntry(input: {
@@ -248,6 +298,8 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
   const [verifyingHlsKey, setVerifyingHlsKey] = React.useState(false);
   const [hlsManualKeyDraft, setHlsManualKeyDraft] = React.useState('');
   const [selectedHlsVariantUrl, setSelectedHlsVariantUrl] = React.useState('');
+  const [selectedHlsAudioRenditionUrl, setSelectedHlsAudioRenditionUrl] = React.useState('');
+  const [selectedHlsSubtitleRenditionUrl, setSelectedHlsSubtitleRenditionUrl] = React.useState('');
   const [hlsThreadCountDraft, setHlsThreadCountDraft] = React.useState(6);
   const [hlsRangeStartDraft, setHlsRangeStartDraft] = React.useState(1);
   const [hlsRangeEndDraft, setHlsRangeEndDraft] = React.useState(1);
@@ -307,12 +359,42 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
   const hlsSubtitleRenditions = React.useMemo(() => (
     (hlsRequest?.plan.renditions || []).filter((rendition) => String(rendition.type || '').toUpperCase() === 'SUBTITLES')
   ), [hlsRequest]);
+  const hlsDefaultVariant = React.useMemo(() => (
+    pickDefaultHlsVariant(hlsRequest?.plan.variants || [])
+  ), [hlsRequest]);
   const hlsSelectedVariant = React.useMemo(() => {
     if (!selectedHlsVariantUrl) {
       return null;
     }
     return hlsRequest?.plan.variants.find((variant) => variant.url === selectedHlsVariantUrl) || null;
   }, [hlsRequest, selectedHlsVariantUrl]);
+  const hlsEffectiveVariant = hlsSelectedVariant || hlsDefaultVariant;
+  const hlsAudioRenditionOptions = React.useMemo<HlsRenditionOption[]>(() => (
+    hlsAudioRenditions
+      .filter((rendition) => Boolean(rendition.url))
+      .filter((rendition) => !hlsEffectiveVariant?.audioGroupId || rendition.groupId === hlsEffectiveVariant.audioGroupId)
+      .map((rendition, index) => ({
+        groupId: rendition.groupId,
+        label: formatHlsRenditionOptionLabel(rendition, index),
+        value: String(rendition.url || ''),
+      }))
+  ), [hlsAudioRenditions, hlsEffectiveVariant]);
+  const hlsSubtitleRenditionOptions = React.useMemo<HlsRenditionOption[]>(() => (
+    hlsSubtitleRenditions
+      .filter((rendition) => Boolean(rendition.url))
+      .filter((rendition) => !hlsEffectiveVariant?.subtitlesGroupId || rendition.groupId === hlsEffectiveVariant.subtitlesGroupId)
+      .map((rendition, index) => ({
+        groupId: rendition.groupId,
+        label: formatHlsRenditionOptionLabel(rendition, index),
+        value: String(rendition.url || ''),
+      }))
+  ), [hlsEffectiveVariant, hlsSubtitleRenditions]);
+  const hlsSelectedAudioRendition = React.useMemo(() => (
+    hlsAudioRenditions.find((rendition) => rendition.url === selectedHlsAudioRenditionUrl) || null
+  ), [hlsAudioRenditions, selectedHlsAudioRenditionUrl]);
+  const hlsSelectedSubtitleRendition = React.useMemo(() => (
+    hlsSubtitleRenditions.find((rendition) => rendition.url === selectedHlsSubtitleRenditionUrl) || null
+  ), [hlsSubtitleRenditions, selectedHlsSubtitleRenditionUrl]);
   const hlsCanSelectVariant = Boolean(
     hlsRequest?.plan.isMaster
     && /^https?:\/\//i.test(hlsRequest?.plan.manifestUrl || '')
@@ -347,6 +429,8 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
   React.useEffect(() => {
     setHlsManualKeyDraft('');
     setSelectedHlsVariantUrl('');
+    setSelectedHlsAudioRenditionUrl('');
+    setSelectedHlsSubtitleRenditionUrl('');
     setHlsThreadCountDraft(Math.max(1, hlsRequest?.plan.suggestedThreadCount || 6));
     setHlsRangeStartDraft(1);
     setHlsRangeEndDraft(Math.max(1, hlsRequest?.plan.fragmentCount || 1));
@@ -369,6 +453,20 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
       totalFragments: hlsRequest?.plan.fragmentCount || 0,
     });
   }, [hlsRequest?.id, hlsRequest?.plan.durationSeconds, hlsRequest?.plan.fragmentCount, hlsRequest?.plan.suggestedThreadCount]);
+
+  React.useEffect(() => {
+    if (selectedHlsAudioRenditionUrl && !hlsAudioRenditionOptions.some((option) => option.value === selectedHlsAudioRenditionUrl)) {
+      setSelectedHlsAudioRenditionUrl('');
+    }
+    if (selectedHlsSubtitleRenditionUrl && !hlsSubtitleRenditionOptions.some((option) => option.value === selectedHlsSubtitleRenditionUrl)) {
+      setSelectedHlsSubtitleRenditionUrl('');
+    }
+  }, [
+    hlsAudioRenditionOptions,
+    hlsSubtitleRenditionOptions,
+    selectedHlsAudioRenditionUrl,
+    selectedHlsSubtitleRenditionUrl,
+  ]);
 
   React.useEffect(() => {
     if (!hlsRequest) {
@@ -445,6 +543,10 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
       Toast.warning('当前 master playlist 的手动 key 仍需先收敛到具体媒体 playlist，先不要直接走本地主链');
       return;
     }
+    if (selectedHlsAudioRenditionUrl && (normalizedHlsManualKey || hlsUsingCustomThreadCount || hlsUsingFragmentRange)) {
+      Toast.warning('独立音轨合并当前只支持网络 manifest 主链，不和手动 key / 本地 downloader 控制混用');
+      return;
+    }
     const shouldUseLocalPlanForControls = hlsCanTuneLocalDownloader && (hlsUsingCustomThreadCount || hlsUsingFragmentRange);
     let effectivePlan = hlsRequest.plan;
     if (shouldUseLocalPlanForControls) {
@@ -463,9 +565,20 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
     try {
       const requestId = `hls-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const effectiveManifestUrl = selectedHlsVariantUrl || hlsRequest.plan.manifestUrl;
+      const effectiveVideoManifestUrl = selectedHlsVariantUrl || hlsEffectiveVariant?.url || hlsRequest.plan.manifestUrl;
       activeHlsTaskRequestIdRef.current = requestId;
-      activeHlsTaskManifestUrlRef.current = effectiveManifestUrl;
-      const shouldUseDirectManifestDownload = /^https?:\/\//i.test(effectiveManifestUrl) && !normalizedHlsManualKey && !shouldUseLocalPlanForControls;
+      activeHlsTaskManifestUrlRef.current = selectedHlsAudioRenditionUrl ? effectiveVideoManifestUrl : effectiveManifestUrl;
+      const shouldUseDirectManifestTrackMerge = Boolean(
+        selectedHlsAudioRenditionUrl
+        && /^https?:\/\//i.test(effectiveVideoManifestUrl)
+        && /^https?:\/\//i.test(selectedHlsAudioRenditionUrl)
+        && !normalizedHlsManualKey
+        && !shouldUseLocalPlanForControls
+      );
+      const shouldUseDirectManifestDownload = /^https?:\/\//i.test(effectiveManifestUrl)
+        && !normalizedHlsManualKey
+        && !shouldUseLocalPlanForControls
+        && !shouldUseDirectManifestTrackMerge;
       setHlsTaskStatus({
         bytesReceived: undefined,
         bytesTotal: undefined,
@@ -478,22 +591,27 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
         lastOutputPath: undefined,
         logs: [
           createHlsTaskLogEntry({
-            mode: shouldUseDirectManifestDownload ? 'direct-manifest' : 'local-plan',
+            mode: shouldUseDirectManifestDownload || shouldUseDirectManifestTrackMerge ? 'direct-manifest' : 'local-plan',
             stage: 'preparing',
             text: '已创建 HLS 处理任务',
           }),
           createHlsTaskLogEntry({
-            mode: shouldUseDirectManifestDownload ? 'direct-manifest' : 'local-plan',
+            mode: shouldUseDirectManifestDownload || shouldUseDirectManifestTrackMerge ? 'direct-manifest' : 'local-plan',
             stage: 'preparing',
             text: selectedHlsVariantUrl ? `已选择变体：${hlsSelectedVariantLabel || selectedHlsVariantUrl}` : '当前使用自动变体策略',
           }),
+          ...(shouldUseDirectManifestTrackMerge ? [createHlsTaskLogEntry({
+            mode: 'direct-manifest',
+            stage: 'preparing',
+            text: `已选择独立音轨：${hlsSelectedAudioRendition?.name || hlsSelectedAudioRendition?.language || selectedHlsAudioRenditionUrl}`,
+          })] : []),
           ...(shouldUseLocalPlanForControls ? [createHlsTaskLogEntry({
             mode: 'local-plan',
             stage: 'preparing',
             text: `使用下载控制：线程 ${normalizedHlsThreadCount}，分片 #${normalizedHlsRangeStart}-#${normalizedHlsRangeEnd}`,
           })] : []),
         ],
-        mode: shouldUseDirectManifestDownload ? 'direct-manifest' : 'local-plan',
+        mode: shouldUseDirectManifestDownload || shouldUseDirectManifestTrackMerge ? 'direct-manifest' : 'local-plan',
         processedSeconds: undefined,
         requestId,
         speedBps: undefined,
@@ -501,8 +619,19 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
         state: 'running',
         totalFragments: effectivePlan.fragmentCount,
       });
-      const result = shouldUseDirectManifestDownload
-        ? await downloadEmbeddedBrowserHlsManifest(hlsRequest.resource.tabId, {
+      const result = shouldUseDirectManifestTrackMerge
+        ? await downloadEmbeddedBrowserHlsTracks(hlsRequest.resource.tabId, {
+            audioManifestUrl: selectedHlsAudioRenditionUrl,
+            durationSeconds: effectivePlan.durationSeconds,
+            headers: withResourceRefererHeader(hlsRequest.resource),
+            outputDirectoryPath,
+            requestId,
+            suggestedFileName: deriveHlsOutputFileName(effectiveVideoManifestUrl),
+            useSystemSaveDialog: false,
+            videoManifestUrl: effectiveVideoManifestUrl,
+          })
+        : shouldUseDirectManifestDownload
+          ? await downloadEmbeddedBrowserHlsManifest(hlsRequest.resource.tabId, {
             durationSeconds: effectivePlan.durationSeconds,
             headers: withResourceRefererHeader(hlsRequest.resource),
             manifestUrl: effectiveManifestUrl,
@@ -511,7 +640,7 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
             suggestedFileName: deriveHlsOutputFileName(effectiveManifestUrl),
             useSystemSaveDialog: false,
           })
-        : await downloadEmbeddedBrowserHlsPlan(hlsRequest.resource.tabId, {
+          : await downloadEmbeddedBrowserHlsPlan(hlsRequest.resource.tabId, {
             manualKeyBase64: normalizedHlsManualKey || undefined,
             outputDirectoryPath,
             plan: effectivePlan,
@@ -561,8 +690,10 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
     }
   }, [
     hlsCanTuneLocalDownloader,
+    hlsEffectiveVariant,
     hlsManualKeyInvalid,
     hlsRequest,
+    hlsSelectedAudioRendition,
     hlsSelectedVariantLabel,
     hlsUsingCustomThreadCount,
     hlsUsingFragmentRange,
@@ -572,8 +703,34 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
     normalizedHlsThreadCount,
     onPersistOutput,
     outputDirectoryPath,
+    selectedHlsAudioRenditionUrl,
     selectedHlsVariantUrl,
   ]);
+
+  const handleDownloadSelectedSubtitle = React.useCallback(async () => {
+    if (!hlsRequest || !selectedHlsSubtitleRenditionUrl) {
+      Toast.warning('先选择一条字幕轨');
+      return;
+    }
+    try {
+      const result = await downloadEmbeddedBrowserDirectFile(hlsRequest.resource.tabId, {
+        headers: withResourceRefererHeader(hlsRequest.resource),
+        outputDirectoryPath,
+        suggestedFileName: deriveHlsOutputFileName(selectedHlsSubtitleRenditionUrl).replace(/\.mp4$/i, '.vtt'),
+        url: selectedHlsSubtitleRenditionUrl,
+        useSystemSaveDialog: false,
+      });
+      if (result?.cancelled) {
+        return;
+      }
+      if (!result?.outputPath) {
+        throw new Error('字幕下载已完成，但未返回输出路径');
+      }
+      Toast.success('字幕轨已保存到本地');
+    } catch (error: any) {
+      Toast.error(error?.message || '字幕轨下载失败');
+    }
+  }, [hlsRequest, outputDirectoryPath, selectedHlsSubtitleRenditionUrl]);
 
   const handleRetryFailedHls = React.useCallback(async () => {
     if (!hlsRequest) {
@@ -697,6 +854,7 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
     canTuneLocalDownloader: hlsCanTuneLocalDownloader,
     hlsAes128KeyCount,
     hlsAudioRenditions,
+    hlsAudioRenditionOptions,
     hlsKeyVerificationResult,
     hlsManualKeyDraft,
     hlsManualKeyInputMode,
@@ -707,7 +865,10 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
     hlsRequest,
     hlsSelectedVariant,
     hlsSelectedVariantLabel,
+    hlsSelectedAudioRendition,
+    hlsSelectedSubtitleRendition,
     hlsSubtitleRenditions,
+    hlsSubtitleRenditionOptions,
     hlsTaskProgressPercent,
     hlsTaskProgressSummary,
     hlsTaskStatus,
@@ -717,15 +878,20 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
     hlsVariantOptions,
     normalizedHlsManualKey,
     savingHls,
+    selectedHlsAudioRenditionUrl,
+    selectedHlsSubtitleRenditionUrl,
     selectedHlsVariantUrl,
     verifyingHlsKey,
     handlers: {
+      onDownloadSelectedSubtitle: () => void handleDownloadSelectedSubtitle(),
       onRetryFailed: () => void (
         hlsTaskStatus.state === 'error'
           ? handleRetryFailedHls()
           : handleSaveHls()
       ),
       onSaveHls: () => void handleSaveHls(),
+      onSetSelectedHlsAudioRenditionUrl: setSelectedHlsAudioRenditionUrl,
+      onSetSelectedHlsSubtitleRenditionUrl: setSelectedHlsSubtitleRenditionUrl,
       onSetHlsManualKeyDraft: setHlsManualKeyDraft,
       onSetHlsRangeEnd: (value: number) => setHlsRangeEndDraft(Number(value || 1)),
       onSetHlsRangeStart: (value: number) => setHlsRangeStartDraft(Number(value || 1)),

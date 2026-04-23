@@ -409,6 +409,17 @@ contextBridge.exposeInMainWorld('electronEmbeddedBrowser', {
     suggestedFileName?: string;
     useSystemSaveDialog?: boolean;
   }) => ipcRenderer.invoke('embedded-browser:resource:download-hls', tabId, payload),
+  downloadHlsTracks: (tabId: string, payload: {
+    audioManifestUrl?: string;
+    durationSeconds?: number;
+    ffmpegPath?: string;
+    headers?: Record<string, string>;
+    outputDirectoryPath?: string;
+    requestId?: string;
+    suggestedFileName?: string;
+    useSystemSaveDialog?: boolean;
+    videoManifestUrl?: string;
+  }) => ipcRenderer.invoke('embedded-browser:resource:download-hls-tracks', tabId, payload),
   downloadHlsPlan: (tabId: string, payload: {
     ffmpegPath?: string;
     manualKeyBase64?: string;
@@ -429,6 +440,13 @@ contextBridge.exposeInMainWorld('electronEmbeddedBrowser', {
     suggestedFileName?: string;
     useSystemSaveDialog?: boolean;
   }) => ipcRenderer.invoke('embedded-browser:resource:download-mpd', tabId, payload),
+  downloadDirectFile: (tabId: string, payload: {
+    headers?: Record<string, string>;
+    outputDirectoryPath?: string;
+    suggestedFileName?: string;
+    url?: string;
+    useSystemSaveDialog?: boolean;
+  }) => ipcRenderer.invoke('embedded-browser:resource:download-direct-file', tabId, payload),
   reload: (tabId: string) => ipcRenderer.invoke('embedded-browser:reload', tabId),
   startDeepResourceCapture: (tabId: string) => ipcRenderer.invoke('embedded-browser:resource:start-deep-capture', tabId),
   startResourceCapture: (tabId: string) => ipcRenderer.invoke('embedded-browser:resource:start', tabId),

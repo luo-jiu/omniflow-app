@@ -218,6 +218,30 @@ export async function downloadEmbeddedBrowserHlsManifest(
   }>;
 }
 
+export async function downloadEmbeddedBrowserHlsTracks(
+  tabId: string,
+  payload: {
+    audioManifestUrl?: string;
+    durationSeconds?: number;
+    ffmpegPath?: string;
+    headers?: Record<string, string>;
+    outputDirectoryPath?: string;
+    requestId?: string;
+    suggestedFileName?: string;
+    useSystemSaveDialog?: boolean;
+    videoManifestUrl?: string;
+  },
+) {
+  assertDesktopSupport();
+  return window.electronEmbeddedBrowser.downloadHlsTracks(tabId, payload) as Promise<{
+    cancelled?: boolean;
+    error?: string;
+    ffmpegPath?: string;
+    ok: boolean;
+    outputPath?: string;
+  }>;
+}
+
 export async function downloadEmbeddedBrowserHlsPlan(
   tabId: string,
   payload: {
@@ -232,6 +256,26 @@ export async function downloadEmbeddedBrowserHlsPlan(
 ) {
   assertDesktopSupport();
   return window.electronEmbeddedBrowser.downloadHlsPlan(tabId, payload) as Promise<{
+    cancelled?: boolean;
+    error?: string;
+    ffmpegPath?: string;
+    ok: boolean;
+    outputPath?: string;
+  }>;
+}
+
+export async function downloadEmbeddedBrowserDirectFile(
+  tabId: string,
+  payload: {
+    headers?: Record<string, string>;
+    outputDirectoryPath?: string;
+    suggestedFileName?: string;
+    url?: string;
+    useSystemSaveDialog?: boolean;
+  },
+) {
+  assertDesktopSupport();
+  return window.electronEmbeddedBrowser.downloadDirectFile(tabId, payload) as Promise<{
     cancelled?: boolean;
     error?: string;
     ffmpegPath?: string;

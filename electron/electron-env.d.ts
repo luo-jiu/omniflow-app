@@ -379,6 +379,17 @@ interface Window {
       suggestedFileName?: string;
       useSystemSaveDialog?: boolean;
     }) => Promise<EmbeddedBrowserCapturedResourceMergeResponse>;
+    downloadHlsTracks: (tabId: string, payload: {
+      audioManifestUrl?: string;
+      durationSeconds?: number;
+      ffmpegPath?: string;
+      headers?: Record<string, string>;
+      outputDirectoryPath?: string;
+      requestId?: string;
+      suggestedFileName?: string;
+      useSystemSaveDialog?: boolean;
+      videoManifestUrl?: string;
+    }) => Promise<EmbeddedBrowserCapturedResourceMergeResponse>;
     downloadHlsPlan: (tabId: string, payload: {
       ffmpegPath?: string;
       manualKeyBase64?: string;
@@ -397,6 +408,13 @@ interface Window {
       manifestUrl?: string;
       outputDirectoryPath?: string;
       suggestedFileName?: string;
+      useSystemSaveDialog?: boolean;
+    }) => Promise<EmbeddedBrowserCapturedResourceMergeResponse>;
+    downloadDirectFile: (tabId: string, payload: {
+      headers?: Record<string, string>;
+      outputDirectoryPath?: string;
+      suggestedFileName?: string;
+      url?: string;
       useSystemSaveDialog?: boolean;
     }) => Promise<EmbeddedBrowserCapturedResourceMergeResponse>;
     getCatchToolkitState: (tabId: string) => Promise<EmbeddedBrowserCatchToolkitState | null>;

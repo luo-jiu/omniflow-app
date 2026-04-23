@@ -25,6 +25,19 @@ export type EmbeddedBrowserManifestDownloadResult = {
   stdout: string
 }
 
+export type EmbeddedBrowserManifestTrackMergeRequest = {
+  audioManifestUrl: string
+  durationSeconds?: number
+  ffmpegPath?: string
+  headers?: Record<string, string>
+  onProgress?: (payload: {
+    processedSeconds?: number
+    speedText?: string
+  }) => void
+  outputPath: string
+  videoManifestUrl: string
+}
+
 const FFMPEG_MANIFEST_HEADER_BLACKLIST = new Set([
   'accept-encoding',
   'connection',
@@ -90,6 +103,34 @@ export function buildEmbeddedBrowserManifestDownloadArgs(request: EmbeddedBrowse
   ]
 }
 
+export function buildEmbeddedBrowserManifestTrackMergeArgs(request: EmbeddedBrowserManifestTrackMergeRequest) {
+  return [
+    '-y',
+    '-nostats',
+    '-protocol_whitelist',
+    'file,http,https,tcp,tls,crypto,data',
+    '-allowed_extensions',
+    'ALL',
+    ...buildFfmpegHttpHeaderArgs(request.headers),
+    '-progress',
+    'pipe:1',
+    '-i',
+    request.videoManifestUrl,
+    ...buildFfmpegHttpHeaderArgs(request.headers),
+    '-i',
+    request.audioManifestUrl,
+    '-map',
+    '0:v:0?',
+    '-map',
+    '1:a:0?',
+    '-c',
+    'copy',
+    '-movflags',
+    '+faststart',
+    request.outputPath,
+  ]
+}
+
 function parseFfmpegProgressChunk(
   state: {
     processedSeconds?: number
@@ -129,6 +170,76 @@ export async function downloadEmbeddedBrowserManifestResource(
     throw new Error('未找到可用的 ffmpeg，可在系统环境变量里配置，或确认 /opt/homebrew/bin/ffmpeg 可执行')
   }
   const commandArgs = buildEmbeddedBrowserManifestDownloadArgs(request)
+  return new Promise<EmbeddedBrowserManifestDownloadResult>((resolve, reject) => {
+    const stdout: string[] = []
+    const stderr: string[] = []
+    let lastProcessedSeconds = -1
+    let lastSpeedText = ''
+    const progressState: {
+      processedSeconds?: number
+      speedText?: string
+    } = {}
+    const child = spawn(ffmpegPath, commandArgs, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+
+    child.stdout.on('data', (chunk) => {
+      const chunkText = String(chunk)
+      stdout.push(chunkText)
+      parseFfmpegProgressChunk(progressState, chunkText)
+      const nextProcessedSeconds = progressState.processedSeconds
+      const nextSpeedText = progressState.speedText || ''
+      const progressChanged = (
+        (typeof nextProcessedSeconds === 'number'
+          && Math.abs(nextProcessedSeconds - lastProcessedSeconds) >= 0.5)
+        || (nextSpeedText && nextSpeedText !== lastSpeedText)
+      )
+      if (!progressChanged) {
+        return
+      }
+      if (typeof nextProcessedSeconds === 'number') {
+        lastProcessedSeconds = nextProcessedSeconds
+      }
+      if (nextSpeedText) {
+        lastSpeedText = nextSpeedText
+      }
+      request.onProgress?.({
+        processedSeconds: typeof nextProcessedSeconds === 'number'
+          ? Math.min(nextProcessedSeconds, request.durationSeconds || Number.POSITIVE_INFINITY)
+          : undefined,
+        speedText: nextSpeedText || undefined,
+      })
+    })
+    child.stderr.on('data', (chunk) => {
+      stderr.push(String(chunk))
+    })
+    child.once('error', (error) => {
+      reject(error)
+    })
+    child.once('exit', (code) => {
+      if (code === 0) {
+        resolve({
+          commandArgs,
+          ffmpegPath,
+          outputPath: request.outputPath,
+          stderr: stderr.join(''),
+          stdout: stdout.join(''),
+        })
+        return
+      }
+      reject(new Error(stderr.join('').trim() || `ffmpeg 退出码异常: ${code}`))
+    })
+  })
+}
+
+export async function downloadEmbeddedBrowserManifestTracks(
+  request: EmbeddedBrowserManifestTrackMergeRequest,
+): Promise<EmbeddedBrowserManifestDownloadResult> {
+  const ffmpegPath = await resolveEmbeddedBrowserFfmpegPath(request.ffmpegPath)
+  if (!ffmpegPath) {
+    throw new Error('未找到可用的 ffmpeg，可在系统环境变量里配置，或确认 /opt/homebrew/bin/ffmpeg 可执行')
+  }
+  const commandArgs = buildEmbeddedBrowserManifestTrackMergeArgs(request)
   return new Promise<EmbeddedBrowserManifestDownloadResult>((resolve, reject) => {
     const stdout: string[] = []
     const stderr: string[] = []

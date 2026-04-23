@@ -6,9 +6,11 @@ import type {
   EmbeddedBrowserCapturedResourceTranscodePayload,
   EmbeddedBrowserFaviconResolvePayload,
   EmbeddedBrowserHlsDownloadPayload,
+  EmbeddedBrowserHlsTrackMergePayload,
   EmbeddedBrowserHlsPlanDownloadPayload,
   EmbeddedBrowserHlsPlanRetryPayload,
   EmbeddedBrowserMpdDownloadPayload,
+  EmbeddedBrowserDirectFileDownloadPayload,
 } from './embeddedBrowserMainTypes'
 import type {
   EmbeddedBrowserCookie,
@@ -35,6 +37,10 @@ type EmbeddedBrowserMainIpcHandlers = {
     tabId: string,
     payload: EmbeddedBrowserHlsDownloadPayload,
   ) => Promise<unknown>
+  downloadHlsTracks: (
+    tabId: string,
+    payload: EmbeddedBrowserHlsTrackMergePayload,
+  ) => Promise<unknown>
   downloadHlsPlan: (
     tabId: string,
     payload: EmbeddedBrowserHlsPlanDownloadPayload,
@@ -46,6 +52,10 @@ type EmbeddedBrowserMainIpcHandlers = {
   downloadMpdManifest: (
     tabId: string,
     payload: EmbeddedBrowserMpdDownloadPayload,
+  ) => Promise<unknown>
+  downloadDirectFile: (
+    tabId: string,
+    payload: EmbeddedBrowserDirectFileDownloadPayload,
   ) => Promise<unknown>
   exportResource: (tabId: string, resourceKey: string) => Promise<boolean>
   getCatchToolkitState: (tabId: string) => Promise<unknown>
@@ -195,6 +205,12 @@ export function registerEmbeddedBrowserMainIpcHandlers(handlers: EmbeddedBrowser
     ),
   )
   ipcMain.handle(
+    'embedded-browser:resource:download-hls-tracks',
+    async (_event, tabId: string, payload: EmbeddedBrowserHlsTrackMergePayload) => (
+      handlers.downloadHlsTracks(tabId, payload)
+    ),
+  )
+  ipcMain.handle(
     'embedded-browser:resource:download-hls-plan',
     async (_event, tabId: string, payload: EmbeddedBrowserHlsPlanDownloadPayload) => (
       handlers.downloadHlsPlan(tabId, payload)
@@ -210,6 +226,12 @@ export function registerEmbeddedBrowserMainIpcHandlers(handlers: EmbeddedBrowser
     'embedded-browser:resource:download-mpd',
     async (_event, tabId: string, payload: EmbeddedBrowserMpdDownloadPayload) => (
       handlers.downloadMpdManifest(tabId, payload)
+    ),
+  )
+  ipcMain.handle(
+    'embedded-browser:resource:download-direct-file',
+    async (_event, tabId: string, payload: EmbeddedBrowserDirectFileDownloadPayload) => (
+      handlers.downloadDirectFile(tabId, payload)
     ),
   )
   ipcMain.handle('embedded-browser:resource:start-deep-capture', async (_event, tabId: string) => (

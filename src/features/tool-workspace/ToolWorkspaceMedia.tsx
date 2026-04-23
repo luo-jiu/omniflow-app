@@ -602,6 +602,7 @@ const ToolWorkspaceMedia: React.FC<MediaProcessingToolProps> = ({
             canTuneLocalDownloader={hlsTask.canTuneLocalDownloader}
             hlsAes128KeyCount={hlsTask.hlsAes128KeyCount}
             hlsAudioRenditions={hlsTask.hlsAudioRenditions}
+            hlsAudioRenditionOptions={hlsTask.hlsAudioRenditionOptions}
             hlsKeyVerificationResult={hlsTask.hlsKeyVerificationResult}
             hlsManualKeyDraft={hlsTask.hlsManualKeyDraft}
             hlsManualKeyInputMode={hlsTask.hlsManualKeyInputMode}
@@ -610,9 +611,12 @@ const ToolWorkspaceMedia: React.FC<MediaProcessingToolProps> = ({
             hlsRangeEnd={hlsTask.hlsRangeEnd}
             hlsRangeStart={hlsTask.hlsRangeStart}
             hlsRequest={hlsTask.hlsRequest}
+            hlsSelectedAudioRendition={hlsTask.hlsSelectedAudioRendition}
+            hlsSelectedSubtitleRendition={hlsTask.hlsSelectedSubtitleRendition}
             hlsSelectedVariant={hlsTask.hlsSelectedVariant}
             hlsSelectedVariantLabel={hlsTask.hlsSelectedVariantLabel}
             hlsSubtitleRenditions={hlsTask.hlsSubtitleRenditions}
+            hlsSubtitleRenditionOptions={hlsTask.hlsSubtitleRenditionOptions}
             hlsTaskProgressPercent={hlsTask.hlsTaskProgressPercent}
             hlsTaskProgressSummary={hlsTask.hlsTaskProgressSummary}
             hlsTaskStatus={hlsTask.hlsTaskStatus}
@@ -622,6 +626,8 @@ const ToolWorkspaceMedia: React.FC<MediaProcessingToolProps> = ({
             hlsVariantOptions={hlsTask.hlsVariantOptions}
             normalizedHlsManualKey={hlsTask.normalizedHlsManualKey}
             savingHls={hlsTask.savingHls}
+            selectedHlsAudioRenditionUrl={hlsTask.selectedHlsAudioRenditionUrl}
+            selectedHlsSubtitleRenditionUrl={hlsTask.selectedHlsSubtitleRenditionUrl}
             selectedHlsVariantUrl={hlsTask.selectedHlsVariantUrl}
             verifyingHlsKey={hlsTask.verifyingHlsKey}
             onCopyFailedFragments={() => {
@@ -637,8 +643,11 @@ const ToolWorkspaceMedia: React.FC<MediaProcessingToolProps> = ({
                 Toast.success('HLS 计划 JSON 已复制');
               });
             }}
+            onDownloadSelectedSubtitle={hlsTask.handlers.onDownloadSelectedSubtitle}
             onRetryFailed={hlsTask.handlers.onRetryFailed}
             onSaveHls={hlsTask.handlers.onSaveHls}
+            onSetSelectedHlsAudioRenditionUrl={hlsTask.handlers.onSetSelectedHlsAudioRenditionUrl}
+            onSetSelectedHlsSubtitleRenditionUrl={hlsTask.handlers.onSetSelectedHlsSubtitleRenditionUrl}
             onSetHlsManualKeyDraft={hlsTask.handlers.onSetHlsManualKeyDraft}
             onSetHlsRangeEnd={hlsTask.handlers.onSetHlsRangeEnd}
             onSetHlsRangeStart={hlsTask.handlers.onSetHlsRangeStart}

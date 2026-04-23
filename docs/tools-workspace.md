@@ -205,7 +205,10 @@ renderer tool workspace
   - 网络 `master playlist` 已支持第一版 variant / 清晰度选择：
     - 默认保持“自动”，继续把原始 manifest 交给 ffmpeg。
     - 也可以明确锁到某个 variant URL，再按该清晰度执行下载。
-  - 工具页现在会额外展示 `master playlist` 的音轨 / 字幕轨摘要，并把当前选中 variant 关联到对应 audio group / subtitles group，先把轨道关系看清楚。
+  - 工具页现在会额外展示 `master playlist` 的音轨 / 字幕轨摘要，并把当前选中 variant 关联到对应 audio group / subtitles group。
+  - 当前已支持在工具页里：
+    - 选择独立 audio rendition，并走 `ffmpeg` 下载+合并主链
+    - 选择 subtitle rendition，并单独下载字幕文件
   - 工具页支持手动输入 16 字节 AES-128 自定义 key（hex / base64）。
   - 工具页也可以直接做一轮 key 验证：
     - 自动候选来源于 manifest 自带 key URL 和当前 tab 已捕获的 key 资源。
@@ -224,7 +227,7 @@ renderer tool workspace
   - 如果填写了自定义 key，也会强制走本地 downloader 主链，让本地 playlist 引用手动写入的 key 文件。
   - 当前 `master playlist + 手动 key` 仍不作为可用组合；需要先收敛到具体媒体 playlist，再走本地 downloader 主链。
   - HLS 计划模式仍复用统一“保存到本地 / 保存到内部”的保存目标切换，不单独弹第二套保存 UI。
-  - 当前下载控制只先补 Cat Catch 最常用的线程数和分片范围；时间范围、IV、真正轨道级选择还没补。
+  - 当前下载控制先补了 Cat Catch 最常用的线程数和分片范围；时间范围、IV 等还没补。
 - 保存目标切换：
   - 本地：保存位置显示为一行路径，点击路径可切换到系统目录
   - 内部：通过“大弹框目录选择器”选择目录（面包屑 + 双击进入目录）
@@ -239,7 +242,7 @@ renderer tool workspace
 - 媒体处理工具不重新捕捉资源，不修改资源 URL、后缀或来源。
 - 当前转格式一次只处理一个媒体资源；多资源批量转码后续再扩展。
 - HLS 第一版只把“计划解析后的重处理”收进工具区；资源面板仍只负责解析、复制计划和发起，不承载长时间下载 UI。
-- 当前 HLS 计划模式已补一版基础执行反馈（阶段 / 结构化最近日志 / 分片完成数 / 阶段进度 / 重新执行），并补了网络 master playlist 的第一版清晰度选择、音轨/字幕轨摘要，以及媒体 playlist 的线程数 / 分片范围控制；本地 downloader 失败后也已经支持“重试失败分片”，下载中会展示已收字节、速度和 ETA，ffmpeg 阶段会展示处理秒数和速度文本。但还没有更细的完整日志面板和真正轨道级选择。
+- 当前 HLS 计划模式已补基础执行反馈（阶段 / 结构化最近日志 / 分片完成数 / 阶段进度 / 重新执行），并补了网络 master playlist 的 variant 选择、独立音轨选择与 ffmpeg 合并、字幕轨单独下载，以及媒体 playlist 的线程数 / 分片范围控制；本地 downloader 失败后也已经支持“重试失败分片”，下载中会展示已收字节、速度和 ETA，ffmpeg 阶段会展示处理秒数和速度文本。剩余主要是轨道联动验真和真实样本测试。
 
 ## 9. 验证方式
 
