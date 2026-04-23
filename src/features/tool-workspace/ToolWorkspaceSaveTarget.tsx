@@ -220,15 +220,15 @@ const ToolWorkspaceSaveTarget: React.FC<ToolWorkspaceSaveTargetProps> = ({
   saveTargetType,
 }) => (
   <Panel>
-    <div className="panel-title">保存目标</div>
+    <div className="panel-title">结果出口</div>
     <div className="panel-desc">
-      先切换保存目标：本地或内部。保存位置点击路径即可更改；内部保存未选目录时会提示“必须选择”，
-      输出会自动上传到所选内部目录。
+      先切换处理结果的出口：保存到本地，或导入到资源库。路径点一下就能改；资源库目录没选时会提示“必须选择”，
+      成品会先落到临时目录，再自动导入到你选中的目录里。
     </div>
     <SaveTargetComposer>
       <div className="save-lane">
         <div className="action-cluster save-target-cluster">
-          <span className="cluster-label">保存目标</span>
+          <span className="cluster-label">结果出口</span>
           <button
             type="button"
             className={`save-target-mode-btn ${isLocalSaveTarget ? 'local' : 'internal'}`}
@@ -239,15 +239,15 @@ const ToolWorkspaceSaveTarget: React.FC<ToolWorkspaceSaveTargetProps> = ({
                 onToggleSaveTargetType();
               }
             }}
-            aria-label="切换保存目标"
-            title="切换保存目标"
+            aria-label="切换结果出口"
+            title="切换结果出口"
           >
             <span className="save-target-mode-label">
               <span className="save-target-mode-icon" aria-hidden>
                 <IconDownload className={`mode-icon ${isLocalSaveTarget ? 'active' : ''}`} />
                 <IconFolder className={`mode-icon ${isLocalSaveTarget ? '' : 'active'}`} />
               </span>
-              {isLocalSaveTarget ? '保存到本地' : '保存到内部'}
+              {isLocalSaveTarget ? '保存到本地' : '导入到资源库'}
             </span>
             <span className="save-target-mode-switch">⇄</span>
           </button>
@@ -256,12 +256,14 @@ const ToolWorkspaceSaveTarget: React.FC<ToolWorkspaceSaveTargetProps> = ({
               type="button"
               className={`save-path-trigger ${saveTargetType === 'internal' && !savePathDisplay ? 'is-empty' : ''} ${internalPathRequired && internalTargetMissing ? 'is-error' : ''}`}
               onClick={onPickSavePath}
-              title={savePathDisplay || '点击选择内部保存路径'}
+              title={savePathDisplay || (saveTargetType === 'local' ? '点击选择本地保存路径' : '点击选择资源库目录')}
             >
-              <span className="save-path-value">{savePathDisplay || '\u00A0'}</span>
+              <span className="save-path-value">
+                {savePathDisplay || (saveTargetType === 'local' ? '点击选择本地保存路径' : '点击选择资源库目录')}
+              </span>
             </button>
             {internalPathRequired && internalTargetMissing ? (
-              <span className="save-path-required">必须选择</span>
+              <span className="save-path-required">必须选择资源库目录</span>
             ) : null}
           </div>
         </div>

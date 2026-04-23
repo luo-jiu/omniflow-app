@@ -105,7 +105,14 @@ interface Window {
       filePath: string;
       size: number;
     }>;
+    createTempImportDirectory: () => Promise<string>;
+    getTempImportFileInfo: (filePath: string) => Promise<{
+      filePath: string;
+      name: string;
+      size: number;
+    }>;
     cleanupStagedTextFile: (stagedPath: string) => Promise<boolean>;
+    cleanupTempImportPath: (targetPath: string) => Promise<boolean>;
     onUploadProgress: (listener: (payload: {
       uploadId: string;
       uploadedBytes: number;

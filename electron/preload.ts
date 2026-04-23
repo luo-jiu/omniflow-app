@@ -66,8 +66,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('fs:cleanup-auto-import-staged-file', stagedPath),
   createStagedTextFile: (fileName: string, content: string) =>
     ipcRenderer.invoke('fs:create-staged-text-file', fileName, content),
+  createTempImportDirectory: () =>
+    ipcRenderer.invoke('fs:create-temp-import-directory'),
+  getTempImportFileInfo: (filePath: string) =>
+    ipcRenderer.invoke('fs:get-temp-import-file-info', filePath),
   cleanupStagedTextFile: (stagedPath: string) =>
     ipcRenderer.invoke('fs:cleanup-staged-text-file', stagedPath),
+  cleanupTempImportPath: (targetPath: string) =>
+    ipcRenderer.invoke('fs:cleanup-temp-import-path', targetPath),
   fetch: (url: string, options?: any) => ipcRenderer.invoke('http:fetch', url, options),
   fetchBinary: (url: string, options?: any) => ipcRenderer.invoke('http:fetch-binary', url, options),
   upload: (

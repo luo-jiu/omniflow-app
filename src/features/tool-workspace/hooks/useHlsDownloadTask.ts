@@ -73,8 +73,15 @@ export type HlsRenditionOption = {
 };
 
 type UseHlsDownloadTaskInput = {
+  createOutputTargetSnapshot?: () => Promise<{
+    cleanupOutputDirectory: () => Promise<void>;
+    outputDirectoryPath?: string;
+    persistOutput: (outputPath: string) => Promise<void>;
+  }>;
   hlsRequest: ToolWorkspaceMediaHlsRequest | null;
+  onCleanupOutputDirectory?: (outputDirectoryPath: string) => Promise<void>;
   outputDirectoryPath?: string;
+  resolveOutputDirectoryPath?: () => Promise<string | undefined>;
   onPersistOutput: (outputPath: string) => Promise<void>;
 };
 
@@ -339,7 +346,14 @@ async function resolveMasterVariantToMediaPlan(input: {
 }
 
 export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
-  const { hlsRequest, onPersistOutput, outputDirectoryPath } = input;
+  const {
+    createOutputTargetSnapshot,
+    hlsRequest,
+    onCleanupOutputDirectory,
+    onPersistOutput,
+    outputDirectoryPath,
+    resolveOutputDirectoryPath,
+  } = input;
   const [savingHls, setSavingHls] = React.useState(false);
   const [verifyingHlsKey, setVerifyingHlsKey] = React.useState(false);
   const [hlsManualKeyDraft, setHlsManualKeyDraft] = React.useState('');
@@ -369,6 +383,11 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
   const activeHlsKeyVerificationTokenRef = React.useRef('');
   const hlsLiveRecordingStateRef = React.useRef<HlsLiveRecordingState>('idle');
   const hlsTaskStateRef = React.useRef<HlsTaskStatus['state']>('idle');
+  const hlsOutputTargetRef = React.useRef<null | {
+    cleanupOutputDirectory: () => Promise<void>;
+    persistOutput: (outputPath: string) => Promise<void>;
+    requestId: string;
+  }>(null);
 
   const normalizedHlsManualKey = React.useMemo(() => (
     normalizeHlsKeyCandidateValue(hlsManualKeyDraft) || ''
@@ -507,6 +526,7 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
           if (activeHlsTaskRequestIdRef.current === requestId) {
             activeHlsTaskRequestIdRef.current = '';
             activeHlsTaskManifestUrlRef.current = '';
+            hlsOutputTargetRef.current = null;
           }
         });
     };
@@ -526,6 +546,7 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
     activeHlsTaskRequestIdRef.current = '';
     activeHlsTaskManifestUrlRef.current = '';
     activeHlsKeyVerificationTokenRef.current = '';
+    hlsOutputTargetRef.current = null;
     setHlsTaskStatus({
       bytesReceived: undefined,
       bytesTotal: undefined,
@@ -664,6 +685,13 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
       return;
     }
     setSavingHls(true);
+    let outputProduced = false;
+    let outputTarget: {
+      cleanupOutputDirectory: () => Promise<void>;
+      outputDirectoryPath?: string;
+      persistOutput: (outputPath: string) => Promise<void>;
+    } | null = null;
+    let taskOutputDirectoryPath: string | undefined;
     try {
       const requestId = `hls-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const resourceHeaders = withResourceRefererHeader(hlsRequest.resource);
@@ -732,12 +760,29 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
         state: 'running',
         totalFragments: effectivePlan.fragmentCount,
       });
+      outputTarget = createOutputTargetSnapshot
+        ? await createOutputTargetSnapshot()
+        : {
+          cleanupOutputDirectory: async () => {
+            if (taskOutputDirectoryPath) {
+              await onCleanupOutputDirectory?.(taskOutputDirectoryPath);
+            }
+          },
+          outputDirectoryPath: await (resolveOutputDirectoryPath?.() ?? Promise.resolve(outputDirectoryPath)),
+          persistOutput: onPersistOutput,
+        };
+      taskOutputDirectoryPath = outputTarget.outputDirectoryPath;
+      hlsOutputTargetRef.current = {
+        cleanupOutputDirectory: outputTarget.cleanupOutputDirectory,
+        persistOutput: outputTarget.persistOutput,
+        requestId,
+      };
       const result = shouldUseDirectManifestTrackMerge
         ? await downloadEmbeddedBrowserHlsTracks(hlsRequest.resource.tabId, {
             audioManifestUrl: selectedHlsAudioRenditionUrl,
             durationSeconds: effectivePlan.durationSeconds,
             headers: withResourceRefererHeader(hlsRequest.resource),
-            outputDirectoryPath,
+            outputDirectoryPath: taskOutputDirectoryPath,
             requestId,
             suggestedFileName: deriveHlsOutputFileName(effectiveVideoManifestUrl),
             useSystemSaveDialog: false,
@@ -748,20 +793,21 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
             durationSeconds: effectivePlan.durationSeconds,
             headers: resourceHeaders,
             manifestUrl: effectiveManifestUrl,
-            outputDirectoryPath,
+            outputDirectoryPath: taskOutputDirectoryPath,
             requestId,
             suggestedFileName: deriveHlsOutputFileName(effectiveManifestUrl),
             useSystemSaveDialog: false,
           })
           : await downloadEmbeddedBrowserHlsPlan(hlsRequest.resource.tabId, {
             manualKeyBase64: normalizedHlsManualKey || undefined,
-            outputDirectoryPath,
+            outputDirectoryPath: taskOutputDirectoryPath,
             plan: effectivePlan,
             requestId,
             suggestedFileName: deriveHlsOutputFileName(effectiveManifestUrl),
             useSystemSaveDialog: false,
           });
       if (result?.cancelled) {
+        await outputTarget.cleanupOutputDirectory();
         setHlsTaskStatus((previous) => ({
           ...previous,
           logs: appendHlsTaskLogs(previous.logs, createHlsTaskLogEntry({
@@ -772,13 +818,20 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
           })),
           state: 'idle',
         }));
+        hlsOutputTargetRef.current = null;
         return;
       }
       if (!result?.outputPath) {
         throw new Error('HLS 下载已完成，但未返回输出路径');
       }
-      await onPersistOutput(result.outputPath);
+      outputProduced = true;
+      await outputTarget.persistOutput(result.outputPath);
+      hlsOutputTargetRef.current = null;
     } catch (error: any) {
+      if (outputTarget && !outputProduced) {
+        await outputTarget.cleanupOutputDirectory();
+        hlsOutputTargetRef.current = null;
+      }
       setHlsTaskStatus((previous) => ({
         ...previous,
         bytesReceived: undefined,
@@ -814,8 +867,11 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
     normalizedHlsRangeEnd,
     normalizedHlsRangeStart,
     normalizedHlsThreadCount,
+    createOutputTargetSnapshot,
+    onCleanupOutputDirectory,
     onPersistOutput,
     outputDirectoryPath,
+    resolveOutputDirectoryPath,
     selectedHlsAudioRenditionUrl,
     selectedHlsVariantUrl,
   ]);
@@ -887,7 +943,11 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
       if (!result?.outputPath) {
         throw new Error('HLS 重试已完成，但未返回输出路径');
       }
-      await onPersistOutput(result.outputPath);
+      const outputTarget = hlsOutputTargetRef.current?.requestId === hlsTaskStatus.requestId
+        ? hlsOutputTargetRef.current
+        : null;
+      await (outputTarget?.persistOutput || onPersistOutput)(result.outputPath);
+      hlsOutputTargetRef.current = null;
     } catch (error: any) {
       setHlsTaskStatus((previous) => ({
         ...previous,
@@ -946,6 +1006,12 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
     const previousActiveManifestUrl = activeHlsTaskManifestUrlRef.current;
     const previousTaskStatus = hlsTaskStatus;
     const previousLiveState = hlsLiveRecordingStateRef.current;
+    const previousOutputTarget = hlsOutputTargetRef.current;
+    let outputTarget: {
+      cleanupOutputDirectory: () => Promise<void>;
+      outputDirectoryPath?: string;
+      persistOutput: (outputPath: string) => Promise<void>;
+    } | null = null;
     try {
       const requestId = `hls-live-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const resourceHeaders = withResourceRefererHeader(hlsRequest.resource);
@@ -981,11 +1047,27 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
         state: 'running',
         totalFragments: 0,
       });
+      outputTarget = createOutputTargetSnapshot
+        ? await createOutputTargetSnapshot()
+        : {
+          cleanupOutputDirectory: async () => {
+            if (outputTarget?.outputDirectoryPath) {
+              await onCleanupOutputDirectory?.(outputTarget.outputDirectoryPath);
+            }
+          },
+          outputDirectoryPath: await (resolveOutputDirectoryPath?.() ?? Promise.resolve(outputDirectoryPath)),
+          persistOutput: onPersistOutput,
+        };
+      hlsOutputTargetRef.current = {
+        cleanupOutputDirectory: outputTarget.cleanupOutputDirectory,
+        persistOutput: outputTarget.persistOutput,
+        requestId,
+      };
       const result = await startEmbeddedBrowserHlsRecording(hlsRequest.resource.tabId, {
         headers: resourceHeaders,
         manifestUrl: effectiveManifestUrl,
         manualKeyBase64: normalizedHlsManualKey || undefined,
-        outputDirectoryPath,
+        outputDirectoryPath: outputTarget.outputDirectoryPath,
         pageUrl: hlsRequest.resource.pageUrl,
         requestId,
         suggestedFileName: deriveHlsOutputFileName(effectiveManifestUrl),
@@ -993,8 +1075,10 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
         useSystemSaveDialog: false,
       });
       if (result?.cancelled) {
+        await outputTarget.cleanupOutputDirectory();
         activeHlsTaskRequestIdRef.current = previousActiveRequestId;
         activeHlsTaskManifestUrlRef.current = previousActiveManifestUrl;
+        hlsOutputTargetRef.current = previousOutputTarget;
         if (previousActiveRequestId) {
           setHlsLiveRecordingState(previousLiveState);
           setHlsTaskStatus(previousTaskStatus);
@@ -1018,8 +1102,12 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
       }
       setHlsLiveRecordingState('recording');
     } catch (error: any) {
+      if (outputTarget) {
+        await outputTarget.cleanupOutputDirectory();
+      }
       activeHlsTaskRequestIdRef.current = previousActiveRequestId;
       activeHlsTaskManifestUrlRef.current = previousActiveManifestUrl;
+      hlsOutputTargetRef.current = previousOutputTarget;
       if (previousActiveRequestId) {
         setHlsLiveRecordingState(previousLiveState);
         setHlsTaskStatus(previousTaskStatus);
@@ -1050,7 +1138,11 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
     hlsSelectedVariantLabel,
     normalizedHlsManualKey,
     normalizedHlsThreadCount,
+    createOutputTargetSnapshot,
+    onCleanupOutputDirectory,
+    onPersistOutput,
     outputDirectoryPath,
+    resolveOutputDirectoryPath,
     selectedHlsAudioRenditionUrl,
     selectedHlsVariantUrl,
   ]);
@@ -1073,7 +1165,11 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
       if (!result?.outputPath) {
         throw new Error(result?.error || '直播录制停止后未生成输出文件');
       }
-      await onPersistOutput(result.outputPath);
+      const outputTarget = hlsOutputTargetRef.current?.requestId === hlsTaskStatus.requestId
+        ? hlsOutputTargetRef.current
+        : null;
+      await (outputTarget?.persistOutput || onPersistOutput)(result.outputPath);
+      hlsOutputTargetRef.current = null;
       setHlsLiveRecordingState('idle');
     } catch (error: any) {
       setHlsLiveRecordingState('idle');

@@ -301,6 +301,11 @@ MSE 捕捉的数据链路：
 
 **预估工作量**：前端 4-6 个文件改动，无后端改动。
 
+> 2026-04-23 当前进度（Codex）：
+> 工具区的第一版导入链已经按这里的 Phase 1 落下来了：`ToolWorkspaceMedia` 在“导入到资源库”模式下，会先申请专用 temp import 目录，再把 `merge / transcode / HLS / MPD` 的输出交给 `useResourceImportToLibrary`，最后统一走 `uploadManager.createBatch`。这一步的目的不是加新能力壳，而是把原来工具区那条“直接调用 uploadLocalPathAndCreateNode”的分叉，收口回上传中心。
+> - 2026-04-23 调整：temp import staging 目录现在按任务独立创建并在单任务成功、取消或前置失败后单独清理，不再在整个工具页共享一个长生命周期目录。
+> - 2026-04-23 调整：导入目标在任务启动时冻结，后续切换本地/资源库或改目录不会影响已启动任务；导入失败也会反映回原任务状态，而不是吞掉后继续上报成功。
+
 ### Phase 2：Catch Toolkit 一键导入
 
 **目标**：缓存捕捉工具链（MSE 实时捕捉）完成后可一键导入资源库。

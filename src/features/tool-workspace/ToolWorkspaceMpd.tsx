@@ -76,8 +76,10 @@ const TrackGrid = styled.div`
 
 type ToolWorkspaceMpdProps = {
   audioRepresentationOptions: MpdRepresentationOption[];
+  disableSaveAction?: boolean;
   mpdRequest: ToolWorkspaceMediaMpdRequest | null;
   mpdTaskStatus: MpdTaskStatus;
+  saveActionLabel?: string;
   savingMpd: boolean;
   selectedAudioRepresentationId: string;
   selectedVideoRepresentationId: string;
@@ -102,8 +104,10 @@ function formatMpdDuration(durationSeconds?: number) {
 
 const ToolWorkspaceMpd: React.FC<ToolWorkspaceMpdProps> = ({
   audioRepresentationOptions,
+  disableSaveAction = false,
   mpdRequest,
   mpdTaskStatus,
+  saveActionLabel = '下载&保存',
   savingMpd,
   selectedAudioRepresentationId,
   selectedVideoRepresentationId,
@@ -126,7 +130,7 @@ const ToolWorkspaceMpd: React.FC<ToolWorkspaceMpdProps> = ({
 
   const audioCount = mpdRequest.plan.representations.filter((item) => item.contentType === 'audio').length
   const videoCount = mpdRequest.plan.representations.filter((item) => item.contentType === 'video').length
-  const canSave = !savingMpd && !mpdRequest.plan.hasDrm && (videoRepresentationOptions.length > 0 || audioRepresentationOptions.length > 0)
+  const canSave = !disableSaveAction && !savingMpd && !mpdRequest.plan.hasDrm && (videoRepresentationOptions.length > 0 || audioRepresentationOptions.length > 0)
 
   return (
     <>
@@ -208,7 +212,7 @@ const ToolWorkspaceMpd: React.FC<ToolWorkspaceMpdProps> = ({
         </div>
         <ActionRow>
           <Button type="primary" loading={savingMpd} disabled={!canSave} onClick={onSaveMpd}>
-            下载&保存
+            {saveActionLabel}
           </Button>
           <Button onClick={onCopyPlan}>复制计划</Button>
           {mpdRequest.plan.hasDrm ? (

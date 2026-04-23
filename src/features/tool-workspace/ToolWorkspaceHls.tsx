@@ -68,6 +68,7 @@ type HlsRenditionOption = {
 type ToolWorkspaceHlsProps = {
   canSelectVariant: boolean;
   canTuneLocalDownloader: boolean;
+  disableSubtitleDownload?: boolean;
   hlsAes128KeyCount: number;
   hlsAudioRenditions: ToolWorkspaceMediaHlsRequest['plan']['renditions'];
   hlsAudioRenditionOptions: HlsRenditionOption[];
@@ -94,7 +95,9 @@ type ToolWorkspaceHlsProps = {
   hlsUsingFragmentRange: boolean;
   hlsVariantOptions: HlsVariantOption[];
   normalizedHlsManualKey: string;
+  disableSaveAction?: boolean;
   savingHls: boolean;
+  saveActionLabel?: string;
   selectedHlsAudioRenditionUrl: string;
   selectedHlsSubtitleRenditionUrl: string;
   selectedHlsVariantUrl: string;
@@ -227,6 +230,7 @@ function formatEtaSeconds(seconds?: number) {
 const ToolWorkspaceHls: React.FC<ToolWorkspaceHlsProps> = ({
   canSelectVariant,
   canTuneLocalDownloader,
+  disableSubtitleDownload = false,
   hlsAes128KeyCount,
   hlsAudioRenditions,
   hlsAudioRenditionOptions,
@@ -253,6 +257,7 @@ const ToolWorkspaceHls: React.FC<ToolWorkspaceHlsProps> = ({
   hlsUsingFragmentRange,
   hlsVariantOptions,
   normalizedHlsManualKey,
+  disableSaveAction = false,
   onCopyFailedFragments,
   onCopyPlan,
   onDownloadSelectedSubtitle,
@@ -268,6 +273,7 @@ const ToolWorkspaceHls: React.FC<ToolWorkspaceHlsProps> = ({
   onSetHlsThreadCount,
   onSetSelectedHlsVariantUrl,
   onVerifyHlsKey,
+  saveActionLabel = '下载&保存',
   savingHls,
   selectedHlsAudioRenditionUrl,
   selectedHlsSubtitleRenditionUrl,
@@ -440,7 +446,7 @@ const ToolWorkspaceHls: React.FC<ToolWorkspaceHlsProps> = ({
                     ))}
                   </Select>
                   {hlsSelectedSubtitleRendition ? (
-                    <Button onClick={onDownloadSelectedSubtitle}>下载字幕轨</Button>
+                    <Button disabled={disableSubtitleDownload} onClick={onDownloadSelectedSubtitle}>下载字幕轨</Button>
                   ) : (
                     <Tag color="grey">未选择字幕轨</Tag>
                   )}
@@ -537,6 +543,7 @@ const ToolWorkspaceHls: React.FC<ToolWorkspaceHlsProps> = ({
       <ActionRow>
         {hlsRequest.plan.isLive ? (
           <Button
+            disabled={disableSaveAction}
             loading={savingHls && (hlsLiveRecordingState === 'starting' || hlsLiveRecordingState === 'stopping')}
             type={hlsLiveRecordingState === 'recording' ? 'danger' : 'primary'}
             onClick={hlsLiveRecordingState === 'recording' || canRetryLiveExport ? onStopLiveRecording : onStartLiveRecording}
@@ -559,8 +566,8 @@ const ToolWorkspaceHls: React.FC<ToolWorkspaceHlsProps> = ({
         >
           {verifyingHlsKey ? '验证中' : '验证 key'}
         </Button>
-        <Button disabled={hlsRequest.plan.isLive} loading={savingHls && !hlsRequest.plan.isLive} type="primary" onClick={onSaveHls}>
-          下载&保存
+        <Button disabled={hlsRequest.plan.isLive || disableSaveAction} loading={savingHls && !hlsRequest.plan.isLive} type="primary" onClick={onSaveHls}>
+          {saveActionLabel}
         </Button>
         <Button
           disabled={savingHls || hlsTaskStatus.state === 'running' || hlsLiveRecordingState === 'recording' || hlsLiveRecordingState === 'stopping'}

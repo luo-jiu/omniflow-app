@@ -20,12 +20,12 @@ import {
   mergeCapturedResources,
   transcodeCapturedResource,
 } from '@/features/embedded-browser/resources/services/embedded-browser-resource-panel-actions';
-import { uploadLocalPathAndCreateNode } from '@/features/file-explorer/services/file.api';
 import {
   getDesktopDefaultDownloadDirectory,
   pickDownloadDirectoryFromDesktop,
 } from '@/features/file-explorer/services/desktop-download.api';
 import { findMergeableResourcePair } from '@/features/embedded-browser/resources/model/embedded-browser-resource.presentation';
+import { useResourceImportToLibrary } from '@/features/embedded-browser/resources/hooks/useResourceImportToLibrary';
 
 import ToolWorkspaceHls from './ToolWorkspaceHls';
 import ToolWorkspaceMpd from './ToolWorkspaceMpd';
@@ -245,6 +245,12 @@ type MediaProcessingToolProps = {
 
 type MediaSaveTargetType = 'local' | 'internal';
 
+type MediaOutputTargetSnapshot = {
+  cleanupOutputDirectory: () => Promise<void>;
+  outputDirectoryPath?: string;
+  persistOutput: (outputPath: string) => Promise<void>;
+};
+
 function normalizeMediaTranscodeFormat(input: string) {
   const normalized = String(input || '').trim().replace(/^\.+/, '').toLowerCase();
   if (!/^[a-z0-9]{1,12}$/.test(normalized)) {
@@ -271,6 +277,16 @@ const ToolWorkspaceMedia: React.FC<MediaProcessingToolProps> = ({
   const [internalDirectory, setInternalDirectory] = React.useState<LibraryNodePickerSelection | null>(null);
   const [internalPickerVisible, setInternalPickerVisible] = React.useState(false);
   const [internalPathRequired, setInternalPathRequired] = React.useState(false);
+  const {
+    cleanupTaskTempImportDirectory,
+    createTaskTempImportDirectory,
+    importOutputToLibrary,
+  } = useResourceImportToLibrary({
+    libraryId,
+    onImportSuccess: async ({ parentId }) => {
+      await onRefreshDirectory?.(parentId);
+    },
+  });
 
   const mergePair = React.useMemo(() => (
     createManualMergePair(resources) || findMergeableResourcePair(resources)
@@ -279,6 +295,7 @@ const ToolWorkspaceMedia: React.FC<MediaProcessingToolProps> = ({
   const isLocalSaveTarget = saveTargetType === 'local';
   const internalTargetMissing = saveTargetType === 'internal' && !internalDirectory;
   const localOutputPathHint = localOutputDirectory || defaultLocalOutputDirectory || '默认下载目录';
+  const primaryActionLabelSuffix = saveTargetType === 'local' ? '保存' : '导入';
 
   React.useEffect(() => {
     let cancelled = false;
@@ -306,50 +323,62 @@ const ToolWorkspaceMedia: React.FC<MediaProcessingToolProps> = ({
     }
   }, [internalDirectory, saveTargetType]);
 
-  const persistMediaOutputBySaveTarget = React.useCallback(async (
-    outputPath: string,
+  const createMediaOutputTargetSnapshot = React.useCallback(async (
     actionName: '合并' | '转格式' | 'HLS 下载' | 'MPD 下载',
-  ) => {
-    if (saveTargetType === 'local') {
-      Toast.success(`已完成${actionName}，文件已保存到本地：${localOutputPathHint}`);
-      return;
+  ): Promise<MediaOutputTargetSnapshot> => {
+    const currentSaveTargetType = saveTargetType;
+    const currentInternalDirectory = internalDirectory;
+    const currentLocalOutputDirectory = localOutputDirectory || undefined;
+    const currentLocalOutputPathHint = localOutputPathHint;
+
+    if (currentSaveTargetType === 'local') {
+      return {
+        cleanupOutputDirectory: async () => undefined,
+        outputDirectoryPath: currentLocalOutputDirectory,
+        persistOutput: async () => {
+          Toast.success(`已完成${actionName}，文件已保存到本地：${currentLocalOutputPathHint}`);
+        },
+      };
     }
-    if (!internalDirectory) {
-      throw new Error('请选择内部保存目录');
+
+    if (!currentInternalDirectory) {
+      throw new Error('请选择资源库目录');
     }
-    try {
-      await uploadLocalPathAndCreateNode(outputPath, internalDirectory.node.id, libraryId, {
-        conflictPolicy: 'auto_rename',
-      });
-      try {
-        await onRefreshDirectory?.(internalDirectory.node.id);
-      } catch (error: any) {
-        Toast.warning(error?.message || '目录刷新失败，请稍后手动刷新目录树');
-      }
-      Toast.success(`已完成${actionName}，并保存到内部目录：${internalDirectory.pathLabel}`);
-    } catch (error: any) {
-      Toast.error(
-        error?.message
-          ? `已完成${actionName}，但上传到库内失败：${error.message}`
-          : `已完成${actionName}，但上传到库内失败`,
-      );
-    }
-  }, [internalDirectory, libraryId, localOutputPathHint, onRefreshDirectory, saveTargetType]);
+
+    const taskOutputDirectoryPath = await createTaskTempImportDirectory();
+    return {
+      cleanupOutputDirectory: async () => {
+        await cleanupTaskTempImportDirectory(taskOutputDirectoryPath);
+      },
+      outputDirectoryPath: taskOutputDirectoryPath,
+      persistOutput: async (outputPath: string) => {
+        await importOutputToLibrary(outputPath, {
+          id: currentInternalDirectory.node.id,
+          pathLabel: currentInternalDirectory.pathLabel,
+        }, actionName);
+      },
+    };
+  }, [
+    cleanupTaskTempImportDirectory,
+    createTaskTempImportDirectory,
+    importOutputToLibrary,
+    internalDirectory,
+    localOutputDirectory,
+    localOutputPathHint,
+    saveTargetType,
+  ]);
 
   const hlsTask = useHlsDownloadTask({
     hlsRequest,
-    outputDirectoryPath: saveTargetType === 'local' && localOutputDirectory
-      ? localOutputDirectory
-      : undefined,
-    onPersistOutput: async (outputPath) => persistMediaOutputBySaveTarget(outputPath, 'HLS 下载'),
+    createOutputTargetSnapshot: async () => await createMediaOutputTargetSnapshot('HLS 下载'),
+    outputDirectoryPath: localOutputDirectory || undefined,
+    onPersistOutput: async () => undefined,
   });
 
   const mpdTask = useMpdDownloadTask({
     mpdRequest,
-    outputDirectoryPath: saveTargetType === 'local' && localOutputDirectory
-      ? localOutputDirectory
-      : undefined,
-    onPersistOutput: async (outputPath) => persistMediaOutputBySaveTarget(outputPath, 'MPD 下载'),
+    createOutputTargetSnapshot: async () => await createMediaOutputTargetSnapshot('MPD 下载'),
+    onPersistOutput: async () => undefined,
   });
 
   const handlePickLocalOutputDirectory = React.useCallback(async () => {
@@ -372,31 +401,37 @@ const ToolWorkspaceMedia: React.FC<MediaProcessingToolProps> = ({
     }
     if (saveTargetType === 'internal' && !internalDirectory) {
       setInternalPathRequired(true);
-      Toast.warning('内部保存路径必须选择');
+      Toast.warning('资源库目录必须选择');
       return;
     }
     setMerging(true);
+    let outputProduced = false;
+    let outputTarget: MediaOutputTargetSnapshot | null = null;
     try {
+      outputTarget = await createMediaOutputTargetSnapshot('合并');
       const result = await mergeCapturedResources(mergePair, {
-        outputDirectoryPath: saveTargetType === 'local' && localOutputDirectory
-          ? localOutputDirectory
-          : undefined,
+        outputDirectoryPath: outputTarget.outputDirectoryPath,
         suppressSuccessToast: true,
         useSystemSaveDialog: false,
       });
       if (result?.cancelled) {
+        await outputTarget.cleanupOutputDirectory();
         return;
       }
       if (!result?.outputPath) {
         throw new Error('合并已完成，但未返回输出路径');
       }
-      await persistMediaOutputBySaveTarget(result.outputPath, '合并');
+      outputProduced = true;
+      await outputTarget.persistOutput(result.outputPath);
     } catch (error: any) {
+      if (outputTarget && !outputProduced) {
+        await outputTarget.cleanupOutputDirectory();
+      }
       Toast.error(error?.message || '合并失败');
     } finally {
       setMerging(false);
     }
-  }, [internalDirectory, localOutputDirectory, mergePair, persistMediaOutputBySaveTarget, saveTargetType]);
+  }, [createMediaOutputTargetSnapshot, internalDirectory, mergePair, saveTargetType]);
 
   const handleTranscode = React.useCallback(async () => {
     if (resources.length === 0) {
@@ -413,7 +448,7 @@ const ToolWorkspaceMedia: React.FC<MediaProcessingToolProps> = ({
     }
     if (saveTargetType === 'internal' && !internalDirectory) {
       setInternalPathRequired(true);
-      Toast.warning('内部保存路径必须选择');
+      Toast.warning('资源库目录必须选择');
       return;
     }
     const outputFormat = normalizeMediaTranscodeFormat(transcodeFormatDraft);
@@ -422,30 +457,35 @@ const ToolWorkspaceMedia: React.FC<MediaProcessingToolProps> = ({
       return;
     }
     setTranscoding(true);
+    let outputProduced = false;
+    let outputTarget: MediaOutputTargetSnapshot | null = null;
     try {
+      outputTarget = await createMediaOutputTargetSnapshot('转格式');
       const result = await transcodeCapturedResource(resource, outputFormat, {
-        outputDirectoryPath: saveTargetType === 'local' && localOutputDirectory
-          ? localOutputDirectory
-          : undefined,
+        outputDirectoryPath: outputTarget.outputDirectoryPath,
         suppressSuccessToast: true,
         useSystemSaveDialog: false,
       });
       if (result?.cancelled) {
+        await outputTarget.cleanupOutputDirectory();
         return;
       }
       if (!result?.outputPath) {
         throw new Error('转格式已完成，但未返回输出路径');
       }
-      await persistMediaOutputBySaveTarget(result.outputPath, '转格式');
+      outputProduced = true;
+      await outputTarget.persistOutput(result.outputPath);
     } catch (error: any) {
+      if (outputTarget && !outputProduced) {
+        await outputTarget.cleanupOutputDirectory();
+      }
       Toast.error(error?.message || '转格式失败');
     } finally {
       setTranscoding(false);
     }
   }, [
+    createMediaOutputTargetSnapshot,
     internalDirectory,
-    localOutputDirectory,
-    persistMediaOutputBySaveTarget,
     resources,
     saveTargetType,
     transcodeFormatDraft,
@@ -555,7 +595,7 @@ const ToolWorkspaceMedia: React.FC<MediaProcessingToolProps> = ({
                 <div className="operations-lane">
                   <div className="action-cluster merge-cluster">
                     <Button loading={merging} disabled={!mergePair} type="primary" onClick={() => void handleMerge()}>
-                      合并&保存
+                      {`合并&${primaryActionLabelSuffix}`}
                     </Button>
                     <span className={`merge-status ${mergePair ? 'ok' : ''}`}>
                       {mergePair ? '已识别可合并音视频' : '未识别到可合并组合'}
@@ -588,7 +628,7 @@ const ToolWorkspaceMedia: React.FC<MediaProcessingToolProps> = ({
                       </div>
                     </div>
                     <Button loading={transcoding} disabled={resources.length === 0} onClick={() => void handleTranscode()}>
-                      转换&保存
+                      {`转换&${primaryActionLabelSuffix}`}
                     </Button>
                   </div>
                 </div>
@@ -623,6 +663,7 @@ const ToolWorkspaceMedia: React.FC<MediaProcessingToolProps> = ({
           <ToolWorkspaceHls
             canSelectVariant={hlsTask.canSelectVariant}
             canTuneLocalDownloader={hlsTask.canTuneLocalDownloader}
+            disableSubtitleDownload={saveTargetType !== 'local'}
             hlsAes128KeyCount={hlsTask.hlsAes128KeyCount}
             hlsAudioRenditions={hlsTask.hlsAudioRenditions}
             hlsAudioRenditionOptions={hlsTask.hlsAudioRenditionOptions}
@@ -649,6 +690,7 @@ const ToolWorkspaceMedia: React.FC<MediaProcessingToolProps> = ({
             hlsUsingFragmentRange={hlsTask.hlsUsingFragmentRange}
             hlsVariantOptions={hlsTask.hlsVariantOptions}
             normalizedHlsManualKey={hlsTask.normalizedHlsManualKey}
+            disableSaveAction={false}
             savingHls={hlsTask.savingHls}
             selectedHlsAudioRenditionUrl={hlsTask.selectedHlsAudioRenditionUrl}
             selectedHlsSubtitleRenditionUrl={hlsTask.selectedHlsSubtitleRenditionUrl}
@@ -670,6 +712,7 @@ const ToolWorkspaceMedia: React.FC<MediaProcessingToolProps> = ({
             onDownloadSelectedSubtitle={hlsTask.handlers.onDownloadSelectedSubtitle}
             onRetryFailed={hlsTask.handlers.onRetryFailed}
             onSaveHls={hlsTask.handlers.onSaveHls}
+            saveActionLabel={`下载&${primaryActionLabelSuffix}`}
             onStartLiveRecording={hlsTask.handlers.onStartLiveRecording}
             onStopLiveRecording={hlsTask.handlers.onStopLiveRecording}
             onSetSelectedHlsAudioRenditionUrl={hlsTask.handlers.onSetSelectedHlsAudioRenditionUrl}
@@ -684,9 +727,11 @@ const ToolWorkspaceMedia: React.FC<MediaProcessingToolProps> = ({
         ) : (
           <ToolWorkspaceMpd
             audioRepresentationOptions={mpdTask.audioRepresentationOptions}
+            disableSaveAction={false}
             mpdRequest={mpdTask.mpdRequest}
             mpdTaskStatus={mpdTask.mpdTaskStatus}
             savingMpd={mpdTask.savingMpd}
+            saveActionLabel={`下载&${primaryActionLabelSuffix}`}
             selectedAudioRepresentationId={mpdTask.selectedAudioRepresentationId}
             selectedVideoRepresentationId={mpdTask.selectedVideoRepresentationId}
             videoRepresentationOptions={mpdTask.videoRepresentationOptions}
@@ -709,8 +754,8 @@ const ToolWorkspaceMedia: React.FC<MediaProcessingToolProps> = ({
         visible={internalPickerVisible}
         libraryId={libraryId}
         displayMode="folders"
-        title="选择保存位置"
-        confirmText="选择此位置"
+        title="选择资源库目录"
+        confirmText="导入到此目录"
         onCancel={() => setInternalPickerVisible(false)}
         onConfirm={(selection) => {
           setInternalDirectory(selection);

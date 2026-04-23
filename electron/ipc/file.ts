@@ -57,6 +57,7 @@ const AUTO_IMPORT_OBSERVE_TTL_MS = 10 * 60 * 1000;
 const AUTO_IMPORT_MIN_STABLE_COUNT = 2;
 const AUTO_IMPORT_MIN_MTIME_AGE_MS = 2_000;
 const AUTO_IMPORT_DEFAULT_MAX_FILES = 12;
+const TEMP_IMPORT_STAGING_DIR_NAME = 'omniflow-import-staging';
 const MAC_CHROME_BOOKMARK_RELATIVE_PATH = path.join(
   'Library',
   'Application Support',
@@ -115,6 +116,10 @@ function getEmbeddedBrowserDownloadStagingRoot(): string {
 
 function getTextFileStagingRoot(): string {
   return path.join(app.getPath('userData'), 'text-file-staging');
+}
+
+function getTempImportStagingRoot(): string {
+  return path.join(app.getPath('temp'), TEMP_IMPORT_STAGING_DIR_NAME);
 }
 
 function normalizeDialogFilters(
@@ -607,6 +612,32 @@ export function registerFileIpc(ipcMain: Electron.IpcMain) {
     };
   });
 
+  ipcMain.handle('fs:create-temp-import-directory', async (): Promise<string> => {
+    const stagingRoot = getTempImportStagingRoot();
+    await fs.mkdir(stagingRoot, { recursive: true });
+    return await fs.mkdtemp(path.join(stagingRoot, 'job-'));
+  });
+
+  ipcMain.handle('fs:get-temp-import-file-info', async (
+    _event,
+    filePath: string,
+  ): Promise<{ filePath: string; name: string; size: number }> => {
+    const normalizedPath = path.resolve(String(filePath || '').trim());
+    const stagingRoot = getTempImportStagingRoot();
+    if (!normalizedPath || !isPathInsideDirectory(normalizedPath, stagingRoot)) {
+      throw new Error('无效的临时导入文件');
+    }
+    const stat = await fs.stat(normalizedPath);
+    if (!stat.isFile()) {
+      throw new Error('临时导入路径不是文件');
+    }
+    return {
+      filePath: normalizedPath,
+      name: path.basename(normalizedPath),
+      size: Number(stat.size || 0),
+    };
+  });
+
   ipcMain.handle('fs:cleanup-staged-text-file', async (
     _event,
     stagedPath: string,
@@ -617,6 +648,19 @@ export function registerFileIpc(ipcMain: Electron.IpcMain) {
       return false;
     }
     await fs.rm(normalizedPath, { force: true });
+    return true;
+  });
+
+  ipcMain.handle('fs:cleanup-temp-import-path', async (
+    _event,
+    targetPath: string,
+  ): Promise<boolean> => {
+    const normalizedPath = path.resolve(String(targetPath || '').trim());
+    const stagingRoot = getTempImportStagingRoot();
+    if (!normalizedPath || !isPathInsideDirectory(normalizedPath, stagingRoot)) {
+      return false;
+    }
+    await fs.rm(normalizedPath, { force: true, recursive: true });
     return true;
   });
 }

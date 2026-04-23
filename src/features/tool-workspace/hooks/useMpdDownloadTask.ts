@@ -17,8 +17,14 @@ export type MpdTaskStatus = {
 };
 
 type UseMpdDownloadTaskInput = {
+  createOutputTargetSnapshot?: () => Promise<{
+    cleanupOutputDirectory: () => Promise<void>;
+    outputDirectoryPath?: string;
+    persistOutput: (outputPath: string) => Promise<void>;
+  }>;
   mpdRequest: ToolWorkspaceMediaMpdRequest | null;
-  outputDirectoryPath?: string;
+  onCleanupOutputDirectory?: (outputDirectoryPath: string) => Promise<void>;
+  resolveOutputDirectoryPath?: () => Promise<string | undefined>;
   onPersistOutput: (outputPath: string) => Promise<void>;
 };
 
@@ -128,7 +134,13 @@ function deriveMpdOutputFileName(input: {
 }
 
 export function useMpdDownloadTask(input: UseMpdDownloadTaskInput) {
-  const { mpdRequest, onPersistOutput, outputDirectoryPath } = input
+  const {
+    createOutputTargetSnapshot,
+    mpdRequest,
+    onCleanupOutputDirectory,
+    onPersistOutput,
+    resolveOutputDirectoryPath,
+  } = input
   const [savingMpd, setSavingMpd] = React.useState(false)
   const [selectedAudioRepresentationId, setSelectedAudioRepresentationId] = React.useState('')
   const [selectedVideoRepresentationId, setSelectedVideoRepresentationId] = React.useState('')
@@ -202,9 +214,26 @@ export function useMpdDownloadTask(input: UseMpdDownloadTaskInput) {
       state: 'running',
     }))
 
+    let outputProduced = false
+    let outputTarget: {
+      cleanupOutputDirectory: () => Promise<void>;
+      outputDirectoryPath?: string;
+      persistOutput: (outputPath: string) => Promise<void>;
+    } | null = null
     try {
+      outputTarget = createOutputTargetSnapshot
+        ? await createOutputTargetSnapshot()
+        : {
+          cleanupOutputDirectory: async () => {
+            if (outputTarget?.outputDirectoryPath) {
+              await onCleanupOutputDirectory?.(outputTarget.outputDirectoryPath)
+            }
+          },
+          outputDirectoryPath: await resolveOutputDirectoryPath?.(),
+          persistOutput: onPersistOutput,
+        }
       const result = await downloadEmbeddedBrowserMpdPlan(mpdRequest.resource.tabId, {
-        outputDirectoryPath,
+        outputDirectoryPath: outputTarget.outputDirectoryPath,
         plan: mpdRequest.plan,
         requestId: runToken,
         selectedAudioRepresentationId: selectedAudioRepresentation?.id,
@@ -217,6 +246,7 @@ export function useMpdDownloadTask(input: UseMpdDownloadTaskInput) {
         useSystemSaveDialog: false,
       })
       if (result.cancelled) {
+        await outputTarget.cleanupOutputDirectory()
         if (isStillActive()) {
           setMpdTaskStatus(createMpdTaskStatus({
             message: '这次 MPD 下载已取消，没有生成文件。',
@@ -227,7 +257,8 @@ export function useMpdDownloadTask(input: UseMpdDownloadTaskInput) {
       if (!result.ok || !result.outputPath) {
         throw new Error(result.error || 'MPD 下载失败')
       }
-      await onPersistOutput(result.outputPath)
+      outputProduced = true
+      await outputTarget.persistOutput(result.outputPath)
       if (isStillActive()) {
         setMpdTaskStatus(createMpdTaskStatus({
           lastOutputPath: result.outputPath,
@@ -236,6 +267,9 @@ export function useMpdDownloadTask(input: UseMpdDownloadTaskInput) {
         }))
       }
     } catch (error) {
+      if (outputTarget && !outputProduced) {
+        await outputTarget.cleanupOutputDirectory()
+      }
       if (isStillActive()) {
         setMpdTaskStatus(createMpdTaskStatus({
           error: error instanceof Error ? error.message : String(error),
@@ -251,9 +285,11 @@ export function useMpdDownloadTask(input: UseMpdDownloadTaskInput) {
       }
     }
   }, [
+    createOutputTargetSnapshot,
     mpdRequest,
+    onCleanupOutputDirectory,
     onPersistOutput,
-    outputDirectoryPath,
+    resolveOutputDirectoryPath,
     selectedAudioRepresentation,
     selectedVideoRepresentation,
   ])
