@@ -503,7 +503,7 @@ const ToolWorkspaceHls: React.FC<ToolWorkspaceHlsProps> = ({
       <div className="panel-desc" style={{ marginBottom: 10 }}>
         如果站点的 AES-128 key 没被自动识别，可以在这里手动粘贴 16 字节 key。
         支持 32 位 hex，或 16 字节 base64。填写后会自动切到本地 downloader 主链。
-        目前 master playlist 还不支持直接带手动 key 落本地主链，需要先收敛到具体媒体 playlist。
+        如果当前是 master playlist，先选一个具体变体，再让手动 key 进入本地主链。
       </div>
       <ActionRow>
         <Input

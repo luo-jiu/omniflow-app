@@ -5,6 +5,10 @@ import {
   verifyHlsResourceKey,
 } from '@/features/embedded-browser/resources/services/embedded-browser-resource-panel-actions';
 import {
+  createEmbeddedBrowserHlsDownloadPlan,
+  parseEmbeddedBrowserHlsManifest,
+} from '@/features/embedded-browser/resources/model/embedded-browser-hls-manifest';
+import {
   downloadEmbeddedBrowserDirectFile,
   downloadEmbeddedBrowserHlsManifest,
   downloadEmbeddedBrowserHlsTracks,
@@ -292,6 +296,43 @@ function createHlsPlanSlice(
   };
 }
 
+async function resolveMasterVariantToMediaPlan(input: {
+  headers: Record<string, string>;
+  pageUrl?: string;
+  variantManifestUrl: string;
+}) {
+  const response = await window.electronAPI.fetch(input.variantManifestUrl, { headers: input.headers });
+  if (response.status < 200 || response.status >= 400) {
+    throw new Error(`变体 playlist 请求失败：HTTP ${response.status}`);
+  }
+  const text = typeof response.body === 'string'
+    ? response.body
+    : JSON.stringify(response.body || '');
+  if (!text.includes('#EXTM3U')) {
+    throw new Error('当前变体返回的内容不像 HLS playlist');
+  }
+  const manifest = parseEmbeddedBrowserHlsManifest({
+    baseUrl: input.variantManifestUrl,
+    text,
+  });
+  const plan = createEmbeddedBrowserHlsDownloadPlan({
+    headers: input.headers,
+    manifest,
+    manifestUrl: input.variantManifestUrl,
+    pageUrl: input.pageUrl,
+  });
+  if (plan.isMaster) {
+    throw new Error('当前选择的变体仍然是 master playlist，先换一个具体媒体变体再试');
+  }
+  if (!plan.fragmentCount) {
+    throw new Error('当前变体没有可下载分片');
+  }
+  return {
+    manifest,
+    plan,
+  };
+}
+
 export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
   const { hlsRequest, onPersistOutput, outputDirectoryPath } = input;
   const [savingHls, setSavingHls] = React.useState(false);
@@ -539,10 +580,6 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
       Toast.warning('自定义 key 需要是 16 字节 AES-128，支持 hex 或 base64');
       return;
     }
-    if (hlsRequest.plan.isMaster && normalizedHlsManualKey) {
-      Toast.warning('当前 master playlist 的手动 key 仍需先收敛到具体媒体 playlist，先不要直接走本地主链');
-      return;
-    }
     if (selectedHlsAudioRenditionUrl && (normalizedHlsManualKey || hlsUsingCustomThreadCount || hlsUsingFragmentRange)) {
       Toast.warning('独立音轨合并当前只支持网络 manifest 主链，不和手动 key / 本地 downloader 控制混用');
       return;
@@ -561,11 +598,32 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
       }
       effectivePlan = slicedPlanResult.plan;
     }
+    const shouldResolveMasterVariantToLocalPlan = Boolean(
+      hlsRequest.plan.isMaster
+      && normalizedHlsManualKey
+      && selectedHlsVariantUrl
+      && /^https?:\/\//i.test(selectedHlsVariantUrl),
+    );
+    if (hlsRequest.plan.isMaster && normalizedHlsManualKey && !shouldResolveMasterVariantToLocalPlan) {
+      Toast.warning('master playlist 使用手动 key 时，先明确选择一个具体变体');
+      return;
+    }
     setSavingHls(true);
     try {
       const requestId = `hls-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const effectiveManifestUrl = selectedHlsVariantUrl || hlsRequest.plan.manifestUrl;
-      const effectiveVideoManifestUrl = selectedHlsVariantUrl || hlsEffectiveVariant?.url || hlsRequest.plan.manifestUrl;
+      const resourceHeaders = withResourceRefererHeader(hlsRequest.resource);
+      let effectiveManifestUrl = selectedHlsVariantUrl || hlsRequest.plan.manifestUrl;
+      let effectiveVideoManifestUrl = selectedHlsVariantUrl || hlsEffectiveVariant?.url || hlsRequest.plan.manifestUrl;
+      if (shouldResolveMasterVariantToLocalPlan) {
+        const resolvedVariant = await resolveMasterVariantToMediaPlan({
+          headers: resourceHeaders,
+          pageUrl: hlsRequest.resource.pageUrl,
+          variantManifestUrl: selectedHlsVariantUrl,
+        });
+        effectivePlan = resolvedVariant.plan;
+        effectiveManifestUrl = resolvedVariant.plan.manifestUrl;
+        effectiveVideoManifestUrl = resolvedVariant.plan.manifestUrl;
+      }
       activeHlsTaskRequestIdRef.current = requestId;
       activeHlsTaskManifestUrlRef.current = selectedHlsAudioRenditionUrl ? effectiveVideoManifestUrl : effectiveManifestUrl;
       const shouldUseDirectManifestTrackMerge = Boolean(
@@ -633,7 +691,7 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
         : shouldUseDirectManifestDownload
           ? await downloadEmbeddedBrowserHlsManifest(hlsRequest.resource.tabId, {
             durationSeconds: effectivePlan.durationSeconds,
-            headers: withResourceRefererHeader(hlsRequest.resource),
+            headers: resourceHeaders,
             manifestUrl: effectiveManifestUrl,
             outputDirectoryPath,
             requestId,
