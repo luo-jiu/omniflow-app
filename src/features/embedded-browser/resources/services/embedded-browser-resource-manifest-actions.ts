@@ -15,6 +15,8 @@ import {
 import {
   createEmbeddedBrowserMpdDownloadPlan,
   parseEmbeddedBrowserMpdManifest,
+  type EmbeddedBrowserMpdDownloadPlan,
+  type EmbeddedBrowserMpdManifest,
 } from '../model/embedded-browser-mpd-manifest';
 import {
   downloadEmbeddedBrowserHlsManifest,
@@ -170,7 +172,12 @@ export async function analyzeMpdResource(resource: EmbeddedBrowserCapturedResour
   await navigator.clipboard.writeText(planText);
   return {
     manifest,
+    plan,
     planText,
+  } satisfies {
+    manifest: EmbeddedBrowserMpdManifest
+    plan: EmbeddedBrowserMpdDownloadPlan
+    planText: string
   };
 }
 

@@ -3,11 +3,15 @@ import type {
   EmbeddedBrowserHlsDownloadPlan,
   EmbeddedBrowserHlsManifest,
 } from '@/features/embedded-browser/resources/model/embedded-browser-hls-manifest';
+import type {
+  EmbeddedBrowserMpdDownloadPlan,
+  EmbeddedBrowserMpdManifest,
+} from '@/features/embedded-browser/resources/model/embedded-browser-mpd-manifest';
 import type { EmbeddedBrowserCapturedResource } from '@/features/embedded-browser/resources/types';
 
 export type ToolWorkspaceToolId = 'subtitle-translation' | 'media-processing';
 
-export type ToolWorkspaceMediaMode = 'resources' | 'hls-download';
+export type ToolWorkspaceMediaMode = 'resources' | 'hls-download' | 'mpd-download';
 
 export interface ToolWorkspaceMediaResourceRequest {
   id: number;
@@ -23,9 +27,18 @@ export interface ToolWorkspaceMediaHlsRequest {
   resource: EmbeddedBrowserCapturedResource;
 }
 
+export interface ToolWorkspaceMediaMpdRequest {
+  id: number;
+  kind: 'mpd-download';
+  manifest: EmbeddedBrowserMpdManifest;
+  plan: EmbeddedBrowserMpdDownloadPlan;
+  resource: EmbeddedBrowserCapturedResource;
+}
+
 export type ToolWorkspaceMediaRequest =
   | ToolWorkspaceMediaResourceRequest
-  | ToolWorkspaceMediaHlsRequest;
+  | ToolWorkspaceMediaHlsRequest
+  | ToolWorkspaceMediaMpdRequest;
 
 export type SubtitleFileFormat = 'srt' | 'vtt';
 

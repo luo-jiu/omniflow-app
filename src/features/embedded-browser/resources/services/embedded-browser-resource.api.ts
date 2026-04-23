@@ -373,3 +373,26 @@ export async function downloadEmbeddedBrowserMpdManifest(
     outputPath?: string;
   }>;
 }
+
+export async function downloadEmbeddedBrowserMpdPlan(
+  tabId: string,
+  payload: {
+    ffmpegPath?: string;
+    outputDirectoryPath?: string;
+    plan: import('../model/embedded-browser-mpd-manifest').EmbeddedBrowserMpdDownloadPlan;
+    requestId?: string;
+    selectedAudioRepresentationId?: string;
+    selectedVideoRepresentationId?: string;
+    suggestedFileName?: string;
+    useSystemSaveDialog?: boolean;
+  },
+) {
+  assertDesktopSupport();
+  return window.electronEmbeddedBrowser.downloadMpdPlan(tabId, payload) as Promise<{
+    cancelled?: boolean;
+    error?: string;
+    ffmpegPath?: string;
+    ok: boolean;
+    outputPath?: string;
+  }>;
+}

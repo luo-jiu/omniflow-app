@@ -8,6 +8,10 @@ import type {
   EmbeddedBrowserHlsDownloadPlan,
   EmbeddedBrowserHlsManifest,
 } from '../model/embedded-browser-hls-manifest';
+import type {
+  EmbeddedBrowserMpdDownloadPlan,
+  EmbeddedBrowserMpdManifest,
+} from '../model/embedded-browser-mpd-manifest';
 import { useEmbeddedBrowserCatchToolkit } from '../hooks/useEmbeddedBrowserCatchToolkit';
 import { useEmbeddedBrowserResources } from '../hooks/useEmbeddedBrowserResources';
 import {
@@ -37,6 +41,11 @@ type EmbeddedBrowserResourcePanelProps = {
     resource: EmbeddedBrowserCapturedResource,
     manifest: EmbeddedBrowserHlsManifest,
     plan: EmbeddedBrowserHlsDownloadPlan,
+  ) => void;
+  onOpenMpdDownloadWorkspace?: (
+    resource: EmbeddedBrowserCapturedResource,
+    manifest: EmbeddedBrowserMpdManifest,
+    plan: EmbeddedBrowserMpdDownloadPlan,
   ) => void;
   onOpenMediaProcessing?: (resources: EmbeddedBrowserCapturedResource[]) => void;
 };
@@ -71,6 +80,7 @@ const EmbeddedBrowserResourcePanel: React.FC<EmbeddedBrowserResourcePanelProps> 
   className,
   currentPageUrl = '',
   onOpenHlsDownloadWorkspace,
+  onOpenMpdDownloadWorkspace,
   onOpenMediaProcessing,
 }) => {
   const {
@@ -371,6 +381,7 @@ const EmbeddedBrowserResourcePanel: React.FC<EmbeddedBrowserResourcePanelProps> 
                 expanded={expandedResourceIds.includes(resource.id)}
                 key={resource.id}
                 onOpenHlsDownloadWorkspace={onOpenHlsDownloadWorkspace}
+                onOpenMpdDownloadWorkspace={onOpenMpdDownloadWorkspace}
                 onToggleDetails={toggleResourceDetails}
                 onToggleSelection={toggleResourceSelection}
                 resource={resource}

@@ -61,6 +61,8 @@ import {
   type EmbeddedBrowserMainControllerOptions,
   type EmbeddedBrowserMpdDownloadPayload,
   type EmbeddedBrowserMpdDownloadResponse,
+  type EmbeddedBrowserMpdPlanDownloadPayload,
+  type EmbeddedBrowserMpdPlanDownloadResponse,
   type EmbeddedBrowserStatePayload,
 } from './embeddedBrowserMainTypes'
 import {
@@ -125,6 +127,9 @@ import {
 import {
   downloadEmbeddedBrowserHlsToLocalWorkDirectory,
 } from './embeddedBrowserHlsLocalDownloaderService'
+import {
+  downloadEmbeddedBrowserMpdToOutput,
+} from './embeddedBrowserMpdLocalDownloaderService'
 import {
   EmbeddedBrowserHlsLiveRecorder,
 } from './embeddedBrowserHlsLiveRecorder'
@@ -1861,6 +1866,84 @@ export function createEmbeddedBrowserMainController(
     return downloadEmbeddedBrowserManifestResourceForRenderer(tabId, payload, 'mpd')
   }
 
+  async function downloadEmbeddedBrowserMpdPlanResource(
+    tabId: string,
+    payload: EmbeddedBrowserMpdPlanDownloadPayload,
+  ): Promise<EmbeddedBrowserMpdPlanDownloadResponse> {
+    const normalizedTabId = String(tabId || '').trim()
+    const requestId = String(payload.requestId || '').trim() || undefined
+    const plan = payload.plan
+    if (!normalizedTabId || !plan || !Array.isArray(plan.representations) || plan.representations.length === 0) {
+      return {
+        error: '缺少可下载的 MPD 计划',
+        ok: false,
+      }
+    }
+    if (plan.hasDrm) {
+      return {
+        error: '当前 MPD 检测到 DRM，第一版下载器暂不支持',
+        ok: false,
+      }
+    }
+
+    const selectedVideoRepresentation = String(payload.selectedVideoRepresentationId || '').trim()
+      ? plan.representations.find((item) => item.id === String(payload.selectedVideoRepresentationId || '').trim())
+      : undefined
+    const selectedAudioRepresentation = String(payload.selectedAudioRepresentationId || '').trim()
+      ? plan.representations.find((item) => item.id === String(payload.selectedAudioRepresentationId || '').trim())
+      : undefined
+
+    if (!selectedVideoRepresentation && !selectedAudioRepresentation) {
+      return {
+        error: '至少需要选择一条 MPD 轨道',
+        ok: false,
+      }
+    }
+
+    try {
+      const defaultFileName = String(payload.suggestedFileName || '').trim()
+        || deriveEmbeddedBrowserManifestOutputFileName(plan.manifestUrl, 'mpd')
+      const outputPath = await resolveEmbeddedBrowserOutputPath({
+        defaultFileName,
+        filters: [
+          { extensions: ['mp4', 'm4a', 'webm'], name: '媒体文件' },
+        ],
+        outputDirectoryPath: payload.outputDirectoryPath,
+        useSystemSaveDialog: payload.useSystemSaveDialog,
+      })
+      if (!outputPath) {
+        return {
+          cancelled: true,
+          ok: false,
+        }
+      }
+
+      const result = await downloadEmbeddedBrowserMpdToOutput({
+        ffmpegPath: payload.ffmpegPath,
+        headers: plan.headers,
+        outputPath,
+        selectedAudioRepresentation,
+        selectedVideoRepresentation,
+      })
+      return {
+        ffmpegPath: result.ffmpegPath,
+        ok: true,
+        outputPath: result.outputPath,
+      }
+    } catch (error) {
+      runtimeLogger.warn('embedded browser mpd plan download failed', {
+        error: error instanceof Error ? error.message : String(error),
+        manifestUrl: plan.manifestUrl,
+        requestId,
+        tabId: normalizedTabId,
+      })
+      return {
+        error: error instanceof Error ? error.message : String(error),
+        ok: false,
+      }
+    }
+  }
+
   function syncEmbeddedBrowserViewBounds(view: WebContentsView) {
     view.setBounds(embeddedBrowserPendingBounds ?? {
       x: 0,
@@ -2635,6 +2718,7 @@ export function createEmbeddedBrowserMainController(
       downloadHlsPlan: downloadEmbeddedBrowserHlsPlanResource,
       retryHlsPlanFailed: retryEmbeddedBrowserHlsPlanFailedFragments,
       downloadMpdManifest: downloadEmbeddedBrowserMpdResource,
+      downloadMpdPlan: downloadEmbeddedBrowserMpdPlanResource,
       downloadDirectFile: downloadEmbeddedBrowserDirectFile,
       exportResource: handleExportResource,
       getCatchToolkitState: handleGetCatchToolkitState,

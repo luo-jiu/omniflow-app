@@ -634,6 +634,13 @@ Cat Catch 在 `m3u8.js` 中实现了 `recorder` 模式：
 
 **目标**：将 DASH/MPD 从"只能解析"提升到"可以下载"，对齐 Cat Catch 的 mpd 下载能力。
 
+> 2026-04-23 当前进度（Codex）：
+> - 资源面板里的 MPD 已补“送到工具页”入口，工具区新增 `mpd-download` 模式。
+> - 工具区第一版已经能展示 video/audio representation，并按“分辨率 / 码率 / codec / 语言”选择轨道，不直接暴露内部 id。
+> - Electron main 已补 `downloadMpdPlan` IPC 和 `embeddedBrowserMpdLocalDownloaderService.ts`，当前主线是：
+>   `representation 选择 -> 本地下载 init+segments -> 轨道文件落盘 -> ffmpeg 合并输出`。
+> - 当前版本先明确拒绝 DRM MPD；目标是先把非 DRM MPD 的主链闭环做稳，不在这一步扩成额外状态机。
+
 ### Cat Catch 的做法
 
 Cat Catch 使用 `mpd-parser.min.js` 解析 MPD manifest，然后：

@@ -15,6 +15,7 @@ import ToolWorkspaceMedia from './ToolWorkspaceMedia';
 import ToolWorkspaceNav from './ToolWorkspaceNav';
 import type {
   ToolWorkspaceMediaHlsRequest,
+  ToolWorkspaceMediaMpdRequest,
   ToolWorkspaceMediaMode,
   ToolWorkspaceMediaRequest,
   ToolWorkspaceState,
@@ -44,6 +45,7 @@ const ToolWorkspace: React.FC<ToolWorkspaceProps> = ({
   ));
   const [mediaProcessingResources, setMediaProcessingResources] = React.useState<EmbeddedBrowserCapturedResource[]>([]);
   const [mediaProcessingHlsRequest, setMediaProcessingHlsRequest] = React.useState<ToolWorkspaceMediaHlsRequest | null>(null);
+  const [mediaProcessingMpdRequest, setMediaProcessingMpdRequest] = React.useState<ToolWorkspaceMediaMpdRequest | null>(null);
   const [mediaProcessingMode, setMediaProcessingMode] = React.useState<ToolWorkspaceMediaMode>('resources');
   const initializedLibraryIdRef = React.useRef(libraryId);
 
@@ -93,6 +95,9 @@ const ToolWorkspace: React.FC<ToolWorkspaceProps> = ({
     } else if (mediaProcessingRequest.kind === 'hls-download') {
       setMediaProcessingHlsRequest(mediaProcessingRequest);
       setMediaProcessingMode('hls-download');
+    } else if (mediaProcessingRequest.kind === 'mpd-download') {
+      setMediaProcessingMpdRequest(mediaProcessingRequest);
+      setMediaProcessingMode('mpd-download');
     }
     setWorkspaceState((current) => ({
       ...current,
@@ -117,6 +122,7 @@ const ToolWorkspace: React.FC<ToolWorkspaceProps> = ({
             activeMode={mediaProcessingMode}
             hlsRequest={mediaProcessingHlsRequest}
             libraryId={libraryId}
+            mpdRequest={mediaProcessingMpdRequest}
             onModeChange={setMediaProcessingMode}
             onRefreshDirectory={onRefreshDirectory}
             resources={mediaProcessingResources}

@@ -9,7 +9,10 @@ import {
   getEmbeddedBrowserHlsKeyVerificationTone,
   type EmbeddedBrowserHlsKeyVerificationResult,
 } from '../model/embedded-browser-hls-key-verifier';
-import type { EmbeddedBrowserMpdManifest } from '../model/embedded-browser-mpd-manifest';
+import type {
+  EmbeddedBrowserMpdDownloadPlan,
+  EmbeddedBrowserMpdManifest,
+} from '../model/embedded-browser-mpd-manifest';
 import {
   analyzeHlsResource,
   analyzeMpdResource,
@@ -36,6 +39,7 @@ type MpdAnalysisState = {
   error?: string
   loading: boolean
   manifest?: EmbeddedBrowserMpdManifest
+  plan?: EmbeddedBrowserMpdDownloadPlan
   planText?: string
   saveLoading?: boolean
 }
@@ -46,12 +50,18 @@ type EmbeddedBrowserResourceManifestToolsProps = {
     manifest: EmbeddedBrowserHlsManifest,
     plan: EmbeddedBrowserHlsDownloadPlan,
   ) => void
+  onOpenMpdDownloadWorkspace?: (
+    resource: EmbeddedBrowserCapturedResource,
+    manifest: EmbeddedBrowserMpdManifest,
+    plan: EmbeddedBrowserMpdDownloadPlan,
+  ) => void
   resource: EmbeddedBrowserCapturedResource
   resources: EmbeddedBrowserCapturedResource[]
 }
 
 const EmbeddedBrowserResourceManifestTools: React.FC<EmbeddedBrowserResourceManifestToolsProps> = ({
   onOpenHlsDownloadWorkspace,
+  onOpenMpdDownloadWorkspace,
   resource,
   resources,
 }) => {
@@ -99,6 +109,7 @@ const EmbeddedBrowserResourceManifestTools: React.FC<EmbeddedBrowserResourceMani
         setMpdAnalysis({
           loading: false,
           manifest: result.manifest,
+          plan: result.plan,
           planText: result.planText,
         });
         Toast.success('MPD 解析完成，下载计划 JSON 已复制');
@@ -366,6 +377,17 @@ const EmbeddedBrowserResourceManifestTools: React.FC<EmbeddedBrowserResourceMani
                 }}
               >
                 复制计划
+              </button>
+            ) : null}
+            {mpdAnalysis.plan && onOpenMpdDownloadWorkspace ? (
+              <button
+                type="button"
+                className="resource-card-btn"
+                onClick={() => {
+                  onOpenMpdDownloadWorkspace(resource, mpdAnalysis.manifest!, mpdAnalysis.plan!);
+                }}
+              >
+                送到工具页
               </button>
             ) : null}
           </>

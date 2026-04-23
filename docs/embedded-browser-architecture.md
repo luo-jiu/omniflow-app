@@ -114,6 +114,7 @@ library detail page
 
 - 资源面板可以把“已选资源”送到工具区媒体处理模式。
 - HLS manifest 解析后，可以把“下载计划”送到工具区。
+- MPD manifest 解析后，也可以把“下载计划”送到工具区；工具区当前提供第一版 representation 选择，并在 main 侧执行 `init segment + media segments` 本地下载，再交给 `ffmpeg` 合并。
 - 工具区当前承接两条 HLS 主线：
   - 网络 manifest：继续走 `ffmpeg` 直拉。
   - blob / 页内内存 manifest：走 Electron main 本地 downloader，先生成 local workdir 和 rewritten local playlist，再交给 `ffmpeg`。

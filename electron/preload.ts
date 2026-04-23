@@ -458,6 +458,16 @@ contextBridge.exposeInMainWorld('electronEmbeddedBrowser', {
     suggestedFileName?: string;
     useSystemSaveDialog?: boolean;
   }) => ipcRenderer.invoke('embedded-browser:resource:download-mpd', tabId, payload),
+  downloadMpdPlan: (tabId: string, payload: {
+    ffmpegPath?: string;
+    outputDirectoryPath?: string;
+    plan: import('@/features/embedded-browser/resources/model/embedded-browser-mpd-manifest').EmbeddedBrowserMpdDownloadPlan;
+    requestId?: string;
+    selectedAudioRepresentationId?: string;
+    selectedVideoRepresentationId?: string;
+    suggestedFileName?: string;
+    useSystemSaveDialog?: boolean;
+  }) => ipcRenderer.invoke('embedded-browser:resource:download-mpd-plan', tabId, payload),
   downloadDirectFile: (tabId: string, payload: {
     headers?: Record<string, string>;
     outputDirectoryPath?: string;

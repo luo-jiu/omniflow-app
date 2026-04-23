@@ -13,6 +13,7 @@ import type {
   EmbeddedBrowserHlsPlanDownloadPayload,
   EmbeddedBrowserHlsPlanRetryPayload,
   EmbeddedBrowserMpdDownloadPayload,
+  EmbeddedBrowserMpdPlanDownloadPayload,
   EmbeddedBrowserDirectFileDownloadPayload,
 } from './embeddedBrowserMainTypes'
 import type {
@@ -67,6 +68,10 @@ type EmbeddedBrowserMainIpcHandlers = {
   downloadMpdManifest: (
     tabId: string,
     payload: EmbeddedBrowserMpdDownloadPayload,
+  ) => Promise<unknown>
+  downloadMpdPlan: (
+    tabId: string,
+    payload: EmbeddedBrowserMpdPlanDownloadPayload,
   ) => Promise<unknown>
   downloadDirectFile: (
     tabId: string,
@@ -259,6 +264,12 @@ export function registerEmbeddedBrowserMainIpcHandlers(handlers: EmbeddedBrowser
     'embedded-browser:resource:download-mpd',
     async (_event, tabId: string, payload: EmbeddedBrowserMpdDownloadPayload) => (
       handlers.downloadMpdManifest(tabId, payload)
+    ),
+  )
+  ipcMain.handle(
+    'embedded-browser:resource:download-mpd-plan',
+    async (_event, tabId: string, payload: EmbeddedBrowserMpdPlanDownloadPayload) => (
+      handlers.downloadMpdPlan(tabId, payload)
     ),
   )
   ipcMain.handle(

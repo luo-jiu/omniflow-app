@@ -42,6 +42,8 @@ import { useEmbeddedBrowserDownloadImport } from "@/features/embedded-browser/do
 import EmbeddedBrowserResourcePanel from "@/features/embedded-browser/resources/components/EmbeddedBrowserResourcePanel";
 import type { EmbeddedBrowserHlsDownloadPlan } from "@/features/embedded-browser/resources/model/embedded-browser-hls-manifest";
 import type { EmbeddedBrowserHlsManifest } from "@/features/embedded-browser/resources/model/embedded-browser-hls-manifest";
+import type { EmbeddedBrowserMpdDownloadPlan } from "@/features/embedded-browser/resources/model/embedded-browser-mpd-manifest";
+import type { EmbeddedBrowserMpdManifest } from "@/features/embedded-browser/resources/model/embedded-browser-mpd-manifest";
 import type { EmbeddedBrowserCapturedResource } from "@/features/embedded-browser/resources/types";
 import type { ToolWorkspaceMediaRequest } from "@/features/tool-workspace/types";
 import {
@@ -2765,6 +2767,23 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
     void window.electronEmbeddedBrowser.deactivate();
   }, []);
 
+  const openMpdDownloadWorkspace = React.useCallback((
+    resource: EmbeddedBrowserCapturedResource,
+    manifest: EmbeddedBrowserMpdManifest,
+    plan: EmbeddedBrowserMpdDownloadPlan,
+  ) => {
+    setMediaProcessingRequest({
+      id: Date.now(),
+      kind: 'mpd-download',
+      manifest,
+      plan,
+      resource,
+    });
+    setBrowserModeOpen(false);
+    setWorkspaceDisplayMode('tools');
+    void window.electronEmbeddedBrowser.deactivate();
+  }, []);
+
   const activateBrowserTab = React.useCallback((tabId: string) => {
     setActiveBrowserTabId(tabId);
     setBrowserModeOpen(true);
@@ -4145,6 +4164,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
                     activeTabId={activeBrowserTabId}
                     currentPageUrl={activeBrowserTab?.url ?? ''}
                     onOpenHlsDownloadWorkspace={openHlsDownloadWorkspace}
+                    onOpenMpdDownloadWorkspace={openMpdDownloadWorkspace}
                     onOpenMediaProcessing={openMediaProcessingWorkspace}
                   />
                 </BrowserWorkspaceAside>

@@ -5,6 +5,10 @@ import type {
   EmbeddedBrowserHlsDownloadPlan,
   EmbeddedBrowserHlsManifest,
 } from '../model/embedded-browser-hls-manifest';
+import type {
+  EmbeddedBrowserMpdDownloadPlan,
+  EmbeddedBrowserMpdManifest,
+} from '../model/embedded-browser-mpd-manifest';
 import {
   isMseCapturedResource,
   isPageContextManagedResource,
@@ -31,6 +35,11 @@ type EmbeddedBrowserResourceCardProps = {
     manifest: EmbeddedBrowserHlsManifest,
     plan: EmbeddedBrowserHlsDownloadPlan,
   ) => void
+  onOpenMpdDownloadWorkspace?: (
+    resource: EmbeddedBrowserCapturedResource,
+    manifest: EmbeddedBrowserMpdManifest,
+    plan: EmbeddedBrowserMpdDownloadPlan,
+  ) => void
   onToggleDetails: (resource: EmbeddedBrowserCapturedResource, expanded: boolean) => void
   onToggleSelection: (resource: EmbeddedBrowserCapturedResource) => void
   resource: EmbeddedBrowserCapturedResource
@@ -41,6 +50,7 @@ type EmbeddedBrowserResourceCardProps = {
 const EmbeddedBrowserResourceCard: React.FC<EmbeddedBrowserResourceCardProps> = ({
   expanded,
   onOpenHlsDownloadWorkspace,
+  onOpenMpdDownloadWorkspace,
   onToggleDetails,
   onToggleSelection,
   resource,
@@ -211,6 +221,7 @@ const EmbeddedBrowserResourceCard: React.FC<EmbeddedBrowserResourceCardProps> = 
       </div>
       <EmbeddedBrowserResourceManifestTools
         onOpenHlsDownloadWorkspace={onOpenHlsDownloadWorkspace}
+        onOpenMpdDownloadWorkspace={onOpenMpdDownloadWorkspace}
         resource={resource}
         resources={resources}
       />

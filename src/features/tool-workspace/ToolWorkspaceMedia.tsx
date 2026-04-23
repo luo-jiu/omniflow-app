@@ -28,10 +28,13 @@ import {
 import { findMergeableResourcePair } from '@/features/embedded-browser/resources/model/embedded-browser-resource.presentation';
 
 import ToolWorkspaceHls from './ToolWorkspaceHls';
+import ToolWorkspaceMpd from './ToolWorkspaceMpd';
 import ToolWorkspaceSaveTarget from './ToolWorkspaceSaveTarget';
 import { useHlsDownloadTask } from './hooks/useHlsDownloadTask';
+import { useMpdDownloadTask } from './hooks/useMpdDownloadTask';
 import type {
   ToolWorkspaceMediaHlsRequest,
+  ToolWorkspaceMediaMpdRequest,
   ToolWorkspaceMediaMode,
 } from './types';
 import {
@@ -234,6 +237,7 @@ type MediaProcessingToolProps = {
   activeMode: ToolWorkspaceMediaMode;
   hlsRequest: ToolWorkspaceMediaHlsRequest | null;
   libraryId: number;
+  mpdRequest: ToolWorkspaceMediaMpdRequest | null;
   onModeChange: (mode: ToolWorkspaceMediaMode) => void;
   resources: EmbeddedBrowserCapturedResource[];
   onRefreshDirectory?: (directoryId: number) => Promise<void> | void;
@@ -253,6 +257,7 @@ const ToolWorkspaceMedia: React.FC<MediaProcessingToolProps> = ({
   activeMode,
   hlsRequest,
   libraryId,
+  mpdRequest,
   onModeChange,
   onRefreshDirectory,
   resources,
@@ -303,7 +308,7 @@ const ToolWorkspaceMedia: React.FC<MediaProcessingToolProps> = ({
 
   const persistMediaOutputBySaveTarget = React.useCallback(async (
     outputPath: string,
-    actionName: '合并' | '转格式' | 'HLS 下载',
+    actionName: '合并' | '转格式' | 'HLS 下载' | 'MPD 下载',
   ) => {
     if (saveTargetType === 'local') {
       Toast.success(`已完成${actionName}，文件已保存到本地：${localOutputPathHint}`);
@@ -337,6 +342,14 @@ const ToolWorkspaceMedia: React.FC<MediaProcessingToolProps> = ({
       ? localOutputDirectory
       : undefined,
     onPersistOutput: async (outputPath) => persistMediaOutputBySaveTarget(outputPath, 'HLS 下载'),
+  });
+
+  const mpdTask = useMpdDownloadTask({
+    mpdRequest,
+    outputDirectoryPath: saveTargetType === 'local' && localOutputDirectory
+      ? localOutputDirectory
+      : undefined,
+    onPersistOutput: async (outputPath) => persistMediaOutputBySaveTarget(outputPath, 'MPD 下载'),
   });
 
   const handlePickLocalOutputDirectory = React.useCallback(async () => {
@@ -477,8 +490,10 @@ const ToolWorkspaceMedia: React.FC<MediaProcessingToolProps> = ({
           <Tag color="green">本地 ffmpeg</Tag>
           {activeMode === 'resources' ? (
             <Tag color="cyan">{resources.length} 条资源</Tag>
-          ) : (
+          ) : activeMode === 'hls-download' ? (
             <Tag color="cyan">{hlsRequest?.plan.fragmentCount || 0} 个分片</Tag>
+          ) : (
+            <Tag color="cyan">{mpdRequest?.plan.representations.length || 0} 条 Representation</Tag>
           )}
         </div>
       </WorkspaceHeader>
@@ -487,8 +502,8 @@ const ToolWorkspaceMedia: React.FC<MediaProcessingToolProps> = ({
         <Panel>
           <div className="panel-title">处理模式</div>
           <div className="panel-desc">
-            同一个媒体处理壳里分两条路：直接资源保留现在的合并与转格式；HLS 计划承接 manifest 解析后的下载任务，
-            后面 MPD 也会沿这条路继续长。
+            同一个媒体处理壳里现在分三条路：直接资源保留合并与转格式；HLS 和 MPD 计划各自承接 manifest
+            解析后的下载任务，但都还是收敛到这个工具页里做重处理。
           </div>
           <ToolModeSwitch>
             <button
@@ -506,6 +521,14 @@ const ToolWorkspaceMedia: React.FC<MediaProcessingToolProps> = ({
               onClick={() => onModeChange('hls-download')}
             >
               HLS 计划
+            </button>
+            <button
+              type="button"
+              className={`mode-btn ${activeMode === 'mpd-download' ? 'is-active' : ''}`}
+              disabled={!mpdRequest}
+              onClick={() => onModeChange('mpd-download')}
+            >
+              MPD 计划
             </button>
           </ToolModeSwitch>
         </Panel>
@@ -596,7 +619,7 @@ const ToolWorkspaceMedia: React.FC<MediaProcessingToolProps> = ({
               )}
             </Panel>
           </>
-        ) : (
+        ) : activeMode === 'hls-download' ? (
           <ToolWorkspaceHls
             canSelectVariant={hlsTask.canSelectVariant}
             canTuneLocalDownloader={hlsTask.canTuneLocalDownloader}
@@ -657,6 +680,27 @@ const ToolWorkspaceMedia: React.FC<MediaProcessingToolProps> = ({
             onSetHlsThreadCount={hlsTask.handlers.onSetHlsThreadCount}
             onSetSelectedHlsVariantUrl={hlsTask.handlers.onSetSelectedHlsVariantUrl}
             onVerifyHlsKey={hlsTask.handlers.onVerifyHlsKey}
+          />
+        ) : (
+          <ToolWorkspaceMpd
+            audioRepresentationOptions={mpdTask.audioRepresentationOptions}
+            mpdRequest={mpdTask.mpdRequest}
+            mpdTaskStatus={mpdTask.mpdTaskStatus}
+            savingMpd={mpdTask.savingMpd}
+            selectedAudioRepresentationId={mpdTask.selectedAudioRepresentationId}
+            selectedVideoRepresentationId={mpdTask.selectedVideoRepresentationId}
+            videoRepresentationOptions={mpdTask.videoRepresentationOptions}
+            onCopyPlan={() => {
+              if (!mpdTask.mpdRequest) {
+                return;
+              }
+              void navigator.clipboard.writeText(JSON.stringify(mpdTask.mpdRequest.plan, null, 2)).then(() => {
+                Toast.success('MPD 计划 JSON 已复制');
+              });
+            }}
+            onSaveMpd={mpdTask.handlers.onSaveMpd}
+            onSetSelectedAudioRepresentationId={mpdTask.handlers.onSetSelectedAudioRepresentationId}
+            onSetSelectedVideoRepresentationId={mpdTask.handlers.onSetSelectedVideoRepresentationId}
           />
         )}
       </WorkspaceBody>

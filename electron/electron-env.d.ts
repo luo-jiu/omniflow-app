@@ -436,6 +436,16 @@ interface Window {
       suggestedFileName?: string;
       useSystemSaveDialog?: boolean;
     }) => Promise<EmbeddedBrowserCapturedResourceMergeResponse>;
+    downloadMpdPlan: (tabId: string, payload: {
+      ffmpegPath?: string;
+      outputDirectoryPath?: string;
+      plan: import('@/features/embedded-browser/resources/model/embedded-browser-mpd-manifest').EmbeddedBrowserMpdDownloadPlan;
+      requestId?: string;
+      selectedAudioRepresentationId?: string;
+      selectedVideoRepresentationId?: string;
+      suggestedFileName?: string;
+      useSystemSaveDialog?: boolean;
+    }) => Promise<EmbeddedBrowserCapturedResourceMergeResponse>;
     downloadDirectFile: (tabId: string, payload: {
       headers?: Record<string, string>;
       outputDirectoryPath?: string;

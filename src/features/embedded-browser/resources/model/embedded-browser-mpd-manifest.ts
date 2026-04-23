@@ -26,6 +26,7 @@ export type EmbeddedBrowserMpdRepresentation = {
   height?: number
   id: string
   initializationUrl?: string
+  language?: string
   mimeType?: string
   segmentCount: number
   segments: EmbeddedBrowserMpdSegment[]
@@ -38,6 +39,31 @@ export type EmbeddedBrowserMpdManifest = {
   hasDrm: boolean
   protections: EmbeddedBrowserMpdContentProtection[]
   representations: EmbeddedBrowserMpdRepresentation[]
+}
+
+export type EmbeddedBrowserMpdDownloadPlanRepresentation = {
+  bandwidth?: number
+  codecs?: string
+  contentType: EmbeddedBrowserMpdRepresentation['contentType']
+  frameRate?: string
+  height?: number
+  id: string
+  initializationUrl?: string
+  language?: string
+  mimeType?: string
+  segmentCount: number
+  segments: EmbeddedBrowserMpdSegment[]
+  width?: number
+}
+
+export type EmbeddedBrowserMpdDownloadPlan = {
+  durationSeconds?: number
+  hasDrm: boolean
+  headers: Record<string, string>
+  manifestUrl: string
+  pageUrl?: string
+  protections: EmbeddedBrowserMpdContentProtection[]
+  representations: EmbeddedBrowserMpdDownloadPlanRepresentation[]
 }
 
 function getLocalName(element: Element) {
@@ -356,6 +382,7 @@ export function parseEmbeddedBrowserMpdManifest(input: {
           height: getNumberAttribute(representation, 'height') || getNumberAttribute(adaptationSet, 'height'),
           id: representationId,
           initializationUrl: templateResult.initializationUrl || listResult.initializationUrl,
+          language: pickAttribute([representation, adaptationSet], 'lang'),
           mimeType: pickAttribute([representation, adaptationSet], 'mimeType'),
           segmentCount: segments.length,
           segments,
@@ -380,7 +407,7 @@ export function createEmbeddedBrowserMpdDownloadPlan(input: {
   manifest: EmbeddedBrowserMpdManifest
   manifestUrl: string
   pageUrl?: string
-}) {
+}): EmbeddedBrowserMpdDownloadPlan {
   return {
     durationSeconds: input.manifest.durationSeconds,
     hasDrm: input.manifest.hasDrm,
@@ -396,6 +423,7 @@ export function createEmbeddedBrowserMpdDownloadPlan(input: {
       height: representation.height,
       id: representation.id,
       initializationUrl: representation.initializationUrl,
+      language: representation.language,
       mimeType: representation.mimeType,
       segmentCount: representation.segmentCount,
       segments: representation.segments,
