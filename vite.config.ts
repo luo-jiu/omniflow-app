@@ -75,7 +75,7 @@ export default defineConfig(({ mode }) => {
     strictPort: true,
     headers: {
       'Content-Security-Policy':
-        `default-src 'self'; connect-src 'self' ${apiOrigin} ${apiWsOrigin} http://localhost:9000 http://127.0.0.1:9000; img-src 'self' data: blob: http://localhost:9000 http://127.0.0.1:9000; media-src 'self' data: blob: http://localhost:9000 http://127.0.0.1:9000; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';`
+        `default-src 'self'; connect-src 'self' ${apiOrigin} ${apiWsOrigin} http://localhost:9000 http://127.0.0.1:9000; img-src 'self' data: blob: http://*:*; media-src 'self' data: blob: http://*:*; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';`
     }
   },
 }

@@ -272,7 +272,7 @@ export async function uploadAndCreateNode(
     throw new Error("Unable to retrieve file path for upload.");
   }
 
-  if (file.size >= CHUNKED_UPLOAD_THRESHOLD_BYTES) {
+  if (false && file.size >= CHUNKED_UPLOAD_THRESHOLD_BYTES) {
     const uploadTask = createIpcChunkedUploadTask<any>(
       filePath,
       {

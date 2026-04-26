@@ -1,18 +1,21 @@
-import { dialog, app, net, ipcMain, session, systemPreferences, safeStorage, webContents, BrowserWindow, WebContentsView, nativeTheme, screen } from "electron";
+var __defProp = Object.defineProperty;
+var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
+var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
+import { dialog, app, net, ipcMain, session, systemPreferences, safeStorage, webContents, BrowserWindow, shell, WebContentsView, nativeTheme, screen } from "electron";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs$1, { existsSync, mkdirSync, readFileSync, writeFileSync, constants } from "node:fs";
 import fs$2 from "fs/promises";
-import fs, { mkdtemp, rm, access, writeFile, mkdir } from "node:fs/promises";
+import fs, { mkdtemp, rm, access, writeFile, copyFile, mkdir, appendFile, readFile } from "node:fs/promises";
 import http from "node:http";
 import https from "node:https";
 import require$$0 from "os";
 import require$$1 from "child_process";
 import fs$3 from "fs";
+import os from "node:os";
 import crypto, { randomUUID } from "node:crypto";
 import { Buffer as Buffer$1 } from "node:buffer";
 import { spawn } from "node:child_process";
-import os from "node:os";
 const DOWNLOAD_REQUEST_TIMEOUT_MS = 6e4;
 async function downloadUrlToFile(url, targetPath, headers = {}, redirectDepth = 0) {
   const MAX_REDIRECT_DEPTH = 3;
@@ -95,6 +98,7 @@ const AUTO_IMPORT_OBSERVE_TTL_MS = 10 * 60 * 1e3;
 const AUTO_IMPORT_MIN_STABLE_COUNT = 2;
 const AUTO_IMPORT_MIN_MTIME_AGE_MS = 2e3;
 const AUTO_IMPORT_DEFAULT_MAX_FILES = 12;
+const TEMP_IMPORT_STAGING_DIR_NAME = "omniflow-import-staging";
 const MAC_CHROME_BOOKMARK_RELATIVE_PATH = path.join(
   "Library",
   "Application Support",
@@ -129,6 +133,9 @@ function getEmbeddedBrowserDownloadStagingRoot() {
 }
 function getTextFileStagingRoot() {
   return path.join(app.getPath("userData"), "text-file-staging");
+}
+function getTempImportStagingRoot() {
+  return path.join(app.getPath("temp"), TEMP_IMPORT_STAGING_DIR_NAME);
 }
 function normalizeDialogFilters(filters, fallback) {
   const normalized = Array.isArray(filters) ? filters.map((filter) => ({
@@ -494,6 +501,27 @@ function registerFileIpc(ipcMain2) {
       size: Buffer.byteLength(normalizedContent, "utf-8")
     };
   });
+  ipcMain2.handle("fs:create-temp-import-directory", async () => {
+    const stagingRoot = getTempImportStagingRoot();
+    await fs$2.mkdir(stagingRoot, { recursive: true });
+    return await fs$2.mkdtemp(path.join(stagingRoot, "job-"));
+  });
+  ipcMain2.handle("fs:get-temp-import-file-info", async (_event, filePath) => {
+    const normalizedPath = path.resolve(String(filePath || "").trim());
+    const stagingRoot = getTempImportStagingRoot();
+    if (!normalizedPath || !isPathInsideDirectory$1(normalizedPath, stagingRoot)) {
+      throw new Error("无效的临时导入文件");
+    }
+    const stat = await fs$2.stat(normalizedPath);
+    if (!stat.isFile()) {
+      throw new Error("临时导入路径不是文件");
+    }
+    return {
+      filePath: normalizedPath,
+      name: path.basename(normalizedPath),
+      size: Number(stat.size || 0)
+    };
+  });
   ipcMain2.handle("fs:cleanup-staged-text-file", async (_event, stagedPath) => {
     const normalizedPath = path.resolve(String(stagedPath || "").trim());
     const stagingRoot = getTextFileStagingRoot();
@@ -501,6 +529,15 @@ function registerFileIpc(ipcMain2) {
       return false;
     }
     await fs$2.rm(normalizedPath, { force: true });
+    return true;
+  });
+  ipcMain2.handle("fs:cleanup-temp-import-path", async (_event, targetPath) => {
+    const normalizedPath = path.resolve(String(targetPath || "").trim());
+    const stagingRoot = getTempImportStagingRoot();
+    if (!normalizedPath || !isPathInsideDirectory$1(normalizedPath, stagingRoot)) {
+      return false;
+    }
+    await fs$2.rm(normalizedPath, { force: true, recursive: true });
     return true;
   });
 }
@@ -972,6 +1009,242 @@ ${value}\r
       fileStream.pipe(request, { end: false });
     });
   });
+  const activeChunkedUploads = /* @__PURE__ */ new Map();
+  const sendChunkedProgress = (runtime, force = false) => {
+    const now = Date.now();
+    if (!force && now - runtime.lastProgressAt < 80) return;
+    runtime.lastProgressAt = now;
+    const elapsedMs = Math.max(now - runtime.startedAt, 1);
+    const speedBps = Math.floor(runtime.uploadedBytes * 1e3 / elapsedMs);
+    const percentage = runtime.totalBytes > 0 ? Math.min(runtime.uploadedBytes / runtime.totalBytes * 100, 100) : 0;
+    runtime.sender.send("http:upload:progress", {
+      uploadId: runtime.uploadId,
+      uploadedBytes: runtime.uploadedBytes,
+      totalBytes: runtime.totalBytes,
+      percentage,
+      speedBps
+    });
+  };
+  const chunkedJsonRequest = (method, url, headers, body) => {
+    return new Promise((resolve, reject) => {
+      const parsedUrl = new URL(url);
+      const transport = parsedUrl.protocol === "https:" ? https : http;
+      const reqHeaders = {
+        ...headers,
+        "Content-Type": "application/json"
+      };
+      const payload = body ? JSON.stringify(body) : void 0;
+      if (payload) {
+        reqHeaders["Content-Length"] = String(Buffer.byteLength(payload));
+      }
+      const req = transport.request({
+        protocol: parsedUrl.protocol,
+        hostname: parsedUrl.hostname,
+        port: parsedUrl.port ? Number(parsedUrl.port) : void 0,
+        path: `${parsedUrl.pathname}${parsedUrl.search}`,
+        method,
+        headers: reqHeaders
+      });
+      let responseBody = "";
+      req.on("response", (res) => {
+        res.on("data", (chunk) => {
+          responseBody += chunk.toString();
+        });
+        res.on("end", () => {
+          let parsed;
+          try {
+            parsed = JSON.parse(responseBody);
+          } catch {
+            parsed = responseBody;
+          }
+          resolve({ status: res.statusCode || 0, body: parsed });
+        });
+      });
+      req.on("error", reject);
+      if (payload) req.write(payload);
+      req.end();
+    });
+  };
+  const chunkedPartUpload = (url, headers, buffer, size, runtime) => {
+    return new Promise((resolve, reject) => {
+      const parsedUrl = new URL(url);
+      const transport = parsedUrl.protocol === "https:" ? https : http;
+      const req = transport.request({
+        protocol: parsedUrl.protocol,
+        hostname: parsedUrl.hostname,
+        port: parsedUrl.port ? Number(parsedUrl.port) : void 0,
+        path: `${parsedUrl.pathname}${parsedUrl.search}`,
+        method: "PUT",
+        headers: {
+          ...headers,
+          "Content-Type": "application/octet-stream",
+          "Content-Length": String(size)
+        }
+      });
+      runtime.activeRequests.add(req);
+      let responseBody = "";
+      req.on("response", (res) => {
+        res.on("data", (chunk) => {
+          responseBody += chunk.toString();
+        });
+        res.on("end", () => {
+          runtime.activeRequests.delete(req);
+          let parsed;
+          try {
+            parsed = JSON.parse(responseBody);
+          } catch {
+            parsed = responseBody;
+          }
+          if ((res.statusCode || 0) >= 400) {
+            reject(new Error(`分片上传失败: HTTP ${res.statusCode}`));
+          } else {
+            resolve({ status: res.statusCode || 0, body: parsed });
+          }
+        });
+      });
+      req.on("error", (err) => {
+        runtime.activeRequests.delete(req);
+        reject(err);
+      });
+      req.write(buffer.subarray(0, size));
+      req.end();
+    });
+  };
+  ipcMain2.handle("http:chunked-upload", async (event, baseUrl, filePath, params, headers = {}, uploadId) => {
+    var _a;
+    let stat;
+    try {
+      stat = fs$1.statSync(filePath);
+    } catch (error) {
+      throw new Error(`读取上传文件失败: ${filePath} (${String(error)})`);
+    }
+    if (!stat.isFile()) {
+      throw new Error(`上传目标不是文件: ${filePath}`);
+    }
+    const currentUploadId = uploadId || `chunked-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const runtime = {
+      uploadId: currentUploadId,
+      serverUploadId: "",
+      sender: event.sender,
+      totalBytes: stat.size,
+      uploadedBytes: 0,
+      startedAt: Date.now(),
+      lastProgressAt: 0,
+      aborted: false,
+      activeRequests: /* @__PURE__ */ new Set(),
+      baseUrl,
+      headers
+    };
+    activeChunkedUploads.set(currentUploadId, runtime);
+    try {
+      const initiateRes = await chunkedJsonRequest(
+        "POST",
+        `${baseUrl}/api/v1/directory/upload/multipart/initiate`,
+        headers,
+        {
+          libraryId: params.libraryId,
+          parentId: params.parentId,
+          fileName: params.fileName,
+          fileSize: params.fileSize,
+          conflictPolicy: params.conflictPolicy
+        }
+      );
+      if (runtime.aborted) throw new Error("UPLOAD_ABORTED");
+      if ((initiateRes.status || 0) >= 400) {
+        throw new Error(`发起分片上传失败: HTTP ${initiateRes.status}`);
+      }
+      const initiateData = ((_a = initiateRes.body) == null ? void 0 : _a.data) ?? initiateRes.body;
+      runtime.serverUploadId = String((initiateData == null ? void 0 : initiateData.uploadId) ?? "");
+      const chunkSize = Number((initiateData == null ? void 0 : initiateData.chunkSize) ?? 10485760);
+      const totalParts = Number((initiateData == null ? void 0 : initiateData.totalParts) ?? Math.ceil(stat.size / chunkSize));
+      const collectedParts = [];
+      let nextPart = 1;
+      const concurrency = 3;
+      const fd = fs$1.openSync(filePath, "r");
+      try {
+        const worker = async () => {
+          var _a2;
+          while (!runtime.aborted) {
+            const partNumber = nextPart++;
+            if (partNumber > totalParts) break;
+            const offset = (partNumber - 1) * chunkSize;
+            const size = Math.min(chunkSize, stat.size - offset);
+            const buffer = Buffer.alloc(size);
+            fs$1.readSync(fd, buffer, 0, size, offset);
+            const url = `${baseUrl}/api/v1/directory/upload/multipart/${runtime.serverUploadId}/part/${partNumber}`;
+            let res;
+            try {
+              res = await chunkedPartUpload(url, headers, buffer, size, runtime);
+            } catch (err) {
+              runtime.aborted = true;
+              throw err;
+            }
+            if (runtime.aborted) break;
+            const partData = ((_a2 = res.body) == null ? void 0 : _a2.data) ?? res.body;
+            collectedParts.push({
+              partNumber: (partData == null ? void 0 : partData.partNumber) ?? partNumber,
+              etag: String((partData == null ? void 0 : partData.etag) ?? "")
+            });
+            runtime.uploadedBytes += size;
+            sendChunkedProgress(runtime);
+          }
+        };
+        await Promise.all(Array.from({ length: concurrency }, () => worker()));
+      } finally {
+        fs$1.closeSync(fd);
+      }
+      if (runtime.aborted) throw new Error("UPLOAD_ABORTED");
+      sendChunkedProgress(runtime, true);
+      const completeRes = await chunkedJsonRequest(
+        "POST",
+        `${baseUrl}/api/v1/directory/upload/multipart/${runtime.serverUploadId}/complete`,
+        headers,
+        { parts: collectedParts.map((p) => ({ partNumber: p.partNumber, etag: p.etag })) }
+      );
+      if ((completeRes.status || 0) >= 400) {
+        throw new Error(`完成分片上传失败: HTTP ${completeRes.status}`);
+      }
+      activeChunkedUploads.delete(currentUploadId);
+      return { status: completeRes.status, body: completeRes.body };
+    } catch (err) {
+      activeChunkedUploads.delete(currentUploadId);
+      if (runtime.serverUploadId) {
+        try {
+          await chunkedJsonRequest(
+            "DELETE",
+            `${baseUrl}/api/v1/directory/upload/multipart/${runtime.serverUploadId}`,
+            headers
+          );
+        } catch {
+        }
+      }
+      throw runtime.aborted ? new Error("UPLOAD_ABORTED") : err;
+    }
+  });
+  ipcMain2.handle("http:chunked-upload:abort", async (_event, uploadId) => {
+    const runtime = activeChunkedUploads.get(uploadId);
+    if (!runtime) return false;
+    runtime.aborted = true;
+    activeChunkedUploads.delete(uploadId);
+    for (const req of runtime.activeRequests) {
+      try {
+        req.destroy(new Error("UPLOAD_ABORTED"));
+      } catch {
+      }
+    }
+    runtime.activeRequests.clear();
+    if (runtime.serverUploadId) {
+      try {
+        await chunkedJsonRequest(
+          "DELETE",
+          `${runtime.baseUrl}/api/v1/directory/upload/multipart/${runtime.serverUploadId}`,
+          runtime.headers
+        );
+      } catch {
+      }
+    }
+    return true;
+  });
 }
 function registerIpcHandlers() {
   registerFileIpc(ipcMain);
@@ -1119,8 +1392,40 @@ function registerEmbeddedBrowserMainIpcHandlers(handlers) {
     async (_event, tabId, payload) => handlers.downloadHlsManifest(tabId, payload)
   );
   ipcMain.handle(
+    "embedded-browser:resource:start-hls-recording",
+    async (_event, tabId, payload) => handlers.startHlsRecording(tabId, payload)
+  );
+  ipcMain.handle(
+    "embedded-browser:resource:stop-hls-recording",
+    async (_event, tabId, payload) => handlers.stopHlsRecording(tabId, payload)
+  );
+  ipcMain.handle(
+    "embedded-browser:resource:discard-hls-recording",
+    async (_event, tabId, payload) => handlers.discardHlsRecording(tabId, payload)
+  );
+  ipcMain.handle(
+    "embedded-browser:resource:download-hls-tracks",
+    async (_event, tabId, payload) => handlers.downloadHlsTracks(tabId, payload)
+  );
+  ipcMain.handle(
+    "embedded-browser:resource:download-hls-plan",
+    async (_event, tabId, payload) => handlers.downloadHlsPlan(tabId, payload)
+  );
+  ipcMain.handle(
+    "embedded-browser:resource:retry-hls-plan-failed",
+    async (_event, tabId, payload) => handlers.retryHlsPlanFailed(tabId, payload)
+  );
+  ipcMain.handle(
     "embedded-browser:resource:download-mpd",
     async (_event, tabId, payload) => handlers.downloadMpdManifest(tabId, payload)
+  );
+  ipcMain.handle(
+    "embedded-browser:resource:download-mpd-plan",
+    async (_event, tabId, payload) => handlers.downloadMpdPlan(tabId, payload)
+  );
+  ipcMain.handle(
+    "embedded-browser:resource:download-direct-file",
+    async (_event, tabId, payload) => handlers.downloadDirectFile(tabId, payload)
   );
   ipcMain.handle("embedded-browser:resource:start-deep-capture", async (_event, tabId) => handlers.startDeepResourceCapture(tabId));
   ipcMain.handle("embedded-browser:set-bounds", (event, bounds) => handlers.setBounds(event.sender, bounds));
@@ -1132,6 +1437,17 @@ function registerEmbeddedBrowserMainIpcHandlers(handlers) {
   ipcMain.handle("embedded-browser:cookie:remove", async (_event, url, name) => handlers.removeCookie(url, name));
   ipcMain.handle("embedded-browser:cookie:remove-domain", async (_event, domain) => handlers.removeCookiesByDomain(domain));
   ipcMain.handle("embedded-browser:cookie:remove-all", async () => handlers.removeAllCookies());
+  ipcMain.handle("embedded-browser:resource-capture-rules:get", async () => handlers.getResourceCaptureRules());
+  ipcMain.handle("embedded-browser:resource-capture-rules:update", async (_event, ruleSet) => handlers.updateResourceCaptureRules(ruleSet));
+  ipcMain.handle("embedded-browser:resource-capture-rules:reset", async () => handlers.resetResourceCaptureRules());
+  ipcMain.handle("embedded-browser:external-tools:get", async () => handlers.getExternalToolSettings());
+  ipcMain.handle("embedded-browser:external-tools:update", async (_event, settings) => handlers.updateExternalToolSettings(settings));
+  ipcMain.handle("embedded-browser:external-tools:reset", async () => handlers.resetExternalToolSettings());
+  ipcMain.handle("embedded-browser:external-tools:list-enabled", async () => handlers.listEnabledExternalTools());
+  ipcMain.handle(
+    "embedded-browser:external-tools:dispatch",
+    async (_event, toolKey, payload) => handlers.dispatchExternalTool(toolKey, payload)
+  );
   ipcMain.handle("embedded-browser:password:list", () => handlers.listPasswords());
   ipcMain.handle("embedded-browser:password:get-decrypted", async (_event, id) => handlers.getDecryptedPassword(id));
   ipcMain.handle("embedded-browser:password:save-captured", async (_event, credentialRequestId) => handlers.saveCapturedCredential(credentialRequestId));
@@ -1320,12 +1636,12 @@ async function removeAllEmbeddedBrowserCookies() {
   }
   await getEmbeddedBrowserSession().cookies.flushStore();
 }
-const STORE_FILE_NAME = "embedded-browser-passwords.json";
+const STORE_FILE_NAME$2 = "embedded-browser-passwords.json";
 const CREDENTIAL_CACHE_TTL_MS = 6e4;
 let cachedStore = null;
 const credentialCache = /* @__PURE__ */ new Map();
 function getStorePath() {
-  return path.join(app.getPath("userData"), STORE_FILE_NAME);
+  return path.join(app.getPath("userData"), STORE_FILE_NAME$2);
 }
 function loadPasswordStore() {
   if (cachedStore) {
@@ -1504,6 +1820,7 @@ function consumeEmbeddedBrowserCachedCredential(requestId) {
   credentialCache.delete(requestId);
   return entry.credential;
 }
+const STORE_FILE_NAME$1 = "embedded-browser-resource-capture-rules.json";
 const catCatchManifestExtensions = [
   "m3u8",
   "m3u",
@@ -1582,6 +1899,61 @@ const catCatchRelevantRequestHeaders = [
   "referer",
   "user-agent"
 ];
+const catCatchDefaultRegexRules = [
+  {
+    builtIn: true,
+    enabled: false,
+    ext: "json",
+    flags: "ig",
+    id: "iqiyi-json",
+    label: "爱奇艺 JSON",
+    pattern: String.raw`https://cache\.video\.[a-z]*\.com/dash\?tvid=.*`
+  },
+  {
+    blacklist: true,
+    builtIn: true,
+    enabled: true,
+    ext: "",
+    flags: "ig",
+    id: "bilibili-live-m4s",
+    label: "B 站直播 m4s 屏蔽",
+    pattern: String.raw`.*\.bilivideo\.(com|cn).*\/live-bvc\/.*m4s`
+  },
+  {
+    builtIn: true,
+    enabled: false,
+    ext: "",
+    flags: "ig",
+    id: "instagram-bytestart",
+    label: "Instagram bytestart 收敛",
+    pattern: String.raw`(^https://scontent[a-z0-9-]*\.cdninstagram\.com/.*)&bytestart=.*`
+  },
+  {
+    builtIn: true,
+    enabled: false,
+    ext: "",
+    flags: "ig",
+    id: "facebook-bytestart",
+    label: "Facebook bytestart 收敛",
+    pattern: String.raw`(^https://.*\.fbcdn\.net/.*)&bytestart=.*`
+  }
+];
+const defaultCaptureExtensions = [
+  ...catCatchManifestExtensions,
+  ...catCatchMediaExtensions,
+  ...catCatchImageExtensions,
+  ...catCatchSubtitleExtensions,
+  ...catCatchKeyExtensions
+];
+const defaultCaptureMimeTypes = [
+  "video/*",
+  "audio/*",
+  ...catCatchMediaMimeTypes,
+  "application/x-mpegurl",
+  "application/vnd.apple.mpegurl",
+  "application/dash+xml"
+];
+let cachedRuleSet = null;
 const catCatchManifestExtensionSet = new Set(catCatchManifestExtensions);
 const catCatchMediaExtensionSet = new Set(catCatchMediaExtensions);
 const catCatchImageExtensionSet = new Set(catCatchImageExtensions);
@@ -1589,6 +1961,140 @@ const catCatchSubtitleExtensionSet = new Set(catCatchSubtitleExtensions);
 const catCatchKeyExtensionSet = new Set(catCatchKeyExtensions);
 const catCatchMediaMimeTypeSet = new Set(catCatchMediaMimeTypes);
 const catCatchRelevantRequestHeaderSet = new Set(catCatchRelevantRequestHeaders);
+function getRuleStorePath() {
+  return path.join(app.getPath("userData"), STORE_FILE_NAME$1);
+}
+function normalizeExtension(value) {
+  return String(value || "").trim().replace(/^\./, "").toLowerCase();
+}
+function normalizeMimeTypePattern(value) {
+  return String(value || "").trim().toLowerCase();
+}
+function normalizeDomain(value) {
+  return String(value || "").trim().toLowerCase();
+}
+function inferExtensionFromUrl$1(url) {
+  try {
+    const pathname = new URL(url).pathname.toLowerCase();
+    const match = pathname.match(/\.([a-z0-9]+)$/i);
+    return (match == null ? void 0 : match[1]) || "";
+  } catch {
+    const match = String(url || "").toLowerCase().match(/\.([a-z0-9]+)(?:\?|#|$)/i);
+    return (match == null ? void 0 : match[1]) || "";
+  }
+}
+function createDefaultRuleSet() {
+  return {
+    domainBlacklist: [],
+    domainWhitelist: [],
+    extensions: defaultCaptureExtensions.map(normalizeExtension),
+    mimeTypes: defaultCaptureMimeTypes.map(normalizeMimeTypePattern),
+    regexRules: catCatchDefaultRegexRules.map((rule) => ({
+      ...rule,
+      ext: normalizeExtension(rule.ext || "") || void 0
+    }))
+  };
+}
+function normalizeRegexRule(rule) {
+  const pattern = String(rule.pattern || "").trim();
+  if (!pattern) {
+    return null;
+  }
+  const flags = String(rule.flags || "").trim() || "ig";
+  try {
+    new RegExp(pattern, flags);
+  } catch {
+    return null;
+  }
+  return {
+    blacklist: Boolean(rule.blacklist),
+    builtIn: Boolean(rule.builtIn),
+    enabled: rule.enabled !== false,
+    ext: normalizeExtension(rule.ext || "") || void 0,
+    flags,
+    id: String(rule.id || "").trim() || crypto.randomUUID(),
+    label: String(rule.label || "").trim() || "未命名规则",
+    pattern
+  };
+}
+function normalizeRuleSet(input) {
+  const defaults = createDefaultRuleSet();
+  const regexRules = Array.isArray(input == null ? void 0 : input.regexRules) ? input == null ? void 0 : input.regexRules.map(normalizeRegexRule).filter(Boolean) : defaults.regexRules;
+  return {
+    domainBlacklist: Array.from(new Set(((input == null ? void 0 : input.domainBlacklist) || []).map(normalizeDomain).filter(Boolean))),
+    domainWhitelist: Array.from(new Set(((input == null ? void 0 : input.domainWhitelist) || []).map(normalizeDomain).filter(Boolean))),
+    extensions: Array.from(new Set(((input == null ? void 0 : input.extensions) || defaults.extensions).map(normalizeExtension).filter(Boolean))),
+    mimeTypes: Array.from(new Set(((input == null ? void 0 : input.mimeTypes) || defaults.mimeTypes).map(normalizeMimeTypePattern).filter(Boolean))),
+    regexRules
+  };
+}
+function loadStoredRuleSet() {
+  if (cachedRuleSet) {
+    return cachedRuleSet;
+  }
+  const storePath = getRuleStorePath();
+  if (!existsSync(storePath)) {
+    cachedRuleSet = createDefaultRuleSet();
+    return cachedRuleSet;
+  }
+  try {
+    const raw = readFileSync(storePath, "utf-8");
+    const parsed = JSON.parse(raw);
+    cachedRuleSet = normalizeRuleSet(parsed);
+    return cachedRuleSet;
+  } catch {
+    cachedRuleSet = createDefaultRuleSet();
+    return cachedRuleSet;
+  }
+}
+function saveStoredRuleSet(ruleSet) {
+  cachedRuleSet = ruleSet;
+  const storePath = getRuleStorePath();
+  const storeDir = path.dirname(storePath);
+  if (!existsSync(storeDir)) {
+    mkdirSync(storeDir, { recursive: true });
+  }
+  writeFileSync(storePath, JSON.stringify(ruleSet, null, 2), "utf-8");
+}
+function extractHostname(url) {
+  try {
+    return new URL(url).hostname.toLowerCase();
+  } catch {
+    return "";
+  }
+}
+function matchesDomainRule(hostname, domain) {
+  const normalizedHostname = normalizeDomain(hostname);
+  const normalizedDomain = normalizeDomain(domain);
+  if (!normalizedHostname || !normalizedDomain) {
+    return false;
+  }
+  return normalizedHostname === normalizedDomain || normalizedHostname.endsWith(`.${normalizedDomain}`);
+}
+function matchesMimePattern(mimeType, pattern) {
+  const normalizedMime = normalizeMimeTypePattern(mimeType);
+  const normalizedPattern = normalizeMimeTypePattern(pattern);
+  if (!normalizedMime || !normalizedPattern) {
+    return false;
+  }
+  if (normalizedPattern.endsWith("/*")) {
+    return normalizedMime.startsWith(`${normalizedPattern.slice(0, -1)}`);
+  }
+  return normalizedMime === normalizedPattern;
+}
+function listEmbeddedBrowserResourceCaptureRules() {
+  return loadStoredRuleSet();
+}
+function updateEmbeddedBrowserResourceCaptureRules(input) {
+  const normalized = normalizeRuleSet(input);
+  saveStoredRuleSet(normalized);
+  return normalized;
+}
+function resetEmbeddedBrowserResourceCaptureRules() {
+  const nextRuleSet = createDefaultRuleSet();
+  saveStoredRuleSet(nextRuleSet);
+  return nextRuleSet;
+}
 function isCatCatchManifestMimeType(normalizedMimeType) {
   return catCatchManifestMimeTypeIncludes.some((value) => normalizedMimeType.includes(value));
 }
@@ -1612,6 +2118,84 @@ function classifyCatCatchExtensionKind(extension) {
     return "key";
   }
   return null;
+}
+function matchCatCatchRegexRule(url, rules = loadStoredRuleSet().regexRules) {
+  const normalizedUrl = String(url || "").trim();
+  if (!normalizedUrl) {
+    return null;
+  }
+  for (const rule of rules) {
+    if (!rule.enabled) {
+      continue;
+    }
+    const regex = new RegExp(rule.pattern, rule.flags);
+    const match = regex.exec(normalizedUrl);
+    if (!match) {
+      continue;
+    }
+    if (rule.blacklist) {
+      return {
+        blacklist: true,
+        ext: rule.ext || void 0,
+        url: normalizedUrl
+      };
+    }
+    if (match.length <= 1) {
+      return {
+        blacklist: false,
+        ext: rule.ext || void 0,
+        url: normalizedUrl
+      };
+    }
+    const rewrittenPath = match.slice(1).map((value) => decodeURIComponent(value)).join("");
+    let rewrittenUrl = rewrittenPath;
+    if (rewrittenUrl && !/^https?:\/\//i.test(rewrittenUrl)) {
+      try {
+        const parsedUrl = new URL(normalizedUrl);
+        rewrittenUrl = `${parsedUrl.protocol}//${parsedUrl.host}${rewrittenUrl}`;
+      } catch {
+        rewrittenUrl = normalizedUrl;
+      }
+    }
+    return {
+      blacklist: false,
+      ext: rule.ext || void 0,
+      url: rewrittenUrl || normalizedUrl
+    };
+  }
+  return null;
+}
+function evaluateEmbeddedBrowserResourceCapture(input) {
+  const normalizedUrl = String(input.url || "").trim();
+  if (!normalizedUrl || normalizedUrl.startsWith("data:")) {
+    return null;
+  }
+  const ruleSet = loadStoredRuleSet();
+  const hostname = extractHostname(normalizedUrl) || extractHostname(String(input.pageUrl || "").trim());
+  if (ruleSet.domainWhitelist.length > 0 && hostname && !ruleSet.domainWhitelist.some((domain) => matchesDomainRule(hostname, domain))) {
+    return null;
+  }
+  if (hostname && ruleSet.domainBlacklist.some((domain) => matchesDomainRule(hostname, domain))) {
+    return null;
+  }
+  const regexMatch = matchCatCatchRegexRule(normalizedUrl, ruleSet.regexRules);
+  if (regexMatch == null ? void 0 : regexMatch.blacklist) {
+    return null;
+  }
+  const resolvedUrl = (regexMatch == null ? void 0 : regexMatch.url) || normalizedUrl;
+  const extHint = normalizeExtension((regexMatch == null ? void 0 : regexMatch.ext) || input.ext || inferExtensionFromUrl$1(resolvedUrl)) || void 0;
+  const normalizedMimeType = normalizeMimeTypePattern(input.mimeType || "");
+  const matchedExtension = extHint ? ruleSet.extensions.includes(extHint) : false;
+  const matchedMime = normalizedMimeType ? ruleSet.mimeTypes.some((pattern) => matchesMimePattern(normalizedMimeType, pattern)) : false;
+  const hasTypeSignal = Boolean(extHint || normalizedMimeType);
+  if (!regexMatch && hasTypeSignal && !matchedExtension && !matchedMime) {
+    return null;
+  }
+  return {
+    extHint,
+    matchedByRuleSet: Boolean(regexMatch || matchedExtension || matchedMime),
+    url: resolvedUrl
+  };
 }
 function getHeaderValue(headers, name) {
   if (!headers) {
@@ -1645,7 +2229,7 @@ function getResourceExtension(url) {
 }
 function classifyCapturedResource(input) {
   const normalizedMimeType = normalizeMimeType(input.mimeType);
-  const extension = getResourceExtension(input.url);
+  const extension = String(input.extHint || "").trim().toLowerCase() || getResourceExtension(input.url);
   const extensionKind = classifyCatCatchExtensionKind(extension);
   if (extensionKind === "manifest" || isCatCatchManifestMimeType(normalizedMimeType)) {
     return "manifest";
@@ -1704,10 +2288,10 @@ function inferStreamType(input) {
     return "video";
   }
   const normalizedUrl = String(input.url || "").toLowerCase();
-  if (/(^|[\/_.-])audio([\/_.-]|$)/.test(normalizedUrl)) {
+  if (/(^|[/_.-])audio([/_.-]|$)/.test(normalizedUrl)) {
     return "audio";
   }
-  if (/(^|[\/_.-])video([\/_.-]|$)/.test(normalizedUrl)) {
+  if (/(^|[/_.-])video([/_.-]|$)/.test(normalizedUrl)) {
     return "video";
   }
   if (input.resourceType === "media") {
@@ -1890,26 +2474,40 @@ function initializeEmbeddedBrowserResourceBridge(options) {
       return;
     }
     const targetWebContents = webContents.fromId(details.webContentsId);
-    const url = String(details.url || "").trim();
+    const rawUrl = String(details.url || "").trim();
     const requestContext = requestContextsByRequestId.get(details.id);
     const mimeType = normalizeMimeType(getHeaderValue(details.responseHeaders, "content-type"));
+    const pageUrl = (targetWebContents == null ? void 0 : targetWebContents.getURL()) || void 0;
+    const captureEvaluation = evaluateEmbeddedBrowserResourceCapture({
+      ext: getResourceExtension(rawUrl) || void 0,
+      mimeType,
+      pageUrl,
+      resourceType: details.resourceType,
+      url: rawUrl
+    });
+    if (!captureEvaluation) {
+      requestContextsByRequestId.delete(details.id);
+      return;
+    }
+    const url = captureEvaluation.url;
     const kind = classifyCapturedResource({
+      extHint: captureEvaluation.extHint,
       mimeType,
       resourceType: details.resourceType,
       url
     });
-    if (!shouldCaptureResource({ kind, resourceType: details.resourceType, url })) {
+    if (!captureEvaluation.matchedByRuleSet && !shouldCaptureResource({ kind, resourceType: details.resourceType, url })) {
       requestContextsByRequestId.delete(details.id);
       return;
     }
     updateEmbeddedBrowserCapturedResource(tabId, {
       capturedAt: Date.now(),
       contentLength: parseContentRangeTotal(getHeaderValue(details.responseHeaders, "content-range")) || parseContentLength(getHeaderValue(details.responseHeaders, "content-length")),
-      ext: getResourceExtension(url) || void 0,
+      ext: captureEvaluation.extHint || getResourceExtension(url) || void 0,
       kind,
       method: details.method || void 0,
       mimeType,
-      pageUrl: (targetWebContents == null ? void 0 : targetWebContents.getURL()) || void 0,
+      pageUrl,
       referer: (requestContext == null ? void 0 : requestContext.referer) || details.referrer || void 0,
       requestHeaders: requestContext == null ? void 0 : requestContext.requestHeaders,
       resourceType: details.resourceType || void 0,
@@ -1937,18 +2535,30 @@ function recordEmbeddedBrowserProbeResource(tabId, payload) {
   if (!url) {
     return null;
   }
-  const kind = payload.kind || classifyCapturedResource({
+  const captureEvaluation = evaluateEmbeddedBrowserResourceCapture({
+    ext: payload.ext,
     mimeType: payload.mimeType,
+    pageUrl: payload.pageUrl,
     resourceType: payload.resourceType,
     url
   });
-  if (!shouldCaptureResource({ kind, resourceType: payload.resourceType, url })) {
+  if (!captureEvaluation) {
+    return null;
+  }
+  const resolvedUrl = captureEvaluation.url;
+  const kind = payload.kind || classifyCapturedResource({
+    extHint: captureEvaluation.extHint,
+    mimeType: payload.mimeType,
+    resourceType: payload.resourceType,
+    url: resolvedUrl
+  });
+  if (!captureEvaluation.matchedByRuleSet && !shouldCaptureResource({ kind, resourceType: payload.resourceType, url: resolvedUrl })) {
     return null;
   }
   return updateEmbeddedBrowserCapturedResource(tabId, {
     capturedAt: Number(payload.capturedAt) || Date.now(),
     contentLength: payload.contentLength,
-    ext: payload.ext,
+    ext: captureEvaluation.extHint || payload.ext,
     kind,
     method: payload.method,
     mimeType: normalizeMimeType(payload.mimeType),
@@ -1961,9 +2571,9 @@ function recordEmbeddedBrowserProbeResource(tabId, payload) {
       mimeType: payload.mimeType,
       resourceType: payload.resourceType,
       streamType: payload.streamType,
-      url
+      url: resolvedUrl
     }),
-    url
+    url: resolvedUrl
   });
 }
 function resolveEmbeddedBrowserOrigin(rawValue) {
@@ -2625,6 +3235,17 @@ function createEmbeddedBrowserResourceExtractScript(resourceKey) {
     })()
   `;
 }
+function createEmbeddedBrowserResourceDrainMseScript(resourceKey) {
+  return `
+    (() => {
+      const probe = window.__OMNIFLOW_EMBEDDED_BROWSER_RESOURCE_PROBE__
+      const handler = probe && typeof probe.drainResource === 'function'
+        ? probe.drainResource
+        : null
+      return handler ? handler(${JSON.stringify(resourceKey)}) : null
+    })()
+  `;
+}
 async function runEmbeddedBrowserResourceProbeAction(executeScript, action, resourceKey) {
   const normalizedResourceKey = String(resourceKey || "").trim();
   if (!normalizedResourceKey) {
@@ -2667,6 +3288,386 @@ async function extractEmbeddedBrowserResourceFromPage(executeScript, resourceKey
     resourceKey: typeof payload.resourceKey === "string" ? payload.resourceKey : normalizedResourceKey,
     streamType: payload.streamType === "audio" || payload.streamType === "video" ? payload.streamType : void 0
   };
+}
+async function drainEmbeddedBrowserMseResourceFromPage(executeScript, resourceKey) {
+  const normalizedResourceKey = String(resourceKey || "").trim();
+  if (!normalizedResourceKey) {
+    return null;
+  }
+  const result = await executeScript(
+    createEmbeddedBrowserResourceDrainMseScript(normalizedResourceKey)
+  );
+  if (!result || typeof result !== "object") {
+    return null;
+  }
+  const payload = result;
+  if (typeof payload.fileName !== "string") {
+    return null;
+  }
+  return {
+    base64: typeof payload.base64 === "string" ? payload.base64 : void 0,
+    fileName: payload.fileName,
+    mimeType: typeof payload.mimeType === "string" ? payload.mimeType : void 0,
+    resourceKey: typeof payload.resourceKey === "string" ? payload.resourceKey : normalizedResourceKey,
+    streamType: payload.streamType === "audio" || payload.streamType === "video" ? payload.streamType : void 0
+  };
+}
+function createDefaultEmbeddedBrowserExternalToolSettings() {
+  return {
+    aria2: {
+      downloadDir: "",
+      enabled: false,
+      label: "aria2 RPC",
+      rpcUrl: "http://localhost:6800/jsonrpc",
+      secret: ""
+    },
+    command: {
+      enabled: false,
+      label: "本地命令",
+      template: 'N_m3u8DL-RE "{url}" --save-dir "{downloadDir}" --save-name "{filename}" {headerArgs}',
+      workingDirectory: ""
+    },
+    protocol: {
+      enabled: false,
+      label: "m3u8dl URL 协议",
+      urlTemplate: "m3u8dl:{url}"
+    }
+  };
+}
+function cloneEmbeddedBrowserExternalToolSettings(settings) {
+  return {
+    aria2: { ...settings.aria2 },
+    command: { ...settings.command },
+    protocol: { ...settings.protocol }
+  };
+}
+function listEnabledEmbeddedBrowserExternalTools(settings) {
+  const options = [];
+  if (settings.aria2.enabled) {
+    options.push({
+      key: "aria2",
+      label: settings.aria2.label || "aria2 RPC"
+    });
+  }
+  if (settings.command.enabled) {
+    options.push({
+      key: "command",
+      label: settings.command.label || "本地命令"
+    });
+  }
+  if (settings.protocol.enabled) {
+    options.push({
+      key: "protocol",
+      label: settings.protocol.label || "m3u8dl URL 协议"
+    });
+  }
+  return options;
+}
+const STORE_FILE_NAME = "embedded-browser-external-tools.json";
+let cachedSettings = null;
+function getExternalToolStorePath() {
+  return path.join(app.getPath("userData"), STORE_FILE_NAME);
+}
+function sanitizeLabel(value, fallback) {
+  return String(value || "").trim() || fallback;
+}
+function normalizeSettings(input) {
+  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l;
+  const defaults = createDefaultEmbeddedBrowserExternalToolSettings();
+  return {
+    aria2: {
+      downloadDir: String(((_a = input == null ? void 0 : input.aria2) == null ? void 0 : _a.downloadDir) || "").trim(),
+      enabled: Boolean((_b = input == null ? void 0 : input.aria2) == null ? void 0 : _b.enabled),
+      label: sanitizeLabel(((_c = input == null ? void 0 : input.aria2) == null ? void 0 : _c.label) || "", defaults.aria2.label),
+      rpcUrl: String(((_d = input == null ? void 0 : input.aria2) == null ? void 0 : _d.rpcUrl) || defaults.aria2.rpcUrl).trim(),
+      secret: String(((_e = input == null ? void 0 : input.aria2) == null ? void 0 : _e.secret) || "").trim()
+    },
+    command: {
+      enabled: Boolean((_f = input == null ? void 0 : input.command) == null ? void 0 : _f.enabled),
+      label: sanitizeLabel(((_g = input == null ? void 0 : input.command) == null ? void 0 : _g.label) || "", defaults.command.label),
+      template: String(((_h = input == null ? void 0 : input.command) == null ? void 0 : _h.template) || defaults.command.template).trim(),
+      workingDirectory: String(((_i = input == null ? void 0 : input.command) == null ? void 0 : _i.workingDirectory) || "").trim()
+    },
+    protocol: {
+      enabled: Boolean((_j = input == null ? void 0 : input.protocol) == null ? void 0 : _j.enabled),
+      label: sanitizeLabel(((_k = input == null ? void 0 : input.protocol) == null ? void 0 : _k.label) || "", defaults.protocol.label),
+      urlTemplate: String(((_l = input == null ? void 0 : input.protocol) == null ? void 0 : _l.urlTemplate) || defaults.protocol.urlTemplate).trim()
+    }
+  };
+}
+function loadSettingsFromDisk() {
+  const storePath = getExternalToolStorePath();
+  if (!existsSync(storePath)) {
+    return createDefaultEmbeddedBrowserExternalToolSettings();
+  }
+  try {
+    const raw = readFileSync(storePath, "utf8");
+    const parsed = JSON.parse(raw);
+    return normalizeSettings(parsed);
+  } catch (error) {
+    runtimeLogger.warn("embedded browser external tool settings load failed", {
+      error: error instanceof Error ? error.message : String(error)
+    });
+    return createDefaultEmbeddedBrowserExternalToolSettings();
+  }
+}
+function persistSettings(settings) {
+  const storePath = getExternalToolStorePath();
+  const directoryPath = path.dirname(storePath);
+  if (!existsSync(directoryPath)) {
+    mkdirSync(directoryPath, { recursive: true });
+  }
+  writeFileSync(storePath, JSON.stringify(settings, null, 2), "utf8");
+}
+function getSettings() {
+  if (!cachedSettings) {
+    cachedSettings = loadSettingsFromDisk();
+  }
+  return cloneEmbeddedBrowserExternalToolSettings(cachedSettings);
+}
+function resolveDownloadDirectory(preferredPath) {
+  return String(preferredPath || "").trim() || path.join(os.homedir(), "Downloads");
+}
+function deriveFileName(input) {
+  const explicit = String(input.fileName || "").trim();
+  if (explicit) {
+    return explicit;
+  }
+  const title = String(input.title || "").trim().replace(/[\\/:*?"<>|]+/g, "_");
+  if (title) {
+    return title;
+  }
+  try {
+    const pathname = new URL(input.url).pathname;
+    const fileName = decodeURIComponent(pathname.split("/").filter(Boolean).pop() || "").replace(/[\\/:*?"<>|]+/g, "_").trim();
+    if (fileName) {
+      return fileName;
+    }
+  } catch {
+  }
+  return "captured-resource";
+}
+function buildDispatchContext(settings, input) {
+  const headers = Object.fromEntries(
+    Object.entries(input.headers || {}).filter(([headerName, headerValue]) => Boolean(String(headerName || "").trim()) && Boolean(String(headerValue || "").trim()))
+  );
+  const fileName = deriveFileName(input);
+  const title = String(input.title || fileName).trim() || fileName;
+  const downloadDir = resolveDownloadDirectory(settings.aria2.downloadDir);
+  const referer = String(input.referer || input.pageUrl || headers.referer || headers.Referer || "").trim();
+  const cookie = String(headers.cookie || headers.Cookie || "").trim();
+  const userAgent = String(headers["user-agent"] || headers["User-Agent"] || "").trim();
+  const headerArgs = Object.entries(headers).map(([headerName, headerValue]) => `--header "${headerName}: ${String(headerValue).replace(/"/g, '\\"')}"`).join(" ").trim();
+  return {
+    cookie,
+    downloadDir,
+    encodedUrl: encodeURIComponent(input.url),
+    fileName,
+    filename: fileName,
+    headerArgs,
+    headersJson: JSON.stringify(headers),
+    mimeType: String(input.mimeType || "").trim(),
+    pageUrl: String(input.pageUrl || "").trim(),
+    referer,
+    title,
+    url: input.url,
+    userAgent
+  };
+}
+function applyTemplate(template, context) {
+  return String(template || "").replace(/\{([a-zA-Z0-9]+)\}/g, (_match, key) => context[key] ?? "");
+}
+async function dispatchToAria2(settings, input) {
+  const rpcUrl = String(settings.aria2.rpcUrl || "").trim();
+  if (!rpcUrl) {
+    throw new Error("请先填写 aria2 RPC 地址");
+  }
+  const parsedUrl = new URL(rpcUrl);
+  const transport = parsedUrl.protocol === "https:" ? https : http;
+  const context = buildDispatchContext(settings, input);
+  const params = [];
+  if (settings.aria2.secret) {
+    params.push(`token:${settings.aria2.secret}`);
+  }
+  params.push([input.url]);
+  params.push({
+    dir: context.downloadDir,
+    header: Object.entries(input.headers || {}).map(([headerName, headerValue]) => `${headerName}: ${headerValue}`),
+    out: context.fileName,
+    referer: context.referer || void 0,
+    "user-agent": context.userAgent || void 0
+  });
+  const payload = JSON.stringify({
+    id: `omniflow-${Date.now()}`,
+    jsonrpc: "2.0",
+    method: "aria2.addUri",
+    params
+  });
+  await new Promise((resolve, reject) => {
+    const request = transport.request({
+      headers: {
+        "content-length": Buffer.byteLength(payload),
+        "content-type": "application/json"
+      },
+      hostname: parsedUrl.hostname,
+      method: "POST",
+      path: `${parsedUrl.pathname || "/"}${parsedUrl.search || ""}`,
+      port: parsedUrl.port ? Number(parsedUrl.port) : void 0,
+      protocol: parsedUrl.protocol
+    }, (response) => {
+      const chunks = [];
+      response.on("data", (chunk) => {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      });
+      response.on("end", () => {
+        var _a;
+        const responseText = Buffer.concat(chunks).toString("utf8");
+        if ((response.statusCode || 0) < 200 || (response.statusCode || 0) >= 300) {
+          reject(new Error(`aria2 RPC 请求失败：HTTP ${response.statusCode || 0}`));
+          return;
+        }
+        try {
+          const parsed = JSON.parse(responseText);
+          if ((_a = parsed.error) == null ? void 0 : _a.message) {
+            reject(new Error(parsed.error.message));
+            return;
+          }
+        } catch {
+        }
+        resolve();
+      });
+    });
+    request.on("error", reject);
+    request.write(payload);
+    request.end();
+  });
+}
+async function dispatchToProtocol(settings, input) {
+  const template = String(settings.protocol.urlTemplate || "").trim();
+  if (!template) {
+    throw new Error("请先填写 URL 协议模板");
+  }
+  const targetUrl = applyTemplate(template, buildDispatchContext(settings, input));
+  if (!targetUrl) {
+    throw new Error("URL 协议模板展开后为空");
+  }
+  await shell.openExternal(targetUrl);
+}
+async function dispatchToCommand(settings, input) {
+  const template = String(settings.command.template || "").trim();
+  if (!template) {
+    throw new Error("请先填写命令模板");
+  }
+  const command2 = applyTemplate(template, buildDispatchContext(settings, input)).trim();
+  if (!command2) {
+    throw new Error("命令模板展开后为空");
+  }
+  await new Promise((resolve, reject) => {
+    const child = spawn(command2, {
+      cwd: String(settings.command.workingDirectory || "").trim() || void 0,
+      detached: true,
+      shell: true,
+      stdio: "ignore",
+      windowsHide: true
+    });
+    let settled = false;
+    let timer = null;
+    const cleanup = () => {
+      child.removeAllListeners("error");
+      child.removeAllListeners("exit");
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+    };
+    const resolveLaunch = () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      resolve();
+    };
+    const rejectLaunch = (error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      runtimeLogger.warn("embedded browser external command spawn failed", {
+        command: command2,
+        error: error.message
+      });
+      reject(error);
+    };
+    child.once("error", (error) => {
+      rejectLaunch(error instanceof Error ? error : new Error(String(error)));
+    });
+    child.once("exit", (code, signal) => {
+      if (settled) {
+        return;
+      }
+      if (typeof code === "number" && code !== 0) {
+        rejectLaunch(new Error(`本地命令启动失败，退出码 ${code}`));
+        return;
+      }
+      if (signal) {
+        rejectLaunch(new Error(`本地命令启动失败，进程被 ${signal} 中断`));
+        return;
+      }
+      resolveLaunch();
+    });
+    child.unref();
+    timer = setTimeout(() => {
+      resolveLaunch();
+    }, 800);
+  });
+}
+function listEmbeddedBrowserExternalToolSettings() {
+  return getSettings();
+}
+function listEnabledEmbeddedBrowserExternalToolOptions() {
+  return listEnabledEmbeddedBrowserExternalTools(getSettings());
+}
+function updateEmbeddedBrowserExternalToolSettings(nextSettings) {
+  const normalizedSettings = normalizeSettings(nextSettings);
+  cachedSettings = normalizedSettings;
+  persistSettings(normalizedSettings);
+  return cloneEmbeddedBrowserExternalToolSettings(normalizedSettings);
+}
+function resetEmbeddedBrowserExternalToolSettings() {
+  const defaults = createDefaultEmbeddedBrowserExternalToolSettings();
+  cachedSettings = defaults;
+  persistSettings(defaults);
+  return cloneEmbeddedBrowserExternalToolSettings(defaults);
+}
+async function dispatchEmbeddedBrowserExternalTool(toolKey, payload) {
+  const settings = getSettings();
+  if (!/^https?:\/\//i.test(String(payload.url || "").trim())) {
+    throw new Error("只有 http(s) 资源可以发送到外部工具");
+  }
+  if (toolKey === "aria2") {
+    if (!settings.aria2.enabled) {
+      throw new Error("aria2 RPC 尚未启用");
+    }
+    await dispatchToAria2(settings, payload);
+    return;
+  }
+  if (toolKey === "protocol") {
+    if (!settings.protocol.enabled) {
+      throw new Error("URL 协议工具尚未启用");
+    }
+    await dispatchToProtocol(settings, payload);
+    return;
+  }
+  if (toolKey === "command") {
+    if (!settings.command.enabled) {
+      throw new Error("本地命令工具尚未启用");
+    }
+    await dispatchToCommand(settings, payload);
+    return;
+  }
+  throw new Error("不支持的外部工具类型");
 }
 function embeddedBrowserResourceProbePageActionsBody() {
   function attachTrackedMediaElement(element) {
@@ -2770,16 +3771,20 @@ function embeddedBrowserResourceProbePageActionsBody() {
   function clearCatchMediaCacheInternal2() {
     let cleared = false;
     mseStreams.forEach((stream) => {
+      clearMseFlushTimer(stream.streamId);
       if (stream.blobUrl) {
         URL.revokeObjectURL(stream.blobUrl);
         stream.blobUrl = "";
       }
+      emitMseStreamReset(stream.streamId);
+      stream.flushedBytes = 0;
       if (isCaptureComplete) {
         cleared = cleared || stream.buffers.length > 0;
         stream.buffers = [];
         stream.bufferCount = 0;
         stream.lastReportedBufferCount = 0;
         stream.lastReportedBytes = 0;
+        stream.retainedBytes = 0;
         stream.totalBytes = 0;
         emitMseStream2(stream.streamId);
         return;
@@ -2788,6 +3793,7 @@ function embeddedBrowserResourceProbePageActionsBody() {
         const firstChunk = stream.buffers[0];
         stream.buffers = firstChunk ? [firstChunk] : [];
         stream.bufferCount = stream.buffers.length;
+        stream.retainedBytes = (firstChunk == null ? void 0 : firstChunk.byteLength) || 0;
         stream.totalBytes = (firstChunk == null ? void 0 : firstChunk.byteLength) || 0;
         stream.lastReportedBufferCount = stream.bufferCount;
         stream.lastReportedBytes = stream.totalBytes;
@@ -2960,6 +3966,28 @@ function embeddedBrowserResourceProbePageActionsBody() {
       return null;
     }
   }
+  function drainMseResource(resourceKey) {
+    const streamId = String(resourceKey || "").replace(/^mse-stream:/, "");
+    const stream = mseStreams.get(streamId);
+    if (!stream) {
+      return null;
+    }
+    clearMseFlushTimer(streamId);
+    const retainedBuffers = normalizeBuffersForPlayback(stream.buffers);
+    const retainedBuffer = retainedBuffers.length > 0 ? combineArrayBuffers(retainedBuffers) : null;
+    stream.buffers = [];
+    stream.retainedBytes = 0;
+    stream.lastReportedBufferCount = stream.bufferCount;
+    stream.lastReportedBytes = stream.totalBytes;
+    emitMseStream2(streamId);
+    return {
+      base64: retainedBuffer && retainedBuffer.byteLength > 0 ? arrayBufferToBase64(retainedBuffer) : void 0,
+      fileName: createMseExportName(streamId),
+      mimeType: stream.mimeType,
+      resourceKey,
+      streamType: stream.streamType
+    };
+  }
   function openProbeResource(resourceKey) {
     const resource = probeResources.get(resourceKey);
     if (!(resource == null ? void 0 : resource.blobUrl)) {
@@ -3008,6 +4036,13 @@ function embeddedBrowserResourceProbePageActionsBody() {
     },
     downloadCatchMedia() {
       return downloadCatchMediaInternal();
+    },
+    drainResource(resourceKey) {
+      const normalizedResourceKey = String(resourceKey || "");
+      if (normalizedResourceKey.startsWith("mse-stream:")) {
+        return drainMseResource(normalizedResourceKey);
+      }
+      return null;
     },
     exportResource(resourceKey) {
       const normalizedResourceKey = String(resourceKey || "");
@@ -3979,6 +5014,12 @@ function embeddedBrowserResourceProbeRuntimeCoreBody() {
     }
     return btoa(binary);
   }
+  function emitProbeConsolePayload(payload) {
+    try {
+      originalConsoleInfo(consolePrefix + JSON.stringify(payload));
+    } catch {
+    }
+  }
   function textToBase642(text) {
     return arrayBufferToBase642(new TextEncoder().encode(text).buffer);
   }
@@ -4243,6 +5284,14 @@ function embeddedBrowserResourceProbeRuntimeCoreBody() {
     }
     return buffers;
   }
+  function emitMseStreamReset2(streamId) {
+    emitProbeConsolePayload({
+      capturedAt: Date.now(),
+      event: "mse-reset",
+      pageUrl: currentLocationHref2,
+      resourceKey: createMseResourceKey(streamId)
+    });
+  }
   function emit2(payload, fromRelay = false) {
     if (!payload.url) {
       return;
@@ -4262,22 +5311,19 @@ function embeddedBrowserResourceProbeRuntimeCoreBody() {
       relayEnvelope({ payload, type: "capture" });
       return;
     }
-    try {
-      originalConsoleInfo(consolePrefix + JSON.stringify({
-        capturedAt: Date.now(),
-        contentLength: payload.contentLength,
-        ext: payload.ext,
-        kind: payload.kind || classifyKind2(payload.url, payload.mimeType),
-        mimeType: payload.mimeType,
-        pageUrl: currentLocationHref2,
-        resourceKey: payload.resourceKey,
-        resourceType: payload.resourceType || "probe",
-        source: payload.source,
-        streamType: payload.streamType,
-        url: payload.url
-      }));
-    } catch {
-    }
+    emitProbeConsolePayload({
+      capturedAt: Date.now(),
+      contentLength: payload.contentLength,
+      ext: payload.ext,
+      kind: payload.kind || classifyKind2(payload.url, payload.mimeType),
+      mimeType: payload.mimeType,
+      pageUrl: currentLocationHref2,
+      resourceKey: payload.resourceKey,
+      resourceType: payload.resourceType || "probe",
+      source: payload.source,
+      streamType: payload.streamType,
+      url: payload.url
+    });
   }
   function inferStreamTypeFromPath(path2) {
     const normalizedPath = path2.map((item) => String(item || "").toLowerCase());
@@ -4304,6 +5350,7 @@ function embeddedBrowserResourceProbeRuntimeCoreBody() {
     dataUrlPattern,
     decodeDataUrlText,
     emit2,
+    emitMseStreamReset2,
     emitGeneratedResource2,
     emitKeyCandidateFromBase642,
     emitKeyCandidateFromBuffer,
@@ -4392,9 +5439,12 @@ function embeddedBrowserResourceProbeRuntimeHooksBody() {
             blobUrl: "",
             bufferCount: 0,
             buffers: [],
+            flushTimer: null,
+            flushedBytes: 0,
             lastReportedBufferCount: 0,
             lastReportedBytes: 0,
             mimeType: mimeType || (streamType === "audio" ? "audio/mp4" : "video/mp4"),
+            retainedBytes: 0,
             streamId,
             streamType,
             totalBytes: 0
@@ -4415,6 +5465,7 @@ function embeddedBrowserResourceProbeRuntimeHooksBody() {
                 }
                 stream.buffers.push(chunk);
                 stream.bufferCount += 1;
+                stream.retainedBytes += chunk.byteLength;
                 stream.totalBytes += chunk.byteLength;
                 probeDiagnostics.appendBufferCount += 1;
                 probeDiagnostics.lastAppendAt = Date.now();
@@ -4423,6 +5474,9 @@ function embeddedBrowserResourceProbeRuntimeHooksBody() {
                   stream.lastReportedBufferCount = stream.bufferCount;
                   stream.lastReportedBytes = stream.totalBytes;
                   emitMseStream(streamId);
+                }
+                if (stream.retainedBytes >= MSE_FLUSH_THRESHOLD_BYTES) {
+                  scheduleMseStreamFlush(streamId);
                 }
                 return appendResult;
               }
@@ -5216,6 +6270,9 @@ async function cleanupEmbeddedBrowserResourceMergeTempDir(tempDir) {
   });
 }
 async function writeExtractedResourceToTempFile(tempDir, resource) {
+  if (resource.filePath) {
+    return resource.filePath;
+  }
   if (!resource.base64) {
     throw new Error("缺少可写入的资源内容");
   }
@@ -5377,6 +6434,13 @@ function deriveEmbeddedBrowserExtractedResourceOutputFileName(resourceFileName, 
   return `${sanitizeFileName(parsedSuggestion.name || normalizedSuggestion)}${outputExtension}`;
 }
 async function saveEmbeddedBrowserExtractedResourceFile(resource, outputPath) {
+  if (resource.filePath) {
+    await copyFile(resource.filePath, outputPath);
+    return outputPath;
+  }
+  if (!resource.base64) {
+    throw new Error("缺少可保存的资源内容");
+  }
   await writeFile(outputPath, Buffer$1.from(resource.base64, "base64"));
   return outputPath;
 }
@@ -5416,11 +6480,14 @@ function deriveEmbeddedBrowserManifestOutputFileName(input, kind) {
 function buildEmbeddedBrowserManifestDownloadArgs(request) {
   return [
     "-y",
+    "-nostats",
     "-protocol_whitelist",
     "file,http,https,tcp,tls,crypto,data",
     "-allowed_extensions",
     "ALL",
     ...buildFfmpegHttpHeaderArgs(request.headers),
+    "-progress",
+    "pipe:1",
     "-i",
     request.manifestUrl,
     "-map",
@@ -5434,6 +6501,57 @@ function buildEmbeddedBrowserManifestDownloadArgs(request) {
     request.outputPath
   ];
 }
+function buildEmbeddedBrowserManifestTrackMergeArgs(request) {
+  return [
+    "-y",
+    "-nostats",
+    "-protocol_whitelist",
+    "file,http,https,tcp,tls,crypto,data",
+    "-allowed_extensions",
+    "ALL",
+    ...buildFfmpegHttpHeaderArgs(request.headers),
+    "-progress",
+    "pipe:1",
+    "-i",
+    request.videoManifestUrl,
+    ...buildFfmpegHttpHeaderArgs(request.headers),
+    "-i",
+    request.audioManifestUrl,
+    "-map",
+    "0:v:0?",
+    "-map",
+    "1:a:0?",
+    "-c",
+    "copy",
+    "-movflags",
+    "+faststart",
+    request.outputPath
+  ];
+}
+function parseFfmpegProgressChunk(state, chunkText) {
+  String(chunkText || "").split(/\r?\n/).forEach((line) => {
+    const normalizedLine = String(line || "").trim();
+    if (!normalizedLine || !normalizedLine.includes("=")) {
+      return;
+    }
+    const separatorIndex = normalizedLine.indexOf("=");
+    const key = normalizedLine.slice(0, separatorIndex).trim();
+    const value = normalizedLine.slice(separatorIndex + 1).trim();
+    if (!key) {
+      return;
+    }
+    if (key === "out_time_ms" || key === "out_time_us") {
+      const rawValue = Number(value);
+      if (Number.isFinite(rawValue) && rawValue >= 0) {
+        state.processedSeconds = rawValue / 1e6;
+      }
+      return;
+    }
+    if (key === "speed") {
+      state.speedText = value;
+    }
+  });
+}
 async function downloadEmbeddedBrowserManifestResource(request) {
   const ffmpegPath = await resolveEmbeddedBrowserFfmpegPath(request.ffmpegPath);
   if (!ffmpegPath) {
@@ -5443,11 +6561,33 @@ async function downloadEmbeddedBrowserManifestResource(request) {
   return new Promise((resolve, reject) => {
     const stdout = [];
     const stderr = [];
+    let lastProcessedSeconds = -1;
+    let lastSpeedText = "";
+    const progressState = {};
     const child = spawn(ffmpegPath, commandArgs, {
       stdio: ["ignore", "pipe", "pipe"]
     });
     child.stdout.on("data", (chunk) => {
-      stdout.push(String(chunk));
+      var _a;
+      const chunkText = String(chunk);
+      stdout.push(chunkText);
+      parseFfmpegProgressChunk(progressState, chunkText);
+      const nextProcessedSeconds = progressState.processedSeconds;
+      const nextSpeedText = progressState.speedText || "";
+      const progressChanged = typeof nextProcessedSeconds === "number" && Math.abs(nextProcessedSeconds - lastProcessedSeconds) >= 0.5 || nextSpeedText && nextSpeedText !== lastSpeedText;
+      if (!progressChanged) {
+        return;
+      }
+      if (typeof nextProcessedSeconds === "number") {
+        lastProcessedSeconds = nextProcessedSeconds;
+      }
+      if (nextSpeedText) {
+        lastSpeedText = nextSpeedText;
+      }
+      (_a = request.onProgress) == null ? void 0 : _a.call(request, {
+        processedSeconds: typeof nextProcessedSeconds === "number" ? Math.min(nextProcessedSeconds, request.durationSeconds || Number.POSITIVE_INFINITY) : void 0,
+        speedText: nextSpeedText || void 0
+      });
     });
     child.stderr.on("data", (chunk) => {
       stderr.push(String(chunk));
@@ -5470,6 +6610,1811 @@ async function downloadEmbeddedBrowserManifestResource(request) {
     });
   });
 }
+async function downloadEmbeddedBrowserManifestTracks(request) {
+  const ffmpegPath = await resolveEmbeddedBrowserFfmpegPath(request.ffmpegPath);
+  if (!ffmpegPath) {
+    throw new Error("未找到可用的 ffmpeg，可在系统环境变量里配置，或确认 /opt/homebrew/bin/ffmpeg 可执行");
+  }
+  const commandArgs = buildEmbeddedBrowserManifestTrackMergeArgs(request);
+  return new Promise((resolve, reject) => {
+    const stdout = [];
+    const stderr = [];
+    let lastProcessedSeconds = -1;
+    let lastSpeedText = "";
+    const progressState = {};
+    const child = spawn(ffmpegPath, commandArgs, {
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    child.stdout.on("data", (chunk) => {
+      var _a;
+      const chunkText = String(chunk);
+      stdout.push(chunkText);
+      parseFfmpegProgressChunk(progressState, chunkText);
+      const nextProcessedSeconds = progressState.processedSeconds;
+      const nextSpeedText = progressState.speedText || "";
+      const progressChanged = typeof nextProcessedSeconds === "number" && Math.abs(nextProcessedSeconds - lastProcessedSeconds) >= 0.5 || nextSpeedText && nextSpeedText !== lastSpeedText;
+      if (!progressChanged) {
+        return;
+      }
+      if (typeof nextProcessedSeconds === "number") {
+        lastProcessedSeconds = nextProcessedSeconds;
+      }
+      if (nextSpeedText) {
+        lastSpeedText = nextSpeedText;
+      }
+      (_a = request.onProgress) == null ? void 0 : _a.call(request, {
+        processedSeconds: typeof nextProcessedSeconds === "number" ? Math.min(nextProcessedSeconds, request.durationSeconds || Number.POSITIVE_INFINITY) : void 0,
+        speedText: nextSpeedText || void 0
+      });
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr.push(String(chunk));
+    });
+    child.once("error", (error) => {
+      reject(error);
+    });
+    child.once("exit", (code) => {
+      if (code === 0) {
+        resolve({
+          commandArgs,
+          ffmpegPath,
+          outputPath: request.outputPath,
+          stderr: stderr.join(""),
+          stdout: stdout.join("")
+        });
+        return;
+      }
+      reject(new Error(stderr.join("").trim() || `ffmpeg 退出码异常: ${code}`));
+    });
+  });
+}
+function mergeHeaders(baseHeaders, overrideHeaders) {
+  const headers = new Headers(baseHeaders);
+  Object.entries(overrideHeaders).forEach(([name, value]) => {
+    const normalizedName = String(name || "").trim();
+    const normalizedValue = String(value || "").trim();
+    if (!normalizedName || !normalizedValue) {
+      return;
+    }
+    headers.set(normalizedName, normalizedValue);
+  });
+  return headers;
+}
+function createRangeHeader(byteRange) {
+  if (!byteRange || !Number.isFinite(byteRange.length) || byteRange.length <= 0) {
+    return null;
+  }
+  const start = Math.max(0, Number(byteRange.offset || 0));
+  const end = start + Math.max(0, Number(byteRange.length || 0)) - 1;
+  if (!Number.isFinite(end) || end < start) {
+    return null;
+  }
+  return `bytes=${start}-${end}`;
+}
+async function readResponseBuffer(response, fragment, emit2) {
+  const responseBody = response.body;
+  const contentLength = Number.parseInt(response.headers.get("content-length") || "0", 10) || 0;
+  if (!responseBody || typeof responseBody.getReader !== "function") {
+    const buffer = await response.arrayBuffer();
+    emit2("itemProgress", fragment, true, buffer.byteLength, buffer.byteLength);
+    return buffer;
+  }
+  const reader = responseBody.getReader();
+  const chunks = [];
+  let receivedLength = 0;
+  let reading = true;
+  while (reading) {
+    const { value, done } = await reader.read();
+    if (done) {
+      reading = false;
+      continue;
+    }
+    if (!value) {
+      continue;
+    }
+    const chunk = value instanceof Uint8Array ? value : new Uint8Array(value);
+    chunks.push(chunk);
+    receivedLength += chunk.byteLength;
+    emit2("itemProgress", fragment, false, receivedLength, contentLength, chunk);
+  }
+  emit2("itemProgress", fragment, true, receivedLength, contentLength);
+  const mergedBuffer = new Uint8Array(receivedLength);
+  let offset = 0;
+  chunks.forEach((chunk) => {
+    mergedBuffer.set(chunk, offset);
+    offset += chunk.byteLength;
+  });
+  return mergedBuffer.buffer;
+}
+class EmbeddedBrowserFragmentDownloader {
+  constructor(options) {
+    __publicField(this, "allFragments");
+    __publicField(this, "buffer");
+    __publicField(this, "buffersize");
+    __publicField(this, "controller");
+    __publicField(this, "duration");
+    __publicField(this, "errorList");
+    __publicField(this, "headers");
+    __publicField(this, "index");
+    __publicField(this, "pushIndex");
+    __publicField(this, "running");
+    __publicField(this, "state");
+    __publicField(this, "success");
+    __publicField(this, "thread");
+    __publicField(this, "events");
+    __publicField(this, "fragmentsInternal");
+    __publicField(this, "maxRetries");
+    __publicField(this, "pendingQueue");
+    this.events = {};
+    this.thread = Math.max(1, Number((options == null ? void 0 : options.thread) || 6));
+    this.maxRetries = Math.max(0, Number((options == null ? void 0 : options.maxRetries) || 2));
+    this.headers = options == null ? void 0 : options.headers;
+    this.allFragments = [];
+    this.fragmentsInternal = [];
+    this.pendingQueue = [];
+    this.index = 0;
+    this.buffer = [];
+    this.state = "waiting";
+    this.success = 0;
+    this.errorList = /* @__PURE__ */ new Set();
+    this.buffersize = 0;
+    this.duration = 0;
+    this.pushIndex = 0;
+    this.controller = [];
+    this.running = 0;
+    this.setFragments((options == null ? void 0 : options.fragments) || []);
+  }
+  on(eventName, callback) {
+    const listeners = this.events[eventName] || [];
+    listeners.push(callback);
+    this.events[eventName] = listeners;
+  }
+  emit(eventName, ...args) {
+    const listeners = this.events[eventName];
+    listeners == null ? void 0 : listeners.forEach((callback) => {
+      callback(...args);
+    });
+  }
+  setFragments(fragments) {
+    this.allFragments = fragments.map((fragment) => ({ ...fragment }));
+    this.fragmentsInternal = this.allFragments.map((fragment, index) => ({
+      ...fragment,
+      index
+    }));
+    this.resetRuntimeState();
+  }
+  get fragments() {
+    return this.fragmentsInternal;
+  }
+  get total() {
+    return this.fragmentsInternal.length;
+  }
+  get totalDuration() {
+    return this.fragmentsInternal.reduce((total, fragment) => total + Number(fragment.duration || 0), 0);
+  }
+  get errorItem() {
+    return this.errorList;
+  }
+  push(fragment) {
+    const nextFragment = {
+      ...fragment,
+      index: this.fragmentsInternal.length
+    };
+    this.allFragments.push({ ...fragment });
+    this.fragmentsInternal.push(nextFragment);
+    this.buffer.push(null);
+    this.controller.push(null);
+  }
+  stop(index) {
+    var _a;
+    if (typeof index === "number") {
+      (_a = this.controller[index]) == null ? void 0 : _a.abort();
+      return;
+    }
+    this.controller.forEach((controller) => {
+      controller == null ? void 0 : controller.abort();
+    });
+    this.pendingQueue = [];
+    this.state = "aborted";
+  }
+  destroy() {
+    this.stop();
+    this.events = {};
+    this.allFragments = [];
+    this.fragmentsInternal = [];
+    this.pendingQueue = [];
+    this.resetRuntimeState();
+  }
+  range(start = 0, end = this.allFragments.length) {
+    const normalizedStart = Math.max(0, Number(start || 0));
+    const normalizedEnd = Math.max(0, Number(end || 0));
+    if (normalizedStart > normalizedEnd) {
+      this.emit("error", "start > end");
+      return false;
+    }
+    if (normalizedEnd > this.allFragments.length) {
+      this.emit("error", "end > total");
+      return false;
+    }
+    if (normalizedStart >= this.allFragments.length) {
+      this.emit("error", "start >= total");
+      return false;
+    }
+    const selected = this.allFragments.slice(normalizedStart, normalizedEnd);
+    this.fragmentsInternal = selected.map((fragment, index) => ({
+      ...fragment,
+      index
+    }));
+    if (!this.fragmentsInternal.length) {
+      this.emit("error", "List is empty");
+      return false;
+    }
+    this.resetRuntimeState();
+    return true;
+  }
+  start(start = 0, end = this.allFragments.length) {
+    if (this.state === "running") {
+      this.emit("error", "state running");
+      return;
+    }
+    if (!this.range(start, end)) {
+      return;
+    }
+    this.state = "running";
+    this.pendingQueue = this.fragmentsInternal.map((fragment) => ({
+      attempt: 1,
+      fragment
+    }));
+    const workerCount = Math.min(this.thread, this.pendingQueue.length);
+    for (let index = 0; index < workerCount; index += 1) {
+      void this.scheduleNext();
+    }
+  }
+  retryErrors() {
+    if (this.state === "running") {
+      this.emit("error", "state running");
+      return;
+    }
+    const retryFragments = Array.from(this.errorList);
+    if (!retryFragments.length) {
+      return;
+    }
+    this.errorList.clear();
+    retryFragments.forEach((fragment) => {
+      this.buffer[fragment.index] = null;
+      this.pendingQueue.push({
+        attempt: 1,
+        fragment
+      });
+    });
+    this.state = "running";
+    const workerCount = Math.min(this.thread, this.pendingQueue.length);
+    for (let index = 0; index < workerCount; index += 1) {
+      void this.scheduleNext();
+    }
+  }
+  resetRuntimeState() {
+    this.index = 0;
+    this.pendingQueue = [];
+    this.buffer = Array.from({ length: this.fragmentsInternal.length }, () => null);
+    this.state = "waiting";
+    this.success = 0;
+    this.errorList = /* @__PURE__ */ new Set();
+    this.buffersize = 0;
+    this.duration = 0;
+    this.pushIndex = 0;
+    this.controller = Array.from({ length: this.fragmentsInternal.length }, () => null);
+    this.running = 0;
+  }
+  async scheduleNext() {
+    if (this.state !== "running") {
+      return;
+    }
+    const task = this.pendingQueue.shift();
+    if (!task) {
+      if (this.running === 0) {
+        this.finishIfComplete();
+      }
+      return;
+    }
+    await this.downloadTask(task);
+    if (this.pendingQueue.length > 0 && this.state === "running") {
+      await this.scheduleNext();
+      return;
+    }
+    this.finishIfComplete();
+  }
+  async downloadTask(task) {
+    const { fragment, attempt } = task;
+    this.running += 1;
+    const controller = new AbortController();
+    this.controller[fragment.index] = controller;
+    const initHeaders = {};
+    const rangeHeader = createRangeHeader(fragment.byteRange);
+    if (rangeHeader) {
+      initHeaders.Range = rangeHeader;
+    }
+    const requestInit = {
+      headers: mergeHeaders(this.headers, initHeaders),
+      signal: controller.signal
+    };
+    this.emit("start", fragment, requestInit, attempt);
+    try {
+      const response = await fetch(fragment.url, requestInit);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      const buffer = await readResponseBuffer(response, fragment, this.emit.bind(this));
+      this.emit("rawBuffer", buffer, fragment);
+      this.buffer[fragment.index] = buffer;
+      this.success += 1;
+      this.buffersize += buffer.byteLength;
+      this.duration += Number(fragment.duration || 0);
+      this.errorList.delete(fragment);
+      this.sequentialPush();
+      this.emit("completed", buffer, fragment);
+    } catch (error) {
+      const normalizedError = error instanceof Error ? error : new Error(String(error));
+      if (normalizedError.name === "AbortError") {
+        this.emit("stop", fragment, normalizedError);
+        return;
+      }
+      this.emit("downloadError", fragment, normalizedError, attempt);
+      if (attempt <= this.maxRetries && this.state === "running") {
+        this.pendingQueue.push({
+          attempt: attempt + 1,
+          fragment
+        });
+      } else {
+        this.errorList.add(fragment);
+      }
+    } finally {
+      this.running = Math.max(0, this.running - 1);
+      this.controller[fragment.index] = null;
+    }
+  }
+  sequentialPush() {
+    var _a;
+    if (!((_a = this.events.sequentialPush) == null ? void 0 : _a.length)) {
+      return;
+    }
+    for (; this.pushIndex < this.fragmentsInternal.length; this.pushIndex += 1) {
+      const buffer = this.buffer[this.pushIndex];
+      if (!buffer) {
+        break;
+      }
+      const fragment = this.fragmentsInternal[this.pushIndex];
+      if (!fragment) {
+        break;
+      }
+      this.emit("sequentialPush", buffer, fragment);
+      this.buffer[this.pushIndex] = null;
+    }
+  }
+  finishIfComplete() {
+    if (this.state !== "running" || this.running > 0 || this.pendingQueue.length > 0) {
+      return;
+    }
+    if (this.success === this.fragmentsInternal.length) {
+      this.state = "done";
+      this.emit("allCompleted", this.buffer, this.fragmentsInternal);
+      return;
+    }
+    if (this.errorList.size > 0) {
+      this.state = "waiting";
+      this.emit("failed", this.fragmentsInternal, this.errorList);
+    }
+  }
+}
+function getFragmentSourceIndex(fragment) {
+  if ("sourceIndex" in fragment && typeof fragment.sourceIndex === "number") {
+    return fragment.sourceIndex;
+  }
+  return typeof fragment.index === "number" ? fragment.index : -1;
+}
+function normalizeManualAes128KeyBase64(base64) {
+  const normalizedBase64 = String(base64 || "").trim();
+  if (!normalizedBase64) {
+    return null;
+  }
+  try {
+    const decoded = Buffer.from(normalizedBase64, "base64");
+    return decoded.byteLength === 16 ? decoded.toString("base64") : null;
+  } catch {
+    return null;
+  }
+}
+function createByteRangeHeader(byteRange) {
+  if (!byteRange || byteRange.length <= 0) {
+    return void 0;
+  }
+  const start = Math.max(0, Number(byteRange.offset || 0));
+  const end = start + Math.max(0, Number(byteRange.length || 0)) - 1;
+  return `bytes=${start}-${end}`;
+}
+function createResourceCacheKey(input) {
+  var _a, _b, _c;
+  return [
+    String(input.method || ""),
+    String(input.url || ""),
+    ((_a = input.byteRange) == null ? void 0 : _a.raw) || "",
+    String(((_b = input.byteRange) == null ? void 0 : _b.length) || ""),
+    String(((_c = input.byteRange) == null ? void 0 : _c.offset) || "")
+  ].join("|");
+}
+function createKeyRefCacheKey(input) {
+  const normalizedMethod = String(input.method || "").trim().toUpperCase();
+  if (input.manualKeyBase64 && normalizedMethod === "AES-128") {
+    return `manual:${input.manualKeyBase64}:${normalizedMethod}`;
+  }
+  return createResourceCacheKey({
+    method: normalizedMethod,
+    url: input.url
+  });
+}
+function inferExtensionFromUrl(input, fallback) {
+  try {
+    const extension = path.extname(new URL(input).pathname || "").replace(/^\./, "").trim();
+    return extension || fallback;
+  } catch {
+    const extension = path.extname(String(input || "")).replace(/^\./, "").trim();
+    return extension || fallback;
+  }
+}
+function createHlsKeyLine(ref, uri) {
+  if (!ref) {
+    return "#EXT-X-KEY:METHOD=NONE";
+  }
+  const attributes = [
+    `METHOD=${ref.method || "NONE"}`,
+    `URI="${uri}"`
+  ];
+  if (ref.iv) {
+    attributes.push(`IV=${ref.iv}`);
+  }
+  if (ref.keyFormat) {
+    attributes.push(`KEYFORMAT="${ref.keyFormat}"`);
+  }
+  return `#EXT-X-KEY:${attributes.join(",")}`;
+}
+function createHlsMapLine(uri) {
+  return `#EXT-X-MAP:URI="${uri}"`;
+}
+function getRequiredLocalRef(collectionName, record, fragmentSequence) {
+  if (record == null ? void 0 : record.playlistPath) {
+    return record;
+  }
+  throw new Error(`重写本地 playlist 失败：分片序号 ${fragmentSequence} 缺少对应的本地${collectionName}文件`);
+}
+async function downloadStaticResource(input) {
+  const headers = new Headers(input.headers);
+  const rangeHeader = createByteRangeHeader(input.byteRange);
+  if (rangeHeader) {
+    headers.set("Range", rangeHeader);
+  }
+  const response = await fetch(input.url, {
+    headers
+  });
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+  const buffer = await response.arrayBuffer();
+  await writeFile(input.outputPath, new Uint8Array(buffer));
+}
+async function prepareStaticRefs(input) {
+  const records = /* @__PURE__ */ new Map();
+  await mkdir(path.join(input.outputDirectoryPath, input.directoryName), {
+    recursive: true
+  });
+  let resourceIndex = 0;
+  for (const ref of input.refs) {
+    if (!ref.url) {
+      continue;
+    }
+    const cacheKey = createResourceCacheKey(ref);
+    if (records.has(cacheKey)) {
+      continue;
+    }
+    const nextPaths = input.resourcePathBuilder(resourceIndex, ref);
+    resourceIndex += 1;
+    await downloadStaticResource({
+      byteRange: ref.byteRange,
+      headers: input.headers,
+      outputPath: nextPaths.outputPath,
+      url: ref.url
+    });
+    records.set(cacheKey, {
+      localPath: nextPaths.outputPath,
+      playlistPath: nextPaths.localPath
+    });
+  }
+  return records;
+}
+async function prepareKeyRefs(input) {
+  const records = /* @__PURE__ */ new Map();
+  const keysDirectoryPath = path.join(input.outputDirectoryPath, "keys");
+  await mkdir(keysDirectoryPath, { recursive: true });
+  const normalizedManualKeyBase64 = normalizeManualAes128KeyBase64(input.manualKeyBase64);
+  const manualKeyBytes = normalizedManualKeyBase64 ? Buffer.from(normalizedManualKeyBase64, "base64") : null;
+  let resourceIndex = 0;
+  for (const ref of input.refs) {
+    const normalizedMethod = String(ref.method || "").trim().toUpperCase();
+    if (!normalizedMethod || normalizedMethod === "NONE") {
+      continue;
+    }
+    const cacheKey = createKeyRefCacheKey({
+      manualKeyBase64: normalizedManualKeyBase64 || void 0,
+      method: normalizedMethod,
+      url: ref.url
+    });
+    if (records.has(cacheKey)) {
+      continue;
+    }
+    const extension = normalizedMethod === "AES-128" ? "key" : inferExtensionFromUrl(ref.url || "", "key");
+    const fileName = `key-${String(resourceIndex + 1).padStart(3, "0")}.${extension}`;
+    resourceIndex += 1;
+    const outputPath = path.join(keysDirectoryPath, fileName);
+    if (manualKeyBytes && normalizedMethod === "AES-128") {
+      await writeFile(outputPath, manualKeyBytes);
+    } else if (ref.url) {
+      await downloadStaticResource({
+        headers: input.headers,
+        outputPath,
+        url: ref.url
+      });
+    } else {
+      continue;
+    }
+    records.set(cacheKey, {
+      localPath: path.posix.join("keys", fileName),
+      playlistPath: path.posix.join("keys", fileName)
+    });
+  }
+  return records;
+}
+function buildLocalPlaylist(input) {
+  var _a;
+  if (!input.fragments.length || !input.fragmentPaths.length) {
+    throw new Error("重写本地 playlist 失败：当前没有可写入 playlist 的本地分片");
+  }
+  const targetDuration = Math.max(
+    1,
+    Math.ceil(input.fragments.reduce((maxDuration, fragment) => Math.max(maxDuration, Number(fragment.duration || 0)), 0))
+  );
+  const lines = [
+    "#EXTM3U",
+    "#EXT-X-VERSION:3",
+    `#EXT-X-TARGETDURATION:${targetDuration}`,
+    "#EXT-X-MEDIA-SEQUENCE:0"
+  ];
+  let previousDiscontinuity = ((_a = input.fragments[0]) == null ? void 0 : _a.discontinuitySequence) ?? 0;
+  let previousKeyCacheKey = "";
+  let previousMapCacheKey = "";
+  let hadKey = false;
+  input.fragments.forEach((fragment, index) => {
+    var _a2;
+    if (index > 0 && fragment.discontinuitySequence !== previousDiscontinuity) {
+      lines.push("#EXT-X-DISCONTINUITY");
+      previousDiscontinuity = fragment.discontinuitySequence;
+    }
+    const nextKeyCacheKey = fragment.key ? createKeyRefCacheKey({
+      manualKeyBase64: input.manualKeyBase64,
+      method: fragment.key.method,
+      url: fragment.key.url
+    }) : "";
+    if (fragment.key && nextKeyCacheKey !== previousKeyCacheKey) {
+      const keyRecord = getRequiredLocalRef("key", input.keyRefs.get(nextKeyCacheKey), fragment.sequence);
+      lines.push(createHlsKeyLine(fragment.key, keyRecord.playlistPath));
+      previousKeyCacheKey = nextKeyCacheKey;
+      hadKey = true;
+    } else if (!fragment.key && hadKey) {
+      lines.push("#EXT-X-KEY:METHOD=NONE");
+      previousKeyCacheKey = "";
+      hadKey = false;
+    }
+    const nextMapCacheKey = ((_a2 = fragment.initSegment) == null ? void 0 : _a2.url) ? createResourceCacheKey({
+      byteRange: fragment.initSegment.byteRange,
+      url: fragment.initSegment.url
+    }) : "";
+    if (fragment.initSegment && nextMapCacheKey !== previousMapCacheKey) {
+      const mapRecord = getRequiredLocalRef("map", input.mapRefs.get(nextMapCacheKey), fragment.sequence);
+      lines.push(createHlsMapLine(mapRecord.playlistPath));
+      previousMapCacheKey = nextMapCacheKey;
+    }
+    const fragmentPath = input.fragmentPaths[index];
+    if (!fragmentPath) {
+      throw new Error(`重写本地 playlist 失败：分片序号 ${fragment.sequence} 缺少本地输出路径`);
+    }
+    lines.push(`#EXTINF:${fragment.duration || 0},${fragment.title || ""}`);
+    lines.push(fragmentPath);
+  });
+  lines.push("#EXT-X-ENDLIST");
+  return `${lines.filter(Boolean).join("\n")}
+`;
+}
+async function filterExistingPlaylistFragments(input) {
+  const existence = await Promise.all(input.fragmentPaths.map(async (relativePath) => {
+    try {
+      await access(path.join(input.outputDirectoryPath, relativePath));
+      return true;
+    } catch {
+      return false;
+    }
+  }));
+  return input.fragments.reduce((accumulator, fragment, index) => {
+    if (!existence[index]) {
+      return accumulator;
+    }
+    accumulator.fragments.push(fragment);
+    accumulator.fragmentPaths.push(input.fragmentPaths[index] || "");
+    return accumulator;
+  }, {
+    fragmentPaths: [],
+    fragments: []
+  });
+}
+async function downloadEmbeddedBrowserHlsToLocalWorkDirectory(request) {
+  var _a, _b, _c, _d, _e, _f;
+  const { plan } = request;
+  const requestedFragmentIndexes = Array.isArray(request.fragmentIndexes) ? new Set(request.fragmentIndexes.filter((value) => Number.isFinite(value) && value >= 0)) : null;
+  (_a = request.onEvent) == null ? void 0 : _a.call(request, {
+    message: "开始准备本地 HLS 工作目录",
+    stage: "preparing",
+    status: "running",
+    totalFragments: plan.fragments.length
+  });
+  const outputDirectoryPath = request.workDirectoryPath ? path.resolve(request.workDirectoryPath) : request.outputDirectoryPath ? path.resolve(request.outputDirectoryPath) : await mkdtemp(path.join(os.tmpdir(), "omniflow-hls-download-"));
+  const segmentsDirectoryPath = path.join(outputDirectoryPath, "segments");
+  await mkdir(segmentsDirectoryPath, { recursive: true });
+  const keyRefs = await prepareKeyRefs({
+    headers: plan.headers,
+    manualKeyBase64: request.manualKeyBase64,
+    outputDirectoryPath,
+    refs: plan.fragments.map((fragment) => {
+      var _a2, _b2;
+      return {
+        method: (_a2 = fragment.key) == null ? void 0 : _a2.method,
+        url: (_b2 = fragment.key) == null ? void 0 : _b2.url
+      };
+    })
+  });
+  const mapRefs = await prepareStaticRefs({
+    directoryName: "maps",
+    headers: plan.headers,
+    outputDirectoryPath,
+    refs: plan.fragments.map((fragment) => {
+      var _a2, _b2;
+      return {
+        byteRange: (_a2 = fragment.initSegment) == null ? void 0 : _a2.byteRange,
+        url: (_b2 = fragment.initSegment) == null ? void 0 : _b2.url
+      };
+    }),
+    resourcePathBuilder: (index, ref) => {
+      const extension = inferExtensionFromUrl(ref.url || "", "bin");
+      const fileName = `map-${String(index + 1).padStart(3, "0")}.${extension}`;
+      return {
+        localPath: path.posix.join("maps", fileName),
+        outputPath: path.join(outputDirectoryPath, "maps", fileName)
+      };
+    }
+  });
+  const fragmentPaths = plan.fragments.map((fragment, index) => {
+    const extension = inferExtensionFromUrl(fragment.url, fragment.part ? "m4s" : "ts");
+    const fragmentIndex = typeof fragment.index === "number" ? fragment.index : index;
+    const fileName = `${String(fragmentIndex + 1).padStart(5, "0")}.${extension}`;
+    return path.posix.join("segments", fileName);
+  });
+  const fragmentsToDownload = requestedFragmentIndexes ? plan.fragments.filter((fragment, index) => requestedFragmentIndexes.has(typeof fragment.index === "number" ? fragment.index : index)).map((fragment) => {
+    const sourceIndex = typeof fragment.index === "number" ? fragment.index : plan.fragments.indexOf(fragment);
+    return {
+      ...fragment,
+      outputRelativePath: fragmentPaths[sourceIndex],
+      sourceIndex
+    };
+  }) : plan.fragments.map((fragment, index) => {
+    const sourceIndex = typeof fragment.index === "number" ? fragment.index : index;
+    return {
+      ...fragment,
+      outputRelativePath: fragmentPaths[sourceIndex],
+      sourceIndex
+    };
+  });
+  const initialCompletedFragments = requestedFragmentIndexes ? (await Promise.all(fragmentPaths.map(async (relativePath, index) => {
+    var _a2, _b2;
+    const sourceIndex = typeof ((_a2 = plan.fragments[index]) == null ? void 0 : _a2.index) === "number" ? Number((_b2 = plan.fragments[index]) == null ? void 0 : _b2.index) : index;
+    if (requestedFragmentIndexes.has(sourceIndex)) {
+      return 0;
+    }
+    try {
+      await access(path.join(outputDirectoryPath, relativePath));
+      return 1;
+    } catch {
+      return 0;
+    }
+  }))).reduce((sum, value) => sum + value, 0) : 0;
+  const downloader = new EmbeddedBrowserFragmentDownloader({
+    fragments: fragmentsToDownload,
+    headers: plan.headers,
+    maxRetries: request.maxRetries,
+    thread: plan.suggestedThreadCount || 6
+  });
+  const pendingWrites = [];
+  let downloadError = null;
+  let downloadErrorMessage = "";
+  const fragmentReceivedBytes = /* @__PURE__ */ new Map();
+  const fragmentTotalBytes = /* @__PURE__ */ new Map();
+  const downloadStartedAt = Date.now();
+  let lastProgressEmitAt = 0;
+  const emitDownloadProgress = (force = false) => {
+    var _a2;
+    const now = Date.now();
+    if (!force && now - lastProgressEmitAt < 220) {
+      return;
+    }
+    lastProgressEmitAt = now;
+    const bytesReceived = Array.from(fragmentReceivedBytes.values()).reduce((sum, value) => sum + value, 0);
+    const bytesTotal = Array.from(fragmentTotalBytes.values()).reduce((sum, value) => sum + value, 0);
+    const elapsedSeconds = Math.max((now - downloadStartedAt) / 1e3, 1e-3);
+    const speedBps = bytesReceived > 0 ? bytesReceived / elapsedSeconds : 0;
+    const etaSeconds = bytesTotal > 0 && speedBps > 0 ? Math.max(0, Math.round((bytesTotal - bytesReceived) / speedBps)) : void 0;
+    (_a2 = request.onEvent) == null ? void 0 : _a2.call(request, {
+      bytesReceived,
+      bytesTotal: bytesTotal > 0 ? bytesTotal : void 0,
+      completedFragments: initialCompletedFragments + downloader.success,
+      etaSeconds,
+      message: "",
+      speedBps: speedBps > 0 ? speedBps : void 0,
+      stage: "downloading-fragments",
+      status: "running",
+      totalFragments: plan.fragments.length
+    });
+  };
+  (_b = request.onEvent) == null ? void 0 : _b.call(request, {
+    completedFragments: initialCompletedFragments,
+    message: (requestedFragmentIndexes == null ? void 0 : requestedFragmentIndexes.size) ? `开始重试 ${fragmentsToDownload.length} 个失败分片` : "开始下载 HLS 分片",
+    stage: "downloading-fragments",
+    status: "running",
+    totalFragments: plan.fragments.length
+  });
+  downloader.on("downloadError", (fragment, error, attempt) => {
+    var _a2;
+    const sourceIndex = Math.max(0, getFragmentSourceIndex(fragment));
+    (_a2 = request.onEvent) == null ? void 0 : _a2.call(request, {
+      completedFragments: initialCompletedFragments + downloader.success,
+      error: error.message,
+      message: `分片 #${sourceIndex + 1} 第 ${attempt} 次下载失败：${error.message}`,
+      stage: "downloading-fragments",
+      status: "running",
+      totalFragments: plan.fragments.length
+    });
+    if (downloadError || attempt <= (request.maxRetries || 2)) {
+      return;
+    }
+    downloadErrorMessage = `下载分片失败：#${sourceIndex + 1} ${error.message}`;
+    downloadError = new Error(downloadErrorMessage);
+  });
+  downloader.on("itemProgress", (fragment, done, receivedLength, contentLength) => {
+    var _a2;
+    const sourceIndex = Math.max(0, getFragmentSourceIndex(fragment));
+    fragmentReceivedBytes.set(sourceIndex, receivedLength);
+    const knownTotal = ((_a2 = fragment.byteRange) == null ? void 0 : _a2.length) || contentLength || fragmentTotalBytes.get(sourceIndex) || 0;
+    if (knownTotal > 0) {
+      fragmentTotalBytes.set(sourceIndex, knownTotal);
+    }
+    emitDownloadProgress(done);
+  });
+  downloader.on("sequentialPush", (buffer, fragment) => {
+    var _a2;
+    const hlsFragment = fragment;
+    const sourceIndex = getFragmentSourceIndex(fragment);
+    const relativePath = hlsFragment.outputRelativePath || (sourceIndex >= 0 ? fragmentPaths[sourceIndex] : void 0);
+    if (!relativePath) {
+      return;
+    }
+    pendingWrites.push({
+      promise: writeFile(
+        path.join(outputDirectoryPath, relativePath),
+        new Uint8Array(buffer)
+      ),
+      sourceIndex
+    });
+    (_a2 = request.onEvent) == null ? void 0 : _a2.call(request, {
+      completedFragments: Math.min(plan.fragments.length, initialCompletedFragments + downloader.success + 1),
+      message: `已写入分片 #${sourceIndex + 1}`,
+      stage: "downloading-fragments",
+      status: "running",
+      totalFragments: plan.fragments.length
+    });
+  });
+  await new Promise((resolve, reject) => {
+    downloader.on("allCompleted", () => {
+      resolve();
+    });
+    downloader.on("error", (message) => {
+      reject(new Error(message));
+    });
+    downloader.on("failed", (_, errors) => {
+      const firstErrorFragment = Array.from(errors)[0];
+      const fragmentIndex = firstErrorFragment ? Math.max(0, getFragmentSourceIndex(firstErrorFragment)) : 0;
+      reject(downloadError || new Error(`下载分片失败：#${fragmentIndex + 1}`));
+    });
+    downloader.start();
+  });
+  const pendingWriteResults = await Promise.allSettled(
+    pendingWrites.map((entry) => entry.promise)
+  );
+  const completedWrittenFragments = pendingWriteResults.reduce((sum, result) => result.status === "fulfilled" ? sum + 1 : sum, 0);
+  const failedWriteFragments = pendingWriteResults.reduce((accumulator, result, index) => {
+    var _a2;
+    if (result.status === "rejected") {
+      const sourceIndex = (_a2 = pendingWrites[index]) == null ? void 0 : _a2.sourceIndex;
+      if (typeof sourceIndex === "number" && sourceIndex >= 0) {
+        accumulator.push(sourceIndex + 1);
+      }
+    }
+    return accumulator;
+  }, []);
+  if (failedWriteFragments.length > 0) {
+    const failureMessage = `写入分片失败：${failedWriteFragments.map((value) => `#${value}`).join(", ")}`;
+    (_c = request.onEvent) == null ? void 0 : _c.call(request, {
+      completedFragments: initialCompletedFragments + completedWrittenFragments,
+      error: failureMessage,
+      failedFragments: failedWriteFragments,
+      message: failureMessage,
+      stage: "error",
+      status: "error",
+      totalFragments: plan.fragments.length
+    });
+    throw new Error(failureMessage);
+  }
+  emitDownloadProgress(true);
+  if (downloadError || downloader.errorItem.size > 0) {
+    const failureMessage = downloadErrorMessage || `仍有 ${downloader.errorItem.size} 个分片下载失败`;
+    (_d = request.onEvent) == null ? void 0 : _d.call(request, {
+      completedFragments: initialCompletedFragments + downloader.success,
+      error: failureMessage,
+      failedFragments: Array.from(downloader.errorItem).map((fragment) => getFragmentSourceIndex(fragment) + 1).filter((value) => value > 0),
+      message: failureMessage,
+      stage: "error",
+      status: "error",
+      totalFragments: plan.fragments.length
+    });
+    throw downloadError || new Error(failureMessage);
+  }
+  (_e = request.onEvent) == null ? void 0 : _e.call(request, {
+    completedFragments: plan.fragments.length,
+    message: "开始重写本地 playlist",
+    stage: "rewriting-playlist",
+    status: "running",
+    totalFragments: plan.fragments.length
+  });
+  const existingPlaylistContent = await filterExistingPlaylistFragments({
+    fragmentPaths,
+    fragments: plan.fragments,
+    outputDirectoryPath
+  });
+  const playlistText = buildLocalPlaylist({
+    fragmentPaths: existingPlaylistContent.fragmentPaths,
+    fragments: existingPlaylistContent.fragments,
+    keyRefs,
+    manualKeyBase64: request.manualKeyBase64,
+    mapRefs
+  });
+  const playlistPath = path.join(outputDirectoryPath, "local-playlist.m3u8");
+  await writeFile(playlistPath, playlistText, "utf8");
+  (_f = request.onEvent) == null ? void 0 : _f.call(request, {
+    completedFragments: plan.fragments.length,
+    message: "本地 playlist 重写完成",
+    stage: "rewriting-playlist",
+    status: "running",
+    totalFragments: plan.fragments.length
+  });
+  return {
+    downloadedFragmentCount: plan.fragments.length,
+    keyCount: keyRefs.size,
+    mapCount: mapRefs.size,
+    playlistPath,
+    workDirectoryPath: outputDirectoryPath
+  };
+}
+function buildMpdFaststartArgs(outputPath) {
+  const normalizedExtension = path.extname(String(outputPath || "")).trim().toLowerCase();
+  return normalizedExtension === ".mp4" ? ["-movflags", "+faststart"] : [];
+}
+function sanitizeMpdTempSegmentExtension(value) {
+  const normalized = String(value || "").trim().replace(/^\./, "").toLowerCase();
+  if (/^[a-z0-9]{1,10}$/.test(normalized)) {
+    return normalized;
+  }
+  return "";
+}
+function inferMpdRepresentationExtension(representation, fallback) {
+  var _a;
+  const candidates = [
+    representation.initializationUrl,
+    (_a = representation.segments[0]) == null ? void 0 : _a.url
+  ];
+  for (const candidate of candidates) {
+    try {
+      const extension = sanitizeMpdTempSegmentExtension(path.extname(new URL(String(candidate || "")).pathname));
+      if (extension) {
+        return extension;
+      }
+    } catch {
+    }
+  }
+  const mimeType = String(representation.mimeType || "").toLowerCase();
+  if (mimeType.includes("webm")) {
+    return representation.contentType === "audio" ? "weba" : "webm";
+  }
+  if (mimeType.includes("mp4")) {
+    return representation.contentType === "audio" ? "m4a" : "mp4";
+  }
+  return fallback;
+}
+function buildMpdTrackFragments(representation) {
+  const fragments = [];
+  if (representation.initializationUrl) {
+    fragments.push({
+      index: 0,
+      url: representation.initializationUrl
+    });
+  }
+  const baseIndex = fragments.length;
+  representation.segments.forEach((segment, index) => {
+    fragments.push({
+      duration: segment.duration,
+      index: baseIndex + index,
+      url: segment.url
+    });
+  });
+  return fragments;
+}
+async function downloadMpdRepresentationToFile(input) {
+  const fragments = buildMpdTrackFragments(input.representation);
+  if (!fragments.length) {
+    throw new Error("当前 Representation 没有可下载的 init segment 或媒体分片");
+  }
+  await writeFile(input.outputPath, Buffer$1.alloc(0));
+  const downloader = new EmbeddedBrowserFragmentDownloader({
+    fragments,
+    headers: input.headers,
+    maxRetries: 2,
+    thread: Math.max(1, Number(input.threadCount || 8))
+  });
+  let writeChain = Promise.resolve();
+  let writeError = null;
+  await new Promise((resolve, reject) => {
+    let settled = false;
+    const succeed = () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      resolve();
+    };
+    const fail = (error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      reject(error);
+    };
+    downloader.on("sequentialPush", (buffer) => {
+      writeChain = writeChain.then(async () => {
+        try {
+          await appendFile(input.outputPath, Buffer$1.from(buffer));
+        } catch (error) {
+          writeError = error instanceof Error ? error : new Error(String(error));
+          downloader.stop();
+          fail(writeError);
+        }
+      });
+    });
+    downloader.on("error", (message) => {
+      fail(new Error(message));
+    });
+    downloader.on("failed", (_fragments, errors) => {
+      void writeChain.then(() => {
+        const failedIndexes = Array.from(errors).map((fragment) => Number(fragment.index) + 1).filter((value) => Number.isFinite(value));
+        fail(new Error(
+          failedIndexes.length ? `MPD 分片下载失败：${failedIndexes.map((value) => `#${value}`).join(", ")}` : "MPD 分片下载失败"
+        ));
+      }).catch((error) => {
+        fail(error instanceof Error ? error : new Error(String(error)));
+      });
+    });
+    downloader.on("allCompleted", () => {
+      void writeChain.then(() => {
+        if (writeError) {
+          fail(writeError);
+          return;
+        }
+        succeed();
+      }).catch((error) => {
+        fail(error instanceof Error ? error : new Error(String(error)));
+      });
+    });
+    downloader.start();
+  }).finally(() => {
+    downloader.destroy();
+  });
+}
+async function mergeMpdTrackFilesToOutput(input) {
+  const ffmpegPath = await resolveEmbeddedBrowserFfmpegPath(input.ffmpegPath);
+  if (!ffmpegPath) {
+    throw new Error("未找到可用的 ffmpeg，可在系统环境变量里配置，或确认 /opt/homebrew/bin/ffmpeg 可执行");
+  }
+  const faststartArgs = buildMpdFaststartArgs(input.outputPath);
+  const commandArgs = input.videoTrackPath && input.audioTrackPath ? [
+    "-y",
+    "-i",
+    input.videoTrackPath,
+    "-i",
+    input.audioTrackPath,
+    "-map",
+    "0:v:0?",
+    "-map",
+    "1:a:0?",
+    "-c",
+    "copy",
+    ...faststartArgs,
+    input.outputPath
+  ] : input.videoTrackPath ? [
+    "-y",
+    "-i",
+    input.videoTrackPath,
+    "-map",
+    "0:v:0?",
+    "-map",
+    "0:a:0?",
+    "-c",
+    "copy",
+    ...faststartArgs,
+    input.outputPath
+  ] : input.audioTrackPath ? [
+    "-y",
+    "-i",
+    input.audioTrackPath,
+    "-map",
+    "0:a:0?",
+    "-c",
+    "copy",
+    input.outputPath
+  ] : [];
+  if (!commandArgs.length) {
+    throw new Error("缺少可合并的 MPD 轨道文件");
+  }
+  await new Promise((resolve, reject) => {
+    const stderr = [];
+    const child = spawn(ffmpegPath, commandArgs, {
+      stdio: ["ignore", "ignore", "pipe"]
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr.push(String(chunk));
+    });
+    child.once("error", reject);
+    child.once("exit", (code) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      reject(new Error(stderr.join("").trim() || `ffmpeg 退出码异常: ${code}`));
+    });
+  });
+  return {
+    ffmpegPath,
+    outputPath: input.outputPath
+  };
+}
+async function downloadEmbeddedBrowserMpdToOutput(input) {
+  if (!input.selectedVideoRepresentation && !input.selectedAudioRepresentation) {
+    throw new Error("至少需要选择一条 MPD 轨道");
+  }
+  const tempDirectory = await mkdtemp(path.join(os.tmpdir(), "omniflow-mpd-download-"));
+  try {
+    const videoTrackPath = input.selectedVideoRepresentation ? path.join(
+      tempDirectory,
+      `video-track.${inferMpdRepresentationExtension(input.selectedVideoRepresentation, "mp4")}`
+    ) : void 0;
+    const audioTrackPath = input.selectedAudioRepresentation ? path.join(
+      tempDirectory,
+      `audio-track.${inferMpdRepresentationExtension(input.selectedAudioRepresentation, "m4a")}`
+    ) : void 0;
+    if (input.selectedVideoRepresentation && videoTrackPath) {
+      await downloadMpdRepresentationToFile({
+        headers: input.headers,
+        outputPath: videoTrackPath,
+        representation: input.selectedVideoRepresentation
+      });
+    }
+    if (input.selectedAudioRepresentation && audioTrackPath) {
+      await downloadMpdRepresentationToFile({
+        headers: input.headers,
+        outputPath: audioTrackPath,
+        representation: input.selectedAudioRepresentation
+      });
+    }
+    return mergeMpdTrackFilesToOutput({
+      audioTrackPath,
+      ffmpegPath: input.ffmpegPath,
+      outputPath: input.outputPath,
+      videoTrackPath
+    });
+  } finally {
+    await rm(tempDirectory, { force: true, recursive: true }).catch(() => void 0);
+  }
+}
+function parseNumber(value) {
+  if (!value) {
+    return void 0;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : void 0;
+}
+function parseBoolean(value) {
+  const normalizedValue = String(value || "").trim().toUpperCase();
+  if (normalizedValue === "YES") {
+    return true;
+  }
+  if (normalizedValue === "NO") {
+    return false;
+  }
+  return void 0;
+}
+function parseHlsAttributeList(input) {
+  const result = {};
+  let key = "";
+  let value = "";
+  let readingKey = true;
+  let inQuotes = false;
+  function commit() {
+    const normalizedKey = key.trim();
+    if (!normalizedKey) {
+      key = "";
+      value = "";
+      readingKey = true;
+      return;
+    }
+    let normalizedValue = value.trim();
+    if (normalizedValue.startsWith('"') && normalizedValue.endsWith('"')) {
+      normalizedValue = normalizedValue.slice(1, -1);
+    }
+    result[normalizedKey] = normalizedValue;
+    key = "";
+    value = "";
+    readingKey = true;
+  }
+  Array.from(String(input || "")).forEach((char) => {
+    if (readingKey) {
+      if (char === "=") {
+        readingKey = false;
+      } else {
+        key += char;
+      }
+      return;
+    }
+    if (char === '"') {
+      inQuotes = !inQuotes;
+      value += char;
+      return;
+    }
+    if (char === "," && !inQuotes) {
+      commit();
+      return;
+    }
+    value += char;
+  });
+  commit();
+  return result;
+}
+function getTagValue(line) {
+  const colonIndex = line.indexOf(":");
+  return colonIndex >= 0 ? line.slice(colonIndex + 1).trim() : "";
+}
+function parseHlsByteRange(input) {
+  const normalizedInput = String(input || "").trim();
+  if (!normalizedInput) {
+    return void 0;
+  }
+  const [lengthText, offsetText] = normalizedInput.split("@");
+  const length = parseNumber(lengthText);
+  if (!length || length <= 0) {
+    return void 0;
+  }
+  const offset = parseNumber(offsetText);
+  return {
+    length,
+    offset,
+    raw: normalizedInput
+  };
+}
+function resolveHlsUrl(uri, baseUrl) {
+  const normalizedUri = String(uri || "").trim();
+  if (!normalizedUri) {
+    return "";
+  }
+  if (/^(data|blob|javascript):/i.test(normalizedUri)) {
+    return normalizedUri;
+  }
+  try {
+    return new URL(normalizedUri, baseUrl).toString();
+  } catch {
+    return normalizedUri;
+  }
+}
+function parseExtinf(line) {
+  const value = getTagValue(line);
+  const commaIndex = value.indexOf(",");
+  const durationText = commaIndex >= 0 ? value.slice(0, commaIndex) : value;
+  const title = commaIndex >= 0 ? value.slice(commaIndex + 1).trim() : void 0;
+  return {
+    duration: parseNumber(durationText) || 0,
+    title: title || void 0
+  };
+}
+function createHlsKey(line, baseUrl) {
+  const attributes = parseHlsAttributeList(getTagValue(line));
+  const uri = attributes.URI;
+  return {
+    iv: attributes.IV,
+    keyFormat: attributes.KEYFORMAT,
+    keyFormatVersions: attributes["KEYFORMATVERSIONS"],
+    method: attributes.METHOD || "NONE",
+    rawAttributes: attributes,
+    rawLine: line,
+    uri,
+    url: uri ? resolveHlsUrl(uri, baseUrl) : void 0
+  };
+}
+function createHlsMap(line, baseUrl) {
+  const attributes = parseHlsAttributeList(getTagValue(line));
+  const uri = attributes.URI;
+  if (!uri) {
+    return null;
+  }
+  return {
+    byteRange: parseHlsByteRange(attributes.BYTERANGE),
+    rawAttributes: attributes,
+    rawLine: line,
+    uri,
+    url: resolveHlsUrl(uri, baseUrl)
+  };
+}
+function createHlsVariant(line, uri, baseUrl) {
+  const attributes = parseHlsAttributeList(getTagValue(line));
+  return {
+    audioGroupId: attributes.AUDIO,
+    averageBandwidth: parseNumber(attributes["AVERAGE-BANDWIDTH"]),
+    bandwidth: parseNumber(attributes.BANDWIDTH),
+    codecs: attributes.CODECS,
+    frameRate: parseNumber(attributes["FRAME-RATE"]),
+    rawAttributes: attributes,
+    rawLine: line,
+    resolution: attributes.RESOLUTION,
+    subtitlesGroupId: attributes.SUBTITLES,
+    uri,
+    url: resolveHlsUrl(uri, baseUrl)
+  };
+}
+function createHlsRendition(line, baseUrl) {
+  const attributes = parseHlsAttributeList(getTagValue(line));
+  const uri = attributes.URI;
+  return {
+    autoselect: parseBoolean(attributes.AUTOSELECT),
+    default: parseBoolean(attributes.DEFAULT),
+    forced: parseBoolean(attributes.FORCED),
+    groupId: attributes["GROUP-ID"],
+    language: attributes.LANGUAGE,
+    name: attributes.NAME,
+    rawAttributes: attributes,
+    rawLine: line,
+    type: attributes.TYPE,
+    uri,
+    url: uri ? resolveHlsUrl(uri, baseUrl) : void 0
+  };
+}
+function parseEmbeddedBrowserHlsManifest(input) {
+  const baseUrl = String(input.baseUrl || "").trim();
+  const lines = String(input.text || "").replace(/^\uFEFF/, "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  let mediaSequence = 0;
+  let targetDuration;
+  let playlistType;
+  let hasEndList = false;
+  let discontinuitySequence = 0;
+  let currentKey;
+  let currentMap;
+  let pendingSegment;
+  let pendingByteRange;
+  let pendingVariantLine;
+  const keys = /* @__PURE__ */ new Map();
+  const maps = /* @__PURE__ */ new Map();
+  const segments = [];
+  const variants = [];
+  const renditions = [];
+  function rememberKey(key) {
+    const keyId = `${key.method}:${key.url || key.uri || key.rawLine}:${key.iv || ""}`;
+    keys.set(keyId, key);
+  }
+  function rememberMap(map) {
+    var _a;
+    maps.set(`${map.url}:${((_a = map.byteRange) == null ? void 0 : _a.raw) || ""}`, map);
+  }
+  function addSegment(uri, part) {
+    const normalizedUri = String(uri || "").trim();
+    if (!normalizedUri) {
+      return;
+    }
+    const index = segments.length;
+    segments.push({
+      byteRange: pendingByteRange,
+      discontinuitySequence,
+      duration: (pendingSegment == null ? void 0 : pendingSegment.duration) || 0,
+      index,
+      key: currentKey,
+      map: currentMap,
+      part,
+      sequence: mediaSequence + index,
+      title: pendingSegment == null ? void 0 : pendingSegment.title,
+      uri: normalizedUri,
+      url: resolveHlsUrl(normalizedUri, baseUrl)
+    });
+    pendingSegment = void 0;
+    pendingByteRange = void 0;
+  }
+  lines.forEach((line) => {
+    if (pendingVariantLine && !line.startsWith("#")) {
+      variants.push(createHlsVariant(pendingVariantLine, line, baseUrl));
+      pendingVariantLine = void 0;
+      return;
+    }
+    if (!line.startsWith("#")) {
+      addSegment(line, false);
+      return;
+    }
+    if (line.startsWith("#EXT-X-STREAM-INF")) {
+      pendingVariantLine = line;
+      return;
+    }
+    if (line.startsWith("#EXT-X-I-FRAME-STREAM-INF")) {
+      const attributes = parseHlsAttributeList(getTagValue(line));
+      if (attributes.URI) {
+        variants.push(createHlsVariant(line, attributes.URI, baseUrl));
+      }
+      return;
+    }
+    if (line.startsWith("#EXT-X-MEDIA:")) {
+      renditions.push(createHlsRendition(line, baseUrl));
+      return;
+    }
+    if (line.startsWith("#EXT-X-MEDIA-SEQUENCE")) {
+      mediaSequence = parseNumber(getTagValue(line)) || 0;
+      return;
+    }
+    if (line.startsWith("#EXT-X-TARGETDURATION")) {
+      targetDuration = parseNumber(getTagValue(line));
+      return;
+    }
+    if (line.startsWith("#EXT-X-PLAYLIST-TYPE")) {
+      playlistType = getTagValue(line) || void 0;
+      return;
+    }
+    if (line.startsWith("#EXT-X-KEY")) {
+      const key = createHlsKey(line, baseUrl);
+      rememberKey(key);
+      currentKey = key.method.toUpperCase() === "NONE" ? void 0 : key;
+      return;
+    }
+    if (line.startsWith("#EXT-X-MAP")) {
+      const map = createHlsMap(line, baseUrl);
+      if (map) {
+        currentMap = map;
+        rememberMap(map);
+      }
+      return;
+    }
+    if (line.startsWith("#EXT-X-BYTERANGE")) {
+      pendingByteRange = parseHlsByteRange(getTagValue(line));
+      return;
+    }
+    if (line.startsWith("#EXT-X-DISCONTINUITY")) {
+      discontinuitySequence += 1;
+      return;
+    }
+    if (line.startsWith("#EXTINF")) {
+      pendingSegment = parseExtinf(line);
+      return;
+    }
+    if (line.startsWith("#EXT-X-PART")) {
+      const attributes = parseHlsAttributeList(getTagValue(line));
+      pendingSegment = {
+        duration: parseNumber(attributes.DURATION) || 0
+      };
+      addSegment(attributes.URI || "", true);
+      return;
+    }
+    if (line.startsWith("#EXT-X-ENDLIST")) {
+      hasEndList = true;
+    }
+  });
+  const durationSeconds = segments.reduce((total, segment) => total + segment.duration, 0);
+  return {
+    baseUrl,
+    discontinuityCount: discontinuitySequence,
+    durationSeconds,
+    hasEndList,
+    isLive: !hasEndList,
+    isMaster: variants.length > 0,
+    keys: Array.from(keys.values()),
+    maps: Array.from(maps.values()),
+    mediaSequence,
+    playlistType,
+    renditions,
+    segmentCount: segments.length,
+    segments,
+    targetDuration,
+    variants
+  };
+}
+function createEmbeddedBrowserHlsDownloadPlan(input) {
+  var _a;
+  const { manifest } = input;
+  const fragments = manifest.segments.map((segment) => ({
+    byteRange: segment.byteRange,
+    discontinuitySequence: segment.discontinuitySequence,
+    duration: segment.duration,
+    index: segment.index,
+    initSegment: segment.map ? {
+      byteRange: segment.map.byteRange,
+      url: segment.map.url
+    } : void 0,
+    key: segment.key ? {
+      iv: segment.key.iv,
+      keyFormat: segment.key.keyFormat,
+      method: segment.key.method,
+      url: segment.key.url
+    } : void 0,
+    part: segment.part,
+    sequence: segment.sequence,
+    title: segment.title,
+    url: segment.url
+  }));
+  const suggestedThreadCount = Math.min(6, Math.max(1, fragments.length || 1));
+  return {
+    durationSeconds: manifest.durationSeconds,
+    encryptedSegmentCount: fragments.filter((fragment) => {
+      var _a2, _b;
+      return ((_a2 = fragment.key) == null ? void 0 : _a2.url) || ((_b = fragment.key) == null ? void 0 : _b.method) === "AES-128";
+    }).length,
+    fragmentCount: fragments.length,
+    fragments,
+    headers: input.headers || {},
+    isLive: manifest.isLive,
+    isMaster: manifest.isMaster,
+    keys: manifest.keys.map((key) => ({
+      iv: key.iv,
+      keyFormat: key.keyFormat,
+      method: key.method,
+      url: key.url
+    })),
+    manifestUrl: input.manifestUrl,
+    maps: manifest.maps.map((map) => ({
+      byteRange: map.byteRange,
+      url: map.url
+    })),
+    mapTag: ((_a = manifest.maps[0]) == null ? void 0 : _a.url) || "",
+    pageUrl: input.pageUrl,
+    partCount: fragments.filter((fragment) => fragment.part).length,
+    renditions: manifest.renditions.map((rendition) => ({
+      autoselect: rendition.autoselect,
+      default: rendition.default,
+      forced: rendition.forced,
+      groupId: rendition.groupId,
+      language: rendition.language,
+      name: rendition.name,
+      type: rendition.type,
+      url: rendition.url
+    })),
+    segmentCount: manifest.segmentCount,
+    segments: manifest.segments.map((segment) => {
+      var _a2, _b;
+      return {
+        byteRange: segment.byteRange,
+        discontinuitySequence: segment.discontinuitySequence,
+        duration: segment.duration,
+        keyUrl: (_a2 = segment.key) == null ? void 0 : _a2.url,
+        mapUrl: (_b = segment.map) == null ? void 0 : _b.url,
+        part: segment.part,
+        sequence: segment.sequence,
+        url: segment.url
+      };
+    }),
+    suggestedThreadCount,
+    variants: manifest.variants.map((variant) => ({
+      audioGroupId: variant.audioGroupId,
+      averageBandwidth: variant.averageBandwidth,
+      bandwidth: variant.bandwidth,
+      codecs: variant.codecs,
+      frameRate: variant.frameRate,
+      resolution: variant.resolution,
+      subtitlesGroupId: variant.subtitlesGroupId,
+      url: variant.url
+    }))
+  };
+}
+function createLiveFragmentKey(fragment) {
+  return `${fragment.sequence}|${fragment.url}`;
+}
+function mergeUniqueByKey(existing, nextItems, createKey) {
+  const seen2 = new Set(existing.map((item) => createKey(item)));
+  const appended = [];
+  nextItems.forEach((item) => {
+    const key = createKey(item);
+    if (seen2.has(key)) {
+      return;
+    }
+    seen2.add(key);
+    appended.push(item);
+  });
+  return [...existing, ...appended];
+}
+async function fetchEmbeddedBrowserHlsLiveManifestSnapshot(input) {
+  const response = await fetch(input.manifestUrl, {
+    headers: input.headers
+  });
+  if (!response.ok) {
+    throw new Error(`直播 playlist 请求失败：HTTP ${response.status}`);
+  }
+  const text = await response.text();
+  if (!text.includes("#EXTM3U")) {
+    throw new Error("当前直播返回内容不像 HLS playlist");
+  }
+  const manifest = parseEmbeddedBrowserHlsManifest({
+    baseUrl: input.manifestUrl,
+    text
+  });
+  const plan = createEmbeddedBrowserHlsDownloadPlan({
+    headers: input.headers || {},
+    manifest,
+    manifestUrl: input.manifestUrl,
+    pageUrl: input.pageUrl
+  });
+  if (plan.isMaster) {
+    throw new Error("直播录制当前只支持具体 media playlist，不直接录制 master playlist");
+  }
+  if (!plan.isLive) {
+    throw new Error("当前 playlist 不是直播流");
+  }
+  return {
+    manifest,
+    plan: input.suggestedThreadCount && input.suggestedThreadCount > 0 ? {
+      ...plan,
+      suggestedThreadCount: input.suggestedThreadCount
+    } : plan
+  };
+}
+class EmbeddedBrowserHlsLiveRecorder {
+  constructor(options) {
+    __publicField(this, "activePollPromise", null);
+    __publicField(this, "cumulativePlan", null);
+    __publicField(this, "downloadedBytes", 0);
+    __publicField(this, "isRecording", false);
+    __publicField(this, "manualKeyBase64");
+    __publicField(this, "manifestUrl");
+    __publicField(this, "headers");
+    __publicField(this, "onEvent");
+    __publicField(this, "pageUrl");
+    __publicField(this, "playlistPath", "");
+    __publicField(this, "pollIntervalMs", 4e3);
+    __publicField(this, "pollTimer", null);
+    __publicField(this, "suggestedThreadCount");
+    __publicField(this, "workDirectoryPath", "");
+    this.headers = options.headers;
+    this.manifestUrl = options.manifestUrl;
+    this.manualKeyBase64 = options.manualKeyBase64;
+    this.onEvent = options.onEvent;
+    this.pageUrl = options.pageUrl;
+    this.suggestedThreadCount = options.suggestedThreadCount;
+    this.workDirectoryPath = options.workDirectoryPath || "";
+  }
+  getCurrentWorkDirectoryPath() {
+    return this.workDirectoryPath;
+  }
+  async start() {
+    if (this.isRecording) {
+      throw new Error("直播录制已经在进行中");
+    }
+    this.isRecording = true;
+    this.workDirectoryPath = this.workDirectoryPath || await mkdtemp(path.join(os.tmpdir(), "omniflow-hls-live-"));
+    await this.pollOnce(true);
+    this.scheduleNextPoll();
+  }
+  async stop() {
+    this.isRecording = false;
+    if (this.pollTimer) {
+      clearTimeout(this.pollTimer);
+      this.pollTimer = null;
+    }
+    if (this.activePollPromise) {
+      await this.activePollPromise.catch(() => void 0);
+      this.activePollPromise = null;
+    }
+    if (!this.cumulativePlan || !this.playlistPath) {
+      throw new Error("直播录制还没有可用的本地 playlist");
+    }
+    return {
+      durationSeconds: this.cumulativePlan.durationSeconds,
+      playlistPath: this.playlistPath,
+      totalFragments: this.cumulativePlan.fragmentCount,
+      workDirectoryPath: this.workDirectoryPath
+    };
+  }
+  scheduleNextPoll() {
+    if (!this.isRecording) {
+      return;
+    }
+    this.pollTimer = setTimeout(() => {
+      this.activePollPromise = this.pollOnce(false).catch((error) => {
+        var _a, _b, _c, _d;
+        (_d = this.onEvent) == null ? void 0 : _d.call(this, {
+          completedFragments: ((_a = this.cumulativePlan) == null ? void 0 : _a.fragmentCount) || 0,
+          durationSeconds: (_b = this.cumulativePlan) == null ? void 0 : _b.durationSeconds,
+          error: error instanceof Error ? error.message : String(error),
+          message: error instanceof Error ? error.message : String(error),
+          stage: "error",
+          status: "error",
+          totalFragments: ((_c = this.cumulativePlan) == null ? void 0 : _c.fragmentCount) || 0
+        });
+        this.isRecording = false;
+      }).finally(() => {
+        this.activePollPromise = null;
+        if (this.isRecording) {
+          this.scheduleNextPoll();
+        }
+      });
+    }, this.pollIntervalMs);
+  }
+  async pollOnce(isInitial) {
+    var _a;
+    const snapshot = await fetchEmbeddedBrowserHlsLiveManifestSnapshot({
+      headers: this.headers,
+      manifestUrl: this.manifestUrl,
+      pageUrl: this.pageUrl,
+      suggestedThreadCount: this.suggestedThreadCount
+    });
+    this.pollIntervalMs = Math.max(1500, Math.min(1e4, (snapshot.manifest.targetDuration || 4) * 1e3));
+    if (!this.cumulativePlan) {
+      this.cumulativePlan = {
+        ...snapshot.plan,
+        fragments: snapshot.plan.fragments.map((fragment, index) => ({
+          ...fragment,
+          index
+        }))
+      };
+      await this.downloadFragments({
+        fragmentIndexes: void 0,
+        message: "开始录制直播流"
+      });
+      return;
+    }
+    const existingFragmentKeys = new Set(this.cumulativePlan.fragments.map((fragment) => createLiveFragmentKey(fragment)));
+    const newFragments = snapshot.plan.fragments.filter((fragment) => !existingFragmentKeys.has(createLiveFragmentKey(fragment)));
+    if (!newFragments.length) {
+      (_a = this.onEvent) == null ? void 0 : _a.call(this, {
+        completedFragments: this.cumulativePlan.fragmentCount,
+        durationSeconds: this.cumulativePlan.durationSeconds,
+        message: isInitial ? "开始录制直播流" : "等待直播流产生新分片",
+        stage: "downloading-fragments",
+        status: "running",
+        totalFragments: this.cumulativePlan.fragmentCount
+      });
+      return;
+    }
+    const nextStartIndex = this.cumulativePlan.fragments.length;
+    const normalizedNewFragments = newFragments.map((fragment, index) => ({
+      ...fragment,
+      index: nextStartIndex + index
+    }));
+    this.cumulativePlan = {
+      ...this.cumulativePlan,
+      durationSeconds: this.cumulativePlan.durationSeconds + newFragments.reduce((sum, fragment) => sum + Number(fragment.duration || 0), 0),
+      encryptedSegmentCount: this.cumulativePlan.encryptedSegmentCount + newFragments.filter((fragment) => {
+        var _a2, _b;
+        return Boolean(((_a2 = fragment.key) == null ? void 0 : _a2.url) || ((_b = fragment.key) == null ? void 0 : _b.method));
+      }).length,
+      fragmentCount: this.cumulativePlan.fragmentCount + normalizedNewFragments.length,
+      fragments: [...this.cumulativePlan.fragments, ...normalizedNewFragments],
+      keys: mergeUniqueByKey(
+        this.cumulativePlan.keys,
+        snapshot.plan.keys,
+        (key) => `${key.method}|${key.url || ""}|${key.iv || ""}`
+      ),
+      maps: mergeUniqueByKey(
+        this.cumulativePlan.maps,
+        snapshot.plan.maps,
+        (map) => {
+          var _a2;
+          return `${map.url}|${((_a2 = map.byteRange) == null ? void 0 : _a2.raw) || ""}`;
+        }
+      ),
+      partCount: this.cumulativePlan.partCount + newFragments.filter((fragment) => fragment.part).length,
+      segmentCount: this.cumulativePlan.segmentCount + newFragments.length,
+      segments: [
+        ...this.cumulativePlan.segments,
+        ...newFragments.map((fragment) => {
+          var _a2, _b;
+          return {
+            byteRange: fragment.byteRange,
+            discontinuitySequence: fragment.discontinuitySequence,
+            duration: fragment.duration,
+            keyUrl: (_a2 = fragment.key) == null ? void 0 : _a2.url,
+            mapUrl: (_b = fragment.initSegment) == null ? void 0 : _b.url,
+            part: fragment.part,
+            sequence: fragment.sequence,
+            url: fragment.url
+          };
+        })
+      ],
+      suggestedThreadCount: snapshot.plan.suggestedThreadCount
+    };
+    await this.downloadFragments({
+      fragmentIndexes: normalizedNewFragments.map((fragment) => Number(fragment.index || 0)),
+      message: `检测到 ${normalizedNewFragments.length} 个新分片`
+    });
+  }
+  async downloadFragments(input) {
+    var _a;
+    if (!this.cumulativePlan) {
+      throw new Error("直播录制计划还没有初始化");
+    }
+    const bytesOffset = this.downloadedBytes;
+    let lastBatchBytes = 0;
+    const localDownloadResult = await downloadEmbeddedBrowserHlsToLocalWorkDirectory({
+      fragmentIndexes: input.fragmentIndexes,
+      manualKeyBase64: this.manualKeyBase64,
+      onEvent: (event) => {
+        var _a2, _b, _c, _d;
+        const nextBytesReceived = typeof event.bytesReceived === "number" ? bytesOffset + event.bytesReceived : bytesOffset;
+        if (typeof event.bytesReceived === "number") {
+          lastBatchBytes = event.bytesReceived;
+        }
+        (_d = this.onEvent) == null ? void 0 : _d.call(this, {
+          bytesReceived: nextBytesReceived,
+          bytesTotal: void 0,
+          completedFragments: event.completedFragments ?? ((_a2 = this.cumulativePlan) == null ? void 0 : _a2.fragmentCount),
+          durationSeconds: (_b = this.cumulativePlan) == null ? void 0 : _b.durationSeconds,
+          error: event.error,
+          etaSeconds: void 0,
+          failedFragments: event.failedFragments,
+          message: event.message || input.message,
+          speedBps: event.speedBps,
+          stage: event.stage,
+          status: event.status,
+          totalFragments: (_c = this.cumulativePlan) == null ? void 0 : _c.fragmentCount
+        });
+      },
+      plan: {
+        fragments: this.cumulativePlan.fragments,
+        headers: this.cumulativePlan.headers,
+        manifestUrl: this.cumulativePlan.manifestUrl,
+        suggestedThreadCount: this.cumulativePlan.suggestedThreadCount
+      },
+      workDirectoryPath: this.workDirectoryPath
+    });
+    this.playlistPath = localDownloadResult.playlistPath;
+    this.workDirectoryPath = localDownloadResult.workDirectoryPath;
+    this.downloadedBytes = bytesOffset + lastBatchBytes;
+    (_a = this.onEvent) == null ? void 0 : _a.call(this, {
+      bytesReceived: this.downloadedBytes,
+      completedFragments: this.cumulativePlan.fragmentCount,
+      durationSeconds: this.cumulativePlan.durationSeconds,
+      message: input.message,
+      stage: "downloading-fragments",
+      status: "running",
+      totalFragments: this.cumulativePlan.fragmentCount
+    });
+  }
+}
 function createEmbeddedBrowserMainController(options) {
   const embeddedBrowserViews = /* @__PURE__ */ new Map();
   const embeddedBrowserLastCommittedUrls = /* @__PURE__ */ new Map();
@@ -5479,6 +8424,10 @@ function createEmbeddedBrowserMainController(options) {
   const embeddedBrowserAttachedOpenFiles = /* @__PURE__ */ new Map();
   const embeddedBrowserOpenFileRequestVersions = /* @__PURE__ */ new Map();
   const embeddedBrowserFileSystemOriginDecisions = /* @__PURE__ */ new Map();
+  const embeddedBrowserHlsRetrySessions = /* @__PURE__ */ new Map();
+  const embeddedBrowserHlsLiveRecordingSessions = /* @__PURE__ */ new Map();
+  const embeddedBrowserMseSpoolFiles = /* @__PURE__ */ new Map();
+  const embeddedBrowserMseSpoolWriteQueues = /* @__PURE__ */ new Map();
   let activeEmbeddedBrowserTabId = null;
   let embeddedBrowserPendingBounds = null;
   let embeddedBrowserSessionConfigured = false;
@@ -5503,6 +8452,142 @@ function createEmbeddedBrowserMainController(options) {
       return;
     }
     mainWindow2.webContents.send("embedded-browser:resource", payload);
+  }
+  function emitEmbeddedBrowserHlsTask(payload) {
+    const mainWindow2 = options.getMainWindow();
+    if (!mainWindow2 || mainWindow2.isDestroyed()) {
+      return;
+    }
+    mainWindow2.webContents.send("embedded-browser:hls-task", payload);
+  }
+  function buildEmbeddedBrowserMseSpoolKey(tabId, resourceKey) {
+    return `${String(tabId || "").trim()}:${String(resourceKey || "").trim()}`;
+  }
+  async function clearEmbeddedBrowserMseSpoolFiles(options2) {
+    const normalizedTabId = String(options2.tabId || "").trim();
+    const normalizedResourceKey = String(options2.resourceKey || "").trim();
+    if (!normalizedTabId && !normalizedResourceKey) {
+      return;
+    }
+    const matchedEntries = Array.from(embeddedBrowserMseSpoolFiles.entries()).filter(([, file]) => {
+      if (normalizedTabId && file.tabId !== normalizedTabId) {
+        return false;
+      }
+      if (normalizedResourceKey && file.resourceKey !== normalizedResourceKey) {
+        return false;
+      }
+      return true;
+    });
+    await Promise.all(matchedEntries.map(async ([key, file]) => {
+      embeddedBrowserMseSpoolFiles.delete(key);
+      embeddedBrowserMseSpoolWriteQueues.delete(key);
+      await rm(file.directoryPath, { force: true, recursive: true }).catch(() => void 0);
+    }));
+  }
+  async function waitForEmbeddedBrowserMseSpoolWrites(tabId, resourceKey) {
+    const spoolKey = buildEmbeddedBrowserMseSpoolKey(tabId, resourceKey);
+    const pendingWrite = embeddedBrowserMseSpoolWriteQueues.get(spoolKey);
+    if (!pendingWrite) {
+      return;
+    }
+    await pendingWrite.catch(() => void 0);
+  }
+  async function appendEmbeddedBrowserMseSpoolChunk(tabId, payload) {
+    const normalizedTabId = String(tabId || "").trim();
+    const normalizedResourceKey = String(payload.resourceKey || "").trim();
+    const normalizedBase64 = String(payload.base64 || "").trim();
+    if (!normalizedTabId || !normalizedResourceKey || !normalizedBase64) {
+      return null;
+    }
+    const spoolKey = buildEmbeddedBrowserMseSpoolKey(normalizedTabId, normalizedResourceKey);
+    const chunk = Buffer.from(normalizedBase64, "base64");
+    const nextWrite = (embeddedBrowserMseSpoolWriteQueues.get(spoolKey) || Promise.resolve(null)).then(async (existingSpoolFile) => {
+      let spoolFile2 = existingSpoolFile || embeddedBrowserMseSpoolFiles.get(spoolKey) || null;
+      if (!spoolFile2) {
+        const directoryPath = await mkdtemp(path.join(os.tmpdir(), "omniflow-mse-spool-"));
+        const fileName = sanitizeEmbeddedBrowserOutputFileName(
+          String(payload.fileName || normalizedResourceKey || "media").trim()
+        );
+        spoolFile2 = {
+          bytesWritten: 0,
+          directoryPath,
+          fileName,
+          filePath: path.join(directoryPath, fileName),
+          mimeType: payload.mimeType,
+          resourceKey: normalizedResourceKey,
+          streamType: payload.streamType,
+          tabId: normalizedTabId
+        };
+        embeddedBrowserMseSpoolFiles.set(spoolKey, spoolFile2);
+      }
+      if (chunk.byteLength) {
+        await appendFile(spoolFile2.filePath, chunk);
+        spoolFile2.bytesWritten += chunk.byteLength;
+      }
+      if (payload.mimeType) {
+        spoolFile2.mimeType = payload.mimeType;
+      }
+      if (payload.streamType === "audio" || payload.streamType === "video") {
+        spoolFile2.streamType = payload.streamType;
+      }
+      return spoolFile2;
+    });
+    embeddedBrowserMseSpoolWriteQueues.set(spoolKey, nextWrite);
+    const spoolFile = await nextWrite;
+    return spoolFile;
+  }
+  async function clearEmbeddedBrowserHlsRetrySessions(options2) {
+    const normalizedRequestId = String(options2.requestId || "").trim();
+    const normalizedTabId = String(options2.tabId || "").trim();
+    if (!normalizedRequestId && !normalizedTabId) {
+      return;
+    }
+    const matchedSessions = Array.from(embeddedBrowserHlsRetrySessions.entries()).filter(([requestId, session2]) => {
+      if (normalizedRequestId && requestId === normalizedRequestId) {
+        return true;
+      }
+      if (normalizedTabId && session2.tabId === normalizedTabId) {
+        return true;
+      }
+      return false;
+    });
+    if (!matchedSessions.length) {
+      return;
+    }
+    await Promise.all(matchedSessions.map(async ([requestId, session2]) => {
+      embeddedBrowserHlsRetrySessions.delete(requestId);
+      await rm(session2.workDirectoryPath, { force: true, recursive: true }).catch(() => void 0);
+    }));
+  }
+  async function clearEmbeddedBrowserHlsLiveRecordingSessions(options2) {
+    const normalizedRequestId = String(options2.requestId || "").trim();
+    const normalizedTabId = String(options2.tabId || "").trim();
+    if (!normalizedRequestId && !normalizedTabId) {
+      return;
+    }
+    const matchedSessions = Array.from(embeddedBrowserHlsLiveRecordingSessions.entries()).filter(([requestId, session2]) => {
+      if (normalizedRequestId && requestId === normalizedRequestId) {
+        return true;
+      }
+      if (normalizedTabId && session2.tabId === normalizedTabId) {
+        return true;
+      }
+      return false;
+    });
+    if (!matchedSessions.length) {
+      return;
+    }
+    await Promise.all(matchedSessions.map(async ([requestId, session2]) => {
+      embeddedBrowserHlsLiveRecordingSessions.delete(requestId);
+      try {
+        await session2.recorder.stop().catch(() => void 0);
+      } catch {
+      }
+      const workDirectoryPath = session2.workDirectoryPath || session2.recorder.getCurrentWorkDirectoryPath();
+      if (workDirectoryPath) {
+        await rm(workDirectoryPath, { force: true, recursive: true }).catch(() => void 0);
+      }
+    }));
   }
   function emitCredentialCaptured(payload) {
     const mainWindow2 = options.getMainWindow();
@@ -5728,7 +8813,64 @@ function createEmbeddedBrowserMainController(options) {
       videoSizeBytes: 0
     };
   }
-  async function extractEmbeddedBrowserResourceFromFrames(view, resourceKey) {
+  async function extractEmbeddedBrowserMseResourceFromFrames(tabId, view, resourceKey) {
+    const spoolKey = buildEmbeddedBrowserMseSpoolKey(tabId, resourceKey);
+    const currentSpoolFile = embeddedBrowserMseSpoolFiles.get(spoolKey);
+    if (currentSpoolFile) {
+      await waitForEmbeddedBrowserMseSpoolWrites(tabId, resourceKey);
+    }
+    const frames = getEmbeddedBrowserFrameList(view);
+    const drainFromExecutor = async (executeScript) => drainEmbeddedBrowserMseResourceFromPage(executeScript, resourceKey);
+    const drained = !frames.length ? await drainFromExecutor((script) => view.webContents.executeJavaScript(script, true)) : await (async () => {
+      for (const frame of frames) {
+        try {
+          const resource = await drainFromExecutor((script) => frame.executeJavaScript(script, true));
+          if (resource) {
+            return resource;
+          }
+        } catch {
+        }
+      }
+      return null;
+    })();
+    if (!currentSpoolFile) {
+      if (!(drained == null ? void 0 : drained.base64)) {
+        return null;
+      }
+      return {
+        base64: drained.base64,
+        fileName: drained.fileName,
+        mimeType: drained.mimeType,
+        resourceKey,
+        streamType: drained.streamType
+      };
+    }
+    if (drained == null ? void 0 : drained.base64) {
+      await appendEmbeddedBrowserMseSpoolChunk(tabId, {
+        base64: drained.base64,
+        fileName: drained.fileName,
+        mimeType: drained.mimeType,
+        resourceKey,
+        streamType: drained.streamType
+      });
+    }
+    await waitForEmbeddedBrowserMseSpoolWrites(tabId, resourceKey);
+    const nextSpoolFile = embeddedBrowserMseSpoolFiles.get(spoolKey) || currentSpoolFile;
+    return {
+      fileName: (drained == null ? void 0 : drained.fileName) || nextSpoolFile.fileName,
+      filePath: nextSpoolFile.filePath,
+      mimeType: (drained == null ? void 0 : drained.mimeType) || nextSpoolFile.mimeType,
+      resourceKey,
+      streamType: (drained == null ? void 0 : drained.streamType) || nextSpoolFile.streamType
+    };
+  }
+  async function extractEmbeddedBrowserResourceFromFrames(tabId, view, resourceKey) {
+    if (String(resourceKey || "").startsWith("mse-stream:")) {
+      const mseResource = await extractEmbeddedBrowserMseResourceFromFrames(tabId, view, resourceKey);
+      if (mseResource) {
+        return mseResource;
+      }
+    }
     const frames = getEmbeddedBrowserFrameList(view);
     if (!frames.length) {
       return extractEmbeddedBrowserResourceFromPage(
@@ -5793,6 +8935,55 @@ function createEmbeddedBrowserMainController(options) {
     }
     return saveResult.filePath;
   }
+  function deriveEmbeddedBrowserDirectFileName(url, fallbackName) {
+    try {
+      const fileName = decodeURIComponent(path.basename(new URL(url).pathname)).trim();
+      if (fileName) {
+        return sanitizeEmbeddedBrowserOutputFileName(fileName);
+      }
+    } catch {
+    }
+    return sanitizeEmbeddedBrowserOutputFileName(fallbackName);
+  }
+  async function downloadEmbeddedBrowserDirectFile(_tabId, payload) {
+    const resourceUrl = String(payload.url || "").trim();
+    if (!/^https?:\/\//i.test(resourceUrl)) {
+      return {
+        error: "缺少可下载的字幕或文件链接",
+        ok: false
+      };
+    }
+    try {
+      const outputPath = await resolveEmbeddedBrowserOutputPath({
+        defaultFileName: deriveEmbeddedBrowserDirectFileName(resourceUrl, String(payload.suggestedFileName || "").trim() || "resource.txt"),
+        outputDirectoryPath: payload.outputDirectoryPath,
+        useSystemSaveDialog: payload.useSystemSaveDialog
+      });
+      if (!outputPath) {
+        return {
+          cancelled: true,
+          ok: false
+        };
+      }
+      const response = await fetch(resourceUrl, {
+        headers: payload.headers
+      });
+      if (!response.ok) {
+        throw new Error(`下载失败：HTTP ${response.status}`);
+      }
+      const buffer = Buffer.from(await response.arrayBuffer());
+      await writeFile(outputPath, buffer);
+      return {
+        ok: true,
+        outputPath
+      };
+    } catch (error) {
+      return {
+        error: error instanceof Error ? error.message : String(error),
+        ok: false
+      };
+    }
+  }
   async function mergeEmbeddedBrowserCapturedMseResources(tabId, payload) {
     var _a, _b, _c, _d;
     const normalizedTabId = String(tabId || "").trim();
@@ -5833,8 +9024,8 @@ function createEmbeddedBrowserMainController(options) {
         const extractedResources = await withEmbeddedBrowserView(
           normalizedTabId,
           async (view) => Promise.all([
-            audioResourceKey ? extractEmbeddedBrowserResourceFromFrames(view, audioResourceKey) : null,
-            videoResourceKey ? extractEmbeddedBrowserResourceFromFrames(view, videoResourceKey) : null
+            audioResourceKey ? extractEmbeddedBrowserResourceFromFrames(normalizedTabId, view, audioResourceKey) : null,
+            videoResourceKey ? extractEmbeddedBrowserResourceFromFrames(normalizedTabId, view, videoResourceKey) : null
           ])
         );
         audioResource = (extractedResources == null ? void 0 : extractedResources[0]) || audioResource;
@@ -5897,7 +9088,7 @@ function createEmbeddedBrowserMainController(options) {
     try {
       const resource = await withEmbeddedBrowserView(
         normalizedTabId,
-        async (view) => extractEmbeddedBrowserResourceFromFrames(view, resourceKey)
+        async (view) => extractEmbeddedBrowserResourceFromFrames(normalizedTabId, view, resourceKey)
       );
       if (!resource) {
         return {
@@ -5988,7 +9179,7 @@ function createEmbeddedBrowserMainController(options) {
       if (resourceKey) {
         const extractedResource = await withEmbeddedBrowserView(
           normalizedTabId,
-          async (view) => extractEmbeddedBrowserResourceFromFrames(view, resourceKey)
+          async (view) => extractEmbeddedBrowserResourceFromFrames(normalizedTabId, view, resourceKey)
         );
         resource = extractedResource || resource;
       }
@@ -6046,36 +9237,97 @@ function createEmbeddedBrowserMainController(options) {
       };
     }
     try {
+      const requestId = String(payload.requestId || "").trim() || void 0;
       const defaultFileName = String(payload.suggestedFileName || "").trim() || deriveEmbeddedBrowserManifestOutputFileName(manifestUrl, kind);
-      const mainWindow2 = options.getMainWindow();
-      const targetWindow = mainWindow2 && !mainWindow2.isDestroyed() ? mainWindow2 : void 0;
-      const saveDialogOptions = {
-        defaultPath: path.join(app.getPath("downloads"), defaultFileName),
+      const outputPath = await resolveEmbeddedBrowserOutputPath({
+        defaultFileName,
         filters: [
           { extensions: ["mp4"], name: "MP4 Video" }
         ],
-        showsTagField: false
-      };
-      const saveResult = targetWindow ? await dialog.showSaveDialog(targetWindow, saveDialogOptions) : await dialog.showSaveDialog(saveDialogOptions);
-      if (saveResult.canceled || !saveResult.filePath) {
+        outputDirectoryPath: payload.outputDirectoryPath,
+        useSystemSaveDialog: payload.useSystemSaveDialog
+      });
+      if (!outputPath) {
         return {
           cancelled: true,
           ok: false
         };
       }
+      if (kind === "hls") {
+        emitEmbeddedBrowserHlsTask({
+          durationSeconds: payload.durationSeconds,
+          manifestUrl,
+          message: "开始准备网络 manifest 下载",
+          mode: "direct-manifest",
+          requestId,
+          stage: "preparing",
+          status: "running",
+          tabId: normalizedTabId
+        });
+        emitEmbeddedBrowserHlsTask({
+          durationSeconds: payload.durationSeconds,
+          manifestUrl,
+          message: "已交给 ffmpeg 直拉处理",
+          mode: "direct-manifest",
+          requestId,
+          stage: "ffmpeg",
+          status: "running",
+          tabId: normalizedTabId
+        });
+      }
       const result = await downloadEmbeddedBrowserManifestResource({
+        durationSeconds: payload.durationSeconds,
         ffmpegPath: payload.ffmpegPath,
         headers: payload.headers,
         kind,
         manifestUrl,
-        outputPath: saveResult.filePath
+        onProgress: kind === "hls" ? (progress) => {
+          emitEmbeddedBrowserHlsTask({
+            durationSeconds: payload.durationSeconds,
+            ffmpegSpeedText: progress.speedText,
+            manifestUrl,
+            mode: "direct-manifest",
+            processedSeconds: progress.processedSeconds,
+            requestId,
+            stage: "ffmpeg",
+            status: "running",
+            tabId: normalizedTabId
+          });
+        } : void 0,
+        outputPath
       });
+      if (kind === "hls") {
+        emitEmbeddedBrowserHlsTask({
+          durationSeconds: payload.durationSeconds,
+          manifestUrl,
+          message: "HLS 下载完成",
+          mode: "direct-manifest",
+          outputPath: result.outputPath,
+          requestId,
+          stage: "completed",
+          status: "success",
+          tabId: normalizedTabId
+        });
+      }
       return {
         ffmpegPath: result.ffmpegPath,
         ok: true,
         outputPath: result.outputPath
       };
     } catch (error) {
+      if (kind === "hls") {
+        emitEmbeddedBrowserHlsTask({
+          durationSeconds: payload.durationSeconds,
+          error: error instanceof Error ? error.message : String(error),
+          manifestUrl,
+          message: error instanceof Error ? error.message : String(error),
+          mode: "direct-manifest",
+          requestId: String(payload.requestId || "").trim() || void 0,
+          stage: "error",
+          status: "error",
+          tabId: normalizedTabId
+        });
+      }
       runtimeLogger.warn("embedded browser manifest download failed", {
         error: error instanceof Error ? error.message : String(error),
         kind,
@@ -6091,8 +9343,758 @@ function createEmbeddedBrowserMainController(options) {
   async function downloadEmbeddedBrowserHlsResource(tabId, payload) {
     return downloadEmbeddedBrowserManifestResourceForRenderer(tabId, payload, "hls");
   }
+  async function downloadEmbeddedBrowserHlsTracksResource(tabId, payload) {
+    const normalizedTabId = String(tabId || "").trim();
+    const videoManifestUrl = String(payload.videoManifestUrl || "").trim();
+    const audioManifestUrl = String(payload.audioManifestUrl || "").trim();
+    const requestId = String(payload.requestId || "").trim() || void 0;
+    if (!normalizedTabId || !/^https?:\/\//i.test(videoManifestUrl) || !/^https?:\/\//i.test(audioManifestUrl)) {
+      return {
+        error: "缺少可合并的视频或音轨 manifest",
+        ok: false
+      };
+    }
+    let outputPath = null;
+    try {
+      outputPath = await resolveEmbeddedBrowserOutputPath({
+        defaultFileName: String(payload.suggestedFileName || "").trim() || deriveEmbeddedBrowserManifestOutputFileName(videoManifestUrl, "hls"),
+        filters: [
+          { extensions: ["mp4"], name: "MP4 Video" }
+        ],
+        outputDirectoryPath: payload.outputDirectoryPath,
+        useSystemSaveDialog: payload.useSystemSaveDialog
+      });
+      if (!outputPath) {
+        return {
+          cancelled: true,
+          ok: false
+        };
+      }
+      emitEmbeddedBrowserHlsTask({
+        durationSeconds: payload.durationSeconds,
+        manifestUrl: videoManifestUrl,
+        message: "开始下载并合并视频/音轨",
+        mode: "direct-manifest",
+        requestId,
+        stage: "preparing",
+        status: "running",
+        tabId: normalizedTabId
+      });
+      const result = await downloadEmbeddedBrowserManifestTracks({
+        audioManifestUrl,
+        durationSeconds: payload.durationSeconds,
+        ffmpegPath: payload.ffmpegPath,
+        headers: payload.headers,
+        onProgress: payload.durationSeconds ? (progress) => {
+          emitEmbeddedBrowserHlsTask({
+            durationSeconds: payload.durationSeconds,
+            ffmpegSpeedText: progress.speedText,
+            manifestUrl: videoManifestUrl,
+            message: "正在通过 ffmpeg 合并视频和音轨",
+            mode: "direct-manifest",
+            processedSeconds: progress.processedSeconds,
+            requestId,
+            stage: "ffmpeg",
+            status: "running",
+            tabId: normalizedTabId
+          });
+        } : void 0,
+        outputPath,
+        videoManifestUrl
+      });
+      emitEmbeddedBrowserHlsTask({
+        durationSeconds: payload.durationSeconds,
+        manifestUrl: videoManifestUrl,
+        message: "HLS 视频/音轨合并完成",
+        mode: "direct-manifest",
+        outputPath: result.outputPath,
+        requestId,
+        stage: "completed",
+        status: "success",
+        tabId: normalizedTabId
+      });
+      return {
+        ffmpegPath: result.ffmpegPath,
+        ok: true,
+        outputPath: result.outputPath
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      emitEmbeddedBrowserHlsTask({
+        durationSeconds: payload.durationSeconds,
+        error: message,
+        manifestUrl: videoManifestUrl,
+        message,
+        mode: "direct-manifest",
+        requestId,
+        stage: "error",
+        status: "error",
+        tabId: normalizedTabId
+      });
+      return {
+        error: message,
+        ok: false
+      };
+    }
+  }
+  async function downloadEmbeddedBrowserHlsPlanResource(tabId, payload) {
+    const normalizedTabId = String(tabId || "").trim();
+    await clearEmbeddedBrowserHlsRetrySessions({ tabId: normalizedTabId });
+    if (!normalizedTabId || !payload.plan || !Array.isArray(payload.plan.fragments) || payload.plan.fragments.length === 0) {
+      return {
+        error: "缺少可下载的 HLS 计划",
+        ok: false
+      };
+    }
+    let latestFailedFragments;
+    let outputPath = null;
+    let retainRetrySession = false;
+    let workDirectoryPath = "";
+    const requestId = String(payload.requestId || "").trim() || void 0;
+    try {
+      const defaultFileName = String(payload.suggestedFileName || "").trim() || deriveEmbeddedBrowserManifestOutputFileName(payload.plan.manifestUrl, "hls");
+      outputPath = await resolveEmbeddedBrowserOutputPath({
+        defaultFileName,
+        filters: [
+          { extensions: ["mp4"], name: "MP4 Video" }
+        ],
+        outputDirectoryPath: payload.outputDirectoryPath,
+        useSystemSaveDialog: payload.useSystemSaveDialog
+      });
+      if (!outputPath) {
+        return {
+          cancelled: true,
+          ok: false
+        };
+      }
+      emitEmbeddedBrowserHlsTask({
+        manifestUrl: payload.plan.manifestUrl,
+        message: "开始准备本地 HLS 下载任务",
+        mode: "local-plan",
+        requestId,
+        stage: "preparing",
+        status: "running",
+        tabId: normalizedTabId,
+        durationSeconds: payload.plan.durationSeconds,
+        totalFragments: payload.plan.fragmentCount,
+        usingManualKey: Boolean(payload.manualKeyBase64)
+      });
+      workDirectoryPath = await mkdtemp(path.join(os.tmpdir(), "omniflow-hls-download-"));
+      const localDownloadResult = await downloadEmbeddedBrowserHlsToLocalWorkDirectory({
+        onEvent: (event) => {
+          var _a;
+          if ((_a = event.failedFragments) == null ? void 0 : _a.length) {
+            latestFailedFragments = event.failedFragments;
+          }
+          emitEmbeddedBrowserHlsTask({
+            bytesReceived: event.bytesReceived,
+            bytesTotal: event.bytesTotal,
+            completedFragments: event.completedFragments,
+            durationSeconds: payload.plan.durationSeconds,
+            error: event.error,
+            etaSeconds: event.etaSeconds,
+            failedFragments: event.failedFragments,
+            manifestUrl: payload.plan.manifestUrl,
+            message: event.message,
+            mode: "local-plan",
+            processedSeconds: void 0,
+            requestId,
+            speedBps: event.speedBps,
+            stage: event.stage,
+            status: event.status,
+            tabId: normalizedTabId,
+            totalFragments: event.totalFragments || payload.plan.fragmentCount,
+            usingManualKey: Boolean(payload.manualKeyBase64)
+          });
+        },
+        manualKeyBase64: payload.manualKeyBase64,
+        plan: {
+          fragments: payload.plan.fragments,
+          headers: payload.plan.headers,
+          manifestUrl: payload.plan.manifestUrl,
+          suggestedThreadCount: payload.plan.suggestedThreadCount
+        },
+        workDirectoryPath
+      });
+      workDirectoryPath = localDownloadResult.workDirectoryPath;
+      latestFailedFragments = void 0;
+      emitEmbeddedBrowserHlsTask({
+        completedFragments: payload.plan.fragmentCount,
+        durationSeconds: payload.plan.durationSeconds,
+        manifestUrl: payload.plan.manifestUrl,
+        message: "本地 playlist 已生成，开始交给 ffmpeg",
+        mode: "local-plan",
+        requestId,
+        stage: "ffmpeg",
+        status: "running",
+        tabId: normalizedTabId,
+        totalFragments: payload.plan.fragmentCount,
+        usingManualKey: Boolean(payload.manualKeyBase64)
+      });
+      const result = await downloadEmbeddedBrowserManifestResource({
+        durationSeconds: payload.plan.durationSeconds,
+        ffmpegPath: payload.ffmpegPath,
+        kind: "hls",
+        manifestUrl: localDownloadResult.playlistPath,
+        onProgress: (progress) => {
+          emitEmbeddedBrowserHlsTask({
+            completedFragments: payload.plan.fragmentCount,
+            durationSeconds: payload.plan.durationSeconds,
+            ffmpegSpeedText: progress.speedText,
+            manifestUrl: payload.plan.manifestUrl,
+            mode: "local-plan",
+            processedSeconds: progress.processedSeconds,
+            requestId,
+            stage: "ffmpeg",
+            status: "running",
+            tabId: normalizedTabId,
+            totalFragments: payload.plan.fragmentCount,
+            usingManualKey: Boolean(payload.manualKeyBase64)
+          });
+        },
+        outputPath
+      });
+      emitEmbeddedBrowserHlsTask({
+        completedFragments: payload.plan.fragmentCount,
+        durationSeconds: payload.plan.durationSeconds,
+        manifestUrl: payload.plan.manifestUrl,
+        message: "HLS 下载完成",
+        mode: "local-plan",
+        outputPath: result.outputPath,
+        requestId,
+        stage: "completed",
+        status: "success",
+        tabId: normalizedTabId,
+        totalFragments: payload.plan.fragmentCount,
+        usingManualKey: Boolean(payload.manualKeyBase64)
+      });
+      return {
+        ffmpegPath: result.ffmpegPath,
+        ok: true,
+        outputPath: result.outputPath
+      };
+    } catch (error) {
+      if (requestId && workDirectoryPath && outputPath && (latestFailedFragments == null ? void 0 : latestFailedFragments.length)) {
+        embeddedBrowserHlsRetrySessions.set(requestId, {
+          failedFragments: latestFailedFragments,
+          ffmpegPath: payload.ffmpegPath,
+          manualKeyBase64: payload.manualKeyBase64,
+          outputPath,
+          plan: payload.plan,
+          requestId,
+          tabId: normalizedTabId,
+          workDirectoryPath
+        });
+        retainRetrySession = true;
+      } else if (requestId) {
+        embeddedBrowserHlsRetrySessions.delete(requestId);
+      }
+      emitEmbeddedBrowserHlsTask({
+        durationSeconds: payload.plan.durationSeconds,
+        error: error instanceof Error ? error.message : String(error),
+        manifestUrl: payload.plan.manifestUrl,
+        message: error instanceof Error ? error.message : String(error),
+        mode: "local-plan",
+        requestId,
+        stage: "error",
+        status: "error",
+        tabId: normalizedTabId,
+        totalFragments: payload.plan.fragmentCount,
+        usingManualKey: Boolean(payload.manualKeyBase64)
+      });
+      runtimeLogger.warn("embedded browser hls plan download failed", {
+        error: error instanceof Error ? error.message : String(error),
+        manifestUrl: payload.plan.manifestUrl,
+        tabId: normalizedTabId
+      });
+      return {
+        error: error instanceof Error ? error.message : String(error),
+        ok: false
+      };
+    } finally {
+      if (workDirectoryPath && !retainRetrySession) {
+        await rm(workDirectoryPath, { force: true, recursive: true }).catch(() => void 0);
+      }
+    }
+  }
+  async function startEmbeddedBrowserHlsRecordingResource(tabId, payload) {
+    const normalizedTabId = String(tabId || "").trim();
+    const manifestUrl = String(payload.manifestUrl || "").trim();
+    const requestId = String(payload.requestId || "").trim() || void 0;
+    if (!normalizedTabId || !requestId || !/^https?:\/\//i.test(manifestUrl)) {
+      return {
+        error: "缺少可录制的直播 manifest",
+        ok: false
+      };
+    }
+    const existingSession = Array.from(embeddedBrowserHlsLiveRecordingSessions.values()).find((session2) => session2.tabId === normalizedTabId);
+    if (existingSession) {
+      return {
+        error: "当前 tab 仍有未完成的直播录制，请先停止录制或重试导出",
+        ok: false
+      };
+    }
+    let outputPath = null;
+    try {
+      const suggestedFileName = String(payload.suggestedFileName || "").trim() || deriveEmbeddedBrowserManifestOutputFileName(manifestUrl, "hls");
+      outputPath = await resolveEmbeddedBrowserOutputPath({
+        defaultFileName: suggestedFileName,
+        filters: [
+          { extensions: ["mp4"], name: "MP4 Video" }
+        ],
+        outputDirectoryPath: payload.outputDirectoryPath,
+        useSystemSaveDialog: payload.useSystemSaveDialog
+      });
+      if (!outputPath) {
+        return {
+          cancelled: true,
+          ok: false
+        };
+      }
+      emitEmbeddedBrowserHlsTask({
+        manifestUrl,
+        message: "开始准备直播录制任务",
+        mode: "local-plan",
+        requestId,
+        stage: "preparing",
+        status: "running",
+        tabId: normalizedTabId,
+        usingManualKey: Boolean(payload.manualKeyBase64)
+      });
+      const recorder = new EmbeddedBrowserHlsLiveRecorder({
+        headers: payload.headers,
+        manifestUrl,
+        manualKeyBase64: payload.manualKeyBase64,
+        onEvent: (event) => {
+          emitEmbeddedBrowserHlsTask({
+            bytesReceived: event.bytesReceived,
+            bytesTotal: event.bytesTotal,
+            completedFragments: event.completedFragments,
+            durationSeconds: event.durationSeconds,
+            error: event.error,
+            etaSeconds: event.etaSeconds,
+            failedFragments: event.failedFragments,
+            manifestUrl,
+            message: event.message,
+            mode: "local-plan",
+            requestId,
+            speedBps: event.speedBps,
+            stage: event.stage,
+            status: event.status,
+            tabId: normalizedTabId,
+            totalFragments: event.totalFragments,
+            usingManualKey: Boolean(payload.manualKeyBase64)
+          });
+        },
+        pageUrl: payload.pageUrl,
+        suggestedThreadCount: payload.suggestedThreadCount
+      });
+      embeddedBrowserHlsLiveRecordingSessions.set(requestId, {
+        ffmpegPath: payload.ffmpegPath,
+        manifestUrl,
+        outputPath,
+        recorder,
+        requestId,
+        tabId: normalizedTabId
+      });
+      await recorder.start();
+      embeddedBrowserHlsLiveRecordingSessions.set(requestId, {
+        ffmpegPath: payload.ffmpegPath,
+        manifestUrl,
+        outputPath,
+        recorder,
+        requestId,
+        tabId: normalizedTabId,
+        workDirectoryPath: recorder.getCurrentWorkDirectoryPath()
+      });
+      emitEmbeddedBrowserHlsTask({
+        manifestUrl,
+        message: "直播录制已开始，继续等待你手动停止",
+        mode: "local-plan",
+        requestId,
+        stage: "downloading-fragments",
+        status: "running",
+        tabId: normalizedTabId,
+        usingManualKey: Boolean(payload.manualKeyBase64)
+      });
+      return {
+        ok: true,
+        requestId
+      };
+    } catch (error) {
+      await clearEmbeddedBrowserHlsLiveRecordingSessions({ requestId, tabId: normalizedTabId });
+      emitEmbeddedBrowserHlsTask({
+        error: error instanceof Error ? error.message : String(error),
+        manifestUrl,
+        message: error instanceof Error ? error.message : String(error),
+        mode: "local-plan",
+        requestId,
+        stage: "error",
+        status: "error",
+        tabId: normalizedTabId,
+        usingManualKey: Boolean(payload.manualKeyBase64)
+      });
+      return {
+        error: error instanceof Error ? error.message : String(error),
+        ok: false
+      };
+    }
+  }
+  async function stopEmbeddedBrowserHlsRecordingResource(tabId, payload) {
+    const normalizedTabId = String(tabId || "").trim();
+    const requestId = String(payload.requestId || "").trim();
+    if (!normalizedTabId || !requestId) {
+      return {
+        error: "缺少可停止的直播录制任务",
+        ok: false
+      };
+    }
+    const session2 = embeddedBrowserHlsLiveRecordingSessions.get(requestId);
+    if (!session2 || session2.tabId !== normalizedTabId) {
+      return {
+        error: "直播录制任务不存在或已结束",
+        ok: false
+      };
+    }
+    let stopResult = null;
+    try {
+      emitEmbeddedBrowserHlsTask({
+        manifestUrl: session2.manifestUrl,
+        message: "正在停止直播录制并整理本地 playlist",
+        mode: "local-plan",
+        requestId,
+        stage: "rewriting-playlist",
+        status: "running",
+        tabId: normalizedTabId
+      });
+      stopResult = await session2.recorder.stop();
+      const completedRecording = stopResult;
+      session2.workDirectoryPath = completedRecording.workDirectoryPath;
+      emitEmbeddedBrowserHlsTask({
+        completedFragments: completedRecording.totalFragments,
+        durationSeconds: completedRecording.durationSeconds,
+        manifestUrl: session2.manifestUrl,
+        message: "直播录制已停止，开始交给 ffmpeg",
+        mode: "local-plan",
+        requestId,
+        stage: "ffmpeg",
+        status: "running",
+        tabId: normalizedTabId,
+        totalFragments: completedRecording.totalFragments
+      });
+      const result = await downloadEmbeddedBrowserManifestResource({
+        durationSeconds: completedRecording.durationSeconds,
+        ffmpegPath: session2.ffmpegPath,
+        kind: "hls",
+        manifestUrl: completedRecording.playlistPath,
+        onProgress: (progress) => {
+          emitEmbeddedBrowserHlsTask({
+            completedFragments: completedRecording.totalFragments,
+            durationSeconds: completedRecording.durationSeconds,
+            ffmpegSpeedText: progress.speedText,
+            manifestUrl: session2.manifestUrl,
+            mode: "local-plan",
+            processedSeconds: progress.processedSeconds,
+            requestId,
+            stage: "ffmpeg",
+            status: "running",
+            tabId: normalizedTabId,
+            totalFragments: completedRecording.totalFragments
+          });
+        },
+        outputPath: session2.outputPath
+      });
+      emitEmbeddedBrowserHlsTask({
+        completedFragments: completedRecording.totalFragments,
+        durationSeconds: completedRecording.durationSeconds,
+        manifestUrl: session2.manifestUrl,
+        message: "直播录制文件已完成",
+        mode: "local-plan",
+        outputPath: result.outputPath,
+        requestId,
+        stage: "completed",
+        status: "success",
+        tabId: normalizedTabId,
+        totalFragments: completedRecording.totalFragments
+      });
+      embeddedBrowserHlsLiveRecordingSessions.delete(requestId);
+      await rm(completedRecording.workDirectoryPath, { force: true, recursive: true }).catch(() => void 0);
+      return {
+        ffmpegPath: result.ffmpegPath,
+        ok: true,
+        outputPath: result.outputPath
+      };
+    } catch (error) {
+      emitEmbeddedBrowserHlsTask({
+        error: error instanceof Error ? error.message : String(error),
+        manifestUrl: session2.manifestUrl,
+        message: error instanceof Error ? error.message : String(error),
+        mode: "local-plan",
+        requestId,
+        stage: "error",
+        status: "error",
+        tabId: normalizedTabId
+      });
+      if (!stopResult) {
+        embeddedBrowserHlsLiveRecordingSessions.delete(requestId);
+      }
+      if (!stopResult && session2.workDirectoryPath) {
+        await rm(session2.workDirectoryPath, { force: true, recursive: true }).catch(() => void 0);
+      }
+      return {
+        error: error instanceof Error ? error.message : String(error),
+        ok: false
+      };
+    }
+  }
+  async function discardEmbeddedBrowserHlsRecordingResource(tabId, payload) {
+    const normalizedTabId = String(tabId || "").trim();
+    const requestId = String(payload.requestId || "").trim();
+    if (!normalizedTabId || !requestId) {
+      return {
+        error: "缺少可清理的直播录制任务",
+        ok: false
+      };
+    }
+    const session2 = embeddedBrowserHlsLiveRecordingSessions.get(requestId);
+    if (!session2 || session2.tabId !== normalizedTabId) {
+      return {
+        ok: true
+      };
+    }
+    await clearEmbeddedBrowserHlsLiveRecordingSessions({ requestId });
+    return {
+      ok: true
+    };
+  }
+  async function retryEmbeddedBrowserHlsPlanFailedFragments(tabId, payload) {
+    const normalizedTabId = String(tabId || "").trim();
+    const requestId = String(payload.requestId || "").trim();
+    if (!normalizedTabId || !requestId) {
+      return {
+        error: "缺少可重试的 HLS 任务",
+        ok: false
+      };
+    }
+    const session2 = embeddedBrowserHlsRetrySessions.get(requestId);
+    if (!session2 || session2.tabId !== normalizedTabId) {
+      return {
+        error: "这条 HLS 失败任务已经过期，请重新执行一次完整下载",
+        ok: false
+      };
+    }
+    let latestFailedFragments = session2.failedFragments;
+    let retainRetrySession = false;
+    try {
+      emitEmbeddedBrowserHlsTask({
+        completedFragments: Math.max(0, session2.plan.fragmentCount - session2.failedFragments.length),
+        durationSeconds: session2.plan.durationSeconds,
+        failedFragments: session2.failedFragments,
+        manifestUrl: session2.plan.manifestUrl,
+        message: `开始重试 ${session2.failedFragments.length} 个失败分片`,
+        mode: "local-plan",
+        requestId,
+        stage: "downloading-fragments",
+        status: "running",
+        tabId: normalizedTabId,
+        totalFragments: session2.plan.fragmentCount,
+        usingManualKey: Boolean(session2.manualKeyBase64)
+      });
+      const localDownloadResult = await downloadEmbeddedBrowserHlsToLocalWorkDirectory({
+        fragmentIndexes: session2.failedFragments.map((value) => value - 1).filter((value) => value >= 0),
+        manualKeyBase64: session2.manualKeyBase64,
+        onEvent: (event) => {
+          var _a;
+          if ((_a = event.failedFragments) == null ? void 0 : _a.length) {
+            latestFailedFragments = event.failedFragments;
+          }
+          emitEmbeddedBrowserHlsTask({
+            bytesReceived: event.bytesReceived,
+            bytesTotal: event.bytesTotal,
+            completedFragments: event.completedFragments,
+            durationSeconds: session2.plan.durationSeconds,
+            error: event.error,
+            etaSeconds: event.etaSeconds,
+            failedFragments: event.failedFragments,
+            manifestUrl: session2.plan.manifestUrl,
+            message: event.message,
+            mode: "local-plan",
+            processedSeconds: void 0,
+            requestId,
+            speedBps: event.speedBps,
+            stage: event.stage,
+            status: event.status,
+            tabId: normalizedTabId,
+            totalFragments: event.totalFragments || session2.plan.fragmentCount,
+            usingManualKey: Boolean(session2.manualKeyBase64)
+          });
+        },
+        plan: {
+          fragments: session2.plan.fragments,
+          headers: session2.plan.headers,
+          manifestUrl: session2.plan.manifestUrl,
+          suggestedThreadCount: session2.plan.suggestedThreadCount
+        },
+        workDirectoryPath: session2.workDirectoryPath
+      });
+      latestFailedFragments = void 0;
+      emitEmbeddedBrowserHlsTask({
+        completedFragments: session2.plan.fragmentCount,
+        durationSeconds: session2.plan.durationSeconds,
+        manifestUrl: session2.plan.manifestUrl,
+        message: "失败分片已补齐，开始交给 ffmpeg",
+        mode: "local-plan",
+        requestId,
+        stage: "ffmpeg",
+        status: "running",
+        tabId: normalizedTabId,
+        totalFragments: session2.plan.fragmentCount,
+        usingManualKey: Boolean(session2.manualKeyBase64)
+      });
+      const result = await downloadEmbeddedBrowserManifestResource({
+        durationSeconds: session2.plan.durationSeconds,
+        ffmpegPath: session2.ffmpegPath,
+        kind: "hls",
+        manifestUrl: localDownloadResult.playlistPath,
+        onProgress: (progress) => {
+          emitEmbeddedBrowserHlsTask({
+            completedFragments: session2.plan.fragmentCount,
+            durationSeconds: session2.plan.durationSeconds,
+            ffmpegSpeedText: progress.speedText,
+            manifestUrl: session2.plan.manifestUrl,
+            mode: "local-plan",
+            processedSeconds: progress.processedSeconds,
+            requestId,
+            stage: "ffmpeg",
+            status: "running",
+            tabId: normalizedTabId,
+            totalFragments: session2.plan.fragmentCount,
+            usingManualKey: Boolean(session2.manualKeyBase64)
+          });
+        },
+        outputPath: session2.outputPath
+      });
+      embeddedBrowserHlsRetrySessions.delete(requestId);
+      emitEmbeddedBrowserHlsTask({
+        completedFragments: session2.plan.fragmentCount,
+        durationSeconds: session2.plan.durationSeconds,
+        manifestUrl: session2.plan.manifestUrl,
+        message: "HLS 下载完成",
+        mode: "local-plan",
+        outputPath: result.outputPath,
+        requestId,
+        stage: "completed",
+        status: "success",
+        tabId: normalizedTabId,
+        totalFragments: session2.plan.fragmentCount,
+        usingManualKey: Boolean(session2.manualKeyBase64)
+      });
+      await rm(session2.workDirectoryPath, { force: true, recursive: true }).catch(() => void 0);
+      return {
+        ffmpegPath: result.ffmpegPath,
+        ok: true,
+        outputPath: result.outputPath
+      };
+    } catch (error) {
+      if (latestFailedFragments == null ? void 0 : latestFailedFragments.length) {
+        embeddedBrowserHlsRetrySessions.set(requestId, {
+          ...session2,
+          failedFragments: latestFailedFragments
+        });
+        retainRetrySession = true;
+      } else {
+        embeddedBrowserHlsRetrySessions.delete(requestId);
+      }
+      emitEmbeddedBrowserHlsTask({
+        durationSeconds: session2.plan.durationSeconds,
+        error: error instanceof Error ? error.message : String(error),
+        failedFragments: latestFailedFragments,
+        manifestUrl: session2.plan.manifestUrl,
+        message: error instanceof Error ? error.message : String(error),
+        mode: "local-plan",
+        requestId,
+        stage: "error",
+        status: "error",
+        tabId: normalizedTabId,
+        totalFragments: session2.plan.fragmentCount,
+        usingManualKey: Boolean(session2.manualKeyBase64)
+      });
+      if (!retainRetrySession) {
+        await rm(session2.workDirectoryPath, { force: true, recursive: true }).catch(() => void 0);
+      }
+      return {
+        error: error instanceof Error ? error.message : String(error),
+        ok: false
+      };
+    }
+  }
   async function downloadEmbeddedBrowserMpdResource(tabId, payload) {
     return downloadEmbeddedBrowserManifestResourceForRenderer(tabId, payload, "mpd");
+  }
+  async function downloadEmbeddedBrowserMpdPlanResource(tabId, payload) {
+    const normalizedTabId = String(tabId || "").trim();
+    const requestId = String(payload.requestId || "").trim() || void 0;
+    const plan = payload.plan;
+    if (!normalizedTabId || !plan || !Array.isArray(plan.representations) || plan.representations.length === 0) {
+      return {
+        error: "缺少可下载的 MPD 计划",
+        ok: false
+      };
+    }
+    if (plan.hasDrm) {
+      return {
+        error: "当前 MPD 检测到 DRM，第一版下载器暂不支持",
+        ok: false
+      };
+    }
+    const selectedVideoRepresentation = String(payload.selectedVideoRepresentationId || "").trim() ? plan.representations.find((item) => item.id === String(payload.selectedVideoRepresentationId || "").trim()) : void 0;
+    const selectedAudioRepresentation = String(payload.selectedAudioRepresentationId || "").trim() ? plan.representations.find((item) => item.id === String(payload.selectedAudioRepresentationId || "").trim()) : void 0;
+    if (!selectedVideoRepresentation && !selectedAudioRepresentation) {
+      return {
+        error: "至少需要选择一条 MPD 轨道",
+        ok: false
+      };
+    }
+    try {
+      const defaultFileName = String(payload.suggestedFileName || "").trim() || deriveEmbeddedBrowserManifestOutputFileName(plan.manifestUrl, "mpd");
+      const outputPath = await resolveEmbeddedBrowserOutputPath({
+        defaultFileName,
+        filters: [
+          { extensions: ["mp4", "m4a", "webm"], name: "媒体文件" }
+        ],
+        outputDirectoryPath: payload.outputDirectoryPath,
+        useSystemSaveDialog: payload.useSystemSaveDialog
+      });
+      if (!outputPath) {
+        return {
+          cancelled: true,
+          ok: false
+        };
+      }
+      const result = await downloadEmbeddedBrowserMpdToOutput({
+        ffmpegPath: payload.ffmpegPath,
+        headers: plan.headers,
+        outputPath,
+        selectedAudioRepresentation,
+        selectedVideoRepresentation
+      });
+      return {
+        ffmpegPath: result.ffmpegPath,
+        ok: true,
+        outputPath: result.outputPath
+      };
+    } catch (error) {
+      runtimeLogger.warn("embedded browser mpd plan download failed", {
+        error: error instanceof Error ? error.message : String(error),
+        manifestUrl: plan.manifestUrl,
+        requestId,
+        tabId: normalizedTabId
+      });
+      return {
+        error: error instanceof Error ? error.message : String(error),
+        ok: false
+      };
+    }
   }
   function syncEmbeddedBrowserViewBounds(view) {
     view.setBounds(embeddedBrowserPendingBounds ?? {
@@ -6121,6 +10123,7 @@ function createEmbeddedBrowserMainController(options) {
     if (!mainWindow2 || mainWindow2.isDestroyed()) {
       return null;
     }
+    const recordProbeResource = buildEmbeddedBrowserProbeResourceRecorder(tabId);
     return createEmbeddedBrowserView({
       createIfMissingProbe: tryInstallEmbeddedBrowserResourceProbe,
       currentUrls: embeddedBrowserLastCommittedUrls,
@@ -6183,7 +10186,25 @@ function createEmbeddedBrowserMainController(options) {
           tabId: credentialTabId
         });
       },
-      onProbePayload: buildEmbeddedBrowserProbeResourceRecorder(tabId),
+      onProbePayload: (payload) => {
+        const event = typeof payload.event === "string" ? payload.event : "";
+        const resourceKey = typeof payload.resourceKey === "string" ? payload.resourceKey : "";
+        if (event === "mse-flush") {
+          void appendEmbeddedBrowserMseSpoolChunk(tabId, {
+            base64: typeof payload.base64 === "string" ? payload.base64 : "",
+            fileName: typeof payload.fileName === "string" ? payload.fileName : void 0,
+            mimeType: typeof payload.mimeType === "string" ? payload.mimeType : void 0,
+            resourceKey,
+            streamType: payload.streamType === "audio" || payload.streamType === "video" ? payload.streamType : void 0
+          });
+          return;
+        }
+        if (event === "mse-reset") {
+          void clearEmbeddedBrowserMseSpoolFiles({ resourceKey, tabId });
+          return;
+        }
+        recordProbeResource(payload);
+      },
       syncBounds: syncEmbeddedBrowserViewBounds,
       tabId,
       tryDispatchPendingOpenFile: async (targetTabId, view) => tryDispatchPendingEmbeddedBrowserOpenFile({
@@ -6302,6 +10323,9 @@ function createEmbeddedBrowserMainController(options) {
       pendingOpenFiles: embeddedBrowserPendingOpenFiles,
       tabId: normalizedTabId
     });
+    void clearEmbeddedBrowserHlsRetrySessions({ tabId: normalizedTabId });
+    void clearEmbeddedBrowserHlsLiveRecordingSessions({ tabId: normalizedTabId });
+    void clearEmbeddedBrowserMseSpoolFiles({ tabId: normalizedTabId });
     if (!view.webContents.isDestroyed()) {
       view.webContents.close({ waitForBeforeUnload: false });
     }
@@ -6530,6 +10554,15 @@ function createEmbeddedBrowserMainController(options) {
   async function handleOpenResource(tabId, resourceKey) {
     return withEmbeddedBrowserView(tabId, async (view) => {
       try {
+        const normalizedTabId = String(tabId || "").trim();
+        const normalizedResourceKey = String(resourceKey || "").trim();
+        if (normalizedResourceKey.startsWith("mse-stream:")) {
+          const resource = await extractEmbeddedBrowserResourceFromFrames(normalizedTabId, view, normalizedResourceKey);
+          if (resource && "filePath" in resource && resource.filePath) {
+            const openError = await shell.openPath(resource.filePath);
+            return !openError;
+          }
+        }
         const frames = getEmbeddedBrowserFrameList(view);
         if (!frames.length) {
           return await runEmbeddedBrowserResourceProbeAction(
@@ -6565,6 +10598,28 @@ function createEmbeddedBrowserMainController(options) {
   async function handleExportResource(tabId, resourceKey) {
     return withEmbeddedBrowserView(tabId, async (view) => {
       try {
+        const normalizedTabId = String(tabId || "").trim();
+        const normalizedResourceKey = String(resourceKey || "").trim();
+        if (normalizedResourceKey.startsWith("mse-stream:")) {
+          const resource = await extractEmbeddedBrowserResourceFromFrames(normalizedTabId, view, normalizedResourceKey);
+          if (resource) {
+            const defaultFileName = deriveEmbeddedBrowserExtractedResourceOutputFileName(
+              resource.fileName
+            );
+            const mainWindow2 = options.getMainWindow();
+            const targetWindow = mainWindow2 && !mainWindow2.isDestroyed() ? mainWindow2 : void 0;
+            const saveDialogOptions = {
+              defaultPath: path.join(app.getPath("downloads"), defaultFileName),
+              showsTagField: false
+            };
+            const saveResult = targetWindow ? await dialog.showSaveDialog(targetWindow, saveDialogOptions) : await dialog.showSaveDialog(saveDialogOptions);
+            if (saveResult.canceled || !saveResult.filePath) {
+              return false;
+            }
+            await saveEmbeddedBrowserExtractedResourceFile(resource, saveResult.filePath);
+            return true;
+          }
+        }
         const frames = getEmbeddedBrowserFrameList(view);
         if (!frames.length) {
           return await runEmbeddedBrowserResourceProbeAction(
@@ -6600,7 +10655,30 @@ function createEmbeddedBrowserMainController(options) {
   async function handleReadResource(tabId, resourceKey) {
     return withEmbeddedBrowserView(tabId, async (view) => {
       try {
-        return await extractEmbeddedBrowserResourceFromFrames(view, resourceKey);
+        const resource = await extractEmbeddedBrowserResourceFromFrames(String(tabId || "").trim(), view, resourceKey);
+        if (!resource) {
+          return null;
+        }
+        if (typeof resource.base64 === "string") {
+          return {
+            base64: resource.base64,
+            fileName: resource.fileName,
+            mimeType: resource.mimeType,
+            resourceKey: resource.resourceKey || String(resourceKey || "").trim(),
+            streamType: resource.streamType
+          };
+        }
+        if (!("filePath" in resource) || !resource.filePath) {
+          return null;
+        }
+        const fileBuffer = await readFile(resource.filePath);
+        return {
+          base64: fileBuffer.toString("base64"),
+          fileName: resource.fileName,
+          mimeType: resource.mimeType,
+          resourceKey: resource.resourceKey || String(resourceKey || "").trim(),
+          streamType: resource.streamType
+        };
       } catch (error) {
         runtimeLogger.warn("embedded browser resource read failed", {
           error: error instanceof Error ? error.message : String(error),
@@ -6804,7 +10882,15 @@ function createEmbeddedBrowserMainController(options) {
       deactivate: handleDeactivate,
       downloadCatchMedia: (tabId) => handleCatchToolkitAction(tabId, "downloadCatchMedia", "download"),
       downloadHlsManifest: downloadEmbeddedBrowserHlsResource,
+      startHlsRecording: startEmbeddedBrowserHlsRecordingResource,
+      stopHlsRecording: stopEmbeddedBrowserHlsRecordingResource,
+      discardHlsRecording: discardEmbeddedBrowserHlsRecordingResource,
+      downloadHlsTracks: downloadEmbeddedBrowserHlsTracksResource,
+      downloadHlsPlan: downloadEmbeddedBrowserHlsPlanResource,
+      retryHlsPlanFailed: retryEmbeddedBrowserHlsPlanFailedFragments,
       downloadMpdManifest: downloadEmbeddedBrowserMpdResource,
+      downloadMpdPlan: downloadEmbeddedBrowserMpdPlanResource,
+      downloadDirectFile: downloadEmbeddedBrowserDirectFile,
       exportResource: handleExportResource,
       getCatchToolkitState: handleGetCatchToolkitState,
       goBack: handleGoBack,
@@ -6832,6 +10918,14 @@ function createEmbeddedBrowserMainController(options) {
       removeCookie: removeEmbeddedBrowserCookie,
       removeCookiesByDomain: removeEmbeddedBrowserCookiesByDomain,
       removeAllCookies: removeAllEmbeddedBrowserCookies,
+      getResourceCaptureRules: async () => listEmbeddedBrowserResourceCaptureRules(),
+      updateResourceCaptureRules: async (ruleSet) => updateEmbeddedBrowserResourceCaptureRules(ruleSet),
+      resetResourceCaptureRules: async () => resetEmbeddedBrowserResourceCaptureRules(),
+      getExternalToolSettings: async () => listEmbeddedBrowserExternalToolSettings(),
+      updateExternalToolSettings: async (settings) => updateEmbeddedBrowserExternalToolSettings(settings),
+      resetExternalToolSettings: async () => resetEmbeddedBrowserExternalToolSettings(),
+      listEnabledExternalTools: async () => listEnabledEmbeddedBrowserExternalToolOptions(),
+      dispatchExternalTool: async (toolKey, payload) => dispatchEmbeddedBrowserExternalTool(toolKey, payload),
       listPasswords: listEmbeddedBrowserPasswords,
       getDecryptedPassword: getEmbeddedBrowserDecryptedPassword,
       saveCapturedCredential: async (credentialRequestId) => {
