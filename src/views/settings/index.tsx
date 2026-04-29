@@ -540,6 +540,20 @@ const Settings: React.FC = () => {
 
         <div className="setting-item">
           <div>
+            <div className="setting-title">存储管理</div>
+            <div className="setting-desc">管理多个存储 Provider 和文件分流规则</div>
+          </div>
+          <Button
+            theme="borderless"
+            onClick={() => navigate('/settings/storage')}
+            className="settings-action-btn manage"
+          >
+            管理
+          </Button>
+        </div>
+
+        <div className="setting-item">
+          <div>
             <div className="setting-title">导入 Chrome 书签</div>
             <div className="setting-desc">支持导入本地书签文件，或手动选择任意 Chrome 导出的书签 JSON</div>
           </div>

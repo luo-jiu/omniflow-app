@@ -8,6 +8,7 @@ const LibraryDetail = lazy(() => import('@/views/library/detail')) // 仓库选�
 const Settings = lazy(() => import('@/views/settings'))
 const TagManagement = lazy(() => import('@/views/tag-management'))
 const BrowserFileMappings = lazy(() => import('@/views/browser-file-mappings'))
+const StorageSettings = lazy(() => import('@/views/storage-settings'))
 const UploadCenter = lazy(() => import('@/views/upload-center'))
 const RecycleBin = lazy(() => import('@/views/recycle-bin'))
 const Profile = lazy(() => import('@/views/profile'))
@@ -72,6 +73,14 @@ const routes: RouteObject[] = [
     element: (
       <RequireAuth>
         <BrowserFileMappings />
+      </RequireAuth>
+    )
+  },
+  {
+    path: '/settings/storage',
+    element: (
+      <RequireAuth>
+        <StorageSettings />
       </RequireAuth>
     )
   },
