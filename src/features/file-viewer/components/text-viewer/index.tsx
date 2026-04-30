@@ -11,7 +11,12 @@ import { xml } from '@codemirror/lang-xml';
 import { python } from '@codemirror/lang-python';
 import { keymap, EditorView } from '@codemirror/view';
 import { useTheme } from '@/hooks/useTheme';
-import { fetchNodeDetailById, uploadLocalPathAndCreateNode, getFileLink } from '@/features/file-explorer/services/file.api';
+import {
+  fetchNodeDetailById,
+  getFileLink,
+  updateNodeFileContent,
+  uploadLocalPathAndCreateNode,
+} from '@/features/file-explorer/services/file.api';
 import { useFileViewer } from '@/hooks/useFileViewer';
 import { refreshDirectoryInTree } from '@/features/file-explorer/services/tree-locate';
 import { normalizeFileExtension } from '@/utils/preview-file-type';
@@ -154,31 +159,28 @@ const TextViewer: React.FC<TextViewerProps> = ({
     setIsSaving(true);
     try {
       const detail = await fetchNodeDetailById(nodeId);
-      const saveName = buildFullFileName(detail);
       const savedContent = contentRef.current;
-      const staged = await window.electronAPI.createStagedTextFile(saveName, contentRef.current);
+      const savedNode = await updateNodeFileContent({
+        nodeId,
+        libraryId: detail.libraryId,
+        content: savedContent,
+        contentType: detail.mimeType || 'text/plain; charset=utf-8',
+      });
+      const savedNodeId = Number(savedNode?.id || nodeId);
+      contentRef.current = savedContent;
+      setContent(savedContent);
+      setIsDirty(false);
+      refreshDirectoryInTree(detail.parentId);
+      Toast.success('已保存');
       try {
-        const savedNode = await uploadLocalPathAndCreateNode(staged.filePath, detail.parentId, detail.libraryId, {
-          conflictPolicy: 'replace',
-        });
-        const savedNodeId = Number(savedNode?.id || nodeId);
-        contentRef.current = savedContent;
-        setContent(savedContent);
-        setIsDirty(false);
-        refreshDirectoryInTree(detail.parentId);
-        Toast.success('已保存');
-        try {
-          const newUrl = await getFileLink(savedNodeId, detail.libraryId);
-          if (newUrl) {
-            loadedUrlRef.current = `${newUrl}::${reloadToken}`;
-            setFileUrl(newUrl, fileName || null, 'text', savedNodeId);
-            reloadActiveTab();
-          }
-        } catch {
-          // URL 刷新失败不影响保存成功
+        const newUrl = await getFileLink(savedNodeId, detail.libraryId);
+        if (newUrl) {
+          loadedUrlRef.current = `${newUrl}::${reloadToken}`;
+          setFileUrl(newUrl, fileName || null, 'text', savedNodeId);
+          reloadActiveTab();
         }
-      } finally {
-        await window.electronAPI.cleanupStagedTextFile(staged.filePath).catch(() => false);
+      } catch {
+        // URL 刷新失败不影响保存成功
       }
     } catch (error: any) {
       runtimeLogger.error('文本保存失败:', error);
@@ -186,7 +188,7 @@ const TextViewer: React.FC<TextViewerProps> = ({
     } finally {
       setIsSaving(false);
     }
-  }, [nodeId, isSaving, buildFullFileName, reloadToken, fileName, reloadActiveTab, setFileUrl]);
+  }, [nodeId, isSaving, reloadToken, fileName, reloadActiveTab, setFileUrl]);
 
   const handleSaveAs = useCallback(async () => {
     if (!nodeId || isSaving) return;

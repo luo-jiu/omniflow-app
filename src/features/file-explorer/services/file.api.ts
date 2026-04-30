@@ -256,6 +256,27 @@ export async function fetchNodeDetailById(nodeId: number): Promise<NodeDetailDTO
   return normalizeNodeDetailPayload(data as Record<string, unknown>);
 }
 
+export async function updateNodeFileContent(payload: {
+  nodeId: number;
+  libraryId: number;
+  content: string;
+  contentType?: string;
+}): Promise<NodeDetailDTO> {
+  const body = await request(`/v1/nodes/${payload.nodeId}/content`, {
+    method: 'PUT',
+    body: JSON.stringify({
+      libraryId: payload.libraryId,
+      content: payload.content,
+      contentType: payload.contentType,
+    }),
+  });
+  const data = body?.data;
+  if (!data || typeof data !== 'object') {
+    throw new Error('文件内容保存响应数据异常');
+  }
+  return normalizeNodeDetailPayload(data as Record<string, unknown>);
+}
+
 // 上传文件并创建节点
 export async function uploadAndCreateNode(
   file: File,

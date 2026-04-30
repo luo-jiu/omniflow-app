@@ -12,7 +12,8 @@
 - 按文件名扩展名选择基础语法高亮
 - 加载后维护编辑内容和 dirty 状态
 - 支持字号缩放、自动换行、保存、另存为和下载
-- 通过 Electron 暂存文本文件，再走现有上传创建节点链路保存
+- 保存时调用后端按 `nodeId` 更新内容的专用 API
+- 另存为时通过 Electron 暂存文本文件，再走现有上传创建节点链路
 - 保存成功后刷新目录树，并刷新当前 tab 的文件链接
 
 它不是文件打开链路 owner，也不是后端节点存储 owner。
@@ -43,15 +44,15 @@
 
 ### 3.3 保存
 
-当前保存链路是兼容既有上传能力的过渡实现：
+当前保存链路使用专用内容更新接口：
 
 1. 读取当前节点详情。
-2. 通过 `window.electronAPI.createStagedTextFile` 生成临时文本文件。
-3. 调用 `uploadLocalPathAndCreateNode`，使用 `conflictPolicy: 'replace'` 覆盖同名文件。
-4. 清理暂存文件。
+2. 调用 `PUT /api/v1/nodes/:nodeId/content`，请求体包含 `libraryId`、`content` 和可选 `contentType`。
+3. 后端生成新的对象存储内容，并替换当前文件节点的 storage 绑定。
+4. 保留节点 ID、文件名和目录位置不变。
 5. 刷新目录树和当前 tab 的文件链接。
 
-这个实现依赖后端同名替换语义保持原节点或返回可继续打开的新节点。后续如果后端提供按 `nodeId` 更新内容的专用接口，应优先切换到专用接口，避免把编辑保存伪装成上传。
+不要把普通保存重新改成 `uploadLocalPathAndCreateNode + conflictPolicy: 'replace'`。那条链路只适合兼容上传替换，不适合作为编辑器保存的主路径。
 
 ### 3.4 另存为
 
