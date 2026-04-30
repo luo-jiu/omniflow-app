@@ -9,6 +9,7 @@ export type FileViewerFileType =
   | 'video'
   | 'audio'
   | 'pdf'
+  | 'text'
   | 'comic'
   | 'asmr'
   | ArchiveFileType

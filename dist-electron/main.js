@@ -1,7 +1,7 @@
 var __defProp = Object.defineProperty;
 var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
 var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
-import { dialog, app, net, ipcMain, session, systemPreferences, safeStorage, webContents, BrowserWindow, shell, WebContentsView, nativeTheme, screen } from "electron";
+import { dialog, app, net, ipcMain, session, systemPreferences, safeStorage, webContents, BrowserWindow, shell, WebContentsView, nativeTheme, screen, Menu } from "electron";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs$1, { existsSync, mkdirSync, readFileSync, writeFileSync, constants } from "node:fs";
@@ -492,8 +492,10 @@ function registerFileIpc(ipcMain2) {
   });
   ipcMain2.handle("fs:create-staged-text-file", async (_event, fileName, content) => {
     const stagingRoot = getTextFileStagingRoot();
-    await fs$2.mkdir(stagingRoot, { recursive: true });
-    const stagedPath = path.join(stagingRoot, buildStagedFileName$1(fileName || "subtitle.txt"));
+    const subDir = path.join(stagingRoot, `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+    await fs$2.mkdir(subDir, { recursive: true });
+    const safeName = String(fileName || "subtitle.txt").replace(/[/\\]/g, "_").trim() || "unknown";
+    const stagedPath = path.join(subDir, safeName);
     const normalizedContent = String(content ?? "");
     await fs$2.writeFile(stagedPath, normalizedContent, "utf-8");
     return {
@@ -528,7 +530,12 @@ function registerFileIpc(ipcMain2) {
     if (!normalizedPath || !isPathInsideDirectory$1(normalizedPath, stagingRoot)) {
       return false;
     }
-    await fs$2.rm(normalizedPath, { force: true });
+    const parentDir = path.dirname(normalizedPath);
+    if (parentDir !== stagingRoot && isPathInsideDirectory$1(parentDir, stagingRoot)) {
+      await fs$2.rm(parentDir, { recursive: true, force: true });
+    } else {
+      await fs$2.rm(normalizedPath, { force: true });
+    }
     return true;
   });
   ipcMain2.handle("fs:cleanup-temp-import-path", async (_event, targetPath) => {
@@ -11499,11 +11506,17 @@ function createWindow() {
     }
     overlayWindowController.destroy();
   });
-  win.webContents.setZoomFactor(1);
-  void win.webContents.setVisualZoomLevelLimits(1, 1).catch(() => void 0);
   win.webContents.on("before-input-event", (event, input) => {
     if (isZoomShortcut(input)) {
       event.preventDefault();
+      const key = (input.key || "").toLowerCase();
+      if (key === "+" || key === "=") {
+        win.webContents.send("app:zoom-shortcut", "in");
+      } else if (key === "-" || key === "_") {
+        win.webContents.send("app:zoom-shortcut", "out");
+      } else if (key === "0") {
+        win.webContents.send("app:zoom-shortcut", "reset");
+      }
       return;
     }
     if (!isToggleDevToolsShortcut(input)) {
@@ -11567,6 +11580,46 @@ app.whenReady().then(() => {
   });
   embeddedBrowserMainController.registerIpcHandlers();
   registerOverlayWindowIpcHandlers(overlayWindowController);
+  const template = [
+    ...process.platform === "darwin" ? [{
+      label: app.name,
+      submenu: [
+        { role: "about" },
+        { type: "separator" },
+        { role: "services" },
+        { type: "separator" },
+        { role: "hide" },
+        { role: "hideOthers" },
+        { role: "unhide" },
+        { type: "separator" },
+        { role: "quit" }
+      ]
+    }] : [],
+    {
+      label: "Edit",
+      submenu: [
+        { role: "undo" },
+        { role: "redo" },
+        { type: "separator" },
+        { role: "cut" },
+        { role: "copy" },
+        { role: "paste" },
+        { role: "selectAll" }
+      ]
+    },
+    {
+      label: "Window",
+      submenu: [
+        { role: "minimize" },
+        { role: "close" },
+        ...process.platform === "darwin" ? [
+          { type: "separator" },
+          { role: "front" }
+        ] : []
+      ]
+    }
+  ];
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
   createWindow();
   void overlayWindowController.ensureReady();
 });

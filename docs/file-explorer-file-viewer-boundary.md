@@ -95,6 +95,7 @@ OmniFlow 当前的文件浏览主链路不是一个模块完成的，而是 3 �
 - `audio -> AudioViewer`
 - `video -> VideoViewer`
 - `pdf -> PdfViewer`
+- `text -> TextViewer`
 - `comic / asmr / archive -> 对应 viewer`
 
 它不应该承担：

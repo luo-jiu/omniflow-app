@@ -25,7 +25,7 @@ import { useFileViewer } from '@/hooks/useFileViewer';
 import { runtimeLogger } from '@/utils/runtimeLogger';
 import { globalAudioPlayer } from '@/features/file-viewer/services/global-audio-player';
 import { parseAsmrRouteInfo, resolveAsmrOwnerKey } from '@/features/file-viewer/utils/asmr-owner-key';
-import { resolvePreviewFileType } from '@/utils/preview-file-type';
+import { resolvePreviewFileType, type PreviewFileType } from '@/utils/preview-file-type';
 
 interface AsmrViewerProps {
   folderNodeId: number | null;
@@ -152,7 +152,7 @@ function resolveRowType(item: AsmrNodeItem): string {
   return item.mimeType || '文件';
 }
 
-function resolveFileType(item: AsmrNodeItem): 'image' | 'video' | 'audio' | 'pdf' | 'other' {
+function resolveFileType(item: AsmrNodeItem): PreviewFileType {
   return resolvePreviewFileType(item.mimeType, item.ext);
 }
 

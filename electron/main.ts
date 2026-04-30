@@ -1,4 +1,4 @@
-import { app, BrowserWindow, screen } from 'electron'
+import { app, BrowserWindow, Menu, screen } from 'electron'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -296,11 +296,17 @@ function createWindow() {
     overlayWindowController.destroy()
   })
 
-  win.webContents.setZoomFactor(1)
-  void win.webContents.setVisualZoomLevelLimits(1, 1).catch(() => undefined)
   win.webContents.on('before-input-event', (event, input) => {
     if (isZoomShortcut(input)) {
       event.preventDefault()
+      const key = (input.key || '').toLowerCase()
+      if (key === '+' || key === '=') {
+        win.webContents.send('app:zoom-shortcut', 'in')
+      } else if (key === '-' || key === '_') {
+        win.webContents.send('app:zoom-shortcut', 'out')
+      } else if (key === '0') {
+        win.webContents.send('app:zoom-shortcut', 'reset')
+      }
       return
     }
     if (!isToggleDevToolsShortcut(input)) {
@@ -373,6 +379,52 @@ app.whenReady().then(() => {
   })
   embeddedBrowserMainController.registerIpcHandlers()
   registerOverlayWindowIpcHandlers(overlayWindowController)
+
+  const template: Electron.MenuItemConstructorOptions[] = [
+    ...(process.platform === 'darwin'
+      ? [{
+          label: app.name,
+          submenu: [
+            { role: 'about' as const },
+            { type: 'separator' as const },
+            { role: 'services' as const },
+            { type: 'separator' as const },
+            { role: 'hide' as const },
+            { role: 'hideOthers' as const },
+            { role: 'unhide' as const },
+            { type: 'separator' as const },
+            { role: 'quit' as const },
+          ],
+        }]
+      : []),
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'selectAll' },
+      ],
+    },
+    {
+      label: 'Window',
+      submenu: [
+        { role: 'minimize' },
+        { role: 'close' },
+        ...(process.platform === 'darwin'
+          ? [
+              { type: 'separator' as const },
+              { role: 'front' as const },
+            ]
+          : []),
+      ],
+    },
+  ]
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template))
+
   createWindow()
   // Pre-create overlay window so it's ready when first spec arrives
   void overlayWindowController.ensureReady()

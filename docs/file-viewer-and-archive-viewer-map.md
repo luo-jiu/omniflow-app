@@ -1,6 +1,6 @@
 # File Viewer 与 Archive Viewer 映射说明
 
-更新时间：2026-04-16
+更新时间：2026-04-30
 适用范围：`features/file-viewer`、`features/archive-viewer`、`contexts/FileViewerContext.tsx`、`components/business/app-main/` 中与文件预览、viewer 分发和归档返回链路相关的代码。
 
 ## 1. 概述
@@ -24,6 +24,7 @@ OmniFlow 当前不是“一个万能 viewer”，而是多种 viewer 共同组�
 - `video`
 - `audio`
 - `pdf`
+- `text`
 - `comic`
 - `asmr`
 - `video_archive`
@@ -41,6 +42,7 @@ OmniFlow 当前不是“一个万能 viewer”，而是多种 viewer 共同组�
 - `audio -> AudioViewer`
 - `video -> VideoViewer`
 - `pdf -> PdfViewer`
+- `text -> TextViewer`
 - `comic -> ComicViewer`
 - `asmr -> AsmrViewer`
 - `video_archive -> VideoArchiveViewer`
@@ -69,6 +71,7 @@ OmniFlow 当前不是“一个万能 viewer”，而是多种 viewer 共同组�
 - `audio-viewer`
 - `video-viewer`
 - `pdf-viewer`
+- `text-viewer`
 - `comic-viewer`
 - `asmr-viewer`
 - `welcome-view`
@@ -123,6 +126,7 @@ OmniFlow 当前不是“一个万能 viewer”，而是多种 viewer 共同组�
 5. 再按需看具体 viewer：
    - `src/features/file-viewer/components/comic-viewer/`
    - `src/features/file-viewer/components/asmr-viewer/`
+   - `src/features/file-viewer/components/text-viewer/`
    - `src/features/archive-viewer/components/video-archive-viewer/`
    - `src/features/archive-viewer/components/comic-archive-viewer/`
    - `src/features/archive-viewer/components/asmr-archive-viewer/`

@@ -601,9 +601,11 @@ export function registerFileIpc(ipcMain: Electron.IpcMain) {
     content: string,
   ): Promise<DesktopStagedTextFileResult> => {
     const stagingRoot = getTextFileStagingRoot();
-    await fs.mkdir(stagingRoot, { recursive: true });
+    const subDir = path.join(stagingRoot, `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+    await fs.mkdir(subDir, { recursive: true });
 
-    const stagedPath = path.join(stagingRoot, buildStagedFileName(fileName || 'subtitle.txt'));
+    const safeName = String(fileName || 'subtitle.txt').replace(/[/\\]/g, '_').trim() || 'unknown';
+    const stagedPath = path.join(subDir, safeName);
     const normalizedContent = String(content ?? '');
     await fs.writeFile(stagedPath, normalizedContent, 'utf-8');
     return {
@@ -647,7 +649,12 @@ export function registerFileIpc(ipcMain: Electron.IpcMain) {
     if (!normalizedPath || !isPathInsideDirectory(normalizedPath, stagingRoot)) {
       return false;
     }
-    await fs.rm(normalizedPath, { force: true });
+    const parentDir = path.dirname(normalizedPath);
+    if (parentDir !== stagingRoot && isPathInsideDirectory(parentDir, stagingRoot)) {
+      await fs.rm(parentDir, { recursive: true, force: true });
+    } else {
+      await fs.rm(normalizedPath, { force: true });
+    }
     return true;
   });
 

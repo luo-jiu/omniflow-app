@@ -4,6 +4,7 @@ import { useRepositoryTree } from './hooks/useRepositoryTree';
 import type { NodeRespDTO } from './hooks/useRepositoryTree';
 import React from 'react';
 import { useDesktopAutoImport } from './hooks/useDesktopAutoImport';
+import { TREE_REFRESH_DIRECTORY_EVENT, type TreeRefreshDirectoryDetail } from './services/tree-locate';
 import type { FileViewerFileType } from '@/shared/file-viewer-types';
 
 interface Props {
@@ -94,6 +95,17 @@ const DirectorySidebar = React.forwardRef<DirectorySidebarHandle, Props>(({
   React.useImperativeHandle(ref, () => ({
     refreshNodeSubtree,
   }), [refreshNodeSubtree]);
+
+  React.useEffect(() => {
+    const handler = (event: Event) => {
+      const { directoryNodeId } = (event as CustomEvent<TreeRefreshDirectoryDetail>).detail;
+      if (directoryNodeId > 0) {
+        refreshNodeSubtree(directoryNodeId);
+      }
+    };
+    window.addEventListener(TREE_REFRESH_DIRECTORY_EVENT, handler);
+    return () => { window.removeEventListener(TREE_REFRESH_DIRECTORY_EVENT, handler); };
+  }, [refreshNodeSubtree]);
 
   const handleAutoImportNodeCreated = React.useCallback((newNode: unknown) => {
     if (!isNodeRespDTO(newNode)) {

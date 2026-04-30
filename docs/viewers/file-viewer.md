@@ -21,6 +21,7 @@
 - `components/audio-viewer/`
 - `components/video-viewer/`
 - `components/pdf-viewer/`
+- `components/text-viewer/`
 - `components/comic-viewer/`
 - `components/asmr-viewer/`
 - `components/welcome-view/`
@@ -60,3 +61,4 @@
 - `docs/viewers/asmr-viewer.md`
 - `docs/viewers/comic-viewer.md`
 - `docs/viewers/pdf-viewer.md`
+- `docs/viewers/text-viewer.md`

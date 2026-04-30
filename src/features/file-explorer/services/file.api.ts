@@ -2,6 +2,8 @@ import { createIpcChunkedUploadTask, createIpcUploadTask, ipcRequest as request,
 import type { ArchiveBuiltInType } from '@/shared/file-viewer-types';
 import { CHUNKED_UPLOAD_THRESHOLD_BYTES, MAX_SINGLE_UPLOAD_BYTES, MAX_SINGLE_UPLOAD_ERROR_MESSAGE } from '@/shared/upload-limits';
 
+const ENABLE_CHUNKED_UPLOAD = false;
+
 export type Library = {
   createdAt: string;
   updatedAt: string;
@@ -241,7 +243,7 @@ export interface NodeDetailDTO {
   viewMeta?: string | null;
 }
 
-export type NodeNameConflictPolicy = 'error' | 'auto_rename';
+export type NodeNameConflictPolicy = 'error' | 'auto_rename' | 'replace';
 
 export async function fetchNodeDetailById(nodeId: number): Promise<NodeDetailDTO> {
   const body = await request(`/v1/nodes/${nodeId}`, {
@@ -272,7 +274,7 @@ export async function uploadAndCreateNode(
     throw new Error("Unable to retrieve file path for upload.");
   }
 
-  if (false && file.size >= CHUNKED_UPLOAD_THRESHOLD_BYTES) {
+  if (ENABLE_CHUNKED_UPLOAD && file.size >= CHUNKED_UPLOAD_THRESHOLD_BYTES) {
     const uploadTask = createIpcChunkedUploadTask<any>(
       filePath,
       {
@@ -294,9 +296,7 @@ export async function uploadAndCreateNode(
       },
     );
 
-    if (options?.setAbort) {
-      options.setAbort(uploadTask.abort);
-    }
+    options?.setAbort?.(uploadTask.abort);
 
     const json = await uploadTask.promise;
     if (!json) throw new Error('上传响应为空');

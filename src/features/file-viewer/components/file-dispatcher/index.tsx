@@ -5,6 +5,7 @@ import AudioViewer from "../audio-viewer";
 import VideoViewer from "../video-viewer";
 import ComicViewer from "../comic-viewer";
 import PdfViewer from "../pdf-viewer";
+import TextViewer from "../text-viewer";
 import AsmrViewer from "../asmr-viewer";
 import AsmrArchiveViewer from "../../../archive-viewer/components/asmr-archive-viewer";
 import ComicArchiveViewer from "../../../archive-viewer/components/comic-archive-viewer";
@@ -102,6 +103,9 @@ const FileDispatcher: React.FC<FileDispatcherProps> = ({
 
     case 'pdf':
       return <PdfViewer nodeId={nodeId} url={fileUrl} fileName={fileName} active={active} reloadToken={reloadToken} />;
+
+    case 'text':
+      return <TextViewer nodeId={nodeId} url={fileUrl} fileName={fileName} active={active} reloadToken={reloadToken} />;
 
     case 'comic':
       return <ComicViewer folderNodeId={nodeId} fileUrl={fileUrl} fileName={fileName} active={active} reloadToken={reloadToken} />;

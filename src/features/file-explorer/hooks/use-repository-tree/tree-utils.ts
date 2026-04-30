@@ -1,5 +1,5 @@
 import { buildTreeNodeLabel } from '@/utils/fileTreeSettings';
-import { resolvePreviewFileType } from '@/utils/preview-file-type';
+import { resolvePreviewFileType, type PreviewFileType } from '@/utils/preview-file-type';
 import { getDirectoryBuiltInIcon, getFileNodeIconByParentBuiltInType } from '../../utils/file-node-icon';
 import type { Node, NodeRespDTO } from './types';
 
@@ -10,7 +10,7 @@ export function normalizeArchiveMode(mode?: number): 0 | 1 {
 export function resolveFileType(
   mimeType?: string,
   ext?: string,
-): 'image' | 'video' | 'audio' | 'pdf' | 'other' {
+): PreviewFileType {
   return resolvePreviewFileType(mimeType, ext);
 }
 
