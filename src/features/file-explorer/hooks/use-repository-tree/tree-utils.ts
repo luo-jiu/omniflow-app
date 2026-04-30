@@ -166,7 +166,7 @@ export function mapToTreeNode(
       parentArchiveMode,
     },
     icon: item.type === 'file'
-      ? getFileNodeIconByParentBuiltInType(item.ext, parentBuiltInType, parentArchiveMode)
+      ? getFileNodeIconByParentBuiltInType(item.ext, parentBuiltInType, parentArchiveMode, item.name)
       : getDirectoryBuiltInIcon(nodeBuiltInType, nodeArchiveMode),
     children: item.type === 'dir' ? [] : undefined,
     loaded: false,
