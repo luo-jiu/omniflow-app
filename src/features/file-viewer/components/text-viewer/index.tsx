@@ -111,7 +111,7 @@ const TextViewer: React.FC<TextViewerProps> = ({
   reloadToken = 0,
 }) => {
   const { resolvedTheme } = useTheme();
-  const { reloadActiveTab, setFileUrl } = useFileViewer();
+  const { setFileUrl } = useFileViewer();
   const [content, setContent] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -177,7 +177,6 @@ const TextViewer: React.FC<TextViewerProps> = ({
         if (newUrl) {
           loadedUrlRef.current = `${newUrl}::${reloadToken}`;
           setFileUrl(newUrl, fileName || null, 'text', savedNodeId);
-          reloadActiveTab();
         }
       } catch {
         // URL 刷新失败不影响保存成功
@@ -188,7 +187,7 @@ const TextViewer: React.FC<TextViewerProps> = ({
     } finally {
       setIsSaving(false);
     }
-  }, [nodeId, isSaving, reloadToken, fileName, reloadActiveTab, setFileUrl]);
+  }, [nodeId, isSaving, reloadToken, fileName, setFileUrl]);
 
   const handleSaveAs = useCallback(async () => {
     if (!nodeId || isSaving) return;

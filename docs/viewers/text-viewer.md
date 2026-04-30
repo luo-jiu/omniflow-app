@@ -14,7 +14,7 @@
 - 支持字号缩放、自动换行、保存、另存为和下载
 - 保存时调用后端按 `nodeId` 更新内容的专用 API
 - 另存为时通过 Electron 暂存文本文件，再走现有上传创建节点链路
-- 保存成功后刷新目录树，并刷新当前 tab 的文件链接
+- 保存成功后刷新目录树和当前 tab 的文件链接，但不 reload 当前 viewer
 
 它不是文件打开链路 owner，也不是后端节点存储 owner。
 
@@ -50,7 +50,9 @@
 2. 调用 `PUT /api/v1/nodes/:nodeId/content`，请求体包含 `libraryId`、`content` 和可选 `contentType`。
 3. 后端生成新的对象存储内容，并替换当前文件节点的 storage 绑定。
 4. 保留节点 ID、文件名和目录位置不变。
-5. 刷新目录树和当前 tab 的文件链接。
+5. 刷新目录树和当前 tab 的文件链接，但不触发 `reloadActiveTab`。
+
+保存时不应该重置当前 viewer 的局部阅读状态，例如字号和自动换行。重新关闭再打开文件时，viewer 可以重新使用默认字号；但一次保存动作不能把正在编辑的界面当成重新进入。
 
 不要把普通保存重新改成 `uploadLocalPathAndCreateNode + conflictPolicy: 'replace'`。那条链路只适合兼容上传替换，不适合作为编辑器保存的主路径。
 
