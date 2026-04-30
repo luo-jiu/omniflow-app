@@ -1,5 +1,10 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { getChildrenByNodeId, getFileLink, getLibraryRootNodeId } from '../services/file.api';
+import {
+  getChildrenByNodeId,
+  getFileLink,
+  getLibraryRootNodeId,
+  updateNodeFileContent,
+} from '../services/file.api';
 import { fileCache } from '@/utils/fileCache.ts';
 import { buildTreeNodeLabel } from '@/utils/fileTreeSettings';
 import { runtimeLogger } from '@/utils/runtimeLogger';
@@ -715,11 +720,28 @@ export function useRepositoryTree(
       const linkNodeId = Number(payload.linkNodeId ?? payload.id);
       const tabNodeId = Number(payload.tabNodeId ?? payload.id);
       const fileName = payload.displayName ?? payload.name;
+      const fileType = resolveFileType(payload.mimeType, payload.ext);
 
-      let fileUrl = fileCache.getLink(linkNodeId, selectedLibraryId);
+      let fileUrl = fileType === 'text'
+        ? ''
+        : fileCache.getLink(linkNodeId, selectedLibraryId);
       if (!fileUrl) {
         runtimeLogger.debug('🚀 缓存失效，请求后端获取新链接');
-        fileUrl = await getFileLink(linkNodeId, selectedLibraryId, 60);
+        try {
+          fileUrl = await getFileLink(linkNodeId, selectedLibraryId, 60);
+        } catch (error) {
+          if (fileType !== 'text') {
+            throw error;
+          }
+          runtimeLogger.warn('文本文件缺少存储对象，尝试初始化为空文件:', error);
+          await updateNodeFileContent({
+            nodeId: linkNodeId,
+            libraryId: selectedLibraryId,
+            content: '',
+            contentType: payload.mimeType || 'text/plain; charset=utf-8',
+          });
+          fileUrl = await getFileLink(linkNodeId, selectedLibraryId, 60);
+        }
         if (fileUrl) {
           fileCache.setLink(linkNodeId, selectedLibraryId, fileUrl, 30);
         }
@@ -731,7 +753,6 @@ export function useRepositoryTree(
         throw new Error('无法获取文件访问链接');
       }
 
-      const fileType = resolveFileType(payload.mimeType, payload.ext);
       if (onFileOpen) {
         onFileOpen(fileUrl, fileName, fileType, tabNodeId, {
           tabTypeLabel: payload.tabTypeLabel ?? null,

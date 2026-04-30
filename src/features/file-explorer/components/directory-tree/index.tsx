@@ -13,6 +13,7 @@ import {
   renameNode,
   sortComicChildrenByName,
   updateNodeConfig,
+  updateNodeFileContent,
 } from "../../services/file.api";
 import CreateNodeModal from './modals/CreateNodeModal.tsx';
 import { buildFileFullName, splitFileBaseNameAndExt } from '@/utils/fileTreeSettings';
@@ -1940,13 +1941,20 @@ export default function DirectoryTree({
       }
 
       const parentId = parentNode ? parentNode.id : Number(resolvedRootParentId);
-      const newNode = await createNode({
+      let newNode: any = await createNode({
         name: nextCreateValue.name,
         ext: type === 'file' ? nextCreateValue.ext : undefined,
         parentId,
         libraryId,
         type,
       });
+      if (type === 'file') {
+        newNode = await updateNodeFileContent({
+          nodeId: Number(newNode.id),
+          libraryId,
+          content: '',
+        });
+      }
       
       Toast.success(`${type === 'dir' ? '文件夹' : '文件'}创建成功`);
       setCreateModal({ visible: false, type: null, parentNode: null, name: '', loading: false });
