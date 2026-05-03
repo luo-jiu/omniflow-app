@@ -250,13 +250,6 @@ export default function DirectoryTree({
     return `${value.toFixed(precision)} ${units[index]}`;
   };
 
-  const formatDateTime = (value: unknown): string => {
-    if (!value) return '-';
-    const date = new Date(String(value));
-    if (Number.isNaN(date.getTime())) return String(value);
-    return date.toLocaleString('zh-CN', { hour12: false });
-  };
-
   const formatBuiltInTypeLabel = (value: unknown): string => {
     const normalized = String(value || 'DEF').trim().toUpperCase();
     if (normalized === 'COMIC') return '漫画';
@@ -317,9 +310,16 @@ export default function DirectoryTree({
     const builtInTypeLabel = formatBuiltInTypeLabel(detail.builtInType ?? node?.builtInType);
     const archiveModeLabel = formatArchiveModeLabel(detail.archiveMode ?? node?.archiveMode);
     const mimeType = String(detail.mimeType || node?.data?.mimeType || node?.mimeType || '').trim();
-    const createdAt = formatDateTime(detail.createdAt || node?.data?.createdAt || node?.createdAt);
-    const updatedAt = formatDateTime(detail.updatedAt || node?.data?.updatedAt || node?.updatedAt);
     const viewMetaState = detail.viewMeta ? '已记录' : '未记录';
+    const storageProvider = String(detail.storageProvider || '').trim();
+    const storageProviderLabel = String(detail.storageProviderLabel || '').trim();
+    const storageProviderType = String(detail.storageProviderType || '').trim();
+    const storageEndpoint = String(detail.storageEndpoint || '').trim();
+    const storageBucket = String(detail.storageBucket || '').trim();
+    const storageKey = String(detail.storageKey || '').trim();
+    const storageProviderDisplay = storageProviderLabel && storageProvider
+      ? `${storageProviderLabel}（${storageProvider}）`
+      : storageProviderLabel || storageProvider || '-';
 
     const directFileCount = directChildren.filter((item) => resolveNodeType(item) === 'file').length;
     const directDirCount = directChildren.filter((item) => resolveNodeType(item) === 'dir').length;
@@ -335,8 +335,8 @@ export default function DirectoryTree({
 
     const renderPathName = (item: NodeDetailDTO): string => {
       const itemBaseName = String(item.name || '').trim();
-      if (Number(item.id) === ROOT_PARENT_ID && itemBaseName === '') {
-        return '根目录';
+      if (Number(item.id) === ROOT_PARENT_ID) {
+        return '';
       }
       return getNodeFullName({
         isFile: item.type === 'file',
@@ -345,15 +345,17 @@ export default function DirectoryTree({
       });
     };
 
-    const path = pathDetails.map(renderPathName).filter(Boolean).join(' / ') || '根目录';
-    const parentPath = pathDetails.slice(0, -1).map(renderPathName).filter(Boolean).join(' / ') || '根目录';
+    const pathSegments = pathDetails
+      .filter((item) => Number(item.id) !== Number(detail.id))
+      .map(renderPathName)
+      .filter(Boolean);
+    const path = pathSegments.length > 0 ? `/ ${pathSegments.join(' / ')}` : '/';
 
     const sections = isFile
       ? [
         {
           title: '基本信息',
           items: [
-            { label: '名称', value: fullName || '-' },
             { label: '文件大小', value: formatFileSize(detail.fileSize ?? node?.data?.fileSize ?? node?.fileSize) },
             { label: '后缀', value: ext || '-' },
             { label: 'MIME', value: mimeType || '-' },
@@ -362,32 +364,28 @@ export default function DirectoryTree({
         {
           title: '视图与模式',
           items: [
+            { label: '所属类型', value: '文件' },
             { label: '内置类型', value: builtInTypeLabel },
             { label: '归档模式', value: archiveModeLabel },
             { label: '视图配置', value: viewMetaState },
-            { label: '所属类型', value: '文件' },
           ],
         },
         {
-          title: '位置',
+          title: '物理存储',
           items: [
-            { label: '所在目录', value: parentPath },
-            { label: '路径深度', value: `${Math.max(pathDetails.length - 1, 0)} 层` },
-          ],
-        },
-        {
-          title: '时间',
-          items: [
-            { label: '创建时间', value: createdAt },
-            { label: '修改时间', value: updatedAt },
+            { label: 'Provider', value: storageProviderDisplay },
+            { label: '类型', value: storageProviderType || '-' },
+            { label: 'Endpoint', value: storageEndpoint || '-' },
+            { label: 'Bucket', value: storageBucket || '-' },
+            { label: 'Object Key', value: storageKey || '-' },
           ],
         },
       ]
       : [
         {
-          title: '基本信息',
+          title: '视图与模式',
           items: [
-            { label: '名称', value: fullName || '-' },
+            { label: '所属类型', value: '文件夹' },
             { label: '内置类型', value: builtInTypeLabel },
             { label: '归档模式', value: archiveModeLabel },
             { label: '视图配置', value: viewMetaState },
@@ -406,34 +404,13 @@ export default function DirectoryTree({
             { label: '子树文件总大小', value: totalFileCount > 0 ? formatFileSize(totalFileBytes) : '-' },
           ],
         },
-        {
-          title: '位置',
-          items: [
-            { label: '所在目录', value: parentPath },
-            { label: '路径深度', value: `${Math.max(pathDetails.length - 1, 0)} 层` },
-          ],
-        },
-        {
-          title: '时间',
-          items: [
-            { label: '创建时间', value: createdAt },
-            { label: '修改时间', value: updatedAt },
-          ],
-        },
       ];
 
     return {
-      chips: [
-        isFile ? '文件' : '文件夹',
-        builtInTypeLabel,
-        `归档模式 ${archiveModeLabel}`,
-      ],
+      chips: [],
       fullName: fullName || '-',
       path,
       sections,
-      subtitle: isFile
-        ? `${builtInTypeLabel} · ${mimeType || '未知内容类型'} · ${formatFileSize(detail.fileSize ?? node?.data?.fileSize ?? node?.fileSize)}`
-        : `${builtInTypeLabel} · 共 ${descendantsWithoutSelf.length} 项内容 · 归档模式 ${archiveModeLabel}`,
       title: isFile ? '文件属性' : '文件夹属性',
     };
   }, [ROOT_PARENT_ID]);
@@ -1833,7 +1810,26 @@ export default function DirectoryTree({
           return;
         }
 
-        runtimeLogger.debug('🗑️ [删除]', deleteTargets);
+        const firstTarget = deleteTargets[0];
+        const firstName = String(firstTarget?.data?.rawName || firstTarget?.label || firstTarget?.key || '').trim();
+        const firstExt = String(firstTarget?.data?.rawExt ?? firstTarget?.ext ?? '').trim();
+        const deleteNodeName = deleteTargets.length > 1
+          ? firstName
+          : getNodeFullName({
+            isFile: resolveNodeType(firstTarget) === 'file',
+            baseName: firstName,
+            ext: firstExt,
+          });
+        const confirmResult = await openOverlay('delete-confirm', {
+          deleteCount: deleteTargets.length,
+          isFolder: resolveNodeType(firstTarget) === 'dir',
+          nodeName: deleteNodeName,
+        });
+        if (confirmResult.type !== 'confirm') {
+          return;
+        }
+
+        runtimeLogger.debug('[删除]', deleteTargets);
         const affectedParentIds = new Set<number>();
         const deletedNodeKeys: string[] = [];
         const deletedNodeIds = new Set<number>();

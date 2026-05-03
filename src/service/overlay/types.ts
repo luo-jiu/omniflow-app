@@ -11,12 +11,33 @@ export type OverlayTargetNode = {
   libraryId: number;
 };
 
+export type OverlayStorageProvider = {
+  alias: string;
+  type: string;
+  endpoint: string;
+  bucket: string;
+  label: string;
+  useSSL: boolean;
+};
+
 export type UploadConfirmOverlayProps = {
+  defaultProvider: string;
   fileSummaries: OverlayFileSummary[];
+  providers: OverlayStorageProvider[];
   targetNode: OverlayTargetNode;
 };
 
 export type UploadConfirmResult =
+  | { type: 'confirm'; storageProvider: string }
+  | { type: 'cancel' };
+
+export type DeleteConfirmOverlayProps = {
+  deleteCount: number;
+  isFolder: boolean;
+  nodeName: string;
+};
+
+export type DeleteConfirmResult =
   | { type: 'confirm' }
   | { type: 'cancel' };
 
@@ -35,7 +56,6 @@ export type NodePropertiesOverlayProps = {
   fullName: string;
   path: string;
   sections: NodePropertiesOverlaySection[];
-  subtitle: string;
   title: string;
 };
 
@@ -92,12 +112,14 @@ export type DirectoryContextMenuResult =
   | { type: 'cancel' };
 
 export type OverlayResultMap = {
+  'delete-confirm': DeleteConfirmResult;
   'directory-context-menu': DirectoryContextMenuResult;
   'node-properties': NodePropertiesOverlayResult;
   'upload-confirm': UploadConfirmResult;
 };
 
 export type OverlayPropsMap = {
+  'delete-confirm': DeleteConfirmOverlayProps;
   'directory-context-menu': DirectoryContextMenuOverlayProps;
   'node-properties': NodePropertiesOverlayProps;
   'upload-confirm': UploadConfirmOverlayProps;

@@ -12,9 +12,11 @@ export const UploadConfirmOverlayAdapter: React.FC<
   return (
     <UploadConfirmModal
       visible
+      defaultProvider={props.defaultProvider}
       fileSummaries={props.fileSummaries}
+      providers={props.providers}
       targetNode={props.targetNode}
-      onConfirm={() => onResolve({ type: 'confirm' })}
+      onConfirm={(storageProvider) => onResolve({ type: 'confirm', storageProvider })}
       onCancel={onCancel}
     />
   );

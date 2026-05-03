@@ -1,11 +1,6 @@
 import React from 'react';
-import { Popconfirm } from '@douyinfe/semi-ui';
 import ContextMenu, { ContextMenuItem } from '@/components/ui/context-menu';
-import {
-  resolveOverlayPlacement,
-  type ContextMenuPosition,
-  type OverlayBoundaryRect,
-} from '@/components/ui/context-menu/overlay';
+import type { OverlayBoundaryRect } from '@/components/ui/context-menu/overlay';
 import comicFolderIcon from '@/assets/icons/material/folder-comic.svg';
 import asmrFolderIcon from '@/assets/icons/material/folder-asmr.svg';
 import videoIcon from '@/assets/icons/material/video.svg';
@@ -38,80 +33,6 @@ function createBuiltInMenuIcon(src: string, alt: string): React.ReactNode {
 const COMIC_BUILT_IN_MENU_ICON = createBuiltInMenuIcon(comicFolderIcon, 'comic');
 const ASMR_BUILT_IN_MENU_ICON = createBuiltInMenuIcon(asmrFolderIcon, 'asmr');
 const VIDEO_BUILT_IN_MENU_ICON = createBuiltInMenuIcon(videoIcon, 'video');
-
-function truncateMenuText(value: unknown, maxLength = 16): string {
-  const text = String(value || '').trim();
-  if (text.length <= maxLength) {
-    return text;
-  }
-  return `${text.slice(0, Math.max(0, maxLength - 1))}…`;
-}
-
-const AdaptiveDeleteConfirm: React.FC<{
-  content: React.ReactNode;
-  node: any;
-  onAction: (action: string, node: any) => void;
-  onClose?: () => void;
-  boundaryRect?: OverlayBoundaryRect | null;
-  deleteCount?: number;
-  getPopupContainer?: () => HTMLElement;
-}> = ({ content, node, onAction, onClose, boundaryRect, deleteCount = 1, getPopupContainer: getPopupContainerProp }) => {
-  const triggerRef = React.useRef<HTMLDivElement | null>(null);
-  const [position, setPosition] = React.useState<ContextMenuPosition>('leftBottom');
-  const resolveConfirmPosition = React.useCallback(() => {
-    if (!triggerRef.current) {
-      return;
-    }
-    setPosition(resolveOverlayPlacement(triggerRef.current.getBoundingClientRect(), {
-      preferredHorizontal: 'left',
-      preferredVertical: 'bottom',
-      popupWidth: 248,
-      popupHeight: 160,
-      boundaryRect,
-    }));
-  }, [boundaryRect]);
-  const triggerContent = React.isValidElement(content)
-    ? React.cloneElement(content as React.ReactElement<any>, {
-      ref: triggerRef,
-      onMouseEnter: resolveConfirmPosition,
-      onMouseMove: resolveConfirmPosition,
-      onMouseDownCapture: resolveConfirmPosition,
-    })
-    : (
-      <div
-        ref={triggerRef}
-        onMouseEnter={resolveConfirmPosition}
-        onMouseMove={resolveConfirmPosition}
-        onMouseDownCapture={resolveConfirmPosition}
-      >
-        {content}
-      </div>
-    );
-  const truncatedNodeName = truncateMenuText(node.data?.rawName ?? node.label ?? node.key);
-  const isBatchDelete = deleteCount > 1;
-
-  return (
-    <Popconfirm
-      icon={null}
-      title={<div style={{ fontSize: '15px', fontWeight: 600 }}>确认删除？</div>}
-      content={
-        <div style={{ fontSize: '13px', marginTop: '4px', width: '172px', lineHeight: 1.4 }}>
-          {isBatchDelete ? `将选中的 ${deleteCount} 项移入回收站。` : `将「${truncatedNodeName}」移入回收站。`}
-        </div>
-      }
-      okType="danger"
-      onConfirm={() => {
-        onAction('delete', node);
-        onClose?.();
-      }}
-      position={position}
-      style={{ width: 248 }}
-      {...(getPopupContainerProp ? { getPopupContainer: getPopupContainerProp } : {})}
-    >
-      {triggerContent}
-    </Popconfirm>
-  );
-};
 
 function getBuiltInTypeMenuIcon(builtInType: string): React.ReactNode | undefined {
   const normalizedType = String(builtInType || '').toUpperCase();
@@ -172,7 +93,6 @@ const DirectoryContextMenu: React.FC<DirectoryContextMenuProps> = ({
   onAction,
   onClose,
   boundaryRect,
-  deleteCount = 1,
   submenuPreferredHorizontal = 'left',
   getPopupContainer: getPopupContainerProp,
 }) => {
@@ -390,17 +310,7 @@ const DirectoryContextMenu: React.FC<DirectoryContextMenuProps> = ({
     key: 'delete',
     label: '删除',
     danger: true,
-    render: (content) => (
-      <AdaptiveDeleteConfirm
-        content={content}
-        node={node}
-        onAction={onAction}
-        onClose={onClose}
-        boundaryRect={boundaryRect}
-        deleteCount={deleteCount}
-        getPopupContainer={getPopupContainerProp}
-      />
-    )
+    onClick: () => onAction('delete', node),
   });
 
   return (

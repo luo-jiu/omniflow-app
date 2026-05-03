@@ -26,4 +26,5 @@
 ## Step 2 扩展位
 
 - 上传引擎仅消费状态机，不允许直接改任务对象字段。
+- `UploadTaskInput.storageProvider` 是用户在上传确认 overlay 中选择的目标 provider 别名，只由上传执行器透传给后端，不进入状态机派生逻辑。
 - 若未来支持断点续传，可新增 `sessionId/chunkIndex` 字段，但不破坏当前事件模型。

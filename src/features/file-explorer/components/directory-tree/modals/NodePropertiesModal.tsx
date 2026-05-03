@@ -8,7 +8,6 @@ interface NodePropertiesModalProps {
   fullName: string;
   path: string;
   sections: NodePropertiesOverlaySection[];
-  subtitle: string;
   title: string;
   visible: boolean;
   onClose: () => void;
@@ -17,34 +16,13 @@ interface NodePropertiesModalProps {
 const Content = styled.div`
   display: flex;
   flex-direction: column;
-  gap: 22px;
-  padding-top: 6px;
+  gap: 14px;
   color: var(--semi-color-text-0);
 
   .properties-hero {
     display: flex;
     flex-direction: column;
-    gap: 12px;
-  }
-
-  .properties-chips {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-  }
-
-  .properties-chip {
-    display: inline-flex;
-    align-items: center;
-    min-height: 32px;
-    padding: 4px 12px;
-    border-radius: 999px;
-    background: color-mix(in srgb, var(--semi-color-primary) 10%, var(--semi-color-fill-0) 90%);
-    border: 1px solid color-mix(in srgb, var(--semi-color-primary) 24%, var(--semi-color-border) 76%);
-    color: var(--semi-color-primary);
-    font-size: 16px;
-    line-height: 1.45;
-    font-weight: 600;
+    gap: 0;
   }
 
   .properties-name {
@@ -55,14 +33,8 @@ const Content = styled.div`
     word-break: break-word;
   }
 
-  .properties-subtitle {
-    font-size: 18px;
-    line-height: 1.6;
-    color: var(--semi-color-text-1);
-  }
-
   .properties-path {
-    padding: 14px 16px;
+    padding: 10px 14px;
     border-radius: 10px;
     border: 1px solid var(--semi-color-border);
     background: var(--semi-color-fill-0);
@@ -73,28 +45,27 @@ const Content = styled.div`
     line-height: 1.45;
     font-weight: 600;
     color: var(--semi-color-text-1);
-    margin-bottom: 6px;
+    margin-bottom: 3px;
   }
 
   .properties-path-value {
     font-size: 16px;
-    line-height: 1.6;
+    line-height: 1.45;
     color: var(--semi-color-text-0);
     word-break: break-word;
   }
 
   .properties-grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
   }
 
   .properties-card {
-    min-height: 180px;
     border-radius: 10px;
     border: 1px solid var(--semi-color-border);
     background: var(--semi-color-bg-1);
-    padding: 18px;
+    padding: 14px 16px;
   }
 
   .properties-card-title {
@@ -102,13 +73,13 @@ const Content = styled.div`
     line-height: 1.3;
     font-weight: 700;
     color: var(--semi-color-text-0);
-    margin-bottom: 14px;
+    margin-bottom: 10px;
   }
 
   .properties-fields {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 6px;
   }
 
   .properties-field {
@@ -120,40 +91,51 @@ const Content = styled.div`
 
   .properties-field-label {
     font-size: 16px;
-    line-height: 1.6;
+    line-height: 1.45;
     color: var(--semi-color-text-2);
   }
 
   .properties-field-value {
     min-width: 0;
     font-size: 17px;
-    line-height: 1.6;
+    line-height: 1.45;
     color: var(--semi-color-text-0);
     word-break: break-word;
   }
 
-  @media (max-width: 960px) {
-    .properties-grid {
-      grid-template-columns: 1fr;
-    }
+  .properties-field-chip {
+    display: inline-flex;
+    align-items: center;
+    min-height: 28px;
+    max-width: 100%;
+    padding: 2px 10px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--semi-color-primary) 10%, var(--semi-color-fill-0) 90%);
+    border: 1px solid color-mix(in srgb, var(--semi-color-primary) 24%, var(--semi-color-border) 76%);
+    color: var(--semi-color-primary);
+    font-size: 16px;
+    line-height: 1.45;
+    font-weight: 600;
+    word-break: break-word;
+  }
 
+  @media (max-width: 960px) {
     .properties-name {
       font-size: 24px;
     }
 
-    .properties-subtitle,
     .properties-field-value {
       font-size: 16px;
     }
   }
 `;
 
+const CHIP_FIELD_LABELS = new Set(['所属类型', '内置类型', '归档模式']);
+
 const NodePropertiesModal: React.FC<NodePropertiesModalProps> = ({
-  chips,
   fullName,
   path,
   sections,
-  subtitle,
   title,
   visible,
   onClose,
@@ -167,23 +149,15 @@ const NodePropertiesModal: React.FC<NodePropertiesModalProps> = ({
       okText="关闭"
       cancelButtonProps={{ style: { display: 'none' } }}
       centered
-      width={820}
+      width={720}
       maskClosable
       bodyStyle={{
-        padding: '24px 28px 28px',
+        padding: '6px 24px 22px',
       }}
     >
       <Content>
         <div className="properties-hero">
-          {chips.length > 0 ? (
-            <div className="properties-chips">
-              {chips.map((chip) => (
-                <span key={chip} className="properties-chip">{chip}</span>
-              ))}
-            </div>
-          ) : null}
           <div className="properties-name">{fullName || '-'}</div>
-          <div className="properties-subtitle">{subtitle}</div>
         </div>
 
         <div className="properties-path">
@@ -199,7 +173,13 @@ const NodePropertiesModal: React.FC<NodePropertiesModalProps> = ({
                 {section.items.map((item) => (
                   <div key={`${section.title}-${item.label}`} className="properties-field">
                     <div className="properties-field-label">{item.label}</div>
-                    <div className="properties-field-value">{item.value || '-'}</div>
+                    <div className="properties-field-value">
+                      {CHIP_FIELD_LABELS.has(item.label) ? (
+                        <span className="properties-field-chip">{item.value || '-'}</span>
+                      ) : (
+                        item.value || '-'
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>

@@ -11,8 +11,9 @@ import {
 } from '@/features/file-explorer/services/desktop-upload-picker.api';
 import type { UploadCandidateFile } from '@/features/file-explorer/services/desktop-upload-picker.api';
 import { normalizeUploadRelativePath, UploadPathResolver } from '@/features/file-explorer/services/upload-path-resolver';
+import { fetchProviders } from '@/features/storage-config/services/storage-config.api';
 import { openOverlay } from '@/service/overlay/overlay.api';
-import type { UploadConfirmResult } from '@/service/overlay/types';
+import type { OverlayStorageProvider, UploadConfirmResult } from '@/service/overlay/types';
 
 type UploadModalTargetNode = {
   id: number;
@@ -101,6 +102,7 @@ export function useDirectoryUpload({
   const startUploadInBackground = useCallback(async (
     files: UploadCandidateFile[],
     targetNode: UploadModalTargetNode,
+    storageProvider: string,
   ) => {
     const pathResolver = new UploadPathResolver({
       libraryId: targetNode.libraryId,
@@ -128,6 +130,7 @@ export function useDirectoryUpload({
             parentId,
             libraryId: targetNode.libraryId,
             relativePath,
+            storageProvider,
             folderGroupId: buildUploadGroupId(
               relativePath,
               candidate.file.name,
@@ -183,9 +186,31 @@ export function useDirectoryUpload({
       relativePath: candidate.relativePath || candidate.file.name,
     }));
 
+    let providers: OverlayStorageProvider[] = [];
+    let defaultProvider = '';
+    try {
+      const providerData = await fetchProviders();
+      defaultProvider = providerData.defaultProvider || '';
+      providers = (providerData.providers || []).map((provider) => ({
+        alias: provider.alias,
+        type: provider.type,
+        endpoint: provider.endpoint,
+        bucket: provider.bucket,
+        label: provider.label,
+        useSSL: provider.useSSL,
+      }));
+    } catch (error) {
+      runtimeLogger.warn('加载存储 Provider 失败，上传确认弹框将使用后端默认分配:', error);
+    }
+
     let result: UploadConfirmResult;
     try {
-      result = await openOverlay('upload-confirm', { fileSummaries, targetNode });
+      result = await openOverlay('upload-confirm', {
+        defaultProvider,
+        fileSummaries,
+        providers,
+        targetNode,
+      });
     } catch (error) {
       runtimeLogger.error('上传确认弹框无法打开:', error);
       Toast.error('上传确认弹框无法打开');
@@ -195,7 +220,7 @@ export function useDirectoryUpload({
     if (result.type !== 'confirm') return;
 
     Toast.info(`正在准备上传队列（${files.length} 个文件）`);
-    void startUploadInBackground(files, targetNode).catch((error) => {
+    void startUploadInBackground(files, targetNode, result.storageProvider).catch((error) => {
       runtimeLogger.error('上传执行失败:', error);
       Toast.error((error as any)?.message || '上传过程中出现未知错误');
     });

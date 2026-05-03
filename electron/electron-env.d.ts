@@ -163,6 +163,7 @@ interface Window {
         fileName: string;
         fileSize: number;
         conflictPolicy?: string;
+        storageProvider?: string;
       },
       headers?: Record<string, string>,
       uploadId?: string,

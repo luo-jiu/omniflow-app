@@ -22,6 +22,7 @@ const defaultExecutor: UploadTaskExecutor = async (payload: UploadTaskExecutorPa
       setAbort: (aborter) => {
         payload.setAbort(aborter);
       },
+      storageProvider: payload.input.storageProvider,
     },
   );
   return result;

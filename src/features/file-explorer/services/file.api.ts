@@ -113,6 +113,12 @@ function normalizeNodeDetailPayload(source: Record<string, unknown>): NodeDetail
     ext: toOptionalString(normalized.ext),
     mimeType: toOptionalString(normalized.mimeType ?? normalized.mime_type),
     fileSize: toOptionalNumber(normalized.fileSize ?? normalized.file_size),
+    storageKey: toOptionalString(normalized.storageKey ?? normalized.storage_key),
+    storageProvider: toOptionalString(normalized.storageProvider ?? normalized.storage_provider),
+    storageProviderType: toOptionalString(normalized.storageProviderType ?? normalized.storage_provider_type),
+    storageProviderLabel: toOptionalString(normalized.storageProviderLabel ?? normalized.storage_provider_label),
+    storageEndpoint: toOptionalString(normalized.storageEndpoint ?? normalized.storage_endpoint),
+    storageBucket: toOptionalString(normalized.storageBucket ?? normalized.storage_bucket),
     builtInType: toOptionalString(normalized.builtInType ?? normalized.built_in_type),
     archiveMode: toOptionalNumber(normalized.archiveMode ?? normalized.archive_mode),
     updatedAt: toOptionalString(normalized.updatedAt ?? normalized.updated_at),
@@ -237,6 +243,12 @@ export interface NodeDetailDTO {
   ext?: string;
   mimeType?: string;
   fileSize?: number;
+  storageKey?: string;
+  storageProvider?: string;
+  storageProviderType?: string;
+  storageProviderLabel?: string;
+  storageEndpoint?: string;
+  storageBucket?: string;
   builtInType?: string;
   archiveMode?: number;
   updatedAt?: string;
@@ -286,6 +298,7 @@ export async function uploadAndCreateNode(
     conflictPolicy?: NodeNameConflictPolicy;
     onProgress?: (uploadedBytes: number, totalBytes: number, percentage: number, speedBps: number) => void;
     setAbort?: (aborter: () => void | Promise<void | boolean>) => void;
+    storageProvider?: string;
   },
 ) {
   assertUploadFileSize(file);
@@ -304,6 +317,7 @@ export async function uploadAndCreateNode(
         fileName: file.name,
         fileSize: file.size,
         conflictPolicy: options?.conflictPolicy,
+        storageProvider: options?.storageProvider,
       },
       (progress) => {
         if (options?.onProgress) {
@@ -332,6 +346,9 @@ export async function uploadAndCreateNode(
   };
   if (options?.conflictPolicy) {
     formDataParams.conflictPolicy = options.conflictPolicy;
+  }
+  if (options?.storageProvider) {
+    formDataParams.storage_provider = options.storageProvider;
   }
 
   const uploadTask = createIpcUploadTask<any>(

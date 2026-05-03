@@ -8,6 +8,10 @@
 
 `omniflow-app` 是 OmniFlow 的桌面客户端，当前主体由 `React + TypeScript + Vite + Electron` 组成。前端不是一个纯网页，而是一个带原生窗口、内置浏览器、文件系统、上传、资源捕捉和本地预览能力的桌面工作区。
 
+主窗口由 Electron main 进程创建，当前最小窗口尺寸固定为 `1120 x 720`。这个下限用于保护目录树、工作区工具栏、文件预览、overlay 弹框等桌面布局不被压缩到不可用状态；后续调整最小尺寸必须同时验证 library detail、上传确认、属性弹窗和内置浏览器模式。
+
+主窗口全局拦截 `Cmd/Ctrl` + `+/-/0` 并阻止 Chromium 页面缩放，避免桌面 UI 在运行中被整体放大或缩小。文本 viewer 可以继续通过 main 进程转发的 `app:zoom-shortcut` 做局部字号调整，但不要恢复 Electron 标准 `zoomIn / zoomOut / resetZoom` 菜单角色来启用全局页面缩放。
+
 这份文档的目标不是重复代码目录，而是固定当前前端最重要的长期事实：
 
 - 页面层、业务层、服务层和 Electron 宿主边界怎么分。

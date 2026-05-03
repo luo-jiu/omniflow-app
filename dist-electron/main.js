@@ -1153,7 +1153,8 @@ ${value}\r
           parentId: params.parentId,
           fileName: params.fileName,
           fileSize: params.fileSize,
-          conflictPolicy: params.conflictPolicy
+          conflictPolicy: params.conflictPolicy,
+          storageProvider: params.storageProvider
         }
       );
       if (runtime.aborted) throw new Error("UPLOAD_ABORTED");
@@ -11287,8 +11288,8 @@ const APP_DISPLAY_NAME = "Omniflow";
 const LEGACY_USER_DATA_DIRNAME = "omniflow-app";
 const DEFAULT_WINDOW_WIDTH = 1400;
 const DEFAULT_WINDOW_HEIGHT = 920;
-const MIN_WINDOW_WIDTH = 600;
-const MIN_WINDOW_HEIGHT = 400;
+const MIN_WINDOW_WIDTH = 1120;
+const MIN_WINDOW_HEIGHT = 720;
 const WINDOW_STATE_FILENAME = "window-state.json";
 const WINDOW_STATE_SAVE_DEBOUNCE_MS = 200;
 const ENABLE_EMBEDDED_BROWSER_DEBUG = process.env.NODE_ENV === "test" || Boolean(VITE_DEV_SERVER_URL || process.env.ELECTRON_RENDERER_URL) || process.env.OMNIFLOW_ENABLE_RUNTIME_LOGS === "true";

@@ -503,6 +503,7 @@ export function registerHttpIpc(ipcMain: Electron.IpcMain) {
       fileName: string;
       fileSize: number;
       conflictPolicy?: string;
+      storageProvider?: string;
     },
     headers: Record<string, string> = {},
     uploadId?: string,
@@ -545,6 +546,7 @@ export function registerHttpIpc(ipcMain: Electron.IpcMain) {
           fileName: params.fileName,
           fileSize: params.fileSize,
           conflictPolicy: params.conflictPolicy,
+          storageProvider: params.storageProvider,
         },
       );
 

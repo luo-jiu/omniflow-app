@@ -51,8 +51,15 @@ OmniFlow 当前的文件浏览主链路不是一个模块完成的，而是 3 �
 - 上传成功后的节点追加
 - 删除、重命名、配置变更后的树更新
 - 自动导入触发的节点追加
+- 右键属性弹窗的数据编排，包括目录树逻辑位置和文件物理存储位置展示
+- 上传确认弹框的数据编排，包括目标目录、待上传文件摘要和可选 storage provider
+- 删除二次确认弹框的数据编排；确认弹框走 overlay 子窗口，不能在侧边栏 Popconfirm 中展开
 
 它不负责维护“预览 tab 列表”，只在文件被打开时通过 `onFileOpen(...)` 把结果交给外部页面。
+
+右键“属性”里的“位置”是资料库目录树内的逻辑所在目录，不包含当前节点自身名称；文件节点额外展示“物理存储”，来源于 `GET /api/v1/nodes/:nodeId` 返回的 `storageProvider`、`storageEndpoint`、`storageBucket` 和 `storageKey`，用于区分同为 MinIO 的不同机器或不同桶。节点所属类型、内置类型和归档模式作为“视图与模式”字段展示，不再重复放在名称下方。
+
+上传确认弹框由主 renderer 先读取 `/v1/storage/providers`，overlay 只展示可序列化后的 provider 摘要。用户在弹框里选择 provider 后，上传任务把 `storageProvider` 透传到后端；未取到 provider 列表时，上传仍可走后端默认分配。
 
 ### 3.2 `useRepositoryTree`
 

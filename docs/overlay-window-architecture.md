@@ -84,6 +84,8 @@ src/overlay/main.tsx
        └─ registry.tsx          (type → component 映射)
              └─ UploadConfirmOverlayAdapter
                   └─ UploadConfirmModal  (复用原组件,props 已 serializable 化)
+             └─ DeleteConfirmOverlayAdapter
+                  └─ DeleteConfirmModal  (删除二次确认,居中覆盖原生视图)
              └─ DirectoryContextMenuOverlayAdapter
                   └─ DirectoryContextMenu  (右键动作通过 result 回主 renderer 执行)
 ```
@@ -109,7 +111,7 @@ overlay 和主窗口是同 origin 的两个 renderer,`localStorage` 共享。主
 - 文件 / 文件夹属性弹窗
 - 拖拽区域在浏览器范围内的浮层(拖拽上传确认)
 - 右键菜单打开在浏览器之上时
-- 业务操作的 Popconfirm(删除、清空、批量操作等)
+- 业务操作的确认弹框(删除、清空、批量操作等)
 - 资源选择 / 目标目录选择等需要接管主视图的浮层
 
 ### 3.2 可以保留 DOM 层
@@ -216,7 +218,7 @@ Semi UI Modal 的内部 portal 在 StrictMode 的 dev 双挂 cleanup 中会被�
 
 以下是本次样板迁移的完整流程,新增弹框照抄即可。
 
-### Step 1:评估组件是否满足第 4 节 13 条约束
+### Step 1:评估组件是否满足第 4 节强约束
 
 例:`UploadConfirmModal` 原 props 含 `files: UploadCandidateFile[]`,其中 `file: File` 不可序列化 → 必须先改造。
 

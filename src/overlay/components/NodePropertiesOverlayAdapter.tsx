@@ -16,7 +16,6 @@ export const NodePropertiesOverlayAdapter: React.FC<
       fullName={props.fullName}
       path={props.path}
       sections={props.sections}
-      subtitle={props.subtitle}
       title={props.title}
       onClose={() => onResolve({ type: 'close' })}
     />

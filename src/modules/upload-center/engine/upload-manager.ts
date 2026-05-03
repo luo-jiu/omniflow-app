@@ -15,6 +15,7 @@ export interface UploadTaskInput {
   libraryId: number;
   localPath?: string;
   relativePath?: string;
+  storageProvider?: string;
   folderGroupId?: string;
 }
 

@@ -202,6 +202,7 @@ export function createIpcChunkedUploadTask<T = any>(
     fileName: string;
     fileSize: number;
     conflictPolicy?: string;
+    storageProvider?: string;
   },
   onProgress?: (payload: IpcUploadProgressPayload) => void,
 ): IpcUploadTask<T> {
