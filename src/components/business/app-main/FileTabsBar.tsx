@@ -23,11 +23,11 @@ const REORDER_MIN_STEP_PX = 14;
 const REORDER_COOLDOWN_MS = 90;
 const MIDPOINT_GUARD_RATIO = 0.16;
 const REORDER_FLIP_DURATION_MS = 180;
-const TAB_TOP_SCROLLBAR_HEIGHT = 10;
+const TAB_TOP_SCROLLBAR_HEIGHT = 7;
 const TAB_TOP_SCROLLBAR_HIDE_DELAY_MS = 900;
 const TAB_TOP_SCROLLBAR_HIDE_DELAY_ON_LEAVE_MS = 260;
-const TAB_OVERFLOW_BUTTON_WIDTH = 44;
-const TAB_OVERFLOW_GAP = 6;
+const TAB_OVERFLOW_BUTTON_WIDTH = 32;
+const TAB_OVERFLOW_GAP = 4;
 const TAB_MEMORY_SAMPLE_DELAY_MS = 900;
 const TAB_MEMORY_MAX_STALE_MS = 120_000;
 const TAB_MEMORY_GLOBAL_COOLDOWN_MS = 8_000;
@@ -45,12 +45,22 @@ const TAB_MEMORY_FALLBACK_BY_TYPE: Record<string, number> = {
   other: 36 * 1024 * 1024,
 };
 
-const TabsFrame = styled.div`
+const TabsFrame = styled.div<{ $scrollVisible: boolean }>`
   width: 100%;
   min-width: 0;
   display: flex;
   flex-direction: column;
   position: relative;
+
+  ${({ $scrollVisible }) => $scrollVisible ? `
+    .tabs-top-scroll {
+      scrollbar-color: var(--app-scrollbar-thumb) var(--app-scrollbar-track);
+    }
+
+    .tabs-top-scroll::-webkit-scrollbar-thumb {
+      background: var(--app-scrollbar-thumb);
+    }
+  ` : ''}
 `;
 
 const TabsTopScroll = styled.div<{ $visible: boolean }>`
@@ -75,7 +85,7 @@ const TabsTopScroll = styled.div<{ $visible: boolean }>`
   scrollbar-color: transparent transparent;
 
   &::-webkit-scrollbar {
-    height: 10px;
+    height: 7px;
   }
 
   &::-webkit-scrollbar-track {
@@ -117,19 +127,30 @@ const TabsContainer = styled.div`
   display: flex;
   align-items: center;
   position: relative;
-  margin-top: 3px;
-  border-bottom: 1px solid var(--app-border);
+  margin-top: 2px;
+
+  &::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 1px;
+    background: var(--app-border);
+    pointer-events: none;
+    z-index: 1;
+  }
 `;
 
 const TabsWrapper = styled.div`
   width: auto;
   min-width: 0;
   flex: 1 1 auto;
-  height: 46px;
+  height: 32px;
   display: flex;
   align-items: center;
   gap: ${TAB_OVERFLOW_GAP}px;
-  padding: 0 ${TAB_OVERFLOW_BUTTON_WIDTH + 8}px 0 0;
+  padding: 0 ${TAB_OVERFLOW_BUTTON_WIDTH + 5}px 0 2px;
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: none;
@@ -146,17 +167,17 @@ const TabButton = styled.div<{
   $dropAfter?: boolean;
   $dragging?: boolean;
 }>`
-  height: 42px;
-  min-width: 195px;
-  max-width: 360px;
+  height: 30px;
+  min-width: 130px;
+  max-width: 240px;
   display: inline-flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   border: 1px solid ${({ $active }) => ($active ? 'var(--semi-color-primary)' : 'var(--app-border)')};
   background: ${({ $active }) => ($active ? 'var(--semi-color-primary-light-default)' : 'var(--app-bg-elevated)')};
   color: var(--app-text);
-  border-radius: 12px;
-  padding: 0 14px 0 15px;
+  border-radius: 8px;
+  padding: 0 9px 0 10px;
   cursor: pointer;
   transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
   user-select: none;
@@ -183,40 +204,40 @@ const TabButton = styled.div<{
 
 const FileTypeBadge = styled.span<{ $tone: TabTypeTone }>`
   flex-shrink: 0;
-  min-width: 42px;
-  height: 27px;
+  min-width: 30px;
+  height: 20px;
   border-radius: 999px;
   background: ${({ $tone }) => $tone.background};
   color: ${({ $tone }) => $tone.text};
   border: 1px solid ${({ $tone }) => $tone.border};
-  font-size: 14px;
-  line-height: 24px;
+  font-size: 10px;
+  line-height: 18px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   text-align: center;
-  padding: 0 9px;
+  padding: 0 6px;
 `;
 
 const DragGhost = styled.div`
   position: fixed;
   pointer-events: none;
   z-index: 9999;
-  height: 42px;
+  height: 30px;
   display: inline-flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   border: 1px solid var(--semi-color-primary);
   background: var(--semi-color-primary-light-default);
   color: var(--app-text);
-  border-radius: 12px;
-  padding: 0 14px 0 15px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
+  border-radius: 8px;
+  padding: 0 9px 0 10px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.14);
 `;
 
 const Name = styled.span`
   min-width: 0;
   flex: 1;
-  font-size: 18px;
+  font-size: 12px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -225,8 +246,8 @@ const Name = styled.span`
 
 const CloseButton = styled.button`
   flex-shrink: 0;
-  width: 27px;
-  height: 27px;
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
   border: none;
   background: transparent;
@@ -248,7 +269,7 @@ const OverflowSlot = styled.div`
   right: 0;
   top: 0;
   z-index: 5;
-  height: 47px;
+  height: 33px;
   width: ${TAB_OVERFLOW_BUTTON_WIDTH}px;
   display: flex;
   align-items: center;
@@ -258,13 +279,14 @@ const OverflowSlot = styled.div`
     color-mix(in srgb, var(--app-bg-1) 0%, transparent),
     var(--app-bg-1) 24%
   );
+  pointer-events: none;
 `;
 
 const OverflowTrigger = styled.button<{ $open: boolean; $disabled: boolean }>`
-  width: 34px;
-  height: 34px;
+  width: 24px;
+  height: 24px;
   border: 1px solid ${({ $open }) => ($open ? 'var(--semi-color-primary)' : 'var(--app-border)')};
-  border-radius: 10px;
+  border-radius: 7px;
   background: ${({ $open }) => ($open ? 'var(--semi-color-primary-light-default)' : 'var(--app-bg-elevated)')};
   color: ${({ $disabled }) => ($disabled ? 'var(--app-text-faint)' : 'var(--app-text-muted)')};
   cursor: ${({ $disabled }) => ($disabled ? 'default' : 'pointer')};
@@ -272,6 +294,7 @@ const OverflowTrigger = styled.button<{ $open: boolean; $disabled: boolean }>`
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  pointer-events: auto;
 
   &:hover {
     border-color: ${({ $disabled }) => ($disabled ? 'var(--app-border)' : 'var(--semi-color-primary)')};
@@ -281,7 +304,7 @@ const OverflowTrigger = styled.button<{ $open: boolean; $disabled: boolean }>`
   .dot-stack {
     display: inline-block;
     line-height: 1;
-    font-size: 20px;
+    font-size: 14px;
     font-weight: 700;
     letter-spacing: 0;
   }
@@ -291,28 +314,29 @@ const OverflowMenu = styled.div`
   position: absolute;
   top: calc(100% - 2px);
   right: 0;
-  width: 360px;
-  max-height: 380px;
+  width: 260px;
+  max-height: 280px;
   overflow: auto;
   z-index: 40;
-  padding: 8px;
-  border-radius: 10px;
+  padding: 5px;
+  border-radius: 8px;
   border: 1px solid var(--app-border);
   background: var(--app-bg-elevated);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.14);
+  pointer-events: auto;
 `;
 
 const OverflowMenuItem = styled.button<{ $active: boolean }>`
   width: 100%;
   border: 1px solid ${({ $active }) => ($active ? 'var(--semi-color-primary)' : 'transparent')};
   background: ${({ $active }) => ($active ? 'var(--semi-color-primary-light-default)' : 'transparent')};
-  border-radius: 8px;
-  padding: 8px 10px;
+  border-radius: 6px;
+  padding: 5px 7px;
   margin: 0;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: 7px;
   color: var(--app-text);
 
   &:hover {
@@ -626,6 +650,18 @@ const FileTabsBar: React.FC<FileTabsBarProps> = ({
     }, TAB_TOP_SCROLLBAR_HIDE_DELAY_ON_LEAVE_MS);
   }, [clearTopScrollHideTimer]);
 
+  const hideTopScrollAfterAction = React.useCallback(() => {
+    tabsHoveringRef.current = false;
+    clearTopScrollHideTimer();
+    window.requestAnimationFrame(() => {
+      clearTopScrollHideTimer();
+      topScrollHideTimerRef.current = window.setTimeout(() => {
+        setTopScrollVisible(false);
+        topScrollHideTimerRef.current = null;
+      }, TAB_TOP_SCROLLBAR_HIDE_DELAY_ON_LEAVE_MS);
+    });
+  }, [clearTopScrollHideTimer]);
+
   React.useEffect(() => {
     void loadFileTabTones();
   }, [loadFileTabTones]);
@@ -672,6 +708,25 @@ const FileTabsBar: React.FC<FileTabsBarProps> = ({
     wrapper.addEventListener('scroll', onScroll, { passive: true });
     return () => wrapper.removeEventListener('scroll', onScroll);
   }, [overflowMenuOpen, refreshOverflowMenuTabIds, revealTopScrollTemporarily]);
+
+  React.useEffect(() => {
+    const wrapper = tabsWrapperRef.current;
+    if (!wrapper) return undefined;
+    const onWheel = (event: WheelEvent) => {
+      if (!event.shiftKey) return;
+      const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
+      if (!Number.isFinite(delta) || Math.abs(delta) < 0.1) return;
+      event.preventDefault();
+      wrapper.scrollLeft += delta;
+      const topScroll = topScrollRef.current;
+      if (topScroll && Math.abs(topScroll.scrollLeft - wrapper.scrollLeft) > 1) {
+        topScroll.scrollLeft = wrapper.scrollLeft;
+      }
+      revealTopScrollTemporarily();
+    };
+    wrapper.addEventListener('wheel', onWheel, { passive: false });
+    return () => wrapper.removeEventListener('wheel', onWheel);
+  }, [revealTopScrollTemporarily]);
 
   React.useEffect(() => {
     const handler = () => {
@@ -858,21 +913,6 @@ const FileTabsBar: React.FC<FileTabsBarProps> = ({
     revealTopScrollTemporarily();
   }, [revealTopScrollTemporarily]);
 
-  const handleTabsWheel = React.useCallback((event: React.WheelEvent<HTMLDivElement>) => {
-    if (!event.shiftKey) return;
-    const wrapper = tabsWrapperRef.current;
-    if (!wrapper) return;
-    const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
-    if (!Number.isFinite(delta) || Math.abs(delta) < 0.1) return;
-    event.preventDefault();
-    wrapper.scrollLeft += delta;
-    const topScroll = topScrollRef.current;
-    if (topScroll && Math.abs(topScroll.scrollLeft - wrapper.scrollLeft) > 1) {
-      topScroll.scrollLeft = wrapper.scrollLeft;
-    }
-    revealTopScrollTemporarily();
-  }, [revealTopScrollTemporarily]);
-
   const captureTabLefts = React.useCallback(() => {
     const positions = new Map<string, number>();
     tabs.forEach((tab) => {
@@ -989,6 +1029,8 @@ const FileTabsBar: React.FC<FileTabsBarProps> = ({
   return (
     <>
       <TabsFrame
+        className="file-tabs-bar"
+        $scrollVisible={hasHorizontalOverflow && topScrollVisible}
         onMouseEnter={() => {
           tabsHoveringRef.current = true;
           revealTopScrollTemporarily();
@@ -1000,6 +1042,7 @@ const FileTabsBar: React.FC<FileTabsBarProps> = ({
       >
         <TabsTopScroll
           ref={topScrollRef}
+          className="tabs-top-scroll"
           $visible={hasHorizontalOverflow && topScrollVisible}
           onScroll={handleTopScroll}
         >
@@ -1009,7 +1052,6 @@ const FileTabsBar: React.FC<FileTabsBarProps> = ({
         >
         <TabsWrapper
           ref={tabsWrapperRef}
-          onWheel={handleTabsWheel}
         >
           {tabs.map(tab => {
         const tabTypeLabel = getTabTypeLabel(tab);
@@ -1233,6 +1275,7 @@ const FileTabsBar: React.FC<FileTabsBarProps> = ({
                       onClick={() => {
                         onActivate(tab.id);
                         setOverflowMenuOpen(false);
+                        hideTopScrollAfterAction();
                       }}
                     >
                       <FileTypeBadge $tone={badgeTone}>{tabTypeLabel}</FileTypeBadge>

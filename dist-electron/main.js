@@ -11402,16 +11402,6 @@ function isToggleDevToolsShortcut(input) {
   const key = (input.key || "").toLowerCase();
   return (input.meta || input.control) && input.shift && key === "i";
 }
-function isZoomShortcut(input) {
-  if (input.type !== "keyDown") {
-    return false;
-  }
-  if (!(input.meta || input.control)) {
-    return false;
-  }
-  const key = (input.key || "").toLowerCase();
-  return key === "+" || key === "=" || key === "-" || key === "_" || key === "0";
-}
 const embeddedBrowserMainController = createEmbeddedBrowserMainController({
   debugEnabled: ENABLE_EMBEDDED_BROWSER_DEBUG,
   getMainWindow: () => mainWindow
@@ -11508,18 +11498,6 @@ function createWindow() {
     overlayWindowController.destroy();
   });
   win.webContents.on("before-input-event", (event, input) => {
-    if (isZoomShortcut(input)) {
-      event.preventDefault();
-      const key = (input.key || "").toLowerCase();
-      if (key === "+" || key === "=") {
-        win.webContents.send("app:zoom-shortcut", "in");
-      } else if (key === "-" || key === "_") {
-        win.webContents.send("app:zoom-shortcut", "out");
-      } else if (key === "0") {
-        win.webContents.send("app:zoom-shortcut", "reset");
-      }
-      return;
-    }
     if (!isToggleDevToolsShortcut(input)) {
       return;
     }
@@ -11606,6 +11584,14 @@ app.whenReady().then(() => {
         { role: "copy" },
         { role: "paste" },
         { role: "selectAll" }
+      ]
+    },
+    {
+      label: "View",
+      submenu: [
+        { role: "zoomIn" },
+        { role: "zoomOut" },
+        { role: "resetZoom" }
       ]
     },
     {

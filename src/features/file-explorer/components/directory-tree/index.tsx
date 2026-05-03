@@ -196,6 +196,7 @@ export default function DirectoryTree({
   const visibleRowBoundsRef = useRef<VisibleRowBounds[]>([]);
   const lastExternalDropResolutionRef = useRef<ExternalUploadFallback | null>(null);
   const treeDataRef = useRef<any[]>(treeData);
+  const expandClickGuardRef = useRef<{ key: string; targetExpanded: boolean; expiresAt: number } | null>(null);
 
   // 记录上一次应用到 wrapper 的 minWidth，避免 1px 抖动
   const lastAppliedWidthRef = useRef<number>(0);
@@ -1470,7 +1471,21 @@ export default function DirectoryTree({
   };
 
   // 包装后的 onExpand：触发父回调后，下一帧仅以视口重算
-  const handleExpand = (keys: string[]) => {
+  const handleExpand = (keys: string[], expandInfo?: { expanded?: boolean; node?: any }) => {
+    const infoNodeKey = String(expandInfo?.node?.key || '');
+    const infoExpanded = expandInfo?.expanded;
+    const now = performance.now();
+    const guard = expandClickGuardRef.current;
+    if (
+      guard
+      && infoNodeKey
+      && guard.key === infoNodeKey
+      && infoExpanded === !guard.targetExpanded
+      && now < guard.expiresAt
+    ) {
+      return;
+    }
+
     const blockedNewKeys = new Set<string>();
     for (const key of keys) {
       if (expandedKeys.includes(key)) {
@@ -1502,6 +1517,13 @@ export default function DirectoryTree({
     }
 
     onExpand(filteredKeys);
+    if (infoNodeKey && typeof infoExpanded === 'boolean') {
+      expandClickGuardRef.current = {
+        key: infoNodeKey,
+        targetExpanded: infoExpanded,
+        expiresAt: now + 320,
+      };
+    }
 
     requestAnimationFrame(() => {
       scheduleRecompute(); // 只看视口，不会被未见内容影响

@@ -399,20 +399,20 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   const toggleSidePanelCollapsed = React.useCallback(() => {
     cleanupResizeListeners();
     setSidePanelResizing(false);
-    const nextCollapsed = !sidePanelCollapsedRef.current;
-    sidePanelCollapsedRef.current = nextCollapsed;
-    setSidePanelCollapsed(nextCollapsed);
     setSidePanelMotionSyncSignal((current) => current + 1);
-
-    if (nextCollapsed) {
-      setSidePanelVisualWidth(0);
-      return;
-    }
-
-    const restoredWidth = Math.max(MIN_SIDE_PANEL_WIDTH, latestPanelWidthRef.current || sidePanelWidth);
-    setSidePanelWidth(restoredWidth);
-    latestPanelWidthRef.current = restoredWidth;
-    setSidePanelVisualWidth(restoredWidth);
+    setSidePanelCollapsed((current) => {
+      const nextCollapsed = !current;
+      sidePanelCollapsedRef.current = nextCollapsed;
+      if (nextCollapsed) {
+        setSidePanelVisualWidth(0);
+        return nextCollapsed;
+      }
+      const restoredWidth = Math.max(MIN_SIDE_PANEL_WIDTH, latestPanelWidthRef.current || sidePanelWidth);
+      setSidePanelWidth(restoredWidth);
+      latestPanelWidthRef.current = restoredWidth;
+      setSidePanelVisualWidth(restoredWidth);
+      return nextCollapsed;
+    });
   }, [cleanupResizeListeners, setSidePanelVisualWidth, sidePanelWidth]);
 
   React.useEffect(() => {
@@ -2263,28 +2263,28 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
               onClick={() => navigate("/libraries")}
               title="返回库列表"
             >
-              <IconHome size="large" />
+              <IconHome />
             </button>
             <button
               className="footer-btn"
               onClick={() => navigate("/upload-center")}
               title="上传中心"
             >
-              <IconUpload size="large" />
+              <IconUpload />
             </button>
             <button
               className="footer-btn"
               onClick={() => navigate(`/libraries/${libraryId}/recycle-bin`)}
               title="回收站"
             >
-              <IconDelete size="large" />
+              <IconDelete />
             </button>
             <button
               className="footer-btn"
               onClick={() => navigate("/settings")}
               title="设置"
             >
-              <IconSetting size="large" />
+              <IconSetting />
             </button>
           </div>
         </SidePanelFooter>

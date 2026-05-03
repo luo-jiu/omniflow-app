@@ -222,17 +222,6 @@ const TextViewer: React.FC<TextViewerProps> = ({
   const fontSizeRef = useRef(fontSize);
   fontSizeRef.current = fontSize;
 
-  useEffect(() => {
-    const handler = (_event: any, direction: string) => {
-      if (!active) return;
-      if (direction === 'in') setFontSize((prev) => clampFontSize(prev + FONT_SIZE_STEP));
-      else if (direction === 'out') setFontSize((prev) => clampFontSize(prev - FONT_SIZE_STEP));
-      else if (direction === 'reset') setFontSize(DEFAULT_FONT_SIZE);
-    };
-    window.ipcRenderer?.on('app:zoom-shortcut', handler);
-    return () => { window.ipcRenderer?.off('app:zoom-shortcut', handler); };
-  }, [active]);
-
   const saveKeymap = useMemo(
     () => keymap.of([
       {
@@ -246,6 +235,34 @@ const TextViewer: React.FC<TextViewerProps> = ({
         key: 'Mod-Shift-s',
         run: () => {
           handleSaveAsRef.current();
+          return true;
+        },
+      },
+      {
+        key: 'Mod-=',
+        run: () => {
+          setFontSize((prev) => clampFontSize(prev + FONT_SIZE_STEP));
+          return true;
+        },
+      },
+      {
+        key: 'Mod-+',
+        run: () => {
+          setFontSize((prev) => clampFontSize(prev + FONT_SIZE_STEP));
+          return true;
+        },
+      },
+      {
+        key: 'Mod--',
+        run: () => {
+          setFontSize((prev) => clampFontSize(prev - FONT_SIZE_STEP));
+          return true;
+        },
+      },
+      {
+        key: 'Mod-0',
+        run: () => {
+          setFontSize(DEFAULT_FONT_SIZE);
           return true;
         },
       },

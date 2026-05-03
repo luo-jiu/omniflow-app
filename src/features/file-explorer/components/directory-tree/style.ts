@@ -23,7 +23,7 @@ export const DirectorySidebarWrapper = styled.aside<{ $isDragging?: boolean }>`
   }
 
   .repository-selector {
-    padding: 10px 12px;
+    padding: 7px 8px;
     border-bottom: 1px solid var(--app-border);
     flex-shrink: 0;
   }
@@ -33,10 +33,45 @@ export const DirectorySidebarWrapper = styled.aside<{ $isDragging?: boolean }>`
     overflow-y: auto;
     overflow-x: auto;
     position: relative;
-    padding: 4px 6px 10px 2px;
-    scrollbar-gutter: stable both-edges;
+    padding: 3px 1px 7px 1px;
     overscroll-behavior: contain;
-    font-size: 19px;
+    font-size: 13px;
+    scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
+  }
+
+  .tree-container::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  .tree-container::-webkit-scrollbar-track {
+    background: var(--app-scrollbar-track);
+  }
+
+  .tree-container::-webkit-scrollbar-thumb {
+    background: transparent;
+    border-radius: 999px;
+  }
+
+  .tree-container:hover,
+  .tree-container:focus-within,
+  .tree-container:active {
+    scrollbar-color: var(--app-scrollbar-thumb) var(--app-scrollbar-track);
+  }
+
+  .tree-container:hover::-webkit-scrollbar-thumb,
+  .tree-container:focus-within::-webkit-scrollbar-thumb,
+  .tree-container:active::-webkit-scrollbar-thumb {
+    background: var(--app-scrollbar-thumb);
+  }
+
+  .tree-container::-webkit-scrollbar-thumb:hover {
+    background: var(--app-scrollbar-thumb-hover);
+  }
+
+  .tree-container::-webkit-scrollbar-corner {
+    background: var(--app-scrollbar-track);
   }
 
   .resize-handle {
@@ -66,13 +101,13 @@ export const DirectorySidebarWrapper = styled.aside<{ $isDragging?: boolean }>`
     display: block;
     min-width: max-content;
     width: auto;
-    font-size: 19px;
+    font-size: 13px;
   }
 
   /* 全局覆盖 Semi Tree 的字体大小 */
   .custom-tree,
   .custom-tree * {
-    font-size: 19px !important;
+    font-size: 13px !important;
   }
 
   .custom-tree {
@@ -80,11 +115,11 @@ export const DirectorySidebarWrapper = styled.aside<{ $isDragging?: boolean }>`
 
     .semi-tree-option-list .semi-tree-option {
       box-sizing: border-box;
-      min-height: 34px;
-      padding: 3px 6px;
-      border-radius: 8px;
-      font-size: 19px !important;
-      line-height: 28px !important;
+      min-height: 20px;
+      padding: 1px 3px;
+      border-radius: 6px;
+      font-size: 13px !important;
+      line-height: 17px !important;
       color: var(--app-text-secondary);
     }
   }
@@ -95,15 +130,11 @@ export const DirectorySidebarWrapper = styled.aside<{ $isDragging?: boolean }>`
   }
 
   .custom-tree .semi-tree-option {
-    padding-left: 4px !important;
+    padding-left: 2px !important;
     transition:
       background-color 120ms ease,
       color 120ms ease,
       border-radius 120ms ease;
-  }
-
-  .custom-tree .semi-tree-indent {
-    width: 16px !important;
   }
 
     .semi-tree-option:hover {
@@ -118,11 +149,11 @@ export const DirectorySidebarWrapper = styled.aside<{ $isDragging?: boolean }>`
     }
 
     .semi-tree-option.tree-row-selected-single {
-      border-radius: 8px;
+      border-radius: 6px;
     }
 
     .semi-tree-option.tree-row-selected-start {
-      border-radius: 8px 8px 2px 2px;
+      border-radius: 6px 6px 2px 2px;
     }
 
     .semi-tree-option.tree-row-selected-middle {
@@ -130,7 +161,7 @@ export const DirectorySidebarWrapper = styled.aside<{ $isDragging?: boolean }>`
     }
 
     .semi-tree-option.tree-row-selected-end {
-      border-radius: 2px 2px 8px 8px;
+      border-radius: 2px 2px 6px 6px;
     }
 
     .semi-tree-option-selected,
@@ -141,7 +172,7 @@ export const DirectorySidebarWrapper = styled.aside<{ $isDragging?: boolean }>`
 
     .semi-tree-option-label,
     .semi-tree-option-label-text {
-      font-size: 19px !important;
+      font-size: 13px !important;
     }
 
     .semi-tree-option-label {
@@ -152,17 +183,17 @@ export const DirectorySidebarWrapper = styled.aside<{ $isDragging?: boolean }>`
 
     .semi-tree-option-label .semi-icon,
     .semi-tree-option-icon {
-      font-size: 22px !important;
-      margin-right: 8px;
+      font-size: 14px !important;
+      margin-right: 3px;
       color: var(--app-text-muted);
     }
 
     .semi-tree-option-expand-icon {
-      font-size: 22px !important;
+      font-size: 13px !important;
       color: var(--app-text-muted);
-      padding: 6px;
-      margin: -6px 2px -6px -6px;
-      border-radius: 6px;
+      padding: 4px;
+      margin: -4px 0 -4px 0;
+      border-radius: 4px;
       cursor: pointer;
     }
 
@@ -172,13 +203,13 @@ export const DirectorySidebarWrapper = styled.aside<{ $isDragging?: boolean }>`
   }
 
   .custom-tree .semi-input {
-    font-size: 19px;
-    line-height: 28px;
+    font-size: 13px;
+    line-height: 17px;
   }
 
   .custom-tree .semi-input-wrapper {
-    height: 38px;
-    border-radius: 8px;
+    height: 24px;
+    border-radius: 6px;
     background: var(--app-bg-elevated);
     border: 1px solid var(--app-border);
   }
@@ -189,8 +220,8 @@ export const DirectorySidebarWrapper = styled.aside<{ $isDragging?: boolean }>`
     width: 100%;
     min-width: 0;
     box-sizing: border-box;
-    gap: 9px;
-    padding-right: 8px;
+    gap: 5px;
+    padding-right: 4px;
   }
 
   .tree-node-label.drag-over {
@@ -206,8 +237,8 @@ export const DirectorySidebarWrapper = styled.aside<{ $isDragging?: boolean }>`
     overflow: visible;
     text-overflow: initial;
     color: inherit;
-    font-size: 19px !important;
-    line-height: 28px;
+    font-size: 13px !important;
+    line-height: 17px;
   }
 
   .tree-node-text-archive {
@@ -216,13 +247,13 @@ export const DirectorySidebarWrapper = styled.aside<{ $isDragging?: boolean }>`
   }
 
   .tree-file-type-icon {
-    width: 20px;
-    height: 20px;
+    width: 15px;
+    height: 15px;
     display: block;
     object-fit: contain;
-    margin-right: 3px;
+    margin-right: 2px;
     box-sizing: border-box;
-    flex: 0 0 20px;
+    flex: 0 0 15px;
   }
 
   /* Normalize perceptual size for built-in folder icons. */
@@ -235,13 +266,13 @@ export const DirectorySidebarWrapper = styled.aside<{ $isDragging?: boolean }>`
   }
 
   .tree-built-in-type-icon {
-    width: 20px;
-    height: 20px;
-    border-radius: 6px;
+    width: 13px;
+    height: 13px;
+    border-radius: 4px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    font-size: 12px;
+    font-size: 8px;
     font-weight: 600;
     line-height: 1;
   }
@@ -258,69 +289,6 @@ export const DirectorySidebarWrapper = styled.aside<{ $isDragging?: boolean }>`
     border: 1px solid #ffb7b7;
   }
 
-  .tree-container::-webkit-scrollbar {
-    height: 6px;
-    width: 6px;
-  }
-  .tree-container::-webkit-scrollbar-track {
-    background: var(--app-scrollbar-track);
-  }
-  .tree-container::-webkit-scrollbar-thumb {
-    background: transparent;
-    border-radius: 10px;
-    min-height: 20px;
-    min-width: 20px;
-  }
-  .tree-container:hover::-webkit-scrollbar-thumb,
-  .tree-container:focus-within::-webkit-scrollbar-thumb,
-  .tree-container:active::-webkit-scrollbar-thumb {
-    background: var(--app-scrollbar-thumb);
-  }
-  .tree-container:hover::-webkit-scrollbar-thumb:hover,
-  .tree-container:focus-within::-webkit-scrollbar-thumb:hover,
-  .tree-container:active::-webkit-scrollbar-thumb:hover {
-    background: var(--app-scrollbar-thumb-hover);
-  }
-  .tree-container::-webkit-scrollbar-corner {
-    background: transparent;
-  }
-
-  .tree-container {
-    scrollbar-width: thin;
-    scrollbar-color: transparent transparent;
-  }
-
-  .tree-container:hover,
-  .tree-container:focus-within,
-  .tree-container:active {
-    scrollbar-color: var(--app-scrollbar-thumb) var(--app-scrollbar-track);
-  }
-
-  /* 覆盖所有内部可能出现的滚动条 */
-  *::-webkit-scrollbar {
-    height: 6px;
-    width: 6px;
-  }
-  *::-webkit-scrollbar-track {
-    background: var(--app-scrollbar-track);
-  }
-  *::-webkit-scrollbar-thumb {
-    background: transparent;
-    border-radius: 10px;
-  }
-  *:hover::-webkit-scrollbar-thumb,
-  *:focus-within::-webkit-scrollbar-thumb,
-  *:active::-webkit-scrollbar-thumb {
-    background: var(--app-scrollbar-thumb);
-  }
-  *:hover::-webkit-scrollbar-thumb:hover,
-  *:focus-within::-webkit-scrollbar-thumb:hover,
-  *:active::-webkit-scrollbar-thumb:hover {
-    background: var(--app-scrollbar-thumb-hover);
-  }
-  *::-webkit-scrollbar-corner {
-    background: transparent;
-  }
 `;
 
 export default DirectorySidebarWrapper;

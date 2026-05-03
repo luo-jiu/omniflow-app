@@ -42,20 +42,20 @@ const SettingsPageWrapper = styled.div`
     top: 0;
     left: 0;
     right: 0;
-    height: 56px;
+    height: 38px;
     -webkit-app-region: drag;
     z-index: 0;
   }
 `;
 
 const SettingsWrapper = styled.div`
-  --page-heading-indent: 58px;
+  --page-heading-indent: 39px;
 
   position: relative;
   z-index: 1;
-  padding: 56px 68px;
-  padding-top: 64px;
-  max-width: 920px;
+  padding: 38px 46px;
+  padding-top: 43px;
+  max-width: 616px;
   margin: 0 auto;
   width: 100%;
   color: var(--semi-color-text-0);
@@ -68,29 +68,29 @@ const SettingsWrapper = styled.div`
   .settings-header {
     display: flex;
     align-items: center;
-    gap: 18px;
-    margin-bottom: 10px;
+    gap: 12px;
+    margin-bottom: 7px;
   }
 
   .page-back-button {
     flex-shrink: 0;
-    padding: 8px;
-    border-radius: 10px;
+    padding: 5px;
+    border-radius: 7px;
   }
 
   .page-title {
     margin: 0;
-    font-size: 34px;
+    font-size: 23px;
     font-weight: 700;
     line-height: 1.15;
   }
 
   .settings-subtitle {
     margin-left: var(--page-heading-indent);
-    margin-bottom: 34px;
-    max-width: 720px;
+    margin-bottom: 23px;
+    max-width: 482px;
     color: var(--semi-color-text-2);
-    font-size: 17px;
+    font-size: 12px;
     line-height: 1.6;
   }
 
@@ -98,19 +98,19 @@ const SettingsWrapper = styled.div`
     display: flex;
     justify-content: space-between;
     align-items: center;
-    gap: 24px;
-    padding: 24px 0;
+    gap: 16px;
+    padding: 16px 0;
   }
 
   .setting-title {
-    font-size: 19px;
+    font-size: 13px;
     font-weight: 600;
     line-height: 1.35;
   }
 
   .setting-desc {
-    font-size: 16px;
-    margin-top: 6px;
+    font-size: 11px;
+    margin-top: 4px;
     color: var(--semi-color-text-2);
     line-height: 1.6;
   }
@@ -118,8 +118,8 @@ const SettingsWrapper = styled.div`
   .setting-control-group {
     display: inline-flex;
     align-items: center;
-    gap: 10px;
-    width: min(56vw, 460px);
+    gap: 7px;
+    width: min(56vw, 308px);
     justify-content: flex-end;
   }
 
@@ -130,19 +130,19 @@ const SettingsWrapper = styled.div`
 
   .setting-path-input .semi-input-wrapper,
   .setting-path-input .semi-input {
-    font-size: 16px;
+    font-size: 11px;
   }
 
   .setting-path-input .semi-input-wrapper {
-    min-height: 44px;
+    min-height: 30px;
   }
 
   .settings-action-btn {
-    min-height: 42px;
-    min-width: 108px;
-    padding: 0 18px;
-    border-radius: 8px;
-    font-size: 15px;
+    min-height: 30px;
+    min-width: 72px;
+    padding: 0 12px;
+    border-radius: 6px;
+    font-size: 11px;
     font-weight: 600;
   }
 
@@ -188,14 +188,14 @@ const SettingsWrapper = styled.div`
   .theme-control-group {
     display: inline-flex;
     align-items: center;
-    gap: 14px;
+    gap: 9px;
   }
 
   .theme-toggle {
     position: relative;
-    width: 102px;
-    height: 40px;
-    padding: 4px;
+    width: 68px;
+    height: 28px;
+    padding: 3px;
     border-radius: 999px;
     border: 1px solid var(--semi-color-border);
     background: var(--semi-color-fill-0);
@@ -214,24 +214,24 @@ const SettingsWrapper = styled.div`
     content: '';
     position: absolute;
     top: 50%;
-    left: 18px;
-    width: 7px;
-    height: 7px;
+    left: 12px;
+    width: 5px;
+    height: 5px;
     border-radius: 999px;
     background: color-mix(in srgb, var(--semi-color-text-2) 72%, transparent);
     box-shadow:
-      32px 0 0 color-mix(in srgb, var(--semi-color-text-2) 72%, transparent),
-      64px 0 0 color-mix(in srgb, var(--semi-color-text-2) 72%, transparent);
+      21px 0 0 color-mix(in srgb, var(--semi-color-text-2) 72%, transparent),
+      42px 0 0 color-mix(in srgb, var(--semi-color-text-2) 72%, transparent);
     transform: translateY(-50%);
     pointer-events: none;
   }
 
   .theme-toggle-thumb {
     position: absolute;
-    top: 4px;
-    left: 4px;
-    width: 30px;
-    height: 30px;
+    top: 3px;
+    left: 3px;
+    width: 22px;
+    height: 22px;
     border-radius: 999px;
     background: var(--semi-color-bg-0);
     box-shadow: 0 2px 6px rgba(0, 0, 0, 0.14);
@@ -240,18 +240,18 @@ const SettingsWrapper = styled.div`
   }
 
   .theme-toggle[data-mode='system'] .theme-toggle-thumb {
-    transform: translateX(32px);
+    transform: translateX(20px);
     background: color-mix(in srgb, var(--semi-color-primary) 18%, var(--semi-color-bg-0) 82%);
   }
 
   .theme-toggle[data-mode='dark'] .theme-toggle-thumb {
-    transform: translateX(64px);
+    transform: translateX(40px);
     background: var(--semi-color-primary);
   }
 
   .theme-toggle-label {
-    min-width: 76px;
-    font-size: 16px;
+    min-width: 51px;
+    font-size: 11px;
     color: var(--semi-color-text-1);
     text-align: right;
   }
@@ -391,7 +391,7 @@ const Settings: React.FC = () => {
       <SettingsWrapper>
         <div className="settings-header">
           <Button
-            icon={<IconChevronLeft style={{ fontSize: 20 }} />}
+            icon={<IconChevronLeft style={{ fontSize: 14 }} />}
             theme="borderless"
             onClick={() => navigate(-1)}
             className="page-back-button"
@@ -403,7 +403,7 @@ const Settings: React.FC = () => {
           在这里调整你的 Omniflow 体验
         </div>
 
-        <Divider style={{ margin: '20px 0' }} />
+        <Divider style={{ margin: '13px 0' }} />
 
         <div className="setting-item">
           <div>
@@ -435,8 +435,8 @@ const Settings: React.FC = () => {
           </div>
           <Select
             value={language}
-            style={{ width: 186, fontSize: 16 }}
-            size="large"
+            style={{ width: 125, fontSize: 11 }}
+            size="small"
             onChange={(value) => {
               const nextLanguage = value as AppLanguage;
               setLanguage(nextLanguage);
@@ -455,7 +455,7 @@ const Settings: React.FC = () => {
             <div className="setting-desc">开启后，文件节点会显示扩展名（如 .txt、.jpg）</div>
           </div>
           <Switch
-            size="large"
+            size="small"
             checked={showFileSuffix}
             onChange={(checked) => {
               setShowFileSuffix(checked);
@@ -471,7 +471,7 @@ const Settings: React.FC = () => {
             <div className="setting-desc">监控指定目录并自动加入上传队列（目标：当前库根目录）</div>
           </div>
           <Switch
-            size="large"
+            size="small"
             checked={autoImportEnabled}
             onChange={(checked) => {
               setAutoImportEnabledState(checked);
@@ -579,18 +579,18 @@ const Settings: React.FC = () => {
           </div>
         </div>
 
-        <Divider style={{ margin: '24px 0' }} />
+        <Divider style={{ margin: '16px 0' }} />
 
         <div>
-          <Title heading={3} style={{ fontSize: 24, marginBottom: 10, lineHeight: 1.2 }}>关于</Title>
-          <Text style={{ fontSize: 16, color: 'var(--semi-color-text-2)' }}>Omniflow App v0.0.1</Text>
+          <Title heading={3} style={{ fontSize: 16, marginBottom: 7, lineHeight: 1.2 }}>关于</Title>
+          <Text style={{ fontSize: 11, color: 'var(--semi-color-text-2)' }}>Omniflow App v0.0.1</Text>
         </div>
 
-        <div style={{ marginTop: 56, textAlign: 'center' }}>
+        <div style={{ marginTop: 38, textAlign: 'center' }}>
           <Button
             theme="light"
             type="secondary"
-            size="large"
+            size="small"
             onClick={() => navigate(-1)}
             className="settings-action-btn exit"
           >

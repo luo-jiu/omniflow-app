@@ -17,6 +17,12 @@ export const MainWrapper = styled.main`
     padding: 0 12px 12px;
   }
 
+  &.viewer-mode .file-tabs-bar {
+    width: calc(100% + 24px);
+    margin-left: -12px;
+    margin-right: -12px;
+  }
+
   .main-content {
     flex: 1;
     min-height: 0;

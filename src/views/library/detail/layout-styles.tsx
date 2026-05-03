@@ -14,7 +14,6 @@ import {
   CONTENT_TOOLBAR_HEIGHT,
   DEFAULT_SIDE_PANEL_WIDTH,
   SIDE_PANEL_COLLAPSE_ANIMATION_MS,
-  SIDE_PANEL_TOGGLE_ICON_SIZE,
   SIDE_PANEL_TOGGLE_LEFT,
   SIDE_PANEL_TOGGLE_SIZE,
   SIDE_PANEL_TOGGLE_TOP,
@@ -22,6 +21,10 @@ import {
   TOOLBAR_ACTION_BUTTON_SIZE,
   TOOLBAR_ACTION_ICON_SIZE,
 } from './layout-constants';
+import {
+  sidePanelCompactIconButtonStyles,
+  sidePanelIconButtonBaseStyles,
+} from './icon-button-styles';
 
 export const SidePanelMotionProperty = createGlobalStyle`
   @property --side-panel-visual-width {
@@ -70,7 +73,7 @@ export const DetailWrapper = styled.div`
 
 export const TitlebarSidePanelToggleHost = styled.div`
   position: absolute;
-  left: ${SIDE_PANEL_TOGGLE_LEFT}px;
+  left: ${SIDE_PANEL_TOGGLE_LEFT - 10}px;
   top: ${SIDE_PANEL_TOGGLE_TOP}px;
   z-index: 3200;
   width: ${SIDE_PANEL_TOGGLE_SIZE}px;
@@ -85,25 +88,11 @@ export const TitlebarSidePanelToggleHost = styled.div`
 `;
 
 export const TitlebarSidePanelToggleButton = styled.button`
+  ${sidePanelIconButtonBaseStyles}
   width: 100%;
   height: 100%;
-  border-radius: 8px;
-  border: 1px solid transparent;
-  background: transparent;
-  color: var(--app-text-muted);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  cursor: pointer;
   pointer-events: auto;
-  user-select: none;
   -webkit-app-region: no-drag !important;
-
-  &:hover {
-    background: color-mix(in srgb, var(--app-text) 8%, transparent);
-    color: var(--app-text);
-  }
 
   &.is-active {
     background: #e8f7ff;
@@ -129,11 +118,6 @@ export const TitlebarSidePanelToggleButton = styled.button`
     color: #a2e4ff;
   }
 
-  svg {
-    width: ${SIDE_PANEL_TOGGLE_ICON_SIZE}px;
-    height: ${SIDE_PANEL_TOGGLE_ICON_SIZE}px;
-    display: block;
-  }
 `;
 
 export const SidePanel = styled.div`
@@ -170,8 +154,8 @@ export const ResizeHandle = styled.div`
 export const SidePanelHeader = styled.div`
   height: ${SIDE_PANEL_TRAFFIC_LIGHT_SAFE_HEIGHT}px;
   min-height: ${SIDE_PANEL_TRAFFIC_LIGHT_SAFE_HEIGHT}px;
-  padding: 0 16px;
-  padding-left: 80px;
+  padding: 0 11px;
+  padding-left: 68px;
   box-sizing: border-box;
   display: flex;
   align-items: center;
@@ -205,7 +189,7 @@ export const SidePanelHeader = styled.div`
     position: relative;
     z-index: 1;
     -webkit-app-region: no-drag;
-    font-size: 16px;
+    font-size: 11px;
     font-weight: 600;
     color: var(--app-text);
     margin: 0;
@@ -216,29 +200,11 @@ export const SidePanelTree = styled.div`
   flex: 1;
   min-height: 0;
   overflow: hidden;
-  padding: 8px 10px 6px;
-
-  *::-webkit-scrollbar {
-    height: 6px;
-    width: 6px;
-  }
-  *::-webkit-scrollbar-track {
-    background: var(--app-scrollbar-track);
-  }
-  *::-webkit-scrollbar-thumb {
-    background: var(--app-scrollbar-thumb);
-    border-radius: 10px;
-  }
-  *::-webkit-scrollbar-thumb:hover {
-    background: var(--app-scrollbar-thumb-hover);
-  }
-  *::-webkit-scrollbar-corner {
-    background: transparent;
-  }
+  padding: 5px 7px 4px;
 `;
 
 export const SidePanelFooter = styled.div`
-  padding: 10px 14px;
+  padding: 7px 9px;
   border-top: none;
   display: flex;
   align-items: center;
@@ -248,25 +214,11 @@ export const SidePanelFooter = styled.div`
   .footer-left {
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: 3px;
   }
 
   .footer-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 32px;
-    height: 32px;
-    border-radius: 8px;
-    cursor: pointer;
-    color: var(--app-text-muted);
-    background: transparent;
-    border: none;
-
-    &:hover {
-      background: rgba(0, 0, 0, 0.05);
-      color: var(--app-text);
-    }
+    ${sidePanelCompactIconButtonStyles}
   }
 `;
 
@@ -286,7 +238,7 @@ const toolbarActionButtonStyles = css`
   .toolbar-action-btn {
     width: ${TOOLBAR_ACTION_BUTTON_SIZE}px;
     height: ${TOOLBAR_ACTION_BUTTON_SIZE}px;
-    border-radius: 8px;
+    border-radius: 6px;
     border: 1px solid transparent;
     background: transparent;
     color: var(--app-text-muted);
@@ -340,16 +292,16 @@ const toolbarActionButtonStyles = css`
 const toolbarBackButtonStyles = css`
   .toolbar-back-btn {
     height: ${TOOLBAR_ACTION_BUTTON_SIZE}px;
-    border-radius: 8px;
+    border-radius: 6px;
     border: none;
     background: transparent;
     color: var(--app-text-muted);
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    padding: 0 10px;
+    gap: 4px;
+    padding: 0 7px;
     cursor: pointer;
-    font-size: 13px;
+    font-size: 10px;
     font-weight: 500;
     line-height: 1;
     -webkit-app-region: no-drag;
@@ -379,9 +331,9 @@ export const ContentToolbar = styled.div`
   position: relative;
   display: flex;
   align-items: center;
-  padding: 0 10px;
+  padding: 0 7px;
   padding-left: max(
-    10px,
+    7px,
     calc(var(--content-toolbar-collapsed-safe-space) - var(--side-panel-visual-width))
   );
 
@@ -397,13 +349,13 @@ export const ContentToolbar = styled.div`
   }
 
   &.browser-url-toolbar {
-    padding-left: 10px;
+    padding-left: 7px;
   }
 
   .toolbar-left {
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: 3px;
     -webkit-app-region: no-drag;
   }
 
@@ -420,8 +372,8 @@ export const ContentToolbar = styled.div`
     min-width: 0;
     display: flex;
     align-items: center;
-    gap: 8px;
-    margin-left: 4px;
+    gap: 5px;
+    margin-left: 3px;
     overflow-x: auto;
     overflow-y: hidden;
     scrollbar-width: none;
@@ -439,10 +391,10 @@ export const ContentToolbar = styled.div`
     position: sticky;
     right: 0;
     z-index: 1;
-    width: 34px;
-    height: 34px;
-    margin-left: 4px;
-    border-radius: 8px;
+    width: 26px;
+    height: 26px;
+    margin-left: 3px;
+    border-radius: 6px;
     border: 1px solid var(--app-border);
     background: color-mix(in srgb, var(--app-bg) 92%, transparent);
     color: var(--app-text-muted);
@@ -456,7 +408,7 @@ export const ContentToolbar = styled.div`
   }
 
   .browser-tabs-add .semi-icon {
-    font-size: 18px;
+    font-size: 13px;
   }
 
   .browser-tabs-add:hover {
@@ -465,17 +417,17 @@ export const ContentToolbar = styled.div`
   }
 
   .browser-tab-btn {
-    min-width: 140px;
-    max-width: 260px;
+    min-width: 94px;
+    max-width: 174px;
     height: ${BROWSER_TAB_HEIGHT}px;
-    padding: 0 13px;
-    border-radius: 8px;
+    padding: 0 9px;
+    border-radius: 6px;
     border: 1px solid var(--app-border);
     background: var(--app-bg-elevated);
     color: var(--app-text-muted);
     display: inline-flex;
     align-items: center;
-    gap: 8px;
+    gap: 5px;
     cursor: pointer;
     flex-shrink: 0;
     -webkit-app-region: no-drag;
@@ -488,7 +440,7 @@ export const ContentToolbar = styled.div`
   }
 
   .browser-tab-favicon {
-    border-radius: 4px;
+    border-radius: 3px;
     object-fit: contain;
   }
 
@@ -501,7 +453,7 @@ export const ContentToolbar = styled.div`
   }
 
   .browser-tab-favicon.favicon-fallback .semi-icon {
-    font-size: 15px;
+    font-size: 11px;
   }
 
   .browser-tab-btn.active {
@@ -535,8 +487,8 @@ export const ContentToolbar = styled.div`
   }
 
   .browser-tab-close {
-    width: 22px;
-    height: 22px;
+    width: 18px;
+    height: 18px;
     margin-left: auto;
     border: none;
     background: transparent;
@@ -555,7 +507,7 @@ export const ContentToolbar = styled.div`
   }
 
   .browser-tab-close .semi-icon {
-    font-size: 15px;
+    font-size: 11px;
   }
 
   .toolbar-browser-form {
@@ -568,11 +520,11 @@ export const ContentToolbar = styled.div`
   .toolbar-browser-input {
     width: 100%;
     height: ${BROWSER_INPUT_HEIGHT}px;
-    border-radius: 8px;
+    border-radius: 6px;
     border: 1px solid var(--app-border);
     background: var(--app-bg-elevated);
     color: var(--app-text);
-    padding: 0 12px;
+    padding: 0 8px;
     outline: none;
     font-size: ${BROWSER_INPUT_FONT_SIZE}px;
   }
@@ -584,8 +536,8 @@ export const ContentToolbar = styled.div`
   .toolbar-right {
     display: flex;
     align-items: center;
-    gap: 6px;
-    margin-right: 6px;
+    gap: 4px;
+    margin-right: 4px;
     -webkit-app-region: no-drag;
   }
   ${toolbarBackButtonStyles}
@@ -599,8 +551,8 @@ export const BookmarkToolbar = styled.div`
   background: color-mix(in srgb, var(--app-bg) 94%, var(--semi-color-fill-0) 6%);
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 0 10px;
+  gap: 4px;
+  padding: 0 7px;
   -webkit-app-region: no-drag;
 
   .bookmark-bar-list {
@@ -608,22 +560,22 @@ export const BookmarkToolbar = styled.div`
     min-width: 0;
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 4px;
     overflow: hidden;
   }
 
   .bookmark-item {
     height: ${BOOKMARK_ITEM_HEIGHT}px;
     min-width: 0;
-    max-width: 180px;
+    max-width: 120px;
     border: 1px solid transparent;
-    border-radius: 8px;
+    border-radius: 6px;
     background: transparent;
     color: var(--app-text);
     display: inline-flex;
     align-items: center;
-    gap: 8px;
-    padding: 0 11px;
+    gap: 5px;
+    padding: 0 7px;
     cursor: pointer;
     flex-shrink: 0;
     user-select: none;
@@ -655,7 +607,7 @@ export const BookmarkToolbar = styled.div`
   .bookmark-favicon {
     width: ${BOOKMARK_ICON_SIZE}px;
     height: ${BOOKMARK_ICON_SIZE}px;
-    border-radius: 4px;
+    border-radius: 3px;
     flex-shrink: 0;
     object-fit: contain;
     display: block;
@@ -671,7 +623,7 @@ export const BookmarkToolbar = styled.div`
   }
 
   .bookmark-favicon.favicon-fallback .semi-icon {
-    font-size: 15px;
+    font-size: 11px;
   }
 
   .bookmark-folder-glyph {
@@ -686,11 +638,11 @@ export const BookmarkToolbar = styled.div`
     content: "";
     position: absolute;
     left: 1px;
-    top: 7px;
-    width: 17px;
-    height: 11px;
-    border-radius: 3px;
-    border: 1.5px solid currentColor;
+    top: 5px;
+    width: 12px;
+    height: 8px;
+    border-radius: 2px;
+    border: 1px solid currentColor;
     background: transparent;
     box-sizing: border-box;
   }
@@ -700,9 +652,9 @@ export const BookmarkToolbar = styled.div`
     position: absolute;
     left: 2px;
     top: 2px;
-    width: 10px;
-    height: 6px;
-    border: 1.5px solid currentColor;
+    width: 7px;
+    height: 4px;
+    border: 1px solid currentColor;
     border-bottom: none;
     border-radius: 3px 3px 0 0;
     background: transparent;
@@ -720,9 +672,9 @@ export const BookmarkToolbar = styled.div`
   }
 
   .bookmark-more-btn {
-    width: 34px;
-    height: 34px;
-    border-radius: 8px;
+    width: 26px;
+    height: 26px;
+    border-radius: 6px;
     border: 1px solid transparent;
     background: transparent;
     color: var(--app-text-muted);
@@ -734,7 +686,7 @@ export const BookmarkToolbar = styled.div`
   }
 
   .bookmark-more-btn .semi-icon {
-    font-size: 18px;
+    font-size: 13px;
   }
 `;
 
@@ -820,8 +772,8 @@ export const SidebarCollapseIcon: React.FC = () => (
 );
 
 export const BookmarkManagerContent = styled.div`
-  min-height: 460px;
-  max-height: 520px;
+  min-height: 310px;
+  max-height: 350px;
   overflow: auto;
   padding: 2px 0;
 
@@ -829,8 +781,8 @@ export const BookmarkManagerContent = styled.div`
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 12px;
-    padding: 4px 4px 12px;
+    gap: 8px;
+    padding: 3px 3px 8px;
     position: sticky;
     top: 0;
     z-index: 1;
@@ -847,17 +799,17 @@ export const BookmarkManagerContent = styled.div`
 
   .bookmark-manager-empty {
     color: var(--app-text-muted);
-    padding: 18px 4px;
+    padding: 12px 3px;
     text-align: center;
   }
 
   .bookmark-manager-row {
-    min-height: 42px;
-    border-radius: 8px;
+    min-height: 30px;
+    border-radius: 6px;
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 0 8px;
+    gap: 6px;
+    padding: 0 6px;
   }
 
   .bookmark-manager-row:hover {
@@ -865,10 +817,10 @@ export const BookmarkManagerContent = styled.div`
   }
 
   .bookmark-manager-disclosure {
-    width: 24px;
-    height: 24px;
+    width: 18px;
+    height: 18px;
     border: none;
-    border-radius: 6px;
+    border-radius: 4px;
     background: transparent;
     color: var(--app-text-muted);
     display: inline-flex;
@@ -988,19 +940,19 @@ export const BookmarkManagerContent = styled.div`
   .bookmark-manager-actions {
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: 3px;
     flex-wrap: wrap;
     justify-content: flex-end;
   }
 
   .bookmark-manager-action {
-    height: 26px;
-    border-radius: 8px;
+    height: 20px;
+    border-radius: 6px;
     border: 1px solid var(--app-border);
     background: var(--app-bg-elevated);
     color: var(--app-text);
     cursor: pointer;
-    padding: 0 8px;
+    padding: 0 6px;
   }
 
   .bookmark-manager-action.danger {
@@ -1020,40 +972,40 @@ export const BrowserSettingsContent = styled.div`
   overflow: auto;
   display: flex;
   flex-direction: column;
-  gap: 24px;
-  padding: 30px 32px 36px;
+  gap: 16px;
+  padding: 20px 21px 24px;
   background: var(--app-bg);
 
   .browser-settings-hero {
     display: flex;
     flex-direction: column;
-    gap: 12px;
-    padding-bottom: 4px;
+    gap: 8px;
+    padding-bottom: 3px;
   }
 
   .browser-settings-intro {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 7px;
   }
 
   .browser-settings-eyebrow {
-    font-size: 16px;
+    font-size: 11px;
     line-height: 1.45;
     font-weight: 700;
     color: var(--semi-color-primary);
   }
 
   .browser-settings-title {
-    font-size: 30px;
+    font-size: 20px;
     font-weight: 700;
     color: var(--app-text);
     line-height: 1.2;
   }
 
   .browser-settings-description {
-    max-width: 720px;
-    font-size: 18px;
+    max-width: 480px;
+    font-size: 12px;
     line-height: 1.6;
     color: var(--app-text-muted);
   }
@@ -1061,18 +1013,18 @@ export const BrowserSettingsContent = styled.div`
   .browser-settings-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 18px;
+    gap: 12px;
   }
 
   .browser-settings-card {
-    min-height: 172px;
+    min-height: 115px;
     border: 1px solid var(--app-border);
-    border-radius: 10px;
+    border-radius: 8px;
     background: var(--app-bg-elevated);
-    padding: 18px 18px 20px;
+    padding: 12px 12px 13px;
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 8px;
 
     &.browser-settings-card-clickable {
       cursor: pointer;
@@ -1086,14 +1038,14 @@ export const BrowserSettingsContent = styled.div`
   }
 
   .browser-settings-card-title {
-    font-size: 20px;
+    font-size: 13px;
     font-weight: 700;
     line-height: 1.3;
     color: var(--app-text);
   }
 
   .browser-settings-card-body {
-    font-size: 17px;
+    font-size: 11px;
     line-height: 1.6;
     color: var(--app-text-muted);
   }
@@ -1101,45 +1053,45 @@ export const BrowserSettingsContent = styled.div`
   .browser-settings-chip {
     width: fit-content;
     max-width: 100%;
-    min-height: 30px;
-    padding: 4px 12px;
+    min-height: 20px;
+    padding: 3px 8px;
     border-radius: 999px;
     border: 1px solid var(--app-border);
     background: color-mix(in srgb, var(--app-bg-elevated) 82%, var(--semi-color-fill-0) 18%);
     color: var(--app-text-muted);
     display: inline-flex;
     align-items: center;
-    font-size: 16px;
+    font-size: 11px;
     line-height: 1.4;
     font-weight: 600;
   }
 
   .browser-settings-footer {
     padding-top: 2px;
-    font-size: 17px;
+    font-size: 11px;
     line-height: 1.6;
     color: var(--app-text-muted);
   }
 
   @media (max-width: 1040px) {
-    padding: 24px 24px 30px;
+    padding: 16px 16px 20px;
 
     .browser-settings-grid {
       grid-template-columns: 1fr;
     }
 
     .browser-settings-title {
-      font-size: 28px;
+      font-size: 19px;
     }
 
     .browser-settings-description,
     .browser-settings-card-body,
     .browser-settings-footer {
-      font-size: 16px;
+      font-size: 11px;
     }
 
     .browser-settings-card-title {
-      font-size: 18px;
+      font-size: 12px;
     }
   }
 `;

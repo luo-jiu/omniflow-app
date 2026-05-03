@@ -57,7 +57,7 @@
   3. `.agent-docs/frontend-documentation-standard.md`
 - 涉及整体分层、状态 owner、API / IPC、Electron、工作区模式、文件树 / 文件预览、embedded browser、资源捕捉、上传或验证时，必须继续查阅对应专题文档。
 - 涉及字号、排版、控件密度、目录树宽度、工具栏高度、弹框观感、亮暗主题可见性时，必须先阅读 `docs/ui-display-readability-baseline.md`。
-- 新页面和新模块默认遵守当前临时显示基线：任何文本不得低于 `16px`；主正文默认应高于 `16px`；按钮 / tab / 输入框文字不得低于 `16px`，按钮和输入框高度优先使用 `40px`；说明文本和正文段落的松紧不得低于设置页“白天、跟随系统、夜间三种显示方式”说明文本的当前标准（`font-size: 16px; line-height: 1.6; margin-top: 6px`）；除非页面场景能明确证明需要偏离。
+- 当前显示基线处于恢复 `100%` 页面缩放的迁移阶段；新页面和新模块必须先参考 `docs/ui-display-readability-baseline.md` 的最新结论，不能继续套用旧的 `16px` 最小字号硬规则。高频工作区控件允许使用更紧凑字号，但必须同时保证行高、截断、点击热区、主题对比度和 `Cmd/Ctrl+0` 下的可读性。
 - 按当前前端依赖方向开发：
 
 ```text
