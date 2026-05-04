@@ -17,6 +17,7 @@ import {
   SIDE_PANEL_TOGGLE_LEFT,
   SIDE_PANEL_TOGGLE_SIZE,
   SIDE_PANEL_TOGGLE_TOP,
+  SIDE_PANEL_TOGGLE_VISUAL_LEFT,
   SIDE_PANEL_TRAFFIC_LIGHT_SAFE_HEIGHT,
   TOOLBAR_ACTION_BUTTON_SIZE,
   TOOLBAR_ACTION_ICON_SIZE,
@@ -73,7 +74,7 @@ export const DetailWrapper = styled.div`
 
 export const TitlebarSidePanelToggleHost = styled.div`
   position: absolute;
-  left: ${SIDE_PANEL_TOGGLE_LEFT - 10}px;
+  left: ${SIDE_PANEL_TOGGLE_VISUAL_LEFT}px;
   top: ${SIDE_PANEL_TOGGLE_TOP}px;
   z-index: 3200;
   width: ${SIDE_PANEL_TOGGLE_SIZE}px;
@@ -114,6 +115,12 @@ export const TitlebarSidePanelToggleButton = styled.button`
     background: color-mix(in srgb, var(--app-text) 8%, transparent);
   }
 
+  &.is-active,
+  &.is-active *,
+  body[theme-mode="dark"] &.is-active,
+  body[theme-mode="dark"] &.is-active * {
+    color: #22d3ee;
+  }
 `;
 
 export const SidePanel = styled.div`
@@ -286,6 +293,13 @@ const toolbarActionButtonStyles = css`
 
   body[theme-mode="dark"] & .toolbar-action-btn.is-active:hover:not(:disabled) {
     background: color-mix(in srgb, var(--app-text) 8%, transparent);
+  }
+
+  .toolbar-action-btn.is-active,
+  .toolbar-action-btn.is-active *,
+  body[theme-mode="dark"] & .toolbar-action-btn.is-active,
+  body[theme-mode="dark"] & .toolbar-action-btn.is-active * {
+    color: #22d3ee;
   }
 
   .toolbar-action-btn:disabled {
@@ -765,11 +779,13 @@ export const SidebarCollapseIcon: React.FC = () => (
       width="13.5"
       height="11.5"
       rx="2.25"
+      fill="none"
       stroke="currentColor"
       strokeWidth="1.35"
     />
     <path
       d="M7.5 4.75V15.25"
+      fill="none"
       stroke="currentColor"
       strokeWidth="1.35"
       strokeLinecap="round"
