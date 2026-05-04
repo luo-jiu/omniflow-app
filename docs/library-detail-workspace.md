@@ -168,8 +168,9 @@
 
 - 仅当 `MediaRegistry` 中存在已注册（即至少播放过一次的）audio / video entry 时才出现，空态隐藏。
 - 进入浏览器模式后整个 toolbar-right 让位给浏览器工具组，不再显示。
-- 点击弹出 `MediaHubPopover`，列出当前所有注册项；每条支持 play/pause 和"点击行 → 跳到对应 tab"。
-- "跳到 tab" 路径：调用 `useFileViewer().activateTab(tabId)`，再调 `openFileWorkspace()` 切回 file-viewer 模式。
+- 点击弹出 `MediaHubPopover`，列出当前所有注册项；每条支持 play/pause、点击进度条 seek、播放进度与时长展示、通过专门按钮跳到对应 tab，以及通过 `x` 按钮结束并移出媒体控制中心。
+- "跳到 tab" 路径：点击行内跳转按钮后调用 `useFileViewer().activateTab(tabId)`，再调 `openFileWorkspace()` 切回 file-viewer 模式。
+- "移除" 路径：不关闭文件 tab；audio / asmr 会清空 `globalAudioPlayer`，video 会 pause 并退出本次媒体注册，下次在原 tab 里播放会重新注册。
 - 不再保留旧的"顶部 GlobalAudioMiniBar"——audio 跨 tab 不再叠加额外 UI。
 - 不再保留"video tab 失活自动 pause"和"audio play 自动暂停 video"的互斥；多个视频可并行，音频可与视频并行。音频底座仍是单例 `<audio>`，所以同时播多首音频仍受单例限制（属预期范围）。
 
@@ -367,9 +368,11 @@
   - `audio-viewer`（`kind: 'audio'`，仅在 owns globalAudioPlayer 且 `hasStarted` 时注册）
   - `asmr-viewer`（`kind: 'audio'`，同上但 ownerType 为 `'asmr'`）
   - `video-viewer`（`kind: 'video'`，本 tab `<video>` 至少播放过一次后注册）
-- entry 关键字段：`entryId`（`<kind>:<tabId>` 格式）、`tabId`（用于跳转）、`title`、`isPlaying`。
+- entry 关键字段：`entryId`（`<kind>:<tabId>` 格式）、`tabId`（用于跳转）、`title`、`isPlaying`、`currentTime`、`duration`。
+- 注册表还保存每个 entry 的 `play` / `pause` / `seek(time)` / `dismiss()` 回调；这些控制回调只存在于 registry 内部，不进入可订阅快照。
+- `useRegisterMediaEntry` 会把 `currentTime` / `duration` 归一到整秒再更新注册表，避免 audio/video 高频 `timeupdate` 造成页面级广播抖动。
 - 注册表只持有索引和回调，不持有 `<audio>` / `<video>` 元素本身。
-- 每个 viewer 必须在挂载且"曾播放"后才注册，关闭 viewer / unmount 时清理。
+- 每个 viewer 必须在挂载且"曾播放"后才注册，关闭 viewer / unmount / 用户点击媒体行 `x` 时清理。
 - 浏览器内嵌页面（main 进程的 `WebContentsView`）的媒体不在本 registry 范围内。
 
 后续如果继续治理这页，优先方向应该是：

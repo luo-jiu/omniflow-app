@@ -10,6 +10,8 @@ import {
 interface MediaRegistryEntryRecord extends MediaEntry {
   play: () => void | Promise<void>;
   pause: () => void;
+  seek: (time: number) => void;
+  dismiss: () => void;
 }
 
 function createMediaRegistry(): MediaRegistryAPI {
@@ -24,6 +26,8 @@ function createMediaRegistry(): MediaRegistryAPI {
       tabId: record.tabId,
       title: record.title,
       isPlaying: record.isPlaying,
+      currentTime: record.currentTime,
+      duration: record.duration,
     }));
   }
 
@@ -40,8 +44,12 @@ function createMediaRegistry(): MediaRegistryAPI {
         tabId: input.tabId,
         title: input.title,
         isPlaying: input.isPlaying,
+        currentTime: input.currentTime,
+        duration: input.duration,
         play: input.play,
         pause: input.pause,
+        seek: input.seek,
+        dismiss: input.dismiss,
       };
       entries.set(input.entryId, record);
       emit();
@@ -56,6 +64,14 @@ function createMediaRegistry(): MediaRegistryAPI {
           }
           if (patch.isPlaying !== undefined && patch.isPlaying !== current.isPlaying) {
             current.isPlaying = patch.isPlaying;
+            changed = true;
+          }
+          if (patch.currentTime !== undefined && patch.currentTime !== current.currentTime) {
+            current.currentTime = patch.currentTime;
+            changed = true;
+          }
+          if (patch.duration !== undefined && patch.duration !== current.duration) {
+            current.duration = patch.duration;
             changed = true;
           }
           if (changed) emit();
@@ -85,6 +101,19 @@ function createMediaRegistry(): MediaRegistryAPI {
       const record = entries.get(entryId);
       if (!record) return;
       record.pause();
+    },
+    seek(entryId, time) {
+      const record = entries.get(entryId);
+      if (!record) return;
+      record.seek(time);
+    },
+    dismiss(entryId) {
+      const record = entries.get(entryId);
+      if (!record) return;
+      record.dismiss();
+      if (entries.delete(entryId)) {
+        emit();
+      }
     },
   };
 }

@@ -8,6 +8,8 @@ export interface MediaEntry {
   tabId: string;
   title: string;
   isPlaying: boolean;
+  currentTime?: number;
+  duration?: number;
 }
 
 export interface MediaRegistryRegisterInput {
@@ -16,12 +18,16 @@ export interface MediaRegistryRegisterInput {
   tabId: string;
   title: string;
   isPlaying: boolean;
+  currentTime?: number;
+  duration?: number;
   play: () => void | Promise<void>;
   pause: () => void;
+  seek: (time: number) => void;
+  dismiss: () => void;
 }
 
 export interface MediaRegistryRegistration {
-  update(patch: { title?: string; isPlaying?: boolean }): void;
+  update(patch: { title?: string; isPlaying?: boolean; currentTime?: number; duration?: number }): void;
   unregister(): void;
 }
 
@@ -31,6 +37,8 @@ export interface MediaRegistryAPI {
   getEntries(): MediaEntry[];
   play(entryId: string): void | Promise<void>;
   pause(entryId: string): void;
+  seek(entryId: string, time: number): void;
+  dismiss(entryId: string): void;
 }
 
 export const MediaRegistryContext = createContext<MediaRegistryAPI | undefined>(undefined);

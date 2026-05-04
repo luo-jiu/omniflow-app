@@ -644,11 +644,22 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
     tabId,
     title: playerState.trackName || fileName || 'ASMR',
     isPlaying: isAsmrOwnedSource && playerState.isPlaying,
+    currentTime: isAsmrOwnedSource ? playerState.currentTime : 0,
+    duration: isAsmrOwnedSource ? playerState.duration : 0,
     play: () => {
       void globalAudioPlayer.play().catch(() => {});
     },
     pause: () => {
       globalAudioPlayer.pause();
+    },
+    seek: (time) => {
+      globalAudioPlayer.seekTo(time);
+    },
+    dismiss: () => {
+      const state = globalAudioPlayer.getState();
+      if (state.ownerType === 'asmr' && Boolean(asmrOwnerKey) && state.ownerKey === asmrOwnerKey) {
+        globalAudioPlayer.clear();
+      }
     },
   });
 

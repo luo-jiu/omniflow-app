@@ -4,7 +4,7 @@
 
 ## 现状速览
 
-- `MediaRegistry`：库维度，`audio`/`video` kind，每条 `{ entryId, kind, tabId, title, isPlaying }`。
+- `MediaRegistry`：库维度，`audio`/`video` kind，每条 `{ entryId, kind, tabId, title, isPlaying, currentTime, duration }`，控制回调包括 `play/pause/seek/dismiss`。
 - 三类注册者：audio-viewer / asmr-viewer / video-viewer，均在 hasStarted 后注册，卸载清理。
 - audio / asmr cleanup 会在自己是 globalAudioPlayer owner 时调 `clear()`，避免孤立后台音频。
 - 已删除：`GlobalAudioMiniBar` 组件、video 跨 tab 自动 pause、audio↔video 互斥。
@@ -13,14 +13,14 @@
 
 ## Tier 1 — 立即可做（一上午能完）
 
-### 1. Popover 行加进度条 + 时长
+### 1. Popover 行加进度条 + 时长（已完成）
 
-**目标**：每行下方一条细进度条 + 右侧 `01:23 / 04:56`，向 chrome 看齐。
+**状态**：已完成。每行下方一条可点击 seek 的细进度条 + 右侧 `01:23 / 04:56`，`useRegisterMediaEntry` 按整秒归一化进度后广播。
 
 **改动点**：
 - `src/contexts/media-registry.context.ts`：`MediaEntry` 加 `currentTime?: number` / `duration?: number`。
-- `src/hooks/useMediaRegistry.ts`：`RegisterMediaEntryOptions` 加同字段；`useRegisterMediaEntry` 的 update effect 把这两个字段也广播。
-- `src/components/business/media-hub-popover/index.tsx`：每行渲染进度条（`<div>` + 内层宽度 % 即可，不用 `<input range>`）+ 时长文本。
+- `src/hooks/useMediaRegistry.ts`：`RegisterMediaEntryOptions` 加同字段和 `seek(time)` 控制回调；`useRegisterMediaEntry` 的 update effect 把这两个字段也广播。
+- `src/components/business/media-hub-popover/index.tsx`：每行渲染可点击进度条 + 时长文本；行本身不跳转，使用专门的"回到标签页"按钮。
 - 三个 viewer：把 currentTime/duration 透传到注册项。
   - audio/asmr：`playerState.currentTime` / `playerState.duration`
   - video：现有 `currentTime` / `duration` state
@@ -32,28 +32,23 @@
 
 ---
 
-### 2. 播放/暂停按钮上 cyan active 色
+### 2. 播放/暂停按钮上 cyan active 色（已完成）
 
-**目标**：行内 ▶/⏸ 按钮在 isPlaying 时复用 `#22d3ee`，方便扫一眼分辨"哪条在播"。
-
-**改动点**：`src/components/business/media-hub-popover/index.tsx` 一行 css。
-
-**纯外观**，零风险。
+**状态**：已完成。行内 ▶/⏸ 按钮在 `isPlaying` 时使用 `#22d3ee`，方便扫一眼分辨"哪条在播"。
 
 ---
 
-### 3. 每条加 ✕（移除）按钮
+### 3. 每条加 ✕（移除）按钮（已完成）
 
-**目标**：不用先跳回 tab 才能停，直接在 popover 里清掉一条。
+**状态**：已完成。不用先跳回 tab 才能停，直接在 popover 里清掉一条。
 
-**语义决策（需要再过一遍）**：
+**语义**：
 - audio / asmr：✕ → `globalAudioPlayer.clear()`，entry 自然消失。
-- video：✕ → 只 pause（保留 entry 显示为"已暂停"）？还是 pause + force unregister？还是关闭 tab？  
-  **倾向**：`pause + 强制 unregister`（让用户在 tab 内随时再播）。需要在 `useRegisterMediaEntry` 暴露一个外部 `forceUnregister` 通道，或者在 video-viewer 加一个"被外部强制结束"的 state。
+- video：✕ → pause + 退出本次媒体注册，不关闭 tab；用户在 tab 内再次播放时重新注册。
 
 **改动点**：
 - `MediaRegistryAPI` 加 `dismiss(entryId)` 方法。
-- 各 viewer 监听被 dismiss 的事件并 pause + 重置 hasStartedPlaying。
+- 各 viewer 提供 dismiss 回调：audio / asmr 清空单例播放器，video pause 并重置 `hasStartedPlaying`。
 - popover 行加 ✕ 按钮。
 
 **风险**：dismiss 后用户在 tab 里点播放，video 应该重新注册。靠 `hasStartedPlaying` 重置 + 下次 onPlay 自动加回，链路是通的。

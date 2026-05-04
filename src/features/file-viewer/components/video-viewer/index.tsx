@@ -204,6 +204,8 @@ const VideoViewer: React.FC<VideoViewerProps> = ({ nodeId, url, fileName, active
     tabId,
     title: fileName || '视频',
     isPlaying,
+    currentTime,
+    duration,
     play: () => {
       const video = videoRef.current;
       if (video) void video.play();
@@ -211,6 +213,22 @@ const VideoViewer: React.FC<VideoViewerProps> = ({ nodeId, url, fileName, active
     pause: () => {
       const video = videoRef.current;
       if (video && !video.paused) video.pause();
+    },
+    seek: (time) => {
+      const video = videoRef.current;
+      if (!video || !Number.isFinite(time)) return;
+      const next = Math.min(Math.max(time, 0), duration || video.duration || 0);
+      video.currentTime = next;
+      setCurrentTime(next);
+      persistVideoProgress(true);
+    },
+    dismiss: () => {
+      const video = videoRef.current;
+      if (video && !video.paused) {
+        video.pause();
+      }
+      persistVideoProgress(true);
+      setHasStartedPlaying(false);
     },
   });
 

@@ -140,6 +140,8 @@ const AudioViewer: React.FC<AudioViewerProps> = ({ nodeId, url, fileName, active
     tabId,
     title: deriveAudioTrackName(url, fileName),
     isPlaying: isOwnedSource && playerState.isPlaying,
+    currentTime: effectiveCurrentTime,
+    duration: effectiveDuration,
     play: () => {
       void globalAudioPlayer.play().catch((error) => {
         runtimeLogger.error('failed to start audio playback from media hub:', error);
@@ -147,6 +149,15 @@ const AudioViewer: React.FC<AudioViewerProps> = ({ nodeId, url, fileName, active
     },
     pause: () => {
       globalAudioPlayer.pause();
+    },
+    seek: (time) => {
+      globalAudioPlayer.seekTo(time);
+    },
+    dismiss: () => {
+      const state = globalAudioPlayer.getState();
+      if (state.ownerType === 'default' && state.ownerKey === ownerKey) {
+        globalAudioPlayer.clear();
+      }
     },
   });
 

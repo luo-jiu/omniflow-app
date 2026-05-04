@@ -2486,6 +2486,12 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
                         void mediaRegistry.play(entry.entryId);
                       }
                     }}
+                    onSeek={(entry, time) => {
+                      mediaRegistry.seek(entry.entryId, time);
+                    }}
+                    onDismiss={(entry) => {
+                      mediaRegistry.dismiss(entry.entryId);
+                    }}
                   />
                 }
               >
