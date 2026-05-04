@@ -147,9 +147,9 @@ const AudioViewer: React.FC<AudioViewerProps> = ({ nodeId, url, fileName, active
             </div>
           </div>
         </div>
-        <div style={{ marginTop: 20, textAlign: 'center' }}>
-          <div style={{ fontSize: 24, fontWeight: 600 }}>{fileName || '正在播放'}</div>
-          <div style={{ color: 'var(--semi-color-text-2)', marginTop: 8 }}>—— 歌词区域预留 ——</div>
+        <div style={{ marginTop: 14, textAlign: 'center' }}>
+          <div style={{ fontSize: 16, lineHeight: 1.3, fontWeight: 700 }}>{fileName || '正在播放'}</div>
+          <div style={{ color: 'var(--semi-color-text-2)', fontSize: 11, marginTop: 5 }}>—— 歌词区域预留 ——</div>
         </div>
       </div>
 
@@ -159,7 +159,7 @@ const AudioViewer: React.FC<AudioViewerProps> = ({ nodeId, url, fileName, active
             className="progress-wrapper" 
             ref={progressBarRef}
             onMouseDown={handleMouseDown}
-            style={{ cursor: 'pointer', height: 20, display: 'flex', alignItems: 'center' }}
+            style={{ cursor: 'pointer', height: 14, display: 'flex', alignItems: 'center' }}
         >
           {/* Rail */}
           <div style={{ width: '100%', height: 4, background: 'var(--semi-color-fill-0)', position: 'relative' }}>
@@ -174,8 +174,8 @@ const AudioViewer: React.FC<AudioViewerProps> = ({ nodeId, url, fileName, active
              }} />
              {/* Handle (optional, can be added if needed, or just keep it minimal like Spotify) */}
              <div style={{
-                 width: 12,
-                 height: 12,
+                 width: 9,
+                 height: 9,
                  borderRadius: '50%',
                  background: '#fff',
                  position: 'absolute',
@@ -231,7 +231,7 @@ const AudioViewer: React.FC<AudioViewerProps> = ({ nodeId, url, fileName, active
                 step="0.01"
                 value={playerState.isMuted ? 0 : playerState.volume}
                 onChange={handleVolumeChange}
-                style={{ width: 80, accentColor: 'var(--semi-color-primary)' }}
+                style={{ width: 58, height: 4, accentColor: 'var(--semi-color-primary)' }}
               />
             </div>
           </div>

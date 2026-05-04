@@ -57,15 +57,15 @@ import {
 
 const MediaResourceList = styled.div`
   border: 1px solid var(--app-border);
-  border-radius: 14px;
+  border-radius: 8px;
   overflow: hidden;
 
   .media-row {
     display: grid;
-    grid-template-columns: minmax(220px, 1fr) 112px 120px 144px;
-    gap: 12px;
+    grid-template-columns: minmax(154px, 1fr) 78px 84px 100px;
+    gap: 8px;
     align-items: center;
-    padding: 12px 14px;
+    padding: 8px 9px;
     border-bottom: 1px solid color-mix(in srgb, var(--app-border) 72%, transparent);
   }
 
@@ -75,7 +75,7 @@ const MediaResourceList = styled.div`
 
   .media-title {
     min-width: 0;
-    font-size: 16px;
+    font-size: 11px;
     font-weight: 700;
     color: var(--app-text);
     overflow: hidden;
@@ -84,7 +84,7 @@ const MediaResourceList = styled.div`
   }
 
   .media-meta {
-    font-size: 14px;
+    font-size: 10px;
     color: var(--app-text-muted);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -99,13 +99,13 @@ const ToolModeSwitch = styled.div`
   flex-wrap: wrap;
 
   .mode-btn {
-    min-height: 42px;
-    padding: 0 16px;
-    border-radius: 10px;
+    min-height: 30px;
+    padding: 0 11px;
+    border-radius: 6px;
     border: 1px solid var(--app-border);
     background: color-mix(in srgb, var(--app-bg) 88%, var(--app-bg-elevated));
     color: var(--app-text-muted);
-    font-size: 16px;
+    font-size: 11px;
     font-weight: 600;
     cursor: pointer;
     transition: border-color 160ms ease, background-color 160ms ease, color 160ms ease;
@@ -126,11 +126,11 @@ const ToolModeSwitch = styled.div`
 const MediaActionComposer = styled.div`
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
 
   .operations-lane {
     display: grid;
-    gap: 12px;
+    gap: 8px;
   }
 
   .operations-lane {
@@ -140,11 +140,11 @@ const MediaActionComposer = styled.div`
   .action-cluster {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 8px;
     flex-wrap: wrap;
-    min-height: 64px;
-    padding: 12px 14px;
-    border-radius: 14px;
+    min-height: 44px;
+    padding: 8px 9px;
+    border-radius: 8px;
     border: 1px solid color-mix(in srgb, var(--app-border) 86%, transparent);
     background: color-mix(in srgb, var(--app-bg) 84%, var(--app-bg-elevated));
   }
@@ -161,7 +161,7 @@ const MediaActionComposer = styled.div`
   .transcode-controls {
     display: inline-flex;
     align-items: center;
-    gap: 10px;
+    gap: 7px;
     flex-wrap: wrap;
     min-width: 0;
   }
@@ -169,50 +169,52 @@ const MediaActionComposer = styled.div`
   .cluster-label {
     display: inline-flex;
     align-items: center;
-    font-size: 15px;
+    font-size: 11px;
     font-weight: 700;
     color: var(--app-text);
     white-space: nowrap;
   }
 
   .semi-button {
-    min-height: 42px;
-    font-size: 15px;
+    min-height: 30px;
+    padding: 0 10px;
+    border-radius: 6px;
+    font-size: 11px;
   }
 
   .semi-tag {
-    font-size: 14px;
+    font-size: 10px;
   }
 
   .transcode-type-block {
     display: inline-flex;
     align-items: center;
-    gap: 8px;
+    gap: 5px;
   }
 
   .transcode-format-label {
-    font-size: 14px;
+    font-size: 10px;
     color: var(--app-text-muted);
     white-space: nowrap;
   }
 
   .transcode-format-input {
-    width: 140px;
+    width: 98px;
   }
 
   .transcode-presets {
     display: inline-flex;
     align-items: center;
-    gap: 8px;
+    gap: 5px;
     flex-wrap: wrap;
   }
 
   .transcode-pill {
-    height: 32px;
+    height: 24px;
     border: 1px solid color-mix(in srgb, var(--app-border) 82%, transparent);
     border-radius: 999px;
-    padding: 0 12px;
-    font-size: 14px;
+    padding: 0 8px;
+    font-size: 10px;
     font-weight: 600;
     line-height: 1;
     background: color-mix(in srgb, var(--app-bg) 86%, var(--app-bg-elevated));

@@ -1222,7 +1222,7 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
         title="编辑 ASMR 集合"
         visible={editorVisible}
         centered
-        width={980}
+        width={660}
         onCancel={() => {
           if (!editorSaving) {
             setEditorVisible(false);
@@ -1236,23 +1236,24 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
         confirmLoading={editorSaving}
       >
         {editorLoading ? (
-          <div style={{ height: 320, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <Spin size="large" tip="加载编辑信息..." />
+          <div style={{ height: 220, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Spin size="middle" tip="加载编辑信息..." />
           </div>
         ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: '380px 1fr', gap: 16, minHeight: 420 }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '250px 1fr', gap: 12, minHeight: 300 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               <div>
-                <div style={{ marginBottom: 6, color: 'var(--semi-color-text-1)', fontSize: 13 }}>名称</div>
+                <div style={{ marginBottom: 4, color: 'var(--semi-color-text-1)', fontSize: 11 }}>名称</div>
                 <Input
                   value={editorName}
                   maxLength={255}
                   onChange={(value) => setEditorName(value)}
                   placeholder="请输入 ASMR 集合名称"
+                  size="small"
                 />
               </div>
               <div>
-                <div style={{ marginBottom: 6, color: 'var(--semi-color-text-1)', fontSize: 13 }}>TAG</div>
+                <div style={{ marginBottom: 4, color: 'var(--semi-color-text-1)', fontSize: 11 }}>TAG</div>
                 <Select
                   multiple
                   filter
@@ -1263,6 +1264,7 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
                   }}
                   placeholder="请选择一个或多个 ASMR 标签"
                   style={{ width: '100%' }}
+                  size="small"
                   maxTagCount={3}
                 >
                   {asmrTagOptions.map(option => (
@@ -1273,25 +1275,28 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
                 </Select>
               </div>
               <div>
-                <div style={{ marginBottom: 6, color: 'var(--semi-color-text-1)', fontSize: 13 }}>SN</div>
+                <div style={{ marginBottom: 4, color: 'var(--semi-color-text-1)', fontSize: 11 }}>SN</div>
                 <Input
                   value={editorSn}
                   maxLength={128}
                   onChange={(value) => setEditorSn(value)}
                   placeholder="例如：ASMR-2026-0001"
+                  size="small"
                 />
               </div>
               <div>
-                <div style={{ marginBottom: 6, color: 'var(--semi-color-text-1)', fontSize: 13 }}>封面节点</div>
+                <div style={{ marginBottom: 4, color: 'var(--semi-color-text-1)', fontSize: 11 }}>封面节点</div>
                 <Input
                   value={editorCoverNodeId ? String(editorCoverNodeId) : ''}
                   readOnly
                   placeholder="未选择（默认自动取首张图片）"
+                  size="small"
                 />
               </div>
-              <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ display: 'flex', gap: 6 }}>
                 <Button
                   theme="light"
+                  size="small"
                   onClick={() => setEditorCoverNodeId(null)}
                 >
                   清除自定义封面
@@ -1302,7 +1307,7 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
             <div
               style={{
                 border: '1px solid var(--semi-color-border)',
-                borderRadius: 10,
+                borderRadius: 8,
                 overflow: 'hidden',
                 display: 'flex',
                 flexDirection: 'column',
@@ -1311,14 +1316,15 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
             >
               <div
                 style={{
-                  height: 44,
+                  height: 32,
                   borderBottom: '1px solid var(--semi-color-border)',
                   display: 'flex',
                   alignItems: 'center',
-                  padding: '0 10px',
-                  gap: 6,
+                  padding: '0 8px',
+                  gap: 4,
                   whiteSpace: 'nowrap',
                   overflow: 'hidden',
+                  fontSize: 11,
                 }}
               >
                 {coverPickerPathStack.map((item, index) => {
@@ -1348,17 +1354,17 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
                 })}
               </div>
 
-              <div style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: 8 }}>
+              <div style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: 6 }}>
                 {coverPickerLoading ? (
-                  <div style={{ height: 280, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <Spin size="large" />
+                  <div style={{ height: 190, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <Spin size="middle" />
                   </div>
                 ) : coverPickerItems.length === 0 ? (
-                  <div style={{ height: 280, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--semi-color-text-2)' }}>
+                  <div style={{ height: 190, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--semi-color-text-2)', fontSize: 11 }}>
                     当前目录为空
                   </div>
                 ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                     {coverPickerItems.map((item) => {
                       const isDir = isDirectoryNode(item);
                       const isImage = !isDir && isImageFile(item);
@@ -1367,16 +1373,16 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
                         <div
                           key={`cover-picker-${item.id}`}
                           style={{
-                            height: 44,
+                            height: 32,
                             display: 'grid',
                             gridTemplateColumns: 'minmax(0, 1fr) auto',
                             alignItems: 'center',
-                            gap: 8,
+                            gap: 6,
                             border: selected
                               ? '1px solid var(--semi-color-primary)'
                               : '1px solid transparent',
-                            borderRadius: 8,
-                            padding: '0 10px',
+                            borderRadius: 6,
+                            padding: '0 8px',
                             background: selected
                               ? 'var(--semi-color-primary-light-default)'
                               : 'transparent',
@@ -1396,15 +1402,15 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
                             }
                           }}
                         >
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-                            <span style={{ width: 24, display: 'inline-flex', justifyContent: 'center' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0, fontSize: 11 }}>
+                            <span style={{ width: 20, display: 'inline-flex', justifyContent: 'center' }}>
                               {isDir ? <IconFolder /> : getFileNodeIcon(item.ext)}
                             </span>
                             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                               {resolveDisplayName(item)}
                             </span>
                           </div>
-                          <span style={{ color: 'var(--semi-color-text-2)', fontSize: 12 }}>
+                          <span style={{ color: 'var(--semi-color-text-2)', fontSize: 10 }}>
                             {isDir ? '目录（双击进入）' : isImage ? '图片（可选封面）' : '不可作为封面'}
                           </span>
                         </div>

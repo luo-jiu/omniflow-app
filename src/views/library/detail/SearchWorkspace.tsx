@@ -27,7 +27,7 @@ const SearchWorkspaceRoot = styled.div`
   background: var(--app-bg);
 
   .search-workspace-panel {
-    width: min(576px, 100%);
+    width: min(460px, 100%);
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -35,44 +35,44 @@ const SearchWorkspaceRoot = styled.div`
 
   .search-workspace-header {
     width: 100%;
-    min-height: 102px;
+    min-height: 72px;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 9px;
-    margin-bottom: 13px;
+    gap: 6px;
+    margin-bottom: 10px;
     text-align: center;
   }
 
   .search-workspace-title {
     margin: 0;
     color: var(--app-text);
-    font-size: 40px;
+    font-size: 28px;
     font-weight: 700;
     line-height: 1.1;
   }
 
   .search-workspace-description {
     color: var(--app-text-muted);
-    font-size: 13px;
-    line-height: 1.6;
+    font-size: 11px;
+    line-height: 1.55;
   }
 
   .search-workspace-form {
     width: 100%;
     display: grid;
     grid-template-columns: auto minmax(0, 1fr) auto;
-    gap: 7px;
+    gap: 6px;
     align-items: center;
   }
 
   .search-workspace-mode-btn {
-    height: 31px;
-    min-width: 91px;
+    height: 30px;
+    min-width: 82px;
     border: none;
     border-radius: 999px;
-    padding: 0 11px;
+    padding: 0 10px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -160,12 +160,12 @@ const SearchWorkspaceRoot = styled.div`
 
   .search-workspace-input {
     width: 100%;
-    height: 38px;
+    height: 34px;
     border-radius: 8px;
     border: 1px solid var(--app-border);
     background: var(--app-bg-elevated);
     color: var(--app-text);
-    padding: 0 11px;
+    padding: 0 10px;
     outline: none;
     font-size: 12px;
   }
@@ -175,12 +175,12 @@ const SearchWorkspaceRoot = styled.div`
   }
 
   .search-workspace-submit {
-    height: 31px;
+    height: 30px;
     border-radius: 6px;
     border: none;
     background: var(--semi-color-primary);
     color: #fff;
-    padding: 0 13px;
+    padding: 0 12px;
     cursor: pointer;
     font-size: 11px;
     font-weight: 600;
@@ -188,23 +188,23 @@ const SearchWorkspaceRoot = styled.div`
 
   .search-workspace-below {
     width: 100%;
-    min-height: 160px;
-    margin-top: 27px;
+    min-height: 112px;
+    margin-top: 20px;
   }
 
   .search-workspace-file-tips {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
     gap: 7px;
-    width: min(402px, 100%);
+    width: min(360px, 100%);
     margin: 0 auto;
   }
 
   .search-workspace-file-tip {
     display: flex;
     flex-direction: column;
-    gap: 5px;
-    padding: 11px;
+    gap: 4px;
+    padding: 9px;
     border-radius: 6px;
     background: var(--app-bg-elevated);
     border: 1px solid var(--app-border);

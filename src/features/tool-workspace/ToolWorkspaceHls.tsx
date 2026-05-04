@@ -371,7 +371,7 @@ const ToolWorkspaceHls: React.FC<ToolWorkspaceHlsProps> = ({
       </ActionRow>
       {canSelectVariant ? (
         <>
-          <div className="panel-desc" style={{ marginBottom: 10 }}>
+          <div className="panel-desc" style={{ marginBottom: 7 }}>
             这是一个网络 master playlist。默认保持“自动”让 ffmpeg 自己选；如果你想明确锁到某个清晰度，可以在这里指定变体。
           </div>
           <ActionRow>
@@ -379,7 +379,7 @@ const ToolWorkspaceHls: React.FC<ToolWorkspaceHlsProps> = ({
               value={selectedHlsVariantUrl || undefined}
               placeholder="自动（沿用原始 manifest）"
               onChange={(value) => onSetSelectedHlsVariantUrl(String(value || ''))}
-              style={{ minWidth: 320 }}
+              style={{ minWidth: 224 }}
             >
               <Select.Option value="">自动（沿用原始 manifest）</Select.Option>
               {hlsVariantOptions.map((option) => (
@@ -398,7 +398,7 @@ const ToolWorkspaceHls: React.FC<ToolWorkspaceHlsProps> = ({
       ) : null}
       {(hlsAudioRenditions.length || hlsSubtitleRenditions.length || hlsSelectedVariant) ? (
         <>
-          <div className="panel-desc" style={{ marginBottom: 10 }}>
+          <div className="panel-desc" style={{ marginBottom: 7 }}>
             这块是 `master playlist` 里的轨道视图。现在可以在这里锁定独立音轨，并把字幕轨单独下载；音轨选择会尽量跟着当前变体的 group 关系走。
           </div>
           {hlsSelectedVariant ? (
@@ -417,14 +417,14 @@ const ToolWorkspaceHls: React.FC<ToolWorkspaceHlsProps> = ({
           ) : null}
           {hlsAudioRenditions.length ? (
             <>
-              <div className="panel-desc" style={{ marginBottom: 8 }}>音轨候选</div>
+              <div className="panel-desc" style={{ marginBottom: 5 }}>音轨候选</div>
               {hlsAudioRenditionOptions.length ? (
                 <ActionRow>
                   <Select
                     value={selectedHlsAudioRenditionUrl || undefined}
                     placeholder="自动（沿用默认音轨）"
                     onChange={(value) => onSetSelectedHlsAudioRenditionUrl(String(value || ''))}
-                    style={{ minWidth: 320 }}
+                    style={{ minWidth: 224 }}
                   >
                     <Select.Option value="">自动（沿用默认音轨）</Select.Option>
                     {hlsAudioRenditionOptions.map((option) => (
@@ -458,14 +458,14 @@ const ToolWorkspaceHls: React.FC<ToolWorkspaceHlsProps> = ({
           ) : null}
           {hlsSubtitleRenditions.length ? (
             <>
-              <div className="panel-desc" style={{ marginBottom: 8 }}>字幕候选</div>
+              <div className="panel-desc" style={{ marginBottom: 5 }}>字幕候选</div>
               {hlsSubtitleRenditionOptions.length ? (
                 <ActionRow>
                   <Select
                     value={selectedHlsSubtitleRenditionUrl || undefined}
                     placeholder="不下载字幕轨"
                     onChange={(value) => onSetSelectedHlsSubtitleRenditionUrl(String(value || ''))}
-                    style={{ minWidth: 320 }}
+                    style={{ minWidth: 224 }}
                   >
                     <Select.Option value="">不下载字幕轨</Select.Option>
                     {hlsSubtitleRenditionOptions.map((option) => (
@@ -501,41 +501,41 @@ const ToolWorkspaceHls: React.FC<ToolWorkspaceHlsProps> = ({
       ) : null}
       {canTuneLocalDownloader ? (
         <>
-          <div className="panel-desc" style={{ marginBottom: 10 }}>
+          <div className="panel-desc" style={{ marginBottom: 7 }}>
             这是 Cat Catch 那套最常用的下载控制。当前先补线程数和分片范围；一旦改了这里，就会切到本地 downloader 主链，不再让 ffmpeg 直接拉整条 manifest。
           </div>
           <ActionRow>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <div style={{ fontSize: 16, color: 'var(--app-text-muted)' }}>线程数</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <div style={{ fontSize: 11, color: 'var(--app-text-muted)' }}>线程数</div>
               <InputNumber
                 min={1}
                 max={32}
                 step={1}
                 value={hlsThreadCount}
                 onNumberChange={(value) => onSetHlsThreadCount(Number(value || 1))}
-                style={{ width: 140 }}
+                style={{ width: 98 }}
               />
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <div style={{ fontSize: 16, color: 'var(--app-text-muted)' }}>起始分片</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <div style={{ fontSize: 11, color: 'var(--app-text-muted)' }}>起始分片</div>
               <InputNumber
                 min={1}
                 max={Math.max(1, hlsRequest.plan.fragmentCount)}
                 step={1}
                 value={hlsRangeStart}
                 onNumberChange={(value) => onSetHlsRangeStart(Number(value || 1))}
-                style={{ width: 140 }}
+                style={{ width: 98 }}
               />
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <div style={{ fontSize: 16, color: 'var(--app-text-muted)' }}>结束分片</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <div style={{ fontSize: 11, color: 'var(--app-text-muted)' }}>结束分片</div>
               <InputNumber
                 min={1}
                 max={Math.max(1, hlsRequest.plan.fragmentCount)}
                 step={1}
                 value={hlsRangeEnd}
                 onNumberChange={(value) => onSetHlsRangeEnd(Number(value || 1))}
-                style={{ width: 140 }}
+                style={{ width: 98 }}
               />
             </div>
             <Tag color={hlsUsingCustomThreadCount ? 'blue' : 'grey'}>
@@ -547,7 +547,7 @@ const ToolWorkspaceHls: React.FC<ToolWorkspaceHlsProps> = ({
           </ActionRow>
         </>
       ) : null}
-      <div className="panel-desc" style={{ marginBottom: 10 }}>
+      <div className="panel-desc" style={{ marginBottom: 7 }}>
         如果站点的 AES-128 key 没被自动识别，可以在这里手动粘贴 16 字节 key。
         支持 32 位 hex，或 16 字节 base64。填写后会自动切到本地 downloader 主链。
         如果当前是 master playlist，先选一个具体变体，再让手动 key 进入本地主链。
@@ -708,12 +708,12 @@ const ToolWorkspaceHls: React.FC<ToolWorkspaceHlsProps> = ({
         ) : null}
         <Tag color="white">执行链：{formatHlsTaskModeLabel(hlsTaskStatus.mode)}</Tag>
       </ActionRow>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-          <div style={{ fontSize: 17, color: 'var(--app-text)' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginBottom: 9 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+          <div style={{ fontSize: 12, color: 'var(--app-text)' }}>
             {hlsTaskProgressSummary}
           </div>
-          <div style={{ fontSize: 16, color: 'var(--app-text-muted)' }}>
+          <div style={{ fontSize: 11, color: 'var(--app-text-muted)' }}>
             阶段进度 {hlsTaskProgressPercent}%
           </div>
         </div>
@@ -721,7 +721,7 @@ const ToolWorkspaceHls: React.FC<ToolWorkspaceHlsProps> = ({
           aria-hidden
           style={{
             width: '100%',
-            height: 10,
+            height: 7,
             borderRadius: 999,
             background: 'color-mix(in srgb, var(--app-border) 72%, transparent)',
             overflow: 'hidden',
@@ -741,13 +741,13 @@ const ToolWorkspaceHls: React.FC<ToolWorkspaceHlsProps> = ({
             }}
           />
         </div>
-        <div style={{ fontSize: 15, lineHeight: 1.7, color: 'var(--app-text-muted)' }}>
+        <div style={{ fontSize: 11, lineHeight: 1.7, color: 'var(--app-text-muted)' }}>
           这里显示的是阶段进度；本地 downloader 会补充当前下载速度和预计剩余时间，ffmpeg 阶段会额外显示处理秒数和速度，但仍以阶段状态为主。
         </div>
       </div>
       <div style={{
         border: '1px solid var(--app-border)',
-        borderRadius: 14,
+        borderRadius: 8,
         overflow: 'hidden',
       }}>
         {(hlsTaskStatus.logs.length
@@ -763,19 +763,19 @@ const ToolWorkspaceHls: React.FC<ToolWorkspaceHlsProps> = ({
             key={entry.id}
             style={{
               display: 'grid',
-              gridTemplateColumns: 'minmax(220px, 1fr) 112px 120px 144px',
-              gap: 12,
+              gridTemplateColumns: 'minmax(154px, 1fr) 78px 84px 100px',
+              gap: 8,
               alignItems: 'center',
-              padding: '12px 14px',
+              padding: '8px 9px',
               borderBottom: index === array.length - 1 ? 'none' : '1px solid color-mix(in srgb, var(--app-border) 72%, transparent)',
             }}
           >
-            <div style={{ minWidth: 0, fontSize: 16, fontWeight: 700, color: 'var(--app-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={entry.text}>
+            <div style={{ minWidth: 0, fontSize: 11, fontWeight: 700, color: 'var(--app-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={entry.text}>
               {entry.text}
             </div>
-            <div style={{ fontSize: 14, color: 'var(--app-text-muted)' }}>{formatHlsTaskModeLabel(entry.mode)}</div>
-            <div style={{ fontSize: 14, color: 'var(--app-text-muted)' }}>{formatHlsTaskStageLabel(entry.stage)}</div>
-            <div style={{ fontSize: 14, color: 'var(--app-text-muted)' }}>{formatHlsTaskLogTime(entry.createdAt) || (index === array.length - 1 ? 'latest' : '')}</div>
+            <div style={{ fontSize: 10, color: 'var(--app-text-muted)' }}>{formatHlsTaskModeLabel(entry.mode)}</div>
+            <div style={{ fontSize: 10, color: 'var(--app-text-muted)' }}>{formatHlsTaskStageLabel(entry.stage)}</div>
+            <div style={{ fontSize: 10, color: 'var(--app-text-muted)' }}>{formatHlsTaskLogTime(entry.createdAt) || (index === array.length - 1 ? 'latest' : '')}</div>
           </div>
         ))}
       </div>

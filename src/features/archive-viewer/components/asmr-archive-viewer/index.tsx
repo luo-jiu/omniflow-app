@@ -306,7 +306,7 @@ const AsmrArchiveViewer: React.FC<AsmrArchiveViewerProps> = ({
   active = true,
 }) => {
   const { setFileUrl } = useFileViewer();
-  const { viewportRef, wrapperStyle } = useArchiveCardGrid({ baseCardWidth: 410 });
+  const { viewportRef, wrapperStyle } = useArchiveCardGrid({ baseCardWidth: 275, gridGap: 15 });
   const libraryId = useMemo(() => parseArchiveLibraryId(fileUrl), [fileUrl]);
   const title = useMemo(() => normalizeArchiveTitle(fileName), [fileName]);
   const readerCacheKey = useMemo(

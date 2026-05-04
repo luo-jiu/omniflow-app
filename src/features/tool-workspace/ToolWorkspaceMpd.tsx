@@ -24,24 +24,24 @@ import type { MpdRepresentationOption, MpdTaskStatus } from './hooks/useMpdDownl
 const MpdMetaGrid = styled.div`
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  gap: 8px;
 
   .meta-item {
     border: 1px solid color-mix(in srgb, var(--app-border) 82%, transparent);
-    border-radius: 8px;
-    padding: 14px;
+    border-radius: 6px;
+    padding: 9px;
     background: color-mix(in srgb, var(--app-bg) 84%, var(--app-bg-elevated));
   }
 
   .meta-label {
-    font-size: 14px;
+    font-size: 10px;
     color: var(--app-text-muted);
-    margin-bottom: 6px;
+    margin-bottom: 4px;
   }
 
   .meta-value {
-    font-size: 16px;
-    line-height: 1.6;
+    font-size: 11px;
+    line-height: 1.5;
     color: var(--app-text);
     word-break: break-word;
   }
@@ -50,27 +50,27 @@ const MpdMetaGrid = styled.div`
 const TrackGrid = styled.div`
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
+  gap: 9px;
 
   .track-card {
     border: 1px solid color-mix(in srgb, var(--app-border) 82%, transparent);
-    border-radius: 8px;
-    padding: 14px;
+    border-radius: 6px;
+    padding: 9px;
     background: color-mix(in srgb, var(--app-bg) 84%, var(--app-bg-elevated));
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 7px;
   }
 
   .track-title {
-    font-size: 17px;
+    font-size: 12px;
     font-weight: 700;
     color: var(--app-text);
   }
 
   .track-desc {
-    font-size: 16px;
-    line-height: 1.6;
+    font-size: 11px;
+    line-height: 1.5;
     color: var(--app-text-muted);
   }
 

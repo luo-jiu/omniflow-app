@@ -2,7 +2,7 @@ import styled from 'styled-components';
 
 export const Wrapper = styled.div`
   display: grid;
-  grid-template-columns: 240px minmax(0, 1fr);
+  grid-template-columns: 176px minmax(0, 1fr);
   height: 100%;
   min-height: 0;
   background: var(--app-bg);
@@ -11,13 +11,13 @@ export const Wrapper = styled.div`
 export const ToolNav = styled.aside`
   border-right: 1px solid var(--app-border);
   background: color-mix(in srgb, var(--app-sidebar-vibrancy) 88%, var(--app-bg) 12%);
-  padding: 20px 16px;
+  padding: 13px 11px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 9px;
 
   .title {
-    font-size: 20px;
+    font-size: 14px;
     font-weight: 700;
     color: var(--app-text);
   }
@@ -29,8 +29,8 @@ export const ToolNav = styled.aside`
     gap: 0;
     width: 100%;
     text-align: left;
-    padding: 16px 12px;
-    border-radius: 12px;
+    padding: 10px 8px;
+    border-radius: 8px;
     border: 1px solid var(--app-border);
     background: color-mix(in srgb, var(--app-bg-elevated) 88%, transparent);
     cursor: pointer;
@@ -46,14 +46,14 @@ export const ToolNav = styled.aside`
   }
 
   .tool-card-title {
-    font-size: 17px;
+    font-size: 12px;
     font-weight: 700;
     color: var(--semi-color-primary);
   }
 
   .semi-button {
-    min-height: 42px;
-    font-size: 15px;
+    min-height: 30px;
+    font-size: 11px;
   }
 `;
 
@@ -73,36 +73,36 @@ export const WorkspaceSection = styled.div<{ $active: boolean }>`
 `;
 
 export const WorkspaceHeader = styled.div`
-  padding: 18px 20px 12px;
+  padding: 12px 14px 8px;
   border-bottom: 1px solid var(--app-border);
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
+  gap: 10px;
 
   .header-copy {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 4px;
   }
 
   .header-title {
-    font-size: clamp(30px, 2.2vw, 36px);
+    font-size: 22px;
     font-weight: 700;
     color: var(--app-text);
     line-height: 1.2;
   }
 
   .header-desc {
-    font-size: 16px;
-    line-height: 1.75;
+    font-size: 11px;
+    line-height: 1.55;
     color: var(--app-text-muted);
   }
 
   .header-tags {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 5px;
     flex-wrap: wrap;
   }
 `;
@@ -111,42 +111,42 @@ export const WorkspaceBody = styled.div`
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: 18px 20px 24px;
+  padding: 12px 14px 16px;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 12px;
 `;
 
 export const Panel = styled.section`
   border: 1px solid var(--app-border);
-  border-radius: 14px;
+  border-radius: 8px;
   background: color-mix(in srgb, var(--app-bg-elevated) 92%, transparent);
-  padding: 18px;
+  padding: 12px;
 
   .panel-title {
-    font-size: 20px;
+    font-size: 14px;
     font-weight: 700;
     color: var(--app-text);
-    margin-bottom: 12px;
+    margin-bottom: 8px;
   }
 
   .panel-desc {
-    font-size: 16px;
-    line-height: 1.75;
+    font-size: 11px;
+    line-height: 1.55;
     color: var(--app-text-muted);
-    margin-bottom: 14px;
+    margin-bottom: 9px;
   }
 `;
 
 export const ConfigGrid = styled.div`
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  gap: 8px;
 
   .field {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 5px;
     min-width: 0;
   }
 
@@ -155,7 +155,7 @@ export const ConfigGrid = styled.div`
   }
 
   .label {
-    font-size: 14px;
+    font-size: 11px;
     font-weight: 600;
     color: var(--app-text-muted);
   }
@@ -163,39 +163,42 @@ export const ConfigGrid = styled.div`
   .models-row {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 7px;
   }
 
   .semi-input-wrapper,
   .semi-input,
   .semi-input-number,
   .semi-input-number-input {
-    font-size: 15px;
+    font-size: 11px;
   }
 
   .semi-input-wrapper,
   .semi-input-number {
-    min-height: 42px;
+    min-height: 30px;
+    border-radius: 6px;
   }
 `;
 
 export const ActionRow = styled.div`
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 7px;
   flex-wrap: wrap;
 
   .semi-button {
-    min-height: 42px;
-    font-size: 15px;
+    min-height: 30px;
+    padding: 0 10px;
+    border-radius: 6px;
+    font-size: 11px;
   }
 
   .semi-tag {
-    font-size: 14px;
+    font-size: 10px;
   }
 
   .merge-status {
-    font-size: 14px;
+    font-size: 11px;
     line-height: 1.5;
     color: var(--app-text-muted);
   }

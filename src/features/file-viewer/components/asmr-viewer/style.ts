@@ -6,14 +6,14 @@ export const AsmrViewerWrapper = styled.div`
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
   color: var(--semi-color-text-0);
   background:
     radial-gradient(1000px 480px at 10% -20%, rgba(59, 130, 246, 0.14), transparent 60%),
     radial-gradient(900px 420px at 90% -25%, rgba(16, 185, 129, 0.11), transparent 56%),
     linear-gradient(180deg, var(--semi-color-bg-0) 0%, var(--semi-color-bg-1) 100%);
   border: 1px solid var(--semi-color-border);
-  border-radius: 12px;
+  border-radius: 8px;
   overflow: hidden;
 
   .top-section {
@@ -21,20 +21,20 @@ export const AsmrViewerWrapper = styled.div`
     min-height: 0;
     display: flex;
     align-items: flex-start;
-    gap: 16px;
-    padding: 8px 12px 12px 8px;
+    gap: 10px;
+    padding: 6px 8px 8px 6px;
     border-bottom: 1px solid var(--semi-color-border);
     background: color-mix(in srgb, var(--semi-color-bg-0) 92%, transparent);
   }
 
   .cover-panel {
     flex: 0 0 auto;
-    width: clamp(360px, 50%, 640px);
+    width: clamp(240px, 38%, 420px);
     aspect-ratio: 4 / 3;
     height: auto;
     max-height: none;
     align-self: flex-start;
-    border-radius: 10px;
+    border-radius: 8px;
     border: 1px solid var(--semi-color-border);
     background: var(--semi-color-fill-0);
     overflow: hidden;
@@ -59,8 +59,8 @@ export const AsmrViewerWrapper = styled.div`
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 8px;
-    font-size: 13px;
+    gap: 5px;
+    font-size: 11px;
     color: var(--semi-color-text-2);
     background:
       linear-gradient(
@@ -79,30 +79,40 @@ export const AsmrViewerWrapper = styled.div`
     position: relative;
     display: flex;
     flex-direction: column;
-    gap: 12px;
-    padding: 12px 4px 4px 0;
+    gap: 8px;
+    padding: 8px 3px 3px 0;
   }
 
   .meta-tools {
     position: absolute;
-    top: 6px;
+    top: 3px;
     right: 0;
     z-index: 2;
+  }
+
+  .meta-tools .semi-button {
+    min-height: 28px;
+    padding: 0 8px;
+    border-radius: 6px;
+  }
+
+  .meta-tools .semi-button-icon {
+    font-size: 14px;
   }
 
   .title-row {
     min-width: 0;
     display: flex;
     align-items: flex-start;
-    gap: 12px;
-    padding-right: 64px;
+    gap: 8px;
+    padding-right: 44px;
   }
 
   .title {
     min-width: 0;
     flex: 1;
     margin: 0;
-    font-size: 20px;
+    font-size: 14px;
     line-height: 1.32;
     font-weight: 700;
     white-space: normal;
@@ -113,10 +123,10 @@ export const AsmrViewerWrapper = styled.div`
   .subtitle {
     margin: 0;
     color: var(--semi-color-text-2);
-    font-size: 14px;
+    font-size: 11px;
     line-height: 1.45;
     font-weight: 500;
-    min-height: 20px;
+    min-height: 15px;
   }
 
   .meta-divider {
@@ -129,8 +139,8 @@ export const AsmrViewerWrapper = styled.div`
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 10px;
-    min-height: 42px;
+    gap: 6px;
+    min-height: 28px;
   }
 
   .tag-pill {
@@ -138,10 +148,10 @@ export const AsmrViewerWrapper = styled.div`
     align-items: center;
     justify-content: center;
     height: auto;
-    padding: 2px 10px;
+    padding: 1px 7px;
     border-radius: 999px;
     border: 1px solid transparent;
-    font-size: 20px;
+    font-size: 12px;
     font-weight: 700;
     line-height: 1.1;
     white-space: nowrap;
@@ -158,7 +168,7 @@ export const AsmrViewerWrapper = styled.div`
 
   .tag-empty {
     color: var(--semi-color-text-2);
-    font-size: 18px;
+    font-size: 11px;
   }
 
   .bottom-section {
@@ -170,11 +180,11 @@ export const AsmrViewerWrapper = styled.div`
   }
 
   .path-strip {
-    height: 52px;
+    height: 34px;
     flex-shrink: 0;
     display: flex;
     align-items: center;
-    padding: 0 12px;
+    padding: 0 8px;
     border-bottom: 1px solid var(--semi-color-border);
     background: color-mix(in srgb, var(--semi-color-bg-0) 93%, transparent);
   }
@@ -184,7 +194,7 @@ export const AsmrViewerWrapper = styled.div`
     flex: 1;
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 4px;
     white-space: nowrap;
     overflow: hidden;
   }
@@ -193,7 +203,7 @@ export const AsmrViewerWrapper = styled.div`
     border: none;
     background: transparent;
     color: var(--semi-color-text-1);
-    font-size: 14px;
+    font-size: 11px;
     font-weight: 500;
     cursor: pointer;
     padding: 2px 0;
@@ -206,14 +216,14 @@ export const AsmrViewerWrapper = styled.div`
 
   .crumb-sep {
     color: var(--semi-color-text-2);
-    font-size: 13px;
+    font-size: 10px;
   }
 
   .list-shell {
     flex: 1;
     min-height: 0;
     overflow: auto;
-    padding: 6px 8px 8px;
+    padding: 4px 6px 6px;
     scrollbar-width: thin;
     scrollbar-color: transparent transparent;
   }
@@ -254,13 +264,13 @@ export const AsmrViewerWrapper = styled.div`
   .state-error,
   .state-empty {
     height: 100%;
-    min-height: 120px;
+    min-height: 80px;
     display: flex;
     align-items: center;
     justify-content: center;
     text-align: center;
     color: var(--semi-color-text-2);
-    font-size: 14px;
+    font-size: 11px;
   }
 
   .state-error {
@@ -270,18 +280,18 @@ export const AsmrViewerWrapper = styled.div`
   .rows {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 4px;
   }
 
   .row {
-    height: 54px;
-    border-radius: 8px;
+    height: 38px;
+    border-radius: 6px;
     border: 1px solid transparent;
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 140px 116px;
+    grid-template-columns: minmax(0, 1fr) 88px 74px;
     align-items: center;
-    gap: 12px;
-    padding: 0 12px 0 10px;
+    gap: 8px;
+    padding: 0 8px 0 7px;
     cursor: pointer;
     user-select: none;
     transition: border-color 0.14s ease, background 0.14s ease;
@@ -307,12 +317,12 @@ export const AsmrViewerWrapper = styled.div`
     min-width: 0;
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 8px;
   }
 
   .row-icon {
-    width: 32px;
-    height: 32px;
+    width: 22px;
+    height: 22px;
     flex-shrink: 0;
     display: inline-flex;
     align-items: center;
@@ -321,14 +331,18 @@ export const AsmrViewerWrapper = styled.div`
   }
 
   .row-icon .tree-file-type-icon {
-    width: 30px;
-    height: 30px;
+    width: 20px;
+    height: 20px;
     margin-right: 0;
+  }
+
+  .row-icon .semi-icon {
+    font-size: 18px;
   }
 
   .row-name {
     min-width: 0;
-    font-size: 16px;
+    font-size: 12px;
     font-weight: 500;
     color: var(--semi-color-text-0);
     white-space: nowrap;
@@ -338,12 +352,12 @@ export const AsmrViewerWrapper = styled.div`
 
   .row-playing-badge {
     flex-shrink: 0;
-    margin-left: 4px;
-    height: 22px;
-    padding: 0 9px;
+    margin-left: 2px;
+    height: 18px;
+    padding: 0 6px;
     border-radius: 999px;
     border: 1px solid transparent;
-    font-size: 12px;
+    font-size: 10px;
     font-weight: 600;
     display: inline-flex;
     align-items: center;
@@ -368,20 +382,20 @@ export const AsmrViewerWrapper = styled.div`
   .row-size {
     text-align: right;
     color: var(--semi-color-text-2);
-    font-size: 13px;
+    font-size: 10px;
     font-weight: 500;
     white-space: nowrap;
   }
 
   .asmr-player-bar {
-    height: 74px;
+    height: 50px;
     flex-shrink: 0;
     position: relative;
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
     align-items: center;
-    gap: 12px;
-    padding: 8px 12px 0;
+    gap: 8px;
+    padding: 6px 8px 0;
     border-top: 1px solid var(--semi-color-border);
     background: color-mix(in srgb, var(--semi-color-bg-0) 95%, transparent);
     overflow: hidden;
@@ -395,7 +409,7 @@ export const AsmrViewerWrapper = styled.div`
     width: 100%;
     margin: 0;
     accent-color: var(--semi-color-primary);
-    height: 6px;
+    height: 4px;
   }
 
   .player-progress-line::-webkit-slider-thumb {
@@ -424,14 +438,14 @@ export const AsmrViewerWrapper = styled.div`
     justify-self: start;
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
     width: 100%;
   }
 
   .player-track-icon {
-    width: 24px;
-    height: 24px;
-    border-radius: 6px;
+    width: 18px;
+    height: 18px;
+    border-radius: 5px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -440,9 +454,13 @@ export const AsmrViewerWrapper = styled.div`
     flex-shrink: 0;
   }
 
+  .player-track-icon .semi-icon {
+    font-size: 12px;
+  }
+
   .player-track-name {
     min-width: 0;
-    font-size: 14px;
+    font-size: 11px;
     font-weight: 500;
     color: var(--semi-color-text-1);
     white-space: nowrap;
@@ -453,15 +471,15 @@ export const AsmrViewerWrapper = styled.div`
   .player-controls {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 4px;
     flex-shrink: 0;
     white-space: nowrap;
     justify-self: center;
   }
 
   .player-main-toggle {
-    min-width: 40px;
-    height: 40px;
+    min-width: 30px;
+    height: 30px;
   }
 
   .player-right {
@@ -469,28 +487,28 @@ export const AsmrViewerWrapper = styled.div`
     justify-self: end;
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 6px;
     white-space: nowrap;
   }
 
   .player-time-inline {
-    min-width: 132px;
+    min-width: 90px;
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 6px;
+    gap: 4px;
     flex-shrink: 0;
     white-space: nowrap;
   }
 
   .player-time-sep {
-    font-size: 12px;
+    font-size: 10px;
     color: var(--semi-color-text-2);
   }
 
   .player-time {
     width: auto;
-    font-size: 12px;
+    font-size: 10px;
     color: var(--semi-color-text-2);
     text-align: center;
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
@@ -500,21 +518,31 @@ export const AsmrViewerWrapper = styled.div`
   .player-volume {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 4px;
     flex-shrink: 0;
     justify-content: flex-end;
     white-space: nowrap;
   }
 
   .player-volume-range {
-    width: 96px;
+    width: 68px;
     accent-color: var(--semi-color-primary);
-    height: 6px;
+    height: 4px;
   }
 
   .player-volume-range::-webkit-slider-thumb {
-    width: 14px;
-    height: 14px;
+    width: 10px;
+    height: 10px;
+  }
+
+  .asmr-player-bar .semi-button {
+    min-height: 28px;
+    padding: 0 8px;
+    border-radius: 6px;
+  }
+
+  .asmr-player-bar .semi-button-icon {
+    font-size: 14px;
   }
 
   @keyframes asmr-cover-wave {

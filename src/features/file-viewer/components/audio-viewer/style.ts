@@ -22,8 +22,8 @@ export const AudioViewerWrapper = styled.div`
     
     .record-player {
       position: relative;
-      width: 300px;
-      height: 300px;
+      width: 204px;
+      height: 204px;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -32,10 +32,10 @@ export const AudioViewerWrapper = styled.div`
       &::before {
         content: '';
         position: absolute;
-        width: 260px;
-        height: 260px;
+        width: 178px;
+        height: 178px;
         border-radius: 50%;
-        box-shadow: 0 20px 50px rgba(0,0,0,0.4);
+        box-shadow: 0 14px 32px rgba(0,0,0,0.34);
         z-index: 0; 
       }
     }
@@ -43,11 +43,11 @@ export const AudioViewerWrapper = styled.div`
     .album-art {
       position: relative;
       z-index: 1;
-      width: 260px;
-      height: 260px;
+      width: 178px;
+      height: 178px;
       border-radius: 50%;
       background: #111;
-      border: 10px solid #222;
+      border: 7px solid #222;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -66,7 +66,7 @@ export const AudioViewerWrapper = styled.div`
         display: flex;
         align-items: center;
         justify-content: center;
-        font-size: 100px;
+        font-size: 64px;
         color: var(--semi-color-primary);
       }
     }
@@ -74,10 +74,10 @@ export const AudioViewerWrapper = styled.div`
     /* 唱片针效果 */
     .record-needle {
       position: absolute;
-      top: -20px;
-      right: 20px;
-      width: 100px;
-      height: 150px;
+      top: -14px;
+      right: 14px;
+      width: 70px;
+      height: 104px;
       z-index: 10;
       transform-origin: 20px 20px;
       transform: rotate(-30deg);
@@ -91,8 +91,8 @@ export const AudioViewerWrapper = styled.div`
       &::before {
         content: '';
         position: absolute;
-        width: 40px;
-        height: 40px;
+        width: 28px;
+        height: 28px;
         background: #444;
         border-radius: 50%;
         box-shadow: 0 2px 5px rgba(0,0,0,0.3);
@@ -102,10 +102,10 @@ export const AudioViewerWrapper = styled.div`
       &::after {
         content: '';
         position: absolute;
-        top: 20px;
-        left: 18px;
-        width: 8px;
-        height: 120px;
+        top: 14px;
+        left: 12px;
+        width: 6px;
+        height: 84px;
         background: linear-gradient(to bottom, #666, #999);
         border-radius: 4px;
       }
@@ -114,19 +114,19 @@ export const AudioViewerWrapper = styled.div`
 
   /* 下方控制栏 - 音乐播放器风格 */
   .player-bar {
-    height: 120px;
+    height: 76px;
     background: var(--semi-color-bg-1);
     border-top: 1px solid var(--semi-color-border);
     display: flex;
     flex-direction: column;
     position: relative;
-    padding: 0 32px;
+    padding: 0 18px;
     backdrop-filter: blur(20px);
 
     /* 进度条移到最顶部，横跨整个宽度 */
     .progress-wrapper {
       position: absolute;
-      top: -6px; /* 调整位置 */
+      top: -5px; /* 调整位置 */
       left: 0;
       right: 0;
       padding: 0;
@@ -134,7 +134,7 @@ export const AudioViewerWrapper = styled.div`
       
       .semi-slider {
         padding: 0;
-        height: 12px; /* 增加感应热区 */
+        height: 10px; /* 增加感应热区 */
         cursor: pointer;
       }
       
@@ -169,19 +169,19 @@ export const AudioViewerWrapper = styled.div`
       display: flex;
       align-items: center;
       justify-content: space-between;
-      margin-top: 10px;
+      margin-top: 6px;
     }
 
     .song-brief {
       display: flex;
       align-items: center;
-      gap: 16px;
+      gap: 10px;
       width: 25%;
       
       .mini-cover {
-        width: 56px;
-        height: 56px;
-        border-radius: 8px;
+        width: 38px;
+        height: 38px;
+        border-radius: 6px;
         background: var(--semi-color-fill-0);
         display: flex;
         align-items: center;
@@ -190,41 +190,53 @@ export const AudioViewerWrapper = styled.div`
       .info {
         display: flex;
         flex-direction: column;
-        .name { font-size: 16px; font-weight: 600; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .author { font-size: 13px; color: var(--semi-color-text-2); }
+        gap: 2px;
+        .name { font-size: 12px; font-weight: 600; max-width: 124px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .author { font-size: 10px; color: var(--semi-color-text-2); }
       }
     }
 
     .main-btns {
       display: flex;
       align-items: center;
-      gap: 32px;
+      gap: 18px;
       
       .play-btn {
-        width: 50px;
-        height: 50px;
-        font-size: 24px;
-        box-shadow: 0 4px 15px var(--semi-color-primary-light-default);
+        width: 34px;
+        height: 34px;
+        min-width: 34px;
+        font-size: 17px;
+        box-shadow: 0 3px 10px var(--semi-color-primary-light-default);
       }
+    }
+
+    .semi-button {
+      min-height: 28px;
+      padding: 0 8px;
+      border-radius: 6px;
+    }
+
+    .semi-button-icon {
+      font-size: 14px;
     }
 
     .extra-controls {
       display: flex;
       align-items: center;
       justify-content: flex-end;
-      gap: 20px;
+      gap: 12px;
       width: 25%;
 
       .time-display {
         font-family: monospace;
-        font-size: 13px;
+        font-size: 10px;
         color: var(--semi-color-text-2);
       }
 
       .volume-pop {
         display: flex;
         align-items: center;
-        gap: 8px;
+        gap: 5px;
       }
     }
   }

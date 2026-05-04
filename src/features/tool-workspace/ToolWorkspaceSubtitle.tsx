@@ -30,34 +30,34 @@ import {
 const ImportExportSection = styled.div`
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  margin-top: 6px;
+  gap: 9px;
+  margin-top: 4px;
 `;
 
-const SUBTITLE_TABLE_HEADER_HEIGHT = 49;
-const SUBTITLE_TABLE_ESTIMATED_ROW_HEIGHT = 64;
+const SUBTITLE_TABLE_HEADER_HEIGHT = 34;
+const SUBTITLE_TABLE_ESTIMATED_ROW_HEIGHT = 44;
 const SUBTITLE_TABLE_OVERSCAN_PX = SUBTITLE_TABLE_ESTIMATED_ROW_HEIGHT * 6;
 
 const SubtitleTable = styled.div`
   border: 1px solid var(--app-border);
-  border-radius: 14px;
+  border-radius: 8px;
   overflow: hidden;
-  min-height: 280px;
+  min-height: 190px;
   display: flex;
   flex-direction: column;
 
   .table-scroll {
     overflow: auto;
-    max-height: min(62vh, 820px);
+    max-height: min(62vh, 560px);
     will-change: scroll-position;
   }
 
   .table-head,
   .table-row {
     display: grid;
-    grid-template-columns: 252px minmax(220px, 1fr) minmax(260px, 1fr) 92px;
+    grid-template-columns: 176px minmax(154px, 1fr) minmax(182px, 1fr) 66px;
     gap: 0;
-    min-width: 900px;
+    min-width: 630px;
   }
 
   .table-head {
@@ -79,19 +79,19 @@ const SubtitleTable = styled.div`
 
   .virtual-spacer {
     width: 100%;
-    min-width: 900px;
+    min-width: 630px;
     pointer-events: none;
   }
 
   .cell {
-    padding: 8px 12px;
+    padding: 5px 8px;
     min-width: 0;
     display: flex;
     align-items: stretch;
   }
 
   .head-cell {
-    font-size: 13px;
+    font-size: 10px;
     font-weight: 700;
     color: var(--app-text-muted);
     text-transform: uppercase;
@@ -101,19 +101,19 @@ const SubtitleTable = styled.div`
   .time-cell {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 5px;
     justify-content: center;
     white-space: nowrap;
   }
 
   .time-index {
-    font-size: 13px;
+    font-size: 10px;
     color: var(--app-text-muted);
     flex: none;
   }
 
   .time-range {
-    font-size: 14px;
+    font-size: 11px;
     line-height: 1.4;
     color: var(--app-text);
     white-space: nowrap;
@@ -122,7 +122,7 @@ const SubtitleTable = styled.div`
   }
 
   .source-cell {
-    font-size: 14px;
+    font-size: 11px;
     line-height: 1.5;
     color: var(--app-text);
     white-space: nowrap;
@@ -135,20 +135,20 @@ const SubtitleTable = styled.div`
   }
 
   .translation-cell textarea {
-    font-size: 14px;
-    line-height: 1.5;
-    min-height: 40px;
+    font-size: 11px;
+    line-height: 1.45;
+    min-height: 28px;
   }
 
   .translation-preview {
     width: 100%;
-    min-height: 40px;
-    padding: 8px 10px;
-    border-radius: 10px;
+    min-height: 28px;
+    padding: 5px 7px;
+    border-radius: 6px;
     border: 1px solid color-mix(in srgb, var(--app-border) 82%, transparent);
     background: color-mix(in srgb, var(--app-bg) 94%, transparent);
-    font-size: 14px;
-    line-height: 1.5;
+    font-size: 11px;
+    line-height: 1.45;
     color: var(--app-text);
     white-space: nowrap;
     overflow: hidden;
@@ -172,8 +172,8 @@ const SubtitleTable = styled.div`
   }
 
   .row-actions .semi-button {
-    min-height: 32px;
-    font-size: 13px;
+    min-height: 24px;
+    font-size: 10px;
     width: 100%;
     min-width: 0;
   }

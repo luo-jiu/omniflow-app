@@ -7,22 +7,22 @@ import { Panel } from './styles';
 const SaveTargetComposer = styled.div`
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
 
   .save-lane {
     display: grid;
     grid-template-columns: 1fr;
-    gap: 12px;
+    gap: 8px;
   }
 
   .action-cluster {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 8px;
     flex-wrap: wrap;
-    min-height: 64px;
-    padding: 12px 14px;
-    border-radius: 14px;
+    min-height: 44px;
+    padding: 8px 9px;
+    border-radius: 8px;
     border: 1px solid color-mix(in srgb, var(--app-border) 86%, transparent);
     background: color-mix(in srgb, var(--app-bg) 84%, var(--app-bg-elevated));
   }
@@ -35,24 +35,24 @@ const SaveTargetComposer = styled.div`
   .cluster-label {
     display: inline-flex;
     align-items: center;
-    font-size: 15px;
+    font-size: 11px;
     font-weight: 700;
     color: var(--app-text);
     white-space: nowrap;
   }
 
   .save-target-mode-btn {
-    height: 44px;
-    min-width: 182px;
+    height: 30px;
+    min-width: 128px;
     border: none;
     border-radius: 999px;
-    padding: 0 14px;
+    padding: 0 10px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 10px;
+    gap: 7px;
     cursor: pointer;
-    font-size: 15px;
+    font-size: 11px;
     font-weight: 600;
     transition: background-color 180ms ease, color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
   }
@@ -86,12 +86,12 @@ const SaveTargetComposer = styled.div`
   .save-target-mode-label {
     display: inline-flex;
     align-items: center;
-    gap: 8px;
+    gap: 5px;
   }
 
   .save-target-mode-icon {
-    width: 19px;
-    height: 19px;
+    width: 14px;
+    height: 14px;
     position: relative;
     display: inline-flex;
     align-items: center;
@@ -102,7 +102,7 @@ const SaveTargetComposer = styled.div`
     position: absolute;
     inset: 0;
     margin: auto;
-    font-size: 19px;
+    font-size: 14px;
     transition: transform 180ms ease, opacity 180ms ease;
     opacity: 0;
     transform: scale(0.74) rotate(-18deg);
@@ -121,8 +121,8 @@ const SaveTargetComposer = styled.div`
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-width: 18px;
-    font-size: 17px;
+    min-width: 13px;
+    font-size: 12px;
     font-weight: 700;
     line-height: 1;
     opacity: 0.92;
@@ -144,20 +144,20 @@ const SaveTargetComposer = styled.div`
   .save-path-line {
     display: inline-flex;
     align-items: center;
-    gap: 8px;
-    flex: 1 1 360px;
-    min-width: 260px;
+    gap: 5px;
+    flex: 1 1 252px;
+    min-width: 182px;
   }
 
   .save-path-trigger {
     flex: 1;
-    min-width: 220px;
-    height: 42px;
+    min-width: 154px;
+    height: 30px;
     border: 1px solid color-mix(in srgb, var(--app-border) 82%, transparent);
-    border-radius: 10px;
+    border-radius: 6px;
     background: color-mix(in srgb, var(--app-bg) 90%, var(--app-bg-elevated));
     color: var(--app-text);
-    padding: 0 12px;
+    padding: 0 8px;
     text-align: left;
     cursor: pointer;
     transition: border-color 150ms ease, box-shadow 150ms ease, background-color 150ms ease;
@@ -188,12 +188,12 @@ const SaveTargetComposer = styled.div`
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: 14px;
+    font-size: 10px;
     line-height: 1.4;
   }
 
   .save-path-required {
-    font-size: 13px;
+    font-size: 10px;
     font-weight: 600;
     color: #db4652;
     white-space: nowrap;
