@@ -256,6 +256,14 @@ export const DirectorySidebarWrapper = styled.aside<{ $isDragging?: boolean }>`
     flex: 0 0 15px;
   }
 
+  .tree-file-type-icon-audio-subtitles {
+    margin-right: 2px;
+    flex: 0 0 15px;
+    overflow: visible;
+    transform: scale(0.75);
+    transform-origin: center;
+  }
+
   /* Normalize perceptual size for built-in folder icons. */
   .tree-file-type-icon-comic-folder {
     padding: 0.5px;

@@ -4,6 +4,7 @@ import type { OverlayBoundaryRect } from '@/components/ui/context-menu/overlay';
 import comicFolderIcon from '@/assets/icons/material/folder-comic.svg';
 import asmrFolderIcon from '@/assets/icons/material/folder-asmr.svg';
 import videoIcon from '@/assets/icons/material/video.svg';
+import audioFolderIcon from '@/assets/icons/material/folder-audio.svg';
 
 interface DirectoryContextMenuProps {
   node: any;
@@ -33,6 +34,7 @@ function createBuiltInMenuIcon(src: string, alt: string): React.ReactNode {
 const COMIC_BUILT_IN_MENU_ICON = createBuiltInMenuIcon(comicFolderIcon, 'comic');
 const ASMR_BUILT_IN_MENU_ICON = createBuiltInMenuIcon(asmrFolderIcon, 'asmr');
 const VIDEO_BUILT_IN_MENU_ICON = createBuiltInMenuIcon(videoIcon, 'video');
+const AUDIO_BUILT_IN_MENU_ICON = createBuiltInMenuIcon(audioFolderIcon, 'audio');
 
 function getBuiltInTypeMenuIcon(builtInType: string): React.ReactNode | undefined {
   const normalizedType = String(builtInType || '').toUpperCase();
@@ -44,6 +46,9 @@ function getBuiltInTypeMenuIcon(builtInType: string): React.ReactNode | undefine
   }
   if (normalizedType === 'VIDEO') {
     return VIDEO_BUILT_IN_MENU_ICON;
+  }
+  if (normalizedType === 'AUDIO') {
+    return AUDIO_BUILT_IN_MENU_ICON;
   }
   return undefined;
 }
@@ -137,6 +142,12 @@ const DirectoryContextMenu: React.FC<DirectoryContextMenuProps> = ({
   // 文件/文件夹菜单
   const currentBuiltInType = String(node?.builtInType || 'DEF').toUpperCase();
   const currentArchiveMode = Number(node?.archiveMode ?? 0) === 1 ? 1 : 0;
+  const parentBuiltInType = String(node?.data?.parentBuiltInType || 'DEF').toUpperCase();
+  const parentArchiveMode = Number(node?.data?.parentArchiveMode ?? 0) === 1 ? 1 : 0;
+  const isAudioArchiveChildFile = !isFolder && parentBuiltInType === 'AUDIO' && parentArchiveMode === 1;
+  const isAudioArchiveAudioFile = isAudioArchiveChildFile && node?.data?.audioArchiveAudio === true;
+  const isAudioArchiveFolder = isFolder && currentBuiltInType === 'AUDIO' && currentArchiveMode === 1;
+  const audioSubtitleVisible = node?.data?.audioArchiveSubtitlesVisible === true;
 
   const items: ContextMenuItem[] = isFolder
     ? [
@@ -207,6 +218,12 @@ const DirectoryContextMenu: React.FC<DirectoryContextMenuProps> = ({
           icon: VIDEO_BUILT_IN_MENU_ICON,
           onClick: () => onAction('设置内置类型:VIDEO', node),
         },
+        ...(isFolder ? [{
+          key: 'built-in-type-audio',
+          label: currentBuiltInType === 'AUDIO' ? '音频（当前）' : '音频',
+          icon: AUDIO_BUILT_IN_MENU_ICON,
+          onClick: () => onAction('设置内置类型:AUDIO', node),
+        }] : []),
       ],
     },
   );
@@ -250,13 +267,29 @@ const DirectoryContextMenu: React.FC<DirectoryContextMenuProps> = ({
         onClick: () => onAction('打开原始目录', node),
       });
     }
-    if (currentBuiltInType === 'COMIC') {
+    if (currentBuiltInType === 'COMIC' || currentBuiltInType === 'AUDIO') {
       items.push({
-        key: 'comic-sort-by-name',
+        key: 'sort-by-name',
         label: '按名称排序',
         onClick: () => onAction('按名称排序', node),
       });
     }
+    if (isAudioArchiveFolder) {
+      items.push({
+        key: 'toggle-audio-subtitles',
+        label: audioSubtitleVisible ? '隐藏文件' : '显示隐藏文件',
+        onClick: () => onAction(audioSubtitleVisible ? '隐藏音频字幕文件' : '显示音频字幕文件', node),
+      });
+    }
+  }
+
+  if (isAudioArchiveAudioFile) {
+    items.push({ type: 'divider', key: 'divider-audio-subtitles' });
+    items.push({
+      key: 'toggle-audio-file-subtitles',
+      label: audioSubtitleVisible ? '隐藏文件' : '显示隐藏文件',
+      onClick: () => onAction(audioSubtitleVisible ? '隐藏音频字幕文件' : '显示音频字幕文件', node),
+    });
   }
 
   if (isFolder) {

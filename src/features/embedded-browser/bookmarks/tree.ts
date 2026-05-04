@@ -28,8 +28,17 @@ export function getDefaultBookmarkTitle(rawUrl: string, fallback?: string | null
 }
 
 export function estimateBookmarkWidth(item: BrowserBookmarkItem) {
-  const titleLength = String(item.title || '').length;
-  return Math.min(Math.max(60 + titleLength * 7, 88), 180);
+  const title = String(item.title || item.url || '').trim();
+  const weightedTitleWidth = Array.from(title).reduce((total, char) => {
+    if (/[\u2e80-\u9fff\uff00-\uffef]/.test(char)) {
+      return total + 11;
+    }
+    if (/[A-Z]/.test(char)) {
+      return total + 7;
+    }
+    return total + 6;
+  }, 0);
+  return Math.min(Math.max(35 + weightedTitleWidth, 44), 120);
 }
 
 export function resolveVisibleBookmarkCount(items: BrowserBookmarkItem[], containerWidth: number) {

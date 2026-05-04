@@ -8,6 +8,7 @@ import {
   classifyCatCatchExtensionKind,
   isCatCatchManifestMimeType,
   isCatCatchMediaMimeType,
+  isCatCatchSubtitleMimeType,
 } from './embeddedBrowserResourceCaptureRules'
 
 export function getHeaderValue(
@@ -71,7 +72,7 @@ export function classifyCapturedResource(input: {
   if (extensionKind === 'image' || normalizedMimeType.startsWith('image/')) {
     return 'image'
   }
-  if (extensionKind === 'subtitle' || normalizedMimeType.includes('text/vtt')) {
+  if (extensionKind === 'subtitle' || isCatCatchSubtitleMimeType(normalizedMimeType)) {
     return 'subtitle'
   }
   if (extension === 'pdf' || normalizedMimeType === 'application/pdf') {

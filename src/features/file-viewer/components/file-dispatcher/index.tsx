@@ -10,6 +10,7 @@ import AsmrViewer from "../asmr-viewer";
 import AsmrArchiveViewer from "../../../archive-viewer/components/asmr-archive-viewer";
 import ComicArchiveViewer from "../../../archive-viewer/components/comic-archive-viewer";
 import VideoArchiveViewer from "../../../archive-viewer/components/video-archive-viewer";
+import AudioArchiveViewer from "../../../archive-viewer/components/audio-archive-viewer";
 import styled from 'styled-components';
 import type { FileViewerFileType } from '@/shared/file-viewer-types';
 
@@ -131,6 +132,9 @@ const FileDispatcher: React.FC<FileDispatcherProps> = ({
 
     case 'video_archive':
       return <VideoArchiveViewer folderNodeId={nodeId} fileUrl={fileUrl} fileName={fileName} active={active} />;
+
+    case 'audio_archive':
+      return <AudioArchiveViewer folderNodeId={nodeId} fileUrl={fileUrl} fileName={fileName} active={active} />;
 
     default:
       return (

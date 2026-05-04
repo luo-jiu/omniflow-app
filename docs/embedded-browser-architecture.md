@@ -194,9 +194,75 @@ library detail page
 
 - 网络和 probe 捕捉事件由 main 发回 renderer
 - 在发回 renderer 前，main 会先经过统一的规则过滤：域名黑白名单、regex 规则、扩展名与 MIME 白名单
+- 默认捕捉规则会识别常见媒体、manifest、key、图片和字幕 / 歌词资源；字幕 / 歌词包含 `vtt/srt/ass/ssa/ttml/lrc/qrc/krc/yrc/trc/ksc/sbv/dfxp/smi/sami/scc/stl/sub/idx/sup/lyric/lyrics/webvtt` 等扩展名，并覆盖常见 VTT、SRT、ASS、SSA、SubRip、TTML MIME
 - renderer 里的 `useEmbeddedBrowserResources` 再按 `tabId` 聚合成 snapshot
 - 当前页面资源面板只读“活动 tab 的快照”
+- 资源面板有“全部 / 筛选”两个显示模式：“全部”直接显示活动 tab 快照里的全部资源；“筛选”才应用 renderer 本地正则、同名同大小去重和扩展名 chip
 - 资源面板的筛选正则和“筛除同名同大小”开关是 renderer 本地偏好，分别持久化在 `embedded-browser:resource-filter-regex` 和 `embedded-browser:resource-dedupe-same-name`，不改变 main 侧捕捉快照
+
+#### 页面运行时歌词提取经验
+
+`.qrc/.lrc` 捕获只覆盖真实网络资源或脚本 URL。QQ 音乐这类页面有时不会暴露独立歌词文件，而是把歌词渲染到 DOM：`#qrc_ctn p` 只包含显示文本和当前行 `class`，时间轴不在 DOM 属性里。
+
+已验证的 QQ 音乐播放器结构：
+
+- 从 `#qrc_ctn` 反查 React 父组件，可拿到运行时组件实例。
+- `comp.lyricData.lyricList` 是原歌词，`comp.lyricData.transList` 是翻译 / 音译歌词。
+- 单行结构为 `{ interval, context }`，`interval` 是秒，`context` 可能是 React element。
+
+调试时可在页面 Console 执行：
+
+```js
+function findReactComponentFromDom(dom, predicate) {
+  const key = Object.keys(dom).find((value) => (
+    value.startsWith('__reactFiber$')
+    || value.startsWith('__reactInternalInstance$')
+  ))
+  let fiber = key ? dom[key] : null
+  for (let index = 0; fiber && index < 100; index += 1) {
+    const node = fiber.stateNode
+    if (node && typeof node === 'object' && predicate(node)) {
+      return node
+    }
+    fiber = fiber.return
+  }
+  return null
+}
+
+function lyricText(context) {
+  if (typeof context === 'string') return context
+  const html = context?.props?.dangerouslySetInnerHTML?.__html
+  if (typeof html === 'string') {
+    const div = document.createElement('div')
+    div.innerHTML = html
+    return div.innerText
+  }
+  const children = context?.props?.children
+  if (typeof children === 'string') return children
+  if (Array.isArray(children)) return children.join('')
+  return ''
+}
+
+function toLrc(rows = []) {
+  const pad = (value, width = 2) => String(Math.floor(value)).padStart(width, '0')
+  return rows.map((row) => {
+    const time = Number(row.interval || 0)
+    const min = Math.floor(time / 60)
+    const sec = Math.floor(time % 60)
+    const cs = Math.floor((time - Math.floor(time)) * 100)
+    return `[${pad(min)}:${pad(sec)}.${pad(cs)}]${lyricText(row.context)}`
+  }).join('\n')
+}
+
+const comp = findReactComponentFromDom(
+  document.querySelector('#qrc_ctn'),
+  (node) => node.lyricData || node.state?.lyric,
+)
+
+copy(toLrc(comp?.lyricData?.lyricList || comp?.state?.lyric || []))
+```
+
+这属于页面运行时提取经验，不是全站通用规则；后续如果产品化，应作为“提取页面歌词 / 字幕”能力处理，不混入网络资源捕获规则。
 
 ### 4.4 缓存捕捉工具态
 

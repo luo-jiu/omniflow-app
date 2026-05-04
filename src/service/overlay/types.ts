@@ -84,6 +84,10 @@ export type DirectoryContextMenuNodeSnapshot = {
   archiveMode: number;
   builtInType: string;
   data?: {
+    audioArchiveAudio?: boolean;
+    audioArchiveSubtitlesVisible?: boolean;
+    parentArchiveMode?: number;
+    parentBuiltInType?: string;
     rawExt?: string;
     rawName?: string;
   };

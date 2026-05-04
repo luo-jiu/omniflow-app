@@ -580,6 +580,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
     (fileState.fileType === 'asmr' && archiveReturnTarget?.fileType === 'asmr_archive')
     || (fileState.fileType === 'comic' && archiveReturnTarget?.fileType === 'comic_archive')
     || (fileState.fileType === 'video' && archiveReturnTarget?.fileType === 'video_archive')
+    || (fileState.fileType === 'audio' && archiveReturnTarget?.fileType === 'audio_archive')
   );
 
   const handleArchiveReturn = React.useCallback(() => {

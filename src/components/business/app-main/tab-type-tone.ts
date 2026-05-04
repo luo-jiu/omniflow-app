@@ -56,6 +56,11 @@ const LABEL_TONE_MAP: Record<string, TabTypeTone> = {
     text: 'var(--semi-color-primary)',
     border: 'color-mix(in srgb, var(--semi-color-primary) 42%, transparent)',
   },
+  AUDIO: {
+    background: 'color-mix(in srgb, var(--semi-color-warning-light-default) 82%, var(--semi-color-tertiary-light-default) 18%)',
+    text: 'color-mix(in srgb, var(--semi-color-warning) 78%, var(--semi-color-tertiary) 22%)',
+    border: 'color-mix(in srgb, var(--semi-color-warning) 38%, var(--semi-color-tertiary) 20%)',
+  },
   'ASMR-ARC': {
     background: 'color-mix(in srgb, var(--semi-color-success-light-default) 78%, var(--semi-color-primary-light-default) 22%)',
     text: 'color-mix(in srgb, var(--semi-color-success) 62%, var(--semi-color-primary) 38%)',
@@ -70,6 +75,11 @@ const LABEL_TONE_MAP: Record<string, TabTypeTone> = {
     background: 'color-mix(in srgb, var(--semi-color-info-light-default) 74%, var(--semi-color-tertiary-light-default) 26%)',
     text: 'color-mix(in srgb, var(--semi-color-info) 70%, var(--semi-color-tertiary) 30%)',
     border: 'color-mix(in srgb, var(--semi-color-info) 40%, var(--semi-color-tertiary) 24%)',
+  },
+  'AUDIO-ARC': {
+    background: 'color-mix(in srgb, var(--semi-color-warning-light-default) 76%, var(--semi-color-success-light-default) 24%)',
+    text: 'color-mix(in srgb, var(--semi-color-warning) 66%, var(--semi-color-success) 34%)',
+    border: 'color-mix(in srgb, var(--semi-color-warning) 36%, var(--semi-color-success) 28%)',
   },
   IMAGE: {
     background: 'color-mix(in srgb, var(--semi-color-tertiary-light-default) 84%, transparent)',
@@ -113,6 +123,7 @@ const FILE_TYPE_TONE_MAP: Partial<Record<NonNullable<FileViewerTab['fileType']>,
   video_archive: LABEL_TONE_MAP['VIDEO-ARC'],
   asmr_archive: LABEL_TONE_MAP['ASMR-ARC'],
   comic_archive: LABEL_TONE_MAP['COMIC-ARC'],
+  audio_archive: LABEL_TONE_MAP['AUDIO-ARC'],
   other: LABEL_TONE_MAP.FILE,
 };
 
@@ -200,6 +211,7 @@ export function resolveTabTargetKey(tab: FileViewerTab, tabTypeLabel: string): s
   if (tab.fileType === 'video_archive') return 'VIDEO-ARC';
   if (tab.fileType === 'asmr_archive') return 'ASMR-ARC';
   if (tab.fileType === 'comic_archive') return 'COMIC-ARC';
+  if (tab.fileType === 'audio_archive') return 'AUDIO-ARC';
   return 'FILE';
 }
 

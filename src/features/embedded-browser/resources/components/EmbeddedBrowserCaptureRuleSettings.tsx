@@ -30,6 +30,7 @@ function cloneRuleSet(ruleSet: EmbeddedBrowserCaptureRuleSet): EmbeddedBrowserCa
     extensions: [...ruleSet.extensions],
     mimeTypes: [...ruleSet.mimeTypes],
     regexRules: ruleSet.regexRules.map((rule) => ({ ...rule })),
+    version: ruleSet.version,
   }
 }
 
@@ -74,6 +75,7 @@ function normalizeRuleSetDraft(ruleSet: EmbeddedBrowserCaptureRuleSet): Embedded
       label: String(rule.label || '').trim(),
       pattern: String(rule.pattern || '').trim(),
     })),
+    version: ruleSet.version,
   }
 }
 

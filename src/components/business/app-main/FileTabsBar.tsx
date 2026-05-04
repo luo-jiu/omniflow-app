@@ -42,6 +42,7 @@ const TAB_MEMORY_FALLBACK_BY_TYPE: Record<string, number> = {
   video_archive: 118 * 1024 * 1024,
   asmr_archive: 84 * 1024 * 1024,
   comic_archive: 92 * 1024 * 1024,
+  audio_archive: 72 * 1024 * 1024,
   other: 36 * 1024 * 1024,
 };
 
@@ -374,6 +375,14 @@ function getTabTypeLabel(tab: FileViewerTab) {
     ) {
       return 'COMIC-A';
     }
+    if (
+      normalized === 'AUDIO-ARCHIVE'
+      || normalized === 'AUDIO ARC'
+      || normalized === 'AUDIO-ARC'
+      || normalized === 'AUDIO_ARCHIVE'
+    ) {
+      return 'AUDIO-A';
+    }
     return normalized;
   }
   const fileType = tab.fileType;
@@ -386,6 +395,7 @@ function getTabTypeLabel(tab: FileViewerTab) {
   if (fileType === 'video_archive') return 'VIDEO-A';
   if (fileType === 'asmr_archive') return 'ASMR-A';
   if (fileType === 'comic_archive') return 'COMIC-A';
+  if (fileType === 'audio_archive') return 'AUDIO-A';
   return 'FILE';
 }
 
@@ -396,12 +406,15 @@ function getDisplayName(tab: FileViewerTab) {
     .replace(/^VIDEO\s*归档\s*·\s*/iu, '')
     .replace(/^ASMR\s*归档\s*·\s*/iu, '')
     .replace(/^COMIC\s*归档\s*·\s*/iu, '')
+    .replace(/^AUDIO\s*归档\s*·\s*/iu, '')
     .replace(/^VIDEO\s*·\s*/iu, '')
     .replace(/^ASMR\s*·\s*/iu, '')
     .replace(/^COMIC\s*·\s*/iu, '')
+    .replace(/^AUDIO\s*·\s*/iu, '')
     .replace(/\s*[【[]\s*VIDEO\s*·\s*归档\s*[】\]]\s*$/iu, '')
     .replace(/\s*[【[]\s*ASMR\s*·\s*归档\s*[】\]]\s*$/iu, '')
     .replace(/\s*[【[]\s*COMIC\s*·\s*归档\s*[】\]]\s*$/iu, '')
+    .replace(/\s*[【[]\s*AUDIO\s*·\s*归档\s*[】\]]\s*$/iu, '')
     .trim();
   return trimmed || '未命名文件';
 }

@@ -540,7 +540,7 @@ export async function moveNodesBatch(payload: {
   };
 }
 
-// 漫画目录：按名称重排直接子项（重建 sort_order 间隔）
+// 内置类型目录：按名称重排直接子项（后端沿用历史 comic 路由，当前支持 COMIC / AUDIO）
 export async function sortComicChildrenByName(nodeId: number) {
   const body = await request(`/v1/nodes/${nodeId}/comic/sort-by-name`, {
     method: 'PATCH',

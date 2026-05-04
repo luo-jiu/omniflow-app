@@ -10,6 +10,7 @@
 它当前主要承接：
 
 - `video_archive`
+- `audio_archive`
 - `asmr_archive`
 - `comic_archive`
 
@@ -24,9 +25,18 @@
 - 封面优先走 `coverNodeId`
 - 暂无封面时使用占位卡面，后续再按需补首帧策略
 
+其中 `audio_archive` 当前是独立的音频归档视图：
+
+- 双击卡片打开普通 `audio` viewer
+- 通过 `returnTarget` 返回原音频归档页
+- 卡片数据来自归档目录下的直属音频媒体文件
+- 子音频文件当前不要求再单独设置 `builtInType = AUDIO`
+- 字幕折叠显示由目录树负责，归档卡片页只展示音频资源本身
+
 ## 2. 当前结构
 
 - `components/video-archive-viewer/`
+- `components/audio-archive-viewer/`
 - `components/asmr-archive-viewer/`
 - `components/comic-archive-viewer/`
 - `hooks/useArchiveCardGrid.ts`

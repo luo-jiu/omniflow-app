@@ -1,5 +1,5 @@
 import React from 'react';
-import styled from 'styled-components';
+import styled, { createGlobalStyle } from 'styled-components';
 import { Empty, Modal, Spin } from '@douyinfe/semi-ui';
 import { IconFile, IconFolder } from '@douyinfe/semi-icons';
 
@@ -36,29 +36,62 @@ interface LibraryNodePickerModalProps {
   onConfirm: (selection: LibraryNodePickerSelection) => void;
 }
 
+const PickerModalStyle = createGlobalStyle`
+  .library-node-picker-modal .semi-modal-content {
+    border-radius: 8px;
+  }
+
+  .library-node-picker-modal .semi-modal-header {
+    padding: 13px 16px 8px;
+  }
+
+  .library-node-picker-modal .semi-modal-title {
+    font-size: 14px;
+    line-height: 1.35;
+    font-weight: 600;
+  }
+
+  .library-node-picker-modal .semi-modal-close {
+    top: 12px;
+    right: 14px;
+  }
+
+  .library-node-picker-modal .semi-modal-footer {
+    padding: 9px 16px 13px;
+  }
+
+  .library-node-picker-modal .semi-button {
+    height: 28px;
+    min-width: 66px;
+    padding: 0 12px;
+    font-size: 12px;
+    border-radius: 6px;
+  }
+`;
+
 const ModalBody = styled.div`
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 9px;
   min-height: 0;
-  padding-top: 4px;
 
   .breadcrumbs {
     display: flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: 6px;
+    gap: 4px;
   }
 
   .crumb-btn {
-    height: 30px;
+    height: 24px;
     border: 1px solid var(--app-border);
-    border-radius: 8px;
-    padding: 0 10px;
+    border-radius: 6px;
+    padding: 0 8px;
     background: color-mix(in srgb, var(--app-bg-elevated) 92%, transparent);
     color: var(--app-text);
     cursor: pointer;
-    font-size: 12px;
+    font-size: 11px;
+    line-height: 1;
   }
 
   .crumb-btn[data-current='true'] {
@@ -69,23 +102,23 @@ const ModalBody = styled.div`
 
   .crumb-sep {
     color: var(--app-text-muted);
-    font-size: 12px;
+    font-size: 11px;
   }
 
   .node-panel {
-    min-height: 420px;
-    max-height: 420px;
+    height: clamp(260px, 38vh, 318px);
+    min-height: 0;
     overflow: auto;
     border: 1px solid var(--app-border);
-    border-radius: 10px;
+    border-radius: 8px;
     background: var(--app-bg-elevated);
-    padding: 10px;
+    padding: 6px;
   }
 
   .node-list {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 3px;
   }
 
   .node-row {
@@ -93,13 +126,14 @@ const ModalBody = styled.div`
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 12px;
+    gap: 8px;
     border: 1px solid transparent;
-    border-radius: 8px;
+    border-radius: 6px;
     background: transparent;
     color: var(--app-text);
     cursor: pointer;
-    padding: 10px 12px;
+    min-height: 30px;
+    padding: 5px 8px;
     text-align: left;
   }
 
@@ -117,7 +151,7 @@ const ModalBody = styled.div`
     flex: 1;
     display: inline-flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
   }
 
   .node-kind-icon {
@@ -125,8 +159,8 @@ const ModalBody = styled.div`
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 18px;
-    height: 18px;
+    width: 16px;
+    height: 16px;
     color: var(--app-text-muted);
   }
 
@@ -136,15 +170,15 @@ const ModalBody = styled.div`
 
   .node-name {
     min-width: 0;
-    font-size: 14px;
-    line-height: 1.4;
+    font-size: 12px;
+    line-height: 1.35;
     word-break: break-all;
   }
 
   .node-action {
     flex-shrink: 0;
     color: var(--app-text-muted);
-    font-size: 12px;
+    font-size: 11px;
   }
 `;
 
@@ -350,108 +384,112 @@ const LibraryNodePickerModal: React.FC<LibraryNodePickerModalProps> = ({
   }, [childrenMap, loadChildren]);
 
   return (
-    <Modal
-      title={title}
-      visible={visible}
-      width={1080}
-      centered
-      style={{ maxWidth: 'calc(100vw - 48px)' }}
-      bodyStyle={{ minHeight: 540, padding: '10px 20px 14px' }}
-      okText={confirmText}
-      cancelText={cancelText}
-      okButtonProps={{ disabled: !confirmNode || loading }}
-      onCancel={onCancel}
-      onOk={() => {
-        if (!confirmNode) {
-          return;
-        }
-        const currentPath = [...breadcrumbs];
-        if (!currentPath.length || currentPath[currentPath.length - 1]?.id !== confirmNode.id) {
-          currentPath.push({ id: confirmNode.id, name: confirmNode.name });
-        }
-        onConfirm({
-          breadcrumb: currentPath,
-          node: confirmNode,
-          pathLabel: buildPickerPathLabel(currentPath, confirmNode),
-        });
-      }}
-    >
-      <ModalBody>
-        <div className="breadcrumbs">
-          {breadcrumbs.map((crumb, index) => {
-            const isCurrent = index === breadcrumbs.length - 1;
-            return (
-              <React.Fragment key={crumb.id}>
-                <button
-                  type="button"
-                  className="crumb-btn"
-                  data-current={isCurrent}
-                  onClick={() => {
-                    setSelectedNodeId(null);
-                    setBreadcrumbs(breadcrumbs.slice(0, index + 1));
-                  }}
-                >
-                  {crumb.name}
-                </button>
-                {!isCurrent ? <span className="crumb-sep">/</span> : null}
-              </React.Fragment>
-            );
-          })}
-        </div>
+    <>
+      <PickerModalStyle />
+      <Modal
+        className="library-node-picker-modal"
+        title={title}
+        visible={visible}
+        width={720}
+        centered
+        style={{ maxWidth: 'calc(100vw - 40px)' }}
+        bodyStyle={{ minHeight: 350, padding: '7px 16px 9px' }}
+        okText={confirmText}
+        cancelText={cancelText}
+        okButtonProps={{ disabled: !confirmNode || loading }}
+        onCancel={onCancel}
+        onOk={() => {
+          if (!confirmNode) {
+            return;
+          }
+          const currentPath = [...breadcrumbs];
+          if (!currentPath.length || currentPath[currentPath.length - 1]?.id !== confirmNode.id) {
+            currentPath.push({ id: confirmNode.id, name: confirmNode.name });
+          }
+          onConfirm({
+            breadcrumb: currentPath,
+            node: confirmNode,
+            pathLabel: buildPickerPathLabel(currentPath, confirmNode),
+          });
+        }}
+      >
+        <ModalBody>
+          <div className="breadcrumbs">
+            {breadcrumbs.map((crumb, index) => {
+              const isCurrent = index === breadcrumbs.length - 1;
+              return (
+                <React.Fragment key={crumb.id}>
+                  <button
+                    type="button"
+                    className="crumb-btn"
+                    data-current={isCurrent}
+                    onClick={() => {
+                      setSelectedNodeId(null);
+                      setBreadcrumbs(breadcrumbs.slice(0, index + 1));
+                    }}
+                  >
+                    {crumb.name}
+                  </button>
+                  {!isCurrent ? <span className="crumb-sep">/</span> : null}
+                </React.Fragment>
+              );
+            })}
+          </div>
 
-        <div className="node-panel">
-          {loading ? (
-            <Spin spinning />
-          ) : errorMessage ? (
-            <Empty
-              image={<div />}
-              title="目录加载失败"
-              description={errorMessage}
-            />
-          ) : visibleNodes.length > 0 ? (
-            <div className="node-list">
-              {visibleNodes.map((node) => (
-                <button
-                  type="button"
-                  key={node.id}
-                  className="node-row"
-                  data-selected={selectedNodeId === node.id}
-                  onClick={() => {
-                    if (!isSelectableNode(node, displayMode)) {
-                      return;
-                    }
-                    setSelectedNodeId(node.id);
-                  }}
-                  onDoubleClick={() => {
-                    if (node.type === 'dir') {
-                      void enterDirectory(node);
-                    }
-                  }}
-                >
-                  <span className="node-label">
-                    <span className={`node-kind-icon ${node.type === 'dir' ? 'is-dir' : ''}`}>
-                      {node.type === 'dir' ? <IconFolder /> : <IconFile />}
+          <div className="node-panel">
+            {loading ? (
+              <Spin spinning />
+            ) : errorMessage ? (
+              <Empty
+                image={<div />}
+                title="目录加载失败"
+                description={errorMessage}
+              />
+            ) : visibleNodes.length > 0 ? (
+              <div className="node-list">
+                {visibleNodes.map((node) => (
+                  <button
+                    type="button"
+                    key={node.id}
+                    className="node-row"
+                    data-selected={selectedNodeId === node.id}
+                    onClick={() => {
+                      if (!isSelectableNode(node, displayMode)) {
+                        return;
+                      }
+                      setSelectedNodeId(node.id);
+                    }}
+                    onDoubleClick={() => {
+                      if (node.type === 'dir') {
+                        void enterDirectory(node);
+                      }
+                    }}
+                  >
+                    <span className="node-label">
+                      <span className={`node-kind-icon ${node.type === 'dir' ? 'is-dir' : ''}`}>
+                        {node.type === 'dir' ? <IconFolder /> : <IconFile />}
+                      </span>
+                      <span className="node-name">
+                        {node.type === 'file' && node.ext ? `${node.name}.${node.ext}` : node.name}
+                      </span>
                     </span>
-                    <span className="node-name">
-                      {node.type === 'file' && node.ext ? `${node.name}.${node.ext}` : node.name}
+                    <span className="node-action">
+                      {node.type === 'dir' ? '双击进入' : '可选择'}
                     </span>
-                  </span>
-                  <span className="node-action">
-                    {node.type === 'dir' ? '双击进入' : '可选择'}
-                  </span>
-                </button>
-              ))}
-            </div>
-          ) : (
-            <Empty
-              image={<div />}
-              title="当前目录没有可显示节点"
-              description={displayMode === 'folders' ? '可以直接选择当前目录' : '请切换到其他目录继续查找'}
-            />
-          )}
-        </div>
-      </ModalBody>
-    </Modal>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <Empty
+                image={<div />}
+                title="当前目录没有可显示节点"
+                description={displayMode === 'folders' ? '可以直接选择当前目录' : '请切换到其他目录继续查找'}
+              />
+            )}
+          </div>
+        </ModalBody>
+      </Modal>
+    </>
   );
 };
 

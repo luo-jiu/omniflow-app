@@ -72,6 +72,8 @@ interface DirectoryTreeProps {
   // 拖拽移动成功后，通知父组件刷新受影响父目录
   onMoveSuccess?: (payload: { affectedParentIds: number[] }) => void | Promise<void>;
   onRefreshNode?: (node: any) => void | Promise<void>;
+  onToggleAudioArchiveSubtitles?: (node: any, visible: boolean) => void | Promise<void>;
+  isAudioArchiveSubtitlesVisible?: (node: any) => boolean;
   onOpenFileInBrowser?: (payload: {
     fileExt: string;
     fileName: string;
@@ -138,6 +140,8 @@ export default function DirectoryTree({
   onConfigSuccess,
   onMoveSuccess,
   onRefreshNode,
+  onToggleAudioArchiveSubtitles,
+  isAudioArchiveSubtitlesVisible,
   onOpenFileInBrowser,
   onSelectionChange,
   loadData,
@@ -256,6 +260,7 @@ export default function DirectoryTree({
     if (normalized === 'COMIC') return '漫画';
     if (normalized === 'ASMR') return 'ASMR';
     if (normalized === 'VIDEO') return '视频';
+    if (normalized === 'AUDIO') return '音频';
     return '默认';
   };
 
@@ -1598,6 +1603,10 @@ export default function DirectoryTree({
       archiveMode: Number(node.archiveMode ?? 0) === 1 ? 1 : 0,
       builtInType: String(node.builtInType || 'DEF').toUpperCase(),
       data: {
+        audioArchiveAudio: node.data?.audioArchiveAudio === true,
+        audioArchiveSubtitlesVisible: isAudioArchiveSubtitlesVisible?.(node) === true,
+        parentArchiveMode: Number(node.data?.parentArchiveMode ?? 0) === 1 ? 1 : 0,
+        parentBuiltInType: String(node.data?.parentBuiltInType || 'DEF').toUpperCase(),
         rawExt,
         rawName,
       },
@@ -1613,6 +1622,20 @@ export default function DirectoryTree({
 
   // 菜单行为
   const handleAction = async (action: string, node: any) => {
+    if (action === '显示音频字幕文件' || action === '隐藏音频字幕文件') {
+      if (!node || !onToggleAudioArchiveSubtitles) {
+        return;
+      }
+      try {
+        await onToggleAudioArchiveSubtitles(node, action === '显示音频字幕文件');
+        Toast.success(action === '显示音频字幕文件' ? '已显示隐藏文件' : '已隐藏文件');
+      } catch (error: any) {
+        runtimeLogger.error('切换音频字幕文件显示失败:', error);
+        Toast.error(error?.message || '切换隐藏文件失败');
+      }
+      return;
+    }
+
     if (action === '打开原始目录') {
       if (!node || String(node.type) === 'file') {
         return;

@@ -23,7 +23,7 @@
 - `file-viewer.md`
   - 普通 viewer 体系入口、职责和阅读顺序
 - `archive-viewer.md`
-  - 归档 viewer 体系入口、职责和阅读顺序
+  - 归档 viewer 体系入口、职责和阅读顺序；当前同时记录音频归档 viewer 的轻量规则
 - `asmr-viewer.md`
   - ASMR 集合 viewer 的局部模型、缓存、播放协作和编辑链路
 - `comic-viewer.md`

@@ -90,6 +90,8 @@ const DirectorySidebar = React.forwardRef<DirectorySidebarHandle, Props>(({
     updateNodeBuiltInConfig,
     refreshAfterMove,
     refreshNodeSubtree,
+    toggleAudioArchiveSubtitles,
+    isAudioArchiveSubtitlesVisible,
   } = useRepositoryTree(libraryId, onFileOpen);
 
   React.useImperativeHandle(ref, () => ({
@@ -145,6 +147,12 @@ const DirectorySidebar = React.forwardRef<DirectorySidebarHandle, Props>(({
     if (!isNodeRespDTO(newNode)) {
       return;
     }
+    const parentBuiltInType = String(parentNode?.builtInType || 'DEF').toUpperCase();
+    const parentArchiveMode = Number(parentNode?.archiveMode ?? 0) === 1 ? 1 : 0;
+    if (parentNode?.id && parentBuiltInType === 'AUDIO' && parentArchiveMode === 1) {
+      void refreshNodeSubtree(Number(parentNode.id));
+      return;
+    }
 
     const parentNodeKey = (!parentNode || parentNode.key === 'root' || (rootNodeId !== null && parentNode.id === rootNodeId))
       ? 'root'
@@ -166,7 +174,7 @@ const DirectorySidebar = React.forwardRef<DirectorySidebarHandle, Props>(({
     if (uploadAppendTimerRef.current === null) {
       uploadAppendTimerRef.current = window.setTimeout(flushUploadAppendQueue, UPLOAD_APPEND_FLUSH_MS);
     }
-  }, [flushUploadAppendQueue, libraryId, rootNodeId]);
+  }, [flushUploadAppendQueue, libraryId, refreshNodeSubtree, rootNodeId]);
 
   React.useEffect(() => () => {
     if (uploadAppendTimerRef.current !== null) {
@@ -213,6 +221,8 @@ const DirectorySidebar = React.forwardRef<DirectorySidebarHandle, Props>(({
             }
             return refreshNodeSubtree(targetNodeId);
           }}
+          onToggleAudioArchiveSubtitles={toggleAudioArchiveSubtitles}
+          isAudioArchiveSubtitlesVisible={isAudioArchiveSubtitlesVisible}
           onOpenFileInBrowser={onOpenFileInBrowser}
           onSelectionChange={(payload) => {
             onSelectionChange?.({

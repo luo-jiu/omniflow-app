@@ -15,4 +15,5 @@ export type EmbeddedBrowserCaptureRuleSet = {
   extensions: string[]
   mimeTypes: string[]
   regexRules: EmbeddedBrowserCaptureRegexRule[]
+  version?: number
 }

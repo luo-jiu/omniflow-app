@@ -637,7 +637,7 @@ export function embeddedBrowserResourceProbeRuntimeHooksBody() {
     }
     try {
       const patterns = [
-        /["']((?:(?:https?:)?\/\/)?[^"'\s]*?\.(?:m3u8|mp4|flv)(?:\?[^"'\s]*)?)["']/gi,
+        /["']((?:(?:https?:)?\/\/)?[^"'\s]*?\.(?:m3u8|mp4|flv|vtt|srt|ass|ssa|ttml|lrc|qrc|krc|yrc|trc|ksc|sbv|dfxp|smi|sami|scc|stl|sub|idx|sup|lyric|lyrics|webvtt)(?:\?[^"'\s]*)?)["']/gi,
       ]
       document.querySelectorAll('script:not([src])').forEach((script) => {
         const scriptText = script.textContent || ''

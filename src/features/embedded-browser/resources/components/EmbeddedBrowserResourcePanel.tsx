@@ -57,12 +57,19 @@ type EmbeddedBrowserResourcePanelProps = {
   onOpenMediaProcessing?: (resources: EmbeddedBrowserCapturedResource[]) => void;
 };
 
+type ResourceDisplayMode = 'all' | 'filtered';
+
 const RESOURCE_FILTER_STORAGE_KEY = 'embedded-browser:resource-filter-regex';
 const RESOURCE_DEDUPE_SAME_NAME_STORAGE_KEY = 'embedded-browser:resource-dedupe-same-name';
-const DEFAULT_MEDIA_RESOURCE_REGEX = String.raw`(blob:|key|base64key|\.((m3u8|m3u|mpd|m4s|mp4|m4v|m4a|mp3|aac|flac|wav|ogg|oga|ogv|webm|mkv|mov|avi|ts|flv|hlv|f4v|wma|mpeg|wmv|asf|movie|divx|mpeg4|vid|weba|opus|acc|3gp|vtt|srt))(?:$|[?#]))`;
+const LEGACY_DEFAULT_MEDIA_RESOURCE_REGEX = String.raw`(blob:|key|base64key|\.((m3u8|m3u|mpd|m4s|mp4|m4v|m4a|mp3|aac|flac|wav|ogg|oga|ogv|webm|mkv|mov|avi|ts|flv|hlv|f4v|wma|mpeg|wmv|asf|movie|divx|mpeg4|vid|weba|opus|acc|3gp|vtt|srt))(?:$|[?#]))`;
+const DEFAULT_MEDIA_RESOURCE_REGEX = String.raw`(blob:|key|base64key|\.((m3u8|m3u|mpd|m4s|mp4|m4v|m4a|mp3|aac|flac|wav|ogg|oga|ogv|webm|mkv|mov|avi|ts|flv|hlv|f4v|wma|mpeg|wmv|asf|movie|divx|mpeg4|vid|weba|opus|acc|3gp|vtt|srt|ass|ssa|ttml|lrc|qrc|krc|yrc|trc|ksc|sbv|dfxp|smi|sami|scc|stl|sub|idx|sup|lyric|lyrics|webvtt))(?:$|[?#]))`;
 
 function loadResourceFilterDraft() {
   const value = window.localStorage.getItem(RESOURCE_FILTER_STORAGE_KEY);
+  if (value === LEGACY_DEFAULT_MEDIA_RESOURCE_REGEX) {
+    window.localStorage.setItem(RESOURCE_FILTER_STORAGE_KEY, DEFAULT_MEDIA_RESOURCE_REGEX);
+    return DEFAULT_MEDIA_RESOURCE_REGEX;
+  }
   return String(value || DEFAULT_MEDIA_RESOURCE_REGEX);
 }
 
@@ -104,6 +111,7 @@ const EmbeddedBrowserResourcePanel: React.FC<EmbeddedBrowserResourcePanelProps> 
   const [actionLoading, setActionLoading] = React.useState<'start' | 'deep' | 'stop' | 'clear' | 'cache' | 'reset' | null>(null);
   const [filterDraft, setFilterDraft] = React.useState(loadResourceFilterDraft);
   const [dedupeSameName, setDedupeSameName] = React.useState(loadDedupeSameName);
+  const [resourceDisplayMode, setResourceDisplayMode] = React.useState<ResourceDisplayMode>('all');
   const [extensionFilterIds, setExtensionFilterIds] = React.useState<string[]>([]);
   const [expandedResourceIds, setExpandedResourceIds] = React.useState<string[]>([]);
   const [manualMergeSelectedIds, setManualMergeSelectedIds] = React.useState<string[]>([]);
@@ -204,7 +212,7 @@ const EmbeddedBrowserResourcePanel: React.FC<EmbeddedBrowserResourcePanelProps> 
     setExtensionFilterIds((previous) => previous.filter((key) => availableKeys.has(key)));
   }, [extensionOptions]);
 
-  const filteredResources = React.useMemo(() => {
+  const ruleFilteredResources = React.useMemo(() => {
     if (!extensionFilterIds.length) {
       return dedupedResources;
     }
@@ -214,19 +222,23 @@ const EmbeddedBrowserResourcePanel: React.FC<EmbeddedBrowserResourcePanelProps> 
     ));
   }, [extensionFilterIds, dedupedResources]);
 
+  const displayResources = resourceDisplayMode === 'all'
+    ? resources
+    : ruleFilteredResources;
+
   const resourceSections = React.useMemo(
-    () => createEmbeddedBrowserResourceSections(filteredResources),
-    [filteredResources],
+    () => createEmbeddedBrowserResourceSections(displayResources),
+    [displayResources],
   );
   const mergeablePair = React.useMemo(
-    () => findMergeableResourcePair(filteredResources),
-    [filteredResources],
+    () => findMergeableResourcePair(displayResources),
+    [displayResources],
   );
   const manualMergeSelectedResources = React.useMemo(() => (
     manualMergeSelectedIds
-      .map((resourceId) => filteredResources.find((resource) => resource.id === resourceId))
+      .map((resourceId) => displayResources.find((resource) => resource.id === resourceId))
       .filter(Boolean) as EmbeddedBrowserCapturedResource[]
-  ), [filteredResources, manualMergeSelectedIds]);
+  ), [displayResources, manualMergeSelectedIds]);
   const manualMergePair = React.useMemo(
     () => createManualMergePair(manualMergeSelectedResources),
     [manualMergeSelectedResources],
@@ -238,9 +250,9 @@ const EmbeddedBrowserResourcePanel: React.FC<EmbeddedBrowserResourcePanelProps> 
 
   React.useEffect(() => {
     setManualMergeSelectedIds((previous) => (
-      previous.filter((resourceId) => filteredResources.some((resource) => resource.id === resourceId))
+      previous.filter((resourceId) => displayResources.some((resource) => resource.id === resourceId))
     ));
-  }, [filteredResources]);
+  }, [displayResources]);
 
   const toggleResourceSelection = React.useCallback((
     resource: EmbeddedBrowserCapturedResource,
@@ -254,20 +266,20 @@ const EmbeddedBrowserResourcePanel: React.FC<EmbeddedBrowserResourcePanelProps> 
   }, []);
 
   const selectAllFilteredResources = React.useCallback(() => {
-    setManualMergeSelectedIds(filteredResources.map((resource) => resource.id));
-  }, [filteredResources]);
+    setManualMergeSelectedIds(displayResources.map((resource) => resource.id));
+  }, [displayResources]);
 
   const invertFilteredResourceSelection = React.useCallback(() => {
     setManualMergeSelectedIds((previous) => {
       const selectedIds = new Set(previous);
-      const visibleIds = new Set(filteredResources.map((resource) => resource.id));
+      const visibleIds = new Set(displayResources.map((resource) => resource.id));
       const keptHiddenIds = previous.filter((resourceId) => !visibleIds.has(resourceId));
-      const invertedVisibleIds = filteredResources
+      const invertedVisibleIds = displayResources
         .filter((resource) => !selectedIds.has(resource.id))
         .map((resource) => resource.id);
       return [...keptHiddenIds, ...invertedVisibleIds];
     });
-  }, [filteredResources]);
+  }, [displayResources]);
 
   const copySelectedResourceLinks = React.useCallback(async () => {
     if (!manualMergeSelectedResources.length) {
@@ -318,8 +330,8 @@ const EmbeddedBrowserResourcePanel: React.FC<EmbeddedBrowserResourcePanelProps> 
   }, [externalToolOptions])
 
   const expandAllFilteredResources = React.useCallback(() => {
-    setExpandedResourceIds(filteredResources.map((resource) => resource.id));
-  }, [filteredResources]);
+    setExpandedResourceIds(displayResources.map((resource) => resource.id));
+  }, [displayResources]);
 
   const collapseAllResourceDetails = React.useCallback(() => {
     setExpandedResourceIds([]);
@@ -352,7 +364,7 @@ const EmbeddedBrowserResourcePanel: React.FC<EmbeddedBrowserResourcePanelProps> 
       dedupeSameName={dedupeSameName}
       disabled={disabled || actionLoading !== null}
       hasExpandedResources={expandedResourceIds.length > 0}
-      hasResources={filteredResources.length > 0}
+      hasResources={displayResources.length > 0}
       onClearSelection={() => {
         setManualMergeSelectedIds([]);
       }}
@@ -388,6 +400,7 @@ const EmbeddedBrowserResourcePanel: React.FC<EmbeddedBrowserResourcePanelProps> 
       onSelectAll={selectAllFilteredResources}
       onToggleDedupeSameName={() => {
         setDedupeSameName((value) => !value);
+        setResourceDisplayMode('filtered');
       }}
       onToggleExpandAll={() => {
         if (expandedResourceIds.length > 0) {
@@ -396,7 +409,7 @@ const EmbeddedBrowserResourcePanel: React.FC<EmbeddedBrowserResourcePanelProps> 
         }
         expandAllFilteredResources();
       }}
-      sameNameHiddenCount={sameNameHiddenCount}
+      sameNameHiddenCount={resourceDisplayMode === 'filtered' ? sameNameHiddenCount : 0}
       selectedCount={manualMergeSelectedResources.length}
       selectedMergeableCount={selectedMergeableCount}
     />
@@ -408,12 +421,14 @@ const EmbeddedBrowserResourcePanel: React.FC<EmbeddedBrowserResourcePanelProps> 
         <div className="resource-panel-empty">
           先打开一个内置浏览器标签页，再开始捕获。
         </div>
-      ) : filteredResources.length === 0 ? (
+      ) : displayResources.length === 0 ? (
         <div className="resource-panel-empty">
-          {filterError
+          {resourceDisplayMode === 'filtered' && filterError
             ? '当前正则无效，先修正过滤规则。'
             : captureEnabled
-              ? '当前过滤条件下还没有命中资源。可以继续浏览页面，或者点“深度捕获”后刷新页面。'
+              ? resourceDisplayMode === 'filtered'
+                ? '当前过滤条件下还没有命中资源。可以继续浏览页面，或者点“深度捕获”后刷新页面。'
+                : '当前页面还没有捕获到资源。可以继续浏览页面，或者点“深度捕获”后刷新页面。'
               : '点击“开启捕获”后，网络层资源会开始进入这个面板。'}
         </div>
       ) : (
@@ -437,7 +452,7 @@ const EmbeddedBrowserResourcePanel: React.FC<EmbeddedBrowserResourcePanelProps> 
                 onToggleDetails={toggleResourceDetails}
                 onToggleSelection={toggleResourceSelection}
                 resource={resource}
-                resources={filteredResources}
+                resources={displayResources}
                 selected={manualMergeSelectedIds.includes(resource.id)}
               />
             ))}
@@ -466,7 +481,7 @@ const EmbeddedBrowserResourcePanel: React.FC<EmbeddedBrowserResourcePanelProps> 
             {deepCaptureEnabled ? '深度探测已开启' : '深度探测未开启'}
           </span>
           <span className="resource-panel-badge">
-            {loading ? '同步中...' : `显示 ${filteredResources.length} / ${resources.length} 条`}
+            {loading ? '同步中...' : `显示 ${displayResources.length} / ${resources.length} 条`}
           </span>
         </div>
         <div className="resource-panel-filter">
@@ -479,6 +494,7 @@ const EmbeddedBrowserResourcePanel: React.FC<EmbeddedBrowserResourcePanelProps> 
               value={filterDraft}
               onChange={(event) => {
                 setFilterDraft(event.target.value);
+                setResourceDisplayMode('filtered');
               }}
               placeholder="输入正则，例如 m4s|m3u8|mpd"
             />
@@ -487,6 +503,7 @@ const EmbeddedBrowserResourcePanel: React.FC<EmbeddedBrowserResourcePanelProps> 
               className="resource-panel-filter-reset"
               onClick={() => {
                 setFilterDraft(DEFAULT_MEDIA_RESOURCE_REGEX);
+                setResourceDisplayMode('filtered');
               }}
             >
               重置
@@ -497,7 +514,27 @@ const EmbeddedBrowserResourcePanel: React.FC<EmbeddedBrowserResourcePanelProps> 
               正则解析失败：{filterError}
             </div>
           ) : null}
-          {extensionOptions.length > 0 ? (
+          <div className="resource-display-mode">
+            <button
+              type="button"
+              className={`resource-extension-chip ${resourceDisplayMode === 'all' ? 'is-active' : ''}`}
+              onClick={() => {
+                setResourceDisplayMode('all');
+              }}
+            >
+              全部 {resources.length}
+            </button>
+            <button
+              type="button"
+              className={`resource-extension-chip ${resourceDisplayMode === 'filtered' ? 'is-active' : ''}`}
+              onClick={() => {
+                setResourceDisplayMode('filtered');
+              }}
+            >
+              筛选 {ruleFilteredResources.length}
+            </button>
+          </div>
+          {resourceDisplayMode === 'filtered' && extensionOptions.length > 0 ? (
             <div className="resource-extension-filter">
               <button
                 type="button"
@@ -506,7 +543,7 @@ const EmbeddedBrowserResourcePanel: React.FC<EmbeddedBrowserResourcePanelProps> 
                   setExtensionFilterIds([]);
                 }}
               >
-                全部 {dedupedResources.length}
+                不限后缀 {dedupedResources.length}
               </button>
               {extensionOptions.map((option) => {
                 const active = extensionFilterIds.includes(option.key);
@@ -638,7 +675,7 @@ const EmbeddedBrowserResourcePanel: React.FC<EmbeddedBrowserResourcePanelProps> 
             <button
               type="button"
               className="resource-card-btn"
-              disabled={!filteredResources.length}
+              disabled={!displayResources.length}
               onClick={expandAllFilteredResources}
             >
               展开资源
@@ -657,6 +694,7 @@ const EmbeddedBrowserResourcePanel: React.FC<EmbeddedBrowserResourcePanelProps> 
               onClick={() => {
                 setFilterDraft(DEFAULT_MEDIA_RESOURCE_REGEX);
                 setExtensionFilterIds([]);
+                setResourceDisplayMode('filtered');
               }}
             >
               重置筛选
@@ -684,7 +722,7 @@ const EmbeddedBrowserResourcePanel: React.FC<EmbeddedBrowserResourcePanelProps> 
           <details className="resource-debug-shell">
             <summary>
               <span>抓包明细</span>
-              <span>{filteredResources.length} 条资源</span>
+              <span>{displayResources.length} 条资源</span>
             </summary>
             <div className="resource-debug-content">
               {resourceExplorer}

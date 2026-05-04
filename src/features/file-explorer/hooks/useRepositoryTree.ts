@@ -17,7 +17,7 @@ import {
   isHiddenNodeName,
   isImageFileNode,
   isVideoFileNode,
-  mapToTreeNode,
+  mapChildrenToTreeNodes,
   mergeNodesPreservingLoadedState,
   normalizeArchiveMode,
   removeTreeNodeByKey,
@@ -87,6 +87,8 @@ export function useRepositoryTree(
   const pendingAppendByRepositoryRef = useRef<Map<string, AppendNodeBatchItem[]>>(new Map());
   const pendingAppendRetryTimerRef = useRef<number | null>(null);
   const appendNodesByRepositoryRef = useRef<(repositoryId: string | number, items: AppendNodeBatchItem[]) => void>(() => { /* noop */ });
+  const audioArchiveShownDirectoryIdsRef = useRef<Set<number>>(new Set());
+  const audioArchiveShownAudioNodeIdsRef = useRef<Set<number>>(new Set());
 
   useEffect(() => {
     rootNodeIdRef.current = rootNodeId;
@@ -172,7 +174,7 @@ export function useRepositoryTree(
     rootNodeIdRef.current = nextRootNodeId;
 
     const rootNodes = (await getChildrenByNodeId(nextRootNodeId, repoLibraryId)) as NodeRespDTO[];
-    const mappedRoots = rootNodes.map((item: NodeRespDTO) => mapToTreeNode(item));
+    const mappedRoots = mapChildrenToTreeNodes(rootNodes);
     setTreesCache(prev => {
       const current = prev[id] || [];
       return {
@@ -212,8 +214,9 @@ export function useRepositoryTree(
     rootId: number,
     sourceExpandedKeys: string[],
   ) => {
-    let rebuiltTree = ((await getChildrenByNodeId(rootId, Number(repoId))) as NodeRespDTO[])
-      .map((item: NodeRespDTO) => mapToTreeNode(item));
+    let rebuiltTree = mapChildrenToTreeNodes(
+      (await getChildrenByNodeId(rootId, Number(repoId))) as NodeRespDTO[],
+    );
     let pendingKeys = Array.from(new Set(sourceExpandedKeys));
 
     while (pendingKeys.length > 0) {
@@ -234,7 +237,10 @@ export function useRepositoryTree(
         rebuiltTree = updateNodeChildren(
           rebuiltTree,
           key,
-          children.map((item: NodeRespDTO) => mapToTreeNode(item, target)),
+          mapChildrenToTreeNodes(children, target, {
+            showAllSubtitles: audioArchiveShownDirectoryIdsRef.current.has(target.id),
+            expandedAudioNodeIds: audioArchiveShownAudioNodeIdsRef.current,
+          }),
         );
         progressed = true;
       }
@@ -315,6 +321,11 @@ export function useRepositoryTree(
                   nextExt,
                   node.data?.parentBuiltInType,
                   node.data?.parentArchiveMode,
+                  newName,
+                  {
+                    hasAudioSubtitle: node.data?.audioArchiveHasSubtitle === true,
+                    audioArchiveSubtitle: node.data?.audioArchiveSubtitle === true,
+                  },
                 )
                 : node.icon,
             };
@@ -367,6 +378,10 @@ export function useRepositoryTree(
                   rawExt: child.data?.rawExt ?? child.ext ?? '',
                   parentBuiltInType: mergedBuiltInType,
                   parentArchiveMode: mergedArchiveMode,
+                  audioArchiveAudio: false,
+                  audioArchiveHasSubtitle: false,
+                  audioArchiveSubtitle: false,
+                  audioArchiveSubtitleOwnerId: undefined,
                 },
               };
             });
@@ -424,7 +439,7 @@ export function useRepositoryTree(
       let changed = false;
 
       if (rootItems.length > 0) {
-        const mappedRoots = rootItems.map(item => mapToTreeNode(item));
+        const mappedRoots = mapChildrenToTreeNodes(rootItems);
         nextCurrent = [...nextCurrent, ...mappedRoots];
         changed = true;
       }
@@ -445,7 +460,14 @@ export function useRepositoryTree(
           });
           return;
         }
-        const mappedChildren = groupItems.map(item => mapToTreeNode(item.newNodeDTO, parent));
+        const mappedChildren = mapChildrenToTreeNodes(
+          groupItems.map(item => item.newNodeDTO),
+          parent,
+          {
+            showAllSubtitles: audioArchiveShownDirectoryIdsRef.current.has(parent.id),
+            expandedAudioNodeIds: audioArchiveShownAudioNodeIdsRef.current,
+          },
+        );
         const newChildren = parent.children ? [...parent.children, ...mappedChildren] : mappedChildren;
         nextCurrent = updateNodeChildren(
           nextCurrent,
@@ -534,13 +556,13 @@ export function useRepositoryTree(
   const refreshParentChildren = useCallback(async (parentId: number) => {
     const children = (await getChildrenByNodeId(parentId, Number(selectedRepository))) as NodeRespDTO[];
     const currentRootNodeId = rootNodeIdRef.current;
-    const mapped = children.map((item: NodeRespDTO) => {
-      if (currentRootNodeId !== null && parentId === currentRootNodeId) {
-        return mapToTreeNode(item);
-      }
-      const current = treesCacheRef.current[selectedRepository] || [];
-      const parentNode = findNodeById(current, parentId);
-      return mapToTreeNode(item, parentNode || undefined);
+    const current = treesCacheRef.current[selectedRepository] || [];
+    const parentNode = currentRootNodeId !== null && parentId === currentRootNodeId
+      ? undefined
+      : findNodeById(current, parentId) || undefined;
+    const mapped = mapChildrenToTreeNodes(children, parentNode, {
+      showAllSubtitles: audioArchiveShownDirectoryIdsRef.current.has(parentId),
+      expandedAudioNodeIds: audioArchiveShownAudioNodeIdsRef.current,
     });
 
     setTreesCache(prev => {
@@ -652,7 +674,10 @@ export function useRepositoryTree(
 
     try {
       const children = await getChildrenByNodeId(node.id, Number(selectedRepository));
-      const mapped = (children as NodeRespDTO[]).map((item: NodeRespDTO) => mapToTreeNode(item, node));
+      const mapped = mapChildrenToTreeNodes(children as NodeRespDTO[], node, {
+        showAllSubtitles: audioArchiveShownDirectoryIdsRef.current.has(node.id),
+        expandedAudioNodeIds: audioArchiveShownAudioNodeIdsRef.current,
+      });
 
       // 第一步：先把子节点数据写入树（此时节点仍然是收起状态）
       setTreesCache(prev => ({
@@ -815,6 +840,19 @@ export function useRepositoryTree(
         return;
       }
 
+      if (archiveMode === 1 && builtInType === 'AUDIO') {
+        if (onFileOpen) {
+          onFileOpen(
+            `audio-archive://library/${selectedLibraryId}/node/${node.id}`,
+            node.name,
+            'audio_archive',
+            node.id,
+            { tabTypeLabel: 'AUDIO-ARCHIVE' },
+          );
+        }
+        return;
+      }
+
       if (archiveMode === 1) {
         await toggleDirectoryNodeExpand();
         return;
@@ -910,6 +948,46 @@ export function useRepositoryTree(
       }
     }
   }, [loadChildren, onFileOpen, selectedRepository]);
+
+  const toggleAudioArchiveSubtitles = useCallback(async (node: Node, visible: boolean) => {
+    const nodeId = Number(node?.id);
+    if (!Number.isFinite(nodeId) || nodeId <= 0) {
+      return;
+    }
+
+    if (node.type === 'dir') {
+      if (visible) {
+        audioArchiveShownDirectoryIdsRef.current.add(nodeId);
+      } else {
+        audioArchiveShownDirectoryIdsRef.current.delete(nodeId);
+      }
+      await refreshParentChildren(nodeId);
+      return;
+    }
+
+    const parentId = Number(node.parentId);
+    if (!Number.isFinite(parentId) || parentId <= 0) {
+      return;
+    }
+    if (visible) {
+      audioArchiveShownAudioNodeIdsRef.current.add(nodeId);
+    } else {
+      audioArchiveShownAudioNodeIdsRef.current.delete(nodeId);
+    }
+    await refreshParentChildren(parentId);
+  }, [refreshParentChildren]);
+
+  const isAudioArchiveSubtitlesVisible = useCallback((node: Node): boolean => {
+    const nodeId = Number(node?.id);
+    if (!Number.isFinite(nodeId) || nodeId <= 0) {
+      return false;
+    }
+    if (node.type === 'dir') {
+      return audioArchiveShownDirectoryIdsRef.current.has(nodeId);
+    }
+    return audioArchiveShownAudioNodeIdsRef.current.has(nodeId);
+  }, []);
+
   return {
     selectedRepository,
     rootNodeId,
@@ -927,5 +1005,7 @@ export function useRepositoryTree(
     updateNodeBuiltInConfig,
     refreshAfterMove,
     refreshNodeSubtree,
+    toggleAudioArchiveSubtitles,
+    isAudioArchiveSubtitlesVisible,
   };
 }

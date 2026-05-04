@@ -1829,6 +1829,7 @@ function consumeEmbeddedBrowserCachedCredential(requestId) {
   return entry.credential;
 }
 const STORE_FILE_NAME$1 = "embedded-browser-resource-capture-rules.json";
+const CAPTURE_RULE_SCHEMA_VERSION = 2;
 const catCatchManifestExtensions = [
   "m3u8",
   "m3u",
@@ -1883,7 +1884,45 @@ const catCatchSubtitleExtensions = [
   "srt",
   "ass",
   "ssa",
-  "ttml"
+  "ttml",
+  "lrc",
+  "qrc",
+  "krc",
+  "yrc",
+  "trc",
+  "ksc",
+  "sbv",
+  "dfxp",
+  "smi",
+  "sami",
+  "scc",
+  "stl",
+  "sub",
+  "idx",
+  "sup",
+  "lyric",
+  "lyrics",
+  "webvtt"
+];
+const catCatchExpandedSubtitleExtensions = [
+  "lrc",
+  "qrc",
+  "krc",
+  "yrc",
+  "trc",
+  "ksc",
+  "sbv",
+  "dfxp",
+  "smi",
+  "sami",
+  "scc",
+  "stl",
+  "sub",
+  "idx",
+  "sup",
+  "lyric",
+  "lyrics",
+  "webvtt"
 ];
 const catCatchKeyExtensions = [
   "key",
@@ -1892,6 +1931,22 @@ const catCatchKeyExtensions = [
 const catCatchMediaMimeTypes = [
   "application/ogg",
   "application/m4s"
+];
+const catCatchSubtitleMimeTypes = [
+  "text/vtt",
+  "text/srt",
+  "text/x-srt",
+  "text/x-ass",
+  "text/x-ssa",
+  "application/x-subrip",
+  "application/ttml+xml",
+  "application/x-srt",
+  "application/x-subtitle"
+];
+const catCatchSubtitleMimeTypeIncludes = [
+  "subrip",
+  "subtitle",
+  "ttml+xml"
 ];
 const catCatchManifestMimeTypeIncludes = [
   "mpegurl",
@@ -1957,6 +2012,7 @@ const defaultCaptureMimeTypes = [
   "video/*",
   "audio/*",
   ...catCatchMediaMimeTypes,
+  ...catCatchSubtitleMimeTypes,
   "application/x-mpegurl",
   "application/vnd.apple.mpegurl",
   "application/dash+xml"
@@ -1968,6 +2024,7 @@ const catCatchImageExtensionSet = new Set(catCatchImageExtensions);
 const catCatchSubtitleExtensionSet = new Set(catCatchSubtitleExtensions);
 const catCatchKeyExtensionSet = new Set(catCatchKeyExtensions);
 const catCatchMediaMimeTypeSet = new Set(catCatchMediaMimeTypes);
+const catCatchSubtitleMimeTypeSet = new Set(catCatchSubtitleMimeTypes);
 const catCatchRelevantRequestHeaderSet = new Set(catCatchRelevantRequestHeaders);
 function getRuleStorePath() {
   return path.join(app.getPath("userData"), STORE_FILE_NAME$1);
@@ -2000,7 +2057,8 @@ function createDefaultRuleSet() {
     regexRules: catCatchDefaultRegexRules.map((rule) => ({
       ...rule,
       ext: normalizeExtension(rule.ext || "") || void 0
-    }))
+    })),
+    version: CAPTURE_RULE_SCHEMA_VERSION
   };
 }
 function normalizeRegexRule(rule) {
@@ -2027,13 +2085,24 @@ function normalizeRegexRule(rule) {
 }
 function normalizeRuleSet(input) {
   const defaults = createDefaultRuleSet();
+  const inputVersion = Number((input == null ? void 0 : input.version) || 0);
+  const shouldAppendNewDefaults = inputVersion < CAPTURE_RULE_SCHEMA_VERSION;
+  const extensions = Array.from(/* @__PURE__ */ new Set([
+    ...((input == null ? void 0 : input.extensions) || defaults.extensions).map(normalizeExtension).filter(Boolean),
+    ...shouldAppendNewDefaults ? catCatchExpandedSubtitleExtensions.map(normalizeExtension) : []
+  ]));
+  const mimeTypes = Array.from(/* @__PURE__ */ new Set([
+    ...((input == null ? void 0 : input.mimeTypes) || defaults.mimeTypes).map(normalizeMimeTypePattern).filter(Boolean),
+    ...shouldAppendNewDefaults ? catCatchSubtitleMimeTypes.map(normalizeMimeTypePattern) : []
+  ]));
   const regexRules = Array.isArray(input == null ? void 0 : input.regexRules) ? input == null ? void 0 : input.regexRules.map(normalizeRegexRule).filter(Boolean) : defaults.regexRules;
   return {
     domainBlacklist: Array.from(new Set(((input == null ? void 0 : input.domainBlacklist) || []).map(normalizeDomain).filter(Boolean))),
     domainWhitelist: Array.from(new Set(((input == null ? void 0 : input.domainWhitelist) || []).map(normalizeDomain).filter(Boolean))),
-    extensions: Array.from(new Set(((input == null ? void 0 : input.extensions) || defaults.extensions).map(normalizeExtension).filter(Boolean))),
-    mimeTypes: Array.from(new Set(((input == null ? void 0 : input.mimeTypes) || defaults.mimeTypes).map(normalizeMimeTypePattern).filter(Boolean))),
-    regexRules
+    extensions,
+    mimeTypes,
+    regexRules,
+    version: CAPTURE_RULE_SCHEMA_VERSION
   };
 }
 function loadStoredRuleSet() {
@@ -2049,6 +2118,9 @@ function loadStoredRuleSet() {
     const raw = readFileSync(storePath, "utf-8");
     const parsed = JSON.parse(raw);
     cachedRuleSet = normalizeRuleSet(parsed);
+    if (cachedRuleSet.version !== parsed.version) {
+      saveStoredRuleSet(cachedRuleSet);
+    }
     return cachedRuleSet;
   } catch {
     cachedRuleSet = createDefaultRuleSet();
@@ -2108,6 +2180,9 @@ function isCatCatchManifestMimeType(normalizedMimeType) {
 }
 function isCatCatchMediaMimeType(normalizedMimeType) {
   return normalizedMimeType.startsWith("video/") || normalizedMimeType.startsWith("audio/") || catCatchMediaMimeTypeSet.has(normalizedMimeType);
+}
+function isCatCatchSubtitleMimeType(normalizedMimeType) {
+  return catCatchSubtitleMimeTypeSet.has(normalizedMimeType) || catCatchSubtitleMimeTypeIncludes.some((value) => normalizedMimeType.includes(value));
 }
 function classifyCatCatchExtensionKind(extension) {
   if (catCatchManifestExtensionSet.has(extension)) {
@@ -2248,7 +2323,7 @@ function classifyCapturedResource(input) {
   if (extensionKind === "image" || normalizedMimeType.startsWith("image/")) {
     return "image";
   }
-  if (extensionKind === "subtitle" || normalizedMimeType.includes("text/vtt")) {
+  if (extensionKind === "subtitle" || isCatCatchSubtitleMimeType(normalizedMimeType)) {
     return "subtitle";
   }
   if (extension === "pdf" || normalizedMimeType === "application/pdf") {
@@ -4605,14 +4680,38 @@ function embeddedBrowserResourceProbeRuntimeCoreBody() {
     "3gp"
   ]);
   const imageExtensions = /* @__PURE__ */ new Set(["jpg", "jpeg", "png", "gif", "webp", "bmp", "svg", "avif", "ico"]);
-  const subtitleExtensions = /* @__PURE__ */ new Set(["vtt", "srt", "ass", "ssa", "ttml"]);
+  const subtitleExtensions = /* @__PURE__ */ new Set([
+    "vtt",
+    "srt",
+    "ass",
+    "ssa",
+    "ttml",
+    "lrc",
+    "qrc",
+    "krc",
+    "yrc",
+    "trc",
+    "ksc",
+    "sbv",
+    "dfxp",
+    "smi",
+    "sami",
+    "scc",
+    "stl",
+    "sub",
+    "idx",
+    "sup",
+    "lyric",
+    "lyrics",
+    "webvtt"
+  ]);
   const keyExtensions = /* @__PURE__ */ new Set(["key", "base64key"]);
   const dataUrlPattern = /^data:(application|video|audio)\//i;
   const likelyUrlPattern = /^(https?:\/\/|blob:|\/\/|\/|\.\/|\.\.\/)/i;
   const manifestPattern = /\.(m3u8|m3u|mpd)(\?|#|$)/i;
   const mediaPattern = /\.(mp4|m4v|m4a|m4s|mp3|aac|flac|wav|ogg|oga|ogv|webm|mkv|mov|avi|ts|flv|hlv|f4v|wma|mpeg|wmv|asf|movie|divx|mpeg4|vid|weba|opus|acc|3gp)(\?|#|$)/i;
   const imagePattern = /\.(jpg|jpeg|png|gif|webp|bmp|svg|avif|ico)(\?|#|$)/i;
-  const subtitlePattern = /\.(vtt|srt|ass|ssa|ttml)(\?|#|$)/i;
+  const subtitlePattern = /\.(vtt|srt|ass|ssa|ttml|lrc|qrc|krc|yrc|trc|ksc|sbv|dfxp|smi|sami|scc|stl|sub|idx|sup|lyric|lyrics|webvtt)(\?|#|$)/i;
   const pdfPattern = /\.pdf(\?|#|$)/i;
   const keyPattern = /\.(key|base64key)(\?|#|$)/i;
   const originalJSONParse = JSON.parse.bind(JSON);
@@ -4903,7 +5002,7 @@ function embeddedBrowserResourceProbeRuntimeCoreBody() {
     if (imageExtensions.has(extension) || normalizedMimeType.startsWith("image/") || imagePattern.test(url)) {
       return "image";
     }
-    if (subtitleExtensions.has(extension) || normalizedMimeType.includes("text/vtt") || subtitlePattern.test(url)) {
+    if (subtitleExtensions.has(extension) || normalizedMimeType.includes("text/vtt") || normalizedMimeType.includes("subrip") || normalizedMimeType.includes("subtitle") || normalizedMimeType.includes("ttml+xml") || normalizedMimeType === "text/srt" || normalizedMimeType === "text/x-srt" || normalizedMimeType === "text/x-ass" || normalizedMimeType === "text/x-ssa" || subtitlePattern.test(url)) {
       return "subtitle";
     }
     if (extension === "pdf" || normalizedMimeType === "application/pdf" || pdfPattern.test(url)) {

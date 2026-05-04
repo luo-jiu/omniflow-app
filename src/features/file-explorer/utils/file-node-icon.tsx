@@ -26,6 +26,50 @@ function createIconNode(src: string, alt: string): React.ReactNode {
   });
 }
 
+function createAudioWithSubtitleIconNode(): React.ReactNode {
+  const audioIcon = getMaterialIconUrl('audio') || getMaterialIconUrl('file-blank') || '';
+  const subtitleIcon = getMaterialIconUrl('subtitles') || getMaterialIconUrl('file-blank') || '';
+  return React.createElement(
+    'span',
+    {
+      className: 'tree-file-type-icon tree-file-type-icon-audio-subtitles',
+      title: '带字幕的音频',
+      style: {
+        position: 'relative',
+        display: 'inline-flex',
+        width: 20,
+        height: 20,
+        alignItems: 'center',
+        justifyContent: 'center',
+      },
+    },
+    React.createElement('img', {
+      src: audioIcon,
+      alt: 'audio',
+      width: 20,
+      height: 20,
+      draggable: false,
+      style: { display: 'block', width: 20, height: 20, objectFit: 'contain' },
+    }),
+    React.createElement('img', {
+      src: subtitleIcon,
+      alt: 'subtitles',
+      width: 9,
+      height: 9,
+      draggable: false,
+      style: {
+        position: 'absolute',
+        right: -1,
+        bottom: -1,
+        width: 9,
+        height: 9,
+        objectFit: 'contain',
+        filter: 'drop-shadow(0 0 1px rgba(255, 255, 255, 0.9))',
+      },
+    }),
+  );
+}
+
 function normalizeExt(ext?: string): string {
   return (ext || '').toLowerCase().replace('.', '');
 }
@@ -49,14 +93,20 @@ export function isImageExtension(ext?: string): boolean {
   return imageExtensions.includes(normalized);
 }
 
-function isAudioExtension(ext?: string): boolean {
+export function isAudioExtension(ext?: string): boolean {
   const normalized = normalizeExt(ext);
-  const audioExtensions = ['mp3', 'wav', 'aac', 'flac', 'm4a', 'ogg', 'opus'];
+  const audioExtensions = ['mp3', 'wav', 'aac', 'flac', 'm4a', 'ogg', 'oga', 'opus'];
   return audioExtensions.includes(normalized);
 }
 
 function isVideoExtension(ext?: string): boolean {
   return resolvePreviewFileType(undefined, ext) === 'video';
+}
+
+export function isSubtitleExtension(ext?: string): boolean {
+  const normalized = normalizeExt(ext);
+  const subtitleExtensions = ['lrc', 'srt', 'vtt', 'ass', 'ssa'];
+  return subtitleExtensions.includes(normalized);
 }
 
 const FILE_ICON_BY_NAME: Record<string, string> = {
@@ -310,6 +360,10 @@ export function getFileNodeIconByParentBuiltInType(
   parentBuiltInType?: string,
   parentArchiveMode?: number,
   fileName?: string,
+  options?: {
+    hasAudioSubtitle?: boolean;
+    audioArchiveSubtitle?: boolean;
+  },
 ): React.ReactNode {
   const normalizedBuiltInType = String(parentBuiltInType || 'DEF').toUpperCase();
   const normalizedArchiveMode = Number(parentArchiveMode ?? 0) === 1 ? 1 : 0;
@@ -335,6 +389,19 @@ export function getFileNodeIconByParentBuiltInType(
         : '与视频模式不匹配的文件',
     );
   }
+  if (normalizedBuiltInType === 'AUDIO' && normalizedArchiveMode === 1) {
+    if (options?.audioArchiveSubtitle || isSubtitleExtension(ext)) {
+      const subtitleIcon = getMaterialIconUrl('subtitles') || getMaterialIconUrl('file-blank') || '';
+      return createIconNode(subtitleIcon, 'subtitles');
+    }
+    if (isAudioExtension(ext)) {
+      if (options?.hasAudioSubtitle) {
+        return createAudioWithSubtitleIconNode();
+      }
+      return getFileNodeIcon(ext, fileName);
+    }
+    return createWarningIconNode('与音频归档模式不匹配的文件');
+  }
   return getFileNodeIcon(ext, fileName);
 }
 
@@ -358,6 +425,9 @@ export function getDirectoryBuiltInIcon(
   }
   if (normalized === 'VIDEO') {
     return createIconNode(getMaterialIconUrl('video') || '', 'video-folder');
+  }
+  if (normalized === 'AUDIO') {
+    return createIconNode(getMaterialIconUrl('folder-audio') || getMaterialIconUrl('audio') || '', 'audio-folder');
   }
   return createWarningIconNode(`未知内置类型: ${normalized}`);
 }

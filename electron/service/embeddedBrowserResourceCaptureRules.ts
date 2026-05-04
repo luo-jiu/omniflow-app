@@ -14,6 +14,7 @@ import type {
 } from '@/features/embedded-browser/resources/model/embedded-browser-capture-rules'
 
 const STORE_FILE_NAME = 'embedded-browser-resource-capture-rules.json'
+const CAPTURE_RULE_SCHEMA_VERSION = 2
 
 export type EmbeddedBrowserResourceRegexMatch = {
   blacklist: boolean
@@ -85,6 +86,45 @@ export const catCatchSubtitleExtensions = [
   'ass',
   'ssa',
   'ttml',
+  'lrc',
+  'qrc',
+  'krc',
+  'yrc',
+  'trc',
+  'ksc',
+  'sbv',
+  'dfxp',
+  'smi',
+  'sami',
+  'scc',
+  'stl',
+  'sub',
+  'idx',
+  'sup',
+  'lyric',
+  'lyrics',
+  'webvtt',
+] as const
+
+const catCatchExpandedSubtitleExtensions = [
+  'lrc',
+  'qrc',
+  'krc',
+  'yrc',
+  'trc',
+  'ksc',
+  'sbv',
+  'dfxp',
+  'smi',
+  'sami',
+  'scc',
+  'stl',
+  'sub',
+  'idx',
+  'sup',
+  'lyric',
+  'lyrics',
+  'webvtt',
 ] as const
 
 export const catCatchKeyExtensions = [
@@ -95,6 +135,24 @@ export const catCatchKeyExtensions = [
 export const catCatchMediaMimeTypes = [
   'application/ogg',
   'application/m4s',
+] as const
+
+export const catCatchSubtitleMimeTypes = [
+  'text/vtt',
+  'text/srt',
+  'text/x-srt',
+  'text/x-ass',
+  'text/x-ssa',
+  'application/x-subrip',
+  'application/ttml+xml',
+  'application/x-srt',
+  'application/x-subtitle',
+] as const
+
+export const catCatchSubtitleMimeTypeIncludes = [
+  'subrip',
+  'subtitle',
+  'ttml+xml',
 ] as const
 
 export const catCatchManifestMimeTypeIncludes = [
@@ -169,6 +227,7 @@ const defaultCaptureMimeTypes = [
   'video/*',
   'audio/*',
   ...catCatchMediaMimeTypes,
+  ...catCatchSubtitleMimeTypes,
   'application/x-mpegurl',
   'application/vnd.apple.mpegurl',
   'application/dash+xml',
@@ -182,6 +241,7 @@ export const catCatchImageExtensionSet = new Set<string>(catCatchImageExtensions
 export const catCatchSubtitleExtensionSet = new Set<string>(catCatchSubtitleExtensions)
 export const catCatchKeyExtensionSet = new Set<string>(catCatchKeyExtensions)
 export const catCatchMediaMimeTypeSet = new Set<string>(catCatchMediaMimeTypes)
+export const catCatchSubtitleMimeTypeSet = new Set<string>(catCatchSubtitleMimeTypes)
 export const catCatchRelevantRequestHeaderSet = new Set<string>(catCatchRelevantRequestHeaders)
 
 function getRuleStorePath() {
@@ -221,6 +281,7 @@ function createDefaultRuleSet(): EmbeddedBrowserCaptureRuleSet {
       ...rule,
       ext: normalizeExtension(rule.ext || '') || undefined,
     })),
+    version: CAPTURE_RULE_SCHEMA_VERSION,
   }
 }
 
@@ -254,15 +315,26 @@ function normalizeRuleSet(
   input?: Partial<EmbeddedBrowserCaptureRuleSet> | null,
 ): EmbeddedBrowserCaptureRuleSet {
   const defaults = createDefaultRuleSet()
+  const inputVersion = Number(input?.version || 0)
+  const shouldAppendNewDefaults = inputVersion < CAPTURE_RULE_SCHEMA_VERSION
+  const extensions = Array.from(new Set([
+    ...(input?.extensions || defaults.extensions).map(normalizeExtension).filter(Boolean),
+    ...(shouldAppendNewDefaults ? catCatchExpandedSubtitleExtensions.map(normalizeExtension) : []),
+  ]))
+  const mimeTypes = Array.from(new Set([
+    ...(input?.mimeTypes || defaults.mimeTypes).map(normalizeMimeTypePattern).filter(Boolean),
+    ...(shouldAppendNewDefaults ? catCatchSubtitleMimeTypes.map(normalizeMimeTypePattern) : []),
+  ]))
   const regexRules = Array.isArray(input?.regexRules)
     ? input?.regexRules.map(normalizeRegexRule).filter(Boolean) as EmbeddedBrowserCaptureRegexRule[]
     : defaults.regexRules
   return {
     domainBlacklist: Array.from(new Set((input?.domainBlacklist || []).map(normalizeDomain).filter(Boolean))),
     domainWhitelist: Array.from(new Set((input?.domainWhitelist || []).map(normalizeDomain).filter(Boolean))),
-    extensions: Array.from(new Set((input?.extensions || defaults.extensions).map(normalizeExtension).filter(Boolean))),
-    mimeTypes: Array.from(new Set((input?.mimeTypes || defaults.mimeTypes).map(normalizeMimeTypePattern).filter(Boolean))),
+    extensions,
+    mimeTypes,
     regexRules,
+    version: CAPTURE_RULE_SCHEMA_VERSION,
   }
 }
 
@@ -279,6 +351,9 @@ function loadStoredRuleSet(): EmbeddedBrowserCaptureRuleSet {
     const raw = readFileSync(storePath, 'utf-8')
     const parsed = JSON.parse(raw) as EmbeddedBrowserCaptureRuleSet
     cachedRuleSet = normalizeRuleSet(parsed)
+    if (cachedRuleSet.version !== parsed.version) {
+      saveStoredRuleSet(cachedRuleSet)
+    }
     return cachedRuleSet
   } catch {
     cachedRuleSet = createDefaultRuleSet()
@@ -351,6 +426,11 @@ export function isCatCatchMediaMimeType(normalizedMimeType: string) {
   return normalizedMimeType.startsWith('video/')
     || normalizedMimeType.startsWith('audio/')
     || catCatchMediaMimeTypeSet.has(normalizedMimeType)
+}
+
+export function isCatCatchSubtitleMimeType(normalizedMimeType: string) {
+  return catCatchSubtitleMimeTypeSet.has(normalizedMimeType)
+    || catCatchSubtitleMimeTypeIncludes.some((value) => normalizedMimeType.includes(value))
 }
 
 export function classifyCatCatchExtensionKind(

@@ -131,6 +131,13 @@ const PanelShell = styled.aside`
     gap: 5px;
   }
 
+  .resource-display-mode {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 5px;
+  }
+
   .resource-extension-chip {
     height: 24px;
     padding: 0 8px;

@@ -1,6 +1,11 @@
 import { buildTreeNodeLabel } from '@/utils/fileTreeSettings';
 import { resolvePreviewFileType, type PreviewFileType } from '@/utils/preview-file-type';
-import { getDirectoryBuiltInIcon, getFileNodeIconByParentBuiltInType } from '../../utils/file-node-icon';
+import {
+  getDirectoryBuiltInIcon,
+  getFileNodeIconByParentBuiltInType,
+  isAudioExtension,
+  isSubtitleExtension,
+} from '../../utils/file-node-icon';
 import type { Node, NodeRespDTO } from './types';
 
 export function normalizeArchiveMode(mode?: number): 0 | 1 {
@@ -20,6 +25,14 @@ export function isImageFileNode(item: Pick<NodeRespDTO, 'mimeType' | 'ext'>): bo
 
 export function isVideoFileNode(item: Pick<NodeRespDTO, 'mimeType' | 'ext'>): boolean {
   return resolveFileType(item.mimeType, item.ext) === 'video';
+}
+
+export function isAudioFileNode(item: Pick<NodeRespDTO, 'mimeType' | 'ext'>): boolean {
+  return resolveFileType(item.mimeType, item.ext) === 'audio' || isAudioExtension(item.ext);
+}
+
+export function isSubtitleFileNode(item: Pick<NodeRespDTO, 'type' | 'ext'>): boolean {
+  return item.type === 'file' && isSubtitleExtension(item.ext);
 }
 
 export function isHiddenNodeName(name?: string, ext?: string): boolean {
@@ -144,9 +157,120 @@ export function removeTreeNodeByKey(nodes: Node[], targetKey: string): Node[] {
   return changed ? nextNodes : nodes;
 }
 
+function normalizeSubtitleMatchName(name?: string): string {
+  return String(name || '').trim().toLowerCase();
+}
+
+export interface AudioArchiveSubtitleVisibility {
+  showAllSubtitles?: boolean;
+  expandedAudioNodeIds?: Set<number>;
+}
+
+interface TreeNodeMapOptions {
+  audioArchiveHasSubtitle?: boolean;
+  audioArchiveSubtitle?: boolean;
+  audioArchiveSubtitleOwnerId?: number;
+}
+
+export function mapAudioArchiveChildrenForDisplay(
+  children: NodeRespDTO[],
+  parentNode?: Pick<Node, 'builtInType' | 'archiveMode'>,
+  visibility?: AudioArchiveSubtitleVisibility,
+): Array<{ item: NodeRespDTO; options?: TreeNodeMapOptions }> {
+  const parentBuiltInType = String(parentNode?.builtInType || 'DEF').toUpperCase();
+  const parentArchiveMode = normalizeArchiveMode(parentNode?.archiveMode);
+  if (parentBuiltInType !== 'AUDIO' || parentArchiveMode !== 1) {
+    return children.map(item => ({ item }));
+  }
+
+  const audioByName = new Map<string, NodeRespDTO[]>();
+  const subtitlesByName = new Map<string, NodeRespDTO[]>();
+
+  children.forEach((item) => {
+    if (item.type !== 'file') {
+      return;
+    }
+    const matchName = normalizeSubtitleMatchName(item.name);
+    if (!matchName) {
+      return;
+    }
+    if (isAudioFileNode(item)) {
+      const bucket = audioByName.get(matchName) || [];
+      bucket.push(item);
+      audioByName.set(matchName, bucket);
+      return;
+    }
+    if (isSubtitleFileNode(item)) {
+      const bucket = subtitlesByName.get(matchName) || [];
+      bucket.push(item);
+      subtitlesByName.set(matchName, bucket);
+    }
+  });
+
+  const consumedSubtitleIds = new Set<number>();
+  const expandedAudioNodeIds = visibility?.expandedAudioNodeIds ?? new Set<number>();
+  const result: Array<{ item: NodeRespDTO; options?: TreeNodeMapOptions }> = [];
+
+  children.forEach((item) => {
+    if (consumedSubtitleIds.has(item.id)) {
+      return;
+    }
+
+    if (item.type === 'file' && isSubtitleFileNode(item)) {
+      const matchName = normalizeSubtitleMatchName(item.name);
+      if (audioByName.has(matchName)) {
+        return;
+      }
+      result.push({ item, options: { audioArchiveSubtitle: true } });
+      return;
+    }
+
+    if (item.type !== 'file' || !isAudioFileNode(item)) {
+      result.push({ item });
+      return;
+    }
+
+    const matchName = normalizeSubtitleMatchName(item.name);
+    const subtitles = subtitlesByName.get(matchName) || [];
+    const hasSubtitle = subtitles.length > 0;
+    result.push({ item, options: { audioArchiveHasSubtitle: hasSubtitle } });
+
+    if (!hasSubtitle) {
+      return;
+    }
+    const shouldShowSubtitles = visibility?.showAllSubtitles || expandedAudioNodeIds.has(item.id);
+    if (!shouldShowSubtitles) {
+      return;
+    }
+
+    subtitles.forEach((subtitle) => {
+      consumedSubtitleIds.add(subtitle.id);
+      result.push({
+        item: subtitle,
+        options: {
+          audioArchiveSubtitle: true,
+          audioArchiveSubtitleOwnerId: item.id,
+        },
+      });
+    });
+  });
+
+  return result;
+}
+
+export function mapChildrenToTreeNodes(
+  children: NodeRespDTO[],
+  parentNode?: Node,
+  visibility?: AudioArchiveSubtitleVisibility,
+): Node[] {
+  return mapAudioArchiveChildrenForDisplay(children, parentNode, visibility)
+    .map(({ item, options }) => mapToTreeNode(item, parentNode, options));
+}
+
 export function mapToTreeNode(
   item: NodeRespDTO,
   parentNode?: Pick<Node, 'builtInType' | 'archiveMode'>,
+  options?: TreeNodeMapOptions,
 ): Node {
   const parentBuiltInType = String(parentNode?.builtInType || 'DEF').toUpperCase();
   const parentArchiveMode = normalizeArchiveMode(parentNode?.archiveMode);
@@ -164,9 +288,16 @@ export function mapToTreeNode(
       rawExt: item.ext || '',
       parentBuiltInType,
       parentArchiveMode,
+      audioArchiveAudio: parentBuiltInType === 'AUDIO' && parentArchiveMode === 1 && item.type === 'file' && isAudioFileNode(item),
+      audioArchiveHasSubtitle: options?.audioArchiveHasSubtitle === true,
+      audioArchiveSubtitle: options?.audioArchiveSubtitle === true,
+      audioArchiveSubtitleOwnerId: options?.audioArchiveSubtitleOwnerId,
     },
     icon: item.type === 'file'
-      ? getFileNodeIconByParentBuiltInType(item.ext, parentBuiltInType, parentArchiveMode, item.name)
+      ? getFileNodeIconByParentBuiltInType(item.ext, parentBuiltInType, parentArchiveMode, item.name, {
+        hasAudioSubtitle: options?.audioArchiveHasSubtitle,
+        audioArchiveSubtitle: options?.audioArchiveSubtitle,
+      })
       : getDirectoryBuiltInIcon(nodeBuiltInType, nodeArchiveMode),
     children: item.type === 'dir' ? [] : undefined,
     loaded: false,
