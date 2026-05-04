@@ -13,6 +13,8 @@ export interface GlobalAudioPlayerState {
 
 type StateListener = (state: GlobalAudioPlayerState) => void;
 
+const MEDIA_SESSION_POSITION_SYNC_MIN_DELTA_SECONDS = 1;
+
 class GlobalAudioPlayer {
   private readonly audio: HTMLAudioElement;
   private listeners = new Set<StateListener>();
@@ -21,6 +23,7 @@ class GlobalAudioPlayer {
   private ownerType: 'default' | 'asmr' = 'default';
   private ownerKey: string | null = null;
   private hasStarted = false;
+  private lastMediaSessionPositionSignature = '';
 
   constructor() {
     this.audio = new Audio();
@@ -34,6 +37,8 @@ class GlobalAudioPlayer {
     this.audio.addEventListener('pause', emit);
     this.audio.addEventListener('ended', emit);
     this.audio.addEventListener('volumechange', emit);
+
+    this.setupMediaSession();
   }
 
   subscribe(listener: StateListener) {
@@ -65,6 +70,8 @@ class GlobalAudioPlayer {
         }
         this.ownerType = nextOwnerType;
         this.ownerKey = nextOwnerKey;
+        this.lastMediaSessionPositionSignature = '';
+        this.syncMediaSessionMetadata();
         this.emitState();
       }
       return;
@@ -74,8 +81,10 @@ class GlobalAudioPlayer {
     this.ownerType = nextOwnerType;
     this.ownerKey = nextOwnerKey;
     this.hasStarted = false;
+    this.lastMediaSessionPositionSignature = '';
     this.audio.src = url;
     this.audio.load();
+    this.syncMediaSessionMetadata();
     this.emitState();
   }
 
@@ -128,6 +137,7 @@ class GlobalAudioPlayer {
     this.ownerType = 'default';
     this.ownerKey = null;
     this.hasStarted = false;
+    this.clearMediaSession();
     this.emitState();
   }
 
@@ -148,7 +158,120 @@ class GlobalAudioPlayer {
 
   private emitState() {
     const snapshot = this.getState();
+    this.syncMediaSessionPlaybackState(snapshot);
+    this.syncMediaSessionPositionState(snapshot);
     this.listeners.forEach(listener => listener(snapshot));
+  }
+
+  private get mediaSession() {
+    if (typeof navigator === 'undefined' || !('mediaSession' in navigator)) {
+      return null;
+    }
+    return navigator.mediaSession;
+  }
+
+  private setupMediaSession() {
+    const mediaSession = this.mediaSession;
+    if (!mediaSession) return;
+
+    try {
+      mediaSession.setActionHandler('play', () => {
+        void this.play().catch(() => {});
+      });
+      mediaSession.setActionHandler('pause', () => {
+        this.pause();
+      });
+      mediaSession.setActionHandler('seekbackward', (details) => {
+        const offset = details.seekOffset ?? 10;
+        this.seekTo((this.audio.currentTime || 0) - offset);
+      });
+      mediaSession.setActionHandler('seekforward', (details) => {
+        const offset = details.seekOffset ?? 10;
+        this.seekTo((this.audio.currentTime || 0) + offset);
+      });
+      mediaSession.setActionHandler('seekto', (details) => {
+        if (details.seekTime === undefined) return;
+        this.seekTo(details.seekTime);
+      });
+    } catch {
+      // MediaSession support varies by runtime; playback itself should keep working.
+    }
+  }
+
+  private syncMediaSessionMetadata() {
+    const mediaSession = this.mediaSession;
+    if (!mediaSession || typeof MediaMetadata === 'undefined') return;
+    if (!this.sourceUrl) {
+      mediaSession.metadata = null;
+      return;
+    }
+
+    mediaSession.metadata = new MediaMetadata({
+      title: this.trackName || '音频',
+      artist: this.ownerType === 'asmr' ? 'ASMR' : 'OmniFlow',
+      album: 'OmniFlow',
+    });
+  }
+
+  private syncMediaSessionPlaybackState(snapshot: GlobalAudioPlayerState) {
+    const mediaSession = this.mediaSession;
+    if (!mediaSession) return;
+    if (!snapshot.src || !snapshot.hasStarted) {
+      mediaSession.playbackState = 'none';
+      return;
+    }
+    mediaSession.playbackState = snapshot.isPlaying ? 'playing' : 'paused';
+  }
+
+  private syncMediaSessionPositionState(snapshot: GlobalAudioPlayerState) {
+    const mediaSession = this.mediaSession;
+    if (
+      !mediaSession
+      || typeof mediaSession.setPositionState !== 'function'
+      || !snapshot.src
+      || !snapshot.hasStarted
+      || snapshot.duration <= 0
+      || snapshot.currentTime < 0
+    ) {
+      return;
+    }
+
+    const normalizedPosition = Math.min(Math.max(snapshot.currentTime, 0), snapshot.duration);
+    const roundedPosition = Math.floor(normalizedPosition / MEDIA_SESSION_POSITION_SYNC_MIN_DELTA_SECONDS)
+      * MEDIA_SESSION_POSITION_SYNC_MIN_DELTA_SECONDS;
+    const signature = [
+      roundedPosition.toFixed(0),
+      snapshot.duration.toFixed(0),
+      snapshot.isPlaying ? 'playing' : 'paused',
+    ].join('|');
+    if (signature === this.lastMediaSessionPositionSignature) return;
+    this.lastMediaSessionPositionSignature = signature;
+
+    try {
+      mediaSession.setPositionState({
+        duration: snapshot.duration,
+        playbackRate: 1,
+        position: normalizedPosition,
+      });
+    } catch {
+      // Invalid metadata must not break the in-app audio player.
+    }
+  }
+
+  private clearMediaSession() {
+    const mediaSession = this.mediaSession;
+    if (!mediaSession) return;
+    mediaSession.metadata = null;
+    mediaSession.playbackState = 'none';
+    this.lastMediaSessionPositionSignature = '';
+
+    if (typeof mediaSession.setPositionState === 'function') {
+      try {
+        mediaSession.setPositionState();
+      } catch {
+        // Some runtimes reject clearing position state; metadata/playbackState are enough.
+      }
+    }
   }
 }
 

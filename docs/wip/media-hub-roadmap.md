@@ -7,6 +7,7 @@
 - `MediaRegistry`：库维度，`audio`/`video` kind，每条 `{ entryId, kind, tabId, title, isPlaying, currentTime, duration }`，控制回调包括 `play/pause/seek/dismiss`。
 - 三类注册者：audio-viewer / asmr-viewer / video-viewer，均在 hasStarted 后注册，卸载清理。
 - audio / asmr cleanup 会在自己是 globalAudioPlayer owner 时调 `clear()`，避免孤立后台音频。
+- `globalAudioPlayer` 已接入 MediaSession：系统媒体控制器标题来自真实 trackName，支持 play/pause/seek，clear 时清理系统媒体状态。
 - 已删除：`GlobalAudioMiniBar` 组件、video 跨 tab 自动 pause、audio↔video 互斥。
 
 ---
@@ -69,23 +70,20 @@
 
 ## Tier 2 — 中期（半天到一天）
 
-### 5. OS 级 MediaSession API（重要）
+### 5. OS 级 MediaSession API（已完成）
 
-**目标**：锁屏 / 蓝牙耳机暂停键 / macOS 状态栏 NowPlaying widget 都能控制 OmniFlow 当前播放。
+**状态**：已完成。锁屏 / 蓝牙耳机暂停键 / macOS 状态栏 NowPlaying widget 可控制 `globalAudioPlayer` 当前播放。
 
 **实现**：
-- 在 `globalAudioPlayer` 内部接入 `navigator.mediaSession`：
-  - `metadata = new MediaMetadata({ title, artist, ...})`，title 用当前 entry.title。
-  - `setActionHandler('play' | 'pause' | 'previoustrack' | 'nexttrack' | 'seekto')`。
-  - `setPositionState({ duration, position, playbackRate })` 在 timeupdate 同步。
-- video 暂不接（多实例，MediaSession 只一份；除非是"焦点 video"概念，复杂度不值）。
-- previous/next：先不实现，需要 audio 队列概念（asmr-viewer 已有，普通 audio 没有）。
+- 在 `globalAudioPlayer` 内部接入 `navigator.mediaSession`。
+- `metadata = new MediaMetadata({ title, artist, album })`，title 使用当前 `trackName`。
+- `setActionHandler('play' | 'pause' | 'seekbackward' | 'seekforward' | 'seekto')`。
+- `setPositionState({ duration, position, playbackRate })` 在 `emitState()` 时按秒同步。
+- `clear()` 会清空 metadata / playbackState / positionState。
 
-**风险**：MediaSession 一接，OS 会把 OmniFlow 当成"音乐播放器"。要注意 metadata 在 clear/pause 时也清掉，不然状态栏会留个空壳。
-
-**改动点**：`global-audio-player.ts`（90% 改动在这）+ 一个新文件 `src/features/file-viewer/services/media-session-bridge.ts`。
-
-**依赖**：可独立做，但和 #1 共享 currentTime/duration 数据流，建议在 #1 之后做。
+**边界**：
+- video 暂不接（多实例，MediaSession 只一份；除非后续有"焦点 video"概念）。
+- previous/next 暂不接，需要统一 audio 队列概念后再做。
 
 ---
 

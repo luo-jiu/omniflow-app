@@ -375,6 +375,13 @@
 - 每个 viewer 必须在挂载且"曾播放"后才注册，关闭 viewer / unmount / 用户点击媒体行 `x` 时清理。
 - 浏览器内嵌页面（main 进程的 `WebContentsView`）的媒体不在本 registry 范围内。
 
+`globalAudioPlayer` 同时接入浏览器 `navigator.mediaSession`：
+
+- 作用范围只覆盖 audio / asmr 这条全局音频播放器，不覆盖多实例 video，也不覆盖 embedded browser 内网页媒体。
+- 系统媒体信息里的标题来自 `globalAudioPlayer.trackName`，普通音频由文件名推导，ASMR 由当前播放节点显示名推导。
+- 系统媒体键 / macOS Now Playing 支持 play、pause、seekforward、seekbackward、seekto；进度通过 `setPositionState` 按秒同步。
+- `globalAudioPlayer.clear()` 会清空 MediaSession metadata 和 playbackState，避免系统媒体控制器保留过期条目。
+
 后续如果继续治理这页，优先方向应该是：
 
 - 固定“哪些状态是页面 owner，哪些只是子组件消费”
