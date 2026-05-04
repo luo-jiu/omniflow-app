@@ -2345,7 +2345,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
             {!browserModeOpen ? (
               <button
                 type="button"
-                className="toolbar-action-btn"
+                className={`toolbar-action-btn ${workspaceDisplayMode === 'browser' ? 'is-active' : ''}`}
                 onClick={openEmbeddedBrowser}
                 title="打开内置浏览器"
               >

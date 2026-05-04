@@ -14,13 +14,7 @@ export const MainWrapper = styled.main`
   position: relative;
 
   &.viewer-mode {
-    padding: 0 12px 12px;
-  }
-
-  &.viewer-mode .file-tabs-bar {
-    width: calc(100% + 24px);
-    margin-left: -12px;
-    margin-right: -12px;
+    padding: 0;
   }
 
   .main-content {

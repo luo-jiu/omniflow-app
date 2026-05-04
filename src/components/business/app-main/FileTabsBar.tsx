@@ -128,6 +128,8 @@ const TabsContainer = styled.div`
   align-items: center;
   position: relative;
   margin-top: 2px;
+  padding-top: 1px;
+  padding-bottom: 4px;
 
   &::after {
     content: "";
@@ -135,7 +137,7 @@ const TabsContainer = styled.div`
     left: 0;
     right: 0;
     bottom: 0;
-    height: 1px;
+    height: 3px;
     background: var(--app-border);
     pointer-events: none;
     z-index: 1;
@@ -146,7 +148,7 @@ const TabsWrapper = styled.div`
   width: auto;
   min-width: 0;
   flex: 1 1 auto;
-  height: 32px;
+  height: 30px;
   display: flex;
   align-items: center;
   gap: ${TAB_OVERFLOW_GAP}px;

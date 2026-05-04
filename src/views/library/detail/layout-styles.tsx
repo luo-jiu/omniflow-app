@@ -95,27 +95,23 @@ export const TitlebarSidePanelToggleButton = styled.button`
   -webkit-app-region: no-drag !important;
 
   &.is-active {
-    background: #e8f7ff;
-    border-color: #9bdcff;
-    color: #0876c9;
-    box-shadow: inset 0 0 0 1px rgba(8, 118, 201, 0.08);
+    background: transparent;
+    border-color: transparent;
+    box-shadow: none;
   }
 
   &.is-active:hover {
-    background: #d9f1ff;
-    color: #0568b3;
+    background: color-mix(in srgb, var(--app-text) 8%, transparent);
   }
 
   body[theme-mode="dark"] &.is-active {
-    background: #17384a;
-    border-color: #3aa7d8;
-    color: #7dd8ff;
-    box-shadow: inset 0 0 0 1px rgba(125, 216, 255, 0.12);
+    background: transparent;
+    border-color: transparent;
+    box-shadow: none;
   }
 
   body[theme-mode="dark"] &.is-active:hover {
-    background: #1d4358;
-    color: #a2e4ff;
+    background: color-mix(in srgb, var(--app-text) 8%, transparent);
   }
 
 `;
@@ -251,7 +247,20 @@ const toolbarActionButtonStyles = css`
   }
 
   .toolbar-action-btn .semi-icon {
+    width: ${TOOLBAR_ACTION_ICON_SIZE}px;
+    height: ${TOOLBAR_ACTION_ICON_SIZE}px;
     font-size: ${TOOLBAR_ACTION_ICON_SIZE}px;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .toolbar-action-btn .semi-icon > svg,
+  .toolbar-action-btn svg {
+    width: ${TOOLBAR_ACTION_ICON_SIZE}px;
+    height: ${TOOLBAR_ACTION_ICON_SIZE}px;
+    display: block;
   }
 
   .toolbar-action-btn:hover:not(:disabled) {
@@ -260,27 +269,23 @@ const toolbarActionButtonStyles = css`
   }
 
   .toolbar-action-btn.is-active {
-    background: #e8f7ff;
-    border-color: #9bdcff;
-    color: #0876c9;
-    box-shadow: inset 0 0 0 1px rgba(8, 118, 201, 0.08);
+    background: transparent;
+    border-color: transparent;
+    box-shadow: none;
   }
 
   .toolbar-action-btn.is-active:hover:not(:disabled) {
-    background: #d9f1ff;
-    color: #0568b3;
+    background: color-mix(in srgb, var(--app-text) 8%, transparent);
   }
 
   body[theme-mode="dark"] & .toolbar-action-btn.is-active {
-    background: #17384a;
-    border-color: #3aa7d8;
-    color: #7dd8ff;
-    box-shadow: inset 0 0 0 1px rgba(125, 216, 255, 0.12);
+    background: transparent;
+    border-color: transparent;
+    box-shadow: none;
   }
 
   body[theme-mode="dark"] & .toolbar-action-btn.is-active:hover:not(:disabled) {
-    background: #1d4358;
-    color: #a2e4ff;
+    background: color-mix(in srgb, var(--app-text) 8%, transparent);
   }
 
   .toolbar-action-btn:disabled {
@@ -325,7 +330,7 @@ export const ContentToolbar = styled.div`
   height: ${CONTENT_TOOLBAR_HEIGHT}px;
   flex-shrink: 0;
   background: var(--app-bg);
-  border-bottom: 1px solid var(--app-border);
+  border-bottom: 3px solid var(--app-border);
   border-top-left-radius: clamp(0px, var(--side-panel-visual-width), 12px);
   -webkit-app-region: drag;
   position: relative;
@@ -357,6 +362,7 @@ export const ContentToolbar = styled.div`
     align-items: center;
     gap: 3px;
     -webkit-app-region: no-drag;
+    transform: translate(-1px, 1px);
   }
 
   .toolbar-spacer {

@@ -11292,6 +11292,7 @@ const MIN_WINDOW_WIDTH = 1120;
 const MIN_WINDOW_HEIGHT = 720;
 const WINDOW_STATE_FILENAME = "window-state.json";
 const WINDOW_STATE_SAVE_DEBOUNCE_MS = 200;
+const MACOS_TRAFFIC_LIGHT_POSITION = { x: 14, y: 11 };
 const ENABLE_EMBEDDED_BROWSER_DEBUG = process.env.NODE_ENV === "test" || Boolean(VITE_DEV_SERVER_URL || process.env.ELECTRON_RENDERER_URL) || process.env.OMNIFLOW_ENABLE_RUNTIME_LOGS === "true";
 const ENABLE_CHROMIUM_RUNTIME_LOGS = process.env.OMNIFLOW_ENABLE_CHROMIUM_LOGS === "true";
 if (!ENABLE_CHROMIUM_RUNTIME_LOGS) {
@@ -11306,6 +11307,12 @@ try {
 }
 function getAppIconPath() {
   return existsSync(APP_ICON_PATH) ? APP_ICON_PATH : null;
+}
+function applyMacOSWindowButtonPosition(win) {
+  if (process.platform !== "darwin") {
+    return;
+  }
+  win.setWindowButtonPosition(MACOS_TRAFFIC_LIGHT_POSITION);
 }
 let mainWindow = null;
 let isQuitting = false;
@@ -11402,6 +11409,14 @@ function isToggleDevToolsShortcut(input) {
   const key = (input.key || "").toLowerCase();
   return (input.meta || input.control) && input.shift && key === "i";
 }
+function isChromiumPageZoomShortcut(input) {
+  if (input.type !== "keyDown" || !(input.meta || input.control)) {
+    return false;
+  }
+  const key = (input.key || "").toLowerCase();
+  const code = input.code || "";
+  return key === "+" || key === "=" || key === "-" || key === "_" || key === "0" || code === "Equal" || code === "Minus" || code === "Digit0" || code === "NumpadAdd" || code === "NumpadSubtract" || code === "Numpad0";
+}
 const embeddedBrowserMainController = createEmbeddedBrowserMainController({
   debugEnabled: ENABLE_EMBEDDED_BROWSER_DEBUG,
   getMainWindow: () => mainWindow
@@ -11430,6 +11445,7 @@ function createWindow() {
     vibrancy: "sidebar",
     visualEffectState: "active",
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
+    ...process.platform === "darwin" ? { trafficLightPosition: MACOS_TRAFFIC_LIGHT_POSITION } : {},
     ...isFiniteNumber(persistedWindowState == null ? void 0 : persistedWindowState.x) && isFiniteNumber(persistedWindowState == null ? void 0 : persistedWindowState.y) ? { x: persistedWindowState.x, y: persistedWindowState.y } : {},
     webPreferences: {
       preload: path.join(MAIN_DIST, "preload.mjs"),
@@ -11439,6 +11455,7 @@ function createWindow() {
     ...appIconPath ? { icon: appIconPath } : {}
   });
   mainWindow = win;
+  applyMacOSWindowButtonPosition(win);
   if (persistedWindowState == null ? void 0 : persistedWindowState.maximized) {
     win.maximize();
   }
@@ -11498,6 +11515,11 @@ function createWindow() {
     overlayWindowController.destroy();
   });
   win.webContents.on("before-input-event", (event, input) => {
+    if (isChromiumPageZoomShortcut(input)) {
+      event.preventDefault();
+      win.webContents.setZoomFactor(1);
+      return;
+    }
     if (!isToggleDevToolsShortcut(input)) {
       return;
     }
@@ -11584,14 +11606,6 @@ app.whenReady().then(() => {
         { role: "copy" },
         { role: "paste" },
         { role: "selectAll" }
-      ]
-    },
-    {
-      label: "View",
-      submenu: [
-        { role: "zoomIn" },
-        { role: "zoomOut" },
-        { role: "resetZoom" }
       ]
     },
     {
