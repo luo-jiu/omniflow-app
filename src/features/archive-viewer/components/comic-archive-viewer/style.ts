@@ -1,8 +1,8 @@
 import styled from 'styled-components';
 
 export const ComicArchiveViewerWrapper = styled.div`
-  --archive-card-width: 342px;
-  --archive-card-gap: 22px;
+  --archive-card-width: 275px;
+  --archive-card-gap: 15px;
   --archive-column-count: 1;
 
   width: 100%;
@@ -15,7 +15,7 @@ export const ComicArchiveViewerWrapper = styled.div`
 
   .badge {
     flex-shrink: 0;
-    font-size: 11px;
+    font-size: 10px;
     line-height: 1;
     font-weight: 700;
     letter-spacing: 0.05em;
@@ -23,13 +23,13 @@ export const ComicArchiveViewerWrapper = styled.div`
     background: #dbfce8;
     border: 1px solid #a8efc8;
     border-radius: 999px;
-    padding: 4px 8px;
+    padding: 3px 6px;
   }
 
   .title {
     min-width: 0;
     margin: 0;
-    font-size: 13px;
+    font-size: 11px;
     font-weight: 600;
     white-space: nowrap;
     overflow: hidden;
@@ -40,7 +40,7 @@ export const ComicArchiveViewerWrapper = styled.div`
     flex: 1;
     min-height: 0;
     overflow: auto;
-    padding: 20px 20px 22px;
+    padding: 13px 13px 15px;
     background: var(--app-bg);
     scrollbar-width: thin;
     scrollbar-color: transparent transparent;
@@ -79,12 +79,12 @@ export const ComicArchiveViewerWrapper = styled.div`
   }
 
   .state-wrap {
-    min-height: 180px;
+    min-height: 121px;
     display: flex;
     align-items: center;
     justify-content: center;
     color: var(--app-text-secondary);
-    font-size: 14px;
+    font-size: 11px;
     text-align: center;
   }
 
@@ -98,6 +98,7 @@ export const ComicArchiveViewerWrapper = styled.div`
     grid-template-columns: repeat(var(--archive-column-count), minmax(0, var(--archive-card-width)));
     justify-content: start;
     gap: var(--archive-card-gap);
+    align-items: start;
   }
 
   .archive-card {
@@ -105,14 +106,17 @@ export const ComicArchiveViewerWrapper = styled.div`
     position: relative;
     display: flex;
     flex-direction: column;
-    border-radius: 12px;
+    border-radius: 8px;
     border: 1px solid rgba(255, 255, 255, 0.22);
     background: #fefefe;
     box-shadow:
-      0 16px 24px rgba(2, 20, 15, 0.28),
+      0 11px 16px rgba(2, 20, 15, 0.28),
       0 2px 0 rgba(255, 255, 255, 0.55) inset;
     overflow: hidden;
     cursor: pointer;
+    contain: layout paint style;
+    content-visibility: auto;
+    contain-intrinsic-size: 0 330px;
   }
 
   .archive-card:hover {
@@ -148,10 +152,10 @@ export const ComicArchiveViewerWrapper = styled.div`
   }
 
   .card-title {
-    min-height: 94px;
-    max-height: 94px;
-    padding: 12px 14px 10px;
-    font-size: 15px;
+    min-height: 63px;
+    max-height: 63px;
+    padding: 8px 9px 7px;
+    font-size: 11px;
     line-height: 1.35;
     font-weight: 700;
     color: #0b1220;
@@ -166,25 +170,25 @@ export const ComicArchiveViewerWrapper = styled.div`
   }
 
   .card-tag-slot {
-    height: 70px;
-    padding: 8px 10px;
+    height: 47px;
+    padding: 5px 7px;
     display: flex;
     flex-wrap: wrap;
     align-items: flex-start;
     align-content: flex-start;
-    gap: 6px;
+    gap: 4px;
     overflow: hidden;
     background: transparent;
   }
 
   .card-meta {
-    --card-meta-seam-fix: 2px;
+    --card-meta-seam-fix: 1px;
     position: relative;
     z-index: 2;
     /* 亚像素缝修正，避免封面与遮罩交界闪线 */
     margin-top: calc(var(--card-meta-seam-fix) * -1);
     padding-top: var(--card-meta-seam-fix);
-    padding-bottom: 20px;
+    padding-bottom: 13px;
     overflow: hidden;
     background: linear-gradient(
       180deg,
@@ -202,10 +206,10 @@ export const ComicArchiveViewerWrapper = styled.div`
     align-items: center;
     justify-content: center;
     max-width: calc(100% - 2px);
-    padding: 2px 10px;
+    padding: 2px 7px;
     border-radius: 999px;
     border: 1px solid rgba(30, 41, 59, 0.22);
-    font-size: 12px;
+    font-size: 10px;
     font-weight: 600;
     line-height: 1.2;
     color: #0b1220;
@@ -217,11 +221,11 @@ export const ComicArchiveViewerWrapper = styled.div`
   }
 
   .archive-footer {
-    height: 42px;
+    height: 28px;
     flex-shrink: 0;
     display: flex;
     align-items: center;
-    padding: 0 12px;
+    padding: 0 8px;
     border-top: 1px solid var(--semi-color-border);
     background: color-mix(in srgb, var(--semi-color-bg-0) 95%, transparent);
   }
@@ -231,6 +235,6 @@ export const ComicArchiveViewerWrapper = styled.div`
     width: 100%;
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 5px;
   }
 `;

@@ -54,8 +54,8 @@ const LOAD_MORE_STEP = 10;
 const PREFETCH_AHEAD = 48;
 const MAX_RESOLVE_PER_TICK = 64;
 const COMIC_LINK_EXPIRY_MINUTES = 240;
-const MIN_PAGE_WIDTH = 360;
-const MAX_PAGE_WIDTH = 980;
+const MIN_PAGE_WIDTH = 240;
+const MAX_PAGE_WIDTH = 656;
 const DOUBLE_COLUMN_INNER_GAP = 0;
 const SINGLE_SCROLL_ZOOM_MIN = 0.45;
 const SINGLE_SCROLL_ZOOM_MAX = 3.2;
@@ -1163,12 +1163,12 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
   }, [folderNodeId, libraryId, pages, visibleCount]);
 
   const scrollBasePageWidth = useMemo(() => {
-    if (!scrollWidth) return 760;
+    if (!scrollWidth) return 510;
     if (scrollColumnMode === 2) {
-      const raw = (scrollWidth - 32 - DOUBLE_COLUMN_INNER_GAP) / 2;
+      const raw = (scrollWidth - 22 - DOUBLE_COLUMN_INNER_GAP) / 2;
       return clamp(raw, MIN_PAGE_WIDTH * 0.7, MAX_PAGE_WIDTH);
     }
-    return clamp(scrollWidth - 32, MIN_PAGE_WIDTH, MAX_PAGE_WIDTH);
+    return clamp(scrollWidth - 22, MIN_PAGE_WIDTH, MAX_PAGE_WIDTH);
   }, [scrollColumnMode, scrollWidth]);
 
   const pageWidth = useMemo(
@@ -1907,14 +1907,14 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
         footer={null}
         onCancel={() => setViewerSettingsVisible(false)}
         centered
-        width={760}
+        width={510}
       >
         <div
           style={{
             display: 'flex',
             flexDirection: 'column',
-            gap: 28,
-            padding: '20px 20px 12px',
+            gap: 19,
+            padding: '13px 13px 8px',
           }}
         >
           <div
@@ -1922,9 +1922,9 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
               display: 'flex',
               flexDirection: 'column',
               alignItems: 'stretch',
-              gap: 12,
-              padding: '20px 24px',
-              borderRadius: 8,
+              gap: 8,
+              padding: '13px 16px',
+              borderRadius: 6,
               border: '1px solid var(--semi-color-border)',
               background: 'var(--semi-color-fill-0)',
             }}
@@ -1933,10 +1933,10 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: 8,
+                gap: 5,
               }}
             >
-              <span style={{ fontSize: 14, color: 'var(--semi-color-text-0)' }}>页面间隔</span>
+              <span style={{ fontSize: 11, color: 'var(--semi-color-text-0)' }}>页面间隔</span>
             </div>
             <Slider
               min={0}
@@ -1952,7 +1952,7 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
           </div>
           <div
             style={{
-              minHeight: 200,
+              minHeight: 134,
             }}
           />
         </div>

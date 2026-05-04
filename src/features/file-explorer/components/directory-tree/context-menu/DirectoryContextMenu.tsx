@@ -16,7 +16,7 @@ interface DirectoryContextMenuProps {
   getPopupContainer?: () => HTMLElement;
 }
 
-const BUILT_IN_MENU_ICON_SIZE = 20;
+const BUILT_IN_MENU_ICON_SIZE = 13;
 
 function createBuiltInMenuIcon(src: string, alt: string): React.ReactNode {
   return (
@@ -63,7 +63,7 @@ function createTrailingBuiltInTypeLabel(
         width: '100%',
         alignItems: 'center',
         justifyContent: 'space-between',
-        gap: 10,
+        gap: 7,
       }}
     >
       <span>{text}</span>
@@ -124,7 +124,7 @@ const DirectoryContextMenu: React.FC<DirectoryContextMenuProps> = ({
     return (
       <ContextMenu
         items={rootItems}
-        className="directory-context-menu"
+        className="directory-context-menu directory-tree-context-menu"
         onItemClick={onClose}
         submenuPosition="auto"
         submenuPreferredHorizontal={submenuPreferredHorizontal}
@@ -316,7 +316,7 @@ const DirectoryContextMenu: React.FC<DirectoryContextMenuProps> = ({
   return (
     <ContextMenu 
       items={items} 
-      className="directory-context-menu"
+      className="directory-context-menu directory-tree-context-menu"
       onItemClick={onClose}
       submenuPosition="auto"
       submenuPreferredHorizontal={submenuPreferredHorizontal}

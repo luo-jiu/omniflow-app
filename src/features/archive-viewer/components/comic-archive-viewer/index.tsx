@@ -59,6 +59,7 @@ const VIEW_META_COMIC_ARCHIVE_READER_KEY = 'comicArchiveReader';
 const VIEW_META_COMIC_ARCHIVE_READER_LEGACY_KEY = 'comic_archive_reader';
 const COMIC_ARCHIVE_CACHE_MAX_ENTRIES = 24;
 const REMOTE_PROGRESS_SYNC_INTERVAL_MS = 200;
+const SCROLL_PROGRESS_PERSIST_DEBOUNCE_MS = 160;
 
 const EMPTY_COMIC_ARCHIVE_SNAPSHOT: ComicArchiveSnapshot = {
   hasLoadedList: false,
@@ -197,7 +198,10 @@ const ComicArchiveViewer: React.FC<ComicArchiveViewerProps> = ({
   reloadToken = 0,
 }) => {
   const { setFileUrl } = useFileViewer();
-  const { viewportRef, wrapperStyle } = useArchiveCardGrid({ baseCardWidth: 410 });
+  const { viewportRef, wrapperStyle } = useArchiveCardGrid({
+    baseCardWidth: 275,
+    gridGap: 15,
+  });
   const libraryId = useMemo(() => parseArchiveLibraryId(fileUrl), [fileUrl]);
   const title = useMemo(() => normalizeArchiveTitle(fileName), [fileName]);
   const readerCacheKey = useMemo(
@@ -236,6 +240,7 @@ const ComicArchiveViewer: React.FC<ComicArchiveViewerProps> = ({
   const pendingRestoreRef = useRef<ArchiveReaderProgress | null>(null);
   const restoreTriggeredLoadMoreRef = useRef(false);
   const scrollPersistRafRef = useRef<number>(0);
+  const scrollPersistTimerRef = useRef<number>(0);
   const remoteSyncTimerRef = useRef<number>(0);
   const remoteSyncInflightRef = useRef(false);
   const pendingRemoteProgressRef = useRef<ArchiveReaderProgress | null>(null);
@@ -829,20 +834,32 @@ const ComicArchiveViewer: React.FC<ComicArchiveViewerProps> = ({
       }
       if (scrollPersistRafRef.current) {
         window.cancelAnimationFrame(scrollPersistRafRef.current);
-      }
-      scrollPersistRafRef.current = window.requestAnimationFrame(() => {
         scrollPersistRafRef.current = 0;
-        persistCurrentViewportProgress(false);
-      });
+      }
+      if (scrollPersistTimerRef.current) {
+        window.clearTimeout(scrollPersistTimerRef.current);
+      }
+      scrollPersistTimerRef.current = window.setTimeout(() => {
+        scrollPersistTimerRef.current = 0;
+        scrollPersistRafRef.current = window.requestAnimationFrame(() => {
+          scrollPersistRafRef.current = 0;
+          persistCurrentViewportProgress(false);
+        });
+      }, SCROLL_PROGRESS_PERSIST_DEBOUNCE_MS);
     };
 
     viewport.addEventListener('scroll', onScroll, { passive: true });
     return () => {
       viewport.removeEventListener('scroll', onScroll);
+      if (scrollPersistTimerRef.current) {
+        window.clearTimeout(scrollPersistTimerRef.current);
+        scrollPersistTimerRef.current = 0;
+      }
       if (scrollPersistRafRef.current) {
         window.cancelAnimationFrame(scrollPersistRafRef.current);
         scrollPersistRafRef.current = 0;
       }
+      persistCurrentViewportProgress(true);
     };
   }, [persistCurrentViewportProgress, viewportRef]);
 
@@ -1006,6 +1023,7 @@ const ComicArchiveViewer: React.FC<ComicArchiveViewerProps> = ({
         okText="保存"
         cancelText="取消"
         centered
+        width={420}
         onOk={handleRenameSubmit}
         onCancel={() => {
           if (renameSubmitting) return;

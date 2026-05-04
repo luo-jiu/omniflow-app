@@ -17,7 +17,7 @@ export const ComicViewerWrapper = styled.div`
     min-height: 0;
     overflow-y: auto;
     overflow-x: auto;
-    padding: 10px 0 20px;
+    padding: 7px 0 13px;
     scrollbar-width: thin;
     scrollbar-color: transparent transparent;
   }
@@ -88,7 +88,7 @@ export const ComicViewerWrapper = styled.div`
 
   .page-skeleton {
     width: 100%;
-    min-height: 200px;
+    min-height: 134px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -114,8 +114,8 @@ export const ComicViewerWrapper = styled.div`
     align-items: center;
     justify-content: center;
     color: var(--semi-color-text-2);
-    font-size: 12px;
-    padding: 8px 0 0;
+    font-size: 10px;
+    padding: 5px 0 0;
   }
 
   .state-empty,
@@ -127,37 +127,37 @@ export const ComicViewerWrapper = styled.div`
     justify-content: center;
     text-align: center;
     color: var(--semi-color-text-2);
-    padding: 32px;
+    padding: 21px;
   }
 
   .viewer-footer {
-    height: 42px;
+    height: 28px;
     flex-shrink: 0;
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 10px;
-    padding: 0 12px;
+    gap: 7px;
+    padding: 0 8px;
     border-top: 1px solid var(--semi-color-border);
     background: color-mix(in srgb, var(--semi-color-bg-0) 95%, transparent);
   }
 
   .back-top-btn {
     position: absolute;
-    right: 14px;
-    bottom: 52px;
+    right: 9px;
+    bottom: 35px;
     z-index: 12;
-    height: 30px;
-    padding: 0 12px;
+    height: 22px;
+    padding: 0 8px;
     border-radius: 999px;
     border: 1px solid color-mix(in srgb, var(--semi-color-border) 80%, transparent);
     background: color-mix(in srgb, var(--semi-color-bg-0) 94%, transparent);
     color: var(--semi-color-text-1);
-    font-size: 12px;
+    font-size: 10px;
     line-height: 1;
     cursor: pointer;
     transition: border-color 120ms ease, background-color 120ms ease, color 120ms ease;
-    backdrop-filter: blur(6px);
+    backdrop-filter: blur(4px);
   }
 
   .back-top-btn:hover {
@@ -169,7 +169,7 @@ export const ComicViewerWrapper = styled.div`
     min-width: 0;
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 5px;
     flex: 1 1 0;
   }
 
@@ -183,9 +183,9 @@ export const ComicViewerWrapper = styled.div`
   }
 
   .footer-title-badge {
-    font-size: 11px;
+    font-size: 10px;
     line-height: 1;
-    padding: 3px 8px;
+    padding: 2px 5px;
     border-radius: 999px;
     background: color-mix(in srgb, var(--semi-color-success) 16%, transparent);
     color: var(--semi-color-success);
@@ -195,7 +195,7 @@ export const ComicViewerWrapper = styled.div`
 
   .footer-title {
     min-width: 0;
-    font-size: 13px;
+    font-size: 11px;
     color: var(--semi-color-text-1);
     white-space: nowrap;
     overflow: hidden;
@@ -204,22 +204,22 @@ export const ComicViewerWrapper = styled.div`
 
   .footer-page-meta {
     flex: 0 0 auto;
-    min-width: 120px;
+    min-width: 80px;
     text-align: center;
-    font-size: 13px;
+    font-size: 11px;
     color: var(--semi-color-text-2);
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     white-space: nowrap;
   }
 
   .footer-btn {
-    height: 28px;
-    padding: 0 12px;
-    border-radius: 8px;
+    height: 22px;
+    padding: 0 8px;
+    border-radius: 6px;
     border: 1px solid var(--semi-color-border);
     background: color-mix(in srgb, var(--semi-color-bg-0) 96%, transparent);
     color: var(--semi-color-text-1);
-    font-size: 12px;
+    font-size: 10px;
     line-height: 1;
     cursor: pointer;
     transition: all 120ms ease;
@@ -260,19 +260,19 @@ export const ComicViewerWrapper = styled.div`
     align-items: center;
     justify-content: center;
     overflow: hidden;
-    gap: 6px;
-    padding: 0 44px;
+    gap: 4px;
+    padding: 0 29px;
     box-sizing: border-box;
   }
 
   .flip-canvas.single {
     gap: 0;
-    padding: 0 44px;
+    padding: 0 29px;
   }
 
   .flip-canvas.double {
-    gap: 4px;
-    padding: 0 32px;
+    gap: 3px;
+    padding: 0 21px;
   }
 
   .flip-page-panel {
@@ -311,9 +311,9 @@ export const ComicViewerWrapper = styled.div`
   }
 
   .flip-image-skeleton {
-    width: min(78vw, 980px);
-    height: min(80vh, 760px);
-    border-radius: 10px;
+    width: min(78vw, 656px);
+    height: min(80vh, 509px);
+    border-radius: 7px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -329,9 +329,9 @@ export const ComicViewerWrapper = styled.div`
   }
 
   .flip-image-empty {
-    width: min(78vw, 980px);
-    height: min(80vh, 760px);
-    border-radius: 10px;
+    width: min(78vw, 656px);
+    height: min(80vh, 509px);
+    border-radius: 7px;
     background: color-mix(in srgb, var(--semi-color-fill-0) 56%, transparent);
     border: 1px dashed color-mix(in srgb, var(--semi-color-border) 70%, transparent);
   }

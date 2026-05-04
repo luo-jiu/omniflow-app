@@ -151,21 +151,29 @@ export const MenuContent = styled.div`
   }
 
   &.directory-context-menu {
-    min-width: 240px;
-    padding: 4px;
-    border-radius: 8px;
+    min-width: 160px;
+    padding: 3px;
+    border-radius: 6px;
+
+    .menu-title {
+      font-size: 11px;
+      line-height: 18px;
+      margin: 3px 8px;
+      padding-bottom: 4px;
+    }
 
     .semi-divider-horizontal {
       margin: 1px 0 !important;
     }
 
     .menu-item {
-      min-height: 28px;
-      font-size: 18px;
+      min-height: 24px;
+      font-size: 12px;
       font-weight: 400;
-      padding: 3px 10px;
-      line-height: 1.12;
-      gap: 6px;
+      padding: 3px 7px;
+      line-height: 1.2;
+      gap: 5px;
+      border-radius: 5px;
     }
 
     .menu-item + .menu-item {
@@ -173,15 +181,41 @@ export const MenuContent = styled.div`
     }
 
     .menu-item-icon {
-      width: 18px;
-      height: 18px;
-      flex-basis: 18px;
-      font-size: 18px;
+      width: 14px;
+      height: 14px;
+      flex-basis: 14px;
+      font-size: 14px;
     }
 
     .menu-item-submenu-arrow {
-      margin-left: 4px;
+      margin-left: 3px;
+      font-size: 11px;
+    }
+  }
+
+  &.directory-tree-context-menu {
+    min-width: 148px;
+    padding: 2px;
+
+    .semi-divider-horizontal {
+      margin: 0 !important;
+    }
+
+    .menu-item {
+      min-height: 21px;
+      padding: 2px 6px;
+      gap: 4px;
+    }
+
+    .menu-item-icon {
+      width: 13px;
+      height: 13px;
+      flex-basis: 13px;
       font-size: 13px;
+    }
+
+    .menu-item-submenu-arrow {
+      margin-left: 2px;
     }
   }
 
