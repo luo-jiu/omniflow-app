@@ -4,14 +4,14 @@ export const LibraryWrapper = styled.div`
   position: relative;
   width: 100%;
   height: 100%;
-  padding: 24px 28px;
-  padding-top: 40px;
+  padding: 18px 22px;
+  padding-top: 34px;
   background: var(--app-bg);
   color: var(--semi-color-text-0);
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  font-size: 15px;
+  gap: 12px;
+  font-size: 12px;
   -webkit-app-region: drag;
 
   & > * {
@@ -21,32 +21,32 @@ export const LibraryWrapper = styled.div`
 
 export const ContentRow = styled.div`
   display: flex;
-  gap: 18px;
+  gap: 14px;
   flex: 1;
   min-height: 0;
 `
 
 export const SideMenu = styled.aside`
-  flex: 0 0 240px;
-  min-width: 240px;
-  margin-top: 10px;
+  flex: 0 0 176px;
+  min-width: 176px;
+  margin-top: 7px;
   background: var(--app-bg-elevated);
   border: 1px solid var(--app-border);
-  border-radius: 12px;
-  padding: 16px 12px 12px;
+  border-radius: 8px;
+  padding: 12px 9px 9px;
   display: flex;
   flex-direction: column;
   min-height: 0;
 `
 
 export const SideMenuHeader = styled.div`
-  font-size: 12px;
+  font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--app-text-muted);
-  margin-bottom: 12px;
-  padding: 0 10px;
+  margin-bottom: 8px;
+  padding: 0 7px;
 `
 
 export const SideMenuList = styled.div`
@@ -59,14 +59,14 @@ export const SideMenuList = styled.div`
 `
 
 export const SideMenuItem = styled.div`
-  padding: 10px 14px;
-  border-radius: 8px;
+  padding: 7px 10px;
+  border-radius: 6px;
   color: var(--app-text-secondary);
   background: transparent;
   cursor: pointer;
   user-select: none;
-  font-size: 14px;
-  line-height: 1.4;
+  font-size: 11px;
+  line-height: 1.35;
 
   &:not(:last-child) { margin-bottom: 2px; }
 
@@ -91,13 +91,13 @@ export const SideMenuFooter = styled.div`
 `
 
 export const SideMenuAction = styled.button`
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   border: none;
   outline: none;
   background: transparent;
   padding: 0;
-  border-radius: 8px;
+  border-radius: 7px;
   color: var(--app-text-secondary);
   cursor: pointer;
   user-select: none;
@@ -120,27 +120,27 @@ export const CardArea = styled.section`
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 11px;
 `
 
 export const RightHeader = styled.div`
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  margin-top: -8px;
+  gap: 10px;
+  margin-top: -5px;
 
   .header-right {
     display: inline-flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
   }
 
   .semi-button {
-    height: 38px;
-    padding: 0 16px;
-    border-radius: 10px;
-    font-size: 14px;
+    height: 30px;
+    padding: 0 12px;
+    border-radius: 7px;
+    font-size: 11px;
     font-weight: 500;
     box-shadow: none;
   }
@@ -163,7 +163,7 @@ export const RightHeader = styled.div`
 
 export const RightHeaderTitle = styled.h3`
   margin: 0;
-  font-size: 26px;
+  font-size: 20px;
   font-weight: 600;
   line-height: 1.2;
   letter-spacing: -0.02em;
@@ -192,19 +192,19 @@ export const CardScroll = styled.div`
 
 export const CardGrid = styled.div`
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(196px, 1fr));
-  gap: 8px;
-  padding: 4px 0 10px;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 6px;
+  padding: 2px 0 8px;
   align-content: flex-start;
 `
 
 export const CardItem = styled.div`
   position: relative;
-  min-height: 170px;
-  width: min(100%, 188px);
+  min-height: 120px;
+  width: min(100%, 132px);
   justify-self: center;
   box-sizing: border-box;
-  border-radius: 12px;
+  border-radius: 8px;
   background: transparent;
   border: none;
   display: flex;
@@ -240,7 +240,7 @@ export const CardIcon = styled.div`
   align-items: center;
   justify-content: center;
   width: 100%;
-  height: 170px;
+  height: 120px;
   background: transparent;
   background-position: center;
   background-size: contain;
@@ -252,7 +252,7 @@ export const CardIcon = styled.div`
     content: '';
     position: absolute;
     inset: 0;
-    border-radius: 10px;
+    border-radius: 8px;
     background: transparent;
     pointer-events: none;
     z-index: 1;
@@ -265,15 +265,15 @@ export const CardIcon = styled.div`
 
 export const CardName = styled.div`
   position: absolute;
-  top: 82px;
-  left: 26px;
-  right: 24px;
+  top: 58px;
+  left: 18px;
+  right: 16px;
   min-width: 0;
   text-align: left;
   white-space: nowrap;
   text-overflow: ellipsis;
   overflow: hidden;
-  font-size: 15px;
+  font-size: 11px;
   font-weight: 700;
   color: #6d4b0a;
   text-shadow: 0 1px 0 rgba(255, 243, 209, 0.45);
@@ -377,18 +377,18 @@ export const CardNameEdit = styled.div`
 
   .semi-input-wrapper,
   input {
-    height: 38px;
-    font-size: 14px;
-    border-radius: 8px;
+    height: 30px;
+    font-size: 11px;
+    border-radius: 6px;
   }
 `
 
 export const CardActions = styled.div`
   position: absolute;
-  top: 12px;
-  right: 12px;
+  top: 8px;
+  right: 8px;
   display: flex;
-  gap: 5px;
+  gap: 4px;
   opacity: 0;
   pointer-events: none;
   transition: opacity .1s ease;
@@ -398,10 +398,10 @@ export const ActionIconBtn = styled.button`
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 30px;
+  width: 26px;
+  height: 26px;
   padding: 0;
-  border-radius: 8px;
+  border-radius: 7px;
   border: 1px solid var(--app-border);
   background: var(--app-bg-elevated);
   color: var(--app-text-secondary);
@@ -441,10 +441,10 @@ export const ContextMenuActions = styled.div`
 `
 
 export const EmptyTip = styled.div`
-  padding: 52px 0 24px;
+  padding: 38px 0 18px;
   text-align: center;
   color: var(--app-text-muted);
-  font-size: 14px;
+  font-size: 11px;
 `
 
 export default LibraryWrapper

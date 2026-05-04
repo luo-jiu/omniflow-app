@@ -43,7 +43,7 @@ const QuickAccessSidebar: React.FC<QuickAccessSidebarProps> = ({ mode, onModeCha
       </SideMenuList>
       <SideMenuFooter>
         <SideMenuAction onClick={onOpenSettings} title="设置" aria-label="设置">
-          <IconSetting size="large" />
+          <IconSetting style={{ fontSize: 15 }} />
         </SideMenuAction>
       </SideMenuFooter>
     </SideMenu>

@@ -79,9 +79,9 @@ const LibraryPage: React.FC = () => {
         size="small"
         src={user?.avatar}
         style={{
-          width: 60,
-          height: 60,
-          fontSize: 24,
+          width: 42,
+          height: 42,
+          fontSize: 17,
           backgroundColor: isLoggedIn ? 'var(--app-accent)' : 'var(--semi-color-fill-2)',
         }}
       >

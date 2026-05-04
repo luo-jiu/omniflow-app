@@ -1,10 +1,10 @@
 import styled from 'styled-components';
 
 export const VideoViewerWrapper = styled.div`
-  --video-font-caption: 16px;
-  --video-font-body: 18px;
-  --video-font-control: 20px;
-  --video-font-title: 22px;
+  --video-font-caption: 10px;
+  --video-font-body: 11px;
+  --video-font-control: 12px;
+  --video-font-title: 14px;
 
   width: 100%;
   height: 100%;
@@ -32,7 +32,7 @@ export const VideoViewerWrapper = styled.div`
   }
 
   .viewer-main.console-open {
-    padding-right: 360px;
+    padding-right: 260px;
   }
 
   .subtitle-file-input {
@@ -68,7 +68,7 @@ export const VideoViewerWrapper = styled.div`
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 6px;
+    gap: 4px;
     pointer-events: none;
     z-index: 2;
   }
@@ -77,8 +77,8 @@ export const VideoViewerWrapper = styled.div`
     display: inline-flex;
     justify-content: center;
     max-width: 100%;
-    padding: 8px 20px;
-    border-radius: 16px;
+    padding: 6px 14px;
+    border-radius: 10px;
     background: rgba(0, 0, 0, 0.52);
     color: #fff;
     font-weight: 700;
@@ -111,7 +111,7 @@ export const VideoViewerWrapper = styled.div`
     top: 0;
     right: 0;
     bottom: 0;
-    width: 360px;
+    width: 260px;
     border-left: 1px solid var(--semi-color-border);
     background: linear-gradient(180deg, rgba(247, 249, 252, 0.98), rgba(241, 244, 248, 0.96));
     display: flex;
@@ -119,7 +119,7 @@ export const VideoViewerWrapper = styled.div`
     min-height: 0;
     transition: transform 0.24s ease, opacity 0.24s ease;
     z-index: 3;
-    box-shadow: -16px 0 40px rgba(0, 0, 0, 0.16);
+    box-shadow: -10px 0 28px rgba(0, 0, 0, 0.14);
   }
 
   .console-panel.closed {
@@ -136,27 +136,27 @@ export const VideoViewerWrapper = styled.div`
     flex: 1;
     min-height: 0;
     overflow: auto;
-    padding: 18px;
+    padding: 12px;
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 8px;
   }
 
   .console-section {
     border: 1px solid var(--semi-color-border);
     background: var(--semi-color-bg-1);
-    border-radius: 14px;
-    padding: 16px;
+    border-radius: 8px;
+    padding: 10px;
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 7px;
   }
 
   .section-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 10px;
+    gap: 7px;
   }
 
   .section-title {
@@ -169,7 +169,7 @@ export const VideoViewerWrapper = styled.div`
     font-size: var(--video-font-body);
     color: var(--semi-color-text-2);
     text-align: right;
-    max-width: 180px;
+    max-width: 116px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -184,23 +184,23 @@ export const VideoViewerWrapper = styled.div`
 
   .section-actions {
     display: flex;
-    gap: 10px;
+    gap: 7px;
     flex-wrap: wrap;
   }
 
   .info-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 10px;
+    gap: 7px;
   }
 
   .info-card {
-    border-radius: 12px;
+    border-radius: 7px;
     background: var(--semi-color-fill-0);
-    padding: 12px 14px;
+    padding: 8px 9px;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 3px;
     min-width: 0;
   }
 
@@ -217,8 +217,8 @@ export const VideoViewerWrapper = styled.div`
   }
 
   .inline-alert {
-    border-radius: 12px;
-    padding: 10px 12px;
+    border-radius: 7px;
+    padding: 7px 8px;
     font-size: var(--video-font-body);
     line-height: 1.6;
   }
@@ -231,7 +231,7 @@ export const VideoViewerWrapper = styled.div`
   .slider-field {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 5px;
     font-size: var(--video-font-body);
     color: var(--semi-color-text-1);
   }
@@ -240,7 +240,7 @@ export const VideoViewerWrapper = styled.div`
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
-    gap: 12px;
+    gap: 8px;
   }
 
   .slider-row input[type='range'] {
@@ -251,38 +251,52 @@ export const VideoViewerWrapper = styled.div`
   .slider-row strong {
     font-size: var(--video-font-body);
     color: var(--semi-color-text-0);
-    min-width: 64px;
+    min-width: 43px;
     text-align: right;
   }
 
   .subtitle-preview {
-    border-radius: 12px;
+    border-radius: 8px;
     background: rgba(0, 0, 0, 0.84);
     color: rgba(255, 255, 255, 0.92);
-    padding: 14px 16px;
+    padding: 9px 10px;
     display: flex;
     flex-direction: column;
-    gap: 6px;
-    min-height: 96px;
+    gap: 4px;
+    min-height: 64px;
     font-size: var(--video-font-control);
     line-height: 1.6;
   }
 
   .console-empty {
-    border-radius: 12px;
+    border-radius: 8px;
     background: var(--semi-color-fill-0);
-    padding: 12px;
+    padding: 8px;
+  }
+
+  .console-empty .semi-empty {
+    padding: 7px 0;
+  }
+
+  .console-empty .semi-empty-title {
+    font-size: var(--video-font-body);
+    line-height: 1.35;
+  }
+
+  .console-empty .semi-empty-description {
+    font-size: var(--video-font-caption);
+    line-height: 1.5;
   }
 
   .placeholder-grid {
     display: flex;
-    gap: 10px;
+    gap: 6px;
     flex-wrap: wrap;
   }
 
   .placeholder-chip {
     border-radius: 999px;
-    padding: 8px 14px;
+    padding: 5px 9px;
     font-size: var(--video-font-body);
     color: var(--semi-color-text-1);
     background: var(--semi-color-fill-0);
@@ -290,7 +304,7 @@ export const VideoViewerWrapper = styled.div`
   }
 
   .controls-panel {
-    padding: 16px 24px 20px;
+    padding: 10px 16px 12px;
     border-top: 1px solid var(--semi-color-border);
     background: rgba(0, 0, 0, 0.2);
     backdrop-filter: blur(10px);
@@ -298,7 +312,7 @@ export const VideoViewerWrapper = styled.div`
 
   .timeline-hitbox {
     width: 100%;
-    height: 20px;
+    height: 16px;
     display: flex;
     align-items: center;
     cursor: pointer;
@@ -307,7 +321,7 @@ export const VideoViewerWrapper = styled.div`
   .timeline-rail {
     position: relative;
     width: 100%;
-    height: 6px;
+    height: 4px;
     border-radius: 999px;
     background: rgba(255, 255, 255, 0.2);
     overflow: visible;
@@ -325,20 +339,20 @@ export const VideoViewerWrapper = styled.div`
   .timeline-thumb {
     position: absolute;
     top: 50%;
-    width: 14px;
-    height: 14px;
+    width: 10px;
+    height: 10px;
     border-radius: 50%;
     transform: translate(-50%, -50%);
     background: #fff;
-    box-shadow: 0 0 0 4px rgba(38, 110, 255, 0.25);
+    box-shadow: 0 0 0 3px rgba(38, 110, 255, 0.24);
     pointer-events: none;
   }
 
   .controls-row {
-    margin-top: 14px;
+    margin-top: 9px;
     display: flex;
     align-items: center;
-    gap: 16px;
+    gap: 10px;
     justify-content: space-between;
   }
 
@@ -346,12 +360,18 @@ export const VideoViewerWrapper = styled.div`
   .right-controls {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 6px;
   }
 
   .controls-row .semi-button {
-    min-height: 38px;
+    min-height: 30px;
     font-size: var(--video-font-control);
+    padding: 0 10px;
+    border-radius: 6px;
+  }
+
+  .controls-row .semi-button-icon {
+    font-size: 14px;
   }
 
   .controls-row .semi-button-content {
@@ -379,7 +399,7 @@ export const VideoViewerWrapper = styled.div`
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     font-size: var(--video-font-body);
     color: rgba(255, 255, 255, 0.86);
-    min-width: 136px;
+    min-width: 92px;
     display: inline-flex;
     align-items: center;
     line-height: 1;
@@ -387,38 +407,38 @@ export const VideoViewerWrapper = styled.div`
 
   .floating-control-panel {
     position: absolute;
-    bottom: calc(100% + 10px);
+    bottom: calc(100% + 7px);
     left: 50%;
     transform: translateX(-50%);
-    border-radius: 16px;
+    border-radius: 10px;
     background: rgba(18, 20, 24, 0.94);
     border: 1px solid rgba(255, 255, 255, 0.08);
     backdrop-filter: blur(16px);
-    box-shadow: 0 18px 36px rgba(0, 0, 0, 0.28);
-    padding: 14px 12px;
+    box-shadow: 0 12px 26px rgba(0, 0, 0, 0.26);
+    padding: 9px 8px;
     z-index: 4;
   }
 
   .volume-panel {
-    width: 74px;
+    width: 54px;
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 12px;
+    gap: 8px;
   }
 
   .volume-slider-vertical {
     -webkit-appearance: slider-vertical;
-    width: 28px;
-    height: 156px;
+    width: 22px;
+    height: 112px;
     accent-color: var(--semi-color-primary);
   }
 
   .rate-panel {
-    min-width: 92px;
+    min-width: 66px;
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 7px;
   }
 
   .floating-action-chip {
@@ -426,7 +446,7 @@ export const VideoViewerWrapper = styled.div`
     border-radius: 999px;
     background: rgba(255, 255, 255, 0.06);
     color: rgba(255, 255, 255, 0.92);
-    padding: 8px 14px;
+    padding: 6px 10px;
     font-size: var(--video-font-body);
     font-weight: 600;
     line-height: 1;
@@ -445,8 +465,10 @@ export const VideoViewerWrapper = styled.div`
   }
 
   .console-section .semi-button {
-    min-height: 38px;
+    min-height: 30px;
     font-size: var(--video-font-body);
+    padding: 0 10px;
+    border-radius: 6px;
   }
 
   .console-section .semi-button-content {
@@ -454,32 +476,32 @@ export const VideoViewerWrapper = styled.div`
   }
 
   .console-section .semi-switch {
-    transform: scale(1.08);
+    transform: scale(0.84);
     transform-origin: center right;
   }
 
   @media (max-width: 1200px) {
     .viewer-main.console-open {
-      padding-right: 320px;
+      padding-right: 240px;
     }
 
     .console-panel {
-      width: 320px;
+      width: 240px;
     }
   }
 
   @media (max-width: 900px) {
     .viewer-main.console-open {
-      padding-right: 280px;
+      padding-right: 220px;
     }
 
     .console-panel {
-      width: 280px;
+      width: 220px;
     }
 
     .controls-row {
       flex-wrap: wrap;
-      gap: 10px;
+      gap: 7px;
     }
 
     .right-controls {

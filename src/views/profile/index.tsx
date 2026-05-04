@@ -16,7 +16,8 @@ import { runtimeLogger } from '@/utils/runtimeLogger';
 const ProfileWrapper = styled.div`
   width: 100%;
   height: 100%;
-  padding: 52px 68px;
+  padding: 38px 46px;
+  padding-top: 43px;
   color: var(--semi-color-text-0);
   background: var(--app-bg);
   overflow: auto;
@@ -29,29 +30,29 @@ const ProfileWrapper = styled.div`
   .profile-header {
     display: flex;
     align-items: center;
-    gap: 16px;
-    margin-bottom: 20px;
+    gap: 12px;
+    margin-bottom: 7px;
   }
 
   .profile-content {
-    max-width: 760px;
+    max-width: 616px;
     margin: 0 auto;
-    padding: 0 8px;
+    padding: 0;
   }
 
   .avatar-area {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 10px;
-    margin-bottom: 20px;
+    gap: 7px;
+    margin-bottom: 16px;
   }
 
   .avatar-trigger {
     cursor: pointer;
-    border: 2px solid var(--app-border);
+    border: 1px solid var(--app-border);
     border-radius: 999px;
-    padding: 3px;
+    padding: 2px;
     transition: border-color 0.2s ease;
   }
 
@@ -60,38 +61,42 @@ const ProfileWrapper = styled.div`
   }
 
   .avatar-tip {
-    font-size: 14px;
+    font-size: 11px;
     color: var(--app-text-muted);
+    line-height: 1.5;
   }
 
   .form-row {
-    margin-bottom: 16px;
+    margin-bottom: 13px;
   }
 
   .row-title {
-    font-size: 16px;
+    font-size: 13px;
+    line-height: 1.35;
+    font-weight: 600;
     color: var(--app-text-secondary);
-    margin-bottom: 8px;
+    margin-bottom: 6px;
   }
 
   .form-actions {
     display: flex;
     justify-content: flex-end;
-    margin-top: 10px;
+    margin-top: 7px;
   }
 
   .bottom-logout {
-    margin-top: 22px;
+    margin-top: 18px;
     display: flex;
     justify-content: center;
   }
 
   .profile-action-btn {
-    min-height: 40px;
-    min-width: 104px;
-    padding: 0 16px;
-    border-radius: 8px;
-    font-size: 14px;
+    min-height: 30px;
+    min-width: 72px;
+    padding: 0 12px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 600;
   }
 
   .profile-action-btn.manage {
@@ -139,52 +144,110 @@ const ProfileWrapper = styled.div`
   .password-modal-body {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 10px;
   }
 
   .password-modal-label {
-    font-size: 14px;
+    font-size: 11px;
+    line-height: 1.35;
+    font-weight: 600;
     color: var(--app-text-secondary);
-    margin-bottom: 6px;
+    margin-bottom: 4px;
+  }
+
+  .profile-input.semi-input-wrapper,
+  .profile-input .semi-input-wrapper,
+  .profile-input .semi-input {
+    font-size: 11px;
+  }
+
+  .profile-input.semi-input-wrapper,
+  .profile-input .semi-input-wrapper {
+    min-height: 30px;
+    border-radius: 6px;
   }
 `;
 
 const ProfileModalGlobalStyle = createGlobalStyle`
-  .profile-password-modal .profile-action-btn,
-  .semi-modal .profile-action-btn {
-    min-height: 40px;
-    min-width: 104px;
-    padding: 0 16px;
+  .profile-password-modal .semi-modal-content {
     border-radius: 8px;
-    font-size: 14px;
   }
 
-  .profile-password-modal .profile-action-btn.manage,
-  .semi-modal .profile-action-btn.manage {
+  .profile-password-modal .semi-modal-header {
+    margin: 0;
+    padding: 16px 18px 5px;
+  }
+
+  .profile-password-modal .semi-modal-title {
+    font-size: 14px;
+    line-height: 1.3;
+    font-weight: 700;
+  }
+
+  .profile-password-modal .semi-modal-body {
+    padding: 0 18px 14px;
+  }
+
+  .profile-password-modal .semi-modal-footer {
+    margin: 0;
+    padding: 0 18px 16px;
+  }
+
+  .profile-password-modal .profile-action-btn {
+    min-height: 30px;
+    min-width: 72px;
+    padding: 0 12px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  .profile-password-modal .profile-action-btn.manage {
     border: 1px solid var(--semi-color-border);
     color: var(--semi-color-text-0);
     background: var(--semi-color-bg-0);
   }
 
-  .profile-password-modal .profile-action-btn.manage:hover,
-  .semi-modal .profile-action-btn.manage:hover {
+  .profile-password-modal .profile-action-btn.manage:hover {
     background: var(--semi-color-bg-0);
     border-color: var(--semi-color-primary);
     color: var(--semi-color-primary);
   }
 
-  .profile-password-modal .profile-action-btn.exit,
-  .semi-modal .profile-action-btn.exit {
+  .profile-password-modal .profile-action-btn.exit {
     border: 1px solid var(--semi-color-border);
     color: var(--semi-color-text-0);
     background: var(--semi-color-fill-0);
   }
 
-  .profile-password-modal .profile-action-btn.exit:hover,
-  .semi-modal .profile-action-btn.exit:hover {
+  .profile-password-modal .profile-action-btn.exit:hover {
     background: rgba(220, 38, 38, 0.12);
     border-color: rgba(220, 38, 38, 0.46);
     color: #c03636;
+  }
+
+  .profile-password-modal .password-modal-label {
+    font-size: 11px;
+    line-height: 1.35;
+    font-weight: 600;
+    color: var(--app-text-secondary);
+    margin-bottom: 4px;
+  }
+
+  .profile-password-modal .password-modal-body {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .profile-password-modal .semi-input-wrapper,
+  .profile-password-modal .semi-input {
+    font-size: 11px;
+  }
+
+  .profile-password-modal .semi-input-wrapper {
+    min-height: 30px;
+    border-radius: 6px;
   }
 `;
 
@@ -324,12 +387,12 @@ const ProfilePage: React.FC = () => {
       <ProfileModalGlobalStyle />
       <div className="profile-header">
         <Button
-          icon={<IconChevronLeft style={{ fontSize: 20 }} />}
+          icon={<IconChevronLeft style={{ fontSize: 14 }} />}
           theme="borderless"
           onClick={() => navigate(-1)}
-          style={{ padding: '8px', borderRadius: '10px' }}
+          style={{ padding: '5px', borderRadius: '7px' }}
         />
-        <Typography.Title heading={2} style={{ fontSize: 31, fontWeight: 600, margin: 0 }}>
+        <Typography.Title heading={2} style={{ fontSize: 23, fontWeight: 700, lineHeight: 1.15, margin: 0 }}>
           个人资料
         </Typography.Title>
       </div>
@@ -341,9 +404,9 @@ const ProfilePage: React.FC = () => {
               size="extra-large"
               src={profile?.avatar || user?.avatar}
               style={{
-                width: 152,
-                height: 152,
-                fontSize: 52,
+                width: 104,
+                height: 104,
+                fontSize: 36,
                 backgroundColor: 'var(--app-accent)',
               }}
             >
@@ -360,16 +423,16 @@ const ProfilePage: React.FC = () => {
           />
         </div>
 
-        <Divider style={{ margin: '8px 0 20px' }} />
+        <Divider style={{ margin: '8px 0 16px' }} />
 
         <div className="form-row">
           <div className="row-title">昵称</div>
           <Input
+            className="profile-input"
             value={nickname}
             placeholder="输入昵称"
             onChange={setNickname}
             disabled={loading}
-            size="large"
           />
           <div className="form-actions">
             <Button
@@ -385,7 +448,7 @@ const ProfilePage: React.FC = () => {
 
         <div className="form-row">
           <div className="row-title">邮箱（暂不可修改）</div>
-          <Input value={profile?.email || ''} disabled size="large" />
+          <Input className="profile-input" value={profile?.email || ''} disabled />
         </div>
 
         <div className="form-row">
@@ -401,7 +464,7 @@ const ProfilePage: React.FC = () => {
           </div>
         </div>
 
-        <Divider style={{ margin: '20px 0 16px' }} />
+        <Divider style={{ margin: '16px 0 13px' }} />
 
         <div className="bottom-logout">
           <Button
@@ -435,6 +498,7 @@ const ProfilePage: React.FC = () => {
           className: 'profile-action-btn exit',
         }}
         confirmLoading={savingPassword}
+        width={360}
         onOk={onChangePassword}
         onCancel={() => {
           if (savingPassword) return;

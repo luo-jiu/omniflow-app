@@ -1,1 +1,193 @@
-"use strict";const r=require("electron");r.contextBridge.exposeInMainWorld("ipcRenderer",{on(...e){const[d,n]=e;return r.ipcRenderer.on(d,(o,...i)=>n(o,...i))},off(...e){const[d,...n]=e;return r.ipcRenderer.off(d,...n)},send(...e){const[d,...n]=e;return r.ipcRenderer.send(d,...n)},invoke(...e){const[d,...n]=e;return r.ipcRenderer.invoke(d,...n)}});r.contextBridge.exposeInMainWorld("electronAPI",{getStaticData:()=>r.ipcRenderer.invoke("sys:get-static-data"),openTextFile:e=>r.ipcRenderer.invoke("file:open",e),readLocalChromeBookmarks:()=>r.ipcRenderer.invoke("file:read-local-chrome-bookmarks"),readTextFile:e=>r.ipcRenderer.invoke("file:read-text",e),writeTextFile:(e,d)=>r.ipcRenderer.invoke("fs:write-text-file",e,d),pickUploadFiles:()=>r.ipcRenderer.invoke("dialog:pick-upload-files"),pickUploadFolders:()=>r.ipcRenderer.invoke("dialog:pick-upload-folders"),pickDownloadDirectory:()=>r.ipcRenderer.invoke("dialog:pick-download-directory"),getDownloadDirectory:()=>r.ipcRenderer.invoke("fs:get-download-directory"),saveDownloadFile:(e,d)=>r.ipcRenderer.invoke("dialog:save-download-file",e,d),pickAutoImportDirectory:()=>r.ipcRenderer.invoke("dialog:pick-auto-import-directory"),ensureDirectory:(e,d)=>r.ipcRenderer.invoke("fs:ensure-directory",e,d),saveStagedDownloadFile:(e,d)=>r.ipcRenderer.invoke("fs:save-staged-download-file",e,d),downloadUrlToPath:(e,d,n,o)=>r.ipcRenderer.invoke("fs:download-url-to-path",e,d,n,o),claimAutoImportFiles:(e,d)=>r.ipcRenderer.invoke("fs:claim-auto-import-files",e,d),cleanupAutoImportStagedFile:e=>r.ipcRenderer.invoke("fs:cleanup-auto-import-staged-file",e),createStagedTextFile:(e,d)=>r.ipcRenderer.invoke("fs:create-staged-text-file",e,d),createTempImportDirectory:()=>r.ipcRenderer.invoke("fs:create-temp-import-directory"),getTempImportFileInfo:e=>r.ipcRenderer.invoke("fs:get-temp-import-file-info",e),cleanupStagedTextFile:e=>r.ipcRenderer.invoke("fs:cleanup-staged-text-file",e),cleanupTempImportPath:e=>r.ipcRenderer.invoke("fs:cleanup-temp-import-path",e),fetch:(e,d)=>r.ipcRenderer.invoke("http:fetch",e,d),fetchBinary:(e,d)=>r.ipcRenderer.invoke("http:fetch-binary",e,d),upload:(e,d,n,o,i)=>r.ipcRenderer.invoke("http:upload",e,d,n,o,i),uploadAbort:e=>r.ipcRenderer.invoke("http:upload:abort",e),chunkedUpload:(e,d,n,o,i)=>r.ipcRenderer.invoke("http:chunked-upload",e,d,n,o,i),chunkedUploadAbort:e=>r.ipcRenderer.invoke("http:chunked-upload:abort",e),onUploadProgress:e=>{const d=(n,o)=>{e(o)};return r.ipcRenderer.on("http:upload:progress",d),()=>r.ipcRenderer.removeListener("http:upload:progress",d)}});r.contextBridge.exposeInMainWorld("electronWindow",{minimize:()=>r.ipcRenderer.send("window-minimize"),maximize:()=>r.ipcRenderer.send("window-maximize"),close:()=>r.ipcRenderer.send("window-close"),activate:(e=!1)=>r.ipcRenderer.invoke("window-activate",e),setThemeSource:e=>r.ipcRenderer.send("window-set-theme-source",e)});r.contextBridge.exposeInMainWorld("electronOverlay",{open:(e,d)=>r.ipcRenderer.invoke("overlay:open",{type:e,props:d})});r.contextBridge.exposeInMainWorld("electronOverlayHost",{onShow:e=>{const d=(n,o)=>{e(o)};return r.ipcRenderer.on("overlay:host:show",d),()=>r.ipcRenderer.removeListener("overlay:host:show",d)},onDismissFromMain:e=>{const d=(n,o)=>{e(o)};return r.ipcRenderer.on("overlay:host:dismiss-from-main",d),()=>r.ipcRenderer.removeListener("overlay:host:dismiss-from-main",d)},resolve:(e,d)=>r.ipcRenderer.send("overlay:host:resolve",{requestId:e,result:d}),dismiss:(e,d)=>r.ipcRenderer.send("overlay:host:dismiss",{requestId:e,reason:d}),reportReady:()=>r.ipcRenderer.send("overlay:host:ready")});r.contextBridge.exposeInMainWorld("electronEmbeddedBrowser",{activateTab:e=>r.ipcRenderer.invoke("embedded-browser:activate-tab",e),cleanupDownloadFile:e=>r.ipcRenderer.invoke("embedded-browser:cleanup-download-file",e),closeAll:()=>r.ipcRenderer.invoke("embedded-browser:close-all"),closeTab:e=>r.ipcRenderer.invoke("embedded-browser:close-tab",e),deactivate:()=>r.ipcRenderer.invoke("embedded-browser:deactivate"),goBack:e=>r.ipcRenderer.invoke("embedded-browser:go-back",e),goForward:e=>r.ipcRenderer.invoke("embedded-browser:go-forward",e),navigate:(e,d)=>r.ipcRenderer.invoke("embedded-browser:navigate",e,d),openMappedFile:(e,d,n,o)=>r.ipcRenderer.invoke("embedded-browser:open-mapped-file",e,d,n,o),resolveFavicon:e=>r.ipcRenderer.invoke("embedded-browser:resolve-favicon",e),onStateChange:e=>{const d=(n,o)=>{e(o)};return r.ipcRenderer.on("embedded-browser:state",d),()=>r.ipcRenderer.removeListener("embedded-browser:state",d)},onDownload:e=>{const d=(n,o)=>{e(o)};return r.ipcRenderer.on("embedded-browser:download",d),()=>r.ipcRenderer.removeListener("embedded-browser:download",d)},onHlsTask:e=>{const d=(n,o)=>{e(o)};return r.ipcRenderer.on("embedded-browser:hls-task",d),()=>r.ipcRenderer.removeListener("embedded-browser:hls-task",d)},onResourceCaptured:e=>{const d=(n,o)=>{e(o)};return r.ipcRenderer.on("embedded-browser:resource",d),()=>r.ipcRenderer.removeListener("embedded-browser:resource",d)},openTab:(e,d)=>r.ipcRenderer.invoke("embedded-browser:open-tab",e,d),exportCapturedResource:(e,d)=>r.ipcRenderer.invoke("embedded-browser:resource:export",e,d),listCapturedResources:e=>r.ipcRenderer.invoke("embedded-browser:resource:list",e),openCapturedResource:(e,d)=>r.ipcRenderer.invoke("embedded-browser:resource:open",e,d),readCapturedResource:(e,d)=>r.ipcRenderer.invoke("embedded-browser:resource:read",e,d),saveCapturedResource:(e,d)=>r.ipcRenderer.invoke("embedded-browser:resource:save",e,d),previewCapturedResource:(e,d)=>r.ipcRenderer.invoke("embedded-browser:resource:preview",e,d),getCatchToolkitState:e=>r.ipcRenderer.invoke("embedded-browser:resource:catch-toolkit:get-state",e),updateCatchToolkitState:(e,d)=>r.ipcRenderer.invoke("embedded-browser:resource:catch-toolkit:update-state",e,d),clearCatchMediaCache:e=>r.ipcRenderer.invoke("embedded-browser:resource:catch-toolkit:clear-cache",e),clearCacheAndReload:e=>r.ipcRenderer.invoke("embedded-browser:clear-cache-reload",e),resetPageStorageAndReload:e=>r.ipcRenderer.invoke("embedded-browser:reset-page-storage",e),downloadCatchMedia:e=>r.ipcRenderer.invoke("embedded-browser:resource:catch-toolkit:download",e),restartCatchMediaCapture:e=>r.ipcRenderer.invoke("embedded-browser:resource:catch-toolkit:restart",e),mergeCapturedMseResources:(e,d)=>r.ipcRenderer.invoke("embedded-browser:resource:merge-mse",e,d),transcodeCapturedResource:(e,d)=>r.ipcRenderer.invoke("embedded-browser:resource:transcode",e,d),downloadHlsManifest:(e,d)=>r.ipcRenderer.invoke("embedded-browser:resource:download-hls",e,d),startHlsRecording:(e,d)=>r.ipcRenderer.invoke("embedded-browser:resource:start-hls-recording",e,d),stopHlsRecording:(e,d)=>r.ipcRenderer.invoke("embedded-browser:resource:stop-hls-recording",e,d),discardHlsRecording:(e,d)=>r.ipcRenderer.invoke("embedded-browser:resource:discard-hls-recording",e,d),downloadHlsTracks:(e,d)=>r.ipcRenderer.invoke("embedded-browser:resource:download-hls-tracks",e,d),downloadHlsPlan:(e,d)=>r.ipcRenderer.invoke("embedded-browser:resource:download-hls-plan",e,d),retryHlsPlanFailed:(e,d)=>r.ipcRenderer.invoke("embedded-browser:resource:retry-hls-plan-failed",e,d),downloadMpdManifest:(e,d)=>r.ipcRenderer.invoke("embedded-browser:resource:download-mpd",e,d),downloadMpdPlan:(e,d)=>r.ipcRenderer.invoke("embedded-browser:resource:download-mpd-plan",e,d),downloadDirectFile:(e,d)=>r.ipcRenderer.invoke("embedded-browser:resource:download-direct-file",e,d),reload:e=>r.ipcRenderer.invoke("embedded-browser:reload",e),startDeepResourceCapture:e=>r.ipcRenderer.invoke("embedded-browser:resource:start-deep-capture",e),startResourceCapture:e=>r.ipcRenderer.invoke("embedded-browser:resource:start",e),stopResourceCapture:e=>r.ipcRenderer.invoke("embedded-browser:resource:stop",e),clearCapturedResources:e=>r.ipcRenderer.invoke("embedded-browser:resource:clear",e),setBounds:e=>r.ipcRenderer.invoke("embedded-browser:set-bounds",e),getCookies:e=>r.ipcRenderer.invoke("embedded-browser:cookie:get",e),removeCookie:(e,d)=>r.ipcRenderer.invoke("embedded-browser:cookie:remove",e,d),removeCookiesByDomain:e=>r.ipcRenderer.invoke("embedded-browser:cookie:remove-domain",e),removeAllCookies:()=>r.ipcRenderer.invoke("embedded-browser:cookie:remove-all"),getResourceCaptureRules:()=>r.ipcRenderer.invoke("embedded-browser:resource-capture-rules:get"),updateResourceCaptureRules:e=>r.ipcRenderer.invoke("embedded-browser:resource-capture-rules:update",e),resetResourceCaptureRules:()=>r.ipcRenderer.invoke("embedded-browser:resource-capture-rules:reset"),getExternalToolSettings:()=>r.ipcRenderer.invoke("embedded-browser:external-tools:get"),updateExternalToolSettings:e=>r.ipcRenderer.invoke("embedded-browser:external-tools:update",e),resetExternalToolSettings:()=>r.ipcRenderer.invoke("embedded-browser:external-tools:reset"),listEnabledExternalTools:()=>r.ipcRenderer.invoke("embedded-browser:external-tools:list-enabled"),dispatchExternalTool:(e,d)=>r.ipcRenderer.invoke("embedded-browser:external-tools:dispatch",e,d),listPasswords:()=>r.ipcRenderer.invoke("embedded-browser:password:list"),getDecryptedPassword:e=>r.ipcRenderer.invoke("embedded-browser:password:get-decrypted",e),saveCapturedCredential:e=>r.ipcRenderer.invoke("embedded-browser:password:save-captured",e),deletePassword:e=>r.ipcRenderer.invoke("embedded-browser:password:delete",e),deleteAllPasswords:()=>r.ipcRenderer.invoke("embedded-browser:password:delete-all"),blacklistDomain:e=>r.ipcRenderer.invoke("embedded-browser:password:blacklist-domain",e),isBlacklistedDomain:e=>r.ipcRenderer.invoke("embedded-browser:password:is-blacklisted",e),autoFillPassword:(e,d)=>r.ipcRenderer.invoke("embedded-browser:password:auto-fill",e,d),onCredentialCaptured:e=>{const d=(n,o)=>{e(o)};return r.ipcRenderer.on("embedded-browser:credential-captured",d),()=>r.ipcRenderer.removeListener("embedded-browser:credential-captured",d)},onCredentialAutoFilled:e=>{const d=(n,o)=>{e(o)};return r.ipcRenderer.on("embedded-browser:credential-autofilled",d),()=>r.ipcRenderer.removeListener("embedded-browser:credential-autofilled",d)}});
+"use strict";
+const electron = require("electron");
+electron.contextBridge.exposeInMainWorld("ipcRenderer", {
+  on(...args) {
+    const [channel, listener] = args;
+    return electron.ipcRenderer.on(channel, (event, ...args2) => listener(event, ...args2));
+  },
+  off(...args) {
+    const [channel, ...omit] = args;
+    return electron.ipcRenderer.off(channel, ...omit);
+  },
+  send(...args) {
+    const [channel, ...omit] = args;
+    return electron.ipcRenderer.send(channel, ...omit);
+  },
+  invoke(...args) {
+    const [channel, ...omit] = args;
+    return electron.ipcRenderer.invoke(channel, ...omit);
+  }
+  // You can expose other APTs you need here.
+  // ...
+});
+electron.contextBridge.exposeInMainWorld("electronAPI", {
+  getStaticData: () => electron.ipcRenderer.invoke("sys:get-static-data"),
+  openTextFile: (options) => electron.ipcRenderer.invoke("file:open", options),
+  readLocalChromeBookmarks: () => electron.ipcRenderer.invoke("file:read-local-chrome-bookmarks"),
+  readTextFile: (filePath) => electron.ipcRenderer.invoke("file:read-text", filePath),
+  writeTextFile: (filePath, content) => electron.ipcRenderer.invoke("fs:write-text-file", filePath, content),
+  pickUploadFiles: () => electron.ipcRenderer.invoke("dialog:pick-upload-files"),
+  pickUploadFolders: () => electron.ipcRenderer.invoke("dialog:pick-upload-folders"),
+  pickDownloadDirectory: () => electron.ipcRenderer.invoke("dialog:pick-download-directory"),
+  getDownloadDirectory: () => electron.ipcRenderer.invoke("fs:get-download-directory"),
+  saveDownloadFile: (defaultFileName, options) => electron.ipcRenderer.invoke("dialog:save-download-file", defaultFileName, options),
+  pickAutoImportDirectory: () => electron.ipcRenderer.invoke("dialog:pick-auto-import-directory"),
+  ensureDirectory: (baseDirectory, relativePath) => electron.ipcRenderer.invoke("fs:ensure-directory", baseDirectory, relativePath),
+  saveStagedDownloadFile: (stagedPath, targetFilePath) => electron.ipcRenderer.invoke("fs:save-staged-download-file", stagedPath, targetFilePath),
+  downloadUrlToPath: (url, baseDirectory, relativePath, headers) => electron.ipcRenderer.invoke("fs:download-url-to-path", url, baseDirectory, relativePath, headers),
+  claimAutoImportFiles: (watchDirectory, maxFiles) => electron.ipcRenderer.invoke("fs:claim-auto-import-files", watchDirectory, maxFiles),
+  cleanupAutoImportStagedFile: (stagedPath) => electron.ipcRenderer.invoke("fs:cleanup-auto-import-staged-file", stagedPath),
+  createStagedTextFile: (fileName, content) => electron.ipcRenderer.invoke("fs:create-staged-text-file", fileName, content),
+  createTempImportDirectory: () => electron.ipcRenderer.invoke("fs:create-temp-import-directory"),
+  getTempImportFileInfo: (filePath) => electron.ipcRenderer.invoke("fs:get-temp-import-file-info", filePath),
+  cleanupStagedTextFile: (stagedPath) => electron.ipcRenderer.invoke("fs:cleanup-staged-text-file", stagedPath),
+  cleanupTempImportPath: (targetPath) => electron.ipcRenderer.invoke("fs:cleanup-temp-import-path", targetPath),
+  fetch: (url, options) => electron.ipcRenderer.invoke("http:fetch", url, options),
+  fetchBinary: (url, options) => electron.ipcRenderer.invoke("http:fetch-binary", url, options),
+  upload: (url, filePath, formDataParams, headers, uploadId) => electron.ipcRenderer.invoke("http:upload", url, filePath, formDataParams, headers, uploadId),
+  uploadAbort: (uploadId) => electron.ipcRenderer.invoke("http:upload:abort", uploadId),
+  chunkedUpload: (baseUrl, filePath, params, headers, uploadId) => electron.ipcRenderer.invoke("http:chunked-upload", baseUrl, filePath, params, headers, uploadId),
+  chunkedUploadAbort: (uploadId) => electron.ipcRenderer.invoke("http:chunked-upload:abort", uploadId),
+  onUploadProgress: (listener) => {
+    const wrapped = (_event, payload) => {
+      listener(payload);
+    };
+    electron.ipcRenderer.on("http:upload:progress", wrapped);
+    return () => electron.ipcRenderer.removeListener("http:upload:progress", wrapped);
+  }
+});
+electron.contextBridge.exposeInMainWorld("electronWindow", {
+  minimize: () => electron.ipcRenderer.send("window-minimize"),
+  maximize: () => electron.ipcRenderer.send("window-maximize"),
+  close: () => electron.ipcRenderer.send("window-close"),
+  activate: (temporaryOnTop = false) => electron.ipcRenderer.invoke("window-activate", temporaryOnTop),
+  setThemeSource: (source) => electron.ipcRenderer.send("window-set-theme-source", source)
+});
+electron.contextBridge.exposeInMainWorld("electronOverlay", {
+  open: (type, props) => electron.ipcRenderer.invoke("overlay:open", { type, props })
+});
+electron.contextBridge.exposeInMainWorld("electronOverlayHost", {
+  onShow: (listener) => {
+    const wrapped = (_event, spec) => {
+      listener(spec);
+    };
+    electron.ipcRenderer.on("overlay:host:show", wrapped);
+    return () => electron.ipcRenderer.removeListener("overlay:host:show", wrapped);
+  },
+  onDismissFromMain: (listener) => {
+    const wrapped = (_event, payload) => {
+      listener(payload);
+    };
+    electron.ipcRenderer.on("overlay:host:dismiss-from-main", wrapped);
+    return () => electron.ipcRenderer.removeListener("overlay:host:dismiss-from-main", wrapped);
+  },
+  resolve: (requestId, result) => electron.ipcRenderer.send("overlay:host:resolve", { requestId, result }),
+  dismiss: (requestId, reason) => electron.ipcRenderer.send("overlay:host:dismiss", { requestId, reason }),
+  reportReady: () => electron.ipcRenderer.send("overlay:host:ready")
+});
+electron.contextBridge.exposeInMainWorld("electronEmbeddedBrowser", {
+  activateTab: (tabId) => electron.ipcRenderer.invoke("embedded-browser:activate-tab", tabId),
+  cleanupDownloadFile: (tempPath) => electron.ipcRenderer.invoke("embedded-browser:cleanup-download-file", tempPath),
+  closeAll: () => electron.ipcRenderer.invoke("embedded-browser:close-all"),
+  closeTab: (tabId) => electron.ipcRenderer.invoke("embedded-browser:close-tab", tabId),
+  deactivate: () => electron.ipcRenderer.invoke("embedded-browser:deactivate"),
+  goBack: (tabId) => electron.ipcRenderer.invoke("embedded-browser:go-back", tabId),
+  goForward: (tabId) => electron.ipcRenderer.invoke("embedded-browser:go-forward", tabId),
+  navigate: (tabId, url) => electron.ipcRenderer.invoke("embedded-browser:navigate", tabId, url),
+  openMappedFile: (tabId, pageUrl, sourceUrl, fileName) => electron.ipcRenderer.invoke("embedded-browser:open-mapped-file", tabId, pageUrl, sourceUrl, fileName),
+  resolveFavicon: (payload) => electron.ipcRenderer.invoke("embedded-browser:resolve-favicon", payload),
+  onStateChange: (listener) => {
+    const wrapped = (_event, payload) => {
+      listener(payload);
+    };
+    electron.ipcRenderer.on("embedded-browser:state", wrapped);
+    return () => electron.ipcRenderer.removeListener("embedded-browser:state", wrapped);
+  },
+  onDownload: (listener) => {
+    const wrapped = (_event, payload) => {
+      listener(payload);
+    };
+    electron.ipcRenderer.on("embedded-browser:download", wrapped);
+    return () => electron.ipcRenderer.removeListener("embedded-browser:download", wrapped);
+  },
+  onHlsTask: (listener) => {
+    const wrapped = (_event, payload) => {
+      listener(payload);
+    };
+    electron.ipcRenderer.on("embedded-browser:hls-task", wrapped);
+    return () => electron.ipcRenderer.removeListener("embedded-browser:hls-task", wrapped);
+  },
+  onResourceCaptured: (listener) => {
+    const wrapped = (_event, payload) => {
+      listener(payload);
+    };
+    electron.ipcRenderer.on("embedded-browser:resource", wrapped);
+    return () => electron.ipcRenderer.removeListener("embedded-browser:resource", wrapped);
+  },
+  openTab: (tabId, url) => electron.ipcRenderer.invoke("embedded-browser:open-tab", tabId, url),
+  exportCapturedResource: (tabId, resourceKey) => electron.ipcRenderer.invoke("embedded-browser:resource:export", tabId, resourceKey),
+  listCapturedResources: (tabId) => electron.ipcRenderer.invoke("embedded-browser:resource:list", tabId),
+  openCapturedResource: (tabId, resourceKey) => electron.ipcRenderer.invoke("embedded-browser:resource:open", tabId, resourceKey),
+  readCapturedResource: (tabId, resourceKey) => electron.ipcRenderer.invoke("embedded-browser:resource:read", tabId, resourceKey),
+  saveCapturedResource: (tabId, payload) => electron.ipcRenderer.invoke("embedded-browser:resource:save", tabId, payload),
+  previewCapturedResource: (tabId, payload) => electron.ipcRenderer.invoke("embedded-browser:resource:preview", tabId, payload),
+  getCatchToolkitState: (tabId) => electron.ipcRenderer.invoke("embedded-browser:resource:catch-toolkit:get-state", tabId),
+  updateCatchToolkitState: (tabId, payload) => electron.ipcRenderer.invoke("embedded-browser:resource:catch-toolkit:update-state", tabId, payload),
+  clearCatchMediaCache: (tabId) => electron.ipcRenderer.invoke("embedded-browser:resource:catch-toolkit:clear-cache", tabId),
+  clearCacheAndReload: (tabId) => electron.ipcRenderer.invoke("embedded-browser:clear-cache-reload", tabId),
+  resetPageStorageAndReload: (tabId) => electron.ipcRenderer.invoke("embedded-browser:reset-page-storage", tabId),
+  downloadCatchMedia: (tabId) => electron.ipcRenderer.invoke("embedded-browser:resource:catch-toolkit:download", tabId),
+  restartCatchMediaCapture: (tabId) => electron.ipcRenderer.invoke("embedded-browser:resource:catch-toolkit:restart", tabId),
+  mergeCapturedMseResources: (tabId, payload) => electron.ipcRenderer.invoke("embedded-browser:resource:merge-mse", tabId, payload),
+  transcodeCapturedResource: (tabId, payload) => electron.ipcRenderer.invoke("embedded-browser:resource:transcode", tabId, payload),
+  downloadHlsManifest: (tabId, payload) => electron.ipcRenderer.invoke("embedded-browser:resource:download-hls", tabId, payload),
+  startHlsRecording: (tabId, payload) => electron.ipcRenderer.invoke("embedded-browser:resource:start-hls-recording", tabId, payload),
+  stopHlsRecording: (tabId, payload) => electron.ipcRenderer.invoke("embedded-browser:resource:stop-hls-recording", tabId, payload),
+  discardHlsRecording: (tabId, payload) => electron.ipcRenderer.invoke("embedded-browser:resource:discard-hls-recording", tabId, payload),
+  downloadHlsTracks: (tabId, payload) => electron.ipcRenderer.invoke("embedded-browser:resource:download-hls-tracks", tabId, payload),
+  downloadHlsPlan: (tabId, payload) => electron.ipcRenderer.invoke("embedded-browser:resource:download-hls-plan", tabId, payload),
+  retryHlsPlanFailed: (tabId, payload) => electron.ipcRenderer.invoke("embedded-browser:resource:retry-hls-plan-failed", tabId, payload),
+  downloadMpdManifest: (tabId, payload) => electron.ipcRenderer.invoke("embedded-browser:resource:download-mpd", tabId, payload),
+  downloadMpdPlan: (tabId, payload) => electron.ipcRenderer.invoke("embedded-browser:resource:download-mpd-plan", tabId, payload),
+  downloadDirectFile: (tabId, payload) => electron.ipcRenderer.invoke("embedded-browser:resource:download-direct-file", tabId, payload),
+  reload: (tabId) => electron.ipcRenderer.invoke("embedded-browser:reload", tabId),
+  startDeepResourceCapture: (tabId) => electron.ipcRenderer.invoke("embedded-browser:resource:start-deep-capture", tabId),
+  startResourceCapture: (tabId) => electron.ipcRenderer.invoke("embedded-browser:resource:start", tabId),
+  stopResourceCapture: (tabId) => electron.ipcRenderer.invoke("embedded-browser:resource:stop", tabId),
+  clearCapturedResources: (tabId) => electron.ipcRenderer.invoke("embedded-browser:resource:clear", tabId),
+  setBounds: (bounds) => electron.ipcRenderer.invoke("embedded-browser:set-bounds", bounds),
+  getCookies: (filter) => electron.ipcRenderer.invoke("embedded-browser:cookie:get", filter),
+  removeCookie: (url, name) => electron.ipcRenderer.invoke("embedded-browser:cookie:remove", url, name),
+  removeCookiesByDomain: (domain) => electron.ipcRenderer.invoke("embedded-browser:cookie:remove-domain", domain),
+  removeAllCookies: () => electron.ipcRenderer.invoke("embedded-browser:cookie:remove-all"),
+  getResourceCaptureRules: () => electron.ipcRenderer.invoke("embedded-browser:resource-capture-rules:get"),
+  updateResourceCaptureRules: (ruleSet) => electron.ipcRenderer.invoke("embedded-browser:resource-capture-rules:update", ruleSet),
+  resetResourceCaptureRules: () => electron.ipcRenderer.invoke("embedded-browser:resource-capture-rules:reset"),
+  getExternalToolSettings: () => electron.ipcRenderer.invoke("embedded-browser:external-tools:get"),
+  updateExternalToolSettings: (settings) => electron.ipcRenderer.invoke("embedded-browser:external-tools:update", settings),
+  resetExternalToolSettings: () => electron.ipcRenderer.invoke("embedded-browser:external-tools:reset"),
+  listEnabledExternalTools: () => electron.ipcRenderer.invoke("embedded-browser:external-tools:list-enabled"),
+  dispatchExternalTool: (toolKey, payload) => electron.ipcRenderer.invoke("embedded-browser:external-tools:dispatch", toolKey, payload),
+  listPasswords: () => electron.ipcRenderer.invoke("embedded-browser:password:list"),
+  getDecryptedPassword: (id) => electron.ipcRenderer.invoke("embedded-browser:password:get-decrypted", id),
+  saveCapturedCredential: (credentialRequestId) => electron.ipcRenderer.invoke("embedded-browser:password:save-captured", credentialRequestId),
+  deletePassword: (id) => electron.ipcRenderer.invoke("embedded-browser:password:delete", id),
+  deleteAllPasswords: () => electron.ipcRenderer.invoke("embedded-browser:password:delete-all"),
+  blacklistDomain: (domain) => electron.ipcRenderer.invoke("embedded-browser:password:blacklist-domain", domain),
+  isBlacklistedDomain: (domain) => electron.ipcRenderer.invoke("embedded-browser:password:is-blacklisted", domain),
+  autoFillPassword: (tabId, passwordId) => electron.ipcRenderer.invoke("embedded-browser:password:auto-fill", tabId, passwordId),
+  onCredentialCaptured: (listener) => {
+    const wrapped = (_event, payload) => {
+      listener(payload);
+    };
+    electron.ipcRenderer.on("embedded-browser:credential-captured", wrapped);
+    return () => electron.ipcRenderer.removeListener("embedded-browser:credential-captured", wrapped);
+  },
+  onCredentialAutoFilled: (listener) => {
+    const wrapped = (_event, payload) => {
+      listener(payload);
+    };
+    electron.ipcRenderer.on("embedded-browser:credential-autofilled", wrapped);
+    return () => electron.ipcRenderer.removeListener("embedded-browser:credential-autofilled", wrapped);
+  }
+});
