@@ -28,12 +28,18 @@ function createMediaRegistry(): MediaRegistryAPI {
       isPlaying: record.isPlaying,
       currentTime: record.currentTime,
       duration: record.duration,
+      thumbnailUrl: record.thumbnailUrl,
+      previewUrl: record.previewUrl,
     }));
   }
 
   function emit() {
     rebuild();
     listeners.forEach((listener) => listener(cached));
+  }
+
+  function hasPatchKey<T extends object>(patch: T, key: keyof T) {
+    return Object.prototype.hasOwnProperty.call(patch, key);
   }
 
   return {
@@ -46,6 +52,8 @@ function createMediaRegistry(): MediaRegistryAPI {
         isPlaying: input.isPlaying,
         currentTime: input.currentTime,
         duration: input.duration,
+        thumbnailUrl: input.thumbnailUrl,
+        previewUrl: input.previewUrl,
         play: input.play,
         pause: input.pause,
         seek: input.seek,
@@ -72,6 +80,14 @@ function createMediaRegistry(): MediaRegistryAPI {
           }
           if (patch.duration !== undefined && patch.duration !== current.duration) {
             current.duration = patch.duration;
+            changed = true;
+          }
+          if (hasPatchKey(patch, 'thumbnailUrl') && patch.thumbnailUrl !== current.thumbnailUrl) {
+            current.thumbnailUrl = patch.thumbnailUrl;
+            changed = true;
+          }
+          if (hasPatchKey(patch, 'previewUrl') && patch.previewUrl !== current.previewUrl) {
+            current.previewUrl = patch.previewUrl;
             changed = true;
           }
           if (changed) emit();

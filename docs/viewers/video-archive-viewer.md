@@ -1,6 +1,6 @@
 # Video Archive Viewer 说明
 
-更新时间：2026-04-16
+更新时间：2026-05-04
 适用范围：`src/features/archive-viewer/components/video-archive-viewer/` 下的视频归档卡片视图、封面解析、缓存恢复和返回链路能力。
 
 ## 1. 概述
@@ -12,7 +12,8 @@
 - 解析 `video-archive://library/:libraryId/node/:nodeId` 路由
 - 读取归档目录下的视频卡片分页数据
 - 用卡片墙方式展示直属视频资源
-- 解析并补齐 `coverNodeId` 对应封面
+- 解析并补齐 `coverNodeId` 对应封面；没有显式封面时，用视频文件自身链接做首帧预览
+- 卡片尺寸和底栏密度跟漫画 / ASMR 归档保持同一档，视频封面仍保留 16:9 横向比例
 - 维护局部列表缓存和滚动位置
 - 提供重命名、删除、目录树定位等卡片级操作
 - 双击卡片后打开普通 `video` viewer，并带上 `returnTarget`
@@ -60,7 +61,7 @@
 
 ### 3.3 封面策略
 
-当前卡片封面优先使用：
+当前卡片封面优先使用显式封面：
 
 - `coverNodeId`
 
@@ -68,9 +69,10 @@
 
 1. 卡片初始只带 `coverNodeId`
 2. 再通过 `batchGetFileLinks` 批量解析封面 URL
-3. 如果没有封面，则显示占位卡面
+3. 如果没有 `coverNodeId`，则批量解析视频节点自身链接，渲染只读 `<video preload="metadata">` 预览，并在 metadata 后 seek 到约 0.5 秒避开 0 秒空帧
+4. 如果封面和视频预览链接都不可用，则显示占位卡面
 
-这说明当前封面不是现场生成首帧，而是优先依赖已有封面节点。
+这说明当前封面不是现场生成图片文件，而是优先依赖已有封面节点；没有显式封面时，只在前端用视频元素做轻量预览。
 
 ### 3.4 局部缓存
 
@@ -112,8 +114,9 @@
 `video-archive-viewer` 当前负责：
 
 - 分页加载视频归档卡片
-- 批量解析封面
+- 批量解析封面或视频首帧预览链接
 - 卡片网格展示和滚动恢复
+- 维护 `100%` 页面缩放下的紧凑归档卡片密度
 - 卡片级右键菜单
 - 重命名、删除、目录树定位
 - 双击打开普通视频 viewer
@@ -144,7 +147,7 @@
    - 直接恢复卡片、分页信息和 `scrollTop`
 4. 如果未命中：
    - 从 offset 0 开始请求第一页
-   - 把 `coverNodeId` 批量补成 `coverUrl`
+   - 把 `coverNodeId` 批量补成 `coverUrl`；没有 `coverNodeId` 的卡片补 `videoPreviewUrl`
    - 初始化 `nextOffset / total / hasMore`
 
 ### 5.2 分页加载
@@ -165,17 +168,19 @@
 
 - `coverNodeId`
 - `coverUrl = null`
+- `videoPreviewUrl = null`
 
 后续通过 `resolveCardCoverUrls`：
 
-- 收集未解析封面的 `coverNodeId`
+- 收集未解析封面的 `coverNodeId`，没有显式封面时收集卡片自身 `id`
 - 批量拿链接
-- 回填 `coverUrl`
+- 对显式封面回填 `coverUrl`
+- 对无显式封面的卡片回填 `videoPreviewUrl`
 
 失败时当前会：
 
 - 保留卡片
-- 只是不显示封面
+- 只是不显示封面或视频预览
 - 用占位卡面兜底
 
 ### 5.4 双击打开视频
@@ -210,7 +215,7 @@
 
 - `video_archive` 和普通 `video` 是两层 viewer，不要混成一个页面
 - 卡片来源当前是归档分页接口，不是目录树递归扫描
-- `coverNodeId` 和 `coverUrl` 是两阶段模型，不能假设一开始就有可显示封面
+- `coverNodeId`、`coverUrl` 和 `videoPreviewUrl` 是展示阶段字段，不能假设一开始就有可显示封面
 - 返回链路依赖 `returnTarget`，改打开逻辑时必须一起验证
 - snapshot cache 里不只存卡片，还存滚动位置和分页信息
 
@@ -245,7 +250,7 @@
 1. 归档页能正确展示视频卡片。
 2. 滚动加载更多仍然正常。
 3. 有 `coverNodeId` 的卡片能正确补出封面。
-4. 无封面的卡片会走占位卡面，不会白块。
+4. 无封面的卡片会优先显示视频首帧预览；链接不可用时走占位卡面，不会白块。
 5. 双击卡片能打开普通视频 viewer。
 6. 从普通视频 viewer 返回时，仍能回到原视频归档页。
 7. 重命名、删除、目录树定位仍然正常。

@@ -44,6 +44,11 @@ const VIDEO_PROGRESS_REMOTE_SYNC_INTERVAL_MS = 8000;
 const RESTORE_MIN_SECONDS = 2;
 const RESTORE_END_GUARD_SECONDS = 5;
 const RESTORE_END_GUARD_RATIO = 0.98;
+const VIDEO_THUMBNAIL_MAX_WIDTH = 96;
+const VIDEO_THUMBNAIL_MAX_HEIGHT = 72;
+const VIDEO_THUMBNAIL_CAPTURE_DELAY_MS = 160;
+const VIDEO_THUMBNAIL_CAPTURE_MAX_ATTEMPTS = 5;
+const VIDEO_THUMBNAIL_MIN_LUMA = 8;
 const VIEW_META_VIEWER_STATE_KEY = '__omniflowViewerStateV1';
 const VIEW_META_VIEWER_STATE_LEGACY_KEY = '__omniflow_viewer_state_v1';
 const VIEW_META_VIDEO_PLAYER_KEY = 'videoPlayer';
@@ -175,6 +180,9 @@ const VideoViewer: React.FC<VideoViewerProps> = ({ nodeId, url, fileName, active
   const isMountedRef = useRef(true);
   const activeRef = useRef(active);
   const isDraggingProgress = useRef(false);
+  const thumbnailCaptureTimerRef = useRef<number>(0);
+  const thumbnailCaptureAttemptRef = useRef(0);
+  const thumbnailCaptureUrlRef = useRef('');
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [hasStartedPlaying, setHasStartedPlaying] = useState(false);
@@ -182,6 +190,7 @@ const VideoViewer: React.FC<VideoViewerProps> = ({ nodeId, url, fileName, active
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [thumbnailUrl, setThumbnailUrl] = useState<string | undefined>(undefined);
   const [volume, setVolume] = useState(0.75);
   const [isMuted, setIsMuted] = useState(false);
   const [playbackRate, setPlaybackRate] = useState(1);
@@ -197,6 +206,68 @@ const VideoViewer: React.FC<VideoViewerProps> = ({ nodeId, url, fileName, active
 
   const progressCacheKey = useMemo(() => resolveVideoProgressCacheKey(url, nodeId), [nodeId, url]);
 
+  const captureVideoThumbnail = useCallback((): boolean => {
+    const video = videoRef.current;
+    if (!video || thumbnailUrl || video.videoWidth <= 0 || video.videoHeight <= 0) return false;
+
+    const ratio = Math.min(
+      VIDEO_THUMBNAIL_MAX_WIDTH / video.videoWidth,
+      VIDEO_THUMBNAIL_MAX_HEIGHT / video.videoHeight,
+      1,
+    );
+    const width = Math.max(1, Math.round(video.videoWidth * ratio));
+    const height = Math.max(1, Math.round(video.videoHeight * ratio));
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return false;
+
+    try {
+      ctx.drawImage(video, 0, 0, width, height);
+      const sample = ctx.getImageData(0, 0, width, height).data;
+      let lumaTotal = 0;
+      const pixelCount = Math.max(width * height, 1);
+      for (let index = 0; index < sample.length; index += 4) {
+        lumaTotal += (sample[index] * 0.2126) + (sample[index + 1] * 0.7152) + (sample[index + 2] * 0.0722);
+      }
+      if (lumaTotal / pixelCount < VIDEO_THUMBNAIL_MIN_LUMA) {
+        return false;
+      }
+      setThumbnailUrl(canvas.toDataURL('image/jpeg', 0.72));
+      return true;
+    } catch (error) {
+      runtimeLogger.debug('视频缩略图生成失败，媒体中心将回退默认图标:', error);
+      return false;
+    }
+  }, [thumbnailUrl]);
+
+  const scheduleVideoThumbnailCapture = useCallback(() => {
+    const video = videoRef.current;
+    if (!video || thumbnailUrl) return;
+    if (thumbnailCaptureTimerRef.current) {
+      window.clearTimeout(thumbnailCaptureTimerRef.current);
+    }
+    thumbnailCaptureTimerRef.current = window.setTimeout(() => {
+      thumbnailCaptureTimerRef.current = 0;
+      const currentVideo = videoRef.current;
+      if (!currentVideo || thumbnailUrl) return;
+      if (currentVideo.currentSrc && thumbnailCaptureUrlRef.current !== currentVideo.currentSrc) {
+        thumbnailCaptureAttemptRef.current = 0;
+        thumbnailCaptureUrlRef.current = currentVideo.currentSrc;
+      }
+
+      const captured = captureVideoThumbnail();
+      if (captured || thumbnailCaptureAttemptRef.current >= VIDEO_THUMBNAIL_CAPTURE_MAX_ATTEMPTS) {
+        return;
+      }
+      thumbnailCaptureAttemptRef.current += 1;
+      if (!currentVideo.paused || currentVideo.currentTime >= 0.05) {
+        scheduleVideoThumbnailCapture();
+      }
+    }, VIDEO_THUMBNAIL_CAPTURE_DELAY_MS);
+  }, [captureVideoThumbnail, thumbnailUrl]);
+
   useRegisterMediaEntry({
     enabled: hasStartedPlaying,
     entryId: `video:${tabId}`,
@@ -206,6 +277,8 @@ const VideoViewer: React.FC<VideoViewerProps> = ({ nodeId, url, fileName, active
     isPlaying,
     currentTime,
     duration,
+    thumbnailUrl,
+    previewUrl: url,
     play: () => {
       const video = videoRef.current;
       if (video) void video.play();
@@ -388,6 +461,10 @@ const VideoViewer: React.FC<VideoViewerProps> = ({ nodeId, url, fileName, active
     return () => {
       window.removeEventListener('mousemove', handleGlobalMouseMove);
       window.removeEventListener('mouseup', handleGlobalMouseUp);
+      if (thumbnailCaptureTimerRef.current) {
+        window.clearTimeout(thumbnailCaptureTimerRef.current);
+        thumbnailCaptureTimerRef.current = 0;
+      }
     };
   }, [handleGlobalMouseMove, handleGlobalMouseUp]);
 
@@ -400,6 +477,7 @@ const VideoViewer: React.FC<VideoViewerProps> = ({ nodeId, url, fileName, active
       applyPendingRestoreTime();
       setCurrentTime(video.currentTime || 0);
       setIsBuffering(false);
+      scheduleVideoThumbnailCapture();
     };
     const onTimeUpdate = () => {
       if (!isDraggingProgress.current) {
@@ -417,7 +495,10 @@ const VideoViewer: React.FC<VideoViewerProps> = ({ nodeId, url, fileName, active
       persistVideoProgress(true);
     };
     const onWaiting = () => setIsBuffering(true);
-    const onCanPlay = () => setIsBuffering(false);
+    const onCanPlay = () => {
+      setIsBuffering(false);
+      scheduleVideoThumbnailCapture();
+    };
 
     video.addEventListener('loadedmetadata', onLoadedMetadata);
     video.addEventListener('timeupdate', onTimeUpdate);
@@ -438,7 +519,7 @@ const VideoViewer: React.FC<VideoViewerProps> = ({ nodeId, url, fileName, active
       video.removeEventListener('canplay', onCanPlay);
       video.removeEventListener('playing', onCanPlay);
     };
-  }, [applyPendingRestoreTime, persistVideoProgress]);
+  }, [applyPendingRestoreTime, persistVideoProgress, scheduleVideoThumbnailCapture]);
 
   useEffect(() => {
     const onFullscreenChange = () => {
@@ -458,8 +539,15 @@ const VideoViewer: React.FC<VideoViewerProps> = ({ nodeId, url, fileName, active
     pendingRemoteProgressRef.current = null;
     lastSyncedRemoteProgressSignatureRef.current = '';
     pendingRestoreTimeRef.current = resolveRestorableTime(videoProgressCache.get(progressCacheKey));
+    if (thumbnailCaptureTimerRef.current) {
+      window.clearTimeout(thumbnailCaptureTimerRef.current);
+      thumbnailCaptureTimerRef.current = 0;
+    }
+    thumbnailCaptureAttemptRef.current = 0;
+    thumbnailCaptureUrlRef.current = '';
     video.src = url;
     video.load();
+    setThumbnailUrl(undefined);
     setCurrentTime(0);
     setDuration(0);
     setIsPlaying(false);

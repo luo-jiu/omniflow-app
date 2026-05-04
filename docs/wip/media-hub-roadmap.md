@@ -87,26 +87,27 @@
 
 ---
 
-### 6. 视频缩略图
+### 6. 视频缩略图（已完成）
 
-**目标**：popover 视频条左侧不再是抽象图标，而是一帧画面缩略。
+**状态**：已完成。popover 视频条左侧优先显示低分辨率首帧缩略图，生成失败时回退抽象视频图标。
 
 **实现**：
-- video-viewer 在 `loadedmetadata` 后用 canvas 抓首帧 → toDataURL → 进 entry。
-- 或者用 `requestVideoFrameCallback` 抓"当前帧"动态更新（更贵，先不做）。
-- audio 没有原生封面，先 fallback 一个圆形音符 icon（已有）。
+- video-viewer 在 `loadedmetadata` / `canplay` 后用 canvas 抓低分辨率帧 → jpeg dataURL → 进 entry。
+- 抓帧会过滤近似全黑的空帧；未抓到有效帧时，popover 会用视频链接自身做 metadata 预览兜底。
+- 不做动态当前帧更新，避免额外解码与 canvas 热路径。
+- audio 没有原生封面，继续 fallback 圆形音符 icon。
 
-**改动点**：`MediaEntry` 加 `thumbnailUrl?: string`；popover 渲染 `<img>` if 有。
+**改动点**：`MediaEntry` 加 `thumbnailUrl?: string` 和 `previewUrl?: string`；popover 优先渲染 `<img>`，再 fallback 到只读 `<video preload="metadata">`。
 
 **注意**：dataUrl 大小，用低分辨率（80x60 足够）+ jpeg quality 0.7。
 
 ---
 
-### 7. Popover 按 kind 分组
+### 7. Popover 按 kind 分组（已完成）
 
-只在 entries.length > 4 时才分。否则平铺更直观。
+**状态**：已完成。只在 entries.length > 4 时按音频 / 视频分组，否则平铺更直观。
 
-**改动点**：`MediaHubPopover`，加 group header。
+**改动点**：`MediaHubPopover` 加 group header。
 
 ---
 
@@ -131,7 +132,7 @@
 
 ### 9. 拆 globalAudioPlayer 单例 → 多 audio 实例
 
-**触发条件**：用户明确要"两首歌同时播"。目前没要求，**不要主动做**。
+**触发条件**：用户明确要"两首歌同时播"。目前没要求，**不要主动做**。媒体控制中心当前收尾不包含这项。
 
 如果做，影响面：
 - audio-viewer / asmr-viewer 各自持 `<audio>` ref。

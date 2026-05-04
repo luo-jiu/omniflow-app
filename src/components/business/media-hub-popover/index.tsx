@@ -4,8 +4,8 @@ import { IconMusic, IconVideoStroked, IconPlay, IconPause, IconExternalOpenStrok
 import type { MediaEntry } from '@/contexts/media-registry.context';
 
 const PopoverWrapper = styled.div`
-  width: 340px;
-  max-width: 360px;
+  width: 368px;
+  max-width: 388px;
   padding: 8px;
 `;
 
@@ -32,7 +32,7 @@ const PopoverHeader = styled.div`
 const EntryRow = styled.div`
   position: relative;
   display: grid;
-  grid-template-columns: 28px minmax(0, 1fr) 28px 28px;
+  grid-template-columns: 42px minmax(0, 1fr) 28px 28px;
   grid-template-rows: auto auto auto;
   column-gap: 10px;
   row-gap: 5px;
@@ -56,8 +56,8 @@ const EntryRow = styled.div`
     grid-row: 1 / span 3;
     align-self: center;
     flex-shrink: 0;
-    width: 28px;
-    height: 28px;
+    width: 42px;
+    height: 32px;
     border-radius: 8px;
     background: color-mix(in srgb, var(--app-text) 8%, transparent);
     display: inline-flex;
@@ -65,6 +65,14 @@ const EntryRow = styled.div`
     justify-content: center;
     color: var(--app-text-muted);
     font-size: 15px;
+    overflow: hidden;
+  }
+
+  .thumbnail {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
   }
 
   &.is-playing .kind-icon {
@@ -250,6 +258,29 @@ const EntryRow = styled.div`
   }
 `;
 
+const GroupBlock = styled.div`
+  & + & {
+    margin-top: 8px;
+  }
+
+  .group-title {
+    padding: 4px 3px 5px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 10px;
+    line-height: 1;
+    color: var(--app-text-muted);
+  }
+
+  .group-title::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: color-mix(in srgb, var(--app-border) 78%, transparent);
+  }
+`;
+
 const EmptyHint = styled.div`
   padding: 12px 14px;
   text-align: center;
@@ -299,6 +330,47 @@ function getMediaKindLabel(kind: MediaEntry['kind']) {
   return kind === 'audio' ? '音频' : '视频';
 }
 
+function groupMediaEntries(entries: MediaEntry[]) {
+  if (entries.length <= 4) {
+    return [{ key: 'all', label: '', entries }];
+  }
+  const audioEntries = entries.filter(entry => entry.kind === 'audio');
+  const videoEntries = entries.filter(entry => entry.kind === 'video');
+  return [
+    audioEntries.length > 0 ? { key: 'audio', label: `音频 ${audioEntries.length}`, entries: audioEntries } : null,
+    videoEntries.length > 0 ? { key: 'video', label: `视频 ${videoEntries.length}`, entries: videoEntries } : null,
+  ].filter((group): group is { key: string; label: string; entries: MediaEntry[] } => Boolean(group));
+}
+
+function seekVideoPreviewFrame(video: HTMLVideoElement) {
+  if (!Number.isFinite(video.duration) || video.duration <= 0.6 || video.currentTime >= 0.05) return;
+  try {
+    video.currentTime = 0.5;
+  } catch {
+    // Preview-only video elements can keep their fallback frame if seeking is unsupported.
+  }
+}
+
+function renderKindIcon(entry: MediaEntry) {
+  if (entry.thumbnailUrl) {
+    return <img src={entry.thumbnailUrl} alt="" className="thumbnail" />;
+  }
+  if (entry.kind === 'video' && entry.previewUrl) {
+    return (
+      <video
+        src={entry.previewUrl}
+        preload="metadata"
+        muted
+        playsInline
+        aria-hidden
+        className="thumbnail"
+        onLoadedMetadata={(event) => seekVideoPreviewFrame(event.currentTarget)}
+      />
+    );
+  }
+  return entry.kind === 'audio' ? <IconMusic /> : <IconVideoStroked />;
+}
+
 const MediaHubPopover: React.FC<MediaHubPopoverProps> = ({ entries, onActivate, onToggle, onSeek, onDismiss }) => {
   if (entries.length === 0) {
     return (
@@ -314,72 +386,77 @@ const MediaHubPopover: React.FC<MediaHubPopoverProps> = ({ entries, onActivate, 
         <span className="heading">媒体控制中心</span>
         <span className="count">{entries.length} 项</span>
       </PopoverHeader>
-      {entries.map((entry) => {
-        const progressPercent = resolveProgressPercent(entry);
-        return (
-          <EntryRow
-            key={entry.entryId}
-            className={entry.isPlaying ? 'is-playing' : ''}
-            title={entry.title}
-          >
-            <span className="kind-icon">
-              {entry.kind === 'audio' ? <IconMusic /> : <IconVideoStroked />}
-            </span>
-            <span className="title">{entry.title}</span>
-            <span className="meta">
-              <span className="status-dot" />
-              <span>{getMediaKindLabel(entry.kind)}</span>
-              <span>{entry.isPlaying ? '播放中' : '已暂停'}</span>
-            </span>
-            <button
-              type="button"
-              className={`toggle-btn ${entry.isPlaying ? 'is-playing' : ''}`}
-              onClick={() => onToggle(entry)}
-              title={entry.isPlaying ? '暂停' : '播放'}
-            >
-              {entry.isPlaying ? <IconPause /> : <IconPlay />}
-            </button>
-            <button
-              type="button"
-              className="jump-btn"
-              onClick={() => onActivate(entry.tabId)}
-              title="回到标签页"
-              aria-label="回到标签页"
-            >
-              <IconExternalOpenStroked />
-            </button>
-            <button
-              type="button"
-              className="dismiss-btn"
-              onClick={() => onDismiss(entry)}
-              title="从媒体控制中心移除"
-              aria-label="从媒体控制中心移除"
-            >
-              <IconClose />
-            </button>
-            <div className="progress-row">
-              <button
-                type="button"
-                className="progress-track"
-                onClick={(event) => {
-                  const seekTime = resolveSeekTime(entry, event);
-                  if (seekTime !== null) {
-                    onSeek(entry, seekTime);
-                  }
-                }}
-                title="跳转播放进度"
+      {groupMediaEntries(entries).map(group => (
+        <GroupBlock key={group.key}>
+          {group.label ? <div className="group-title">{group.label}</div> : null}
+          {group.entries.map((entry) => {
+            const progressPercent = resolveProgressPercent(entry);
+            return (
+              <EntryRow
+                key={entry.entryId}
+                className={entry.isPlaying ? 'is-playing' : ''}
+                title={entry.title}
               >
-                <span className="progress-bar">
-                  <span className="progress-fill" style={{ width: `${progressPercent}%` }} />
+                <span className="kind-icon">
+                  {renderKindIcon(entry)}
                 </span>
-              </button>
-              <span className="time-text">
-                {formatMediaTime(entry.currentTime)} / {formatMediaTime(entry.duration)}
-              </span>
-            </div>
-          </EntryRow>
-        );
-      })}
+                <span className="title">{entry.title}</span>
+                <span className="meta">
+                  <span className="status-dot" />
+                  <span>{getMediaKindLabel(entry.kind)}</span>
+                  <span>{entry.isPlaying ? '播放中' : '已暂停'}</span>
+                </span>
+                <button
+                  type="button"
+                  className={`toggle-btn ${entry.isPlaying ? 'is-playing' : ''}`}
+                  onClick={() => onToggle(entry)}
+                  title={entry.isPlaying ? '暂停' : '播放'}
+                >
+                  {entry.isPlaying ? <IconPause /> : <IconPlay />}
+                </button>
+                <button
+                  type="button"
+                  className="jump-btn"
+                  onClick={() => onActivate(entry.tabId)}
+                  title="回到标签页"
+                  aria-label="回到标签页"
+                >
+                  <IconExternalOpenStroked />
+                </button>
+                <button
+                  type="button"
+                  className="dismiss-btn"
+                  onClick={() => onDismiss(entry)}
+                  title="从媒体控制中心移除"
+                  aria-label="从媒体控制中心移除"
+                >
+                  <IconClose />
+                </button>
+                <div className="progress-row">
+                  <button
+                    type="button"
+                    className="progress-track"
+                    onClick={(event) => {
+                      const seekTime = resolveSeekTime(entry, event);
+                      if (seekTime !== null) {
+                        onSeek(entry, seekTime);
+                      }
+                    }}
+                    title="跳转播放进度"
+                  >
+                    <span className="progress-bar">
+                      <span className="progress-fill" style={{ width: `${progressPercent}%` }} />
+                    </span>
+                  </button>
+                  <span className="time-text">
+                    {formatMediaTime(entry.currentTime)} / {formatMediaTime(entry.duration)}
+                  </span>
+                </div>
+              </EntryRow>
+            );
+          })}
+        </GroupBlock>
+      ))}
     </PopoverWrapper>
   );
 };

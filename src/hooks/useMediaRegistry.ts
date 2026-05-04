@@ -29,6 +29,8 @@ export interface RegisterMediaEntryOptions {
   isPlaying: boolean;
   currentTime?: number;
   duration?: number;
+  thumbnailUrl?: string;
+  previewUrl?: string;
   play: () => void | Promise<void>;
   pause: () => void;
   seek: (time: number) => void;
@@ -43,7 +45,22 @@ function normalizeMediaProgressValue(value: number | undefined) {
 
 export function useRegisterMediaEntry(options: RegisterMediaEntryOptions) {
   const registry = useMediaRegistry();
-  const { enabled, entryId, kind, tabId, title, isPlaying, currentTime, duration, play, pause, seek, dismiss } = options;
+  const {
+    enabled,
+    entryId,
+    kind,
+    tabId,
+    title,
+    isPlaying,
+    currentTime,
+    duration,
+    thumbnailUrl,
+    previewUrl,
+    play,
+    pause,
+    seek,
+    dismiss,
+  } = options;
 
   const playRef = useRef(play);
   const pauseRef = useRef(pause);
@@ -59,6 +76,8 @@ export function useRegisterMediaEntry(options: RegisterMediaEntryOptions) {
   const lastIsPlayingRef = useRef(isPlaying);
   const lastCurrentTimeRef = useRef(normalizeMediaProgressValue(currentTime));
   const lastDurationRef = useRef(normalizeMediaProgressValue(duration));
+  const lastThumbnailUrlRef = useRef(thumbnailUrl);
+  const lastPreviewUrlRef = useRef(previewUrl);
 
   useEffect(() => {
     if (!enabled) {
@@ -76,6 +95,8 @@ export function useRegisterMediaEntry(options: RegisterMediaEntryOptions) {
       isPlaying: lastIsPlayingRef.current,
       currentTime: lastCurrentTimeRef.current,
       duration: lastDurationRef.current,
+      thumbnailUrl: lastThumbnailUrlRef.current,
+      previewUrl: lastPreviewUrlRef.current,
       play: () => playRef.current(),
       pause: () => pauseRef.current(),
       seek: (time) => seekRef.current(time),
@@ -94,11 +115,15 @@ export function useRegisterMediaEntry(options: RegisterMediaEntryOptions) {
     lastIsPlayingRef.current = isPlaying;
     lastCurrentTimeRef.current = nextCurrentTime;
     lastDurationRef.current = nextDuration;
+    lastThumbnailUrlRef.current = thumbnailUrl;
+    lastPreviewUrlRef.current = previewUrl;
     registrationRef.current?.update({
       title,
       isPlaying,
       currentTime: nextCurrentTime,
       duration: nextDuration,
+      thumbnailUrl,
+      previewUrl,
     });
-  }, [title, isPlaying, currentTime, duration]);
+  }, [title, isPlaying, currentTime, duration, thumbnailUrl, previewUrl]);
 }

@@ -27,6 +27,7 @@ interface VideoArchiveCard {
   sortOrder: number;
   coverNodeId: number | null;
   coverUrl: string | null;
+  videoPreviewUrl: string | null;
 }
 
 interface VideoArchiveSnapshot {
@@ -41,6 +42,7 @@ interface VideoArchiveSnapshot {
 const PAGE_SIZE = 24;
 const LINK_EXPIRY_MINUTES = 120;
 const VIDEO_ARCHIVE_CACHE_MAX_ENTRIES = 24;
+const VIDEO_PREVIEW_SAMPLE_TIME = 0.5;
 
 const EMPTY_VIDEO_ARCHIVE_SNAPSHOT: VideoArchiveSnapshot = {
   hasLoadedList: false,
@@ -88,6 +90,21 @@ function setArchiveSnapshotCache(cacheKey: string, snapshot: VideoArchiveSnapsho
   }
 }
 
+function seekVideoPreviewFrame(video: HTMLVideoElement) {
+  if (
+    !Number.isFinite(video.duration)
+    || video.duration <= VIDEO_PREVIEW_SAMPLE_TIME + 0.1
+    || video.currentTime >= 0.05
+  ) {
+    return;
+  }
+  try {
+    video.currentTime = VIDEO_PREVIEW_SAMPLE_TIME;
+  } catch {
+    // Preview-only video elements can keep their fallback frame if seeking is unsupported.
+  }
+}
+
 const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
   folderNodeId,
   fileUrl,
@@ -95,7 +112,10 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
   active = true,
 }) => {
   const { setFileUrl } = useFileViewer();
-  const { viewportRef, wrapperStyle } = useArchiveCardGrid({ baseCardWidth: 336, minScale: 0.84, gridGap: 20 });
+  const { viewportRef, wrapperStyle } = useArchiveCardGrid({
+    baseCardWidth: 275,
+    gridGap: 15,
+  });
   const libraryId = useMemo(() => parseArchiveLibraryId(fileUrl), [fileUrl]);
   const title = useMemo(() => normalizeArchiveTitle(fileName), [fileName]);
   const readerCacheKey = useMemo(
@@ -277,9 +297,10 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
       return inputCards;
     }
 
-    const unresolvedNodeIds = inputCards
-      .filter(card => !card.coverUrl && card.coverNodeId && card.coverNodeId > 0)
-      .map(card => card.coverNodeId as number);
+    const unresolvedNodeIds = Array.from(new Set(inputCards
+      .filter(card => !card.coverUrl)
+      .map(card => (card.coverNodeId && card.coverNodeId > 0 ? card.coverNodeId : card.id))
+      .filter((nodeId): nodeId is number => Number.isFinite(nodeId) && nodeId > 0)));
     if (unresolvedNodeIds.length === 0) {
       return inputCards;
     }
@@ -294,12 +315,14 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
         return inputCards;
       }
       return inputCards.map((card) => {
-        if (!card.coverNodeId || card.coverUrl) return card;
-        const nextUrl = linkMap.get(card.coverNodeId);
+        if (card.coverUrl) return card;
+        const targetNodeId = card.coverNodeId && card.coverNodeId > 0 ? card.coverNodeId : card.id;
+        const nextUrl = linkMap.get(targetNodeId);
         if (!nextUrl) return card;
         return {
           ...card,
-          coverUrl: nextUrl,
+          coverUrl: card.coverNodeId ? nextUrl : null,
+          videoPreviewUrl: card.coverNodeId ? card.videoPreviewUrl : nextUrl,
         };
       });
     } catch (coverError) {
@@ -336,6 +359,7 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
           ? Number(item.coverNodeId)
           : null,
         coverUrl: null,
+        videoPreviewUrl: null,
       }));
       const cardsWithCover = await resolveCardCoverUrls(rawCards);
       if (requestId !== requestIdRef.current) return;
@@ -353,6 +377,7 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
             ...existing,
             ...card,
             coverUrl: card.coverUrl || existing.coverUrl,
+            videoPreviewUrl: card.videoPreviewUrl || existing.videoPreviewUrl,
           });
         });
         return Array.from(byId.values()).sort((a, b) => {
@@ -563,6 +588,15 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
                   <div className="card-cover">
                     {card.coverUrl ? (
                       <img src={card.coverUrl} alt={card.title} draggable={false} />
+                    ) : card.videoPreviewUrl ? (
+                      <video
+                        src={card.videoPreviewUrl}
+                        preload="metadata"
+                        muted
+                        playsInline
+                        aria-label={card.title}
+                        onLoadedMetadata={(event) => seekVideoPreviewFrame(event.currentTarget)}
+                      />
                     ) : (
                       <div className="card-cover-fallback" aria-hidden>
                         <span className="card-cover-icon">VIDEO</span>
@@ -577,7 +611,7 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
                     <p className="card-title" title={card.title}>{card.title}</p>
                     <div className="card-footer">
                       <span>节点 #{card.id}</span>
-                      <span>{card.coverUrl ? '已带封面' : '封面待补'}</span>
+                      <span>{card.coverUrl ? '已带封面' : (card.videoPreviewUrl ? '视频首帧' : '封面待补')}</span>
                     </div>
                   </div>
                 </article>
@@ -593,25 +627,15 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
         )}
       </div>
 
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: 12,
-          padding: '12px 18px',
-          borderTop: '1px solid var(--app-border)',
-          background: 'color-mix(in srgb, var(--app-bg-elevated) 92%, white)',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+      <footer className="archive-footer">
+        <div className="footer-title-group">
           <span className="badge">VIDEO ARCHIVE</span>
-          <h3 className="title" title={title}>{title}</h3>
+          <span className="title" title={title}>{title}</span>
         </div>
-        <div style={{ fontSize: 13, color: 'var(--app-text-secondary)', whiteSpace: 'nowrap' }}>
+        <div className="archive-count">
           共 {total} 项
         </div>
-      </div>
+      </footer>
 
       <Popover
         trigger="custom"
@@ -656,6 +680,8 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
         okText="保存"
         cancelText="取消"
         confirmLoading={renameSubmitting}
+        centered
+        width={420}
       >
         <Input
           value={renameInput}

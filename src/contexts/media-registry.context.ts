@@ -10,6 +10,8 @@ export interface MediaEntry {
   isPlaying: boolean;
   currentTime?: number;
   duration?: number;
+  thumbnailUrl?: string;
+  previewUrl?: string;
 }
 
 export interface MediaRegistryRegisterInput {
@@ -20,6 +22,8 @@ export interface MediaRegistryRegisterInput {
   isPlaying: boolean;
   currentTime?: number;
   duration?: number;
+  thumbnailUrl?: string;
+  previewUrl?: string;
   play: () => void | Promise<void>;
   pause: () => void;
   seek: (time: number) => void;
@@ -27,7 +31,14 @@ export interface MediaRegistryRegisterInput {
 }
 
 export interface MediaRegistryRegistration {
-  update(patch: { title?: string; isPlaying?: boolean; currentTime?: number; duration?: number }): void;
+  update(patch: {
+    title?: string;
+    isPlaying?: boolean;
+    currentTime?: number;
+    duration?: number;
+    thumbnailUrl?: string;
+    previewUrl?: string;
+  }): void;
   unregister(): void;
 }
 

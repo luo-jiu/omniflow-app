@@ -1,8 +1,8 @@
 import styled from 'styled-components';
 
 export const VideoArchiveViewerWrapper = styled.div`
-  --archive-card-width: 336px;
-  --archive-card-gap: 20px;
+  --archive-card-width: 275px;
+  --archive-card-gap: 15px;
   --archive-column-count: 1;
 
   width: 100%;
@@ -10,25 +10,26 @@ export const VideoArchiveViewerWrapper = styled.div`
   min-height: 0;
   display: flex;
   flex-direction: column;
+  gap: 0;
   color: var(--semi-color-text-0);
 
   .badge {
     flex-shrink: 0;
-    font-size: 11px;
+    font-size: 10px;
     line-height: 1;
     font-weight: 700;
-    letter-spacing: 0.06em;
+    letter-spacing: 0.05em;
     color: #0f3f71;
     background: #d9edff;
     border: 1px solid #9dccff;
     border-radius: 999px;
-    padding: 4px 8px;
+    padding: 3px 6px;
   }
 
   .title {
     min-width: 0;
     margin: 0;
-    font-size: 13px;
+    font-size: 11px;
     font-weight: 600;
     white-space: nowrap;
     overflow: hidden;
@@ -39,10 +40,8 @@ export const VideoArchiveViewerWrapper = styled.div`
     flex: 1;
     min-height: 0;
     overflow: auto;
-    padding: 20px 20px 24px;
-    background:
-      radial-gradient(circle at top, color-mix(in srgb, var(--semi-color-info-light-default) 36%, transparent), transparent 56%),
-      var(--app-bg);
+    padding: 13px 13px 15px;
+    background: var(--app-bg);
     scrollbar-width: thin;
     scrollbar-color: transparent transparent;
   }
@@ -80,12 +79,12 @@ export const VideoArchiveViewerWrapper = styled.div`
   }
 
   .state-wrap {
-    min-height: 200px;
+    min-height: 121px;
     display: flex;
     align-items: center;
     justify-content: center;
     color: var(--app-text-secondary);
-    font-size: 14px;
+    font-size: 11px;
     text-align: center;
   }
 
@@ -99,6 +98,7 @@ export const VideoArchiveViewerWrapper = styled.div`
     grid-template-columns: repeat(var(--archive-column-count), minmax(0, var(--archive-card-width)));
     justify-content: start;
     gap: var(--archive-card-gap);
+    align-items: start;
   }
 
   .archive-card {
@@ -106,22 +106,21 @@ export const VideoArchiveViewerWrapper = styled.div`
     position: relative;
     display: flex;
     flex-direction: column;
-    border-radius: 16px;
-    border: 1px solid color-mix(in srgb, var(--semi-color-info) 18%, rgba(255, 255, 255, 0.2));
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(246, 251, 255, 0.96));
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    background: #fefefe;
     box-shadow:
-      0 18px 36px rgba(9, 32, 58, 0.14),
-      inset 0 1px 0 rgba(255, 255, 255, 0.58);
+      0 11px 16px rgba(9, 32, 58, 0.24),
+      0 2px 0 rgba(255, 255, 255, 0.55) inset;
     overflow: hidden;
     cursor: pointer;
-    transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+    contain: layout paint style;
+    content-visibility: auto;
+    contain-intrinsic-size: 0 238px;
   }
 
   .archive-card:hover {
-    border-color: color-mix(in srgb, var(--semi-color-info) 42%, rgba(255, 255, 255, 0.2));
-    box-shadow:
-      0 22px 42px rgba(9, 32, 58, 0.18),
-      inset 0 1px 0 rgba(255, 255, 255, 0.62);
+    border-color: color-mix(in srgb, var(--semi-color-info) 40%, rgba(255, 255, 255, 0.22));
   }
 
   .card-cover {
@@ -140,6 +139,15 @@ export const VideoArchiveViewerWrapper = styled.div`
     object-fit: cover;
   }
 
+  .card-cover video {
+    width: 100%;
+    height: 100%;
+    display: block;
+    object-fit: cover;
+    background: #08111f;
+    pointer-events: none;
+  }
+
   .card-cover::after {
     content: '';
     position: absolute;
@@ -155,7 +163,7 @@ export const VideoArchiveViewerWrapper = styled.div`
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 12px;
+    gap: 8px;
     color: rgba(255, 255, 255, 0.88);
     font-weight: 700;
     letter-spacing: 0.08em;
@@ -165,34 +173,34 @@ export const VideoArchiveViewerWrapper = styled.div`
   .card-cover-fallback::after {
     content: '';
     position: absolute;
-    top: 12px;
-    bottom: 12px;
-    width: 18px;
+    top: 8px;
+    bottom: 8px;
+    width: 13px;
     border-radius: 999px;
     background:
       repeating-linear-gradient(
         180deg,
         rgba(255, 255, 255, 0.22) 0,
-        rgba(255, 255, 255, 0.22) 9px,
-        transparent 9px,
-        transparent 16px
+        rgba(255, 255, 255, 0.22) 7px,
+        transparent 7px,
+        transparent 13px
       );
     opacity: 0.6;
   }
 
   .card-cover-fallback::before {
-    left: 14px;
+    left: 10px;
   }
 
   .card-cover-fallback::after {
-    right: 14px;
+    right: 10px;
   }
 
   .card-cover-icon {
     position: relative;
     z-index: 1;
-    min-width: 86px;
-    height: 40px;
+    min-width: 58px;
+    height: 28px;
     border-radius: 999px;
     display: inline-flex;
     align-items: center;
@@ -205,15 +213,15 @@ export const VideoArchiveViewerWrapper = styled.div`
   .card-meta {
     display: flex;
     flex-direction: column;
-    gap: 10px;
-    padding: 14px 15px 16px;
+    gap: 7px;
+    padding: 10px 10px 11px;
   }
 
   .card-tag-row {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 10px;
+    gap: 7px;
   }
 
   .card-tag-pill {
@@ -221,27 +229,27 @@ export const VideoArchiveViewerWrapper = styled.div`
     align-items: center;
     justify-content: center;
     max-width: calc(100% - 2px);
-    padding: 2px 10px;
+    padding: 2px 7px;
     border-radius: 999px;
     border: 1px solid color-mix(in srgb, var(--semi-color-info) 18%, rgba(11, 18, 32, 0.1));
-    font-size: 12px;
-    font-weight: 700;
-    line-height: 1.25;
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 1.2;
     color: #0f3f71;
     background: color-mix(in srgb, var(--semi-color-info-light-default) 74%, white);
     white-space: nowrap;
   }
 
   .card-open-hint {
-    font-size: 12px;
+    font-size: 10px;
     color: var(--app-text-secondary);
     white-space: nowrap;
   }
 
   .card-title {
-    min-height: 44px;
+    min-height: 32px;
     margin: 0;
-    font-size: 16px;
+    font-size: 11px;
     line-height: 1.35;
     font-weight: 700;
     color: #0b1220;
@@ -255,8 +263,35 @@ export const VideoArchiveViewerWrapper = styled.div`
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 10px;
-    font-size: 12px;
+    gap: 7px;
+    font-size: 10px;
     color: var(--app-text-secondary);
+  }
+
+  .archive-footer {
+    height: 28px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 0 8px;
+    border-top: 1px solid var(--semi-color-border);
+    background: color-mix(in srgb, var(--semi-color-bg-0) 95%, transparent);
+  }
+
+  .footer-title-group {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+
+  .archive-count {
+    flex-shrink: 0;
+    font-size: 11px;
+    line-height: 1;
+    color: var(--app-text-secondary);
+    white-space: nowrap;
   }
 `;
