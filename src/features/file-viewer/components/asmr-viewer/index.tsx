@@ -25,6 +25,7 @@ import { useFileViewer } from '@/hooks/useFileViewer';
 import { runtimeLogger } from '@/utils/runtimeLogger';
 import { globalAudioPlayer } from '@/features/file-viewer/services/global-audio-player';
 import { parseAsmrRouteInfo, resolveAsmrOwnerKey } from '@/features/file-viewer/utils/asmr-owner-key';
+import { useRegisterMediaEntry } from '@/hooks/useMediaRegistry';
 import { resolvePreviewFileType, type PreviewFileType } from '@/utils/preview-file-type';
 
 interface AsmrViewerProps {
@@ -33,6 +34,7 @@ interface AsmrViewerProps {
   fileName?: string | null;
   active?: boolean;
   reloadToken?: number;
+  tabId: string;
 }
 
 interface AsmrNodeItem {
@@ -248,8 +250,8 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
   folderNodeId,
   fileUrl,
   fileName,
-  active = true,
   reloadToken = 0,
+  tabId,
 }) => {
   const { setFileUrl } = useFileViewer();
   const routeInfo = useMemo(() => parseAsmrRouteInfo(fileUrl), [fileUrl]);
@@ -624,10 +626,40 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
   }, [loadAsmrTagOptions]);
 
   useEffect(() => {
-    if (!active) return;
     setPlayerState(globalAudioPlayer.getState());
     return globalAudioPlayer.subscribe(setPlayerState);
-  }, [active]);
+  }, []);
+
+  const asmrOwnerKey = useMemo(() => resolveAsmrOwnerKey(fileUrl, folderNodeId), [fileUrl, folderNodeId]);
+  const isAsmrOwnedSource = (
+    playerState.ownerType === 'asmr'
+    && Boolean(asmrOwnerKey)
+    && playerState.ownerKey === asmrOwnerKey
+  );
+
+  useRegisterMediaEntry({
+    enabled: isAsmrOwnedSource && playerState.hasStarted,
+    entryId: `asmr:${tabId}`,
+    kind: 'audio',
+    tabId,
+    title: playerState.trackName || fileName || 'ASMR',
+    isPlaying: isAsmrOwnedSource && playerState.isPlaying,
+    play: () => {
+      void globalAudioPlayer.play().catch(() => {});
+    },
+    pause: () => {
+      globalAudioPlayer.pause();
+    },
+  });
+
+  useEffect(() => {
+    return () => {
+      const state = globalAudioPlayer.getState();
+      if (state.ownerType === 'asmr' && Boolean(asmrOwnerKey) && state.ownerKey === asmrOwnerKey) {
+        globalAudioPlayer.clear();
+      }
+    };
+  }, [asmrOwnerKey]);
 
   useEffect(() => {
     if (!rootNodeId || !Number.isFinite(rootNodeId) || !libraryId) {

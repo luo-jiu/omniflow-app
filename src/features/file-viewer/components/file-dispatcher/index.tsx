@@ -21,6 +21,7 @@ interface FileDispatcherProps {
   loading: boolean;
   active?: boolean;
   reloadToken?: number;
+  tabId: string;
 }
 
 const DispatcherWrapper = styled.div`
@@ -70,14 +71,15 @@ const DispatcherWrapper = styled.div`
  * 文件分发器组件
  * 根据文件类型渲染对应的查看器 Feature
  */
-const FileDispatcher: React.FC<FileDispatcherProps> = ({ 
+const FileDispatcher: React.FC<FileDispatcherProps> = ({
   nodeId,
-  fileUrl, 
-  fileName, 
-  fileType, 
+  fileUrl,
+  fileName,
+  fileType,
   loading,
   active = true,
   reloadToken = 0,
+  tabId,
 }) => {
   if (loading) {
     return (
@@ -96,10 +98,10 @@ const FileDispatcher: React.FC<FileDispatcherProps> = ({
       return <ImageViewer url={fileUrl} fileName={fileName} />;
     
     case 'audio':
-      return <AudioViewer nodeId={nodeId} url={fileUrl} fileName={fileName} active={active} />;
-    
+      return <AudioViewer nodeId={nodeId} url={fileUrl} fileName={fileName} active={active} tabId={tabId} />;
+
     case 'video':
-      return <VideoViewer nodeId={nodeId} url={fileUrl} fileName={fileName} active={active} />;
+      return <VideoViewer nodeId={nodeId} url={fileUrl} fileName={fileName} active={active} tabId={tabId} />;
 
     case 'pdf':
       return <PdfViewer nodeId={nodeId} url={fileUrl} fileName={fileName} active={active} reloadToken={reloadToken} />;
@@ -111,7 +113,7 @@ const FileDispatcher: React.FC<FileDispatcherProps> = ({
       return <ComicViewer folderNodeId={nodeId} fileUrl={fileUrl} fileName={fileName} active={active} reloadToken={reloadToken} />;
 
     case 'asmr':
-      return <AsmrViewer folderNodeId={nodeId} fileUrl={fileUrl} fileName={fileName} active={active} reloadToken={reloadToken} />;
+      return <AsmrViewer folderNodeId={nodeId} fileUrl={fileUrl} fileName={fileName} active={active} reloadToken={reloadToken} tabId={tabId} />;
 
     case 'asmr_archive':
       return <AsmrArchiveViewer folderNodeId={nodeId} fileUrl={fileUrl} fileName={fileName} active={active} />;

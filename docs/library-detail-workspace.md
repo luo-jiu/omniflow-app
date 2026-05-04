@@ -162,6 +162,17 @@
 - 工具按钮在 `workspaceDisplayMode = tools` 时高亮。
 - 浏览器入口进入浏览器后会被浏览器 tab 栏替代，不做常驻高亮。
 
+### 4.6 主内容头部右侧：媒体控制中心
+
+工具栏右侧（刷新按钮左侧）的乐符按钮是页面级"媒体控制中心"入口：
+
+- 仅当 `MediaRegistry` 中存在已注册（即至少播放过一次的）audio / video entry 时才出现，空态隐藏。
+- 进入浏览器模式后整个 toolbar-right 让位给浏览器工具组，不再显示。
+- 点击弹出 `MediaHubPopover`，列出当前所有注册项；每条支持 play/pause 和"点击行 → 跳到对应 tab"。
+- "跳到 tab" 路径：调用 `useFileViewer().activateTab(tabId)`，再调 `openFileWorkspace()` 切回 file-viewer 模式。
+- 不再保留旧的"顶部 GlobalAudioMiniBar"——audio 跨 tab 不再叠加额外 UI。
+- 不再保留"video tab 失活自动 pause"和"audio play 自动暂停 video"的互斥；多个视频可并行，音频可与视频并行。音频底座仍是单例 `<audio>`，所以同时播多首音频仍受单例限制（属预期范围）。
+
 ## 5. 浏览器 tab 规则
 
 ### 5.1 tab 模型
@@ -343,6 +354,23 @@
 - 工作区缓存字段变化
 - 浏览器资源面板归属变化
 - `library detail` 被进一步拆分出新的页面级状态 owner
+- `MediaRegistry` 注册者变化（新增 viewer 类型、变更 entry 标识或行为语义）
+
+## 11. MediaRegistry 状态 owner
+
+媒体控制中心使用一个独立的 renderer-only 注册表 `MediaRegistry`：
+
+- Provider：`src/contexts/MediaRegistryContext.tsx`，挂在 `FileViewerProvider` 内层，作用域与一次 library detail 进入对齐。
+- Context value 与类型：`src/contexts/media-registry.context.ts`。
+- 消费 hook：`src/hooks/useMediaRegistry.ts` 暴露 `useMediaRegistry()`、`useMediaEntries()`、`useRegisterMediaEntry()`。
+- 当前注册者：
+  - `audio-viewer`（`kind: 'audio'`，仅在 owns globalAudioPlayer 且 `hasStarted` 时注册）
+  - `asmr-viewer`（`kind: 'audio'`，同上但 ownerType 为 `'asmr'`）
+  - `video-viewer`（`kind: 'video'`，本 tab `<video>` 至少播放过一次后注册）
+- entry 关键字段：`entryId`（`<kind>:<tabId>` 格式）、`tabId`（用于跳转）、`title`、`isPlaying`。
+- 注册表只持有索引和回调，不持有 `<audio>` / `<video>` 元素本身。
+- 每个 viewer 必须在挂载且"曾播放"后才注册，关闭 viewer / unmount 时清理。
+- 浏览器内嵌页面（main 进程的 `WebContentsView`）的媒体不在本 registry 范围内。
 
 后续如果继续治理这页，优先方向应该是：
 

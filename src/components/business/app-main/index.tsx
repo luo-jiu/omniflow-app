@@ -3,11 +3,7 @@ import MainWrapper from "./style.ts";
 import { useFileViewer } from "@/hooks/useFileViewer";
 import WelcomeView from "@/features/file-viewer/components/welcome-view";
 import FileDispatcher from "@/features/file-viewer/components/file-dispatcher";
-import GlobalAudioMiniBar from "@/components/business/global-audio-mini-bar";
 import FileTabsBar from "./FileTabsBar";
-import { globalAudioPlayer } from "@/features/file-viewer/services/global-audio-player";
-import { resolveAsmrOwnerKey } from "@/features/file-viewer/utils/asmr-owner-key";
-import { resolveAudioOwnerKey } from "@/features/file-viewer/utils/audio-owner-key";
 
 interface IProps {
   children?: ReactNode;
@@ -20,12 +16,9 @@ interface IProps {
  */
 const AppMain: FC<IProps> = ({ hideTabsBar = false }) => {
   const { fileState, tabs, activeTabId, activateTab, closeTab, reorderTabs } = useFileViewer();
-  const [playerState, setPlayerState] = React.useState(() => globalAudioPlayer.getState());
   const [keepAliveTabIds, setKeepAliveTabIds] = React.useState<string[]>(() => (
     activeTabId ? [activeTabId] : []
   ));
-
-  React.useEffect(() => globalAudioPlayer.subscribe(setPlayerState), []);
 
   const tabMap = React.useMemo(() => {
     return new Map(tabs.map((tab) => [tab.id, tab]));
@@ -58,35 +51,6 @@ const AppMain: FC<IProps> = ({ hideTabsBar = false }) => {
     return [...cached, activeTab];
   }, [activeTabId, keepAliveTabIds, tabMap]);
 
-  const activeAsmrViewerKey = React.useMemo(() => {
-    if (fileState.fileType !== 'asmr') {
-      return null;
-    }
-    return resolveAsmrOwnerKey(String(fileState.fileUrl || ''), fileState.nodeId);
-  }, [fileState.fileType, fileState.fileUrl, fileState.nodeId]);
-
-  const activeAudioViewerKey = React.useMemo(() => {
-    if (fileState.fileType !== 'audio') {
-      return null;
-    }
-    return resolveAudioOwnerKey(String(fileState.fileUrl || ''), fileState.nodeId);
-  }, [fileState.fileType, fileState.fileUrl, fileState.nodeId]);
-
-  const suppressGlobalAudioBar = (
-    (
-      fileState.fileType === 'asmr'
-      && playerState.ownerType === 'asmr'
-      && Boolean(activeAsmrViewerKey)
-      && playerState.ownerKey === activeAsmrViewerKey
-    )
-    || (
-      fileState.fileType === 'audio'
-      && playerState.ownerType === 'default'
-      && Boolean(activeAudioViewerKey)
-      && playerState.ownerKey === activeAudioViewerKey
-    )
-  );
-
   // 如果没有文件在查看，显示欢迎视图
   if (!fileState.fileUrl && !fileState.loading) {
     return (
@@ -100,7 +64,6 @@ const AppMain: FC<IProps> = ({ hideTabsBar = false }) => {
             onReorder={reorderTabs}
           />
         )}
-        <GlobalAudioMiniBar suppressed={suppressGlobalAudioBar} />
         <div className="main-content">
           <WelcomeView />
         </div>
@@ -120,7 +83,6 @@ const AppMain: FC<IProps> = ({ hideTabsBar = false }) => {
           onReorder={reorderTabs}
         />
       )}
-      <GlobalAudioMiniBar suppressed={suppressGlobalAudioBar} />
       <div className="main-content">
         <div className="tab-stage-stack">
           {keepAliveTabs.map((tab) => {
@@ -140,6 +102,7 @@ const AppMain: FC<IProps> = ({ hideTabsBar = false }) => {
                   loading={tab.loading}
                   active={isActive}
                   reloadToken={tab.reloadToken ?? 0}
+                  tabId={tab.id}
                 />
               </div>
             );

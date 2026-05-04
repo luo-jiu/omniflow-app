@@ -39,12 +39,12 @@ OmniFlow 当前不是“一个万能 viewer”，而是多种 viewer 共同组�
 `FileDispatcher` 当前的实际分发关系是：
 
 - `image -> ImageViewer`
-- `audio -> AudioViewer`
-- `video -> VideoViewer`
+- `audio -> AudioViewer`（参与 MediaRegistry 注册，kind=audio）
+- `video -> VideoViewer`（参与 MediaRegistry 注册，kind=video）
 - `pdf -> PdfViewer`
 - `text -> TextViewer`
 - `comic -> ComicViewer`
-- `asmr -> AsmrViewer`
+- `asmr -> AsmrViewer`（参与 MediaRegistry 注册，kind=audio，仅当 ownerType 为 asmr 且为该 viewer 的 ownerKey）
 - `video_archive -> VideoArchiveViewer`
 - `asmr_archive -> AsmrArchiveViewer`
 - `comic_archive -> ComicArchiveViewer`
@@ -53,6 +53,8 @@ OmniFlow 当前不是“一个万能 viewer”，而是多种 viewer 共同组�
 对应代码位置：
 
 - `src/features/file-viewer/components/file-dispatcher/index.tsx`
+
+`FileDispatcher` 现在会接收 `tabId` prop 并透传给 audio / asmr / video viewer，用于把它们的播放注册到 `MediaRegistry`，详见 `docs/library-detail-workspace.md` §11。
 
 ## 4. 模块边界
 

@@ -206,6 +206,7 @@ views -> features -> components / hooks -> service / preload bridge -> electron 
 - 当前激活 tab
 - 当前页草稿输入
 - 当前页选择和展开态
+- 当前正在播放的媒体注册表（`MediaRegistry`，库维度，由各 audio/video viewer 注册自身，详见 `docs/library-detail-workspace.md` §11）
 
 这类状态可以缓存，但缓存只是恢复手段，不应变成第二份权威数据。
 

@@ -16,15 +16,18 @@ import { AudioViewerWrapper } from './style';
 import { globalAudioPlayer } from '@/features/file-viewer/services/global-audio-player';
 import { runtimeLogger } from '@/utils/runtimeLogger';
 import { resolveAudioOwnerKey } from '@/features/file-viewer/utils/audio-owner-key';
+import { deriveAudioTrackName } from '@/features/file-viewer/utils/audio-track-name';
+import { useRegisterMediaEntry } from '@/hooks/useMediaRegistry';
 
 interface AudioViewerProps {
   nodeId: number | null;
   url: string;
   fileName?: string | null;
   active?: boolean;
+  tabId: string;
 }
 
-const AudioViewer: React.FC<AudioViewerProps> = ({ nodeId, url, fileName, active = true }) => {
+const AudioViewer: React.FC<AudioViewerProps> = ({ nodeId, url, fileName, active = true, tabId }) => {
   const progressBarRef = useRef<HTMLDivElement>(null);
   const [playerState, setPlayerState] = useState(() => globalAudioPlayer.getState());
   const [dragPreviewTime, setDragPreviewTime] = useState<number | null>(null);
@@ -126,10 +129,35 @@ const AudioViewer: React.FC<AudioViewerProps> = ({ nodeId, url, fileName, active
   };
 
   useEffect(() => {
-    if (!active) return;
     setPlayerState(globalAudioPlayer.getState());
     return globalAudioPlayer.subscribe(setPlayerState);
-  }, [active]);
+  }, []);
+
+  useRegisterMediaEntry({
+    enabled: isOwnedSource && playerState.hasStarted,
+    entryId: `audio:${tabId}`,
+    kind: 'audio',
+    tabId,
+    title: deriveAudioTrackName(url, fileName),
+    isPlaying: isOwnedSource && playerState.isPlaying,
+    play: () => {
+      void globalAudioPlayer.play().catch((error) => {
+        runtimeLogger.error('failed to start audio playback from media hub:', error);
+      });
+    },
+    pause: () => {
+      globalAudioPlayer.pause();
+    },
+  });
+
+  useEffect(() => {
+    return () => {
+      const state = globalAudioPlayer.getState();
+      if (state.ownerType === 'default' && state.ownerKey === ownerKey) {
+        globalAudioPlayer.clear();
+      }
+    };
+  }, [ownerKey]);
 
   useEffect(() => {
     if (!active) return;

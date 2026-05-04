@@ -7,6 +7,9 @@ import {
 import React from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { FileViewerProvider } from "@/contexts/FileViewerContext";
+import { MediaRegistryProvider } from "@/contexts/MediaRegistryContext";
+import { useMediaEntries, useMediaRegistry } from "@/hooks/useMediaRegistry";
+import MediaHubPopover from "@/components/business/media-hub-popover";
 import { useFileViewer } from "@/hooks/useFileViewer";
 import {
   IconHome,
@@ -27,6 +30,7 @@ import {
   IconEdit,
   IconPulse,
   IconWrench,
+  IconMusic,
 } from "@douyinfe/semi-icons";
 import { Input, Modal, Popover, Select, Toast } from '@douyinfe/semi-ui';
 import ContextMenu, { type ContextMenuItem } from "@/components/ui/context-menu";
@@ -162,7 +166,9 @@ type BookmarkEditDraft = {
 
 const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) => {
   const { user } = useAuth();
-  const { setFileUrl, tabs, activeTabId, fileState, reloadActiveTab } = useFileViewer();
+  const { setFileUrl, tabs, activeTabId, fileState, reloadActiveTab, activateTab } = useFileViewer();
+  const mediaEntries = useMediaEntries();
+  const mediaRegistry = useMediaRegistry();
   const navigate = useNavigate();
   const sidePanelRef = React.useRef<HTMLDivElement>(null);
   const browserResourcePanelRef = React.useRef<HTMLDivElement>(null);
@@ -2459,6 +2465,39 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
             ) : null}
           </div>
           <div className="toolbar-right">
+            {!browserModeOpen && mediaEntries.length > 0 ? (
+              <Popover
+                trigger="click"
+                showArrow={false}
+                position="bottomRight"
+                spacing={6}
+                getPopupContainer={getAppPopupContainer}
+                content={
+                  <MediaHubPopover
+                    entries={mediaEntries}
+                    onActivate={(tabId) => {
+                      activateTab(tabId);
+                      openFileWorkspace();
+                    }}
+                    onToggle={(entry) => {
+                      if (entry.isPlaying) {
+                        mediaRegistry.pause(entry.entryId);
+                      } else {
+                        void mediaRegistry.play(entry.entryId);
+                      }
+                    }}
+                  />
+                }
+              >
+                <button
+                  type="button"
+                  className="toolbar-action-btn"
+                  title="正在播放的媒体"
+                >
+                  <IconMusic />
+                </button>
+              </Popover>
+            ) : null}
             {browserModeOpen ? null : (
               <button
                 type="button"
@@ -2843,7 +2882,9 @@ const LibraryDetail: React.FC = () => {
 
   return (
     <FileViewerProvider key={cacheKey} cacheKey={cacheKey}>
-      <LibraryDetailContent key={id} libraryId={libraryId} />
+      <MediaRegistryProvider>
+        <LibraryDetailContent key={id} libraryId={libraryId} />
+      </MediaRegistryProvider>
     </FileViewerProvider>
   );
 };

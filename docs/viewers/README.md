@@ -52,6 +52,15 @@
    - `docs/viewers/video-viewer.md`
    - `docs/viewers/video-archive-viewer.md`
 
+## 3.1 跨 tab 播放策略
+
+当前 viewer 体系的跨 tab / 多媒体规则：
+
+- 视频 viewer 不再因为所在 tab 失活而自动 pause；保留进度落库（`persistVideoProgress(true)`），但不再触发 `<video>.pause()`。多个视频可在不同 tab 并行播放。
+- 音频 viewer / asmr viewer 共用 `globalAudioPlayer` 单例 `<audio>`，所以同一时刻仍只能有一个音频源在播放（属预期范围）；但音频不再因切换 tab 而出现"顶部 GlobalAudioMiniBar"那条额外 UI。
+- video 启动播放不再调用 `globalAudioPlayer.pause()` 暂停音频；audio 启动播放不再暂停所有视频。音视频可并行。
+- 所有 audio / video / asmr viewer 在挂载且首次播放后向 `MediaRegistry` 注册自身，由 `library detail` 工具栏右侧的"媒体控制中心"集中展示与控制，详见 `docs/library-detail-workspace.md` §11。
+
 ## 4. 落点规则
 
 从现在开始，viewer 相关长期文档优先放在：

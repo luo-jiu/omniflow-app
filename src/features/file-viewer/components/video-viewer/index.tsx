@@ -11,7 +11,7 @@ import {
   IconVolume2,
 } from '@douyinfe/semi-icons';
 import { VideoViewerWrapper } from './style';
-import { globalAudioPlayer } from '@/features/file-viewer/services/global-audio-player';
+import { useRegisterMediaEntry } from '@/hooks/useMediaRegistry';
 import { fetchNodeDetailById, updateNodeConfig } from '@/features/file-explorer/services/file.api';
 import { runtimeLogger } from '@/utils/runtimeLogger';
 import { findActiveSubtitleCue, parseVideoSubtitle, type VideoSubtitleCue } from './subtitle';
@@ -21,6 +21,7 @@ interface VideoViewerProps {
   url: string;
   fileName?: string | null;
   active?: boolean;
+  tabId: string;
 }
 
 interface VideoPlaybackProgress {
@@ -155,7 +156,7 @@ function isProgressNewer(
   return candidateTime > currentTime;
 }
 
-const VideoViewer: React.FC<VideoViewerProps> = ({ nodeId, url, fileName, active = true }) => {
+const VideoViewer: React.FC<VideoViewerProps> = ({ nodeId, url, fileName, active = true, tabId }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const progressRef = useRef<HTMLDivElement>(null);
@@ -176,6 +177,7 @@ const VideoViewer: React.FC<VideoViewerProps> = ({ nodeId, url, fileName, active
   const isDraggingProgress = useRef(false);
 
   const [isPlaying, setIsPlaying] = useState(false);
+  const [hasStartedPlaying, setHasStartedPlaying] = useState(false);
   const [isBuffering, setIsBuffering] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -194,6 +196,23 @@ const VideoViewer: React.FC<VideoViewerProps> = ({ nodeId, url, fileName, active
   const [isRatePanelOpen, setIsRatePanelOpen] = useState(false);
 
   const progressCacheKey = useMemo(() => resolveVideoProgressCacheKey(url, nodeId), [nodeId, url]);
+
+  useRegisterMediaEntry({
+    enabled: hasStartedPlaying,
+    entryId: `video:${tabId}`,
+    kind: 'video',
+    tabId,
+    title: fileName || '视频',
+    isPlaying,
+    play: () => {
+      const video = videoRef.current;
+      if (video) void video.play();
+    },
+    pause: () => {
+      const video = videoRef.current;
+      if (video && !video.paused) video.pause();
+    },
+  });
 
   const formatTime = (value: number) => {
     if (!Number.isFinite(value) || value < 0) return '00:00';
@@ -372,7 +391,7 @@ const VideoViewer: React.FC<VideoViewerProps> = ({ nodeId, url, fileName, active
     };
     const onPlay = () => {
       setIsPlaying(true);
-      globalAudioPlayer.pause();
+      setHasStartedPlaying(true);
     };
     const onPause = () => setIsPlaying(false);
     const onEnded = () => {
@@ -402,12 +421,6 @@ const VideoViewer: React.FC<VideoViewerProps> = ({ nodeId, url, fileName, active
       video.removeEventListener('playing', onCanPlay);
     };
   }, [applyPendingRestoreTime, persistVideoProgress]);
-
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video) return;
-    return globalAudioPlayer.registerVideo(video);
-  }, []);
 
   useEffect(() => {
     const onFullscreenChange = () => {
@@ -486,11 +499,6 @@ const VideoViewer: React.FC<VideoViewerProps> = ({ nodeId, url, fileName, active
 
   useEffect(() => {
     if (active) return;
-    const video = videoRef.current;
-    if (!video) return;
-    if (!video.paused) {
-      video.pause();
-    }
     persistVideoProgress(true);
   }, [active, persistVideoProgress]);
 

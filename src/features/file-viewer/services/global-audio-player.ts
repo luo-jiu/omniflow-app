@@ -16,7 +16,6 @@ type StateListener = (state: GlobalAudioPlayerState) => void;
 class GlobalAudioPlayer {
   private readonly audio: HTMLAudioElement;
   private listeners = new Set<StateListener>();
-  private registeredVideos = new Set<HTMLVideoElement>();
   private sourceUrl: string | null = null;
   private trackName: string | null = null;
   private ownerType: 'default' | 'asmr' = 'default';
@@ -81,7 +80,6 @@ class GlobalAudioPlayer {
   }
 
   async play() {
-    this.pauseRegisteredVideos();
     await this.audio.play();
     this.hasStarted = true;
     this.emitState();
@@ -133,13 +131,6 @@ class GlobalAudioPlayer {
     this.emitState();
   }
 
-  registerVideo(video: HTMLVideoElement) {
-    this.registeredVideos.add(video);
-    return () => {
-      this.registeredVideos.delete(video);
-    };
-  }
-
   getState(): GlobalAudioPlayerState {
     return {
       src: this.sourceUrl,
@@ -158,18 +149,6 @@ class GlobalAudioPlayer {
   private emitState() {
     const snapshot = this.getState();
     this.listeners.forEach(listener => listener(snapshot));
-  }
-
-  private pauseRegisteredVideos() {
-    this.registeredVideos.forEach(video => {
-      if (!video.isConnected) {
-        this.registeredVideos.delete(video);
-        return;
-      }
-      if (!video.paused) {
-        video.pause();
-      }
-    });
   }
 }
 
