@@ -15,6 +15,7 @@ import { fetchTags, type TagItem } from '@/features/tag-management/services/tag.
 import { useArchiveCardGrid } from '@/features/archive-viewer/hooks/useArchiveCardGrid';
 import ContextMenu, { ContextMenuItem } from '@/components/ui/context-menu';
 import { locateNodeInDirectoryTree } from '@/features/file-explorer/services/tree-locate';
+import { useNodePropertiesOverlay } from '@/features/file-explorer/hooks/useNodePropertiesOverlay';
 
 interface AsmrArchiveViewerProps {
   folderNodeId: number | null;
@@ -309,6 +310,7 @@ const AsmrArchiveViewer: React.FC<AsmrArchiveViewerProps> = ({
   const { viewportRef, wrapperStyle } = useArchiveCardGrid({ baseCardWidth: 275, gridGap: 15 });
   const libraryId = useMemo(() => parseArchiveLibraryId(fileUrl), [fileUrl]);
   const title = useMemo(() => normalizeArchiveTitle(fileName), [fileName]);
+  const { showNodeProperties } = useNodePropertiesOverlay({ libraryId });
   const readerCacheKey = useMemo(
     () => resolveReaderCacheKey(fileUrl, folderNodeId),
     [fileUrl, folderNodeId],
@@ -498,6 +500,17 @@ const AsmrArchiveViewer: React.FC<AsmrArchiveViewerProps> = ({
         },
       },
       {
+        key: 'props',
+        label: '属性',
+        onClick: () => {
+          closeContextMenu();
+          void showNodeProperties({
+            id: card.id,
+            label: card.title,
+          });
+        },
+      },
+      {
         key: 'delete',
         label: '删除',
         danger: true,
@@ -507,7 +520,7 @@ const AsmrArchiveViewer: React.FC<AsmrArchiveViewerProps> = ({
         },
       },
     ];
-  }, [closeContextMenu, handleDeleteCard, libraryId, menuState.card, openRenameDialog]);
+  }, [closeContextMenu, handleDeleteCard, libraryId, menuState.card, openRenameDialog, showNodeProperties]);
 
   const captureAnchorFromViewport = useCallback((): {
     anchorCardId: number | null;

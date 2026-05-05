@@ -33,6 +33,8 @@
 - 子音频文件当前不要求再单独设置 `builtInType = AUDIO`
 - 字幕折叠显示由目录树负责，归档卡片页只展示音频资源本身
 
+归档卡片右键中的“属性”必须走目录树同一套节点属性 overlay；卡片只提供节点 id 和标题，属性内容仍以 `fetchNodeDetailById` 等节点接口返回的真实数据为准。
+
 ## 2. 当前结构
 
 - `components/video-archive-viewer/`

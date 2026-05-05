@@ -240,23 +240,24 @@ export const VideoArchiveViewerWrapper = styled.div`
     white-space: nowrap;
   }
 
-  .card-open-hint {
+  .card-duration {
     font-size: 10px;
     color: var(--app-text-secondary);
     white-space: nowrap;
   }
 
   .card-title {
-    min-height: 32px;
+    height: 30px;
     margin: 0;
     font-size: 11px;
-    line-height: 1.35;
+    line-height: 15px;
     font-weight: 700;
     color: #0b1220;
     overflow: hidden;
     display: -webkit-box;
     -webkit-box-orient: vertical;
     -webkit-line-clamp: 2;
+    word-break: break-all;
   }
 
   .card-footer {
@@ -265,7 +266,15 @@ export const VideoArchiveViewerWrapper = styled.div`
     justify-content: space-between;
     gap: 7px;
     font-size: 10px;
+    line-height: 1;
     color: var(--app-text-secondary);
+  }
+
+  .card-footer span:first-child {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .archive-footer {

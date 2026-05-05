@@ -1,10 +1,7 @@
 import React from 'react';
 import ContextMenu, { ContextMenuItem } from '@/components/ui/context-menu';
 import type { OverlayBoundaryRect } from '@/components/ui/context-menu/overlay';
-import comicFolderIcon from '@/assets/icons/material/folder-comic.svg';
-import asmrFolderIcon from '@/assets/icons/material/folder-asmr.svg';
-import videoFolderIcon from '@/assets/icons/material/folder-video.svg';
-import audioFolderIcon from '@/assets/icons/material/folder-audio.svg';
+import { getDirectoryBuiltInIcon } from '@/features/file-explorer/utils/file-node-icon';
 
 interface DirectoryContextMenuProps {
   node: any;
@@ -19,36 +16,44 @@ interface DirectoryContextMenuProps {
 
 const BUILT_IN_MENU_ICON_SIZE = 13;
 
-function createBuiltInMenuIcon(src: string, alt: string): React.ReactNode {
-  return (
-    <img
-      src={src}
-      alt={alt}
-      width={BUILT_IN_MENU_ICON_SIZE}
-      height={BUILT_IN_MENU_ICON_SIZE}
-      style={{ display: 'block', width: BUILT_IN_MENU_ICON_SIZE, height: BUILT_IN_MENU_ICON_SIZE, objectFit: 'contain' }}
-    />
-  );
+function createBuiltInMenuIcon(builtInType: string, archiveMode = 0): React.ReactNode {
+  const icon = getDirectoryBuiltInIcon(builtInType, archiveMode, false);
+  if (!React.isValidElement<React.ImgHTMLAttributes<HTMLImageElement>>(icon)) {
+    return icon;
+  }
+  return React.cloneElement(icon, {
+    width: BUILT_IN_MENU_ICON_SIZE,
+    height: BUILT_IN_MENU_ICON_SIZE,
+    style: {
+      ...(icon.props.style || {}),
+      display: 'block',
+      width: BUILT_IN_MENU_ICON_SIZE,
+      height: BUILT_IN_MENU_ICON_SIZE,
+      objectFit: 'contain',
+      marginRight: 0,
+      flex: '0 0 auto',
+    },
+  });
 }
 
-const COMIC_BUILT_IN_MENU_ICON = createBuiltInMenuIcon(comicFolderIcon, 'comic');
-const ASMR_BUILT_IN_MENU_ICON = createBuiltInMenuIcon(asmrFolderIcon, 'asmr');
-const VIDEO_BUILT_IN_MENU_ICON = createBuiltInMenuIcon(videoFolderIcon, 'video');
-const AUDIO_BUILT_IN_MENU_ICON = createBuiltInMenuIcon(audioFolderIcon, 'audio');
+const COMIC_BUILT_IN_MENU_ICON = createBuiltInMenuIcon('COMIC');
+const ASMR_BUILT_IN_MENU_ICON = createBuiltInMenuIcon('ASMR');
+const VIDEO_BUILT_IN_MENU_ICON = createBuiltInMenuIcon('VIDEO');
+const AUDIO_BUILT_IN_MENU_ICON = createBuiltInMenuIcon('AUDIO');
 
-function getBuiltInTypeMenuIcon(builtInType: string): React.ReactNode | undefined {
+function getBuiltInTypeMenuIcon(builtInType: string, archiveMode = 0): React.ReactNode | undefined {
   const normalizedType = String(builtInType || '').toUpperCase();
   if (normalizedType === 'COMIC') {
-    return COMIC_BUILT_IN_MENU_ICON;
+    return archiveMode === 1 ? createBuiltInMenuIcon('COMIC', 1) : COMIC_BUILT_IN_MENU_ICON;
   }
   if (normalizedType === 'ASMR') {
-    return ASMR_BUILT_IN_MENU_ICON;
+    return archiveMode === 1 ? createBuiltInMenuIcon('ASMR', 1) : ASMR_BUILT_IN_MENU_ICON;
   }
   if (normalizedType === 'VIDEO') {
-    return VIDEO_BUILT_IN_MENU_ICON;
+    return archiveMode === 1 ? createBuiltInMenuIcon('VIDEO', 1) : VIDEO_BUILT_IN_MENU_ICON;
   }
   if (normalizedType === 'AUDIO') {
-    return AUDIO_BUILT_IN_MENU_ICON;
+    return archiveMode === 1 ? createBuiltInMenuIcon('AUDIO', 1) : AUDIO_BUILT_IN_MENU_ICON;
   }
   return undefined;
 }
@@ -56,8 +61,9 @@ function getBuiltInTypeMenuIcon(builtInType: string): React.ReactNode | undefine
 function createTrailingBuiltInTypeLabel(
   text: string,
   builtInType: string,
+  archiveMode = 0,
 ): React.ReactNode {
-  const icon = getBuiltInTypeMenuIcon(builtInType);
+  const icon = getBuiltInTypeMenuIcon(builtInType, archiveMode);
   if (!icon) {
     return text;
   }
@@ -254,7 +260,7 @@ const DirectoryContextMenu: React.FC<DirectoryContextMenuProps> = ({
   if (isArchiveFolder) {
     items.push({
       key: 'batch-set-built-in-type',
-      label: createTrailingBuiltInTypeLabel('批量设置内置类型', currentBuiltInType),
+      label: createTrailingBuiltInTypeLabel('批量设置内置类型', currentBuiltInType, currentArchiveMode),
       onClick: () => onAction('批量设置内置类型', node),
     });
   }

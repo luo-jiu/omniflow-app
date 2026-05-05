@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Spin, Toast } from '@douyinfe/semi-ui';
+import { Popover, Spin, Toast } from '@douyinfe/semi-ui';
 import {
   fetchArchiveCardsPage,
   getFileLink,
@@ -8,6 +8,8 @@ import { runtimeLogger } from '@/utils/runtimeLogger';
 import { useFileViewer } from '@/hooks/useFileViewer';
 import { useArchiveCardGrid } from '@/features/archive-viewer/hooks/useArchiveCardGrid';
 import { AudioArchiveViewerWrapper } from './style';
+import ContextMenu, { type ContextMenuItem } from '@/components/ui/context-menu';
+import { useNodePropertiesOverlay } from '@/features/file-explorer/hooks/useNodePropertiesOverlay';
 
 interface AudioArchiveViewerProps {
   folderNodeId: number | null;
@@ -95,6 +97,7 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
   });
   const libraryId = useMemo(() => parseArchiveLibraryId(fileUrl), [fileUrl]);
   const title = useMemo(() => normalizeArchiveTitle(fileName), [fileName]);
+  const { showNodeProperties } = useNodePropertiesOverlay({ libraryId });
   const readerCacheKey = useMemo(
     () => resolveReaderCacheKey(fileUrl, folderNodeId),
     [fileUrl, folderNodeId],
@@ -108,6 +111,17 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
   const [total, setTotal] = useState(0);
   const [nextOffset, setNextOffset] = useState(0);
   const [hasMore, setHasMore] = useState(false);
+  const [menuState, setMenuState] = useState<{
+    visible: boolean;
+    x: number;
+    y: number;
+    card: AudioArchiveCard | null;
+  }>({
+    visible: false,
+    x: 0,
+    y: 0,
+    card: null,
+  });
 
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const requestIdRef = useRef(0);
@@ -126,6 +140,39 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
       scrollTop: patch.scrollTop ?? prev.scrollTop,
     });
   }, [readerCacheKey]);
+
+  const closeContextMenu = useCallback(() => {
+    setMenuState(prev => ({ ...prev, visible: false }));
+  }, []);
+
+  const openCardContextMenu = useCallback((e: React.MouseEvent, card: AudioArchiveCard) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setMenuState({
+      visible: true,
+      x: e.clientX,
+      y: e.clientY,
+      card,
+    });
+  }, []);
+
+  const contextMenuItems = useMemo<ContextMenuItem[]>(() => {
+    const card = menuState.card;
+    if (!card || !libraryId) return [];
+    return [
+      {
+        key: 'props',
+        label: '属性',
+        onClick: () => {
+          closeContextMenu();
+          void showNodeProperties({
+            id: card.id,
+            label: card.title,
+          });
+        },
+      },
+    ];
+  }, [closeContextMenu, libraryId, menuState.card, showNodeProperties]);
 
   const loadPage = useCallback(async (offset: number, append: boolean) => {
     if (!folderNodeId || !libraryId || !Number.isFinite(folderNodeId)) return;
@@ -333,6 +380,7 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
                 <article
                   key={card.id}
                   className="archive-card"
+                  onContextMenu={(e) => openCardContextMenu(e, card)}
                   onDoubleClick={() => {
                     void handleOpenCard(card);
                   }}
@@ -375,6 +423,35 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
           共 {total} 项
         </div>
       </footer>
+
+      <Popover
+        trigger="custom"
+        visible={menuState.visible}
+        onClickOutSide={closeContextMenu}
+        position="bottomLeft"
+        showArrow={false}
+        spacing={4}
+        getPopupContainer={() => document.body}
+        content={(
+          <ContextMenu
+            items={contextMenuItems}
+            className="directory-context-menu"
+            onItemClick={closeContextMenu}
+          />
+        )}
+      >
+        <div
+          style={{
+            position: 'fixed',
+            left: menuState.x,
+            top: menuState.y,
+            width: 1,
+            height: 1,
+            pointerEvents: 'none',
+            zIndex: 9999,
+          }}
+        />
+      </Popover>
     </AudioArchiveViewerWrapper>
   );
 };

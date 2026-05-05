@@ -583,6 +583,7 @@ export interface ArchiveCardDTO {
   coverNodeId?: number;
   mediaNodeId?: number;
   subtitleCount?: number;
+  durationSeconds?: number;
 }
 
 export interface ArchiveCardsPageResult {
@@ -622,6 +623,7 @@ export async function fetchArchiveCardsPage(payload: {
       coverNodeId: toOptionalNumber(item.coverNodeId ?? item.cover_node_id),
       mediaNodeId: toOptionalNumber(item.mediaNodeId ?? item.media_node_id),
       subtitleCount: toOptionalNumber(item.subtitleCount ?? item.subtitle_count),
+      durationSeconds: toOptionalNumber(item.durationSeconds ?? item.duration_seconds),
     }))
     .filter(item => item.id > 0);
 

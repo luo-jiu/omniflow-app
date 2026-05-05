@@ -15,6 +15,7 @@ import { useFileViewer } from '@/hooks/useFileViewer';
 import { useArchiveCardGrid } from '@/features/archive-viewer/hooks/useArchiveCardGrid';
 import ContextMenu, { type ContextMenuItem } from '@/components/ui/context-menu';
 import { locateNodeInDirectoryTree } from '@/features/file-explorer/services/tree-locate';
+import { useNodePropertiesOverlay } from '@/features/file-explorer/hooks/useNodePropertiesOverlay';
 
 interface VideoArchiveViewerProps {
   folderNodeId: number | null;
@@ -32,6 +33,7 @@ interface VideoArchiveCard {
   coverUrl: string | null;
   videoPreviewUrl: string | null;
   subtitleCount: number;
+  durationSeconds?: number;
 }
 
 interface VideoArchiveChildNode {
@@ -170,6 +172,22 @@ function seekVideoPreviewFrame(video: HTMLVideoElement) {
   }
 }
 
+function formatVideoDuration(durationSeconds?: number): string {
+  const duration = Number(durationSeconds);
+  if (!Number.isFinite(duration) || duration <= 0) {
+    return '--:--';
+  }
+  const totalSeconds = Math.max(Math.floor(duration), 0);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const paddedSeconds = String(seconds).padStart(2, '0');
+  if (hours > 0) {
+    return `${hours}:${String(minutes).padStart(2, '0')}:${paddedSeconds}`;
+  }
+  return `${minutes}:${paddedSeconds}`;
+}
+
 const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
   folderNodeId,
   fileUrl,
@@ -183,6 +201,7 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
   });
   const libraryId = useMemo(() => parseArchiveLibraryId(fileUrl), [fileUrl]);
   const title = useMemo(() => normalizeArchiveTitle(fileName), [fileName]);
+  const { showNodeProperties } = useNodePropertiesOverlay({ libraryId });
   const readerCacheKey = useMemo(
     () => resolveReaderCacheKey(fileUrl, folderNodeId),
     [fileUrl, folderNodeId],
@@ -348,6 +367,17 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
         },
       },
       {
+        key: 'props',
+        label: '属性',
+        onClick: () => {
+          closeContextMenu();
+          void showNodeProperties({
+            id: card.id,
+            label: card.title,
+          });
+        },
+      },
+      {
         key: 'delete',
         label: '删除',
         danger: true,
@@ -357,7 +387,7 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
         },
       },
     ];
-  }, [closeContextMenu, handleDeleteCard, libraryId, menuState.card, openRenameDialog]);
+  }, [closeContextMenu, handleDeleteCard, libraryId, menuState.card, openRenameDialog, showNodeProperties]);
 
   const resolveCardCoverUrls = useCallback(async (
     inputCards: VideoArchiveCard[],
@@ -467,6 +497,7 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
           coverUrl: null,
           videoPreviewUrl: null,
           subtitleCount,
+          durationSeconds: Number(item.durationSeconds ?? 0) > 0 ? Number(item.durationSeconds) : undefined,
         };
       });
       const cardsWithCover = await resolveCardCoverUrls(rawCards);
@@ -487,6 +518,7 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
             coverUrl: card.coverUrl || existing.coverUrl,
             videoPreviewUrl: card.videoPreviewUrl || existing.videoPreviewUrl,
             subtitleCount: Math.max(card.subtitleCount || 0, existing.subtitleCount || 0),
+            durationSeconds: card.durationSeconds || existing.durationSeconds,
           });
         });
         return Array.from(byId.values()).sort((a, b) => {
@@ -715,14 +747,15 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
                   <div className="card-meta">
                     <div className="card-tag-row">
                       <span className="card-tag-pill">VIDEO</span>
-                      <span className="card-open-hint">双击打开</span>
                     </div>
                     <p className="card-title" title={card.title}>{card.title}</p>
                     <div className="card-footer">
-                      <span>节点 #{card.id}</span>
                       <span>
                         {card.coverUrl ? '已带封面' : (card.videoPreviewUrl ? '视频首帧' : '封面待补')}
                         {card.subtitleCount > 0 ? ` · 字幕 ${card.subtitleCount}` : ''}
+                      </span>
+                      <span className="card-duration" title="视频时长">
+                        {formatVideoDuration(card.durationSeconds)}
                       </span>
                     </div>
                   </div>

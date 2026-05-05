@@ -384,7 +384,7 @@ export function getFileNodeIconByParentBuiltInType(
     return createWarningIconNode('与 ASMR 归档模式不匹配的文件');
   }
   if (normalizedBuiltInType === 'VIDEO') {
-    if (isVideoExtension(ext)) {
+    if (isVideoExtension(ext) || isImageExtension(ext) || isSubtitleExtension(ext)) {
       return getFileNodeIcon(ext, fileName);
     }
     return createWarningIconNode(

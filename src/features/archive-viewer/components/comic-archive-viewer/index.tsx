@@ -14,6 +14,7 @@ import { useFileViewer } from '@/hooks/useFileViewer';
 import { useArchiveCardGrid } from '@/features/archive-viewer/hooks/useArchiveCardGrid';
 import ContextMenu, { ContextMenuItem } from '@/components/ui/context-menu';
 import { locateNodeInDirectoryTree } from '@/features/file-explorer/services/tree-locate';
+import { useNodePropertiesOverlay } from '@/features/file-explorer/hooks/useNodePropertiesOverlay';
 
 interface ComicArchiveViewerProps {
   folderNodeId: number | null;
@@ -204,6 +205,7 @@ const ComicArchiveViewer: React.FC<ComicArchiveViewerProps> = ({
   });
   const libraryId = useMemo(() => parseArchiveLibraryId(fileUrl), [fileUrl]);
   const title = useMemo(() => normalizeArchiveTitle(fileName), [fileName]);
+  const { showNodeProperties } = useNodePropertiesOverlay({ libraryId });
   const readerCacheKey = useMemo(
     () => resolveReaderCacheKey(fileUrl, folderNodeId, reloadToken),
     [fileUrl, folderNodeId, reloadToken],
@@ -389,6 +391,17 @@ const ComicArchiveViewer: React.FC<ComicArchiveViewerProps> = ({
         },
       },
       {
+        key: 'props',
+        label: '属性',
+        onClick: () => {
+          closeContextMenu();
+          void showNodeProperties({
+            id: card.id,
+            label: card.title,
+          });
+        },
+      },
+      {
         key: 'delete',
         label: '删除',
         danger: true,
@@ -398,7 +411,7 @@ const ComicArchiveViewer: React.FC<ComicArchiveViewerProps> = ({
         },
       },
     ];
-  }, [closeContextMenu, handleDeleteCard, libraryId, menuState.card, openRenameDialog]);
+  }, [closeContextMenu, handleDeleteCard, libraryId, menuState.card, openRenameDialog, showNodeProperties]);
 
   const captureAnchorFromViewport = useCallback((): {
     anchorCardId: number | null;
