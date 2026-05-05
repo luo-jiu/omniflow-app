@@ -2467,7 +2467,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
             ) : null}
           </div>
           <div className="toolbar-right">
-            {!browserModeOpen && mediaEntries.length > 0 ? (
+            {mediaEntries.length > 0 ? (
               <Popover
                 trigger="click"
                 showArrow={false}
@@ -2647,101 +2647,111 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
           />
         ) : null}
         <ContentBody>
+          <div
+            className={`workspace-pane ${workspaceDisplayMode === 'file-viewer' ? 'active' : 'inactive'}`}
+            aria-hidden={workspaceDisplayMode !== 'file-viewer'}
+          >
+            <AppMain hideTabsBar={false} workspaceActive={workspaceDisplayMode === 'file-viewer'} />
+          </div>
           {workspaceDisplayMode === 'browser' ? (
-            <BrowserWorkspace>
-              <BrowserWorkspaceMain>
-                {activeBrowserTabIsSettings ? (
-                  <BrowserSettingsWorkspace
-                    section={browserSettingsSection}
-                    onSectionChange={setBrowserSettingsSection}
-                  />
-                ) : (
-                  <EmbeddedBrowserPanel
-                    ref={browserRef}
-                    activeTabId={activeBrowserTabId}
-                    boundsSyncDurationMs={SIDE_PANEL_COLLAPSE_ANIMATION_MS}
-                    boundsSyncSignal={sidePanelMotionSyncSignal}
-                    currentUrl={
-                      activeBrowserTab?.url ?? ''
-                    }
-                    pendingFileOpen={
-                      activeBrowserTabId
-                        ? pendingBrowserFileOpenByTabId[activeBrowserTabId] ?? null
-                        : null
-                    }
-                    onPendingFileOpenHandled={(tabId) => {
-                      clearPendingBrowserFileOpen(tabId);
-                    }}
-                    suspendNativeView={Boolean(activeBrowserDownload)}
-                    onUrlChange={(nextUrl) => {
-                      if (!activeBrowserTabId) {
-                        return;
+            <div className="workspace-pane active">
+              <BrowserWorkspace>
+                <BrowserWorkspaceMain>
+                  {activeBrowserTabIsSettings ? (
+                    <BrowserSettingsWorkspace
+                      section={browserSettingsSection}
+                      onSectionChange={setBrowserSettingsSection}
+                    />
+                  ) : (
+                    <EmbeddedBrowserPanel
+                      ref={browserRef}
+                      activeTabId={activeBrowserTabId}
+                      boundsSyncDurationMs={SIDE_PANEL_COLLAPSE_ANIMATION_MS}
+                      boundsSyncSignal={sidePanelMotionSyncSignal}
+                      currentUrl={
+                        activeBrowserTab?.url ?? ''
                       }
-                      applyBrowserTabUpdate(activeBrowserTabId, (tab) => ({
-                        ...tab,
-                        url: nextUrl,
-                        title: tab.title || nextUrl,
-                      }));
-                      syncBrowserInputWithTab(activeBrowserTabId, nextUrl);
-                    }}
-                    onStateChange={(payload) => {
-                      if (!payload.tabId) {
-                        return;
+                      pendingFileOpen={
+                        activeBrowserTabId
+                          ? pendingBrowserFileOpenByTabId[activeBrowserTabId] ?? null
+                          : null
                       }
-                      applyBrowserTabState({
-                        ...payload,
-                        tabId: payload.tabId,
-                      });
-                      if (payload.tabId === activeBrowserTabId && payload.url) {
-                        setBrowserInput(payload.url);
-                      }
-                    }}
-                    onSubmitDraft={submitBrowserDraft}
-                  />
-                )}
-              </BrowserWorkspaceMain>
-              {browserResourcePanelVisible && !activeBrowserTabIsSettings ? (
-                <BrowserWorkspaceAside
-                  ref={browserResourcePanelRef}
-                  style={{ width: `${browserResourcePanelWidth}px` }}
-                >
-                  <BrowserWorkspaceAsideResizeHandle
-                    onMouseDown={handleBrowserResourcePanelResizeMouseDown}
-                  />
-                  <EmbeddedBrowserResourcePanel
-                    activeTabId={activeBrowserTabId}
-                    currentPageUrl={activeBrowserTab?.url ?? ''}
-                    onOpenHlsDownloadWorkspace={openHlsDownloadWorkspace}
-                    onOpenMpdDownloadWorkspace={openMpdDownloadWorkspace}
-                    onOpenMediaProcessing={openMediaProcessingWorkspace}
-                  />
-                </BrowserWorkspaceAside>
-              ) : null}
-            </BrowserWorkspace>
+                      onPendingFileOpenHandled={(tabId) => {
+                        clearPendingBrowserFileOpen(tabId);
+                      }}
+                      suspendNativeView={Boolean(activeBrowserDownload)}
+                      onUrlChange={(nextUrl) => {
+                        if (!activeBrowserTabId) {
+                          return;
+                        }
+                        applyBrowserTabUpdate(activeBrowserTabId, (tab) => ({
+                          ...tab,
+                          url: nextUrl,
+                          title: tab.title || nextUrl,
+                        }));
+                        syncBrowserInputWithTab(activeBrowserTabId, nextUrl);
+                      }}
+                      onStateChange={(payload) => {
+                        if (!payload.tabId) {
+                          return;
+                        }
+                        applyBrowserTabState({
+                          ...payload,
+                          tabId: payload.tabId,
+                        });
+                        if (payload.tabId === activeBrowserTabId && payload.url) {
+                          setBrowserInput(payload.url);
+                        }
+                      }}
+                      onSubmitDraft={submitBrowserDraft}
+                    />
+                  )}
+                </BrowserWorkspaceMain>
+                {browserResourcePanelVisible && !activeBrowserTabIsSettings ? (
+                  <BrowserWorkspaceAside
+                    ref={browserResourcePanelRef}
+                    style={{ width: `${browserResourcePanelWidth}px` }}
+                  >
+                    <BrowserWorkspaceAsideResizeHandle
+                      onMouseDown={handleBrowserResourcePanelResizeMouseDown}
+                    />
+                    <EmbeddedBrowserResourcePanel
+                      activeTabId={activeBrowserTabId}
+                      currentPageUrl={activeBrowserTab?.url ?? ''}
+                      onOpenHlsDownloadWorkspace={openHlsDownloadWorkspace}
+                      onOpenMpdDownloadWorkspace={openMpdDownloadWorkspace}
+                      onOpenMediaProcessing={openMediaProcessingWorkspace}
+                    />
+                  </BrowserWorkspaceAside>
+                ) : null}
+              </BrowserWorkspace>
+            </div>
           ) : workspaceDisplayMode === 'search-home' ? (
-            <SearchWorkspace
-              mode={searchMode}
-              value={searchDraft}
-              onValueChange={setSearchDraft}
-              onModeChange={setSearchMode}
-              onSubmit={handleSearchWorkspaceSubmit}
-              placeholder={searchMode === 'web' ? '输入网址或关键词' : '搜索文件或文件夹'}
-              title="Omniflow"
-              description="输入网址或关键词开始"
-            />
+            <div className="workspace-pane active">
+              <SearchWorkspace
+                mode={searchMode}
+                value={searchDraft}
+                onValueChange={setSearchDraft}
+                onModeChange={setSearchMode}
+                onSubmit={handleSearchWorkspaceSubmit}
+                placeholder={searchMode === 'web' ? '输入网址或关键词' : '搜索文件或文件夹'}
+                title="Omniflow"
+                description="输入网址或关键词开始"
+              />
+            </div>
           ) : workspaceDisplayMode === 'tools' ? (
-            <ToolWorkspace
-              libraryId={libraryId}
-              mediaProcessingRequest={mediaProcessingRequest}
-              onRefreshDirectory={(directoryId) => (
-                directorySidebarRef.current?.refreshNodeSubtree(directoryId)
-              )}
-              rootNodeId={treeRootNodeId}
-              selectedTreeNode={selectedTreeNode}
-            />
-          ) : (
-            <AppMain hideTabsBar={false} />
-          )}
+            <div className="workspace-pane active">
+              <ToolWorkspace
+                libraryId={libraryId}
+                mediaProcessingRequest={mediaProcessingRequest}
+                onRefreshDirectory={(directoryId) => (
+                  directorySidebarRef.current?.refreshNodeSubtree(directoryId)
+                )}
+                rootNodeId={treeRootNodeId}
+                selectedTreeNode={selectedTreeNode}
+              />
+            </div>
+          ) : null}
         </ContentBody>
       </ContentArea>
       {bookmarkContextMenu ? (

@@ -1122,12 +1122,31 @@ export const ContentBody = styled.div`
   flex: 1;
   min-height: 0;
   overflow: hidden;
-  display: flex;
+  display: grid;
   -webkit-app-region: no-drag;
 
   & > * {
+    grid-area: 1 / 1;
     flex: 1;
     min-height: 0;
+    min-width: 0;
+  }
+
+  .workspace-pane {
+    display: flex;
+    min-width: 0;
+    min-height: 0;
+  }
+
+  .workspace-pane.inactive {
+    visibility: hidden;
+    pointer-events: none;
+  }
+
+  .workspace-pane.active {
+    visibility: visible;
+    pointer-events: auto;
+    z-index: 1;
   }
 `;
 

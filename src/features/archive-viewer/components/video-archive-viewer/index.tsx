@@ -183,6 +183,13 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
   const [renameTargetCard, setRenameTargetCard] = useState<VideoArchiveCard | null>(null);
   const [renameInput, setRenameInput] = useState('');
 
+  useEffect(() => {
+    if (active) return;
+    setMenuState(prev => (prev.visible ? { ...prev, visible: false } : prev));
+    setRenameDialogVisible(false);
+    setRenameTargetCard(null);
+  }, [active]);
+
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const requestIdRef = useRef(0);
   const restoreScrollTopRef = useRef<number | null>(null);

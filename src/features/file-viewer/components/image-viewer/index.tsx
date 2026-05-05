@@ -7,6 +7,7 @@ import { runtimeLogger } from '@/utils/runtimeLogger';
 interface ImageViewerProps {
   url: string;
   fileName?: string | null;
+  active?: boolean;
 }
 
 interface Point {
@@ -19,7 +20,7 @@ const MAX_ZOOM = 10;
 const WHEEL_ZOOM_RATIO = 0.08;
 const FIT_RETRY_FRAMES = 6;
 
-const ImageViewer: React.FC<ImageViewerProps> = ({ url, fileName }) => {
+const ImageViewer: React.FC<ImageViewerProps> = ({ url, fileName, active = true }) => {
   const [baseScale, setBaseScale] = useState(1);
   const [zoom, setZoom] = useState(1);
   const [offset, setOffset] = useState<Point>({ x: 0, y: 0 });
@@ -140,6 +141,9 @@ const ImageViewer: React.FC<ImageViewerProps> = ({ url, fileName }) => {
   const handleContextMenu = (e: MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    if (!active) {
+      return;
+    }
 
     if (menuState.visible) {
       setMenuState(prev => ({ ...prev, visible: false }));
@@ -150,6 +154,13 @@ const ImageViewer: React.FC<ImageViewerProps> = ({ url, fileName }) => {
       setMenuState({ visible: true, x: e.clientX, y: e.clientY });
     }
   };
+
+  useEffect(() => {
+    if (active) return;
+    setMenuState(prev => (prev.visible ? { ...prev, visible: false } : prev));
+    setIsDragging(false);
+    setIsPanMode(false);
+  }, [active]);
 
   // 菜单项
   const menuItems: ContextMenuItem[] = [

@@ -99,7 +99,7 @@ const FileDispatcher: React.FC<FileDispatcherProps> = ({
 
   switch (fileType) {
     case 'image':
-      return <ImageViewer url={fileUrl} fileName={fileName} />;
+      return <ImageViewer url={fileUrl} fileName={fileName} active={active} />;
     
     case 'audio':
       return <AudioViewer nodeId={nodeId} url={fileUrl} fileName={fileName} active={active} tabId={tabId} />;

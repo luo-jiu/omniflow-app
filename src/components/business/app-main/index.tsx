@@ -8,13 +8,14 @@ import FileTabsBar from "./FileTabsBar";
 interface IProps {
   children?: ReactNode;
   hideTabsBar?: boolean;
+  workspaceActive?: boolean;
 }
 
 /**
  * 主工作区容器
  * 负责在“欢迎页”和“文件预览页”之间切换
  */
-const AppMain: FC<IProps> = ({ hideTabsBar = false }) => {
+const AppMain: FC<IProps> = ({ hideTabsBar = false, workspaceActive = true }) => {
   const { fileState, tabs, activeTabId, activateTab, closeTab, reorderTabs } = useFileViewer();
   const [keepAliveTabIds, setKeepAliveTabIds] = React.useState<string[]>(() => (
     activeTabId ? [activeTabId] : []
@@ -86,7 +87,7 @@ const AppMain: FC<IProps> = ({ hideTabsBar = false }) => {
       <div className="main-content">
         <div className="tab-stage-stack">
           {keepAliveTabs.map((tab) => {
-            const isActive = tab.id === activeTabId;
+            const isActive = workspaceActive && tab.id === activeTabId;
             return (
               <div
                 key={tab.id}

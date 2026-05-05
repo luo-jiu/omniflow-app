@@ -250,6 +250,7 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
   folderNodeId,
   fileUrl,
   fileName,
+  active = true,
   reloadToken = 0,
   tabId,
 }) => {
@@ -309,6 +310,11 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
   const [coverPickerPathStack, setCoverPickerPathStack] = useState<AsmrPathItem[]>([]);
   const [coverPickerItems, setCoverPickerItems] = useState<AsmrNodeItem[]>([]);
   const [coverPickerLoading, setCoverPickerLoading] = useState(false);
+
+  useEffect(() => {
+    if (active) return;
+    setEditorVisible(false);
+  }, [active]);
 
   const listRequestIdRef = useRef(0);
   const coverRequestIdRef = useRef(0);

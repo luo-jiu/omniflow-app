@@ -167,7 +167,8 @@
 工具栏右侧（刷新按钮左侧）的乐符按钮是页面级"媒体控制中心"入口：
 
 - 仅当 `MediaRegistry` 中存在已注册（即至少播放过一次的）audio / video entry 时才出现，空态隐藏。
-- 进入浏览器模式后整个 toolbar-right 让位给浏览器工具组，不再显示。
+- 进入浏览器模式后仍保留媒体控制入口；已播放的文件媒体不会因为切换到浏览器而暂停，后续浏览器内媒体接入时也走同一个控制中心入口。
+- `file-viewer` 工作区在切到浏览器 / 搜索 / 工具区时只隐藏、不卸载；隐藏时会向 viewer 传递 `active=false`，让非前台快捷键和局部 portal 浮层收起，同时保留正在播放的 video DOM、audio viewer 注册关系和 `MediaRegistry` entry。
 - 点击弹出 `MediaHubPopover`，列出当前所有注册项；每条支持 play/pause、点击进度条 seek、播放进度与时长展示、通过专门按钮跳到对应 tab，以及通过 `x` 按钮结束并移出媒体控制中心。
 - "跳到 tab" 路径：点击行内跳转按钮后调用 `useFileViewer().activateTab(tabId)`，再调 `openFileWorkspace()` 切回 file-viewer 模式。
 - "移除" 路径：不关闭文件 tab；audio / asmr 会清空 `globalAudioPlayer`，video 会 pause 并退出本次媒体注册，下次在原 tab 里播放会重新注册。

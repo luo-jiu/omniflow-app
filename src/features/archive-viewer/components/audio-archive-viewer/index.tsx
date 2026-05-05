@@ -123,6 +123,11 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
     card: null,
   });
 
+  useEffect(() => {
+    if (active) return;
+    setMenuState(prev => (prev.visible ? { ...prev, visible: false } : prev));
+  }, [active]);
+
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const requestIdRef = useRef(0);
   const restoreScrollTopRef = useRef<number | null>(null);

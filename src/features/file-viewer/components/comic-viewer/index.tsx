@@ -417,6 +417,14 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
   const pendingRemoteProgressRef = useRef<ComicRemoteReadingProgress | null>(null);
   const lastSyncedRemoteProgressSignatureRef = useRef<string>('');
 
+  useEffect(() => {
+    if (active) return;
+    setFlipMenuState(prev => (prev.visible ? { ...prev, visible: false } : prev));
+    setViewerSettingsVisible(false);
+    setFlipPanMode(false);
+    setFlipDragging(false);
+  }, [active]);
+
   const applyFlipZoomRatio = useCallback((ratio: number) => {
     if (!Number.isFinite(ratio) || ratio <= 0) {
       return;
@@ -1531,7 +1539,7 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
   }, [flipDragging, flipPanMode, goToNextFlipPage, goToPrevFlipPage, isFlipMode]);
 
   useEffect(() => {
-    if (!isFlipMode) {
+    if (!active || !isFlipMode) {
       setFlipPanMode(false);
       setFlipDragging(false);
       return;
@@ -1565,7 +1573,7 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [goToNextFlipPage, goToPrevFlipPage, isFlipMode]);
+  }, [active, goToNextFlipPage, goToPrevFlipPage, isFlipMode]);
 
   useEffect(() => {
     const isEditableTarget = (target: EventTarget | null) => {

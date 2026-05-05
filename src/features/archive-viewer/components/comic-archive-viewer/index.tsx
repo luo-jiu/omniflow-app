@@ -235,6 +235,13 @@ const ComicArchiveViewer: React.FC<ComicArchiveViewerProps> = ({
   const [renameTargetCard, setRenameTargetCard] = useState<ComicArchiveCard | null>(null);
   const [renameInput, setRenameInput] = useState('');
 
+  useEffect(() => {
+    if (active) return;
+    setMenuState(prev => (prev.visible ? { ...prev, visible: false } : prev));
+    setRenameDialogVisible(false);
+    setRenameTargetCard(null);
+  }, [active]);
+
   const cardRefs = useRef<Map<number, HTMLElement>>(new Map());
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const requestIdRef = useRef(0);
