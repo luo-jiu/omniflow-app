@@ -212,12 +212,12 @@ const DirectoryContextMenu: React.FC<DirectoryContextMenuProps> = ({
           icon: ASMR_BUILT_IN_MENU_ICON,
           onClick: () => onAction('设置内置类型:ASMR', node),
         },
-        {
+        ...(isFolder ? [{
           key: 'built-in-type-video',
           label: currentBuiltInType === 'VIDEO' ? '视频（当前）' : '视频',
           icon: VIDEO_BUILT_IN_MENU_ICON,
           onClick: () => onAction('设置内置类型:VIDEO', node),
-        },
+        }] : []),
         ...(isFolder ? [{
           key: 'built-in-type-audio',
           label: currentBuiltInType === 'AUDIO' ? '音频（当前）' : '音频',

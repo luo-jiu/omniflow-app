@@ -4,9 +4,11 @@ import {
   batchGetFileLinks,
   deleteNodeAndChildren,
   fetchArchiveCardsPage,
+  getChildrenByNodeId,
   getFileLink,
   renameNode,
 } from '@/features/file-explorer/services/file.api';
+import { resolvePreviewFileType } from '@/utils/preview-file-type';
 import { runtimeLogger } from '@/utils/runtimeLogger';
 import { VideoArchiveViewerWrapper } from './style';
 import { useFileViewer } from '@/hooks/useFileViewer';
@@ -23,11 +25,26 @@ interface VideoArchiveViewerProps {
 
 interface VideoArchiveCard {
   id: number;
+  mediaNodeId: number;
   title: string;
   sortOrder: number;
   coverNodeId: number | null;
   coverUrl: string | null;
   videoPreviewUrl: string | null;
+  subtitleCount: number;
+}
+
+interface VideoArchiveChildNode {
+  id: number;
+  name?: string;
+  type?: string;
+  ext?: string;
+  mimeType?: string;
+}
+
+interface VideoArchiveSidecarIndex {
+  coverNodeIdByName: Map<string, number>;
+  subtitleCountByName: Map<string, number>;
 }
 
 interface VideoArchiveSnapshot {
@@ -43,6 +60,11 @@ const PAGE_SIZE = 24;
 const LINK_EXPIRY_MINUTES = 120;
 const VIDEO_ARCHIVE_CACHE_MAX_ENTRIES = 24;
 const VIDEO_PREVIEW_SAMPLE_TIME = 0.5;
+const VIDEO_ARCHIVE_EMPTY_SIDECARS: VideoArchiveSidecarIndex = {
+  coverNodeIdByName: new Map(),
+  subtitleCountByName: new Map(),
+};
+const VIDEO_SUBTITLE_EXTENSIONS = new Set(['lrc', 'srt', 'vtt', 'ass', 'ssa']);
 
 const EMPTY_VIDEO_ARCHIVE_SNAPSHOT: VideoArchiveSnapshot = {
   hasLoadedList: false,
@@ -75,6 +97,49 @@ function normalizeArchiveTitle(fileName?: string | null): string {
 function resolveReaderCacheKey(fileUrl: string, folderNodeId: number | null): string | null {
   if (!folderNodeId || !Number.isFinite(folderNodeId)) return null;
   return `${String(fileUrl || '').trim()}::${folderNodeId}`;
+}
+
+function normalizeVideoArchiveExtension(ext?: string): string {
+  return String(ext || '').trim().toLowerCase().replace(/^\./, '');
+}
+
+function normalizeVideoArchiveMatchName(name?: string, ext?: string): string {
+  const normalizedName = String(name || '').trim().toLowerCase();
+  const normalizedExt = normalizeVideoArchiveExtension(ext);
+  if (!normalizedName || !normalizedExt || !normalizedName.endsWith(`.${normalizedExt}`)) {
+    return normalizedName;
+  }
+  return normalizedName.slice(0, -(normalizedExt.length + 1)).trim();
+}
+
+function isVideoArchiveCoverNode(item: VideoArchiveChildNode): boolean {
+  return item.type === 'file' && resolvePreviewFileType(item.mimeType, item.ext) === 'image';
+}
+
+function isVideoArchiveSubtitleNode(item: VideoArchiveChildNode): boolean {
+  return item.type === 'file' && VIDEO_SUBTITLE_EXTENSIONS.has(normalizeVideoArchiveExtension(item.ext));
+}
+
+function buildVideoArchiveSidecarIndex(children: VideoArchiveChildNode[]): VideoArchiveSidecarIndex {
+  const coverNodeIdByName = new Map<string, number>();
+  const subtitleCountByName = new Map<string, number>();
+
+  children.forEach((item) => {
+    const matchName = normalizeVideoArchiveMatchName(item.name, item.ext);
+    if (!matchName || item.id <= 0) return;
+    if (isVideoArchiveCoverNode(item) && !coverNodeIdByName.has(matchName)) {
+      coverNodeIdByName.set(matchName, item.id);
+      return;
+    }
+    if (isVideoArchiveSubtitleNode(item)) {
+      subtitleCountByName.set(matchName, (subtitleCountByName.get(matchName) || 0) + 1);
+    }
+  });
+
+  return {
+    coverNodeIdByName,
+    subtitleCountByName,
+  };
 }
 
 function setArchiveSnapshotCache(cacheKey: string, snapshot: VideoArchiveSnapshot) {
@@ -151,6 +216,10 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
   const requestIdRef = useRef(0);
   const restoreScrollTopRef = useRef<number | null>(null);
   const persistScrollRafRef = useRef<number>(0);
+  const sidecarIndexCacheRef = useRef<{
+    cacheKey: string;
+    index: VideoArchiveSidecarIndex;
+  } | null>(null);
 
   const persistSnapshot = useCallback((patch: Partial<VideoArchiveSnapshot>) => {
     if (!readerCacheKey) return;
@@ -299,7 +368,7 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
 
     const unresolvedNodeIds = Array.from(new Set(inputCards
       .filter(card => !card.coverUrl)
-      .map(card => (card.coverNodeId && card.coverNodeId > 0 ? card.coverNodeId : card.id))
+      .map(card => (card.coverNodeId && card.coverNodeId > 0 ? card.coverNodeId : card.mediaNodeId || card.id))
       .filter((nodeId): nodeId is number => Number.isFinite(nodeId) && nodeId > 0)));
     if (unresolvedNodeIds.length === 0) {
       return inputCards;
@@ -316,7 +385,9 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
       }
       return inputCards.map((card) => {
         if (card.coverUrl) return card;
-        const targetNodeId = card.coverNodeId && card.coverNodeId > 0 ? card.coverNodeId : card.id;
+        const targetNodeId = card.coverNodeId && card.coverNodeId > 0
+          ? card.coverNodeId
+          : card.mediaNodeId || card.id;
         const nextUrl = linkMap.get(targetNodeId);
         if (!nextUrl) return card;
         return {
@@ -330,6 +401,26 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
       return inputCards;
     }
   }, [libraryId]);
+
+  const loadVideoArchiveSidecarIndex = useCallback(async (): Promise<VideoArchiveSidecarIndex> => {
+    if (!folderNodeId || !libraryId) {
+      return VIDEO_ARCHIVE_EMPTY_SIDECARS;
+    }
+    const cacheKey = `${libraryId}:${folderNodeId}`;
+    if (sidecarIndexCacheRef.current?.cacheKey === cacheKey) {
+      return sidecarIndexCacheRef.current.index;
+    }
+
+    try {
+      const children = await getChildrenByNodeId(folderNodeId, libraryId);
+      const index = buildVideoArchiveSidecarIndex(children as VideoArchiveChildNode[]);
+      sidecarIndexCacheRef.current = { cacheKey, index };
+      return index;
+    } catch (sidecarError) {
+      runtimeLogger.warn('加载视频归档伴随资源失败:', sidecarError);
+      return VIDEO_ARCHIVE_EMPTY_SIDECARS;
+    }
+  }, [folderNodeId, libraryId]);
 
   const loadPage = useCallback(async (offset: number, append: boolean) => {
     if (!folderNodeId || !libraryId || !Number.isFinite(folderNodeId)) return;
@@ -350,17 +441,34 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
         limit: PAGE_SIZE,
       });
       if (requestId !== requestIdRef.current) return;
+      const sidecarIndex = await loadVideoArchiveSidecarIndex();
+      if (requestId !== requestIdRef.current) return;
 
-      const rawCards: VideoArchiveCard[] = page.items.map(item => ({
-        id: Number(item.id),
-        title: String(item.name || ''),
-        sortOrder: Number(item.sortOrder ?? 0),
-        coverNodeId: Number.isFinite(Number(item.coverNodeId)) && Number(item.coverNodeId) > 0
+      const rawCards: VideoArchiveCard[] = page.items.map((item) => {
+        const cardId = Number(item.id);
+        const mediaNodeId = Number.isFinite(Number(item.mediaNodeId)) && Number(item.mediaNodeId) > 0
+          ? Number(item.mediaNodeId)
+          : cardId;
+        const matchName = normalizeVideoArchiveMatchName(item.name);
+        const explicitCoverNodeId = Number.isFinite(Number(item.coverNodeId)) && Number(item.coverNodeId) > 0
           ? Number(item.coverNodeId)
-          : null,
-        coverUrl: null,
-        videoPreviewUrl: null,
-      }));
+          : null;
+        const sidecarCoverNodeId = matchName ? sidecarIndex.coverNodeIdByName.get(matchName) ?? null : null;
+        const subtitleCount = Math.max(
+          Number(item.subtitleCount ?? 0),
+          matchName ? sidecarIndex.subtitleCountByName.get(matchName) ?? 0 : 0,
+        );
+        return {
+          id: cardId,
+          mediaNodeId,
+          title: String(item.name || ''),
+          sortOrder: Number(item.sortOrder ?? 0),
+          coverNodeId: explicitCoverNodeId || sidecarCoverNodeId,
+          coverUrl: null,
+          videoPreviewUrl: null,
+          subtitleCount,
+        };
+      });
       const cardsWithCover = await resolveCardCoverUrls(rawCards);
       if (requestId !== requestIdRef.current) return;
 
@@ -378,6 +486,7 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
             ...card,
             coverUrl: card.coverUrl || existing.coverUrl,
             videoPreviewUrl: card.videoPreviewUrl || existing.videoPreviewUrl,
+            subtitleCount: Math.max(card.subtitleCount || 0, existing.subtitleCount || 0),
           });
         });
         return Array.from(byId.values()).sort((a, b) => {
@@ -402,7 +511,7 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
         setLoadingMore(false);
       }
     }
-  }, [folderNodeId, libraryId, resolveCardCoverUrls]);
+  }, [folderNodeId, libraryId, loadVideoArchiveSidecarIndex, resolveCardCoverUrls]);
 
   const loadMore = useCallback(() => {
     if (listLoading || loadingMore || !hasMore) return;
@@ -415,7 +524,7 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
       return;
     }
     try {
-      const nextUrl = await getFileLink(card.id, libraryId, LINK_EXPIRY_MINUTES);
+      const nextUrl = await getFileLink(card.mediaNodeId || card.id, libraryId, LINK_EXPIRY_MINUTES);
       if (!nextUrl) {
         throw new Error('未获取到视频访问链接');
       }
@@ -423,7 +532,7 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
         nextUrl,
         card.title,
         'video',
-        card.id,
+        card.mediaNodeId || card.id,
         {
           tabTypeLabel: 'VIDEO',
           returnTarget: {
@@ -611,7 +720,10 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
                     <p className="card-title" title={card.title}>{card.title}</p>
                     <div className="card-footer">
                       <span>节点 #{card.id}</span>
-                      <span>{card.coverUrl ? '已带封面' : (card.videoPreviewUrl ? '视频首帧' : '封面待补')}</span>
+                      <span>
+                        {card.coverUrl ? '已带封面' : (card.videoPreviewUrl ? '视频首帧' : '封面待补')}
+                        {card.subtitleCount > 0 ? ` · 字幕 ${card.subtitleCount}` : ''}
+                      </span>
                     </div>
                   </div>
                 </article>

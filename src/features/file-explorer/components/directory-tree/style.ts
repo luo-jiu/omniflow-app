@@ -231,6 +231,47 @@ export const DirectorySidebarWrapper = styled.aside<{ $isDragging?: boolean }>`
     border: 1px solid var(--app-border);
   }
 
+  /* 编辑态行高必须和普通态严格一致（实测普通态 .semi-tree-option-label 自然高 25px，
+     来自 Semi draggable Tree 的 .option-label padding 2px + 字体行高）。
+     如果让编辑态 label 走自然高度，Input 20px + Semi padding 会撑成 ~28px，反向变高。
+     这里直接把编辑态 label 锁成 25px border-box，padding 清零让 Input 自己在 25px 槽位
+     里通过 align-items:center 垂直居中，从结构上消除任何上下抽动。 */
+  .custom-tree .tree-node-label.editing {
+    display: inline-flex;
+    align-items: center;
+    padding-right: 0;
+  }
+
+  .custom-tree .semi-tree-option-label:has(.tree-node-rename-input),
+  .custom-tree .semi-tree-option-label-text:has(.tree-node-rename-input) {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    height: 25px;
+    min-height: 25px;
+    max-height: 25px;
+    box-sizing: border-box;
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+  }
+
+  .custom-tree .tree-node-rename-input.semi-input-wrapper {
+    height: 20px;
+    line-height: 18px !important;
+    vertical-align: middle;
+    border-color: var(--semi-color-primary);
+    border-radius: 6px;
+    background: var(--semi-color-bg-1);
+  }
+
+  .custom-tree .tree-node-rename-input .semi-input {
+    display: block;
+    height: 18px;
+    line-height: 18px;
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+
   .tree-node-label {
     display: inline-flex;
     align-items: center;

@@ -1724,6 +1724,10 @@ export default function DirectoryTree({
 
     if (action.startsWith('设置内置类型:')) {
       const nextBuiltInType = action.split(':')[1]?.trim()?.toUpperCase() || 'DEF';
+      if ((nextBuiltInType === 'VIDEO' || nextBuiltInType === 'AUDIO') && node.type !== 'dir') {
+        Toast.warning(`${nextBuiltInType} 内置类型仅支持文件夹`);
+        return;
+      }
       const currentArchiveMode = Number(node?.archiveMode ?? 0);
       const nextArchiveMode = nextBuiltInType === 'DEF'
         ? 0
@@ -2227,6 +2231,8 @@ export default function DirectoryTree({
           style={{ display: 'inline-flex', alignItems: 'center', maxWidth: '100%' }}
         >
           <Input
+            className="tree-node-rename-input"
+            size="small"
             value={editingName}
             onChange={setEditingName}
             onBlur={() => handleRenameConfirm(treeNode)}
@@ -2242,11 +2248,12 @@ export default function DirectoryTree({
             style={{
               width: `${renameInputWidthCh}ch`,
               maxWidth: '100%',
-              fontSize: '13px',
-              height: '24px',
-              backgroundColor: 'var(--semi-color-bg-1)',
-              border: '1px solid var(--semi-color-primary)',
-              borderRadius: 6,
+            }}
+            inputStyle={{
+              height: 18,
+              lineHeight: '18px',
+              paddingTop: 0,
+              paddingBottom: 0,
             }}
             onFocus={(e) => {
               const input = e.target as HTMLInputElement;

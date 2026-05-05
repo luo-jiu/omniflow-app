@@ -581,6 +581,8 @@ export interface ArchiveCardDTO {
   sortOrder?: number;
   viewMeta?: string;
   coverNodeId?: number;
+  mediaNodeId?: number;
+  subtitleCount?: number;
 }
 
 export interface ArchiveCardsPageResult {
@@ -618,6 +620,8 @@ export async function fetchArchiveCardsPage(payload: {
       sortOrder: toOptionalNumber(item.sortOrder ?? item.sort_order),
       viewMeta: toOptionalString(item.viewMeta ?? item.view_meta),
       coverNodeId: toOptionalNumber(item.coverNodeId ?? item.cover_node_id),
+      mediaNodeId: toOptionalNumber(item.mediaNodeId ?? item.media_node_id),
+      subtitleCount: toOptionalNumber(item.subtitleCount ?? item.subtitle_count),
     }))
     .filter(item => item.id > 0);
 
