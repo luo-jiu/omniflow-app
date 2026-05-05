@@ -572,6 +572,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
     (fileState.fileType === 'asmr' && archiveReturnTarget?.fileType === 'asmr_archive')
     || (fileState.fileType === 'comic' && archiveReturnTarget?.fileType === 'comic_archive')
     || (fileState.fileType === 'video' && archiveReturnTarget?.fileType === 'video_archive')
+    || (fileState.fileType === 'video_archive' && archiveReturnTarget?.fileType === 'video_archive')
     || (fileState.fileType === 'audio' && archiveReturnTarget?.fileType === 'audio_archive')
   );
 
@@ -579,14 +580,22 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
     if (!archiveReturnTarget) {
       return;
     }
+    const targetTab = tabs.find(tab => (
+      (archiveReturnTarget.nodeId !== null && archiveReturnTarget.nodeId !== undefined)
+        ? tab.nodeId === archiveReturnTarget.nodeId
+        : tab.fileUrl === archiveReturnTarget.fileUrl
+    ));
     setFileUrl(
       archiveReturnTarget.fileUrl,
       archiveReturnTarget.fileName,
       archiveReturnTarget.fileType,
       archiveReturnTarget.nodeId,
-      { tabTypeLabel: archiveReturnTarget.tabTypeLabel ?? null },
+      {
+        tabTypeLabel: archiveReturnTarget.tabTypeLabel ?? null,
+        returnTarget: targetTab?.returnTarget ?? null,
+      },
     );
-  }, [archiveReturnTarget, setFileUrl]);
+  }, [archiveReturnTarget, setFileUrl, tabs]);
 
   const showSearchHome = React.useCallback((nextMode?: SearchWorkspaceMode) => {
     setBrowserModeOpen(false);

@@ -169,6 +169,12 @@ export const VideoArchiveViewerWrapper = styled.div`
     letter-spacing: 0.08em;
   }
 
+  .card-cover-fallback.collection {
+    background:
+      linear-gradient(135deg, rgba(20, 72, 77, 0.94), rgba(22, 123, 113, 0.88)),
+      radial-gradient(circle at 72% 24%, rgba(255, 255, 255, 0.2), transparent 34%);
+  }
+
   .card-cover-fallback::before,
   .card-cover-fallback::after {
     content: '';
@@ -240,10 +246,21 @@ export const VideoArchiveViewerWrapper = styled.div`
     white-space: nowrap;
   }
 
+  .card-tag-pill.collection {
+    border-color: color-mix(in srgb, #11a789 28%, rgba(11, 18, 32, 0.1));
+    color: #075f54;
+    background: color-mix(in srgb, #bdf3e8 82%, white);
+  }
+
   .card-duration {
     font-size: 10px;
     color: var(--app-text-secondary);
     white-space: nowrap;
+  }
+
+  .card-duration.collection {
+    color: #087969;
+    font-weight: 700;
   }
 
   .card-title {

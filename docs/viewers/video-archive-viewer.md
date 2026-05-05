@@ -11,6 +11,7 @@
 
 - 解析 `video-archive://library/:libraryId/node/:nodeId` 路由
 - 读取归档目录下的视频卡片分页数据；卡片可以是历史直属视频文件，也可以是新的 `VIDEO` 文件夹视频单元
+- 归档目录内如果直属子目录本身也是 `VIDEO` 归档目录，则以“合集”卡片展示，支持封面和逐层返回
 - 用卡片墙方式展示直属视频资源
 - 解析并补齐 `coverNodeId` 对应封面；没有显式封面时，优先兼容同名 / 文件夹内封面，再用视频文件自身链接做首帧预览
 - 解析视频单元内或历史同名字幕，双击打开普通视频 viewer 时作为库内字幕候选传入
@@ -63,8 +64,11 @@
 
 - 新规则：直属 `VIDEO` 文件夹，文件夹内部第一个视频文件是 `mediaNodeId`，第一个图片文件是 `coverNodeId`，字幕文件作为伴随资源计数，并在打开播放页时传给普通 `VideoViewer`
 - 历史兼容：直属视频媒体文件，`mediaNodeId` 回退为卡片自身 id；同级同名图片 / 字幕由前端辅助匹配
+- 归档嵌套：直属 `VIDEO + archiveMode=1` 子目录作为 `cardKind=collection` 合集卡片展示；双击合集卡片会进入该子归档，继续按它自己的第一代视频单元展示；合集封面沿用普通视频单元封面规则，优先 `coverNodeId`，否则取合集目录第一代图片文件
 
 也就是说现在的模型不是“递归抓整棵子树所有视频”，而是按归档目录自己的第一代视频单元结果来展示。
+
+归档嵌套也只看亲子关系：父归档只显示直属子归档为合集，不把孙级内容提前摊平。进入子归档后，子归档再按相同规则展示自己的直属视频单元和直属合集。
 
 ### 3.3 封面策略
 
@@ -176,6 +180,7 @@
 
 分页接口返回的卡片初始结构里，媒体和封面重点是：
 
+- `cardKind`
 - `mediaNodeId`
 - `coverNodeId`
 - `subtitleCount`
@@ -186,6 +191,7 @@
 后续通过 `resolveCardCoverUrls`：
 
 - 收集未解析封面的 `coverNodeId`，没有显式封面时收集 `mediaNodeId`
+- `cardKind=collection` 且没有显式封面时不尝试获取媒体链接，直接显示合集占位封面
 - 批量拿链接
 - 对显式封面回填 `coverUrl`
 - 对无显式封面的卡片回填 `videoPreviewUrl`
@@ -200,12 +206,13 @@
 
 双击卡片后当前链路是：
 
-1. 调用 `getFileLink(card.mediaNodeId || card.id, libraryId, expiry)`
-2. 收集字幕候选：
+1. 如果 `cardKind=collection`，直接打开 `video-archive://library/:libraryId/node/:cardId`，相当于继续进入子归档，并把当前归档作为 `returnTarget`
+2. 否则调用 `getFileLink(card.mediaNodeId || card.id, libraryId, expiry)`
+3. 收集字幕候选：
    - `VIDEO` 文件夹卡片读取卡片目录内的字幕文件，按 `sortOrder` / `id` 排序
    - 历史直属视频文件按同级同名字幕兼容匹配
-3. 用 `setFileUrl` 打开普通 `video` viewer
-4. 透传 `returnTarget` 和 `videoSubtitleSources`
+4. 用 `setFileUrl` 打开普通 `video` viewer
+5. 透传 `returnTarget` 和 `videoSubtitleSources`
 
 `returnTarget` 当前关键内容包括：
 
@@ -218,6 +225,13 @@
 这部分如果丢了，用户从视频页返回归档页的体验就会断掉。
 
 `videoSubtitleSources` 只传可序列化的节点摘要（字幕节点 id、libraryId、文件名和排序值）。真正的字幕链接仍由普通 `VideoViewer` 在播放页按需获取，避免归档页缓存里保存过期的临时链接。
+
+合集嵌套的返回是逐层语义：
+
+- 父归档打开子合集时，子归档 tab 的 `returnTarget` 指向父归档
+- 子归档打开内部视频时，视频 tab 的 `returnTarget` 指向子归档
+- 用户从视频返回子归档时，页面会保留子归档 tab 既有的 `returnTarget`，因此还能继续从子归档返回父归档
+- 更深层合集按同一规则套用，前提是中间归档 tab 未被手动关闭
 
 ### 5.5 卡片右键菜单
 
@@ -233,6 +247,7 @@
 
 - `video_archive` 和普通 `video` 是两层 viewer，不要混成一个页面
 - 卡片来源当前是归档分页接口，不是目录树递归扫描；`VIDEO` 文件夹只取第一代内部资源
+- 归档嵌套只把直属子归档显示成合集卡片，不在父归档卡片页递归拉平孙级内容
 - `coverNodeId`、`coverUrl` 和 `videoPreviewUrl` 是展示阶段字段，不能假设一开始就有可显示封面
 - `mediaNodeId` 是实际播放目标；卡片 `id` 仍然用于重命名、删除和目录树定位
 - 返回链路依赖 `returnTarget`，改打开逻辑时必须一起验证

@@ -1,6 +1,6 @@
 # OmniFlow App 前端架构基线
 
-更新时间：2026-04-15
+更新时间：2026-05-05
 
 适用范围：`omniflow-app` 的 React renderer、Electron preload/main、页面分层、状态所有权、IPC 边界和前端文档维护。
 
@@ -55,6 +55,12 @@ src/main.tsx
 - 内置浏览器
 - 浏览器资源捕捉
 - 工具工作区
+
+React 18 兼容层：
+
+- `vite.config.ts` 当前把裸 `react-dom` alias 到 `src/utils/react-dom-compat.ts`，只用于兼容第三方库仍调用 `ReactDOM.render` / `unmountComponentAtNode` 的旧入口。
+- 应用自身入口继续从 `react-dom/client` 使用 `createRoot`；不要在业务代码里新增 `ReactDOM.render`。
+- 修改该 alias 或兼容层后，dev 环境需要用 `npm run dev -- --force` 重建 Vite optimized deps，避免继续加载旧的 `node_modules/.vite/deps/chunk-*.js`。
 
 ## 3. 目录语义
 

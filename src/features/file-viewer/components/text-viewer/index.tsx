@@ -33,6 +33,11 @@ interface TextViewerProps {
   reloadToken?: number;
 }
 
+interface IpcTextFetchResponse {
+  status?: number;
+  body?: unknown;
+}
+
 const MIN_FONT_SIZE = 12;
 const MAX_FONT_SIZE = 32;
 const DEFAULT_FONT_SIZE = 15;
@@ -40,6 +45,12 @@ const FONT_SIZE_STEP = 1;
 
 function clampFontSize(size: number): number {
   return Math.min(Math.max(Math.round(size), MIN_FONT_SIZE), MAX_FONT_SIZE);
+}
+
+function readTextResponseBody(body: unknown): string {
+  if (typeof body === 'string') return body;
+  if (body === null || body === undefined) return '';
+  return String(body);
 }
 
 function resolveLanguageExtension(fileName?: string | null) {
@@ -130,17 +141,22 @@ const TextViewer: React.FC<TextViewerProps> = ({
 
     (async () => {
       try {
-        const response = await fetch(url);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const text = await response.text();
+        const response = await window.electronAPI.fetch(url, {
+          method: 'GET',
+        }) as IpcTextFetchResponse;
+        const status = Number(response?.status ?? 0);
+        if (status >= 400) throw new Error(`HTTP ${status}`);
+        const text = readTextResponseBody(response?.body);
         if (cancelled) return;
         loadedUrlRef.current = `${url}::${reloadToken}`;
         setContent(text);
         contentRef.current = text;
         setIsDirty(false);
       } catch (error: any) {
-        runtimeLogger.error('文本文件加载失败:', error);
-        if (!cancelled) setErrorMessage('文件加载失败');
+        if (!cancelled) {
+          runtimeLogger.error('文本文件加载失败:', error);
+          setErrorMessage('文件加载失败');
+        }
       } finally {
         if (!cancelled) setIsLoading(false);
       }

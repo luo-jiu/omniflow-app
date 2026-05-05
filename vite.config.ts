@@ -57,9 +57,20 @@ export default defineConfig(({ mode }) => {
     }),
   ],
   resolve: {
-    alias: {
-      '@': path.resolve(__dirname, 'src'),
-    },
+    alias: [
+      {
+        find: /^react-dom$/,
+        replacement: path.resolve(__dirname, 'src/utils/react-dom-compat.ts'),
+      },
+      {
+        find: /^react-dom-actual$/,
+        replacement: path.resolve(__dirname, 'node_modules/react-dom/index.js'),
+      },
+      {
+        find: '@',
+        replacement: path.resolve(__dirname, 'src'),
+      },
+    ],
   },
   build: {
     rollupOptions: {

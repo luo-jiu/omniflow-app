@@ -37,6 +37,7 @@ interface VideoArchiveCard {
   mediaNodeId: number;
   title: string;
   sortOrder: number;
+  cardKind: 'media' | 'collection';
   coverNodeId: number | null;
   coverUrl: string | null;
   videoPreviewUrl: string | null;
@@ -89,6 +90,10 @@ function normalizeArchiveTitle(fileName?: string | null): string {
 function resolveReaderCacheKey(fileUrl: string, folderNodeId: number | null): string | null {
   if (!folderNodeId || !Number.isFinite(folderNodeId)) return null;
   return `${String(fileUrl || '').trim()}::${folderNodeId}`;
+}
+
+function normalizeVideoArchiveCardKind(input?: string | null): VideoArchiveCard['cardKind'] {
+  return String(input || '').trim().toLowerCase() === 'collection' ? 'collection' : 'media';
 }
 
 function setArchiveSnapshotCache(cacheKey: string, snapshot: VideoArchiveSnapshot) {
@@ -345,7 +350,11 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
 
     const unresolvedNodeIds = Array.from(new Set(inputCards
       .filter(card => !card.coverUrl)
-      .map(card => (card.coverNodeId && card.coverNodeId > 0 ? card.coverNodeId : card.mediaNodeId || card.id))
+      .map((card) => {
+        if (card.coverNodeId && card.coverNodeId > 0) return card.coverNodeId;
+        if (card.cardKind === 'collection') return 0;
+        return card.mediaNodeId || card.id;
+      })
       .filter((nodeId): nodeId is number => Number.isFinite(nodeId) && nodeId > 0)));
     if (unresolvedNodeIds.length === 0) {
       return inputCards;
@@ -423,9 +432,10 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
 
       const rawCards: VideoArchiveCard[] = page.items.map((item) => {
         const cardId = Number(item.id);
+        const cardKind = normalizeVideoArchiveCardKind(item.cardKind);
         const mediaNodeId = Number.isFinite(Number(item.mediaNodeId)) && Number(item.mediaNodeId) > 0
           ? Number(item.mediaNodeId)
-          : cardId;
+          : cardKind === 'collection' ? 0 : cardId;
         const matchName = normalizeVideoArchiveMatchName(item.name);
         const explicitCoverNodeId = Number.isFinite(Number(item.coverNodeId)) && Number(item.coverNodeId) > 0
           ? Number(item.coverNodeId)
@@ -440,6 +450,7 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
           mediaNodeId,
           title: String(item.name || ''),
           sortOrder: Number(item.sortOrder ?? 0),
+          cardKind,
           coverNodeId: explicitCoverNodeId || sidecarCoverNodeId,
           coverUrl: null,
           videoPreviewUrl: null,
@@ -466,6 +477,7 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
             videoPreviewUrl: card.videoPreviewUrl || existing.videoPreviewUrl,
             subtitleCount: Math.max(card.subtitleCount || 0, existing.subtitleCount || 0),
             durationSeconds: card.durationSeconds || existing.durationSeconds,
+            cardKind: card.cardKind || existing.cardKind,
           });
         });
         return Array.from(byId.values()).sort((a, b) => {
@@ -501,6 +513,7 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
     card: VideoArchiveCard,
   ): Promise<FileViewerSubtitleSource[]> => {
     if (!libraryId) return [];
+    if (card.cardKind === 'collection') return [];
 
     if (card.mediaNodeId && card.mediaNodeId !== card.id) {
       try {
@@ -526,6 +539,25 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
   const handleOpenCard = useCallback(async (card: VideoArchiveCard) => {
     if (!libraryId) {
       Toast.error('当前库参数异常');
+      return;
+    }
+    if (card.cardKind === 'collection') {
+      setFileUrl(
+        `video-archive://library/${libraryId}/node/${card.id}`,
+        card.title,
+        'video_archive',
+        card.id,
+        {
+          tabTypeLabel: 'VIDEO-ARCHIVE',
+          returnTarget: {
+            fileUrl,
+            fileName: fileName || title,
+            fileType: 'video_archive',
+            nodeId: folderNodeId,
+            tabTypeLabel: 'VIDEO-ARCHIVE',
+          },
+        },
+      );
       return;
     }
     try {
@@ -704,6 +736,10 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
                   <div className="card-cover">
                     {card.coverUrl ? (
                       <img src={card.coverUrl} alt={card.title} draggable={false} />
+                    ) : card.cardKind === 'collection' ? (
+                      <div className="card-cover-fallback collection" aria-hidden>
+                        <span className="card-cover-icon">合集</span>
+                      </div>
                     ) : card.videoPreviewUrl ? (
                       <video
                         src={card.videoPreviewUrl}
@@ -721,17 +757,29 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
                   </div>
                   <div className="card-meta">
                     <div className="card-tag-row">
-                      <span className="card-tag-pill">VIDEO</span>
+                      <span className={`card-tag-pill ${card.cardKind === 'collection' ? 'collection' : ''}`}>
+                        {card.cardKind === 'collection' ? '合集' : 'VIDEO'}
+                      </span>
                     </div>
                     <p className="card-title" title={card.title}>{card.title}</p>
                     <div className="card-footer">
                       <span>
-                        {card.coverUrl ? '已带封面' : (card.videoPreviewUrl ? '视频首帧' : '封面待补')}
-                        {card.subtitleCount > 0 ? ` · 字幕 ${card.subtitleCount}` : ''}
+                        {card.cardKind === 'collection'
+                          ? '双击展开子归档'
+                          : (
+                            <>
+                              {card.coverUrl ? '已带封面' : (card.videoPreviewUrl ? '视频首帧' : '封面待补')}
+                              {card.subtitleCount > 0 ? ` · 字幕 ${card.subtitleCount}` : ''}
+                            </>
+                          )}
                       </span>
-                      <span className="card-duration" title="视频时长">
-                        {formatVideoDuration(card.durationSeconds)}
-                      </span>
+                      {card.cardKind === 'collection' ? (
+                        <span className="card-duration collection" title="合集">合集</span>
+                      ) : (
+                        <span className="card-duration" title="视频时长">
+                          {formatVideoDuration(card.durationSeconds)}
+                        </span>
+                      )}
                     </div>
                   </div>
                 </article>

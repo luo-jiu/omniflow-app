@@ -486,10 +486,46 @@ export const VideoViewerWrapper = styled.div`
   }
 
   .volume-slider-vertical {
-    -webkit-appearance: slider-vertical;
-    width: 22px;
+    appearance: none;
+    writing-mode: vertical-lr;
+    direction: rtl;
+    width: 24px;
     height: 112px;
     accent-color: var(--semi-color-primary);
+    background: transparent;
+    cursor: pointer;
+  }
+
+  .volume-slider-vertical::-webkit-slider-runnable-track {
+    width: 4px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.2);
+  }
+
+  .volume-slider-vertical::-webkit-slider-thumb {
+    appearance: none;
+    width: 14px;
+    height: 14px;
+    border-radius: 999px;
+    background: var(--semi-color-primary);
+    border: 2px solid rgba(255, 255, 255, 0.9);
+    box-shadow: 0 2px 7px rgba(0, 0, 0, 0.24);
+    margin-left: -5px;
+  }
+
+  .volume-slider-vertical::-moz-range-track {
+    width: 4px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.2);
+  }
+
+  .volume-slider-vertical::-moz-range-thumb {
+    width: 14px;
+    height: 14px;
+    border-radius: 999px;
+    background: var(--semi-color-primary);
+    border: 2px solid rgba(255, 255, 255, 0.9);
+    box-shadow: 0 2px 7px rgba(0, 0, 0, 0.24);
   }
 
   .rate-panel {
