@@ -3,7 +3,7 @@ import ContextMenu, { ContextMenuItem } from '@/components/ui/context-menu';
 import type { OverlayBoundaryRect } from '@/components/ui/context-menu/overlay';
 import comicFolderIcon from '@/assets/icons/material/folder-comic.svg';
 import asmrFolderIcon from '@/assets/icons/material/folder-asmr.svg';
-import videoIcon from '@/assets/icons/material/video.svg';
+import videoFolderIcon from '@/assets/icons/material/folder-video.svg';
 import audioFolderIcon from '@/assets/icons/material/folder-audio.svg';
 
 interface DirectoryContextMenuProps {
@@ -33,7 +33,7 @@ function createBuiltInMenuIcon(src: string, alt: string): React.ReactNode {
 
 const COMIC_BUILT_IN_MENU_ICON = createBuiltInMenuIcon(comicFolderIcon, 'comic');
 const ASMR_BUILT_IN_MENU_ICON = createBuiltInMenuIcon(asmrFolderIcon, 'asmr');
-const VIDEO_BUILT_IN_MENU_ICON = createBuiltInMenuIcon(videoIcon, 'video');
+const VIDEO_BUILT_IN_MENU_ICON = createBuiltInMenuIcon(videoFolderIcon, 'video');
 const AUDIO_BUILT_IN_MENU_ICON = createBuiltInMenuIcon(audioFolderIcon, 'audio');
 
 function getBuiltInTypeMenuIcon(builtInType: string): React.ReactNode | undefined {

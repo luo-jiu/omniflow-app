@@ -188,11 +188,28 @@ export const DirectorySidebarWrapper = styled.aside<{ $isDragging?: boolean }>`
       color: var(--app-text-muted);
     }
 
+    /* loadData 期间 Semi 会把 expand-icon 整个替换成 spin-icon。
+       Semi 默认 expand-icon 用 box-sizing: content-box + 内 svg 14px + 我们的 padding 4px，
+       但折叠态的 transform: rotate(270deg) 会让 boundingClientRect 出现亚像素差异，
+       展开态 width 又比折叠态少 1px，再加 spin-icon 默认 footprint 不一致，
+       三者宽度依次跳变 21 → 22 → 20，标签起点跟着右移再左回造成"加载闪烁"。
+       这里把两种插槽都锁成 border-box 22x22，从根上消除宽度跳变。 */
+    .semi-tree-option-expand-icon,
+    .semi-tree-option-spin-icon {
+      box-sizing: border-box !important;
+      width: 22px !important;
+      height: 22px !important;
+      padding: 4px !important;
+      margin: -4px 0 !important;
+      display: inline-flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      flex-shrink: 0 !important;
+    }
+
     .semi-tree-option-expand-icon {
       font-size: 13px !important;
       color: var(--app-text-muted);
-      padding: 4px;
-      margin: -4px 0 -4px 0;
       border-radius: 4px;
       cursor: pointer;
     }
@@ -256,6 +273,17 @@ export const DirectorySidebarWrapper = styled.aside<{ $isDragging?: boolean }>`
     flex: 0 0 15px;
   }
 
+  .tree-file-type-icon-default-folder,
+  .tree-file-type-icon-comic-folder,
+  .tree-file-type-icon-asmr-folder,
+  .tree-file-type-icon-audio-folder,
+  .tree-file-type-icon-video-folder {
+    width: 15px;
+    height: 15px;
+    flex-basis: 15px;
+    object-fit: contain;
+  }
+
   .tree-file-type-icon-audio-subtitles {
     margin-right: 2px;
     flex: 0 0 15px;
@@ -264,13 +292,16 @@ export const DirectorySidebarWrapper = styled.aside<{ $isDragging?: boolean }>`
     transform-origin: center;
   }
 
-  /* Normalize perceptual size for built-in folder icons. */
-  .tree-file-type-icon-comic-folder {
+  /* Normalize perceptual size for directory icons (built-in + default).
+     四类内置 SVG 与 folder-base 共享同一 folder body 几何，
+     视觉差异仅来自装饰图案是否突破 folder body 边界，统一 0.5px 即可。
+     超出范围的单类（如 audio 麦克风外延）后续靠单独 class 增加 padding 校准。 */
+  .tree-file-type-icon-default-folder,
+  .tree-file-type-icon-comic-folder,
+  .tree-file-type-icon-asmr-folder,
+  .tree-file-type-icon-audio-folder,
+  .tree-file-type-icon-video-folder {
     padding: 0.5px;
-  }
-
-  .tree-file-type-icon-asmr-folder {
-    padding: 1px;
   }
 
   .tree-built-in-type-icon {

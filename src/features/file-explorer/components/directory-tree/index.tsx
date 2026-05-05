@@ -21,6 +21,7 @@ import { validateWindowsLikeFileName } from '@/utils/windowsFileName';
 import { runtimeLogger } from '@/utils/runtimeLogger';
 import { useFileViewer } from '@/hooks/useFileViewer';
 import { globalAudioPlayer } from '@/features/file-viewer/services/global-audio-player';
+import { getDirectoryBuiltInIcon } from '@/features/file-explorer/utils/file-node-icon';
 import {
   downloadUrlToDesktopPath,
   ensureDesktopDirectory,
@@ -774,9 +775,21 @@ export default function DirectoryTree({
           ? patchNodes(node.children)
           : node.children;
 
-        if (!isBuiltInFolderNode(node)) {
+        if (String(node.type) === 'file') {
           if (patchedChildren !== node.children) {
             return { ...node, children: patchedChildren };
+          }
+          return node;
+        }
+
+        const isExpanded = expandedKeys.includes(node.key);
+        const directoryIcon = getDirectoryBuiltInIcon(node.builtInType, node.archiveMode, isExpanded);
+
+        if (!isBuiltInFolderNode(node)) {
+          // archive + DEF 等非法组合 directoryIcon 为 undefined，保留原 icon 让 Semi 兜底。
+          const nextIcon = directoryIcon ?? node.icon;
+          if (patchedChildren !== node.children || nextIcon !== node.icon) {
+            return { ...node, icon: nextIcon, children: patchedChildren };
           }
           return node;
         }
@@ -784,6 +797,7 @@ export default function DirectoryTree({
         if (isRawOpenAllowed(node.key)) {
           return {
             ...node,
+            icon: directoryIcon,
             isLeaf: false,
             children: patchedChildren,
           };
@@ -792,6 +806,7 @@ export default function DirectoryTree({
         // 回锁时清空展示态：隐藏箭头并清空当前挂载子节点
         return {
           ...node,
+          icon: directoryIcon,
           isLeaf: true,
           loaded: false,
           children: [],
@@ -800,7 +815,7 @@ export default function DirectoryTree({
     };
 
     return patchNodes(treeData);
-  }, [rawOpenVersion, treeData]);
+  }, [expandedKeys, rawOpenVersion, treeData]);
 
   const visibleNodesLinear = React.useMemo(() => {
     const acc: any[] = [];

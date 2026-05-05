@@ -93,12 +93,17 @@ OmniFlow 里有一组不是通用前端术语、而是项目自己定义出来�
 
 目录图标当前由内置类型和归档模式共同影响：
 
+- `DEF`（默认目录）使用 `folder-base.svg` / `folder-base-open.svg`
 - `COMIC` 目录使用漫画目录图标
 - `ASMR` 目录使用 ASMR 目录图标
-- `VIDEO` 目录使用视频图标
-- `AUDIO` 目录使用音频目录图标
+- `VIDEO` 目录使用视频文件夹图标
+- `AUDIO` 目录使用音频文件夹图标
+- 五类目录图标都必须提供闭合 / 展开两态，目录树展开后切到对应 `*-open` 图标；切换由 `directory-tree/index.tsx` 的 `patchNodes` 根据 `expandedKeys` 完成
+- 归档与非归档同类型共享同一 SVG（如 audio 归档与非归档都用 `folder-audio.svg`），归档语义靠目录树文本绿色加粗（`tree-node-text-archive`）表达，不靠图标区分
 - 未知内置类型会显示警告图标
 - 在某些归档语义不匹配的文件上会显示警告图标
+
+五类目录图标统一进 15px × 15px 槽位、统一走 `<img>` from custom SVG 路径、统一 0.5px 基础 padding，不再走 Semi 内置 `IconFolder`。详见 `docs/ui-display-readability-baseline.md` §6.4.1。
 
 图标不是单纯装饰，而是在向用户暴露“当前节点被系统按什么语义理解”。
 

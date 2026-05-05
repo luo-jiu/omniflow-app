@@ -1,6 +1,10 @@
 import React from 'react';
 import { resolvePreviewFileType } from '@/utils/preview-file-type';
 
+// 与 directory-tree/style.ts 的 .tree-file-type-icon { width: 15px; height: 15px } 保持一致。
+const TREE_ICON_SIZE = 15;
+const TREE_ICON_SUBTITLE_BADGE_SIZE = 9;
+
 const materialIconUrls = import.meta.glob('../../../assets/icons/material/*.svg', {
   eager: true,
   import: 'default',
@@ -20,8 +24,8 @@ function createIconNode(src: string, alt: string): React.ReactNode {
     src,
     alt,
     className: `tree-file-type-icon tree-file-type-icon-${normalizedAltClass}`,
-    width: 20,
-    height: 20,
+    width: TREE_ICON_SIZE,
+    height: TREE_ICON_SIZE,
     draggable: false,
   });
 }
@@ -37,8 +41,8 @@ function createAudioWithSubtitleIconNode(): React.ReactNode {
       style: {
         position: 'relative',
         display: 'inline-flex',
-        width: 20,
-        height: 20,
+        width: TREE_ICON_SIZE,
+        height: TREE_ICON_SIZE,
         alignItems: 'center',
         justifyContent: 'center',
       },
@@ -46,23 +50,23 @@ function createAudioWithSubtitleIconNode(): React.ReactNode {
     React.createElement('img', {
       src: audioIcon,
       alt: 'audio',
-      width: 20,
-      height: 20,
+      width: TREE_ICON_SIZE,
+      height: TREE_ICON_SIZE,
       draggable: false,
-      style: { display: 'block', width: 20, height: 20, objectFit: 'contain' },
+      style: { display: 'block', width: TREE_ICON_SIZE, height: TREE_ICON_SIZE, objectFit: 'contain' },
     }),
     React.createElement('img', {
       src: subtitleIcon,
       alt: 'subtitles',
-      width: 9,
-      height: 9,
+      width: TREE_ICON_SUBTITLE_BADGE_SIZE,
+      height: TREE_ICON_SUBTITLE_BADGE_SIZE,
       draggable: false,
       style: {
         position: 'absolute',
         right: -1,
         bottom: -1,
-        width: 9,
-        height: 9,
+        width: TREE_ICON_SUBTITLE_BADGE_SIZE,
+        height: TREE_ICON_SUBTITLE_BADGE_SIZE,
         objectFit: 'contain',
         filter: 'drop-shadow(0 0 1px rgba(255, 255, 255, 0.9))',
       },
@@ -408,6 +412,7 @@ export function getFileNodeIconByParentBuiltInType(
 export function getDirectoryBuiltInIcon(
   builtInType?: string,
   archiveMode?: number,
+  expanded?: boolean,
 ): React.ReactNode | undefined {
   const normalized = String(builtInType || 'DEF').toUpperCase();
   const normalizedArchiveMode = Number(archiveMode ?? 0) === 1 ? 1 : 0;
@@ -415,19 +420,25 @@ export function getDirectoryBuiltInIcon(
     return undefined;
   }
   if (normalized === 'DEF') {
-    return undefined;
+    return createIconNode(
+      getMaterialIconUrl(expanded ? 'folder-base-open' : 'folder-base') || '',
+      'default-folder',
+    );
   }
   if (normalized === 'COMIC') {
-    return createIconNode(getMaterialIconUrl('folder-comic') || '', 'comic-folder');
+    return createIconNode(getMaterialIconUrl(expanded ? 'folder-comic-open' : 'folder-comic') || '', 'comic-folder');
   }
   if (normalized === 'ASMR') {
-    return createIconNode(getMaterialIconUrl('folder-asmr') || '', 'asmr-folder');
+    return createIconNode(getMaterialIconUrl(expanded ? 'folder-asmr-open' : 'folder-asmr') || '', 'asmr-folder');
   }
   if (normalized === 'VIDEO') {
-    return createIconNode(getMaterialIconUrl('video') || '', 'video-folder');
+    return createIconNode(getMaterialIconUrl(expanded ? 'folder-video-open' : 'folder-video') || getMaterialIconUrl('video') || '', 'video-folder');
   }
   if (normalized === 'AUDIO') {
-    return createIconNode(getMaterialIconUrl('folder-audio') || getMaterialIconUrl('audio') || '', 'audio-folder');
+    return createIconNode(
+      getMaterialIconUrl(expanded ? 'folder-audio-open' : 'folder-audio') || getMaterialIconUrl('audio') || '',
+      'audio-folder',
+    );
   }
   return createWarningIconNode(`未知内置类型: ${normalized}`);
 }
