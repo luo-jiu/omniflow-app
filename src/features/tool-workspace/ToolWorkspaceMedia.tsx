@@ -421,14 +421,13 @@ const ToolWorkspaceMedia: React.FC<MediaProcessingToolProps> = ({
     const currentSaveTargetType = saveTargetType;
     const currentInternalDirectory = internalDirectory;
     const currentLocalOutputDirectory = localOutputDirectory || undefined;
-    const currentLocalOutputPathHint = localOutputPathHint;
 
     if (currentSaveTargetType === 'local') {
       return {
         cleanupOutputDirectory: async () => undefined,
         outputDirectoryPath: currentLocalOutputDirectory,
         persistOutput: async () => {
-          Toast.success(`已完成${actionName}，文件已保存到本地：${currentLocalOutputPathHint}`);
+          Toast.success(`已完成${actionName}，已保存到本地`);
         },
       };
     }
@@ -444,10 +443,14 @@ const ToolWorkspaceMedia: React.FC<MediaProcessingToolProps> = ({
       },
       outputDirectoryPath: taskOutputDirectoryPath,
       persistOutput: async (outputPath: string) => {
-        await importOutputToLibrary(outputPath, {
-          id: currentInternalDirectory.node.id,
-          pathLabel: currentInternalDirectory.pathLabel,
-        }, actionName);
+        try {
+          await importOutputToLibrary(outputPath, {
+            id: currentInternalDirectory.node.id,
+            pathLabel: currentInternalDirectory.pathLabel,
+          }, actionName);
+        } finally {
+          await cleanupTaskTempImportDirectory(taskOutputDirectoryPath);
+        }
       },
     };
   }, [
@@ -456,7 +459,6 @@ const ToolWorkspaceMedia: React.FC<MediaProcessingToolProps> = ({
     importOutputToLibrary,
     internalDirectory,
     localOutputDirectory,
-    localOutputPathHint,
     saveTargetType,
   ]);
 

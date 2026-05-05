@@ -85,7 +85,7 @@ export function useResourceImportToLibrary(input: UseResourceImportToLibraryInpu
       } catch (error: any) {
         Toast.warning(error?.message || '目录刷新失败，请稍后手动刷新目录树')
       }
-      Toast.success(`已完成${actionName}，并导入到资源库：${targetFolder.pathLabel}`)
+      Toast.success(`已完成${actionName}，已导入资源库`)
     } finally {
       setImportingOutputPath((current) => (
         current === normalizedOutputPath ? null : current
