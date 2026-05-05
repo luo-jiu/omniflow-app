@@ -362,6 +362,8 @@ export const VideoViewerWrapper = styled.div`
   }
 
   .controls-panel {
+    position: relative;
+    z-index: 6;
     padding: 10px 16px 12px;
     border-top: 1px solid var(--semi-color-border);
     background: rgba(0, 0, 0, 0.2);
@@ -491,7 +493,7 @@ export const VideoViewerWrapper = styled.div`
     backdrop-filter: blur(16px);
     box-shadow: 0 12px 26px rgba(0, 0, 0, 0.26);
     padding: 9px 8px;
-    z-index: 4;
+    z-index: 8;
   }
 
   .volume-panel {
@@ -550,6 +552,112 @@ export const VideoViewerWrapper = styled.div`
     display: flex;
     flex-direction: column;
     gap: 7px;
+  }
+
+  .playlist-panel {
+    right: 0;
+    left: auto;
+    width: min(360px, calc(100vw - 48px));
+    max-height: 320px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    transform: none;
+  }
+
+  .playlist-panel-header {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 0 2px 2px;
+  }
+
+  .playlist-panel-title {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--video-font-control);
+    line-height: 1.2;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.92);
+  }
+
+  .playlist-panel-count {
+    flex-shrink: 0;
+    font-size: 10px;
+    line-height: 1;
+    color: rgba(255, 255, 255, 0.58);
+  }
+
+  .playlist-panel-list {
+    min-height: 0;
+    max-height: 260px;
+    overflow: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding-right: 2px;
+    scrollbar-width: thin;
+  }
+
+  .playlist-panel-item {
+    width: 100%;
+    min-width: 0;
+    min-height: 32px;
+    display: grid;
+    grid-template-columns: 22px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 7px;
+    border: 1px solid transparent;
+    border-radius: 7px;
+    padding: 5px 7px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.86);
+    cursor: pointer;
+    text-align: left;
+  }
+
+  .playlist-panel-item:hover {
+    background: rgba(255, 255, 255, 0.08);
+  }
+
+  .playlist-panel-item.active {
+    border-color: color-mix(in srgb, var(--semi-color-primary) 42%, transparent);
+    background: color-mix(in srgb, var(--semi-color-primary) 24%, transparent);
+    color: #fff;
+  }
+
+  .playlist-panel-index {
+    width: 22px;
+    height: 18px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.08);
+    font-size: 10px;
+    line-height: 1;
+    font-weight: 700;
+  }
+
+  .playlist-panel-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--video-font-body);
+    line-height: 1.2;
+    font-weight: 600;
+  }
+
+  .playlist-panel-duration {
+    flex-shrink: 0;
+    font-size: 10px;
+    line-height: 1;
+    color: rgba(255, 255, 255, 0.58);
   }
 
   .floating-action-chip {

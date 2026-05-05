@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Button, Spin } from '@douyinfe/semi-ui';
+import { Button, Spin, Toast } from '@douyinfe/semi-ui';
 import {
   IconBackward,
   IconForward,
@@ -8,22 +8,38 @@ import {
   IconPause,
   IconPlay,
   IconShrinkScreenStroked,
+  IconVideoListStroked,
   IconVolume1,
   IconVolume2,
 } from '@douyinfe/semi-icons';
 import { VideoViewerWrapper } from './style';
 import { useRegisterMediaEntry } from '@/hooks/useMediaRegistry';
 import { useLibraryWorkspaceControls } from '@/contexts/library-workspace-controls.context';
-import { fetchNodeDetailById, updateNodeConfig } from '@/features/file-explorer/services/file.api';
+import {
+  fetchNodeDetailById,
+  getChildrenByNodeId,
+  getFileLink,
+  updateNodeConfig,
+} from '@/features/file-explorer/services/file.api';
 import { runtimeLogger } from '@/utils/runtimeLogger';
 import {
   isTextEditingKeyboardTarget,
   isViewerInteractiveKeyboardTarget,
   releaseExternalKeyboardFocus,
 } from '@/features/file-viewer/utils/media-keyboard-target';
-import type { FileViewerSubtitleSource } from '@/contexts/file-viewer.context';
+import type {
+  FileViewerReturnTarget,
+  FileViewerSubtitleSource,
+  FileViewerVideoPlaylist,
+  FileViewerVideoPlaylistItem,
+} from '@/contexts/file-viewer.context';
 import VideoSubtitlePanel from './VideoSubtitlePanel';
 import { useVideoSubtitles } from './useVideoSubtitles';
+import { useFileViewer } from '@/hooks/useFileViewer';
+import {
+  buildVideoSubtitleSources,
+  type VideoSubtitleSourceNode,
+} from '@/features/file-viewer/utils/video-subtitle-sources';
 
 interface VideoViewerProps {
   nodeId?: number | null;
@@ -31,7 +47,10 @@ interface VideoViewerProps {
   fileName?: string | null;
   active?: boolean;
   tabId: string;
+  returnTarget?: FileViewerReturnTarget | null;
   subtitleSources?: FileViewerSubtitleSource[];
+  playlist?: FileViewerVideoPlaylist | null;
+  autoPlay?: boolean;
 }
 
 interface VideoPlaybackProgress {
@@ -60,6 +79,7 @@ const VIEW_META_VIDEO_PLAYER_LEGACY_KEY = 'video_player';
 const KEYBOARD_SEEK_SECONDS = 10;
 const KEYBOARD_FAST_SEEK_SECONDS = 30;
 const KEYBOARD_VOLUME_STEP = 0.05;
+const PLAYLIST_LINK_EXPIRY_MINUTES = 120;
 
 const RightToolPanelIcon: React.FC = () => (
   <svg className="video-control-svg" viewBox="0 0 24 24" width="1em" height="1em" fill="none" aria-hidden focusable="false">
@@ -217,14 +237,19 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
   fileName,
   active = true,
   tabId,
+  returnTarget,
   subtitleSources,
+  playlist,
+  autoPlay = false,
 }) => {
+  const { setFileUrl } = useFileViewer();
   const containerRef = useRef<HTMLDivElement>(null);
   const viewerRootRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const progressRef = useRef<HTMLDivElement>(null);
   const volumeControlRef = useRef<HTMLDivElement>(null);
   const rateControlRef = useRef<HTMLDivElement>(null);
+  const playlistControlRef = useRef<HTMLDivElement>(null);
   const remoteProgressRequestIdRef = useRef(0);
   const remoteProgressSyncTimerRef = useRef<number>(0);
   const remoteProgressSyncInFlightRef = useRef(false);
@@ -258,8 +283,11 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
   const [isWideMode, setIsWideMode] = useState(false);
   const [isVolumePanelOpen, setIsVolumePanelOpen] = useState(false);
   const [isRatePanelOpen, setIsRatePanelOpen] = useState(false);
+  const [isPlaylistPanelOpen, setIsPlaylistPanelOpen] = useState(false);
 
   const progressCacheKey = useMemo(() => resolveVideoProgressCacheKey(url, nodeId), [nodeId, url]);
+  const playlistItems = useMemo(() => playlist?.items ?? [], [playlist]);
+  const hasPlaylist = playlistItems.length > 0;
   const {
     activeSubtitleCue,
     clearSubtitle,
@@ -635,6 +663,26 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
   }, [progressCacheKey, url]);
 
   useEffect(() => {
+    if (!autoPlay) return;
+    const video = videoRef.current;
+    if (!video) return;
+
+    const play = () => {
+      video.play().catch((error) => {
+        runtimeLogger.warn('自动播放合集视频失败:', error);
+      });
+    };
+
+    if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+      const timer = window.setTimeout(play, 0);
+      return () => window.clearTimeout(timer);
+    }
+
+    video.addEventListener('canplay', play, { once: true });
+    return () => video.removeEventListener('canplay', play);
+  }, [autoPlay, url]);
+
+  useEffect(() => {
     remoteProgressRequestIdRef.current += 1;
     const requestId = remoteProgressRequestIdRef.current;
 
@@ -711,6 +759,9 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
       if (rateControlRef.current && !rateControlRef.current.contains(target)) {
         setIsRatePanelOpen(false);
       }
+      if (playlistControlRef.current && !playlistControlRef.current.contains(target)) {
+        setIsPlaylistPanelOpen(false);
+      }
     };
 
     document.addEventListener('mousedown', handlePointerDown);
@@ -770,7 +821,80 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
   const toggleRatePanel = useCallback(() => {
     setIsRatePanelOpen(prev => !prev);
     setIsVolumePanelOpen(false);
+    setIsPlaylistPanelOpen(false);
   }, []);
+
+  const togglePlaylistPanel = useCallback(() => {
+    setIsPlaylistPanelOpen(prev => !prev);
+    setIsVolumePanelOpen(false);
+    setIsRatePanelOpen(false);
+  }, []);
+
+  const resolvePlaylistItemSubtitleSources = useCallback(async (
+    item: FileViewerVideoPlaylistItem,
+  ): Promise<FileViewerSubtitleSource[] | undefined> => {
+    if (item.subtitleSources && item.subtitleSources.length > 0) {
+      return item.subtitleSources;
+    }
+    if (!item.subtitleCardNodeId) {
+      return undefined;
+    }
+
+    try {
+      const children = (await getChildrenByNodeId(item.subtitleCardNodeId, item.libraryId)) as VideoSubtitleSourceNode[];
+      const sources = buildVideoSubtitleSources(children, item.libraryId);
+      return sources.length > 0 ? sources : undefined;
+    } catch (error) {
+      runtimeLogger.warn('加载合集视频字幕失败:', error);
+      return undefined;
+    }
+  }, []);
+
+  const openPlaylistItem = useCallback(async (item: FileViewerVideoPlaylistItem) => {
+    if (!playlist) return;
+    if (item.nodeId === nodeId) {
+      setIsPlaylistPanelOpen(false);
+      return;
+    }
+    try {
+      persistVideoProgress(true);
+      const [nextUrl, nextSubtitleSources] = await Promise.all([
+        getFileLink(item.nodeId, item.libraryId, PLAYLIST_LINK_EXPIRY_MINUTES),
+        resolvePlaylistItemSubtitleSources(item),
+      ]);
+      if (!nextUrl) {
+        throw new Error('未获取到视频访问链接');
+      }
+      const nextPlaylist = nextSubtitleSources
+        ? {
+          ...playlist,
+          items: playlist.items.map(playlistItem => (
+            playlistItem.nodeId === item.nodeId && playlistItem.libraryId === item.libraryId
+              ? { ...playlistItem, subtitleSources: nextSubtitleSources }
+              : playlistItem
+          )),
+        }
+        : playlist;
+      setIsPlaylistPanelOpen(false);
+      setFileUrl(
+        nextUrl,
+        item.title,
+        'video',
+        item.nodeId,
+        {
+          tabTypeLabel: 'VIDEO',
+          returnTarget,
+          replaceTabId: tabId,
+          videoSubtitleSources: nextSubtitleSources,
+          videoPlaylist: nextPlaylist,
+          videoAutoPlay: true,
+        },
+      );
+    } catch (error: any) {
+      runtimeLogger.error('切换合集视频失败:', error);
+      Toast.error(error?.message || '切换视频失败');
+    }
+  }, [nodeId, persistVideoProgress, playlist, resolvePlaylistItemSubtitleSources, returnTarget, setFileUrl, tabId]);
 
   const toggleConsole = useCallback(() => {
     if (isWideMode) {
@@ -978,6 +1102,51 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
               </div>
 
               <div className="right-controls">
+                {hasPlaylist && (
+                  <div className="control-popover-box" ref={playlistControlRef}>
+                    <Button
+                      icon={<IconVideoListStroked />}
+                      theme={isPlaylistPanelOpen ? 'solid' : 'borderless'}
+                      type={isPlaylistPanelOpen ? 'primary' : 'tertiary'}
+                      onClick={togglePlaylistPanel}
+                      title="播放列表"
+                      aria-label="播放列表"
+                    />
+                    {isPlaylistPanelOpen && (
+                      <div className="floating-control-panel playlist-panel">
+                        <div className="playlist-panel-header">
+                          <span className="playlist-panel-title" title={playlist?.title || ''}>
+                            {playlist?.title || '合集'}
+                          </span>
+                          <span className="playlist-panel-count">{playlistItems.length} 集</span>
+                        </div>
+                        <div className="playlist-panel-list">
+                          {playlistItems.map((item, index) => {
+                            const current = item.nodeId === nodeId;
+                            return (
+                              <button
+                                key={`${item.libraryId}:${item.nodeId}`}
+                                type="button"
+                                className={`playlist-panel-item ${current ? 'active' : ''}`}
+                                onClick={() => {
+                                  void openPlaylistItem(item);
+                                }}
+                                title={item.title}
+                              >
+                                <span className="playlist-panel-index">{index + 1}</span>
+                                <span className="playlist-panel-name">{item.title}</span>
+                                <span className="playlist-panel-duration">
+                                  {item.durationSeconds ? formatTime(item.durationSeconds) : '--:--'}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <div className="control-popover-box" ref={volumeControlRef}>
                   <Button
                     icon={isMuted ? <IconMute /> : volume < 0.5 ? <IconVolume1 /> : <IconVolume2 />}

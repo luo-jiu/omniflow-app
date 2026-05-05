@@ -18,10 +18,29 @@ export interface FileViewerSubtitleSource {
   sortOrder?: number | null;
 }
 
+export interface FileViewerVideoPlaylistItem {
+  nodeId: number;
+  libraryId: number;
+  title: string;
+  sortOrder?: number | null;
+  durationSeconds?: number | null;
+  subtitleCardNodeId?: number | null;
+  subtitleSources?: FileViewerSubtitleSource[];
+}
+
+export interface FileViewerVideoPlaylist {
+  id: string;
+  title: string;
+  items: FileViewerVideoPlaylistItem[];
+}
+
 export interface FileViewerOpenOptions {
   tabTypeLabel?: string | null;
   returnTarget?: FileViewerReturnTarget | null;
+  replaceTabId?: string | null;
   videoSubtitleSources?: FileViewerSubtitleSource[];
+  videoPlaylist?: FileViewerVideoPlaylist | null;
+  videoAutoPlay?: boolean;
 }
 
 export interface FileViewerState {
@@ -31,6 +50,8 @@ export interface FileViewerState {
   fileType: FileViewerFileType | null;
   tabTypeLabel?: string | null;
   videoSubtitleSources?: FileViewerSubtitleSource[];
+  videoPlaylist?: FileViewerVideoPlaylist | null;
+  videoAutoPlay?: boolean;
   loading: boolean;
 }
 
@@ -43,6 +64,8 @@ export interface FileViewerTab {
   tabTypeLabel?: string | null;
   returnTarget?: FileViewerReturnTarget | null;
   videoSubtitleSources?: FileViewerSubtitleSource[];
+  videoPlaylist?: FileViewerVideoPlaylist | null;
+  videoAutoPlay?: boolean;
   loading: boolean;
   reloadToken?: number;
 }

@@ -13,14 +13,21 @@ import VideoArchiveViewer from "../../../archive-viewer/components/video-archive
 import AudioArchiveViewer from "../../../archive-viewer/components/audio-archive-viewer";
 import styled from 'styled-components';
 import type { FileViewerFileType } from '@/shared/file-viewer-types';
-import type { FileViewerSubtitleSource } from '@/contexts/file-viewer.context';
+import type {
+  FileViewerReturnTarget,
+  FileViewerSubtitleSource,
+  FileViewerVideoPlaylist,
+} from '@/contexts/file-viewer.context';
 
 interface FileDispatcherProps {
   nodeId: number | null;
   fileUrl: string | null;
   fileName: string | null;
   fileType: FileViewerFileType | null;
+  returnTarget?: FileViewerReturnTarget | null;
   videoSubtitleSources?: FileViewerSubtitleSource[];
+  videoPlaylist?: FileViewerVideoPlaylist | null;
+  videoAutoPlay?: boolean;
   loading: boolean;
   active?: boolean;
   reloadToken?: number;
@@ -79,7 +86,10 @@ const FileDispatcher: React.FC<FileDispatcherProps> = ({
   fileUrl,
   fileName,
   fileType,
+  returnTarget,
   videoSubtitleSources,
+  videoPlaylist,
+  videoAutoPlay = false,
   loading,
   active = true,
   reloadToken = 0,
@@ -112,7 +122,10 @@ const FileDispatcher: React.FC<FileDispatcherProps> = ({
           fileName={fileName}
           active={active}
           tabId={tabId}
+          returnTarget={returnTarget}
           subtitleSources={videoSubtitleSources}
+          playlist={videoPlaylist}
+          autoPlay={videoAutoPlay}
         />
       );
 

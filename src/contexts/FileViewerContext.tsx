@@ -4,6 +4,7 @@ import {
   type FileViewerState,
   type FileViewerTab,
   type FileViewerOpenOptions,
+  type FileViewerVideoPlaylist,
   type FileViewerSubtitleSource,
 } from './file-viewer.context';
 import {
@@ -44,6 +45,8 @@ function toFileState(tab: FileViewerTab | null): FileViewerState {
     fileType: tab.fileType,
     tabTypeLabel: tab.tabTypeLabel ?? null,
     videoSubtitleSources: tab.videoSubtitleSources,
+    videoPlaylist: tab.videoPlaylist ?? null,
+    videoAutoPlay: tab.videoAutoPlay ?? false,
     loading: tab.loading,
   };
 }
@@ -65,23 +68,61 @@ function normalizeVideoSubtitleSources(
   }));
 }
 
+function normalizeVideoPlaylist(
+  playlist: FileViewerVideoPlaylist | null | undefined,
+): FileViewerVideoPlaylist | null {
+  if (!playlist || !playlist.items || playlist.items.length === 0) return null;
+  const items = playlist.items.map(item => ({
+    ...item,
+    nodeId: Number(item.nodeId),
+    libraryId: Number(item.libraryId),
+    sortOrder: item.sortOrder ?? null,
+    durationSeconds: item.durationSeconds ?? null,
+    subtitleCardNodeId: Number.isFinite(Number(item.subtitleCardNodeId)) && Number(item.subtitleCardNodeId) > 0
+      ? Number(item.subtitleCardNodeId)
+      : null,
+    subtitleSources: normalizeVideoSubtitleSources(item.subtitleSources),
+  })).filter(item => (
+    Number.isFinite(item.nodeId)
+    && item.nodeId > 0
+    && Number.isFinite(item.libraryId)
+    && item.libraryId > 0
+  ));
+  if (items.length === 0) return null;
+  return {
+    id: String(playlist.id || ''),
+    title: String(playlist.title || ''),
+    items,
+  };
+}
+
 function normalizeStoreState(raw: FileViewerStoreState | null | undefined): FileViewerStoreState {
   if (!raw) {
     return defaultFileViewerStoreState;
   }
+  const tabs = raw.tabs.map(tab => ({
+    ...tab,
+    videoAutoPlay: false,
+  }));
   if (raw.activeTabId === null) {
-    return raw;
+    return {
+      ...raw,
+      tabs,
+      fileState: defaultFileViewerState,
+    };
   }
-  const activeTab = raw.tabs.find(tab => tab.id === raw.activeTabId) || null;
+  const activeTab = tabs.find(tab => tab.id === raw.activeTabId) || null;
   if (!activeTab) {
     return {
       ...raw,
+      tabs,
       activeTabId: null,
       fileState: defaultFileViewerState,
     };
   }
   return {
     ...raw,
+    tabs,
     fileState: toFileState(activeTab),
   };
 }
@@ -177,8 +218,14 @@ export const FileViewerProvider: React.FC<{ children: ReactNode; cacheKey?: stri
 
     const tabId = resolveTabId(url, nodeId);
     setViewerState(prev => {
+      const replaceTabId = options?.replaceTabId || null;
+      const replacingTab = replaceTabId
+        ? prev.tabs.find(tab => tab.id === replaceTabId) || null
+        : null;
       const existingTab = prev.tabs.find(tab => tab.id === tabId);
+      const baseTab = replacingTab ?? existingTab;
       const videoSubtitleSources = normalizeVideoSubtitleSources(options?.videoSubtitleSources);
+      const videoPlaylist = normalizeVideoPlaylist(options?.videoPlaylist);
       const nextTab: FileViewerTab = {
         id: tabId,
         nodeId: nodeId ?? null,
@@ -188,11 +235,32 @@ export const FileViewerProvider: React.FC<{ children: ReactNode; cacheKey?: stri
         tabTypeLabel: options?.tabTypeLabel ?? null,
         returnTarget: options?.returnTarget ?? null,
         videoSubtitleSources,
+        videoPlaylist,
+        videoAutoPlay: Boolean(options?.videoAutoPlay),
         loading: false,
-        reloadToken: existingTab?.reloadToken ?? 0,
+        reloadToken: baseTab?.reloadToken ?? 0,
       };
       const existingIndex = prev.tabs.findIndex(tab => tab.id === tabId);
       const nextTabs = [...prev.tabs];
+      const replaceIndex = replaceTabId ? prev.tabs.findIndex(tab => tab.id === replaceTabId) : -1;
+      if (replaceIndex >= 0) {
+        const withoutTargetDuplicate = nextTabs.filter((tab, index) => (
+          index === replaceIndex || tab.id !== tabId
+        ));
+        const nextReplaceIndex = withoutTargetDuplicate.findIndex(tab => tab.id === replaceTabId);
+        withoutTargetDuplicate[nextReplaceIndex] = {
+          ...nextTab,
+          loading: replacingTab?.loading ?? existingTab?.loading ?? false,
+          reloadToken: replacingTab?.reloadToken ?? existingTab?.reloadToken ?? 0,
+        };
+        const activeTab = withoutTargetDuplicate[nextReplaceIndex] ?? nextTab;
+        return {
+          ...prev,
+          tabs: withoutTargetDuplicate,
+          activeTabId: tabId,
+          fileState: toFileState(activeTab),
+        };
+      }
       if (existingIndex >= 0) {
         nextTabs[existingIndex] = {
           ...nextTab,

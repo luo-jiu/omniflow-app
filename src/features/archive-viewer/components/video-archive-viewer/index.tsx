@@ -7,6 +7,7 @@ import {
   getChildrenByNodeId,
   getFileLink,
   renameNode,
+  type ArchiveCardDTO,
 } from '@/features/file-explorer/services/file.api';
 import { runtimeLogger } from '@/utils/runtimeLogger';
 import { VideoArchiveViewerWrapper } from './style';
@@ -15,7 +16,11 @@ import { useArchiveCardGrid } from '@/features/archive-viewer/hooks/useArchiveCa
 import ContextMenu, { type ContextMenuItem } from '@/components/ui/context-menu';
 import { locateNodeInDirectoryTree } from '@/features/file-explorer/services/tree-locate';
 import { useNodePropertiesOverlay } from '@/features/file-explorer/hooks/useNodePropertiesOverlay';
-import type { FileViewerSubtitleSource } from '@/contexts/file-viewer.context';
+import type {
+  FileViewerSubtitleSource,
+  FileViewerVideoPlaylist,
+  FileViewerVideoPlaylistItem,
+} from '@/contexts/file-viewer.context';
 import {
   buildVideoArchiveSidecarIndex,
   buildVideoSubtitleSources,
@@ -55,6 +60,7 @@ interface VideoArchiveSnapshot {
 }
 
 const PAGE_SIZE = 24;
+const COLLECTION_PLAYLIST_PAGE_SIZE = 200;
 const LINK_EXPIRY_MINUTES = 120;
 const VIDEO_ARCHIVE_CACHE_MAX_ENTRIES = 24;
 const VIDEO_PREVIEW_SAMPLE_TIME = 0.5;
@@ -94,6 +100,109 @@ function resolveReaderCacheKey(fileUrl: string, folderNodeId: number | null): st
 
 function normalizeVideoArchiveCardKind(input?: string | null): VideoArchiveCard['cardKind'] {
   return String(input || '').trim().toLowerCase() === 'collection' ? 'collection' : 'media';
+}
+
+function mapVideoArchiveCards(
+  items: ArchiveCardDTO[],
+  sidecarIndex: VideoArchiveSidecarIndex,
+): VideoArchiveCard[] {
+  return items.map((item) => {
+    const cardId = Number(item.id);
+    const cardKind = normalizeVideoArchiveCardKind(item.cardKind);
+    const mediaNodeId = Number.isFinite(Number(item.mediaNodeId)) && Number(item.mediaNodeId) > 0
+      ? Number(item.mediaNodeId)
+      : cardKind === 'collection' ? 0 : cardId;
+    const matchName = normalizeVideoArchiveMatchName(item.name);
+    const explicitCoverNodeId = Number.isFinite(Number(item.coverNodeId)) && Number(item.coverNodeId) > 0
+      ? Number(item.coverNodeId)
+      : null;
+    const sidecarCoverNodeId = matchName ? sidecarIndex.coverNodeIdByName.get(matchName) ?? null : null;
+    const subtitleCount = Math.max(
+      Number(item.subtitleCount ?? 0),
+      matchName ? sidecarIndex.subtitlesByName.get(matchName)?.length ?? 0 : 0,
+    );
+    return {
+      id: cardId,
+      mediaNodeId,
+      title: String(item.name || ''),
+      sortOrder: Number(item.sortOrder ?? 0),
+      cardKind,
+      coverNodeId: explicitCoverNodeId || sidecarCoverNodeId,
+      coverUrl: null,
+      videoPreviewUrl: null,
+      subtitleCount,
+      durationSeconds: Number(item.durationSeconds ?? 0) > 0 ? Number(item.durationSeconds) : undefined,
+    };
+  });
+}
+
+async function fetchAllCollectionArchiveCards(collectionNodeId: number, libraryId: number): Promise<ArchiveCardDTO[]> {
+  const items: ArchiveCardDTO[] = [];
+  let offset = 0;
+
+  for (;;) {
+    const page = await fetchArchiveCardsPage({
+      nodeId: collectionNodeId,
+      libraryId,
+      builtInType: 'VIDEO',
+      offset,
+      limit: COLLECTION_PLAYLIST_PAGE_SIZE,
+    });
+    items.push(...page.items);
+
+    if (!page.hasMore) {
+      break;
+    }
+
+    const pageOffset = Number.isFinite(Number(page.offset)) ? Number(page.offset) : offset;
+    const pageLimit = Number.isFinite(Number(page.limit)) && Number(page.limit) > 0
+      ? Number(page.limit)
+      : COLLECTION_PLAYLIST_PAGE_SIZE;
+    const nextOffset = Math.max(pageOffset + pageLimit, offset + page.items.length);
+    if (nextOffset <= offset || page.items.length === 0) {
+      runtimeLogger.warn('视频合集播放列表分页未能继续推进，已停止继续加载:', {
+        collectionNodeId,
+        libraryId,
+        offset,
+        nextOffset,
+      });
+      break;
+    }
+    offset = nextOffset;
+  }
+
+  return items;
+}
+
+function buildSameLevelSubtitleSources(
+  card: VideoArchiveCard,
+  sidecarIndex: VideoArchiveSidecarIndex,
+  libraryId: number,
+): FileViewerSubtitleSource[] | undefined {
+  if ((card.subtitleCount || 0) <= 0) return undefined;
+  const matchName = normalizeVideoArchiveMatchName(card.title);
+  const sidecars = matchName ? sidecarIndex.subtitlesByName.get(matchName) ?? [] : [];
+  const sources = buildVideoSubtitleSources(sidecars, libraryId);
+  return sources.length > 0 ? sources : undefined;
+}
+
+function buildCollectionPlaylistItem(
+  card: VideoArchiveCard,
+  sidecarIndex: VideoArchiveSidecarIndex,
+  libraryId: number,
+): FileViewerVideoPlaylistItem {
+  const subtitleCardNodeId = (card.subtitleCount || 0) > 0 && card.mediaNodeId && card.mediaNodeId !== card.id
+    ? card.id
+    : null;
+  return {
+    nodeId: card.mediaNodeId || card.id,
+    libraryId,
+    title: card.title,
+    sortOrder: card.sortOrder,
+    durationSeconds: card.durationSeconds ?? null,
+    subtitleCardNodeId,
+    subtitleSources: subtitleCardNodeId ? undefined : buildSameLevelSubtitleSources(card, sidecarIndex, libraryId),
+  };
 }
 
 function setArchiveSnapshotCache(cacheKey: string, snapshot: VideoArchiveSnapshot) {
@@ -437,34 +546,7 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
       const sidecarIndex = await loadVideoArchiveSidecarIndex();
       if (requestId !== requestIdRef.current) return;
 
-      const rawCards: VideoArchiveCard[] = page.items.map((item) => {
-        const cardId = Number(item.id);
-        const cardKind = normalizeVideoArchiveCardKind(item.cardKind);
-        const mediaNodeId = Number.isFinite(Number(item.mediaNodeId)) && Number(item.mediaNodeId) > 0
-          ? Number(item.mediaNodeId)
-          : cardKind === 'collection' ? 0 : cardId;
-        const matchName = normalizeVideoArchiveMatchName(item.name);
-        const explicitCoverNodeId = Number.isFinite(Number(item.coverNodeId)) && Number(item.coverNodeId) > 0
-          ? Number(item.coverNodeId)
-          : null;
-        const sidecarCoverNodeId = matchName ? sidecarIndex.coverNodeIdByName.get(matchName) ?? null : null;
-        const subtitleCount = Math.max(
-          Number(item.subtitleCount ?? 0),
-          matchName ? sidecarIndex.subtitlesByName.get(matchName)?.length ?? 0 : 0,
-        );
-        return {
-          id: cardId,
-          mediaNodeId,
-          title: String(item.name || ''),
-          sortOrder: Number(item.sortOrder ?? 0),
-          cardKind,
-          coverNodeId: explicitCoverNodeId || sidecarCoverNodeId,
-          coverUrl: null,
-          videoPreviewUrl: null,
-          subtitleCount,
-          durationSeconds: Number(item.durationSeconds ?? 0) > 0 ? Number(item.durationSeconds) : undefined,
-        };
-      });
+      const rawCards = mapVideoArchiveCards(page.items, sidecarIndex);
       const cardsWithCover = await resolveCardCoverUrls(rawCards);
       if (requestId !== requestIdRef.current) return;
 
@@ -516,11 +598,13 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
     void loadPage(nextOffset, true);
   }, [hasMore, listLoading, loadingMore, loadPage, nextOffset]);
 
-  const loadCardSubtitleSources = useCallback(async (
+  const loadCardSubtitleSourcesWithIndex = useCallback(async (
     card: VideoArchiveCard,
+    sidecarIndex: VideoArchiveSidecarIndex,
   ): Promise<FileViewerSubtitleSource[]> => {
     if (!libraryId) return [];
     if (card.cardKind === 'collection') return [];
+    if ((card.subtitleCount || 0) <= 0) return [];
 
     if (card.mediaNodeId && card.mediaNodeId !== card.id) {
       try {
@@ -533,7 +617,6 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
     }
 
     try {
-      const sidecarIndex = await loadVideoArchiveSidecarIndex();
       const matchName = normalizeVideoArchiveMatchName(card.title);
       const sidecars = matchName ? sidecarIndex.subtitlesByName.get(matchName) ?? [] : [];
       return buildVideoSubtitleSources(sidecars, libraryId);
@@ -541,7 +624,76 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
       runtimeLogger.warn('加载历史视频同名字幕失败:', error);
       return [];
     }
-  }, [libraryId, loadVideoArchiveSidecarIndex]);
+  }, [libraryId]);
+
+  const loadCardSubtitleSources = useCallback(async (
+    card: VideoArchiveCard,
+  ): Promise<FileViewerSubtitleSource[]> => {
+    const sidecarIndex = await loadVideoArchiveSidecarIndex();
+    return loadCardSubtitleSourcesWithIndex(card, sidecarIndex);
+  }, [loadCardSubtitleSourcesWithIndex, loadVideoArchiveSidecarIndex]);
+
+  const loadPlaylistItemSubtitleSources = useCallback(async (
+    item: FileViewerVideoPlaylistItem,
+  ): Promise<FileViewerSubtitleSource[]> => {
+    if (item.subtitleSources) return item.subtitleSources;
+    if (!item.subtitleCardNodeId) return [];
+
+    try {
+      const children = (await getChildrenByNodeId(item.subtitleCardNodeId, item.libraryId)) as VideoArchiveChildNode[];
+      return buildVideoSubtitleSources(children, item.libraryId);
+    } catch (error) {
+      runtimeLogger.warn('加载合集首播字幕失败:', error);
+      return [];
+    }
+  }, []);
+
+  const buildCollectionPlaylist = useCallback(async (
+    collectionCard: VideoArchiveCard,
+  ): Promise<{
+    playlist: FileViewerVideoPlaylist;
+    firstItem: FileViewerVideoPlaylistItem;
+  } | null> => {
+    if (!libraryId) return null;
+
+    const [playlistCards, children] = await Promise.all([
+      fetchAllCollectionArchiveCards(collectionCard.id, libraryId),
+      getChildrenByNodeId(collectionCard.id, libraryId),
+    ]);
+    const sidecarIndex = buildVideoArchiveSidecarIndex(children as VideoArchiveChildNode[]);
+    const mediaCards = mapVideoArchiveCards(playlistCards, sidecarIndex)
+      .filter(card => card.cardKind === 'media' && (card.mediaNodeId || card.id))
+      .sort((left, right) => {
+        if (left.sortOrder !== right.sortOrder) return left.sortOrder - right.sortOrder;
+        return left.id - right.id;
+      });
+
+    if (mediaCards.length === 0) {
+      return null;
+    }
+
+    const items = mediaCards.map(card => buildCollectionPlaylistItem(card, sidecarIndex, libraryId));
+    const firstItem = items[0];
+    if (!firstItem) return null;
+    const firstSubtitleSources = await loadPlaylistItemSubtitleSources(firstItem);
+    const playlistItems = firstSubtitleSources.length > 0
+      ? items.map(item => (
+        item.nodeId === firstItem.nodeId && item.libraryId === firstItem.libraryId
+          ? { ...item, subtitleSources: firstSubtitleSources }
+          : item
+      ))
+      : items;
+    const firstItemWithSubtitles = playlistItems[0] ?? firstItem;
+
+    return {
+      playlist: {
+        id: `video-collection:${libraryId}:${collectionCard.id}`,
+        title: collectionCard.title || '视频合集',
+        items: playlistItems,
+      },
+      firstItem: firstItemWithSubtitles,
+    };
+  }, [libraryId, loadPlaylistItemSubtitleSources]);
 
   const handleOpenCard = useCallback(async (card: VideoArchiveCard) => {
     if (!libraryId) {
@@ -549,22 +701,43 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
       return;
     }
     if (card.cardKind === 'collection') {
-      setFileUrl(
-        `video-archive://library/${libraryId}/node/${card.id}`,
-        card.title,
-        'video_archive',
-        card.id,
-        {
-          tabTypeLabel: 'VIDEO-ARCHIVE',
-          returnTarget: {
-            fileUrl,
-            fileName: fileName || title,
-            fileType: 'video_archive',
-            nodeId: folderNodeId,
-            tabTypeLabel: 'VIDEO-ARCHIVE',
+      try {
+        const collection = await buildCollectionPlaylist(card);
+        if (!collection) {
+          Toast.warning('该合集下暂无可播放视频');
+          return;
+        }
+        const nextUrl = await getFileLink(
+          collection.firstItem.nodeId,
+          collection.firstItem.libraryId,
+          LINK_EXPIRY_MINUTES,
+        );
+        if (!nextUrl) {
+          throw new Error('未获取到视频访问链接');
+        }
+        setFileUrl(
+          nextUrl,
+          collection.firstItem.title,
+          'video',
+          collection.firstItem.nodeId,
+          {
+            tabTypeLabel: 'VIDEO',
+            returnTarget: {
+              fileUrl,
+              fileName: fileName || title,
+              fileType: 'video_archive',
+              nodeId: folderNodeId,
+              tabTypeLabel: 'VIDEO-ARCHIVE',
+            },
+            videoSubtitleSources: collection.firstItem.subtitleSources,
+            videoPlaylist: collection.playlist,
+            videoAutoPlay: true,
           },
-        },
-      );
+        );
+      } catch (error: any) {
+        runtimeLogger.error('打开视频合集失败:', error);
+        Toast.error(error?.message || '打开合集失败');
+      }
       return;
     }
     try {
@@ -594,7 +767,16 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
       runtimeLogger.error('打开视频归档卡片失败:', error);
       Toast.error(error?.message || '打开视频失败');
     }
-  }, [fileName, fileUrl, folderNodeId, libraryId, loadCardSubtitleSources, setFileUrl, title]);
+  }, [
+    fileName,
+    fileUrl,
+    folderNodeId,
+    buildCollectionPlaylist,
+    libraryId,
+    loadCardSubtitleSources,
+    setFileUrl,
+    title,
+  ]);
 
   useEffect(() => {
     requestIdRef.current += 1;
@@ -772,7 +954,7 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
                     <div className="card-footer">
                       <span>
                         {card.cardKind === 'collection'
-                          ? '双击展开子归档'
+                          ? '双击播放合集'
                           : (
                             <>
                               {card.coverUrl ? '已带封面' : (card.videoPreviewUrl ? '视频首帧' : '封面待补')}
