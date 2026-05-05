@@ -1,6 +1,7 @@
 import ReactDOM from 'react-dom/client';
 import 'normalize.css';
 import '@douyinfe/semi-ui/dist/css/semi.min.css';
+import '@/assets/css/index.less';
 
 import { OverlayThemeBridge } from './OverlayThemeBridge';
 import { OverlayHost } from './OverlayHost';

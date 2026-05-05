@@ -129,7 +129,7 @@ const DirectoryContextMenu: React.FC<DirectoryContextMenuProps> = ({
     return (
       <ContextMenu
         items={rootItems}
-        className="directory-context-menu directory-tree-context-menu"
+        className="directory-context-menu"
         onItemClick={onClose}
         submenuPosition="auto"
         submenuPreferredHorizontal={submenuPreferredHorizontal}
@@ -349,7 +349,7 @@ const DirectoryContextMenu: React.FC<DirectoryContextMenuProps> = ({
   return (
     <ContextMenu 
       items={items} 
-      className="directory-context-menu directory-tree-context-menu"
+      className="directory-context-menu"
       onItemClick={onClose}
       submenuPosition="auto"
       submenuPreferredHorizontal={submenuPreferredHorizontal}

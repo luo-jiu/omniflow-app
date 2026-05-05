@@ -2242,10 +2242,11 @@ export default function DirectoryTree({
             style={{
               width: `${renameInputWidthCh}ch`,
               maxWidth: '100%',
-              fontSize: '19px',
-              height: '34px',
+              fontSize: '13px',
+              height: '24px',
               backgroundColor: 'var(--semi-color-bg-1)',
               border: '1px solid var(--semi-color-primary)',
+              borderRadius: 6,
             }}
             onFocus={(e) => {
               const input = e.target as HTMLInputElement;
@@ -2280,7 +2281,6 @@ export default function DirectoryTree({
         onDragOver={onDragOver}
         onDragLeave={onDragLeave}
         onDrop={onDrop}
-        title={typeof label === 'string' ? label : undefined}
         onClick={(e) => handleSelectionIntent(treeNode, e)}
         onContextMenu={(e) => openMenu(e, treeNode, isFolder)}
       >
