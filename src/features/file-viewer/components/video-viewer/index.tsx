@@ -3,16 +3,24 @@ import { Button, Spin } from '@douyinfe/semi-ui';
 import {
   IconBackward,
   IconForward,
+  IconFullScreenStroked,
   IconMute,
   IconPause,
   IconPlay,
+  IconShrinkScreenStroked,
   IconVolume1,
   IconVolume2,
 } from '@douyinfe/semi-icons';
 import { VideoViewerWrapper } from './style';
 import { useRegisterMediaEntry } from '@/hooks/useMediaRegistry';
+import { useLibraryWorkspaceControls } from '@/contexts/library-workspace-controls.context';
 import { fetchNodeDetailById, updateNodeConfig } from '@/features/file-explorer/services/file.api';
 import { runtimeLogger } from '@/utils/runtimeLogger';
+import {
+  isTextEditingKeyboardTarget,
+  isViewerInteractiveKeyboardTarget,
+  releaseExternalKeyboardFocus,
+} from '@/features/file-viewer/utils/media-keyboard-target';
 import type { FileViewerSubtitleSource } from '@/contexts/file-viewer.context';
 import VideoSubtitlePanel from './VideoSubtitlePanel';
 import { useVideoSubtitles } from './useVideoSubtitles';
@@ -49,6 +57,52 @@ const VIEW_META_VIEWER_STATE_KEY = '__omniflowViewerStateV1';
 const VIEW_META_VIEWER_STATE_LEGACY_KEY = '__omniflow_viewer_state_v1';
 const VIEW_META_VIDEO_PLAYER_KEY = 'videoPlayer';
 const VIEW_META_VIDEO_PLAYER_LEGACY_KEY = 'video_player';
+const KEYBOARD_SEEK_SECONDS = 10;
+const KEYBOARD_FAST_SEEK_SECONDS = 30;
+const KEYBOARD_VOLUME_STEP = 0.05;
+
+const RightToolPanelIcon: React.FC = () => (
+  <svg className="video-control-svg" viewBox="0 0 24 24" width="1em" height="1em" fill="none" aria-hidden focusable="false">
+    <path
+      d="M4.5 5h15a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-15a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinejoin="round"
+    />
+    <path d="M14.5 5v14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    <path d="M14.5 6h4.5a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1h-4.5V6Z" fill="currentColor" opacity="0.28" />
+  </svg>
+);
+
+const WideModeEnterIcon: React.FC = () => (
+  <svg className="video-control-svg" viewBox="0 0 24 24" width="1em" height="1em" fill="none" aria-hidden focusable="false">
+    <path
+      d="M3 6h18v12H3V6Z"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinejoin="round"
+    />
+    <path d="M10 12H5" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" />
+    <path d="M7.5 9.25 4.75 12l2.75 2.75" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round" />
+    <path d="M14 12h5" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" />
+    <path d="M16.5 9.25 19.25 12l-2.75 2.75" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
+const WideModeExitIcon: React.FC = () => (
+  <svg className="video-control-svg" viewBox="0 0 24 24" width="1em" height="1em" fill="none" aria-hidden focusable="false">
+    <path
+      d="M3 6h18v12H3V6Z"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinejoin="round"
+    />
+    <path d="M4.75 12h5" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" />
+    <path d="M7.5 9.25 10.25 12 7.5 14.75" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round" />
+    <path d="M19.25 12h-5" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" />
+    <path d="M16.5 9.25 13.75 12l2.75 2.75" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
 
 const videoProgressCache = new Map<string, VideoPlaybackProgress>();
 
@@ -166,6 +220,7 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
   subtitleSources,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
+  const viewerRootRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const progressRef = useRef<HTMLDivElement>(null);
   const volumeControlRef = useRef<HTMLDivElement>(null);
@@ -184,6 +239,10 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
   const thumbnailCaptureTimerRef = useRef<number>(0);
   const thumbnailCaptureAttemptRef = useRef(0);
   const thumbnailCaptureUrlRef = useRef('');
+  const consoleOpenRef = useRef(true);
+  const consoleOpenBeforeWideModeRef = useRef<boolean | null>(null);
+  const wideModeAppliedRef = useRef(false);
+  const { setVideoWideMode } = useLibraryWorkspaceControls();
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [hasStartedPlaying, setHasStartedPlaying] = useState(false);
@@ -196,6 +255,7 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
   const [isMuted, setIsMuted] = useState(false);
   const [playbackRate, setPlaybackRate] = useState(1);
   const [isConsoleOpen, setIsConsoleOpen] = useState(true);
+  const [isWideMode, setIsWideMode] = useState(false);
   const [isVolumePanelOpen, setIsVolumePanelOpen] = useState(false);
   const [isRatePanelOpen, setIsRatePanelOpen] = useState(false);
 
@@ -337,6 +397,10 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
   useEffect(() => {
     activeRef.current = active;
   }, [active]);
+
+  useEffect(() => {
+    consoleOpenRef.current = isConsoleOpen;
+  }, [isConsoleOpen]);
 
   const flushRemoteVideoProgress = useCallback(async (force = false) => {
     if (!nodeId || !Number.isFinite(nodeId)) {
@@ -663,7 +727,7 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
     };
   }, [persistVideoProgress]);
 
-  const togglePlay = () => {
+  const togglePlay = useCallback(() => {
     const video = videoRef.current;
     if (!video) return;
     if (video.paused) {
@@ -673,16 +737,24 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
     } else {
       video.pause();
     }
-  };
+  }, []);
 
-  const seekBy = (delta: number) => {
+  const seekBy = useCallback((delta: number) => {
     const video = videoRef.current;
     if (!video) return;
     const next = Math.min(Math.max((video.currentTime || 0) + delta, 0), duration || 0);
     video.currentTime = next;
     setCurrentTime(next);
     persistVideoProgress(true);
-  };
+  }, [duration, persistVideoProgress]);
+
+  const adjustVolumeBy = useCallback((delta: number) => {
+    setVolume((current) => {
+      const next = Math.min(Math.max(current + delta, 0), 1);
+      setIsMuted(next === 0);
+      return next;
+    });
+  }, []);
 
   const handleVolumeChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const next = Number(event.target.value);
@@ -700,6 +772,14 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
     setIsVolumePanelOpen(false);
   }, []);
 
+  const toggleConsole = useCallback(() => {
+    if (isWideMode) {
+      setIsWideMode(false);
+      return;
+    }
+    setIsConsoleOpen(prev => !prev);
+  }, [isWideMode]);
+
   const handleProgressMouseDown = (event: React.MouseEvent<HTMLDivElement>) => {
     isDraggingProgress.current = true;
     seekToByClientX(event.clientX);
@@ -707,7 +787,7 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
     window.addEventListener('mouseup', handleGlobalMouseUp);
   };
 
-  const toggleFullscreen = async () => {
+  const toggleFullscreen = useCallback(async () => {
     try {
       if (document.fullscreenElement) {
         await document.exitFullscreen();
@@ -717,13 +797,123 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
     } catch (error) {
       runtimeLogger.warn('切换全屏失败:', error);
     }
-  };
+  }, []);
+
+  const toggleWideMode = useCallback(() => {
+    setIsWideMode(prev => !prev);
+  }, []);
+
+  useEffect(() => {
+    if (isWideMode) {
+      if (consoleOpenBeforeWideModeRef.current === null) {
+        consoleOpenBeforeWideModeRef.current = consoleOpenRef.current;
+      }
+      setIsConsoleOpen(false);
+      wideModeAppliedRef.current = true;
+      setVideoWideMode?.(true);
+      return;
+    }
+
+    if (!wideModeAppliedRef.current) {
+      return;
+    }
+    wideModeAppliedRef.current = false;
+    setVideoWideMode?.(false);
+    const restoreConsoleOpen = consoleOpenBeforeWideModeRef.current;
+    consoleOpenBeforeWideModeRef.current = null;
+    if (restoreConsoleOpen !== null) {
+      setIsConsoleOpen(restoreConsoleOpen);
+    }
+  }, [isWideMode, setVideoWideMode]);
+
+  useEffect(() => {
+    if (active || !isWideMode) return;
+    setIsWideMode(false);
+  }, [active, isWideMode]);
+
+  useEffect(() => () => {
+    if (wideModeAppliedRef.current) {
+      setVideoWideMode?.(false);
+    }
+  }, [setVideoWideMode]);
+
+  useEffect(() => {
+    if (!active) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
+      if (isTextEditingKeyboardTarget(event.target)) return;
+      if (isViewerInteractiveKeyboardTarget(event.target, viewerRootRef.current)) return;
+      let handled = true;
+
+      switch (event.key) {
+        case ' ':
+        case 'k':
+        case 'K':
+          event.preventDefault();
+          if (!event.repeat) {
+            togglePlay();
+          }
+          break;
+        case 'ArrowLeft':
+          event.preventDefault();
+          seekBy(event.shiftKey ? -KEYBOARD_FAST_SEEK_SECONDS : -KEYBOARD_SEEK_SECONDS);
+          break;
+        case 'ArrowRight':
+          event.preventDefault();
+          seekBy(event.shiftKey ? KEYBOARD_FAST_SEEK_SECONDS : KEYBOARD_SEEK_SECONDS);
+          break;
+        case 'j':
+        case 'J':
+          event.preventDefault();
+          seekBy(-KEYBOARD_SEEK_SECONDS);
+          break;
+        case 'l':
+        case 'L':
+          event.preventDefault();
+          seekBy(KEYBOARD_SEEK_SECONDS);
+          break;
+        case 'ArrowUp':
+          event.preventDefault();
+          adjustVolumeBy(KEYBOARD_VOLUME_STEP);
+          break;
+        case 'ArrowDown':
+          event.preventDefault();
+          adjustVolumeBy(-KEYBOARD_VOLUME_STEP);
+          break;
+        case 'm':
+        case 'M':
+          event.preventDefault();
+          if (!event.repeat) {
+            setIsMuted(prev => !prev);
+          }
+          break;
+        case 'f':
+        case 'F':
+          event.preventDefault();
+          if (!event.repeat) {
+            void toggleFullscreen();
+          }
+          break;
+        default:
+          handled = false;
+          break;
+      }
+      if (handled) {
+        event.stopPropagation();
+        releaseExternalKeyboardFocus(event.target, viewerRootRef.current);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, [active, adjustVolumeBy, seekBy, toggleFullscreen, togglePlay]);
 
   const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
   const displayedVolume = Math.round((isMuted ? 0 : volume) * 100);
 
   return (
-    <VideoViewerWrapper>
+    <VideoViewerWrapper ref={viewerRootRef}>
       <div className="viewer-layout">
         <div className={`viewer-main ${isConsoleOpen ? 'console-open' : ''}`}>
           <input
@@ -839,13 +1029,34 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
                   )}
                 </div>
 
-                <Button theme="borderless" onClick={() => setIsConsoleOpen(prev => !prev)}>
-                  {isConsoleOpen ? '隐藏工具台' : '工具台'}
-                </Button>
+                <Button
+                  icon={<span className="video-control-icon"><RightToolPanelIcon /></span>}
+                  theme="borderless"
+                  onClick={toggleConsole}
+                  title={isConsoleOpen ? '隐藏工具台' : '显示工具台'}
+                  aria-label={isConsoleOpen ? '隐藏工具台' : '显示工具台'}
+                />
 
-                <Button theme="borderless" onClick={toggleFullscreen}>
-                  {isFullscreen ? '退出全屏' : '全屏'}
-                </Button>
+                <Button
+                  icon={<span className="video-control-icon">{isWideMode ? <WideModeExitIcon /> : <WideModeEnterIcon />}</span>}
+                  theme={isWideMode ? 'solid' : 'borderless'}
+                  type={isWideMode ? 'primary' : 'tertiary'}
+                  onClick={toggleWideMode}
+                  title={isWideMode ? '退出宽屏模式' : '宽屏模式'}
+                  aria-label={isWideMode ? '退出宽屏模式' : '宽屏模式'}
+                />
+
+                <Button
+                  icon={(
+                    <span className="video-control-icon">
+                      {isFullscreen ? <IconShrinkScreenStroked /> : <IconFullScreenStroked />}
+                    </span>
+                  )}
+                  theme="borderless"
+                  onClick={toggleFullscreen}
+                  title={isFullscreen ? '退出全屏' : '全屏'}
+                  aria-label={isFullscreen ? '退出全屏' : '全屏'}
+                />
               </div>
             </div>
           </div>
@@ -853,16 +1064,6 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
 
         <aside className={`console-panel ${isConsoleOpen ? 'open' : 'closed'}`}>
           <div className="console-body">
-            <div className="console-section">
-              <div className="section-header">
-                <span className="section-title">视频操作台</span>
-                <span className="section-meta">{fileName || '当前视频'}</span>
-              </div>
-              <p className="section-description">
-                这是视频专属的右侧控制区，后面可以继续往这里加字幕、标注、片段和更多播放能力。
-              </p>
-            </div>
-
             <VideoSubtitlePanel
               activeSubtitleCue={activeSubtitleCue}
               clearSubtitle={clearSubtitle}

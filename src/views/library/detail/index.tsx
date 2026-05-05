@@ -7,6 +7,7 @@ import {
 import React from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { FileViewerProvider } from "@/contexts/FileViewerContext";
+import { LibraryWorkspaceControlsContext } from "@/contexts/library-workspace-controls.context";
 import { MediaRegistryProvider } from "@/contexts/MediaRegistryContext";
 import { useMediaEntries, useMediaRegistry } from "@/hooks/useMediaRegistry";
 import MediaHubPopover from "@/components/business/media-hub-popover";
@@ -258,11 +259,16 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   const [treeRootNodeId, setTreeRootNodeId] = React.useState<number | null>(null);
   const [workspaceDisplayMode, setWorkspaceDisplayMode] = React.useState<WorkspaceDisplayMode>(initialWorkspaceState.workspaceDisplayMode);
   const [mediaProcessingRequest, setMediaProcessingRequest] = React.useState<ToolWorkspaceMediaRequest | null>(null);
+  const [videoWideModeActive, setVideoWideModeActive] = React.useState(false);
   const browserInputRef = React.useRef<HTMLInputElement | null>(null);
   const latestWorkspaceStateRef = React.useRef<LibraryDetailWorkspaceState>(initialWorkspaceState);
   const latestPanelWidthRef = React.useRef<number>(sidePanelWidth);
   const sidePanelCollapsedRef = React.useRef<boolean>(sidePanelCollapsed);
   const sidePanelVisualWidthRef = React.useRef<number>(sidePanelVisualWidth);
+  const videoWideModeRestoreRef = React.useRef<{
+    sidePanelCollapsed: boolean;
+    sidePanelWidth: number;
+  } | null>(null);
   const latestBrowserResourcePanelWidthRef = React.useRef<number>(browserResourcePanelWidth);
   const resizeMoveHandlerRef = React.useRef<((event: MouseEvent) => void) | null>(null);
   const resizeUpHandlerRef = React.useRef<(() => void) | null>(null);
@@ -421,6 +427,57 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
       return nextCollapsed;
     });
   }, [cleanupResizeListeners, setSidePanelVisualWidth, sidePanelWidth]);
+
+  const setVideoWideMode = React.useCallback((enabled: boolean) => {
+    cleanupResizeListeners();
+    setSidePanelResizing(false);
+
+    if (enabled) {
+      if (videoWideModeRestoreRef.current) {
+        return;
+      }
+      setVideoWideModeActive(true);
+      videoWideModeRestoreRef.current = {
+        sidePanelCollapsed: sidePanelCollapsedRef.current,
+        sidePanelWidth: latestPanelWidthRef.current || MIN_SIDE_PANEL_WIDTH,
+      };
+      if (!sidePanelCollapsedRef.current) {
+        sidePanelCollapsedRef.current = true;
+        setSidePanelCollapsed(true);
+        setSidePanelMotionSyncSignal((current) => current + 1);
+        setSidePanelVisualWidth(0);
+      }
+      return;
+    }
+
+    const restore = videoWideModeRestoreRef.current;
+    if (!restore) {
+      setVideoWideModeActive(false);
+      return;
+    }
+    videoWideModeRestoreRef.current = null;
+    setVideoWideModeActive(false);
+    setSidePanelMotionSyncSignal((current) => current + 1);
+    if (restore.sidePanelCollapsed) {
+      sidePanelCollapsedRef.current = true;
+      setSidePanelCollapsed(true);
+      setSidePanelVisualWidth(0);
+      return;
+    }
+    const restoredWidth = Math.max(
+      MIN_SIDE_PANEL_WIDTH,
+      restore.sidePanelWidth || latestPanelWidthRef.current || MIN_SIDE_PANEL_WIDTH,
+    );
+    sidePanelCollapsedRef.current = false;
+    setSidePanelCollapsed(false);
+    setSidePanelWidth(restoredWidth);
+    latestPanelWidthRef.current = restoredWidth;
+    setSidePanelVisualWidth(restoredWidth);
+  }, [cleanupResizeListeners, setSidePanelVisualWidth]);
+
+  const libraryWorkspaceControls = React.useMemo(() => ({
+    setVideoWideMode,
+  }), [setVideoWideMode]);
 
   React.useEffect(() => {
     sidePanelCollapsedRef.current = sidePanelCollapsed;
@@ -2230,18 +2287,20 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
 
   return (
     <>
-      <SidePanelMotionProperty />
-      <DetailWrapper
-        className={sidePanelResizing ? 'is-side-panel-resizing' : ''}
-        style={detailWrapperStyle}
-      >
+      <LibraryWorkspaceControlsContext.Provider value={libraryWorkspaceControls}>
+        <SidePanelMotionProperty />
+        <DetailWrapper
+          className={sidePanelResizing ? 'is-side-panel-resizing' : ''}
+          style={detailWrapperStyle}
+        >
       <TitlebarSidePanelToggleHost>
         <TitlebarSidePanelToggleButton
           type="button"
           className={sidePanelCollapsed ? 'is-active' : ''}
+          disabled={videoWideModeActive}
           onClick={toggleSidePanelCollapsed}
-          title={sidePanelCollapsed ? '展开目录树' : '折叠目录树'}
-          aria-label={sidePanelCollapsed ? '展开目录树' : '折叠目录树'}
+          title={videoWideModeActive ? '宽屏模式下请在播放器内退出宽屏' : (sidePanelCollapsed ? '展开目录树' : '折叠目录树')}
+          aria-label={videoWideModeActive ? '宽屏模式下目录树按钮暂不可用' : (sidePanelCollapsed ? '展开目录树' : '折叠目录树')}
           aria-pressed={sidePanelCollapsed}
         >
           <SidebarCollapseIcon />
@@ -2888,7 +2947,8 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
           void saveActiveDownloadToDesktop();
         }}
       />
-      </DetailWrapper>
+        </DetailWrapper>
+      </LibraryWorkspaceControlsContext.Provider>
     </>
   );
 };

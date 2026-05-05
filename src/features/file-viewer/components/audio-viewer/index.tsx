@@ -18,6 +18,11 @@ import { runtimeLogger } from '@/utils/runtimeLogger';
 import { resolveAudioOwnerKey } from '@/features/file-viewer/utils/audio-owner-key';
 import { deriveAudioTrackName } from '@/features/file-viewer/utils/audio-track-name';
 import { useRegisterMediaEntry } from '@/hooks/useMediaRegistry';
+import {
+  isTextEditingKeyboardTarget,
+  isViewerInteractiveKeyboardTarget,
+  releaseExternalKeyboardFocus,
+} from '@/features/file-viewer/utils/media-keyboard-target';
 
 interface AudioViewerProps {
   nodeId: number | null;
@@ -27,7 +32,12 @@ interface AudioViewerProps {
   tabId: string;
 }
 
+const AUDIO_KEYBOARD_SEEK_SECONDS = 10;
+const AUDIO_KEYBOARD_FAST_SEEK_SECONDS = 30;
+const AUDIO_KEYBOARD_VOLUME_STEP = 0.05;
+
 const AudioViewer: React.FC<AudioViewerProps> = ({ nodeId, url, fileName, active = true, tabId }) => {
+  const viewerRootRef = useRef<HTMLDivElement>(null);
   const progressBarRef = useRef<HTMLDivElement>(null);
   const [playerState, setPlayerState] = useState(() => globalAudioPlayer.getState());
   const [dragPreviewTime, setDragPreviewTime] = useState<number | null>(null);
@@ -50,7 +60,15 @@ const AudioViewer: React.FC<AudioViewerProps> = ({ nodeId, url, fileName, active
     return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
   };
 
-  const togglePlay = () => {
+  const ensureOwnedSource = useCallback(() => {
+    globalAudioPlayer.ensureSource(
+      url,
+      fileName || null,
+      { ownerType: 'default', ownerKey },
+    );
+  }, [fileName, ownerKey, url]);
+
+  const togglePlay = useCallback(() => {
     if (isOwnedSource) {
       void globalAudioPlayer.togglePlay().catch((error) => {
         runtimeLogger.error('failed to toggle audio playback:', error);
@@ -58,15 +76,22 @@ const AudioViewer: React.FC<AudioViewerProps> = ({ nodeId, url, fileName, active
       return;
     }
 
-    globalAudioPlayer.ensureSource(
-      url,
-      fileName || null,
-      { ownerType: 'default', ownerKey },
-    );
+    ensureOwnedSource();
     void globalAudioPlayer.play().catch((error) => {
       runtimeLogger.error('failed to start audio playback:', error);
     });
-  };
+  }, [ensureOwnedSource, isOwnedSource]);
+
+  const seekBy = useCallback((delta: number) => {
+    if (!isOwnedSource || !effectiveDuration) return;
+    const next = Math.min(Math.max(effectiveCurrentTime + delta, 0), effectiveDuration);
+    globalAudioPlayer.seekTo(next);
+  }, [effectiveCurrentTime, effectiveDuration, isOwnedSource]);
+
+  const adjustVolumeBy = useCallback((delta: number) => {
+    const state = globalAudioPlayer.getState();
+    globalAudioPlayer.setVolume(state.volume + delta);
+  }, []);
 
   // --- Custom Progress Bar Logic ---
 
@@ -175,8 +200,74 @@ const AudioViewer: React.FC<AudioViewerProps> = ({ nodeId, url, fileName, active
     setDragPreviewTime(null);
   }, [active]);
 
+  useEffect(() => {
+    if (!active) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
+      if (isTextEditingKeyboardTarget(event.target)) return;
+      if (isViewerInteractiveKeyboardTarget(event.target, viewerRootRef.current)) return;
+      let handled = true;
+
+      switch (event.key) {
+        case ' ':
+        case 'k':
+        case 'K':
+          event.preventDefault();
+          if (!event.repeat) {
+            togglePlay();
+          }
+          break;
+        case 'ArrowLeft':
+          event.preventDefault();
+          seekBy(event.shiftKey ? -AUDIO_KEYBOARD_FAST_SEEK_SECONDS : -AUDIO_KEYBOARD_SEEK_SECONDS);
+          break;
+        case 'ArrowRight':
+          event.preventDefault();
+          seekBy(event.shiftKey ? AUDIO_KEYBOARD_FAST_SEEK_SECONDS : AUDIO_KEYBOARD_SEEK_SECONDS);
+          break;
+        case 'j':
+        case 'J':
+          event.preventDefault();
+          seekBy(-AUDIO_KEYBOARD_SEEK_SECONDS);
+          break;
+        case 'l':
+        case 'L':
+          event.preventDefault();
+          seekBy(AUDIO_KEYBOARD_SEEK_SECONDS);
+          break;
+        case 'ArrowUp':
+          event.preventDefault();
+          adjustVolumeBy(AUDIO_KEYBOARD_VOLUME_STEP);
+          break;
+        case 'ArrowDown':
+          event.preventDefault();
+          adjustVolumeBy(-AUDIO_KEYBOARD_VOLUME_STEP);
+          break;
+        case 'm':
+        case 'M':
+          event.preventDefault();
+          if (!event.repeat) {
+            const state = globalAudioPlayer.getState();
+            globalAudioPlayer.setMuted(!state.isMuted);
+          }
+          break;
+        default:
+          handled = false;
+          break;
+      }
+      if (handled) {
+        event.stopPropagation();
+        releaseExternalKeyboardFocus(event.target, viewerRootRef.current);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, [active, adjustVolumeBy, seekBy, togglePlay]);
+
   return (
-    <AudioViewerWrapper>
+    <AudioViewerWrapper ref={viewerRootRef}>
       <div className="main-display">
         <div className="record-player">
           <div className={`record-needle ${isOwnedSource && playerState.isPlaying ? 'playing' : ''}`} />
@@ -238,7 +329,12 @@ const AudioViewer: React.FC<AudioViewerProps> = ({ nodeId, url, fileName, active
 
           <div className="main-btns">
             <Button icon={<IconSync />} theme="borderless" style={{ color: 'var(--semi-color-text-2)' }} />
-            <Button icon={<IconBackward />} theme="borderless" size="large" />
+            <Button
+              icon={<IconBackward />}
+              theme="borderless"
+              size="large"
+              onClick={() => seekBy(-AUDIO_KEYBOARD_SEEK_SECONDS)}
+            />
             <Button
               className="play-btn"
               icon={isOwnedSource && playerState.isPlaying ? <IconPause /> : <IconPlay />}
@@ -246,7 +342,12 @@ const AudioViewer: React.FC<AudioViewerProps> = ({ nodeId, url, fileName, active
               shape="circle"
               onClick={togglePlay}
             />
-            <Button icon={<IconForward />} theme="borderless" size="large" />
+            <Button
+              icon={<IconForward />}
+              theme="borderless"
+              size="large"
+              onClick={() => seekBy(AUDIO_KEYBOARD_SEEK_SECONDS)}
+            />
             <Button icon={<IconList />} theme="borderless" style={{ color: 'var(--semi-color-text-2)' }} />
           </div>
 

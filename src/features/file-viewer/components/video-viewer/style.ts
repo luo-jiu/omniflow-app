@@ -432,6 +432,23 @@ export const VideoViewerWrapper = styled.div`
     font-size: 14px;
   }
 
+  .controls-row .video-control-icon {
+    width: 18px;
+    height: 18px;
+    font-size: 18px;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .controls-row .video-control-icon svg,
+  .controls-row .video-control-svg {
+    width: 1em;
+    height: 1em;
+    flex: 0 0 auto;
+  }
+
   .controls-row .semi-button-content {
     display: inline-flex;
     align-items: center;

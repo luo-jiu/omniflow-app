@@ -1,6 +1,6 @@
 # Viewer 文档入口
 
-更新时间：2026-04-16
+更新时间：2026-05-05
 适用范围：`file-viewer`、`archive-viewer` 以及后续各类具体 viewer 的长期说明文档。
 
 ## 1. 作用
@@ -60,6 +60,19 @@
 - 音频 viewer / asmr viewer 共用 `globalAudioPlayer` 单例 `<audio>`，所以同一时刻仍只能有一个音频源在播放（属预期范围）；但音频不再因切换 tab 而出现"顶部 GlobalAudioMiniBar"那条额外 UI。
 - video 启动播放不再调用 `globalAudioPlayer.pause()` 暂停音频；audio 启动播放不再暂停所有视频。音视频可并行。
 - 所有 audio / video / asmr viewer 在挂载且首次播放后向 `MediaRegistry` 注册自身，由 `library detail` 工具栏右侧的"媒体控制中心"集中展示与控制，详见 `docs/library-detail-workspace.md` §11。
+
+## 3.2 普通音视频键盘控制
+
+普通 `audio` / `video` viewer 在 `active=true` 且焦点不在输入框、文本域或可编辑元素内时响应基础媒体快捷键：
+
+- `Space` / `K`：播放或暂停
+- `ArrowLeft` / `ArrowRight`：快退 / 快进 10 秒
+- `Shift + ArrowLeft` / `Shift + ArrowRight`：快退 / 快进 30 秒
+- `J` / `L`：快退 / 快进 10 秒
+- `ArrowUp` / `ArrowDown`：音量增减
+- `M`：静音切换
+
+`video` 额外支持 `F` 切换全屏。所有快捷键必须受 viewer `active` 状态保护，避免在浏览器、搜索主页、工具区或其他 file tab 中拦截输入。
 
 ## 4. 落点规则
 

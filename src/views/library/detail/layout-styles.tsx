@@ -121,6 +121,14 @@ export const TitlebarSidePanelToggleButton = styled.button`
   body[theme-mode="dark"] &.is-active * {
     color: #22d3ee;
   }
+
+  &:disabled {
+    cursor: default;
+    opacity: 0.46;
+    background: transparent;
+    border-color: transparent;
+    box-shadow: none;
+  }
 `;
 
 export const SidePanel = styled.div`
