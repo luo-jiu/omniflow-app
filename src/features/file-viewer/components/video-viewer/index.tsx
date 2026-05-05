@@ -1,12 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Button, Empty, Spin, Switch } from '@douyinfe/semi-ui';
+import { Button, Spin } from '@douyinfe/semi-ui';
 import {
   IconBackward,
   IconForward,
   IconMute,
   IconPause,
   IconPlay,
-  IconUpload,
   IconVolume1,
   IconVolume2,
 } from '@douyinfe/semi-icons';
@@ -14,7 +13,9 @@ import { VideoViewerWrapper } from './style';
 import { useRegisterMediaEntry } from '@/hooks/useMediaRegistry';
 import { fetchNodeDetailById, updateNodeConfig } from '@/features/file-explorer/services/file.api';
 import { runtimeLogger } from '@/utils/runtimeLogger';
-import { findActiveSubtitleCue, parseVideoSubtitle, type VideoSubtitleCue } from './subtitle';
+import type { FileViewerSubtitleSource } from '@/contexts/file-viewer.context';
+import VideoSubtitlePanel from './VideoSubtitlePanel';
+import { useVideoSubtitles } from './useVideoSubtitles';
 
 interface VideoViewerProps {
   nodeId?: number | null;
@@ -22,6 +23,7 @@ interface VideoViewerProps {
   fileName?: string | null;
   active?: boolean;
   tabId: string;
+  subtitleSources?: FileViewerSubtitleSource[];
 }
 
 interface VideoPlaybackProgress {
@@ -33,12 +35,6 @@ interface VideoPlaybackProgress {
 const SEEK_SECONDS = 5;
 const PLAYBACK_RATES = [0.75, 1, 1.25, 1.5, 2];
 const PLACEHOLDER_TOOL_OPTIONS = ['同名字幕自动发现', '双语字幕', '片段标注', 'AI 字幕'];
-const DEFAULT_SUBTITLE_FONT_SIZE = 44;
-const MIN_SUBTITLE_FONT_SIZE = 28;
-const MAX_SUBTITLE_FONT_SIZE = 72;
-const DEFAULT_SUBTITLE_BOTTOM_OFFSET = 72;
-const MIN_SUBTITLE_BOTTOM_OFFSET = 36;
-const MAX_SUBTITLE_BOTTOM_OFFSET = 160;
 const VIDEO_PROGRESS_CACHE_MAX_ENTRIES = 48;
 const VIDEO_PROGRESS_REMOTE_SYNC_INTERVAL_MS = 8000;
 const RESTORE_MIN_SECONDS = 2;
@@ -161,14 +157,19 @@ function isProgressNewer(
   return candidateTime > currentTime;
 }
 
-const VideoViewer: React.FC<VideoViewerProps> = ({ nodeId, url, fileName, active = true, tabId }) => {
+const VideoViewer: React.FC<VideoViewerProps> = ({
+  nodeId,
+  url,
+  fileName,
+  active = true,
+  tabId,
+  subtitleSources,
+}) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const progressRef = useRef<HTMLDivElement>(null);
-  const subtitleInputRef = useRef<HTMLInputElement>(null);
   const volumeControlRef = useRef<HTMLDivElement>(null);
   const rateControlRef = useRef<HTMLDivElement>(null);
-  const subtitleLoadRequestIdRef = useRef(0);
   const remoteProgressRequestIdRef = useRef(0);
   const remoteProgressSyncTimerRef = useRef<number>(0);
   const remoteProgressSyncInFlightRef = useRef(false);
@@ -195,16 +196,33 @@ const VideoViewer: React.FC<VideoViewerProps> = ({ nodeId, url, fileName, active
   const [isMuted, setIsMuted] = useState(false);
   const [playbackRate, setPlaybackRate] = useState(1);
   const [isConsoleOpen, setIsConsoleOpen] = useState(true);
-  const [subtitleEnabled, setSubtitleEnabled] = useState(true);
-  const [subtitleFileName, setSubtitleFileName] = useState('');
-  const [subtitleError, setSubtitleError] = useState<string | null>(null);
-  const [subtitleCues, setSubtitleCues] = useState<VideoSubtitleCue[]>([]);
-  const [subtitleFontSize, setSubtitleFontSize] = useState(DEFAULT_SUBTITLE_FONT_SIZE);
-  const [subtitleBottomOffset, setSubtitleBottomOffset] = useState(DEFAULT_SUBTITLE_BOTTOM_OFFSET);
   const [isVolumePanelOpen, setIsVolumePanelOpen] = useState(false);
   const [isRatePanelOpen, setIsRatePanelOpen] = useState(false);
 
   const progressCacheKey = useMemo(() => resolveVideoProgressCacheKey(url, nodeId), [nodeId, url]);
+  const {
+    activeSubtitleCue,
+    clearSubtitle,
+    handleSubtitleFileChange,
+    librarySubtitleSources,
+    loadLibrarySubtitle,
+    loadedSubtitleSourceId,
+    openSubtitlePicker,
+    setSubtitleBottomOffset,
+    setSubtitleEnabled,
+    setSubtitleFontSize,
+    subtitleBottomOffset,
+    subtitleCues,
+    subtitleEnabled,
+    subtitleError,
+    subtitleFileName,
+    subtitleFontSize,
+    subtitleInputRef,
+  } = useVideoSubtitles({
+    currentTime,
+    subtitleSources,
+    url,
+  });
 
   const captureVideoThumbnail = useCallback((): boolean => {
     const video = videoRef.current;
@@ -453,7 +471,6 @@ const VideoViewer: React.FC<VideoViewerProps> = ({ nodeId, url, fileName, active
     isMountedRef.current = true;
     return () => {
       isMountedRef.current = false;
-      subtitleLoadRequestIdRef.current += 1;
     };
   }, []);
 
@@ -532,7 +549,6 @@ const VideoViewer: React.FC<VideoViewerProps> = ({ nodeId, url, fileName, active
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
-    subtitleLoadRequestIdRef.current += 1;
     remoteProgressRequestIdRef.current += 1;
     viewMetaBaseReadyRef.current = false;
     viewMetaBaseRef.current = {};
@@ -552,10 +568,6 @@ const VideoViewer: React.FC<VideoViewerProps> = ({ nodeId, url, fileName, active
     setDuration(0);
     setIsPlaying(false);
     setIsBuffering(true);
-    setSubtitleFileName('');
-    setSubtitleError(null);
-    setSubtitleCues([]);
-    setSubtitleEnabled(true);
   }, [progressCacheKey, url]);
 
   useEffect(() => {
@@ -708,58 +720,6 @@ const VideoViewer: React.FC<VideoViewerProps> = ({ nodeId, url, fileName, active
   };
 
   const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
-  const activeSubtitleCue = useMemo(() => {
-    if (!subtitleEnabled) return null;
-    return findActiveSubtitleCue(subtitleCues, currentTime);
-  }, [currentTime, subtitleCues, subtitleEnabled]);
-
-  const openSubtitlePicker = useCallback(() => {
-    subtitleInputRef.current?.click();
-  }, []);
-
-  const clearSubtitle = useCallback(() => {
-    subtitleLoadRequestIdRef.current += 1;
-    setSubtitleFileName('');
-    setSubtitleError(null);
-    setSubtitleCues([]);
-    setSubtitleEnabled(true);
-  }, []);
-
-  const handleSubtitleFileChange = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    const requestId = subtitleLoadRequestIdRef.current + 1;
-    subtitleLoadRequestIdRef.current = requestId;
-
-    try {
-      const raw = await file.text();
-      if (!isMountedRef.current || requestId !== subtitleLoadRequestIdRef.current) {
-        return;
-      }
-      const cues = parseVideoSubtitle(raw);
-      if (cues.length === 0) {
-        setSubtitleFileName('');
-        setSubtitleCues([]);
-        setSubtitleError('字幕文件没有解析出有效时间轴，当前先支持常见的 .srt / .vtt 格式。');
-        return;
-      }
-      setSubtitleFileName(file.name);
-      setSubtitleCues(cues);
-      setSubtitleError(null);
-      setSubtitleEnabled(true);
-    } catch (error) {
-      if (!isMountedRef.current || requestId !== subtitleLoadRequestIdRef.current) {
-        return;
-      }
-      runtimeLogger.error('读取字幕文件失败:', error);
-      setSubtitleFileName('');
-      setSubtitleCues([]);
-      setSubtitleError('字幕文件读取失败，请重新选择。');
-    } finally {
-      event.target.value = '';
-    }
-  }, []);
-
   const displayedVolume = Math.round((isMuted ? 0 : volume) * 100);
 
   return (
@@ -770,7 +730,7 @@ const VideoViewer: React.FC<VideoViewerProps> = ({ nodeId, url, fileName, active
             ref={subtitleInputRef}
             className="subtitle-file-input"
             type="file"
-            accept=".srt,.vtt,text/vtt,application/x-subrip"
+            accept=".srt,.vtt,.ass,.ssa,.lrc,text/vtt,application/x-subrip"
             onChange={handleSubtitleFileChange}
           />
 
@@ -893,128 +853,67 @@ const VideoViewer: React.FC<VideoViewerProps> = ({ nodeId, url, fileName, active
 
         <aside className={`console-panel ${isConsoleOpen ? 'open' : 'closed'}`}>
           <div className="console-body">
-              <div className="console-section">
-                <div className="section-header">
-                  <span className="section-title">视频操作台</span>
-                  <span className="section-meta">{fileName || '当前视频'}</span>
-                </div>
-                <p className="section-description">
-                  这是视频专属的右侧控制区，后面可以继续往这里加字幕、标注、片段和更多播放能力。
-                </p>
+            <div className="console-section">
+              <div className="section-header">
+                <span className="section-title">视频操作台</span>
+                <span className="section-meta">{fileName || '当前视频'}</span>
               </div>
+              <p className="section-description">
+                这是视频专属的右侧控制区，后面可以继续往这里加字幕、标注、片段和更多播放能力。
+              </p>
+            </div>
 
-              <div className="console-section">
-                <div className="section-header">
-                  <span className="section-title">字幕</span>
-                  <Switch checked={subtitleEnabled} disabled={subtitleCues.length === 0} onChange={setSubtitleEnabled} />
-                </div>
-                <div className="section-actions">
-                  <Button icon={<IconUpload />} onClick={openSubtitlePicker}>
-                    加载字幕
-                  </Button>
-                  <Button disabled={subtitleCues.length === 0} onClick={clearSubtitle}>
-                    清除字幕
-                  </Button>
+            <VideoSubtitlePanel
+              activeSubtitleCue={activeSubtitleCue}
+              clearSubtitle={clearSubtitle}
+              librarySubtitleSources={librarySubtitleSources}
+              loadLibrarySubtitle={(source) => {
+                void loadLibrarySubtitle(source);
+              }}
+              loadedSubtitleSourceId={loadedSubtitleSourceId}
+              openSubtitlePicker={openSubtitlePicker}
+              setSubtitleBottomOffset={setSubtitleBottomOffset}
+              setSubtitleEnabled={setSubtitleEnabled}
+              setSubtitleFontSize={setSubtitleFontSize}
+              subtitleBottomOffset={subtitleBottomOffset}
+              subtitleCues={subtitleCues}
+              subtitleEnabled={subtitleEnabled}
+              subtitleError={subtitleError}
+              subtitleFileName={subtitleFileName}
+              subtitleFontSize={subtitleFontSize}
+            />
+
+            <div className="console-section">
+              <div className="section-header">
+                <span className="section-title">播放状态</span>
+                <span className="section-meta">{isPlaying ? '播放中' : '已暂停'}</span>
+              </div>
+              <div className="info-grid">
+                <div className="info-card">
+                  <span className="info-label">播放速率</span>
+                  <span className="info-value">{playbackRate}x</span>
                 </div>
                 <div className="info-card">
-                  <span className="info-label">当前文件</span>
-                  <span className="info-value">{subtitleFileName || '未加载字幕文件'}</span>
+                  <span className="info-label">音量</span>
+                  <span className="info-value">{Math.round((isMuted ? 0 : volume) * 100)}%</span>
                 </div>
-                {subtitleError && (
-                  <div className="inline-alert error">{subtitleError}</div>
-                )}
-                {!subtitleError && subtitleCues.length > 0 && (
-                  <>
-                    <div className="info-grid">
-                      <div className="info-card">
-                        <span className="info-label">字幕片段</span>
-                        <span className="info-value">{subtitleCues.length}</span>
-                      </div>
-                      <div className="info-card">
-                        <span className="info-label">当前状态</span>
-                        <span className="info-value">{activeSubtitleCue ? '跟随播放中' : '等待下一句'}</span>
-                      </div>
-                    </div>
-                    <label className="slider-field">
-                      <span>字号</span>
-                      <div className="slider-row">
-                        <input
-                          type="range"
-                          min={String(MIN_SUBTITLE_FONT_SIZE)}
-                          max={String(MAX_SUBTITLE_FONT_SIZE)}
-                          step="1"
-                          value={subtitleFontSize}
-                          onChange={event => setSubtitleFontSize(Number(event.target.value))}
-                        />
-                        <strong>{subtitleFontSize}px</strong>
-                      </div>
-                    </label>
-                    <label className="slider-field">
-                      <span>底部位置</span>
-                      <div className="slider-row">
-                        <input
-                          type="range"
-                          min={String(MIN_SUBTITLE_BOTTOM_OFFSET)}
-                          max={String(MAX_SUBTITLE_BOTTOM_OFFSET)}
-                          step="2"
-                          value={subtitleBottomOffset}
-                          onChange={event => setSubtitleBottomOffset(Number(event.target.value))}
-                        />
-                        <strong>{subtitleBottomOffset}px</strong>
-                      </div>
-                    </label>
-                    <div className="subtitle-preview">
-                      {activeSubtitleCue ? (
-                        activeSubtitleCue.lines.map((line, index) => (
-                          <span key={`${activeSubtitleCue.id}-preview-${index}`}>{line}</span>
-                        ))
-                      ) : (
-                        <span>字幕已加载，播放到对应时间点后会固定显示在主画面底部。</span>
-                      )}
-                    </div>
-                  </>
-                )}
-                {!subtitleError && subtitleCues.length === 0 && (
-                  <div className="console-empty">
-                    <Empty
-                      title="还没有字幕"
-                      description="先加载一个 .srt 或 .vtt 文件，字幕会固定显示在视频主内容区域。"
-                    />
-                  </div>
-                )}
               </div>
+              <p className="section-description">
+                基础播放控制仍然放在底部控制条；右侧操作台主要承接视频扩展能力，避免和其他 viewer 混在一起。
+              </p>
+            </div>
 
-              <div className="console-section">
-                <div className="section-header">
-                  <span className="section-title">播放状态</span>
-                  <span className="section-meta">{isPlaying ? '播放中' : '已暂停'}</span>
-                </div>
-                <div className="info-grid">
-                  <div className="info-card">
-                    <span className="info-label">播放速率</span>
-                    <span className="info-value">{playbackRate}x</span>
-                  </div>
-                  <div className="info-card">
-                    <span className="info-label">音量</span>
-                    <span className="info-value">{Math.round((isMuted ? 0 : volume) * 100)}%</span>
-                  </div>
-                </div>
-                <p className="section-description">
-                  基础播放控制仍然放在底部控制条；右侧操作台主要承接视频扩展能力，避免和其他 viewer 混在一起。
-                </p>
+            <div className="console-section">
+              <div className="section-header">
+                <span className="section-title">预留能力</span>
+                <span className="section-meta">后续扩展</span>
               </div>
-
-              <div className="console-section">
-                <div className="section-header">
-                  <span className="section-title">预留能力</span>
-                  <span className="section-meta">后续扩展</span>
-                </div>
-                <div className="placeholder-grid">
-                  {PLACEHOLDER_TOOL_OPTIONS.map(item => (
-                    <span key={item} className="placeholder-chip">{item}</span>
-                  ))}
-                </div>
+              <div className="placeholder-grid">
+                {PLACEHOLDER_TOOL_OPTIONS.map(item => (
+                  <span key={item} className="placeholder-chip">{item}</span>
+                ))}
               </div>
+            </div>
           </div>
         </aside>
       </div>

@@ -3,7 +3,8 @@ import {
   FileViewerContext,
   type FileViewerState,
   type FileViewerTab,
-  type FileViewerReturnTarget,
+  type FileViewerOpenOptions,
+  type FileViewerSubtitleSource,
 } from './file-viewer.context';
 import {
   getFileViewerStateCache,
@@ -42,6 +43,7 @@ function toFileState(tab: FileViewerTab | null): FileViewerState {
     fileName: tab.fileName,
     fileType: tab.fileType,
     tabTypeLabel: tab.tabTypeLabel ?? null,
+    videoSubtitleSources: tab.videoSubtitleSources,
     loading: tab.loading,
   };
 }
@@ -51,6 +53,16 @@ function resolveTabId(url: string, nodeId?: number | null): string {
     return `node:${nodeId}`;
   }
   return `url:${url}`;
+}
+
+function normalizeVideoSubtitleSources(
+  sources: FileViewerSubtitleSource[] | null | undefined,
+): FileViewerSubtitleSource[] | undefined {
+  if (!sources || sources.length === 0) return undefined;
+  return sources.map(source => ({
+    ...source,
+    sortOrder: source.sortOrder ?? null,
+  }));
 }
 
 function normalizeStoreState(raw: FileViewerStoreState | null | undefined): FileViewerStoreState {
@@ -152,10 +164,7 @@ export const FileViewerProvider: React.FC<{ children: ReactNode; cacheKey?: stri
     fileName: string | null,
     fileType: FileViewerFileType | null,
     nodeId?: number | null,
-    options?: {
-      tabTypeLabel?: string | null;
-      returnTarget?: FileViewerReturnTarget | null;
-    },
+    options?: FileViewerOpenOptions,
   ) => {
     if (!url) {
       setViewerState(prev => ({
@@ -169,6 +178,7 @@ export const FileViewerProvider: React.FC<{ children: ReactNode; cacheKey?: stri
     const tabId = resolveTabId(url, nodeId);
     setViewerState(prev => {
       const existingTab = prev.tabs.find(tab => tab.id === tabId);
+      const videoSubtitleSources = normalizeVideoSubtitleSources(options?.videoSubtitleSources);
       const nextTab: FileViewerTab = {
         id: tabId,
         nodeId: nodeId ?? null,
@@ -177,6 +187,7 @@ export const FileViewerProvider: React.FC<{ children: ReactNode; cacheKey?: stri
         fileType,
         tabTypeLabel: options?.tabTypeLabel ?? null,
         returnTarget: options?.returnTarget ?? null,
+        videoSubtitleSources,
         loading: false,
         reloadToken: existingTab?.reloadToken ?? 0,
       };

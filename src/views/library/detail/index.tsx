@@ -87,6 +87,7 @@ import {
   type WorkspaceDisplayMode,
 } from "./workspace-state";
 import type { FileViewerFileType } from '@/shared/file-viewer-types';
+import type { FileViewerOpenOptions } from '@/contexts/file-viewer.context';
 import {
   BOOKMARK_TOOLBAR_HORIZONTAL_PADDING,
   MAX_BROWSER_RESOURCE_PANEL_WIDTH,
@@ -553,16 +554,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
     fileName: string,
     fileType: FileViewerFileType,
     nodeId: number,
-    options?: {
-      tabTypeLabel?: string | null;
-      returnTarget?: {
-        fileUrl: string;
-        fileName: string | null;
-        fileType: FileViewerFileType;
-        nodeId: number | null;
-        tabTypeLabel?: string | null;
-      } | null;
-    },
+    options?: FileViewerOpenOptions,
   ) => {
     setBrowserModeOpen(false);
     setWorkspaceDisplayMode('file-viewer');

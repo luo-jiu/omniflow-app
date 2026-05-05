@@ -6,6 +6,7 @@ import React from 'react';
 import { useDesktopAutoImport } from './hooks/useDesktopAutoImport';
 import { TREE_REFRESH_DIRECTORY_EVENT, type TreeRefreshDirectoryDetail } from './services/tree-locate';
 import type { FileViewerFileType } from '@/shared/file-viewer-types';
+import type { FileViewerOpenOptions } from '@/contexts/file-viewer.context';
 
 interface Props {
   libraryId: number;
@@ -14,16 +15,7 @@ interface Props {
     fileName: string,
     fileType: FileViewerFileType,
     nodeId: number,
-    options?: {
-      tabTypeLabel?: string | null;
-      returnTarget?: {
-        fileUrl: string;
-        fileName: string | null;
-        fileType: FileViewerFileType;
-        nodeId: number | null;
-        tabTypeLabel?: string | null;
-      } | null;
-    },
+    options?: FileViewerOpenOptions,
   ) => void;
   onOpenFileInBrowser?: (payload: {
     fileExt: string;

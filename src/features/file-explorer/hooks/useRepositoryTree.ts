@@ -34,6 +34,7 @@ import {
   hasRepositoryTreeSnapshot,
 } from './use-repository-tree/snapshot-store';
 import type { FileViewerFileType } from '@/shared/file-viewer-types';
+import type { FileViewerOpenOptions } from '@/contexts/file-viewer.context';
 
 const PENDING_APPEND_RETRY_INTERVAL_MS = 420;
 const PENDING_APPEND_MAX_RETRY = 40;
@@ -56,16 +57,7 @@ export function useRepositoryTree(
     fileName: string,
     fileType: FileViewerFileType,
     nodeId: number,
-    options?: {
-      tabTypeLabel?: string | null;
-      returnTarget?: {
-        fileUrl: string;
-        fileName: string | null;
-        fileType: FileViewerFileType;
-        nodeId: number | null;
-        tabTypeLabel?: string | null;
-      } | null;
-    },
+    options?: FileViewerOpenOptions,
   ) => void,
 ) {
   const cachedSnapshot = getRepositoryTreeSnapshot(libraryId);

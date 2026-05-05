@@ -216,6 +216,64 @@ export const VideoViewerWrapper = styled.div`
     word-break: break-word;
   }
 
+  .subtitle-source-list {
+    border-radius: 7px;
+    background: var(--semi-color-fill-0);
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 132px;
+    overflow: auto;
+  }
+
+  .subtitle-source-title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: var(--video-font-caption);
+    color: var(--semi-color-text-2);
+  }
+
+  .subtitle-source-title strong {
+    font-size: var(--video-font-caption);
+    color: var(--semi-color-text-1);
+  }
+
+  .subtitle-source-item {
+    border: 1px solid var(--semi-color-border);
+    border-radius: 6px;
+    background: var(--semi-color-bg-1);
+    color: var(--semi-color-text-1);
+    min-height: 26px;
+    padding: 0 8px;
+    font-size: var(--video-font-body);
+    text-align: left;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    min-width: 0;
+  }
+
+  .subtitle-source-item span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .subtitle-source-item:hover {
+    border-color: var(--semi-color-primary-light-default);
+    color: var(--semi-color-primary);
+  }
+
+  .subtitle-source-item.active {
+    border-color: transparent;
+    background: var(--semi-color-primary-light-default);
+    color: var(--semi-color-primary);
+    font-weight: 700;
+  }
+
   .inline-alert {
     border-radius: 7px;
     padding: 7px 8px;

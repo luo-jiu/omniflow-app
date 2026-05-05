@@ -8,7 +8,6 @@ import {
   getFileLink,
   renameNode,
 } from '@/features/file-explorer/services/file.api';
-import { resolvePreviewFileType } from '@/utils/preview-file-type';
 import { runtimeLogger } from '@/utils/runtimeLogger';
 import { VideoArchiveViewerWrapper } from './style';
 import { useFileViewer } from '@/hooks/useFileViewer';
@@ -16,6 +15,15 @@ import { useArchiveCardGrid } from '@/features/archive-viewer/hooks/useArchiveCa
 import ContextMenu, { type ContextMenuItem } from '@/components/ui/context-menu';
 import { locateNodeInDirectoryTree } from '@/features/file-explorer/services/tree-locate';
 import { useNodePropertiesOverlay } from '@/features/file-explorer/hooks/useNodePropertiesOverlay';
+import type { FileViewerSubtitleSource } from '@/contexts/file-viewer.context';
+import {
+  buildVideoArchiveSidecarIndex,
+  buildVideoSubtitleSources,
+  normalizeVideoArchiveMatchName,
+  VIDEO_ARCHIVE_EMPTY_SIDECARS,
+  type VideoArchiveChildNode,
+  type VideoArchiveSidecarIndex,
+} from './video-archive-sidecars';
 
 interface VideoArchiveViewerProps {
   folderNodeId: number | null;
@@ -36,19 +44,6 @@ interface VideoArchiveCard {
   durationSeconds?: number;
 }
 
-interface VideoArchiveChildNode {
-  id: number;
-  name?: string;
-  type?: string;
-  ext?: string;
-  mimeType?: string;
-}
-
-interface VideoArchiveSidecarIndex {
-  coverNodeIdByName: Map<string, number>;
-  subtitleCountByName: Map<string, number>;
-}
-
 interface VideoArchiveSnapshot {
   hasLoadedList: boolean;
   cards: VideoArchiveCard[];
@@ -62,11 +57,6 @@ const PAGE_SIZE = 24;
 const LINK_EXPIRY_MINUTES = 120;
 const VIDEO_ARCHIVE_CACHE_MAX_ENTRIES = 24;
 const VIDEO_PREVIEW_SAMPLE_TIME = 0.5;
-const VIDEO_ARCHIVE_EMPTY_SIDECARS: VideoArchiveSidecarIndex = {
-  coverNodeIdByName: new Map(),
-  subtitleCountByName: new Map(),
-};
-const VIDEO_SUBTITLE_EXTENSIONS = new Set(['lrc', 'srt', 'vtt', 'ass', 'ssa']);
 
 const EMPTY_VIDEO_ARCHIVE_SNAPSHOT: VideoArchiveSnapshot = {
   hasLoadedList: false,
@@ -99,49 +89,6 @@ function normalizeArchiveTitle(fileName?: string | null): string {
 function resolveReaderCacheKey(fileUrl: string, folderNodeId: number | null): string | null {
   if (!folderNodeId || !Number.isFinite(folderNodeId)) return null;
   return `${String(fileUrl || '').trim()}::${folderNodeId}`;
-}
-
-function normalizeVideoArchiveExtension(ext?: string): string {
-  return String(ext || '').trim().toLowerCase().replace(/^\./, '');
-}
-
-function normalizeVideoArchiveMatchName(name?: string, ext?: string): string {
-  const normalizedName = String(name || '').trim().toLowerCase();
-  const normalizedExt = normalizeVideoArchiveExtension(ext);
-  if (!normalizedName || !normalizedExt || !normalizedName.endsWith(`.${normalizedExt}`)) {
-    return normalizedName;
-  }
-  return normalizedName.slice(0, -(normalizedExt.length + 1)).trim();
-}
-
-function isVideoArchiveCoverNode(item: VideoArchiveChildNode): boolean {
-  return item.type === 'file' && resolvePreviewFileType(item.mimeType, item.ext) === 'image';
-}
-
-function isVideoArchiveSubtitleNode(item: VideoArchiveChildNode): boolean {
-  return item.type === 'file' && VIDEO_SUBTITLE_EXTENSIONS.has(normalizeVideoArchiveExtension(item.ext));
-}
-
-function buildVideoArchiveSidecarIndex(children: VideoArchiveChildNode[]): VideoArchiveSidecarIndex {
-  const coverNodeIdByName = new Map<string, number>();
-  const subtitleCountByName = new Map<string, number>();
-
-  children.forEach((item) => {
-    const matchName = normalizeVideoArchiveMatchName(item.name, item.ext);
-    if (!matchName || item.id <= 0) return;
-    if (isVideoArchiveCoverNode(item) && !coverNodeIdByName.has(matchName)) {
-      coverNodeIdByName.set(matchName, item.id);
-      return;
-    }
-    if (isVideoArchiveSubtitleNode(item)) {
-      subtitleCountByName.set(matchName, (subtitleCountByName.get(matchName) || 0) + 1);
-    }
-  });
-
-  return {
-    coverNodeIdByName,
-    subtitleCountByName,
-  };
 }
 
 function setArchiveSnapshotCache(cacheKey: string, snapshot: VideoArchiveSnapshot) {
@@ -486,7 +433,7 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
         const sidecarCoverNodeId = matchName ? sidecarIndex.coverNodeIdByName.get(matchName) ?? null : null;
         const subtitleCount = Math.max(
           Number(item.subtitleCount ?? 0),
-          matchName ? sidecarIndex.subtitleCountByName.get(matchName) ?? 0 : 0,
+          matchName ? sidecarIndex.subtitlesByName.get(matchName)?.length ?? 0 : 0,
         );
         return {
           id: cardId,
@@ -550,6 +497,32 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
     void loadPage(nextOffset, true);
   }, [hasMore, listLoading, loadingMore, loadPage, nextOffset]);
 
+  const loadCardSubtitleSources = useCallback(async (
+    card: VideoArchiveCard,
+  ): Promise<FileViewerSubtitleSource[]> => {
+    if (!libraryId) return [];
+
+    if (card.mediaNodeId && card.mediaNodeId !== card.id) {
+      try {
+        const children = (await getChildrenByNodeId(card.id, libraryId)) as VideoArchiveChildNode[];
+        return buildVideoSubtitleSources(children, libraryId);
+      } catch (error) {
+        runtimeLogger.warn('加载视频单元字幕失败:', error);
+        return [];
+      }
+    }
+
+    try {
+      const sidecarIndex = await loadVideoArchiveSidecarIndex();
+      const matchName = normalizeVideoArchiveMatchName(card.title);
+      const sidecars = matchName ? sidecarIndex.subtitlesByName.get(matchName) ?? [] : [];
+      return buildVideoSubtitleSources(sidecars, libraryId);
+    } catch (error) {
+      runtimeLogger.warn('加载历史视频同名字幕失败:', error);
+      return [];
+    }
+  }, [libraryId, loadVideoArchiveSidecarIndex]);
+
   const handleOpenCard = useCallback(async (card: VideoArchiveCard) => {
     if (!libraryId) {
       Toast.error('当前库参数异常');
@@ -560,6 +533,7 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
       if (!nextUrl) {
         throw new Error('未获取到视频访问链接');
       }
+      const videoSubtitleSources = await loadCardSubtitleSources(card);
       setFileUrl(
         nextUrl,
         card.title,
@@ -574,13 +548,14 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
             nodeId: folderNodeId,
             tabTypeLabel: 'VIDEO-ARCHIVE',
           },
+          videoSubtitleSources,
         },
       );
     } catch (error: any) {
       runtimeLogger.error('打开视频归档卡片失败:', error);
       Toast.error(error?.message || '打开视频失败');
     }
-  }, [fileName, fileUrl, folderNodeId, libraryId, setFileUrl, title]);
+  }, [fileName, fileUrl, folderNodeId, libraryId, loadCardSubtitleSources, setFileUrl, title]);
 
   useEffect(() => {
     requestIdRef.current += 1;

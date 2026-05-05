@@ -13,12 +13,14 @@ import VideoArchiveViewer from "../../../archive-viewer/components/video-archive
 import AudioArchiveViewer from "../../../archive-viewer/components/audio-archive-viewer";
 import styled from 'styled-components';
 import type { FileViewerFileType } from '@/shared/file-viewer-types';
+import type { FileViewerSubtitleSource } from '@/contexts/file-viewer.context';
 
 interface FileDispatcherProps {
   nodeId: number | null;
   fileUrl: string | null;
   fileName: string | null;
   fileType: FileViewerFileType | null;
+  videoSubtitleSources?: FileViewerSubtitleSource[];
   loading: boolean;
   active?: boolean;
   reloadToken?: number;
@@ -77,6 +79,7 @@ const FileDispatcher: React.FC<FileDispatcherProps> = ({
   fileUrl,
   fileName,
   fileType,
+  videoSubtitleSources,
   loading,
   active = true,
   reloadToken = 0,
@@ -102,7 +105,16 @@ const FileDispatcher: React.FC<FileDispatcherProps> = ({
       return <AudioViewer nodeId={nodeId} url={fileUrl} fileName={fileName} active={active} tabId={tabId} />;
 
     case 'video':
-      return <VideoViewer nodeId={nodeId} url={fileUrl} fileName={fileName} active={active} tabId={tabId} />;
+      return (
+        <VideoViewer
+          nodeId={nodeId}
+          url={fileUrl}
+          fileName={fileName}
+          active={active}
+          tabId={tabId}
+          subtitleSources={videoSubtitleSources}
+        />
+      );
 
     case 'pdf':
       return <PdfViewer nodeId={nodeId} url={fileUrl} fileName={fileName} active={active} reloadToken={reloadToken} />;

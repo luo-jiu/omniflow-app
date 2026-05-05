@@ -99,6 +99,7 @@ const AppMain: FC<IProps> = ({ hideTabsBar = false }) => {
                   fileUrl={tab.fileUrl}
                   fileName={tab.fileName}
                   fileType={tab.fileType}
+                  videoSubtitleSources={tab.videoSubtitleSources}
                   loading={tab.loading}
                   active={isActive}
                   reloadToken={tab.reloadToken ?? 0}

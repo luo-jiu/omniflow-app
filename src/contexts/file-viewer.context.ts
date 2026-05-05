@@ -9,12 +9,28 @@ export interface FileViewerReturnTarget {
   tabTypeLabel?: string | null;
 }
 
+export interface FileViewerSubtitleSource {
+  id: string;
+  sourceType: 'library';
+  fileName: string;
+  nodeId: number;
+  libraryId: number;
+  sortOrder?: number | null;
+}
+
+export interface FileViewerOpenOptions {
+  tabTypeLabel?: string | null;
+  returnTarget?: FileViewerReturnTarget | null;
+  videoSubtitleSources?: FileViewerSubtitleSource[];
+}
+
 export interface FileViewerState {
   nodeId: number | null;
   fileUrl: string | null;
   fileName: string | null;
   fileType: FileViewerFileType | null;
   tabTypeLabel?: string | null;
+  videoSubtitleSources?: FileViewerSubtitleSource[];
   loading: boolean;
 }
 
@@ -26,6 +42,7 @@ export interface FileViewerTab {
   fileType: FileViewerFileType | null;
   tabTypeLabel?: string | null;
   returnTarget?: FileViewerReturnTarget | null;
+  videoSubtitleSources?: FileViewerSubtitleSource[];
   loading: boolean;
   reloadToken?: number;
 }
@@ -39,10 +56,7 @@ export interface FileViewerContextType {
     fileName: string | null,
     fileType: FileViewerFileType | null,
     nodeId?: number | null,
-    options?: {
-      tabTypeLabel?: string | null;
-      returnTarget?: FileViewerReturnTarget | null;
-    },
+    options?: FileViewerOpenOptions,
   ) => void;
   setLoading: (loading: boolean) => void;
   activateTab: (tabId: string) => void;

@@ -64,7 +64,7 @@ function parseSubtitleBlock(block: string, index: number): VideoSubtitleCue | nu
   };
 }
 
-export function parseVideoSubtitle(raw: string): VideoSubtitleCue[] {
+function parseSrtOrVttSubtitle(raw: string): VideoSubtitleCue[] {
   const normalized = normalizeSubtitleText(raw);
   if (!normalized) return [];
 
@@ -78,6 +78,113 @@ export function parseVideoSubtitle(raw: string): VideoSubtitleCue[] {
     .map((block, index) => parseSubtitleBlock(block, index))
     .filter((item): item is VideoSubtitleCue => Boolean(item))
     .sort((left, right) => left.start - right.start);
+}
+
+function cleanAssText(raw: string): string[] {
+  return raw
+    .replace(/\{[^}]*\}/gu, '')
+    .replace(/\\N|\\n/gu, '\n')
+    .replace(/\\h/gu, ' ')
+    .split('\n')
+    .map(line => line.trim())
+    .filter(Boolean);
+}
+
+function splitAssDialoguePayload(payload: string, expectedColumns: number): string[] {
+  const columns = payload.split(',');
+  if (expectedColumns <= 1 || columns.length <= expectedColumns) {
+    return columns.map(item => item.trim());
+  }
+  const head = columns.slice(0, expectedColumns - 1).map(item => item.trim());
+  const text = columns.slice(expectedColumns - 1).join(',').trim();
+  return [...head, text];
+}
+
+function parseAssSubtitle(raw: string): VideoSubtitleCue[] {
+  const normalized = normalizeSubtitleText(raw);
+  if (!normalized || !/\[events\]/iu.test(normalized)) return [];
+
+  const cues: VideoSubtitleCue[] = [];
+  let inEvents = false;
+  let formatColumns: string[] = [];
+
+  normalized.split('\n').forEach((line) => {
+    const trimmed = line.trim();
+    if (!trimmed) return;
+    if (/^\[[^\]]+\]$/u.test(trimmed)) {
+      inEvents = /^\[events\]$/iu.test(trimmed);
+      return;
+    }
+    if (!inEvents) return;
+
+    const formatMatch = /^Format\s*:\s*(.+)$/iu.exec(trimmed);
+    if (formatMatch) {
+      formatColumns = formatMatch[1]
+        .split(',')
+        .map(item => item.trim().toLowerCase());
+      return;
+    }
+
+    const dialogueMatch = /^Dialogue\s*:\s*(.+)$/iu.exec(trimmed);
+    if (!dialogueMatch) return;
+
+    const expectedColumns = formatColumns.length || 10;
+    const values = splitAssDialoguePayload(dialogueMatch[1], expectedColumns);
+    const startIndex = formatColumns.indexOf('start');
+    const endIndex = formatColumns.indexOf('end');
+    const textIndex = formatColumns.indexOf('text');
+    const start = parseSubtitleTimestamp(values[startIndex >= 0 ? startIndex : 1] || '');
+    const end = parseSubtitleTimestamp(values[endIndex >= 0 ? endIndex : 2] || '');
+    const lines = cleanAssText(values[textIndex >= 0 ? textIndex : expectedColumns - 1] || '');
+    if (start === null || end === null || end <= start || lines.length === 0) return;
+
+    cues.push({
+      id: `subtitle-ass-${cues.length}-${start}-${end}`,
+      start,
+      end,
+      lines,
+    });
+  });
+
+  return cues.sort((left, right) => left.start - right.start);
+}
+
+function parseLrcSubtitle(raw: string): VideoSubtitleCue[] {
+  const normalized = normalizeSubtitleText(raw);
+  if (!normalized) return [];
+
+  const timedLines: Array<{ start: number; lines: string[] }> = [];
+  normalized.split('\n').forEach((line) => {
+    const matches = Array.from(line.matchAll(/\[(\d{1,2}:\d{2}(?:[.:]\d{1,3})?)\]/gu));
+    if (matches.length === 0) return;
+    const text = line.replace(/\[(\d{1,2}:\d{2}(?:[.:]\d{1,3})?)\]/gu, '').trim();
+    if (!text) return;
+    matches.forEach((match) => {
+      const start = parseSubtitleTimestamp(match[1]);
+      if (start === null) return;
+      timedLines.push({ start, lines: [text] });
+    });
+  });
+
+  return timedLines
+    .sort((left, right) => left.start - right.start)
+    .map((item, index, list) => ({
+      id: `subtitle-lrc-${index}-${item.start}`,
+      start: item.start,
+      end: list[index + 1]?.start ?? item.start + 4,
+      lines: item.lines,
+    }))
+    .filter(item => item.end > item.start);
+}
+
+export function parseVideoSubtitle(raw: string): VideoSubtitleCue[] {
+  const srtOrVttCues = parseSrtOrVttSubtitle(raw);
+  if (srtOrVttCues.length > 0) return srtOrVttCues;
+
+  const assCues = parseAssSubtitle(raw);
+  if (assCues.length > 0) return assCues;
+
+  return parseLrcSubtitle(raw);
 }
 
 export function findActiveSubtitleCue(
