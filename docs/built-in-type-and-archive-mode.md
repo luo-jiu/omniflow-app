@@ -93,13 +93,14 @@ OmniFlow 里有一组不是通用前端术语、而是项目自己定义出来�
 
 目录图标当前由内置类型和归档模式共同影响：
 
-- `DEF`（默认目录）使用 `folder-base.svg` / `folder-base-open.svg`
-- `COMIC` 目录使用漫画目录图标
-- `ASMR` 目录使用 ASMR 目录图标
-- `VIDEO` 目录使用视频文件夹图标
-- `AUDIO` 目录使用音频文件夹图标
+- `DEF`（默认目录）使用经典黄色文件夹图标 `folder-base.svg` / `folder-base-open.svg`
+- `COMIC` 非归档目录使用漫画文件夹图标；`COMIC + archiveMode=1` 使用漫画归档文件夹图标
+- `ASMR` 非归档目录使用 ASMR 文件夹图标；`ASMR + archiveMode=1` 使用 ASMR 归档文件夹图标
+- `VIDEO` 非归档目录使用视频文件夹图标；`VIDEO + archiveMode=1` 使用视频归档文件夹图标
+- `AUDIO` 非归档目录使用音频文件夹图标；`AUDIO + archiveMode=1` 使用音频归档文件夹图标
 - 五类目录图标都必须提供闭合 / 展开两态，目录树展开后切到对应 `*-open` 图标；切换由 `directory-tree/index.tsx` 的 `patchNodes` 根据 `expandedKeys` 完成
-- 归档与非归档同类型共享同一 SVG（如 audio 归档与非归档都用 `folder-audio.svg`），归档语义靠目录树文本绿色加粗（`tree-node-text-archive`）表达，不靠图标区分
+- 归档与非归档在所有内置类型目录上必须有图标区分：普通媒体文件继续按扩展名使用 `video.svg` / `audio.svg` 等文件图标，非归档内置目录使用 `folder-{type}.svg`，归档目录使用 `folder-{type}-archive.svg`；归档语义同时保留目录树文本绿色加粗（`tree-node-text-archive`）
+- 归档目录图标统一使用右下角绿色归档盒角标；同为音频符号的 `ASMR` 与 `AUDIO` 保持相同的音符图形，但 `ASMR` 使用樱花粉文件夹与高对比白色音符，`AUDIO` 使用红色文件夹与浅红音符，避免只靠名称判断
 - 未知内置类型会显示警告图标
 - 在某些归档语义不匹配的文件上会显示警告图标
 

@@ -426,17 +426,29 @@ export function getDirectoryBuiltInIcon(
     );
   }
   if (normalized === 'COMIC') {
-    return createIconNode(getMaterialIconUrl(expanded ? 'folder-comic-open' : 'folder-comic') || '', 'comic-folder');
+    const iconName = normalizedArchiveMode === 1
+      ? (expanded ? 'folder-comic-archive-open' : 'folder-comic-archive')
+      : (expanded ? 'folder-comic-open' : 'folder-comic');
+    return createIconNode(getMaterialIconUrl(iconName) || getMaterialIconUrl('folder-comic') || '', 'comic-folder');
   }
   if (normalized === 'ASMR') {
-    return createIconNode(getMaterialIconUrl(expanded ? 'folder-asmr-open' : 'folder-asmr') || '', 'asmr-folder');
+    const iconName = normalizedArchiveMode === 1
+      ? (expanded ? 'folder-asmr-archive-open' : 'folder-asmr-archive')
+      : (expanded ? 'folder-asmr-open' : 'folder-asmr');
+    return createIconNode(getMaterialIconUrl(iconName) || getMaterialIconUrl('folder-asmr') || '', 'asmr-folder');
   }
   if (normalized === 'VIDEO') {
-    return createIconNode(getMaterialIconUrl(expanded ? 'folder-video-open' : 'folder-video') || getMaterialIconUrl('video') || '', 'video-folder');
+    const iconName = normalizedArchiveMode === 1
+      ? (expanded ? 'folder-video-archive-open' : 'folder-video-archive')
+      : (expanded ? 'folder-video-open' : 'folder-video');
+    return createIconNode(getMaterialIconUrl(iconName) || getMaterialIconUrl('video') || '', 'video-folder');
   }
   if (normalized === 'AUDIO') {
+    const iconName = normalizedArchiveMode === 1
+      ? (expanded ? 'folder-audio-archive-open' : 'folder-audio-archive')
+      : (expanded ? 'folder-audio-open' : 'folder-audio');
     return createIconNode(
-      getMaterialIconUrl(expanded ? 'folder-audio-open' : 'folder-audio') || getMaterialIconUrl('audio') || '',
+      getMaterialIconUrl(iconName) || getMaterialIconUrl('audio') || '',
       'audio-folder',
     );
   }
