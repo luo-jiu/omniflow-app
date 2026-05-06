@@ -128,9 +128,10 @@
 
 ### 5.2 字幕解析
 
-字幕解析逻辑收口在：
+字幕 / 歌词这类按时间轴显示的文本解析逻辑收口在：
 
-- `src/features/file-viewer/components/video-viewer/subtitle.ts`
+- `src/features/file-viewer/timed-text/subtitle.ts`
+- `src/features/file-viewer/timed-text/useTimedText.ts`
 
 它负责：
 
@@ -139,7 +140,7 @@
 - 提取 cue 文本
 - 根据当前时间找到活跃 cue
 
-如果未来字幕功能继续膨胀，优先继续把字幕算法放在这里，而不是塞回 `index.tsx`。
+`VideoViewer`、普通 `AudioViewer` 和 `AudioArchiveViewer` 都应复用这层 timed text 能力。后续字幕 / 歌词功能继续膨胀时，优先继续把时间轴解析、库内文本读取和当前 cue 匹配放在这里，而不是塞回各 viewer 的 `index.tsx`。
 
 ### 5.3 工具台与宽屏模式
 

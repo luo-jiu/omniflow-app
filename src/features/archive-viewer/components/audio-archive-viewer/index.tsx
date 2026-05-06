@@ -25,8 +25,8 @@ import {
 } from '@/features/file-explorer/services/file.api';
 import { runtimeLogger } from '@/utils/runtimeLogger';
 import { useFileViewer } from '@/hooks/useFileViewer';
-import { globalAudioPlayer } from '@/features/file-viewer/services/global-audio-player';
-import { useVideoSubtitles } from '@/features/file-viewer/components/video-viewer/useVideoSubtitles';
+import { useGlobalAudioPlayback } from '@/features/file-viewer/hooks/useGlobalAudioPlayback';
+import { useTimedText } from '@/features/file-viewer/timed-text/useTimedText';
 import type {
   FileViewerAudioPlaylist,
   FileViewerSubtitleSource,
@@ -207,7 +207,6 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
   const [currentAudioUrl, setCurrentAudioUrl] = useState<string | null>(null);
   const [repeatMode, setRepeatMode] = useState<AudioRepeatMode>('list-loop');
   const [expanded, setExpanded] = useState(false);
-  const [playerState, setPlayerState] = useState(() => globalAudioPlayer.getState());
   const [activeSubtitleSources, setActiveSubtitleSources] = useState<FileViewerSubtitleSource[] | undefined>(undefined);
   const [menuState, setMenuState] = useState<{
     visible: boolean;
@@ -230,13 +229,17 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
     [cards, selectedCardId],
   );
   const effectiveCard = currentCard || selectedCard || cards[0] || null;
-  const isOwnedSource = Boolean(
-    archiveOwnerKey
-    && playerState.ownerType === 'default'
-    && playerState.ownerKey === archiveOwnerKey
-    && currentAudioUrl
-    && playerState.src === currentAudioUrl,
-  );
+  const {
+    ensureSource,
+    getPlayerState,
+    isOwnedSource: isOwnedArchiveSource,
+    play,
+    playerState,
+    setMuted,
+    setVolume,
+    togglePlay: toggleOwnedPlay,
+  } = useGlobalAudioPlayback({ ownerType: 'default', ownerKey: archiveOwnerKey });
+  const isOwnedSource = Boolean(isOwnedArchiveSource && currentAudioUrl && playerState.src === currentAudioUrl);
   const currentTime = isOwnedSource ? playerState.currentTime : 0;
   const duration = isOwnedSource ? playerState.duration : 0;
 
@@ -245,7 +248,7 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
     subtitleCues,
     subtitleError,
     subtitleFileName,
-  } = useVideoSubtitles({
+  } = useTimedText({
     currentTime,
     subtitleSources: activeSubtitleSources,
     url: currentAudioUrl || '',
@@ -254,11 +257,6 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
   useEffect(() => {
     activeSubtitleSourcesRef.current = activeSubtitleSources;
   }, [activeSubtitleSources]);
-
-  useEffect(() => {
-    setPlayerState(globalAudioPlayer.getState());
-    return globalAudioPlayer.subscribe(setPlayerState);
-  }, []);
 
   useEffect(() => {
     if (active) return;
@@ -489,22 +487,18 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
       if (!nextUrl) {
         throw new Error('未获取到音频访问链接');
       }
-      globalAudioPlayer.ensureSource(
-        nextUrl,
-        card.title,
-        { ownerType: 'default', ownerKey: archiveOwnerKey },
-      );
-      await globalAudioPlayer.play();
+      ensureSource(nextUrl, card.title);
+      await play();
       setCurrentCardId(card.id);
       setSelectedCardId(card.id);
       setCurrentAudioUrl(nextUrl);
       setActiveSubtitleSources(subtitleSources);
-      lastHandledEndedSerialRef.current = globalAudioPlayer.getState().endedSerial;
+      lastHandledEndedSerialRef.current = getPlayerState().endedSerial;
     } catch (playError: any) {
       runtimeLogger.error('播放音频归档歌曲失败:', playError);
       Toast.error(playError?.message || '播放音频失败');
     }
-  }, [archiveOwnerKey, libraryId, loadCardSubtitleSources]);
+  }, [archiveOwnerKey, ensureSource, getPlayerState, libraryId, loadCardSubtitleSources, play]);
 
   const currentCardIndex = useMemo(
     () => cards.findIndex(card => card.id === currentCardId),
@@ -542,7 +536,7 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
 
   const togglePlay = useCallback(() => {
     if (isOwnedSource) {
-      void globalAudioPlayer.togglePlay().catch((playError) => {
+      void toggleOwnedPlay().catch((playError) => {
         runtimeLogger.error('切换音频播放失败:', playError);
       });
       return;
@@ -550,7 +544,7 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
     if (effectiveCard) {
       void playCard(effectiveCard);
     }
-  }, [effectiveCard, isOwnedSource, playCard]);
+  }, [effectiveCard, isOwnedSource, playCard, toggleOwnedPlay]);
 
   const handleOpenInAudioViewer = useCallback(async () => {
     if (!currentCard || !libraryId || !currentAudioUrl) return;
@@ -903,7 +897,7 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
               theme="borderless"
               size="small"
               onClick={() => {
-                globalAudioPlayer.setMuted(!playerState.isMuted);
+                setMuted(!playerState.isMuted);
               }}
               title="静音"
               aria-label="静音"
@@ -914,7 +908,7 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
               max="1"
               step="0.01"
               value={playerState.isMuted ? 0 : playerState.volume}
-              onChange={(event) => globalAudioPlayer.setVolume(Number(event.target.value))}
+              onChange={(event) => setVolume(Number(event.target.value))}
               aria-label="音量"
             />
           </div>

@@ -1,4 +1,4 @@
-export interface VideoSubtitleCue {
+export interface TimedTextCue {
   id: string;
   start: number;
   end: number;
@@ -27,7 +27,7 @@ function parseSubtitleTimestamp(raw: string): number | null {
   return (hoursPart * 3600) + (minutesPart * 60) + secondsPart;
 }
 
-function parseSubtitleBlock(block: string, index: number): VideoSubtitleCue | null {
+function parseSubtitleBlock(block: string, index: number): TimedTextCue | null {
   const lines = block
     .split('\n')
     .map(line => line.trimEnd())
@@ -64,7 +64,7 @@ function parseSubtitleBlock(block: string, index: number): VideoSubtitleCue | nu
   };
 }
 
-function parseSrtOrVttSubtitle(raw: string): VideoSubtitleCue[] {
+function parseSrtOrVttSubtitle(raw: string): TimedTextCue[] {
   const normalized = normalizeSubtitleText(raw);
   if (!normalized) return [];
 
@@ -76,7 +76,7 @@ function parseSrtOrVttSubtitle(raw: string): VideoSubtitleCue[] {
 
   return blocks
     .map((block, index) => parseSubtitleBlock(block, index))
-    .filter((item): item is VideoSubtitleCue => Boolean(item))
+    .filter((item): item is TimedTextCue => Boolean(item))
     .sort((left, right) => left.start - right.start);
 }
 
@@ -100,11 +100,11 @@ function splitAssDialoguePayload(payload: string, expectedColumns: number): stri
   return [...head, text];
 }
 
-function parseAssSubtitle(raw: string): VideoSubtitleCue[] {
+function parseAssSubtitle(raw: string): TimedTextCue[] {
   const normalized = normalizeSubtitleText(raw);
   if (!normalized || !/\[events\]/iu.test(normalized)) return [];
 
-  const cues: VideoSubtitleCue[] = [];
+  const cues: TimedTextCue[] = [];
   let inEvents = false;
   let formatColumns: string[] = [];
 
@@ -149,7 +149,7 @@ function parseAssSubtitle(raw: string): VideoSubtitleCue[] {
   return cues.sort((left, right) => left.start - right.start);
 }
 
-function parseLrcSubtitle(raw: string): VideoSubtitleCue[] {
+function parseLrcSubtitle(raw: string): TimedTextCue[] {
   const normalized = normalizeSubtitleText(raw);
   if (!normalized) return [];
 
@@ -177,7 +177,7 @@ function parseLrcSubtitle(raw: string): VideoSubtitleCue[] {
     .filter(item => item.end > item.start);
 }
 
-export function parseVideoSubtitle(raw: string): VideoSubtitleCue[] {
+export function parseTimedText(raw: string): TimedTextCue[] {
   const srtOrVttCues = parseSrtOrVttSubtitle(raw);
   if (srtOrVttCues.length > 0) return srtOrVttCues;
 
@@ -187,10 +187,10 @@ export function parseVideoSubtitle(raw: string): VideoSubtitleCue[] {
   return parseLrcSubtitle(raw);
 }
 
-export function findActiveSubtitleCue(
-  cues: VideoSubtitleCue[],
+export function findActiveTimedTextCue(
+  cues: TimedTextCue[],
   currentTime: number,
-): VideoSubtitleCue | null {
+): TimedTextCue | null {
   if (!Number.isFinite(currentTime) || currentTime < 0 || cues.length === 0) {
     return null;
   }

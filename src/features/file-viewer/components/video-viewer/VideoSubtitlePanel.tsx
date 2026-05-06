@@ -2,16 +2,16 @@ import React from 'react';
 import { Button, Empty, Switch } from '@douyinfe/semi-ui';
 import { IconUpload } from '@douyinfe/semi-icons';
 import type { FileViewerSubtitleSource } from '@/contexts/file-viewer.context';
-import type { VideoSubtitleCue } from './subtitle';
+import type { TimedTextCue } from '@/features/file-viewer/timed-text/subtitle';
 import {
   MAX_SUBTITLE_BOTTOM_OFFSET,
   MAX_SUBTITLE_FONT_SIZE,
   MIN_SUBTITLE_BOTTOM_OFFSET,
   MIN_SUBTITLE_FONT_SIZE,
-} from './useVideoSubtitles';
+} from '@/features/file-viewer/timed-text/useTimedText';
 
 interface VideoSubtitlePanelProps {
-  activeSubtitleCue: VideoSubtitleCue | null;
+  activeSubtitleCue: TimedTextCue | null;
   clearSubtitle: () => void;
   librarySubtitleSources: FileViewerSubtitleSource[];
   loadLibrarySubtitle: (source: FileViewerSubtitleSource) => void;
@@ -21,7 +21,7 @@ interface VideoSubtitlePanelProps {
   setSubtitleEnabled: (value: boolean) => void;
   setSubtitleFontSize: (value: number) => void;
   subtitleBottomOffset: number;
-  subtitleCues: VideoSubtitleCue[];
+  subtitleCues: TimedTextCue[];
   subtitleEnabled: boolean;
   subtitleError: string | null;
   subtitleFileName: string;

@@ -23,10 +23,10 @@ import { getFileNodeIcon, isImageExtension } from '@/features/file-explorer/util
 import { AsmrViewerWrapper } from './style';
 import { useFileViewer } from '@/hooks/useFileViewer';
 import { runtimeLogger } from '@/utils/runtimeLogger';
-import { globalAudioPlayer } from '@/features/file-viewer/services/global-audio-player';
 import { parseAsmrRouteInfo, resolveAsmrOwnerKey } from '@/features/file-viewer/utils/asmr-owner-key';
 import { useRegisterMediaEntry } from '@/hooks/useMediaRegistry';
 import { resolvePreviewFileType, type PreviewFileType } from '@/utils/preview-file-type';
+import { useGlobalAudioPlayback } from '@/features/file-viewer/hooks/useGlobalAudioPlayback';
 
 interface AsmrViewerProps {
   folderNodeId: number | null;
@@ -277,6 +277,7 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
     [viewerCacheKey],
   );
   const fallbackTitle = useMemo(() => normalizeViewerTitle(fileName), [fileName]);
+  const asmrOwnerKey = useMemo(() => resolveAsmrOwnerKey(fileUrl, rootNodeId), [fileUrl, rootNodeId]);
 
   const [pathStack, setPathStack] = useState<AsmrPathItem[]>(() => initialSnapshot?.pathStack ?? []);
   const [items, setItems] = useState<AsmrNodeItem[]>(() => initialSnapshot?.items ?? []);
@@ -293,7 +294,6 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
   const [coverLoading, setCoverLoading] = useState(false);
   const [coverUrl, setCoverUrl] = useState<string | null>(() => initialSnapshot?.coverUrl ?? null);
   const [coverNodeId, setCoverNodeId] = useState<number | null>(() => initialSnapshot?.coverNodeId ?? null);
-  const [playerState, setPlayerState] = useState(() => globalAudioPlayer.getState());
   const [audioQueue, setAudioQueue] = useState<AsmrNodeItem[]>(() => initialSnapshot?.audioQueue ?? []);
   const [currentAudioId, setCurrentAudioId] = useState<number | null>(() => initialSnapshot?.currentAudioId ?? null);
   const [currentAudioSrc, setCurrentAudioSrc] = useState<string | null>(() => initialSnapshot?.currentAudioSrc ?? null);
@@ -310,6 +310,18 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
   const [coverPickerPathStack, setCoverPickerPathStack] = useState<AsmrPathItem[]>([]);
   const [coverPickerItems, setCoverPickerItems] = useState<AsmrNodeItem[]>([]);
   const [coverPickerLoading, setCoverPickerLoading] = useState(false);
+  const {
+    clearIfOwned,
+    ensureSource,
+    isOwnedSource: isAsmrOwnedSource,
+    pause,
+    play,
+    playerState,
+    seekTo,
+    setMuted,
+    setVolume,
+    togglePlay: toggleOwnedPlay,
+  } = useGlobalAudioPlayback({ ownerType: 'asmr', ownerKey: asmrOwnerKey });
 
   useEffect(() => {
     if (active) return;
@@ -471,15 +483,8 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
   ) => {
     try {
       const url = await resolveAudioUrl(targetAudio);
-      globalAudioPlayer.ensureSource(
-        url,
-        resolveDisplayName(targetAudio),
-        {
-          ownerType: 'asmr',
-          ownerKey: resolveAsmrOwnerKey(fileUrl, rootNodeId || targetAudio.id),
-        },
-      );
-      await globalAudioPlayer.play();
+      ensureSource(url, resolveDisplayName(targetAudio));
+      await play();
       setAudioQueue(queue);
       setCurrentAudioId(targetAudio.id);
       setCurrentAudioSrc(url);
@@ -495,7 +500,7 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
       runtimeLogger.error('ASMR 音频播放失败:', error);
       Toast.error(error?.message || '播放音频失败');
     }
-  }, [fileUrl, persistViewerSnapshot, resolveAudioUrl, rootNodeId]);
+  }, [ensureSource, persistViewerSnapshot, play, resolveAudioUrl]);
 
   const resolveCover = useCallback(async (
     rootChildren: AsmrNodeItem[],
@@ -631,18 +636,6 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
     };
   }, [loadAsmrTagOptions]);
 
-  useEffect(() => {
-    setPlayerState(globalAudioPlayer.getState());
-    return globalAudioPlayer.subscribe(setPlayerState);
-  }, []);
-
-  const asmrOwnerKey = useMemo(() => resolveAsmrOwnerKey(fileUrl, folderNodeId), [fileUrl, folderNodeId]);
-  const isAsmrOwnedSource = (
-    playerState.ownerType === 'asmr'
-    && Boolean(asmrOwnerKey)
-    && playerState.ownerKey === asmrOwnerKey
-  );
-
   useRegisterMediaEntry({
     enabled: isAsmrOwnedSource && playerState.hasStarted,
     entryId: `asmr:${tabId}`,
@@ -653,30 +646,24 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
     currentTime: isAsmrOwnedSource ? playerState.currentTime : 0,
     duration: isAsmrOwnedSource ? playerState.duration : 0,
     play: () => {
-      void globalAudioPlayer.play().catch(() => {});
+      void play().catch(() => {});
     },
     pause: () => {
-      globalAudioPlayer.pause();
+      pause();
     },
     seek: (time) => {
-      globalAudioPlayer.seekTo(time);
+      seekTo(time);
     },
     dismiss: () => {
-      const state = globalAudioPlayer.getState();
-      if (state.ownerType === 'asmr' && Boolean(asmrOwnerKey) && state.ownerKey === asmrOwnerKey) {
-        globalAudioPlayer.clear();
-      }
+      clearIfOwned();
     },
   });
 
   useEffect(() => {
     return () => {
-      const state = globalAudioPlayer.getState();
-      if (state.ownerType === 'asmr' && Boolean(asmrOwnerKey) && state.ownerKey === asmrOwnerKey) {
-        globalAudioPlayer.clear();
-      }
+      clearIfOwned();
     };
-  }, [asmrOwnerKey]);
+  }, [clearIfOwned]);
 
   useEffect(() => {
     if (!rootNodeId || !Number.isFinite(rootNodeId) || !libraryId) {
@@ -1186,7 +1173,7 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
               onChange={(event) => {
                 const next = Number(event.target.value);
                 setSeekingTime(next);
-                globalAudioPlayer.seekTo(next);
+                seekTo(next);
               }}
               onMouseUp={() => {
                 setSeekingTime(null);
@@ -1217,7 +1204,7 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
                 className="player-main-toggle"
                 icon={playerState.isPlaying ? <IconPause /> : <IconPlay />}
                 onClick={() => {
-                  void globalAudioPlayer.togglePlay().catch((error) => {
+                  void toggleOwnedPlay().catch((error) => {
                     runtimeLogger.error('ASMR 音频切换播放失败:', error);
                   });
                 }}
@@ -1246,7 +1233,7 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
                   size="default"
                   icon={playerState.isMuted ? <IconMute /> : <IconVolume2 />}
                   onClick={() => {
-                    globalAudioPlayer.setMuted(!playerState.isMuted);
+                    setMuted(!playerState.isMuted);
                   }}
                 />
                 <input
@@ -1258,7 +1245,7 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
                   value={playerState.isMuted ? 0 : playerState.volume}
                   onChange={(event) => {
                     const next = Number(event.target.value);
-                    globalAudioPlayer.setVolume(next);
+                    setVolume(next);
                   }}
                 />
               </div>

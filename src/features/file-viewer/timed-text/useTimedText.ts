@@ -2,14 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } f
 import { getFileLink } from '@/features/file-explorer/services/file.api';
 import type { FileViewerSubtitleSource } from '@/contexts/file-viewer.context';
 import { runtimeLogger } from '@/utils/runtimeLogger';
-import { findActiveSubtitleCue, parseVideoSubtitle, type VideoSubtitleCue } from './subtitle';
+import { findActiveTimedTextCue, parseTimedText, type TimedTextCue } from './subtitle';
 
 interface IpcTextFetchResponse {
   status?: number;
   body?: unknown;
 }
 
-interface UseVideoSubtitlesOptions {
+interface UseTimedTextOptions {
   currentTime: number;
   subtitleSources?: FileViewerSubtitleSource[];
   url: string;
@@ -37,11 +37,11 @@ function readTextResponseBody(body: unknown): string {
   return String(body);
 }
 
-export function useVideoSubtitles({
+export function useTimedText({
   currentTime,
   subtitleSources,
   url,
-}: UseVideoSubtitlesOptions) {
+}: UseTimedTextOptions) {
   const subtitleInputRef = useRef<HTMLInputElement>(null);
   const subtitleLoadRequestIdRef = useRef(0);
   const isMountedRef = useRef(true);
@@ -50,7 +50,7 @@ export function useVideoSubtitles({
   const [subtitleFileName, setSubtitleFileName] = useState('');
   const [loadedSubtitleSourceId, setLoadedSubtitleSourceId] = useState<string | null>(null);
   const [subtitleError, setSubtitleError] = useState<string | null>(null);
-  const [subtitleCues, setSubtitleCues] = useState<VideoSubtitleCue[]>([]);
+  const [subtitleCues, setSubtitleCues] = useState<TimedTextCue[]>([]);
   const [subtitleFontSize, setSubtitleFontSize] = useState(DEFAULT_SUBTITLE_FONT_SIZE);
   const [subtitleBottomOffset, setSubtitleBottomOffset] = useState(DEFAULT_SUBTITLE_BOTTOM_OFFSET);
 
@@ -62,7 +62,7 @@ export function useVideoSubtitles({
 
   const activeSubtitleCue = useMemo(() => {
     if (!subtitleEnabled) return null;
-    return findActiveSubtitleCue(subtitleCues, currentTime);
+    return findActiveTimedTextCue(subtitleCues, currentTime);
   }, [currentTime, subtitleCues, subtitleEnabled]);
 
   const resetSubtitle = useCallback(() => {
@@ -79,7 +79,7 @@ export function useVideoSubtitles({
   }, []);
 
   const applySubtitleText = useCallback((raw: string, displayName: string): boolean => {
-    const cues = parseVideoSubtitle(raw);
+    const cues = parseTimedText(raw);
     if (cues.length === 0) {
       setSubtitleFileName('');
       setSubtitleCues([]);

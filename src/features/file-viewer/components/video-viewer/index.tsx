@@ -34,7 +34,7 @@ import type {
   FileViewerVideoPlaylistItem,
 } from '@/contexts/file-viewer.context';
 import VideoSubtitlePanel from './VideoSubtitlePanel';
-import { useVideoSubtitles } from './useVideoSubtitles';
+import { useTimedText } from '@/features/file-viewer/timed-text/useTimedText';
 import { useFileViewer } from '@/hooks/useFileViewer';
 import {
   buildVideoSubtitleSources,
@@ -306,7 +306,7 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
     subtitleFileName,
     subtitleFontSize,
     subtitleInputRef,
-  } = useVideoSubtitles({
+  } = useTimedText({
     currentTime,
     subtitleSources,
     url,

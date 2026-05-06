@@ -1,6 +1,6 @@
 # Viewer 文档入口
 
-更新时间：2026-05-05
+更新时间：2026-05-06
 适用范围：`file-viewer`、`archive-viewer` 以及后续各类具体 viewer 的长期说明文档。
 
 ## 1. 作用
@@ -57,11 +57,24 @@
 当前 viewer 体系的跨 tab / 多媒体规则：
 
 - 视频 viewer 不再因为所在 tab 失活而自动 pause；保留进度落库（`persistVideoProgress(true)`），但不再触发 `<video>.pause()`。多个视频可在不同 tab 并行播放。
-- 音频 viewer / asmr viewer 共用 `globalAudioPlayer` 单例 `<audio>`，所以同一时刻仍只能有一个音频源在播放（属预期范围）；但音频不再因切换 tab 而出现"顶部 GlobalAudioMiniBar"那条额外 UI。
+- 音频 viewer / asmr viewer / 音频归档播放器共用 `globalAudioPlayer` 单例 `<audio>`，所以同一时刻仍只能有一个音频源在播放（属预期范围）；组件侧统一通过 `useGlobalAudioPlayback` 订阅和控制这个单例，但 UI 仍由各 viewer 自己决定。
 - video 启动播放不再调用 `globalAudioPlayer.pause()` 暂停音频；audio 启动播放不再暂停所有视频。音视频可并行。
 - 所有 audio / video / asmr viewer 在挂载且首次播放后向 `MediaRegistry` 注册自身，由 `library detail` 工具栏右侧的"媒体控制中心"集中展示与控制，详见 `docs/library-detail-workspace.md` §11。
 
-## 3.2 普通音视频键盘控制
+## 3.2 Viewer 共享能力边界
+
+当前只抽稳定的底层能力，不抽强 UI：
+
+- `src/features/file-viewer/timed-text/`
+  - 负责字幕 / 歌词这类时间轴文本的解析、库内文本加载、当前 cue 匹配。
+  - video、普通 audio、音频归档播放器可复用；具体展示方式仍由各 viewer 自己决定。
+- `src/features/file-viewer/hooks/useGlobalAudioPlayback.ts`
+  - 负责订阅和控制 `globalAudioPlayer` 单例，统一 owner 判断、播放、暂停、进度、音量和清理。
+  - 普通 audio、ASMR、音频归档播放器可复用；底部播放条、展开歌词页、ASMR 列表播放器这些 UI 不在这个 hook 里统一。
+
+不要为了“看起来通用”抽出统一卡片或统一播放条。归档卡片、歌曲列表、ASMR 文件列表和普通播放器未来都可能分化，只有当多个 viewer 的行为模型真正稳定一致时，再抽更高层组件。
+
+## 3.3 普通音视频键盘控制
 
 普通 `audio` / `video` viewer 在 `active=true` 且焦点不在输入框、文本域或可编辑元素内时响应基础媒体快捷键：
 

@@ -13,11 +13,11 @@ import {
   IconSync
 } from '@douyinfe/semi-icons';
 import { AudioViewerWrapper } from './style';
-import { globalAudioPlayer } from '@/features/file-viewer/services/global-audio-player';
 import { runtimeLogger } from '@/utils/runtimeLogger';
 import { resolveAudioOwnerKey } from '@/features/file-viewer/utils/audio-owner-key';
 import { deriveAudioTrackName } from '@/features/file-viewer/utils/audio-track-name';
 import { useRegisterMediaEntry } from '@/hooks/useMediaRegistry';
+import { useGlobalAudioPlayback } from '@/features/file-viewer/hooks/useGlobalAudioPlayback';
 import {
   isTextEditingKeyboardTarget,
   isViewerInteractiveKeyboardTarget,
@@ -28,7 +28,7 @@ import type {
   FileViewerReturnTarget,
   FileViewerSubtitleSource,
 } from '@/contexts/file-viewer.context';
-import { useVideoSubtitles } from '@/features/file-viewer/components/video-viewer/useVideoSubtitles';
+import { useTimedText } from '@/features/file-viewer/timed-text/useTimedText';
 import { useFileViewer } from '@/hooks/useFileViewer';
 import { getFileLink } from '@/features/file-explorer/services/file.api';
 
@@ -65,13 +65,21 @@ const AudioViewer: React.FC<AudioViewerProps> = ({
   const { setFileUrl } = useFileViewer();
   const viewerRootRef = useRef<HTMLDivElement>(null);
   const progressBarRef = useRef<HTMLDivElement>(null);
-  const [playerState, setPlayerState] = useState(() => globalAudioPlayer.getState());
   const [dragPreviewTime, setDragPreviewTime] = useState<number | null>(null);
   const ownerKey = React.useMemo(() => resolveAudioOwnerKey(url, nodeId), [nodeId, url]);
-  const isOwnedSource = (
-    playerState.ownerType === 'default'
-    && playerState.ownerKey === ownerKey
-  );
+  const {
+    adjustVolumeBy,
+    clearIfOwned,
+    ensureSource,
+    isOwnedSource,
+    pause,
+    play,
+    playerState,
+    seekTo,
+    setMuted,
+    setVolume,
+    togglePlay: toggleOwnedPlay,
+  } = useGlobalAudioPlayback({ ownerType: 'default', ownerKey });
   const effectiveCurrentTime = isOwnedSource ? playerState.currentTime : 0;
   const effectiveDuration = isOwnedSource ? playerState.duration : 0;
 
@@ -88,7 +96,7 @@ const AudioViewer: React.FC<AudioViewerProps> = ({
     subtitleCues,
     subtitleError,
     subtitleFileName,
-  } = useVideoSubtitles({
+  } = useTimedText({
     currentTime: effectiveCurrentTime,
     subtitleSources,
     url,
@@ -102,26 +110,22 @@ const AudioViewer: React.FC<AudioViewerProps> = ({
   };
 
   const ensureOwnedSource = useCallback(() => {
-    globalAudioPlayer.ensureSource(
-      url,
-      fileName || null,
-      { ownerType: 'default', ownerKey },
-    );
-  }, [fileName, ownerKey, url]);
+    ensureSource(url, fileName || null);
+  }, [ensureSource, fileName, url]);
 
   const togglePlay = useCallback(() => {
     if (isOwnedSource) {
-      void globalAudioPlayer.togglePlay().catch((error) => {
+      void toggleOwnedPlay().catch((error) => {
         runtimeLogger.error('failed to toggle audio playback:', error);
       });
       return;
     }
 
     ensureOwnedSource();
-    void globalAudioPlayer.play().catch((error) => {
+    void play().catch((error) => {
       runtimeLogger.error('failed to start audio playback:', error);
     });
-  }, [ensureOwnedSource, isOwnedSource]);
+  }, [ensureOwnedSource, isOwnedSource, play, toggleOwnedPlay]);
 
   const openPlaylistItem = useCallback(async (direction: -1 | 1) => {
     if (!playlist || currentPlaylistIndex < 0) return;
@@ -155,13 +159,8 @@ const AudioViewer: React.FC<AudioViewerProps> = ({
   const seekBy = useCallback((delta: number) => {
     if (!isOwnedSource || !effectiveDuration) return;
     const next = Math.min(Math.max(effectiveCurrentTime + delta, 0), effectiveDuration);
-    globalAudioPlayer.seekTo(next);
-  }, [effectiveCurrentTime, effectiveDuration, isOwnedSource]);
-
-  const adjustVolumeBy = useCallback((delta: number) => {
-    const state = globalAudioPlayer.getState();
-    globalAudioPlayer.setVolume(state.volume + delta);
-  }, []);
+    seekTo(next);
+  }, [effectiveCurrentTime, effectiveDuration, isOwnedSource, seekTo]);
 
   // --- Custom Progress Bar Logic ---
 
@@ -189,14 +188,14 @@ const AudioViewer: React.FC<AudioViewerProps> = ({
     if (isDraggingRef.current) {
       const finalTime = updateProgress(e.clientX);
       if (finalTime !== undefined && Number.isFinite(finalTime)) {
-        globalAudioPlayer.seekTo(finalTime);
+        seekTo(finalTime);
       }
       isDraggingRef.current = false;
       setDragPreviewTime(null);
       window.removeEventListener('mousemove', handleGlobalMouseMove);
       window.removeEventListener('mouseup', handleGlobalMouseUp);
     }
-  }, [handleGlobalMouseMove, updateProgress]);
+  }, [handleGlobalMouseMove, seekTo, updateProgress]);
 
   const handleMouseDown = (e: React.MouseEvent) => {
     if (!isOwnedSource) {
@@ -220,13 +219,8 @@ const AudioViewer: React.FC<AudioViewerProps> = ({
 
   const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const vol = parseFloat(e.target.value);
-    globalAudioPlayer.setVolume(vol);
+    setVolume(vol);
   };
-
-  useEffect(() => {
-    setPlayerState(globalAudioPlayer.getState());
-    return globalAudioPlayer.subscribe(setPlayerState);
-  }, []);
 
   useRegisterMediaEntry({
     enabled: isOwnedSource && playerState.hasStarted,
@@ -238,32 +232,26 @@ const AudioViewer: React.FC<AudioViewerProps> = ({
     currentTime: effectiveCurrentTime,
     duration: effectiveDuration,
     play: () => {
-      void globalAudioPlayer.play().catch((error) => {
+      void play().catch((error) => {
         runtimeLogger.error('failed to start audio playback from media hub:', error);
       });
     },
     pause: () => {
-      globalAudioPlayer.pause();
+      pause();
     },
     seek: (time) => {
-      globalAudioPlayer.seekTo(time);
+      seekTo(time);
     },
     dismiss: () => {
-      const state = globalAudioPlayer.getState();
-      if (state.ownerType === 'default' && state.ownerKey === ownerKey) {
-        globalAudioPlayer.clear();
-      }
+      clearIfOwned();
     },
   });
 
   useEffect(() => {
     return () => {
-      const state = globalAudioPlayer.getState();
-      if (state.ownerType === 'default' && state.ownerKey === ownerKey) {
-        globalAudioPlayer.clear();
-      }
+      clearIfOwned();
     };
-  }, [ownerKey]);
+  }, [clearIfOwned]);
 
   useEffect(() => {
     if (!active) return;
@@ -318,8 +306,7 @@ const AudioViewer: React.FC<AudioViewerProps> = ({
         case 'M':
           event.preventDefault();
           if (!event.repeat) {
-            const state = globalAudioPlayer.getState();
-            globalAudioPlayer.setMuted(!state.isMuted);
+            setMuted(!playerState.isMuted);
           }
           break;
         default:
@@ -334,15 +321,15 @@ const AudioViewer: React.FC<AudioViewerProps> = ({
 
     window.addEventListener('keydown', handleKeyDown, true);
     return () => window.removeEventListener('keydown', handleKeyDown, true);
-  }, [active, adjustVolumeBy, seekBy, togglePlay]);
+  }, [active, adjustVolumeBy, playerState.isMuted, seekBy, setMuted, togglePlay]);
 
   useEffect(() => {
     if (!autoPlay) return;
     ensureOwnedSource();
-    void globalAudioPlayer.play().catch((error) => {
+    void play().catch((error) => {
       runtimeLogger.warn('自动播放音频失败:', error);
     });
-  }, [autoPlay, ensureOwnedSource, url]);
+  }, [autoPlay, ensureOwnedSource, play, url]);
 
   return (
     <AudioViewerWrapper ref={viewerRootRef}>
@@ -463,7 +450,7 @@ const AudioViewer: React.FC<AudioViewerProps> = ({
                 theme="borderless"
                 size="small"
                 onClick={() => {
-                    globalAudioPlayer.setMuted(!playerState.isMuted);
+                  setMuted(!playerState.isMuted);
                 }}
               />
               <input 
