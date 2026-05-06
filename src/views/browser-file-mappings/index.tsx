@@ -1,5 +1,5 @@
 import React from 'react';
-import styled from 'styled-components';
+import styled, { createGlobalStyle } from 'styled-components';
 import OpaquePageContainer from '@/components/OpaquePageContainer';
 import { useNavigate } from 'react-router-dom';
 import { Button, Empty, Input, Modal, Table, Toast, Typography } from '@douyinfe/semi-ui';
@@ -24,8 +24,8 @@ const DEFAULT_FORM_STATE: FormState = {
 };
 
 const Wrapper = styled.div`
-  padding: 42px 56px;
-  max-width: 1160px;
+  padding: 28px 32px 24px;
+  max-width: 900px;
   margin: 0 auto;
   width: 100%;
   color: var(--semi-color-text-0);
@@ -38,28 +38,59 @@ const Wrapper = styled.div`
   .header {
     display: flex;
     align-items: center;
-    gap: 14px;
-    margin-bottom: 14px;
+    gap: 11px;
+    margin-bottom: 6px;
+  }
+
+  .page-back-button {
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    min-width: 28px;
+    padding: 0;
+    border-radius: 7px;
+  }
+
+  .page-title {
+    margin: 0;
+    font-size: 23px;
+    font-weight: 700;
+    line-height: 1.15;
   }
 
   .subtitle {
-    margin: 0 0 22px 48px;
+    margin: 0 0 16px 39px;
     color: var(--semi-color-text-2);
-    font-size: 14px;
+    font-size: 11px;
+    line-height: 1.55;
   }
 
   .toolbar {
     display: flex;
     align-items: center;
-    gap: 10px;
-    margin-bottom: 18px;
+    gap: 8px;
+    margin-bottom: 11px;
+  }
+
+  .toolbar-search {
+    width: 260px;
+  }
+
+  .toolbar-search .semi-input-wrapper,
+  .toolbar-search .semi-input {
+    font-size: 11px;
+  }
+
+  .toolbar-search .semi-input-wrapper {
+    min-height: 30px;
   }
 
   .toolbar-btn {
-    min-height: 38px;
-    padding: 0 16px;
-    font-size: 14px;
-    border-radius: 8px;
+    min-height: 30px;
+    padding: 0 12px;
+    font-size: 11px;
+    font-weight: 600;
+    border-radius: 6px;
     border: 1px solid var(--semi-color-border);
     color: var(--semi-color-text-0);
     background: var(--semi-color-bg-0);
@@ -72,10 +103,10 @@ const Wrapper = styled.div`
   }
 
   .section {
-    margin-top: 18px;
-    padding: 14px 14px 4px;
+    margin-top: 14px;
+    padding: 10px 10px 4px;
     border: 1px solid var(--semi-color-border);
-    border-radius: 10px;
+    border-radius: 8px;
     background: color-mix(in srgb, var(--semi-color-bg-0) 96%, transparent);
   }
 
@@ -83,13 +114,13 @@ const Wrapper = styled.div`
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-width: 56px;
-    height: 28px;
-    padding: 0 10px;
-    border-radius: 8px;
+    min-width: 42px;
+    height: 22px;
+    padding: 0 8px;
+    border-radius: 6px;
     background: var(--semi-color-fill-0);
     color: var(--semi-color-text-0);
-    font-size: 13px;
+    font-size: 10px;
     font-weight: 600;
   }
 
@@ -101,6 +132,7 @@ const Wrapper = styled.div`
     white-space: nowrap;
     color: var(--semi-color-text-0);
     text-decoration: none;
+    font-size: 10px;
   }
 
   .site-link:hover {
@@ -109,33 +141,137 @@ const Wrapper = styled.div`
 
   .editor-field {
     display: grid;
-    gap: 8px;
-    margin-bottom: 16px;
+    gap: 5px;
+    margin-bottom: 10px;
   }
 
   .editor-label {
-    font-size: 13px;
+    font-size: 11px;
+    line-height: 15px;
     color: var(--semi-color-text-1);
   }
 
   .editor-suffix-row {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
   }
 
   .editor-suffix-prefix {
-    width: 32px;
-    height: 40px;
-    border-radius: 8px;
+    width: 26px;
+    height: 28px;
+    border-radius: 6px;
     border: 1px solid var(--semi-color-border);
     background: var(--semi-color-fill-0);
     color: var(--semi-color-text-1);
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    font-size: 16px;
+    font-size: 12px;
     flex-shrink: 0;
+  }
+
+  .row-actions {
+    display: inline-flex;
+    gap: 5px;
+  }
+
+  .semi-table {
+    font-size: 10px;
+  }
+
+  .semi-table-container {
+    overflow: hidden;
+  }
+
+  .semi-table-thead > .semi-table-row > .semi-table-row-head,
+  .semi-table-tbody > .semi-table-row > .semi-table-row-cell {
+    padding: 8px 9px;
+  }
+
+  .semi-table-thead > .semi-table-row > .semi-table-row-head {
+    font-size: 10px;
+    font-weight: 600;
+  }
+
+  .semi-button {
+    height: 25px;
+    min-height: 25px;
+    padding: 0 7px;
+    border-radius: 6px;
+    font-size: 10px;
+    font-weight: 600;
+  }
+
+  .semi-button .semi-icon {
+    font-size: 12px;
+  }
+
+  .semi-empty-description {
+    font-size: 11px;
+  }
+`;
+
+const BrowserFileMappingsCompactModalStyle = createGlobalStyle`
+  .browser-file-mapping-compact-modal,
+  .browser-file-mapping-compact-confirm {
+    width: 380px !important;
+  }
+
+  .browser-file-mapping-compact-modal .semi-modal-content,
+  .browser-file-mapping-compact-confirm .semi-modal-content {
+    overflow: hidden;
+    border: 1px solid var(--app-border-strong);
+    border-radius: 8px;
+    background: var(--app-bg-elevated);
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28), var(--app-shadow);
+  }
+
+  .browser-file-mapping-compact-modal .semi-modal-header,
+  .browser-file-mapping-compact-confirm .semi-modal-header {
+    margin: 0;
+    padding: 13px 16px 8px !important;
+  }
+
+  .browser-file-mapping-compact-modal .semi-modal-title,
+  .browser-file-mapping-compact-confirm .semi-modal-title {
+    font-size: 14px;
+    line-height: 1.35;
+    font-weight: 700;
+  }
+
+  .browser-file-mapping-compact-modal .semi-modal-body,
+  .browser-file-mapping-compact-confirm .semi-modal-body {
+    padding: 0 16px 13px !important;
+    font-size: 12px;
+    line-height: 1.55;
+    color: var(--semi-color-text-1);
+  }
+
+  .browser-file-mapping-compact-modal .semi-modal-footer,
+  .browser-file-mapping-compact-confirm .semi-modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin: 0;
+    padding: 0 16px 16px !important;
+  }
+
+  .browser-file-mapping-compact-modal .semi-button,
+  .browser-file-mapping-compact-confirm .semi-button {
+    height: 28px;
+    min-width: 56px;
+    padding: 0 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .browser-file-mapping-compact-modal .semi-input-wrapper,
+  .browser-file-mapping-compact-modal .semi-input {
+    height: 28px;
+    min-height: 28px;
+    font-size: 12px;
   }
 `;
 
@@ -271,6 +407,7 @@ const BrowserFileMappingsPage: React.FC = () => {
       title: '确认删除该映射？',
       content: `删除后，.${item.fileExt} 将不再支持“在浏览器打开”`,
       okType: 'danger',
+      className: 'browser-file-mapping-compact-confirm',
       onOk: async () => {
         try {
           await deleteBrowserFileMapping(item.id);
@@ -285,18 +422,19 @@ const BrowserFileMappingsPage: React.FC = () => {
 
   return (
     <OpaquePageContainer>
-    <Wrapper>
-      <div className="header">
-        <Button
-          icon={<IconChevronLeft style={{ fontSize: 20 }} />}
-          theme="borderless"
-          onClick={() => navigate(-1)}
-          style={{ padding: '6px', borderRadius: 8 }}
-        />
-        <Title heading={2} style={{ fontSize: 26, fontWeight: 600, margin: 0 }}>
-          浏览器打开映射
-        </Title>
-      </div>
+      <BrowserFileMappingsCompactModalStyle />
+      <Wrapper>
+        <div className="header">
+          <Button
+            icon={<IconChevronLeft style={{ fontSize: 14 }} />}
+            theme="borderless"
+            onClick={() => navigate(-1)}
+            className="page-back-button"
+          />
+          <Title heading={2} className="page-title">
+            浏览器打开映射
+          </Title>
+        </div>
 
       <div className="subtitle">
         为文件后缀绑定默认网站。右键文件选择“在浏览器打开”时，会进入对应站点。
@@ -308,7 +446,7 @@ const BrowserFileMappingsPage: React.FC = () => {
           onChange={setSearchKeyword}
           placeholder="搜索后缀或网站地址"
           showClear
-          style={{ width: 340 }}
+          className="toolbar-search"
         />
         <Button theme="borderless" className="toolbar-btn" onClick={openCreate}>
           新建映射
@@ -326,7 +464,7 @@ const BrowserFileMappingsPage: React.FC = () => {
             {
               title: '后缀',
               dataIndex: 'fileExt',
-              width: 120,
+              width: 88,
               render: (value: string) => <span className="suffix-chip">{`.${value}`}</span>,
             },
             {
@@ -347,14 +485,14 @@ const BrowserFileMappingsPage: React.FC = () => {
             {
               title: '更新时间',
               dataIndex: 'updatedAt',
-              width: 190,
+              width: 142,
               render: (value: string | null | undefined) => formatDateTime(value),
             },
             {
               title: '操作',
-              width: 132,
+              width: 92,
               render: (_: unknown, record: BrowserFileMappingItem) => (
-                <div style={{ display: 'inline-flex', gap: 8 }}>
+                <div className="row-actions">
                   <Button
                     theme="borderless"
                     icon={<IconEdit />}
@@ -387,7 +525,24 @@ const BrowserFileMappingsPage: React.FC = () => {
         }}
         okText={form.id ? '保存' : '创建'}
         confirmLoading={editorSubmitting}
-        style={{ width: 560, maxWidth: 'calc(100vw - 48px)' }}
+        width={380}
+        className="browser-file-mapping-compact-modal"
+        okButtonProps={{
+          style: {
+            minWidth: 56,
+            height: 28,
+            fontSize: 12,
+            borderRadius: 6,
+          },
+        }}
+        cancelButtonProps={{
+          style: {
+            minWidth: 56,
+            height: 28,
+            fontSize: 12,
+            borderRadius: 6,
+          },
+        }}
       >
         <div className="editor-field">
           <div className="editor-label">文件后缀</div>

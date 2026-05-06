@@ -1,5 +1,5 @@
 import React from 'react';
-import styled from 'styled-components';
+import styled, { createGlobalStyle } from 'styled-components';
 import OpaquePageContainer from '@/components/OpaquePageContainer';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -80,8 +80,8 @@ const DEFAULT_RULE_FORM: RuleFormState = {
 };
 
 const Wrapper = styled.div`
-  padding: 42px 56px;
-  max-width: 1160px;
+  padding: 28px 32px 24px;
+  max-width: 900px;
   margin: 0 auto;
   width: 100%;
   color: var(--semi-color-text-0);
@@ -95,34 +95,52 @@ const Wrapper = styled.div`
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 16px;
-    margin-bottom: 14px;
+    gap: 11px;
+    margin-bottom: 6px;
   }
 
   .header-left {
     display: flex;
     align-items: center;
-    gap: 14px;
+    gap: 11px;
+  }
+
+  .page-back-button {
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    min-width: 28px;
+    padding: 0;
+    border-radius: 7px;
+  }
+
+  .page-title {
+    margin: 0;
+    font-size: 23px;
+    font-weight: 700;
+    line-height: 1.15;
   }
 
   .subtitle {
-    margin: 0 0 18px 48px;
+    margin: 0 0 16px 39px;
     color: var(--semi-color-text-2);
-    font-size: 14px;
+    font-size: 11px;
+    line-height: 1.55;
   }
 
   .toolbar {
     display: flex;
     align-items: center;
-    gap: 10px;
-    margin-bottom: 16px;
+    gap: 8px;
+    margin-bottom: 11px;
   }
 
   .toolbar-btn {
-    min-height: 38px;
-    padding: 0 16px;
-    font-size: 14px;
-    border-radius: 8px;
+    min-height: 30px;
+    padding: 0 12px;
+    font-size: 11px;
+    font-weight: 600;
+    border-radius: 6px;
     border: 1px solid var(--semi-color-border);
     color: var(--semi-color-text-0);
     background: var(--semi-color-bg-0);
@@ -135,10 +153,10 @@ const Wrapper = styled.div`
   }
 
   .section {
-    margin-top: 18px;
-    padding: 14px 14px 4px;
+    margin-top: 14px;
+    padding: 10px 10px 4px;
     border: 1px solid var(--semi-color-border);
-    border-radius: 10px;
+    border-radius: 8px;
     background: color-mix(in srgb, var(--semi-color-bg-0) 96%, transparent);
   }
 
@@ -146,29 +164,205 @@ const Wrapper = styled.div`
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 12px;
+    gap: 10px;
+    margin-bottom: 9px;
+  }
+
+  .section-heading {
+    margin: 0;
+    font-size: 16px;
+    line-height: 1.25;
+    font-weight: 700;
   }
 
   .form-grid {
     display: grid;
-    gap: 14px;
+    gap: 10px;
   }
 
   .form-row {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 14px;
+    gap: 8px;
   }
 
   .form-field {
     display: grid;
-    gap: 6px;
+    gap: 5px;
   }
 
   .form-label {
     color: var(--semi-color-text-1);
+    font-size: 11px;
+    line-height: 15px;
+  }
+
+  .cell-ellipsis {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .row-actions {
+    display: inline-flex;
+    gap: 5px;
+    flex-wrap: wrap;
+  }
+
+  .semi-table {
+    font-size: 10px;
+  }
+
+  .semi-table-container {
+    overflow: hidden;
+  }
+
+  .semi-table-thead > .semi-table-row > .semi-table-row-head,
+  .semi-table-tbody > .semi-table-row > .semi-table-row-cell {
+    padding: 8px 9px;
+  }
+
+  .semi-table-thead > .semi-table-row > .semi-table-row-head {
+    font-size: 10px;
+    font-weight: 600;
+  }
+
+  .semi-button {
+    height: 25px;
+    min-height: 25px;
+    padding: 0 7px;
+    border-radius: 6px;
+    font-size: 10px;
+    font-weight: 600;
+  }
+
+  .semi-button .semi-icon {
+    font-size: 12px;
+  }
+
+  .semi-tag {
+    font-size: 10px;
+    line-height: 16px;
+  }
+
+  .semi-empty-description {
+    font-size: 11px;
+  }
+`;
+
+const StorageSettingsCompactModalStyle = createGlobalStyle`
+  .storage-settings-compact-modal,
+  .storage-settings-compact-confirm {
+    width: 420px !important;
+  }
+
+  .storage-settings-compact-modal .semi-modal-content,
+  .storage-settings-compact-confirm .semi-modal-content {
+    overflow: hidden;
+    border: 1px solid var(--app-border-strong);
+    border-radius: 8px;
+    background: var(--app-bg-elevated);
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28), var(--app-shadow);
+  }
+
+  .storage-settings-compact-modal .semi-modal-header,
+  .storage-settings-compact-confirm .semi-modal-header {
+    margin: 0;
+    padding: 13px 16px 8px !important;
+  }
+
+  .storage-settings-compact-modal .semi-modal-title,
+  .storage-settings-compact-confirm .semi-modal-title {
     font-size: 14px;
-    line-height: 20px;
+    line-height: 1.35;
+    font-weight: 700;
+  }
+
+  .storage-settings-compact-modal .semi-modal-body,
+  .storage-settings-compact-confirm .semi-modal-body {
+    padding: 0 16px 13px !important;
+    font-size: 12px;
+    line-height: 1.55;
+    color: var(--semi-color-text-1);
+  }
+
+  .storage-settings-compact-modal .semi-modal-footer,
+  .storage-settings-compact-confirm .semi-modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin: 0;
+    padding: 0 16px 16px !important;
+  }
+
+  .storage-settings-compact-modal .semi-button,
+  .storage-settings-compact-confirm .semi-button {
+    height: 28px;
+    min-width: 56px;
+    padding: 0 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .storage-settings-compact-modal .semi-input-wrapper,
+  .storage-settings-compact-modal .semi-input,
+  .storage-settings-compact-modal .semi-select,
+  .storage-settings-compact-modal .semi-select-selection,
+  .storage-settings-compact-modal .semi-input-number,
+  .storage-settings-compact-modal textarea {
+    font-size: 12px;
+  }
+
+  .storage-settings-compact-modal .semi-input-wrapper,
+  .storage-settings-compact-modal .semi-select,
+  .storage-settings-compact-modal .semi-input-number {
+    height: 28px;
+    min-height: 28px;
+  }
+
+  .storage-settings-compact-modal .semi-select {
+    max-height: 28px !important;
+    overflow: hidden !important;
+  }
+
+  .storage-settings-compact-modal .semi-select::-webkit-scrollbar {
+    display: none;
+    width: 0;
+    height: 0;
+  }
+
+  .storage-settings-compact-modal .semi-select-selection {
+    height: 28px;
+    min-height: 28px;
+    max-height: 28px;
+    align-items: center;
+    overflow: hidden !important;
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+
+  .storage-settings-compact-modal .semi-select-selection-placeholder,
+  .storage-settings-compact-modal .semi-select-selection-rendered,
+  .storage-settings-compact-modal .semi-select-selection-text,
+  .storage-settings-compact-modal .semi-select-selection span {
+    overflow: hidden !important;
+  }
+
+  .storage-settings-compact-modal .semi-select-selection-text {
+    max-height: none !important;
+    line-height: 28px;
+    white-space: nowrap;
+  }
+
+  .storage-settings-compact-modal .semi-select-selection-text::-webkit-scrollbar {
+    display: none;
+  }
+
+  .storage-settings-compact-modal .semi-select-arrow {
+    align-self: center;
   }
 `;
 
@@ -319,6 +513,7 @@ const StorageSettings: React.FC = () => {
       title: '确认删除此 Provider？',
       content: `删除后引用「${item.alias}」的文件将无法访问`,
       okType: 'danger',
+      className: 'storage-settings-compact-confirm',
       onOk: async () => {
         try {
           await deleteProvider(item.alias);
@@ -439,22 +634,22 @@ const StorageSettings: React.FC = () => {
   );
 
   const modalBtnProps = React.useMemo(() => ({
-    size: 'large' as const,
-    style: { minWidth: 96, height: 38, fontSize: 14, borderRadius: 8 },
+    style: { minWidth: 56, height: 28, fontSize: 12, borderRadius: 6 },
   }), []);
 
   return (
     <OpaquePageContainer>
+      <StorageSettingsCompactModalStyle />
       <Wrapper>
         <div className="header">
           <div className="header-left">
             <Button
-              icon={<IconChevronLeft style={{ fontSize: 20 }} />}
+              icon={<IconChevronLeft style={{ fontSize: 14 }} />}
               theme="borderless"
               onClick={() => navigate(-1)}
-              style={{ padding: '6px', borderRadius: 8 }}
+              className="page-back-button"
             />
-            <Title heading={2} style={{ fontSize: 26, fontWeight: 600, margin: 0 }}>
+            <Title heading={2} className="page-title">
               存储管理
             </Title>
           </div>
@@ -467,7 +662,7 @@ const StorageSettings: React.FC = () => {
         {/* Provider 管理 */}
         <section className="section">
           <div className="section-title">
-            <Title heading={5} style={{ margin: 0 }}>存储 Provider</Title>
+            <Title heading={5} className="section-heading">存储 Provider</Title>
             <Button
               theme="borderless"
               icon={<IconPlus />}
@@ -487,10 +682,10 @@ const StorageSettings: React.FC = () => {
               {
                 title: '别名',
                 dataIndex: 'alias',
-                width: 140,
+                width: 112,
                 render: (value: string) => (
-                  <span>
-                    {value}
+                  <span className="cell-ellipsis">
+                    <span>{value}</span>
                     {value === defaultProvider && (
                       <Tag color="blue" style={{ marginLeft: 6 }}>默认</Tag>
                     )}
@@ -500,19 +695,34 @@ const StorageSettings: React.FC = () => {
               {
                 title: '类型',
                 dataIndex: 'type',
-                width: 100,
+                width: 82,
                 render: (value: string) => (
                   <Tag>{(PROVIDER_TYPE_OPTIONS.find(o => o.value === value)?.label) || value}</Tag>
                 ),
               },
-              { title: '地址', dataIndex: 'endpoint', width: 200 },
-              { title: '存储桶', dataIndex: 'bucket', width: 120 },
-              { title: '标签', dataIndex: 'label', width: 120, render: (v: string) => v || '-' },
+              {
+                title: '地址',
+                dataIndex: 'endpoint',
+                width: 160,
+                render: (v: string) => <span className="cell-ellipsis">{v || '-'}</span>,
+              },
+              {
+                title: '存储桶',
+                dataIndex: 'bucket',
+                width: 100,
+                render: (v: string) => <span className="cell-ellipsis">{v || '-'}</span>,
+              },
+              {
+                title: '标签',
+                dataIndex: 'label',
+                width: 92,
+                render: (v: string) => <span className="cell-ellipsis">{v || '-'}</span>,
+              },
               {
                 title: '操作',
-                width: 300,
+                width: 220,
                 render: (_: unknown, record: ProviderItem) => (
-                  <div style={{ display: 'inline-flex', gap: 6, flexWrap: 'wrap' }}>
+                  <div className="row-actions">
                     <Button
                       theme="borderless"
                       icon={<IconEdit />}
@@ -556,7 +766,7 @@ const StorageSettings: React.FC = () => {
         {/* 路由规则 */}
         <section className="section">
           <div className="section-title">
-            <Title heading={5} style={{ margin: 0 }}>分流规则</Title>
+            <Title heading={5} className="section-heading">分流规则</Title>
             <Button
               theme="borderless"
               icon={<IconPlus />}
@@ -572,36 +782,46 @@ const StorageSettings: React.FC = () => {
             pagination={false}
             empty={<Empty description="暂无分流规则，所有文件将上传至默认 Provider" />}
             columns={[
-              { title: '优先级', dataIndex: '_index', width: 80, render: (v: number) => v + 1 },
-              { title: '名称', dataIndex: 'name', width: 160, render: (v: string) => v || '-' },
-              { title: '目标 Provider', dataIndex: 'targetProvider', width: 140 },
+              { title: '优先级', dataIndex: '_index', width: 58, render: (v: number) => v + 1 },
+              {
+                title: '名称',
+                dataIndex: 'name',
+                width: 120,
+                render: (v: string) => <span className="cell-ellipsis">{v || '-'}</span>,
+              },
+              {
+                title: '目标 Provider',
+                dataIndex: 'targetProvider',
+                width: 118,
+                render: (v: string) => <span className="cell-ellipsis">{v || '-'}</span>,
+              },
               {
                 title: '文件大小范围',
-                width: 200,
+                width: 150,
                 render: (_: unknown, record: RoutingRule) => {
                   const min = record.conditions.minFileSizeBytes;
                   const max = record.conditions.maxFileSizeBytes;
                   if (!min && !max) return '-';
-                  return `${formatFileSize(min)} ~ ${max ? formatFileSize(max) : '不限'}`;
+                  return <span className="cell-ellipsis">{`${formatFileSize(min)} ~ ${max ? formatFileSize(max) : '不限'}`}</span>;
                 },
               },
               {
                 title: '扩展名',
-                width: 160,
+                width: 118,
                 render: (_: unknown, record: RoutingRule) =>
-                  (record.conditions.extensions || []).join(', ') || '-',
+                  <span className="cell-ellipsis">{(record.conditions.extensions || []).join(', ') || '-'}</span>,
               },
               {
                 title: 'MIME 前缀',
-                width: 160,
+                width: 118,
                 render: (_: unknown, record: RoutingRule) =>
-                  (record.conditions.mimePrefixes || []).join(', ') || '-',
+                  <span className="cell-ellipsis">{(record.conditions.mimePrefixes || []).join(', ') || '-'}</span>,
               },
               {
                 title: '操作',
-                width: 160,
+                width: 132,
                 render: (_: unknown, record: any) => (
-                  <div style={{ display: 'inline-flex', gap: 8 }}>
+                  <div className="row-actions">
                     <Button
                       theme="borderless"
                       icon={<IconEdit />}
@@ -632,7 +852,8 @@ const StorageSettings: React.FC = () => {
           onCancel={() => setProviderEditorVisible(false)}
           onOk={handleProviderSubmit}
           confirmLoading={providerEditorSubmitting}
-          width={560}
+          width={420}
+          className="storage-settings-compact-modal"
           style={modalStyle}
           okButtonProps={modalBtnProps}
           cancelButtonProps={modalBtnProps}
@@ -714,7 +935,7 @@ const StorageSettings: React.FC = () => {
                 />
               </div>
             </div>
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
               <span>使用 SSL</span>
               <Switch
                 checked={providerForm.useSSL}
@@ -732,7 +953,8 @@ const StorageSettings: React.FC = () => {
           onCancel={() => setRuleEditorVisible(false)}
           onOk={handleRuleSubmit}
           confirmLoading={ruleEditorSubmitting}
-          width={560}
+          width={420}
+          className="storage-settings-compact-modal"
           style={modalStyle}
           okButtonProps={modalBtnProps}
           cancelButtonProps={modalBtnProps}
