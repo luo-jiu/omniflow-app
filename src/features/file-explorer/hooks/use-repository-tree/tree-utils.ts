@@ -15,8 +15,9 @@ export function normalizeArchiveMode(mode?: number): 0 | 1 {
 export function resolveFileType(
   mimeType?: string,
   ext?: string,
+  fileName?: string,
 ): PreviewFileType {
-  return resolvePreviewFileType(mimeType, ext);
+  return resolvePreviewFileType(mimeType, ext, fileName);
 }
 
 export function isImageFileNode(item: Pick<NodeRespDTO, 'mimeType' | 'ext'>): boolean {

@@ -2,14 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Spin, Toast } from '@douyinfe/semi-ui';
 import { IconMinus, IconPlus } from '@douyinfe/semi-icons';
 import CodeMirror from '@uiw/react-codemirror';
-import { javascript } from '@codemirror/lang-javascript';
-import { json } from '@codemirror/lang-json';
-import { markdown } from '@codemirror/lang-markdown';
-import { html } from '@codemirror/lang-html';
-import { css } from '@codemirror/lang-css';
-import { xml } from '@codemirror/lang-xml';
-import { python } from '@codemirror/lang-python';
 import { keymap, EditorView } from '@codemirror/view';
+import type { Extension } from '@codemirror/state';
 import { useTheme } from '@/hooks/useTheme';
 import {
   fetchNodeDetailById,
@@ -19,9 +13,9 @@ import {
 } from '@/features/file-explorer/services/file.api';
 import { useFileViewer } from '@/hooks/useFileViewer';
 import { refreshDirectoryInTree } from '@/features/file-explorer/services/tree-locate';
-import { normalizeFileExtension } from '@/utils/preview-file-type';
 import { runtimeLogger } from '@/utils/runtimeLogger';
 import { TextViewerWrapper } from './style';
+import { resolveTextEditorLanguage } from './language';
 import '@fontsource/jetbrains-mono/400.css';
 import '@fontsource/jetbrains-mono/700.css';
 
@@ -42,6 +36,11 @@ const MIN_FONT_SIZE = 12;
 const MAX_FONT_SIZE = 32;
 const DEFAULT_FONT_SIZE = 15;
 const FONT_SIZE_STEP = 1;
+const HIGHLIGHT_SOURCE_LABEL = {
+  lezer: '官方语法高亮',
+  legacy: '兼容语法高亮',
+  plain: '纯文本',
+} as const;
 
 function clampFontSize(size: number): number {
   return Math.min(Math.max(Math.round(size), MIN_FONT_SIZE), MAX_FONT_SIZE);
@@ -51,67 +50,6 @@ function readTextResponseBody(body: unknown): string {
   if (typeof body === 'string') return body;
   if (body === null || body === undefined) return '';
   return String(body);
-}
-
-function resolveLanguageExtension(fileName?: string | null) {
-  const ext = normalizeFileExtension(fileName?.split('.').pop());
-  switch (ext) {
-    case 'js':
-    case 'mjs':
-    case 'cjs':
-      return javascript();
-    case 'jsx':
-      return javascript({ jsx: true });
-    case 'ts':
-    case 'mts':
-    case 'cts':
-      return javascript({ typescript: true });
-    case 'tsx':
-      return javascript({ jsx: true, typescript: true });
-    case 'json':
-    case 'json5':
-    case 'jsonc':
-      return json();
-    case 'md':
-    case 'markdown':
-      return markdown();
-    case 'html':
-    case 'htm':
-      return html();
-    case 'css':
-    case 'scss':
-    case 'less':
-      return css();
-    case 'xml':
-      return xml();
-    case 'py':
-      return python();
-    default:
-      return null;
-  }
-}
-
-function resolveLanguageLabel(fileName?: string | null): string {
-  const ext = normalizeFileExtension(fileName?.split('.').pop());
-  const map: Record<string, string> = {
-    js: 'JavaScript', mjs: 'JavaScript', cjs: 'JavaScript', jsx: 'JSX',
-    ts: 'TypeScript', mts: 'TypeScript', cts: 'TypeScript', tsx: 'TSX',
-    json: 'JSON', json5: 'JSON5', jsonc: 'JSON',
-    md: 'Markdown', markdown: 'Markdown',
-    html: 'HTML', htm: 'HTML',
-    css: 'CSS', scss: 'SCSS', less: 'Less',
-    xml: 'XML', svg: 'SVG',
-    py: 'Python', rb: 'Ruby', go: 'Go', rs: 'Rust',
-    java: 'Java', kt: 'Kotlin',
-    c: 'C', cpp: 'C++', h: 'C', hpp: 'C++',
-    sh: 'Shell', bash: 'Bash', zsh: 'Zsh',
-    yaml: 'YAML', yml: 'YAML', toml: 'TOML',
-    ini: 'INI', cfg: 'Config', conf: 'Config',
-    sql: 'SQL', csv: 'CSV', tsv: 'TSV',
-    log: 'Log', txt: 'Text',
-    srt: 'SRT', vtt: 'WebVTT', ass: 'ASS', ssa: 'SSA', lrc: 'LRC',
-  };
-  return map[ext] || 'Text';
 }
 
 const TextViewer: React.FC<TextViewerProps> = ({
@@ -235,9 +173,6 @@ const TextViewer: React.FC<TextViewerProps> = ({
   const handleSaveAsRef = useRef(handleSaveAs);
   handleSaveAsRef.current = handleSaveAs;
 
-  const fontSizeRef = useRef(fontSize);
-  fontSizeRef.current = fontSize;
-
   const saveKeymap = useMemo(
     () => keymap.of([
       {
@@ -309,14 +244,13 @@ const TextViewer: React.FC<TextViewerProps> = ({
     [wordWrap],
   );
 
-  const langExtension = useMemo(() => resolveLanguageExtension(fileName), [fileName]);
-  const langLabel = useMemo(() => resolveLanguageLabel(fileName), [fileName]);
+  const textLanguage = useMemo(() => resolveTextEditorLanguage(fileName), [fileName]);
 
   const extensions = useMemo(() => {
-    const exts: any[] = [saveKeymap, fontTheme, wrapExtension];
-    if (langExtension) exts.push(langExtension);
+    const exts: Extension[] = [saveKeymap, fontTheme, wrapExtension];
+    if (textLanguage.extension) exts.push(textLanguage.extension);
     return exts;
-  }, [saveKeymap, fontTheme, wrapExtension, langExtension]);
+  }, [saveKeymap, fontTheme, wrapExtension, textLanguage]);
 
   const handleChange = useCallback((value: string) => {
     contentRef.current = value;
@@ -357,7 +291,9 @@ const TextViewer: React.FC<TextViewerProps> = ({
 
       <div className="viewer-footer">
         <div className="footer-title-group">
-          <span className="title-badge">{langLabel}</span>
+          <span className="title-badge" title={HIGHLIGHT_SOURCE_LABEL[textLanguage.source]}>
+            {textLanguage.label}
+          </span>
           <span className="title" title={fileName || '文本预览'}>
             {fileName || '文本预览'}
           </span>

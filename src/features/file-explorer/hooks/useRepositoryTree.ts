@@ -6,7 +6,7 @@ import {
   updateNodeFileContent,
 } from '../services/file.api';
 import { fileCache } from '@/utils/fileCache.ts';
-import { buildTreeNodeLabel } from '@/utils/fileTreeSettings';
+import { buildFileFullName, buildTreeNodeLabel } from '@/utils/fileTreeSettings';
 import { runtimeLogger } from '@/utils/runtimeLogger';
 import { getDirectoryBuiltInIcon, getFileNodeIconByParentBuiltInType } from '../utils/file-node-icon';
 import type { AppendNodeBatchItem, Node, NodeRespDTO } from './use-repository-tree/types';
@@ -736,8 +736,8 @@ export function useRepositoryTree(
     }) => {
       const linkNodeId = Number(payload.linkNodeId ?? payload.id);
       const tabNodeId = Number(payload.tabNodeId ?? payload.id);
-      const fileName = payload.displayName ?? payload.name;
-      const fileType = resolveFileType(payload.mimeType, payload.ext);
+      const fileName = payload.displayName ?? buildFileFullName(payload.name, payload.ext);
+      const fileType = resolveFileType(payload.mimeType, payload.ext, payload.name);
 
       let fileUrl = fileType === 'text'
         ? ''

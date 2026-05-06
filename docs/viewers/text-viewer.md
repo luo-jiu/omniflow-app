@@ -1,6 +1,6 @@
 # Text Viewer 说明
 
-更新时间：2026-04-30
+更新时间：2026-05-06
 适用范围：`src/features/file-viewer/components/text-viewer/` 下的文本预览、编辑、保存和另存为链路。
 
 ## 1. 概述
@@ -22,10 +22,28 @@
 
 - `index.tsx`
   - CodeMirror 配置、文件加载、编辑状态、保存/另存为和快捷键
+- `language.ts`
+  - 文本编辑器语言识别、CodeMirror 语法扩展注册和语言标签
 - `style.ts`
   - 编辑区、底部工具栏、dirty 标记和操作按钮样式
 
 ## 3. 关键链路
+
+### 3.0 语法高亮
+
+`text-viewer` 当前继续使用 CodeMirror 6，不引入富文本编辑模型。语法高亮分三层：
+
+- 官方 Lezer parser：用于 JavaScript / TypeScript / JSON / Markdown / HTML / CSS / XML / Python / Go / Rust / Java / C/C++ / SQL / YAML / PHP 等主流代码文件。
+- `@codemirror/legacy-modes` stream parser：用于 Shell / PowerShell / Dockerfile / TOML / Ruby / Perl / Lua / diff / nginx / protobuf / Swift / R / CMake / Kotlin / SCSS / Sass / Less / Stylus 等轻量兼容场景。
+- 纯文本：用于 txt / log / csv / tsv / subtitle / ignore 文件等不适合强行套 parser 的内容。
+
+语言注册集中在 `language.ts`，`index.tsx` 只消费 `resolveTextEditorLanguage(fileName)` 返回的 `label`、`source` 和 CodeMirror `extension`。后续新增高亮能力时，优先改 `language.ts` 和 `src/utils/preview-file-type.ts`，不要把扩展名判断重新塞回 viewer 主组件。
+
+文件进入 text viewer 的前置判断仍由文件打开链路完成，核心位置是 `src/utils/preview-file-type.ts`。如果新增一种可编辑文本格式，必须同时确认：
+
+1. `preview-file-type.ts` 会把它识别为 `text`。
+2. `language.ts` 能给它合适的高亮，或明确作为纯文本降级。
+3. `docs/viewers/text-viewer.md` 中的高亮分层仍准确。
 
 ### 3.1 加载
 
@@ -84,3 +102,31 @@
 - `src/features/file-viewer/components/file-dispatcher/index.tsx`
 - `src/contexts/FileViewerContext.tsx`
 - `src/features/file-explorer/services/file.api.ts`
+
+## 5. 依赖边界
+
+CodeMirror 相关依赖必须显式写在 `package.json`，不能依赖本地 `node_modules` 中偶然存在的 extraneous 包。
+
+当前 text viewer 使用的关键依赖包括：
+
+- `@uiw/react-codemirror`
+- `@codemirror/view`
+- `@codemirror/state`
+- `@codemirror/language`
+- `@codemirror/lang-*`
+- `@codemirror/legacy-modes`
+- `@fontsource/jetbrains-mono`
+
+不要为了只读高亮引入 Shiki / highlight.js 作为编辑器主链路。它们更适合渲染代码块或静态预览；当前目标是普通可编辑文本编辑器，CodeMirror extension 才是主边界。
+
+## 6. 验证方式
+
+涉及 text viewer 高亮或编辑链路时，至少验证：
+
+- 打开 `.ts` / `.md` / `.json` / `.py` 中至少一种官方 parser 文件，确认有高亮且可编辑。
+- 打开 `.sh` / `Dockerfile` / `.toml` / `.diff` 中至少一种 legacy parser 文件，确认有高亮且可编辑。
+- 打开 `.txt` / `.log` 等纯文本文件，确认不会白屏且仍可保存。
+- `Cmd/Ctrl+S` 保存后 dirty 标记清除，目录树刷新，当前 tab 不丢失。
+- 亮色和暗色主题下 gutter、正文、选区和底部工具栏可读。
+
+常规代码变更仍按 `docs/frontend-validation-matrix.md` 执行 `npm run lint` 和 `npm run build`。
