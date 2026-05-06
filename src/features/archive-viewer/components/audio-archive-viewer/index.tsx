@@ -12,6 +12,7 @@ import {
   IconPause,
   IconPlay,
   IconShrink,
+  IconSort,
   IconSync,
   IconVolume1,
   IconVolume2,
@@ -25,6 +26,7 @@ import {
 } from '@/features/file-explorer/services/file.api';
 import { runtimeLogger } from '@/utils/runtimeLogger';
 import { useFileViewer } from '@/hooks/useFileViewer';
+import { useRegisterMediaEntry } from '@/hooks/useMediaRegistry';
 import { useGlobalAudioPlayback } from '@/features/file-viewer/hooks/useGlobalAudioPlayback';
 import { useTimedText } from '@/features/file-viewer/timed-text/useTimedText';
 import type {
@@ -48,6 +50,7 @@ interface AudioArchiveViewerProps {
   fileUrl: string;
   fileName?: string | null;
   active?: boolean;
+  tabId: string;
 }
 
 interface AudioArchiveCard {
@@ -102,6 +105,11 @@ function normalizeArchiveTitle(fileName?: string | null): string {
     if (stripped) return stripped;
   }
   return raw;
+}
+
+function formatPlaylistTitle(title: string): string {
+  const normalized = String(title || '').trim() || '音乐';
+  return normalized.endsWith('播放列表') ? normalized : `${normalized}播放列表`;
 }
 
 function resolveReaderCacheKey(fileUrl: string, folderNodeId: number | null): string | null {
@@ -169,6 +177,7 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
   fileUrl,
   fileName,
   active = true,
+  tabId,
 }) => {
   const { setFileUrl } = useFileViewer();
   const viewportRef = useRef<HTMLDivElement | null>(null);
@@ -182,9 +191,11 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
   } | null>(null);
   const activeSubtitleSourcesRef = useRef<FileViewerSubtitleSource[] | undefined>(undefined);
   const lastHandledEndedSerialRef = useRef(0);
+  const coverClickTimerRef = useRef<number>(0);
 
   const libraryId = useMemo(() => parseArchiveLibraryId(fileUrl), [fileUrl]);
   const title = useMemo(() => normalizeArchiveTitle(fileName), [fileName]);
+  const playlistTitle = useMemo(() => formatPlaylistTitle(title), [title]);
   const archiveOwnerKey = useMemo(() => (
     libraryId && folderNodeId ? `audio-archive:${libraryId}:${folderNodeId}` : null
   ), [folderNodeId, libraryId]);
@@ -230,11 +241,14 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
   );
   const effectiveCard = currentCard || selectedCard || cards[0] || null;
   const {
+    clearIfOwned,
     ensureSource,
     getPlayerState,
     isOwnedSource: isOwnedArchiveSource,
+    pause,
     play,
     playerState,
+    seekTo,
     setMuted,
     setVolume,
     togglePlay: toggleOwnedPlay,
@@ -278,6 +292,12 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
 
   const closeContextMenu = useCallback(() => {
     setMenuState(prev => ({ ...prev, visible: false }));
+  }, []);
+
+  const clearPendingCoverClick = useCallback(() => {
+    if (!coverClickTimerRef.current) return;
+    window.clearTimeout(coverClickTimerRef.current);
+    coverClickTimerRef.current = 0;
   }, []);
 
   const openCardContextMenu = useCallback((e: React.MouseEvent, card: AudioArchiveCard) => {
@@ -500,6 +520,33 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
     }
   }, [archiveOwnerKey, ensureSource, getPlayerState, libraryId, loadCardSubtitleSources, play]);
 
+  const restartCard = useCallback(async (card: AudioArchiveCard) => {
+    if (!libraryId || !archiveOwnerKey) {
+      Toast.error('当前库参数异常');
+      return;
+    }
+    try {
+      const [nextUrl, subtitleSources] = await Promise.all([
+        getFileLink(card.mediaNodeId || card.id, libraryId, LINK_EXPIRY_MINUTES),
+        loadCardSubtitleSources(card),
+      ]);
+      if (!nextUrl) {
+        throw new Error('未获取到音频访问链接');
+      }
+      ensureSource(nextUrl, card.title);
+      seekTo(0);
+      await play();
+      setCurrentCardId(card.id);
+      setSelectedCardId(card.id);
+      setCurrentAudioUrl(nextUrl);
+      setActiveSubtitleSources(subtitleSources);
+      lastHandledEndedSerialRef.current = getPlayerState().endedSerial;
+    } catch (playError: any) {
+      runtimeLogger.error('重新播放音频归档歌曲失败:', playError);
+      Toast.error(playError?.message || '重新播放音频失败');
+    }
+  }, [archiveOwnerKey, ensureSource, getPlayerState, libraryId, loadCardSubtitleSources, play, seekTo]);
+
   const currentCardIndex = useMemo(
     () => cards.findIndex(card => card.id === currentCardId),
     [cards, currentCardId],
@@ -545,6 +592,27 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
       void playCard(effectiveCard);
     }
   }, [effectiveCard, isOwnedSource, playCard, toggleOwnedPlay]);
+
+  const handleCardPlayButtonClick = useCallback((card: AudioArchiveCard) => {
+    clearPendingCoverClick();
+    coverClickTimerRef.current = window.setTimeout(() => {
+      coverClickTimerRef.current = 0;
+      setSelectedCardId(card.id);
+      if (card.id === currentCardId && isOwnedSource) {
+        void toggleOwnedPlay().catch((playError) => {
+          runtimeLogger.error('切换音频播放失败:', playError);
+        });
+        return;
+      }
+      void playCard(card);
+    }, 180);
+  }, [clearPendingCoverClick, currentCardId, isOwnedSource, playCard, toggleOwnedPlay]);
+
+  const handleCardRestart = useCallback((card: AudioArchiveCard) => {
+    clearPendingCoverClick();
+    setSelectedCardId(card.id);
+    void restartCard(card);
+  }, [clearPendingCoverClick, restartCard]);
 
   const handleOpenInAudioViewer = useCallback(async () => {
     if (!currentCard || !libraryId || !currentAudioUrl) return;
@@ -705,6 +773,39 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
 
   const progressPercent = duration > 0 ? Math.min(Math.max((currentTime / duration) * 100, 0), 100) : 0;
 
+  useRegisterMediaEntry({
+    enabled: isOwnedSource && playerState.hasStarted,
+    entryId: `audio-archive:${tabId}`,
+    kind: 'audio',
+    tabId,
+    title: currentCard?.title || playerState.trackName || playlistTitle,
+    isPlaying: isOwnedSource && playerState.isPlaying,
+    currentTime,
+    duration,
+    thumbnailUrl: currentCard?.coverUrl || undefined,
+    play: () => {
+      void play().catch((playError) => {
+        runtimeLogger.error('从媒体控制中心播放音频归档失败:', playError);
+      });
+    },
+    pause: () => {
+      pause();
+    },
+    seek: (time) => {
+      seekTo(time);
+    },
+    dismiss: () => {
+      clearIfOwned();
+    },
+  });
+
+  useEffect(() => {
+    return () => {
+      clearPendingCoverClick();
+      clearIfOwned();
+    };
+  }, [clearIfOwned, clearPendingCoverClick]);
+
   return (
     <AudioArchiveViewerWrapper className={expanded ? 'is-expanded' : ''}>
       {expanded && (
@@ -743,9 +844,9 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
 
       <div className="archive-main" ref={viewportRef}>
         <header className="archive-header">
-          <div>
-            <span className="badge">AUDIO ARCHIVE</span>
-            <h2 title={title}>{title}</h2>
+          <div className="archive-title-wrap">
+            <span className="badge">音乐</span>
+            <h2 title={playlistTitle}>{playlistTitle}</h2>
           </div>
           <span className="archive-count">共 {total} 首</span>
         </header>
@@ -760,9 +861,21 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
           <div className="state-wrap">当前归档下暂无可播放歌曲</div>
         ) : (
           <>
+            <div className="song-list-header" aria-hidden="true">
+              <span />
+              <span />
+              <span className="song-header-title">
+                歌名/歌手
+                <IconSort className="song-header-sort" />
+              </span>
+              <span>专辑</span>
+              <span />
+              <span className="song-header-duration">时长</span>
+            </div>
             <div className="song-list" role="list">
               {cards.map((card, index) => {
                 const activeRow = card.id === currentCardId && isOwnedSource;
+                const playingRow = activeRow && playerState.isPlaying;
                 const selectedRow = card.id === selectedCardId;
                 return (
                   <article
@@ -770,7 +883,7 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
                     role="listitem"
                     className={`song-row ${activeRow ? 'is-playing' : ''} ${selectedRow ? 'is-selected' : ''}`}
                     onClick={() => setSelectedCardId(card.id)}
-                    onDoubleClick={() => void playCard(card)}
+                    onDoubleClick={() => handleCardRestart(card)}
                     onContextMenu={(event) => openCardContextMenu(event, card)}
                   >
                     <span className="song-index">{activeRow ? <IconMusic /> : index + 1}</span>
@@ -779,13 +892,17 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
                       className="song-cover-button"
                       onClick={(event) => {
                         event.stopPropagation();
-                        void playCard(card);
+                        handleCardPlayButtonClick(card);
                       }}
-                      title="播放"
-                      aria-label={`播放 ${card.title}`}
+                      onDoubleClick={(event) => {
+                        event.stopPropagation();
+                        handleCardRestart(card);
+                      }}
+                      title={activeRow && playingRow ? '暂停' : '播放'}
+                      aria-label={`${activeRow && playingRow ? '暂停' : '播放'} ${card.title}`}
                     >
                       <AudioCover coverUrl={card.coverUrl} title={card.title} />
-                      <span className="cover-play"><IconPlay /></span>
+                      <span className="cover-play">{activeRow && playingRow ? <IconPause /> : <IconPlay />}</span>
                     </button>
                     <div className="song-primary">
                       <div className="song-title-line">

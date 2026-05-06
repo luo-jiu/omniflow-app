@@ -181,7 +181,15 @@ const FileDispatcher: React.FC<FileDispatcherProps> = ({
       return <VideoArchiveViewer folderNodeId={nodeId} fileUrl={fileUrl} fileName={fileName} active={active} />;
 
     case 'audio_archive':
-      return <AudioArchiveViewer folderNodeId={nodeId} fileUrl={fileUrl} fileName={fileName} active={active} />;
+      return (
+        <AudioArchiveViewer
+          folderNodeId={nodeId}
+          fileUrl={fileUrl}
+          fileName={fileName}
+          active={active}
+          tabId={tabId}
+        />
+      );
 
     default:
       return (

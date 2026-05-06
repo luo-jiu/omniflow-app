@@ -56,8 +56,15 @@ export const AudioArchiveViewerWrapper = styled.div`
     padding: 1px 6px 9px;
   }
 
+  .archive-title-wrap {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
   .archive-header h2 {
-    margin: 5px 0 0;
+    margin: 0;
     max-width: min(520px, 62vw);
     font-size: 16px;
     line-height: 1.25;
@@ -110,6 +117,38 @@ export const AudioArchiveViewerWrapper = styled.div`
     flex-direction: column;
     gap: 1px;
     min-width: 0;
+  }
+
+  .song-list-header {
+    display: grid;
+    grid-template-columns: 34px 44px minmax(150px, 1.4fr) minmax(120px, 0.8fr) 30px 54px;
+    align-items: center;
+    gap: 12px;
+    min-height: 34px;
+    margin-bottom: 5px;
+    padding: 0 10px 0 6px;
+    border-bottom: 1px solid color-mix(in srgb, var(--semi-color-border) 82%, transparent);
+    color: var(--semi-color-text-1);
+    background: color-mix(in srgb, var(--semi-color-bg-0) 84%, var(--semi-color-fill-0));
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .song-header-title,
+  .song-header-duration {
+    min-width: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .song-header-sort {
+    color: var(--semi-color-success);
+    font-size: 11px;
+  }
+
+  .song-header-duration {
+    justify-content: flex-end;
   }
 
   .song-row {
@@ -281,7 +320,8 @@ export const AudioArchiveViewerWrapper = styled.div`
   }
 
   .song-row:hover .row-icon-button,
-  .row-icon-button:focus-visible {
+  .row-icon-button:focus-visible,
+  .song-row.is-playing .row-icon-button {
     opacity: 1;
   }
 
@@ -490,8 +530,15 @@ export const AudioArchiveViewerWrapper = styled.div`
       gap: 9px;
     }
 
+    .song-list-header {
+      grid-template-columns: 28px 40px minmax(120px, 1fr) 46px;
+      gap: 9px;
+    }
+
     .song-album,
-    .row-icon-button {
+    .row-icon-button,
+    .song-list-header span:nth-child(4),
+    .song-list-header span:nth-child(5) {
       display: none;
     }
 

@@ -47,7 +47,7 @@ OmniFlow 当前不是“一个万能 viewer”，而是多种 viewer 共同组�
 - `comic -> ComicViewer`
 - `asmr -> AsmrViewer`（参与 MediaRegistry 注册，kind=audio，仅当 ownerType 为 asmr 且为该 viewer 的 ownerKey）
 - `video_archive -> VideoArchiveViewer`
-- `audio_archive -> AudioArchiveViewer`
+- `audio_archive -> AudioArchiveViewer`（归档页底部播放器首次播放后参与 MediaRegistry 注册，kind=audio）
 - `asmr_archive -> AsmrArchiveViewer`
 - `comic_archive -> ComicArchiveViewer`
 - `other -> 不支持预览提示`
@@ -121,7 +121,7 @@ OmniFlow 当前不是“一个万能 viewer”，而是多种 viewer 共同组�
 
 这说明归档 viewer 不只是视觉差异，它还携带额外导航语义。
 
-`audio_archive` 也可以在归档页内直接播放歌曲列表；只有用户从底部控制条打开普通 `audio` viewer 时，才通过 `FileViewerContext` 透传 `audioPlaylist`、`audioSubtitleSources`、`audioCoverUrl` 和 `returnTarget`。这些字段只表达打开来源和播放上下文，不拥有实际播放时间或歌词解析结果。
+`audio_archive` 也可以在归档页内直接播放歌曲列表；归档页自身会在首次播放后以当前 tab 注册到 `MediaRegistry`，用于工具栏媒体控制中心的播放 / 暂停 / seek / 移除控制。只有用户从底部控制条打开普通 `audio` viewer 时，才通过 `FileViewerContext` 透传 `audioPlaylist`、`audioSubtitleSources`、`audioCoverUrl` 和 `returnTarget`。这些字段只表达打开来源和播放上下文，不拥有实际播放时间或歌词解析结果。
 
 ## 6. 当前最值得读的文件
 

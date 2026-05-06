@@ -59,7 +59,7 @@
 - 视频 viewer 不再因为所在 tab 失活而自动 pause；保留进度落库（`persistVideoProgress(true)`），但不再触发 `<video>.pause()`。多个视频可在不同 tab 并行播放。
 - 音频 viewer / asmr viewer / 音频归档播放器共用 `globalAudioPlayer` 单例 `<audio>`，所以同一时刻仍只能有一个音频源在播放（属预期范围）；组件侧统一通过 `useGlobalAudioPlayback` 订阅和控制这个单例，但 UI 仍由各 viewer 自己决定。
 - video 启动播放不再调用 `globalAudioPlayer.pause()` 暂停音频；audio 启动播放不再暂停所有视频。音视频可并行。
-- 所有 audio / video / asmr viewer 在挂载且首次播放后向 `MediaRegistry` 注册自身，由 `library detail` 工具栏右侧的"媒体控制中心"集中展示与控制，详见 `docs/library-detail-workspace.md` §11。
+- 所有 audio / video / asmr viewer，以及音频归档页内置播放器，在挂载且首次播放后向 `MediaRegistry` 注册自身，由 `library detail` 工具栏右侧的"媒体控制中心"集中展示与控制，详见 `docs/library-detail-workspace.md` §11。
 
 ## 3.2 Viewer 共享能力边界
 
