@@ -1,6 +1,9 @@
 import styled from 'styled-components';
 
 export const Wrapper = styled.div`
+  flex: 1;
+  width: 100%;
+  min-width: 0;
   display: grid;
   grid-template-columns: 176px minmax(0, 1fr);
   height: 100%;

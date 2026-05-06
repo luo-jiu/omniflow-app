@@ -9,13 +9,13 @@ import type { UploadTaskSummary } from '@/modules/upload-center/model/upload-tas
 import OpaquePageContainer from '@/components/OpaquePageContainer';
 
 const Page = styled.div`
-  --page-heading-indent: 58px;
+  --page-heading-indent: 38px;
 
   width: 100%;
   height: 100%;
-  max-width: 1100px;
+  max-width: 760px;
   margin: 0 auto;
-  padding: 56px 48px 40px;
+  padding: 38px 32px 27px;
   overflow: auto;
   -webkit-app-region: drag;
 
@@ -26,66 +26,69 @@ const Page = styled.div`
   .header {
     display: flex;
     align-items: center;
-    gap: 16px;
-    margin-bottom: 20px;
+    gap: 11px;
+    margin-bottom: 13px;
   }
 
   .page-back-button {
     flex-shrink: 0;
-    padding: 8px;
-    border-radius: 10px;
+    width: 28px;
+    height: 28px;
+    min-width: 28px;
+    padding: 0;
+    border-radius: 7px;
   }
 
   .page-title {
     margin: 0;
-    font-size: 34px;
+    font-size: 23px;
     font-weight: 700;
     line-height: 1.15;
   }
 
   .subtitle {
     margin-left: var(--page-heading-indent);
-    margin-bottom: 22px;
-    max-width: 720px;
+    margin-bottom: 15px;
+    max-width: 480px;
     color: var(--semi-color-text-2);
-    font-size: 16px;
-    line-height: 1.6;
+    font-size: 11px;
+    line-height: 1.55;
   }
 
   .summary {
     display: grid;
-    grid-template-columns: repeat(4, minmax(120px, 1fr));
-    gap: 14px;
-    margin-bottom: 22px;
+    grid-template-columns: repeat(4, minmax(80px, 1fr));
+    gap: 9px;
+    margin-bottom: 15px;
   }
 
   .summary-card {
     border: 1px solid var(--semi-color-border);
-    border-radius: 12px;
-    padding: 14px 16px;
+    border-radius: 8px;
+    padding: 9px 11px;
     background: var(--semi-color-bg-0);
   }
 
   .summary-label {
-    font-size: 14px;
+    font-size: 10px;
     color: var(--semi-color-text-2);
   }
 
   .summary-value {
-    margin-top: 6px;
-    font-size: 26px;
+    margin-top: 4px;
+    font-size: 17px;
     font-weight: 700;
   }
 
   .list {
     border: 1px solid var(--semi-color-border);
-    border-radius: 14px;
+    border-radius: 9px;
     overflow: hidden;
     background: var(--semi-color-bg-0);
   }
 
   .group-row {
-    padding: 18px 20px;
+    padding: 12px 13px;
     border-bottom: 1px solid var(--semi-color-border-light);
   }
 
@@ -97,19 +100,19 @@ const Page = styled.div`
     display: flex;
     justify-content: space-between;
     align-items: center;
-    gap: 12px;
+    gap: 8px;
   }
 
   .name-wrap {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 7px;
     min-width: 0;
     flex: 1;
   }
 
   .name {
-    font-size: 16px;
+    font-size: 11px;
     font-weight: 600;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -117,34 +120,35 @@ const Page = styled.div`
   }
 
   .row-meta {
-    margin-top: 10px;
+    margin-top: 7px;
     display: flex;
     justify-content: space-between;
-    gap: 12px;
+    gap: 8px;
     color: var(--semi-color-text-2);
-    font-size: 14px;
+    font-size: 10px;
     align-items: center;
   }
 
   .row-actions {
     display: flex;
-    gap: 8px;
+    gap: 5px;
     flex-shrink: 0;
   }
 
   .row-action-button {
-    min-height: 38px;
-    padding: 0 10px;
-    border-radius: 8px;
-    font-size: 15px;
+    height: 25px;
+    min-height: 25px;
+    padding: 0 7px;
+    border-radius: 6px;
+    font-size: 10px;
     font-weight: 600;
   }
 
   .tree {
-    margin-top: 14px;
+    margin-top: 9px;
     border: 1px solid var(--semi-color-border-light);
-    border-radius: 10px;
-    padding: 10px;
+    border-radius: 7px;
+    padding: 7px;
     background: var(--semi-color-fill-0);
   }
 
@@ -152,10 +156,10 @@ const Page = styled.div`
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 10px;
-    min-height: 34px;
-    border-radius: 6px;
-    padding: 4px 8px;
+    gap: 7px;
+    min-height: 23px;
+    border-radius: 4px;
+    padding: 3px 5px;
   }
 
   .tree-row:hover {
@@ -165,7 +169,7 @@ const Page = styled.div`
   .tree-left {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 5px;
     min-width: 0;
     flex: 1;
   }
@@ -174,29 +178,65 @@ const Page = styled.div`
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: 14px;
+    font-size: 10px;
   }
 
   .tree-meta {
-    font-size: 13px;
+    font-size: 9px;
     color: var(--semi-color-text-2);
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 5px;
     flex-shrink: 0;
   }
 
   .tree-more {
-    margin-left: 20px;
-    margin-top: 4px;
+    margin-left: 13px;
+    margin-top: 3px;
+  }
+
+  .semi-tag {
+    font-size: 10px;
+    line-height: 16px;
+  }
+
+  .semi-progress-line {
+    height: 4px;
+  }
+
+  .semi-button .semi-icon {
+    font-size: 12px;
+  }
+
+  .name-wrap > .semi-button,
+  .tree-left .semi-button {
+    width: 18px;
+    height: 18px;
+    min-width: 18px;
+    padding: 0 !important;
+    border-radius: 4px;
+  }
+
+  .tree-more .semi-button,
+  .group-row > .semi-button {
+    height: 24px;
+    min-height: 24px;
+    padding: 0 8px;
+    border-radius: 6px;
+    font-size: 10px;
+    font-weight: 600;
   }
 
   .empty-state {
-    padding: 56px 24px;
+    padding: 38px 16px;
   }
 
-  @media (max-width: 900px) {
-    padding: 44px 20px 24px;
+  .empty-state .semi-empty-description {
+    font-size: 11px;
+  }
+
+  @media (max-width: 760px) {
+    padding: 29px 13px 16px;
 
     .summary {
       grid-template-columns: repeat(2, minmax(100px, 1fr));
@@ -524,20 +564,20 @@ const GroupTreeView: React.FC<GroupTreeViewProps> = ({ group, taskMap, expandedK
 
     return (
       <React.Fragment key={node.key}>
-        <div className="tree-row" style={{ paddingLeft: `${depth * 18 + 6}px` }}>
+        <div className="tree-row" style={{ paddingLeft: `${depth * 12 + 4}px` }}>
           <div className="tree-left">
             {isFolder ? (
               <Button
                 type="tertiary"
                 theme="borderless"
                 icon={expanded ? <IconChevronDown /> : <IconChevronRight />}
-                style={{ padding: 2 }}
+                style={{ padding: 1 }}
                 onClick={() => onToggleKey(node.key)}
               />
             ) : (
-              <span style={{ width: 22 }} />
+              <span style={{ width: 15 }} />
             )}
-            <span style={{ fontSize: 14 }}>{isFolder ? '📁' : '📄'}</span>
+            <span style={{ fontSize: 10 }}>{isFolder ? '📁' : '📄'}</span>
             <span className="tree-name" title={node.name}>{node.name}</span>
           </div>
 
@@ -551,7 +591,7 @@ const GroupTreeView: React.FC<GroupTreeViewProps> = ({ group, taskMap, expandedK
           <>
             {visibleChildren.map((childKey) => renderNode(childKey, depth + 1))}
             {hasMoreChildren && (
-              <div className="tree-more" style={{ paddingLeft: `${(depth + 1) * 18 + 8}px` }}>
+              <div className="tree-more" style={{ paddingLeft: `${(depth + 1) * 12 + 5}px` }}>
                 <Button
                   size="small"
                   theme="borderless"
@@ -574,7 +614,7 @@ const GroupTreeView: React.FC<GroupTreeViewProps> = ({ group, taskMap, expandedK
 
   const rootChildren = getNodeChildren(tree, null);
   if (rootChildren.length === 0) {
-    return <Empty image={null} description="目录为空" style={{ padding: '16px 0' }} />;
+    return <Empty image={null} description="目录为空" style={{ padding: '11px 0' }} />;
   }
 
   return <>{rootChildren.map((nodeKey) => renderNode(nodeKey, 0))}</>;
@@ -740,140 +780,140 @@ const UploadCenter: React.FC = () => {
 
   return (
     <OpaquePageContainer>
-    <Page>
-      <div className="header">
-        <Button
-          icon={<IconChevronLeft style={{ fontSize: 20 }} />}
-          theme="borderless"
-          onClick={() => navigate(-1)}
-          className="page-back-button"
-        />
-        <Title heading={2} className="page-title">
-          上传中心
-        </Title>
-      </div>
+      <Page>
+        <div className="header">
+          <Button
+            icon={<IconChevronLeft style={{ fontSize: 14 }} />}
+            theme="borderless"
+            onClick={() => navigate(-1)}
+            className="page-back-button"
+          />
+          <Title heading={2} className="page-title">
+            上传中心
+          </Title>
+        </div>
 
-      <div className="subtitle">
-        默认仅展示分组，展开后按目录层级逐步查看
-      </div>
+        <div className="subtitle">
+          默认仅展示分组，展开后按目录层级逐步查看
+        </div>
 
-      <div className="summary">
-        <div className="summary-card">
-          <div className="summary-label">总任务</div>
-          <div className="summary-value">{summary.total}</div>
-        </div>
-        <div className="summary-card">
-          <div className="summary-label">进行中</div>
-          <div className="summary-value">{summary.uploading}</div>
-        </div>
-        <div className="summary-card">
-          <div className="summary-label">排队</div>
-          <div className="summary-value">{summary.queued}</div>
-        </div>
-        <div className="summary-card">
-          <div className="summary-label">失败</div>
-          <div className="summary-value">{summary.failed}</div>
-        </div>
-      </div>
-
-      <div className="list">
-        {groups.length === 0 ? (
-          <div className="empty-state">
-            <Empty description="暂无上传任务" />
+        <div className="summary">
+          <div className="summary-card">
+            <div className="summary-label">总任务</div>
+            <div className="summary-value">{summary.total}</div>
           </div>
-        ) : (
-          visibleGroups.map((group) => {
-            const status = getDominantStatus(group);
-            const percent = getProgressPercent(group);
-            const expanded = expandedGroupIds.includes(group.id);
+          <div className="summary-card">
+            <div className="summary-label">进行中</div>
+            <div className="summary-value">{summary.uploading}</div>
+          </div>
+          <div className="summary-card">
+            <div className="summary-label">排队</div>
+            <div className="summary-value">{summary.queued}</div>
+          </div>
+          <div className="summary-card">
+            <div className="summary-label">失败</div>
+            <div className="summary-value">{summary.failed}</div>
+          </div>
+        </div>
 
-            return (
-              <div key={group.id} className="group-row">
-                <div className="row-head">
-                  <div className="name-wrap">
-                    {group.isFolder ? (
-                      <Button
-                        icon={expanded ? <IconChevronDown /> : <IconChevronRight />}
-                        size="small"
-                        theme="borderless"
-                        type="tertiary"
-                        style={{ padding: 2 }}
-                        onClick={() => toggleGroup(group.id)}
-                      />
-                    ) : (
-                      <span style={{ width: 24 }} />
-                    )}
-                    <span style={{ fontSize: 16 }}>{group.isFolder ? '📁' : '📄'}</span>
-                    <div className="name" title={group.label}>{group.label}</div>
+        <div className="list">
+          {groups.length === 0 ? (
+            <div className="empty-state">
+              <Empty description="暂无上传任务" />
+            </div>
+          ) : (
+            visibleGroups.map((group) => {
+              const status = getDominantStatus(group);
+              const percent = getProgressPercent(group);
+              const expanded = expandedGroupIds.includes(group.id);
+
+              return (
+                <div key={group.id} className="group-row">
+                  <div className="row-head">
+                    <div className="name-wrap">
+                      {group.isFolder ? (
+                        <Button
+                          icon={expanded ? <IconChevronDown /> : <IconChevronRight />}
+                          size="small"
+                          theme="borderless"
+                          type="tertiary"
+                          style={{ padding: 1 }}
+                          onClick={() => toggleGroup(group.id)}
+                        />
+                      ) : (
+                        <span style={{ width: 16 }} />
+                      )}
+                      <span style={{ fontSize: 11 }}>{group.isFolder ? '📁' : '📄'}</span>
+                      <div className="name" title={group.label}>{group.label}</div>
+                    </div>
+                    <Tag color={STATUS_COLOR[status]}>{STATUS_LABEL[status]}</Tag>
                   </div>
-                  <Tag color={STATUS_COLOR[status]}>{STATUS_LABEL[status]}</Tag>
-                </div>
 
-                <div style={{ marginTop: 10 }}>
-                  <Progress
-                    percent={percent}
-                    showInfo={false}
-                    stroke={status === 'failed' ? 'var(--semi-color-danger)' : undefined}
-                  />
-                </div>
-
-                <div className="row-meta">
-                  <span>{group.fileCount} 项</span>
-                  <span>{uploadManager.formatSize(group.uploadedBytes)} / {uploadManager.formatSize(group.totalBytes)}</span>
-                  <span>{percent.toFixed(1)}%</span>
-                  <div className="row-actions">
-                    {(group.uploading > 0 || group.queued > 0 || group.paused > 0) && (
-                      <Button
-                        size="default"
-                        type="danger"
-                        theme="borderless"
-                        className="row-action-button"
-                        onClick={() => handleCancelGroup(group)}
-                      >
-                        中断
-                      </Button>
-                    )}
-                    {group.failed > 0 && (
-                      <Button
-                        size="default"
-                        theme="borderless"
-                        className="row-action-button"
-                        onClick={() => handleRetryGroup(group)}
-                      >
-                        重试失败项
-                      </Button>
-                    )}
-                  </div>
-                </div>
-
-                {group.isFolder && expanded && (
-                  <div className="tree">
-                    <GroupTreeView
-                      group={group}
-                      taskMap={taskMap}
-                      expandedKeys={expandedTreeKeysByGroup[group.id] || []}
-                      onToggleKey={(nodeKey) => handleToggleTreeNode(group.id, nodeKey)}
+                  <div style={{ marginTop: 7 }}>
+                    <Progress
+                      percent={percent}
+                      showInfo={false}
+                      stroke={status === 'failed' ? 'var(--semi-color-danger)' : undefined}
                     />
                   </div>
-                )}
-              </div>
-            );
-          })
-        )}
-        {groups.length > visibleGroupCount && (
-          <div className="group-row" style={{ textAlign: 'center' }}>
-            <Button
-              theme="borderless"
-              onClick={() => {
-                setVisibleGroupCount(prev => Math.min(prev + GROUP_RENDER_STEP, groups.length));
-              }}
-            >
-              加载更多分组（剩余 {groups.length - visibleGroupCount}）
-            </Button>
-          </div>
-        )}
-      </div>
-    </Page>
+
+                  <div className="row-meta">
+                    <span>{group.fileCount} 项</span>
+                    <span>{uploadManager.formatSize(group.uploadedBytes)} / {uploadManager.formatSize(group.totalBytes)}</span>
+                    <span>{percent.toFixed(1)}%</span>
+                    <div className="row-actions">
+                      {(group.uploading > 0 || group.queued > 0 || group.paused > 0) && (
+                        <Button
+                          size="default"
+                          type="danger"
+                          theme="borderless"
+                          className="row-action-button"
+                          onClick={() => handleCancelGroup(group)}
+                        >
+                          中断
+                        </Button>
+                      )}
+                      {group.failed > 0 && (
+                        <Button
+                          size="default"
+                          theme="borderless"
+                          className="row-action-button"
+                          onClick={() => handleRetryGroup(group)}
+                        >
+                          重试失败项
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+
+                  {group.isFolder && expanded && (
+                    <div className="tree">
+                      <GroupTreeView
+                        group={group}
+                        taskMap={taskMap}
+                        expandedKeys={expandedTreeKeysByGroup[group.id] || []}
+                        onToggleKey={(nodeKey) => handleToggleTreeNode(group.id, nodeKey)}
+                      />
+                    </div>
+                  )}
+                </div>
+              );
+            })
+          )}
+          {groups.length > visibleGroupCount && (
+            <div className="group-row" style={{ textAlign: 'center' }}>
+              <Button
+                theme="borderless"
+                onClick={() => {
+                  setVisibleGroupCount(prev => Math.min(prev + GROUP_RENDER_STEP, groups.length));
+                }}
+              >
+                加载更多分组（剩余 {groups.length - visibleGroupCount}）
+              </Button>
+            </div>
+          )}
+        </div>
+      </Page>
     </OpaquePageContainer>
   );
 };

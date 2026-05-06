@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import styled from 'styled-components';
+import styled, { createGlobalStyle } from 'styled-components';
 import { Button, Empty, Modal, Tag, Toast, Typography } from '@douyinfe/semi-ui';
 import { IconChevronLeft, IconDelete, IconRefresh } from '@douyinfe/semi-icons';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -15,13 +15,13 @@ import { requestDesktopWindowActivation } from '@/utils/windowActivation';
 import OpaquePageContainer from '@/components/OpaquePageContainer';
 
 const Page = styled.div`
-  --page-heading-indent: 58px;
+  --page-heading-indent: 38px;
 
   width: 100%;
   height: 100%;
-  max-width: 1100px;
+  max-width: 760px;
   margin: 0 auto;
-  padding: 56px 48px 40px;
+  padding: 38px 32px 27px;
   overflow: auto;
   -webkit-app-region: drag;
 
@@ -33,71 +33,80 @@ const Page = styled.div`
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 16px;
-    margin-bottom: 18px;
+    gap: 11px;
+    margin-bottom: 12px;
   }
 
   .header-left {
     display: flex;
     align-items: center;
-    gap: 16px;
+    gap: 11px;
   }
 
   .header-right {
     display: flex;
     align-items: center;
     justify-content: flex-end;
-    gap: 8px;
+    gap: 5px;
   }
 
   .page-back-button {
     flex-shrink: 0;
-    padding: 8px;
-    border-radius: 10px;
+    width: 28px;
+    height: 28px;
+    min-width: 28px;
+    padding: 0;
+    border-radius: 7px;
   }
 
   .page-title {
     margin: 0;
-    font-size: 34px;
+    font-size: 23px;
     font-weight: 700;
     line-height: 1.15;
   }
 
   .subtitle {
     margin-left: var(--page-heading-indent);
-    margin-bottom: 22px;
-    max-width: 720px;
+    margin-bottom: 15px;
+    max-width: 480px;
     color: var(--semi-color-text-2);
-    font-size: 16px;
-    line-height: 1.6;
+    font-size: 11px;
+    line-height: 1.55;
   }
 
   .toolbar-button {
-    min-height: 40px;
-    padding: 0 14px;
-    border-radius: 10px;
-    font-size: 15px;
+    height: 27px;
+    min-height: 27px;
+    padding: 0 9px;
+    border-radius: 7px;
+    font-size: 10px;
     font-weight: 600;
+  }
+
+  .toolbar-button .semi-icon,
+  .row-action-button .semi-icon {
+    font-size: 12px;
   }
 
   .list {
     border: 1px solid var(--semi-color-border);
-    border-radius: 14px;
+    border-radius: 9px;
     overflow: hidden;
     background: var(--semi-color-bg-0);
   }
 
   .row {
     display: grid;
-    grid-template-columns: minmax(200px, 1.3fr) 100px 180px 120px 180px;
+    grid-template-columns: minmax(134px, 1.3fr) 67px 121px 80px 121px;
     align-items: center;
-    gap: 14px;
-    padding: 16px 18px;
+    gap: 9px;
+    padding: 11px 12px;
     border-bottom: 1px solid var(--semi-color-border-light);
   }
 
   .row.header-row {
-    font-size: 14px;
+    font-size: 10px;
     color: var(--semi-color-text-2);
     background: var(--semi-color-fill-0);
     font-weight: 600;
@@ -115,48 +124,112 @@ const Page = styled.div`
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: 16px;
+    font-size: 11px;
     font-weight: 500;
   }
 
   .name-meta {
-    margin-top: 6px;
-    font-size: 14px;
+    margin-top: 4px;
+    font-size: 10px;
     color: var(--semi-color-text-2);
   }
 
   .size,
   .time {
-    font-size: 14px;
+    font-size: 10px;
     color: var(--semi-color-text-2);
   }
 
   .actions {
     display: flex;
     justify-content: flex-end;
-    gap: 8px;
+    gap: 5px;
   }
 
   .row-action-button {
-    min-height: 38px;
-    padding: 0 10px;
-    border-radius: 8px;
-    font-size: 15px;
+    height: 25px;
+    min-height: 25px;
+    padding: 0 7px;
+    border-radius: 6px;
+    font-size: 10px;
     font-weight: 600;
   }
 
-  .empty-state {
-    padding: 56px 24px;
+  .semi-tag {
+    font-size: 10px;
+    line-height: 16px;
   }
 
-  @media (max-width: 980px) {
-    padding: 44px 20px 24px;
+  .empty-state {
+    padding: 38px 16px;
+  }
+
+  .empty-state .semi-empty-description {
+    font-size: 11px;
+  }
+
+  @media (max-width: 760px) {
+    padding: 29px 13px 16px;
 
     .row {
-      grid-template-columns: minmax(160px, 1fr) 88px 140px 90px 150px;
-      gap: 8px;
-      padding: 12px 14px;
+      grid-template-columns: minmax(120px, 1fr) 59px 94px 60px 101px;
+      gap: 5px;
+      padding: 8px 9px;
     }
+  }
+`;
+
+const RecycleBinConfirmModalStyle = createGlobalStyle`
+  .recycle-bin-compact-confirm {
+    width: 320px !important;
+  }
+
+  .recycle-bin-compact-confirm .semi-modal-content {
+    overflow: hidden;
+    border: 1px solid var(--app-border-strong);
+    border-radius: 8px;
+    background: var(--app-bg-elevated);
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28), var(--app-shadow);
+  }
+
+  .recycle-bin-compact-confirm .semi-modal-header {
+    margin: 0;
+    padding: 13px 16px 8px !important;
+  }
+
+  .recycle-bin-compact-confirm .semi-modal-title {
+    font-size: 14px;
+    line-height: 1.35;
+    font-weight: 700;
+  }
+
+  .recycle-bin-compact-confirm .semi-modal-body {
+    padding: 0 16px 13px !important;
+    font-size: 12px;
+    line-height: 1.55;
+    color: var(--semi-color-text-1);
+  }
+
+  .recycle-bin-compact-confirm .semi-modal-confirm-content {
+    font-size: 12px;
+    line-height: 1.55;
+  }
+
+  .recycle-bin-compact-confirm .semi-modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin: 0;
+    padding: 0 16px 16px !important;
+  }
+
+  .recycle-bin-compact-confirm .semi-button {
+    height: 28px;
+    min-width: 56px;
+    padding: 0 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
   }
 `;
 
@@ -246,6 +319,7 @@ const RecycleBin: React.FC = () => {
   const openHardDeleteConfirm = (item: RecycleBinItem) => {
     requestDesktopWindowActivation(true);
     Modal.confirm({
+      className: 'recycle-bin-compact-confirm',
       title: '确认彻底删除？',
       content: '彻底删除后无法恢复，并会清理对象存储文件。',
       okText: '彻底删除',
@@ -263,6 +337,7 @@ const RecycleBin: React.FC = () => {
     }
     requestDesktopWindowActivation(true);
     Modal.confirm({
+      className: 'recycle-bin-compact-confirm',
       title: '确认清空回收站？',
       content: `将彻底删除当前库回收站中的 ${items.length} 项内容，删除后无法恢复。`,
       okText: '清空回收站',
@@ -283,98 +358,99 @@ const RecycleBin: React.FC = () => {
 
   return (
     <OpaquePageContainer>
-    <Page>
-      <div className="header">
-        <div className="header-left">
-          <Button
-            icon={<IconChevronLeft style={{ fontSize: 20 }} />}
-            theme="borderless"
-            onClick={() => navigate(-1)}
-            className="page-back-button"
-          />
-          <Title heading={2} className="page-title">
-            回收站
-          </Title>
-        </div>
-        <div className="header-right">
-          <Button
-            icon={<IconDelete />}
-            theme="borderless"
-            type="danger"
-            disabled={items.length === 0 || loading}
-            onClick={() => void handleClearRecycleBin()}
-            className="toolbar-button"
-          >
-            清空回收站
-          </Button>
-          <Button
-            icon={<IconRefresh />}
-            theme="borderless"
-            loading={loading}
-            onClick={() => void loadItems()}
-            className="toolbar-button"
-          >
-            刷新
-          </Button>
-        </div>
-      </div>
-
-      <div className="subtitle">{summaryText}</div>
-
-      <div className="list">
-        <div className="row header-row">
-          <div>名称</div>
-          <div>类型</div>
-          <div>删除时间</div>
-          <div>大小</div>
-          <div style={{ textAlign: 'right' }}>操作</div>
-        </div>
-
-        {items.length === 0 ? (
-          <div className="empty-state">
-            <Empty description="回收站为空" />
+      <RecycleBinConfirmModalStyle />
+      <Page>
+        <div className="header">
+          <div className="header-left">
+            <Button
+              icon={<IconChevronLeft style={{ fontSize: 14 }} />}
+              theme="borderless"
+              onClick={() => navigate(-1)}
+              className="page-back-button"
+            />
+            <Title heading={2} className="page-title">
+              回收站
+            </Title>
           </div>
-        ) : (
-          items.map(item => (
-            <div className="row" key={item.id}>
-              <div className="name">
-                <div className="name-text" title={item.name}>
-                  {item.name}
-                  {item.type === 'file' && item.ext ? `.${item.ext}` : ''}
-                </div>
-                {item.type === 'dir' && (
-                  <div className="name-meta">
-                    包含 {item.deletedDescendantCount ?? 0} 项
-                  </div>
-                )}
-              </div>
-              <div>
-                <Tag color={item.type === 'dir' ? 'blue' : 'grey'}>
-                  {item.type === 'dir' ? '文件夹' : '文件'}
-                </Tag>
-              </div>
-              <div className="time">{formatDeletedAt(item.deletedAt)}</div>
-              <div className="size">{item.type === 'file' ? formatBytes(item.fileSize) : '--'}</div>
-              <div className="actions">
-                <Button size="default" theme="borderless" className="row-action-button" onClick={() => void handleRestore(item)}>
-                  恢复
-                </Button>
-                <Button
-                  size="default"
-                  theme="borderless"
-                  type="danger"
-                  icon={<IconDelete />}
-                  className="row-action-button"
-                  onClick={() => openHardDeleteConfirm(item)}
-                >
-                  彻底删除
-                </Button>
-              </div>
+          <div className="header-right">
+            <Button
+              icon={<IconDelete />}
+              theme="borderless"
+              type="danger"
+              disabled={items.length === 0 || loading}
+              onClick={() => void handleClearRecycleBin()}
+              className="toolbar-button"
+            >
+              清空回收站
+            </Button>
+            <Button
+              icon={<IconRefresh />}
+              theme="borderless"
+              loading={loading}
+              onClick={() => void loadItems()}
+              className="toolbar-button"
+            >
+              刷新
+            </Button>
+          </div>
+        </div>
+
+        <div className="subtitle">{summaryText}</div>
+
+        <div className="list">
+          <div className="row header-row">
+            <div>名称</div>
+            <div>类型</div>
+            <div>删除时间</div>
+            <div>大小</div>
+            <div style={{ textAlign: 'right' }}>操作</div>
+          </div>
+
+          {items.length === 0 ? (
+            <div className="empty-state">
+              <Empty description="回收站为空" />
             </div>
-          ))
-        )}
-      </div>
-    </Page>
+          ) : (
+            items.map(item => (
+              <div className="row" key={item.id}>
+                <div className="name">
+                  <div className="name-text" title={item.name}>
+                    {item.name}
+                    {item.type === 'file' && item.ext ? `.${item.ext}` : ''}
+                  </div>
+                  {item.type === 'dir' && (
+                    <div className="name-meta">
+                      包含 {item.deletedDescendantCount ?? 0} 项
+                    </div>
+                  )}
+                </div>
+                <div>
+                  <Tag color={item.type === 'dir' ? 'blue' : 'grey'}>
+                    {item.type === 'dir' ? '文件夹' : '文件'}
+                  </Tag>
+                </div>
+                <div className="time">{formatDeletedAt(item.deletedAt)}</div>
+                <div className="size">{item.type === 'file' ? formatBytes(item.fileSize) : '--'}</div>
+                <div className="actions">
+                  <Button size="default" theme="borderless" className="row-action-button" onClick={() => void handleRestore(item)}>
+                    恢复
+                  </Button>
+                  <Button
+                    size="default"
+                    theme="borderless"
+                    type="danger"
+                    icon={<IconDelete />}
+                    className="row-action-button"
+                    onClick={() => openHardDeleteConfirm(item)}
+                  >
+                    彻底删除
+                  </Button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </Page>
     </OpaquePageContainer>
   );
 };
