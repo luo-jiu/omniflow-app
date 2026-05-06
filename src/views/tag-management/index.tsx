@@ -24,6 +24,8 @@ import {
   fetchTags,
   updateTag,
   type TagItem,
+  type TagDimension,
+  type TagScope,
   type TagType,
 } from '@/features/tag-management/services/tag.api';
 import {
@@ -39,8 +41,35 @@ import {
 const TAG_TYPE_OPTIONS: Array<{ value: TagType; label: string }> = [
   { value: 'ASMR', label: 'ASMR' },
   { value: 'COMIC', label: '漫画' },
+  { value: 'AUDIO', label: '音频' },
+  { value: 'VIDEO', label: '视频' },
+  { value: 'FILE', label: '文件' },
+  { value: 'FOLDER', label: '文件夹' },
   { value: 'GENERAL', label: '通用' },
   { value: 'FILE_TAB', label: '顶部标签' },
+];
+
+const TAG_DIMENSION_OPTIONS: Array<{ value: TagDimension; label: string }> = [
+  { value: 'custom', label: '自定义' },
+  { value: 'genre', label: '内容 / 风格' },
+  { value: 'creator', label: '作者 / 创作者' },
+  { value: 'character', label: '角色' },
+  { value: 'series', label: '系列 / 作品' },
+  { value: 'source', label: '来源' },
+  { value: 'language', label: '语言' },
+  { value: 'region', label: '地区' },
+  { value: 'technical', label: '技术属性' },
+  { value: 'status', label: '状态' },
+];
+
+const RESOURCE_KIND_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: 'general', label: '通用' },
+  { value: 'asmr', label: 'ASMR' },
+  { value: 'comic', label: '漫画' },
+  { value: 'audio', label: '音频' },
+  { value: 'video', label: '视频' },
+  { value: 'file', label: '文件' },
+  { value: 'folder', label: '文件夹' },
 ];
 
 const HEX_COLOR_PATTERN = /^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
@@ -50,6 +79,9 @@ interface TagFormState {
   id?: number;
   name: string;
   type: TagType;
+  scope: TagScope;
+  dimension: TagDimension;
+  resourceKind: string;
   targetKey: string;
   color: string;
   textColor: string;
@@ -61,6 +93,9 @@ interface TagFormState {
 const DEFAULT_FORM_STATE: TagFormState = {
   name: '',
   type: 'GENERAL',
+  scope: 'resource',
+  dimension: 'custom',
+  resourceKind: 'general',
   targetKey: '',
   color: '#4F8CFF',
   textColor: '',
@@ -253,6 +288,10 @@ function validateForm(form: TagFormState): string | null {
   const name = form.name.trim();
   if (!name) return '标签名称不能为空';
   if (name.length > 64) return '标签名称不能超过 64 个字符';
+  if (String(form.type).toUpperCase() !== 'FILE_TAB') {
+    if (!String(form.dimension || '').trim()) return '标签维度不能为空';
+    if (!String(form.resourceKind || '').trim()) return '资源类型不能为空';
+  }
   const color = normalizeHexColor(form.color);
   if (!HEX_COLOR_PATTERN.test(color)) return '主色格式错误，请输入 #RRGGBB 或 #RRGGBBAA';
   const textColor = normalizeHexColor(form.textColor);
@@ -268,11 +307,33 @@ function matchesSearch(text: string, keyword: string): boolean {
   return String(text || '').toUpperCase().includes(keyword.toUpperCase());
 }
 
+function inferResourceKindFromTagType(type: TagType): string {
+  switch (String(type || '').trim().toUpperCase()) {
+    case 'ASMR':
+      return 'asmr';
+    case 'COMIC':
+      return 'comic';
+    case 'AUDIO':
+      return 'audio';
+    case 'VIDEO':
+      return 'video';
+    case 'FILE':
+      return 'file';
+    case 'FOLDER':
+      return 'folder';
+    default:
+      return 'general';
+  }
+}
+
 function mapTagToForm(tag: TagItem): TagFormState {
   return {
     id: tag.id,
     name: tag.name,
     type: String(tag.type || '').toUpperCase(),
+    scope: tag.scope || 'resource',
+    dimension: tag.dimension || 'custom',
+    resourceKind: tag.resourceKind || inferResourceKindFromTagType(tag.type),
     targetKey: normalizeFileTabTargetKey(tag.targetKey || ''),
     color: tag.color || '#4F8CFF',
     textColor: tag.textColor || '',
@@ -361,6 +422,8 @@ const TagManagement: React.FC = () => {
         return (
           matchesSearch(item.name, normalizedKeyword)
           || matchesSearch(item.type, normalizedKeyword)
+          || matchesSearch(item.dimension || '', normalizedKeyword)
+          || matchesSearch(item.resourceKind || '', normalizedKeyword)
           || matchesSearch(item.description || '', normalizedKeyword)
           || matchesSearch(item.targetKey || '', normalizedKeyword)
         );
@@ -388,6 +451,9 @@ const TagManagement: React.FC = () => {
       setForm({
         ...DEFAULT_FORM_STATE,
         type: 'FILE_TAB',
+        scope: 'ui',
+        dimension: 'custom',
+        resourceKind: '',
         targetKey: target.key,
         name: target.key,
       });
@@ -408,9 +474,15 @@ const TagManagement: React.FC = () => {
     const normalizedTargetKey = normalizedType === 'FILE_TAB'
       ? normalizeFileTabTargetKey(lockTargetKey || form.targetKey || '')
       : null;
+    const normalizedResourceKind = normalizedType === 'FILE_TAB'
+      ? null
+      : String(form.resourceKind || 'general').trim().toLowerCase();
     const payload = {
       name: form.name.trim(),
       type: normalizedType,
+      scope: normalizedType === 'FILE_TAB' ? 'ui' : 'resource',
+      dimension: normalizedType === 'FILE_TAB' ? 'custom' : String(form.dimension || 'custom').trim().toLowerCase(),
+      resourceKind: normalizedResourceKind,
       targetKey: normalizedTargetKey,
       color: normalizeHexColor(form.color),
       textColor: normalizeHexColor(form.textColor) || null,
@@ -569,7 +641,7 @@ const TagManagement: React.FC = () => {
 
       <section className="section">
         <div className="section-title">
-          <Title heading={5} style={{ margin: 0 }}>其他标签（ASMR / COMIC / GENERAL）</Title>
+          <Title heading={5} style={{ margin: 0 }}>资源标签（多维标签）</Title>
         </div>
         <Table
           loading={loading}
@@ -583,13 +655,28 @@ const TagManagement: React.FC = () => {
             {
               title: '类型',
               dataIndex: 'type',
-              width: 130,
+              width: 110,
               render: (value: string) => <Tag>{String(value || '').toUpperCase()}</Tag>,
+            },
+            {
+              title: '维度',
+              dataIndex: 'dimension',
+              width: 130,
+              render: (value: string) => {
+                const option = TAG_DIMENSION_OPTIONS.find(item => item.value === value);
+                return option?.label || value || '-';
+              },
+            },
+            {
+              title: '资源',
+              dataIndex: 'resourceKind',
+              width: 110,
+              render: (value: string | null) => value || '-',
             },
             {
               title: '颜色',
               dataIndex: 'color',
-              width: 170,
+              width: 150,
               render: (value: string) => (
                 <span className="swatch-cell">
                   <span className="swatch" style={{ backgroundColor: value || '#00000000' }} />
@@ -664,7 +751,15 @@ const TagManagement: React.FC = () => {
 
           <Select
             value={editingType}
-            onChange={(value) => setForm(prev => ({ ...prev, type: String(value).toUpperCase() }))}
+            onChange={(value) => {
+              const nextType = String(value).toUpperCase();
+              setForm(prev => ({
+                ...prev,
+                type: nextType,
+                scope: nextType === 'FILE_TAB' ? 'ui' : 'resource',
+                resourceKind: nextType === 'FILE_TAB' ? '' : inferResourceKindFromTagType(nextType),
+              }));
+            }}
             disabled={Boolean(lockType)}
           >
             {TAG_TYPE_OPTIONS.map(option => (
@@ -686,6 +781,31 @@ const TagManagement: React.FC = () => {
                 </Select.Option>
               ))}
             </Select>
+          ) : null}
+
+          {!isEditingFileTab ? (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <Select
+                value={form.dimension}
+                onChange={(value) => setForm(prev => ({ ...prev, dimension: String(value).toLowerCase() }))}
+              >
+                {TAG_DIMENSION_OPTIONS.map(option => (
+                  <Select.Option key={String(option.value)} value={String(option.value)}>
+                    {option.label}
+                  </Select.Option>
+                ))}
+              </Select>
+              <Select
+                value={form.resourceKind}
+                onChange={(value) => setForm(prev => ({ ...prev, resourceKind: String(value).toLowerCase() }))}
+              >
+                {RESOURCE_KIND_OPTIONS.map(option => (
+                  <Select.Option key={option.value} value={option.value}>
+                    {option.label}
+                  </Select.Option>
+                ))}
+              </Select>
+            </div>
           ) : null}
 
           <div className="color-field" style={{ display: 'grid', gap: 10 }}>

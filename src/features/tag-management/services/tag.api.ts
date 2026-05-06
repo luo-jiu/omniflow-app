@@ -1,11 +1,34 @@
 import { ipcRequest as request } from '@/service/request/ipcRequest';
 
 export type TagType = 'ASMR' | 'FILE_TAB' | 'COMIC' | 'GENERAL' | string;
+export type TagScope = 'resource' | 'ui' | string;
+export type TagDimension =
+  | 'genre'
+  | 'creator'
+  | 'character'
+  | 'series'
+  | 'source'
+  | 'language'
+  | 'region'
+  | 'technical'
+  | 'status'
+  | 'custom'
+  | string;
+
+export interface FetchTagsFilter {
+  type?: TagType;
+  scope?: TagScope;
+  dimension?: TagDimension;
+  resourceKind?: string;
+}
 
 export interface TagItem {
   id: number;
   name: string;
   type: TagType;
+  scope?: TagScope;
+  dimension?: TagDimension;
+  resourceKind?: string | null;
   targetKey?: string | null;
   ownerUserId: number | null;
   color: string;
@@ -20,6 +43,9 @@ export interface TagItem {
 export interface TagUpsertPayload {
   name: string;
   type: TagType;
+  scope?: TagScope;
+  dimension?: TagDimension;
+  resourceKind?: string | null;
   targetKey?: string | null;
   color: string;
   textColor?: string | null;
@@ -28,10 +54,22 @@ export interface TagUpsertPayload {
   description?: string | null;
 }
 
-export async function fetchTags(type?: TagType): Promise<TagItem[]> {
+export async function fetchTags(typeOrFilter?: TagType | FetchTagsFilter): Promise<TagItem[]> {
+  const filter = typeof typeOrFilter === 'object' && typeOrFilter !== null
+    ? typeOrFilter
+    : { type: typeOrFilter };
   const query = new URLSearchParams();
-  if (type && String(type).trim()) {
-    query.set('type', String(type).trim().toUpperCase());
+  if (filter.type && String(filter.type).trim()) {
+    query.set('type', String(filter.type).trim().toUpperCase());
+  }
+  if (filter.scope && String(filter.scope).trim()) {
+    query.set('scope', String(filter.scope).trim().toLowerCase());
+  }
+  if (filter.dimension && String(filter.dimension).trim()) {
+    query.set('dimension', String(filter.dimension).trim().toLowerCase());
+  }
+  if (filter.resourceKind && String(filter.resourceKind).trim()) {
+    query.set('resourceKind', String(filter.resourceKind).trim().toLowerCase());
   }
   const suffix = query.toString() ? `?${query}` : '';
   const body = await request(`/v1/tags${suffix}`, { method: 'GET' });
@@ -45,6 +83,9 @@ export async function createTag(payload: TagUpsertPayload): Promise<TagItem> {
     body: JSON.stringify({
       ...payload,
       type: String(payload.type || '').trim().toUpperCase(),
+      scope: payload.scope ? String(payload.scope).trim().toLowerCase() : undefined,
+      dimension: payload.dimension ? String(payload.dimension).trim().toLowerCase() : undefined,
+      resourceKind: payload.resourceKind ? String(payload.resourceKind).trim().toLowerCase() : null,
     }),
   });
   return body?.data as TagItem;
@@ -56,6 +97,9 @@ export async function updateTag(id: number, payload: TagUpsertPayload): Promise<
     body: JSON.stringify({
       ...payload,
       type: String(payload.type || '').trim().toUpperCase(),
+      scope: payload.scope ? String(payload.scope).trim().toLowerCase() : undefined,
+      dimension: payload.dimension ? String(payload.dimension).trim().toLowerCase() : undefined,
+      resourceKind: payload.resourceKind ? String(payload.resourceKind).trim().toLowerCase() : null,
     }),
   });
   return body?.data as TagItem;
