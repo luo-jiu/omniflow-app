@@ -14,6 +14,7 @@ import AudioArchiveViewer from "../../../archive-viewer/components/audio-archive
 import styled from 'styled-components';
 import type { FileViewerFileType } from '@/shared/file-viewer-types';
 import type {
+  FileViewerAudioPlaylist,
   FileViewerReturnTarget,
   FileViewerSubtitleSource,
   FileViewerVideoPlaylist,
@@ -28,6 +29,10 @@ interface FileDispatcherProps {
   videoSubtitleSources?: FileViewerSubtitleSource[];
   videoPlaylist?: FileViewerVideoPlaylist | null;
   videoAutoPlay?: boolean;
+  audioSubtitleSources?: FileViewerSubtitleSource[];
+  audioPlaylist?: FileViewerAudioPlaylist | null;
+  audioAutoPlay?: boolean;
+  audioCoverUrl?: string | null;
   loading: boolean;
   active?: boolean;
   reloadToken?: number;
@@ -90,6 +95,10 @@ const FileDispatcher: React.FC<FileDispatcherProps> = ({
   videoSubtitleSources,
   videoPlaylist,
   videoAutoPlay = false,
+  audioSubtitleSources,
+  audioPlaylist,
+  audioAutoPlay = false,
+  audioCoverUrl,
   loading,
   active = true,
   reloadToken = 0,
@@ -112,7 +121,20 @@ const FileDispatcher: React.FC<FileDispatcherProps> = ({
       return <ImageViewer url={fileUrl} fileName={fileName} active={active} />;
     
     case 'audio':
-      return <AudioViewer nodeId={nodeId} url={fileUrl} fileName={fileName} active={active} tabId={tabId} />;
+      return (
+        <AudioViewer
+          nodeId={nodeId}
+          url={fileUrl}
+          fileName={fileName}
+          active={active}
+          tabId={tabId}
+          returnTarget={returnTarget}
+          subtitleSources={audioSubtitleSources}
+          playlist={audioPlaylist}
+          autoPlay={audioAutoPlay}
+          coverUrl={audioCoverUrl}
+        />
+      );
 
     case 'video':
       return (

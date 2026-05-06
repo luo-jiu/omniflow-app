@@ -1,15 +1,47 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Popover, Spin, Toast } from '@douyinfe/semi-ui';
+import { Button, Popover, Spin, Toast } from '@douyinfe/semi-ui';
 import {
+  IconBackward,
+  IconChevronDown,
+  IconExpand,
+  IconForward,
+  IconList,
+  IconLoopTextStroked,
+  IconMore,
+  IconMusic,
+  IconPause,
+  IconPlay,
+  IconShrink,
+  IconSync,
+  IconVolume1,
+  IconVolume2,
+  IconMute,
+} from '@douyinfe/semi-icons';
+import {
+  batchGetFileLinks,
   fetchArchiveCardsPage,
+  getChildrenByNodeId,
   getFileLink,
 } from '@/features/file-explorer/services/file.api';
 import { runtimeLogger } from '@/utils/runtimeLogger';
 import { useFileViewer } from '@/hooks/useFileViewer';
-import { useArchiveCardGrid } from '@/features/archive-viewer/hooks/useArchiveCardGrid';
-import { AudioArchiveViewerWrapper } from './style';
+import { globalAudioPlayer } from '@/features/file-viewer/services/global-audio-player';
+import { useVideoSubtitles } from '@/features/file-viewer/components/video-viewer/useVideoSubtitles';
+import type {
+  FileViewerAudioPlaylist,
+  FileViewerSubtitleSource,
+} from '@/contexts/file-viewer.context';
 import ContextMenu, { type ContextMenuItem } from '@/components/ui/context-menu';
 import { useNodePropertiesOverlay } from '@/features/file-explorer/hooks/useNodePropertiesOverlay';
+import {
+  AUDIO_ARCHIVE_EMPTY_SIDECARS,
+  buildAudioArchiveSidecarIndex,
+  buildAudioSubtitleSources,
+  normalizeAudioArchiveMatchName,
+  type AudioArchiveChildNode,
+  type AudioArchiveSidecarIndex,
+} from './audio-archive-sidecars';
+import { AudioArchiveViewerWrapper } from './style';
 
 interface AudioArchiveViewerProps {
   folderNodeId: number | null;
@@ -20,8 +52,13 @@ interface AudioArchiveViewerProps {
 
 interface AudioArchiveCard {
   id: number;
+  mediaNodeId: number;
   title: string;
   sortOrder: number;
+  coverNodeId: number | null;
+  coverUrl: string | null;
+  subtitleCount: number;
+  durationSeconds?: number | null;
 }
 
 interface AudioArchiveSnapshot {
@@ -33,7 +70,9 @@ interface AudioArchiveSnapshot {
   scrollTop: number;
 }
 
-const PAGE_SIZE = 36;
+type AudioRepeatMode = 'order' | 'list-loop' | 'single-loop' | 'random';
+
+const PAGE_SIZE = 60;
 const LINK_EXPIRY_MINUTES = 120;
 const AUDIO_ARCHIVE_CACHE_MAX_ENTRIES = 24;
 
@@ -70,6 +109,34 @@ function resolveReaderCacheKey(fileUrl: string, folderNodeId: number | null): st
   return `${String(fileUrl || '').trim()}::${folderNodeId}`;
 }
 
+function formatDuration(durationSeconds?: number | null): string {
+  const duration = Number(durationSeconds);
+  if (!Number.isFinite(duration) || duration <= 0) return '--:--';
+  const totalSeconds = Math.max(Math.floor(duration), 0);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const paddedSeconds = String(seconds).padStart(2, '0');
+  if (hours > 0) {
+    return `${hours}:${String(minutes).padStart(2, '0')}:${paddedSeconds}`;
+  }
+  return `${minutes}:${paddedSeconds}`;
+}
+
+function getRepeatModeLabel(mode: AudioRepeatMode): string {
+  if (mode === 'list-loop') return '列表循环';
+  if (mode === 'single-loop') return '单曲循环';
+  if (mode === 'random') return '随机播放';
+  return '顺序播放';
+}
+
+function getNextRepeatMode(mode: AudioRepeatMode): AudioRepeatMode {
+  if (mode === 'order') return 'list-loop';
+  if (mode === 'list-loop') return 'single-loop';
+  if (mode === 'single-loop') return 'random';
+  return 'order';
+}
+
 function setArchiveSnapshotCache(cacheKey: string, snapshot: AudioArchiveSnapshot) {
   if (audioArchiveSnapshotCache.has(cacheKey)) {
     audioArchiveSnapshotCache.delete(cacheKey);
@@ -83,6 +150,20 @@ function setArchiveSnapshotCache(cacheKey: string, snapshot: AudioArchiveSnapsho
   }
 }
 
+const AudioCover: React.FC<{
+  coverUrl?: string | null;
+  title: string;
+  className?: string;
+}> = ({ coverUrl, title, className }) => (
+  <div className={`audio-cover ${className || ''}`}>
+    {coverUrl ? (
+      <img src={coverUrl} alt={title} draggable={false} />
+    ) : (
+      <IconMusic />
+    )}
+  </div>
+);
+
 const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
   folderNodeId,
   fileUrl,
@@ -90,13 +171,23 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
   active = true,
 }) => {
   const { setFileUrl } = useFileViewer();
-  const { viewportRef, wrapperStyle } = useArchiveCardGrid({
-    baseCardWidth: 198,
-    minScale: 0.82,
-    gridGap: 13,
-  });
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+  const requestIdRef = useRef(0);
+  const restoreScrollTopRef = useRef<number | null>(null);
+  const persistScrollRafRef = useRef<number>(0);
+  const sidecarIndexCacheRef = useRef<{
+    cacheKey: string;
+    index: AudioArchiveSidecarIndex;
+  } | null>(null);
+  const activeSubtitleSourcesRef = useRef<FileViewerSubtitleSource[] | undefined>(undefined);
+  const lastHandledEndedSerialRef = useRef(0);
+
   const libraryId = useMemo(() => parseArchiveLibraryId(fileUrl), [fileUrl]);
   const title = useMemo(() => normalizeArchiveTitle(fileName), [fileName]);
+  const archiveOwnerKey = useMemo(() => (
+    libraryId && folderNodeId ? `audio-archive:${libraryId}:${folderNodeId}` : null
+  ), [folderNodeId, libraryId]);
   const { showNodeProperties } = useNodePropertiesOverlay({ libraryId });
   const readerCacheKey = useMemo(
     () => resolveReaderCacheKey(fileUrl, folderNodeId),
@@ -111,6 +202,13 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
   const [total, setTotal] = useState(0);
   const [nextOffset, setNextOffset] = useState(0);
   const [hasMore, setHasMore] = useState(false);
+  const [selectedCardId, setSelectedCardId] = useState<number | null>(null);
+  const [currentCardId, setCurrentCardId] = useState<number | null>(null);
+  const [currentAudioUrl, setCurrentAudioUrl] = useState<string | null>(null);
+  const [repeatMode, setRepeatMode] = useState<AudioRepeatMode>('list-loop');
+  const [expanded, setExpanded] = useState(false);
+  const [playerState, setPlayerState] = useState(() => globalAudioPlayer.getState());
+  const [activeSubtitleSources, setActiveSubtitleSources] = useState<FileViewerSubtitleSource[] | undefined>(undefined);
   const [menuState, setMenuState] = useState<{
     visible: boolean;
     x: number;
@@ -123,15 +221,49 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
     card: null,
   });
 
+  const currentCard = useMemo(
+    () => cards.find(card => card.id === currentCardId) || null,
+    [cards, currentCardId],
+  );
+  const selectedCard = useMemo(
+    () => cards.find(card => card.id === selectedCardId) || null,
+    [cards, selectedCardId],
+  );
+  const effectiveCard = currentCard || selectedCard || cards[0] || null;
+  const isOwnedSource = Boolean(
+    archiveOwnerKey
+    && playerState.ownerType === 'default'
+    && playerState.ownerKey === archiveOwnerKey
+    && currentAudioUrl
+    && playerState.src === currentAudioUrl,
+  );
+  const currentTime = isOwnedSource ? playerState.currentTime : 0;
+  const duration = isOwnedSource ? playerState.duration : 0;
+
+  const {
+    activeSubtitleCue,
+    subtitleCues,
+    subtitleError,
+    subtitleFileName,
+  } = useVideoSubtitles({
+    currentTime,
+    subtitleSources: activeSubtitleSources,
+    url: currentAudioUrl || '',
+  });
+
+  useEffect(() => {
+    activeSubtitleSourcesRef.current = activeSubtitleSources;
+  }, [activeSubtitleSources]);
+
+  useEffect(() => {
+    setPlayerState(globalAudioPlayer.getState());
+    return globalAudioPlayer.subscribe(setPlayerState);
+  }, []);
+
   useEffect(() => {
     if (active) return;
     setMenuState(prev => (prev.visible ? { ...prev, visible: false } : prev));
   }, [active]);
-
-  const sentinelRef = useRef<HTMLDivElement | null>(null);
-  const requestIdRef = useRef(0);
-  const restoreScrollTopRef = useRef<number | null>(null);
-  const persistScrollRafRef = useRef<number>(0);
 
   const persistSnapshot = useCallback((patch: Partial<AudioArchiveSnapshot>) => {
     if (!readerCacheKey) return;
@@ -179,6 +311,91 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
     ];
   }, [closeContextMenu, libraryId, menuState.card, showNodeProperties]);
 
+  const loadAudioArchiveSidecarIndex = useCallback(async (): Promise<AudioArchiveSidecarIndex> => {
+    if (!folderNodeId || !libraryId) {
+      return AUDIO_ARCHIVE_EMPTY_SIDECARS;
+    }
+    const cacheKey = `${libraryId}:${folderNodeId}`;
+    if (sidecarIndexCacheRef.current?.cacheKey === cacheKey) {
+      return sidecarIndexCacheRef.current.index;
+    }
+
+    try {
+      const children = await getChildrenByNodeId(folderNodeId, libraryId);
+      const index = buildAudioArchiveSidecarIndex(children as AudioArchiveChildNode[]);
+      sidecarIndexCacheRef.current = { cacheKey, index };
+      return index;
+    } catch (sidecarError) {
+      runtimeLogger.warn('加载音频归档伴随资源失败:', sidecarError);
+      return AUDIO_ARCHIVE_EMPTY_SIDECARS;
+    }
+  }, [folderNodeId, libraryId]);
+
+  const resolveCardCoverUrls = useCallback(async (inputCards: AudioArchiveCard[]): Promise<AudioArchiveCard[]> => {
+    if (!libraryId || inputCards.length === 0) {
+      return inputCards;
+    }
+    const coverNodeIds = Array.from(new Set(inputCards
+      .map(card => card.coverNodeId)
+      .filter((nodeId): nodeId is number => Boolean(nodeId && nodeId > 0))));
+    if (coverNodeIds.length === 0) {
+      return inputCards;
+    }
+
+    try {
+      const linkMap = await batchGetFileLinks({
+        libraryId,
+        nodeIds: coverNodeIds,
+        expiry: LINK_EXPIRY_MINUTES,
+      });
+      return inputCards.map(card => (
+        card.coverNodeId && linkMap.has(card.coverNodeId)
+          ? { ...card, coverUrl: linkMap.get(card.coverNodeId) || null }
+          : card
+      ));
+    } catch (coverError) {
+      runtimeLogger.warn('批量加载音频归档封面失败:', coverError);
+      return inputCards;
+    }
+  }, [libraryId]);
+
+  const mapArchiveCards = useCallback((
+    items: Array<{
+      id: number;
+      name: string;
+      sortOrder?: number;
+      coverNodeId?: number;
+      mediaNodeId?: number;
+      subtitleCount?: number;
+      durationSeconds?: number;
+    }>,
+    sidecarIndex: AudioArchiveSidecarIndex,
+  ): AudioArchiveCard[] => items.map((item) => {
+    const cardId = Number(item.id);
+    const mediaNodeId = Number.isFinite(Number(item.mediaNodeId)) && Number(item.mediaNodeId) > 0
+      ? Number(item.mediaNodeId)
+      : cardId;
+    const matchName = normalizeAudioArchiveMatchName(item.name);
+    const explicitCoverNodeId = Number.isFinite(Number(item.coverNodeId)) && Number(item.coverNodeId) > 0
+      ? Number(item.coverNodeId)
+      : null;
+    const sidecarCoverNodeId = matchName ? sidecarIndex.coverNodeIdByName.get(matchName) ?? null : null;
+    const subtitleCount = Math.max(
+      Number(item.subtitleCount ?? 0),
+      matchName ? sidecarIndex.subtitlesByName.get(matchName)?.length ?? 0 : 0,
+    );
+    return {
+      id: cardId,
+      mediaNodeId,
+      title: String(item.name || ''),
+      sortOrder: Number(item.sortOrder ?? 0),
+      coverNodeId: explicitCoverNodeId || sidecarCoverNodeId,
+      coverUrl: null,
+      subtitleCount,
+      durationSeconds: Number(item.durationSeconds ?? 0) > 0 ? Number(item.durationSeconds) : null,
+    };
+  }), []);
+
   const loadPage = useCallback(async (offset: number, append: boolean) => {
     if (!folderNodeId || !libraryId || !Number.isFinite(folderNodeId)) return;
     const requestId = requestIdRef.current;
@@ -198,18 +415,18 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
         limit: PAGE_SIZE,
       });
       if (requestId !== requestIdRef.current) return;
-
-      const rawCards: AudioArchiveCard[] = page.items.map(item => ({
-        id: Number(item.id),
-        title: String(item.name || ''),
-        sortOrder: Number(item.sortOrder ?? 0),
-      }));
+      const sidecarIndex = await loadAudioArchiveSidecarIndex();
+      if (requestId !== requestIdRef.current) return;
+      const rawCards = mapArchiveCards(page.items, sidecarIndex);
+      const cardsWithCover = await resolveCardCoverUrls(rawCards);
+      if (requestId !== requestIdRef.current) return;
 
       setCards((prev) => {
-        const merged = append ? [...prev, ...rawCards] : rawCards;
+        const merged = append ? [...prev, ...cardsWithCover] : cardsWithCover;
         const byId = new Map<number, AudioArchiveCard>();
         merged.forEach((card) => {
-          byId.set(card.id, card);
+          const existing = byId.get(card.id);
+          byId.set(card.id, existing ? { ...existing, ...card, coverUrl: card.coverUrl || existing.coverUrl } : card);
         });
         return Array.from(byId.values()).sort((a, b) => {
           if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;
@@ -233,47 +450,155 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
         setLoadingMore(false);
       }
     }
-  }, [folderNodeId, libraryId]);
+  }, [folderNodeId, libraryId, loadAudioArchiveSidecarIndex, mapArchiveCards, resolveCardCoverUrls]);
 
   const loadMore = useCallback(() => {
     if (listLoading || loadingMore || !hasMore) return;
     void loadPage(nextOffset, true);
   }, [hasMore, listLoading, loadingMore, loadPage, nextOffset]);
 
-  const handleOpenCard = useCallback(async (card: AudioArchiveCard) => {
-    if (!libraryId) {
+  const loadCardSubtitleSources = useCallback(async (card: AudioArchiveCard): Promise<FileViewerSubtitleSource[] | undefined> => {
+    if (!libraryId || (card.subtitleCount || 0) <= 0) return undefined;
+    if (card.mediaNodeId && card.mediaNodeId !== card.id) {
+      try {
+        const children = await getChildrenByNodeId(card.id, libraryId);
+        const sources = buildAudioSubtitleSources(children as AudioArchiveChildNode[], libraryId);
+        return sources.length > 0 ? sources : undefined;
+      } catch (error) {
+        runtimeLogger.warn('加载歌曲文件夹歌词失败:', error);
+        return undefined;
+      }
+    }
+    const sidecarIndex = await loadAudioArchiveSidecarIndex();
+    const matchName = normalizeAudioArchiveMatchName(card.title);
+    const sidecars = matchName ? sidecarIndex.subtitlesByName.get(matchName) ?? [] : [];
+    const sources = buildAudioSubtitleSources(sidecars, libraryId);
+    return sources.length > 0 ? sources : undefined;
+  }, [libraryId, loadAudioArchiveSidecarIndex]);
+
+  const playCard = useCallback(async (card: AudioArchiveCard) => {
+    if (!libraryId || !archiveOwnerKey) {
       Toast.error('当前库参数异常');
       return;
     }
     try {
-      const nextUrl = await getFileLink(card.id, libraryId, LINK_EXPIRY_MINUTES);
+      const [nextUrl, subtitleSources] = await Promise.all([
+        getFileLink(card.mediaNodeId || card.id, libraryId, LINK_EXPIRY_MINUTES),
+        loadCardSubtitleSources(card),
+      ]);
       if (!nextUrl) {
         throw new Error('未获取到音频访问链接');
       }
-      setFileUrl(
+      globalAudioPlayer.ensureSource(
         nextUrl,
         card.title,
-        'audio',
-        card.id,
-        {
-          tabTypeLabel: 'AUDIO',
-          returnTarget: {
-            fileUrl,
-            fileName: fileName || title,
-            fileType: 'audio_archive',
-            nodeId: folderNodeId,
-            tabTypeLabel: 'AUDIO-ARCHIVE',
-          },
-        },
+        { ownerType: 'default', ownerKey: archiveOwnerKey },
       );
-    } catch (error: any) {
-      runtimeLogger.error('打开音频归档卡片失败:', error);
-      Toast.error(error?.message || '打开音频失败');
+      await globalAudioPlayer.play();
+      setCurrentCardId(card.id);
+      setSelectedCardId(card.id);
+      setCurrentAudioUrl(nextUrl);
+      setActiveSubtitleSources(subtitleSources);
+      lastHandledEndedSerialRef.current = globalAudioPlayer.getState().endedSerial;
+    } catch (playError: any) {
+      runtimeLogger.error('播放音频归档歌曲失败:', playError);
+      Toast.error(playError?.message || '播放音频失败');
     }
-  }, [fileName, fileUrl, folderNodeId, libraryId, setFileUrl, title]);
+  }, [archiveOwnerKey, libraryId, loadCardSubtitleSources]);
+
+  const currentCardIndex = useMemo(
+    () => cards.findIndex(card => card.id === currentCardId),
+    [cards, currentCardId],
+  );
+
+  const playNextCard = useCallback((fromEnded = false) => {
+    if (cards.length === 0) return;
+    if (repeatMode === 'single-loop' && currentCard && fromEnded) {
+      void playCard(currentCard);
+      return;
+    }
+    let nextIndex = currentCardIndex >= 0 ? currentCardIndex + 1 : 0;
+    if (repeatMode === 'random') {
+      nextIndex = cards.length === 1 ? 0 : Math.floor(Math.random() * cards.length);
+      if (cards.length > 1 && nextIndex === currentCardIndex) {
+        nextIndex = (nextIndex + 1) % cards.length;
+      }
+    }
+    if (nextIndex >= cards.length) {
+      if (repeatMode !== 'list-loop' && repeatMode !== 'random') return;
+      nextIndex = 0;
+    }
+    const nextCard = cards[nextIndex];
+    if (nextCard) void playCard(nextCard);
+  }, [cards, currentCard, currentCardIndex, playCard, repeatMode]);
+
+  const playPrevCard = useCallback(() => {
+    if (cards.length === 0) return;
+    let nextIndex = currentCardIndex >= 0 ? currentCardIndex - 1 : 0;
+    if (nextIndex < 0) nextIndex = repeatMode === 'list-loop' ? cards.length - 1 : 0;
+    const prevCard = cards[nextIndex];
+    if (prevCard) void playCard(prevCard);
+  }, [cards, currentCardIndex, playCard, repeatMode]);
+
+  const togglePlay = useCallback(() => {
+    if (isOwnedSource) {
+      void globalAudioPlayer.togglePlay().catch((playError) => {
+        runtimeLogger.error('切换音频播放失败:', playError);
+      });
+      return;
+    }
+    if (effectiveCard) {
+      void playCard(effectiveCard);
+    }
+  }, [effectiveCard, isOwnedSource, playCard]);
+
+  const handleOpenInAudioViewer = useCallback(async () => {
+    if (!currentCard || !libraryId || !currentAudioUrl) return;
+    const audioPlaylist: FileViewerAudioPlaylist = {
+      id: `audio-archive:${libraryId}:${folderNodeId || 0}`,
+      title,
+      items: cards.map(card => ({
+        nodeId: card.mediaNodeId || card.id,
+        libraryId,
+        title: card.title,
+        sortOrder: card.sortOrder,
+        durationSeconds: card.durationSeconds,
+        coverUrl: card.coverUrl,
+        subtitleSources: card.id === currentCard.id ? activeSubtitleSourcesRef.current : undefined,
+      })),
+    };
+    setFileUrl(
+      currentAudioUrl,
+      currentCard.title,
+      'audio',
+      currentCard.mediaNodeId || currentCard.id,
+      {
+        tabTypeLabel: 'AUDIO',
+        returnTarget: {
+          fileUrl,
+          fileName: fileName || title,
+          fileType: 'audio_archive',
+          nodeId: folderNodeId,
+          tabTypeLabel: 'AUDIO-ARCHIVE',
+        },
+        audioSubtitleSources: activeSubtitleSourcesRef.current,
+        audioPlaylist,
+        audioAutoPlay: true,
+        audioCoverUrl: currentCard.coverUrl,
+      },
+    );
+  }, [cards, currentAudioUrl, currentCard, fileName, fileUrl, folderNodeId, libraryId, setFileUrl, title]);
+
+  useEffect(() => {
+    if (!isOwnedSource) return;
+    if (playerState.endedSerial <= 0 || playerState.endedSerial === lastHandledEndedSerialRef.current) return;
+    lastHandledEndedSerialRef.current = playerState.endedSerial;
+    playNextCard(true);
+  }, [isOwnedSource, playNextCard, playerState.endedSerial]);
 
   useEffect(() => {
     requestIdRef.current += 1;
+    sidecarIndexCacheRef.current = null;
     if (persistScrollRafRef.current) {
       window.cancelAnimationFrame(persistScrollRafRef.current);
       persistScrollRafRef.current = 0;
@@ -285,6 +610,9 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
       setError('归档参数异常');
       setListLoading(false);
       setLoadingMore(false);
+      setTotal(0);
+      setNextOffset(0);
+      setHasMore(false);
       return;
     }
 
@@ -296,6 +624,8 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
       setHasMore(cached.hasMore);
       setHasLoadedList(true);
       setError(null);
+      setListLoading(false);
+      setLoadingMore(false);
       restoreScrollTopRef.current = cached.scrollTop;
       return;
     }
@@ -305,6 +635,8 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
     setNextOffset(0);
     setTotal(0);
     setHasMore(false);
+    setError(null);
+    restoreScrollTopRef.current = 0;
     void loadPage(0, false);
   }, [folderNodeId, libraryId, loadPage, readerCacheKey]);
 
@@ -318,7 +650,17 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
         viewportRef.current.scrollTop = nextScrollTop;
       }
     });
-  }, [active, cards.length, viewportRef]);
+  }, [active, cards.length]);
+
+  useEffect(() => {
+    persistSnapshot({
+      hasLoadedList,
+      cards,
+      nextOffset,
+      total,
+      hasMore,
+    });
+  }, [cards, hasLoadedList, hasMore, nextOffset, persistSnapshot, total]);
 
   useEffect(() => {
     const viewport = viewportRef.current;
@@ -345,7 +687,7 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
         persistScrollRafRef.current = 0;
       }
     };
-  }, [cards, hasLoadedList, hasMore, nextOffset, persistSnapshot, total, viewportRef]);
+  }, [cards, hasLoadedList, hasMore, nextOffset, persistSnapshot, total]);
 
   useEffect(() => {
     const sentinel = sentinelRef.current;
@@ -365,11 +707,55 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
 
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [loadMore, viewportRef]);
+  }, [loadMore]);
+
+  const progressPercent = duration > 0 ? Math.min(Math.max((currentTime / duration) * 100, 0), 100) : 0;
 
   return (
-    <AudioArchiveViewerWrapper style={wrapperStyle}>
-      <div className="table-surface" ref={viewportRef as React.RefObject<HTMLDivElement>}>
+    <AudioArchiveViewerWrapper className={expanded ? 'is-expanded' : ''}>
+      {expanded && (
+        <section className="expanded-player" aria-label="展开播放器">
+          <button
+            type="button"
+            className="expanded-collapse"
+            onClick={() => setExpanded(false)}
+            title="收起播放器"
+            aria-label="收起播放器"
+          >
+            <IconChevronDown />
+          </button>
+          <div className="expanded-cover-wrap">
+            <AudioCover coverUrl={effectiveCard?.coverUrl} title={effectiveCard?.title || '音频'} className="large" />
+          </div>
+          <div className="expanded-lyrics">
+            <div className="expanded-title" title={effectiveCard?.title || ''}>{effectiveCard?.title || '未选择歌曲'}</div>
+            <div className="expanded-subtitle">{subtitleFileName || (subtitleCues.length > 0 ? '歌词已加载' : '暂无歌词')}</div>
+            <div className="lyrics-stage">
+              {activeSubtitleCue ? (
+                activeSubtitleCue.lines.map((line, index) => (
+                  <p key={`${activeSubtitleCue.id}-${index}`} className="lyric-line active">{line}</p>
+                ))
+              ) : subtitleError ? (
+                <p className="lyric-line muted">{subtitleError}</p>
+              ) : subtitleCues.length > 0 ? (
+                <p className="lyric-line muted">等待歌词时间轴...</p>
+              ) : (
+                <p className="lyric-line muted">当前歌曲没有可用歌词</p>
+              )}
+            </div>
+          </div>
+        </section>
+      )}
+
+      <div className="archive-main" ref={viewportRef}>
+        <header className="archive-header">
+          <div>
+            <span className="badge">AUDIO ARCHIVE</span>
+            <h2 title={title}>{title}</h2>
+          </div>
+          <span className="archive-count">共 {total} 首</span>
+        </header>
+
         {listLoading ? (
           <div className="state-wrap">
             <Spin size="large" tip="归档加载中..." />
@@ -377,40 +763,61 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
         ) : error ? (
           <div className="state-wrap state-error">{error}</div>
         ) : cards.length === 0 ? (
-          <div className="state-wrap">当前归档下暂无可展示的音频资源</div>
+          <div className="state-wrap">当前归档下暂无可播放歌曲</div>
         ) : (
           <>
-            <div className="cards-grid">
-              {cards.map(card => (
-                <article
-                  key={card.id}
-                  className="archive-card"
-                  onContextMenu={(e) => openCardContextMenu(e, card)}
-                  onDoubleClick={() => {
-                    void handleOpenCard(card);
-                  }}
-                >
-                  <div className="card-cover">
-                    <div className="card-cover-fallback" aria-hidden>
-                      <span className="card-cover-icon">AUDIO</span>
+            <div className="song-list" role="list">
+              {cards.map((card, index) => {
+                const activeRow = card.id === currentCardId && isOwnedSource;
+                const selectedRow = card.id === selectedCardId;
+                return (
+                  <article
+                    key={card.id}
+                    role="listitem"
+                    className={`song-row ${activeRow ? 'is-playing' : ''} ${selectedRow ? 'is-selected' : ''}`}
+                    onClick={() => setSelectedCardId(card.id)}
+                    onDoubleClick={() => void playCard(card)}
+                    onContextMenu={(event) => openCardContextMenu(event, card)}
+                  >
+                    <span className="song-index">{activeRow ? <IconMusic /> : index + 1}</span>
+                    <button
+                      type="button"
+                      className="song-cover-button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void playCard(card);
+                      }}
+                      title="播放"
+                      aria-label={`播放 ${card.title}`}
+                    >
+                      <AudioCover coverUrl={card.coverUrl} title={card.title} />
+                      <span className="cover-play"><IconPlay /></span>
+                    </button>
+                    <div className="song-primary">
+                      <div className="song-title-line">
+                        <span className="song-title" title={card.title}>{card.title}</span>
+                        {card.subtitleCount > 0 && <span className="song-pill">歌词</span>}
+                        {card.coverUrl && <span className="song-pill">封面</span>}
+                      </div>
+                      <span className="song-artist">未知艺术家</span>
                     </div>
-                  </div>
-                  <div className="card-meta">
-                    <div className="card-tag-row">
-                      <span className="card-tag-pill">AUDIO</span>
-                      <span className="card-open-hint">双击打开</span>
-                    </div>
-                    <p className="card-title" title={card.title}>{card.title}</p>
-                    <div className="card-footer">
-                      <span>节点 #{card.id}</span>
-                      <span>音频资源</span>
-                    </div>
-                  </div>
-                </article>
-              ))}
+                    <span className="song-album" title={title}>{title}</span>
+                    <button
+                      type="button"
+                      className="row-icon-button"
+                      title="更多"
+                      aria-label="更多"
+                      onClick={(event) => openCardContextMenu(event, card)}
+                    >
+                      <IconMore />
+                    </button>
+                    <span className="song-duration">{formatDuration(card.durationSeconds)}</span>
+                  </article>
+                );
+              })}
             </div>
             {loadingMore && (
-              <div className="state-wrap">
+              <div className="state-wrap loading-more">
                 <Spin size="large" tip="正在加载更多..." />
               </div>
             )}
@@ -419,13 +826,98 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
         )}
       </div>
 
-      <footer className="archive-footer">
-        <div className="footer-title-group">
-          <span className="badge">AUDIO ARCHIVE</span>
-          <span className="title" title={title}>{title}</span>
+      <footer className="audio-player-bar">
+        <div className="player-progress">
+          <span style={{ width: `${progressPercent}%` }} />
         </div>
-        <div className="archive-count">
-          共 {total} 项
+        <button
+          type="button"
+          className="player-brief"
+          onClick={() => setExpanded(true)}
+          title="展开播放器"
+          aria-label="展开播放器"
+        >
+          <AudioCover coverUrl={effectiveCard?.coverUrl} title={effectiveCard?.title || '音频'} className="mini" />
+          <div className="player-track">
+            <span className="player-title" title={effectiveCard?.title || ''}>{effectiveCard?.title || '选择一首歌'}</span>
+            <span className="player-artist">{subtitleFileName || '未知艺术家'}</span>
+          </div>
+        </button>
+
+        <div className="player-controls">
+          <Button
+            icon={<IconBackward />}
+            theme="borderless"
+            onClick={playPrevCard}
+            disabled={cards.length === 0}
+            title="上一首"
+            aria-label="上一首"
+          />
+          <Button
+            className="play-main"
+            icon={isOwnedSource && playerState.isPlaying ? <IconPause /> : <IconPlay />}
+            theme="solid"
+            shape="circle"
+            onClick={togglePlay}
+            disabled={cards.length === 0}
+            title={isOwnedSource && playerState.isPlaying ? '暂停' : '播放'}
+            aria-label={isOwnedSource && playerState.isPlaying ? '暂停' : '播放'}
+          />
+          <Button
+            icon={<IconForward />}
+            theme="borderless"
+            onClick={() => playNextCard(false)}
+            disabled={cards.length === 0}
+            title="下一首"
+            aria-label="下一首"
+          />
+        </div>
+
+        <div className="player-extra">
+          <span className="time-display">{formatDuration(currentTime)} / {formatDuration(duration)}</span>
+          <Button
+            icon={repeatMode === 'single-loop' ? <IconLoopTextStroked /> : repeatMode === 'random' ? <IconSync /> : <IconList />}
+            theme="borderless"
+            onClick={() => setRepeatMode(prev => getNextRepeatMode(prev))}
+            title={getRepeatModeLabel(repeatMode)}
+            aria-label={getRepeatModeLabel(repeatMode)}
+          />
+          <Button
+            icon={expanded ? <IconShrink /> : <IconExpand />}
+            theme="borderless"
+            onClick={() => setExpanded(prev => !prev)}
+            title={expanded ? '收起播放器' : '展开播放器'}
+            aria-label={expanded ? '收起播放器' : '展开播放器'}
+          />
+          <Button
+            icon={<IconMusic />}
+            theme="borderless"
+            onClick={() => void handleOpenInAudioViewer()}
+            disabled={!currentCard || !currentAudioUrl}
+            title="打开普通音频播放器"
+            aria-label="打开普通音频播放器"
+          />
+          <div className="volume-pop">
+            <Button
+              icon={playerState.isMuted ? <IconMute /> : playerState.volume < 0.5 ? <IconVolume1 /> : <IconVolume2 />}
+              theme="borderless"
+              size="small"
+              onClick={() => {
+                globalAudioPlayer.setMuted(!playerState.isMuted);
+              }}
+              title="静音"
+              aria-label="静音"
+            />
+            <input
+              type="range"
+              min="0"
+              max="1"
+              step="0.01"
+              value={playerState.isMuted ? 0 : playerState.volume}
+              onChange={(event) => globalAudioPlayer.setVolume(Number(event.target.value))}
+              aria-label="音量"
+            />
+          </div>
         </div>
       </footer>
 

@@ -23,6 +23,14 @@ import {
   isViewerInteractiveKeyboardTarget,
   releaseExternalKeyboardFocus,
 } from '@/features/file-viewer/utils/media-keyboard-target';
+import type {
+  FileViewerAudioPlaylist,
+  FileViewerReturnTarget,
+  FileViewerSubtitleSource,
+} from '@/contexts/file-viewer.context';
+import { useVideoSubtitles } from '@/features/file-viewer/components/video-viewer/useVideoSubtitles';
+import { useFileViewer } from '@/hooks/useFileViewer';
+import { getFileLink } from '@/features/file-explorer/services/file.api';
 
 interface AudioViewerProps {
   nodeId: number | null;
@@ -30,13 +38,31 @@ interface AudioViewerProps {
   fileName?: string | null;
   active?: boolean;
   tabId: string;
+  returnTarget?: FileViewerReturnTarget | null;
+  subtitleSources?: FileViewerSubtitleSource[];
+  playlist?: FileViewerAudioPlaylist | null;
+  autoPlay?: boolean;
+  coverUrl?: string | null;
 }
 
 const AUDIO_KEYBOARD_SEEK_SECONDS = 10;
 const AUDIO_KEYBOARD_FAST_SEEK_SECONDS = 30;
 const AUDIO_KEYBOARD_VOLUME_STEP = 0.05;
+const PLAYLIST_LINK_EXPIRY_MINUTES = 120;
 
-const AudioViewer: React.FC<AudioViewerProps> = ({ nodeId, url, fileName, active = true, tabId }) => {
+const AudioViewer: React.FC<AudioViewerProps> = ({
+  nodeId,
+  url,
+  fileName,
+  active = true,
+  tabId,
+  returnTarget,
+  subtitleSources,
+  playlist,
+  autoPlay = false,
+  coverUrl,
+}) => {
+  const { setFileUrl } = useFileViewer();
   const viewerRootRef = useRef<HTMLDivElement>(null);
   const progressBarRef = useRef<HTMLDivElement>(null);
   const [playerState, setPlayerState] = useState(() => globalAudioPlayer.getState());
@@ -52,6 +78,21 @@ const AudioViewer: React.FC<AudioViewerProps> = ({ nodeId, url, fileName, active
   // Dragging state (managed via refs to avoid re-renders during high-frequency events)
   const isDraggingRef = useRef(false);
   const displayTime = dragPreviewTime ?? effectiveCurrentTime;
+  const currentPlaylistIndex = React.useMemo(() => (
+    playlist?.items.findIndex(item => item.nodeId === nodeId) ?? -1
+  ), [nodeId, playlist]);
+  const hasPlaylistPrev = currentPlaylistIndex > 0;
+  const hasPlaylistNext = Boolean(playlist && currentPlaylistIndex >= 0 && currentPlaylistIndex < playlist.items.length - 1);
+  const {
+    activeSubtitleCue,
+    subtitleCues,
+    subtitleError,
+    subtitleFileName,
+  } = useVideoSubtitles({
+    currentTime: effectiveCurrentTime,
+    subtitleSources,
+    url,
+  });
 
   const formatTime = (time: number) => {
     if (!isFinite(time)) return '00:00';
@@ -81,6 +122,35 @@ const AudioViewer: React.FC<AudioViewerProps> = ({ nodeId, url, fileName, active
       runtimeLogger.error('failed to start audio playback:', error);
     });
   }, [ensureOwnedSource, isOwnedSource]);
+
+  const openPlaylistItem = useCallback(async (direction: -1 | 1) => {
+    if (!playlist || currentPlaylistIndex < 0) return;
+    const item = playlist.items[currentPlaylistIndex + direction];
+    if (!item) return;
+    try {
+      const nextUrl = await getFileLink(item.nodeId, item.libraryId, PLAYLIST_LINK_EXPIRY_MINUTES);
+      if (!nextUrl) {
+        throw new Error('未获取到音频访问链接');
+      }
+      setFileUrl(
+        nextUrl,
+        item.title,
+        'audio',
+        item.nodeId,
+        {
+          tabTypeLabel: 'AUDIO',
+          returnTarget,
+          replaceTabId: tabId,
+          audioSubtitleSources: item.subtitleSources,
+          audioPlaylist: playlist,
+          audioAutoPlay: true,
+          audioCoverUrl: item.coverUrl,
+        },
+      );
+    } catch (error: any) {
+      runtimeLogger.error('切换音频播放列表失败:', error);
+    }
+  }, [currentPlaylistIndex, playlist, returnTarget, setFileUrl, tabId]);
 
   const seekBy = useCallback((delta: number) => {
     if (!isOwnedSource || !effectiveDuration) return;
@@ -266,6 +336,14 @@ const AudioViewer: React.FC<AudioViewerProps> = ({ nodeId, url, fileName, active
     return () => window.removeEventListener('keydown', handleKeyDown, true);
   }, [active, adjustVolumeBy, seekBy, togglePlay]);
 
+  useEffect(() => {
+    if (!autoPlay) return;
+    ensureOwnedSource();
+    void globalAudioPlayer.play().catch((error) => {
+      runtimeLogger.warn('自动播放音频失败:', error);
+    });
+  }, [autoPlay, ensureOwnedSource, url]);
+
   return (
     <AudioViewerWrapper ref={viewerRootRef}>
       <div className="main-display">
@@ -273,13 +351,25 @@ const AudioViewer: React.FC<AudioViewerProps> = ({ nodeId, url, fileName, active
           <div className={`record-needle ${isOwnedSource && playerState.isPlaying ? 'playing' : ''}`} />
           <div className={`album-art ${isOwnedSource && playerState.isPlaying ? 'playing' : ''}`}>
             <div className="inner-cover">
-              <IconMusic />
+              {coverUrl ? <img src={coverUrl} alt={fileName || '音频封面'} draggable={false} /> : <IconMusic />}
             </div>
           </div>
         </div>
         <div style={{ marginTop: 14, textAlign: 'center' }}>
           <div style={{ fontSize: 16, lineHeight: 1.3, fontWeight: 700 }}>{fileName || '正在播放'}</div>
-          <div style={{ color: 'var(--semi-color-text-2)', fontSize: 11, marginTop: 5 }}>—— 歌词区域预留 ——</div>
+          <div className="audio-lyric-preview">
+            {activeSubtitleCue ? (
+              activeSubtitleCue.lines.map((line, index) => (
+                <span key={`${activeSubtitleCue.id}-${index}`}>{line}</span>
+              ))
+            ) : subtitleError ? (
+              <span>{subtitleError}</span>
+            ) : subtitleCues.length > 0 ? (
+              <span>等待歌词时间轴...</span>
+            ) : (
+              <span>{subtitleFileName ? '歌词已加载' : '暂无歌词'}</span>
+            )}
+          </div>
         </div>
       </div>
 
@@ -333,7 +423,13 @@ const AudioViewer: React.FC<AudioViewerProps> = ({ nodeId, url, fileName, active
               icon={<IconBackward />}
               theme="borderless"
               size="large"
-              onClick={() => seekBy(-AUDIO_KEYBOARD_SEEK_SECONDS)}
+              onClick={() => {
+                if (hasPlaylistPrev) {
+                  void openPlaylistItem(-1);
+                  return;
+                }
+                seekBy(-AUDIO_KEYBOARD_SEEK_SECONDS);
+              }}
             />
             <Button
               className="play-btn"
@@ -346,7 +442,13 @@ const AudioViewer: React.FC<AudioViewerProps> = ({ nodeId, url, fileName, active
               icon={<IconForward />}
               theme="borderless"
               size="large"
-              onClick={() => seekBy(AUDIO_KEYBOARD_SEEK_SECONDS)}
+              onClick={() => {
+                if (hasPlaylistNext) {
+                  void openPlaylistItem(1);
+                  return;
+                }
+                seekBy(AUDIO_KEYBOARD_SEEK_SECONDS);
+              }}
             />
             <Button icon={<IconList />} theme="borderless" style={{ color: 'var(--semi-color-text-2)' }} />
           </div>

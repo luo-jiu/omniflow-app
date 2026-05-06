@@ -4,6 +4,7 @@ import {
   type FileViewerState,
   type FileViewerTab,
   type FileViewerOpenOptions,
+  type FileViewerAudioPlaylist,
   type FileViewerVideoPlaylist,
   type FileViewerSubtitleSource,
 } from './file-viewer.context';
@@ -47,6 +48,10 @@ function toFileState(tab: FileViewerTab | null): FileViewerState {
     videoSubtitleSources: tab.videoSubtitleSources,
     videoPlaylist: tab.videoPlaylist ?? null,
     videoAutoPlay: tab.videoAutoPlay ?? false,
+    audioSubtitleSources: tab.audioSubtitleSources,
+    audioPlaylist: tab.audioPlaylist ?? null,
+    audioAutoPlay: tab.audioAutoPlay ?? false,
+    audioCoverUrl: tab.audioCoverUrl ?? null,
     loading: tab.loading,
   };
 }
@@ -96,6 +101,32 @@ function normalizeVideoPlaylist(
   };
 }
 
+function normalizeAudioPlaylist(
+  playlist: FileViewerAudioPlaylist | null | undefined,
+): FileViewerAudioPlaylist | null {
+  if (!playlist || !playlist.items || playlist.items.length === 0) return null;
+  const items = playlist.items.map(item => ({
+    ...item,
+    nodeId: Number(item.nodeId),
+    libraryId: Number(item.libraryId),
+    sortOrder: item.sortOrder ?? null,
+    durationSeconds: item.durationSeconds ?? null,
+    coverUrl: item.coverUrl ?? null,
+    subtitleSources: normalizeVideoSubtitleSources(item.subtitleSources),
+  })).filter(item => (
+    Number.isFinite(item.nodeId)
+    && item.nodeId > 0
+    && Number.isFinite(item.libraryId)
+    && item.libraryId > 0
+  ));
+  if (items.length === 0) return null;
+  return {
+    id: String(playlist.id || ''),
+    title: String(playlist.title || ''),
+    items,
+  };
+}
+
 function normalizeStoreState(raw: FileViewerStoreState | null | undefined): FileViewerStoreState {
   if (!raw) {
     return defaultFileViewerStoreState;
@@ -103,6 +134,7 @@ function normalizeStoreState(raw: FileViewerStoreState | null | undefined): File
   const tabs = raw.tabs.map(tab => ({
     ...tab,
     videoAutoPlay: false,
+    audioAutoPlay: false,
   }));
   if (raw.activeTabId === null) {
     return {
@@ -226,6 +258,8 @@ export const FileViewerProvider: React.FC<{ children: ReactNode; cacheKey?: stri
       const baseTab = replacingTab ?? existingTab;
       const videoSubtitleSources = normalizeVideoSubtitleSources(options?.videoSubtitleSources);
       const videoPlaylist = normalizeVideoPlaylist(options?.videoPlaylist);
+      const audioSubtitleSources = normalizeVideoSubtitleSources(options?.audioSubtitleSources);
+      const audioPlaylist = normalizeAudioPlaylist(options?.audioPlaylist);
       const nextTab: FileViewerTab = {
         id: tabId,
         nodeId: nodeId ?? null,
@@ -237,6 +271,10 @@ export const FileViewerProvider: React.FC<{ children: ReactNode; cacheKey?: stri
         videoSubtitleSources,
         videoPlaylist,
         videoAutoPlay: Boolean(options?.videoAutoPlay),
+        audioSubtitleSources,
+        audioPlaylist,
+        audioAutoPlay: Boolean(options?.audioAutoPlay),
+        audioCoverUrl: options?.audioCoverUrl ?? null,
         loading: false,
         reloadToken: baseTab?.reloadToken ?? 0,
       };

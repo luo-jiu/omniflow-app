@@ -5,6 +5,7 @@ export interface GlobalAudioPlayerState {
   ownerKey: string | null;
   hasStarted: boolean;
   isPlaying: boolean;
+  endedSerial: number;
   currentTime: number;
   duration: number;
   volume: number;
@@ -23,6 +24,7 @@ class GlobalAudioPlayer {
   private ownerType: 'default' | 'asmr' = 'default';
   private ownerKey: string | null = null;
   private hasStarted = false;
+  private endedSerial = 0;
   private lastMediaSessionPositionSignature = '';
 
   constructor() {
@@ -35,7 +37,10 @@ class GlobalAudioPlayer {
     this.audio.addEventListener('timeupdate', emit);
     this.audio.addEventListener('play', emit);
     this.audio.addEventListener('pause', emit);
-    this.audio.addEventListener('ended', emit);
+    this.audio.addEventListener('ended', () => {
+      this.endedSerial += 1;
+      emit();
+    });
     this.audio.addEventListener('volumechange', emit);
 
     this.setupMediaSession();
@@ -81,6 +86,7 @@ class GlobalAudioPlayer {
     this.ownerType = nextOwnerType;
     this.ownerKey = nextOwnerKey;
     this.hasStarted = false;
+    this.endedSerial = 0;
     this.lastMediaSessionPositionSignature = '';
     this.audio.src = url;
     this.audio.load();
@@ -149,6 +155,7 @@ class GlobalAudioPlayer {
       ownerKey: this.ownerKey,
       hasStarted: this.hasStarted,
       isPlaying: !this.audio.paused,
+      endedSerial: this.endedSerial,
       currentTime: Number.isFinite(this.audio.currentTime) ? this.audio.currentTime : 0,
       duration: Number.isFinite(this.audio.duration) ? this.audio.duration : 0,
       volume: this.audio.volume,

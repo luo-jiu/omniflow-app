@@ -34,6 +34,22 @@ export interface FileViewerVideoPlaylist {
   items: FileViewerVideoPlaylistItem[];
 }
 
+export interface FileViewerAudioPlaylistItem {
+  nodeId: number;
+  libraryId: number;
+  title: string;
+  sortOrder?: number | null;
+  durationSeconds?: number | null;
+  coverUrl?: string | null;
+  subtitleSources?: FileViewerSubtitleSource[];
+}
+
+export interface FileViewerAudioPlaylist {
+  id: string;
+  title: string;
+  items: FileViewerAudioPlaylistItem[];
+}
+
 export interface FileViewerOpenOptions {
   tabTypeLabel?: string | null;
   returnTarget?: FileViewerReturnTarget | null;
@@ -41,6 +57,10 @@ export interface FileViewerOpenOptions {
   videoSubtitleSources?: FileViewerSubtitleSource[];
   videoPlaylist?: FileViewerVideoPlaylist | null;
   videoAutoPlay?: boolean;
+  audioSubtitleSources?: FileViewerSubtitleSource[];
+  audioPlaylist?: FileViewerAudioPlaylist | null;
+  audioAutoPlay?: boolean;
+  audioCoverUrl?: string | null;
 }
 
 export interface FileViewerState {
@@ -52,6 +72,10 @@ export interface FileViewerState {
   videoSubtitleSources?: FileViewerSubtitleSource[];
   videoPlaylist?: FileViewerVideoPlaylist | null;
   videoAutoPlay?: boolean;
+  audioSubtitleSources?: FileViewerSubtitleSource[];
+  audioPlaylist?: FileViewerAudioPlaylist | null;
+  audioAutoPlay?: boolean;
+  audioCoverUrl?: string | null;
   loading: boolean;
 }
 
@@ -66,6 +90,10 @@ export interface FileViewerTab {
   videoSubtitleSources?: FileViewerSubtitleSource[];
   videoPlaylist?: FileViewerVideoPlaylist | null;
   videoAutoPlay?: boolean;
+  audioSubtitleSources?: FileViewerSubtitleSource[];
+  audioPlaylist?: FileViewerAudioPlaylist | null;
+  audioAutoPlay?: boolean;
+  audioCoverUrl?: string | null;
   loading: boolean;
   reloadToken?: number;
 }

@@ -103,7 +103,8 @@ OmniFlow 当前不是“一个万能 viewer”，而是多种 viewer 共同组�
 - 欢迎页和 viewer 页切换
 - tabs 保活
 - 把 active tab 交给 `FileDispatcher`
-- 协调全局音频条与 ASMR/音频 viewer 的关系
+- 透传 `videoPlaylist` / `audioPlaylist`、字幕候选、封面和归档返回目标
+- 协调全局音频播放器与 ASMR/普通音频 viewer 的关系
 
 ## 5. 归档返回链路
 
@@ -119,6 +120,8 @@ OmniFlow 当前不是“一个万能 viewer”，而是多种 viewer 共同组�
 当普通 `asmr / comic / video / audio` viewer 来自对应归档 viewer 时，顶部文件系统按钮会切换成绿色返回按钮：按钮背景保持透明，返回箭头图标本身常态显示为绿色，用来提示当前文件可以返回原归档入口。
 
 这说明归档 viewer 不只是视觉差异，它还携带额外导航语义。
+
+`audio_archive` 也可以在归档页内直接播放歌曲列表；只有用户从底部控制条打开普通 `audio` viewer 时，才通过 `FileViewerContext` 透传 `audioPlaylist`、`audioSubtitleSources`、`audioCoverUrl` 和 `returnTarget`。这些字段只表达打开来源和播放上下文，不拥有实际播放时间或歌词解析结果。
 
 ## 6. 当前最值得读的文件
 

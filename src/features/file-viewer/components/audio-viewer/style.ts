@@ -68,6 +68,13 @@ export const AudioViewerWrapper = styled.div`
         justify-content: center;
         font-size: 64px;
         color: var(--semi-color-primary);
+
+        img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+          display: block;
+        }
       }
     }
 
@@ -108,6 +115,27 @@ export const AudioViewerWrapper = styled.div`
         height: 84px;
         background: linear-gradient(to bottom, #666, #999);
         border-radius: 4px;
+      }
+    }
+
+    .audio-lyric-preview {
+      min-height: 32px;
+      max-width: min(640px, 72vw);
+      margin: 9px auto 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 3px;
+      color: var(--semi-color-text-1);
+      font-size: 14px;
+      line-height: 1.45;
+      font-weight: 600;
+
+      span {
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
     }
   }
