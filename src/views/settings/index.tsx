@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import styled from 'styled-components';
+import styled, { createGlobalStyle } from 'styled-components';
 import { Typography, Divider, Switch, Select, Button, Input, Toast } from '@douyinfe/semi-ui';
 import { IconChevronLeft } from '@douyinfe/semi-icons';
 import { useTheme } from '@/hooks/useTheme';
@@ -138,12 +138,17 @@ const SettingsWrapper = styled.div`
   }
 
   .settings-action-btn {
+    box-sizing: border-box;
+    height: 30px;
     min-height: 30px;
     min-width: 72px;
     padding: 0 12px;
     border-radius: 6px;
     font-size: 11px;
     font-weight: 600;
+    line-height: 30px;
+    white-space: nowrap;
+    transform: none;
   }
 
   .settings-action-btn.manage {
@@ -188,17 +193,18 @@ const SettingsWrapper = styled.div`
   .theme-control-group {
     display: inline-flex;
     align-items: center;
-    gap: 9px;
+    gap: 7px;
   }
 
   .theme-toggle {
     position: relative;
-    width: 68px;
-    height: 28px;
+    box-sizing: border-box;
+    width: 64px;
+    height: 26px;
     padding: 3px;
     border-radius: 999px;
     border: 1px solid var(--semi-color-border);
-    background: var(--semi-color-fill-0);
+    background: var(--semi-color-bg-0);
     cursor: pointer;
     display: inline-flex;
     align-items: center;
@@ -214,14 +220,14 @@ const SettingsWrapper = styled.div`
     content: '';
     position: absolute;
     top: 50%;
-    left: 12px;
-    width: 5px;
-    height: 5px;
+    left: 10px;
+    width: 4px;
+    height: 4px;
     border-radius: 999px;
     background: color-mix(in srgb, var(--semi-color-text-2) 72%, transparent);
     box-shadow:
-      21px 0 0 color-mix(in srgb, var(--semi-color-text-2) 72%, transparent),
-      42px 0 0 color-mix(in srgb, var(--semi-color-text-2) 72%, transparent);
+      20px 0 0 color-mix(in srgb, var(--semi-color-text-2) 72%, transparent),
+      40px 0 0 color-mix(in srgb, var(--semi-color-text-2) 72%, transparent);
     transform: translateY(-50%);
     pointer-events: none;
   }
@@ -230,22 +236,22 @@ const SettingsWrapper = styled.div`
     position: absolute;
     top: 3px;
     left: 3px;
-    width: 22px;
-    height: 22px;
+    width: 20px;
+    height: 20px;
     border-radius: 999px;
     background: var(--semi-color-bg-0);
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.14);
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.14);
     transition: transform 0.2s ease, background-color 0.2s ease;
     pointer-events: none;
   }
 
   .theme-toggle[data-mode='system'] .theme-toggle-thumb {
-    transform: translateX(20px);
+    transform: translateX(19px);
     background: color-mix(in srgb, var(--semi-color-primary) 18%, var(--semi-color-bg-0) 82%);
   }
 
   .theme-toggle[data-mode='dark'] .theme-toggle-thumb {
-    transform: translateX(40px);
+    transform: translateX(38px);
     background: var(--semi-color-primary);
   }
 
@@ -254,6 +260,82 @@ const SettingsWrapper = styled.div`
     font-size: 11px;
     color: var(--semi-color-text-1);
     text-align: right;
+  }
+
+  .language-select {
+    font-size: 11px;
+  }
+
+  .language-select.semi-select {
+    height: 30px;
+    max-height: 30px !important;
+    overflow: hidden !important;
+  }
+
+  .language-select.semi-select::-webkit-scrollbar {
+    display: none;
+    width: 0;
+    height: 0;
+  }
+
+  .language-select.semi-select,
+  .language-select .semi-select-selection {
+    height: 30px;
+    min-height: 30px;
+    max-height: 30px;
+    font-size: 11px;
+  }
+
+  .language-select .semi-select-selection {
+    align-items: center;
+    overflow: hidden !important;
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+
+  .language-select .semi-select-selection-placeholder,
+  .language-select .semi-select-selection-rendered,
+  .language-select .semi-select-selection-text,
+  .language-select .semi-select-selection span {
+    overflow: hidden !important;
+  }
+
+  .language-select .semi-select-selection-text {
+    max-height: none !important;
+    line-height: 30px;
+    white-space: nowrap;
+  }
+
+  .language-select .semi-select-selection-text::-webkit-scrollbar {
+    display: none;
+  }
+
+  .language-select .semi-select-arrow {
+    align-self: center;
+  }
+
+  .chrome-bookmark-actions {
+    width: auto;
+  }
+
+  .chrome-bookmark-actions .settings-action-btn {
+    width: 92px;
+    flex: 0 0 92px;
+    padding: 0 10px;
+  }
+`;
+
+const SettingsDropdownStyle = createGlobalStyle`
+  .settings-language-dropdown .semi-select-option {
+    min-height: 26px;
+    padding-top: 4px;
+    padding-bottom: 4px;
+    font-size: 11px;
+    line-height: 18px;
+  }
+
+  .settings-language-dropdown .semi-select-option-selected {
+    font-weight: 600;
   }
 `;
 
@@ -387,6 +469,7 @@ const Settings: React.FC = () => {
 
   return (
     <SettingsPageWrapper>
+      <SettingsDropdownStyle />
       <div className="top-drag-region" />
       <SettingsWrapper>
         <div className="settings-header">
@@ -435,8 +518,10 @@ const Settings: React.FC = () => {
           </div>
           <Select
             value={language}
-            style={{ width: 125, fontSize: 11 }}
+            style={{ width: 125 }}
             size="small"
+            className="language-select"
+            dropdownClassName="settings-language-dropdown"
             onChange={(value) => {
               const nextLanguage = value as AppLanguage;
               setLanguage(nextLanguage);
@@ -557,7 +642,7 @@ const Settings: React.FC = () => {
             <div className="setting-title">导入 Chrome 书签</div>
             <div className="setting-desc">支持导入本地书签文件，或手动选择任意 Chrome 导出的书签 JSON</div>
           </div>
-          <div className="setting-control-group">
+          <div className="setting-control-group chrome-bookmark-actions">
             <Button
               theme="borderless"
               onClick={() => {

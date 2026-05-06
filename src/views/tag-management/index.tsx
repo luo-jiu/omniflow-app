@@ -1,5 +1,5 @@
 import React from 'react';
-import styled from 'styled-components';
+import styled, { createGlobalStyle } from 'styled-components';
 import OpaquePageContainer from '@/components/OpaquePageContainer';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -72,6 +72,30 @@ const RESOURCE_KIND_OPTIONS: Array<{ value: string; label: string }> = [
   { value: 'folder', label: '文件夹' },
 ];
 
+type TagCenterMode = 'RESOURCE' | 'UI_MAPPING';
+type TagResourceSection = 'ALL' | 'GENERAL' | 'ASMR' | 'COMIC' | 'AUDIO' | 'VIDEO' | 'FILE' | 'FOLDER';
+
+const TAG_RESOURCE_SECTIONS: Array<{
+  key: TagResourceSection;
+  label: string;
+  description: string;
+  type?: TagType;
+}> = [
+  { key: 'ALL', label: '全部资源', description: '跨资源类型查看所有业务标签' },
+  { key: 'GENERAL', label: '通用', description: '适用于多个资源域的通用标签', type: 'GENERAL' },
+  { key: 'ASMR', label: 'ASMR', description: 'ASMR 内置类型与归档标签', type: 'ASMR' },
+  { key: 'COMIC', label: '漫画', description: '漫画、作者、角色与系列标签', type: 'COMIC' },
+  { key: 'AUDIO', label: '音频', description: '音乐、音频归档与播放列表标签', type: 'AUDIO' },
+  { key: 'VIDEO', label: '视频', description: '视频、合集与媒体处理标签', type: 'VIDEO' },
+  { key: 'FILE', label: '文件', description: '普通文件搜索辅助标签', type: 'FILE' },
+  { key: 'FOLDER', label: '文件夹', description: '目录与归档入口标签', type: 'FOLDER' },
+];
+
+const FILE_TAB_SECTION_META = {
+  label: '顶部标签映射',
+  description: '文件预览顶部标签颜色映射',
+};
+
 const HEX_COLOR_PATTERN = /^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
 const FILE_TAB_UPDATE_EVENT = 'omniflow:file-tab-tags-updated';
 
@@ -104,11 +128,18 @@ const DEFAULT_FORM_STATE: TagFormState = {
   description: '',
 };
 
+const TagCenterPage = styled(OpaquePageContainer)`
+  overflow: hidden;
+`;
+
 const Wrapper = styled.div`
-  padding: 42px 56px;
-  max-width: 1160px;
-  margin: 0 auto;
+  padding: 28px 32px 24px;
   width: 100%;
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   color: var(--semi-color-text-0);
   -webkit-app-region: drag;
 
@@ -120,34 +151,206 @@ const Wrapper = styled.div`
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 16px;
-    margin-bottom: 14px;
+    gap: 11px;
+    margin-bottom: 6px;
+    flex-shrink: 0;
   }
 
   .header-left {
     display: flex;
     align-items: center;
-    gap: 14px;
+    gap: 11px;
+  }
+
+  .page-back-button {
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    min-width: 28px;
+    padding: 0;
+    border-radius: 7px;
+  }
+
+  .page-title {
+    margin: 0;
+    font-size: 23px;
+    font-weight: 700;
+    line-height: 1.15;
   }
 
   .subtitle {
-    margin: 0 0 18px 48px;
+    margin: 0 0 16px 39px;
+    max-width: 760px;
     color: var(--semi-color-text-2);
-    font-size: 14px;
+    font-size: 11px;
+    line-height: 1.55;
+    flex-shrink: 0;
+  }
+
+  .center-layout {
+    display: grid;
+    grid-template-columns: 180px minmax(0, 1fr);
+    gap: 14px;
+    flex: 1;
+    min-height: 0;
+  }
+
+  .side-panel,
+  .main-panel {
+    min-height: 0;
+    border: 1px solid var(--semi-color-border);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--semi-color-bg-0) 96%, transparent);
+  }
+
+  .side-panel {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    padding: 9px;
+    overflow: auto;
+  }
+
+  .side-heading {
+    padding: 4px 6px 7px;
+    color: var(--semi-color-text-2);
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 1.4;
+  }
+
+  .type-list {
+    display: grid;
+    gap: 4px;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+    padding-right: 2px;
+  }
+
+  .side-divider {
+    flex-shrink: 0;
+    height: 1px;
+    margin: 9px 6px 8px;
+    background: var(--semi-color-border);
+  }
+
+  .type-button {
+    width: 100%;
+    height: auto;
+    min-height: 34px;
+    justify-content: flex-start;
+    padding: 6px 7px;
+    border-radius: 6px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--semi-color-text-1);
+    text-align: left;
+  }
+
+  .type-button:hover {
+    background: var(--semi-color-fill-0);
+    color: var(--semi-color-text-0);
+  }
+
+  .type-button.active {
+    border-color: color-mix(in srgb, var(--semi-color-primary) 58%, transparent);
+    background: color-mix(in srgb, var(--semi-color-primary) 16%, transparent);
+    color: var(--semi-color-primary);
+  }
+
+  .type-button:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--semi-color-primary) 72%, transparent);
+    outline-offset: 1px;
+  }
+
+  .type-button-inner {
+    display: grid;
+    gap: 2px;
+    width: 100%;
+  }
+
+  .type-button-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1.2;
+  }
+
+  .type-button-desc {
+    overflow: hidden;
+    color: var(--semi-color-text-2);
+    font-size: 9px;
+    line-height: 1.3;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .type-count {
+    color: var(--semi-color-text-2);
+    font-size: 10px;
+    font-weight: 600;
+  }
+
+  .main-panel {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .main-panel-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 14px;
+    padding: 12px 13px 10px;
+    border-bottom: 1px solid var(--semi-color-border);
+  }
+
+  .main-title {
+    margin: 0;
+    font-size: 16px;
+    line-height: 1.25;
+    font-weight: 700;
+  }
+
+  .main-desc {
+    margin-top: 3px;
+    color: var(--semi-color-text-2);
+    font-size: 10px;
+    line-height: 1.45;
   }
 
   .toolbar {
     display: flex;
     align-items: center;
-    gap: 10px;
-    margin-bottom: 16px;
+    justify-content: flex-end;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+
+  .toolbar-search {
+    width: 260px;
+  }
+
+  .toolbar-search .semi-input-wrapper,
+  .toolbar-search .semi-input {
+    font-size: 11px;
+  }
+
+  .toolbar-search .semi-input-wrapper {
+    min-height: 30px;
   }
 
   .toolbar-create-btn {
-    min-height: 38px;
-    padding: 0 16px;
-    font-size: 14px;
-    border-radius: 8px;
+    min-height: 30px;
+    padding: 0 12px;
+    font-size: 11px;
+    font-weight: 600;
+    border-radius: 6px;
     border: 1px solid var(--semi-color-border);
     color: var(--semi-color-text-0);
     background: var(--semi-color-bg-0);
@@ -171,24 +374,15 @@ const Wrapper = styled.div`
     color: var(--semi-color-primary);
   }
 
-  .section {
-    margin-top: 18px;
-    padding: 14px 14px 4px;
-    border: 1px solid var(--semi-color-border);
-    border-radius: 10px;
-    background: color-mix(in srgb, var(--semi-color-bg-0) 96%, transparent);
-  }
-
-  .section-title {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 12px;
+  .table-body {
+    min-height: 0;
+    overflow: auto;
+    padding: 10px;
   }
 
   .swatch {
-    width: 16px;
-    height: 16px;
+    width: 12px;
+    height: 12px;
     border-radius: 4px;
     border: 1px solid color-mix(in srgb, var(--semi-color-border) 68%, transparent);
     flex-shrink: 0;
@@ -197,7 +391,22 @@ const Wrapper = styled.div`
   .swatch-cell {
     display: inline-flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
+    max-width: 100%;
+    font-size: 10px;
+  }
+
+  .cell-ellipsis {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .row-actions {
+    display: inline-flex;
+    gap: 5px;
   }
 
   .color-field {
@@ -207,8 +416,8 @@ const Wrapper = styled.div`
 
   .field-label {
     color: var(--semi-color-text-1);
-    font-size: 13px;
-    line-height: 18px;
+    font-size: 11px;
+    line-height: 15px;
   }
 
   .color-row {
@@ -264,9 +473,179 @@ const Wrapper = styled.div`
     background: transparent;
     color: var(--semi-color-text-2);
     cursor: pointer;
-    font-size: 13px;
-    line-height: 22px;
+    font-size: 11px;
+    line-height: 18px;
     padding: 0 4px;
+  }
+
+  .semi-table {
+    font-size: 10px;
+  }
+
+  .semi-table-container {
+    overflow: hidden;
+  }
+
+  .semi-table-thead > .semi-table-row > .semi-table-row-head,
+  .semi-table-tbody > .semi-table-row > .semi-table-row-cell {
+    padding: 8px 9px;
+  }
+
+  .semi-table-thead > .semi-table-row > .semi-table-row-head {
+    font-size: 10px;
+    font-weight: 600;
+  }
+
+  .semi-button {
+    height: 25px;
+    min-height: 25px;
+    padding: 0 7px;
+    border-radius: 6px;
+    font-size: 10px;
+    font-weight: 600;
+  }
+
+  .semi-button .semi-icon {
+    font-size: 12px;
+  }
+
+  .semi-tag {
+    font-size: 10px;
+    line-height: 16px;
+  }
+
+  .semi-empty-description {
+    font-size: 11px;
+  }
+
+  @media (max-width: 760px) {
+    padding: 20px 12px 14px;
+
+    .center-layout {
+      grid-template-columns: 1fr;
+    }
+
+    .side-panel {
+      display: none;
+    }
+
+    .toolbar-search {
+      width: min(100%, 240px);
+    }
+  }
+`;
+
+const TagManagementCompactModalStyle = createGlobalStyle`
+  .tag-management-compact-modal,
+  .tag-management-compact-confirm {
+    width: 380px !important;
+  }
+
+  .tag-management-compact-modal .semi-modal-content,
+  .tag-management-compact-confirm .semi-modal-content {
+    overflow: hidden;
+    border: 1px solid var(--app-border-strong);
+    border-radius: 8px;
+    background: var(--app-bg-elevated);
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28), var(--app-shadow);
+  }
+
+  .tag-management-compact-modal .semi-modal-header,
+  .tag-management-compact-confirm .semi-modal-header {
+    margin: 0;
+    padding: 13px 16px 8px !important;
+  }
+
+  .tag-management-compact-modal .semi-modal-title,
+  .tag-management-compact-confirm .semi-modal-title {
+    font-size: 14px;
+    line-height: 1.35;
+    font-weight: 700;
+  }
+
+  .tag-management-compact-modal .semi-modal-body,
+  .tag-management-compact-confirm .semi-modal-body {
+    padding: 0 16px 13px !important;
+    font-size: 12px;
+    line-height: 1.55;
+    color: var(--semi-color-text-1);
+  }
+
+  .tag-management-compact-modal .semi-modal-footer,
+  .tag-management-compact-confirm .semi-modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin: 0;
+    padding: 0 16px 16px !important;
+  }
+
+  .tag-management-compact-modal .semi-button,
+  .tag-management-compact-confirm .semi-button {
+    height: 28px;
+    min-width: 56px;
+    padding: 0 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .tag-management-compact-modal .semi-input-wrapper,
+  .tag-management-compact-modal .semi-input,
+  .tag-management-compact-modal .semi-select,
+  .tag-management-compact-modal .semi-select-selection,
+  .tag-management-compact-modal .semi-input-number,
+  .tag-management-compact-modal textarea {
+    font-size: 12px;
+  }
+
+  .tag-management-compact-modal .semi-input-wrapper,
+  .tag-management-compact-modal .semi-select,
+  .tag-management-compact-modal .semi-input-number {
+    height: 28px;
+    min-height: 28px;
+  }
+
+  .tag-management-compact-modal .semi-select {
+    max-height: 28px !important;
+    overflow: hidden !important;
+  }
+
+  .tag-management-compact-modal .semi-select::-webkit-scrollbar {
+    display: none;
+    width: 0;
+    height: 0;
+  }
+
+  .tag-management-compact-modal .semi-select-selection {
+    height: 28px;
+    min-height: 28px;
+    max-height: 28px;
+    align-items: center;
+    overflow: hidden !important;
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+
+  .tag-management-compact-modal .semi-select-selection-placeholder,
+  .tag-management-compact-modal .semi-select-selection-rendered,
+  .tag-management-compact-modal .semi-select-selection-text,
+  .tag-management-compact-modal .semi-select-selection span {
+    overflow: hidden !important;
+  }
+
+  .tag-management-compact-modal .semi-select-selection-text {
+    max-height: none !important;
+    line-height: 28px;
+    white-space: nowrap;
+  }
+
+  .tag-management-compact-modal .semi-select-selection-text::-webkit-scrollbar {
+    display: none;
+  }
+
+  .tag-management-compact-modal .semi-select-arrow {
+    align-self: center;
   }
 `;
 
@@ -359,6 +738,8 @@ const TagManagement: React.FC = () => {
   const [form, setForm] = React.useState<TagFormState>(DEFAULT_FORM_STATE);
   const [lockType, setLockType] = React.useState<TagType | null>(null);
   const [lockTargetKey, setLockTargetKey] = React.useState<string | null>(null);
+  const [activeMode, setActiveMode] = React.useState<TagCenterMode>('RESOURCE');
+  const [activeSection, setActiveSection] = React.useState<TagResourceSection>('ALL');
 
   const loadList = React.useCallback(async () => {
     setLoading(true);
@@ -430,8 +811,36 @@ const TagManagement: React.FC = () => {
       });
   }, [items, normalizedKeyword]);
 
+  const activeSectionMeta = React.useMemo(
+    () => TAG_RESOURCE_SECTIONS.find(section => section.key === activeSection) || TAG_RESOURCE_SECTIONS[0],
+    [activeSection]
+  );
+
+  const activeResourceRows = React.useMemo(() => {
+    if (activeSection === 'ALL') return otherTagRows;
+    return otherTagRows.filter(item => String(item.type || '').toUpperCase() === activeSection);
+  }, [activeSection, otherTagRows]);
+
+  const sectionCounts = React.useMemo(() => {
+    const counts = new Map<TagResourceSection, number>();
+    counts.set('ALL', items.filter(item => String(item.type || '').toUpperCase() !== 'FILE_TAB').length);
+    TAG_RESOURCE_SECTIONS.forEach((section) => {
+      if (!section.type) return;
+      counts.set(
+        section.key,
+        items.filter(item => String(item.type || '').toUpperCase() === String(section.type).toUpperCase()).length
+      );
+    });
+    return counts;
+  }, [items]);
+
   const openCreateOther = () => {
-    setForm(DEFAULT_FORM_STATE);
+    const nextType = activeSection === 'ALL' ? 'GENERAL' : activeSection;
+    setForm({
+      ...DEFAULT_FORM_STATE,
+      type: nextType,
+      resourceKind: inferResourceKindFromTagType(nextType),
+    });
     setLockType(null);
     setLockTargetKey(null);
     setEditorVisible(true);
@@ -517,6 +926,7 @@ const TagManagement: React.FC = () => {
       title: '确认删除该标签？',
       content: `删除后标签「${record.name}」将不可用`,
       okType: 'danger',
+      className: 'tag-management-compact-confirm',
       onOk: async () => {
         try {
           await deleteTag(record.id);
@@ -534,183 +944,262 @@ const TagManagement: React.FC = () => {
 
   const editingType = String(lockType || form.type || '').toUpperCase();
   const isEditingFileTab = editingType === 'FILE_TAB';
+  const activeMainTitle = activeMode === 'UI_MAPPING' ? FILE_TAB_SECTION_META.label : activeSectionMeta.label;
+  const activeMainDescription = activeMode === 'UI_MAPPING'
+    ? FILE_TAB_SECTION_META.description
+    : activeSectionMeta.description;
 
   return (
-    <OpaquePageContainer>
+    <TagCenterPage>
+    <TagManagementCompactModalStyle />
     <Wrapper>
       <div className="header">
         <div className="header-left">
           <Button
-            icon={<IconChevronLeft style={{ fontSize: 20 }} />}
+            icon={<IconChevronLeft style={{ fontSize: 14 }} />}
             theme="borderless"
             onClick={() => navigate(-1)}
-            style={{ padding: '6px', borderRadius: 8 }}
+            className="page-back-button"
           />
-          <Title heading={2} style={{ fontSize: 26, fontWeight: 600, margin: 0 }}>
+          <Title heading={2} className="page-title">
             标签管理
           </Title>
         </div>
       </div>
 
       <div className="subtitle">
-        顶部标签与业务标签分区管理。你可以搜索标签名、类型、目标键并进行颜色配置。
+        按资源类型管理业务标签和顶部标签映射。后续 ASMR、视频、音频等入口会直接带上下文进入这里。
       </div>
 
-      <div className="toolbar">
-        <Input
-          value={searchKeyword}
-          onChange={setSearchKeyword}
-          placeholder="搜索标签名称 / 类型 / 目标键"
-          showClear
-          style={{ width: 340 }}
-        />
-        <Button
-          theme="borderless"
-          onClick={openCreateOther}
-          className="toolbar-create-btn"
-        >
-          新建标签
-        </Button>
-      </div>
-
-      <section className="section">
-        <div className="section-title">
-          <Title heading={5} style={{ margin: 0 }}>顶部标签（FILE_TAB）</Title>
-        </div>
-        <Table
-          dataSource={fileTabRows}
-          pagination={false}
-          rowKey="key"
-          empty={<Empty description="未匹配到顶部标签项" />}
-          columns={[
-            { title: '目标键', dataIndex: 'target.key', width: 120 },
-            { title: '目标名称', dataIndex: 'target.label', width: 140 },
-            { title: '说明', dataIndex: 'target.description' },
-            {
-              title: '当前标签',
-              width: 160,
-              render: (_: unknown, record: { target: FileTabTarget; tag: TagItem | null }) => (
-                record.tag
-                  ? <Tag color="green">{record.tag.name}</Tag>
-                  : <Tag color="grey">未配置</Tag>
-              ),
-            },
-            {
-              title: '颜色',
-              width: 170,
-              render: (_: unknown, record: { target: FileTabTarget; tag: TagItem | null }) => {
-                const color = record.tag?.color || '';
-                return (
-                  <span className="swatch-cell">
-                    <span className="swatch" style={{ backgroundColor: color || '#00000000' }} />
-                    <span>{color || '-'}</span>
+      <div className="center-layout">
+        <aside className="side-panel">
+          <div className="side-heading">资源标签</div>
+          <div className="type-list">
+            {TAG_RESOURCE_SECTIONS.map(section => (
+              <button
+                key={section.key}
+                type="button"
+                className={`type-button ${activeMode === 'RESOURCE' && activeSection === section.key ? 'active' : ''}`}
+                onClick={() => {
+                  setActiveMode('RESOURCE');
+                  setActiveSection(section.key);
+                }}
+              >
+                <span className="type-button-inner">
+                  <span className="type-button-top">
+                    <span>{section.label}</span>
+                    <span className="type-count">{sectionCounts.get(section.key) || 0}</span>
                   </span>
-                );
-              },
-            },
-            {
-              title: '操作',
-              width: 220,
-              render: (_: unknown, record: { target: FileTabTarget; tag: TagItem | null }) => (
-                <div style={{ display: 'inline-flex', gap: 8 }}>
-                  <Button
-                    theme="borderless"
-                    icon={<IconEdit />}
-                    onClick={() => openConfigureFileTab(record.target, record.tag)}
-                  >
-                    {record.tag ? '编辑映射' : '配置映射'}
-                  </Button>
-                  {record.tag ? (
-                    <Button
-                      theme="borderless"
-                      type="danger"
-                      icon={<IconDelete />}
-                      onClick={() => {
-                        void handleDelete(record.tag as TagItem);
-                      }}
-                    >
-                      删除
-                    </Button>
-                  ) : null}
-                </div>
-              ),
-            },
-          ]}
-        />
-      </section>
-
-      <section className="section">
-        <div className="section-title">
-          <Title heading={5} style={{ margin: 0 }}>资源标签（多维标签）</Title>
-        </div>
-        <Table
-          loading={loading}
-          dataSource={otherTagRows}
-          rowKey="id"
-          empty={<Empty description="暂无业务标签" />}
-          pagination={{ pageSize: 10 }}
-          columns={[
-            { title: 'ID', dataIndex: 'id', width: 80 },
-            { title: '标签名称', dataIndex: 'name', width: 180 },
-            {
-              title: '类型',
-              dataIndex: 'type',
-              width: 110,
-              render: (value: string) => <Tag>{String(value || '').toUpperCase()}</Tag>,
-            },
-            {
-              title: '维度',
-              dataIndex: 'dimension',
-              width: 130,
-              render: (value: string) => {
-                const option = TAG_DIMENSION_OPTIONS.find(item => item.value === value);
-                return option?.label || value || '-';
-              },
-            },
-            {
-              title: '资源',
-              dataIndex: 'resourceKind',
-              width: 110,
-              render: (value: string | null) => value || '-',
-            },
-            {
-              title: '颜色',
-              dataIndex: 'color',
-              width: 150,
-              render: (value: string) => (
-                <span className="swatch-cell">
-                  <span className="swatch" style={{ backgroundColor: value || '#00000000' }} />
-                  <span>{value || '-'}</span>
+                  <span className="type-button-desc">{section.description}</span>
                 </span>
-              ),
-            },
-            { title: '启用', dataIndex: 'enabled', width: 90, render: (value: number) => (Number(value) === 1 ? '是' : '否') },
-            { title: '排序', dataIndex: 'sortOrder', width: 90 },
-            { title: '描述', dataIndex: 'description', render: (value: string) => value || '-' },
-            {
-              title: '操作',
-              width: 170,
-              render: (_: unknown, record: TagItem) => (
-                <div style={{ display: 'inline-flex', gap: 8 }}>
-                  <Button theme="borderless" icon={<IconEdit />} onClick={() => openEdit(record)}>
-                    编辑
-                  </Button>
-                  <Button
-                    theme="borderless"
-                    type="danger"
-                    icon={<IconDelete />}
-                    onClick={() => {
-                      void handleDelete(record);
-                    }}
-                  >
-                    删除
-                  </Button>
-                </div>
-              ),
-            },
-          ]}
-        />
-      </section>
+              </button>
+            ))}
+          </div>
+          <div className="side-divider" />
+          <div className="side-heading">界面映射</div>
+          <button
+            type="button"
+            className={`type-button ${activeMode === 'UI_MAPPING' ? 'active' : ''}`}
+            onClick={() => setActiveMode('UI_MAPPING')}
+          >
+            <span className="type-button-inner">
+              <span className="type-button-top">
+                <span>{FILE_TAB_SECTION_META.label}</span>
+                <span className="type-count">{fileTabTagMap.size}</span>
+              </span>
+              <span className="type-button-desc">{FILE_TAB_SECTION_META.description}</span>
+            </span>
+          </button>
+        </aside>
+
+        <main className="main-panel">
+          <div className="main-panel-head">
+            <div>
+              <Title heading={5} className="main-title">{activeMainTitle}</Title>
+              <div className="main-desc">{activeMainDescription}</div>
+            </div>
+            <div className="toolbar">
+              <Input
+                value={searchKeyword}
+                onChange={setSearchKeyword}
+                placeholder="搜索标签名称 / 类型 / 维度"
+                showClear
+                className="toolbar-search"
+              />
+              {activeMode === 'RESOURCE' ? (
+                <Button
+                  theme="borderless"
+                  onClick={openCreateOther}
+                  className="toolbar-create-btn"
+                >
+                  新建标签
+                </Button>
+              ) : null}
+            </div>
+          </div>
+
+          <div className="table-body">
+            {activeMode === 'UI_MAPPING' ? (
+              <Table
+                dataSource={fileTabRows}
+                pagination={false}
+                rowKey="key"
+                empty={<Empty description="未匹配到顶部标签项" />}
+                columns={[
+                  {
+                    title: '目标键',
+                    dataIndex: 'target.key',
+                    width: 96,
+                    render: (value: string) => <span className="cell-ellipsis">{value}</span>,
+                  },
+                  {
+                    title: '目标名称',
+                    dataIndex: 'target.label',
+                    width: 112,
+                    render: (value: string) => <span className="cell-ellipsis">{value}</span>,
+                  },
+                  {
+                    title: '说明',
+                    dataIndex: 'target.description',
+                    render: (value: string) => <span className="cell-ellipsis">{value}</span>,
+                  },
+                  {
+                    title: '当前标签',
+                    width: 104,
+                    render: (_: unknown, record: { target: FileTabTarget; tag: TagItem | null }) => (
+                      record.tag
+                        ? <Tag color="green">{record.tag.name}</Tag>
+                        : <Tag color="grey">未配置</Tag>
+                    ),
+                  },
+                  {
+                    title: '颜色',
+                    width: 118,
+                    render: (_: unknown, record: { target: FileTabTarget; tag: TagItem | null }) => {
+                      const color = record.tag?.color || '';
+                      return (
+                        <span className="swatch-cell">
+                          <span className="swatch" style={{ backgroundColor: color || '#00000000' }} />
+                          <span className="cell-ellipsis">{color || '-'}</span>
+                        </span>
+                      );
+                    },
+                  },
+                  {
+                    title: '操作',
+                    width: 150,
+                    render: (_: unknown, record: { target: FileTabTarget; tag: TagItem | null }) => (
+                      <div className="row-actions">
+                        <Button
+                          theme="borderless"
+                          icon={<IconEdit />}
+                          onClick={() => openConfigureFileTab(record.target, record.tag)}
+                        >
+                          {record.tag ? '编辑' : '配置'}
+                        </Button>
+                        {record.tag ? (
+                          <Button
+                            theme="borderless"
+                            type="danger"
+                            icon={<IconDelete />}
+                            onClick={() => {
+                              void handleDelete(record.tag as TagItem);
+                            }}
+                          >
+                            删除
+                          </Button>
+                        ) : null}
+                      </div>
+                    ),
+                  },
+                ]}
+              />
+            ) : (
+              <Table
+                loading={loading}
+                dataSource={activeResourceRows}
+                rowKey="id"
+                empty={<Empty description="暂无业务标签" />}
+                pagination={{ pageSize: 12 }}
+                columns={[
+                  { title: 'ID', dataIndex: 'id', width: 58 },
+                  {
+                    title: '标签名称',
+                    dataIndex: 'name',
+                    width: 150,
+                    render: (value: string) => <span className="cell-ellipsis">{value}</span>,
+                  },
+                  {
+                    title: '类型',
+                    dataIndex: 'type',
+                    width: 82,
+                    render: (value: string) => <Tag>{String(value || '').toUpperCase()}</Tag>,
+                  },
+                  {
+                    title: '维度',
+                    dataIndex: 'dimension',
+                    width: 118,
+                    render: (value: string) => {
+                      const option = TAG_DIMENSION_OPTIONS.find(item => item.value === value);
+                      return <span className="cell-ellipsis">{option?.label || value || '-'}</span>;
+                    },
+                  },
+                  {
+                    title: '资源',
+                    dataIndex: 'resourceKind',
+                    width: 86,
+                    render: (value: string | null) => <span className="cell-ellipsis">{value || '-'}</span>,
+                  },
+                  {
+                    title: '颜色',
+                    dataIndex: 'color',
+                    width: 116,
+                    render: (value: string) => (
+                      <span className="swatch-cell">
+                        <span className="swatch" style={{ backgroundColor: value || '#00000000' }} />
+                        <span className="cell-ellipsis">{value || '-'}</span>
+                      </span>
+                    ),
+                  },
+                  {
+                    title: '启用',
+                    dataIndex: 'enabled',
+                    width: 58,
+                    render: (value: number) => (Number(value) === 1 ? '是' : '否'),
+                  },
+                  { title: '排序', dataIndex: 'sortOrder', width: 58 },
+                  {
+                    title: '描述',
+                    dataIndex: 'description',
+                    render: (value: string) => <span className="cell-ellipsis">{value || '-'}</span>,
+                  },
+                  {
+                    title: '操作',
+                    width: 132,
+                    render: (_: unknown, record: TagItem) => (
+                      <div className="row-actions">
+                        <Button theme="borderless" icon={<IconEdit />} onClick={() => openEdit(record)}>
+                          编辑
+                        </Button>
+                        <Button
+                          theme="borderless"
+                          type="danger"
+                          icon={<IconDelete />}
+                          onClick={() => {
+                            void handleDelete(record);
+                          }}
+                        >
+                          删除
+                        </Button>
+                      </div>
+                    ),
+                  },
+                ]}
+              />
+            )}
+          </div>
+        </main>
+      </div>
 
       <Modal
         title={form.id ? '编辑标签' : '新建标签'}
@@ -719,28 +1208,27 @@ const TagManagement: React.FC = () => {
         onCancel={() => setEditorVisible(false)}
         onOk={handleSubmit}
         confirmLoading={editorSubmitting}
-        width={560}
+        width={380}
+        className="tag-management-compact-modal"
         style={modalNoDragStyle}
         okButtonProps={{
-          size: 'large',
           style: {
-            minWidth: 96,
-            height: 38,
-            fontSize: 14,
-            borderRadius: 8,
+            minWidth: 56,
+            height: 28,
+            fontSize: 12,
+            borderRadius: 6,
           },
         }}
         cancelButtonProps={{
-          size: 'large',
           style: {
-            minWidth: 96,
-            height: 38,
-            fontSize: 14,
-            borderRadius: 8,
+            minWidth: 56,
+            height: 28,
+            fontSize: 12,
+            borderRadius: 6,
           },
         }}
       >
-        <div style={{ display: 'grid', gap: 14 }}>
+        <div style={{ display: 'grid', gap: 10 }}>
           <Input
             value={form.name}
             onChange={(value) => setForm(prev => ({ ...prev, name: value }))}
@@ -784,7 +1272,7 @@ const TagManagement: React.FC = () => {
           ) : null}
 
           {!isEditingFileTab ? (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
               <Select
                 value={form.dimension}
                 onChange={(value) => setForm(prev => ({ ...prev, dimension: String(value).toLowerCase() }))}
@@ -808,9 +1296,9 @@ const TagManagement: React.FC = () => {
             </div>
           ) : null}
 
-          <div className="color-field" style={{ display: 'grid', gap: 10 }}>
-            <span className="field-label" style={{ fontSize: 14, lineHeight: '20px' }}>主色</span>
-            <div className="color-row" style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 12, alignItems: 'center' }}>
+          <div className="color-field">
+            <span className="field-label">主色</span>
+            <div className="color-row">
               <Input
                 value={form.color}
                 onChange={(value) => setForm(prev => ({ ...prev, color: value }))}
@@ -825,23 +1313,23 @@ const TagManagement: React.FC = () => {
                 width={380}
                 height={240}
                 style={{
-                  width: 78,
-                  height: 42,
-                  borderRadius: 8,
+                  width: 52,
+                  height: 30,
+                  borderRadius: 6,
                   display: 'block',
                 }}
               />
             </div>
-            <div className="palette" style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center' }}>
+            <div className="palette">
               {TAG_PRIMARY_COLOR_PRESETS.map(color => (
                 <button
                   key={color}
                   type="button"
                   className={`palette-item ${isColorActive(form.color, color) ? 'active' : ''}`}
                   style={{
-                    width: 36,
-                    height: 36,
-                    borderRadius: 8,
+                    width: 24,
+                    height: 24,
+                    borderRadius: 6,
                     border: '1px solid color-mix(in srgb, var(--semi-color-border) 75%, transparent)',
                     backgroundColor: color,
                     padding: 0,
@@ -855,9 +1343,9 @@ const TagManagement: React.FC = () => {
             </div>
           </div>
 
-          <div className="color-field" style={{ display: 'grid', gap: 10 }}>
-            <span className="field-label" style={{ fontSize: 14, lineHeight: '20px' }}>文字色（可空）</span>
-            <div className="color-row" style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 12, alignItems: 'center' }}>
+          <div className="color-field">
+            <span className="field-label">文字色（可空）</span>
+            <div className="color-row">
               <Input
                 value={form.textColor}
                 onChange={(value) => setForm(prev => ({ ...prev, textColor: value }))}
@@ -872,23 +1360,23 @@ const TagManagement: React.FC = () => {
                 width={380}
                 height={240}
                 style={{
-                  width: 78,
-                  height: 42,
-                  borderRadius: 8,
+                  width: 52,
+                  height: 30,
+                  borderRadius: 6,
                   display: 'block',
                 }}
               />
             </div>
-            <div className="palette" style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center' }}>
+            <div className="palette">
               {TAG_TEXT_COLOR_PRESETS.map(color => (
                 <button
                   key={color}
                   type="button"
                   className={`palette-item ${isColorActive(form.textColor, color) ? 'active' : ''}`}
                   style={{
-                    width: 36,
-                    height: 36,
-                    borderRadius: 8,
+                    width: 24,
+                    height: 24,
+                    borderRadius: 6,
                     border: '1px solid color-mix(in srgb, var(--semi-color-border) 75%, transparent)',
                     backgroundColor: color,
                     padding: 0,
@@ -904,9 +1392,9 @@ const TagManagement: React.FC = () => {
                 className="palette-clear"
                 onClick={() => setForm(prev => ({ ...prev, textColor: '' }))}
                 style={{
-                  fontSize: 13,
-                  lineHeight: '24px',
-                  padding: '0 6px',
+                  fontSize: 11,
+                  lineHeight: '18px',
+                  padding: '0 4px',
                   border: 'none',
                   background: 'transparent',
                   color: 'var(--semi-color-text-2)',
@@ -918,8 +1406,8 @@ const TagManagement: React.FC = () => {
             </div>
           </div>
 
-          <div className="color-field" style={{ display: 'grid', gap: 8 }}>
-            <span className="field-label" style={{ fontSize: 14, lineHeight: '20px' }}>
+          <div className="color-field">
+            <span className="field-label">
               排序值（越小越靠前）
             </span>
             <InputNumber
@@ -933,7 +1421,7 @@ const TagManagement: React.FC = () => {
             />
           </div>
 
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
             <span>启用</span>
             <Switch
               checked={form.enabled}
@@ -951,7 +1439,7 @@ const TagManagement: React.FC = () => {
         </div>
       </Modal>
     </Wrapper>
-    </OpaquePageContainer>
+    </TagCenterPage>
   );
 };
 
