@@ -299,6 +299,9 @@ export async function uploadAndCreateNode(
     onProgress?: (uploadedBytes: number, totalBytes: number, percentage: number, speedBps: number) => void;
     setAbort?: (aborter: () => void | Promise<void | boolean>) => void;
     storageProvider?: string;
+    // uploadId 是客户端持有的上传会话标识，透传给后端用于服务端真进度跟踪。
+    // 后端为可选字段：缺省时整段进度跟踪退化为无操作，向前兼容旧客户端。
+    uploadId?: string;
   },
 ) {
   assertUploadFileSize(file);
@@ -349,6 +352,9 @@ export async function uploadAndCreateNode(
   }
   if (options?.storageProvider) {
     formDataParams.storage_provider = options.storageProvider;
+  }
+  if (options?.uploadId) {
+    formDataParams.upload_id = options.uploadId;
   }
 
   const uploadTask = createIpcUploadTask<any>(
