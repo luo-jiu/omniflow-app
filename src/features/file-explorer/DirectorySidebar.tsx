@@ -22,6 +22,7 @@ interface Props {
     fileName: string;
     nodeId: number;
   }) => void | Promise<void>;
+  onOpenMediaTool?: (node: SelectedTreeNode) => void | Promise<void>;
   onSelectionChange?: (payload: {
     primaryNode: SelectedTreeNode | null;
     rootNodeId: number | null;
@@ -65,6 +66,7 @@ const DirectorySidebar = React.forwardRef<DirectorySidebarHandle, Props>(({
   libraryId,
   onFileOpen,
   onOpenFileInBrowser,
+  onOpenMediaTool,
   onSelectionChange,
   browserModeOpen = false,
 }, ref) => {
@@ -216,6 +218,20 @@ const DirectorySidebar = React.forwardRef<DirectorySidebarHandle, Props>(({
           onToggleAudioArchiveSubtitles={toggleAudioArchiveSubtitles}
           isAudioArchiveSubtitlesVisible={isAudioArchiveSubtitlesVisible}
           onOpenFileInBrowser={onOpenFileInBrowser}
+          onOpenMediaTool={(node) => {
+            onOpenMediaTool?.({
+              archiveMode: Number(node.archiveMode ?? 0),
+              builtInType: String(node.builtInType || 'DEF'),
+              ext: node.data?.rawExt ? String(node.data.rawExt) : node.ext ? String(node.ext) : undefined,
+              id: Number(node.id),
+              key: String(node.key || ''),
+              libraryId: Number(node.libraryId || libraryId),
+              mimeType: node.mimeType ? String(node.mimeType) : undefined,
+              name: String(node.data?.rawName || node.name || node.label || ''),
+              parentId: Number(node.parentId || 0),
+              type: node.type === 'dir' ? 'dir' : 'file',
+            });
+          }}
           onSelectionChange={(payload) => {
             onSelectionChange?.({
               primaryNode: payload.primaryNode

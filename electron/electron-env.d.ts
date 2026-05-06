@@ -113,6 +113,19 @@ interface Window {
     }>;
     cleanupStagedTextFile: (stagedPath: string) => Promise<boolean>;
     cleanupTempImportPath: (targetPath: string) => Promise<boolean>;
+    processMediaFile: (payload: {
+      ffmpegPath?: string;
+      inputFileName?: string;
+      inputUrl: string;
+      operation: 'extract-audio' | 'compress-video';
+      outputDirectoryPath?: string;
+    }) => Promise<{
+      commandArgs?: string[];
+      error?: string;
+      ffmpegPath?: string;
+      ok: boolean;
+      outputPath?: string;
+    }>;
     onUploadProgress: (listener: (payload: {
       uploadId: string;
       uploadedBytes: number;

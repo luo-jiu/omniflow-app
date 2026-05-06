@@ -613,10 +613,10 @@ const ToolWorkspaceMedia: React.FC<MediaProcessingToolProps> = ({
     <>
       <WorkspaceHeader>
         <div className="header-copy">
-          <div className="header-title">媒体处理</div>
+          <div className="header-title">资源捕获处理</div>
           <div className="header-desc">
-            侧边资源面板只负责发现和发起，真正的下载、合并、转格式这类重处理都收在这里。当前先接两条主线：
-            直接资源处理，以及 HLS 计划处理。
+            侧边资源面板只负责发现和发起，真正的下载、合并、转格式这类重处理都收在这里。
+            内部资源库文件请使用“媒体文件处理”。
           </div>
         </div>
         <div className="header-tags">
@@ -636,7 +636,7 @@ const ToolWorkspaceMedia: React.FC<MediaProcessingToolProps> = ({
         <Panel>
           <div className="panel-title">处理模式</div>
           <div className="panel-desc">
-            同一个媒体处理壳里现在分三条路：直接资源保留合并与转格式；HLS 和 MPD 计划各自承接 manifest
+            同一个资源捕获处理壳里现在分三条路：直接资源保留合并与转格式；HLS 和 MPD 计划各自承接 manifest
             解析后的下载任务，但都还是收敛到这个工具页里做重处理。
           </div>
           <ToolModeSwitch>

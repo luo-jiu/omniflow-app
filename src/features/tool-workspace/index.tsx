@@ -13,7 +13,9 @@ import {
 import ToolWorkspaceSubtitle from './ToolWorkspaceSubtitle';
 import ToolWorkspaceMedia from './ToolWorkspaceMedia';
 import ToolWorkspaceNav from './ToolWorkspaceNav';
+import LibraryMediaTool from '@/features/media-tools/LibraryMediaTool';
 import type {
+  ToolWorkspaceLibraryMediaRequest,
   ToolWorkspaceMediaHlsRequest,
   ToolWorkspaceMediaMpdRequest,
   ToolWorkspaceMediaMode,
@@ -27,6 +29,7 @@ import {
 
 type ToolWorkspaceProps = {
   libraryId: number;
+  libraryMediaProcessingRequest?: ToolWorkspaceLibraryMediaRequest | null;
   rootNodeId: number | null;
   selectedTreeNode: SelectedTreeNode | null;
   mediaProcessingRequest?: ToolWorkspaceMediaRequest | null;
@@ -35,6 +38,7 @@ type ToolWorkspaceProps = {
 
 const ToolWorkspace: React.FC<ToolWorkspaceProps> = ({
   libraryId,
+  libraryMediaProcessingRequest = null,
   mediaProcessingRequest = null,
   onRefreshDirectory,
   rootNodeId,
@@ -47,6 +51,7 @@ const ToolWorkspace: React.FC<ToolWorkspaceProps> = ({
   const [mediaProcessingHlsRequest, setMediaProcessingHlsRequest] = React.useState<ToolWorkspaceMediaHlsRequest | null>(null);
   const [mediaProcessingMpdRequest, setMediaProcessingMpdRequest] = React.useState<ToolWorkspaceMediaMpdRequest | null>(null);
   const [mediaProcessingMode, setMediaProcessingMode] = React.useState<ToolWorkspaceMediaMode>('resources');
+  const [libraryMediaRequest, setLibraryMediaRequest] = React.useState<ToolWorkspaceLibraryMediaRequest | null>(libraryMediaProcessingRequest);
   const initializedLibraryIdRef = React.useRef(libraryId);
 
   const draft = workspaceState.subtitleTranslationDraft;
@@ -105,6 +110,17 @@ const ToolWorkspace: React.FC<ToolWorkspaceProps> = ({
     }));
   }, [mediaProcessingRequest]);
 
+  React.useEffect(() => {
+    if (!libraryMediaProcessingRequest) {
+      return;
+    }
+    setLibraryMediaRequest(libraryMediaProcessingRequest);
+    setWorkspaceState((current) => ({
+      ...current,
+      activeToolId: 'media-file-processing',
+    }));
+  }, [libraryMediaProcessingRequest]);
+
   const openTool = React.useCallback((toolId: ToolWorkspaceState['activeToolId']) => {
     setWorkspaceState((current) => ({
       ...current,
@@ -126,6 +142,14 @@ const ToolWorkspace: React.FC<ToolWorkspaceProps> = ({
             onModeChange={setMediaProcessingMode}
             onRefreshDirectory={onRefreshDirectory}
             resources={mediaProcessingResources}
+          />
+        ) : null}
+
+        {activeToolId === 'media-file-processing' ? (
+          <LibraryMediaTool
+            libraryId={libraryId}
+            onRefreshDirectory={onRefreshDirectory}
+            request={libraryMediaRequest}
           />
         ) : null}
 

@@ -80,6 +80,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('fs:cleanup-staged-text-file', stagedPath),
   cleanupTempImportPath: (targetPath: string) =>
     ipcRenderer.invoke('fs:cleanup-temp-import-path', targetPath),
+  processMediaFile: (payload: {
+    ffmpegPath?: string;
+    inputFileName?: string;
+    inputUrl: string;
+    operation: 'extract-audio' | 'compress-video';
+    outputDirectoryPath?: string;
+  }) => ipcRenderer.invoke('media-tool:process-file', payload),
   fetch: (url: string, options?: any) => ipcRenderer.invoke('http:fetch', url, options),
   fetchBinary: (url: string, options?: any) => ipcRenderer.invoke('http:fetch-binary', url, options),
   upload: (

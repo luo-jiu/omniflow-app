@@ -94,6 +94,39 @@ function createTrailingBuiltInTypeLabel(
   );
 }
 
+function normalizeExt(ext?: string | null): string {
+  return String(ext || '').trim().toLowerCase().replace(/^\./, '');
+}
+
+function isMediaFileNode(node: any): boolean {
+  const mimeType = String(node?.mimeType || '').toLowerCase();
+  if (mimeType.startsWith('audio/') || mimeType.startsWith('video/')) {
+    return true;
+  }
+  const ext = normalizeExt(node?.ext || node?.data?.rawExt);
+  return [
+    'aac',
+    'aiff',
+    'avi',
+    'flac',
+    'flv',
+    'm4a',
+    'm4v',
+    'mkv',
+    'mov',
+    'mp3',
+    'mp4',
+    'ogg',
+    'opus',
+    'ts',
+    'wav',
+    'weba',
+    'webm',
+    'wma',
+    'wmv',
+  ].includes(ext);
+}
+
 /**
  * 目录树右键菜单
  * 使用通用的 ContextMenu 组件构建
@@ -189,6 +222,11 @@ const DirectoryContextMenu: React.FC<DirectoryContextMenuProps> = ({
         label: '在浏览器打开',
         onClick: () => onAction('在浏览器打开', node),
       },
+      ...(isMediaFileNode(node) ? [{
+        key: 'open-media-tool',
+        label: '在媒体工具打开',
+        onClick: () => onAction('在媒体工具打开', node),
+      }] : []),
     ];
 
   // 文件夹：基础信息组后加分隔线，再进入模式设置组

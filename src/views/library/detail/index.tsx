@@ -47,7 +47,10 @@ import type { EmbeddedBrowserHlsManifest } from "@/features/embedded-browser/res
 import type { EmbeddedBrowserMpdDownloadPlan } from "@/features/embedded-browser/resources/model/embedded-browser-mpd-manifest";
 import type { EmbeddedBrowserMpdManifest } from "@/features/embedded-browser/resources/model/embedded-browser-mpd-manifest";
 import type { EmbeddedBrowserCapturedResource } from "@/features/embedded-browser/resources/types";
-import type { ToolWorkspaceMediaRequest } from "@/features/tool-workspace/types";
+import type {
+  ToolWorkspaceLibraryMediaRequest,
+  ToolWorkspaceMediaRequest,
+} from "@/features/tool-workspace/types";
 import {
   createBrowserBookmark,
   deleteBrowserBookmark,
@@ -259,6 +262,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   const [treeRootNodeId, setTreeRootNodeId] = React.useState<number | null>(null);
   const [workspaceDisplayMode, setWorkspaceDisplayMode] = React.useState<WorkspaceDisplayMode>(initialWorkspaceState.workspaceDisplayMode);
   const [mediaProcessingRequest, setMediaProcessingRequest] = React.useState<ToolWorkspaceMediaRequest | null>(null);
+  const [libraryMediaProcessingRequest, setLibraryMediaProcessingRequest] = React.useState<ToolWorkspaceLibraryMediaRequest | null>(null);
   const [videoWideModeActive, setVideoWideModeActive] = React.useState(false);
   const browserInputRef = React.useRef<HTMLInputElement | null>(null);
   const latestWorkspaceStateRef = React.useRef<LibraryDetailWorkspaceState>(initialWorkspaceState);
@@ -1386,6 +1390,16 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
     void window.electronEmbeddedBrowser.deactivate();
   }, []);
 
+  const openLibraryMediaProcessingWorkspace = React.useCallback((node: SelectedTreeNode) => {
+    setLibraryMediaProcessingRequest({
+      id: Date.now(),
+      node,
+    });
+    setBrowserModeOpen(false);
+    setWorkspaceDisplayMode('tools');
+    void window.electronEmbeddedBrowser.deactivate();
+  }, []);
+
   const openHlsDownloadWorkspace = React.useCallback((
     resource: EmbeddedBrowserCapturedResource,
     manifest: EmbeddedBrowserHlsManifest,
@@ -2314,6 +2328,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
             ref={directorySidebarRef}
             libraryId={libraryId}
             onFileOpen={handleFileOpen}
+            onOpenMediaTool={openLibraryMediaProcessingWorkspace}
             onSelectionChange={(payload) => {
               setSelectedTreeNode(payload.primaryNode);
               setTreeRootNodeId(payload.rootNodeId);
@@ -2801,6 +2816,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
           ) : workspaceDisplayMode === 'tools' ? (
             <div className="workspace-pane active">
               <ToolWorkspace
+                libraryMediaProcessingRequest={libraryMediaProcessingRequest}
                 libraryId={libraryId}
                 mediaProcessingRequest={mediaProcessingRequest}
                 onRefreshDirectory={(directoryId) => (

@@ -10,7 +10,8 @@ type ToolWorkspaceNavProps = {
 
 const TOOL_ITEMS: Array<{ id: ToolWorkspaceToolId; title: string }> = [
   { id: 'subtitle-translation', title: 'AI 字幕翻译' },
-  { id: 'media-processing', title: '媒体处理' },
+  { id: 'media-file-processing', title: '媒体文件处理' },
+  { id: 'media-processing', title: '资源捕获处理' },
 ];
 
 const ToolWorkspaceNav: React.FC<ToolWorkspaceNavProps> = ({

@@ -9,7 +9,7 @@ import type {
 } from '@/features/embedded-browser/resources/model/embedded-browser-mpd-manifest';
 import type { EmbeddedBrowserCapturedResource } from '@/features/embedded-browser/resources/types';
 
-export type ToolWorkspaceToolId = 'subtitle-translation' | 'media-processing';
+export type ToolWorkspaceToolId = 'subtitle-translation' | 'media-processing' | 'media-file-processing';
 
 export type ToolWorkspaceMediaMode = 'resources' | 'hls-download' | 'mpd-download';
 
@@ -39,6 +39,11 @@ export type ToolWorkspaceMediaRequest =
   | ToolWorkspaceMediaResourceRequest
   | ToolWorkspaceMediaHlsRequest
   | ToolWorkspaceMediaMpdRequest;
+
+export interface ToolWorkspaceLibraryMediaRequest {
+  id: number;
+  node: SelectedTreeNode;
+}
 
 export type SubtitleFileFormat = 'srt' | 'vtt';
 

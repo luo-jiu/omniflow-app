@@ -78,6 +78,7 @@ interface DirectoryTreeProps {
     fileName: string;
     nodeId: number;
   }) => void | Promise<void>;
+  onOpenMediaTool?: (node: any) => void | Promise<void>;
   onSelectionChange?: (payload: {
     primaryNode: any | null;
     selectedNodeIds: number[];
@@ -142,6 +143,7 @@ export default function DirectoryTree({
   onToggleAudioArchiveSubtitles,
   isAudioArchiveSubtitlesVisible,
   onOpenFileInBrowser,
+  onOpenMediaTool,
   onSelectionChange,
   loadData,
   libraryId,
@@ -1630,6 +1632,20 @@ export default function DirectoryTree({
       } catch (error: any) {
         runtimeLogger.error('在浏览器打开文件失败:', error);
         Toast.error(error?.message || '在浏览器打开失败');
+      }
+      return;
+    }
+
+    if (action === '在媒体工具打开') {
+      if (!node || resolveNodeType(node) !== 'file') {
+        Toast.warning('请选择媒体文件');
+        return;
+      }
+      try {
+        await onOpenMediaTool?.(node);
+      } catch (error: any) {
+        runtimeLogger.error('打开媒体工具失败:', error);
+        Toast.error(error?.message || '打开媒体工具失败');
       }
       return;
     }
