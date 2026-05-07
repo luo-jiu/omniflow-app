@@ -128,6 +128,7 @@ interface Window {
     }>;
     onUploadProgress: (listener: (payload: {
       uploadId: string;
+      partNumber: number;
       uploadedBytes: number;
       totalBytes: number;
       percentage: number;
@@ -156,35 +157,31 @@ interface Window {
       receivedBytes: number;
       truncated: boolean;
     }>;
-    upload: (
+    uploadPresignedPut: (args: {
+      uploadId: string;
+      partNumber: number;
+      presignedUrl: string;
+      filePath: string;
+      byteOffset: number;
+      byteLength: number;
+      contentType?: string;
+    }) => Promise<{
+      status: number;
+      etag: string;
+      body: string;
+    }>;
+    uploadAbort: (uploadId: string) => Promise<boolean>;
+    uploadFormData: (
       url: string,
       filePath: string,
       formDataParams?: Record<string, string>,
-      headers?: Record<string, string>,
-      uploadId?: string
-    ) => Promise<{
-      status: number;
-      body: any;
-    }>;
-    uploadAbort: (uploadId: string) => Promise<boolean>;
-    chunkedUpload: (
-      baseUrl: string,
-      filePath: string,
-      params: {
-        libraryId: number;
-        parentId: number;
-        fileName: string;
-        fileSize: number;
-        conflictPolicy?: string;
-        storageProvider?: string;
-      },
       headers?: Record<string, string>,
       uploadId?: string,
     ) => Promise<{
       status: number;
       body: any;
     }>;
-    chunkedUploadAbort: (uploadId: string) => Promise<boolean>;
+    uploadFormDataAbort: (uploadId: string) => Promise<boolean>;
   };
 
   electronWindow: {

@@ -1,8 +1,6 @@
-import { createIpcChunkedUploadTask, createIpcUploadTask, ipcRequest as request, ipcUpload } from '@/service/request/ipcRequest';
+import { ipcRequest as request } from '@/service/request/ipcRequest';
 import type { ArchiveBuiltInType } from '@/shared/file-viewer-types';
-import { CHUNKED_UPLOAD_THRESHOLD_BYTES, MAX_SINGLE_UPLOAD_BYTES, MAX_SINGLE_UPLOAD_ERROR_MESSAGE } from '@/shared/upload-limits';
-
-const ENABLE_CHUNKED_UPLOAD = false;
+import { runDirectUpload } from '@/modules/upload-center/services/upload-direct';
 
 export type Library = {
   createdAt: string;
@@ -140,13 +138,6 @@ function normalizeRecycleBinItemPayload(source: Record<string, unknown>): Recycl
     deletedAt: String(normalized.deletedAt ?? normalized.deleted_at ?? ''),
     deletedDescendantCount: toOptionalNumber(normalized.deletedDescendantCount ?? normalized.deleted_descendant_count),
   };
-}
-
-function assertUploadFileSize(file: File) {
-  const fileSize = Number(file.size || 0);
-  if (fileSize > MAX_SINGLE_UPLOAD_BYTES) {
-    throw new Error(MAX_SINGLE_UPLOAD_ERROR_MESSAGE);
-  }
 }
 
 // 获取仓库列表
@@ -289,128 +280,14 @@ export async function updateNodeFileContent(payload: {
   return normalizeNodeDetailPayload(data as Record<string, unknown>);
 }
 
-// 上传文件并创建节点
-export async function uploadAndCreateNode(
-  file: File,
-  parentId: number,
-  libraryId: number,
-  options?: {
-    conflictPolicy?: NodeNameConflictPolicy;
-    onProgress?: (uploadedBytes: number, totalBytes: number, percentage: number, speedBps: number) => void;
-    setAbort?: (aborter: () => void | Promise<void | boolean>) => void;
-    storageProvider?: string;
-    // uploadId 是客户端持有的上传会话标识，透传给后端用于服务端真进度跟踪。
-    // 后端为可选字段：缺省时整段进度跟踪退化为无操作，向前兼容旧客户端。
-    uploadId?: string;
-  },
-) {
-  assertUploadFileSize(file);
-
-  const filePath = (file as any).path;
-  if (!filePath) {
-    throw new Error("Unable to retrieve file path for upload.");
-  }
-
-  if (ENABLE_CHUNKED_UPLOAD && file.size >= CHUNKED_UPLOAD_THRESHOLD_BYTES) {
-    const uploadTask = createIpcChunkedUploadTask<any>(
-      filePath,
-      {
-        libraryId,
-        parentId,
-        fileName: file.name,
-        fileSize: file.size,
-        conflictPolicy: options?.conflictPolicy,
-        storageProvider: options?.storageProvider,
-      },
-      (progress) => {
-        if (options?.onProgress) {
-          options.onProgress(
-            progress.uploadedBytes,
-            progress.totalBytes,
-            progress.percentage,
-            progress.speedBps,
-          );
-        }
-      },
-    );
-
-    options?.setAbort?.(uploadTask.abort);
-
-    const json = await uploadTask.promise;
-    if (!json) throw new Error('上传响应为空');
-    const d = extractDataPayload<Record<string, unknown>>(json);
-    if (!d || typeof d !== 'object') throw new Error('上传响应数据异常');
-    return normalizeNodePayload(d as Record<string, unknown>, 'file');
-  }
-
-  const formDataParams: Record<string, string> = {
-    parent_id: String(parentId),
-    library_id: String(libraryId),
-  };
-  if (options?.conflictPolicy) {
-    formDataParams.conflictPolicy = options.conflictPolicy;
-  }
-  if (options?.storageProvider) {
-    formDataParams.storage_provider = options.storageProvider;
-  }
-  if (options?.uploadId) {
-    formDataParams.upload_id = options.uploadId;
-  }
-
-  const uploadTask = createIpcUploadTask<any>(
-    "/v1/directory/upload",
-    filePath,
-    formDataParams,
-    (progress) => {
-      if (options?.onProgress) {
-        options.onProgress(
-          progress.uploadedBytes,
-          progress.totalBytes,
-          progress.percentage,
-          progress.speedBps,
-        );
-      }
-    },
-  );
-
-  if (options?.setAbort) {
-    options.setAbort(uploadTask.abort);
-  }
-
-  const json = await uploadTask.promise;
-  if (!json) {
-    throw new Error('上传响应为空');
-  }
-
-  const d = extractDataPayload<Record<string, unknown>>(json);
-  if (!d || typeof d !== 'object') {
-    throw new Error('上传响应数据异常');
-  }
-  return normalizeNodePayload(d as Record<string, unknown>, 'file');
-}
-
-// 兼容旧上传（无进度）
-export async function uploadAndCreateNodeLegacy(file: File, parentId: number, libraryId: number) {
-  assertUploadFileSize(file);
-
-  const json = await ipcUpload("/v1/directory/upload", (file as any).path, {
-    parent_id: String(parentId),
-    library_id: String(libraryId),
-  });
-
-  const d = extractDataPayload<Record<string, unknown>>(json);
-  if (!d || typeof d !== 'object') {
-    throw new Error('上传响应数据异常');
-  }
-  return normalizeNodePayload(d as Record<string, unknown>, 'file');
-}
-
+// 直传 MinIO 上传一个本地路径并创建节点；conflictPolicy 在 complete 阶段传给后端，由 NodeUseCase.Create 兜底。
 export async function uploadLocalPathAndCreateNode(
   filePath: string,
   parentId: number,
   libraryId: number,
   options?: {
     conflictPolicy?: NodeNameConflictPolicy;
+    storageProvider?: string;
   },
 ) {
   const normalizedFilePath = String(filePath || '').trim();
@@ -418,15 +295,17 @@ export async function uploadLocalPathAndCreateNode(
     throw new Error('上传路径不能为空');
   }
 
-  const formDataParams: Record<string, string> = {
-    parent_id: String(parentId),
-    library_id: String(libraryId),
-  };
-  if (options?.conflictPolicy) {
-    formDataParams.conflictPolicy = options.conflictPolicy;
-  }
+  const info = await window.electronAPI.getTempImportFileInfo(normalizedFilePath);
 
-  const json = await ipcUpload("/v1/directory/upload", normalizedFilePath, formDataParams);
+  const json = await runDirectUpload({
+    filePath: info.filePath,
+    fileName: info.name,
+    fileSize: Number(info.size || 0),
+    libraryId,
+    parentId,
+    storageProvider: options?.storageProvider,
+    conflictPolicy: options?.conflictPolicy,
+  });
 
   const d = extractDataPayload<Record<string, unknown>>(json);
   if (!d || typeof d !== 'object') {

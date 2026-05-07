@@ -89,31 +89,27 @@ contextBridge.exposeInMainWorld('electronAPI', {
   }) => ipcRenderer.invoke('media-tool:process-file', payload),
   fetch: (url: string, options?: any) => ipcRenderer.invoke('http:fetch', url, options),
   fetchBinary: (url: string, options?: any) => ipcRenderer.invoke('http:fetch-binary', url, options),
-  upload: (
+  uploadPresignedPut: (args: {
+    uploadId: string;
+    partNumber: number;
+    presignedUrl: string;
+    filePath: string;
+    byteOffset: number;
+    byteLength: number;
+    contentType?: string;
+  }) => ipcRenderer.invoke('http:upload:presigned-put', args),
+  uploadAbort: (uploadId: string) => ipcRenderer.invoke('http:upload:abort', uploadId),
+  uploadFormData: (
     url: string,
     filePath: string,
     formDataParams?: Record<string, string>,
     headers?: Record<string, string>,
     uploadId?: string,
-  ) => ipcRenderer.invoke('http:upload', url, filePath, formDataParams, headers, uploadId),
-  uploadAbort: (uploadId: string) => ipcRenderer.invoke('http:upload:abort', uploadId),
-  chunkedUpload: (
-    baseUrl: string,
-    filePath: string,
-    params: {
-      libraryId: number;
-      parentId: number;
-      fileName: string;
-      fileSize: number;
-      conflictPolicy?: string;
-      storageProvider?: string;
-    },
-    headers?: Record<string, string>,
-    uploadId?: string,
-  ) => ipcRenderer.invoke('http:chunked-upload', baseUrl, filePath, params, headers, uploadId),
-  chunkedUploadAbort: (uploadId: string) => ipcRenderer.invoke('http:chunked-upload:abort', uploadId),
+  ) => ipcRenderer.invoke('http:upload:formdata', url, filePath, formDataParams, headers, uploadId),
+  uploadFormDataAbort: (uploadId: string) => ipcRenderer.invoke('http:upload:formdata:abort', uploadId),
   onUploadProgress: (listener: (payload: {
     uploadId: string;
+    partNumber: number;
     uploadedBytes: number;
     totalBytes: number;
     percentage: number;
@@ -121,6 +117,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   }) => void) => {
     const wrapped = (_event: Electron.IpcRendererEvent, payload: {
       uploadId: string;
+      partNumber: number;
       uploadedBytes: number;
       totalBytes: number;
       percentage: number;

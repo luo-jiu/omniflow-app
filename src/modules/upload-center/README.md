@@ -14,10 +14,13 @@
   - 上传引擎（队列、并发、取消、重试、事件回调）。
 - `engine/upload-manager.scenario.ts`
   - Step 2 验收场景（并发与事件推送）。
-- `services/upload-progress.api.ts`
-  - 后端真进度轮询封装。Proxy 上传模式下解决 UI 提前 100% 的问题。
-  - 执行器层调用，UI 不感知；详见 `omniflow-app/docs/upload-progress-architecture.md`。
-  - 切到客户端直传 MinIO 后该文件可整段删除（`omniflow-go/docs/architecture/upload-direct-upload-migration.md`）。
+- `services/upload-session.api.ts`
+  - 直传 MinIO 7 端点的 fetch 包装（`init / parts/sign / parts(GET) / renew / complete / abort`）。
+  - 401/404/410 错误语义统一映射；执行器层调用，UI 不感知。
+- `services/upload-direct.ts`
+  - `runDirectUpload` 共享流程：init → 4 并发 sign+PUT → complete + 心跳 + abort。
+  - 由 `UploadManager.defaultExecutor` 和 `uploadLocalPathAndCreateNode` 共用同一条链路。
+  - 详见 `omniflow-app/docs/upload-direct-architecture.md` 与 `omniflow-go/docs/architecture/upload-direct-design.md`。
 
 ## 代码规矩
 
@@ -32,4 +35,4 @@
 - 上传引擎仅消费状态机，不允许直接改任务对象字段。
 - `UploadTaskInput.storageProvider` 是用户在上传确认 overlay 中选择的目标 provider 别名，只由上传执行器透传给后端，不进入状态机派生逻辑。
 - 若未来支持断点续传，可新增 `sessionId/chunkIndex` 字段，但不破坏当前事件模型。
-- `UploadTaskEvent.PROGRESS` 的数据来源对 UI 透明：当前由执行器混合 IPC 字节（首帧前兜底）和服务端轮询字节（首帧后接管），未来直传时切换为 XHR / S3 SDK 进度事件，事件契约不变。
+- `UploadTaskEvent.PROGRESS` 的数据来源对 UI 透明：当前由 Electron 主进程 PUT 出口字节（按 partNumber 由 `runDirectUpload` 合并）push 上来，事件契约不变。
