@@ -90,6 +90,18 @@ const RESOURCE_KIND_OPTIONS: Array<TagOption> = [
   { value: 'folder', label: '文件夹', icon: folderTagIcon },
 ];
 
+const TARGET_KIND_OPTIONS: Array<TagOption> = [
+  { value: 'file', label: '文件', icon: fileTagIcon },
+  { value: 'folder', label: '文件夹', icon: folderTagIcon },
+  { value: 'archive_root', label: '归档根', icon: folderTagIcon },
+  { value: 'asmr_work', label: 'ASMR 作品', icon: asmrTagIcon },
+  { value: 'comic_work', label: '漫画作品', icon: comicTagIcon },
+  { value: 'audio_track', label: '音频文件', icon: audioTagIcon },
+  { value: 'audio_album', label: '音频专辑', icon: audioTagIcon },
+  { value: 'video_file', label: '视频文件', icon: videoTagIcon },
+  { value: 'video_collection', label: '视频合集', icon: videoTagIcon },
+];
+
 type TagCenterMode = 'RESOURCE' | 'UI_MAPPING';
 type TagResourceSection = 'ALL' | 'GENERAL' | 'ASMR' | 'COMIC' | 'AUDIO' | 'VIDEO' | 'FILE' | 'FOLDER';
 
@@ -128,6 +140,7 @@ interface TagFormState {
   scope: TagScope;
   dimension: TagDimension;
   resourceKind: string;
+  targetKinds: string[];
   targetKey: string;
   color: string;
   textColor: string;
@@ -142,6 +155,7 @@ const DEFAULT_FORM_STATE: TagFormState = {
   scope: 'resource',
   dimension: 'custom',
   resourceKind: 'general',
+  targetKinds: ['file', 'folder', 'archive_root'],
   targetKey: '',
   color: '#4F8CFF',
   textColor: '',
@@ -847,6 +861,48 @@ const TagManagementCompactModalStyle = createGlobalStyle`
     min-width: 0;
   }
 
+  .tag-management-compact-modal .tag-editor-target-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .tag-management-compact-modal .tag-editor-target-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 28px;
+    padding: 0 9px;
+    border: 1px solid color-mix(in srgb, var(--semi-color-border) 80%, transparent);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--semi-color-bg-1) 72%, transparent);
+    color: var(--semi-color-text-1);
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.2;
+    transition: border-color 120ms ease, background-color 120ms ease, color 120ms ease;
+  }
+
+  .tag-management-compact-modal .tag-editor-target-chip:hover {
+    border-color: color-mix(in srgb, var(--semi-color-primary) 54%, var(--semi-color-border) 46%);
+    background: var(--semi-color-fill-0);
+    color: var(--semi-color-text-0);
+  }
+
+  .tag-management-compact-modal .tag-editor-target-chip.active {
+    border-color: var(--semi-color-primary);
+    background: color-mix(in srgb, var(--semi-color-primary) 16%, transparent);
+    color: var(--semi-color-primary);
+  }
+
+  .tag-management-compact-modal .tag-editor-target-chip-icon {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+    object-fit: contain;
+  }
+
   .tag-management-compact-modal .tag-editor-label {
     color: var(--semi-color-text-2);
     font-size: 11px;
@@ -1214,6 +1270,7 @@ function validateForm(form: TagFormState): string | null {
   if (String(form.type).toUpperCase() !== 'FILE_TAB') {
     if (!String(form.dimension || '').trim()) return '标签维度不能为空';
     if (!String(form.resourceKind || '').trim()) return '资源类型不能为空';
+    if (!form.targetKinds.length) return '至少选择一个可贴对象';
   }
   const color = normalizeHexColor(form.color);
   if (!HEX_COLOR_PATTERN.test(color)) return '主色格式错误，请输入 #RRGGBB 或 #RRGGBBAA';
@@ -1249,6 +1306,46 @@ function inferResourceKindFromTagType(type: TagType): string {
   }
 }
 
+function inferTargetKindsFromTagType(type: TagType): string[] {
+  switch (String(type || '').trim().toUpperCase()) {
+    case 'ASMR':
+      return ['asmr_work', 'archive_root', 'folder'];
+    case 'COMIC':
+      return ['comic_work', 'archive_root', 'folder'];
+    case 'AUDIO':
+      return ['audio_track', 'audio_album', 'folder'];
+    case 'VIDEO':
+      return ['video_file', 'video_collection', 'folder'];
+    case 'FILE':
+      return ['file'];
+    case 'FOLDER':
+      return ['folder'];
+    case 'FILE_TAB':
+      return [];
+    default:
+      return ['file', 'folder', 'archive_root'];
+  }
+}
+
+function normalizeTargetKinds(value: unknown, type: TagType): string[] {
+  const items = Array.isArray(value) ? value : [];
+  const normalized = Array.from(new Set(
+    items
+      .map(item => String(item || '').trim().toLowerCase())
+      .filter(Boolean)
+  ));
+  return normalized.length > 0 ? normalized : inferTargetKindsFromTagType(type);
+}
+
+function formatTargetKinds(targetKinds: string[] | undefined): string {
+  const normalized = normalizeTargetKinds(targetKinds, 'GENERAL');
+  const labels = normalized
+    .map(kind => TARGET_KIND_OPTIONS.find(option => option.value === kind)?.label || kind)
+    .filter(Boolean);
+  if (labels.length <= 2) return labels.join(' / ');
+  return `${labels.slice(0, 2).join(' / ')} +${labels.length - 2}`;
+}
+
 function mapTagToForm(tag: TagItem): TagFormState {
   return {
     id: tag.id,
@@ -1257,6 +1354,7 @@ function mapTagToForm(tag: TagItem): TagFormState {
     scope: tag.scope || 'resource',
     dimension: tag.dimension || 'custom',
     resourceKind: tag.resourceKind || inferResourceKindFromTagType(tag.type),
+    targetKinds: normalizeTargetKinds(tag.targetKinds, tag.type),
     targetKey: normalizeFileTabTargetKey(tag.targetKey || ''),
     color: tag.color || '#4F8CFF',
     textColor: tag.textColor || '',
@@ -1343,6 +1441,7 @@ const TagManagement: React.FC = () => {
         scope: normalizedType === 'FILE_TAB' ? 'ui' : record.scope || 'resource',
         dimension: normalizedType === 'FILE_TAB' ? 'custom' : record.dimension || 'custom',
         resourceKind: normalizedType === 'FILE_TAB' ? null : record.resourceKind || inferResourceKindFromTagType(normalizedType),
+        targetKinds: normalizedType === 'FILE_TAB' ? [] : normalizeTargetKinds(record.targetKinds, normalizedType),
         targetKey: normalizedType === 'FILE_TAB' ? normalizeFileTabTargetKey(record.targetKey || '') : null,
         color: normalizeHexColor(record.color || DEFAULT_FORM_STATE.color),
         textColor: normalizeHexColor(record.textColor || '') || null,
@@ -1428,6 +1527,7 @@ const TagManagement: React.FC = () => {
       ...DEFAULT_FORM_STATE,
       type: nextType,
       resourceKind: inferResourceKindFromTagType(nextType),
+      targetKinds: inferTargetKindsFromTagType(nextType),
     });
     setLockType(null);
     setLockTargetKey(null);
@@ -1451,6 +1551,7 @@ const TagManagement: React.FC = () => {
         scope: 'ui',
         dimension: 'custom',
         resourceKind: '',
+        targetKinds: [],
         targetKey: target.key,
         name: target.key,
       });
@@ -1480,6 +1581,7 @@ const TagManagement: React.FC = () => {
       scope: normalizedType === 'FILE_TAB' ? 'ui' : 'resource',
       dimension: normalizedType === 'FILE_TAB' ? 'custom' : String(form.dimension || 'custom').trim().toLowerCase(),
       resourceKind: normalizedResourceKind,
+      targetKinds: normalizedType === 'FILE_TAB' ? [] : normalizeTargetKinds(form.targetKinds, normalizedType),
       targetKey: normalizedTargetKey,
       color: normalizeHexColor(form.color),
       textColor: normalizeHexColor(form.textColor) || null,
@@ -1747,6 +1849,14 @@ const TagManagement: React.FC = () => {
                     render: (value: string | null) => <span className="cell-ellipsis">{value || '-'}</span>,
                   },
                   {
+                    title: '可贴对象',
+                    dataIndex: 'targetKinds',
+                    width: 154,
+                    render: (value: string[] | undefined) => (
+                      <span className="cell-ellipsis">{formatTargetKinds(value)}</span>
+                    ),
+                  },
+                  {
                     title: '颜色',
                     dataIndex: 'color',
                     width: 116,
@@ -1875,6 +1985,7 @@ const TagManagement: React.FC = () => {
                       type: nextType,
                       scope: nextType === 'FILE_TAB' ? 'ui' : 'resource',
                       resourceKind: nextType === 'FILE_TAB' ? '' : inferResourceKindFromTagType(nextType),
+                      targetKinds: inferTargetKindsFromTagType(nextType),
                     }));
                   }}
                   disabled={Boolean(lockType)}
@@ -1940,6 +2051,41 @@ const TagManagement: React.FC = () => {
                     </Select.Option>
                   ))}
                 </Select>
+              </div>
+            ) : null}
+
+            {!isEditingFileTab ? (
+              <div className="tag-editor-field">
+                <span className="tag-editor-label">可贴对象</span>
+                <div className="tag-editor-target-grid">
+                  {TARGET_KIND_OPTIONS.map(option => {
+                    const active = form.targetKinds.includes(option.value);
+                    return (
+                      <button
+                        key={option.value}
+                        type="button"
+                        className={`tag-editor-target-chip ${active ? 'active' : ''}`}
+                        onClick={() => {
+                          setForm((prev) => {
+                            const existing = new Set(prev.targetKinds);
+                            if (existing.has(option.value)) {
+                              existing.delete(option.value);
+                            } else {
+                              existing.add(option.value);
+                            }
+                            return {
+                              ...prev,
+                              targetKinds: Array.from(existing),
+                            };
+                          });
+                        }}
+                      >
+                        <img className="tag-editor-target-chip-icon" src={option.icon} alt="" />
+                        {option.label}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             ) : null}
             </section>

@@ -103,6 +103,7 @@ export function useDirectoryUpload({
     files: UploadCandidateFile[],
     targetNode: UploadModalTargetNode,
     storageProvider: string,
+    onQueuePrepared?: () => void,
   ) => {
     const pathResolver = new UploadPathResolver({
       libraryId: targetNode.libraryId,
@@ -153,6 +154,8 @@ export function useDirectoryUpload({
       donePromises.push(batch.done);
       await nextMicroTask();
     }
+
+    onQueuePrepared?.();
 
     const results = (await Promise.all(donePromises)).flat();
     const successCount = results.filter(r => r.taskStatus === UPLOAD_TASK_STATUS.SUCCESS).length;
@@ -219,11 +222,24 @@ export function useDirectoryUpload({
 
     if (result.type !== 'confirm') return;
 
-    Toast.info(`正在准备上传队列（${files.length} 个文件）`);
-    void startUploadInBackground(files, targetNode, result.storageProvider).catch((error) => {
-      runtimeLogger.error('上传执行失败:', error);
-      Toast.error((error as any)?.message || '上传过程中出现未知错误');
+    const preparingToastId = Toast.info({
+      content: `正在准备上传队列（${files.length} 个文件）`,
+      duration: 8,
+      showClose: true,
     });
+    let preparingToastClosed = false;
+    const closePreparingToast = () => {
+      if (preparingToastClosed) return;
+      preparingToastClosed = true;
+      Toast.close(preparingToastId);
+    };
+
+    void startUploadInBackground(files, targetNode, result.storageProvider, closePreparingToast)
+      .catch((error) => {
+        runtimeLogger.error('上传执行失败:', error);
+        Toast.error((error as any)?.message || '上传过程中出现未知错误');
+      })
+      .finally(closePreparingToast);
   }, [startUploadInBackground]);
 
   const handleExternalDropOnFolder = useCallback((treeNode: any, e: React.DragEvent) => {

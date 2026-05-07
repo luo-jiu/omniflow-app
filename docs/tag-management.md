@@ -32,6 +32,7 @@
 | `scope` | `resource` 或 `ui` |
 | `dimension` | `genre / creator / character / series / source / language / region / technical / status / custom` |
 | `resourceKind` | `asmr / comic / audio / video / file / folder / general` 等资源类型 |
+| `targetKinds` | 标签允许贴到的具体对象，例如 `file / folder / archive_root / asmr_work / comic_work / audio_track / audio_album / video_file / video_collection` |
 
 ## 3. 契约
 
@@ -56,7 +57,10 @@ await fetchTags({
 
 - `type` 转为大写
 - `scope / dimension / resourceKind` 转为小写
+- `targetKinds` 作为数组提交；资源标签至少选择一个可贴对象
 - `FILE_TAB` 的 `scope` 固定为 `ui`，`resourceKind` 置空
+- `FILE_TAB` 不提交资源绑定策略，`targetKinds` 固定为空数组
+- 后端更新接口采用补丁语义：未携带 `targetKinds` 时保留原可贴对象；标签管理页会在编辑和启停时显式提交当前值，避免用户配置丢失。
 
 ## 4. 实现边界
 
@@ -66,6 +70,7 @@ await fetchTags({
 - 标签颜色是标签自身的固定色，不随明暗主题自动变化；主题只影响弹框背景、边框和说明文字等 UI 容器。
 - 标签编辑弹框的主色色盘按 `1 ~ 5` 明暗档位展示，当前档位仅是编辑器 UI 偏好，持久化在 `localStorage` 的 `tag-management:primary-color-tone:v1`，不写入标签数据本身。用户仍可通过 Semi `ColorPicker` 选择任意颜色。
 - 标签启用 / 停用在标签列表中直接切换，编辑弹框只负责名称、归属、颜色、排序和说明等内容字段。
+- 标签编辑弹框里的“可贴对象”只控制标签绑定策略，不代表资源归档类型本身；真正能否保存到节点，仍由后端根据 `tag_bind_policies` 与 `node_resource_targets` 做最终校验。
 
 ## 5. 验证方式
 
