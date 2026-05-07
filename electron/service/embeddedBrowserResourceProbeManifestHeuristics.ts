@@ -2,6 +2,7 @@
  * Core logic adapted from cat-catch (https://github.com/xifangczy/cat-catch)
  * Licensed under AGPL-3.0
  */
+/* eslint-disable @typescript-eslint/ban-ts-comment, prefer-const, no-extra-semi */
 // These body fragments are compiled to JavaScript, sliced, and injected into the page runtime.
 // @ts-nocheck
 export function embeddedBrowserResourceProbeManifestHeuristicsBody() {

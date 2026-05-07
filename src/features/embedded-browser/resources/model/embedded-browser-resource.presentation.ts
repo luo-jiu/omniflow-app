@@ -46,7 +46,7 @@ function isInitSegmentCandidate(resource: EmbeddedBrowserCapturedResource) {
   const url = resource.url.toLowerCase()
   const mimeType = String(resource.mimeType || '').toLowerCase()
   return (
-    /(^|[\/_.-])(init|initseg|initialization|bootstrap|header)($|[\/_.?-])/.test(url)
+    /(^|[/_.-])(init|initseg|initialization|bootstrap|header)($|[/_.?-])/.test(url)
     || mimeType.includes('iso.segment')
     || (resource.ext === 'mp4' && url.includes('init'))
   )
@@ -63,7 +63,7 @@ function isMediaSegmentCandidate(resource: EmbeddedBrowserCapturedResource) {
   return (
     resource.ext === 'm4s'
     || resource.ext === 'ts'
-    || /(^|[\/_.-])(seg|segment|chunk|frag|fragment|part)($|[\/_.?-])/.test(url)
+    || /(^|[/_.-])(seg|segment|chunk|frag|fragment|part)($|[/_.?-])/.test(url)
   )
 }
 
@@ -78,10 +78,10 @@ function inferPlayableResourceRole(resource: EmbeddedBrowserCapturedResource) {
   if (mimeType.startsWith('video/')) {
     return 'video' as const
   }
-  if (/(^|[\/_.-])audio([\/_.-]|$)/i.test(resource.url)) {
+  if (/(^|[/_.-])audio([/_.-]|$)/i.test(resource.url)) {
     return 'audio' as const
   }
-  if (/(^|[\/_.-])video([\/_.-]|$)/i.test(resource.url)) {
+  if (/(^|[/_.-])video([/_.-]|$)/i.test(resource.url)) {
     return 'video' as const
   }
   if (/(mp4a|aac|opus|vorbis|mp3|flac)/i.test(mimeType)) {

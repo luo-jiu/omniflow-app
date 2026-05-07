@@ -72,7 +72,7 @@ function normalizeCatchToolkitStatePayload(
       mediaSourceHooked: payload.diagnostics.mediaSourceHooked,
       sourceBufferCount: payload.diagnostics.sourceBufferCount,
     },
-	    isCaptureComplete: payload.isCaptureComplete,
+      isCaptureComplete: payload.isCaptureComplete,
     manualFileName: payload.manualFileName,
     primaryResourceKey: payload.primaryResourceKey,
     regexWarning: payload.regexWarning,

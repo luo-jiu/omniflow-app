@@ -2,14 +2,15 @@
  * Core logic adapted from cat-catch (https://github.com/xifangczy/cat-catch)
  * Licensed under AGPL-3.0
  */
+/* eslint-disable @typescript-eslint/ban-ts-comment, @typescript-eslint/no-unused-vars, prefer-const, no-extra-semi */
 // These body fragments are compiled to JavaScript, sliced, and injected into the page runtime.
 // @ts-nocheck
 export function embeddedBrowserResourceProbeRuntimeCoreBody() {
   const globalScope = globalThis as typeof globalThis & {
     __OMNIFLOW_EMBEDDED_BROWSER_RESOURCE_PROBE__?: {
       exportResource?: (resourceKey: string) => boolean
-	      getCatchToolkitState?: () => ProbeCatchToolkitState
-	      installedAt: number
+      getCatchToolkitState?: () => ProbeCatchToolkitState
+      installedAt: number
       clearCatchMediaCache?: () => boolean
       drainResource?: (resourceKey: string) => null | {
         base64?: string
@@ -621,7 +622,7 @@ export function embeddedBrowserResourceProbeRuntimeCoreBody() {
 
   function parseMaybeJson(value: string) {
     const normalizedValue = String(value || '').trim()
-    if (!normalizedValue || !/^[\[{]/.test(normalizedValue)) {
+    if (!normalizedValue || (normalizedValue[0] !== '{' && normalizedValue[0] !== '[')) {
       return null
     }
     try {
