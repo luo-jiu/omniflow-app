@@ -106,6 +106,15 @@ export const VideoViewerWrapper = styled.div`
     pointer-events: none;
   }
 
+  .buffering-overlay .semi-spin-wrapper,
+  .buffering-overlay .semi-spin-children {
+    min-width: max-content;
+  }
+
+  .buffering-overlay .semi-spin-tip {
+    white-space: nowrap;
+  }
+
   .console-panel {
     position: absolute;
     top: 0;

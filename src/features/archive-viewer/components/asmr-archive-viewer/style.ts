@@ -40,6 +40,7 @@ export const AsmrArchiveViewerWrapper = styled.div`
     flex: 1;
     min-height: 0;
     overflow: auto;
+    scrollbar-gutter: stable;
     padding: 13px 13px 15px;
     background: var(--app-bg);
     scrollbar-width: thin;

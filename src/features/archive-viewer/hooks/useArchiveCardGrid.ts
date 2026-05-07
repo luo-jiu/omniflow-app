@@ -11,12 +11,12 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 export function useArchiveCardGrid(options?: UseArchiveCardGridOptions) {
-  const baseCardWidth = options?.baseCardWidth ?? 342;
+  const baseCardWidth = Math.max(1, Math.floor(options?.baseCardWidth ?? 342));
   const minScale = clamp(options?.minScale ?? 0.9, 0.75, 1);
-  const gridGap = options?.gridGap ?? 22;
+  const gridGap = Math.max(0, Math.floor(options?.gridGap ?? 22));
 
   const minCardWidth = useMemo(
-    () => baseCardWidth * minScale,
+    () => Math.ceil(baseCardWidth * minScale),
     [baseCardWidth, minScale],
   );
 
@@ -42,7 +42,9 @@ export function useArchiveCardGrid(options?: UseArchiveCardGridOptions) {
         Math.floor((containerWidth + gridGap) / (minCardWidth + gridGap)),
       );
       const computedWidth = (containerWidth - (columns - 1) * gridGap) / columns;
-      const nextCardWidth = clamp(computedWidth, minCardWidth, baseCardWidth);
+      const nextCardWidth = columns === 1
+        ? Math.max(1, Math.min(baseCardWidth, containerWidth))
+        : clamp(Math.floor(computedWidth), minCardWidth, baseCardWidth);
       setGridMetrics((previous) => {
         if (
           previous.columns === columns
