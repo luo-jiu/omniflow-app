@@ -2,6 +2,14 @@ import React from 'react';
 import styled, { createGlobalStyle } from 'styled-components';
 import OpaquePageContainer from '@/components/OpaquePageContainer';
 import { useNavigate } from 'react-router-dom';
+import generalTagIcon from '@/assets/icons/material/settings.svg';
+import asmrTagIcon from '@/assets/icons/material/folder-asmr.svg';
+import comicTagIcon from '@/assets/icons/material/folder-comic.svg';
+import audioTagIcon from '@/assets/icons/material/audio.svg';
+import videoTagIcon from '@/assets/icons/material/video.svg';
+import fileTagIcon from '@/assets/icons/material/file-blank.svg';
+import folderTagIcon from '@/assets/icons/material/folder-base.svg';
+import uiMappingTagIcon from '@/assets/icons/material/command.svg';
 import {
   Button,
   ColorPicker,
@@ -34,19 +42,29 @@ import {
   type FileTabTarget,
 } from '@/features/tag-management/constants/file-tab-targets';
 import {
-  TAG_PRIMARY_COLOR_PRESETS,
+  TAG_COLOR_TONE_OPTIONS,
+  DEFAULT_TAG_COLOR_TONE,
+  getTagPrimaryColorPresets,
+  normalizeTagColorTone,
   TAG_TEXT_COLOR_PRESETS,
+  type TagColorTone,
 } from '@/features/tag-management/constants/tag-color-presets';
 
-const TAG_TYPE_OPTIONS: Array<{ value: TagType; label: string }> = [
-  { value: 'ASMR', label: 'ASMR' },
-  { value: 'COMIC', label: '漫画' },
-  { value: 'AUDIO', label: '音频' },
-  { value: 'VIDEO', label: '视频' },
-  { value: 'FILE', label: '文件' },
-  { value: 'FOLDER', label: '文件夹' },
-  { value: 'GENERAL', label: '通用' },
-  { value: 'FILE_TAB', label: '顶部标签' },
+interface TagOption<T extends string = string> {
+  value: T;
+  label: string;
+  icon: string;
+}
+
+const TAG_TYPE_OPTIONS: Array<TagOption<TagType>> = [
+  { value: 'GENERAL', label: '通用', icon: generalTagIcon },
+  { value: 'ASMR', label: 'ASMR', icon: asmrTagIcon },
+  { value: 'COMIC', label: '漫画', icon: comicTagIcon },
+  { value: 'AUDIO', label: '音频', icon: audioTagIcon },
+  { value: 'VIDEO', label: '视频', icon: videoTagIcon },
+  { value: 'FILE', label: '文件', icon: fileTagIcon },
+  { value: 'FOLDER', label: '文件夹', icon: folderTagIcon },
+  { value: 'FILE_TAB', label: '界面映射', icon: uiMappingTagIcon },
 ];
 
 const TAG_DIMENSION_OPTIONS: Array<{ value: TagDimension; label: string }> = [
@@ -62,14 +80,14 @@ const TAG_DIMENSION_OPTIONS: Array<{ value: TagDimension; label: string }> = [
   { value: 'status', label: '状态' },
 ];
 
-const RESOURCE_KIND_OPTIONS: Array<{ value: string; label: string }> = [
-  { value: 'general', label: '通用' },
-  { value: 'asmr', label: 'ASMR' },
-  { value: 'comic', label: '漫画' },
-  { value: 'audio', label: '音频' },
-  { value: 'video', label: '视频' },
-  { value: 'file', label: '文件' },
-  { value: 'folder', label: '文件夹' },
+const RESOURCE_KIND_OPTIONS: Array<TagOption> = [
+  { value: 'general', label: '通用', icon: generalTagIcon },
+  { value: 'asmr', label: 'ASMR', icon: asmrTagIcon },
+  { value: 'comic', label: '漫画', icon: comicTagIcon },
+  { value: 'audio', label: '音频', icon: audioTagIcon },
+  { value: 'video', label: '视频', icon: videoTagIcon },
+  { value: 'file', label: '文件', icon: fileTagIcon },
+  { value: 'folder', label: '文件夹', icon: folderTagIcon },
 ];
 
 type TagCenterMode = 'RESOURCE' | 'UI_MAPPING';
@@ -79,25 +97,29 @@ const TAG_RESOURCE_SECTIONS: Array<{
   key: TagResourceSection;
   label: string;
   description: string;
+  icon: string;
   type?: TagType;
 }> = [
-  { key: 'ALL', label: '全部资源', description: '跨资源类型查看所有业务标签' },
-  { key: 'GENERAL', label: '通用', description: '适用于多个资源域的通用标签', type: 'GENERAL' },
-  { key: 'ASMR', label: 'ASMR', description: 'ASMR 内置类型与归档标签', type: 'ASMR' },
-  { key: 'COMIC', label: '漫画', description: '漫画、作者、角色与系列标签', type: 'COMIC' },
-  { key: 'AUDIO', label: '音频', description: '音乐、音频归档与播放列表标签', type: 'AUDIO' },
-  { key: 'VIDEO', label: '视频', description: '视频、合集与媒体处理标签', type: 'VIDEO' },
-  { key: 'FILE', label: '文件', description: '普通文件搜索辅助标签', type: 'FILE' },
-  { key: 'FOLDER', label: '文件夹', description: '目录与归档入口标签', type: 'FOLDER' },
+  { key: 'ALL', label: '全部资源', description: '跨资源类型查看所有业务标签', icon: generalTagIcon },
+  { key: 'GENERAL', label: '通用', description: '适用于多个资源域的通用标签', icon: generalTagIcon, type: 'GENERAL' },
+  { key: 'ASMR', label: 'ASMR', description: 'ASMR 内置类型与归档标签', icon: asmrTagIcon, type: 'ASMR' },
+  { key: 'COMIC', label: '漫画', description: '漫画、作者、角色与系列标签', icon: comicTagIcon, type: 'COMIC' },
+  { key: 'AUDIO', label: '音频', description: '音乐、音频归档与播放列表标签', icon: audioTagIcon, type: 'AUDIO' },
+  { key: 'VIDEO', label: '视频', description: '视频、合集与媒体处理标签', icon: videoTagIcon, type: 'VIDEO' },
+  { key: 'FILE', label: '文件', description: '普通文件搜索辅助标签', icon: fileTagIcon, type: 'FILE' },
+  { key: 'FOLDER', label: '文件夹', description: '目录与归档入口标签', icon: folderTagIcon, type: 'FOLDER' },
 ];
 
 const FILE_TAB_SECTION_META = {
   label: '顶部标签映射',
   description: '文件预览顶部标签颜色映射',
+  icon: uiMappingTagIcon,
 };
 
 const HEX_COLOR_PATTERN = /^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
 const FILE_TAB_UPDATE_EVENT = 'omniflow:file-tab-tags-updated';
+const TAG_COLOR_TONE_STORAGE_KEY = 'tag-management:primary-color-tone:v1';
+const TAG_MANAGEMENT_SELECT_DROPDOWN_CLASS = 'tag-management-select-dropdown';
 
 interface TagFormState {
   id?: number;
@@ -178,15 +200,6 @@ const Wrapper = styled.div`
     line-height: 1.15;
   }
 
-  .subtitle {
-    margin: 0 0 16px 39px;
-    max-width: 760px;
-    color: var(--semi-color-text-2);
-    font-size: 11px;
-    line-height: 1.55;
-    flex-shrink: 0;
-  }
-
   .center-layout {
     display: grid;
     grid-template-columns: 180px minmax(0, 1fr);
@@ -208,20 +221,23 @@ const Wrapper = styled.div`
     flex-direction: column;
     min-height: 0;
     padding: 9px;
-    overflow: auto;
+    overflow: hidden;
   }
 
   .side-heading {
+    flex-shrink: 0;
     padding: 4px 6px 7px;
     color: var(--semi-color-text-2);
-    font-size: 10px;
+    font-size: 12px;
     font-weight: 600;
     line-height: 1.4;
   }
 
   .type-list {
     display: grid;
-    gap: 4px;
+    gap: 3px;
+    align-content: start;
+    grid-auto-rows: max-content;
     flex: 1 1 auto;
     min-height: 0;
     overflow: auto;
@@ -231,16 +247,16 @@ const Wrapper = styled.div`
   .side-divider {
     flex-shrink: 0;
     height: 1px;
-    margin: 9px 6px 8px;
+    margin: 7px 6px 6px;
     background: var(--semi-color-border);
   }
 
   .type-button {
     width: 100%;
     height: auto;
-    min-height: 34px;
+    min-height: 30px;
     justify-content: flex-start;
-    padding: 6px 7px;
+    padding: 5px 8px;
     border-radius: 6px;
     border: 1px solid transparent;
     background: transparent;
@@ -266,7 +282,6 @@ const Wrapper = styled.div`
 
   .type-button-inner {
     display: grid;
-    gap: 2px;
     width: 100%;
   }
 
@@ -275,23 +290,34 @@ const Wrapper = styled.div`
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    font-size: 11px;
+    font-size: 13px;
     font-weight: 700;
     line-height: 1.2;
   }
 
-  .type-button-desc {
+  .type-button-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .type-button-icon {
+    width: 15px;
+    height: 15px;
+    flex-shrink: 0;
+    object-fit: contain;
+  }
+
+  .type-button-label-text {
     overflow: hidden;
-    color: var(--semi-color-text-2);
-    font-size: 9px;
-    line-height: 1.3;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
   .type-count {
     color: var(--semi-color-text-2);
-    font-size: 10px;
+    font-size: 12px;
     font-weight: 600;
   }
 
@@ -320,7 +346,7 @@ const Wrapper = styled.div`
   .main-desc {
     margin-top: 3px;
     color: var(--semi-color-text-2);
-    font-size: 10px;
+    font-size: 12px;
     line-height: 1.45;
   }
 
@@ -338,7 +364,7 @@ const Wrapper = styled.div`
 
   .toolbar-search .semi-input-wrapper,
   .toolbar-search .semi-input {
-    font-size: 11px;
+    font-size: 13px;
   }
 
   .toolbar-search .semi-input-wrapper {
@@ -348,7 +374,7 @@ const Wrapper = styled.div`
   .toolbar-create-btn {
     min-height: 30px;
     padding: 0 12px;
-    font-size: 11px;
+    font-size: 13px;
     font-weight: 600;
     border-radius: 6px;
     border: 1px solid var(--semi-color-border);
@@ -375,9 +401,29 @@ const Wrapper = styled.div`
   }
 
   .table-body {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
     min-height: 0;
-    overflow: auto;
+    overflow: hidden;
     padding: 10px;
+  }
+
+  .table-body .tag-table {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+  }
+
+  .table-body .tag-table > .semi-spin,
+  .table-body .tag-table > .semi-spin > .semi-spin-children,
+  .table-body .tag-table > .semi-spin > .semi-spin-children > div {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    width: 100%;
   }
 
   .swatch {
@@ -393,7 +439,7 @@ const Wrapper = styled.div`
     align-items: center;
     gap: 6px;
     max-width: 100%;
-    font-size: 10px;
+    font-size: 12px;
   }
 
   .cell-ellipsis {
@@ -479,11 +525,35 @@ const Wrapper = styled.div`
   }
 
   .semi-table {
-    font-size: 10px;
+    font-size: 12px;
   }
 
   .semi-table-container {
-    overflow: hidden;
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    border: 1px solid var(--semi-color-border);
+    border-radius: 8px;
+    background: var(--semi-color-bg-0);
+  }
+
+  .semi-table-pagination-outer {
+    flex-shrink: 0;
+    min-height: 36px;
+    padding-top: 4px;
+  }
+
+  .semi-table-pagination-info {
+    font-size: 12px;
+    line-height: 18px;
+  }
+
+  .semi-page-item {
+    min-width: 28px;
+    height: 28px;
+    margin-left: 2px;
+    margin-right: 2px;
+    line-height: 28px;
   }
 
   .semi-table-thead > .semi-table-row > .semi-table-row-head,
@@ -492,7 +562,7 @@ const Wrapper = styled.div`
   }
 
   .semi-table-thead > .semi-table-row > .semi-table-row-head {
-    font-size: 10px;
+    font-size: 12px;
     font-weight: 600;
   }
 
@@ -501,7 +571,7 @@ const Wrapper = styled.div`
     min-height: 25px;
     padding: 0 7px;
     border-radius: 6px;
-    font-size: 10px;
+    font-size: 12px;
     font-weight: 600;
   }
 
@@ -510,12 +580,18 @@ const Wrapper = styled.div`
   }
 
   .semi-tag {
-    font-size: 10px;
+    font-size: 12px;
     line-height: 16px;
   }
 
   .semi-empty-description {
-    font-size: 11px;
+    font-size: 13px;
+  }
+
+  .semi-page,
+  .semi-page-total,
+  .semi-page-item {
+    font-size: 12px;
   }
 
   @media (max-width: 760px) {
@@ -538,14 +614,15 @@ const Wrapper = styled.div`
 const TagManagementCompactModalStyle = createGlobalStyle`
   .tag-management-compact-modal,
   .tag-management-compact-confirm {
-    width: 380px !important;
+    width: 620px !important;
   }
 
   .tag-management-compact-modal .semi-modal-content,
   .tag-management-compact-confirm .semi-modal-content {
     overflow: hidden;
+    padding: 0 !important;
     border: 1px solid var(--app-border-strong);
-    border-radius: 8px;
+    border-radius: 12px;
     background: var(--app-bg-elevated);
     box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28), var(--app-shadow);
   }
@@ -553,19 +630,54 @@ const TagManagementCompactModalStyle = createGlobalStyle`
   .tag-management-compact-modal .semi-modal-header,
   .tag-management-compact-confirm .semi-modal-header {
     margin: 0;
-    padding: 13px 16px 8px !important;
+    padding: 18px 22px 8px !important;
   }
 
   .tag-management-compact-modal .semi-modal-title,
   .tag-management-compact-confirm .semi-modal-title {
-    font-size: 14px;
-    line-height: 1.35;
+    font-size: 18px;
+    line-height: 1.25;
     font-weight: 700;
+  }
+
+  .tag-management-compact-modal .semi-modal-close,
+  .tag-management-compact-confirm .semi-modal-close {
+    top: 16px !important;
+    right: 18px !important;
+    width: 24px !important;
+    min-width: 24px !important;
+    height: 24px !important;
+    padding: 0 !important;
+    border-radius: 6px !important;
+    background: transparent !important;
+    color: var(--semi-color-text-1);
+  }
+
+  .tag-management-compact-modal .semi-modal-close:hover,
+  .tag-management-compact-confirm .semi-modal-close:hover {
+    background: var(--semi-color-fill-0) !important;
+    color: var(--semi-color-text-0);
+  }
+
+  .tag-management-compact-modal .semi-modal-close .semi-icon,
+  .tag-management-compact-confirm .semi-modal-close .semi-icon {
+    font-size: 13px;
+  }
+
+  .tag-management-compact-modal .tag-editor-title {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    min-width: 0;
+  }
+
+  .tag-management-compact-modal .tag-editor-title-text {
+    flex-shrink: 0;
   }
 
   .tag-management-compact-modal .semi-modal-body,
   .tag-management-compact-confirm .semi-modal-body {
-    padding: 0 16px 13px !important;
+    padding: 0 22px 16px !important;
     font-size: 12px;
     line-height: 1.55;
     color: var(--semi-color-text-1);
@@ -577,14 +689,14 @@ const TagManagementCompactModalStyle = createGlobalStyle`
     justify-content: flex-end;
     gap: 8px;
     margin: 0;
-    padding: 0 16px 16px !important;
+    padding: 0 22px 18px !important;
   }
 
   .tag-management-compact-modal .semi-button,
   .tag-management-compact-confirm .semi-button {
-    height: 28px;
-    min-width: 56px;
-    padding: 0 10px;
+    height: 30px;
+    min-width: 64px;
+    padding: 0 12px;
     border-radius: 6px;
     font-size: 12px;
     font-weight: 600;
@@ -602,13 +714,14 @@ const TagManagementCompactModalStyle = createGlobalStyle`
   .tag-management-compact-modal .semi-input-wrapper,
   .tag-management-compact-modal .semi-select,
   .tag-management-compact-modal .semi-input-number {
-    height: 28px;
-    min-height: 28px;
+    height: 30px;
+    min-height: 30px;
   }
 
   .tag-management-compact-modal .semi-select {
-    max-height: 28px !important;
+    max-height: 30px !important;
     overflow: hidden !important;
+    border-radius: 8px !important;
   }
 
   .tag-management-compact-modal .semi-select::-webkit-scrollbar {
@@ -618,13 +731,14 @@ const TagManagementCompactModalStyle = createGlobalStyle`
   }
 
   .tag-management-compact-modal .semi-select-selection {
-    height: 28px;
-    min-height: 28px;
-    max-height: 28px;
+    height: 30px;
+    min-height: 30px;
+    max-height: 30px;
     align-items: center;
     overflow: hidden !important;
     padding-top: 0;
     padding-bottom: 0;
+    border-radius: 8px !important;
   }
 
   .tag-management-compact-modal .semi-select-selection-placeholder,
@@ -636,7 +750,7 @@ const TagManagementCompactModalStyle = createGlobalStyle`
 
   .tag-management-compact-modal .semi-select-selection-text {
     max-height: none !important;
-    line-height: 28px;
+    line-height: 30px;
     white-space: nowrap;
   }
 
@@ -646,6 +760,359 @@ const TagManagementCompactModalStyle = createGlobalStyle`
 
   .tag-management-compact-modal .semi-select-arrow {
     align-self: center;
+  }
+
+  .tag-management-compact-modal .tag-editor-form {
+    display: grid;
+    gap: 12px;
+  }
+
+  .tag-management-compact-modal .tag-editor-section {
+    display: grid;
+    gap: 10px;
+  }
+
+  .tag-management-compact-modal .tag-editor-color-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.42fr) minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .tag-management-compact-modal .tag-editor-tone-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-width: 0;
+  }
+
+  .tag-management-compact-modal .tag-editor-tone-label {
+    color: var(--semi-color-text-2);
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.2;
+  }
+
+  .tag-management-compact-modal .tag-editor-tone-list {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+
+  .tag-management-compact-modal .tag-editor-tone-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 31px;
+    height: 22px;
+    border: 1px solid color-mix(in srgb, var(--semi-color-border) 72%, transparent);
+    border-radius: 7px;
+    color: #14532d;
+    cursor: pointer;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1;
+    padding: 0;
+    transition: border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease;
+  }
+
+  .tag-management-compact-modal .tag-editor-tone-button:hover {
+    transform: translateY(-1px);
+    border-color: color-mix(in srgb, var(--semi-color-primary) 62%, var(--semi-color-border) 38%);
+  }
+
+  .tag-management-compact-modal .tag-editor-tone-button.active {
+    border-color: var(--semi-color-primary);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--semi-color-primary) 30%, transparent);
+  }
+
+  .tag-management-compact-modal .tag-editor-section-title {
+    margin: 0;
+    color: var(--semi-color-text-2);
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1.2;
+    letter-spacing: 0;
+  }
+
+  .tag-management-compact-modal .tag-editor-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+
+  .tag-management-compact-modal .tag-editor-field {
+    display: grid;
+    gap: 6px;
+    min-width: 0;
+  }
+
+  .tag-management-compact-modal .tag-editor-label {
+    color: var(--semi-color-text-2);
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.2;
+  }
+
+  .tag-management-compact-modal .tag-editor-color-card {
+    display: grid;
+    align-content: start;
+    gap: 9px;
+    padding: 10px;
+    border: 1px solid color-mix(in srgb, var(--semi-color-border) 82%, transparent);
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--semi-color-bg-1) 70%, transparent);
+  }
+
+  .tag-management-compact-modal .tag-editor-color-card.compact {
+    gap: 8px;
+  }
+
+  .tag-management-compact-modal .tag-editor-color-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+
+  .tag-management-compact-modal .tag-editor-color-title {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .tag-management-compact-modal .tag-editor-color-name {
+    color: var(--semi-color-text-0);
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1.25;
+  }
+
+  .tag-management-compact-modal .tag-editor-color-desc {
+    color: var(--semi-color-text-2);
+    font-size: 10px;
+    line-height: 1.35;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .tag-management-compact-modal .tag-editor-color-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 28px;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .tag-management-compact-modal .tag-editor-color-picker {
+    width: 28px !important;
+    height: 28px !important;
+    min-width: 28px;
+    border: 1px solid var(--semi-color-border);
+    border-radius: 7px;
+    overflow: hidden;
+  }
+
+  .tag-management-compact-modal .tag-editor-palette {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+  }
+
+  .tag-management-compact-modal .tag-editor-swatch {
+    width: 21px;
+    height: 21px;
+    border: 1px solid color-mix(in srgb, var(--semi-color-border) 76%, transparent);
+    border-radius: 999px;
+    padding: 0;
+    cursor: pointer;
+    transition: border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease;
+  }
+
+  .tag-management-compact-modal .tag-editor-swatch:hover {
+    transform: translateY(-1px);
+    border-color: color-mix(in srgb, var(--semi-color-primary) 58%, var(--semi-color-border) 42%);
+  }
+
+  .tag-management-compact-modal .tag-editor-swatch.active {
+    border-color: var(--semi-color-primary);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--semi-color-primary) 36%, transparent);
+  }
+
+  .tag-management-compact-modal .tag-editor-preview {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    justify-self: start;
+    min-width: 72px;
+    max-width: 100%;
+    height: 24px;
+    padding: 0 10px;
+    border-radius: 999px;
+    border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1;
+  }
+
+  .tag-management-compact-modal .tag-editor-title .tag-editor-preview {
+    justify-self: auto;
+    max-width: 180px;
+  }
+
+  .tag-management-compact-modal .tag-editor-tone-divider {
+    width: calc(100% - 18px);
+    height: 1px;
+    justify-self: center;
+    background: color-mix(in srgb, var(--semi-color-border) 72%, transparent);
+  }
+
+  .tag-management-compact-modal .tag-editor-toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 10px;
+    border: 1px solid color-mix(in srgb, var(--semi-color-border) 82%, transparent);
+    border-radius: 9px;
+    background: color-mix(in srgb, var(--semi-color-bg-1) 62%, transparent);
+  }
+
+  .tag-management-compact-modal .tag-editor-toggle-copy {
+    display: grid;
+    gap: 2px;
+  }
+
+  .tag-management-compact-modal .tag-editor-toggle-title {
+    color: var(--semi-color-text-0);
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1.25;
+  }
+
+  .tag-management-compact-modal .tag-editor-toggle-desc {
+    color: var(--semi-color-text-2);
+    font-size: 10px;
+    line-height: 1.35;
+  }
+
+  .tag-management-compact-modal textarea {
+    min-height: 72px !important;
+    resize: vertical;
+  }
+
+  @media (max-width: 680px) {
+    .tag-management-compact-modal,
+    .tag-management-compact-confirm {
+      width: calc(100vw - 32px) !important;
+    }
+
+    .tag-management-compact-modal .tag-editor-color-grid,
+    .tag-management-compact-modal .tag-editor-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  .tag-management-select-dropdown {
+    background: var(--semi-color-bg-3);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  .tag-management-select-dropdown.semi-select-option-list-wrapper {
+    padding: 0;
+  }
+
+  .tag-management-select-dropdown .semi-select-option-list {
+    background: transparent;
+    scrollbar-color: color-mix(in srgb, var(--semi-color-text-3) 58%, transparent) transparent;
+    scrollbar-width: thin;
+    border-radius: 8px;
+  }
+
+  .tag-management-select-dropdown .semi-select-option-list::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+    background: transparent;
+  }
+
+  .tag-management-select-dropdown .semi-select-option-list::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .tag-management-select-dropdown .semi-select-option-list::-webkit-scrollbar-thumb {
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--semi-color-text-3) 58%, transparent);
+  }
+
+  .tag-management-select-dropdown .semi-select-option-list::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in srgb, var(--semi-color-text-2) 62%, transparent);
+  }
+
+  .tag-management-select-dropdown .semi-select-option-icon {
+    display: none;
+  }
+
+  .tag-management-select-dropdown .semi-select-option {
+    min-height: 28px;
+    margin: 0 4px;
+    padding: 5px 10px;
+    border-radius: 6px;
+    box-sizing: border-box;
+  }
+
+  .tag-management-select-dropdown .semi-select-option-custom {
+    min-height: 28px;
+    margin: 0 4px;
+    padding: 5px 10px;
+    border-radius: 6px;
+    box-sizing: border-box;
+    cursor: pointer;
+    transition: background-color 120ms ease, color 120ms ease;
+  }
+
+  .tag-management-select-dropdown .semi-select-option-custom-selected,
+  .tag-management-select-dropdown .tag-management-select-option-row-selected {
+    background: var(--semi-color-fill-0);
+  }
+
+  .tag-management-select-dropdown .semi-select-option:hover,
+  .tag-management-select-dropdown .semi-select-option-focused,
+  .tag-management-select-dropdown .semi-select-option-custom:hover,
+  .tag-management-select-dropdown .semi-select-option-custom-focused,
+  .tag-management-select-dropdown .tag-management-select-option-row-focused {
+    background: var(--semi-color-fill-1);
+  }
+
+  .tag-management-select-dropdown .semi-select-option-selected:hover,
+  .tag-management-select-dropdown .semi-select-option-custom-selected:hover,
+  .tag-management-select-dropdown .tag-management-select-option-row-selected.tag-management-select-option-row-focused {
+    background: color-mix(in srgb, var(--semi-color-fill-2) 72%, var(--semi-color-primary) 8%);
+  }
+
+  .tag-management-select-dropdown .semi-select-option-custom-disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+  }
+
+  .tag-management-select-option {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .tag-management-select-option-icon {
+    width: 15px;
+    height: 15px;
+    flex-shrink: 0;
+    object-fit: contain;
+  }
+
+  .tag-management-select-option-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 `;
 
@@ -661,6 +1128,83 @@ function toColorPickerValue(color: string, fallback: string) {
 
 function isColorActive(currentValue: string, presetValue: string): boolean {
   return normalizeHexColor(currentValue) === normalizeHexColor(presetValue);
+}
+
+function loadStoredTagColorTone(): TagColorTone {
+  if (typeof window === 'undefined') return DEFAULT_TAG_COLOR_TONE;
+  try {
+    return normalizeTagColorTone(window.localStorage.getItem(TAG_COLOR_TONE_STORAGE_KEY));
+  } catch {
+    return DEFAULT_TAG_COLOR_TONE;
+  }
+}
+
+function storeTagColorTone(tone: TagColorTone): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(TAG_COLOR_TONE_STORAGE_KEY, tone);
+  } catch {
+    // localStorage 可能被禁用；保留当前内存状态即可。
+  }
+}
+
+function renderTagSelectOption(option: TagOption): React.ReactNode {
+  return (
+    <span className="tag-management-select-option">
+      <img className="tag-management-select-option-icon" src={option.icon} alt="" />
+      <span className="tag-management-select-option-label">{option.label}</span>
+    </span>
+  );
+}
+
+function renderTagSelectOptionItem(props: {
+  className?: string;
+  style?: React.CSSProperties;
+  label?: React.ReactNode;
+  icon?: string;
+  selected?: boolean;
+  focused?: boolean;
+  disabled?: boolean;
+  onClick?: (event: React.MouseEvent) => void;
+  onMouseEnter?: (event: React.MouseEvent) => void;
+}): React.ReactNode {
+  const optionClassName = [
+    props.className,
+    props.selected ? 'tag-management-select-option-row-selected' : '',
+    props.focused ? 'tag-management-select-option-row-focused' : '',
+    props.disabled ? 'tag-management-select-option-row-disabled' : '',
+  ].filter(Boolean).join(' ');
+
+  return (
+    <div
+      className={optionClassName}
+      style={props.style}
+      role="option"
+      aria-disabled={props.disabled ? 'true' : 'false'}
+      onClick={props.onClick}
+      onMouseEnter={props.onMouseEnter}
+    >
+      <span className="tag-management-select-option">
+        {props.icon ? <img className="tag-management-select-option-icon" src={props.icon} alt="" /> : null}
+        <span className="tag-management-select-option-label">{props.label}</span>
+      </span>
+    </div>
+  );
+}
+
+function renderTagSelectSelectedItem(optionNode: Record<string, unknown>): React.ReactNode {
+  return (
+    <span className="tag-management-select-option">
+      {typeof optionNode.icon === 'string' ? (
+        <img className="tag-management-select-option-icon" src={optionNode.icon} alt="" />
+      ) : null}
+      <span className="tag-management-select-option-label">
+        {React.isValidElement(optionNode.label) || typeof optionNode.label === 'string' || typeof optionNode.label === 'number'
+          ? optionNode.label
+          : String(optionNode.value || '')}
+      </span>
+    </span>
+  );
 }
 
 function validateForm(form: TagFormState): string | null {
@@ -740,6 +1284,8 @@ const TagManagement: React.FC = () => {
   const [lockTargetKey, setLockTargetKey] = React.useState<string | null>(null);
   const [activeMode, setActiveMode] = React.useState<TagCenterMode>('RESOURCE');
   const [activeSection, setActiveSection] = React.useState<TagResourceSection>('ALL');
+  const [primaryColorTone, setPrimaryColorTone] = React.useState<TagColorTone>(() => loadStoredTagColorTone());
+  const [togglingTagIds, setTogglingTagIds] = React.useState<Set<number>>(() => new Set());
 
   const loadList = React.useCallback(async () => {
     setLoading(true);
@@ -777,6 +1323,48 @@ const TagManagement: React.FC = () => {
   }, [items]);
 
   const normalizedKeyword = searchKeyword.trim().toUpperCase();
+  const primaryColorPresets = React.useMemo(
+    () => getTagPrimaryColorPresets(primaryColorTone),
+    [primaryColorTone]
+  );
+
+  const handlePrimaryColorToneChange = React.useCallback((tone: TagColorTone) => {
+    setPrimaryColorTone(tone);
+    storeTagColorTone(tone);
+  }, []);
+
+  const handleToggleEnabled = React.useCallback(async (record: TagItem, checked: boolean) => {
+    setTogglingTagIds(prev => new Set(prev).add(record.id));
+    try {
+      const normalizedType = String(record.type || '').trim().toUpperCase();
+      await updateTag(record.id, {
+        name: record.name,
+        type: normalizedType,
+        scope: normalizedType === 'FILE_TAB' ? 'ui' : record.scope || 'resource',
+        dimension: normalizedType === 'FILE_TAB' ? 'custom' : record.dimension || 'custom',
+        resourceKind: normalizedType === 'FILE_TAB' ? null : record.resourceKind || inferResourceKindFromTagType(normalizedType),
+        targetKey: normalizedType === 'FILE_TAB' ? normalizeFileTabTargetKey(record.targetKey || '') : null,
+        color: normalizeHexColor(record.color || DEFAULT_FORM_STATE.color),
+        textColor: normalizeHexColor(record.textColor || '') || null,
+        sortOrder: Number(record.sortOrder || 0),
+        enabled: checked ? 1 : 0,
+        description: record.description || null,
+      });
+      Toast.success(checked ? '标签已启用' : '标签已停用');
+      if (normalizedType === 'FILE_TAB') {
+        emitFileTabUpdated();
+      }
+      await loadList();
+    } catch (error: any) {
+      Toast.error(error?.message || '更新标签状态失败');
+    } finally {
+      setTogglingTagIds((prev) => {
+        const next = new Set(prev);
+        next.delete(record.id);
+        return next;
+      });
+    }
+  }, [emitFileTabUpdated, loadList]);
 
   const fileTabRows = React.useMemo(() => {
     return FILE_TAB_TARGETS
@@ -944,6 +1532,12 @@ const TagManagement: React.FC = () => {
 
   const editingType = String(lockType || form.type || '').toUpperCase();
   const isEditingFileTab = editingType === 'FILE_TAB';
+  const previewBackgroundColor = HEX_COLOR_PATTERN.test(normalizeHexColor(form.color))
+    ? normalizeHexColor(form.color)
+    : DEFAULT_FORM_STATE.color;
+  const previewTextColor = HEX_COLOR_PATTERN.test(normalizeHexColor(form.textColor))
+    ? normalizeHexColor(form.textColor)
+    : '#FFFFFF';
   const activeMainTitle = activeMode === 'UI_MAPPING' ? FILE_TAB_SECTION_META.label : activeSectionMeta.label;
   const activeMainDescription = activeMode === 'UI_MAPPING'
     ? FILE_TAB_SECTION_META.description
@@ -967,10 +1561,6 @@ const TagManagement: React.FC = () => {
         </div>
       </div>
 
-      <div className="subtitle">
-        按资源类型管理业务标签和顶部标签映射。后续 ASMR、视频、音频等入口会直接带上下文进入这里。
-      </div>
-
       <div className="center-layout">
         <aside className="side-panel">
           <div className="side-heading">资源标签</div>
@@ -987,10 +1577,12 @@ const TagManagement: React.FC = () => {
               >
                 <span className="type-button-inner">
                   <span className="type-button-top">
-                    <span>{section.label}</span>
+                    <span className="type-button-label">
+                      <img className="type-button-icon" src={section.icon} alt="" />
+                      <span className="type-button-label-text">{section.label}</span>
+                    </span>
                     <span className="type-count">{sectionCounts.get(section.key) || 0}</span>
                   </span>
-                  <span className="type-button-desc">{section.description}</span>
                 </span>
               </button>
             ))}
@@ -1004,10 +1596,12 @@ const TagManagement: React.FC = () => {
           >
             <span className="type-button-inner">
               <span className="type-button-top">
-                <span>{FILE_TAB_SECTION_META.label}</span>
+                <span className="type-button-label">
+                  <img className="type-button-icon" src={FILE_TAB_SECTION_META.icon} alt="" />
+                  <span className="type-button-label-text">{FILE_TAB_SECTION_META.label}</span>
+                </span>
                 <span className="type-count">{fileTabTagMap.size}</span>
               </span>
-              <span className="type-button-desc">{FILE_TAB_SECTION_META.description}</span>
             </span>
           </button>
         </aside>
@@ -1041,6 +1635,7 @@ const TagManagement: React.FC = () => {
           <div className="table-body">
             {activeMode === 'UI_MAPPING' ? (
               <Table
+                className="tag-table"
                 dataSource={fileTabRows}
                 pagination={false}
                 rowKey="key"
@@ -1116,6 +1711,7 @@ const TagManagement: React.FC = () => {
               />
             ) : (
               <Table
+                className="tag-table"
                 loading={loading}
                 dataSource={activeResourceRows}
                 rowKey="id"
@@ -1161,12 +1757,21 @@ const TagManagement: React.FC = () => {
                       </span>
                     ),
                   },
-                  {
-                    title: '启用',
-                    dataIndex: 'enabled',
-                    width: 58,
-                    render: (value: number) => (Number(value) === 1 ? '是' : '否'),
-                  },
+                    {
+                      title: '启用',
+                      dataIndex: 'enabled',
+                      width: 70,
+                      render: (value: number, record: TagItem) => (
+                        <Switch
+                          size="small"
+                          checked={Number(value) === 1}
+                          disabled={togglingTagIds.has(record.id)}
+                          onChange={(checked) => {
+                            void handleToggleEnabled(record, checked);
+                          }}
+                        />
+                      ),
+                    },
                   { title: '排序', dataIndex: 'sortOrder', width: 58 },
                   {
                     title: '描述',
@@ -1201,241 +1806,265 @@ const TagManagement: React.FC = () => {
         </main>
       </div>
 
-      <Modal
-        title={form.id ? '编辑标签' : '新建标签'}
+        <Modal
+          title={(
+            <span className="tag-editor-title">
+              <span className="tag-editor-title-text">{form.id ? '编辑标签' : '新建标签'}</span>
+              <span
+                className="tag-editor-preview"
+                style={{
+                  backgroundColor: previewBackgroundColor,
+                  color: previewTextColor,
+                }}
+              >
+                {form.name.trim() || '标签预览'}
+              </span>
+            </span>
+          )}
         visible={editorVisible}
         okText={form.id ? '保存' : '创建'}
         onCancel={() => setEditorVisible(false)}
         onOk={handleSubmit}
         confirmLoading={editorSubmitting}
-        width={380}
+        width={620}
         className="tag-management-compact-modal"
         style={modalNoDragStyle}
         okButtonProps={{
           style: {
-            minWidth: 56,
-            height: 28,
+            minWidth: 64,
+            height: 30,
             fontSize: 12,
             borderRadius: 6,
           },
         }}
         cancelButtonProps={{
           style: {
-            minWidth: 56,
-            height: 28,
+            minWidth: 64,
+            height: 30,
             fontSize: 12,
             borderRadius: 6,
           },
         }}
       >
-        <div style={{ display: 'grid', gap: 10 }}>
-          <Input
-            value={form.name}
-            onChange={(value) => setForm(prev => ({ ...prev, name: value }))}
-            placeholder="标签名称"
-            maxLength={64}
-            showClear
-          />
-
-          <Select
-            value={editingType}
-            onChange={(value) => {
-              const nextType = String(value).toUpperCase();
-              setForm(prev => ({
-                ...prev,
-                type: nextType,
-                scope: nextType === 'FILE_TAB' ? 'ui' : 'resource',
-                resourceKind: nextType === 'FILE_TAB' ? '' : inferResourceKindFromTagType(nextType),
-              }));
-            }}
-            disabled={Boolean(lockType)}
-          >
-            {TAG_TYPE_OPTIONS.map(option => (
-              <Select.Option key={String(option.value)} value={String(option.value)}>
-                {option.label}
-              </Select.Option>
-            ))}
-          </Select>
-
-          {isEditingFileTab ? (
-            <Select
-              value={normalizeFileTabTargetKey(lockTargetKey || form.targetKey)}
-              onChange={(value) => setForm(prev => ({ ...prev, targetKey: String(value) }))}
-              disabled={Boolean(lockTargetKey)}
-            >
-              {FILE_TAB_TARGETS.map(target => (
-                <Select.Option key={target.key} value={target.key}>
-                  {target.key} · {target.label}
-                </Select.Option>
-              ))}
-            </Select>
-          ) : null}
-
-          {!isEditingFileTab ? (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-              <Select
-                value={form.dimension}
-                onChange={(value) => setForm(prev => ({ ...prev, dimension: String(value).toLowerCase() }))}
-              >
-                {TAG_DIMENSION_OPTIONS.map(option => (
-                  <Select.Option key={String(option.value)} value={String(option.value)}>
-                    {option.label}
-                  </Select.Option>
-                ))}
-              </Select>
-              <Select
-                value={form.resourceKind}
-                onChange={(value) => setForm(prev => ({ ...prev, resourceKind: String(value).toLowerCase() }))}
-              >
-                {RESOURCE_KIND_OPTIONS.map(option => (
-                  <Select.Option key={option.value} value={option.value}>
-                    {option.label}
-                  </Select.Option>
-                ))}
-              </Select>
-            </div>
-          ) : null}
-
-          <div className="color-field">
-            <span className="field-label">主色</span>
-            <div className="color-row">
+          <div className="tag-editor-form">
+            <section className="tag-editor-section">
+              <div className="tag-editor-field">
+              <span className="tag-editor-label">标签名称</span>
               <Input
-                value={form.color}
-                onChange={(value) => setForm(prev => ({ ...prev, color: value }))}
-                placeholder="#4F8CFF"
-                maxLength={9}
-              />
-              <ColorPicker
-                usePopover
-                alpha
-                value={toColorPickerValue(form.color, '#4F8CFF')}
-                onChange={(color) => setForm(prev => ({ ...prev, color: normalizeHexColor(color.hex) }))}
-                width={380}
-                height={240}
-                style={{
-                  width: 52,
-                  height: 30,
-                  borderRadius: 6,
-                  display: 'block',
-                }}
+                value={form.name}
+                onChange={(value) => setForm(prev => ({ ...prev, name: value }))}
+                placeholder="例如：治愈系 / 作者名 / 合集状态"
+                maxLength={64}
+                showClear
               />
             </div>
-            <div className="palette">
-              {TAG_PRIMARY_COLOR_PRESETS.map(color => (
-                <button
-                  key={color}
-                  type="button"
-                  className={`palette-item ${isColorActive(form.color, color) ? 'active' : ''}`}
-                  style={{
-                    width: 24,
-                    height: 24,
-                    borderRadius: 6,
-                    border: '1px solid color-mix(in srgb, var(--semi-color-border) 75%, transparent)',
-                    backgroundColor: color,
-                    padding: 0,
-                    cursor: 'pointer',
-                    boxShadow: isColorActive(form.color, color) ? '0 0 0 2px var(--semi-color-primary)' : 'none',
+
+            <div className="tag-editor-grid">
+              <div className="tag-editor-field">
+                <span className="tag-editor-label">类型</span>
+                <Select
+                  value={editingType}
+                  dropdownClassName={TAG_MANAGEMENT_SELECT_DROPDOWN_CLASS}
+                  spacing={0}
+                  renderOptionItem={renderTagSelectOptionItem}
+                  renderSelectedItem={renderTagSelectSelectedItem}
+                  onChange={(value) => {
+                    const nextType = String(value).toUpperCase();
+                    setForm(prev => ({
+                      ...prev,
+                      type: nextType,
+                      scope: nextType === 'FILE_TAB' ? 'ui' : 'resource',
+                      resourceKind: nextType === 'FILE_TAB' ? '' : inferResourceKindFromTagType(nextType),
+                    }));
                   }}
-                  onClick={() => setForm(prev => ({ ...prev, color }))}
-                  aria-label={`主色 ${color}`}
+                  disabled={Boolean(lockType)}
+                >
+                  {TAG_TYPE_OPTIONS.map(option => (
+                    <Select.Option key={String(option.value)} value={String(option.value)} label={option.label} icon={option.icon}>
+                      {renderTagSelectOption(option)}
+                    </Select.Option>
+                  ))}
+                </Select>
+              </div>
+
+              {isEditingFileTab ? (
+                <div className="tag-editor-field">
+                  <span className="tag-editor-label">映射目标</span>
+                  <Select
+                    value={normalizeFileTabTargetKey(lockTargetKey || form.targetKey)}
+                    dropdownClassName={TAG_MANAGEMENT_SELECT_DROPDOWN_CLASS}
+                    spacing={0}
+                    onChange={(value) => setForm(prev => ({ ...prev, targetKey: String(value) }))}
+                    disabled={Boolean(lockTargetKey)}
+                  >
+                    {FILE_TAB_TARGETS.map(target => (
+                      <Select.Option key={target.key} value={target.key}>
+                        {target.key} · {target.label}
+                      </Select.Option>
+                    ))}
+                  </Select>
+                </div>
+              ) : (
+                <div className="tag-editor-field">
+                  <span className="tag-editor-label">资源域</span>
+                  <Select
+                    value={form.resourceKind}
+                    dropdownClassName={TAG_MANAGEMENT_SELECT_DROPDOWN_CLASS}
+                    spacing={0}
+                    renderOptionItem={renderTagSelectOptionItem}
+                    renderSelectedItem={renderTagSelectSelectedItem}
+                    onChange={(value) => setForm(prev => ({ ...prev, resourceKind: String(value).toLowerCase() }))}
+                  >
+                    {RESOURCE_KIND_OPTIONS.map(option => (
+                      <Select.Option key={option.value} value={option.value} label={option.label} icon={option.icon}>
+                        {renderTagSelectOption(option)}
+                      </Select.Option>
+                    ))}
+                  </Select>
+                </div>
+              )}
+            </div>
+
+            {!isEditingFileTab ? (
+              <div className="tag-editor-field">
+                <span className="tag-editor-label">维度</span>
+                <Select
+                  value={form.dimension}
+                  dropdownClassName={TAG_MANAGEMENT_SELECT_DROPDOWN_CLASS}
+                  spacing={0}
+                  onChange={(value) => setForm(prev => ({ ...prev, dimension: String(value).toLowerCase() }))}
+                >
+                  {TAG_DIMENSION_OPTIONS.map(option => (
+                    <Select.Option key={String(option.value)} value={String(option.value)}>
+                      {option.label}
+                    </Select.Option>
+                  ))}
+                </Select>
+              </div>
+            ) : null}
+            </section>
+
+            <section className="tag-editor-section">
+              <div className="tag-editor-color-grid">
+              <div className="tag-editor-color-card">
+                <div className="tag-editor-color-head">
+                  <div className="tag-editor-color-title">
+                    <span className="tag-editor-color-name">主色</span>
+                    <span className="tag-editor-color-desc">选择常用色，或点右侧打开完整取色器</span>
+                  </div>
+                </div>
+                <div className="tag-editor-color-row">
+                  <Input
+                    value={form.color}
+                    onChange={(value) => setForm(prev => ({ ...prev, color: value }))}
+                    placeholder="#4F8CFF"
+                    maxLength={9}
+                  />
+                  <ColorPicker
+                    className="tag-editor-color-picker"
+                    usePopover
+                    alpha
+                    value={toColorPickerValue(form.color, '#4F8CFF')}
+                    onChange={(color) => setForm(prev => ({ ...prev, color: normalizeHexColor(color.hex) }))}
+                    width={360}
+                    height={220}
+                  />
+                </div>
+                  <div className="tag-editor-palette">
+                    {primaryColorPresets.map(color => (
+                    <button
+                      key={color}
+                      type="button"
+                      className={`tag-editor-swatch ${isColorActive(form.color, color) ? 'active' : ''}`}
+                      style={{ backgroundColor: color }}
+                      onClick={() => setForm(prev => ({ ...prev, color }))}
+                      aria-label={`主色 ${color}`}
+                      />
+                    ))}
+                  </div>
+                  <div className="tag-editor-tone-divider" />
+                  <div className="tag-editor-tone-row">
+                    <span className="tag-editor-tone-label">色调明暗</span>
+                    <div className="tag-editor-tone-list">
+                      {TAG_COLOR_TONE_OPTIONS.map(option => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        className={`tag-editor-tone-button ${primaryColorTone === option.value ? 'active' : ''}`}
+                        style={{ backgroundColor: option.color }}
+                        onClick={() => handlePrimaryColorToneChange(option.value)}
+                        aria-label={`色调明暗 ${option.label}`}
+                      />
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="tag-editor-color-card compact">
+                <div className="tag-editor-color-head">
+                  <div className="tag-editor-color-title">
+                    <span className="tag-editor-color-name">文字色</span>
+                    <span className="tag-editor-color-desc">留空使用默认白字</span>
+                  </div>
+                </div>
+                <div className="tag-editor-color-row">
+                  <Input
+                    value={form.textColor}
+                    onChange={(value) => setForm(prev => ({ ...prev, textColor: value }))}
+                    placeholder="可空，例如 #FFFFFF"
+                    maxLength={9}
+                  />
+                  <ColorPicker
+                    className="tag-editor-color-picker"
+                    usePopover
+                    alpha
+                    value={toColorPickerValue(form.textColor, '#FFFFFF')}
+                    onChange={(color) => setForm(prev => ({ ...prev, textColor: normalizeHexColor(color.hex) }))}
+                    width={360}
+                    height={220}
+                  />
+                </div>
+                <div className="tag-editor-palette">
+                  {TAG_TEXT_COLOR_PRESETS.map(color => (
+                    <button
+                      key={color}
+                      type="button"
+                      className={`tag-editor-swatch ${isColorActive(form.textColor, color) ? 'active' : ''}`}
+                      style={{ backgroundColor: color }}
+                      onClick={() => setForm(prev => ({ ...prev, textColor: color }))}
+                      aria-label={`文字色 ${color}`}
+                    />
+                  ))}
+                </div>
+              </div>
+            </div>
+            </section>
+
+            <section className="tag-editor-section">
+              <div className="tag-editor-field">
+                <span className="tag-editor-label">排序值</span>
+                <InputNumber
+                  value={form.sortOrder}
+                  onNumberChange={(value) => setForm(prev => ({ ...prev, sortOrder: Number(value || 0) }))}
+                  min={-99999}
+                  max={99999}
+                  precision={0}
+                  hideButtons={false}
+                  placeholder="默认 0"
                 />
-              ))}
-            </div>
-          </div>
+              </div>
 
-          <div className="color-field">
-            <span className="field-label">文字色（可空）</span>
-            <div className="color-row">
-              <Input
-                value={form.textColor}
-                onChange={(value) => setForm(prev => ({ ...prev, textColor: value }))}
-                placeholder="文字颜色（可空）例如 #FFFFFF"
-                maxLength={9}
-              />
-              <ColorPicker
-                usePopover
-                alpha
-                value={toColorPickerValue(form.textColor, '#FFFFFF')}
-                onChange={(color) => setForm(prev => ({ ...prev, textColor: normalizeHexColor(color.hex) }))}
-                width={380}
-                height={240}
-                style={{
-                  width: 52,
-                  height: 30,
-                  borderRadius: 6,
-                  display: 'block',
-                }}
+            <div className="tag-editor-field">
+              <span className="tag-editor-label">说明</span>
+              <TextArea
+                value={form.description}
+                onChange={(value: string) => setForm(prev => ({ ...prev, description: value }))}
+                placeholder="可选，用来补充标签含义"
+                maxCount={255}
+                autosize={{ minRows: 3, maxRows: 5 }}
               />
             </div>
-            <div className="palette">
-              {TAG_TEXT_COLOR_PRESETS.map(color => (
-                <button
-                  key={color}
-                  type="button"
-                  className={`palette-item ${isColorActive(form.textColor, color) ? 'active' : ''}`}
-                  style={{
-                    width: 24,
-                    height: 24,
-                    borderRadius: 6,
-                    border: '1px solid color-mix(in srgb, var(--semi-color-border) 75%, transparent)',
-                    backgroundColor: color,
-                    padding: 0,
-                    cursor: 'pointer',
-                    boxShadow: isColorActive(form.textColor, color) ? '0 0 0 2px var(--semi-color-primary)' : 'none',
-                  }}
-                  onClick={() => setForm(prev => ({ ...prev, textColor: color }))}
-                  aria-label={`文字色 ${color}`}
-                />
-              ))}
-              <button
-                type="button"
-                className="palette-clear"
-                onClick={() => setForm(prev => ({ ...prev, textColor: '' }))}
-                style={{
-                  fontSize: 11,
-                  lineHeight: '18px',
-                  padding: '0 4px',
-                  border: 'none',
-                  background: 'transparent',
-                  color: 'var(--semi-color-text-2)',
-                  cursor: 'pointer',
-                }}
-              >
-                清空文字色
-              </button>
-            </div>
-          </div>
-
-          <div className="color-field">
-            <span className="field-label">
-              排序值（越小越靠前）
-            </span>
-            <InputNumber
-              value={form.sortOrder}
-              onNumberChange={(value) => setForm(prev => ({ ...prev, sortOrder: Number(value || 0) }))}
-              min={-99999}
-              max={99999}
-              precision={0}
-              hideButtons={false}
-              placeholder="默认 0"
-            />
-          </div>
-
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
-            <span>启用</span>
-            <Switch
-              checked={form.enabled}
-              onChange={(checked) => setForm(prev => ({ ...prev, enabled: checked }))}
-            />
-          </div>
-
-          <TextArea
-            value={form.description}
-            onChange={(value: string) => setForm(prev => ({ ...prev, description: value }))}
-            placeholder="标签说明（可空）"
-            maxCount={255}
-            autosize={{ minRows: 3, maxRows: 6 }}
-          />
+          </section>
         </div>
       </Modal>
     </Wrapper>
