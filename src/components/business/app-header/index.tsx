@@ -46,11 +46,11 @@ const AppHeader: FC = () => {
         </div>
         <div className="right-controls">
           <Button
-            onClick={() => navigate('/upload-center')}
+            onClick={() => navigate('/transfer-center?tab=upload')}
             theme="borderless"
             className="header-action"
             icon={<IconUpload />}
-            title="上传中心"
+            title="传输中心"
           />
           <Button
             onClick={() => navigate('/settings')}

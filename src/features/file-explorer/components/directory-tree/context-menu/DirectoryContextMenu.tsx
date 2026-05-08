@@ -379,6 +379,16 @@ const DirectoryContextMenu: React.FC<DirectoryContextMenuProps> = ({
     );
   }
 
+  // 存储迁移：文件夹 / 文件都允许触发，把当前节点（含子树）迁到目标 provider。
+  items.push(
+    { type: 'divider', key: 'divider-migrate-storage' },
+    {
+      key: 'migrate-storage',
+      label: '迁移到其他存储...',
+      onClick: () => onAction('迁移到其他存储', node),
+    },
+  );
+
   // 危险操作分割线
   items.push({ type: 'divider', key: 'divider-delete' });
 

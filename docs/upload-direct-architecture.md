@@ -49,7 +49,7 @@ runDirectUpload (src/modules/upload-center/services/upload-direct.ts)
 
 - 渲染进程触发 `payload.setAbort()` 注入的 aborter；
 - aborter 先调 `electronAPI.uploadAbort(uploadId)`：主进程把所有 in-flight part 请求 destroy（含 `fs.ReadStream` 和 `ClientRequest`）；
-- 然后调 `abortUploadSession(uploadId)`：后端 MinIO `AbortMultipartUpload` + 删 session 行。
+- 然后调 `abortUploadSession(uploadId)`：后端 multipart 调 `AbortMultipartUpload`，single 模式 best-effort 删除已 PUT 对象，最后删 session 行。
 - 顺序：先杀网络请求再删后端 session，避免后端在 Abort 时还有 part 在写。
 
 ## 6. 嗅探 / 下载链路 0 改动不变量

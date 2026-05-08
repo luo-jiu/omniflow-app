@@ -51,6 +51,8 @@ import type {
   OverlayContextMenuPosition,
 } from '@/service/overlay/types';
 import { useNodePropertiesOverlay } from '@/features/file-explorer/hooks/useNodePropertiesOverlay';
+import MigrationDialog from '@/features/file-explorer/components/migration-dialog';
+import { fetchProviders } from '@/features/storage-config/services/storage-config.api';
 
 interface DirectoryTreeProps {
   treeData: any[];
@@ -171,6 +173,14 @@ export default function DirectoryTree({
     loading: false,
   });
   const treeContainerRef = useRef<HTMLDivElement | null>(null);
+
+  // 存储迁移 Dialog 状态
+  const [migrationDialog, setMigrationDialog] = useState<{
+    visible: boolean;
+    rootNodeId: number;
+    nodeName: string;
+  }>({ visible: false, rootNodeId: 0, nodeName: '' });
+  const [migrationProviders, setMigrationProviders] = useState<string[]>([]);
 
   // 内联编辑状态（重命名用）
   const [editingKey, setEditingKey] = useState<string | null>(null);
@@ -1601,6 +1611,32 @@ export default function DirectoryTree({
       return;
     }
 
+    if (action === '迁移到其他存储') {
+      const targetNodeId = Number(node?.id);
+      if (!Number.isFinite(targetNodeId) || targetNodeId <= 0) {
+        Toast.warning('当前节点不支持迁移');
+        return;
+      }
+      try {
+        const list = await fetchProviders();
+        const providers = (list?.providers || []).map((p) => p.alias).filter(Boolean);
+        if (providers.length === 0) {
+          Toast.warning('未配置任何存储 provider');
+          return;
+        }
+        setMigrationProviders(providers);
+        setMigrationDialog({
+          visible: true,
+          rootNodeId: targetNodeId,
+          nodeName: String(node?.name || ''),
+        });
+      } catch (error: any) {
+        runtimeLogger.error('加载 provider 列表失败:', error);
+        Toast.error(error?.message || '加载存储 provider 失败');
+      }
+      return;
+    }
+
     if (action === '下载') {
       try {
         await handleDownloadNode(node);
@@ -2375,6 +2411,20 @@ export default function DirectoryTree({
         onNameChange={(value) => setCreateModal(prev => ({ ...prev, name: value }))}
         onConfirm={handleConfirmCreate}
         onCancel={handleCancelCreate}
+      />
+
+      {/* 存储迁移对话框 */}
+      <MigrationDialog
+        visible={migrationDialog.visible}
+        libraryId={Number(libraryId)}
+        rootNodeId={migrationDialog.rootNodeId}
+        nodeName={migrationDialog.nodeName}
+        availableProviders={migrationProviders}
+        onCancel={() => setMigrationDialog({ visible: false, rootNodeId: 0, nodeName: '' })}
+        onSuccess={() => {
+          setMigrationDialog({ visible: false, rootNodeId: 0, nodeName: '' });
+          window.location.hash = '#/transfer-center?tab=migration';
+        }}
       />
     </div>
   );

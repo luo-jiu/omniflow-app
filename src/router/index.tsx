@@ -10,6 +10,7 @@ const TagManagement = lazy(() => import('@/views/tag-management'))
 const BrowserFileMappings = lazy(() => import('@/views/browser-file-mappings'))
 const StorageSettings = lazy(() => import('@/views/storage-settings'))
 const UploadCenter = lazy(() => import('@/views/upload-center'))
+const TransferCenter = lazy(() => import('@/views/transfer-center'))
 const RecycleBin = lazy(() => import('@/views/recycle-bin'))
 const Profile = lazy(() => import('@/views/profile'))
 const Login = lazy(() => import('@/views/login'))
@@ -49,6 +50,14 @@ const routes: RouteObject[] = [
     element: (
       <RequireAuth>
         <UploadCenter />
+      </RequireAuth>
+    )
+  },
+  {
+    path: '/transfer-center',
+    element: (
+      <RequireAuth>
+        <TransferCenter />
       </RequireAuth>
     )
   },

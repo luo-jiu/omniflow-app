@@ -313,9 +313,14 @@ export class UploadManager {
     this.runningTaskIds.add(taskId);
     this.applyTaskEvent(taskId, { type: 'PROGRESS', uploadedBytes: 0, speedBps: 0 });
 
+    // 滑动窗口速率估算：多分片并发时单个 progress 事件之间的 deltaTimeMs 可能 < 1ms，
+    // 直接用单点除法会得到 GB/s 级别的伪峰值。改成 ≥ 1.5s 跨度的窗口取均值，并丢弃不足 250ms 的样本。
+    const SPEED_WINDOW_MIN_MS = 1500;
+    const SPEED_SAMPLE_MIN_MS = 250;
+    const SPEED_WINDOW_MAX_MS = 4000;
     const startedAt = now();
-    let previousBytes = 0;
-    let previousAt = startedAt;
+    const samples: { at: number; bytes: number }[] = [{ at: startedAt, bytes: 0 }];
+    let lastSampleAt = startedAt;
 
     this.executor({
       taskId,
@@ -328,11 +333,24 @@ export class UploadManager {
         if (!current || current.status !== UPLOAD_TASK_STATUS.UPLOADING) return;
 
         const currentAt = now();
-        const deltaBytes = Math.max(0, uploadedBytes - previousBytes);
-        const deltaTimeMs = Math.max(1, currentAt - previousAt);
-        previousBytes = uploadedBytes;
-        previousAt = currentAt;
-        const computedSpeed = speedBps ?? Math.floor((deltaBytes * 1000) / deltaTimeMs);
+        let computedSpeed = speedBps;
+        if (computedSpeed === undefined) {
+          if (currentAt - lastSampleAt >= SPEED_SAMPLE_MIN_MS) {
+            samples.push({ at: currentAt, bytes: uploadedBytes });
+            lastSampleAt = currentAt;
+            while (samples.length > 1 && currentAt - samples[0].at > SPEED_WINDOW_MAX_MS) {
+              samples.shift();
+            }
+          }
+          // 取窗口内最早 ≥ 1.5s 跨度的样本计算均速；不够则不更新本次 speed。
+          const head = samples[0];
+          const span = currentAt - head.at;
+          if (span >= SPEED_WINDOW_MIN_MS) {
+            computedSpeed = Math.floor(((uploadedBytes - head.bytes) * 1000) / span);
+          } else {
+            computedSpeed = current.progress.speedBps;
+          }
+        }
         this.applyTaskEvent(taskId, { type: 'PROGRESS', uploadedBytes, speedBps: computedSpeed });
       },
     })
