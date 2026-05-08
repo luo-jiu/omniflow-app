@@ -8,6 +8,7 @@ import {
   type FileViewerVideoPlaylist,
   type FileViewerSubtitleSource,
 } from './file-viewer.context';
+import { normalizeFileViewerReturnTarget } from './file-viewer-return-target';
 import {
   getFileViewerStateCache,
   setFileViewerStateCache,
@@ -98,6 +99,24 @@ function normalizeVideoPlaylist(
     id: String(playlist.id || ''),
     title: String(playlist.title || ''),
     items,
+    total: Number.isFinite(Number(playlist.total)) && Number(playlist.total) >= 0
+      ? Number(playlist.total)
+      : null,
+    nextOffset: Number.isFinite(Number(playlist.nextOffset)) && Number(playlist.nextOffset) >= 0
+      ? Number(playlist.nextOffset)
+      : null,
+    hasMore: Boolean(playlist.hasMore),
+    source: playlist.source?.kind === 'video_archive_collection'
+      && Number.isFinite(Number(playlist.source.nodeId))
+      && Number(playlist.source.nodeId) > 0
+      && Number.isFinite(Number(playlist.source.libraryId))
+      && Number(playlist.source.libraryId) > 0
+      ? {
+        kind: 'video_archive_collection',
+        nodeId: Number(playlist.source.nodeId),
+        libraryId: Number(playlist.source.libraryId),
+      }
+      : null,
   };
 }
 
@@ -133,6 +152,7 @@ function normalizeStoreState(raw: FileViewerStoreState | null | undefined): File
   }
   const tabs = raw.tabs.map(tab => ({
     ...tab,
+    returnTarget: normalizeFileViewerReturnTarget(tab.returnTarget),
     videoAutoPlay: false,
     audioAutoPlay: false,
   }));
@@ -260,6 +280,7 @@ export const FileViewerProvider: React.FC<{ children: ReactNode; cacheKey?: stri
       const videoPlaylist = normalizeVideoPlaylist(options?.videoPlaylist);
       const audioSubtitleSources = normalizeVideoSubtitleSources(options?.audioSubtitleSources);
       const audioPlaylist = normalizeAudioPlaylist(options?.audioPlaylist);
+      const returnTarget = normalizeFileViewerReturnTarget(options?.returnTarget);
       const nextTab: FileViewerTab = {
         id: tabId,
         nodeId: nodeId ?? null,
@@ -267,7 +288,7 @@ export const FileViewerProvider: React.FC<{ children: ReactNode; cacheKey?: stri
         fileName,
         fileType,
         tabTypeLabel: options?.tabTypeLabel ?? null,
-        returnTarget: options?.returnTarget ?? null,
+        returnTarget,
         videoSubtitleSources,
         videoPlaylist,
         videoAutoPlay: Boolean(options?.videoAutoPlay),
@@ -303,7 +324,7 @@ export const FileViewerProvider: React.FC<{ children: ReactNode; cacheKey?: stri
         nextTabs[existingIndex] = {
           ...nextTab,
           // 若调用者未显式透传 returnTarget，则默认清空，避免历史来源残留。
-          returnTarget: options?.returnTarget ?? null,
+          returnTarget,
           // loading 由 setLoading 统一维护，防止打开同 tab 时闪烁。
           loading: existingTab?.loading ?? false,
           reloadToken: existingTab?.reloadToken ?? 0,

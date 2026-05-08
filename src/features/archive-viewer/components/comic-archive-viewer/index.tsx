@@ -10,11 +10,29 @@ import {
 } from '@/features/file-explorer/services/file.api';
 import { runtimeLogger } from '@/utils/runtimeLogger';
 import { ComicArchiveViewerWrapper } from './style';
-import { useFileViewer } from '@/hooks/useFileViewer';
 import { useArchiveCardGrid } from '@/features/archive-viewer/hooks/useArchiveCardGrid';
 import ContextMenu, { ContextMenuItem } from '@/components/ui/context-menu';
 import { locateNodeInDirectoryTree } from '@/features/file-explorer/services/tree-locate';
 import { useNodePropertiesOverlay } from '@/features/file-explorer/hooks/useNodePropertiesOverlay';
+import type { FileViewerReturnTarget } from '@/contexts/file-viewer.context';
+import { buildFileViewerReturnTarget } from '@/contexts/file-viewer-return-target';
+import { mapComicArchiveCards } from './comic-archive-card-mapper';
+import type { ComicArchiveCard } from './comic-archive-types';
+import { useComicArchiveNavigation } from './useComicArchiveNavigation';
+import {
+  EMPTY_COMIC_ARCHIVE_SNAPSHOT,
+  comicArchiveSnapshotCache,
+  resolveReaderCacheKey,
+  setArchiveSnapshotCache,
+  type ComicArchiveSnapshot,
+} from './comic-archive-cache';
+import {
+  buildViewMetaWithArchiveProgress,
+  clamp,
+  parseRemoteArchiveProgress,
+  parseViewMetaObject,
+  type ArchiveReaderProgress,
+} from './comic-archive-progress';
 
 interface ComicArchiveViewerProps {
   folderNodeId: number | null;
@@ -22,59 +40,13 @@ interface ComicArchiveViewerProps {
   fileName?: string | null;
   active?: boolean;
   reloadToken?: number;
-}
-
-interface ComicArchiveCard {
-  id: number;
-  title: string;
-  sortOrder: number;
-  coverNodeId: number | null;
-  coverUrl: string | null;
-}
-
-interface ComicArchiveSnapshot {
-  hasLoadedList: boolean;
-  cards: ComicArchiveCard[];
-  nextOffset: number;
-  total: number;
-  hasMore: boolean;
-  scrollTop: number;
-  scrollRatio: number;
-  anchorCardId: number | null;
-  anchorOffsetRatio: number;
-}
-
-interface ArchiveReaderProgress {
-  anchorCardId: number | null;
-  anchorOffsetRatio: number;
-  scrollTop: number;
-  scrollRatio: number;
-  updatedAt: string;
+  returnTarget?: FileViewerReturnTarget | null;
 }
 
 const PAGE_SIZE = 24;
 const LINK_EXPIRY_MINUTES = 120;
-const VIEW_META_VIEWER_STATE_KEY = '__omniflowViewerStateV1';
-const VIEW_META_VIEWER_STATE_LEGACY_KEY = '__omniflow_viewer_state_v1';
-const VIEW_META_COMIC_ARCHIVE_READER_KEY = 'comicArchiveReader';
-const VIEW_META_COMIC_ARCHIVE_READER_LEGACY_KEY = 'comic_archive_reader';
-const COMIC_ARCHIVE_CACHE_MAX_ENTRIES = 24;
 const REMOTE_PROGRESS_SYNC_INTERVAL_MS = 200;
 const SCROLL_PROGRESS_PERSIST_DEBOUNCE_MS = 160;
-
-const EMPTY_COMIC_ARCHIVE_SNAPSHOT: ComicArchiveSnapshot = {
-  hasLoadedList: false,
-  cards: [],
-  nextOffset: 0,
-  total: 0,
-  hasMore: false,
-  scrollTop: 0,
-  scrollRatio: 0,
-  anchorCardId: null,
-  anchorOffsetRatio: 0,
-};
-
-const comicArchiveSnapshotCache = new Map<string, ComicArchiveSnapshot>();
 
 function parseArchiveLibraryId(fileUrl: string): number | null {
   const matches = /^comic-archive:\/\/library\/(\d+)\/node\/\d+$/i.exec(String(fileUrl || '').trim());
@@ -93,118 +65,37 @@ function normalizeArchiveTitle(fileName?: string | null): string {
   return raw;
 }
 
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(Math.max(value, min), max);
-}
-
-function resolveReaderCacheKey(fileUrl: string, folderNodeId: number | null, reloadToken: number): string | null {
-  if (!folderNodeId || !Number.isFinite(folderNodeId)) {
-    return null;
-  }
-  return `${String(fileUrl || '').trim()}::${folderNodeId}::r${Math.max(Math.floor(reloadToken), 0)}`;
-}
-
-function setArchiveSnapshotCache(cacheKey: string, snapshot: ComicArchiveSnapshot) {
-  if (comicArchiveSnapshotCache.has(cacheKey)) {
-    comicArchiveSnapshotCache.delete(cacheKey);
-  }
-  comicArchiveSnapshotCache.set(cacheKey, snapshot);
-  if (comicArchiveSnapshotCache.size > COMIC_ARCHIVE_CACHE_MAX_ENTRIES) {
-    const oldest = comicArchiveSnapshotCache.keys().next().value;
-    if (oldest) {
-      comicArchiveSnapshotCache.delete(oldest);
-    }
-  }
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function parseViewMetaObject(raw: string | null | undefined): Record<string, unknown> {
-  if (!raw) return {};
-  try {
-    const parsed = JSON.parse(raw);
-    return isPlainObject(parsed) ? parsed : {};
-  } catch {
-    return {};
-  }
-}
-
-function parsePositiveNumber(value: unknown): number | null {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed <= 0) return null;
-  return parsed;
-}
-
-function parseRatio(value: unknown): number {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return 0;
-  return clamp(parsed, 0, 1);
-}
-
-function parseRemoteArchiveProgress(viewMetaRaw: string | null | undefined): ArchiveReaderProgress | null {
-  const meta = parseViewMetaObject(viewMetaRaw);
-  const viewerState = meta[VIEW_META_VIEWER_STATE_KEY] ?? meta[VIEW_META_VIEWER_STATE_LEGACY_KEY];
-  if (!isPlainObject(viewerState)) return null;
-  const readerState = viewerState[VIEW_META_COMIC_ARCHIVE_READER_KEY] ?? viewerState[VIEW_META_COMIC_ARCHIVE_READER_LEGACY_KEY];
-  if (!isPlainObject(readerState)) return null;
-
-  const anchorCardId = parsePositiveNumber(readerState.anchorCardId);
-  const scrollTop = Number(readerState.scrollTop ?? 0);
-  const currentScrollTop = Number.isFinite(scrollTop) && scrollTop > 0 ? scrollTop : 0;
-  const currentScrollRatio = parseRatio(readerState.scrollRatio);
-  if (!anchorCardId && currentScrollTop <= 0 && currentScrollRatio <= 0) {
-    return null;
-  }
-
-  return {
-    anchorCardId,
-    anchorOffsetRatio: parseRatio(readerState.anchorOffsetRatio),
-    scrollTop: currentScrollTop,
-    scrollRatio: currentScrollRatio,
-    updatedAt: String(readerState.updatedAt || ''),
-  };
-}
-
-function buildViewMetaWithArchiveProgress(
-  baseMeta: Record<string, unknown>,
-  progress: ArchiveReaderProgress,
-): Record<string, unknown> {
-  const nextMeta: Record<string, unknown> = { ...baseMeta };
-  const viewerStateCandidate = nextMeta[VIEW_META_VIEWER_STATE_KEY] ?? nextMeta[VIEW_META_VIEWER_STATE_LEGACY_KEY];
-  const currentViewerState = isPlainObject(viewerStateCandidate)
-    ? { ...(viewerStateCandidate as Record<string, unknown>) }
-    : {};
-  delete currentViewerState[VIEW_META_COMIC_ARCHIVE_READER_LEGACY_KEY];
-  delete nextMeta[VIEW_META_VIEWER_STATE_LEGACY_KEY];
-  nextMeta[VIEW_META_VIEWER_STATE_KEY] = {
-    ...currentViewerState,
-    [VIEW_META_COMIC_ARCHIVE_READER_KEY]: {
-      anchorCardId: progress.anchorCardId,
-      anchorOffsetRatio: progress.anchorOffsetRatio,
-      scrollTop: progress.scrollTop,
-      scrollRatio: progress.scrollRatio,
-      updatedAt: progress.updatedAt,
-    },
-  };
-  return nextMeta;
-}
-
 const ComicArchiveViewer: React.FC<ComicArchiveViewerProps> = ({
   folderNodeId,
   fileUrl,
   fileName,
   active = true,
   reloadToken = 0,
+  returnTarget = null,
 }) => {
-  const { setFileUrl } = useFileViewer();
   const { viewportRef, wrapperStyle } = useArchiveCardGrid({
     baseCardWidth: 275,
     gridGap: 15,
   });
   const libraryId = useMemo(() => parseArchiveLibraryId(fileUrl), [fileUrl]);
   const title = useMemo(() => normalizeArchiveTitle(fileName), [fileName]);
+  const currentArchiveReturnTarget = useMemo<FileViewerReturnTarget | null>(() => {
+    if (!folderNodeId || !libraryId || !Number.isFinite(folderNodeId)) {
+      return null;
+    }
+    return buildFileViewerReturnTarget({
+      fileUrl,
+      fileName: fileName || title,
+      fileType: 'comic_archive',
+      nodeId: folderNodeId,
+      tabTypeLabel: 'COMIC-ARC',
+      returnTarget: returnTarget ?? null,
+    });
+  }, [fileName, fileUrl, folderNodeId, libraryId, returnTarget, title]);
+  const handleOpenCard = useComicArchiveNavigation({
+    libraryId,
+    currentArchiveReturnTarget,
+  });
   const { showNodeProperties } = useNodePropertiesOverlay({ libraryId });
   const readerCacheKey = useMemo(
     () => resolveReaderCacheKey(fileUrl, folderNodeId, reloadToken),
@@ -600,15 +491,7 @@ const ComicArchiveViewer: React.FC<ComicArchiveViewerProps> = ({
       });
       if (requestId !== requestIdRef.current) return;
 
-      const rawCards: ComicArchiveCard[] = page.items.map(item => ({
-        id: Number(item.id),
-        title: String(item.name || ''),
-        sortOrder: Number(item.sortOrder ?? 0),
-        coverNodeId: Number.isFinite(Number(item.coverNodeId)) && Number(item.coverNodeId) > 0
-          ? Number(item.coverNodeId)
-          : null,
-        coverUrl: null,
-      }));
+      const rawCards = mapComicArchiveCards(page.items);
       const cardsWithUrl = await resolveCardCoverUrls(rawCards);
       if (requestId !== requestIdRef.current) return;
 
@@ -952,25 +835,7 @@ const ComicArchiveViewer: React.FC<ComicArchiveViewerProps> = ({
                         cardRefs.current.delete(card.id);
                       }
                     }}
-                    onDoubleClick={() => {
-                      if (!libraryId || !folderNodeId || !Number.isFinite(folderNodeId)) return;
-                      setFileUrl(
-                        `comic://library/${libraryId}/node/${card.id}`,
-                        card.title,
-                        'comic',
-                        card.id,
-                        {
-                          tabTypeLabel: 'COMIC',
-                          returnTarget: {
-                            fileUrl,
-                            fileName: fileName || title,
-                            fileType: 'comic_archive',
-                            nodeId: folderNodeId,
-                            tabTypeLabel: 'COMIC-ARC',
-                          },
-                        },
-                      );
-                    }}
+                    onDoubleClick={() => handleOpenCard(card)}
                     onContextMenu={(e) => openCardContextMenu(e, card)}
                   >
                     {card.coverUrl ? (
@@ -981,7 +846,9 @@ const ComicArchiveViewer: React.FC<ComicArchiveViewerProps> = ({
                     <div className="card-cover" />
                     <div className="card-meta">
                       <div className="card-tag-slot">
-                        <span className="card-tag-pill">COMIC</span>
+                        <span className={`card-tag-pill ${card.cardKind === 'collection' ? 'collection' : ''}`}>
+                          {card.cardKind === 'collection' ? '合集' : 'COMIC'}
+                        </span>
                       </div>
                       <div className="card-title" title={card.title}>
                         {card.title}

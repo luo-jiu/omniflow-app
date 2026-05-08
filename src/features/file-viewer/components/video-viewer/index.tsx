@@ -16,10 +16,12 @@ import { VideoViewerWrapper } from './style';
 import { useRegisterMediaEntry } from '@/hooks/useMediaRegistry';
 import { useLibraryWorkspaceControls } from '@/contexts/library-workspace-controls.context';
 import {
+  fetchArchiveCardsPage,
   fetchNodeDetailById,
   getChildrenByNodeId,
   getFileLink,
   updateNodeConfig,
+  type ArchiveCardDTO,
 } from '@/features/file-explorer/services/file.api';
 import { runtimeLogger } from '@/utils/runtimeLogger';
 import {
@@ -80,6 +82,7 @@ const KEYBOARD_SEEK_SECONDS = 10;
 const KEYBOARD_FAST_SEEK_SECONDS = 30;
 const KEYBOARD_VOLUME_STEP = 0.05;
 const PLAYLIST_LINK_EXPIRY_MINUTES = 120;
+const PLAYLIST_PAGE_SIZE = 80;
 
 const RightToolPanelIcon: React.FC = () => (
   <svg className="video-control-svg" viewBox="0 0 24 24" width="1em" height="1em" fill="none" aria-hidden focusable="false">
@@ -163,6 +166,29 @@ function setVideoProgressSnapshot(cacheKey: string, progress: VideoPlaybackProgr
       videoProgressCache.delete(oldestKey);
     }
   }
+}
+
+function mapArchiveCardToPlaylistItem(item: ArchiveCardDTO, libraryId: number): FileViewerVideoPlaylistItem | null {
+  if (String(item.cardKind || '').trim().toLowerCase() === 'collection') {
+    return null;
+  }
+  const cardId = Number(item.id);
+  const mediaNodeId = Number.isFinite(Number(item.mediaNodeId)) && Number(item.mediaNodeId) > 0
+    ? Number(item.mediaNodeId)
+    : cardId;
+  if (!Number.isFinite(mediaNodeId) || mediaNodeId <= 0 || !Number.isFinite(libraryId) || libraryId <= 0) {
+    return null;
+  }
+  const subtitleCount = Number(item.subtitleCount ?? 0);
+  const cardOwnsMediaFolder = mediaNodeId !== cardId;
+  return {
+    nodeId: mediaNodeId,
+    libraryId,
+    title: String(item.name || ''),
+    sortOrder: Number(item.sortOrder ?? 0),
+    durationSeconds: Number(item.durationSeconds ?? 0) > 0 ? Number(item.durationSeconds) : null,
+    subtitleCardNodeId: cardOwnsMediaFolder && subtitleCount > 0 ? cardId : null,
+  };
 }
 
 function parseVideoRemoteProgress(viewMetaRaw: string | null | undefined): VideoPlaybackProgress | null {
@@ -284,10 +310,24 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
   const [isVolumePanelOpen, setIsVolumePanelOpen] = useState(false);
   const [isRatePanelOpen, setIsRatePanelOpen] = useState(false);
   const [isPlaylistPanelOpen, setIsPlaylistPanelOpen] = useState(false);
+  const [isLoadingPlaylistMore, setIsLoadingPlaylistMore] = useState(false);
 
   const progressCacheKey = useMemo(() => resolveVideoProgressCacheKey(url, nodeId), [nodeId, url]);
   const playlistItems = useMemo(() => playlist?.items ?? [], [playlist]);
   const hasPlaylist = playlistItems.length > 0;
+  const playlistCountText = useMemo(() => {
+    const total = Number(playlist?.total);
+    if (Number.isFinite(total) && total > playlistItems.length) {
+      return `${playlistItems.length}/${total} 集`;
+    }
+    return `${playlistItems.length} 集`;
+  }, [playlist?.total, playlistItems.length]);
+  const canLoadPlaylistMore = Boolean(
+    playlist?.source?.kind === 'video_archive_collection'
+    && playlist.hasMore
+    && playlist.source.nodeId > 0
+    && playlist.source.libraryId > 0,
+  );
   const {
     activeSubtitleCue,
     clearSubtitle,
@@ -896,6 +936,81 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
     }
   }, [nodeId, persistVideoProgress, playlist, resolvePlaylistItemSubtitleSources, returnTarget, setFileUrl, tabId]);
 
+  const loadMorePlaylistItems = useCallback(async () => {
+    const source = playlist?.source;
+    if (
+      !playlist
+      || source?.kind !== 'video_archive_collection'
+      || !playlist.hasMore
+      || isLoadingPlaylistMore
+    ) {
+      return;
+    }
+
+    const nextOffset = Number.isFinite(Number(playlist.nextOffset))
+      ? Number(playlist.nextOffset)
+      : playlist.items.length;
+    setIsLoadingPlaylistMore(true);
+    try {
+      const page = await fetchArchiveCardsPage({
+        nodeId: source.nodeId,
+        libraryId: source.libraryId,
+        builtInType: 'VIDEO',
+        offset: Math.max(Math.floor(nextOffset), 0),
+        limit: PLAYLIST_PAGE_SIZE,
+      });
+      const known = new Set(playlist.items.map(item => `${item.libraryId}:${item.nodeId}`));
+      const moreItems = page.items
+        .map(item => mapArchiveCardToPlaylistItem(item, source.libraryId))
+        .filter((item): item is FileViewerVideoPlaylistItem => {
+          if (!item) return false;
+          const key = `${item.libraryId}:${item.nodeId}`;
+          if (known.has(key)) return false;
+          known.add(key);
+          return true;
+        });
+      const resolvedNextOffset = page.items.length > 0
+        ? page.offset + page.items.length
+        : nextOffset;
+      const nextPlaylist: FileViewerVideoPlaylist = {
+        ...playlist,
+        items: [...playlist.items, ...moreItems],
+        total: page.total,
+        nextOffset: resolvedNextOffset,
+        hasMore: page.items.length > 0 && page.hasMore,
+      };
+      setFileUrl(
+        url,
+        fileName ?? null,
+        'video',
+        nodeId,
+        {
+          tabTypeLabel: 'VIDEO',
+          returnTarget,
+          replaceTabId: tabId,
+          videoSubtitleSources: subtitleSources,
+          videoPlaylist: nextPlaylist,
+          videoAutoPlay: false,
+        },
+      );
+    } catch (error: any) {
+      runtimeLogger.error('加载更多合集视频失败:', error);
+      Toast.error(error?.message || '加载更多失败');
+    } finally {
+      setIsLoadingPlaylistMore(false);
+    }
+  }, [
+    fileName,
+    isLoadingPlaylistMore,
+    nodeId,
+    playlist,
+    returnTarget,
+    setFileUrl,
+    subtitleSources,
+    tabId,
+    url,
+  ]);
+
   const toggleConsole = useCallback(() => {
     if (isWideMode) {
       setIsWideMode(false);
@@ -1118,7 +1233,7 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
                           <span className="playlist-panel-title" title={playlist?.title || ''}>
                             {playlist?.title || '合集'}
                           </span>
-                          <span className="playlist-panel-count">{playlistItems.length} 集</span>
+                          <span className="playlist-panel-count">{playlistCountText}</span>
                         </div>
                         <div className="playlist-panel-list">
                           {playlistItems.map((item, index) => {
@@ -1141,6 +1256,18 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
                               </button>
                             );
                           })}
+                          {canLoadPlaylistMore && (
+                            <button
+                              type="button"
+                              className="playlist-panel-load-more"
+                              disabled={isLoadingPlaylistMore}
+                              onClick={() => {
+                                void loadMorePlaylistItems();
+                              }}
+                            >
+                              {isLoadingPlaylistMore ? '加载中...' : '加载更多'}
+                            </button>
+                          )}
                         </div>
                       </div>
                     )}

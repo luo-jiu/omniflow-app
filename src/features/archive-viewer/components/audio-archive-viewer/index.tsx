@@ -37,7 +37,6 @@ import ContextMenu, { type ContextMenuItem } from '@/components/ui/context-menu'
 import { useNodePropertiesOverlay } from '@/features/file-explorer/hooks/useNodePropertiesOverlay';
 import {
   AUDIO_ARCHIVE_EMPTY_SIDECARS,
-  buildAudioArchiveSidecarIndex,
   buildAudioSubtitleSources,
   normalizeAudioArchiveMatchName,
   type AudioArchiveChildNode,
@@ -185,10 +184,6 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
   const requestIdRef = useRef(0);
   const restoreScrollTopRef = useRef<number | null>(null);
   const persistScrollRafRef = useRef<number>(0);
-  const sidecarIndexCacheRef = useRef<{
-    cacheKey: string;
-    index: AudioArchiveSidecarIndex;
-  } | null>(null);
   const activeSubtitleSourcesRef = useRef<FileViewerSubtitleSource[] | undefined>(undefined);
   const lastHandledEndedSerialRef = useRef(0);
   const coverClickTimerRef = useRef<number>(0);
@@ -329,26 +324,6 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
     ];
   }, [closeContextMenu, libraryId, menuState.card, showNodeProperties]);
 
-  const loadAudioArchiveSidecarIndex = useCallback(async (): Promise<AudioArchiveSidecarIndex> => {
-    if (!folderNodeId || !libraryId) {
-      return AUDIO_ARCHIVE_EMPTY_SIDECARS;
-    }
-    const cacheKey = `${libraryId}:${folderNodeId}`;
-    if (sidecarIndexCacheRef.current?.cacheKey === cacheKey) {
-      return sidecarIndexCacheRef.current.index;
-    }
-
-    try {
-      const children = await getChildrenByNodeId(folderNodeId, libraryId);
-      const index = buildAudioArchiveSidecarIndex(children as AudioArchiveChildNode[]);
-      sidecarIndexCacheRef.current = { cacheKey, index };
-      return index;
-    } catch (sidecarError) {
-      runtimeLogger.warn('加载音频归档伴随资源失败:', sidecarError);
-      return AUDIO_ARCHIVE_EMPTY_SIDECARS;
-    }
-  }, [folderNodeId, libraryId]);
-
   const resolveCardCoverUrls = useCallback(async (inputCards: AudioArchiveCard[]): Promise<AudioArchiveCard[]> => {
     if (!libraryId || inputCards.length === 0) {
       return inputCards;
@@ -433,9 +408,7 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
         limit: PAGE_SIZE,
       });
       if (requestId !== requestIdRef.current) return;
-      const sidecarIndex = await loadAudioArchiveSidecarIndex();
-      if (requestId !== requestIdRef.current) return;
-      const rawCards = mapArchiveCards(page.items, sidecarIndex);
+      const rawCards = mapArchiveCards(page.items, AUDIO_ARCHIVE_EMPTY_SIDECARS);
       const cardsWithCover = await resolveCardCoverUrls(rawCards);
       if (requestId !== requestIdRef.current) return;
 
@@ -468,7 +441,7 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
         setLoadingMore(false);
       }
     }
-  }, [folderNodeId, libraryId, loadAudioArchiveSidecarIndex, mapArchiveCards, resolveCardCoverUrls]);
+  }, [folderNodeId, libraryId, mapArchiveCards, resolveCardCoverUrls]);
 
   const loadMore = useCallback(() => {
     if (listLoading || loadingMore || !hasMore) return;
@@ -487,12 +460,8 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
         return undefined;
       }
     }
-    const sidecarIndex = await loadAudioArchiveSidecarIndex();
-    const matchName = normalizeAudioArchiveMatchName(card.title);
-    const sidecars = matchName ? sidecarIndex.subtitlesByName.get(matchName) ?? [] : [];
-    const sources = buildAudioSubtitleSources(sidecars, libraryId);
-    return sources.length > 0 ? sources : undefined;
-  }, [libraryId, loadAudioArchiveSidecarIndex]);
+    return undefined;
+  }, [libraryId]);
 
   const playCard = useCallback(async (card: AudioArchiveCard) => {
     if (!libraryId || !archiveOwnerKey) {
@@ -660,7 +629,6 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
 
   useEffect(() => {
     requestIdRef.current += 1;
-    sidecarIndexCacheRef.current = null;
     if (persistScrollRafRef.current) {
       window.cancelAnimationFrame(persistScrollRafRef.current);
       persistScrollRafRef.current = 0;

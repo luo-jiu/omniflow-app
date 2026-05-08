@@ -58,6 +58,8 @@ OmniFlow 当前不是“一个万能 viewer”，而是多种 viewer 共同组�
 
 `FileDispatcher` 现在会接收 `tabId` prop 并透传给 audio / asmr / video viewer，用于把它们的播放注册到 `MediaRegistry`，详见 `docs/library-detail-workspace.md` §11。
 
+`FileDispatcher` 也会把 tab 上的 `returnTarget` 透传给需要继续开子层的归档 viewer。当前 `comic_archive` 会用它串起归档返回栈：父归档打开子归档时，子归档 tab 的 `returnTarget` 指向父归档；子归档再打开漫画或下一层归档时，会把自己的父级继续挂在 `returnTarget.returnTarget` 上。顶部返回按钮只按这条显式链返回，不根据目录树反查父级。返回栈的构造、规范化和 pop 逻辑统一收敛在 `src/contexts/file-viewer-return-target.ts`，后续不要在 viewer 内手写另一套对象拼装规则。
+
 ## 4. 模块边界
 
 ### 4.1 `file-viewer`
@@ -165,7 +167,8 @@ OmniFlow 当前不是“一个万能 viewer”，而是多种 viewer 共同组�
 3. `video_archive / audio_archive / comic_archive / asmr_archive` 仍进入归档 viewer。
 4. 归档 viewer 返回链路仍然成立。
 5. 从 `asmr / comic / video / audio` 归档打开普通 viewer 后，顶部返回按钮显示绿色提示态。
-6. 不支持预览的文件仍进入降级态，而不是白屏。
+6. 从 `comic_archive` 打开子 `comic_archive` 后，顶部返回按钮能逐级回到父归档；从目录树直接打开中间层归档时，不显示不存在的父级返回。
+7. 不支持预览的文件仍进入降级态，而不是白屏。
 
 ## 9. 维护规则
 

@@ -221,6 +221,12 @@ export const ComicArchiveViewerWrapper = styled.div`
     text-overflow: ellipsis;
   }
 
+  .card-tag-pill.collection {
+    border-color: color-mix(in srgb, var(--semi-color-success) 42%, rgba(30, 41, 59, 0.22));
+    color: #116d48;
+    background: color-mix(in srgb, #dbfce8 88%, rgba(255, 255, 255, 0.9));
+  }
+
   .archive-footer {
     height: 28px;
     flex-shrink: 0;

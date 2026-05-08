@@ -8,6 +8,7 @@ import {
   getFileLink,
   renameNode,
   type ArchiveCardDTO,
+  type ArchiveCardsPageResult,
 } from '@/features/file-explorer/services/file.api';
 import { runtimeLogger } from '@/utils/runtimeLogger';
 import { VideoArchiveViewerWrapper } from './style';
@@ -22,7 +23,6 @@ import type {
   FileViewerVideoPlaylistItem,
 } from '@/contexts/file-viewer.context';
 import {
-  buildVideoArchiveSidecarIndex,
   buildVideoSubtitleSources,
   normalizeVideoArchiveMatchName,
   VIDEO_ARCHIVE_EMPTY_SIDECARS,
@@ -60,7 +60,7 @@ interface VideoArchiveSnapshot {
 }
 
 const PAGE_SIZE = 24;
-const COLLECTION_PLAYLIST_PAGE_SIZE = 200;
+const COLLECTION_PLAYLIST_PAGE_SIZE = 80;
 const LINK_EXPIRY_MINUTES = 120;
 const VIDEO_ARCHIVE_CACHE_MAX_ENTRIES = 24;
 const VIDEO_PREVIEW_SAMPLE_TIME = 0.5;
@@ -136,42 +136,23 @@ function mapVideoArchiveCards(
   });
 }
 
-async function fetchAllCollectionArchiveCards(collectionNodeId: number, libraryId: number): Promise<ArchiveCardDTO[]> {
-  const items: ArchiveCardDTO[] = [];
-  let offset = 0;
+async function fetchCollectionArchiveCardsPage(
+  collectionNodeId: number,
+  libraryId: number,
+  offset = 0,
+): Promise<ArchiveCardsPageResult> {
+  return fetchArchiveCardsPage({
+    nodeId: collectionNodeId,
+    libraryId,
+    builtInType: 'VIDEO',
+    offset,
+    limit: COLLECTION_PLAYLIST_PAGE_SIZE,
+  });
+}
 
-  for (;;) {
-    const page = await fetchArchiveCardsPage({
-      nodeId: collectionNodeId,
-      libraryId,
-      builtInType: 'VIDEO',
-      offset,
-      limit: COLLECTION_PLAYLIST_PAGE_SIZE,
-    });
-    items.push(...page.items);
-
-    if (!page.hasMore) {
-      break;
-    }
-
-    const pageOffset = Number.isFinite(Number(page.offset)) ? Number(page.offset) : offset;
-    const pageLimit = Number.isFinite(Number(page.limit)) && Number(page.limit) > 0
-      ? Number(page.limit)
-      : COLLECTION_PLAYLIST_PAGE_SIZE;
-    const nextOffset = Math.max(pageOffset + pageLimit, offset + page.items.length);
-    if (nextOffset <= offset || page.items.length === 0) {
-      runtimeLogger.warn('视频合集播放列表分页未能继续推进，已停止继续加载:', {
-        collectionNodeId,
-        libraryId,
-        offset,
-        nextOffset,
-      });
-      break;
-    }
-    offset = nextOffset;
-  }
-
-  return items;
+function resolveArchivePageNextOffset(page: ArchiveCardsPageResult, fallbackOffset: number): number {
+  const pageOffset = Number.isFinite(Number(page.offset)) ? Number(page.offset) : fallbackOffset;
+  return pageOffset + page.items.length;
 }
 
 function buildSameLevelSubtitleSources(
@@ -303,10 +284,6 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
   const requestIdRef = useRef(0);
   const restoreScrollTopRef = useRef<number | null>(null);
   const persistScrollRafRef = useRef<number>(0);
-  const sidecarIndexCacheRef = useRef<{
-    cacheKey: string;
-    index: VideoArchiveSidecarIndex;
-  } | null>(null);
 
   const persistSnapshot = useCallback((patch: Partial<VideoArchiveSnapshot>) => {
     if (!readerCacheKey) return;
@@ -504,26 +481,6 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
     }
   }, [libraryId]);
 
-  const loadVideoArchiveSidecarIndex = useCallback(async (): Promise<VideoArchiveSidecarIndex> => {
-    if (!folderNodeId || !libraryId) {
-      return VIDEO_ARCHIVE_EMPTY_SIDECARS;
-    }
-    const cacheKey = `${libraryId}:${folderNodeId}`;
-    if (sidecarIndexCacheRef.current?.cacheKey === cacheKey) {
-      return sidecarIndexCacheRef.current.index;
-    }
-
-    try {
-      const children = await getChildrenByNodeId(folderNodeId, libraryId);
-      const index = buildVideoArchiveSidecarIndex(children as VideoArchiveChildNode[]);
-      sidecarIndexCacheRef.current = { cacheKey, index };
-      return index;
-    } catch (sidecarError) {
-      runtimeLogger.warn('加载视频归档伴随资源失败:', sidecarError);
-      return VIDEO_ARCHIVE_EMPTY_SIDECARS;
-    }
-  }, [folderNodeId, libraryId]);
-
   const loadPage = useCallback(async (offset: number, append: boolean) => {
     if (!folderNodeId || !libraryId || !Number.isFinite(folderNodeId)) return;
     const requestId = requestIdRef.current;
@@ -543,10 +500,8 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
         limit: PAGE_SIZE,
       });
       if (requestId !== requestIdRef.current) return;
-      const sidecarIndex = await loadVideoArchiveSidecarIndex();
-      if (requestId !== requestIdRef.current) return;
 
-      const rawCards = mapVideoArchiveCards(page.items, sidecarIndex);
+      const rawCards = mapVideoArchiveCards(page.items, VIDEO_ARCHIVE_EMPTY_SIDECARS);
       const cardsWithCover = await resolveCardCoverUrls(rawCards);
       if (requestId !== requestIdRef.current) return;
 
@@ -591,7 +546,7 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
         setLoadingMore(false);
       }
     }
-  }, [folderNodeId, libraryId, loadVideoArchiveSidecarIndex, resolveCardCoverUrls]);
+  }, [folderNodeId, libraryId, resolveCardCoverUrls]);
 
   const loadMore = useCallback(() => {
     if (listLoading || loadingMore || !hasMore) return;
@@ -629,9 +584,8 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
   const loadCardSubtitleSources = useCallback(async (
     card: VideoArchiveCard,
   ): Promise<FileViewerSubtitleSource[]> => {
-    const sidecarIndex = await loadVideoArchiveSidecarIndex();
-    return loadCardSubtitleSourcesWithIndex(card, sidecarIndex);
-  }, [loadCardSubtitleSourcesWithIndex, loadVideoArchiveSidecarIndex]);
+    return loadCardSubtitleSourcesWithIndex(card, VIDEO_ARCHIVE_EMPTY_SIDECARS);
+  }, [loadCardSubtitleSourcesWithIndex]);
 
   const loadPlaylistItemSubtitleSources = useCallback(async (
     item: FileViewerVideoPlaylistItem,
@@ -656,12 +610,8 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
   } | null> => {
     if (!libraryId) return null;
 
-    const [playlistCards, children] = await Promise.all([
-      fetchAllCollectionArchiveCards(collectionCard.id, libraryId),
-      getChildrenByNodeId(collectionCard.id, libraryId),
-    ]);
-    const sidecarIndex = buildVideoArchiveSidecarIndex(children as VideoArchiveChildNode[]);
-    const mediaCards = mapVideoArchiveCards(playlistCards, sidecarIndex)
+    const page = await fetchCollectionArchiveCardsPage(collectionCard.id, libraryId);
+    const mediaCards = mapVideoArchiveCards(page.items, VIDEO_ARCHIVE_EMPTY_SIDECARS)
       .filter(card => card.cardKind === 'media' && (card.mediaNodeId || card.id))
       .sort((left, right) => {
         if (left.sortOrder !== right.sortOrder) return left.sortOrder - right.sortOrder;
@@ -672,7 +622,7 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
       return null;
     }
 
-    const items = mediaCards.map(card => buildCollectionPlaylistItem(card, sidecarIndex, libraryId));
+    const items = mediaCards.map(card => buildCollectionPlaylistItem(card, VIDEO_ARCHIVE_EMPTY_SIDECARS, libraryId));
     const firstItem = items[0];
     if (!firstItem) return null;
     const firstSubtitleSources = await loadPlaylistItemSubtitleSources(firstItem);
@@ -690,6 +640,14 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
         id: `video-collection:${libraryId}:${collectionCard.id}`,
         title: collectionCard.title || '视频合集',
         items: playlistItems,
+        total: page.total,
+        nextOffset: resolveArchivePageNextOffset(page, 0),
+        hasMore: page.hasMore,
+        source: {
+          kind: 'video_archive_collection',
+          nodeId: collectionCard.id,
+          libraryId,
+        },
       },
       firstItem: firstItemWithSubtitles,
     };

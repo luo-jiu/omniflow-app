@@ -669,6 +669,28 @@ export const VideoViewerWrapper = styled.div`
     color: rgba(255, 255, 255, 0.58);
   }
 
+  .playlist-panel-load-more {
+    width: 100%;
+    min-height: 30px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 7px;
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.78);
+    font-size: var(--video-font-body);
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .playlist-panel-load-more:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+  }
+
+  .playlist-panel-load-more:disabled {
+    cursor: default;
+    opacity: 0.62;
+  }
+
   .floating-action-chip {
     border: 1px solid rgba(255, 255, 255, 0.12);
     border-radius: 999px;

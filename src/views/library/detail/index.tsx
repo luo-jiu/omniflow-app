@@ -92,6 +92,7 @@ import {
 } from "./workspace-state";
 import type { FileViewerFileType } from '@/shared/file-viewer-types';
 import type { FileViewerOpenOptions } from '@/contexts/file-viewer.context';
+import { resolveFileViewerReturnOptions } from '@/contexts/file-viewer-return-target';
 import {
   BOOKMARK_TOOLBAR_HORIZONTAL_PADDING,
   MAX_BROWSER_RESOURCE_PANEL_WIDTH,
@@ -632,6 +633,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   const showBackToArchive = (
     (fileState.fileType === 'asmr' && archiveReturnTarget?.fileType === 'asmr_archive')
     || (fileState.fileType === 'comic' && archiveReturnTarget?.fileType === 'comic_archive')
+    || (fileState.fileType === 'comic_archive' && archiveReturnTarget?.fileType === 'comic_archive')
     || (fileState.fileType === 'video' && archiveReturnTarget?.fileType === 'video_archive')
     || (fileState.fileType === 'video_archive' && archiveReturnTarget?.fileType === 'video_archive')
     || (fileState.fileType === 'audio' && archiveReturnTarget?.fileType === 'audio_archive')
@@ -641,20 +643,12 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
     if (!archiveReturnTarget) {
       return;
     }
-    const targetTab = tabs.find(tab => (
-      (archiveReturnTarget.nodeId !== null && archiveReturnTarget.nodeId !== undefined)
-        ? tab.nodeId === archiveReturnTarget.nodeId
-        : tab.fileUrl === archiveReturnTarget.fileUrl
-    ));
     setFileUrl(
       archiveReturnTarget.fileUrl,
       archiveReturnTarget.fileName,
       archiveReturnTarget.fileType,
       archiveReturnTarget.nodeId,
-      {
-        tabTypeLabel: archiveReturnTarget.tabTypeLabel ?? null,
-        returnTarget: targetTab?.returnTarget ?? null,
-      },
+      resolveFileViewerReturnOptions(archiveReturnTarget, tabs),
     );
   }, [archiveReturnTarget, setFileUrl, tabs]);
 

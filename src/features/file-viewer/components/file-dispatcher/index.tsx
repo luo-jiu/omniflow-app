@@ -174,6 +174,7 @@ const FileDispatcher: React.FC<FileDispatcherProps> = ({
           fileName={fileName}
           active={active}
           reloadToken={reloadToken}
+          returnTarget={returnTarget}
         />
       );
 

@@ -7,6 +7,7 @@ export interface FileViewerReturnTarget {
   fileType: FileViewerFileType;
   nodeId: number | null;
   tabTypeLabel?: string | null;
+  returnTarget?: FileViewerReturnTarget | null;
 }
 
 export interface FileViewerSubtitleSource {
@@ -32,6 +33,14 @@ export interface FileViewerVideoPlaylist {
   id: string;
   title: string;
   items: FileViewerVideoPlaylistItem[];
+  total?: number | null;
+  nextOffset?: number | null;
+  hasMore?: boolean;
+  source?: {
+    kind: 'video_archive_collection';
+    nodeId: number;
+    libraryId: number;
+  } | null;
 }
 
 export interface FileViewerAudioPlaylistItem {
