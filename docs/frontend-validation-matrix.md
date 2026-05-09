@@ -57,7 +57,8 @@ npm run build
 
 - `views/library/detail/`
 - 工作区模式切换
-- tab / browser / search-home / file-viewer 关系
+- tab / browser / search-home / file-viewer / tools / system 关系
+- 设置、个人主页、上传中心、回收站、标签 / 存储 / 浏览器映射等从旧全屏页迁移到工作区视图的入口
 
 至少验证：
 
@@ -67,13 +68,28 @@ npm run build
 - `browser -> file-viewer`
 - `browser -> search-home`
 - `browser -> tools`
+- `browser -> system -> browser`
+- `file-viewer -> system -> file-viewer`
+- `search-home -> system -> search-home`
 - `tools -> file-viewer`
+- `tools -> system -> tools`
 - 页面切走再回来，workspace 缓存恢复正常
 
 边界路径：
 
 - 关闭最后一个 browser tab
 - 当前没有 active file 时退出 browser
+- system tab 重复打开同一入口不创建第二份视图
+- 打开 system view 后，正在播放的音频 / 视频不中断
+- 上传中心 system view 打开 / 关闭不影响后台上传队列
+- 回收站 system view 恢复 / 彻底删除 / 清空后列表更新，目录树快照标记刷新
+- 个人主页 system view 从目录树右下头像打开，修改头像 / 昵称后入口头像同步
+
+legacy 兼容检查：
+
+- `/settings`、`/profile`、`/upload-center`、`/transfer-center?tab=upload`、`/libraries/:id/recycle-bin`、`/settings/tags`、`/settings/storage`、`/settings/browser-file-mappings` 只作为迁移期兼容入口。
+- 新增能力、样式基线和主路径验证默认落在 system workspace 或仓库页右侧系统宿主，不再以 legacy 全屏页作为推荐入口。
+- legacy 路由删除前，只需要确认直接访问不造成明显崩溃；不要为它们重新扩展独立交互。
 
 ### 3.3 文件树 / File Explorer
 

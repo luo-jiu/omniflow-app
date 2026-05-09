@@ -13,7 +13,7 @@ export type BrowserTab = {
   url: string;
 };
 
-export type WorkspaceDisplayMode = 'search-home' | 'file-viewer' | 'browser' | 'tools';
+export type WorkspaceDisplayMode = 'search-home' | 'file-viewer' | 'browser' | 'tools' | 'system';
 
 export interface LibraryDetailWorkspaceState {
   activeBrowserTabId: string | null;
@@ -92,7 +92,7 @@ export function normalizeLibraryDetailWorkspaceState(
       ? 'browser'
       : raw.workspaceDisplayMode === 'tools'
         ? 'tools'
-      : 'search-home';
+        : 'search-home';
   if (workspaceDisplayMode === 'browser' && !browserModeOpen) {
     workspaceDisplayMode = 'search-home';
   }

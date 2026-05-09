@@ -7,7 +7,6 @@ import { AuthProvider } from "@/contexts/AuthContext";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import UserPreferencesBootstrap from '@/features/user/preferences/UserPreferencesBootstrap';
 import FloatingMiniVideoPlayer from '@/features/file-viewer/components/floating-mini-video-player';
-import AppHeader from '@/components/business/app-header';
 import { runtimeLogger } from '@/utils/runtimeLogger';
 import './App.css'
 
@@ -66,13 +65,9 @@ function App() {
       <AuthProvider>
         <UserPreferencesBootstrap />
         <MainLayout>
-          <AppHeader />
-          {/* flex:1 + min-height:0 让路由内容占满 header 之外的空间；display:flex 让 height:100% 的子页面能撑满 */}
-          <div style={{ flex: 1, minHeight: 0, minWidth: 0, display: 'flex', position: 'relative' }}>
-            <Suspense fallback={'loading...'}>
-              {useRoutes(routes)}
-            </Suspense>
-          </div>
+          <Suspense fallback={'loading...'}>
+            {useRoutes(routes)}
+          </Suspense>
           <FloatingMiniVideoPlayer />
         </MainLayout>
       </AuthProvider>

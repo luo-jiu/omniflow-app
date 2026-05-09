@@ -264,7 +264,7 @@ export const FileViewerProvider: React.FC<{
   const activeCacheKeyRef = React.useRef<string | undefined>(cacheKey);
   const skipPersistRef = React.useRef(false);
 
-  // 跨路由"待激活 tab"消费：MediaHub 在外部点 jump 时 setPendingActivation；
+  // 跨路由"待激活 tab"消费：预留给未来外部 MediaHub 入口 setPendingActivation；
   // 设计要点（解决 StrictMode 双 mount 把 setState 丢弃的问题）：
   //   - 不在调 setState 的同时 commit pending；
   //   - 把"清 pending"和"viewerState.activeTabId 真的等于 tabId"挂钩；

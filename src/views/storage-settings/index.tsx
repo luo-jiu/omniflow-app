@@ -79,13 +79,13 @@ const DEFAULT_RULE_FORM: RuleFormState = {
   mimePrefixes: '',
 };
 
-const Wrapper = styled.div`
-  padding: 28px 32px 24px;
-  max-width: 900px;
+const Wrapper = styled.div<{ $embedded?: boolean }>`
+  padding: ${({ $embedded }) => ($embedded ? '0' : '28px 32px 24px')};
+  max-width: ${({ $embedded }) => ($embedded ? 'none' : '900px')};
   margin: 0 auto;
   width: 100%;
   color: var(--semi-color-text-0);
-  -webkit-app-region: drag;
+  -webkit-app-region: ${({ $embedded }) => ($embedded ? 'no-drag' : 'drag')};
 
   & > * {
     -webkit-app-region: no-drag;
@@ -387,7 +387,15 @@ function validateRuleForm(form: RuleFormState): string | null {
   return null;
 }
 
-const StorageSettings: React.FC = () => {
+type StorageSettingsProps = {
+  embedded?: boolean;
+  onBack?: () => void;
+};
+
+const StorageSettings: React.FC<StorageSettingsProps> = ({
+  embedded = false,
+  onBack,
+}) => {
   const navigate = useNavigate();
   const { Title } = Typography;
   const modalStyle = React.useMemo(
@@ -637,16 +645,22 @@ const StorageSettings: React.FC = () => {
     style: { minWidth: 56, height: 28, fontSize: 12, borderRadius: 6 },
   }), []);
 
-  return (
-    <OpaquePageContainer>
+  const content = (
+    <>
       <StorageSettingsCompactModalStyle />
-      <Wrapper>
+      <Wrapper $embedded={embedded}>
         <div className="header">
           <div className="header-left">
             <Button
               icon={<IconChevronLeft style={{ fontSize: 14 }} />}
               theme="borderless"
-              onClick={() => navigate(-1)}
+              onClick={() => {
+                if (onBack) {
+                  onBack();
+                  return;
+                }
+                navigate(-1);
+              }}
               className="page-back-button"
             />
             <Title heading={2} className="page-title">
@@ -1019,8 +1033,10 @@ const StorageSettings: React.FC = () => {
           </div>
         </Modal>
       </Wrapper>
-    </OpaquePageContainer>
+    </>
   );
+
+  return embedded ? content : <OpaquePageContainer>{content}</OpaquePageContainer>;
 };
 
 export default StorageSettings;

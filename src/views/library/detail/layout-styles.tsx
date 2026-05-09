@@ -228,8 +228,25 @@ export const SidePanelFooter = styled.div`
     gap: 3px;
   }
 
+  .footer-right {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    min-width: 0;
+  }
+
   .footer-btn {
     ${sidePanelCompactIconButtonStyles}
+  }
+
+  .footer-avatar-btn {
+    border-radius: 999px;
+    padding: 0;
+    overflow: hidden;
+  }
+
+  .footer-avatar-btn .semi-avatar {
+    flex-shrink: 0;
   }
 `;
 

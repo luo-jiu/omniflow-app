@@ -23,13 +23,13 @@ const DEFAULT_FORM_STATE: FormState = {
   siteUrl: '',
 };
 
-const Wrapper = styled.div`
-  padding: 28px 32px 24px;
-  max-width: 900px;
+const Wrapper = styled.div<{ $embedded?: boolean }>`
+  padding: ${({ $embedded }) => ($embedded ? '0' : '28px 32px 24px')};
+  max-width: ${({ $embedded }) => ($embedded ? 'none' : '900px')};
   margin: 0 auto;
   width: 100%;
   color: var(--semi-color-text-0);
-  -webkit-app-region: drag;
+  -webkit-app-region: ${({ $embedded }) => ($embedded ? 'no-drag' : 'drag')};
 
   & > * {
     -webkit-app-region: no-drag;
@@ -320,7 +320,15 @@ function formatDateTime(value?: string | null): string {
   });
 }
 
-const BrowserFileMappingsPage: React.FC = () => {
+type BrowserFileMappingsPageProps = {
+  embedded?: boolean;
+  onBack?: () => void;
+};
+
+const BrowserFileMappingsPage: React.FC<BrowserFileMappingsPageProps> = ({
+  embedded = false,
+  onBack,
+}) => {
   const navigate = useNavigate();
   const { Title } = Typography;
 
@@ -420,15 +428,21 @@ const BrowserFileMappingsPage: React.FC = () => {
     });
   }, [loadList]);
 
-  return (
-    <OpaquePageContainer>
+  const content = (
+    <>
       <BrowserFileMappingsCompactModalStyle />
-      <Wrapper>
+      <Wrapper $embedded={embedded}>
         <div className="header">
           <Button
             icon={<IconChevronLeft style={{ fontSize: 14 }} />}
             theme="borderless"
-            onClick={() => navigate(-1)}
+            onClick={() => {
+              if (onBack) {
+                onBack();
+                return;
+              }
+              navigate(-1);
+            }}
             className="page-back-button"
           />
           <Title heading={2} className="page-title">
@@ -567,9 +581,11 @@ const BrowserFileMappingsPage: React.FC = () => {
           />
         </div>
       </Modal>
-    </Wrapper>
-    </OpaquePageContainer>
+      </Wrapper>
+    </>
   );
+
+  return embedded ? content : <OpaquePageContainer>{content}</OpaquePageContainer>;
 };
 
 export default BrowserFileMappingsPage;

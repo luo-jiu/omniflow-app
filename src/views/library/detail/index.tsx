@@ -9,6 +9,8 @@ import { useParams, useNavigate } from "react-router-dom";
 import { FileViewerProvider } from "@/contexts/FileViewerContext";
 import { LibraryWorkspaceControlsContext } from "@/contexts/library-workspace-controls.context";
 import { MediaRegistryProvider } from "@/contexts/MediaRegistryContext";
+import { useMediaEntries, useMediaRegistry } from "@/hooks/useMediaRegistry";
+import MediaHubPopover from "@/components/business/media-hub-popover";
 import { useFileViewer } from "@/hooks/useFileViewer";
 import {
   IconHome,
@@ -29,7 +31,7 @@ import {
   IconEdit,
   IconPulse,
   IconWrench,
-  IconExit,
+  IconMusic,
 } from "@douyinfe/semi-icons";
 import { Avatar, Input, Modal, Popover, Select, Toast } from '@douyinfe/semi-ui';
 import ContextMenu, { type ContextMenuItem } from "@/components/ui/context-menu";
@@ -81,6 +83,10 @@ import { useAuth } from '@/hooks/useAuth';
 import SearchWorkspace, { type SearchWorkspaceMode } from "./SearchWorkspace";
 import BrowserSettingsWorkspace, { type BrowserSettingsSection } from './BrowserSettingsWorkspace';
 import ToolWorkspace from "@/features/tool-workspace";
+import SystemWorkspace, {
+  type SystemWorkspaceReturnMode,
+  type SystemWorkspaceView,
+} from "@/features/system-workspace";
 import {
   loadLibraryDetailWorkspaceState,
   saveLibraryDetailWorkspaceState,
@@ -169,8 +175,11 @@ type BookmarkEditDraft = {
 } | null;
 
 const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) => {
-  const { user, isLoggedIn, logout } = useAuth();
-  const { setFileUrl, tabs, activeTabId, fileState, reloadActiveTab } = useFileViewer();
+  const { user } = useAuth();
+  const displayName = user?.nickname || user?.username || '未登录';
+  const { setFileUrl, tabs, activeTabId, fileState, reloadActiveTab, activateTab } = useFileViewer();
+  const mediaEntries = useMediaEntries();
+  const mediaRegistry = useMediaRegistry();
   const navigate = useNavigate();
   const sidePanelRef = React.useRef<HTMLDivElement>(null);
   const browserResourcePanelRef = React.useRef<HTMLDivElement>(null);
@@ -258,6 +267,9 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   const [selectedTreeNode, setSelectedTreeNode] = React.useState<SelectedTreeNode | null>(null);
   const [treeRootNodeId, setTreeRootNodeId] = React.useState<number | null>(null);
   const [workspaceDisplayMode, setWorkspaceDisplayMode] = React.useState<WorkspaceDisplayMode>(initialWorkspaceState.workspaceDisplayMode);
+  const [systemWorkspaceTabs, setSystemWorkspaceTabs] = React.useState<SystemWorkspaceView[]>([]);
+  const [activeSystemWorkspaceView, setActiveSystemWorkspaceView] = React.useState<SystemWorkspaceView | null>(null);
+  const [systemWorkspaceReturnMode, setSystemWorkspaceReturnMode] = React.useState<SystemWorkspaceReturnMode>('search-home');
   const [mediaProcessingRequest, setMediaProcessingRequest] = React.useState<ToolWorkspaceMediaRequest | null>(null);
   const [libraryMediaProcessingRequest, setLibraryMediaProcessingRequest] = React.useState<ToolWorkspaceLibraryMediaRequest | null>(null);
   const [videoWideModeActive, setVideoWideModeActive] = React.useState(false);
@@ -1357,7 +1369,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
       setWorkspaceDisplayMode('file-viewer');
       return;
     }
-    showSearchHome('files');
+    showSearchHome();
   }, [activeTabId, showSearchHome]);
 
   const openToolsWorkspace = React.useCallback(() => {
@@ -1365,6 +1377,87 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
     setWorkspaceDisplayMode('tools');
     void window.electronEmbeddedBrowser.deactivate();
   }, []);
+
+  const openSystemWorkspace = React.useCallback((view: SystemWorkspaceView) => {
+    setSystemWorkspaceReturnMode((currentReturnMode) => {
+      if (workspaceDisplayMode === 'system') {
+        return currentReturnMode;
+      }
+      return workspaceDisplayMode;
+    });
+    setSystemWorkspaceTabs((currentTabs) => (
+      currentTabs.includes(view) ? currentTabs : [...currentTabs, view]
+    ));
+    setActiveSystemWorkspaceView(view);
+    setBrowserModeOpen(false);
+    setWorkspaceDisplayMode('system');
+    void window.electronEmbeddedBrowser.deactivate();
+  }, [workspaceDisplayMode]);
+
+  const restoreAfterSystemWorkspaceClose = React.useCallback(() => {
+    if (systemWorkspaceReturnMode === 'browser' && browserTabs.length > 0) {
+      openEmbeddedBrowser();
+      return;
+    }
+    if (systemWorkspaceReturnMode === 'tools') {
+      setBrowserModeOpen(false);
+      setWorkspaceDisplayMode('tools');
+      void window.electronEmbeddedBrowser.deactivate();
+      return;
+    }
+    if (systemWorkspaceReturnMode === 'file-viewer' && activeTabId) {
+      openFileWorkspace();
+      return;
+    }
+    showSearchHome();
+  }, [
+    activeTabId,
+    browserTabs.length,
+    openEmbeddedBrowser,
+    openFileWorkspace,
+    showSearchHome,
+    systemWorkspaceReturnMode,
+  ]);
+
+  const closeSystemWorkspaceView = React.useCallback((view?: SystemWorkspaceView) => {
+    const targetView = view ?? activeSystemWorkspaceView;
+    if (!targetView) {
+      setSystemWorkspaceTabs([]);
+      setActiveSystemWorkspaceView(null);
+      restoreAfterSystemWorkspaceClose();
+      return;
+    }
+
+    const currentTabs = systemWorkspaceTabs;
+    const targetIndex = currentTabs.indexOf(targetView);
+    const nextTabs = currentTabs.filter(tab => tab !== targetView);
+
+    setSystemWorkspaceTabs(nextTabs);
+    if (nextTabs.length > 0) {
+      setActiveSystemWorkspaceView((currentActiveView) => {
+        if (currentActiveView && currentActiveView !== targetView && nextTabs.includes(currentActiveView)) {
+          return currentActiveView;
+        }
+        return nextTabs[Math.min(Math.max(targetIndex, 0), nextTabs.length - 1)];
+      });
+      return;
+    }
+
+    setActiveSystemWorkspaceView(null);
+    restoreAfterSystemWorkspaceClose();
+  }, [
+    activeSystemWorkspaceView,
+    restoreAfterSystemWorkspaceClose,
+    systemWorkspaceTabs,
+  ]);
+
+  const closeSystemWorkspace = React.useCallback(() => {
+    closeSystemWorkspaceView();
+  }, [closeSystemWorkspaceView]);
+
+  const openLegacySystemRoute = React.useCallback((route: string) => {
+    navigate(route);
+  }, [navigate]);
 
   const openMediaProcessingWorkspace = React.useCallback((resources: EmbeddedBrowserCapturedResource[]) => {
     if (!resources.length) {
@@ -2026,6 +2119,14 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   }, [activeTabId, browserModeOpen, workspaceDisplayMode]);
 
   React.useEffect(() => {
+    if (workspaceDisplayMode === 'system' || systemWorkspaceTabs.length === 0) {
+      return;
+    }
+    setSystemWorkspaceTabs([]);
+    setActiveSystemWorkspaceView(null);
+  }, [systemWorkspaceTabs.length, workspaceDisplayMode]);
+
+  React.useEffect(() => {
     const nextWorkspaceState: LibraryDetailWorkspaceState = {
       activeBrowserTabId,
       browserInput,
@@ -2339,70 +2440,42 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
             </button>
             <button
               className="footer-btn"
-              onClick={() => navigate("/upload-center")}
+              onClick={() => openSystemWorkspace('uploads')}
               title="上传中心"
             >
               <IconUpload />
             </button>
             <button
               className="footer-btn"
-              onClick={() => navigate(`/libraries/${libraryId}/recycle-bin`)}
+              onClick={() => openSystemWorkspace('recycle-bin')}
               title="回收站"
             >
               <IconDelete />
             </button>
-            {/* Avatar 取代原本「设置」按钮：设置已上提到全局顶栏。详见 docs/media-hub-contract.md */}
-            {isLoggedIn ? (
-              <Popover
-                trigger="click"
-                showArrow={false}
-                position="topLeft"
-                spacing={6}
-                getPopupContainer={getAppPopupContainer}
-                style={{ padding: 0 }}
-                content={
-                  <ContextMenu
-                    title={user?.nickname || user?.username || 'User'}
-                    style={{ border: 'none', boxShadow: 'none' }}
-                    items={[
-                      {
-                        key: 'logout',
-                        label: '退出登录',
-                        icon: <IconExit />,
-                        danger: true,
-                        onClick: () => {
-                          logout();
-                          navigate('/login');
-                        },
-                      },
-                    ]}
-                  />
-                }
+            <button
+              className="footer-btn"
+              onClick={() => openSystemWorkspace('settings')}
+              title="设置"
+            >
+              <IconSetting />
+            </button>
+          </div>
+          <div className="footer-right">
+            <button
+              className="footer-btn footer-avatar-btn"
+              onClick={() => openSystemWorkspace('profile')}
+              title={displayName}
+            >
+              <Avatar
+                size="extra-extra-small"
+                src={user?.avatar}
+                style={{
+                  backgroundColor: user ? 'var(--app-accent)' : 'var(--semi-color-fill-2)',
+                }}
               >
-                <button
-                  className="footer-btn"
-                  type="button"
-                  title={user?.nickname || user?.username || '账户'}
-                >
-                  <Avatar
-                    size="extra-extra-small"
-                    src={user?.avatar}
-                    style={{ backgroundColor: 'var(--app-accent)' }}
-                  >
-                    {(user?.nickname || user?.username || 'U').slice(0, 1).toUpperCase()}
-                  </Avatar>
-                </button>
-              </Popover>
-            ) : (
-              <button
-                className="footer-btn"
-                type="button"
-                onClick={() => navigate('/login')}
-                title="登录"
-              >
-                <Avatar size="extra-extra-small">未</Avatar>
-              </button>
-            )}
+                {displayName?.[0]?.toUpperCase() || '未'}
+              </Avatar>
+            </button>
           </div>
         </SidePanelFooter>
         {sidePanelVisualWidth > 0 ? <ResizeHandle onMouseDown={handleResizeMouseDown} /> : null}
@@ -2576,14 +2649,52 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
             ) : null}
           </div>
           <div className="toolbar-right">
-            {/* MediaHub 已上提到全局顶栏；详见 docs/media-hub-contract.md */}
+            {mediaEntries.length > 0 ? (
+              <Popover
+                trigger="click"
+                showArrow={false}
+                position="bottomRight"
+                spacing={6}
+                getPopupContainer={getAppPopupContainer}
+                content={
+                  <MediaHubPopover
+                    entries={mediaEntries}
+                    onActivate={(tabId) => {
+                      activateTab(tabId);
+                      openFileWorkspace();
+                    }}
+                    onToggle={(entry) => {
+                      if (entry.isPlaying) {
+                        mediaRegistry.pause(entry.entryId);
+                      } else {
+                        void mediaRegistry.play(entry.entryId);
+                      }
+                    }}
+                    onSeek={(entry, time) => {
+                      mediaRegistry.seek(entry.entryId, time);
+                    }}
+                    onDismiss={(entry) => {
+                      mediaRegistry.dismiss(entry.entryId);
+                    }}
+                  />
+                }
+              >
+                <button
+                  type="button"
+                  className="toolbar-action-btn"
+                  title="正在播放的媒体"
+                >
+                  <IconMusic />
+                </button>
+              </Popover>
+            ) : null}
             {browserModeOpen ? null : (
               <button
                 type="button"
                 className="toolbar-action-btn"
                 onClick={handleToolbarRefresh}
                 title="刷新当前标签页"
-                disabled={!activeTabId || workspaceDisplayMode === 'tools'}
+                disabled={!activeTabId || workspaceDisplayMode === 'tools' || workspaceDisplayMode === 'system'}
               >
                 <IconRefresh />
               </button>
@@ -2821,6 +2932,19 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
                 )}
                 rootNodeId={treeRootNodeId}
                 selectedTreeNode={selectedTreeNode}
+              />
+            </div>
+          ) : workspaceDisplayMode === 'system' ? (
+            <div className="workspace-pane active">
+              <SystemWorkspace
+                activeView={activeSystemWorkspaceView}
+                libraryId={libraryId}
+                tabs={systemWorkspaceTabs}
+                onActivateView={setActiveSystemWorkspaceView}
+                onClose={closeSystemWorkspace}
+                onCloseView={closeSystemWorkspaceView}
+                onOpenLegacyRoute={openLegacySystemRoute}
+                onOpenView={openSystemWorkspace}
               />
             </div>
           ) : null}

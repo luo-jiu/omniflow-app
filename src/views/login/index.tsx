@@ -202,7 +202,19 @@ const LoginWrapper = styled.div`
     font-weight: 700;
   }
 
-  .side-title span {
+  .brand-omni {
+    color: var(--auth-accent);
+  }
+
+  .brand-flow {
+    color: var(--auth-text);
+  }
+
+  .side.left .brand-omni {
+    color: var(--auth-text);
+  }
+
+  .side.left .brand-flow {
     color: var(--auth-accent);
   }
 
@@ -497,7 +509,10 @@ const Login: React.FC = () => {
           </div>
 
           <div className="side left">
-            <h2 className="side-title"><span>OMNI</span><br />&amp; FLOW</h2>
+            <h2 className="side-title">
+              <span className="brand-omni">OMNI</span><br />
+              <span className="brand-flow">&amp; FLOW</span>
+            </h2>
             <p className="side-desc">file system crafted for active creators</p>
             <div className="deco-flower" />
             <p className="side-account">Already inside the workspace?</p>
@@ -507,7 +522,10 @@ const Login: React.FC = () => {
           </div>
 
           <div className="side right">
-            <h2 className="side-title"><span>OMNI</span><br />&amp; FLOW</h2>
+            <h2 className="side-title">
+              <span className="brand-omni">OMNI</span><br />
+              <span className="brand-flow">&amp; FLOW</span>
+            </h2>
             <p className="side-desc">build your own structured content hub</p>
             <div className="deco-flower alt" />
             <p className="side-account">Need a new workspace identity?</p>

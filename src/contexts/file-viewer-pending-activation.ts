@@ -1,5 +1,5 @@
 // 跨路由"待激活 tab"协调器。
-// 用于：MediaHub 在非资料库路由下点 entry 跳转 → 先 setPendingActivation(libraryId, tabId)，
+// 用于：未来外部 MediaHub 入口点 entry 跳转 → 先 setPendingActivation(libraryId, tabId)，
 // 再 navigate 到 /libraries/:id；FileViewerProvider 重 mount 或同库内重复触发时，
 // 根据匹配的 libraryId 取走 pending 并 setActiveTabId。
 //

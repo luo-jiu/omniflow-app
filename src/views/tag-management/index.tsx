@@ -128,6 +128,8 @@ const FILE_TAB_SECTION_META = {
   icon: uiMappingTagIcon,
 };
 
+const UI_MAPPING_SECTION_VALUE = 'UI_MAPPING';
+
 const HEX_COLOR_PATTERN = /^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
 const FILE_TAB_UPDATE_EVENT = 'omniflow:file-tab-tags-updated';
 const TAG_COLOR_TONE_STORAGE_KEY = 'tag-management:primary-color-tone:v1';
@@ -168,16 +170,17 @@ const TagCenterPage = styled(OpaquePageContainer)`
   overflow: hidden;
 `;
 
-const Wrapper = styled.div`
-  padding: 28px 32px 24px;
+const Wrapper = styled.div<{ $embedded?: boolean }>`
+  padding: ${({ $embedded }) => ($embedded ? '0' : '28px 32px 24px')};
   width: 100%;
   height: 100%;
+  flex: ${({ $embedded }) => ($embedded ? '1 1 auto' : 'initial')};
   min-height: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
   color: var(--semi-color-text-0);
-  -webkit-app-region: drag;
+  -webkit-app-region: ${({ $embedded }) => ($embedded ? 'no-drag' : 'drag')};
 
   & > * {
     -webkit-app-region: no-drag;
@@ -216,10 +219,68 @@ const Wrapper = styled.div`
 
   .center-layout {
     display: grid;
-    grid-template-columns: 180px minmax(0, 1fr);
-    gap: 14px;
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: 10px;
     flex: 1;
     min-height: 0;
+  }
+
+  .section-switcher {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 42px;
+    padding: 8px 10px;
+    border: 1px solid var(--semi-color-border);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--semi-color-bg-0) 96%, transparent);
+    flex-shrink: 0;
+  }
+
+  .section-switcher-copy {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .section-switcher-title {
+    color: var(--semi-color-text-0);
+    font-size: 13px;
+    font-weight: 700;
+    line-height: 1.25;
+  }
+
+  .section-switcher-desc {
+    color: var(--semi-color-text-2);
+    font-size: 11px;
+    line-height: 1.35;
+  }
+
+  .section-select.semi-select {
+    width: 260px;
+    height: 30px;
+    min-height: 30px;
+    flex-shrink: 0;
+    overflow: hidden;
+    border-radius: 7px;
+  }
+
+  .section-select .semi-select-selection {
+    height: 30px;
+    min-height: 30px;
+    align-items: center;
+    overflow: hidden;
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+
+  .section-select .semi-select-selection-placeholder,
+  .section-select .semi-select-selection-rendered,
+  .section-select .semi-select-selection-text,
+  .section-select .semi-select-selection span {
+    font-size: 13px;
+    line-height: 30px;
   }
 
   .side-panel,
@@ -338,6 +399,8 @@ const Wrapper = styled.div`
   .main-panel {
     display: flex;
     flex-direction: column;
+    min-height: 360px;
+    max-height: 100%;
     overflow: hidden;
   }
 
@@ -611,14 +674,12 @@ const Wrapper = styled.div`
   @media (max-width: 760px) {
     padding: 20px 12px 14px;
 
-    .center-layout {
-      grid-template-columns: 1fr;
+    .section-switcher {
+      align-items: stretch;
+      flex-direction: column;
     }
 
-    .side-panel {
-      display: none;
-    }
-
+    .section-select.semi-select,
     .toolbar-search {
       width: min(100%, 240px);
     }
@@ -1364,7 +1425,15 @@ function mapTagToForm(tag: TagItem): TagFormState {
   };
 }
 
-const TagManagement: React.FC = () => {
+type TagManagementProps = {
+  embedded?: boolean;
+  onBack?: () => void;
+};
+
+const TagManagement: React.FC<TagManagementProps> = ({
+  embedded = false,
+  onBack,
+}) => {
   const navigate = useNavigate();
   const { Title } = Typography;
   const modalNoDragStyle = React.useMemo(
@@ -1644,71 +1713,89 @@ const TagManagement: React.FC = () => {
   const activeMainDescription = activeMode === 'UI_MAPPING'
     ? FILE_TAB_SECTION_META.description
     : activeSectionMeta.description;
+  const activeSectionSelectValue = activeMode === 'UI_MAPPING' ? UI_MAPPING_SECTION_VALUE : activeSection;
 
-  return (
-    <TagCenterPage>
+  const handleSectionSelectChange = (value: unknown) => {
+    const nextValue = String(value);
+    if (nextValue === UI_MAPPING_SECTION_VALUE) {
+      setActiveMode('UI_MAPPING');
+      return;
+    }
+    if (TAG_RESOURCE_SECTIONS.some(section => section.key === nextValue)) {
+      setActiveMode('RESOURCE');
+      setActiveSection(nextValue as TagResourceSection);
+    }
+  };
+
+  const content = (
+    <>
     <TagManagementCompactModalStyle />
-    <Wrapper>
+    <Wrapper $embedded={embedded}>
       <div className="header">
         <div className="header-left">
           <Button
             icon={<IconChevronLeft style={{ fontSize: 14 }} />}
             theme="borderless"
-            onClick={() => navigate(-1)}
+            onClick={() => {
+              if (onBack) {
+                onBack();
+                return;
+              }
+              navigate(-1);
+            }}
             className="page-back-button"
           />
           <Title heading={2} className="page-title">
             标签管理
           </Title>
         </div>
-      </div>
+        </div>
 
-      <div className="center-layout">
-        <aside className="side-panel">
-          <div className="side-heading">资源标签</div>
-          <div className="type-list">
-            {TAG_RESOURCE_SECTIONS.map(section => (
-              <button
-                key={section.key}
-                type="button"
-                className={`type-button ${activeMode === 'RESOURCE' && activeSection === section.key ? 'active' : ''}`}
-                onClick={() => {
-                  setActiveMode('RESOURCE');
-                  setActiveSection(section.key);
-                }}
+        <div className="center-layout">
+          <div className="section-switcher">
+            <div className="section-switcher-copy">
+              <span className="section-switcher-title">标签域</span>
+              <span className="section-switcher-desc">选择资源标签或界面映射，列表会按当前域展开</span>
+            </div>
+            <Select
+              value={activeSectionSelectValue}
+              className="section-select"
+              dropdownClassName={TAG_MANAGEMENT_SELECT_DROPDOWN_CLASS}
+              spacing={0}
+              renderOptionItem={renderTagSelectOptionItem}
+              renderSelectedItem={renderTagSelectSelectedItem}
+              onChange={handleSectionSelectChange}
+            >
+              {TAG_RESOURCE_SECTIONS.map(section => (
+                <Select.Option
+                  key={section.key}
+                  value={section.key}
+                  label={`${section.label} (${sectionCounts.get(section.key) || 0})`}
+                  icon={section.icon}
+                >
+                  {renderTagSelectOption({
+                    value: section.key,
+                    label: `${section.label} (${sectionCounts.get(section.key) || 0})`,
+                    icon: section.icon,
+                  })}
+                </Select.Option>
+              ))}
+              <Select.Option
+                key={UI_MAPPING_SECTION_VALUE}
+                value={UI_MAPPING_SECTION_VALUE}
+                label={`${FILE_TAB_SECTION_META.label} (${fileTabTagMap.size})`}
+                icon={FILE_TAB_SECTION_META.icon}
               >
-                <span className="type-button-inner">
-                  <span className="type-button-top">
-                    <span className="type-button-label">
-                      <img className="type-button-icon" src={section.icon} alt="" />
-                      <span className="type-button-label-text">{section.label}</span>
-                    </span>
-                    <span className="type-count">{sectionCounts.get(section.key) || 0}</span>
-                  </span>
-                </span>
-              </button>
-            ))}
+                {renderTagSelectOption({
+                  value: UI_MAPPING_SECTION_VALUE,
+                  label: `${FILE_TAB_SECTION_META.label} (${fileTabTagMap.size})`,
+                  icon: FILE_TAB_SECTION_META.icon,
+                })}
+              </Select.Option>
+            </Select>
           </div>
-          <div className="side-divider" />
-          <div className="side-heading">界面映射</div>
-          <button
-            type="button"
-            className={`type-button ${activeMode === 'UI_MAPPING' ? 'active' : ''}`}
-            onClick={() => setActiveMode('UI_MAPPING')}
-          >
-            <span className="type-button-inner">
-              <span className="type-button-top">
-                <span className="type-button-label">
-                  <img className="type-button-icon" src={FILE_TAB_SECTION_META.icon} alt="" />
-                  <span className="type-button-label-text">{FILE_TAB_SECTION_META.label}</span>
-                </span>
-                <span className="type-count">{fileTabTagMap.size}</span>
-              </span>
-            </span>
-          </button>
-        </aside>
 
-        <main className="main-panel">
+          <main className="main-panel">
           <div className="main-panel-head">
             <div>
               <Title heading={5} className="main-title">{activeMainTitle}</Title>
@@ -2214,8 +2301,10 @@ const TagManagement: React.FC = () => {
         </div>
       </Modal>
     </Wrapper>
-    </TagCenterPage>
+    </>
   );
+
+  return embedded ? content : <TagCenterPage>{content}</TagCenterPage>;
 };
 
 export default TagManagement;

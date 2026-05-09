@@ -1,6 +1,6 @@
 # MediaHub 契约
 
-更新时间：2026-05-09（含全局顶栏 + 浮窗软关闭/收起）
+更新时间：2026-05-09（含库内工具区入口 + 浮窗软关闭/收起）
 适用范围：`MediaRegistry`、`globalAudioPlayer`、`floatingVideoService`、`MediaHubPopover`、`FloatingMiniVideoPlayer`，以及 audio / video / asmr / audio-archive viewer 与 `FileViewerContext` 的 tab close 路径。
 
 > 本文是 MediaHub 行为的**单一真源**。修改任何与"出声"或 MediaHub 入口相关的代码前必须先读这里。变更行为时必须同步更新本文，并在 PR 描述中点名。
@@ -121,7 +121,7 @@ dismiss(): void            // 完全释放：pause + remove src + delete element
 文件：`src/contexts/file-viewer-pending-activation.ts`
 
 ```ts
-setPendingActivation(libraryId, tabId)    // 由全局 AppHeader 的 mediahub jump 调用
+setPendingActivation(libraryId, tabId)    // 预留给未来外部入口的 MediaHub jump
 takePendingActivation(libraryId)          // 由 FileViewerProvider 消费
 subscribePendingActivation(listener)      // 同 libraryId 内多次 set 也能被 emit 触发
 ```
@@ -130,13 +130,13 @@ subscribePendingActivation(listener)      // 同 libraryId 内多次 set 也能�
 
 ## 3. UI 入口
 
-- **全局顶栏 `AppHeader`**：在 `MainLayout` 内、所有非 `/login` 路由下渲染。携带：传输中心、设置、MediaHub Popover（gated on `useMediaEntries().length > 0`）。**MediaHub 现在是全局可见的**——任何路由下出声实体都能从这里看到/控制/跳转。entry jump 通过 `setPendingActivation` + `navigate('/libraries/:libraryId')` 完成跨路由跳转。
+- **库 / 资源页原有头部工具区**：仓库页新增与资源页同规格的主内容头部，MediaHub Popover 入口放在右侧工具按钮组，设置仍保留在左下角侧栏；`library detail` 继续使用 `ContentToolbar .toolbar-right`。这里沿用原本的工作区工具按钮，不新增全局产品顶栏。
 - **`MediaHubPopover`**：弹窗组件本身保留为 dumb component，`onActivate` / `onToggle` / `onSeek` / `onDismiss` 由调用方提供。entry 行的"跳转 tab"按钮根据 `kind` 显示不同 title（`回到视频 tab` / `回到音频 tab`）。
 - **`FloatingMiniVideoPlayer`**：在 `App.tsx` 顶层始终挂载（host ref 不被卸载），通过 `data-visible` 控制显隐：`transform: translate(20000px, 20000px)` 移到屏外但保持 connected DOM。
   - header 包含两个按钮：「收起」（IconChevronDown）→ `hide()`；「×」→ `softClose()`
   - 点击 header 主体：navigate 回 `/libraries/:libraryId`，触发对应 viewer 重新 mount → `bindInline` 把元素搬回 inline host → 浮窗自动收起
-- **库左下角 Avatar**：`SidePanelFooter` 中替换原「设置」按钮位置；点击展开 logout popover。设置按钮已上提到全局顶栏。
-- **登出**：仅在 library 左下角 avatar popover 中可达。其它路由想登出需先回库；如成本过高再考虑全局化 avatar。
+- **库左下角设置入口**：保留原设置按钮，用户头像可放在同一侧栏容器右下角，不因 MediaHub 改造移动设置入口。
+- **旧全屏系统页**：`/settings`、`/profile`、旧上传 / 回收站页面只作为迁移期兼容入口。新入口应优先使用仓库页或资源页右侧系统视图，避免路由切换影响媒体 DOM、MediaHub entry 和后台任务状态。
 
 ## 4. 行为表
 
@@ -149,7 +149,7 @@ subscribePendingActivation(listener)      // 同 libraryId 内多次 set 也能�
 | 浮窗 收起（hide） | —— | 不动播放 + 收起浮窗；元素留 floating host，hub entry 保留 |
 | `closeTab(tabId)` | `releaseForTab` 触发 `clear()`，从 hub 消失 | `releaseForTab` 触发 `dismiss()`，浮窗消失 |
 | MediaHub × 按钮 | `mediaRegistry.dismiss` → `globalAudioPlayer.clear` | `mediaRegistry.dismiss` → `floatingVideoService.dismiss` |
-| 全局 MediaHub jump（任意路由） | `setPendingActivation(libraryId, tabId)` + navigate；Provider 内消费激活 | 同上；视频元素由 `bindInline` 接回 inline，浮窗自动收起 |
+| 库内 MediaHub jump | `activateTab(tabId)` + 切回 file-viewer | 同上；视频元素由 `bindInline` 接回 inline，浮窗自动收起 |
 | 新源接管 | `ensureSource(newUrl, …)` 复用同一 audio | `bindInline` 检测到 `key` 变化时 `releaseGlobalVideoElement` 旧元素 |
 
 ## 5. 修改禁忌
@@ -167,9 +167,9 @@ subscribePendingActivation(listener)      // 同 libraryId 内多次 set 也能�
 ## 6. 已知缺口与 v2 候补
 
 - 内置浏览器中的视频未接入 MediaHub。需要在 `embedded-browser` 侧暴露 `play/pause/seek/dismiss + tabId/libraryId/title` 才能纳入；目前出于对 webview 生命周期的不确定性放后处理。
-- 浮窗仅 video。音频离库时没有"小窗"，但用户可通过全局顶栏 MediaHub 完整控制（play/pause/seek/dismiss/jump）。
+- 浮窗仅 video。音频离库时没有"小窗"，回到库详情后可通过原有工具区 MediaHub 完整控制（play/pause/seek/dismiss/jump）。
 - 浮窗收起后用户在外部点 hub play → 视频在 off-screen floating host 内继续播放（仅声）；要看见画面需 navigate 回 library。这是预期行为。
-- 登出按钮仅在 library 左下角 avatar 内可达；其它路由想登出需先回库。如成本过高再考虑全局 avatar。
+- 暂无全局产品顶栏；不要为了 MediaHub 单独新增一个顶栏。若未来要在非库路由控制音频 / 视频，应优先复用现有窗口级工具区域或重新设计跨路由工具入口。
 
 ## 7. 维护规则
 
@@ -179,7 +179,7 @@ subscribePendingActivation(listener)      // 同 libraryId 内多次 set 也能�
 - 新的"出声"实体（含浏览器视频接入）
 - 注册 / 注销时机调整
 - tab 关闭路径或 `releaseForTab` 行为变化
-- 浮窗 / popover 的入口位置变化（含全局顶栏布局变更）
+- 浮窗 / popover 的入口位置变化
 - 浮窗按钮语义变化（softClose / hide / dismiss）
 - 跨路由跳转协调器 `file-viewer-pending-activation` 的接口变化
 - 单例约束变化（例如允许多视频）

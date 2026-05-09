@@ -1,47 +1,38 @@
 import { FC } from 'react';
 import { HeaderWrapper } from './style';
-import { Button, Popover } from '@douyinfe/semi-ui';
-import { IconSetting, IconUpload, IconMusic } from '@douyinfe/semi-icons';
-import { useLocation, useNavigate } from 'react-router-dom';
-import { useMediaEntries } from '@/hooks/useMediaRegistry';
-import { mediaRegistry } from '@/contexts/media-registry.singleton';
-import { setPendingActivation } from '@/contexts/file-viewer-pending-activation';
-import MediaHubPopover from '@/components/business/media-hub-popover';
-import { getAppPopupContainer } from '@/utils/popup-container';
-import type { MediaEntry } from '@/contexts/media-registry.context';
+import { Button, Avatar, Popover } from '@douyinfe/semi-ui';
+import { IconSetting, IconExit, IconUpload } from '@douyinfe/semi-icons';
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from '@/hooks/useAuth';
+import ContextMenu from '@/components/ui/context-menu';
 
-// 全局顶栏：所有路由共享。承载传输中心、设置、MediaHub（按需显示）。
-// Avatar/登出 已下沉到 library 左下角；详见 docs/media-hub-contract.md。
 const AppHeader: FC = () => {
   const navigate = useNavigate();
-  const location = useLocation();
-  const mediaEntries = useMediaEntries();
+  const { user, isLoggedIn, logout } = useAuth();
+  const displayName = isLoggedIn ? user?.nickname || user?.username || 'User' : '未登录';
 
-  // 登录页不显示全局顶栏。
-  if (location.pathname === '/login') return null;
-
-  const handleActivate = (tabId: string) => {
-    const entry = mediaEntries.find((e) => e.tabId === tabId);
-    if (!entry || entry.libraryId == null) return;
-    setPendingActivation(entry.libraryId, tabId);
-    navigate(`/libraries/${entry.libraryId}`);
+  const handleLogout = () => {
+    logout();
+    navigate('/login');
   };
 
-  const handleToggle = (entry: MediaEntry) => {
-    if (entry.isPlaying) {
-      mediaRegistry.pause(entry.entryId);
-    } else {
-      void mediaRegistry.play(entry.entryId);
-    }
-  };
-
-  const handleSeek = (entry: MediaEntry, time: number) => {
-    mediaRegistry.seek(entry.entryId, time);
-  };
-
-  const handleDismiss = (entry: MediaEntry) => {
-    mediaRegistry.dismiss(entry.entryId);
-  };
+  const avatarContent = (
+    <div
+      className="avatar-trigger"
+      onClick={() => !isLoggedIn && navigate('/login')}
+    >
+      <Avatar
+        size="small"
+        src={user?.avatar}
+        style={{
+          backgroundColor: isLoggedIn ? 'var(--app-accent)' : 'var(--semi-color-fill-2)',
+        }}
+      >
+        {isLoggedIn ? (displayName?.[0]?.toUpperCase() || 'U') : '未'}
+      </Avatar>
+      <span className="avatar-name">{displayName}</span>
+    </div>
+  );
 
   return (
     <HeaderWrapper>
@@ -54,31 +45,6 @@ const AppHeader: FC = () => {
           </div>
         </div>
         <div className="right-controls">
-          {mediaEntries.length > 0 ? (
-            <Popover
-              trigger="click"
-              showArrow={false}
-              position="bottomRight"
-              spacing={6}
-              getPopupContainer={getAppPopupContainer}
-              content={
-                <MediaHubPopover
-                  entries={mediaEntries}
-                  onActivate={handleActivate}
-                  onToggle={handleToggle}
-                  onSeek={handleSeek}
-                  onDismiss={handleDismiss}
-                />
-              }
-            >
-              <Button
-                theme="borderless"
-                className="header-action"
-                icon={<IconMusic />}
-                title="正在播放的媒体"
-              />
-            </Popover>
-          ) : null}
           <Button
             onClick={() => navigate('/transfer-center?tab=upload')}
             theme="borderless"
@@ -93,6 +59,36 @@ const AppHeader: FC = () => {
             icon={<IconSetting />}
             title="设置"
           />
+
+          <div className="user-section">
+            {isLoggedIn ? (
+              <Popover
+                showArrow={false}
+                spacing={8}
+                style={{ padding: 0 }}
+                content={
+                  <ContextMenu
+                    title={displayName}
+                    style={{ border: 'none', boxShadow: 'none' }}
+                    items={[
+                      {
+                        key: 'logout',
+                        label: '退出登录',
+                        icon: <IconExit />,
+                        danger: true,
+                        onClick: handleLogout,
+                      },
+                    ]}
+                  />
+                }
+              >
+                {avatarContent}
+              </Popover>
+            ) : (
+              avatarContent
+            )}
+          </div>
+
         </div>
       </div>
     </HeaderWrapper>

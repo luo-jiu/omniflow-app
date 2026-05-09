@@ -15,11 +15,19 @@ interface QuickAccessSidebarProps {
   mode: QuickAccessMode;
   onModeChange: (mode: QuickAccessMode) => void;
   onOpenSettings: () => void;
+  onSidebarClick?: () => void;
+  footerContent?: React.ReactNode;
 }
 
-const QuickAccessSidebar: React.FC<QuickAccessSidebarProps> = ({ mode, onModeChange, onOpenSettings }) => {
+const QuickAccessSidebar: React.FC<QuickAccessSidebarProps> = ({
+  mode,
+  onModeChange,
+  onOpenSettings,
+  onSidebarClick,
+  footerContent,
+}) => {
   return (
-    <SideMenu>
+    <SideMenu onClick={onSidebarClick}>
       <SideMenuHeader>Quick Access</SideMenuHeader>
       <SideMenuList>
         <SideMenuItem
@@ -42,9 +50,21 @@ const QuickAccessSidebar: React.FC<QuickAccessSidebarProps> = ({ mode, onModeCha
         </SideMenuItem>
       </SideMenuList>
       <SideMenuFooter>
-        <SideMenuAction onClick={onOpenSettings} title="设置" aria-label="设置">
+        <SideMenuAction
+          onClick={(event) => {
+            event.stopPropagation();
+            onOpenSettings();
+          }}
+          title="设置"
+          aria-label="设置"
+        >
           <IconSetting style={{ fontSize: 15 }} />
         </SideMenuAction>
+        {footerContent ? (
+          <SideMenuAction as="div" className="avatar-action">
+            {footerContent}
+          </SideMenuAction>
+        ) : <span />}
       </SideMenuFooter>
     </SideMenu>
   );
