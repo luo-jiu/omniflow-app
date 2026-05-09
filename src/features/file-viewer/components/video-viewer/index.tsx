@@ -1,9 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { Button, Spin, Toast } from '@douyinfe/semi-ui';
 import {
   IconBackward,
   IconForward,
   IconFullScreenStroked,
+  IconMiniPlayer,
   IconMute,
   IconPause,
   IconPlay,
@@ -286,6 +287,12 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
   const viewerRootRef = useRef<HTMLDivElement>(null);
   const videoElementKey = useMemo(() => `video:${tabId}`, [tabId]);
   const videoRef = useRef<HTMLVideoElement>(getGlobalVideoElement(videoElementKey));
+  const videoMountTokenRef = useRef<number | null>(null);
+  const floatingVideoState = useSyncExternalStore(
+    floatingVideoService.subscribe,
+    floatingVideoService.getState,
+    floatingVideoService.getState,
+  );
   const progressRef = useRef<HTMLDivElement>(null);
   const volumeControlRef = useRef<HTMLDivElement>(null);
   const rateControlRef = useRef<HTMLDivElement>(null);
@@ -325,6 +332,9 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
   const [isRatePanelOpen, setIsRatePanelOpen] = useState(false);
   const [isPlaylistPanelOpen, setIsPlaylistPanelOpen] = useState(false);
   const [isLoadingPlaylistMore, setIsLoadingPlaylistMore] = useState(false);
+
+  const isVideoHostedOutsideInline = floatingVideoState.key === videoElementKey
+    && floatingVideoState.hostMode !== 'inline';
 
   const progressCacheKey = useMemo(() => resolveVideoProgressCacheKey(url, nodeId), [nodeId, url]);
   const playlistItems = useMemo(() => playlist?.items ?? [], [playlist]);
@@ -543,6 +553,7 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
     const host = videoHostRef.current;
     if (!host) return undefined;
     const mounted = mountGlobalVideoElement(videoElementKey, host);
+    videoMountTokenRef.current = mounted.mountToken;
     videoRef.current = mounted.element;
     floatingVideoService.bindInline({
       key: videoElementKey,
@@ -551,6 +562,7 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
       nodeId: nodeId ?? null,
       fileName: fileName ?? '',
       thumbnailUrl,
+      forceInline: true,
     });
 
     return () => {
@@ -565,12 +577,25 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
         connected: elBefore?.isConnected,
       });
       persistVideoProgressRef.current(true);
+      const mountToken = videoMountTokenRef.current ?? mounted.mountToken;
       if (inLibrary) {
-        parkGlobalVideoElement(videoElementKey, mounted.mountToken);
+        const floatingState = floatingVideoService.getState();
+        const isHostedOutsideInline = floatingState.key === videoElementKey
+          && floatingState.hostMode !== 'inline';
+        if (isHostedOutsideInline) {
+          console.log('[video-viewer] cleanup.keep-external-host', {
+            key: videoElementKey,
+            hostMode: floatingState.hostMode,
+            paused: elBefore?.paused,
+            connected: elBefore?.isConnected,
+          });
+          return;
+        }
+        parkGlobalVideoElement(videoElementKey, mountToken);
         console.log('[video-viewer] cleanup.parked', { key: videoElementKey, paused: elBefore?.paused, connected: elBefore?.isConnected });
         return;
       }
-      floatingVideoService.handoffToFloating(videoElementKey, mounted.mountToken);
+      floatingVideoService.handoffToFloating(videoElementKey, mountToken);
       console.log('[video-viewer] cleanup.handed-off', { key: videoElementKey, paused: elBefore?.paused, connected: elBefore?.isConnected });
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -872,6 +897,31 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
       video.pause();
     }
   }, []);
+
+  const restoreVideoInline = useCallback(() => {
+    const host = videoHostRef.current;
+    if (!host) return;
+    const mounted = mountGlobalVideoElement(videoElementKey, host);
+    videoMountTokenRef.current = mounted.mountToken;
+    videoRef.current = mounted.element;
+    floatingVideoService.bindInline({
+      key: videoElementKey,
+      libraryId,
+      tabId,
+      nodeId: nodeId ?? null,
+      fileName: fileName ?? '',
+      thumbnailUrl,
+      forceInline: true,
+    });
+  }, [fileName, libraryId, nodeId, tabId, thumbnailUrl, videoElementKey]);
+
+  const requestFloatingVideo = useCallback(() => {
+    if (isVideoHostedOutsideInline) {
+      restoreVideoInline();
+      return;
+    }
+    void floatingVideoService.requestSystemFloating();
+  }, [isVideoHostedOutsideInline, restoreVideoInline]);
 
   const seekBy = useCallback((delta: number) => {
     const video = videoRef.current;
@@ -1193,6 +1243,12 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
 
   const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
   const displayedVolume = Math.round((isMuted ? 0 : volume) * 100);
+  const detachedPosterUrl = floatingVideoState.thumbnailUrl || thumbnailUrl;
+  const detachedPosterStyle = useMemo<React.CSSProperties | undefined>(() => (
+    detachedPosterUrl
+      ? { backgroundImage: `url(${JSON.stringify(detachedPosterUrl)})` }
+      : undefined
+  ), [detachedPosterUrl]);
 
   return (
     <VideoViewerWrapper ref={viewerRootRef}>
@@ -1210,10 +1266,32 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
             <div className="video-shell" ref={containerRef}>
               <div
                 ref={videoHostRef}
-                className="video-element-host"
+                className={`video-element-host ${isVideoHostedOutsideInline ? 'detached' : ''}`}
                 onDoubleClick={toggleFullscreen}
               />
-              {activeSubtitleCue && (
+              {isVideoHostedOutsideInline && (
+                <div className="video-detached-placeholder">
+                  {detachedPosterUrl && (
+                    <div
+                      className="video-detached-poster"
+                      style={detachedPosterStyle}
+                    />
+                  )}
+                  <div className="video-detached-card">
+                    <span className="video-detached-title">视频正在小窗播放</span>
+                    <span className="video-detached-desc">画面已移到浮窗，播放进度会继续保留。</span>
+                    <Button
+                      icon={<IconShrinkScreenStroked />}
+                      type="primary"
+                      theme="solid"
+                      onClick={restoreVideoInline}
+                    >
+                      收回 inline
+                    </Button>
+                  </div>
+                </div>
+              )}
+              {!isVideoHostedOutsideInline && activeSubtitleCue && (
                 <div
                   className="subtitle-overlay"
                   style={{
@@ -1228,7 +1306,7 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
                   ))}
                 </div>
               )}
-              {isBuffering && (
+              {!isVideoHostedOutsideInline && isBuffering && (
                 <div className="buffering-overlay">
                   <Spin size="large" tip="视频加载中..." />
                 </div>
@@ -1372,6 +1450,15 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
                   onClick={toggleConsole}
                   title={isConsoleOpen ? '隐藏工具台' : '显示工具台'}
                   aria-label={isConsoleOpen ? '隐藏工具台' : '显示工具台'}
+                />
+
+                <Button
+                  icon={<span className="video-control-icon"><IconMiniPlayer /></span>}
+                  theme={isVideoHostedOutsideInline ? 'solid' : 'borderless'}
+                  type={isVideoHostedOutsideInline ? 'primary' : 'tertiary'}
+                  onClick={requestFloatingVideo}
+                  title={isVideoHostedOutsideInline ? '收回播放器' : '桌面小窗'}
+                  aria-label={isVideoHostedOutsideInline ? '收回播放器' : '桌面小窗'}
                 />
 
                 <Button

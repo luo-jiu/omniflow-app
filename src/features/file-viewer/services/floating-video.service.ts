@@ -4,6 +4,7 @@ import {
   getGlobalVideoElement,
   releaseGlobalVideoElement,
 } from './global-video-elements';
+import { createDocumentPipShell, type DocumentPipShell } from './document-pip-shell';
 
 // 单例 entryId：同一时刻最多一条 video 记录在 MediaHub 中。详见 docs/media-hub-contract.md。
 const VIDEO_REGISTRY_ENTRY_ID = 'video:active';
@@ -14,8 +15,25 @@ function dbg(...args: unknown[]) {
   console.log(DEBUG_TAG, ...args);
 }
 
+type FloatingVideoHostMode = 'inline' | 'app-floating' | 'document-pip';
+
+type DocumentPictureInPictureController = {
+  requestWindow(options?: { width?: number; height?: number }): Promise<Window>;
+};
+
+type WindowWithDocumentPictureInPicture = Window & {
+  documentPictureInPicture?: DocumentPictureInPictureController;
+};
+
+type DocumentPipRequestSnapshot = {
+  key: string;
+  tabId: string | null;
+  element: HTMLVideoElement | null;
+};
+
 export interface FloatingVideoState {
   visible: boolean;
+  hostMode: FloatingVideoHostMode;
   key: string | null;
   libraryId: number | null;
   tabId: string | null;
@@ -34,12 +52,14 @@ export interface BindInlineMeta {
   nodeId: number | null;
   fileName: string;
   thumbnailUrl?: string;
+  forceInline?: boolean;
 }
 
 type StateListener = (state: FloatingVideoState) => void;
 
 const INITIAL_STATE: FloatingVideoState = {
   visible: false,
+  hostMode: 'inline',
   key: null,
   libraryId: null,
   tabId: null,
@@ -65,6 +85,10 @@ class FloatingVideoService {
   private registeredTabId: string | null = null;
   // 一旦视频被用户触发过 play()，就持续在 MediaHub 中显示，直到 dismiss。匹配旧 useRegisterMediaEntry 的 hasStartedPlaying 语义。
   private hasStarted = false;
+  private documentPipWindow: Window | null = null;
+  private documentPipHostEl: HTMLDivElement | null = null;
+  private documentPipShell: DocumentPipShell | null = null;
+  private closingDocumentPipForInline = false;
 
   private onPlay = () => {
     dbg('video.event play', { key: this.state.key, paused: this.boundElement?.paused, ct: this.boundElement?.currentTime });
@@ -113,8 +137,22 @@ class FloatingVideoService {
   bindInline = (meta: BindInlineMeta) => {
     dbg('bindInline', { meta, prevKey: this.state.key, prevVisible: this.state.visible });
     const isNewKey = this.state.key !== meta.key;
+    const shouldForceInline = meta.forceInline || isNewKey || this.state.hostMode === 'inline';
+
+    if (!shouldForceInline && this.state.key === meta.key) {
+      this.setState({
+        libraryId: meta.libraryId,
+        tabId: meta.tabId,
+        nodeId: meta.nodeId,
+        fileName: meta.fileName,
+        thumbnailUrl: meta.thumbnailUrl,
+      });
+      return;
+    }
+
+    this.closeDocumentPipForInlineRestore();
     // 切到新视频时，若浮窗里还有旧视频，释放旧元素，避免双实例。
-    if (this.state.key && isNewKey && this.state.visible) {
+    if (this.state.key && isNewKey && this.state.hostMode !== 'inline') {
       releaseGlobalVideoElement(this.state.key);
     }
     if (isNewKey) {
@@ -127,6 +165,7 @@ class FloatingVideoService {
     this.clearAutoResumeTimer();
     this.setState({
       visible: false,
+      hostMode: 'inline',
       key: meta.key,
       libraryId: meta.libraryId,
       tabId: meta.tabId,
@@ -137,6 +176,33 @@ class FloatingVideoService {
       currentTime: el && Number.isFinite(el.currentTime) ? el.currentTime : 0,
       duration: el && Number.isFinite(el.duration) ? el.duration : 0,
     });
+  };
+
+  requestSystemFloating = async () => {
+    const key = this.state.key;
+    if (!key) return false;
+    const el = this.boundElement;
+    const requestSnapshot: DocumentPipRequestSnapshot = {
+      key,
+      tabId: this.state.tabId,
+      element: el,
+    };
+    const wasPlaying = !!(el && !el.paused && !el.ended) || this.state.isPlaying;
+    this.autoResumeArmed = wasPlaying;
+
+    if (this.canUseDocumentPictureInPicture()) {
+      try {
+        const opened = await this.openDocumentPictureInPicture(requestSnapshot);
+        if (opened) return true;
+        return false;
+      } catch (error) {
+        dbg('document-pip.open failed, fallback app-floating', { error: String(error) });
+      }
+    }
+
+    if (!this.isSameVideoRequest(requestSnapshot)) return false;
+    this.showAppFloating();
+    return false;
   };
 
   // 关闭某个 tab 时由 FileViewerContext 调用：若当前视频归属于该 tab，整体释放。
@@ -163,13 +229,17 @@ class FloatingVideoService {
       dbg('handoffToFloating.skip stale key', { wantKey: key, curKey: this.state.key });
       return;
     }
+    if (this.state.hostMode === 'document-pip') {
+      dbg('handoffToFloating.keep document-pip', { key });
+      this.setState({ visible: false });
+      return;
+    }
     // 仅当离开 inline 时元素是播放中，才上膛一次自动续播 —— 用户原本暂停的视频不会被强行播放。
     const wasPlaying = !!(el && !el.paused && !el.ended) || this.state.isPlaying;
     this.autoResumeArmed = wasPlaying;
-    this.setState({ visible: true });
 
     if (this.floatingHostEl) {
-      this.moveElementToFloatingHost();
+      this.showAppFloating();
     } else {
       dbg('handoffToFloating.host not ready, pending', { key, mountToken });
       this.pendingHandoff = { key, mountToken };
@@ -193,7 +263,7 @@ class FloatingVideoService {
     this.floatingHostEl = el;
     if (el && this.pendingHandoff) {
       this.pendingHandoff = null;
-      this.moveElementToFloatingHost();
+      this.showAppFloating();
     }
   };
 
@@ -233,20 +303,29 @@ class FloatingVideoService {
     this.clearAutoResumeTimer();
     const el = this.boundElement;
     if (el && !el.paused) el.pause();
-    this.setState({ visible: false });
+    if (this.state.hostMode === 'document-pip') {
+      this.closeDocumentPipToAppFloating({ pause: true, visible: false });
+      return;
+    }
+    this.setState({ visible: false, hostMode: 'app-floating' });
   };
 
   // 收起：仅收起浮窗 UI，不暂停。tab/元素/hub entry 全保留。
   hide = () => {
     this.autoResumeArmed = false;
     this.clearAutoResumeTimer();
-    this.setState({ visible: false });
+    if (this.state.hostMode === 'document-pip') {
+      this.closeDocumentPipToAppFloating({ pause: false, visible: false });
+      return;
+    }
+    this.setState({ visible: false, hostMode: 'app-floating' });
   };
 
   dismiss = () => {
     const key = this.state.key;
     this.autoResumeArmed = false;
     this.clearAutoResumeTimer();
+    this.cleanupDocumentPipWindow({ close: true });
     this.detachVideoListeners();
     if (key) {
       releaseGlobalVideoElement(key);
@@ -257,6 +336,148 @@ class FloatingVideoService {
     this.state = { ...INITIAL_STATE };
     this.emit();
   };
+
+  private canUseDocumentPictureInPicture() {
+    const controller = (window as WindowWithDocumentPictureInPicture).documentPictureInPicture;
+    return typeof controller?.requestWindow === 'function';
+  }
+
+  private async openDocumentPictureInPicture(requestSnapshot: DocumentPipRequestSnapshot) {
+    if (!requestSnapshot.key || !requestSnapshot.element) throw new Error('No active video');
+    const controller = (window as WindowWithDocumentPictureInPicture).documentPictureInPicture;
+    if (!controller) throw new Error('Document Picture-in-Picture is not available');
+
+    this.cleanupDocumentPipWindow({ close: true });
+    const pipWindow = await controller.requestWindow({ width: 480, height: 320 });
+    if (!this.isSameVideoRequest(requestSnapshot)) {
+      closePipWindow(pipWindow);
+      return false;
+    }
+
+    this.documentPipWindow = pipWindow;
+    this.closingDocumentPipForInline = false;
+    this.renderDocumentPipShell(pipWindow);
+    this.moveElementToDocumentPipHost();
+    pipWindow.addEventListener('pagehide', this.handleDocumentPipPageHide);
+    this.setState({ visible: false, hostMode: 'document-pip' });
+
+    const elAfter = this.boundElement;
+    if (this.autoResumeArmed && elAfter && elAfter.paused && !elAfter.ended) {
+      this.autoResumeArmed = false;
+      this.scheduleAutoResume();
+    }
+    return true;
+  }
+
+  private renderDocumentPipShell(pipWindow: Window) {
+    const shell = createDocumentPipShell(
+      pipWindow,
+      {
+        hide: () => this.hide(),
+        softClose: () => this.softClose(),
+        togglePlay: () => {
+          if (this.state.isPlaying) {
+            this.pause();
+          } else {
+            this.play();
+          }
+        },
+      },
+      this.getDocumentPipShellState(),
+    );
+    this.documentPipHostEl = shell.host;
+    this.documentPipShell = shell;
+    this.updateDocumentPipShell();
+  }
+
+  private handleDocumentPipPageHide = () => {
+    const returningInline = this.closingDocumentPipForInline;
+    dbg('document-pip.pagehide', { returningInline, key: this.state.key });
+    if (returningInline) {
+      this.cleanupDocumentPipWindow({ close: false });
+      this.closingDocumentPipForInline = false;
+      return;
+    }
+    this.closeDocumentPipToAppFloating({ pause: true, visible: false, closeWindow: false });
+  };
+
+  private closeDocumentPipForInlineRestore() {
+    const pipWindow = this.documentPipWindow;
+    if (!pipWindow) return;
+    this.closingDocumentPipForInline = true;
+    this.cleanupDocumentPipWindow({ close: false });
+    try {
+      if (!pipWindow.closed) pipWindow.close();
+    } catch (error) {
+      dbg('document-pip.close for inline failed', { error: String(error) });
+    } finally {
+      this.closingDocumentPipForInline = false;
+    }
+  }
+
+  private closeDocumentPipToAppFloating(options: { pause: boolean; visible: boolean; closeWindow?: boolean }) {
+    const el = this.boundElement;
+    if (options.pause && el && !el.paused) el.pause();
+    this.moveElementToFloatingHost();
+    this.cleanupDocumentPipWindow({ close: options.closeWindow ?? true });
+    this.setState({
+      hostMode: 'app-floating',
+      visible: options.visible,
+      isPlaying: el ? !el.paused && !el.ended : false,
+    });
+  }
+
+  private cleanupDocumentPipWindow(options: { close: boolean }) {
+    const pipWindow = this.documentPipWindow;
+    if (pipWindow) {
+      pipWindow.removeEventListener('pagehide', this.handleDocumentPipPageHide);
+      if (options.close) {
+        try {
+          if (!pipWindow.closed) pipWindow.close();
+        } catch (error) {
+          dbg('document-pip.close failed', { error: String(error) });
+        }
+      }
+    }
+    this.documentPipWindow = null;
+    this.documentPipHostEl = null;
+    this.documentPipShell = null;
+  }
+
+  private updateDocumentPipShell() {
+    this.documentPipShell?.update(this.getDocumentPipShellState());
+  }
+
+  private getDocumentPipShellState() {
+    return {
+      title: this.state.fileName || '视频',
+      isPlaying: this.state.isPlaying,
+      currentTime: this.state.currentTime,
+      duration: this.state.duration,
+    };
+  }
+
+  private isSameVideoRequest(requestSnapshot: DocumentPipRequestSnapshot) {
+    return this.state.key === requestSnapshot.key
+      && this.state.tabId === requestSnapshot.tabId
+      && this.boundElement === requestSnapshot.element;
+  }
+
+  private moveElementToDocumentPipHost() {
+    const key = this.state.key;
+    const host = this.documentPipHostEl;
+    if (!key || !host) return;
+    const el = getGlobalVideoElement(key);
+    if (el.parentElement !== host) {
+      host.appendChild(el);
+    }
+  }
+
+  private showAppFloating() {
+    this.cleanupDocumentPipWindow({ close: true });
+    this.setState({ visible: true, hostMode: 'app-floating' });
+    this.moveElementToFloatingHost();
+  }
 
   private scheduleAutoResume() {
     if (this.autoResumeTimer != null) return;
@@ -341,6 +562,7 @@ class FloatingVideoService {
 
   private emit() {
     this.syncMediaRegistry();
+    this.updateDocumentPipShell();
     this.listeners.forEach((listener) => listener(this.state));
   }
 
@@ -391,6 +613,14 @@ class FloatingVideoService {
       thumbnailUrl,
       libraryId,
     });
+  }
+}
+
+function closePipWindow(pipWindow: Window) {
+  try {
+    if (!pipWindow.closed) pipWindow.close();
+  } catch (error) {
+    dbg('document-pip.close stale window failed', { error: String(error) });
   }
 }
 

@@ -144,10 +144,26 @@
 
 ### 10. 悬浮 mini player（picture-in-picture 风格）
 
-popover 里加个 📌，把当前播放项 detach 成右下角小窗，全应用范围内可见。  
-Electron 起一个 child window or DOM portal 到根。
+**状态**：已从 video viewer 底部控制条落地第一版。
 
-**优先级低**。功能很酷但跟"集中控制"目标重叠度高，先把 #1-#5 做扎实再说。
+当前结论：
+
+- 用户主动点击普通视频的小窗按钮时，优先使用 Chromium Document PiP。
+- Document PiP 不可用或请求失败时，降级到应用内右下角浮窗。
+- 离开资料库等被动场景不强行开 PiP，仍走应用内浮窗；如果用户已主动进入 PiP，则继续保持 PiP。
+- inline 区域显示海报占位 + “收回 inline”按钮。
+- 第一版目标是跑通宿主迁移、关闭、收回、降级和 MediaHub 状态链路，不追求最终播放器质感。
+
+正式契约见 `docs/media-hub-contract.md` 和 `docs/viewers/video-viewer.md`。
+
+后续精修：
+
+- PiP 窗口加入进度条 seek、音量、倍速等常用控制，但仍由 `floatingVideoService` 统一转发到同一个 `<video>` 元素。
+- 打磨 PiP 窗口视觉，让它更像正式桌面播放器：标题区、控制区、圆角、阴影、macOS / Windows 观感。
+- 明确 PiP 内“收起 / 关闭 / 回到 inline”的文案和按钮位置，避免和应用内浮窗语义混淆。
+- 验证 macOS / Windows / 不支持 Document PiP 环境下的 fallback 表现。
+- 如需更复杂控件，再评估是否用 React portal 渲染 PiP window 内容；不要在 viewer 里直接维护第二套 PiP 状态。
+- 观察 Document PiP 原生关闭、主窗口关闭、切库、关闭 tab 的边界路径，必要时补自动化或专门手工验证脚本。
 
 ---
 

@@ -133,6 +133,9 @@ legacy 兼容检查：
 
 - 不支持预览的文件
 - `nodeId` 和 `url` 作为 tab id 的复用行为
+- 视频底部小窗按钮优先进入 Document PiP；不支持时降级应用内浮窗
+- 视频小窗状态下 inline 占位可收回，同一个视频元素进度不丢
+- Document PiP 原生关闭、应用内浮窗收起 / 软关闭后，MediaHub entry 和播放状态符合 `docs/media-hub-contract.md`
 
 ### 3.5 上传中心
 
