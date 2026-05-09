@@ -36,6 +36,7 @@
 - 内置类型与归档模式：`docs/built-in-type-and-archive-mode.md`
 - Viewer 映射专题：`docs/file-viewer-and-archive-viewer-map.md`
 - Viewer 文档入口：`docs/viewers/README.md`
+- MediaHub 契约（出声实体注册 / 浮窗 / tab 关闭释放）：`docs/media-hub-contract.md`
 - 前端验证矩阵：`docs/frontend-validation-matrix.md`
 - 资源捕捉迁移审计：`docs/cat-catch-migration-audit.md`
 - 上传中心局部说明：`src/modules/upload-center/README.md`
@@ -106,4 +107,5 @@ npm run build
 - 未阅读必读文档，不得修改 `omniflow-app` 下的任何代码或文档。
 - 不得绕过前端规范修改 API / IPC 契约、状态所有权、Electron 边界、主题布局或验证门禁。
 - 不得把工作区状态、文件预览状态、浏览器 tab 状态或资源捕捉状态做成多份 source of truth。
+- 不得绕过 `docs/media-hub-contract.md`：MediaHub 注册必须由 `globalAudioPlayer` / `floatingVideoService` 服务层完成，不得让 viewer 组件再走 `useRegisterMediaEntry`；tab 关闭释放必须经 `FileViewerContext.closeTab` / `closeTabByNodeId` 走 `releaseForTab`。
 - 不得用项目 README 替代专题文档或规范文档。

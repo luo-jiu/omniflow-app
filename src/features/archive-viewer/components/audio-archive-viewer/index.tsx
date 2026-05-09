@@ -26,7 +26,6 @@ import {
 } from '@/features/file-explorer/services/file.api';
 import { runtimeLogger } from '@/utils/runtimeLogger';
 import { useFileViewer } from '@/hooks/useFileViewer';
-import { useRegisterMediaEntry } from '@/hooks/useMediaRegistry';
 import { useGlobalAudioPlayback } from '@/features/file-viewer/hooks/useGlobalAudioPlayback';
 import { useTimedText } from '@/features/file-viewer/timed-text/useTimedText';
 import type {
@@ -236,18 +235,16 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
   );
   const effectiveCard = currentCard || selectedCard || cards[0] || null;
   const {
-    clearIfOwned,
     ensureSource,
     getPlayerState,
     isOwnedSource: isOwnedArchiveSource,
-    pause,
     play,
     playerState,
     seekTo,
     setMuted,
     setVolume,
     togglePlay: toggleOwnedPlay,
-  } = useGlobalAudioPlayback({ ownerType: 'default', ownerKey: archiveOwnerKey });
+  } = useGlobalAudioPlayback({ ownerType: 'default', ownerKey: archiveOwnerKey, tabId, libraryId });
   const isOwnedSource = Boolean(isOwnedArchiveSource && currentAudioUrl && playerState.src === currentAudioUrl);
   const currentTime = isOwnedSource ? playerState.currentTime : 0;
   const duration = isOwnedSource ? playerState.duration : 0;
@@ -476,7 +473,7 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
       if (!nextUrl) {
         throw new Error('未获取到音频访问链接');
       }
-      ensureSource(nextUrl, card.title);
+      ensureSource(nextUrl, card.title, card.coverUrl ?? null);
       await play();
       setCurrentCardId(card.id);
       setSelectedCardId(card.id);
@@ -502,7 +499,7 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
       if (!nextUrl) {
         throw new Error('未获取到音频访问链接');
       }
-      ensureSource(nextUrl, card.title);
+      ensureSource(nextUrl, card.title, card.coverUrl ?? null);
       seekTo(0);
       await play();
       setCurrentCardId(card.id);
@@ -741,38 +738,14 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
 
   const progressPercent = duration > 0 ? Math.min(Math.max((currentTime / duration) * 100, 0), 100) : 0;
 
-  useRegisterMediaEntry({
-    enabled: isOwnedSource && playerState.hasStarted,
-    entryId: `audio-archive:${tabId}`,
-    kind: 'audio',
-    tabId,
-    title: currentCard?.title || playerState.trackName || playlistTitle,
-    isPlaying: isOwnedSource && playerState.isPlaying,
-    currentTime,
-    duration,
-    thumbnailUrl: currentCard?.coverUrl || undefined,
-    play: () => {
-      void play().catch((playError) => {
-        runtimeLogger.error('从媒体控制中心播放音频归档失败:', playError);
-      });
-    },
-    pause: () => {
-      pause();
-    },
-    seek: (time) => {
-      seekTo(time);
-    },
-    dismiss: () => {
-      clearIfOwned();
-    },
-  });
+  // MediaHub 注册由 globalAudioPlayer 服务层完成；详见 docs/media-hub-contract.md。
+  // 关闭归档 tab 时必须由 FileViewerContext.releaseForTab 释放，不能依赖组件卸载。
 
   useEffect(() => {
     return () => {
       clearPendingCoverClick();
-      clearIfOwned();
     };
-  }, [clearIfOwned, clearPendingCoverClick]);
+  }, [clearPendingCoverClick]);
 
   return (
     <AudioArchiveViewerWrapper className={expanded ? 'is-expanded' : ''}>

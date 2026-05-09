@@ -418,8 +418,8 @@ const MediaHubPopover: React.FC<MediaHubPopoverProps> = ({ entries, onActivate, 
                   type="button"
                   className="jump-btn"
                   onClick={() => onActivate(entry.tabId)}
-                  title="回到标签页"
-                  aria-label="回到标签页"
+                  title={entry.kind === 'video' ? '回到视频 tab' : '回到音频 tab'}
+                  aria-label={entry.kind === 'video' ? '回到视频 tab' : '回到音频 tab'}
                 >
                   <IconExternalOpenStroked />
                 </button>

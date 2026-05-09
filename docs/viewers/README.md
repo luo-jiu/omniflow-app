@@ -57,7 +57,9 @@
 当前 viewer 体系的跨 tab / 多媒体规则：
 
 - 视频 viewer 不再因为所在 tab 失活而自动 pause；保留进度落库（`persistVideoProgress(true)`），但不再触发 `<video>.pause()`。多个视频可在不同 tab 并行播放。
+- 普通视频的 `<video>` 元素由 `global-video-elements` 按 tab 管理。进入设置、传输中心、回收站等路由级页面时，视频元素会停靠到隐藏宿主继续播放；回到原 tab 后再挂回播放器容器。只有在库详情工作区内关闭对应 tab 或媒体控制中心移除时，才释放该 tab 的视频元素。
 - 音频 viewer / asmr viewer / 音频归档播放器共用 `globalAudioPlayer` 单例 `<audio>`，所以同一时刻仍只能有一个音频源在播放（属预期范围）；组件侧统一通过 `useGlobalAudioPlayback` 订阅和控制这个单例，但 UI 仍由各 viewer 自己决定。
+- 进入设置、传输中心、回收站等非库详情工作区页面时，音频 viewer 卸载不得清空 `globalAudioPlayer`，避免后台播放被页面跳转打断；只有在库详情工作区内关闭对应 tab，或通过媒体控制中心 / 播放器自身执行关闭、暂停、切歌等对应媒体操作时，才由 owner 清理或变更播放源。
 - video 启动播放不再调用 `globalAudioPlayer.pause()` 暂停音频；audio 启动播放不再暂停所有视频。音视频可并行。
 - 所有 audio / video / asmr viewer，以及音频归档页内置播放器，在挂载且首次播放后向 `MediaRegistry` 注册自身，由 `library detail` 工具栏右侧的"媒体控制中心"集中展示与控制，详见 `docs/library-detail-workspace.md` §11。
 

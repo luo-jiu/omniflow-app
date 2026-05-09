@@ -1,4 +1,4 @@
-import React, { useState, ReactNode } from 'react';
+import React, { useState, useEffect, ReactNode } from 'react';
 import {
   FileViewerContext,
   type FileViewerState,
@@ -9,6 +9,13 @@ import {
   type FileViewerSubtitleSource,
 } from './file-viewer.context';
 import { normalizeFileViewerReturnTarget } from './file-viewer-return-target';
+import { globalAudioPlayer } from '@/features/file-viewer/services/global-audio-player';
+import { floatingVideoService } from '@/features/file-viewer/services/floating-video.service';
+import {
+  commitPendingActivation,
+  peekPendingActivation,
+  subscribePendingActivation,
+} from './file-viewer-pending-activation';
 import {
   getFileViewerStateCache,
   setFileViewerStateCache,
@@ -239,9 +246,14 @@ function reorderTabsInState(
   };
 }
 
-export const FileViewerProvider: React.FC<{ children: ReactNode; cacheKey?: string }> = ({
+export const FileViewerProvider: React.FC<{
+  children: ReactNode;
+  cacheKey?: string;
+  libraryId?: number | null;
+}> = ({
   children,
   cacheKey,
+  libraryId = null,
 }) => {
   const [viewerState, setViewerState] = useState<FileViewerStoreState>(() => {
     if (!cacheKey) {
@@ -251,6 +263,40 @@ export const FileViewerProvider: React.FC<{ children: ReactNode; cacheKey?: stri
   });
   const activeCacheKeyRef = React.useRef<string | undefined>(cacheKey);
   const skipPersistRef = React.useRef(false);
+
+  // 跨路由"待激活 tab"消费：MediaHub 在外部点 jump 时 setPendingActivation；
+  // 设计要点（解决 StrictMode 双 mount 把 setState 丢弃的问题）：
+  //   - 不在调 setState 的同时 commit pending；
+  //   - 把"清 pending"和"viewerState.activeTabId 真的等于 tabId"挂钩；
+  //   - tabs / activeTabId / pendingTick 任意变化都重跑 effect 直到 pending 能匹配上。
+  // 详见 docs/media-hub-contract.md。
+  const [pendingTick, setPendingTick] = useState(0);
+  useEffect(() => subscribePendingActivation(() => setPendingTick((n) => n + 1)), []);
+
+  useEffect(() => {
+    if (libraryId == null) return;
+    const tabId = peekPendingActivation(libraryId);
+    if (!tabId) return;
+    // 已经激活到位 → 清 pending
+    if (viewerState.activeTabId === tabId) {
+      commitPendingActivation(libraryId, tabId);
+      return;
+    }
+    // 还未激活：tab 在 → setState 激活；tab 不在 → 等下一次 tabs 变化再来
+    const target = viewerState.tabs.find((tab) => tab.id === tabId);
+    if (!target) return;
+    setViewerState((prev) => {
+      if (prev.activeTabId === tabId) return prev;
+      const persistTarget = prev.tabs.find((tab) => tab.id === tabId);
+      if (!persistTarget) return prev;
+      return {
+        ...prev,
+        activeTabId: tabId,
+        fileState: toFileState(persistTarget),
+      };
+    });
+    // 下一帧 render 后 viewerState.activeTabId 变，本 effect 重跑走第一个分支清 pending
+  }, [libraryId, viewerState.activeTabId, viewerState.tabs, pendingTick]);
 
   const setFileUrl = (
     url: string | null,
@@ -379,20 +425,27 @@ export const FileViewerProvider: React.FC<{ children: ReactNode; cacheKey?: stri
     });
   };
 
+  // 关闭 tab 时务必通知媒体服务释放对应资源（同浏览器关 tab 一致）。
+  // 服务层是 MediaHub 的真实持有者，组件卸载不再触发释放，必须从这里兜底。
+  // 详见 docs/media-hub-contract.md。
+  const releaseMediaForTab = (tabId: string) => {
+    globalAudioPlayer.releaseForTab(tabId);
+    floatingVideoService.releaseForTab(tabId);
+  };
+
   const closeTab = (tabId: string) => {
+    releaseMediaForTab(tabId);
     setViewerState(prev => closeTabInState(prev, tabId));
   };
 
   const closeTabByNodeId = (nodeId: number) => {
-    setViewerState(prev => {
-      const targetIds = prev.tabs
-        .filter(tab => tab.nodeId === nodeId)
-        .map(tab => tab.id);
-      if (targetIds.length === 0) {
-        return prev;
-      }
-      return targetIds.reduce((state, tabId) => closeTabInState(state, tabId), prev);
-    });
+    const targetIds = viewerState.tabs
+      .filter(tab => tab.nodeId === nodeId)
+      .map(tab => tab.id);
+    if (targetIds.length === 0) return;
+    // 副作用必须在 setState 外执行——updater 必须保持纯函数，否则 StrictMode 双调用会重复 release。
+    targetIds.forEach(releaseMediaForTab);
+    setViewerState(prev => targetIds.reduce((state, tabId) => closeTabInState(state, tabId), prev));
   };
 
   const reloadActiveTab = () => {

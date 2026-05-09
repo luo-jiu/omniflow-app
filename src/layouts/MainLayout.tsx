@@ -8,6 +8,7 @@ interface MainLayoutProps {
 
 const LayoutWrapper = styled.div`
   display: flex;
+  flex-direction: column;
   position: relative;
   height: 100vh;
   width: 100vw;

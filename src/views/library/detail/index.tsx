@@ -9,8 +9,6 @@ import { useParams, useNavigate } from "react-router-dom";
 import { FileViewerProvider } from "@/contexts/FileViewerContext";
 import { LibraryWorkspaceControlsContext } from "@/contexts/library-workspace-controls.context";
 import { MediaRegistryProvider } from "@/contexts/MediaRegistryContext";
-import { useMediaEntries, useMediaRegistry } from "@/hooks/useMediaRegistry";
-import MediaHubPopover from "@/components/business/media-hub-popover";
 import { useFileViewer } from "@/hooks/useFileViewer";
 import {
   IconHome,
@@ -31,9 +29,9 @@ import {
   IconEdit,
   IconPulse,
   IconWrench,
-  IconMusic,
+  IconExit,
 } from "@douyinfe/semi-icons";
-import { Input, Modal, Popover, Select, Toast } from '@douyinfe/semi-ui';
+import { Avatar, Input, Modal, Popover, Select, Toast } from '@douyinfe/semi-ui';
 import ContextMenu, { type ContextMenuItem } from "@/components/ui/context-menu";
 import EmbeddedBrowserPanel, { type EmbeddedBrowserHandle } from "@/features/embedded-browser/components/EmbeddedBrowserPanel";
 import EmbeddedBrowserAutoFillBar from "@/features/embedded-browser/passwords/components/EmbeddedBrowserAutoFillBar";
@@ -171,10 +169,8 @@ type BookmarkEditDraft = {
 } | null;
 
 const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) => {
-  const { user } = useAuth();
-  const { setFileUrl, tabs, activeTabId, fileState, reloadActiveTab, activateTab } = useFileViewer();
-  const mediaEntries = useMediaEntries();
-  const mediaRegistry = useMediaRegistry();
+  const { user, isLoggedIn, logout } = useAuth();
+  const { setFileUrl, tabs, activeTabId, fileState, reloadActiveTab } = useFileViewer();
   const navigate = useNavigate();
   const sidePanelRef = React.useRef<HTMLDivElement>(null);
   const browserResourcePanelRef = React.useRef<HTMLDivElement>(null);
@@ -2355,13 +2351,58 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
             >
               <IconDelete />
             </button>
-            <button
-              className="footer-btn"
-              onClick={() => navigate("/settings")}
-              title="设置"
-            >
-              <IconSetting />
-            </button>
+            {/* Avatar 取代原本「设置」按钮：设置已上提到全局顶栏。详见 docs/media-hub-contract.md */}
+            {isLoggedIn ? (
+              <Popover
+                trigger="click"
+                showArrow={false}
+                position="topLeft"
+                spacing={6}
+                getPopupContainer={getAppPopupContainer}
+                style={{ padding: 0 }}
+                content={
+                  <ContextMenu
+                    title={user?.nickname || user?.username || 'User'}
+                    style={{ border: 'none', boxShadow: 'none' }}
+                    items={[
+                      {
+                        key: 'logout',
+                        label: '退出登录',
+                        icon: <IconExit />,
+                        danger: true,
+                        onClick: () => {
+                          logout();
+                          navigate('/login');
+                        },
+                      },
+                    ]}
+                  />
+                }
+              >
+                <button
+                  className="footer-btn"
+                  type="button"
+                  title={user?.nickname || user?.username || '账户'}
+                >
+                  <Avatar
+                    size="extra-extra-small"
+                    src={user?.avatar}
+                    style={{ backgroundColor: 'var(--app-accent)' }}
+                  >
+                    {(user?.nickname || user?.username || 'U').slice(0, 1).toUpperCase()}
+                  </Avatar>
+                </button>
+              </Popover>
+            ) : (
+              <button
+                className="footer-btn"
+                type="button"
+                onClick={() => navigate('/login')}
+                title="登录"
+              >
+                <Avatar size="extra-extra-small">未</Avatar>
+              </button>
+            )}
           </div>
         </SidePanelFooter>
         {sidePanelVisualWidth > 0 ? <ResizeHandle onMouseDown={handleResizeMouseDown} /> : null}
@@ -2535,45 +2576,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
             ) : null}
           </div>
           <div className="toolbar-right">
-            {mediaEntries.length > 0 ? (
-              <Popover
-                trigger="click"
-                showArrow={false}
-                position="bottomRight"
-                spacing={6}
-                getPopupContainer={getAppPopupContainer}
-                content={
-                  <MediaHubPopover
-                    entries={mediaEntries}
-                    onActivate={(tabId) => {
-                      activateTab(tabId);
-                      openFileWorkspace();
-                    }}
-                    onToggle={(entry) => {
-                      if (entry.isPlaying) {
-                        mediaRegistry.pause(entry.entryId);
-                      } else {
-                        void mediaRegistry.play(entry.entryId);
-                      }
-                    }}
-                    onSeek={(entry, time) => {
-                      mediaRegistry.seek(entry.entryId, time);
-                    }}
-                    onDismiss={(entry) => {
-                      mediaRegistry.dismiss(entry.entryId);
-                    }}
-                  />
-                }
-              >
-                <button
-                  type="button"
-                  className="toolbar-action-btn"
-                  title="正在播放的媒体"
-                >
-                  <IconMusic />
-                </button>
-              </Popover>
-            ) : null}
+            {/* MediaHub 已上提到全局顶栏；详见 docs/media-hub-contract.md */}
             {browserModeOpen ? null : (
               <button
                 type="button"
@@ -2969,7 +2972,7 @@ const LibraryDetail: React.FC = () => {
   const cacheKey = `library:${id}`;
 
   return (
-    <FileViewerProvider key={cacheKey} cacheKey={cacheKey}>
+    <FileViewerProvider key={cacheKey} cacheKey={cacheKey} libraryId={Number.isFinite(libraryId) && libraryId > 0 ? libraryId : null}>
       <MediaRegistryProvider>
         <LibraryDetailContent key={id} libraryId={libraryId} />
       </MediaRegistryProvider>

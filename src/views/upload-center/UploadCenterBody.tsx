@@ -33,6 +33,7 @@ const Body = styled.div`
     margin-top: 4px;
     font-size: 17px;
     font-weight: 700;
+    font-variant-numeric: tabular-nums;
   }
 
   .list {
@@ -76,18 +77,39 @@ const Body = styled.div`
 
   .row-meta {
     margin-top: 7px;
-    display: flex;
-    justify-content: space-between;
+    display: grid;
+    grid-template-columns:
+      minmax(48px, 0.55fr)
+      minmax(150px, 1.25fr)
+      58px
+      86px
+      92px
+      minmax(112px, auto);
     gap: 8px;
     color: var(--semi-color-text-2);
     font-size: 10px;
     align-items: center;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .row-metric {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .row-metric.align-right {
+    text-align: right;
   }
 
   .row-actions {
     display: flex;
     gap: 5px;
+    justify-content: flex-end;
     flex-shrink: 0;
+    min-width: 112px;
+    min-height: 25px;
   }
 
   .row-action-button {
@@ -139,10 +161,13 @@ const Body = styled.div`
   .tree-meta {
     font-size: 9px;
     color: var(--semi-color-text-2);
-    display: flex;
+    display: grid;
+    grid-template-columns: 44px 72px;
     align-items: center;
     gap: 5px;
     flex-shrink: 0;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
   }
 
   .tree-more {
@@ -153,6 +178,13 @@ const Body = styled.div`
   .semi-tag {
     font-size: 10px;
     line-height: 16px;
+  }
+
+  .status-tag {
+    min-width: 52px;
+    justify-content: center;
+    flex-shrink: 0;
+    font-variant-numeric: tabular-nums;
   }
 
   .semi-progress-line {
@@ -193,6 +225,19 @@ const Body = styled.div`
   @media (max-width: 760px) {
     .summary {
       grid-template-columns: repeat(2, minmax(100px, 1fr));
+    }
+
+    .row-meta {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .row-metric.align-right {
+      text-align: left;
+    }
+
+    .row-actions {
+      justify-content: flex-start;
+      min-width: 0;
     }
   }
 `;
@@ -795,7 +840,7 @@ const UploadCenterBody: React.FC = () => {
                       <span style={{ fontSize: 11 }}>{group.isFolder ? '📁' : '📄'}</span>
                       <div className="name" title={group.label}>{group.label}</div>
                     </div>
-                    <Tag color={STATUS_COLOR[status]}>{STATUS_LABEL[status]}</Tag>
+                    <Tag className="status-tag" color={STATUS_COLOR[status]}>{STATUS_LABEL[status]}</Tag>
                   </div>
 
                   <div style={{ marginTop: 7 }}>
@@ -807,16 +852,18 @@ const UploadCenterBody: React.FC = () => {
                   </div>
 
                   <div className="row-meta">
-                    <span>{group.fileCount} 项</span>
-                    <span>{uploadManager.formatSize(group.uploadedBytes)} / {uploadManager.formatSize(group.totalBytes)}</span>
-                    <span>{percent.toFixed(1)}%</span>
-                    {group.uploading > 0 && group.speedBps > 0 && (
-                      <span>{formatRate(group.speedBps)}</span>
-                    )}
+                    <span className="row-metric">{group.fileCount} 项</span>
+                    <span className="row-metric align-right">
+                      {uploadManager.formatSize(group.uploadedBytes)} / {uploadManager.formatSize(group.totalBytes)}
+                    </span>
+                    <span className="row-metric align-right">{percent.toFixed(1)}%</span>
+                    <span className="row-metric align-right">
+                      {group.uploading > 0 && group.speedBps > 0 ? formatRate(group.speedBps) : '—'}
+                    </span>
                     {(() => {
                       const eta = getGroupEtaSeconds(group);
                       const etaText = eta != null ? formatETA(eta) : '';
-                      return etaText ? <span>剩余 {etaText}</span> : null;
+                      return <span className="row-metric align-right">剩余 {etaText || '—'}</span>;
                     })()}
                     <div className="row-actions">
                       {(group.uploading > 0 || group.queued > 0 || group.paused > 0) && (

@@ -89,6 +89,13 @@ export const VideoViewerWrapper = styled.div`
     word-break: break-word;
   }
 
+  .video-element-host {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    background: #000;
+  }
+
   .video-element {
     width: 100%;
     height: 100%;

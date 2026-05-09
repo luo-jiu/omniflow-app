@@ -24,7 +24,6 @@ import { AsmrViewerWrapper } from './style';
 import { useFileViewer } from '@/hooks/useFileViewer';
 import { runtimeLogger } from '@/utils/runtimeLogger';
 import { parseAsmrRouteInfo, resolveAsmrOwnerKey } from '@/features/file-viewer/utils/asmr-owner-key';
-import { useRegisterMediaEntry } from '@/hooks/useMediaRegistry';
 import { resolvePreviewFileType, type PreviewFileType } from '@/utils/preview-file-type';
 import { useGlobalAudioPlayback } from '@/features/file-viewer/hooks/useGlobalAudioPlayback';
 
@@ -311,17 +310,14 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
   const [coverPickerItems, setCoverPickerItems] = useState<AsmrNodeItem[]>([]);
   const [coverPickerLoading, setCoverPickerLoading] = useState(false);
   const {
-    clearIfOwned,
     ensureSource,
-    isOwnedSource: isAsmrOwnedSource,
-    pause,
     play,
     playerState,
     seekTo,
     setMuted,
     setVolume,
     togglePlay: toggleOwnedPlay,
-  } = useGlobalAudioPlayback({ ownerType: 'asmr', ownerKey: asmrOwnerKey });
+  } = useGlobalAudioPlayback({ ownerType: 'asmr', ownerKey: asmrOwnerKey, tabId, libraryId });
 
   useEffect(() => {
     if (active) return;
@@ -636,34 +632,8 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
     };
   }, [loadAsmrTagOptions]);
 
-  useRegisterMediaEntry({
-    enabled: isAsmrOwnedSource && playerState.hasStarted,
-    entryId: `asmr:${tabId}`,
-    kind: 'audio',
-    tabId,
-    title: playerState.trackName || fileName || 'ASMR',
-    isPlaying: isAsmrOwnedSource && playerState.isPlaying,
-    currentTime: isAsmrOwnedSource ? playerState.currentTime : 0,
-    duration: isAsmrOwnedSource ? playerState.duration : 0,
-    play: () => {
-      void play().catch(() => {});
-    },
-    pause: () => {
-      pause();
-    },
-    seek: (time) => {
-      seekTo(time);
-    },
-    dismiss: () => {
-      clearIfOwned();
-    },
-  });
-
-  useEffect(() => {
-    return () => {
-      clearIfOwned();
-    };
-  }, [clearIfOwned]);
+  // MediaHub 注册由 globalAudioPlayer 服务层完成；详见 docs/media-hub-contract.md。
+  // 卸载时不主动 clear，tab 关闭由 FileViewerContext.releaseForTab 兜底。
 
   useEffect(() => {
     if (!rootNodeId || !Number.isFinite(rootNodeId) || !libraryId) {

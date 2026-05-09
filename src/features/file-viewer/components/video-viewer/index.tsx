@@ -13,7 +13,6 @@ import {
   IconVolume2,
 } from '@douyinfe/semi-icons';
 import { VideoViewerWrapper } from './style';
-import { useRegisterMediaEntry } from '@/hooks/useMediaRegistry';
 import { useLibraryWorkspaceControls } from '@/contexts/library-workspace-controls.context';
 import {
   fetchArchiveCardsPage,
@@ -42,6 +41,14 @@ import {
   buildVideoSubtitleSources,
   type VideoSubtitleSourceNode,
 } from '@/features/file-viewer/utils/video-subtitle-sources';
+import {
+  getGlobalVideoElement,
+  mountGlobalVideoElement,
+  parkGlobalVideoElement,
+} from '@/features/file-viewer/services/global-video-elements';
+import { floatingVideoService } from '@/features/file-viewer/services/floating-video.service';
+import { isLibraryWorkspaceRoute } from '@/features/file-viewer/utils/media-route';
+import { useParams } from 'react-router-dom';
 
 interface VideoViewerProps {
   nodeId?: number | null;
@@ -269,9 +276,16 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
   autoPlay = false,
 }) => {
   const { setFileUrl } = useFileViewer();
+  const { id: libraryIdParam } = useParams<{ id: string }>();
+  const libraryId = useMemo(() => {
+    const parsed = Number(libraryIdParam);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }, [libraryIdParam]);
   const containerRef = useRef<HTMLDivElement>(null);
+  const videoHostRef = useRef<HTMLDivElement>(null);
   const viewerRootRef = useRef<HTMLDivElement>(null);
-  const videoRef = useRef<HTMLVideoElement>(null);
+  const videoElementKey = useMemo(() => `video:${tabId}`, [tabId]);
+  const videoRef = useRef<HTMLVideoElement>(getGlobalVideoElement(videoElementKey));
   const progressRef = useRef<HTMLDivElement>(null);
   const volumeControlRef = useRef<HTMLDivElement>(null);
   const rateControlRef = useRef<HTMLDivElement>(null);
@@ -286,6 +300,7 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
   const lastSyncedRemoteProgressSignatureRef = useRef('');
   const isMountedRef = useRef(true);
   const activeRef = useRef(active);
+  const persistVideoProgressRef = useRef<(forceRemoteSync?: boolean) => void>(() => {});
   const isDraggingProgress = useRef(false);
   const thumbnailCaptureTimerRef = useRef<number>(0);
   const thumbnailCaptureAttemptRef = useRef(0);
@@ -296,7 +311,6 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
   const { setVideoWideMode } = useLibraryWorkspaceControls();
 
   const [isPlaying, setIsPlaying] = useState(false);
-  const [hasStartedPlaying, setHasStartedPlaying] = useState(false);
   const [isBuffering, setIsBuffering] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -414,42 +428,8 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
     }, VIDEO_THUMBNAIL_CAPTURE_DELAY_MS);
   }, [captureVideoThumbnail, thumbnailUrl]);
 
-  useRegisterMediaEntry({
-    enabled: hasStartedPlaying,
-    entryId: `video:${tabId}`,
-    kind: 'video',
-    tabId,
-    title: fileName || '视频',
-    isPlaying,
-    currentTime,
-    duration,
-    thumbnailUrl,
-    previewUrl: url,
-    play: () => {
-      const video = videoRef.current;
-      if (video) void video.play();
-    },
-    pause: () => {
-      const video = videoRef.current;
-      if (video && !video.paused) video.pause();
-    },
-    seek: (time) => {
-      const video = videoRef.current;
-      if (!video || !Number.isFinite(time)) return;
-      const next = Math.min(Math.max(time, 0), duration || video.duration || 0);
-      video.currentTime = next;
-      setCurrentTime(next);
-      persistVideoProgress(true);
-    },
-    dismiss: () => {
-      const video = videoRef.current;
-      if (video && !video.paused) {
-        video.pause();
-      }
-      persistVideoProgress(true);
-      setHasStartedPlaying(false);
-    },
-  });
+  // MediaHub 注册由 floatingVideoService 服务层完成；详见 docs/media-hub-contract.md。
+  // 关闭视频 tab 时由 FileViewerContext.releaseForTab 释放，不依赖组件卸载。
 
   const formatTime = (value: number) => {
     if (!Number.isFinite(value) || value < 0) return '00:00';
@@ -555,6 +535,59 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
     queueRemoteVideoProgressSync(progress, forceRemoteSync);
   }, [progressCacheKey, queueRemoteVideoProgressSync]);
 
+  useEffect(() => {
+    persistVideoProgressRef.current = persistVideoProgress;
+  }, [persistVideoProgress]);
+
+  useEffect(() => {
+    const host = videoHostRef.current;
+    if (!host) return undefined;
+    const mounted = mountGlobalVideoElement(videoElementKey, host);
+    videoRef.current = mounted.element;
+    floatingVideoService.bindInline({
+      key: videoElementKey,
+      libraryId,
+      tabId,
+      nodeId: nodeId ?? null,
+      fileName: fileName ?? '',
+      thumbnailUrl,
+    });
+
+    return () => {
+      const elBefore = videoRef.current;
+      const inLibrary = isLibraryWorkspaceRoute(window.location.hash);
+      console.log('[video-viewer] cleanup.start', {
+        key: videoElementKey,
+        hash: window.location.hash,
+        isLibrary: inLibrary,
+        paused: elBefore?.paused,
+        ct: elBefore?.currentTime,
+        connected: elBefore?.isConnected,
+      });
+      persistVideoProgressRef.current(true);
+      if (inLibrary) {
+        parkGlobalVideoElement(videoElementKey, mounted.mountToken);
+        console.log('[video-viewer] cleanup.parked', { key: videoElementKey, paused: elBefore?.paused, connected: elBefore?.isConnected });
+        return;
+      }
+      floatingVideoService.handoffToFloating(videoElementKey, mounted.mountToken);
+      console.log('[video-viewer] cleanup.handed-off', { key: videoElementKey, paused: elBefore?.paused, connected: elBefore?.isConnected });
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [videoElementKey]);
+
+  // metadata 后续变化（如异步加载到的封面、文件名修正、libraryId 切换）也要同步给浮窗 service。
+  useEffect(() => {
+    floatingVideoService.bindInline({
+      key: videoElementKey,
+      libraryId,
+      tabId,
+      nodeId: nodeId ?? null,
+      fileName: fileName ?? '',
+      thumbnailUrl,
+    });
+  }, [videoElementKey, libraryId, tabId, nodeId, fileName, thumbnailUrl]);
+
   const applyPendingRestoreTime = useCallback(() => {
     const video = videoRef.current;
     const pendingTime = pendingRestoreTimeRef.current;
@@ -636,7 +669,6 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
     };
     const onPlay = () => {
       setIsPlaying(true);
-      setHasStartedPlaying(true);
     };
     const onPause = () => setIsPlaying(false);
     const onEnded = () => {
@@ -681,11 +713,22 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
+    const isSameSource = video.getAttribute('src') === url;
     remoteProgressRequestIdRef.current += 1;
     viewMetaBaseReadyRef.current = false;
     viewMetaBaseRef.current = {};
     pendingRemoteProgressRef.current = null;
     lastSyncedRemoteProgressSignatureRef.current = '';
+
+    if (isSameSource) {
+      setCurrentTime(Number.isFinite(video.currentTime) ? video.currentTime : 0);
+      setDuration(Number.isFinite(video.duration) ? video.duration : 0);
+      setIsPlaying(!video.paused && !video.ended);
+      setIsBuffering(!video.paused && video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA);
+      scheduleVideoThumbnailCapture();
+      return;
+    }
+
     pendingRestoreTimeRef.current = resolveRestorableTime(videoProgressCache.get(progressCacheKey));
     if (thumbnailCaptureTimerRef.current) {
       window.clearTimeout(thumbnailCaptureTimerRef.current);
@@ -700,7 +743,7 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
     setDuration(0);
     setIsPlaying(false);
     setIsBuffering(true);
-  }, [progressCacheKey, url]);
+  }, [progressCacheKey, scheduleVideoThumbnailCapture, url]);
 
   useEffect(() => {
     if (!autoPlay) return;
@@ -1165,11 +1208,9 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
 
           <div className="video-stage">
             <div className="video-shell" ref={containerRef}>
-              <video
-                ref={videoRef}
-                className="video-element"
-                preload="metadata"
-                playsInline
+              <div
+                ref={videoHostRef}
+                className="video-element-host"
                 onDoubleClick={toggleFullscreen}
               />
               {activeSubtitleCue && (
