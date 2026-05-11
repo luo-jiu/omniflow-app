@@ -8,13 +8,14 @@
 
 资源监测控制台用于观察 OmniFlow 当前用户可见资料库范围内的资源占用和物理存储分布。它不是存储配置页：存储配置负责增删改 provider，资源监测负责只读统计、诊断和后续探针展示。
 
-当前第一版只交付只读快照：
+当前已交付只读快照和只读探针：
 
 - 总物理占用
 - 对象数
 - 文件引用数
 - provider / bucket 分布
 - 未匹配当前 provider 配置的历史位置提示
+- 对象存储、Postgres、Redis 的只读可用性探针
 
 ## 2. 入口
 
@@ -75,6 +76,27 @@ type ResourceMonitorSnapshot = {
     percent: number;
     matchedConfig: boolean;
   }>;
+  distributionError?: string;
+  probeSummary: {
+    total: number;
+    ok: number;
+    error: number;
+    unknown: number;
+  };
+  probes: Array<{
+    key: string;
+    kind: 'object_storage' | 'postgres' | 'redis' | string;
+    label: string;
+    provider?: string;
+    providerType?: string;
+    endpoint?: string;
+    bucket?: string;
+    isDefault?: boolean;
+    status: 'ok' | 'error' | 'unknown';
+    latencyMs: number;
+    error?: string;
+    checkedAt: string;
+  }>;
 };
 ```
 
@@ -84,15 +106,17 @@ type ResourceMonitorSnapshot = {
 - `objectCount`：distinct `storage_objects` 数量。
 - `fileRefCount`：`node_files` 引用数量。
 - `unmatchedCount`：没有匹配到当前 provider 配置的 provider / bucket 行数。
+- `distributionError`：资源分布统计失败时的脱敏错误摘要；此时探针仍可正常返回。
+- `probeSummary`：当前快照内探针数量和状态汇总。
+- `probes`：只读探针结果；对象存储探针只检查 bucket 可访问性，不创建 bucket 或写入对象。
 
 ## 5. 当前限制
 
-- 不做对象存储真实连通性 probe。
-- 不做 Postgres / Redis / MySQL 探针。
 - 不做自动刷新。
 - 不做历史曲线。
 - 不做孤儿对象、回收站占用细分。
 - 不提供清理、迁移或修复动作。
+- 暂不做 MySQL / 外部资源探针。
 
 ## 6. 验证方式
 
@@ -106,6 +130,7 @@ type ResourceMonitorSnapshot = {
 - 仓库页左下角点击资源监测入口，右侧进入资源监测 system view。
 - system overview 中点击资源监测卡片可进入同一视图。
 - 快照加载成功时展示总览和分布表。
+- 探针加载成功时展示对象存储、Postgres、Redis 状态、耗时和错误摘要。
+- 分布统计失败时分布表展示错误摘要，同时保留探针结果。
 - 无资源对象时展示空态。
 - API 失败时展示错误态和 Toast。
-

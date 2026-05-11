@@ -4,6 +4,7 @@ import { IconRefresh } from '@douyinfe/semi-icons';
 import styled from 'styled-components';
 import {
   fetchResourceMonitorSnapshot,
+  type ResourceMonitorProbeTarget,
   type ResourceMonitorSnapshot,
   type ResourceMonitorStorageItem,
 } from '../services/resource-monitor.api';
@@ -33,6 +34,25 @@ function storageTitle(item: ResourceMonitorStorageItem): string {
     return `${item.providerLabel}（${item.provider}）`;
   }
   return item.providerLabel || item.provider || '未命名 provider';
+}
+
+function probeStatusText(status: ResourceMonitorProbeTarget['status']): string {
+  if (status === 'ok') return '可用';
+  if (status === 'error') return '异常';
+  return '未知';
+}
+
+function probeMeta(item: ResourceMonitorProbeTarget): string {
+  const parts = [
+    item.providerType,
+    item.provider ? `provider ${item.provider}` : '',
+    item.bucket ? `桶 ${item.bucket}` : '',
+    item.endpoint,
+  ].filter(Boolean);
+  if (parts.length > 0) return parts.join(' · ');
+  if (item.kind === 'postgres') return 'PostgreSQL 主连接';
+  if (item.kind === 'redis') return 'Redis 主连接';
+  return item.kind;
 }
 
 const ResourceMonitorWorkspace: React.FC = () => {
@@ -72,6 +92,9 @@ const ResourceMonitorWorkspace: React.FC = () => {
   }, [loadSnapshot]);
 
   const summary = snapshot?.summary;
+  const probeSummary = snapshot?.probeSummary;
+  const probes = snapshot?.probes || [];
+  const distributionError = snapshot?.distributionError || '';
   const storage = snapshot?.storage || [];
 
   return (
@@ -109,6 +132,10 @@ const ResourceMonitorWorkspace: React.FC = () => {
           <span className="summary-label">Provider / Bucket</span>
           <span className="summary-value">{summary?.providerCount || 0} / {summary?.bucketCount || 0}</span>
         </div>
+        <div className="summary-item">
+          <span className="summary-label">探针</span>
+          <span className="summary-value">{probeSummary?.ok || 0} / {probeSummary?.total || 0}</span>
+        </div>
       </div>
 
       {summary && summary.unmatchedCount > 0 ? (
@@ -116,6 +143,42 @@ const ResourceMonitorWorkspace: React.FC = () => {
           有 {summary.unmatchedCount} 个存储位置没有匹配到当前 provider 配置，可能来自历史数据或已移除的 provider。
         </div>
       ) : null}
+
+      <div className="probe-panel">
+        <div className="distribution-header">
+          <span>资源探针</span>
+          <span>{probeSummary?.error || 0} 个异常</span>
+        </div>
+        {loading && !snapshot ? (
+          <div className="state-block">
+            <Spin />
+          </div>
+        ) : probes.length === 0 ? (
+          <div className="state-block">
+            <Empty description="暂无探针结果" />
+          </div>
+        ) : (
+          <div className="probe-list">
+            {probes.map((item) => (
+              <div className="probe-row" key={item.key}>
+                <div className="probe-main">
+                  <div className="probe-title">
+                    <span className={`probe-dot ${item.status}`} />
+                    <span>{item.label}</span>
+                    {item.isDefault ? <span className="default-badge">默认</span> : null}
+                  </div>
+                  <div className="location-meta">{probeMeta(item)}</div>
+                  {item.error ? <div className="probe-error">{item.error}</div> : null}
+                </div>
+                <div className="probe-status">
+                  <span className={`probe-status-text ${item.status}`}>{probeStatusText(item.status)}</span>
+                  <span>{item.latencyMs} ms</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
       <div className="distribution-panel">
         <div className="distribution-header">
@@ -129,6 +192,8 @@ const ResourceMonitorWorkspace: React.FC = () => {
           </div>
         ) : error && !snapshot ? (
           <div className="state-block error">{error}</div>
+        ) : distributionError ? (
+          <div className="state-block error">{distributionError}</div>
         ) : storage.length === 0 ? (
           <div className="state-block">
             <Empty description="暂无物理存储对象" />
@@ -201,7 +266,7 @@ const ResourceMonitorRoot = styled.div`
 
   .summary-grid {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: 8px;
   }
 
@@ -239,6 +304,7 @@ const ResourceMonitorRoot = styled.div`
     line-height: 1.5;
   }
 
+  .probe-panel,
   .distribution-panel {
     border: 1px solid var(--app-border);
     border-radius: 8px;
@@ -273,6 +339,90 @@ const ResourceMonitorRoot = styled.div`
 
   .distribution-table {
     width: 100%;
+  }
+
+  .probe-list {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .probe-row {
+    min-height: 48px;
+    padding: 9px 12px;
+    border-bottom: 1px solid color-mix(in srgb, var(--app-border) 70%, transparent);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .probe-row:last-child {
+    border-bottom: none;
+  }
+
+  .probe-main {
+    min-width: 0;
+  }
+
+  .probe-title {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    color: var(--app-text);
+    font-size: 12px;
+    line-height: 1.35;
+    font-weight: 650;
+  }
+
+  .probe-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 999px;
+    flex: 0 0 auto;
+    background: var(--semi-color-text-2);
+  }
+
+  .probe-dot.ok {
+    background: var(--semi-color-success);
+  }
+
+  .probe-dot.error {
+    background: var(--semi-color-danger);
+  }
+
+  .probe-error {
+    margin-top: 4px;
+    color: var(--semi-color-danger);
+    font-size: 11px;
+    line-height: 1.4;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .probe-status {
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 3px;
+    color: var(--app-text-muted);
+    font-size: 11px;
+    line-height: 1.35;
+  }
+
+  .probe-status-text {
+    color: var(--app-text-secondary);
+    font-weight: 650;
+  }
+
+  .probe-status-text.ok {
+    color: var(--semi-color-success);
+  }
+
+  .probe-status-text.error {
+    color: var(--semi-color-danger);
   }
 
   .distribution-row {
@@ -358,6 +508,10 @@ const ResourceMonitorRoot = styled.div`
 
     .distribution-row {
       grid-template-columns: minmax(180px, 1fr) 56px 56px 80px 96px;
+    }
+
+    .probe-row {
+      align-items: flex-start;
     }
   }
 `;

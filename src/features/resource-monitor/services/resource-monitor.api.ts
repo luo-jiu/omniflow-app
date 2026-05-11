@@ -9,6 +9,30 @@ export interface ResourceMonitorSummary {
   unmatchedCount: number;
 }
 
+export interface ResourceMonitorProbeSummary {
+  total: number;
+  ok: number;
+  error: number;
+  unknown: number;
+}
+
+export type ResourceMonitorProbeStatus = 'ok' | 'error' | 'unknown';
+
+export interface ResourceMonitorProbeTarget {
+  key: string;
+  kind: string;
+  label: string;
+  provider?: string;
+  providerType?: string;
+  endpoint?: string;
+  bucket?: string;
+  isDefault?: boolean;
+  status: ResourceMonitorProbeStatus;
+  latencyMs: number;
+  error?: string;
+  checkedAt: string;
+}
+
 export interface ResourceMonitorStorageItem {
   provider: string;
   providerType?: string;
@@ -27,6 +51,9 @@ export interface ResourceMonitorSnapshot {
   generatedAt: string;
   summary: ResourceMonitorSummary;
   storage: ResourceMonitorStorageItem[];
+  distributionError?: string;
+  probeSummary: ResourceMonitorProbeSummary;
+  probes: ResourceMonitorProbeTarget[];
 }
 
 const emptySnapshot: ResourceMonitorSnapshot = {
@@ -40,6 +67,14 @@ const emptySnapshot: ResourceMonitorSnapshot = {
     unmatchedCount: 0,
   },
   storage: [],
+  distributionError: '',
+  probeSummary: {
+    total: 0,
+    ok: 0,
+    error: 0,
+    unknown: 0,
+  },
+  probes: [],
 };
 
 export async function fetchResourceMonitorSnapshot(): Promise<ResourceMonitorSnapshot> {

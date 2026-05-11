@@ -1,7 +1,7 @@
 # 资源监测控制台规划草案
 
 更新时间：2026-05-11
-状态：进行中（Phase 1 已落地，Phase 2-4 待开发）
+状态：进行中（Phase 1-2 已落地，Phase 3-4 待开发）
 
 > 本文是 `docs/wip/` 下的临时开发计划。功能稳定后，应删除本文，并把最终契约回写到 `docs/library-detail-workspace.md`、`docs/frontend-validation-matrix.md`、后端 API 契约文档或对应长期专题文档。
 
@@ -101,14 +101,22 @@
 - 后端 `docs/architecture/resource-monitor-console.md`
 - 后端 `docs/progress/go-api-contract-status.md`
 
-### Phase 2：只读资源探针
+### Phase 2：只读资源探针（已落地）
 
 目标：判断物理资源是否可用。
 
 - 对象存储 provider 增加无副作用 probe。
-- Postgres 通过 repository 层 ping / `SELECT 1`。
+- Postgres 通过 repository 层 ping。
 - Redis 通过独立 redis monitor repository ping。
 - 前端展示状态、耗时、错误摘要和最后探测时间。
+- 资源分布统计失败时仍返回 partial snapshot 和探针结果，错误摘要需要脱敏。
+
+已回写正式文档：
+
+- `docs/resource-monitor-console.md`
+- `docs/frontend-validation-matrix.md`
+- 后端 `docs/architecture/resource-monitor-console.md`
+- 后端 `docs/progress/go-api-contract-status.md`
 
 ### Phase 3：占用细分和异常诊断
 
@@ -148,10 +156,9 @@
 
 ## 7. 当前未做
 
-- 不做对象存储真实 probe。
-- 不做 Postgres / Redis / MySQL 探针。
 - 不做自动刷新和历史曲线。
 - 不做孤儿对象清理。
+- 不做 MySQL / 外部资源探针。
 - 不做 CLI 命令，待控制台快照契约稳定后再决定是否补 `of resource-monitor snapshot --json`。
 
 ## 8. 验证方式
@@ -163,3 +170,5 @@ Phase 1 最低验证：
 - 前端 `npm run build`。
 - 手工验证仓库页点击资源监测入口后打开右侧控制台。
 - 手工验证刷新按钮、加载态、错误态和空态。
+- 手工验证对象存储、Postgres、Redis 探针状态和错误摘要展示。
+- 手工验证分布统计失败时探针面板仍展示。
