@@ -20,11 +20,12 @@ import {
 } from '@/features/file-explorer/services/file.api';
 import { fetchTags, type TagItem } from '@/features/tag-management/services/tag.api';
 import { getFileNodeIcon, isImageExtension } from '@/features/file-explorer/utils/file-node-icon';
+import { resolveNodeFileIdentity } from '@/features/file-identity';
 import { AsmrViewerWrapper } from './style';
 import { useFileViewer } from '@/hooks/useFileViewer';
 import { runtimeLogger } from '@/utils/runtimeLogger';
 import { parseAsmrRouteInfo, resolveAsmrOwnerKey } from '@/features/file-viewer/utils/asmr-owner-key';
-import { resolvePreviewFileType, type PreviewFileType } from '@/utils/preview-file-type';
+import type { PreviewFileType } from '@/utils/preview-file-type';
 import { useGlobalAudioPlayback } from '@/features/file-viewer/hooks/useGlobalAudioPlayback';
 
 interface AsmrViewerProps {
@@ -154,7 +155,13 @@ function resolveRowType(item: AsmrNodeItem): string {
 }
 
 function resolveFileType(item: AsmrNodeItem): PreviewFileType {
-  return resolvePreviewFileType(item.mimeType, item.ext);
+  return resolveNodeFileIdentity({
+    mimeType: item.mimeType,
+    ext: item.ext,
+    name: item.name,
+    parentBuiltInType: 'AUDIO',
+    parentArchiveMode: 1,
+  }).previewKind;
 }
 
 function isImageFile(item: AsmrNodeItem): boolean {
@@ -1113,7 +1120,11 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
                   >
                     <div className="row-main">
                       <span className="row-icon">
-                        {isDir ? <IconFolder size="extra-large" /> : getFileNodeIcon(item.ext)}
+                        {isDir ? <IconFolder size="extra-large" /> : getFileNodeIcon(item.ext, item.name, {
+                          mimeType: item.mimeType,
+                          parentBuiltInType: 'AUDIO',
+                          parentArchiveMode: 1,
+                        })}
                       </span>
                       <span className="row-name">{displayName}</span>
                       {isPlayingRow ? (
@@ -1410,7 +1421,11 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
                         >
                           <div style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0, fontSize: 11 }}>
                             <span style={{ width: 20, display: 'inline-flex', justifyContent: 'center' }}>
-                              {isDir ? <IconFolder /> : getFileNodeIcon(item.ext)}
+                              {isDir ? <IconFolder /> : getFileNodeIcon(item.ext, item.name, {
+                                mimeType: item.mimeType,
+                                parentBuiltInType: 'AUDIO',
+                                parentArchiveMode: 1,
+                              })}
                             </span>
                             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                               {resolveDisplayName(item)}

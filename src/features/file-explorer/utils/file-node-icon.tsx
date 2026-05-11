@@ -1,9 +1,16 @@
 import React from 'react';
-import { resolvePreviewFileType } from '@/utils/preview-file-type';
+import { resolveNodeFileIdentity, type FileIdentityPreviewKind } from '@/features/file-identity';
 
 // 与 directory-tree/style.ts 的 .tree-file-type-icon { width: 15px; height: 15px } 保持一致。
 const TREE_ICON_SIZE = 15;
 const TREE_ICON_SUBTITLE_BADGE_SIZE = 9;
+
+type FileNodeIconOptions = {
+  mimeType?: string | null;
+  parentBuiltInType?: string | null;
+  parentArchiveMode?: number | null;
+  previewKind?: FileIdentityPreviewKind | null;
+};
 
 const materialIconUrls = import.meta.glob('../../../assets/icons/material/*.svg', {
   eager: true,
@@ -103,8 +110,14 @@ export function isAudioExtension(ext?: string): boolean {
   return audioExtensions.includes(normalized);
 }
 
-function isVideoExtension(ext?: string): boolean {
-  return resolvePreviewFileType(undefined, ext) === 'video';
+function isVideoExtension(ext?: string, fileName?: string, options?: FileNodeIconOptions): boolean {
+  return resolveNodeFileIdentity({
+    ext,
+    name: fileName,
+    mimeType: options?.mimeType,
+    parentBuiltInType: options?.parentBuiltInType,
+    parentArchiveMode: options?.parentArchiveMode,
+  }).previewKind === 'video';
 }
 
 export function isSubtitleExtension(ext?: string): boolean {
@@ -323,9 +336,29 @@ function createWarningIconNode(title: string): React.ReactNode {
   );
 }
 
-export function getFileNodeIcon(ext?: string, fileName?: string): React.ReactNode {
+export function getFileNodeIcon(ext?: string, fileName?: string, options?: FileNodeIconOptions): React.ReactNode {
   const blankFileIcon = getMaterialIconUrl('file-blank') || '';
   const normalized = normalizeExt(ext);
+  const identity = resolveNodeFileIdentity({
+    ext,
+    name: fileName,
+    mimeType: options?.mimeType,
+    parentBuiltInType: options?.parentBuiltInType,
+    parentArchiveMode: options?.parentArchiveMode,
+    contentKindOverride: options?.previewKind,
+  });
+  if (
+    identity.confidence !== 'extension'
+    && (
+      identity.previewKind === 'image'
+      || identity.previewKind === 'video'
+      || identity.previewKind === 'audio'
+      || identity.previewKind === 'pdf'
+    )
+  ) {
+    return createIconNode(getMaterialIconUrl(identity.iconKind) || blankFileIcon, identity.iconKind);
+  }
+
   const mappedIconName = resolveFileIconName(normalized, fileName);
   const mappedIconUrl = mappedIconName ? getMaterialIconUrl(mappedIconName) : undefined;
   if (mappedIconUrl) {
@@ -348,7 +381,7 @@ export function getFileNodeIcon(ext?: string, fileName?: string): React.ReactNod
     return createIconNode(getMaterialIconUrl('audio-wav') || blankFileIcon, 'audio-wav');
   }
 
-  if (isVideoExtension(normalized)) {
+  if (identity.previewKind === 'video' || isVideoExtension(normalized, fileName, options)) {
     return createIconNode(getMaterialIconUrl('video') || blankFileIcon, 'video');
   }
 
@@ -367,25 +400,38 @@ export function getFileNodeIconByParentBuiltInType(
   options?: {
     hasAudioSubtitle?: boolean;
     audioArchiveSubtitle?: boolean;
+    mimeType?: string | null;
   },
 ): React.ReactNode {
   const normalizedBuiltInType = String(parentBuiltInType || 'DEF').toUpperCase();
   const normalizedArchiveMode = Number(parentArchiveMode ?? 0) === 1 ? 1 : 0;
   if (normalizedBuiltInType === 'COMIC') {
     if (isImageExtension(ext)) {
-      return getFileNodeIcon(ext, fileName);
+      return getFileNodeIcon(ext, fileName, { mimeType: options?.mimeType });
     }
     return createWarningIconNode('与漫画模式不匹配的文件');
   }
   if (normalizedBuiltInType === 'ASMR' && normalizedArchiveMode === 1) {
     if (isAudioExtension(ext)) {
-      return getFileNodeIcon(ext, fileName);
+      return getFileNodeIcon(ext, fileName, { mimeType: options?.mimeType });
     }
     return createWarningIconNode('与 ASMR 归档模式不匹配的文件');
   }
   if (normalizedBuiltInType === 'VIDEO') {
-    if (isVideoExtension(ext) || isImageExtension(ext) || isSubtitleExtension(ext)) {
-      return getFileNodeIcon(ext, fileName);
+    if (
+      isVideoExtension(ext, fileName, {
+        mimeType: options?.mimeType,
+        parentBuiltInType,
+        parentArchiveMode,
+      })
+      || isImageExtension(ext)
+      || isSubtitleExtension(ext)
+    ) {
+      return getFileNodeIcon(ext, fileName, {
+        mimeType: options?.mimeType,
+        parentBuiltInType,
+        parentArchiveMode,
+      });
     }
     return createWarningIconNode(
       normalizedArchiveMode === 1
@@ -402,11 +448,15 @@ export function getFileNodeIconByParentBuiltInType(
       if (options?.hasAudioSubtitle) {
         return createAudioWithSubtitleIconNode();
       }
-      return getFileNodeIcon(ext, fileName);
+      return getFileNodeIcon(ext, fileName, { mimeType: options?.mimeType });
     }
     return createWarningIconNode('与音频归档模式不匹配的文件');
   }
-  return getFileNodeIcon(ext, fileName);
+  return getFileNodeIcon(ext, fileName, {
+    mimeType: options?.mimeType,
+    parentBuiltInType,
+    parentArchiveMode,
+  });
 }
 
 export function getDirectoryBuiltInIcon(

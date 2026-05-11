@@ -14,8 +14,12 @@ interface UploadConfirmModalProps {
   defaultProvider: string;
   visible: boolean;
   fileSummaries: OverlayFileSummary[];
+  okText?: string;
   providers: OverlayStorageProvider[];
+  taskLabel?: string;
+  targetLabel?: string;
   targetNode: OverlayTargetNode | null;
+  title?: string;
   loading?: boolean;
   onConfirm: (storageProvider: string) => void;
   onCancel: () => void;
@@ -217,13 +221,21 @@ const UploadConfirmModal: React.FC<UploadConfirmModalProps> = ({
   defaultProvider,
   visible,
   fileSummaries,
+  okText,
   providers,
+  taskLabel,
+  targetLabel,
   targetNode,
+  title,
   loading,
   onConfirm,
   onCancel,
 }) => {
   const containsFolderStructure = fileSummaries.some(item => (item.relativePath || '').includes('/'));
+  const modalTitle = title || (containsFolderStructure ? '文件夹上传确认' : '文件上传确认');
+  const confirmText = okText || '确定上传';
+  const directoryLabel = targetLabel || '上传目录';
+  const summaryTaskLabel = taskLabel || '上传任务';
   const fallbackProvider = defaultProvider || providers[0]?.alias || '';
   const [selectedProvider, setSelectedProvider] = React.useState(fallbackProvider);
 
@@ -295,12 +307,12 @@ const UploadConfirmModal: React.FC<UploadConfirmModalProps> = ({
       <DirectoryTreeCompactModalStyle />
       <Modal
         className="directory-tree-compact-modal"
-        title={containsFolderStructure ? '文件夹上传确认' : '文件上传确认'}
+        title={modalTitle}
         visible={visible}
         onOk={() => onConfirm(selectedProvider)}
         onCancel={onCancel}
         confirmLoading={Boolean(loading)}
-        okText="确定上传"
+        okText={confirmText}
         cancelText="取消"
         maskClosable={false}
         centered
@@ -310,7 +322,7 @@ const UploadConfirmModal: React.FC<UploadConfirmModalProps> = ({
           <Content>
             <div className="upload-summary">
               <div className="upload-info-card">
-                <div className="upload-info-label">上传目录</div>
+                <div className="upload-info-label">{directoryLabel}</div>
                 <div className="upload-info-value">{targetNode.label}</div>
               </div>
               <div className="upload-info-card">
@@ -368,7 +380,7 @@ const UploadConfirmModal: React.FC<UploadConfirmModalProps> = ({
             </div>
 
             <div className="upload-footer">
-              共 {summaryItems.folders.length} 个文件夹、{summaryItems.files.length} 个文件、{fileSummaries.length} 个上传任务，
+              共 {summaryItems.folders.length} 个文件夹、{summaryItems.files.length} 个文件、{fileSummaries.length} 个{summaryTaskLabel}，
               总大小 {formatSize(totalBytes)}。
             </div>
           </Content>

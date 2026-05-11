@@ -12,5 +12,6 @@
 ## 当前文件
 
 - `media-hub-roadmap.md` — 全局媒体控制中心后续迭代清单（基线版本已合入 main）。
+- `file-type-identity-roadmap.md` — 文件类型身份识别终局规划草案。
 - `resource-create-wizard-roadmap.md` — 资源创建向导规划草案。
 - `system-workspace-roadmap.md` — 设置 / 上传 / 回收站等系统页面改成资料库工作区视图的规划草案。

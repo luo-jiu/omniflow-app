@@ -367,7 +367,16 @@ function getFileTabIcon(tab: FileViewerTab): React.ReactNode {
     const archiveMode = tab.fileType?.endsWith('_archive') ? 1 : 0;
     return getDirectoryBuiltInIcon(builtInType ?? 'DEF', archiveMode, false) ?? getFileNodeIcon();
   }
-  return getFileNodeIcon(getFileExtFromTab(tab), tab.fileName ?? undefined);
+  return getFileNodeIcon(getFileExtFromTab(tab), tab.fileName ?? undefined, {
+    previewKind: (
+      tab.fileType === 'image'
+      || tab.fileType === 'video'
+      || tab.fileType === 'audio'
+      || tab.fileType === 'pdf'
+      || tab.fileType === 'text'
+      || tab.fileType === 'other'
+    ) ? tab.fileType : null,
+  });
 }
 
 function FileTabIcon({ tab }: { tab: FileViewerTab }) {

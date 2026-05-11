@@ -8,6 +8,7 @@ import {
   hardDeleteNodeAndChildren,
   restoreNodeAndChildren,
   type RecycleBinItem,
+  type RecycleStorageLocation,
 } from '@/features/file-explorer/services/file.api';
 import { markRepositoryTreeSnapshotDirty } from '@/features/file-explorer/hooks/useRepositoryTree';
 import { requestDesktopWindowActivation } from '@/utils/windowActivation';
@@ -93,9 +94,32 @@ const RecycleBinWorkspaceWrapper = styled.div`
   }
 
   .name-meta {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     margin-top: 4px;
     font-size: 10px;
     color: var(--semi-color-text-2);
+  }
+
+  .storage-location-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .storage-more {
+    flex-shrink: 0;
+    border: 0;
+    padding: 0;
+    background: transparent;
+    color: var(--semi-color-primary);
+    cursor: pointer;
+    font-size: 10px;
+    line-height: 1.3;
   }
 
   .size,
@@ -212,6 +236,50 @@ function formatBytes(size?: number): string {
   return `${value.toFixed(value >= 10 || idx === 0 ? 0 : 1)} ${units[idx]}`;
 }
 
+function getRecycleStorageLocations(item: RecycleBinItem): RecycleStorageLocation[] {
+  if (item.storageLocations && item.storageLocations.length > 0) {
+    return item.storageLocations;
+  }
+  if (!item.storageProvider && !item.storageBucket) {
+    return [];
+  }
+  return [{
+    storageProvider: item.storageProvider,
+    storageProviderType: item.storageProviderType,
+    storageProviderLabel: item.storageProviderLabel,
+    storageEndpoint: item.storageEndpoint,
+    storageBucket: item.storageBucket,
+    fileCount: item.type === 'file' ? 1 : undefined,
+  }];
+}
+
+function formatStorageLocation(location: RecycleStorageLocation): string {
+  const provider = location.storageProviderLabel && location.storageProvider
+    ? `${location.storageProviderLabel}（${location.storageProvider}）`
+    : location.storageProviderLabel || location.storageProvider || '';
+  const parts = [
+    provider,
+    location.storageBucket ? `桶 ${location.storageBucket}` : '',
+  ].filter(Boolean);
+  const text = parts.length > 0 ? parts.join(' · ') : '物理存储未知';
+  return location.fileCount && location.fileCount > 1 ? `${text} · ${location.fileCount} 个文件` : text;
+}
+
+function formatStorageLocationTitle(item: RecycleBinItem): string {
+  const locations = getRecycleStorageLocations(item);
+  if (locations.length === 0) {
+    return '物理存储未知';
+  }
+  const lines = locations.map((location) => [
+    formatStorageLocation(location),
+    location.storageEndpoint ? `Endpoint: ${location.storageEndpoint}` : '',
+  ].filter(Boolean).join(' · '));
+  if (item.storageKey) {
+    lines.push(`Key: ${item.storageKey}`);
+  }
+  return lines.join('\n');
+}
+
 function formatDeletedAt(value: string): string {
   if (!value) return '--';
   const date = new Date(value);
@@ -227,6 +295,7 @@ function formatDeletedAt(value: string): string {
 const RecycleBinWorkspace: React.FC<SystemWorkspaceViewProps> = ({ libraryId }) => {
   const [items, setItems] = useState<RecycleBinItem[]>([]);
   const [loading, setLoading] = useState(false);
+  const [expandedStorageIds, setExpandedStorageIds] = useState<Set<number>>(() => new Set());
 
   const validLibraryId = Number.isFinite(libraryId) && libraryId > 0;
 
@@ -256,6 +325,18 @@ const RecycleBinWorkspace: React.FC<SystemWorkspaceViewProps> = ({ libraryId }) 
     }
     return `共 ${items.length} 条记录。默认删除会进入回收站，可恢复或彻底删除。`;
   }, [items.length, validLibraryId]);
+
+  const toggleStorageExpanded = useCallback((itemId: number) => {
+    setExpandedStorageIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(itemId)) {
+        next.delete(itemId);
+      } else {
+        next.add(itemId);
+      }
+      return next;
+    });
+  }, []);
 
   const handleRestore = async (item: RecycleBinItem) => {
     try {
@@ -368,9 +449,35 @@ const RecycleBinWorkspace: React.FC<SystemWorkspaceViewProps> = ({ libraryId }) 
                   {item.name}
                   {item.type === 'file' && item.ext ? `.${item.ext}` : ''}
                 </div>
-                {item.type === 'dir' && (
+                {item.type === 'dir' && getRecycleStorageLocations(item).length === 0 && (
                   <div className="name-meta">
                     包含 {item.deletedDescendantCount ?? 0} 项
+                  </div>
+                )}
+                {getRecycleStorageLocations(item).length > 0 && (
+                  <div className="name-meta" title={formatStorageLocationTitle(item)}>
+                    {(expandedStorageIds.has(item.id)
+                      ? getRecycleStorageLocations(item)
+                      : getRecycleStorageLocations(item).slice(0, 2)
+                    ).map((location) => (
+                      <span
+                        className="storage-location-text"
+                        key={`${location.storageProvider || 'unknown'}:${location.storageBucket || ''}`}
+                      >
+                        {formatStorageLocation(location)}
+                      </span>
+                    ))}
+                    {getRecycleStorageLocations(item).length > 2 && (
+                      <button
+                        className="storage-more"
+                        type="button"
+                        onClick={() => toggleStorageExpanded(item.id)}
+                      >
+                        {expandedStorageIds.has(item.id)
+                          ? '收起'
+                          : `更多 ${getRecycleStorageLocations(item).length - 2}`}
+                      </button>
+                    )}
                   </div>
                 )}
               </div>

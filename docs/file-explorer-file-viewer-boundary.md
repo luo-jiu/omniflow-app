@@ -1,6 +1,6 @@
 # File Explorer 与 File Viewer 边界说明
 
-更新时间：2026-04-19
+更新时间：2026-05-11
 
 适用范围：`features/file-explorer`、`features/file-viewer`、`contexts/FileViewerContext.tsx`、`views/library/detail/` 中与文件树、文件打开、预览 tab、预览分发和缓存恢复相关的代码。
 
@@ -29,6 +29,8 @@ OmniFlow 当前的文件浏览主链路不是一个模块完成的，而是 3 �
   - `src/features/file-explorer/DirectorySidebar.tsx`
 - 文件树核心 hook
   - `src/features/file-explorer/hooks/useRepositoryTree.ts`
+- 文件类型身份解析
+  - `src/features/file-identity/`
 - 文件预览上下文
   - `src/contexts/FileViewerContext.tsx`
   - `src/contexts/file-viewer.context.ts`
@@ -61,6 +63,10 @@ OmniFlow 当前的文件浏览主链路不是一个模块完成的，而是 3 �
 
 上传确认弹框由主 renderer 先读取 `/v1/storage/providers`，overlay 只展示可序列化后的 provider 摘要。用户在弹框里选择 provider 后，上传任务把 `storageProvider` 透传到后端；未取到 provider 列表时，上传仍可走后端默认分配。
 
+右键新建文件在新建弹框内直接展示创建目录和存储位置，不再额外弹上传确认 overlay。新建文件的首次空内容写入会把用户选择的 `storageProvider` 传给 `PUT /v1/nodes/:nodeId/content`，并显式使用 `text/plain; charset=utf-8`，避免空 `.ts` 文件被后端按后缀推断为 MPEG-TS 视频。
+
+回收站列表会展示文件节点的物理存储位置；目录节点使用后端返回的 `storageLocations` 聚合子树内文件实际分布。前端默认只展示前两个存储位置，更多位置通过行内“更多”按钮展开。
+
 ### 3.2 `useRepositoryTree`
 
 `useRepositoryTree.ts` 当前是文件树真正的 owner，负责：
@@ -71,7 +77,7 @@ OmniFlow 当前的文件浏览主链路不是一个模块完成的，而是 3 �
 - snapshot 恢复与脏重建
 - 懒加载子节点
 - 目录节点和文件节点的树内增删改
-- 文件双击打开时的文件类型判定与回调派发
+- 文件双击打开时的文件类型解析入口与回调派发
 
 它拥有“树结构事实”，不应该顺手拥有文件预览状态。
 
@@ -119,7 +125,7 @@ OmniFlow 当前的文件浏览主链路不是一个模块完成的，而是 3 �
 ```text
 DirectoryTree double click
   -> useRepositoryTree.handleDoubleClick()
-    -> getFileLink / resolveFileType
+    -> getFileLink / file-identity resolveFileType
       -> onFileOpen(fileUrl, fileName, fileType, nodeId, options)
         -> page / file viewer context
           -> FileViewerContext.setFileUrl(...)
@@ -130,9 +136,9 @@ DirectoryTree double click
 
 - 文件树负责“把节点变成可打开文件信息”。
 - 文件预览负责“把文件信息放进当前预览状态和 tab”。
-- 文件类型解析当前发生在 `useRepositoryTree`，不是 `FileDispatcher`。
+- 文件类型解析当前由 `src/features/file-identity/` 提供统一 resolver，并由 `useRepositoryTree` 在打开链路中调用，不发生在 `FileDispatcher`。
 
-这意味着如果以后要改“文件类型怎么判”，优先改文件树打开链路，不要往分发器里塞更多判断。
+这意味着如果以后要改“文件类型怎么判”，优先改 `file-identity` 的 resolver 和打开链路传入的上下文，不要往分发器里塞更多判断。
 
 ## 5. 树状态 owner
 

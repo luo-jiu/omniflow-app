@@ -733,11 +733,16 @@ export function useRepositoryTree(
       tabNodeId?: number;
       linkNodeId?: number;
       tabTypeLabel?: string | null;
+      parentBuiltInType?: string | null;
+      parentArchiveMode?: number | null;
     }) => {
       const linkNodeId = Number(payload.linkNodeId ?? payload.id);
       const tabNodeId = Number(payload.tabNodeId ?? payload.id);
       const fileName = payload.displayName ?? buildFileFullName(payload.name, payload.ext);
-      const fileType = resolveFileType(payload.mimeType, payload.ext, payload.name);
+      const fileType = resolveFileType(payload.mimeType, payload.ext, payload.name, {
+        parentBuiltInType: payload.parentBuiltInType,
+        parentArchiveMode: payload.parentArchiveMode,
+      });
 
       let fileUrl = fileType === 'text'
         ? ''
@@ -882,7 +887,10 @@ export function useRepositoryTree(
           const firstVideoNode = children.find(item => (
             isFileNodeType(item.type)
             && !isHiddenNodeName(item.name, item.ext)
-            && isVideoFileNode(item)
+            && isVideoFileNode(item, {
+              parentBuiltInType: builtInType,
+              parentArchiveMode: archiveMode,
+            })
           ));
           if (!firstVideoNode) {
             runtimeLogger.warn('视频目录无可打开视频:', node.name);
@@ -893,6 +901,8 @@ export function useRepositoryTree(
             displayName: node.name,
             tabNodeId: node.id,
             tabTypeLabel: builtInType,
+            parentBuiltInType: builtInType,
+            parentArchiveMode: archiveMode,
           });
         } catch (error) {
           runtimeLogger.error('打开视频目录内容失败:', error);
@@ -934,6 +944,8 @@ export function useRepositoryTree(
           name: node.name,
           ext: node.ext,
           mimeType: node.mimeType,
+          parentBuiltInType: node.data?.parentBuiltInType,
+          parentArchiveMode: node.data?.parentArchiveMode,
         });
       } catch (error) {
         runtimeLogger.error('获取文件链接失败:', error);

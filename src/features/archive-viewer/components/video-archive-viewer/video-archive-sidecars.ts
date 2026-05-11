@@ -1,4 +1,4 @@
-import { resolvePreviewFileType } from '@/utils/preview-file-type';
+import { resolveNodeFileIdentity } from '@/features/file-identity';
 import {
   buildVideoSubtitleSources,
   getVideoSubtitleNodeSortOrder,
@@ -40,7 +40,13 @@ export function normalizeVideoArchiveMatchName(name?: string, ext?: string): str
 }
 
 function isVideoArchiveCoverNode(item: VideoArchiveChildNode): boolean {
-  return item.type === 'file' && resolvePreviewFileType(item.mimeType, item.ext) === 'image';
+  return item.type === 'file' && resolveNodeFileIdentity({
+    mimeType: item.mimeType,
+    ext: item.ext,
+    name: item.name,
+    parentBuiltInType: 'VIDEO',
+    parentArchiveMode: 1,
+  }).previewKind === 'image';
 }
 
 function isVideoArchiveSubtitleNode(item: VideoArchiveChildNode): boolean {

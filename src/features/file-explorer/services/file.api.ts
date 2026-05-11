@@ -99,6 +99,17 @@ function toNumberOrDefault(value: unknown, defaultValue = 0): number {
   return Number.isFinite(numeric) ? numeric : defaultValue;
 }
 
+function normalizeRecycleStorageLocationPayload(source: Record<string, unknown>): RecycleStorageLocation {
+  return {
+    storageProvider: toOptionalString(source.storageProvider ?? source.storage_provider),
+    storageProviderType: toOptionalString(source.storageProviderType ?? source.storage_provider_type),
+    storageProviderLabel: toOptionalString(source.storageProviderLabel ?? source.storage_provider_label),
+    storageEndpoint: toOptionalString(source.storageEndpoint ?? source.storage_endpoint),
+    storageBucket: toOptionalString(source.storageBucket ?? source.storage_bucket),
+    fileCount: toOptionalNumber(source.fileCount ?? source.file_count),
+  };
+}
+
 function normalizeNodeDetailPayload(source: Record<string, unknown>): NodeDetailDTO {
   const normalized = normalizeNodePayload(source);
   return {
@@ -126,12 +137,24 @@ function normalizeNodeDetailPayload(source: Record<string, unknown>): NodeDetail
 
 function normalizeRecycleBinItemPayload(source: Record<string, unknown>): RecycleBinItem {
   const normalized = normalizeNodePayload(source);
+  const rawStorageLocations = normalized.storageLocations ?? normalized.storage_locations;
   return {
     id: toNumberOrDefault(normalized.id),
     name: String(normalized.name ?? ''),
     ext: toOptionalString(normalized.ext),
     mimeType: toOptionalString(normalized.mimeType ?? normalized.mime_type),
     fileSize: toOptionalNumber(normalized.fileSize ?? normalized.file_size),
+    storageKey: toOptionalString(normalized.storageKey ?? normalized.storage_key),
+    storageProvider: toOptionalString(normalized.storageProvider ?? normalized.storage_provider),
+    storageProviderType: toOptionalString(normalized.storageProviderType ?? normalized.storage_provider_type),
+    storageProviderLabel: toOptionalString(normalized.storageProviderLabel ?? normalized.storage_provider_label),
+    storageEndpoint: toOptionalString(normalized.storageEndpoint ?? normalized.storage_endpoint),
+    storageBucket: toOptionalString(normalized.storageBucket ?? normalized.storage_bucket),
+    storageLocations: Array.isArray(rawStorageLocations)
+      ? rawStorageLocations
+        .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object'))
+        .map(item => normalizeRecycleStorageLocationPayload(item))
+      : undefined,
     type: normalized.type,
     parentId: toNumberOrDefault(normalized.parentId ?? normalized.parent_id),
     libraryId: toNumberOrDefault(normalized.libraryId ?? normalized.library_id),
@@ -264,6 +287,7 @@ export async function updateNodeFileContent(payload: {
   libraryId: number;
   content: string;
   contentType?: string;
+  storageProvider?: string;
 }): Promise<NodeDetailDTO> {
   const body = await request(`/v1/nodes/${payload.nodeId}/content`, {
     method: 'PUT',
@@ -271,6 +295,7 @@ export async function updateNodeFileContent(payload: {
       libraryId: payload.libraryId,
       content: payload.content,
       contentType: payload.contentType,
+      storageProvider: payload.storageProvider,
     }),
   });
   const data = body?.data;
@@ -573,11 +598,27 @@ export interface RecycleBinItem {
   ext?: string;
   mimeType?: string;
   fileSize?: number;
+  storageKey?: string;
+  storageProvider?: string;
+  storageProviderType?: string;
+  storageProviderLabel?: string;
+  storageEndpoint?: string;
+  storageBucket?: string;
+  storageLocations?: RecycleStorageLocation[];
   type: 'dir' | 'file';
   parentId: number;
   libraryId: number;
   deletedAt: string;
   deletedDescendantCount?: number;
+}
+
+export interface RecycleStorageLocation {
+  storageProvider?: string;
+  storageProviderType?: string;
+  storageProviderLabel?: string;
+  storageEndpoint?: string;
+  storageBucket?: string;
+  fileCount?: number;
 }
 
 export async function fetchRecycleBinItems(libraryId: number): Promise<RecycleBinItem[]> {
