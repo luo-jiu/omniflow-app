@@ -1,4 +1,3 @@
-import { IconClose } from '@douyinfe/semi-icons';
 import { useMemo, useState, type FC } from 'react';
 import {
   systemWorkspaceMeta,
@@ -8,7 +7,6 @@ import {
   SystemWorkspaceBody,
   SystemWorkspaceHeader,
   SystemWorkspaceRoot,
-  SystemWorkspaceTabBar,
   SystemWorkspaceViewport,
 } from './style';
 import type {
@@ -20,10 +18,7 @@ import type {
 type SystemWorkspaceProps = {
   activeView: SystemWorkspaceView | null;
   libraryId: number;
-  tabs: SystemWorkspaceView[];
-  onActivateView: (view: SystemWorkspaceView) => void;
   onClose: () => void;
-  onCloseView: (view: SystemWorkspaceView) => void;
   onOpenLegacyRoute: (route: SystemWorkspaceActionRoute) => void;
   onOpenView: (view: SystemWorkspaceView) => void;
 };
@@ -31,16 +26,12 @@ type SystemWorkspaceProps = {
 const SystemWorkspace: FC<SystemWorkspaceProps> = ({
   activeView: activeViewProp,
   libraryId,
-  tabs,
-  onActivateView,
   onClose,
-  onCloseView,
   onOpenLegacyRoute,
   onOpenView,
 }) => {
   const [settingsSection, setSettingsSection] = useState<SettingsWorkspaceSection>('home');
-  const activeView = activeViewProp ?? tabs[0] ?? 'overview';
-  const visibleTabs = tabs.length > 0 ? tabs : [activeView];
+  const activeView = activeViewProp ?? 'overview';
   const meta = systemWorkspaceMeta[activeView];
   const ViewComponent = systemWorkspaceViews[activeView];
   const frameClassKey = activeView === 'settings' && settingsSection !== 'home'
@@ -58,44 +49,6 @@ const SystemWorkspace: FC<SystemWorkspaceProps> = ({
 
   return (
     <SystemWorkspaceRoot>
-      <SystemWorkspaceTabBar>
-        {visibleTabs.map((tabView) => {
-          const tabMeta = systemWorkspaceMeta[tabView];
-          const isActive = tabView === activeView;
-          return (
-            <button
-              key={tabView}
-              type="button"
-              className={`system-tab ${isActive ? 'active' : ''}`}
-              onClick={() => onActivateView(tabView)}
-            >
-              <span className="system-tab-badge">系统</span>
-              <span className="system-tab-title">{tabMeta.title}</span>
-              <span
-                role="button"
-                tabIndex={0}
-                className="system-tab-close"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onCloseView(tabView);
-                }}
-                onMouseDown={(event) => {
-                  event.stopPropagation();
-                }}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' || event.key === ' ') {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    onCloseView(tabView);
-                  }
-                }}
-              >
-                <IconClose />
-              </span>
-            </button>
-          );
-        })}
-      </SystemWorkspaceTabBar>
       <SystemWorkspaceViewport>
         <div className={`system-workspace-center-frame system-workspace-frame-${frameClassKey}`}>
           <SystemWorkspaceHeader>

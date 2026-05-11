@@ -321,9 +321,21 @@ const AudioViewer: React.FC<AudioViewerProps> = ({
           <div style={{ fontSize: 16, lineHeight: 1.3, fontWeight: 700 }}>{fileName || '正在播放'}</div>
           <div className="audio-lyric-preview">
             {activeSubtitleCue ? (
-              activeSubtitleCue.lines.map((line, index) => (
-                <span key={`${activeSubtitleCue.id}-${index}`}>{line}</span>
-              ))
+              activeSubtitleCue.lines.map((line, index) => {
+                const segments = activeSubtitleCue.segmentLines?.[index];
+                return (
+                  <span key={`${activeSubtitleCue.id}-${index}`}>
+                    {segments?.length ? segments.map((segment, segmentIndex) => (
+                      <span
+                        key={`${activeSubtitleCue.id}-${index}-${segmentIndex}`}
+                        className={`lyric-segment ${effectiveCurrentTime >= segment.end ? 'is-past' : ''} ${effectiveCurrentTime >= segment.start && effectiveCurrentTime < segment.end ? 'is-active' : ''}`}
+                      >
+                        {segment.text}
+                      </span>
+                    )) : line}
+                  </span>
+                );
+              })
             ) : subtitleError ? (
               <span>{subtitleError}</span>
             ) : subtitleCues.length > 0 ? (

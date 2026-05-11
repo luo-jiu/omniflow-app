@@ -166,6 +166,102 @@ contextBridge.exposeInMainWorld('electronOverlayHost', {
   reportReady: () => ipcRenderer.send('overlay:host:ready'),
 });
 
+contextBridge.exposeInMainWorld('electronSystemVideo', {
+  open: (payload: {
+    src: string;
+    title: string;
+    currentTime: number;
+    duration?: number;
+    isPlaying: boolean;
+    volume: number;
+    muted: boolean;
+  }) => ipcRenderer.invoke('system-video-window:open', payload),
+  close: () => ipcRenderer.invoke('system-video-window:close'),
+  play: () => ipcRenderer.invoke('system-video-window:command', { type: 'play' }),
+  pause: () => ipcRenderer.invoke('system-video-window:command', { type: 'pause' }),
+  seek: (time: number) => ipcRenderer.invoke('system-video-window:command', { type: 'seek', time }),
+  onState: (listener: (payload: {
+    currentTime: number;
+    duration: number;
+    isPlaying: boolean;
+    volume: number;
+    muted: boolean;
+    ended: boolean;
+  }) => void) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, payload: {
+      currentTime: number;
+      duration: number;
+      isPlaying: boolean;
+      volume: number;
+      muted: boolean;
+      ended: boolean;
+    }) => listener(payload);
+    ipcRenderer.on('system-video-window:state', wrapped);
+    return () => ipcRenderer.removeListener('system-video-window:state', wrapped);
+  },
+  onClosed: (listener: (payload: {
+    currentTime: number;
+    duration: number;
+    isPlaying: boolean;
+    volume: number;
+    muted: boolean;
+    ended: boolean;
+  } | null) => void) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, payload: {
+      currentTime: number;
+      duration: number;
+      isPlaying: boolean;
+      volume: number;
+      muted: boolean;
+      ended: boolean;
+    } | null) => listener(payload);
+    ipcRenderer.on('system-video-window:closed', wrapped);
+    return () => ipcRenderer.removeListener('system-video-window:closed', wrapped);
+  },
+});
+
+contextBridge.exposeInMainWorld('electronSystemVideoHost', {
+  onInit: (listener: (payload: {
+    src: string;
+    title: string;
+    currentTime: number;
+    duration?: number;
+    isPlaying: boolean;
+    volume: number;
+    muted: boolean;
+  }) => void) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, payload: {
+      src: string;
+      title: string;
+      currentTime: number;
+      duration?: number;
+      isPlaying: boolean;
+      volume: number;
+      muted: boolean;
+    }) => listener(payload);
+    ipcRenderer.on('system-video-window:host:init', wrapped);
+    return () => ipcRenderer.removeListener('system-video-window:host:init', wrapped);
+  },
+  onCommand: (listener: (payload: { type: 'play' } | { type: 'pause' } | { type: 'seek'; time: number }) => void) => {
+    const wrapped = (
+      _event: Electron.IpcRendererEvent,
+      payload: { type: 'play' } | { type: 'pause' } | { type: 'seek'; time: number },
+    ) => listener(payload);
+    ipcRenderer.on('system-video-window:host:command', wrapped);
+    return () => ipcRenderer.removeListener('system-video-window:host:command', wrapped);
+  },
+  reportReady: () => ipcRenderer.send('system-video-window:host:ready'),
+  reportState: (payload: {
+    currentTime: number;
+    duration: number;
+    isPlaying: boolean;
+    volume: number;
+    muted: boolean;
+    ended: boolean;
+  }) => ipcRenderer.send('system-video-window:host:state', payload),
+  close: () => ipcRenderer.send('system-video-window:host:close'),
+});
+
 contextBridge.exposeInMainWorld('electronEmbeddedBrowser', {
   activateTab: (tabId: string | null) => ipcRenderer.invoke('embedded-browser:activate-tab', tabId),
   cleanupDownloadFile: (tempPath: string) => ipcRenderer.invoke('embedded-browser:cleanup-download-file', tempPath),

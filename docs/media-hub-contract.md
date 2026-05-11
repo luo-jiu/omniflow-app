@@ -1,6 +1,6 @@
 # MediaHub 契约
 
-更新时间：2026-05-09（含 Document PiP 主动小窗 + 应用内浮窗 fallback）
+更新时间：2026-05-09（含 Document PiP 主动小窗 + Electron 系统小窗 fallback）
 适用范围：`MediaRegistry`、`globalAudioPlayer`、`floatingVideoService`、`MediaHubPopover`、`FloatingMiniVideoPlayer`，以及 audio / video / asmr / audio-archive viewer 与 `FileViewerContext` 的 tab close 路径。
 
 > 本文是 MediaHub 行为的**单一真源**。修改任何与"出声"或 MediaHub 入口相关的代码前必须先读这里。变更行为时必须同步更新本文，并在 PR 描述中点名。
@@ -106,7 +106,7 @@ clear()                              // 同时取消 registry 注册
 
 ```ts
 seek(time: number): void
-requestSystemFloating(): Promise<boolean> // 用户主动触发桌面小窗；优先 Document PiP，失败降级应用内浮窗
+requestSystemFloating(): Promise<boolean> // 用户主动触发桌面小窗；优先 Document PiP，其次 Electron 系统小窗，最后应用内浮窗
 softClose(): void          // 暂停 + 收起浮窗 UI；元素/hub entry 保留
 hide(): void               // 仅收起浮窗 UI；不暂停
 releaseForTab(tabId: string): void
@@ -115,15 +115,18 @@ dismiss(): void            // 完全释放：pause + remove src + delete element
 
 `hasStarted` 在 `<video>` 触发 `play` 事件时置 true；`bindInline` 切到新 key 或 `dismiss` 时回到 false。MediaHub 只显示已 `play` 过的视频，匹配旧 `useRegisterMediaEntry({ enabled: hasStartedPlaying })` 语义。
 
-`hostMode` 只表达同一个 `<video>` DOM 当前挂在哪个宿主，不代表第二个播放器：
+`hostMode` 表达当前视频播放权归属：
 
 - `inline`：视频在 `VideoViewer` 的 `.video-element-host`。
 - `app-floating`：视频在应用内 `FloatingMiniVideoPlayer` host。
 - `document-pip`：视频在 Chromium Document Picture-in-Picture window。
+- `system-window`：视频由 Electron 独立 `BrowserWindow` 播放。该模式不是搬同一个 DOM 元素，而是用同一视频 URL + 当前进度接力播放，并通过 IPC 同步 play/pause/seek/currentTime。它可以拖到应用窗口外，是 Document PiP 不可用时的桌面级小窗 fallback。
 
 `softClose` / `hide` 都不动 `hasStarted` 也不取消注册。处于 `app-floating` 时，元素继续留在 floating host（`transform: translate(20000px, 20000px)` 移到屏外但保持 connected document）；处于 `document-pip` 时，会先把元素移回应用内 floating host 再关闭 PiP 窗口。用户回 library 时 `mountGlobalVideoElement` + `bindInline({ forceInline: true })` 把元素搬回 inline。
 
 Document PiP 只作为**用户主动点击**的优先路径，因为 Chromium 通常要求用户手势。离开资料库等被动 cleanup 仍走 `handoffToFloating()`，已有 PiP 时保持 PiP，否则走应用内浮窗。
+
+部分 Electron / Chromium 环境会暴露 `documentPictureInPicture.requestWindow`，但返回尺寸为 `0x0` 的不可见窗口并立即 `pagehide`。这类情况视为 Document PiP 不可用，`requestSystemFloating()` 必须继续降级到 Electron 系统小窗；若系统小窗也不可用，最后才降级到可见的应用内浮窗，避免出现“视频继续播放但用户看不到任何小窗”的隐藏播放态。
 
 ### 2.4 跨路由"待激活 tab"协调器
 
@@ -143,10 +146,12 @@ subscribePendingActivation(listener)      // 同 libraryId 内多次 set 也能�
 - **`MediaHubPopover`**：弹窗组件本身保留为 dumb component，`onActivate` / `onToggle` / `onSeek` / `onDismiss` 由调用方提供。entry 行的"跳转 tab"按钮根据 `kind` 显示不同 title（`回到视频 tab` / `回到音频 tab`）。
 - **`FloatingMiniVideoPlayer`**：在 `App.tsx` 顶层始终挂载（host ref 不被卸载），通过 `data-visible` 控制显隐：`transform: translate(20000px, 20000px)` 移到屏外但保持 connected DOM。
   - header 包含两个按钮：「收起」（IconChevronDown）→ `hide()`；「×」→ `softClose()`
-  - 点击 header 主体：navigate 回 `/libraries/:libraryId`，触发对应 viewer 重新 mount → `bindInline` 把元素搬回 inline host → 浮窗自动收起
+  - 点击 header 主体：写入 pending activation 并 navigate 回 `/libraries/:libraryId`，触发对应 viewer 重新 mount → `bindInline` 把元素搬回 inline host → 浮窗自动收起
+  - 拖拽 header 可在应用窗口内移动小窗；应用内浮窗不能越出 Electron 主窗口，真正桌面级浮窗由 Document PiP 或 Electron 系统小窗提供。
 - **`VideoViewer` 桌面小窗按钮**：底部控制条的小窗按钮调用 `floatingVideoService.requestSystemFloating()`。
   - 支持 `documentPictureInPicture.requestWindow` 时，打开桌面级 Document PiP 窗口，视频元素直接搬入 PiP document。
-  - 不支持或请求失败时，降级为应用内浮窗。
+  - Document PiP 不支持、请求失败或返回 `0x0` 不可见窗口时，降级为 Electron 独立系统小窗。该小窗是独立 `BrowserWindow`，可以拖到应用主窗口外；由于跨 renderer 不能搬 DOM，系统小窗使用当前视频 URL 和时间点接力播放。
+  - Electron 系统小窗也不可用时，最后降级为应用内浮窗。
   - inline 区域显示海报占位 + “收回 inline”按钮；这只是 UI 占位，不是新的播放器实例。
 - **库左下角设置入口**：保留原设置按钮，用户头像可放在同一侧栏容器右下角，不因 MediaHub 改造移动设置入口。
 - **旧全屏系统页**：`/settings`、`/profile`、旧上传 / 回收站页面只作为迁移期兼容入口。新入口应优先使用仓库页或资源页右侧系统视图，避免路由切换影响媒体 DOM、MediaHub entry 和后台任务状态。
@@ -158,9 +163,10 @@ subscribePendingActivation(listener)      // 同 libraryId 内多次 set 也能�
 | 首次播放 | service 注册 entry | service 注册 entry（hasStarted=true 起） |
 | viewer 卸载（同库内切 tab） | 不动 audio，继续在 hub | `parkGlobalVideoElement`，浮窗不弹 |
 | 离开 `/libraries/:id` | 不动 audio，继续在 hub | `handoffToFloating()`，浮窗弹出 |
-| 视频底部小窗按钮 | —— | 优先进入 Document PiP；不可用时进入应用内浮窗；inline 显示海报 + 收回 |
+| 视频底部小窗按钮 | —— | 优先进入 Document PiP；不可用时进入 Electron 系统小窗；再不可用时进入应用内浮窗；inline 显示海报 + 收回 |
 | inline 收回按钮 | —— | `mountGlobalVideoElement` + `bindInline({ forceInline: true })`，视频回到 inline |
 | Document PiP 原生关闭 | —— | 暂停视频，移回应用内 floating host 并收起，hub entry 保留（已暂停） |
+| Electron 系统小窗关闭 | —— | 暂停系统窗口播放，把最后进度同步回 inline/global video，hub entry 保留（已暂停） |
 | 浮窗 ×（softClose） | —— | 暂停视频 + 收起浮窗；元素留 floating host，hub entry 保留（已暂停） |
 | 浮窗 收起（hide） | —— | 不动播放 + 收起浮窗；元素留 floating host，hub entry 保留 |
 | `closeTab(tabId)` | `releaseForTab` 触发 `clear()`，从 hub 消失 | `releaseForTab` 触发 `dismiss()`，浮窗消失 |
@@ -186,7 +192,9 @@ subscribePendingActivation(listener)      // 同 libraryId 内多次 set 也能�
 - 内置浏览器中的视频未接入 MediaHub。需要在 `embedded-browser` 侧暴露 `play/pause/seek/dismiss + tabId/libraryId/title` 才能纳入；目前出于对 webview 生命周期的不确定性放后处理。
 - 浮窗仅 video。音频离库时没有"小窗"，回到库详情后可通过原有工具区 MediaHub 完整控制（play/pause/seek/dismiss/jump）。
 - 应用内浮窗收起后用户在外部点 hub play → 视频在 off-screen floating host 内继续播放（仅声）；要看见画面需 navigate 回 library 或从 inline 占位收回。这是预期行为。
-- Document PiP 依赖 Chromium 支持和用户手势；不可用、权限拒绝或请求失败时自动降级到应用内浮窗。
+- Document PiP 依赖 Chromium 支持和用户手势；不可用、权限拒绝或请求失败时自动降级到 Electron 系统小窗，再失败才降级到应用内浮窗。
+- 若 Document PiP API 名义存在但窗口尺寸为 `0x0` 或立即关闭，也按不可用处理并自动降级。
+- Electron 系统小窗使用新 `<video>` 元素接力播放，依赖当前视频 URL 仍可访问。若未来预签名 URL 过短导致接力失败，应在 `floatingVideoService` 里按 `nodeId/libraryId` 重新申请 fresh link，而不是让系统窗口直接复用过期 URL。
 - 暂无全局产品顶栏；不要为了 MediaHub 单独新增一个顶栏。若未来要在非库路由控制音频 / 视频，应优先复用现有窗口级工具区域或重新设计跨路由工具入口。
 
 ## 7. 维护规则

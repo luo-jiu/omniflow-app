@@ -137,6 +137,19 @@ export const AudioViewerWrapper = styled.div`
         text-overflow: ellipsis;
         white-space: nowrap;
       }
+
+      .lyric-segment {
+        color: color-mix(in srgb, var(--semi-color-text-2) 82%, transparent);
+        transition: color 0.12s ease;
+      }
+
+      .lyric-segment.is-past {
+        color: color-mix(in srgb, var(--semi-color-primary) 74%, var(--semi-color-text-0));
+      }
+
+      .lyric-segment.is-active {
+        color: var(--semi-color-primary);
+      }
     }
   }
 

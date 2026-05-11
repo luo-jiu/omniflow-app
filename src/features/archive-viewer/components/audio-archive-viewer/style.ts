@@ -373,10 +373,39 @@ export const AudioArchiveViewerWrapper = styled.div`
     cursor: pointer;
   }
 
-  .audio-cover.mini {
+  .player-cover-trigger {
+    position: relative;
     flex-shrink: 0;
     width: 42px;
     height: 42px;
+    display: block;
+  }
+
+  .audio-cover.mini {
+    width: 42px;
+    height: 42px;
+  }
+
+  .player-cover-toggle {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 5px;
+    color: #fff;
+    background: rgba(0, 0, 0, 0.42);
+    font-size: 16px;
+    opacity: 0;
+    transform: translateY(2px);
+    transition: opacity 0.14s ease, transform 0.14s ease;
+  }
+
+  .player-brief:hover .player-cover-toggle,
+  .player-brief:focus-visible .player-cover-toggle,
+  &.is-expanded .player-cover-toggle {
+    opacity: 1;
+    transform: translateY(0);
   }
 
   .player-title {
@@ -442,17 +471,8 @@ export const AudioArchiveViewerWrapper = styled.div`
     border-bottom: 1px solid var(--semi-color-border);
   }
 
-  .expanded-collapse {
-    position: absolute;
-    top: 10px;
-    right: 14px;
-    width: 30px;
-    height: 30px;
-    border: 0;
-    border-radius: 6px;
-    color: var(--semi-color-text-1);
-    background: var(--semi-color-fill-0);
-    cursor: pointer;
+  &.is-expanded .archive-main {
+    display: none;
   }
 
   .expanded-cover-wrap {
@@ -494,34 +514,80 @@ export const AudioArchiveViewerWrapper = styled.div`
   }
 
   .lyrics-stage {
-    min-height: 168px;
+    height: clamp(250px, 42vh, 420px);
+    min-height: 0;
+    overflow: auto;
+    scrollbar-width: none;
+    mask-image: linear-gradient(180deg, transparent 0%, #000 15%, #000 85%, transparent 100%);
+  }
+
+  .lyrics-stage::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+    display: none;
+  }
+
+  .lyric-roller {
+    min-height: 100%;
     display: flex;
     flex-direction: column;
     justify-content: center;
-    gap: 8px;
+    gap: 14px;
+    padding: 42% 0;
   }
 
   .lyric-line {
+    position: relative;
     margin: 0;
-    max-width: 660px;
-    font-size: 19px;
+    width: fit-content;
+    max-width: min(720px, 100%);
+    padding: 0;
+    border: 0;
+    background: transparent;
+    font: inherit;
+    font-size: 17px;
     line-height: 1.55;
     font-weight: 700;
+    color: var(--semi-color-text-2);
+    text-align: left;
+    white-space: pre-wrap;
+    cursor: pointer;
+    opacity: 0.48;
+    transform-origin: left center;
+    transition:
+      opacity 0.18s ease,
+      color 0.18s ease,
+      transform 0.18s ease;
+  }
+
+  .lyric-line:hover {
+    opacity: 0.78;
     color: var(--semi-color-text-1);
   }
 
-  .lyric-line.active {
-    color: var(--semi-color-text-0);
+  .lyric-line.is-focus {
+    font-size: 25px;
+    font-weight: 850;
+    opacity: 1;
+    transform: translateX(2px);
+    color: transparent;
+    background:
+      linear-gradient(
+        90deg,
+        color-mix(in srgb, var(--semi-color-primary) 74%, var(--semi-color-text-0)) 0%,
+        color-mix(in srgb, var(--semi-color-primary) 74%, var(--semi-color-text-0)) var(--lyric-progress),
+        var(--semi-color-text-0) var(--lyric-progress),
+        var(--semi-color-text-0) 100%
+      );
+    background-clip: text;
+    -webkit-background-clip: text;
+    will-change: background;
   }
 
   .lyric-line.muted {
     color: var(--semi-color-text-2);
     font-size: 14px;
     font-weight: 500;
-  }
-
-  &.is-expanded .archive-main {
-    flex: 0 1 42%;
   }
 
   @media (max-width: 860px) {

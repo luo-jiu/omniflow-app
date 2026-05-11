@@ -3,6 +3,13 @@ export interface TimedTextCue {
   start: number;
   end: number;
   lines: string[];
+  segmentLines?: TimedTextSegment[][];
+}
+
+export interface TimedTextSegment {
+  text: string;
+  start: number;
+  end: number;
 }
 
 function normalizeSubtitleText(raw: string): string {
@@ -177,7 +184,110 @@ function parseLrcSubtitle(raw: string): TimedTextCue[] {
     .filter(item => item.end > item.start);
 }
 
+function decodeXmlAttribute(value: string): string {
+  return value
+    .replace(/&#x([0-9a-f]+);/giu, (_, hex: string) => String.fromCodePoint(Number.parseInt(hex, 16)))
+    .replace(/&#(\d+);/gu, (_, code: string) => String.fromCodePoint(Number.parseInt(code, 10)))
+    .replace(/&quot;/gu, '"')
+    .replace(/&apos;/gu, "'")
+    .replace(/&lt;/gu, '<')
+    .replace(/&gt;/gu, '>')
+    .replace(/&amp;/gu, '&');
+}
+
+function extractQrcLyricContent(raw: string): string | null {
+  const normalized = normalizeSubtitleText(raw);
+  if (!normalized) return null;
+  const lyricContentMatch = /<Lyric_\d+\b[^>]*\bLyricContent=(["'])([\s\S]*?)\1/iu.exec(normalized);
+  if (lyricContentMatch) {
+    return decodeXmlAttribute(lyricContentMatch[2]);
+  }
+  if (/^\[\d+,\d+\]/mu.test(normalized)) {
+    return normalized;
+  }
+  return null;
+}
+
+function parseQrcLineSegments(payload: string, lineStart: number, lineEnd: number): TimedTextSegment[] {
+  const matches = Array.from(payload.matchAll(/\((\d+),(\d+)\)/gu));
+  if (matches.length === 0) {
+    const text = payload.trim();
+    return text ? [{ text, start: lineStart, end: lineEnd }] : [];
+  }
+
+  const rawSegments: TimedTextSegment[] = [];
+  const leadingText = payload.slice(0, matches[0].index ?? 0);
+
+  matches.forEach((match, index) => {
+    const markerEnd = (match.index ?? 0) + match[0].length;
+    const nextMarkerStart = matches[index + 1]?.index ?? payload.length;
+    const text = payload.slice(markerEnd, nextMarkerStart);
+    if (!text) return;
+
+    const start = Number(match[1]) / 1000;
+    const duration = Number(match[2]) / 1000;
+    rawSegments.push({
+      text,
+      start,
+      end: duration > 0 ? start + duration : start,
+    });
+  });
+
+  if (leadingText) {
+    rawSegments.unshift({
+      text: leadingText,
+      start: lineStart,
+      end: rawSegments[0]?.end ?? lineEnd,
+    });
+  }
+
+  return rawSegments
+    .map((segment, index, list) => {
+      if (segment.end > segment.start) return segment;
+      const nextDifferentStart = list.slice(index + 1).find(item => item.start > segment.start)?.start;
+      return {
+        ...segment,
+        end: Math.max(nextDifferentStart ?? lineEnd, segment.start + 0.08),
+      };
+    })
+    .filter(segment => segment.text.length > 0 && segment.end > segment.start);
+}
+
+function parseQrcXmlSubtitle(raw: string): TimedTextCue[] {
+  const lyricContent = extractQrcLyricContent(raw);
+  if (!lyricContent) return [];
+
+  const cues: TimedTextCue[] = [];
+  lyricContent.split(/\r?\n/u).forEach((line) => {
+    const trimmed = line.trim();
+    const lineMatch = /^\[(\d+),(\d+)\](.+)$/u.exec(trimmed);
+    if (!lineMatch) return;
+
+    const start = Number(lineMatch[1]) / 1000;
+    const duration = Number(lineMatch[2]) / 1000;
+    if (!Number.isFinite(start) || !Number.isFinite(duration) || duration <= 0) return;
+
+    const end = start + duration;
+    const segments = parseQrcLineSegments(lineMatch[3], start, end);
+    const text = segments.map(segment => segment.text).join('').trim();
+    if (!text) return;
+
+    cues.push({
+      id: `subtitle-qrc-${cues.length}-${start}-${end}`,
+      start,
+      end,
+      lines: [text],
+      segmentLines: [segments],
+    });
+  });
+
+  return cues.sort((left, right) => left.start - right.start);
+}
+
 export function parseTimedText(raw: string): TimedTextCue[] {
+  const qrcCues = parseQrcXmlSubtitle(raw);
+  if (qrcCues.length > 0) return qrcCues;
+
   const srtOrVttCues = parseSrtOrVttSubtitle(raw);
   if (srtOrVttCues.length > 0) return srtOrVttCues;
 

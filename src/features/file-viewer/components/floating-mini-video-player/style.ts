@@ -15,6 +15,7 @@ export const FloatingMiniVideoPlayerWrapper = styled.div`
   flex-direction: column;
   font-size: 12px;
   user-select: none;
+  touch-action: none;
 
   /* 隐藏时挪到屏外但保持 connected DOM，确保 host 始终可接收视频元素，不让 Chromium 因脱离 document 触发 pause。
      不用 display:none —— 某些浏览器会因 <video> 不在 layout 树中而暂停。 */
@@ -24,13 +25,21 @@ export const FloatingMiniVideoPlayerWrapper = styled.div`
     transform: translate(20000px, 20000px);
   }
 
+  &[data-dragging='true'] {
+    cursor: grabbing;
+  }
+
   .floating-header {
     display: flex;
     align-items: center;
     gap: 8px;
     padding: 6px 10px;
     background: rgba(0, 0, 0, 0.4);
-    cursor: pointer;
+    cursor: grab;
+
+    &:active {
+      cursor: grabbing;
+    }
 
     .floating-title {
       flex: 1;

@@ -83,7 +83,7 @@ export function useTimedText({
     if (cues.length === 0) {
       setSubtitleFileName('');
       setSubtitleCues([]);
-      setSubtitleError('字幕文件没有解析出有效时间轴，当前支持常见的 .srt / .vtt / .ass / .ssa / .lrc 格式。');
+      setSubtitleError('字幕文件没有解析出有效时间轴，当前支持常见的 .srt / .vtt / .ass / .ssa / .lrc / .qrc.xml 格式。');
       return false;
     }
     setSubtitleFileName(displayName);

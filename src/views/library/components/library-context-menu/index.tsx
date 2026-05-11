@@ -1,7 +1,6 @@
 import React from 'react';
-import { Popover } from '@douyinfe/semi-ui';
 import ContextMenu, { ContextMenuItem } from '@/components/ui/context-menu';
-import type { Library } from "@/features/file-explorer/services/file.api";
+import type { Library } from '@/features/file-explorer/services/file.api';
 
 interface LibraryContextMenuProps {
   visible: boolean;
@@ -28,6 +27,30 @@ const LibraryContextMenu: React.FC<LibraryContextMenuProps> = ({
   onDelete,
   onClose
 }) => {
+  const menuRef = React.useRef<HTMLDivElement | null>(null);
+  const [position, setPosition] = React.useState({ left: x, top: y });
+
+  React.useLayoutEffect(() => {
+    if (!visible) return;
+    const menuEl = menuRef.current;
+    if (!menuEl) {
+      setPosition({ left: x, top: y });
+      return;
+    }
+
+    const margin = 8;
+    const rect = menuEl.getBoundingClientRect();
+    const maxLeft = Math.max(margin, window.innerWidth - rect.width - margin);
+    const maxTop = Math.max(margin, window.innerHeight - rect.height - margin);
+    const nextPosition = {
+      left: Math.min(Math.max(x, margin), maxLeft),
+      top: Math.min(Math.max(y, margin), maxTop),
+    };
+    setPosition((prev) => (
+      prev.left === nextPosition.left && prev.top === nextPosition.top ? prev : nextPosition
+    ));
+  }, [mode, visible, x, y]);
+
   if (mode === 'library' && !library) return null;
 
   const items: ContextMenuItem[] = mode === 'blank'
@@ -61,36 +84,25 @@ const LibraryContextMenu: React.FC<LibraryContextMenuProps> = ({
       },
     ];
 
+  if (!visible) return null;
+
   return (
-    <Popover
-      trigger="custom"
-      visible={visible}
-      onClickOutSide={onClose}
-      position="bottomLeft" // 改为 bottomLeft
-      showArrow={false}
-      spacing={4}
-      getPopupContainer={() => document.body}
-      content={
-        <ContextMenu
-          id="library-context-menu"
-          items={items}
-          className="directory-context-menu"
-          onItemClick={onClose}
-        />
-      }
+    <div
+      ref={menuRef}
+      style={{
+        position: 'fixed',
+        left: position.left,
+        top: position.top,
+        zIndex: 9999,
+      }}
     >
-      <div
-        style={{
-          position: 'fixed',
-          left: x,
-          top: y,
-          width: 1,
-          height: 1,
-          pointerEvents: 'none',
-          zIndex: 9999
-        }}
+      <ContextMenu
+        id="library-context-menu"
+        items={items}
+        className="directory-context-menu"
+        onItemClick={onClose}
       />
-    </Popover>
+    </div>
   );
 };
 

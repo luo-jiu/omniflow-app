@@ -203,6 +203,61 @@ interface Window {
     dismiss: (requestId: string, reason?: string) => void;
     reportReady: () => void;
   };
+
+  electronSystemVideo?: {
+    open: (payload: {
+      src: string;
+      title: string;
+      currentTime: number;
+      duration?: number;
+      isPlaying: boolean;
+      volume: number;
+      muted: boolean;
+    }) => Promise<boolean>;
+    close: () => Promise<boolean>;
+    play: () => Promise<boolean>;
+    pause: () => Promise<boolean>;
+    seek: (time: number) => Promise<boolean>;
+    onState: (listener: (payload: {
+      currentTime: number;
+      duration: number;
+      isPlaying: boolean;
+      volume: number;
+      muted: boolean;
+      ended: boolean;
+    }) => void) => () => void;
+    onClosed: (listener: (payload: {
+      currentTime: number;
+      duration: number;
+      isPlaying: boolean;
+      volume: number;
+      muted: boolean;
+      ended: boolean;
+    } | null) => void) => () => void;
+  };
+
+  electronSystemVideoHost?: {
+    onInit: (listener: (payload: {
+      src: string;
+      title: string;
+      currentTime: number;
+      duration?: number;
+      isPlaying: boolean;
+      volume: number;
+      muted: boolean;
+    }) => void) => () => void;
+    onCommand: (listener: (payload: { type: 'play' } | { type: 'pause' } | { type: 'seek'; time: number }) => void) => () => void;
+    reportReady: () => void;
+    reportState: (payload: {
+      currentTime: number;
+      duration: number;
+      isPlaying: boolean;
+      volume: number;
+      muted: boolean;
+      ended: boolean;
+    }) => void;
+    close: () => void;
+  };
 }
 
 type EmbeddedBrowserCookie = {

@@ -15,7 +15,7 @@ function dbg(...args: unknown[]) {
   console.log(DEBUG_TAG, ...args);
 }
 
-type FloatingVideoHostMode = 'inline' | 'app-floating' | 'document-pip';
+type FloatingVideoHostMode = 'inline' | 'app-floating' | 'document-pip' | 'system-window';
 
 type DocumentPictureInPictureController = {
   requestWindow(options?: { width?: number; height?: number }): Promise<Window>;
@@ -29,6 +29,15 @@ type DocumentPipRequestSnapshot = {
   key: string;
   tabId: string | null;
   element: HTMLVideoElement | null;
+};
+
+type SystemVideoWindowStatePayload = {
+  currentTime: number;
+  duration: number;
+  isPlaying: boolean;
+  volume: number;
+  muted: boolean;
+  ended: boolean;
 };
 
 export interface FloatingVideoState {
@@ -89,13 +98,16 @@ class FloatingVideoService {
   private documentPipHostEl: HTMLDivElement | null = null;
   private documentPipShell: DocumentPipShell | null = null;
   private closingDocumentPipForInline = false;
+  private systemWindowUnsubscribers: Array<() => void> = [];
 
   private onPlay = () => {
+    if (this.state.hostMode === 'system-window') return;
     dbg('video.event play', { key: this.state.key, paused: this.boundElement?.paused, ct: this.boundElement?.currentTime });
     this.hasStarted = true;
     this.setState({ isPlaying: true });
   };
   private onPause = () => {
+    if (this.state.hostMode === 'system-window') return;
     const el = this.boundElement;
     dbg('video.event pause', { key: this.state.key, paused: el?.paused, ended: el?.ended, ct: el?.currentTime, armed: this.autoResumeArmed });
     this.setState({ isPlaying: false });
@@ -110,6 +122,7 @@ class FloatingVideoService {
   private onStalled = () => dbg('video.event stalled', { connected: this.boundElement?.isConnected, paused: this.boundElement?.paused });
   private onWaiting = () => dbg('video.event waiting', { connected: this.boundElement?.isConnected, paused: this.boundElement?.paused });
   private onTimeUpdate = () => {
+    if (this.state.hostMode === 'system-window') return;
     const el = this.boundElement;
     if (!el) return;
     this.setState({
@@ -117,6 +130,7 @@ class FloatingVideoService {
     });
   };
   private onLoadedMetadata = () => {
+    if (this.state.hostMode === 'system-window') return;
     const el = this.boundElement;
     if (!el) return;
     this.setState({
@@ -138,6 +152,9 @@ class FloatingVideoService {
     dbg('bindInline', { meta, prevKey: this.state.key, prevVisible: this.state.visible });
     const isNewKey = this.state.key !== meta.key;
     const shouldForceInline = meta.forceInline || isNewKey || this.state.hostMode === 'inline';
+    const shouldRestoreFromSystemWindow = !isNewKey && this.state.hostMode === 'system-window';
+    const systemWindowTime = this.state.currentTime;
+    const systemWindowWasPlaying = this.state.isPlaying;
 
     if (!shouldForceInline && this.state.key === meta.key) {
       this.setState({
@@ -151,6 +168,9 @@ class FloatingVideoService {
     }
 
     this.closeDocumentPipForInlineRestore();
+    if (this.state.hostMode === 'system-window') {
+      this.closeSystemVideoWindow();
+    }
     // 切到新视频时，若浮窗里还有旧视频，释放旧元素，避免双实例。
     if (this.state.key && isNewKey && this.state.hostMode !== 'inline') {
       releaseGlobalVideoElement(this.state.key);
@@ -163,6 +183,9 @@ class FloatingVideoService {
     // 回到 inline：卸膛 + 清掉残留 timer，浮窗逻辑完全交还给 inline 模式。
     this.autoResumeArmed = false;
     this.clearAutoResumeTimer();
+    if (shouldRestoreFromSystemWindow && el && Number.isFinite(systemWindowTime)) {
+      el.currentTime = systemWindowTime;
+    }
     this.setState({
       visible: false,
       hostMode: 'inline',
@@ -176,11 +199,19 @@ class FloatingVideoService {
       currentTime: el && Number.isFinite(el.currentTime) ? el.currentTime : 0,
       duration: el && Number.isFinite(el.duration) ? el.duration : 0,
     });
+    if (shouldRestoreFromSystemWindow && systemWindowWasPlaying && el && !el.ended) {
+      void el.play().catch(() => {
+        /* swallow restore autoplay rejection */
+      });
+    }
   };
 
   requestSystemFloating = async () => {
     const key = this.state.key;
-    if (!key) return false;
+    if (!key) {
+      dbg('requestSystemFloating.skip no key');
+      return false;
+    }
     const el = this.boundElement;
     const requestSnapshot: DocumentPipRequestSnapshot = {
       key,
@@ -189,18 +220,44 @@ class FloatingVideoService {
     };
     const wasPlaying = !!(el && !el.paused && !el.ended) || this.state.isPlaying;
     this.autoResumeArmed = wasPlaying;
+    const canDocumentPip = this.canUseDocumentPictureInPicture();
+    dbg('requestSystemFloating.start', {
+      key,
+      tabId: this.state.tabId,
+      hostMode: this.state.hostMode,
+      canDocumentPip,
+      hasElement: !!el,
+      paused: el?.paused,
+      currentTime: el?.currentTime,
+      wasPlaying,
+    });
 
-    if (this.canUseDocumentPictureInPicture()) {
+    if (canDocumentPip) {
       try {
         const opened = await this.openDocumentPictureInPicture(requestSnapshot);
+        dbg('requestSystemFloating.document-pip.result', { opened, hostMode: this.state.hostMode });
         if (opened) return true;
-        return false;
       } catch (error) {
         dbg('document-pip.open failed, fallback app-floating', { error: String(error) });
       }
     }
 
-    if (!this.isSameVideoRequest(requestSnapshot)) return false;
+    if (!this.isSameVideoRequest(requestSnapshot)) {
+      dbg('requestSystemFloating.skip stale before app-floating', {
+        requestKey: requestSnapshot.key,
+        stateKey: this.state.key,
+      });
+      return false;
+    }
+    const openedSystemWindow = await this.openSystemVideoWindow(requestSnapshot, wasPlaying);
+    if (openedSystemWindow) return true;
+    if (!this.isSameVideoRequest(requestSnapshot)) {
+      dbg('requestSystemFloating.skip stale before app-floating after system-window', {
+        requestKey: requestSnapshot.key,
+        stateKey: this.state.key,
+      });
+      return false;
+    }
     this.showAppFloating();
     return false;
   };
@@ -270,6 +327,11 @@ class FloatingVideoService {
   play = () => {
     this.autoResumeArmed = false;
     this.clearAutoResumeTimer();
+    if (this.state.hostMode === 'system-window') {
+      void window.electronSystemVideo?.play();
+      this.setState({ isPlaying: true });
+      return;
+    }
     const el = this.boundElement;
     if (!el) return;
     void el.play().catch(() => {
@@ -280,12 +342,24 @@ class FloatingVideoService {
   pause = () => {
     this.autoResumeArmed = false;
     this.clearAutoResumeTimer();
+    if (this.state.hostMode === 'system-window') {
+      void window.electronSystemVideo?.pause();
+      this.setState({ isPlaying: false });
+      return;
+    }
     const el = this.boundElement;
     if (!el) return;
     if (!el.paused) el.pause();
   };
 
   seek = (time: number) => {
+    if (this.state.hostMode === 'system-window') {
+      const duration = Number.isFinite(this.state.duration) ? this.state.duration : 0;
+      const next = duration > 0 ? Math.min(Math.max(time, 0), duration) : Math.max(time, 0);
+      void window.electronSystemVideo?.seek(next);
+      this.setState({ currentTime: next });
+      return;
+    }
     const el = this.boundElement;
     if (!el || !Number.isFinite(time)) return;
     const duration = Number.isFinite(el.duration) ? el.duration : 0;
@@ -303,6 +377,12 @@ class FloatingVideoService {
     this.clearAutoResumeTimer();
     const el = this.boundElement;
     if (el && !el.paused) el.pause();
+    if (this.state.hostMode === 'system-window') {
+      void window.electronSystemVideo?.pause();
+      this.closeSystemVideoWindow();
+      this.setState({ visible: false, hostMode: 'inline', isPlaying: false });
+      return;
+    }
     if (this.state.hostMode === 'document-pip') {
       this.closeDocumentPipToAppFloating({ pause: true, visible: false });
       return;
@@ -314,6 +394,9 @@ class FloatingVideoService {
   hide = () => {
     this.autoResumeArmed = false;
     this.clearAutoResumeTimer();
+    if (this.state.hostMode === 'system-window') {
+      return;
+    }
     if (this.state.hostMode === 'document-pip') {
       this.closeDocumentPipToAppFloating({ pause: false, visible: false });
       return;
@@ -326,6 +409,7 @@ class FloatingVideoService {
     this.autoResumeArmed = false;
     this.clearAutoResumeTimer();
     this.cleanupDocumentPipWindow({ close: true });
+    this.closeSystemVideoWindow();
     this.detachVideoListeners();
     if (key) {
       releaseGlobalVideoElement(key);
@@ -342,6 +426,88 @@ class FloatingVideoService {
     return typeof controller?.requestWindow === 'function';
   }
 
+  private async openSystemVideoWindow(requestSnapshot: DocumentPipRequestSnapshot, wasPlaying: boolean) {
+    const el = requestSnapshot.element;
+    const api = window.electronSystemVideo;
+    const src = el?.currentSrc || el?.src || '';
+    if (!api || !requestSnapshot.key || !el || !src) {
+      dbg('system-window.skip unavailable', { hasApi: !!api, hasElement: !!el, hasSrc: !!src });
+      return false;
+    }
+    this.ensureSystemWindowListeners();
+    const currentTime = Number.isFinite(el.currentTime) ? el.currentTime : 0;
+    const duration = Number.isFinite(el.duration) ? el.duration : 0;
+    const volume = Number.isFinite(el.volume) ? el.volume : 1;
+    try {
+      const opened = await api.open({
+        src,
+        title: this.state.fileName || '视频',
+        currentTime,
+        duration,
+        isPlaying: wasPlaying,
+        volume,
+        muted: el.muted,
+      });
+      dbg('system-window.open.result', { opened });
+      if (!opened || !this.isSameVideoRequest(requestSnapshot)) {
+        if (opened) void api.close();
+        return false;
+      }
+      this.autoResumeArmed = false;
+      if (!el.paused) el.pause();
+      this.setState({
+        visible: false,
+        hostMode: 'system-window',
+        isPlaying: wasPlaying,
+        currentTime,
+        duration,
+      });
+      return true;
+    } catch (error) {
+      dbg('system-window.open failed, fallback app-floating', { error: String(error) });
+      return false;
+    }
+  }
+
+  private ensureSystemWindowListeners() {
+    if (this.systemWindowUnsubscribers.length > 0) return;
+    const api = window.electronSystemVideo;
+    if (!api) return;
+    this.systemWindowUnsubscribers = [
+      api.onState((payload) => this.handleSystemWindowState(payload)),
+      api.onClosed((payload) => this.handleSystemWindowClosed(payload)),
+    ];
+  }
+
+  private handleSystemWindowState(payload: SystemVideoWindowStatePayload) {
+    if (this.state.hostMode !== 'system-window') return;
+    this.setState({
+      currentTime: Number.isFinite(payload.currentTime) ? payload.currentTime : 0,
+      duration: Number.isFinite(payload.duration) ? payload.duration : 0,
+      isPlaying: payload.isPlaying,
+    });
+  }
+
+  private handleSystemWindowClosed(payload: SystemVideoWindowStatePayload | null) {
+    if (this.state.hostMode !== 'system-window') return;
+    const el = this.boundElement;
+    const nextTime = payload && Number.isFinite(payload.currentTime) ? payload.currentTime : this.state.currentTime;
+    if (el && Number.isFinite(nextTime)) {
+      el.currentTime = nextTime;
+    }
+    this.setState({
+      visible: false,
+      hostMode: 'inline',
+      isPlaying: false,
+      currentTime: Number.isFinite(nextTime) ? nextTime : 0,
+      duration: payload && Number.isFinite(payload.duration) ? payload.duration : this.state.duration,
+    });
+  }
+
+  private closeSystemVideoWindow() {
+    void window.electronSystemVideo?.close();
+  }
+
   private async openDocumentPictureInPicture(requestSnapshot: DocumentPipRequestSnapshot) {
     if (!requestSnapshot.key || !requestSnapshot.element) throw new Error('No active video');
     const controller = (window as WindowWithDocumentPictureInPicture).documentPictureInPicture;
@@ -353,11 +519,33 @@ class FloatingVideoService {
       closePipWindow(pipWindow);
       return false;
     }
+    const isReady = await this.waitForDocumentPipWindowReady(pipWindow);
+    if (!isReady) {
+      dbg('document-pip.unusable, fallback app-floating', this.getDocumentPipWindowSnapshot(pipWindow));
+      closePipWindow(pipWindow);
+      return false;
+    }
 
     this.documentPipWindow = pipWindow;
     this.closingDocumentPipForInline = false;
     this.renderDocumentPipShell(pipWindow);
     this.moveElementToDocumentPipHost();
+    try {
+      pipWindow.focus();
+    } catch (error) {
+      dbg('document-pip.focus failed', { error: String(error) });
+    }
+    dbg('document-pip.opened', {
+      closed: pipWindow.closed,
+      innerWidth: pipWindow.innerWidth,
+      innerHeight: pipWindow.innerHeight,
+      outerWidth: pipWindow.outerWidth,
+      outerHeight: pipWindow.outerHeight,
+      screenX: pipWindow.screenX,
+      screenY: pipWindow.screenY,
+      visibilityState: pipWindow.document.visibilityState,
+      activeElement: pipWindow.document.activeElement?.tagName,
+    });
     pipWindow.addEventListener('pagehide', this.handleDocumentPipPageHide);
     this.setState({ visible: false, hostMode: 'document-pip' });
 
@@ -463,6 +651,39 @@ class FloatingVideoService {
       && this.boundElement === requestSnapshot.element;
   }
 
+  private async waitForDocumentPipWindowReady(pipWindow: Window) {
+    const start = window.performance.now();
+    while (window.performance.now() - start < 320) {
+      if (this.isDocumentPipWindowUsable(pipWindow)) return true;
+      if (pipWindow.closed) return false;
+      await new Promise<void>((resolve) => {
+        window.requestAnimationFrame(() => resolve());
+      });
+    }
+    return this.isDocumentPipWindowUsable(pipWindow);
+  }
+
+  private isDocumentPipWindowUsable(pipWindow: Window) {
+    if (pipWindow.closed) return false;
+    const { innerWidth, innerHeight, outerWidth, outerHeight } = pipWindow;
+    const width = Math.max(innerWidth || 0, outerWidth || 0);
+    const height = Math.max(innerHeight || 0, outerHeight || 0);
+    return width > 0 && height > 0;
+  }
+
+  private getDocumentPipWindowSnapshot(pipWindow: Window) {
+    return {
+      closed: pipWindow.closed,
+      innerWidth: pipWindow.innerWidth,
+      innerHeight: pipWindow.innerHeight,
+      outerWidth: pipWindow.outerWidth,
+      outerHeight: pipWindow.outerHeight,
+      screenX: pipWindow.screenX,
+      screenY: pipWindow.screenY,
+      visibilityState: pipWindow.document.visibilityState,
+    };
+  }
+
   private moveElementToDocumentPipHost() {
     const key = this.state.key;
     const host = this.documentPipHostEl;
@@ -474,9 +695,20 @@ class FloatingVideoService {
   }
 
   private showAppFloating() {
+    dbg('showAppFloating.start', {
+      key: this.state.key,
+      hasFloatingHost: !!this.floatingHostEl,
+      currentHostMode: this.state.hostMode,
+    });
     this.cleanupDocumentPipWindow({ close: true });
     this.setState({ visible: true, hostMode: 'app-floating' });
     this.moveElementToFloatingHost();
+    dbg('showAppFloating.end', {
+      visible: this.state.visible,
+      hostMode: this.state.hostMode,
+      hostConnected: this.floatingHostEl?.isConnected,
+      parentClass: this.boundElement?.parentElement?.className,
+    });
   }
 
   private scheduleAutoResume() {

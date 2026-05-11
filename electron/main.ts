@@ -7,6 +7,8 @@ import { createEmbeddedBrowserMainController } from './service/embeddedBrowserMa
 import { registerWindowControlIpcHandlers } from './service/windowControlIpc'
 import { createOverlayWindowController } from './service/overlayWindowController'
 import { registerOverlayWindowIpcHandlers } from './service/overlayWindowIpc'
+import { createSystemVideoWindowController } from './service/systemVideoWindowController'
+import { registerSystemVideoWindowIpcHandlers } from './service/systemVideoWindowIpc'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -219,6 +221,11 @@ const overlayWindowController = createOverlayWindowController({
   devServerUrl: VITE_DEV_SERVER_URL,
 })
 
+const systemVideoWindowController = createSystemVideoWindowController({
+  getMainWindow: () => mainWindow,
+  preloadPath: path.join(MAIN_DIST, 'preload.mjs'),
+})
+
 function createWindow() {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.show()
@@ -314,6 +321,7 @@ function createWindow() {
       mainWindow = null
     }
     overlayWindowController.destroy()
+    systemVideoWindowController.destroy()
   })
 
   win.webContents.on('before-input-event', (event, input) => {
@@ -356,6 +364,7 @@ app.on('before-quit', () => {
     saveWindowState(mainWindow)
   }
   overlayWindowController.destroy()
+  systemVideoWindowController.destroy()
 })
 
 app.on('window-all-closed', () => {
@@ -393,6 +402,7 @@ app.whenReady().then(() => {
   })
   embeddedBrowserMainController.registerIpcHandlers()
   registerOverlayWindowIpcHandlers(overlayWindowController)
+  registerSystemVideoWindowIpcHandlers(systemVideoWindowController)
 
   const template: Electron.MenuItemConstructorOptions[] = [
     ...(process.platform === 'darwin'

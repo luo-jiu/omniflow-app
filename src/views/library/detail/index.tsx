@@ -1,4 +1,5 @@
 import AppMain from "@/components/business/app-main";
+import FileTabsBar, { type FileTabsBarExtraTab } from "@/components/business/app-main/FileTabsBar";
 import {
   DirectorySidebar,
   type DirectorySidebarHandle,
@@ -87,6 +88,7 @@ import SystemWorkspace, {
   type SystemWorkspaceReturnMode,
   type SystemWorkspaceView,
 } from "@/features/system-workspace";
+import { systemWorkspaceMeta } from "@/features/system-workspace/registry";
 import {
   loadLibraryDetailWorkspaceState,
   saveLibraryDetailWorkspaceState,
@@ -177,7 +179,16 @@ type BookmarkEditDraft = {
 const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) => {
   const { user } = useAuth();
   const displayName = user?.nickname || user?.username || '未登录';
-  const { setFileUrl, tabs, activeTabId, fileState, reloadActiveTab, activateTab } = useFileViewer();
+  const {
+    setFileUrl,
+    tabs,
+    activeTabId,
+    fileState,
+    reloadActiveTab,
+    activateTab,
+    closeTab,
+    reorderTabs,
+  } = useFileViewer();
   const mediaEntries = useMediaEntries();
   const mediaRegistry = useMediaRegistry();
   const navigate = useNavigate();
@@ -270,6 +281,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   const [systemWorkspaceTabs, setSystemWorkspaceTabs] = React.useState<SystemWorkspaceView[]>([]);
   const [activeSystemWorkspaceView, setActiveSystemWorkspaceView] = React.useState<SystemWorkspaceView | null>(null);
   const [systemWorkspaceReturnMode, setSystemWorkspaceReturnMode] = React.useState<SystemWorkspaceReturnMode>('search-home');
+  const [workspaceTabOrder, setWorkspaceTabOrder] = React.useState<string[]>([]);
   const [mediaProcessingRequest, setMediaProcessingRequest] = React.useState<ToolWorkspaceMediaRequest | null>(null);
   const [libraryMediaProcessingRequest, setLibraryMediaProcessingRequest] = React.useState<ToolWorkspaceLibraryMediaRequest | null>(null);
   const [videoWideModeActive, setVideoWideModeActive] = React.useState(false);
@@ -1394,6 +1406,26 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
     void window.electronEmbeddedBrowser.deactivate();
   }, [workspaceDisplayMode]);
 
+  const activateWorkspaceFileTab = React.useCallback((tabId: string) => {
+    activateTab(tabId);
+    setBrowserModeOpen(false);
+    setWorkspaceDisplayMode('file-viewer');
+    void window.electronEmbeddedBrowser.deactivate();
+  }, [activateTab]);
+
+  const activateSystemWorkspaceTab = React.useCallback((view: SystemWorkspaceView) => {
+    setSystemWorkspaceReturnMode((currentReturnMode) => {
+      if (workspaceDisplayMode === 'system') {
+        return currentReturnMode;
+      }
+      return workspaceDisplayMode;
+    });
+    setActiveSystemWorkspaceView(view);
+    setBrowserModeOpen(false);
+    setWorkspaceDisplayMode('system');
+    void window.electronEmbeddedBrowser.deactivate();
+  }, [workspaceDisplayMode]);
+
   const restoreAfterSystemWorkspaceClose = React.useCallback(() => {
     if (systemWorkspaceReturnMode === 'browser' && browserTabs.length > 0) {
       openEmbeddedBrowser();
@@ -1424,7 +1456,9 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
     if (!targetView) {
       setSystemWorkspaceTabs([]);
       setActiveSystemWorkspaceView(null);
-      restoreAfterSystemWorkspaceClose();
+      if (workspaceDisplayMode === 'system') {
+        restoreAfterSystemWorkspaceClose();
+      }
       return;
     }
 
@@ -1444,16 +1478,85 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
     }
 
     setActiveSystemWorkspaceView(null);
-    restoreAfterSystemWorkspaceClose();
+    if (workspaceDisplayMode === 'system') {
+      restoreAfterSystemWorkspaceClose();
+    }
   }, [
     activeSystemWorkspaceView,
     restoreAfterSystemWorkspaceClose,
     systemWorkspaceTabs,
+    workspaceDisplayMode,
   ]);
 
   const closeSystemWorkspace = React.useCallback(() => {
     closeSystemWorkspaceView();
   }, [closeSystemWorkspaceView]);
+
+  const systemWorkspaceTabItems = React.useMemo<FileTabsBarExtraTab[]>(() => (
+    systemWorkspaceTabs.map((view) => {
+      const meta = systemWorkspaceMeta[view];
+      return {
+        id: `system:${view}`,
+        badge: '系统',
+        title: meta.title,
+        active: workspaceDisplayMode === 'system' && activeSystemWorkspaceView === view,
+        onActivate: () => activateSystemWorkspaceTab(view),
+        onClose: () => closeSystemWorkspaceView(view),
+      };
+    })
+  ), [
+    activateSystemWorkspaceTab,
+    activeSystemWorkspaceView,
+    closeSystemWorkspaceView,
+    systemWorkspaceTabs,
+    workspaceDisplayMode,
+  ]);
+
+  const workspaceTabIds = React.useMemo(() => [
+    ...tabs.map(tab => tab.id),
+    ...systemWorkspaceTabs.map(view => `system:${view}`),
+  ], [systemWorkspaceTabs, tabs]);
+
+  React.useLayoutEffect(() => {
+    setWorkspaceTabOrder((currentOrder) => {
+      const validIds = new Set(workspaceTabIds);
+      const normalizedOrder = [
+        ...currentOrder.filter(id => validIds.has(id)),
+        ...workspaceTabIds.filter(id => !currentOrder.includes(id)),
+      ];
+      if (
+        normalizedOrder.length === currentOrder.length
+        && normalizedOrder.every((id, index) => id === currentOrder[index])
+      ) {
+        return currentOrder;
+      }
+      return normalizedOrder;
+    });
+  }, [workspaceTabIds]);
+
+  const reorderWorkspaceTabItems = React.useCallback((
+    draggedItemId: string,
+    targetItemId: string,
+    position: 'before' | 'after',
+  ) => {
+    setWorkspaceTabOrder((currentOrder) => {
+      const validIds = new Set(workspaceTabIds);
+      const orderedIds = [
+        ...currentOrder.filter(id => validIds.has(id)),
+        ...workspaceTabIds.filter(id => !currentOrder.includes(id)),
+      ];
+      if (!validIds.has(draggedItemId) || !validIds.has(targetItemId) || draggedItemId === targetItemId) {
+        return orderedIds;
+      }
+      const withoutDragged = orderedIds.filter(id => id !== draggedItemId);
+      const targetIndex = withoutDragged.indexOf(targetItemId);
+      if (targetIndex < 0) {
+        return orderedIds;
+      }
+      withoutDragged.splice(position === 'after' ? targetIndex + 1 : targetIndex, 0, draggedItemId);
+      return withoutDragged;
+    });
+  }, [workspaceTabIds]);
 
   const openLegacySystemRoute = React.useCallback((route: string) => {
     navigate(route);
@@ -2119,14 +2222,6 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   }, [activeTabId, browserModeOpen, workspaceDisplayMode]);
 
   React.useEffect(() => {
-    if (workspaceDisplayMode === 'system' || systemWorkspaceTabs.length === 0) {
-      return;
-    }
-    setSystemWorkspaceTabs([]);
-    setActiveSystemWorkspaceView(null);
-  }, [systemWorkspaceTabs.length, workspaceDisplayMode]);
-
-  React.useEffect(() => {
     const nextWorkspaceState: LibraryDetailWorkspaceState = {
       activeBrowserTabId,
       browserInput,
@@ -2701,6 +2796,18 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
             )}
           </div>
         </ContentToolbar>
+        {!browserModeOpen ? (
+          <FileTabsBar
+            tabs={tabs}
+            activeTabId={workspaceDisplayMode === 'file-viewer' ? activeTabId : null}
+            extraTabs={systemWorkspaceTabItems}
+            itemOrder={workspaceTabOrder}
+            onActivate={activateWorkspaceFileTab}
+            onClose={closeTab}
+            onItemReorder={reorderWorkspaceTabItems}
+            onReorder={reorderTabs}
+          />
+        ) : null}
         {browserModeOpen && !activeBrowserTabIsSettings ? (
           <>
             <ContentToolbar className="browser-url-toolbar">
@@ -2833,7 +2940,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
             className={`workspace-pane ${workspaceDisplayMode === 'file-viewer' ? 'active' : 'inactive'}`}
             aria-hidden={workspaceDisplayMode !== 'file-viewer'}
           >
-            <AppMain hideTabsBar={false} workspaceActive={workspaceDisplayMode === 'file-viewer'} />
+            <AppMain hideTabsBar workspaceActive={workspaceDisplayMode === 'file-viewer'} />
           </div>
           {workspaceDisplayMode === 'browser' ? (
             <div className="workspace-pane active">
@@ -2939,10 +3046,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
               <SystemWorkspace
                 activeView={activeSystemWorkspaceView}
                 libraryId={libraryId}
-                tabs={systemWorkspaceTabs}
-                onActivateView={setActiveSystemWorkspaceView}
                 onClose={closeSystemWorkspace}
-                onCloseView={closeSystemWorkspaceView}
                 onOpenLegacyRoute={openLegacySystemRoute}
                 onOpenView={openSystemWorkspace}
               />
