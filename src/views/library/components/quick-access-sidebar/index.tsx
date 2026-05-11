@@ -1,5 +1,5 @@
 import React from 'react';
-import { IconSetting } from '@douyinfe/semi-icons';
+import { IconPulse, IconSetting } from '@douyinfe/semi-icons';
 import {
   SideMenu,
   SideMenuHeader,
@@ -15,6 +15,7 @@ interface QuickAccessSidebarProps {
   mode: QuickAccessMode;
   onModeChange: (mode: QuickAccessMode) => void;
   onOpenSettings: () => void;
+  onOpenResourceMonitor?: () => void;
   onSidebarClick?: () => void;
   footerContent?: React.ReactNode;
 }
@@ -23,6 +24,7 @@ const QuickAccessSidebar: React.FC<QuickAccessSidebarProps> = ({
   mode,
   onModeChange,
   onOpenSettings,
+  onOpenResourceMonitor,
   onSidebarClick,
   footerContent,
 }) => {
@@ -50,16 +52,30 @@ const QuickAccessSidebar: React.FC<QuickAccessSidebarProps> = ({
         </SideMenuItem>
       </SideMenuList>
       <SideMenuFooter>
-        <SideMenuAction
-          onClick={(event) => {
-            event.stopPropagation();
-            onOpenSettings();
-          }}
-          title="设置"
-          aria-label="设置"
-        >
-          <IconSetting style={{ fontSize: 15 }} />
-        </SideMenuAction>
+        <div className="footer-action-group">
+          {onOpenResourceMonitor ? (
+            <SideMenuAction
+              onClick={(event) => {
+                event.stopPropagation();
+                onOpenResourceMonitor();
+              }}
+              title="资源监测"
+              aria-label="资源监测"
+            >
+              <IconPulse style={{ fontSize: 15 }} />
+            </SideMenuAction>
+          ) : null}
+          <SideMenuAction
+            onClick={(event) => {
+              event.stopPropagation();
+              onOpenSettings();
+            }}
+            title="设置"
+            aria-label="设置"
+          >
+            <IconSetting style={{ fontSize: 15 }} />
+          </SideMenuAction>
+        </div>
         {footerContent ? (
           <SideMenuAction as="div" className="avatar-action">
             {footerContent}

@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 
-export type SystemWorkspaceView = 'overview' | 'settings' | 'uploads' | 'recycle-bin' | 'profile';
+export type SystemWorkspaceView = 'overview' | 'settings' | 'uploads' | 'recycle-bin' | 'profile' | 'resource-monitor';
 
 export type SettingsWorkspaceSection = 'home' | 'tags' | 'storage' | 'browser-mappings';
 

@@ -48,6 +48,7 @@ export const SystemWorkspaceViewport = styled.div`
   }
 
   .system-workspace-frame-settings,
+  .system-workspace-frame-resource-monitor,
   .system-workspace-frame-profile {
     width: 760px;
     min-width: 760px;
@@ -74,6 +75,7 @@ export const SystemWorkspaceViewport = styled.div`
 
   @container (max-width: 808px) {
     .system-workspace-frame-settings,
+    .system-workspace-frame-resource-monitor,
     .system-workspace-frame-profile,
     .system-workspace-frame-uploads,
     .system-workspace-frame-recycle-bin {
@@ -90,6 +92,7 @@ export const SystemWorkspaceViewport = styled.div`
   }
 
   .system-workspace-frame-settings .system-workspace-header-inner,
+  .system-workspace-frame-resource-monitor .system-workspace-header-inner,
   .system-workspace-frame-profile .system-workspace-header-inner,
   .system-workspace-frame-settings-detail .system-workspace-header-inner {
     width: 100%;

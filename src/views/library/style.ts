@@ -87,6 +87,12 @@ export const SideMenuFooter = styled.div`
   display: flex;
   align-items: center;
   justify-content: space-between;
+
+  .footer-action-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+  }
 `
 
 export const SideMenuAction = styled.button`

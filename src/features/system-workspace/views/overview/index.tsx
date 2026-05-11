@@ -8,6 +8,7 @@ import type { SystemWorkspaceViewProps } from '../../types';
 
 const overviewItems = [
   'settings',
+  'resource-monitor',
   'profile',
   'uploads',
   'recycle-bin',

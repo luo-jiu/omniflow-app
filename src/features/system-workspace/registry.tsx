@@ -1,6 +1,7 @@
 import {
   IconApps,
   IconDelete,
+  IconPulse,
   IconSetting,
   IconUpload,
   IconUser,
@@ -16,6 +17,7 @@ import SettingsWorkspace from './views/settings';
 import UploadsWorkspace from './views/uploads';
 import RecycleBinWorkspace from './views/recycle-bin';
 import ProfileWorkspace from './views/profile';
+import ResourceMonitorWorkspace from '@/features/resource-monitor/components/ResourceMonitorWorkspace';
 
 export const systemWorkspaceMeta: Record<SystemWorkspaceView, SystemWorkspaceViewMeta> = {
   overview: {
@@ -43,6 +45,11 @@ export const systemWorkspaceMeta: Record<SystemWorkspaceView, SystemWorkspaceVie
     description: '管理头像、昵称和账号安全',
     icon: <IconUser />,
   },
+  'resource-monitor': {
+    title: '资源监测',
+    description: '查看物理存储分布和资源占用快照',
+    icon: <IconPulse />,
+  },
 };
 
 export const systemWorkspaceViews: Record<SystemWorkspaceView, ComponentType<SystemWorkspaceViewProps>> = {
@@ -51,4 +58,5 @@ export const systemWorkspaceViews: Record<SystemWorkspaceView, ComponentType<Sys
   uploads: UploadsWorkspace,
   'recycle-bin': RecycleBinWorkspace,
   profile: ProfileWorkspace,
+  'resource-monitor': ResourceMonitorWorkspace,
 };

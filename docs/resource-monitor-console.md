@@ -1,0 +1,111 @@
+# 资源监测控制台
+
+更新时间：2026-05-11
+
+适用范围：仓库页 / 资料库页 system workspace 中的资源监测入口、前端展示、后端快照 API 对接和后续探针扩展。
+
+## 1. 概述
+
+资源监测控制台用于观察 OmniFlow 当前用户可见资料库范围内的资源占用和物理存储分布。它不是存储配置页：存储配置负责增删改 provider，资源监测负责只读统计、诊断和后续探针展示。
+
+当前第一版只交付只读快照：
+
+- 总物理占用
+- 对象数
+- 文件引用数
+- provider / bucket 分布
+- 未匹配当前 provider 配置的历史位置提示
+
+## 2. 入口
+
+当前入口：
+
+- 仓库页左下角设置按钮旁边的资源监测按钮。
+- system workspace overview 中的“资源监测”卡片。
+
+当前不新增 legacy 全屏路由。后续新增主入口仍应优先进入 system workspace，不应扩展独立全屏页面。
+
+## 3. 前端边界
+
+实现位置：
+
+- 入口：`src/views/library/components/quick-access-sidebar/index.tsx`
+- system view 注册：`src/features/system-workspace/registry.tsx`
+- 页面组件：`src/features/resource-monitor/components/ResourceMonitorWorkspace.tsx`
+- 请求封装：`src/features/resource-monitor/services/resource-monitor.api.ts`
+
+职责规则：
+
+- `views/library` 只负责打开 `resource-monitor` system view。
+- `features/system-workspace` 只负责 system view 的宿主和注册。
+- `features/resource-monitor` 负责资源监测自己的请求、格式化、加载态、错误态和展示。
+- 页面层不得直接拼 `/v1/resource-monitor/snapshot`。
+
+## 4. API 契约
+
+当前使用：
+
+```text
+GET /api/v1/resource-monitor/snapshot
+```
+
+响应 `data`：
+
+```ts
+type ResourceMonitorSnapshot = {
+  generatedAt: string;
+  summary: {
+    providerCount: number;
+    bucketCount: number;
+    objectCount: number;
+    fileRefCount: number;
+    physicalBytes: number;
+    unmatchedCount: number;
+  };
+  storage: Array<{
+    provider: string;
+    providerType?: string;
+    providerLabel?: string;
+    endpoint?: string;
+    bucket: string;
+    isDefault: boolean;
+    objectCount: number;
+    fileRefCount: number;
+    physicalBytes: number;
+    percent: number;
+    matchedConfig: boolean;
+  }>;
+};
+```
+
+统计口径：
+
+- `physicalBytes`：按 distinct `storage_objects` 聚合的真实对象容量。
+- `objectCount`：distinct `storage_objects` 数量。
+- `fileRefCount`：`node_files` 引用数量。
+- `unmatchedCount`：没有匹配到当前 provider 配置的 provider / bucket 行数。
+
+## 5. 当前限制
+
+- 不做对象存储真实连通性 probe。
+- 不做 Postgres / Redis / MySQL 探针。
+- 不做自动刷新。
+- 不做历史曲线。
+- 不做孤儿对象、回收站占用细分。
+- 不提供清理、迁移或修复动作。
+
+## 6. 验证方式
+
+常规验证：
+
+- `npm run lint`
+- `npm run build`
+
+手工验证：
+
+- 仓库页左下角点击资源监测入口，右侧进入资源监测 system view。
+- system overview 中点击资源监测卡片可进入同一视图。
+- 快照加载成功时展示总览和分布表。
+- 无资源对象时展示空态。
+- API 失败时展示错误态和 Toast。
+

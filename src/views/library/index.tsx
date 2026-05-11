@@ -53,7 +53,7 @@ type MenuState = {
 const MENU_WIDTH = 300
 const MENU_HEIGHT = 200
 const PADDING = 10
-type LibrarySystemView = Extract<SystemWorkspaceView, 'settings' | 'profile'>
+type LibrarySystemView = Extract<SystemWorkspaceView, 'settings' | 'profile' | 'resource-monitor'>
 
 const LibraryPage: React.FC = () => {
   const navigate = useNavigate()
@@ -132,6 +132,11 @@ const LibraryPage: React.FC = () => {
 
   const openLibrarySettingsView = () => {
     setLibrarySystemView('settings')
+    setLibrarySettingsSection('home')
+  }
+
+  const openLibraryResourceMonitorView = () => {
+    setLibrarySystemView('resource-monitor')
     setLibrarySettingsSection('home')
   }
 
@@ -317,6 +322,7 @@ const LibraryPage: React.FC = () => {
           mode={quickAccessMode}
           onModeChange={setQuickAccessMode}
           onOpenSettings={openLibrarySettingsView}
+          onOpenResourceMonitor={openLibraryResourceMonitorView}
           onSidebarClick={closeLibrarySystemView}
           footerContent={userContent}
         />
@@ -385,7 +391,7 @@ const LibraryPage: React.FC = () => {
                   onClose={closeLibrarySystemView}
                   onOpenLegacyRoute={navigate}
                   onOpenView={(view) => {
-                    if (view === 'settings' || view === 'profile') {
+                    if (view === 'settings' || view === 'profile' || view === 'resource-monitor') {
                       setLibrarySystemView(view)
                     }
                   }}
