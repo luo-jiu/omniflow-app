@@ -1,7 +1,12 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import styled from 'styled-components';
 import { IconMusic, IconVideoStroked, IconPlay, IconPause, IconExternalOpenStroked, IconClose } from '@douyinfe/semi-icons';
 import type { MediaEntry } from '@/contexts/media-registry.context';
+import {
+  normalizeMediaTime,
+  resolveProgressPercentFromTime,
+  useSmoothMediaDisplayTimes,
+} from './use-smooth-media-display-times';
 
 const PopoverWrapper = styled.div`
   width: 368px;
@@ -308,15 +313,6 @@ function formatMediaTime(value: number | undefined) {
   return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 }
 
-function resolveProgressPercent(entry: MediaEntry) {
-  const currentTime = Number(entry.currentTime ?? 0);
-  const duration = Number(entry.duration ?? 0);
-  if (!Number.isFinite(currentTime) || !Number.isFinite(duration) || duration <= 0) {
-    return 0;
-  }
-  return Math.min(100, Math.max(0, (currentTime / duration) * 100));
-}
-
 function resolveSeekTime(entry: MediaEntry, event: React.MouseEvent<HTMLButtonElement>) {
   const duration = Number(entry.duration ?? 0);
   if (!Number.isFinite(duration) || duration <= 0) return null;
@@ -372,6 +368,9 @@ function renderKindIcon(entry: MediaEntry) {
 }
 
 const MediaHubPopover: React.FC<MediaHubPopoverProps> = ({ entries, onActivate, onToggle, onSeek, onDismiss }) => {
+  const displayTimes = useSmoothMediaDisplayTimes(entries);
+  const groupedEntries = useMemo(() => groupMediaEntries(entries), [entries]);
+
   if (entries.length === 0) {
     return (
       <PopoverWrapper>
@@ -386,11 +385,12 @@ const MediaHubPopover: React.FC<MediaHubPopoverProps> = ({ entries, onActivate, 
         <span className="heading">媒体控制中心</span>
         <span className="count">{entries.length} 项</span>
       </PopoverHeader>
-      {groupMediaEntries(entries).map(group => (
+      {groupedEntries.map(group => (
         <GroupBlock key={group.key}>
           {group.label ? <div className="group-title">{group.label}</div> : null}
           {group.entries.map((entry) => {
-            const progressPercent = resolveProgressPercent(entry);
+            const displayTime = displayTimes[entry.entryId] ?? normalizeMediaTime(entry.currentTime);
+            const progressPercent = resolveProgressPercentFromTime(displayTime, entry.duration);
             return (
               <EntryRow
                 key={entry.entryId}
@@ -449,7 +449,7 @@ const MediaHubPopover: React.FC<MediaHubPopoverProps> = ({ entries, onActivate, 
                     </span>
                   </button>
                   <span className="time-text">
-                    {formatMediaTime(entry.currentTime)} / {formatMediaTime(entry.duration)}
+                    {formatMediaTime(displayTime)} / {formatMediaTime(entry.duration)}
                   </span>
                 </div>
               </EntryRow>

@@ -1,6 +1,6 @@
 # MediaHub 契约
 
-更新时间：2026-05-09（含 Document PiP 主动小窗 + Electron 系统小窗 fallback）
+更新时间：2026-05-11（含 MediaHub 本地平滑进度、Document PiP 主动小窗 + Electron 系统小窗 fallback）
 适用范围：`MediaRegistry`、`globalAudioPlayer`、`floatingVideoService`、`MediaHubPopover`、`FloatingMiniVideoPlayer`，以及 audio / video / asmr / audio-archive viewer 与 `FileViewerContext` 的 tab close 路径。
 
 > 本文是 MediaHub 行为的**单一真源**。修改任何与"出声"或 MediaHub 入口相关的代码前必须先读这里。变更行为时必须同步更新本文，并在 PR 描述中点名。
@@ -144,6 +144,7 @@ subscribePendingActivation(listener)      // 同 libraryId 内多次 set 也能�
 
 - **库 / 资源页原有头部工具区**：仓库页新增与资源页同规格的主内容头部，MediaHub Popover 入口放在右侧工具按钮组，设置仍保留在左下角侧栏；`library detail` 继续使用 `ContentToolbar .toolbar-right`。这里沿用原本的工作区工具按钮，不新增全局产品顶栏。
 - **`MediaHubPopover`**：弹窗组件本身保留为 dumb component，`onActivate` / `onToggle` / `onSeek` / `onDismiss` 由调用方提供。entry 行的"跳转 tab"按钮根据 `kind` 显示不同 title（`回到视频 tab` / `回到音频 tab`）。
+  - Registry 内的 `currentTime` 仍允许按秒级低频更新，避免全局广播抖动；Popover 打开时可在组件内部用 `requestAnimationFrame` 做播放中进度插值，只影响本地显示，不改变 `MediaRegistry` 的状态 owner。
 - **`FloatingMiniVideoPlayer`**：在 `App.tsx` 顶层始终挂载（host ref 不被卸载），通过 `data-visible` 控制显隐：`transform: translate(20000px, 20000px)` 移到屏外但保持 connected DOM。
   - header 包含两个按钮：「收起」（IconChevronDown）→ `hide()`；「×」→ `softClose()`
   - 点击 header 主体：写入 pending activation 并 navigate 回 `/libraries/:libraryId`，触发对应 viewer 重新 mount → `bindInline` 把元素搬回 inline host → 浮窗自动收起
