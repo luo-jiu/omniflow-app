@@ -4,18 +4,18 @@ var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "sy
 import { dialog, app, net, ipcMain, session, systemPreferences, safeStorage, webContents, BrowserWindow, shell, WebContentsView, nativeTheme, screen, Menu } from "electron";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import fs$1, { existsSync, mkdirSync, readFileSync, writeFileSync, constants } from "node:fs";
+import fs$1, { constants, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import fs$2 from "fs/promises";
-import fs, { mkdtemp, rm, access, writeFile, copyFile, mkdir, appendFile, readFile } from "node:fs/promises";
+import fs, { access, mkdtemp, rm, writeFile, mkdir, copyFile, appendFile, readFile } from "node:fs/promises";
 import http from "node:http";
 import https from "node:https";
 import require$$0 from "os";
 import require$$1 from "child_process";
 import fs$3 from "fs";
-import os from "node:os";
-import crypto, { randomUUID } from "node:crypto";
-import { Buffer as Buffer$1 } from "node:buffer";
 import { spawn } from "node:child_process";
+import os from "node:os";
+import { Buffer as Buffer$1 } from "node:buffer";
+import crypto, { randomUUID } from "node:crypto";
 const DOWNLOAD_REQUEST_TIMEOUT_MS = 6e4;
 async function downloadUrlToFile(url, targetPath, headers = {}, redirectDepth = 0) {
   const MAX_REDIRECT_DEPTH = 3;
@@ -712,9 +712,6 @@ function getStorageData() {
 function registerSystemIpc(ipcMain2) {
   ipcMain2.handle("sys:get-static-data", getStaticData);
 }
-const MAX_SINGLE_UPLOAD_BYTES = 10 * 1024 * 1024 * 1024;
-const MAX_SINGLE_UPLOAD_LABEL = "10GB";
-const MAX_SINGLE_UPLOAD_ERROR_MESSAGE = `上传失败：单文件最大支持 ${MAX_SINGLE_UPLOAD_LABEL}`;
 function escapeMultipartDispositionValue(value) {
   return String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\r/g, "").replace(/\n/g, "");
 }
@@ -732,6 +729,20 @@ function buildFileContentDisposition(fileName) {
 }
 function registerHttpIpc(ipcMain2) {
   const activeUploads = /* @__PURE__ */ new Map();
+  const registerRuntime = (runtime) => {
+    let bucket = activeUploads.get(runtime.uploadId);
+    if (!bucket) {
+      bucket = /* @__PURE__ */ new Set();
+      activeUploads.set(runtime.uploadId, bucket);
+    }
+    bucket.add(runtime);
+  };
+  const unregisterRuntime = (runtime) => {
+    const bucket = activeUploads.get(runtime.uploadId);
+    if (!bucket) return;
+    bucket.delete(runtime);
+    if (bucket.size === 0) activeUploads.delete(runtime.uploadId);
+  };
   const sendUploadProgress = (runtime, force = false) => {
     const now = Date.now();
     if (!force && now - runtime.lastProgressAt < 80) return;
@@ -741,6 +752,7 @@ function registerHttpIpc(ipcMain2) {
     const percentage = runtime.totalBytes > 0 ? Math.min(runtime.uploadedBytes / runtime.totalBytes * 100, 100) : 0;
     runtime.sender.send("http:upload:progress", {
       uploadId: runtime.uploadId,
+      partNumber: runtime.partNumber,
       uploadedBytes: runtime.uploadedBytes,
       totalBytes: runtime.totalBytes,
       percentage,
@@ -869,11 +881,12 @@ function registerHttpIpc(ipcMain2) {
       request.end();
     });
   });
-  ipcMain2.handle("http:upload:abort", async (_event, uploadId) => {
-    const runtime = activeUploads.get(uploadId);
+  const activeFormDataUploads = /* @__PURE__ */ new Map();
+  ipcMain2.handle("http:upload:formdata:abort", async (_event, uploadId) => {
+    const runtime = activeFormDataUploads.get(uploadId);
     if (!runtime) return false;
     runtime.aborted = true;
-    activeUploads.delete(uploadId);
+    activeFormDataUploads.delete(uploadId);
     try {
       runtime.fileStream.destroy(new Error("UPLOAD_ABORTED"));
     } catch {
@@ -884,7 +897,7 @@ function registerHttpIpc(ipcMain2) {
     }
     return true;
   });
-  ipcMain2.handle("http:upload", async (event, url, filePath, formDataParams = {}, headers = {}, uploadId) => {
+  ipcMain2.handle("http:upload:formdata", async (_event, url, filePath, formDataParams = {}, headers = {}, uploadId) => {
     return new Promise((resolve, reject) => {
       let stat;
       try {
@@ -897,12 +910,8 @@ function registerHttpIpc(ipcMain2) {
         reject(new Error(`上传目标不是文件: ${filePath}`));
         return;
       }
-      if (stat.size > MAX_SINGLE_UPLOAD_BYTES) {
-        reject(new Error(MAX_SINGLE_UPLOAD_ERROR_MESSAGE));
-        return;
-      }
       const boundary = "----WebKitFormBoundary" + Math.random().toString(36).substring(2);
-      const currentUploadId = uploadId || `upload-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const currentUploadId = uploadId || `formdata-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const fileName = path.basename(filePath);
       const fieldsPrefix = Object.entries(formDataParams).map(([key, value]) => `--${boundary}\r
 Content-Disposition: form-data; name="${escapeMultipartDispositionValue(key)}"\r
@@ -932,32 +941,20 @@ ${value}\r
         method: "POST",
         headers: finalHeaders
       });
-      const fileStream = fs$1.createReadStream(filePath, {
-        highWaterMark: 1024 * 1024
-      });
-      const runtime = {
-        uploadId: currentUploadId,
-        request,
-        fileStream,
-        sender: event.sender,
-        totalBytes: Math.max(0, stat.size),
-        uploadedBytes: 0,
-        startedAt: Date.now(),
-        lastProgressAt: 0,
-        aborted: false
-      };
-      activeUploads.set(currentUploadId, runtime);
+      const fileStream = fs$1.createReadStream(filePath, { highWaterMark: 1024 * 1024 });
+      const runtime = { request, fileStream, aborted: false };
+      activeFormDataUploads.set(currentUploadId, runtime);
       let settled = false;
       const safeResolve = (payload) => {
         if (settled) return;
         settled = true;
-        activeUploads.delete(currentUploadId);
+        activeFormDataUploads.delete(currentUploadId);
         resolve(payload);
       };
       const safeReject = (error) => {
         if (settled) return;
         settled = true;
-        activeUploads.delete(currentUploadId);
+        activeFormDataUploads.delete(currentUploadId);
         reject(error);
       };
       let responseBody = "";
@@ -972,10 +969,7 @@ ${value}\r
           } catch {
             parsedBody = responseBody;
           }
-          safeResolve({
-            status: response.statusCode,
-            body: parsedBody
-          });
+          safeResolve({ status: response.statusCode, body: parsedBody });
         });
       });
       request.on("error", (err) => {
@@ -991,14 +985,8 @@ ${value}\r
       });
       request.write(fieldsPrefix);
       request.write(filePrefix);
-      fileStream.on("data", (chunk) => {
-        if (runtime.aborted) return;
-        runtime.uploadedBytes += chunk.length;
-        sendUploadProgress(runtime);
-      });
       fileStream.on("end", () => {
         if (runtime.aborted) return;
-        sendUploadProgress(runtime, true);
         request.write(fileSuffix);
         request.end();
       });
@@ -1007,118 +995,46 @@ ${value}\r
           safeReject(new Error("UPLOAD_ABORTED"));
           return;
         }
-        safeReject(err);
         try {
           request.destroy(err);
         } catch {
         }
+        safeReject(err);
       });
       fileStream.pipe(request, { end: false });
     });
   });
-  const activeChunkedUploads = /* @__PURE__ */ new Map();
-  const sendChunkedProgress = (runtime, force = false) => {
-    const now = Date.now();
-    if (!force && now - runtime.lastProgressAt < 80) return;
-    runtime.lastProgressAt = now;
-    const elapsedMs = Math.max(now - runtime.startedAt, 1);
-    const speedBps = Math.floor(runtime.uploadedBytes * 1e3 / elapsedMs);
-    const percentage = runtime.totalBytes > 0 ? Math.min(runtime.uploadedBytes / runtime.totalBytes * 100, 100) : 0;
-    runtime.sender.send("http:upload:progress", {
-      uploadId: runtime.uploadId,
-      uploadedBytes: runtime.uploadedBytes,
-      totalBytes: runtime.totalBytes,
-      percentage,
-      speedBps
-    });
-  };
-  const chunkedJsonRequest = (method, url, headers, body) => {
-    return new Promise((resolve, reject) => {
-      const parsedUrl = new URL(url);
-      const transport = parsedUrl.protocol === "https:" ? https : http;
-      const reqHeaders = {
-        ...headers,
-        "Content-Type": "application/json"
-      };
-      const payload = body ? JSON.stringify(body) : void 0;
-      if (payload) {
-        reqHeaders["Content-Length"] = String(Buffer.byteLength(payload));
+  ipcMain2.handle("http:upload:abort", async (_event, uploadId) => {
+    const bucket = activeUploads.get(uploadId);
+    if (!bucket || bucket.size === 0) return false;
+    for (const runtime of bucket) {
+      runtime.aborted = true;
+      try {
+        runtime.fileStream.destroy(new Error("UPLOAD_ABORTED"));
+      } catch {
       }
-      const req = transport.request({
-        protocol: parsedUrl.protocol,
-        hostname: parsedUrl.hostname,
-        port: parsedUrl.port ? Number(parsedUrl.port) : void 0,
-        path: `${parsedUrl.pathname}${parsedUrl.search}`,
-        method,
-        headers: reqHeaders
-      });
-      let responseBody = "";
-      req.on("response", (res) => {
-        res.on("data", (chunk) => {
-          responseBody += chunk.toString();
-        });
-        res.on("end", () => {
-          let parsed;
-          try {
-            parsed = JSON.parse(responseBody);
-          } catch {
-            parsed = responseBody;
-          }
-          resolve({ status: res.statusCode || 0, body: parsed });
-        });
-      });
-      req.on("error", reject);
-      if (payload) req.write(payload);
-      req.end();
-    });
-  };
-  const chunkedPartUpload = (url, headers, buffer, size, runtime) => {
-    return new Promise((resolve, reject) => {
-      const parsedUrl = new URL(url);
-      const transport = parsedUrl.protocol === "https:" ? https : http;
-      const req = transport.request({
-        protocol: parsedUrl.protocol,
-        hostname: parsedUrl.hostname,
-        port: parsedUrl.port ? Number(parsedUrl.port) : void 0,
-        path: `${parsedUrl.pathname}${parsedUrl.search}`,
-        method: "PUT",
-        headers: {
-          ...headers,
-          "Content-Type": "application/octet-stream",
-          "Content-Length": String(size)
-        }
-      });
-      runtime.activeRequests.add(req);
-      let responseBody = "";
-      req.on("response", (res) => {
-        res.on("data", (chunk) => {
-          responseBody += chunk.toString();
-        });
-        res.on("end", () => {
-          runtime.activeRequests.delete(req);
-          let parsed;
-          try {
-            parsed = JSON.parse(responseBody);
-          } catch {
-            parsed = responseBody;
-          }
-          if ((res.statusCode || 0) >= 400) {
-            reject(new Error(`分片上传失败: HTTP ${res.statusCode}`));
-          } else {
-            resolve({ status: res.statusCode || 0, body: parsed });
-          }
-        });
-      });
-      req.on("error", (err) => {
-        runtime.activeRequests.delete(req);
-        reject(err);
-      });
-      req.write(buffer.subarray(0, size));
-      req.end();
-    });
-  };
-  ipcMain2.handle("http:chunked-upload", async (event, baseUrl, filePath, params, headers = {}, uploadId) => {
-    var _a;
+      try {
+        runtime.request.destroy(new Error("UPLOAD_ABORTED"));
+      } catch {
+      }
+    }
+    activeUploads.delete(uploadId);
+    return true;
+  });
+  ipcMain2.handle("http:upload:presigned-put", async (event, args) => {
+    const { uploadId, partNumber, presignedUrl, filePath, byteOffset, byteLength, contentType } = args;
+    if (!uploadId || !presignedUrl || !filePath) {
+      throw new Error("uploadId / presignedUrl / filePath 必填");
+    }
+    if (!Number.isFinite(partNumber) || partNumber < 1) {
+      throw new Error(`非法 partNumber: ${partNumber}`);
+    }
+    if (!Number.isFinite(byteOffset) || byteOffset < 0) {
+      throw new Error(`非法 byteOffset: ${byteOffset}`);
+    }
+    if (!Number.isFinite(byteLength) || byteLength <= 0) {
+      throw new Error(`非法 byteLength: ${byteLength}`);
+    }
     let stat;
     try {
       stat = fs$1.statSync(filePath);
@@ -1128,136 +1044,513 @@ ${value}\r
     if (!stat.isFile()) {
       throw new Error(`上传目标不是文件: ${filePath}`);
     }
-    const currentUploadId = uploadId || `chunked-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const runtime = {
-      uploadId: currentUploadId,
-      serverUploadId: "",
-      sender: event.sender,
-      totalBytes: stat.size,
-      uploadedBytes: 0,
-      startedAt: Date.now(),
-      lastProgressAt: 0,
-      aborted: false,
-      activeRequests: /* @__PURE__ */ new Set(),
-      baseUrl,
-      headers
-    };
-    activeChunkedUploads.set(currentUploadId, runtime);
-    try {
-      const initiateRes = await chunkedJsonRequest(
-        "POST",
-        `${baseUrl}/api/v1/directory/upload/multipart/initiate`,
-        headers,
-        {
-          libraryId: params.libraryId,
-          parentId: params.parentId,
-          fileName: params.fileName,
-          fileSize: params.fileSize,
-          conflictPolicy: params.conflictPolicy,
-          storageProvider: params.storageProvider
-        }
-      );
-      if (runtime.aborted) throw new Error("UPLOAD_ABORTED");
-      if ((initiateRes.status || 0) >= 400) {
-        throw new Error(`发起分片上传失败: HTTP ${initiateRes.status}`);
+    if (byteOffset + byteLength > stat.size) {
+      throw new Error(`分片越界: offset=${byteOffset}, length=${byteLength}, fileSize=${stat.size}`);
+    }
+    return new Promise((resolve, reject) => {
+      const parsedUrl = new URL(presignedUrl);
+      const transport = parsedUrl.protocol === "https:" ? https : http;
+      const headers = {
+        "Content-Length": String(byteLength)
+      };
+      if (contentType) {
+        headers["Content-Type"] = contentType;
       }
-      const initiateData = ((_a = initiateRes.body) == null ? void 0 : _a.data) ?? initiateRes.body;
-      runtime.serverUploadId = String((initiateData == null ? void 0 : initiateData.uploadId) ?? "");
-      const chunkSize = Number((initiateData == null ? void 0 : initiateData.chunkSize) ?? 10485760);
-      const totalParts = Number((initiateData == null ? void 0 : initiateData.totalParts) ?? Math.ceil(stat.size / chunkSize));
-      const collectedParts = [];
-      let nextPart = 1;
-      const concurrency = 3;
-      const fd = fs$1.openSync(filePath, "r");
-      try {
-        const worker = async () => {
-          var _a2;
-          while (!runtime.aborted) {
-            const partNumber = nextPart++;
-            if (partNumber > totalParts) break;
-            const offset = (partNumber - 1) * chunkSize;
-            const size = Math.min(chunkSize, stat.size - offset);
-            const buffer = Buffer.alloc(size);
-            fs$1.readSync(fd, buffer, 0, size, offset);
-            const url = `${baseUrl}/api/v1/directory/upload/multipart/${runtime.serverUploadId}/part/${partNumber}`;
-            let res;
-            try {
-              res = await chunkedPartUpload(url, headers, buffer, size, runtime);
-            } catch (err) {
-              runtime.aborted = true;
-              throw err;
-            }
-            if (runtime.aborted) break;
-            const partData = ((_a2 = res.body) == null ? void 0 : _a2.data) ?? res.body;
-            collectedParts.push({
-              partNumber: (partData == null ? void 0 : partData.partNumber) ?? partNumber,
-              etag: String((partData == null ? void 0 : partData.etag) ?? "")
-            });
-            runtime.uploadedBytes += size;
-            sendChunkedProgress(runtime);
+      const request = transport.request({
+        protocol: parsedUrl.protocol,
+        hostname: parsedUrl.hostname,
+        port: parsedUrl.port ? Number(parsedUrl.port) : void 0,
+        path: `${parsedUrl.pathname}${parsedUrl.search}`,
+        method: "PUT",
+        headers
+      });
+      const fileStream = fs$1.createReadStream(filePath, {
+        start: byteOffset,
+        end: byteOffset + byteLength - 1,
+        highWaterMark: 1024 * 1024
+      });
+      const runtime = {
+        uploadId,
+        partNumber,
+        request,
+        fileStream,
+        sender: event.sender,
+        totalBytes: byteLength,
+        uploadedBytes: 0,
+        startedAt: Date.now(),
+        lastProgressAt: 0,
+        aborted: false
+      };
+      registerRuntime(runtime);
+      let settled = false;
+      const safeResolve = (payload) => {
+        if (settled) return;
+        settled = true;
+        unregisterRuntime(runtime);
+        resolve(payload);
+      };
+      const safeReject = (error) => {
+        if (settled) return;
+        settled = true;
+        unregisterRuntime(runtime);
+        reject(error);
+      };
+      let responseBody = "";
+      request.on("response", (response) => {
+        response.on("data", (chunk) => {
+          responseBody += chunk.toString();
+        });
+        response.on("end", () => {
+          const status = response.statusCode || 0;
+          const rawEtag = response.headers.etag || response.headers.ETag || "";
+          const etag = String(rawEtag).replace(/^"+|"+$/g, "");
+          if (status >= 400) {
+            safeReject(new Error(`分片上传失败: HTTP ${status} ${responseBody.slice(0, 200)}`));
+            return;
           }
-        };
-        await Promise.all(Array.from({ length: concurrency }, () => worker()));
-      } finally {
-        fs$1.closeSync(fd);
-      }
-      if (runtime.aborted) throw new Error("UPLOAD_ABORTED");
-      sendChunkedProgress(runtime, true);
-      const completeRes = await chunkedJsonRequest(
-        "POST",
-        `${baseUrl}/api/v1/directory/upload/multipart/${runtime.serverUploadId}/complete`,
-        headers,
-        { parts: collectedParts.map((p) => ({ partNumber: p.partNumber, etag: p.etag })) }
-      );
-      if ((completeRes.status || 0) >= 400) {
-        throw new Error(`完成分片上传失败: HTTP ${completeRes.status}`);
-      }
-      activeChunkedUploads.delete(currentUploadId);
-      return { status: completeRes.status, body: completeRes.body };
-    } catch (err) {
-      activeChunkedUploads.delete(currentUploadId);
-      if (runtime.serverUploadId) {
+          runtime.uploadedBytes = runtime.totalBytes;
+          sendUploadProgress(runtime, true);
+          safeResolve({ status, etag, body: responseBody });
+        });
+      });
+      request.on("error", (err) => {
+        if (runtime.aborted) {
+          safeReject(new Error("UPLOAD_ABORTED"));
+          return;
+        }
         try {
-          await chunkedJsonRequest(
-            "DELETE",
-            `${baseUrl}/api/v1/directory/upload/multipart/${runtime.serverUploadId}`,
-            headers
-          );
+          fileStream.destroy(err);
         } catch {
         }
-      }
-      throw runtime.aborted ? new Error("UPLOAD_ABORTED") : err;
-    }
+        safeReject(err);
+      });
+      fileStream.on("data", (chunk) => {
+        if (runtime.aborted) return;
+        runtime.uploadedBytes += chunk.length;
+        sendUploadProgress(runtime);
+      });
+      fileStream.on("error", (err) => {
+        if (runtime.aborted) {
+          safeReject(new Error("UPLOAD_ABORTED"));
+          return;
+        }
+        try {
+          request.destroy(err);
+        } catch {
+        }
+        safeReject(err);
+      });
+      fileStream.pipe(request);
+    });
   });
-  ipcMain2.handle("http:chunked-upload:abort", async (_event, uploadId) => {
-    const runtime = activeChunkedUploads.get(uploadId);
-    if (!runtime) return false;
-    runtime.aborted = true;
-    activeChunkedUploads.delete(uploadId);
-    for (const req of runtime.activeRequests) {
-      try {
-        req.destroy(new Error("UPLOAD_ABORTED"));
-      } catch {
-      }
-    }
-    runtime.activeRequests.clear();
-    if (runtime.serverUploadId) {
-      try {
-        await chunkedJsonRequest(
-          "DELETE",
-          `${runtime.baseUrl}/api/v1/directory/upload/multipart/${runtime.serverUploadId}`,
-          runtime.headers
-        );
-      } catch {
-      }
-    }
+}
+const COMMON_FFMPEG_PATHS = [
+  process.env.OMNIFLOW_FFMPEG_PATH,
+  "/opt/homebrew/bin/ffmpeg",
+  "/usr/local/bin/ffmpeg",
+  "/usr/bin/ffmpeg",
+  "ffmpeg"
+].filter((value) => Boolean(value));
+const FFMPEG_HTTP_HEADER_BLACKLIST = /* @__PURE__ */ new Set([
+  "accept-encoding",
+  "connection",
+  "host",
+  "range"
+]);
+function normalizeEmbeddedBrowserResourceTranscodeFormat(input) {
+  const normalized = String(input || "").trim().replace(/^\.+/, "").toLowerCase();
+  if (!/^[a-z0-9]{1,12}$/.test(normalized)) {
+    return null;
+  }
+  return normalized;
+}
+function sanitizeFileName$2(input) {
+  const normalized = String(input || "").trim().replace(/[\\/:*?"<>|]+/g, "_");
+  return normalized || "media";
+}
+async function canExecuteFile(candidatePath) {
+  if (!candidatePath || candidatePath === "ffmpeg") {
+    return false;
+  }
+  try {
+    await access(candidatePath, constants.X_OK);
     return true;
+  } catch {
+    return false;
+  }
+}
+async function canExecuteCommand(candidateCommand) {
+  return new Promise((resolve) => {
+    const child = spawn(candidateCommand, ["-version"], {
+      stdio: "ignore"
+    });
+    child.once("error", () => resolve(false));
+    child.once("exit", (code) => resolve(code === 0));
   });
+}
+async function resolveEmbeddedBrowserFfmpegPath(preferredPath) {
+  const candidates = [
+    String(preferredPath || "").trim() || void 0,
+    ...COMMON_FFMPEG_PATHS
+  ].filter((value, index, list) => Boolean(value) && list.indexOf(value) === index);
+  for (const candidate of candidates) {
+    if (candidate === "ffmpeg") {
+      if (await canExecuteCommand(candidate)) {
+        return candidate;
+      }
+      continue;
+    }
+    if (await canExecuteFile(candidate)) {
+      return candidate;
+    }
+  }
+  return null;
+}
+function buildEmbeddedBrowserResourceMergeArgs(request) {
+  return [
+    "-y",
+    ...request.video.inputArgs,
+    "-i",
+    request.video.path,
+    ...request.audio.inputArgs,
+    "-i",
+    request.audio.path,
+    "-c",
+    "copy",
+    request.outputPath
+  ];
+}
+function buildEmbeddedBrowserResourceTranscodeArgs(request) {
+  const normalizedFormat = normalizeEmbeddedBrowserResourceTranscodeFormat(request.outputFormat);
+  if (!normalizedFormat) {
+    throw new Error("请输入 1-12 位字母或数字格式，例如 mp3、m4a、mp4");
+  }
+  const outputArgsByFormat = {
+    aac: ["-vn", "-c:a", "aac", "-b:a", "192k"],
+    aiff: ["-vn"],
+    alac: ["-vn", "-c:a", "alac"],
+    flac: ["-vn", "-c:a", "flac"],
+    m4a: ["-vn", "-c:a", "aac", "-b:a", "192k"],
+    mp3: ["-vn", "-c:a", "libmp3lame", "-b:a", "192k"],
+    ogg: ["-vn", "-c:a", "libvorbis", "-q:a", "5"],
+    opus: ["-vn", "-c:a", "libopus", "-b:a", "128k"],
+    wav: ["-vn", "-c:a", "pcm_s16le"],
+    weba: ["-vn", "-c:a", "libopus", "-b:a", "128k"],
+    webm: ["-map", "0:v:0?", "-map", "0:a:0?", "-c:v", "libvpx-vp9", "-c:a", "libopus"],
+    wma: ["-vn"]
+  };
+  const outputArgs = outputArgsByFormat[normalizedFormat] || ["-map", "0:v:0?", "-map", "0:a:0?", "-c:v", "libx264", "-c:a", "aac", "-movflags", "+faststart"];
+  return [
+    "-y",
+    ...request.input.inputArgs,
+    "-i",
+    request.input.path,
+    ...outputArgs,
+    request.outputPath
+  ];
+}
+function deriveEmbeddedBrowserMergedFileName(videoFileName, audioFileName) {
+  const normalizedVideoName = sanitizeFileName$2(path.parse(videoFileName).name);
+  const normalizedAudioName = sanitizeFileName$2(path.parse(audioFileName).name);
+  const mergedBaseName = normalizedVideoName.replace(/-video$/i, "").replace(/_video$/i, "") || normalizedAudioName.replace(/-audio$/i, "").replace(/_audio$/i, "") || "merged-media";
+  return `${mergedBaseName}.mp4`;
+}
+async function createEmbeddedBrowserResourceMergeTempDir() {
+  return mkdtemp(path.join(os.tmpdir(), "omniflow-resource-merge-"));
+}
+async function cleanupEmbeddedBrowserResourceMergeTempDir(tempDir) {
+  if (!tempDir) {
+    return;
+  }
+  await rm(tempDir, {
+    force: true,
+    recursive: true
+  });
+}
+async function writeExtractedResourceToTempFile(tempDir, resource) {
+  if (resource.filePath) {
+    return resource.filePath;
+  }
+  if (!resource.base64) {
+    throw new Error("缺少可写入的资源内容");
+  }
+  const filePath = path.join(tempDir, sanitizeFileName$2(resource.fileName));
+  await writeFile(filePath, Buffer$1.from(resource.base64, "base64"));
+  return filePath;
+}
+function isHttpResourceUrl(input) {
+  return /^https?:\/\//i.test(String(input || "").trim());
+}
+function sanitizeHeaderValue$1(input) {
+  return String(input || "").replace(/[\r\n]+/g, " ").trim();
+}
+function buildFfmpegHttpInputArgs(resource) {
+  const url = String(resource.url || "").trim();
+  if (!isHttpResourceUrl(url)) {
+    return [];
+  }
+  const headers = resource.requestHeaders || {};
+  const inputArgs = [];
+  const headerLines = [];
+  Object.entries(headers).forEach(([rawName, rawValue]) => {
+    const headerName = String(rawName || "").trim().toLowerCase();
+    const headerValue = sanitizeHeaderValue$1(rawValue);
+    if (!headerName || !headerValue || FFMPEG_HTTP_HEADER_BLACKLIST.has(headerName)) {
+      return;
+    }
+    headerLines.push(`${headerName}: ${headerValue}`);
+  });
+  if (headerLines.length) {
+    inputArgs.push("-headers", `${headerLines.join("\r\n")}\r
+`);
+  }
+  return inputArgs;
+}
+async function prepareResourceMergeInput(tempDir, resource) {
+  const url = String(resource.url || "").trim();
+  if (url && isHttpResourceUrl(url) && !resource.base64) {
+    return {
+      inputArgs: buildFfmpegHttpInputArgs(resource),
+      path: url
+    };
+  }
+  return {
+    inputArgs: [],
+    path: await writeExtractedResourceToTempFile(tempDir, resource)
+  };
+}
+async function mergeEmbeddedBrowserResourceTracks(request) {
+  const ffmpegPath = await resolveEmbeddedBrowserFfmpegPath(request.ffmpegPath);
+  if (!ffmpegPath) {
+    throw new Error("未找到可用的 ffmpeg，可在系统环境变量里配置，或确认 /opt/homebrew/bin/ffmpeg 可执行");
+  }
+  const tempDir = await createEmbeddedBrowserResourceMergeTempDir();
+  try {
+    const [audio, video] = await Promise.all([
+      prepareResourceMergeInput(tempDir, request.audio),
+      prepareResourceMergeInput(tempDir, request.video)
+    ]);
+    const commandArgs = buildEmbeddedBrowserResourceMergeArgs({
+      audio,
+      outputPath: request.outputPath,
+      video
+    });
+    const result = await new Promise((resolve, reject) => {
+      const stdout = [];
+      const stderr = [];
+      const child = spawn(ffmpegPath, commandArgs, {
+        stdio: ["ignore", "pipe", "pipe"]
+      });
+      child.stdout.on("data", (chunk) => {
+        stdout.push(String(chunk));
+      });
+      child.stderr.on("data", (chunk) => {
+        stderr.push(String(chunk));
+      });
+      child.once("error", (error) => {
+        reject(error);
+      });
+      child.once("exit", (code) => {
+        if (code === 0) {
+          resolve({
+            commandArgs,
+            ffmpegPath,
+            outputPath: request.outputPath,
+            stderr: stderr.join(""),
+            stdout: stdout.join("")
+          });
+          return;
+        }
+        reject(new Error(stderr.join("").trim() || `ffmpeg 退出码异常: ${code}`));
+      });
+    });
+    return result;
+  } finally {
+    await cleanupEmbeddedBrowserResourceMergeTempDir(tempDir).catch(() => void 0);
+  }
+}
+async function transcodeEmbeddedBrowserResource(request) {
+  const ffmpegPath = await resolveEmbeddedBrowserFfmpegPath(request.ffmpegPath);
+  if (!ffmpegPath) {
+    throw new Error("未找到可用的 ffmpeg，可在系统环境变量里配置，或确认 /opt/homebrew/bin/ffmpeg 可执行");
+  }
+  const tempDir = await createEmbeddedBrowserResourceMergeTempDir();
+  try {
+    const input = await prepareResourceMergeInput(tempDir, request.resource);
+    const commandArgs = buildEmbeddedBrowserResourceTranscodeArgs({
+      input,
+      outputFormat: request.outputFormat,
+      outputPath: request.outputPath
+    });
+    const result = await new Promise((resolve, reject) => {
+      const stdout = [];
+      const stderr = [];
+      const child = spawn(ffmpegPath, commandArgs, {
+        stdio: ["ignore", "pipe", "pipe"]
+      });
+      child.stdout.on("data", (chunk) => {
+        stdout.push(String(chunk));
+      });
+      child.stderr.on("data", (chunk) => {
+        stderr.push(String(chunk));
+      });
+      child.once("error", (error) => {
+        reject(error);
+      });
+      child.once("exit", (code) => {
+        if (code === 0) {
+          resolve({
+            commandArgs,
+            ffmpegPath,
+            outputPath: request.outputPath,
+            stderr: stderr.join(""),
+            stdout: stdout.join("")
+          });
+          return;
+        }
+        reject(new Error(stderr.join("").trim() || `ffmpeg 退出码异常: ${code}`));
+      });
+    });
+    return result;
+  } finally {
+    await cleanupEmbeddedBrowserResourceMergeTempDir(tempDir).catch(() => void 0);
+  }
+}
+function isMediaToolOperation(input) {
+  return input === "extract-audio" || input === "compress-video";
+}
+function sanitizeFileName$1(input) {
+  const normalized = String(input).trim().replace(/[\\/:*?"<>|]+/g, "_");
+  return normalized || "media";
+}
+function deriveOutputFileName(inputFileName, operation) {
+  const parsed = path.parse(sanitizeFileName$1(inputFileName || "media"));
+  const baseName = parsed.name || "media";
+  if (operation === "extract-audio") {
+    return `${baseName}-audio.m4a`;
+  }
+  return `${baseName}-compressed.mp4`;
+}
+async function resolveUniqueOutputPath(outputDirectoryPath, fileName) {
+  const parsed = path.parse(fileName);
+  for (let index = 0; index < 1e3; index += 1) {
+    const suffix = index === 0 ? "" : ` (${index})`;
+    const candidate = path.join(outputDirectoryPath, `${parsed.name}${suffix}${parsed.ext}`);
+    try {
+      await access(candidate);
+    } catch {
+      return candidate;
+    }
+  }
+  return path.join(outputDirectoryPath, `${parsed.name}-${Date.now()}${parsed.ext}`);
+}
+function buildMediaToolArgs(request) {
+  if (request.operation === "extract-audio") {
+    return [
+      "-y",
+      "-i",
+      request.inputUrl,
+      "-vn",
+      "-c:a",
+      "aac",
+      "-b:a",
+      "192k",
+      request.outputPath
+    ];
+  }
+  return [
+    "-y",
+    "-i",
+    request.inputUrl,
+    "-map",
+    "0:v:0",
+    "-map",
+    "0:a:0?",
+    "-c:v",
+    "libx264",
+    "-preset",
+    "medium",
+    "-crf",
+    "28",
+    "-c:a",
+    "aac",
+    "-b:a",
+    "128k",
+    "-movflags",
+    "+faststart",
+    request.outputPath
+  ];
+}
+async function processMediaToolFile(request) {
+  const inputUrl = String(request.inputUrl || "").trim();
+  if (!inputUrl) {
+    return { ok: false, error: "缺少输入文件地址" };
+  }
+  if (!isMediaToolOperation(request.operation)) {
+    return { ok: false, error: "未知的媒体处理操作" };
+  }
+  const ffmpegPath = await resolveEmbeddedBrowserFfmpegPath(request.ffmpegPath);
+  if (!ffmpegPath) {
+    return { ok: false, error: "未找到可用的 ffmpeg，可在系统环境变量里配置，或确认 /opt/homebrew/bin/ffmpeg 可执行" };
+  }
+  const outputDirectoryPath = path.resolve(
+    String(request.outputDirectoryPath || "").trim() || app.getPath("downloads")
+  );
+  await mkdir(outputDirectoryPath, { recursive: true });
+  const outputPath = await resolveUniqueOutputPath(
+    outputDirectoryPath,
+    deriveOutputFileName(request.inputFileName, request.operation)
+  );
+  const commandArgs = buildMediaToolArgs({
+    inputUrl,
+    operation: request.operation,
+    outputPath
+  });
+  return new Promise((resolve) => {
+    const stderr = [];
+    const child = spawn(ffmpegPath, commandArgs, {
+      stdio: ["ignore", "ignore", "pipe"]
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr.push(String(chunk));
+    });
+    child.once("error", (error) => {
+      resolve({
+        commandArgs,
+        error: error.message || "媒体处理失败",
+        ffmpegPath,
+        ok: false,
+        outputPath
+      });
+    });
+    child.once("exit", (code) => {
+      if (code === 0) {
+        resolve({
+          commandArgs,
+          ffmpegPath,
+          ok: true,
+          outputPath
+        });
+        return;
+      }
+      resolve({
+        commandArgs,
+        error: stderr.join("").trim() || `ffmpeg 退出码异常: ${code}`,
+        ffmpegPath,
+        ok: false,
+        outputPath
+      });
+    });
+  });
+}
+function registerMediaToolIpc(ipcMain2) {
+  ipcMain2.handle("media-tool:process-file", async (_event, payload) => processMediaToolFile(payload));
 }
 function registerIpcHandlers() {
   registerFileIpc(ipcMain);
   registerSystemIpc(ipcMain);
   registerHttpIpc(ipcMain);
+  registerMediaToolIpc(ipcMain);
 }
 function createEmbeddedBrowserCatchToolkitGetStateScript() {
   return `
@@ -1487,13 +1780,13 @@ function buildStagedDownloadName(fileName) {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${safeName}`;
 }
 function toDownloadPayload(item, overrides) {
-  var _a, _b;
+  var _a2, _b;
   return {
     downloadId: overrides.downloadId,
     fileName: overrides.fileName,
     mimeType: overrides.mimeType,
     pageUrl: overrides.pageUrl,
-    receivedBytes: overrides.receivedBytes ?? Math.max(0, Number(((_a = item.getReceivedBytes) == null ? void 0 : _a.call(item)) || 0)),
+    receivedBytes: overrides.receivedBytes ?? Math.max(0, Number(((_a2 = item.getReceivedBytes) == null ? void 0 : _a2.call(item)) || 0)),
     state: overrides.state,
     tabId: overrides.tabId,
     tempPath: overrides.tempPath,
@@ -2297,8 +2590,8 @@ function getHeaderValue(headers, name) {
   return "";
 }
 function normalizeMimeType(input) {
-  var _a;
-  return ((_a = String(input || "").split(";")[0]) == null ? void 0 : _a.trim().toLowerCase()) || "";
+  var _a2;
+  return ((_a2 = String(input || "").split(";")[0]) == null ? void 0 : _a2.trim().toLowerCase()) || "";
 }
 function getResourceExtension(url) {
   try {
@@ -2523,8 +2816,8 @@ function disposeEmbeddedBrowserCapturedResources(tabId) {
   tabCaptureStates.delete(String(tabId || "").trim());
 }
 function isEmbeddedBrowserDeepCaptureEnabled(tabId) {
-  var _a;
-  return Boolean((_a = getEmbeddedBrowserTabCaptureState(tabId)) == null ? void 0 : _a.deepCaptureEnabled);
+  var _a2;
+  return Boolean((_a2 = getEmbeddedBrowserTabCaptureState(tabId)) == null ? void 0 : _a2.deepCaptureEnabled);
 }
 const requestContextsByRequestId = /* @__PURE__ */ new Map();
 let embeddedBrowserResourceBridgeInitialized = false;
@@ -2823,8 +3116,8 @@ function resolveEmbeddedBrowserFaviconUrl(rawIconUrl, pageUrl) {
   }
 }
 function getEmbeddedBrowserFaviconMimeType(iconUrl, contentType) {
-  var _a;
-  const normalizedContentType = (_a = String(contentType || "").split(";")[0]) == null ? void 0 : _a.trim();
+  var _a2;
+  const normalizedContentType = (_a2 = String(contentType || "").split(";")[0]) == null ? void 0 : _a2.trim();
   if (normalizedContentType == null ? void 0 : normalizedContentType.startsWith("image/")) {
     return normalizedContentType;
   }
@@ -2998,7 +3291,7 @@ async function ensureInputSelector(view) {
   return typeof selector === "string" && selector.trim() ? selector.trim() : null;
 }
 async function setFileInputFiles(view, selector, filePaths) {
-  var _a;
+  var _a2;
   if (!selector || filePaths.length === 0) {
     return false;
   }
@@ -3014,7 +3307,7 @@ async function setFileInputFiles(view, selector, filePaths) {
   const documentNode = await view.webContents.debugger.sendCommand("DOM.getDocument", {
     depth: 1
   });
-  const nodeID = Number(((_a = documentNode == null ? void 0 : documentNode.root) == null ? void 0 : _a.nodeId) || 0);
+  const nodeID = Number(((_a2 = documentNode == null ? void 0 : documentNode.root) == null ? void 0 : _a2.nodeId) || 0);
   if (!Number.isFinite(nodeID) || nodeID <= 0) {
     return false;
   }
@@ -3455,11 +3748,11 @@ function sanitizeLabel(value, fallback) {
   return String(value || "").trim() || fallback;
 }
 function normalizeSettings(input) {
-  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l;
+  var _a2, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l;
   const defaults = createDefaultEmbeddedBrowserExternalToolSettings();
   return {
     aria2: {
-      downloadDir: String(((_a = input == null ? void 0 : input.aria2) == null ? void 0 : _a.downloadDir) || "").trim(),
+      downloadDir: String(((_a2 = input == null ? void 0 : input.aria2) == null ? void 0 : _a2.downloadDir) || "").trim(),
       enabled: Boolean((_b = input == null ? void 0 : input.aria2) == null ? void 0 : _b.enabled),
       label: sanitizeLabel(((_c = input == null ? void 0 : input.aria2) == null ? void 0 : _c.label) || "", defaults.aria2.label),
       rpcUrl: String(((_d = input == null ? void 0 : input.aria2) == null ? void 0 : _d.rpcUrl) || defaults.aria2.rpcUrl).trim(),
@@ -3603,7 +3896,7 @@ async function dispatchToAria2(settings, input) {
         chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
       });
       response.on("end", () => {
-        var _a;
+        var _a2;
         const responseText = Buffer.concat(chunks).toString("utf8");
         if ((response.statusCode || 0) < 200 || (response.statusCode || 0) >= 300) {
           reject(new Error(`aria2 RPC 请求失败：HTTP ${response.statusCode || 0}`));
@@ -3611,7 +3904,7 @@ async function dispatchToAria2(settings, input) {
         }
         try {
           const parsed = JSON.parse(responseText);
-          if ((_a = parsed.error) == null ? void 0 : _a.message) {
+          if ((_a2 = parsed.error) == null ? void 0 : _a2.message) {
             reject(new Error(parsed.error.message));
             return;
           }
@@ -4618,10 +4911,10 @@ function embeddedBrowserResourceProbeManifestHeuristicsBody() {
   ];
 }
 function embeddedBrowserResourceProbeRuntimeCoreBody() {
-  var _a, _b, _c;
+  var _a2, _b, _c;
   const globalScope2 = globalThis;
   const isWorkerScope2 = typeof document === "undefined" && typeof globalScope2.importScripts === "function";
-  const currentLocationHref2 = typeof ((_a = globalScope2.location) == null ? void 0 : _a.href) === "string" ? globalScope2.location.href : "";
+  const currentLocationHref2 = typeof ((_a2 = globalScope2.location) == null ? void 0 : _a2.href) === "string" ? globalScope2.location.href : "";
   const currentLocationHost = typeof ((_b = globalScope2.location) == null ? void 0 : _b.hostname) === "string" ? globalScope2.location.hostname : "resource";
   const currentLocationProtocol = typeof ((_c = globalScope2.location) == null ? void 0 : _c.protocol) === "string" ? globalScope2.location.protocol : "https:";
   const workerRelayKey = "__OMNIFLOW_EMBEDDED_BROWSER_RESOURCE_RELAY__";
@@ -4785,7 +5078,7 @@ function embeddedBrowserResourceProbeRuntimeCoreBody() {
     }
   }
   function evaluateSelectorRule2(rule) {
-    var _a2;
+    var _a3;
     const normalizedRule = String(rule || "").trim();
     if (!normalizedRule) {
       return {
@@ -4801,7 +5094,7 @@ function embeddedBrowserResourceProbeRuntimeCoreBody() {
     }
     try {
       const matchedNode = document.querySelector(normalizedRule);
-      const matchedText = ((_a2 = matchedNode == null ? void 0 : matchedNode.textContent) == null ? void 0 : _a2.trim()) || "";
+      const matchedText = ((_a3 = matchedNode == null ? void 0 : matchedNode.textContent) == null ? void 0 : _a3.trim()) || "";
       return {
         rule: normalizedRule,
         warning: matchedText ? "" : "表达式暂时没有命中可用内容"
@@ -4911,7 +5204,7 @@ function embeddedBrowserResourceProbeRuntimeCoreBody() {
     return document.title.trim();
   }
   function resolveCatchToolkitFileName2() {
-    var _a2, _b2;
+    var _a3, _b2;
     const manualFileName = sanitizeFileName2(catchToolkitState2.manualFileName);
     if (manualFileName !== "media") {
       return manualFileName;
@@ -4921,7 +5214,7 @@ function embeddedBrowserResourceProbeRuntimeCoreBody() {
     if (selectorRule && typeof document !== "undefined") {
       try {
         const matchedNode = document.querySelector(selectorRule);
-        const matchedText = ((_a2 = matchedNode == null ? void 0 : matchedNode.textContent) == null ? void 0 : _a2.trim()) || "";
+        const matchedText = ((_a3 = matchedNode == null ? void 0 : matchedNode.textContent) == null ? void 0 : _a3.trim()) || "";
         if (matchedText) {
           candidateName = matchedText;
         }
@@ -4987,9 +5280,9 @@ function embeddedBrowserResourceProbeRuntimeCoreBody() {
     }
   }
   function classifyKind2(url, mimeType) {
-    var _a2;
+    var _a3;
     const extension = getExtension2(url);
-    const normalizedMimeType = (_a2 = String(mimeType || "").split(";")[0]) == null ? void 0 : _a2.trim().toLowerCase();
+    const normalizedMimeType = (_a3 = String(mimeType || "").split(";")[0]) == null ? void 0 : _a3.trim().toLowerCase();
     if (manifestExtensions.has(extension) || normalizedMimeType.includes("mpegurl") || normalizedMimeType.includes("dash+xml") || manifestPattern.test(url)) {
       return "manifest";
     }
@@ -5011,8 +5304,8 @@ function embeddedBrowserResourceProbeRuntimeCoreBody() {
     return "other";
   }
   function guessExtensionFromMimeType2(mimeType, streamType) {
-    var _a2;
-    const normalizedMimeType = (_a2 = String(mimeType || "").split(";")[0]) == null ? void 0 : _a2.trim().toLowerCase();
+    var _a3;
+    const normalizedMimeType = (_a3 = String(mimeType || "").split(";")[0]) == null ? void 0 : _a3.trim().toLowerCase();
     if (normalizedMimeType === "audio/mp4") {
       return "m4a";
     }
@@ -5047,7 +5340,7 @@ function embeddedBrowserResourceProbeRuntimeCoreBody() {
     return safeName || "media";
   }
   function buildCatchToolkitState2() {
-    var _a2;
+    var _a3;
     const selectorEvaluation = evaluateSelectorRule2(catchToolkitState2.selectorRule);
     const regexEvaluation = evaluateRegexRule2(catchToolkitState2.regexRule);
     const capturedMediaSizeBytes = Array.from(mseStreams2.values()).reduce((totalBytes, stream) => {
@@ -5075,7 +5368,7 @@ function embeddedBrowserResourceProbeRuntimeCoreBody() {
         appendBufferCount: probeDiagnostics2.appendBufferCount,
         frameUrl: currentLocationHref2,
         hookErrors: probeDiagnostics2.hookErrors,
-        installedAt: ((_a2 = globalScope2.__OMNIFLOW_EMBEDDED_BROWSER_RESOURCE_PROBE__) == null ? void 0 : _a2.installedAt) || Date.now(),
+        installedAt: ((_a3 = globalScope2.__OMNIFLOW_EMBEDDED_BROWSER_RESOURCE_PROBE__) == null ? void 0 : _a3.installedAt) || Date.now(),
         lastAppendAt: probeDiagnostics2.lastAppendAt,
         lastError: probeDiagnostics2.lastError,
         mediaSourceAvailable: probeDiagnostics2.mediaSourceAvailable,
@@ -5520,14 +5813,14 @@ function embeddedBrowserResourceProbeRuntimeCoreBody() {
   ];
 }
 function embeddedBrowserResourceProbeRuntimeHooksBody() {
-  var _a, _b;
+  var _a2, _b;
   globalScope.Worker;
   const mediaSourceConstructor = globalScope.MediaSource;
-  if ((_a = mediaSourceConstructor == null ? void 0 : mediaSourceConstructor.prototype) == null ? void 0 : _a.addSourceBuffer) {
+  if ((_a2 = mediaSourceConstructor == null ? void 0 : mediaSourceConstructor.prototype) == null ? void 0 : _a2.addSourceBuffer) {
     const originalAddSourceBuffer = mediaSourceConstructor.prototype.addSourceBuffer;
     mediaSourceConstructor.prototype.addSourceBuffer = new Proxy(originalAddSourceBuffer, {
       apply(target, thisArg, argumentsList) {
-        var _a2;
+        var _a3;
         const sourceBuffer = Reflect.apply(target, thisArg, argumentsList);
         try {
           probeDiagnostics.mediaSourceHooked = true;
@@ -5536,7 +5829,7 @@ function embeddedBrowserResourceProbeRuntimeHooksBody() {
           isCaptureComplete = false;
           const mediaSource = thisArg;
           const mimeType = String((argumentsList == null ? void 0 : argumentsList[0]) || "").trim();
-          const normalizedMimeType = ((_a2 = mimeType.split(";")[0]) == null ? void 0 : _a2.trim().toLowerCase()) || "";
+          const normalizedMimeType = ((_a3 = mimeType.split(";")[0]) == null ? void 0 : _a3.trim().toLowerCase()) || "";
           const streamType = normalizedMimeType.startsWith("audio/") ? "audio" : normalizedMimeType.startsWith("video/") ? "video" : void 0;
           const streamId = `${Date.now()}-${++mseSequence}`;
           const existingStreamIds = mediaSourceStreams.get(mediaSource) || [];
@@ -6253,278 +6546,6 @@ async function installEmbeddedBrowserResourceProbe(tabId, view, isDeepCaptureEna
     return false;
   }
 }
-const COMMON_FFMPEG_PATHS = [
-  process.env.OMNIFLOW_FFMPEG_PATH,
-  "/opt/homebrew/bin/ffmpeg",
-  "/usr/local/bin/ffmpeg",
-  "/usr/bin/ffmpeg",
-  "ffmpeg"
-].filter((value) => Boolean(value));
-const FFMPEG_HTTP_HEADER_BLACKLIST = /* @__PURE__ */ new Set([
-  "accept-encoding",
-  "connection",
-  "host",
-  "range"
-]);
-function normalizeEmbeddedBrowserResourceTranscodeFormat(input) {
-  const normalized = String(input || "").trim().replace(/^\.+/, "").toLowerCase();
-  if (!/^[a-z0-9]{1,12}$/.test(normalized)) {
-    return null;
-  }
-  return normalized;
-}
-function sanitizeFileName$1(input) {
-  const normalized = String(input || "").trim().replace(/[\\/:*?"<>|]+/g, "_");
-  return normalized || "media";
-}
-async function canExecuteFile(candidatePath) {
-  if (!candidatePath || candidatePath === "ffmpeg") {
-    return false;
-  }
-  try {
-    await access(candidatePath, constants.X_OK);
-    return true;
-  } catch {
-    return false;
-  }
-}
-async function canExecuteCommand(candidateCommand) {
-  return new Promise((resolve) => {
-    const child = spawn(candidateCommand, ["-version"], {
-      stdio: "ignore"
-    });
-    child.once("error", () => resolve(false));
-    child.once("exit", (code) => resolve(code === 0));
-  });
-}
-async function resolveEmbeddedBrowserFfmpegPath(preferredPath) {
-  const candidates = [
-    String(preferredPath || "").trim() || void 0,
-    ...COMMON_FFMPEG_PATHS
-  ].filter((value, index, list) => Boolean(value) && list.indexOf(value) === index);
-  for (const candidate of candidates) {
-    if (candidate === "ffmpeg") {
-      if (await canExecuteCommand(candidate)) {
-        return candidate;
-      }
-      continue;
-    }
-    if (await canExecuteFile(candidate)) {
-      return candidate;
-    }
-  }
-  return null;
-}
-function buildEmbeddedBrowserResourceMergeArgs(request) {
-  return [
-    "-y",
-    ...request.video.inputArgs,
-    "-i",
-    request.video.path,
-    ...request.audio.inputArgs,
-    "-i",
-    request.audio.path,
-    "-c",
-    "copy",
-    request.outputPath
-  ];
-}
-function buildEmbeddedBrowserResourceTranscodeArgs(request) {
-  const normalizedFormat = normalizeEmbeddedBrowserResourceTranscodeFormat(request.outputFormat);
-  if (!normalizedFormat) {
-    throw new Error("请输入 1-12 位字母或数字格式，例如 mp3、m4a、mp4");
-  }
-  const outputArgsByFormat = {
-    aac: ["-vn", "-c:a", "aac", "-b:a", "192k"],
-    aiff: ["-vn"],
-    alac: ["-vn", "-c:a", "alac"],
-    flac: ["-vn", "-c:a", "flac"],
-    m4a: ["-vn", "-c:a", "aac", "-b:a", "192k"],
-    mp3: ["-vn", "-c:a", "libmp3lame", "-b:a", "192k"],
-    ogg: ["-vn", "-c:a", "libvorbis", "-q:a", "5"],
-    opus: ["-vn", "-c:a", "libopus", "-b:a", "128k"],
-    wav: ["-vn", "-c:a", "pcm_s16le"],
-    weba: ["-vn", "-c:a", "libopus", "-b:a", "128k"],
-    webm: ["-map", "0:v:0?", "-map", "0:a:0?", "-c:v", "libvpx-vp9", "-c:a", "libopus"],
-    wma: ["-vn"]
-  };
-  const outputArgs = outputArgsByFormat[normalizedFormat] || ["-map", "0:v:0?", "-map", "0:a:0?", "-c:v", "libx264", "-c:a", "aac", "-movflags", "+faststart"];
-  return [
-    "-y",
-    ...request.input.inputArgs,
-    "-i",
-    request.input.path,
-    ...outputArgs,
-    request.outputPath
-  ];
-}
-function deriveEmbeddedBrowserMergedFileName(videoFileName, audioFileName) {
-  const normalizedVideoName = sanitizeFileName$1(path.parse(videoFileName).name);
-  const normalizedAudioName = sanitizeFileName$1(path.parse(audioFileName).name);
-  const mergedBaseName = normalizedVideoName.replace(/-video$/i, "").replace(/_video$/i, "") || normalizedAudioName.replace(/-audio$/i, "").replace(/_audio$/i, "") || "merged-media";
-  return `${mergedBaseName}.mp4`;
-}
-async function createEmbeddedBrowserResourceMergeTempDir() {
-  return mkdtemp(path.join(os.tmpdir(), "omniflow-resource-merge-"));
-}
-async function cleanupEmbeddedBrowserResourceMergeTempDir(tempDir) {
-  if (!tempDir) {
-    return;
-  }
-  await rm(tempDir, {
-    force: true,
-    recursive: true
-  });
-}
-async function writeExtractedResourceToTempFile(tempDir, resource) {
-  if (resource.filePath) {
-    return resource.filePath;
-  }
-  if (!resource.base64) {
-    throw new Error("缺少可写入的资源内容");
-  }
-  const filePath = path.join(tempDir, sanitizeFileName$1(resource.fileName));
-  await writeFile(filePath, Buffer$1.from(resource.base64, "base64"));
-  return filePath;
-}
-function isHttpResourceUrl(input) {
-  return /^https?:\/\//i.test(String(input || "").trim());
-}
-function sanitizeHeaderValue$1(input) {
-  return String(input || "").replace(/[\r\n]+/g, " ").trim();
-}
-function buildFfmpegHttpInputArgs(resource) {
-  const url = String(resource.url || "").trim();
-  if (!isHttpResourceUrl(url)) {
-    return [];
-  }
-  const headers = resource.requestHeaders || {};
-  const inputArgs = [];
-  const headerLines = [];
-  Object.entries(headers).forEach(([rawName, rawValue]) => {
-    const headerName = String(rawName || "").trim().toLowerCase();
-    const headerValue = sanitizeHeaderValue$1(rawValue);
-    if (!headerName || !headerValue || FFMPEG_HTTP_HEADER_BLACKLIST.has(headerName)) {
-      return;
-    }
-    headerLines.push(`${headerName}: ${headerValue}`);
-  });
-  if (headerLines.length) {
-    inputArgs.push("-headers", `${headerLines.join("\r\n")}\r
-`);
-  }
-  return inputArgs;
-}
-async function prepareResourceMergeInput(tempDir, resource) {
-  const url = String(resource.url || "").trim();
-  if (url && isHttpResourceUrl(url) && !resource.base64) {
-    return {
-      inputArgs: buildFfmpegHttpInputArgs(resource),
-      path: url
-    };
-  }
-  return {
-    inputArgs: [],
-    path: await writeExtractedResourceToTempFile(tempDir, resource)
-  };
-}
-async function mergeEmbeddedBrowserResourceTracks(request) {
-  const ffmpegPath = await resolveEmbeddedBrowserFfmpegPath(request.ffmpegPath);
-  if (!ffmpegPath) {
-    throw new Error("未找到可用的 ffmpeg，可在系统环境变量里配置，或确认 /opt/homebrew/bin/ffmpeg 可执行");
-  }
-  const tempDir = await createEmbeddedBrowserResourceMergeTempDir();
-  try {
-    const [audio, video] = await Promise.all([
-      prepareResourceMergeInput(tempDir, request.audio),
-      prepareResourceMergeInput(tempDir, request.video)
-    ]);
-    const commandArgs = buildEmbeddedBrowserResourceMergeArgs({
-      audio,
-      outputPath: request.outputPath,
-      video
-    });
-    const result = await new Promise((resolve, reject) => {
-      const stdout = [];
-      const stderr = [];
-      const child = spawn(ffmpegPath, commandArgs, {
-        stdio: ["ignore", "pipe", "pipe"]
-      });
-      child.stdout.on("data", (chunk) => {
-        stdout.push(String(chunk));
-      });
-      child.stderr.on("data", (chunk) => {
-        stderr.push(String(chunk));
-      });
-      child.once("error", (error) => {
-        reject(error);
-      });
-      child.once("exit", (code) => {
-        if (code === 0) {
-          resolve({
-            commandArgs,
-            ffmpegPath,
-            outputPath: request.outputPath,
-            stderr: stderr.join(""),
-            stdout: stdout.join("")
-          });
-          return;
-        }
-        reject(new Error(stderr.join("").trim() || `ffmpeg 退出码异常: ${code}`));
-      });
-    });
-    return result;
-  } finally {
-    await cleanupEmbeddedBrowserResourceMergeTempDir(tempDir).catch(() => void 0);
-  }
-}
-async function transcodeEmbeddedBrowserResource(request) {
-  const ffmpegPath = await resolveEmbeddedBrowserFfmpegPath(request.ffmpegPath);
-  if (!ffmpegPath) {
-    throw new Error("未找到可用的 ffmpeg，可在系统环境变量里配置，或确认 /opt/homebrew/bin/ffmpeg 可执行");
-  }
-  const tempDir = await createEmbeddedBrowserResourceMergeTempDir();
-  try {
-    const input = await prepareResourceMergeInput(tempDir, request.resource);
-    const commandArgs = buildEmbeddedBrowserResourceTranscodeArgs({
-      input,
-      outputFormat: request.outputFormat,
-      outputPath: request.outputPath
-    });
-    const result = await new Promise((resolve, reject) => {
-      const stdout = [];
-      const stderr = [];
-      const child = spawn(ffmpegPath, commandArgs, {
-        stdio: ["ignore", "pipe", "pipe"]
-      });
-      child.stdout.on("data", (chunk) => {
-        stdout.push(String(chunk));
-      });
-      child.stderr.on("data", (chunk) => {
-        stderr.push(String(chunk));
-      });
-      child.once("error", (error) => {
-        reject(error);
-      });
-      child.once("exit", (code) => {
-        if (code === 0) {
-          resolve({
-            commandArgs,
-            ffmpegPath,
-            outputPath: request.outputPath,
-            stderr: stderr.join(""),
-            stdout: stdout.join("")
-          });
-          return;
-        }
-        reject(new Error(stderr.join("").trim() || `ffmpeg 退出码异常: ${code}`));
-      });
-    });
-    return result;
-  } finally {
-    await cleanupEmbeddedBrowserResourceMergeTempDir(tempDir).catch(() => void 0);
-  }
-}
 function sanitizeFileName(input) {
   const normalized = String(input || "").trim().replace(/[\\/:*?"<>|]+/g, "_");
   return normalized || "media";
@@ -6675,7 +6696,7 @@ async function downloadEmbeddedBrowserManifestResource(request) {
       stdio: ["ignore", "pipe", "pipe"]
     });
     child.stdout.on("data", (chunk) => {
-      var _a;
+      var _a2;
       const chunkText = String(chunk);
       stdout.push(chunkText);
       parseFfmpegProgressChunk(progressState, chunkText);
@@ -6691,7 +6712,7 @@ async function downloadEmbeddedBrowserManifestResource(request) {
       if (nextSpeedText) {
         lastSpeedText = nextSpeedText;
       }
-      (_a = request.onProgress) == null ? void 0 : _a.call(request, {
+      (_a2 = request.onProgress) == null ? void 0 : _a2.call(request, {
         processedSeconds: typeof nextProcessedSeconds === "number" ? Math.min(nextProcessedSeconds, request.durationSeconds || Number.POSITIVE_INFINITY) : void 0,
         speedText: nextSpeedText || void 0
       });
@@ -6733,7 +6754,7 @@ async function downloadEmbeddedBrowserManifestTracks(request) {
       stdio: ["ignore", "pipe", "pipe"]
     });
     child.stdout.on("data", (chunk) => {
-      var _a;
+      var _a2;
       const chunkText = String(chunk);
       stdout.push(chunkText);
       parseFfmpegProgressChunk(progressState, chunkText);
@@ -6749,7 +6770,7 @@ async function downloadEmbeddedBrowserManifestTracks(request) {
       if (nextSpeedText) {
         lastSpeedText = nextSpeedText;
       }
-      (_a = request.onProgress) == null ? void 0 : _a.call(request, {
+      (_a2 = request.onProgress) == null ? void 0 : _a2.call(request, {
         processedSeconds: typeof nextProcessedSeconds === "number" ? Math.min(nextProcessedSeconds, request.durationSeconds || Number.POSITIVE_INFINITY) : void 0,
         speedText: nextSpeedText || void 0
       });
@@ -6913,9 +6934,9 @@ class EmbeddedBrowserFragmentDownloader {
     this.controller.push(null);
   }
   stop(index) {
-    var _a;
+    var _a2;
     if (typeof index === "number") {
-      (_a = this.controller[index]) == null ? void 0 : _a.abort();
+      (_a2 = this.controller[index]) == null ? void 0 : _a2.abort();
       return;
     }
     this.controller.forEach((controller) => {
@@ -7081,8 +7102,8 @@ class EmbeddedBrowserFragmentDownloader {
     }
   }
   sequentialPush() {
-    var _a;
-    if (!((_a = this.events.sequentialPush) == null ? void 0 : _a.length)) {
+    var _a2;
+    if (!((_a2 = this.events.sequentialPush) == null ? void 0 : _a2.length)) {
       return;
     }
     for (; this.pushIndex < this.fragmentsInternal.length; this.pushIndex += 1) {
@@ -7140,11 +7161,11 @@ function createByteRangeHeader(byteRange) {
   return `bytes=${start}-${end}`;
 }
 function createResourceCacheKey(input) {
-  var _a, _b, _c;
+  var _a2, _b, _c;
   return [
     String(input.method || ""),
     String(input.url || ""),
-    ((_a = input.byteRange) == null ? void 0 : _a.raw) || "",
+    ((_a2 = input.byteRange) == null ? void 0 : _a2.raw) || "",
     String(((_b = input.byteRange) == null ? void 0 : _b.length) || ""),
     String(((_c = input.byteRange) == null ? void 0 : _c.offset) || "")
   ].join("|");
@@ -7280,7 +7301,7 @@ async function prepareKeyRefs(input) {
   return records;
 }
 function buildLocalPlaylist(input) {
-  var _a;
+  var _a2;
   if (!input.fragments.length || !input.fragmentPaths.length) {
     throw new Error("重写本地 playlist 失败：当前没有可写入 playlist 的本地分片");
   }
@@ -7294,12 +7315,12 @@ function buildLocalPlaylist(input) {
     `#EXT-X-TARGETDURATION:${targetDuration}`,
     "#EXT-X-MEDIA-SEQUENCE:0"
   ];
-  let previousDiscontinuity = ((_a = input.fragments[0]) == null ? void 0 : _a.discontinuitySequence) ?? 0;
+  let previousDiscontinuity = ((_a2 = input.fragments[0]) == null ? void 0 : _a2.discontinuitySequence) ?? 0;
   let previousKeyCacheKey = "";
   let previousMapCacheKey = "";
   let hadKey = false;
   input.fragments.forEach((fragment, index) => {
-    var _a2;
+    var _a3;
     if (index > 0 && fragment.discontinuitySequence !== previousDiscontinuity) {
       lines.push("#EXT-X-DISCONTINUITY");
       previousDiscontinuity = fragment.discontinuitySequence;
@@ -7319,7 +7340,7 @@ function buildLocalPlaylist(input) {
       previousKeyCacheKey = "";
       hadKey = false;
     }
-    const nextMapCacheKey = ((_a2 = fragment.initSegment) == null ? void 0 : _a2.url) ? createResourceCacheKey({
+    const nextMapCacheKey = ((_a3 = fragment.initSegment) == null ? void 0 : _a3.url) ? createResourceCacheKey({
       byteRange: fragment.initSegment.byteRange,
       url: fragment.initSegment.url
     }) : "";
@@ -7361,10 +7382,10 @@ async function filterExistingPlaylistFragments(input) {
   });
 }
 async function downloadEmbeddedBrowserHlsToLocalWorkDirectory(request) {
-  var _a, _b, _c, _d, _e, _f;
+  var _a2, _b, _c, _d, _e, _f;
   const { plan } = request;
   const requestedFragmentIndexes = Array.isArray(request.fragmentIndexes) ? new Set(request.fragmentIndexes.filter((value) => Number.isFinite(value) && value >= 0)) : null;
-  (_a = request.onEvent) == null ? void 0 : _a.call(request, {
+  (_a2 = request.onEvent) == null ? void 0 : _a2.call(request, {
     message: "开始准备本地 HLS 工作目录",
     stage: "preparing",
     status: "running",
@@ -7378,9 +7399,9 @@ async function downloadEmbeddedBrowserHlsToLocalWorkDirectory(request) {
     manualKeyBase64: request.manualKeyBase64,
     outputDirectoryPath,
     refs: plan.fragments.map((fragment) => {
-      var _a2, _b2;
+      var _a3, _b2;
       return {
-        method: (_a2 = fragment.key) == null ? void 0 : _a2.method,
+        method: (_a3 = fragment.key) == null ? void 0 : _a3.method,
         url: (_b2 = fragment.key) == null ? void 0 : _b2.url
       };
     })
@@ -7390,9 +7411,9 @@ async function downloadEmbeddedBrowserHlsToLocalWorkDirectory(request) {
     headers: plan.headers,
     outputDirectoryPath,
     refs: plan.fragments.map((fragment) => {
-      var _a2, _b2;
+      var _a3, _b2;
       return {
-        byteRange: (_a2 = fragment.initSegment) == null ? void 0 : _a2.byteRange,
+        byteRange: (_a3 = fragment.initSegment) == null ? void 0 : _a3.byteRange,
         url: (_b2 = fragment.initSegment) == null ? void 0 : _b2.url
       };
     }),
@@ -7427,8 +7448,8 @@ async function downloadEmbeddedBrowserHlsToLocalWorkDirectory(request) {
     };
   });
   const initialCompletedFragments = requestedFragmentIndexes ? (await Promise.all(fragmentPaths.map(async (relativePath, index) => {
-    var _a2, _b2;
-    const sourceIndex = typeof ((_a2 = plan.fragments[index]) == null ? void 0 : _a2.index) === "number" ? Number((_b2 = plan.fragments[index]) == null ? void 0 : _b2.index) : index;
+    var _a3, _b2;
+    const sourceIndex = typeof ((_a3 = plan.fragments[index]) == null ? void 0 : _a3.index) === "number" ? Number((_b2 = plan.fragments[index]) == null ? void 0 : _b2.index) : index;
     if (requestedFragmentIndexes.has(sourceIndex)) {
       return 0;
     }
@@ -7453,7 +7474,7 @@ async function downloadEmbeddedBrowserHlsToLocalWorkDirectory(request) {
   const downloadStartedAt = Date.now();
   let lastProgressEmitAt = 0;
   const emitDownloadProgress = (force = false) => {
-    var _a2;
+    var _a3;
     const now = Date.now();
     if (!force && now - lastProgressEmitAt < 220) {
       return;
@@ -7464,7 +7485,7 @@ async function downloadEmbeddedBrowserHlsToLocalWorkDirectory(request) {
     const elapsedSeconds = Math.max((now - downloadStartedAt) / 1e3, 1e-3);
     const speedBps = bytesReceived > 0 ? bytesReceived / elapsedSeconds : 0;
     const etaSeconds = bytesTotal > 0 && speedBps > 0 ? Math.max(0, Math.round((bytesTotal - bytesReceived) / speedBps)) : void 0;
-    (_a2 = request.onEvent) == null ? void 0 : _a2.call(request, {
+    (_a3 = request.onEvent) == null ? void 0 : _a3.call(request, {
       bytesReceived,
       bytesTotal: bytesTotal > 0 ? bytesTotal : void 0,
       completedFragments: initialCompletedFragments + downloader.success,
@@ -7484,9 +7505,9 @@ async function downloadEmbeddedBrowserHlsToLocalWorkDirectory(request) {
     totalFragments: plan.fragments.length
   });
   downloader.on("downloadError", (fragment, error, attempt) => {
-    var _a2;
+    var _a3;
     const sourceIndex = Math.max(0, getFragmentSourceIndex(fragment));
-    (_a2 = request.onEvent) == null ? void 0 : _a2.call(request, {
+    (_a3 = request.onEvent) == null ? void 0 : _a3.call(request, {
       completedFragments: initialCompletedFragments + downloader.success,
       error: error.message,
       message: `分片 #${sourceIndex + 1} 第 ${attempt} 次下载失败：${error.message}`,
@@ -7501,17 +7522,17 @@ async function downloadEmbeddedBrowserHlsToLocalWorkDirectory(request) {
     downloadError = new Error(downloadErrorMessage);
   });
   downloader.on("itemProgress", (fragment, done, receivedLength, contentLength) => {
-    var _a2;
+    var _a3;
     const sourceIndex = Math.max(0, getFragmentSourceIndex(fragment));
     fragmentReceivedBytes.set(sourceIndex, receivedLength);
-    const knownTotal = ((_a2 = fragment.byteRange) == null ? void 0 : _a2.length) || contentLength || fragmentTotalBytes.get(sourceIndex) || 0;
+    const knownTotal = ((_a3 = fragment.byteRange) == null ? void 0 : _a3.length) || contentLength || fragmentTotalBytes.get(sourceIndex) || 0;
     if (knownTotal > 0) {
       fragmentTotalBytes.set(sourceIndex, knownTotal);
     }
     emitDownloadProgress(done);
   });
   downloader.on("sequentialPush", (buffer, fragment) => {
-    var _a2;
+    var _a3;
     const hlsFragment = fragment;
     const sourceIndex = getFragmentSourceIndex(fragment);
     const relativePath = hlsFragment.outputRelativePath || (sourceIndex >= 0 ? fragmentPaths[sourceIndex] : void 0);
@@ -7525,7 +7546,7 @@ async function downloadEmbeddedBrowserHlsToLocalWorkDirectory(request) {
       ),
       sourceIndex
     });
-    (_a2 = request.onEvent) == null ? void 0 : _a2.call(request, {
+    (_a3 = request.onEvent) == null ? void 0 : _a3.call(request, {
       completedFragments: Math.min(plan.fragments.length, initialCompletedFragments + downloader.success + 1),
       message: `已写入分片 #${sourceIndex + 1}`,
       stage: "downloading-fragments",
@@ -7552,9 +7573,9 @@ async function downloadEmbeddedBrowserHlsToLocalWorkDirectory(request) {
   );
   const completedWrittenFragments = pendingWriteResults.reduce((sum, result) => result.status === "fulfilled" ? sum + 1 : sum, 0);
   const failedWriteFragments = pendingWriteResults.reduce((accumulator, result, index) => {
-    var _a2;
+    var _a3;
     if (result.status === "rejected") {
-      const sourceIndex = (_a2 = pendingWrites[index]) == null ? void 0 : _a2.sourceIndex;
+      const sourceIndex = (_a3 = pendingWrites[index]) == null ? void 0 : _a3.sourceIndex;
       if (typeof sourceIndex === "number" && sourceIndex >= 0) {
         accumulator.push(sourceIndex + 1);
       }
@@ -7636,10 +7657,10 @@ function sanitizeMpdTempSegmentExtension(value) {
   return "";
 }
 function inferMpdRepresentationExtension(representation, fallback) {
-  var _a;
+  var _a2;
   const candidates = [
     representation.initializationUrl,
-    (_a = representation.segments[0]) == null ? void 0 : _a.url
+    (_a2 = representation.segments[0]) == null ? void 0 : _a2.url
   ];
   for (const candidate of candidates) {
     try {
@@ -8044,8 +8065,8 @@ function parseEmbeddedBrowserHlsManifest(input) {
     keys.set(keyId, key);
   }
   function rememberMap(map) {
-    var _a;
-    maps.set(`${map.url}:${((_a = map.byteRange) == null ? void 0 : _a.raw) || ""}`, map);
+    var _a2;
+    maps.set(`${map.url}:${((_a2 = map.byteRange) == null ? void 0 : _a2.raw) || ""}`, map);
   }
   function addSegment(uri, part) {
     const normalizedUri = String(uri || "").trim();
@@ -8164,7 +8185,7 @@ function parseEmbeddedBrowserHlsManifest(input) {
   };
 }
 function createEmbeddedBrowserHlsDownloadPlan(input) {
-  var _a;
+  var _a2;
   const { manifest } = input;
   const fragments = manifest.segments.map((segment) => ({
     byteRange: segment.byteRange,
@@ -8190,8 +8211,8 @@ function createEmbeddedBrowserHlsDownloadPlan(input) {
   return {
     durationSeconds: manifest.durationSeconds,
     encryptedSegmentCount: fragments.filter((fragment) => {
-      var _a2, _b;
-      return ((_a2 = fragment.key) == null ? void 0 : _a2.url) || ((_b = fragment.key) == null ? void 0 : _b.method) === "AES-128";
+      var _a3, _b;
+      return ((_a3 = fragment.key) == null ? void 0 : _a3.url) || ((_b = fragment.key) == null ? void 0 : _b.method) === "AES-128";
     }).length,
     fragmentCount: fragments.length,
     fragments,
@@ -8209,7 +8230,7 @@ function createEmbeddedBrowserHlsDownloadPlan(input) {
       byteRange: map.byteRange,
       url: map.url
     })),
-    mapTag: ((_a = manifest.maps[0]) == null ? void 0 : _a.url) || "",
+    mapTag: ((_a2 = manifest.maps[0]) == null ? void 0 : _a2.url) || "",
     pageUrl: input.pageUrl,
     partCount: fragments.filter((fragment) => fragment.part).length,
     renditions: manifest.renditions.map((rendition) => ({
@@ -8224,12 +8245,12 @@ function createEmbeddedBrowserHlsDownloadPlan(input) {
     })),
     segmentCount: manifest.segmentCount,
     segments: manifest.segments.map((segment) => {
-      var _a2, _b;
+      var _a3, _b;
       return {
         byteRange: segment.byteRange,
         discontinuitySequence: segment.discontinuitySequence,
         duration: segment.duration,
-        keyUrl: (_a2 = segment.key) == null ? void 0 : _a2.url,
+        keyUrl: (_a3 = segment.key) == null ? void 0 : _a3.url,
         mapUrl: (_b = segment.map) == null ? void 0 : _b.url,
         part: segment.part,
         sequence: segment.sequence,
@@ -8362,9 +8383,9 @@ class EmbeddedBrowserHlsLiveRecorder {
     }
     this.pollTimer = setTimeout(() => {
       this.activePollPromise = this.pollOnce(false).catch((error) => {
-        var _a, _b, _c, _d;
+        var _a2, _b, _c, _d;
         (_d = this.onEvent) == null ? void 0 : _d.call(this, {
-          completedFragments: ((_a = this.cumulativePlan) == null ? void 0 : _a.fragmentCount) || 0,
+          completedFragments: ((_a2 = this.cumulativePlan) == null ? void 0 : _a2.fragmentCount) || 0,
           durationSeconds: (_b = this.cumulativePlan) == null ? void 0 : _b.durationSeconds,
           error: error instanceof Error ? error.message : String(error),
           message: error instanceof Error ? error.message : String(error),
@@ -8382,7 +8403,7 @@ class EmbeddedBrowserHlsLiveRecorder {
     }, this.pollIntervalMs);
   }
   async pollOnce(isInitial) {
-    var _a;
+    var _a2;
     const snapshot = await fetchEmbeddedBrowserHlsLiveManifestSnapshot({
       headers: this.headers,
       manifestUrl: this.manifestUrl,
@@ -8407,7 +8428,7 @@ class EmbeddedBrowserHlsLiveRecorder {
     const existingFragmentKeys = new Set(this.cumulativePlan.fragments.map((fragment) => createLiveFragmentKey(fragment)));
     const newFragments = snapshot.plan.fragments.filter((fragment) => !existingFragmentKeys.has(createLiveFragmentKey(fragment)));
     if (!newFragments.length) {
-      (_a = this.onEvent) == null ? void 0 : _a.call(this, {
+      (_a2 = this.onEvent) == null ? void 0 : _a2.call(this, {
         completedFragments: this.cumulativePlan.fragmentCount,
         durationSeconds: this.cumulativePlan.durationSeconds,
         message: isInitial ? "开始录制直播流" : "等待直播流产生新分片",
@@ -8426,8 +8447,8 @@ class EmbeddedBrowserHlsLiveRecorder {
       ...this.cumulativePlan,
       durationSeconds: this.cumulativePlan.durationSeconds + newFragments.reduce((sum, fragment) => sum + Number(fragment.duration || 0), 0),
       encryptedSegmentCount: this.cumulativePlan.encryptedSegmentCount + newFragments.filter((fragment) => {
-        var _a2, _b;
-        return Boolean(((_a2 = fragment.key) == null ? void 0 : _a2.url) || ((_b = fragment.key) == null ? void 0 : _b.method));
+        var _a3, _b;
+        return Boolean(((_a3 = fragment.key) == null ? void 0 : _a3.url) || ((_b = fragment.key) == null ? void 0 : _b.method));
       }).length,
       fragmentCount: this.cumulativePlan.fragmentCount + normalizedNewFragments.length,
       fragments: [...this.cumulativePlan.fragments, ...normalizedNewFragments],
@@ -8440,8 +8461,8 @@ class EmbeddedBrowserHlsLiveRecorder {
         this.cumulativePlan.maps,
         snapshot.plan.maps,
         (map) => {
-          var _a2;
-          return `${map.url}|${((_a2 = map.byteRange) == null ? void 0 : _a2.raw) || ""}`;
+          var _a3;
+          return `${map.url}|${((_a3 = map.byteRange) == null ? void 0 : _a3.raw) || ""}`;
         }
       ),
       partCount: this.cumulativePlan.partCount + newFragments.filter((fragment) => fragment.part).length,
@@ -8449,12 +8470,12 @@ class EmbeddedBrowserHlsLiveRecorder {
       segments: [
         ...this.cumulativePlan.segments,
         ...newFragments.map((fragment) => {
-          var _a2, _b;
+          var _a3, _b;
           return {
             byteRange: fragment.byteRange,
             discontinuitySequence: fragment.discontinuitySequence,
             duration: fragment.duration,
-            keyUrl: (_a2 = fragment.key) == null ? void 0 : _a2.url,
+            keyUrl: (_a3 = fragment.key) == null ? void 0 : _a3.url,
             mapUrl: (_b = fragment.initSegment) == null ? void 0 : _b.url,
             part: fragment.part,
             sequence: fragment.sequence,
@@ -8470,7 +8491,7 @@ class EmbeddedBrowserHlsLiveRecorder {
     });
   }
   async downloadFragments(input) {
-    var _a;
+    var _a2;
     if (!this.cumulativePlan) {
       throw new Error("直播录制计划还没有初始化");
     }
@@ -8480,7 +8501,7 @@ class EmbeddedBrowserHlsLiveRecorder {
       fragmentIndexes: input.fragmentIndexes,
       manualKeyBase64: this.manualKeyBase64,
       onEvent: (event) => {
-        var _a2, _b, _c, _d;
+        var _a3, _b, _c, _d;
         const nextBytesReceived = typeof event.bytesReceived === "number" ? bytesOffset + event.bytesReceived : bytesOffset;
         if (typeof event.bytesReceived === "number") {
           lastBatchBytes = event.bytesReceived;
@@ -8488,7 +8509,7 @@ class EmbeddedBrowserHlsLiveRecorder {
         (_d = this.onEvent) == null ? void 0 : _d.call(this, {
           bytesReceived: nextBytesReceived,
           bytesTotal: void 0,
-          completedFragments: event.completedFragments ?? ((_a2 = this.cumulativePlan) == null ? void 0 : _a2.fragmentCount),
+          completedFragments: event.completedFragments ?? ((_a3 = this.cumulativePlan) == null ? void 0 : _a3.fragmentCount),
           durationSeconds: (_b = this.cumulativePlan) == null ? void 0 : _b.durationSeconds,
           error: event.error,
           etaSeconds: void 0,
@@ -8511,7 +8532,7 @@ class EmbeddedBrowserHlsLiveRecorder {
     this.playlistPath = localDownloadResult.playlistPath;
     this.workDirectoryPath = localDownloadResult.workDirectoryPath;
     this.downloadedBytes = bytesOffset + lastBatchBytes;
-    (_a = this.onEvent) == null ? void 0 : _a.call(this, {
+    (_a2 = this.onEvent) == null ? void 0 : _a2.call(this, {
       bytesReceived: this.downloadedBytes,
       completedFragments: this.cumulativePlan.fragmentCount,
       durationSeconds: this.cumulativePlan.durationSeconds,
@@ -9092,9 +9113,9 @@ function createEmbeddedBrowserMainController(options) {
     }
   }
   async function mergeEmbeddedBrowserCapturedMseResources(tabId, payload) {
-    var _a, _b, _c, _d;
+    var _a2, _b, _c, _d;
     const normalizedTabId = String(tabId || "").trim();
-    const audioResourceKey = String(payload.audioResourceKey || ((_a = payload.audioResource) == null ? void 0 : _a.resourceKey) || "").trim();
+    const audioResourceKey = String(payload.audioResourceKey || ((_a2 = payload.audioResource) == null ? void 0 : _a2.resourceKey) || "").trim();
     const videoResourceKey = String(payload.videoResourceKey || ((_b = payload.videoResource) == null ? void 0 : _b.resourceKey) || "").trim();
     const createPayloadMergeResource = (input, fallbackStreamType) => {
       const url = String((input == null ? void 0 : input.url) || "").trim();
@@ -9265,9 +9286,9 @@ function createEmbeddedBrowserMainController(options) {
     return `${baseName}.${outputFormat}`;
   }
   async function transcodeEmbeddedBrowserCapturedResourceForRenderer(tabId, payload) {
-    var _a, _b;
+    var _a2, _b;
     const normalizedTabId = String(tabId || "").trim();
-    const resourceKey = String(payload.resourceKey || ((_a = payload.resource) == null ? void 0 : _a.resourceKey) || "").trim();
+    const resourceKey = String(payload.resourceKey || ((_a2 = payload.resource) == null ? void 0 : _a2.resourceKey) || "").trim();
     const outputFormat = normalizeEmbeddedBrowserResourceTranscodeFormat(payload.outputFormat || "mp4");
     if (!normalizedTabId || !resourceKey && !((_b = payload.resource) == null ? void 0 : _b.url)) {
       return {
@@ -9589,8 +9610,8 @@ function createEmbeddedBrowserMainController(options) {
       workDirectoryPath = await mkdtemp(path.join(os.tmpdir(), "omniflow-hls-download-"));
       const localDownloadResult = await downloadEmbeddedBrowserHlsToLocalWorkDirectory({
         onEvent: (event) => {
-          var _a;
-          if ((_a = event.failedFragments) == null ? void 0 : _a.length) {
+          var _a2;
+          if ((_a2 = event.failedFragments) == null ? void 0 : _a2.length) {
             latestFailedFragments = event.failedFragments;
           }
           emitEmbeddedBrowserHlsTask({
@@ -10011,8 +10032,8 @@ function createEmbeddedBrowserMainController(options) {
         fragmentIndexes: session2.failedFragments.map((value) => value - 1).filter((value) => value >= 0),
         manualKeyBase64: session2.manualKeyBase64,
         onEvent: (event) => {
-          var _a;
-          if ((_a = event.failedFragments) == null ? void 0 : _a.length) {
+          var _a2;
+          if ((_a2 = event.failedFragments) == null ? void 0 : _a2.length) {
             latestFailedFragments = event.failedFragments;
           }
           emitEmbeddedBrowserHlsTask({
@@ -11376,6 +11397,312 @@ function registerOverlayWindowIpcHandlers(controller) {
     advanceQueueOrIdle();
   });
 }
+var __freeze = Object.freeze;
+var __defProp2 = Object.defineProperty;
+var __template = (cooked, raw) => __freeze(__defProp2(cooked, "raw", { value: __freeze(cooked.slice()) }));
+var _a;
+function createSystemVideoWindowDataUrl() {
+  return `data:text/html;charset=utf-8,${encodeURIComponent(SYSTEM_VIDEO_WINDOW_HTML)}`;
+}
+const SYSTEM_VIDEO_WINDOW_HTML = String.raw(_a || (_a = __template([`<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' data: blob: http: https:; media-src http: https: blob: data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src http: https: blob: data:;" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>视频</title>
+  <style>
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: #08090b;
+      color: #f6f7fb;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+      user-select: none;
+    }
+    .shell {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      background: #08090b;
+    }
+    .header {
+      height: 34px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 10px;
+      box-sizing: border-box;
+      background: rgba(18, 20, 25, 0.96);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      -webkit-app-region: drag;
+    }
+    .title {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+      font-size: 12px;
+      font-weight: 650;
+      color: rgba(246, 247, 251, 0.9);
+    }
+    .close {
+      width: 24px;
+      height: 24px;
+      border: 0;
+      border-radius: 7px;
+      background: rgba(255, 255, 255, 0.08);
+      color: rgba(246, 247, 251, 0.9);
+      font-size: 16px;
+      line-height: 22px;
+      cursor: pointer;
+      -webkit-app-region: no-drag;
+    }
+    .close:hover {
+      background: rgba(255, 255, 255, 0.16);
+    }
+    .video-host {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      background: #000;
+    }
+    video {
+      width: 100%;
+      height: 100%;
+      background: #000;
+      outline: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <div class="header">
+      <div class="title" id="title">视频</div>
+      <button class="close" id="close" type="button" aria-label="关闭">×</button>
+    </div>
+    <div class="video-host">
+      <video id="video" controls playsinline></video>
+    </div>
+  </div>
+  <script>
+    const video = document.getElementById('video');
+    const title = document.getElementById('title');
+    const closeButton = document.getElementById('close');
+    let pendingCurrentTime = null;
+    let lastReportAt = 0;
+
+    function report(force = false) {
+      const now = Date.now();
+      if (!force && now - lastReportAt < 180) return;
+      lastReportAt = now;
+      window.electronSystemVideoHost?.reportState({
+        currentTime: Number.isFinite(video.currentTime) ? video.currentTime : 0,
+        duration: Number.isFinite(video.duration) ? video.duration : 0,
+        isPlaying: !video.paused && !video.ended,
+        volume: Number.isFinite(video.volume) ? video.volume : 1,
+        muted: Boolean(video.muted),
+        ended: Boolean(video.ended),
+      });
+    }
+
+    function applyCurrentTime(time) {
+      if (!Number.isFinite(time) || time < 0) return;
+      if (video.readyState >= 1) {
+        video.currentTime = time;
+      } else {
+        pendingCurrentTime = time;
+      }
+    }
+
+    window.electronSystemVideoHost?.onInit((payload) => {
+      title.textContent = payload.title || '视频';
+      title.title = payload.title || '视频';
+      document.title = payload.title || '视频';
+      video.src = payload.src;
+      video.volume = Number.isFinite(payload.volume) ? Math.min(Math.max(payload.volume, 0), 1) : 1;
+      video.muted = Boolean(payload.muted);
+      applyCurrentTime(payload.currentTime || 0);
+      if (payload.isPlaying) {
+        video.play().catch(() => undefined);
+      }
+      report(true);
+    });
+
+    window.electronSystemVideoHost?.onCommand((command) => {
+      if (command.type === 'play') {
+        video.play().catch(() => undefined);
+      } else if (command.type === 'pause') {
+        video.pause();
+      } else if (command.type === 'seek') {
+        applyCurrentTime(command.time);
+      }
+      report(true);
+    });
+
+    video.addEventListener('loadedmetadata', () => {
+      if (pendingCurrentTime != null) {
+        video.currentTime = pendingCurrentTime;
+        pendingCurrentTime = null;
+      }
+      report(true);
+    });
+    ['play', 'pause', 'ended', 'volumechange', 'seeked'].forEach((eventName) => {
+      video.addEventListener(eventName, () => report(true));
+    });
+    video.addEventListener('timeupdate', () => report(false));
+    closeButton.addEventListener('click', () => {
+      video.pause();
+      report(true);
+      window.electronSystemVideoHost?.close();
+    });
+    window.electronSystemVideoHost?.reportReady();
+  <\/script>
+</body>
+</html>`])));
+const DEFAULT_WIDTH = 560;
+const DEFAULT_HEIGHT = 360;
+const MIN_WIDTH = 360;
+const MIN_HEIGHT = 240;
+function createSystemVideoWindowController(options) {
+  let videoWin = null;
+  let readyPromise = null;
+  let readyResolve = null;
+  let lastState = null;
+  function ensureCreated() {
+    if (videoWin && !videoWin.isDestroyed()) {
+      return videoWin;
+    }
+    const mainWindow2 = options.getMainWindow();
+    const mainBounds = mainWindow2 && !mainWindow2.isDestroyed() ? mainWindow2.getBounds() : screen.getPrimaryDisplay().workArea;
+    const x = Math.round(mainBounds.x + mainBounds.width - DEFAULT_WIDTH - 48);
+    const y = Math.round(mainBounds.y + mainBounds.height - DEFAULT_HEIGHT - 48);
+    const win = new BrowserWindow({
+      x,
+      y,
+      width: DEFAULT_WIDTH,
+      height: DEFAULT_HEIGHT,
+      minWidth: MIN_WIDTH,
+      minHeight: MIN_HEIGHT,
+      frame: false,
+      show: false,
+      alwaysOnTop: true,
+      skipTaskbar: false,
+      backgroundColor: "#08090b",
+      autoHideMenuBar: true,
+      webPreferences: {
+        preload: options.preloadPath,
+        devTools: true
+      }
+    });
+    videoWin = win;
+    readyPromise = new Promise((resolve) => {
+      readyResolve = resolve;
+    });
+    win.webContents.on("render-process-gone", (_event, details) => {
+      console.error("[system-video-window] render-process-gone", details);
+    });
+    win.on("closed", () => {
+      if (videoWin === win) {
+        videoWin = null;
+        readyPromise = null;
+        readyResolve = null;
+      }
+      const main = options.getMainWindow();
+      if (main && !main.isDestroyed()) {
+        main.webContents.send("system-video-window:closed", lastState);
+      }
+    });
+    void win.loadURL(createSystemVideoWindowDataUrl());
+    return win;
+  }
+  async function ensureReady(win) {
+    if (win.isDestroyed()) return;
+    if (readyPromise) await readyPromise;
+  }
+  async function open(payload) {
+    const win = ensureCreated();
+    if (!win) return false;
+    lastState = {
+      currentTime: payload.currentTime,
+      duration: payload.duration ?? 0,
+      isPlaying: payload.isPlaying,
+      volume: payload.volume,
+      muted: payload.muted,
+      ended: false
+    };
+    await ensureReady(win);
+    if (!videoWin || videoWin.isDestroyed()) return false;
+    videoWin.setTitle(payload.title || "视频");
+    videoWin.webContents.send("system-video-window:host:init", payload);
+    if (!videoWin.isVisible()) {
+      videoWin.show();
+    }
+    videoWin.focus();
+    return true;
+  }
+  function close() {
+    if (!videoWin || videoWin.isDestroyed()) return false;
+    videoWin.close();
+    return true;
+  }
+  function sendCommand(payload) {
+    if (!videoWin || videoWin.isDestroyed()) return false;
+    videoWin.webContents.send("system-video-window:host:command", payload);
+    return true;
+  }
+  function markReady(fromWebContents) {
+    if (!videoWin || videoWin.isDestroyed()) return;
+    if (fromWebContents !== videoWin.webContents) return;
+    if (readyResolve) {
+      const resolve = readyResolve;
+      readyResolve = null;
+      resolve();
+    }
+  }
+  function updateState(payload) {
+    lastState = payload;
+    const main = options.getMainWindow();
+    if (main && !main.isDestroyed()) {
+      main.webContents.send("system-video-window:state", payload);
+    }
+  }
+  function destroy() {
+    if (videoWin && !videoWin.isDestroyed()) {
+      videoWin.destroy();
+    }
+    videoWin = null;
+    readyPromise = null;
+    readyResolve = null;
+  }
+  return {
+    open,
+    close,
+    sendCommand,
+    markReady,
+    updateState,
+    destroy
+  };
+}
+function registerSystemVideoWindowIpcHandlers(controller) {
+  ipcMain.handle("system-video-window:open", (_event, payload) => controller.open(payload));
+  ipcMain.handle("system-video-window:close", () => controller.close());
+  ipcMain.handle("system-video-window:command", (_event, payload) => controller.sendCommand(payload));
+  ipcMain.on("system-video-window:host:ready", (event) => {
+    controller.markReady(event.sender);
+  });
+  ipcMain.on("system-video-window:host:state", (_event, payload) => {
+    controller.updateState(payload);
+  });
+  ipcMain.on("system-video-window:host:close", () => {
+    controller.close();
+  });
+}
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 process.env.APP_ROOT = path.join(__dirname, "..");
 const VITE_DEV_SERVER_URL = process.env["VITE_DEV_SERVER_URL"];
@@ -11526,6 +11853,10 @@ const overlayWindowController = createOverlayWindowController({
   rendererDist: RENDERER_DIST,
   devServerUrl: VITE_DEV_SERVER_URL
 });
+const systemVideoWindowController = createSystemVideoWindowController({
+  getMainWindow: () => mainWindow,
+  preloadPath: path.join(MAIN_DIST, "preload.mjs")
+});
 function createWindow() {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.show();
@@ -11612,6 +11943,7 @@ function createWindow() {
       mainWindow = null;
     }
     overlayWindowController.destroy();
+    systemVideoWindowController.destroy();
   });
   win.webContents.on("before-input-event", (event, input) => {
     if (isChromiumPageZoomShortcut(input)) {
@@ -11648,6 +11980,7 @@ app.on("before-quit", () => {
     saveWindowState(mainWindow);
   }
   overlayWindowController.destroy();
+  systemVideoWindowController.destroy();
 });
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
@@ -11680,6 +12013,7 @@ app.whenReady().then(() => {
   });
   embeddedBrowserMainController.registerIpcHandlers();
   registerOverlayWindowIpcHandlers(overlayWindowController);
+  registerSystemVideoWindowIpcHandlers(systemVideoWindowController);
   const template = [
     ...process.platform === "darwin" ? [{
       label: app.name,

@@ -1,14 +1,14 @@
 # 标签管理前端说明
 
-更新时间：2026-05-07
+更新时间：2026-05-11
 
-适用范围：`src/features/tag-management`、`src/views/tag-management`、ASMR 标签选项读取和顶部文件标签映射。
+适用范围：`src/features/tag-management`、`src/views/tag-management`、ASMR 标签选项读取和历史顶部文件标签映射。
 
 ## 1. 概述
 
 前端标签能力分为两类：
 
-- 顶部标签：`type=FILE_TAB`，用于文件预览 tab 的短标签与颜色映射。
+- 顶部标签：`type=FILE_TAB`，历史上用于文件预览 tab 的短标签与颜色映射；当前文件 tab 已改为复用目录树图标，不再读取该映射。
 - 资源标签：用于 ASMR、漫画、音频、视频、普通文件和文件夹等资源，支持 `scope / dimension / resourceKind` 多维字段。
 
 现阶段前端只提供轻量管理入口，不在本轮实现文件 / 文件夹通用打标签页面。
@@ -65,7 +65,7 @@ await fetchTags({
 ## 4. 实现边界
 
 - ASMR viewer 仍按 `fetchTags('ASMR')` 读取标签，避免一次性改动 viewer 行为。
-- 顶部标签仍按 `fetchTags('FILE_TAB')` 读取，并通过 `targetKey` 影响 tab 展示。
+- 文件预览 tab 当前复用目录树图标解析，不再按 `fetchTags('FILE_TAB')` 读取颜色映射，也不再生成 `IMG / MP4 / PDF` 等文字胶囊。
 - 通用文件 / 文件夹打标签入口后续再做，届时应复用 `TagItem` 与后端 `node_tag_rel`，不要在前端另建一套标签状态。
 - 标签颜色是标签自身的固定色，不随明暗主题自动变化；主题只影响弹框背景、边框和说明文字等 UI 容器。
 - 标签编辑弹框的主色色盘按 `1 ~ 5` 明暗档位展示，当前档位仅是编辑器 UI 偏好，持久化在 `localStorage` 的 `tag-management:primary-color-tone:v1`，不写入标签数据本身。用户仍可通过 Semi `ColorPicker` 选择任意颜色。
@@ -80,7 +80,7 @@ await fetchTags({
 - `npm run build`
 - 标签管理页能创建 / 编辑资源标签与顶部标签。
 - ASMR 标签选择仍能读取 `ASMR` 标签。
-- 顶部标签颜色映射仍能刷新文件 tab。
+- 文件预览 tab 应与目录树同名文件使用同一图标；`FILE_TAB` 历史映射不再影响文件 tab 展示。
 
 ## 6. 维护规则
 

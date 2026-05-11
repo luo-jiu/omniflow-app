@@ -1497,7 +1497,6 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
       const meta = systemWorkspaceMeta[view];
       return {
         id: `system:${view}`,
-        badge: '系统',
         title: meta.title,
         active: workspaceDisplayMode === 'system' && activeSystemWorkspaceView === view,
         onActivate: () => activateSystemWorkspaceTab(view),
