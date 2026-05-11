@@ -6,7 +6,7 @@
 
 ## 1. 概述
 
-资源监测控制台用于观察 OmniFlow 当前用户可见资料库范围内的资源占用和物理存储分布。它不是存储配置页：存储配置负责增删改 provider，资源监测负责只读统计、诊断和后续探针展示。
+资源监测控制台用于观察 OmniFlow 当前用户可见资料库范围内的资源占用和物理存储分布；在资料库详情页打开时，会按当前 `libraryId` 收敛为单资料库快照。它不是存储配置页：存储配置负责增删改 provider，资源监测负责只读统计、诊断和后续探针展示。
 
 当前已交付只读快照和只读探针：
 
@@ -16,7 +16,9 @@
 - provider / bucket 分布
 - 可见资源、回收站关联资源、孤儿对象占用细分
 - 未匹配当前 provider 配置的历史位置提示
+- 历史 provider 类型值提示，例如 `MINIO` 兼容映射到唯一 provider alias
 - 对象存储、Postgres、Redis 的只读可用性探针
+- 到存储设置、迁移任务、回收站的快捷跳转
 
 ## 2. 入口
 
@@ -41,6 +43,7 @@
 - `views/library` 只负责打开 `resource-monitor` system view。
 - `features/system-workspace` 只负责 system view 的宿主和注册。
 - `features/resource-monitor` 负责资源监测自己的请求、格式化、加载态、错误态和展示。
+- 资源监测只能跳转到已有管理入口：存储配置进入 system workspace 设置页的存储分区，资料库详情页内的回收站关联进入当前资料库 system workspace 回收站，迁移任务进入迁移中心 `migration` tab。
 - 页面层不得直接拼 `/v1/resource-monitor/snapshot`。
 
 ## 4. API 契约
@@ -49,6 +52,7 @@
 
 ```text
 GET /api/v1/resource-monitor/snapshot
+GET /api/v1/resource-monitor/snapshot?libraryId=123
 ```
 
 响应 `data`：
@@ -71,14 +75,17 @@ type ResourceMonitorSnapshot = {
     orphanObjectCount: number;
     orphanBytes: number;
     unmatchedCount: number;
+    legacyProviderCount: number;
   };
   storage: Array<{
     provider: string;
+    sourceProvider?: string;
     providerType?: string;
     providerLabel?: string;
     endpoint?: string;
     bucket: string;
     isDefault: boolean;
+    isLegacyProvider: boolean;
     objectCount: number;
     fileRefCount: number;
     physicalBytes: number;
@@ -119,6 +126,7 @@ type ResourceMonitorSnapshot = {
 
 统计口径：
 
+- 不带 `libraryId` 时统计当前用户可见的全部资料库；带 `libraryId` 时只统计该用户拥有的指定资料库。
 - `physicalBytes`：按 distinct `storage_objects` 聚合的真实对象容量。
 - `objectCount`：distinct `storage_objects` 数量。
 - `fileRefCount`：`node_files` 引用数量。
@@ -126,6 +134,8 @@ type ResourceMonitorSnapshot = {
 - `recycle*`：没有可见引用、但存在已删除节点引用的对象及其文件引用数 / 容量。
 - `orphan*`：没有任何 `node_files` 引用的对象及其容量。
 - `unmatchedCount`：没有匹配到当前 provider 配置的 provider / bucket 行数。
+- `legacyProviderCount`：仍使用历史 provider 类型值、但已兼容映射到唯一 alias 的存储位置数。
+- `sourceProvider` / `isLegacyProvider`：展示历史 provider 类型值与当前 alias 的兼容关系。
 - `distributionError`：资源分布统计失败时的脱敏错误摘要；此时探针仍可正常返回。
 - `probeSummary`：当前快照内探针数量和状态汇总。
 - `probes`：只读探针结果；对象存储探针只检查 bucket 可访问性，不创建 bucket 或写入对象。
@@ -135,6 +145,7 @@ type ResourceMonitorSnapshot = {
 - 不做自动刷新。
 - 不做历史曲线。
 - 不提供清理、迁移或修复动作。
+- 只提供到存储设置、迁移任务、当前资料库回收站的跳转，不在资源监测内直接执行变更；仓库页没有具体 `libraryId` 时点击回收站会提示先进入具体资料库。
 - 暂不做 MySQL / 外部资源探针。
 
 ## 6. 验证方式
@@ -151,6 +162,9 @@ type ResourceMonitorSnapshot = {
 - 快照加载成功时展示总览和分布表。
 - 探针加载成功时展示对象存储、Postgres、Redis 状态、耗时和错误摘要。
 - 诊断摘要展示可见资源、回收站关联资源、孤儿对象占用。
+- 历史 provider 类型值行展示“历史”标记和兼容映射关系。
+- 顶部“存储设置”可进入设置页存储分区，“迁移任务”可进入迁移中心存储迁移 tab。
+- 资料库详情页中，资源监测请求携带当前 `libraryId`，回收站关联卡片的“回收站”可进入当前资料库 system workspace 回收站；仓库页入口下该按钮只提示先进入具体资料库，不直接打开回收站。
 - 分布统计失败时分布表展示错误摘要，同时保留探针结果。
 - 无资源对象时展示空态。
 - API 失败时展示错误态和 Toast。

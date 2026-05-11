@@ -1,7 +1,13 @@
 import React from 'react';
 import { Button, Empty, Spin, Toast } from '@douyinfe/semi-ui';
-import { IconRefresh } from '@douyinfe/semi-icons';
+import {
+  IconArrowRight,
+  IconDelete,
+  IconRefresh,
+  IconSetting,
+} from '@douyinfe/semi-icons';
 import styled from 'styled-components';
+import type { SystemWorkspaceViewProps } from '@/features/system-workspace/types';
 import {
   fetchResourceMonitorSnapshot,
   type ResourceMonitorProbeTarget,
@@ -63,7 +69,12 @@ function storageBreakdown(item: ResourceMonitorStorageItem): string {
   ].join(' · ');
 }
 
-const ResourceMonitorWorkspace: React.FC = () => {
+const ResourceMonitorWorkspace: React.FC<SystemWorkspaceViewProps> = ({
+  libraryId,
+  onOpenLegacyRoute,
+  onOpenView,
+  onSettingsSectionChange,
+}) => {
   const [snapshot, setSnapshot] = React.useState<ResourceMonitorSnapshot | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string>('');
@@ -80,7 +91,7 @@ const ResourceMonitorWorkspace: React.FC = () => {
     setLoading(true);
     setError('');
     try {
-      const nextSnapshot = await fetchResourceMonitorSnapshot();
+      const nextSnapshot = await fetchResourceMonitorSnapshot({ libraryId });
       if (!mountedRef.current) return;
       setSnapshot(nextSnapshot);
     } catch (err: any) {
@@ -93,7 +104,7 @@ const ResourceMonitorWorkspace: React.FC = () => {
         setLoading(false);
       }
     }
-  }, []);
+  }, [libraryId]);
 
   React.useEffect(() => {
     void loadSnapshot();
@@ -104,6 +115,21 @@ const ResourceMonitorWorkspace: React.FC = () => {
   const probes = snapshot?.probes || [];
   const distributionError = snapshot?.distributionError || '';
   const storage = snapshot?.storage || [];
+  const canOpenRecycleBin = libraryId > 0;
+  const openStorageSettings = React.useCallback(() => {
+    onSettingsSectionChange?.('storage');
+    onOpenView('settings');
+  }, [onOpenView, onSettingsSectionChange]);
+  const openMigrationCenter = React.useCallback(() => {
+    onOpenLegacyRoute('/transfer-center?tab=migration');
+  }, [onOpenLegacyRoute]);
+  const openRecycleBin = React.useCallback(() => {
+    if (!canOpenRecycleBin) {
+      Toast.info('进入具体资料库后可以查看回收站');
+      return;
+    }
+    onOpenView('recycle-bin');
+  }, [canOpenRecycleBin, onOpenView]);
 
   return (
     <ResourceMonitorRoot>
@@ -112,15 +138,33 @@ const ResourceMonitorWorkspace: React.FC = () => {
           <div className="monitor-toolbar-title">资源分布快照</div>
           <div className="monitor-toolbar-meta">最后刷新：{formatTime(snapshot?.generatedAt || '')}</div>
         </div>
-        <Button
-          icon={<IconRefresh />}
-          loading={loading}
-          onClick={() => void loadSnapshot()}
-          size="small"
-          theme="borderless"
-        >
-          刷新
-        </Button>
+        <div className="monitor-toolbar-actions">
+          <Button
+            icon={<IconSetting />}
+            onClick={openStorageSettings}
+            size="small"
+            theme="borderless"
+          >
+            存储设置
+          </Button>
+          <Button
+            icon={<IconArrowRight />}
+            onClick={openMigrationCenter}
+            size="small"
+            theme="borderless"
+          >
+            迁移任务
+          </Button>
+          <Button
+            icon={<IconRefresh />}
+            loading={loading}
+            onClick={() => void loadSnapshot()}
+            size="small"
+            theme="borderless"
+          >
+            刷新
+          </Button>
+        </div>
       </div>
 
       <div className="summary-grid">
@@ -148,7 +192,33 @@ const ResourceMonitorWorkspace: React.FC = () => {
 
       {summary && summary.unmatchedCount > 0 ? (
         <div className="monitor-warning">
-          有 {summary.unmatchedCount} 个存储位置没有匹配到当前 provider 配置，可能来自历史数据或已移除的 provider。
+          <span>
+            有 {summary.unmatchedCount} 个存储位置没有匹配到当前 provider 配置，可能来自历史数据或已移除的 provider。
+          </span>
+          <Button
+            icon={<IconSetting />}
+            onClick={openStorageSettings}
+            size="small"
+            theme="borderless"
+          >
+            存储设置
+          </Button>
+        </div>
+      ) : null}
+
+      {summary && summary.legacyProviderCount > 0 ? (
+        <div className="monitor-warning">
+          <span>
+            有 {summary.legacyProviderCount} 个存储位置仍使用历史 provider 类型值，当前已按唯一匹配的 provider alias 兼容展示。
+          </span>
+          <Button
+            icon={<IconSetting />}
+            onClick={openStorageSettings}
+            size="small"
+            theme="borderless"
+          >
+            存储设置
+          </Button>
         </div>
       ) : null}
 
@@ -166,6 +236,16 @@ const ResourceMonitorWorkspace: React.FC = () => {
           <span className="diagnostic-meta">
             {summary?.recycleObjectCount || 0} 对象 / {summary?.recycleFileRefCount || 0} 引用
           </span>
+          <Button
+            className="diagnostic-action"
+            icon={<IconDelete />}
+            onClick={openRecycleBin}
+            size="small"
+            theme="borderless"
+            title={canOpenRecycleBin ? '打开当前资料库回收站' : '进入具体资料库后可以查看回收站'}
+          >
+            回收站
+          </Button>
         </div>
         <div className="diagnostic-item">
           <span className="diagnostic-label">孤儿对象</span>
@@ -243,12 +323,16 @@ const ResourceMonitorWorkspace: React.FC = () => {
                   <div className="location-title">
                     {storageTitle(item)}
                     {item.isDefault ? <span className="default-badge">默认</span> : null}
+                    {item.isLegacyProvider ? <span className="legacy-badge">历史</span> : null}
                   </div>
                   <div className="location-meta">
                     {[item.providerType, item.bucket ? `桶 ${item.bucket}` : '', item.endpoint]
                       .filter(Boolean)
                       .join(' · ')}
                   </div>
+                  {item.isLegacyProvider && item.sourceProvider ? (
+                    <div className="location-legacy">历史 provider {item.sourceProvider} 已映射为 {item.provider}</div>
+                  ) : null}
                   <div className="location-breakdown">{storageBreakdown(item)}</div>
                 </div>
                 <span>{item.objectCount}</span>
@@ -280,6 +364,14 @@ const ResourceMonitorRoot = styled.div`
     align-items: center;
     justify-content: space-between;
     gap: 12px;
+  }
+
+  .monitor-toolbar-actions {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 4px;
   }
 
   .monitor-toolbar-title {
@@ -331,8 +423,16 @@ const ResourceMonitorRoot = styled.div`
     background: color-mix(in srgb, var(--semi-color-warning-light-default) 45%, var(--app-bg-elevated));
     color: var(--app-text);
     padding: 9px 11px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
     font-size: 11px;
     line-height: 1.5;
+  }
+
+  .monitor-warning > span {
+    min-width: 0;
   }
 
   .diagnostics-grid {
@@ -371,6 +471,11 @@ const ResourceMonitorRoot = styled.div`
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .diagnostic-action {
+    margin-top: 7px;
+    padding-left: 0;
   }
 
   .probe-panel,
@@ -558,6 +663,26 @@ const ResourceMonitorRoot = styled.div`
     line-height: 1.4;
   }
 
+  .legacy-badge {
+    flex-shrink: 0;
+    border-radius: 999px;
+    padding: 1px 6px;
+    background: var(--semi-color-warning-light-default);
+    color: var(--semi-color-warning);
+    font-size: 10px;
+    line-height: 1.4;
+  }
+
+  .location-legacy {
+    margin-top: 3px;
+    color: var(--semi-color-warning);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 10px;
+    line-height: 1.35;
+  }
+
   .percent-cell {
     min-width: 0;
     display: flex;
@@ -581,6 +706,22 @@ const ResourceMonitorRoot = styled.div`
   }
 
   @container (max-width: 760px) {
+    .monitor-toolbar {
+      align-items: flex-start;
+      flex-direction: column;
+    }
+
+    .monitor-toolbar-actions {
+      width: 100%;
+      justify-content: flex-start;
+      flex-wrap: wrap;
+    }
+
+    .monitor-warning {
+      align-items: flex-start;
+      flex-direction: column;
+    }
+
     .summary-grid {
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }

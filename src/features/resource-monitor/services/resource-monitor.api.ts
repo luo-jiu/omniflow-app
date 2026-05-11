@@ -15,6 +15,7 @@ export interface ResourceMonitorSummary {
   orphanObjectCount: number;
   orphanBytes: number;
   unmatchedCount: number;
+  legacyProviderCount: number;
 }
 
 export interface ResourceMonitorProbeSummary {
@@ -43,11 +44,13 @@ export interface ResourceMonitorProbeTarget {
 
 export interface ResourceMonitorStorageItem {
   provider: string;
+  sourceProvider?: string;
   providerType?: string;
   providerLabel?: string;
   endpoint?: string;
   bucket: string;
   isDefault: boolean;
+  isLegacyProvider: boolean;
   objectCount: number;
   fileRefCount: number;
   physicalBytes: number;
@@ -72,6 +75,10 @@ export interface ResourceMonitorSnapshot {
   probes: ResourceMonitorProbeTarget[];
 }
 
+export interface ResourceMonitorSnapshotOptions {
+  libraryId?: number;
+}
+
 const emptySnapshot: ResourceMonitorSnapshot = {
   generatedAt: '',
   summary: {
@@ -89,6 +96,7 @@ const emptySnapshot: ResourceMonitorSnapshot = {
     orphanObjectCount: 0,
     orphanBytes: 0,
     unmatchedCount: 0,
+    legacyProviderCount: 0,
   },
   storage: [],
   distributionError: '',
@@ -101,7 +109,12 @@ const emptySnapshot: ResourceMonitorSnapshot = {
   probes: [],
 };
 
-export async function fetchResourceMonitorSnapshot(): Promise<ResourceMonitorSnapshot> {
-  const body = await request('/v1/resource-monitor/snapshot', { method: 'GET' });
+export async function fetchResourceMonitorSnapshot(
+  options: ResourceMonitorSnapshotOptions = {},
+): Promise<ResourceMonitorSnapshot> {
+  const query = options.libraryId && options.libraryId > 0
+    ? `?libraryId=${encodeURIComponent(String(options.libraryId))}`
+    : '';
+  const body = await request(`/v1/resource-monitor/snapshot${query}`, { method: 'GET' });
   return (body?.data || emptySnapshot) as ResourceMonitorSnapshot;
 }
