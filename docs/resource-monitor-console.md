@@ -14,6 +14,7 @@
 - 对象数
 - 文件引用数
 - provider / bucket 分布
+- 可见资源、回收站关联资源、孤儿对象占用细分
 - 未匹配当前 provider 配置的历史位置提示
 - 对象存储、Postgres、Redis 的只读可用性探针
 
@@ -61,6 +62,14 @@ type ResourceMonitorSnapshot = {
     objectCount: number;
     fileRefCount: number;
     physicalBytes: number;
+    visibleObjectCount: number;
+    visibleFileRefCount: number;
+    visibleBytes: number;
+    recycleObjectCount: number;
+    recycleFileRefCount: number;
+    recycleBytes: number;
+    orphanObjectCount: number;
+    orphanBytes: number;
     unmatchedCount: number;
   };
   storage: Array<{
@@ -73,6 +82,14 @@ type ResourceMonitorSnapshot = {
     objectCount: number;
     fileRefCount: number;
     physicalBytes: number;
+    visibleObjectCount: number;
+    visibleFileRefCount: number;
+    visibleBytes: number;
+    recycleObjectCount: number;
+    recycleFileRefCount: number;
+    recycleBytes: number;
+    orphanObjectCount: number;
+    orphanBytes: number;
     percent: number;
     matchedConfig: boolean;
   }>;
@@ -105,6 +122,9 @@ type ResourceMonitorSnapshot = {
 - `physicalBytes`：按 distinct `storage_objects` 聚合的真实对象容量。
 - `objectCount`：distinct `storage_objects` 数量。
 - `fileRefCount`：`node_files` 引用数量。
+- `visible*`：存在未删除节点引用的对象及其文件引用数 / 容量；对象有可见引用时优先归入此类。
+- `recycle*`：没有可见引用、但存在已删除节点引用的对象及其文件引用数 / 容量。
+- `orphan*`：没有任何 `node_files` 引用的对象及其容量。
 - `unmatchedCount`：没有匹配到当前 provider 配置的 provider / bucket 行数。
 - `distributionError`：资源分布统计失败时的脱敏错误摘要；此时探针仍可正常返回。
 - `probeSummary`：当前快照内探针数量和状态汇总。
@@ -114,7 +134,6 @@ type ResourceMonitorSnapshot = {
 
 - 不做自动刷新。
 - 不做历史曲线。
-- 不做孤儿对象、回收站占用细分。
 - 不提供清理、迁移或修复动作。
 - 暂不做 MySQL / 外部资源探针。
 
@@ -131,6 +150,7 @@ type ResourceMonitorSnapshot = {
 - system overview 中点击资源监测卡片可进入同一视图。
 - 快照加载成功时展示总览和分布表。
 - 探针加载成功时展示对象存储、Postgres、Redis 状态、耗时和错误摘要。
+- 诊断摘要展示可见资源、回收站关联资源、孤儿对象占用。
 - 分布统计失败时分布表展示错误摘要，同时保留探针结果。
 - 无资源对象时展示空态。
 - API 失败时展示错误态和 Toast。

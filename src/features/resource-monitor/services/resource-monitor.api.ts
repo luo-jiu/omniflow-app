@@ -6,6 +6,14 @@ export interface ResourceMonitorSummary {
   objectCount: number;
   fileRefCount: number;
   physicalBytes: number;
+  visibleObjectCount: number;
+  visibleFileRefCount: number;
+  visibleBytes: number;
+  recycleObjectCount: number;
+  recycleFileRefCount: number;
+  recycleBytes: number;
+  orphanObjectCount: number;
+  orphanBytes: number;
   unmatchedCount: number;
 }
 
@@ -43,6 +51,14 @@ export interface ResourceMonitorStorageItem {
   objectCount: number;
   fileRefCount: number;
   physicalBytes: number;
+  visibleObjectCount: number;
+  visibleFileRefCount: number;
+  visibleBytes: number;
+  recycleObjectCount: number;
+  recycleFileRefCount: number;
+  recycleBytes: number;
+  orphanObjectCount: number;
+  orphanBytes: number;
   percent: number;
   matchedConfig: boolean;
 }
@@ -64,6 +80,14 @@ const emptySnapshot: ResourceMonitorSnapshot = {
     objectCount: 0,
     fileRefCount: 0,
     physicalBytes: 0,
+    visibleObjectCount: 0,
+    visibleFileRefCount: 0,
+    visibleBytes: 0,
+    recycleObjectCount: 0,
+    recycleFileRefCount: 0,
+    recycleBytes: 0,
+    orphanObjectCount: 0,
+    orphanBytes: 0,
     unmatchedCount: 0,
   },
   storage: [],

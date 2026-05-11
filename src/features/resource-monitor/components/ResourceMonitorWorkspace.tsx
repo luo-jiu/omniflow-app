@@ -55,6 +55,14 @@ function probeMeta(item: ResourceMonitorProbeTarget): string {
   return item.kind;
 }
 
+function storageBreakdown(item: ResourceMonitorStorageItem): string {
+  return [
+    `可见 ${formatBytes(item.visibleBytes)} / ${item.visibleObjectCount} 对象`,
+    `回收站 ${formatBytes(item.recycleBytes)} / ${item.recycleObjectCount} 对象`,
+    `孤儿 ${formatBytes(item.orphanBytes)} / ${item.orphanObjectCount} 对象`,
+  ].join(' · ');
+}
+
 const ResourceMonitorWorkspace: React.FC = () => {
   const [snapshot, setSnapshot] = React.useState<ResourceMonitorSnapshot | null>(null);
   const [loading, setLoading] = React.useState(false);
@@ -144,6 +152,28 @@ const ResourceMonitorWorkspace: React.FC = () => {
         </div>
       ) : null}
 
+      <div className="diagnostics-grid">
+        <div className="diagnostic-item">
+          <span className="diagnostic-label">可见资源</span>
+          <span className="diagnostic-value">{formatBytes(summary?.visibleBytes || 0)}</span>
+          <span className="diagnostic-meta">
+            {summary?.visibleObjectCount || 0} 对象 / {summary?.visibleFileRefCount || 0} 引用
+          </span>
+        </div>
+        <div className="diagnostic-item">
+          <span className="diagnostic-label">回收站关联</span>
+          <span className="diagnostic-value">{formatBytes(summary?.recycleBytes || 0)}</span>
+          <span className="diagnostic-meta">
+            {summary?.recycleObjectCount || 0} 对象 / {summary?.recycleFileRefCount || 0} 引用
+          </span>
+        </div>
+        <div className="diagnostic-item">
+          <span className="diagnostic-label">孤儿对象</span>
+          <span className="diagnostic-value">{formatBytes(summary?.orphanBytes || 0)}</span>
+          <span className="diagnostic-meta">{summary?.orphanObjectCount || 0} 对象无文件引用</span>
+        </div>
+      </div>
+
       <div className="probe-panel">
         <div className="distribution-header">
           <span>资源探针</span>
@@ -219,6 +249,7 @@ const ResourceMonitorWorkspace: React.FC = () => {
                       .filter(Boolean)
                       .join(' · ')}
                   </div>
+                  <div className="location-breakdown">{storageBreakdown(item)}</div>
                 </div>
                 <span>{item.objectCount}</span>
                 <span>{item.fileRefCount}</span>
@@ -302,6 +333,44 @@ const ResourceMonitorRoot = styled.div`
     padding: 9px 11px;
     font-size: 11px;
     line-height: 1.5;
+  }
+
+  .diagnostics-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .diagnostic-item {
+    min-width: 0;
+    border: 1px solid var(--app-border);
+    border-radius: 8px;
+    background: var(--app-bg-elevated);
+    padding: 10px 12px;
+  }
+
+  .diagnostic-label,
+  .diagnostic-meta {
+    display: block;
+    color: var(--app-text-muted);
+    font-size: 11px;
+    line-height: 1.35;
+  }
+
+  .diagnostic-value {
+    display: block;
+    margin-top: 5px;
+    color: var(--app-text);
+    font-size: 15px;
+    line-height: 1.25;
+    font-weight: 700;
+  }
+
+  .diagnostic-meta {
+    margin-top: 4px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .probe-panel,
@@ -469,6 +538,16 @@ const ResourceMonitorRoot = styled.div`
     white-space: nowrap;
   }
 
+  .location-breakdown {
+    margin-top: 3px;
+    color: var(--app-text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 10px;
+    line-height: 1.35;
+  }
+
   .default-badge {
     flex-shrink: 0;
     border-radius: 999px;
@@ -504,6 +583,10 @@ const ResourceMonitorRoot = styled.div`
   @container (max-width: 760px) {
     .summary-grid {
       grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .diagnostics-grid {
+      grid-template-columns: 1fr;
     }
 
     .distribution-row {

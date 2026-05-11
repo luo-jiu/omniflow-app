@@ -1,7 +1,7 @@
 # 资源监测控制台规划草案
 
 更新时间：2026-05-11
-状态：进行中（Phase 1-2 已落地，Phase 3-4 待开发）
+状态：进行中（Phase 1-2 已落地，Phase 3 部分落地，Phase 4 待开发）
 
 > 本文是 `docs/wip/` 下的临时开发计划。功能稳定后，应删除本文，并把最终契约回写到 `docs/library-detail-workspace.md`、`docs/frontend-validation-matrix.md`、后端 API 契约文档或对应长期专题文档。
 
@@ -34,11 +34,11 @@
 | `fileRefCount` | `node_files` 引用数量，用于发现一对象多引用 |
 | `provider` | `storage_objects.provider` 中记录的 provider alias；历史类型值只做兼容展示 |
 | `bucket` | `storage_objects.bucket` 中记录的物理桶 |
-| `visible` | 未删除节点引用的对象 |
-| `recycle` | 已删除节点仍引用的对象 |
+| `visible` | 存在未删除节点引用的对象；对象有可见引用时优先归入此类 |
+| `recycle` | 没有可见引用、但已删除节点仍引用的对象 |
 | `orphan` | 没有任何 `node_files` 引用的对象 |
 
-第一阶段先交付 `objectCount / fileRefCount / physicalBytes`，后续再细分 `visible / recycle / orphan`。
+当前已交付 `objectCount / fileRefCount / physicalBytes`，并补充 `visible / recycle / orphan` 只读占用细分。
 
 ## 4. 目标形态
 
@@ -118,15 +118,22 @@
 - 后端 `docs/architecture/resource-monitor-console.md`
 - 后端 `docs/progress/go-api-contract-status.md`
 
-### Phase 3：占用细分和异常诊断
+### Phase 3：占用细分和异常诊断（部分落地）
 
 目标：让控制台能指出长期维护风险。
 
-- 统计 visible / recycle / orphan。
-- 展示回收站占用。
-- 展示孤儿对象。
+- 统计 visible / recycle / orphan。（已落地）
+- 展示回收站占用。（已落地）
+- 展示孤儿对象。（已落地）
 - 标记历史 provider 类型值。
 - 和迁移任务、回收站、存储设置形成跳转关系。
+
+已回写正式文档：
+
+- `docs/resource-monitor-console.md`
+- `docs/frontend-validation-matrix.md`
+- 后端 `docs/architecture/resource-monitor-console.md`
+- 后端 `docs/progress/go-api-contract-status.md`
 
 ### Phase 4：历史采样和告警
 
@@ -158,6 +165,7 @@
 
 - 不做自动刷新和历史曲线。
 - 不做孤儿对象清理。
+- 不做异常诊断跳转。
 - 不做 MySQL / 外部资源探针。
 - 不做 CLI 命令，待控制台快照契约稳定后再决定是否补 `of resource-monitor snapshot --json`。
 
@@ -172,3 +180,4 @@ Phase 1 最低验证：
 - 手工验证刷新按钮、加载态、错误态和空态。
 - 手工验证对象存储、Postgres、Redis 探针状态和错误摘要展示。
 - 手工验证分布统计失败时探针面板仍展示。
+- 手工验证可见资源、回收站关联、孤儿对象占用展示。
