@@ -1,5 +1,5 @@
 import React from 'react';
-import { Empty, Spin } from '@douyinfe/semi-ui';
+import { Button, Empty, Spin } from '@douyinfe/semi-ui';
 import {
   IconAlertTriangle,
   IconArchive,
@@ -23,6 +23,7 @@ interface ResourceBreakdownDashboardProps {
   breakdown: ResourceMonitorBreakdown | null;
   error: string;
   loading: boolean;
+  onRetry?: () => void;
   storageError?: string;
   storageLoading?: boolean;
   storage?: ResourceMonitorStorageItem[];
@@ -85,6 +86,10 @@ function accentStyle(accent: string): React.CSSProperties {
 function percentWidth(value: number): string {
   if (!Number.isFinite(value) || value <= 0) return '0%';
   return `${Math.min(100, Math.max(0, value))}%`;
+}
+
+function compositionTitle(item: CompositionItem): string {
+  return `${item.label}：${formatBytes(item.value)}，占 ${item.percent.toFixed(1)}%。${item.meta}。物理容量按当前维度去重统计。`;
 }
 
 function metricItems(breakdown: ResourceMonitorBreakdown) {
@@ -252,6 +257,7 @@ const ResourceBreakdownDashboard: React.FC<ResourceBreakdownDashboardProps> = ({
   breakdown,
   error,
   loading,
+  onRetry,
   storageError = '',
   storageLoading = false,
   storage = [],
@@ -271,7 +277,14 @@ const ResourceBreakdownDashboard: React.FC<ResourceBreakdownDashboardProps> = ({
   if (error && !breakdown) {
     return (
       <DashboardRoot>
-        <div className="dashboard-state error">{error}</div>
+        <div className="dashboard-state error">
+          <span>{error}</span>
+          {onRetry ? (
+            <Button onClick={onRetry} size="small" theme="borderless">
+              重试
+            </Button>
+          ) : null}
+        </div>
       </DashboardRoot>
     );
   }
@@ -314,7 +327,14 @@ const ResourceBreakdownDashboard: React.FC<ResourceBreakdownDashboardProps> = ({
       </div>
 
       {error || breakdown.breakdownError ? (
-        <div className="dashboard-inline-error">{error || breakdown.breakdownError}</div>
+        <div className="dashboard-inline-error">
+          <span>{error || breakdown.breakdownError}</span>
+          {onRetry ? (
+            <Button onClick={onRetry} size="small" theme="borderless">
+              重试
+            </Button>
+          ) : null}
+        </div>
       ) : null}
 
       <div className="metric-grid">
@@ -359,7 +379,14 @@ const ResourceBreakdownDashboard: React.FC<ResourceBreakdownDashboardProps> = ({
               {storageWaiting ? (
                 <div className="chart-empty">物理存储分布加载中</div>
               ) : storageFailed ? (
-                <div className="chart-empty error">{storageError}</div>
+                <div className="chart-empty error">
+                  <span>{storageError}</span>
+                  {onRetry ? (
+                    <Button onClick={onRetry} size="small" theme="borderless">
+                      重试
+                    </Button>
+                  ) : null}
+                </div>
               ) : compositionItems.length === 0 ? (
                 <div className="chart-empty">暂无该维度数据</div>
               ) : compositionItems.map((item) => (
@@ -367,7 +394,11 @@ const ResourceBreakdownDashboard: React.FC<ResourceBreakdownDashboardProps> = ({
               ))}
             </div>
             <div className="status-card">
-              <div className="status-donut" style={statusDonutStyle(breakdown.statuses)}>
+              <div
+                className="status-donut"
+                style={statusDonutStyle(breakdown.statuses)}
+                title="状态主归属：对象有可见引用优先归为可见资源；没有可见引用但有回收站引用归为回收站；没有任何引用归为孤儿对象。"
+              >
                 <div className="status-donut-inner">
                   <span>状态</span>
                   <strong>{formatBytes(breakdown.summary.physicalBytes)}</strong>
@@ -426,7 +457,12 @@ const ResourceBreakdownDashboard: React.FC<ResourceBreakdownDashboardProps> = ({
 };
 
 const CompositionBar: React.FC<{ item: CompositionItem }> = ({ item }) => (
-  <div className="composition-row" style={accentStyle(item.accent)}>
+  <div
+    aria-label={compositionTitle(item)}
+    className="composition-row"
+    style={accentStyle(item.accent)}
+    title={compositionTitle(item)}
+  >
     <div className="composition-row-head">
       <span>{item.label}</span>
       <strong>{formatBytes(item.value)}</strong>
@@ -563,9 +599,20 @@ const DashboardRoot = styled.div`
   .dashboard-inline-error {
     padding: 8px 12px;
     border-bottom: 1px solid color-mix(in srgb, var(--app-border) 70%, transparent);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
     color: var(--semi-color-danger);
     font-size: 11px;
     line-height: 1.4;
+  }
+
+  .dashboard-inline-error span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .dashboard-state,
@@ -574,8 +621,13 @@ const DashboardRoot = styled.div`
     display: flex;
     align-items: center;
     justify-content: center;
+    gap: 8px;
     color: var(--app-text-muted);
     font-size: 12px;
+  }
+
+  .dashboard-state {
+    flex-direction: column;
   }
 
   .dashboard-mini-state {
@@ -785,6 +837,8 @@ const DashboardRoot = styled.div`
     display: flex;
     align-items: center;
     justify-content: center;
+    flex-direction: column;
+    gap: 8px;
     color: var(--app-text-muted);
     font-size: 11px;
   }

@@ -293,6 +293,7 @@ const ResourceMonitorWorkspace: React.FC<SystemWorkspaceViewProps> = ({
         breakdown={breakdownSnapshot}
         error={breakdownErrorState}
         loading={breakdownLoading}
+        onRetry={loadSnapshot}
         storageError={distributionErrorState || distributionError}
         storageLoading={distributionLoading}
         storage={storage}
