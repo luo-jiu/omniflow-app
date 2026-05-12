@@ -77,6 +77,25 @@ export interface ResourceMonitorSnapshot {
 
 export interface ResourceMonitorSnapshotOptions {
   libraryId?: number;
+  dryRun?: boolean;
+}
+
+export interface ResourceMonitorSample {
+  id: number;
+  dryRun: boolean;
+  actorId: string;
+  scope: 'global' | 'library' | string;
+  libraryId: number;
+  generatedAt: string;
+  physicalBytes: number;
+  objectCount: number;
+  fileRefCount: number;
+  recycleBytes: number;
+  orphanBytes: number;
+  probeTotal: number;
+  probeOk: number;
+  probeError: number;
+  createdAt: string;
 }
 
 const emptySnapshot: ResourceMonitorSnapshot = {
@@ -117,4 +136,19 @@ export async function fetchResourceMonitorSnapshot(
     : '';
   const body = await request(`/v1/resource-monitor/snapshot${query}`, { method: 'GET' });
   return (body?.data || emptySnapshot) as ResourceMonitorSnapshot;
+}
+
+export async function captureResourceMonitorSample(
+  options: ResourceMonitorSnapshotOptions = {},
+): Promise<ResourceMonitorSample> {
+  const params = new URLSearchParams();
+  if (options.libraryId && options.libraryId > 0) {
+    params.set('libraryId', String(options.libraryId));
+  }
+  if (options.dryRun) {
+    params.set('dryRun', 'true');
+  }
+  const query = params.toString() ? `?${params.toString()}` : '';
+  const body = await request(`/v1/resource-monitor/samples${query}`, { method: 'POST' });
+  return body?.data as ResourceMonitorSample;
 }

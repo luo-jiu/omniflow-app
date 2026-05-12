@@ -4,11 +4,13 @@ import {
   IconArrowRight,
   IconDelete,
   IconRefresh,
+  IconSave,
   IconSetting,
 } from '@douyinfe/semi-icons';
 import styled from 'styled-components';
 import type { SystemWorkspaceViewProps } from '@/features/system-workspace/types';
 import {
+  captureResourceMonitorSample,
   fetchResourceMonitorSnapshot,
   type ResourceMonitorProbeTarget,
   type ResourceMonitorSnapshot,
@@ -77,6 +79,7 @@ const ResourceMonitorWorkspace: React.FC<SystemWorkspaceViewProps> = ({
 }) => {
   const [snapshot, setSnapshot] = React.useState<ResourceMonitorSnapshot | null>(null);
   const [loading, setLoading] = React.useState(false);
+  const [sampling, setSampling] = React.useState(false);
   const [error, setError] = React.useState<string>('');
   const mountedRef = React.useRef(true);
 
@@ -130,6 +133,22 @@ const ResourceMonitorWorkspace: React.FC<SystemWorkspaceViewProps> = ({
     }
     onOpenView('recycle-bin');
   }, [canOpenRecycleBin, onOpenView]);
+  const captureSample = React.useCallback(async () => {
+    setSampling(true);
+    try {
+      const sample = await captureResourceMonitorSample({ libraryId });
+      if (!mountedRef.current) return;
+      Toast.success(`已记录资源样本 #${sample.id}`);
+      void loadSnapshot();
+    } catch (err: any) {
+      if (!mountedRef.current) return;
+      Toast.error(err?.message || '记录资源样本失败');
+    } finally {
+      if (mountedRef.current) {
+        setSampling(false);
+      }
+    }
+  }, [libraryId, loadSnapshot]);
 
   return (
     <ResourceMonitorRoot>
@@ -154,6 +173,15 @@ const ResourceMonitorWorkspace: React.FC<SystemWorkspaceViewProps> = ({
             theme="borderless"
           >
             迁移任务
+          </Button>
+          <Button
+            icon={<IconSave />}
+            loading={sampling}
+            onClick={() => void captureSample()}
+            size="small"
+            theme="borderless"
+          >
+            记录样本
           </Button>
           <Button
             icon={<IconRefresh />}

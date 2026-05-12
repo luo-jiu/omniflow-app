@@ -19,6 +19,7 @@
 - 历史 provider 类型值提示，例如 `MINIO` 兼容映射到唯一 provider alias
 - 对象存储、Postgres、Redis 的只读可用性探针
 - 到存储设置、迁移任务、回收站的快捷跳转
+- 用户显式触发的历史样本记录
 
 ## 2. 入口
 
@@ -53,6 +54,9 @@
 ```text
 GET /api/v1/resource-monitor/snapshot
 GET /api/v1/resource-monitor/snapshot?libraryId=123
+POST /api/v1/resource-monitor/samples
+POST /api/v1/resource-monitor/samples?libraryId=123
+POST /api/v1/resource-monitor/samples?libraryId=123&dryRun=true
 ```
 
 响应 `data`：
@@ -124,6 +128,28 @@ type ResourceMonitorSnapshot = {
 };
 ```
 
+`POST /samples` 返回 `ResourceMonitorSample`，用于确认样本已写入：
+
+```ts
+type ResourceMonitorSample = {
+  id: number;
+  dryRun: boolean;
+  actorId: string;
+  scope: 'global' | 'library' | string;
+  libraryId: number;
+  generatedAt: string;
+  physicalBytes: number;
+  objectCount: number;
+  fileRefCount: number;
+  recycleBytes: number;
+  orphanBytes: number;
+  probeTotal: number;
+  probeOk: number;
+  probeError: number;
+  createdAt: string;
+};
+```
+
 统计口径：
 
 - 不带 `libraryId` 时统计当前用户可见的全部资料库；带 `libraryId` 时只统计该用户拥有的指定资料库。
@@ -139,11 +165,12 @@ type ResourceMonitorSnapshot = {
 - `distributionError`：资源分布统计失败时的脱敏错误摘要；此时探针仍可正常返回。
 - `probeSummary`：当前快照内探针数量和状态汇总。
 - `probes`：只读探针结果；对象存储探针只检查 bucket 可访问性，不创建 bucket 或写入对象。
+- `dryRun`：采样写链路支持的标准 dry-run 参数；返回样本预览但不持久化。
 
 ## 5. 当前限制
 
 - 不做自动刷新。
-- 不做历史曲线。
+- 不做历史曲线；当前只支持用户点击“记录样本”写入单次历史样本。
 - 不提供清理、迁移或修复动作。
 - 只提供到存储设置、迁移任务、当前资料库回收站的跳转，不在资源监测内直接执行变更；仓库页没有具体 `libraryId` 时点击回收站会提示先进入具体资料库。
 - 暂不做 MySQL / 外部资源探针。
@@ -164,6 +191,7 @@ type ResourceMonitorSnapshot = {
 - 诊断摘要展示可见资源、回收站关联资源、孤儿对象占用。
 - 历史 provider 类型值行展示“历史”标记和兼容映射关系。
 - 顶部“存储设置”可进入设置页存储分区，“迁移任务”可进入迁移中心存储迁移 tab。
+- 点击“记录样本”可写入一条历史采样并显示样本 ID；资料库详情页样本携带当前 `libraryId`，仓库页样本为全局范围；采样 API 支持 `dryRun=true`。
 - 资料库详情页中，资源监测请求携带当前 `libraryId`，回收站关联卡片的“回收站”可进入当前资料库 system workspace 回收站；仓库页入口下该按钮只提示先进入具体资料库，不直接打开回收站。
 - 分布统计失败时分布表展示错误摘要，同时保留探针结果。
 - 无资源对象时展示空态。

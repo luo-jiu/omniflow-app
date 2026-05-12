@@ -175,7 +175,7 @@
 - 资料库详情页左下设置按钮打开 `settings` system view。
 - 资料库详情页右下头像打开 `profile` system view，并跟随目录树宽度停留在侧栏右下角。
 - 上传中心和回收站按钮打开对应 system view；上传复用上传中心任务模块，回收站按当前资料库加载和操作。
-- 资源监测打开 `resource-monitor` system view；资料库详情页会按当前 `libraryId` 展示单资料库物理存储分布快照、只读资源探针状态和可见 / 回收站 / 孤儿对象占用细分；可跳转到存储设置、迁移任务，且可跳转到当前资料库回收站。
+- 资源监测打开 `resource-monitor` system view；资料库详情页会按当前 `libraryId` 展示单资料库物理存储分布快照、只读资源探针状态和可见 / 回收站 / 孤儿对象占用细分；可显式记录一条历史样本，可跳转到存储设置、迁移任务，且可跳转到当前资料库回收站。
 - 设置页里的标签管理、存储管理、浏览器打开映射是 `settings` tab 内部页面；进入后 tab 仍显示设置，内部返回箭头回到设置首页。
 - 旧 `/settings`、`/profile`、`/upload-center`、`/libraries/:id/recycle-bin` 等路由继续存在，直到新视图稳定后再评估移除。
 
