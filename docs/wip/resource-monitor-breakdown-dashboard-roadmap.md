@@ -1,7 +1,7 @@
 # 资源监测细分仪表盘规划草案
 
 更新时间：2026-05-12
-状态：进行中（Phase A 已落地，Phase B 首版已落地）
+状态：进行中（Phase A 已落地，Phase B 首版已落地，主图维度切换已落地）
 
 > 本文是 `docs/wip/` 下的临时开发计划。功能稳定后，应删除本文，并把最终契约回写到 `docs/resource-monitor-console.md`、`docs/frontend-validation-matrix.md`、后端 `docs/architecture/resource-monitor-console.md` 和对应 API 契约文档。
 
@@ -380,7 +380,7 @@ type ResourceMonitorBreakdown = {
 
 不要继续把所有 JSX 堆进 `ResourceMonitorWorkspace`。页面组件只负责数据加载和区块编排。
 
-当前已落地 `ResourceBreakdownDashboard` 首版组件：先集中承接指标块、组成图、资料库排行、分类条和诊断摘要；后续视觉继续复杂化时再按区块继续拆分。
+当前已落地 `ResourceBreakdownDashboard` 首版组件：先集中承接指标块、组成图、资料库排行、分类条和诊断摘要；组成图已支持资料库、归档分类、物理存储和资源状态四个维度切换，并使用真实容量条带和状态 donut 展示当前快照。后续视觉继续复杂化时再按区块继续拆分。
 
 ### Phase C：视觉语言
 

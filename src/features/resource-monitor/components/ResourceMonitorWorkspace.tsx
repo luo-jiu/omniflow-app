@@ -293,6 +293,9 @@ const ResourceMonitorWorkspace: React.FC<SystemWorkspaceViewProps> = ({
         breakdown={breakdownSnapshot}
         error={breakdownErrorState}
         loading={breakdownLoading}
+        storageError={distributionErrorState || distributionError}
+        storageLoading={distributionLoading}
+        storage={storage}
       />
 
       <div className="summary-grid">

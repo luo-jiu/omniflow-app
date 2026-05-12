@@ -16,12 +16,16 @@ import type {
   ResourceMonitorBreakdownCategory,
   ResourceMonitorBreakdownLibrary,
   ResourceMonitorBreakdownStatus,
+  ResourceMonitorStorageItem,
 } from '../services/resource-monitor.api';
 
 interface ResourceBreakdownDashboardProps {
   breakdown: ResourceMonitorBreakdown | null;
   error: string;
   loading: boolean;
+  storageError?: string;
+  storageLoading?: boolean;
+  storage?: ResourceMonitorStorageItem[];
 }
 
 const CATEGORY_ACCENTS = ['#f59e0b', '#38bdf8', '#22c55e', '#a855f7', '#ef4444', '#14b8a6'];
@@ -30,6 +34,24 @@ const STATUS_ACCENT: Record<string, string> = {
   recycle: '#f59e0b',
   orphan: '#ef4444',
 };
+
+type CompositionMode = 'library' | 'category' | 'storage' | 'status';
+
+interface CompositionItem {
+  key: string;
+  label: string;
+  meta: string;
+  value: number;
+  percent: number;
+  accent: string;
+}
+
+const COMPOSITION_MODES: Array<{ key: CompositionMode; label: string }> = [
+  { key: 'library', label: '资料库' },
+  { key: 'category', label: '归档分类' },
+  { key: 'storage', label: '物理存储' },
+  { key: 'status', label: '资源状态' },
+];
 
 function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
@@ -112,11 +134,130 @@ function metricItems(breakdown: ResourceMonitorBreakdown) {
   ];
 }
 
+function storageTotal(items: ResourceMonitorStorageItem[]): number {
+  return items.reduce((total, item) => total + (Number.isFinite(item.physicalBytes) ? item.physicalBytes : 0), 0);
+}
+
+function storageLabel(item: ResourceMonitorStorageItem): string {
+  if (item.providerLabel && item.provider) return `${item.providerLabel}（${item.provider}）`;
+  return item.providerLabel || item.provider || '未命名存储';
+}
+
+function withOtherCompositionItem<T>(
+  rows: T[],
+  total: number,
+  limit: number,
+  mapItem: (item: T, index: number) => Omit<CompositionItem, 'percent'>,
+): CompositionItem[] {
+  const visibleRows = rows.slice(0, limit).map((item, index) => {
+    const mapped = mapItem(item, index);
+    return { ...mapped, percent: percentOfNumber(mapped.value, total) };
+  });
+  const hiddenRows = rows.slice(limit);
+  if (hiddenRows.length === 0) return visibleRows;
+
+  const otherBytes = hiddenRows.reduce((sum, item) => sum + Math.max(0, mapItem(item, limit).value), 0);
+  if (otherBytes <= 0) return visibleRows;
+  return [
+    ...visibleRows,
+    {
+      key: '__other__',
+      label: `其他 ${hiddenRows.length} 项`,
+      meta: '未展开的剩余容量',
+      value: otherBytes,
+      percent: percentOfNumber(otherBytes, total),
+      accent: '#64748b',
+    },
+  ];
+}
+
+function buildCompositionItems(
+  mode: CompositionMode,
+  breakdown: ResourceMonitorBreakdown,
+  storage: ResourceMonitorStorageItem[],
+): CompositionItem[] {
+  if (mode === 'category') {
+    const total = breakdown.summary.physicalBytes;
+    return withOtherCompositionItem(breakdown.categories, total, 7, (item, index) => ({
+      key: item.key,
+      label: item.label,
+      meta: `${formatNumber(item.objectCount)} 对象 · ${formatNumber(item.fileRefCount)} 引用`,
+      value: item.physicalBytes,
+      accent: CATEGORY_ACCENTS[index % CATEGORY_ACCENTS.length],
+    }));
+  }
+
+  if (mode === 'storage') {
+    const total = storageTotal(storage);
+    return withOtherCompositionItem(storage, total, 7, (item, index) => ({
+      key: `${item.provider}:${item.bucket}`,
+      label: storageLabel(item),
+      meta: [item.providerType, item.bucket ? `桶 ${item.bucket}` : '', item.endpoint].filter(Boolean).join(' · '),
+      value: item.physicalBytes,
+      accent: CATEGORY_ACCENTS[index % CATEGORY_ACCENTS.length],
+    }));
+  }
+
+  if (mode === 'status') {
+    return breakdown.statuses.map((item) => ({
+      key: item.key,
+      label: item.label,
+      meta: `${formatNumber(item.objectCount)} 对象 · ${formatNumber(item.fileRefCount)} 引用`,
+      value: item.physicalBytes,
+      percent: item.percent,
+      accent: STATUS_ACCENT[item.key] || '#64748b',
+    }));
+  }
+
+  const total = breakdown.summary.physicalBytes;
+  return withOtherCompositionItem(breakdown.libraries, total, 7, (item, index) => ({
+    key: String(item.libraryId),
+    label: item.libraryName || `资料库 ${item.libraryId}`,
+    meta: `${formatNumber(item.objectCount)} 对象 · ${formatNumber(item.fileRefCount)} 引用`,
+    value: item.physicalBytes,
+    accent: CATEGORY_ACCENTS[index % CATEGORY_ACCENTS.length],
+  }));
+}
+
+function percentOfNumber(part: number, total: number): number {
+  if (!Number.isFinite(part) || !Number.isFinite(total) || part <= 0 || total <= 0) return 0;
+  return Math.round((part / total) * 1000) / 10;
+}
+
+function statusDonutStyle(statuses: ResourceMonitorBreakdownStatus[]): React.CSSProperties {
+  const total = statuses.reduce((sum, status) => sum + Math.max(0, status.physicalBytes), 0);
+  if (total <= 0) {
+    return {
+      '--donut-bg': 'conic-gradient(color-mix(in srgb, var(--app-text-muted) 24%, transparent) 0 100%)',
+    } as React.CSSProperties;
+  }
+  let cursor = 0;
+  const segments = statuses
+    .filter((status) => status.physicalBytes > 0)
+    .map((status) => {
+      const start = cursor;
+      const width = Math.max(0.6, status.physicalBytes / total * 100);
+      cursor = Math.min(100, cursor + width);
+      return `${STATUS_ACCENT[status.key] || '#64748b'} ${start}% ${cursor}%`;
+    });
+  if (segments.length === 0) {
+    return {
+      '--donut-bg': 'conic-gradient(color-mix(in srgb, var(--app-text-muted) 24%, transparent) 0 100%)',
+    } as React.CSSProperties;
+  }
+  return { '--donut-bg': `conic-gradient(${segments.join(', ')})` } as React.CSSProperties;
+}
+
 const ResourceBreakdownDashboard: React.FC<ResourceBreakdownDashboardProps> = ({
   breakdown,
   error,
   loading,
+  storageError = '',
+  storageLoading = false,
+  storage = [],
 }) => {
+  const [compositionMode, setCompositionMode] = React.useState<CompositionMode>('library');
+
   if (loading && !breakdown) {
     return (
       <DashboardRoot>
@@ -148,6 +289,12 @@ const ResourceBreakdownDashboard: React.FC<ResourceBreakdownDashboardProps> = ({
   const hasData = breakdown.summary.physicalBytes > 0 || breakdown.summary.objectCount > 0;
   const categories = breakdown.categories.slice(0, 6);
   const libraries = breakdown.libraries.slice(0, 5);
+  const compositionItems = buildCompositionItems(compositionMode, breakdown, storage);
+  const compositionTotalBytes = compositionMode === 'storage'
+    ? storageTotal(storage)
+    : breakdown.summary.physicalBytes;
+  const storageWaiting = compositionMode === 'storage' && storageLoading && storage.length === 0;
+  const storageFailed = compositionMode === 'storage' && Boolean(storageError) && storage.length === 0;
 
   return (
     <DashboardRoot>
@@ -185,22 +332,52 @@ const ResourceBreakdownDashboard: React.FC<ResourceBreakdownDashboardProps> = ({
 
       <div className="dashboard-main">
         <div className="composition-panel">
-          <div className="panel-header">
+          <div className="panel-header composition-header">
             <span>资源组成</span>
-            <span>{hasData ? '当前快照' : '暂无容量'}</span>
+            <div className="mode-switch" role="tablist" aria-label="资源组成维度">
+              {COMPOSITION_MODES.map((item) => (
+                <button
+                  aria-selected={compositionMode === item.key}
+                  className={compositionMode === item.key ? 'active' : ''}
+                  key={item.key}
+                  onClick={() => setCompositionMode(item.key)}
+                  role="tab"
+                  type="button"
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
           </div>
           <div className="composition-visual">
-            <div className="chart-field" aria-hidden="true">
-              <svg viewBox="0 0 420 126" role="presentation">
-                <path className="grid-line" d="M12 102H408M12 70H408M12 38H408" />
-                <path className="signal-line main" d="M12 92C56 84 76 88 112 68C154 45 184 56 216 48C264 36 294 62 326 50C358 38 378 45 408 28" />
-                <path className="signal-line aux" d="M12 104C60 99 92 101 134 92C180 80 214 86 254 76C304 64 350 75 408 62" />
-              </svg>
-            </div>
-            <div className="status-stack">
-              {breakdown.statuses.map((status) => (
-                <StatusSegment key={status.key} status={status} />
+            <div className="chart-field">
+              <div className="chart-grid" aria-hidden="true" />
+              <div className="chart-header">
+                <span>{hasData ? '当前快照' : '暂无容量'}</span>
+                <strong>{formatBytes(compositionTotalBytes)}</strong>
+              </div>
+              {storageWaiting ? (
+                <div className="chart-empty">物理存储分布加载中</div>
+              ) : storageFailed ? (
+                <div className="chart-empty error">{storageError}</div>
+              ) : compositionItems.length === 0 ? (
+                <div className="chart-empty">暂无该维度数据</div>
+              ) : compositionItems.map((item) => (
+                <CompositionBar item={item} key={item.key} />
               ))}
+            </div>
+            <div className="status-card">
+              <div className="status-donut" style={statusDonutStyle(breakdown.statuses)}>
+                <div className="status-donut-inner">
+                  <span>状态</span>
+                  <strong>{formatBytes(breakdown.summary.physicalBytes)}</strong>
+                </div>
+              </div>
+              <div className="status-stack">
+                {breakdown.statuses.map((status) => (
+                  <StatusSegment key={status.key} status={status} />
+                ))}
+              </div>
             </div>
           </div>
           <div className="category-strip">
@@ -247,6 +424,22 @@ const ResourceBreakdownDashboard: React.FC<ResourceBreakdownDashboardProps> = ({
     </DashboardRoot>
   );
 };
+
+const CompositionBar: React.FC<{ item: CompositionItem }> = ({ item }) => (
+  <div className="composition-row" style={accentStyle(item.accent)}>
+    <div className="composition-row-head">
+      <span>{item.label}</span>
+      <strong>{formatBytes(item.value)}</strong>
+    </div>
+    <div className="composition-row-track">
+      <div className="composition-row-fill" style={{ width: percentWidth(item.percent) }} />
+    </div>
+    <div className="composition-row-meta">
+      <span>{item.meta || '暂无明细'}</span>
+      <strong>{item.percent.toFixed(1)}%</strong>
+    </div>
+  </div>
+);
 
 const StatusSegment: React.FC<{ status: ResourceMonitorBreakdownStatus }> = ({ status }) => (
   <div className="status-row" style={accentStyle(STATUS_ACCENT[status.key] || '#64748b')}>
@@ -487,48 +680,227 @@ const DashboardRoot = styled.div`
     font-weight: 650;
   }
 
+  .composition-header {
+    min-height: 38px;
+    height: auto;
+    gap: 10px;
+    flex-wrap: wrap;
+    padding-top: 5px;
+    padding-bottom: 5px;
+  }
+
+  .mode-switch {
+    min-width: 0;
+    border: 1px solid color-mix(in srgb, var(--app-border) 82%, transparent);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--app-bg-base) 78%, transparent);
+    padding: 2px;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+  }
+
+  .mode-switch button {
+    min-width: 48px;
+    height: 22px;
+    border: 0;
+    border-radius: 6px;
+    padding: 0 7px;
+    color: var(--app-text-muted);
+    background: transparent;
+    cursor: pointer;
+    font: inherit;
+    font-size: 10px;
+    line-height: 1;
+  }
+
+  .mode-switch button:hover {
+    color: var(--app-text);
+    background: color-mix(in srgb, var(--app-text-muted) 12%, transparent);
+  }
+
+  .mode-switch button.active {
+    color: var(--semi-color-primary);
+    background: color-mix(in srgb, var(--semi-color-primary) 16%, var(--app-bg-elevated));
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--semi-color-primary) 20%, transparent);
+  }
+
   .composition-visual {
     padding: 10px;
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 180px;
+    grid-template-columns: minmax(0, 1fr) 210px;
     gap: 10px;
   }
 
   .chart-field {
+    position: relative;
     min-width: 0;
-    height: 126px;
+    min-height: 204px;
     border: 1px solid color-mix(in srgb, var(--semi-color-primary) 18%, var(--app-border));
     border-radius: 8px;
-    background: color-mix(in srgb, var(--semi-color-primary) 7%, transparent);
+    background:
+      linear-gradient(180deg, color-mix(in srgb, var(--semi-color-primary) 8%, transparent), transparent 68%),
+      color-mix(in srgb, var(--app-bg-elevated) 94%, var(--app-panel-muted));
+    padding: 10px;
     overflow: hidden;
   }
 
-  .chart-field svg {
-    display: block;
-    width: 100%;
+  .chart-grid {
+    position: absolute;
+    inset: 0;
+    opacity: 0.55;
+    background:
+      linear-gradient(90deg, color-mix(in srgb, var(--app-text-muted) 11%, transparent) 1px, transparent 1px),
+      linear-gradient(180deg, color-mix(in srgb, var(--app-text-muted) 10%, transparent) 1px, transparent 1px);
+    background-size: 20% 100%, 100% 34px;
+    pointer-events: none;
+  }
+
+  .chart-header,
+  .composition-row {
+    position: relative;
+    z-index: 1;
+  }
+
+  .chart-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 10px;
+    color: var(--app-text-secondary);
+    font-size: 10px;
+    line-height: 1.35;
+  }
+
+  .chart-header strong {
+    color: var(--app-text);
+    font-size: 12px;
+  }
+
+  .chart-empty {
+    position: relative;
+    z-index: 1;
+    min-height: 146px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--app-text-muted);
+    font-size: 11px;
+  }
+
+  .chart-empty.error {
+    color: var(--semi-color-danger);
+    text-align: center;
+  }
+
+  .composition-row {
+    min-width: 0;
+    border-bottom: 1px solid color-mix(in srgb, var(--app-border) 58%, transparent);
+    padding: 8px 0;
+  }
+
+  .composition-row:last-child {
+    border-bottom: none;
+  }
+
+  .composition-row-head,
+  .composition-row-meta {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    color: var(--app-text);
+    font-size: 11px;
+    line-height: 1.35;
+  }
+
+  .composition-row-head span,
+  .composition-row-meta span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .composition-row-head strong,
+  .composition-row-meta strong {
+    flex: 0 0 auto;
+  }
+
+  .composition-row-track {
+    margin-top: 6px;
+    height: 9px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--app-text-muted) 18%, transparent);
+    overflow: hidden;
+  }
+
+  .composition-row-fill {
     height: 100%;
+    border-radius: inherit;
+    background:
+      linear-gradient(90deg, color-mix(in srgb, var(--accent) 72%, white 28%), var(--accent));
+    box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 28%, transparent);
   }
 
-  .grid-line {
-    fill: none;
-    stroke: color-mix(in srgb, var(--app-text-muted) 20%, transparent);
-    stroke-width: 1;
+  .composition-row-meta {
+    margin-top: 5px;
+    color: var(--app-text-muted);
+    font-size: 10px;
   }
 
-  .signal-line {
-    fill: none;
-    stroke-linecap: round;
-    stroke-width: 3;
+  .status-card {
+    min-width: 0;
+    border: 1px solid color-mix(in srgb, var(--app-border) 82%, transparent);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--app-bg-elevated) 88%, var(--app-bg-base));
+    padding: 10px;
   }
 
-  .signal-line.main {
-    stroke: var(--semi-color-warning);
-    filter: drop-shadow(0 0 5px color-mix(in srgb, var(--semi-color-warning) 45%, transparent));
+  .status-donut {
+    width: 128px;
+    height: 128px;
+    margin: 0 auto 12px;
+    border-radius: 50%;
+    background: var(--donut-bg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow:
+      inset 0 0 0 1px color-mix(in srgb, var(--app-border) 80%, transparent),
+      0 0 18px color-mix(in srgb, var(--semi-color-primary) 12%, transparent);
   }
 
-  .signal-line.aux {
-    stroke: var(--semi-color-info);
-    opacity: 0.78;
+  .status-donut-inner {
+    width: 82px;
+    height: 82px;
+    border-radius: 50%;
+    background: color-mix(in srgb, var(--app-bg-elevated) 96%, var(--app-bg-base));
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    text-align: center;
+    box-shadow: inset 0 0 0 1px var(--app-border);
+  }
+
+  .status-donut-inner span {
+    color: var(--app-text-muted);
+    font-size: 10px;
+    line-height: 1.25;
+  }
+
+  .status-donut-inner strong {
+    max-width: 70px;
+    color: var(--app-text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12px;
+    line-height: 1.25;
   }
 
   .status-stack {
