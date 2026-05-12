@@ -178,7 +178,7 @@ src/features/system-workspace/
 
 ## 5. 工作区状态设计
 
-在 `src/views/library/detail/workspace-state.ts` 里扩展持久化状态时要谨慎。
+在 `src/features/library-workspace/workspace-state.ts` 里扩展持久化状态时要谨慎。
 
 建议新增页面内状态：
 
@@ -421,7 +421,7 @@ Uploads Workspace 只展示上传中心模块状态，不再复制一份任务�
 改动范围：
 
 - `src/features/system-workspace/**`
-- `src/views/library/detail/workspace-state.ts`
+- `src/features/library-workspace/workspace-state.ts`
 - `src/views/library/detail/index.tsx`
 - 必要时更新 `docs/library-detail-workspace.md`
 

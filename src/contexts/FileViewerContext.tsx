@@ -20,6 +20,7 @@ import {
   getFileViewerStateCache,
   setFileViewerStateCache,
 } from './file-viewer-cache';
+import { isDisposingLibraryWorkspace } from '@/features/workspace-resource-release';
 import type { FileViewerFileType } from '@/shared/file-viewer-types';
 
 const defaultFileViewerState: FileViewerState = {
@@ -488,12 +489,13 @@ export const FileViewerProvider: React.FC<{
 
   React.useEffect(() => {
     if (!cacheKey) return;
+    if (isDisposingLibraryWorkspace(libraryId)) return;
     if (skipPersistRef.current) {
       skipPersistRef.current = false;
       return;
     }
     setFileViewerStateCache<FileViewerStoreState>(cacheKey, viewerState);
-  }, [cacheKey, viewerState]);
+  }, [cacheKey, libraryId, viewerState]);
 
   return (
     <FileViewerContext.Provider

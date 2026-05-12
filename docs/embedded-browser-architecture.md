@@ -1,6 +1,6 @@
 # Embedded Browser 架构说明
 
-更新时间：2026-05-06
+更新时间：2026-05-12
 
 适用范围：`omniflow-app` 内置浏览器的 renderer UI、preload bridge、Electron main controller、资源捕捉、下载导入与缓存捕捉工具链。
 
@@ -450,6 +450,8 @@ renderer catch toolkit action
 - main 中真实 view 关闭
 
 不要只删 renderer tab，而忘了 main 的 view。
+
+右键释放仓库工作区时，renderer 通过 `workspace-resource-release` 读取目标资料库的 workspace state，并逐个调用 `window.electronEmbeddedBrowser.closeTab(tabId)` 关闭该资料库登记过的真实 view。session release / 后续退出登录路径使用 `window.electronEmbeddedBrowser.closeAll()` 兜底关闭所有 embedded browser view。
 
 ## 7. 高风险变更点
 

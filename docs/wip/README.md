@@ -16,3 +16,4 @@
 - `resource-create-wizard-roadmap.md` — 资源创建向导规划草案。
 - `resource-monitor-console-roadmap.md` — 资源监测控制台规划草案。
 - `system-workspace-roadmap.md` — 设置 / 上传 / 回收站等系统页面改成资料库工作区视图的规划草案。
+- `workspace-resource-release-roadmap.md` — 退出登录 / 释放仓库时统一释放前端工作区资源的治理规划草案。

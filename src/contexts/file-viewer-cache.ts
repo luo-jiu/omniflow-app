@@ -8,6 +8,10 @@ export function clearFileViewerStateCache(cacheKey?: string) {
   fileViewerStateCache.delete(cacheKey);
 }
 
+export function clearAllFileViewerStateCache() {
+  fileViewerStateCache.clear();
+}
+
 export function getFileViewerStateCache<T>(cacheKey?: string) {
   if (!cacheKey) {
     return undefined;

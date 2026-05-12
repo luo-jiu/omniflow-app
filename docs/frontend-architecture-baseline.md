@@ -1,6 +1,6 @@
 # OmniFlow App 前端架构基线
 
-更新时间：2026-05-05
+更新时间：2026-05-12
 
 适用范围：`omniflow-app` 的 React renderer、Electron preload/main、页面分层、状态所有权、IPC 边界和前端文档维护。
 
@@ -118,7 +118,9 @@ views -> features -> components / hooks -> service / preload bridge -> electron 
 
 对应状态定义位于：
 
-- `src/views/library/detail/workspace-state.ts`
+- `src/features/library-workspace/workspace-state.ts`
+
+旧 `src/views/library/detail/workspace-state.ts` 仅作为兼容 re-export 保留。
 
 这里的 `LibraryDetailWorkspaceState` 是页面级工作区状态，而不是全局状态。它负责：
 

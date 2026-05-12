@@ -129,6 +129,11 @@ class GlobalAudioPlayer {
     this.clear();
   }
 
+  releaseForLibrary(libraryId: number) {
+    if (this.libraryId !== libraryId) return;
+    this.clear();
+  }
+
   async play() {
     await this.audio.play();
     this.hasStarted = true;

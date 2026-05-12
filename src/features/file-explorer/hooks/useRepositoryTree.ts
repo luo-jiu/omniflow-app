@@ -33,6 +33,7 @@ import {
   saveRepositoryTreeSnapshot,
   hasRepositoryTreeSnapshot,
 } from './use-repository-tree/snapshot-store';
+import { isDisposingLibraryWorkspace } from '@/features/workspace-resource-release';
 import type { FileViewerFileType } from '@/shared/file-viewer-types';
 import type { FileViewerOpenOptions } from '@/contexts/file-viewer.context';
 
@@ -178,6 +179,9 @@ export function useRepositoryTree(
 
   // 快照保存：切走页面后可恢复
   useEffect(() => {
+    if (isDisposingLibraryWorkspace(libraryId)) {
+      return;
+    }
     saveRepositoryTreeSnapshot(libraryId, {
       selectedRepository,
       rootNodeId,

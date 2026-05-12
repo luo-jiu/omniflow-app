@@ -1,6 +1,6 @@
 # MediaHub 契约
 
-更新时间：2026-05-11（含 MediaHub 本地平滑进度、Document PiP 主动小窗 + Electron 系统小窗 fallback）
+更新时间：2026-05-12（含 MediaHub 本地平滑进度、Document PiP 主动小窗 + Electron 系统小窗 fallback、工作区显式释放）
 适用范围：`MediaRegistry`、`globalAudioPlayer`、`floatingVideoService`、`MediaHubPopover`、`FloatingMiniVideoPlayer`，以及 audio / video / asmr / audio-archive viewer 与 `FileViewerContext` 的 tab close 路径。
 
 > 本文是 MediaHub 行为的**单一真源**。修改任何与"出声"或 MediaHub 入口相关的代码前必须先读这里。变更行为时必须同步更新本文，并在 PR 描述中点名。
@@ -39,6 +39,8 @@
 | 浮窗 收起 | 不动播放，仅收起浮窗 | —— | 否 | 保留（仍在播） |
 | MediaHub × | dismiss → release | clear → release | 是 | 消失 |
 | `closeTab` / `closeTabByNodeId` | dismiss → release | clear → release | 是 | 消失 |
+| `disposeLibraryWorkspace(libraryId)` | 命中同 library 时 dismiss → release | 命中同 library 时 clear → release | 是 | 消失 |
+| `disposeSessionWorkspaces()` | dismiss → release | clear → release | 是 | 消失 |
 | 新源接管 | bindInline 切 key → 旧元素 release | ensureSource 换 url → audio 自然换源 | 视频是、音频否 | 旧消失/被替换 |
 
 `FileViewerContext.closeTab(tabId)` 与 `closeTabByNodeId(nodeId)` 必须在删除 tab 前调用：
@@ -93,6 +95,7 @@ ensureSource(url, trackName?, options?: {
   ownerType, ownerKey, tabId, libraryId, thumbnailUrl
 })
 releaseForTab(tabId: string): void   // 仅当 state.tabId === tabId 时 clear()
+releaseForLibrary(libraryId: number): void // 仅当 state.libraryId === libraryId 时 clear()
 clear()                              // 同时取消 registry 注册
 ```
 
@@ -110,6 +113,7 @@ requestSystemFloating(): Promise<boolean> // 用户主动触发桌面小窗；�
 softClose(): void          // 暂停 + 收起浮窗 UI；元素/hub entry 保留
 hide(): void               // 仅收起浮窗 UI；不暂停
 releaseForTab(tabId: string): void
+releaseForLibrary(libraryId: number): void
 dismiss(): void            // 完全释放：pause + remove src + delete element + 取消注册
 ```
 

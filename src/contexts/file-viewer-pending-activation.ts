@@ -28,6 +28,19 @@ export function commitPendingActivation(libraryId: number, tabId: string): void 
   }
 }
 
+export function clearPendingActivationForLibrary(libraryId: number): void {
+  if (pending?.libraryId === libraryId) {
+    pending = null;
+    listeners.forEach((fn) => fn());
+  }
+}
+
+export function clearPendingActivation(): void {
+  if (!pending) return;
+  pending = null;
+  listeners.forEach((fn) => fn());
+}
+
 export function subscribePendingActivation(listener: () => void): () => void {
   listeners.add(listener);
   return () => {

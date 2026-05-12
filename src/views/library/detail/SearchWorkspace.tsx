@@ -1,8 +1,7 @@
 import React from 'react';
 import styled from 'styled-components';
 import { IconApps, IconGlobeStroke } from '@douyinfe/semi-icons';
-
-export type SearchWorkspaceMode = 'files' | 'web';
+import type { SearchWorkspaceMode } from '@/features/library-workspace/workspace-state';
 
 type SearchWorkspaceProps = {
   actionLabel?: string;

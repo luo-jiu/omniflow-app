@@ -268,6 +268,11 @@ class FloatingVideoService {
     this.dismiss();
   };
 
+  releaseForLibrary = (libraryId: number) => {
+    if (this.state.libraryId !== libraryId) return;
+    this.dismiss();
+  };
+
   handoffToFloating = (key: string, mountToken: number) => {
     const el = this.boundElement;
     dbg('handoffToFloating.start', {

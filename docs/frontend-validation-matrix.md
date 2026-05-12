@@ -1,6 +1,6 @@
 # 前端验证矩阵
 
-更新时间：2026-05-11
+更新时间：2026-05-12
 
 适用范围：`omniflow-app` 前端、Electron、IPC、工作区、文件树、文件预览、上传、内置浏览器和资源捕捉相关改动的提测、自测与 review 验证。
 
@@ -167,6 +167,7 @@ legacy 兼容检查：
 - `electron/preload.ts`
 - `embeddedBrowserMainController`
 - `embeddedBrowserViewLifecycle`
+- `features/workspace-resource-release`
 
 至少验证：
 
@@ -179,6 +180,8 @@ legacy 兼容检查：
 边界路径：
 
 - browser 面板隐藏或切到文件区后，原生 view 不残留
+- 右键释放仓库工作区后，该仓库登记过的原生 view 不残留
+- session release / 退出登录后，所有原生 view 不残留
 - 调整窗口尺寸后，浏览器视图 bounds 正常
 - 空白页和已加载页之间切换时状态正常
 

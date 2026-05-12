@@ -81,7 +81,7 @@ import { getFileLink } from '@/features/file-explorer/services/file.api';
 import { resolveBrowserFileMapping } from '@/features/browser-file-mappings/services/browser-file-mapping.api';
 import { getAppPopupContainer } from '@/utils/popup-container';
 import { useAuth } from '@/hooks/useAuth';
-import SearchWorkspace, { type SearchWorkspaceMode } from "./SearchWorkspace";
+import SearchWorkspace from "./SearchWorkspace";
 import BrowserSettingsWorkspace, { type BrowserSettingsSection } from './BrowserSettingsWorkspace';
 import ToolWorkspace from "@/features/tool-workspace";
 import SystemWorkspace, {
@@ -89,13 +89,15 @@ import SystemWorkspace, {
   type SystemWorkspaceView,
 } from "@/features/system-workspace";
 import { systemWorkspaceMeta } from "@/features/system-workspace/registry";
+import { isDisposingLibraryWorkspace } from "@/features/workspace-resource-release";
 import {
   loadLibraryDetailWorkspaceState,
   saveLibraryDetailWorkspaceState,
   type BrowserTab,
   type LibraryDetailWorkspaceState,
+  type SearchWorkspaceMode,
   type WorkspaceDisplayMode,
-} from "./workspace-state";
+} from "@/features/library-workspace/workspace-state";
 import type { FileViewerFileType } from '@/shared/file-viewer-types';
 import type { FileViewerOpenOptions } from '@/contexts/file-viewer.context';
 import { resolveFileViewerReturnOptions } from '@/contexts/file-viewer-return-target';
@@ -2248,10 +2250,18 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
       clearBrowserTabDragState();
       clearBookmarkDragState();
       clearBookmarkMenuDragState();
-      saveLibraryDetailWorkspaceState(workspaceCacheKey, latestWorkspaceStateRef.current);
+      if (!isDisposingLibraryWorkspace(libraryId)) {
+        saveLibraryDetailWorkspaceState(workspaceCacheKey, latestWorkspaceStateRef.current);
+      }
       void window.electronEmbeddedBrowser.deactivate();
     };
-  }, [clearBookmarkDragState, clearBookmarkMenuDragState, clearBrowserTabDragState, workspaceCacheKey]);
+  }, [
+    clearBookmarkDragState,
+    clearBookmarkMenuDragState,
+    clearBrowserTabDragState,
+    libraryId,
+    workspaceCacheKey,
+  ]);
 
   const visibleBookmarks = bookmarks.slice(0, Math.min(visibleBookmarkCount, bookmarks.length));
   const overflowBookmarks = bookmarks.slice(visibleBookmarks.length);

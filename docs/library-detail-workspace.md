@@ -1,6 +1,6 @@
 # Library Detail 工作区状态说明
 
-更新时间：2026-05-11
+更新时间：2026-05-12
 
 适用范围：`src/views/library/detail/` 页面中的工作区显示模式、浏览器 tab、搜索模式、地址栏、缓存恢复，以及和文件预览/内置浏览器之间的切换逻辑。
 
@@ -23,7 +23,9 @@
 
 工作区持久化模型定义在：
 
-- `src/views/library/detail/workspace-state.ts`
+- `src/features/library-workspace/workspace-state.ts`
+
+旧路径 `src/views/library/detail/workspace-state.ts` 只保留 re-export 兼容，不再作为新增调用方的依赖入口。
 
 当前核心字段：
 
@@ -44,6 +46,12 @@
 - `system`
 
 这个模型是页面级 source of truth，不是通用组件状态。
+
+显式释放工作区由 `src/features/workspace-resource-release/` 统一处理：
+
+- 普通离开资料库详情页时继续保存现场。
+- 右键释放仓库、删除仓库成功、后续退出登录 / 401 登录失效等显式 dispose 路径不保存现场。
+- dispose 期间 `library detail` cleanup 会跳过 `saveLibraryDetailWorkspaceState`，避免清理后又写回旧状态。
 
 ## 3. 状态 owner 规则
 

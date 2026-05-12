@@ -1,6 +1,6 @@
 # File Explorer 与 File Viewer 边界说明
 
-更新时间：2026-05-11
+更新时间：2026-05-12
 
 适用范围：`features/file-explorer`、`features/file-viewer`、`contexts/FileViewerContext.tsx`、`views/library/detail/` 中与文件树、文件打开、预览 tab、预览分发和缓存恢复相关的代码。
 
@@ -156,6 +156,7 @@ DirectoryTree double click
 - 正常切页时恢复树快照
 - 标记 dirty 时按展开状态重建树
 - 保留可见展开分支，避免切回来整树折叠
+- 显式释放工作区时，`workspace-resource-release` 会按 `libraryId` 清理目录树 snapshot 和 dirty marker；session release 会全量清理。dispose 期间 `useRepositoryTree` 不再保存 snapshot，避免旧展开状态被写回。
 
 规则：
 

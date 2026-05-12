@@ -26,11 +26,6 @@ import LibraryContextMenu from './components/library-context-menu'
 import LibraryCreateModal from './components/library-create-modal'
 import LibraryEditModal from './components/library-edit-modal'
 import type { Library } from "@/features/file-explorer/services/file.api"
-import { clearFileViewerStateCache } from '@/contexts/file-viewer-cache'
-import {
-  clearLibraryDetailWorkspaceState,
-  loadLibraryDetailWorkspaceState,
-} from './detail/workspace-state'
 import { useMediaEntries } from '@/hooks/useMediaRegistry'
 import { mediaRegistry } from '@/contexts/media-registry.singleton'
 import MediaHubPopover from '@/components/business/media-hub-popover'
@@ -41,6 +36,7 @@ import type {
   SettingsWorkspaceSection,
   SystemWorkspaceView,
 } from '@/features/system-workspace'
+import { disposeLibraryWorkspace } from '@/features/workspace-resource-release'
 
 type MenuState = {
   visible: boolean
@@ -253,16 +249,12 @@ const LibraryPage: React.FC = () => {
     library: Pick<Library, 'id' | 'name'>,
     options?: { showToast?: boolean },
   ) => {
-    const cacheKey = `library:${library.id}`
-    const workspaceState = loadLibraryDetailWorkspaceState(cacheKey)
-    const browserTabIds = workspaceState.browserTabs.map((tab) => tab.id)
-    await Promise.allSettled(
-      browserTabIds.map((tabId) => window.electronEmbeddedBrowser.closeTab(tabId))
-    )
-    await window.electronEmbeddedBrowser.deactivate().catch(() => undefined)
-    clearLibraryDetailWorkspaceState(cacheKey)
-    clearFileViewerStateCache(cacheKey)
+    const result = await disposeLibraryWorkspace(library.id)
     if (options?.showToast) {
+      if (result.failedBrowserTabIds.length > 0) {
+        Toast.warning(`已清空「${library.name}」的工作区状态，但有 ${result.failedBrowserTabIds.length} 个浏览器视图未确认关闭`)
+        return
+      }
       Toast.success(`已释放「${library.name}」的工作区资源`)
     }
   }, [])
