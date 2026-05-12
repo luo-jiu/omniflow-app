@@ -11,12 +11,15 @@ import styled from 'styled-components';
 import type { SystemWorkspaceViewProps } from '@/features/system-workspace/types';
 import {
   captureResourceMonitorSample,
+  fetchResourceMonitorBreakdown,
   fetchResourceMonitorDistribution,
   fetchResourceMonitorProbes,
+  type ResourceMonitorBreakdown,
   type ResourceMonitorProbeTarget,
   type ResourceMonitorSnapshot,
   type ResourceMonitorStorageItem,
 } from '../services/resource-monitor.api';
+import ResourceBreakdownDashboard from './ResourceBreakdownDashboard';
 import ResourceProbeHistoryPanel, {
   type ResourceProbeHistoryEntry,
   type ResourceProbeHistoryMap,
@@ -68,15 +71,19 @@ const ResourceMonitorWorkspace: React.FC<SystemWorkspaceViewProps> = ({
 }) => {
   const [distributionSnapshot, setDistributionSnapshot] = React.useState<ResourceMonitorSnapshot | null>(null);
   const [probeSnapshot, setProbeSnapshot] = React.useState<ResourceMonitorSnapshot | null>(null);
+  const [breakdownSnapshot, setBreakdownSnapshot] = React.useState<ResourceMonitorBreakdown | null>(null);
   const [distributionLoading, setDistributionLoading] = React.useState(false);
   const [probeLoading, setProbeLoading] = React.useState(false);
+  const [breakdownLoading, setBreakdownLoading] = React.useState(false);
   const [sampling, setSampling] = React.useState(false);
   const [distributionErrorState, setDistributionErrorState] = React.useState<string>('');
   const [probeErrorState, setProbeErrorState] = React.useState<string>('');
+  const [breakdownErrorState, setBreakdownErrorState] = React.useState<string>('');
   const [probeHistory, setProbeHistory] = React.useState<ResourceProbeHistoryMap>({});
   const mountedRef = React.useRef(true);
   const distributionRequestIdRef = React.useRef(0);
   const probeRequestIdRef = React.useRef(0);
+  const breakdownRequestIdRef = React.useRef(0);
 
   React.useEffect(() => {
     mountedRef.current = true;
@@ -102,6 +109,27 @@ const ResourceMonitorWorkspace: React.FC<SystemWorkspaceViewProps> = ({
     } finally {
       if (mountedRef.current && distributionRequestIdRef.current === requestId) {
         setDistributionLoading(false);
+      }
+    }
+  }, [libraryId]);
+
+  const loadBreakdown = React.useCallback(async () => {
+    const requestId = breakdownRequestIdRef.current + 1;
+    breakdownRequestIdRef.current = requestId;
+    setBreakdownLoading(true);
+    setBreakdownErrorState('');
+    try {
+      const nextBreakdown = await fetchResourceMonitorBreakdown({ libraryId });
+      if (!mountedRef.current || breakdownRequestIdRef.current !== requestId) return;
+      setBreakdownSnapshot(nextBreakdown);
+    } catch (err: any) {
+      if (!mountedRef.current || breakdownRequestIdRef.current !== requestId) return;
+      const message = err?.message || '加载资源细分失败';
+      setBreakdownErrorState(message);
+      Toast.error(message);
+    } finally {
+      if (mountedRef.current && breakdownRequestIdRef.current === requestId) {
+        setBreakdownLoading(false);
       }
     }
   }, [libraryId]);
@@ -155,8 +183,9 @@ const ResourceMonitorWorkspace: React.FC<SystemWorkspaceViewProps> = ({
 
   const loadSnapshot = React.useCallback(() => {
     void loadDistribution();
+    void loadBreakdown();
     void loadProbes();
-  }, [loadDistribution, loadProbes]);
+  }, [loadBreakdown, loadDistribution, loadProbes]);
 
   React.useEffect(() => {
     loadSnapshot();
@@ -176,7 +205,7 @@ const ResourceMonitorWorkspace: React.FC<SystemWorkspaceViewProps> = ({
   const probes = probeSnapshot?.probes || [];
   const distributionError = distributionSnapshot?.distributionError || '';
   const storage = distributionSnapshot?.storage || [];
-  const isRefreshing = distributionLoading || probeLoading;
+  const isRefreshing = distributionLoading || breakdownLoading || probeLoading;
   const canOpenRecycleBin = libraryId > 0;
   const openStorageSettings = React.useCallback(() => {
     onSettingsSectionChange?.('storage');
@@ -216,6 +245,8 @@ const ResourceMonitorWorkspace: React.FC<SystemWorkspaceViewProps> = ({
           <div className="monitor-toolbar-title">资源分布快照</div>
           <div className="monitor-toolbar-meta">
             分布：{formatTime(distributionSnapshot?.generatedAt || '')}
+            {' · '}
+            细分：{formatTime(breakdownSnapshot?.generatedAt || '')}
             {' · '}
             探针：{formatTime(probeSnapshot?.generatedAt || '')}
           </div>
@@ -257,6 +288,12 @@ const ResourceMonitorWorkspace: React.FC<SystemWorkspaceViewProps> = ({
           </Button>
         </div>
       </div>
+
+      <ResourceBreakdownDashboard
+        breakdown={breakdownSnapshot}
+        error={breakdownErrorState}
+        loading={breakdownLoading}
+      />
 
       <div className="summary-grid">
         <div className="summary-item">

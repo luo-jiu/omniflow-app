@@ -1,7 +1,7 @@
 # 资源监测细分仪表盘规划草案
 
 更新时间：2026-05-12
-状态：规划中
+状态：进行中（Phase A 已落地，Phase B 首版已落地）
 
 > 本文是 `docs/wip/` 下的临时开发计划。功能稳定后，应删除本文，并把最终契约回写到 `docs/resource-monitor-console.md`、`docs/frontend-validation-matrix.md`、后端 `docs/architecture/resource-monitor-console.md` 和对应 API 契约文档。
 
@@ -325,6 +325,7 @@ type ResourceMonitorBreakdown = {
 - 在资源监测 repository port 增加 breakdown 读取方法。
 - usecase 增加 `Breakdown(ctx, principal, options...)`。
 - handler / router 增加 `GET /resource-monitor/breakdown`。
+- 当前已落地。
 
 ### Phase B：仓储统计
 
@@ -343,6 +344,7 @@ type ResourceMonitorBreakdown = {
 - category breakdown 查询。
 - archive directory count 查询。
 - anomaly 查询可以先在 usecase 根据 breakdown 结果生成，避免第一版 SQL 过重。
+- 当前已落地第一版：资料库、分类、归档目录、多引用对象和 visible / recycle / orphan 统计；诊断摘要由 usecase 基于统计结果生成。
 
 ### Phase C：测试
 
@@ -363,6 +365,7 @@ type ResourceMonitorBreakdown = {
 - `ResourceMonitorWorkspace` 新增 breakdown loading / error / snapshot。
 - 和 distribution / probes 并行加载，互不阻塞。
 - 仍保留刷新按钮一次刷新全部分区。
+- 当前已落地。
 
 ### Phase B：仪表盘组件拆分
 
@@ -376,6 +379,8 @@ type ResourceMonitorBreakdown = {
 - `ResourceAnomalyPanel`
 
 不要继续把所有 JSX 堆进 `ResourceMonitorWorkspace`。页面组件只负责数据加载和区块编排。
+
+当前已落地 `ResourceBreakdownDashboard` 首版组件：先集中承接指标块、组成图、资料库排行、分类条和诊断摘要；后续视觉继续复杂化时再按区块继续拆分。
 
 ### Phase C：视觉语言
 
@@ -434,4 +439,3 @@ npm run build
 - 不做跨用户全局统计。
 - 不做真实数据库外的外部 BI 面板。
 - 不在第一版接入大型图表库，除非手写图表明显拖慢开发或可维护性。
-

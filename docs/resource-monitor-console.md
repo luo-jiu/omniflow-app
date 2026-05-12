@@ -14,6 +14,7 @@
 - 对象数
 - 文件引用数
 - provider / bucket 分布
+- 按资料库、归档分类和资源状态拆分的细分仪表盘
 - 可见资源、回收站关联资源、孤儿对象占用细分
 - 未匹配当前 provider 配置的历史位置提示
 - 历史 provider 类型值提示，例如 `MINIO` 兼容映射到唯一 provider alias
@@ -57,13 +58,15 @@ GET /api/v1/resource-monitor/snapshot
 GET /api/v1/resource-monitor/snapshot?libraryId=123
 GET /api/v1/resource-monitor/distribution
 GET /api/v1/resource-monitor/distribution?libraryId=123
+GET /api/v1/resource-monitor/breakdown
+GET /api/v1/resource-monitor/breakdown?libraryId=123
 GET /api/v1/resource-monitor/probes
 POST /api/v1/resource-monitor/samples
 POST /api/v1/resource-monitor/samples?libraryId=123
 POST /api/v1/resource-monitor/samples?libraryId=123&dryRun=true
 ```
 
-前端展示默认并行请求 `/distribution` 和 `/probes`，让资源分布和资源探针独立加载、独立错误、谁先返回谁先展示。`/snapshot` 继续保留为兼容聚合接口，并作为采样写链路内部生成完整快照的语义参考。
+前端展示默认并行请求 `/distribution`、`/breakdown` 和 `/probes`，让资源分布、细分仪表盘和资源探针独立加载、独立错误、谁先返回谁先展示。`/snapshot` 继续保留为兼容聚合接口，并作为采样写链路内部生成完整快照的语义参考。
 
 响应 `data`：
 
@@ -134,6 +137,81 @@ type ResourceMonitorSnapshot = {
 };
 ```
 
+`GET /breakdown` 返回 `ResourceMonitorBreakdown`：
+
+```ts
+type ResourceMonitorBreakdown = {
+  generatedAt: string;
+  summary: {
+    libraryCount: number;
+    archiveDirectoryCount: number;
+    physicalBytes: number;
+    referencedBytes: number;
+    objectCount: number;
+    fileRefCount: number;
+    visibleObjectCount: number;
+    visibleFileRefCount: number;
+    visibleBytes: number;
+    recycleObjectCount: number;
+    recycleFileRefCount: number;
+    recycleBytes: number;
+    orphanObjectCount: number;
+    orphanBytes: number;
+    multiRefObjectCount: number;
+    multiRefPhysicalBytes: number;
+  };
+  libraries: Array<{
+    libraryId: number;
+    libraryName: string;
+    physicalBytes: number;
+    referencedBytes: number;
+    objectCount: number;
+    fileRefCount: number;
+    archiveDirectoryCount: number;
+    visibleBytes: number;
+    recycleBytes: number;
+    orphanBytes: number;
+    topProvider?: string;
+    topBucket?: string;
+    percent: number;
+  }>;
+  categories: Array<{
+    key: 'DEF' | 'COMIC' | 'ASMR' | 'VIDEO' | 'AUDIO' | 'UNKNOWN' | 'UNCLASSIFIED' | string;
+    label: string;
+    builtInType?: string;
+    physicalBytes: number;
+    referencedBytes: number;
+    objectCount: number;
+    fileRefCount: number;
+    archiveDirectoryCount: number;
+    visibleBytes: number;
+    recycleBytes: number;
+    orphanBytes: number;
+    percent: number;
+  }>;
+  statuses: Array<{
+    key: 'visible' | 'recycle' | 'orphan' | string;
+    label: string;
+    physicalBytes: number;
+    objectCount: number;
+    fileRefCount: number;
+    percent: number;
+  }>;
+  anomalies: Array<{
+    key: string;
+    severity: 'info' | 'warning' | 'danger' | string;
+    title: string;
+    message: string;
+    libraryId?: number;
+    provider?: string;
+    bucket?: string;
+    physicalBytes?: number;
+    objectCount?: number;
+  }>;
+  breakdownError?: string;
+};
+```
+
 `POST /samples` 返回 `ResourceMonitorSample`，用于确认样本已写入：
 
 ```ts
@@ -160,6 +238,7 @@ type ResourceMonitorSample = {
 
 - 不带 `libraryId` 时统计当前用户可见的全部资料库；带 `libraryId` 时只统计该用户拥有的指定资料库。
 - `physicalBytes`：按 distinct `storage_objects` 聚合的真实对象容量。
+- `referencedBytes`：按 `node_files` 引用展开后的容量，可能重复，用于解释一个对象被多处业务结构使用。
 - `objectCount`：distinct `storage_objects` 数量。
 - `fileRefCount`：`node_files` 引用数量。
 - `visible*`：存在未删除节点引用的对象及其文件引用数 / 容量；对象有可见引用时优先归入此类。
@@ -173,6 +252,7 @@ type ResourceMonitorSample = {
 - `probes`：只读探针结果；对象存储探针只检查 bucket 可访问性，不创建 bucket 或写入对象。
 - `dryRun`：采样写链路支持的标准 dry-run 参数；返回样本预览但不持久化。
 - `/distribution` 只返回分布相关字段；`/probes` 只返回探针相关字段；两者都沿用同一 `ResourceMonitorSnapshot` 外形，未加载的分区保持空 summary / 空数组。
+- `/breakdown` 只返回细分仪表盘字段；`libraries / categories / statuses / anomalies` 分别对应资料库排行、归档分类、资源状态和只读诊断摘要。
 
 ## 5. 当前限制
 
@@ -194,7 +274,8 @@ type ResourceMonitorSample = {
 
 - 仓库页左下角点击资源监测入口，右侧进入资源监测 system view。
 - system overview 中点击资源监测卡片可进入同一视图。
-- 分布加载成功时展示总览和分布表；探针加载成功时展示对象存储、Postgres、Redis 状态、耗时和错误摘要，两者不互相等待。
+- 分布加载成功时展示总览和分布表；细分仪表盘和探针加载成功后分别展示资源拆分、对象存储、Postgres、Redis 状态、耗时和错误摘要，三者不互相等待。
+- 细分仪表盘加载成功时展示关键指标块、资源组成、资料库排行、归档分类和诊断摘要；失败时只在仪表盘区展示错误，不阻塞分布和探针。
 - 探针可用性图谱每 5 分钟自动追加一次历史；绿色竖胶囊表示可用，红色竖胶囊表示异常，并展示最近一次错误或服务信息。
 - 诊断摘要展示可见资源、回收站关联资源、孤儿对象占用。
 - 历史 provider 类型值行展示“历史”标记和兼容映射关系。
