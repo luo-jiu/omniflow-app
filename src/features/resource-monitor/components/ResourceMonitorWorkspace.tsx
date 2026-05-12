@@ -11,11 +11,19 @@ import styled from 'styled-components';
 import type { SystemWorkspaceViewProps } from '@/features/system-workspace/types';
 import {
   captureResourceMonitorSample,
-  fetchResourceMonitorSnapshot,
+  fetchResourceMonitorDistribution,
+  fetchResourceMonitorProbes,
   type ResourceMonitorProbeTarget,
   type ResourceMonitorSnapshot,
   type ResourceMonitorStorageItem,
 } from '../services/resource-monitor.api';
+import ResourceProbeHistoryPanel, {
+  type ResourceProbeHistoryEntry,
+  type ResourceProbeHistoryMap,
+} from './ResourceProbeHistoryPanel';
+
+const PROBE_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+const PROBE_HISTORY_LIMIT = 60;
 
 function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
@@ -44,25 +52,6 @@ function storageTitle(item: ResourceMonitorStorageItem): string {
   return item.providerLabel || item.provider || '未命名 provider';
 }
 
-function probeStatusText(status: ResourceMonitorProbeTarget['status']): string {
-  if (status === 'ok') return '可用';
-  if (status === 'error') return '异常';
-  return '未知';
-}
-
-function probeMeta(item: ResourceMonitorProbeTarget): string {
-  const parts = [
-    item.providerType,
-    item.provider ? `provider ${item.provider}` : '',
-    item.bucket ? `桶 ${item.bucket}` : '',
-    item.endpoint,
-  ].filter(Boolean);
-  if (parts.length > 0) return parts.join(' · ');
-  if (item.kind === 'postgres') return 'PostgreSQL 主连接';
-  if (item.kind === 'redis') return 'Redis 主连接';
-  return item.kind;
-}
-
 function storageBreakdown(item: ResourceMonitorStorageItem): string {
   return [
     `可见 ${formatBytes(item.visibleBytes)} / ${item.visibleObjectCount} 对象`,
@@ -77,11 +66,17 @@ const ResourceMonitorWorkspace: React.FC<SystemWorkspaceViewProps> = ({
   onOpenView,
   onSettingsSectionChange,
 }) => {
-  const [snapshot, setSnapshot] = React.useState<ResourceMonitorSnapshot | null>(null);
-  const [loading, setLoading] = React.useState(false);
+  const [distributionSnapshot, setDistributionSnapshot] = React.useState<ResourceMonitorSnapshot | null>(null);
+  const [probeSnapshot, setProbeSnapshot] = React.useState<ResourceMonitorSnapshot | null>(null);
+  const [distributionLoading, setDistributionLoading] = React.useState(false);
+  const [probeLoading, setProbeLoading] = React.useState(false);
   const [sampling, setSampling] = React.useState(false);
-  const [error, setError] = React.useState<string>('');
+  const [distributionErrorState, setDistributionErrorState] = React.useState<string>('');
+  const [probeErrorState, setProbeErrorState] = React.useState<string>('');
+  const [probeHistory, setProbeHistory] = React.useState<ResourceProbeHistoryMap>({});
   const mountedRef = React.useRef(true);
+  const distributionRequestIdRef = React.useRef(0);
+  const probeRequestIdRef = React.useRef(0);
 
   React.useEffect(() => {
     mountedRef.current = true;
@@ -90,34 +85,98 @@ const ResourceMonitorWorkspace: React.FC<SystemWorkspaceViewProps> = ({
     };
   }, []);
 
-  const loadSnapshot = React.useCallback(async () => {
-    setLoading(true);
-    setError('');
+  const loadDistribution = React.useCallback(async () => {
+    const requestId = distributionRequestIdRef.current + 1;
+    distributionRequestIdRef.current = requestId;
+    setDistributionLoading(true);
+    setDistributionErrorState('');
     try {
-      const nextSnapshot = await fetchResourceMonitorSnapshot({ libraryId });
-      if (!mountedRef.current) return;
-      setSnapshot(nextSnapshot);
+      const nextSnapshot = await fetchResourceMonitorDistribution({ libraryId });
+      if (!mountedRef.current || distributionRequestIdRef.current !== requestId) return;
+      setDistributionSnapshot(nextSnapshot);
     } catch (err: any) {
-      if (!mountedRef.current) return;
+      if (!mountedRef.current || distributionRequestIdRef.current !== requestId) return;
       const message = err?.message || '加载资源快照失败';
-      setError(message);
+      setDistributionErrorState(message);
       Toast.error(message);
     } finally {
-      if (mountedRef.current) {
-        setLoading(false);
+      if (mountedRef.current && distributionRequestIdRef.current === requestId) {
+        setDistributionLoading(false);
       }
     }
   }, [libraryId]);
 
+  const appendProbeHistory = React.useCallback((nextProbes: ResourceMonitorProbeTarget[]) => {
+    if (nextProbes.length === 0) return;
+    setProbeHistory((prev) => {
+      const next: ResourceProbeHistoryMap = { ...prev };
+      nextProbes.forEach((target) => {
+        const checkedAt = target.checkedAt || new Date().toISOString();
+        const entry: ResourceProbeHistoryEntry = {
+          checkedAt,
+          error: target.error,
+          latencyMs: target.latencyMs,
+          status: target.status,
+        };
+        const existing = next[target.key]?.entries || [];
+        const last = existing[existing.length - 1];
+        const entries = last?.checkedAt === checkedAt
+          ? [...existing.slice(0, -1), entry]
+          : [...existing, entry].slice(-PROBE_HISTORY_LIMIT);
+        next[target.key] = { entries, target };
+      });
+      return next;
+    });
+  }, []);
+
+  const loadProbes = React.useCallback(async (options?: { silent?: boolean }) => {
+    const requestId = probeRequestIdRef.current + 1;
+    probeRequestIdRef.current = requestId;
+    setProbeLoading(true);
+    setProbeErrorState('');
+    try {
+      const nextSnapshot = await fetchResourceMonitorProbes();
+      if (!mountedRef.current || probeRequestIdRef.current !== requestId) return;
+      setProbeSnapshot(nextSnapshot);
+      appendProbeHistory(nextSnapshot.probes || []);
+    } catch (err: any) {
+      if (!mountedRef.current || probeRequestIdRef.current !== requestId) return;
+      const message = err?.message || '加载资源探针失败';
+      setProbeErrorState(message);
+      if (!options?.silent) {
+        Toast.error(message);
+      }
+    } finally {
+      if (mountedRef.current && probeRequestIdRef.current === requestId) {
+        setProbeLoading(false);
+      }
+    }
+  }, [appendProbeHistory]);
+
+  const loadSnapshot = React.useCallback(() => {
+    void loadDistribution();
+    void loadProbes();
+  }, [loadDistribution, loadProbes]);
+
   React.useEffect(() => {
-    void loadSnapshot();
+    loadSnapshot();
   }, [loadSnapshot]);
 
-  const summary = snapshot?.summary;
-  const probeSummary = snapshot?.probeSummary;
-  const probes = snapshot?.probes || [];
-  const distributionError = snapshot?.distributionError || '';
-  const storage = snapshot?.storage || [];
+  React.useEffect(() => {
+    const timer = window.setInterval(() => {
+      void loadProbes({ silent: true });
+    }, PROBE_REFRESH_INTERVAL_MS);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [loadProbes]);
+
+  const summary = distributionSnapshot?.summary;
+  const probeSummary = probeSnapshot?.probeSummary;
+  const probes = probeSnapshot?.probes || [];
+  const distributionError = distributionSnapshot?.distributionError || '';
+  const storage = distributionSnapshot?.storage || [];
+  const isRefreshing = distributionLoading || probeLoading;
   const canOpenRecycleBin = libraryId > 0;
   const openStorageSettings = React.useCallback(() => {
     onSettingsSectionChange?.('storage');
@@ -139,7 +198,7 @@ const ResourceMonitorWorkspace: React.FC<SystemWorkspaceViewProps> = ({
       const sample = await captureResourceMonitorSample({ libraryId });
       if (!mountedRef.current) return;
       Toast.success(`已记录资源样本 #${sample.id}`);
-      void loadSnapshot();
+      loadSnapshot();
     } catch (err: any) {
       if (!mountedRef.current) return;
       Toast.error(err?.message || '记录资源样本失败');
@@ -155,7 +214,11 @@ const ResourceMonitorWorkspace: React.FC<SystemWorkspaceViewProps> = ({
       <div className="monitor-toolbar">
         <div>
           <div className="monitor-toolbar-title">资源分布快照</div>
-          <div className="monitor-toolbar-meta">最后刷新：{formatTime(snapshot?.generatedAt || '')}</div>
+          <div className="monitor-toolbar-meta">
+            分布：{formatTime(distributionSnapshot?.generatedAt || '')}
+            {' · '}
+            探针：{formatTime(probeSnapshot?.generatedAt || '')}
+          </div>
         </div>
         <div className="monitor-toolbar-actions">
           <Button
@@ -185,8 +248,8 @@ const ResourceMonitorWorkspace: React.FC<SystemWorkspaceViewProps> = ({
           </Button>
           <Button
             icon={<IconRefresh />}
-            loading={loading}
-            onClick={() => void loadSnapshot()}
+            loading={isRefreshing}
+            onClick={loadSnapshot}
             size="small"
             theme="borderless"
           >
@@ -282,41 +345,12 @@ const ResourceMonitorWorkspace: React.FC<SystemWorkspaceViewProps> = ({
         </div>
       </div>
 
-      <div className="probe-panel">
-        <div className="distribution-header">
-          <span>资源探针</span>
-          <span>{probeSummary?.error || 0} 个异常</span>
-        </div>
-        {loading && !snapshot ? (
-          <div className="state-block">
-            <Spin />
-          </div>
-        ) : probes.length === 0 ? (
-          <div className="state-block">
-            <Empty description="暂无探针结果" />
-          </div>
-        ) : (
-          <div className="probe-list">
-            {probes.map((item) => (
-              <div className="probe-row" key={item.key}>
-                <div className="probe-main">
-                  <div className="probe-title">
-                    <span className={`probe-dot ${item.status}`} />
-                    <span>{item.label}</span>
-                    {item.isDefault ? <span className="default-badge">默认</span> : null}
-                  </div>
-                  <div className="location-meta">{probeMeta(item)}</div>
-                  {item.error ? <div className="probe-error">{item.error}</div> : null}
-                </div>
-                <div className="probe-status">
-                  <span className={`probe-status-text ${item.status}`}>{probeStatusText(item.status)}</span>
-                  <span>{item.latencyMs} ms</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+      <ResourceProbeHistoryPanel
+        error={probeErrorState}
+        history={probeHistory}
+        loading={probeLoading}
+        probes={probes}
+      />
 
       <div className="distribution-panel">
         <div className="distribution-header">
@@ -324,12 +358,12 @@ const ResourceMonitorWorkspace: React.FC<SystemWorkspaceViewProps> = ({
           <span>{storage.length} 个位置</span>
         </div>
 
-        {loading && !snapshot ? (
+        {distributionLoading && !distributionSnapshot ? (
           <div className="state-block">
             <Spin />
           </div>
-        ) : error && !snapshot ? (
-          <div className="state-block error">{error}</div>
+        ) : distributionErrorState && !distributionSnapshot ? (
+          <div className="state-block error">{distributionErrorState}</div>
         ) : distributionError ? (
           <div className="state-block error">{distributionError}</div>
         ) : storage.length === 0 ? (
@@ -506,7 +540,6 @@ const ResourceMonitorRoot = styled.div`
     padding-left: 0;
   }
 
-  .probe-panel,
   .distribution-panel {
     border: 1px solid var(--app-border);
     border-radius: 8px;
@@ -541,90 +574,6 @@ const ResourceMonitorRoot = styled.div`
 
   .distribution-table {
     width: 100%;
-  }
-
-  .probe-list {
-    display: flex;
-    flex-direction: column;
-  }
-
-  .probe-row {
-    min-height: 48px;
-    padding: 9px 12px;
-    border-bottom: 1px solid color-mix(in srgb, var(--app-border) 70%, transparent);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-  }
-
-  .probe-row:last-child {
-    border-bottom: none;
-  }
-
-  .probe-main {
-    min-width: 0;
-  }
-
-  .probe-title {
-    min-width: 0;
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    color: var(--app-text);
-    font-size: 12px;
-    line-height: 1.35;
-    font-weight: 650;
-  }
-
-  .probe-dot {
-    width: 7px;
-    height: 7px;
-    border-radius: 999px;
-    flex: 0 0 auto;
-    background: var(--semi-color-text-2);
-  }
-
-  .probe-dot.ok {
-    background: var(--semi-color-success);
-  }
-
-  .probe-dot.error {
-    background: var(--semi-color-danger);
-  }
-
-  .probe-error {
-    margin-top: 4px;
-    color: var(--semi-color-danger);
-    font-size: 11px;
-    line-height: 1.4;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .probe-status {
-    flex: 0 0 auto;
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 3px;
-    color: var(--app-text-muted);
-    font-size: 11px;
-    line-height: 1.35;
-  }
-
-  .probe-status-text {
-    color: var(--app-text-secondary);
-    font-weight: 650;
-  }
-
-  .probe-status-text.ok {
-    color: var(--semi-color-success);
-  }
-
-  .probe-status-text.error {
-    color: var(--semi-color-danger);
   }
 
   .distribution-row {
@@ -760,10 +709,6 @@ const ResourceMonitorRoot = styled.div`
 
     .distribution-row {
       grid-template-columns: minmax(180px, 1fr) 56px 56px 80px 96px;
-    }
-
-    .probe-row {
-      align-items: flex-start;
     }
   }
 `;

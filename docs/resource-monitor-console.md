@@ -1,6 +1,6 @@
 # 资源监测控制台
 
-更新时间：2026-05-11
+更新时间：2026-05-12
 
 适用范围：仓库页 / 资料库页 system workspace 中的资源监测入口、前端展示、后端快照 API 对接和后续探针扩展。
 
@@ -18,6 +18,7 @@
 - 未匹配当前 provider 配置的历史位置提示
 - 历史 provider 类型值提示，例如 `MINIO` 兼容映射到唯一 provider alias
 - 对象存储、Postgres、Redis 的只读可用性探针
+- 探针可用性图谱：前端打开面板后立即探测一次，之后每 5 分钟自动探测，内存中只保留最近 60 次，不持久化，重启后清空
 - 到存储设置、迁移任务、回收站的快捷跳转
 - 用户显式触发的历史样本记录
 
@@ -54,10 +55,15 @@
 ```text
 GET /api/v1/resource-monitor/snapshot
 GET /api/v1/resource-monitor/snapshot?libraryId=123
+GET /api/v1/resource-monitor/distribution
+GET /api/v1/resource-monitor/distribution?libraryId=123
+GET /api/v1/resource-monitor/probes
 POST /api/v1/resource-monitor/samples
 POST /api/v1/resource-monitor/samples?libraryId=123
 POST /api/v1/resource-monitor/samples?libraryId=123&dryRun=true
 ```
+
+前端展示默认并行请求 `/distribution` 和 `/probes`，让资源分布和资源探针独立加载、独立错误、谁先返回谁先展示。`/snapshot` 继续保留为兼容聚合接口，并作为采样写链路内部生成完整快照的语义参考。
 
 响应 `data`：
 
@@ -166,10 +172,12 @@ type ResourceMonitorSample = {
 - `probeSummary`：当前快照内探针数量和状态汇总。
 - `probes`：只读探针结果；对象存储探针只检查 bucket 可访问性，不创建 bucket 或写入对象。
 - `dryRun`：采样写链路支持的标准 dry-run 参数；返回样本预览但不持久化。
+- `/distribution` 只返回分布相关字段；`/probes` 只返回探针相关字段；两者都沿用同一 `ResourceMonitorSnapshot` 外形，未加载的分区保持空 summary / 空数组。
 
 ## 5. 当前限制
 
-- 不做自动刷新。
+- 不做资源分布自动刷新；资源探针会在前端打开面板后每 5 分钟自动探测一次。
+- 探针历史只保留在当前 renderer 内存中，每个探针最多 60 次；不写 localStorage，不写后端，应用重启后清空。
 - 不做历史曲线；当前只支持用户点击“记录样本”写入单次历史样本。
 - 不提供清理、迁移或修复动作。
 - 只提供到存储设置、迁移任务、当前资料库回收站的跳转，不在资源监测内直接执行变更；仓库页没有具体 `libraryId` 时点击回收站会提示先进入具体资料库。
@@ -186,13 +194,13 @@ type ResourceMonitorSample = {
 
 - 仓库页左下角点击资源监测入口，右侧进入资源监测 system view。
 - system overview 中点击资源监测卡片可进入同一视图。
-- 快照加载成功时展示总览和分布表。
-- 探针加载成功时展示对象存储、Postgres、Redis 状态、耗时和错误摘要。
+- 分布加载成功时展示总览和分布表；探针加载成功时展示对象存储、Postgres、Redis 状态、耗时和错误摘要，两者不互相等待。
+- 探针可用性图谱每 5 分钟自动追加一次历史；绿色竖胶囊表示可用，红色竖胶囊表示异常，并展示最近一次错误或服务信息。
 - 诊断摘要展示可见资源、回收站关联资源、孤儿对象占用。
 - 历史 provider 类型值行展示“历史”标记和兼容映射关系。
 - 顶部“存储设置”可进入设置页存储分区，“迁移任务”可进入迁移中心存储迁移 tab。
 - 点击“记录样本”可写入一条历史采样并显示样本 ID；资料库详情页样本携带当前 `libraryId`，仓库页样本为全局范围；采样 API 支持 `dryRun=true`。
-- 资料库详情页中，资源监测请求携带当前 `libraryId`，回收站关联卡片的“回收站”可进入当前资料库 system workspace 回收站；仓库页入口下该按钮只提示先进入具体资料库，不直接打开回收站。
+- 资料库详情页中，分布统计和采样请求携带当前 `libraryId`；`/probes` 是 provider / 基础设施级只读探针，不按资料库过滤。回收站关联卡片的“回收站”可进入当前资料库 system workspace 回收站；仓库页入口下该按钮只提示先进入具体资料库，不直接打开回收站。
 - 分布统计失败时分布表展示错误摘要，同时保留探针结果。
 - 无资源对象时展示空态。
 - API 失败时展示错误态和 Toast。

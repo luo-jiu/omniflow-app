@@ -138,6 +138,21 @@ export async function fetchResourceMonitorSnapshot(
   return (body?.data || emptySnapshot) as ResourceMonitorSnapshot;
 }
 
+export async function fetchResourceMonitorDistribution(
+  options: ResourceMonitorSnapshotOptions = {},
+): Promise<ResourceMonitorSnapshot> {
+  const query = options.libraryId && options.libraryId > 0
+    ? `?libraryId=${encodeURIComponent(String(options.libraryId))}`
+    : '';
+  const body = await request(`/v1/resource-monitor/distribution${query}`, { method: 'GET' });
+  return (body?.data || emptySnapshot) as ResourceMonitorSnapshot;
+}
+
+export async function fetchResourceMonitorProbes(): Promise<ResourceMonitorSnapshot> {
+  const body = await request('/v1/resource-monitor/probes', { method: 'GET' });
+  return (body?.data || emptySnapshot) as ResourceMonitorSnapshot;
+}
+
 export async function captureResourceMonitorSample(
   options: ResourceMonitorSnapshotOptions = {},
 ): Promise<ResourceMonitorSample> {
