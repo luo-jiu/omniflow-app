@@ -252,7 +252,7 @@ type ResourceMonitorSample = {
 - `probes`：只读探针结果；对象存储探针只检查 bucket 可访问性，不创建 bucket 或写入对象。
 - `dryRun`：采样写链路支持的标准 dry-run 参数；返回样本预览但不持久化。
 - `/distribution` 只返回分布相关字段；`/probes` 只返回探针相关字段；两者都沿用同一 `ResourceMonitorSnapshot` 外形，未加载的分区保持空 summary / 空数组。
-- `/breakdown` 只返回细分仪表盘字段；`libraries / categories / statuses / anomalies` 分别对应资料库排行、归档分类、资源状态和只读诊断摘要。
+- `/breakdown` 只返回细分仪表盘字段；`libraries / categories / statuses / anomalies` 分别对应资料库排行、内置类型分类、资源状态和只读诊断摘要。内置类型按内容集合统计：从引用节点向上寻找最外层非 `DEF` 内置类型，集合内部文件都归属该外层类型；归档模式允许嵌套，分类统计不按 `archiveMode` 递归聚合。
 
 ## 5. 当前限制
 
