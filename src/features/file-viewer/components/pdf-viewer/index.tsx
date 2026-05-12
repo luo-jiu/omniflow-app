@@ -4,6 +4,12 @@ import { IconMinus, IconPlus } from '@douyinfe/semi-icons';
 import { getDocument, GlobalWorkerOptions, type PDFDocumentProxy } from 'pdfjs-dist';
 import { PdfViewerWrapper } from './style';
 import { runtimeLogger } from '@/utils/runtimeLogger';
+import {
+  pdfViewerSnapshotCache,
+  resolvePdfViewerCacheKey,
+  setPdfViewerSnapshot,
+  type PdfViewerSnapshot,
+} from './pdf-viewer-cache';
 
 interface PdfViewerProps {
   nodeId: number | null;
@@ -11,15 +17,6 @@ interface PdfViewerProps {
   fileName?: string | null;
   active?: boolean;
   reloadToken?: number;
-}
-
-interface PdfViewerSnapshot {
-  currentPage: number;
-  zoom: number;
-  scrollTop: number;
-  scrollRatio: number;
-  anchorPage: number;
-  anchorOffsetRatio: number;
 }
 
 interface PdfPageCanvasProps {
@@ -30,9 +27,6 @@ interface PdfPageCanvasProps {
   onRendered: (pageNumber: number, renderedHeight: number) => void;
   assignShellRef: (pageNumber: number, element: HTMLElement | null) => void;
 }
-
-const PDF_VIEWER_CACHE_MAX_ENTRIES = 24;
-const pdfViewerSnapshotCache = new Map<string, PdfViewerSnapshot>();
 
 const MIN_ZOOM = 0.6;
 const MAX_ZOOM = 2.8;
@@ -62,27 +56,6 @@ function normalizeRatio(value: number): number {
 function normalizeZoom(value: number): number {
   const fixed = Number(value.toFixed(2));
   return clamp(fixed, MIN_ZOOM, MAX_ZOOM);
-}
-
-function resolveViewerCacheKey(url: string, nodeId: number | null, reloadToken: number): string {
-  const normalizedToken = Math.max(Math.floor(reloadToken), 0);
-  if (nodeId !== null && nodeId !== undefined) {
-    return `node:${nodeId}::r${normalizedToken}`;
-  }
-  return `url:${String(url || '').trim()}::r${normalizedToken}`;
-}
-
-function setPdfViewerSnapshot(cacheKey: string, snapshot: PdfViewerSnapshot) {
-  if (pdfViewerSnapshotCache.has(cacheKey)) {
-    pdfViewerSnapshotCache.delete(cacheKey);
-  }
-  pdfViewerSnapshotCache.set(cacheKey, snapshot);
-  if (pdfViewerSnapshotCache.size > PDF_VIEWER_CACHE_MAX_ENTRIES) {
-    const oldestKey = pdfViewerSnapshotCache.keys().next().value;
-    if (oldestKey) {
-      pdfViewerSnapshotCache.delete(oldestKey);
-    }
-  }
 }
 
 function resolveCurrentPageFromRenderedRefs(
@@ -310,7 +283,7 @@ const PdfPageCanvas: React.FC<PdfPageCanvasProps> = ({
 
 const PdfViewer: React.FC<PdfViewerProps> = ({ nodeId, url, fileName, active = true, reloadToken = 0 }) => {
   const viewerCacheKey = useMemo(
-    () => resolveViewerCacheKey(url, nodeId, reloadToken),
+    () => resolvePdfViewerCacheKey(url, nodeId, reloadToken),
     [url, nodeId, reloadToken],
   );
   const initialSnapshot = useMemo(

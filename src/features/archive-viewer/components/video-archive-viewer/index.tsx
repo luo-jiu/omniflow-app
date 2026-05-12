@@ -29,6 +29,14 @@ import {
   type VideoArchiveChildNode,
   type VideoArchiveSidecarIndex,
 } from './video-archive-sidecars';
+import {
+  EMPTY_VIDEO_ARCHIVE_SNAPSHOT,
+  resolveVideoArchiveReaderCacheKey,
+  setVideoArchiveSnapshotCache,
+  videoArchiveSnapshotCache,
+  type VideoArchiveCard,
+  type VideoArchiveSnapshot,
+} from './video-archive-cache';
 
 interface VideoArchiveViewerProps {
   folderNodeId: number | null;
@@ -37,44 +45,10 @@ interface VideoArchiveViewerProps {
   active?: boolean;
 }
 
-interface VideoArchiveCard {
-  id: number;
-  mediaNodeId: number;
-  title: string;
-  sortOrder: number;
-  cardKind: 'media' | 'collection';
-  coverNodeId: number | null;
-  coverUrl: string | null;
-  videoPreviewUrl: string | null;
-  subtitleCount: number;
-  durationSeconds?: number;
-}
-
-interface VideoArchiveSnapshot {
-  hasLoadedList: boolean;
-  cards: VideoArchiveCard[];
-  nextOffset: number;
-  total: number;
-  hasMore: boolean;
-  scrollTop: number;
-}
-
 const PAGE_SIZE = 24;
 const COLLECTION_PLAYLIST_PAGE_SIZE = 80;
 const LINK_EXPIRY_MINUTES = 120;
-const VIDEO_ARCHIVE_CACHE_MAX_ENTRIES = 24;
 const VIDEO_PREVIEW_SAMPLE_TIME = 0.5;
-
-const EMPTY_VIDEO_ARCHIVE_SNAPSHOT: VideoArchiveSnapshot = {
-  hasLoadedList: false,
-  cards: [],
-  nextOffset: 0,
-  total: 0,
-  hasMore: false,
-  scrollTop: 0,
-};
-
-const videoArchiveSnapshotCache = new Map<string, VideoArchiveSnapshot>();
 
 function parseArchiveLibraryId(fileUrl: string): number | null {
   const matches = /^video-archive:\/\/library\/(\d+)\/node\/\d+$/i.exec(String(fileUrl || '').trim());
@@ -91,11 +65,6 @@ function normalizeArchiveTitle(fileName?: string | null): string {
     if (stripped) return stripped;
   }
   return raw;
-}
-
-function resolveReaderCacheKey(fileUrl: string, folderNodeId: number | null): string | null {
-  if (!folderNodeId || !Number.isFinite(folderNodeId)) return null;
-  return `${String(fileUrl || '').trim()}::${folderNodeId}`;
 }
 
 function normalizeVideoArchiveCardKind(input?: string | null): VideoArchiveCard['cardKind'] {
@@ -186,19 +155,6 @@ function buildCollectionPlaylistItem(
   };
 }
 
-function setArchiveSnapshotCache(cacheKey: string, snapshot: VideoArchiveSnapshot) {
-  if (videoArchiveSnapshotCache.has(cacheKey)) {
-    videoArchiveSnapshotCache.delete(cacheKey);
-  }
-  videoArchiveSnapshotCache.set(cacheKey, snapshot);
-  if (videoArchiveSnapshotCache.size > VIDEO_ARCHIVE_CACHE_MAX_ENTRIES) {
-    const oldest = videoArchiveSnapshotCache.keys().next().value;
-    if (oldest) {
-      videoArchiveSnapshotCache.delete(oldest);
-    }
-  }
-}
-
 function seekVideoPreviewFrame(video: HTMLVideoElement) {
   if (
     !Number.isFinite(video.duration)
@@ -245,7 +201,7 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
   const title = useMemo(() => normalizeArchiveTitle(fileName), [fileName]);
   const { showNodeProperties } = useNodePropertiesOverlay({ libraryId });
   const readerCacheKey = useMemo(
-    () => resolveReaderCacheKey(fileUrl, folderNodeId),
+    () => resolveVideoArchiveReaderCacheKey(fileUrl, folderNodeId),
     [fileUrl, folderNodeId],
   );
 
@@ -288,7 +244,7 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
   const persistSnapshot = useCallback((patch: Partial<VideoArchiveSnapshot>) => {
     if (!readerCacheKey) return;
     const prev = videoArchiveSnapshotCache.get(readerCacheKey) ?? EMPTY_VIDEO_ARCHIVE_SNAPSHOT;
-    setArchiveSnapshotCache(readerCacheKey, {
+    setVideoArchiveSnapshotCache(readerCacheKey, {
       hasLoadedList: patch.hasLoadedList ?? prev.hasLoadedList,
       cards: patch.cards ?? prev.cards,
       nextOffset: patch.nextOffset ?? prev.nextOffset,

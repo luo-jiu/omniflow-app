@@ -50,6 +50,12 @@ import {
 import { floatingVideoService } from '@/features/file-viewer/services/floating-video.service';
 import { isLibraryWorkspaceRoute } from '@/features/file-viewer/utils/media-route';
 import { useParams } from 'react-router-dom';
+import {
+  resolveVideoProgressCacheKey,
+  setVideoProgressSnapshot,
+  videoProgressCache,
+  type VideoPlaybackProgress,
+} from './video-progress-cache';
 
 interface VideoViewerProps {
   nodeId?: number | null;
@@ -63,16 +69,9 @@ interface VideoViewerProps {
   autoPlay?: boolean;
 }
 
-interface VideoPlaybackProgress {
-  currentTime: number;
-  duration: number;
-  updatedAt: string;
-}
-
 const SEEK_SECONDS = 5;
 const PLAYBACK_RATES = [0.75, 1, 1.25, 1.5, 2];
 const PLACEHOLDER_TOOL_OPTIONS = ['同名字幕自动发现', '双语字幕', '片段标注', 'AI 字幕'];
-const VIDEO_PROGRESS_CACHE_MAX_ENTRIES = 48;
 const VIDEO_PROGRESS_REMOTE_SYNC_INTERVAL_MS = 8000;
 const RESTORE_MIN_SECONDS = 2;
 const RESTORE_END_GUARD_SECONDS = 5;
@@ -135,8 +134,6 @@ const WideModeExitIcon: React.FC = () => (
   </svg>
 );
 
-const videoProgressCache = new Map<string, VideoPlaybackProgress>();
-
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value));
 }
@@ -154,26 +151,6 @@ function parseViewMetaObject(raw: string | null | undefined): Record<string, unk
 function parseFiniteNumber(value: unknown): number | null {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : null;
-}
-
-function resolveVideoProgressCacheKey(url: string, nodeId?: number | null): string {
-  if (nodeId !== null && nodeId !== undefined && Number.isFinite(nodeId)) {
-    return `node:${nodeId}`;
-  }
-  return `url:${String(url || '').trim()}`;
-}
-
-function setVideoProgressSnapshot(cacheKey: string, progress: VideoPlaybackProgress) {
-  if (videoProgressCache.has(cacheKey)) {
-    videoProgressCache.delete(cacheKey);
-  }
-  videoProgressCache.set(cacheKey, progress);
-  if (videoProgressCache.size > VIDEO_PROGRESS_CACHE_MAX_ENTRIES) {
-    const oldestKey = videoProgressCache.keys().next().value;
-    if (oldestKey) {
-      videoProgressCache.delete(oldestKey);
-    }
-  }
 }
 
 function mapArchiveCardToPlaylistItem(item: ArchiveCardDTO, libraryId: number): FileViewerVideoPlaylistItem | null {

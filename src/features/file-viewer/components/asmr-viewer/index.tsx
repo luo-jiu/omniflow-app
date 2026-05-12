@@ -27,6 +27,15 @@ import { runtimeLogger } from '@/utils/runtimeLogger';
 import { parseAsmrRouteInfo, resolveAsmrOwnerKey } from '@/features/file-viewer/utils/asmr-owner-key';
 import type { PreviewFileType } from '@/utils/preview-file-type';
 import { useGlobalAudioPlayback } from '@/features/file-viewer/hooks/useGlobalAudioPlayback';
+import {
+  asmrViewerSnapshotCache,
+  resolveAsmrViewerCacheKey,
+  setAsmrViewerSnapshot,
+  type AsmrNodeItem,
+  type AsmrPathItem,
+  type AsmrViewMetaPayload,
+  type AsmrViewerSnapshot,
+} from './asmr-viewer-cache';
 
 interface AsmrViewerProps {
   folderNodeId: number | null;
@@ -37,53 +46,10 @@ interface AsmrViewerProps {
   tabId: string;
 }
 
-interface AsmrNodeItem {
-  id: number;
-  name: string;
-  type: 'dir' | 'file' | string | number;
-  ext?: string;
-  mimeType?: string;
-  fileSize?: number;
-}
-
-interface AsmrPathItem {
-  id: number;
-  name: string;
-}
-
-interface AsmrViewerSnapshot {
-  hasLoadedList: boolean;
-  pathStack: AsmrPathItem[];
-  items: AsmrNodeItem[];
-  selectedId: number | null;
-  collectionName?: string | null;
-  collectionTag?: string | null;
-  collectionTagIds?: number[];
-  collectionSn?: string | null;
-  viewMetaBase?: AsmrViewMetaPayload;
-  coverUrl: string | null;
-  coverNodeId: number | null;
-  currentAudioId: number | null;
-  currentAudioSrc: string | null;
-  audioQueue: AsmrNodeItem[];
-  audioUrlEntries: Array<[number, string]>;
-}
-
-interface AsmrViewMetaPayload {
-  sn?: string;
-  tag?: string;
-  tagIds?: number[];
-  coverNodeId?: number;
-  [key: string]: unknown;
-}
-
 const NAME_COLLATOR = new Intl.Collator('zh-Hans-CN', {
   numeric: true,
   sensitivity: 'base',
 });
-
-const ASMR_VIEWER_CACHE_MAX_ENTRIES = 24;
-const asmrViewerSnapshotCache = new Map<string, AsmrViewerSnapshot>();
 
 function normalizeExt(ext?: string): string {
   return String(ext || '').trim().toLowerCase().replace(/^\./, '');
@@ -102,29 +68,6 @@ function sortNodes(items: AsmrNodeItem[]): AsmrNodeItem[] {
     }
     return NAME_COLLATOR.compare(String(a.name || ''), String(b.name || ''));
   });
-}
-
-function resolveAsmrViewerCacheKey(
-  fileUrl: string,
-  folderNodeId: number | null,
-  reloadToken: number,
-): string | null {
-  const ownerKey = resolveAsmrOwnerKey(fileUrl, folderNodeId);
-  if (!ownerKey) return null;
-  return `${ownerKey}::r${Math.max(Math.floor(reloadToken), 0)}`;
-}
-
-function setAsmrViewerSnapshot(cacheKey: string, snapshot: AsmrViewerSnapshot) {
-  if (asmrViewerSnapshotCache.has(cacheKey)) {
-    asmrViewerSnapshotCache.delete(cacheKey);
-  }
-  asmrViewerSnapshotCache.set(cacheKey, snapshot);
-  if (asmrViewerSnapshotCache.size > ASMR_VIEWER_CACHE_MAX_ENTRIES) {
-    const oldestKey = asmrViewerSnapshotCache.keys().next().value;
-    if (oldestKey) {
-      asmrViewerSnapshotCache.delete(oldestKey);
-    }
-  }
 }
 
 function resolveDisplayName(item: AsmrNodeItem): string {

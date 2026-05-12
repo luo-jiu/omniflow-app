@@ -1,3 +1,4 @@
+import { isDisposingAnyWorkspace } from '@/features/workspace-resource-release/dispose-markers';
 import type { ComicArchiveCard } from './comic-archive-types';
 
 const COMIC_ARCHIVE_CACHE_MAX_ENTRIES = 24;
@@ -40,6 +41,9 @@ export function resolveReaderCacheKey(
 }
 
 export function setArchiveSnapshotCache(cacheKey: string, snapshot: ComicArchiveSnapshot) {
+  if (isDisposingAnyWorkspace()) {
+    return;
+  }
   if (comicArchiveSnapshotCache.has(cacheKey)) {
     comicArchiveSnapshotCache.delete(cacheKey);
   }
@@ -50,4 +54,23 @@ export function setArchiveSnapshotCache(cacheKey: string, snapshot: ComicArchive
       comicArchiveSnapshotCache.delete(oldest);
     }
   }
+}
+
+export function clearComicArchiveSnapshotForFile(
+  fileUrl: string,
+  folderNodeId: number | null | undefined,
+) {
+  if (!folderNodeId || !Number.isFinite(folderNodeId)) {
+    return;
+  }
+  const prefix = `${String(fileUrl || '').trim()}::${folderNodeId}::r`;
+  Array.from(comicArchiveSnapshotCache.keys()).forEach((cacheKey) => {
+    if (cacheKey.startsWith(prefix)) {
+      comicArchiveSnapshotCache.delete(cacheKey);
+    }
+  });
+}
+
+export function clearAllComicArchiveSnapshots() {
+  comicArchiveSnapshotCache.clear();
 }

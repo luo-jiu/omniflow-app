@@ -1,7 +1,9 @@
 import {
   clearAllFileViewerStateCache,
   clearFileViewerStateCache,
+  getFileViewerStateCache,
 } from '@/contexts/file-viewer-cache';
+import type { FileViewerTab } from '@/contexts/file-viewer.context';
 import {
   clearPendingActivation,
   clearPendingActivationForLibrary,
@@ -18,21 +20,33 @@ import {
   clearLibraryDetailWorkspaceState,
   loadLibraryDetailWorkspaceState,
 } from '@/features/library-workspace/workspace-state';
+import {
+  clearAllViewerSnapshots,
+  clearViewerSnapshotsForTabs,
+} from '@/features/file-viewer/services/viewer-snapshot-release';
+import {
+  clearAllToolWorkspaceStates,
+  clearToolWorkspaceState,
+} from '@/features/tool-workspace/tool-workspace.state';
+import {
+  beginLibraryDisposing,
+  beginSessionDisposing,
+  normalizeLibraryId,
+} from './dispose-markers';
+
+export {
+  isDisposingAnyWorkspace,
+  isDisposingLibraryWorkspace,
+  isDisposingSessionWorkspaces,
+} from './dispose-markers';
+
+interface FileViewerCacheState {
+  tabs?: FileViewerTab[];
+}
 
 export interface DisposeLibraryWorkspaceResult {
   closedBrowserTabCount: number;
   failedBrowserTabIds: string[];
-}
-
-const disposingLibraries = new Map<number, number>();
-let sessionDisposeCount = 0;
-
-function normalizeLibraryId(libraryId: number): number | null {
-  const normalized = Number(libraryId);
-  if (!Number.isFinite(normalized) || normalized <= 0) {
-    return null;
-  }
-  return Math.trunc(normalized);
 }
 
 function workspaceCacheKey(libraryId: number) {
@@ -41,55 +55,6 @@ function workspaceCacheKey(libraryId: number) {
 
 function hasWindow() {
   return typeof window !== 'undefined';
-}
-
-function deferAfterCurrentCleanup(callback: () => void) {
-  if (!hasWindow()) {
-    callback();
-    return;
-  }
-  window.setTimeout(callback, 0);
-}
-
-function beginLibraryDisposing(libraryId: number) {
-  disposingLibraries.set(libraryId, (disposingLibraries.get(libraryId) ?? 0) + 1);
-  return () => {
-    deferAfterCurrentCleanup(() => {
-      const nextCount = (disposingLibraries.get(libraryId) ?? 0) - 1;
-      if (nextCount > 0) {
-        disposingLibraries.set(libraryId, nextCount);
-        return;
-      }
-      disposingLibraries.delete(libraryId);
-    });
-  };
-}
-
-function beginSessionDisposing() {
-  sessionDisposeCount += 1;
-  return () => {
-    deferAfterCurrentCleanup(() => {
-      sessionDisposeCount = Math.max(0, sessionDisposeCount - 1);
-    });
-  };
-}
-
-export function isDisposingSessionWorkspaces() {
-  return sessionDisposeCount > 0;
-}
-
-export function isDisposingLibraryWorkspace(libraryId: number | null | undefined) {
-  if (isDisposingSessionWorkspaces()) {
-    return true;
-  }
-  if (libraryId == null) {
-    return false;
-  }
-  const normalized = normalizeLibraryId(libraryId);
-  if (normalized == null) {
-    return false;
-  }
-  return (disposingLibraries.get(normalized) ?? 0) > 0;
 }
 
 async function closeEmbeddedBrowserTabs(tabIds: string[]): Promise<DisposeLibraryWorkspaceResult> {
@@ -135,11 +100,14 @@ export async function disposeLibraryWorkspace(libraryId: number): Promise<Dispos
   try {
     const cacheKey = workspaceCacheKey(normalizedLibraryId);
     const workspaceState = loadLibraryDetailWorkspaceState(cacheKey);
+    const fileViewerState = getFileViewerStateCache<FileViewerCacheState>(cacheKey);
     const browserTabIds = workspaceState.browserTabs.map((tab) => tab.id);
     const result = await closeEmbeddedBrowserTabs(browserTabIds);
 
     globalAudioPlayer.releaseForLibrary(normalizedLibraryId);
     floatingVideoService.releaseForLibrary(normalizedLibraryId);
+    clearViewerSnapshotsForTabs(fileViewerState?.tabs);
+    clearToolWorkspaceState(normalizedLibraryId);
     clearPendingActivationForLibrary(normalizedLibraryId);
     clearRepositoryTreeSnapshot(normalizedLibraryId);
     clearLibraryDetailWorkspaceState(cacheKey);
@@ -160,6 +128,8 @@ export async function disposeSessionWorkspaces() {
     }
     globalAudioPlayer.clear();
     floatingVideoService.dismiss();
+    clearAllViewerSnapshots();
+    clearAllToolWorkspaceStates();
     clearPendingActivation();
     clearAllRepositoryTreeSnapshots();
     clearAllLibraryDetailWorkspaceStates();

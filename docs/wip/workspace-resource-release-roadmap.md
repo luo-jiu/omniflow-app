@@ -1,7 +1,7 @@
 # 工作区资源释放治理规划草案
 
 更新时间：2026-05-12
-状态：进行中（Phase 1-2 已落地，Phase 3 防写回基础已部分落地）
+状态：进行中（Phase 1-4 已落地，待 Phase 5 文档与验证收口）
 
 > 本文是 `docs/wip/` 下的临时开发计划。功能稳定后，应删除本文，并把最终契约回写到 `docs/library-detail-workspace.md`、`docs/file-explorer-file-viewer-boundary.md`、`docs/media-hub-contract.md`、`docs/embedded-browser-architecture.md` 和 `docs/frontend-validation-matrix.md`。
 
@@ -105,15 +105,15 @@
 
 | 资源 | 当前 owner | 释放要求 |
 | --- | --- | --- |
-| PDF viewer snapshot | `pdf-viewer` 模块内 Map | 支持按 tab/cacheKey 或全量清 |
-| Comic reader snapshot | `comic-viewer` / `comic-archive-viewer` | 支持按 cacheKey 前缀或全量清 |
-| ASMR snapshot | `asmr-viewer` / `asmr-archive-viewer` | 支持按 cacheKey 前缀或全量清 |
-| Audio archive snapshot | `audio-archive-viewer` | 支持按 cacheKey 前缀或全量清 |
-| Video archive snapshot / progress | `video-archive-viewer`、`video-viewer` | 支持按 cacheKey 前缀或全量清 |
+| PDF viewer snapshot | `pdf-viewer` cache sidecar | 支持按 tab 精确清和 session 全量清（已落地） |
+| Comic reader snapshot | `comic-viewer` / `comic-archive-viewer` cache sidecar | 支持按 tab 精确清和 session 全量清（已落地） |
+| ASMR snapshot | `asmr-viewer` / `asmr-archive-viewer` cache sidecar | 支持按 tab 精确清和 session 全量清（已落地） |
+| Audio archive snapshot | `audio-archive-viewer` cache sidecar | 支持按 tab 精确清和 session 全量清（已落地） |
+| Video archive snapshot / progress | `video-archive-viewer`、`video-viewer` cache sidecar | 支持按 tab 精确清和 session 全量清（已落地） |
 | pending media activation | `file-viewer-pending-activation.ts` | session release 清空；scoped release 清目标 library |
-| 工具区状态 | `tool-workspace.state.ts` | scoped release 清目标 library 内存 cache，是否清 localStorage 需单独决策 |
+| 工具区状态 | `tool-workspace.state.ts` | scoped release 清目标 library 内存 cache 和对应 localStorage；session release 清所有工具区 workspace state（已落地） |
 
-第二批可在第一批稳定后接入。第一批先解决用户可见的 tab、目录树、browser view 和出声资源残留。
+第二批已接入统一释放层。注意：本阶段只清前端 workspace snapshot 和工具区草稿，不删除后端节点 `viewMeta` 中已经同步的阅读进度。
 
 ### 4.3 暂不处理
 
@@ -234,20 +234,25 @@ src/features/workspace-resource-release/
 - scoped release 和 session release 后不会被 unmount cleanup 写回旧数据。
 - 普通离开资料库仍能恢复现场。
 
-### Phase 4：viewer 内部 snapshot 和工具区状态补齐
+### Phase 4：viewer 内部 snapshot 和工具区状态补齐（已落地）
 
 目标：减少阅读进度 / 归档浏览等内部 snapshot 在 release 后残留。
 
 任务：
 
-- 为 PDF / comic / ASMR / audio archive / video archive / video progress 等模块补清理出口。
-- 优先按 cacheKey 前缀清理，无法可靠归属时只在 session release 全量清理。
-- 工具区状态区分“草稿偏好”和“当前资料库工作现场”，只清后者。
+- 为 PDF / comic / ASMR / audio archive / video archive / video progress 等模块补清理出口。（已落地）
+- viewer snapshot Map 拆到轻量 cache sidecar，避免 workspace release 静态 import React viewer 组件形成循环依赖。（已落地）
+- scoped release 先读取目标 `library:${id}` 的 file viewer tab cache，再按 tab 精确清理对应 viewer snapshot；带 `reloadToken` 的 viewer 会清同一文件的所有 reload 版本，避免旧 token 恢复。（已落地）
+- session release 全量清理所有 viewer snapshot。（已落地）
+- viewer snapshot sidecar 的写入入口会在 dispose marker 存活期间跳过保存，避免组件 unmount cleanup 把已清理的 snapshot 写回。（已落地）
+- 工具区状态区分“用户偏好”和“当前资料库工作现场”；只清 `tool-workspace-state:v1:${libraryId}` 这类 workspace state，不清翻译模型等用户偏好。（已落地）
+- `ToolWorkspace` 在 dispose marker 命中时跳过保存，避免清理后被 effect 写回。（已落地）
 
 验收：
 
-- release 后重新打开同资源，不从已释放前的内部阅读位置恢复。
+- release 后重新打开同资源，不从已释放前的前端内存 snapshot / 工具区草稿恢复。
 - 用户偏好不被误删。
+- 已同步到后端 `viewMeta` 的阅读进度不在前端 release 中删除；如果未来要支持“清远端阅读进度”，必须单独设计用户确认和后端接口。
 
 ### Phase 5：文档与验证收口
 

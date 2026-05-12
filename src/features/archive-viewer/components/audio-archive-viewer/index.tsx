@@ -42,6 +42,14 @@ import {
   type AudioArchiveSidecarIndex,
 } from './audio-archive-sidecars';
 import { AudioArchiveViewerWrapper } from './style';
+import {
+  audioArchiveSnapshotCache,
+  EMPTY_AUDIO_ARCHIVE_SNAPSHOT,
+  resolveAudioArchiveReaderCacheKey,
+  setAudioArchiveSnapshotCache,
+  type AudioArchiveCard,
+  type AudioArchiveSnapshot,
+} from './audio-archive-cache';
 
 interface AudioArchiveViewerProps {
   folderNodeId: number | null;
@@ -51,50 +59,10 @@ interface AudioArchiveViewerProps {
   tabId: string;
 }
 
-interface AudioArchiveCard {
-  id: number;
-  mediaNodeId: number;
-  title: string;
-  sortOrder: number;
-  coverNodeId: number | null;
-  coverUrl: string | null;
-  subtitleCount: number;
-  durationSeconds?: number | null;
-}
-
-interface AudioArchiveSnapshot {
-  hasLoadedList: boolean;
-  cards: AudioArchiveCard[];
-  nextOffset: number;
-  total: number;
-  hasMore: boolean;
-  scrollTop: number;
-  currentCardId: number | null;
-  selectedCardId: number | null;
-  currentAudioUrl: string | null;
-  activeSubtitleSources?: FileViewerSubtitleSource[];
-}
-
 type AudioRepeatMode = 'order' | 'list-loop' | 'single-loop' | 'random';
 
 const PAGE_SIZE = 60;
 const LINK_EXPIRY_MINUTES = 120;
-const AUDIO_ARCHIVE_CACHE_MAX_ENTRIES = 24;
-
-const EMPTY_AUDIO_ARCHIVE_SNAPSHOT: AudioArchiveSnapshot = {
-  hasLoadedList: false,
-  cards: [],
-  nextOffset: 0,
-  total: 0,
-  hasMore: false,
-  scrollTop: 0,
-  currentCardId: null,
-  selectedCardId: null,
-  currentAudioUrl: null,
-  activeSubtitleSources: undefined,
-};
-
-const audioArchiveSnapshotCache = new Map<string, AudioArchiveSnapshot>();
 
 function parseArchiveLibraryId(fileUrl: string): number | null {
   const matches = /^audio-archive:\/\/library\/(\d+)\/node\/\d+$/i.exec(String(fileUrl || '').trim());
@@ -116,11 +84,6 @@ function normalizeArchiveTitle(fileName?: string | null): string {
 function formatPlaylistTitle(title: string): string {
   const normalized = String(title || '').trim() || '音乐';
   return normalized.endsWith('播放列表') ? normalized : `${normalized}播放列表`;
-}
-
-function resolveReaderCacheKey(fileUrl: string, folderNodeId: number | null): string | null {
-  if (!folderNodeId || !Number.isFinite(folderNodeId)) return null;
-  return `${String(fileUrl || '').trim()}::${folderNodeId}`;
 }
 
 function formatDuration(durationSeconds?: number | null): string {
@@ -216,19 +179,6 @@ function hasSnapshotPatchKey<Key extends keyof AudioArchiveSnapshot>(
   key: Key,
 ): boolean {
   return Object.prototype.hasOwnProperty.call(patch, key);
-}
-
-function setArchiveSnapshotCache(cacheKey: string, snapshot: AudioArchiveSnapshot) {
-  if (audioArchiveSnapshotCache.has(cacheKey)) {
-    audioArchiveSnapshotCache.delete(cacheKey);
-  }
-  audioArchiveSnapshotCache.set(cacheKey, snapshot);
-  if (audioArchiveSnapshotCache.size > AUDIO_ARCHIVE_CACHE_MAX_ENTRIES) {
-    const oldest = audioArchiveSnapshotCache.keys().next().value;
-    if (oldest) {
-      audioArchiveSnapshotCache.delete(oldest);
-    }
-  }
 }
 
 const AudioCover: React.FC<{
@@ -378,7 +328,7 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
   ), [folderNodeId, libraryId]);
   const { showNodeProperties } = useNodePropertiesOverlay({ libraryId });
   const readerCacheKey = useMemo(
-    () => resolveReaderCacheKey(fileUrl, folderNodeId),
+    () => resolveAudioArchiveReaderCacheKey(fileUrl, folderNodeId),
     [fileUrl, folderNodeId],
   );
 
@@ -453,7 +403,7 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
   const persistSnapshot = useCallback((patch: Partial<AudioArchiveSnapshot>) => {
     if (!readerCacheKey) return;
     const prev = audioArchiveSnapshotCache.get(readerCacheKey) ?? EMPTY_AUDIO_ARCHIVE_SNAPSHOT;
-    setArchiveSnapshotCache(readerCacheKey, {
+    setAudioArchiveSnapshotCache(readerCacheKey, {
       hasLoadedList: patch.hasLoadedList ?? prev.hasLoadedList,
       cards: patch.cards ?? prev.cards,
       nextOffset: patch.nextOffset ?? prev.nextOffset,

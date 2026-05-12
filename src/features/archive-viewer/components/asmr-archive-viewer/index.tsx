@@ -16,42 +16,21 @@ import { useArchiveCardGrid } from '@/features/archive-viewer/hooks/useArchiveCa
 import ContextMenu, { ContextMenuItem } from '@/components/ui/context-menu';
 import { locateNodeInDirectoryTree } from '@/features/file-explorer/services/tree-locate';
 import { useNodePropertiesOverlay } from '@/features/file-explorer/hooks/useNodePropertiesOverlay';
+import {
+  asmrArchiveSnapshotCache,
+  EMPTY_ASMR_ARCHIVE_SNAPSHOT,
+  resolveAsmrArchiveReaderCacheKey,
+  setAsmrArchiveSnapshotCache,
+  type AsmrArchiveCard,
+  type AsmrArchiveSnapshot,
+  type AsmrArchiveTag,
+} from './asmr-archive-cache';
 
 interface AsmrArchiveViewerProps {
   folderNodeId: number | null;
   fileUrl: string;
   fileName?: string | null;
   active?: boolean;
-}
-
-interface AsmrArchiveTag {
-  id: number | null;
-  name: string;
-  color?: string | null;
-  textColor?: string | null;
-  fallback?: boolean;
-}
-
-interface AsmrArchiveCard {
-  id: number;
-  title: string;
-  sortOrder: number;
-  coverNodeId: number | null;
-  coverUrl: string | null;
-  tags: AsmrArchiveTag[];
-  viewMeta: string;
-}
-
-interface AsmrArchiveSnapshot {
-  hasLoadedList: boolean;
-  cards: AsmrArchiveCard[];
-  nextOffset: number;
-  total: number;
-  hasMore: boolean;
-  scrollTop: number;
-  scrollRatio: number;
-  anchorCardId: number | null;
-  anchorOffsetRatio: number;
 }
 
 interface ArchiveReaderProgress {
@@ -75,22 +54,7 @@ const VIEW_META_VIEWER_STATE_KEY = '__omniflowViewerStateV1';
 const VIEW_META_VIEWER_STATE_LEGACY_KEY = '__omniflow_viewer_state_v1';
 const VIEW_META_ASMR_ARCHIVE_READER_KEY = 'asmrArchiveReader';
 const VIEW_META_ASMR_ARCHIVE_READER_LEGACY_KEY = 'asmr_archive_reader';
-const ASMR_ARCHIVE_CACHE_MAX_ENTRIES = 24;
 const REMOTE_PROGRESS_SYNC_INTERVAL_MS = 200;
-
-const EMPTY_ASMR_ARCHIVE_SNAPSHOT: AsmrArchiveSnapshot = {
-  hasLoadedList: false,
-  cards: [],
-  nextOffset: 0,
-  total: 0,
-  hasMore: false,
-  scrollTop: 0,
-  scrollRatio: 0,
-  anchorCardId: null,
-  anchorOffsetRatio: 0,
-};
-
-const asmrArchiveSnapshotCache = new Map<string, AsmrArchiveSnapshot>();
 
 function parseArchiveLibraryId(fileUrl: string): number | null {
   const matches = /^asmr-archive:\/\/library\/(\d+)\/node\/\d+$/i.exec(String(fileUrl || '').trim());
@@ -111,24 +75,6 @@ function normalizeArchiveTitle(fileName?: string | null): string {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
-}
-
-function resolveReaderCacheKey(fileUrl: string, folderNodeId: number | null): string | null {
-  if (!folderNodeId || !Number.isFinite(folderNodeId)) return null;
-  return `${String(fileUrl || '').trim()}::${folderNodeId}`;
-}
-
-function setArchiveSnapshotCache(cacheKey: string, snapshot: AsmrArchiveSnapshot) {
-  if (asmrArchiveSnapshotCache.has(cacheKey)) {
-    asmrArchiveSnapshotCache.delete(cacheKey);
-  }
-  asmrArchiveSnapshotCache.set(cacheKey, snapshot);
-  if (asmrArchiveSnapshotCache.size > ASMR_ARCHIVE_CACHE_MAX_ENTRIES) {
-    const oldest = asmrArchiveSnapshotCache.keys().next().value;
-    if (oldest) {
-      asmrArchiveSnapshotCache.delete(oldest);
-    }
-  }
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -312,7 +258,7 @@ const AsmrArchiveViewer: React.FC<AsmrArchiveViewerProps> = ({
   const title = useMemo(() => normalizeArchiveTitle(fileName), [fileName]);
   const { showNodeProperties } = useNodePropertiesOverlay({ libraryId });
   const readerCacheKey = useMemo(
-    () => resolveReaderCacheKey(fileUrl, folderNodeId),
+    () => resolveAsmrArchiveReaderCacheKey(fileUrl, folderNodeId),
     [fileUrl, folderNodeId],
   );
 
@@ -370,7 +316,7 @@ const AsmrArchiveViewer: React.FC<AsmrArchiveViewerProps> = ({
   const persistSnapshot = useCallback((patch: Partial<AsmrArchiveSnapshot>) => {
     if (!readerCacheKey) return;
     const prev = asmrArchiveSnapshotCache.get(readerCacheKey) ?? EMPTY_ASMR_ARCHIVE_SNAPSHOT;
-    setArchiveSnapshotCache(readerCacheKey, {
+    setAsmrArchiveSnapshotCache(readerCacheKey, {
       hasLoadedList: patch.hasLoadedList ?? prev.hasLoadedList,
       cards: patch.cards ?? prev.cards,
       nextOffset: patch.nextOffset ?? prev.nextOffset,

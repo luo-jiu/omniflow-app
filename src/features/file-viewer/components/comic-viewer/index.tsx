@@ -9,6 +9,14 @@ import {
 import { ComicViewerWrapper } from './style';
 import ContextMenu, { type ContextMenuItem } from '@/components/ui/context-menu';
 import { runtimeLogger } from '@/utils/runtimeLogger';
+import {
+  comicReaderSnapshotCache,
+  EMPTY_COMIC_READER_SNAPSHOT,
+  resolveComicReaderCacheKey,
+  setComicReaderSnapshotCache,
+  type ComicPageItem,
+  type ComicReaderSnapshot,
+} from './comic-reader-cache';
 
 interface ComicViewerProps {
   folderNodeId: number | null;
@@ -26,28 +34,8 @@ interface ComicChildNode {
   type: 'dir' | 'file' | number | string;
 }
 
-interface ComicPageItem {
-  id: number;
-  name: string;
-  ext?: string;
-  mimeType?: string;
-  url: string | null;
-  status: 'idle' | 'loading' | 'ready' | 'error';
-}
-
 type ReaderLayoutMode = 'scroll' | 'flip';
 type ScrollColumnMode = 1 | 2;
-
-interface ComicReaderSnapshot {
-  hasLoadedList: boolean;
-  pages: ComicPageItem[];
-  visibleCount: number;
-  scrollTop: number;
-  scrollRatio: number;
-  anchorPageId: number | null;
-  anchorOffsetRatio: number;
-  updatedAt: string;
-}
 
 const INITIAL_VISIBLE_COUNT = 12;
 const LOAD_MORE_STEP = 10;
@@ -68,7 +56,6 @@ const FLIP_DECODE_WINDOW_BEHIND = 2;
 const FLIP_DECODE_WINDOW_AHEAD = 8;
 const DEFAULT_SCROLL_PAGE_GAP_PX = 0;
 const MAX_SCROLL_PAGE_GAP_PX = 100;
-const COMIC_READER_CACHE_MAX_ENTRIES = 24;
 const REMOTE_PROGRESS_SYNC_INTERVAL_MS = 1000;
 const BACK_TO_TOP_DIRECT_PAGE_THRESHOLD = 300;
 const BACK_TO_TOP_ANIMATION_MIN_MS = 180;
@@ -77,19 +64,6 @@ const VIEW_META_VIEWER_STATE_KEY = '__omniflowViewerStateV1';
 const VIEW_META_VIEWER_STATE_LEGACY_KEY = '__omniflow_viewer_state_v1';
 const VIEW_META_COMIC_READER_KEY = 'comicReader';
 const VIEW_META_COMIC_READER_LEGACY_KEY = 'comic_reader';
-const EMPTY_COMIC_READER_SNAPSHOT: ComicReaderSnapshot = {
-  hasLoadedList: false,
-  pages: [],
-  visibleCount: 0,
-  scrollTop: 0,
-  scrollRatio: 0,
-  anchorPageId: null,
-  anchorOffsetRatio: 0,
-  updatedAt: '',
-};
-
-const comicReaderSnapshotCache = new Map<string, ComicReaderSnapshot>();
-
 const IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg', 'avif']);
 
 function normalizeExt(ext?: string): string {
@@ -152,30 +126,6 @@ function normalizeComicTitle(fileName?: string | null): string {
     }
   }
   return raw;
-}
-
-function resolveReaderCacheKey(
-  fileUrl: string,
-  folderNodeId: number | null,
-  reloadToken: number,
-): string | null {
-  if (!folderNodeId || !Number.isFinite(folderNodeId)) {
-    return null;
-  }
-  return `${String(fileUrl || '').trim()}::${folderNodeId}::r${Math.max(Math.floor(reloadToken), 0)}`;
-}
-
-function setReaderSnapshotCache(cacheKey: string, snapshot: ComicReaderSnapshot) {
-  if (comicReaderSnapshotCache.has(cacheKey)) {
-    comicReaderSnapshotCache.delete(cacheKey);
-  }
-  comicReaderSnapshotCache.set(cacheKey, snapshot);
-  if (comicReaderSnapshotCache.size > COMIC_READER_CACHE_MAX_ENTRIES) {
-    const oldestKey = comicReaderSnapshotCache.keys().next().value;
-    if (oldestKey) {
-      comicReaderSnapshotCache.delete(oldestKey);
-    }
-  }
 }
 
 function normalizeCachedPages(pages: ComicPageItem[]): ComicPageItem[] {
@@ -355,7 +305,7 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
   const libraryId = useMemo(() => parseComicLibraryId(fileUrl), [fileUrl]);
   const displayTitle = useMemo(() => normalizeComicTitle(fileName), [fileName]);
   const readerCacheKey = useMemo(
-    () => resolveReaderCacheKey(fileUrl, folderNodeId, reloadToken),
+    () => resolveComicReaderCacheKey(fileUrl, folderNodeId, reloadToken),
     [fileUrl, folderNodeId, reloadToken],
   );
 
@@ -451,7 +401,7 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
   const persistReaderSnapshot = useCallback((patch: Partial<ComicReaderSnapshot>) => {
     if (!readerCacheKey) return;
     const prev = comicReaderSnapshotCache.get(readerCacheKey) ?? EMPTY_COMIC_READER_SNAPSHOT;
-    setReaderSnapshotCache(readerCacheKey, {
+    setComicReaderSnapshotCache(readerCacheKey, {
       hasLoadedList: patch.hasLoadedList ?? prev.hasLoadedList,
       pages: patch.pages ?? prev.pages,
       visibleCount: patch.visibleCount ?? prev.visibleCount,
