@@ -54,6 +54,12 @@ floatingVideoService.releaseForTab(tabId);
 
 > ⚠️ `closeTabByNodeId` 内的 `releaseMediaForTab` 必须在 `setViewerState` updater **之外**调用——updater 是纯函数，StrictMode 会双调用，把副作用塞进去会重复 release。
 
+`workspace-resource-release` 只能通过服务层接口释放 MediaHub 资源：
+
+- 单库释放调用 `globalAudioPlayer.releaseForLibrary(libraryId)` 和 `floatingVideoService.releaseForLibrary(libraryId)`，只清命中目标资料库的出声实体。
+- session 释放调用 `globalAudioPlayer.clear()` 和 `floatingVideoService.dismiss()`，清空当前会话全部出声实体。
+- 释放路径不依赖 React viewer 卸载，也不直接操作 `mediaRegistry`。registry 仍由 `globalAudioPlayer` / `floatingVideoService` 自注册和注销。
+
 ### 1.5 跨路由保活
 
 离开 `/libraries/:id` 时：

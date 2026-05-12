@@ -453,6 +453,19 @@ renderer catch toolkit action
 
 右键释放仓库工作区时，renderer 通过 `workspace-resource-release` 读取目标资料库的 workspace state，并逐个调用 `window.electronEmbeddedBrowser.closeTab(tabId)` 关闭该资料库登记过的真实 view。session release / 后续退出登录路径使用 `window.electronEmbeddedBrowser.closeAll()` 兜底关闭所有 embedded browser view。
 
+### 6.4 工作区释放规则
+
+embedded browser 的真实资源在 Electron main，不能依赖 React 组件卸载自然消失。
+
+当前释放约定：
+
+- 普通切离资料库详情页时，renderer workspace state 继续保存 browser tab 投影，回到资料库后可以恢复现场。
+- 单库释放时，`workspace-resource-release` 从目标资料库的 workspace state 读取 browser tab id，逐个关闭对应 `WebContentsView`，随后清掉该资料库的 workspace state。
+- session 释放时，`workspace-resource-release` 调用 `closeAll()` 全量关闭所有 `WebContentsView`，用于主动退出登录和 401 登录失效。
+- 释放过程中如果关闭某个 view 失败，前端 cache 仍应继续清理，并用 warning 记录未确认关闭的 view；登录或仓库释放流程不能因为单个 view close 失败而卡住。
+
+后续如果出现 browser tab 不在 `library detail` workspace state 中登记的场景，应补一个 renderer 侧 tab ownership registry，而不是让页面、hook 和 release service 各自猜归属。
+
 ## 7. 高风险变更点
 
 后续改动以下地方时，必须额外小心：

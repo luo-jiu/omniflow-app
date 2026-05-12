@@ -58,6 +58,7 @@ npm run build
 - `views/library/detail/`
 - 工作区模式切换
 - tab / browser / search-home / file-viewer / tools / system 关系
+- `features/workspace-resource-release`
 - 设置、个人主页、上传中心、回收站、标签 / 存储 / 浏览器映射等从旧全屏页迁移到工作区视图的入口
 
 至少验证：
@@ -85,6 +86,10 @@ npm run build
 - 回收站 system view 恢复 / 彻底删除 / 清空后列表更新，目录树快照标记刷新
 - 个人主页 system view 从目录树右下头像打开，修改头像 / 昵称后入口头像同步
 - 资源监测 system view 能打开、刷新、展示空态 / 错误态、资源探针状态、可见 / 回收站 / 孤儿对象占用和历史 provider 类型值标记；资料库详情页请求携带当前 `libraryId`，到存储设置、迁移任务、当前资料库回收站的跳转关系正常，仓库页入口不能在缺少 `libraryId` 时直接打开回收站；点击“记录样本”能写入一条历史采样并提示样本 ID；它不影响文件 tab、上传任务和媒体播放
+- 右键释放仓库后，再进入同一仓库时文件 tab、目录树展开、browser tab、系统工作区现场、工具区草稿、viewer 前端 snapshot 和 MediaHub 出声实体都不恢复
+- 右键释放仓库只影响目标 `libraryId`；另一个仓库的文件 tab、目录树现场和媒体播放不被清掉
+- 删除仓库成功后，本地不留下该仓库可被同 id 恢复的旧工作区现场
+- 主动退出登录或 401 登录失效后，所有资料库工作区现场、MediaHub 出声实体和 embedded browser view 都被释放，重新登录不恢复上一个会话的目录树、文件 tab 或浏览器 tab
 
 legacy 兼容检查：
 
@@ -137,6 +142,8 @@ legacy 兼容检查：
 - 视频底部小窗按钮优先进入 Document PiP；不支持时降级应用内浮窗
 - 视频小窗状态下 inline 占位可收回，同一个视频元素进度不丢
 - Document PiP 原生关闭、应用内浮窗收起 / 软关闭后，MediaHub entry 和播放状态符合 `docs/media-hub-contract.md`
+- 显式释放工作区后，PDF / 漫画 / ASMR / 视频进度 / 归档浏览等 viewer 前端 snapshot 不从释放前状态恢复；普通切页仍可恢复
+- 已同步到后端 `viewMeta` 的阅读 / 播放进度不应被前端工作区释放误删
 
 ### 3.5 上传中心
 

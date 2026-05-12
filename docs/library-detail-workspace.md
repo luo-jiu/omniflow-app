@@ -53,6 +53,24 @@
 - 右键释放仓库、删除仓库成功、后续退出登录 / 401 登录失效等显式 dispose 路径不保存现场。
 - dispose 期间 `library detail` cleanup 会跳过 `saveLibraryDetailWorkspaceState`，避免清理后又写回旧状态。
 
+### 2.1 显式释放范围
+
+工作区释放分两层：
+
+- `disposeLibraryWorkspace(libraryId)`：释放单个资料库的前端工作区现场，用于仓库右键释放和删除仓库成功后的本地清理。
+- `disposeSessionWorkspaces()`：释放当前登录会话内所有前端工作区现场，用于主动退出登录和 401 登录失效。
+
+单库释放会清理目标资料库的 `library detail` workspace cache、文件预览 tab cache、目录树 snapshot / dirty marker、系统工作区临时状态、工具区 workspace state、pending media activation、目标资料库登记过的 embedded browser view，以及命中该 `libraryId` 的 MediaHub 音视频实体。session 释放会对上述前端工作区资源做全量清理，并通过 embedded browser 的 `closeAll()` 兜底关闭所有原生 view。
+
+显式释放不清理以下内容：
+
+- 后端节点、对象存储文件、数据库记录。
+- 已同步到后端 `viewMeta` 的阅读 / 播放进度。
+- 主题、语言、浏览器规则、cookie、密码、外部工具配置等用户偏好或隐私策略另管的数据。
+- 上传中心、迁移中心的历史任务记录。
+
+所有会在卸载 cleanup 中保存现场的模块，都必须在写入前检查 `workspace-resource-release` 的 dispose marker。marker 只用于阻止释放过程中的旧状态回写，释放结束后会在下一轮事件循环移除，普通切页仍应恢复现场。
+
 ## 3. 状态 owner 规则
 
 ### 3.1 页面层 owner
