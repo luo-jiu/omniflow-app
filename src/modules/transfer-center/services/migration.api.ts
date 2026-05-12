@@ -1,5 +1,6 @@
 import { API_CONFIG } from '@/config/api';
 import { auth } from '@/utils/auth';
+import { clearAuthSessionAndDisposeWorkspaces } from '@/service/auth-session-release';
 
 // 存储迁移 HTTP 客户端：6 端点的轻封装。
 // 调用走 electronAPI.fetch（主进程，避免 CORS / Cookie 问题）。
@@ -127,10 +128,10 @@ async function requestJson<T>(path: string, init: { method: string; body?: unkno
 
   const status = Number(res?.status ?? 0);
   if (status === 401) {
-    auth.clear();
-    if (!window.location.hash.includes('/login')) {
-      window.location.hash = '/login';
-    }
+    await clearAuthSessionAndDisposeWorkspaces({
+      reason: `migration auth expired ${path}`,
+      redirectToLogin: true,
+    });
     throw new Error(`登录状态已失效 (${path})`);
   }
   if (status === 204) {

@@ -369,8 +369,10 @@ const ProfilePage: React.FC = () => {
   };
 
   const onLogout = () => {
-    logout();
-    navigate('/login');
+    void (async () => {
+      await logout();
+      navigate('/login');
+    })();
   };
 
   return (

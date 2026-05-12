@@ -1,6 +1,7 @@
 import { API_CONFIG } from '@/config/api';
 import { auth } from '@/utils/auth';
 import { runtimeLogger } from '@/utils/runtimeLogger';
+import { clearAuthSessionAndDisposeWorkspaces } from '@/service/auth-session-release';
 
 interface IpcHttpResponse<T = unknown> {
   status?: number;
@@ -65,10 +66,10 @@ export async function ipcRequest<T = any>(path: string, options?: any): Promise<
     const businessSuccess = isBusinessSuccess(body);
 
     if (status === 401 || code === 'A00200') {
-      auth.clear();
-      if (!window.location.hash.includes('/login')) {
-        window.location.hash = '/login';
-      }
+      await clearAuthSessionAndDisposeWorkspaces({
+        reason: `ipc auth expired ${path}`,
+        redirectToLogin: true,
+      });
       throw new Error(`登录状态已失效，请重新登录 (${path})`);
     }
 
@@ -90,17 +91,17 @@ export async function ipcRequest<T = any>(path: string, options?: any): Promise<
   }
 }
 
-function validateIpcUploadResponse<T>(res: IpcHttpResponse, label: string): T {
+async function validateIpcUploadResponse<T>(res: IpcHttpResponse, label: string): Promise<T> {
   const status = Number(res?.status ?? 0);
   const body = res?.body as unknown;
   const code = getApiCode(body);
   const businessSuccess = isBusinessSuccess(body);
 
   if (status === 401 || code === 'A00200') {
-    auth.clear();
-    if (!window.location.hash.includes('/login')) {
-      window.location.hash = '/login';
-    }
+    await clearAuthSessionAndDisposeWorkspaces({
+      reason: `ipc upload auth expired ${label}`,
+      redirectToLogin: true,
+    });
     throw new Error(`登录状态已失效，请重新登录 (${label})`);
   }
 
@@ -144,7 +145,7 @@ export async function ipcUpload<T = any>(
       formDataParams,
       headers,
     ) as IpcHttpResponse;
-    return validateIpcUploadResponse<T>(res, path);
+    return await validateIpcUploadResponse<T>(res, path);
   } catch (err) {
     runtimeLogger.error('❌ IPC Upload 请求失败:', err);
     throw err;

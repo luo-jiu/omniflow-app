@@ -12,8 +12,10 @@ const AppHeader: FC = () => {
   const displayName = isLoggedIn ? user?.nickname || user?.username || 'User' : '未登录';
 
   const handleLogout = () => {
-    logout();
-    navigate('/login');
+    void (async () => {
+      await logout();
+      navigate('/login');
+    })();
   };
 
   const avatarContent = (

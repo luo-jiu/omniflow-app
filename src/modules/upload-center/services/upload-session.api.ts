@@ -1,6 +1,7 @@
 import { API_CONFIG } from '@/config/api';
 import { auth } from '@/utils/auth';
 import { runtimeLogger } from '@/utils/runtimeLogger';
+import { clearAuthSessionAndDisposeWorkspaces } from '@/service/auth-session-release';
 
 // 后端 7 端点 + 直传 MinIO 的客户端封装；统一走 electronAPI.fetch（主进程，避免 CORS）。
 // 失败语义：404 → session 不存在/无权（统一防 uploadId 枚举）；410 Gone → lease 过期需重新 init。
@@ -115,10 +116,10 @@ async function requestJson<T>(path: string, init: { method: string; body?: unkno
   const status = Number(res?.status ?? 0);
 
   if (status === 401) {
-    auth.clear();
-    if (!window.location.hash.includes('/login')) {
-      window.location.hash = '/login';
-    }
+    await clearAuthSessionAndDisposeWorkspaces({
+      reason: `upload session auth expired ${path}`,
+      redirectToLogin: true,
+    });
     throw new Error(`登录状态已失效，请重新登录 (${path})`);
   }
   if (status === 404) {

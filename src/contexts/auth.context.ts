@@ -19,7 +19,7 @@ export interface AuthContextType {
     phone?: string;
   }) => Promise<{ success: boolean; message?: string }>;
   setUserInfo: (userInfo: User | null) => void;
-  logout: () => void;
+  logout: () => Promise<void>;
   loading: boolean;
 }
 

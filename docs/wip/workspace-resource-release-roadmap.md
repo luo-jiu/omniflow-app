@@ -1,7 +1,7 @@
 # 工作区资源释放治理规划草案
 
 更新时间：2026-05-12
-状态：进行中（Phase 1 已落地，Phase 3 防写回基础已部分落地）
+状态：进行中（Phase 1-2 已落地，Phase 3 防写回基础已部分落地）
 
 > 本文是 `docs/wip/` 下的临时开发计划。功能稳定后，应删除本文，并把最终契约回写到 `docs/library-detail-workspace.md`、`docs/file-explorer-file-viewer-boundary.md`、`docs/media-hub-contract.md`、`docs/embedded-browser-architecture.md` 和 `docs/frontend-validation-matrix.md`。
 
@@ -158,8 +158,10 @@ src/features/workspace-resource-release/
 
 `AuthContext` / request service：
 
-- 退出登录或 401 只调用 session release，然后清认证 / 跳登录。
-- 允许 release 异步失败被吞掉并记录日志，不能阻塞登录页跳转。
+- 退出登录或 401 通过统一 auth session helper 等待一次 session release 尝试完成，然后清认证 / 跳登录。
+- release 失败只记录日志，不抛出到登录页跳转链路。
+- request service 只依赖认证会话 helper；具体 workspace release 由 `AuthProvider` 注册，避免 service 反向 import 业务 feature。
+- 多个 401 并发触发时复用同一个 in-flight release promise，避免重复关闭同一批 renderer / Electron 资源。
 
 `library detail`：
 
@@ -198,16 +200,16 @@ src/features/workspace-resource-release/
 - 右键释放后目标仓库的 MediaHub 音视频消失。
 - 右键释放不影响其他仓库已打开资源。
 
-### Phase 2：登出和登录失效接入
+### Phase 2：登出和登录失效接入（已落地）
 
 目标：退出登录和 401 登录失效彻底清 session。
 
 任务：
 
-- `AuthContext.logout()` 接入 `disposeSessionWorkspaces()`。
-- `apiRequest`、`ipcRequest`、上传 session、迁移 service 中的 401 分支接入同一个 session dispose helper，避免多套逻辑。
-- 登出跳转前后都不能重新保存 workspace state。
-- release 失败时记录日志，但不阻断登录页跳转。
+- `AuthContext.logout()` 接入 `disposeSessionWorkspaces()`。（已落地）
+- `apiRequest`、`ipcRequest`、上传 session、迁移 service 中的 401 分支接入同一个 session dispose helper，避免多套逻辑，并在跳登录前等待本地释放尝试完成。（已落地）
+- 登出跳转前后都不能重新保存 workspace state。（已落地，依赖 session dispose marker）
+- release 失败时记录日志，但不阻断登录页跳转。（已落地）
 
 验收：
 

@@ -4,6 +4,12 @@ import { loginService } from '@/service/authService';
 import { AuthContext, type User } from './auth.context';
 import { fetchCurrentUserProfile } from '@/features/user/services/user.api';
 import { runtimeLogger } from '@/utils/runtimeLogger';
+import {
+  clearAuthSessionAndDisposeWorkspaces,
+  listenAuthSessionCleared,
+  registerAuthSessionWorkspaceDisposer,
+} from '@/service/auth-session-release';
+import { disposeSessionWorkspaces } from '@/features/workspace-resource-release';
 
 function mergeUserWithProfile(profile: {
   id?: number;
@@ -33,6 +39,18 @@ function mergeUserWithProfile(profile: {
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    return registerAuthSessionWorkspaceDisposer(async () => {
+      await disposeSessionWorkspaces();
+    });
+  }, []);
+
+  useEffect(() => {
+    return listenAuthSessionCleared(() => {
+      setUser(null);
+    });
+  }, []);
 
   useEffect(() => {
     let disposed = false;
@@ -123,9 +141,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return { success: false, message: result.message };
   };
 
-  const logout = () => {
-    auth.clear();
-    setUser(null);
+  const logout = async () => {
+    await clearAuthSessionAndDisposeWorkspaces({ reason: 'manual logout' });
   };
 
   return (
