@@ -19,7 +19,7 @@
 - 未匹配当前 provider 配置的历史位置提示
 - 历史 provider 类型值提示，例如 `MINIO` 兼容映射到唯一 provider alias
 - 对象存储、Postgres、Redis 的只读可用性探针
-- 探针可用性图谱：前端打开面板后立即探测一次，之后每 5 分钟自动探测，内存中只保留最近 60 次，不持久化，重启后清空
+- 探针可用性图谱：登录后由前端应用级 runtime 立即探测一次，之后每 5 分钟自动探测；页面只订阅展示，离开页面后仍继续采样；内存中只保留最近 60 次，不持久化，退出登录 / 切换账号 / 重启后清空
 - 到存储设置、迁移任务、回收站的快捷跳转
 - 用户显式触发的历史样本记录
 
@@ -46,6 +46,7 @@
 - `views/library` 只负责打开 `resource-monitor` system view。
 - `features/system-workspace` 只负责 system view 的宿主和注册。
 - `features/resource-monitor` 负责资源监测自己的请求、格式化、加载态、错误态和展示。
+- 资源探针历史由 `features/resource-monitor/services/resource-monitor-runtime.ts` 维护，生命周期跟随登录后的应用进程，不归属页面组件。
 - 资源监测只能跳转到已有管理入口：存储配置进入 system workspace 设置页的存储分区，资料库详情页内的回收站关联进入当前资料库 system workspace 回收站，迁移任务进入迁移中心 `migration` tab。
 - 页面层不得直接拼 `/v1/resource-monitor/snapshot`。
 
@@ -60,6 +61,8 @@ GET /api/v1/resource-monitor/distribution
 GET /api/v1/resource-monitor/distribution?libraryId=123
 GET /api/v1/resource-monitor/breakdown
 GET /api/v1/resource-monitor/breakdown?libraryId=123
+GET /api/v1/resource-monitor/dashboard
+GET /api/v1/resource-monitor/dashboard?libraryId=123
 GET /api/v1/resource-monitor/probes
 POST /api/v1/resource-monitor/samples
 POST /api/v1/resource-monitor/samples?libraryId=123
@@ -67,6 +70,8 @@ POST /api/v1/resource-monitor/samples?libraryId=123&dryRun=true
 ```
 
 前端展示默认并行请求 `/distribution`、`/breakdown` 和 `/probes`，让资源分布、细分仪表盘和资源探针独立加载、独立错误、谁先返回谁先展示。`/snapshot` 继续保留为兼容聚合接口，并作为采样写链路内部生成完整快照的语义参考。
+
+`/dashboard` 是 V2 仪表盘并行接口，当前前端 service 已保留类型和请求封装，但稳定展示仍以旧 `/breakdown` 页面为准。V2 页面落地后，它会承载基础文件类型、业务集合类型和交叉矩阵统计；探针仍通过 `/probes` 独立加载。
 
 响应 `data`：
 
@@ -253,11 +258,12 @@ type ResourceMonitorSample = {
 - `dryRun`：采样写链路支持的标准 dry-run 参数；返回样本预览但不持久化。
 - `/distribution` 只返回分布相关字段；`/probes` 只返回探针相关字段；两者都沿用同一 `ResourceMonitorSnapshot` 外形，未加载的分区保持空 summary / 空数组。
 - `/breakdown` 只返回细分仪表盘字段；`libraries / categories / statuses / anomalies` 分别对应资料库排行、内置类型分类、资源状态和只读诊断摘要。内置类型按内容集合统计：从引用节点向上寻找最外层非 `DEF` 内置类型，集合内部文件都归属该外层类型；归档模式允许嵌套，分类统计不按 `archiveMode` 递归聚合。
+- `/dashboard` 只返回 V2 统计字段；`fileTypes` 表示基础文件类型分布，`collections` 表示业务集合分布，`collectionFileTypeMatrix` 表示业务集合 x 基础文件类型。基础文件类型优先使用后端 MIME / content type，扩展名只做兜底，避免 `.ts` 等冲突后缀只靠后缀误判。
 
 ## 5. 当前限制
 
-- 不做资源分布自动刷新；资源探针会在前端打开面板后每 5 分钟自动探测一次。
-- 探针历史只保留在当前 renderer 内存中，每个探针最多 60 次；不写 localStorage，不写后端，应用重启后清空。
+- 不做资源分布自动刷新；资源探针会在登录后由应用级 runtime 每 5 分钟自动探测一次。
+- 探针历史只保留在当前 renderer 内存中，每个探针最多 60 次；不写 localStorage，不写后端，退出登录 / 切换账号 / 应用重启后清空。
 - 不做历史曲线；当前只支持用户点击“记录样本”写入单次历史样本。
 - 不提供清理、迁移或修复动作。
 - 只提供到存储设置、迁移任务、当前资料库回收站的跳转，不在资源监测内直接执行变更；仓库页没有具体 `libraryId` 时点击回收站会提示先进入具体资料库。

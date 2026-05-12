@@ -2,20 +2,11 @@ import React from 'react';
 import { Empty, Spin } from '@douyinfe/semi-ui';
 import styled from 'styled-components';
 import type { ResourceMonitorProbeTarget } from '../services/resource-monitor.api';
-
-export interface ResourceProbeHistoryEntry {
-  checkedAt: string;
-  error?: string;
-  latencyMs: number;
-  status: ResourceMonitorProbeTarget['status'];
-}
-
-export interface ResourceProbeHistoryRecord {
-  entries: ResourceProbeHistoryEntry[];
-  target: ResourceMonitorProbeTarget;
-}
-
-export type ResourceProbeHistoryMap = Record<string, ResourceProbeHistoryRecord>;
+import type {
+  ResourceProbeHistoryEntry,
+  ResourceProbeHistoryItem,
+  ResourceProbeHistoryMap,
+} from '../services/resource-monitor-runtime';
 
 interface ResourceProbeHistoryPanelProps {
   error: string;
@@ -75,8 +66,8 @@ const ResourceProbeHistoryPanel: React.FC<ResourceProbeHistoryPanelProps> = ({
   loading,
   probes,
 }) => {
-  const records = React.useMemo<ResourceProbeHistoryRecord[]>(() => {
-    const merged = new Map<string, ResourceProbeHistoryRecord>();
+  const records = React.useMemo<ResourceProbeHistoryItem[]>(() => {
+    const merged = new Map<string, ResourceProbeHistoryItem>();
     probes.forEach((target) => {
       merged.set(target.key, history[target.key] || { entries: [], target });
     });

@@ -6,8 +6,10 @@ import { fetchCurrentUserProfile } from '@/features/user/services/user.api';
 import { runtimeLogger } from '@/utils/runtimeLogger';
 import {
   clearAuthSessionAndDisposeWorkspaces,
+  disposeAuthSessionRuntimes,
   listenAuthSessionCleared,
   registerAuthSessionWorkspaceDisposer,
+  startAuthSessionRuntimes,
 } from '@/service/auth-session-release';
 import { disposeSessionWorkspaces } from '@/features/workspace-resource-release';
 
@@ -51,6 +53,14 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setUser(null);
     });
   }, []);
+
+  useEffect(() => {
+    if (user) {
+      startAuthSessionRuntimes();
+      return;
+    }
+    disposeAuthSessionRuntimes();
+  }, [user]);
 
   useEffect(() => {
     let disposed = false;

@@ -7,7 +7,12 @@ export interface ClearAuthSessionOptions {
 }
 
 type AuthSessionWorkspaceDisposer = (options: Required<Pick<ClearAuthSessionOptions, 'reason'>>) => Promise<void> | void;
+type AuthSessionRuntime = {
+  dispose?: () => void;
+  start?: () => void;
+};
 
+const authSessionRuntimes = new Set<AuthSessionRuntime>();
 let workspaceDisposer: AuthSessionWorkspaceDisposer | null = null;
 let pendingWorkspaceDispose: Promise<void> | null = null;
 
@@ -18,6 +23,33 @@ export function registerAuthSessionWorkspaceDisposer(disposer: AuthSessionWorksp
       workspaceDisposer = null;
     }
   };
+}
+
+export function registerAuthSessionRuntime(runtime: AuthSessionRuntime) {
+  authSessionRuntimes.add(runtime);
+  return () => {
+    authSessionRuntimes.delete(runtime);
+  };
+}
+
+export function startAuthSessionRuntimes() {
+  authSessionRuntimes.forEach((runtime) => {
+    try {
+      runtime.start?.();
+    } catch (error) {
+      runtimeLogger.warn('start auth session runtime failed', { error });
+    }
+  });
+}
+
+export function disposeAuthSessionRuntimes() {
+  authSessionRuntimes.forEach((runtime) => {
+    try {
+      runtime.dispose?.();
+    } catch (error) {
+      runtimeLogger.warn('dispose auth session runtime failed', { error });
+    }
+  });
 }
 
 function redirectToLoginIfNeeded() {
@@ -49,6 +81,7 @@ async function disposeWorkspaces(reason: string) {
 }
 
 function clearAuthState() {
+  disposeAuthSessionRuntimes();
   auth.clear();
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('omniflow:auth-session-cleared'));
@@ -67,6 +100,7 @@ export function listenAuthSessionCleared(listener: () => void) {
 
 export async function clearAuthSessionAndDisposeWorkspaces(options: ClearAuthSessionOptions = {}) {
   const reason = options.reason || 'auth session cleared';
+  disposeAuthSessionRuntimes();
   await disposeWorkspaces(reason);
   clearAuthState();
   if (options.redirectToLogin) {

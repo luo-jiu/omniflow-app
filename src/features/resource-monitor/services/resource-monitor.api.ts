@@ -156,6 +156,43 @@ export interface ResourceMonitorBreakdown {
   breakdownError?: string;
 }
 
+export interface ResourceMonitorDashboardDimension {
+  key: string;
+  label: string;
+  builtInType?: string;
+  physicalBytes: number;
+  referencedBytes: number;
+  objectCount: number;
+  fileRefCount: number;
+  percent: number;
+}
+
+export interface ResourceMonitorDashboardMatrixItem {
+  collectionKey: string;
+  collectionLabel: string;
+  collectionBuiltInType?: string;
+  fileTypeKey: string;
+  fileTypeLabel: string;
+  physicalBytes: number;
+  referencedBytes: number;
+  objectCount: number;
+  fileRefCount: number;
+  percentOfCollection: number;
+  percentOfTotal: number;
+}
+
+export interface ResourceMonitorDashboard {
+  generatedAt: string;
+  summary: ResourceMonitorBreakdownSummary;
+  fileTypes: ResourceMonitorDashboardDimension[];
+  collections: ResourceMonitorDashboardDimension[];
+  collectionFileTypeMatrix: ResourceMonitorDashboardMatrixItem[];
+  libraries: ResourceMonitorBreakdownLibrary[];
+  statuses: ResourceMonitorBreakdownStatus[];
+  anomalies: ResourceMonitorBreakdownAnomaly[];
+  dashboardError?: string;
+}
+
 export interface ResourceMonitorSnapshotOptions {
   libraryId?: number;
   dryRun?: boolean;
@@ -236,6 +273,18 @@ const emptyBreakdown: ResourceMonitorBreakdown = {
   breakdownError: '',
 };
 
+const emptyDashboard: ResourceMonitorDashboard = {
+  generatedAt: '',
+  summary: { ...emptyBreakdown.summary },
+  fileTypes: [],
+  collections: [],
+  collectionFileTypeMatrix: [],
+  libraries: [],
+  statuses: [],
+  anomalies: [],
+  dashboardError: '',
+};
+
 export async function fetchResourceMonitorSnapshot(
   options: ResourceMonitorSnapshotOptions = {},
 ): Promise<ResourceMonitorSnapshot> {
@@ -269,6 +318,16 @@ export async function fetchResourceMonitorBreakdown(
     : '';
   const body = await request(`/v1/resource-monitor/breakdown${query}`, { method: 'GET' });
   return (body?.data || emptyBreakdown) as ResourceMonitorBreakdown;
+}
+
+export async function fetchResourceMonitorDashboard(
+  options: ResourceMonitorSnapshotOptions = {},
+): Promise<ResourceMonitorDashboard> {
+  const query = options.libraryId && options.libraryId > 0
+    ? `?libraryId=${encodeURIComponent(String(options.libraryId))}`
+    : '';
+  const body = await request(`/v1/resource-monitor/dashboard${query}`, { method: 'GET' });
+  return (body?.data || emptyDashboard) as ResourceMonitorDashboard;
 }
 
 export async function captureResourceMonitorSample(

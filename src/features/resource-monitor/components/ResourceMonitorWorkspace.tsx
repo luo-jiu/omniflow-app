@@ -13,20 +13,13 @@ import {
   captureResourceMonitorSample,
   fetchResourceMonitorBreakdown,
   fetchResourceMonitorDistribution,
-  fetchResourceMonitorProbes,
   type ResourceMonitorBreakdown,
-  type ResourceMonitorProbeTarget,
   type ResourceMonitorSnapshot,
   type ResourceMonitorStorageItem,
 } from '../services/resource-monitor.api';
+import { resourceMonitorProbeRuntime } from '../services/resource-monitor-runtime';
 import ResourceBreakdownDashboard from './ResourceBreakdownDashboard';
-import ResourceProbeHistoryPanel, {
-  type ResourceProbeHistoryEntry,
-  type ResourceProbeHistoryMap,
-} from './ResourceProbeHistoryPanel';
-
-const PROBE_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
-const PROBE_HISTORY_LIMIT = 60;
+import ResourceProbeHistoryPanel from './ResourceProbeHistoryPanel';
 
 function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
@@ -70,26 +63,30 @@ const ResourceMonitorWorkspace: React.FC<SystemWorkspaceViewProps> = ({
   onSettingsSectionChange,
 }) => {
   const [distributionSnapshot, setDistributionSnapshot] = React.useState<ResourceMonitorSnapshot | null>(null);
-  const [probeSnapshot, setProbeSnapshot] = React.useState<ResourceMonitorSnapshot | null>(null);
   const [breakdownSnapshot, setBreakdownSnapshot] = React.useState<ResourceMonitorBreakdown | null>(null);
   const [distributionLoading, setDistributionLoading] = React.useState(false);
-  const [probeLoading, setProbeLoading] = React.useState(false);
   const [breakdownLoading, setBreakdownLoading] = React.useState(false);
   const [sampling, setSampling] = React.useState(false);
   const [distributionErrorState, setDistributionErrorState] = React.useState<string>('');
-  const [probeErrorState, setProbeErrorState] = React.useState<string>('');
   const [breakdownErrorState, setBreakdownErrorState] = React.useState<string>('');
-  const [probeHistory, setProbeHistory] = React.useState<ResourceProbeHistoryMap>({});
   const mountedRef = React.useRef(true);
   const distributionRequestIdRef = React.useRef(0);
-  const probeRequestIdRef = React.useRef(0);
   const breakdownRequestIdRef = React.useRef(0);
+  const probeRuntime = React.useSyncExternalStore(
+    resourceMonitorProbeRuntime.subscribe,
+    resourceMonitorProbeRuntime.getState,
+    resourceMonitorProbeRuntime.getState,
+  );
 
   React.useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
     };
+  }, []);
+
+  React.useEffect(() => {
+    resourceMonitorProbeRuntime.start();
   }, []);
 
   const loadDistribution = React.useCallback(async () => {
@@ -134,52 +131,15 @@ const ResourceMonitorWorkspace: React.FC<SystemWorkspaceViewProps> = ({
     }
   }, [libraryId]);
 
-  const appendProbeHistory = React.useCallback((nextProbes: ResourceMonitorProbeTarget[]) => {
-    if (nextProbes.length === 0) return;
-    setProbeHistory((prev) => {
-      const next: ResourceProbeHistoryMap = { ...prev };
-      nextProbes.forEach((target) => {
-        const checkedAt = target.checkedAt || new Date().toISOString();
-        const entry: ResourceProbeHistoryEntry = {
-          checkedAt,
-          error: target.error,
-          latencyMs: target.latencyMs,
-          status: target.status,
-        };
-        const existing = next[target.key]?.entries || [];
-        const last = existing[existing.length - 1];
-        const entries = last?.checkedAt === checkedAt
-          ? [...existing.slice(0, -1), entry]
-          : [...existing, entry].slice(-PROBE_HISTORY_LIMIT);
-        next[target.key] = { entries, target };
-      });
-      return next;
-    });
-  }, []);
-
   const loadProbes = React.useCallback(async (options?: { silent?: boolean }) => {
-    const requestId = probeRequestIdRef.current + 1;
-    probeRequestIdRef.current = requestId;
-    setProbeLoading(true);
-    setProbeErrorState('');
     try {
-      const nextSnapshot = await fetchResourceMonitorProbes();
-      if (!mountedRef.current || probeRequestIdRef.current !== requestId) return;
-      setProbeSnapshot(nextSnapshot);
-      appendProbeHistory(nextSnapshot.probes || []);
+      await resourceMonitorProbeRuntime.refresh(options);
     } catch (err: any) {
-      if (!mountedRef.current || probeRequestIdRef.current !== requestId) return;
-      const message = err?.message || '加载资源探针失败';
-      setProbeErrorState(message);
-      if (!options?.silent) {
-        Toast.error(message);
-      }
-    } finally {
-      if (mountedRef.current && probeRequestIdRef.current === requestId) {
-        setProbeLoading(false);
+      if (mountedRef.current && !options?.silent) {
+        Toast.error(err?.message || '加载资源探针失败');
       }
     }
-  }, [appendProbeHistory]);
+  }, []);
 
   const loadSnapshot = React.useCallback(() => {
     void loadDistribution();
@@ -191,21 +151,12 @@ const ResourceMonitorWorkspace: React.FC<SystemWorkspaceViewProps> = ({
     loadSnapshot();
   }, [loadSnapshot]);
 
-  React.useEffect(() => {
-    const timer = window.setInterval(() => {
-      void loadProbes({ silent: true });
-    }, PROBE_REFRESH_INTERVAL_MS);
-    return () => {
-      window.clearInterval(timer);
-    };
-  }, [loadProbes]);
-
   const summary = distributionSnapshot?.summary;
-  const probeSummary = probeSnapshot?.probeSummary;
-  const probes = probeSnapshot?.probes || [];
+  const probeSummary = probeRuntime.snapshot?.probeSummary;
+  const probes = probeRuntime.snapshot?.probes || [];
   const distributionError = distributionSnapshot?.distributionError || '';
   const storage = distributionSnapshot?.storage || [];
-  const isRefreshing = distributionLoading || breakdownLoading || probeLoading;
+  const isRefreshing = distributionLoading || breakdownLoading || probeRuntime.loading;
   const canOpenRecycleBin = libraryId > 0;
   const openStorageSettings = React.useCallback(() => {
     onSettingsSectionChange?.('storage');
@@ -248,7 +199,7 @@ const ResourceMonitorWorkspace: React.FC<SystemWorkspaceViewProps> = ({
             {' · '}
             细分：{formatTime(breakdownSnapshot?.generatedAt || '')}
             {' · '}
-            探针：{formatTime(probeSnapshot?.generatedAt || '')}
+            探针：{formatTime(probeRuntime.snapshot?.generatedAt || '')}
           </div>
         </div>
         <div className="monitor-toolbar-actions">
@@ -387,9 +338,9 @@ const ResourceMonitorWorkspace: React.FC<SystemWorkspaceViewProps> = ({
       </div>
 
       <ResourceProbeHistoryPanel
-        error={probeErrorState}
-        history={probeHistory}
-        loading={probeLoading}
+        error={probeRuntime.error}
+        history={probeRuntime.history}
+        loading={probeRuntime.loading}
         probes={probes}
       />
 
