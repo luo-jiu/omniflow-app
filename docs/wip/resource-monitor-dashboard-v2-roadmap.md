@@ -1,7 +1,7 @@
 # 资源监测仪表盘 V2 改进规划草案
 
 更新时间：2026-05-12
-状态：进行中（Phase 1 已落地，Phase 2 已落地）
+状态：进行中（Phase 1 已落地，Phase 2 已落地，Phase 3 已落地，Phase 4 已落地）
 
 > 本文是 `docs/wip/` 下的临时开发计划。V2 稳定后，应删除本文，并把最终结论回写到 `docs/resource-monitor-console.md`、`docs/frontend-validation-matrix.md`、后端 `docs/architecture/resource-monitor-console.md` 以及 API 契约相关文档。
 
@@ -133,13 +133,19 @@ V2 不再把所有分类塞进一个 `categories` 概念里，而是拆成：
 
 ### 5.1 图表库
 
-优先采用 Semi 生态兼容的 VChart：
+原计划优先采用 Semi 生态兼容的 VChart，但在当前 Vite / Rollup 构建链路中，`@visactor/react-vchart` 1.x 和 2.x 都会触发 Rollup 内部静态分析错误：
 
-- 依赖：`@visactor/react-vchart`
-- 原因：
-  - Semi 官方数据可视化方案基于 VChart。
-  - 支持现代图表、主题、tooltip、交互和动画。
-  - 避免继续手写 CSS 饼图。
+```text
+Cannot add property 0, object is not extensible
+```
+
+因此 Phase 3 先采用 `echarts`，并只在 `features/resource-monitor` 内做一个很薄的 React 生命周期封装：
+
+- 由 `ResourceMonitorCharts.tsx` 负责 `echarts.init / setOption / resize / dispose`。
+- 图表颜色从当前主题 CSS 变量读取为真实颜色，避免 canvas 无法解析 CSS var。
+- 资源监测 system view 使用懒加载壳，避免图表库进入设置 / 上传中心等其他 system view 的初始链路。
+- 先替换最弱的手写图：资源组成横向条形图和资源状态 donut。
+- 仍避免继续手写 CSS 饼图；后续如 VChart 构建兼容性恢复，可再评估是否迁移。
 
 暂不建议继续把饼图作为主图。饼图只适合少量分类和粗略占比，资源监测的分类维度更适合条形、堆叠条形、矩阵和趋势图。
 
@@ -249,18 +255,19 @@ type ResourceMonitorDashboard = {
 - 手动刷新复用 runtime。（已落地）
 - 仍需手工验证：离开资源监测页面超过 5 分钟后返回，历史胶囊应继续累积。
 
-### Phase 3：VChart 接入
+### Phase 3：图表库接入
 
-- 引入 `@visactor/react-vchart`。
-- 建立统一图表主题，适配 Semi 明暗主题。
-- 先用 VChart 替换当前最弱的饼图 / 手写图。
-- 保留当前数据卡和诊断列表，降低一次性改动风险。
+- 引入 `echarts`。（已落地）
+- 建立资源监测局部图表封装，适配 Semi 明暗主题。（已落地）
+- 资源监测 system view 懒加载，避免图表库成本扩散到其他 system view。（已落地）
+- 先用图表库替换当前最弱的手写图。（已落地：资源组成主图）
+- 移除与仪表盘关键指标重复的摘要卡，回收站入口收敛到工具栏。（已落地）
 
 ### Phase 4：V2 仪表盘并行落地
 
-- 新增 V2 dashboard 组件，与当前页面并行存在。
-- 默认可通过内部开关切换或局部模块替换。
-- 完成业务集合分布、集合内部构成、基础文件类型分布、资料库排行。
+- 前端主展示切到 `/dashboard`，旧 `/breakdown` 保留兼容接口。（已落地）
+- 默认展示业务集合分布，而不是旧的基础文件类型混合分类。（已落地）
+- 完成业务集合分布、集合内部构成、基础文件类型分布、资料库排行。（已落地）
 - 旧统计视图确认无回归后移除。
 
 ### Phase 5：性能收敛

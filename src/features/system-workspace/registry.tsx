@@ -17,7 +17,7 @@ import SettingsWorkspace from './views/settings';
 import UploadsWorkspace from './views/uploads';
 import RecycleBinWorkspace from './views/recycle-bin';
 import ProfileWorkspace from './views/profile';
-import ResourceMonitorWorkspace from '@/features/resource-monitor/components/ResourceMonitorWorkspace';
+import ResourceMonitorWorkspace from './views/resource-monitor';
 
 export const systemWorkspaceMeta: Record<SystemWorkspaceView, SystemWorkspaceViewMeta> = {
   overview: {

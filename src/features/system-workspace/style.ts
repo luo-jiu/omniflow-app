@@ -105,6 +105,13 @@ export const SystemWorkspaceViewport = styled.div`
     margin: 0;
   }
 
+  .system-workspace-lazy-state {
+    min-height: 180px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
   &::-webkit-scrollbar {
     width: 8px;
     height: 8px;

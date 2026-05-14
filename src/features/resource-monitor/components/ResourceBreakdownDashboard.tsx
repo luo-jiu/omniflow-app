@@ -15,12 +15,18 @@ import type {
   ResourceMonitorBreakdownAnomaly,
   ResourceMonitorBreakdownCategory,
   ResourceMonitorBreakdownLibrary,
-  ResourceMonitorBreakdownStatus,
+  ResourceMonitorDashboard,
+  ResourceMonitorDashboardDimension,
+  ResourceMonitorDashboardMatrixItem,
   ResourceMonitorStorageItem,
 } from '../services/resource-monitor.api';
+import {
+  ResourceCompositionChart,
+} from './ResourceMonitorCharts';
 
 interface ResourceBreakdownDashboardProps {
-  breakdown: ResourceMonitorBreakdown | null;
+  breakdown?: ResourceMonitorBreakdown | null;
+  dashboard?: ResourceMonitorDashboard | null;
   error: string;
   loading: boolean;
   onRetry?: () => void;
@@ -36,7 +42,8 @@ const STATUS_ACCENT: Record<string, string> = {
   orphan: '#ef4444',
 };
 
-type CompositionMode = 'library' | 'category' | 'storage' | 'status';
+type DashboardSource = ResourceMonitorBreakdown | ResourceMonitorDashboard;
+type CompositionMode = 'collection' | 'fileType' | 'matrix' | 'library' | 'storage' | 'status';
 
 interface CompositionItem {
   key: string;
@@ -48,8 +55,10 @@ interface CompositionItem {
 }
 
 const COMPOSITION_MODES: Array<{ key: CompositionMode; label: string }> = [
+  { key: 'collection', label: '业务集合' },
+  { key: 'fileType', label: '基础类型' },
+  { key: 'matrix', label: '集合构成' },
   { key: 'library', label: '资料库' },
-  { key: 'category', label: '归档分类' },
   { key: 'storage', label: '物理存储' },
   { key: 'status', label: '资源状态' },
 ];
@@ -88,55 +97,57 @@ function percentWidth(value: number): string {
   return `${Math.min(100, Math.max(0, value))}%`;
 }
 
-function compositionTitle(item: CompositionItem): string {
-  return `${item.label}：${formatBytes(item.value)}，占 ${item.percent.toFixed(1)}%。${item.meta}。物理容量按当前维度去重统计。`;
-}
-
-function metricItems(breakdown: ResourceMonitorBreakdown) {
+function metricItems(snapshot: DashboardSource) {
   return [
     {
       accent: '#f59e0b',
       icon: <IconPieChartStroked />,
       label: '物理占用',
       meta: '对象存储真实容量',
-      value: formatBytes(breakdown.summary.physicalBytes),
+      value: formatBytes(snapshot.summary.physicalBytes),
     },
     {
       accent: '#38bdf8',
       icon: <IconLayers />,
       label: '对象数',
       meta: 'distinct storage object',
-      value: formatNumber(breakdown.summary.objectCount),
+      value: formatNumber(snapshot.summary.objectCount),
     },
     {
       accent: '#3b82f6',
       icon: <IconLink />,
       label: '文件引用',
-      meta: `引用展开 ${formatBytes(breakdown.summary.referencedBytes)}`,
-      value: formatNumber(breakdown.summary.fileRefCount),
+      meta: `引用展开 ${formatBytes(snapshot.summary.referencedBytes)}`,
+      value: formatNumber(snapshot.summary.fileRefCount),
     },
     {
       accent: '#14b8a6',
       icon: <IconFolder />,
       label: '资料库',
       meta: '当前范围有资源',
-      value: formatNumber(breakdown.summary.libraryCount),
+      value: formatNumber(snapshot.summary.libraryCount),
     },
     {
       accent: '#a855f7',
       icon: <IconArchive />,
       label: '归档目录',
       meta: 'archiveMode = 1',
-      value: formatNumber(breakdown.summary.archiveDirectoryCount),
+      value: formatNumber(snapshot.summary.archiveDirectoryCount),
     },
     {
       accent: '#ef4444',
       icon: <IconAlertTriangle />,
       label: '维护风险',
-      meta: `多引用 ${formatNumber(breakdown.summary.multiRefObjectCount)} 对象`,
-      value: formatBytes(breakdown.summary.recycleBytes + breakdown.summary.orphanBytes),
+      meta: `多引用 ${formatNumber(snapshot.summary.multiRefObjectCount)} 对象`,
+      value: formatBytes(snapshot.summary.recycleBytes + snapshot.summary.orphanBytes),
     },
   ];
+}
+
+function snapshotRuntimeError(snapshot: DashboardSource): string | undefined {
+  if ('dashboardError' in snapshot) return snapshot.dashboardError;
+  if ('breakdownError' in snapshot) return snapshot.breakdownError;
+  return undefined;
 }
 
 function storageTotal(items: ResourceMonitorStorageItem[]): number {
@@ -176,20 +187,53 @@ function withOtherCompositionItem<T>(
   ];
 }
 
+function dimensionMeta(item: Pick<ResourceMonitorDashboardDimension, 'objectCount' | 'fileRefCount'>): string {
+  return `${formatNumber(item.objectCount)} 对象 · ${formatNumber(item.fileRefCount)} 引用`;
+}
+
+function buildDimensionCompositionItems(
+  rows: Array<ResourceMonitorBreakdownCategory | ResourceMonitorDashboardDimension>,
+  total: number,
+): CompositionItem[] {
+  return withOtherCompositionItem(rows, total, 7, (item, index) => ({
+    key: item.key,
+    label: item.label,
+    meta: dimensionMeta(item),
+    value: item.physicalBytes,
+    accent: CATEGORY_ACCENTS[index % CATEGORY_ACCENTS.length],
+  }));
+}
+
+function buildMatrixCompositionItems(
+  rows: ResourceMonitorDashboardMatrixItem[],
+  total: number,
+): CompositionItem[] {
+  return withOtherCompositionItem(rows, total, 8, (item, index) => ({
+    key: `${item.collectionKey}:${item.fileTypeKey}`,
+    label: `${item.collectionLabel} / ${item.fileTypeLabel}`,
+    meta: `${dimensionMeta(item)} · 集合内 ${item.percentOfCollection.toFixed(1)}%`,
+    value: item.physicalBytes,
+    accent: CATEGORY_ACCENTS[index % CATEGORY_ACCENTS.length],
+  }));
+}
+
 function buildCompositionItems(
   mode: CompositionMode,
-  breakdown: ResourceMonitorBreakdown,
+  snapshot: DashboardSource,
   storage: ResourceMonitorStorageItem[],
+  dashboard?: ResourceMonitorDashboard | null,
 ): CompositionItem[] {
-  if (mode === 'category') {
-    const total = breakdown.summary.physicalBytes;
-    return withOtherCompositionItem(breakdown.categories, total, 7, (item, index) => ({
-      key: item.key,
-      label: item.label,
-      meta: `${formatNumber(item.objectCount)} 对象 · ${formatNumber(item.fileRefCount)} 引用`,
-      value: item.physicalBytes,
-      accent: CATEGORY_ACCENTS[index % CATEGORY_ACCENTS.length],
-    }));
+  if (mode === 'collection') {
+    const collections = dashboard?.collections || ('categories' in snapshot ? snapshot.categories : []);
+    return buildDimensionCompositionItems(collections, snapshot.summary.physicalBytes);
+  }
+
+  if (mode === 'fileType') {
+    return buildDimensionCompositionItems(dashboard?.fileTypes || [], snapshot.summary.physicalBytes);
+  }
+
+  if (mode === 'matrix') {
+    return buildMatrixCompositionItems(dashboard?.collectionFileTypeMatrix || [], snapshot.summary.physicalBytes);
   }
 
   if (mode === 'storage') {
@@ -204,7 +248,7 @@ function buildCompositionItems(
   }
 
   if (mode === 'status') {
-    return breakdown.statuses.map((item) => ({
+    return snapshot.statuses.map((item) => ({
       key: item.key,
       label: item.label,
       meta: `${formatNumber(item.objectCount)} 对象 · ${formatNumber(item.fileRefCount)} 引用`,
@@ -214,8 +258,8 @@ function buildCompositionItems(
     }));
   }
 
-  const total = breakdown.summary.physicalBytes;
-  return withOtherCompositionItem(breakdown.libraries, total, 7, (item, index) => ({
+  const total = snapshot.summary.physicalBytes;
+  return withOtherCompositionItem(snapshot.libraries, total, 7, (item, index) => ({
     key: String(item.libraryId),
     label: item.libraryName || `资料库 ${item.libraryId}`,
     meta: `${formatNumber(item.objectCount)} 对象 · ${formatNumber(item.fileRefCount)} 引用`,
@@ -229,32 +273,9 @@ function percentOfNumber(part: number, total: number): number {
   return Math.round((part / total) * 1000) / 10;
 }
 
-function statusDonutStyle(statuses: ResourceMonitorBreakdownStatus[]): React.CSSProperties {
-  const total = statuses.reduce((sum, status) => sum + Math.max(0, status.physicalBytes), 0);
-  if (total <= 0) {
-    return {
-      '--donut-bg': 'conic-gradient(color-mix(in srgb, var(--app-text-muted) 24%, transparent) 0 100%)',
-    } as React.CSSProperties;
-  }
-  let cursor = 0;
-  const segments = statuses
-    .filter((status) => status.physicalBytes > 0)
-    .map((status) => {
-      const start = cursor;
-      const width = Math.max(0.6, status.physicalBytes / total * 100);
-      cursor = Math.min(100, cursor + width);
-      return `${STATUS_ACCENT[status.key] || '#64748b'} ${start}% ${cursor}%`;
-    });
-  if (segments.length === 0) {
-    return {
-      '--donut-bg': 'conic-gradient(color-mix(in srgb, var(--app-text-muted) 24%, transparent) 0 100%)',
-    } as React.CSSProperties;
-  }
-  return { '--donut-bg': `conic-gradient(${segments.join(', ')})` } as React.CSSProperties;
-}
-
 const ResourceBreakdownDashboard: React.FC<ResourceBreakdownDashboardProps> = ({
   breakdown,
+  dashboard,
   error,
   loading,
   onRetry,
@@ -262,9 +283,10 @@ const ResourceBreakdownDashboard: React.FC<ResourceBreakdownDashboardProps> = ({
   storageLoading = false,
   storage = [],
 }) => {
-  const [compositionMode, setCompositionMode] = React.useState<CompositionMode>('library');
+  const [compositionMode, setCompositionMode] = React.useState<CompositionMode>('collection');
+  const snapshot = dashboard || breakdown || null;
 
-  if (loading && !breakdown) {
+  if (loading && !snapshot) {
     return (
       <DashboardRoot>
         <div className="dashboard-state">
@@ -274,7 +296,7 @@ const ResourceBreakdownDashboard: React.FC<ResourceBreakdownDashboardProps> = ({
     );
   }
 
-  if (error && !breakdown) {
+  if (error && !snapshot) {
     return (
       <DashboardRoot>
         <div className="dashboard-state error">
@@ -289,7 +311,7 @@ const ResourceBreakdownDashboard: React.FC<ResourceBreakdownDashboardProps> = ({
     );
   }
 
-  if (!breakdown) {
+  if (!snapshot) {
     return (
       <DashboardRoot>
         <div className="dashboard-state">
@@ -299,15 +321,16 @@ const ResourceBreakdownDashboard: React.FC<ResourceBreakdownDashboardProps> = ({
     );
   }
 
-  const hasData = breakdown.summary.physicalBytes > 0 || breakdown.summary.objectCount > 0;
-  const categories = breakdown.categories.slice(0, 6);
-  const libraries = breakdown.libraries.slice(0, 5);
-  const compositionItems = buildCompositionItems(compositionMode, breakdown, storage);
+  const hasData = snapshot.summary.physicalBytes > 0 || snapshot.summary.objectCount > 0;
+  const collections = (dashboard?.collections || ('categories' in snapshot ? snapshot.categories : [])).slice(0, 6);
+  const libraries = snapshot.libraries.slice(0, 5);
+  const compositionItems = buildCompositionItems(compositionMode, snapshot, storage, dashboard);
   const compositionTotalBytes = compositionMode === 'storage'
     ? storageTotal(storage)
-    : breakdown.summary.physicalBytes;
+    : snapshot.summary.physicalBytes;
   const storageWaiting = compositionMode === 'storage' && storageLoading && storage.length === 0;
   const storageFailed = compositionMode === 'storage' && Boolean(storageError) && storage.length === 0;
+  const runtimeError = snapshotRuntimeError(snapshot);
 
   return (
     <DashboardRoot>
@@ -315,20 +338,20 @@ const ResourceBreakdownDashboard: React.FC<ResourceBreakdownDashboardProps> = ({
         <div>
           <div className="dashboard-title">
             <IconPulse />
-            <span>资源细分仪表盘</span>
+            <span>资源统计仪表盘</span>
           </div>
           <div className="dashboard-meta">
-            细分：{formatTime(breakdown.generatedAt)} · 物理去重 / 引用展开分离统计
+            {dashboard ? 'V2：' : '细分：'}{formatTime(snapshot.generatedAt)} · 业务集合 / 基础类型分离统计
           </div>
         </div>
         <div className="dashboard-badge">
-          {breakdown.summary.multiRefObjectCount > 0 ? '存在多引用' : '对象去重'}
+          {snapshot.summary.multiRefObjectCount > 0 ? '存在多引用' : '对象去重'}
         </div>
       </div>
 
-      {error || breakdown.breakdownError ? (
+      {error || runtimeError ? (
         <div className="dashboard-inline-error">
-          <span>{error || breakdown.breakdownError}</span>
+          <span>{error || runtimeError}</span>
           {onRetry ? (
             <Button onClick={onRetry} size="small" theme="borderless">
               重试
@@ -338,7 +361,7 @@ const ResourceBreakdownDashboard: React.FC<ResourceBreakdownDashboardProps> = ({
       ) : null}
 
       <div className="metric-grid">
-        {metricItems(breakdown).map((item) => (
+        {metricItems(snapshot).map((item) => (
           <div className="metric-tile" key={item.label} style={accentStyle(item.accent)}>
             <div className="metric-icon">{item.icon}</div>
             <div className="metric-copy">
@@ -389,32 +412,24 @@ const ResourceBreakdownDashboard: React.FC<ResourceBreakdownDashboardProps> = ({
                 </div>
               ) : compositionItems.length === 0 ? (
                 <div className="chart-empty">暂无该维度数据</div>
-              ) : compositionItems.map((item) => (
-                <CompositionBar item={item} key={item.key} />
-              ))}
-            </div>
-            <div className="status-card">
-              <div
-                className="status-donut"
-                style={statusDonutStyle(breakdown.statuses)}
-                title="状态主归属：对象有可见引用优先归为可见资源；没有可见引用但有回收站引用归为回收站；没有任何引用归为孤儿对象。"
-              >
-                <div className="status-donut-inner">
-                  <span>状态</span>
-                  <strong>{formatBytes(breakdown.summary.physicalBytes)}</strong>
+              ) : (
+                <div className="composition-chart-layout">
+                  <div className="composition-chart-area">
+                    <ResourceCompositionChart items={compositionItems} />
+                  </div>
+                  <div className="composition-legend">
+                    {compositionItems.map((item) => (
+                      <CompositionLegendItem item={item} key={item.key} />
+                    ))}
+                  </div>
                 </div>
-              </div>
-              <div className="status-stack">
-                {breakdown.statuses.map((status) => (
-                  <StatusSegment key={status.key} status={status} />
-                ))}
-              </div>
+              )}
             </div>
           </div>
           <div className="category-strip">
-            {categories.length === 0 ? (
-              <div className="strip-empty">暂无分类数据</div>
-            ) : categories.map((item, index) => (
+            {collections.length === 0 ? (
+              <div className="strip-empty">暂无业务集合数据</div>
+            ) : collections.map((item, index) => (
               <CategoryChip
                 accent={CATEGORY_ACCENTS[index % CATEGORY_ACCENTS.length]}
                 item={item}
@@ -427,7 +442,7 @@ const ResourceBreakdownDashboard: React.FC<ResourceBreakdownDashboardProps> = ({
         <div className="rank-panel">
           <div className="panel-header">
             <span>资料库排行</span>
-            <span>{breakdown.libraries.length} 个</span>
+            <span>{snapshot.libraries.length} 个</span>
           </div>
           {libraries.length === 0 ? (
             <div className="dashboard-mini-state">暂无资料库资源</div>
@@ -440,13 +455,13 @@ const ResourceBreakdownDashboard: React.FC<ResourceBreakdownDashboardProps> = ({
       <div className="anomaly-panel">
         <div className="panel-header">
           <span>诊断摘要</span>
-          <span>{breakdown.anomalies.length} 条</span>
+          <span>{snapshot.anomalies.length} 条</span>
         </div>
-        {breakdown.anomalies.length === 0 ? (
+        {snapshot.anomalies.length === 0 ? (
           <div className="dashboard-mini-state">暂无明显风险项</div>
         ) : (
           <div className="anomaly-list">
-            {breakdown.anomalies.map((item) => (
+            {snapshot.anomalies.map((item) => (
               <AnomalyItem item={item} key={item.key} />
             ))}
           </div>
@@ -456,45 +471,23 @@ const ResourceBreakdownDashboard: React.FC<ResourceBreakdownDashboardProps> = ({
   );
 };
 
-const CompositionBar: React.FC<{ item: CompositionItem }> = ({ item }) => (
+const CompositionLegendItem: React.FC<{ item: CompositionItem }> = ({ item }) => (
   <div
-    aria-label={compositionTitle(item)}
-    className="composition-row"
+    className="composition-legend-item"
     style={accentStyle(item.accent)}
-    title={compositionTitle(item)}
+    title={`${item.label}：${formatBytes(item.value)}，占 ${item.percent.toFixed(1)}%。${item.meta}。物理容量按当前维度去重统计。`}
   >
-    <div className="composition-row-head">
+    <span className="composition-legend-dot" />
+    <div className="composition-legend-copy">
       <span>{item.label}</span>
-      <strong>{formatBytes(item.value)}</strong>
-    </div>
-    <div className="composition-row-track">
-      <div className="composition-row-fill" style={{ width: percentWidth(item.percent) }} />
-    </div>
-    <div className="composition-row-meta">
-      <span>{item.meta || '暂无明细'}</span>
-      <strong>{item.percent.toFixed(1)}%</strong>
-    </div>
-  </div>
-);
-
-const StatusSegment: React.FC<{ status: ResourceMonitorBreakdownStatus }> = ({ status }) => (
-  <div className="status-row" style={accentStyle(STATUS_ACCENT[status.key] || '#64748b')}>
-    <div className="status-label">
-      <span>{status.label}</span>
-      <strong>{formatBytes(status.physicalBytes)}</strong>
-    </div>
-    <div className="status-track">
-      <div className="status-fill" style={{ width: percentWidth(status.percent) }} />
-    </div>
-    <div className="status-meta">
-      {formatNumber(status.objectCount)} 对象 · {status.percent.toFixed(1)}%
+      <strong>{formatBytes(item.value)} · {item.percent.toFixed(1)}%</strong>
     </div>
   </div>
 );
 
 const CategoryChip: React.FC<{
   accent: string;
-  item: ResourceMonitorBreakdownCategory;
+  item: ResourceMonitorBreakdownCategory | ResourceMonitorDashboardDimension;
 }> = ({ accent, item }) => (
   <div className="category-chip" style={accentStyle(accent)}>
     <div className="category-head">
@@ -548,6 +541,7 @@ const AnomalyItem: React.FC<{ item: ResourceMonitorBreakdownAnomaly }> = ({ item
 );
 
 const DashboardRoot = styled.div`
+  container-type: inline-size;
   border: 1px solid color-mix(in srgb, var(--semi-color-primary) 18%, var(--app-border));
   border-radius: 8px;
   background:
@@ -780,19 +774,18 @@ const DashboardRoot = styled.div`
   .composition-visual {
     padding: 10px;
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 210px;
-    gap: 10px;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .chart-field {
     position: relative;
     min-width: 0;
-    min-height: 204px;
-    border: 1px solid color-mix(in srgb, var(--semi-color-primary) 18%, var(--app-border));
+    min-height: 248px;
+    border: 1px solid color-mix(in srgb, var(--semi-color-primary) 22%, var(--app-border));
     border-radius: 8px;
     background:
-      linear-gradient(180deg, color-mix(in srgb, var(--semi-color-primary) 8%, transparent), transparent 68%),
-      color-mix(in srgb, var(--app-bg-elevated) 94%, var(--app-panel-muted));
+      linear-gradient(180deg, color-mix(in srgb, var(--semi-color-primary) 5%, transparent), transparent 72%),
+      color-mix(in srgb, var(--app-bg-elevated) 98%, var(--app-bg-base));
     padding: 10px;
     overflow: hidden;
   }
@@ -800,7 +793,7 @@ const DashboardRoot = styled.div`
   .chart-grid {
     position: absolute;
     inset: 0;
-    opacity: 0.55;
+    opacity: 0.28;
     background:
       linear-gradient(90deg, color-mix(in srgb, var(--app-text-muted) 11%, transparent) 1px, transparent 1px),
       linear-gradient(180deg, color-mix(in srgb, var(--app-text-muted) 10%, transparent) 1px, transparent 1px);
@@ -809,7 +802,7 @@ const DashboardRoot = styled.div`
   }
 
   .chart-header,
-  .composition-row {
+  .composition-chart-layout {
     position: relative;
     z-index: 1;
   }
@@ -848,124 +841,68 @@ const DashboardRoot = styled.div`
     text-align: center;
   }
 
-  .composition-row {
+  .composition-chart-layout {
+    display: grid;
+    grid-template-columns: minmax(300px, 1fr) minmax(184px, 240px);
+    gap: 12px;
+    align-items: stretch;
+  }
+
+  .composition-chart-area {
     min-width: 0;
-    border-bottom: 1px solid color-mix(in srgb, var(--app-border) 58%, transparent);
-    padding: 8px 0;
   }
 
-  .composition-row:last-child {
-    border-bottom: none;
+  .composition-legend {
+    min-width: 0;
+    align-self: stretch;
+    border-left: 1px solid color-mix(in srgb, var(--app-border) 72%, transparent);
+    padding-left: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
   }
 
-  .composition-row-head,
-  .composition-row-meta {
+  .composition-legend-item {
     min-width: 0;
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    color: var(--app-text);
+    align-items: flex-start;
+    gap: 8px;
+    color: var(--app-text-muted);
     font-size: 11px;
     line-height: 1.35;
   }
 
-  .composition-row-head span,
-  .composition-row-meta span {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .composition-row-head strong,
-  .composition-row-meta strong {
-    flex: 0 0 auto;
-  }
-
-  .composition-row-track {
-    margin-top: 6px;
-    height: 9px;
+  .composition-legend-dot {
+    width: 8px;
+    height: 8px;
     border-radius: 999px;
-    background: color-mix(in srgb, var(--app-text-muted) 18%, transparent);
-    overflow: hidden;
+    margin-top: 3px;
+    flex: 0 0 auto;
+    background: var(--accent);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 16%, transparent);
   }
 
-  .composition-row-fill {
-    height: 100%;
-    border-radius: inherit;
-    background:
-      linear-gradient(90deg, color-mix(in srgb, var(--accent) 72%, white 28%), var(--accent));
-    box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 28%, transparent);
-  }
-
-  .composition-row-meta {
-    margin-top: 5px;
-    color: var(--app-text-muted);
-    font-size: 10px;
-  }
-
-  .status-card {
+  .composition-legend-copy {
     min-width: 0;
-    border: 1px solid color-mix(in srgb, var(--app-border) 82%, transparent);
-    border-radius: 8px;
-    background: color-mix(in srgb, var(--app-bg-elevated) 88%, var(--app-bg-base));
-    padding: 10px;
   }
 
-  .status-donut {
-    width: 128px;
-    height: 128px;
-    margin: 0 auto 12px;
-    border-radius: 50%;
-    background: var(--donut-bg);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    box-shadow:
-      inset 0 0 0 1px color-mix(in srgb, var(--app-border) 80%, transparent),
-      0 0 18px color-mix(in srgb, var(--semi-color-primary) 12%, transparent);
-  }
-
-  .status-donut-inner {
-    width: 82px;
-    height: 82px;
-    border-radius: 50%;
-    background: color-mix(in srgb, var(--app-bg-elevated) 96%, var(--app-bg-base));
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 2px;
-    text-align: center;
-    box-shadow: inset 0 0 0 1px var(--app-border);
-  }
-
-  .status-donut-inner span {
-    color: var(--app-text-muted);
-    font-size: 10px;
-    line-height: 1.25;
-  }
-
-  .status-donut-inner strong {
-    max-width: 70px;
-    color: var(--app-text);
+  .composition-legend-copy span,
+  .composition-legend-copy strong {
+    display: block;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: 12px;
-    line-height: 1.25;
   }
 
-  .status-stack {
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
+  .composition-legend-copy span {
+    color: var(--app-text);
   }
 
-  .status-row {
-    min-width: 0;
+  .composition-legend-copy strong {
+    margin-top: 2px;
+    color: var(--app-text-muted);
+    font-weight: 600;
   }
 
   .status-label,
@@ -1136,9 +1073,18 @@ const DashboardRoot = styled.div`
     }
 
     .dashboard-main,
-    .composition-visual,
+    .composition-chart-layout,
     .anomaly-list {
       grid-template-columns: 1fr;
+    }
+
+    .composition-legend {
+      border-left: 0;
+      border-top: 1px solid color-mix(in srgb, var(--app-border) 72%, transparent);
+      padding-left: 0;
+      padding-top: 10px;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
     .category-strip {

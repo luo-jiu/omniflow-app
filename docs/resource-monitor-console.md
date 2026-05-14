@@ -14,12 +14,13 @@
 - 对象数
 - 文件引用数
 - provider / bucket 分布
-- 按资料库、归档分类和资源状态拆分的细分仪表盘
-- 可见资源、回收站关联资源、孤儿对象占用细分
+- 按资料库、业务集合、基础文件类型、集合内部构成和资源状态拆分的统计仪表盘
+- 资源状态维度中的可见资源、回收站关联资源、孤儿对象占用细分
 - 未匹配当前 provider 配置的历史位置提示
 - 历史 provider 类型值提示，例如 `MINIO` 兼容映射到唯一 provider alias
 - 对象存储、Postgres、Redis 的只读可用性探针
 - 探针可用性图谱：登录后由前端应用级 runtime 立即探测一次，之后每 5 分钟自动探测；页面只订阅展示，离开页面后仍继续采样；内存中只保留最近 60 次，不持久化，退出登录 / 切换账号 / 重启后清空
+- 资源组成主图使用 `echarts` 渲染；图表封装只存在于 `features/resource-monitor` 内，负责读取当前主题颜色、初始化、resize 和释放实例
 - 到存储设置、迁移任务、回收站的快捷跳转
 - 用户显式触发的历史样本记录
 
@@ -38,13 +39,15 @@
 
 - 入口：`src/views/library/components/quick-access-sidebar/index.tsx`
 - system view 注册：`src/features/system-workspace/registry.tsx`
+- system view 懒加载壳：`src/features/system-workspace/views/resource-monitor/index.tsx`
 - 页面组件：`src/features/resource-monitor/components/ResourceMonitorWorkspace.tsx`
+- 图表封装：`src/features/resource-monitor/components/ResourceMonitorCharts.tsx`
 - 请求封装：`src/features/resource-monitor/services/resource-monitor.api.ts`
 
 职责规则：
 
 - `views/library` 只负责打开 `resource-monitor` system view。
-- `features/system-workspace` 只负责 system view 的宿主和注册。
+- `features/system-workspace` 只负责 system view 的宿主和注册；资源监测实际页面通过懒加载壳进入，避免图表库成本扩散到设置、上传中心等其他 system view。
 - `features/resource-monitor` 负责资源监测自己的请求、格式化、加载态、错误态和展示。
 - 资源探针历史由 `features/resource-monitor/services/resource-monitor-runtime.ts` 维护，生命周期跟随登录后的应用进程，不归属页面组件。
 - 资源监测只能跳转到已有管理入口：存储配置进入 system workspace 设置页的存储分区，资料库详情页内的回收站关联进入当前资料库 system workspace 回收站，迁移任务进入迁移中心 `migration` tab。
@@ -69,9 +72,9 @@ POST /api/v1/resource-monitor/samples?libraryId=123
 POST /api/v1/resource-monitor/samples?libraryId=123&dryRun=true
 ```
 
-前端展示默认并行请求 `/distribution`、`/breakdown` 和 `/probes`，让资源分布、细分仪表盘和资源探针独立加载、独立错误、谁先返回谁先展示。`/snapshot` 继续保留为兼容聚合接口，并作为采样写链路内部生成完整快照的语义参考。
+前端展示默认并行请求 `/distribution`、`/dashboard` 和 `/probes`，让资源分布、V2 统计仪表盘和资源探针独立加载、独立错误、谁先返回谁先展示。`/snapshot` 继续保留为兼容聚合接口，并作为采样写链路内部生成完整快照的语义参考。
 
-`/dashboard` 是 V2 仪表盘并行接口，当前前端 service 已保留类型和请求封装，但稳定展示仍以旧 `/breakdown` 页面为准。V2 页面落地后，它会承载基础文件类型、业务集合类型和交叉矩阵统计；探针仍通过 `/probes` 独立加载。
+`/dashboard` 是 V2 仪表盘接口，当前前端主展示优先使用它的 `collections / fileTypes / collectionFileTypeMatrix`。业务集合视角回答 ASMR、漫画、普通资源等用户认知分类；基础文件类型视角回答视频、图片、音频等真实对象形态；集合构成视角解释业务集合内部由哪些基础类型组成。旧 `/breakdown` 暂时保留为兼容接口，探针仍通过 `/probes` 独立加载。
 
 响应 `data`：
 
@@ -257,7 +260,8 @@ type ResourceMonitorSample = {
 - `probes`：只读探针结果；对象存储探针只检查 bucket 可访问性，不创建 bucket 或写入对象。
 - `dryRun`：采样写链路支持的标准 dry-run 参数；返回样本预览但不持久化。
 - `/distribution` 只返回分布相关字段；`/probes` 只返回探针相关字段；两者都沿用同一 `ResourceMonitorSnapshot` 外形，未加载的分区保持空 summary / 空数组。
-- `/breakdown` 只返回细分仪表盘字段；`libraries / categories / statuses / anomalies` 分别对应资料库排行、内置类型分类、资源状态和只读诊断摘要。内置类型按内容集合统计：从引用节点向上寻找最外层非 `DEF` 内置类型，集合内部文件都归属该外层类型；归档模式允许嵌套，分类统计不按 `archiveMode` 递归聚合。
+- `/dashboard` 返回 V2 统计仪表盘字段；`collections / fileTypes / collectionFileTypeMatrix / libraries / statuses / anomalies` 分别对应业务集合、基础文件类型、集合内部构成、资料库排行、资源状态和只读诊断摘要。内置类型按内容集合统计：从引用节点向上寻找最外层非 `DEF` 内置类型，集合内部文件都归属该外层类型；归档模式允许嵌套，分类统计不按 `archiveMode` 递归聚合。
+- `/breakdown` 仍保留为旧统计接口，后续等 V2 页面验证稳定后再决定废弃或兼容映射。
 - `/dashboard` 只返回 V2 统计字段；`fileTypes` 表示基础文件类型分布，`collections` 表示业务集合分布，`collectionFileTypeMatrix` 表示业务集合 x 基础文件类型。基础文件类型优先使用后端 MIME / content type，扩展名只做兜底，避免 `.ts` 等冲突后缀只靠后缀误判。
 
 ## 5. 当前限制
@@ -281,9 +285,9 @@ type ResourceMonitorSample = {
 - 仓库页左下角点击资源监测入口，右侧进入资源监测 system view。
 - system overview 中点击资源监测卡片可进入同一视图。
 - 分布加载成功时展示总览和分布表；细分仪表盘和探针加载成功后分别展示资源拆分、对象存储、Postgres、Redis 状态、耗时和错误摘要，三者不互相等待。
-- 细分仪表盘加载成功时展示关键指标块、可按资料库 / 归档分类 / 物理存储 / 资源状态切换的资源组成主图、资料库排行、归档分类和诊断摘要；主图条带和状态图提供物理去重、引用展开和状态主归属口径提示；失败时只在仪表盘区展示错误和重试入口，不阻塞分布和探针。
+- 统计仪表盘加载成功时展示关键指标块、可按业务集合 / 基础类型 / 集合构成 / 资料库 / 物理存储 / 资源状态切换的资源组成主图、资料库排行、业务集合和诊断摘要；主图右侧独立明细列提供物理去重、引用展开和状态主归属口径提示；失败时只在仪表盘区展示错误和重试入口，不阻塞分布和探针。
 - 探针可用性图谱每 5 分钟自动追加一次历史；绿色竖胶囊表示可用，红色竖胶囊表示异常，并展示最近一次错误或服务信息。
-- 诊断摘要展示可见资源、回收站关联资源、孤儿对象占用。
+- 资源状态维度展示可见资源、回收站关联资源、孤儿对象占用。
 - 历史 provider 类型值行展示“历史”标记和兼容映射关系。
 - 顶部“存储设置”可进入设置页存储分区，“迁移任务”可进入迁移中心存储迁移 tab。
 - 点击“记录样本”可写入一条历史采样并显示样本 ID；资料库详情页样本携带当前 `libraryId`，仓库页样本为全局范围；采样 API 支持 `dryRun=true`。

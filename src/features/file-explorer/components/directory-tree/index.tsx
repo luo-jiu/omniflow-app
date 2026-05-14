@@ -27,6 +27,7 @@ import {
   normalizeDownloadRelativePath,
   pickDownloadDirectoryFromDesktop,
 } from '@/features/file-explorer/services/desktop-download.api';
+import { hasExternalUploadData } from '@/features/file-explorer/services/external-web-image-upload.api';
 import { TREE_LOCATE_NODE_EVENT, type TreeLocateNodeDetail } from '@/features/file-explorer/services/tree-locate';
 import { useDirectoryUpload } from './hooks/useDirectoryUpload';
 import {
@@ -429,8 +430,7 @@ export default function DirectoryTree({
   // 处理文件放置逻辑
   // 外部文件拖拽
   const isExternalFileDrag = (e: React.DragEvent) => {
-    const types = Array.from(e.dataTransfer?.types || []);
-    return types.includes('Files');
+    return hasExternalUploadData(e.dataTransfer);
   };
 
   const hasActiveInternalTreeDrag = () => dragSelectionNodeIdsRef.current.length > 0;

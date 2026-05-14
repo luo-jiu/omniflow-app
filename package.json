@@ -36,6 +36,7 @@
     "@fontsource/jetbrains-mono": "^5.2.8",
     "@reduxjs/toolkit": "^2.8.2",
     "@uiw/react-codemirror": "^4.25.9",
+    "echarts": "^6.0.0",
     "normalize.css": "^8.0.1",
     "os-utils": "^0.0.14",
     "pdfjs-dist": "^4.10.38",

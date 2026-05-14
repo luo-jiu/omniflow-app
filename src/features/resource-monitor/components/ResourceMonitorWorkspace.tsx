@@ -11,9 +11,9 @@ import styled from 'styled-components';
 import type { SystemWorkspaceViewProps } from '@/features/system-workspace/types';
 import {
   captureResourceMonitorSample,
-  fetchResourceMonitorBreakdown,
+  fetchResourceMonitorDashboard,
   fetchResourceMonitorDistribution,
-  type ResourceMonitorBreakdown,
+  type ResourceMonitorDashboard,
   type ResourceMonitorSnapshot,
   type ResourceMonitorStorageItem,
 } from '../services/resource-monitor.api';
@@ -63,15 +63,15 @@ const ResourceMonitorWorkspace: React.FC<SystemWorkspaceViewProps> = ({
   onSettingsSectionChange,
 }) => {
   const [distributionSnapshot, setDistributionSnapshot] = React.useState<ResourceMonitorSnapshot | null>(null);
-  const [breakdownSnapshot, setBreakdownSnapshot] = React.useState<ResourceMonitorBreakdown | null>(null);
+  const [dashboardSnapshot, setDashboardSnapshot] = React.useState<ResourceMonitorDashboard | null>(null);
   const [distributionLoading, setDistributionLoading] = React.useState(false);
-  const [breakdownLoading, setBreakdownLoading] = React.useState(false);
+  const [dashboardLoading, setDashboardLoading] = React.useState(false);
   const [sampling, setSampling] = React.useState(false);
   const [distributionErrorState, setDistributionErrorState] = React.useState<string>('');
-  const [breakdownErrorState, setBreakdownErrorState] = React.useState<string>('');
+  const [dashboardErrorState, setDashboardErrorState] = React.useState<string>('');
   const mountedRef = React.useRef(true);
   const distributionRequestIdRef = React.useRef(0);
-  const breakdownRequestIdRef = React.useRef(0);
+  const dashboardRequestIdRef = React.useRef(0);
   const probeRuntime = React.useSyncExternalStore(
     resourceMonitorProbeRuntime.subscribe,
     resourceMonitorProbeRuntime.getState,
@@ -110,23 +110,23 @@ const ResourceMonitorWorkspace: React.FC<SystemWorkspaceViewProps> = ({
     }
   }, [libraryId]);
 
-  const loadBreakdown = React.useCallback(async () => {
-    const requestId = breakdownRequestIdRef.current + 1;
-    breakdownRequestIdRef.current = requestId;
-    setBreakdownLoading(true);
-    setBreakdownErrorState('');
+  const loadDashboard = React.useCallback(async () => {
+    const requestId = dashboardRequestIdRef.current + 1;
+    dashboardRequestIdRef.current = requestId;
+    setDashboardLoading(true);
+    setDashboardErrorState('');
     try {
-      const nextBreakdown = await fetchResourceMonitorBreakdown({ libraryId });
-      if (!mountedRef.current || breakdownRequestIdRef.current !== requestId) return;
-      setBreakdownSnapshot(nextBreakdown);
+      const nextDashboard = await fetchResourceMonitorDashboard({ libraryId });
+      if (!mountedRef.current || dashboardRequestIdRef.current !== requestId) return;
+      setDashboardSnapshot(nextDashboard);
     } catch (err: any) {
-      if (!mountedRef.current || breakdownRequestIdRef.current !== requestId) return;
-      const message = err?.message || '加载资源细分失败';
-      setBreakdownErrorState(message);
+      if (!mountedRef.current || dashboardRequestIdRef.current !== requestId) return;
+      const message = err?.message || '加载资源仪表盘失败';
+      setDashboardErrorState(message);
       Toast.error(message);
     } finally {
-      if (mountedRef.current && breakdownRequestIdRef.current === requestId) {
-        setBreakdownLoading(false);
+      if (mountedRef.current && dashboardRequestIdRef.current === requestId) {
+        setDashboardLoading(false);
       }
     }
   }, [libraryId]);
@@ -143,20 +143,19 @@ const ResourceMonitorWorkspace: React.FC<SystemWorkspaceViewProps> = ({
 
   const loadSnapshot = React.useCallback(() => {
     void loadDistribution();
-    void loadBreakdown();
+    void loadDashboard();
     void loadProbes();
-  }, [loadBreakdown, loadDistribution, loadProbes]);
+  }, [loadDashboard, loadDistribution, loadProbes]);
 
   React.useEffect(() => {
     loadSnapshot();
   }, [loadSnapshot]);
 
   const summary = distributionSnapshot?.summary;
-  const probeSummary = probeRuntime.snapshot?.probeSummary;
   const probes = probeRuntime.snapshot?.probes || [];
   const distributionError = distributionSnapshot?.distributionError || '';
   const storage = distributionSnapshot?.storage || [];
-  const isRefreshing = distributionLoading || breakdownLoading || probeRuntime.loading;
+  const isRefreshing = distributionLoading || dashboardLoading || probeRuntime.loading;
   const canOpenRecycleBin = libraryId > 0;
   const openStorageSettings = React.useCallback(() => {
     onSettingsSectionChange?.('storage');
@@ -197,7 +196,7 @@ const ResourceMonitorWorkspace: React.FC<SystemWorkspaceViewProps> = ({
           <div className="monitor-toolbar-meta">
             分布：{formatTime(distributionSnapshot?.generatedAt || '')}
             {' · '}
-            细分：{formatTime(breakdownSnapshot?.generatedAt || '')}
+            仪表盘：{formatTime(dashboardSnapshot?.generatedAt || '')}
             {' · '}
             探针：{formatTime(probeRuntime.snapshot?.generatedAt || '')}
           </div>
@@ -218,6 +217,15 @@ const ResourceMonitorWorkspace: React.FC<SystemWorkspaceViewProps> = ({
             theme="borderless"
           >
             迁移任务
+          </Button>
+          <Button
+            icon={<IconDelete />}
+            onClick={openRecycleBin}
+            size="small"
+            theme="borderless"
+            title={canOpenRecycleBin ? '打开当前资料库回收站' : '进入具体资料库后可以查看回收站'}
+          >
+            回收站
           </Button>
           <Button
             icon={<IconSave />}
@@ -241,37 +249,14 @@ const ResourceMonitorWorkspace: React.FC<SystemWorkspaceViewProps> = ({
       </div>
 
       <ResourceBreakdownDashboard
-        breakdown={breakdownSnapshot}
-        error={breakdownErrorState}
-        loading={breakdownLoading}
+        dashboard={dashboardSnapshot}
+        error={dashboardErrorState}
+        loading={dashboardLoading}
         onRetry={loadSnapshot}
         storageError={distributionErrorState || distributionError}
         storageLoading={distributionLoading}
         storage={storage}
       />
-
-      <div className="summary-grid">
-        <div className="summary-item">
-          <span className="summary-label">物理占用</span>
-          <span className="summary-value">{formatBytes(summary?.physicalBytes || 0)}</span>
-        </div>
-        <div className="summary-item">
-          <span className="summary-label">对象数</span>
-          <span className="summary-value">{summary?.objectCount || 0}</span>
-        </div>
-        <div className="summary-item">
-          <span className="summary-label">文件引用</span>
-          <span className="summary-value">{summary?.fileRefCount || 0}</span>
-        </div>
-        <div className="summary-item">
-          <span className="summary-label">Provider / Bucket</span>
-          <span className="summary-value">{summary?.providerCount || 0} / {summary?.bucketCount || 0}</span>
-        </div>
-        <div className="summary-item">
-          <span className="summary-label">探针</span>
-          <span className="summary-value">{probeSummary?.ok || 0} / {probeSummary?.total || 0}</span>
-        </div>
-      </div>
 
       {summary && summary.unmatchedCount > 0 ? (
         <div className="monitor-warning">
@@ -304,38 +289,6 @@ const ResourceMonitorWorkspace: React.FC<SystemWorkspaceViewProps> = ({
           </Button>
         </div>
       ) : null}
-
-      <div className="diagnostics-grid">
-        <div className="diagnostic-item">
-          <span className="diagnostic-label">可见资源</span>
-          <span className="diagnostic-value">{formatBytes(summary?.visibleBytes || 0)}</span>
-          <span className="diagnostic-meta">
-            {summary?.visibleObjectCount || 0} 对象 / {summary?.visibleFileRefCount || 0} 引用
-          </span>
-        </div>
-        <div className="diagnostic-item">
-          <span className="diagnostic-label">回收站关联</span>
-          <span className="diagnostic-value">{formatBytes(summary?.recycleBytes || 0)}</span>
-          <span className="diagnostic-meta">
-            {summary?.recycleObjectCount || 0} 对象 / {summary?.recycleFileRefCount || 0} 引用
-          </span>
-          <Button
-            className="diagnostic-action"
-            icon={<IconDelete />}
-            onClick={openRecycleBin}
-            size="small"
-            theme="borderless"
-            title={canOpenRecycleBin ? '打开当前资料库回收站' : '进入具体资料库后可以查看回收站'}
-          >
-            回收站
-          </Button>
-        </div>
-        <div className="diagnostic-item">
-          <span className="diagnostic-label">孤儿对象</span>
-          <span className="diagnostic-value">{formatBytes(summary?.orphanBytes || 0)}</span>
-          <span className="diagnostic-meta">{summary?.orphanObjectCount || 0} 对象无文件引用</span>
-        </div>
-      </div>
 
       <ResourceProbeHistoryPanel
         error={probeRuntime.error}
@@ -408,6 +361,7 @@ const ResourceMonitorWorkspace: React.FC<SystemWorkspaceViewProps> = ({
 };
 
 const ResourceMonitorRoot = styled.div`
+  container-type: inline-size;
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -441,36 +395,6 @@ const ResourceMonitorRoot = styled.div`
     line-height: 1.4;
   }
 
-  .summary-grid {
-    display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
-    gap: 8px;
-  }
-
-  .summary-item {
-    min-width: 0;
-    border: 1px solid var(--app-border);
-    border-radius: 8px;
-    background: var(--app-bg-elevated);
-    padding: 11px 12px;
-  }
-
-  .summary-label {
-    display: block;
-    color: var(--app-text-muted);
-    font-size: 11px;
-    line-height: 1.35;
-  }
-
-  .summary-value {
-    display: block;
-    margin-top: 5px;
-    font-size: 16px;
-    line-height: 1.25;
-    font-weight: 700;
-    color: var(--app-text);
-  }
-
   .monitor-warning {
     border: 1px solid color-mix(in srgb, var(--semi-color-warning) 35%, var(--app-border));
     border-radius: 8px;
@@ -487,49 +411,6 @@ const ResourceMonitorRoot = styled.div`
 
   .monitor-warning > span {
     min-width: 0;
-  }
-
-  .diagnostics-grid {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 8px;
-  }
-
-  .diagnostic-item {
-    min-width: 0;
-    border: 1px solid var(--app-border);
-    border-radius: 8px;
-    background: var(--app-bg-elevated);
-    padding: 10px 12px;
-  }
-
-  .diagnostic-label,
-  .diagnostic-meta {
-    display: block;
-    color: var(--app-text-muted);
-    font-size: 11px;
-    line-height: 1.35;
-  }
-
-  .diagnostic-value {
-    display: block;
-    margin-top: 5px;
-    color: var(--app-text);
-    font-size: 15px;
-    line-height: 1.25;
-    font-weight: 700;
-  }
-
-  .diagnostic-meta {
-    margin-top: 4px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .diagnostic-action {
-    margin-top: 7px;
-    padding-left: 0;
   }
 
   .distribution-panel {
@@ -689,14 +570,6 @@ const ResourceMonitorRoot = styled.div`
     .monitor-warning {
       align-items: flex-start;
       flex-direction: column;
-    }
-
-    .summary-grid {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-
-    .diagnostics-grid {
-      grid-template-columns: 1fr;
     }
 
     .distribution-row {

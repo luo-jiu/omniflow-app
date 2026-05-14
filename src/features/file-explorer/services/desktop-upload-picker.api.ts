@@ -38,6 +38,7 @@ function buildFileNameFromLocalPath(localPath: string): string {
 }
 
 export interface UploadCandidateFile {
+  cleanupPath?: string;
   file: File;
   relativePath: string;
 }
