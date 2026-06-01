@@ -1,7 +1,7 @@
 var __defProp = Object.defineProperty;
 var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
 var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
-import { dialog, app, net, ipcMain, session, systemPreferences, safeStorage, webContents, BrowserWindow, shell, WebContentsView, nativeTheme, screen, Menu } from "electron";
+import { dialog, app, net, protocol, ipcMain, session, systemPreferences, safeStorage, webContents, BrowserWindow, shell, WebContentsView, nativeTheme, screen, Menu } from "electron";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs$1, { constants, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -12,10 +12,11 @@ import https from "node:https";
 import require$$0 from "os";
 import require$$1 from "child_process";
 import fs$3 from "fs";
-import { spawn } from "node:child_process";
+import { spawn, execFile } from "node:child_process";
 import os from "node:os";
 import { Buffer as Buffer$1 } from "node:buffer";
 import crypto, { randomUUID } from "node:crypto";
+import { promisify } from "node:util";
 const DOWNLOAD_REQUEST_TIMEOUT_MS = 6e4;
 async function downloadUrlToFile(url, targetPath, headers = {}, redirectDepth = 0) {
   const MAX_REDIRECT_DEPTH = 3;
@@ -503,6 +504,22 @@ function registerFileIpc(ipcMain2) {
       size: Buffer.byteLength(normalizedContent, "utf-8")
     };
   });
+  ipcMain2.handle("fs:create-staged-binary-file", async (_event, fileName, base64) => {
+    const stagingRoot = getTempImportStagingRoot();
+    const subDir = path.join(stagingRoot, `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+    await fs$2.mkdir(subDir, { recursive: true });
+    const safeName = String(fileName || "image.png").replace(/[/\\]/g, "_").trim() || "image.png";
+    const stagedPath = path.join(subDir, safeName);
+    const buffer = Buffer.from(String(base64 || ""), "base64");
+    if (buffer.length <= 0) {
+      throw new Error("临时图片内容为空");
+    }
+    await fs$2.writeFile(stagedPath, buffer);
+    return {
+      filePath: stagedPath,
+      size: buffer.length
+    };
+  });
   ipcMain2.handle("fs:create-temp-import-directory", async () => {
     const stagingRoot = getTempImportStagingRoot();
     await fs$2.mkdir(stagingRoot, { recursive: true });
@@ -543,6 +560,14 @@ function registerFileIpc(ipcMain2) {
     const stagingRoot = getTempImportStagingRoot();
     if (!normalizedPath || !isPathInsideDirectory$1(normalizedPath, stagingRoot)) {
       return false;
+    }
+    const stat = await fs$2.stat(normalizedPath).catch(() => null);
+    if (stat == null ? void 0 : stat.isFile()) {
+      const parentDir = path.dirname(normalizedPath);
+      if (parentDir !== stagingRoot && isPathInsideDirectory$1(parentDir, stagingRoot)) {
+        await fs$2.rm(parentDir, { recursive: true, force: true });
+        return true;
+      }
     }
     await fs$2.rm(normalizedPath, { force: true, recursive: true });
     return true;
@@ -1546,11 +1571,228 @@ async function processMediaToolFile(request) {
 function registerMediaToolIpc(ipcMain2) {
   ipcMain2.handle("media-tool:process-file", async (_event, payload) => processMediaToolFile(payload));
 }
+const execFileAsync = promisify(execFile);
+const CACHE_DIR_NAME = "gallery-preview-cache";
+const IMAGE_PREVIEW_PROTOCOL = "omniflow-preview";
+const HEIC_EXTENSIONS = /* @__PURE__ */ new Set(["heic", "heif", "heics", "heifs"]);
+const FFMPEG_CANDIDATES = [
+  process.env.FFMPEG_PATH || "",
+  "ffmpeg",
+  "/opt/homebrew/bin/ffmpeg",
+  "/usr/local/bin/ffmpeg"
+].filter(Boolean);
+const SIPS_PATH = "/usr/bin/sips";
+function normalizeExt(ext) {
+  return String(ext || "").trim().toLowerCase().replace(/^\./, "");
+}
+function isHeicRequest(payload) {
+  const mimeType = String(payload.mimeType || "").toLowerCase();
+  return HEIC_EXTENSIONS.has(normalizeExt(payload.ext)) || mimeType === "image/heic" || mimeType === "image/heif" || mimeType === "image/heic-sequence" || mimeType === "image/heif-sequence";
+}
+function buildCacheKey(payload) {
+  const libraryId = Number(payload.libraryId || 0);
+  const nodeId = Number(payload.nodeId || 0);
+  const sourceVersion = String(payload.sourceVersion || "").trim();
+  let sourcePath = "";
+  try {
+    const parsedUrl = new URL(payload.url);
+    sourcePath = `${parsedUrl.origin}${parsedUrl.pathname}`;
+  } catch {
+    sourcePath = payload.url || "";
+  }
+  const sourceSignature = `${payload.fileName || ""}|${payload.ext || ""}|${payload.fileSize || ""}|${sourceVersion || sourcePath}`;
+  if (libraryId > 0 && nodeId > 0) {
+    const sourceHash = crypto.createHash("sha256").update(sourceSignature).digest("hex").slice(0, 12);
+    return `${libraryId}-${nodeId}-${sourceHash}`;
+  }
+  if (nodeId > 0) {
+    const fileHash = crypto.createHash("sha256").update(sourceSignature).digest("hex").slice(0, 12);
+    return `node-${nodeId}-${fileHash}`;
+  }
+  const hash = crypto.createHash("sha256").update(sourceSignature).digest("hex").slice(0, 24);
+  return `url-${hash}`;
+}
+function getCacheRoot() {
+  return path.join(app.getPath("userData"), CACHE_DIR_NAME);
+}
+function getCachePaths(cacheKey) {
+  const root = getCacheRoot();
+  return {
+    inputPath: path.join(root, `${cacheKey}.source.heic`),
+    metadataPath: path.join(root, `${cacheKey}.json`),
+    previewPath: path.join(root, `${cacheKey}.png`)
+  };
+}
+function isSafeCacheKey(input) {
+  return /^[a-z0-9-]+$/i.test(input);
+}
+function buildPreviewUrl(cacheKey) {
+  return `${IMAGE_PREVIEW_PROTOCOL}://image-preview/${encodeURIComponent(cacheKey)}.png`;
+}
+function registerImagePreviewProtocol() {
+  if (protocol.isProtocolHandled(IMAGE_PREVIEW_PROTOCOL)) return;
+  protocol.handle(IMAGE_PREVIEW_PROTOCOL, async (request) => {
+    const parsedUrl = new URL(request.url);
+    if (parsedUrl.hostname !== "image-preview") {
+      return new Response("Not Found", { status: 404 });
+    }
+    const fileName = decodeURIComponent(parsedUrl.pathname.replace(/^\/+/, ""));
+    const cacheKey = fileName.replace(/\.png$/i, "");
+    if (!cacheKey || !isSafeCacheKey(cacheKey)) {
+      return new Response("Bad Request", { status: 400 });
+    }
+    const { previewPath } = getCachePaths(cacheKey);
+    try {
+      const previewBuffer = await fs.readFile(previewPath);
+      return new Response(previewBuffer, {
+        headers: {
+          "Cache-Control": "no-store",
+          "Content-Type": "image/png"
+        }
+      });
+    } catch {
+      return new Response("Not Found", { status: 404 });
+    }
+  });
+}
+async function readCachedResult(cacheKey) {
+  const { metadataPath, previewPath } = getCachePaths(cacheKey);
+  const [metadataRaw, hasPreview] = await Promise.all([
+    fs.readFile(metadataPath, "utf-8").catch(() => ""),
+    fs.access(previewPath).then(() => true).catch(() => false)
+  ]);
+  if (!metadataRaw || !hasPreview) return null;
+  const metadata = JSON.parse(metadataRaw);
+  return {
+    ok: true,
+    cacheKey,
+    metadataRows: Array.isArray(metadata.metadataRows) ? metadata.metadataRows : [],
+    originalSize: Number(metadata.originalSize || 0) || void 0,
+    previewPath,
+    previewUrl: buildPreviewUrl(cacheKey)
+  };
+}
+async function resolveExecutable(candidates) {
+  for (const candidate of candidates) {
+    try {
+      await execFileAsync(candidate, ["-version"], { timeout: 5e3 });
+      return candidate;
+    } catch {
+    }
+  }
+  return null;
+}
+function parseSipsRows(output) {
+  const rows = [];
+  const map = /* @__PURE__ */ new Map();
+  output.split(/\r?\n/).forEach((line) => {
+    const match = /^\s*([A-Za-z][A-Za-z0-9]+):\s*(.*?)\s*$/.exec(line);
+    if (match) map.set(match[1], match[2]);
+  });
+  const width = map.get("pixelWidth");
+  const height = map.get("pixelHeight");
+  if (width && height) rows.push({ label: "尺寸", value: `${width} × ${height}` });
+  const creation = map.get("creation");
+  if (creation) rows.push({ label: "拍摄时间", value: creation.replace(/^(\d{4}):(\d{2}):(\d{2})/, "$1-$2-$3") });
+  const make = map.get("make");
+  if (make) rows.push({ label: "相机品牌", value: make });
+  const model = map.get("model");
+  if (model) rows.push({ label: "相机型号", value: model });
+  const software = map.get("software");
+  if (software) rows.push({ label: "软件", value: software });
+  const profile = map.get("profile");
+  if (profile) rows.push({ label: "色彩配置", value: profile });
+  const space = map.get("space");
+  if (space) rows.push({ label: "色彩空间", value: space });
+  const dpiWidth = map.get("dpiWidth");
+  const dpiHeight = map.get("dpiHeight");
+  if (dpiWidth && dpiHeight) rows.push({ label: "DPI", value: `${dpiWidth} × ${dpiHeight}` });
+  const bitsPerSample = map.get("bitsPerSample");
+  if (bitsPerSample) rows.push({ label: "位深", value: bitsPerSample });
+  return rows;
+}
+async function readSipsMetadata(inputPath) {
+  try {
+    const { stdout } = await execFileAsync(SIPS_PATH, ["-g", "all", inputPath], { timeout: 15e3 });
+    return parseSipsRows(stdout);
+  } catch {
+    return [];
+  }
+}
+async function convertHeicToPng(inputPath, outputPath) {
+  const ffmpegPath = await resolveExecutable(FFMPEG_CANDIDATES);
+  if (!ffmpegPath) {
+    throw new Error("未找到 ffmpeg，无法生成 HEIC 预览");
+  }
+  await execFileAsync(ffmpegPath, [
+    "-v",
+    "error",
+    "-y",
+    "-i",
+    inputPath,
+    "-frames:v",
+    "1",
+    "-update",
+    "1",
+    outputPath
+  ], {
+    timeout: 6e4,
+    maxBuffer: 1024 * 1024 * 8
+  });
+}
+function registerImagePreviewIpc(ipcMain2) {
+  ipcMain2.handle("image-preview:prepare", async (_event, payload) => {
+    const url = String((payload == null ? void 0 : payload.url) || "").trim();
+    if (!url) {
+      return { ok: false, error: "缺少图片访问链接", metadataRows: [] };
+    }
+    if (!isHeicRequest(payload)) {
+      return { ok: false, error: "当前只支持 HEIC / HEIF 预览代理", metadataRows: [] };
+    }
+    const cacheKey = buildCacheKey(payload);
+    const cached = await readCachedResult(cacheKey).catch(() => null);
+    if (cached) return cached;
+    const paths = getCachePaths(cacheKey);
+    await fs.mkdir(path.dirname(paths.previewPath), { recursive: true });
+    try {
+      await downloadUrlToFile(url, paths.inputPath);
+      const inputStat = await fs.stat(paths.inputPath).catch(() => null);
+      const metadataRows = await readSipsMetadata(paths.inputPath);
+      await convertHeicToPng(paths.inputPath, paths.previewPath);
+      const result = {
+        ok: true,
+        cacheKey,
+        metadataRows,
+        originalSize: inputStat == null ? void 0 : inputStat.size,
+        previewPath: paths.previewPath,
+        previewUrl: buildPreviewUrl(cacheKey)
+      };
+      await fs.writeFile(paths.metadataPath, JSON.stringify({
+        cacheKey,
+        generatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+        metadataRows,
+        originalExt: normalizeExt(payload.ext),
+        originalSize: inputStat == null ? void 0 : inputStat.size,
+        previewPath: paths.previewPath
+      }), "utf-8");
+      return result;
+    } catch (error) {
+      return {
+        ok: false,
+        error: (error == null ? void 0 : error.message) || "生成 HEIC 预览失败",
+        metadataRows: []
+      };
+    } finally {
+      await fs.rm(paths.inputPath, { force: true }).catch(() => void 0);
+    }
+  });
+}
 function registerIpcHandlers() {
   registerFileIpc(ipcMain);
   registerSystemIpc(ipcMain);
   registerHttpIpc(ipcMain);
   registerMediaToolIpc(ipcMain);
+  registerImagePreviewIpc(ipcMain);
 }
 function createEmbeddedBrowserCatchToolkitGetStateScript() {
   return `
@@ -11704,6 +11946,16 @@ function registerSystemVideoWindowIpcHandlers(controller) {
   });
 }
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: IMAGE_PREVIEW_PROTOCOL,
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true
+    }
+  }
+]);
 process.env.APP_ROOT = path.join(__dirname, "..");
 const VITE_DEV_SERVER_URL = process.env["VITE_DEV_SERVER_URL"];
 const MAIN_DIST = path.join(process.env.APP_ROOT, "dist-electron");
@@ -11835,13 +12087,22 @@ function isToggleDevToolsShortcut(input) {
   const key = (input.key || "").toLowerCase();
   return (input.meta || input.control) && input.shift && key === "i";
 }
-function isChromiumPageZoomShortcut(input) {
+function getChromiumPageZoomShortcutAction(input) {
   if (input.type !== "keyDown" || !(input.meta || input.control)) {
-    return false;
+    return null;
   }
   const key = (input.key || "").toLowerCase();
   const code = input.code || "";
-  return key === "+" || key === "=" || key === "-" || key === "_" || key === "0" || code === "Equal" || code === "Minus" || code === "Digit0" || code === "NumpadAdd" || code === "NumpadSubtract" || code === "Numpad0";
+  if (key === "+" || key === "=" || code === "Equal" || code === "NumpadAdd") {
+    return "zoom-in";
+  }
+  if (key === "-" || key === "_" || code === "Minus" || code === "NumpadSubtract") {
+    return "zoom-out";
+  }
+  if (key === "0" || code === "Digit0" || code === "Numpad0") {
+    return "reset";
+  }
+  return null;
 }
 const embeddedBrowserMainController = createEmbeddedBrowserMainController({
   debugEnabled: ENABLE_EMBEDDED_BROWSER_DEBUG,
@@ -11946,9 +12207,11 @@ function createWindow() {
     systemVideoWindowController.destroy();
   });
   win.webContents.on("before-input-event", (event, input) => {
-    if (isChromiumPageZoomShortcut(input)) {
+    const zoomShortcutAction = getChromiumPageZoomShortcutAction(input);
+    if (zoomShortcutAction) {
       event.preventDefault();
       win.webContents.setZoomFactor(1);
+      win.webContents.send("app:viewer-zoom-shortcut", { action: zoomShortcutAction });
       return;
     }
     if (!isToggleDevToolsShortcut(input)) {
@@ -12006,6 +12269,7 @@ app.whenReady().then(() => {
     app.dock.setIcon(appIconPath);
   }
   embeddedBrowserMainController.configureSession();
+  registerImagePreviewProtocol();
   embeddedBrowserMainController.initializeBridges();
   registerIpcHandlers();
   registerWindowControlIpcHandlers({

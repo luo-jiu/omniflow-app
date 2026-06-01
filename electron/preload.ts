@@ -72,6 +72,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('fs:cleanup-auto-import-staged-file', stagedPath),
   createStagedTextFile: (fileName: string, content: string) =>
     ipcRenderer.invoke('fs:create-staged-text-file', fileName, content),
+  createStagedBinaryFile: (fileName: string, base64: string) =>
+    ipcRenderer.invoke('fs:create-staged-binary-file', fileName, base64),
   createTempImportDirectory: () =>
     ipcRenderer.invoke('fs:create-temp-import-directory'),
   getTempImportFileInfo: (filePath: string) =>
@@ -97,6 +99,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     fileSize?: number;
     sourceVersion?: string;
   }) => ipcRenderer.invoke('image-preview:prepare', payload),
+  onViewerZoomShortcut: (listener: (payload: { action: 'zoom-in' | 'zoom-out' | 'reset' }) => void) => {
+    const wrapped = (
+      _event: Electron.IpcRendererEvent,
+      payload: { action: 'zoom-in' | 'zoom-out' | 'reset' },
+    ) => {
+      listener(payload);
+    };
+    ipcRenderer.on('app:viewer-zoom-shortcut', wrapped);
+    return () => ipcRenderer.removeListener('app:viewer-zoom-shortcut', wrapped);
+  },
   fetch: (url: string, options?: any) => ipcRenderer.invoke('http:fetch', url, options),
   fetchBinary: (url: string, options?: any) => ipcRenderer.invoke('http:fetch-binary', url, options),
   uploadPresignedPut: (args: {

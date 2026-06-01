@@ -1,14 +1,14 @@
-import { app } from 'electron';
+import { app, protocol } from 'electron';
 import { execFile } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { downloadUrlToFile } from '../service/fileTransfer';
 
 const execFileAsync = promisify(execFile);
 const CACHE_DIR_NAME = 'gallery-preview-cache';
+export const IMAGE_PREVIEW_PROTOCOL = 'omniflow-preview';
 const HEIC_EXTENSIONS = new Set(['heic', 'heif', 'heics', 'heifs']);
 const FFMPEG_CANDIDATES = [
   process.env.FFMPEG_PATH || '',
@@ -107,6 +107,41 @@ function getCachePaths(cacheKey: string) {
   };
 }
 
+function isSafeCacheKey(input: string): boolean {
+  return /^[a-z0-9-]+$/i.test(input);
+}
+
+function buildPreviewUrl(cacheKey: string): string {
+  return `${IMAGE_PREVIEW_PROTOCOL}://image-preview/${encodeURIComponent(cacheKey)}.png`;
+}
+
+export function registerImagePreviewProtocol() {
+  if (protocol.isProtocolHandled(IMAGE_PREVIEW_PROTOCOL)) return;
+  protocol.handle(IMAGE_PREVIEW_PROTOCOL, async (request) => {
+    const parsedUrl = new URL(request.url);
+    if (parsedUrl.hostname !== 'image-preview') {
+      return new Response('Not Found', { status: 404 });
+    }
+    const fileName = decodeURIComponent(parsedUrl.pathname.replace(/^\/+/, ''));
+    const cacheKey = fileName.replace(/\.png$/i, '');
+    if (!cacheKey || !isSafeCacheKey(cacheKey)) {
+      return new Response('Bad Request', { status: 400 });
+    }
+    const { previewPath } = getCachePaths(cacheKey);
+    try {
+      const previewBuffer = await fs.readFile(previewPath);
+      return new Response(previewBuffer, {
+        headers: {
+          'Cache-Control': 'no-store',
+          'Content-Type': 'image/png',
+        },
+      });
+    } catch {
+      return new Response('Not Found', { status: 404 });
+    }
+  });
+}
+
 async function readCachedResult(cacheKey: string): Promise<ImagePreviewResult | null> {
   const { metadataPath, previewPath } = getCachePaths(cacheKey);
   const [metadataRaw, hasPreview] = await Promise.all([
@@ -121,7 +156,7 @@ async function readCachedResult(cacheKey: string): Promise<ImagePreviewResult | 
     metadataRows: Array.isArray(metadata.metadataRows) ? metadata.metadataRows : [],
     originalSize: Number(metadata.originalSize || 0) || undefined,
     previewPath,
-    previewUrl: pathToFileURL(previewPath).toString(),
+    previewUrl: buildPreviewUrl(cacheKey),
   };
 }
 
@@ -225,7 +260,7 @@ export function registerImagePreviewIpc(ipcMain: Electron.IpcMain) {
         metadataRows,
         originalSize: inputStat?.size,
         previewPath: paths.previewPath,
-        previewUrl: pathToFileURL(paths.previewPath).toString(),
+        previewUrl: buildPreviewUrl(cacheKey),
       };
       await fs.writeFile(paths.metadataPath, JSON.stringify({
         cacheKey,

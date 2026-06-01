@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Button, Modal, Spin, Tooltip } from '@douyinfe/semi-ui';
+import { Button, Modal, Spin, Toast, Tooltip } from '@douyinfe/semi-ui';
 import {
   IconChevronLeft,
   IconChevronRight,
+  IconCrop,
   IconInfoCircle,
   IconPause,
   IconPlay,
@@ -11,10 +12,20 @@ import {
   IconSearchStroked,
 } from '@douyinfe/semi-icons';
 import { GalleryViewerWrapper } from './style';
+import ImageCropOverlay from '../image-crop-overlay';
 import {
   batchGetFileLinks,
   getChildrenByNodeId,
 } from '@/features/file-explorer/services/file.api';
+import {
+  createDefaultCropSelection,
+  getDisplayedImageBounds,
+  getImageRectInContainer,
+  isCropBoundsUsable,
+  saveCroppedImageCopy,
+  type CropBounds,
+  type CropSelection,
+} from '../../services/image-crop.service';
 import {
   mountGlobalVideoElement,
   parkGlobalVideoElement,
@@ -425,8 +436,13 @@ const GalleryViewer: React.FC<GalleryViewerProps> = ({
   const [imageZoom, setImageZoom] = useState(1);
   const [imageRotateSteps, setImageRotateSteps] = useState(0);
   const [imageOffset, setImageOffset] = useState<Point>({ x: 0, y: 0 });
+  const [imageNaturalSize, setImageNaturalSize] = useState({ width: 0, height: 0 });
   const [isImageDragging, setIsImageDragging] = useState(false);
   const [imageDragAnchor, setImageDragAnchor] = useState<Point>({ x: 0, y: 0 });
+  const [cropMode, setCropMode] = useState(false);
+  const [cropBounds, setCropBounds] = useState<CropBounds | null>(null);
+  const [cropSelection, setCropSelection] = useState<CropSelection | null>(null);
+  const [cropApplying, setCropApplying] = useState(false);
   const [videoState, setVideoState] = useState<VideoRuntimeState>({
     isPlaying: false,
     currentTime: 0,
@@ -442,6 +458,8 @@ const GalleryViewer: React.FC<GalleryViewerProps> = ({
   const linkMapRef = useRef<Map<number, string>>(new Map());
   const imagePreviewMapRef = useRef<Map<number, GalleryImagePreview>>(new Map());
   const requestedImagePreviewIdsRef = useRef<Set<number>>(new Set());
+  const imageStageRef = useRef<HTMLDivElement | null>(null);
+  const detailImageRef = useRef<HTMLImageElement | null>(null);
   const videoHostRef = useRef<HTMLDivElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const videoMountTokenRef = useRef<number | null>(null);
@@ -619,7 +637,11 @@ const GalleryViewer: React.FC<GalleryViewerProps> = ({
     setImageZoom(1);
     setImageRotateSteps(0);
     setImageOffset({ x: 0, y: 0 });
+    setImageNaturalSize({ width: 0, height: 0 });
     setIsImageDragging(false);
+    setCropMode(false);
+    setCropBounds(null);
+    setCropSelection(null);
   }, [activeItem?.id]);
 
   useEffect(() => {
@@ -634,6 +656,14 @@ const GalleryViewer: React.FC<GalleryViewerProps> = ({
     if (!activeItem || !activeUrl || !isHeicMediaItem(activeItem)) return;
     void prepareHeicPreview(activeItem, activeUrl);
   }, [activeItem, activeUrl, prepareHeicPreview]);
+
+  useEffect(() => {
+    if (active) return;
+    setCropMode(false);
+    setCropBounds(null);
+    setCropSelection(null);
+    setIsImageDragging(false);
+  }, [active]);
 
   useEffect(() => {
     if (!metadataVisible || !activeItem) return;
@@ -795,10 +825,11 @@ const GalleryViewer: React.FC<GalleryViewerProps> = ({
   }, [releaseCurrentVideoIfNeeded]);
 
   const moveDetail = useCallback((delta: number) => {
+    if (cropMode || cropApplying) return;
     if (activeIndex === null || items.length === 0) return;
     const nextIndex = (activeIndex + delta + items.length) % items.length;
     openDetail(nextIndex);
-  }, [activeIndex, items.length, openDetail]);
+  }, [activeIndex, cropApplying, cropMode, items.length, openDetail]);
 
   useEffect(() => {
     if (!active || activeIndex === null) return undefined;
@@ -809,6 +840,17 @@ const GalleryViewer: React.FC<GalleryViewerProps> = ({
         if (tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT' || target.isContentEditable) {
           return;
         }
+      }
+      if (cropMode) {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          if (!cropApplying) {
+            setCropMode(false);
+            setCropBounds(null);
+            setCropSelection(null);
+          }
+        }
+        return;
       }
       if (event.key === 'ArrowLeft') {
         event.preventDefault();
@@ -835,7 +877,7 @@ const GalleryViewer: React.FC<GalleryViewerProps> = ({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [active, activeIndex, activeItem?.kind, closeDetail, moveDetail]);
+  }, [active, activeIndex, activeItem?.kind, closeDetail, cropApplying, cropMode, moveDetail]);
 
   const toggleVideoPlay = useCallback(() => {
     const video = videoRef.current;
@@ -859,33 +901,126 @@ const GalleryViewer: React.FC<GalleryViewerProps> = ({
   const handleImageWheel = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
     if (activeItem?.kind !== 'image') return;
     event.preventDefault();
+    if (cropMode) return;
     const direction = event.deltaY > 0 ? -1 : 1;
     setImageZoom(prev => clamp(prev + direction * prev * 0.1, IMAGE_ZOOM_MIN, IMAGE_ZOOM_MAX));
-  }, [activeItem?.kind]);
+  }, [activeItem?.kind, cropMode]);
 
   const handleImageMouseDown = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
-    if (activeItem?.kind !== 'image' || event.button !== 0) return;
+    if (activeItem?.kind !== 'image' || cropMode || event.button !== 0) return;
     setIsImageDragging(true);
     setImageDragAnchor({
       x: event.clientX - imageOffset.x,
       y: event.clientY - imageOffset.y,
     });
-  }, [activeItem?.kind, imageOffset]);
+  }, [activeItem?.kind, cropMode, imageOffset]);
 
   const handleImageMouseMove = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
-    if (!isImageDragging) return;
+    if (cropMode || !isImageDragging) return;
     setImageOffset({
       x: event.clientX - imageDragAnchor.x,
       y: event.clientY - imageDragAnchor.y,
     });
-  }, [imageDragAnchor, isImageDragging]);
+  }, [cropMode, imageDragAnchor, isImageDragging]);
 
   const resetImageView = useCallback(() => {
     setImageZoom(1);
     setImageRotateSteps(0);
     setImageOffset({ x: 0, y: 0 });
     setIsImageDragging(false);
+    setCropMode(false);
+    setCropBounds(null);
+    setCropSelection(null);
   }, []);
+
+  const enterCropMode = useCallback(() => {
+    if (!activeItem || activeItem.kind !== 'image' || !activeDisplayUrl) {
+      Toast.warning('图片尚未加载完成');
+      return;
+    }
+    if (imageRotateSteps !== 0) {
+      Toast.warning('请先重置旋转后再裁剪');
+      return;
+    }
+    if (imageNaturalSize.width <= 0 || imageNaturalSize.height <= 0) {
+      Toast.warning('图片尚未加载完成');
+      return;
+    }
+    const nextBounds = getDisplayedImageBounds(imageStageRef.current, detailImageRef.current);
+    if (!isCropBoundsUsable(nextBounds)) {
+      Toast.warning('当前可裁剪区域过小');
+      return;
+    }
+    setIsImageDragging(false);
+    setCropBounds(nextBounds);
+    setCropSelection(createDefaultCropSelection(nextBounds));
+    setCropMode(true);
+  }, [activeDisplayUrl, activeItem, imageNaturalSize.height, imageNaturalSize.width, imageRotateSteps]);
+
+  const cancelCropMode = useCallback(() => {
+    if (cropApplying) return;
+    setCropMode(false);
+    setCropBounds(null);
+    setCropSelection(null);
+  }, [cropApplying]);
+
+  const applyCrop = useCallback(async () => {
+    if (!activeItem || activeItem.kind !== 'image' || !activeDisplayUrl || !cropSelection || !folderNodeId || !libraryId) {
+      return;
+    }
+    const imageRect = getImageRectInContainer(imageStageRef.current, detailImageRef.current);
+    if (!imageRect) {
+      Toast.warning('无法读取图片位置');
+      return;
+    }
+
+    setCropApplying(true);
+    try {
+      const children = await getChildrenByNodeId(folderNodeId, libraryId) as GalleryChildNode[];
+      const existingNames = children
+        .map(child => buildFileFullName(String(child.name || ''), child.ext))
+        .filter(Boolean);
+      const created = await saveCroppedImageCopy({
+        beforeNodeId: activeItem.id,
+        existingNames,
+        imageRect,
+        libraryId,
+        naturalSize: imageNaturalSize,
+        parentId: folderNodeId,
+        selection: cropSelection,
+        sourceFileName: activeItem.title,
+        sourceUrl: activeDisplayUrl,
+      }) as Record<string, unknown>;
+      const createdId = Number(created?.id);
+      if (Number.isFinite(createdId) && createdId > 0 && activeIndex !== null) {
+        const createdItem: GalleryMediaItem = {
+          id: createdId,
+          title: buildFileFullName(String(created.name || ''), created.ext as string | undefined) || `${activeItem.title} 副本`,
+          ext: created.ext as string | undefined,
+          mimeType: created.mimeType as string | undefined,
+          kind: 'image',
+        };
+        setItems((prev) => {
+          const insertIndex = prev.findIndex(item => item.id === activeItem.id);
+          if (insertIndex < 0 || prev.some(item => item.id === createdId)) return prev;
+          const next = [...prev];
+          next.splice(insertIndex, 0, createdItem);
+          return next;
+        });
+        setActiveIndex(index => (index === null ? index : index + 1));
+        void ensureLinksFor([createdItem]);
+      }
+      Toast.success('已保存裁剪副本');
+      setCropMode(false);
+      setCropBounds(null);
+      setCropSelection(null);
+    } catch (error: any) {
+      runtimeLogger.error('图集保存裁剪图片失败:', error);
+      Toast.error(error?.message || '保存裁剪副本失败');
+    } finally {
+      setCropApplying(false);
+    }
+  }, [activeDisplayUrl, activeIndex, activeItem, cropSelection, ensureLinksFor, folderNodeId, imageNaturalSize, libraryId]);
 
   const renderGrid = () => (
     <div className="gallery-grid-wrap">
@@ -954,6 +1089,7 @@ const GalleryViewer: React.FC<GalleryViewerProps> = ({
 
   const renderImageDetail = () => (
     <div
+      ref={imageStageRef}
       className={`gallery-detail-stage image ${isImageDragging ? 'dragging' : ''}`}
       onWheel={handleImageWheel}
       onMouseDown={handleImageMouseDown}
@@ -963,10 +1099,18 @@ const GalleryViewer: React.FC<GalleryViewerProps> = ({
     >
       {activeDisplayUrl ? (
         <img
+          ref={detailImageRef}
           className="gallery-detail-image"
           src={activeDisplayUrl}
           alt={activeItem?.title || title}
           draggable={false}
+          onLoad={(event) => {
+            const img = event.currentTarget;
+            setImageNaturalSize({
+              width: img.naturalWidth,
+              height: img.naturalHeight,
+            });
+          }}
           style={{
             transform: `translate(${imageOffset.x}px, ${imageOffset.y}px) scale(${imageZoom}) rotate(${imageRotateSteps * 90}deg)`,
           }}
@@ -974,6 +1118,16 @@ const GalleryViewer: React.FC<GalleryViewerProps> = ({
       ) : (
         <Spin />
       )}
+      {cropMode ? (
+        <ImageCropOverlay
+          applying={cropApplying}
+          bounds={cropBounds}
+          selection={cropSelection}
+          onApply={applyCrop}
+          onCancel={cancelCropMode}
+          onSelectionChange={setCropSelection}
+        />
+      ) : null}
     </div>
   );
 
@@ -1075,8 +1229,23 @@ const GalleryViewer: React.FC<GalleryViewerProps> = ({
                     theme="borderless"
                     type="tertiary"
                     icon={<IconRotate />}
-                    onClick={() => setImageRotateSteps(prev => (prev + 1) % 4)}
+                    onClick={() => {
+                      if (cropMode) return;
+                      setImageRotateSteps(prev => (prev + 1) % 4);
+                    }}
                     aria-label="旋转 90°"
+                    disabled={cropMode}
+                  />
+                </Tooltip>
+                <Tooltip content="裁剪为副本" position="bottom">
+                  <Button
+                    className="gallery-tool-button"
+                    theme="borderless"
+                    type="tertiary"
+                    icon={<IconCrop />}
+                    onClick={enterCropMode}
+                    aria-label="裁剪为副本"
+                    disabled={cropMode || cropApplying}
                   />
                 </Tooltip>
                 <Tooltip content={`缩放 ${Math.round(imageZoom * 100)}%`} position="bottom">
@@ -1089,11 +1258,23 @@ const GalleryViewer: React.FC<GalleryViewerProps> = ({
             ) : null}
           </div>
         </div>
-        <button type="button" className="gallery-nav prev" onClick={() => moveDetail(-1)} aria-label="上一个">
+        <button
+          type="button"
+          className="gallery-nav prev"
+          onClick={() => moveDetail(-1)}
+          aria-label="上一个"
+          disabled={cropMode || cropApplying}
+        >
           <IconChevronLeft size="large" />
         </button>
         {activeItem.kind === 'image' ? renderImageDetail() : renderVideoDetail()}
-        <button type="button" className="gallery-nav next" onClick={() => moveDetail(1)} aria-label="下一个">
+        <button
+          type="button"
+          className="gallery-nav next"
+          onClick={() => moveDetail(1)}
+          aria-label="下一个"
+          disabled={cropMode || cropApplying}
+        >
           <IconChevronRight size="large" />
         </button>
         {renderMetadataModal()}

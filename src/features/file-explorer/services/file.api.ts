@@ -311,6 +311,7 @@ export async function uploadLocalPathAndCreateNode(
   parentId: number,
   libraryId: number,
   options?: {
+    contentType?: string;
     conflictPolicy?: NodeNameConflictPolicy;
     storageProvider?: string;
   },
@@ -326,6 +327,7 @@ export async function uploadLocalPathAndCreateNode(
     filePath: info.filePath,
     fileName: info.name,
     fileSize: Number(info.size || 0),
+    contentType: options?.contentType,
     libraryId,
     parentId,
     storageProvider: options?.storageProvider,

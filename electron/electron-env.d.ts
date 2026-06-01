@@ -105,6 +105,10 @@ interface Window {
       filePath: string;
       size: number;
     }>;
+    createStagedBinaryFile: (fileName: string, base64: string) => Promise<{
+      filePath: string;
+      size: number;
+    }>;
     createTempImportDirectory: () => Promise<string>;
     getTempImportFileInfo: (filePath: string) => Promise<{
       filePath: string;
@@ -148,6 +152,9 @@ interface Window {
       previewPath?: string;
       previewUrl?: string;
     }>;
+    onViewerZoomShortcut: (listener: (payload: {
+      action: 'zoom-in' | 'zoom-out' | 'reset';
+    }) => void) => () => void;
     onUploadProgress: (listener: (payload: {
       uploadId: string;
       partNumber: number;

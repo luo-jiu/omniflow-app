@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, screen } from 'electron'
+import { app, BrowserWindow, Menu, protocol, screen } from 'electron'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -9,8 +9,20 @@ import { createOverlayWindowController } from './service/overlayWindowController
 import { registerOverlayWindowIpcHandlers } from './service/overlayWindowIpc'
 import { createSystemVideoWindowController } from './service/systemVideoWindowController'
 import { registerSystemVideoWindowIpcHandlers } from './service/systemVideoWindowIpc'
+import { IMAGE_PREVIEW_PROTOCOL, registerImagePreviewProtocol } from './ipc/imagePreview'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
+
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: IMAGE_PREVIEW_PROTOCOL,
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+    },
+  },
+])
 
 process.env.APP_ROOT = path.join(__dirname, '..')
 
@@ -187,26 +199,23 @@ function isToggleDevToolsShortcut(input: Electron.Input) {
   return (input.meta || input.control) && input.shift && key === 'i'
 }
 
-function isChromiumPageZoomShortcut(input: Electron.Input) {
+function getChromiumPageZoomShortcutAction(input: Electron.Input): 'zoom-in' | 'zoom-out' | 'reset' | null {
   if (input.type !== 'keyDown' || !(input.meta || input.control)) {
-    return false
+    return null
   }
 
   const key = (input.key || '').toLowerCase()
   const code = input.code || ''
-  return (
-    key === '+'
-    || key === '='
-    || key === '-'
-    || key === '_'
-    || key === '0'
-    || code === 'Equal'
-    || code === 'Minus'
-    || code === 'Digit0'
-    || code === 'NumpadAdd'
-    || code === 'NumpadSubtract'
-    || code === 'Numpad0'
-  )
+  if (key === '+' || key === '=' || code === 'Equal' || code === 'NumpadAdd') {
+    return 'zoom-in'
+  }
+  if (key === '-' || key === '_' || code === 'Minus' || code === 'NumpadSubtract') {
+    return 'zoom-out'
+  }
+  if (key === '0' || code === 'Digit0' || code === 'Numpad0') {
+    return 'reset'
+  }
+  return null
 }
 
 const embeddedBrowserMainController = createEmbeddedBrowserMainController({
@@ -325,9 +334,11 @@ function createWindow() {
   })
 
   win.webContents.on('before-input-event', (event, input) => {
-    if (isChromiumPageZoomShortcut(input)) {
+    const zoomShortcutAction = getChromiumPageZoomShortcutAction(input)
+    if (zoomShortcutAction) {
       event.preventDefault()
       win.webContents.setZoomFactor(1)
+      win.webContents.send('app:viewer-zoom-shortcut', { action: zoomShortcutAction })
       return
     }
 
@@ -395,6 +406,7 @@ app.whenReady().then(() => {
   }
 
   embeddedBrowserMainController.configureSession()
+  registerImagePreviewProtocol()
   embeddedBrowserMainController.initializeBridges()
   registerIpcHandlers()
   registerWindowControlIpcHandlers({

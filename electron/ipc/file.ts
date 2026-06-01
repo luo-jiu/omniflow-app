@@ -52,6 +52,11 @@ interface DesktopStagedTextFileResult {
   size: number;
 }
 
+interface DesktopStagedBinaryFileResult {
+  filePath: string;
+  size: number;
+}
+
 const AUTO_IMPORT_DEFAULT_DIR_NAME = 'Omniflow Inbox';
 const AUTO_IMPORT_OBSERVE_TTL_MS = 10 * 60 * 1000;
 const AUTO_IMPORT_MIN_STABLE_COUNT = 2;
@@ -614,6 +619,28 @@ export function registerFileIpc(ipcMain: Electron.IpcMain) {
     };
   });
 
+  ipcMain.handle('fs:create-staged-binary-file', async (
+    _event,
+    fileName: string,
+    base64: string,
+  ): Promise<DesktopStagedBinaryFileResult> => {
+    const stagingRoot = getTempImportStagingRoot();
+    const subDir = path.join(stagingRoot, `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+    await fs.mkdir(subDir, { recursive: true });
+
+    const safeName = String(fileName || 'image.png').replace(/[/\\]/g, '_').trim() || 'image.png';
+    const stagedPath = path.join(subDir, safeName);
+    const buffer = Buffer.from(String(base64 || ''), 'base64');
+    if (buffer.length <= 0) {
+      throw new Error('临时图片内容为空');
+    }
+    await fs.writeFile(stagedPath, buffer);
+    return {
+      filePath: stagedPath,
+      size: buffer.length,
+    };
+  });
+
   ipcMain.handle('fs:create-temp-import-directory', async (): Promise<string> => {
     const stagingRoot = getTempImportStagingRoot();
     await fs.mkdir(stagingRoot, { recursive: true });
@@ -666,6 +693,14 @@ export function registerFileIpc(ipcMain: Electron.IpcMain) {
     const stagingRoot = getTempImportStagingRoot();
     if (!normalizedPath || !isPathInsideDirectory(normalizedPath, stagingRoot)) {
       return false;
+    }
+    const stat = await fs.stat(normalizedPath).catch(() => null);
+    if (stat?.isFile()) {
+      const parentDir = path.dirname(normalizedPath);
+      if (parentDir !== stagingRoot && isPathInsideDirectory(parentDir, stagingRoot)) {
+        await fs.rm(parentDir, { recursive: true, force: true });
+        return true;
+      }
     }
     await fs.rm(normalizedPath, { force: true, recursive: true });
     return true;

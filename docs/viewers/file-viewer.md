@@ -19,6 +19,8 @@
   - 按 `fileType` 分发 viewer
 - `components/image-viewer/`
   - 普通图片预览；HEIC / HEIF 通过 `prepareImagePreview` 生成本地 PNG 预览后复用现有缩放、平移、旋转逻辑。
+  - 图片加载后左键按住即可拖拽平移；`Cmd/Ctrl + +/-/0` 只调整当前图片缩放，不触发应用页面缩放。
+  - 支持在当前缩放 / 平移状态下裁剪可见图片区域，并把裁剪结果作为同级副本文件上传；副本命名为“原名 副本 / 原名 副本1 …”，创建后通过节点移动接口排到原图前面。
 - `components/audio-viewer/`
 - `components/video-viewer/`
 - `components/pdf-viewer/`

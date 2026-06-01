@@ -1,7 +1,23 @@
 import React, { useState, WheelEvent, MouseEvent, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Popover, Spin } from '@douyinfe/semi-ui';
+import { Popover, Spin, Toast } from '@douyinfe/semi-ui';
+import { IconCrop } from '@douyinfe/semi-icons';
 import { ImageViewerWrapper } from './style';
 import ContextMenu, { ContextMenuItem } from '@/components/ui/context-menu';
+import ImageCropOverlay from '../image-crop-overlay';
+import {
+  createDefaultCropSelection,
+  getDisplayedImageBounds,
+  getImageRectInContainer,
+  isCropBoundsUsable,
+  saveCroppedImageCopy,
+  type CropBounds,
+  type CropSelection,
+} from '../../services/image-crop.service';
+import {
+  fetchNodeDetailById,
+  getChildrenByNodeId,
+} from '@/features/file-explorer/services/file.api';
+import { buildFileFullName } from '@/utils/fileTreeSettings';
 import { runtimeLogger } from '@/utils/runtimeLogger';
 
 interface ImageViewerProps {
@@ -15,6 +31,8 @@ interface Point {
   x: number;
   y: number;
 }
+
+type ViewerZoomShortcutAction = 'zoom-in' | 'zoom-out' | 'reset';
 
 const MIN_ZOOM = 0.05;
 const MAX_ZOOM = 10;
@@ -53,12 +71,17 @@ const ImageViewer: React.FC<ImageViewerProps> = ({
   const [isDragging, setIsDragging] = useState(false);
   const [dragAnchor, setDragAnchor] = useState<Point>({ x: 0, y: 0 });
   const [rotateSteps, setRotateSteps] = useState(0);
+  const [cropMode, setCropMode] = useState(false);
+  const [cropBounds, setCropBounds] = useState<CropBounds | null>(null);
+  const [cropSelection, setCropSelection] = useState<CropSelection | null>(null);
+  const [cropApplying, setCropApplying] = useState(false);
   const [menuState, setMenuState] = useState({
     visible: false,
     x: 0,
     y: 0
   });
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const imageRef = useRef<HTMLImageElement | null>(null);
   const imageNaturalRef = useRef({ width: 0, height: 0 });
   const isHeic = useMemo(() => isHeicFile(fileName), [fileName]);
   const imageUrl = isHeic ? previewUrl : url;
@@ -96,6 +119,9 @@ const ImageViewer: React.FC<ImageViewerProps> = ({
     setRotateSteps(0);
     setIsDragging(false);
     setIsPanMode(false);
+    setCropMode(false);
+    setCropBounds(null);
+    setCropSelection(null);
   }, [computeContainScale]);
 
   // 重置视图：完整显示图片（上下左右都可见）并尽量大
@@ -104,8 +130,9 @@ const ImageViewer: React.FC<ImageViewerProps> = ({
   }, [fitToViewport]);
 
   const rotateCounterclockwise = useCallback(() => {
+    if (cropMode) return;
     setRotateSteps(prev => (prev + 1) % 4);
-  }, []);
+  }, [cropMode]);
 
   const handleImageLoad = useCallback((e: React.SyntheticEvent<HTMLImageElement>) => {
     const img = e.currentTarget;
@@ -129,6 +156,9 @@ const ImageViewer: React.FC<ImageViewerProps> = ({
     setRotateSteps(0);
     setIsDragging(false);
     setIsPanMode(false);
+    setCropMode(false);
+    setCropBounds(null);
+    setCropSelection(null);
     imageNaturalRef.current = { width: 0, height: 0 };
   }, [url]);
 
@@ -191,33 +221,112 @@ const ImageViewer: React.FC<ImageViewerProps> = ({
   // 滚轮缩放（不需要 Ctrl）
   const handleWheel = useCallback((e: WheelEvent) => {
     e.preventDefault();
+    if (cropMode) return;
     const direction = e.deltaY > 0 ? -1 : 1;
     setZoom(prev => clamp(prev + direction * prev * WHEEL_ZOOM_RATIO, MIN_ZOOM, MAX_ZOOM));
-  }, []);
+  }, [cropMode]);
 
-  // 鼠标按下：空格 或 中键 开始拖拽
+  // 鼠标按下：左键或中键直接拖拽平移
   const handleMouseDown = useCallback((e: MouseEvent) => {
-    if (isPanMode || e.button === 1) {
+    if (cropMode || !imageUrl) return;
+    if (e.button === 0 || e.button === 1) {
       e.preventDefault();
       setIsDragging(true);
       setDragAnchor({ x: e.clientX - offset.x, y: e.clientY - offset.y });
     }
-  }, [isPanMode, offset]);
+  }, [cropMode, imageUrl, offset]);
 
   // 鼠标移动
   const handleMouseMove = useCallback((e: MouseEvent) => {
+    if (cropMode) return;
     if (isDragging) {
       setOffset({
         x: e.clientX - dragAnchor.x,
         y: e.clientY - dragAnchor.y
       });
     }
-  }, [isDragging, dragAnchor]);
+  }, [cropMode, isDragging, dragAnchor]);
 
   // 鼠标松开
   const handleMouseUp = useCallback(() => {
     setIsDragging(false);
   }, []);
+
+  const enterCropMode = useCallback(() => {
+    if (!nodeId || nodeId <= 0) {
+      Toast.warning('当前图片缺少节点信息，无法保存裁剪副本');
+      return;
+    }
+    if (!imageUrl || naturalSize.width <= 0 || naturalSize.height <= 0) {
+      Toast.warning('图片尚未加载完成');
+      return;
+    }
+    if (rotateSteps !== 0) {
+      Toast.warning('请先重置旋转后再裁剪');
+      return;
+    }
+    const nextBounds = getDisplayedImageBounds(containerRef.current, imageRef.current);
+    if (!isCropBoundsUsable(nextBounds)) {
+      Toast.warning('当前可裁剪区域过小');
+      return;
+    }
+    setIsDragging(false);
+    setIsPanMode(false);
+    setCropBounds(nextBounds);
+    setCropSelection(createDefaultCropSelection(nextBounds));
+    setCropMode(true);
+  }, [imageUrl, naturalSize.height, naturalSize.width, nodeId, rotateSteps]);
+
+  const cancelCropMode = useCallback(() => {
+    if (cropApplying) return;
+    setCropMode(false);
+    setCropBounds(null);
+    setCropSelection(null);
+  }, [cropApplying]);
+
+  const applyCrop = useCallback(async () => {
+    if (!nodeId || !imageUrl || !cropSelection) return;
+    const imageRect = getImageRectInContainer(containerRef.current, imageRef.current);
+    if (!imageRect) {
+      Toast.warning('无法读取图片位置');
+      return;
+    }
+
+    setCropApplying(true);
+    try {
+      const detail = await fetchNodeDetailById(nodeId);
+      const parentId = Number(detail.parentId);
+      const libraryId = Number(detail.libraryId);
+      if (!Number.isFinite(parentId) || parentId <= 0 || !Number.isFinite(libraryId) || libraryId <= 0) {
+        throw new Error('当前图片目录信息异常');
+      }
+      const siblings = await getChildrenByNodeId(parentId, libraryId);
+      const existingNames = siblings
+        .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object'))
+        .map(item => buildFileFullName(String(item.name || ''), item.ext as string | undefined))
+        .filter(Boolean);
+      await saveCroppedImageCopy({
+        beforeNodeId: nodeId,
+        existingNames,
+        imageRect,
+        libraryId,
+        naturalSize: imageNaturalRef.current,
+        parentId,
+        selection: cropSelection,
+        sourceFileName: fileName,
+        sourceUrl: imageUrl,
+      });
+      Toast.success('已保存裁剪副本');
+      setCropMode(false);
+      setCropBounds(null);
+      setCropSelection(null);
+    } catch (error: any) {
+      runtimeLogger.error('保存裁剪图片失败:', error);
+      Toast.error(error?.message || '保存裁剪副本失败');
+    } finally {
+      setCropApplying(false);
+    }
+  }, [cropSelection, fileName, imageUrl, nodeId]);
 
   // 处理右键菜单
   const handleContextMenu = (e: MouseEvent) => {
@@ -242,6 +351,9 @@ const ImageViewer: React.FC<ImageViewerProps> = ({
     setMenuState(prev => (prev.visible ? { ...prev, visible: false } : prev));
     setIsDragging(false);
     setIsPanMode(false);
+    setCropMode(false);
+    setCropBounds(null);
+    setCropSelection(null);
   }, [active]);
 
   // 菜单项
@@ -255,6 +367,13 @@ const ImageViewer: React.FC<ImageViewerProps> = ({
       key: 'rotate-ccw',
       label: '旋转（逆时针90°）',
       onClick: rotateCounterclockwise
+    },
+    {
+      key: 'crop-copy',
+      label: '裁剪为副本',
+      icon: <IconCrop />,
+      onClick: enterCropMode,
+      disabled: !nodeId || !imageUrl || cropMode
     },
     {
       key: 'copy-link',
@@ -271,6 +390,19 @@ const ImageViewer: React.FC<ImageViewerProps> = ({
     }
   ];
 
+  const applyViewerZoomShortcut = useCallback((action: ViewerZoomShortcutAction) => {
+    if (!active || cropMode) return;
+    if (action === 'zoom-in') {
+      setZoom(s => clamp(s * 1.15, MIN_ZOOM, MAX_ZOOM));
+      return;
+    }
+    if (action === 'zoom-out') {
+      setZoom(s => clamp(s / 1.15, MIN_ZOOM, MAX_ZOOM));
+      return;
+    }
+    resetView();
+  }, [active, cropMode, resetView]);
+
   // 空格键平移 + 快捷键缩放
   useEffect(() => {
     const isEditableTarget = (target: EventTarget | null) => {
@@ -281,12 +413,22 @@ const ImageViewer: React.FC<ImageViewerProps> = ({
     };
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (!active) return;
       if (e.code === 'Space' && !e.repeat) {
-        e.preventDefault();
-        setIsPanMode(true);
+        if (!cropMode) {
+          e.preventDefault();
+          setIsPanMode(true);
+        }
+        return;
       }
 
-      if (e.ctrlKey || e.metaKey) {
+      if (e.key === 'Escape' && cropMode) {
+        e.preventDefault();
+        cancelCropMode();
+        return;
+      }
+
+      if ((e.ctrlKey || e.metaKey) && !cropMode) {
         if (isEditableTarget(e.target)) {
           return;
         }
@@ -296,40 +438,52 @@ const ImageViewer: React.FC<ImageViewerProps> = ({
         const isPlus = key === '+' || key === '=' || code === 'Equal' || code === 'NumpadAdd';
         const isMinus = key === '-' || key === '_' || code === 'Minus' || code === 'NumpadSubtract';
         const isReset = key === '0' || code === 'Digit0' || code === 'Numpad0';
+        if (!isPlus && !isMinus && !isReset) {
+          return;
+        }
 
+        e.preventDefault();
+        e.stopPropagation();
         if (isPlus) {
-          e.preventDefault();
-          setZoom(s => clamp(s * 1.15, MIN_ZOOM, MAX_ZOOM));
+          applyViewerZoomShortcut('zoom-in');
         } else if (isMinus) {
-          e.preventDefault();
-          setZoom(s => clamp(s / 1.15, MIN_ZOOM, MAX_ZOOM));
+          applyViewerZoomShortcut('zoom-out');
         } else if (isReset) {
-          e.preventDefault();
-          resetView();
+          applyViewerZoomShortcut('reset');
         }
       }
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
+      if (!active) return;
       if (e.code === 'Space') {
         setIsPanMode(false);
         setIsDragging(false);
       }
     };
 
-    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keydown', handleKeyDown, { capture: true });
     window.addEventListener('keyup', handleKeyUp);
     return () => {
-      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keydown', handleKeyDown, { capture: true } as EventListenerOptions);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [resetView]);
+  }, [active, applyViewerZoomShortcut, cancelCropMode, cropMode]);
+
+  useEffect(() => {
+    const off = window.electronAPI?.onViewerZoomShortcut?.(({ action }) => {
+      applyViewerZoomShortcut(action);
+    });
+    return () => {
+      off?.();
+    };
+  }, [applyViewerZoomShortcut]);
 
   return (
     <ImageViewerWrapper
       onWheel={handleWheel}
       onContextMenu={handleContextMenu}
-      className={`${isPanMode ? 'can-pan' : ''} ${isDragging ? 'is-panning' : ''}`}
+      className={`${imageUrl && !cropMode ? 'can-pan' : ''} ${isPanMode ? 'space-pan' : ''} ${isDragging ? 'is-panning' : ''}`}
     >
       <div
         ref={containerRef}
@@ -341,6 +495,7 @@ const ImageViewer: React.FC<ImageViewerProps> = ({
       >
         {imageUrl ? (
           <img
+            ref={imageRef}
             src={imageUrl}
             alt={fileName || 'Image'}
             className="viewer-image"
@@ -364,6 +519,16 @@ const ImageViewer: React.FC<ImageViewerProps> = ({
             )}
           </div>
         )}
+        {cropMode ? (
+          <ImageCropOverlay
+            applying={cropApplying}
+            bounds={cropBounds}
+            selection={cropSelection}
+            onApply={applyCrop}
+            onCancel={cancelCropMode}
+            onSelectionChange={setCropSelection}
+          />
+        ) : null}
       </div>
 
       {fileName && (

@@ -36,6 +36,7 @@ interface ComicChildNode {
 
 type ReaderLayoutMode = 'scroll' | 'flip';
 type ScrollColumnMode = 1 | 2;
+type ViewerZoomShortcutAction = 'zoom-in' | 'zoom-out' | 'reset';
 
 const INITIAL_VISIBLE_COUNT = 12;
 const LOAD_MORE_STEP = 10;
@@ -338,6 +339,9 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const flipStageRef = useRef<HTMLDivElement | null>(null);
+  const flipDragStartRef = useRef({ x: 0, y: 0 });
+  const flipDragMovedRef = useRef(false);
+  const suppressNextFlipClickRef = useRef(false);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const pageRefs = useRef<Map<number, HTMLElement>>(new Map());
   const flipWarmImageCacheRef = useRef<Map<number, HTMLImageElement>>(new Map());
@@ -1432,18 +1436,25 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
   ]);
 
   const handleFlipMouseDown = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
-    if (flipPanMode || event.button === 1) {
+    if (event.button === 0 || event.button === 1) {
       event.preventDefault();
+      flipDragStartRef.current = { x: event.clientX, y: event.clientY };
+      flipDragMovedRef.current = false;
       setFlipDragging(true);
       setFlipDragAnchor({
         x: event.clientX - flipOffset.x,
         y: event.clientY - flipOffset.y,
       });
     }
-  }, [flipOffset.x, flipOffset.y, flipPanMode]);
+  }, [flipOffset.x, flipOffset.y]);
 
   const handleFlipMouseMove = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     if (!flipDragging) return;
+    const movedX = Math.abs(event.clientX - flipDragStartRef.current.x);
+    const movedY = Math.abs(event.clientY - flipDragStartRef.current.y);
+    if (movedX > 3 || movedY > 3) {
+      flipDragMovedRef.current = true;
+    }
     setFlipOffset({
       x: event.clientX - flipDragAnchor.x,
       y: event.clientY - flipDragAnchor.y,
@@ -1451,6 +1462,12 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
   }, [flipDragAnchor.x, flipDragAnchor.y, flipDragging]);
 
   const handleFlipMouseUp = useCallback(() => {
+    if (flipDragMovedRef.current) {
+      suppressNextFlipClickRef.current = true;
+      window.setTimeout(() => {
+        suppressNextFlipClickRef.current = false;
+      }, 0);
+    }
     setFlipDragging(false);
   }, []);
 
@@ -1471,6 +1488,10 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
 
   const handleFlipStageClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     if (!isFlipMode) return;
+    if (suppressNextFlipClickRef.current) {
+      suppressNextFlipClickRef.current = false;
+      return;
+    }
     if (flipPanMode || flipDragging) return;
     if (event.button !== 0) return;
 
@@ -1525,6 +1546,40 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
     };
   }, [active, goToNextFlipPage, goToPrevFlipPage, isFlipMode]);
 
+  const applyViewerZoomShortcut = useCallback((action: ViewerZoomShortcutAction) => {
+    if (!active) return;
+    if (action === 'zoom-in') {
+      if (isFlipMode) {
+        applyFlipZoomRatio(1 + CTRL_WHEEL_ZOOM_STEP);
+      } else {
+        zoomScrollByDirection(1);
+      }
+      return;
+    }
+
+    if (action === 'zoom-out') {
+      if (isFlipMode) {
+        applyFlipZoomRatio(1 - CTRL_WHEEL_ZOOM_STEP);
+      } else {
+        zoomScrollByDirection(-1);
+      }
+      return;
+    }
+
+    if (isFlipMode) {
+      resetFlipZoomToFit();
+    } else {
+      resetScrollZoom();
+    }
+  }, [
+    active,
+    applyFlipZoomRatio,
+    isFlipMode,
+    resetFlipZoomToFit,
+    resetScrollZoom,
+    zoomScrollByDirection,
+  ]);
+
   useEffect(() => {
     const isEditableTarget = (target: EventTarget | null) => {
       if (!(target instanceof HTMLElement)) return false;
@@ -1549,35 +1604,32 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
       event.stopPropagation();
 
       if (isPlus) {
-        if (isFlipMode) {
-          applyFlipZoomRatio(1 + CTRL_WHEEL_ZOOM_STEP);
-        } else {
-          zoomScrollByDirection(1);
-        }
+        applyViewerZoomShortcut('zoom-in');
         return;
       }
 
       if (isMinus) {
-        if (isFlipMode) {
-          applyFlipZoomRatio(1 - CTRL_WHEEL_ZOOM_STEP);
-        } else {
-          zoomScrollByDirection(-1);
-        }
+        applyViewerZoomShortcut('zoom-out');
         return;
       }
 
-      if (isFlipMode) {
-        resetFlipZoomToFit();
-      } else {
-        resetScrollZoom();
-      }
+      applyViewerZoomShortcut('reset');
     };
 
     window.addEventListener('keydown', handleZoomShortcut, { capture: true });
     return () => {
       window.removeEventListener('keydown', handleZoomShortcut, { capture: true } as EventListenerOptions);
     };
-  }, [active, applyFlipZoomRatio, isFlipMode, resetFlipZoomToFit, resetScrollZoom, zoomScrollByDirection]);
+  }, [active, applyViewerZoomShortcut]);
+
+  useEffect(() => {
+    const off = window.electronAPI?.onViewerZoomShortcut?.(({ action }) => {
+      applyViewerZoomShortcut(action);
+    });
+    return () => {
+      off?.();
+    };
+  }, [applyViewerZoomShortcut]);
 
   const flipPrimaryIndex = useMemo(
     () => normalizeFlipIndexForPageMode(clamp(flipPageIndex, 0, Math.max(pages.length - 1, 0))),
@@ -1743,7 +1795,7 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
     <ComicViewerWrapper>
       {isFlipMode ? (
         <div
-          className={`flip-stage ${flipPanMode ? 'can-pan' : ''} ${flipDragging ? 'is-panning' : ''}`}
+          className={`flip-stage can-pan ${flipPanMode ? 'space-pan' : ''} ${flipDragging ? 'is-panning' : ''}`}
           ref={flipStageRef}
           onClick={handleFlipStageClick}
           onContextMenu={handleViewerContextMenu}
