@@ -854,6 +854,19 @@ export function useRepositoryTree(
         return;
       }
 
+      if (archiveMode === 1 && builtInType === 'GALLERY') {
+        if (onFileOpen) {
+          onFileOpen(
+            `gallery-archive://library/${selectedLibraryId}/node/${node.id}`,
+            node.name,
+            'gallery_archive',
+            node.id,
+            { tabTypeLabel: 'GALLERY-ARCHIVE' },
+          );
+        }
+        return;
+      }
+
       if (archiveMode === 1) {
         await toggleDirectoryNodeExpand();
         return;
@@ -878,6 +891,19 @@ export function useRepositoryTree(
             `asmr://library/${selectedLibraryId}/node/${node.id}`,
             node.name,
             'asmr',
+            node.id,
+            { tabTypeLabel: builtInType },
+          );
+        }
+        return;
+      }
+
+      if (builtInType === 'GALLERY') {
+        if (onFileOpen) {
+          onFileOpen(
+            `gallery://library/${selectedLibraryId}/node/${node.id}`,
+            node.name,
+            'gallery',
             node.id,
             { tabTypeLabel: builtInType },
           );

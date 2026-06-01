@@ -87,6 +87,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     operation: 'extract-audio' | 'compress-video';
     outputDirectoryPath?: string;
   }) => ipcRenderer.invoke('media-tool:process-file', payload),
+  prepareImagePreview: (payload: {
+    nodeId?: number;
+    libraryId?: number;
+    url: string;
+    fileName?: string;
+    ext?: string;
+    mimeType?: string;
+    fileSize?: number;
+    sourceVersion?: string;
+  }) => ipcRenderer.invoke('image-preview:prepare', payload),
   fetch: (url: string, options?: any) => ipcRenderer.invoke('http:fetch', url, options),
   fetchBinary: (url: string, options?: any) => ipcRenderer.invoke('http:fetch-binary', url, options),
   uploadPresignedPut: (args: {

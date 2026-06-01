@@ -1,10 +1,11 @@
-import React, { useState, WheelEvent, MouseEvent, useEffect, useCallback, useRef } from 'react';
-import { Popover } from '@douyinfe/semi-ui';
+import React, { useState, WheelEvent, MouseEvent, useEffect, useCallback, useMemo, useRef } from 'react';
+import { Popover, Spin } from '@douyinfe/semi-ui';
 import { ImageViewerWrapper } from './style';
 import ContextMenu, { ContextMenuItem } from '@/components/ui/context-menu';
 import { runtimeLogger } from '@/utils/runtimeLogger';
 
 interface ImageViewerProps {
+  nodeId?: number | null;
   url: string;
   fileName?: string | null;
   active?: boolean;
@@ -20,11 +21,34 @@ const MAX_ZOOM = 10;
 const WHEEL_ZOOM_RATIO = 0.08;
 const FIT_RETRY_FRAMES = 6;
 
-const ImageViewer: React.FC<ImageViewerProps> = ({ url, fileName, active = true }) => {
+function normalizeExt(value?: string | null): string {
+  return String(value || '').trim().toLowerCase().replace(/^\./, '');
+}
+
+function extFromFileName(fileName?: string | null): string {
+  const raw = String(fileName || '').trim();
+  const dotIndex = raw.lastIndexOf('.');
+  return dotIndex >= 0 ? normalizeExt(raw.slice(dotIndex + 1)) : '';
+}
+
+function isHeicFile(fileName?: string | null): boolean {
+  const ext = extFromFileName(fileName);
+  return ext === 'heic' || ext === 'heif' || ext === 'heics' || ext === 'heifs';
+}
+
+const ImageViewer: React.FC<ImageViewerProps> = ({
+  nodeId,
+  url,
+  fileName,
+  active = true,
+}) => {
   const [baseScale, setBaseScale] = useState(1);
   const [zoom, setZoom] = useState(1);
   const [offset, setOffset] = useState<Point>({ x: 0, y: 0 });
   const [naturalSize, setNaturalSize] = useState({ width: 0, height: 0 });
+  const [previewUrl, setPreviewUrl] = useState('');
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
   const [isPanMode, setIsPanMode] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [dragAnchor, setDragAnchor] = useState<Point>({ x: 0, y: 0 });
@@ -36,6 +60,8 @@ const ImageViewer: React.FC<ImageViewerProps> = ({ url, fileName, active = true 
   });
   const containerRef = useRef<HTMLDivElement | null>(null);
   const imageNaturalRef = useRef({ width: 0, height: 0 });
+  const isHeic = useMemo(() => isHeicFile(fileName), [fileName]);
+  const imageUrl = isHeic ? previewUrl : url;
 
   const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
 
@@ -105,6 +131,62 @@ const ImageViewer: React.FC<ImageViewerProps> = ({ url, fileName, active = true 
     setIsPanMode(false);
     imageNaturalRef.current = { width: 0, height: 0 };
   }, [url]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setPreviewUrl('');
+    setPreviewError(null);
+    if (!isHeic) {
+      setPreviewLoading(false);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const api = window.electronAPI?.prepareImagePreview;
+    if (!api) {
+      setPreviewLoading(false);
+      setPreviewError('当前环境不支持 HEIC 预览');
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    async function preparePreview() {
+      setPreviewLoading(true);
+      try {
+        const result = await api({
+          nodeId: nodeId || undefined,
+          url,
+          fileName: fileName || undefined,
+          ext: extFromFileName(fileName),
+          mimeType: 'image/heic',
+        });
+        const nextPreviewUrl = result?.previewUrl || result?.previewDataUrl || '';
+        if (!result?.ok || !nextPreviewUrl) {
+          throw new Error(result?.error || '生成 HEIC 预览失败');
+        }
+        if (!cancelled) {
+          setPreviewUrl(nextPreviewUrl);
+          setPreviewError(null);
+        }
+      } catch (error: any) {
+        runtimeLogger.warn('普通图片查看器生成 HEIC 预览失败:', error);
+        if (!cancelled) {
+          setPreviewError(error?.message || '生成 HEIC 预览失败');
+        }
+      } finally {
+        if (!cancelled) {
+          setPreviewLoading(false);
+        }
+      }
+    }
+
+    void preparePreview();
+    return () => {
+      cancelled = true;
+    };
+  }, [fileName, isHeic, nodeId, url]);
 
   // 滚轮缩放（不需要 Ctrl）
   const handleWheel = useCallback((e: WheelEvent) => {
@@ -257,18 +339,31 @@ const ImageViewer: React.FC<ImageViewerProps> = ({ url, fileName, active = true 
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
       >
-        <img
-          src={url}
-          alt={fileName || 'Image'}
-          className="viewer-image"
-          onLoad={handleImageLoad}
-          style={{
-            width: naturalSize.width > 0 ? `${naturalSize.width}px` : undefined,
-            height: naturalSize.height > 0 ? `${naturalSize.height}px` : undefined,
-            transform: `translate(${offset.x}px, ${offset.y}px) scale(${baseScale * zoom}) rotate(${-90 * rotateSteps}deg)`,
-            transition: 'none'
-          }}
-        />
+        {imageUrl ? (
+          <img
+            src={imageUrl}
+            alt={fileName || 'Image'}
+            className="viewer-image"
+            onLoad={handleImageLoad}
+            style={{
+              width: naturalSize.width > 0 ? `${naturalSize.width}px` : undefined,
+              height: naturalSize.height > 0 ? `${naturalSize.height}px` : undefined,
+              transform: `translate(${offset.x}px, ${offset.y}px) scale(${baseScale * zoom}) rotate(${-90 * rotateSteps}deg)`,
+              transition: 'none'
+            }}
+          />
+        ) : (
+          <div className="image-preview-placeholder">
+            {previewLoading ? (
+              <>
+                <Spin />
+                <span>正在生成 HEIC 预览...</span>
+              </>
+            ) : (
+              <span>{previewError || '无法预览图片'}</span>
+            )}
+          </div>
+        )}
       </div>
 
       {fileName && (

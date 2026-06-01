@@ -1,6 +1,6 @@
 # File Viewer 与 Archive Viewer 映射说明
 
-更新时间：2026-04-30
+更新时间：2026-06-01
 适用范围：`features/file-viewer`、`features/archive-viewer`、`contexts/FileViewerContext.tsx`、`components/business/app-main/` 中与文件预览、viewer 分发和归档返回链路相关的代码。
 
 ## 1. 概述
@@ -26,11 +26,13 @@ OmniFlow 当前不是“一个万能 viewer”，而是多种 viewer 共同组�
 - `pdf`
 - `text`
 - `comic`
+- `gallery`
 - `asmr`
 - `video_archive`
 - `audio_archive`
 - `asmr_archive`
 - `comic_archive`
+- `gallery_archive`
 - `other`
 
 这里的 `fileType` 是预览分发类型，不等同于文件扩展名，也不等同于目录树节点上的 `builtInType`。
@@ -45,11 +47,13 @@ OmniFlow 当前不是“一个万能 viewer”，而是多种 viewer 共同组�
 - `pdf -> PdfViewer`
 - `text -> TextViewer`
 - `comic -> ComicViewer`
+- `gallery -> GalleryViewer`（图集目录 viewer；图片和视频详情在当前 tab 内切换，视频通过 `floatingVideoService` 接入 MediaHub）
 - `asmr -> AsmrViewer`（参与 MediaRegistry 注册，kind=audio，仅当 ownerType 为 asmr 且为该 viewer 的 ownerKey）
 - `video_archive -> VideoArchiveViewer`
 - `audio_archive -> AudioArchiveViewer`（归档页底部播放器首次播放后参与 MediaRegistry 注册，kind=audio）
 - `asmr_archive -> AsmrArchiveViewer`
 - `comic_archive -> ComicArchiveViewer`
+- `gallery_archive -> GalleryArchiveViewer`（图集归档卡片墙；直属普通图集卡片进入 `gallery`，直属下级归档卡片进入下一层 `gallery_archive`）
 - `other -> 不支持预览提示`
 
 对应代码位置：
@@ -79,6 +83,7 @@ OmniFlow 当前不是“一个万能 viewer”，而是多种 viewer 共同组�
 - `pdf-viewer`
 - `text-viewer`
 - `comic-viewer`
+- `gallery-viewer`
 - `asmr-viewer`
 - `welcome-view`
 - `file-dispatcher`
@@ -91,6 +96,7 @@ OmniFlow 当前不是“一个万能 viewer”，而是多种 viewer 共同组�
 - `audio-archive-viewer`
 - `asmr-archive-viewer`
 - `comic-archive-viewer`
+- `gallery-archive-viewer`
 
 它和 `file-viewer` 是配套关系，不是替代关系。
 
@@ -135,6 +141,7 @@ OmniFlow 当前不是“一个万能 viewer”，而是多种 viewer 共同组�
 4. `src/features/file-viewer/components/file-dispatcher/index.tsx`
 5. 再按需看具体 viewer：
    - `src/features/file-viewer/components/comic-viewer/`
+   - `src/features/file-viewer/components/gallery-viewer/`
    - `src/features/file-viewer/components/asmr-viewer/`
    - `src/features/file-viewer/components/text-viewer/`
    - `src/features/archive-viewer/components/video-archive-viewer/`
@@ -164,11 +171,12 @@ OmniFlow 当前不是“一个万能 viewer”，而是多种 viewer 共同组�
 
 1. 普通文件类型仍进入正确 viewer。
 2. `comic / asmr` 仍进入普通 viewer。
-3. `video_archive / audio_archive / comic_archive / asmr_archive` 仍进入归档 viewer。
-4. 归档 viewer 返回链路仍然成立。
-5. 从 `asmr / comic / video / audio` 归档打开普通 viewer 后，顶部返回按钮显示绿色提示态。
-6. 从 `comic_archive` 打开子 `comic_archive` 后，顶部返回按钮能逐级回到父归档；从目录树直接打开中间层归档时，不显示不存在的父级返回。
-7. 不支持预览的文件仍进入降级态，而不是白屏。
+3. `gallery` 目录进入图集 viewer，图片 / 视频详情在同一 tab 内左右切换。
+4. `video_archive / audio_archive / comic_archive / asmr_archive / gallery_archive` 仍进入归档 viewer。
+5. 归档 viewer 返回链路仍然成立。
+6. 从 `asmr / comic / video / audio` 归档打开普通 viewer 后，顶部返回按钮显示绿色提示态。
+7. 从 `comic_archive` 打开子 `comic_archive` 后，顶部返回按钮能逐级回到父归档；从目录树直接打开中间层归档时，不显示不存在的父级返回。
+8. 不支持预览的文件仍进入降级态，而不是白屏。
 
 ## 9. 维护规则
 

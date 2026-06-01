@@ -61,6 +61,11 @@ const LABEL_TONE_MAP: Record<string, TabTypeTone> = {
     text: 'color-mix(in srgb, var(--semi-color-warning) 78%, var(--semi-color-tertiary) 22%)',
     border: 'color-mix(in srgb, var(--semi-color-warning) 38%, var(--semi-color-tertiary) 20%)',
   },
+  GALLERY: {
+    background: 'color-mix(in srgb, var(--semi-color-tertiary-light-default) 78%, var(--semi-color-success-light-default) 22%)',
+    text: 'color-mix(in srgb, var(--semi-color-tertiary) 72%, var(--semi-color-success) 28%)',
+    border: 'color-mix(in srgb, var(--semi-color-tertiary) 38%, var(--semi-color-success) 24%)',
+  },
   'ASMR-ARC': {
     background: 'color-mix(in srgb, var(--semi-color-success-light-default) 78%, var(--semi-color-primary-light-default) 22%)',
     text: 'color-mix(in srgb, var(--semi-color-success) 62%, var(--semi-color-primary) 38%)',
@@ -80,6 +85,11 @@ const LABEL_TONE_MAP: Record<string, TabTypeTone> = {
     background: 'color-mix(in srgb, var(--semi-color-warning-light-default) 76%, var(--semi-color-success-light-default) 24%)',
     text: 'color-mix(in srgb, var(--semi-color-warning) 66%, var(--semi-color-success) 34%)',
     border: 'color-mix(in srgb, var(--semi-color-warning) 36%, var(--semi-color-success) 28%)',
+  },
+  'GALLERY-ARC': {
+    background: 'color-mix(in srgb, var(--semi-color-tertiary-light-default) 74%, var(--semi-color-primary-light-default) 26%)',
+    text: 'color-mix(in srgb, var(--semi-color-tertiary) 70%, var(--semi-color-primary) 30%)',
+    border: 'color-mix(in srgb, var(--semi-color-tertiary) 38%, var(--semi-color-primary) 26%)',
   },
   IMAGE: {
     background: 'color-mix(in srgb, var(--semi-color-tertiary-light-default) 84%, transparent)',
@@ -119,11 +129,13 @@ const FILE_TYPE_TONE_MAP: Partial<Record<NonNullable<FileViewerTab['fileType']>,
   video: LABEL_TONE_MAP.MP4,
   pdf: LABEL_TONE_MAP.PDF,
   comic: LABEL_TONE_MAP.COMIC,
+  gallery: LABEL_TONE_MAP.GALLERY,
   asmr: LABEL_TONE_MAP.ASMR,
   video_archive: LABEL_TONE_MAP['VIDEO-ARC'],
   asmr_archive: LABEL_TONE_MAP['ASMR-ARC'],
   comic_archive: LABEL_TONE_MAP['COMIC-ARC'],
   audio_archive: LABEL_TONE_MAP['AUDIO-ARC'],
+  gallery_archive: LABEL_TONE_MAP['GALLERY-ARC'],
   other: LABEL_TONE_MAP.FILE,
 };
 
@@ -207,11 +219,13 @@ export function resolveTabTargetKey(tab: FileViewerTab, tabTypeLabel: string): s
   if (tab.fileType === 'video') return 'MP4';
   if (tab.fileType === 'pdf') return 'PDF';
   if (tab.fileType === 'comic') return 'COMIC';
+  if (tab.fileType === 'gallery') return 'GALLERY';
   if (tab.fileType === 'asmr') return 'ASMR';
   if (tab.fileType === 'video_archive') return 'VIDEO-ARC';
   if (tab.fileType === 'asmr_archive') return 'ASMR-ARC';
   if (tab.fileType === 'comic_archive') return 'COMIC-ARC';
   if (tab.fileType === 'audio_archive') return 'AUDIO-ARC';
+  if (tab.fileType === 'gallery_archive') return 'GALLERY-ARC';
   return 'FILE';
 }
 

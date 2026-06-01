@@ -221,7 +221,7 @@
 - 图标元素必须使用 `object-fit: contain`，不得只依赖 SVG 自身 `viewBox` 或 `width/height` 来决定最终视觉大小。
 - 内置类型图标的视觉面积参考默认文件夹（`folder-base.svg`）：主体图形不应明显高过同一行的默认文件夹图标，也不应比普通文件夹小一圈。
 - **所有目录类图标都必须提供闭合与展开两态**，例如 `folder-base.svg` / `folder-base-open.svg`、`folder-video.svg` / `folder-video-open.svg`；目录树渲染时按节点展开状态切换（参见 `directory-tree/index.tsx` 的 `patchNodes` 逻辑），不允许只用单个静态图标。
-- 不同 SVG 的有效图形面积不一致时，只允许在类型 class 上用 `0.5px ~ 1.5px` 的 `padding` 做感知大小校准，例如 `comic-folder`、`asmr-folder`、`audio-folder`、`video-folder`、`default-folder`。本仓库当前所有 5 类共享 0.5px 基准。
+- 不同 SVG 的有效图形面积不一致时，只允许在类型 class 上用 `0.5px ~ 1.5px` 的 `padding` 做感知大小校准，例如 `comic-folder`、`asmr-folder`、`audio-folder`、`video-folder`、`gallery-folder`、`default-folder`。本仓库当前所有目录类图标共享 0.5px 基准。
 - 新增目录树语义图标时，必须同时检查默认目录、漫画归档、ASMR 归档、音频归档和视频归档同屏展示效果，避免出现某个图标因为 SVG 内容铺满画布而明显偏大。
 
 ### 6.5 明暗主题可见性

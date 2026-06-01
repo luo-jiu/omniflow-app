@@ -1,6 +1,6 @@
 # 内置类型与归档模式说明
 
-更新时间：2026-05-06
+更新时间：2026-06-01
 适用范围：`features/file-explorer`、`features/file-viewer`、`features/archive-viewer`、`views/library/detail/` 中与节点内置类型、归档模式、目录树限制和视图选择相关的代码。
 
 ## 1. 概述
@@ -26,7 +26,7 @@ OmniFlow 里有一组不是通用前端术语、而是项目自己定义出来�
 
 ### 2.1 内置类型
 
-当前代码里的 `builtInType` 主要有 5 个值：
+当前代码里的 `builtInType` 主要有 6 个值：
 
 - `DEF`
   - 默认模式，不附加项目语义
@@ -38,6 +38,8 @@ OmniFlow 里有一组不是通用前端术语、而是项目自己定义出来�
   - 视频目录语义；只能设置到文件夹，不能设置到文件
 - `AUDIO`
   - 通用音频目录语义；只能设置到文件夹，不能设置到文件
+- `GALLERY`
+  - 图集目录语义；只能设置到文件夹，不能设置到文件；支持非归档图集 viewer 和图集归档 viewer
 
 它可以理解为“给节点附加一种项目内约定的展示/处理语义”。
 
@@ -77,7 +79,7 @@ OmniFlow 里有一组不是通用前端术语、而是项目自己定义出来�
 目录树右键菜单里当前会暴露：
 
 - 内置类型
-  - 文件夹：默认 / 漫画 / ASMR / 视频 / 音频
+  - 文件夹：默认 / 漫画 / ASMR / 视频 / 音频 / 图集
   - 文件：默认 / 漫画 / ASMR；`VIDEO` / `AUDIO` 不对文件展示
 - 归档模式
   - 仅文件夹展示关闭 / 开启
@@ -99,14 +101,15 @@ OmniFlow 里有一组不是通用前端术语、而是项目自己定义出来�
 - `ASMR` 非归档目录使用 ASMR 文件夹图标；`ASMR + archiveMode=1` 使用 ASMR 归档文件夹图标
 - `VIDEO` 非归档目录使用视频文件夹图标；`VIDEO + archiveMode=1` 使用视频归档文件夹图标
 - `AUDIO` 非归档目录使用音频文件夹图标；`AUDIO + archiveMode=1` 使用音频归档文件夹图标
-- 五类目录图标都必须提供闭合 / 展开两态，目录树展开后切到对应 `*-open` 图标；切换由 `directory-tree/index.tsx` 的 `patchNodes` 根据 `expandedKeys` 完成
+- `GALLERY` 非归档目录使用图集文件夹图标；`GALLERY + archiveMode=1` 使用图集归档文件夹图标并进入图集归档 viewer
+- 六类目录图标都必须提供闭合 / 展开两态，目录树展开后切到对应 `*-open` 图标；切换由 `directory-tree/index.tsx` 的 `patchNodes` 根据 `expandedKeys` 完成
 - 归档与非归档在所有内置类型目录上必须有图标区分：普通媒体文件继续按扩展名使用 `video.svg` / `audio.svg` 等文件图标，非归档内置目录使用 `folder-{type}.svg`，归档目录使用 `folder-{type}-archive.svg`；归档语义同时保留目录树文本绿色加粗（`tree-node-text-archive`）
 - 归档目录图标统一使用右下角绿色归档盒角标；同为音频符号的 `ASMR` 与 `AUDIO` 保持相同的音符图形，但 `ASMR` 使用樱花粉文件夹与高对比白色音符，`AUDIO` 使用红色文件夹与浅红音符，避免只靠名称判断
 - `VIDEO` 非归档目录和归档目录使用同一套蓝青色视频文件夹主体；归档目录仅额外增加右下角绿色归档盒角标
 - 未知内置类型会显示警告图标
 - 在某些归档语义不匹配的文件上会显示警告图标
 
-五类目录图标统一进 15px × 15px 槽位、统一走 `<img>` from custom SVG 路径、统一 0.5px 基础 padding，不再走 Semi 内置 `IconFolder`。详见 `docs/ui-display-readability-baseline.md` §6.4.1。
+六类目录图标统一进 15px × 15px 槽位、统一走 `<img>` from custom SVG 路径、统一 0.5px 基础 padding，不再走 Semi 内置 `IconFolder`。详见 `docs/ui-display-readability-baseline.md` §6.4.1。
 
 图标不是单纯装饰，而是在向用户暴露“当前节点被系统按什么语义理解”。
 
@@ -140,6 +143,22 @@ OmniFlow 里有一组不是通用前端术语、而是项目自己定义出来�
 - 上级音频归档不展示下级 `AUDIO + archiveMode=1` 子归档为合集；下级归档可以存在，但只在用户直接打开该归档目录时生效
 - 目录树中同级同名字幕默认折叠隐藏；通过右键临时显示时，字幕紧贴对应音频文件下方
 - 归档页底部内置播放控制条，点击封面可在归档页内展开大封面 + 歌词视图，也可打开普通 `audio` viewer 并通过 `returnTarget` 返回归档页
+
+当前 `GALLERY` 非归档目录展示的是图集视图：
+
+- 双击 `GALLERY + archiveMode=0` 目录会进入独立的 `gallery` viewer。
+- 图集 viewer 按目录直属一代节点顺序展示图片和视频，不递归铺平子目录。
+- 网格页只为首屏附近媒体批量请求临时链接，图片缩略图使用浏览器 lazy loading、异步解码和模糊占位，降低初始内存压力。
+- 点击图片或视频后仍停留在当前图集 tab 内进入详情态，左右按钮和键盘左右键切换上一项 / 下一项。
+- 图片详情使用图集自己的大图查看逻辑，支持拖拽、滚轮缩放、旋转和重置，不复用普通 `ImageViewer`。
+- 视频详情使用图集自己的视频 UI，不复用普通 `VideoViewer`；视频元素仍通过 `floatingVideoService` 接入 MediaHub，关闭 tab 时经 `FileViewerContext` 释放。
+当前 `GALLERY` 归档目录展示的是直属图集集合卡片：
+
+- 只展示当前归档目录直属一代 `GALLERY` 子目录，不递归铺平孙级内容。
+- 直属 `GALLERY + archiveMode=0` 目录作为普通图集卡片，单击进入图集 viewer。
+- 直属 `GALLERY + archiveMode=1` 目录作为下级图集归档卡片，单击进入下一层图集归档 viewer。
+- 卡片进入视口附近后才读取直属一代媒体数量并取第一张图片作为封面；如果封面是 HEIC / HEIF，前端复用 Electron 本地预览代理生成 PNG 封面。
+- 卡片同时展示当前图集目录直属一代图片 / 视频数量，用于快速区分纯图片图集和混合媒体图集。
 
 ### 3.4 上传与移动限制
 
@@ -201,7 +220,7 @@ OmniFlow 里有一组不是通用前端术语、而是项目自己定义出来�
 可以这样理解：
 
 - 内置类型和归档模式决定目录树如何理解一个目录
-- 文件打开链路再把最终文件分发成 `comic / asmr / video_archive / audio_archive / comic_archive / asmr_archive` 等 viewer 类型
+- 文件打开链路再把最终文件分发成 `comic / gallery / asmr / video_archive / audio_archive / comic_archive / asmr_archive` 等 viewer 类型
 
 漫画归档嵌套的当前约定：
 
@@ -232,6 +251,7 @@ OmniFlow 里有一组不是通用前端术语、而是项目自己定义出来�
 
 - `src/contexts/file-viewer.context.ts`
 - `src/features/file-viewer/components/file-dispatcher/index.tsx`
+- `src/features/file-viewer/components/gallery-viewer/`
 
 归档返回工作区逻辑：
 
@@ -252,6 +272,8 @@ OmniFlow 里有一组不是通用前端术语、而是项目自己定义出来�
 9. `VIDEO` 归档目录双击会进入独立的视频归档页，视频文件夹卡片双击后打开其内部主视频。
 10. `VIDEO` 归档内的直属子视频归档会显示“合集”标签，双击后直接播放合集内排序最前的视频；普通视频 viewer 底部应出现播放列表按钮，可在气泡里切换已加载集数，并通过“加载更多”继续分页追加。
 11. `AUDIO` 归档目录双击会进入独立的音频归档页，目录树默认隐藏同名字幕文件，右键可临时显示或再次隐藏。
+12. `GALLERY` 内置目录双击会进入独立图集页，网格可打开图片和视频详情，详情态左右切换正常。
+13. 图集视频开始播放后会出现在 MediaHub；关闭图集 tab 后对应视频 entry 消失。
 
 ## 8. 维护规则
 

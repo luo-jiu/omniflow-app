@@ -126,6 +126,28 @@ interface Window {
       ok: boolean;
       outputPath?: string;
     }>;
+    prepareImagePreview: (payload: {
+      nodeId?: number;
+      libraryId?: number;
+      url: string;
+      fileName?: string;
+      ext?: string;
+      mimeType?: string;
+      fileSize?: number;
+      sourceVersion?: string;
+    }) => Promise<{
+      ok: boolean;
+      cacheKey?: string;
+      error?: string;
+      metadataRows: Array<{
+        label: string;
+        value: string;
+      }>;
+      originalSize?: number;
+      previewDataUrl?: string;
+      previewPath?: string;
+      previewUrl?: string;
+    }>;
     onUploadProgress: (listener: (payload: {
       uploadId: string;
       partNumber: number;

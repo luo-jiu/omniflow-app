@@ -51,6 +51,21 @@ export const ImageViewerWrapper = styled.div`
     will-change: transform;
   }
 
+  .image-preview-placeholder {
+    width: min(320px, 72vw);
+    min-height: 140px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    color: var(--semi-color-text-2);
+    font-size: 13px;
+    line-height: 20px;
+    text-align: center;
+    white-space: nowrap;
+  }
+
   /* 悬浮功能栏：居中、透明玻璃效果 */
   .viewer-floating-bar {
     position: absolute;

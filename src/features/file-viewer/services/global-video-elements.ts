@@ -100,3 +100,11 @@ export function releaseGlobalVideoElement(key: string, mountToken?: number) {
   record.element.remove();
   videoRecords.delete(key);
 }
+
+export function releaseGlobalVideoElementsForTab(tabId: string) {
+  const tabVideoKey = `video:${tabId}`;
+  const galleryVideoPrefix = `gallery-video:${tabId}:`;
+  [...videoRecords.keys()]
+    .filter(key => key === tabVideoKey || key.startsWith(galleryVideoPrefix))
+    .forEach(key => releaseGlobalVideoElement(key));
+}

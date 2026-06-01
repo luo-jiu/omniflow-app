@@ -62,11 +62,13 @@ const TAB_MEMORY_FALLBACK_BY_TYPE: Record<string, number> = {
   audio: 24 * 1024 * 1024,
   pdf: 72 * 1024 * 1024,
   comic: 120 * 1024 * 1024,
+  gallery: 110 * 1024 * 1024,
   asmr: 96 * 1024 * 1024,
   video_archive: 118 * 1024 * 1024,
   asmr_archive: 84 * 1024 * 1024,
   comic_archive: 92 * 1024 * 1024,
   audio_archive: 72 * 1024 * 1024,
+  gallery_archive: 88 * 1024 * 1024,
   other: 36 * 1024 * 1024,
 };
 
@@ -336,14 +338,16 @@ function getFileExtFromTab(tab: FileViewerTab): string {
   return match?.[1] ?? '';
 }
 
-function getBuiltInTypeFromTab(tab: FileViewerTab): 'ASMR' | 'COMIC' | 'VIDEO' | 'AUDIO' | null {
+function getBuiltInTypeFromTab(tab: FileViewerTab): 'ASMR' | 'COMIC' | 'VIDEO' | 'AUDIO' | 'GALLERY' | null {
   const label = normalizeTabTypeForIcon(getTabTypeLabel(tab));
   if (label.startsWith('ASMR')) return 'ASMR';
   if (label.startsWith('COMIC')) return 'COMIC';
   if (label.startsWith('VIDEO')) return 'VIDEO';
   if (label.startsWith('AUDIO')) return 'AUDIO';
+  if (label.startsWith('GALLERY')) return 'GALLERY';
   if (tab.fileType === 'asmr' || tab.fileType === 'asmr_archive') return 'ASMR';
   if (tab.fileType === 'comic' || tab.fileType === 'comic_archive') return 'COMIC';
+  if (tab.fileType === 'gallery' || tab.fileType === 'gallery_archive') return 'GALLERY';
   if (tab.fileType === 'video_archive') return 'VIDEO';
   if (tab.fileType === 'audio_archive') return 'AUDIO';
   return null;
@@ -353,10 +357,12 @@ function isDirectoryLikeTab(tab: FileViewerTab): boolean {
   return (
     tab.fileType === 'asmr'
     || tab.fileType === 'comic'
+    || tab.fileType === 'gallery'
     || tab.fileType === 'asmr_archive'
     || tab.fileType === 'comic_archive'
     || tab.fileType === 'video_archive'
     || tab.fileType === 'audio_archive'
+    || tab.fileType === 'gallery_archive'
     || (tab.fileType === 'video' && normalizeTabTypeForIcon(getTabTypeLabel(tab)) === 'VIDEO')
   );
 }
@@ -511,6 +517,14 @@ function getTabTypeLabel(tab: FileViewerTab) {
     ) {
       return 'AUDIO-A';
     }
+    if (
+      normalized === 'GALLERY-ARCHIVE'
+      || normalized === 'GALLERY ARC'
+      || normalized === 'GALLERY-ARC'
+      || normalized === 'GALLERY_ARCHIVE'
+    ) {
+      return 'GALLERY-A';
+    }
     return normalized;
   }
   const fileType = tab.fileType;
@@ -519,11 +533,13 @@ function getTabTypeLabel(tab: FileViewerTab) {
   if (fileType === 'video') return 'MP4';
   if (fileType === 'pdf') return 'PDF';
   if (fileType === 'comic') return 'COMIC';
+  if (fileType === 'gallery') return 'GALLERY';
   if (fileType === 'asmr') return 'ASMR';
   if (fileType === 'video_archive') return 'VIDEO-A';
   if (fileType === 'asmr_archive') return 'ASMR-A';
   if (fileType === 'comic_archive') return 'COMIC-A';
   if (fileType === 'audio_archive') return 'AUDIO-A';
+  if (fileType === 'gallery_archive') return 'GALLERY-A';
   return 'FILE';
 }
 

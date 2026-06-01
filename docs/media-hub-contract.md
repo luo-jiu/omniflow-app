@@ -1,6 +1,6 @@
 # MediaHub 契约
 
-更新时间：2026-05-12（含 MediaHub 本地平滑进度、Document PiP 主动小窗 + Electron 系统小窗 fallback、工作区显式释放）
+更新时间：2026-06-01（含 GalleryViewer 视频接入）
 适用范围：`MediaRegistry`、`globalAudioPlayer`、`floatingVideoService`、`MediaHubPopover`、`FloatingMiniVideoPlayer`，以及 audio / video / asmr / audio-archive viewer 与 `FileViewerContext` 的 tab close 路径。
 
 > 本文是 MediaHub 行为的**单一真源**。修改任何与"出声"或 MediaHub 入口相关的代码前必须先读这里。变更行为时必须同步更新本文，并在 PR 描述中点名。
@@ -12,7 +12,7 @@
 只有以下两类被纳入 MediaHub：
 
 - **音频**：普通音频 viewer、ASMR viewer、音频归档 viewer，统一通过 `globalAudioPlayer`（模块级单例 `<audio>`）出声。
-- **视频**：普通视频 viewer 与视频归档点开后的 video viewer，DOM 元素由 `global-video-elements` 单例池持有，由 `floatingVideoService`（模块级单例）跨路由跟踪状态。
+- **视频**：普通视频 viewer、视频归档点开后的 video viewer、图集 viewer 内的视频详情，DOM 元素由 `global-video-elements` 单例池持有，由 `floatingVideoService`（模块级单例）跨路由跟踪状态。
 
 **内置浏览器内的视频暂不纳入 MediaHub**（v2 候补，参见 §6）。
 
@@ -28,6 +28,7 @@
 
 - `globalAudioPlayer` 在 `ensureSource()` 后由内部 `syncMediaRegistry()` 调用 `mediaRegistry.register()`；`clear()`（含 `releaseForTab`）时取消注册。
 - `floatingVideoService` 在视频被 play 过（`hasStarted=true`）且有 `tabId` 时注册；`dismiss()`（含 `releaseForTab`）时取消注册。
+- `GalleryViewer` 不复用普通 `VideoViewer` UI，但图集视频详情必须继续通过 `mountGlobalVideoElement` + `floatingVideoService.bindInline()` 接入服务层；不得在图集组件内直接调用 `mediaRegistry.register()`。
 - **viewer 组件不得调用 `useRegisterMediaEntry`**。`MediaRegistryProvider` 仍存在但只做 Context 注入，不再决定 registry 生命周期。
 - `mediaRegistry` 是模块级单例（`src/contexts/media-registry.singleton.ts` 的 `export const mediaRegistry`），全应用生存期内只有一份；`MediaRegistryContext.tsx` 只暴露 `MediaRegistryProvider`。
 
@@ -50,7 +51,10 @@ globalAudioPlayer.releaseForTab(tabId);
 floatingVideoService.releaseForTab(tabId);
 ```
 
-它们只在 `state.tabId === tabId` 时真正释放，因此对其他 tab 是 no-op。
+音频只在 `state.tabId === tabId` 时真正释放，因此对其他 tab 是 no-op。
+视频额外有一层兜底：如果当前 `floatingVideoService.state.tabId` 已不指向目标 tab，`releaseForTab(tabId)` 仍必须释放 `global-video-elements` 中以该 tab 为 owner 的 DOM 元素，防止播放列表切集、切换多视频 tab 等路径留下无 owner 的后台 `<video>`。
+
+`setFileUrl(..., { replaceTabId })` 在把旧 tab 替换成新 tab 前，也必须先按 `replaceTabId` 调用同一释放链。替换 tab 在用户心智上等价于关闭旧 tab 后打开新内容，不能只依赖 React viewer 卸载。
 
 > ⚠️ `closeTabByNodeId` 内的 `releaseMediaForTab` 必须在 `setViewerState` updater **之外**调用——updater 是纯函数，StrictMode 会双调用，把副作用塞进去会重复 release。
 

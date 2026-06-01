@@ -13,6 +13,7 @@
 - `audio_archive`
 - `asmr_archive`
 - `comic_archive`
+- `gallery_archive`
 
 这些 viewer 与普通 `video`、`asmr`、`comic` viewer 的区别，不只是界面不同，还包括它们在工作区中的导航语义不同。
 
@@ -49,6 +50,14 @@
 - 如果用户从目录树直接打开中间层归档，返回栈从该归档开始，不自动推断隐藏父级
 - 从归档卡片进入子归档或普通漫画时，`returnTarget` 会携带当前归档；子归档再进入下一层时会继续串起上一级，顶部返回按钮按显式栈逐级返回
 
+其中 `gallery_archive` 当前是图集归档视图：
+
+- 卡片数据来自当前归档目录的直属一代 `GALLERY` 子目录，不递归铺平孙级内容。
+- 直属 `GALLERY + archiveMode=0` 目录作为普通图集卡片，单击进入普通 `GalleryViewer`。
+- 直属 `GALLERY + archiveMode=1` 目录作为下级图集归档卡片，单击进入下一层 `GalleryArchiveViewer`。
+- 卡片进入视口附近后才读取该图集目录的一代图片 / 视频数量，并用第一张图片作为封面；如果第一张图片是 HEIC / HEIF，则复用 Electron 本地预览代理生成 PNG 封面。
+- 从归档卡片进入子归档或普通图集时，`returnTarget` 会携带当前归档，返回链路与漫画归档保持同一套显式栈模型。
+
 归档卡片右键中的“属性”必须走目录树同一套节点属性 overlay；卡片只提供节点 id 和标题，属性内容仍以 `fetchNodeDetailById` 等节点接口返回的真实数据为准。
 
 ## 2. 当前结构
@@ -57,6 +66,7 @@
 - `components/audio-archive-viewer/`
 - `components/asmr-archive-viewer/`
 - `components/comic-archive-viewer/`
+- `components/gallery-archive-viewer/`
 - `hooks/useArchiveCardGrid.ts`
 - `utils/archive-sort.ts`
 
@@ -72,7 +82,8 @@
 2. `components/video-archive-viewer/`
 3. `components/asmr-archive-viewer/`
 4. `components/comic-archive-viewer/`
-5. `../../views/library/detail/index.tsx`
+5. `components/gallery-archive-viewer/`
+6. `../../views/library/detail/index.tsx`
    - 关注归档返回链路
 
 ## 4. 何时继续细分文档

@@ -23,7 +23,7 @@
 - 接近片尾或已经播完的视频不会恢复到最后几秒，而是按普通新打开处理。
 - 视频 DOM 元素不再完全绑定 `VideoViewer` 组件生命周期，而是由 `src/features/file-viewer/services/global-video-elements.ts` 按 tab id 管理。进入设置、传输中心、回收站等页面导致 viewer 卸载时，元素会移动到隐藏 parking host 中继续播放；回到原 tab 后再挂回 `.video-element-host`。
 - 用户点击底部小窗按钮时，`VideoViewer` 只调用 `floatingVideoService.requestSystemFloating()`；服务层优先打开 Document PiP 桌面小窗，不可用时降级应用内浮窗。视频区域本身显示海报占位 + “收回 inline”按钮。
-- 在库详情工作区内关闭对应 tab 时，才释放该 tab 的 video 元素并停止播放，避免“页面导航”和“操作对应媒体”混在一起。
+- 在库详情工作区内关闭对应 tab 时，才释放该 tab 的 video 元素并停止播放，避免“页面导航”和“操作对应媒体”混在一起；播放列表切集使用 `replaceTabId` 时，也按“关闭旧 tab 后打开新内容”释放旧 tab 的元素。
 
 ## 2. 当前结构
 

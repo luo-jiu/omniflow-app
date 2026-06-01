@@ -100,7 +100,7 @@ function buildNormalizedFullName(fileName?: string, ext?: string): string {
 
 export function isImageExtension(ext?: string): boolean {
   const normalized = normalizeExt(ext);
-  const imageExtensions = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg', 'avif'];
+  const imageExtensions = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg', 'avif', 'heic', 'heif', 'heics', 'heifs'];
   return imageExtensions.includes(normalized);
 }
 
@@ -500,6 +500,15 @@ export function getDirectoryBuiltInIcon(
     return createIconNode(
       getMaterialIconUrl(iconName) || getMaterialIconUrl('audio') || '',
       'audio-folder',
+    );
+  }
+  if (normalized === 'GALLERY') {
+    const iconName = normalizedArchiveMode === 1
+      ? (expanded ? 'folder-gallery-archive-open' : 'folder-gallery-archive')
+      : (expanded ? 'folder-gallery-open' : 'folder-gallery');
+    return createIconNode(
+      getMaterialIconUrl(iconName) || getMaterialIconUrl('image') || '',
+      'gallery-folder',
     );
   }
   return createWarningIconNode(`未知内置类型: ${normalized}`);

@@ -1564,7 +1564,7 @@ export default function DirectoryTree({
 
     if (action.startsWith('设置内置类型:')) {
       const nextBuiltInType = action.split(':')[1]?.trim()?.toUpperCase() || 'DEF';
-      if ((nextBuiltInType === 'VIDEO' || nextBuiltInType === 'AUDIO') && node.type !== 'dir') {
+      if ((nextBuiltInType === 'VIDEO' || nextBuiltInType === 'AUDIO' || nextBuiltInType === 'GALLERY') && node.type !== 'dir') {
         Toast.warning(`${nextBuiltInType} 内置类型仅支持文件夹`);
         return;
       }

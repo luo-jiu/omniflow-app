@@ -3,6 +3,7 @@ import { type MediaRegistryRegistration } from '@/contexts/media-registry.contex
 import {
   getGlobalVideoElement,
   releaseGlobalVideoElement,
+  releaseGlobalVideoElementsForTab,
 } from './global-video-elements';
 import { createDocumentPipShell, type DocumentPipShell } from './document-pip-shell';
 
@@ -264,8 +265,10 @@ class FloatingVideoService {
 
   // 关闭某个 tab 时由 FileViewerContext 调用：若当前视频归属于该 tab，整体释放。
   releaseForTab = (tabId: string) => {
-    if (this.state.tabId !== tabId) return;
-    this.dismiss();
+    if (this.state.tabId === tabId) {
+      this.dismiss();
+    }
+    releaseGlobalVideoElementsForTab(tabId);
   };
 
   releaseForLibrary = (libraryId: number) => {

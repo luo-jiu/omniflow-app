@@ -1,6 +1,6 @@
 # Viewer 文档入口
 
-更新时间：2026-05-06
+更新时间：2026-06-01
 适用范围：`file-viewer`、`archive-viewer` 以及后续各类具体 viewer 的长期说明文档。
 
 ## 1. 作用
@@ -28,6 +28,10 @@
   - ASMR 集合 viewer 的局部模型、缓存、播放协作和编辑链路
 - `comic-viewer.md`
   - 漫画 viewer 的阅读模式、进度恢复、远端同步和视图设置
+- `gallery-viewer.md`
+  - 图集 viewer 的相册网格、图片 / 视频详情切换、缩略图链接加载和 MediaHub 接入
+- `gallery-archive-viewer.md`
+  - 图集归档 viewer 的相册分类卡片、封面来源和逐层进入规则
 - `pdf-viewer.md`
   - PDF viewer 的 pdf.js 渲染、窗口化分页、锚点恢复和缩放重排
 - `text-viewer.md`
@@ -47,6 +51,8 @@
 4. 再按需读具体 viewer：
    - `docs/viewers/asmr-viewer.md`
    - `docs/viewers/comic-viewer.md`
+   - `docs/viewers/gallery-viewer.md`
+   - `docs/viewers/gallery-archive-viewer.md`
    - `docs/viewers/pdf-viewer.md`
    - `docs/viewers/text-viewer.md`
    - `docs/viewers/video-viewer.md`
@@ -61,7 +67,7 @@
 - 音频 viewer / asmr viewer / 音频归档播放器共用 `globalAudioPlayer` 单例 `<audio>`，所以同一时刻仍只能有一个音频源在播放（属预期范围）；组件侧统一通过 `useGlobalAudioPlayback` 订阅和控制这个单例，但 UI 仍由各 viewer 自己决定。
 - 进入设置、传输中心、回收站等非库详情工作区页面时，音频 viewer 卸载不得清空 `globalAudioPlayer`，避免后台播放被页面跳转打断；只有在库详情工作区内关闭对应 tab，或通过媒体控制中心 / 播放器自身执行关闭、暂停、切歌等对应媒体操作时，才由 owner 清理或变更播放源。
 - video 启动播放不再调用 `globalAudioPlayer.pause()` 暂停音频；audio 启动播放不再暂停所有视频。音视频可并行。
-- 所有 audio / video / asmr viewer，以及音频归档页内置播放器，在挂载且首次播放后向 `MediaRegistry` 注册自身，由 `library detail` 工具栏右侧的"媒体控制中心"集中展示与控制，详见 `docs/library-detail-workspace.md` §11。
+- 所有 audio / video / asmr viewer、图集 viewer 内的视频详情，以及音频归档页内置播放器，在挂载且首次播放后向 `MediaRegistry` 注册自身，由 `library detail` 工具栏右侧的"媒体控制中心"集中展示与控制，详见 `docs/library-detail-workspace.md` §11。
 
 ## 3.2 Viewer 共享能力边界
 

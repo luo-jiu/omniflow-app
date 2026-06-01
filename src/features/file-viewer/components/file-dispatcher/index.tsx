@@ -4,11 +4,13 @@ import ImageViewer from "../image-viewer";
 import AudioViewer from "../audio-viewer";
 import VideoViewer from "../video-viewer";
 import ComicViewer from "../comic-viewer";
+import GalleryViewer from "../gallery-viewer";
 import PdfViewer from "../pdf-viewer";
 import TextViewer from "../text-viewer";
 import AsmrViewer from "../asmr-viewer";
 import AsmrArchiveViewer from "../../../archive-viewer/components/asmr-archive-viewer";
 import ComicArchiveViewer from "../../../archive-viewer/components/comic-archive-viewer";
+import GalleryArchiveViewer from "../../../archive-viewer/components/gallery-archive-viewer";
 import VideoArchiveViewer from "../../../archive-viewer/components/video-archive-viewer";
 import AudioArchiveViewer from "../../../archive-viewer/components/audio-archive-viewer";
 import styled from 'styled-components';
@@ -118,7 +120,7 @@ const FileDispatcher: React.FC<FileDispatcherProps> = ({
 
   switch (fileType) {
     case 'image':
-      return <ImageViewer url={fileUrl} fileName={fileName} active={active} />;
+      return <ImageViewer nodeId={nodeId} url={fileUrl} fileName={fileName} active={active} />;
     
     case 'audio':
       return (
@@ -160,6 +162,9 @@ const FileDispatcher: React.FC<FileDispatcherProps> = ({
     case 'comic':
       return <ComicViewer folderNodeId={nodeId} fileUrl={fileUrl} fileName={fileName} active={active} reloadToken={reloadToken} />;
 
+    case 'gallery':
+      return <GalleryViewer folderNodeId={nodeId} fileUrl={fileUrl} fileName={fileName} active={active} reloadToken={reloadToken} tabId={tabId} />;
+
     case 'asmr':
       return <AsmrViewer folderNodeId={nodeId} fileUrl={fileUrl} fileName={fileName} active={active} reloadToken={reloadToken} tabId={tabId} />;
 
@@ -169,6 +174,18 @@ const FileDispatcher: React.FC<FileDispatcherProps> = ({
     case 'comic_archive':
       return (
         <ComicArchiveViewer
+          folderNodeId={nodeId}
+          fileUrl={fileUrl}
+          fileName={fileName}
+          active={active}
+          reloadToken={reloadToken}
+          returnTarget={returnTarget}
+        />
+      );
+
+    case 'gallery_archive':
+      return (
+        <GalleryArchiveViewer
           folderNodeId={nodeId}
           fileUrl={fileUrl}
           fileName={fileName}

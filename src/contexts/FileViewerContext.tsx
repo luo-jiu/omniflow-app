@@ -299,6 +299,14 @@ export const FileViewerProvider: React.FC<{
     // 下一帧 render 后 viewerState.activeTabId 变，本 effect 重跑走第一个分支清 pending
   }, [libraryId, viewerState.activeTabId, viewerState.tabs, pendingTick]);
 
+  // 关闭或替换 tab 时务必通知媒体服务释放对应资源（同浏览器关 tab 一致）。
+  // 服务层是 MediaHub 的真实持有者，组件卸载不再触发释放，必须从这里兜底。
+  // 详见 docs/media-hub-contract.md。
+  const releaseMediaForTab = (tabId: string) => {
+    globalAudioPlayer.releaseForTab(tabId);
+    floatingVideoService.releaseForTab(tabId);
+  };
+
   const setFileUrl = (
     url: string | null,
     fileName: string | null,
@@ -316,8 +324,11 @@ export const FileViewerProvider: React.FC<{
     }
 
     const tabId = resolveTabId(url, nodeId);
+    const replaceTabId = options?.replaceTabId || null;
+    if (replaceTabId && replaceTabId !== tabId) {
+      releaseMediaForTab(replaceTabId);
+    }
     setViewerState(prev => {
-      const replaceTabId = options?.replaceTabId || null;
       const replacingTab = replaceTabId
         ? prev.tabs.find(tab => tab.id === replaceTabId) || null
         : null;
@@ -424,14 +435,6 @@ export const FileViewerProvider: React.FC<{
         fileState: toFileState(targetTab),
       };
     });
-  };
-
-  // 关闭 tab 时务必通知媒体服务释放对应资源（同浏览器关 tab 一致）。
-  // 服务层是 MediaHub 的真实持有者，组件卸载不再触发释放，必须从这里兜底。
-  // 详见 docs/media-hub-contract.md。
-  const releaseMediaForTab = (tabId: string) => {
-    globalAudioPlayer.releaseForTab(tabId);
-    floatingVideoService.releaseForTab(tabId);
   };
 
   const closeTab = (tabId: string) => {
