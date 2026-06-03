@@ -41,6 +41,7 @@ interface ProviderFormState {
   alias: string;
   type: string;
   endpoint: string;
+  publicEndpoint: string;
   accessKey: string;
   secretKey: string;
   useSSL: boolean;
@@ -53,6 +54,7 @@ const DEFAULT_PROVIDER_FORM: ProviderFormState = {
   alias: '',
   type: 'minio',
   endpoint: '',
+  publicEndpoint: '',
   accessKey: '',
   secretKey: '',
   useSSL: false,
@@ -455,6 +457,7 @@ const StorageSettings: React.FC<StorageSettingsProps> = ({
       alias: item.alias,
       type: item.type,
       endpoint: item.endpoint,
+      publicEndpoint: item.publicEndpoint || '',
       accessKey: '',
       secretKey: '',
       useSSL: item.useSSL,
@@ -480,6 +483,7 @@ const StorageSettings: React.FC<StorageSettingsProps> = ({
         await updateProvider(editingProviderAlias, {
           type: providerForm.type.trim(),
           endpoint: providerForm.endpoint.trim(),
+          publicEndpoint: providerForm.publicEndpoint.trim(),
           accessKey: providerForm.accessKey.trim(),
           secretKey: providerForm.secretKey.trim(),
           useSSL: providerForm.useSSL,
@@ -493,6 +497,7 @@ const StorageSettings: React.FC<StorageSettingsProps> = ({
           alias: providerForm.alias.trim(),
           type: providerForm.type.trim(),
           endpoint: providerForm.endpoint.trim(),
+          publicEndpoint: providerForm.publicEndpoint.trim(),
           accessKey: providerForm.accessKey.trim(),
           secretKey: providerForm.secretKey.trim(),
           useSSL: providerForm.useSSL,
@@ -717,7 +722,13 @@ const StorageSettings: React.FC<StorageSettingsProps> = ({
               {
                 title: '地址',
                 dataIndex: 'endpoint',
-                width: 160,
+                width: 150,
+                render: (v: string) => <span className="cell-ellipsis">{v || '-'}</span>,
+              },
+              {
+                title: '公开地址',
+                dataIndex: 'publicEndpoint',
+                width: 150,
                 render: (v: string) => <span className="cell-ellipsis">{v || '-'}</span>,
               },
               {
@@ -910,6 +921,14 @@ const StorageSettings: React.FC<StorageSettingsProps> = ({
                 value={providerForm.endpoint}
                 onChange={(v) => setProviderForm(prev => ({ ...prev, endpoint: v }))}
                 placeholder="如 192.168.1.10:9000"
+              />
+            </div>
+            <div className="form-field">
+              <span className="form-label">公开地址（Public Endpoint）</span>
+              <Input
+                value={providerForm.publicEndpoint}
+                onChange={(v) => setProviderForm(prev => ({ ...prev, publicEndpoint: v }))}
+                placeholder="如 localhost:9000"
               />
             </div>
             <div className="form-row">

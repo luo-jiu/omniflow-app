@@ -1,6 +1,6 @@
 # 直传 MinIO 上传链路（前端视角）
 
-更新时间：2026-05-07
+更新时间：2026-06-03
 状态：已落地（与 `omniflow-go/docs/architecture/upload-direct-design.md` 配套）
 
 ## 1. 全链路一览
@@ -55,6 +55,8 @@ runDirectUpload (src/modules/upload-center/services/upload-direct.ts)
 ## 6. 嗅探 / 下载链路 0 改动不变量
 
 `UploadTaskInput` 形状（`file`、`libraryId`、`parentId`、`relativePath`、可选 `storageProvider`）不变。任何调用 `uploadManager.createBatch([...])` 的入口都不感知底层链路切换。
+
+存储配置页和 `fetchProviders()` 需要透传 provider 的 `publicEndpoint` 字段。该字段用于后端生成前端 / Electron 可直接访问的 MinIO 预签名 URL，不进入 `UploadTaskInput`，上传任务仍只传 `storageProvider` alias。
 
 已验证：
 - `src/features/file-explorer/hooks/useResourceImportToLibrary.ts:62`
