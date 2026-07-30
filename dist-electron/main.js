@@ -11945,6 +11945,40 @@ function registerSystemVideoWindowIpcHandlers(controller) {
     controller.close();
   });
 }
+const MACOS_TRAFFIC_LIGHT_POSITION = { x: 14, y: 11 };
+function getMacOSMainWindowOptions() {
+  return {
+    titleBarStyle: "hiddenInset",
+    trafficLightPosition: MACOS_TRAFFIC_LIGHT_POSITION,
+    vibrancy: "sidebar",
+    visualEffectState: "active"
+  };
+}
+function applyMacOSMainWindowBehavior(win) {
+  win.setWindowButtonPosition(MACOS_TRAFFIC_LIGHT_POSITION);
+}
+function getWindowsMainWindowOptions() {
+  return {
+    titleBarStyle: "default"
+  };
+}
+const DEFAULT_MAIN_WINDOW_OPTIONS = {
+  titleBarStyle: "default"
+};
+function getMainWindowPlatformOptions(platform = process.platform) {
+  if (platform === "darwin") {
+    return getMacOSMainWindowOptions();
+  }
+  if (platform === "win32") {
+    return getWindowsMainWindowOptions();
+  }
+  return DEFAULT_MAIN_WINDOW_OPTIONS;
+}
+function applyMainWindowPlatformBehavior(win, platform = process.platform) {
+  if (platform === "darwin") {
+    applyMacOSMainWindowBehavior(win);
+  }
+}
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 protocol.registerSchemesAsPrivileged([
   {
@@ -11970,7 +12004,6 @@ const MIN_WINDOW_WIDTH = 1120;
 const MIN_WINDOW_HEIGHT = 720;
 const WINDOW_STATE_FILENAME = "window-state.json";
 const WINDOW_STATE_SAVE_DEBOUNCE_MS = 200;
-const MACOS_TRAFFIC_LIGHT_POSITION = { x: 14, y: 11 };
 const ENABLE_EMBEDDED_BROWSER_DEBUG = process.env.NODE_ENV === "test" || Boolean(VITE_DEV_SERVER_URL || process.env.ELECTRON_RENDERER_URL) || process.env.OMNIFLOW_ENABLE_RUNTIME_LOGS === "true";
 const ENABLE_CHROMIUM_RUNTIME_LOGS = process.env.OMNIFLOW_ENABLE_CHROMIUM_LOGS === "true";
 function resolveUserDataDirname() {
@@ -11993,12 +12026,6 @@ try {
 }
 function getAppIconPath() {
   return existsSync(APP_ICON_PATH) ? APP_ICON_PATH : null;
-}
-function applyMacOSWindowButtonPosition(win) {
-  if (process.platform !== "darwin") {
-    return;
-  }
-  win.setWindowButtonPosition(MACOS_TRAFFIC_LIGHT_POSITION);
 }
 let mainWindow = null;
 let isQuitting = false;
@@ -12141,10 +12168,7 @@ function createWindow() {
     height: initialHeight,
     minWidth: MIN_WINDOW_WIDTH,
     minHeight: MIN_WINDOW_HEIGHT,
-    vibrancy: "sidebar",
-    visualEffectState: "active",
-    titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
-    ...process.platform === "darwin" ? { trafficLightPosition: MACOS_TRAFFIC_LIGHT_POSITION } : {},
+    ...getMainWindowPlatformOptions(),
     ...isFiniteNumber(persistedWindowState == null ? void 0 : persistedWindowState.x) && isFiniteNumber(persistedWindowState == null ? void 0 : persistedWindowState.y) ? { x: persistedWindowState.x, y: persistedWindowState.y } : {},
     webPreferences: {
       preload: path.join(MAIN_DIST, "preload.mjs"),
@@ -12154,7 +12178,7 @@ function createWindow() {
     ...appIconPath ? { icon: appIconPath } : {}
   });
   mainWindow = win;
-  applyMacOSWindowButtonPosition(win);
+  applyMainWindowPlatformBehavior(win);
   if (persistedWindowState == null ? void 0 : persistedWindowState.maximized) {
     win.maximize();
   }

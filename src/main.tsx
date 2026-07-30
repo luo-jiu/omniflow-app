@@ -8,6 +8,9 @@ import '@/assets/css/index.less' // 重置 css
 import {HashRouter} from "react-router-dom";
 import {ThemeProvider} from "styled-components";
 import theme from "./assets/theme";
+import { installDesktopPlatformDomState } from '@/platform';
+
+installDesktopPlatformDomState();
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

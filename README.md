@@ -40,6 +40,15 @@ npm install
 npm run build
 ```
 
+分平台构建可使用：
+
+```bash
+npm run build:mac
+npm run build:win
+```
+
+macOS 交叉生成的 Windows 安装包仍需在 Windows 10/11 或 Windows 11 ARM 虚拟机中运行验证。
+
 本地联调默认后端地址是 `http://127.0.0.1:8850/api`。如果需要改成其他地址，请调整 `VITE_API_BASE_URL`。
 
 本机常用启动脚本在 `~/script/omniflow-app.sh`。默认 `dev` 会随代码修改刷新；`stable` 跑已构建的 `dist`，并通过独立 `userData` 目录和 dev 隔离。
@@ -49,6 +58,7 @@ npm run build
 Key frontend documents live in the repo and should be treated as part of the development baseline:
 
 - `docs/frontend-architecture-baseline.md`: current renderer / Electron layering, state ownership, and IPC boundary rules
+- `docs/desktop-platform-architecture.md`: macOS / Windows host strategy, renderer platform bridge, and platform validation
 - `docs/embedded-browser-architecture.md`: embedded browser lifecycle, capture, download, and main/preload responsibilities
 - `docs/library-detail-workspace.md`: library detail workspace modes, browser tab ownership, and persistence rules
 - `docs/file-explorer-file-viewer-boundary.md`: file tree, file-open flow, viewer tabs, and dispatcher ownership

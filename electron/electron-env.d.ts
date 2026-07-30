@@ -214,6 +214,7 @@ interface Window {
   };
 
   electronWindow: {
+    platform: 'darwin' | 'win32' | 'linux' | 'unknown';
     minimize: () => void;
     maximize: () => void;
     close: () => void;

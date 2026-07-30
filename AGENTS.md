@@ -26,6 +26,7 @@
 - 前端交接说明：`.agent-docs/frontend-handoff.md`
 - 前端文档规范：`.agent-docs/frontend-documentation-standard.md`
 - 前端架构基线：`docs/frontend-architecture-baseline.md`
+- 桌面平台适配专题：`docs/desktop-platform-architecture.md`
 - 显示与可读性基线：`docs/ui-display-readability-baseline.md`
 - Embedded Browser 专题：`docs/embedded-browser-architecture.md`
 - Cat Catch 总览与迁移地图：`docs/cat-catch-overview-and-migration-map.md`

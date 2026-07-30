@@ -1,6 +1,6 @@
 # 前端验证矩阵
 
-更新时间：2026-05-12
+更新时间：2026-07-30
 
 适用范围：`omniflow-app` 前端、Electron、IPC、工作区、文件树、文件预览、上传、内置浏览器和资源捕捉相关改动的提测、自测与 review 验证。
 
@@ -274,6 +274,32 @@ legacy 兼容检查：
 
 - 浏览器模式与文件模式切换时布局跳变
 - 分栏拖拽到最小/最大宽度
+
+### 3.11 桌面平台 / 窗口壳
+
+适用改动：
+
+- `electron/platform/`
+- `src/platform/`
+- `electron/main.ts` 的 BrowserWindow 配置或生命周期
+- preload 的 `window.electronWindow` 暴露面
+- 标题栏、安全区、红绿灯、Windows caption buttons
+
+至少验证：
+
+- macOS 与 Windows 各自识别出正确的 `html[data-platform]`
+- 窗口可拖动、最小化、最大化 / 还原和关闭
+- 亮色、暗色和跟随系统下标题栏控件可见
+- Windows 标题栏右侧控件、macOS 左侧红绿灯都不遮挡业务按钮
+- 内置浏览器激活后 resize / maximize 的原生 view bounds 正确
+
+边界路径：
+
+- Windows 100%、125%、150% DPI
+- 多显示器切换和不同 DPI 显示器之间移动
+- 主窗口最大化 / 还原后 overlay bounds 和点击命中正常
+- macOS 全屏退出后红绿灯、安全区和 overlay 恢复正常
+- 非 Electron renderer 预览环境缺少 bridge 时回退为可识别平台或 `unknown`，页面不崩溃
 
 ## 4. 最低提交说明模板
 

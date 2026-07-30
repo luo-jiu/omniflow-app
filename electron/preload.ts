@@ -154,6 +154,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
 // 窗口控制 API
 contextBridge.exposeInMainWorld('electronWindow', {
+  platform: process.platform === 'darwin' || process.platform === 'win32' || process.platform === 'linux'
+    ? process.platform
+    : 'unknown',
   minimize: () => ipcRenderer.send('window-minimize'),
   maximize: () => ipcRenderer.send('window-maximize'),
   close: () => ipcRenderer.send('window-close'),

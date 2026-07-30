@@ -1,6 +1,6 @@
 # OmniFlow App 前端架构基线
 
-更新时间：2026-05-12
+更新时间：2026-07-30
 
 适用范围：`omniflow-app` 的 React renderer、Electron preload/main、页面分层、状态所有权、IPC 边界和前端文档维护。
 
@@ -80,6 +80,8 @@ contexts/            全局上下文
 service/             HTTP / IPC 请求收口
 modules/             已经抽成独立模型的复杂域
 electron/            主进程、preload、IPC、原生能力
+electron/platform/   主进程平台窗口和系统能力策略
+src/platform/        renderer 平台识别和 DOM 平台标记
 docs/                前端专题与架构文档
 .agent-docs/         Agent 长期规范
 ```
@@ -110,6 +112,12 @@ views -> features -> components / hooks -> service / preload bridge -> electron 
 - `electron/`
   - 负责窗口、浏览器视图、下载、会话、文件系统、资源捕捉、IPC 注册等宿主能力。
   - 不反向承担 renderer 页面编排。
+- `electron/platform/`
+  - 只收纳 macOS / Windows / Linux 的真实宿主差异，当前首先承载主窗口选项。
+  - 共享窗口生命周期仍由 `electron/main.ts` 持有，不按平台复制。
+- `src/platform/`
+  - 是 renderer 读取宿主平台事实的唯一入口。
+  - 应用启动时统一写入 `html[data-platform]`，页面和组件不自行解析 user agent。
 
 ## 4. 当前核心业务域
 
@@ -273,6 +281,8 @@ Renderer 只能持有这些状态的投影，不要把 main 的内部结构当�
 - `window.electronWindow`
 - `window.electronEmbeddedBrowser`
 
+其中 `window.electronWindow.platform` 是只读宿主平台事实，renderer 统一通过 `src/platform` 归一和消费，不直接在页面中读取。
+
 对应实现位于：
 
 - `electron/preload.ts`
@@ -295,6 +305,7 @@ Renderer 只能持有这些状态的投影，不要把 main 的内部结构当�
 
 - `electron/ipc/`：channel 注册
 - `electron/service/`：窗口、浏览器、下载、文件、资源捕捉等宿主能力
+- `electron/platform/`：主窗口和系统能力的平台策略
 
 规则：
 
@@ -310,6 +321,7 @@ Renderer 只能持有这些状态的投影，不要把 main 的内部结构当�
 - `.agent-docs/frontend-handoff.md`
 - `.agent-docs/frontend-documentation-standard.md`
 - `docs/frontend-architecture-baseline.md`
+- `docs/desktop-platform-architecture.md`
 - `docs/embedded-browser-architecture.md`
 - `docs/library-detail-workspace.md`
 - `docs/file-explorer-file-viewer-boundary.md`
