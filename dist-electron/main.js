@@ -11973,13 +11973,21 @@ const WINDOW_STATE_SAVE_DEBOUNCE_MS = 200;
 const MACOS_TRAFFIC_LIGHT_POSITION = { x: 14, y: 11 };
 const ENABLE_EMBEDDED_BROWSER_DEBUG = process.env.NODE_ENV === "test" || Boolean(VITE_DEV_SERVER_URL || process.env.ELECTRON_RENDERER_URL) || process.env.OMNIFLOW_ENABLE_RUNTIME_LOGS === "true";
 const ENABLE_CHROMIUM_RUNTIME_LOGS = process.env.OMNIFLOW_ENABLE_CHROMIUM_LOGS === "true";
+function resolveUserDataDirname() {
+  const suffix = String(process.env.OMNIFLOW_USER_DATA_SUFFIX || "").trim();
+  if (!suffix) {
+    return LEGACY_USER_DATA_DIRNAME;
+  }
+  const normalizedSuffix = suffix.replace(/[^a-zA-Z0-9_-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
+  return normalizedSuffix ? `${LEGACY_USER_DATA_DIRNAME}-${normalizedSuffix}` : LEGACY_USER_DATA_DIRNAME;
+}
 if (!ENABLE_CHROMIUM_RUNTIME_LOGS) {
   app.commandLine.appendSwitch("disable-logging");
   app.commandLine.appendSwitch("log-level", "3");
 }
 app.setName(APP_DISPLAY_NAME);
 try {
-  const stableUserDataPath = path.join(app.getPath("appData"), LEGACY_USER_DATA_DIRNAME);
+  const stableUserDataPath = path.join(app.getPath("appData"), resolveUserDataDirname());
   app.setPath("userData", stableUserDataPath);
 } catch {
 }

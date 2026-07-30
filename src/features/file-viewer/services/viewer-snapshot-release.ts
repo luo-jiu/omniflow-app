@@ -24,6 +24,10 @@ import {
   clearComicReaderSnapshotForFile,
 } from '@/features/file-viewer/components/comic-viewer/comic-reader-cache';
 import {
+  clearAllGallerySnapshots,
+  clearGallerySnapshotForFile,
+} from '@/features/file-viewer/components/gallery-viewer/gallery-viewer-cache';
+import {
   clearAllPdfViewerSnapshots,
   clearPdfViewerSnapshotForFile,
 } from '@/features/file-viewer/components/pdf-viewer/pdf-viewer-cache';
@@ -43,6 +47,9 @@ export function clearViewerSnapshotsForTabs(tabs: FileViewerTab[] | null | undef
         break;
       case 'comic':
         clearComicReaderSnapshotForFile(tab.fileUrl, tab.nodeId);
+        break;
+      case 'gallery':
+        clearGallerySnapshotForFile(tab.fileUrl, tab.nodeId);
         break;
       case 'asmr':
         clearAsmrViewerSnapshotForFile(tab.fileUrl, tab.nodeId);
@@ -69,6 +76,7 @@ export function clearAllViewerSnapshots() {
   clearAllPdfViewerSnapshots();
   clearAllVideoProgressSnapshots();
   clearAllComicReaderSnapshots();
+  clearAllGallerySnapshots();
   clearAllAsmrViewerSnapshots();
   clearAllAudioArchiveSnapshots();
   clearAllVideoArchiveSnapshots();

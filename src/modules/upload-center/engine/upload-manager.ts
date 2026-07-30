@@ -3,6 +3,7 @@ import {
   enqueueUploadTasks,
   getUploadTaskSummary,
   getUploadTasks,
+  removeUploadTasks,
   UploadTaskStoreState,
   createUploadTaskStoreState,
 } from '../model/upload-task.store';
@@ -50,6 +51,12 @@ export type UploadManagerEvent =
     batchId: string;
     summary: ReturnType<typeof getUploadTaskSummary>;
     results: UploadResult[];
+  }
+  | {
+    type: 'records';
+    reason: 'REMOVE' | 'CLEAR';
+    removedTaskIds: string[];
+    summary: ReturnType<typeof getUploadTaskSummary>;
   };
 
 export interface UploadBatchOptions {
@@ -145,6 +152,32 @@ export class UploadManager {
 
   getState() {
     return this.state;
+  }
+
+  canRemoveTaskRecord(taskId: string): boolean {
+    const task = this.getTask(taskId);
+    return Boolean(task && this.isRemovableTaskRecord(task));
+  }
+
+  removeTaskRecord(taskId: string): boolean {
+    const task = this.getTask(taskId);
+    if (!task || !this.isRemovableTaskRecord(task)) {
+      return false;
+    }
+
+    this.removeTaskRecords([taskId], 'REMOVE');
+    return true;
+  }
+
+  clearTaskRecords(taskIds?: string[]): number {
+    const allowedTaskIds = new Set(taskIds);
+    const removedTaskIds = this.getTasks()
+      .filter((task) => (taskIds ? allowedTaskIds.has(task.id) : true))
+      .filter((task) => this.isRemovableTaskRecord(task))
+      .map((task) => task.id);
+
+    this.removeTaskRecords(removedTaskIds, 'CLEAR');
+    return removedTaskIds.length;
   }
 
   createBatch(tasks: UploadTaskInput[], options?: UploadBatchOptions): UploadBatchHandle {
@@ -506,6 +539,31 @@ export class UploadManager {
   private emit(event: UploadManagerEvent) {
     this.listeners.forEach((listener) => {
       listener(event);
+    });
+  }
+
+  private isRemovableTaskRecord(task: UploadTask): boolean {
+    return task.status === UPLOAD_TASK_STATUS.SUCCESS
+      || task.status === UPLOAD_TASK_STATUS.FAILED
+      || task.status === UPLOAD_TASK_STATUS.CANCELED;
+  }
+
+  private removeTaskRecords(taskIds: string[], reason: 'REMOVE' | 'CLEAR') {
+    if (taskIds.length === 0) {
+      return;
+    }
+
+    this.state = removeUploadTasks(this.state, taskIds);
+    taskIds.forEach((taskId) => {
+      this.taskInputMap.delete(taskId);
+      this.taskRuntimeMap.delete(taskId);
+    });
+    this.summary = getUploadTaskSummary(this.state);
+    this.emit({
+      type: 'records',
+      reason,
+      removedTaskIds: taskIds,
+      summary: this.getSummary(),
     });
   }
 

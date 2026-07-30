@@ -19,6 +19,23 @@ export const GalleryViewerWrapper = styled.div`
     font-size: 14px;
   }
 
+  .gallery-image-keepalive {
+    position: absolute;
+    left: -10000px;
+    top: -10000px;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .gallery-image-keepalive img {
+    width: 1px;
+    height: 1px;
+    object-fit: contain;
+  }
+
   .gallery-grid-wrap {
     height: 100%;
     min-height: 0;
@@ -80,13 +97,37 @@ export const GalleryViewerWrapper = styled.div`
     flex: 1;
     min-height: 0;
     overflow: auto;
+    scrollbar-gutter: stable;
     padding: 18px 24px 28px;
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
-    grid-auto-rows: max-content;
-    align-content: start;
-    align-items: start;
-    gap: 14px;
+    display: block;
+    scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
+  }
+
+  .gallery-grid::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  .gallery-grid::-webkit-scrollbar-track {
+    background: var(--app-scrollbar-track);
+  }
+
+  .gallery-grid::-webkit-scrollbar-thumb {
+    background: transparent;
+    border-radius: 999px;
+  }
+
+  .gallery-grid:hover,
+  .gallery-grid:focus-within,
+  .gallery-grid:active {
+    scrollbar-color: var(--app-scrollbar-thumb) var(--app-scrollbar-track);
+  }
+
+  .gallery-grid:hover::-webkit-scrollbar-thumb,
+  .gallery-grid:focus-within::-webkit-scrollbar-thumb,
+  .gallery-grid:active::-webkit-scrollbar-thumb {
+    background: var(--app-scrollbar-thumb);
   }
 
   .gallery-card {
@@ -100,6 +141,25 @@ export const GalleryViewerWrapper = styled.div`
     color: inherit;
     text-align: left;
     cursor: pointer;
+    contain: layout paint style;
+    content-visibility: auto;
+    contain-intrinsic-size: 0 160px;
+  }
+
+  .gallery-grid-virtual-space {
+    position: relative;
+    width: 100%;
+    min-height: 0;
+  }
+
+  .gallery-grid-content {
+    position: absolute;
+    inset: 0 auto auto 0;
+    display: grid;
+    align-content: start;
+    align-items: start;
+    gap: 14px;
+    will-change: transform;
   }
 
   .gallery-card:focus-visible {

@@ -138,7 +138,7 @@ dismiss(): void            // 完全释放：pause + remove src + delete element
 
 `softClose` / `hide` 都不动 `hasStarted` 也不取消注册。处于 `app-floating` 时，元素继续留在 floating host（`transform: translate(20000px, 20000px)` 移到屏外但保持 connected document）；处于 `document-pip` 时，会先把元素移回应用内 floating host 再关闭 PiP 窗口。用户回 library 时 `mountGlobalVideoElement` + `bindInline({ forceInline: true })` 把元素搬回 inline。
 
-Document PiP 只作为**用户主动点击**的优先路径，因为 Chromium 通常要求用户手势。离开资料库等被动 cleanup 仍走 `handoffToFloating()`，已有 PiP 时保持 PiP，否则走应用内浮窗。
+Document PiP / Electron 系统小窗只作为**用户主动点击**的优先路径，因为 Chromium 通常要求用户手势。离开资料库等被动 cleanup 仍走 `handoffToFloating()`；已有 Document PiP 或 Electron 系统小窗时保持当前外部小窗，否则才走应用内浮窗。
 
 部分 Electron / Chromium 环境会暴露 `documentPictureInPicture.requestWindow`，但返回尺寸为 `0x0` 的不可见窗口并立即 `pagehide`。这类情况视为 Document PiP 不可用，`requestSystemFloating()` 必须继续降级到 Electron 系统小窗；若系统小窗也不可用，最后才降级到可见的应用内浮窗，避免出现“视频继续播放但用户看不到任何小窗”的隐藏播放态。
 
@@ -177,7 +177,7 @@ subscribePendingActivation(listener)      // 同 libraryId 内多次 set 也能�
 |---|---|---|
 | 首次播放 | service 注册 entry | service 注册 entry（hasStarted=true 起） |
 | viewer 卸载（同库内切 tab） | 不动 audio，继续在 hub | `parkGlobalVideoElement`，浮窗不弹 |
-| 离开 `/libraries/:id` | 不动 audio，继续在 hub | `handoffToFloating()`，浮窗弹出 |
+| 离开 `/libraries/:id` | 不动 audio，继续在 hub | `handoffToFloating()`；已有 Document PiP / Electron 系统小窗时保持现有小窗，否则弹出应用内浮窗 |
 | 视频底部小窗按钮 | —— | 优先进入 Document PiP；不可用时进入 Electron 系统小窗；再不可用时进入应用内浮窗；inline 显示海报 + 收回 |
 | inline 收回按钮 | —— | `mountGlobalVideoElement` + `bindInline({ forceInline: true })`，视频回到 inline |
 | Document PiP 原生关闭 | —— | 暂停视频，移回应用内 floating host 并收起，hub entry 保留（已暂停） |

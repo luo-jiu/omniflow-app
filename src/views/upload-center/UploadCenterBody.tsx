@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import styled from 'styled-components';
 import { Button, Empty, Progress, Tag, Toast } from '@douyinfe/semi-ui';
-import { IconChevronDown, IconChevronRight } from '@douyinfe/semi-icons';
+import { IconChevronDown, IconChevronRight, IconDelete } from '@douyinfe/semi-icons';
 import { uploadManager } from '@/utils/uploadManager';
 import type { UploadTask } from '@/modules/upload-center/model/upload-task.types';
 import type { UploadTaskSummary } from '@/modules/upload-center/model/upload-task.store';
@@ -15,6 +15,38 @@ const Body = styled.div`
     grid-template-columns: repeat(4, minmax(80px, 1fr));
     gap: 9px;
     margin-bottom: 15px;
+  }
+
+  .list-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+
+  .subtitle {
+    min-width: 0;
+    color: var(--semi-color-text-2);
+    font-size: 11px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .toolbar-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-shrink: 0;
+  }
+
+  .toolbar-icon-button {
+    width: 28px;
+    height: 28px;
+    min-width: 28px;
+    padding: 0 !important;
+    border-radius: 6px;
   }
 
   .summary-card {
@@ -84,7 +116,7 @@ const Body = styled.div`
       58px
       86px
       92px
-      minmax(112px, auto);
+      minmax(136px, auto);
     gap: 8px;
     color: var(--semi-color-text-2);
     font-size: 10px;
@@ -108,7 +140,7 @@ const Body = styled.div`
     gap: 5px;
     justify-content: flex-end;
     flex-shrink: 0;
-    min-width: 112px;
+    min-width: 136px;
     min-height: 25px;
   }
 
@@ -119,6 +151,14 @@ const Body = styled.div`
     border-radius: 6px;
     font-size: 10px;
     font-weight: 600;
+  }
+
+  .row-icon-button {
+    width: 25px;
+    height: 25px;
+    min-width: 25px;
+    padding: 0 !important;
+    border-radius: 6px;
   }
 
   .tree {
@@ -225,6 +265,14 @@ const Body = styled.div`
   @media (max-width: 760px) {
     .summary {
       grid-template-columns: repeat(2, minmax(100px, 1fr));
+    }
+
+    .list-toolbar {
+      align-items: flex-start;
+    }
+
+    .subtitle {
+      white-space: normal;
     }
 
     .row-meta {
@@ -390,6 +438,10 @@ function getGroupEtaSeconds(stats: UploadGroupStats): number | null {
   const remaining = Math.max(0, Number(stats.totalBytes || 0) - Number(stats.uploadedBytes || 0));
   if (remaining <= 0) return null;
   return Math.ceil(remaining / stats.speedBps);
+}
+
+function isRemovableUploadTaskRecord(task: UploadTask): boolean {
+  return task.status === 'success' || task.status === 'failed' || task.status === 'canceled';
 }
 
 function getTaskRelativePath(task: UploadTask): string {
@@ -680,6 +732,10 @@ const UploadCenterBody: React.FC = () => {
 
   const taskMap = useMemo(() => new Map(tasks.map(task => [task.id, task])), [tasks]);
   const groups = useMemo(() => buildUploadGroups(tasks), [tasks]);
+  const removableRecordCount = useMemo(
+    () => tasks.filter(isRemovableUploadTaskRecord).length,
+    [tasks],
+  );
   const visibleGroups = useMemo(
     () => groups.slice(0, visibleGroupCount),
     [groups, visibleGroupCount],
@@ -785,137 +841,201 @@ const UploadCenterBody: React.FC = () => {
     Toast.info(`已重试 ${retriedCount} 个任务`);
   };
 
+  const handleRemoveGroupRecords = (group: UploadGroup) => {
+    const activeCount = group.queued + group.uploading + group.paused;
+    if (activeCount > 0) {
+      Toast.warning('进行中的任务需先中断或等待完成');
+      return;
+    }
+
+    const removedCount = uploadManager.clearTaskRecords(group.taskIds);
+    if (removedCount === 0) {
+      Toast.warning('当前分组没有可删除记录');
+      return;
+    }
+
+    expandedGroupIdsRef.current = expandedGroupIdsRef.current.filter(id => id !== group.id);
+    setExpandedGroupIds(expandedGroupIdsRef.current);
+    setExpandedTreeKeysByGroup((prev) => {
+      const next = { ...prev };
+      delete next[group.id];
+      expandedTreeKeysByGroupRef.current = next;
+      return next;
+    });
+    Toast.success(removedCount > 1 ? `已删除 ${removedCount} 条记录` : '已删除记录');
+  };
+
+  const handleClearRecords = () => {
+    const removedCount = uploadManager.clearTaskRecords();
+    if (removedCount === 0) {
+      Toast.warning('没有可清空记录');
+      return;
+    }
+
+    expandedGroupIdsRef.current = [];
+    expandedTreeKeysByGroupRef.current = {};
+    setExpandedGroupIds([]);
+    setExpandedTreeKeysByGroup({});
+    Toast.success(`已清空 ${removedCount} 条记录`);
+  };
+
   return (
     <Body>
-      <div className="subtitle">
-        默认仅展示分组，展开后按目录层级逐步查看
+      <div className="list-toolbar">
+        <div className="subtitle">
+          默认仅展示分组，展开后按目录层级逐步查看
         </div>
-
-        <div className="summary">
-          <div className="summary-card">
-            <div className="summary-label">总任务</div>
-            <div className="summary-value">{summary.total}</div>
-          </div>
-          <div className="summary-card">
-            <div className="summary-label">进行中</div>
-            <div className="summary-value">{summary.uploading}</div>
-          </div>
-          <div className="summary-card">
-            <div className="summary-label">排队</div>
-            <div className="summary-value">{summary.queued}</div>
-          </div>
-          <div className="summary-card">
-            <div className="summary-label">失败</div>
-            <div className="summary-value">{summary.failed}</div>
-          </div>
+        <div className="toolbar-actions">
+          <Button
+            aria-label="清空已结束记录"
+            className="toolbar-icon-button"
+            disabled={removableRecordCount === 0}
+            icon={<IconDelete />}
+            theme="borderless"
+            type="danger"
+            onClick={handleClearRecords}
+          />
         </div>
+      </div>
 
-        <div className="list">
-          {groups.length === 0 ? (
-            <div className="empty-state">
-              <Empty description="暂无上传任务" />
-            </div>
-          ) : (
-            visibleGroups.map((group) => {
-              const status = getDominantStatus(group);
-              const percent = getProgressPercent(group);
-              const expanded = expandedGroupIds.includes(group.id);
+      <div className="summary">
+        <div className="summary-card">
+          <div className="summary-label">总任务</div>
+          <div className="summary-value">{summary.total}</div>
+        </div>
+        <div className="summary-card">
+          <div className="summary-label">进行中</div>
+          <div className="summary-value">{summary.uploading}</div>
+        </div>
+        <div className="summary-card">
+          <div className="summary-label">排队</div>
+          <div className="summary-value">{summary.queued}</div>
+        </div>
+        <div className="summary-card">
+          <div className="summary-label">失败</div>
+          <div className="summary-value">{summary.failed}</div>
+        </div>
+      </div>
 
-              return (
-                <div key={group.id} className="group-row">
-                  <div className="row-head">
-                    <div className="name-wrap">
-                      {group.isFolder ? (
-                        <Button
-                          icon={expanded ? <IconChevronDown /> : <IconChevronRight />}
-                          size="small"
-                          theme="borderless"
-                          type="tertiary"
-                          style={{ padding: 1 }}
-                          onClick={() => toggleGroup(group.id)}
-                        />
-                      ) : (
-                        <span style={{ width: 16 }} />
-                      )}
-                      <span style={{ fontSize: 11 }}>{group.isFolder ? '📁' : '📄'}</span>
-                      <div className="name" title={group.label}>{group.label}</div>
-                    </div>
-                    <Tag className="status-tag" color={STATUS_COLOR[status]}>{STATUS_LABEL[status]}</Tag>
+      <div className="list">
+        {groups.length === 0 ? (
+          <div className="empty-state">
+            <Empty description="暂无上传任务" />
+          </div>
+        ) : (
+          visibleGroups.map((group) => {
+            const status = getDominantStatus(group);
+            const percent = getProgressPercent(group);
+            const expanded = expandedGroupIds.includes(group.id);
+            const activeCount = group.queued + group.uploading + group.paused;
+            const removableCount = group.success + group.failed + group.canceled;
+            const removeDisabled = activeCount > 0 || removableCount === 0;
+
+            return (
+              <div key={group.id} className="group-row">
+                <div className="row-head">
+                  <div className="name-wrap">
+                    {group.isFolder ? (
+                      <Button
+                        icon={expanded ? <IconChevronDown /> : <IconChevronRight />}
+                        size="small"
+                        theme="borderless"
+                        type="tertiary"
+                        style={{ padding: 1 }}
+                        onClick={() => toggleGroup(group.id)}
+                      />
+                    ) : (
+                      <span style={{ width: 16 }} />
+                    )}
+                    <span style={{ fontSize: 11 }}>{group.isFolder ? '📁' : '📄'}</span>
+                    <div className="name" title={group.label}>{group.label}</div>
                   </div>
+                  <Tag className="status-tag" color={STATUS_COLOR[status]}>{STATUS_LABEL[status]}</Tag>
+                </div>
 
-                  <div style={{ marginTop: 7 }}>
-                    <Progress
-                      percent={percent}
-                      showInfo={false}
-                      stroke={status === 'failed' ? 'var(--semi-color-danger)' : undefined}
+                <div style={{ marginTop: 7 }}>
+                  <Progress
+                    percent={percent}
+                    showInfo={false}
+                    stroke={status === 'failed' ? 'var(--semi-color-danger)' : undefined}
+                  />
+                </div>
+
+                <div className="row-meta">
+                  <span className="row-metric">{group.fileCount} 项</span>
+                  <span className="row-metric align-right">
+                    {uploadManager.formatSize(group.uploadedBytes)} / {uploadManager.formatSize(group.totalBytes)}
+                  </span>
+                  <span className="row-metric align-right">{percent.toFixed(1)}%</span>
+                  <span className="row-metric align-right">
+                    {group.uploading > 0 && group.speedBps > 0 ? formatRate(group.speedBps) : '—'}
+                  </span>
+                  {(() => {
+                    const eta = getGroupEtaSeconds(group);
+                    const etaText = eta != null ? formatETA(eta) : '';
+                    return <span className="row-metric align-right">剩余 {etaText || '—'}</span>;
+                  })()}
+                  <div className="row-actions">
+                    {(group.uploading > 0 || group.queued > 0 || group.paused > 0) && (
+                      <Button
+                        size="default"
+                        type="danger"
+                        theme="borderless"
+                        className="row-action-button"
+                        onClick={() => handleCancelGroup(group)}
+                      >
+                        中断
+                      </Button>
+                    )}
+                    {group.failed > 0 && (
+                      <Button
+                        size="default"
+                        theme="borderless"
+                        className="row-action-button"
+                        onClick={() => handleRetryGroup(group)}
+                      >
+                        重试失败项
+                      </Button>
+                    )}
+                    <Button
+                      aria-label="删除记录"
+                      className="row-icon-button"
+                      disabled={removeDisabled}
+                      icon={<IconDelete />}
+                      size="default"
+                      theme="borderless"
+                      type="danger"
+                      onClick={() => handleRemoveGroupRecords(group)}
                     />
                   </div>
-
-                  <div className="row-meta">
-                    <span className="row-metric">{group.fileCount} 项</span>
-                    <span className="row-metric align-right">
-                      {uploadManager.formatSize(group.uploadedBytes)} / {uploadManager.formatSize(group.totalBytes)}
-                    </span>
-                    <span className="row-metric align-right">{percent.toFixed(1)}%</span>
-                    <span className="row-metric align-right">
-                      {group.uploading > 0 && group.speedBps > 0 ? formatRate(group.speedBps) : '—'}
-                    </span>
-                    {(() => {
-                      const eta = getGroupEtaSeconds(group);
-                      const etaText = eta != null ? formatETA(eta) : '';
-                      return <span className="row-metric align-right">剩余 {etaText || '—'}</span>;
-                    })()}
-                    <div className="row-actions">
-                      {(group.uploading > 0 || group.queued > 0 || group.paused > 0) && (
-                        <Button
-                          size="default"
-                          type="danger"
-                          theme="borderless"
-                          className="row-action-button"
-                          onClick={() => handleCancelGroup(group)}
-                        >
-                          中断
-                        </Button>
-                      )}
-                      {group.failed > 0 && (
-                        <Button
-                          size="default"
-                          theme="borderless"
-                          className="row-action-button"
-                          onClick={() => handleRetryGroup(group)}
-                        >
-                          重试失败项
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-
-                  {group.isFolder && expanded && (
-                    <div className="tree">
-                      <GroupTreeView
-                        group={group}
-                        taskMap={taskMap}
-                        expandedKeys={expandedTreeKeysByGroup[group.id] || []}
-                        onToggleKey={(nodeKey) => handleToggleTreeNode(group.id, nodeKey)}
-                      />
-                    </div>
-                  )}
                 </div>
-              );
-            })
-          )}
-          {groups.length > visibleGroupCount && (
-            <div className="group-row" style={{ textAlign: 'center' }}>
-              <Button
-                theme="borderless"
-                onClick={() => {
-                  setVisibleGroupCount(prev => Math.min(prev + GROUP_RENDER_STEP, groups.length));
-                }}
-              >
-                加载更多分组（剩余 {groups.length - visibleGroupCount}）
-              </Button>
-            </div>
-          )}
+
+                {group.isFolder && expanded && (
+                  <div className="tree">
+                    <GroupTreeView
+                      group={group}
+                      taskMap={taskMap}
+                      expandedKeys={expandedTreeKeysByGroup[group.id] || []}
+                      onToggleKey={(nodeKey) => handleToggleTreeNode(group.id, nodeKey)}
+                    />
+                  </div>
+                )}
+              </div>
+            );
+          })
+        )}
+        {groups.length > visibleGroupCount && (
+          <div className="group-row" style={{ textAlign: 'center' }}>
+            <Button
+              theme="borderless"
+              onClick={() => {
+                setVisibleGroupCount(prev => Math.min(prev + GROUP_RENDER_STEP, groups.length));
+              }}
+            >
+              加载更多分组（剩余 {groups.length - visibleGroupCount}）
+            </Button>
+          </div>
+        )}
       </div>
     </Body>
   );

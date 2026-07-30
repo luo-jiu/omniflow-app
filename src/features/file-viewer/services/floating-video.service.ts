@@ -213,6 +213,19 @@ class FloatingVideoService {
       dbg('requestSystemFloating.skip no key');
       return false;
     }
+    if (this.state.hostMode === 'document-pip') {
+      try {
+        this.documentPipWindow?.focus();
+      } catch {
+        // ignore focus failure; the existing PiP window still owns the video.
+      }
+      dbg('requestSystemFloating.keep document-pip', { key });
+      return true;
+    }
+    if (this.state.hostMode === 'system-window') {
+      dbg('requestSystemFloating.keep system-window', { key });
+      return true;
+    }
     const el = this.boundElement;
     const requestSnapshot: DocumentPipRequestSnapshot = {
       key,
@@ -296,6 +309,14 @@ class FloatingVideoService {
     }
     if (this.state.hostMode === 'document-pip') {
       dbg('handoffToFloating.keep document-pip', { key });
+      this.setState({ visible: false });
+      return;
+    }
+    if (this.state.hostMode === 'system-window') {
+      dbg('handoffToFloating.keep system-window', { key });
+      this.pendingHandoff = null;
+      this.autoResumeArmed = false;
+      this.clearAutoResumeTimer();
       this.setState({ visible: false });
       return;
     }

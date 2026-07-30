@@ -82,6 +82,36 @@ export function dispatchUploadTaskEvent(
   };
 }
 
+export function removeUploadTasks(state: UploadTaskStoreState, taskIds: string[]): UploadTaskStoreState {
+  if (taskIds.length === 0) {
+    return state;
+  }
+
+  const removeSet = new Set(taskIds);
+  let changed = false;
+  const nextOrder = state.order.filter((taskId) => {
+    if (removeSet.has(taskId) && state.tasks[taskId]) {
+      changed = true;
+      return false;
+    }
+    return true;
+  });
+
+  if (!changed) {
+    return state;
+  }
+
+  const nextTasks: Record<string, UploadTask> = { ...state.tasks };
+  removeSet.forEach((taskId) => {
+    delete nextTasks[taskId];
+  });
+
+  return {
+    order: nextOrder,
+    tasks: nextTasks,
+  };
+}
+
 export function getUploadTasks(state: UploadTaskStoreState): UploadTask[] {
   return state.order.map(id => state.tasks[id]).filter(Boolean);
 }

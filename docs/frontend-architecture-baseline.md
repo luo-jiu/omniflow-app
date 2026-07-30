@@ -62,6 +62,12 @@ React 18 兼容层：
 - 应用自身入口继续从 `react-dom/client` 使用 `createRoot`；不要在业务代码里新增 `ReactDOM.render`。
 - 修改该 alias 或兼容层后，dev 环境需要用 `npm run dev -- --force` 重建 Vite optimized deps，避免继续加载旧的 `node_modules/.vite/deps/chunk-*.js`。
 
+Electron `userData`：
+
+- 主进程默认继续使用历史目录 `omniflow-app`，保证普通启动能读到原有本地状态。
+- 本地双开调试可通过环境变量 `OMNIFLOW_USER_DATA_SUFFIX` 指定隔离目录；例如 `stable` 会落到 `omniflow-app-stable`，避免 dev / stable 实例互相抢 IndexedDB、session、窗口状态和本地预览缓存。
+- suffix 只允许字母、数字、下划线和短横线，其他字符会被替换为短横线。
+
 ## 3. 目录语义
 
 当前目录分层以“页面编排”和“业务域”并存为主：

@@ -6,7 +6,6 @@ type EmbeddedBrowserPanelProps = {
   boundsSyncDurationMs?: number;
   boundsSyncSignal?: number;
   currentUrl?: string;
-  onUrlChange?: (url: string) => void;
   onStateChange?: (payload: BrowserEventPayload) => void;
   onPendingFileOpenHandled?: (tabId: string) => void;
   onSubmitDraft: (value: string) => void;
@@ -171,7 +170,6 @@ const EmbeddedBrowserPanel = React.forwardRef<EmbeddedBrowserHandle, EmbeddedBro
     boundsSyncDurationMs = 0,
     boundsSyncSignal = 0,
     currentUrl = '',
-    onUrlChange,
     onStateChange,
     onPendingFileOpenHandled,
     onSubmitDraft,
@@ -179,7 +177,6 @@ const EmbeddedBrowserPanel = React.forwardRef<EmbeddedBrowserHandle, EmbeddedBro
     suspendNativeView = false,
   }, ref) => {
     const hostRef = React.useRef<HTMLDivElement | null>(null);
-    const emptyInputRef = React.useRef<HTMLInputElement | null>(null);
     const lastNativeAttachRef = React.useRef<{
       pendingKey: string | null;
       tabId: string | null;
@@ -255,9 +252,6 @@ const EmbeddedBrowserPanel = React.forwardRef<EmbeddedBrowserHandle, EmbeddedBro
         if (payload.tabId && activeTabId && payload.tabId !== activeTabId) {
           return;
         }
-        if (payload.url) {
-          onUrlChange?.(payload.url);
-        }
         if (payload.state === 'idle') {
           setStatusDetails('');
           setStatusMeta([]);
@@ -283,7 +277,7 @@ const EmbeddedBrowserPanel = React.forwardRef<EmbeddedBrowserHandle, EmbeddedBro
         }
       });
       return unsubscribe;
-    }, [activeTabId, onStateChange, onUrlChange]);
+    }, [activeTabId, onStateChange]);
 
     React.useEffect(() => {
       if (suspendNativeView) {
@@ -435,15 +429,6 @@ const EmbeddedBrowserPanel = React.forwardRef<EmbeddedBrowserHandle, EmbeddedBro
       };
     }, []);
 
-    React.useEffect(() => {
-      if (panelMode !== 'blank') {
-        return;
-      }
-      window.requestAnimationFrame(() => {
-        emptyInputRef.current?.focus();
-      });
-    }, [panelMode]);
-
     return (
       <BrowserSurface
         style={
@@ -468,7 +453,6 @@ const EmbeddedBrowserPanel = React.forwardRef<EmbeddedBrowserHandle, EmbeddedBro
                 }}
               >
                 <input
-                  ref={emptyInputRef}
                   className="embedded-browser-empty-input"
                   value={emptyDraftValue}
                   onChange={(event) => setEmptyDraftValue(event.target.value)}

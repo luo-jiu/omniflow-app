@@ -1,6 +1,6 @@
 # Library Detail 工作区状态说明
 
-更新时间：2026-05-12
+更新时间：2026-06-03
 
 适用范围：`src/views/library/detail/` 页面中的工作区显示模式、浏览器 tab、搜索模式、地址栏、缓存恢复，以及和文件预览/内置浏览器之间的切换逻辑。
 
@@ -310,6 +310,8 @@
 - `window.electronEmbeddedBrowser.activateTab(tabId)`
 
 因此“切换激活 tab”不是只改一个 id，而是一次页面工作区上下文切换。
+
+地址栏焦点不属于工作区状态同步的一部分。激活 tab、后退、前进、刷新或导航事件都不得主动 focus / select 地址栏；只有用户点击地址栏或空白页输入框时才进入编辑。导航期间的 loading URL 只更新 tab 投影，地址栏只在当前 active tab 收到 `ready` 状态时同步最终 URL，避免重定向或临时长 URL 在输入框里闪烁。
 
 ### 5.4 关闭 tab
 

@@ -287,7 +287,6 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   const [mediaProcessingRequest, setMediaProcessingRequest] = React.useState<ToolWorkspaceMediaRequest | null>(null);
   const [libraryMediaProcessingRequest, setLibraryMediaProcessingRequest] = React.useState<ToolWorkspaceLibraryMediaRequest | null>(null);
   const [videoWideModeActive, setVideoWideModeActive] = React.useState(false);
-  const browserInputRef = React.useRef<HTMLInputElement | null>(null);
   const latestWorkspaceStateRef = React.useRef<LibraryDetailWorkspaceState>(initialWorkspaceState);
   const latestPanelWidthRef = React.useRef<number>(sidePanelWidth);
   const sidePanelCollapsedRef = React.useRef<boolean>(sidePanelCollapsed);
@@ -1334,13 +1333,6 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
     }));
   }, [applyBrowserTabUpdate, faviconCacheOwnerKey]);
 
-  const syncBrowserInputWithTab = React.useCallback((tabId: string | null, nextUrl: string) => {
-    if (!tabId || tabId !== activeBrowserTabId) {
-      return;
-    }
-    setBrowserInput(nextUrl);
-  }, [activeBrowserTabId]);
-
   const createAndActivateBrowserTab = React.useCallback(() => {
     const next = createEmptyBrowserTab();
     setBrowserTabs((prev) => [...prev, next.tab]);
@@ -2176,18 +2168,6 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   }, [bookmarkContextMenu]);
 
   React.useEffect(() => {
-    if (!browserModeOpen) {
-      return;
-    }
-    if (!activeBrowserTab?.url) {
-      return;
-    }
-    window.requestAnimationFrame(() => {
-      browserInputRef.current?.focus();
-    });
-  }, [activeBrowserTab, browserModeOpen]);
-
-  React.useEffect(() => {
     if (!browserModeOpen || !activeBrowserTabId) {
       previousActiveBrowserTabIdRef.current = activeBrowserTabId;
       previousBrowserTabCountRef.current = browserTabs.length;
@@ -2851,7 +2831,6 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
               <div className="toolbar-spacer">
                 <form className="toolbar-browser-form" onSubmit={handleBrowserSubmit}>
                   <input
-                    ref={browserInputRef}
                     className="toolbar-browser-input"
                     value={browserInput}
                     onChange={(event) => setBrowserInput(event.target.value)}
@@ -2978,17 +2957,6 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
                         clearPendingBrowserFileOpen(tabId);
                       }}
                       suspendNativeView={Boolean(activeBrowserDownload)}
-                      onUrlChange={(nextUrl) => {
-                        if (!activeBrowserTabId) {
-                          return;
-                        }
-                        applyBrowserTabUpdate(activeBrowserTabId, (tab) => ({
-                          ...tab,
-                          url: nextUrl,
-                          title: tab.title || nextUrl,
-                        }));
-                        syncBrowserInputWithTab(activeBrowserTabId, nextUrl);
-                      }}
                       onStateChange={(payload) => {
                         if (!payload.tabId) {
                           return;
@@ -2997,7 +2965,11 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
                           ...payload,
                           tabId: payload.tabId,
                         });
-                        if (payload.tabId === activeBrowserTabId && payload.url) {
+                        if (
+                          payload.tabId === activeBrowserTabId
+                          && payload.state === 'ready'
+                          && payload.url
+                        ) {
                           setBrowserInput(payload.url);
                         }
                       }}

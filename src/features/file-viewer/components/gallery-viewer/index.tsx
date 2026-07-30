@@ -12,6 +12,12 @@ import {
   IconSearchStroked,
 } from '@douyinfe/semi-icons';
 import { GalleryViewerWrapper } from './style';
+import {
+  clearGallerySnapshotCache,
+  getGallerySnapshotCache,
+  resolveGallerySnapshotCacheKey,
+  setGallerySnapshotCache,
+} from './gallery-viewer-cache';
 import ImageCropOverlay from '../image-crop-overlay';
 import {
   batchGetFileLinks,
@@ -83,6 +89,7 @@ interface GalleryImagePreview {
   previewPath?: string;
 }
 
+type ViewerZoomShortcutAction = 'zoom-in' | 'zoom-out' | 'reset';
 type ExifValue = string | number | number[] | undefined;
 
 const IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg', 'avif', 'heic', 'heif', 'heics', 'heifs']);
@@ -109,6 +116,13 @@ const VIDEO_EXTENSIONS = new Set([
   '3gp',
 ]);
 const PREFETCH_FIRST_MEDIA_COUNT = 48;
+const HEIC_PREVIEW_PREFETCH_COUNT = PREFETCH_FIRST_MEDIA_COUNT;
+const KEEP_ALIVE_IMAGE_LIMIT = 12;
+const GRID_BASE_CARD_WIDTH = 160;
+const GRID_MIN_CARD_SCALE = 0.88;
+const GRID_GAP = 14;
+const GRID_HORIZONTAL_PADDING = 48;
+const GRID_VERTICAL_OVERSCAN_ROWS = 3;
 const IMAGE_ZOOM_MIN = 0.2;
 const IMAGE_ZOOM_MAX = 6;
 const TIFF_TYPE_BYTE = 1;
@@ -147,6 +161,20 @@ const EXIF_TAGS: Record<number, string> = {
 };
 const EXIF_POINTER_TAG = 0x8769;
 const GPS_POINTER_TAG = 0x8825;
+
+function pushLimitedId(prev: Set<number>, id: number, limit: number): Set<number> {
+  const next = new Set(prev);
+  if (next.has(id)) {
+    next.delete(id);
+  }
+  next.add(id);
+  while (next.size > limit) {
+    const oldest = next.values().next().value;
+    if (oldest === undefined) break;
+    next.delete(oldest);
+  }
+  return next;
+}
 
 function normalizeExt(ext?: string): string {
   return String(ext || '').trim().toLowerCase().replace(/^\./, '');
@@ -427,6 +455,10 @@ const GalleryViewer: React.FC<GalleryViewerProps> = ({
 }) => {
   const libraryId = useMemo(() => parseGalleryLibraryId(fileUrl), [fileUrl]);
   const title = useMemo(() => normalizeGalleryTitle(fileName), [fileName]);
+  const snapshotCacheKey = useMemo(
+    () => resolveGallerySnapshotCacheKey(fileUrl, folderNodeId, reloadToken),
+    [fileUrl, folderNodeId, reloadToken],
+  );
   const [items, setItems] = useState<GalleryMediaItem[]>([]);
   const [linkMap, setLinkMap] = useState<Map<number, string>>(() => new Map());
   const [loading, setLoading] = useState(true);
@@ -454,10 +486,23 @@ const GalleryViewer: React.FC<GalleryViewerProps> = ({
   const [metadataError, setMetadataError] = useState<string | null>(null);
   const [imagePreviewMap, setImagePreviewMap] = useState<Map<number, GalleryImagePreview>>(() => new Map());
   const [imagePreviewErrorMap, setImagePreviewErrorMap] = useState<Map<number, string>>(() => new Map());
+  const [keptImageIds, setKeptImageIds] = useState<Set<number>>(() => new Set());
+  const [gridScrollTop, setGridScrollTop] = useState(0);
+  const [gridViewportHeight, setGridViewportHeight] = useState(0);
+  const [gridColumnCount, setGridColumnCount] = useState(1);
+  const [gridCardWidth, setGridCardWidth] = useState(GRID_BASE_CARD_WIDTH);
   const requestedLinkIdsRef = useRef<Set<number>>(new Set());
+  const requestedLinkGenerationsRef = useRef<Map<number, number>>(new Map());
   const linkMapRef = useRef<Map<number, string>>(new Map());
   const imagePreviewMapRef = useRef<Map<number, GalleryImagePreview>>(new Map());
   const requestedImagePreviewIdsRef = useRef<Set<number>>(new Set());
+  const requestedImagePreviewGenerationsRef = useRef<Map<number, number>>(new Map());
+  const mountedRef = useRef(false);
+  const previewGenerationRef = useRef(0);
+  const gridScrollRef = useRef<HTMLDivElement | null>(null);
+  const gridScrollTopRef = useRef(0);
+  const gridScrollFrameRef = useRef<number | null>(null);
+  const restoringSnapshotRef = useRef(false);
   const imageStageRef = useRef<HTMLDivElement | null>(null);
   const detailImageRef = useRef<HTMLImageElement | null>(null);
   const videoHostRef = useRef<HTMLDivElement | null>(null);
@@ -473,6 +518,34 @@ const GalleryViewer: React.FC<GalleryViewerProps> = ({
     ? `gallery-video:${tabId}:${activeItem.id}`
     : null;
 
+  const isPreviewGenerationCurrent = useCallback((generation: number) => {
+    return mountedRef.current && previewGenerationRef.current === generation;
+  }, []);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    const requestedLinkIds = requestedLinkIdsRef.current;
+    const requestedLinkGenerations = requestedLinkGenerationsRef.current;
+    const requestedImagePreviewIds = requestedImagePreviewIdsRef.current;
+    const requestedImagePreviewGenerations = requestedImagePreviewGenerationsRef.current;
+    return () => {
+      mountedRef.current = false;
+      previewGenerationRef.current += 1;
+      requestedLinkIds.clear();
+      requestedLinkGenerations.clear();
+      requestedImagePreviewIds.clear();
+      requestedImagePreviewGenerations.clear();
+    };
+  }, []);
+
+  useEffect(() => {
+    previewGenerationRef.current += 1;
+    requestedLinkIdsRef.current.clear();
+    requestedLinkGenerationsRef.current.clear();
+    requestedImagePreviewIdsRef.current.clear();
+    requestedImagePreviewGenerationsRef.current.clear();
+  }, [libraryId, snapshotCacheKey]);
+
   const prepareHeicPreview = useCallback(async (
     item: GalleryMediaItem,
     sourceUrl: string,
@@ -485,6 +558,8 @@ const GalleryViewer: React.FC<GalleryViewerProps> = ({
     if (!api) return null;
 
     requestedImagePreviewIdsRef.current.add(item.id);
+    const requestGeneration = previewGenerationRef.current;
+    requestedImagePreviewGenerationsRef.current.set(item.id, requestGeneration);
     try {
       const result = await api({
         nodeId: item.id,
@@ -498,6 +573,7 @@ const GalleryViewer: React.FC<GalleryViewerProps> = ({
       if (!result?.ok || !nextPreviewUrl) {
         throw new Error(result?.error || '生成 HEIC 预览失败');
       }
+      if (!isPreviewGenerationCurrent(requestGeneration)) return null;
       const preview: GalleryImagePreview = {
         metadataRows: Array.isArray(result.metadataRows) ? result.metadataRows : [],
         originalSize: result.originalSize,
@@ -518,6 +594,7 @@ const GalleryViewer: React.FC<GalleryViewerProps> = ({
       });
       return preview;
     } catch (previewError: any) {
+      if (!isPreviewGenerationCurrent(requestGeneration)) return null;
       const message = previewError?.message || '生成 HEIC 预览失败';
       setImagePreviewErrorMap((prev) => {
         const next = new Map(prev);
@@ -527,55 +604,85 @@ const GalleryViewer: React.FC<GalleryViewerProps> = ({
       runtimeLogger.warn('生成 HEIC 预览失败:', previewError);
       return null;
     } finally {
-      requestedImagePreviewIdsRef.current.delete(item.id);
+      if (requestedImagePreviewGenerationsRef.current.get(item.id) === requestGeneration) {
+        requestedImagePreviewGenerationsRef.current.delete(item.id);
+        requestedImagePreviewIdsRef.current.delete(item.id);
+      }
     }
-  }, [libraryId]);
+  }, [isPreviewGenerationCurrent, libraryId]);
 
   const ensureLinksFor = useCallback(async (
     targetItems: GalleryMediaItem[],
     options?: { prepareHeicPreview?: boolean },
   ) => {
     if (!libraryId || targetItems.length === 0) return;
+    const requestGeneration = previewGenerationRef.current;
+    const previewLinks = new Map<number, string>();
+    targetItems.forEach((item) => {
+      const existingUrl = linkMapRef.current.get(item.id);
+      if (existingUrl) previewLinks.set(item.id, existingUrl);
+    });
     const missingIds = targetItems
       .map(item => item.id)
       .filter((id) => {
         if (linkMapRef.current.has(id) || requestedLinkIdsRef.current.has(id)) return false;
         requestedLinkIdsRef.current.add(id);
+        requestedLinkGenerationsRef.current.set(id, requestGeneration);
         return true;
       });
-    if (missingIds.length === 0) return;
-    try {
-      const nextLinks = await batchGetFileLinks({
-        libraryId,
-        nodeIds: missingIds,
-        expiry: 240,
-      });
-      const returnedIds = new Set<number>();
-      setLinkMap((prev) => {
-        const next = new Map(prev);
-        nextLinks.forEach((url, nodeId) => {
-          returnedIds.add(nodeId);
-          next.set(nodeId, url);
+    if (missingIds.length > 0) {
+      try {
+        const nextLinks = await batchGetFileLinks({
+          libraryId,
+          nodeIds: missingIds,
+          expiry: 240,
         });
-        linkMapRef.current = next;
-        return next;
-      });
-      missingIds
-        .filter(id => !returnedIds.has(id))
-        .forEach(id => requestedLinkIdsRef.current.delete(id));
-      if (options?.prepareHeicPreview) {
-        targetItems.forEach((item) => {
-          const sourceUrl = nextLinks.get(item.id);
-          if (sourceUrl && isHeicMediaItem(item)) {
-            void prepareHeicPreview(item, sourceUrl);
+        if (!isPreviewGenerationCurrent(requestGeneration)) return;
+        const returnedIds = new Set<number>();
+        setLinkMap((prev) => {
+          const next = new Map(prev);
+          nextLinks.forEach((url, nodeId) => {
+            returnedIds.add(nodeId);
+            next.set(nodeId, url);
+            previewLinks.set(nodeId, url);
+          });
+          linkMapRef.current = next;
+          return next;
+        });
+        missingIds
+          .filter(id => !returnedIds.has(id))
+          .forEach((id) => {
+            if (requestedLinkGenerationsRef.current.get(id) === requestGeneration) {
+              requestedLinkGenerationsRef.current.delete(id);
+              requestedLinkIdsRef.current.delete(id);
+            }
+          });
+      } catch (loadError) {
+        missingIds.forEach((id) => {
+          if (requestedLinkGenerationsRef.current.get(id) === requestGeneration) {
+            requestedLinkGenerationsRef.current.delete(id);
+            requestedLinkIdsRef.current.delete(id);
           }
         });
+        runtimeLogger.error('加载图集媒体链接失败:', loadError);
       }
-    } catch (loadError) {
-      missingIds.forEach(id => requestedLinkIdsRef.current.delete(id));
-      runtimeLogger.error('加载图集媒体链接失败:', loadError);
     }
-  }, [libraryId, prepareHeicPreview]);
+    if (options?.prepareHeicPreview) {
+      const heicItems = targetItems
+        .filter(item => isHeicMediaItem(item))
+        .filter(item => !imagePreviewMapRef.current.has(item.id))
+        .slice(0, HEIC_PREVIEW_PREFETCH_COUNT);
+      void (async () => {
+        for (const item of heicItems) {
+          if (!isPreviewGenerationCurrent(requestGeneration)) return;
+          const sourceUrl = previewLinks.get(item.id) || linkMapRef.current.get(item.id);
+          if (sourceUrl) {
+            await prepareHeicPreview(item, sourceUrl);
+          }
+        }
+      })();
+    }
+  }, [isPreviewGenerationCurrent, libraryId, prepareHeicPreview]);
 
   useEffect(() => {
     let cancelled = false;
@@ -586,6 +693,38 @@ const GalleryViewer: React.FC<GalleryViewerProps> = ({
         setError('图集目录参数异常');
         return;
       }
+      const cachedSnapshot = getGallerySnapshotCache(snapshotCacheKey);
+      if (cachedSnapshot) {
+        const restoredLinks = new Map(cachedSnapshot.linkEntries);
+        const restoredPreviews = new Map(cachedSnapshot.imagePreviewEntries);
+        linkMapRef.current = restoredLinks;
+        imagePreviewMapRef.current = restoredPreviews;
+        gridScrollTopRef.current = cachedSnapshot.scrollTop;
+        setGridScrollTop(cachedSnapshot.scrollTop);
+        restoringSnapshotRef.current = true;
+        requestedLinkIdsRef.current.clear();
+        requestedLinkGenerationsRef.current.clear();
+        requestedImagePreviewIdsRef.current.clear();
+        requestedImagePreviewGenerationsRef.current.clear();
+        setItems(cachedSnapshot.items);
+        setLinkMap(restoredLinks);
+        setLoadedThumbIds(new Set(cachedSnapshot.loadedThumbIds));
+        setImagePreviewMap(restoredPreviews);
+        setImagePreviewErrorMap(new Map(cachedSnapshot.imagePreviewErrorEntries));
+        setKeptImageIds(new Set(cachedSnapshot.keptImageIds));
+        setActiveIndex(cachedSnapshot.activeIndex);
+        setImageZoom(cachedSnapshot.imageZoom);
+        setImageRotateSteps(cachedSnapshot.imageRotateSteps);
+        setImageOffset(cachedSnapshot.imageOffset);
+        setImageNaturalSize(cachedSnapshot.imageNaturalSize);
+        setIsImageDragging(false);
+        setCropMode(false);
+        setCropBounds(null);
+        setCropSelection(null);
+        setError(null);
+        setLoading(false);
+        return;
+      }
       setLoading(true);
       setError(null);
       setActiveIndex(null);
@@ -593,11 +732,16 @@ const GalleryViewer: React.FC<GalleryViewerProps> = ({
       linkMapRef.current = emptyLinks;
       setLinkMap(emptyLinks);
       setLoadedThumbIds(new Set());
+      gridScrollTopRef.current = 0;
+      setGridScrollTop(0);
       requestedLinkIdsRef.current.clear();
+      requestedLinkGenerationsRef.current.clear();
       imagePreviewMapRef.current = new Map();
       setImagePreviewMap(new Map());
       setImagePreviewErrorMap(new Map());
       requestedImagePreviewIdsRef.current.clear();
+      requestedImagePreviewGenerationsRef.current.clear();
+      setKeptImageIds(new Set());
       try {
         const children = await getChildrenByNodeId(folderNodeId, libraryId) as GalleryChildNode[];
         if (cancelled) return;
@@ -616,7 +760,7 @@ const GalleryViewer: React.FC<GalleryViewerProps> = ({
             return acc;
           }, []);
         setItems(nextItems);
-        void ensureLinksFor(nextItems.slice(0, PREFETCH_FIRST_MEDIA_COUNT));
+        void ensureLinksFor(nextItems.slice(0, PREFETCH_FIRST_MEDIA_COUNT), { prepareHeicPreview: true });
       } catch (loadError) {
         if (cancelled) return;
         runtimeLogger.error('加载图集失败:', loadError);
@@ -631,9 +775,21 @@ const GalleryViewer: React.FC<GalleryViewerProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [folderNodeId, libraryId, reloadToken, ensureLinksFor]);
+  }, [folderNodeId, libraryId, snapshotCacheKey, ensureLinksFor]);
+
+  useEffect(() => () => {
+    clearGallerySnapshotCache(snapshotCacheKey);
+  }, [snapshotCacheKey]);
 
   useEffect(() => {
+    if (restoringSnapshotRef.current) {
+      restoringSnapshotRef.current = false;
+      setIsImageDragging(false);
+      setCropMode(false);
+      setCropBounds(null);
+      setCropSelection(null);
+      return;
+    }
     setImageZoom(1);
     setImageRotateSteps(0);
     setImageOffset({ x: 0, y: 0 });
@@ -649,7 +805,7 @@ const GalleryViewer: React.FC<GalleryViewerProps> = ({
     void ensureLinksFor([activeItem]);
     const start = Math.max((activeIndex ?? 0) - 2, 0);
     const end = Math.min((activeIndex ?? 0) + 3, items.length);
-    void ensureLinksFor(items.slice(start, end));
+    void ensureLinksFor(items.slice(start, end), { prepareHeicPreview: true });
   }, [activeIndex, activeItem, ensureLinksFor, items]);
 
   useEffect(() => {
@@ -658,12 +814,120 @@ const GalleryViewer: React.FC<GalleryViewerProps> = ({
   }, [activeItem, activeUrl, prepareHeicPreview]);
 
   useEffect(() => {
+    if (items.length === 0 || linkMap.size === 0) return;
+    const candidates = items
+      .slice(0, PREFETCH_FIRST_MEDIA_COUNT)
+      .filter(item => isHeicMediaItem(item))
+      .filter(item => Boolean(linkMap.get(item.id)))
+      .filter(item => !imagePreviewMap.has(item.id))
+      .filter(item => !requestedImagePreviewIdsRef.current.has(item.id));
+    if (candidates.length === 0) return;
+    let cancelled = false;
+    void (async () => {
+      for (const item of candidates) {
+        if (cancelled) return;
+        if (imagePreviewMapRef.current.has(item.id)) continue;
+        const sourceUrl = linkMapRef.current.get(item.id) || linkMap.get(item.id) || '';
+        if (!sourceUrl) continue;
+        await prepareHeicPreview(item, sourceUrl);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [imagePreviewMap, items, linkMap, prepareHeicPreview]);
+
+  useEffect(() => {
+    if (!activeItem || activeItem.kind !== 'image' || !activeDisplayUrl) return;
+    setKeptImageIds((prev) => {
+      return pushLimitedId(prev, activeItem.id, KEEP_ALIVE_IMAGE_LIMIT);
+    });
+  }, [activeDisplayUrl, activeItem]);
+
+  useEffect(() => {
+    if (loading || error || items.length === 0) return;
+    setGallerySnapshotCache(snapshotCacheKey, {
+      activeIndex,
+      imageNaturalSize,
+      imageOffset,
+      imagePreviewEntries: Array.from(imagePreviewMap.entries()),
+      imagePreviewErrorEntries: Array.from(imagePreviewErrorMap.entries()),
+      imageRotateSteps,
+      imageZoom,
+      items,
+      keptImageIds: Array.from(keptImageIds),
+      linkEntries: Array.from(linkMap.entries()),
+      loadedThumbIds: Array.from(loadedThumbIds),
+      scrollTop: gridScrollTopRef.current,
+    });
+  }, [
+    activeIndex,
+    error,
+    imageNaturalSize,
+    imageOffset,
+    imagePreviewErrorMap,
+    imagePreviewMap,
+    imageRotateSteps,
+    imageZoom,
+    items,
+    keptImageIds,
+    linkMap,
+    loadedThumbIds,
+    loading,
+    snapshotCacheKey,
+  ]);
+
+  useEffect(() => {
     if (active) return;
     setCropMode(false);
     setCropBounds(null);
     setCropSelection(null);
     setIsImageDragging(false);
   }, [active]);
+
+  useEffect(() => {
+    if (activeIndex !== null) return;
+    const grid = gridScrollRef.current;
+    if (!grid) return;
+    grid.scrollTop = gridScrollTopRef.current;
+    setGridScrollTop(gridScrollTopRef.current);
+  }, [activeIndex, items.length]);
+
+  useEffect(() => {
+    const grid = gridScrollRef.current;
+    if (!grid || activeIndex !== null) return undefined;
+    const updateMetrics = () => {
+      const contentWidth = Math.max(Math.floor(grid.clientWidth - GRID_HORIZONTAL_PADDING), 0);
+      const minCardWidth = Math.ceil(GRID_BASE_CARD_WIDTH * GRID_MIN_CARD_SCALE);
+      if (contentWidth <= 0) {
+        setGridViewportHeight(grid.clientHeight);
+        setGridColumnCount(1);
+        setGridCardWidth(GRID_BASE_CARD_WIDTH);
+        return;
+      }
+      const columns = Math.max(1, Math.floor((contentWidth + GRID_GAP) / (minCardWidth + GRID_GAP)));
+      const computedWidth = (contentWidth - (columns - 1) * GRID_GAP) / columns;
+      const cardWidth = columns === 1
+        ? Math.max(1, Math.min(GRID_BASE_CARD_WIDTH, contentWidth))
+        : clamp(Math.floor(computedWidth), minCardWidth, GRID_BASE_CARD_WIDTH);
+      setGridViewportHeight(grid.clientHeight);
+      setGridColumnCount(columns);
+      setGridCardWidth(cardWidth);
+    };
+    updateMetrics();
+    const observer = new ResizeObserver(updateMetrics);
+    observer.observe(grid);
+    return () => {
+      observer.disconnect();
+    };
+  }, [activeIndex, items.length]);
+
+  useEffect(() => () => {
+    if (gridScrollFrameRef.current !== null) {
+      window.cancelAnimationFrame(gridScrollFrameRef.current);
+      gridScrollFrameRef.current = null;
+    }
+  }, []);
 
   useEffect(() => {
     if (!metadataVisible || !activeItem) return;
@@ -814,9 +1078,12 @@ const GalleryViewer: React.FC<GalleryViewerProps> = ({
   const openDetail = useCallback((index: number) => {
     const nextItem = items[index];
     if (!nextItem) return;
+    if (gridScrollRef.current) {
+      gridScrollTopRef.current = gridScrollRef.current.scrollTop;
+    }
     releaseCurrentVideoIfNeeded(nextItem.id);
     setActiveIndex(index);
-    void ensureLinksFor([nextItem]);
+    void ensureLinksFor([nextItem], { prepareHeicPreview: true });
   }, [ensureLinksFor, items, releaseCurrentVideoIfNeeded]);
 
   const closeDetail = useCallback(() => {
@@ -830,6 +1097,29 @@ const GalleryViewer: React.FC<GalleryViewerProps> = ({
     const nextIndex = (activeIndex + delta + items.length) % items.length;
     openDetail(nextIndex);
   }, [activeIndex, cropApplying, cropMode, items.length, openDetail]);
+
+  const resetImageView = useCallback(() => {
+    setImageZoom(1);
+    setImageRotateSteps(0);
+    setImageOffset({ x: 0, y: 0 });
+    setIsImageDragging(false);
+    setCropMode(false);
+    setCropBounds(null);
+    setCropSelection(null);
+  }, []);
+
+  const applyImageZoomShortcut = useCallback((action: ViewerZoomShortcutAction) => {
+    if (!active || activeIndex === null || activeItem?.kind !== 'image' || cropMode) return;
+    if (action === 'zoom-in') {
+      setImageZoom(prev => clamp(prev * 1.15, IMAGE_ZOOM_MIN, IMAGE_ZOOM_MAX));
+      return;
+    }
+    if (action === 'zoom-out') {
+      setImageZoom(prev => clamp(prev / 1.15, IMAGE_ZOOM_MIN, IMAGE_ZOOM_MAX));
+      return;
+    }
+    resetImageView();
+  }, [active, activeIndex, activeItem?.kind, cropMode, resetImageView]);
 
   useEffect(() => {
     if (!active || activeIndex === null) return undefined;
@@ -851,6 +1141,19 @@ const GalleryViewer: React.FC<GalleryViewerProps> = ({
           }
         }
         return;
+      }
+      if ((event.metaKey || event.ctrlKey) && activeItem?.kind === 'image') {
+        const code = event.code;
+        const key = event.key;
+        const isPlus = key === '+' || key === '=' || code === 'Equal' || code === 'NumpadAdd';
+        const isMinus = key === '-' || key === '_' || code === 'Minus' || code === 'NumpadSubtract';
+        const isReset = key === '0' || code === 'Digit0' || code === 'Numpad0';
+        if (isPlus || isMinus || isReset) {
+          event.preventDefault();
+          event.stopPropagation();
+          applyImageZoomShortcut(isPlus ? 'zoom-in' : isMinus ? 'zoom-out' : 'reset');
+          return;
+        }
       }
       if (event.key === 'ArrowLeft') {
         event.preventDefault();
@@ -877,7 +1180,7 @@ const GalleryViewer: React.FC<GalleryViewerProps> = ({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [active, activeIndex, activeItem?.kind, closeDetail, cropApplying, cropMode, moveDetail]);
+  }, [active, activeIndex, activeItem?.kind, applyImageZoomShortcut, closeDetail, cropApplying, cropMode, moveDetail]);
 
   const toggleVideoPlay = useCallback(() => {
     const video = videoRef.current;
@@ -923,15 +1226,14 @@ const GalleryViewer: React.FC<GalleryViewerProps> = ({
     });
   }, [cropMode, imageDragAnchor, isImageDragging]);
 
-  const resetImageView = useCallback(() => {
-    setImageZoom(1);
-    setImageRotateSteps(0);
-    setImageOffset({ x: 0, y: 0 });
-    setIsImageDragging(false);
-    setCropMode(false);
-    setCropBounds(null);
-    setCropSelection(null);
-  }, []);
+  useEffect(() => {
+    const off = window.electronAPI?.onViewerZoomShortcut?.(({ action }) => {
+      applyImageZoomShortcut(action);
+    });
+    return () => {
+      off?.();
+    };
+  }, [applyImageZoomShortcut]);
 
   const enterCropMode = useCallback(() => {
     if (!activeItem || activeItem.kind !== 'image' || !activeDisplayUrl) {
@@ -1022,6 +1324,61 @@ const GalleryViewer: React.FC<GalleryViewerProps> = ({
     }
   }, [activeDisplayUrl, activeIndex, activeItem, cropSelection, ensureLinksFor, folderNodeId, imageNaturalSize, libraryId]);
 
+  const getImageDisplayUrl = useCallback((item: GalleryMediaItem): string => {
+    if (item.kind !== 'image') return '';
+    if (isHeicMediaItem(item)) {
+      return imagePreviewMap.get(item.id)?.previewUrl || '';
+    }
+    return linkMap.get(item.id) || '';
+  }, [imagePreviewMap, linkMap]);
+
+  const gridWindow = useMemo(() => {
+    const rowStride = gridCardWidth + GRID_GAP;
+    const totalRows = Math.ceil(items.length / Math.max(gridColumnCount, 1));
+    const firstVisibleRow = Math.max(0, Math.floor(gridScrollTop / Math.max(rowStride, 1)) - GRID_VERTICAL_OVERSCAN_ROWS);
+    const visibleRowCount = Math.max(
+      GRID_VERTICAL_OVERSCAN_ROWS * 2 + 1,
+      Math.ceil(gridViewportHeight / Math.max(rowStride, 1)) + GRID_VERTICAL_OVERSCAN_ROWS * 2,
+    );
+    const lastVisibleRow = Math.min(totalRows, firstVisibleRow + visibleRowCount);
+    const startIndex = firstVisibleRow * gridColumnCount;
+    const endIndex = Math.min(items.length, lastVisibleRow * gridColumnCount);
+    return {
+      endIndex,
+      offsetTop: firstVisibleRow * rowStride,
+      startIndex,
+      totalHeight: totalRows > 0 ? totalRows * gridCardWidth + Math.max(totalRows - 1, 0) * GRID_GAP : 0,
+    };
+  }, [gridCardWidth, gridColumnCount, gridScrollTop, gridViewportHeight, items]);
+
+  const gridWindowItems = useMemo(() => (
+    items.slice(gridWindow.startIndex, gridWindow.endIndex)
+  ), [gridWindow.endIndex, gridWindow.startIndex, items]);
+
+  useEffect(() => {
+    if (gridWindowItems.length === 0) return;
+    void ensureLinksFor(gridWindowItems, { prepareHeicPreview: true });
+  }, [ensureLinksFor, gridWindowItems]);
+
+  const renderImageKeepAlive = () => {
+    if (keptImageIds.size === 0) return null;
+    const keepAliveImages = items
+      .filter(item => item.kind === 'image' && keptImageIds.has(item.id))
+      .map((item) => {
+        const url = getImageDisplayUrl(item);
+        return url ? { item, url } : null;
+      })
+      .filter((entry): entry is { item: GalleryMediaItem; url: string } => Boolean(entry));
+    if (keepAliveImages.length === 0) return null;
+    return (
+      <div className="gallery-image-keepalive" aria-hidden="true">
+        {keepAliveImages.map(({ item, url }) => (
+          <img key={item.id} src={url} alt="" draggable={false} />
+        ))}
+      </div>
+    );
+  };
+
   const renderGrid = () => (
     <div className="gallery-grid-wrap">
       <div className="gallery-header">
@@ -1037,51 +1394,72 @@ const GalleryViewer: React.FC<GalleryViewerProps> = ({
       {items.length === 0 ? (
         <div className="gallery-empty">当前图集没有可展示的图片或视频</div>
       ) : (
-        <div className="gallery-grid">
-          {items.map((item, index) => {
-            const sourceUrl = linkMap.get(item.id) || '';
-            const preview = imagePreviewMap.get(item.id);
-            const isHeic = isHeicMediaItem(item);
-            const url = isHeic ? preview?.previewUrl || '' : sourceUrl;
-            const isLoaded = loadedThumbIds.has(item.id);
-            return (
-              <button
-                key={item.id}
-                type="button"
-                className="gallery-card"
-                onClick={() => openDetail(index)}
-                onMouseEnter={() => {
-                  void ensureLinksFor([item], { prepareHeicPreview: true });
-                  if (sourceUrl && isHeicMediaItem(item)) {
-                    void prepareHeicPreview(item, sourceUrl);
-                  }
-                }}
-                title={item.title}
-              >
-                <span className={`gallery-thumb ${item.kind} ${isLoaded ? 'loaded' : ''}`}>
-                  {item.kind === 'image' && url ? (
-                    <img
-                      src={url}
-                      alt={item.title}
-                      loading="lazy"
-                      decoding="async"
-                      onLoad={() => {
-                        setLoadedThumbIds((prev) => {
-                          const next = new Set(prev);
-                          next.add(item.id);
-                          return next;
-                        });
-                      }}
-                    />
-                  ) : item.kind === 'video' ? (
-                    <span className="video-thumb-mark">VIDEO</span>
-                  ) : (
-                    <span className="video-thumb-mark">HEIC</span>
-                  )}
-                </span>
-              </button>
-            );
-          })}
+        <div
+          ref={gridScrollRef}
+          className="gallery-grid"
+          onScroll={(event) => {
+            const nextScrollTop = event.currentTarget.scrollTop;
+            gridScrollTopRef.current = nextScrollTop;
+            if (gridScrollFrameRef.current !== null) return;
+            gridScrollFrameRef.current = window.requestAnimationFrame(() => {
+              gridScrollFrameRef.current = null;
+              setGridScrollTop(gridScrollTopRef.current);
+            });
+          }}
+        >
+          <div className="gallery-grid-virtual-space" style={{ height: gridWindow.totalHeight }}>
+            <div
+              className="gallery-grid-content"
+              style={{
+                gridTemplateColumns: `repeat(${gridColumnCount}, minmax(0, ${gridCardWidth}px))`,
+                transform: `translateY(${gridWindow.offsetTop}px)`,
+              }}
+            >
+              {gridWindowItems.map((item, windowIndex) => {
+                const index = gridWindow.startIndex + windowIndex;
+                const sourceUrl = linkMap.get(item.id) || '';
+                const url = getImageDisplayUrl(item);
+                const isLoaded = loadedThumbIds.has(item.id);
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className="gallery-card"
+                    onClick={() => openDetail(index)}
+                    onMouseEnter={() => {
+                      void ensureLinksFor([item], { prepareHeicPreview: true });
+                      if (sourceUrl && isHeicMediaItem(item)) {
+                        void prepareHeicPreview(item, sourceUrl);
+                      }
+                    }}
+                    title={item.title}
+                  >
+                    <span className={`gallery-thumb ${item.kind} ${isLoaded ? 'loaded' : ''}`}>
+                      {item.kind === 'image' && url ? (
+                        <img
+                          src={url}
+                          alt={item.title}
+                          loading="lazy"
+                          decoding="async"
+                          onLoad={() => {
+                            setLoadedThumbIds((prev) => {
+                              const next = new Set(prev);
+                              next.add(item.id);
+                              return next;
+                            });
+                          }}
+                        />
+                      ) : item.kind === 'video' ? (
+                        <span className="video-thumb-mark">VIDEO</span>
+                      ) : (
+                        <span className="video-thumb-mark">HEIC</span>
+                      )}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -1301,6 +1679,7 @@ const GalleryViewer: React.FC<GalleryViewerProps> = ({
   return (
     <GalleryViewerWrapper>
       {activeIndex === null ? renderGrid() : renderDetail()}
+      {renderImageKeepAlive()}
     </GalleryViewerWrapper>
   );
 };
