@@ -5,9 +5,11 @@ import {
   createViewerDraftKey,
   createViewerLiveInstanceKey,
   createViewerResourceKey,
+  isViewerDraftKey,
   isViewerResourceKey,
   resolveViewerResourceIdentity,
   serializeViewerLiveDiagnosticKey,
+  serializeViewerDraftKey,
   serializeViewerResourceKey,
 } from './viewer-session-identity';
 import { viewerSessionPolicies } from './viewer-session-policies';
@@ -74,7 +76,11 @@ describe('viewer session identity', () => {
       viewerKind: 'text',
     });
 
-    expect(createViewerDraftKey(identity!, 'etag:v2')?.contentRevision).toBe('etag:v2');
+    const draftKey = createViewerDraftKey(identity!, 'etag:v2');
+    expect(draftKey?.contentRevision).toBe('etag:v2');
+    expect(isViewerDraftKey(draftKey)).toBe(true);
+    expect(serializeViewerDraftKey(draftKey!)).toBe('["user:1",3,"node:8","text","etag:v2"]');
+    expect(isViewerDraftKey({ ...draftKey, contentRevision: ' etag:v2' })).toBe(false);
     expect(createViewerDraftKey(identity!, '  ')).toBeNull();
     expect(createViewerLiveInstanceKey({
       runtimeSessionId: 'runtime-a',
@@ -95,6 +101,12 @@ describe('viewer session identity', () => {
     expect(createDeviceViewerAccountScope('device_01')).toBe('device:device_01');
     expect(createDeviceViewerAccountScope('device/01')).toBeNull();
     expect(createDeviceViewerAccountScope('device:01')).toBeNull();
+    expect(viewerSessionPolicies.text).toMatchObject({
+      warm: 'memory',
+      cold: 'none',
+      closeBehavior: 'retain-reading-position',
+      hasDraft: true,
+    });
     expect(Object.keys(viewerSessionPolicies).sort()).toEqual([
       'asmr',
       'asmr_archive',

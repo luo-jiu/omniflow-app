@@ -19,6 +19,12 @@ import { buildFileFullName, splitFileBaseNameAndExt } from '@/utils/fileTreeSett
 import { validateWindowsLikeFileName } from '@/utils/windowsFileName';
 import { runtimeLogger } from '@/utils/runtimeLogger';
 import { useFileViewer } from '@/hooks/useFileViewer';
+import { useAuth } from '@/hooks/useAuth';
+import {
+  createUserViewerAccountScope,
+  createViewerResourceKey,
+  viewerDraftStore,
+} from '@/features/file-viewer/session';
 import { globalAudioPlayer } from '@/features/file-viewer/services/global-audio-player';
 import { getDirectoryBuiltInIcon } from '@/features/file-explorer/utils/file-node-icon';
 import {
@@ -156,6 +162,11 @@ export default function DirectoryTree({
   browserModeOpen = false,
 }: DirectoryTreeProps) {
   const { closeTabByNodeId, tabs } = useFileViewer();
+  const { user } = useAuth();
+  const viewerAccountScope = React.useMemo(
+    () => createUserViewerAccountScope(Number(user?.id)),
+    [user?.id],
+  );
 
   // 外部文件拖拽：悬停高亮 & 延迟展开
   const [dragOverKey, setDragOverKey] = useState<string | null>(null);
@@ -1824,13 +1835,13 @@ export default function DirectoryTree({
         for (const targetNode of deleteTargets) {
           try {
             const subtreeNodeIds = await collectDeleteSubtreeNodeIds(targetNode);
-            subtreeNodeIds.forEach((nodeId) => deletedNodeIds.add(nodeId));
 
             const parentIdCandidate = Number(targetNode?.parentId);
             const parentId = Number.isFinite(parentIdCandidate) && parentIdCandidate > 0
               ? parentIdCandidate
               : (ROOT_PARENT_ID ?? 0);
             await deleteNodeAndChildren(Number(targetNode.id), libraryId);
+            subtreeNodeIds.forEach((nodeId) => deletedNodeIds.add(nodeId));
             if (parentId > 0) {
               affectedParentIds.add(parentId);
             }
@@ -1840,6 +1851,24 @@ export default function DirectoryTree({
           } catch (error) {
             deleteError = error;
             break;
+          }
+        }
+
+        let draftCleanupFailed = false;
+        if (viewerAccountScope && deletedNodeIds.size > 0) {
+          const draftIdentities = Array.from(deletedNodeIds)
+            .map((deletedNodeId) => createViewerResourceKey({
+              accountScope: viewerAccountScope,
+              libraryId,
+              nodeId: deletedNodeId,
+              viewerKind: 'text',
+            }))
+            .filter((identity) => identity !== null);
+          try {
+            await viewerDraftStore.discardDrafts(draftIdentities);
+          } catch (error) {
+            draftCleanupFailed = true;
+            runtimeLogger.error('清理已删除节点的文本草稿失败:', error);
           }
         }
 
@@ -1884,7 +1913,11 @@ export default function DirectoryTree({
           return;
         }
 
-        Toast.success(deleteTargets.length > 1 ? `已移入回收站 ${deleteTargets.length} 项` : '已移入回收站');
+        if (draftCleanupFailed) {
+          Toast.warning('内容已移入回收站，但本地文本草稿清理失败');
+        } else {
+          Toast.success(deleteTargets.length > 1 ? `已移入回收站 ${deleteTargets.length} 项` : '已移入回收站');
+        }
         scheduleRecompute();
       } catch (error) {
         runtimeLogger.error('删除节点失败:', error);

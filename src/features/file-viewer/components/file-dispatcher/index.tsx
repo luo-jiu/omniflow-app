@@ -175,7 +175,19 @@ const FileDispatcher: React.FC<FileDispatcherProps> = ({
       );
 
     case 'text':
-      return <TextViewer nodeId={nodeId} url={fileUrl} fileName={fileName} active={active} reloadToken={reloadToken} />;
+      return (
+        <TextViewer
+          accountScope={accountScope}
+          active={active}
+          contentRevision={contentRevision}
+          fileName={fileName}
+          libraryId={libraryId}
+          nodeId={nodeId}
+          reloadToken={reloadToken}
+          tabId={tabId}
+          url={fileUrl}
+        />
+      );
 
     case 'comic':
       return <ComicViewer folderNodeId={nodeId} fileUrl={fileUrl} fileName={fileName} active={active} reloadToken={reloadToken} />;

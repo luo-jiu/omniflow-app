@@ -3,7 +3,7 @@
 更新时间：2026-07-31
 适用范围：`src/components/business/app-main/`、`src/contexts/FileViewerContext.tsx`、`src/features/file-viewer/`、`src/features/archive-viewer/`、`src/features/workspace-resource-release/` 中与 viewer tab 保活、阅读现场、编辑草稿、缓存恢复和资源释放相关的代码。
 
-状态：目标架构已确定，阶段 0、阶段 1 公共内核和阶段 2 的 PDF 样本迁移已完成，Text/DraftStore 样本尚未开始。本文同时记录当前审计事实、目标契约和分阶段迁移门槛；单个 viewer 完成 adapter 接入前，不能把目标行为描述成当前已经具备的能力。
+状态：目标架构已确定，阶段 0、阶段 1 公共内核和阶段 2 的 PDF/Text 双样本代码迁移已完成。PDF 长文档恢复与 Text 草稿跨重启/冲突恢复仍需 Electron 样本人工验收；其他 viewer 尚未迁移。本文同时记录当前事实、目标契约和分阶段迁移门槛。
 
 ## 1. 目标
 
@@ -60,7 +60,7 @@ Viewer Session 治理需要同时解决以下问题：
 | Audio | 有；播放由全局音频服务持有 | 无独立 UI 快照 | 无 | 播放资源和 viewer UI 生命周期未统一分类 |
 | Video | 有；视频元素由全局服务保活 | 播放进度 | `viewMeta` 播放进度 | 字幕选择、倍速、工具台等 UI 现场不完整 |
 | PDF | 有 | 公共 registry：页码、缩放、滚动、比例、页锚点 | 无 | adapter/codec 已接入；跨重启 Cold 恢复未启用 |
-| Text | 有 | 无 | 无 | 滚动、选区、字号、换行和草稿均无卸载恢复；`basicSetup` 已稳定，不再因普通 rerender 重配置 |
+| Text | 有 | 公共 registry：选区、顶部行、滚动、字号、换行 | IndexedDB dirty draft | UI adapter/codec 与 DraftStore 已接入；后端稳定 revision 和人工恢复验收仍待补齐 |
 | Comic | 有 | 页列表、渲染窗口、滚动、页锚点 | `viewMeta` 阅读进度 | 阅读模式、布局、缩放等偏好没有完整进入 session |
 | Gallery | 有 | 媒体列表、临时链接、滚动、详情图片现场 | 无 | 普通卸载已可恢复，关闭 tab 显式清理；快照仍含临时 URL |
 | ASMR | 有 | 路径、列表、选择、封面和音频上下文 | `viewMeta` 仅承担集合元信息 | 没有列表滚动位置；快照含临时音频 URL |
@@ -125,10 +125,11 @@ Comic Archive 和 ASMR Archive 会把阅读位置写入 `viewMeta`，但当前�
 - Warm registry 只接受 plain JSON payload，写入和读取都会脱离调用方对象引用；同时按条目数和估算字节预算执行 LRU。
 - schema 或 content revision 不匹配时跳过并删除旧 snapshot；显式 replace 事务会先 capture 旧实例，再注册新资源。
 - registry runtime 在 application/auth session 级注册；认证 bootstrap 会先启动 runtime 再提交用户状态，受保护路由在 bootstrap 完成前不挂载 viewer 子树；资料库释放按 `libraryId` 清理，退出登录或 401 清理整个 session。
-- 迁移期 workspace release 同时清公共 registry 和 legacy cache；PDF 已只写公共 registry，其他已带 snapshot 的 viewer 仍写 legacy cache，没有双写。
+- 迁移期 workspace release 同时清公共 registry 和 legacy cache；PDF/Text 已接入公共 registry，其他已带 snapshot 的 viewer 仍写 legacy cache，没有双写。
 - `useViewerSession` 统一处理 adapter 注册、mount generation、schema/revision restore、active flush、cleanup capture 和 reload generation 失效；具体 payload/codec 继续留在 viewer 目录。
+- `ViewerDraftStore` 使用 IndexedDB 独立持久化 Text dirty content；按 resource slot 保留最新 draft，并用 draft key 中的 revision 做冲突判断。默认限制为单草稿 5 MiB、单账号 50 MiB、保留 30 天，存储失败不会把 dirty 状态降级成已安全落盘。
 
-账号已有稳定 `user.id`，可以构造 `user:<id>` scope。节点详情目前只有 `updatedAt`，没有经确认可靠的 ETag、对象版本、storage fingerprint 或内容 hash，因此 `contentRevision` 当前保持 `null`；Text 的内容 hash 降级和后端稳定 revision 仍属于阶段 2 前置工作。
+账号已有稳定 `user.id`，可以构造 `user:<id>` scope。节点详情目前只有 `updatedAt`，没有经确认可靠的 ETag、对象版本或 storage fingerprint，因此通用 viewer 的 `contentRevision` 仍可为空；Text 已在首次加载与保存后使用原始正文 SHA-256 作为 DraftStore 临时基线，并在签名 URL 更新时把保存后的 hash 回写 tab。后端稳定 revision 仍是长期目标。
 
 ## 3. 状态所有权
 
@@ -422,6 +423,7 @@ Text Viewer 的 `basicSetup` 是第一项需要修正的已知案例。
 
 ```text
 src/features/file-viewer/session/
+  viewer-draft-store.ts
   viewer-session.types.ts
   viewer-session-identity.ts
   viewer-session-registry.ts
@@ -431,7 +433,7 @@ src/features/file-viewer/session/
   index.ts
   *.test.ts
 
-阶段 2 及以后按需新增：
+后续按需新增：
   viewer-session-storage.ts
   scroll-anchor.ts
 ```
@@ -469,10 +471,12 @@ src/features/file-viewer/session/
 
 ### 阶段 2：双样本纵向验证
 
-当前状态：PDF 代码迁移和自动化测试已完成，Electron 中的长文档人工恢复验证仍需执行；Text/DraftStore 尚未开始。
+当前状态：PDF/Text 代码迁移和自动化测试已完成；Electron 中的 PDF 长文档恢复，以及 Text 草稿跨重启、冲突选择和保存后清理仍需真实样本人工验收。
 
 - PDF：已迁移现有成熟 anchor snapshot；独立 `pdf-viewer-cache.ts` 和 legacy release 分支已删除，reload generation 由公共 runtime 精确失效。
-- Text：先落地最小 IndexedDB DraftStore，再接入 CodeMirror view state、字号和换行，验证编辑器场景。
+- Text：已接入最小 IndexedDB DraftStore 与公共 registry；草稿输入 debounce，失活/卸载/pagehide 尽力 flush，恢复必须显式选择，revision 不同会显示冲突提示；UI snapshot 不含正文，只保存选区、顶部行、滚动、字号和换行。
+- Text 保存成功会清除已提交 draft；保存请求期间产生的新编辑不会被旧正文覆盖，而是基于已保存正文的新 hash 继续落为 dirty draft。
+- 文件树确认删除成功后按当前账号批量清对应节点 Text draft，并提升 draft writer generation，阻止旧组件延迟 cleanup 写回；后端删除失败的节点不会被误判为已删除并关闭 tab。
 - 迁移完成后删除 PDF/Text 旧 cache 或无快照实现，不能长期双写。
 
 这两个样本分别覆盖异步文档布局和可编辑草稿，足以验证公共契约是否成立。

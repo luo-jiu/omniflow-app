@@ -39,9 +39,9 @@ export const viewerSessionPolicies = {
   },
   text: {
     defaultHotCost: 'medium',
-    warm: 'none',
+    warm: 'memory',
     cold: 'none',
-    closeBehavior: 'discard',
+    closeBehavior: 'retain-reading-position',
     hasDraft: true,
   },
   comic: {

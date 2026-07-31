@@ -174,6 +174,13 @@ export function isViewerResourceKey(
     && isViewerKind(candidate.viewerKind);
 }
 
+export function isViewerDraftKey(value: unknown): value is ViewerDraftKey {
+  if (!isViewerResourceKey(value)) return false;
+  const candidate = value as Partial<ViewerDraftKey>;
+  return typeof candidate.contentRevision === 'string'
+    && normalizeRequiredText(candidate.contentRevision, 512) === candidate.contentRevision;
+}
+
 export function isViewerLiveInstanceKey(
   value: unknown,
 ): value is ViewerLiveInstanceKey {
@@ -199,6 +206,16 @@ export function serializeViewerResourceKey(identity: ViewerResourceKey): string 
     identity.libraryId,
     identity.resourceIdentity,
     identity.viewerKind,
+  ]);
+}
+
+export function serializeViewerDraftKey(key: ViewerDraftKey): string {
+  return JSON.stringify([
+    key.accountScope,
+    key.libraryId,
+    key.resourceIdentity,
+    key.viewerKind,
+    key.contentRevision,
   ]);
 }
 
