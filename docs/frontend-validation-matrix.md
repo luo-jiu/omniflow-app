@@ -1,12 +1,12 @@
 # 前端验证矩阵
 
-更新时间：2026-07-30
+更新时间：2026-07-31
 
 适用范围：`omniflow-app` 前端、Electron、IPC、工作区、文件树、文件预览、上传、内置浏览器和资源捕捉相关改动的提测、自测与 review 验证。
 
 ## 1. 概述
 
-当前仓库没有完整的前端自动化测试门禁，所以“验证矩阵”就是前端工程约束的一部分。
+当前仓库已有 Viewer Session 纯 TypeScript 单元测试，但还没有覆盖完整 UI 和 Electron 交互的自动化门禁，所以“验证矩阵”仍是前端工程约束的一部分。
 
 它的目标不是替代自动化，而是让每次改动至少回答 3 个问题：
 
@@ -20,6 +20,7 @@
 
 ```bash
 npm run lint
+npm test
 npm run build
 ```
 
@@ -313,6 +314,7 @@ legacy 兼容检查：
 ```text
 已执行：
 - npm run lint
+- npm test
 - npm run build
 
 已手工验证：

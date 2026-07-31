@@ -341,6 +341,7 @@ Renderer 只能持有这些状态的投影，不要把 main 的内部结构当�
 
 ```bash
 npm run lint
+npm test
 npm run build
 ```
 

@@ -101,6 +101,7 @@ views -> features -> components / hooks -> service / bridge -> backend or electr
 优先关注：
 
 - 是否执行了 `npm run lint`
+- 是否执行了 `npm test`
 - 是否执行了 `npm run build`
 - 是否按 `docs/frontend-validation-matrix.md` 覆盖本次改动对应的主路径和边界路径
 - 是否同步更新了真正受影响的文档
@@ -110,10 +111,11 @@ views -> features -> components / hooks -> service / bridge -> backend or electr
 前端 review 的最低门禁：
 
 1. `npm run lint`
-2. `npm run build`
-3. 对本次改动涉及的关键交互做一次人工验证
-4. 涉及工作区、文件树、文件预览、上传、embedded browser、资源捕捉、主题或浮层时，至少验证一条边界路径
-5. 更新真正受影响的文档或明确说明为什么不用更新
+2. `npm test`
+3. `npm run build`
+4. 对本次改动涉及的关键交互做一次人工验证
+5. 涉及工作区、文件树、文件预览、上传、embedded browser、资源捕捉、主题或浮层时，至少验证一条边界路径
+6. 更新真正受影响的文档或明确说明为什么不用更新
 
 如果没有执行这些验证，不代表不能 review；但必须把未验证风险明确写出来。
 

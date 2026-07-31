@@ -3,7 +3,7 @@
 更新时间：2026-07-31
 适用范围：`src/components/business/app-main/`、`src/contexts/FileViewerContext.tsx`、`src/features/file-viewer/`、`src/features/archive-viewer/`、`src/features/workspace-resource-release/` 中与 viewer tab 保活、阅读现场、编辑草稿、缓存恢复和资源释放相关的代码。
 
-状态：目标架构已确定，公共运行时尚未实现。本文同时记录当前审计事实、目标契约和分阶段迁移门槛；迁移完成前，不能把目标行为描述成当前已经具备的能力。
+状态：目标架构已确定，阶段 0 和阶段 1 公共内核已完成，具体 viewer 尚未迁移到公共 registry。本文同时记录当前审计事实、目标契约和分阶段迁移门槛；单个 viewer 完成 adapter 接入前，不能把目标行为描述成当前已经具备的能力。
 
 ## 1. 目标
 
@@ -36,7 +36,7 @@ Viewer Session 治理需要同时解决以下问题：
 
 ### 2.2 工作区缓存只保存 tab 事实
 
-`FileViewerContext` 按 `library:${libraryId}` 保存 tabs、activeTabId 和当前 active tab 投影。
+`FileViewerContext` 按 `library:${libraryId}` 保存 tabs、activeTabId 和当前 active tab 投影。每个新 tab 同时携带 provider 给出的 `libraryId` 和显式可空的 `contentRevision`，但不使用节点 `updatedAt` 冒充内容版本；旧缓存 tab 恢复时会补齐当前 provider 的 `libraryId`。
 
 `file-viewer-cache.ts` 是最多 12 个资料库的内存 LRU。它不保存统一的 viewer payload，也没有在 LRU 淘汰资料库 tab 元数据时同步释放该资料库的 viewer snapshot 或媒体资源。
 
@@ -114,7 +114,20 @@ Comic Archive 和 ASMR Archive 会把阅读位置写入 `viewMeta`，但当前�
 - viewer 文档地图
 - 验证矩阵
 
-类型系统不会要求新增 viewer 声明 session policy，因此很容易出现“能打开，但不恢复、不能释放”的半接入状态。
+阶段 1 已增加 `viewerSessionPolicies` 并用 `satisfies Record<FileViewerFileType, ...>` 建立编译期穷举；新增 `fileType` 若未声明 policy 会编译失败。具体 adapter、codec 和恢复验证仍必须在 viewer 迁移时完成，不能只以 policy 存在视为已接入。
+
+### 2.6 公共内核当前状态
+
+`src/features/file-viewer/session/` 已提供第一版公共内核：
+
+- resource key 由稳定账号 scope、显式 `libraryId`、`node:<id>` 或经过约束的 opaque stable id、`viewerKind` 组成；签名 URL、`blob:` URL 和本地路径不能成为 resource identity。
+- live key 使用 auth runtime session、`libraryId`、tab id 和 mount generation；旧 generation 的 cleanup 不会移除新 adapter。
+- Warm registry 只接受 plain JSON payload，写入和读取都会脱离调用方对象引用；同时按条目数和估算字节预算执行 LRU。
+- schema 或 content revision 不匹配时跳过并删除旧 snapshot；显式 replace 事务会先 capture 旧实例，再注册新资源。
+- registry runtime 在 application/auth session 级注册；资料库释放按 `libraryId` 清理，退出登录或 401 清理整个 session。
+- 迁移期 workspace release 同时清公共 registry 和 legacy cache；当前具体 viewer 仍只写 legacy cache，没有双写。
+
+账号已有稳定 `user.id`，可以构造 `user:<id>` scope。节点详情目前只有 `updatedAt`，没有经确认可靠的 ETag、对象版本、storage fingerprint 或内容 hash，因此 `contentRevision` 当前保持 `null`；Text 的内容 hash 降级和后端稳定 revision 仍属于阶段 2 前置工作。
 
 ## 3. 状态所有权
 
@@ -126,6 +139,7 @@ Comic Archive 和 ASMR Archive 会把阅读位置写入 `viewMeta`，但当前�
 - 文件稳定身份与展示信息
 - 打开来源和返回目标
 - viewer 输入上下文，例如字幕候选和播放列表摘要
+- session identity 输入，例如 `libraryId` 和可空 content revision
 - reload generation
 
 它不持有各 viewer 的滚动位置、光标、缩放、播放器内部状态或草稿正文。
@@ -144,7 +158,7 @@ Comic Archive 和 ASMR Archive 会把阅读位置写入 `viewMeta`，但当前�
 
 ### 3.3 ViewerSessionRegistry
 
-新增 registry 只负责恢复介质和生命周期协调：
+公共 registry 只负责恢复介质和生命周期协调：
 
 - 用统一身份读取、写入、失效和删除 snapshot。
 - 管理 Warm cache 预算和 LRU。
@@ -325,7 +339,7 @@ const viewerSessionPolicies = {
 } satisfies Record<FileViewerFileType, ViewerSessionPolicy>;
 ```
 
-即使某个 viewer 不需要恢复，也必须声明 `warm: 'none'`，不能保持未定义。`defaultHotCost` 只是没有运行时数据时的基线，不能把同类型所有实例视为固定成本。
+即使某个 viewer 不需要恢复，也必须声明 `warm: 'none'`，不能保持未定义。`defaultHotCost` 只是没有运行时数据时的基线，不能把同类型所有实例视为固定成本。当前 policy 表声明迁移目标和接入约束，不代表对应 viewer 已经改为读写公共 registry；实际迁移状态仍以本文能力矩阵和 viewer 文档为准。
 
 ### 6.2 Live adapter
 
@@ -399,7 +413,7 @@ CodeMirror、pdf.js、播放器、观察器和昂贵 extension 的配置必须�
 
 Text Viewer 的 `basicSetup` 是第一项需要修正的已知案例。
 
-## 7. 目标代码边界
+## 7. 代码边界
 
 公共 session 基础能力建议收敛在：
 
@@ -409,6 +423,11 @@ src/features/file-viewer/session/
   viewer-session-identity.ts
   viewer-session-registry.ts
   viewer-session-policies.ts
+  viewer-session-runtime.ts
+  index.ts
+  *.test.ts
+
+阶段 2 及以后按需新增：
   viewer-session-storage.ts
   useViewerSession.ts
   scroll-anchor.ts
@@ -419,7 +438,7 @@ src/features/file-viewer/session/
 - `viewer-session-registry.ts` 不 import React viewer 组件。
 - registry runtime 由 application/auth session 级 service 持有；React Provider 如需提供访问入口，只投影同一个 service，不能在 `library detail` mount 时重新创建 store。
 - viewer payload 类型和 codec 留在各 viewer 目录，避免公共层知道所有业务字段。
-- `workspace-resource-release` 按 library/session 调 registry 清理，不再静态 import 每一个 viewer cache。
+- `workspace-resource-release` 当前按 library/session 清 registry，并在迁移期继续清 legacy viewer cache；全部 viewer 迁移后再删除逐类型静态 import。
 - `FileDispatcher` 继续只负责渲染分发；session policy 用 `Record<FileViewerFileType, ...>` 独立做穷举门禁。
 - 媒体 DOM 和播放 owner 继续留在 `globalAudioPlayer`、`global-video-elements` 和 `floatingVideoService`。
 - 迁移期间允许短期 adapter 读取旧 cache，但单个 viewer 完成迁移后必须删除旧双写路径。
@@ -437,7 +456,9 @@ src/features/file-viewer/session/
 
 ### 阶段 1：建立公共内核
 
-- 先确认可靠 content revision 的后端字段或 Text 内容 hash 降级，并把 `libraryId`/revision 沿打开链路传到 session identity。
+当前状态：代码已完成，尚未迁移具体 viewer。`npm test` 覆盖 identity、policy、schema/revision 失效、条目/字节预算 LRU、replace、generation cleanup、单库隔离和 session 释放。
+
+- 已确认节点详情仅有 `updatedAt`，不能作为可靠 content revision；`FileViewerTab` 已携带 `libraryId` 和显式可空 revision，Text 内容 hash 降级留到阶段 2。
 - 实现 session identity、envelope、registry、policy 穷举和 library/session 清理。
 - 先只支持 Warm memory，不立即加入 IndexedDB 和 Hot 淘汰。
 - 给 registry 增加单元测试：三类 key、版本、LRU、预算、replace 事务、失效、单库释放、session 释放。
@@ -534,7 +555,7 @@ Text 额外验证：
 
 ## 11. 自动化与诊断
 
-当前项目没有前端测试脚本。Viewer Session 公共内核落地时，至少补充轻量单元测试能力，优先覆盖纯 TypeScript registry 和 codec；不能只依赖手工切 tab。
+项目已提供 `npm test`，当前使用 Vitest 覆盖 Viewer Session 纯 TypeScript identity、policy 和 registry。后续每个 viewer 迁移时必须继续补 codec/adapter 单元测试与对应手工恢复验证，不能只依赖现有公共内核测试。
 
 Registry 应提供开发环境诊断事件：
 

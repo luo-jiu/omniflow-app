@@ -155,12 +155,28 @@ function normalizeAudioPlaylist(
   };
 }
 
-function normalizeStoreState(raw: FileViewerStoreState | null | undefined): FileViewerStoreState {
+function normalizePositiveId(value: number | null | undefined): number | null {
+  const normalized = Number(value);
+  return Number.isSafeInteger(normalized) && normalized > 0 ? normalized : null;
+}
+
+function normalizeContentRevision(value: string | null | undefined): string | null {
+  const normalized = String(value || '').trim();
+  return normalized || null;
+}
+
+function normalizeStoreState(
+  raw: FileViewerStoreState | null | undefined,
+  libraryId?: number | null,
+): FileViewerStoreState {
   if (!raw) {
     return defaultFileViewerStoreState;
   }
+  const providerLibraryId = normalizePositiveId(libraryId);
   const tabs = raw.tabs.map(tab => ({
     ...tab,
+    libraryId: providerLibraryId ?? normalizePositiveId(tab.libraryId),
+    contentRevision: normalizeContentRevision(tab.contentRevision),
     returnTarget: normalizeFileViewerReturnTarget(tab.returnTarget),
     videoAutoPlay: false,
     audioAutoPlay: false,
@@ -261,7 +277,7 @@ export const FileViewerProvider: React.FC<{
     if (!cacheKey) {
       return defaultFileViewerStoreState;
     }
-    return normalizeStoreState(getFileViewerStateCache<FileViewerStoreState>(cacheKey));
+    return normalizeStoreState(getFileViewerStateCache<FileViewerStoreState>(cacheKey), libraryId);
   });
   const activeCacheKeyRef = React.useRef<string | undefined>(cacheKey);
   const skipPersistRef = React.useRef(false);
@@ -340,8 +356,12 @@ export const FileViewerProvider: React.FC<{
       const audioSubtitleSources = normalizeVideoSubtitleSources(options?.audioSubtitleSources);
       const audioPlaylist = normalizeAudioPlaylist(options?.audioPlaylist);
       const returnTarget = normalizeFileViewerReturnTarget(options?.returnTarget);
+      const hasContentRevision = Boolean(
+        options && Object.prototype.hasOwnProperty.call(options, 'contentRevision'),
+      );
       const nextTab: FileViewerTab = {
         id: tabId,
+        libraryId: normalizePositiveId(libraryId),
         nodeId: nodeId ?? null,
         fileUrl: url,
         fileName,
@@ -357,6 +377,9 @@ export const FileViewerProvider: React.FC<{
         audioCoverUrl: options?.audioCoverUrl ?? null,
         loading: false,
         reloadToken: baseTab?.reloadToken ?? 0,
+        contentRevision: hasContentRevision
+          ? normalizeContentRevision(options?.contentRevision)
+          : normalizeContentRevision(existingTab?.contentRevision),
       };
       const existingIndex = prev.tabs.findIndex(tab => tab.id === tabId);
       const nextTabs = [...prev.tabs];
@@ -492,8 +515,8 @@ export const FileViewerProvider: React.FC<{
       setViewerState(defaultFileViewerStoreState);
       return;
     }
-    setViewerState(normalizeStoreState(getFileViewerStateCache<FileViewerStoreState>(cacheKey)));
-  }, [cacheKey]);
+    setViewerState(normalizeStoreState(getFileViewerStateCache<FileViewerStoreState>(cacheKey), libraryId));
+  }, [cacheKey, libraryId]);
 
   React.useEffect(() => {
     if (!cacheKey) return;

@@ -149,4 +149,4 @@ CodeMirror 相关依赖必须显式写在 `package.json`，不能依赖本地 `n
 - 在长行和多行文本中分别触发横向、纵向滚动条，确认滚动条轨道和右下角交汇区透明，滑块在亮色和暗色主题下可辨认。
 - 亮色和暗色主题下 gutter、正文、选区和底部工具栏可读。
 
-常规代码变更仍按 `docs/frontend-validation-matrix.md` 执行 `npm run lint` 和 `npm run build`。
+常规代码变更仍按 `docs/frontend-validation-matrix.md` 执行 `npm run lint`、`npm test` 和 `npm run build`。

@@ -60,6 +60,7 @@ export interface FileViewerAudioPlaylist {
 }
 
 export interface FileViewerOpenOptions {
+  contentRevision?: string | null;
   tabTypeLabel?: string | null;
   returnTarget?: FileViewerReturnTarget | null;
   replaceTabId?: string | null;
@@ -90,6 +91,7 @@ export interface FileViewerState {
 
 export interface FileViewerTab {
   id: string;
+  libraryId: number | null;
   nodeId: number | null;
   fileUrl: string;
   fileName: string | null;
@@ -105,6 +107,7 @@ export interface FileViewerTab {
   audioCoverUrl?: string | null;
   loading: boolean;
   reloadToken?: number;
+  contentRevision: string | null;
 }
 
 export interface FileViewerContextType {

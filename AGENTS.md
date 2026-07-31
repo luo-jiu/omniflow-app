@@ -80,6 +80,7 @@ views -> features -> components / hooks -> service / bridge -> backend or electr
 
 ```bash
 npm run lint
+npm test
 npm run build
 ```
 
