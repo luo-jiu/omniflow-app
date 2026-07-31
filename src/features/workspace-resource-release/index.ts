@@ -24,7 +24,7 @@ import {
   clearAllViewerSnapshots,
   clearViewerSnapshotsForTabs,
 } from '@/features/file-viewer/services/viewer-snapshot-release';
-import { viewerSessionRegistry } from '@/features/file-viewer/session';
+import { viewerSessionRuntime } from '@/features/file-viewer/session';
 import {
   clearAllToolWorkspaceStates,
   clearToolWorkspaceState,
@@ -107,7 +107,7 @@ export async function disposeLibraryWorkspace(libraryId: number): Promise<Dispos
 
     globalAudioPlayer.releaseForLibrary(normalizedLibraryId);
     floatingVideoService.releaseForLibrary(normalizedLibraryId);
-    viewerSessionRegistry.disposeLibrary(normalizedLibraryId);
+    viewerSessionRuntime.disposeLibrary(normalizedLibraryId);
     clearViewerSnapshotsForTabs(fileViewerState?.tabs);
     clearToolWorkspaceState(normalizedLibraryId);
     clearPendingActivationForLibrary(normalizedLibraryId);
@@ -130,7 +130,7 @@ export async function disposeSessionWorkspaces() {
     }
     globalAudioPlayer.clear();
     floatingVideoService.dismiss();
-    viewerSessionRegistry.disposeSession();
+    viewerSessionRuntime.dispose();
     clearAllViewerSnapshots();
     clearAllToolWorkspaceStates();
     clearPendingActivation();

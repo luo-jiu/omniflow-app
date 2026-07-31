@@ -4,6 +4,8 @@ import { useFileViewer } from "@/hooks/useFileViewer";
 import WelcomeView from "@/features/file-viewer/components/welcome-view";
 import FileDispatcher from "@/features/file-viewer/components/file-dispatcher";
 import FileTabsBar from "./FileTabsBar";
+import { useAuth } from '@/hooks/useAuth';
+import { createUserViewerAccountScope } from '@/features/file-viewer/session';
 
 interface IProps {
   children?: ReactNode;
@@ -17,6 +19,11 @@ interface IProps {
  */
 const AppMain: FC<IProps> = ({ hideTabsBar = false, workspaceActive = true }) => {
   const { fileState, tabs, activeTabId, activateTab, closeTab, reorderTabs } = useFileViewer();
+  const { user } = useAuth();
+  const accountScope = React.useMemo(
+    () => createUserViewerAccountScope(Number(user?.id)),
+    [user?.id],
+  );
   const [keepAliveTabIds, setKeepAliveTabIds] = React.useState<string[]>(() => (
     activeTabId ? [activeTabId] : []
   ));
@@ -100,6 +107,8 @@ const AppMain: FC<IProps> = ({ hideTabsBar = false, workspaceActive = true }) =>
                 <FileDispatcher
                   key={`${tab.id}:${tab.reloadToken ?? 0}`}
                   nodeId={tab.nodeId}
+                  accountScope={accountScope}
+                  libraryId={tab.libraryId}
                   fileUrl={tab.fileUrl}
                   fileName={tab.fileName}
                   fileType={tab.fileType}
@@ -114,6 +123,7 @@ const AppMain: FC<IProps> = ({ hideTabsBar = false, workspaceActive = true }) =>
                   loading={tab.loading}
                   active={isActive}
                   reloadToken={tab.reloadToken ?? 0}
+                  contentRevision={tab.contentRevision}
                   tabId={tab.id}
                 />
               </div>

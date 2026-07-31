@@ -5,18 +5,23 @@ import { getDocument, GlobalWorkerOptions, type PDFDocumentProxy } from 'pdfjs-d
 import { PdfViewerWrapper } from './style';
 import { runtimeLogger } from '@/utils/runtimeLogger';
 import {
-  pdfViewerSnapshotCache,
-  resolvePdfViewerCacheKey,
-  setPdfViewerSnapshot,
+  PDF_VIEWER_SESSION_ESTIMATED_BYTES,
+  PDF_VIEWER_SESSION_SCHEMA_VERSION,
+  parsePdfViewerSnapshot,
   type PdfViewerSnapshot,
-} from './pdf-viewer-cache';
+} from './pdf-viewer-session';
+import { useViewerSession, type ViewerSessionAdapter } from '@/features/file-viewer/session';
 
 interface PdfViewerProps {
+  accountScope: string | null;
+  libraryId: number | null;
   nodeId: number | null;
   url: string;
   fileName?: string | null;
   active?: boolean;
+  contentRevision: string | null;
   reloadToken?: number;
+  tabId: string;
 }
 
 interface PdfPageCanvasProps {
@@ -281,20 +286,21 @@ const PdfPageCanvas: React.FC<PdfPageCanvasProps> = ({
   );
 };
 
-const PdfViewer: React.FC<PdfViewerProps> = ({ nodeId, url, fileName, active = true, reloadToken = 0 }) => {
-  const viewerCacheKey = useMemo(
-    () => resolvePdfViewerCacheKey(url, nodeId, reloadToken),
-    [url, nodeId, reloadToken],
-  );
-  const initialSnapshot = useMemo(
-    () => pdfViewerSnapshotCache.get(viewerCacheKey) ?? null,
-    [viewerCacheKey],
-  );
-
+const PdfViewer: React.FC<PdfViewerProps> = ({
+  accountScope,
+  active = true,
+  contentRevision,
+  fileName,
+  libraryId,
+  nodeId,
+  reloadToken = 0,
+  tabId,
+  url,
+}) => {
   const [pdfDoc, setPdfDoc] = useState<PDFDocumentProxy | null>(null);
   const [numPages, setNumPages] = useState(0);
-  const [currentPage, setCurrentPage] = useState(initialSnapshot?.currentPage ?? 1);
-  const [zoom, setZoom] = useState(normalizeZoom(initialSnapshot?.zoom ?? 1));
+  const [currentPage, setCurrentPage] = useState(1);
+  const [zoom, setZoom] = useState(1);
   const [stageMeasuredWidth, setStageMeasuredWidth] = useState(0);
   const [stageRenderWidth, setStageRenderWidth] = useState(0);
   const [isDocumentLoading, setIsDocumentLoading] = useState(false);
@@ -317,41 +323,93 @@ const PdfViewer: React.FC<PdfViewerProps> = ({ nodeId, url, fileName, active = t
   const pendingJumpPageRef = useRef<number | null>(null);
   const currentPageRef = useRef(currentPage);
   const zoomRef = useRef(zoom);
-  const scrollTopRef = useRef(initialSnapshot?.scrollTop ?? 0);
-  const anchorPageRef = useRef(initialSnapshot?.anchorPage ?? initialSnapshot?.currentPage ?? 1);
-  const anchorOffsetRatioRef = useRef(normalizeRatio(initialSnapshot?.anchorOffsetRatio ?? 0));
+  const scrollTopRef = useRef(0);
+  const scrollRatioRef = useRef(0);
+  const anchorPageRef = useRef(1);
+  const anchorOffsetRatioRef = useRef(0);
+  const activeRef = useRef(active);
+  const previousActiveRef = useRef(active);
+  const numPagesRef = useRef(0);
+  const latestSnapshotRef = useRef<PdfViewerSnapshot | null>(null);
+  const pendingStateHydrationRef = useRef(false);
   const hasScrollMutationRef = useRef(false);
+  activeRef.current = active;
 
-  useEffect(() => {
-    currentPageRef.current = currentPage;
-  }, [currentPage]);
+  const capturePdfSnapshot = useCallback((): PdfViewerSnapshot => {
+    const snapshot = {
+      currentPage: Math.max(Math.round(currentPageRef.current), 1),
+      zoom: normalizeZoom(zoomRef.current),
+      scrollTop: Math.max(scrollTopRef.current, 0),
+      scrollRatio: normalizeRatio(scrollRatioRef.current),
+      anchorPage: Math.max(Math.round(anchorPageRef.current || currentPageRef.current), 1),
+      anchorOffsetRatio: normalizeRatio(anchorOffsetRatioRef.current),
+    };
+    latestSnapshotRef.current = snapshot;
+    return snapshot;
+  }, []);
 
-  useEffect(() => {
-    zoomRef.current = zoom;
-  }, [zoom]);
+  const restorePdfSnapshot = useCallback((payload: PdfViewerSnapshot) => {
+    const snapshot = parsePdfViewerSnapshot(payload);
+    if (!snapshot) return;
+    latestSnapshotRef.current = snapshot;
+    pendingStateHydrationRef.current = true;
+    const total = numPagesRef.current;
+    const restoredPage = total > 0 ? clamp(snapshot.currentPage, 1, total) : snapshot.currentPage;
+    currentPageRef.current = restoredPage;
+    zoomRef.current = normalizeZoom(snapshot.zoom);
+    scrollTopRef.current = snapshot.scrollTop;
+    scrollRatioRef.current = snapshot.scrollRatio;
+    anchorPageRef.current = snapshot.anchorPage;
+    anchorOffsetRatioRef.current = snapshot.anchorOffsetRatio;
+    setCurrentPage(restoredPage);
+    setZoom(normalizeZoom(snapshot.zoom));
+
+    if (total > 0) {
+      pendingRestoreRef.current = {
+        desiredScrollTop: snapshot.scrollTop,
+        desiredScrollRatio: snapshot.scrollRatio,
+        anchorPage: clamp(snapshot.anchorPage, 1, total),
+        anchorOffsetRatio: snapshot.anchorOffsetRatio,
+        attempts: 0,
+      };
+      setRestoreTick((prev) => prev + 1);
+    }
+  }, []);
+
+  const sessionAdapter = useMemo<ViewerSessionAdapter<PdfViewerSnapshot>>(() => ({
+    capture: capturePdfSnapshot,
+    restore: restorePdfSnapshot,
+    suspend: () => undefined,
+    resume: () => undefined,
+    estimateCost: () => PDF_VIEWER_SESSION_ESTIMATED_BYTES,
+    getPinReasons: () => (activeRef.current ? ['active'] : []),
+  }), [capturePdfSnapshot, restorePdfSnapshot]);
+
+  const { capture: captureSessionSnapshot } = useViewerSession({
+    accountScope,
+    active,
+    adapter: sessionAdapter,
+    contentRevision,
+    libraryId,
+    nodeId,
+    reloadToken,
+    schemaVersion: PDF_VIEWER_SESSION_SCHEMA_VERSION,
+    tabId,
+    viewerKind: 'pdf',
+  });
 
   const persistViewerSnapshot = useCallback((patch?: Partial<PdfViewerSnapshot>) => {
-    const previous = pdfViewerSnapshotCache.get(viewerCacheKey);
-    setPdfViewerSnapshot(viewerCacheKey, {
-      currentPage: patch?.currentPage ?? previous?.currentPage ?? currentPageRef.current,
-      zoom: patch?.zoom ?? previous?.zoom ?? zoomRef.current,
-      scrollTop: patch?.scrollTop ?? previous?.scrollTop ?? scrollTopRef.current,
-      scrollRatio: normalizeRatio(patch?.scrollRatio ?? previous?.scrollRatio ?? 0),
-      anchorPage: patch?.anchorPage ?? previous?.anchorPage ?? anchorPageRef.current ?? currentPageRef.current,
-      anchorOffsetRatio: normalizeRatio(
-        patch?.anchorOffsetRatio ?? previous?.anchorOffsetRatio ?? anchorOffsetRatioRef.current,
-      ),
-    });
-  }, [viewerCacheKey]);
-
-  useEffect(() => {
-    const snapshot = pdfViewerSnapshotCache.get(viewerCacheKey);
-    setCurrentPage(snapshot?.currentPage ?? 1);
-    setZoom(normalizeZoom(snapshot?.zoom ?? 1));
-    scrollTopRef.current = snapshot?.scrollTop ?? 0;
-    anchorPageRef.current = snapshot?.anchorPage ?? snapshot?.currentPage ?? 1;
-    anchorOffsetRatioRef.current = normalizeRatio(snapshot?.anchorOffsetRatio ?? 0);
-  }, [viewerCacheKey]);
+    if (patch?.currentPage !== undefined) currentPageRef.current = patch.currentPage;
+    if (patch?.zoom !== undefined) zoomRef.current = patch.zoom;
+    if (patch?.scrollTop !== undefined) scrollTopRef.current = patch.scrollTop;
+    if (patch?.scrollRatio !== undefined) scrollRatioRef.current = normalizeRatio(patch.scrollRatio);
+    if (patch?.anchorPage !== undefined) anchorPageRef.current = patch.anchorPage;
+    if (patch?.anchorOffsetRatio !== undefined) {
+      anchorOffsetRatioRef.current = normalizeRatio(patch.anchorOffsetRatio);
+    }
+    capturePdfSnapshot();
+    captureSessionSnapshot();
+  }, [capturePdfSnapshot, captureSessionSnapshot]);
 
   useEffect(() => {
     const stage = stageRef.current;
@@ -390,12 +448,13 @@ const PdfViewer: React.FC<PdfViewerProps> = ({ nodeId, url, fileName, active = t
   useEffect(() => {
     let active = true;
     const loadingTask = getDocument(url);
-    const cachedSnapshot = pdfViewerSnapshotCache.get(viewerCacheKey);
+    const cachedSnapshot = latestSnapshotRef.current;
 
     setErrorMessage(null);
     setIsDocumentLoading(true);
     setPdfDoc(null);
     setNumPages(0);
+    numPagesRef.current = 0;
     pageShellRefs.current.clear();
     pageHeightByPageRef.current.clear();
     averagePageHeightRef.current = DEFAULT_ESTIMATED_PAGE_HEIGHT;
@@ -413,6 +472,7 @@ const PdfViewer: React.FC<PdfViewerProps> = ({ nodeId, url, fileName, active = t
 
         setPdfDoc(doc);
         setNumPages(total);
+        numPagesRef.current = total;
         setCurrentPage(restoredPage);
         setIsDocumentLoading(false);
         setErrorMessage(null);
@@ -438,6 +498,7 @@ const PdfViewer: React.FC<PdfViewerProps> = ({ nodeId, url, fileName, active = t
         if (!active) return;
         setPdfDoc(null);
         setNumPages(0);
+        numPagesRef.current = 0;
         setErrorMessage('PDF 加载失败');
         setIsDocumentLoading(false);
       });
@@ -446,7 +507,7 @@ const PdfViewer: React.FC<PdfViewerProps> = ({ nodeId, url, fileName, active = t
       active = false;
       loadingTask.destroy();
     };
-  }, [url, viewerCacheKey]);
+  }, [url]);
 
   useEffect(() => {
     return () => {
@@ -457,12 +518,22 @@ const PdfViewer: React.FC<PdfViewerProps> = ({ nodeId, url, fileName, active = t
   }, [pdfDoc]);
 
   useEffect(() => {
+    if (!pdfDoc) return;
+    const restoredSnapshot = latestSnapshotRef.current;
+    if (pendingStateHydrationRef.current && restoredSnapshot) {
+      const expectedPage = clamp(restoredSnapshot.currentPage, 1, Math.max(numPages, 1));
+      const expectedZoom = normalizeZoom(restoredSnapshot.zoom);
+      if (currentPage !== expectedPage || normalizeZoom(zoom) !== expectedZoom) {
+        return;
+      }
+      pendingStateHydrationRef.current = false;
+    }
     persistViewerSnapshot({
       currentPage,
       zoom,
       anchorPage: currentPage,
     });
-  }, [currentPage, zoom, persistViewerSnapshot]);
+  }, [currentPage, numPages, pdfDoc, persistViewerSnapshot, zoom]);
 
   const renderStartPage = useMemo(
     () => (numPages > 0 ? clamp(currentPage - WINDOW_PAGES_BEFORE, 1, numPages) : 1),
@@ -572,7 +643,7 @@ const PdfViewer: React.FC<PdfViewerProps> = ({ nodeId, url, fileName, active = t
       const finalScrollRatio = maxScrollable > 0
         ? normalizeRatio(finalScrollTop / maxScrollable)
         : 0;
-      const previous = pdfViewerSnapshotCache.get(viewerCacheKey);
+      const previous = latestSnapshotRef.current;
       const shouldSkipZeroOverwrite = (
         !hasScrollMutationRef.current
         && finalScrollTop <= 1
@@ -597,7 +668,7 @@ const PdfViewer: React.FC<PdfViewerProps> = ({ nodeId, url, fileName, active = t
         anchorOffsetRatio,
       });
     };
-  }, [numPages, persistViewerSnapshot, viewerCacheKey]);
+  }, [numPages, persistViewerSnapshot]);
 
   const jumpToPage = useCallback((value: number) => {
     if (numPages <= 0) return;
@@ -694,8 +765,10 @@ const PdfViewer: React.FC<PdfViewerProps> = ({ nodeId, url, fileName, active = t
   }, [layoutRevision, numPages, persistViewerSnapshot, restoreTick, stageRenderWidth, zoom]);
 
   useEffect(() => {
-    if (!active) return;
-    const snapshot = pdfViewerSnapshotCache.get(viewerCacheKey);
+    const wasActive = previousActiveRef.current;
+    previousActiveRef.current = active;
+    if (!active || wasActive) return;
+    const snapshot = latestSnapshotRef.current;
     if (!snapshot || numPages <= 0) {
       return;
     }
@@ -707,7 +780,7 @@ const PdfViewer: React.FC<PdfViewerProps> = ({ nodeId, url, fileName, active = t
       attempts: 0,
     };
     setRestoreTick((prev) => prev + 1);
-  }, [active, numPages, viewerCacheKey]);
+  }, [active, numPages]);
 
   const canGoPrevious = currentPage > 1;
   const canGoNext = currentPage < numPages;

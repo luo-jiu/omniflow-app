@@ -28,10 +28,6 @@ import {
   clearGallerySnapshotForFile,
 } from '@/features/file-viewer/components/gallery-viewer/gallery-viewer-cache';
 import {
-  clearAllPdfViewerSnapshots,
-  clearPdfViewerSnapshotForFile,
-} from '@/features/file-viewer/components/pdf-viewer/pdf-viewer-cache';
-import {
   clearAllVideoProgressSnapshots,
   clearVideoProgressSnapshotForFile,
 } from '@/features/file-viewer/components/video-viewer/video-progress-cache';
@@ -39,9 +35,6 @@ import {
 export function clearViewerSnapshotsForTabs(tabs: FileViewerTab[] | null | undefined) {
   (tabs ?? []).forEach((tab) => {
     switch (tab.fileType) {
-      case 'pdf':
-        clearPdfViewerSnapshotForFile(tab.fileUrl, tab.nodeId);
-        break;
       case 'video':
         clearVideoProgressSnapshotForFile(tab.fileUrl, tab.nodeId);
         break;
@@ -84,7 +77,6 @@ export function clearViewerSnapshotOnTabClose(tab: FileViewerTab | null | undefi
 }
 
 export function clearAllViewerSnapshots() {
-  clearAllPdfViewerSnapshots();
   clearAllVideoProgressSnapshots();
   clearAllComicReaderSnapshots();
   clearAllGallerySnapshots();

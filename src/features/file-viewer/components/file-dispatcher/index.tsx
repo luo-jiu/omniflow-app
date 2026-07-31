@@ -23,6 +23,8 @@ import type {
 } from '@/contexts/file-viewer.context';
 
 interface FileDispatcherProps {
+  accountScope: string | null;
+  libraryId: number | null;
   nodeId: number | null;
   fileUrl: string | null;
   fileName: string | null;
@@ -38,6 +40,7 @@ interface FileDispatcherProps {
   loading: boolean;
   active?: boolean;
   reloadToken?: number;
+  contentRevision: string | null;
   tabId: string;
 }
 
@@ -89,6 +92,8 @@ const DispatcherWrapper = styled.div`
  * 根据文件类型渲染对应的查看器 Feature
  */
 const FileDispatcher: React.FC<FileDispatcherProps> = ({
+  accountScope,
+  libraryId,
   nodeId,
   fileUrl,
   fileName,
@@ -104,6 +109,7 @@ const FileDispatcher: React.FC<FileDispatcherProps> = ({
   loading,
   active = true,
   reloadToken = 0,
+  contentRevision,
   tabId,
 }) => {
   if (loading) {
@@ -154,7 +160,19 @@ const FileDispatcher: React.FC<FileDispatcherProps> = ({
       );
 
     case 'pdf':
-      return <PdfViewer nodeId={nodeId} url={fileUrl} fileName={fileName} active={active} reloadToken={reloadToken} />;
+      return (
+        <PdfViewer
+          accountScope={accountScope}
+          active={active}
+          contentRevision={contentRevision}
+          fileName={fileName}
+          libraryId={libraryId}
+          nodeId={nodeId}
+          reloadToken={reloadToken}
+          tabId={tabId}
+          url={fileUrl}
+        />
+      );
 
     case 'text':
       return <TextViewer nodeId={nodeId} url={fileUrl} fileName={fileName} active={active} reloadToken={reloadToken} />;

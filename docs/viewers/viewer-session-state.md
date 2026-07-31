@@ -3,7 +3,7 @@
 更新时间：2026-07-31
 适用范围：`src/components/business/app-main/`、`src/contexts/FileViewerContext.tsx`、`src/features/file-viewer/`、`src/features/archive-viewer/`、`src/features/workspace-resource-release/` 中与 viewer tab 保活、阅读现场、编辑草稿、缓存恢复和资源释放相关的代码。
 
-状态：目标架构已确定，阶段 0 和阶段 1 公共内核已完成，具体 viewer 尚未迁移到公共 registry。本文同时记录当前审计事实、目标契约和分阶段迁移门槛；单个 viewer 完成 adapter 接入前，不能把目标行为描述成当前已经具备的能力。
+状态：目标架构已确定，阶段 0、阶段 1 公共内核和阶段 2 的 PDF 样本迁移已完成，Text/DraftStore 样本尚未开始。本文同时记录当前审计事实、目标契约和分阶段迁移门槛；单个 viewer 完成 adapter 接入前，不能把目标行为描述成当前已经具备的能力。
 
 ## 1. 目标
 
@@ -42,7 +42,7 @@ Viewer Session 治理需要同时解决以下问题：
 
 ### 2.3 Viewer snapshot 当前各自维护
 
-当前 PDF、漫画、图集、ASMR、视频进度和多数归档 viewer 分别维护独立模块级 `Map`。常见实现重复包含：
+除已迁移的 PDF 外，当前漫画、图集、ASMR、视频进度和多数归档 viewer 仍分别维护独立模块级 `Map`。常见实现重复包含：
 
 - cache key 拼装
 - `Map` 读写
@@ -59,7 +59,7 @@ Viewer Session 治理需要同时解决以下问题：
 | Image | 有 | 无 | 无 | 缩放、平移、旋转在真卸载后丢失 |
 | Audio | 有；播放由全局音频服务持有 | 无独立 UI 快照 | 无 | 播放资源和 viewer UI 生命周期未统一分类 |
 | Video | 有；视频元素由全局服务保活 | 播放进度 | `viewMeta` 播放进度 | 字幕选择、倍速、工具台等 UI 现场不完整 |
-| PDF | 有 | 页码、缩放、滚动、比例、页锚点 | 无 | 当前最接近目标，但仍是独立 cache |
+| PDF | 有 | 公共 registry：页码、缩放、滚动、比例、页锚点 | 无 | adapter/codec 已接入；跨重启 Cold 恢复未启用 |
 | Text | 有 | 无 | 无 | 滚动、选区、字号、换行和草稿均无卸载恢复；`basicSetup` 已稳定，不再因普通 rerender 重配置 |
 | Comic | 有 | 页列表、渲染窗口、滚动、页锚点 | `viewMeta` 阅读进度 | 阅读模式、布局、缩放等偏好没有完整进入 session |
 | Gallery | 有 | 媒体列表、临时链接、滚动、详情图片现场 | 无 | 普通卸载已可恢复，关闭 tab 显式清理；快照仍含临时 URL |
@@ -87,7 +87,7 @@ Text Viewer 曾在 render 中创建新的 CodeMirror `basicSetup` 对象。activ
 #### 关闭、卸载和显式释放语义混杂
 
 - Gallery 已区分普通卸载与关闭：普通卸载保留快照，关闭 tab 通过显式入口清理。
-- PDF、Comic、ASMR 和多数归档 viewer 在关闭 tab 后仍可能保留快照。
+- PDF 按 policy 明确保留关闭前阅读位置；Comic、ASMR 和多数归档 viewer 的关闭语义仍依赖 legacy cache。
 - `viewer-snapshot-release.ts` 通过手工 `switch(fileType)` 清理已接入类型。
 - 如果资料库 tab 元数据已经被 12 项 LRU 淘汰，单库释放无法再通过 tabs 枚举该库历史 snapshot。
 
@@ -125,7 +125,8 @@ Comic Archive 和 ASMR Archive 会把阅读位置写入 `viewMeta`，但当前�
 - Warm registry 只接受 plain JSON payload，写入和读取都会脱离调用方对象引用；同时按条目数和估算字节预算执行 LRU。
 - schema 或 content revision 不匹配时跳过并删除旧 snapshot；显式 replace 事务会先 capture 旧实例，再注册新资源。
 - registry runtime 在 application/auth session 级注册；认证 bootstrap 会先启动 runtime 再提交用户状态，受保护路由在 bootstrap 完成前不挂载 viewer 子树；资料库释放按 `libraryId` 清理，退出登录或 401 清理整个 session。
-- 迁移期 workspace release 同时清公共 registry 和 legacy cache；当前具体 viewer 仍只写 legacy cache，没有双写。
+- 迁移期 workspace release 同时清公共 registry 和 legacy cache；PDF 已只写公共 registry，其他已带 snapshot 的 viewer 仍写 legacy cache，没有双写。
+- `useViewerSession` 统一处理 adapter 注册、mount generation、schema/revision restore、active flush、cleanup capture 和 reload generation 失效；具体 payload/codec 继续留在 viewer 目录。
 
 账号已有稳定 `user.id`，可以构造 `user:<id>` scope。节点详情目前只有 `updatedAt`，没有经确认可靠的 ETag、对象版本、storage fingerprint 或内容 hash，因此 `contentRevision` 当前保持 `null`；Text 的内容 hash 降级和后端稳定 revision 仍属于阶段 2 前置工作。
 
@@ -426,12 +427,12 @@ src/features/file-viewer/session/
   viewer-session-registry.ts
   viewer-session-policies.ts
   viewer-session-runtime.ts
+  useViewerSession.ts
   index.ts
   *.test.ts
 
 阶段 2 及以后按需新增：
   viewer-session-storage.ts
-  useViewerSession.ts
   scroll-anchor.ts
 ```
 
@@ -458,7 +459,7 @@ src/features/file-viewer/session/
 
 ### 阶段 1：建立公共内核
 
-当前状态：代码已完成，尚未迁移具体 viewer。`npm test` 覆盖 identity、policy、schema/revision 失效、条目/字节预算 LRU、replace、generation cleanup、单库隔离和 session 释放。
+当前状态：代码已完成。`npm test` 覆盖 identity、policy、schema/revision 失效、条目/字节预算 LRU、replace、generation cleanup、单库隔离和 session 释放。
 
 - 已确认节点详情仅有 `updatedAt`，不能作为可靠 content revision；`FileViewerTab` 已携带 `libraryId` 和显式可空 revision，Text 内容 hash 降级留到阶段 2。
 - 实现 session identity、envelope、registry、policy 穷举和 library/session 清理。
@@ -468,7 +469,9 @@ src/features/file-viewer/session/
 
 ### 阶段 2：双样本纵向验证
 
-- PDF：迁移现有成熟 anchor snapshot，验证公共 registry 不损失复杂恢复能力。
+当前状态：PDF 代码迁移和自动化测试已完成，Electron 中的长文档人工恢复验证仍需执行；Text/DraftStore 尚未开始。
+
+- PDF：已迁移现有成熟 anchor snapshot；独立 `pdf-viewer-cache.ts` 和 legacy release 分支已删除，reload generation 由公共 runtime 精确失效。
 - Text：先落地最小 IndexedDB DraftStore，再接入 CodeMirror view state、字号和换行，验证编辑器场景。
 - 迁移完成后删除 PDF/Text 旧 cache 或无快照实现，不能长期双写。
 

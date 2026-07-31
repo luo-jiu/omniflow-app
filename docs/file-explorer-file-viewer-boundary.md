@@ -197,9 +197,9 @@ tab id 的规则：
 
 显式释放工作区时，`workspace-resource-release` 是预览缓存清理入口：
 
-- 单库释放会读取目标 `library:${id}` 的文件预览 tab cache，先按 tab 清理 viewer 内部 snapshot，再清文件预览 tab cache。
-- session 释放会全量清理文件预览 tab cache 和 viewer 内部 snapshot。
-- PDF、漫画、图集、ASMR、视频进度、音频归档、视频归档等 viewer 的阅读 / 播放 / 浏览现场应放在各自轻量 cache sidecar 中，由 `src/features/file-viewer/services/viewer-snapshot-release.ts` 汇总释放，不要让 release service 静态 import React viewer 组件。
+- 单库释放先按 `libraryId` 清公共 Viewer Session Registry；legacy viewer 再读取目标 `library:${id}` 的文件预览 tab cache 做逐类型清理，最后清文件预览 tab cache。
+- session 释放会全量清理公共 registry、legacy viewer snapshot 和文件预览 tab cache。
+- PDF 已迁移到公共 registry，不再依赖 tab cache 枚举或 `viewer-snapshot-release.ts`；漫画、图集、ASMR、视频进度、音频归档、视频归档等未迁移 viewer 暂时继续使用各自轻量 cache sidecar，由 release service 汇总释放。
 - viewer snapshot sidecar 的写入入口必须在 `isDisposingAnyWorkspace()` 命中时跳过保存，避免组件卸载 cleanup 把已释放的现场写回。
 
 前端释放只清工作区现场。已经同步到后端 `viewMeta` 的阅读 / 播放进度不在这里删除；如果未来要支持“清远端阅读进度”，必须另设用户确认和后端接口。

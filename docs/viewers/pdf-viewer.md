@@ -1,6 +1,6 @@
 # PDF Viewer 说明
 
-更新时间：2026-04-16
+更新时间：2026-07-31
 适用范围：`src/features/file-viewer/components/pdf-viewer/` 下的 PDF 预览、按页渲染、滚动恢复和缩放阅读能力。
 
 ## 1. 概述
@@ -24,6 +24,8 @@
   - 主体实现，包含 worker 初始化、文档加载、分页渲染、状态恢复和底部控制栏
 - `style.ts`
   - PDF 预览区域、分页外观和底部工具栏样式
+- `pdf-viewer-session.ts`
+  - PDF snapshot schema、payload 类型和反序列化校验
 - `docs/viewers/pdf-viewer.md`
   - 当前说明
 
@@ -42,19 +44,18 @@
 
 所以后续如果你升级 bundler、调整静态资源路径或换 `pdfjs-dist` 版本，必须优先检查这里。
 
-### 3.2 局部快照缓存
+### 3.2 公共 Viewer Session
 
-`pdf-viewer` 当前有一层局部快照缓存，cache key 由：
+`pdf-viewer` 已迁移到公共 `ViewerSessionRegistry`，不再维护独立模块级 `Map`。resource key 由以下稳定事实组成：
 
-- `nodeId`
-  - 优先使用
-- `url`
-  - 兜底使用
-- `reloadToken`
+- 账号 scope
+- `libraryId`
+- `node:<nodeId>`
+- `viewerKind=pdf`
 
-共同组成。
+签名 URL 不进入 resource key。没有正整数 `nodeId` 或稳定账号/资料库身份时，PDF 仍可依赖当前 Hot 实例阅读，但不会写入公共 Warm snapshot。
 
-缓存内容包括：
+PDF adapter 使用 schema version 1，payload 包括：
 
 - `currentPage`
 - `zoom`
@@ -63,7 +64,7 @@
 - `anchorPage`
 - `anchorOffsetRatio`
 
-它的目标是让用户切 tab、切换工作区后，能尽量回到原阅读位置。
+滚动时按动画帧更新 snapshot，active 变为 false 和组件卸载时再次 capture。`reloadToken` 只作为当前 runtime 的失效 generation；变化时删除同资源旧 snapshot，不进入 resource key，也不会留下旧 token 孤儿项。普通关闭 tab 按 PDF policy 保留阅读位置，显式释放资料库或 session 时统一由公共 runtime 清理。
 
 ### 3.3 anchor 恢复优先于纯 scrollTop
 
@@ -148,9 +149,9 @@
 
 1. 用 `url` 调用 `getDocument`
 2. 加载成功后拿到 `PDFDocumentProxy`
-3. 结合快照恢复 `currentPage`
+3. 由 session adapter 校验并恢复 `currentPage` / `zoom`
 4. 初始化待恢复滚动信息
-5. 再根据当前页计算渲染窗口
+5. 文档和布局 ready 后再按 anchor 执行滚动定位并计算渲染窗口
 
 失败时当前会进入：
 
