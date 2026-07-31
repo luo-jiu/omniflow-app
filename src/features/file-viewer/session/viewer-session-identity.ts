@@ -1,13 +1,23 @@
 import type { FileViewerFileType } from '@/shared/file-viewer-types';
+import { viewerSessionPolicies } from './viewer-session-policies';
 import type {
   ViewerDraftKey,
   ViewerLiveInstanceKey,
   ViewerResourceKey,
 } from './viewer-session.types';
 
-const ACCOUNT_SCOPE_PATTERN = /^(?:user:\d+|device:[A-Za-z0-9][A-Za-z0-9._-]{0,127})$/;
+const USER_ACCOUNT_SCOPE_PATTERN = /^user:([1-9]\d*)$/;
+const DEVICE_ACCOUNT_SCOPE_PATTERN = /^device:[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const DEVICE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
-const STABLE_RESOURCE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
+const NODE_RESOURCE_IDENTITY_PATTERN = /^node:([1-9]\d*)$/;
+const STABLE_RESOURCE_ID_PATTERN = /^([a-z][a-z0-9-]{1,31}):[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
+const STABLE_RESOURCE_ID_NAMESPACES = new Set([
+  'external',
+  'object',
+  'sha256',
+  'storage',
+  'uuid',
+]);
 
 function normalizePositiveInteger(value: number): number | null {
   return Number.isSafeInteger(value) && value > 0 ? value : null;
@@ -36,8 +46,35 @@ export function createDeviceViewerAccountScope(deviceId: string): string | null 
   return `device:${normalizedDeviceId}`;
 }
 
-export function isViewerAccountScope(value: string): boolean {
-  return ACCOUNT_SCOPE_PATTERN.test(String(value || '').trim());
+export function isViewerAccountScope(value: unknown): value is string {
+  if (typeof value !== 'string' || value !== value.trim()) return false;
+  if (DEVICE_ACCOUNT_SCOPE_PATTERN.test(value)) return true;
+  const userMatch = USER_ACCOUNT_SCOPE_PATTERN.exec(value);
+  if (!userMatch) return false;
+  const userId = Number(userMatch[1]);
+  return normalizePositiveInteger(userId) != null && value === `user:${userId}`;
+}
+
+export function isViewerKind(value: unknown): value is FileViewerFileType {
+  return typeof value === 'string'
+    && Object.prototype.hasOwnProperty.call(viewerSessionPolicies, value);
+}
+
+function isStableResourceId(value: string): boolean {
+  if (value.length > 256) return false;
+  const match = STABLE_RESOURCE_ID_PATTERN.exec(value);
+  return Boolean(match && STABLE_RESOURCE_ID_NAMESPACES.has(match[1]));
+}
+
+function isResourceIdentity(value: unknown): value is string {
+  if (typeof value !== 'string' || value !== value.trim()) return false;
+  const nodeMatch = NODE_RESOURCE_IDENTITY_PATTERN.exec(value);
+  if (nodeMatch) {
+    const nodeId = Number(nodeMatch[1]);
+    return normalizePositiveInteger(nodeId) != null && value === `node:${nodeId}`;
+  }
+  if (!value.startsWith('stable:')) return false;
+  return isStableResourceId(value.slice('stable:'.length));
 }
 
 export function resolveViewerResourceIdentity(options: {
@@ -52,7 +89,7 @@ export function resolveViewerResourceIdentity(options: {
   }
 
   const stableResourceId = normalizeRequiredText(options.stableResourceId || '', 256);
-  if (!stableResourceId || !STABLE_RESOURCE_ID_PATTERN.test(stableResourceId)) {
+  if (!stableResourceId || !isStableResourceId(stableResourceId)) {
     return null;
   }
   return `stable:${stableResourceId}`;
@@ -68,7 +105,12 @@ export function createViewerResourceKey(options: {
   const accountScope = String(options.accountScope || '').trim();
   const libraryId = normalizePositiveInteger(options.libraryId);
   const resourceIdentity = resolveViewerResourceIdentity(options);
-  if (!isViewerAccountScope(accountScope) || libraryId == null || !resourceIdentity) {
+  if (
+    !isViewerAccountScope(accountScope)
+    || libraryId == null
+    || !resourceIdentity
+    || !isViewerKind(options.viewerKind)
+  ) {
     return null;
   }
   return {
@@ -121,22 +163,34 @@ export function createViewerRuntimeSessionId(): string {
 }
 
 export function isViewerResourceKey(
-  value: ViewerResourceKey | null | undefined,
+  value: unknown,
 ): value is ViewerResourceKey {
-  return value != null
-    && isViewerAccountScope(value.accountScope)
-    && normalizePositiveInteger(value.libraryId) != null
-    && (/^(?:node:\d+|stable:[A-Za-z0-9][A-Za-z0-9._:-]{0,255})$/).test(value.resourceIdentity);
+  if (value == null || typeof value !== 'object') return false;
+  const candidate = value as Partial<ViewerResourceKey>;
+  return isViewerAccountScope(candidate.accountScope)
+    && typeof candidate.libraryId === 'number'
+    && normalizePositiveInteger(candidate.libraryId) != null
+    && isResourceIdentity(candidate.resourceIdentity)
+    && isViewerKind(candidate.viewerKind);
 }
 
 export function isViewerLiveInstanceKey(
-  value: ViewerLiveInstanceKey | null | undefined,
+  value: unknown,
 ): value is ViewerLiveInstanceKey {
-  return value != null
-    && Boolean(normalizeRequiredText(value.runtimeSessionId, 256))
-    && normalizePositiveInteger(value.libraryId) != null
-    && Boolean(normalizeRequiredText(value.tabId, 2048))
-    && normalizeNonNegativeInteger(value.mountGeneration) != null;
+  if (value == null || typeof value !== 'object') return false;
+  const candidate = value as Partial<ViewerLiveInstanceKey>;
+  const runtimeSessionId = typeof candidate.runtimeSessionId === 'string'
+    ? normalizeRequiredText(candidate.runtimeSessionId, 256)
+    : null;
+  const tabId = typeof candidate.tabId === 'string'
+    ? normalizeRequiredText(candidate.tabId, 2048)
+    : null;
+  return runtimeSessionId === candidate.runtimeSessionId
+    && typeof candidate.libraryId === 'number'
+    && normalizePositiveInteger(candidate.libraryId) != null
+    && tabId === candidate.tabId
+    && typeof candidate.mountGeneration === 'number'
+    && normalizeNonNegativeInteger(candidate.mountGeneration) != null;
 }
 
 export function serializeViewerResourceKey(identity: ViewerResourceKey): string {
@@ -159,4 +213,18 @@ export function serializeViewerLiveInstanceKey(key: ViewerLiveInstanceKey): stri
 
 export function serializeViewerLiveSlotKey(key: ViewerLiveInstanceKey): string {
   return JSON.stringify([key.runtimeSessionId, key.libraryId, key.tabId]);
+}
+
+export function serializeViewerLiveDiagnosticKey(
+  key: ViewerLiveInstanceKey,
+  identity: ViewerResourceKey,
+): string {
+  return JSON.stringify([
+    key.runtimeSessionId,
+    identity.accountScope,
+    identity.libraryId,
+    identity.resourceIdentity,
+    identity.viewerKind,
+    key.mountGeneration,
+  ]);
 }

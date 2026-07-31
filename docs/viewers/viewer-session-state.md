@@ -120,11 +120,11 @@ Comic Archive 和 ASMR Archive 会把阅读位置写入 `viewMeta`，但当前�
 
 `src/features/file-viewer/session/` 已提供第一版公共内核：
 
-- resource key 由稳定账号 scope、显式 `libraryId`、`node:<id>` 或经过约束的 opaque stable id、`viewerKind` 组成；签名 URL、`blob:` URL 和本地路径不能成为 resource identity。
+- resource key 由 canonical 账号 scope、显式 `libraryId`、正整数 `node:<id>` 或带允许 namespace 的 opaque stable id、有效 `viewerKind` 组成；factory 与运行时 validator 共用同一套规则，签名 URL、`blob:` URL 和本地路径不能成为 resource identity。
 - live key 使用 auth runtime session、`libraryId`、tab id 和 mount generation；旧 generation 的 cleanup 不会移除新 adapter。
 - Warm registry 只接受 plain JSON payload，写入和读取都会脱离调用方对象引用；同时按条目数和估算字节预算执行 LRU。
 - schema 或 content revision 不匹配时跳过并删除旧 snapshot；显式 replace 事务会先 capture 旧实例，再注册新资源。
-- registry runtime 在 application/auth session 级注册；资料库释放按 `libraryId` 清理，退出登录或 401 清理整个 session。
+- registry runtime 在 application/auth session 级注册；认证 bootstrap 会先启动 runtime 再提交用户状态，受保护路由在 bootstrap 完成前不挂载 viewer 子树；资料库释放按 `libraryId` 清理，退出登录或 401 清理整个 session。
 - 迁移期 workspace release 同时清公共 registry 和 legacy cache；当前具体 viewer 仍只写 legacy cache，没有双写。
 
 账号已有稳定 `user.id`，可以构造 `user:<id>` scope。节点详情目前只有 `updatedAt`，没有经确认可靠的 ETag、对象版本、storage fingerprint 或内容 hash，因此 `contentRevision` 当前保持 `null`；Text 的内容 hash 降级和后端稳定 revision 仍属于阶段 2 前置工作。
@@ -219,6 +219,8 @@ interface ViewerDraftKey extends ViewerResourceKey {
 - `libraryId` 必须显式存在，不能靠 URL 反解析作为唯一来源。
 - `resourceIdentity` 优先 `node:<nodeId>`；无节点资源只能使用经过规范化且不暴露敏感信息的稳定身份。无法得到稳定身份时，只允许 Hot/Warm 运行期恢复，不进入 Cold 或 DraftStore。
 - `viewerKind` 避免同一节点以不同 viewer 打开时 payload 冲突。
+
+当前 opaque stable id 必须使用 `sha256:`、`uuid:`、`object:`、`storage:` 或 `external:` namespace；新增 namespace 需要先确认来源稳定、可重建且不携带敏感信息，再更新公共 validator。`user:<id>` 和 `node:<id>` 都只接受 canonical 的正安全整数，不接受前导零、零值或超出 JavaScript 安全整数范围的值。所有来自 Cold、DraftStore 或其他反序列化边界的 key 都必须重新通过同一 validator，不能只依赖 TypeScript 类型。
 
 签名 URL、`blob:` URL、本地临时路径和对象 URL 都不能作为主要身份。
 
@@ -567,7 +569,7 @@ Registry 应提供开发环境诊断事件：
 - `disposed`
 - `restore-skipped`，附带版本不匹配、内容 revision 变化或 payload 损坏等原因
 
-日志只能记录 key、kind、版本、估算成本和原因，不能输出文本草稿、签名 URL、字幕内容或其他 payload。
+日志只能记录 key、kind、版本、估算成本和原因，不能输出文本草稿、签名 URL、字幕内容或其他 payload。live registry 的内部索引可以包含 tab id，但诊断 key 只能由 runtime、resource identity 和 mount generation 组成，不能序列化原始 tab id；无节点 tab 的 id 可能直接包含完整 URL。
 
 ## 12. 非目标
 

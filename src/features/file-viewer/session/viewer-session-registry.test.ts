@@ -40,6 +40,7 @@ function liveRegistration(options: {
   identity: ViewerResourceKey;
   payload: { page: number };
   suspend?: ReturnType<typeof vi.fn>;
+  tabId?: string;
 }): ViewerLiveRegistration<{ page: number }> {
   const suspend = options.suspend ?? vi.fn();
   const adapter: ViewerSessionAdapter<{ page: number }> = {
@@ -54,7 +55,7 @@ function liveRegistration(options: {
     key: createViewerLiveInstanceKey({
       runtimeSessionId: 'runtime-1',
       libraryId: options.identity.libraryId,
-      tabId: 'node:active',
+      tabId: options.tabId ?? 'node:active',
       mountGeneration: options.generation,
     })!,
     identity: options.identity,
@@ -271,5 +272,24 @@ describe('ViewerSessionRegistry live generations', () => {
       liveInstanceCount: 0,
       snapshotCount: 0,
     });
+  });
+
+  it('never exposes URL-backed tab ids through live diagnostics', () => {
+    const registry = new ViewerSessionRegistry();
+    const events: unknown[] = [];
+    registry.subscribe((event) => events.push(event));
+    const registration = liveRegistration({
+      generation: 0,
+      identity: resource({ nodeId: 1 }),
+      payload: { page: 1 },
+      tabId: 'url:https://example.com/file?signature=private',
+    });
+
+    const unregister = registry.registerLiveInstance(registration);
+    unregister();
+
+    expect(events).toHaveLength(2);
+    expect(JSON.stringify(events)).not.toContain('example.com');
+    expect(JSON.stringify(events)).not.toContain('private');
   });
 });

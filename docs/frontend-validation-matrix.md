@@ -45,6 +45,7 @@ npm run build
 - 页面能正常进入目标路由
 - 刷新后能恢复到正确页面
 - 登录态要求没有漂移
+- 存在本地 token 的冷启动会等待认证 bootstrap 和 application/auth runtime 启动后再挂载受保护页面
 - 从目标页面返回上一路径时行为正常
 
 边界路径：

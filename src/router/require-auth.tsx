@@ -1,17 +1,22 @@
 import React from 'react';
 import { Navigate } from 'react-router-dom';
-import { auth } from '@/utils/auth';
+import { useAuth } from '@/hooks/useAuth';
 
 export const RequireAuth: React.FC<{ children: JSX.Element }> = ({ children }) => {
-  const token = auth.getToken();
-  if (!token) {
+  const { isLoggedIn, loading } = useAuth();
+  if (loading) {
+    return null;
+  }
+  if (!isLoggedIn) {
     return <Navigate to="/login" replace />;
   }
   return children;
 };
 
 export const RootRedirect: React.FC = () => {
-  const token = auth.getToken();
-  return <Navigate to={token ? '/libraries' : '/login'} replace />;
+  const { isLoggedIn, loading } = useAuth();
+  if (loading) {
+    return null;
+  }
+  return <Navigate to={isLoggedIn ? '/libraries' : '/login'} replace />;
 };
-

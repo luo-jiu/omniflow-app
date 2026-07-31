@@ -47,6 +47,8 @@ src/main.tsx
 - `/upload-center`
 - `/profile`
 
+受保护路由以 `AuthContext` 完成 bootstrap 后的 `isLoggedIn` 为准，不直接把本地 token 当作 renderer 子树已经可挂载的信号。认证成功或本地会话恢复时，application/auth session runtime 必须先启动，再提交用户状态并挂载工作区；退出登录或 401 则先释放 runtime 和工作区，再清除认证投影。
+
 当前主工作区重心在 `/libraries/:id`，它承载：
 
 - 文件树浏览

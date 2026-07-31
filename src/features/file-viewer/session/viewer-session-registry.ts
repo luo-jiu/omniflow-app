@@ -1,6 +1,7 @@
 import {
   isViewerLiveInstanceKey,
   isViewerResourceKey,
+  serializeViewerLiveDiagnosticKey,
   serializeViewerLiveInstanceKey,
   serializeViewerLiveSlotKey,
   serializeViewerResourceKey,
@@ -252,7 +253,7 @@ export class ViewerSessionRegistry {
     this.liveSlotKeys.set(slotKey, serializedKey);
     this.emit({
       type: 'registered',
-      key: serializedKey,
+      key: serializeViewerLiveDiagnosticKey(registration.key, registration.identity),
       identity: registration.identity,
       schemaVersion: registration.schemaVersion,
     });
@@ -382,7 +383,10 @@ export class ViewerSessionRegistry {
     }
     this.emit({
       type: 'disposed',
-      key: serializedKey,
+      key: serializeViewerLiveDiagnosticKey(
+        entry.registration.key,
+        entry.registration.identity,
+      ),
       identity: entry.registration.identity,
       schemaVersion: entry.registration.schemaVersion,
       reason,
