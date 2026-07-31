@@ -43,6 +43,7 @@ interface VideoArchiveViewerProps {
   fileUrl: string;
   fileName?: string | null;
   active?: boolean;
+  reloadToken?: number;
 }
 
 const PAGE_SIZE = 24;
@@ -191,6 +192,7 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
   fileUrl,
   fileName,
   active = true,
+  reloadToken = 0,
 }) => {
   const { setFileUrl } = useFileViewer();
   const { viewportRef, wrapperStyle } = useArchiveCardGrid({
@@ -201,8 +203,8 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
   const title = useMemo(() => normalizeArchiveTitle(fileName), [fileName]);
   const { showNodeProperties } = useNodePropertiesOverlay({ libraryId });
   const readerCacheKey = useMemo(
-    () => resolveVideoArchiveReaderCacheKey(fileUrl, folderNodeId),
-    [fileUrl, folderNodeId],
+    () => resolveVideoArchiveReaderCacheKey(fileUrl, folderNodeId, reloadToken),
+    [fileUrl, folderNodeId, reloadToken],
   );
 
   const [listLoading, setListLoading] = useState(false);

@@ -42,9 +42,16 @@ export const EMPTY_AUDIO_ARCHIVE_SNAPSHOT: AudioArchiveSnapshot = {
 
 export const audioArchiveSnapshotCache = new Map<string, AudioArchiveSnapshot>();
 
-export function resolveAudioArchiveReaderCacheKey(fileUrl: string, folderNodeId: number | null): string | null {
+export function resolveAudioArchiveReaderCacheKey(
+  fileUrl: string,
+  folderNodeId: number | null,
+  reloadToken = 0,
+): string | null {
   if (!folderNodeId || !Number.isFinite(folderNodeId)) return null;
-  return `${String(fileUrl || '').trim()}::${folderNodeId}`;
+  const normalizedReloadToken = Number.isFinite(reloadToken)
+    ? Math.max(Math.floor(reloadToken), 0)
+    : 0;
+  return `${String(fileUrl || '').trim()}::${folderNodeId}::r${normalizedReloadToken}`;
 }
 
 export function setAudioArchiveSnapshotCache(cacheKey: string, snapshot: AudioArchiveSnapshot) {
@@ -67,10 +74,14 @@ export function clearAudioArchiveSnapshotForFile(
   fileUrl: string,
   folderNodeId: number | null | undefined,
 ) {
-  const cacheKey = resolveAudioArchiveReaderCacheKey(fileUrl, folderNodeId ?? null);
-  if (cacheKey) {
-    audioArchiveSnapshotCache.delete(cacheKey);
-  }
+  const normalizedFileUrl = String(fileUrl || '').trim();
+  if (!normalizedFileUrl || !folderNodeId || !Number.isFinite(folderNodeId)) return;
+  const resourceKey = `${normalizedFileUrl}::${folderNodeId}`;
+  Array.from(audioArchiveSnapshotCache.keys()).forEach((cacheKey) => {
+    if (cacheKey === resourceKey || cacheKey.startsWith(`${resourceKey}::`)) {
+      audioArchiveSnapshotCache.delete(cacheKey);
+    }
+  });
 }
 
 export function clearAllAudioArchiveSnapshots() {

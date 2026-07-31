@@ -31,6 +31,7 @@ interface AsmrArchiveViewerProps {
   fileUrl: string;
   fileName?: string | null;
   active?: boolean;
+  reloadToken?: number;
 }
 
 interface ArchiveReaderProgress {
@@ -251,6 +252,7 @@ const AsmrArchiveViewer: React.FC<AsmrArchiveViewerProps> = ({
   fileUrl,
   fileName,
   active = true,
+  reloadToken = 0,
 }) => {
   const { setFileUrl } = useFileViewer();
   const { viewportRef, wrapperStyle } = useArchiveCardGrid({ baseCardWidth: 275, gridGap: 15 });
@@ -258,8 +260,8 @@ const AsmrArchiveViewer: React.FC<AsmrArchiveViewerProps> = ({
   const title = useMemo(() => normalizeArchiveTitle(fileName), [fileName]);
   const { showNodeProperties } = useNodePropertiesOverlay({ libraryId });
   const readerCacheKey = useMemo(
-    () => resolveAsmrArchiveReaderCacheKey(fileUrl, folderNodeId),
-    [fileUrl, folderNodeId],
+    () => resolveAsmrArchiveReaderCacheKey(fileUrl, folderNodeId, reloadToken),
+    [fileUrl, folderNodeId, reloadToken],
   );
 
   const [listLoading, setListLoading] = useState(false);

@@ -1,6 +1,6 @@
 # Archive Viewer 说明
 
-更新时间：2026-05-05
+更新时间：2026-07-31
 适用范围：`src/features/archive-viewer/` 下的归档语义 viewer 和相关辅助能力。
 
 ## 1. 作用
@@ -70,7 +70,7 @@
 - `hooks/useArchiveCardGrid.ts`
 - `utils/archive-sort.ts`
 
-`comic_archive` 会保存归档卡片列表和滚动位置的本地快照，用于切换 tab 或离开页面后快速恢复。工作区刷新按钮会把 `reloadToken` 传入漫画归档 viewer，刷新后的缓存键会随 token 变化，因此会重新请求第一页归档卡片，避免上传新漫画目录并设置为漫画内置类型后仍命中旧列表。快照只属于当前归档节点，不跨父子归档共享。
+`comic_archive`、`video_archive`、`audio_archive` 和 `asmr_archive` 会保存归档卡片列表及各自阅读现场的本地快照，用于切换 tab 或离开页面后快速恢复。工作区刷新按钮会把 `reloadToken` 传入这些归档 viewer，刷新后的缓存键随 token generation 变化，因此重新请求第一页归档卡片，不会在 remount 后重新命中刷新前的旧列表。按文件或工作区释放时会按资源前缀清理全部 generation。快照只属于当前归档节点，不跨父子归档共享。
 
 `components/comic-archive-viewer/index.tsx` 只保留页面编排、加载和渲染；新增或修改漫画归档卡片类型、DTO 映射、返回栈导航、阅读位置 viewMeta 解析时，优先维护同目录下的 `comic-archive-card-mapper.ts`、`useComicArchiveNavigation.ts`、`comic-archive-progress.ts` 和 `comic-archive-cache.ts`，不要继续把规则堆回主组件。
 

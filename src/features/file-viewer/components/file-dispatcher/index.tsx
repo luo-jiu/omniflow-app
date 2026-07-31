@@ -169,7 +169,7 @@ const FileDispatcher: React.FC<FileDispatcherProps> = ({
       return <AsmrViewer folderNodeId={nodeId} fileUrl={fileUrl} fileName={fileName} active={active} reloadToken={reloadToken} tabId={tabId} />;
 
     case 'asmr_archive':
-      return <AsmrArchiveViewer folderNodeId={nodeId} fileUrl={fileUrl} fileName={fileName} active={active} />;
+      return <AsmrArchiveViewer folderNodeId={nodeId} fileUrl={fileUrl} fileName={fileName} active={active} reloadToken={reloadToken} />;
 
     case 'comic_archive':
       return (
@@ -196,7 +196,7 @@ const FileDispatcher: React.FC<FileDispatcherProps> = ({
       );
 
     case 'video_archive':
-      return <VideoArchiveViewer folderNodeId={nodeId} fileUrl={fileUrl} fileName={fileName} active={active} />;
+      return <VideoArchiveViewer folderNodeId={nodeId} fileUrl={fileUrl} fileName={fileName} active={active} reloadToken={reloadToken} />;
 
     case 'audio_archive':
       return (
@@ -206,6 +206,7 @@ const FileDispatcher: React.FC<FileDispatcherProps> = ({
           fileName={fileName}
           active={active}
           tabId={tabId}
+          reloadToken={reloadToken}
         />
       );
 

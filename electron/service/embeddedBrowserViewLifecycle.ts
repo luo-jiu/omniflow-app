@@ -18,6 +18,11 @@ import {
   createCredentialDetectionScript,
 } from './embeddedBrowserCredentialDetectionScript'
 import { type EmbeddedBrowserCapturedResource, recordEmbeddedBrowserProbeResource } from './embeddedBrowserResourceService'
+import {
+  handleEmbeddedBrowserInputShortcut,
+  isDevToolsToggleShortcut,
+  showEmbeddedBrowserContextMenu,
+} from './embeddedBrowserInputShortcuts'
 
 const embeddedBrowserProbeNewDocumentScriptIds = new WeakMap<WebContents, string>()
 const EMBEDDED_BROWSER_POPUP_PLACEHOLDER_URLS = new Set(['', 'about:blank'])
@@ -82,6 +87,41 @@ export function createEmbeddedBrowserView(
   }
   options.syncBounds(view)
   options.views.set(options.tabId, view)
+
+  view.webContents.on('before-input-event', (event, input) => {
+    if (handleEmbeddedBrowserInputShortcut(view.webContents, input)) {
+      event.preventDefault()
+    }
+  })
+  view.webContents.on('context-menu', (_event, params) => {
+    showEmbeddedBrowserContextMenu(view.webContents, params)
+  })
+
+  let removeDevToolsInputListener: (() => void) | null = null
+  const cleanupDevToolsInputListener = () => {
+    removeDevToolsInputListener?.()
+    removeDevToolsInputListener = null
+  }
+  view.webContents.on('devtools-opened', () => {
+    cleanupDevToolsInputListener()
+    const devToolsWebContents = view.webContents.devToolsWebContents
+    if (!devToolsWebContents || devToolsWebContents.isDestroyed()) {
+      return
+    }
+    const handleDevToolsInput = (event: Electron.Event, input: Electron.Input) => {
+      if (!isDevToolsToggleShortcut(input)) {
+        return
+      }
+      event.preventDefault()
+      if (!view.webContents.isDestroyed()) {
+        view.webContents.closeDevTools()
+      }
+    }
+    devToolsWebContents.on('before-input-event', handleDevToolsInput)
+    removeDevToolsInputListener = () => {
+      devToolsWebContents.removeListener('before-input-event', handleDevToolsInput)
+    }
+  })
 
   view.webContents.on('did-start-loading', () => {
     options.emitTabState(options.tabId, view, {
@@ -171,6 +211,13 @@ export function createEmbeddedBrowserView(
   view.webContents.debugger.on('detach', () => {
     embeddedBrowserProbeNewDocumentScriptIds.delete(view.webContents)
   })
+  view.webContents.on('devtools-closed', () => {
+    cleanupDevToolsInputListener()
+    if (!view.webContents.isDestroyed()) {
+      void options.createIfMissingProbe(options.tabId, view)
+    }
+  })
+  view.webContents.once('destroyed', cleanupDevToolsInputListener)
   view.webContents.on('console-message', (_event, level, message, line, sourceId) => {
     if (typeof message === 'string' && message.startsWith(EMBEDDED_BROWSER_RESOURCE_CONSOLE_PREFIX)) {
       const rawPayload = message.slice(EMBEDDED_BROWSER_RESOURCE_CONSOLE_PREFIX.length)

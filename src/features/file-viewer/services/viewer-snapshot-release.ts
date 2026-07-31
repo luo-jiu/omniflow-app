@@ -72,6 +72,17 @@ export function clearViewerSnapshotsForTabs(tabs: FileViewerTab[] | null | undef
   });
 }
 
+export function clearViewerSnapshotOnTabClose(tab: FileViewerTab | null | undefined) {
+  if (!tab) return;
+  switch (tab.fileType) {
+    case 'gallery':
+      clearGallerySnapshotForFile(tab.fileUrl, tab.nodeId);
+      break;
+    default:
+      break;
+  }
+}
+
 export function clearAllViewerSnapshots() {
   clearAllPdfViewerSnapshots();
   clearAllVideoProgressSnapshots();

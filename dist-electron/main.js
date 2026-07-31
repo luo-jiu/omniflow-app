@@ -1,7 +1,7 @@
 var __defProp = Object.defineProperty;
 var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
 var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
-import { dialog, app, net, protocol, ipcMain, session, systemPreferences, safeStorage, webContents, BrowserWindow, shell, WebContentsView, nativeTheme, screen, Menu } from "electron";
+import { dialog, app, net, protocol, ipcMain, session, systemPreferences, safeStorage, webContents, BrowserWindow, shell, Menu, WebContentsView, nativeTheme, screen } from "electron";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs$1, { constants, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -6480,6 +6480,165 @@ function createCredentialDetectionScript() {
   }
 })();`;
 }
+const CHROMIUM_ZOOM_FACTORS = [
+  0.25,
+  0.33,
+  0.5,
+  0.67,
+  0.75,
+  0.8,
+  0.9,
+  1,
+  1.1,
+  1.25,
+  1.5,
+  1.75,
+  2,
+  2.5,
+  3,
+  4,
+  5
+];
+const ZOOM_FACTOR_EPSILON = 1e-3;
+function isKeyDown(input) {
+  return input.type === "keyDown";
+}
+function isPrimaryModifierPressed(input, platform) {
+  return platform === "darwin" ? input.meta : input.control;
+}
+function isDevToolsToggleShortcut(input, platform = process.platform) {
+  if (!isKeyDown(input)) {
+    return false;
+  }
+  const key = (input.key || "").toLowerCase();
+  const code = input.code || "";
+  if (key === "f12" || code === "F12") {
+    return true;
+  }
+  if (key !== "i" && code !== "KeyI") {
+    return false;
+  }
+  if (platform === "darwin") {
+    return Boolean(input.meta && (input.alt || input.shift));
+  }
+  return Boolean(input.control && input.shift);
+}
+function getZoomShortcutAction(input, platform) {
+  if (!isKeyDown(input) || !isPrimaryModifierPressed(input, platform)) {
+    return null;
+  }
+  const key = (input.key || "").toLowerCase();
+  const code = input.code || "";
+  if (key === "+" || key === "=" || code === "Equal" || code === "NumpadAdd") {
+    return "zoom-in";
+  }
+  if (key === "-" || key === "_" || code === "Minus" || code === "NumpadSubtract") {
+    return "zoom-out";
+  }
+  if (key === "0" || code === "Digit0" || code === "Numpad0") {
+    return "zoom-reset";
+  }
+  return null;
+}
+function getEmbeddedBrowserInputShortcutAction(input, platform = process.platform) {
+  if (isDevToolsToggleShortcut(input, platform)) {
+    return "devtools";
+  }
+  return getZoomShortcutAction(input, platform);
+}
+function getNextZoomFactor(currentFactor, direction) {
+  if (direction === "in") {
+    return CHROMIUM_ZOOM_FACTORS.find((factor) => factor > currentFactor + ZOOM_FACTOR_EPSILON) ?? CHROMIUM_ZOOM_FACTORS[CHROMIUM_ZOOM_FACTORS.length - 1];
+  }
+  return [...CHROMIUM_ZOOM_FACTORS].reverse().find((factor) => factor < currentFactor - ZOOM_FACTOR_EPSILON) ?? CHROMIUM_ZOOM_FACTORS[0];
+}
+function toggleEmbeddedBrowserDevTools(webContents2) {
+  if (webContents2.isDestroyed()) {
+    return;
+  }
+  if (webContents2.isDevToolsOpened()) {
+    webContents2.closeDevTools();
+    return;
+  }
+  if (webContents2.debugger.isAttached()) {
+    try {
+      webContents2.debugger.detach();
+    } catch {
+    }
+  }
+  webContents2.openDevTools({ activate: true, mode: "right" });
+}
+function applyZoomShortcut(webContents2, action) {
+  if (action === "zoom-reset") {
+    webContents2.setZoomFactor(1);
+    return;
+  }
+  const direction = action === "zoom-in" ? "in" : "out";
+  webContents2.setZoomFactor(getNextZoomFactor(webContents2.getZoomFactor(), direction));
+}
+function handleEmbeddedBrowserInputShortcut(webContents2, input, platform = process.platform) {
+  if (webContents2.isDestroyed()) {
+    return false;
+  }
+  const action = getEmbeddedBrowserInputShortcutAction(input, platform);
+  if (!action) {
+    return false;
+  }
+  if (action === "devtools") {
+    toggleEmbeddedBrowserDevTools(webContents2);
+  } else {
+    applyZoomShortcut(webContents2, action);
+  }
+  return true;
+}
+function inspectEmbeddedBrowserElement(webContents2, x, y) {
+  if (webContents2.isDevToolsOpened()) {
+    webContents2.inspectElement(x, y);
+    return;
+  }
+  if (webContents2.debugger.isAttached()) {
+    try {
+      webContents2.debugger.detach();
+    } catch {
+    }
+  }
+  webContents2.once("devtools-opened", () => {
+    if (!webContents2.isDestroyed()) {
+      webContents2.inspectElement(x, y);
+    }
+  });
+  webContents2.openDevTools({ activate: true, mode: "right" });
+}
+function showEmbeddedBrowserContextMenu(webContents2, params) {
+  if (webContents2.isDestroyed()) {
+    return;
+  }
+  const template = [];
+  if (params.isEditable) {
+    template.push(
+      { enabled: params.editFlags.canUndo, role: "undo" },
+      { enabled: params.editFlags.canRedo, role: "redo" },
+      { type: "separator" },
+      { enabled: params.editFlags.canCut, role: "cut" },
+      { enabled: params.editFlags.canCopy, role: "copy" },
+      { enabled: params.editFlags.canPaste, role: "paste" },
+      { enabled: params.editFlags.canDelete, role: "delete" },
+      { type: "separator" },
+      { enabled: params.editFlags.canSelectAll, role: "selectAll" },
+      { type: "separator" }
+    );
+  } else if (params.editFlags.canCopy) {
+    template.push(
+      { role: "copy" },
+      { type: "separator" }
+    );
+  }
+  template.push({
+    click: () => inspectEmbeddedBrowserElement(webContents2, params.x, params.y),
+    label: "检查"
+  });
+  Menu.buildFromTemplate(template).popup();
+}
 const embeddedBrowserProbeNewDocumentScriptIds = /* @__PURE__ */ new WeakMap();
 const EMBEDDED_BROWSER_POPUP_PLACEHOLDER_URLS = /* @__PURE__ */ new Set(["", "about:blank"]);
 function isEmbeddedBrowserPopupPlaceholderUrl(url) {
@@ -6512,6 +6671,39 @@ function createEmbeddedBrowserView(options) {
   }
   options.syncBounds(view);
   options.views.set(options.tabId, view);
+  view.webContents.on("before-input-event", (event, input) => {
+    if (handleEmbeddedBrowserInputShortcut(view.webContents, input)) {
+      event.preventDefault();
+    }
+  });
+  view.webContents.on("context-menu", (_event, params) => {
+    showEmbeddedBrowserContextMenu(view.webContents, params);
+  });
+  let removeDevToolsInputListener = null;
+  const cleanupDevToolsInputListener = () => {
+    removeDevToolsInputListener == null ? void 0 : removeDevToolsInputListener();
+    removeDevToolsInputListener = null;
+  };
+  view.webContents.on("devtools-opened", () => {
+    cleanupDevToolsInputListener();
+    const devToolsWebContents = view.webContents.devToolsWebContents;
+    if (!devToolsWebContents || devToolsWebContents.isDestroyed()) {
+      return;
+    }
+    const handleDevToolsInput = (event, input) => {
+      if (!isDevToolsToggleShortcut(input)) {
+        return;
+      }
+      event.preventDefault();
+      if (!view.webContents.isDestroyed()) {
+        view.webContents.closeDevTools();
+      }
+    };
+    devToolsWebContents.on("before-input-event", handleDevToolsInput);
+    removeDevToolsInputListener = () => {
+      devToolsWebContents.removeListener("before-input-event", handleDevToolsInput);
+    };
+  });
   view.webContents.on("did-start-loading", () => {
     options.emitTabState(options.tabId, view, {
       details: "did-start-loading",
@@ -6599,6 +6791,13 @@ function createEmbeddedBrowserView(options) {
   view.webContents.debugger.on("detach", () => {
     embeddedBrowserProbeNewDocumentScriptIds.delete(view.webContents);
   });
+  view.webContents.on("devtools-closed", () => {
+    cleanupDevToolsInputListener();
+    if (!view.webContents.isDestroyed()) {
+      void options.createIfMissingProbe(options.tabId, view);
+    }
+  });
+  view.webContents.once("destroyed", cleanupDevToolsInputListener);
   view.webContents.on("console-message", (_event, level, message, line, sourceId) => {
     if (typeof message === "string" && message.startsWith(EMBEDDED_BROWSER_RESOURCE_CONSOLE_PREFIX)) {
       const rawPayload = message.slice(EMBEDDED_BROWSER_RESOURCE_CONSOLE_PREFIX.length);
@@ -9044,6 +9243,29 @@ function createEmbeddedBrowserMainController(options) {
     }
     return view;
   }
+  function handleActiveViewInputShortcut(input) {
+    if (!activeEmbeddedBrowserTabId) {
+      return false;
+    }
+    const view = getEmbeddedBrowserView(activeEmbeddedBrowserTabId);
+    if (!view) {
+      activeEmbeddedBrowserTabId = null;
+      return false;
+    }
+    return handleEmbeddedBrowserInputShortcut(view.webContents, input);
+  }
+  function toggleActiveViewDevTools() {
+    if (!activeEmbeddedBrowserTabId) {
+      return false;
+    }
+    const view = getEmbeddedBrowserView(activeEmbeddedBrowserTabId);
+    if (!view) {
+      activeEmbeddedBrowserTabId = null;
+      return false;
+    }
+    toggleEmbeddedBrowserDevTools(view.webContents);
+    return true;
+  }
   async function tryInstallEmbeddedBrowserResourceProbe(tabId, view) {
     return installEmbeddedBrowserResourceProbe(
       tabId,
@@ -11332,8 +11554,10 @@ function createEmbeddedBrowserMainController(options) {
   }
   return {
     configureSession,
+    handleActiveViewInputShortcut,
     initializeBridges,
-    registerIpcHandlers: registerIpcHandlers2
+    registerIpcHandlers: registerIpcHandlers2,
+    toggleActiveViewDevTools
   };
 }
 const WINDOW_ACTIVATE_TOPMOST_DURATION_MS = 240;
@@ -12115,13 +12339,6 @@ function scheduleSaveWindowState(win) {
     saveWindowState(win);
   }, WINDOW_STATE_SAVE_DEBOUNCE_MS);
 }
-function isToggleDevToolsShortcut(input) {
-  if (input.type !== "keyDown") {
-    return false;
-  }
-  const key = (input.key || "").toLowerCase();
-  return (input.meta || input.control) && input.shift && key === "i";
-}
 function getChromiumPageZoomShortcutAction(input) {
   if (input.type !== "keyDown" || !(input.meta || input.control)) {
     return null;
@@ -12239,6 +12456,10 @@ function createWindow() {
     systemVideoWindowController.destroy();
   });
   win.webContents.on("before-input-event", (event, input) => {
+    if (embeddedBrowserMainController.handleActiveViewInputShortcut(input)) {
+      event.preventDefault();
+      return;
+    }
     const zoomShortcutAction = getChromiumPageZoomShortcutAction(input);
     if (zoomShortcutAction) {
       event.preventDefault();
@@ -12246,7 +12467,7 @@ function createWindow() {
       win.webContents.send("app:viewer-zoom-shortcut", { action: zoomShortcutAction });
       return;
     }
-    if (!isToggleDevToolsShortcut(input)) {
+    if (!isDevToolsToggleShortcut(input)) {
       return;
     }
     event.preventDefault();
@@ -12310,6 +12531,14 @@ app.whenReady().then(() => {
   embeddedBrowserMainController.registerIpcHandlers();
   registerOverlayWindowIpcHandlers(overlayWindowController);
   registerSystemVideoWindowIpcHandlers(systemVideoWindowController);
+  const toggleActiveDevToolsFromMenu = () => {
+    if (embeddedBrowserMainController.toggleActiveViewDevTools()) {
+      return;
+    }
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.toggleDevTools();
+    }
+  };
   const template = [
     ...process.platform === "darwin" ? [{
       label: app.name,
@@ -12335,6 +12564,21 @@ app.whenReady().then(() => {
         { role: "copy" },
         { role: "paste" },
         { role: "selectAll" }
+      ]
+    },
+    {
+      label: "View",
+      submenu: [
+        {
+          accelerator: process.platform === "darwin" ? "Command+Alt+I" : "CommandOrControl+Shift+I",
+          click: toggleActiveDevToolsFromMenu,
+          label: "Toggle Developer Tools"
+        },
+        ...process.platform === "darwin" ? [] : [{
+          accelerator: "F12",
+          click: toggleActiveDevToolsFromMenu,
+          label: "Toggle Developer Tools (F12)"
+        }]
       ]
     },
     {

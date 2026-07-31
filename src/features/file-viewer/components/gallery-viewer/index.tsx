@@ -13,7 +13,6 @@ import {
 } from '@douyinfe/semi-icons';
 import { GalleryViewerWrapper } from './style';
 import {
-  clearGallerySnapshotCache,
   getGallerySnapshotCache,
   resolveGallerySnapshotCacheKey,
   setGallerySnapshotCache,
@@ -776,10 +775,6 @@ const GalleryViewer: React.FC<GalleryViewerProps> = ({
       cancelled = true;
     };
   }, [folderNodeId, libraryId, snapshotCacheKey, ensureLinksFor]);
-
-  useEffect(() => () => {
-    clearGallerySnapshotCache(snapshotCacheKey);
-  }, [snapshotCacheKey]);
 
   useEffect(() => {
     if (restoringSnapshotRef.current) {

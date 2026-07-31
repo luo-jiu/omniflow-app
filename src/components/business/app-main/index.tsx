@@ -31,7 +31,10 @@ const AppMain: FC<IProps> = ({ hideTabsBar = false, workspaceActive = true }) =>
       if (!activeTabId || !tabMap.has(activeTabId)) {
         return survived;
       }
-      return [...survived.filter((tabId) => tabId !== activeTabId), activeTabId];
+      if (survived.includes(activeTabId)) {
+        return survived;
+      }
+      return [...survived, activeTabId];
     });
   }, [activeTabId, tabMap]);
 

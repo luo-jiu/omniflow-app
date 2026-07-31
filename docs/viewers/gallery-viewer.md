@@ -1,6 +1,6 @@
 # Gallery Viewer 说明
 
-更新时间：2026-06-01
+更新时间：2026-07-31
 适用范围：`src/features/file-viewer/components/gallery-viewer/` 下的图集目录预览、图片 / 视频详情切换和 MediaHub 接入。
 
 ## 1. 概述
@@ -45,7 +45,8 @@
 - 图片缩略图使用 `loading="lazy"` 和 `decoding="async"`。
 - 缩略图加载前显示模糊占位。
 - 网格卡片参考归档 viewer 的自适应策略：以目标宽度为主，在列数阈值附近允许小幅收缩，超过目标宽度后右侧留空，不为了填满整行而持续放大。
-- 当前图集 viewer 会按 `fileUrl + folderNodeId + reloadToken` 保存一层内存快照，包含媒体列表、临时链接、预览缓存、滚动位置和当前详情状态；命中快照时不重新拉目录，图集 tab 关闭或 viewer 卸载时会清理对应快照。
+- 当前图集 viewer 会按 `fileUrl + folderNodeId + reloadToken` 保存一层内存快照，包含媒体列表、临时链接、预览缓存、滚动位置和当前详情状态；命中快照时不重新拉目录。
+- 普通工作区隐藏或路由卸载会保留快照，重新挂载后可以恢复滚动位置和详情状态。关闭图集 tab 则由 `FileViewerContext` 的显式关闭入口经 `viewer-snapshot-release` 清理该图集全部 generation，重新打开从网格开始；不能再用组件 unmount 推断关闭原因。
 - 图集快照集中在 `gallery-viewer-cache.ts`，并接入 `viewer-snapshot-release`；显式释放资料库或 session 时不会把释放前的图集现场写回。
 - HEIC / HEIF 链接请求和预览预热带 viewer generation 校验；关闭 tab、reload 或切换到新图集后，旧异步结果不会写回当前 viewer。
 
@@ -103,6 +104,7 @@ HEIC / HEIF 预览走 Electron 本地代理：
 12. 从其他相册切回当前图集时，命中内存快照后不应重新拉目录，滚动位置和当前详情状态应恢复。
 13. 关闭图集 tab 后重新打开同一图集，不应恢复上一次详情图片位置，应按新 tab 重新进入网格。
 14. 回到网格再打开最近看过的同一图片，不应重新请求或释放该图片资源；超过保活 LRU 上限后允许释放。
+15. 离开资料库详情页再返回时，图集快照仍可恢复；显式释放资料库后再进入时不得恢复释放前现场。
 
 ## 7. 维护规则
 

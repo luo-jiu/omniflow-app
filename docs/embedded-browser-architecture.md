@@ -1,6 +1,6 @@
 # Embedded Browser 架构说明
 
-更新时间：2026-05-12
+更新时间：2026-07-30
 
 适用范围：`omniflow-app` 内置浏览器的 renderer UI、preload bridge、Electron main controller、资源捕捉、下载导入与缓存捕捉工具链。
 
@@ -411,6 +411,21 @@ renderer catch toolkit action
 - 多账号时通知 renderer 显示切换通知条；renderer 可通过 `autoFillPassword` IPC 切换
 - 已保存的 domain+username 提交时不再弹出保存提示（`hasEmbeddedBrowserMatchingPassword` 检查）
 - MutationObserver 确保 SPA 动态渲染的登录表单也能触发自动填充
+
+### 5.7 DevTools 与网页缩放
+
+embedded browser 的 DevTools 和页面缩放由真实 `WebContentsView.webContents` 执行，不缩放 OmniFlow renderer 外壳。
+
+快捷键规则：
+
+- macOS：`Cmd+Option+I` 打开 / 关闭活动网页 DevTools，`Cmd++/-/0` 缩放 / 重置网页。
+- Windows / Linux：`F12` 或 `Ctrl+Shift+I` 打开 / 关闭 DevTools，`Ctrl++/-/0` 缩放 / 重置网页。
+- 网页获得焦点时，快捷键由该 view 直接处理；地址栏或工具栏获得焦点且活动 view 仍挂载时，主窗口把同一指令转发给活动 view。
+- 右键菜单保留剪切 / 复制 / 粘贴等可用编辑动作，并提供稳定的“检查”元素入口。
+
+DevTools 使用 Electron 内置 Chromium DevTools frontend，默认停靠在当前网页右侧；用户可继续通过 DevTools 的停靠菜单切换到左侧、底部或独立窗口。焦点位于 DevTools 内时，同一组 DevTools 快捷键仍可关闭面板。受 Electron 的 inspected page 与 DevTools frontend 分属不同 `WebContents` 影响，DevTools 左上角原生元素选择器在当前 docked `WebContentsView` 组合中不能作为可靠能力保证；需要定位页面元素时，以网页右键“检查”为当前受支持入口。若后续需要稳定的跨 view 点选流程，应单独实现 OmniFlow 元素选择器，不向 Chromium DevTools 私有 DOM 注入补丁。
+
+DevTools 会替换 `webContents.debugger` 当前的 CDP 连接；因此 DevTools 打开期间，deep capture 的 document-start probe 和依赖 CDP 的文件输入设置可能暂时不可用。DevTools 关闭后，view lifecycle 会自动恢复已开启的 deep-capture probe；调试期间需要完整 document-start 捕捉时，应先关闭 DevTools 再刷新页面。
 
 ## 6. 生命周期规则
 

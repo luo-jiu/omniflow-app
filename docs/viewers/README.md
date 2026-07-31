@@ -1,6 +1,6 @@
 # Viewer 文档入口
 
-更新时间：2026-06-01
+更新时间：2026-07-31
 适用范围：`file-viewer`、`archive-viewer` 以及后续各类具体 viewer 的长期说明文档。
 
 ## 1. 作用
@@ -40,6 +40,8 @@
   - 普通视频 viewer 的底部控制条、右侧操作台和字幕覆盖层
 - `video-archive-viewer.md`
   - 视频归档 viewer 的卡片来源、封面策略、缓存恢复和返回链路
+- `viewer-session-state.md`
+  - 跨 viewer 的 tab 保活、阅读现场、快照生命周期、资源预算、统一接入契约和分阶段迁移方案
 
 ## 3. 阅读顺序
 
@@ -57,6 +59,8 @@
    - `docs/viewers/text-viewer.md`
    - `docs/viewers/video-viewer.md`
    - `docs/viewers/video-archive-viewer.md`
+5. 涉及 tab 保活、阅读位置、草稿、缓存、刷新失效或工作区释放时，继续阅读：
+   - `docs/viewers/viewer-session-state.md`
 
 ## 3.1 跨 tab 播放策略
 

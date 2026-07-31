@@ -21,6 +21,7 @@ import {
   setFileViewerStateCache,
 } from './file-viewer-cache';
 import { isDisposingLibraryWorkspace } from '@/features/workspace-resource-release';
+import { clearViewerSnapshotOnTabClose } from '@/features/file-viewer/services/viewer-snapshot-release';
 import type { FileViewerFileType } from '@/shared/file-viewer-types';
 
 const defaultFileViewerState: FileViewerState = {
@@ -439,6 +440,7 @@ export const FileViewerProvider: React.FC<{
 
   const closeTab = (tabId: string) => {
     releaseMediaForTab(tabId);
+    clearViewerSnapshotOnTabClose(viewerState.tabs.find(tab => tab.id === tabId));
     setViewerState(prev => closeTabInState(prev, tabId));
   };
 
@@ -449,6 +451,9 @@ export const FileViewerProvider: React.FC<{
     if (targetIds.length === 0) return;
     // 副作用必须在 setState 外执行——updater 必须保持纯函数，否则 StrictMode 双调用会重复 release。
     targetIds.forEach(releaseMediaForTab);
+    viewerState.tabs
+      .filter(tab => targetIds.includes(tab.id))
+      .forEach(clearViewerSnapshotOnTabClose);
     setViewerState(prev => targetIds.reduce((state, tabId) => closeTabInState(state, tabId), prev));
   };
 

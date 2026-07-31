@@ -185,6 +185,10 @@ legacy 兼容检查：
 - 导航 URL
 - 返回 / 前进 / 刷新
 - 关闭 tab
+- 网页和地址栏分别获得焦点时，`Cmd/Ctrl` + `+/-/0` 都只缩放活动网页
+- `Cmd+Option+I`（macOS）、`F12` / `Ctrl+Shift+I`（Windows / Linux）能在活动网页右侧停靠打开 DevTools；焦点进入 DevTools 的 Elements / Console 后，同一快捷键仍能关闭
+- DevTools 可切换左侧 / 底部 / 独立窗口停靠方式；左上角原生元素选择器属于 Electron 运行时限制，不作为通过项
+- 网页右键“检查”能定位当前元素，可编辑区域的剪切 / 复制 / 粘贴没有丢失
 
 边界路径：
 
@@ -193,6 +197,7 @@ legacy 兼容检查：
 - session release / 退出登录后，所有原生 view 不残留
 - 调整窗口尺寸后，浏览器视图 bounds 正常
 - 空白页和已加载页之间切换时状态正常
+- DevTools 打开时 deep capture 明确处于 CDP 调试降级；关闭 DevTools 后刷新页面，document-start probe 能恢复
 
 ### 3.7 资源捕捉 / Catch Toolkit
 

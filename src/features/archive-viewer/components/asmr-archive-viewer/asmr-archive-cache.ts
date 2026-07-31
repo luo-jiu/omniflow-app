@@ -46,9 +46,16 @@ export const EMPTY_ASMR_ARCHIVE_SNAPSHOT: AsmrArchiveSnapshot = {
 
 export const asmrArchiveSnapshotCache = new Map<string, AsmrArchiveSnapshot>();
 
-export function resolveAsmrArchiveReaderCacheKey(fileUrl: string, folderNodeId: number | null): string | null {
+export function resolveAsmrArchiveReaderCacheKey(
+  fileUrl: string,
+  folderNodeId: number | null,
+  reloadToken = 0,
+): string | null {
   if (!folderNodeId || !Number.isFinite(folderNodeId)) return null;
-  return `${String(fileUrl || '').trim()}::${folderNodeId}`;
+  const normalizedReloadToken = Number.isFinite(reloadToken)
+    ? Math.max(Math.floor(reloadToken), 0)
+    : 0;
+  return `${String(fileUrl || '').trim()}::${folderNodeId}::r${normalizedReloadToken}`;
 }
 
 export function setAsmrArchiveSnapshotCache(cacheKey: string, snapshot: AsmrArchiveSnapshot) {
@@ -71,10 +78,14 @@ export function clearAsmrArchiveSnapshotForFile(
   fileUrl: string,
   folderNodeId: number | null | undefined,
 ) {
-  const cacheKey = resolveAsmrArchiveReaderCacheKey(fileUrl, folderNodeId ?? null);
-  if (cacheKey) {
-    asmrArchiveSnapshotCache.delete(cacheKey);
-  }
+  const normalizedFileUrl = String(fileUrl || '').trim();
+  if (!normalizedFileUrl || !folderNodeId || !Number.isFinite(folderNodeId)) return;
+  const resourceKey = `${normalizedFileUrl}::${folderNodeId}`;
+  Array.from(asmrArchiveSnapshotCache.keys()).forEach((cacheKey) => {
+    if (cacheKey === resourceKey || cacheKey.startsWith(`${resourceKey}::`)) {
+      asmrArchiveSnapshotCache.delete(cacheKey);
+    }
+  });
 }
 
 export function clearAllAsmrArchiveSnapshots() {

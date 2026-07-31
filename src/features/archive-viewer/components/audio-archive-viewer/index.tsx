@@ -57,6 +57,7 @@ interface AudioArchiveViewerProps {
   fileName?: string | null;
   active?: boolean;
   tabId: string;
+  reloadToken?: number;
 }
 
 type AudioRepeatMode = 'order' | 'list-loop' | 'single-loop' | 'random';
@@ -309,6 +310,7 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
   fileName,
   active = true,
   tabId,
+  reloadToken = 0,
 }) => {
   const { setFileUrl } = useFileViewer();
   const viewportRef = useRef<HTMLDivElement | null>(null);
@@ -328,8 +330,8 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
   ), [folderNodeId, libraryId]);
   const { showNodeProperties } = useNodePropertiesOverlay({ libraryId });
   const readerCacheKey = useMemo(
-    () => resolveAudioArchiveReaderCacheKey(fileUrl, folderNodeId),
-    [fileUrl, folderNodeId],
+    () => resolveAudioArchiveReaderCacheKey(fileUrl, folderNodeId, reloadToken),
+    [fileUrl, folderNodeId, reloadToken],
   );
 
   const [listLoading, setListLoading] = useState(false);

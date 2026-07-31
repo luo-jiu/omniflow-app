@@ -35,9 +35,16 @@ export const EMPTY_VIDEO_ARCHIVE_SNAPSHOT: VideoArchiveSnapshot = {
 
 export const videoArchiveSnapshotCache = new Map<string, VideoArchiveSnapshot>();
 
-export function resolveVideoArchiveReaderCacheKey(fileUrl: string, folderNodeId: number | null): string | null {
+export function resolveVideoArchiveReaderCacheKey(
+  fileUrl: string,
+  folderNodeId: number | null,
+  reloadToken = 0,
+): string | null {
   if (!folderNodeId || !Number.isFinite(folderNodeId)) return null;
-  return `${String(fileUrl || '').trim()}::${folderNodeId}`;
+  const normalizedReloadToken = Number.isFinite(reloadToken)
+    ? Math.max(Math.floor(reloadToken), 0)
+    : 0;
+  return `${String(fileUrl || '').trim()}::${folderNodeId}::r${normalizedReloadToken}`;
 }
 
 export function setVideoArchiveSnapshotCache(cacheKey: string, snapshot: VideoArchiveSnapshot) {
@@ -60,10 +67,14 @@ export function clearVideoArchiveSnapshotForFile(
   fileUrl: string,
   folderNodeId: number | null | undefined,
 ) {
-  const cacheKey = resolveVideoArchiveReaderCacheKey(fileUrl, folderNodeId ?? null);
-  if (cacheKey) {
-    videoArchiveSnapshotCache.delete(cacheKey);
-  }
+  const normalizedFileUrl = String(fileUrl || '').trim();
+  if (!normalizedFileUrl || !folderNodeId || !Number.isFinite(folderNodeId)) return;
+  const resourceKey = `${normalizedFileUrl}::${folderNodeId}`;
+  Array.from(videoArchiveSnapshotCache.keys()).forEach((cacheKey) => {
+    if (cacheKey === resourceKey || cacheKey.startsWith(`${resourceKey}::`)) {
+      videoArchiveSnapshotCache.delete(cacheKey);
+    }
+  });
 }
 
 export function clearAllVideoArchiveSnapshots() {

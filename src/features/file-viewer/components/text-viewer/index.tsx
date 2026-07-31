@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Button, Spin, Toast } from '@douyinfe/semi-ui';
-import { IconMinus, IconPlus } from '@douyinfe/semi-icons';
+import { Button, Spin, Toast, Tooltip } from '@douyinfe/semi-ui';
+import { IconCopyAdd, IconDownload, IconSave } from '@douyinfe/semi-icons';
 import CodeMirror from '@uiw/react-codemirror';
 import { keymap, EditorView } from '@codemirror/view';
 import type { Extension } from '@codemirror/state';
@@ -32,10 +32,21 @@ interface IpcTextFetchResponse {
   body?: unknown;
 }
 
+type ViewerZoomShortcutAction = 'zoom-in' | 'zoom-out' | 'reset';
+
 const MIN_FONT_SIZE = 12;
 const MAX_FONT_SIZE = 32;
 const DEFAULT_FONT_SIZE = 15;
 const FONT_SIZE_STEP = 1;
+const TEXT_EDITOR_BASIC_SETUP = {
+  lineNumbers: true,
+  foldGutter: true,
+  highlightActiveLineGutter: true,
+  highlightActiveLine: true,
+  bracketMatching: true,
+  closeBrackets: true,
+  indentOnInput: true,
+} as const;
 const HIGHLIGHT_SOURCE_LABEL = {
   lezer: '官方语法高亮',
   legacy: '兼容语法高亮',
@@ -173,6 +184,28 @@ const TextViewer: React.FC<TextViewerProps> = ({
   const handleSaveAsRef = useRef(handleSaveAs);
   handleSaveAsRef.current = handleSaveAs;
 
+  const applyViewerZoomShortcut = useCallback((action: ViewerZoomShortcutAction) => {
+    if (!active) return;
+    if (action === 'zoom-in') {
+      setFontSize((prev) => clampFontSize(prev + FONT_SIZE_STEP));
+      return;
+    }
+    if (action === 'zoom-out') {
+      setFontSize((prev) => clampFontSize(prev - FONT_SIZE_STEP));
+      return;
+    }
+    setFontSize(DEFAULT_FONT_SIZE);
+  }, [active]);
+
+  useEffect(() => {
+    const off = window.electronAPI?.onViewerZoomShortcut?.(({ action }) => {
+      applyViewerZoomShortcut(action);
+    });
+    return () => {
+      off?.();
+    };
+  }, [applyViewerZoomShortcut]);
+
   const saveKeymap = useMemo(
     () => keymap.of([
       {
@@ -276,15 +309,7 @@ const TextViewer: React.FC<TextViewerProps> = ({
             theme={resolvedTheme === 'dark' ? 'dark' : 'light'}
             extensions={extensions}
             onChange={handleChange}
-            basicSetup={{
-              lineNumbers: true,
-              foldGutter: true,
-              highlightActiveLineGutter: true,
-              highlightActiveLine: true,
-              bracketMatching: true,
-              closeBrackets: true,
-              indentOnInput: true,
-            }}
+            basicSetup={TEXT_EDITOR_BASIC_SETUP}
           />
         </div>
       )}
@@ -301,21 +326,13 @@ const TextViewer: React.FC<TextViewerProps> = ({
         </div>
 
         <div className="footer-controls">
-          <Button
-            size="small"
-            icon={<IconMinus />}
-            theme="borderless"
-            onClick={() => setFontSize((prev) => clampFontSize(prev - FONT_SIZE_STEP))}
-            disabled={fontSize <= MIN_FONT_SIZE}
-          />
-          <span className="meta-text zoom-text">{fontSize}px</span>
-          <Button
-            size="small"
-            icon={<IconPlus />}
-            theme="borderless"
-            onClick={() => setFontSize((prev) => clampFontSize(prev + FONT_SIZE_STEP))}
-            disabled={fontSize >= MAX_FONT_SIZE}
-          />
+          <span
+            className="meta-text zoom-text"
+            title={`当前字号 ${fontSize}px`}
+            aria-label={`当前字号 ${fontSize}px`}
+          >
+            {fontSize}
+          </span>
           <button
             type="button"
             className={`wrap-toggle ${wordWrap ? 'is-active' : ''}`}
@@ -327,34 +344,45 @@ const TextViewer: React.FC<TextViewerProps> = ({
         </div>
 
         <div className="footer-actions">
-          <Button
-            size="small"
-            theme="solid"
-            className="save-btn"
-            disabled={!isDirty || isSaving}
-            loading={isSaving}
-            onClick={handleSave}
-          >
-            保存
-          </Button>
-          <Button
-            size="small"
-            theme="light"
-            className="save-btn"
-            disabled={isSaving}
-            onClick={handleSaveAs}
-          >
-            另存为
-          </Button>
-          <a
-            href={url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="action-link"
-            download={fileName || undefined}
-          >
-            下载
-          </a>
+          <Tooltip content="保存">
+            <span className="action-tooltip-anchor">
+              <Button
+                size="small"
+                theme="solid"
+                icon={<IconSave />}
+                className="icon-action-btn"
+                aria-label="保存"
+                disabled={!isDirty || isSaving}
+                loading={isSaving}
+                onClick={handleSave}
+              />
+            </span>
+          </Tooltip>
+          <Tooltip content="另存为">
+            <span className="action-tooltip-anchor">
+              <Button
+                size="small"
+                theme="light"
+                icon={<IconCopyAdd />}
+                className="icon-action-btn"
+                aria-label="另存为"
+                disabled={isSaving}
+                onClick={handleSaveAs}
+              />
+            </span>
+          </Tooltip>
+          <Tooltip content="下载">
+            <a
+              href={url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="icon-action-link"
+              download={fileName || undefined}
+              aria-label="下载"
+            >
+              <IconDownload />
+            </a>
+          </Tooltip>
         </div>
       </div>
     </TextViewerWrapper>

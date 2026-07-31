@@ -4,6 +4,7 @@ import path from 'node:path'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import registerIpcHandlers from './ipc'
 import { createEmbeddedBrowserMainController } from './service/embeddedBrowserMainController'
+import { isDevToolsToggleShortcut } from './service/embeddedBrowserInputShortcuts'
 import { registerWindowControlIpcHandlers } from './service/windowControlIpc'
 import { createOverlayWindowController } from './service/overlayWindowController'
 import { registerOverlayWindowIpcHandlers } from './service/overlayWindowIpc'
@@ -194,15 +195,6 @@ function scheduleSaveWindowState(win: BrowserWindow) {
   }, WINDOW_STATE_SAVE_DEBOUNCE_MS)
 }
 
-function isToggleDevToolsShortcut(input: Electron.Input) {
-  if (input.type !== 'keyDown') {
-    return false
-  }
-
-  const key = (input.key || '').toLowerCase()
-  return (input.meta || input.control) && input.shift && key === 'i'
-}
-
 function getChromiumPageZoomShortcutAction(input: Electron.Input): 'zoom-in' | 'zoom-out' | 'reset' | null {
   if (input.type !== 'keyDown' || !(input.meta || input.control)) {
     return null
@@ -335,6 +327,11 @@ function createWindow() {
   })
 
   win.webContents.on('before-input-event', (event, input) => {
+    if (embeddedBrowserMainController.handleActiveViewInputShortcut(input)) {
+      event.preventDefault()
+      return
+    }
+
     const zoomShortcutAction = getChromiumPageZoomShortcutAction(input)
     if (zoomShortcutAction) {
       event.preventDefault()
@@ -343,7 +340,7 @@ function createWindow() {
       return
     }
 
-    if (!isToggleDevToolsShortcut(input)) {
+    if (!isDevToolsToggleShortcut(input)) {
       return
     }
 
@@ -417,6 +414,14 @@ app.whenReady().then(() => {
   registerOverlayWindowIpcHandlers(overlayWindowController)
   registerSystemVideoWindowIpcHandlers(systemVideoWindowController)
 
+  const toggleActiveDevToolsFromMenu = () => {
+    if (embeddedBrowserMainController.toggleActiveViewDevTools()) {
+      return
+    }
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.toggleDevTools()
+    }
+  }
   const template: Electron.MenuItemConstructorOptions[] = [
     ...(process.platform === 'darwin'
       ? [{
@@ -444,6 +449,23 @@ app.whenReady().then(() => {
         { role: 'copy' },
         { role: 'paste' },
         { role: 'selectAll' },
+      ],
+    },
+    {
+      label: 'View',
+      submenu: [
+        {
+          accelerator: process.platform === 'darwin' ? 'Command+Alt+I' : 'CommandOrControl+Shift+I',
+          click: toggleActiveDevToolsFromMenu,
+          label: 'Toggle Developer Tools',
+        },
+        ...(process.platform === 'darwin'
+          ? []
+          : [{
+              accelerator: 'F12',
+              click: toggleActiveDevToolsFromMenu,
+              label: 'Toggle Developer Tools (F12)',
+            }]),
       ],
     },
     {

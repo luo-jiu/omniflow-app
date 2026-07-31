@@ -1,6 +1,6 @@
 # Video Archive Viewer 说明
 
-更新时间：2026-05-08
+更新时间：2026-07-31
 适用范围：`src/features/archive-viewer/components/video-archive-viewer/` 下的视频归档卡片视图、封面解析、缓存恢复和返回链路能力。
 
 ## 1. 概述
@@ -92,6 +92,7 @@
 
 - `fileUrl`
 - `folderNodeId`
+- `reloadToken`
 
 共同组成。
 
@@ -105,6 +106,8 @@
 - `scrollTop`
 
 它的目标是让用户切 tab 或切工作区再回来时，能恢复视频墙列表和滚动位置，而不是每次都重新从头加载。
+
+工作区刷新会生成新的 `reloadToken` generation。新实例只读取新 generation，因此必须重新请求第一页；按文件释放时会清理该资源的全部 generation，并兼容清理旧版不含 token 的 cache key。
 
 ### 3.5 返回链路
 
@@ -155,7 +158,7 @@
 建议顺着这条链路阅读：
 
 1. 从 `fileUrl` 解析 `libraryId`
-2. 用 `fileUrl + folderNodeId` 计算 cache key
+2. 用 `fileUrl + folderNodeId + reloadToken` 计算 cache key
 3. 如果命中本地 snapshot：
    - 直接恢复卡片、分页信息和 `scrollTop`
 4. 如果未命中：
