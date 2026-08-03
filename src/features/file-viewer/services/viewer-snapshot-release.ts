@@ -1,5 +1,10 @@
 import type { FileViewerTab } from '@/contexts/file-viewer.context';
 import {
+  createViewerResourceKey,
+  viewerSessionPolicies,
+  viewerSessionRuntime,
+} from '@/features/file-viewer/session';
+import {
   clearAllAsmrArchiveSnapshots,
   clearAsmrArchiveSnapshotForFile,
 } from '@/features/archive-viewer/components/asmr-archive-viewer/asmr-archive-cache';
@@ -24,10 +29,6 @@ import {
   clearComicReaderSnapshotForFile,
 } from '@/features/file-viewer/components/comic-viewer/comic-reader-cache';
 import {
-  clearAllGallerySnapshots,
-  clearGallerySnapshotForFile,
-} from '@/features/file-viewer/components/gallery-viewer/gallery-viewer-cache';
-import {
   clearAllVideoProgressSnapshots,
   clearVideoProgressSnapshotForFile,
 } from '@/features/file-viewer/components/video-viewer/video-progress-cache';
@@ -40,9 +41,6 @@ export function clearViewerSnapshotsForTabs(tabs: FileViewerTab[] | null | undef
         break;
       case 'comic':
         clearComicReaderSnapshotForFile(tab.fileUrl, tab.nodeId);
-        break;
-      case 'gallery':
-        clearGallerySnapshotForFile(tab.fileUrl, tab.nodeId);
         break;
       case 'asmr':
         clearAsmrViewerSnapshotForFile(tab.fileUrl, tab.nodeId);
@@ -65,21 +63,26 @@ export function clearViewerSnapshotsForTabs(tabs: FileViewerTab[] | null | undef
   });
 }
 
-export function clearViewerSnapshotOnTabClose(tab: FileViewerTab | null | undefined) {
-  if (!tab) return;
-  switch (tab.fileType) {
-    case 'gallery':
-      clearGallerySnapshotForFile(tab.fileUrl, tab.nodeId);
-      break;
-    default:
-      break;
+export function clearViewerSnapshotOnTabClose(
+  tab: FileViewerTab | null | undefined,
+  accountScope: string | null,
+) {
+  if (!tab?.fileType) return;
+  const policy = viewerSessionPolicies[tab.fileType];
+  if (policy.closeBehavior === 'discard' && accountScope && tab.libraryId != null) {
+    const identity = createViewerResourceKey({
+      accountScope,
+      libraryId: tab.libraryId,
+      nodeId: tab.nodeId,
+      viewerKind: tab.fileType,
+    });
+    if (identity) viewerSessionRuntime.disposeResource(identity);
   }
 }
 
 export function clearAllViewerSnapshots() {
   clearAllVideoProgressSnapshots();
   clearAllComicReaderSnapshots();
-  clearAllGallerySnapshots();
   clearAllAsmrViewerSnapshots();
   clearAllAudioArchiveSnapshots();
   clearAllVideoArchiveSnapshots();

@@ -4,4 +4,5 @@ export * from './viewer-session-policies';
 export * from './viewer-session-registry';
 export * from './viewer-session-runtime';
 export * from './useViewerSession';
+export * from './useViewerAccountScope';
 export type * from './viewer-session.types';

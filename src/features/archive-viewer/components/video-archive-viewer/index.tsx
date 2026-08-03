@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Input, Modal, Popover, Spin, Toast } from '@douyinfe/semi-ui';
 import {
   batchGetFileLinks,
-  deleteNodeAndChildren,
   fetchArchiveCardsPage,
   getChildrenByNodeId,
   getFileLink,
@@ -10,7 +9,9 @@ import {
   type ArchiveCardDTO,
   type ArchiveCardsPageResult,
 } from '@/features/file-explorer/services/file.api';
+import { softDeleteNodeSubtree } from '@/features/file-explorer/services/node-deletion';
 import { runtimeLogger } from '@/utils/runtimeLogger';
+import { useViewerAccountScope } from '@/features/file-viewer/session';
 import { VideoArchiveViewerWrapper } from './style';
 import { useFileViewer } from '@/hooks/useFileViewer';
 import { useArchiveCardGrid } from '@/features/archive-viewer/hooks/useArchiveCardGrid';
@@ -194,7 +195,8 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
   active = true,
   reloadToken = 0,
 }) => {
-  const { setFileUrl } = useFileViewer();
+  const { closeTabByNodeId, setFileUrl } = useFileViewer();
+  const viewerAccountScope = useViewerAccountScope();
   const { viewportRef, wrapperStyle } = useArchiveCardGrid({
     baseCardWidth: 275,
     gridGap: 15,
@@ -330,21 +332,30 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
       centered: true,
       onOk: async () => {
         try {
-          await deleteNodeAndChildren(card.id, libraryId);
+          const result = await softDeleteNodeSubtree({
+            accountScope: viewerAccountScope,
+            ancestorId: card.id,
+            libraryId,
+          });
+          result.deletedNodeIds.forEach(closeTabByNodeId);
           const nextCards = cards.filter(item => item.id !== card.id);
           const nextTotal = Math.max(total - 1, 0);
           setCards(nextCards);
           setTotal(nextTotal);
           setNextOffset(nextCards.length);
           setHasMore(nextCards.length < nextTotal);
-          Toast.success('已移入回收站');
+          if (result.draftCleanupFailed || result.subtreeCollectionFailed) {
+            Toast.warning('已移入回收站，但本地文本草稿可能未完整清理');
+          } else {
+            Toast.success('已移入回收站');
+          }
         } catch (error: any) {
           runtimeLogger.error('删除视频归档卡片失败:', error);
           Toast.error(error?.message || '删除失败');
         }
       },
     });
-  }, [cards, libraryId, total]);
+  }, [cards, closeTabByNodeId, libraryId, total, viewerAccountScope]);
 
   const contextMenuItems = useMemo<ContextMenuItem[]>(() => {
     const card = menuState.card;

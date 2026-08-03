@@ -92,6 +92,7 @@ OmniFlow 当前的文件浏览主链路不是一个模块完成的，而是 3 �
 - 激活 tab、关闭 tab、按 nodeId 关闭 tab
 - 预览 reload token
 - 预览 tab 排序
+- 按 tab id 静默更新现存 tab 的签名 URL / content revision，不改变当前激活 tab
 - 按 cache key 恢复/保存预览状态
 
 它拥有“预览事实”，不拥有目录树数据，也不负责知道某个节点是否还在树中。
@@ -202,7 +203,7 @@ tab id 的规则：
 - PDF 和 Text UI 现场已迁移到公共 registry，不再依赖 tab cache 枚举或 `viewer-snapshot-release.ts`；漫画、图集、ASMR、视频进度、音频归档、视频归档等未迁移 viewer 暂时继续使用各自轻量 cache sidecar，由 release service 汇总释放。
 - viewer snapshot sidecar 的写入入口必须在 `isDisposingAnyWorkspace()` 命中时跳过保存，避免组件卸载 cleanup 把已释放的现场写回。
 
-Text dirty draft 属于用户数据，不跟随普通 tab 关闭、资料库释放或退出登录删除。目录树确认删除成功后会按当前账号和已确认删除的节点集合批量删除对应 draft；后端删除失败的节点不能提前进入关闭 tab 或清草稿路径。
+Text dirty draft 属于用户数据，不跟随普通 tab 关闭、资料库释放或退出登录删除。节点软删除、回收站彻底删除和清空回收站统一经过 `features/file-explorer/services/node-deletion.ts`：先尽力确定可识别的子树节点，再执行后端删除，确认成功后按当前账号批量删除 draft 并失效旧 writer generation。枚举失败不能阻断本可成功的后端删除；后端删除失败的节点不能提前进入关闭 tab 或清草稿路径。回收站后代无法由普通 descendants 接口枚举时，服务会用 `deletedDescendantCount` 识别不完整结果，至少清理已知根节点并明确提示可能未完整清理。
 
 前端释放只清工作区现场。已经同步到后端 `viewMeta` 的阅读 / 播放进度不在这里删除；如果未来要支持“清远端阅读进度”，必须另设用户确认和后端接口。
 
@@ -229,8 +230,8 @@ Text dirty draft 属于用户数据，不跟随普通 tab 关闭、资料库释�
 1. `useRepositoryTree.handleDoubleClick`
 原因：这里同时承担文件打开入口、文件类型解析和树节点行为。
 
-2. `FileViewerContext.setFileUrl`
-原因：这里决定同一文件是否复用 tab，以及当前 active tab 如何更新。
+2. `FileViewerContext.setFileUrl` / `updateFileTabResource`
+原因：前者决定同一文件是否复用并激活 tab；后者只允许保存回调更新指定现存 tab，不能创建或激活 tab。两者不能混用。
 
 3. `file-dispatcher`
 原因：它看起来像最适合“顺手加业务判断”的地方，但实际上应该保持纯分发。

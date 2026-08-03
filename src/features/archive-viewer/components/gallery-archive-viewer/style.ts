@@ -78,6 +78,8 @@ export const GalleryArchiveViewerWrapper = styled.div`
 
   .gallery-album-stack {
     position: relative;
+    width: 100%;
+    flex: 0 0 auto;
     aspect-ratio: 1 / 1;
     border-radius: 8px;
   }

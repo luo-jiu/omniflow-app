@@ -73,6 +73,12 @@ export interface FileViewerOpenOptions {
   audioCoverUrl?: string | null;
 }
 
+export interface FileViewerTabResourceUpdate {
+  contentRevision: string | null;
+  expectedNodeId: number | null;
+  fileUrl: string;
+}
+
 export interface FileViewerState {
   nodeId: number | null;
   fileUrl: string | null;
@@ -120,6 +126,10 @@ export interface FileViewerContextType {
     fileType: FileViewerFileType | null,
     nodeId?: number | null,
     options?: FileViewerOpenOptions,
+  ) => void;
+  updateFileTabResource: (
+    tabId: string,
+    update: FileViewerTabResourceUpdate,
   ) => void;
   setLoading: (loading: boolean) => void;
   activateTab: (tabId: string) => void;

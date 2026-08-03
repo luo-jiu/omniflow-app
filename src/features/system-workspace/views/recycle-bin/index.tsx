@@ -3,13 +3,16 @@ import styled, { createGlobalStyle } from 'styled-components';
 import { Button, Empty, Modal, Tag, Toast } from '@douyinfe/semi-ui';
 import { IconDelete, IconRefresh } from '@douyinfe/semi-icons';
 import {
-  clearRecycleBin,
   fetchRecycleBinItems,
-  hardDeleteNodeAndChildren,
   restoreNodeAndChildren,
   type RecycleBinItem,
   type RecycleStorageLocation,
 } from '@/features/file-explorer/services/file.api';
+import {
+  clearRecycleBinWithViewerCleanup,
+  hardDeleteNodeSubtree,
+} from '@/features/file-explorer/services/node-deletion';
+import { useViewerAccountScope } from '@/features/file-viewer/session';
 import { markRepositoryTreeSnapshotDirty } from '@/features/file-explorer/hooks/useRepositoryTree';
 import { requestDesktopWindowActivation } from '@/utils/windowActivation';
 import type { SystemWorkspaceViewProps } from '../../types';
@@ -298,6 +301,7 @@ const RecycleBinWorkspace: React.FC<SystemWorkspaceViewProps> = ({ libraryId }) 
   const [expandedStorageIds, setExpandedStorageIds] = useState<Set<number>>(() => new Set());
 
   const validLibraryId = Number.isFinite(libraryId) && libraryId > 0;
+  const viewerAccountScope = useViewerAccountScope();
 
   const loadItems = useCallback(async () => {
     if (!validLibraryId) {
@@ -351,10 +355,19 @@ const RecycleBinWorkspace: React.FC<SystemWorkspaceViewProps> = ({ libraryId }) 
 
   const handleHardDelete = async (item: RecycleBinItem) => {
     try {
-      await hardDeleteNodeAndChildren(item.id, libraryId);
+      const result = await hardDeleteNodeSubtree({
+        accountScope: viewerAccountScope,
+        ancestorId: item.id,
+        expectedDescendantCount: item.deletedDescendantCount,
+        libraryId,
+      });
       setItems(prev => prev.filter(x => x.id !== item.id));
       markRepositoryTreeSnapshotDirty(libraryId);
-      Toast.success('已彻底删除');
+      if (result.draftCleanupFailed || result.subtreeCollectionFailed) {
+        Toast.warning('已彻底删除，但本地文本草稿可能未完整清理');
+      } else {
+        Toast.success('已彻底删除');
+      }
     } catch (error: any) {
       Toast.error(error?.message || '彻底删除失败');
     }
@@ -389,10 +402,20 @@ const RecycleBinWorkspace: React.FC<SystemWorkspaceViewProps> = ({ libraryId }) 
       okType: 'danger',
       async onOk() {
         try {
-          const clearedCount = await clearRecycleBin(libraryId);
+          const result = await clearRecycleBinWithViewerCleanup({
+            accountScope: viewerAccountScope,
+            items,
+            libraryId,
+          });
           setItems([]);
           markRepositoryTreeSnapshotDirty(libraryId);
-          Toast.success(clearedCount > 0 ? `已清空回收站（${clearedCount} 项）` : '回收站已清空');
+          if (result.draftCleanupFailed || result.subtreeCollectionFailed) {
+            Toast.warning('回收站已清空，但本地文本草稿可能未完整清理');
+          } else {
+            Toast.success(result.clearedCount > 0
+              ? `已清空回收站（${result.clearedCount} 项）`
+              : '回收站已清空');
+          }
         } catch (error: any) {
           Toast.error(error?.message || '清空回收站失败');
         }

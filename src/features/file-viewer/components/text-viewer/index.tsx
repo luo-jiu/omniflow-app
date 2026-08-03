@@ -34,6 +34,7 @@ import {
   TEXT_VIEWER_SESSION_SCHEMA_VERSION,
   type TextViewerSessionSnapshot,
 } from './text-viewer-session';
+import { resolveTextSaveFeedback } from './text-viewer-save';
 import '@fontsource/jetbrains-mono/400.css';
 import '@fontsource/jetbrains-mono/700.css';
 
@@ -110,7 +111,7 @@ const TextViewer: React.FC<TextViewerProps> = ({
   url,
 }) => {
   const { resolvedTheme } = useTheme();
-  const { setFileUrl } = useFileViewer();
+  const { updateFileTabResource } = useFileViewer();
   const [content, setContent] = useState<string | null>(null);
   const [draftRecovery, setDraftRecovery] = useState<DraftRecoveryState | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -155,7 +156,7 @@ const TextViewer: React.FC<TextViewerProps> = ({
 
   const setDirtyState = useCallback((dirty: boolean) => {
     isDirtyRef.current = dirty;
-    setIsDirty(dirty);
+    if (isAliveRef.current) setIsDirty(dirty);
   }, []);
 
   const setEditorContent = useCallback((value: string, dirty: boolean) => {
@@ -474,6 +475,7 @@ const TextViewer: React.FC<TextViewerProps> = ({
     clearDraftTimer();
     const savedContent = contentRef.current;
     const saveGeneration = editGenerationRef.current;
+    const saveIdentity = resourceIdentityRef.current;
     try {
       let savedRevision: string | null = null;
       try {
@@ -489,7 +491,7 @@ const TextViewer: React.FC<TextViewerProps> = ({
         contentType: detail.mimeType || 'text/plain; charset=utf-8',
       });
       const savedNodeId = Number(savedNode?.id || nodeId);
-      const identity = resourceIdentityRef.current;
+      const identity = saveIdentity;
       let draftCleanupFailed = false;
       if (identity) {
         try {
@@ -503,25 +505,38 @@ const TextViewer: React.FC<TextViewerProps> = ({
           : null;
       }
       const editedDuringSave = saveGeneration !== editGenerationRef.current;
+      let followUpDraftPersisted = true;
       if (editedDuringSave) {
         draftPersistedRef.current = false;
-        await flushDraft();
+        followUpDraftPersisted = await flushDraft();
       } else {
         setDirtyState(false);
         draftPersistedRef.current = true;
         draftErrorShownRef.current = false;
       }
-      if (draftCleanupFailed && !editedDuringSave) {
-        Toast.warning('文件已保存，但旧草稿清理失败');
-      }
       refreshDirectoryInTree(detail.parentId);
-      Toast.success(editedDuringSave ? '已保存，后续修改已保留为草稿' : '已保存');
+      const feedback = resolveTextSaveFeedback({
+        draftCleanupFailed,
+        editedDuringSave,
+        followUpDraftPersisted,
+      });
+      if (feedback.level === 'warning') {
+        Toast.warning(feedback.message);
+      } else {
+        Toast.success(feedback.message);
+      }
       try {
         const newUrl = await getFileLink(savedNodeId, detail.libraryId);
-        if (newUrl) {
+        if (
+          newUrl
+          && isAliveRef.current
+          && resourceIdentityRef.current === saveIdentity
+        ) {
           loadedUrlRef.current = `${newUrl}::${reloadToken}::${savedRevision ?? ''}`;
-          setFileUrl(newUrl, fileName || null, 'text', savedNodeId, {
+          updateFileTabResource(tabId, {
             contentRevision: savedRevision,
+            expectedNodeId: savedNodeId,
+            fileUrl: newUrl,
           });
         }
       } catch {
@@ -529,21 +544,23 @@ const TextViewer: React.FC<TextViewerProps> = ({
       }
     } catch (error: any) {
       runtimeLogger.error('文本保存失败:', error);
-      Toast.error(error?.message || '保存失败');
-      scheduleDraftFlush();
+      if (isAliveRef.current) {
+        Toast.error(error?.message || '保存失败');
+        scheduleDraftFlush();
+      }
     } finally {
-      setIsSaving(false);
+      if (isAliveRef.current) setIsSaving(false);
     }
   }, [
     clearDraftTimer,
-    fileName,
     flushDraft,
     isSaving,
     nodeId,
     reloadToken,
     scheduleDraftFlush,
     setDirtyState,
-    setFileUrl,
+    tabId,
+    updateFileTabResource,
   ]);
 
   const handleSaveAs = useCallback(async () => {

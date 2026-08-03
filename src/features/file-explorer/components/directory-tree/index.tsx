@@ -19,13 +19,9 @@ import { buildFileFullName, splitFileBaseNameAndExt } from '@/utils/fileTreeSett
 import { validateWindowsLikeFileName } from '@/utils/windowsFileName';
 import { runtimeLogger } from '@/utils/runtimeLogger';
 import { useFileViewer } from '@/hooks/useFileViewer';
-import { useAuth } from '@/hooks/useAuth';
-import {
-  createUserViewerAccountScope,
-  createViewerResourceKey,
-  viewerDraftStore,
-} from '@/features/file-viewer/session';
+import { useViewerAccountScope } from '@/features/file-viewer/session';
 import { globalAudioPlayer } from '@/features/file-viewer/services/global-audio-player';
+import { softDeleteNodeSubtree } from '@/features/file-explorer/services/node-deletion';
 import { getDirectoryBuiltInIcon } from '@/features/file-explorer/utils/file-node-icon';
 import {
   downloadUrlToDesktopPath,
@@ -162,11 +158,7 @@ export default function DirectoryTree({
   browserModeOpen = false,
 }: DirectoryTreeProps) {
   const { closeTabByNodeId, tabs } = useFileViewer();
-  const { user } = useAuth();
-  const viewerAccountScope = React.useMemo(
-    () => createUserViewerAccountScope(Number(user?.id)),
-    [user?.id],
-  );
+  const viewerAccountScope = useViewerAccountScope();
 
   // 外部文件拖拽：悬停高亮 & 延迟展开
   const [dragOverKey, setDragOverKey] = useState<string | null>(null);
@@ -847,24 +839,6 @@ export default function DirectoryTree({
     }
     const normalizedSelection = normalizeMoveSelection(selectedNodeIds);
     return normalizedSelection.length > 0 ? normalizedSelection : [targetNode];
-  };
-
-  const collectDeleteSubtreeNodeIds = async (targetNode: any): Promise<Set<number>> => {
-    const nodeIds = new Set<number>();
-    const targetNodeId = Number(targetNode?.id);
-    if (!Number.isFinite(targetNodeId) || targetNodeId <= 0) {
-      return nodeIds;
-    }
-
-    nodeIds.add(targetNodeId);
-    const descendants = await getAllDescendantsByNodeId(targetNodeId, libraryId);
-    (descendants || []).forEach((item: any) => {
-      const descendantId = Number(item?.id);
-      if (Number.isFinite(descendantId) && descendantId > 0) {
-        nodeIds.add(descendantId);
-      }
-    });
-    return nodeIds;
   };
 
   const applyTemporaryExpandedKeys = useCallback((keys: string[]) => {
@@ -1831,17 +1805,23 @@ export default function DirectoryTree({
         const deletedNodeKeys: string[] = [];
         const deletedNodeIds = new Set<number>();
         let deleteError: unknown = null;
+        let draftCleanupFailed = false;
 
         for (const targetNode of deleteTargets) {
           try {
-            const subtreeNodeIds = await collectDeleteSubtreeNodeIds(targetNode);
-
             const parentIdCandidate = Number(targetNode?.parentId);
             const parentId = Number.isFinite(parentIdCandidate) && parentIdCandidate > 0
               ? parentIdCandidate
               : (ROOT_PARENT_ID ?? 0);
-            await deleteNodeAndChildren(Number(targetNode.id), libraryId);
-            subtreeNodeIds.forEach((nodeId) => deletedNodeIds.add(nodeId));
+            const result = await softDeleteNodeSubtree({
+              accountScope: viewerAccountScope,
+              ancestorId: Number(targetNode.id),
+              libraryId,
+            });
+            result.deletedNodeIds.forEach((nodeId) => deletedNodeIds.add(nodeId));
+            draftCleanupFailed = draftCleanupFailed
+              || result.draftCleanupFailed
+              || result.subtreeCollectionFailed;
             if (parentId > 0) {
               affectedParentIds.add(parentId);
             }
@@ -1851,24 +1831,6 @@ export default function DirectoryTree({
           } catch (error) {
             deleteError = error;
             break;
-          }
-        }
-
-        let draftCleanupFailed = false;
-        if (viewerAccountScope && deletedNodeIds.size > 0) {
-          const draftIdentities = Array.from(deletedNodeIds)
-            .map((deletedNodeId) => createViewerResourceKey({
-              accountScope: viewerAccountScope,
-              libraryId,
-              nodeId: deletedNodeId,
-              viewerKind: 'text',
-            }))
-            .filter((identity) => identity !== null);
-          try {
-            await viewerDraftStore.discardDrafts(draftIdentities);
-          } catch (error) {
-            draftCleanupFailed = true;
-            runtimeLogger.error('清理已删除节点的文本草稿失败:', error);
           }
         }
 
@@ -1914,7 +1876,7 @@ export default function DirectoryTree({
         }
 
         if (draftCleanupFailed) {
-          Toast.warning('内容已移入回收站，但本地文本草稿清理失败');
+          Toast.warning('内容已移入回收站，但本地文本草稿可能未完整清理');
         } else {
           Toast.success(deleteTargets.length > 1 ? `已移入回收站 ${deleteTargets.length} 项` : '已移入回收站');
         }

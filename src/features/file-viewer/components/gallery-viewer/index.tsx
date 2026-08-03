@@ -13,10 +13,12 @@ import {
 } from '@douyinfe/semi-icons';
 import { GalleryViewerWrapper } from './style';
 import {
-  getGallerySnapshotCache,
-  resolveGallerySnapshotCacheKey,
-  setGallerySnapshotCache,
-} from './gallery-viewer-cache';
+  GALLERY_VIEWER_SESSION_ESTIMATED_BYTES,
+  GALLERY_VIEWER_SESSION_SCHEMA_VERSION,
+  parseGalleryViewerSessionSnapshot,
+  resolveGalleryGridRestoreScrollTop,
+  type GalleryViewerSessionSnapshot,
+} from './gallery-viewer-session';
 import ImageCropOverlay from '../image-crop-overlay';
 import {
   batchGetFileLinks,
@@ -39,11 +41,14 @@ import { floatingVideoService } from '@/features/file-viewer/services/floating-v
 import { isLibraryWorkspaceRoute } from '@/features/file-viewer/utils/media-route';
 import { buildFileFullName } from '@/utils/fileTreeSettings';
 import { runtimeLogger } from '@/utils/runtimeLogger';
+import { useViewerSession, type ViewerSessionAdapter } from '@/features/file-viewer/session';
 
 interface GalleryViewerProps {
+  accountScope: string | null;
+  contentRevision: string | null;
   folderNodeId: number | null;
-  fileUrl: string;
   fileName?: string | null;
+  libraryId: number | null;
   active?: boolean;
   reloadToken?: number;
   tabId: string;
@@ -214,13 +219,6 @@ function isHeicMediaItem(item?: GalleryMediaItem | null): boolean {
     || mimeType === 'image/heif'
     || mimeType === 'image/heic-sequence'
     || mimeType === 'image/heif-sequence';
-}
-
-function parseGalleryLibraryId(fileUrl: string): number | null {
-  const matches = /^gallery:\/\/library\/(\d+)\/node\/\d+$/i.exec(String(fileUrl || '').trim());
-  if (!matches) return null;
-  const parsed = Number(matches[1]);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
 function normalizeGalleryTitle(fileName?: string | null): string {
@@ -444,20 +442,31 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
 }
 
+function resolveGridLayout(viewportWidth: number) {
+  const contentWidth = Math.max(Math.floor(viewportWidth - GRID_HORIZONTAL_PADDING), 0);
+  const minCardWidth = Math.ceil(GRID_BASE_CARD_WIDTH * GRID_MIN_CARD_SCALE);
+  if (contentWidth <= 0) {
+    return { cardWidth: GRID_BASE_CARD_WIDTH, columns: 1 };
+  }
+  const columns = Math.max(1, Math.floor((contentWidth + GRID_GAP) / (minCardWidth + GRID_GAP)));
+  const computedWidth = (contentWidth - (columns - 1) * GRID_GAP) / columns;
+  const cardWidth = columns === 1
+    ? Math.max(1, Math.min(GRID_BASE_CARD_WIDTH, contentWidth))
+    : clamp(Math.floor(computedWidth), minCardWidth, GRID_BASE_CARD_WIDTH);
+  return { cardWidth, columns };
+}
+
 const GalleryViewer: React.FC<GalleryViewerProps> = ({
+  accountScope,
+  contentRevision,
   folderNodeId,
-  fileUrl,
   fileName,
+  libraryId,
   active = true,
   reloadToken = 0,
   tabId,
 }) => {
-  const libraryId = useMemo(() => parseGalleryLibraryId(fileUrl), [fileUrl]);
   const title = useMemo(() => normalizeGalleryTitle(fileName), [fileName]);
-  const snapshotCacheKey = useMemo(
-    () => resolveGallerySnapshotCacheKey(fileUrl, folderNodeId, reloadToken),
-    [fileUrl, folderNodeId, reloadToken],
-  );
   const [items, setItems] = useState<GalleryMediaItem[]>([]);
   const [linkMap, setLinkMap] = useState<Map<number, string>>(() => new Map());
   const [loading, setLoading] = useState(true);
@@ -500,13 +509,32 @@ const GalleryViewer: React.FC<GalleryViewerProps> = ({
   const previewGenerationRef = useRef(0);
   const gridScrollRef = useRef<HTMLDivElement | null>(null);
   const gridScrollTopRef = useRef(0);
+  const gridScrollRatioRef = useRef<number | null>(null);
   const gridScrollFrameRef = useRef<number | null>(null);
-  const restoringSnapshotRef = useRef(false);
+  const gridRestoreFrameRef = useRef<number | null>(null);
   const imageStageRef = useRef<HTMLDivElement | null>(null);
   const detailImageRef = useRef<HTMLImageElement | null>(null);
   const videoHostRef = useRef<HTMLDivElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const videoMountTokenRef = useRef<number | null>(null);
+  const activeRef = useRef(active);
+  const activeIndexRef = useRef<number | null>(activeIndex);
+  const galleryLoadedRef = useRef(false);
+  const gridCardWidthRef = useRef(gridCardWidth);
+  const gridColumnCountRef = useRef(gridColumnCount);
+  const imageOffsetRef = useRef(imageOffset);
+  const imageRotateStepsRef = useRef(imageRotateSteps);
+  const imageZoomRef = useRef(imageZoom);
+  const itemsRef = useRef<GalleryMediaItem[]>(items);
+  const pendingGridRestoreRef = useRef<GalleryViewerSessionSnapshot | null>(null);
+  const pendingImageRestoreRef = useRef<{
+    itemId: number;
+    snapshot: GalleryViewerSessionSnapshot;
+  } | null>(null);
+  const pendingSessionRestoreRef = useRef<{
+    resourceNodeId: number | null;
+    snapshot: GalleryViewerSessionSnapshot;
+  } | null>(null);
   const activeItem = activeIndex === null ? null : items[activeIndex] ?? null;
   const activeUrl = activeItem ? linkMap.get(activeItem.id) || '' : '';
   const activeImagePreview = activeItem ? imagePreviewMap.get(activeItem.id) || null : null;
@@ -516,6 +544,125 @@ const GalleryViewer: React.FC<GalleryViewerProps> = ({
   const activeVideoKey = activeItem?.kind === 'video'
     ? `gallery-video:${tabId}:${activeItem.id}`
     : null;
+  activeRef.current = active;
+  activeIndexRef.current = activeIndex;
+  gridCardWidthRef.current = gridCardWidth;
+  gridColumnCountRef.current = gridColumnCount;
+  imageOffsetRef.current = imageOffset;
+  imageRotateStepsRef.current = imageRotateSteps;
+  imageZoomRef.current = imageZoom;
+  itemsRef.current = items;
+
+  const applyImageSessionSnapshot = useCallback((snapshot: GalleryViewerSessionSnapshot) => {
+    const stage = imageStageRef.current;
+    const viewportWidth = Math.round(stage?.clientWidth ?? 0);
+    const viewportHeight = Math.round(stage?.clientHeight ?? 0);
+    const nextOffset = {
+      x: snapshot.imageOffsetRatioX != null && viewportWidth > 0
+        ? snapshot.imageOffsetRatioX * viewportWidth
+        : snapshot.imageOffsetX,
+      y: snapshot.imageOffsetRatioY != null && viewportHeight > 0
+        ? snapshot.imageOffsetRatioY * viewportHeight
+        : snapshot.imageOffsetY,
+    };
+    imageZoomRef.current = snapshot.imageZoom;
+    imageRotateStepsRef.current = snapshot.imageRotateSteps;
+    imageOffsetRef.current = nextOffset;
+    setImageZoom(snapshot.imageZoom);
+    setImageRotateSteps(snapshot.imageRotateSteps);
+    setImageOffset(nextOffset);
+  }, []);
+
+  const applyRestoredSnapshot = useCallback((
+    snapshot: GalleryViewerSessionSnapshot,
+    targetItems: GalleryMediaItem[],
+  ) => {
+    const restoredIndex = snapshot.activeItemId == null
+      ? null
+      : targetItems.findIndex(item => item.id === snapshot.activeItemId);
+    const nextActiveIndex = restoredIndex != null && restoredIndex >= 0 ? restoredIndex : null;
+    const nextActiveItem = nextActiveIndex == null ? null : targetItems[nextActiveIndex] ?? null;
+    pendingSessionRestoreRef.current = null;
+    pendingGridRestoreRef.current = snapshot;
+    pendingImageRestoreRef.current = nextActiveItem?.kind === 'image'
+      ? { itemId: nextActiveItem.id, snapshot }
+      : null;
+    gridScrollTopRef.current = snapshot.gridScrollTop;
+    gridScrollRatioRef.current = snapshot.gridScrollRatio;
+    setGridScrollTop(snapshot.gridScrollTop);
+    setActiveIndex(nextActiveIndex);
+    setImageNaturalSize({ width: 0, height: 0 });
+    setIsImageDragging(false);
+    setCropMode(false);
+    setCropBounds(null);
+    setCropSelection(null);
+    setMetadataVisible(false);
+  }, []);
+
+  const captureGallerySnapshot = useCallback((): GalleryViewerSessionSnapshot | null => {
+    if (!galleryLoadedRef.current) return null;
+    const currentItems = itemsRef.current;
+    const currentIndex = activeIndexRef.current;
+    const currentItem = currentIndex == null ? null : currentItems[currentIndex] ?? null;
+    const grid = gridScrollRef.current;
+    const pendingGridRestore = pendingGridRestoreRef.current;
+    const scrollTop = grid
+      ? grid.scrollTop
+      : pendingGridRestore?.gridScrollTop ?? gridScrollTopRef.current;
+    const maxScrollable = grid ? Math.max(grid.scrollHeight - grid.clientHeight, 0) : 0;
+    const gridScrollRatio = maxScrollable > 0
+      ? scrollTop / maxScrollable
+      : pendingGridRestore?.gridScrollRatio ?? gridScrollRatioRef.current;
+    const rowStride = Math.max(gridCardWidthRef.current + GRID_GAP, 1);
+    const anchorRow = Math.max(Math.floor(scrollTop / rowStride), 0);
+    const anchorIndex = anchorRow * Math.max(gridColumnCountRef.current, 1);
+    const anchorItem = currentItems[anchorIndex] ?? null;
+    const stage = imageStageRef.current;
+    const viewportWidth = Math.round(stage?.clientWidth ?? 0);
+    const viewportHeight = Math.round(stage?.clientHeight ?? 0);
+    return {
+      activeItemId: currentItem?.id ?? null,
+      gridAnchorItemId: pendingGridRestore?.gridAnchorItemId ?? anchorItem?.id ?? null,
+      gridAnchorOffsetRatio: pendingGridRestore?.gridAnchorOffsetRatio
+        ?? clamp((scrollTop - anchorRow * rowStride) / rowStride, 0, 1),
+      gridScrollRatio: gridScrollRatio == null ? null : clamp(gridScrollRatio, 0, 1),
+      gridScrollTop: Math.max(scrollTop, 0),
+      imageOffsetRatioX: viewportWidth > 0 ? imageOffsetRef.current.x / viewportWidth : null,
+      imageOffsetRatioY: viewportHeight > 0 ? imageOffsetRef.current.y / viewportHeight : null,
+      imageOffsetX: imageOffsetRef.current.x,
+      imageOffsetY: imageOffsetRef.current.y,
+      imageRotateSteps: imageRotateStepsRef.current,
+      imageZoom: imageZoomRef.current,
+    };
+  }, []);
+
+  const restoreGallerySnapshot = useCallback((payload: GalleryViewerSessionSnapshot) => {
+    const snapshot = parseGalleryViewerSessionSnapshot(payload);
+    if (!snapshot) return;
+    pendingSessionRestoreRef.current = { resourceNodeId: folderNodeId, snapshot };
+  }, [folderNodeId]);
+
+  const sessionAdapter = useMemo<ViewerSessionAdapter<GalleryViewerSessionSnapshot>>(() => ({
+    capture: captureGallerySnapshot,
+    restore: restoreGallerySnapshot,
+    suspend: () => undefined,
+    resume: () => undefined,
+    estimateCost: () => GALLERY_VIEWER_SESSION_ESTIMATED_BYTES,
+    getPinReasons: () => (activeRef.current ? ['active'] : []),
+  }), [captureGallerySnapshot, restoreGallerySnapshot]);
+
+  useViewerSession({
+    accountScope,
+    active,
+    adapter: sessionAdapter,
+    contentRevision,
+    libraryId,
+    nodeId: folderNodeId,
+    reloadToken,
+    schemaVersion: GALLERY_VIEWER_SESSION_SCHEMA_VERSION,
+    tabId,
+    viewerKind: 'gallery',
+  });
 
   const isPreviewGenerationCurrent = useCallback((generation: number) => {
     return mountedRef.current && previewGenerationRef.current === generation;
@@ -543,7 +690,7 @@ const GalleryViewer: React.FC<GalleryViewerProps> = ({
     requestedLinkGenerationsRef.current.clear();
     requestedImagePreviewIdsRef.current.clear();
     requestedImagePreviewGenerationsRef.current.clear();
-  }, [libraryId, snapshotCacheKey]);
+  }, [folderNodeId, libraryId, reloadToken]);
 
   const prepareHeicPreview = useCallback(async (
     item: GalleryMediaItem,
@@ -686,52 +833,24 @@ const GalleryViewer: React.FC<GalleryViewerProps> = ({
   useEffect(() => {
     let cancelled = false;
     async function loadGallery() {
+      galleryLoadedRef.current = false;
       if (!folderNodeId || !libraryId) {
         setItems([]);
         setLoading(false);
         setError('图集目录参数异常');
         return;
       }
-      const cachedSnapshot = getGallerySnapshotCache(snapshotCacheKey);
-      if (cachedSnapshot) {
-        const restoredLinks = new Map(cachedSnapshot.linkEntries);
-        const restoredPreviews = new Map(cachedSnapshot.imagePreviewEntries);
-        linkMapRef.current = restoredLinks;
-        imagePreviewMapRef.current = restoredPreviews;
-        gridScrollTopRef.current = cachedSnapshot.scrollTop;
-        setGridScrollTop(cachedSnapshot.scrollTop);
-        restoringSnapshotRef.current = true;
-        requestedLinkIdsRef.current.clear();
-        requestedLinkGenerationsRef.current.clear();
-        requestedImagePreviewIdsRef.current.clear();
-        requestedImagePreviewGenerationsRef.current.clear();
-        setItems(cachedSnapshot.items);
-        setLinkMap(restoredLinks);
-        setLoadedThumbIds(new Set(cachedSnapshot.loadedThumbIds));
-        setImagePreviewMap(restoredPreviews);
-        setImagePreviewErrorMap(new Map(cachedSnapshot.imagePreviewErrorEntries));
-        setKeptImageIds(new Set(cachedSnapshot.keptImageIds));
-        setActiveIndex(cachedSnapshot.activeIndex);
-        setImageZoom(cachedSnapshot.imageZoom);
-        setImageRotateSteps(cachedSnapshot.imageRotateSteps);
-        setImageOffset(cachedSnapshot.imageOffset);
-        setImageNaturalSize(cachedSnapshot.imageNaturalSize);
-        setIsImageDragging(false);
-        setCropMode(false);
-        setCropBounds(null);
-        setCropSelection(null);
-        setError(null);
-        setLoading(false);
-        return;
-      }
       setLoading(true);
       setError(null);
       setActiveIndex(null);
+      pendingGridRestoreRef.current = null;
+      pendingImageRestoreRef.current = null;
       const emptyLinks = new Map<number, string>();
       linkMapRef.current = emptyLinks;
       setLinkMap(emptyLinks);
       setLoadedThumbIds(new Set());
       gridScrollTopRef.current = 0;
+      gridScrollRatioRef.current = null;
       setGridScrollTop(0);
       requestedLinkIdsRef.current.clear();
       requestedLinkGenerationsRef.current.clear();
@@ -741,6 +860,15 @@ const GalleryViewer: React.FC<GalleryViewerProps> = ({
       requestedImagePreviewIdsRef.current.clear();
       requestedImagePreviewGenerationsRef.current.clear();
       setKeptImageIds(new Set());
+      setImageZoom(1);
+      setImageRotateSteps(0);
+      setImageOffset({ x: 0, y: 0 });
+      setImageNaturalSize({ width: 0, height: 0 });
+      setIsImageDragging(false);
+      setCropMode(false);
+      setCropBounds(null);
+      setCropSelection(null);
+      setMetadataVisible(false);
       try {
         const children = await getChildrenByNodeId(folderNodeId, libraryId) as GalleryChildNode[];
         if (cancelled) return;
@@ -758,7 +886,15 @@ const GalleryViewer: React.FC<GalleryViewerProps> = ({
             });
             return acc;
           }, []);
+        itemsRef.current = nextItems;
         setItems(nextItems);
+        galleryLoadedRef.current = true;
+        const pendingRestore = pendingSessionRestoreRef.current;
+        if (pendingRestore?.resourceNodeId === folderNodeId) {
+          applyRestoredSnapshot(pendingRestore.snapshot, nextItems);
+        } else {
+          pendingSessionRestoreRef.current = null;
+        }
         void ensureLinksFor(nextItems.slice(0, PREFETCH_FIRST_MEDIA_COUNT), { prepareHeicPreview: true });
       } catch (loadError) {
         if (cancelled) return;
@@ -774,11 +910,18 @@ const GalleryViewer: React.FC<GalleryViewerProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [folderNodeId, libraryId, snapshotCacheKey, ensureLinksFor]);
+  }, [applyRestoredSnapshot, ensureLinksFor, folderNodeId, libraryId, reloadToken]);
 
   useEffect(() => {
-    if (restoringSnapshotRef.current) {
-      restoringSnapshotRef.current = false;
+    const pendingImageRestore = pendingImageRestoreRef.current;
+    if (
+      pendingImageRestore
+      && activeItem?.kind === 'image'
+      && pendingImageRestore.itemId === activeItem.id
+    ) {
+      pendingImageRestoreRef.current = null;
+      applyImageSessionSnapshot(pendingImageRestore.snapshot);
+      setImageNaturalSize({ width: 0, height: 0 });
       setIsImageDragging(false);
       setCropMode(false);
       setCropBounds(null);
@@ -793,7 +936,7 @@ const GalleryViewer: React.FC<GalleryViewerProps> = ({
     setCropMode(false);
     setCropBounds(null);
     setCropSelection(null);
-  }, [activeItem?.id]);
+  }, [activeItem?.id, activeItem?.kind, applyImageSessionSnapshot]);
 
   useEffect(() => {
     if (!activeItem) return;
@@ -840,39 +983,6 @@ const GalleryViewer: React.FC<GalleryViewerProps> = ({
   }, [activeDisplayUrl, activeItem]);
 
   useEffect(() => {
-    if (loading || error || items.length === 0) return;
-    setGallerySnapshotCache(snapshotCacheKey, {
-      activeIndex,
-      imageNaturalSize,
-      imageOffset,
-      imagePreviewEntries: Array.from(imagePreviewMap.entries()),
-      imagePreviewErrorEntries: Array.from(imagePreviewErrorMap.entries()),
-      imageRotateSteps,
-      imageZoom,
-      items,
-      keptImageIds: Array.from(keptImageIds),
-      linkEntries: Array.from(linkMap.entries()),
-      loadedThumbIds: Array.from(loadedThumbIds),
-      scrollTop: gridScrollTopRef.current,
-    });
-  }, [
-    activeIndex,
-    error,
-    imageNaturalSize,
-    imageOffset,
-    imagePreviewErrorMap,
-    imagePreviewMap,
-    imageRotateSteps,
-    imageZoom,
-    items,
-    keptImageIds,
-    linkMap,
-    loadedThumbIds,
-    loading,
-    snapshotCacheKey,
-  ]);
-
-  useEffect(() => {
     if (active) return;
     setCropMode(false);
     setCropBounds(null);
@@ -884,27 +994,55 @@ const GalleryViewer: React.FC<GalleryViewerProps> = ({
     if (activeIndex !== null) return;
     const grid = gridScrollRef.current;
     if (!grid) return;
-    grid.scrollTop = gridScrollTopRef.current;
-    setGridScrollTop(gridScrollTopRef.current);
-  }, [activeIndex, items.length]);
+    const layout = resolveGridLayout(grid.clientWidth);
+    const viewportHeight = grid.clientHeight;
+    gridCardWidthRef.current = layout.cardWidth;
+    gridColumnCountRef.current = layout.columns;
+    if (
+      gridCardWidth !== layout.cardWidth
+      || gridColumnCount !== layout.columns
+      || gridViewportHeight !== viewportHeight
+    ) {
+      setGridViewportHeight(viewportHeight);
+      setGridColumnCount(layout.columns);
+      setGridCardWidth(layout.cardWidth);
+      return;
+    }
+    const pendingRestore = pendingGridRestoreRef.current;
+    const fallbackScrollTop = gridScrollTopRef.current;
+    if (gridRestoreFrameRef.current !== null) {
+      window.cancelAnimationFrame(gridRestoreFrameRef.current);
+    }
+    gridRestoreFrameRef.current = window.requestAnimationFrame(() => {
+      gridRestoreFrameRef.current = null;
+      let targetScrollTop = fallbackScrollTop;
+      if (pendingRestore) {
+        targetScrollTop = resolveGalleryGridRestoreScrollTop({
+          cardWidth: layout.cardWidth,
+          columns: layout.columns,
+          gap: GRID_GAP,
+          itemIds: items.map(item => item.id),
+          maxScrollable: Math.max(grid.scrollHeight - grid.clientHeight, 0),
+          snapshot: pendingRestore,
+        });
+        pendingGridRestoreRef.current = null;
+      }
+      const maxScrollable = Math.max(grid.scrollHeight - grid.clientHeight, 0);
+      const nextScrollTop = clamp(targetScrollTop, 0, maxScrollable);
+      grid.scrollTop = nextScrollTop;
+      gridScrollTopRef.current = nextScrollTop;
+      gridScrollRatioRef.current = maxScrollable > 0 ? nextScrollTop / maxScrollable : null;
+      setGridScrollTop(nextScrollTop);
+    });
+  }, [activeIndex, gridCardWidth, gridColumnCount, gridViewportHeight, items]);
 
   useEffect(() => {
     const grid = gridScrollRef.current;
     if (!grid || activeIndex !== null) return undefined;
     const updateMetrics = () => {
-      const contentWidth = Math.max(Math.floor(grid.clientWidth - GRID_HORIZONTAL_PADDING), 0);
-      const minCardWidth = Math.ceil(GRID_BASE_CARD_WIDTH * GRID_MIN_CARD_SCALE);
-      if (contentWidth <= 0) {
-        setGridViewportHeight(grid.clientHeight);
-        setGridColumnCount(1);
-        setGridCardWidth(GRID_BASE_CARD_WIDTH);
-        return;
-      }
-      const columns = Math.max(1, Math.floor((contentWidth + GRID_GAP) / (minCardWidth + GRID_GAP)));
-      const computedWidth = (contentWidth - (columns - 1) * GRID_GAP) / columns;
-      const cardWidth = columns === 1
-        ? Math.max(1, Math.min(GRID_BASE_CARD_WIDTH, contentWidth))
-        : clamp(Math.floor(computedWidth), minCardWidth, GRID_BASE_CARD_WIDTH);
+      const { cardWidth, columns } = resolveGridLayout(grid.clientWidth);
+      gridCardWidthRef.current = cardWidth;
+      gridColumnCountRef.current = columns;
       setGridViewportHeight(grid.clientHeight);
       setGridColumnCount(columns);
       setGridCardWidth(cardWidth);
@@ -921,6 +1059,10 @@ const GalleryViewer: React.FC<GalleryViewerProps> = ({
     if (gridScrollFrameRef.current !== null) {
       window.cancelAnimationFrame(gridScrollFrameRef.current);
       gridScrollFrameRef.current = null;
+    }
+    if (gridRestoreFrameRef.current !== null) {
+      window.cancelAnimationFrame(gridRestoreFrameRef.current);
+      gridRestoreFrameRef.current = null;
     }
   }, []);
 
@@ -1074,7 +1216,10 @@ const GalleryViewer: React.FC<GalleryViewerProps> = ({
     const nextItem = items[index];
     if (!nextItem) return;
     if (gridScrollRef.current) {
-      gridScrollTopRef.current = gridScrollRef.current.scrollTop;
+      const grid = gridScrollRef.current;
+      gridScrollTopRef.current = grid.scrollTop;
+      const maxScrollable = Math.max(grid.scrollHeight - grid.clientHeight, 0);
+      gridScrollRatioRef.current = maxScrollable > 0 ? grid.scrollTop / maxScrollable : null;
     }
     releaseCurrentVideoIfNeeded(nextItem.id);
     setActiveIndex(index);
@@ -1393,8 +1538,11 @@ const GalleryViewer: React.FC<GalleryViewerProps> = ({
           ref={gridScrollRef}
           className="gallery-grid"
           onScroll={(event) => {
-            const nextScrollTop = event.currentTarget.scrollTop;
+            const grid = event.currentTarget;
+            const nextScrollTop = grid.scrollTop;
             gridScrollTopRef.current = nextScrollTop;
+            const maxScrollable = Math.max(grid.scrollHeight - grid.clientHeight, 0);
+            gridScrollRatioRef.current = maxScrollable > 0 ? nextScrollTop / maxScrollable : null;
             if (gridScrollFrameRef.current !== null) return;
             gridScrollFrameRef.current = window.requestAnimationFrame(() => {
               gridScrollFrameRef.current = null;

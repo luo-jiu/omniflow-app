@@ -7,6 +7,7 @@ import {
   type FileViewerAudioPlaylist,
   type FileViewerVideoPlaylist,
   type FileViewerSubtitleSource,
+  type FileViewerTabResourceUpdate,
 } from './file-viewer.context';
 import { normalizeFileViewerReturnTarget } from './file-viewer-return-target';
 import { globalAudioPlayer } from '@/features/file-viewer/services/global-audio-player';
@@ -23,6 +24,8 @@ import {
 import { isDisposingLibraryWorkspace } from '@/features/workspace-resource-release';
 import { clearViewerSnapshotOnTabClose } from '@/features/file-viewer/services/viewer-snapshot-release';
 import type { FileViewerFileType } from '@/shared/file-viewer-types';
+import { updateExistingFileViewerTabResource } from './file-viewer-tab-resource';
+import { useViewerAccountScope } from '@/features/file-viewer/session';
 
 const defaultFileViewerState: FileViewerState = {
   nodeId: null,
@@ -273,6 +276,7 @@ export const FileViewerProvider: React.FC<{
   cacheKey,
   libraryId = null,
 }) => {
+  const viewerAccountScope = useViewerAccountScope();
   const [viewerState, setViewerState] = useState<FileViewerStoreState>(() => {
     if (!cacheKey) {
       return defaultFileViewerStoreState;
@@ -447,6 +451,23 @@ export const FileViewerProvider: React.FC<{
     });
   };
 
+  const updateFileTabResource = (
+    tabId: string,
+    update: FileViewerTabResourceUpdate,
+  ) => {
+    setViewerState(prev => {
+      const result = updateExistingFileViewerTabResource(prev.tabs, tabId, update);
+      if (!result) return prev;
+      return {
+        ...prev,
+        tabs: result.tabs,
+        fileState: prev.activeTabId === tabId
+          ? toFileState(result.updatedTab)
+          : prev.fileState,
+      };
+    });
+  };
+
   const activateTab = (tabId: string) => {
     setViewerState(prev => {
       const targetTab = prev.tabs.find(tab => tab.id === tabId) || null;
@@ -463,7 +484,10 @@ export const FileViewerProvider: React.FC<{
 
   const closeTab = (tabId: string) => {
     releaseMediaForTab(tabId);
-    clearViewerSnapshotOnTabClose(viewerState.tabs.find(tab => tab.id === tabId));
+    clearViewerSnapshotOnTabClose(
+      viewerState.tabs.find(tab => tab.id === tabId),
+      viewerAccountScope,
+    );
     setViewerState(prev => closeTabInState(prev, tabId));
   };
 
@@ -476,7 +500,7 @@ export const FileViewerProvider: React.FC<{
     targetIds.forEach(releaseMediaForTab);
     viewerState.tabs
       .filter(tab => targetIds.includes(tab.id))
-      .forEach(clearViewerSnapshotOnTabClose);
+      .forEach((tab) => clearViewerSnapshotOnTabClose(tab, viewerAccountScope));
     setViewerState(prev => targetIds.reduce((state, tabId) => closeTabInState(state, tabId), prev));
   };
 
@@ -535,6 +559,7 @@ export const FileViewerProvider: React.FC<{
         tabs: viewerState.tabs,
         activeTabId: viewerState.activeTabId,
         setFileUrl,
+        updateFileTabResource,
         setLoading,
         activateTab,
         closeTab,

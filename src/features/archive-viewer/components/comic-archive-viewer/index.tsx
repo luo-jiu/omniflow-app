@@ -2,12 +2,12 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Input, Modal, Popover, Spin, Toast } from '@douyinfe/semi-ui';
 import {
   batchGetFileLinks,
-  deleteNodeAndChildren,
   fetchArchiveCardsPage,
   fetchNodeDetailById,
   renameNode,
   updateNodeConfig,
 } from '@/features/file-explorer/services/file.api';
+import { softDeleteNodeSubtree } from '@/features/file-explorer/services/node-deletion';
 import { runtimeLogger } from '@/utils/runtimeLogger';
 import { ComicArchiveViewerWrapper } from './style';
 import { useArchiveCardGrid } from '@/features/archive-viewer/hooks/useArchiveCardGrid';
@@ -19,6 +19,8 @@ import { buildFileViewerReturnTarget } from '@/contexts/file-viewer-return-targe
 import { mapComicArchiveCards } from './comic-archive-card-mapper';
 import type { ComicArchiveCard } from './comic-archive-types';
 import { useComicArchiveNavigation } from './useComicArchiveNavigation';
+import { useFileViewer } from '@/hooks/useFileViewer';
+import { useViewerAccountScope } from '@/features/file-viewer/session';
 import {
   EMPTY_COMIC_ARCHIVE_SNAPSHOT,
   comicArchiveSnapshotCache,
@@ -73,6 +75,8 @@ const ComicArchiveViewer: React.FC<ComicArchiveViewerProps> = ({
   reloadToken = 0,
   returnTarget = null,
 }) => {
+  const { closeTabByNodeId } = useFileViewer();
+  const viewerAccountScope = useViewerAccountScope();
   const { viewportRef, wrapperStyle } = useArchiveCardGrid({
     baseCardWidth: 275,
     gridGap: 15,
@@ -253,17 +257,26 @@ const ComicArchiveViewer: React.FC<ComicArchiveViewerProps> = ({
       centered: true,
       onOk: async () => {
         try {
-          await deleteNodeAndChildren(card.id, libraryId);
+          const result = await softDeleteNodeSubtree({
+            accountScope: viewerAccountScope,
+            ancestorId: card.id,
+            libraryId,
+          });
+          result.deletedNodeIds.forEach(closeTabByNodeId);
           setCards(prev => prev.filter(item => item.id !== card.id));
           setTotal(prev => Math.max(prev - 1, 0));
-          Toast.success('已移入回收站');
+          if (result.draftCleanupFailed || result.subtreeCollectionFailed) {
+            Toast.warning('已移入回收站，但本地文本草稿可能未完整清理');
+          } else {
+            Toast.success('已移入回收站');
+          }
         } catch (error: any) {
           runtimeLogger.error('删除漫画归档卡片失败:', error);
           Toast.error(error?.message || '删除失败');
         }
       },
     });
-  }, [libraryId]);
+  }, [closeTabByNodeId, libraryId, viewerAccountScope]);
 
   const contextMenuItems = useMemo<ContextMenuItem[]>(() => {
     const card = menuState.card;

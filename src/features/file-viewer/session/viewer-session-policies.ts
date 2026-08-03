@@ -11,7 +11,7 @@ export interface ViewerSessionPolicy {
 export const viewerSessionPolicies = {
   image: {
     defaultHotCost: 'medium',
-    warm: 'none',
+    warm: 'memory',
     cold: 'none',
     closeBehavior: 'discard',
     hasDraft: false,
@@ -95,7 +95,7 @@ export const viewerSessionPolicies = {
   },
   gallery_archive: {
     defaultHotCost: 'heavy',
-    warm: 'none',
+    warm: 'memory',
     cold: 'none',
     closeBehavior: 'discard',
     hasDraft: false,

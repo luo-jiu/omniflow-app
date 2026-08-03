@@ -26,6 +26,10 @@
   - PDF 预览区域、分页外观和底部工具栏样式
 - `pdf-viewer-session.ts`
   - PDF snapshot schema、payload 类型和反序列化校验
+- `pdf-viewer-navigation.ts`
+  - 页码跳转、布局稳定判断和 viewport anchor 解析
+- `pdf-viewer-navigation.test.ts`
+  - 未渲染页跳转、页间 gap、布局稳定和边界位置单元测试
 - `docs/viewers/pdf-viewer.md`
   - 当前说明
 
@@ -65,6 +69,8 @@ PDF adapter 使用 schema version 1，payload 包括：
 - `anchorOffsetRatio`
 
 滚动时按动画帧更新 snapshot，active 变为 false 和组件卸载时再次 capture。`reloadToken` 只作为当前 runtime 的失效 generation；变化时删除同资源旧 snapshot，不进入 resource key，也不会留下旧 token 孤儿项。普通关闭 tab 按 PDF policy 保留阅读位置，显式释放资料库或 session 时统一由公共 runtime 清理。
+
+session restore 可能早于 PDF 页数解析完成。此时只先恢复 snapshot/ref，不能把大于当前临时 `max=1` 的页码交给页码控件；文档解析出真实页数后，才同时提交 `numPages` 和受控 `currentPage`。否则 Semi `InputNumber` 会把页码判为非法，并且不会只因后续 `max` 变化重新格式化显示值。
 
 ### 3.3 anchor 恢复优先于纯 scrollTop
 
@@ -196,26 +202,29 @@ PDF adapter 使用 schema version 1，payload 包括：
 1. 设置 `pendingJumpPageRef`
 2. 尝试优先用已渲染页的 DOM 定位
 3. 如果目标页还没渲染，就用估算高度计算目标偏移
-4. 平滑滚动到目标位置
-5. 同步更新 snapshot
+4. 保持 jump pending，等待目标页和当前渲染窗口测量稳定
+5. 用目标页精确 DOM 位置完成定位并同步 snapshot
 
 这说明它并不是只能跳到“已在屏幕上的页”，而是有一套针对未渲染页的估算跳转机制。
 
 ### 5.5 缩放与重排恢复
 
-缩放变化会触发：
+缩放和 stage 宽度变化都会触发分页重排。当前处理顺序是：
 
-- stage render width 重算
+- 在旧布局仍有效时捕获当前 `anchorPage + anchorOffsetRatio`
+- 建立 pending restore，阻止重排中的原生 scroll clamp 改写当前页
+- debounce 后提交新的 stage render width
 - 页高缓存清空
 - layout revision 增加
-- pending restore 重新执行
+- 目标页及其之前的渲染窗口测量稳定后，按 anchor 完成 restore
 
-所以缩放不仅是 UI 数值变化，它会影响整套分页布局和恢复逻辑。
+所以缩放或打开右侧 DevTools 这类宽度变化不仅是 UI 尺寸变化，它们都会影响整套分页布局和恢复逻辑。
 
 ## 6. 当前最值得小心的点
 
 - `anchorPage` 比 `scrollTop` 更关键，恢复逻辑不要只盯 `scrollTop`
 - 缩放会导致页高估算失效，所以重排时必须重新走恢复链路
+- stage 宽度变化必须在提交新宽度前捕获 anchor，不能等浏览器把 `scrollTop` clamp 到新范围后再推导当前页
 - 虚拟 spacer 高度依赖平均页高和已测量页高，修改时要防止跳页或滚动漂移
 - `currentPage` 是滚动派生状态，不要把它当成唯一输入状态反向驱动一切
 - `pdfDoc` 和 `loadingTask` 都有资源释放语义，生命周期改动时要确认销毁逻辑
@@ -252,7 +261,9 @@ PDF adapter 使用 schema version 1，payload 包括：
 3. 页码输入框、上一页、下一页都能正确跳转。
 4. 缩放后仍能维持合理阅读位置，不会明显跳页。
 5. 切换 tab 再回来后，页码和阅读位置仍能恢复。
-6. 新窗口打开和下载按钮仍然正常。
+6. 关闭 tab 再打开符合 `retain-reading-position`，实际视口和页码控件显示一致。
+7. 调整窗口宽度或打开/关闭右侧 DevTools 后，仍按页锚点保持阅读位置。
+8. 新窗口打开和下载按钮仍然正常。
 
 ## 10. 维护规则
 

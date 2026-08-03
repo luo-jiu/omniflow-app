@@ -53,6 +53,11 @@ export class ViewerSessionRuntime {
     });
   }
 
+  disposeResource(identity: ViewerResourceKey) {
+    this.registry.disposeResource(identity, 'resource-closed');
+    this.resourceReloadTokens.delete(serializeViewerResourceKey(identity));
+  }
+
   createLiveInstanceKey(options: { libraryId: number; tabId: string }) {
     if (!this.active) return null;
     const slotKey = JSON.stringify([this.runtimeSessionId, options.libraryId, options.tabId]);

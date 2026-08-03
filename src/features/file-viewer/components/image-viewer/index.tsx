@@ -19,12 +19,24 @@ import {
 } from '@/features/file-explorer/services/file.api';
 import { buildFileFullName } from '@/utils/fileTreeSettings';
 import { runtimeLogger } from '@/utils/runtimeLogger';
+import { useViewerSession, type ViewerSessionAdapter } from '@/features/file-viewer/session';
+import {
+  IMAGE_VIEWER_SESSION_ESTIMATED_BYTES,
+  IMAGE_VIEWER_SESSION_SCHEMA_VERSION,
+  parseImageViewerSessionSnapshot,
+  type ImageViewerSessionSnapshot,
+} from './image-viewer-session';
 
 interface ImageViewerProps {
+  accountScope: string | null;
+  libraryId: number | null;
   nodeId?: number | null;
   url: string;
   fileName?: string | null;
   active?: boolean;
+  contentRevision: string | null;
+  reloadToken?: number;
+  tabId: string;
 }
 
 interface Point {
@@ -55,10 +67,15 @@ function isHeicFile(fileName?: string | null): boolean {
 }
 
 const ImageViewer: React.FC<ImageViewerProps> = ({
+  accountScope,
+  libraryId,
   nodeId,
   url,
   fileName,
   active = true,
+  contentRevision,
+  reloadToken = 0,
+  tabId,
 }) => {
   const [baseScale, setBaseScale] = useState(1);
   const [zoom, setZoom] = useState(1);
@@ -83,6 +100,19 @@ const ImageViewer: React.FC<ImageViewerProps> = ({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const imageRef = useRef<HTMLImageElement | null>(null);
   const imageNaturalRef = useRef({ width: 0, height: 0 });
+  const activeRef = useRef(active);
+  const loadedResourceUrlRef = useRef('');
+  const offsetRef = useRef<Point>({ x: 0, y: 0 });
+  const pendingSessionRestoreRef = useRef<{
+    resourceUrl: string;
+    snapshot: ImageViewerSessionSnapshot;
+  } | null>(null);
+  const rotateStepsRef = useRef(0);
+  const zoomRef = useRef(1);
+  activeRef.current = active;
+  offsetRef.current = offset;
+  rotateStepsRef.current = rotateSteps;
+  zoomRef.current = zoom;
   const isHeic = useMemo(() => isHeicFile(fileName), [fileName]);
   const imageUrl = isHeic ? previewUrl : url;
 
@@ -98,7 +128,93 @@ const ImageViewer: React.FC<ImageViewerProps> = ({
     return Math.min(containerWidth / imageWidth, containerHeight / imageHeight);
   }, []);
 
+  const applySessionSnapshot = useCallback((snapshot: ImageViewerSessionSnapshot) => {
+    const container = containerRef.current;
+    const viewportWidth = Math.round(container?.clientWidth ?? 0);
+    const viewportHeight = Math.round(container?.clientHeight ?? 0);
+    const nextOffset = {
+      x: snapshot.offsetRatioX != null && viewportWidth > 0
+        ? snapshot.offsetRatioX * viewportWidth
+        : snapshot.offsetX,
+      y: snapshot.offsetRatioY != null && viewportHeight > 0
+        ? snapshot.offsetRatioY * viewportHeight
+        : snapshot.offsetY,
+    };
+    zoomRef.current = snapshot.zoom;
+    offsetRef.current = nextOffset;
+    rotateStepsRef.current = snapshot.rotateSteps;
+    setZoom(snapshot.zoom);
+    setOffset(nextOffset);
+    setRotateSteps(snapshot.rotateSteps);
+  }, []);
+
+  const resetTransformState = useCallback(() => {
+    zoomRef.current = 1;
+    offsetRef.current = { x: 0, y: 0 };
+    rotateStepsRef.current = 0;
+    setZoom(1);
+    setOffset({ x: 0, y: 0 });
+    setRotateSteps(0);
+    setIsDragging(false);
+    setIsPanMode(false);
+    setCropMode(false);
+    setCropBounds(null);
+    setCropSelection(null);
+  }, []);
+
+  const captureImageSnapshot = useCallback((): ImageViewerSessionSnapshot | null => {
+    if (imageNaturalRef.current.width <= 0 || imageNaturalRef.current.height <= 0) return null;
+    const container = containerRef.current;
+    const viewportWidth = Math.round(container?.clientWidth ?? 0);
+    const viewportHeight = Math.round(container?.clientHeight ?? 0);
+    return {
+      zoom: zoomRef.current,
+      offsetX: offsetRef.current.x,
+      offsetY: offsetRef.current.y,
+      offsetRatioX: viewportWidth > 0 ? offsetRef.current.x / viewportWidth : null,
+      offsetRatioY: viewportHeight > 0 ? offsetRef.current.y / viewportHeight : null,
+      rotateSteps: rotateStepsRef.current,
+    };
+  }, []);
+
+  const restoreImageSnapshot = useCallback((payload: ImageViewerSessionSnapshot) => {
+    const snapshot = parseImageViewerSessionSnapshot(payload);
+    if (!snapshot) return;
+    pendingSessionRestoreRef.current = { resourceUrl: url, snapshot };
+    if (
+      loadedResourceUrlRef.current === url
+      && imageNaturalRef.current.width > 0
+      && imageNaturalRef.current.height > 0
+    ) {
+      pendingSessionRestoreRef.current = null;
+      applySessionSnapshot(snapshot);
+    }
+  }, [applySessionSnapshot, url]);
+
+  const sessionAdapter = useMemo<ViewerSessionAdapter<ImageViewerSessionSnapshot>>(() => ({
+    capture: captureImageSnapshot,
+    restore: restoreImageSnapshot,
+    suspend: () => undefined,
+    resume: () => undefined,
+    estimateCost: () => IMAGE_VIEWER_SESSION_ESTIMATED_BYTES,
+    getPinReasons: () => (activeRef.current ? ['active'] : []),
+  }), [captureImageSnapshot, restoreImageSnapshot]);
+
+  useViewerSession({
+    accountScope,
+    active,
+    adapter: sessionAdapter,
+    contentRevision,
+    libraryId,
+    nodeId: nodeId ?? null,
+    reloadToken,
+    schemaVersion: IMAGE_VIEWER_SESSION_SCHEMA_VERSION,
+    tabId,
+    viewerKind: 'image',
+  });
+
   const fitToViewport = useCallback((attempt = 0) => {
+    if (loadedResourceUrlRef.current !== url) return;
     const container = containerRef.current;
     const { width: imageWidth, height: imageHeight } = imageNaturalRef.current;
     if (!container || imageWidth <= 0 || imageHeight <= 0) return;
@@ -114,18 +230,18 @@ const ImageViewer: React.FC<ImageViewerProps> = ({
 
     const nextBase = computeContainScale(viewportWidth, viewportHeight, imageWidth, imageHeight);
     setBaseScale(Number.isFinite(nextBase) && nextBase > 0 ? nextBase : 1);
-    setZoom(1);
-    setOffset({ x: 0, y: 0 });
-    setRotateSteps(0);
-    setIsDragging(false);
-    setIsPanMode(false);
-    setCropMode(false);
-    setCropBounds(null);
-    setCropSelection(null);
-  }, [computeContainScale]);
+    const pendingRestore = pendingSessionRestoreRef.current;
+    if (pendingRestore?.resourceUrl === url) {
+      pendingSessionRestoreRef.current = null;
+      applySessionSnapshot(pendingRestore.snapshot);
+      return;
+    }
+    resetTransformState();
+  }, [applySessionSnapshot, computeContainScale, resetTransformState, url]);
 
   // 重置视图：完整显示图片（上下左右都可见）并尽量大
   const resetView = useCallback(() => {
+    pendingSessionRestoreRef.current = null;
     fitToViewport(0);
   }, [fitToViewport]);
 
@@ -144,23 +260,21 @@ const ImageViewer: React.FC<ImageViewerProps> = ({
       width: img.naturalWidth,
       height: img.naturalHeight,
     });
+    loadedResourceUrlRef.current = url;
     fitToViewport(0);
-  }, [fitToViewport]);
+  }, [fitToViewport, url]);
 
   // 切换图片时清空上一张图的尺寸和拖拽状态，避免“旧尺寸残留”
   useEffect(() => {
+    loadedResourceUrlRef.current = '';
+    if (pendingSessionRestoreRef.current?.resourceUrl !== url) {
+      pendingSessionRestoreRef.current = null;
+    }
     setNaturalSize({ width: 0, height: 0 });
     setBaseScale(1);
-    setZoom(1);
-    setOffset({ x: 0, y: 0 });
-    setRotateSteps(0);
-    setIsDragging(false);
-    setIsPanMode(false);
-    setCropMode(false);
-    setCropBounds(null);
-    setCropSelection(null);
+    resetTransformState();
     imageNaturalRef.current = { width: 0, height: 0 };
-  }, [url]);
+  }, [resetTransformState, url]);
 
   useEffect(() => {
     let cancelled = false;

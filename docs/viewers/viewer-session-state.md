@@ -1,9 +1,9 @@
 # Viewer Session 状态架构
 
-更新时间：2026-07-31
+更新时间：2026-08-03
 适用范围：`src/components/business/app-main/`、`src/contexts/FileViewerContext.tsx`、`src/features/file-viewer/`、`src/features/archive-viewer/`、`src/features/workspace-resource-release/` 中与 viewer tab 保活、阅读现场、编辑草稿、缓存恢复和资源释放相关的代码。
 
-状态：目标架构已确定，阶段 0、阶段 1 公共内核和阶段 2 的 PDF/Text 双样本代码迁移已完成。PDF 长文档恢复与 Text 草稿跨重启/冲突恢复仍需 Electron 样本人工验收；其他 viewer 尚未迁移。本文同时记录当前事实、目标契约和分阶段迁移门槛。
+状态：目标架构已确定，阶段 0、阶段 1 公共内核和阶段 2 的 PDF/Text 双样本代码迁移与 Electron 真实样本验收已完成；阶段 3 的 Image、Gallery 和 Gallery Archive 已完成代码迁移与 Electron 真实样本验收。本文同时记录当前事实、目标契约和分阶段迁移门槛。
 
 ## 1. 目标
 
@@ -42,7 +42,7 @@ Viewer Session 治理需要同时解决以下问题：
 
 ### 2.3 Viewer snapshot 当前各自维护
 
-除已迁移的 PDF 外，当前漫画、图集、ASMR、视频进度和多数归档 viewer 仍分别维护独立模块级 `Map`。常见实现重复包含：
+除已迁移的 Image、PDF、Text、Gallery 和 Gallery Archive 外，当前漫画、ASMR、视频进度和多数归档 viewer 仍分别维护独立模块级 `Map`。常见实现重复包含：
 
 - cache key 拼装
 - `Map` 读写
@@ -56,19 +56,19 @@ Viewer Session 治理需要同时解决以下问题：
 
 | Viewer | Hot 实例 | Warm 快照 | 远端进度 | 主要缺口 |
 | --- | --- | --- | --- | --- |
-| Image | 有 | 无 | 无 | 缩放、平移、旋转在真卸载后丢失 |
+| Image | 有 | 公共 registry：缩放、比例/绝对平移、旋转 | 无 | adapter/codec 已接入，并通过 Electron 真实图片样本验收 |
 | Audio | 有；播放由全局音频服务持有 | 无独立 UI 快照 | 无 | 播放资源和 viewer UI 生命周期未统一分类 |
 | Video | 有；视频元素由全局服务保活 | 播放进度 | `viewMeta` 播放进度 | 字幕选择、倍速、工具台等 UI 现场不完整 |
-| PDF | 有 | 公共 registry：页码、缩放、滚动、比例、页锚点 | 无 | adapter/codec 已接入；跨重启 Cold 恢复未启用 |
-| Text | 有 | 公共 registry：选区、顶部行、滚动、字号、换行 | IndexedDB dirty draft | UI adapter/codec 与 DraftStore 已接入；后端稳定 revision 和人工恢复验收仍待补齐 |
+| PDF | 有 | 公共 registry：页码、缩放、滚动、比例、页锚点 | 无 | adapter/codec 已接入并通过 80 页 Electron 样本验收；跨重启 Cold 恢复未启用 |
+| Text | 有 | 公共 registry：选区、顶部行、滚动、字号、换行 | IndexedDB dirty draft | adapter/codec 与 DraftStore 已接入并通过 Electron 草稿恢复、冲突和保存并发验收；后端稳定 revision 尚未提供 |
 | Comic | 有 | 页列表、渲染窗口、滚动、页锚点 | `viewMeta` 阅读进度 | 阅读模式、布局、缩放等偏好没有完整进入 session |
-| Gallery | 有 | 媒体列表、临时链接、滚动、详情图片现场 | 无 | 普通卸载已可恢复，关闭 tab 显式清理；快照仍含临时 URL |
+| Gallery | 有 | 公共 registry：详情节点、网格锚点 / 比例、图片变换 | 无 | adapter/codec 已接入；临时链接和 HEIC 预览不进入 snapshot |
 | ASMR | 有 | 路径、列表、选择、封面和音频上下文 | `viewMeta` 仅承担集合元信息 | 没有列表滚动位置；快照含临时音频 URL |
 | Video Archive | 有 | 卡片、分页、`scrollTop` | 无 | 刷新已按 generation 失效；原始像素恢复仍较脆弱 |
 | Audio Archive | 有 | 卡片、分页、选择、播放上下文、`scrollTop` | 无 | 刷新已按 generation 失效；快照仍含临时音频 URL |
 | ASMR Archive | 有 | 卡片、分页、滚动比例和卡片锚点 | 写入 `viewMeta` 阅读进度 | 刷新已按 generation 失效；远端冷恢复路径不完整 |
 | Comic Archive | 有 | 卡片、分页、滚动比例和卡片锚点 | 写入 `viewMeta` 阅读进度 | 远端冷恢复路径不完整；仍是独立 cache |
-| Gallery Archive | 有 | 无 | 无 | 卡片列表、封面解析结果和滚动位置全部依赖实例 |
+| Gallery Archive | 有 | 公共 registry：卡片锚点、比例和绝对滚动 | 无 | adapter/codec 已接入并通过 Electron 长卡片墙样本验收；卡片与临时封面重新加载 |
 
 ### 2.5 已确认的系统性缺口
 
@@ -86,7 +86,7 @@ Text Viewer 曾在 render 中创建新的 CodeMirror `basicSetup` 对象。activ
 
 #### 关闭、卸载和显式释放语义混杂
 
-- Gallery 已区分普通卸载与关闭：普通卸载保留快照，关闭 tab 通过显式入口清理。
+- Gallery 已迁移到公共 registry，并区分普通卸载与关闭：普通卸载保留快照，关闭 tab 通过 policy 精确清理。
 - PDF 按 policy 明确保留关闭前阅读位置；Comic、ASMR 和多数归档 viewer 的关闭语义仍依赖 legacy cache。
 - `viewer-snapshot-release.ts` 通过手工 `switch(fileType)` 清理已接入类型。
 - 如果资料库 tab 元数据已经被 12 项 LRU 淘汰，单库释放无法再通过 tabs 枚举该库历史 snapshot。
@@ -95,7 +95,7 @@ Text Viewer 曾在 render 中创建新的 CodeMirror `basicSetup` 对象。activ
 
 #### 快照混入了临时资源地址
 
-Gallery、ASMR、Audio Archive、Video Archive 等快照会保存临时文件、封面、音频或视频链接。签名 URL 有过期时间，不是可持久化身份。长时间保留后，即使命中快照也可能恢复出失效资源。
+ASMR、Audio Archive、Video Archive 等 legacy 快照仍会保存临时文件、封面、音频或视频链接。Gallery 已在公共 registry 迁移中移除这些字段。签名 URL 有过期时间，不是可持久化身份；其他 viewer 后续迁移时同样只能保存稳定节点身份和可重建数据。
 
 目标快照只能保存稳定节点身份和可重建数据。临时 URL 只能进入带明确 `expiresAt` 的短期资源 cache，恢复时过期就重新解析。
 
@@ -125,7 +125,7 @@ Comic Archive 和 ASMR Archive 会把阅读位置写入 `viewMeta`，但当前�
 - Warm registry 只接受 plain JSON payload，写入和读取都会脱离调用方对象引用；同时按条目数和估算字节预算执行 LRU。
 - schema 或 content revision 不匹配时跳过并删除旧 snapshot；显式 replace 事务会先 capture 旧实例，再注册新资源。
 - registry runtime 在 application/auth session 级注册；认证 bootstrap 会先启动 runtime 再提交用户状态，受保护路由在 bootstrap 完成前不挂载 viewer 子树；资料库释放按 `libraryId` 清理，退出登录或 401 清理整个 session。
-- 迁移期 workspace release 同时清公共 registry 和 legacy cache；PDF/Text 已接入公共 registry，其他已带 snapshot 的 viewer 仍写 legacy cache，没有双写。
+- 迁移期 workspace release 同时清公共 registry 和 legacy cache；Image/PDF/Text/Gallery/Gallery Archive 已接入公共 registry，其他已带 snapshot 的 viewer 仍写 legacy cache，没有双写。
 - `useViewerSession` 统一处理 adapter 注册、mount generation、schema/revision restore、active flush、cleanup capture 和 reload generation 失效；具体 payload/codec 继续留在 viewer 目录。
 - `ViewerDraftStore` 使用 IndexedDB 独立持久化 Text dirty content；按 resource slot 保留最新 draft，并用 draft key 中的 revision 做冲突判断。默认限制为单草稿 5 MiB、单账号 50 MiB、保留 30 天，存储失败不会把 dirty 状态降级成已安全落盘。
 
@@ -471,17 +471,20 @@ src/features/file-viewer/session/
 
 ### 阶段 2：双样本纵向验证
 
-当前状态：PDF/Text 代码迁移和自动化测试已完成；Electron 中的 PDF 长文档恢复，以及 Text 草稿跨重启、冲突选择和保存后清理仍需真实样本人工验收。
+当前状态：PDF/Text 代码迁移、自动化测试和 Electron 真实样本人工验收均已完成。
 
-- PDF：已迁移现有成熟 anchor snapshot；独立 `pdf-viewer-cache.ts` 和 legacy release 分支已删除，reload generation 由公共 runtime 精确失效。
+- PDF：已迁移现有成熟 anchor snapshot；独立 `pdf-viewer-cache.ts` 和 legacy release 分支已删除，reload generation 由公共 runtime 精确失效。80 页样本已验证页码跳转、缩放锚点、Text/PDF 热 tab 往返、工具区往返、关闭重开续读和工作区宽度变化；实际视口、受控页码和 snapshot 保持一致。
 - Text：已接入最小 IndexedDB DraftStore 与公共 registry；草稿输入 debounce，失活/卸载/pagehide 尽力 flush，恢复必须显式选择，revision 不同会显示冲突提示；UI snapshot 不含正文，只保存选区、顶部行、滚动、字号和换行。
-- Text 保存成功会清除已提交 draft；保存请求期间产生的新编辑不会被旧正文覆盖，而是基于已保存正文的新 hash 继续落为 dirty draft。
-- 文件树确认删除成功后按当前账号批量清对应节点 Text draft，并提升 draft writer generation，阻止旧组件延迟 cleanup 写回；后端删除失败的节点不会被误判为已删除并关闭 tab。
+- Text 真实样本已验证跨应用重启恢复、revision 冲突的“使用最新文件/恢复草稿”两条分支、保存后清理、保存期间继续编辑、保存期间切换 tab，以及关闭原 tab 后旧保存回调不重建 tab。
+- Text 保存成功会清除已提交 draft；保存请求期间产生的新编辑不会被旧正文覆盖，而是基于已保存正文的新 hash 继续落为 dirty draft。后续 draft 写入失败时保持 dirty 并显示警告，不能用成功提示掩盖；签名 URL 只静默更新发起保存的现存 tab，不激活或重建已关闭 tab。
+- 节点软删除、彻底删除和清空回收站统一通过 node deletion service 收口；后端确认成功后按当前账号批量清对应节点 Text draft，并提升 draft writer generation，阻止旧组件延迟 cleanup 写回。后端删除失败的节点不会被误判为已删除或提前清草稿。
 - 迁移完成后删除 PDF/Text 旧 cache 或无快照实现，不能长期双写。
 
 这两个样本分别覆盖异步文档布局和可编辑草稿，足以验证公共契约是否成立。
 
 ### 阶段 3：补齐所有 viewer
+
+当前状态：Image 已完成公共 adapter、snapshot codec、关闭资源精确释放、dispatcher/policy 接线、自动化门禁和 Electron 真实图片样本验收。Gallery 已完成公共 adapter/codec、稳定节点详情恢复、网格锚点 / 比例恢复、临时 URL 剥离、legacy cache 移除和 Electron 真实图集样本验收。Gallery Archive 已完成公共 adapter/codec、卡片锚点 / 比例恢复、显式身份接线和临时封面剥离；25 张卡片的 Electron 长卡片墙样本已验证文件 tab 往返、工作区真卸载、reload 和关闭重开语义。
 
 建议顺序：
 
@@ -548,6 +551,8 @@ Text 额外验证：
 - dirty draft 在切 tab、Hot 淘汰、路由卸载和应用重启后可恢复。
 - 远端内容 revision 变化时提示冲突，不静默覆盖草稿。
 - 保存成功后 draft 清除，但当前阅读位置不重置。
+- 保存过程中切换或关闭 tab 后，旧异步回调不改变当前 active tab，也不重新创建已关闭 tab。
+- 保存期间继续编辑且 DraftStore 写入失败时，dirty 保持且反馈不能声称草稿已持久化。
 
 媒体额外验证：
 

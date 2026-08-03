@@ -4,9 +4,9 @@ import { GalleryArchiveViewerWrapper } from './style';
 import { useArchiveCardGrid } from '@/features/archive-viewer/hooks/useArchiveCardGrid';
 import {
   batchGetFileLinks,
-  deleteNodeAndChildren,
   getChildrenByNodeId,
 } from '@/features/file-explorer/services/file.api';
+import { softDeleteNodeSubtree } from '@/features/file-explorer/services/node-deletion';
 import { locateNodeInDirectoryTree } from '@/features/file-explorer/services/tree-locate';
 import { useNodePropertiesOverlay } from '@/features/file-explorer/hooks/useNodePropertiesOverlay';
 import ContextMenu, { ContextMenuItem } from '@/components/ui/context-menu';
@@ -15,14 +15,26 @@ import { buildFileViewerReturnTarget } from '@/contexts/file-viewer-return-targe
 import { useFileViewer } from '@/hooks/useFileViewer';
 import { buildFileFullName } from '@/utils/fileTreeSettings';
 import { runtimeLogger } from '@/utils/runtimeLogger';
+import { useViewerSession, type ViewerSessionAdapter } from '@/features/file-viewer/session';
+import {
+  GALLERY_ARCHIVE_VIEWER_SESSION_ESTIMATED_BYTES,
+  GALLERY_ARCHIVE_VIEWER_SESSION_SCHEMA_VERSION,
+  parseGalleryArchiveViewerSessionSnapshot,
+  resolveGalleryArchiveRestoreScrollTop,
+  type GalleryArchiveViewerSessionSnapshot,
+} from './gallery-archive-viewer-session';
 
 interface GalleryArchiveViewerProps {
+  accountScope: string | null;
+  contentRevision: string | null;
   folderNodeId: number | null;
   fileUrl: string;
   fileName?: string | null;
+  libraryId: number | null;
   active?: boolean;
   reloadToken?: number;
   returnTarget?: FileViewerReturnTarget | null;
+  tabId: string;
 }
 
 interface GalleryArchiveNode {
@@ -52,13 +64,6 @@ const IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 's
 const VIDEO_EXTENSIONS = new Set(['mp4', 'm4v', 'webm', 'mkv', 'mov', 'avi', 'ts', 'flv', 'f4v', 'mpeg', 'mpg', 'wmv', 'ogv', '3gp']);
 const LINK_EXPIRY_MINUTES = 240;
 const COVER_LOAD_CONCURRENCY = 3;
-
-function parseGalleryArchiveLibraryId(fileUrl: string): number | null {
-  const matches = /^gallery-archive:\/\/library\/(\d+)\/node\/\d+$/i.exec(String(fileUrl || '').trim());
-  if (!matches) return null;
-  const parsed = Number(matches[1]);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
-}
 
 function normalizeArchiveTitle(fileName?: string | null): string {
   const raw = String(fileName || '').trim();
@@ -111,20 +116,23 @@ function isHeicNode(item?: GalleryArchiveNode | null): boolean {
 }
 
 const GalleryArchiveViewer: React.FC<GalleryArchiveViewerProps> = ({
+  accountScope,
+  contentRevision,
   folderNodeId,
   fileUrl,
   fileName,
+  libraryId,
   active = true,
   reloadToken = 0,
   returnTarget = null,
+  tabId,
 }) => {
   const { viewportRef, wrapperStyle } = useArchiveCardGrid({
     baseCardWidth: 220,
     minScale: 0.82,
     gridGap: 18,
   });
-  const { setFileUrl } = useFileViewer();
-  const libraryId = useMemo(() => parseGalleryArchiveLibraryId(fileUrl), [fileUrl]);
+  const { closeTabByNodeId, setFileUrl } = useFileViewer();
   const title = useMemo(() => normalizeArchiveTitle(fileName), [fileName]);
   const currentArchiveReturnTarget = useMemo<FileViewerReturnTarget | null>(() => {
     if (!folderNodeId || !libraryId) return null;
@@ -158,6 +166,74 @@ const GalleryArchiveViewer: React.FC<GalleryArchiveViewerProps> = ({
   const detailInflightRef = useRef(0);
   const detailGenerationRef = useRef(0);
   const cardsRef = useRef<GalleryArchiveCard[]>([]);
+  const activeRef = useRef(active);
+  const archiveLoadedRef = useRef(false);
+  const restoreFrameRef = useRef<number | null>(null);
+  const pendingSessionRestoreRef = useRef<{
+    reloadToken: number;
+    resourceNodeId: number | null;
+    snapshot: GalleryArchiveViewerSessionSnapshot;
+  } | null>(null);
+  activeRef.current = active;
+  cardsRef.current = cards;
+
+  const captureArchiveSnapshot = useCallback((): GalleryArchiveViewerSessionSnapshot | null => {
+    if (!archiveLoadedRef.current) return null;
+    const viewport = viewportRef.current;
+    if (!viewport) return null;
+    const scrollTop = viewport.scrollTop;
+    const maxScrollable = Math.max(viewport.scrollHeight - viewport.clientHeight, 0);
+    let anchorCard: GalleryArchiveCard | null = null;
+    let anchorElement: HTMLButtonElement | null = null;
+    let anchorTop = Number.NEGATIVE_INFINITY;
+    cardsRef.current.forEach((card) => {
+      const element = cardElementMapRef.current.get(card.id);
+      if (!element || element.offsetTop > scrollTop + 1 || element.offsetTop <= anchorTop) return;
+      anchorCard = card;
+      anchorElement = element;
+      anchorTop = element.offsetTop;
+    });
+    if (!anchorElement && cardsRef.current.length > 0) {
+      anchorCard = cardsRef.current[0];
+      anchorElement = cardElementMapRef.current.get(anchorCard.id) ?? null;
+      anchorTop = anchorElement?.offsetTop ?? 0;
+    }
+    const anchorHeight = Math.max(anchorElement?.offsetHeight ?? 0, 1);
+    return {
+      anchorCardId: anchorCard?.id ?? null,
+      anchorOffsetRatio: Math.min(Math.max((scrollTop - Math.max(anchorTop, 0)) / anchorHeight, 0), 1),
+      scrollRatio: maxScrollable > 0 ? scrollTop / maxScrollable : null,
+      scrollTop: Math.max(scrollTop, 0),
+    };
+  }, [viewportRef]);
+
+  const restoreArchiveSnapshot = useCallback((payload: GalleryArchiveViewerSessionSnapshot) => {
+    const snapshot = parseGalleryArchiveViewerSessionSnapshot(payload);
+    if (!snapshot) return;
+    pendingSessionRestoreRef.current = { reloadToken, resourceNodeId: folderNodeId, snapshot };
+  }, [folderNodeId, reloadToken]);
+
+  const sessionAdapter = useMemo<ViewerSessionAdapter<GalleryArchiveViewerSessionSnapshot>>(() => ({
+    capture: captureArchiveSnapshot,
+    restore: restoreArchiveSnapshot,
+    suspend: () => undefined,
+    resume: () => undefined,
+    estimateCost: () => GALLERY_ARCHIVE_VIEWER_SESSION_ESTIMATED_BYTES,
+    getPinReasons: () => (activeRef.current ? ['active'] : []),
+  }), [captureArchiveSnapshot, restoreArchiveSnapshot]);
+
+  useViewerSession({
+    accountScope,
+    active,
+    adapter: sessionAdapter,
+    contentRevision,
+    libraryId,
+    nodeId: folderNodeId,
+    reloadToken,
+    schemaVersion: GALLERY_ARCHIVE_VIEWER_SESSION_SCHEMA_VERSION,
+    tabId,
+    viewerKind: 'gallery_archive',
+  });
 
   const closeContextMenu = useCallback(() => {
     setMenuState(prev => ({ ...prev, visible: false }));
@@ -244,9 +320,18 @@ const GalleryArchiveViewer: React.FC<GalleryArchiveViewerProps> = ({
             centered: true,
             onOk: async () => {
               try {
-                await deleteNodeAndChildren(card.id, libraryId);
+                const result = await softDeleteNodeSubtree({
+                  accountScope,
+                  ancestorId: card.id,
+                  libraryId,
+                });
+                result.deletedNodeIds.forEach(closeTabByNodeId);
                 setCards(prev => prev.filter(item => item.id !== card.id));
-                Toast.success('已移入回收站');
+                if (result.draftCleanupFailed || result.subtreeCollectionFailed) {
+                  Toast.warning('已移入回收站，但本地文本草稿可能未完整清理');
+                } else {
+                  Toast.success('已移入回收站');
+                }
               } catch (deleteError: any) {
                 runtimeLogger.error('删除图集归档卡片失败:', deleteError);
                 Toast.error(deleteError?.message || '删除失败');
@@ -256,11 +341,15 @@ const GalleryArchiveViewer: React.FC<GalleryArchiveViewerProps> = ({
         },
       },
     ];
-  }, [closeContextMenu, libraryId, menuState.card, openCard, showNodeProperties]);
-
-  useEffect(() => {
-    cardsRef.current = cards;
-  }, [cards]);
+  }, [
+    closeContextMenu,
+    closeTabByNodeId,
+    libraryId,
+    menuState.card,
+    openCard,
+    showNodeProperties,
+    accountScope,
+  ]);
 
   const createGalleryCard = useCallback((node: GalleryArchiveNode): GalleryArchiveCard => ({
     id: Number(node.id),
@@ -376,11 +465,22 @@ const GalleryArchiveViewer: React.FC<GalleryArchiveViewerProps> = ({
 
   useEffect(() => {
     let cancelled = false;
+    if (restoreFrameRef.current !== null) {
+      window.cancelAnimationFrame(restoreFrameRef.current);
+      restoreFrameRef.current = null;
+    }
+    if (pendingSessionRestoreRef.current?.reloadToken !== reloadToken) {
+      pendingSessionRestoreRef.current = null;
+    }
+    archiveLoadedRef.current = false;
     detailGenerationRef.current += 1;
     cardElementMapRef.current.clear();
     loadingDetailIdsRef.current.clear();
     detailQueueRef.current = [];
     detailInflightRef.current = 0;
+    if (viewportRef.current) {
+      viewportRef.current.scrollTop = 0;
+    }
     async function load() {
       if (!folderNodeId || !libraryId) {
         setCards([]);
@@ -397,7 +497,9 @@ const GalleryArchiveViewer: React.FC<GalleryArchiveViewerProps> = ({
           .filter(isGalleryDirectory);
         const nextCards = galleryNodes.map(node => createGalleryCard(node));
         if (!cancelled) {
+          cardsRef.current = nextCards;
           setCards(nextCards);
+          archiveLoadedRef.current = true;
         }
       } catch (loadError) {
         runtimeLogger.error('加载图集归档失败:', loadError);
@@ -416,7 +518,52 @@ const GalleryArchiveViewer: React.FC<GalleryArchiveViewerProps> = ({
       cancelled = true;
       detailGenerationRef.current += 1;
     };
-  }, [createGalleryCard, folderNodeId, libraryId, reloadToken]);
+  }, [createGalleryCard, folderNodeId, libraryId, reloadToken, viewportRef]);
+
+  useEffect(() => {
+    if (loading || !archiveLoadedRef.current) return;
+    const pendingRestore = pendingSessionRestoreRef.current;
+    if (!pendingRestore) return;
+    if (
+      pendingRestore.resourceNodeId !== folderNodeId
+      || pendingRestore.reloadToken !== reloadToken
+    ) {
+      if (restoreFrameRef.current !== null) {
+        window.cancelAnimationFrame(restoreFrameRef.current);
+        restoreFrameRef.current = null;
+      }
+      pendingSessionRestoreRef.current = null;
+      return;
+    }
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    if (restoreFrameRef.current !== null) {
+      window.cancelAnimationFrame(restoreFrameRef.current);
+    }
+    restoreFrameRef.current = window.requestAnimationFrame(() => {
+      restoreFrameRef.current = window.requestAnimationFrame(() => {
+        restoreFrameRef.current = null;
+        const anchorElement = pendingRestore.snapshot.anchorCardId == null
+          ? null
+          : cardElementMapRef.current.get(pendingRestore.snapshot.anchorCardId) ?? null;
+        const nextScrollTop = resolveGalleryArchiveRestoreScrollTop({
+          anchorHeight: anchorElement?.offsetHeight ?? null,
+          anchorOffsetTop: anchorElement?.offsetTop ?? null,
+          maxScrollable: Math.max(viewport.scrollHeight - viewport.clientHeight, 0),
+          snapshot: pendingRestore.snapshot,
+        });
+        viewport.scrollTop = nextScrollTop;
+        pendingSessionRestoreRef.current = null;
+      });
+    });
+  }, [cards, folderNodeId, loading, reloadToken, viewportRef, wrapperStyle]);
+
+  useEffect(() => () => {
+    if (restoreFrameRef.current !== null) {
+      window.cancelAnimationFrame(restoreFrameRef.current);
+      restoreFrameRef.current = null;
+    }
+  }, []);
 
   useEffect(() => {
     if (loading || cards.length === 0) return;

@@ -1,6 +1,6 @@
 # Viewer 文档入口
 
-更新时间：2026-07-31
+更新时间：2026-08-03
 适用范围：`file-viewer`、`archive-viewer` 以及后续各类具体 viewer 的长期说明文档。
 
 ## 1. 作用
@@ -32,6 +32,8 @@
   - 图集 viewer 的相册网格、图片 / 视频详情切换、缩略图链接加载和 MediaHub 接入
 - `gallery-archive-viewer.md`
   - 图集归档 viewer 的相册分类卡片、封面来源和逐层进入规则
+- `image-viewer.md`
+  - 普通图片 viewer 的缩放、平移、旋转、裁剪边界和 Warm session 恢复
 - `pdf-viewer.md`
   - PDF viewer 的 pdf.js 渲染、窗口化分页、锚点恢复和缩放重排
 - `text-viewer.md`
@@ -55,6 +57,7 @@
    - `docs/viewers/comic-viewer.md`
    - `docs/viewers/gallery-viewer.md`
    - `docs/viewers/gallery-archive-viewer.md`
+   - `docs/viewers/image-viewer.md`
    - `docs/viewers/pdf-viewer.md`
    - `docs/viewers/text-viewer.md`
    - `docs/viewers/video-viewer.md`

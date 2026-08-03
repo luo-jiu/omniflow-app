@@ -2,15 +2,16 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Input, Modal, Popover, Spin, Toast } from '@douyinfe/semi-ui';
 import {
   batchGetFileLinks,
-  deleteNodeAndChildren,
   fetchArchiveCardsPage,
   fetchNodeDetailById,
   renameNode,
   updateNodeConfig,
 } from '@/features/file-explorer/services/file.api';
+import { softDeleteNodeSubtree } from '@/features/file-explorer/services/node-deletion';
 import { runtimeLogger } from '@/utils/runtimeLogger';
 import { AsmrArchiveViewerWrapper } from './style';
 import { useFileViewer } from '@/hooks/useFileViewer';
+import { useViewerAccountScope } from '@/features/file-viewer/session';
 import { fetchTags, type TagItem } from '@/features/tag-management/services/tag.api';
 import { useArchiveCardGrid } from '@/features/archive-viewer/hooks/useArchiveCardGrid';
 import ContextMenu, { ContextMenuItem } from '@/components/ui/context-menu';
@@ -254,7 +255,8 @@ const AsmrArchiveViewer: React.FC<AsmrArchiveViewerProps> = ({
   active = true,
   reloadToken = 0,
 }) => {
-  const { setFileUrl } = useFileViewer();
+  const { closeTabByNodeId, setFileUrl } = useFileViewer();
+  const viewerAccountScope = useViewerAccountScope();
   const { viewportRef, wrapperStyle } = useArchiveCardGrid({ baseCardWidth: 275, gridGap: 15 });
   const libraryId = useMemo(() => parseArchiveLibraryId(fileUrl), [fileUrl]);
   const title = useMemo(() => normalizeArchiveTitle(fileName), [fileName]);
@@ -419,17 +421,26 @@ const AsmrArchiveViewer: React.FC<AsmrArchiveViewerProps> = ({
       centered: true,
       onOk: async () => {
         try {
-          await deleteNodeAndChildren(card.id, libraryId);
+          const result = await softDeleteNodeSubtree({
+            accountScope: viewerAccountScope,
+            ancestorId: card.id,
+            libraryId,
+          });
+          result.deletedNodeIds.forEach(closeTabByNodeId);
           setCards(prev => prev.filter(item => item.id !== card.id));
           setTotal(prev => Math.max(prev - 1, 0));
-          Toast.success('已移入回收站');
+          if (result.draftCleanupFailed || result.subtreeCollectionFailed) {
+            Toast.warning('已移入回收站，但本地文本草稿可能未完整清理');
+          } else {
+            Toast.success('已移入回收站');
+          }
         } catch (error: any) {
           runtimeLogger.error('删除 ASMR 归档卡片失败:', error);
           Toast.error(error?.message || '删除失败');
         }
       },
     });
-  }, [libraryId]);
+  }, [closeTabByNodeId, libraryId, viewerAccountScope]);
 
   const contextMenuItems = useMemo<ContextMenuItem[]>(() => {
     const card = menuState.card;

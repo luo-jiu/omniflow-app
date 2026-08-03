@@ -294,6 +294,21 @@ export class ViewerSessionRegistry {
     return this.registerLiveInstance(nextRegistration);
   }
 
+  disposeResource(identity: ViewerResourceKey, reason = 'resource-disposed') {
+    if (!isViewerResourceKey(identity)) return false;
+    const resourceKey = serializeViewerResourceKey(identity);
+    let disposed = false;
+    if (this.deleteSnapshotEntry(resourceKey)) {
+      disposed = true;
+      this.emit({ type: 'disposed', key: resourceKey, identity, reason });
+    }
+    Array.from(this.liveEntries.entries()).forEach(([key, entry]) => {
+      if (serializeViewerResourceKey(entry.registration.identity) !== resourceKey) return;
+      disposed = this.removeLiveEntry(key, reason) || disposed;
+    });
+    return disposed;
+  }
+
   disposeLibrary(libraryId: number, accountScope?: string) {
     if (!Number.isSafeInteger(libraryId) || libraryId <= 0) return;
     Array.from(this.snapshots.entries()).forEach(([key, entry]) => {

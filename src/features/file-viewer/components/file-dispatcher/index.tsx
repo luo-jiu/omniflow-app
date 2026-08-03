@@ -126,7 +126,19 @@ const FileDispatcher: React.FC<FileDispatcherProps> = ({
 
   switch (fileType) {
     case 'image':
-      return <ImageViewer nodeId={nodeId} url={fileUrl} fileName={fileName} active={active} />;
+      return (
+        <ImageViewer
+          accountScope={accountScope}
+          active={active}
+          contentRevision={contentRevision}
+          fileName={fileName}
+          libraryId={libraryId}
+          nodeId={nodeId}
+          reloadToken={reloadToken}
+          tabId={tabId}
+          url={fileUrl}
+        />
+      );
     
     case 'audio':
       return (
@@ -193,7 +205,18 @@ const FileDispatcher: React.FC<FileDispatcherProps> = ({
       return <ComicViewer folderNodeId={nodeId} fileUrl={fileUrl} fileName={fileName} active={active} reloadToken={reloadToken} />;
 
     case 'gallery':
-      return <GalleryViewer folderNodeId={nodeId} fileUrl={fileUrl} fileName={fileName} active={active} reloadToken={reloadToken} tabId={tabId} />;
+      return (
+        <GalleryViewer
+          accountScope={accountScope}
+          active={active}
+          contentRevision={contentRevision}
+          fileName={fileName}
+          folderNodeId={nodeId}
+          libraryId={libraryId}
+          reloadToken={reloadToken}
+          tabId={tabId}
+        />
+      );
 
     case 'asmr':
       return <AsmrViewer folderNodeId={nodeId} fileUrl={fileUrl} fileName={fileName} active={active} reloadToken={reloadToken} tabId={tabId} />;
@@ -216,12 +239,16 @@ const FileDispatcher: React.FC<FileDispatcherProps> = ({
     case 'gallery_archive':
       return (
         <GalleryArchiveViewer
+          accountScope={accountScope}
+          contentRevision={contentRevision}
           folderNodeId={nodeId}
           fileUrl={fileUrl}
           fileName={fileName}
+          libraryId={libraryId}
           active={active}
           reloadToken={reloadToken}
           returnTarget={returnTarget}
+          tabId={tabId}
         />
       );
 

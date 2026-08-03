@@ -170,6 +170,26 @@ describe('ViewerSessionRegistry warm snapshots', () => {
     registry.disposeSession();
     expect(registry.getState().snapshotCount).toBe(0);
   });
+
+  it('disposes a resource without allowing old unregister cleanup to recreate a snapshot', () => {
+    const registry = new ViewerSessionRegistry();
+    const identity = resource({ nodeId: 8, viewerKind: 'image' });
+    const registration = liveRegistration({
+      generation: 0,
+      identity,
+      payload: { page: 4 },
+    });
+    registry.writeSnapshot(snapshot(identity, 3));
+    const unregister = registry.registerLiveInstance(registration);
+
+    expect(registry.disposeResource(identity, 'tab-closed')).toBe(true);
+    expect(registry.getState()).toMatchObject({
+      liveInstanceCount: 0,
+      snapshotCount: 0,
+    });
+    unregister();
+    expect(registry.readSnapshot(identity)).toBeNull();
+  });
 });
 
 describe('ViewerSessionRegistry live generations', () => {

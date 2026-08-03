@@ -1,6 +1,6 @@
 # Gallery Viewer 说明
 
-更新时间：2026-07-31
+更新时间：2026-08-03
 适用范围：`src/features/file-viewer/components/gallery-viewer/` 下的图集目录预览、图片 / 视频详情切换和 MediaHub 接入。
 
 ## 1. 概述
@@ -24,7 +24,12 @@
   - 加载目录直属子节点
   - 过滤图片 / 视频媒体
   - 管理网格、详情态、图片查看状态和视频播放状态
+  - 通过公共 `ViewerSessionRegistry` capture / restore 阅读现场
   - 通过 `floatingVideoService` 接入 MediaHub
+- `gallery-viewer-session.ts`
+  - snapshot schema、payload 校验和跨列数滚动锚点恢复
+- `gallery-viewer-session.test.ts`
+  - snapshot 解析、锚点重排和比例 / 绝对滚动降级测试
 - `style.ts`
   - 相册网格、模糊占位、大图 / 视频详情和底部视频控制条样式
 
@@ -45,9 +50,8 @@
 - 图片缩略图使用 `loading="lazy"` 和 `decoding="async"`。
 - 缩略图加载前显示模糊占位。
 - 网格卡片参考归档 viewer 的自适应策略：以目标宽度为主，在列数阈值附近允许小幅收缩，超过目标宽度后右侧留空，不为了填满整行而持续放大。
-- 当前图集 viewer 会按 `fileUrl + folderNodeId + reloadToken` 保存一层内存快照，包含媒体列表、临时链接、预览缓存、滚动位置和当前详情状态；命中快照时不重新拉目录。
-- 普通工作区隐藏或路由卸载会保留快照，重新挂载后可以恢复滚动位置和详情状态。关闭图集 tab 则由 `FileViewerContext` 的显式关闭入口经 `viewer-snapshot-release` 清理该图集全部 generation，重新打开从网格开始；不能再用组件 unmount 推断关闭原因。
-- 图集快照集中在 `gallery-viewer-cache.ts`，并接入 `viewer-snapshot-release`；显式释放资料库或 session 时不会把释放前的图集现场写回。
+- 真卸载后会重新读取直属子节点，再按稳定节点 ID 恢复当前详情项；Warm snapshot 不替代目录数据请求，避免把旧媒体列表长期当成后端事实。
+- 临时签名链接、HEIC 本地预览 URL、预览错误、缩略图 loaded 状态和 keep-alive 图片集合只属于当前实例，不进入 snapshot；恢复时按节点重新请求链接和预览。
 - HEIC / HEIF 链接请求和预览预热带 viewer generation 校验；关闭 tab、reload 或切换到新图集后，旧异步结果不会写回当前 viewer。
 
 HEIC / HEIF 预览走 Electron 本地代理：
@@ -75,7 +79,35 @@ HEIC / HEIF 预览走 Electron 本地代理：
 - 首次播放后由 `floatingVideoService` 注册到 MediaHub。
 - 切换到另一项或回到网格时释放当前图集视频；切换 tab 或离开资料库时沿用 MediaHub 契约的保活 / handoff 行为。
 
-## 5. 边界
+## 5. Viewer Session 契约
+
+resource key 使用稳定账号 scope、显式 `libraryId`、`node:<folderNodeId>` 和 `viewerKind=gallery`。`gallery://` 入口 URL、签名链接、HEIC 预览 URL 和本地路径都不参与身份。
+
+Gallery snapshot schema version 为 1，只保存：
+
+- 当前详情媒体节点 ID；没有详情时为网格态。
+- 网格 `scrollTop`、滚动比例、首行锚点媒体 ID 和行内偏移比例。
+- 当前图片详情的 zoom、绝对 / 比例 pan offset 和 rotation。
+
+不保存：
+
+- 媒体列表和文件名等可重新读取数据。
+- 签名链接、HEIC 预览结果和 EXIF 读取结果。
+- 视频播放进度或媒体元素；这些继续由现有媒体 service owner 管理。
+- 裁剪、拖拽、详情弹框、loading、error、缩略图 loaded 和图片 keep-alive 集合。
+
+恢复先重新加载目录，再按节点 ID 找到详情项。网格恢复优先用锚点 ID 适配列数变化；锚点已不存在时降级到滚动比例，最后使用绝对 `scrollTop`。图片 pan 在详情舞台可测时按比例恢复，否则使用绝对偏移。
+
+生命周期语义：
+
+- 普通 tab 失活：capture Warm snapshot，不重置当前实例。
+- 工作区模式切换或真卸载：卸载前 capture，重新挂载并加载目录后恢复。
+- reload：按 `reloadToken` 失效旧 snapshot，重新进入默认网格。
+- 关闭 tab：`closeBehavior=discard`，删除 snapshot 和 live adapter，重新打开从默认网格开始。
+- 资料库或 auth session 释放：由公共 runtime 统一清理。
+- Cold：当前为 `none`，应用重启后不恢复图集现场。
+
+## 6. 边界
 
 `GalleryViewer` 不负责：
 
@@ -86,7 +118,7 @@ HEIC / HEIF 预览走 Electron 本地代理：
 
 `FileViewerContext` 只保存当前图集 tab 的文件事实，图集内部选中项、缩放、旋转和视频进度都不上提。
 
-## 6. 验证方式
+## 7. 验证方式
 
 涉及图集 viewer 改动时，至少验证：
 
@@ -101,12 +133,14 @@ HEIC / HEIF 预览走 Electron 本地代理：
 9. 从视频切换到图片或回到网格后，当前图集视频被释放。
 10. 关闭图集 tab 后，图集视频从 MediaHub 消失。
 11. 切换到其他 tab 再回来，图集 tab 不丢失当前前端状态。
-12. 从其他相册切回当前图集时，命中内存快照后不应重新拉目录，滚动位置和当前详情状态应恢复。
+12. 从其他相册切回当前图集时会重新读取目录事实，然后恢复滚动锚点和当前详情节点；链接与 HEIC 预览重新按节点加载。
 13. 关闭图集 tab 后重新打开同一图集，不应恢复上一次详情图片位置，应按新 tab 重新进入网格。
 14. 回到网格再打开最近看过的同一图片，不应重新请求或释放该图片资源；超过保活 LRU 上限后允许释放。
 15. 离开资料库详情页再返回时，图集快照仍可恢复；显式释放资料库后再进入时不得恢复释放前现场。
+16. 窗口宽度变化造成网格列数变化时，恢复后仍以同一媒体锚点为主；锚点被删除时按比例合理降级。
+17. reload 后回到默认网格；裁剪、详情弹框、拖拽、临时链接和 HEIC 预览 URL 不恢复。
 
-## 7. 维护规则
+## 8. 维护规则
 
 出现以下变化时必须更新本文：
 
@@ -115,4 +149,5 @@ HEIC / HEIF 预览走 Electron 本地代理：
 - 图集视频 MediaHub 接入方式变化。
 - HEIC / HEIF 预览缓存、IPC 或元信息读取方式变化。
 - 图集图片裁剪、副本命名或排序语义变化。
+- Gallery snapshot 字段、恢复时序或关闭语义变化。
 - 新增 `gallery_archive` 或图集归档 viewer。
