@@ -1,6 +1,6 @@
 # Video Viewer
 
-更新时间：2026-05-09
+更新时间：2026-08-04
 适用范围：`src/features/file-viewer/components/video-viewer/` 下的普通视频播放页、右侧工具台、宽屏模式、桌面小窗和字幕覆盖层。
 
 ## 1. 概述
@@ -18,7 +18,7 @@
 
 它当前会保存普通视频的观看进度，并让正在播放的视频跨路由级页面继续存活：
 
-- 切换 tab、切换工作区页面或卸载 viewer 前，会先把当前播放时间写入本地 snapshot。
+- 切换 tab、切换工作区页面或卸载 viewer 前，会把观看位置和非媒体 UI 偏好写入公共 Warm registry。
 - 有 `nodeId` 的视频会把进度写回节点 `viewMeta`，下次重新打开同一视频时从上次观看位置继续。
 - 接近片尾或已经播完的视频不会恢复到最后几秒，而是按普通新打开处理。
 - 视频 DOM 元素不再完全绑定 `VideoViewer` 组件生命周期，而是由 `src/features/file-viewer/services/global-video-elements.ts` 按 tab id 管理。进入设置、传输中心、回收站等页面导致 viewer 卸载时，元素会移动到隐藏 parking host 中继续播放；回到原 tab 后再挂回 `.video-element-host`。
@@ -56,9 +56,10 @@
 
 当前使用两层恢复：
 
-1. 本地 snapshot
-   - key 优先使用 `node:${nodeId}`
-   - 无 `nodeId` 时 fallback 到 `url:${url}`
+1. Warm snapshot
+   - identity 使用账号、资料库、稳定 `nodeId` 和 `viewerKind=video`
+   - 保存观看时间投影、倍速、字幕开关/来源/字号/底部偏移和操作台显隐
+   - 不保存视频 URL、字幕正文/cue、菜单、DOM、回调或媒体元素
    - 主要用于切 tab、切页面或同一运行会话内快速恢复
 2. 远端 `viewMeta`
    - 只在有 `nodeId` 时启用
@@ -72,9 +73,9 @@
 - 距离结尾小于 5 秒的进度
 - 进度比例达到 98% 及以上的进度
 
-远端同步是延迟写入模型：
+Warm 和远端进度都存在时按合法 `updatedAt` 选择较新的进度；非媒体 UI 偏好只来自 Warm。远端同步是延迟写入模型：
 
-- 播放过程中先更新本地 snapshot。
+- 播放过程中先更新 Warm snapshot。
 - 后台按间隔把最新进度写到 `viewMeta`。
 - inactive、手动 seek、播放结束或 viewer 卸载时会尝试强制刷新一次。
 
@@ -120,13 +121,14 @@
 - 字号
 - 底部偏移
 
-这些状态目前没有上提到全局工作区，也没有写入后端。
+这些状态没有上提到全局工作区。字幕 cue 和正文只在 viewer 本地存在；可恢复的来源 id、开关、字号、底部偏移及工具台显隐进入 Warm snapshot，但不写入后端。
 
 视频观看进度同样由 `VideoViewer` 自己持有：
 
 - `FileViewerContext` 只负责 tab 和当前文件事实，不拥有视频播放时间。
 - `FileViewerContext` 可以随 tab 携带 `videoSubtitleSources`，只表达“这个视频有哪些可用库内字幕候选”，不拥有字幕解析结果或当前播放 cue。
 - 本地 snapshot 和远端 `viewMeta` 都只是恢复介质，不是页面层的新 source of truth。
+- 库内字幕恢复会重新申请临时链接；异步加载过程中必须保留 snapshot 恢复的字幕开关，不能因默认加载首条字幕而重新开启。
 
 库内字幕读取通过 `window.electronAPI.fetch` 走主进程 IPC HTTP 通道，不直接在 renderer 里 `fetch` 临时对象存储链接。视频元素播放可以直接使用临时链接，但字幕读取需要拿到文本内容，走 IPC 可以避开对象存储 CORS / 签名链接细节对 renderer fetch 的影响。
 
@@ -241,7 +243,7 @@
 涉及 `VideoViewer` 改动时，至少验证：
 
 1. 普通视频仍能正常播放。
-2. 切换 tab、切换工作区页面或进入设置 / 传输中心 / 回收站后再回来，视频播放状态和进度不会异常丢失，也不会被路由切换自动暂停。
+2. 切换 tab、切换工作区页面或进入设置 / 传输中心 / 回收站后再回来，视频播放状态、进度、倍速、字幕偏好和操作台不会异常丢失，也不会被路由切换自动暂停。
 3. 切到浏览器 / 搜索 / 工具区时，视频快捷键不会继续拦截前台输入。
 4. 关闭后重新打开同一个视频时，会从上次观看位置恢复。
 5. 播放到接近片尾或结束后重新打开，不会卡在最后几秒。
@@ -260,7 +262,7 @@
 
 出现以下任一变化时，必须更新本文：
 
-- 视频进度 snapshot key、恢复阈值或 `viewMeta` key 变化
+- 视频 session schema、恢复阈值或 `viewMeta` key 变化
 - 视频 DOM 生命周期、parking host 或 tab 关闭释放策略变化
 - 视频小窗宿主、Document PiP fallback 或 inline 占位行为变化
 - 字幕来源变化

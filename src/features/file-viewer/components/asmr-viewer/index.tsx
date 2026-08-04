@@ -28,19 +28,23 @@ import { parseAsmrRouteInfo, resolveAsmrOwnerKey } from '@/features/file-viewer/
 import type { PreviewFileType } from '@/utils/preview-file-type';
 import { useGlobalAudioPlayback } from '@/features/file-viewer/hooks/useGlobalAudioPlayback';
 import {
-  asmrViewerSnapshotCache,
-  resolveAsmrViewerCacheKey,
-  setAsmrViewerSnapshot,
+  ASMR_VIEWER_SESSION_ESTIMATED_BYTES,
+  ASMR_VIEWER_SESSION_SCHEMA_VERSION,
+  parseAsmrViewerSessionSnapshot,
   type AsmrNodeItem,
   type AsmrPathItem,
   type AsmrViewMetaPayload,
-  type AsmrViewerSnapshot,
-} from './asmr-viewer-cache';
+  type AsmrViewerSessionSnapshot,
+} from './asmr-viewer-session';
+import { useViewerSession, type ViewerSessionAdapter } from '@/features/file-viewer/session';
 
 interface AsmrViewerProps {
+  accountScope: string | null;
+  contentRevision: string | null;
   folderNodeId: number | null;
   fileUrl: string;
   fileName?: string | null;
+  libraryId: number | null;
   active?: boolean;
   reloadToken?: number;
   tabId: string;
@@ -196,16 +200,22 @@ function formatDuration(time: number): string {
 }
 
 const AsmrViewer: React.FC<AsmrViewerProps> = ({
+  accountScope,
+  contentRevision,
   folderNodeId,
   fileUrl,
   fileName,
+  libraryId: libraryIdProp,
   active = true,
   reloadToken = 0,
   tabId,
 }) => {
   const { setFileUrl } = useFileViewer();
   const routeInfo = useMemo(() => parseAsmrRouteInfo(fileUrl), [fileUrl]);
-  const libraryId = routeInfo?.libraryId ?? null;
+  const libraryId = useMemo(() => {
+    if (libraryIdProp && Number.isFinite(libraryIdProp)) return libraryIdProp;
+    return routeInfo?.libraryId ?? null;
+  }, [libraryIdProp, routeInfo?.libraryId]);
   const rootNodeId = useMemo(() => {
     const fromProp = Number(folderNodeId);
     if (Number.isFinite(fromProp) && fromProp > 0) {
@@ -217,35 +227,25 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
     }
     return null;
   }, [folderNodeId, routeInfo?.nodeId]);
-  const viewerCacheKey = useMemo(
-    () => resolveAsmrViewerCacheKey(fileUrl, folderNodeId, reloadToken),
-    [fileUrl, folderNodeId, reloadToken],
-  );
-  const initialSnapshot = useMemo(
-    () => (viewerCacheKey ? asmrViewerSnapshotCache.get(viewerCacheKey) ?? null : null),
-    [viewerCacheKey],
-  );
   const fallbackTitle = useMemo(() => normalizeViewerTitle(fileName), [fileName]);
   const asmrOwnerKey = useMemo(() => resolveAsmrOwnerKey(fileUrl, rootNodeId), [fileUrl, rootNodeId]);
 
-  const [pathStack, setPathStack] = useState<AsmrPathItem[]>(() => initialSnapshot?.pathStack ?? []);
-  const [items, setItems] = useState<AsmrNodeItem[]>(() => initialSnapshot?.items ?? []);
-  const [selectedId, setSelectedId] = useState<number | null>(() => initialSnapshot?.selectedId ?? null);
-  const [collectionName, setCollectionName] = useState<string>(() => (
-    sanitizeMetaText(initialSnapshot?.collectionName || '') || fallbackTitle
-  ));
-  const [collectionTag, setCollectionTag] = useState<string>(() => sanitizeMetaText(initialSnapshot?.collectionTag || ''));
-  const [collectionTagIds, setCollectionTagIds] = useState<number[]>(() => initialSnapshot?.collectionTagIds || []);
-  const [collectionSn, setCollectionSn] = useState<string>(() => sanitizeMetaText(initialSnapshot?.collectionSn || ''));
-  const [viewMetaBase, setViewMetaBase] = useState<AsmrViewMetaPayload>(() => initialSnapshot?.viewMetaBase || {});
+  const [pathStack, setPathStack] = useState<AsmrPathItem[]>([]);
+  const [items, setItems] = useState<AsmrNodeItem[]>([]);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [collectionName, setCollectionName] = useState<string>(fallbackTitle);
+  const [collectionTag, setCollectionTag] = useState<string>('');
+  const [collectionTagIds, setCollectionTagIds] = useState<number[]>([]);
+  const [collectionSn, setCollectionSn] = useState<string>('');
+  const [viewMetaBase, setViewMetaBase] = useState<AsmrViewMetaPayload>({});
   const [listLoading, setListLoading] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
   const [coverLoading, setCoverLoading] = useState(false);
-  const [coverUrl, setCoverUrl] = useState<string | null>(() => initialSnapshot?.coverUrl ?? null);
-  const [coverNodeId, setCoverNodeId] = useState<number | null>(() => initialSnapshot?.coverNodeId ?? null);
-  const [audioQueue, setAudioQueue] = useState<AsmrNodeItem[]>(() => initialSnapshot?.audioQueue ?? []);
-  const [currentAudioId, setCurrentAudioId] = useState<number | null>(() => initialSnapshot?.currentAudioId ?? null);
-  const [currentAudioSrc, setCurrentAudioSrc] = useState<string | null>(() => initialSnapshot?.currentAudioSrc ?? null);
+  const [coverUrl, setCoverUrl] = useState<string | null>(null);
+  const [coverNodeId, setCoverNodeId] = useState<number | null>(null);
+  const [audioQueue, setAudioQueue] = useState<AsmrNodeItem[]>([]);
+  const [currentAudioId, setCurrentAudioId] = useState<number | null>(null);
+  const [currentAudioSrc, setCurrentAudioSrc] = useState<string | null>(null);
   const [seekingTime, setSeekingTime] = useState<number | null>(null);
   const [editorVisible, setEditorVisible] = useState(false);
   const [editorLoading, setEditorLoading] = useState(false);
@@ -261,6 +261,7 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
   const [coverPickerLoading, setCoverPickerLoading] = useState(false);
   const {
     ensureSource,
+    isOwnedSource,
     play,
     playerState,
     seekTo,
@@ -277,44 +278,91 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
   const listRequestIdRef = useRef(0);
   const coverRequestIdRef = useRef(0);
   const coverPickerRequestIdRef = useRef(0);
-  const audioUrlCacheRef = useRef<Map<number, string>>(new Map(initialSnapshot?.audioUrlEntries ?? []));
+  const audioUrlCacheRef = useRef<Map<number, string>>(new Map());
+  const listViewportRef = useRef<HTMLDivElement | null>(null);
+  const rowElementMapRef = useRef<Map<number, HTMLDivElement>>(new Map());
+  const pathStackRef = useRef(pathStack);
+  const itemsRef = useRef(items);
+  const selectedIdRef = useRef(selectedId);
+  const currentAudioIdRef = useRef(currentAudioId);
+  const currentAudioParentNodeIdRef = useRef<number | null>(null);
+  const activeRef = useRef(active);
+  const isOwnedSourceRef = useRef(isOwnedSource);
+  const playerSrcRef = useRef(playerState.src);
+  const hasLoadedListRef = useRef(false);
+  const pendingSessionRestoreRef = useRef<AsmrViewerSessionSnapshot | null>(null);
+  const listScrollCaptureRafRef = useRef(0);
+  pathStackRef.current = pathStack;
+  itemsRef.current = items;
+  selectedIdRef.current = selectedId;
+  currentAudioIdRef.current = currentAudioId;
+  activeRef.current = active;
+  isOwnedSourceRef.current = isOwnedSource;
+  playerSrcRef.current = playerState.src;
 
-  const persistViewerSnapshot = useCallback((patch?: Partial<AsmrViewerSnapshot>) => {
-    if (!viewerCacheKey) return;
-    const previous = asmrViewerSnapshotCache.get(viewerCacheKey);
-    setAsmrViewerSnapshot(viewerCacheKey, {
-      hasLoadedList: patch?.hasLoadedList ?? previous?.hasLoadedList ?? (items.length > 0 || pathStack.length > 0),
-      pathStack: patch?.pathStack ?? pathStack,
-      items: patch?.items ?? items,
-      selectedId: patch?.selectedId ?? selectedId,
-      collectionName: patch?.collectionName ?? collectionName,
-      collectionTag: patch?.collectionTag ?? collectionTag,
-      collectionTagIds: patch?.collectionTagIds ?? collectionTagIds,
-      collectionSn: patch?.collectionSn ?? collectionSn,
-      viewMetaBase: patch?.viewMetaBase ?? viewMetaBase,
-      coverUrl: patch?.coverUrl ?? coverUrl,
-      coverNodeId: patch?.coverNodeId ?? coverNodeId,
-      currentAudioId: patch?.currentAudioId ?? currentAudioId,
-      currentAudioSrc: patch?.currentAudioSrc ?? currentAudioSrc,
-      audioQueue: patch?.audioQueue ?? audioQueue,
-      audioUrlEntries: patch?.audioUrlEntries ?? Array.from(audioUrlCacheRef.current.entries()),
-    });
-  }, [
-    audioQueue,
-    collectionName,
-    collectionSn,
-    collectionTag,
-    collectionTagIds,
-    coverNodeId,
-    coverUrl,
-    currentAudioId,
-    currentAudioSrc,
-    items,
-    pathStack,
-    selectedId,
-    viewMetaBase,
-    viewerCacheKey,
-  ]);
+  const captureSessionSnapshot = useCallback((): AsmrViewerSessionSnapshot | null => {
+    if (pendingSessionRestoreRef.current) return pendingSessionRestoreRef.current;
+    if (!hasLoadedListRef.current || pathStackRef.current.length === 0) return null;
+    const viewport = listViewportRef.current;
+    const scrollTop = Math.max(viewport?.scrollTop ?? 0, 0);
+    const maxScrollable = viewport
+      ? Math.max(viewport.scrollHeight - viewport.clientHeight, 0)
+      : 0;
+    let anchorItemId: number | null = null;
+    let anchorOffsetRatio = 0;
+    for (const item of itemsRef.current) {
+      const element = rowElementMapRef.current.get(item.id);
+      if (!element || element.offsetTop > scrollTop + 1) continue;
+      anchorItemId = item.id;
+      anchorOffsetRatio = Math.min(
+        Math.max((scrollTop - element.offsetTop) / Math.max(element.offsetHeight, 1), 0),
+        1,
+      );
+    }
+    if (anchorItemId == null && itemsRef.current.length > 0) {
+      anchorItemId = itemsRef.current[0].id;
+    }
+    return {
+      currentAudioId: currentAudioIdRef.current,
+      currentAudioParentNodeId: currentAudioIdRef.current == null
+        ? null
+        : currentAudioParentNodeIdRef.current,
+      listAnchorItemId: anchorItemId,
+      listAnchorOffsetRatio: anchorOffsetRatio,
+      listScrollRatio: maxScrollable > 0 ? scrollTop / maxScrollable : null,
+      listScrollTop: scrollTop,
+      pathStack: pathStackRef.current,
+      selectedId: selectedIdRef.current,
+    };
+  }, []);
+
+  const restoreSessionSnapshot = useCallback((payload: AsmrViewerSessionSnapshot) => {
+    const snapshot = parseAsmrViewerSessionSnapshot(payload);
+    if (!snapshot || snapshot.pathStack[0]?.id !== rootNodeId) return;
+    pendingSessionRestoreRef.current = snapshot;
+  }, [rootNodeId]);
+
+  const sessionAdapter = useMemo<ViewerSessionAdapter<AsmrViewerSessionSnapshot>>(() => ({
+    capture: captureSessionSnapshot,
+    restore: restoreSessionSnapshot,
+    suspend: () => undefined,
+    resume: () => undefined,
+    estimateCost: () => ASMR_VIEWER_SESSION_ESTIMATED_BYTES,
+    getPinReasons: () => (activeRef.current ? ['active'] : []),
+  }), [captureSessionSnapshot, restoreSessionSnapshot]);
+
+  const { capture: flushSessionSnapshot } = useViewerSession({
+    accountScope,
+    active,
+    adapter: sessionAdapter,
+    contentRevision,
+    libraryId,
+    nodeId: rootNodeId,
+    reloadToken,
+    schemaVersion: ASMR_VIEWER_SESSION_SCHEMA_VERSION,
+    tabId,
+    viewerKind: 'asmr',
+  });
 
   const relativePath = useMemo(() => {
     const segments = pathStack.slice(1).map(item => item.name);
@@ -375,7 +423,7 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
     if (!libraryId) {
       setListError('ASMR 目录参数异常');
       setItems([]);
-      return [] as AsmrNodeItem[];
+      return { items: [] as AsmrNodeItem[], success: false };
     }
 
     const requestId = ++listRequestIdRef.current;
@@ -385,21 +433,19 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
     try {
       const children = (await getChildrenByNodeId(targetNodeId, libraryId)) as AsmrNodeItem[];
       if (requestId !== listRequestIdRef.current) {
-        return [] as AsmrNodeItem[];
+        return { items: [] as AsmrNodeItem[], success: false };
       }
       const sorted = sortNodes(children || []);
       setPathStack(nextPathStack);
       setItems(sorted);
       setSelectedId(null);
-      return sorted;
+      return { items: sorted, success: true };
     } catch (error) {
       runtimeLogger.error('加载 ASMR 目录失败:', error);
       if (requestId === listRequestIdRef.current) {
-        setPathStack(nextPathStack);
-        setItems([]);
         setListError('加载目录失败');
       }
-      return [] as AsmrNodeItem[];
+      return { items: [] as AsmrNodeItem[], success: false };
     } finally {
       if (requestId === listRequestIdRef.current) {
         setListLoading(false);
@@ -426,6 +472,7 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
   const playAudioInAsmr = useCallback(async (
     targetAudio: AsmrNodeItem,
     queue: AsmrNodeItem[],
+    parentNodeId?: number | null,
   ) => {
     try {
       const url = await resolveAudioUrl(targetAudio);
@@ -433,20 +480,18 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
       await play();
       setAudioQueue(queue);
       setCurrentAudioId(targetAudio.id);
+      currentAudioParentNodeIdRef.current = parentNodeId
+        ?? currentAudioParentNodeIdRef.current
+        ?? pathStackRef.current[pathStackRef.current.length - 1]?.id
+        ?? null;
       setCurrentAudioSrc(url);
       setSelectedId(targetAudio.id);
       setSeekingTime(null);
-      persistViewerSnapshot({
-        currentAudioId: targetAudio.id,
-        currentAudioSrc: url,
-        audioQueue: queue,
-        selectedId: targetAudio.id,
-      });
     } catch (error: any) {
       runtimeLogger.error('ASMR 音频播放失败:', error);
       Toast.error(error?.message || '播放音频失败');
     }
-  }, [ensureSource, persistViewerSnapshot, play, resolveAudioUrl]);
+  }, [ensureSource, play, resolveAudioUrl]);
 
   const resolveCover = useCallback(async (
     rootChildren: AsmrNodeItem[],
@@ -586,7 +631,9 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
   // 卸载时不主动 clear，tab 关闭由 FileViewerContext.releaseForTab 兜底。
 
   useEffect(() => {
+    let canceled = false;
     if (!rootNodeId || !Number.isFinite(rootNodeId) || !libraryId) {
+      hasLoadedListRef.current = false;
       setPathStack([]);
       setItems([]);
       setListError('ASMR 目录参数异常');
@@ -602,29 +649,13 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
       return;
     }
 
-    const snapshot = viewerCacheKey ? asmrViewerSnapshotCache.get(viewerCacheKey) : null;
-    if (snapshot?.hasLoadedList && snapshot.pathStack.length > 0) {
-      setPathStack(snapshot.pathStack);
-      setItems(snapshot.items || []);
-      setSelectedId(snapshot.selectedId ?? null);
-      setListError(null);
-      setListLoading(false);
-      setCollectionName(sanitizeMetaText(snapshot.collectionName || '') || fallbackTitle);
-      setCollectionTag(sanitizeMetaText(snapshot.collectionTag || ''));
-      setCollectionTagIds(resolveMetaNumberList(snapshot.collectionTagIds));
-      setCollectionSn(sanitizeMetaText(snapshot.collectionSn || ''));
-      setViewMetaBase(snapshot.viewMetaBase || {});
-      setCoverUrl(snapshot.coverUrl ?? null);
-      setCoverNodeId(resolveMetaNumber(snapshot.coverNodeId));
-      setCoverLoading(false);
-      setCurrentAudioId(snapshot.currentAudioId ?? null);
-      setCurrentAudioSrc(snapshot.currentAudioSrc ?? null);
-      setAudioQueue(snapshot.audioQueue || []);
-      audioUrlCacheRef.current = new Map(snapshot.audioUrlEntries || []);
-      return;
-    }
-
     const rootPath: AsmrPathItem[] = [{ id: rootNodeId, name: 'ROOT' }];
+    const pendingRestore = pendingSessionRestoreRef.current;
+    const restorePath = pendingRestore?.pathStack[0]?.id === rootNodeId
+      ? pendingRestore.pathStack
+      : rootPath;
+    hasLoadedListRef.current = false;
+    audioUrlCacheRef.current.clear();
     setCoverUrl(null);
     setCoverNodeId(null);
     setCoverLoading(true);
@@ -633,6 +664,7 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
       let preferredCoverNodeId: number | null = null;
       try {
         const meta = await loadCollectionMeta(rootNodeId);
+        if (canceled) return;
         setCollectionName(meta.name);
         setCollectionTag(meta.tag);
         setCollectionTagIds(meta.tagIds);
@@ -640,6 +672,7 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
         setViewMetaBase(meta.viewMeta);
         preferredCoverNodeId = meta.preferredCoverNodeId;
       } catch (error) {
+        if (canceled) return;
         runtimeLogger.warn('加载 ASMR 元信息失败，已回退默认展示:', error);
         setCollectionName(fallbackTitle);
         setCollectionTag('');
@@ -648,10 +681,59 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
         setViewMetaBase({});
       }
 
-      const rootChildren = await loadDirectory(rootNodeId, rootPath);
+      const rootResult = await loadDirectory(rootNodeId, rootPath);
+      if (canceled) return;
+      if (!rootResult.success) return;
+      const rootChildren = rootResult.items;
+      let restoredItems = rootChildren;
+      let restoredPath = rootPath;
+      for (const desiredSegment of restorePath.slice(1)) {
+        const validSegment = restoredItems.find(item => (
+          item.id === desiredSegment.id && isDirectoryNode(item)
+        ));
+        if (!validSegment) break;
+        const nextPath = [...restoredPath, { id: validSegment.id, name: validSegment.name }];
+        const nextResult = await loadDirectory(validSegment.id, nextPath);
+        if (canceled) return;
+        if (!nextResult.success) break;
+        restoredItems = nextResult.items;
+        restoredPath = nextPath;
+      }
+      hasLoadedListRef.current = true;
+      const restoredSelectedId = pendingRestore?.selectedId ?? null;
+      setSelectedId(restoredItems.some(item => item.id === restoredSelectedId) ? restoredSelectedId : null);
+      if (pendingRestore?.currentAudioId && isOwnedSourceRef.current && playerSrcRef.current) {
+        const audioParentNodeId = pendingRestore.currentAudioParentNodeId
+          ?? restoredPath[restoredPath.length - 1]?.id
+          ?? null;
+        let audioParentItems = restoredItems;
+        if (audioParentNodeId && audioParentNodeId !== restoredPath[restoredPath.length - 1]?.id) {
+          try {
+            const children = (await getChildrenByNodeId(audioParentNodeId, libraryId)) as AsmrNodeItem[];
+            if (canceled) return;
+            audioParentItems = sortNodes(children || []);
+          } catch (error) {
+            runtimeLogger.warn('恢复 ASMR 播放队列失败:', error);
+            audioParentItems = [];
+          }
+        }
+        const restoredQueue = audioParentItems.filter(item => (
+          !isDirectoryNode(item) && resolveFileType(item) === 'audio'
+        ));
+        const restoredAudio = restoredQueue.find(item => item.id === pendingRestore.currentAudioId);
+        if (restoredAudio) {
+          setAudioQueue(restoredQueue);
+          setCurrentAudioId(restoredAudio.id);
+          currentAudioParentNodeIdRef.current = audioParentNodeId;
+          setCurrentAudioSrc(playerSrcRef.current);
+        }
+      }
       await resolveCover(rootChildren, preferredCoverNodeId);
     })();
-  }, [fallbackTitle, libraryId, loadCollectionMeta, loadDirectory, resolveCover, rootNodeId, viewerCacheKey]);
+    return () => {
+      canceled = true;
+    };
+  }, [fallbackTitle, libraryId, loadCollectionMeta, loadDirectory, resolveCover, rootNodeId]);
 
   useEffect(() => {
     if (currentAudioId === null) {
@@ -659,6 +741,7 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
     }
     if (!playerState.src || !currentAudioSrc || playerState.src !== currentAudioSrc) {
       setCurrentAudioId(null);
+      currentAudioParentNodeIdRef.current = null;
       setCurrentAudioSrc(null);
       setAudioQueue([]);
       setSeekingTime(null);
@@ -666,87 +749,51 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
   }, [currentAudioId, currentAudioSrc, playerState.src]);
 
   useEffect(() => {
-    const shouldPersist = (
-      collectionName.length > 0
-      || pathStack.length > 0
-      || items.length > 0
-      || coverUrl !== null
-      || coverNodeId !== null
-      || currentAudioId !== null
-      || currentAudioSrc !== null
-      || audioQueue.length > 0
-    );
-    if (!shouldPersist) {
-      return;
-    }
-    persistViewerSnapshot({
-      hasLoadedList: items.length > 0 || pathStack.length > 0,
-      collectionName,
-      collectionTag,
-      collectionTagIds,
-      collectionSn,
-      viewMetaBase,
-      coverNodeId,
-      audioUrlEntries: Array.from(audioUrlCacheRef.current.entries()),
+    if (!active || !hasLoadedListRef.current) return;
+    const pending = pendingSessionRestoreRef.current;
+    const viewport = listViewportRef.current;
+    if (!pending || !viewport) return;
+    const frame = window.requestAnimationFrame(() => {
+      const anchorElement = pending.listAnchorItemId == null
+        ? null
+        : rowElementMapRef.current.get(pending.listAnchorItemId) ?? null;
+      const maxScrollable = Math.max(viewport.scrollHeight - viewport.clientHeight, 0);
+      const targetTop = anchorElement
+        ? anchorElement.offsetTop + pending.listAnchorOffsetRatio * Math.max(anchorElement.offsetHeight, 1)
+        : pending.listScrollRatio != null && maxScrollable > 0
+          ? pending.listScrollRatio * maxScrollable
+          : pending.listScrollTop;
+      viewport.scrollTop = Math.min(Math.max(targetTop, 0), maxScrollable);
+      pendingSessionRestoreRef.current = null;
+      flushSessionSnapshot();
     });
-  }, [
-    audioQueue,
-    collectionName,
-    collectionSn,
-    collectionTag,
-    collectionTagIds,
-    coverNodeId,
-    coverUrl,
-    currentAudioId,
-    currentAudioSrc,
-    items,
-    pathStack,
-    persistViewerSnapshot,
-    selectedId,
-    viewMetaBase,
-  ]);
+    return () => window.cancelAnimationFrame(frame);
+  }, [active, flushSessionSnapshot, items]);
 
   useEffect(() => {
-    return () => {
-      const shouldPersist = (
-        collectionName.length > 0
-        || pathStack.length > 0
-        || items.length > 0
-        || coverUrl !== null
-        || coverNodeId !== null
-        || currentAudioId !== null
-        || currentAudioSrc !== null
-        || audioQueue.length > 0
-      );
-      if (!shouldPersist) {
-        return;
-      }
-      persistViewerSnapshot({
-        hasLoadedList: items.length > 0 || pathStack.length > 0,
-        collectionName,
-        collectionTag,
-        collectionTagIds,
-        collectionSn,
-        viewMetaBase,
-        coverNodeId,
-        audioUrlEntries: Array.from(audioUrlCacheRef.current.entries()),
+    if (!hasLoadedListRef.current) return;
+    flushSessionSnapshot();
+  }, [currentAudioId, flushSessionSnapshot, pathStack, selectedId]);
+
+  useEffect(() => {
+    const viewport = listViewportRef.current;
+    if (!viewport) return;
+    const onScroll = () => {
+      if (pendingSessionRestoreRef.current || listScrollCaptureRafRef.current) return;
+      listScrollCaptureRafRef.current = window.requestAnimationFrame(() => {
+        listScrollCaptureRafRef.current = 0;
+        flushSessionSnapshot();
       });
     };
-  }, [
-    audioQueue.length,
-    collectionName,
-    collectionSn,
-    collectionTag,
-    collectionTagIds,
-    coverNodeId,
-    coverUrl,
-    currentAudioId,
-    currentAudioSrc,
-    items,
-    pathStack,
-    persistViewerSnapshot,
-    viewMetaBase,
-  ]);
+    viewport.addEventListener('scroll', onScroll, { passive: true });
+    return () => {
+      viewport.removeEventListener('scroll', onScroll);
+      if (listScrollCaptureRafRef.current) {
+        window.cancelAnimationFrame(listScrollCaptureRafRef.current);
+        listScrollCaptureRafRef.current = 0;
+      }
+    };
+  }, [flushSessionSnapshot]);
 
   const handleOpenNode = useCallback(async (item: AsmrNodeItem) => {
     if (!libraryId) return;
@@ -762,7 +809,11 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
         const queue = items.filter(candidate => (
           !isDirectoryNode(candidate) && resolveFileType(candidate) === 'audio'
         ));
-        await playAudioInAsmr(item, queue);
+        await playAudioInAsmr(
+          item,
+          queue,
+          pathStack[pathStack.length - 1]?.id ?? null,
+        );
         return;
       }
 
@@ -915,12 +966,6 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
 
       const rootChildren = sortNodes((await getChildrenByNodeId(rootNodeId, libraryId)) as AsmrNodeItem[]);
       await resolveCover(rootChildren, editorCoverNodeId);
-      persistViewerSnapshot({
-        collectionName: nextName,
-        collectionTag: nextTag,
-        collectionTagIds: nextTagIds,
-        coverNodeId: resolveMetaNumber(editorCoverNodeId),
-      });
       Toast.success('ASMR 信息已更新');
     } catch (error: any) {
       runtimeLogger.error('保存 ASMR 信息失败:', error);
@@ -936,7 +981,6 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
     editorTagIds,
     asmrTagOptionMap,
     libraryId,
-    persistViewerSnapshot,
     resolveCover,
     rootNodeId,
     viewMetaBase,
@@ -1036,7 +1080,7 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
           </div>
         </div>
 
-        <div className="list-shell">
+        <div className="list-shell" ref={listViewportRef}>
           {listLoading ? (
             <div className="state-loading">
               <Spin size="large" tip="目录加载中..." />
@@ -1054,6 +1098,13 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
                 return (
                   <div
                     key={item.id}
+                    ref={(element) => {
+                      if (element) {
+                        rowElementMapRef.current.set(item.id, element);
+                      } else {
+                        rowElementMapRef.current.delete(item.id);
+                      }
+                    }}
                     className={`row ${selectedId === item.id ? 'selected' : ''} ${isPlayingRow ? 'playing' : ''}`}
                     onClick={() => setSelectedId(item.id)}
                     onDoubleClick={() => {

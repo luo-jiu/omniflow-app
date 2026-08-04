@@ -1,9 +1,9 @@
 # Viewer Session 状态架构
 
-更新时间：2026-08-03
+更新时间：2026-08-04
 适用范围：`src/components/business/app-main/`、`src/contexts/FileViewerContext.tsx`、`src/features/file-viewer/`、`src/features/archive-viewer/`、`src/features/workspace-resource-release/` 中与 viewer tab 保活、阅读现场、编辑草稿、缓存恢复和资源释放相关的代码。
 
-状态：目标架构已确定，阶段 0、阶段 1 公共内核和阶段 2 的 PDF/Text 双样本代码迁移与 Electron 真实样本验收已完成；阶段 3 的 Image、Gallery 和 Gallery Archive 已完成代码迁移与 Electron 真实样本验收。本文同时记录当前事实、目标契约和分阶段迁移门槛。
+状态：阶段 0 到阶段 3 已完成。全部 Warm-capable viewer 已迁移到公共 registry，旧逐 viewer cache 和迁移期 release switch 已删除，并已完成自动化门禁与 `win` 测试库的定向 Electron 真实样本验收。下一阶段是有限 Hot 保活和资源预算治理。
 
 ## 1. 目标
 
@@ -40,17 +40,11 @@ Viewer Session 治理需要同时解决以下问题：
 
 `file-viewer-cache.ts` 是最多 12 个资料库的内存 LRU。它不保存统一的 viewer payload，也没有在 LRU 淘汰资料库 tab 元数据时同步释放该资料库的 viewer snapshot 或媒体资源。
 
-### 2.3 Viewer snapshot 当前各自维护
+### 2.3 Viewer snapshot 已统一到公共 registry
 
-除已迁移的 Image、PDF、Text、Gallery 和 Gallery Archive 外，当前漫画、ASMR、视频进度和多数归档 viewer 仍分别维护独立模块级 `Map`。常见实现重复包含：
+当前所有声明 `warm: 'memory'` 的 viewer 都通过 `useViewerSession` 接入公共 registry。具体 codec 仍留在各 viewer 目录；registry 统一承担身份、版本、revision、预算、LRU 和释放，不 import 具体 viewer。
 
-- cache key 拼装
-- `Map` 读写
-- 24 或 48 项 LRU
-- dispose marker guard
-- 按文件或全量清理
-
-这些 cache 不是同一个 registry，容量也只是按条目数计算。一个小型视频进度对象和一个包含大量卡片、页面、临时链接的图集快照被视为相同成本。
+旧的漫画、ASMR、视频进度及四类归档模块级 `Map` 已删除。`workspace-resource-release` 不再枚举文件 tab 或静态 import 具体 viewer，单库释放直接调用 `viewerSessionRuntime.disposeLibrary`，session 释放调用 `viewerSessionRuntime.dispose`。
 
 ### 2.4 当前能力矩阵
 
@@ -58,16 +52,16 @@ Viewer Session 治理需要同时解决以下问题：
 | --- | --- | --- | --- | --- |
 | Image | 有 | 公共 registry：缩放、比例/绝对平移、旋转 | 无 | adapter/codec 已接入，并通过 Electron 真实图片样本验收 |
 | Audio | 有；播放由全局音频服务持有 | 无独立 UI 快照 | 无 | 播放资源和 viewer UI 生命周期未统一分类 |
-| Video | 有；视频元素由全局服务保活 | 播放进度 | `viewMeta` 播放进度 | 字幕选择、倍速、工具台等 UI 现场不完整 |
+| Video | 有；视频元素由全局服务保活 | 公共 registry：播放进度投影、倍速、字幕开关/来源/样式、操作台 | `viewMeta` 播放进度 | 媒体 DOM 和 URL 始终由服务层拥有，不进入 snapshot |
 | PDF | 有 | 公共 registry：页码、缩放、滚动、比例、页锚点 | 无 | adapter/codec 已接入并通过 80 页 Electron 样本验收；跨重启 Cold 恢复未启用 |
 | Text | 有 | 公共 registry：选区、顶部行、滚动、字号、换行 | IndexedDB dirty draft | adapter/codec 与 DraftStore 已接入并通过 Electron 草稿恢复、冲突和保存并发验收；后端稳定 revision 尚未提供 |
-| Comic | 有 | 页列表、渲染窗口、滚动、页锚点 | `viewMeta` 阅读进度 | 阅读模式、布局、缩放等偏好没有完整进入 session |
+| Comic | 有 | 公共 registry：页锚点、滚动降级、阅读/单双页模式、缩放、页间距、翻页变换 | `viewMeta` 阅读进度 | 页列表和临时图片链接重新加载 |
 | Gallery | 有 | 公共 registry：详情节点、网格锚点 / 比例、图片变换 | 无 | adapter/codec 已接入；临时链接和 HEIC 预览不进入 snapshot |
-| ASMR | 有 | 路径、列表、选择、封面和音频上下文 | `viewMeta` 仅承担集合元信息 | 没有列表滚动位置；快照含临时音频 URL |
-| Video Archive | 有 | 卡片、分页、`scrollTop` | 无 | 刷新已按 generation 失效；原始像素恢复仍较脆弱 |
-| Audio Archive | 有 | 卡片、分页、选择、播放上下文、`scrollTop` | 无 | 刷新已按 generation 失效；快照仍含临时音频 URL |
-| ASMR Archive | 有 | 卡片、分页、滚动比例和卡片锚点 | 写入 `viewMeta` 阅读进度 | 刷新已按 generation 失效；远端冷恢复路径不完整 |
-| Comic Archive | 有 | 卡片、分页、滚动比例和卡片锚点 | 写入 `viewMeta` 阅读进度 | 远端冷恢复路径不完整；仍是独立 cache |
+| ASMR | 有 | 公共 registry：稳定路径、选择、列表锚点/比例、播放节点和队列父目录 | `viewMeta` 仅承担集合元信息 | 目录列表、封面和临时音频链接重新加载；播放 owner 仍是全局音频服务 |
+| Video Archive | 有 | 公共 registry：卡片锚点、比例和绝对滚动 | 无 | 卡片、分页和临时封面/预览链接重新加载 |
+| Audio Archive | 有 | 公共 registry：卡片锚点、比例、绝对滚动和稳定选择 | 无 | 播放事实从 `globalAudioPlayer` 反向投影，不缓存音频 URL |
+| ASMR Archive | 有 | 公共 registry：卡片锚点、比例和绝对滚动 | `viewMeta` 阅读进度 | Warm 优先，未命中时才采用远端位置；卡片重新加载 |
+| Comic Archive | 有 | 公共 registry：卡片锚点、比例和绝对滚动 | `viewMeta` 阅读进度 | Warm 优先，未命中时才采用远端位置；卡片重新加载 |
 | Gallery Archive | 有 | 公共 registry：卡片锚点、比例和绝对滚动 | 无 | adapter/codec 已接入并通过 Electron 长卡片墙样本验收；卡片与临时封面重新加载 |
 
 ### 2.5 已确认的系统性缺口
@@ -78,30 +72,26 @@ Text Viewer 曾在 render 中创建新的 CodeMirror `basicSetup` 对象。activ
 
 这类问题说明“组件没有卸载”不等于“现场一定稳定”。高成本编辑器、播放器和渲染器的配置引用必须稳定，只有真实配置变化才能触发 reconfigure。
 
-#### 刷新失效语义不一致
+#### 刷新使用统一 generation 失效
 
-现有带本地快照的 viewer 已让工作区 `reloadToken` 参与 cache key。Video Archive、Audio Archive 和 ASMR Archive 在阶段 0 补齐了 token 透传和 generation cache key，不再在刷新 remount 后命中旧 cache。
-
-此外，把 `reloadToken` 直接拼进 key 会让每次刷新产生一个旧版本孤儿项，直到 LRU 或显式释放才被清理。
+`reloadToken` 不再拼进 snapshot key。公共 runtime 在同一资源 generation 变化时精确失效旧 snapshot，`FileDispatcher` 的 remount key 负责重建 active viewer；不会产生旧 token 对应的孤儿 cache 项。
 
 #### 关闭、卸载和显式释放语义混杂
 
-- Gallery 已迁移到公共 registry，并区分普通卸载与关闭：普通卸载保留快照，关闭 tab 通过 policy 精确清理。
-- PDF 按 policy 明确保留关闭前阅读位置；Comic、ASMR 和多数归档 viewer 的关闭语义仍依赖 legacy cache。
-- `viewer-snapshot-release.ts` 通过手工 `switch(fileType)` 清理已接入类型。
-- 如果资料库 tab 元数据已经被 12 项 LRU 淘汰，单库释放无法再通过 tabs 枚举该库历史 snapshot。
-
-这导致“关闭再打开是否续读”“普通路由卸载是否保留”“释放资料库是否彻底清空”没有统一答案。
+- 普通卸载统一先 capture，再按 policy 保留 Warm snapshot。
+- 关闭 tab 由 `disposeViewerSessionOnClose` 查询穷举 policy；`discard` 会先移除 snapshot 和 live registration，避免随后 React cleanup 写回，`retain-reading-position` 保留续读位置。
+- 单库和 session 释放直接清 registry，不依赖仍可枚举到的 tab 元数据。
+- 后端 `viewMeta` 不随前端工作区释放删除；它属于单独的 Cold 语义。
 
 #### 快照混入了临时资源地址
 
-ASMR、Audio Archive、Video Archive 等 legacy 快照仍会保存临时文件、封面、音频或视频链接。Gallery 已在公共 registry 迁移中移除这些字段。签名 URL 有过期时间，不是可持久化身份；其他 viewer 后续迁移时同样只能保存稳定节点身份和可重建数据。
+所有已迁移 snapshot 都只保存稳定节点身份、锚点、比例和 UI 参数。签名 URL、卡片/页数组、字幕正文、封面、音频队列数据和媒体元素不进入 registry；恢复时通过节点接口重新获取。
 
 目标快照只能保存稳定节点身份和可重建数据。临时 URL 只能进入带明确 `expiresAt` 的短期资源 cache，恢复时过期就重新解析。
 
 #### 远端写入不代表已经具备冷恢复
 
-Comic Archive 和 ASMR Archive 会把阅读位置写入 `viewMeta`，但当前加载逻辑在没有本地卡片快照时会在解析远端位置前返回；存在本地快照时，已有 pending restore 又不会被远端位置替换。因此当前远端进度主要完成了写入，不能视为已经通过跨重启恢复验证。
+Comic Archive 和 ASMR Archive 已补齐无 Warm snapshot 时的 `viewMeta` 冷恢复。命中 Warm 时，本次资源加载周期始终以 Warm 为准，较慢返回的远端请求不能在 Warm 定位完成后反向覆盖；跨重启行为仍需真实样本验收。
 
 #### 新 viewer 没有接入门禁
 
@@ -109,7 +99,7 @@ Comic Archive 和 ASMR Archive 会把阅读位置写入 `viewMeta`，但当前�
 
 - `FileDispatcher`
 - viewer snapshot cache
-- `viewer-snapshot-release.ts`
+- session policy / close helper
 - workspace release
 - viewer 文档地图
 - 验证矩阵
@@ -125,7 +115,7 @@ Comic Archive 和 ASMR Archive 会把阅读位置写入 `viewMeta`，但当前�
 - Warm registry 只接受 plain JSON payload，写入和读取都会脱离调用方对象引用；同时按条目数和估算字节预算执行 LRU。
 - schema 或 content revision 不匹配时跳过并删除旧 snapshot；显式 replace 事务会先 capture 旧实例，再注册新资源。
 - registry runtime 在 application/auth session 级注册；认证 bootstrap 会先启动 runtime 再提交用户状态，受保护路由在 bootstrap 完成前不挂载 viewer 子树；资料库释放按 `libraryId` 清理，退出登录或 401 清理整个 session。
-- 迁移期 workspace release 同时清公共 registry 和 legacy cache；Image/PDF/Text/Gallery/Gallery Archive 已接入公共 registry，其他已带 snapshot 的 viewer 仍写 legacy cache，没有双写。
+- workspace release 只清公共 registry；旧逐 viewer cache 与迁移期 release bridge 已删除。
 - `useViewerSession` 统一处理 adapter 注册、mount generation、schema/revision restore、active flush、cleanup capture 和 reload generation 失效；具体 payload/codec 继续留在 viewer 目录。
 - `ViewerDraftStore` 使用 IndexedDB 独立持久化 Text dirty content；按 resource slot 保留最新 draft，并用 draft key 中的 revision 做冲突判断。默认限制为单草稿 5 MiB、单账号 50 MiB、保留 30 天，存储失败不会把 dirty 状态降级成已安全落盘。
 
@@ -343,7 +333,7 @@ const viewerSessionPolicies = {
 } satisfies Record<FileViewerFileType, ViewerSessionPolicy>;
 ```
 
-即使某个 viewer 不需要恢复，也必须声明 `warm: 'none'`，不能保持未定义。`defaultHotCost` 只是没有运行时数据时的基线，不能把同类型所有实例视为固定成本。当前 policy 表声明迁移目标和接入约束，不代表对应 viewer 已经改为读写公共 registry；实际迁移状态仍以本文能力矩阵和 viewer 文档为准。
+即使某个 viewer 不需要恢复，也必须声明 `warm: 'none'`，不能保持未定义。`defaultHotCost` 只是没有运行时数据时的基线，不能把同类型所有实例视为固定成本。当前所有 `warm: 'memory'` 类型都已接入公共 registry；新增类型仍必须同时完成 adapter、codec 和恢复验证，不能只补 policy。
 
 ### 6.2 Live adapter
 
@@ -407,6 +397,8 @@ PDF、Comic、Comic Archive 和 ASMR Archive 的现有 anchor 模型可作为公
 
 支持 `AbortSignal` 的请求应主动取消；不支持取消的请求至少在提交 state 前校验 generation。Gallery 当前已有 generation 防护，可作为迁移参考。
 
+远端 `viewMeta` 进度同步必须采用 latest-wins：完成中的请求只能确认并清除自己发送的 pending 值；如果请求期间产生了新位置，必须保留并继续调度最新版。资源 generation 已变化时，旧请求即使完成也不能修改新资源的 base meta、in-flight 标记或重试计时器。
+
 ### 6.6 配置稳定性
 
 CodeMirror、pdf.js、播放器、观察器和昂贵 extension 的配置必须：
@@ -428,6 +420,7 @@ src/features/file-viewer/session/
   viewer-session-identity.ts
   viewer-session-registry.ts
   viewer-session-policies.ts
+  viewer-session-close.ts
   viewer-session-runtime.ts
   useViewerSession.ts
   index.ts
@@ -443,16 +436,16 @@ src/features/file-viewer/session/
 - `viewer-session-registry.ts` 不 import React viewer 组件。
 - registry runtime 由 application/auth session 级 service 持有；React Provider 如需提供访问入口，只投影同一个 service，不能在 `library detail` mount 时重新创建 store。
 - viewer payload 类型和 codec 留在各 viewer 目录，避免公共层知道所有业务字段。
-- `workspace-resource-release` 当前按 library/session 清 registry，并在迁移期继续清 legacy viewer cache；全部 viewer 迁移后再删除逐类型静态 import。
+- `workspace-resource-release` 按 library/session 直接清 registry，不枚举 tab，也不静态 import 具体 viewer。
 - `FileDispatcher` 继续只负责渲染分发；session policy 用 `Record<FileViewerFileType, ...>` 独立做穷举门禁。
 - 媒体 DOM 和播放 owner 继续留在 `globalAudioPlayer`、`global-video-elements` 和 `floatingVideoService`。
-- 迁移期间允许短期 adapter 读取旧 cache，但单个 viewer 完成迁移后必须删除旧双写路径。
+- viewer 不得重新引入独立模块级 snapshot `Map`；新需求先扩展 codec 或公共 registry 契约。
 
 ## 8. 分阶段落地
 
 ### 阶段 0：修复已知正确性问题
 
-当前状态：代码已完成。Text 双 tab 往返已在 Electron 中验证；Gallery 与三类 Archive 的非空内容样本仍需继续补人工验收。
+当前状态：代码已完成。阶段 0 的遗留 cache 已在阶段 3 收口时全部删除。
 
 - 稳定 Text Viewer 的 CodeMirror `basicSetup` 和 keep-alive DOM 顺序，消除普通 tab 切换滚动归零。
 - 明确 Gallery 卸载与关闭的不同语义，停止在普通路由卸载时删除可恢复 snapshot。
@@ -467,7 +460,7 @@ src/features/file-viewer/session/
 - 实现 session identity、envelope、registry、policy 穷举和 library/session 清理。
 - 先只支持 Warm memory，不立即加入 IndexedDB 和 Hot 淘汰。
 - 给 registry 增加单元测试：三类 key、版本、LRU、预算、replace 事务、失效、单库释放、session 释放。
-- workspace release 在迁移期同时清理 registry 与 legacy cache。每迁移一种 viewer，就从 legacy release switch 删除该类型；所有类型迁移并通过单库/session 释放验证后，才删除 `viewer-snapshot-release.ts`。
+- workspace release 已只依赖 registry；关闭策略、单库隔离和 session 释放均有公共内核测试覆盖。
 
 ### 阶段 2：双样本纵向验证
 
@@ -484,18 +477,24 @@ src/features/file-viewer/session/
 
 ### 阶段 3：补齐所有 viewer
 
-当前状态：Image 已完成公共 adapter、snapshot codec、关闭资源精确释放、dispatcher/policy 接线、自动化门禁和 Electron 真实图片样本验收。Gallery 已完成公共 adapter/codec、稳定节点详情恢复、网格锚点 / 比例恢复、临时 URL 剥离、legacy cache 移除和 Electron 真实图集样本验收。Gallery Archive 已完成公共 adapter/codec、卡片锚点 / 比例恢复、显式身份接线和临时封面剥离；25 张卡片的 Electron 长卡片墙样本已验证文件 tab 往返、工作区真卸载、reload 和关闭重开语义。
+当前状态：已完成。旧 cache 和 release bridge 已删除；全量 lint、单元测试和生产构建已通过，全部 Warm-capable viewer 已完成与风险相匹配的 Electron 真实样本验收。
 
-建议顺序：
+- 普通 ASMR：保存稳定浏览路径、列表锚点/比例、选择、播放节点和队列父目录；路径逐级验证，失效层级回退，播放 URL 与目录列表重新请求。
+- Video：保存播放时间投影、倍速、字幕开关/来源/样式和操作台状态；媒体元素继续由 `floatingVideoService` 持有，Warm 与远端进度按更新时间选择。
+- Video/Audio Archive：分页加载直到锚点出现；Audio 只保存稳定选择，实际播放从 `globalAudioPlayer` 反向投影。
+- Comic：保存滚动/翻页、单双页、缩放、页间距、页锚点和翻页变换；页数组及临时图片链接重新加载。
+- Comic/ASMR Archive：Warm 优先，未命中时读取远端 `viewMeta`；分页直到稳定卡片锚点出现，锚点失效后按比例和绝对位置降级。
+- 所有 adapter 在同一资源生命周期内保持稳定，卡片/分页状态通过 ref 读取，避免数据加载导致重复注册和重复 restore。
+- 异步锚点尚未落位时，adapter capture 保留 pending snapshot，不用首批分页的临时顶部位置覆盖旧现场；远端进度写入采用 latest-wins，并用资源 generation 隔离旧请求回调。
 
-1. Image
-2. Gallery 与 Gallery Archive
-3. 普通 ASMR
-4. Video/Audio 的非媒体 UI 状态
-5. Video Archive 与 Audio Archive
-6. Comic、Comic Archive、ASMR Archive 等已有复杂快照
+本阶段在第三个 `win` 测试库完成以下定向验收；前两个日常库未被改动：
 
-迁移时同时移除快照中的临时 URL，统一走稳定节点摘要和带过期信息的资源解析层。
+- 普通 ASMR 的嵌套路径、跨目录播放队列和真卸载恢复通过；播放事实始终由 `globalAudioPlayer` 投影。
+- Video 的观看位置、`1.25x` 倍速和操作台在真卸载后恢复；媒体元素继续由全局视频服务持有，样本没有库内字幕时由 codec 单测覆盖字幕偏好 envelope。
+- Video Archive 从第 31 张附近真卸载后恢复，并自动补齐 66 张卡片；Audio Archive 跨过第 60 项分页，恢复末页选择且全局音频队列在重建期间继续推进。
+- Comic 从滚动模式第 11 页切到翻页双页模式并真卸载后，页码、模式和双页设置恢复；缩放、平移和旋转字段由 codec 单测覆盖非法值与 envelope 边界。
+- Comic/ASMR Archive 先用 CLI 固定远端末页位置，确认 Cold 恢复；再把 Warm 移到顶部并保留远端末页，真卸载后均由 Warm 胜出。
+- 显式释放 `win` 工作区后，文件 tab、目录树现场、媒体实体和 Warm snapshot 均被清除；重新进入归档只采用远端进度，不恢复释放前的本地现场。
 
 ### 阶段 4：启用有限 Hot 保活
 

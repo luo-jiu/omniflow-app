@@ -159,6 +159,9 @@ const FileDispatcher: React.FC<FileDispatcherProps> = ({
     case 'video':
       return (
         <VideoViewer
+          accountScope={accountScope}
+          contentRevision={contentRevision}
+          libraryId={libraryId}
           nodeId={nodeId}
           url={fileUrl}
           fileName={fileName}
@@ -168,6 +171,7 @@ const FileDispatcher: React.FC<FileDispatcherProps> = ({
           subtitleSources={videoSubtitleSources}
           playlist={videoPlaylist}
           autoPlay={videoAutoPlay}
+          reloadToken={reloadToken}
         />
       );
 
@@ -202,7 +206,19 @@ const FileDispatcher: React.FC<FileDispatcherProps> = ({
       );
 
     case 'comic':
-      return <ComicViewer folderNodeId={nodeId} fileUrl={fileUrl} fileName={fileName} active={active} reloadToken={reloadToken} />;
+      return (
+        <ComicViewer
+          accountScope={accountScope}
+          active={active}
+          contentRevision={contentRevision}
+          fileName={fileName}
+          fileUrl={fileUrl}
+          folderNodeId={nodeId}
+          libraryId={libraryId}
+          reloadToken={reloadToken}
+          tabId={tabId}
+        />
+      );
 
     case 'gallery':
       return (
@@ -219,20 +235,48 @@ const FileDispatcher: React.FC<FileDispatcherProps> = ({
       );
 
     case 'asmr':
-      return <AsmrViewer folderNodeId={nodeId} fileUrl={fileUrl} fileName={fileName} active={active} reloadToken={reloadToken} tabId={tabId} />;
+      return (
+        <AsmrViewer
+          accountScope={accountScope}
+          active={active}
+          contentRevision={contentRevision}
+          fileName={fileName}
+          fileUrl={fileUrl}
+          folderNodeId={nodeId}
+          libraryId={libraryId}
+          reloadToken={reloadToken}
+          tabId={tabId}
+        />
+      );
 
     case 'asmr_archive':
-      return <AsmrArchiveViewer folderNodeId={nodeId} fileUrl={fileUrl} fileName={fileName} active={active} reloadToken={reloadToken} />;
+      return (
+        <AsmrArchiveViewer
+          accountScope={accountScope}
+          active={active}
+          contentRevision={contentRevision}
+          fileName={fileName}
+          fileUrl={fileUrl}
+          folderNodeId={nodeId}
+          libraryId={libraryId}
+          reloadToken={reloadToken}
+          tabId={tabId}
+        />
+      );
 
     case 'comic_archive':
       return (
         <ComicArchiveViewer
+          accountScope={accountScope}
+          contentRevision={contentRevision}
           folderNodeId={nodeId}
           fileUrl={fileUrl}
           fileName={fileName}
+          libraryId={libraryId}
           active={active}
           reloadToken={reloadToken}
           returnTarget={returnTarget}
+          tabId={tabId}
         />
       );
 
@@ -253,14 +297,29 @@ const FileDispatcher: React.FC<FileDispatcherProps> = ({
       );
 
     case 'video_archive':
-      return <VideoArchiveViewer folderNodeId={nodeId} fileUrl={fileUrl} fileName={fileName} active={active} reloadToken={reloadToken} />;
+      return (
+        <VideoArchiveViewer
+          accountScope={accountScope}
+          active={active}
+          contentRevision={contentRevision}
+          fileName={fileName}
+          fileUrl={fileUrl}
+          folderNodeId={nodeId}
+          libraryId={libraryId}
+          reloadToken={reloadToken}
+          tabId={tabId}
+        />
+      );
 
     case 'audio_archive':
       return (
         <AudioArchiveViewer
+          accountScope={accountScope}
+          contentRevision={contentRevision}
           folderNodeId={nodeId}
           fileUrl={fileUrl}
           fileName={fileName}
+          libraryId={libraryId}
           active={active}
           tabId={tabId}
           reloadToken={reloadToken}

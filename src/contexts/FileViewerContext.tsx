@@ -22,10 +22,12 @@ import {
   setFileViewerStateCache,
 } from './file-viewer-cache';
 import { isDisposingLibraryWorkspace } from '@/features/workspace-resource-release';
-import { clearViewerSnapshotOnTabClose } from '@/features/file-viewer/services/viewer-snapshot-release';
 import type { FileViewerFileType } from '@/shared/file-viewer-types';
 import { updateExistingFileViewerTabResource } from './file-viewer-tab-resource';
-import { useViewerAccountScope } from '@/features/file-viewer/session';
+import {
+  disposeViewerSessionOnClose,
+  useViewerAccountScope,
+} from '@/features/file-viewer/session';
 
 const defaultFileViewerState: FileViewerState = {
   nodeId: null,
@@ -484,10 +486,13 @@ export const FileViewerProvider: React.FC<{
 
   const closeTab = (tabId: string) => {
     releaseMediaForTab(tabId);
-    clearViewerSnapshotOnTabClose(
-      viewerState.tabs.find(tab => tab.id === tabId),
-      viewerAccountScope,
-    );
+    const tab = viewerState.tabs.find(item => item.id === tabId);
+    disposeViewerSessionOnClose({
+      accountScope: viewerAccountScope,
+      libraryId: tab?.libraryId ?? null,
+      nodeId: tab?.nodeId ?? null,
+      viewerKind: tab?.fileType ?? null,
+    });
     setViewerState(prev => closeTabInState(prev, tabId));
   };
 
@@ -500,7 +505,12 @@ export const FileViewerProvider: React.FC<{
     targetIds.forEach(releaseMediaForTab);
     viewerState.tabs
       .filter(tab => targetIds.includes(tab.id))
-      .forEach((tab) => clearViewerSnapshotOnTabClose(tab, viewerAccountScope));
+      .forEach((tab) => disposeViewerSessionOnClose({
+        accountScope: viewerAccountScope,
+        libraryId: tab.libraryId,
+        nodeId: tab.nodeId,
+        viewerKind: tab.fileType,
+      }));
     setViewerState(prev => targetIds.reduce((state, tabId) => closeTabInState(state, tabId), prev));
   };
 

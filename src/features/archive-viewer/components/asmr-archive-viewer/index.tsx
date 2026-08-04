@@ -11,28 +11,52 @@ import { softDeleteNodeSubtree } from '@/features/file-explorer/services/node-de
 import { runtimeLogger } from '@/utils/runtimeLogger';
 import { AsmrArchiveViewerWrapper } from './style';
 import { useFileViewer } from '@/hooks/useFileViewer';
-import { useViewerAccountScope } from '@/features/file-viewer/session';
+import {
+  acknowledgeLatestPendingValue,
+  useViewerSession,
+  type ViewerSessionAdapter,
+} from '@/features/file-viewer/session';
 import { fetchTags, type TagItem } from '@/features/tag-management/services/tag.api';
 import { useArchiveCardGrid } from '@/features/archive-viewer/hooks/useArchiveCardGrid';
 import ContextMenu, { ContextMenuItem } from '@/components/ui/context-menu';
 import { locateNodeInDirectoryTree } from '@/features/file-explorer/services/tree-locate';
 import { useNodePropertiesOverlay } from '@/features/file-explorer/hooks/useNodePropertiesOverlay';
 import {
-  asmrArchiveSnapshotCache,
-  EMPTY_ASMR_ARCHIVE_SNAPSHOT,
-  resolveAsmrArchiveReaderCacheKey,
-  setAsmrArchiveSnapshotCache,
-  type AsmrArchiveCard,
-  type AsmrArchiveSnapshot,
-  type AsmrArchiveTag,
-} from './asmr-archive-cache';
+  ARCHIVE_CARD_SESSION_ESTIMATED_BYTES,
+  ARCHIVE_CARD_SESSION_SCHEMA_VERSION,
+  parseArchiveCardSessionSnapshot,
+  resolveArchiveCardRestoreScrollTop,
+  type ArchiveCardSessionSnapshot,
+} from '@/features/archive-viewer/session/archive-card-session';
+
+interface AsmrArchiveTag {
+  id: number | null;
+  name: string;
+  color?: string | null;
+  textColor?: string | null;
+  fallback?: boolean;
+}
+
+interface AsmrArchiveCard {
+  id: number;
+  title: string;
+  sortOrder: number;
+  coverNodeId: number | null;
+  coverUrl: string | null;
+  tags: AsmrArchiveTag[];
+  viewMeta: string;
+}
 
 interface AsmrArchiveViewerProps {
+  accountScope: string | null;
+  contentRevision: string | null;
   folderNodeId: number | null;
   fileUrl: string;
   fileName?: string | null;
+  libraryId: number | null;
   active?: boolean;
   reloadToken?: number;
+  tabId: string;
 }
 
 interface ArchiveReaderProgress {
@@ -57,13 +81,6 @@ const VIEW_META_VIEWER_STATE_LEGACY_KEY = '__omniflow_viewer_state_v1';
 const VIEW_META_ASMR_ARCHIVE_READER_KEY = 'asmrArchiveReader';
 const VIEW_META_ASMR_ARCHIVE_READER_LEGACY_KEY = 'asmr_archive_reader';
 const REMOTE_PROGRESS_SYNC_INTERVAL_MS = 200;
-
-function parseArchiveLibraryId(fileUrl: string): number | null {
-  const matches = /^asmr-archive:\/\/library\/(\d+)\/node\/\d+$/i.exec(String(fileUrl || '').trim());
-  if (!matches) return null;
-  const parsed = Number(matches[1]);
-  return Number.isFinite(parsed) ? parsed : null;
-}
 
 function normalizeArchiveTitle(fileName?: string | null): string {
   const raw = String(fileName || '').trim();
@@ -249,28 +266,26 @@ function resolveAsmrCardTags(
 }
 
 const AsmrArchiveViewer: React.FC<AsmrArchiveViewerProps> = ({
+  accountScope,
+  contentRevision,
   folderNodeId,
   fileUrl,
   fileName,
+  libraryId,
   active = true,
   reloadToken = 0,
+  tabId,
 }) => {
   const { closeTabByNodeId, setFileUrl } = useFileViewer();
-  const viewerAccountScope = useViewerAccountScope();
   const { viewportRef, wrapperStyle } = useArchiveCardGrid({ baseCardWidth: 275, gridGap: 15 });
-  const libraryId = useMemo(() => parseArchiveLibraryId(fileUrl), [fileUrl]);
   const title = useMemo(() => normalizeArchiveTitle(fileName), [fileName]);
   const { showNodeProperties } = useNodePropertiesOverlay({ libraryId });
-  const readerCacheKey = useMemo(
-    () => resolveAsmrArchiveReaderCacheKey(fileUrl, folderNodeId, reloadToken),
-    [fileUrl, folderNodeId, reloadToken],
-  );
 
   const [listLoading, setListLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [cards, setCards] = useState<AsmrArchiveCard[]>([]);
-  const [total, setTotal] = useState(0);
+  const [, setTotal] = useState(0);
   const [nextOffset, setNextOffset] = useState(0);
   const [hasMore, setHasMore] = useState(false);
   const [restoreTick, setRestoreTick] = useState(0);
@@ -303,10 +318,12 @@ const AsmrArchiveViewer: React.FC<AsmrArchiveViewerProps> = ({
   }, [active]);
 
   const cardRefs = useRef<Map<number, HTMLElement>>(new Map());
+  const cardsRef = useRef(cards);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const requestIdRef = useRef(0);
-  const isHydratingSnapshotRef = useRef(false);
   const pendingRestoreRef = useRef<ArchiveReaderProgress | null>(null);
+  const pendingSessionResourceNodeIdRef = useRef<number | null>(null);
+  const activeRef = useRef(active);
   const restoreTriggeredLoadMoreRef = useRef(false);
   const scrollPersistRafRef = useRef<number>(0);
   const remoteSyncTimerRef = useRef<number>(0);
@@ -316,22 +333,8 @@ const AsmrArchiveViewer: React.FC<AsmrArchiveViewerProps> = ({
   const viewMetaBaseRef = useRef<Record<string, unknown>>({});
   const viewMetaBaseReadyRef = useRef(false);
   const lastRemoteSyncSignatureRef = useRef('');
-
-  const persistSnapshot = useCallback((patch: Partial<AsmrArchiveSnapshot>) => {
-    if (!readerCacheKey) return;
-    const prev = asmrArchiveSnapshotCache.get(readerCacheKey) ?? EMPTY_ASMR_ARCHIVE_SNAPSHOT;
-    setAsmrArchiveSnapshotCache(readerCacheKey, {
-      hasLoadedList: patch.hasLoadedList ?? prev.hasLoadedList,
-      cards: patch.cards ?? prev.cards,
-      nextOffset: patch.nextOffset ?? prev.nextOffset,
-      total: patch.total ?? prev.total,
-      hasMore: patch.hasMore ?? prev.hasMore,
-      scrollTop: patch.scrollTop ?? prev.scrollTop,
-      scrollRatio: patch.scrollRatio ?? prev.scrollRatio,
-      anchorCardId: patch.anchorCardId ?? prev.anchorCardId,
-      anchorOffsetRatio: patch.anchorOffsetRatio ?? prev.anchorOffsetRatio,
-    });
-  }, [readerCacheKey]);
+  activeRef.current = active;
+  cardsRef.current = cards;
 
   const closeContextMenu = useCallback(() => {
     setMenuState(prev => ({ ...prev, visible: false }));
@@ -422,7 +425,7 @@ const AsmrArchiveViewer: React.FC<AsmrArchiveViewerProps> = ({
       onOk: async () => {
         try {
           const result = await softDeleteNodeSubtree({
-            accountScope: viewerAccountScope,
+            accountScope,
             ancestorId: card.id,
             libraryId,
           });
@@ -440,7 +443,7 @@ const AsmrArchiveViewer: React.FC<AsmrArchiveViewerProps> = ({
         }
       },
     });
-  }, [closeTabByNodeId, libraryId, viewerAccountScope]);
+  }, [accountScope, closeTabByNodeId, libraryId]);
 
   const contextMenuItems = useMemo<ContextMenuItem[]>(() => {
     const card = menuState.card;
@@ -498,7 +501,7 @@ const AsmrArchiveViewer: React.FC<AsmrArchiveViewerProps> = ({
     }
 
     const viewportTop = viewport.getBoundingClientRect().top;
-    for (const card of cards) {
+    for (const card of cardsRef.current) {
       const el = cardRefs.current.get(card.id);
       if (!el) continue;
       const rect = el.getBoundingClientRect();
@@ -510,14 +513,75 @@ const AsmrArchiveViewer: React.FC<AsmrArchiveViewerProps> = ({
       };
     }
 
-    if (cards.length > 0) {
+    if (cardsRef.current.length > 0) {
       return {
-        anchorCardId: cards[0].id,
+        anchorCardId: cardsRef.current[0].id,
         anchorOffsetRatio: 0,
       };
     }
     return { anchorCardId: null, anchorOffsetRatio: 0 };
-  }, [cards, viewportRef]);
+  }, [viewportRef]);
+
+  const captureSessionSnapshot = useCallback((): ArchiveCardSessionSnapshot | null => {
+    const pending = pendingRestoreRef.current;
+    if (pending) {
+      return {
+        anchorCardId: pending.anchorCardId,
+        anchorOffsetRatio: pending.anchorOffsetRatio,
+        scrollRatio: pending.scrollRatio,
+        scrollTop: pending.scrollTop,
+        selectedCardId: null,
+      };
+    }
+    const viewport = viewportRef.current;
+    if (!viewport || cardsRef.current.length === 0) return null;
+    const maxScrollable = Math.max(viewport.scrollHeight - viewport.clientHeight, 0);
+    const scrollTop = Math.max(viewport.scrollTop, 0);
+    const anchor = captureAnchorFromViewport();
+    return {
+      anchorCardId: anchor.anchorCardId,
+      anchorOffsetRatio: anchor.anchorOffsetRatio,
+      scrollRatio: maxScrollable > 0 ? clamp(scrollTop / maxScrollable, 0, 1) : null,
+      scrollTop,
+      selectedCardId: null,
+    };
+  }, [captureAnchorFromViewport, viewportRef]);
+
+  const restoreSessionSnapshot = useCallback((payload: ArchiveCardSessionSnapshot) => {
+    const snapshot = parseArchiveCardSessionSnapshot(payload);
+    if (!snapshot) return;
+    pendingRestoreRef.current = {
+      anchorCardId: snapshot.anchorCardId,
+      anchorOffsetRatio: snapshot.anchorOffsetRatio,
+      scrollRatio: snapshot.scrollRatio ?? 0,
+      scrollTop: snapshot.scrollTop,
+      updatedAt: '',
+    };
+    pendingSessionResourceNodeIdRef.current = folderNodeId;
+    setRestoreTick(prev => prev + 1);
+  }, [folderNodeId]);
+
+  const sessionAdapter = useMemo<ViewerSessionAdapter<ArchiveCardSessionSnapshot>>(() => ({
+    capture: captureSessionSnapshot,
+    restore: restoreSessionSnapshot,
+    suspend: () => undefined,
+    resume: () => undefined,
+    estimateCost: () => ARCHIVE_CARD_SESSION_ESTIMATED_BYTES,
+    getPinReasons: () => (activeRef.current ? ['active'] : []),
+  }), [captureSessionSnapshot, restoreSessionSnapshot]);
+
+  const { capture: flushSessionSnapshot } = useViewerSession({
+    accountScope,
+    active,
+    adapter: sessionAdapter,
+    contentRevision,
+    libraryId,
+    nodeId: folderNodeId,
+    reloadToken,
+    schemaVersion: ARCHIVE_CARD_SESSION_SCHEMA_VERSION,
+    tabId,
+    viewerKind: 'asmr_archive',
+  });
 
   const flushRemoteProgress = useCallback(async (force = false) => {
     if (!folderNodeId || !libraryId) {
@@ -529,14 +593,20 @@ const AsmrArchiveViewer: React.FC<AsmrArchiveViewerProps> = ({
 
     const pending = pendingRemoteProgressRef.current;
     if (!pending) return;
+    const requestId = requestIdRef.current;
     const signature = JSON.stringify(pending);
-    if (!force && signature === lastRemoteSyncSignatureRef.current) return;
+    if (signature === lastRemoteSyncSignatureRef.current) {
+      acknowledgeLatestPendingValue(pendingRemoteProgressRef, pending);
+      return;
+    }
 
+    let shouldFlushLatest = false;
     remoteSyncInflightRef.current = true;
     try {
       if (!viewMetaBaseReadyRef.current) {
         try {
           const detail = await fetchNodeDetailById(folderNodeId);
+          if (requestId !== requestIdRef.current) return;
           viewMetaBaseRef.current = parseViewMetaObject(detail.viewMeta);
           viewMetaBaseReadyRef.current = true;
         } catch (detailError) {
@@ -549,13 +619,25 @@ const AsmrArchiveViewer: React.FC<AsmrArchiveViewerProps> = ({
         id: folderNodeId,
         viewMeta: JSON.stringify(nextMeta),
       });
+      if (requestId !== requestIdRef.current) return;
       viewMetaBaseRef.current = nextMeta;
       lastRemoteSyncSignatureRef.current = signature;
-      pendingRemoteProgressRef.current = null;
+      shouldFlushLatest = acknowledgeLatestPendingValue(pendingRemoteProgressRef, pending);
     } catch (syncError) {
       runtimeLogger.warn('同步 ASMR 归档阅读位置失败:', syncError);
     } finally {
-      remoteSyncInflightRef.current = false;
+      if (requestId === requestIdRef.current) {
+        remoteSyncInflightRef.current = false;
+        if (shouldFlushLatest && pendingRemoteProgressRef.current && (active || force)) {
+          if (remoteSyncTimerRef.current) {
+            window.clearTimeout(remoteSyncTimerRef.current);
+          }
+          remoteSyncTimerRef.current = window.setTimeout(() => {
+            remoteSyncTimerRef.current = 0;
+            void flushRemoteProgress(force);
+          }, force ? 0 : REMOTE_PROGRESS_SYNC_INTERVAL_MS);
+        }
+      }
     }
   }, [active, folderNodeId, libraryId]);
 
@@ -743,8 +825,21 @@ const AsmrArchiveViewer: React.FC<AsmrArchiveViewerProps> = ({
     requestIdRef.current += 1;
     const requestId = requestIdRef.current;
     restoreTriggeredLoadMoreRef.current = false;
-    pendingRestoreRef.current = null;
+    const hasWarmSessionRestore = pendingSessionResourceNodeIdRef.current === folderNodeId;
+    if (!hasWarmSessionRestore) {
+      pendingRestoreRef.current = null;
+      pendingSessionResourceNodeIdRef.current = null;
+    }
     cardRefs.current.clear();
+    pendingRemoteProgressRef.current = null;
+    remoteSyncInflightRef.current = false;
+    lastRemoteSyncSignatureRef.current = '';
+    viewMetaBaseRef.current = {};
+    viewMetaBaseReadyRef.current = false;
+    if (remoteSyncTimerRef.current) {
+      window.clearTimeout(remoteSyncTimerRef.current);
+      remoteSyncTimerRef.current = 0;
+    }
 
     if (!folderNodeId || !libraryId) {
       setCards([]);
@@ -757,33 +852,12 @@ const AsmrArchiveViewer: React.FC<AsmrArchiveViewerProps> = ({
       return;
     }
 
-    const cached = readerCacheKey ? asmrArchiveSnapshotCache.get(readerCacheKey) : null;
-    const hasCachedList = Boolean(cached?.hasLoadedList && cached.cards.length > 0);
-    if (hasCachedList && cached) {
-      isHydratingSnapshotRef.current = true;
-      setCards(cached.cards);
-      setTotal(cached.total);
-      setNextOffset(cached.nextOffset);
-      setHasMore(cached.hasMore);
-      setError(null);
-      setListLoading(false);
-      setLoadingMore(false);
-      pendingRestoreRef.current = {
-        anchorCardId: cached.anchorCardId,
-        anchorOffsetRatio: cached.anchorOffsetRatio,
-        scrollTop: cached.scrollTop,
-        scrollRatio: cached.scrollRatio,
-        updatedAt: '',
-      };
-      setRestoreTick((prev) => prev + 1);
-    } else {
-      setCards([]);
-      setTotal(0);
-      setNextOffset(0);
-      setHasMore(false);
-      setError(null);
-      void loadPage(0, false);
-    }
+    setCards([]);
+    setTotal(0);
+    setNextOffset(0);
+    setHasMore(false);
+    setError(null);
+    void loadPage(0, false);
 
     void (async () => {
       try {
@@ -791,12 +865,9 @@ const AsmrArchiveViewer: React.FC<AsmrArchiveViewerProps> = ({
         if (requestId !== requestIdRef.current) return;
         viewMetaBaseRef.current = parseViewMetaObject(detail.viewMeta);
         viewMetaBaseReadyRef.current = true;
-        if (!hasCachedList) {
-          return;
-        }
         const remoteProgress = parseRemoteArchiveProgress(detail.viewMeta);
         if (!remoteProgress) return;
-        if (!pendingRestoreRef.current) {
+        if (!hasWarmSessionRestore && !pendingRestoreRef.current) {
           pendingRestoreRef.current = remoteProgress;
           setRestoreTick((prev) => prev + 1);
         }
@@ -804,7 +875,7 @@ const AsmrArchiveViewer: React.FC<AsmrArchiveViewerProps> = ({
         runtimeLogger.warn('读取 ASMR 归档阅读位置失败:', detailError);
       }
     })();
-  }, [folderNodeId, libraryId, loadPage, readerCacheKey]);
+  }, [folderNodeId, libraryId, loadPage]);
 
   useEffect(() => {
     if (!active) return;
@@ -824,20 +895,21 @@ const AsmrArchiveViewer: React.FC<AsmrArchiveViewerProps> = ({
         if ((listLoading || loadingMore) && cards.length === 0) {
           return;
         }
-        if (!hasMore && !listLoading && !loadingMore && pending.scrollTop > 0) {
-          suppressNextScrollPersistRef.current = true;
-          viewport.scrollTop = Math.max(Math.floor(pending.scrollTop), 0);
-          pendingRestoreRef.current = null;
-          return;
-        }
-        if (!hasMore && !listLoading && !loadingMore && pending.scrollRatio > 0) {
+        if (!hasMore && !listLoading && !loadingMore) {
           const maxScrollable = Math.max(viewport.scrollHeight - viewport.clientHeight, 0);
           suppressNextScrollPersistRef.current = true;
-          viewport.scrollTop = Math.floor(maxScrollable * clamp(pending.scrollRatio, 0, 1));
-          pendingRestoreRef.current = null;
-          return;
-        }
-        if (!hasMore && !listLoading && !loadingMore) {
+          viewport.scrollTop = resolveArchiveCardRestoreScrollTop({
+            anchorHeight: null,
+            anchorOffsetTop: null,
+            maxScrollable,
+            snapshot: {
+              anchorCardId: pending.anchorCardId,
+              anchorOffsetRatio: pending.anchorOffsetRatio,
+              scrollRatio: pending.scrollRatio,
+              scrollTop: pending.scrollTop,
+              selectedCardId: null,
+            },
+          });
           pendingRestoreRef.current = null;
         }
         return;
@@ -851,31 +923,22 @@ const AsmrArchiveViewer: React.FC<AsmrArchiveViewerProps> = ({
       return;
     }
 
-    if (pending.scrollTop > 0) {
-      suppressNextScrollPersistRef.current = true;
-      viewport.scrollTop = Math.max(Math.floor(pending.scrollTop), 0);
-      pendingRestoreRef.current = null;
-      return;
-    }
-
-    if (pending.scrollRatio > 0) {
-      const maxScrollable = Math.max(viewport.scrollHeight - viewport.clientHeight, 0);
-      suppressNextScrollPersistRef.current = true;
-      viewport.scrollTop = Math.floor(maxScrollable * clamp(pending.scrollRatio, 0, 1));
-      pendingRestoreRef.current = null;
-    }
-  }, [active, cards, hasMore, listLoading, loadPage, loadingMore, nextOffset, restoreTick, viewportRef]);
-
-  useEffect(() => {
-    if (cards.length === 0) return;
-    persistSnapshot({
-      hasLoadedList: true,
-      cards,
-      nextOffset,
-      total,
-      hasMore,
+    const maxScrollable = Math.max(viewport.scrollHeight - viewport.clientHeight, 0);
+    suppressNextScrollPersistRef.current = true;
+    viewport.scrollTop = resolveArchiveCardRestoreScrollTop({
+      anchorHeight: null,
+      anchorOffsetTop: null,
+      maxScrollable,
+      snapshot: {
+        anchorCardId: null,
+        anchorOffsetRatio: pending.anchorOffsetRatio,
+        scrollRatio: pending.scrollRatio,
+        scrollTop: pending.scrollTop,
+        selectedCardId: null,
+      },
     });
-  }, [cards, hasMore, nextOffset, persistSnapshot, total]);
+    pendingRestoreRef.current = null;
+  }, [active, cards, hasMore, listLoading, loadPage, loadingMore, nextOffset, restoreTick, viewportRef]);
 
   useEffect(() => {
     const viewport = viewportRef.current;
@@ -918,12 +981,7 @@ const AsmrArchiveViewer: React.FC<AsmrArchiveViewerProps> = ({
         const scrollTop = Math.max(viewport.scrollTop, 0);
         const scrollRatio = maxScrollable > 0 ? clamp(scrollTop / maxScrollable, 0, 1) : 0;
         const anchor = captureAnchorFromViewport();
-        persistSnapshot({
-          scrollTop,
-          scrollRatio,
-          anchorCardId: anchor.anchorCardId,
-          anchorOffsetRatio: anchor.anchorOffsetRatio,
-        });
+        flushSessionSnapshot();
         queueRemoteProgress({
           anchorCardId: anchor.anchorCardId,
           anchorOffsetRatio: anchor.anchorOffsetRatio,
@@ -942,28 +1000,12 @@ const AsmrArchiveViewer: React.FC<AsmrArchiveViewerProps> = ({
         scrollPersistRafRef.current = 0;
       }
     };
-  }, [captureAnchorFromViewport, persistSnapshot, queueRemoteProgress, viewportRef]);
+  }, [captureAnchorFromViewport, flushSessionSnapshot, queueRemoteProgress, viewportRef]);
 
   useEffect(() => {
-    if (isHydratingSnapshotRef.current) {
-      isHydratingSnapshotRef.current = false;
-      return;
-    }
     if (!active || cards.length === 0) return;
-    const viewport = viewportRef.current;
-    if (!viewport) return;
-    const maxScrollable = Math.max(viewport.scrollHeight - viewport.clientHeight, 0);
-    const scrollTop = Math.max(viewport.scrollTop, 0);
-    const scrollRatio = maxScrollable > 0 ? clamp(scrollTop / maxScrollable, 0, 1) : 0;
-    const anchor = captureAnchorFromViewport();
-    persistSnapshot({
-      hasLoadedList: true,
-      scrollTop,
-      scrollRatio,
-      anchorCardId: anchor.anchorCardId,
-      anchorOffsetRatio: anchor.anchorOffsetRatio,
-    });
-  }, [active, cards.length, captureAnchorFromViewport, persistSnapshot, viewportRef]);
+    flushSessionSnapshot();
+  }, [active, cards.length, flushSessionSnapshot]);
 
   useEffect(() => () => {
     if (remoteSyncTimerRef.current) {

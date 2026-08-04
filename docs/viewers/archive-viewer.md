@@ -1,6 +1,6 @@
 # Archive Viewer 说明
 
-更新时间：2026-07-31
+更新时间：2026-08-04
 适用范围：`src/features/archive-viewer/` 下的归档语义 viewer 和相关辅助能力。
 
 ## 1. 作用
@@ -38,7 +38,7 @@
 - 歌曲文件夹内第一个音频文件作为主媒体，第一个图片文件作为封面，字幕 / 歌词文件作为伴随资源候选；直属普通音频文件不要求单独设置 `builtInType = AUDIO`
 - 歌词支持 `.lrc / .srt / .vtt / .ass / .ssa / .qrc.xml`；其中 QQ 音乐 QRC XML 会解析字级时间轴，音乐归档展开页用可滚动歌词滚筒展示，当前句自动居中放大，点击歌词可跳转播放，高精度歌词会按真实播放时间平滑从左到右填色
 - 音频归档页不全量扫描归档根目录来匹配历史同名封面 / 歌词；需要伴随资源时优先使用歌曲文件夹结构
-- 音频归档快照会保存当前播放卡片、选中卡片、播放 URL 和歌词候选；从普通音频详情页返回归档时，也会按全局音频 `audio:node:<id>` owner 反向匹配 `mediaNodeId`，让列表高亮和底部播放器继续指向正在播放的歌曲
+- 音频归档 Warm snapshot 只保存稳定选中卡片和卡片墙锚点；播放 URL、歌词候选和卡片数组不进入 snapshot。从普通音频详情页返回归档时，按全局音频 `audio:node:<id>` owner 反向匹配 `mediaNodeId`，让列表高亮和底部播放器继续指向正在播放的歌曲
 - 上级音频归档视图不会把直属 `AUDIO + archiveMode=1` 子目录展示为合集；这类下级归档可以存在，但不进入上级歌曲列表
 
 其中 `comic_archive` 当前是漫画归档墙视图：
@@ -70,9 +70,11 @@
 - `hooks/useArchiveCardGrid.ts`
 - `utils/archive-sort.ts`
 
-`comic_archive`、`video_archive`、`audio_archive` 和 `asmr_archive` 会保存归档卡片列表及各自阅读现场的本地快照，用于切换 tab 或离开页面后快速恢复。工作区刷新按钮会把 `reloadToken` 传入这些归档 viewer，刷新后的缓存键随 token generation 变化，因此重新请求第一页归档卡片，不会在 remount 后重新命中刷新前的旧列表。按文件或工作区释放时会按资源前缀清理全部 generation。快照只属于当前归档节点，不跨父子归档共享。
+五类归档 viewer 都通过公共 Viewer Session Registry 保存最小阅读现场。卡片数组、分页响应、计数和临时封面/媒体链接始终重新请求；snapshot 只保存稳定卡片锚点、锚点内偏移、整体滚动比例、绝对滚动兜底，以及 Audio Archive 的稳定选择。刷新通过公共 reload generation 精确失效旧 snapshot，不再维护逐 viewer cache key。
 
-`components/comic-archive-viewer/index.tsx` 只保留页面编排、加载和渲染；新增或修改漫画归档卡片类型、DTO 映射、返回栈导航、阅读位置 viewMeta 解析时，优先维护同目录下的 `comic-archive-card-mapper.ts`、`useComicArchiveNavigation.ts`、`comic-archive-progress.ts` 和 `comic-archive-cache.ts`，不要继续把规则堆回主组件。
+Comic Archive 和 ASMR Archive 还会把语义阅读位置写入 `viewMeta`。同进程命中 Warm 时以 Warm 为准；未命中时才采用远端位置。恢复会继续分页直到锚点出现，锚点删除后按比例和绝对位置降级。分页更新不能改变 session adapter 引用，否则会重复注册并把用户拉回旧位置。
+
+`components/comic-archive-viewer/index.tsx` 只保留页面编排、加载和渲染；新增或修改漫画归档卡片类型、DTO 映射、返回栈导航或阅读位置解析时，优先维护同目录下的 `comic-archive-card-mapper.ts`、`useComicArchiveNavigation.ts` 和 `comic-archive-progress.ts`，不要继续把规则堆回主组件。
 
 ## 3. 阅读顺序
 

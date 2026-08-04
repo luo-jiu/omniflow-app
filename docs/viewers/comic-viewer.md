@@ -1,6 +1,6 @@
 # Comic Viewer 说明
 
-更新时间：2026-04-16
+更新时间：2026-08-04
 适用范围：`src/features/file-viewer/components/comic-viewer/` 下的漫画阅读、阅读模式切换、进度恢复和远端进度同步能力。
 
 ## 1. 概述
@@ -12,7 +12,7 @@
 - 解析 `comic://library/:libraryId/node/:nodeId` 路由中的 `libraryId`
 - 读取漫画目录中的图片页并按阅读器模型展示
 - 支持滚动模式和翻页模式两套阅读交互
-- 维护本地阅读快照缓存
+- 通过公共 Viewer Session Registry 维护 Warm 阅读现场
 - 把阅读进度回写到节点 `viewMeta`
 - 提供缩放、单双页切换、页间距、回到顶部、右键菜单和设置弹窗
 
@@ -62,26 +62,17 @@
 
 后续改动时不要把它们揉成一个开关。
 
-### 3.3 本地快照缓存
+### 3.3 Warm Session
 
-`comic-viewer` 当前有局部快照缓存，缓存 key 由：
+`comic-viewer` 通过公共 registry 保存：
 
-- `fileUrl`
-- `folderNodeId`
-- `reloadToken`
+- 稳定页锚点、锚点内偏移、滚动比例和绝对位置兜底
+- 当前页码
+- 滚动/翻页模式与单双页模式
+- 滚动缩放、页间距
+- 翻页缩放、平移、旋转和是否使用自定义缩放
 
-共同组成。
-
-当前缓存内容包括：
-
-- 是否已加载列表
-- 已解析的页列表
-- 当前已渲染页数
-- 滚动位置与滚动比例
-- anchor page 和 offset ratio
-- 本地快照更新时间
-
-它的目的不是持久化全部阅读器设置，而是让 tab 切换、重渲染后能尽可能恢复到原阅读位置。
+页列表、渲染窗口、临时图片链接、已解码图片和 DOM ref 不进入 snapshot；恢复时重新读取 children 并按目标页抬高首批渲染窗口。资源身份使用稳定节点，不使用 `fileUrl`；刷新由 `reloadToken` generation 精确失效旧 snapshot。
 
 ### 3.4 远端阅读进度同步
 
@@ -106,7 +97,7 @@
 - `currentPageNumber`
 - `updatedAt`
 
-远端恢复会和本地快照的 `updatedAt` 比较：当本地快照更新时，旧的远端记录不能覆盖本地恢复点。
+同进程命中 Warm 时直接以 Warm 为准，远端只作为没有 Warm snapshot 时的 Cold fallback；旧的远端记录不能覆盖本地恢复点。
 `anchorPageId + anchorOffsetRatio` 是优先恢复依据，`scrollTop / scrollRatio` 作为页面顺序变化或 anchor 不可用时的兜底。
 
 所以后续如果你改阅读进度模型，要同时确认：
@@ -146,15 +137,11 @@
 
 建议顺着这条链路阅读：
 
-1. 从 `fileUrl` 解析 `libraryId`
-2. 用 `folderNodeId + fileUrl + reloadToken` 计算 reader cache key
-3. 如果命中本地快照：
-   - 恢复 pages、visibleCount、anchor 和 scroll 信息
-   - 再异步拉一次节点详情，尝试用远端阅读进度覆盖本地恢复点
-4. 如果未命中本地快照：
-   - 并行加载 children 和节点详情
-   - 过滤出图片页
-   - 如果 `viewMeta` 里有阅读记录，则直接把 visibleCount 和 anchor 提前抬到目标页
+1. 使用显式 `libraryId` 和 `folderNodeId` 构造公共 session identity。
+2. registry 同步恢复模式、缩放、页间距、翻页变换和待定位页锚点。
+3. 并行加载 children 和节点详情，过滤出图片页。
+4. 命中 Warm 时按稳定页锚点定位，并忽略本轮远端位置；未命中时才解析 `viewMeta`。
+5. 根据目标页提前抬高 `visibleCount`，重新请求图片链接，待布局稳定后完成定位。
 
 这里最重要的是：
 
@@ -223,7 +210,7 @@
 
 ## 6. 当前最值得小心的点
 
-- 本地恢复和远端恢复是两条链路叠加的，不能只验证其中一条
+- Warm 和远端恢复是有明确优先级的两条链路，不能让较慢的远端请求覆盖 Warm
 - `layoutMode` 和 `scrollColumnMode` 是两层状态，不要误合并
 - `visibleCount` 同时影响渲染数量、预取窗口和恢复能力，是关键状态
 - `flipPageIndex` 在双页模式下需要做偶数对齐，不能直接拿来显示
@@ -265,16 +252,17 @@
 2. 滚动模式下能继续加载更多页，缩放和回到顶部正常。
 3. 翻页模式下能左右翻页、单双页切换、缩放、拖拽和平移。
 4. 右键菜单和设置弹窗在两种模式下都正常。
-5. 切换 tab 再回来后，本地阅读位置仍能恢复。
-6. 重新进入同一漫画目录后，远端阅读进度仍能续读。
-7. 历史 `viewMeta` 兼容情况下不会白屏或丢进度。
+5. 滚动/翻页、单双页、缩放、页间距和平移旋转在真卸载重建后恢复。
+6. 未命中 Warm 时，重新进入同一漫画目录能从远端阅读进度续读。
+7. reload 后不恢复旧 Warm snapshot，关闭重开按 retain-reading-position 续读。
+8. 历史 `viewMeta` 兼容情况下不会白屏或丢进度。
 
 ## 10. 维护规则
 
 出现以下任一变化时，必须回写本文：
 
 - `comic://` 路由解析变化
-- 本地 reader snapshot 结构变化
+- Warm session schema 或恢复优先级变化
 - 远端阅读进度字段变化
 - 滚动/翻页模式切换规则变化
 - 单双页或缩放模型变化

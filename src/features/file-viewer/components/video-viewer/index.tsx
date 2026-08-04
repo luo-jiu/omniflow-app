@@ -49,15 +49,23 @@ import {
 } from '@/features/file-viewer/services/global-video-elements';
 import { floatingVideoService } from '@/features/file-viewer/services/floating-video.service';
 import { isLibraryWorkspaceRoute } from '@/features/file-viewer/utils/media-route';
-import { useParams } from 'react-router-dom';
 import {
-  resolveVideoProgressCacheKey,
-  setVideoProgressSnapshot,
-  videoProgressCache,
+  VIDEO_VIEWER_SESSION_ESTIMATED_BYTES,
+  VIDEO_VIEWER_SESSION_SCHEMA_VERSION,
+  parseVideoViewerSessionSnapshot,
   type VideoPlaybackProgress,
-} from './video-progress-cache';
+  type VideoViewerSessionSnapshot,
+} from './video-viewer-session';
+import {
+  acknowledgeLatestPendingValue,
+  useViewerSession,
+  type ViewerSessionAdapter,
+} from '@/features/file-viewer/session';
 
 interface VideoViewerProps {
+  accountScope: string | null;
+  contentRevision: string | null;
+  libraryId: number | null;
   nodeId?: number | null;
   url: string;
   fileName?: string | null;
@@ -67,6 +75,7 @@ interface VideoViewerProps {
   subtitleSources?: FileViewerSubtitleSource[];
   playlist?: FileViewerVideoPlaylist | null;
   autoPlay?: boolean;
+  reloadToken?: number;
 }
 
 const SEEK_SECONDS = 5;
@@ -243,6 +252,9 @@ function isProgressNewer(
 }
 
 const VideoViewer: React.FC<VideoViewerProps> = ({
+  accountScope,
+  contentRevision,
+  libraryId,
   nodeId,
   url,
   fileName,
@@ -252,13 +264,9 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
   subtitleSources,
   playlist,
   autoPlay = false,
+  reloadToken = 0,
 }) => {
   const { setFileUrl } = useFileViewer();
-  const { id: libraryIdParam } = useParams<{ id: string }>();
-  const libraryId = useMemo(() => {
-    const parsed = Number(libraryIdParam);
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
-  }, [libraryIdParam]);
   const containerRef = useRef<HTMLDivElement>(null);
   const videoHostRef = useRef<HTMLDivElement>(null);
   const viewerRootRef = useRef<HTMLDivElement>(null);
@@ -281,6 +289,9 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
   const viewMetaBaseRef = useRef<Record<string, unknown>>({});
   const pendingRemoteProgressRef = useRef<VideoPlaybackProgress | null>(null);
   const pendingRestoreTimeRef = useRef<number | null>(null);
+  const pendingRestoreNodeIdRef = useRef<number | null>(null);
+  const restoredWarmProgressRef = useRef<VideoPlaybackProgress | null>(null);
+  const lastPlaybackProgressRef = useRef<VideoPlaybackProgress | null>(null);
   const lastSyncedRemoteProgressSignatureRef = useRef('');
   const isMountedRef = useRef(true);
   const activeRef = useRef(active);
@@ -292,6 +303,12 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
   const consoleOpenRef = useRef(false);
   const consoleOpenBeforeWideModeRef = useRef<boolean | null>(null);
   const wideModeAppliedRef = useRef(false);
+  const playbackRateRef = useRef(1);
+  const subtitleEnabledRef = useRef(true);
+  const subtitleSourceIdRef = useRef<string | null>(null);
+  const subtitleFontSizeRef = useRef(44);
+  const subtitleBottomOffsetRef = useRef(72);
+  const sessionCaptureRafRef = useRef(0);
   const { setVideoWideMode } = useLibraryWorkspaceControls();
 
   const [isPlaying, setIsPlaying] = useState(false);
@@ -313,7 +330,6 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
   const isVideoHostedOutsideInline = floatingVideoState.key === videoElementKey
     && floatingVideoState.hostMode !== 'inline';
 
-  const progressCacheKey = useMemo(() => resolveVideoProgressCacheKey(url, nodeId), [nodeId, url]);
   const playlistItems = useMemo(() => playlist?.items ?? [], [playlist]);
   const hasPlaylist = playlistItems.length > 0;
   const playlistCountText = useMemo(() => {
@@ -352,6 +368,101 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
     subtitleSources,
     url,
   });
+
+  playbackRateRef.current = playbackRate;
+  subtitleEnabledRef.current = subtitleEnabled;
+  subtitleSourceIdRef.current = loadedSubtitleSourceId;
+  subtitleFontSizeRef.current = subtitleFontSize;
+  subtitleBottomOffsetRef.current = subtitleBottomOffset;
+
+  const captureVideoSession = useCallback((): VideoViewerSessionSnapshot => {
+    const video = videoRef.current;
+    const pendingProgress = pendingRestoreTimeRef.current == null
+      ? null
+      : lastPlaybackProgressRef.current;
+    const durationValue = pendingProgress?.duration ?? (
+      video && Number.isFinite(video.duration) && video.duration > 0
+        ? video.duration
+        : lastPlaybackProgressRef.current?.duration ?? 0
+    );
+    const currentValue = pendingProgress
+      ? pendingRestoreTimeRef.current ?? pendingProgress.currentTime
+      : video && Number.isFinite(video.currentTime) && durationValue > 0
+      ? Math.min(Math.max(video.ended ? 0 : video.currentTime, 0), durationValue)
+      : lastPlaybackProgressRef.current?.currentTime ?? 0;
+    return {
+      currentTime: currentValue,
+      duration: durationValue,
+      updatedAt: lastPlaybackProgressRef.current?.updatedAt ?? '',
+      playbackRate: playbackRateRef.current,
+      subtitleEnabled: subtitleEnabledRef.current,
+      subtitleSourceId: subtitleSourceIdRef.current,
+      subtitleFontSize: subtitleFontSizeRef.current,
+      subtitleBottomOffset: subtitleBottomOffsetRef.current,
+      consoleOpen: consoleOpenRef.current,
+    };
+  }, []);
+
+  const restoreVideoSession = useCallback((payload: VideoViewerSessionSnapshot) => {
+    const snapshot = parseVideoViewerSessionSnapshot(payload);
+    if (!snapshot) return;
+    const progress: VideoPlaybackProgress = {
+      currentTime: snapshot.currentTime,
+      duration: snapshot.duration,
+      updatedAt: snapshot.updatedAt,
+    };
+    restoredWarmProgressRef.current = progress;
+    lastPlaybackProgressRef.current = progress;
+    pendingRestoreTimeRef.current = resolveRestorableTime(progress);
+    pendingRestoreNodeIdRef.current = nodeId ?? null;
+    setPlaybackRate(snapshot.playbackRate);
+    setSubtitleEnabled(snapshot.subtitleEnabled);
+    setSubtitleFontSize(snapshot.subtitleFontSize);
+    setSubtitleBottomOffset(snapshot.subtitleBottomOffset);
+    setIsConsoleOpen(snapshot.consoleOpen);
+    if (snapshot.subtitleSourceId) {
+      const source = librarySubtitleSources.find(item => item.id === snapshot.subtitleSourceId);
+      if (source) void loadLibrarySubtitle(source, { preserveEnabled: true });
+    }
+  }, [librarySubtitleSources, loadLibrarySubtitle, nodeId, setSubtitleBottomOffset, setSubtitleEnabled, setSubtitleFontSize]);
+
+  const sessionAdapter = useMemo<ViewerSessionAdapter<VideoViewerSessionSnapshot>>(() => ({
+    capture: captureVideoSession,
+    restore: restoreVideoSession,
+    suspend: () => undefined,
+    resume: () => undefined,
+    estimateCost: () => VIDEO_VIEWER_SESSION_ESTIMATED_BYTES,
+    getPinReasons: () => {
+      const reasons: Array<'active' | 'playing' | 'pip'> = [];
+      if (activeRef.current) reasons.push('active');
+      const video = videoRef.current;
+      if (video && !video.paused && !video.ended) reasons.push('playing');
+      const hostMode = floatingVideoService.getState().hostMode;
+      if (hostMode === 'document-pip' || hostMode === 'system-window') reasons.push('pip');
+      return reasons;
+    },
+  }), [captureVideoSession, restoreVideoSession]);
+
+  const { capture: flushVideoSession } = useViewerSession({
+    accountScope,
+    active,
+    adapter: sessionAdapter,
+    contentRevision,
+    libraryId,
+    nodeId: nodeId ?? null,
+    reloadToken,
+    schemaVersion: VIDEO_VIEWER_SESSION_SCHEMA_VERSION,
+    tabId,
+    viewerKind: 'video',
+  });
+
+  const scheduleVideoSessionCapture = useCallback(() => {
+    if (sessionCaptureRafRef.current) return;
+    sessionCaptureRafRef.current = window.requestAnimationFrame(() => {
+      sessionCaptureRafRef.current = 0;
+      flushVideoSession();
+    });
+  }, [flushVideoSession]);
 
   const captureVideoThumbnail = useCallback((): boolean => {
     const video = videoRef.current;
@@ -437,6 +548,18 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
     consoleOpenRef.current = isConsoleOpen;
   }, [isConsoleOpen]);
 
+  useEffect(() => {
+    scheduleVideoSessionCapture();
+  }, [
+    isConsoleOpen,
+    loadedSubtitleSourceId,
+    playbackRate,
+    scheduleVideoSessionCapture,
+    subtitleBottomOffset,
+    subtitleEnabled,
+    subtitleFontSize,
+  ]);
+
   const flushRemoteVideoProgress = useCallback(async (force = false) => {
     if (!nodeId || !Number.isFinite(nodeId)) {
       pendingRemoteProgressRef.current = null;
@@ -451,16 +574,18 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
 
     const pending = pendingRemoteProgressRef.current;
     if (!pending) return;
+    const requestId = remoteProgressRequestIdRef.current;
 
     const signature = [
       pending.currentTime.toFixed(1),
       pending.duration.toFixed(1),
     ].join('|');
     if (signature === lastSyncedRemoteProgressSignatureRef.current) {
-      pendingRemoteProgressRef.current = null;
+      acknowledgeLatestPendingValue(pendingRemoteProgressRef, pending);
       return;
     }
 
+    let shouldFlushLatest = false;
     remoteProgressSyncInFlightRef.current = true;
     try {
       const nextMeta = buildNextViewMetaWithVideoProgress(viewMetaBaseRef.current, pending);
@@ -468,21 +593,24 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
         id: nodeId,
         viewMeta: JSON.stringify(nextMeta),
       });
+      if (requestId !== remoteProgressRequestIdRef.current) return;
       viewMetaBaseRef.current = nextMeta;
       lastSyncedRemoteProgressSignatureRef.current = signature;
-      pendingRemoteProgressRef.current = null;
+      shouldFlushLatest = acknowledgeLatestPendingValue(pendingRemoteProgressRef, pending);
     } catch (error) {
       runtimeLogger.warn('同步视频观看进度失败:', error);
     } finally {
-      remoteProgressSyncInFlightRef.current = false;
-      if (pendingRemoteProgressRef.current && (activeRef.current || force)) {
-        if (remoteProgressSyncTimerRef.current) {
-          window.clearTimeout(remoteProgressSyncTimerRef.current);
+      if (requestId === remoteProgressRequestIdRef.current) {
+        remoteProgressSyncInFlightRef.current = false;
+        if (shouldFlushLatest && pendingRemoteProgressRef.current && (activeRef.current || force)) {
+          if (remoteProgressSyncTimerRef.current) {
+            window.clearTimeout(remoteProgressSyncTimerRef.current);
+          }
+          remoteProgressSyncTimerRef.current = window.setTimeout(() => {
+            remoteProgressSyncTimerRef.current = 0;
+            void flushRemoteVideoProgress(force);
+          }, VIDEO_PROGRESS_REMOTE_SYNC_INTERVAL_MS);
         }
-        remoteProgressSyncTimerRef.current = window.setTimeout(() => {
-          remoteProgressSyncTimerRef.current = 0;
-          void flushRemoteVideoProgress(force);
-        }, VIDEO_PROGRESS_REMOTE_SYNC_INTERVAL_MS);
       }
     }
   }, [nodeId]);
@@ -518,9 +646,10 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
       duration: durationValue,
       updatedAt: new Date().toISOString(),
     };
-    setVideoProgressSnapshot(progressCacheKey, progress);
+    lastPlaybackProgressRef.current = progress;
+    scheduleVideoSessionCapture();
     queueRemoteVideoProgressSync(progress, forceRemoteSync);
-  }, [progressCacheKey, queueRemoteVideoProgressSync]);
+  }, [queueRemoteVideoProgressSync, scheduleVideoSessionCapture]);
 
   useEffect(() => {
     persistVideoProgressRef.current = persistVideoProgress;
@@ -649,6 +778,10 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
         window.clearTimeout(thumbnailCaptureTimerRef.current);
         thumbnailCaptureTimerRef.current = 0;
       }
+      if (sessionCaptureRafRef.current) {
+        window.cancelAnimationFrame(sessionCaptureRafRef.current);
+        sessionCaptureRafRef.current = 0;
+      }
     };
   }, [handleGlobalMouseMove, handleGlobalMouseUp]);
 
@@ -720,6 +853,7 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
     viewMetaBaseReadyRef.current = false;
     viewMetaBaseRef.current = {};
     pendingRemoteProgressRef.current = null;
+    remoteProgressSyncInFlightRef.current = false;
     lastSyncedRemoteProgressSignatureRef.current = '';
 
     if (isSameSource) {
@@ -731,7 +865,12 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
       return;
     }
 
-    pendingRestoreTimeRef.current = resolveRestorableTime(videoProgressCache.get(progressCacheKey));
+    if (pendingRestoreNodeIdRef.current !== (nodeId ?? null)) {
+      pendingRestoreTimeRef.current = null;
+      restoredWarmProgressRef.current = null;
+      lastPlaybackProgressRef.current = null;
+    }
+    pendingRestoreNodeIdRef.current = nodeId ?? null;
     if (thumbnailCaptureTimerRef.current) {
       window.clearTimeout(thumbnailCaptureTimerRef.current);
       thumbnailCaptureTimerRef.current = 0;
@@ -745,7 +884,7 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
     setDuration(0);
     setIsPlaying(false);
     setIsBuffering(true);
-  }, [progressCacheKey, scheduleVideoThumbnailCapture, url]);
+  }, [nodeId, scheduleVideoThumbnailCapture, url]);
 
   useEffect(() => {
     if (!autoPlay) return;
@@ -786,10 +925,10 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
 
         const remoteProgress = parseVideoRemoteProgress(detail.viewMeta);
         if (remoteProgress) {
-          const cachedProgress = videoProgressCache.get(progressCacheKey);
-          const shouldUseRemoteProgress = isProgressNewer(remoteProgress, cachedProgress);
+          const warmProgress = restoredWarmProgressRef.current ?? lastPlaybackProgressRef.current;
+          const shouldUseRemoteProgress = isProgressNewer(remoteProgress, warmProgress);
           if (shouldUseRemoteProgress) {
-            setVideoProgressSnapshot(progressCacheKey, remoteProgress);
+            lastPlaybackProgressRef.current = remoteProgress;
             const pendingTime = resolveRestorableTime(remoteProgress);
             if (pendingTime !== null) {
               pendingRestoreTimeRef.current = pendingTime;
@@ -810,7 +949,7 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
         if (!isMountedRef.current || requestId !== remoteProgressRequestIdRef.current) return;
         runtimeLogger.warn('加载视频观看进度失败:', error);
       });
-  }, [applyPendingRestoreTime, flushRemoteVideoProgress, nodeId, progressCacheKey]);
+  }, [applyPendingRestoreTime, flushRemoteVideoProgress, nodeId]);
 
   useEffect(() => {
     if (active) return;

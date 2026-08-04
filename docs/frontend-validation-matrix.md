@@ -1,6 +1,6 @@
 # 前端验证矩阵
 
-更新时间：2026-07-31
+更新时间：2026-08-04
 
 适用范围：`omniflow-app` 前端、Electron、IPC、工作区、文件树、文件预览、上传、内置浏览器和资源捕捉相关改动的提测、自测与 review 验证。
 
@@ -144,6 +144,11 @@ legacy 兼容检查：
 - Gallery reload 和关闭再打开均回到默认网格；真卸载恢复时重新读取目录并重新请求临时链接，不复用旧签名 URL / HEIC 预览 URL
 - Gallery Archive 卡片墙在文件 tab 往返和工作区真卸载后恢复同一卡片锚点；reload 和关闭重开回到顶部，卡片与临时封面重新加载
 - PDF 长文档的页码跳转、上一页/下一页、缩放、文件 tab 往返、工作区模式往返和关闭重开都保持同一阅读页；窗口宽度变化后按页锚点恢复，实际视口与页码控件显示一致
+- ASMR 嵌套路径、列表锚点、选择在真卸载后恢复；播放后浏览到另一目录时，播放节点和原队列仍由稳定父目录与 `globalAudioPlayer` 投影
+- Video 倍速、字幕开关/来源/字号/底部偏移、操作台和观看位置在真卸载后恢复；同一个媒体 DOM 不被复制
+- Video/Audio Archive 长列表继续分页直到卡片锚点出现；Audio 的选中项恢复，播放事实仍以 `globalAudioPlayer` 为准
+- Comic 的滚动/翻页、单双页、缩放、页间距、页锚点和平移旋转在真卸载后恢复
+- Comic/ASMR Archive 命中 Warm 时不被较慢的远端 `viewMeta` 覆盖；未命中 Warm 时可以从远端位置冷恢复
 
 边界路径：
 
@@ -152,6 +157,10 @@ legacy 兼容检查：
 - Image 裁剪模式、右键菜单、dragging 和 HEIC 临时预览 URL 不进入 session snapshot
 - Gallery 裁剪、详情弹框、dragging、缩略图 loaded、图片 keep-alive 集合和临时资源 URL 不进入 session snapshot；锚点媒体被删除时按滚动比例合理降级
 - Gallery Archive 列数变化时仍按稳定卡片节点恢复；锚点被删除时按比例降级，卡片列表、计数、详情队列和临时封面 URL 不进入 snapshot
+- ASMR 恢复路径中的目录被删除或移动时回退到最后一个有效层级；目录列表、封面、音频队列内容和临时音频 URL 不进入 snapshot
+- Video snapshot 不包含视频 URL、字幕正文/cue、菜单、DOM 或回调；库内字幕重新取临时链接且保持恢复后的开关偏好
+- 归档锚点被删除时按整体比例、再按绝对滚动位置降级；卡片数组、分页响应和临时资源链接不进入 snapshot
+- Comic 页锚点被删除时按页码和滚动降级；页数组、渲染窗口、已解码图片和临时图片 URL 不进入 snapshot
 - 视频底部小窗按钮优先进入 Document PiP；不支持时降级应用内浮窗
 - 视频小窗状态下 inline 占位可收回，同一个视频元素进度不丢
 - Document PiP 原生关闭、应用内浮窗收起 / 软关闭后，MediaHub entry 和播放状态符合 `docs/media-hub-contract.md`

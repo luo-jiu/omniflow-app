@@ -43,18 +43,32 @@ import {
 } from './audio-archive-sidecars';
 import { AudioArchiveViewerWrapper } from './style';
 import {
-  audioArchiveSnapshotCache,
-  EMPTY_AUDIO_ARCHIVE_SNAPSHOT,
-  resolveAudioArchiveReaderCacheKey,
-  setAudioArchiveSnapshotCache,
-  type AudioArchiveCard,
-  type AudioArchiveSnapshot,
-} from './audio-archive-cache';
+  ARCHIVE_CARD_SESSION_ESTIMATED_BYTES,
+  ARCHIVE_CARD_SESSION_SCHEMA_VERSION,
+  parseArchiveCardSessionSnapshot,
+  resolveArchiveCardRestoreScrollTop,
+  type ArchiveCardSessionSnapshot,
+} from '@/features/archive-viewer/session/archive-card-session';
+import { useViewerSession, type ViewerSessionAdapter } from '@/features/file-viewer/session';
+
+interface AudioArchiveCard {
+  id: number;
+  mediaNodeId: number;
+  title: string;
+  sortOrder: number;
+  coverNodeId: number | null;
+  coverUrl: string | null;
+  subtitleCount: number;
+  durationSeconds?: number | null;
+}
 
 interface AudioArchiveViewerProps {
+  accountScope: string | null;
+  contentRevision: string | null;
   folderNodeId: number | null;
   fileUrl: string;
   fileName?: string | null;
+  libraryId: number | null;
   active?: boolean;
   tabId: string;
   reloadToken?: number;
@@ -64,13 +78,6 @@ type AudioRepeatMode = 'order' | 'list-loop' | 'single-loop' | 'random';
 
 const PAGE_SIZE = 60;
 const LINK_EXPIRY_MINUTES = 120;
-
-function parseArchiveLibraryId(fileUrl: string): number | null {
-  const matches = /^audio-archive:\/\/library\/(\d+)\/node\/\d+$/i.exec(String(fileUrl || '').trim());
-  if (!matches) return null;
-  const parsed = Number(matches[1]);
-  return Number.isFinite(parsed) ? parsed : null;
-}
 
 function normalizeArchiveTitle(fileName?: string | null): string {
   const raw = String(fileName || '').trim();
@@ -173,13 +180,6 @@ function parseAudioNodeOwnerKey(ownerKey?: string | null): number | null {
   if (!match) return null;
   const parsed = Number(match[1]);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
-}
-
-function hasSnapshotPatchKey<Key extends keyof AudioArchiveSnapshot>(
-  patch: Partial<AudioArchiveSnapshot>,
-  key: Key,
-): boolean {
-  return Object.prototype.hasOwnProperty.call(patch, key);
 }
 
 const AudioCover: React.FC<{
@@ -305,9 +305,12 @@ const ExpandedLyricsRoller: React.FC<{
 });
 
 const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
+  accountScope,
+  contentRevision,
   folderNodeId,
   fileUrl,
   fileName,
+  libraryId,
   active = true,
   tabId,
   reloadToken = 0,
@@ -316,23 +319,17 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const requestIdRef = useRef(0);
-  const restoreScrollTopRef = useRef<number | null>(null);
   const persistScrollRafRef = useRef<number>(0);
   const activeSubtitleSourcesRef = useRef<FileViewerSubtitleSource[] | undefined>(undefined);
   const lastHandledEndedSerialRef = useRef(0);
   const coverClickTimerRef = useRef<number>(0);
 
-  const libraryId = useMemo(() => parseArchiveLibraryId(fileUrl), [fileUrl]);
   const title = useMemo(() => normalizeArchiveTitle(fileName), [fileName]);
   const playlistTitle = useMemo(() => formatPlaylistTitle(title), [title]);
   const archiveOwnerKey = useMemo(() => (
     libraryId && folderNodeId ? `audio-archive:${libraryId}:${folderNodeId}` : null
   ), [folderNodeId, libraryId]);
   const { showNodeProperties } = useNodePropertiesOverlay({ libraryId });
-  const readerCacheKey = useMemo(
-    () => resolveAudioArchiveReaderCacheKey(fileUrl, folderNodeId, reloadToken),
-    [fileUrl, folderNodeId, reloadToken],
-  );
 
   const [listLoading, setListLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -402,24 +399,76 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
     setMenuState(prev => (prev.visible ? { ...prev, visible: false } : prev));
   }, [active]);
 
-  const persistSnapshot = useCallback((patch: Partial<AudioArchiveSnapshot>) => {
-    if (!readerCacheKey) return;
-    const prev = audioArchiveSnapshotCache.get(readerCacheKey) ?? EMPTY_AUDIO_ARCHIVE_SNAPSHOT;
-    setAudioArchiveSnapshotCache(readerCacheKey, {
-      hasLoadedList: patch.hasLoadedList ?? prev.hasLoadedList,
-      cards: patch.cards ?? prev.cards,
-      nextOffset: patch.nextOffset ?? prev.nextOffset,
-      total: patch.total ?? prev.total,
-      hasMore: patch.hasMore ?? prev.hasMore,
-      scrollTop: patch.scrollTop ?? prev.scrollTop,
-      currentCardId: hasSnapshotPatchKey(patch, 'currentCardId') ? patch.currentCardId ?? null : prev.currentCardId,
-      selectedCardId: hasSnapshotPatchKey(patch, 'selectedCardId') ? patch.selectedCardId ?? null : prev.selectedCardId,
-      currentAudioUrl: hasSnapshotPatchKey(patch, 'currentAudioUrl') ? patch.currentAudioUrl ?? null : prev.currentAudioUrl,
-      activeSubtitleSources: hasSnapshotPatchKey(patch, 'activeSubtitleSources')
-        ? patch.activeSubtitleSources
-        : prev.activeSubtitleSources,
-    });
-  }, [readerCacheKey]);
+  const cardElementMapRef = useRef<Map<number, HTMLElement>>(new Map());
+  const cardsRef = useRef(cards);
+  const selectedCardIdRef = useRef(selectedCardId);
+  const activeRef = useRef(active);
+  const hasLoadedListRef = useRef(hasLoadedList);
+  const pendingSessionRestoreRef = useRef<ArchiveCardSessionSnapshot | null>(null);
+  const pendingSessionResourceNodeIdRef = useRef<number | null>(null);
+  const restoreTriggeredLoadMoreRef = useRef(false);
+  cardsRef.current = cards;
+  selectedCardIdRef.current = selectedCardId;
+  activeRef.current = active;
+  hasLoadedListRef.current = hasLoadedList;
+
+  const captureSessionSnapshot = useCallback((): ArchiveCardSessionSnapshot | null => {
+    if (pendingSessionRestoreRef.current) return pendingSessionRestoreRef.current;
+    if (!hasLoadedListRef.current) return null;
+    const viewport = viewportRef.current;
+    if (!viewport) return null;
+    const scrollTop = Math.max(viewport.scrollTop, 0);
+    const maxScrollable = Math.max(viewport.scrollHeight - viewport.clientHeight, 0);
+    let anchorCardId: number | null = null;
+    let anchorOffsetRatio = 0;
+    for (const card of cardsRef.current) {
+      const element = cardElementMapRef.current.get(card.id);
+      if (!element || element.offsetTop > scrollTop + 1) continue;
+      anchorCardId = card.id;
+      anchorOffsetRatio = Math.min(
+        Math.max((scrollTop - element.offsetTop) / Math.max(element.offsetHeight, 1), 0),
+        1,
+      );
+    }
+    if (anchorCardId == null && cardsRef.current.length > 0) anchorCardId = cardsRef.current[0].id;
+    return {
+      anchorCardId,
+      anchorOffsetRatio,
+      scrollRatio: maxScrollable > 0 ? scrollTop / maxScrollable : null,
+      scrollTop,
+      selectedCardId: selectedCardIdRef.current,
+    };
+  }, []);
+
+  const restoreSessionSnapshot = useCallback((payload: ArchiveCardSessionSnapshot) => {
+    const snapshot = parseArchiveCardSessionSnapshot(payload);
+    if (!snapshot) return;
+    pendingSessionRestoreRef.current = snapshot;
+    pendingSessionResourceNodeIdRef.current = folderNodeId;
+    setSelectedCardId(snapshot.selectedCardId);
+  }, [folderNodeId]);
+
+  const sessionAdapter = useMemo<ViewerSessionAdapter<ArchiveCardSessionSnapshot>>(() => ({
+    capture: captureSessionSnapshot,
+    restore: restoreSessionSnapshot,
+    suspend: () => undefined,
+    resume: () => undefined,
+    estimateCost: () => ARCHIVE_CARD_SESSION_ESTIMATED_BYTES,
+    getPinReasons: () => (activeRef.current ? ['active'] : []),
+  }), [captureSessionSnapshot, restoreSessionSnapshot]);
+
+  const { capture: flushSessionSnapshot } = useViewerSession({
+    accountScope,
+    active,
+    adapter: sessionAdapter,
+    contentRevision,
+    libraryId,
+    nodeId: folderNodeId,
+    reloadToken,
+    schemaVersion: ARCHIVE_CARD_SESSION_SCHEMA_VERSION,
+    tabId,
+    viewerKind: 'audio_archive',
+  });
 
   const closeContextMenu = useCallback(() => {
     setMenuState(prev => ({ ...prev, visible: false }));
@@ -782,6 +831,8 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
 
   useEffect(() => {
     requestIdRef.current += 1;
+    cardElementMapRef.current.clear();
+    restoreTriggeredLoadMoreRef.current = false;
     if (persistScrollRafRef.current) {
       window.cancelAnimationFrame(persistScrollRafRef.current);
       persistScrollRafRef.current = 0;
@@ -802,23 +853,8 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
       setActiveSubtitleSources(undefined);
       return;
     }
-
-    const cached = readerCacheKey ? audioArchiveSnapshotCache.get(readerCacheKey) : null;
-    if (cached?.hasLoadedList) {
-      setCards(cached.cards);
-      setNextOffset(cached.nextOffset);
-      setTotal(cached.total);
-      setHasMore(cached.hasMore);
-      setHasLoadedList(true);
-      setError(null);
-      setListLoading(false);
-      setLoadingMore(false);
-      setCurrentCardId(cached.currentCardId);
-      setSelectedCardId(cached.selectedCardId);
-      setCurrentAudioUrl(cached.currentAudioUrl);
-      setActiveSubtitleSources(cached.activeSubtitleSources);
-      restoreScrollTopRef.current = cached.scrollTop;
-      return;
+    if (pendingSessionResourceNodeIdRef.current !== folderNodeId) {
+      pendingSessionRestoreRef.current = null;
     }
 
     setHasLoadedList(false);
@@ -828,43 +864,58 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
     setHasMore(false);
     setError(null);
     setCurrentCardId(null);
-    setSelectedCardId(null);
+    setSelectedCardId(pendingSessionRestoreRef.current?.selectedCardId ?? null);
     setCurrentAudioUrl(null);
     setActiveSubtitleSources(undefined);
-    restoreScrollTopRef.current = 0;
     void loadPage(0, false);
-  }, [folderNodeId, libraryId, loadPage, readerCacheKey]);
+  }, [folderNodeId, libraryId, loadPage]);
 
   useEffect(() => {
     if (!active) return;
-    const nextScrollTop = restoreScrollTopRef.current;
-    if (nextScrollTop == null) return;
-    restoreScrollTopRef.current = null;
-    requestAnimationFrame(() => {
-      if (viewportRef.current) {
-        viewportRef.current.scrollTop = nextScrollTop;
+    const viewport = viewportRef.current;
+    const pending = pendingSessionRestoreRef.current;
+    if (!viewport || !pending || !hasLoadedList) return;
+    const anchorElement = pending.anchorCardId == null
+      ? null
+      : cardElementMapRef.current.get(pending.anchorCardId) ?? null;
+    if (!anchorElement && pending.anchorCardId && hasMore && !listLoading && !loadingMore) {
+      if (!restoreTriggeredLoadMoreRef.current) {
+        restoreTriggeredLoadMoreRef.current = true;
+        void loadPage(nextOffset, true).finally(() => {
+          restoreTriggeredLoadMoreRef.current = false;
+        });
       }
+      return;
+    }
+    if (!anchorElement && pending.anchorCardId && (listLoading || loadingMore)) return;
+    const frame = window.requestAnimationFrame(() => {
+      const maxScrollable = Math.max(viewport.scrollHeight - viewport.clientHeight, 0);
+      viewport.scrollTop = resolveArchiveCardRestoreScrollTop({
+        anchorHeight: anchorElement?.offsetHeight ?? null,
+        anchorOffsetTop: anchorElement?.offsetTop ?? null,
+        maxScrollable,
+        snapshot: pending,
+      });
+      pendingSessionRestoreRef.current = null;
+      flushSessionSnapshot();
     });
-  }, [active, cards.length]);
+    return () => window.cancelAnimationFrame(frame);
+  }, [
+    active,
+    cards.length,
+    flushSessionSnapshot,
+    hasLoadedList,
+    hasMore,
+    listLoading,
+    loadPage,
+    loadingMore,
+    nextOffset,
+  ]);
 
   useEffect(() => {
-    persistSnapshot({
-      hasLoadedList,
-      cards,
-      nextOffset,
-      total,
-      hasMore,
-    });
-  }, [cards, hasLoadedList, hasMore, nextOffset, persistSnapshot, total]);
-
-  useEffect(() => {
-    persistSnapshot({
-      currentCardId,
-      selectedCardId,
-      currentAudioUrl,
-      activeSubtitleSources,
-    });
-  }, [activeSubtitleSources, currentAudioUrl, currentCardId, persistSnapshot, selectedCardId]);
+    if (!hasLoadedList) return;
+    flushSessionSnapshot();
+  }, [flushSessionSnapshot, hasLoadedList, selectedCardId]);
 
   useEffect(() => {
     if (!libraryId || cards.length === 0 || !playerState.src) return;
@@ -904,14 +955,8 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
       if (persistScrollRafRef.current) return;
       persistScrollRafRef.current = window.requestAnimationFrame(() => {
         persistScrollRafRef.current = 0;
-        persistSnapshot({
-          hasLoadedList,
-          cards,
-          nextOffset,
-          total,
-          hasMore,
-          scrollTop: viewport.scrollTop,
-        });
+        if (pendingSessionRestoreRef.current) pendingSessionRestoreRef.current = null;
+        flushSessionSnapshot();
       });
     };
     viewport.addEventListener('scroll', handleScroll, { passive: true });
@@ -922,7 +967,7 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
         persistScrollRafRef.current = 0;
       }
     };
-  }, [cards, hasLoadedList, hasMore, nextOffset, persistSnapshot, total]);
+  }, [flushSessionSnapshot]);
 
   useEffect(() => {
     const sentinel = sentinelRef.current;
@@ -1020,6 +1065,13 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
                 return (
                   <article
                     key={card.id}
+                    ref={(element) => {
+                      if (element) {
+                        cardElementMapRef.current.set(card.id, element);
+                      } else {
+                        cardElementMapRef.current.delete(card.id);
+                      }
+                    }}
                     role="listitem"
                     className={`song-row ${activeRow ? 'is-playing' : ''} ${selectedRow ? 'is-selected' : ''}`}
                     onClick={() => setSelectedCardId(card.id)}

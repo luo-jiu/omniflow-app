@@ -1,7 +1,7 @@
 # Video Archive Viewer 说明
 
-更新时间：2026-07-31
-适用范围：`src/features/archive-viewer/components/video-archive-viewer/` 下的视频归档卡片视图、封面解析、缓存恢复和返回链路能力。
+更新时间：2026-08-04
+适用范围：`src/features/archive-viewer/components/video-archive-viewer/` 下的视频归档卡片视图、封面解析、Warm session 恢复和返回链路能力。
 
 ## 1. 概述
 
@@ -17,16 +17,16 @@
 - 解析视频单元文件夹内字幕，双击打开普通视频 viewer 时作为库内字幕候选传入；历史直属视频文件不再触发归档根目录同名字幕扫描；合集只同步加载首播集字幕，其他集切换时再按需加载
 - 卡片右下角展示视频时长；当前时长来自后端 `durationSeconds`，不在卡片上展示节点 id 和“双击打开”提示
 - 卡片尺寸和底栏密度跟漫画 / ASMR 归档保持同一档，视频封面仍保留 16:9 横向比例
-- 维护局部列表缓存和滚动位置
+- 通过公共 Viewer Session Registry 维护卡片墙锚点和滚动降级
 - 提供重命名、删除、目录树定位等卡片级操作
 - 双击视频卡片或合集卡片后都会进入普通 `video` viewer，并带上返回视频归档 tab 的 `returnTarget`
 
-如果只把它当成“卡片列表”来改，最容易把返回链路、封面策略和分页缓存改坏。
+如果只把它当成“卡片列表”来改，最容易把返回链路、封面策略和分页恢复改坏。
 
 ## 2. 当前结构
 
 - `index.tsx`
-  - 主体实现，包含分页加载、封面解析、右键菜单、缓存恢复和打开视频链路
+  - 主体实现，包含分页加载、封面解析、右键菜单、session 恢复和打开视频链路
 - `style.ts`
   - 视频墙卡片布局和视觉样式
 - `docs/viewers/video-archive-viewer.md`
@@ -86,28 +86,11 @@
 
 这说明当前封面不是现场生成图片文件，而是优先依赖已有封面节点；没有显式封面时，只在前端用视频元素做轻量预览。
 
-### 3.4 局部缓存
+### 3.4 Warm Session
 
-`video-archive-viewer` 当前有一层局部 snapshot cache，key 由：
+`video-archive-viewer` 通过公共 registry 保存稳定卡片锚点、锚点内偏移、整体滚动比例和绝对 `scrollTop` 兜底。卡片数组、分页 offset/total、封面 URL 和视频预览 URL 都不进入 snapshot。
 
-- `fileUrl`
-- `folderNodeId`
-- `reloadToken`
-
-共同组成。
-
-缓存内容包括：
-
-- 是否已加载列表
-- 当前卡片数组
-- `nextOffset`
-- `total`
-- `hasMore`
-- `scrollTop`
-
-它的目标是让用户切 tab 或切工作区再回来时，能恢复视频墙列表和滚动位置，而不是每次都重新从头加载。
-
-工作区刷新会生成新的 `reloadToken` generation。新实例只读取新 generation，因此必须重新请求第一页；按文件释放时会清理该资源的全部 generation，并兼容清理旧版不含 token 的 cache key。
+恢复时总是重新请求第一页并解析临时链接；如果锚点不在已加载页中，就继续分页直到找到目标。锚点已删除时按整体比例、再按绝对位置降级。工作区刷新通过 `reloadToken` generation 精确失效旧 snapshot，不产生旧 generation cache key。
 
 ### 3.5 返回链路
 
@@ -157,14 +140,11 @@
 
 建议顺着这条链路阅读：
 
-1. 从 `fileUrl` 解析 `libraryId`
-2. 用 `fileUrl + folderNodeId + reloadToken` 计算 cache key
-3. 如果命中本地 snapshot：
-   - 直接恢复卡片、分页信息和 `scrollTop`
-4. 如果未命中：
-   - 从 offset 0 开始请求第一页
-   - 把 `coverNodeId` 批量补成 `coverUrl`；没有 `coverNodeId` 的卡片补 `videoPreviewUrl`
-   - 初始化 `nextOffset / total / hasMore`
+1. 使用显式账号、`libraryId` 和 `folderNodeId` 构造公共 session identity。
+2. 从 offset 0 请求第一页。
+3. 把 `coverNodeId` 批量补成 `coverUrl`；没有 `coverNodeId` 的卡片补 `videoPreviewUrl`。
+4. 初始化 `nextOffset / total / hasMore`。
+5. 命中 Warm 时继续分页直到稳定锚点出现，再按锚点/比例/绝对位置完成恢复。
 
 ### 5.2 分页加载
 
@@ -254,7 +234,7 @@
 - `coverNodeId`、`coverUrl` 和 `videoPreviewUrl` 是展示阶段字段，不能假设一开始就有可显示封面
 - `mediaNodeId` 是实际播放目标；卡片 `id` 仍然用于重命名、删除和目录树定位
 - 返回链路依赖 `returnTarget`，改打开逻辑时必须一起验证
-- snapshot cache 里不只存卡片，还存滚动位置和分页信息
+- snapshot 只能保存锚点和滚动降级，不能重新放入卡片、分页响应或临时链接
 
 ## 7. 阅读顺序
 
@@ -295,7 +275,7 @@
 9. 重命名、删除、目录树定位仍然正常。
 10. 双击合集卡片后会直接打开合集内排序最前的视频，并自动开始播放；普通视频 viewer 底部会显示播放列表按钮。
 11. 播放列表气泡能切换同合集视频，切换后仍停留在当前视频 tab，并带上同一份 `videoPlaylist` 和归档返回链路；有更多集数时通过气泡底部“加载更多”继续分页追加。
-12. 切换 tab 再回来后，归档墙列表和滚动位置仍能恢复。
+12. 切换 tab 或真卸载再回来后，重新请求卡片和临时链接，并恢复同一卡片锚点；锚点删除时合理降级。
 13. 视频单元存在字幕时，打开普通视频 viewer 后会默认加载排序最靠前的库内字幕；多个字幕可在视频操作台切换。
 
 ## 10. 维护规则
@@ -308,4 +288,4 @@
 - `returnTarget` 结构变化
 - 合集打开和播放列表行为变化
 - 右键菜单能力变化
-- snapshot cache 结构变化
+- Warm session schema 或恢复降级变化

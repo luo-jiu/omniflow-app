@@ -1,9 +1,7 @@
 import {
   clearAllFileViewerStateCache,
   clearFileViewerStateCache,
-  getFileViewerStateCache,
 } from '@/contexts/file-viewer-cache';
-import type { FileViewerTab } from '@/contexts/file-viewer.context';
 import {
   clearPendingActivation,
   clearPendingActivationForLibrary,
@@ -20,10 +18,6 @@ import {
   clearLibraryDetailWorkspaceState,
   loadLibraryDetailWorkspaceState,
 } from '@/features/library-workspace/workspace-state';
-import {
-  clearAllViewerSnapshots,
-  clearViewerSnapshotsForTabs,
-} from '@/features/file-viewer/services/viewer-snapshot-release';
 import { viewerSessionRuntime } from '@/features/file-viewer/session';
 import {
   clearAllToolWorkspaceStates,
@@ -40,10 +34,6 @@ export {
   isDisposingLibraryWorkspace,
   isDisposingSessionWorkspaces,
 } from './dispose-markers';
-
-interface FileViewerCacheState {
-  tabs?: FileViewerTab[];
-}
 
 export interface DisposeLibraryWorkspaceResult {
   closedBrowserTabCount: number;
@@ -101,14 +91,12 @@ export async function disposeLibraryWorkspace(libraryId: number): Promise<Dispos
   try {
     const cacheKey = workspaceCacheKey(normalizedLibraryId);
     const workspaceState = loadLibraryDetailWorkspaceState(cacheKey);
-    const fileViewerState = getFileViewerStateCache<FileViewerCacheState>(cacheKey);
     const browserTabIds = workspaceState.browserTabs.map((tab) => tab.id);
     const result = await closeEmbeddedBrowserTabs(browserTabIds);
 
     globalAudioPlayer.releaseForLibrary(normalizedLibraryId);
     floatingVideoService.releaseForLibrary(normalizedLibraryId);
     viewerSessionRuntime.disposeLibrary(normalizedLibraryId);
-    clearViewerSnapshotsForTabs(fileViewerState?.tabs);
     clearToolWorkspaceState(normalizedLibraryId);
     clearPendingActivationForLibrary(normalizedLibraryId);
     clearRepositoryTreeSnapshot(normalizedLibraryId);
@@ -131,7 +119,6 @@ export async function disposeSessionWorkspaces() {
     globalAudioPlayer.clear();
     floatingVideoService.dismiss();
     viewerSessionRuntime.dispose();
-    clearAllViewerSnapshots();
     clearAllToolWorkspaceStates();
     clearPendingActivation();
     clearAllRepositoryTreeSnapshots();

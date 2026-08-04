@@ -45,8 +45,9 @@ export function useTimedText({
   const subtitleInputRef = useRef<HTMLInputElement>(null);
   const subtitleLoadRequestIdRef = useRef(0);
   const isMountedRef = useRef(true);
+  const subtitleEnabledPreferenceRef = useRef(true);
 
-  const [subtitleEnabled, setSubtitleEnabled] = useState(true);
+  const [subtitleEnabled, setSubtitleEnabledState] = useState(true);
   const [subtitleFileName, setSubtitleFileName] = useState('');
   const [loadedSubtitleSourceId, setLoadedSubtitleSourceId] = useState<string | null>(null);
   const [subtitleError, setSubtitleError] = useState<string | null>(null);
@@ -65,6 +66,11 @@ export function useTimedText({
     return findActiveTimedTextCue(subtitleCues, currentTime);
   }, [currentTime, subtitleCues, subtitleEnabled]);
 
+  const setSubtitleEnabled = useCallback((enabled: boolean) => {
+    subtitleEnabledPreferenceRef.current = enabled;
+    setSubtitleEnabledState(enabled);
+  }, []);
+
   const resetSubtitle = useCallback(() => {
     subtitleLoadRequestIdRef.current += 1;
     setSubtitleFileName('');
@@ -72,13 +78,17 @@ export function useTimedText({
     setSubtitleError(null);
     setSubtitleCues([]);
     setSubtitleEnabled(true);
-  }, []);
+  }, [setSubtitleEnabled]);
 
   const openSubtitlePicker = useCallback(() => {
     subtitleInputRef.current?.click();
   }, []);
 
-  const applySubtitleText = useCallback((raw: string, displayName: string): boolean => {
+  const applySubtitleText = useCallback((
+    raw: string,
+    displayName: string,
+    preserveEnabled = false,
+  ): boolean => {
     const cues = parseTimedText(raw);
     if (cues.length === 0) {
       setSubtitleFileName('');
@@ -89,11 +99,18 @@ export function useTimedText({
     setSubtitleFileName(displayName);
     setSubtitleCues(cues);
     setSubtitleError(null);
-    setSubtitleEnabled(true);
+    if (!preserveEnabled) {
+      setSubtitleEnabled(true);
+    } else {
+      setSubtitleEnabledState(subtitleEnabledPreferenceRef.current);
+    }
     return true;
-  }, []);
+  }, [setSubtitleEnabled]);
 
-  const loadLibrarySubtitle = useCallback(async (source: FileViewerSubtitleSource) => {
+  const loadLibrarySubtitle = useCallback(async (
+    source: FileViewerSubtitleSource,
+    options?: { preserveEnabled?: boolean },
+  ) => {
     const requestId = subtitleLoadRequestIdRef.current + 1;
     subtitleLoadRequestIdRef.current = requestId;
 
@@ -110,7 +127,7 @@ export function useTimedText({
       if (!isMountedRef.current || requestId !== subtitleLoadRequestIdRef.current) {
         return;
       }
-      const loaded = applySubtitleText(raw, source.fileName);
+      const loaded = applySubtitleText(raw, source.fileName, options?.preserveEnabled);
       setLoadedSubtitleSourceId(loaded ? source.id : null);
     } catch (error) {
       if (!isMountedRef.current || requestId !== subtitleLoadRequestIdRef.current) {
@@ -170,7 +187,7 @@ export function useTimedText({
   useEffect(() => {
     const firstSource = librarySubtitleSources[0];
     if (!firstSource) return;
-    void loadLibrarySubtitle(firstSource);
+    void loadLibrarySubtitle(firstSource, { preserveEnabled: true });
   }, [librarySubtitleSources, loadLibrarySubtitle, url]);
 
   return {

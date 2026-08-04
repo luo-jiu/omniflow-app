@@ -198,10 +198,10 @@ tab id 的规则：
 
 显式释放工作区时，`workspace-resource-release` 是预览缓存清理入口：
 
-- 单库释放先按 `libraryId` 清公共 Viewer Session Registry；legacy viewer 再读取目标 `library:${id}` 的文件预览 tab cache 做逐类型清理，最后清文件预览 tab cache。
-- session 释放会全量清理公共 registry、legacy viewer snapshot 和文件预览 tab cache。
-- PDF 和 Text UI 现场已迁移到公共 registry，不再依赖 tab cache 枚举或 `viewer-snapshot-release.ts`；漫画、图集、ASMR、视频进度、音频归档、视频归档等未迁移 viewer 暂时继续使用各自轻量 cache sidecar，由 release service 汇总释放。
-- viewer snapshot sidecar 的写入入口必须在 `isDisposingAnyWorkspace()` 命中时跳过保存，避免组件卸载 cleanup 把已释放的现场写回。
+- 单库释放按 `libraryId` 直接清公共 Viewer Session Registry，再清文件预览 tab cache；不依赖 tab cache 仍能枚举到哪些 viewer。
+- session 释放会全量清理公共 registry 和文件预览 tab cache。
+- 所有 Warm-capable viewer 已迁移到公共 registry，旧逐 viewer cache 与 `viewer-snapshot-release.ts` 已删除。
+- registry 在释放资源时会同时移除 live registration；随后 React cleanup 不能把已释放 snapshot 写回。
 
 Text dirty draft 属于用户数据，不跟随普通 tab 关闭、资料库释放或退出登录删除。节点软删除、回收站彻底删除和清空回收站统一经过 `features/file-explorer/services/node-deletion.ts`：先尽力确定可识别的子树节点，再执行后端删除，确认成功后按当前账号批量删除 draft 并失效旧 writer generation。枚举失败不能阻断本可成功的后端删除；后端删除失败的节点不能提前进入关闭 tab 或清草稿路径。回收站后代无法由普通 descendants 接口枚举时，服务会用 `deletedDescendantCount` 识别不完整结果，至少清理已知根节点并明确提示可能未完整清理。
 

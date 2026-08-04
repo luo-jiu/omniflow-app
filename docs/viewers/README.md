@@ -1,6 +1,6 @@
 # Viewer 文档入口
 
-更新时间：2026-08-03
+更新时间：2026-08-04
 适用范围：`file-viewer`、`archive-viewer` 以及后续各类具体 viewer 的长期说明文档。
 
 ## 1. 作用
@@ -25,7 +25,7 @@
 - `archive-viewer.md`
   - 归档 viewer 体系入口、职责和阅读顺序；当前同时记录音频归档 viewer 的轻量规则
 - `asmr-viewer.md`
-  - ASMR 集合 viewer 的局部模型、缓存、播放协作和编辑链路
+  - ASMR 集合 viewer 的局部模型、Warm session、播放协作和编辑链路
 - `comic-viewer.md`
   - 漫画 viewer 的阅读模式、进度恢复、远端同步和视图设置
 - `gallery-viewer.md`
@@ -41,7 +41,7 @@
 - `video-viewer.md`
   - 普通视频 viewer 的底部控制条、右侧操作台和字幕覆盖层
 - `video-archive-viewer.md`
-  - 视频归档 viewer 的卡片来源、封面策略、缓存恢复和返回链路
+  - 视频归档 viewer 的卡片来源、封面策略、Warm session 恢复和返回链路
 - `viewer-session-state.md`
   - 跨 viewer 的 tab 保活、阅读现场、快照生命周期、资源预算、统一接入契约和分阶段迁移方案
 
@@ -86,6 +86,9 @@
 - `src/features/file-viewer/hooks/useGlobalAudioPlayback.ts`
   - 负责订阅和控制 `globalAudioPlayer` 单例，统一 owner 判断、播放、暂停、进度、音量和清理。
   - 普通 audio、ASMR、音频归档播放器可复用；底部播放条、展开歌词页、ASMR 列表播放器这些 UI 不在这个 hook 里统一。
+- `src/features/file-viewer/session/`
+  - 统一 viewer resource identity、Warm registry、reload generation、关闭 policy 和单库/session 释放。
+  - 具体 snapshot codec 继续留在各 viewer 目录；禁止重新新增逐 viewer 模块级 cache `Map`。
 
 不要为了“看起来通用”抽出统一卡片或统一播放条。归档卡片、歌曲列表、ASMR 文件列表和普通播放器未来都可能分化，只有当多个 viewer 的行为模型真正稳定一致时，再抽更高层组件。
 
