@@ -19,7 +19,7 @@ export const viewerSessionPolicies = {
   video: {
     defaultHotCost: 'heavy',
     warm: 'memory',
-    cold: 'remote',
+    cold: 'device-and-remote',
     closeBehavior: 'retain-reading-position',
     hasDraft: false,
   },
@@ -33,21 +33,21 @@ export const viewerSessionPolicies = {
   pdf: {
     defaultHotCost: 'heavy',
     warm: 'memory',
-    cold: 'none',
+    cold: 'device',
     closeBehavior: 'retain-reading-position',
     hasDraft: false,
   },
   text: {
     defaultHotCost: 'medium',
     warm: 'memory',
-    cold: 'none',
+    cold: 'device',
     closeBehavior: 'retain-reading-position',
     hasDraft: true,
   },
   comic: {
     defaultHotCost: 'heavy',
     warm: 'memory',
-    cold: 'remote',
+    cold: 'device-and-remote',
     closeBehavior: 'retain-reading-position',
     hasDraft: false,
   },
@@ -61,35 +61,35 @@ export const viewerSessionPolicies = {
   asmr: {
     defaultHotCost: 'medium',
     warm: 'memory',
-    cold: 'none',
+    cold: 'device',
     closeBehavior: 'retain-reading-position',
     hasDraft: false,
   },
   asmr_archive: {
     defaultHotCost: 'heavy',
     warm: 'memory',
-    cold: 'remote',
+    cold: 'device-and-remote',
     closeBehavior: 'retain-reading-position',
     hasDraft: false,
   },
   comic_archive: {
     defaultHotCost: 'heavy',
     warm: 'memory',
-    cold: 'remote',
+    cold: 'device-and-remote',
     closeBehavior: 'retain-reading-position',
     hasDraft: false,
   },
   video_archive: {
     defaultHotCost: 'heavy',
     warm: 'memory',
-    cold: 'none',
+    cold: 'device',
     closeBehavior: 'retain-reading-position',
     hasDraft: false,
   },
   audio_archive: {
     defaultHotCost: 'heavy',
     warm: 'memory',
-    cold: 'none',
+    cold: 'device',
     closeBehavior: 'retain-reading-position',
     hasDraft: false,
   },
@@ -108,3 +108,8 @@ export const viewerSessionPolicies = {
     hasDraft: false,
   },
 } as const satisfies Record<FileViewerFileType, ViewerSessionPolicy>;
+
+export function viewerPolicyUsesDeviceCold(viewerKind: FileViewerFileType): boolean {
+  const cold = viewerSessionPolicies[viewerKind].cold;
+  return cold === 'device' || cold === 'device-and-remote';
+}

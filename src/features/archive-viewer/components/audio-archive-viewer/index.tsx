@@ -26,6 +26,7 @@ import {
 import { runtimeLogger } from '@/utils/runtimeLogger';
 import { useFileViewer } from '@/hooks/useFileViewer';
 import { useGlobalAudioPlayback } from '@/features/file-viewer/hooks/useGlobalAudioPlayback';
+import { isOwnedGlobalAudioPlaying } from '@/features/file-viewer/services/global-audio-retention';
 import { useTimedText } from '@/features/file-viewer/timed-text/useTimedText';
 import type { TimedTextCue, TimedTextSegment } from '@/features/file-viewer/timed-text/subtitle';
 import type {
@@ -339,6 +340,7 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
   const [total, setTotal] = useState(0);
   const [nextOffset, setNextOffset] = useState(0);
   const [hasMore, setHasMore] = useState(false);
+  const [sessionRestoreRevision, setSessionRestoreRevision] = useState(0);
   const [selectedCardId, setSelectedCardId] = useState<number | null>(null);
   const [currentCardId, setCurrentCardId] = useState<number | null>(null);
   const [currentAudioUrl, setCurrentAudioUrl] = useState<string | null>(null);
@@ -376,6 +378,7 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
     setVolume,
     togglePlay: toggleOwnedPlay,
   } = useGlobalAudioPlayback({ ownerType: 'default', ownerKey: archiveOwnerKey, tabId, libraryId });
+  const retentionPlaying = isOwnedGlobalAudioPlaying(playerState, tabId, libraryId);
   const isCurrentArchiveSource = Boolean(currentAudioUrl && playerState.src === currentAudioUrl);
   const currentTime = isCurrentArchiveSource ? playerState.currentTime : 0;
   const duration = isCurrentArchiveSource ? playerState.duration : 0;
@@ -406,6 +409,7 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
   const hasLoadedListRef = useRef(hasLoadedList);
   const pendingSessionRestoreRef = useRef<ArchiveCardSessionSnapshot | null>(null);
   const pendingSessionResourceNodeIdRef = useRef<number | null>(null);
+  const retentionPlayingRef = useRef(retentionPlaying);
   const restoreTriggeredLoadMoreRef = useRef(false);
   cardsRef.current = cards;
   selectedCardIdRef.current = selectedCardId;
@@ -446,6 +450,7 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
     pendingSessionRestoreRef.current = snapshot;
     pendingSessionResourceNodeIdRef.current = folderNodeId;
     setSelectedCardId(snapshot.selectedCardId);
+    setSessionRestoreRevision(revision => revision + 1);
   }, [folderNodeId]);
 
   const sessionAdapter = useMemo<ViewerSessionAdapter<ArchiveCardSessionSnapshot>>(() => ({
@@ -453,11 +458,22 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
     restore: restoreSessionSnapshot,
     suspend: () => undefined,
     resume: () => undefined,
-    estimateCost: () => ARCHIVE_CARD_SESSION_ESTIMATED_BYTES,
-    getPinReasons: () => (activeRef.current ? ['active'] : []),
-  }), [captureSessionSnapshot, restoreSessionSnapshot]);
+    estimateSnapshotBytes: () => ARCHIVE_CARD_SESSION_ESTIMATED_BYTES,
+    getPinReasons: () => {
+      const reasons: Array<'active' | 'playing'> = [];
+      if (activeRef.current) reasons.push('active');
+      const audioState = getPlayerState();
+      if (isOwnedGlobalAudioPlaying(audioState, tabId, libraryId)) {
+        reasons.push('playing');
+      }
+      return reasons;
+    },
+  }), [captureSessionSnapshot, getPlayerState, libraryId, restoreSessionSnapshot, tabId]);
 
-  const { capture: flushSessionSnapshot } = useViewerSession({
+  const {
+    capture: flushSessionSnapshot,
+    notifyRetentionChanged,
+  } = useViewerSession({
     accountScope,
     active,
     adapter: sessionAdapter,
@@ -469,6 +485,12 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
     tabId,
     viewerKind: 'audio_archive',
   });
+
+  useEffect(() => {
+    if (retentionPlayingRef.current === retentionPlaying) return;
+    retentionPlayingRef.current = retentionPlaying;
+    notifyRetentionChanged();
+  }, [notifyRetentionChanged, retentionPlaying]);
 
   const closeContextMenu = useCallback(() => {
     setMenuState(prev => ({ ...prev, visible: false }));
@@ -910,6 +932,7 @@ const AudioArchiveViewer: React.FC<AudioArchiveViewerProps> = ({
     loadPage,
     loadingMore,
     nextOffset,
+    sessionRestoreRevision,
   ]);
 
   useEffect(() => {

@@ -224,6 +224,7 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
   const [total, setTotal] = useState(0);
   const [nextOffset, setNextOffset] = useState(0);
   const [hasMore, setHasMore] = useState(false);
+  const [sessionRestoreRevision, setSessionRestoreRevision] = useState(0);
   const [menuState, setMenuState] = useState<{
     visible: boolean;
     x: number;
@@ -296,6 +297,7 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
     if (!snapshot) return;
     pendingSessionRestoreRef.current = snapshot;
     pendingSessionResourceNodeIdRef.current = folderNodeId;
+    setSessionRestoreRevision(revision => revision + 1);
   }, [folderNodeId]);
 
   const sessionAdapter = useMemo<ViewerSessionAdapter<ArchiveCardSessionSnapshot>>(() => ({
@@ -303,7 +305,7 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
     restore: restoreSessionSnapshot,
     suspend: () => undefined,
     resume: () => undefined,
-    estimateCost: () => ARCHIVE_CARD_SESSION_ESTIMATED_BYTES,
+    estimateSnapshotBytes: () => ARCHIVE_CARD_SESSION_ESTIMATED_BYTES,
     getPinReasons: () => (activeRef.current ? ['active'] : []),
   }), [captureSessionSnapshot, restoreSessionSnapshot]);
 
@@ -406,8 +408,12 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
           setTotal(nextTotal);
           setNextOffset(nextCards.length);
           setHasMore(nextCards.length < nextTotal);
-          if (result.draftCleanupFailed || result.subtreeCollectionFailed) {
-            Toast.warning('已移入回收站，但本地文本草稿可能未完整清理');
+          if (
+            result.draftCleanupFailed
+            || result.viewerSessionCleanupFailed
+            || result.subtreeCollectionFailed
+          ) {
+            Toast.warning('已移入回收站，但本地恢复数据可能未完整清理');
           } else {
             Toast.success('已移入回收站');
           }
@@ -840,6 +846,7 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
     loadPage,
     loadingMore,
     nextOffset,
+    sessionRestoreRevision,
     viewportRef,
   ]);
 

@@ -1,6 +1,6 @@
 # 前端验证矩阵
 
-更新时间：2026-08-04
+更新时间：2026-08-13
 
 适用范围：`omniflow-app` 前端、Electron、IPC、工作区、文件树、文件预览、上传、内置浏览器和资源捕捉相关改动的提测、自测与 review 验证。
 
@@ -148,7 +148,8 @@ legacy 兼容检查：
 - Video 倍速、字幕开关/来源/字号/底部偏移、操作台和观看位置在真卸载后恢复；同一个媒体 DOM 不被复制
 - Video/Audio Archive 长列表继续分页直到卡片锚点出现；Audio 的选中项恢复，播放事实仍以 `globalAudioPlayer` 为准
 - Comic 的滚动/翻页、单双页、缩放、页间距、页锚点和平移旋转在真卸载后恢复
-- Comic/ASMR Archive 命中 Warm 时不被较慢的远端 `viewMeta` 覆盖；未命中 Warm 时可以从远端位置冷恢复
+- device-capable viewer 在应用重启后从同账号 Cold 恢复；Warm 命中时不再读取 Cold，用户开始操作后迟到 Cold 不覆盖当前现场
+- Video、Comic、Comic/ASMR Archive 按 Warm、device Cold、远端 `viewMeta` 的顺序恢复；本地均未命中时才采用远端位置
 
 边界路径：
 
@@ -164,7 +165,9 @@ legacy 兼容检查：
 - 视频底部小窗按钮优先进入 Document PiP；不支持时降级应用内浮窗
 - 视频小窗状态下 inline 占位可收回，同一个视频元素进度不丢
 - Document PiP 原生关闭、应用内浮窗收起 / 软关闭后，MediaHub entry 和播放状态符合 `docs/media-hub-contract.md`
-- 显式释放工作区后，PDF / 漫画 / ASMR / 视频进度 / 归档浏览等 viewer 前端 snapshot 不从释放前状态恢复；普通切页仍可恢复
+- 显式释放工作区后，PDF / 漫画 / ASMR / 视频进度 / 归档浏览等 viewer 的 Warm 与同账号 device Cold 都不从释放前状态恢复；普通切页仍可恢复
+- 显式释放工作区缺少账号 scope 或 device Cold 删除失败时显示清理不完整 warning，不提示完整释放成功
+- 节点删除成功后，该节点所有 viewer kind 的 Warm/live、device Cold 与 Text draft 被清理；后端删除失败时不提前清理
 - 已同步到后端 `viewMeta` 的阅读 / 播放进度不应被前端工作区释放误删
 
 ### 3.5 上传中心

@@ -1,9 +1,9 @@
 # Viewer Session 状态架构
 
-更新时间：2026-08-04
+更新时间：2026-08-13
 适用范围：`src/components/business/app-main/`、`src/contexts/FileViewerContext.tsx`、`src/features/file-viewer/`、`src/features/archive-viewer/`、`src/features/workspace-resource-release/` 中与 viewer tab 保活、阅读现场、编辑草稿、缓存恢复和资源释放相关的代码。
 
-状态：阶段 0 到阶段 3 已完成。全部 Warm-capable viewer 已迁移到公共 registry，旧逐 viewer cache 和迁移期 release switch 已删除，并已完成自动化门禁与 `win` 测试库的定向 Electron 真实样本验收。下一阶段是有限 Hot 保活和资源预算治理。
+状态：阶段 0 到阶段 5 的核心链路已完成。全部 Warm-capable viewer 已迁移到公共 registry，有限 Hot 保活与 device Cold 跨重启恢复均已启用；10/30 个混合 viewer 的性能基线、Cold 真实重启样本和本轮 Electron 人工验收明确后补。
 
 ## 1. 目标
 
@@ -53,7 +53,7 @@ Viewer Session 治理需要同时解决以下问题：
 | Image | 有 | 公共 registry：缩放、比例/绝对平移、旋转 | 无 | adapter/codec 已接入，并通过 Electron 真实图片样本验收 |
 | Audio | 有；播放由全局音频服务持有 | 无独立 UI 快照 | 无 | 播放资源和 viewer UI 生命周期未统一分类 |
 | Video | 有；视频元素由全局服务保活 | 公共 registry：播放进度投影、倍速、字幕开关/来源/样式、操作台 | `viewMeta` 播放进度 | 媒体 DOM 和 URL 始终由服务层拥有，不进入 snapshot |
-| PDF | 有 | 公共 registry：页码、缩放、滚动、比例、页锚点 | 无 | adapter/codec 已接入并通过 80 页 Electron 样本验收；跨重启 Cold 恢复未启用 |
+| PDF | 有 | 公共 registry：页码、缩放、滚动、比例、页锚点 | 设备 Cold | adapter/codec 已接入并通过 80 页 Electron 样本验收；跨重启自动化链路已启用，真实重启样本待验收 |
 | Text | 有 | 公共 registry：选区、顶部行、滚动、字号、换行 | IndexedDB dirty draft | adapter/codec 与 DraftStore 已接入并通过 Electron 草稿恢复、冲突和保存并发验收；后端稳定 revision 尚未提供 |
 | Comic | 有 | 公共 registry：页锚点、滚动降级、阅读/单双页模式、缩放、页间距、翻页变换 | `viewMeta` 阅读进度 | 页列表和临时图片链接重新加载 |
 | Gallery | 有 | 公共 registry：详情节点、网格锚点 / 比例、图片变换 | 无 | adapter/codec 已接入；临时链接和 HEIC 预览不进入 snapshot |
@@ -91,7 +91,7 @@ Text Viewer 曾在 render 中创建新的 CodeMirror `basicSetup` 对象。activ
 
 #### 远端写入不代表已经具备冷恢复
 
-Comic Archive 和 ASMR Archive 已补齐无 Warm snapshot 时的 `viewMeta` 冷恢复。命中 Warm 时，本次资源加载周期始终以 Warm 为准，较慢返回的远端请求不能在 Warm 定位完成后反向覆盖；跨重启行为仍需真实样本验收。
+Comic Archive 和 ASMR Archive 已补齐无本地 snapshot 时的 `viewMeta` 远端恢复。统一顺序为 Warm、device Cold、远端 `viewMeta`；较慢返回的 Cold 或远端请求不能在本地恢复完成或用户开始操作后反向覆盖。跨重启行为仍需真实样本验收。
 
 #### 新 viewer 没有接入门禁
 
@@ -117,6 +117,8 @@ Comic Archive 和 ASMR Archive 已补齐无 Warm snapshot 时的 `viewMeta` 冷�
 - registry runtime 在 application/auth session 级注册；认证 bootstrap 会先启动 runtime 再提交用户状态，受保护路由在 bootstrap 完成前不挂载 viewer 子树；资料库释放按 `libraryId` 清理，退出登录或 401 清理整个 session。
 - workspace release 只清公共 registry；旧逐 viewer cache 与迁移期 release bridge 已删除。
 - `useViewerSession` 统一处理 adapter 注册、mount generation、schema/revision restore、active flush、cleanup capture 和 reload generation 失效；具体 payload/codec 继续留在 viewer 目录。
+- `ViewerSessionColdStore` 与 `ViewerSessionColdRuntime` 统一处理 IndexedDB 校验、配额、节流写入、页面隐藏 flush 和精确删除；viewer 不直接操作 IndexedDB。
+- `ViewerSessionRestoreGate` 把初始恢复顺序固定为 Warm、device Cold、远端 `viewMeta`，并在旧 generation、用户交互或较新 Warm 出现时拒绝迟到结果。
 - `ViewerDraftStore` 使用 IndexedDB 独立持久化 Text dirty content；按 resource slot 保留最新 draft，并用 draft key 中的 revision 做冲突判断。默认限制为单草稿 5 MiB、单账号 50 MiB、保留 30 天，存储失败不会把 dirty 状态降级成已安全落盘。
 
 账号已有稳定 `user.id`，可以构造 `user:<id>` scope。节点详情目前只有 `updatedAt`，没有经确认可靠的 ETag、对象版本或 storage fingerprint，因此通用 viewer 的 `contentRevision` 仍可为空；Text 已在首次加载与保存后使用原始正文 SHA-256 作为 DraftStore 临时基线，并在签名 URL 更新时把保存后的 hash 回写 tab。后端稳定 revision 仍是长期目标。
@@ -345,7 +347,8 @@ interface ViewerSessionAdapter<TPayload> {
   restore(snapshot: TPayload): void;
   suspend(): void;
   resume(): void;
-  estimateCost(): number;
+  estimateSnapshotBytes(): number;
+  estimateHotCostUnits?(): number | null;
   getPinReasons(): Array<'active' | 'dirty' | 'playing' | 'pip'>;
 }
 ```
@@ -355,7 +358,8 @@ interface ViewerSessionAdapter<TPayload> {
 - `capture` 必须同步、轻量，不发网络请求。
 - `restore` 只恢复 viewer 自有状态，不修改 tab 或页面工作区 owner。
 - `suspend/resume` 用于暂停非必要观察器、动画或后台工作，不等于媒体释放。
-- `estimateCost` 根据当前页数、已解码媒体、canvas、列表规模等返回动态成本；registry 可以结合 policy 默认档位做预算。
+- `estimateSnapshotBytes` 只估算序列化 Warm payload 的字节预算，不能冒充已挂载实例成本。
+- `estimateHotCostUnits` 可按当前保留的 DOM、已解码媒体、canvas 或列表窗口返回动态 Hot 成本；未实现、抛错或返回非法值时回退 session policy 默认档位，单实例投影上限为 8 单位。
 - 动态成本只在文档装载、列表规模或已解码资源集合变化时重新估算，不能在每次 scroll/timeupdate 热路径中序列化整个 payload。
 - `getPinReasons` 只投影当前不能淘汰的原因，不复制 dirty、播放或 PiP 状态的 owner。
 - 真正资源释放仍由 React cleanup 和媒体服务完成。
@@ -498,16 +502,40 @@ src/features/file-viewer/session/
 
 ### 阶段 4：启用有限 Hot 保活
 
-- 完成 viewer 成本基线测量。
-- 引入按成本的 Hot LRU 和 pin 规则。
-- 验证淘汰前 capture、恢复后 ready、媒体 handoff 和 dirty draft 保护。
-- 确认打开大量 tab 后内存进入稳定区间，再替换当前无限 keep-alive。
+当前状态：快速核心版已启用。Hot retention planner、访问顺序 owner、live pin / cost 投影、安全淘汰事务和 `AppMain` 渲染应用均已接通；当前使用静态 policy 作为成本基线，并已让 Comic 按实际保留图片页数覆盖动态成本；性能基线与人工验收作为后续调优项保留。
+
+- planner 按 `maxMountedCount + maxCostUnits` 双预算决策，LRU 只决定淘汰优先级，输出的 retained tab 始终保持原挂载顺序，不能因访问时间重排 DOM。
+- active、dirty、playing、PiP 和无 Warm 恢复能力的 viewer 必须受保护；受保护集合本身超预算时明确报告 pressure，不允许为了满足数字误杀 pin。
+- session policy 的 `light / medium / heavy` 权重继续作为 provisional fallback。adapter 契约已明确拆分 Warm `estimateSnapshotBytes()` 与 Hot `estimateHotCostUnits()`，非法或异常 Hot 投影会回退 policy，不能破坏 retention 计划。
+- Comic 首批接入动态 Hot cost：翻页模式维持 heavy 基线；滚动模式只按实际保留在 DOM 的图片页数分桶，从 4 单位逐级增加并封顶 8。PDF 已使用固定渲染窗口，Gallery 的隐藏图片 keep-alive 有固定上限，本轮不按文档总页数或卡片总数虚增成本。
+- `FileTabsBar` 的浏览器内存探针采到的是 renderer 总量或 JS heap 总量，不是单 tab 独占内存；它只能辅助做前后差分基线，不能直接作为 tab 淘汰成本。
+- `AppMain` 已用独立 `ViewerHotAccessOrderOwner` 记录 active tab 的单调访问序号，并在 tab 关闭后清理元数据；访问顺序不参与 DOM 排序，也不会写回 `FileViewerContext` 形成第二份 tab 事实。
+- registry 已能按需读取 live adapter 的 pin 投影并去重；adapter 抛错、返回非法 pin、尚未注册或 viewer kind 不匹配时一律标为不可安全淘汰。active pin 额外由 tab owner 投影，不能只依赖子组件 effect 的提交时序。
+- `AppMain` 已启用 enforcement，当前 provisional budget 为最多 8 个挂载实例、16 个成本单位；该数字是未经过 10/30 viewer 内存基线校准的保守默认值，后续可以只调整预算而不重写淘汰内核。
+- 每个计划淘汰项在移除渲染集合前都会重新读取 pin 并同步 capture。整批 capture 结束后还会再次确认每个 snapshot 仍可恢复，避免后续 capture 触发 Warm LRU 后挤掉本批较早的 snapshot；live 缺失、kind 不匹配、pin 投影异常、临时变成 pinned、capture 为空/抛错或批次末尾 snapshot 未留存都必须 fail closed。
+- Gallery、ASMR 和 Audio Archive 已按 `tabId + libraryId` 从全局媒体服务补投 playing/PiP pin；普通 Video 继续使用全局视频宿主状态，Text dirty draft 未安全落盘时继续 pin。
+- 快速核心版的淘汰正确性不依赖动态 cost/pin 主动通知：事务提交前始终同步读取最新状态。低频 retention revision 只负责让状态边沿更及时触发重新平衡，不改变 fail-closed 安全事务。
+- registry 已提供独立 retention revision 订阅：live adapter 注册、替换和卸载会推动 `AppMain` 重新评估；`useViewerSession` 向 viewer 暴露当前 mount generation 约束下的主动通知。Text Viewer 已按 `dirty && !draftPersisted` 的 pin 边沿通知；Gallery、Video 已按各自拥有的视频 playing / PiP bitmask 边沿通知；普通 ASMR 和 Audio Archive 已按各自拥有的全局音频 playing 边沿通知；Comic 已按 Hot cost 分桶边沿通知。媒体 ownership 投影统一校验 `tabId + libraryId` 并由纯函数单测覆盖，避免其他 tab 的媒体状态造成误 pin。连续输入、媒体 `timeupdate` 和同一 cost 分桶内的翻页/滚动都不会触发全局重算。
+- `useViewerSession` 会在初始恢复得出结论后，随 Viewer 后续 render 尝试建立第一份可恢复 snapshot；live viewer 首次形成与当前 schema/revision 匹配且仍留在 Warm 预算内的 snapshot 时，会额外推动一次 retention revision。这样首次淘汰因 `capture-empty` fail closed 的加载中 viewer 能在 ready 后自动重试；后续普通 capture 不重复推动全局规划。
+- 本轮按用户选择跳过 10/30 个混合 viewer 的内存基线和 Electron 人工验收；这些是预算调优与回归确认缺口，不再阻塞核心有限 Hot 保活启用。
+
+- 后续补充 viewer 成本基线测量，用实测结果校准当前 policy 基线、Comic 动态分桶和 8/16 预算。
+- 已引入按成本的 Hot LRU、pin 规则与 fail-closed capture 事务。
+- 自动化已覆盖淘汰决策与 capture 边界；恢复后 ready、媒体 handoff 和 dirty draft 的本轮 Electron 人工验收后补。
+- 后续确认打开大量 tab 后内存进入稳定区间；当前已经替换无限 keep-alive，不再以性能基线作为核心启用前置条件。
 
 ### 阶段 5：Cold 持久化
 
-- 在阶段 2 最小 DraftStore 的基础上，把允许跨重启恢复的普通 viewer envelope 接入 IndexedDB。
-- 为 schema migration、过期、配额失败和损坏数据提供降级。
-- 保留现有 Comic、Video 和归档远端 `viewMeta` 兼容，并逐步接入统一 codec。
+当前状态：核心代码已完成并启用。device-capable viewer 已接入统一异步恢复与节流写入；Cold 真实应用重启样本仍待 Electron 人工验收。
+
+- `ViewerSessionColdStore` 使用独立 IndexedDB `omniflow-viewer-sessions`，按稳定 resource key 覆盖写入；记录包含 storage schema、过期时间、估算字节和完整 snapshot envelope。
+- 持久化边界重新验证账号、资料库、资源身份、viewer kind、payload plain JSON、viewer schema 和 content revision；损坏、过期或不匹配记录读取时删除，不进入 adapter。
+- 默认保留 90 天，单条最多 64 KiB、单账号最多 8 MiB；账号超限时按 snapshot `savedAt` 淘汰最旧可丢弃现场，删除与新记录写入位于同一 IndexedDB 事务。存储不可用和配额失败统一映射为可降级错误。
+- device-capable policy 已声明：PDF、Text、ASMR、Video/Audio Archive 使用 device；Video、Comic、Comic/ASMR Archive 使用 device-and-remote；close 为 discard 的 Image、Gallery、Gallery Archive 不进入 Cold。
+- 公共 runtime 订阅同步 capture，按 resource key 对 Cold 写入做 1 秒 trailing 合并；页面隐藏、`pagehide` 和 runtime dispose 会尽力 flush，存储失败只记录并降级，不阻塞 viewer。
+- `useViewerSession` 在同步 Warm 未命中后才读取 Cold。初始恢复未决时不允许默认状态 capture 覆盖 Cold；旧 generation、Viewer 内容区域内的用户交互或较新 Warm 命中时，迟到 Cold 会被拒绝。tab bar、页面导航和其他 Viewer 外部操作不能被误判为当前 Viewer 已交互；由 `window`、Electron 菜单或其他非 Viewer DOM 入口消费的真实 Viewer 操作，必须调用 hook 返回的 `markInteracted()` 显式上报。
+- Video、Comic、Comic Archive 和 ASMR Archive 会等待本地恢复结论后才采用远端 `viewMeta`；用户已开始操作时，本地和远端迟到恢复都不再覆盖当前现场。
+- Cold Store 支持按资源和 `accountScope + libraryId` 精确删除；普通退出登录不删除同账号 Cold，显式释放资料库会清该账号/资料库，节点删除成功后会清所有 viewer kind 的 Warm/live 状态、device Cold 与 Text draft。显式释放缺少账号 scope 或 Cold 删除失败时必须返回不完整状态并向用户 warning，不能提示完整释放成功。
 
 ## 9. 新 Viewer 接入清单
 
@@ -519,7 +547,7 @@ src/features/file-viewer/session/
 4. 定义 live instance、resource 和 draft 所需身份，禁止以签名 URL 为主键。
 5. 确认 `libraryId`、内容 revision 及保存后 revision 更新链路。
 6. 定义 payload schema 和 `schemaVersion`；明确哪些字段禁止持久化。
-7. 接入 `useViewerSession`，实现同步 capture、动态成本/pin 投影与 ready 后 restore。
+7. 接入 `useViewerSession`，实现同步 capture、动态成本/pin 投影与 ready 后 restore；非 Viewer DOM 的快捷键、菜单或宿主入口若会修改 Viewer 状态，必须显式调用 `markInteracted()`。
 8. 对滚动容器实现 anchor、ratio、`scrollTop` 降级。
 9. 对异步请求接入 generation/abort 防护。
 10. 声明 reload、replace、保存、关闭、删除和 workspace release 的失效行为。
@@ -541,7 +569,7 @@ src/features/file-viewer/session/
 - Audio/Video 播放列表 `replaceTabId` 后只恢复新资源现场，旧 adapter 和异步回调不残留。
 - 关闭再打开符合该 viewer 的 `closeBehavior`。
 - 显式释放资料库后不恢复可丢弃的 viewer session；dirty draft 按 DraftStore 规则保留或确认丢弃。
-- 退出登录后不恢复上一运行 session 的普通 viewer 现场；持久 draft 只允许同一账号恢复。
+- 退出登录会释放 Hot/Warm 运行现场，但不删除 device Cold 与 draft；重新登录时只能恢复同一账号 scope 的持久状态，不能跨账号读取。
 - 缓存中的临时 URL 过期后能重新解析，不白屏。
 
 Text 额外验证：
@@ -568,7 +596,7 @@ Text 额外验证：
 
 ## 11. 自动化与诊断
 
-项目已提供 `npm test`，当前使用 Vitest 覆盖 Viewer Session 纯 TypeScript identity、policy 和 registry。后续每个 viewer 迁移时必须继续补 codec/adapter 单元测试与对应手工恢复验证，不能只依赖现有公共内核测试。
+项目已提供 `npm test`，当前使用 Vitest 覆盖 Viewer Session identity、policy、registry、Hot retention、Cold Store、Cold 写入协调、restore gate 和节点清理。2026-08-13 收尾时全量 lint、135 个 Vitest 用例和生产构建均已通过；Electron 人工恢复与性能样本仍按本文阶段状态后补。后续每个 viewer 迁移时必须继续补 codec/adapter 单元测试与对应手工恢复验证，不能只依赖现有公共内核测试。
 
 Registry 应提供开发环境诊断事件：
 

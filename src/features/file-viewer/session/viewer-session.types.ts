@@ -26,13 +26,16 @@ export interface ViewerSessionSnapshot<TPayload = unknown> {
   payload: TPayload;
 }
 
+export type ViewerSessionPinReason = 'active' | 'dirty' | 'playing' | 'pip';
+
 export interface ViewerSessionAdapter<TPayload = unknown> {
   capture: () => TPayload | null;
   restore: (snapshot: TPayload) => void;
   suspend: () => void;
   resume: () => void;
-  estimateCost: () => number;
-  getPinReasons: () => Array<'active' | 'dirty' | 'playing' | 'pip'>;
+  estimateSnapshotBytes: () => number;
+  estimateHotCostUnits?: () => number | null;
+  getPinReasons: () => ViewerSessionPinReason[];
 }
 
 export interface ViewerLiveRegistration<TPayload = unknown> {
@@ -42,6 +45,38 @@ export interface ViewerLiveRegistration<TPayload = unknown> {
   contentRevision: string | null;
   adapter: ViewerSessionAdapter<TPayload>;
 }
+
+export interface ViewerLiveRetentionProjection {
+  libraryId: number;
+  tabId: string;
+  viewerKind: FileViewerFileType;
+  hotCostUnits: number | null;
+  pinReasons: ViewerSessionPinReason[];
+  pinProjectionReliable: boolean;
+}
+
+export interface ViewerHotEvictionPreparationTarget {
+  libraryId: number;
+  tabId: string;
+  viewerKind: FileViewerFileType;
+}
+
+export type ViewerHotEvictionBlockReason =
+  | 'live-instance-not-found'
+  | 'viewer-kind-mismatch'
+  | 'pin-projection-unreliable'
+  | 'pinned'
+  | 'capture-empty'
+  | 'capture-failed'
+  | 'snapshot-not-retained';
+
+export type ViewerHotEvictionPreparationResult =
+  | { status: 'captured' }
+  | {
+    status: 'blocked';
+    reason: ViewerHotEvictionBlockReason;
+    pinReasons: ViewerSessionPinReason[];
+  };
 
 export type ViewerSessionDiagnosticEventType =
   | 'registered'

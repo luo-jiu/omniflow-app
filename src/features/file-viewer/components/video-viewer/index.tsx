@@ -48,6 +48,11 @@ import {
   parkGlobalVideoElement,
 } from '@/features/file-viewer/services/global-video-elements';
 import { floatingVideoService } from '@/features/file-viewer/services/floating-video.service';
+import {
+  FLOATING_VIDEO_RETENTION_PIP_MASK,
+  FLOATING_VIDEO_RETENTION_PLAYING_MASK,
+  readOwnedFloatingVideoRetentionPinMask,
+} from '@/features/file-viewer/services/floating-video-retention';
 import { isLibraryWorkspaceRoute } from '@/features/file-viewer/utils/media-route';
 import {
   VIDEO_VIEWER_SESSION_ESTIMATED_BYTES,
@@ -431,19 +436,27 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
     restore: restoreVideoSession,
     suspend: () => undefined,
     resume: () => undefined,
-    estimateCost: () => VIDEO_VIEWER_SESSION_ESTIMATED_BYTES,
+    estimateSnapshotBytes: () => VIDEO_VIEWER_SESSION_ESTIMATED_BYTES,
     getPinReasons: () => {
       const reasons: Array<'active' | 'playing' | 'pip'> = [];
       if (activeRef.current) reasons.push('active');
-      const video = videoRef.current;
-      if (video && !video.paused && !video.ended) reasons.push('playing');
-      const hostMode = floatingVideoService.getState().hostMode;
-      if (hostMode === 'document-pip' || hostMode === 'system-window') reasons.push('pip');
+      const pinMask = readOwnedFloatingVideoRetentionPinMask(
+        floatingVideoService.getState(),
+        tabId,
+        libraryId,
+      );
+      if (pinMask & FLOATING_VIDEO_RETENTION_PLAYING_MASK) reasons.push('playing');
+      if (pinMask & FLOATING_VIDEO_RETENTION_PIP_MASK) reasons.push('pip');
       return reasons;
     },
-  }), [captureVideoSession, restoreVideoSession]);
+  }), [captureVideoSession, libraryId, restoreVideoSession, tabId]);
 
-  const { capture: flushVideoSession } = useViewerSession({
+  const {
+    capture: flushVideoSession,
+    markInteracted: markVideoSessionInteracted,
+    notifyRetentionChanged,
+    waitForInitialRestore,
+  } = useViewerSession({
     accountScope,
     active,
     adapter: sessionAdapter,
@@ -455,6 +468,20 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
     tabId,
     viewerKind: 'video',
   });
+
+  useEffect(() => {
+    let pinMask = readOwnedFloatingVideoRetentionPinMask(
+      floatingVideoService.getState(),
+      tabId,
+      libraryId,
+    );
+    return floatingVideoService.subscribe((state) => {
+      const nextPinMask = readOwnedFloatingVideoRetentionPinMask(state, tabId, libraryId);
+      if (nextPinMask === pinMask) return;
+      pinMask = nextPinMask;
+      notifyRetentionChanged();
+    });
+  }, [libraryId, notifyRetentionChanged, tabId]);
 
   const scheduleVideoSessionCapture = useCallback(() => {
     if (sessionCaptureRafRef.current) return;
@@ -917,16 +944,19 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
     }
 
     fetchNodeDetailById(nodeId)
-      .then((detail) => {
+      .then(async (detail) => {
         if (!isMountedRef.current || requestId !== remoteProgressRequestIdRef.current) return;
         const baseMeta = parseViewMetaObject(detail.viewMeta);
         viewMetaBaseRef.current = baseMeta;
-        viewMetaBaseReadyRef.current = true;
 
+        const initialRestoreSource = await waitForInitialRestore();
+        if (!isMountedRef.current || requestId !== remoteProgressRequestIdRef.current) return;
+        viewMetaBaseReadyRef.current = true;
         const remoteProgress = parseVideoRemoteProgress(detail.viewMeta);
         if (remoteProgress) {
-          const warmProgress = restoredWarmProgressRef.current ?? lastPlaybackProgressRef.current;
-          const shouldUseRemoteProgress = isProgressNewer(remoteProgress, warmProgress);
+          const localProgress = restoredWarmProgressRef.current ?? lastPlaybackProgressRef.current;
+          const shouldUseRemoteProgress = initialRestoreSource === 'none'
+            && isProgressNewer(remoteProgress, localProgress);
           if (shouldUseRemoteProgress) {
             lastPlaybackProgressRef.current = remoteProgress;
             const pendingTime = resolveRestorableTime(remoteProgress);
@@ -949,7 +979,7 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
         if (!isMountedRef.current || requestId !== remoteProgressRequestIdRef.current) return;
         runtimeLogger.warn('加载视频观看进度失败:', error);
       });
-  }, [applyPendingRestoreTime, flushRemoteVideoProgress, nodeId]);
+  }, [applyPendingRestoreTime, flushRemoteVideoProgress, nodeId, waitForInitialRestore]);
 
   useEffect(() => {
     if (active) return;
@@ -1348,6 +1378,7 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
           break;
       }
       if (handled) {
+        markVideoSessionInteracted();
         event.stopPropagation();
         releaseExternalKeyboardFocus(event.target, viewerRootRef.current);
       }
@@ -1355,7 +1386,7 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
 
     window.addEventListener('keydown', handleKeyDown, true);
     return () => window.removeEventListener('keydown', handleKeyDown, true);
-  }, [active, adjustVolumeBy, seekBy, toggleFullscreen, togglePlay]);
+  }, [active, adjustVolumeBy, markVideoSessionInteracted, seekBy, toggleFullscreen, togglePlay]);
 
   const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
   const displayedVolume = Math.round((isMuted ? 0 : volume) * 100);

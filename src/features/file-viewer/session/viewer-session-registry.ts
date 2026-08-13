@@ -9,7 +9,11 @@ import {
 import type {
   ViewerLiveInstanceKey,
   ViewerLiveRegistration,
+  ViewerLiveRetentionProjection,
+  ViewerHotEvictionPreparationResult,
+  ViewerHotEvictionPreparationTarget,
   ViewerResourceKey,
+  ViewerSessionPinReason,
   ViewerSessionDiagnosticEvent,
   ViewerSessionSnapshot,
 } from './viewer-session.types';
@@ -45,6 +49,54 @@ export interface ViewerSessionRegistryState {
 }
 
 type DiagnosticListener = (event: ViewerSessionDiagnosticEvent) => void;
+type RetentionListener = () => void;
+type CapturedSnapshotListener = (snapshot: ViewerSessionSnapshot) => void;
+
+const VIEWER_SESSION_PIN_REASONS = new Set<ViewerSessionPinReason>([
+  'active',
+  'dirty',
+  'playing',
+  'pip',
+]);
+
+function readLivePinProjection(registration: ViewerLiveRegistration): {
+  pinReasons: ViewerSessionPinReason[];
+  projectionReliable: boolean;
+} {
+  let pinReasons: ViewerSessionPinReason[] = [];
+  let projectionReliable = true;
+  try {
+    const projectedReasons: unknown = registration.adapter.getPinReasons();
+    if (!Array.isArray(projectedReasons)) {
+      projectionReliable = false;
+    } else {
+      const uniqueReasons = new Set<ViewerSessionPinReason>();
+      projectedReasons.forEach((reason: unknown) => {
+        if (!VIEWER_SESSION_PIN_REASONS.has(reason as ViewerSessionPinReason)) {
+          projectionReliable = false;
+          return;
+        }
+        uniqueReasons.add(reason as ViewerSessionPinReason);
+      });
+      pinReasons = Array.from(uniqueReasons);
+    }
+  } catch {
+    projectionReliable = false;
+  }
+  return { pinReasons, projectionReliable };
+}
+
+function readLiveHotCostProjection(registration: ViewerLiveRegistration): number | null {
+  if (!registration.adapter.estimateHotCostUnits) return null;
+  try {
+    const costUnits: unknown = registration.adapter.estimateHotCostUnits();
+    return typeof costUnits === 'number' && Number.isFinite(costUnits) && costUnits > 0
+      ? costUnits
+      : null;
+  } catch {
+    return null;
+  }
+}
 
 function normalizeBudget(value: number | undefined, fallback: number): number {
   if (!Number.isFinite(value)) return fallback;
@@ -113,14 +165,17 @@ function sameRevision(left: string | null, right: string | null) {
 }
 
 export class ViewerSessionRegistry {
+  private readonly capturedSnapshotListeners = new Set<CapturedSnapshotListener>();
   private readonly diagnosticListeners = new Set<DiagnosticListener>();
   private readonly liveEntries = new Map<string, LiveEntry>();
   private readonly liveSlotKeys = new Map<string, string>();
   private readonly now: () => number;
+  private readonly retentionListeners = new Set<RetentionListener>();
   private readonly snapshots = new Map<string, SnapshotEntry>();
   private estimatedBytes = 0;
   private maxEntries: number;
   private maxEstimatedBytes: number;
+  private retentionRevision = 0;
 
   constructor(options: ViewerSessionRegistryOptions = {}) {
     this.maxEntries = normalizeBudget(options.maxEntries, DEFAULT_MAX_ENTRIES);
@@ -138,12 +193,135 @@ export class ViewerSessionRegistry {
     };
   }
 
+  subscribeRetention(listener: RetentionListener) {
+    this.retentionListeners.add(listener);
+    return () => {
+      this.retentionListeners.delete(listener);
+    };
+  }
+
+  subscribeCapturedSnapshots(listener: CapturedSnapshotListener) {
+    this.capturedSnapshotListeners.add(listener);
+    return () => {
+      this.capturedSnapshotListeners.delete(listener);
+    };
+  }
+
+  getRetentionRevision() {
+    return this.retentionRevision;
+  }
+
   getState(): ViewerSessionRegistryState {
     return {
       estimatedBytes: this.estimatedBytes,
       liveInstanceCount: this.liveEntries.size,
       snapshotCount: this.snapshots.size,
     };
+  }
+
+  getLiveRetentionProjections(): ViewerLiveRetentionProjection[] {
+    return Array.from(this.liveEntries.values()).map(({ registration }) => {
+      const { pinReasons, projectionReliable } = readLivePinProjection(registration);
+      return {
+        libraryId: registration.key.libraryId,
+        tabId: registration.key.tabId,
+        viewerKind: registration.identity.viewerKind,
+        hotCostUnits: readLiveHotCostProjection(registration),
+        pinReasons,
+        pinProjectionReliable: projectionReliable,
+      };
+    });
+  }
+
+  notifyLiveRetentionChanged(key: ViewerLiveInstanceKey): boolean {
+    if (!isViewerLiveInstanceKey(key)) return false;
+    if (!this.liveEntries.has(serializeViewerLiveInstanceKey(key))) return false;
+    this.emitRetentionChanged();
+    return true;
+  }
+
+  prepareLiveInstanceForHotEviction(
+    target: ViewerHotEvictionPreparationTarget,
+  ): ViewerHotEvictionPreparationResult {
+    const entry = Array.from(this.liveEntries.values()).find(({ registration }) => (
+      registration.key.libraryId === target.libraryId
+      && registration.key.tabId === target.tabId
+    ));
+    if (!entry) {
+      return {
+        status: 'blocked',
+        reason: 'live-instance-not-found',
+        pinReasons: [],
+      };
+    }
+    if (entry.registration.identity.viewerKind !== target.viewerKind) {
+      return {
+        status: 'blocked',
+        reason: 'viewer-kind-mismatch',
+        pinReasons: [],
+      };
+    }
+    const pinProjection = readLivePinProjection(entry.registration);
+    if (!pinProjection.projectionReliable) {
+      return {
+        status: 'blocked',
+        reason: 'pin-projection-unreliable',
+        pinReasons: pinProjection.pinReasons,
+      };
+    }
+    if (pinProjection.pinReasons.length > 0) {
+      return {
+        status: 'blocked',
+        reason: 'pinned',
+        pinReasons: pinProjection.pinReasons,
+      };
+    }
+    try {
+      const snapshot = this.captureLiveInstance(entry.registration.key);
+      if (!snapshot) {
+        return {
+          status: 'blocked',
+          reason: 'capture-empty',
+          pinReasons: [],
+        };
+      }
+      if (!this.hasRestorableSnapshotForHotEviction(target)) {
+        return {
+          status: 'blocked',
+          reason: 'snapshot-not-retained',
+          pinReasons: [],
+        };
+      }
+      return { status: 'captured' };
+    } catch {
+      return {
+        status: 'blocked',
+        reason: 'capture-failed',
+        pinReasons: [],
+      };
+    }
+  }
+
+  hasRestorableSnapshotForHotEviction(
+    target: ViewerHotEvictionPreparationTarget,
+  ): boolean {
+    const entry = Array.from(this.liveEntries.values()).find(({ registration }) => (
+      registration.key.libraryId === target.libraryId
+      && registration.key.tabId === target.tabId
+      && registration.identity.viewerKind === target.viewerKind
+    ));
+    if (!entry) return false;
+    const storedSnapshot = this.snapshots.get(
+      serializeViewerResourceKey(entry.registration.identity),
+    );
+    return Boolean(
+      storedSnapshot
+      && storedSnapshot.snapshot.schemaVersion === entry.registration.schemaVersion
+      && sameRevision(
+        storedSnapshot.snapshot.contentRevision,
+        entry.registration.contentRevision,
+      )
+    );
   }
 
   setBudget(options: Pick<ViewerSessionRegistryOptions, 'maxEntries' | 'maxEstimatedBytes'>) {
@@ -154,7 +332,10 @@ export class ViewerSessionRegistry {
 
   writeSnapshot<TPayload>(
     snapshot: ViewerSessionSnapshot<TPayload>,
-    options: { estimatedBytes?: number } = {},
+    options: {
+      diagnosticType?: 'captured' | 'restored';
+      estimatedBytes?: number;
+    } = {},
   ) {
     const serialized = serializeSnapshot(snapshot);
     const serializedBytes = getSerializedByteLength(serialized);
@@ -164,17 +345,37 @@ export class ViewerSessionRegistry {
     const estimatedBytes = Math.max(serializedBytes, requestedEstimate);
     const storedSnapshot = JSON.parse(serialized) as ViewerSessionSnapshot;
     const key = serializeViewerResourceKey(snapshot.identity);
+    const previousSnapshot = this.snapshots.get(key)?.snapshot;
+    const hadMatchingSnapshot = Boolean(
+      previousSnapshot
+      && previousSnapshot.schemaVersion === snapshot.schemaVersion
+      && sameRevision(previousSnapshot.contentRevision, snapshot.contentRevision),
+    );
     this.deleteSnapshotEntry(key);
     this.snapshots.set(key, { estimatedBytes, snapshot: storedSnapshot });
     this.estimatedBytes += estimatedBytes;
     this.emit({
-      type: 'captured',
+      type: options.diagnosticType ?? 'captured',
       key,
       identity: snapshot.identity,
       schemaVersion: snapshot.schemaVersion,
       estimatedBytes,
     });
     this.evictToBudget();
+    if (
+      !hadMatchingSnapshot
+      && this.hasMatchingSnapshot(snapshot.identity, {
+        schemaVersion: snapshot.schemaVersion,
+        contentRevision: snapshot.contentRevision,
+      })
+      && Array.from(this.liveEntries.values()).some(({ registration }) => (
+        serializeViewerResourceKey(registration.identity) === key
+        && registration.schemaVersion === snapshot.schemaVersion
+        && sameRevision(registration.contentRevision, snapshot.contentRevision)
+      ))
+    ) {
+      this.emitRetentionChanged();
+    }
   }
 
   readSnapshot<TPayload>(
@@ -225,6 +426,21 @@ export class ViewerSessionRegistry {
     return cloneSnapshot<TPayload>(entry.snapshot);
   }
 
+  hasMatchingSnapshot(
+    identity: ViewerResourceKey,
+    requirements: ViewerSnapshotReadRequirements = {},
+  ): boolean {
+    if (!isViewerResourceKey(identity)) return false;
+    const entry = this.snapshots.get(serializeViewerResourceKey(identity));
+    if (!entry) return false;
+    return (
+      (requirements.schemaVersion === undefined
+        || entry.snapshot.schemaVersion === requirements.schemaVersion)
+      && (requirements.contentRevision === undefined
+        || sameRevision(entry.snapshot.contentRevision, requirements.contentRevision))
+    );
+  }
+
   invalidateSnapshot(identity: ViewerResourceKey, reason = 'explicit-invalidation') {
     if (!isViewerResourceKey(identity)) return false;
     const key = serializeViewerResourceKey(identity);
@@ -257,6 +473,7 @@ export class ViewerSessionRegistry {
       identity: registration.identity,
       schemaVersion: registration.schemaVersion,
     });
+    this.emitRetentionChanged();
     return () => {
       const currentSerializedKey = this.liveSlotKeys.get(slotKey);
       if (currentSerializedKey === serializedKey) {
@@ -279,9 +496,17 @@ export class ViewerSessionRegistry {
       payload,
     };
     this.writeSnapshot(snapshot, {
-      estimatedBytes: entry.registration.adapter.estimateCost(),
+      estimatedBytes: entry.registration.adapter.estimateSnapshotBytes(),
     });
-    return cloneSnapshot<TPayload>(snapshot);
+    const capturedSnapshot = cloneSnapshot<TPayload>(snapshot);
+    this.capturedSnapshotListeners.forEach((listener) => {
+      try {
+        listener(capturedSnapshot);
+      } catch {
+        // Persistence observers must never break the synchronous capture path.
+      }
+    });
+    return capturedSnapshot;
   }
 
   replaceLiveInstance<TPayload>(
@@ -406,7 +631,21 @@ export class ViewerSessionRegistry {
       schemaVersion: entry.registration.schemaVersion,
       reason,
     });
+    this.emitRetentionChanged();
     return true;
+  }
+
+  private emitRetentionChanged() {
+    this.retentionRevision = this.retentionRevision >= Number.MAX_SAFE_INTEGER
+      ? 1
+      : this.retentionRevision + 1;
+    this.retentionListeners.forEach((listener) => {
+      try {
+        listener();
+      } catch {
+        // Retention observers must never break viewer lifecycle transitions.
+      }
+    });
   }
 
   private emit(event: Omit<ViewerSessionDiagnosticEvent, 'occurredAt' | 'libraryId' | 'viewerKind'> & {

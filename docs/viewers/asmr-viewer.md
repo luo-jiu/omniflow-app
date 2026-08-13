@@ -1,6 +1,6 @@
 # ASMR Viewer 说明
 
-更新时间：2026-08-04
+更新时间：2026-08-13
 适用范围：`src/features/file-viewer/components/asmr-viewer/` 下的 ASMR 集合预览、目录浏览、音频播放、封面解析和元信息编辑能力。
 
 ## 1. 概述
@@ -125,8 +125,8 @@
 建议顺着这条链路阅读：
 
 1. 从 props 或 `fileUrl` 解析 `libraryId` 和 `rootNodeId`。
-2. 公共 registry 同步恢复稳定路径、选择、列表锚点和播放节点投影。
-3. 重新读取节点详情与根目录 children，并逐级验证、加载恢复路径。
+2. 公共 registry 发起 Warm/Cold 恢复；节点详情和根目录 children 与异步 Cold 读取并行请求，Cold 不阻塞内容网络请求。
+3. 初始恢复得出结论后，按 snapshot 逐级验证、加载稳定路径、选择、列表锚点和播放节点投影；如果用户已在 Viewer 内容区操作，则保留当前现场，不再套用迟到恢复。
 4. 根据 `coverNodeId` 或根目录首张图片重新解析封面。
 5. 如果全局音频服务仍由该 ASMR 集合拥有，则按稳定父目录重建音频队列；否则不伪造播放状态。
 

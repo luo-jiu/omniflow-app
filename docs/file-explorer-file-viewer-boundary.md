@@ -1,6 +1,6 @@
 # File Explorer 与 File Viewer 边界说明
 
-更新时间：2026-05-12
+更新时间：2026-08-13
 
 适用范围：`features/file-explorer`、`features/file-viewer`、`contexts/FileViewerContext.tsx`、`views/library/detail/` 中与文件树、文件打开、预览 tab、预览分发和缓存恢复相关的代码。
 
@@ -198,12 +198,13 @@ tab id 的规则：
 
 显式释放工作区时，`workspace-resource-release` 是预览缓存清理入口：
 
-- 单库释放按 `libraryId` 直接清公共 Viewer Session Registry，再清文件预览 tab cache；不依赖 tab cache 仍能枚举到哪些 viewer。
+- 单库释放按 `accountScope + libraryId` 清 device Cold，再按 `libraryId` 清公共 Viewer Session Registry 和文件预览 tab cache；不依赖 tab cache 仍能枚举到哪些 viewer。
 - session 释放会全量清理公共 registry 和文件预览 tab cache。
 - 所有 Warm-capable viewer 已迁移到公共 registry，旧逐 viewer cache 与 `viewer-snapshot-release.ts` 已删除。
 - registry 在释放资源时会同时移除 live registration；随后 React cleanup 不能把已释放 snapshot 写回。
+- 单库释放缺少账号 scope 或 device Cold 删除失败时，内存工作区仍继续释放，但结果必须标记 Viewer Session 清理不完整并由调用页面提示 warning，不能把残留 Cold 表现成完整成功。
 
-Text dirty draft 属于用户数据，不跟随普通 tab 关闭、资料库释放或退出登录删除。节点软删除、回收站彻底删除和清空回收站统一经过 `features/file-explorer/services/node-deletion.ts`：先尽力确定可识别的子树节点，再执行后端删除，确认成功后按当前账号批量删除 draft 并失效旧 writer generation。枚举失败不能阻断本可成功的后端删除；后端删除失败的节点不能提前进入关闭 tab 或清草稿路径。回收站后代无法由普通 descendants 接口枚举时，服务会用 `deletedDescendantCount` 识别不完整结果，至少清理已知根节点并明确提示可能未完整清理。
+Text dirty draft 属于用户数据，不跟随普通 tab 关闭、资料库释放或退出登录删除。节点软删除、回收站彻底删除和清空回收站统一经过 `features/file-explorer/services/node-deletion.ts`：先尽力确定可识别的子树节点，再执行后端删除，确认成功后按当前账号批量删除 draft、所有 viewer kind 的 Warm/live 状态和 device Cold，并失效旧 writer generation。枚举失败不能阻断本可成功的后端删除；后端删除失败的节点不能提前进入关闭 tab 或本地恢复数据清理路径。回收站后代无法由普通 descendants 接口枚举时，服务会用 `deletedDescendantCount` 识别不完整结果，至少清理已知根节点并明确提示可能未完整清理。
 
 前端释放只清工作区现场。已经同步到后端 `viewMeta` 的阅读 / 播放进度不在这里删除；如果未来要支持“清远端阅读进度”，必须另设用户确认和后端接口。
 

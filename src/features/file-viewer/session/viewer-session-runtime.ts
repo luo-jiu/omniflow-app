@@ -1,13 +1,23 @@
 import { registerAuthSessionRuntime } from '@/service/auth-session-release';
+import { runtimeLogger } from '@/utils/runtimeLogger';
 import {
+  createViewerResourceKey,
   createViewerLiveInstanceKey,
   createViewerRuntimeSessionId,
   serializeViewerResourceKey,
 } from './viewer-session-identity';
 import { ViewerSessionRegistry } from './viewer-session-registry';
+import { viewerSessionColdStore } from './viewer-session-cold-store';
+import { ViewerSessionColdRuntime } from './viewer-session-cold-runtime';
 import type { ViewerResourceKey } from './viewer-session.types';
+import { viewerSessionPolicies } from './viewer-session-policies';
+import type { FileViewerFileType } from '@/shared/file-viewer-types';
 
 export const viewerSessionRegistry = new ViewerSessionRegistry();
+export const viewerSessionColdRuntime = new ViewerSessionColdRuntime(
+  viewerSessionRegistry,
+  viewerSessionColdStore,
+);
 
 interface ResourceReloadEntry {
   accountScope: string;
@@ -25,7 +35,10 @@ export class ViewerSessionRuntime {
   private readonly resourceReloadTokens = new Map<string, ResourceReloadEntry>();
   private runtimeSessionId = createViewerRuntimeSessionId();
 
-  constructor(private readonly registry: ViewerSessionRegistry = viewerSessionRegistry) {}
+  constructor(
+    private readonly registry: ViewerSessionRegistry = viewerSessionRegistry,
+    private readonly coldRuntime?: Pick<ViewerSessionColdRuntime, 'deleteResources'>,
+  ) {}
 
   start = () => {
     if (this.active) return;
@@ -56,6 +69,31 @@ export class ViewerSessionRuntime {
   disposeResource(identity: ViewerResourceKey) {
     this.registry.disposeResource(identity, 'resource-closed');
     this.resourceReloadTokens.delete(serializeViewerResourceKey(identity));
+    void this.coldRuntime?.deleteResources([identity]).catch((error: unknown) => {
+      runtimeLogger.warn('delete discarded viewer Cold snapshot failed', { error });
+    });
+  }
+
+  async disposeNodeResources(
+    accountScope: string,
+    libraryId: number,
+    nodeIds: number[],
+  ): Promise<void> {
+    const viewerKinds = Object.keys(viewerSessionPolicies) as FileViewerFileType[];
+    const identities = nodeIds.flatMap((nodeId) => viewerKinds.flatMap((viewerKind) => {
+      const identity = createViewerResourceKey({
+        accountScope,
+        libraryId,
+        nodeId,
+        viewerKind,
+      });
+      return identity ? [identity] : [];
+    }));
+    identities.forEach((identity) => {
+      this.registry.disposeResource(identity, 'node-deleted');
+      this.resourceReloadTokens.delete(serializeViewerResourceKey(identity));
+    });
+    await this.coldRuntime?.deleteResources(identities);
   }
 
   createLiveInstanceKey(options: { libraryId: number; tabId: string }) {
@@ -82,6 +120,9 @@ export class ViewerSessionRuntime {
     const previous = this.resourceReloadTokens.get(key);
     if (previous && previous.reloadToken !== normalizedReloadToken) {
       this.registry.invalidateSnapshot(identity, 'runtime-reload-generation-changed');
+      void this.coldRuntime?.deleteResources([identity]).catch((error: unknown) => {
+        runtimeLogger.warn('invalidate reloaded viewer Cold snapshot failed', { error });
+      });
     }
     this.resourceReloadTokens.set(key, {
       accountScope: identity.accountScope,
@@ -95,6 +136,10 @@ export class ViewerSessionRuntime {
   }
 }
 
-export const viewerSessionRuntime = new ViewerSessionRuntime();
+export const viewerSessionRuntime = new ViewerSessionRuntime(
+  viewerSessionRegistry,
+  viewerSessionColdRuntime,
+);
 
 registerAuthSessionRuntime(viewerSessionRuntime);
+registerAuthSessionRuntime(viewerSessionColdRuntime);

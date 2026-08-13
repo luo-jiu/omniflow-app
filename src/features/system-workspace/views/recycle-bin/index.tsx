@@ -363,8 +363,12 @@ const RecycleBinWorkspace: React.FC<SystemWorkspaceViewProps> = ({ libraryId }) 
       });
       setItems(prev => prev.filter(x => x.id !== item.id));
       markRepositoryTreeSnapshotDirty(libraryId);
-      if (result.draftCleanupFailed || result.subtreeCollectionFailed) {
-        Toast.warning('已彻底删除，但本地文本草稿可能未完整清理');
+      if (
+        result.draftCleanupFailed
+        || result.viewerSessionCleanupFailed
+        || result.subtreeCollectionFailed
+      ) {
+        Toast.warning('已彻底删除，但本地恢复数据可能未完整清理');
       } else {
         Toast.success('已彻底删除');
       }
@@ -409,8 +413,12 @@ const RecycleBinWorkspace: React.FC<SystemWorkspaceViewProps> = ({ libraryId }) 
           });
           setItems([]);
           markRepositoryTreeSnapshotDirty(libraryId);
-          if (result.draftCleanupFailed || result.subtreeCollectionFailed) {
-            Toast.warning('回收站已清空，但本地文本草稿可能未完整清理');
+          if (
+            result.draftCleanupFailed
+            || result.viewerSessionCleanupFailed
+            || result.subtreeCollectionFailed
+          ) {
+            Toast.warning('回收站已清空，但本地恢复数据可能未完整清理');
           } else {
             Toast.success(result.clearedCount > 0
               ? `已清空回收站（${result.clearedCount} 项）`

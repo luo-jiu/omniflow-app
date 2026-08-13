@@ -6,6 +6,7 @@ function createDependencies() {
     clearRecycleBin: vi.fn(async () => 2),
     deleteNodeAndChildren: vi.fn(async () => true),
     discardDrafts: vi.fn(async () => undefined),
+    discardViewerSessions: vi.fn(async () => undefined),
     getAllDescendantsByNodeId: vi.fn(async (nodeId: number) => [
       { id: nodeId },
       { id: nodeId + 1 },
@@ -13,6 +14,7 @@ function createDependencies() {
     hardDeleteNodeAndChildren: vi.fn(async () => true),
     reportCollectionFailure: vi.fn(),
     reportDraftCleanupFailure: vi.fn(),
+    reportViewerSessionCleanupFailure: vi.fn(),
   };
 }
 
@@ -30,6 +32,7 @@ describe('Node deletion service', () => {
     expect(result).toEqual({
       deletedNodeIds: [8, 9],
       draftCleanupFailed: false,
+      viewerSessionCleanupFailed: false,
       subtreeCollectionFailed: false,
     });
     expect(dependencies.deleteNodeAndChildren).toHaveBeenCalledWith(8, 3);
@@ -39,6 +42,7 @@ describe('Node deletion service', () => {
     ]);
     expect(dependencies.deleteNodeAndChildren.mock.invocationCallOrder[0])
       .toBeLessThan(dependencies.discardDrafts.mock.invocationCallOrder[0]);
+    expect(dependencies.discardViewerSessions).toHaveBeenCalledWith('user:1', 3, [8, 9]);
   });
 
   it('does not discard drafts when the backend deletion fails', async () => {
@@ -52,6 +56,7 @@ describe('Node deletion service', () => {
       libraryId: 3,
     })).rejects.toThrow('delete failed');
     expect(dependencies.discardDrafts).not.toHaveBeenCalled();
+    expect(dependencies.discardViewerSessions).not.toHaveBeenCalled();
   });
 
   it('keeps a successful deletion result while surfacing local cleanup failure', async () => {
@@ -69,6 +74,21 @@ describe('Node deletion service', () => {
     expect(dependencies.reportDraftCleanupFailure).toHaveBeenCalledOnce();
   });
 
+  it('reports Viewer session cleanup failures without rolling back backend deletion', async () => {
+    const dependencies = createDependencies();
+    dependencies.discardViewerSessions.mockRejectedValueOnce(new Error('cold storage failed'));
+    const service = createNodeDeletionService(dependencies);
+
+    const result = await service.softDeleteNodeSubtree({
+      accountScope: 'user:1',
+      ancestorId: 8,
+      libraryId: 3,
+    });
+
+    expect(result.viewerSessionCleanupFailed).toBe(true);
+    expect(dependencies.reportViewerSessionCleanupFailure).toHaveBeenCalledOnce();
+  });
+
   it('still deletes a live subtree when descendant collection fails', async () => {
     const dependencies = createDependencies();
     dependencies.getAllDescendantsByNodeId.mockRejectedValueOnce(new Error('not visible'));
@@ -83,6 +103,7 @@ describe('Node deletion service', () => {
     expect(result).toMatchObject({
       deletedNodeIds: [8],
       draftCleanupFailed: false,
+      viewerSessionCleanupFailed: false,
       subtreeCollectionFailed: true,
     });
     expect(dependencies.deleteNodeAndChildren).toHaveBeenCalledWith(8, 3);
@@ -106,6 +127,7 @@ describe('Node deletion service', () => {
     expect(result).toMatchObject({
       deletedNodeIds: [8],
       draftCleanupFailed: false,
+      viewerSessionCleanupFailed: false,
       subtreeCollectionFailed: true,
     });
     expect(dependencies.hardDeleteNodeAndChildren).toHaveBeenCalledWith(8, 3);
@@ -129,6 +151,7 @@ describe('Node deletion service', () => {
       clearedCount: 2,
       deletedNodeIds: [8, 12],
       draftCleanupFailed: false,
+      viewerSessionCleanupFailed: false,
       subtreeCollectionFailed: true,
     });
     expect(dependencies.clearRecycleBin).toHaveBeenCalledWith(3);

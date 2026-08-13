@@ -13,6 +13,7 @@ import {
   type ComicPageItem,
   COMIC_VIEWER_SESSION_ESTIMATED_BYTES,
   COMIC_VIEWER_SESSION_SCHEMA_VERSION,
+  estimateComicViewerHotCostUnits,
   parseComicViewerSessionSnapshot,
   type ComicReaderLayoutMode,
   type ComicScrollColumnMode,
@@ -316,6 +317,7 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
   const [viewerSettingsVisible, setViewerSettingsVisible] = useState(false);
   const [scrollPageGapPx, setScrollPageGapPx] = useState(DEFAULT_SCROLL_PAGE_GAP_PX);
   const scrollRowGap = scrollPageGapPx;
+  const hotCostUnits = estimateComicViewerHotCostUnits(layoutMode, visibleCount);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const flipStageRef = useRef<HTMLDivElement | null>(null);
@@ -365,6 +367,7 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
   const flipRotateStepsRef = useRef(flipRotateSteps);
   const scrollPageGapPxRef = useRef(scrollPageGapPx);
   const activeRef = useRef(active);
+  const hotCostUnitsRef = useRef(hotCostUnits);
   pagesRef.current = pages;
   visibleCountRef.current = visibleCount;
   currentPageNumberRef.current = currentPageNumber;
@@ -490,11 +493,20 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
     restore: restoreSessionSnapshot,
     suspend: () => undefined,
     resume: () => undefined,
-    estimateCost: () => COMIC_VIEWER_SESSION_ESTIMATED_BYTES,
+    estimateSnapshotBytes: () => COMIC_VIEWER_SESSION_ESTIMATED_BYTES,
+    estimateHotCostUnits: () => estimateComicViewerHotCostUnits(
+      layoutModeRef.current,
+      visibleCountRef.current,
+    ),
     getPinReasons: () => (activeRef.current ? ['active'] : []),
   }), [captureSessionSnapshot, restoreSessionSnapshot]);
 
-  const { capture: flushSessionSnapshot } = useViewerSession({
+  const {
+    capture: flushSessionSnapshot,
+    markInteracted: markComicSessionInteracted,
+    notifyRetentionChanged,
+    waitForInitialRestore,
+  } = useViewerSession({
     accountScope,
     active,
     adapter: sessionAdapter,
@@ -506,6 +518,12 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
     tabId,
     viewerKind: 'comic',
   });
+
+  useEffect(() => {
+    if (hotCostUnitsRef.current === hotCostUnits) return;
+    hotCostUnitsRef.current = hotCostUnits;
+    notifyRetentionChanged();
+  }, [hotCostUnits, notifyRetentionChanged]);
 
   const flushRemoteReadingProgress = useCallback(async (force = false) => {
     if (!folderNodeId || !Number.isFinite(folderNodeId)) {
@@ -689,10 +707,10 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
       window.clearTimeout(remoteProgressSyncTimerRef.current);
       remoteProgressSyncTimerRef.current = 0;
     }
-    const warmSnapshot = restoredSessionResourceNodeIdRef.current === folderNodeId
+    const synchronousSnapshot = restoredSessionResourceNodeIdRef.current === folderNodeId
       ? restoredSessionSnapshotRef.current
       : null;
-    if (!warmSnapshot) {
+    if (!synchronousSnapshot) {
       restoredSessionSnapshotRef.current = null;
       setLayoutMode('scroll');
       setScrollColumnMode(1);
@@ -734,8 +752,17 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
         if (!mounted || sessionRef.current !== currentSession) {
           return;
         }
+        const initialRestoreSource = await waitForInitialRestore();
+        if (!mounted || sessionRef.current !== currentSession) {
+          return;
+        }
+        const sessionSnapshot = restoredSessionResourceNodeIdRef.current === folderNodeId
+          ? restoredSessionSnapshotRef.current
+          : null;
         viewMetaBaseRef.current = parseViewMetaObject(detail?.viewMeta);
-        const remoteProgress = warmSnapshot ? null : parseComicRemoteReadingProgress(detail?.viewMeta);
+        const remoteProgress = initialRestoreSource === 'none' && !sessionSnapshot
+          ? parseComicRemoteReadingProgress(detail?.viewMeta)
+          : null;
         const imagePages = children
           .filter(isImageNode)
           .map((item: ComicChildNode) => ({
@@ -753,18 +780,20 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
         const remoteRestoreTarget = remoteProgress
           ? resolveRemoteRestoreTarget(imagePages, remoteProgress)
           : null;
-        const warmAnchorIndex = warmSnapshot?.anchorPageId
-          ? imagePages.findIndex(page => page.id === warmSnapshot.anchorPageId)
+        const sessionAnchorIndex = sessionSnapshot?.anchorPageId
+          ? imagePages.findIndex(page => page.id === sessionSnapshot.anchorPageId)
           : -1;
-        const warmPageNumber = warmSnapshot && imagePages.length > 0
+        const sessionPageNumber = sessionSnapshot && imagePages.length > 0
           ? clamp(
-            warmAnchorIndex >= 0 ? warmAnchorIndex + 1 : warmSnapshot.currentPageNumber || 1,
+            sessionAnchorIndex >= 0
+              ? sessionAnchorIndex + 1
+              : sessionSnapshot.currentPageNumber || 1,
             1,
             imagePages.length,
           )
           : 0;
-        const targetPageNumber = warmSnapshot
-          ? warmPageNumber
+        const targetPageNumber = sessionSnapshot
+          ? sessionPageNumber
           : remoteRestoreTarget?.pageNumber ?? (imagePages.length > 0 ? 1 : 0);
         const restoredVisibleCount = imagePages.length > 0
           ? clamp(Math.max(initialVisibleCount, targetPageNumber), 1, imagePages.length)
@@ -774,15 +803,15 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
         setCurrentPageNumber(targetPageNumber);
         setFlipPageIndex(Math.max(targetPageNumber - 1, 0));
         lastFocusedPageIdRef.current = imagePages[targetPageNumber - 1]?.id ?? null;
-        const warmRestoreTarget = warmSnapshot && warmSnapshot.layoutMode === 'scroll'
+        const sessionRestoreTarget = sessionSnapshot && sessionSnapshot.layoutMode === 'scroll'
           ? {
-            desiredScrollTop: warmSnapshot.scrollTop,
-            desiredScrollRatio: warmSnapshot.scrollRatio ?? 0,
-            anchorPageId: warmSnapshot.anchorPageId,
-            anchorOffsetRatio: warmSnapshot.anchorOffsetRatio,
+            desiredScrollTop: sessionSnapshot.scrollTop,
+            desiredScrollRatio: sessionSnapshot.scrollRatio ?? 0,
+            anchorPageId: sessionSnapshot.anchorPageId,
+            anchorOffsetRatio: sessionSnapshot.anchorOffsetRatio,
           }
           : null;
-        const scrollRestoreTarget = warmRestoreTarget ?? (remoteRestoreTarget
+        const scrollRestoreTarget = sessionRestoreTarget ?? (remoteRestoreTarget
           ? {
             desiredScrollTop: remoteRestoreTarget.scrollTop,
             desiredScrollRatio: remoteRestoreTarget.scrollRatio,
@@ -815,7 +844,7 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
     return () => {
       mounted = false;
     };
-  }, [folderNodeId, libraryId]);
+  }, [folderNodeId, libraryId, waitForInitialRestore]);
 
   useEffect(() => {
     const validPageIds = new Set(renderedPages.map(page => page.id));
@@ -1486,14 +1515,17 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.code === 'Space' && !event.repeat) {
         event.preventDefault();
+        markComicSessionInteracted();
         setFlipPanMode(true);
       }
       if (event.code === 'ArrowLeft') {
         event.preventDefault();
+        markComicSessionInteracted();
         goToPrevFlipPage();
       }
       if (event.code === 'ArrowRight') {
         event.preventDefault();
+        markComicSessionInteracted();
         goToNextFlipPage();
       }
     };
@@ -1511,10 +1543,11 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [active, goToNextFlipPage, goToPrevFlipPage, isFlipMode]);
+  }, [active, goToNextFlipPage, goToPrevFlipPage, isFlipMode, markComicSessionInteracted]);
 
   const applyViewerZoomShortcut = useCallback((action: ViewerZoomShortcutAction) => {
     if (!active) return;
+    markComicSessionInteracted();
     if (action === 'zoom-in') {
       if (isFlipMode) {
         applyFlipZoomRatio(1 + CTRL_WHEEL_ZOOM_STEP);
@@ -1542,6 +1575,7 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
     active,
     applyFlipZoomRatio,
     isFlipMode,
+    markComicSessionInteracted,
     resetFlipZoomToFit,
     resetScrollZoom,
     zoomScrollByDirection,

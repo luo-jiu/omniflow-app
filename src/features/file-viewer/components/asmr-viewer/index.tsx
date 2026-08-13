@@ -27,6 +27,7 @@ import { runtimeLogger } from '@/utils/runtimeLogger';
 import { parseAsmrRouteInfo, resolveAsmrOwnerKey } from '@/features/file-viewer/utils/asmr-owner-key';
 import type { PreviewFileType } from '@/utils/preview-file-type';
 import { useGlobalAudioPlayback } from '@/features/file-viewer/hooks/useGlobalAudioPlayback';
+import { isOwnedGlobalAudioPlaying } from '@/features/file-viewer/services/global-audio-retention';
 import {
   ASMR_VIEWER_SESSION_ESTIMATED_BYTES,
   ASMR_VIEWER_SESSION_SCHEMA_VERSION,
@@ -261,6 +262,7 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
   const [coverPickerLoading, setCoverPickerLoading] = useState(false);
   const {
     ensureSource,
+    getPlayerState,
     isOwnedSource,
     play,
     playerState,
@@ -269,6 +271,7 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
     setVolume,
     togglePlay: toggleOwnedPlay,
   } = useGlobalAudioPlayback({ ownerType: 'asmr', ownerKey: asmrOwnerKey, tabId, libraryId });
+  const retentionPlaying = isOwnedGlobalAudioPlaying(playerState, tabId, libraryId);
 
   useEffect(() => {
     if (active) return;
@@ -289,6 +292,7 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
   const activeRef = useRef(active);
   const isOwnedSourceRef = useRef(isOwnedSource);
   const playerSrcRef = useRef(playerState.src);
+  const retentionPlayingRef = useRef(retentionPlaying);
   const hasLoadedListRef = useRef(false);
   const pendingSessionRestoreRef = useRef<AsmrViewerSessionSnapshot | null>(null);
   const listScrollCaptureRafRef = useRef(0);
@@ -347,11 +351,23 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
     restore: restoreSessionSnapshot,
     suspend: () => undefined,
     resume: () => undefined,
-    estimateCost: () => ASMR_VIEWER_SESSION_ESTIMATED_BYTES,
-    getPinReasons: () => (activeRef.current ? ['active'] : []),
-  }), [captureSessionSnapshot, restoreSessionSnapshot]);
+    estimateSnapshotBytes: () => ASMR_VIEWER_SESSION_ESTIMATED_BYTES,
+    getPinReasons: () => {
+      const reasons: Array<'active' | 'playing'> = [];
+      if (activeRef.current) reasons.push('active');
+      const audioState = getPlayerState();
+      if (isOwnedGlobalAudioPlaying(audioState, tabId, libraryId)) {
+        reasons.push('playing');
+      }
+      return reasons;
+    },
+  }), [captureSessionSnapshot, getPlayerState, libraryId, restoreSessionSnapshot, tabId]);
 
-  const { capture: flushSessionSnapshot } = useViewerSession({
+  const {
+    capture: flushSessionSnapshot,
+    notifyRetentionChanged,
+    waitForInitialRestore,
+  } = useViewerSession({
     accountScope,
     active,
     adapter: sessionAdapter,
@@ -363,6 +379,12 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
     tabId,
     viewerKind: 'asmr',
   });
+
+  useEffect(() => {
+    if (retentionPlayingRef.current === retentionPlaying) return;
+    retentionPlayingRef.current = retentionPlaying;
+    notifyRetentionChanged();
+  }, [notifyRetentionChanged, retentionPlaying]);
 
   const relativePath = useMemo(() => {
     const segments = pathStack.slice(1).map(item => item.name);
@@ -650,10 +672,6 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
     }
 
     const rootPath: AsmrPathItem[] = [{ id: rootNodeId, name: 'ROOT' }];
-    const pendingRestore = pendingSessionRestoreRef.current;
-    const restorePath = pendingRestore?.pathStack[0]?.id === rootNodeId
-      ? pendingRestore.pathStack
-      : rootPath;
     hasLoadedListRef.current = false;
     audioUrlCacheRef.current.clear();
     setCoverUrl(null);
@@ -661,30 +679,43 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
     setCoverLoading(true);
 
     void (async () => {
-      let preferredCoverNodeId: number | null = null;
-      try {
-        const meta = await loadCollectionMeta(rootNodeId);
-        if (canceled) return;
-        setCollectionName(meta.name);
-        setCollectionTag(meta.tag);
-        setCollectionTagIds(meta.tagIds);
-        setCollectionSn(meta.sn);
-        setViewMetaBase(meta.viewMeta);
-        preferredCoverNodeId = meta.preferredCoverNodeId;
-      } catch (error) {
-        if (canceled) return;
-        runtimeLogger.warn('加载 ASMR 元信息失败，已回退默认展示:', error);
-        setCollectionName(fallbackTitle);
-        setCollectionTag('');
-        setCollectionTagIds([]);
-        setCollectionSn('');
-        setViewMetaBase({});
-      }
-
-      const rootResult = await loadDirectory(rootNodeId, rootPath);
-      if (canceled) return;
-      if (!rootResult.success) return;
+      const metadataPromise = loadCollectionMeta(rootNodeId)
+        .then((meta) => {
+          if (canceled) return null;
+          setCollectionName(meta.name);
+          setCollectionTag(meta.tag);
+          setCollectionTagIds(meta.tagIds);
+          setCollectionSn(meta.sn);
+          setViewMetaBase(meta.viewMeta);
+          return meta.preferredCoverNodeId;
+        })
+        .catch((error) => {
+          if (canceled) return null;
+          runtimeLogger.warn('加载 ASMR 元信息失败，已回退默认展示:', error);
+          setCollectionName(fallbackTitle);
+          setCollectionTag('');
+          setCollectionTagIds([]);
+          setCollectionSn('');
+          setViewMetaBase({});
+          return null;
+        });
+      const [initialRestoreSource, rootResult] = await Promise.all([
+        waitForInitialRestore(),
+        loadDirectory(rootNodeId, rootPath),
+      ]);
+      if (canceled || !rootResult.success) return;
+      const pendingRestore = pendingSessionRestoreRef.current;
+      const restorePath = pendingRestore?.pathStack[0]?.id === rootNodeId
+        ? pendingRestore.pathStack
+        : rootPath;
       const rootChildren = rootResult.items;
+      if (initialRestoreSource === 'blocked') {
+        hasLoadedListRef.current = true;
+        const preferredCoverNodeId = await metadataPromise;
+        if (canceled) return;
+        await resolveCover(rootChildren, preferredCoverNodeId);
+        return;
+      }
       let restoredItems = rootChildren;
       let restoredPath = rootPath;
       for (const desiredSegment of restorePath.slice(1)) {
@@ -728,12 +759,22 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
           setCurrentAudioSrc(playerSrcRef.current);
         }
       }
+      const preferredCoverNodeId = await metadataPromise;
+      if (canceled) return;
       await resolveCover(rootChildren, preferredCoverNodeId);
     })();
     return () => {
       canceled = true;
     };
-  }, [fallbackTitle, libraryId, loadCollectionMeta, loadDirectory, resolveCover, rootNodeId]);
+  }, [
+    fallbackTitle,
+    libraryId,
+    loadCollectionMeta,
+    loadDirectory,
+    resolveCover,
+    rootNodeId,
+    waitForInitialRestore,
+  ]);
 
   useEffect(() => {
     if (currentAudioId === null) {

@@ -37,6 +37,7 @@ import type {
   SystemWorkspaceView,
 } from '@/features/system-workspace'
 import { disposeLibraryWorkspace } from '@/features/workspace-resource-release'
+import { useViewerAccountScope } from '@/features/file-viewer/session'
 
 type MenuState = {
   visible: boolean
@@ -54,6 +55,7 @@ type LibrarySystemView = Extract<SystemWorkspaceView, 'settings' | 'profile' | '
 const LibraryPage: React.FC = () => {
   const navigate = useNavigate()
   const { user, isLoggedIn } = useAuth()
+  const viewerAccountScope = useViewerAccountScope()
   const displayName = isLoggedIn ? user?.nickname || user?.username || 'User' : '未登录'
   const mediaEntries = useMediaEntries()
   const {
@@ -249,15 +251,24 @@ const LibraryPage: React.FC = () => {
     library: Pick<Library, 'id' | 'name'>,
     options?: { showToast?: boolean },
   ) => {
-    const result = await disposeLibraryWorkspace(library.id)
+    const result = await disposeLibraryWorkspace(library.id, {
+      accountScope: viewerAccountScope,
+    })
     if (options?.showToast) {
+      const incompleteReasons: string[] = []
       if (result.failedBrowserTabIds.length > 0) {
-        Toast.warning(`已清空「${library.name}」的工作区状态，但有 ${result.failedBrowserTabIds.length} 个浏览器视图未确认关闭`)
+        incompleteReasons.push(`${result.failedBrowserTabIds.length} 个浏览器视图未确认关闭`)
+      }
+      if (result.viewerSessionCleanupFailed) {
+        incompleteReasons.push('设备阅读现场未确认清除')
+      }
+      if (incompleteReasons.length > 0) {
+        Toast.warning(`已清空「${library.name}」的工作区状态，但${incompleteReasons.join('，')}`)
         return
       }
       Toast.success(`已释放「${library.name}」的工作区资源`)
     }
-  }, [])
+  }, [viewerAccountScope])
 
   const doReleaseWorkspace = () => {
     const library = menu.library

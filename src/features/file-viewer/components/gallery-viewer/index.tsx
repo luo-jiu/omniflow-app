@@ -38,6 +38,11 @@ import {
   parkGlobalVideoElement,
 } from '@/features/file-viewer/services/global-video-elements';
 import { floatingVideoService } from '@/features/file-viewer/services/floating-video.service';
+import {
+  FLOATING_VIDEO_RETENTION_PIP_MASK,
+  FLOATING_VIDEO_RETENTION_PLAYING_MASK,
+  readOwnedFloatingVideoRetentionPinMask,
+} from '@/features/file-viewer/services/floating-video-retention';
 import { isLibraryWorkspaceRoute } from '@/features/file-viewer/utils/media-route';
 import { buildFileFullName } from '@/utils/fileTreeSettings';
 import { runtimeLogger } from '@/utils/runtimeLogger';
@@ -647,11 +652,22 @@ const GalleryViewer: React.FC<GalleryViewerProps> = ({
     restore: restoreGallerySnapshot,
     suspend: () => undefined,
     resume: () => undefined,
-    estimateCost: () => GALLERY_VIEWER_SESSION_ESTIMATED_BYTES,
-    getPinReasons: () => (activeRef.current ? ['active'] : []),
-  }), [captureGallerySnapshot, restoreGallerySnapshot]);
+    estimateSnapshotBytes: () => GALLERY_VIEWER_SESSION_ESTIMATED_BYTES,
+    getPinReasons: () => {
+      const reasons: Array<'active' | 'playing' | 'pip'> = [];
+      if (activeRef.current) reasons.push('active');
+      const pinMask = readOwnedFloatingVideoRetentionPinMask(
+        floatingVideoService.getState(),
+        tabId,
+        libraryId,
+      );
+      if (pinMask & FLOATING_VIDEO_RETENTION_PLAYING_MASK) reasons.push('playing');
+      if (pinMask & FLOATING_VIDEO_RETENTION_PIP_MASK) reasons.push('pip');
+      return reasons;
+    },
+  }), [captureGallerySnapshot, libraryId, restoreGallerySnapshot, tabId]);
 
-  useViewerSession({
+  const { notifyRetentionChanged } = useViewerSession({
     accountScope,
     active,
     adapter: sessionAdapter,
@@ -663,6 +679,20 @@ const GalleryViewer: React.FC<GalleryViewerProps> = ({
     tabId,
     viewerKind: 'gallery',
   });
+
+  useEffect(() => {
+    let pinMask = readOwnedFloatingVideoRetentionPinMask(
+      floatingVideoService.getState(),
+      tabId,
+      libraryId,
+    );
+    return floatingVideoService.subscribe((state) => {
+      const nextPinMask = readOwnedFloatingVideoRetentionPinMask(state, tabId, libraryId);
+      if (nextPinMask === pinMask) return;
+      pinMask = nextPinMask;
+      notifyRetentionChanged();
+    });
+  }, [libraryId, notifyRetentionChanged, tabId]);
 
   const isPreviewGenerationCurrent = useCallback((generation: number) => {
     return mountedRef.current && previewGenerationRef.current === generation;

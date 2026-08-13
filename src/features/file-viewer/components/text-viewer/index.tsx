@@ -136,6 +136,8 @@ const TextViewer: React.FC<TextViewerProps> = ({
   const pendingContentRef = useRef<string | null>(null);
   const pendingSessionHydrationRef = useRef(false);
   const pendingSessionSnapshotRef = useRef<TextViewerSessionSnapshot | null>(null);
+  const notifyRetentionChangedRef = useRef<() => boolean>(() => false);
+  const retentionPinnedRef = useRef(false);
   const restoreFrameRef = useRef<number | null>(null);
   const sessionCaptureFrameRef = useRef<number | null>(null);
   const wordWrapRef = useRef(false);
@@ -154,10 +156,23 @@ const TextViewer: React.FC<TextViewerProps> = ({
   const resourceIdentityRef = useRef(resourceIdentity);
   resourceIdentityRef.current = resourceIdentity;
 
+  const syncRetentionPin = useCallback(() => {
+    const nextPinned = isDirtyRef.current && !draftPersistedRef.current;
+    if (nextPinned === retentionPinnedRef.current) return;
+    retentionPinnedRef.current = nextPinned;
+    notifyRetentionChangedRef.current();
+  }, []);
+
+  const setDraftPersistedState = useCallback((persisted: boolean) => {
+    draftPersistedRef.current = persisted;
+    syncRetentionPin();
+  }, [syncRetentionPin]);
+
   const setDirtyState = useCallback((dirty: boolean) => {
     isDirtyRef.current = dirty;
+    syncRetentionPin();
     if (isAliveRef.current) setIsDirty(dirty);
-  }, []);
+  }, [syncRetentionPin]);
 
   const setEditorContent = useCallback((value: string, dirty: boolean) => {
     pendingContentRef.current = value;
@@ -174,12 +189,12 @@ const TextViewer: React.FC<TextViewerProps> = ({
 
   const reportDraftFailure = useCallback((error: unknown) => {
     runtimeLogger.error('文本草稿写入失败:', error);
-    draftPersistedRef.current = false;
+    setDraftPersistedState(false);
     if (isAliveRef.current && !draftErrorShownRef.current) {
       draftErrorShownRef.current = true;
       Toast.error('草稿无法持久化，请及时保存文件');
     }
-  }, []);
+  }, [setDraftPersistedState]);
 
   const flushDraft = useCallback(async () => {
     clearDraftTimer();
@@ -197,7 +212,7 @@ const TextViewer: React.FC<TextViewerProps> = ({
         writeGeneration: draftWriteGenerationRef.current,
       });
       if (generation === editGenerationRef.current) {
-        draftPersistedRef.current = true;
+        setDraftPersistedState(true);
         draftErrorShownRef.current = false;
       }
       return true;
@@ -208,7 +223,7 @@ const TextViewer: React.FC<TextViewerProps> = ({
       reportDraftFailure(error);
       return false;
     }
-  }, [clearDraftTimer, reportDraftFailure]);
+  }, [clearDraftTimer, reportDraftFailure, setDraftPersistedState]);
 
   const scheduleDraftFlush = useCallback(() => {
     clearDraftTimer();
@@ -314,13 +329,16 @@ const TextViewer: React.FC<TextViewerProps> = ({
     restore: restoreTextSessionSnapshot,
     suspend: () => undefined,
     resume: () => undefined,
-    estimateCost: () => TEXT_VIEWER_SESSION_ESTIMATED_BYTES,
+    estimateSnapshotBytes: () => TEXT_VIEWER_SESSION_ESTIMATED_BYTES,
     getPinReasons: () => (
       isDirtyRef.current && !draftPersistedRef.current ? ['dirty'] : []
     ),
   }), [captureTextSessionSnapshot, restoreTextSessionSnapshot]);
 
-  const { capture: captureSessionSnapshot } = useViewerSession({
+  const {
+    capture: captureSessionSnapshot,
+    notifyRetentionChanged,
+  } = useViewerSession({
     accountScope,
     active,
     adapter: sessionAdapter,
@@ -332,6 +350,7 @@ const TextViewer: React.FC<TextViewerProps> = ({
     tabId,
     viewerKind: 'text',
   });
+  notifyRetentionChangedRef.current = notifyRetentionChanged;
 
   const scheduleSessionCapture = useCallback(() => {
     if (sessionCaptureFrameRef.current != null) return;
@@ -388,7 +407,7 @@ const TextViewer: React.FC<TextViewerProps> = ({
           ? viewerDraftStore.getWriteGeneration(resourceIdentity)
           : null;
         setEditorContent(remoteContent, false);
-        draftPersistedRef.current = true;
+        setDraftPersistedState(true);
         draftErrorShownRef.current = false;
 
         if (!resourceIdentity || !currentDraftKey || !remoteRevision) return;
@@ -423,7 +442,14 @@ const TextViewer: React.FC<TextViewerProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [contentRevision, reloadToken, resourceIdentity, setEditorContent, url]);
+  }, [
+    contentRevision,
+    reloadToken,
+    resourceIdentity,
+    setDraftPersistedState,
+    setEditorContent,
+    url,
+  ]);
 
   useEffect(() => {
     if (pendingSessionHydrationRef.current) {
@@ -507,11 +533,11 @@ const TextViewer: React.FC<TextViewerProps> = ({
       const editedDuringSave = saveGeneration !== editGenerationRef.current;
       let followUpDraftPersisted = true;
       if (editedDuringSave) {
-        draftPersistedRef.current = false;
+        setDraftPersistedState(false);
         followUpDraftPersisted = await flushDraft();
       } else {
         setDirtyState(false);
-        draftPersistedRef.current = true;
+        setDraftPersistedState(true);
         draftErrorShownRef.current = false;
       }
       refreshDirectoryInTree(detail.parentId);
@@ -558,6 +584,7 @@ const TextViewer: React.FC<TextViewerProps> = ({
     nodeId,
     reloadToken,
     scheduleDraftFlush,
+    setDraftPersistedState,
     setDirtyState,
     tabId,
     updateFileTabResource,
@@ -592,10 +619,10 @@ const TextViewer: React.FC<TextViewerProps> = ({
     draftKeyRef.current = draftRecovery.draft.key;
     editGenerationRef.current += 1;
     setEditorContent(draftRecovery.draft.content, true);
-    draftPersistedRef.current = true;
+    setDraftPersistedState(true);
     draftErrorShownRef.current = false;
     setDraftRecovery(null);
-  }, [draftRecovery, setEditorContent]);
+  }, [draftRecovery, setDraftPersistedState, setEditorContent]);
 
   const handleDiscardDraft = useCallback(async () => {
     if (!draftRecovery || !resourceIdentity) return;
@@ -603,14 +630,14 @@ const TextViewer: React.FC<TextViewerProps> = ({
       await viewerDraftStore.deleteDraft(resourceIdentity);
       draftKeyRef.current = createViewerDraftKey(resourceIdentity, draftRecovery.remoteRevision);
       setEditorContent(draftRecovery.remoteContent, false);
-      draftPersistedRef.current = true;
+      setDraftPersistedState(true);
       draftErrorShownRef.current = false;
       setDraftRecovery(null);
     } catch (error) {
       runtimeLogger.error('放弃文本草稿失败:', error);
       Toast.error('草稿删除失败，请重试');
     }
-  }, [draftRecovery, resourceIdentity, setEditorContent]);
+  }, [draftRecovery, resourceIdentity, setDraftPersistedState, setEditorContent]);
 
   const handleSaveRef = useRef(handleSave);
   handleSaveRef.current = handleSave;
@@ -727,9 +754,9 @@ const TextViewer: React.FC<TextViewerProps> = ({
     setContent(value);
     editGenerationRef.current += 1;
     setDirtyState(true);
-    draftPersistedRef.current = false;
+    setDraftPersistedState(false);
     scheduleDraftFlush();
-  }, [scheduleDraftFlush, setDirtyState]);
+  }, [scheduleDraftFlush, setDirtyState, setDraftPersistedState]);
 
   if (!active && content === null) return null;
 

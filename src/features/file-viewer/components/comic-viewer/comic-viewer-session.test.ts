@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { parseComicViewerSessionSnapshot } from './comic-viewer-session';
+import {
+  estimateComicViewerHotCostUnits,
+  parseComicViewerSessionSnapshot,
+} from './comic-viewer-session';
 
 const validSnapshot = {
   anchorPageId: 33,
@@ -36,5 +39,19 @@ describe('Comic viewer session snapshot', () => {
       pages: [{ id: 33, url: 'signed-image-url' }],
       visibleCount: 50,
     })).toEqual(validSnapshot);
+  });
+});
+
+describe('Comic viewer Hot cost', () => {
+  it('keeps flip mode at the heavy baseline', () => {
+    expect(estimateComicViewerHotCostUnits('flip', 500)).toBe(4);
+  });
+
+  it('increases scroll-mode cost by retained image buckets with a safe cap', () => {
+    expect(estimateComicViewerHotCostUnits('scroll', 0)).toBe(4);
+    expect(estimateComicViewerHotCostUnits('scroll', 12)).toBe(4);
+    expect(estimateComicViewerHotCostUnits('scroll', 13)).toBe(5);
+    expect(estimateComicViewerHotCostUnits('scroll', 37)).toBe(7);
+    expect(estimateComicViewerHotCostUnits('scroll', 500)).toBe(8);
   });
 });

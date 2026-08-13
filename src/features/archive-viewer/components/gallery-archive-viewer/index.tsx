@@ -218,7 +218,7 @@ const GalleryArchiveViewer: React.FC<GalleryArchiveViewerProps> = ({
     restore: restoreArchiveSnapshot,
     suspend: () => undefined,
     resume: () => undefined,
-    estimateCost: () => GALLERY_ARCHIVE_VIEWER_SESSION_ESTIMATED_BYTES,
+    estimateSnapshotBytes: () => GALLERY_ARCHIVE_VIEWER_SESSION_ESTIMATED_BYTES,
     getPinReasons: () => (activeRef.current ? ['active'] : []),
   }), [captureArchiveSnapshot, restoreArchiveSnapshot]);
 
@@ -327,8 +327,12 @@ const GalleryArchiveViewer: React.FC<GalleryArchiveViewerProps> = ({
                 });
                 result.deletedNodeIds.forEach(closeTabByNodeId);
                 setCards(prev => prev.filter(item => item.id !== card.id));
-                if (result.draftCleanupFailed || result.subtreeCollectionFailed) {
-                  Toast.warning('已移入回收站，但本地文本草稿可能未完整清理');
+                if (
+                  result.draftCleanupFailed
+                  || result.viewerSessionCleanupFailed
+                  || result.subtreeCollectionFailed
+                ) {
+                  Toast.warning('已移入回收站，但本地恢复数据可能未完整清理');
                 } else {
                   Toast.success('已移入回收站');
                 }

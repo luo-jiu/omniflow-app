@@ -372,7 +372,7 @@ const PdfViewer: React.FC<PdfViewerProps> = ({
     restore: restorePdfSnapshot,
     suspend: () => undefined,
     resume: () => undefined,
-    estimateCost: () => PDF_VIEWER_SESSION_ESTIMATED_BYTES,
+    estimateSnapshotBytes: () => PDF_VIEWER_SESSION_ESTIMATED_BYTES,
     getPinReasons: () => (activeRef.current ? ['active'] : []),
   }), [capturePdfSnapshot, restorePdfSnapshot]);
 

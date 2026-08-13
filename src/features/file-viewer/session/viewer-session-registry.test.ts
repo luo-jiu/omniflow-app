@@ -36,20 +36,25 @@ function snapshot(identity: ViewerResourceKey, page: number, contentRevision: st
 }
 
 function liveRegistration(options: {
+  capture?: ViewerSessionAdapter<{ page: number }>['capture'];
+  estimateHotCostUnits?: ViewerSessionAdapter<{ page: number }>['estimateHotCostUnits'];
+  estimateSnapshotBytes?: ViewerSessionAdapter<{ page: number }>['estimateSnapshotBytes'];
   generation: number;
   identity: ViewerResourceKey;
   payload: { page: number };
   suspend?: ReturnType<typeof vi.fn>;
   tabId?: string;
+  getPinReasons?: ViewerSessionAdapter<{ page: number }>['getPinReasons'];
 }): ViewerLiveRegistration<{ page: number }> {
   const suspend = options.suspend ?? vi.fn();
   const adapter: ViewerSessionAdapter<{ page: number }> = {
-    capture: () => options.payload,
+    capture: options.capture ?? (() => options.payload),
     restore: vi.fn(),
     suspend,
     resume: vi.fn(),
-    estimateCost: () => 256,
-    getPinReasons: () => [],
+    estimateHotCostUnits: options.estimateHotCostUnits,
+    estimateSnapshotBytes: options.estimateSnapshotBytes ?? (() => 256),
+    getPinReasons: options.getPinReasons ?? (() => []),
   };
   return {
     key: createViewerLiveInstanceKey({
@@ -193,6 +198,194 @@ describe('ViewerSessionRegistry warm snapshots', () => {
 });
 
 describe('ViewerSessionRegistry live generations', () => {
+  it('publishes retention revisions for current live lifecycle changes', () => {
+    const registry = new ViewerSessionRegistry();
+    const revisions: number[] = [];
+    const firstRegistration = liveRegistration({
+      generation: 0,
+      identity: resource({ nodeId: 10, viewerKind: 'pdf' }),
+      payload: { page: 10 },
+      tabId: 'tab-pdf',
+    });
+    const nextRegistration = liveRegistration({
+      generation: 1,
+      identity: resource({ nodeId: 10, viewerKind: 'pdf' }),
+      payload: { page: 11 },
+      tabId: 'tab-pdf',
+    });
+    const unsubscribe = registry.subscribeRetention(() => {
+      revisions.push(registry.getRetentionRevision());
+    });
+
+    const unregisterFirst = registry.registerLiveInstance(firstRegistration);
+    const unregisterNext = registry.registerLiveInstance(nextRegistration);
+    expect(registry.notifyLiveRetentionChanged(firstRegistration.key)).toBe(false);
+    expect(registry.notifyLiveRetentionChanged(nextRegistration.key)).toBe(true);
+    unregisterFirst();
+    unregisterNext();
+    unsubscribe();
+
+    expect(revisions).toEqual([1, 2, 3, 4, 5]);
+  });
+
+  it('publishes one retention edge when a live viewer first becomes restorable', () => {
+    const registry = new ViewerSessionRegistry();
+    const registration = liveRegistration({
+      generation: 0,
+      identity: resource({ nodeId: 11, viewerKind: 'pdf' }),
+      payload: { page: 11 },
+      tabId: 'tab-pdf',
+    });
+    registry.registerLiveInstance(registration);
+    const revisionAfterRegistration = registry.getRetentionRevision();
+
+    registry.captureLiveInstance(registration.key);
+    const revisionAfterFirstSnapshot = registry.getRetentionRevision();
+    registry.captureLiveInstance(registration.key);
+
+    expect(revisionAfterFirstSnapshot).toBe(revisionAfterRegistration + 1);
+    expect(registry.getRetentionRevision()).toBe(revisionAfterFirstSnapshot);
+  });
+
+  it('projects current pin reasons without exposing adapter failures as evictable state', () => {
+    const registry = new ViewerSessionRegistry();
+    registry.registerLiveInstance(liveRegistration({
+      generation: 0,
+      identity: resource({ nodeId: 1, viewerKind: 'text' }),
+    payload: { page: 1 },
+    tabId: 'tab-text',
+    estimateHotCostUnits: () => 3.5,
+    getPinReasons: () => ['dirty', 'dirty'],
+    }));
+    registry.registerLiveInstance(liveRegistration({
+      generation: 0,
+      identity: resource({ nodeId: 2, viewerKind: 'video' }),
+    payload: { page: 2 },
+    tabId: 'tab-video',
+    estimateHotCostUnits: () => {
+      throw new Error('cost projection failed');
+    },
+      getPinReasons: () => {
+        throw new Error('projection failed');
+      },
+    }));
+
+    expect(registry.getLiveRetentionProjections()).toEqual([
+      {
+        libraryId: 1,
+        tabId: 'tab-text',
+        viewerKind: 'text',
+        hotCostUnits: 3.5,
+        pinReasons: ['dirty'],
+        pinProjectionReliable: true,
+      },
+      {
+        libraryId: 1,
+        tabId: 'tab-video',
+        viewerKind: 'video',
+        hotCostUnits: null,
+        pinReasons: [],
+        pinProjectionReliable: false,
+      },
+    ]);
+  });
+
+  it('rechecks live pins immediately before Hot eviction capture', () => {
+    const registry = new ViewerSessionRegistry();
+    const getPinReasons = vi.fn()
+      .mockReturnValueOnce([])
+      .mockReturnValue(['dirty']);
+    registry.registerLiveInstance(liveRegistration({
+      generation: 0,
+      identity: resource({ nodeId: 3, viewerKind: 'text' }),
+      payload: { page: 3 },
+      tabId: 'tab-text',
+      getPinReasons,
+    }));
+
+    expect(registry.getLiveRetentionProjections()[0]).toMatchObject({
+      pinReasons: [],
+      pinProjectionReliable: true,
+    });
+    expect(registry.prepareLiveInstanceForHotEviction({
+      libraryId: 1,
+      tabId: 'tab-text',
+      viewerKind: 'text',
+    })).toEqual({
+      status: 'blocked',
+      reason: 'pinned',
+      pinReasons: ['dirty'],
+    });
+    expect(registry.getState().snapshotCount).toBe(0);
+  });
+
+  it('allows Hot eviction only after the captured snapshot remains restorable', () => {
+    const registry = new ViewerSessionRegistry({ now: () => 700 });
+    const identity = resource({ nodeId: 4, viewerKind: 'pdf' });
+    registry.registerLiveInstance(liveRegistration({
+      generation: 0,
+      identity,
+      payload: { page: 14 },
+      tabId: 'tab-pdf',
+    }));
+
+    expect(registry.prepareLiveInstanceForHotEviction({
+      libraryId: 1,
+      tabId: 'tab-pdf',
+      viewerKind: 'pdf',
+    })).toEqual({ status: 'captured' });
+    expect(registry.readSnapshot<{ page: number }>(identity)).toMatchObject({
+      savedAt: 700,
+      payload: { page: 14 },
+    });
+  });
+
+  it('blocks Hot eviction when capture fails or the Warm budget drops the new snapshot', () => {
+    const failedRegistry = new ViewerSessionRegistry();
+    failedRegistry.registerLiveInstance(liveRegistration({
+      generation: 0,
+      identity: resource({ nodeId: 5, viewerKind: 'pdf' }),
+      payload: { page: 5 },
+      tabId: 'tab-failed',
+      capture: () => {
+        throw new Error('capture failed');
+      },
+    }));
+    expect(failedRegistry.prepareLiveInstanceForHotEviction({
+      libraryId: 1,
+      tabId: 'tab-failed',
+      viewerKind: 'pdf',
+    })).toMatchObject({ status: 'blocked', reason: 'capture-failed' });
+
+    const emptyRegistry = new ViewerSessionRegistry();
+    emptyRegistry.registerLiveInstance(liveRegistration({
+      generation: 0,
+      identity: resource({ nodeId: 7, viewerKind: 'pdf' }),
+      payload: { page: 7 },
+      tabId: 'tab-empty',
+      capture: () => null,
+    }));
+    expect(emptyRegistry.prepareLiveInstanceForHotEviction({
+      libraryId: 1,
+      tabId: 'tab-empty',
+      viewerKind: 'pdf',
+    })).toMatchObject({ status: 'blocked', reason: 'capture-empty' });
+
+    const constrainedRegistry = new ViewerSessionRegistry({ maxEstimatedBytes: 1 });
+    constrainedRegistry.registerLiveInstance(liveRegistration({
+      generation: 0,
+      identity: resource({ nodeId: 6, viewerKind: 'pdf' }),
+      payload: { page: 6 },
+      tabId: 'tab-constrained',
+    }));
+    expect(constrainedRegistry.prepareLiveInstanceForHotEviction({
+      libraryId: 1,
+      tabId: 'tab-constrained',
+      viewerKind: 'pdf',
+    })).toMatchObject({ status: 'blocked', reason: 'snapshot-not-retained' });
+    expect(constrainedRegistry.getState().snapshotCount).toBe(0);
+  });
+
   it('does not let an old generation cleanup remove the current adapter', () => {
     const registry = new ViewerSessionRegistry();
     const identity = resource({ nodeId: 1 });

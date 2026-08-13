@@ -1,5 +1,9 @@
 export const COMIC_VIEWER_SESSION_SCHEMA_VERSION = 1;
 export const COMIC_VIEWER_SESSION_ESTIMATED_BYTES = 512;
+export const COMIC_VIEWER_DEFAULT_HOT_COST_UNITS = 4;
+export const COMIC_VIEWER_MAX_HOT_COST_UNITS = 8;
+
+const COMIC_SCROLL_PAGES_PER_EXTRA_HOT_COST_UNIT = 12;
 
 const MAX_SCROLL_TOP = 100_000_000;
 const MAX_PAGE_NUMBER = 10_000_000;
@@ -46,6 +50,24 @@ function readFiniteNumber(value: unknown): number | null {
 function readNodeId(value: unknown): number | null | undefined {
   if (value === null) return null;
   return Number.isSafeInteger(value) && Number(value) > 0 ? Number(value) : undefined;
+}
+
+export function estimateComicViewerHotCostUnits(
+  layoutMode: ComicReaderLayoutMode,
+  retainedPageCount: number,
+): number {
+  if (layoutMode === 'flip') return COMIC_VIEWER_DEFAULT_HOT_COST_UNITS;
+  const normalizedPageCount = Number.isFinite(retainedPageCount)
+    ? Math.max(Math.floor(retainedPageCount), 0)
+    : 0;
+  const extraUnits = Math.floor(
+    Math.max(normalizedPageCount - 1, 0) / COMIC_SCROLL_PAGES_PER_EXTRA_HOT_COST_UNIT,
+  );
+  return clamp(
+    COMIC_VIEWER_DEFAULT_HOT_COST_UNITS + extraUnits,
+    COMIC_VIEWER_DEFAULT_HOT_COST_UNITS,
+    COMIC_VIEWER_MAX_HOT_COST_UNITS,
+  );
 }
 
 export function parseComicViewerSessionSnapshot(value: unknown): ComicViewerSessionSnapshot | null {

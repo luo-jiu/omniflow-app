@@ -196,7 +196,7 @@ const ImageViewer: React.FC<ImageViewerProps> = ({
     restore: restoreImageSnapshot,
     suspend: () => undefined,
     resume: () => undefined,
-    estimateCost: () => IMAGE_VIEWER_SESSION_ESTIMATED_BYTES,
+    estimateSnapshotBytes: () => IMAGE_VIEWER_SESSION_ESTIMATED_BYTES,
     getPinReasons: () => (activeRef.current ? ['active'] : []),
   }), [captureImageSnapshot, restoreImageSnapshot]);
 

@@ -18,7 +18,10 @@ import {
   clearLibraryDetailWorkspaceState,
   loadLibraryDetailWorkspaceState,
 } from '@/features/library-workspace/workspace-state';
-import { viewerSessionRuntime } from '@/features/file-viewer/session';
+import {
+  viewerSessionColdRuntime,
+  viewerSessionRuntime,
+} from '@/features/file-viewer/session';
 import {
   clearAllToolWorkspaceStates,
   clearToolWorkspaceState,
@@ -38,6 +41,11 @@ export {
 export interface DisposeLibraryWorkspaceResult {
   closedBrowserTabCount: number;
   failedBrowserTabIds: string[];
+  viewerSessionCleanupFailed: boolean;
+}
+
+interface DisposeLibraryWorkspaceOptions {
+  accountScope?: string | null;
 }
 
 function workspaceCacheKey(libraryId: number) {
@@ -53,6 +61,7 @@ async function closeEmbeddedBrowserTabs(tabIds: string[]): Promise<DisposeLibrar
     return {
       closedBrowserTabCount: 0,
       failedBrowserTabIds: [],
+      viewerSessionCleanupFailed: false,
     };
   }
   const uniqueTabIds = Array.from(new Set(tabIds.map((tabId) => String(tabId || '').trim()).filter(Boolean)));
@@ -75,15 +84,20 @@ async function closeEmbeddedBrowserTabs(tabIds: string[]): Promise<DisposeLibrar
   return {
     closedBrowserTabCount: uniqueTabIds.length - failedBrowserTabIds.length,
     failedBrowserTabIds,
+    viewerSessionCleanupFailed: false,
   };
 }
 
-export async function disposeLibraryWorkspace(libraryId: number): Promise<DisposeLibraryWorkspaceResult> {
+export async function disposeLibraryWorkspace(
+  libraryId: number,
+  options: DisposeLibraryWorkspaceOptions = {},
+): Promise<DisposeLibraryWorkspaceResult> {
   const normalizedLibraryId = normalizeLibraryId(libraryId);
   if (normalizedLibraryId == null) {
     return {
       closedBrowserTabCount: 0,
       failedBrowserTabIds: [],
+      viewerSessionCleanupFailed: false,
     };
   }
   const endLibraryDisposing = beginLibraryDisposing(normalizedLibraryId);
@@ -97,12 +111,27 @@ export async function disposeLibraryWorkspace(libraryId: number): Promise<Dispos
     globalAudioPlayer.releaseForLibrary(normalizedLibraryId);
     floatingVideoService.releaseForLibrary(normalizedLibraryId);
     viewerSessionRuntime.disposeLibrary(normalizedLibraryId);
+    let viewerSessionCleanupFailed = !options.accountScope;
+    if (options.accountScope) {
+      try {
+        await viewerSessionColdRuntime.deleteLibrary(
+          options.accountScope,
+          normalizedLibraryId,
+        );
+      } catch (error) {
+        viewerSessionCleanupFailed = true;
+        runtimeLogger.warn('delete library viewer Cold snapshots failed', { error });
+      }
+    }
     clearToolWorkspaceState(normalizedLibraryId);
     clearPendingActivationForLibrary(normalizedLibraryId);
     clearRepositoryTreeSnapshot(normalizedLibraryId);
     clearLibraryDetailWorkspaceState(cacheKey);
     clearFileViewerStateCache(cacheKey);
-    return result;
+    return {
+      ...result,
+      viewerSessionCleanupFailed,
+    };
   } finally {
     endLibraryDisposing();
   }

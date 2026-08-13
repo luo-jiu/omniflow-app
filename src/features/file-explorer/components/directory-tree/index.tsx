@@ -1821,6 +1821,7 @@ export default function DirectoryTree({
             result.deletedNodeIds.forEach((nodeId) => deletedNodeIds.add(nodeId));
             draftCleanupFailed = draftCleanupFailed
               || result.draftCleanupFailed
+              || result.viewerSessionCleanupFailed
               || result.subtreeCollectionFailed;
             if (parentId > 0) {
               affectedParentIds.add(parentId);
@@ -1876,7 +1877,7 @@ export default function DirectoryTree({
         }
 
         if (draftCleanupFailed) {
-          Toast.warning('内容已移入回收站，但本地文本草稿可能未完整清理');
+          Toast.warning('内容已移入回收站，但本地恢复数据可能未完整清理');
         } else {
           Toast.success(deleteTargets.length > 1 ? `已移入回收站 ${deleteTargets.length} 项` : '已移入回收站');
         }

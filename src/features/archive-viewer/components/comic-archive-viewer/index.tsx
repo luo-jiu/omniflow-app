@@ -252,8 +252,12 @@ const ComicArchiveViewer: React.FC<ComicArchiveViewerProps> = ({
           result.deletedNodeIds.forEach(closeTabByNodeId);
           setCards(prev => prev.filter(item => item.id !== card.id));
           setTotal(prev => Math.max(prev - 1, 0));
-          if (result.draftCleanupFailed || result.subtreeCollectionFailed) {
-            Toast.warning('已移入回收站，但本地文本草稿可能未完整清理');
+          if (
+            result.draftCleanupFailed
+            || result.viewerSessionCleanupFailed
+            || result.subtreeCollectionFailed
+          ) {
+            Toast.warning('已移入回收站，但本地恢复数据可能未完整清理');
           } else {
             Toast.success('已移入回收站');
           }
@@ -476,11 +480,14 @@ const ComicArchiveViewer: React.FC<ComicArchiveViewerProps> = ({
     restore: restoreSessionSnapshot,
     suspend: () => undefined,
     resume: () => undefined,
-    estimateCost: () => ARCHIVE_CARD_SESSION_ESTIMATED_BYTES,
+    estimateSnapshotBytes: () => ARCHIVE_CARD_SESSION_ESTIMATED_BYTES,
     getPinReasons: () => (activeRef.current ? ['active'] : []),
   }), [captureSessionSnapshot, restoreSessionSnapshot]);
 
-  const { capture: flushSessionSnapshot } = useViewerSession({
+  const {
+    capture: flushSessionSnapshot,
+    waitForInitialRestore,
+  } = useViewerSession({
     accountScope,
     active,
     adapter: sessionAdapter,
@@ -649,10 +656,16 @@ const ComicArchiveViewer: React.FC<ComicArchiveViewerProps> = ({
         const detail = await fetchNodeDetailById(folderNodeId);
         if (requestId !== requestIdRef.current) return;
         viewMetaBaseRef.current = parseViewMetaObject(detail.viewMeta);
+        const initialRestoreSource = await waitForInitialRestore();
+        if (requestId !== requestIdRef.current) return;
         viewMetaBaseReadyRef.current = true;
         const remoteProgress = parseRemoteArchiveProgress(detail.viewMeta);
         if (!remoteProgress) return;
-        if (!hasWarmSessionRestore && !pendingRestoreRef.current) {
+        if (
+          initialRestoreSource === 'none'
+          && !hasWarmSessionRestore
+          && !pendingRestoreRef.current
+        ) {
           pendingRestoreRef.current = remoteProgress;
           setRestoreTick((prev) => prev + 1);
         }
@@ -660,7 +673,7 @@ const ComicArchiveViewer: React.FC<ComicArchiveViewerProps> = ({
         runtimeLogger.warn('读取漫画归档阅读位置失败:', detailError);
       }
     })();
-  }, [folderNodeId, libraryId, loadPage]);
+  }, [folderNodeId, libraryId, loadPage, waitForInitialRestore]);
 
   useEffect(() => {
     if (!active) return;

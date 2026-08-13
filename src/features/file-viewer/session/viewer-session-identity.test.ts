@@ -103,7 +103,7 @@ describe('viewer session identity', () => {
     expect(createDeviceViewerAccountScope('device:01')).toBeNull();
     expect(viewerSessionPolicies.text).toMatchObject({
       warm: 'memory',
-      cold: 'none',
+      cold: 'device',
       closeBehavior: 'retain-reading-position',
       hasDraft: true,
     });
