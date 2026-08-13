@@ -105,6 +105,10 @@ interface Window {
       filePath: string;
       size: number;
     }>;
+    createStagedBinaryFile: (fileName: string, base64: string) => Promise<{
+      filePath: string;
+      size: number;
+    }>;
     createTempImportDirectory: () => Promise<string>;
     getTempImportFileInfo: (filePath: string) => Promise<{
       filePath: string;
@@ -126,8 +130,34 @@ interface Window {
       ok: boolean;
       outputPath?: string;
     }>;
+    prepareImagePreview: (payload: {
+      nodeId?: number;
+      libraryId?: number;
+      url: string;
+      fileName?: string;
+      ext?: string;
+      mimeType?: string;
+      fileSize?: number;
+      sourceVersion?: string;
+    }) => Promise<{
+      ok: boolean;
+      cacheKey?: string;
+      error?: string;
+      metadataRows: Array<{
+        label: string;
+        value: string;
+      }>;
+      originalSize?: number;
+      previewDataUrl?: string;
+      previewPath?: string;
+      previewUrl?: string;
+    }>;
+    onViewerZoomShortcut: (listener: (payload: {
+      action: 'zoom-in' | 'zoom-out' | 'reset';
+    }) => void) => () => void;
     onUploadProgress: (listener: (payload: {
       uploadId: string;
+      partNumber: number;
       uploadedBytes: number;
       totalBytes: number;
       percentage: number;
@@ -156,38 +186,35 @@ interface Window {
       receivedBytes: number;
       truncated: boolean;
     }>;
-    upload: (
+    uploadPresignedPut: (args: {
+      uploadId: string;
+      partNumber: number;
+      presignedUrl: string;
+      filePath: string;
+      byteOffset: number;
+      byteLength: number;
+      contentType?: string;
+    }) => Promise<{
+      status: number;
+      etag: string;
+      body: string;
+    }>;
+    uploadAbort: (uploadId: string) => Promise<boolean>;
+    uploadFormData: (
       url: string,
       filePath: string,
       formDataParams?: Record<string, string>,
-      headers?: Record<string, string>,
-      uploadId?: string
-    ) => Promise<{
-      status: number;
-      body: any;
-    }>;
-    uploadAbort: (uploadId: string) => Promise<boolean>;
-    chunkedUpload: (
-      baseUrl: string,
-      filePath: string,
-      params: {
-        libraryId: number;
-        parentId: number;
-        fileName: string;
-        fileSize: number;
-        conflictPolicy?: string;
-        storageProvider?: string;
-      },
       headers?: Record<string, string>,
       uploadId?: string,
     ) => Promise<{
       status: number;
       body: any;
     }>;
-    chunkedUploadAbort: (uploadId: string) => Promise<boolean>;
+    uploadFormDataAbort: (uploadId: string) => Promise<boolean>;
   };
 
   electronWindow: {
+    platform: 'darwin' | 'win32' | 'linux' | 'unknown';
     minimize: () => void;
     maximize: () => void;
     close: () => void;
@@ -205,6 +232,61 @@ interface Window {
     resolve: (requestId: string, result: unknown) => void;
     dismiss: (requestId: string, reason?: string) => void;
     reportReady: () => void;
+  };
+
+  electronSystemVideo?: {
+    open: (payload: {
+      src: string;
+      title: string;
+      currentTime: number;
+      duration?: number;
+      isPlaying: boolean;
+      volume: number;
+      muted: boolean;
+    }) => Promise<boolean>;
+    close: () => Promise<boolean>;
+    play: () => Promise<boolean>;
+    pause: () => Promise<boolean>;
+    seek: (time: number) => Promise<boolean>;
+    onState: (listener: (payload: {
+      currentTime: number;
+      duration: number;
+      isPlaying: boolean;
+      volume: number;
+      muted: boolean;
+      ended: boolean;
+    }) => void) => () => void;
+    onClosed: (listener: (payload: {
+      currentTime: number;
+      duration: number;
+      isPlaying: boolean;
+      volume: number;
+      muted: boolean;
+      ended: boolean;
+    } | null) => void) => () => void;
+  };
+
+  electronSystemVideoHost?: {
+    onInit: (listener: (payload: {
+      src: string;
+      title: string;
+      currentTime: number;
+      duration?: number;
+      isPlaying: boolean;
+      volume: number;
+      muted: boolean;
+    }) => void) => () => void;
+    onCommand: (listener: (payload: { type: 'play' } | { type: 'pause' } | { type: 'seek'; time: number }) => void) => () => void;
+    reportReady: () => void;
+    reportState: (payload: {
+      currentTime: number;
+      duration: number;
+      isPlaying: boolean;
+      volume: number;
+      muted: boolean;
+      ended: boolean;
+    }) => void;
+    close: () => void;
   };
 }
 

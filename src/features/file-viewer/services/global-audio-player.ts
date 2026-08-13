@@ -1,8 +1,14 @@
+import { mediaRegistry } from '@/contexts/media-registry.singleton';
+import { type MediaRegistryRegistration } from '@/contexts/media-registry.context';
+
 export interface GlobalAudioPlayerState {
   src: string | null;
   trackName: string | null;
   ownerType: 'default' | 'asmr';
   ownerKey: string | null;
+  tabId: string | null;
+  libraryId: number | null;
+  thumbnailUrl: string | null;
   hasStarted: boolean;
   isPlaying: boolean;
   endedSerial: number;
@@ -16,6 +22,9 @@ type StateListener = (state: GlobalAudioPlayerState) => void;
 
 const MEDIA_SESSION_POSITION_SYNC_MIN_DELTA_SECONDS = 1;
 
+// 单例 entryId：同一时刻最多一条 audio 记录在 MediaHub 中。详见 docs/media-hub-contract.md。
+const AUDIO_REGISTRY_ENTRY_ID = 'audio:active';
+
 class GlobalAudioPlayer {
   private readonly audio: HTMLAudioElement;
   private listeners = new Set<StateListener>();
@@ -23,9 +32,14 @@ class GlobalAudioPlayer {
   private trackName: string | null = null;
   private ownerType: 'default' | 'asmr' = 'default';
   private ownerKey: string | null = null;
+  private tabId: string | null = null;
+  private libraryId: number | null = null;
+  private thumbnailUrl: string | null = null;
   private hasStarted = false;
   private endedSerial = 0;
   private lastMediaSessionPositionSignature = '';
+  private registration: MediaRegistryRegistration | null = null;
+  private registeredTabId: string | null = null;
 
   constructor() {
     this.audio = new Audio();
@@ -60,21 +74,33 @@ class GlobalAudioPlayer {
     options?: {
       ownerType?: 'default' | 'asmr';
       ownerKey?: string | null;
+      tabId?: string | null;
+      libraryId?: number | null;
+      thumbnailUrl?: string | null;
     },
   ) {
     const nextOwnerType = options?.ownerType ?? 'default';
     const nextOwnerKey = options?.ownerKey ?? null;
+    const nextTabId = options?.tabId ?? null;
+    const nextLibraryId = options?.libraryId ?? null;
+    const nextThumbnailUrl = options?.thumbnailUrl ?? null;
     if (this.sourceUrl === url) {
       if (
         trackName !== undefined && trackName !== this.trackName
         || nextOwnerType !== this.ownerType
         || nextOwnerKey !== this.ownerKey
+        || nextTabId !== this.tabId
+        || nextLibraryId !== this.libraryId
+        || nextThumbnailUrl !== this.thumbnailUrl
       ) {
         if (trackName !== undefined) {
           this.trackName = trackName;
         }
         this.ownerType = nextOwnerType;
         this.ownerKey = nextOwnerKey;
+        this.tabId = nextTabId;
+        this.libraryId = nextLibraryId;
+        this.thumbnailUrl = nextThumbnailUrl;
         this.lastMediaSessionPositionSignature = '';
         this.syncMediaSessionMetadata();
         this.emitState();
@@ -85,6 +111,9 @@ class GlobalAudioPlayer {
     this.trackName = trackName ?? null;
     this.ownerType = nextOwnerType;
     this.ownerKey = nextOwnerKey;
+    this.tabId = nextTabId;
+    this.libraryId = nextLibraryId;
+    this.thumbnailUrl = nextThumbnailUrl;
     this.hasStarted = false;
     this.endedSerial = 0;
     this.lastMediaSessionPositionSignature = '';
@@ -92,6 +121,17 @@ class GlobalAudioPlayer {
     this.audio.load();
     this.syncMediaSessionMetadata();
     this.emitState();
+  }
+
+  // 关闭某个 tab 时由 FileViewerContext 调用：若当前播放归属于该 tab，整体释放。
+  releaseForTab(tabId: string) {
+    if (this.tabId !== tabId) return;
+    this.clear();
+  }
+
+  releaseForLibrary(libraryId: number) {
+    if (this.libraryId !== libraryId) return;
+    this.clear();
   }
 
   async play() {
@@ -142,6 +182,9 @@ class GlobalAudioPlayer {
     this.trackName = null;
     this.ownerType = 'default';
     this.ownerKey = null;
+    this.tabId = null;
+    this.libraryId = null;
+    this.thumbnailUrl = null;
     this.hasStarted = false;
     this.clearMediaSession();
     this.emitState();
@@ -153,6 +196,9 @@ class GlobalAudioPlayer {
       trackName: this.trackName,
       ownerType: this.ownerType,
       ownerKey: this.ownerKey,
+      tabId: this.tabId,
+      libraryId: this.libraryId,
+      thumbnailUrl: this.thumbnailUrl,
       hasStarted: this.hasStarted,
       isPlaying: !this.audio.paused,
       endedSerial: this.endedSerial,
@@ -167,7 +213,63 @@ class GlobalAudioPlayer {
     const snapshot = this.getState();
     this.syncMediaSessionPlaybackState(snapshot);
     this.syncMediaSessionPositionState(snapshot);
+    this.syncMediaRegistry(snapshot);
     this.listeners.forEach(listener => listener(snapshot));
+  }
+
+  // 服务层自注册：必须 src + tabId + 已 play 过（hasStarted）才进 MediaHub；clear() 时取消注册。
+  // hasStarted 守门保持和旧 useRegisterMediaEntry({ enabled: hasStartedPlaying }) 一致，并和 video 服务对齐。
+  // 不依赖 React 组件生命周期，避免"关闭归档 tag 后音频仍播但 hub 消失"的旧 bug。
+  private syncMediaRegistry(snapshot: GlobalAudioPlayerState) {
+    if (!snapshot.src || !snapshot.tabId || !snapshot.hasStarted) {
+      if (this.registration) {
+        this.registration.unregister();
+        this.registration = null;
+        this.registeredTabId = null;
+      }
+      return;
+    }
+    // tabId 切换（换源 / 换库）时必须重建注册：MediaRegistry update 不接受 tabId 变更。
+    if (this.registration && this.registeredTabId !== snapshot.tabId) {
+      this.registration.unregister();
+      this.registration = null;
+      this.registeredTabId = null;
+    }
+    const title = snapshot.trackName ?? '音频';
+    const currentTime = Number.isFinite(snapshot.currentTime) && snapshot.currentTime >= 0
+      ? Math.floor(snapshot.currentTime)
+      : 0;
+    const duration = Number.isFinite(snapshot.duration) && snapshot.duration > 0
+      ? Math.floor(snapshot.duration)
+      : undefined;
+    const thumbnailUrl = snapshot.thumbnailUrl ?? undefined;
+    if (!this.registration) {
+      this.registration = mediaRegistry.register({
+        entryId: AUDIO_REGISTRY_ENTRY_ID,
+        kind: 'audio',
+        tabId: snapshot.tabId,
+        libraryId: snapshot.libraryId,
+        title,
+        isPlaying: snapshot.isPlaying,
+        currentTime,
+        duration,
+        thumbnailUrl,
+        play: () => { void this.play().catch(() => {}); },
+        pause: () => this.pause(),
+        seek: (time: number) => this.seekTo(time),
+        dismiss: () => this.clear(),
+      });
+      this.registeredTabId = snapshot.tabId;
+      return;
+    }
+    this.registration.update({
+      title,
+      isPlaying: snapshot.isPlaying,
+      currentTime,
+      duration,
+      thumbnailUrl,
+      libraryId: snapshot.libraryId,
+    });
   }
 
   private get mediaSession() {

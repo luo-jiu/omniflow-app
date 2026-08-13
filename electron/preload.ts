@@ -72,6 +72,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('fs:cleanup-auto-import-staged-file', stagedPath),
   createStagedTextFile: (fileName: string, content: string) =>
     ipcRenderer.invoke('fs:create-staged-text-file', fileName, content),
+  createStagedBinaryFile: (fileName: string, base64: string) =>
+    ipcRenderer.invoke('fs:create-staged-binary-file', fileName, base64),
   createTempImportDirectory: () =>
     ipcRenderer.invoke('fs:create-temp-import-directory'),
   getTempImportFileInfo: (filePath: string) =>
@@ -87,33 +89,49 @@ contextBridge.exposeInMainWorld('electronAPI', {
     operation: 'extract-audio' | 'compress-video';
     outputDirectoryPath?: string;
   }) => ipcRenderer.invoke('media-tool:process-file', payload),
+  prepareImagePreview: (payload: {
+    nodeId?: number;
+    libraryId?: number;
+    url: string;
+    fileName?: string;
+    ext?: string;
+    mimeType?: string;
+    fileSize?: number;
+    sourceVersion?: string;
+  }) => ipcRenderer.invoke('image-preview:prepare', payload),
+  onViewerZoomShortcut: (listener: (payload: { action: 'zoom-in' | 'zoom-out' | 'reset' }) => void) => {
+    const wrapped = (
+      _event: Electron.IpcRendererEvent,
+      payload: { action: 'zoom-in' | 'zoom-out' | 'reset' },
+    ) => {
+      listener(payload);
+    };
+    ipcRenderer.on('app:viewer-zoom-shortcut', wrapped);
+    return () => ipcRenderer.removeListener('app:viewer-zoom-shortcut', wrapped);
+  },
   fetch: (url: string, options?: any) => ipcRenderer.invoke('http:fetch', url, options),
   fetchBinary: (url: string, options?: any) => ipcRenderer.invoke('http:fetch-binary', url, options),
-  upload: (
+  uploadPresignedPut: (args: {
+    uploadId: string;
+    partNumber: number;
+    presignedUrl: string;
+    filePath: string;
+    byteOffset: number;
+    byteLength: number;
+    contentType?: string;
+  }) => ipcRenderer.invoke('http:upload:presigned-put', args),
+  uploadAbort: (uploadId: string) => ipcRenderer.invoke('http:upload:abort', uploadId),
+  uploadFormData: (
     url: string,
     filePath: string,
     formDataParams?: Record<string, string>,
     headers?: Record<string, string>,
     uploadId?: string,
-  ) => ipcRenderer.invoke('http:upload', url, filePath, formDataParams, headers, uploadId),
-  uploadAbort: (uploadId: string) => ipcRenderer.invoke('http:upload:abort', uploadId),
-  chunkedUpload: (
-    baseUrl: string,
-    filePath: string,
-    params: {
-      libraryId: number;
-      parentId: number;
-      fileName: string;
-      fileSize: number;
-      conflictPolicy?: string;
-      storageProvider?: string;
-    },
-    headers?: Record<string, string>,
-    uploadId?: string,
-  ) => ipcRenderer.invoke('http:chunked-upload', baseUrl, filePath, params, headers, uploadId),
-  chunkedUploadAbort: (uploadId: string) => ipcRenderer.invoke('http:chunked-upload:abort', uploadId),
+  ) => ipcRenderer.invoke('http:upload:formdata', url, filePath, formDataParams, headers, uploadId),
+  uploadFormDataAbort: (uploadId: string) => ipcRenderer.invoke('http:upload:formdata:abort', uploadId),
   onUploadProgress: (listener: (payload: {
     uploadId: string;
+    partNumber: number;
     uploadedBytes: number;
     totalBytes: number;
     percentage: number;
@@ -121,6 +139,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   }) => void) => {
     const wrapped = (_event: Electron.IpcRendererEvent, payload: {
       uploadId: string;
+      partNumber: number;
       uploadedBytes: number;
       totalBytes: number;
       percentage: number;
@@ -135,6 +154,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
 // 窗口控制 API
 contextBridge.exposeInMainWorld('electronWindow', {
+  platform: process.platform === 'darwin' || process.platform === 'win32' || process.platform === 'linux'
+    ? process.platform
+    : 'unknown',
   minimize: () => ipcRenderer.send('window-minimize'),
   maximize: () => ipcRenderer.send('window-maximize'),
   close: () => ipcRenderer.send('window-close'),
@@ -167,6 +189,102 @@ contextBridge.exposeInMainWorld('electronOverlayHost', {
   dismiss: (requestId: string, reason?: string) =>
     ipcRenderer.send('overlay:host:dismiss', { requestId, reason }),
   reportReady: () => ipcRenderer.send('overlay:host:ready'),
+});
+
+contextBridge.exposeInMainWorld('electronSystemVideo', {
+  open: (payload: {
+    src: string;
+    title: string;
+    currentTime: number;
+    duration?: number;
+    isPlaying: boolean;
+    volume: number;
+    muted: boolean;
+  }) => ipcRenderer.invoke('system-video-window:open', payload),
+  close: () => ipcRenderer.invoke('system-video-window:close'),
+  play: () => ipcRenderer.invoke('system-video-window:command', { type: 'play' }),
+  pause: () => ipcRenderer.invoke('system-video-window:command', { type: 'pause' }),
+  seek: (time: number) => ipcRenderer.invoke('system-video-window:command', { type: 'seek', time }),
+  onState: (listener: (payload: {
+    currentTime: number;
+    duration: number;
+    isPlaying: boolean;
+    volume: number;
+    muted: boolean;
+    ended: boolean;
+  }) => void) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, payload: {
+      currentTime: number;
+      duration: number;
+      isPlaying: boolean;
+      volume: number;
+      muted: boolean;
+      ended: boolean;
+    }) => listener(payload);
+    ipcRenderer.on('system-video-window:state', wrapped);
+    return () => ipcRenderer.removeListener('system-video-window:state', wrapped);
+  },
+  onClosed: (listener: (payload: {
+    currentTime: number;
+    duration: number;
+    isPlaying: boolean;
+    volume: number;
+    muted: boolean;
+    ended: boolean;
+  } | null) => void) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, payload: {
+      currentTime: number;
+      duration: number;
+      isPlaying: boolean;
+      volume: number;
+      muted: boolean;
+      ended: boolean;
+    } | null) => listener(payload);
+    ipcRenderer.on('system-video-window:closed', wrapped);
+    return () => ipcRenderer.removeListener('system-video-window:closed', wrapped);
+  },
+});
+
+contextBridge.exposeInMainWorld('electronSystemVideoHost', {
+  onInit: (listener: (payload: {
+    src: string;
+    title: string;
+    currentTime: number;
+    duration?: number;
+    isPlaying: boolean;
+    volume: number;
+    muted: boolean;
+  }) => void) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, payload: {
+      src: string;
+      title: string;
+      currentTime: number;
+      duration?: number;
+      isPlaying: boolean;
+      volume: number;
+      muted: boolean;
+    }) => listener(payload);
+    ipcRenderer.on('system-video-window:host:init', wrapped);
+    return () => ipcRenderer.removeListener('system-video-window:host:init', wrapped);
+  },
+  onCommand: (listener: (payload: { type: 'play' } | { type: 'pause' } | { type: 'seek'; time: number }) => void) => {
+    const wrapped = (
+      _event: Electron.IpcRendererEvent,
+      payload: { type: 'play' } | { type: 'pause' } | { type: 'seek'; time: number },
+    ) => listener(payload);
+    ipcRenderer.on('system-video-window:host:command', wrapped);
+    return () => ipcRenderer.removeListener('system-video-window:host:command', wrapped);
+  },
+  reportReady: () => ipcRenderer.send('system-video-window:host:ready'),
+  reportState: (payload: {
+    currentTime: number;
+    duration: number;
+    isPlaying: boolean;
+    volume: number;
+    muted: boolean;
+    ended: boolean;
+  }) => ipcRenderer.send('system-video-window:host:state', payload),
+  close: () => ipcRenderer.send('system-video-window:host:close'),
 });
 
 contextBridge.exposeInMainWorld('electronEmbeddedBrowser', {

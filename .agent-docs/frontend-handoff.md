@@ -1,6 +1,6 @@
 # OmniFlow App 前端交接索引
 
-更新时间：2026-04-15
+更新时间：2026-07-30
 
 适用对象：继续维护 `omniflow-app` 前端、Electron 主进程、IPC、桌面交互和前端文档的开发者或 Coding Agent。
 
@@ -46,11 +46,15 @@
 - 上传中心：`src/modules/upload-center/`
 - Electron preload：`electron/preload.ts`
 - Electron 主进程能力：`electron/service/`
+- Electron 平台策略：`electron/platform/`
+- Renderer 平台入口：`src/platform/`
 
 ## 4. 当前重点专题
 
 - 总体分层、状态 owner、IPC / Electron 边界：
   - `docs/frontend-architecture-baseline.md`
+- macOS / Windows 窗口策略、平台 bridge 和构建验证：
+  - `docs/desktop-platform-architecture.md`
 - Embedded Browser 生命周期、资源捕捉、下载导入：
   - `docs/embedded-browser-architecture.md`
 - `library detail` 工作区模式、browser / file-viewer / search-home 切换：

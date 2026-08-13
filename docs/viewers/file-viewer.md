@@ -1,6 +1,6 @@
 # File Viewer 说明
 
-更新时间：2026-04-16
+更新时间：2026-06-01
 适用范围：`src/features/file-viewer/` 下的普通文件预览能力、viewer 分发和局部辅助能力。
 
 ## 1. 作用
@@ -18,11 +18,15 @@
 - `components/file-dispatcher/`
   - 按 `fileType` 分发 viewer
 - `components/image-viewer/`
+  - 普通图片预览；HEIC / HEIF 通过 `prepareImagePreview` 生成本地 PNG 预览后复用现有缩放、平移、旋转逻辑。
+  - 图片加载后左键按住即可拖拽平移；`Cmd/Ctrl + +/-/0` 只调整当前图片缩放，不触发应用页面缩放。
+  - 支持在当前缩放 / 平移状态下裁剪可见图片区域，并把裁剪结果作为同级副本文件上传；副本命名为“原名 副本 / 原名 副本1 …”，创建后通过节点移动接口排到原图前面。
 - `components/audio-viewer/`
 - `components/video-viewer/`
 - `components/pdf-viewer/`
 - `components/text-viewer/`
 - `components/comic-viewer/`
+- `components/gallery-viewer/`
 - `components/asmr-viewer/`
 - `components/welcome-view/`
 - `services/global-audio-player.ts`
@@ -60,5 +64,6 @@
 - `docs/built-in-type-and-archive-mode.md`
 - `docs/viewers/asmr-viewer.md`
 - `docs/viewers/comic-viewer.md`
+- `docs/viewers/gallery-viewer.md`
 - `docs/viewers/pdf-viewer.md`
 - `docs/viewers/text-viewer.md`

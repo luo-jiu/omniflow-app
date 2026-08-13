@@ -6,6 +6,8 @@ export interface MediaEntry {
   entryId: string;
   kind: MediaKind;
   tabId: string;
+  // 用于跨路由跳转：MediaHub 在非资料库页面打开时，通过 libraryId 决定 navigate 目标。
+  libraryId: number | null;
   title: string;
   isPlaying: boolean;
   currentTime?: number;
@@ -18,6 +20,7 @@ export interface MediaRegistryRegisterInput {
   entryId: string;
   kind: MediaKind;
   tabId: string;
+  libraryId: number | null;
   title: string;
   isPlaying: boolean;
   currentTime?: number;
@@ -38,6 +41,7 @@ export interface MediaRegistryRegistration {
     duration?: number;
     thumbnailUrl?: string;
     previewUrl?: string;
+    libraryId?: number | null;
   }): void;
   unregister(): void;
 }

@@ -10,6 +10,7 @@ import {
   loadToolWorkspaceState,
   saveToolWorkspaceState,
 } from './tool-workspace.state';
+import { isDisposingLibraryWorkspace } from '@/features/workspace-resource-release';
 import ToolWorkspaceSubtitle from './ToolWorkspaceSubtitle';
 import ToolWorkspaceMedia from './ToolWorkspaceMedia';
 import ToolWorkspaceNav from './ToolWorkspaceNav';
@@ -87,6 +88,9 @@ const ToolWorkspace: React.FC<ToolWorkspaceProps> = ({
   }, [libraryId, subtitleTranslation]);
 
   React.useEffect(() => {
+    if (isDisposingLibraryWorkspace(libraryId)) {
+      return;
+    }
     saveToolWorkspaceState(libraryId, workspaceState);
   }, [libraryId, workspaceState]);
 

@@ -4,11 +4,13 @@ import ImageViewer from "../image-viewer";
 import AudioViewer from "../audio-viewer";
 import VideoViewer from "../video-viewer";
 import ComicViewer from "../comic-viewer";
+import GalleryViewer from "../gallery-viewer";
 import PdfViewer from "../pdf-viewer";
 import TextViewer from "../text-viewer";
 import AsmrViewer from "../asmr-viewer";
 import AsmrArchiveViewer from "../../../archive-viewer/components/asmr-archive-viewer";
 import ComicArchiveViewer from "../../../archive-viewer/components/comic-archive-viewer";
+import GalleryArchiveViewer from "../../../archive-viewer/components/gallery-archive-viewer";
 import VideoArchiveViewer from "../../../archive-viewer/components/video-archive-viewer";
 import AudioArchiveViewer from "../../../archive-viewer/components/audio-archive-viewer";
 import styled from 'styled-components';
@@ -21,6 +23,8 @@ import type {
 } from '@/contexts/file-viewer.context';
 
 interface FileDispatcherProps {
+  accountScope: string | null;
+  libraryId: number | null;
   nodeId: number | null;
   fileUrl: string | null;
   fileName: string | null;
@@ -36,6 +40,7 @@ interface FileDispatcherProps {
   loading: boolean;
   active?: boolean;
   reloadToken?: number;
+  contentRevision: string | null;
   tabId: string;
 }
 
@@ -87,6 +92,8 @@ const DispatcherWrapper = styled.div`
  * 根据文件类型渲染对应的查看器 Feature
  */
 const FileDispatcher: React.FC<FileDispatcherProps> = ({
+  accountScope,
+  libraryId,
   nodeId,
   fileUrl,
   fileName,
@@ -102,6 +109,7 @@ const FileDispatcher: React.FC<FileDispatcherProps> = ({
   loading,
   active = true,
   reloadToken = 0,
+  contentRevision,
   tabId,
 }) => {
   if (loading) {
@@ -118,7 +126,19 @@ const FileDispatcher: React.FC<FileDispatcherProps> = ({
 
   switch (fileType) {
     case 'image':
-      return <ImageViewer url={fileUrl} fileName={fileName} active={active} />;
+      return (
+        <ImageViewer
+          accountScope={accountScope}
+          active={active}
+          contentRevision={contentRevision}
+          fileName={fileName}
+          libraryId={libraryId}
+          nodeId={nodeId}
+          reloadToken={reloadToken}
+          tabId={tabId}
+          url={fileUrl}
+        />
+      );
     
     case 'audio':
       return (
@@ -139,6 +159,9 @@ const FileDispatcher: React.FC<FileDispatcherProps> = ({
     case 'video':
       return (
         <VideoViewer
+          accountScope={accountScope}
+          contentRevision={contentRevision}
+          libraryId={libraryId}
           nodeId={nodeId}
           url={fileUrl}
           fileName={fileName}
@@ -148,46 +171,158 @@ const FileDispatcher: React.FC<FileDispatcherProps> = ({
           subtitleSources={videoSubtitleSources}
           playlist={videoPlaylist}
           autoPlay={videoAutoPlay}
-        />
-      );
-
-    case 'pdf':
-      return <PdfViewer nodeId={nodeId} url={fileUrl} fileName={fileName} active={active} reloadToken={reloadToken} />;
-
-    case 'text':
-      return <TextViewer nodeId={nodeId} url={fileUrl} fileName={fileName} active={active} reloadToken={reloadToken} />;
-
-    case 'comic':
-      return <ComicViewer folderNodeId={nodeId} fileUrl={fileUrl} fileName={fileName} active={active} reloadToken={reloadToken} />;
-
-    case 'asmr':
-      return <AsmrViewer folderNodeId={nodeId} fileUrl={fileUrl} fileName={fileName} active={active} reloadToken={reloadToken} tabId={tabId} />;
-
-    case 'asmr_archive':
-      return <AsmrArchiveViewer folderNodeId={nodeId} fileUrl={fileUrl} fileName={fileName} active={active} />;
-
-    case 'comic_archive':
-      return (
-        <ComicArchiveViewer
-          folderNodeId={nodeId}
-          fileUrl={fileUrl}
-          fileName={fileName}
-          active={active}
           reloadToken={reloadToken}
         />
       );
 
+    case 'pdf':
+      return (
+        <PdfViewer
+          accountScope={accountScope}
+          active={active}
+          contentRevision={contentRevision}
+          fileName={fileName}
+          libraryId={libraryId}
+          nodeId={nodeId}
+          reloadToken={reloadToken}
+          tabId={tabId}
+          url={fileUrl}
+        />
+      );
+
+    case 'text':
+      return (
+        <TextViewer
+          accountScope={accountScope}
+          active={active}
+          contentRevision={contentRevision}
+          fileName={fileName}
+          libraryId={libraryId}
+          nodeId={nodeId}
+          reloadToken={reloadToken}
+          tabId={tabId}
+          url={fileUrl}
+        />
+      );
+
+    case 'comic':
+      return (
+        <ComicViewer
+          accountScope={accountScope}
+          active={active}
+          contentRevision={contentRevision}
+          fileName={fileName}
+          fileUrl={fileUrl}
+          folderNodeId={nodeId}
+          libraryId={libraryId}
+          reloadToken={reloadToken}
+          tabId={tabId}
+        />
+      );
+
+    case 'gallery':
+      return (
+        <GalleryViewer
+          accountScope={accountScope}
+          active={active}
+          contentRevision={contentRevision}
+          fileName={fileName}
+          folderNodeId={nodeId}
+          libraryId={libraryId}
+          reloadToken={reloadToken}
+          tabId={tabId}
+        />
+      );
+
+    case 'asmr':
+      return (
+        <AsmrViewer
+          accountScope={accountScope}
+          active={active}
+          contentRevision={contentRevision}
+          fileName={fileName}
+          fileUrl={fileUrl}
+          folderNodeId={nodeId}
+          libraryId={libraryId}
+          reloadToken={reloadToken}
+          tabId={tabId}
+        />
+      );
+
+    case 'asmr_archive':
+      return (
+        <AsmrArchiveViewer
+          accountScope={accountScope}
+          active={active}
+          contentRevision={contentRevision}
+          fileName={fileName}
+          fileUrl={fileUrl}
+          folderNodeId={nodeId}
+          libraryId={libraryId}
+          reloadToken={reloadToken}
+          tabId={tabId}
+        />
+      );
+
+    case 'comic_archive':
+      return (
+        <ComicArchiveViewer
+          accountScope={accountScope}
+          contentRevision={contentRevision}
+          folderNodeId={nodeId}
+          fileUrl={fileUrl}
+          fileName={fileName}
+          libraryId={libraryId}
+          active={active}
+          reloadToken={reloadToken}
+          returnTarget={returnTarget}
+          tabId={tabId}
+        />
+      );
+
+    case 'gallery_archive':
+      return (
+        <GalleryArchiveViewer
+          accountScope={accountScope}
+          contentRevision={contentRevision}
+          folderNodeId={nodeId}
+          fileUrl={fileUrl}
+          fileName={fileName}
+          libraryId={libraryId}
+          active={active}
+          reloadToken={reloadToken}
+          returnTarget={returnTarget}
+          tabId={tabId}
+        />
+      );
+
     case 'video_archive':
-      return <VideoArchiveViewer folderNodeId={nodeId} fileUrl={fileUrl} fileName={fileName} active={active} />;
+      return (
+        <VideoArchiveViewer
+          accountScope={accountScope}
+          active={active}
+          contentRevision={contentRevision}
+          fileName={fileName}
+          fileUrl={fileUrl}
+          folderNodeId={nodeId}
+          libraryId={libraryId}
+          reloadToken={reloadToken}
+          tabId={tabId}
+        />
+      );
 
     case 'audio_archive':
       return (
         <AudioArchiveViewer
+          accountScope={accountScope}
+          contentRevision={contentRevision}
           folderNodeId={nodeId}
           fileUrl={fileUrl}
           fileName={fileName}
+          libraryId={libraryId}
           active={active}
           tabId={tabId}
+          reloadToken={reloadToken}
         />
       );
 

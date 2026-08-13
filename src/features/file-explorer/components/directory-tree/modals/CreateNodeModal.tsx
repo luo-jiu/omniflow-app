@@ -1,13 +1,19 @@
 import React from 'react';
-import { Input } from '@douyinfe/semi-ui';
+import { Input, Select } from '@douyinfe/semi-ui';
 import styled from 'styled-components';
+import type { OverlayStorageProvider } from '@/service/overlay/types';
 
 interface CreateNodeModalProps {
   visible: boolean;
   type: 'file' | 'dir' | null;
   name: string;
   loading: boolean;
+  defaultProvider?: string;
+  providers?: OverlayStorageProvider[];
+  providerLoading?: boolean;
+  selectedProvider?: string;
   onNameChange: (value: string) => void;
+  onProviderChange?: (value: string) => void;
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -80,6 +86,75 @@ const Panel = styled.div`
     font-size: 13px;
   }
 
+  .create-fields {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .create-field {
+    min-width: 0;
+  }
+
+  .create-field-label {
+    margin-bottom: 5px;
+    color: var(--semi-color-text-2);
+    font-size: 11px;
+    line-height: 1.35;
+  }
+
+  .provider-select {
+    width: 100%;
+  }
+
+  .provider-select.semi-select,
+  .provider-select .semi-select {
+    height: 42px;
+    max-height: 42px !important;
+    overflow: hidden !important;
+  }
+
+  .provider-select .semi-select-selection {
+    height: 42px;
+    min-height: 42px;
+    max-height: 42px;
+    align-items: center;
+    overflow: hidden !important;
+    padding-top: 4px;
+    padding-bottom: 4px;
+  }
+
+  .provider-selected,
+  .provider-option {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .provider-selected-title,
+  .provider-option-title {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--semi-color-text-0);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.3;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .provider-selected-meta,
+  .provider-option-meta {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--semi-color-text-2);
+    font-size: 10px;
+    line-height: 1.3;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   .create-actions {
     display: flex;
     justify-content: flex-end;
@@ -119,11 +194,33 @@ const CreateNodeModal: React.FC<CreateNodeModalProps> = ({
   type,
   name,
   loading,
+  defaultProvider,
+  providers = [],
+  providerLoading,
+  selectedProvider,
   onNameChange,
+  onProviderChange,
   onConfirm,
   onCancel
 }) => {
   const isFolder = type === 'dir';
+  const selectedProviderInfo = providers.find(provider => provider.alias === selectedProvider);
+  const renderSelectedProvider = React.useCallback(() => {
+    if (!selectedProviderInfo) {
+      return selectedProvider || '选择存储位置';
+    }
+    return (
+      <div className="provider-selected">
+        <div className="provider-selected-title">
+          {selectedProviderInfo.label || selectedProviderInfo.alias}
+          {selectedProviderInfo.alias === defaultProvider ? '（默认）' : ''}
+        </div>
+        <div className="provider-selected-meta">
+          {selectedProviderInfo.alias} · {selectedProviderInfo.endpoint} · {selectedProviderInfo.bucket}
+        </div>
+      </div>
+    );
+  }, [defaultProvider, selectedProvider, selectedProviderInfo]);
 
   React.useEffect(() => {
     if (!visible) {
@@ -154,17 +251,54 @@ const CreateNodeModal: React.FC<CreateNodeModalProps> = ({
             ×
           </button>
         </div>
-        <Input
-          placeholder={isFolder ? '请输入文件夹名称' : '请输入文件名称'}
-          value={name}
-          onChange={onNameChange}
-          onKeyDown={e => {
-            if (e.key === 'Enter') {
-              onConfirm();
-            }
-          }}
-          autoFocus
-        />
+        <div className="create-fields">
+          <div className="create-field">
+            <div className="create-field-label">{isFolder ? '文件夹名称' : '文件名称'}</div>
+            <Input
+              placeholder={isFolder ? '请输入文件夹名称' : '请输入文件名称'}
+              value={name}
+              onChange={onNameChange}
+              onKeyDown={e => {
+                if (e.key === 'Enter') {
+                  onConfirm();
+                }
+              }}
+              autoFocus
+            />
+          </div>
+          {!isFolder && (
+            <>
+              <div className="create-field">
+                <div className="create-field-label">存储位置</div>
+                <Select
+                  className="provider-select"
+                  value={selectedProvider}
+                  loading={providerLoading}
+                  disabled={providerLoading || providers.length === 0}
+                  placeholder={providerLoading ? '正在加载存储位置' : '选择存储位置'}
+                  size="small"
+                  dropdownStyle={{ maxHeight: 180, overflowY: 'auto' }}
+                  onChange={(value) => onProviderChange?.(String(value || ''))}
+                  renderSelectedItem={renderSelectedProvider}
+                >
+                  {providers.map((provider) => (
+                    <Select.Option key={provider.alias} value={provider.alias}>
+                      <div className="provider-option">
+                        <div className="provider-option-title">
+                          {provider.label || provider.alias}
+                          {provider.alias === defaultProvider ? '（默认）' : ''}
+                        </div>
+                        <div className="provider-option-meta">
+                          {provider.alias} · {provider.endpoint} · {provider.bucket}
+                        </div>
+                      </div>
+                    </Select.Option>
+                  ))}
+                </Select>
+              </div>
+            </>
+          )}
+        </div>
         <div className="create-actions">
           <button
             className="create-action create-action-secondary"
@@ -177,7 +311,7 @@ const CreateNodeModal: React.FC<CreateNodeModalProps> = ({
           <button
             className="create-action create-action-primary"
             type="button"
-            disabled={loading}
+            disabled={loading || (!isFolder && providerLoading)}
             onClick={onConfirm}
           >
             确定

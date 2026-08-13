@@ -97,10 +97,10 @@ function inferManualMergeRole(resource: EmbeddedBrowserCapturedResource) {
     return 'video' as const;
   }
   const url = String(resource.url || '').toLowerCase();
-  if (/(^|[\/_.-])audio([\/_.-]|$)/.test(url)) {
+  if (/(^|[/_.-])audio([/_.-]|$)/.test(url)) {
     return 'audio' as const;
   }
-  if (/(^|[\/_.-])video([\/_.-]|$)/.test(url)) {
+  if (/(^|[/_.-])video([/_.-]|$)/.test(url)) {
     return 'video' as const;
   }
   return undefined;

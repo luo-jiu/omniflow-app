@@ -1,6 +1,6 @@
 # File Explorer 与 File Viewer 边界说明
 
-更新时间：2026-04-19
+更新时间：2026-08-13
 
 适用范围：`features/file-explorer`、`features/file-viewer`、`contexts/FileViewerContext.tsx`、`views/library/detail/` 中与文件树、文件打开、预览 tab、预览分发和缓存恢复相关的代码。
 
@@ -29,6 +29,8 @@ OmniFlow 当前的文件浏览主链路不是一个模块完成的，而是 3 �
   - `src/features/file-explorer/DirectorySidebar.tsx`
 - 文件树核心 hook
   - `src/features/file-explorer/hooks/useRepositoryTree.ts`
+- 文件类型身份解析
+  - `src/features/file-identity/`
 - 文件预览上下文
   - `src/contexts/FileViewerContext.tsx`
   - `src/contexts/file-viewer.context.ts`
@@ -61,6 +63,10 @@ OmniFlow 当前的文件浏览主链路不是一个模块完成的，而是 3 �
 
 上传确认弹框由主 renderer 先读取 `/v1/storage/providers`，overlay 只展示可序列化后的 provider 摘要。用户在弹框里选择 provider 后，上传任务把 `storageProvider` 透传到后端；未取到 provider 列表时，上传仍可走后端默认分配。
 
+右键新建文件在新建弹框内直接展示创建目录和存储位置，不再额外弹上传确认 overlay。新建文件的首次空内容写入会把用户选择的 `storageProvider` 传给 `PUT /v1/nodes/:nodeId/content`，并显式使用 `text/plain; charset=utf-8`，避免空 `.ts` 文件被后端按后缀推断为 MPEG-TS 视频。
+
+回收站列表会展示文件节点的物理存储位置；目录节点使用后端返回的 `storageLocations` 聚合子树内文件实际分布。前端默认只展示前两个存储位置，更多位置通过行内“更多”按钮展开。
+
 ### 3.2 `useRepositoryTree`
 
 `useRepositoryTree.ts` 当前是文件树真正的 owner，负责：
@@ -71,7 +77,7 @@ OmniFlow 当前的文件浏览主链路不是一个模块完成的，而是 3 �
 - snapshot 恢复与脏重建
 - 懒加载子节点
 - 目录节点和文件节点的树内增删改
-- 文件双击打开时的文件类型判定与回调派发
+- 文件双击打开时的文件类型解析入口与回调派发
 
 它拥有“树结构事实”，不应该顺手拥有文件预览状态。
 
@@ -86,6 +92,7 @@ OmniFlow 当前的文件浏览主链路不是一个模块完成的，而是 3 �
 - 激活 tab、关闭 tab、按 nodeId 关闭 tab
 - 预览 reload token
 - 预览 tab 排序
+- 按 tab id 静默更新现存 tab 的签名 URL / content revision，不改变当前激活 tab
 - 按 cache key 恢复/保存预览状态
 
 它拥有“预览事实”，不拥有目录树数据，也不负责知道某个节点是否还在树中。
@@ -119,7 +126,7 @@ OmniFlow 当前的文件浏览主链路不是一个模块完成的，而是 3 �
 ```text
 DirectoryTree double click
   -> useRepositoryTree.handleDoubleClick()
-    -> getFileLink / resolveFileType
+    -> getFileLink / file-identity resolveFileType
       -> onFileOpen(fileUrl, fileName, fileType, nodeId, options)
         -> page / file viewer context
           -> FileViewerContext.setFileUrl(...)
@@ -130,9 +137,9 @@ DirectoryTree double click
 
 - 文件树负责“把节点变成可打开文件信息”。
 - 文件预览负责“把文件信息放进当前预览状态和 tab”。
-- 文件类型解析当前发生在 `useRepositoryTree`，不是 `FileDispatcher`。
+- 文件类型解析当前由 `src/features/file-identity/` 提供统一 resolver，并由 `useRepositoryTree` 在打开链路中调用，不发生在 `FileDispatcher`。
 
-这意味着如果以后要改“文件类型怎么判”，优先改文件树打开链路，不要往分发器里塞更多判断。
+这意味着如果以后要改“文件类型怎么判”，优先改 `file-identity` 的 resolver 和打开链路传入的上下文，不要往分发器里塞更多判断。
 
 ## 5. 树状态 owner
 
@@ -150,6 +157,7 @@ DirectoryTree double click
 - 正常切页时恢复树快照
 - 标记 dirty 时按展开状态重建树
 - 保留可见展开分支，避免切回来整树折叠
+- 显式释放工作区时，`workspace-resource-release` 会按 `libraryId` 清理目录树 snapshot 和 dirty marker；session release 会全量清理。dispose 期间 `useRepositoryTree` 不再保存 snapshot，避免旧展开状态被写回。
 
 规则：
 
@@ -188,6 +196,18 @@ tab id 的规则：
 - 可以恢复
 - 不能当成长期数据来源
 
+显式释放工作区时，`workspace-resource-release` 是预览缓存清理入口：
+
+- 单库释放按 `accountScope + libraryId` 清 device Cold，再按 `libraryId` 清公共 Viewer Session Registry 和文件预览 tab cache；不依赖 tab cache 仍能枚举到哪些 viewer。
+- session 释放会全量清理公共 registry 和文件预览 tab cache。
+- 所有 Warm-capable viewer 已迁移到公共 registry，旧逐 viewer cache 与 `viewer-snapshot-release.ts` 已删除。
+- registry 在释放资源时会同时移除 live registration；随后 React cleanup 不能把已释放 snapshot 写回。
+- 单库释放缺少账号 scope 或 device Cold 删除失败时，内存工作区仍继续释放，但结果必须标记 Viewer Session 清理不完整并由调用页面提示 warning，不能把残留 Cold 表现成完整成功。
+
+Text dirty draft 属于用户数据，不跟随普通 tab 关闭、资料库释放或退出登录删除。节点软删除、回收站彻底删除和清空回收站统一经过 `features/file-explorer/services/node-deletion.ts`：先尽力确定可识别的子树节点，再执行后端删除，确认成功后按当前账号批量删除 draft、所有 viewer kind 的 Warm/live 状态和 device Cold，并失效旧 writer generation。枚举失败不能阻断本可成功的后端删除；后端删除失败的节点不能提前进入关闭 tab 或本地恢复数据清理路径。回收站后代无法由普通 descendants 接口枚举时，服务会用 `deletedDescendantCount` 识别不完整结果，至少清理已知根节点并明确提示可能未完整清理。
+
+前端释放只清工作区现场。已经同步到后端 `viewMeta` 的阅读 / 播放进度不在这里删除；如果未来要支持“清远端阅读进度”，必须另设用户确认和后端接口。
+
 ## 7. 页面工作区和文件预览的关系
 
 `library detail` 页面负责把文件预览放进更大的工作区容器中。
@@ -211,8 +231,8 @@ tab id 的规则：
 1. `useRepositoryTree.handleDoubleClick`
 原因：这里同时承担文件打开入口、文件类型解析和树节点行为。
 
-2. `FileViewerContext.setFileUrl`
-原因：这里决定同一文件是否复用 tab，以及当前 active tab 如何更新。
+2. `FileViewerContext.setFileUrl` / `updateFileTabResource`
+原因：前者决定同一文件是否复用并激活 tab；后者只允许保存回调更新指定现存 tab，不能创建或激活 tab。两者不能混用。
 
 3. `file-dispatcher`
 原因：它看起来像最适合“顺手加业务判断”的地方，但实际上应该保持纯分发。
@@ -241,8 +261,10 @@ tab id 的规则：
 
 ## 10. 外部拖拽上传命中与高亮规则
 
-目录树对外部文件拖拽上传采用“命中回溯”和“视觉反馈分离”的策略：
+目录树对外部拖拽上传采用“命中回溯”和“视觉反馈分离”的策略：
 
+- 支持来源：本地文件拖拽继续走 `DataTransfer.files`；外部浏览器图片拖拽可从 `text/html` 中的 `<img src>` 或 `text/uri-list` 中的图片 URL 解析，先下载到临时导入目录，再复用上传确认和 UploadManager 队列。
+- 不支持来源：外部浏览器的 `blob:` 图片、需要浏览器登录态 cookie 才能访问的防盗链图片，不保证可下载；失败时只提示错误，不创建空上传任务。
 - 命中回溯：当鼠标位于文件节点（非目录）时，仍允许把落点解析为最近可用父目录，以保持上传便利性。
 - 视觉反馈：只有当鼠标真正悬停在目录节点行上时，才显示目录高亮边框。
 - 非目录节点悬停：即使可回溯到父目录，也不显示父目录高亮，避免用户误判“拖拽偏移”。

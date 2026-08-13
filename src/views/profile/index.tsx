@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import styled, { createGlobalStyle } from 'styled-components';
-import { Avatar, Button, Divider, Input, Modal, Typography, Toast } from '@douyinfe/semi-ui';
-import { IconChevronLeft } from '@douyinfe/semi-icons';
+import { Avatar, Button, Divider, Input, Modal, Toast } from '@douyinfe/semi-ui';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import {
@@ -16,22 +15,14 @@ import { runtimeLogger } from '@/utils/runtimeLogger';
 const ProfileWrapper = styled.div`
   width: 100%;
   height: 100%;
-  padding: 38px 46px;
-  padding-top: 43px;
+  padding: 0;
   color: var(--semi-color-text-0);
-  background: var(--app-bg);
+  background: transparent;
   overflow: auto;
-  -webkit-app-region: drag;
+  -webkit-app-region: no-drag;
 
   & > * {
     -webkit-app-region: no-drag;
-  }
-
-  .profile-header {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin-bottom: 7px;
   }
 
   .profile-content {
@@ -378,25 +369,15 @@ const ProfilePage: React.FC = () => {
   };
 
   const onLogout = () => {
-    logout();
-    navigate('/login');
+    void (async () => {
+      await logout();
+      navigate('/login');
+    })();
   };
 
   return (
     <ProfileWrapper>
       <ProfileModalGlobalStyle />
-      <div className="profile-header">
-        <Button
-          icon={<IconChevronLeft style={{ fontSize: 14 }} />}
-          theme="borderless"
-          onClick={() => navigate(-1)}
-          style={{ padding: '5px', borderRadius: '7px' }}
-        />
-        <Typography.Title heading={2} style={{ fontSize: 23, fontWeight: 700, lineHeight: 1.15, margin: 0 }}>
-          个人资料
-        </Typography.Title>
-      </div>
-
       <div className="profile-content">
         <div className="avatar-area">
           <div className="avatar-trigger" onClick={onPickAvatar} role="button" tabIndex={0}>

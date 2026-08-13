@@ -150,6 +150,10 @@ import {
   cleanupEmbeddedBrowserOpenFile,
   stageEmbeddedBrowserOpenFile,
 } from './embeddedBrowserOpenFile'
+import {
+  handleEmbeddedBrowserInputShortcut,
+  toggleEmbeddedBrowserDevTools,
+} from './embeddedBrowserInputShortcuts'
 
 export function createEmbeddedBrowserMainController(
   options: EmbeddedBrowserMainControllerOptions,
@@ -509,6 +513,31 @@ export function createEmbeddedBrowserMainController(
       return null
     }
     return view
+  }
+
+  function handleActiveViewInputShortcut(input: Electron.Input) {
+    if (!activeEmbeddedBrowserTabId) {
+      return false
+    }
+    const view = getEmbeddedBrowserView(activeEmbeddedBrowserTabId)
+    if (!view) {
+      activeEmbeddedBrowserTabId = null
+      return false
+    }
+    return handleEmbeddedBrowserInputShortcut(view.webContents, input)
+  }
+
+  function toggleActiveViewDevTools() {
+    if (!activeEmbeddedBrowserTabId) {
+      return false
+    }
+    const view = getEmbeddedBrowserView(activeEmbeddedBrowserTabId)
+    if (!view) {
+      activeEmbeddedBrowserTabId = null
+      return false
+    }
+    toggleEmbeddedBrowserDevTools(view.webContents)
+    return true
   }
 
   async function tryInstallEmbeddedBrowserResourceProbe(tabId: string, view: WebContentsView) {
@@ -3059,7 +3088,9 @@ export function createEmbeddedBrowserMainController(
 
   return {
     configureSession,
+    handleActiveViewInputShortcut,
     initializeBridges,
     registerIpcHandlers,
+    toggleActiveViewDevTools,
   }
 }

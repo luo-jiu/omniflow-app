@@ -1,6 +1,6 @@
 # Library Detail 工作区状态说明
 
-更新时间：2026-04-22
+更新时间：2026-06-03
 
 适用范围：`src/views/library/detail/` 页面中的工作区显示模式、浏览器 tab、搜索模式、地址栏、缓存恢复，以及和文件预览/内置浏览器之间的切换逻辑。
 
@@ -14,6 +14,7 @@
 - 搜索主页
 - 内置浏览器
 - 浏览器资源面板和下载导入
+- 系统工作区视图（设置、个人主页、上传中心、回收站等）
 
 因此这页最重要的不是某个局部组件，而是“工作区状态 owner”。  
 当前这份 owner 仍然应该留在页面层，不要拆散到多个 feature 里各自保存一份。
@@ -22,7 +23,9 @@
 
 工作区持久化模型定义在：
 
-- `src/views/library/detail/workspace-state.ts`
+- `src/features/library-workspace/workspace-state.ts`
+
+旧路径 `src/views/library/detail/workspace-state.ts` 只保留 re-export 兼容，不再作为新增调用方的依赖入口。
 
 当前核心字段：
 
@@ -34,14 +37,39 @@
 - `searchMode`
 - `workspaceDisplayMode`
 
-当前 `workspaceDisplayMode` 有 4 种：
+当前 `workspaceDisplayMode` 有 5 种：
 
 - `search-home`
 - `file-viewer`
 - `browser`
 - `tools`
+- `system`
 
 这个模型是页面级 source of truth，不是通用组件状态。
+
+显式释放工作区由 `src/features/workspace-resource-release/` 统一处理：
+
+- 普通离开资料库详情页时继续保存现场。
+- 右键释放仓库、删除仓库成功、后续退出登录 / 401 登录失效等显式 dispose 路径不保存现场。
+- dispose 期间 `library detail` cleanup 会跳过 `saveLibraryDetailWorkspaceState`，避免清理后又写回旧状态。
+
+### 2.1 显式释放范围
+
+工作区释放分两层：
+
+- `disposeLibraryWorkspace(libraryId)`：释放单个资料库的前端工作区现场，用于仓库右键释放和删除仓库成功后的本地清理。
+- `disposeSessionWorkspaces()`：释放当前登录会话内所有前端工作区现场，用于主动退出登录和 401 登录失效。
+
+单库释放会清理目标资料库的 `library detail` workspace cache、文件预览 tab cache、目录树 snapshot / dirty marker、系统工作区临时状态、工具区 workspace state、pending media activation、目标资料库登记过的 embedded browser view，以及命中该 `libraryId` 的 MediaHub 音视频实体。session 释放会对上述前端工作区资源做全量清理，并通过 embedded browser 的 `closeAll()` 兜底关闭所有原生 view。
+
+显式释放不清理以下内容：
+
+- 后端节点、对象存储文件、数据库记录。
+- 已同步到后端 `viewMeta` 的阅读 / 播放进度。
+- 主题、语言、浏览器规则、cookie、密码、外部工具配置等用户偏好或隐私策略另管的数据。
+- 上传中心、迁移中心的历史任务记录。
+
+所有会在卸载 cleanup 中保存现场的模块，都必须在写入前检查 `workspace-resource-release` 的 dispose marker。marker 只用于阻止释放过程中的旧状态回写，释放结束后会在下一轮事件循环移除，普通切页仍应恢复现场。
 
 ## 3. 状态 owner 规则
 
@@ -59,6 +87,7 @@
 - 浏览器设置入口与 settings 标签页显示
 - pending browser file open
 - 送入工具区的媒体处理请求（普通资源 / HLS 计划）
+- 系统工作区当前视图与关闭后返回模式
 
 规则：
 
@@ -152,7 +181,64 @@
 
 - `docs/tools-workspace.md`
 
-### 4.5 主内容头部模式按钮
+### 4.5 `system`
+
+表示当前工作区显示系统视图。第一版用于把设置、个人主页、上传中心、回收站、资源监测等入口放回资料库详情页右侧主内容区，避免全屏覆盖打断目录树、文件 tab、浏览器 tab 和后台媒体播放。
+
+当前规则：
+
+- 系统视图只在 `library detail` 右侧主内容区显示，左侧目录树继续保留。
+- 系统视图按类型唯一；再次打开同一视图时聚焦已有 tab，打开不同系统视图时可以和普通文件 tab 并存在同一条工作区 tab 栏里，且支持和普通文件 tab 混排拖拽。
+- 系统 tab 只和文件 tab 共用视觉容器，不进入 `FileViewerContext`，也不进入浏览器 tab 列表；系统视图状态仍由 `library detail` 页面层持有。
+- 工作区 tab 的视觉顺序由 `library detail` 页面层统一维护；新打开的文件 tab 和系统 tab 都追加到最右侧，不能让文件 tab 与系统 tab 各自按不同默认分组插入。
+- 关闭 system tab 或点击系统视图内部关闭按钮后，优先回到打开前的工作区模式；来源不可用时按现有 fallback 回到文件模式或搜索主页。
+- 第一版不持久化 `systemWorkspaceTabs` / `activeSystemWorkspaceView`；刷新 / 重启后不会自动恢复到设置或上传视图。
+- 切到文件、搜索主页或工具区时，已打开的系统 tab 不会被自动清空；用户需要通过 tab 的 `x` 或视图内部关闭按钮显式关闭。
+- 浏览器模式仍使用浏览器自己的 tab 栏；切回文件 / 系统工作区后，普通文件 tab 和系统 tab 会重新显示在同一条工作区 tab 栏里。
+
+入口规则：
+
+- 资料库详情页左下设置按钮打开 `settings` system view。
+- 资料库详情页右下头像打开 `profile` system view，并跟随目录树宽度停留在侧栏右下角。
+- 上传中心和回收站按钮打开对应 system view；上传复用上传中心任务模块，回收站按当前资料库加载和操作。
+- 资源监测打开 `resource-monitor` system view；资料库详情页会按当前 `libraryId` 展示单资料库物理存储分布快照、资源细分仪表盘和可见 / 回收站 / 孤儿对象占用细分；只读资源探针按 provider / 基础设施级别展示，不按资料库过滤；可显式记录一条历史样本，可跳转到存储设置、迁移任务，且可跳转到当前资料库回收站。
+- 设置页里的标签管理、存储管理、浏览器打开映射是 `settings` tab 内部页面；进入后 tab 仍显示设置，内部返回箭头回到设置首页。
+- 旧 `/settings`、`/profile`、`/upload-center`、`/libraries/:id/recycle-bin` 等路由继续存在，直到新视图稳定后再评估移除。
+
+### 4.5.1 Legacy 全屏页面
+
+旧全屏页面处于兼容状态，不再作为新功能的首选入口。它们保留的目的只是迁移期兼容旧路由、调试路径和少量直接访问场景；后续不要继续在这些页面上扩展新的主要交互。
+
+当前标记为 legacy 的页面：
+
+| 旧路由 / 旧入口 | 当前推荐入口 | 备注 |
+| --- | --- | --- |
+| `/settings` | 资料库详情页 `settings` system tab；仓库页右侧设置视图 | 旧设置页只作兼容。 |
+| `/profile` | 目录树 / 仓库侧栏右下头像打开个人主页视图 | 个人主页内容应保持 workspace-native，不再依赖全屏 shell。 |
+| `/upload-center`、`/transfer-center?tab=upload` | 资料库详情页 `uploads` system tab | 上传任务状态仍归上传中心模块，视图只是新的展示宿主。 |
+| `/libraries/:id/recycle-bin` | 资料库详情页 `recycle-bin` system tab | 回收站必须携带当前 `libraryId`。 |
+| `/settings/tags` | `settings` tab 内部标签管理页 | 从设置、ASMR、视频、音频、漫画等入口进入时都应带上下文落到同一套内容。 |
+| `/settings/storage` | `settings` tab 内部存储管理页 | 后续和物理位置迁移、存储任务联动。 |
+| `/settings/browser-file-mappings` | `settings` tab 内部浏览器打开映射页 | 不再作为独立全屏管理页扩展。 |
+| 资源监测 | 仓库页 / 资料库页 `resource-monitor` system tab | 只读观察入口，不作为存储配置入口。 |
+
+历史问题：
+
+- 全屏路由会让用户离开当前资料库，目录树、当前文件、当前浏览器 tab 的上下文都被遮掉。
+- 路由切换更容易影响视频 / 音频生命周期，过去多次出现打开设置、上传、回收站后媒体被暂停或回退小窗的问题。
+- 上传、回收站、设置、标签等页面各自维护头部、安全区、宽度、缩放和弹框层级，导致同类问题需要反复补丁式修复。
+- Electron BrowserView、弹框、toast、右键菜单和全屏 overlay 的层级关系更难稳定。
+- 仓库页和资源页的系统入口位置不一致，设置、头像、上传、回收站在视觉上来回跳，增加了使用负担。
+
+当前规则：
+
+- 资源页系统任务进入 `library detail` 的 `system` 工作区，使用和普通文件 tab 共用视觉容器的 system tab。
+- 仓库页系统任务进入仓库页右侧系统宿主，标题从“我的库”切到对应视图。
+- 点击目录树 / 仓库侧栏的业务区域时，可以退出当前系统视图回到资源或仓库内容。
+- legacy 路由删除前只保证不破坏旧访问，不再承接新的主路径能力。
+- 等新宿主稳定一个周期后，再统一删除旧 route、旧 shell 和只为全屏页存在的样式补丁。
+
+### 4.6 主内容头部模式按钮
 
 主内容头部按钮只表达页面级工作区模式，不单独创造第二份状态：
 
@@ -161,8 +247,9 @@
 - 归档返回按钮会替代文件按钮位置，但只保留绿色返回箭头，不复用模式按钮的 active 背景。
 - 工具按钮在 `workspaceDisplayMode = tools` 时高亮。
 - 浏览器入口进入浏览器后会被浏览器 tab 栏替代，不做常驻高亮。
+- 系统视图进入后不再单独创建第二条 system tab 栏；同类 tab 唯一，不同系统视图和普通文件 tab 共用工作区 tab 栏，可混排拖拽，也可通过 `x` 关闭当前 tab。
 
-### 4.6 主内容头部右侧：媒体控制中心
+### 4.7 主内容头部右侧：媒体控制中心
 
 工具栏右侧（刷新按钮左侧）的乐符按钮是页面级"媒体控制中心"入口：
 
@@ -223,6 +310,8 @@
 - `window.electronEmbeddedBrowser.activateTab(tabId)`
 
 因此“切换激活 tab”不是只改一个 id，而是一次页面工作区上下文切换。
+
+地址栏焦点不属于工作区状态同步的一部分。激活 tab、后退、前进、刷新或导航事件都不得主动 focus / select 地址栏；只有用户点击地址栏或空白页输入框时才进入编辑。导航期间的 loading URL 只更新 tab 投影，地址栏只在当前 active tab 收到 `ready` 状态时同步最终 URL，避免重定向或临时长 URL 在输入框里闪烁。
 
 ### 5.4 关闭 tab
 

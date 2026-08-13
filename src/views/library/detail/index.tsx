@@ -1,4 +1,5 @@
 import AppMain from "@/components/business/app-main";
+import FileTabsBar, { type FileTabsBarExtraTab } from "@/components/business/app-main/FileTabsBar";
 import {
   DirectorySidebar,
   type DirectorySidebarHandle,
@@ -33,7 +34,7 @@ import {
   IconWrench,
   IconMusic,
 } from "@douyinfe/semi-icons";
-import { Input, Modal, Popover, Select, Toast } from '@douyinfe/semi-ui';
+import { Avatar, Input, Modal, Popover, Select, Toast } from '@douyinfe/semi-ui';
 import ContextMenu, { type ContextMenuItem } from "@/components/ui/context-menu";
 import EmbeddedBrowserPanel, { type EmbeddedBrowserHandle } from "@/features/embedded-browser/components/EmbeddedBrowserPanel";
 import EmbeddedBrowserAutoFillBar from "@/features/embedded-browser/passwords/components/EmbeddedBrowserAutoFillBar";
@@ -80,18 +81,26 @@ import { getFileLink } from '@/features/file-explorer/services/file.api';
 import { resolveBrowserFileMapping } from '@/features/browser-file-mappings/services/browser-file-mapping.api';
 import { getAppPopupContainer } from '@/utils/popup-container';
 import { useAuth } from '@/hooks/useAuth';
-import SearchWorkspace, { type SearchWorkspaceMode } from "./SearchWorkspace";
+import SearchWorkspace from "./SearchWorkspace";
 import BrowserSettingsWorkspace, { type BrowserSettingsSection } from './BrowserSettingsWorkspace';
 import ToolWorkspace from "@/features/tool-workspace";
+import SystemWorkspace, {
+  type SystemWorkspaceReturnMode,
+  type SystemWorkspaceView,
+} from "@/features/system-workspace";
+import { systemWorkspaceMeta } from "@/features/system-workspace/registry";
+import { isDisposingLibraryWorkspace } from "@/features/workspace-resource-release";
 import {
   loadLibraryDetailWorkspaceState,
   saveLibraryDetailWorkspaceState,
   type BrowserTab,
   type LibraryDetailWorkspaceState,
+  type SearchWorkspaceMode,
   type WorkspaceDisplayMode,
-} from "./workspace-state";
+} from "@/features/library-workspace/workspace-state";
 import type { FileViewerFileType } from '@/shared/file-viewer-types';
 import type { FileViewerOpenOptions } from '@/contexts/file-viewer.context';
+import { resolveFileViewerReturnOptions } from '@/contexts/file-viewer-return-target';
 import {
   BOOKMARK_TOOLBAR_HORIZONTAL_PADDING,
   MAX_BROWSER_RESOURCE_PANEL_WIDTH,
@@ -171,7 +180,17 @@ type BookmarkEditDraft = {
 
 const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) => {
   const { user } = useAuth();
-  const { setFileUrl, tabs, activeTabId, fileState, reloadActiveTab, activateTab } = useFileViewer();
+  const displayName = user?.nickname || user?.username || '未登录';
+  const {
+    setFileUrl,
+    tabs,
+    activeTabId,
+    fileState,
+    reloadActiveTab,
+    activateTab,
+    closeTab,
+    reorderTabs,
+  } = useFileViewer();
   const mediaEntries = useMediaEntries();
   const mediaRegistry = useMediaRegistry();
   const navigate = useNavigate();
@@ -261,10 +280,13 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   const [selectedTreeNode, setSelectedTreeNode] = React.useState<SelectedTreeNode | null>(null);
   const [treeRootNodeId, setTreeRootNodeId] = React.useState<number | null>(null);
   const [workspaceDisplayMode, setWorkspaceDisplayMode] = React.useState<WorkspaceDisplayMode>(initialWorkspaceState.workspaceDisplayMode);
+  const [systemWorkspaceTabs, setSystemWorkspaceTabs] = React.useState<SystemWorkspaceView[]>([]);
+  const [activeSystemWorkspaceView, setActiveSystemWorkspaceView] = React.useState<SystemWorkspaceView | null>(null);
+  const [systemWorkspaceReturnMode, setSystemWorkspaceReturnMode] = React.useState<SystemWorkspaceReturnMode>('search-home');
+  const [workspaceTabOrder, setWorkspaceTabOrder] = React.useState<string[]>([]);
   const [mediaProcessingRequest, setMediaProcessingRequest] = React.useState<ToolWorkspaceMediaRequest | null>(null);
   const [libraryMediaProcessingRequest, setLibraryMediaProcessingRequest] = React.useState<ToolWorkspaceLibraryMediaRequest | null>(null);
   const [videoWideModeActive, setVideoWideModeActive] = React.useState(false);
-  const browserInputRef = React.useRef<HTMLInputElement | null>(null);
   const latestWorkspaceStateRef = React.useRef<LibraryDetailWorkspaceState>(initialWorkspaceState);
   const latestPanelWidthRef = React.useRef<number>(sidePanelWidth);
   const sidePanelCollapsedRef = React.useRef<boolean>(sidePanelCollapsed);
@@ -632,6 +654,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   const showBackToArchive = (
     (fileState.fileType === 'asmr' && archiveReturnTarget?.fileType === 'asmr_archive')
     || (fileState.fileType === 'comic' && archiveReturnTarget?.fileType === 'comic_archive')
+    || (fileState.fileType === 'comic_archive' && archiveReturnTarget?.fileType === 'comic_archive')
     || (fileState.fileType === 'video' && archiveReturnTarget?.fileType === 'video_archive')
     || (fileState.fileType === 'video_archive' && archiveReturnTarget?.fileType === 'video_archive')
     || (fileState.fileType === 'audio' && archiveReturnTarget?.fileType === 'audio_archive')
@@ -641,20 +664,12 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
     if (!archiveReturnTarget) {
       return;
     }
-    const targetTab = tabs.find(tab => (
-      (archiveReturnTarget.nodeId !== null && archiveReturnTarget.nodeId !== undefined)
-        ? tab.nodeId === archiveReturnTarget.nodeId
-        : tab.fileUrl === archiveReturnTarget.fileUrl
-    ));
     setFileUrl(
       archiveReturnTarget.fileUrl,
       archiveReturnTarget.fileName,
       archiveReturnTarget.fileType,
       archiveReturnTarget.nodeId,
-      {
-        tabTypeLabel: archiveReturnTarget.tabTypeLabel ?? null,
-        returnTarget: targetTab?.returnTarget ?? null,
-      },
+      resolveFileViewerReturnOptions(archiveReturnTarget, tabs),
     );
   }, [archiveReturnTarget, setFileUrl, tabs]);
 
@@ -1318,13 +1333,6 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
     }));
   }, [applyBrowserTabUpdate, faviconCacheOwnerKey]);
 
-  const syncBrowserInputWithTab = React.useCallback((tabId: string | null, nextUrl: string) => {
-    if (!tabId || tabId !== activeBrowserTabId) {
-      return;
-    }
-    setBrowserInput(nextUrl);
-  }, [activeBrowserTabId]);
-
   const createAndActivateBrowserTab = React.useCallback(() => {
     const next = createEmptyBrowserTab();
     setBrowserTabs((prev) => [...prev, next.tab]);
@@ -1367,7 +1375,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
       setWorkspaceDisplayMode('file-viewer');
       return;
     }
-    showSearchHome('files');
+    showSearchHome();
   }, [activeTabId, showSearchHome]);
 
   const openToolsWorkspace = React.useCallback(() => {
@@ -1375,6 +1383,177 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
     setWorkspaceDisplayMode('tools');
     void window.electronEmbeddedBrowser.deactivate();
   }, []);
+
+  const openSystemWorkspace = React.useCallback((view: SystemWorkspaceView) => {
+    setSystemWorkspaceReturnMode((currentReturnMode) => {
+      if (workspaceDisplayMode === 'system') {
+        return currentReturnMode;
+      }
+      return workspaceDisplayMode;
+    });
+    setSystemWorkspaceTabs((currentTabs) => (
+      currentTabs.includes(view) ? currentTabs : [...currentTabs, view]
+    ));
+    setActiveSystemWorkspaceView(view);
+    setBrowserModeOpen(false);
+    setWorkspaceDisplayMode('system');
+    void window.electronEmbeddedBrowser.deactivate();
+  }, [workspaceDisplayMode]);
+
+  const activateWorkspaceFileTab = React.useCallback((tabId: string) => {
+    activateTab(tabId);
+    setBrowserModeOpen(false);
+    setWorkspaceDisplayMode('file-viewer');
+    void window.electronEmbeddedBrowser.deactivate();
+  }, [activateTab]);
+
+  const activateSystemWorkspaceTab = React.useCallback((view: SystemWorkspaceView) => {
+    setSystemWorkspaceReturnMode((currentReturnMode) => {
+      if (workspaceDisplayMode === 'system') {
+        return currentReturnMode;
+      }
+      return workspaceDisplayMode;
+    });
+    setActiveSystemWorkspaceView(view);
+    setBrowserModeOpen(false);
+    setWorkspaceDisplayMode('system');
+    void window.electronEmbeddedBrowser.deactivate();
+  }, [workspaceDisplayMode]);
+
+  const restoreAfterSystemWorkspaceClose = React.useCallback(() => {
+    if (systemWorkspaceReturnMode === 'browser' && browserTabs.length > 0) {
+      openEmbeddedBrowser();
+      return;
+    }
+    if (systemWorkspaceReturnMode === 'tools') {
+      setBrowserModeOpen(false);
+      setWorkspaceDisplayMode('tools');
+      void window.electronEmbeddedBrowser.deactivate();
+      return;
+    }
+    if (systemWorkspaceReturnMode === 'file-viewer' && activeTabId) {
+      openFileWorkspace();
+      return;
+    }
+    showSearchHome();
+  }, [
+    activeTabId,
+    browserTabs.length,
+    openEmbeddedBrowser,
+    openFileWorkspace,
+    showSearchHome,
+    systemWorkspaceReturnMode,
+  ]);
+
+  const closeSystemWorkspaceView = React.useCallback((view?: SystemWorkspaceView) => {
+    const targetView = view ?? activeSystemWorkspaceView;
+    if (!targetView) {
+      setSystemWorkspaceTabs([]);
+      setActiveSystemWorkspaceView(null);
+      if (workspaceDisplayMode === 'system') {
+        restoreAfterSystemWorkspaceClose();
+      }
+      return;
+    }
+
+    const currentTabs = systemWorkspaceTabs;
+    const targetIndex = currentTabs.indexOf(targetView);
+    const nextTabs = currentTabs.filter(tab => tab !== targetView);
+
+    setSystemWorkspaceTabs(nextTabs);
+    if (nextTabs.length > 0) {
+      setActiveSystemWorkspaceView((currentActiveView) => {
+        if (currentActiveView && currentActiveView !== targetView && nextTabs.includes(currentActiveView)) {
+          return currentActiveView;
+        }
+        return nextTabs[Math.min(Math.max(targetIndex, 0), nextTabs.length - 1)];
+      });
+      return;
+    }
+
+    setActiveSystemWorkspaceView(null);
+    if (workspaceDisplayMode === 'system') {
+      restoreAfterSystemWorkspaceClose();
+    }
+  }, [
+    activeSystemWorkspaceView,
+    restoreAfterSystemWorkspaceClose,
+    systemWorkspaceTabs,
+    workspaceDisplayMode,
+  ]);
+
+  const closeSystemWorkspace = React.useCallback(() => {
+    closeSystemWorkspaceView();
+  }, [closeSystemWorkspaceView]);
+
+  const systemWorkspaceTabItems = React.useMemo<FileTabsBarExtraTab[]>(() => (
+    systemWorkspaceTabs.map((view) => {
+      const meta = systemWorkspaceMeta[view];
+      return {
+        id: `system:${view}`,
+        title: meta.title,
+        active: workspaceDisplayMode === 'system' && activeSystemWorkspaceView === view,
+        onActivate: () => activateSystemWorkspaceTab(view),
+        onClose: () => closeSystemWorkspaceView(view),
+      };
+    })
+  ), [
+    activateSystemWorkspaceTab,
+    activeSystemWorkspaceView,
+    closeSystemWorkspaceView,
+    systemWorkspaceTabs,
+    workspaceDisplayMode,
+  ]);
+
+  const workspaceTabIds = React.useMemo(() => [
+    ...tabs.map(tab => tab.id),
+    ...systemWorkspaceTabs.map(view => `system:${view}`),
+  ], [systemWorkspaceTabs, tabs]);
+
+  React.useLayoutEffect(() => {
+    setWorkspaceTabOrder((currentOrder) => {
+      const validIds = new Set(workspaceTabIds);
+      const normalizedOrder = [
+        ...currentOrder.filter(id => validIds.has(id)),
+        ...workspaceTabIds.filter(id => !currentOrder.includes(id)),
+      ];
+      if (
+        normalizedOrder.length === currentOrder.length
+        && normalizedOrder.every((id, index) => id === currentOrder[index])
+      ) {
+        return currentOrder;
+      }
+      return normalizedOrder;
+    });
+  }, [workspaceTabIds]);
+
+  const reorderWorkspaceTabItems = React.useCallback((
+    draggedItemId: string,
+    targetItemId: string,
+    position: 'before' | 'after',
+  ) => {
+    setWorkspaceTabOrder((currentOrder) => {
+      const validIds = new Set(workspaceTabIds);
+      const orderedIds = [
+        ...currentOrder.filter(id => validIds.has(id)),
+        ...workspaceTabIds.filter(id => !currentOrder.includes(id)),
+      ];
+      if (!validIds.has(draggedItemId) || !validIds.has(targetItemId) || draggedItemId === targetItemId) {
+        return orderedIds;
+      }
+      const withoutDragged = orderedIds.filter(id => id !== draggedItemId);
+      const targetIndex = withoutDragged.indexOf(targetItemId);
+      if (targetIndex < 0) {
+        return orderedIds;
+      }
+      withoutDragged.splice(position === 'after' ? targetIndex + 1 : targetIndex, 0, draggedItemId);
+      return withoutDragged;
+    });
+  }, [workspaceTabIds]);
+
+  const openLegacySystemRoute = React.useCallback((route: string) => {
+    navigate(route);
+  }, [navigate]);
 
   const openMediaProcessingWorkspace = React.useCallback((resources: EmbeddedBrowserCapturedResource[]) => {
     if (!resources.length) {
@@ -1989,18 +2168,6 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   }, [bookmarkContextMenu]);
 
   React.useEffect(() => {
-    if (!browserModeOpen) {
-      return;
-    }
-    if (!activeBrowserTab?.url) {
-      return;
-    }
-    window.requestAnimationFrame(() => {
-      browserInputRef.current?.focus();
-    });
-  }, [activeBrowserTab, browserModeOpen]);
-
-  React.useEffect(() => {
     if (!browserModeOpen || !activeBrowserTabId) {
       previousActiveBrowserTabIdRef.current = activeBrowserTabId;
       previousBrowserTabCountRef.current = browserTabs.length;
@@ -2063,10 +2230,18 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
       clearBrowserTabDragState();
       clearBookmarkDragState();
       clearBookmarkMenuDragState();
-      saveLibraryDetailWorkspaceState(workspaceCacheKey, latestWorkspaceStateRef.current);
+      if (!isDisposingLibraryWorkspace(libraryId)) {
+        saveLibraryDetailWorkspaceState(workspaceCacheKey, latestWorkspaceStateRef.current);
+      }
       void window.electronEmbeddedBrowser.deactivate();
     };
-  }, [clearBookmarkDragState, clearBookmarkMenuDragState, clearBrowserTabDragState, workspaceCacheKey]);
+  }, [
+    clearBookmarkDragState,
+    clearBookmarkMenuDragState,
+    clearBrowserTabDragState,
+    libraryId,
+    workspaceCacheKey,
+  ]);
 
   const visibleBookmarks = bookmarks.slice(0, Math.min(visibleBookmarkCount, bookmarks.length));
   const overflowBookmarks = bookmarks.slice(visibleBookmarks.length);
@@ -2349,24 +2524,41 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
             </button>
             <button
               className="footer-btn"
-              onClick={() => navigate("/upload-center")}
+              onClick={() => openSystemWorkspace('uploads')}
               title="上传中心"
             >
               <IconUpload />
             </button>
             <button
               className="footer-btn"
-              onClick={() => navigate(`/libraries/${libraryId}/recycle-bin`)}
+              onClick={() => openSystemWorkspace('recycle-bin')}
               title="回收站"
             >
               <IconDelete />
             </button>
             <button
               className="footer-btn"
-              onClick={() => navigate("/settings")}
+              onClick={() => openSystemWorkspace('settings')}
               title="设置"
             >
               <IconSetting />
+            </button>
+          </div>
+          <div className="footer-right">
+            <button
+              className="footer-btn footer-avatar-btn"
+              onClick={() => openSystemWorkspace('profile')}
+              title={displayName}
+            >
+              <Avatar
+                size="extra-extra-small"
+                src={user?.avatar}
+                style={{
+                  backgroundColor: user ? 'var(--app-accent)' : 'var(--semi-color-fill-2)',
+                }}
+              >
+                {displayName?.[0]?.toUpperCase() || '未'}
+              </Avatar>
             </button>
           </div>
         </SidePanelFooter>
@@ -2586,13 +2778,25 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
                 className="toolbar-action-btn"
                 onClick={handleToolbarRefresh}
                 title="刷新当前标签页"
-                disabled={!activeTabId || workspaceDisplayMode === 'tools'}
+                disabled={!activeTabId || workspaceDisplayMode === 'tools' || workspaceDisplayMode === 'system'}
               >
                 <IconRefresh />
               </button>
             )}
           </div>
         </ContentToolbar>
+        {!browserModeOpen ? (
+          <FileTabsBar
+            tabs={tabs}
+            activeTabId={workspaceDisplayMode === 'file-viewer' ? activeTabId : null}
+            extraTabs={systemWorkspaceTabItems}
+            itemOrder={workspaceTabOrder}
+            onActivate={activateWorkspaceFileTab}
+            onClose={closeTab}
+            onItemReorder={reorderWorkspaceTabItems}
+            onReorder={reorderTabs}
+          />
+        ) : null}
         {browserModeOpen && !activeBrowserTabIsSettings ? (
           <>
             <ContentToolbar className="browser-url-toolbar">
@@ -2627,7 +2831,6 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
               <div className="toolbar-spacer">
                 <form className="toolbar-browser-form" onSubmit={handleBrowserSubmit}>
                   <input
-                    ref={browserInputRef}
                     className="toolbar-browser-input"
                     value={browserInput}
                     onChange={(event) => setBrowserInput(event.target.value)}
@@ -2725,7 +2928,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
             className={`workspace-pane ${workspaceDisplayMode === 'file-viewer' ? 'active' : 'inactive'}`}
             aria-hidden={workspaceDisplayMode !== 'file-viewer'}
           >
-            <AppMain hideTabsBar={false} workspaceActive={workspaceDisplayMode === 'file-viewer'} />
+            <AppMain hideTabsBar workspaceActive={workspaceDisplayMode === 'file-viewer'} />
           </div>
           {workspaceDisplayMode === 'browser' ? (
             <div className="workspace-pane active">
@@ -2754,17 +2957,6 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
                         clearPendingBrowserFileOpen(tabId);
                       }}
                       suspendNativeView={Boolean(activeBrowserDownload)}
-                      onUrlChange={(nextUrl) => {
-                        if (!activeBrowserTabId) {
-                          return;
-                        }
-                        applyBrowserTabUpdate(activeBrowserTabId, (tab) => ({
-                          ...tab,
-                          url: nextUrl,
-                          title: tab.title || nextUrl,
-                        }));
-                        syncBrowserInputWithTab(activeBrowserTabId, nextUrl);
-                      }}
                       onStateChange={(payload) => {
                         if (!payload.tabId) {
                           return;
@@ -2773,7 +2965,11 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
                           ...payload,
                           tabId: payload.tabId,
                         });
-                        if (payload.tabId === activeBrowserTabId && payload.url) {
+                        if (
+                          payload.tabId === activeBrowserTabId
+                          && payload.state === 'ready'
+                          && payload.url
+                        ) {
                           setBrowserInput(payload.url);
                         }
                       }}
@@ -2824,6 +3020,16 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
                 )}
                 rootNodeId={treeRootNodeId}
                 selectedTreeNode={selectedTreeNode}
+              />
+            </div>
+          ) : workspaceDisplayMode === 'system' ? (
+            <div className="workspace-pane active">
+              <SystemWorkspace
+                activeView={activeSystemWorkspaceView}
+                libraryId={libraryId}
+                onClose={closeSystemWorkspace}
+                onOpenLegacyRoute={openLegacySystemRoute}
+                onOpenView={openSystemWorkspace}
               />
             </div>
           ) : null}
@@ -2975,7 +3181,7 @@ const LibraryDetail: React.FC = () => {
   const cacheKey = `library:${id}`;
 
   return (
-    <FileViewerProvider key={cacheKey} cacheKey={cacheKey}>
+    <FileViewerProvider key={cacheKey} cacheKey={cacheKey} libraryId={Number.isFinite(libraryId) && libraryId > 0 ? libraryId : null}>
       <MediaRegistryProvider>
         <LibraryDetailContent key={id} libraryId={libraryId} />
       </MediaRegistryProvider>

@@ -10,7 +10,7 @@ export interface VideoSubtitleSourceNode {
   sort_order?: number;
 }
 
-const VIDEO_SUBTITLE_EXTENSIONS = new Set(['lrc', 'srt', 'vtt', 'ass', 'ssa']);
+const VIDEO_SUBTITLE_EXTENSIONS = new Set(['lrc', 'srt', 'vtt', 'ass', 'ssa', 'qrc']);
 
 export function normalizeVideoSubtitleExtension(ext?: string): string {
   return String(ext || '').trim().toLowerCase().replace(/^\./, '');
@@ -22,7 +22,11 @@ export function getVideoSubtitleNodeSortOrder(item: VideoSubtitleSourceNode): nu
 }
 
 export function isVideoSubtitleSourceNode(item: VideoSubtitleSourceNode): boolean {
-  return item.type === 'file' && VIDEO_SUBTITLE_EXTENSIONS.has(normalizeVideoSubtitleExtension(item.ext));
+  if (item.type !== 'file') return false;
+  const ext = normalizeVideoSubtitleExtension(item.ext);
+  if (VIDEO_SUBTITLE_EXTENSIONS.has(ext)) return true;
+  const fullName = buildFileFullName(String(item.name || ''), item.ext).toLowerCase();
+  return ext === 'xml' && fullName.endsWith('.qrc.xml');
 }
 
 function compareVideoSubtitleSourceNodes(

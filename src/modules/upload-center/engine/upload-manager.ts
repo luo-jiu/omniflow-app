@@ -3,6 +3,7 @@ import {
   enqueueUploadTasks,
   getUploadTaskSummary,
   getUploadTasks,
+  removeUploadTasks,
   UploadTaskStoreState,
   createUploadTaskStoreState,
 } from '../model/upload-task.store';
@@ -50,6 +51,12 @@ export type UploadManagerEvent =
     batchId: string;
     summary: ReturnType<typeof getUploadTaskSummary>;
     results: UploadResult[];
+  }
+  | {
+    type: 'records';
+    reason: 'REMOVE' | 'CLEAR';
+    removedTaskIds: string[];
+    summary: ReturnType<typeof getUploadTaskSummary>;
   };
 
 export interface UploadBatchOptions {
@@ -145,6 +152,32 @@ export class UploadManager {
 
   getState() {
     return this.state;
+  }
+
+  canRemoveTaskRecord(taskId: string): boolean {
+    const task = this.getTask(taskId);
+    return Boolean(task && this.isRemovableTaskRecord(task));
+  }
+
+  removeTaskRecord(taskId: string): boolean {
+    const task = this.getTask(taskId);
+    if (!task || !this.isRemovableTaskRecord(task)) {
+      return false;
+    }
+
+    this.removeTaskRecords([taskId], 'REMOVE');
+    return true;
+  }
+
+  clearTaskRecords(taskIds?: string[]): number {
+    const allowedTaskIds = new Set(taskIds);
+    const removedTaskIds = this.getTasks()
+      .filter((task) => (taskIds ? allowedTaskIds.has(task.id) : true))
+      .filter((task) => this.isRemovableTaskRecord(task))
+      .map((task) => task.id);
+
+    this.removeTaskRecords(removedTaskIds, 'CLEAR');
+    return removedTaskIds.length;
   }
 
   createBatch(tasks: UploadTaskInput[], options?: UploadBatchOptions): UploadBatchHandle {
@@ -313,9 +346,14 @@ export class UploadManager {
     this.runningTaskIds.add(taskId);
     this.applyTaskEvent(taskId, { type: 'PROGRESS', uploadedBytes: 0, speedBps: 0 });
 
+    // 滑动窗口速率估算：多分片并发时单个 progress 事件之间的 deltaTimeMs 可能 < 1ms，
+    // 直接用单点除法会得到 GB/s 级别的伪峰值。改成 ≥ 1.5s 跨度的窗口取均值，并丢弃不足 250ms 的样本。
+    const SPEED_WINDOW_MIN_MS = 1500;
+    const SPEED_SAMPLE_MIN_MS = 250;
+    const SPEED_WINDOW_MAX_MS = 4000;
     const startedAt = now();
-    let previousBytes = 0;
-    let previousAt = startedAt;
+    const samples: { at: number; bytes: number }[] = [{ at: startedAt, bytes: 0 }];
+    let lastSampleAt = startedAt;
 
     this.executor({
       taskId,
@@ -328,11 +366,24 @@ export class UploadManager {
         if (!current || current.status !== UPLOAD_TASK_STATUS.UPLOADING) return;
 
         const currentAt = now();
-        const deltaBytes = Math.max(0, uploadedBytes - previousBytes);
-        const deltaTimeMs = Math.max(1, currentAt - previousAt);
-        previousBytes = uploadedBytes;
-        previousAt = currentAt;
-        const computedSpeed = speedBps ?? Math.floor((deltaBytes * 1000) / deltaTimeMs);
+        let computedSpeed = speedBps;
+        if (computedSpeed === undefined) {
+          if (currentAt - lastSampleAt >= SPEED_SAMPLE_MIN_MS) {
+            samples.push({ at: currentAt, bytes: uploadedBytes });
+            lastSampleAt = currentAt;
+            while (samples.length > 1 && currentAt - samples[0].at > SPEED_WINDOW_MAX_MS) {
+              samples.shift();
+            }
+          }
+          // 取窗口内最早 ≥ 1.5s 跨度的样本计算均速；不够则不更新本次 speed。
+          const head = samples[0];
+          const span = currentAt - head.at;
+          if (span >= SPEED_WINDOW_MIN_MS) {
+            computedSpeed = Math.floor(((uploadedBytes - head.bytes) * 1000) / span);
+          } else {
+            computedSpeed = current.progress.speedBps;
+          }
+        }
         this.applyTaskEvent(taskId, { type: 'PROGRESS', uploadedBytes, speedBps: computedSpeed });
       },
     })
@@ -488,6 +539,31 @@ export class UploadManager {
   private emit(event: UploadManagerEvent) {
     this.listeners.forEach((listener) => {
       listener(event);
+    });
+  }
+
+  private isRemovableTaskRecord(task: UploadTask): boolean {
+    return task.status === UPLOAD_TASK_STATUS.SUCCESS
+      || task.status === UPLOAD_TASK_STATUS.FAILED
+      || task.status === UPLOAD_TASK_STATUS.CANCELED;
+  }
+
+  private removeTaskRecords(taskIds: string[], reason: 'REMOVE' | 'CLEAR') {
+    if (taskIds.length === 0) {
+      return;
+    }
+
+    this.state = removeUploadTasks(this.state, taskIds);
+    taskIds.forEach((taskId) => {
+      this.taskInputMap.delete(taskId);
+      this.taskRuntimeMap.delete(taskId);
+    });
+    this.summary = getUploadTaskSummary(this.state);
+    this.emit({
+      type: 'records',
+      reason,
+      removedTaskIds: taskIds,
+      summary: this.getSummary(),
     });
   }
 

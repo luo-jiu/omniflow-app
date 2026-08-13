@@ -1,6 +1,6 @@
 # OmniFlow App 前端架构基线
 
-更新时间：2026-05-05
+更新时间：2026-07-30
 
 适用范围：`omniflow-app` 的 React renderer、Electron preload/main、页面分层、状态所有权、IPC 边界和前端文档维护。
 
@@ -10,7 +10,7 @@
 
 主窗口由 Electron main 进程创建，当前最小窗口尺寸固定为 `1120 x 720`。这个下限用于保护目录树、工作区工具栏、文件预览、overlay 弹框等桌面布局不被压缩到不可用状态；后续调整最小尺寸必须同时验证 library detail、上传确认、属性弹窗和内置浏览器模式。
 
-主窗口当前允许 Chromium 默认的 `Cmd/Ctrl` + `+/-/0` 页面缩放，用于校准历史 UI 实际依赖的全局缩放比例。后续若要收敛为 `zoomFactor = 1`，应先记录当前视觉基线，再逐页迁移字体、间距、控件高度和 overlay 坐标假设。
+主窗口外壳的 `zoomFactor` 固定为 `1`。`Cmd/Ctrl` + `+/-/0` 由 Electron main 按当前宿主分流：已挂载的 embedded browser 优先缩放活动网页，其他工作区则把指令投影给文件 Viewer；不允许通过全局页面缩放改变 React 工具栏与原生 view bounds 的尺寸关系。
 
 这份文档的目标不是重复代码目录，而是固定当前前端最重要的长期事实：
 
@@ -47,6 +47,8 @@ src/main.tsx
 - `/upload-center`
 - `/profile`
 
+受保护路由以 `AuthContext` 完成 bootstrap 后的 `isLoggedIn` 为准，不直接把本地 token 当作 renderer 子树已经可挂载的信号。认证成功或本地会话恢复时，application/auth session runtime 必须先启动，再提交用户状态并挂载工作区；退出登录或 401 则先释放 runtime 和工作区，再清除认证投影。
+
 当前主工作区重心在 `/libraries/:id`，它承载：
 
 - 文件树浏览
@@ -62,6 +64,12 @@ React 18 兼容层：
 - 应用自身入口继续从 `react-dom/client` 使用 `createRoot`；不要在业务代码里新增 `ReactDOM.render`。
 - 修改该 alias 或兼容层后，dev 环境需要用 `npm run dev -- --force` 重建 Vite optimized deps，避免继续加载旧的 `node_modules/.vite/deps/chunk-*.js`。
 
+Electron `userData`：
+
+- 主进程默认继续使用历史目录 `omniflow-app`，保证普通启动能读到原有本地状态。
+- 本地双开调试可通过环境变量 `OMNIFLOW_USER_DATA_SUFFIX` 指定隔离目录；例如 `stable` 会落到 `omniflow-app-stable`，避免 dev / stable 实例互相抢 IndexedDB、session、窗口状态和本地预览缓存。
+- suffix 只允许字母、数字、下划线和短横线，其他字符会被替换为短横线。
+
 ## 3. 目录语义
 
 当前目录分层以“页面编排”和“业务域”并存为主：
@@ -74,6 +82,8 @@ contexts/            全局上下文
 service/             HTTP / IPC 请求收口
 modules/             已经抽成独立模型的复杂域
 electron/            主进程、preload、IPC、原生能力
+electron/platform/   主进程平台窗口和系统能力策略
+src/platform/        renderer 平台识别和 DOM 平台标记
 docs/                前端专题与架构文档
 .agent-docs/         Agent 长期规范
 ```
@@ -104,6 +114,12 @@ views -> features -> components / hooks -> service / preload bridge -> electron 
 - `electron/`
   - 负责窗口、浏览器视图、下载、会话、文件系统、资源捕捉、IPC 注册等宿主能力。
   - 不反向承担 renderer 页面编排。
+- `electron/platform/`
+  - 只收纳 macOS / Windows / Linux 的真实宿主差异，当前首先承载主窗口选项。
+  - 共享窗口生命周期仍由 `electron/main.ts` 持有，不按平台复制。
+- `src/platform/`
+  - 是 renderer 读取宿主平台事实的唯一入口。
+  - 应用启动时统一写入 `html[data-platform]`，页面和组件不自行解析 user agent。
 
 ## 4. 当前核心业务域
 
@@ -118,7 +134,9 @@ views -> features -> components / hooks -> service / preload bridge -> electron 
 
 对应状态定义位于：
 
-- `src/views/library/detail/workspace-state.ts`
+- `src/features/library-workspace/workspace-state.ts`
+
+旧 `src/views/library/detail/workspace-state.ts` 仅作为兼容 re-export 保留。
 
 这里的 `LibraryDetailWorkspaceState` 是页面级工作区状态，而不是全局状态。它负责：
 
@@ -265,6 +283,8 @@ Renderer 只能持有这些状态的投影，不要把 main 的内部结构当�
 - `window.electronWindow`
 - `window.electronEmbeddedBrowser`
 
+其中 `window.electronWindow.platform` 是只读宿主平台事实，renderer 统一通过 `src/platform` 归一和消费，不直接在页面中读取。
+
 对应实现位于：
 
 - `electron/preload.ts`
@@ -287,6 +307,7 @@ Renderer 只能持有这些状态的投影，不要把 main 的内部结构当�
 
 - `electron/ipc/`：channel 注册
 - `electron/service/`：窗口、浏览器、下载、文件、资源捕捉等宿主能力
+- `electron/platform/`：主窗口和系统能力的平台策略
 
 规则：
 
@@ -302,6 +323,7 @@ Renderer 只能持有这些状态的投影，不要把 main 的内部结构当�
 - `.agent-docs/frontend-handoff.md`
 - `.agent-docs/frontend-documentation-standard.md`
 - `docs/frontend-architecture-baseline.md`
+- `docs/desktop-platform-architecture.md`
 - `docs/embedded-browser-architecture.md`
 - `docs/library-detail-workspace.md`
 - `docs/file-explorer-file-viewer-boundary.md`
@@ -321,6 +343,7 @@ Renderer 只能持有这些状态的投影，不要把 main 的内部结构当�
 
 ```bash
 npm run lint
+npm test
 npm run build
 ```
 

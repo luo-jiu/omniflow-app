@@ -1,19 +1,21 @@
 import { FC } from 'react';
-import {HeaderWrapper} from './style';
+import { HeaderWrapper } from './style';
 import { Button, Avatar, Popover } from '@douyinfe/semi-ui';
-import {IconSetting, IconExit, IconUpload} from '@douyinfe/semi-icons';
-import {useNavigate} from "react-router-dom";
+import { IconSetting, IconExit, IconUpload } from '@douyinfe/semi-icons';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import ContextMenu from '@/components/ui/context-menu';
 
 const AppHeader: FC = () => {
-  const navigate = useNavigate()
+  const navigate = useNavigate();
   const { user, isLoggedIn, logout } = useAuth();
   const displayName = isLoggedIn ? user?.nickname || user?.username || 'User' : '未登录';
 
   const handleLogout = () => {
-    logout();
-    navigate('/login');
+    void (async () => {
+      await logout();
+      navigate('/login');
+    })();
   };
 
   const avatarContent = (
@@ -46,11 +48,11 @@ const AppHeader: FC = () => {
         </div>
         <div className="right-controls">
           <Button
-            onClick={() => navigate('/upload-center')}
+            onClick={() => navigate('/transfer-center?tab=upload')}
             theme="borderless"
             className="header-action"
             icon={<IconUpload />}
-            title="上传中心"
+            title="传输中心"
           />
           <Button
             onClick={() => navigate('/settings')}
@@ -76,8 +78,8 @@ const AppHeader: FC = () => {
                         label: '退出登录',
                         icon: <IconExit />,
                         danger: true,
-                        onClick: handleLogout
-                      }
+                        onClick: handleLogout,
+                      },
                     ]}
                   />
                 }

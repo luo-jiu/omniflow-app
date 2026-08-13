@@ -4,8 +4,7 @@ export const LibraryWrapper = styled.div`
   position: relative;
   width: 100%;
   height: 100%;
-  padding: 18px 22px;
-  padding-top: 34px;
+  padding: 0;
   background: var(--app-bg);
   color: var(--semi-color-text-0);
   display: flex;
@@ -21,19 +20,19 @@ export const LibraryWrapper = styled.div`
 
 export const ContentRow = styled.div`
   display: flex;
-  gap: 14px;
   flex: 1;
   min-height: 0;
+  gap: 8px;
 `
 
 export const SideMenu = styled.aside`
-  flex: 0 0 176px;
-  min-width: 176px;
-  margin-top: 7px;
+  flex: 0 0 250px;
+  min-width: 250px;
+  margin: 8px 0 8px 8px;
   background: var(--app-bg-elevated);
   border: 1px solid var(--app-border);
   border-radius: 8px;
-  padding: 12px 9px 9px;
+  padding: 24px 9px 8px;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -87,7 +86,13 @@ export const SideMenuFooter = styled.div`
   padding-top: 0;
   display: flex;
   align-items: center;
-  justify-content: flex-start;
+  justify-content: space-between;
+
+  .footer-action-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+  }
 `
 
 export const SideMenuAction = styled.button`
@@ -109,6 +114,18 @@ export const SideMenuAction = styled.button`
     background: rgba(0, 0, 0, 0.05);
     color: var(--app-text);
   }
+
+  .user-trigger {
+    width: 100%;
+    height: 100%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  &.avatar-action {
+    border-radius: 999px;
+  }
 `
 
 export const VerticalDivider = styled.div`
@@ -120,15 +137,36 @@ export const CardArea = styled.section`
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 11px;
+  gap: 0;
+  background: var(--app-bg);
+  border-top-left-radius: 12px;
+  border-bottom-left-radius: 12px;
+  overflow: hidden;
 `
 
-export const RightHeader = styled.div`
+export const LibraryMainToolbar = styled.div`
+  height: 38px;
+  flex-shrink: 0;
+  background: var(--app-bg);
+  border-bottom: 3px solid var(--app-border);
+  border-top-left-radius: 12px;
+  -webkit-app-region: drag;
+  position: relative;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  margin-top: -5px;
+  padding: 0 7px 0 12px;
+
+  .toolbar-left {
+    display: flex;
+    align-items: center;
+    -webkit-app-region: no-drag;
+  }
+
+  .toolbar-spacer {
+    flex: 1;
+    min-width: 0;
+    -webkit-app-region: drag;
+  }
 
   .header-right {
     display: inline-flex;
@@ -136,43 +174,61 @@ export const RightHeader = styled.div`
     gap: 6px;
   }
 
-  .semi-button {
-    height: 30px;
-    padding: 0 12px;
-    border-radius: 7px;
-    font-size: 11px;
-    font-weight: 500;
-    box-shadow: none;
+  .toolbar-right {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    -webkit-app-region: no-drag;
   }
 
-  .user-trigger {
+  .toolbar-action-btn {
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--app-text-muted);
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    padding: 2px;
-    border-radius: 999px;
+    padding: 0;
     cursor: pointer;
-    color: var(--app-text-secondary);
+    -webkit-app-region: no-drag;
   }
 
-  .user-trigger:hover {
-    background: rgba(0, 0, 0, 0.04);
+  .toolbar-action-btn .semi-icon {
+    width: 15px;
+    height: 15px;
+    font-size: 15px;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .toolbar-action-btn .semi-icon > svg,
+  .toolbar-action-btn svg {
+    width: 15px;
+    height: 15px;
+    display: block;
+  }
+
+  .toolbar-action-btn:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--app-text) 8%, transparent);
     color: var(--app-text);
   }
 `
 
 export const RightHeaderTitle = styled.h3`
   margin: 0;
-  font-size: 20px;
+  font-size: 12px;
   font-weight: 600;
-  line-height: 1.2;
-  letter-spacing: -0.02em;
+  line-height: 1;
+  color: var(--app-text);
 `
 
 export const RightHeaderDivider = styled.div`
-  height: 1px;
-  background: var(--app-border);
-  width: 100%;
+  display: none;
 `
 
 export const CardScroll = styled.div`
@@ -180,6 +236,7 @@ export const CardScroll = styled.div`
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
+  padding: 12px 16px 0;
 
   -ms-overflow-style: none;
   scrollbar-width: none;
@@ -187,6 +244,57 @@ export const CardScroll = styled.div`
     width: 0;
     height: 0;
     display: none;
+  }
+`
+
+export const LibrarySystemScroll = styled.div`
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 18px 24px 24px;
+  display: flex;
+  container-type: inline-size;
+
+  &::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--semi-color-text-2) 24%, transparent);
+    border-radius: 999px;
+  }
+`
+
+export const LibrarySystemFrame = styled.div`
+  width: 760px;
+  min-width: 760px;
+  margin: 0 auto;
+
+  &[data-size='detail'] {
+    width: 1120px;
+    min-width: 1120px;
+    height: 100%;
+    min-height: 520px;
+    max-height: 100%;
+    display: flex;
+    flex-direction: column;
+  }
+
+  @container (max-width: 808px) {
+    margin-left: 0;
+    margin-right: 0;
+  }
+
+  @container (max-width: 1168px) {
+    &[data-size='detail'] {
+      margin-left: 0;
+      margin-right: 0;
+    }
   }
 `
 

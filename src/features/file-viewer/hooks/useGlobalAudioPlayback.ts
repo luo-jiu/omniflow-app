@@ -9,11 +9,15 @@ type GlobalAudioOwnerType = GlobalAudioPlayerState['ownerType'];
 interface UseGlobalAudioPlaybackOptions {
   ownerType?: GlobalAudioOwnerType;
   ownerKey: string | null;
+  tabId?: string | null;
+  libraryId?: number | null;
 }
 
 export function useGlobalAudioPlayback({
   ownerType = 'default',
   ownerKey,
+  tabId = null,
+  libraryId = null,
 }: UseGlobalAudioPlaybackOptions) {
   const [playerState, setPlayerState] = useState(() => globalAudioPlayer.getState());
 
@@ -28,13 +32,17 @@ export function useGlobalAudioPlayback({
     && playerState.ownerKey === ownerKey,
   );
 
-  const ensureSource = useCallback((url: string, trackName?: string | null) => {
+  const ensureSource = useCallback((
+    url: string,
+    trackName?: string | null,
+    thumbnailUrl?: string | null,
+  ) => {
     globalAudioPlayer.ensureSource(
       url,
       trackName ?? null,
-      { ownerType, ownerKey },
+      { ownerType, ownerKey, tabId, libraryId, thumbnailUrl: thumbnailUrl ?? null },
     );
-  }, [ownerKey, ownerType]);
+  }, [ownerKey, ownerType, tabId, libraryId]);
 
   const play = useCallback(async () => {
     await globalAudioPlayer.play();
@@ -74,16 +82,11 @@ export function useGlobalAudioPlayback({
     globalAudioPlayer.setMuted(muted);
   }, []);
 
-  const clearIfOwned = useCallback(() => {
-    const state = globalAudioPlayer.getState();
-    if (ownerKey && state.ownerType === ownerType && state.ownerKey === ownerKey) {
-      globalAudioPlayer.clear();
-    }
-  }, [ownerKey, ownerType]);
+  // clear/dispose 由 FileViewerContext.closeTab → globalAudioPlayer.releaseForTab 兜底，
+  // hook 不再暴露组件层主动 clear 的能力。
 
   return useMemo(() => ({
     adjustVolumeBy,
-    clearIfOwned,
     ensureSource,
     getPlayerState,
     isOwnedSource,
@@ -97,7 +100,6 @@ export function useGlobalAudioPlayback({
     togglePlay,
   }), [
     adjustVolumeBy,
-    clearIfOwned,
     ensureSource,
     getPlayerState,
     isOwnedSource,

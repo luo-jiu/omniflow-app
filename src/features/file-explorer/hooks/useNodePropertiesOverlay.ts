@@ -51,6 +51,7 @@ function formatBuiltInTypeLabel(value: unknown): string {
   if (normalized === 'ASMR') return 'ASMR';
   if (normalized === 'VIDEO') return '视频';
   if (normalized === 'AUDIO') return '音频';
+  if (normalized === 'GALLERY') return '图集';
   return '默认';
 }
 

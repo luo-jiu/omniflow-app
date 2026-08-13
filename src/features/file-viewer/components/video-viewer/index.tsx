@@ -1,9 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { Button, Spin, Toast } from '@douyinfe/semi-ui';
 import {
   IconBackward,
   IconForward,
   IconFullScreenStroked,
+  IconMiniPlayer,
   IconMute,
   IconPause,
   IconPlay,
@@ -13,13 +14,14 @@ import {
   IconVolume2,
 } from '@douyinfe/semi-icons';
 import { VideoViewerWrapper } from './style';
-import { useRegisterMediaEntry } from '@/hooks/useMediaRegistry';
 import { useLibraryWorkspaceControls } from '@/contexts/library-workspace-controls.context';
 import {
+  fetchArchiveCardsPage,
   fetchNodeDetailById,
   getChildrenByNodeId,
   getFileLink,
   updateNodeConfig,
+  type ArchiveCardDTO,
 } from '@/features/file-explorer/services/file.api';
 import { runtimeLogger } from '@/utils/runtimeLogger';
 import {
@@ -40,8 +42,35 @@ import {
   buildVideoSubtitleSources,
   type VideoSubtitleSourceNode,
 } from '@/features/file-viewer/utils/video-subtitle-sources';
+import {
+  getGlobalVideoElement,
+  mountGlobalVideoElement,
+  parkGlobalVideoElement,
+} from '@/features/file-viewer/services/global-video-elements';
+import { floatingVideoService } from '@/features/file-viewer/services/floating-video.service';
+import {
+  FLOATING_VIDEO_RETENTION_PIP_MASK,
+  FLOATING_VIDEO_RETENTION_PLAYING_MASK,
+  readOwnedFloatingVideoRetentionPinMask,
+} from '@/features/file-viewer/services/floating-video-retention';
+import { isLibraryWorkspaceRoute } from '@/features/file-viewer/utils/media-route';
+import {
+  VIDEO_VIEWER_SESSION_ESTIMATED_BYTES,
+  VIDEO_VIEWER_SESSION_SCHEMA_VERSION,
+  parseVideoViewerSessionSnapshot,
+  type VideoPlaybackProgress,
+  type VideoViewerSessionSnapshot,
+} from './video-viewer-session';
+import {
+  acknowledgeLatestPendingValue,
+  useViewerSession,
+  type ViewerSessionAdapter,
+} from '@/features/file-viewer/session';
 
 interface VideoViewerProps {
+  accountScope: string | null;
+  contentRevision: string | null;
+  libraryId: number | null;
   nodeId?: number | null;
   url: string;
   fileName?: string | null;
@@ -51,18 +80,12 @@ interface VideoViewerProps {
   subtitleSources?: FileViewerSubtitleSource[];
   playlist?: FileViewerVideoPlaylist | null;
   autoPlay?: boolean;
-}
-
-interface VideoPlaybackProgress {
-  currentTime: number;
-  duration: number;
-  updatedAt: string;
+  reloadToken?: number;
 }
 
 const SEEK_SECONDS = 5;
 const PLAYBACK_RATES = [0.75, 1, 1.25, 1.5, 2];
 const PLACEHOLDER_TOOL_OPTIONS = ['同名字幕自动发现', '双语字幕', '片段标注', 'AI 字幕'];
-const VIDEO_PROGRESS_CACHE_MAX_ENTRIES = 48;
 const VIDEO_PROGRESS_REMOTE_SYNC_INTERVAL_MS = 8000;
 const RESTORE_MIN_SECONDS = 2;
 const RESTORE_END_GUARD_SECONDS = 5;
@@ -80,6 +103,7 @@ const KEYBOARD_SEEK_SECONDS = 10;
 const KEYBOARD_FAST_SEEK_SECONDS = 30;
 const KEYBOARD_VOLUME_STEP = 0.05;
 const PLAYLIST_LINK_EXPIRY_MINUTES = 120;
+const PLAYLIST_PAGE_SIZE = 80;
 
 const RightToolPanelIcon: React.FC = () => (
   <svg className="video-control-svg" viewBox="0 0 24 24" width="1em" height="1em" fill="none" aria-hidden focusable="false">
@@ -124,8 +148,6 @@ const WideModeExitIcon: React.FC = () => (
   </svg>
 );
 
-const videoProgressCache = new Map<string, VideoPlaybackProgress>();
-
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value));
 }
@@ -145,24 +167,27 @@ function parseFiniteNumber(value: unknown): number | null {
   return Number.isFinite(numeric) ? numeric : null;
 }
 
-function resolveVideoProgressCacheKey(url: string, nodeId?: number | null): string {
-  if (nodeId !== null && nodeId !== undefined && Number.isFinite(nodeId)) {
-    return `node:${nodeId}`;
+function mapArchiveCardToPlaylistItem(item: ArchiveCardDTO, libraryId: number): FileViewerVideoPlaylistItem | null {
+  if (String(item.cardKind || '').trim().toLowerCase() === 'collection') {
+    return null;
   }
-  return `url:${String(url || '').trim()}`;
-}
-
-function setVideoProgressSnapshot(cacheKey: string, progress: VideoPlaybackProgress) {
-  if (videoProgressCache.has(cacheKey)) {
-    videoProgressCache.delete(cacheKey);
+  const cardId = Number(item.id);
+  const mediaNodeId = Number.isFinite(Number(item.mediaNodeId)) && Number(item.mediaNodeId) > 0
+    ? Number(item.mediaNodeId)
+    : cardId;
+  if (!Number.isFinite(mediaNodeId) || mediaNodeId <= 0 || !Number.isFinite(libraryId) || libraryId <= 0) {
+    return null;
   }
-  videoProgressCache.set(cacheKey, progress);
-  if (videoProgressCache.size > VIDEO_PROGRESS_CACHE_MAX_ENTRIES) {
-    const oldestKey = videoProgressCache.keys().next().value;
-    if (oldestKey) {
-      videoProgressCache.delete(oldestKey);
-    }
-  }
+  const subtitleCount = Number(item.subtitleCount ?? 0);
+  const cardOwnsMediaFolder = mediaNodeId !== cardId;
+  return {
+    nodeId: mediaNodeId,
+    libraryId,
+    title: String(item.name || ''),
+    sortOrder: Number(item.sortOrder ?? 0),
+    durationSeconds: Number(item.durationSeconds ?? 0) > 0 ? Number(item.durationSeconds) : null,
+    subtitleCardNodeId: cardOwnsMediaFolder && subtitleCount > 0 ? cardId : null,
+  };
 }
 
 function parseVideoRemoteProgress(viewMetaRaw: string | null | undefined): VideoPlaybackProgress | null {
@@ -232,6 +257,9 @@ function isProgressNewer(
 }
 
 const VideoViewer: React.FC<VideoViewerProps> = ({
+  accountScope,
+  contentRevision,
+  libraryId,
   nodeId,
   url,
   fileName,
@@ -241,11 +269,20 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
   subtitleSources,
   playlist,
   autoPlay = false,
+  reloadToken = 0,
 }) => {
   const { setFileUrl } = useFileViewer();
   const containerRef = useRef<HTMLDivElement>(null);
+  const videoHostRef = useRef<HTMLDivElement>(null);
   const viewerRootRef = useRef<HTMLDivElement>(null);
-  const videoRef = useRef<HTMLVideoElement>(null);
+  const videoElementKey = useMemo(() => `video:${tabId}`, [tabId]);
+  const videoRef = useRef<HTMLVideoElement>(getGlobalVideoElement(videoElementKey));
+  const videoMountTokenRef = useRef<number | null>(null);
+  const floatingVideoState = useSyncExternalStore(
+    floatingVideoService.subscribe,
+    floatingVideoService.getState,
+    floatingVideoService.getState,
+  );
   const progressRef = useRef<HTMLDivElement>(null);
   const volumeControlRef = useRef<HTMLDivElement>(null);
   const rateControlRef = useRef<HTMLDivElement>(null);
@@ -257,20 +294,29 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
   const viewMetaBaseRef = useRef<Record<string, unknown>>({});
   const pendingRemoteProgressRef = useRef<VideoPlaybackProgress | null>(null);
   const pendingRestoreTimeRef = useRef<number | null>(null);
+  const pendingRestoreNodeIdRef = useRef<number | null>(null);
+  const restoredWarmProgressRef = useRef<VideoPlaybackProgress | null>(null);
+  const lastPlaybackProgressRef = useRef<VideoPlaybackProgress | null>(null);
   const lastSyncedRemoteProgressSignatureRef = useRef('');
   const isMountedRef = useRef(true);
   const activeRef = useRef(active);
+  const persistVideoProgressRef = useRef<(forceRemoteSync?: boolean) => void>(() => {});
   const isDraggingProgress = useRef(false);
   const thumbnailCaptureTimerRef = useRef<number>(0);
   const thumbnailCaptureAttemptRef = useRef(0);
   const thumbnailCaptureUrlRef = useRef('');
-  const consoleOpenRef = useRef(true);
+  const consoleOpenRef = useRef(false);
   const consoleOpenBeforeWideModeRef = useRef<boolean | null>(null);
   const wideModeAppliedRef = useRef(false);
+  const playbackRateRef = useRef(1);
+  const subtitleEnabledRef = useRef(true);
+  const subtitleSourceIdRef = useRef<string | null>(null);
+  const subtitleFontSizeRef = useRef(44);
+  const subtitleBottomOffsetRef = useRef(72);
+  const sessionCaptureRafRef = useRef(0);
   const { setVideoWideMode } = useLibraryWorkspaceControls();
 
   const [isPlaying, setIsPlaying] = useState(false);
-  const [hasStartedPlaying, setHasStartedPlaying] = useState(false);
   const [isBuffering, setIsBuffering] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -279,15 +325,31 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
   const [volume, setVolume] = useState(0.75);
   const [isMuted, setIsMuted] = useState(false);
   const [playbackRate, setPlaybackRate] = useState(1);
-  const [isConsoleOpen, setIsConsoleOpen] = useState(true);
+  const [isConsoleOpen, setIsConsoleOpen] = useState(false);
   const [isWideMode, setIsWideMode] = useState(false);
   const [isVolumePanelOpen, setIsVolumePanelOpen] = useState(false);
   const [isRatePanelOpen, setIsRatePanelOpen] = useState(false);
   const [isPlaylistPanelOpen, setIsPlaylistPanelOpen] = useState(false);
+  const [isLoadingPlaylistMore, setIsLoadingPlaylistMore] = useState(false);
 
-  const progressCacheKey = useMemo(() => resolveVideoProgressCacheKey(url, nodeId), [nodeId, url]);
+  const isVideoHostedOutsideInline = floatingVideoState.key === videoElementKey
+    && floatingVideoState.hostMode !== 'inline';
+
   const playlistItems = useMemo(() => playlist?.items ?? [], [playlist]);
   const hasPlaylist = playlistItems.length > 0;
+  const playlistCountText = useMemo(() => {
+    const total = Number(playlist?.total);
+    if (Number.isFinite(total) && total > playlistItems.length) {
+      return `${playlistItems.length}/${total} 集`;
+    }
+    return `${playlistItems.length} 集`;
+  }, [playlist?.total, playlistItems.length]);
+  const canLoadPlaylistMore = Boolean(
+    playlist?.source?.kind === 'video_archive_collection'
+    && playlist.hasMore
+    && playlist.source.nodeId > 0
+    && playlist.source.libraryId > 0,
+  );
   const {
     activeSubtitleCue,
     clearSubtitle,
@@ -311,6 +373,123 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
     subtitleSources,
     url,
   });
+
+  playbackRateRef.current = playbackRate;
+  subtitleEnabledRef.current = subtitleEnabled;
+  subtitleSourceIdRef.current = loadedSubtitleSourceId;
+  subtitleFontSizeRef.current = subtitleFontSize;
+  subtitleBottomOffsetRef.current = subtitleBottomOffset;
+
+  const captureVideoSession = useCallback((): VideoViewerSessionSnapshot => {
+    const video = videoRef.current;
+    const pendingProgress = pendingRestoreTimeRef.current == null
+      ? null
+      : lastPlaybackProgressRef.current;
+    const durationValue = pendingProgress?.duration ?? (
+      video && Number.isFinite(video.duration) && video.duration > 0
+        ? video.duration
+        : lastPlaybackProgressRef.current?.duration ?? 0
+    );
+    const currentValue = pendingProgress
+      ? pendingRestoreTimeRef.current ?? pendingProgress.currentTime
+      : video && Number.isFinite(video.currentTime) && durationValue > 0
+      ? Math.min(Math.max(video.ended ? 0 : video.currentTime, 0), durationValue)
+      : lastPlaybackProgressRef.current?.currentTime ?? 0;
+    return {
+      currentTime: currentValue,
+      duration: durationValue,
+      updatedAt: lastPlaybackProgressRef.current?.updatedAt ?? '',
+      playbackRate: playbackRateRef.current,
+      subtitleEnabled: subtitleEnabledRef.current,
+      subtitleSourceId: subtitleSourceIdRef.current,
+      subtitleFontSize: subtitleFontSizeRef.current,
+      subtitleBottomOffset: subtitleBottomOffsetRef.current,
+      consoleOpen: consoleOpenRef.current,
+    };
+  }, []);
+
+  const restoreVideoSession = useCallback((payload: VideoViewerSessionSnapshot) => {
+    const snapshot = parseVideoViewerSessionSnapshot(payload);
+    if (!snapshot) return;
+    const progress: VideoPlaybackProgress = {
+      currentTime: snapshot.currentTime,
+      duration: snapshot.duration,
+      updatedAt: snapshot.updatedAt,
+    };
+    restoredWarmProgressRef.current = progress;
+    lastPlaybackProgressRef.current = progress;
+    pendingRestoreTimeRef.current = resolveRestorableTime(progress);
+    pendingRestoreNodeIdRef.current = nodeId ?? null;
+    setPlaybackRate(snapshot.playbackRate);
+    setSubtitleEnabled(snapshot.subtitleEnabled);
+    setSubtitleFontSize(snapshot.subtitleFontSize);
+    setSubtitleBottomOffset(snapshot.subtitleBottomOffset);
+    setIsConsoleOpen(snapshot.consoleOpen);
+    if (snapshot.subtitleSourceId) {
+      const source = librarySubtitleSources.find(item => item.id === snapshot.subtitleSourceId);
+      if (source) void loadLibrarySubtitle(source, { preserveEnabled: true });
+    }
+  }, [librarySubtitleSources, loadLibrarySubtitle, nodeId, setSubtitleBottomOffset, setSubtitleEnabled, setSubtitleFontSize]);
+
+  const sessionAdapter = useMemo<ViewerSessionAdapter<VideoViewerSessionSnapshot>>(() => ({
+    capture: captureVideoSession,
+    restore: restoreVideoSession,
+    suspend: () => undefined,
+    resume: () => undefined,
+    estimateSnapshotBytes: () => VIDEO_VIEWER_SESSION_ESTIMATED_BYTES,
+    getPinReasons: () => {
+      const reasons: Array<'active' | 'playing' | 'pip'> = [];
+      if (activeRef.current) reasons.push('active');
+      const pinMask = readOwnedFloatingVideoRetentionPinMask(
+        floatingVideoService.getState(),
+        tabId,
+        libraryId,
+      );
+      if (pinMask & FLOATING_VIDEO_RETENTION_PLAYING_MASK) reasons.push('playing');
+      if (pinMask & FLOATING_VIDEO_RETENTION_PIP_MASK) reasons.push('pip');
+      return reasons;
+    },
+  }), [captureVideoSession, libraryId, restoreVideoSession, tabId]);
+
+  const {
+    capture: flushVideoSession,
+    markInteracted: markVideoSessionInteracted,
+    notifyRetentionChanged,
+    waitForInitialRestore,
+  } = useViewerSession({
+    accountScope,
+    active,
+    adapter: sessionAdapter,
+    contentRevision,
+    libraryId,
+    nodeId: nodeId ?? null,
+    reloadToken,
+    schemaVersion: VIDEO_VIEWER_SESSION_SCHEMA_VERSION,
+    tabId,
+    viewerKind: 'video',
+  });
+
+  useEffect(() => {
+    let pinMask = readOwnedFloatingVideoRetentionPinMask(
+      floatingVideoService.getState(),
+      tabId,
+      libraryId,
+    );
+    return floatingVideoService.subscribe((state) => {
+      const nextPinMask = readOwnedFloatingVideoRetentionPinMask(state, tabId, libraryId);
+      if (nextPinMask === pinMask) return;
+      pinMask = nextPinMask;
+      notifyRetentionChanged();
+    });
+  }, [libraryId, notifyRetentionChanged, tabId]);
+
+  const scheduleVideoSessionCapture = useCallback(() => {
+    if (sessionCaptureRafRef.current) return;
+    sessionCaptureRafRef.current = window.requestAnimationFrame(() => {
+      sessionCaptureRafRef.current = 0;
+      flushVideoSession();
+    });
+  }, [flushVideoSession]);
 
   const captureVideoThumbnail = useCallback((): boolean => {
     const video = videoRef.current;
@@ -374,42 +553,8 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
     }, VIDEO_THUMBNAIL_CAPTURE_DELAY_MS);
   }, [captureVideoThumbnail, thumbnailUrl]);
 
-  useRegisterMediaEntry({
-    enabled: hasStartedPlaying,
-    entryId: `video:${tabId}`,
-    kind: 'video',
-    tabId,
-    title: fileName || '视频',
-    isPlaying,
-    currentTime,
-    duration,
-    thumbnailUrl,
-    previewUrl: url,
-    play: () => {
-      const video = videoRef.current;
-      if (video) void video.play();
-    },
-    pause: () => {
-      const video = videoRef.current;
-      if (video && !video.paused) video.pause();
-    },
-    seek: (time) => {
-      const video = videoRef.current;
-      if (!video || !Number.isFinite(time)) return;
-      const next = Math.min(Math.max(time, 0), duration || video.duration || 0);
-      video.currentTime = next;
-      setCurrentTime(next);
-      persistVideoProgress(true);
-    },
-    dismiss: () => {
-      const video = videoRef.current;
-      if (video && !video.paused) {
-        video.pause();
-      }
-      persistVideoProgress(true);
-      setHasStartedPlaying(false);
-    },
-  });
+  // MediaHub 注册由 floatingVideoService 服务层完成；详见 docs/media-hub-contract.md。
+  // 关闭视频 tab 时由 FileViewerContext.releaseForTab 释放，不依赖组件卸载。
 
   const formatTime = (value: number) => {
     if (!Number.isFinite(value) || value < 0) return '00:00';
@@ -430,6 +575,18 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
     consoleOpenRef.current = isConsoleOpen;
   }, [isConsoleOpen]);
 
+  useEffect(() => {
+    scheduleVideoSessionCapture();
+  }, [
+    isConsoleOpen,
+    loadedSubtitleSourceId,
+    playbackRate,
+    scheduleVideoSessionCapture,
+    subtitleBottomOffset,
+    subtitleEnabled,
+    subtitleFontSize,
+  ]);
+
   const flushRemoteVideoProgress = useCallback(async (force = false) => {
     if (!nodeId || !Number.isFinite(nodeId)) {
       pendingRemoteProgressRef.current = null;
@@ -444,16 +601,18 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
 
     const pending = pendingRemoteProgressRef.current;
     if (!pending) return;
+    const requestId = remoteProgressRequestIdRef.current;
 
     const signature = [
       pending.currentTime.toFixed(1),
       pending.duration.toFixed(1),
     ].join('|');
     if (signature === lastSyncedRemoteProgressSignatureRef.current) {
-      pendingRemoteProgressRef.current = null;
+      acknowledgeLatestPendingValue(pendingRemoteProgressRef, pending);
       return;
     }
 
+    let shouldFlushLatest = false;
     remoteProgressSyncInFlightRef.current = true;
     try {
       const nextMeta = buildNextViewMetaWithVideoProgress(viewMetaBaseRef.current, pending);
@@ -461,21 +620,24 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
         id: nodeId,
         viewMeta: JSON.stringify(nextMeta),
       });
+      if (requestId !== remoteProgressRequestIdRef.current) return;
       viewMetaBaseRef.current = nextMeta;
       lastSyncedRemoteProgressSignatureRef.current = signature;
-      pendingRemoteProgressRef.current = null;
+      shouldFlushLatest = acknowledgeLatestPendingValue(pendingRemoteProgressRef, pending);
     } catch (error) {
       runtimeLogger.warn('同步视频观看进度失败:', error);
     } finally {
-      remoteProgressSyncInFlightRef.current = false;
-      if (pendingRemoteProgressRef.current && (activeRef.current || force)) {
-        if (remoteProgressSyncTimerRef.current) {
-          window.clearTimeout(remoteProgressSyncTimerRef.current);
+      if (requestId === remoteProgressRequestIdRef.current) {
+        remoteProgressSyncInFlightRef.current = false;
+        if (shouldFlushLatest && pendingRemoteProgressRef.current && (activeRef.current || force)) {
+          if (remoteProgressSyncTimerRef.current) {
+            window.clearTimeout(remoteProgressSyncTimerRef.current);
+          }
+          remoteProgressSyncTimerRef.current = window.setTimeout(() => {
+            remoteProgressSyncTimerRef.current = 0;
+            void flushRemoteVideoProgress(force);
+          }, VIDEO_PROGRESS_REMOTE_SYNC_INTERVAL_MS);
         }
-        remoteProgressSyncTimerRef.current = window.setTimeout(() => {
-          remoteProgressSyncTimerRef.current = 0;
-          void flushRemoteVideoProgress(force);
-        }, VIDEO_PROGRESS_REMOTE_SYNC_INTERVAL_MS);
       }
     }
   }, [nodeId]);
@@ -511,9 +673,78 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
       duration: durationValue,
       updatedAt: new Date().toISOString(),
     };
-    setVideoProgressSnapshot(progressCacheKey, progress);
+    lastPlaybackProgressRef.current = progress;
+    scheduleVideoSessionCapture();
     queueRemoteVideoProgressSync(progress, forceRemoteSync);
-  }, [progressCacheKey, queueRemoteVideoProgressSync]);
+  }, [queueRemoteVideoProgressSync, scheduleVideoSessionCapture]);
+
+  useEffect(() => {
+    persistVideoProgressRef.current = persistVideoProgress;
+  }, [persistVideoProgress]);
+
+  useEffect(() => {
+    const host = videoHostRef.current;
+    if (!host) return undefined;
+    const mounted = mountGlobalVideoElement(videoElementKey, host);
+    videoMountTokenRef.current = mounted.mountToken;
+    videoRef.current = mounted.element;
+    floatingVideoService.bindInline({
+      key: videoElementKey,
+      libraryId,
+      tabId,
+      nodeId: nodeId ?? null,
+      fileName: fileName ?? '',
+      thumbnailUrl,
+      forceInline: true,
+    });
+
+    return () => {
+      const elBefore = videoRef.current;
+      const inLibrary = isLibraryWorkspaceRoute(window.location.hash);
+      console.log('[video-viewer] cleanup.start', {
+        key: videoElementKey,
+        hash: window.location.hash,
+        isLibrary: inLibrary,
+        paused: elBefore?.paused,
+        ct: elBefore?.currentTime,
+        connected: elBefore?.isConnected,
+      });
+      persistVideoProgressRef.current(true);
+      const mountToken = videoMountTokenRef.current ?? mounted.mountToken;
+      if (inLibrary) {
+        const floatingState = floatingVideoService.getState();
+        const isHostedOutsideInline = floatingState.key === videoElementKey
+          && floatingState.hostMode !== 'inline';
+        if (isHostedOutsideInline) {
+          console.log('[video-viewer] cleanup.keep-external-host', {
+            key: videoElementKey,
+            hostMode: floatingState.hostMode,
+            paused: elBefore?.paused,
+            connected: elBefore?.isConnected,
+          });
+          return;
+        }
+        parkGlobalVideoElement(videoElementKey, mountToken);
+        console.log('[video-viewer] cleanup.parked', { key: videoElementKey, paused: elBefore?.paused, connected: elBefore?.isConnected });
+        return;
+      }
+      floatingVideoService.handoffToFloating(videoElementKey, mountToken);
+      console.log('[video-viewer] cleanup.handed-off', { key: videoElementKey, paused: elBefore?.paused, connected: elBefore?.isConnected });
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [videoElementKey]);
+
+  // metadata 后续变化（如异步加载到的封面、文件名修正、libraryId 切换）也要同步给浮窗 service。
+  useEffect(() => {
+    floatingVideoService.bindInline({
+      key: videoElementKey,
+      libraryId,
+      tabId,
+      nodeId: nodeId ?? null,
+      fileName: fileName ?? '',
+      thumbnailUrl,
+    });
+  }, [videoElementKey, libraryId, tabId, nodeId, fileName, thumbnailUrl]);
 
   const applyPendingRestoreTime = useCallback(() => {
     const video = videoRef.current;
@@ -574,6 +805,10 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
         window.clearTimeout(thumbnailCaptureTimerRef.current);
         thumbnailCaptureTimerRef.current = 0;
       }
+      if (sessionCaptureRafRef.current) {
+        window.cancelAnimationFrame(sessionCaptureRafRef.current);
+        sessionCaptureRafRef.current = 0;
+      }
     };
   }, [handleGlobalMouseMove, handleGlobalMouseUp]);
 
@@ -596,7 +831,6 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
     };
     const onPlay = () => {
       setIsPlaying(true);
-      setHasStartedPlaying(true);
     };
     const onPause = () => setIsPlaying(false);
     const onEnded = () => {
@@ -641,12 +875,29 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
+    const isSameSource = video.getAttribute('src') === url;
     remoteProgressRequestIdRef.current += 1;
     viewMetaBaseReadyRef.current = false;
     viewMetaBaseRef.current = {};
     pendingRemoteProgressRef.current = null;
+    remoteProgressSyncInFlightRef.current = false;
     lastSyncedRemoteProgressSignatureRef.current = '';
-    pendingRestoreTimeRef.current = resolveRestorableTime(videoProgressCache.get(progressCacheKey));
+
+    if (isSameSource) {
+      setCurrentTime(Number.isFinite(video.currentTime) ? video.currentTime : 0);
+      setDuration(Number.isFinite(video.duration) ? video.duration : 0);
+      setIsPlaying(!video.paused && !video.ended);
+      setIsBuffering(!video.paused && video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA);
+      scheduleVideoThumbnailCapture();
+      return;
+    }
+
+    if (pendingRestoreNodeIdRef.current !== (nodeId ?? null)) {
+      pendingRestoreTimeRef.current = null;
+      restoredWarmProgressRef.current = null;
+      lastPlaybackProgressRef.current = null;
+    }
+    pendingRestoreNodeIdRef.current = nodeId ?? null;
     if (thumbnailCaptureTimerRef.current) {
       window.clearTimeout(thumbnailCaptureTimerRef.current);
       thumbnailCaptureTimerRef.current = 0;
@@ -660,7 +911,7 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
     setDuration(0);
     setIsPlaying(false);
     setIsBuffering(true);
-  }, [progressCacheKey, url]);
+  }, [nodeId, scheduleVideoThumbnailCapture, url]);
 
   useEffect(() => {
     if (!autoPlay) return;
@@ -693,18 +944,21 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
     }
 
     fetchNodeDetailById(nodeId)
-      .then((detail) => {
+      .then(async (detail) => {
         if (!isMountedRef.current || requestId !== remoteProgressRequestIdRef.current) return;
         const baseMeta = parseViewMetaObject(detail.viewMeta);
         viewMetaBaseRef.current = baseMeta;
-        viewMetaBaseReadyRef.current = true;
 
+        const initialRestoreSource = await waitForInitialRestore();
+        if (!isMountedRef.current || requestId !== remoteProgressRequestIdRef.current) return;
+        viewMetaBaseReadyRef.current = true;
         const remoteProgress = parseVideoRemoteProgress(detail.viewMeta);
         if (remoteProgress) {
-          const cachedProgress = videoProgressCache.get(progressCacheKey);
-          const shouldUseRemoteProgress = isProgressNewer(remoteProgress, cachedProgress);
+          const localProgress = restoredWarmProgressRef.current ?? lastPlaybackProgressRef.current;
+          const shouldUseRemoteProgress = initialRestoreSource === 'none'
+            && isProgressNewer(remoteProgress, localProgress);
           if (shouldUseRemoteProgress) {
-            setVideoProgressSnapshot(progressCacheKey, remoteProgress);
+            lastPlaybackProgressRef.current = remoteProgress;
             const pendingTime = resolveRestorableTime(remoteProgress);
             if (pendingTime !== null) {
               pendingRestoreTimeRef.current = pendingTime;
@@ -725,7 +979,7 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
         if (!isMountedRef.current || requestId !== remoteProgressRequestIdRef.current) return;
         runtimeLogger.warn('加载视频观看进度失败:', error);
       });
-  }, [applyPendingRestoreTime, flushRemoteVideoProgress, nodeId, progressCacheKey]);
+  }, [applyPendingRestoreTime, flushRemoteVideoProgress, nodeId, waitForInitialRestore]);
 
   useEffect(() => {
     if (active) return;
@@ -789,6 +1043,31 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
       video.pause();
     }
   }, []);
+
+  const restoreVideoInline = useCallback(() => {
+    const host = videoHostRef.current;
+    if (!host) return;
+    const mounted = mountGlobalVideoElement(videoElementKey, host);
+    videoMountTokenRef.current = mounted.mountToken;
+    videoRef.current = mounted.element;
+    floatingVideoService.bindInline({
+      key: videoElementKey,
+      libraryId,
+      tabId,
+      nodeId: nodeId ?? null,
+      fileName: fileName ?? '',
+      thumbnailUrl,
+      forceInline: true,
+    });
+  }, [fileName, libraryId, nodeId, tabId, thumbnailUrl, videoElementKey]);
+
+  const requestFloatingVideo = useCallback(() => {
+    if (isVideoHostedOutsideInline) {
+      restoreVideoInline();
+      return;
+    }
+    void floatingVideoService.requestSystemFloating();
+  }, [isVideoHostedOutsideInline, restoreVideoInline]);
 
   const seekBy = useCallback((delta: number) => {
     const video = videoRef.current;
@@ -895,6 +1174,81 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
       Toast.error(error?.message || '切换视频失败');
     }
   }, [nodeId, persistVideoProgress, playlist, resolvePlaylistItemSubtitleSources, returnTarget, setFileUrl, tabId]);
+
+  const loadMorePlaylistItems = useCallback(async () => {
+    const source = playlist?.source;
+    if (
+      !playlist
+      || source?.kind !== 'video_archive_collection'
+      || !playlist.hasMore
+      || isLoadingPlaylistMore
+    ) {
+      return;
+    }
+
+    const nextOffset = Number.isFinite(Number(playlist.nextOffset))
+      ? Number(playlist.nextOffset)
+      : playlist.items.length;
+    setIsLoadingPlaylistMore(true);
+    try {
+      const page = await fetchArchiveCardsPage({
+        nodeId: source.nodeId,
+        libraryId: source.libraryId,
+        builtInType: 'VIDEO',
+        offset: Math.max(Math.floor(nextOffset), 0),
+        limit: PLAYLIST_PAGE_SIZE,
+      });
+      const known = new Set(playlist.items.map(item => `${item.libraryId}:${item.nodeId}`));
+      const moreItems = page.items
+        .map(item => mapArchiveCardToPlaylistItem(item, source.libraryId))
+        .filter((item): item is FileViewerVideoPlaylistItem => {
+          if (!item) return false;
+          const key = `${item.libraryId}:${item.nodeId}`;
+          if (known.has(key)) return false;
+          known.add(key);
+          return true;
+        });
+      const resolvedNextOffset = page.items.length > 0
+        ? page.offset + page.items.length
+        : nextOffset;
+      const nextPlaylist: FileViewerVideoPlaylist = {
+        ...playlist,
+        items: [...playlist.items, ...moreItems],
+        total: page.total,
+        nextOffset: resolvedNextOffset,
+        hasMore: page.items.length > 0 && page.hasMore,
+      };
+      setFileUrl(
+        url,
+        fileName ?? null,
+        'video',
+        nodeId,
+        {
+          tabTypeLabel: 'VIDEO',
+          returnTarget,
+          replaceTabId: tabId,
+          videoSubtitleSources: subtitleSources,
+          videoPlaylist: nextPlaylist,
+          videoAutoPlay: false,
+        },
+      );
+    } catch (error: any) {
+      runtimeLogger.error('加载更多合集视频失败:', error);
+      Toast.error(error?.message || '加载更多失败');
+    } finally {
+      setIsLoadingPlaylistMore(false);
+    }
+  }, [
+    fileName,
+    isLoadingPlaylistMore,
+    nodeId,
+    playlist,
+    returnTarget,
+    setFileUrl,
+    subtitleSources,
+    tabId,
+    url,
+  ]);
 
   const toggleConsole = useCallback(() => {
     if (isWideMode) {
@@ -1024,6 +1378,7 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
           break;
       }
       if (handled) {
+        markVideoSessionInteracted();
         event.stopPropagation();
         releaseExternalKeyboardFocus(event.target, viewerRootRef.current);
       }
@@ -1031,10 +1386,16 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
 
     window.addEventListener('keydown', handleKeyDown, true);
     return () => window.removeEventListener('keydown', handleKeyDown, true);
-  }, [active, adjustVolumeBy, seekBy, toggleFullscreen, togglePlay]);
+  }, [active, adjustVolumeBy, markVideoSessionInteracted, seekBy, toggleFullscreen, togglePlay]);
 
   const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
   const displayedVolume = Math.round((isMuted ? 0 : volume) * 100);
+  const detachedPosterUrl = floatingVideoState.thumbnailUrl || thumbnailUrl;
+  const detachedPosterStyle = useMemo<React.CSSProperties | undefined>(() => (
+    detachedPosterUrl
+      ? { backgroundImage: `url(${JSON.stringify(detachedPosterUrl)})` }
+      : undefined
+  ), [detachedPosterUrl]);
 
   return (
     <VideoViewerWrapper ref={viewerRootRef}>
@@ -1050,14 +1411,34 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
 
           <div className="video-stage">
             <div className="video-shell" ref={containerRef}>
-              <video
-                ref={videoRef}
-                className="video-element"
-                preload="metadata"
-                playsInline
+              <div
+                ref={videoHostRef}
+                className={`video-element-host ${isVideoHostedOutsideInline ? 'detached' : ''}`}
                 onDoubleClick={toggleFullscreen}
               />
-              {activeSubtitleCue && (
+              {isVideoHostedOutsideInline && (
+                <div className="video-detached-placeholder">
+                  {detachedPosterUrl && (
+                    <div
+                      className="video-detached-poster"
+                      style={detachedPosterStyle}
+                    />
+                  )}
+                  <div className="video-detached-card">
+                    <span className="video-detached-title">视频正在小窗播放</span>
+                    <span className="video-detached-desc">画面已移到浮窗，播放进度会继续保留。</span>
+                    <Button
+                      icon={<IconShrinkScreenStroked />}
+                      type="primary"
+                      theme="solid"
+                      onClick={restoreVideoInline}
+                    >
+                      收回 inline
+                    </Button>
+                  </div>
+                </div>
+              )}
+              {!isVideoHostedOutsideInline && activeSubtitleCue && (
                 <div
                   className="subtitle-overlay"
                   style={{
@@ -1072,7 +1453,7 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
                   ))}
                 </div>
               )}
-              {isBuffering && (
+              {!isVideoHostedOutsideInline && isBuffering && (
                 <div className="buffering-overlay">
                   <Spin size="large" tip="视频加载中..." />
                 </div>
@@ -1118,7 +1499,7 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
                           <span className="playlist-panel-title" title={playlist?.title || ''}>
                             {playlist?.title || '合集'}
                           </span>
-                          <span className="playlist-panel-count">{playlistItems.length} 集</span>
+                          <span className="playlist-panel-count">{playlistCountText}</span>
                         </div>
                         <div className="playlist-panel-list">
                           {playlistItems.map((item, index) => {
@@ -1141,6 +1522,18 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
                               </button>
                             );
                           })}
+                          {canLoadPlaylistMore && (
+                            <button
+                              type="button"
+                              className="playlist-panel-load-more"
+                              disabled={isLoadingPlaylistMore}
+                              onClick={() => {
+                                void loadMorePlaylistItems();
+                              }}
+                            >
+                              {isLoadingPlaylistMore ? '加载中...' : '加载更多'}
+                            </button>
+                          )}
                         </div>
                       </div>
                     )}
@@ -1204,6 +1597,15 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
                   onClick={toggleConsole}
                   title={isConsoleOpen ? '隐藏工具台' : '显示工具台'}
                   aria-label={isConsoleOpen ? '隐藏工具台' : '显示工具台'}
+                />
+
+                <Button
+                  icon={<span className="video-control-icon"><IconMiniPlayer /></span>}
+                  theme={isVideoHostedOutsideInline ? 'solid' : 'borderless'}
+                  type={isVideoHostedOutsideInline ? 'primary' : 'tertiary'}
+                  onClick={requestFloatingVideo}
+                  title={isVideoHostedOutsideInline ? '收回播放器' : '桌面小窗'}
+                  aria-label={isVideoHostedOutsideInline ? '收回播放器' : '桌面小窗'}
                 />
 
                 <Button

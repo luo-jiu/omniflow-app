@@ -1,0 +1,346 @@
+import { ipcRequest as request } from '@/service/request/ipcRequest';
+
+export interface ResourceMonitorSummary {
+  providerCount: number;
+  bucketCount: number;
+  objectCount: number;
+  fileRefCount: number;
+  physicalBytes: number;
+  visibleObjectCount: number;
+  visibleFileRefCount: number;
+  visibleBytes: number;
+  recycleObjectCount: number;
+  recycleFileRefCount: number;
+  recycleBytes: number;
+  orphanObjectCount: number;
+  orphanBytes: number;
+  unmatchedCount: number;
+  legacyProviderCount: number;
+}
+
+export interface ResourceMonitorProbeSummary {
+  total: number;
+  ok: number;
+  error: number;
+  unknown: number;
+}
+
+export type ResourceMonitorProbeStatus = 'ok' | 'error' | 'unknown';
+
+export interface ResourceMonitorProbeTarget {
+  key: string;
+  kind: string;
+  label: string;
+  provider?: string;
+  providerType?: string;
+  endpoint?: string;
+  bucket?: string;
+  isDefault?: boolean;
+  status: ResourceMonitorProbeStatus;
+  latencyMs: number;
+  error?: string;
+  checkedAt: string;
+}
+
+export interface ResourceMonitorStorageItem {
+  provider: string;
+  sourceProvider?: string;
+  providerType?: string;
+  providerLabel?: string;
+  endpoint?: string;
+  bucket: string;
+  isDefault: boolean;
+  isLegacyProvider: boolean;
+  objectCount: number;
+  fileRefCount: number;
+  physicalBytes: number;
+  visibleObjectCount: number;
+  visibleFileRefCount: number;
+  visibleBytes: number;
+  recycleObjectCount: number;
+  recycleFileRefCount: number;
+  recycleBytes: number;
+  orphanObjectCount: number;
+  orphanBytes: number;
+  percent: number;
+  matchedConfig: boolean;
+}
+
+export interface ResourceMonitorSnapshot {
+  generatedAt: string;
+  summary: ResourceMonitorSummary;
+  storage: ResourceMonitorStorageItem[];
+  distributionError?: string;
+  probeSummary: ResourceMonitorProbeSummary;
+  probes: ResourceMonitorProbeTarget[];
+}
+
+export interface ResourceMonitorBreakdownSummary {
+  libraryCount: number;
+  archiveDirectoryCount: number;
+  physicalBytes: number;
+  referencedBytes: number;
+  objectCount: number;
+  fileRefCount: number;
+  visibleObjectCount: number;
+  visibleFileRefCount: number;
+  visibleBytes: number;
+  recycleObjectCount: number;
+  recycleFileRefCount: number;
+  recycleBytes: number;
+  orphanObjectCount: number;
+  orphanBytes: number;
+  multiRefObjectCount: number;
+  multiRefPhysicalBytes: number;
+}
+
+export interface ResourceMonitorBreakdownLibrary {
+  libraryId: number;
+  libraryName: string;
+  physicalBytes: number;
+  referencedBytes: number;
+  objectCount: number;
+  fileRefCount: number;
+  archiveDirectoryCount: number;
+  visibleBytes: number;
+  recycleBytes: number;
+  orphanBytes: number;
+  topProvider?: string;
+  topBucket?: string;
+  percent: number;
+}
+
+export interface ResourceMonitorBreakdownCategory {
+  key: string;
+  label: string;
+  builtInType?: string;
+  physicalBytes: number;
+  referencedBytes: number;
+  objectCount: number;
+  fileRefCount: number;
+  archiveDirectoryCount: number;
+  visibleBytes: number;
+  recycleBytes: number;
+  orphanBytes: number;
+  percent: number;
+}
+
+export interface ResourceMonitorBreakdownStatus {
+  key: 'visible' | 'recycle' | 'orphan' | string;
+  label: string;
+  physicalBytes: number;
+  objectCount: number;
+  fileRefCount: number;
+  percent: number;
+}
+
+export interface ResourceMonitorBreakdownAnomaly {
+  key: string;
+  severity: 'info' | 'warning' | 'danger' | string;
+  title: string;
+  message: string;
+  libraryId?: number;
+  provider?: string;
+  bucket?: string;
+  physicalBytes?: number;
+  objectCount?: number;
+}
+
+export interface ResourceMonitorBreakdown {
+  generatedAt: string;
+  summary: ResourceMonitorBreakdownSummary;
+  libraries: ResourceMonitorBreakdownLibrary[];
+  categories: ResourceMonitorBreakdownCategory[];
+  statuses: ResourceMonitorBreakdownStatus[];
+  anomalies: ResourceMonitorBreakdownAnomaly[];
+  breakdownError?: string;
+}
+
+export interface ResourceMonitorDashboardDimension {
+  key: string;
+  label: string;
+  builtInType?: string;
+  physicalBytes: number;
+  referencedBytes: number;
+  objectCount: number;
+  fileRefCount: number;
+  percent: number;
+}
+
+export interface ResourceMonitorDashboardMatrixItem {
+  collectionKey: string;
+  collectionLabel: string;
+  collectionBuiltInType?: string;
+  fileTypeKey: string;
+  fileTypeLabel: string;
+  physicalBytes: number;
+  referencedBytes: number;
+  objectCount: number;
+  fileRefCount: number;
+  percentOfCollection: number;
+  percentOfTotal: number;
+}
+
+export interface ResourceMonitorDashboard {
+  generatedAt: string;
+  summary: ResourceMonitorBreakdownSummary;
+  fileTypes: ResourceMonitorDashboardDimension[];
+  collections: ResourceMonitorDashboardDimension[];
+  collectionFileTypeMatrix: ResourceMonitorDashboardMatrixItem[];
+  libraries: ResourceMonitorBreakdownLibrary[];
+  statuses: ResourceMonitorBreakdownStatus[];
+  anomalies: ResourceMonitorBreakdownAnomaly[];
+  dashboardError?: string;
+}
+
+export interface ResourceMonitorSnapshotOptions {
+  libraryId?: number;
+  dryRun?: boolean;
+}
+
+export interface ResourceMonitorSample {
+  id: number;
+  dryRun: boolean;
+  actorId: string;
+  scope: 'global' | 'library' | string;
+  libraryId: number;
+  generatedAt: string;
+  physicalBytes: number;
+  objectCount: number;
+  fileRefCount: number;
+  recycleBytes: number;
+  orphanBytes: number;
+  probeTotal: number;
+  probeOk: number;
+  probeError: number;
+  createdAt: string;
+}
+
+const emptySnapshot: ResourceMonitorSnapshot = {
+  generatedAt: '',
+  summary: {
+    providerCount: 0,
+    bucketCount: 0,
+    objectCount: 0,
+    fileRefCount: 0,
+    physicalBytes: 0,
+    visibleObjectCount: 0,
+    visibleFileRefCount: 0,
+    visibleBytes: 0,
+    recycleObjectCount: 0,
+    recycleFileRefCount: 0,
+    recycleBytes: 0,
+    orphanObjectCount: 0,
+    orphanBytes: 0,
+    unmatchedCount: 0,
+    legacyProviderCount: 0,
+  },
+  storage: [],
+  distributionError: '',
+  probeSummary: {
+    total: 0,
+    ok: 0,
+    error: 0,
+    unknown: 0,
+  },
+  probes: [],
+};
+
+const emptyBreakdown: ResourceMonitorBreakdown = {
+  generatedAt: '',
+  summary: {
+    libraryCount: 0,
+    archiveDirectoryCount: 0,
+    physicalBytes: 0,
+    referencedBytes: 0,
+    objectCount: 0,
+    fileRefCount: 0,
+    visibleObjectCount: 0,
+    visibleFileRefCount: 0,
+    visibleBytes: 0,
+    recycleObjectCount: 0,
+    recycleFileRefCount: 0,
+    recycleBytes: 0,
+    orphanObjectCount: 0,
+    orphanBytes: 0,
+    multiRefObjectCount: 0,
+    multiRefPhysicalBytes: 0,
+  },
+  libraries: [],
+  categories: [],
+  statuses: [],
+  anomalies: [],
+  breakdownError: '',
+};
+
+const emptyDashboard: ResourceMonitorDashboard = {
+  generatedAt: '',
+  summary: { ...emptyBreakdown.summary },
+  fileTypes: [],
+  collections: [],
+  collectionFileTypeMatrix: [],
+  libraries: [],
+  statuses: [],
+  anomalies: [],
+  dashboardError: '',
+};
+
+export async function fetchResourceMonitorSnapshot(
+  options: ResourceMonitorSnapshotOptions = {},
+): Promise<ResourceMonitorSnapshot> {
+  const query = options.libraryId && options.libraryId > 0
+    ? `?libraryId=${encodeURIComponent(String(options.libraryId))}`
+    : '';
+  const body = await request(`/v1/resource-monitor/snapshot${query}`, { method: 'GET' });
+  return (body?.data || emptySnapshot) as ResourceMonitorSnapshot;
+}
+
+export async function fetchResourceMonitorDistribution(
+  options: ResourceMonitorSnapshotOptions = {},
+): Promise<ResourceMonitorSnapshot> {
+  const query = options.libraryId && options.libraryId > 0
+    ? `?libraryId=${encodeURIComponent(String(options.libraryId))}`
+    : '';
+  const body = await request(`/v1/resource-monitor/distribution${query}`, { method: 'GET' });
+  return (body?.data || emptySnapshot) as ResourceMonitorSnapshot;
+}
+
+export async function fetchResourceMonitorProbes(): Promise<ResourceMonitorSnapshot> {
+  const body = await request('/v1/resource-monitor/probes', { method: 'GET' });
+  return (body?.data || emptySnapshot) as ResourceMonitorSnapshot;
+}
+
+export async function fetchResourceMonitorBreakdown(
+  options: ResourceMonitorSnapshotOptions = {},
+): Promise<ResourceMonitorBreakdown> {
+  const query = options.libraryId && options.libraryId > 0
+    ? `?libraryId=${encodeURIComponent(String(options.libraryId))}`
+    : '';
+  const body = await request(`/v1/resource-monitor/breakdown${query}`, { method: 'GET' });
+  return (body?.data || emptyBreakdown) as ResourceMonitorBreakdown;
+}
+
+export async function fetchResourceMonitorDashboard(
+  options: ResourceMonitorSnapshotOptions = {},
+): Promise<ResourceMonitorDashboard> {
+  const query = options.libraryId && options.libraryId > 0
+    ? `?libraryId=${encodeURIComponent(String(options.libraryId))}`
+    : '';
+  const body = await request(`/v1/resource-monitor/dashboard${query}`, { method: 'GET' });
+  return (body?.data || emptyDashboard) as ResourceMonitorDashboard;
+}
+
+export async function captureResourceMonitorSample(
+  options: ResourceMonitorSnapshotOptions = {},
+): Promise<ResourceMonitorSample> {
+  const params = new URLSearchParams();
+  if (options.libraryId && options.libraryId > 0) {
+    params.set('libraryId', String(options.libraryId));
+  }
+  if (options.dryRun) {
+    params.set('dryRun', 'true');
+  }
+  const query = params.toString() ? `?${params.toString()}` : '';
+  const body = await request(`/v1/resource-monitor/samples${query}`, { method: 'POST' });
+  return body?.data as ResourceMonitorSample;
+}

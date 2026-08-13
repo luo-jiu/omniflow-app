@@ -16,6 +16,16 @@ export function invalidateRepositoryTreeSnapshot(libraryId: number) {
   repositoryTreeSnapshotStore.delete(libraryId);
 }
 
+export function clearRepositoryTreeSnapshot(libraryId: number) {
+  repositoryTreeSnapshotStore.delete(libraryId);
+  repositoryTreeDirtyLibraries.delete(libraryId);
+}
+
+export function clearAllRepositoryTreeSnapshots() {
+  repositoryTreeSnapshotStore.clear();
+  repositoryTreeDirtyLibraries.clear();
+}
+
 export function markRepositoryTreeSnapshotDirty(libraryId: number) {
   repositoryTreeDirtyLibraries.add(libraryId);
 }

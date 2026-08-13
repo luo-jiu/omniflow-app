@@ -1,17 +1,20 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Modal, Avatar, Toast } from '@douyinfe/semi-ui'
+import { Modal, Avatar, Popover, Toast } from '@douyinfe/semi-ui'
+import { IconMusic, IconRefresh } from '@douyinfe/semi-icons'
 
 import LibraryWrapper, {
   ContentRow,
   VerticalDivider,
   CardArea,
-  RightHeader,
   RightHeaderTitle,
   RightHeaderDivider,
   CardScroll,
   CardGrid,
-  EmptyTip
+  EmptyTip,
+  LibrarySystemFrame,
+  LibrarySystemScroll,
+  LibraryMainToolbar,
 } from './style'
 
 import { useLibraryPage } from './hooks/useLibraryPage.ts'
@@ -23,11 +26,18 @@ import LibraryContextMenu from './components/library-context-menu'
 import LibraryCreateModal from './components/library-create-modal'
 import LibraryEditModal from './components/library-edit-modal'
 import type { Library } from "@/features/file-explorer/services/file.api"
-import { clearFileViewerStateCache } from '@/contexts/file-viewer-cache'
-import {
-  clearLibraryDetailWorkspaceState,
-  loadLibraryDetailWorkspaceState,
-} from './detail/workspace-state'
+import { useMediaEntries } from '@/hooks/useMediaRegistry'
+import { mediaRegistry } from '@/contexts/media-registry.singleton'
+import MediaHubPopover from '@/components/business/media-hub-popover'
+import { setPendingActivation } from '@/contexts/file-viewer-pending-activation'
+import { getAppPopupContainer } from '@/utils/popup-container'
+import { systemWorkspaceMeta, systemWorkspaceViews } from '@/features/system-workspace/registry'
+import type {
+  SettingsWorkspaceSection,
+  SystemWorkspaceView,
+} from '@/features/system-workspace'
+import { disposeLibraryWorkspace } from '@/features/workspace-resource-release'
+import { useViewerAccountScope } from '@/features/file-viewer/session'
 
 type MenuState = {
   visible: boolean
@@ -40,13 +50,18 @@ type MenuState = {
 const MENU_WIDTH = 300
 const MENU_HEIGHT = 200
 const PADDING = 10
+type LibrarySystemView = Extract<SystemWorkspaceView, 'settings' | 'profile' | 'resource-monitor'>
 
 const LibraryPage: React.FC = () => {
   const navigate = useNavigate()
   const { user, isLoggedIn } = useAuth()
+  const viewerAccountScope = useViewerAccountScope()
   const displayName = isLoggedIn ? user?.nickname || user?.username || 'User' : '未登录'
+  const mediaEntries = useMediaEntries()
   const {
     libraries,
+    loading,
+    loadLibraries,
     handleCreateLibrary,
     handleDeleteLibrary,
     applyLocalLibraryEdit,
@@ -67,28 +82,61 @@ const LibraryPage: React.FC = () => {
   const [editName, setEditName] = useState('')
   const [editStarred, setEditStarred] = useState(false)
   const [quickAccessMode, setQuickAccessMode] = useState<QuickAccessMode>('all')
+  const [librarySystemView, setLibrarySystemView] = useState<LibrarySystemView | null>(null)
+  const [librarySettingsSection, setLibrarySettingsSection] = useState<SettingsWorkspaceSection>('home')
 
   const wrapperRef = useRef<HTMLDivElement>(null)
 
   const userContent = (
     <div
       className="user-trigger"
-      onClick={() => navigate(isLoggedIn ? '/profile' : '/login')}
+      onClick={(event) => {
+        event.stopPropagation()
+        if (!isLoggedIn) {
+          navigate('/login')
+          return
+        }
+        setLibrarySystemView('profile')
+      }}
+      title={isLoggedIn ? displayName : '登录'}
     >
       <Avatar
-        size="small"
+        size="extra-extra-small"
         src={user?.avatar}
         style={{
-          width: 42,
-          height: 42,
-          fontSize: 17,
           backgroundColor: isLoggedIn ? 'var(--app-accent)' : 'var(--semi-color-fill-2)',
         }}
       >
-        {isLoggedIn ? (displayName?.[0]?.toUpperCase() || 'U') : '?'}
+        {isLoggedIn ? (displayName?.[0]?.toUpperCase() || 'U') : '未'}
       </Avatar>
     </div>
   )
+
+  const handleMediaActivate = (tabId: string) => {
+    const entry = mediaEntries.find(item => item.tabId === tabId)
+    if (!entry || entry.libraryId == null) return
+    setPendingActivation(entry.libraryId, tabId)
+    navigate(`/libraries/${entry.libraryId}`)
+  }
+
+  const handleMediaRefresh = () => {
+    void loadLibraries()
+  }
+
+  const closeLibrarySystemView = () => {
+    setLibrarySystemView(null)
+    setLibrarySettingsSection('home')
+  }
+
+  const openLibrarySettingsView = () => {
+    setLibrarySystemView('settings')
+    setLibrarySettingsSection('home')
+  }
+
+  const openLibraryResourceMonitorView = () => {
+    setLibrarySystemView('resource-monitor')
+    setLibrarySettingsSection('home')
+  }
 
   // 关闭右键菜单：点击空白或 ESC
   useEffect(() => {
@@ -203,19 +251,24 @@ const LibraryPage: React.FC = () => {
     library: Pick<Library, 'id' | 'name'>,
     options?: { showToast?: boolean },
   ) => {
-    const cacheKey = `library:${library.id}`
-    const workspaceState = loadLibraryDetailWorkspaceState(cacheKey)
-    const browserTabIds = workspaceState.browserTabs.map((tab) => tab.id)
-    await Promise.allSettled(
-      browserTabIds.map((tabId) => window.electronEmbeddedBrowser.closeTab(tabId))
-    )
-    await window.electronEmbeddedBrowser.deactivate().catch(() => undefined)
-    clearLibraryDetailWorkspaceState(cacheKey)
-    clearFileViewerStateCache(cacheKey)
+    const result = await disposeLibraryWorkspace(library.id, {
+      accountScope: viewerAccountScope,
+    })
     if (options?.showToast) {
+      const incompleteReasons: string[] = []
+      if (result.failedBrowserTabIds.length > 0) {
+        incompleteReasons.push(`${result.failedBrowserTabIds.length} 个浏览器视图未确认关闭`)
+      }
+      if (result.viewerSessionCleanupFailed) {
+        incompleteReasons.push('设备阅读现场未确认清除')
+      }
+      if (incompleteReasons.length > 0) {
+        Toast.warning(`已清空「${library.name}」的工作区状态，但${incompleteReasons.join('，')}`)
+        return
+      }
       Toast.success(`已释放「${library.name}」的工作区资源`)
     }
-  }, [])
+  }, [viewerAccountScope])
 
   const doReleaseWorkspace = () => {
     const library = menu.library
@@ -259,6 +312,11 @@ const LibraryPage: React.FC = () => {
   }, [quickAccessMode])
 
   const isEmpty = useMemo(() => visibleLibraries.length === 0, [visibleLibraries])
+  const activeSystemMeta = librarySystemView ? systemWorkspaceMeta[librarySystemView] : null
+  const ActiveSystemView = librarySystemView ? systemWorkspaceViews[librarySystemView] : null
+  const librarySystemFrameSize = librarySystemView === 'settings' && librarySettingsSection !== 'home'
+    ? 'detail'
+    : 'normal'
 
   return (
     <LibraryWrapper ref={wrapperRef} onContextMenu={preventSystemMenu}>
@@ -266,18 +324,86 @@ const LibraryPage: React.FC = () => {
         <QuickAccessSidebar
           mode={quickAccessMode}
           onModeChange={setQuickAccessMode}
-          onOpenSettings={() => navigate('/settings')}
+          onOpenSettings={openLibrarySettingsView}
+          onOpenResourceMonitor={openLibraryResourceMonitorView}
+          onSidebarClick={closeLibrarySystemView}
+          footerContent={userContent}
         />
         <VerticalDivider />
-        <CardArea onContextMenu={handleBlankContextMenu}>
-          <RightHeader>
-            <RightHeaderTitle>我的库</RightHeaderTitle>
-            <div className="header-right">
-              {userContent}
+        <CardArea onContextMenu={librarySystemView ? undefined : handleBlankContextMenu}>
+          <LibraryMainToolbar>
+            <div className="toolbar-left">
+              <RightHeaderTitle>{activeSystemMeta?.title || '我的库'}</RightHeaderTitle>
             </div>
-          </RightHeader>
+            <div className="toolbar-spacer" />
+            <div className="toolbar-right">
+              {mediaEntries.length > 0 ? (
+                <Popover
+                  trigger="click"
+                  showArrow={false}
+                  position="bottomRight"
+                  spacing={6}
+                  getPopupContainer={getAppPopupContainer}
+                  content={
+                    <MediaHubPopover
+                      entries={mediaEntries}
+                      onActivate={handleMediaActivate}
+                      onToggle={(entry) => {
+                        if (entry.isPlaying) {
+                          mediaRegistry.pause(entry.entryId)
+                        } else {
+                          void mediaRegistry.play(entry.entryId)
+                        }
+                      }}
+                      onSeek={(entry, time) => {
+                        mediaRegistry.seek(entry.entryId, time)
+                      }}
+                      onDismiss={(entry) => {
+                        mediaRegistry.dismiss(entry.entryId)
+                      }}
+                    />
+                  }
+                >
+                  <button
+                    type="button"
+                    className="toolbar-action-btn"
+                    title="正在播放的媒体"
+                  >
+                    <IconMusic />
+                  </button>
+                </Popover>
+              ) : null}
+              <button
+                type="button"
+                className="toolbar-action-btn"
+                onClick={handleMediaRefresh}
+                title="刷新库列表"
+                disabled={loading}
+              >
+                <IconRefresh />
+              </button>
+            </div>
+          </LibraryMainToolbar>
           <RightHeaderDivider />
-          {isEmpty ? (
+          {ActiveSystemView ? (
+            <LibrarySystemScroll>
+              <LibrarySystemFrame data-size={librarySystemFrameSize}>
+                <ActiveSystemView
+                  currentView={librarySystemView as SystemWorkspaceView}
+                  libraryId={0}
+                  onClose={closeLibrarySystemView}
+                  onOpenLegacyRoute={navigate}
+                  onOpenView={(view) => {
+                    if (view === 'settings' || view === 'profile' || view === 'resource-monitor') {
+                      setLibrarySystemView(view)
+                    }
+                  }}
+                  onSettingsSectionChange={setLibrarySettingsSection}
+                  settingsSection={librarySystemView === 'settings' ? librarySettingsSection : 'home'}
+                />
+              </LibrarySystemFrame>
+            </LibrarySystemScroll>
+          ) : isEmpty ? (
             <EmptyTip>{emptyTip}</EmptyTip>
           ) : (
             <CardScroll onContextMenu={handleBlankContextMenu}>

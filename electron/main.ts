@@ -1,14 +1,33 @@
-import { app, BrowserWindow, Menu, screen } from 'electron'
+import { app, BrowserWindow, Menu, protocol, screen } from 'electron'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import registerIpcHandlers from './ipc'
 import { createEmbeddedBrowserMainController } from './service/embeddedBrowserMainController'
+import { isDevToolsToggleShortcut } from './service/embeddedBrowserInputShortcuts'
 import { registerWindowControlIpcHandlers } from './service/windowControlIpc'
 import { createOverlayWindowController } from './service/overlayWindowController'
 import { registerOverlayWindowIpcHandlers } from './service/overlayWindowIpc'
+import { createSystemVideoWindowController } from './service/systemVideoWindowController'
+import { registerSystemVideoWindowIpcHandlers } from './service/systemVideoWindowIpc'
+import { IMAGE_PREVIEW_PROTOCOL, registerImagePreviewProtocol } from './ipc/imagePreview'
+import {
+  applyMainWindowPlatformBehavior,
+  getMainWindowPlatformOptions,
+} from './platform'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
+
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: IMAGE_PREVIEW_PROTOCOL,
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+    },
+  },
+])
 
 process.env.APP_ROOT = path.join(__dirname, '..')
 
@@ -29,12 +48,20 @@ const MIN_WINDOW_WIDTH = 1120
 const MIN_WINDOW_HEIGHT = 720
 const WINDOW_STATE_FILENAME = 'window-state.json'
 const WINDOW_STATE_SAVE_DEBOUNCE_MS = 200
-const MACOS_TRAFFIC_LIGHT_POSITION = { x: 14, y: 11 } as const
 const ENABLE_EMBEDDED_BROWSER_DEBUG =
   process.env.NODE_ENV === 'test' ||
   Boolean(VITE_DEV_SERVER_URL || process.env.ELECTRON_RENDERER_URL) ||
   process.env.OMNIFLOW_ENABLE_RUNTIME_LOGS === 'true'
 const ENABLE_CHROMIUM_RUNTIME_LOGS = process.env.OMNIFLOW_ENABLE_CHROMIUM_LOGS === 'true'
+
+function resolveUserDataDirname() {
+  const suffix = String(process.env.OMNIFLOW_USER_DATA_SUFFIX || '').trim()
+  if (!suffix) {
+    return LEGACY_USER_DATA_DIRNAME
+  }
+  const normalizedSuffix = suffix.replace(/[^a-zA-Z0-9_-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '')
+  return normalizedSuffix ? `${LEGACY_USER_DATA_DIRNAME}-${normalizedSuffix}` : LEGACY_USER_DATA_DIRNAME
+}
 
 if (!ENABLE_CHROMIUM_RUNTIME_LOGS) {
   app.commandLine.appendSwitch('disable-logging')
@@ -43,7 +70,7 @@ if (!ENABLE_CHROMIUM_RUNTIME_LOGS) {
 
 app.setName(APP_DISPLAY_NAME)
 try {
-  const stableUserDataPath = path.join(app.getPath('appData'), LEGACY_USER_DATA_DIRNAME)
+  const stableUserDataPath = path.join(app.getPath('appData'), resolveUserDataDirname())
   app.setPath('userData', stableUserDataPath)
 } catch {
   // ignore
@@ -51,14 +78,6 @@ try {
 
 function getAppIconPath() {
   return existsSync(APP_ICON_PATH) ? APP_ICON_PATH : null
-}
-
-function applyMacOSWindowButtonPosition(win: BrowserWindow) {
-  if (process.platform !== 'darwin') {
-    return
-  }
-
-  win.setWindowButtonPosition(MACOS_TRAFFIC_LIGHT_POSITION)
 }
 
 let mainWindow: BrowserWindow | null = null
@@ -176,35 +195,23 @@ function scheduleSaveWindowState(win: BrowserWindow) {
   }, WINDOW_STATE_SAVE_DEBOUNCE_MS)
 }
 
-function isToggleDevToolsShortcut(input: Electron.Input) {
-  if (input.type !== 'keyDown') {
-    return false
-  }
-
-  const key = (input.key || '').toLowerCase()
-  return (input.meta || input.control) && input.shift && key === 'i'
-}
-
-function isChromiumPageZoomShortcut(input: Electron.Input) {
+function getChromiumPageZoomShortcutAction(input: Electron.Input): 'zoom-in' | 'zoom-out' | 'reset' | null {
   if (input.type !== 'keyDown' || !(input.meta || input.control)) {
-    return false
+    return null
   }
 
   const key = (input.key || '').toLowerCase()
   const code = input.code || ''
-  return (
-    key === '+'
-    || key === '='
-    || key === '-'
-    || key === '_'
-    || key === '0'
-    || code === 'Equal'
-    || code === 'Minus'
-    || code === 'Digit0'
-    || code === 'NumpadAdd'
-    || code === 'NumpadSubtract'
-    || code === 'Numpad0'
-  )
+  if (key === '+' || key === '=' || code === 'Equal' || code === 'NumpadAdd') {
+    return 'zoom-in'
+  }
+  if (key === '-' || key === '_' || code === 'Minus' || code === 'NumpadSubtract') {
+    return 'zoom-out'
+  }
+  if (key === '0' || code === 'Digit0' || code === 'Numpad0') {
+    return 'reset'
+  }
+  return null
 }
 
 const embeddedBrowserMainController = createEmbeddedBrowserMainController({
@@ -217,6 +224,11 @@ const overlayWindowController = createOverlayWindowController({
   preloadPath: path.join(MAIN_DIST, 'preload.mjs'),
   rendererDist: RENDERER_DIST,
   devServerUrl: VITE_DEV_SERVER_URL,
+})
+
+const systemVideoWindowController = createSystemVideoWindowController({
+  getMainWindow: () => mainWindow,
+  preloadPath: path.join(MAIN_DIST, 'preload.mjs'),
 })
 
 function createWindow() {
@@ -236,10 +248,7 @@ function createWindow() {
     height: initialHeight,
     minWidth: MIN_WINDOW_WIDTH,
     minHeight: MIN_WINDOW_HEIGHT,
-    vibrancy: 'sidebar',
-    visualEffectState: 'active',
-    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
-    ...(process.platform === 'darwin' ? { trafficLightPosition: MACOS_TRAFFIC_LIGHT_POSITION } : {}),
+    ...getMainWindowPlatformOptions(),
     ...(isFiniteNumber(persistedWindowState?.x) && isFiniteNumber(persistedWindowState?.y)
       ? { x: persistedWindowState.x, y: persistedWindowState.y }
       : {}),
@@ -251,7 +260,7 @@ function createWindow() {
     ...(appIconPath ? { icon: appIconPath } : {}),
   })
   mainWindow = win
-  applyMacOSWindowButtonPosition(win)
+  applyMainWindowPlatformBehavior(win)
 
   if (persistedWindowState?.maximized) {
     win.maximize()
@@ -314,16 +323,24 @@ function createWindow() {
       mainWindow = null
     }
     overlayWindowController.destroy()
+    systemVideoWindowController.destroy()
   })
 
   win.webContents.on('before-input-event', (event, input) => {
-    if (isChromiumPageZoomShortcut(input)) {
+    if (embeddedBrowserMainController.handleActiveViewInputShortcut(input)) {
       event.preventDefault()
-      win.webContents.setZoomFactor(1)
       return
     }
 
-    if (!isToggleDevToolsShortcut(input)) {
+    const zoomShortcutAction = getChromiumPageZoomShortcutAction(input)
+    if (zoomShortcutAction) {
+      event.preventDefault()
+      win.webContents.setZoomFactor(1)
+      win.webContents.send('app:viewer-zoom-shortcut', { action: zoomShortcutAction })
+      return
+    }
+
+    if (!isDevToolsToggleShortcut(input)) {
       return
     }
 
@@ -356,6 +373,7 @@ app.on('before-quit', () => {
     saveWindowState(mainWindow)
   }
   overlayWindowController.destroy()
+  systemVideoWindowController.destroy()
 })
 
 app.on('window-all-closed', () => {
@@ -386,6 +404,7 @@ app.whenReady().then(() => {
   }
 
   embeddedBrowserMainController.configureSession()
+  registerImagePreviewProtocol()
   embeddedBrowserMainController.initializeBridges()
   registerIpcHandlers()
   registerWindowControlIpcHandlers({
@@ -393,7 +412,16 @@ app.whenReady().then(() => {
   })
   embeddedBrowserMainController.registerIpcHandlers()
   registerOverlayWindowIpcHandlers(overlayWindowController)
+  registerSystemVideoWindowIpcHandlers(systemVideoWindowController)
 
+  const toggleActiveDevToolsFromMenu = () => {
+    if (embeddedBrowserMainController.toggleActiveViewDevTools()) {
+      return
+    }
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.toggleDevTools()
+    }
+  }
   const template: Electron.MenuItemConstructorOptions[] = [
     ...(process.platform === 'darwin'
       ? [{
@@ -421,6 +449,23 @@ app.whenReady().then(() => {
         { role: 'copy' },
         { role: 'paste' },
         { role: 'selectAll' },
+      ],
+    },
+    {
+      label: 'View',
+      submenu: [
+        {
+          accelerator: process.platform === 'darwin' ? 'Command+Alt+I' : 'CommandOrControl+Shift+I',
+          click: toggleActiveDevToolsFromMenu,
+          label: 'Toggle Developer Tools',
+        },
+        ...(process.platform === 'darwin'
+          ? []
+          : [{
+              accelerator: 'F12',
+              click: toggleActiveDevToolsFromMenu,
+              label: 'Toggle Developer Tools (F12)',
+            }]),
       ],
     },
     {

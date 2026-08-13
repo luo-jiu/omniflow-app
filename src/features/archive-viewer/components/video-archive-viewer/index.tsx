@@ -2,14 +2,16 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Input, Modal, Popover, Spin, Toast } from '@douyinfe/semi-ui';
 import {
   batchGetFileLinks,
-  deleteNodeAndChildren,
   fetchArchiveCardsPage,
   getChildrenByNodeId,
   getFileLink,
   renameNode,
   type ArchiveCardDTO,
+  type ArchiveCardsPageResult,
 } from '@/features/file-explorer/services/file.api';
+import { softDeleteNodeSubtree } from '@/features/file-explorer/services/node-deletion';
 import { runtimeLogger } from '@/utils/runtimeLogger';
+import { useViewerSession, type ViewerSessionAdapter } from '@/features/file-viewer/session';
 import { VideoArchiveViewerWrapper } from './style';
 import { useFileViewer } from '@/hooks/useFileViewer';
 import { useArchiveCardGrid } from '@/features/archive-viewer/hooks/useArchiveCardGrid';
@@ -22,20 +24,19 @@ import type {
   FileViewerVideoPlaylistItem,
 } from '@/contexts/file-viewer.context';
 import {
-  buildVideoArchiveSidecarIndex,
   buildVideoSubtitleSources,
   normalizeVideoArchiveMatchName,
   VIDEO_ARCHIVE_EMPTY_SIDECARS,
   type VideoArchiveChildNode,
   type VideoArchiveSidecarIndex,
 } from './video-archive-sidecars';
-
-interface VideoArchiveViewerProps {
-  folderNodeId: number | null;
-  fileUrl: string;
-  fileName?: string | null;
-  active?: boolean;
-}
+import {
+  ARCHIVE_CARD_SESSION_ESTIMATED_BYTES,
+  ARCHIVE_CARD_SESSION_SCHEMA_VERSION,
+  parseArchiveCardSessionSnapshot,
+  resolveArchiveCardRestoreScrollTop,
+  type ArchiveCardSessionSnapshot,
+} from '@/features/archive-viewer/session/archive-card-session';
 
 interface VideoArchiveCard {
   id: number;
@@ -50,38 +51,22 @@ interface VideoArchiveCard {
   durationSeconds?: number;
 }
 
-interface VideoArchiveSnapshot {
-  hasLoadedList: boolean;
-  cards: VideoArchiveCard[];
-  nextOffset: number;
-  total: number;
-  hasMore: boolean;
-  scrollTop: number;
+interface VideoArchiveViewerProps {
+  accountScope: string | null;
+  contentRevision: string | null;
+  folderNodeId: number | null;
+  fileUrl: string;
+  fileName?: string | null;
+  libraryId: number | null;
+  active?: boolean;
+  reloadToken?: number;
+  tabId: string;
 }
 
 const PAGE_SIZE = 24;
-const COLLECTION_PLAYLIST_PAGE_SIZE = 200;
+const COLLECTION_PLAYLIST_PAGE_SIZE = 80;
 const LINK_EXPIRY_MINUTES = 120;
-const VIDEO_ARCHIVE_CACHE_MAX_ENTRIES = 24;
 const VIDEO_PREVIEW_SAMPLE_TIME = 0.5;
-
-const EMPTY_VIDEO_ARCHIVE_SNAPSHOT: VideoArchiveSnapshot = {
-  hasLoadedList: false,
-  cards: [],
-  nextOffset: 0,
-  total: 0,
-  hasMore: false,
-  scrollTop: 0,
-};
-
-const videoArchiveSnapshotCache = new Map<string, VideoArchiveSnapshot>();
-
-function parseArchiveLibraryId(fileUrl: string): number | null {
-  const matches = /^video-archive:\/\/library\/(\d+)\/node\/\d+$/i.exec(String(fileUrl || '').trim());
-  if (!matches) return null;
-  const parsed = Number(matches[1]);
-  return Number.isFinite(parsed) ? parsed : null;
-}
 
 function normalizeArchiveTitle(fileName?: string | null): string {
   const raw = String(fileName || '').trim();
@@ -91,11 +76,6 @@ function normalizeArchiveTitle(fileName?: string | null): string {
     if (stripped) return stripped;
   }
   return raw;
-}
-
-function resolveReaderCacheKey(fileUrl: string, folderNodeId: number | null): string | null {
-  if (!folderNodeId || !Number.isFinite(folderNodeId)) return null;
-  return `${String(fileUrl || '').trim()}::${folderNodeId}`;
 }
 
 function normalizeVideoArchiveCardKind(input?: string | null): VideoArchiveCard['cardKind'] {
@@ -136,42 +116,23 @@ function mapVideoArchiveCards(
   });
 }
 
-async function fetchAllCollectionArchiveCards(collectionNodeId: number, libraryId: number): Promise<ArchiveCardDTO[]> {
-  const items: ArchiveCardDTO[] = [];
-  let offset = 0;
+async function fetchCollectionArchiveCardsPage(
+  collectionNodeId: number,
+  libraryId: number,
+  offset = 0,
+): Promise<ArchiveCardsPageResult> {
+  return fetchArchiveCardsPage({
+    nodeId: collectionNodeId,
+    libraryId,
+    builtInType: 'VIDEO',
+    offset,
+    limit: COLLECTION_PLAYLIST_PAGE_SIZE,
+  });
+}
 
-  for (;;) {
-    const page = await fetchArchiveCardsPage({
-      nodeId: collectionNodeId,
-      libraryId,
-      builtInType: 'VIDEO',
-      offset,
-      limit: COLLECTION_PLAYLIST_PAGE_SIZE,
-    });
-    items.push(...page.items);
-
-    if (!page.hasMore) {
-      break;
-    }
-
-    const pageOffset = Number.isFinite(Number(page.offset)) ? Number(page.offset) : offset;
-    const pageLimit = Number.isFinite(Number(page.limit)) && Number(page.limit) > 0
-      ? Number(page.limit)
-      : COLLECTION_PLAYLIST_PAGE_SIZE;
-    const nextOffset = Math.max(pageOffset + pageLimit, offset + page.items.length);
-    if (nextOffset <= offset || page.items.length === 0) {
-      runtimeLogger.warn('视频合集播放列表分页未能继续推进，已停止继续加载:', {
-        collectionNodeId,
-        libraryId,
-        offset,
-        nextOffset,
-      });
-      break;
-    }
-    offset = nextOffset;
-  }
-
-  return items;
+function resolveArchivePageNextOffset(page: ArchiveCardsPageResult, fallbackOffset: number): number {
+  const pageOffset = Number.isFinite(Number(page.offset)) ? Number(page.offset) : fallbackOffset;
+  return pageOffset + page.items.length;
 }
 
 function buildSameLevelSubtitleSources(
@@ -203,19 +164,6 @@ function buildCollectionPlaylistItem(
     subtitleCardNodeId,
     subtitleSources: subtitleCardNodeId ? undefined : buildSameLevelSubtitleSources(card, sidecarIndex, libraryId),
   };
-}
-
-function setArchiveSnapshotCache(cacheKey: string, snapshot: VideoArchiveSnapshot) {
-  if (videoArchiveSnapshotCache.has(cacheKey)) {
-    videoArchiveSnapshotCache.delete(cacheKey);
-  }
-  videoArchiveSnapshotCache.set(cacheKey, snapshot);
-  if (videoArchiveSnapshotCache.size > VIDEO_ARCHIVE_CACHE_MAX_ENTRIES) {
-    const oldest = videoArchiveSnapshotCache.keys().next().value;
-    if (oldest) {
-      videoArchiveSnapshotCache.delete(oldest);
-    }
-  }
 }
 
 function seekVideoPreviewFrame(video: HTMLVideoElement) {
@@ -250,23 +198,23 @@ function formatVideoDuration(durationSeconds?: number): string {
 }
 
 const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
+  accountScope,
+  contentRevision,
   folderNodeId,
   fileUrl,
   fileName,
+  libraryId,
   active = true,
+  reloadToken = 0,
+  tabId,
 }) => {
-  const { setFileUrl } = useFileViewer();
+  const { closeTabByNodeId, setFileUrl } = useFileViewer();
   const { viewportRef, wrapperStyle } = useArchiveCardGrid({
     baseCardWidth: 275,
     gridGap: 15,
   });
-  const libraryId = useMemo(() => parseArchiveLibraryId(fileUrl), [fileUrl]);
   const title = useMemo(() => normalizeArchiveTitle(fileName), [fileName]);
   const { showNodeProperties } = useNodePropertiesOverlay({ libraryId });
-  const readerCacheKey = useMemo(
-    () => resolveReaderCacheKey(fileUrl, folderNodeId),
-    [fileUrl, folderNodeId],
-  );
 
   const [listLoading, setListLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -276,6 +224,7 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
   const [total, setTotal] = useState(0);
   const [nextOffset, setNextOffset] = useState(0);
   const [hasMore, setHasMore] = useState(false);
+  const [sessionRestoreRevision, setSessionRestoreRevision] = useState(0);
   const [menuState, setMenuState] = useState<{
     visible: boolean;
     x: number;
@@ -301,25 +250,77 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
 
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const requestIdRef = useRef(0);
-  const restoreScrollTopRef = useRef<number | null>(null);
+  const cardElementMapRef = useRef<Map<number, HTMLElement>>(new Map());
+  const cardsRef = useRef(cards);
+  const activeRef = useRef(active);
+  const hasLoadedListRef = useRef(hasLoadedList);
+  const pendingSessionRestoreRef = useRef<ArchiveCardSessionSnapshot | null>(null);
+  const pendingSessionResourceNodeIdRef = useRef<number | null>(null);
+  const restoreTriggeredLoadMoreRef = useRef(false);
   const persistScrollRafRef = useRef<number>(0);
-  const sidecarIndexCacheRef = useRef<{
-    cacheKey: string;
-    index: VideoArchiveSidecarIndex;
-  } | null>(null);
+  cardsRef.current = cards;
+  activeRef.current = active;
+  hasLoadedListRef.current = hasLoadedList;
 
-  const persistSnapshot = useCallback((patch: Partial<VideoArchiveSnapshot>) => {
-    if (!readerCacheKey) return;
-    const prev = videoArchiveSnapshotCache.get(readerCacheKey) ?? EMPTY_VIDEO_ARCHIVE_SNAPSHOT;
-    setArchiveSnapshotCache(readerCacheKey, {
-      hasLoadedList: patch.hasLoadedList ?? prev.hasLoadedList,
-      cards: patch.cards ?? prev.cards,
-      nextOffset: patch.nextOffset ?? prev.nextOffset,
-      total: patch.total ?? prev.total,
-      hasMore: patch.hasMore ?? prev.hasMore,
-      scrollTop: patch.scrollTop ?? prev.scrollTop,
-    });
-  }, [readerCacheKey]);
+  const captureSessionSnapshot = useCallback((): ArchiveCardSessionSnapshot | null => {
+    if (pendingSessionRestoreRef.current) return pendingSessionRestoreRef.current;
+    if (!hasLoadedListRef.current) return null;
+    const viewport = viewportRef.current;
+    if (!viewport) return null;
+    const scrollTop = Math.max(viewport.scrollTop, 0);
+    const maxScrollable = Math.max(viewport.scrollHeight - viewport.clientHeight, 0);
+    let anchorCardId: number | null = null;
+    let anchorOffsetRatio = 0;
+    for (const card of cardsRef.current) {
+      const element = cardElementMapRef.current.get(card.id);
+      if (!element || element.offsetTop > scrollTop + 1) continue;
+      anchorCardId = card.id;
+      anchorOffsetRatio = Math.min(
+        Math.max((scrollTop - element.offsetTop) / Math.max(element.offsetHeight, 1), 0),
+        1,
+      );
+    }
+    if (anchorCardId == null && cardsRef.current.length > 0) {
+      anchorCardId = cardsRef.current[0].id;
+    }
+    return {
+      anchorCardId,
+      anchorOffsetRatio,
+      scrollRatio: maxScrollable > 0 ? scrollTop / maxScrollable : null,
+      scrollTop,
+      selectedCardId: null,
+    };
+  }, [viewportRef]);
+
+  const restoreSessionSnapshot = useCallback((payload: ArchiveCardSessionSnapshot) => {
+    const snapshot = parseArchiveCardSessionSnapshot(payload);
+    if (!snapshot) return;
+    pendingSessionRestoreRef.current = snapshot;
+    pendingSessionResourceNodeIdRef.current = folderNodeId;
+    setSessionRestoreRevision(revision => revision + 1);
+  }, [folderNodeId]);
+
+  const sessionAdapter = useMemo<ViewerSessionAdapter<ArchiveCardSessionSnapshot>>(() => ({
+    capture: captureSessionSnapshot,
+    restore: restoreSessionSnapshot,
+    suspend: () => undefined,
+    resume: () => undefined,
+    estimateSnapshotBytes: () => ARCHIVE_CARD_SESSION_ESTIMATED_BYTES,
+    getPinReasons: () => (activeRef.current ? ['active'] : []),
+  }), [captureSessionSnapshot, restoreSessionSnapshot]);
+
+  const { capture: flushSessionSnapshot } = useViewerSession({
+    accountScope,
+    active,
+    adapter: sessionAdapter,
+    contentRevision,
+    libraryId,
+    nodeId: folderNodeId,
+    reloadToken,
+    schemaVersion: ARCHIVE_CARD_SESSION_SCHEMA_VERSION,
+    tabId,
+    viewerKind: 'video_archive',
+  });
 
   const closeContextMenu = useCallback(() => {
     setMenuState(prev => ({ ...prev, visible: false }));
@@ -395,21 +396,34 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
       centered: true,
       onOk: async () => {
         try {
-          await deleteNodeAndChildren(card.id, libraryId);
+          const result = await softDeleteNodeSubtree({
+            accountScope,
+            ancestorId: card.id,
+            libraryId,
+          });
+          result.deletedNodeIds.forEach(closeTabByNodeId);
           const nextCards = cards.filter(item => item.id !== card.id);
           const nextTotal = Math.max(total - 1, 0);
           setCards(nextCards);
           setTotal(nextTotal);
           setNextOffset(nextCards.length);
           setHasMore(nextCards.length < nextTotal);
-          Toast.success('已移入回收站');
+          if (
+            result.draftCleanupFailed
+            || result.viewerSessionCleanupFailed
+            || result.subtreeCollectionFailed
+          ) {
+            Toast.warning('已移入回收站，但本地恢复数据可能未完整清理');
+          } else {
+            Toast.success('已移入回收站');
+          }
         } catch (error: any) {
           runtimeLogger.error('删除视频归档卡片失败:', error);
           Toast.error(error?.message || '删除失败');
         }
       },
     });
-  }, [cards, libraryId, total]);
+  }, [accountScope, cards, closeTabByNodeId, libraryId, total]);
 
   const contextMenuItems = useMemo<ContextMenuItem[]>(() => {
     const card = menuState.card;
@@ -504,26 +518,6 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
     }
   }, [libraryId]);
 
-  const loadVideoArchiveSidecarIndex = useCallback(async (): Promise<VideoArchiveSidecarIndex> => {
-    if (!folderNodeId || !libraryId) {
-      return VIDEO_ARCHIVE_EMPTY_SIDECARS;
-    }
-    const cacheKey = `${libraryId}:${folderNodeId}`;
-    if (sidecarIndexCacheRef.current?.cacheKey === cacheKey) {
-      return sidecarIndexCacheRef.current.index;
-    }
-
-    try {
-      const children = await getChildrenByNodeId(folderNodeId, libraryId);
-      const index = buildVideoArchiveSidecarIndex(children as VideoArchiveChildNode[]);
-      sidecarIndexCacheRef.current = { cacheKey, index };
-      return index;
-    } catch (sidecarError) {
-      runtimeLogger.warn('加载视频归档伴随资源失败:', sidecarError);
-      return VIDEO_ARCHIVE_EMPTY_SIDECARS;
-    }
-  }, [folderNodeId, libraryId]);
-
   const loadPage = useCallback(async (offset: number, append: boolean) => {
     if (!folderNodeId || !libraryId || !Number.isFinite(folderNodeId)) return;
     const requestId = requestIdRef.current;
@@ -543,10 +537,8 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
         limit: PAGE_SIZE,
       });
       if (requestId !== requestIdRef.current) return;
-      const sidecarIndex = await loadVideoArchiveSidecarIndex();
-      if (requestId !== requestIdRef.current) return;
 
-      const rawCards = mapVideoArchiveCards(page.items, sidecarIndex);
+      const rawCards = mapVideoArchiveCards(page.items, VIDEO_ARCHIVE_EMPTY_SIDECARS);
       const cardsWithCover = await resolveCardCoverUrls(rawCards);
       if (requestId !== requestIdRef.current) return;
 
@@ -591,7 +583,7 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
         setLoadingMore(false);
       }
     }
-  }, [folderNodeId, libraryId, loadVideoArchiveSidecarIndex, resolveCardCoverUrls]);
+  }, [folderNodeId, libraryId, resolveCardCoverUrls]);
 
   const loadMore = useCallback(() => {
     if (listLoading || loadingMore || !hasMore) return;
@@ -629,9 +621,8 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
   const loadCardSubtitleSources = useCallback(async (
     card: VideoArchiveCard,
   ): Promise<FileViewerSubtitleSource[]> => {
-    const sidecarIndex = await loadVideoArchiveSidecarIndex();
-    return loadCardSubtitleSourcesWithIndex(card, sidecarIndex);
-  }, [loadCardSubtitleSourcesWithIndex, loadVideoArchiveSidecarIndex]);
+    return loadCardSubtitleSourcesWithIndex(card, VIDEO_ARCHIVE_EMPTY_SIDECARS);
+  }, [loadCardSubtitleSourcesWithIndex]);
 
   const loadPlaylistItemSubtitleSources = useCallback(async (
     item: FileViewerVideoPlaylistItem,
@@ -656,12 +647,8 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
   } | null> => {
     if (!libraryId) return null;
 
-    const [playlistCards, children] = await Promise.all([
-      fetchAllCollectionArchiveCards(collectionCard.id, libraryId),
-      getChildrenByNodeId(collectionCard.id, libraryId),
-    ]);
-    const sidecarIndex = buildVideoArchiveSidecarIndex(children as VideoArchiveChildNode[]);
-    const mediaCards = mapVideoArchiveCards(playlistCards, sidecarIndex)
+    const page = await fetchCollectionArchiveCardsPage(collectionCard.id, libraryId);
+    const mediaCards = mapVideoArchiveCards(page.items, VIDEO_ARCHIVE_EMPTY_SIDECARS)
       .filter(card => card.cardKind === 'media' && (card.mediaNodeId || card.id))
       .sort((left, right) => {
         if (left.sortOrder !== right.sortOrder) return left.sortOrder - right.sortOrder;
@@ -672,7 +659,7 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
       return null;
     }
 
-    const items = mediaCards.map(card => buildCollectionPlaylistItem(card, sidecarIndex, libraryId));
+    const items = mediaCards.map(card => buildCollectionPlaylistItem(card, VIDEO_ARCHIVE_EMPTY_SIDECARS, libraryId));
     const firstItem = items[0];
     if (!firstItem) return null;
     const firstSubtitleSources = await loadPlaylistItemSubtitleSources(firstItem);
@@ -690,6 +677,14 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
         id: `video-collection:${libraryId}:${collectionCard.id}`,
         title: collectionCard.title || '视频合集',
         items: playlistItems,
+        total: page.total,
+        nextOffset: resolveArchivePageNextOffset(page, 0),
+        hasMore: page.hasMore,
+        source: {
+          kind: 'video_archive_collection',
+          nodeId: collectionCard.id,
+          libraryId,
+        },
       },
       firstItem: firstItemWithSubtitles,
     };
@@ -780,6 +775,8 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
 
   useEffect(() => {
     requestIdRef.current += 1;
+    cardElementMapRef.current.clear();
+    restoreTriggeredLoadMoreRef.current = false;
     if (persistScrollRafRef.current) {
       window.cancelAnimationFrame(persistScrollRafRef.current);
       persistScrollRafRef.current = 0;
@@ -796,19 +793,8 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
       setHasMore(false);
       return;
     }
-
-    const cached = readerCacheKey ? videoArchiveSnapshotCache.get(readerCacheKey) : null;
-    if (cached?.hasLoadedList) {
-      setHasLoadedList(true);
-      setCards(cached.cards);
-      setTotal(cached.total);
-      setNextOffset(cached.nextOffset);
-      setHasMore(cached.hasMore);
-      setError(null);
-      setListLoading(false);
-      setLoadingMore(false);
-      restoreScrollTopRef.current = cached.scrollTop;
-      return;
+    if (pendingSessionResourceNodeIdRef.current !== folderNodeId) {
+      pendingSessionRestoreRef.current = null;
     }
 
     setHasLoadedList(false);
@@ -817,36 +803,52 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
     setNextOffset(0);
     setHasMore(false);
     setError(null);
-    restoreScrollTopRef.current = 0;
     void loadPage(0, false);
-  }, [folderNodeId, libraryId, loadPage, readerCacheKey]);
+  }, [folderNodeId, libraryId, loadPage]);
 
   useEffect(() => {
     if (!active) return;
     const viewport = viewportRef.current;
-    if (!viewport) return;
-    const nextScrollTop = restoreScrollTopRef.current;
-    if (nextScrollTop === null) return;
-
-    const restore = window.requestAnimationFrame(() => {
-      viewport.scrollTop = Math.max(Math.floor(nextScrollTop), 0);
-      restoreScrollTopRef.current = null;
+    const pending = pendingSessionRestoreRef.current;
+    if (!viewport || !pending || !hasLoadedList) return;
+    const anchorElement = pending.anchorCardId == null
+      ? null
+      : cardElementMapRef.current.get(pending.anchorCardId) ?? null;
+    if (!anchorElement && pending.anchorCardId && hasMore && !listLoading && !loadingMore) {
+      if (!restoreTriggeredLoadMoreRef.current) {
+        restoreTriggeredLoadMoreRef.current = true;
+        void loadPage(nextOffset, true).finally(() => {
+          restoreTriggeredLoadMoreRef.current = false;
+        });
+      }
+      return;
+    }
+    if (!anchorElement && pending.anchorCardId && (listLoading || loadingMore)) return;
+    const frame = window.requestAnimationFrame(() => {
+      const maxScrollable = Math.max(viewport.scrollHeight - viewport.clientHeight, 0);
+      viewport.scrollTop = resolveArchiveCardRestoreScrollTop({
+        anchorHeight: anchorElement?.offsetHeight ?? null,
+        anchorOffsetTop: anchorElement?.offsetTop ?? null,
+        maxScrollable,
+        snapshot: pending,
+      });
+      pendingSessionRestoreRef.current = null;
+      flushSessionSnapshot();
     });
-
-    return () => {
-      window.cancelAnimationFrame(restore);
-    };
-  }, [active, cards.length, viewportRef]);
-
-  useEffect(() => {
-    persistSnapshot({
-      hasLoadedList,
-      cards,
-      nextOffset,
-      total,
-      hasMore,
-    });
-  }, [cards, hasLoadedList, hasMore, nextOffset, persistSnapshot, total]);
+    return () => window.cancelAnimationFrame(frame);
+  }, [
+    active,
+    cards.length,
+    flushSessionSnapshot,
+    hasLoadedList,
+    hasMore,
+    listLoading,
+    loadPage,
+    loadingMore,
+    nextOffset,
+    sessionRestoreRevision,
+    viewportRef,
+  ]);
 
   useEffect(() => {
     const viewport = viewportRef.current;
@@ -858,14 +860,10 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
       }
       persistScrollRafRef.current = window.requestAnimationFrame(() => {
         persistScrollRafRef.current = 0;
-        persistSnapshot({
-          hasLoadedList,
-          cards,
-          nextOffset,
-          total,
-          hasMore,
-          scrollTop: Math.max(viewport.scrollTop, 0),
-        });
+        if (pendingSessionRestoreRef.current) {
+          pendingSessionRestoreRef.current = null;
+        }
+        flushSessionSnapshot();
       });
     };
 
@@ -877,7 +875,7 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
         persistScrollRafRef.current = 0;
       }
     };
-  }, [cards, hasLoadedList, hasMore, nextOffset, persistSnapshot, total, viewportRef]);
+  }, [flushSessionSnapshot, viewportRef]);
 
   useEffect(() => {
     const sentinel = sentinelRef.current;
@@ -916,6 +914,13 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
               {cards.map(card => (
                 <article
                   key={card.id}
+                  ref={(element) => {
+                    if (element) {
+                      cardElementMapRef.current.set(card.id, element);
+                    } else {
+                      cardElementMapRef.current.delete(card.id);
+                    }
+                  }}
                   className="archive-card"
                   onContextMenu={(e) => openCardContextMenu(e, card)}
                   onDoubleClick={() => {

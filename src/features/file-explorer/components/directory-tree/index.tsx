@@ -7,6 +7,7 @@ import {
   getAllDescendantsByNodeId,
   fetchNodeDetailById,
   getFileLink,
+  hardDeleteNodeAndChildren,
   moveNodesBatch,
   renameNode,
   sortComicChildrenByName,
@@ -18,7 +19,9 @@ import { buildFileFullName, splitFileBaseNameAndExt } from '@/utils/fileTreeSett
 import { validateWindowsLikeFileName } from '@/utils/windowsFileName';
 import { runtimeLogger } from '@/utils/runtimeLogger';
 import { useFileViewer } from '@/hooks/useFileViewer';
+import { useViewerAccountScope } from '@/features/file-viewer/session';
 import { globalAudioPlayer } from '@/features/file-viewer/services/global-audio-player';
+import { softDeleteNodeSubtree } from '@/features/file-explorer/services/node-deletion';
 import { getDirectoryBuiltInIcon } from '@/features/file-explorer/utils/file-node-icon';
 import {
   downloadUrlToDesktopPath,
@@ -26,6 +29,7 @@ import {
   normalizeDownloadRelativePath,
   pickDownloadDirectoryFromDesktop,
 } from '@/features/file-explorer/services/desktop-download.api';
+import { hasExternalUploadData } from '@/features/file-explorer/services/external-web-image-upload.api';
 import { TREE_LOCATE_NODE_EVENT, type TreeLocateNodeDetail } from '@/features/file-explorer/services/tree-locate';
 import { useDirectoryUpload } from './hooks/useDirectoryUpload';
 import {
@@ -49,8 +53,11 @@ import type {
   DirectoryContextMenuNodeSnapshot,
   DirectoryContextMenuResult,
   OverlayContextMenuPosition,
+  OverlayStorageProvider,
 } from '@/service/overlay/types';
 import { useNodePropertiesOverlay } from '@/features/file-explorer/hooks/useNodePropertiesOverlay';
+import MigrationDialog from '@/features/file-explorer/components/migration-dialog';
+import { fetchProviders } from '@/features/storage-config/services/storage-config.api';
 
 interface DirectoryTreeProps {
   treeData: any[];
@@ -151,6 +158,7 @@ export default function DirectoryTree({
   browserModeOpen = false,
 }: DirectoryTreeProps) {
   const { closeTabByNodeId, tabs } = useFileViewer();
+  const viewerAccountScope = useViewerAccountScope();
 
   // 外部文件拖拽：悬停高亮 & 延迟展开
   const [dragOverKey, setDragOverKey] = useState<string | null>(null);
@@ -163,20 +171,50 @@ export default function DirectoryTree({
     parentNode: any | null; // 父节点，null 表示根目录
     name: string;
     loading: boolean;
+    defaultProvider: string;
+    providers: OverlayStorageProvider[];
+    providerLoading: boolean;
+    selectedProvider: string;
   }>({
     visible: false,
     type: null,
     parentNode: null,
     name: '',
     loading: false,
+    defaultProvider: '',
+    providers: [],
+    providerLoading: false,
+    selectedProvider: '',
   });
   const treeContainerRef = useRef<HTMLDivElement | null>(null);
+
+  // 存储迁移 Dialog 状态
+  const [migrationDialog, setMigrationDialog] = useState<{
+    visible: boolean;
+    rootNodeId: number;
+    nodeName: string;
+  }>({ visible: false, rootNodeId: 0, nodeName: '' });
+  const [migrationProviders, setMigrationProviders] = useState<string[]>([]);
 
   // 内联编辑状态（重命名用）
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [editingName, setEditingName] = useState<string>('');
   const [selectedNodeIds, setSelectedNodeIds] = useState<number[]>([]);
   const [selectionAnchorKey, setSelectionAnchorKey] = useState<string | null>(null);
+
+  const resetCreateModalState = useCallback(() => {
+    setCreateModal({
+      visible: false,
+      type: null,
+      parentNode: null,
+      name: '',
+      loading: false,
+      defaultProvider: '',
+      providers: [],
+      providerLoading: false,
+      selectedProvider: '',
+    });
+  }, []);
   const dragSelectionNodeIdsRef = useRef<number[]>([]);
   const dragCollapsedKeysRef = useRef<string[]>([]);
   const dragExpandedKeysSnapshotRef = useRef<string[]>([]);
@@ -395,8 +433,7 @@ export default function DirectoryTree({
   // 处理文件放置逻辑
   // 外部文件拖拽
   const isExternalFileDrag = (e: React.DragEvent) => {
-    const types = Array.from(e.dataTransfer?.types || []);
-    return types.includes('Files');
+    return hasExternalUploadData(e.dataTransfer);
   };
 
   const hasActiveInternalTreeDrag = () => dragSelectionNodeIdsRef.current.length > 0;
@@ -802,24 +839,6 @@ export default function DirectoryTree({
     }
     const normalizedSelection = normalizeMoveSelection(selectedNodeIds);
     return normalizedSelection.length > 0 ? normalizedSelection : [targetNode];
-  };
-
-  const collectDeleteSubtreeNodeIds = async (targetNode: any): Promise<Set<number>> => {
-    const nodeIds = new Set<number>();
-    const targetNodeId = Number(targetNode?.id);
-    if (!Number.isFinite(targetNodeId) || targetNodeId <= 0) {
-      return nodeIds;
-    }
-
-    nodeIds.add(targetNodeId);
-    const descendants = await getAllDescendantsByNodeId(targetNodeId, libraryId);
-    (descendants || []).forEach((item: any) => {
-      const descendantId = Number(item?.id);
-      if (Number.isFinite(descendantId) && descendantId > 0) {
-        nodeIds.add(descendantId);
-      }
-    });
-    return nodeIds;
   };
 
   const applyTemporaryExpandedKeys = useCallback((keys: string[]) => {
@@ -1530,7 +1549,7 @@ export default function DirectoryTree({
 
     if (action.startsWith('设置内置类型:')) {
       const nextBuiltInType = action.split(':')[1]?.trim()?.toUpperCase() || 'DEF';
-      if ((nextBuiltInType === 'VIDEO' || nextBuiltInType === 'AUDIO') && node.type !== 'dir') {
+      if ((nextBuiltInType === 'VIDEO' || nextBuiltInType === 'AUDIO' || nextBuiltInType === 'GALLERY') && node.type !== 'dir') {
         Toast.warning(`${nextBuiltInType} 内置类型仅支持文件夹`);
         return;
       }
@@ -1598,6 +1617,32 @@ export default function DirectoryTree({
 
     if (action === '上传文件夹') {
       await handlePickUploadFromDesktop('folder', node);
+      return;
+    }
+
+    if (action === '迁移到其他存储') {
+      const targetNodeId = Number(node?.id);
+      if (!Number.isFinite(targetNodeId) || targetNodeId <= 0) {
+        Toast.warning('当前节点不支持迁移');
+        return;
+      }
+      try {
+        const list = await fetchProviders();
+        const providers = (list?.providers || []).map((p) => p.alias).filter(Boolean);
+        if (providers.length === 0) {
+          Toast.warning('未配置任何存储 provider');
+          return;
+        }
+        setMigrationProviders(providers);
+        setMigrationDialog({
+          visible: true,
+          rootNodeId: targetNodeId,
+          nodeName: String(node?.name || ''),
+        });
+      } catch (error: any) {
+        runtimeLogger.error('加载 provider 列表失败:', error);
+        Toast.error(error?.message || '加载存储 provider 失败');
+      }
       return;
     }
 
@@ -1672,7 +1717,41 @@ export default function DirectoryTree({
         parentNode: node,
         name: '',
         loading: false,
+        defaultProvider: '',
+        providers: [],
+        providerLoading: true,
+        selectedProvider: '',
       });
+      try {
+        const providerData = await fetchProviders();
+        const providers = (providerData.providers || []).map((provider) => ({
+          alias: provider.alias,
+          type: provider.type,
+          endpoint: provider.endpoint,
+          bucket: provider.bucket,
+          label: provider.label,
+          useSSL: provider.useSSL,
+        }));
+        const defaultProvider = providerData.defaultProvider || providers[0]?.alias || '';
+        setCreateModal(prev => (
+          prev.visible && prev.type === 'file'
+            ? {
+              ...prev,
+              defaultProvider,
+              providers,
+              providerLoading: false,
+              selectedProvider: defaultProvider,
+            }
+            : prev
+        ));
+      } catch (error) {
+        runtimeLogger.warn('加载存储 Provider 失败，新建文件将使用后端默认分配:', error);
+        setCreateModal(prev => (
+          prev.visible && prev.type === 'file'
+            ? { ...prev, providerLoading: false }
+            : prev
+        ));
+      }
     } else if (action === '新建文件夹') {
       setCreateModal({
         visible: true,
@@ -1680,6 +1759,10 @@ export default function DirectoryTree({
         parentNode: node,
         name: '',
         loading: false,
+        defaultProvider: '',
+        providers: [],
+        providerLoading: false,
+        selectedProvider: '',
       });
     } else if (action === '重命名') {
       const currentBaseName = node.data?.rawName || node.label || '';
@@ -1722,17 +1805,24 @@ export default function DirectoryTree({
         const deletedNodeKeys: string[] = [];
         const deletedNodeIds = new Set<number>();
         let deleteError: unknown = null;
+        let draftCleanupFailed = false;
 
         for (const targetNode of deleteTargets) {
           try {
-            const subtreeNodeIds = await collectDeleteSubtreeNodeIds(targetNode);
-            subtreeNodeIds.forEach((nodeId) => deletedNodeIds.add(nodeId));
-
             const parentIdCandidate = Number(targetNode?.parentId);
             const parentId = Number.isFinite(parentIdCandidate) && parentIdCandidate > 0
               ? parentIdCandidate
               : (ROOT_PARENT_ID ?? 0);
-            await deleteNodeAndChildren(Number(targetNode.id), libraryId);
+            const result = await softDeleteNodeSubtree({
+              accountScope: viewerAccountScope,
+              ancestorId: Number(targetNode.id),
+              libraryId,
+            });
+            result.deletedNodeIds.forEach((nodeId) => deletedNodeIds.add(nodeId));
+            draftCleanupFailed = draftCleanupFailed
+              || result.draftCleanupFailed
+              || result.viewerSessionCleanupFailed
+              || result.subtreeCollectionFailed;
             if (parentId > 0) {
               affectedParentIds.add(parentId);
             }
@@ -1786,7 +1876,11 @@ export default function DirectoryTree({
           return;
         }
 
-        Toast.success(deleteTargets.length > 1 ? `已移入回收站 ${deleteTargets.length} 项` : '已移入回收站');
+        if (draftCleanupFailed) {
+          Toast.warning('内容已移入回收站，但本地恢复数据可能未完整清理');
+        } else {
+          Toast.success(deleteTargets.length > 1 ? `已移入回收站 ${deleteTargets.length} 项` : '已移入回收站');
+        }
         scheduleRecompute();
       } catch (error) {
         runtimeLogger.error('删除节点失败:', error);
@@ -1801,9 +1895,13 @@ export default function DirectoryTree({
 
   // 确认创建文件/文件夹
   const handleConfirmCreate = async () => {
-    const { type, parentNode, name } = createModal;
+    const { type, parentNode, name, providerLoading, selectedProvider } = createModal;
     if (!type || !name.trim()) {
       Toast.warning('请输入名称');
+      return;
+    }
+    if (type === 'file' && providerLoading) {
+      Toast.warning('存储位置加载中，请稍后');
       return;
     }
 
@@ -1813,7 +1911,6 @@ export default function DirectoryTree({
       return;
     }
 
-    setCreateModal(prev => ({ ...prev, loading: true }));
     try {
       const nextCreateValue = type === 'file'
         ? splitFileBaseNameAndExt(name.trim())
@@ -1825,6 +1922,9 @@ export default function DirectoryTree({
       }
 
       const parentId = parentNode ? parentNode.id : Number(resolvedRootParentId);
+      const storageProvider = type === 'file' ? selectedProvider : '';
+
+      setCreateModal(prev => ({ ...prev, loading: true }));
       let newNode: any = await createNode({
         name: nextCreateValue.name,
         ext: type === 'file' ? nextCreateValue.ext : undefined,
@@ -1833,15 +1933,28 @@ export default function DirectoryTree({
         type,
       });
       if (type === 'file') {
-        newNode = await updateNodeFileContent({
-          nodeId: Number(newNode.id),
-          libraryId,
-          content: '',
-        });
+        try {
+          newNode = await updateNodeFileContent({
+            nodeId: Number(newNode.id),
+            libraryId,
+            content: '',
+            contentType: 'text/plain; charset=utf-8',
+            storageProvider,
+          });
+        } catch (error) {
+          const cleanupNodeId = Number(newNode.id);
+          await deleteNodeAndChildren(cleanupNodeId, libraryId).catch((deleteError) => {
+            runtimeLogger.warn('新建文件首次写入失败后清理节点失败:', deleteError);
+          });
+          await hardDeleteNodeAndChildren(cleanupNodeId, libraryId).catch((hardDeleteError) => {
+            runtimeLogger.warn('新建文件首次写入失败后彻底清理节点失败:', hardDeleteError);
+          });
+          throw error;
+        }
       }
       
       Toast.success(`${type === 'dir' ? '文件夹' : '文件'}创建成功`);
-      setCreateModal({ visible: false, type: null, parentNode: null, name: '', loading: false });
+      resetCreateModalState();
       
       // 通知父组件刷新
       if (onUploadSuccess) {
@@ -1862,7 +1975,7 @@ export default function DirectoryTree({
 
   // 取消创建
   const handleCancelCreate = () => {
-    setCreateModal({ visible: false, type: null, parentNode: null, name: '', loading: false });
+    resetCreateModalState();
   };
 
   // 确认重命名
@@ -2372,9 +2485,28 @@ export default function DirectoryTree({
         type={createModal.type}
         name={createModal.name}
         loading={createModal.loading}
+        defaultProvider={createModal.defaultProvider}
+        providers={createModal.providers}
+        providerLoading={createModal.providerLoading}
+        selectedProvider={createModal.selectedProvider}
         onNameChange={(value) => setCreateModal(prev => ({ ...prev, name: value }))}
+        onProviderChange={(value) => setCreateModal(prev => ({ ...prev, selectedProvider: value }))}
         onConfirm={handleConfirmCreate}
         onCancel={handleCancelCreate}
+      />
+
+      {/* 存储迁移对话框 */}
+      <MigrationDialog
+        visible={migrationDialog.visible}
+        libraryId={Number(libraryId)}
+        rootNodeId={migrationDialog.rootNodeId}
+        nodeName={migrationDialog.nodeName}
+        availableProviders={migrationProviders}
+        onCancel={() => setMigrationDialog({ visible: false, rootNodeId: 0, nodeName: '' })}
+        onSuccess={() => {
+          setMigrationDialog({ visible: false, rootNodeId: 0, nodeName: '' });
+          window.location.hash = '#/transfer-center?tab=migration';
+        }}
       />
     </div>
   );

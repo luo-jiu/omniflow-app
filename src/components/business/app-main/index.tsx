@@ -4,6 +4,17 @@ import { useFileViewer } from "@/hooks/useFileViewer";
 import WelcomeView from "@/features/file-viewer/components/welcome-view";
 import FileDispatcher from "@/features/file-viewer/components/file-dispatcher";
 import FileTabsBar from "./FileTabsBar";
+import { useAuth } from '@/hooks/useAuth';
+import {
+  buildViewerHotRetentionCandidates,
+  createUserViewerAccountScope,
+  DEFAULT_VIEWER_HOT_RETENTION_BUDGET,
+  planViewerHotRetention,
+  prepareViewerHotEvictions,
+  VIEWER_HOT_RETENTION_ENFORCEMENT_ENABLED,
+  ViewerHotAccessOrderOwner,
+  viewerSessionRegistry,
+} from '@/features/file-viewer/session';
 
 interface IProps {
   children?: ReactNode;
@@ -11,12 +22,32 @@ interface IProps {
   workspaceActive?: boolean;
 }
 
+const subscribeViewerHotRetention = (listener: () => void) => (
+  viewerSessionRegistry.subscribeRetention(listener)
+);
+
+const getViewerHotRetentionRevision = () => viewerSessionRegistry.getRetentionRevision();
+
 /**
  * 主工作区容器
  * 负责在“欢迎页”和“文件预览页”之间切换
  */
 const AppMain: FC<IProps> = ({ hideTabsBar = false, workspaceActive = true }) => {
   const { fileState, tabs, activeTabId, activateTab, closeTab, reorderTabs } = useFileViewer();
+  const { user } = useAuth();
+  const hotRetentionRevision = React.useSyncExternalStore(
+    subscribeViewerHotRetention,
+    getViewerHotRetentionRevision,
+    getViewerHotRetentionRevision,
+  );
+  const accountScope = React.useMemo(
+    () => createUserViewerAccountScope(Number(user?.id)),
+    [user?.id],
+  );
+  const hotAccessOrderOwnerRef = React.useRef<ViewerHotAccessOrderOwner | null>(null);
+  if (hotAccessOrderOwnerRef.current === null) {
+    hotAccessOrderOwnerRef.current = new ViewerHotAccessOrderOwner();
+  }
   const [keepAliveTabIds, setKeepAliveTabIds] = React.useState<string[]>(() => (
     activeTabId ? [activeTabId] : []
   ));
@@ -26,12 +57,25 @@ const AppMain: FC<IProps> = ({ hideTabsBar = false, workspaceActive = true }) =>
   }, [tabs]);
 
   React.useEffect(() => {
+    hotAccessOrderOwnerRef.current?.retain(tabs.map(tab => tab.id));
+  }, [tabs]);
+
+  React.useEffect(() => {
+    if (workspaceActive && activeTabId) {
+      hotAccessOrderOwnerRef.current?.touch(activeTabId);
+    }
+  }, [activeTabId, workspaceActive]);
+
+  React.useEffect(() => {
     setKeepAliveTabIds((prev) => {
       const survived = prev.filter((tabId) => tabMap.has(tabId));
       if (!activeTabId || !tabMap.has(activeTabId)) {
         return survived;
       }
-      return [...survived.filter((tabId) => tabId !== activeTabId), activeTabId];
+      if (survived.includes(activeTabId)) {
+        return survived;
+      }
+      return [...survived, activeTabId];
     });
   }, [activeTabId, tabMap]);
 
@@ -51,6 +95,38 @@ const AppMain: FC<IProps> = ({ hideTabsBar = false, workspaceActive = true }) =>
     }
     return [...cached, activeTab];
   }, [activeTabId, keepAliveTabIds, tabMap]);
+
+  React.useEffect(() => {
+    if (!VIEWER_HOT_RETENTION_ENFORCEMENT_ENABLED || !workspaceActive) return;
+    const accessOrders = new Map(
+      hotAccessOrderOwnerRef.current
+        ?.snapshot(keepAliveTabs.map(tab => tab.id))
+        .map(item => [item.tabId, item.lastAccessOrder])
+      ?? [],
+    );
+    const tabProjections = keepAliveTabs.map(tab => ({
+      active: tab.id === activeTabId,
+      lastAccessOrder: accessOrders.get(tab.id) ?? null,
+      libraryId: tab.libraryId,
+      tabId: tab.id,
+      viewerKind: tab.fileType,
+    }));
+    const candidates = buildViewerHotRetentionCandidates(
+      tabProjections,
+      viewerSessionRegistry.getLiveRetentionProjections(),
+    );
+    const plan = planViewerHotRetention(candidates, DEFAULT_VIEWER_HOT_RETENTION_BUDGET);
+    if (plan.evictions.length === 0) return;
+    const prepared = prepareViewerHotEvictions(
+      plan.evictions,
+      tabProjections,
+      target => viewerSessionRegistry.prepareLiveInstanceForHotEviction(target),
+      target => viewerSessionRegistry.hasRestorableSnapshotForHotEviction(target),
+    );
+    if (prepared.evictedTabIds.length === 0) return;
+    const evictedTabIds = new Set(prepared.evictedTabIds);
+    setKeepAliveTabIds(prev => prev.filter(tabId => !evictedTabIds.has(tabId)));
+  }, [activeTabId, hotRetentionRevision, keepAliveTabs, workspaceActive]);
 
   // 如果没有文件在查看，显示欢迎视图
   if (!fileState.fileUrl && !fileState.loading) {
@@ -92,11 +168,14 @@ const AppMain: FC<IProps> = ({ hideTabsBar = false, workspaceActive = true }) =>
               <div
                 key={tab.id}
                 className={`tab-stage ${isActive ? 'active' : 'inactive'}`}
+                data-viewer-interaction-root
                 aria-hidden={!isActive}
               >
                 <FileDispatcher
                   key={`${tab.id}:${tab.reloadToken ?? 0}`}
                   nodeId={tab.nodeId}
+                  accountScope={accountScope}
+                  libraryId={tab.libraryId}
                   fileUrl={tab.fileUrl}
                   fileName={tab.fileName}
                   fileType={tab.fileType}
@@ -111,6 +190,7 @@ const AppMain: FC<IProps> = ({ hideTabsBar = false, workspaceActive = true }) =>
                   loading={tab.loading}
                   active={isActive}
                   reloadToken={tab.reloadToken ?? 0}
+                  contentRevision={tab.contentRevision}
                   tabId={tab.id}
                 />
               </div>

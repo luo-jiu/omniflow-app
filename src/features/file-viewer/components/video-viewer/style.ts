@@ -89,11 +89,74 @@ export const VideoViewerWrapper = styled.div`
     word-break: break-word;
   }
 
+  .video-element-host {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    background: #000;
+  }
+
+  .video-element-host.detached {
+    opacity: 0;
+    pointer-events: none;
+  }
+
   .video-element {
     width: 100%;
     height: 100%;
     object-fit: contain;
     background: #000;
+  }
+
+  .video-detached-placeholder {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    background: radial-gradient(circle at 50% 35%, rgba(64, 76, 96, 0.34), rgba(0, 0, 0, 0.96) 62%);
+    color: #fff;
+    z-index: 2;
+  }
+
+  .video-detached-poster {
+    position: absolute;
+    inset: 0;
+    background-size: cover;
+    background-position: center;
+    opacity: 0.32;
+    filter: blur(18px) saturate(1.05);
+    transform: scale(1.08);
+  }
+
+  .video-detached-card {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    max-width: min(360px, 78%);
+    padding: 20px 22px;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 12px;
+    background: rgba(14, 16, 20, 0.72);
+    box-shadow: 0 20px 46px rgba(0, 0, 0, 0.35);
+    backdrop-filter: blur(18px);
+    text-align: center;
+  }
+
+  .video-detached-title {
+    font-size: 15px;
+    font-weight: 750;
+    line-height: 1.35;
+  }
+
+  .video-detached-desc {
+    color: rgba(255, 255, 255, 0.72);
+    font-size: var(--video-font-control);
+    line-height: 1.45;
   }
 
   .buffering-overlay {
@@ -104,6 +167,15 @@ export const VideoViewerWrapper = styled.div`
     justify-content: center;
     background: linear-gradient(180deg, rgba(0, 0, 0, 0.1), rgba(0, 0, 0, 0.45));
     pointer-events: none;
+  }
+
+  .buffering-overlay .semi-spin-wrapper,
+  .buffering-overlay .semi-spin-children {
+    min-width: max-content;
+  }
+
+  .buffering-overlay .semi-spin-tip {
+    white-space: nowrap;
   }
 
   .console-panel {
@@ -658,6 +730,28 @@ export const VideoViewerWrapper = styled.div`
     font-size: 10px;
     line-height: 1;
     color: rgba(255, 255, 255, 0.58);
+  }
+
+  .playlist-panel-load-more {
+    width: 100%;
+    min-height: 30px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 7px;
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.78);
+    font-size: var(--video-font-body);
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .playlist-panel-load-more:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+  }
+
+  .playlist-panel-load-more:disabled {
+    cursor: default;
+    opacity: 0.62;
   }
 
   .floating-action-chip {

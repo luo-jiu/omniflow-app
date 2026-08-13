@@ -40,6 +40,7 @@ const COMIC_BUILT_IN_MENU_ICON = createBuiltInMenuIcon('COMIC');
 const ASMR_BUILT_IN_MENU_ICON = createBuiltInMenuIcon('ASMR');
 const VIDEO_BUILT_IN_MENU_ICON = createBuiltInMenuIcon('VIDEO');
 const AUDIO_BUILT_IN_MENU_ICON = createBuiltInMenuIcon('AUDIO');
+const GALLERY_BUILT_IN_MENU_ICON = createBuiltInMenuIcon('GALLERY');
 
 function getBuiltInTypeMenuIcon(builtInType: string, archiveMode = 0): React.ReactNode | undefined {
   const normalizedType = String(builtInType || '').toUpperCase();
@@ -54,6 +55,9 @@ function getBuiltInTypeMenuIcon(builtInType: string, archiveMode = 0): React.Rea
   }
   if (normalizedType === 'AUDIO') {
     return archiveMode === 1 ? createBuiltInMenuIcon('AUDIO', 1) : AUDIO_BUILT_IN_MENU_ICON;
+  }
+  if (normalizedType === 'GALLERY') {
+    return archiveMode === 1 ? createBuiltInMenuIcon('GALLERY', 1) : GALLERY_BUILT_IN_MENU_ICON;
   }
   return undefined;
 }
@@ -268,6 +272,12 @@ const DirectoryContextMenu: React.FC<DirectoryContextMenuProps> = ({
           icon: AUDIO_BUILT_IN_MENU_ICON,
           onClick: () => onAction('设置内置类型:AUDIO', node),
         }] : []),
+        ...(isFolder ? [{
+          key: 'built-in-type-gallery',
+          label: currentBuiltInType === 'GALLERY' ? '图集（当前）' : '图集',
+          icon: GALLERY_BUILT_IN_MENU_ICON,
+          onClick: () => onAction('设置内置类型:GALLERY', node),
+        }] : []),
       ],
     },
   );
@@ -378,6 +388,16 @@ const DirectoryContextMenu: React.FC<DirectoryContextMenuProps> = ({
       },
     );
   }
+
+  // 存储迁移：文件夹 / 文件都允许触发，把当前节点（含子树）迁到目标 provider。
+  items.push(
+    { type: 'divider', key: 'divider-migrate-storage' },
+    {
+      key: 'migrate-storage',
+      label: '迁移到其他存储...',
+      onClick: () => onAction('迁移到其他存储', node),
+    },
+  );
 
   // 危险操作分割线
   items.push({ type: 'divider', key: 'divider-delete' });

@@ -40,6 +40,7 @@ export const ComicArchiveViewerWrapper = styled.div`
     flex: 1;
     min-height: 0;
     overflow: auto;
+    scrollbar-gutter: stable;
     padding: 13px 13px 15px;
     background: var(--app-bg);
     scrollbar-width: thin;
@@ -218,6 +219,12 @@ export const ComicArchiveViewerWrapper = styled.div`
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  .card-tag-pill.collection {
+    border-color: color-mix(in srgb, var(--semi-color-success) 42%, rgba(30, 41, 59, 0.22));
+    color: #116d48;
+    background: color-mix(in srgb, #dbfce8 88%, rgba(255, 255, 255, 0.9));
   }
 
   .archive-footer {

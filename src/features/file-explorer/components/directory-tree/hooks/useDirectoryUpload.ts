@@ -10,6 +10,10 @@ import {
   pickUploadFoldersFromDesktop,
 } from '@/features/file-explorer/services/desktop-upload-picker.api';
 import type { UploadCandidateFile } from '@/features/file-explorer/services/desktop-upload-picker.api';
+import {
+  extractExternalWebImageDropItems,
+  stageExternalWebImageUploadCandidates,
+} from '@/features/file-explorer/services/external-web-image-upload.api';
 import { normalizeUploadRelativePath, UploadPathResolver } from '@/features/file-explorer/services/upload-path-resolver';
 import { fetchProviders } from '@/features/storage-config/services/storage-config.api';
 import { openOverlay } from '@/service/overlay/overlay.api';
@@ -63,6 +67,20 @@ const nextMicroTask = () =>
     window.setTimeout(resolve, 0);
   });
 
+async function cleanupUploadCandidateTempPaths(files: UploadCandidateFile[]) {
+  const cleanupTargets = Array.from(new Set(
+    files
+      .map((candidate) => String(candidate.cleanupPath || '').trim())
+      .filter(Boolean),
+  ));
+  if (!cleanupTargets.length || !window.electronAPI?.cleanupTempImportPath) {
+    return;
+  }
+  await Promise.all(cleanupTargets.map((targetPath) => (
+    window.electronAPI.cleanupTempImportPath(targetPath).catch(() => false)
+  )));
+}
+
 export function useDirectoryUpload({
   libraryId,
   onUploadSuccess,
@@ -103,6 +121,7 @@ export function useDirectoryUpload({
     files: UploadCandidateFile[],
     targetNode: UploadModalTargetNode,
     storageProvider: string,
+    onQueuePrepared?: () => void,
   ) => {
     const pathResolver = new UploadPathResolver({
       libraryId: targetNode.libraryId,
@@ -154,12 +173,15 @@ export function useDirectoryUpload({
       await nextMicroTask();
     }
 
+    onQueuePrepared?.();
+
     const results = (await Promise.all(donePromises)).flat();
     const successCount = results.filter(r => r.taskStatus === UPLOAD_TASK_STATUS.SUCCESS).length;
     const failedCount = results.filter(r => r.taskStatus === UPLOAD_TASK_STATUS.FAILED).length;
     const canceledCount = results.filter(r => r.taskStatus === UPLOAD_TASK_STATUS.CANCELED).length;
 
     if (failedCount === 0 && canceledCount === 0) {
+      void cleanupUploadCandidateTempPaths(files);
       Toast.success(`成功上传 ${successCount} 个文件`);
     } else if (failedCount === 0 && canceledCount > 0) {
       Toast.info(`上传已中断：成功 ${successCount} 个，中断 ${canceledCount} 个`);
@@ -214,35 +236,80 @@ export function useDirectoryUpload({
     } catch (error) {
       runtimeLogger.error('上传确认弹框无法打开:', error);
       Toast.error('上传确认弹框无法打开');
+      void cleanupUploadCandidateTempPaths(files);
       return;
     }
 
-    if (result.type !== 'confirm') return;
+    if (result.type !== 'confirm') {
+      void cleanupUploadCandidateTempPaths(files);
+      return;
+    }
 
-    Toast.info(`正在准备上传队列（${files.length} 个文件）`);
-    void startUploadInBackground(files, targetNode, result.storageProvider).catch((error) => {
-      runtimeLogger.error('上传执行失败:', error);
-      Toast.error((error as any)?.message || '上传过程中出现未知错误');
+    const preparingToastId = Toast.info({
+      content: `正在准备上传队列（${files.length} 个文件）`,
+      duration: 8,
+      showClose: true,
     });
+    let preparingToastClosed = false;
+    const closePreparingToast = () => {
+      if (preparingToastClosed) return;
+      preparingToastClosed = true;
+      Toast.close(preparingToastId);
+    };
+
+    void startUploadInBackground(files, targetNode, result.storageProvider, closePreparingToast)
+      .catch((error) => {
+        runtimeLogger.error('上传执行失败:', error);
+        Toast.error((error as any)?.message || '上传过程中出现未知错误');
+        void cleanupUploadCandidateTempPaths(files);
+      })
+      .finally(closePreparingToast);
   }, [startUploadInBackground]);
 
   const handleExternalDropOnFolder = useCallback((treeNode: any, e: React.DragEvent) => {
     const files = Array.from(e.dataTransfer.files || []);
-    if (!files.length) return;
-
-    requestDesktopWindowActivation(true);
-    const candidates = files
-      .map(buildUploadCandidateFromDragFile)
-      .filter(candidate => !isIgnoredSystemFilePath(candidate.relativePath || candidate.file.name));
-    if (!candidates.length) {
-      Toast.warning('拖拽内容仅包含系统隐藏文件，已忽略');
+    const webImageItems = files.length > 0 ? [] : extractExternalWebImageDropItems(e.dataTransfer);
+    if (!files.length && !webImageItems.length) {
+      Toast.warning('拖拽内容不是可上传文件或可下载图片');
       return;
     }
+
+    requestDesktopWindowActivation(true);
     const targetNode = toUploadModalTargetNode(treeNode);
     if (!targetNode) {
       return;
     }
-    void openUploadModal(targetNode, candidates);
+
+    if (files.length > 0) {
+      const candidates = files
+        .map(buildUploadCandidateFromDragFile)
+        .filter(candidate => !isIgnoredSystemFilePath(candidate.relativePath || candidate.file.name));
+      if (!candidates.length) {
+        Toast.warning('拖拽内容仅包含系统隐藏文件，已忽略');
+        return;
+      }
+      void openUploadModal(targetNode, candidates);
+      return;
+    }
+
+    const preparingToastId = Toast.info({
+      content: `正在下载拖拽图片（${webImageItems.length} 个）`,
+      duration: 8,
+      showClose: true,
+    });
+    void stageExternalWebImageUploadCandidates(webImageItems)
+      .then((candidates) => {
+        if (!candidates.length) {
+          Toast.warning('未获取到可上传的网页图片');
+          return;
+        }
+        void openUploadModal(targetNode, candidates);
+      })
+      .catch((error) => {
+        runtimeLogger.warn('网页图片拖拽导入失败:', error);
+        Toast.error((error as any)?.message || '网页图片下载失败');
+      })
+      .finally(() => Toast.close(preparingToastId));
   }, [buildUploadCandidateFromDragFile, openUploadModal, toUploadModalTargetNode]);
 
   const handlePickUploadFromDesktop = useCallback(async (mode: 'file' | 'folder', node: any | null) => {

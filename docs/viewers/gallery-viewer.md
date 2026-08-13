@@ -1,0 +1,153 @@
+# Gallery Viewer 说明
+
+更新时间：2026-08-03
+适用范围：`src/features/file-viewer/components/gallery-viewer/` 下的图集目录预览、图片 / 视频详情切换和 MediaHub 接入。
+
+## 1. 概述
+
+`GalleryViewer` 是 `GALLERY + archiveMode=0` 目录的普通内置类型 viewer。
+
+它的用户心智接近手机相册：
+
+- 进入目录后先展示图片和视频组成的网格。
+- 网格卡片不直接显示文件名，避免把相册视觉降级成文件列表；文件名只保留为悬停 title / 无障碍辅助信息。
+- 点击某个媒体后仍停留在当前 tab 内进入详情态。
+- 详情态用左右按钮或键盘左右键切换上一项 / 下一项。
+- 详情态顶部提供媒体详情按钮，先以弹框展示基础信息和图片 EXIF 中可读的拍摄时间、定位、相机信息等字段。
+- 图片和视频详情都由 `GalleryViewer` 自己渲染，不复用普通 `ImageViewer` / `VideoViewer` 组件。
+
+`GALLERY + archiveMode=1` 已由 `GalleryArchiveViewer` 承接，普通 `GalleryViewer` 只负责单个图集内部的图片 / 视频浏览。
+
+## 2. 当前结构
+
+- `index.tsx`
+  - 加载目录直属子节点
+  - 过滤图片 / 视频媒体
+  - 管理网格、详情态、图片查看状态和视频播放状态
+  - 通过公共 `ViewerSessionRegistry` capture / restore 阅读现场
+  - 通过 `floatingVideoService` 接入 MediaHub
+- `gallery-viewer-session.ts`
+  - snapshot schema、payload 校验和跨列数滚动锚点恢复
+- `gallery-viewer-session.test.ts`
+  - snapshot 解析、锚点重排和比例 / 绝对滚动降级测试
+- `style.ts`
+  - 相册网格、模糊占位、大图 / 视频详情和底部视频控制条样式
+
+## 3. 数据与加载规则
+
+图集只读取当前目录的直属一代子节点：
+
+- 图片：`image/*` MIME 或常见图片扩展名。
+- HEIC / HEIF：归入图片媒体，但不要求浏览器原生支持解码。
+- 视频：`video/*` MIME、`application/vnd.apple.mpegurl` 或常见视频扩展名。
+- 隐藏文件和子目录不会进入图集媒体列表。
+
+网格页不会在首次渲染时把全部媒体解码进内存：
+
+- 初始只为前一批媒体请求临时链接。
+- 首批 HEIC / HEIF 会在拿到临时链接后串行预热 PNG 预览，避免必须鼠标悬停后才出现缩略图。
+- 鼠标进入卡片或打开详情时再补请求对应链接。
+- 图片缩略图使用 `loading="lazy"` 和 `decoding="async"`。
+- 缩略图加载前显示模糊占位。
+- 网格卡片参考归档 viewer 的自适应策略：以目标宽度为主，在列数阈值附近允许小幅收缩，超过目标宽度后右侧留空，不为了填满整行而持续放大。
+- 真卸载后会重新读取直属子节点，再按稳定节点 ID 恢复当前详情项；Warm snapshot 不替代目录数据请求，避免把旧媒体列表长期当成后端事实。
+- 临时签名链接、HEIC 本地预览 URL、预览错误、缩略图 loaded 状态和 keep-alive 图片集合只属于当前实例，不进入 snapshot；恢复时按节点重新请求链接和预览。
+- HEIC / HEIF 链接请求和预览预热带 viewer generation 校验；关闭 tab、reload 或切换到新图集后，旧异步结果不会写回当前 viewer。
+
+HEIC / HEIF 预览走 Electron 本地代理：
+
+- Renderer 仍通过原文件临时链接识别媒体，后端文件事实不变。
+- `electron/preload.ts` 暴露 `prepareImagePreview`，主进程 IPC `image-preview:prepare` 下载临时链接到本地临时输入，再用 `ffmpeg` 生成 PNG 预览，并通过 `omniflow-preview://` 自定义协议返回给 Renderer。
+- 预览和元信息缓存在 `app.getPath('userData')/gallery-preview-cache`，按 `libraryId-nodeId` 加源文件指纹记录，不把 PNG 回写后端，也不替换原 HEIC 文件。
+- HEIC 详情元信息先通过 macOS `sips -g all` 读取拍摄时间、相机型号、色彩信息、尺寸等可读字段；如果图片本身没有定位或系统命令读不到定位，不在前端伪造。
+
+## 4. 详情态
+
+图片详情：
+
+- 支持拖拽平移、滚轮缩放、`Cmd/Ctrl + +/-/0` 缩放、旋转和重置。
+- 已打开过的详情图片会在当前图集 tab 内按最近使用顺序保活，默认保留最近 12 张；只要仍在保活范围内，回到网格再打开同一图片不会主动释放图片资源。
+- 支持在当前缩放 / 平移状态下裁剪可见图片区域；裁剪结果作为当前图集目录下的图片副本上传，命名为“原名 副本 / 原名 副本1 …”，并排到被裁剪图片前面。
+- 旋转不做过渡动画，点击后直接切到下一个 90° 状态。
+- 详情弹框会尝试读取图片尺寸、文件大小和 JPEG EXIF 信息；HEIC / HEIF 使用本地预览代理提供的原图大小和 `sips` 可读元信息；读不到 EXIF / HEIC 元信息时显示明确提示。
+- 状态只属于当前图集 viewer，不写入 `FileViewerContext` 或后端 `viewMeta`。
+
+视频详情：
+
+- 使用图集自己的视频布局和控制条。
+- 视频元素仍通过 `global-video-elements` 和 `floatingVideoService` 管理。
+- 首次播放后由 `floatingVideoService` 注册到 MediaHub。
+- 切换到另一项或回到网格时释放当前图集视频；切换 tab 或离开资料库时沿用 MediaHub 契约的保活 / handoff 行为。
+
+## 5. Viewer Session 契约
+
+resource key 使用稳定账号 scope、显式 `libraryId`、`node:<folderNodeId>` 和 `viewerKind=gallery`。`gallery://` 入口 URL、签名链接、HEIC 预览 URL 和本地路径都不参与身份。
+
+Gallery snapshot schema version 为 1，只保存：
+
+- 当前详情媒体节点 ID；没有详情时为网格态。
+- 网格 `scrollTop`、滚动比例、首行锚点媒体 ID 和行内偏移比例。
+- 当前图片详情的 zoom、绝对 / 比例 pan offset 和 rotation。
+
+不保存：
+
+- 媒体列表和文件名等可重新读取数据。
+- 签名链接、HEIC 预览结果和 EXIF 读取结果。
+- 视频播放进度或媒体元素；这些继续由现有媒体 service owner 管理。
+- 裁剪、拖拽、详情弹框、loading、error、缩略图 loaded 和图片 keep-alive 集合。
+
+恢复先重新加载目录，再按节点 ID 找到详情项。网格恢复优先用锚点 ID 适配列数变化；锚点已不存在时降级到滚动比例，最后使用绝对 `scrollTop`。图片 pan 在详情舞台可测时按比例恢复，否则使用绝对偏移。
+
+生命周期语义：
+
+- 普通 tab 失活：capture Warm snapshot，不重置当前实例。
+- 工作区模式切换或真卸载：卸载前 capture，重新挂载并加载目录后恢复。
+- reload：按 `reloadToken` 失效旧 snapshot，重新进入默认网格。
+- 关闭 tab：`closeBehavior=discard`，删除 snapshot 和 live adapter，重新打开从默认网格开始。
+- 资料库或 auth session 释放：由公共 runtime 统一清理。
+- Cold：当前为 `none`，应用重启后不恢复图集现场。
+
+## 6. 边界
+
+`GalleryViewer` 不负责：
+
+- 文件树状态和节点配置。
+- 普通图片 viewer / 普通视频 viewer 的功能演进。
+- 图集归档 viewer 的卡片加载与逐层进入。
+- 跨 tab 播放列表或视频观看进度持久化。
+
+`FileViewerContext` 只保存当前图集 tab 的文件事实，图集内部选中项、缩放、旋转和视频进度都不上提。
+
+## 7. 验证方式
+
+涉及图集 viewer 改动时，至少验证：
+
+1. `GALLERY` 目录双击进入图集 viewer。
+2. 网格只展示直属图片和视频，不展示目录、字幕、文本等文件。
+3. 图片详情可左右切换、滚轮缩放、`Cmd/Ctrl + +/-/0` 缩放、拖拽、旋转和重置。
+4. 图片缩放 / 平移后进入裁剪，选框仍落在当前可见图片区域；保存后新图片使用副本命名并出现在原图前面。
+5. 网格和详情顶部不直接显示文件名；悬停卡片仍能看到 title。
+6. 图片详情按钮可打开媒体详情弹框；有 EXIF 的图片能显示拍摄时间 / 定位等字段，无 EXIF 时有明确提示。
+7. HEIC / HEIF 在本机有 `ffmpeg` 时能生成缩略图和详情大图；详情弹框能展示 `sips` 可读的时间、相机、尺寸等信息。
+8. 视频详情可播放、暂停、seek，并且开始播放后 MediaHub 出现视频 entry。
+9. 从视频切换到图片或回到网格后，当前图集视频被释放。
+10. 关闭图集 tab 后，图集视频从 MediaHub 消失。
+11. 切换到其他 tab 再回来，图集 tab 不丢失当前前端状态。
+12. 从其他相册切回当前图集时会重新读取目录事实，然后恢复滚动锚点和当前详情节点；链接与 HEIC 预览重新按节点加载。
+13. 关闭图集 tab 后重新打开同一图集，不应恢复上一次详情图片位置，应按新 tab 重新进入网格。
+14. 回到网格再打开最近看过的同一图片，不应重新请求或释放该图片资源；超过保活 LRU 上限后允许释放。
+15. 离开资料库详情页再返回时，图集快照仍可恢复；显式释放资料库后再进入时不得恢复释放前现场。
+16. 窗口宽度变化造成网格列数变化时，恢复后仍以同一媒体锚点为主；锚点被删除时按比例合理降级。
+17. reload 后回到默认网格；裁剪、详情弹框、拖拽、临时链接和 HEIC 预览 URL 不恢复。
+
+## 8. 维护规则
+
+出现以下变化时必须更新本文：
+
+- 图集媒体过滤规则变化。
+- 图集开始支持递归、分页、搜索或排序。
+- 图集视频 MediaHub 接入方式变化。
+- HEIC / HEIF 预览缓存、IPC 或元信息读取方式变化。
+- 图集图片裁剪、副本命名或排序语义变化。
+- Gallery snapshot 字段、恢复时序或关闭语义变化。
+- 新增 `gallery_archive` 或图集归档 viewer。

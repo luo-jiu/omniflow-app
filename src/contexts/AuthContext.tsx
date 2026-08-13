@@ -4,6 +4,14 @@ import { loginService } from '@/service/authService';
 import { AuthContext, type User } from './auth.context';
 import { fetchCurrentUserProfile } from '@/features/user/services/user.api';
 import { runtimeLogger } from '@/utils/runtimeLogger';
+import {
+  clearAuthSessionAndDisposeWorkspaces,
+  disposeAuthSessionRuntimes,
+  listenAuthSessionCleared,
+  registerAuthSessionWorkspaceDisposer,
+  startAuthSessionRuntimes,
+} from '@/service/auth-session-release';
+import { disposeSessionWorkspaces } from '@/features/workspace-resource-release';
 
 function mergeUserWithProfile(profile: {
   id?: number;
@@ -33,6 +41,29 @@ function mergeUserWithProfile(profile: {
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const commitAuthenticatedUser = React.useCallback((nextUser: User) => {
+    auth.setUserInfo(nextUser);
+    startAuthSessionRuntimes();
+    setUser(nextUser);
+  }, []);
+
+  useEffect(() => {
+    return registerAuthSessionWorkspaceDisposer(async () => {
+      await disposeSessionWorkspaces();
+    });
+  }, []);
+
+  useEffect(() => {
+    return listenAuthSessionCleared(() => {
+      setUser(null);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!user) {
+      disposeAuthSessionRuntimes();
+    }
+  }, [user]);
 
   useEffect(() => {
     let disposed = false;
@@ -49,7 +80,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
 
       if (userInfo && !disposed) {
-        setUser(userInfo);
+        commitAuthenticatedUser(userInfo);
+        setLoading(false);
       }
 
       try {
@@ -58,16 +90,14 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           return;
         }
         const mergedUser = mergeUserWithProfile(profile, userInfo);
-        auth.setUserInfo(mergedUser);
-        setUser(mergedUser);
+        commitAuthenticatedUser(mergedUser);
       } catch (error) {
         runtimeLogger.warn('refresh current user profile failed, fallback to local cache', error);
         if (!disposed && !userInfo) {
           const fallbackUsername = auth.getUsername();
           if (fallbackUsername) {
             const fallbackUser = { username: fallbackUsername } as User;
-            auth.setUserInfo(fallbackUser);
-            setUser(fallbackUser);
+            commitAuthenticatedUser(fallbackUser);
           }
         }
       } finally {
@@ -81,7 +111,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return () => {
       disposed = true;
     };
-  }, []);
+  }, [commitAuthenticatedUser]);
 
   const login = async (username: string, password: string) => {
     const result = await loginService.login(username, password);
@@ -93,8 +123,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       } catch (error) {
         runtimeLogger.warn('fetch profile after login failed, fallback to login response', error);
       }
-      auth.setUserInfo(nextUser);
-      setUser(nextUser);
+      commitAuthenticatedUser(nextUser);
       return { success: true };
     }
     return { success: false, message: result.message };
@@ -102,10 +131,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const setUserInfo = (userInfo: User | null) => {
     if (userInfo) {
-      auth.setUserInfo(userInfo);
-      setUser(userInfo);
+      commitAuthenticatedUser(userInfo);
       return;
     }
+    disposeAuthSessionRuntimes();
     auth.removeUserInfo();
     setUser(null);
   };
@@ -123,9 +152,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return { success: false, message: result.message };
   };
 
-  const logout = () => {
-    auth.clear();
-    setUser(null);
+  const logout = async () => {
+    await clearAuthSessionAndDisposeWorkspaces({ reason: 'manual logout' });
   };
 
   return (

@@ -1,6 +1,6 @@
 import { ipcRequest as request } from '@/service/request/ipcRequest';
 
-export type TagType = 'ASMR' | 'FILE_TAB' | 'COMIC' | 'GENERAL' | string;
+export type TagType = 'ASMR' | 'FILE_TAB' | 'COMIC' | 'AUDIO' | 'VIDEO' | 'FILE' | 'FOLDER' | 'GENERAL' | string;
 export type TagScope = 'resource' | 'ui' | string;
 export type TagDimension =
   | 'genre'
@@ -29,6 +29,7 @@ export interface TagItem {
   scope?: TagScope;
   dimension?: TagDimension;
   resourceKind?: string | null;
+  targetKinds?: string[];
   targetKey?: string | null;
   ownerUserId: number | null;
   color: string;
@@ -46,6 +47,7 @@ export interface TagUpsertPayload {
   scope?: TagScope;
   dimension?: TagDimension;
   resourceKind?: string | null;
+  targetKinds?: string[];
   targetKey?: string | null;
   color: string;
   textColor?: string | null;
@@ -86,6 +88,9 @@ export async function createTag(payload: TagUpsertPayload): Promise<TagItem> {
       scope: payload.scope ? String(payload.scope).trim().toLowerCase() : undefined,
       dimension: payload.dimension ? String(payload.dimension).trim().toLowerCase() : undefined,
       resourceKind: payload.resourceKind ? String(payload.resourceKind).trim().toLowerCase() : null,
+      targetKinds: Array.isArray(payload.targetKinds)
+        ? payload.targetKinds.map(item => String(item).trim().toLowerCase()).filter(Boolean)
+        : undefined,
     }),
   });
   return body?.data as TagItem;
@@ -100,6 +105,9 @@ export async function updateTag(id: number, payload: TagUpsertPayload): Promise<
       scope: payload.scope ? String(payload.scope).trim().toLowerCase() : undefined,
       dimension: payload.dimension ? String(payload.dimension).trim().toLowerCase() : undefined,
       resourceKind: payload.resourceKind ? String(payload.resourceKind).trim().toLowerCase() : null,
+      targetKinds: Array.isArray(payload.targetKinds)
+        ? payload.targetKinds.map(item => String(item).trim().toLowerCase()).filter(Boolean)
+        : undefined,
     }),
   });
   return body?.data as TagItem;

@@ -149,6 +149,27 @@ function writeToStorage(libraryId: number, state: ToolWorkspaceState): void {
   }
 }
 
+function removeFromStorage(libraryId: number): void {
+  if (typeof window === 'undefined' || !window.localStorage) {
+    return;
+  }
+  window.localStorage.removeItem(storageKey(libraryId));
+}
+
+function clearAllFromStorage(): void {
+  if (typeof window === 'undefined' || !window.localStorage) {
+    return;
+  }
+  const keys: string[] = [];
+  for (let index = 0; index < window.localStorage.length; index += 1) {
+    const key = window.localStorage.key(index);
+    if (key?.startsWith(TOOL_WORKSPACE_STATE_STORAGE_PREFIX)) {
+      keys.push(key);
+    }
+  }
+  keys.forEach((key) => window.localStorage.removeItem(key));
+}
+
 export function loadToolWorkspaceState(libraryId: number): ToolWorkspaceState {
   const cached = toolWorkspaceStateCache.get(libraryId);
   if (cached) {
@@ -175,4 +196,14 @@ export function saveToolWorkspaceState(libraryId: number, state: ToolWorkspaceSt
   };
   toolWorkspaceStateCache.set(libraryId, normalized);
   writeToStorage(libraryId, normalized);
+}
+
+export function clearToolWorkspaceState(libraryId: number) {
+  toolWorkspaceStateCache.delete(libraryId);
+  removeFromStorage(libraryId);
+}
+
+export function clearAllToolWorkspaceStates() {
+  toolWorkspaceStateCache.clear();
+  clearAllFromStorage();
 }

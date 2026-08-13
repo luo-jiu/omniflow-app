@@ -4,6 +4,7 @@ export interface ProviderItem {
   alias: string;
   type: string;
   endpoint: string;
+  publicEndpoint?: string;
   accessKey: string;
   secretKey: string;
   useSSL: boolean;
@@ -21,6 +22,7 @@ export interface AddProviderPayload {
   alias: string;
   type: string;
   endpoint: string;
+  publicEndpoint?: string;
   accessKey: string;
   secretKey: string;
   useSSL: boolean;
@@ -32,6 +34,7 @@ export interface AddProviderPayload {
 export interface UpdateProviderPayload {
   type: string;
   endpoint: string;
+  publicEndpoint?: string;
   accessKey: string;
   secretKey: string;
   useSSL: boolean;

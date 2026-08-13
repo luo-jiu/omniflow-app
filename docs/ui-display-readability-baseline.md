@@ -1,6 +1,6 @@
 # OmniFlow App 显示与可读性基线
 
-更新时间：2026-05-05
+更新时间：2026-07-31
 适用范围：`omniflow-app` 前端页面、工作区、内置浏览器、目录树、弹框、工具页和后续新页面的显示尺寸、字号、密度与可读性校准。
 
 ## 1. 概述
@@ -221,7 +221,7 @@
 - 图标元素必须使用 `object-fit: contain`，不得只依赖 SVG 自身 `viewBox` 或 `width/height` 来决定最终视觉大小。
 - 内置类型图标的视觉面积参考默认文件夹（`folder-base.svg`）：主体图形不应明显高过同一行的默认文件夹图标，也不应比普通文件夹小一圈。
 - **所有目录类图标都必须提供闭合与展开两态**，例如 `folder-base.svg` / `folder-base-open.svg`、`folder-video.svg` / `folder-video-open.svg`；目录树渲染时按节点展开状态切换（参见 `directory-tree/index.tsx` 的 `patchNodes` 逻辑），不允许只用单个静态图标。
-- 不同 SVG 的有效图形面积不一致时，只允许在类型 class 上用 `0.5px ~ 1.5px` 的 `padding` 做感知大小校准，例如 `comic-folder`、`asmr-folder`、`audio-folder`、`video-folder`、`default-folder`。本仓库当前所有 5 类共享 0.5px 基准。
+- 不同 SVG 的有效图形面积不一致时，只允许在类型 class 上用 `0.5px ~ 1.5px` 的 `padding` 做感知大小校准，例如 `comic-folder`、`asmr-folder`、`audio-folder`、`video-folder`、`gallery-folder`、`default-folder`。本仓库当前所有目录类图标共享 0.5px 基准。
 - 新增目录树语义图标时，必须同时检查默认目录、漫画归档、ASMR 归档、音频归档和视频归档同屏展示效果，避免出现某个图标因为 SVG 内容铺满画布而明显偏大。
 
 ### 6.5 明暗主题可见性
@@ -240,6 +240,20 @@
 - URL、路径、资源名称的展示优先级
 - 表格列是否允许换行
 - 描述文本在什么情况下必须折行而不是缩小字号
+
+### 6.7 文件预览 tab 宽度与动效
+
+- 文件预览 tab 不再按内容撑宽，默认宽度为 `168px`，最小宽度为 `96px`。
+- 当可用宽度不足时，tab 应先整体等比例压缩到最小宽度；最小宽度仍放不下时，再使用已有横向滚动条。
+- 拖拽重排 tab 时使用上一帧位置做布局过渡；关闭 tab 时先触发真正关闭，再由 tab bar 保留本地退出快照折叠宽度，让相邻 tab 通过 flex 布局自然收回，避免关闭瞬间出现旧位置残影，同时不延迟媒体释放链路。
+- tab 前缀图标复用目录树图标解析，不额外添加彩色胶囊或文字标签。
+
+### 6.8 工作区滚动条
+
+- 高频工作区的普通滚动容器默认使用窄滚动条，WebKit / Electron 下横纵尺寸优先取 `8px`；轨道保持透明，避免在暗色内容区出现突兀的亮色边带。
+- 滑块颜色必须复用 `--app-scrollbar-thumb`、`--app-scrollbar-thumb-hover` 和 `--app-scrollbar-track` 主题 token，不在业务组件中写死明暗色值。
+- 滚动条右下角交汇区应与轨道同为透明，横纵滚动条同时出现时不能产生白色方块。
+- 不设置全局 `*::-webkit-scrollbar` 规则。PDF、漫画、图集、编辑器等滚动模型不同，应由实际滚动容器局部应用；当多个同类容器的显隐和交互规则稳定一致后，再抽 styled-components 共享片段。
 
 ## 7. 新页面临时准入标准
 

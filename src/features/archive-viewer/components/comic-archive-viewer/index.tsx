@@ -2,86 +2,61 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Input, Modal, Popover, Spin, Toast } from '@douyinfe/semi-ui';
 import {
   batchGetFileLinks,
-  deleteNodeAndChildren,
   fetchArchiveCardsPage,
   fetchNodeDetailById,
   renameNode,
   updateNodeConfig,
 } from '@/features/file-explorer/services/file.api';
+import { softDeleteNodeSubtree } from '@/features/file-explorer/services/node-deletion';
 import { runtimeLogger } from '@/utils/runtimeLogger';
 import { ComicArchiveViewerWrapper } from './style';
-import { useFileViewer } from '@/hooks/useFileViewer';
 import { useArchiveCardGrid } from '@/features/archive-viewer/hooks/useArchiveCardGrid';
 import ContextMenu, { ContextMenuItem } from '@/components/ui/context-menu';
 import { locateNodeInDirectoryTree } from '@/features/file-explorer/services/tree-locate';
 import { useNodePropertiesOverlay } from '@/features/file-explorer/hooks/useNodePropertiesOverlay';
+import type { FileViewerReturnTarget } from '@/contexts/file-viewer.context';
+import { buildFileViewerReturnTarget } from '@/contexts/file-viewer-return-target';
+import { mapComicArchiveCards } from './comic-archive-card-mapper';
+import type { ComicArchiveCard } from './comic-archive-types';
+import { useComicArchiveNavigation } from './useComicArchiveNavigation';
+import { useFileViewer } from '@/hooks/useFileViewer';
+import {
+  acknowledgeLatestPendingValue,
+  useViewerSession,
+  type ViewerSessionAdapter,
+} from '@/features/file-viewer/session';
+import {
+  ARCHIVE_CARD_SESSION_ESTIMATED_BYTES,
+  ARCHIVE_CARD_SESSION_SCHEMA_VERSION,
+  parseArchiveCardSessionSnapshot,
+  resolveArchiveCardRestoreScrollTop,
+  type ArchiveCardSessionSnapshot,
+} from '@/features/archive-viewer/session/archive-card-session';
+import {
+  buildViewMetaWithArchiveProgress,
+  clamp,
+  parseRemoteArchiveProgress,
+  parseViewMetaObject,
+  type ArchiveReaderProgress,
+} from './comic-archive-progress';
 
 interface ComicArchiveViewerProps {
+  accountScope: string | null;
+  contentRevision: string | null;
   folderNodeId: number | null;
   fileUrl: string;
   fileName?: string | null;
   active?: boolean;
+  libraryId: number | null;
   reloadToken?: number;
-}
-
-interface ComicArchiveCard {
-  id: number;
-  title: string;
-  sortOrder: number;
-  coverNodeId: number | null;
-  coverUrl: string | null;
-}
-
-interface ComicArchiveSnapshot {
-  hasLoadedList: boolean;
-  cards: ComicArchiveCard[];
-  nextOffset: number;
-  total: number;
-  hasMore: boolean;
-  scrollTop: number;
-  scrollRatio: number;
-  anchorCardId: number | null;
-  anchorOffsetRatio: number;
-}
-
-interface ArchiveReaderProgress {
-  anchorCardId: number | null;
-  anchorOffsetRatio: number;
-  scrollTop: number;
-  scrollRatio: number;
-  updatedAt: string;
+  returnTarget?: FileViewerReturnTarget | null;
+  tabId: string;
 }
 
 const PAGE_SIZE = 24;
 const LINK_EXPIRY_MINUTES = 120;
-const VIEW_META_VIEWER_STATE_KEY = '__omniflowViewerStateV1';
-const VIEW_META_VIEWER_STATE_LEGACY_KEY = '__omniflow_viewer_state_v1';
-const VIEW_META_COMIC_ARCHIVE_READER_KEY = 'comicArchiveReader';
-const VIEW_META_COMIC_ARCHIVE_READER_LEGACY_KEY = 'comic_archive_reader';
-const COMIC_ARCHIVE_CACHE_MAX_ENTRIES = 24;
 const REMOTE_PROGRESS_SYNC_INTERVAL_MS = 200;
 const SCROLL_PROGRESS_PERSIST_DEBOUNCE_MS = 160;
-
-const EMPTY_COMIC_ARCHIVE_SNAPSHOT: ComicArchiveSnapshot = {
-  hasLoadedList: false,
-  cards: [],
-  nextOffset: 0,
-  total: 0,
-  hasMore: false,
-  scrollTop: 0,
-  scrollRatio: 0,
-  anchorCardId: null,
-  anchorOffsetRatio: 0,
-};
-
-const comicArchiveSnapshotCache = new Map<string, ComicArchiveSnapshot>();
-
-function parseArchiveLibraryId(fileUrl: string): number | null {
-  const matches = /^comic-archive:\/\/library\/(\d+)\/node\/\d+$/i.exec(String(fileUrl || '').trim());
-  if (!matches) return null;
-  const parsed = Number(matches[1]);
-  return Number.isFinite(parsed) ? parsed : null;
-}
 
 function normalizeArchiveTitle(fileName?: string | null): string {
   const raw = String(fileName || '').trim();
@@ -93,129 +68,48 @@ function normalizeArchiveTitle(fileName?: string | null): string {
   return raw;
 }
 
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(Math.max(value, min), max);
-}
-
-function resolveReaderCacheKey(fileUrl: string, folderNodeId: number | null, reloadToken: number): string | null {
-  if (!folderNodeId || !Number.isFinite(folderNodeId)) {
-    return null;
-  }
-  return `${String(fileUrl || '').trim()}::${folderNodeId}::r${Math.max(Math.floor(reloadToken), 0)}`;
-}
-
-function setArchiveSnapshotCache(cacheKey: string, snapshot: ComicArchiveSnapshot) {
-  if (comicArchiveSnapshotCache.has(cacheKey)) {
-    comicArchiveSnapshotCache.delete(cacheKey);
-  }
-  comicArchiveSnapshotCache.set(cacheKey, snapshot);
-  if (comicArchiveSnapshotCache.size > COMIC_ARCHIVE_CACHE_MAX_ENTRIES) {
-    const oldest = comicArchiveSnapshotCache.keys().next().value;
-    if (oldest) {
-      comicArchiveSnapshotCache.delete(oldest);
-    }
-  }
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function parseViewMetaObject(raw: string | null | undefined): Record<string, unknown> {
-  if (!raw) return {};
-  try {
-    const parsed = JSON.parse(raw);
-    return isPlainObject(parsed) ? parsed : {};
-  } catch {
-    return {};
-  }
-}
-
-function parsePositiveNumber(value: unknown): number | null {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed <= 0) return null;
-  return parsed;
-}
-
-function parseRatio(value: unknown): number {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return 0;
-  return clamp(parsed, 0, 1);
-}
-
-function parseRemoteArchiveProgress(viewMetaRaw: string | null | undefined): ArchiveReaderProgress | null {
-  const meta = parseViewMetaObject(viewMetaRaw);
-  const viewerState = meta[VIEW_META_VIEWER_STATE_KEY] ?? meta[VIEW_META_VIEWER_STATE_LEGACY_KEY];
-  if (!isPlainObject(viewerState)) return null;
-  const readerState = viewerState[VIEW_META_COMIC_ARCHIVE_READER_KEY] ?? viewerState[VIEW_META_COMIC_ARCHIVE_READER_LEGACY_KEY];
-  if (!isPlainObject(readerState)) return null;
-
-  const anchorCardId = parsePositiveNumber(readerState.anchorCardId);
-  const scrollTop = Number(readerState.scrollTop ?? 0);
-  const currentScrollTop = Number.isFinite(scrollTop) && scrollTop > 0 ? scrollTop : 0;
-  const currentScrollRatio = parseRatio(readerState.scrollRatio);
-  if (!anchorCardId && currentScrollTop <= 0 && currentScrollRatio <= 0) {
-    return null;
-  }
-
-  return {
-    anchorCardId,
-    anchorOffsetRatio: parseRatio(readerState.anchorOffsetRatio),
-    scrollTop: currentScrollTop,
-    scrollRatio: currentScrollRatio,
-    updatedAt: String(readerState.updatedAt || ''),
-  };
-}
-
-function buildViewMetaWithArchiveProgress(
-  baseMeta: Record<string, unknown>,
-  progress: ArchiveReaderProgress,
-): Record<string, unknown> {
-  const nextMeta: Record<string, unknown> = { ...baseMeta };
-  const viewerStateCandidate = nextMeta[VIEW_META_VIEWER_STATE_KEY] ?? nextMeta[VIEW_META_VIEWER_STATE_LEGACY_KEY];
-  const currentViewerState = isPlainObject(viewerStateCandidate)
-    ? { ...(viewerStateCandidate as Record<string, unknown>) }
-    : {};
-  delete currentViewerState[VIEW_META_COMIC_ARCHIVE_READER_LEGACY_KEY];
-  delete nextMeta[VIEW_META_VIEWER_STATE_LEGACY_KEY];
-  nextMeta[VIEW_META_VIEWER_STATE_KEY] = {
-    ...currentViewerState,
-    [VIEW_META_COMIC_ARCHIVE_READER_KEY]: {
-      anchorCardId: progress.anchorCardId,
-      anchorOffsetRatio: progress.anchorOffsetRatio,
-      scrollTop: progress.scrollTop,
-      scrollRatio: progress.scrollRatio,
-      updatedAt: progress.updatedAt,
-    },
-  };
-  return nextMeta;
-}
-
 const ComicArchiveViewer: React.FC<ComicArchiveViewerProps> = ({
+  accountScope,
+  contentRevision,
   folderNodeId,
   fileUrl,
   fileName,
   active = true,
+  libraryId,
   reloadToken = 0,
+  returnTarget = null,
+  tabId,
 }) => {
-  const { setFileUrl } = useFileViewer();
+  const { closeTabByNodeId } = useFileViewer();
   const { viewportRef, wrapperStyle } = useArchiveCardGrid({
     baseCardWidth: 275,
     gridGap: 15,
   });
-  const libraryId = useMemo(() => parseArchiveLibraryId(fileUrl), [fileUrl]);
   const title = useMemo(() => normalizeArchiveTitle(fileName), [fileName]);
+  const currentArchiveReturnTarget = useMemo<FileViewerReturnTarget | null>(() => {
+    if (!folderNodeId || !libraryId || !Number.isFinite(folderNodeId)) {
+      return null;
+    }
+    return buildFileViewerReturnTarget({
+      fileUrl,
+      fileName: fileName || title,
+      fileType: 'comic_archive',
+      nodeId: folderNodeId,
+      tabTypeLabel: 'COMIC-ARC',
+      returnTarget: returnTarget ?? null,
+    });
+  }, [fileName, fileUrl, folderNodeId, libraryId, returnTarget, title]);
+  const handleOpenCard = useComicArchiveNavigation({
+    libraryId,
+    currentArchiveReturnTarget,
+  });
   const { showNodeProperties } = useNodePropertiesOverlay({ libraryId });
-  const readerCacheKey = useMemo(
-    () => resolveReaderCacheKey(fileUrl, folderNodeId, reloadToken),
-    [fileUrl, folderNodeId, reloadToken],
-  );
 
   const [listLoading, setListLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [cards, setCards] = useState<ComicArchiveCard[]>([]);
-  const [total, setTotal] = useState(0);
+  const [, setTotal] = useState(0);
   const [nextOffset, setNextOffset] = useState(0);
   const [hasMore, setHasMore] = useState(false);
   const [restoreTick, setRestoreTick] = useState(0);
@@ -243,10 +137,12 @@ const ComicArchiveViewer: React.FC<ComicArchiveViewerProps> = ({
   }, [active]);
 
   const cardRefs = useRef<Map<number, HTMLElement>>(new Map());
+  const cardsRef = useRef(cards);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const requestIdRef = useRef(0);
-  const isHydratingSnapshotRef = useRef(false);
   const pendingRestoreRef = useRef<ArchiveReaderProgress | null>(null);
+  const pendingSessionResourceNodeIdRef = useRef<number | null>(null);
+  const activeRef = useRef(active);
   const restoreTriggeredLoadMoreRef = useRef(false);
   const scrollPersistRafRef = useRef<number>(0);
   const scrollPersistTimerRef = useRef<number>(0);
@@ -257,22 +153,8 @@ const ComicArchiveViewer: React.FC<ComicArchiveViewerProps> = ({
   const viewMetaBaseRef = useRef<Record<string, unknown>>({});
   const viewMetaBaseReadyRef = useRef(false);
   const lastRemoteSyncSignatureRef = useRef('');
-
-  const persistSnapshot = useCallback((patch: Partial<ComicArchiveSnapshot>) => {
-    if (!readerCacheKey) return;
-    const prev = comicArchiveSnapshotCache.get(readerCacheKey) ?? EMPTY_COMIC_ARCHIVE_SNAPSHOT;
-    setArchiveSnapshotCache(readerCacheKey, {
-      hasLoadedList: patch.hasLoadedList ?? prev.hasLoadedList,
-      cards: patch.cards ?? prev.cards,
-      nextOffset: patch.nextOffset ?? prev.nextOffset,
-      total: patch.total ?? prev.total,
-      hasMore: patch.hasMore ?? prev.hasMore,
-      scrollTop: patch.scrollTop ?? prev.scrollTop,
-      scrollRatio: patch.scrollRatio ?? prev.scrollRatio,
-      anchorCardId: patch.anchorCardId ?? prev.anchorCardId,
-      anchorOffsetRatio: patch.anchorOffsetRatio ?? prev.anchorOffsetRatio,
-    });
-  }, [readerCacheKey]);
+  activeRef.current = active;
+  cardsRef.current = cards;
 
   const closeContextMenu = useCallback(() => {
     setMenuState(prev => ({ ...prev, visible: false }));
@@ -362,17 +244,30 @@ const ComicArchiveViewer: React.FC<ComicArchiveViewerProps> = ({
       centered: true,
       onOk: async () => {
         try {
-          await deleteNodeAndChildren(card.id, libraryId);
+          const result = await softDeleteNodeSubtree({
+            accountScope,
+            ancestorId: card.id,
+            libraryId,
+          });
+          result.deletedNodeIds.forEach(closeTabByNodeId);
           setCards(prev => prev.filter(item => item.id !== card.id));
           setTotal(prev => Math.max(prev - 1, 0));
-          Toast.success('已移入回收站');
+          if (
+            result.draftCleanupFailed
+            || result.viewerSessionCleanupFailed
+            || result.subtreeCollectionFailed
+          ) {
+            Toast.warning('已移入回收站，但本地恢复数据可能未完整清理');
+          } else {
+            Toast.success('已移入回收站');
+          }
         } catch (error: any) {
           runtimeLogger.error('删除漫画归档卡片失败:', error);
           Toast.error(error?.message || '删除失败');
         }
       },
     });
-  }, [libraryId]);
+  }, [accountScope, closeTabByNodeId, libraryId]);
 
   const contextMenuItems = useMemo<ContextMenuItem[]>(() => {
     const card = menuState.card;
@@ -430,7 +325,7 @@ const ComicArchiveViewer: React.FC<ComicArchiveViewerProps> = ({
     }
 
     const viewportTop = viewport.getBoundingClientRect().top;
-    for (const card of cards) {
+    for (const card of cardsRef.current) {
       const el = cardRefs.current.get(card.id);
       if (!el) continue;
       const rect = el.getBoundingClientRect();
@@ -442,14 +337,14 @@ const ComicArchiveViewer: React.FC<ComicArchiveViewerProps> = ({
       };
     }
 
-    if (cards.length > 0) {
+    if (cardsRef.current.length > 0) {
       return {
-        anchorCardId: cards[0].id,
+        anchorCardId: cardsRef.current[0].id,
         anchorOffsetRatio: 0,
       };
     }
     return { anchorCardId: null, anchorOffsetRatio: 0 };
-  }, [cards, viewportRef]);
+  }, [viewportRef]);
 
   const flushRemoteProgress = useCallback(async (force = false) => {
     if (!folderNodeId || !libraryId) {
@@ -465,16 +360,20 @@ const ComicArchiveViewer: React.FC<ComicArchiveViewerProps> = ({
 
     const pending = pendingRemoteProgressRef.current;
     if (!pending) return;
+    const requestId = requestIdRef.current;
     const signature = JSON.stringify(pending);
-    if (!force && signature === lastRemoteSyncSignatureRef.current) {
+    if (signature === lastRemoteSyncSignatureRef.current) {
+      acknowledgeLatestPendingValue(pendingRemoteProgressRef, pending);
       return;
     }
 
+    let shouldFlushLatest = false;
     remoteSyncInflightRef.current = true;
     try {
       if (!viewMetaBaseReadyRef.current) {
         try {
           const detail = await fetchNodeDetailById(folderNodeId);
+          if (requestId !== requestIdRef.current) return;
           viewMetaBaseRef.current = parseViewMetaObject(detail.viewMeta);
           viewMetaBaseReadyRef.current = true;
         } catch (detailError) {
@@ -488,13 +387,25 @@ const ComicArchiveViewer: React.FC<ComicArchiveViewerProps> = ({
         id: folderNodeId,
         viewMeta: serialized,
       });
+      if (requestId !== requestIdRef.current) return;
       viewMetaBaseRef.current = nextMeta;
       lastRemoteSyncSignatureRef.current = signature;
-      pendingRemoteProgressRef.current = null;
+      shouldFlushLatest = acknowledgeLatestPendingValue(pendingRemoteProgressRef, pending);
     } catch (syncError) {
       runtimeLogger.warn('同步漫画归档阅读位置失败:', syncError);
     } finally {
-      remoteSyncInflightRef.current = false;
+      if (requestId === requestIdRef.current) {
+        remoteSyncInflightRef.current = false;
+        if (shouldFlushLatest && pendingRemoteProgressRef.current && (active || force)) {
+          if (remoteSyncTimerRef.current) {
+            window.clearTimeout(remoteSyncTimerRef.current);
+          }
+          remoteSyncTimerRef.current = window.setTimeout(() => {
+            remoteSyncTimerRef.current = 0;
+            void flushRemoteProgress(force);
+          }, force ? 0 : REMOTE_PROGRESS_SYNC_INTERVAL_MS);
+        }
+      }
     }
   }, [active, folderNodeId, libraryId]);
 
@@ -514,7 +425,7 @@ const ComicArchiveViewer: React.FC<ComicArchiveViewerProps> = ({
 
   const captureViewportProgress = useCallback((): ArchiveReaderProgress | null => {
     const viewport = viewportRef.current;
-    if (!viewport || cards.length === 0) return null;
+    if (!viewport || cardsRef.current.length === 0) return null;
     const maxScrollable = Math.max(viewport.scrollHeight - viewport.clientHeight, 0);
     const scrollTop = Math.max(viewport.scrollTop, 0);
     const scrollRatio = maxScrollable > 0 ? clamp(scrollTop / maxScrollable, 0, 1) : 0;
@@ -526,21 +437,76 @@ const ComicArchiveViewer: React.FC<ComicArchiveViewerProps> = ({
       scrollRatio,
       updatedAt: new Date().toISOString(),
     };
-  }, [cards.length, captureAnchorFromViewport, viewportRef]);
+  }, [captureAnchorFromViewport, viewportRef]);
+
+  const captureSessionSnapshot = useCallback((): ArchiveCardSessionSnapshot | null => {
+    const pending = pendingRestoreRef.current;
+    if (pending) {
+      return {
+        anchorCardId: pending.anchorCardId,
+        anchorOffsetRatio: pending.anchorOffsetRatio,
+        scrollRatio: pending.scrollRatio,
+        scrollTop: pending.scrollTop,
+        selectedCardId: null,
+      };
+    }
+    const progress = captureViewportProgress();
+    if (!progress) return null;
+    return {
+      anchorCardId: progress.anchorCardId,
+      anchorOffsetRatio: progress.anchorOffsetRatio,
+      scrollRatio: progress.scrollRatio,
+      scrollTop: progress.scrollTop,
+      selectedCardId: null,
+    };
+  }, [captureViewportProgress]);
+
+  const restoreSessionSnapshot = useCallback((payload: ArchiveCardSessionSnapshot) => {
+    const snapshot = parseArchiveCardSessionSnapshot(payload);
+    if (!snapshot) return;
+    pendingRestoreRef.current = {
+      anchorCardId: snapshot.anchorCardId,
+      anchorOffsetRatio: snapshot.anchorOffsetRatio,
+      scrollRatio: snapshot.scrollRatio ?? 0,
+      scrollTop: snapshot.scrollTop,
+      updatedAt: '',
+    };
+    pendingSessionResourceNodeIdRef.current = folderNodeId;
+    setRestoreTick(prev => prev + 1);
+  }, [folderNodeId]);
+
+  const sessionAdapter = useMemo<ViewerSessionAdapter<ArchiveCardSessionSnapshot>>(() => ({
+    capture: captureSessionSnapshot,
+    restore: restoreSessionSnapshot,
+    suspend: () => undefined,
+    resume: () => undefined,
+    estimateSnapshotBytes: () => ARCHIVE_CARD_SESSION_ESTIMATED_BYTES,
+    getPinReasons: () => (activeRef.current ? ['active'] : []),
+  }), [captureSessionSnapshot, restoreSessionSnapshot]);
+
+  const {
+    capture: flushSessionSnapshot,
+    waitForInitialRestore,
+  } = useViewerSession({
+    accountScope,
+    active,
+    adapter: sessionAdapter,
+    contentRevision,
+    libraryId,
+    nodeId: folderNodeId,
+    reloadToken,
+    schemaVersion: ARCHIVE_CARD_SESSION_SCHEMA_VERSION,
+    tabId,
+    viewerKind: 'comic_archive',
+  });
 
   const persistCurrentViewportProgress = useCallback((forceRemoteSync = false) => {
     if (pendingRestoreRef.current) return;
     const progress = captureViewportProgress();
     if (!progress) return;
-    persistSnapshot({
-      hasLoadedList: true,
-      scrollTop: progress.scrollTop,
-      scrollRatio: progress.scrollRatio,
-      anchorCardId: progress.anchorCardId,
-      anchorOffsetRatio: progress.anchorOffsetRatio,
-    });
+    flushSessionSnapshot();
     queueRemoteProgress(progress, forceRemoteSync);
-  }, [captureViewportProgress, persistSnapshot, queueRemoteProgress]);
+  }, [captureViewportProgress, flushSessionSnapshot, queueRemoteProgress]);
 
   const resolveCardCoverUrls = useCallback(async (
     inputCards: ComicArchiveCard[],
@@ -600,15 +566,7 @@ const ComicArchiveViewer: React.FC<ComicArchiveViewerProps> = ({
       });
       if (requestId !== requestIdRef.current) return;
 
-      const rawCards: ComicArchiveCard[] = page.items.map(item => ({
-        id: Number(item.id),
-        title: String(item.name || ''),
-        sortOrder: Number(item.sortOrder ?? 0),
-        coverNodeId: Number.isFinite(Number(item.coverNodeId)) && Number(item.coverNodeId) > 0
-          ? Number(item.coverNodeId)
-          : null,
-        coverUrl: null,
-      }));
+      const rawCards = mapComicArchiveCards(page.items);
       const cardsWithUrl = await resolveCardCoverUrls(rawCards);
       if (requestId !== requestIdRef.current) return;
 
@@ -659,9 +617,14 @@ const ComicArchiveViewer: React.FC<ComicArchiveViewerProps> = ({
     requestIdRef.current += 1;
     const requestId = requestIdRef.current;
     restoreTriggeredLoadMoreRef.current = false;
-    pendingRestoreRef.current = null;
+    const hasWarmSessionRestore = pendingSessionResourceNodeIdRef.current === folderNodeId;
+    if (!hasWarmSessionRestore) {
+      pendingRestoreRef.current = null;
+      pendingSessionResourceNodeIdRef.current = null;
+    }
     cardRefs.current.clear();
     pendingRemoteProgressRef.current = null;
+    remoteSyncInflightRef.current = false;
     lastRemoteSyncSignatureRef.current = '';
     viewMetaBaseRef.current = {};
     viewMetaBaseReadyRef.current = false;
@@ -681,46 +644,28 @@ const ComicArchiveViewer: React.FC<ComicArchiveViewerProps> = ({
       return;
     }
 
-    const cached = readerCacheKey ? comicArchiveSnapshotCache.get(readerCacheKey) : null;
-    const hasCachedList = Boolean(cached?.hasLoadedList && cached.cards.length > 0);
-    if (hasCachedList && cached) {
-      isHydratingSnapshotRef.current = true;
-      setCards(cached.cards);
-      setTotal(cached.total);
-      setNextOffset(cached.nextOffset);
-      setHasMore(cached.hasMore);
-      setError(null);
-      setListLoading(false);
-      setLoadingMore(false);
-      pendingRestoreRef.current = {
-        anchorCardId: cached.anchorCardId,
-        anchorOffsetRatio: cached.anchorOffsetRatio,
-        scrollTop: cached.scrollTop,
-        scrollRatio: cached.scrollRatio,
-        updatedAt: '',
-      };
-      setRestoreTick((prev) => prev + 1);
-    } else {
-      setCards([]);
-      setTotal(0);
-      setNextOffset(0);
-      setHasMore(false);
-      setError(null);
-      void loadPage(0, false);
-    }
+    setCards([]);
+    setTotal(0);
+    setNextOffset(0);
+    setHasMore(false);
+    setError(null);
+    void loadPage(0, false);
 
     void (async () => {
       try {
         const detail = await fetchNodeDetailById(folderNodeId);
         if (requestId !== requestIdRef.current) return;
         viewMetaBaseRef.current = parseViewMetaObject(detail.viewMeta);
+        const initialRestoreSource = await waitForInitialRestore();
+        if (requestId !== requestIdRef.current) return;
         viewMetaBaseReadyRef.current = true;
-        if (!hasCachedList) {
-          return;
-        }
         const remoteProgress = parseRemoteArchiveProgress(detail.viewMeta);
         if (!remoteProgress) return;
-        if (!pendingRestoreRef.current) {
+        if (
+          initialRestoreSource === 'none'
+          && !hasWarmSessionRestore
+          && !pendingRestoreRef.current
+        ) {
           pendingRestoreRef.current = remoteProgress;
           setRestoreTick((prev) => prev + 1);
         }
@@ -728,7 +673,7 @@ const ComicArchiveViewer: React.FC<ComicArchiveViewerProps> = ({
         runtimeLogger.warn('读取漫画归档阅读位置失败:', detailError);
       }
     })();
-  }, [folderNodeId, libraryId, loadPage, readerCacheKey]);
+  }, [folderNodeId, libraryId, loadPage, waitForInitialRestore]);
 
   useEffect(() => {
     if (!active) return;
@@ -755,21 +700,24 @@ const ComicArchiveViewer: React.FC<ComicArchiveViewerProps> = ({
         if ((listLoading || loadingMore) && cards.length === 0) {
           return;
         }
-        if (!hasMore && !listLoading && !loadingMore && pending.scrollTop > 0) {
-          suppressNextScrollPersistRef.current = true;
-          viewport.scrollTop = Math.max(Math.floor(pending.scrollTop), 0);
-          finalizeRestore();
-          return;
-        }
-        if (!hasMore && !listLoading && !loadingMore && pending.scrollRatio > 0) {
-          const maxScrollable = Math.max(viewport.scrollHeight - viewport.clientHeight, 0);
-          suppressNextScrollPersistRef.current = true;
-          viewport.scrollTop = Math.floor(maxScrollable * clamp(pending.scrollRatio, 0, 1));
-          finalizeRestore();
-          return;
-        }
         if (!hasMore && !listLoading && !loadingMore) {
+          const maxScrollable = Math.max(viewport.scrollHeight - viewport.clientHeight, 0);
+          const sessionSnapshot: ArchiveCardSessionSnapshot = {
+            anchorCardId: pending.anchorCardId,
+            anchorOffsetRatio: pending.anchorOffsetRatio,
+            scrollRatio: pending.scrollRatio,
+            scrollTop: pending.scrollTop,
+            selectedCardId: null,
+          };
+          suppressNextScrollPersistRef.current = true;
+          viewport.scrollTop = resolveArchiveCardRestoreScrollTop({
+            anchorHeight: null,
+            anchorOffsetTop: null,
+            maxScrollable,
+            snapshot: sessionSnapshot,
+          });
           finalizeRestore();
+          return;
         }
         return;
       }
@@ -783,19 +731,21 @@ const ComicArchiveViewer: React.FC<ComicArchiveViewerProps> = ({
       return;
     }
 
-    if (pending.scrollTop > 0) {
-      suppressNextScrollPersistRef.current = true;
-      viewport.scrollTop = Math.max(Math.floor(pending.scrollTop), 0);
-      finalizeRestore();
-      return;
-    }
-
-    if (pending.scrollRatio > 0) {
-      const maxScrollable = Math.max(viewport.scrollHeight - viewport.clientHeight, 0);
-      suppressNextScrollPersistRef.current = true;
-      viewport.scrollTop = Math.floor(maxScrollable * clamp(pending.scrollRatio, 0, 1));
-      finalizeRestore();
-    }
+    const maxScrollable = Math.max(viewport.scrollHeight - viewport.clientHeight, 0);
+    suppressNextScrollPersistRef.current = true;
+    viewport.scrollTop = resolveArchiveCardRestoreScrollTop({
+      anchorHeight: null,
+      anchorOffsetTop: null,
+      maxScrollable,
+      snapshot: {
+        anchorCardId: null,
+        anchorOffsetRatio: pending.anchorOffsetRatio,
+        scrollRatio: pending.scrollRatio,
+        scrollTop: pending.scrollTop,
+        selectedCardId: null,
+      },
+    });
+    finalizeRestore();
   }, [
     active,
     cards,
@@ -808,17 +758,6 @@ const ComicArchiveViewer: React.FC<ComicArchiveViewerProps> = ({
     restoreTick,
     viewportRef,
   ]);
-
-  useEffect(() => {
-    if (cards.length === 0) return;
-    persistSnapshot({
-      hasLoadedList: true,
-      cards,
-      nextOffset,
-      total,
-      hasMore,
-    });
-  }, [cards, hasMore, nextOffset, persistSnapshot, total]);
 
   useEffect(() => {
     const viewport = viewportRef.current;
@@ -884,34 +823,11 @@ const ComicArchiveViewer: React.FC<ComicArchiveViewerProps> = ({
   }, [persistCurrentViewportProgress, viewportRef]);
 
   useEffect(() => {
-    if (!readerCacheKey) return;
-    if (active) {
-      if (!pendingRestoreRef.current) {
-        const cached = comicArchiveSnapshotCache.get(readerCacheKey);
-        if (cached?.hasLoadedList) {
-          pendingRestoreRef.current = {
-            anchorCardId: cached.anchorCardId,
-            anchorOffsetRatio: cached.anchorOffsetRatio,
-            scrollTop: cached.scrollTop,
-            scrollRatio: cached.scrollRatio,
-            updatedAt: '',
-          };
-          setRestoreTick((prev) => prev + 1);
-        }
-      }
-      return;
-    }
-    if (pendingRestoreRef.current) {
-      return;
-    }
+    if (active || pendingRestoreRef.current) return;
     persistCurrentViewportProgress(true);
-  }, [active, persistCurrentViewportProgress, readerCacheKey]);
+  }, [active, persistCurrentViewportProgress]);
 
   useEffect(() => {
-    if (isHydratingSnapshotRef.current) {
-      isHydratingSnapshotRef.current = false;
-      return;
-    }
     if (!active) return;
     if (cards.length === 0) return;
     if (pendingRestoreRef.current) return;
@@ -952,25 +868,7 @@ const ComicArchiveViewer: React.FC<ComicArchiveViewerProps> = ({
                         cardRefs.current.delete(card.id);
                       }
                     }}
-                    onDoubleClick={() => {
-                      if (!libraryId || !folderNodeId || !Number.isFinite(folderNodeId)) return;
-                      setFileUrl(
-                        `comic://library/${libraryId}/node/${card.id}`,
-                        card.title,
-                        'comic',
-                        card.id,
-                        {
-                          tabTypeLabel: 'COMIC',
-                          returnTarget: {
-                            fileUrl,
-                            fileName: fileName || title,
-                            fileType: 'comic_archive',
-                            nodeId: folderNodeId,
-                            tabTypeLabel: 'COMIC-ARC',
-                          },
-                        },
-                      );
-                    }}
+                    onDoubleClick={() => handleOpenCard(card)}
                     onContextMenu={(e) => openCardContextMenu(e, card)}
                   >
                     {card.coverUrl ? (
@@ -981,7 +879,9 @@ const ComicArchiveViewer: React.FC<ComicArchiveViewerProps> = ({
                     <div className="card-cover" />
                     <div className="card-meta">
                       <div className="card-tag-slot">
-                        <span className="card-tag-pill">COMIC</span>
+                        <span className={`card-tag-pill ${card.cardKind === 'collection' ? 'collection' : ''}`}>
+                          {card.cardKind === 'collection' ? '合集' : 'COMIC'}
+                        </span>
                       </div>
                       <div className="card-title" title={card.title}>
                         {card.title}

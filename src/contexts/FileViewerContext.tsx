@@ -1,4 +1,4 @@
-import React, { useState, ReactNode } from 'react';
+import React, { useState, useEffect, ReactNode } from 'react';
 import {
   FileViewerContext,
   type FileViewerState,
@@ -7,12 +7,27 @@ import {
   type FileViewerAudioPlaylist,
   type FileViewerVideoPlaylist,
   type FileViewerSubtitleSource,
+  type FileViewerTabResourceUpdate,
 } from './file-viewer.context';
+import { normalizeFileViewerReturnTarget } from './file-viewer-return-target';
+import { globalAudioPlayer } from '@/features/file-viewer/services/global-audio-player';
+import { floatingVideoService } from '@/features/file-viewer/services/floating-video.service';
+import {
+  commitPendingActivation,
+  peekPendingActivation,
+  subscribePendingActivation,
+} from './file-viewer-pending-activation';
 import {
   getFileViewerStateCache,
   setFileViewerStateCache,
 } from './file-viewer-cache';
+import { isDisposingLibraryWorkspace } from '@/features/workspace-resource-release';
 import type { FileViewerFileType } from '@/shared/file-viewer-types';
+import { updateExistingFileViewerTabResource } from './file-viewer-tab-resource';
+import {
+  disposeViewerSessionOnClose,
+  useViewerAccountScope,
+} from '@/features/file-viewer/session';
 
 const defaultFileViewerState: FileViewerState = {
   nodeId: null,
@@ -98,6 +113,24 @@ function normalizeVideoPlaylist(
     id: String(playlist.id || ''),
     title: String(playlist.title || ''),
     items,
+    total: Number.isFinite(Number(playlist.total)) && Number(playlist.total) >= 0
+      ? Number(playlist.total)
+      : null,
+    nextOffset: Number.isFinite(Number(playlist.nextOffset)) && Number(playlist.nextOffset) >= 0
+      ? Number(playlist.nextOffset)
+      : null,
+    hasMore: Boolean(playlist.hasMore),
+    source: playlist.source?.kind === 'video_archive_collection'
+      && Number.isFinite(Number(playlist.source.nodeId))
+      && Number(playlist.source.nodeId) > 0
+      && Number.isFinite(Number(playlist.source.libraryId))
+      && Number(playlist.source.libraryId) > 0
+      ? {
+        kind: 'video_archive_collection',
+        nodeId: Number(playlist.source.nodeId),
+        libraryId: Number(playlist.source.libraryId),
+      }
+      : null,
   };
 }
 
@@ -127,12 +160,29 @@ function normalizeAudioPlaylist(
   };
 }
 
-function normalizeStoreState(raw: FileViewerStoreState | null | undefined): FileViewerStoreState {
+function normalizePositiveId(value: number | null | undefined): number | null {
+  const normalized = Number(value);
+  return Number.isSafeInteger(normalized) && normalized > 0 ? normalized : null;
+}
+
+function normalizeContentRevision(value: string | null | undefined): string | null {
+  const normalized = String(value || '').trim();
+  return normalized || null;
+}
+
+function normalizeStoreState(
+  raw: FileViewerStoreState | null | undefined,
+  libraryId?: number | null,
+): FileViewerStoreState {
   if (!raw) {
     return defaultFileViewerStoreState;
   }
+  const providerLibraryId = normalizePositiveId(libraryId);
   const tabs = raw.tabs.map(tab => ({
     ...tab,
+    libraryId: providerLibraryId ?? normalizePositiveId(tab.libraryId),
+    contentRevision: normalizeContentRevision(tab.contentRevision),
+    returnTarget: normalizeFileViewerReturnTarget(tab.returnTarget),
     videoAutoPlay: false,
     audioAutoPlay: false,
   }));
@@ -219,18 +269,66 @@ function reorderTabsInState(
   };
 }
 
-export const FileViewerProvider: React.FC<{ children: ReactNode; cacheKey?: string }> = ({
+export const FileViewerProvider: React.FC<{
+  children: ReactNode;
+  cacheKey?: string;
+  libraryId?: number | null;
+}> = ({
   children,
   cacheKey,
+  libraryId = null,
 }) => {
+  const viewerAccountScope = useViewerAccountScope();
   const [viewerState, setViewerState] = useState<FileViewerStoreState>(() => {
     if (!cacheKey) {
       return defaultFileViewerStoreState;
     }
-    return normalizeStoreState(getFileViewerStateCache<FileViewerStoreState>(cacheKey));
+    return normalizeStoreState(getFileViewerStateCache<FileViewerStoreState>(cacheKey), libraryId);
   });
   const activeCacheKeyRef = React.useRef<string | undefined>(cacheKey);
   const skipPersistRef = React.useRef(false);
+
+  // 跨路由"待激活 tab"消费：预留给未来外部 MediaHub 入口 setPendingActivation；
+  // 设计要点（解决 StrictMode 双 mount 把 setState 丢弃的问题）：
+  //   - 不在调 setState 的同时 commit pending；
+  //   - 把"清 pending"和"viewerState.activeTabId 真的等于 tabId"挂钩；
+  //   - tabs / activeTabId / pendingTick 任意变化都重跑 effect 直到 pending 能匹配上。
+  // 详见 docs/media-hub-contract.md。
+  const [pendingTick, setPendingTick] = useState(0);
+  useEffect(() => subscribePendingActivation(() => setPendingTick((n) => n + 1)), []);
+
+  useEffect(() => {
+    if (libraryId == null) return;
+    const tabId = peekPendingActivation(libraryId);
+    if (!tabId) return;
+    // 已经激活到位 → 清 pending
+    if (viewerState.activeTabId === tabId) {
+      commitPendingActivation(libraryId, tabId);
+      return;
+    }
+    // 还未激活：tab 在 → setState 激活；tab 不在 → 等下一次 tabs 变化再来
+    const target = viewerState.tabs.find((tab) => tab.id === tabId);
+    if (!target) return;
+    setViewerState((prev) => {
+      if (prev.activeTabId === tabId) return prev;
+      const persistTarget = prev.tabs.find((tab) => tab.id === tabId);
+      if (!persistTarget) return prev;
+      return {
+        ...prev,
+        activeTabId: tabId,
+        fileState: toFileState(persistTarget),
+      };
+    });
+    // 下一帧 render 后 viewerState.activeTabId 变，本 effect 重跑走第一个分支清 pending
+  }, [libraryId, viewerState.activeTabId, viewerState.tabs, pendingTick]);
+
+  // 关闭或替换 tab 时务必通知媒体服务释放对应资源（同浏览器关 tab 一致）。
+  // 服务层是 MediaHub 的真实持有者，组件卸载不再触发释放，必须从这里兜底。
+  // 详见 docs/media-hub-contract.md。
+  const releaseMediaForTab = (tabId: string) => {
+    globalAudioPlayer.releaseForTab(tabId);
+    floatingVideoService.releaseForTab(tabId);
+  };
 
   const setFileUrl = (
     url: string | null,
@@ -249,8 +347,11 @@ export const FileViewerProvider: React.FC<{ children: ReactNode; cacheKey?: stri
     }
 
     const tabId = resolveTabId(url, nodeId);
+    const replaceTabId = options?.replaceTabId || null;
+    if (replaceTabId && replaceTabId !== tabId) {
+      releaseMediaForTab(replaceTabId);
+    }
     setViewerState(prev => {
-      const replaceTabId = options?.replaceTabId || null;
       const replacingTab = replaceTabId
         ? prev.tabs.find(tab => tab.id === replaceTabId) || null
         : null;
@@ -260,14 +361,19 @@ export const FileViewerProvider: React.FC<{ children: ReactNode; cacheKey?: stri
       const videoPlaylist = normalizeVideoPlaylist(options?.videoPlaylist);
       const audioSubtitleSources = normalizeVideoSubtitleSources(options?.audioSubtitleSources);
       const audioPlaylist = normalizeAudioPlaylist(options?.audioPlaylist);
+      const returnTarget = normalizeFileViewerReturnTarget(options?.returnTarget);
+      const hasContentRevision = Boolean(
+        options && Object.prototype.hasOwnProperty.call(options, 'contentRevision'),
+      );
       const nextTab: FileViewerTab = {
         id: tabId,
+        libraryId: normalizePositiveId(libraryId),
         nodeId: nodeId ?? null,
         fileUrl: url,
         fileName,
         fileType,
         tabTypeLabel: options?.tabTypeLabel ?? null,
-        returnTarget: options?.returnTarget ?? null,
+        returnTarget,
         videoSubtitleSources,
         videoPlaylist,
         videoAutoPlay: Boolean(options?.videoAutoPlay),
@@ -277,6 +383,9 @@ export const FileViewerProvider: React.FC<{ children: ReactNode; cacheKey?: stri
         audioCoverUrl: options?.audioCoverUrl ?? null,
         loading: false,
         reloadToken: baseTab?.reloadToken ?? 0,
+        contentRevision: hasContentRevision
+          ? normalizeContentRevision(options?.contentRevision)
+          : normalizeContentRevision(existingTab?.contentRevision),
       };
       const existingIndex = prev.tabs.findIndex(tab => tab.id === tabId);
       const nextTabs = [...prev.tabs];
@@ -303,7 +412,7 @@ export const FileViewerProvider: React.FC<{ children: ReactNode; cacheKey?: stri
         nextTabs[existingIndex] = {
           ...nextTab,
           // 若调用者未显式透传 returnTarget，则默认清空，避免历史来源残留。
-          returnTarget: options?.returnTarget ?? null,
+          returnTarget,
           // loading 由 setLoading 统一维护，防止打开同 tab 时闪烁。
           loading: existingTab?.loading ?? false,
           reloadToken: existingTab?.reloadToken ?? 0,
@@ -344,6 +453,23 @@ export const FileViewerProvider: React.FC<{ children: ReactNode; cacheKey?: stri
     });
   };
 
+  const updateFileTabResource = (
+    tabId: string,
+    update: FileViewerTabResourceUpdate,
+  ) => {
+    setViewerState(prev => {
+      const result = updateExistingFileViewerTabResource(prev.tabs, tabId, update);
+      if (!result) return prev;
+      return {
+        ...prev,
+        tabs: result.tabs,
+        fileState: prev.activeTabId === tabId
+          ? toFileState(result.updatedTab)
+          : prev.fileState,
+      };
+    });
+  };
+
   const activateTab = (tabId: string) => {
     setViewerState(prev => {
       const targetTab = prev.tabs.find(tab => tab.id === tabId) || null;
@@ -359,19 +485,33 @@ export const FileViewerProvider: React.FC<{ children: ReactNode; cacheKey?: stri
   };
 
   const closeTab = (tabId: string) => {
+    releaseMediaForTab(tabId);
+    const tab = viewerState.tabs.find(item => item.id === tabId);
+    disposeViewerSessionOnClose({
+      accountScope: viewerAccountScope,
+      libraryId: tab?.libraryId ?? null,
+      nodeId: tab?.nodeId ?? null,
+      viewerKind: tab?.fileType ?? null,
+    });
     setViewerState(prev => closeTabInState(prev, tabId));
   };
 
   const closeTabByNodeId = (nodeId: number) => {
-    setViewerState(prev => {
-      const targetIds = prev.tabs
-        .filter(tab => tab.nodeId === nodeId)
-        .map(tab => tab.id);
-      if (targetIds.length === 0) {
-        return prev;
-      }
-      return targetIds.reduce((state, tabId) => closeTabInState(state, tabId), prev);
-    });
+    const targetIds = viewerState.tabs
+      .filter(tab => tab.nodeId === nodeId)
+      .map(tab => tab.id);
+    if (targetIds.length === 0) return;
+    // 副作用必须在 setState 外执行——updater 必须保持纯函数，否则 StrictMode 双调用会重复 release。
+    targetIds.forEach(releaseMediaForTab);
+    viewerState.tabs
+      .filter(tab => targetIds.includes(tab.id))
+      .forEach((tab) => disposeViewerSessionOnClose({
+        accountScope: viewerAccountScope,
+        libraryId: tab.libraryId,
+        nodeId: tab.nodeId,
+        viewerKind: tab.fileType,
+      }));
+    setViewerState(prev => targetIds.reduce((state, tabId) => closeTabInState(state, tabId), prev));
   };
 
   const reloadActiveTab = () => {
@@ -409,17 +549,18 @@ export const FileViewerProvider: React.FC<{ children: ReactNode; cacheKey?: stri
       setViewerState(defaultFileViewerStoreState);
       return;
     }
-    setViewerState(normalizeStoreState(getFileViewerStateCache<FileViewerStoreState>(cacheKey)));
-  }, [cacheKey]);
+    setViewerState(normalizeStoreState(getFileViewerStateCache<FileViewerStoreState>(cacheKey), libraryId));
+  }, [cacheKey, libraryId]);
 
   React.useEffect(() => {
     if (!cacheKey) return;
+    if (isDisposingLibraryWorkspace(libraryId)) return;
     if (skipPersistRef.current) {
       skipPersistRef.current = false;
       return;
     }
     setFileViewerStateCache<FileViewerStoreState>(cacheKey, viewerState);
-  }, [cacheKey, viewerState]);
+  }, [cacheKey, libraryId, viewerState]);
 
   return (
     <FileViewerContext.Provider
@@ -428,6 +569,7 @@ export const FileViewerProvider: React.FC<{ children: ReactNode; cacheKey?: stri
         tabs: viewerState.tabs,
         activeTabId: viewerState.activeTabId,
         setFileUrl,
+        updateFileTabResource,
         setLoading,
         activateTab,
         closeTab,

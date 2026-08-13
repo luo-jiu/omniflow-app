@@ -23,8 +23,12 @@ export type OverlayStorageProvider = {
 export type UploadConfirmOverlayProps = {
   defaultProvider: string;
   fileSummaries: OverlayFileSummary[];
+  okText?: string;
   providers: OverlayStorageProvider[];
+  taskLabel?: string;
+  targetLabel?: string;
   targetNode: OverlayTargetNode;
+  title?: string;
 };
 
 export type UploadConfirmResult =

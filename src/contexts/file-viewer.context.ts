@@ -7,6 +7,7 @@ export interface FileViewerReturnTarget {
   fileType: FileViewerFileType;
   nodeId: number | null;
   tabTypeLabel?: string | null;
+  returnTarget?: FileViewerReturnTarget | null;
 }
 
 export interface FileViewerSubtitleSource {
@@ -32,6 +33,14 @@ export interface FileViewerVideoPlaylist {
   id: string;
   title: string;
   items: FileViewerVideoPlaylistItem[];
+  total?: number | null;
+  nextOffset?: number | null;
+  hasMore?: boolean;
+  source?: {
+    kind: 'video_archive_collection';
+    nodeId: number;
+    libraryId: number;
+  } | null;
 }
 
 export interface FileViewerAudioPlaylistItem {
@@ -51,6 +60,7 @@ export interface FileViewerAudioPlaylist {
 }
 
 export interface FileViewerOpenOptions {
+  contentRevision?: string | null;
   tabTypeLabel?: string | null;
   returnTarget?: FileViewerReturnTarget | null;
   replaceTabId?: string | null;
@@ -61,6 +71,12 @@ export interface FileViewerOpenOptions {
   audioPlaylist?: FileViewerAudioPlaylist | null;
   audioAutoPlay?: boolean;
   audioCoverUrl?: string | null;
+}
+
+export interface FileViewerTabResourceUpdate {
+  contentRevision: string | null;
+  expectedNodeId: number | null;
+  fileUrl: string;
 }
 
 export interface FileViewerState {
@@ -81,6 +97,7 @@ export interface FileViewerState {
 
 export interface FileViewerTab {
   id: string;
+  libraryId: number | null;
   nodeId: number | null;
   fileUrl: string;
   fileName: string | null;
@@ -96,6 +113,7 @@ export interface FileViewerTab {
   audioCoverUrl?: string | null;
   loading: boolean;
   reloadToken?: number;
+  contentRevision: string | null;
 }
 
 export interface FileViewerContextType {
@@ -108,6 +126,10 @@ export interface FileViewerContextType {
     fileType: FileViewerFileType | null,
     nodeId?: number | null,
     options?: FileViewerOpenOptions,
+  ) => void;
+  updateFileTabResource: (
+    tabId: string,
+    update: FileViewerTabResourceUpdate,
   ) => void;
   setLoading: (loading: boolean) => void;
   activateTab: (tabId: string) => void;

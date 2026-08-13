@@ -5,7 +5,6 @@ import http from 'node:http';
 import https from 'node:https';
 import type { ClientRequest, IncomingMessage } from 'node:http';
 import { runtimeLogger } from '../runtimeLogger';
-import { MAX_SINGLE_UPLOAD_BYTES, MAX_SINGLE_UPLOAD_ERROR_MESSAGE } from '../../src/shared/upload-limits';
 
 function escapeMultipartDispositionValue(value: string): string {
   return String(value)
@@ -29,8 +28,9 @@ function buildFileContentDisposition(fileName: string): string {
 }
 
 export function registerHttpIpc(ipcMain: Electron.IpcMain) {
-  type UploadRuntime = {
+  type PresignedPutRuntime = {
     uploadId: string;
+    partNumber: number;
     request: ClientRequest;
     fileStream: fs.ReadStream;
     sender: Electron.WebContents;
@@ -41,9 +41,26 @@ export function registerHttpIpc(ipcMain: Electron.IpcMain) {
     aborted: boolean;
   };
 
-  const activeUploads = new Map<string, UploadRuntime>();
+  // 同一 uploadId 下的多个 part 共享 runtime 列表，abort 时统一杀掉所有 in-flight part 请求。
+  const activeUploads = new Map<string, Set<PresignedPutRuntime>>();
 
-  const sendUploadProgress = (runtime: UploadRuntime, force = false) => {
+  const registerRuntime = (runtime: PresignedPutRuntime) => {
+    let bucket = activeUploads.get(runtime.uploadId);
+    if (!bucket) {
+      bucket = new Set();
+      activeUploads.set(runtime.uploadId, bucket);
+    }
+    bucket.add(runtime);
+  };
+
+  const unregisterRuntime = (runtime: PresignedPutRuntime) => {
+    const bucket = activeUploads.get(runtime.uploadId);
+    if (!bucket) return;
+    bucket.delete(runtime);
+    if (bucket.size === 0) activeUploads.delete(runtime.uploadId);
+  };
+
+  const sendUploadProgress = (runtime: PresignedPutRuntime, force = false) => {
     const now = Date.now();
     if (!force && now - runtime.lastProgressAt < 80) return;
     runtime.lastProgressAt = now;
@@ -56,6 +73,7 @@ export function registerHttpIpc(ipcMain: Electron.IpcMain) {
 
     runtime.sender.send('http:upload:progress', {
       uploadId: runtime.uploadId,
+      partNumber: runtime.partNumber,
       uploadedBytes: runtime.uploadedBytes,
       totalBytes: runtime.totalBytes,
       percentage,
@@ -87,7 +105,7 @@ export function registerHttpIpc(ipcMain: Electron.IpcMain) {
           body += chunk;
         });
         response.on("end", () => {
-          runtimeLogger.debug("http:fetch body preview:", body.slice(0, 500)); // 只打印前 500 字符
+          runtimeLogger.debug("http:fetch body preview:", body.slice(0, 500));
           let parsedBody: any;
           try {
             parsedBody = JSON.parse(body);
@@ -192,27 +210,27 @@ export function registerHttpIpc(ipcMain: Electron.IpcMain) {
     });
   });
 
-  ipcMain.handle("http:upload:abort", async (_event, uploadId: string) => {
-    const runtime = activeUploads.get(uploadId);
-    if (!runtime) return false;
+  // 单 multipart/form-data POST：仅服务于头像这类小文件、走后端代理保存的旧链路。
+  // 文件节点上传已迁移到 http:upload:presigned-put。
+  type FormDataUploadRuntime = {
+    request: ClientRequest;
+    fileStream: fs.ReadStream;
+    aborted: boolean;
+  };
+  const activeFormDataUploads = new Map<string, FormDataUploadRuntime>();
 
+  ipcMain.handle("http:upload:formdata:abort", async (_event, uploadId: string) => {
+    const runtime = activeFormDataUploads.get(uploadId);
+    if (!runtime) return false;
     runtime.aborted = true;
-    activeUploads.delete(uploadId);
-    try {
-      runtime.fileStream.destroy(new Error('UPLOAD_ABORTED'));
-    } catch {
-      // ignore
-    }
-    try {
-      runtime.request.destroy(new Error('UPLOAD_ABORTED'));
-    } catch {
-      // ignore
-    }
+    activeFormDataUploads.delete(uploadId);
+    try { runtime.fileStream.destroy(new Error('UPLOAD_ABORTED')); } catch { /* ignore */ }
+    try { runtime.request.destroy(new Error('UPLOAD_ABORTED')); } catch { /* ignore */ }
     return true;
   });
 
-  ipcMain.handle("http:upload", async (
-    event,
+  ipcMain.handle("http:upload:formdata", async (
+    _event,
     url: string,
     filePath: string,
     formDataParams: Record<string, string> = {},
@@ -231,13 +249,9 @@ export function registerHttpIpc(ipcMain: Electron.IpcMain) {
         reject(new Error(`上传目标不是文件: ${filePath}`));
         return;
       }
-      if (stat.size > MAX_SINGLE_UPLOAD_BYTES) {
-        reject(new Error(MAX_SINGLE_UPLOAD_ERROR_MESSAGE));
-        return;
-      }
 
       const boundary = '----WebKitFormBoundary' + Math.random().toString(36).substring(2);
-      const currentUploadId = uploadId || `upload-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const currentUploadId = uploadId || `formdata-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const fileName = path.basename(filePath);
       const fieldsPrefix = Object.entries(formDataParams).map(([key, value]) => (
         `--${boundary}\r\n` +
@@ -249,7 +263,8 @@ export function registerHttpIpc(ipcMain: Electron.IpcMain) {
         buildFileContentDisposition(fileName) +
         `Content-Type: application/octet-stream\r\n\r\n`;
       const fileSuffix = `\r\n--${boundary}--\r\n`;
-      const contentLength = Buffer.byteLength(fieldsPrefix) + Buffer.byteLength(filePrefix) + stat.size + Buffer.byteLength(fileSuffix);
+      const contentLength =
+        Buffer.byteLength(fieldsPrefix) + Buffer.byteLength(filePrefix) + stat.size + Buffer.byteLength(fileSuffix);
 
       const finalHeaders = {
         ...headers,
@@ -268,33 +283,179 @@ export function registerHttpIpc(ipcMain: Electron.IpcMain) {
         headers: finalHeaders,
       });
 
-      const fileStream = fs.createReadStream(filePath, {
-        highWaterMark: 1024 * 1024,
-      });
-      const runtime: UploadRuntime = {
-        uploadId: currentUploadId,
-        request,
-        fileStream,
-        sender: event.sender,
-        totalBytes: Math.max(0, stat.size),
-        uploadedBytes: 0,
-        startedAt: Date.now(),
-        lastProgressAt: 0,
-        aborted: false,
-      };
-      activeUploads.set(currentUploadId, runtime);
+      const fileStream = fs.createReadStream(filePath, { highWaterMark: 1024 * 1024 });
+      const runtime: FormDataUploadRuntime = { request, fileStream, aborted: false };
+      activeFormDataUploads.set(currentUploadId, runtime);
 
       let settled = false;
       const safeResolve = (payload: unknown) => {
         if (settled) return;
         settled = true;
-        activeUploads.delete(currentUploadId);
+        activeFormDataUploads.delete(currentUploadId);
         resolve(payload);
       };
       const safeReject = (error: unknown) => {
         if (settled) return;
         settled = true;
-        activeUploads.delete(currentUploadId);
+        activeFormDataUploads.delete(currentUploadId);
+        reject(error);
+      };
+
+      let responseBody = '';
+      request.on('response', (response: IncomingMessage) => {
+        response.on('data', (chunk: Buffer) => { responseBody += chunk.toString(); });
+        response.on('end', () => {
+          let parsedBody: any;
+          try { parsedBody = JSON.parse(responseBody); } catch { parsedBody = responseBody; }
+          safeResolve({ status: response.statusCode, body: parsedBody });
+        });
+      });
+
+      request.on('error', (err: Error) => {
+        if (runtime.aborted) {
+          safeReject(new Error('UPLOAD_ABORTED'));
+          return;
+        }
+        try { fileStream.destroy(err); } catch { /* ignore */ }
+        safeReject(err);
+      });
+
+      request.write(fieldsPrefix);
+      request.write(filePrefix);
+
+      fileStream.on('end', () => {
+        if (runtime.aborted) return;
+        request.write(fileSuffix);
+        request.end();
+      });
+
+      fileStream.on('error', (err) => {
+        if (runtime.aborted) {
+          safeReject(new Error('UPLOAD_ABORTED'));
+          return;
+        }
+        try { request.destroy(err as Error); } catch { /* ignore */ }
+        safeReject(err);
+      });
+
+      fileStream.pipe(request, { end: false });
+    });
+  });
+
+  // 取消整个 upload 会话：杀掉所有还在飞的 part 请求。usecase 层再自行调 /upload/:id DELETE 收尾 MinIO + session 行。
+  ipcMain.handle("http:upload:abort", async (_event, uploadId: string) => {
+    const bucket = activeUploads.get(uploadId);
+    if (!bucket || bucket.size === 0) return false;
+
+    for (const runtime of bucket) {
+      runtime.aborted = true;
+      try {
+        runtime.fileStream.destroy(new Error('UPLOAD_ABORTED'));
+      } catch {
+        // ignore
+      }
+      try {
+        runtime.request.destroy(new Error('UPLOAD_ABORTED'));
+      } catch {
+        // ignore
+      }
+    }
+    activeUploads.delete(uploadId);
+    return true;
+  });
+
+  // 直传 MinIO：对 presigned PUT URL 流式 PUT 单个 part 的字节区间。返回 {status, etag, body}。
+  ipcMain.handle("http:upload:presigned-put", async (
+    event,
+    args: {
+      uploadId: string;
+      partNumber: number;
+      presignedUrl: string;
+      filePath: string;
+      byteOffset: number;
+      byteLength: number;
+      contentType?: string;
+    },
+  ) => {
+    const { uploadId, partNumber, presignedUrl, filePath, byteOffset, byteLength, contentType } = args;
+
+    if (!uploadId || !presignedUrl || !filePath) {
+      throw new Error('uploadId / presignedUrl / filePath 必填');
+    }
+    if (!Number.isFinite(partNumber) || partNumber < 1) {
+      throw new Error(`非法 partNumber: ${partNumber}`);
+    }
+    if (!Number.isFinite(byteOffset) || byteOffset < 0) {
+      throw new Error(`非法 byteOffset: ${byteOffset}`);
+    }
+    if (!Number.isFinite(byteLength) || byteLength <= 0) {
+      throw new Error(`非法 byteLength: ${byteLength}`);
+    }
+
+    let stat: fs.Stats;
+    try {
+      stat = fs.statSync(filePath);
+    } catch (error) {
+      throw new Error(`读取上传文件失败: ${filePath} (${String(error)})`);
+    }
+    if (!stat.isFile()) {
+      throw new Error(`上传目标不是文件: ${filePath}`);
+    }
+    if (byteOffset + byteLength > stat.size) {
+      throw new Error(`分片越界: offset=${byteOffset}, length=${byteLength}, fileSize=${stat.size}`);
+    }
+
+    return new Promise((resolve, reject) => {
+      const parsedUrl = new URL(presignedUrl);
+      const transport = parsedUrl.protocol === 'https:' ? https : http;
+
+      const headers: Record<string, string> = {
+        'Content-Length': String(byteLength),
+      };
+      if (contentType) {
+        headers['Content-Type'] = contentType;
+      }
+
+      const request = transport.request({
+        protocol: parsedUrl.protocol,
+        hostname: parsedUrl.hostname,
+        port: parsedUrl.port ? Number(parsedUrl.port) : undefined,
+        path: `${parsedUrl.pathname}${parsedUrl.search}`,
+        method: 'PUT',
+        headers,
+      });
+
+      const fileStream = fs.createReadStream(filePath, {
+        start: byteOffset,
+        end: byteOffset + byteLength - 1,
+        highWaterMark: 1024 * 1024,
+      });
+
+      const runtime: PresignedPutRuntime = {
+        uploadId,
+        partNumber,
+        request,
+        fileStream,
+        sender: event.sender,
+        totalBytes: byteLength,
+        uploadedBytes: 0,
+        startedAt: Date.now(),
+        lastProgressAt: 0,
+        aborted: false,
+      };
+      registerRuntime(runtime);
+
+      let settled = false;
+      const safeResolve = (payload: unknown) => {
+        if (settled) return;
+        settled = true;
+        unregisterRuntime(runtime);
+        resolve(payload);
+      };
+      const safeReject = (error: unknown) => {
+        if (settled) return;
+        settled = true;
+        unregisterRuntime(runtime);
         reject(error);
       };
 
@@ -304,16 +465,21 @@ export function registerHttpIpc(ipcMain: Electron.IpcMain) {
           responseBody += chunk.toString();
         });
         response.on('end', () => {
-          let parsedBody: any;
-          try {
-            parsedBody = JSON.parse(responseBody);
-          } catch {
-            parsedBody = responseBody;
+          const status = response.statusCode || 0;
+          // S3 协议 ETag 在响应头返回，去引号；single 模式有时 body 也会返回 XML，忽略即可。
+          const rawEtag = (response.headers.etag || response.headers.ETag || '') as string;
+          const etag = String(rawEtag).replace(/^"+|"+$/g, '');
+
+          if (status >= 400) {
+            safeReject(new Error(`分片上传失败: HTTP ${status} ${responseBody.slice(0, 200)}`));
+            return;
           }
-          safeResolve({
-            status: response.statusCode,
-            body: parsedBody,
-          });
+
+          // 强制最终 progress=100% 让 renderer 合并字节计数收敛。
+          runtime.uploadedBytes = runtime.totalBytes;
+          sendUploadProgress(runtime, true);
+
+          safeResolve({ status, etag, body: responseBody });
         });
       });
 
@@ -330,20 +496,10 @@ export function registerHttpIpc(ipcMain: Electron.IpcMain) {
         safeReject(err);
       });
 
-      request.write(fieldsPrefix);
-      request.write(filePrefix);
-
       fileStream.on('data', (chunk) => {
         if (runtime.aborted) return;
         runtime.uploadedBytes += chunk.length;
         sendUploadProgress(runtime);
-      });
-
-      fileStream.on('end', () => {
-        if (runtime.aborted) return;
-        sendUploadProgress(runtime, true);
-        request.write(fileSuffix);
-        request.end();
       });
 
       fileStream.on('error', (err) => {
@@ -351,317 +507,15 @@ export function registerHttpIpc(ipcMain: Electron.IpcMain) {
           safeReject(new Error('UPLOAD_ABORTED'));
           return;
         }
-        safeReject(err);
         try {
           request.destroy(err as Error);
         } catch {
           // ignore
         }
+        safeReject(err);
       });
 
-      fileStream.pipe(request, { end: false });
+      fileStream.pipe(request);
     });
-  });
-
-  // --- Chunked (multipart) upload ---
-
-  type ChunkedUploadRuntime = {
-    uploadId: string;
-    serverUploadId: string;
-    sender: Electron.WebContents;
-    totalBytes: number;
-    uploadedBytes: number;
-    startedAt: number;
-    lastProgressAt: number;
-    aborted: boolean;
-    activeRequests: Set<ClientRequest>;
-    baseUrl: string;
-    headers: Record<string, string>;
-  };
-
-  const activeChunkedUploads = new Map<string, ChunkedUploadRuntime>();
-
-  const sendChunkedProgress = (runtime: ChunkedUploadRuntime, force = false) => {
-    const now = Date.now();
-    if (!force && now - runtime.lastProgressAt < 80) return;
-    runtime.lastProgressAt = now;
-
-    const elapsedMs = Math.max(now - runtime.startedAt, 1);
-    const speedBps = Math.floor((runtime.uploadedBytes * 1000) / elapsedMs);
-    const percentage = runtime.totalBytes > 0
-      ? Math.min((runtime.uploadedBytes / runtime.totalBytes) * 100, 100)
-      : 0;
-
-    runtime.sender.send('http:upload:progress', {
-      uploadId: runtime.uploadId,
-      uploadedBytes: runtime.uploadedBytes,
-      totalBytes: runtime.totalBytes,
-      percentage,
-      speedBps,
-    });
-  };
-
-  const chunkedJsonRequest = (
-    method: string,
-    url: string,
-    headers: Record<string, string>,
-    body?: unknown,
-  ): Promise<{ status: number; body: any }> => {
-    return new Promise((resolve, reject) => {
-      const parsedUrl = new URL(url);
-      const transport = parsedUrl.protocol === 'https:' ? https : http;
-      const reqHeaders: Record<string, string> = {
-        ...headers,
-        'Content-Type': 'application/json',
-      };
-      const payload = body ? JSON.stringify(body) : undefined;
-      if (payload) {
-        reqHeaders['Content-Length'] = String(Buffer.byteLength(payload));
-      }
-
-      const req = transport.request({
-        protocol: parsedUrl.protocol,
-        hostname: parsedUrl.hostname,
-        port: parsedUrl.port ? Number(parsedUrl.port) : undefined,
-        path: `${parsedUrl.pathname}${parsedUrl.search}`,
-        method,
-        headers: reqHeaders,
-      });
-
-      let responseBody = '';
-      req.on('response', (res: IncomingMessage) => {
-        res.on('data', (chunk: Buffer) => { responseBody += chunk.toString(); });
-        res.on('end', () => {
-          let parsed: any;
-          try { parsed = JSON.parse(responseBody); } catch { parsed = responseBody; }
-          resolve({ status: res.statusCode || 0, body: parsed });
-        });
-      });
-      req.on('error', reject);
-      if (payload) req.write(payload);
-      req.end();
-    });
-  };
-
-  const chunkedPartUpload = (
-    url: string,
-    headers: Record<string, string>,
-    buffer: Buffer,
-    size: number,
-    runtime: ChunkedUploadRuntime,
-  ): Promise<{ status: number; body: any }> => {
-    return new Promise((resolve, reject) => {
-      const parsedUrl = new URL(url);
-      const transport = parsedUrl.protocol === 'https:' ? https : http;
-      const req = transport.request({
-        protocol: parsedUrl.protocol,
-        hostname: parsedUrl.hostname,
-        port: parsedUrl.port ? Number(parsedUrl.port) : undefined,
-        path: `${parsedUrl.pathname}${parsedUrl.search}`,
-        method: 'PUT',
-        headers: {
-          ...headers,
-          'Content-Type': 'application/octet-stream',
-          'Content-Length': String(size),
-        },
-      });
-
-      runtime.activeRequests.add(req);
-
-      let responseBody = '';
-      req.on('response', (res: IncomingMessage) => {
-        res.on('data', (chunk: Buffer) => { responseBody += chunk.toString(); });
-        res.on('end', () => {
-          runtime.activeRequests.delete(req);
-          let parsed: any;
-          try { parsed = JSON.parse(responseBody); } catch { parsed = responseBody; }
-          if ((res.statusCode || 0) >= 400) {
-            reject(new Error(`分片上传失败: HTTP ${res.statusCode}`));
-          } else {
-            resolve({ status: res.statusCode || 0, body: parsed });
-          }
-        });
-      });
-
-      req.on('error', (err) => {
-        runtime.activeRequests.delete(req);
-        reject(err);
-      });
-
-      req.write(buffer.subarray(0, size));
-      req.end();
-    });
-  };
-
-  ipcMain.handle("http:chunked-upload", async (
-    event,
-    baseUrl: string,
-    filePath: string,
-    params: {
-      libraryId: number;
-      parentId: number;
-      fileName: string;
-      fileSize: number;
-      conflictPolicy?: string;
-      storageProvider?: string;
-    },
-    headers: Record<string, string> = {},
-    uploadId?: string,
-  ) => {
-    let stat: fs.Stats;
-    try {
-      stat = fs.statSync(filePath);
-    } catch (error) {
-      throw new Error(`读取上传文件失败: ${filePath} (${String(error)})`);
-    }
-    if (!stat.isFile()) {
-      throw new Error(`上传目标不是文件: ${filePath}`);
-    }
-
-    const currentUploadId = uploadId || `chunked-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-
-    const runtime: ChunkedUploadRuntime = {
-      uploadId: currentUploadId,
-      serverUploadId: '',
-      sender: event.sender,
-      totalBytes: stat.size,
-      uploadedBytes: 0,
-      startedAt: Date.now(),
-      lastProgressAt: 0,
-      aborted: false,
-      activeRequests: new Set(),
-      baseUrl,
-      headers,
-    };
-    activeChunkedUploads.set(currentUploadId, runtime);
-
-    try {
-      const initiateRes = await chunkedJsonRequest(
-        'POST',
-        `${baseUrl}/api/v1/directory/upload/multipart/initiate`,
-        headers,
-        {
-          libraryId: params.libraryId,
-          parentId: params.parentId,
-          fileName: params.fileName,
-          fileSize: params.fileSize,
-          conflictPolicy: params.conflictPolicy,
-          storageProvider: params.storageProvider,
-        },
-      );
-
-      if (runtime.aborted) throw new Error('UPLOAD_ABORTED');
-      if ((initiateRes.status || 0) >= 400) {
-        throw new Error(`发起分片上传失败: HTTP ${initiateRes.status}`);
-      }
-
-      const initiateData = initiateRes.body?.data ?? initiateRes.body;
-      runtime.serverUploadId = String(initiateData?.uploadId ?? '');
-      const chunkSize = Number(initiateData?.chunkSize ?? 10485760);
-      const totalParts = Number(initiateData?.totalParts ?? Math.ceil(stat.size / chunkSize));
-
-      const collectedParts: Array<{ partNumber: number; etag: string }> = [];
-      let nextPart = 1;
-      const concurrency = 3;
-
-      const fd = fs.openSync(filePath, 'r');
-      try {
-        const worker = async () => {
-          while (!runtime.aborted) {
-            const partNumber = nextPart++;
-            if (partNumber > totalParts) break;
-
-            const offset = (partNumber - 1) * chunkSize;
-            const size = Math.min(chunkSize, stat.size - offset);
-            const buffer = Buffer.alloc(size);
-            fs.readSync(fd, buffer, 0, size, offset);
-
-            const url = `${baseUrl}/api/v1/directory/upload/multipart/${runtime.serverUploadId}/part/${partNumber}`;
-            let res: { status: number; body: any };
-            try {
-              res = await chunkedPartUpload(url, headers, buffer, size, runtime);
-            } catch (err) {
-              runtime.aborted = true;
-              throw err;
-            }
-
-            if (runtime.aborted) break;
-
-            const partData = res.body?.data ?? res.body;
-            collectedParts.push({
-              partNumber: partData?.partNumber ?? partNumber,
-              etag: String(partData?.etag ?? ''),
-            });
-
-            runtime.uploadedBytes += size;
-            sendChunkedProgress(runtime);
-          }
-        };
-
-        await Promise.all(Array.from({ length: concurrency }, () => worker()));
-      } finally {
-        fs.closeSync(fd);
-      }
-
-      if (runtime.aborted) throw new Error('UPLOAD_ABORTED');
-
-      sendChunkedProgress(runtime, true);
-      const completeRes = await chunkedJsonRequest(
-        'POST',
-        `${baseUrl}/api/v1/directory/upload/multipart/${runtime.serverUploadId}/complete`,
-        headers,
-        { parts: collectedParts.map(p => ({ partNumber: p.partNumber, etag: p.etag })) },
-      );
-
-      if ((completeRes.status || 0) >= 400) {
-        throw new Error(`完成分片上传失败: HTTP ${completeRes.status}`);
-      }
-
-      activeChunkedUploads.delete(currentUploadId);
-      return { status: completeRes.status, body: completeRes.body };
-    } catch (err) {
-      activeChunkedUploads.delete(currentUploadId);
-
-      if (runtime.serverUploadId) {
-        try {
-          await chunkedJsonRequest(
-            'DELETE',
-            `${baseUrl}/api/v1/directory/upload/multipart/${runtime.serverUploadId}`,
-            headers,
-          );
-        } catch {
-          // ignore abort cleanup errors
-        }
-      }
-
-      throw runtime.aborted ? new Error('UPLOAD_ABORTED') : err;
-    }
-  });
-
-  ipcMain.handle("http:chunked-upload:abort", async (_event, uploadId: string) => {
-    const runtime = activeChunkedUploads.get(uploadId);
-    if (!runtime) return false;
-
-    runtime.aborted = true;
-    activeChunkedUploads.delete(uploadId);
-
-    for (const req of runtime.activeRequests) {
-      try { req.destroy(new Error('UPLOAD_ABORTED')); } catch { /* ignore */ }
-    }
-    runtime.activeRequests.clear();
-
-    if (runtime.serverUploadId) {
-      try {
-        await chunkedJsonRequest(
-          'DELETE',
-          `${runtime.baseUrl}/api/v1/directory/upload/multipart/${runtime.serverUploadId}`,
-          runtime.headers,
-        );
-      } catch {
-        // ignore
-      }
-    }
-
-    return true;
   });
 }

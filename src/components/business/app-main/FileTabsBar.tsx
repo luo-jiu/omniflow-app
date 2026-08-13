@@ -2,13 +2,9 @@ import React, { useLayoutEffect } from 'react';
 import styled from 'styled-components';
 import type { FileViewerTab } from '@/contexts/file-viewer.context';
 import {
-  resolveTabTypeTone,
-  type FileTabToneConfig,
-  type TabTypeTone,
-} from './tab-type-tone';
-import { fetchTags, type TagItem } from '@/features/tag-management/services/tag.api';
-import { runtimeLogger } from '@/utils/runtimeLogger';
-import { normalizeFileTabTargetKey } from '@/features/tag-management/constants/file-tab-targets';
+  getDirectoryBuiltInIcon,
+  getFileNodeIcon,
+} from '@/features/file-explorer/utils/file-node-icon';
 
 interface FileTabsBarProps {
   tabs: FileViewerTab[];
@@ -16,16 +12,44 @@ interface FileTabsBarProps {
   onActivate: (tabId: string) => void;
   onClose: (tabId: string) => void;
   onReorder: (draggedTabId: string, targetTabId: string, position: 'before' | 'after') => void;
+  onItemReorder?: (draggedItemId: string, targetItemId: string, position: 'before' | 'after') => void;
+  itemOrder?: string[];
+  extraTabs?: FileTabsBarExtraTab[];
 }
+
+export type FileTabsBarExtraTab = {
+  id: string;
+  title: string;
+  active: boolean;
+  onActivate: () => void;
+  onClose: () => void;
+};
+
+type FileTabsBarItem =
+  | { id: string; kind: 'file'; tab: FileViewerTab }
+  | { id: string; kind: 'extra'; tab: FileTabsBarExtraTab };
+
+type ClosingTabSnapshot = {
+  item: FileTabsBarItem;
+  index: number;
+};
+
+type TabLayoutSnapshot = {
+  left: number;
+};
 
 const DRAG_START_THRESHOLD_PX = 4;
 const REORDER_MIN_STEP_PX = 14;
 const REORDER_COOLDOWN_MS = 90;
 const MIDPOINT_GUARD_RATIO = 0.16;
-const REORDER_FLIP_DURATION_MS = 180;
+const TAB_LAYOUT_FLIP_DURATION_MS = 180;
+const TAB_CLOSE_COLLAPSE_MS = 160;
+const TAB_CLOSE_REMOVE_DELAY_MS = TAB_CLOSE_COLLAPSE_MS + 70;
 const TAB_TOP_SCROLLBAR_HEIGHT = 7;
 const TAB_TOP_SCROLLBAR_HIDE_DELAY_MS = 900;
 const TAB_TOP_SCROLLBAR_HIDE_DELAY_ON_LEAVE_MS = 260;
+const TAB_DEFAULT_WIDTH = 168;
+const TAB_MIN_WIDTH = 96;
 const TAB_OVERFLOW_BUTTON_WIDTH = 32;
 const TAB_OVERFLOW_GAP = 4;
 const TAB_MEMORY_SAMPLE_DELAY_MS = 900;
@@ -38,11 +62,13 @@ const TAB_MEMORY_FALLBACK_BY_TYPE: Record<string, number> = {
   audio: 24 * 1024 * 1024,
   pdf: 72 * 1024 * 1024,
   comic: 120 * 1024 * 1024,
+  gallery: 110 * 1024 * 1024,
   asmr: 96 * 1024 * 1024,
   video_archive: 118 * 1024 * 1024,
   asmr_archive: 84 * 1024 * 1024,
   comic_archive: 92 * 1024 * 1024,
   audio_archive: 72 * 1024 * 1024,
+  gallery_archive: 88 * 1024 * 1024,
   other: 36 * 1024 * 1024,
 };
 
@@ -152,7 +178,7 @@ const TabsWrapper = styled.div`
   height: 30px;
   display: flex;
   align-items: center;
-  gap: ${TAB_OVERFLOW_GAP}px;
+  gap: 0;
   padding: 0 ${TAB_OVERFLOW_BUTTON_WIDTH + 5}px 0 2px;
   overflow-x: auto;
   overflow-y: hidden;
@@ -169,20 +195,35 @@ const TabButton = styled.div<{
   $dropBefore?: boolean;
   $dropAfter?: boolean;
   $dragging?: boolean;
+  $closing?: boolean;
 }>`
   height: 30px;
-  min-width: 130px;
-  max-width: 240px;
+  width: ${TAB_DEFAULT_WIDTH}px;
+  min-width: ${TAB_MIN_WIDTH}px;
+  flex: 0 1 ${TAB_DEFAULT_WIDTH}px;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   border: 1px solid ${({ $active }) => ($active ? 'var(--semi-color-primary)' : 'var(--app-border)')};
   background: ${({ $active }) => ($active ? 'var(--semi-color-primary-light-default)' : 'var(--app-bg-elevated)')};
   color: var(--app-text);
   border-radius: 8px;
-  padding: 0 9px 0 10px;
+  padding: 0 7px;
+  margin-right: ${TAB_OVERFLOW_GAP}px;
   cursor: pointer;
-  transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
+  overflow: hidden;
+  transition:
+    width ${TAB_CLOSE_COLLAPSE_MS}ms cubic-bezier(0.22, 1, 0.36, 1),
+    min-width ${TAB_CLOSE_COLLAPSE_MS}ms cubic-bezier(0.22, 1, 0.36, 1),
+    flex-basis ${TAB_CLOSE_COLLAPSE_MS}ms cubic-bezier(0.22, 1, 0.36, 1),
+    padding ${TAB_CLOSE_COLLAPSE_MS}ms cubic-bezier(0.22, 1, 0.36, 1),
+    margin-right ${TAB_CLOSE_COLLAPSE_MS}ms cubic-bezier(0.22, 1, 0.36, 1),
+    border-left-width ${TAB_CLOSE_COLLAPSE_MS}ms cubic-bezier(0.22, 1, 0.36, 1),
+    border-right-width ${TAB_CLOSE_COLLAPSE_MS}ms cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 0.15s ease,
+    background 0.15s ease,
+    transform 0.15s ease,
+    opacity 0.15s ease;
   user-select: none;
   position: relative;
 
@@ -203,22 +244,38 @@ const TabButton = styled.div<{
     transform: scale(0.985);
     z-index: 2;
   ` : ''}
+
+  ${({ $closing }) => $closing ? `
+    width: 0;
+    min-width: 0;
+    flex-basis: 0;
+    padding-left: 0;
+    padding-right: 0;
+    border-color: transparent;
+    border-left-width: 0;
+    border-right-width: 0;
+    opacity: 0;
+    margin-right: 0;
+    pointer-events: none;
+  ` : ''}
+
+  &:last-child {
+    margin-right: 0;
+  }
 `;
 
-const FileTypeBadge = styled.span<{ $tone: TabTypeTone }>`
+const TabIconSlot = styled.span`
   flex-shrink: 0;
-  min-width: 30px;
-  height: 20px;
-  border-radius: 999px;
-  background: ${({ $tone }) => $tone.background};
-  color: ${({ $tone }) => $tone.text};
-  border: 1px solid ${({ $tone }) => $tone.border};
-  font-size: 10px;
-  line-height: 18px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  text-align: center;
-  padding: 0 6px;
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  .tree-file-type-icon {
+    width: 15px;
+    height: 15px;
+  }
 `;
 
 const DragGhost = styled.div`
@@ -228,12 +285,12 @@ const DragGhost = styled.div`
   height: 30px;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   border: 1px solid var(--semi-color-primary);
   background: var(--semi-color-primary-light-default);
   color: var(--app-text);
   border-radius: 8px;
-  padding: 0 9px 0 10px;
+  padding: 0 7px;
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.14);
 `;
 
@@ -266,6 +323,83 @@ const CloseButton = styled.button`
     background: color-mix(in srgb, var(--semi-color-danger) 12%, transparent);
   }
 `;
+
+function normalizeTabTypeForIcon(tabTypeLabel: string): string {
+  return String(tabTypeLabel || '')
+    .trim()
+    .toUpperCase()
+    .replace(/_/g, '-')
+    .replace(/\s+/g, '-');
+}
+
+function getFileExtFromTab(tab: FileViewerTab): string {
+  const fileName = String(tab.fileName || '').trim();
+  const match = /\.([^.\\/]+)$/.exec(fileName);
+  return match?.[1] ?? '';
+}
+
+function getBuiltInTypeFromTab(tab: FileViewerTab): 'ASMR' | 'COMIC' | 'VIDEO' | 'AUDIO' | 'GALLERY' | null {
+  const label = normalizeTabTypeForIcon(getTabTypeLabel(tab));
+  if (label.startsWith('ASMR')) return 'ASMR';
+  if (label.startsWith('COMIC')) return 'COMIC';
+  if (label.startsWith('VIDEO')) return 'VIDEO';
+  if (label.startsWith('AUDIO')) return 'AUDIO';
+  if (label.startsWith('GALLERY')) return 'GALLERY';
+  if (tab.fileType === 'asmr' || tab.fileType === 'asmr_archive') return 'ASMR';
+  if (tab.fileType === 'comic' || tab.fileType === 'comic_archive') return 'COMIC';
+  if (tab.fileType === 'gallery' || tab.fileType === 'gallery_archive') return 'GALLERY';
+  if (tab.fileType === 'video_archive') return 'VIDEO';
+  if (tab.fileType === 'audio_archive') return 'AUDIO';
+  return null;
+}
+
+function isDirectoryLikeTab(tab: FileViewerTab): boolean {
+  return (
+    tab.fileType === 'asmr'
+    || tab.fileType === 'comic'
+    || tab.fileType === 'gallery'
+    || tab.fileType === 'asmr_archive'
+    || tab.fileType === 'comic_archive'
+    || tab.fileType === 'video_archive'
+    || tab.fileType === 'audio_archive'
+    || tab.fileType === 'gallery_archive'
+    || (tab.fileType === 'video' && normalizeTabTypeForIcon(getTabTypeLabel(tab)) === 'VIDEO')
+  );
+}
+
+function getFileTabIcon(tab: FileViewerTab): React.ReactNode {
+  if (isDirectoryLikeTab(tab)) {
+    const builtInType = getBuiltInTypeFromTab(tab);
+    const archiveMode = tab.fileType?.endsWith('_archive') ? 1 : 0;
+    return getDirectoryBuiltInIcon(builtInType ?? 'DEF', archiveMode, false) ?? getFileNodeIcon();
+  }
+  return getFileNodeIcon(getFileExtFromTab(tab), tab.fileName ?? undefined, {
+    previewKind: (
+      tab.fileType === 'image'
+      || tab.fileType === 'video'
+      || tab.fileType === 'audio'
+      || tab.fileType === 'pdf'
+      || tab.fileType === 'text'
+      || tab.fileType === 'other'
+    ) ? tab.fileType : null,
+  });
+}
+
+function FileTabIcon({ tab }: { tab: FileViewerTab }) {
+  return (
+    <TabIconSlot title={getTabTypeLabel(tab)}>
+      {getFileTabIcon(tab)}
+    </TabIconSlot>
+  );
+}
+
+function SystemTabIcon() {
+  return (
+    <TabIconSlot title="系统">
+      {getFileNodeIcon('env', '.env')}
+    </TabIconSlot>
+  );
+}
 
 const OverflowSlot = styled.div`
   position: absolute;
@@ -383,6 +517,14 @@ function getTabTypeLabel(tab: FileViewerTab) {
     ) {
       return 'AUDIO-A';
     }
+    if (
+      normalized === 'GALLERY-ARCHIVE'
+      || normalized === 'GALLERY ARC'
+      || normalized === 'GALLERY-ARC'
+      || normalized === 'GALLERY_ARCHIVE'
+    ) {
+      return 'GALLERY-A';
+    }
     return normalized;
   }
   const fileType = tab.fileType;
@@ -391,11 +533,13 @@ function getTabTypeLabel(tab: FileViewerTab) {
   if (fileType === 'video') return 'MP4';
   if (fileType === 'pdf') return 'PDF';
   if (fileType === 'comic') return 'COMIC';
+  if (fileType === 'gallery') return 'GALLERY';
   if (fileType === 'asmr') return 'ASMR';
   if (fileType === 'video_archive') return 'VIDEO-A';
   if (fileType === 'asmr_archive') return 'ASMR-A';
   if (fileType === 'comic_archive') return 'COMIC-A';
   if (fileType === 'audio_archive') return 'AUDIO-A';
+  if (fileType === 'gallery_archive') return 'GALLERY-A';
   return 'FILE';
 }
 
@@ -481,8 +625,10 @@ const FileTabsBar: React.FC<FileTabsBarProps> = ({
   onActivate,
   onClose,
   onReorder,
+  onItemReorder,
+  itemOrder,
+  extraTabs = [],
 }) => {
-  const [remoteToneByTargetKey, setRemoteToneByTargetKey] = React.useState<Record<string, FileTabToneConfig>>({});
   const [draggingTabId, setDraggingTabId] = React.useState<string | null>(null);
   const [dropTarget, setDropTarget] = React.useState<{ tabId: string; position: 'before' | 'after' } | null>(null);
   const [dragGhost, setDragGhost] = React.useState<{ left: number; top: number; width: number } | null>(null);
@@ -492,10 +638,14 @@ const FileTabsBar: React.FC<FileTabsBarProps> = ({
   const [overflowMenuTabIds, setOverflowMenuTabIds] = React.useState<string[]>([]);
   const [overflowMenuOpen, setOverflowMenuOpen] = React.useState(false);
   const [reorderTick, setReorderTick] = React.useState(0);
+  const [closingItemSnapshots, setClosingItemSnapshots] = React.useState<Map<string, ClosingTabSnapshot>>(
+    () => new Map(),
+  );
   const blockClickUntilRef = React.useRef(0);
   const lastReorderSignatureRef = React.useRef('');
   const lastReorderAtRef = React.useRef(0);
-  const flipFromLeftRef = React.useRef<Map<string, number> | null>(null);
+  const tabLayoutSnapshotRef = React.useRef<Map<string, TabLayoutSnapshot>>(new Map());
+  const pendingTabLayoutSnapshotRef = React.useRef<Map<string, TabLayoutSnapshot> | null>(null);
   const mouseMoveListenerRef = React.useRef<((event: MouseEvent) => void) | null>(null);
   const mouseUpListenerRef = React.useRef<((event: MouseEvent) => void) | null>(null);
   const topScrollRef = React.useRef<HTMLDivElement | null>(null);
@@ -503,6 +653,7 @@ const FileTabsBar: React.FC<FileTabsBarProps> = ({
   const overflowMenuRef = React.useRef<HTMLDivElement | null>(null);
   const overflowTriggerRef = React.useRef<HTMLButtonElement | null>(null);
   const topScrollHideTimerRef = React.useRef<number | null>(null);
+  const closeTimerRef = React.useRef<Map<string, number>>(new Map());
   const tabsHoveringRef = React.useRef(false);
   const tabButtonRefMap = React.useRef(new Map<string, HTMLDivElement>());
   const tabSampleTimerRef = React.useRef<number | null>(null);
@@ -525,46 +676,58 @@ const FileTabsBar: React.FC<FileTabsBarProps> = ({
     lastDropTarget: { tabId: string; position: 'before' | 'after' } | null;
   } | null>(null);
 
-  const loadFileTabTones = React.useCallback(async () => {
-    try {
-      const tags = await fetchTags('FILE_TAB');
-      const nextMap: Record<string, FileTabToneConfig> = {};
-      const chosenByTarget: Record<string, TagItem> = {};
-      tags
-        .filter((tag: TagItem) => String(tag.type || '').toUpperCase() === 'FILE_TAB')
-        .forEach((tag) => {
-          const targetKey = normalizeFileTabTargetKey(String(tag.targetKey || ''));
-          if (!targetKey) return;
-          const previous = chosenByTarget[targetKey];
-          if (previous) {
-            const previousIsSystem = previous.ownerUserId === null || previous.ownerUserId === undefined;
-            const currentIsSystem = tag.ownerUserId === null || tag.ownerUserId === undefined;
-            if (previousIsSystem && !currentIsSystem) {
-              // 用户标签覆盖系统标签
-            } else if (previousIsSystem === currentIsSystem) {
-              const previousSort = Number(previous.sortOrder ?? 0);
-              const currentSort = Number(tag.sortOrder ?? 0);
-              if (currentSort >= previousSort) {
-                return;
-              }
-            } else {
-              return;
-            }
-          }
-          chosenByTarget[targetKey] = tag;
-          nextMap[targetKey] = {
-            targetKey,
-            color: tag.color,
-            textColor: tag.textColor,
-            enabled: tag.enabled,
-          };
-        });
-      setRemoteToneByTargetKey(nextMap);
-    } catch (error) {
-      runtimeLogger.warn('加载顶部标签配色配置失败，回退默认色盘:', error);
-      setRemoteToneByTargetKey({});
+  const baseTabItems = React.useMemo<FileTabsBarItem[]>(() => [
+    ...tabs.map(tab => ({ id: tab.id, kind: 'file' as const, tab })),
+    ...extraTabs.map(tab => ({ id: tab.id, kind: 'extra' as const, tab })),
+  ], [extraTabs, tabs]);
+  const tabItems = React.useMemo<FileTabsBarItem[]>(() => {
+    if (!itemOrder?.length) {
+      return baseTabItems;
     }
-  }, []);
+    const itemMap = new Map(baseTabItems.map(item => [item.id, item]));
+    const usedIds = new Set<string>();
+    const orderedItems = itemOrder
+      .map((itemId) => {
+        const item = itemMap.get(itemId);
+        if (!item) return null;
+        usedIds.add(itemId);
+        return item;
+      })
+      .filter((item): item is FileTabsBarItem => Boolean(item));
+    return [
+      ...orderedItems,
+      ...baseTabItems.filter(item => !usedIds.has(item.id)),
+    ];
+  }, [baseTabItems, itemOrder]);
+  const activeExtraTabId = React.useMemo(() => (
+    extraTabs.find(tab => tab.active)?.id ?? null
+  ), [extraTabs]);
+  const activeScrollTargetId = activeTabId ?? activeExtraTabId;
+  const liveTabItemIds = React.useMemo(() => new Set(tabItems.map(item => item.id)), [tabItems]);
+  const exitingItemIds = React.useMemo(() => {
+    const ids = new Set<string>();
+    closingItemSnapshots.forEach((_, itemId) => {
+      if (!liveTabItemIds.has(itemId)) {
+        ids.add(itemId);
+      }
+    });
+    return ids;
+  }, [closingItemSnapshots, liveTabItemIds]);
+  const renderedTabItems = React.useMemo(() => {
+    const exitingSnapshots = Array.from(closingItemSnapshots.values())
+      .filter(snapshot => !liveTabItemIds.has(snapshot.item.id))
+      .sort((left, right) => left.index - right.index);
+    if (exitingSnapshots.length === 0) {
+      return tabItems;
+    }
+
+    const nextItems = [...tabItems];
+    exitingSnapshots.forEach((snapshot) => {
+      const insertAt = Math.min(Math.max(snapshot.index, 0), nextItems.length);
+      nextItems.splice(insertAt, 0, snapshot.item);
+    });
+    return nextItems;
+  }, [closingItemSnapshots, liveTabItemIds, tabItems]);
 
   const checkHorizontalOverflow = React.useCallback(() => {
     const wrapper = tabsWrapperRef.current;
@@ -586,7 +749,7 @@ const FileTabsBar: React.FC<FileTabsBarProps> = ({
 
   const collectHiddenTabIds = React.useCallback(() => {
     const wrapper = tabsWrapperRef.current;
-    if (!wrapper || tabs.length === 0) {
+    if (!wrapper || tabItems.length === 0) {
       return [] as string[];
     }
     if (wrapper.scrollWidth - wrapper.clientWidth <= 1) {
@@ -594,36 +757,36 @@ const FileTabsBar: React.FC<FileTabsBarProps> = ({
     }
     const leftBound = wrapper.scrollLeft + 1;
     const rightBound = wrapper.scrollLeft + wrapper.clientWidth - 1;
-    return tabs
-      .map((tab) => {
-        const el = tabButtonRefMap.current.get(tab.id);
-        if (!el) return tab.id;
+    return tabItems
+      .map((tabItem) => {
+        const el = tabButtonRefMap.current.get(tabItem.id);
+        if (!el) return tabItem.id;
         const tabLeft = el.offsetLeft;
         const tabRight = tabLeft + el.offsetWidth;
-        return tabLeft < leftBound || tabRight > rightBound ? tab.id : null;
+        return tabLeft < leftBound || tabRight > rightBound ? tabItem.id : null;
       })
       .filter((value): value is string => Boolean(value));
-  }, [tabs]);
+  }, [tabItems]);
 
   const collectVisibleDropTargetTabIds = React.useCallback((draggedId: string) => {
     const wrapper = tabsWrapperRef.current;
-    if (!wrapper || tabs.length === 0) {
+    if (!wrapper || tabItems.length === 0) {
       return [] as string[];
     }
     const leftBound = wrapper.scrollLeft + 1;
     const rightBound = wrapper.scrollLeft + wrapper.clientWidth - 1;
-    return tabs
-      .map((tab) => {
-        if (tab.id === draggedId) return null;
-        const el = tabButtonRefMap.current.get(tab.id);
+    return tabItems
+      .map((tabItem) => {
+        if (tabItem.id === draggedId) return null;
+        const el = tabButtonRefMap.current.get(tabItem.id);
         if (!el) return null;
         const tabLeft = el.offsetLeft;
         const tabRight = tabLeft + el.offsetWidth;
         const visible = tabRight >= leftBound && tabLeft <= rightBound;
-        return visible ? tab.id : null;
+        return visible ? tabItem.id : null;
       })
       .filter((value): value is string => Boolean(value));
-  }, [tabs]);
+  }, [tabItems]);
 
   const refreshOverflowMenuTabIds = React.useCallback(() => {
     const nextTabIds = collectHiddenTabIds();
@@ -678,16 +841,12 @@ const FileTabsBar: React.FC<FileTabsBarProps> = ({
   }, [clearTopScrollHideTimer]);
 
   React.useEffect(() => {
-    void loadFileTabTones();
-  }, [loadFileTabTones]);
-
-  React.useEffect(() => {
     activeTabIdRef.current = activeTabId;
   }, [activeTabId]);
 
   React.useLayoutEffect(() => {
     checkHorizontalOverflow();
-  }, [checkHorizontalOverflow, tabs, remoteToneByTargetKey]);
+  }, [checkHorizontalOverflow, tabItems]);
 
   React.useEffect(() => {
     const wrapper = tabsWrapperRef.current;
@@ -744,21 +903,11 @@ const FileTabsBar: React.FC<FileTabsBarProps> = ({
   }, [revealTopScrollTemporarily]);
 
   React.useEffect(() => {
-    const handler = () => {
-      void loadFileTabTones();
-    };
-    window.addEventListener('omniflow:file-tab-tags-updated', handler as EventListener);
-    return () => {
-      window.removeEventListener('omniflow:file-tab-tags-updated', handler as EventListener);
-    };
-  }, [loadFileTabTones]);
-
-  React.useEffect(() => {
-    if (!activeTabId) return;
+    if (!activeScrollTargetId) return;
     const wrapper = tabsWrapperRef.current;
     if (!wrapper) return;
     const rafId = window.requestAnimationFrame(() => {
-      const activeEl = tabButtonRefMap.current.get(activeTabId);
+      const activeEl = tabButtonRefMap.current.get(activeScrollTargetId);
       if (!activeEl) return;
       const targetLeft = activeEl.offsetLeft;
       const targetRight = targetLeft + activeEl.offsetWidth;
@@ -778,15 +927,26 @@ const FileTabsBar: React.FC<FileTabsBarProps> = ({
       checkHorizontalOverflow();
     });
     return () => window.cancelAnimationFrame(rafId);
-  }, [activeTabId, checkHorizontalOverflow, tabs.length]);
+  }, [activeScrollTargetId, checkHorizontalOverflow, tabItems.length]);
 
-  const overflowTabs = React.useMemo(() => {
-    if (overflowMenuTabIds.length === 0) return [] as FileViewerTab[];
+  const overflowItems = React.useMemo(() => {
+    if (overflowMenuTabIds.length === 0) return [] as FileTabsBarItem[];
     const tabMap = new Map(tabs.map(tab => [tab.id, tab]));
+    const extraTabMap = new Map(extraTabs.map(tab => [tab.id, tab]));
     return overflowMenuTabIds
-      .map(tabId => tabMap.get(tabId))
-      .filter((tab): tab is FileViewerTab => Boolean(tab));
-  }, [overflowMenuTabIds, tabs]);
+      .map((tabId) => {
+        const fileTab = tabMap.get(tabId);
+        if (fileTab) {
+          return { id: tabId, kind: 'file' as const, tab: fileTab };
+        }
+        const extraTab = extraTabMap.get(tabId);
+        if (extraTab) {
+          return { id: tabId, kind: 'extra' as const, tab: extraTab };
+        }
+        return null;
+      })
+      .filter((tab): tab is FileTabsBarItem => Boolean(tab));
+  }, [extraTabs, overflowMenuTabIds, tabs]);
 
   React.useEffect(() => {
     if (!hasHorizontalOverflow && overflowMenuOpen) {
@@ -811,7 +971,7 @@ const FileTabsBar: React.FC<FileTabsBarProps> = ({
   React.useEffect(() => {
     if (!overflowMenuOpen) return;
     refreshOverflowMenuTabIds();
-  }, [activeTabId, overflowMenuOpen, refreshOverflowMenuTabIds, tabs.length]);
+  }, [activeScrollTargetId, overflowMenuOpen, refreshOverflowMenuTabIds, tabItems.length]);
 
   React.useEffect(() => {
     if (!overflowMenuOpen) {
@@ -835,6 +995,70 @@ const FileTabsBar: React.FC<FileTabsBarProps> = ({
     lastReorderSignatureRef.current = '';
     lastReorderAtRef.current = 0;
   };
+
+  const requestCloseItem = React.useCallback((itemId: string, closeItem: () => void) => {
+    if (closeTimerRef.current.has(itemId)) {
+      return;
+    }
+    const closingIndex = tabItems.findIndex(item => item.id === itemId);
+    const closingItem = closingIndex >= 0 ? tabItems[closingIndex] : null;
+    if (!closingItem) {
+      closeItem();
+      return;
+    }
+    pendingTabLayoutSnapshotRef.current = null;
+    setClosingItemSnapshots((prev) => {
+      if (prev.has(itemId)) {
+        return prev;
+      }
+      const next = new Map(prev);
+      next.set(itemId, {
+        item: closingItem,
+        index: closingIndex,
+      });
+      return next;
+    });
+    closeItem();
+    const timer = window.setTimeout(() => {
+      closeTimerRef.current.delete(itemId);
+      setClosingItemSnapshots((prev) => {
+        if (!prev.has(itemId)) {
+          return prev;
+        }
+        const next = new Map(prev);
+        next.delete(itemId);
+        return next;
+      });
+    }, TAB_CLOSE_REMOVE_DELAY_MS);
+    closeTimerRef.current.set(itemId, timer);
+  }, [tabItems]);
+
+  React.useEffect(() => {
+    const liveItemIds = new Set(tabItems.map(item => item.id));
+    closeTimerRef.current.forEach((timer, itemId) => {
+      if (!liveItemIds.has(itemId)) {
+        return;
+      }
+      window.clearTimeout(timer);
+      closeTimerRef.current.delete(itemId);
+    });
+    setClosingItemSnapshots((prev) => {
+      let changed = false;
+      const next = new Map(prev);
+      prev.forEach((_, itemId) => {
+        if (liveItemIds.has(itemId)) {
+          changed = true;
+          next.delete(itemId);
+        }
+      });
+      return changed ? next : prev;
+    });
+  }, [tabItems]);
+
+  React.useEffect(() => () => {
+    closeTimerRef.current.forEach(timer => window.clearTimeout(timer));
+    closeTimerRef.current.clear();
+  }, []);
 
   const clearTabSampleTimer = React.useCallback(() => {
     if (tabSampleTimerRef.current !== null) {
@@ -928,17 +1152,37 @@ const FileTabsBar: React.FC<FileTabsBarProps> = ({
     revealTopScrollTemporarily();
   }, [revealTopScrollTemporarily]);
 
-  const captureTabLefts = React.useCallback(() => {
-    const positions = new Map<string, number>();
-    tabs.forEach((tab) => {
-      const el = tabButtonRefMap.current.get(tab.id);
+  const captureTabLayouts = React.useCallback(() => {
+    const layouts = new Map<string, TabLayoutSnapshot>();
+    tabItems.forEach((tabItem) => {
+      const el = tabButtonRefMap.current.get(tabItem.id);
       if (!el) return;
-      positions.set(tab.id, el.getBoundingClientRect().left);
+      const rect = el.getBoundingClientRect();
+      layouts.set(tabItem.id, {
+        left: rect.left,
+      });
     });
-    return positions;
-  }, [tabs]);
+    return layouts;
+  }, [tabItems]);
 
-  const resolveClosestDropTarget = (
+  const dispatchReorder = React.useCallback((
+    draggedId: string,
+    targetId: string,
+    position: 'before' | 'after',
+  ) => {
+    const draggedItem = tabItems.find(item => item.id === draggedId);
+    const targetItem = tabItems.find(item => item.id === targetId);
+    if (!draggedItem || !targetItem) {
+      return false;
+    }
+    onItemReorder?.(draggedId, targetId, position);
+    if (draggedItem.kind === 'file' && targetItem.kind === 'file') {
+      onReorder(draggedId, targetId, position);
+    }
+    return true;
+  }, [onItemReorder, onReorder, tabItems]);
+
+  const resolveClosestDropTarget = React.useCallback((
     clientX: number,
     draggedId: string,
     previousTarget: { tabId: string; position: 'before' | 'after' } | null,
@@ -988,7 +1232,7 @@ const FileTabsBar: React.FC<FileTabsBarProps> = ({
     }
     if (!nearest) return null;
     return { tabId: nearest.tabId, position: nearest.position };
-  };
+  }, [collectVisibleDropTargetTabIds]);
 
   const detachWindowDragListeners = React.useCallback(() => {
     if (mouseMoveListenerRef.current) {
@@ -1001,6 +1245,119 @@ const FileTabsBar: React.FC<FileTabsBarProps> = ({
     }
   }, []);
 
+  const handleTabMouseDown = React.useCallback((
+    event: React.MouseEvent<HTMLDivElement>,
+    tabId: string,
+  ) => {
+    if (event.button !== 0) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    pendingDragRef.current = {
+      tabId,
+      startX: event.clientX,
+      started: false,
+      grabOffsetX: event.clientX - rect.left,
+      ghostTop: rect.top,
+      ghostWidth: rect.width,
+      lastReorderClientX: null,
+      lastDropTarget: null,
+    };
+    setDropTarget(null);
+    setDragGhost(null);
+    detachWindowDragListeners();
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      const pending = pendingDragRef.current;
+      if (!pending || pending.tabId !== tabId) {
+        return;
+      }
+
+      const offsetX = moveEvent.clientX - pending.startX;
+      if (!pending.started) {
+        if (Math.abs(offsetX) < DRAG_START_THRESHOLD_PX) {
+          return;
+        }
+        pending.started = true;
+        setDraggingTabId(tabId);
+        blockClickUntilRef.current = Date.now() + 180;
+      }
+
+      setDragGhost({
+        left: moveEvent.clientX - pending.grabOffsetX,
+        top: pending.ghostTop,
+        width: pending.ghostWidth,
+      });
+      if (
+        pending.lastReorderClientX !== null
+        && Math.abs(moveEvent.clientX - pending.lastReorderClientX) < REORDER_MIN_STEP_PX
+      ) {
+        return;
+      }
+
+      const nextDropTarget = resolveClosestDropTarget(
+        moveEvent.clientX,
+        tabId,
+        pending.lastDropTarget,
+      );
+      if (!nextDropTarget) {
+        setDropTarget(null);
+        pending.lastDropTarget = null;
+        return;
+      }
+      setDropTarget(nextDropTarget);
+      const signature = `${tabId}->${nextDropTarget.tabId}:${nextDropTarget.position}`;
+      const now = Date.now();
+      if (
+        signature !== lastReorderSignatureRef.current
+        && now - lastReorderAtRef.current >= REORDER_COOLDOWN_MS
+      ) {
+        pendingTabLayoutSnapshotRef.current = captureTabLayouts();
+        if (!dispatchReorder(tabId, nextDropTarget.tabId, nextDropTarget.position)) {
+          return;
+        }
+        setReorderTick((prev) => prev + 1);
+        lastReorderSignatureRef.current = signature;
+        lastReorderAtRef.current = now;
+        pending.lastReorderClientX = moveEvent.clientX;
+        pending.lastDropTarget = nextDropTarget;
+      }
+    };
+
+    const handleMouseUp = (upEvent: MouseEvent) => {
+      const pending = pendingDragRef.current;
+      pendingDragRef.current = null;
+      detachWindowDragListeners();
+      if (pending?.started) {
+        const finalDropTarget = resolveClosestDropTarget(
+          upEvent.clientX,
+          tabId,
+          pending.lastDropTarget,
+        ) ?? pending.lastDropTarget;
+        if (finalDropTarget) {
+          const signature = `${tabId}->${finalDropTarget.tabId}:${finalDropTarget.position}`;
+          if (signature !== lastReorderSignatureRef.current) {
+            pendingTabLayoutSnapshotRef.current = captureTabLayouts();
+            if (dispatchReorder(tabId, finalDropTarget.tabId, finalDropTarget.position)) {
+              setReorderTick((prev) => prev + 1);
+            }
+          }
+        }
+        clearDragState();
+        return;
+      }
+      clearDragState();
+    };
+
+    mouseMoveListenerRef.current = handleMouseMove;
+    mouseUpListenerRef.current = handleMouseUp;
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+  }, [
+    captureTabLayouts,
+    detachWindowDragListeners,
+    dispatchReorder,
+    resolveClosestDropTarget,
+  ]);
+
   React.useEffect(() => {
     return () => {
       detachWindowDragListeners();
@@ -1008,38 +1365,46 @@ const FileTabsBar: React.FC<FileTabsBarProps> = ({
   }, [detachWindowDragListeners]);
 
   useLayoutEffect(() => {
-    const fromLeft = flipFromLeftRef.current;
-    if (!fromLeft) {
+    const previousLayouts = pendingTabLayoutSnapshotRef.current;
+    pendingTabLayoutSnapshotRef.current = null;
+    const nextLayouts = captureTabLayouts();
+    tabLayoutSnapshotRef.current = nextLayouts;
+    if (!previousLayouts || previousLayouts.size === 0 || nextLayouts.size === 0) {
       return;
     }
-    flipFromLeftRef.current = null;
 
-    tabs.forEach((tab) => {
-      if (tab.id === draggingTabId) return;
-      const el = tabButtonRefMap.current.get(tab.id);
+    tabItems.forEach((tabItem) => {
+      if (tabItem.id === draggingTabId) return;
+      const el = tabButtonRefMap.current.get(tabItem.id);
       if (!el) return;
-      const prevLeft = fromLeft.get(tab.id);
-      if (prevLeft === undefined) return;
-      const nextLeft = el.getBoundingClientRect().left;
-      const deltaX = prevLeft - nextLeft;
+      const prevLayout = previousLayouts.get(tabItem.id);
+      const nextLayout = nextLayouts.get(tabItem.id);
+      if (!prevLayout || !nextLayout) return;
+      const deltaX = prevLayout.left - nextLayout.left;
       if (Math.abs(deltaX) < 0.5) return;
 
       el.style.transition = 'none';
       el.style.transform = `translateX(${deltaX}px)`;
       void el.offsetWidth;
-      el.style.transition = `transform ${REORDER_FLIP_DURATION_MS}ms cubic-bezier(0.22, 1, 0.36, 1)`;
+      el.style.transition = `transform ${TAB_LAYOUT_FLIP_DURATION_MS}ms cubic-bezier(0.22, 1, 0.36, 1)`;
       el.style.transform = 'translateX(0px)';
       const cleanup = () => {
+        window.clearTimeout(cleanupTimer);
         el.style.transition = '';
         el.style.transform = '';
-        el.removeEventListener('transitionend', cleanup);
+        el.removeEventListener('transitionend', handleTransitionEnd);
       };
-      el.addEventListener('transitionend', cleanup);
+      const handleTransitionEnd = (event: TransitionEvent) => {
+        if (event.propertyName !== 'transform') return;
+        cleanup();
+      };
+      const cleanupTimer = window.setTimeout(cleanup, TAB_LAYOUT_FLIP_DURATION_MS + 80);
+      el.addEventListener('transitionend', handleTransitionEnd);
     });
-  }, [tabs, reorderTick, draggingTabId]);
+  }, [captureTabLayouts, draggingTabId, reorderTick, tabItems]);
 
-  if (tabs.length === 0) return null;
-  const draggingTab = draggingTabId ? (tabs.find(tab => tab.id === draggingTabId) ?? null) : null;
+  if (tabItems.length === 0 && renderedTabItems.length === 0) return null;
+  const draggingItem = draggingTabId ? (renderedTabItems.find(item => item.id === draggingTabId) ?? null) : null;
 
   return (
     <>
@@ -1068,9 +1433,85 @@ const FileTabsBar: React.FC<FileTabsBarProps> = ({
         <TabsWrapper
           ref={tabsWrapperRef}
         >
-          {tabs.map(tab => {
-        const tabTypeLabel = getTabTypeLabel(tab);
-        const badgeTone = resolveTabTypeTone(tab, tabTypeLabel, remoteToneByTargetKey);
+          {renderedTabItems.map((tabItem) => {
+        if (tabItem.kind === 'extra') {
+          const tab = tabItem.tab;
+          const isClosing = exitingItemIds.has(tab.id);
+          return (
+            <TabButton
+              key={tab.id}
+              role="button"
+              tabIndex={0}
+              $active={tab.active}
+              $dropBefore={Boolean(
+                draggingTabId
+                && draggingTabId !== tab.id
+                && dropTarget?.tabId === tab.id
+                && dropTarget.position === 'before',
+              )}
+              $dropAfter={Boolean(
+                draggingTabId
+                && draggingTabId !== tab.id
+                && dropTarget?.tabId === tab.id
+                && dropTarget.position === 'after',
+              )}
+              $dragging={draggingTabId === tab.id}
+              $closing={isClosing}
+              ref={(el) => {
+                if (el) {
+                  tabButtonRefMap.current.set(tab.id, el);
+                } else {
+                  tabButtonRefMap.current.delete(tab.id);
+                }
+              }}
+              onMouseDown={(event) => {
+                if (isClosing) return;
+                handleTabMouseDown(event, tab.id);
+              }}
+              onClick={() => {
+                if (isClosing) {
+                  return;
+                }
+                if (Date.now() < blockClickUntilRef.current) {
+                  return;
+                }
+                tab.onActivate();
+              }}
+              onKeyDown={(event) => {
+                if (event.target !== event.currentTarget) {
+                  return;
+                }
+                if (event.key !== 'Enter' && event.key !== ' ') {
+                  return;
+                }
+                event.preventDefault();
+                if (isClosing) {
+                  return;
+                }
+                tab.onActivate();
+              }}
+              title={tab.title}
+            >
+              <SystemTabIcon />
+              <Name>{tab.title}</Name>
+              <CloseButton
+                type="button"
+                aria-label="关闭标签"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  requestCloseItem(tab.id, tab.onClose);
+                }}
+                onMouseDown={(event) => {
+                  event.stopPropagation();
+                }}
+              >
+                ×
+              </CloseButton>
+            </TabButton>
+          );
+        }
+        const tab = tabItem.tab;
+        const isClosing = exitingItemIds.has(tab.id);
         const isDropBefore = Boolean(
           draggingTabId
           && draggingTabId !== tab.id
@@ -1096,6 +1537,7 @@ const FileTabsBar: React.FC<FileTabsBarProps> = ({
             $dropBefore={isDropBefore}
             $dropAfter={isDropAfter}
             $dragging={draggingTabId === tab.id}
+            $closing={isClosing}
             ref={(el) => {
               if (el) {
                 tabButtonRefMap.current.set(tab.id, el);
@@ -1104,107 +1546,13 @@ const FileTabsBar: React.FC<FileTabsBarProps> = ({
               }
             }}
             onMouseDown={(event) => {
-              if (event.button !== 0) return;
-              const rect = event.currentTarget.getBoundingClientRect();
-              pendingDragRef.current = {
-                tabId: tab.id,
-                startX: event.clientX,
-                started: false,
-                grabOffsetX: event.clientX - rect.left,
-                ghostTop: rect.top,
-                ghostWidth: rect.width,
-                lastReorderClientX: null,
-                lastDropTarget: null,
-              };
-              setDropTarget(null);
-              setDragGhost(null);
-              detachWindowDragListeners();
-
-              const handleMouseMove = (moveEvent: MouseEvent) => {
-                const pending = pendingDragRef.current;
-                if (!pending || pending.tabId !== tab.id) {
-                  return;
-                }
-
-                const offsetX = moveEvent.clientX - pending.startX;
-                if (!pending.started) {
-                  if (Math.abs(offsetX) < DRAG_START_THRESHOLD_PX) {
-                    return;
-                  }
-                  pending.started = true;
-                  setDraggingTabId(tab.id);
-                  blockClickUntilRef.current = Date.now() + 180;
-                }
-
-                setDragGhost({
-                  left: moveEvent.clientX - pending.grabOffsetX,
-                  top: pending.ghostTop,
-                  width: pending.ghostWidth,
-                });
-                if (
-                  pending.lastReorderClientX !== null
-                  && Math.abs(moveEvent.clientX - pending.lastReorderClientX) < REORDER_MIN_STEP_PX
-                ) {
-                  return;
-                }
-
-                const nextDropTarget = resolveClosestDropTarget(
-                  moveEvent.clientX,
-                  tab.id,
-                  pending.lastDropTarget,
-                );
-                if (!nextDropTarget) {
-                  setDropTarget(null);
-                  pending.lastDropTarget = null;
-                  return;
-                }
-                setDropTarget(nextDropTarget);
-                const signature = `${tab.id}->${nextDropTarget.tabId}:${nextDropTarget.position}`;
-                const now = Date.now();
-                if (
-                  signature !== lastReorderSignatureRef.current
-                  && now - lastReorderAtRef.current >= REORDER_COOLDOWN_MS
-                ) {
-                  flipFromLeftRef.current = captureTabLefts();
-                  onReorder(tab.id, nextDropTarget.tabId, nextDropTarget.position);
-                  setReorderTick((prev) => prev + 1);
-                  lastReorderSignatureRef.current = signature;
-                  lastReorderAtRef.current = now;
-                  pending.lastReorderClientX = moveEvent.clientX;
-                  pending.lastDropTarget = nextDropTarget;
-                }
-              };
-
-              const handleMouseUp = (upEvent: MouseEvent) => {
-                const pending = pendingDragRef.current;
-                pendingDragRef.current = null;
-                detachWindowDragListeners();
-                if (pending?.started) {
-                  const finalDropTarget = resolveClosestDropTarget(
-                    upEvent.clientX,
-                    tab.id,
-                    pending.lastDropTarget,
-                  ) ?? pending.lastDropTarget;
-                  if (finalDropTarget) {
-                    const signature = `${tab.id}->${finalDropTarget.tabId}:${finalDropTarget.position}`;
-                    if (signature !== lastReorderSignatureRef.current) {
-                      flipFromLeftRef.current = captureTabLefts();
-                      onReorder(tab.id, finalDropTarget.tabId, finalDropTarget.position);
-                      setReorderTick((prev) => prev + 1);
-                    }
-                  }
-                  clearDragState();
-                  return;
-                }
-                clearDragState();
-              };
-
-              mouseMoveListenerRef.current = handleMouseMove;
-              mouseUpListenerRef.current = handleMouseUp;
-              window.addEventListener('mousemove', handleMouseMove);
-              window.addEventListener('mouseup', handleMouseUp);
+              if (isClosing) return;
+              handleTabMouseDown(event, tab.id);
             }}
             onClick={() => {
+              if (isClosing) {
+                return;
+              }
               if (Date.now() < blockClickUntilRef.current) {
                 return;
               }
@@ -1218,6 +1566,9 @@ const FileTabsBar: React.FC<FileTabsBarProps> = ({
                 return;
               }
               event.preventDefault();
+              if (isClosing) {
+                return;
+              }
               if (Date.now() < blockClickUntilRef.current) {
                 return;
               }
@@ -1235,14 +1586,14 @@ const FileTabsBar: React.FC<FileTabsBarProps> = ({
             }}
             title={tabTitle}
           >
-            <FileTypeBadge $tone={badgeTone}>{tabTypeLabel}</FileTypeBadge>
+            <FileTabIcon tab={tab} />
             <Name>{getDisplayName(tab)}</Name>
             <CloseButton
               type="button"
               aria-label="关闭标签"
               onClick={(event) => {
                 event.stopPropagation();
-                onClose(tab.id);
+                requestCloseItem(tab.id, () => onClose(tab.id));
               }}
               onMouseDown={(event) => {
                 event.stopPropagation();
@@ -1254,7 +1605,7 @@ const FileTabsBar: React.FC<FileTabsBarProps> = ({
         );
       })}
         </TabsWrapper>
-        {tabs.length > 1 ? (
+        {tabItems.length > 1 ? (
           <OverflowSlot>
             <OverflowTrigger
               ref={overflowTriggerRef}
@@ -1279,22 +1630,37 @@ const FileTabsBar: React.FC<FileTabsBarProps> = ({
             </OverflowTrigger>
             {overflowMenuOpen ? (
               <OverflowMenu ref={overflowMenuRef}>
-                {overflowTabs.map((tab) => {
-                  const tabTypeLabel = getTabTypeLabel(tab);
-                  const badgeTone = resolveTabTypeTone(tab, tabTypeLabel, remoteToneByTargetKey);
+                {overflowItems.map((item) => {
+                  if (item.kind === 'extra') {
+                    return (
+                      <OverflowMenuItem
+                        key={`overflow-${item.id}`}
+                        type="button"
+                        $active={item.tab.active}
+                        onClick={() => {
+                          item.tab.onActivate();
+                          setOverflowMenuOpen(false);
+                          hideTopScrollAfterAction();
+                        }}
+                      >
+                        <SystemTabIcon />
+                        <Name title={item.tab.title}>{item.tab.title}</Name>
+                      </OverflowMenuItem>
+                    );
+                  }
                   return (
                     <OverflowMenuItem
-                      key={`overflow-${tab.id}`}
+                      key={`overflow-${item.id}`}
                       type="button"
-                      $active={tab.id === activeTabId}
+                      $active={item.tab.id === activeTabId}
                       onClick={() => {
-                        onActivate(tab.id);
+                        onActivate(item.tab.id);
                         setOverflowMenuOpen(false);
                         hideTopScrollAfterAction();
                       }}
                     >
-                      <FileTypeBadge $tone={badgeTone}>{tabTypeLabel}</FileTypeBadge>
-                      <Name title={getDisplayName(tab)}>{getDisplayName(tab)}</Name>
+                      <FileTabIcon tab={item.tab} />
+                      <Name title={getDisplayName(item.tab)}>{getDisplayName(item.tab)}</Name>
                     </OverflowMenuItem>
                   );
                 })}
@@ -1304,12 +1670,19 @@ const FileTabsBar: React.FC<FileTabsBarProps> = ({
         ) : null}
       </TabsContainer>
       </TabsFrame>
-      {draggingTab && dragGhost ? (
+      {draggingItem && dragGhost ? (
         <DragGhost style={{ left: `${dragGhost.left}px`, top: `${dragGhost.top}px`, width: `${dragGhost.width}px` }}>
-          <FileTypeBadge $tone={resolveTabTypeTone(draggingTab, getTabTypeLabel(draggingTab), remoteToneByTargetKey)}>
-            {getTabTypeLabel(draggingTab)}
-          </FileTypeBadge>
-          <Name>{getDisplayName(draggingTab)}</Name>
+          {draggingItem.kind === 'file' ? (
+            <>
+              <FileTabIcon tab={draggingItem.tab} />
+              <Name>{getDisplayName(draggingItem.tab)}</Name>
+            </>
+          ) : (
+            <>
+              <SystemTabIcon />
+              <Name>{draggingItem.tab.title}</Name>
+            </>
+          )}
         </DragGhost>
       ) : null}
     </>

@@ -28,6 +28,7 @@ export const ImageViewerWrapper = styled.div`
   }
 
   .image-container {
+    position: relative;
     flex: 1;
     width: 100%;
     height: 100%;
@@ -49,6 +50,21 @@ export const ImageViewerWrapper = styled.div`
     border-radius: 0;
     transform-origin: center center;
     will-change: transform;
+  }
+
+  .image-preview-placeholder {
+    width: min(320px, 72vw);
+    min-height: 140px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    color: var(--semi-color-text-2);
+    font-size: 13px;
+    line-height: 20px;
+    text-align: center;
+    white-space: nowrap;
   }
 
   /* 悬浮功能栏：居中、透明玻璃效果 */
@@ -99,4 +115,139 @@ export const ImageViewerWrapper = styled.div`
     padding: 2px 8px;
     border-radius: 10px;
   }
+
+  .image-crop-layer {
+    position: absolute;
+    inset: 0;
+    z-index: 120;
+    overflow: hidden;
+    cursor: default;
+  }
+
+  .image-crop-toolbar {
+    position: absolute;
+    top: 16px;
+    left: 50%;
+    z-index: 4;
+    min-height: 38px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 5px 6px 5px 12px;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 8px;
+    background: rgba(17, 24, 39, 0.78);
+    color: #fff;
+    box-shadow: 0 14px 42px rgba(0, 0, 0, 0.28);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    transform: translateX(-50%);
+  }
+
+  .image-crop-title,
+  .image-crop-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .image-crop-title {
+    font-size: 12px;
+    font-weight: 650;
+    white-space: nowrap;
+  }
+
+  .image-crop-action.semi-button {
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border-radius: 6px;
+  }
+
+  .image-crop-dim {
+    position: absolute;
+    z-index: 1;
+    background: rgba(0, 0, 0, 0.52);
+    pointer-events: none;
+  }
+
+  .image-crop-dim.top {
+    top: 0;
+    left: 0;
+    right: 0;
+  }
+
+  .image-crop-dim.right {
+    top: 0;
+    right: 0;
+    bottom: 0;
+  }
+
+  .image-crop-dim.bottom {
+    left: 0;
+    right: 0;
+    bottom: 0;
+  }
+
+  .image-crop-dim.left {
+    top: 0;
+    left: 0;
+    bottom: 0;
+  }
+
+  .image-crop-box {
+    position: absolute;
+    z-index: 3;
+    box-sizing: border-box;
+    border: 1px solid rgba(255, 255, 255, 0.96);
+    background: rgba(255, 255, 255, 0.03);
+    box-shadow:
+      0 0 0 1px rgba(0, 0, 0, 0.42),
+      0 14px 36px rgba(0, 0, 0, 0.22);
+    cursor: move;
+    touch-action: none;
+  }
+
+  .image-crop-grid {
+    position: absolute;
+    inset: 0;
+    background:
+      linear-gradient(to right, transparent 33.333%, rgba(255, 255, 255, 0.58) 33.333%, rgba(255, 255, 255, 0.58) calc(33.333% + 1px), transparent calc(33.333% + 1px), transparent 66.666%, rgba(255, 255, 255, 0.58) 66.666%, rgba(255, 255, 255, 0.58) calc(66.666% + 1px), transparent calc(66.666% + 1px)),
+      linear-gradient(to bottom, transparent 33.333%, rgba(255, 255, 255, 0.58) 33.333%, rgba(255, 255, 255, 0.58) calc(33.333% + 1px), transparent calc(33.333% + 1px), transparent 66.666%, rgba(255, 255, 255, 0.58) 66.666%, rgba(255, 255, 255, 0.58) calc(66.666% + 1px), transparent calc(66.666% + 1px));
+    pointer-events: none;
+  }
+
+  .image-crop-size {
+    position: absolute;
+    right: 6px;
+    bottom: 6px;
+    padding: 2px 6px;
+    border-radius: 5px;
+    background: rgba(17, 24, 39, 0.76);
+    color: rgba(255, 255, 255, 0.92);
+    font-size: 10px;
+    line-height: 14px;
+    font-variant-numeric: tabular-nums;
+    pointer-events: none;
+  }
+
+  .image-crop-handle {
+    position: absolute;
+    width: 13px;
+    height: 13px;
+    border: 2px solid #fff;
+    border-radius: 4px;
+    background: var(--semi-color-primary);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.34);
+    touch-action: none;
+  }
+
+  .image-crop-handle.nw { left: -7px; top: -7px; cursor: nwse-resize; }
+  .image-crop-handle.n { left: 50%; top: -7px; transform: translateX(-50%); cursor: ns-resize; }
+  .image-crop-handle.ne { right: -7px; top: -7px; cursor: nesw-resize; }
+  .image-crop-handle.e { right: -7px; top: 50%; transform: translateY(-50%); cursor: ew-resize; }
+  .image-crop-handle.se { right: -7px; bottom: -7px; cursor: nwse-resize; }
+  .image-crop-handle.s { left: 50%; bottom: -7px; transform: translateX(-50%); cursor: ns-resize; }
+  .image-crop-handle.sw { left: -7px; bottom: -7px; cursor: nesw-resize; }
+  .image-crop-handle.w { left: -7px; top: 50%; transform: translateY(-50%); cursor: ew-resize; }
 `;

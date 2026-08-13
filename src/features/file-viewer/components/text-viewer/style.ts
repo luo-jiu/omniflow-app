@@ -30,6 +30,32 @@ export const TextViewerWrapper = styled.div`
   .editor-stage .cm-editor .cm-scroller {
     overflow: auto !important;
     padding: 12px 0;
+    scrollbar-width: thin;
+    scrollbar-color: var(--app-scrollbar-thumb) var(--app-scrollbar-track);
+  }
+
+  .editor-stage .cm-editor .cm-scroller::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  .editor-stage .cm-editor .cm-scroller::-webkit-scrollbar-track,
+  .editor-stage .cm-editor .cm-scroller::-webkit-scrollbar-corner {
+    background: var(--app-scrollbar-track);
+  }
+
+  .editor-stage .cm-editor .cm-scroller::-webkit-scrollbar-thumb {
+    min-width: 28px;
+    min-height: 28px;
+    border: 2px solid transparent;
+    border-radius: 999px;
+    background: var(--app-scrollbar-thumb);
+    background-clip: padding-box;
+  }
+
+  .editor-stage .cm-editor .cm-scroller::-webkit-scrollbar-thumb:hover {
+    background: var(--app-scrollbar-thumb-hover);
+    background-clip: padding-box;
   }
 
   .editor-stage .cm-editor .cm-gutters {
@@ -112,7 +138,6 @@ export const TextViewerWrapper = styled.div`
   .footer-controls {
     display: flex;
     align-items: center;
-    gap: 2px;
     flex-shrink: 0;
   }
 
@@ -123,7 +148,7 @@ export const TextViewerWrapper = styled.div`
   }
 
   .zoom-text {
-    min-width: 38px;
+    min-width: 24px;
     text-align: center;
     font-variant-numeric: tabular-nums;
   }
@@ -156,23 +181,37 @@ export const TextViewerWrapper = styled.div`
   .footer-actions {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 4px;
     flex-shrink: 0;
   }
 
-  .save-btn {
-    min-height: 30px;
-    font-size: 13px;
-    padding: 0 14px;
-    border-radius: 6px;
+  .action-tooltip-anchor {
+    display: inline-flex;
   }
 
-  .action-link {
-    font-size: 12px;
+  .icon-action-btn,
+  .icon-action-link {
+    width: 30px;
+    height: 30px;
+    min-width: 30px;
+    border-radius: 6px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+  }
+
+  .icon-action-btn .semi-icon,
+  .icon-action-link .semi-icon,
+  .icon-action-btn svg,
+  .icon-action-link svg {
+    width: 15px;
+    height: 15px;
+  }
+
+  .icon-action-link {
     color: var(--semi-color-text-1);
     text-decoration: none;
-    padding: 3px 8px;
-    border-radius: 6px;
     border: 1px solid var(--semi-color-border);
 
     &:hover {

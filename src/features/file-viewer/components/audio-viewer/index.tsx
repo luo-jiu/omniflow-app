@@ -1,4 +1,5 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { useParams } from 'react-router-dom';
 import { Button } from '@douyinfe/semi-ui';
 import { 
   IconPlay, 
@@ -16,7 +17,6 @@ import { AudioViewerWrapper } from './style';
 import { runtimeLogger } from '@/utils/runtimeLogger';
 import { resolveAudioOwnerKey } from '@/features/file-viewer/utils/audio-owner-key';
 import { deriveAudioTrackName } from '@/features/file-viewer/utils/audio-track-name';
-import { useRegisterMediaEntry } from '@/hooks/useMediaRegistry';
 import { useGlobalAudioPlayback } from '@/features/file-viewer/hooks/useGlobalAudioPlayback';
 import {
   isTextEditingKeyboardTarget,
@@ -63,23 +63,26 @@ const AudioViewer: React.FC<AudioViewerProps> = ({
   coverUrl,
 }) => {
   const { setFileUrl } = useFileViewer();
+  const { id: libraryIdParam } = useParams<{ id: string }>();
+  const libraryId = useMemo(() => {
+    const parsed = Number(libraryIdParam);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }, [libraryIdParam]);
   const viewerRootRef = useRef<HTMLDivElement>(null);
   const progressBarRef = useRef<HTMLDivElement>(null);
   const [dragPreviewTime, setDragPreviewTime] = useState<number | null>(null);
   const ownerKey = React.useMemo(() => resolveAudioOwnerKey(url, nodeId), [nodeId, url]);
   const {
     adjustVolumeBy,
-    clearIfOwned,
     ensureSource,
     isOwnedSource,
-    pause,
     play,
     playerState,
     seekTo,
     setMuted,
     setVolume,
     togglePlay: toggleOwnedPlay,
-  } = useGlobalAudioPlayback({ ownerType: 'default', ownerKey });
+  } = useGlobalAudioPlayback({ ownerType: 'default', ownerKey, tabId, libraryId });
   const effectiveCurrentTime = isOwnedSource ? playerState.currentTime : 0;
   const effectiveDuration = isOwnedSource ? playerState.duration : 0;
 
@@ -110,8 +113,8 @@ const AudioViewer: React.FC<AudioViewerProps> = ({
   };
 
   const ensureOwnedSource = useCallback(() => {
-    ensureSource(url, fileName || null);
-  }, [ensureSource, fileName, url]);
+    ensureSource(url, deriveAudioTrackName(url, fileName), coverUrl ?? null);
+  }, [ensureSource, fileName, url, coverUrl]);
 
   const togglePlay = useCallback(() => {
     if (isOwnedSource) {
@@ -222,36 +225,8 @@ const AudioViewer: React.FC<AudioViewerProps> = ({
     setVolume(vol);
   };
 
-  useRegisterMediaEntry({
-    enabled: isOwnedSource && playerState.hasStarted,
-    entryId: `audio:${tabId}`,
-    kind: 'audio',
-    tabId,
-    title: deriveAudioTrackName(url, fileName),
-    isPlaying: isOwnedSource && playerState.isPlaying,
-    currentTime: effectiveCurrentTime,
-    duration: effectiveDuration,
-    play: () => {
-      void play().catch((error) => {
-        runtimeLogger.error('failed to start audio playback from media hub:', error);
-      });
-    },
-    pause: () => {
-      pause();
-    },
-    seek: (time) => {
-      seekTo(time);
-    },
-    dismiss: () => {
-      clearIfOwned();
-    },
-  });
-
-  useEffect(() => {
-    return () => {
-      clearIfOwned();
-    };
-  }, [clearIfOwned]);
+  // MediaHub 注册由 globalAudioPlayer 服务层完成，组件不再参与；详见 docs/media-hub-contract.md。
+  // viewer 卸载时也不主动 clear——tab 关闭由 FileViewerContext 通过 releaseForTab 释放。
 
   useEffect(() => {
     if (!active) return;
@@ -346,9 +321,21 @@ const AudioViewer: React.FC<AudioViewerProps> = ({
           <div style={{ fontSize: 16, lineHeight: 1.3, fontWeight: 700 }}>{fileName || '正在播放'}</div>
           <div className="audio-lyric-preview">
             {activeSubtitleCue ? (
-              activeSubtitleCue.lines.map((line, index) => (
-                <span key={`${activeSubtitleCue.id}-${index}`}>{line}</span>
-              ))
+              activeSubtitleCue.lines.map((line, index) => {
+                const segments = activeSubtitleCue.segmentLines?.[index];
+                return (
+                  <span key={`${activeSubtitleCue.id}-${index}`}>
+                    {segments?.length ? segments.map((segment, segmentIndex) => (
+                      <span
+                        key={`${activeSubtitleCue.id}-${index}-${segmentIndex}`}
+                        className={`lyric-segment ${effectiveCurrentTime >= segment.end ? 'is-past' : ''} ${effectiveCurrentTime >= segment.start && effectiveCurrentTime < segment.end ? 'is-active' : ''}`}
+                      >
+                        {segment.text}
+                      </span>
+                    )) : line}
+                  </span>
+                );
+              })
             ) : subtitleError ? (
               <span>{subtitleError}</span>
             ) : subtitleCues.length > 0 ? (

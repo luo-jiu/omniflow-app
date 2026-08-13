@@ -1,6 +1,7 @@
 import { API_CONFIG } from '@/config/api';
 import { auth } from '@/utils/auth';
 import { runtimeLogger } from '@/utils/runtimeLogger';
+import { clearAuthSessionAndDisposeWorkspaces } from '@/service/auth-session-release';
 
 /**
  * 渲染进程直接请求封装
@@ -35,9 +36,11 @@ export async function apiRequest(path: string, options?: RequestInit) {
     if (!response.ok) {
       // 处理 401 等错误
       if (response.status === 401) {
-        // 可以触发登出逻辑，或者抛出特定错误
         runtimeLogger.warn('Unauthorized access');
-        auth.removeToken();
+        await clearAuthSessionAndDisposeWorkspaces({
+          reason: `api 401 ${path}`,
+          redirectToLogin: true,
+        });
       }
       throw new Error(`HTTP error! status: ${response.status}`);
     }

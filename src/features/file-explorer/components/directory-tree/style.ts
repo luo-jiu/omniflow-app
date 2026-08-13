@@ -318,7 +318,8 @@ export const DirectorySidebarWrapper = styled.aside<{ $isDragging?: boolean }>`
   .tree-file-type-icon-comic-folder,
   .tree-file-type-icon-asmr-folder,
   .tree-file-type-icon-audio-folder,
-  .tree-file-type-icon-video-folder {
+  .tree-file-type-icon-video-folder,
+  .tree-file-type-icon-gallery-folder {
     width: 15px;
     height: 15px;
     flex-basis: 15px;
@@ -334,14 +335,15 @@ export const DirectorySidebarWrapper = styled.aside<{ $isDragging?: boolean }>`
   }
 
   /* Normalize perceptual size for directory icons (built-in + default).
-     四类内置 SVG 与 folder-base 共享同一 folder body 几何，
+     内置 SVG 与 folder-base 共享同一 folder body 几何，
      视觉差异仅来自装饰图案是否突破 folder body 边界，统一 0.5px 即可。
      超出范围的单类（如 audio 麦克风外延）后续靠单独 class 增加 padding 校准。 */
   .tree-file-type-icon-default-folder,
   .tree-file-type-icon-comic-folder,
   .tree-file-type-icon-asmr-folder,
   .tree-file-type-icon-audio-folder,
-  .tree-file-type-icon-video-folder {
+  .tree-file-type-icon-video-folder,
+  .tree-file-type-icon-gallery-folder {
     padding: 0.5px;
   }
 

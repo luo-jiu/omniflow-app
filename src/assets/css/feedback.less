@@ -1,4 +1,11 @@
 // 顶部滑入反馈按历史舒适尺寸收敛，约为 Semi 默认尺寸的 67%。
+.semi-toast-wrapper,
+.semi-toast-wrapper *,
+.semi-notification-list,
+.semi-notification-list * {
+  -webkit-app-region: no-drag !important;
+}
+
 .semi-toast-wrapper .semi-toast-content {
   max-width: min(348px, calc(100vw - 24px)) !important;
   margin: 8px !important;

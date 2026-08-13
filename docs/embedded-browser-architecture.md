@@ -1,6 +1,6 @@
 # Embedded Browser 架构说明
 
-更新时间：2026-05-06
+更新时间：2026-07-30
 
 适用范围：`omniflow-app` 内置浏览器的 renderer UI、preload bridge、Electron main controller、资源捕捉、下载导入与缓存捕捉工具链。
 
@@ -412,6 +412,21 @@ renderer catch toolkit action
 - 已保存的 domain+username 提交时不再弹出保存提示（`hasEmbeddedBrowserMatchingPassword` 检查）
 - MutationObserver 确保 SPA 动态渲染的登录表单也能触发自动填充
 
+### 5.7 DevTools 与网页缩放
+
+embedded browser 的 DevTools 和页面缩放由真实 `WebContentsView.webContents` 执行，不缩放 OmniFlow renderer 外壳。
+
+快捷键规则：
+
+- macOS：`Cmd+Option+I` 打开 / 关闭活动网页 DevTools，`Cmd++/-/0` 缩放 / 重置网页。
+- Windows / Linux：`F12` 或 `Ctrl+Shift+I` 打开 / 关闭 DevTools，`Ctrl++/-/0` 缩放 / 重置网页。
+- 网页获得焦点时，快捷键由该 view 直接处理；地址栏或工具栏获得焦点且活动 view 仍挂载时，主窗口把同一指令转发给活动 view。
+- 右键菜单保留剪切 / 复制 / 粘贴等可用编辑动作，并提供稳定的“检查”元素入口。
+
+DevTools 使用 Electron 内置 Chromium DevTools frontend，默认停靠在当前网页右侧；用户可继续通过 DevTools 的停靠菜单切换到左侧、底部或独立窗口。焦点位于 DevTools 内时，同一组 DevTools 快捷键仍可关闭面板。受 Electron 的 inspected page 与 DevTools frontend 分属不同 `WebContents` 影响，DevTools 左上角原生元素选择器在当前 docked `WebContentsView` 组合中不能作为可靠能力保证；需要定位页面元素时，以网页右键“检查”为当前受支持入口。若后续需要稳定的跨 view 点选流程，应单独实现 OmniFlow 元素选择器，不向 Chromium DevTools 私有 DOM 注入补丁。
+
+DevTools 会替换 `webContents.debugger` 当前的 CDP 连接；因此 DevTools 打开期间，deep capture 的 document-start probe 和依赖 CDP 的文件输入设置可能暂时不可用。DevTools 关闭后，view lifecycle 会自动恢复已开启的 deep-capture probe；调试期间需要完整 document-start 捕捉时，应先关闭 DevTools 再刷新页面。
+
 ## 6. 生命周期规则
 
 ### 6.1 面板停用规则
@@ -450,6 +465,21 @@ renderer catch toolkit action
 - main 中真实 view 关闭
 
 不要只删 renderer tab，而忘了 main 的 view。
+
+右键释放仓库工作区时，renderer 通过 `workspace-resource-release` 读取目标资料库的 workspace state，并逐个调用 `window.electronEmbeddedBrowser.closeTab(tabId)` 关闭该资料库登记过的真实 view。session release / 后续退出登录路径使用 `window.electronEmbeddedBrowser.closeAll()` 兜底关闭所有 embedded browser view。
+
+### 6.4 工作区释放规则
+
+embedded browser 的真实资源在 Electron main，不能依赖 React 组件卸载自然消失。
+
+当前释放约定：
+
+- 普通切离资料库详情页时，renderer workspace state 继续保存 browser tab 投影，回到资料库后可以恢复现场。
+- 单库释放时，`workspace-resource-release` 从目标资料库的 workspace state 读取 browser tab id，逐个关闭对应 `WebContentsView`，随后清掉该资料库的 workspace state。
+- session 释放时，`workspace-resource-release` 调用 `closeAll()` 全量关闭所有 `WebContentsView`，用于主动退出登录和 401 登录失效。
+- 释放过程中如果关闭某个 view 失败，前端 cache 仍应继续清理，并用 warning 记录未确认关闭的 view；登录或仓库释放流程不能因为单个 view close 失败而卡住。
+
+后续如果出现 browser tab 不在 `library detail` workspace state 中登记的场景，应补一个 renderer 侧 tab ownership registry，而不是让页面、hook 和 release service 各自猜归属。
 
 ## 7. 高风险变更点
 

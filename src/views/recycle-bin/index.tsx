@@ -4,12 +4,16 @@ import { Button, Empty, Modal, Tag, Toast, Typography } from '@douyinfe/semi-ui'
 import { IconChevronLeft, IconDelete, IconRefresh } from '@douyinfe/semi-icons';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
-  clearRecycleBin,
   fetchRecycleBinItems,
-  hardDeleteNodeAndChildren,
   restoreNodeAndChildren,
   type RecycleBinItem,
+  type RecycleStorageLocation,
 } from '@/features/file-explorer/services/file.api';
+import {
+  clearRecycleBinWithViewerCleanup,
+  hardDeleteNodeSubtree,
+} from '@/features/file-explorer/services/node-deletion';
+import { useViewerAccountScope } from '@/features/file-viewer/session';
 import { markRepositoryTreeSnapshotDirty } from '@/features/file-explorer/hooks/useRepositoryTree';
 import { requestDesktopWindowActivation } from '@/utils/windowActivation';
 import OpaquePageContainer from '@/components/OpaquePageContainer';
@@ -129,9 +133,32 @@ const Page = styled.div`
   }
 
   .name-meta {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     margin-top: 4px;
     font-size: 10px;
     color: var(--semi-color-text-2);
+  }
+
+  .storage-location-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .storage-more {
+    flex-shrink: 0;
+    border: 0;
+    padding: 0;
+    background: transparent;
+    color: var(--semi-color-primary);
+    cursor: pointer;
+    font-size: 10px;
+    line-height: 1.3;
   }
 
   .size,
@@ -245,6 +272,50 @@ function formatBytes(size?: number): string {
   return `${value.toFixed(value >= 10 || idx === 0 ? 0 : 1)} ${units[idx]}`;
 }
 
+function getRecycleStorageLocations(item: RecycleBinItem): RecycleStorageLocation[] {
+  if (item.storageLocations && item.storageLocations.length > 0) {
+    return item.storageLocations;
+  }
+  if (!item.storageProvider && !item.storageBucket) {
+    return [];
+  }
+  return [{
+    storageProvider: item.storageProvider,
+    storageProviderType: item.storageProviderType,
+    storageProviderLabel: item.storageProviderLabel,
+    storageEndpoint: item.storageEndpoint,
+    storageBucket: item.storageBucket,
+    fileCount: item.type === 'file' ? 1 : undefined,
+  }];
+}
+
+function formatStorageLocation(location: RecycleStorageLocation): string {
+  const provider = location.storageProviderLabel && location.storageProvider
+    ? `${location.storageProviderLabel}（${location.storageProvider}）`
+    : location.storageProviderLabel || location.storageProvider || '';
+  const parts = [
+    provider,
+    location.storageBucket ? `桶 ${location.storageBucket}` : '',
+  ].filter(Boolean);
+  const text = parts.length > 0 ? parts.join(' · ') : '物理存储未知';
+  return location.fileCount && location.fileCount > 1 ? `${text} · ${location.fileCount} 个文件` : text;
+}
+
+function formatStorageLocationTitle(item: RecycleBinItem): string {
+  const locations = getRecycleStorageLocations(item);
+  if (locations.length === 0) {
+    return '物理存储未知';
+  }
+  const lines = locations.map((location) => [
+    formatStorageLocation(location),
+    location.storageEndpoint ? `Endpoint: ${location.storageEndpoint}` : '',
+  ].filter(Boolean).join(' · '));
+  if (item.storageKey) {
+    lines.push(`Key: ${item.storageKey}`);
+  }
+  return lines.join('\n');
+}
+
 function formatDeletedAt(value: string): string {
   if (!value) return '--';
   const date = new Date(value);
@@ -262,8 +333,10 @@ const RecycleBin: React.FC = () => {
   const { id = '' } = useParams<{ id: string }>();
   const libraryId = Number(id);
   const { Title } = Typography;
+  const viewerAccountScope = useViewerAccountScope();
   const [items, setItems] = useState<RecycleBinItem[]>([]);
   const [loading, setLoading] = useState(false);
+  const [expandedStorageIds, setExpandedStorageIds] = useState<Set<number>>(() => new Set());
 
   const validLibraryId = Number.isFinite(libraryId) && libraryId > 0;
 
@@ -294,6 +367,18 @@ const RecycleBin: React.FC = () => {
     return `共 ${items.length} 条记录。默认删除会进入回收站，可恢复或彻底删除。`;
   }, [items.length, validLibraryId]);
 
+  const toggleStorageExpanded = useCallback((itemId: number) => {
+    setExpandedStorageIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(itemId)) {
+        next.delete(itemId);
+      } else {
+        next.add(itemId);
+      }
+      return next;
+    });
+  }, []);
+
   const handleRestore = async (item: RecycleBinItem) => {
     try {
       await restoreNodeAndChildren(item.id, libraryId);
@@ -307,10 +392,23 @@ const RecycleBin: React.FC = () => {
 
   const handleHardDelete = async (item: RecycleBinItem) => {
     try {
-      await hardDeleteNodeAndChildren(item.id, libraryId);
+      const result = await hardDeleteNodeSubtree({
+        accountScope: viewerAccountScope,
+        ancestorId: item.id,
+        expectedDescendantCount: item.deletedDescendantCount,
+        libraryId,
+      });
       setItems(prev => prev.filter(x => x.id !== item.id));
       markRepositoryTreeSnapshotDirty(libraryId);
-      Toast.success('已彻底删除');
+      if (
+        result.draftCleanupFailed
+        || result.viewerSessionCleanupFailed
+        || result.subtreeCollectionFailed
+      ) {
+        Toast.warning('已彻底删除，但本地恢复数据可能未完整清理');
+      } else {
+        Toast.success('已彻底删除');
+      }
     } catch (error: any) {
       Toast.error(error?.message || '彻底删除失败');
     }
@@ -345,10 +443,24 @@ const RecycleBin: React.FC = () => {
       okType: 'danger',
       async onOk() {
         try {
-          const clearedCount = await clearRecycleBin(libraryId);
+          const result = await clearRecycleBinWithViewerCleanup({
+            accountScope: viewerAccountScope,
+            items,
+            libraryId,
+          });
           setItems([]);
           markRepositoryTreeSnapshotDirty(libraryId);
-          Toast.success(clearedCount > 0 ? `已清空回收站（${clearedCount} 项）` : '回收站已清空');
+          if (
+            result.draftCleanupFailed
+            || result.viewerSessionCleanupFailed
+            || result.subtreeCollectionFailed
+          ) {
+            Toast.warning('回收站已清空，但本地恢复数据可能未完整清理');
+          } else {
+            Toast.success(result.clearedCount > 0
+              ? `已清空回收站（${result.clearedCount} 项）`
+              : '回收站已清空');
+          }
         } catch (error: any) {
           Toast.error(error?.message || '清空回收站失败');
         }
@@ -418,9 +530,35 @@ const RecycleBin: React.FC = () => {
                     {item.name}
                     {item.type === 'file' && item.ext ? `.${item.ext}` : ''}
                   </div>
-                  {item.type === 'dir' && (
+                  {item.type === 'dir' && getRecycleStorageLocations(item).length === 0 && (
                     <div className="name-meta">
                       包含 {item.deletedDescendantCount ?? 0} 项
+                    </div>
+                  )}
+                  {getRecycleStorageLocations(item).length > 0 && (
+                    <div className="name-meta" title={formatStorageLocationTitle(item)}>
+                      {(expandedStorageIds.has(item.id)
+                        ? getRecycleStorageLocations(item)
+                        : getRecycleStorageLocations(item).slice(0, 2)
+                      ).map((location) => (
+                        <span
+                          className="storage-location-text"
+                          key={`${location.storageProvider || 'unknown'}:${location.storageBucket || ''}`}
+                        >
+                          {formatStorageLocation(location)}
+                        </span>
+                      ))}
+                      {getRecycleStorageLocations(item).length > 2 && (
+                        <button
+                          className="storage-more"
+                          type="button"
+                          onClick={() => toggleStorageExpanded(item.id)}
+                        >
+                          {expandedStorageIds.has(item.id)
+                            ? '收起'
+                            : `更多 ${getRecycleStorageLocations(item).length - 2}`}
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>

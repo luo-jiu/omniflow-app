@@ -6,7 +6,9 @@ import routes from "@/router";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import UserPreferencesBootstrap from '@/features/user/preferences/UserPreferencesBootstrap';
+import FloatingMiniVideoPlayer from '@/features/file-viewer/components/floating-mini-video-player';
 import { runtimeLogger } from '@/utils/runtimeLogger';
+import '@/features/resource-monitor/services/resource-monitor-runtime';
 import './App.css'
 
 function isBrowserHistoryMouseEvent(event: MouseEvent) {
@@ -67,6 +69,7 @@ function App() {
           <Suspense fallback={'loading...'}>
             {useRoutes(routes)}
           </Suspense>
+          <FloatingMiniVideoPlayer />
         </MainLayout>
       </AuthProvider>
     </ThemeProvider>

@@ -1,6 +1,6 @@
 export type PreviewFileType = 'image' | 'video' | 'audio' | 'pdf' | 'text' | 'other';
 
-const IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg', 'avif']);
+const IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg', 'avif', 'heic', 'heif', 'heics', 'heifs']);
 const VIDEO_EXTENSIONS = new Set([
   'mp4',
   'm4v',

@@ -1,5 +1,6 @@
 import { buildTreeNodeLabel } from '@/utils/fileTreeSettings';
-import { resolvePreviewFileType, type PreviewFileType } from '@/utils/preview-file-type';
+import { resolveNodeFileIdentity } from '@/features/file-identity';
+import type { PreviewFileType } from '@/utils/preview-file-type';
 import {
   getDirectoryBuiltInIcon,
   getFileNodeIconByParentBuiltInType,
@@ -16,20 +17,36 @@ export function resolveFileType(
   mimeType?: string,
   ext?: string,
   fileName?: string,
+  context?: {
+    parentBuiltInType?: string | null;
+    parentArchiveMode?: number | null;
+  },
 ): PreviewFileType {
-  return resolvePreviewFileType(mimeType, ext, fileName);
+  return resolveNodeFileIdentity({
+    mimeType,
+    ext,
+    name: fileName,
+    parentBuiltInType: context?.parentBuiltInType,
+    parentArchiveMode: context?.parentArchiveMode,
+  }).previewKind;
 }
 
-export function isImageFileNode(item: Pick<NodeRespDTO, 'mimeType' | 'ext'>): boolean {
-  return resolveFileType(item.mimeType, item.ext) === 'image';
+export function isImageFileNode(item: Pick<NodeRespDTO, 'mimeType' | 'ext' | 'name'>): boolean {
+  return resolveFileType(item.mimeType, item.ext, item.name) === 'image';
 }
 
-export function isVideoFileNode(item: Pick<NodeRespDTO, 'mimeType' | 'ext'>): boolean {
-  return resolveFileType(item.mimeType, item.ext) === 'video';
+export function isVideoFileNode(
+  item: Pick<NodeRespDTO, 'mimeType' | 'ext' | 'name'>,
+  context?: {
+    parentBuiltInType?: string | null;
+    parentArchiveMode?: number | null;
+  },
+): boolean {
+  return resolveFileType(item.mimeType, item.ext, item.name, context) === 'video';
 }
 
-export function isAudioFileNode(item: Pick<NodeRespDTO, 'mimeType' | 'ext'>): boolean {
-  return resolveFileType(item.mimeType, item.ext) === 'audio' || isAudioExtension(item.ext);
+export function isAudioFileNode(item: Pick<NodeRespDTO, 'mimeType' | 'ext' | 'name'>): boolean {
+  return resolveFileType(item.mimeType, item.ext, item.name) === 'audio' || isAudioExtension(item.ext);
 }
 
 export function isSubtitleFileNode(item: Pick<NodeRespDTO, 'type' | 'ext'>): boolean {
@@ -298,6 +315,7 @@ export function mapToTreeNode(
       ? getFileNodeIconByParentBuiltInType(item.ext, parentBuiltInType, parentArchiveMode, item.name, {
         hasAudioSubtitle: options?.audioArchiveHasSubtitle,
         audioArchiveSubtitle: options?.audioArchiveSubtitle,
+        mimeType: item.mimeType,
       })
       : getDirectoryBuiltInIcon(nodeBuiltInType, nodeArchiveMode),
     children: item.type === 'dir' ? [] : undefined,
