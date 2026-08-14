@@ -11,17 +11,13 @@ import type { BarSeriesOption } from 'echarts/charts';
 import type { ComposeOption, ECharts } from 'echarts/core';
 import { CanvasRenderer } from 'echarts/renderers';
 import styled from 'styled-components';
+import {
+  formatPercentLabel,
+  type ResourceMonitorChartItem,
+  splitChampionItem,
+} from './resource-monitor-chart-utils';
 
 echarts.use([BarChart, GridComponent, TooltipComponent, CanvasRenderer]);
-
-export interface ResourceMonitorChartItem {
-  accent: string;
-  key: string;
-  label: string;
-  meta?: string;
-  percent: number;
-  value: number;
-}
 
 interface ResourceCompositionChartProps {
   items: ResourceMonitorChartItem[];
@@ -148,7 +144,18 @@ function tooltipFormatter(rows: unknown): string {
   ].join('');
 }
 
-function buildCompositionOption(items: ResourceMonitorChartItem[], theme: ChartThemeColors): ResourceChartOption {
+interface CompositionChartOptions {
+  // 长尾放大模式下的坐标上限（通常取剩余项最大值），不传则按 ECharts 默认自适应。
+  maxValue?: number;
+  // 长尾放大模式下所有条都展示占比标签；默认模式下小于 2% 的标签省略。
+  showAllLabels?: boolean;
+}
+
+function buildCompositionOption(
+  items: ResourceMonitorChartItem[],
+  theme: ChartThemeColors,
+  options: CompositionChartOptions = {},
+): ResourceChartOption {
   const values = toChartRows(items);
   return {
     animationDuration: 280,
@@ -183,6 +190,7 @@ function buildCompositionOption(items: ResourceMonitorChartItem[], theme: ChartT
         show: true,
       },
       type: 'value',
+      ...(options.maxValue && options.maxValue > 0 ? { max: options.maxValue } : {}),
     },
     yAxis: {
       axisLabel: {
@@ -208,7 +216,9 @@ function buildCompositionOption(items: ResourceMonitorChartItem[], theme: ChartT
           },
           label: {
             color: theme.text,
-            formatter: () => (item.percent >= 2 ? `${item.percent.toFixed(1)}%` : ''),
+            formatter: () => (
+              options.showAllLabels || item.percent >= 2 ? formatPercentLabel(item.percent) : ''
+            ),
             fontSize: 10,
             position: 'right',
             show: true,
@@ -256,10 +266,51 @@ const EChartSurface: React.FC<{
 export const ResourceCompositionChart: React.FC<ResourceCompositionChartProps> = ({ items }) => {
   const rootRef = React.useRef<HTMLDivElement | null>(null);
   const theme = useChartThemeColors(rootRef);
-  const option = React.useMemo(() => buildCompositionOption(items, theme), [items, theme]);
+  const split = React.useMemo(() => splitChampionItem(items), [items]);
+  const tailMax = React.useMemo(() => {
+    if (!split) return undefined;
+    const max = Math.max(...split.rest.map((item) => item.value));
+    return Number.isFinite(max) && max > 0 ? max * 1.12 : undefined;
+  }, [split]);
+  const option = React.useMemo(
+    () => buildCompositionOption(split ? split.rest : items, theme, {
+      maxValue: tailMax,
+      showAllLabels: Boolean(split),
+    }),
+    [items, split, tailMax, theme],
+  );
+  const tailCount = split ? split.rest.filter((item) => item.value > 0).length : 0;
+  const championDescription = split
+    ? [
+      `${split.champion.label}：${formatBytes(split.champion.value)}，占 ${formatPercentLabel(split.champion.percent)}。`,
+      split.champion.meta,
+    ].filter(Boolean).join(' ')
+    : '';
   return (
     <ChartRoot ref={rootRef}>
-      <EChartSurface ariaLabel="资源组成图表" className="echart-surface" option={option} />
+      {split ? (
+        <div
+          aria-label={championDescription}
+          className="champion-strip"
+          role="img"
+          style={{ '--accent': split.champion.accent } as React.CSSProperties}
+          title={championDescription}
+        >
+          <div className="champion-head">
+            <span className="champion-name">{split.champion.label}</span>
+            <strong>{formatBytes(split.champion.value)} · {formatPercentLabel(split.champion.percent)}</strong>
+          </div>
+          <div className="champion-track">
+            <div className="champion-fill" />
+          </div>
+          <div className="champion-tail-note">其余 {tailCount} 项已放大显示，标签仍为真实占比</div>
+        </div>
+      ) : null}
+      <EChartSurface
+        ariaLabel="资源组成图表"
+        className={split ? 'echart-surface echart-surface-tail' : 'echart-surface'}
+        option={option}
+      />
     </ChartRoot>
   );
 };
@@ -272,5 +323,61 @@ const ChartRoot = styled.div`
   .echart-surface {
     width: 100%;
     height: 212px;
+  }
+
+  .echart-surface-tail {
+    height: 172px;
+  }
+
+  .champion-strip {
+    margin-bottom: 8px;
+    padding-bottom: 9px;
+    border-bottom: 1px dashed color-mix(in srgb, var(--app-border) 85%, transparent);
+  }
+
+  .champion-head {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    color: var(--app-text, currentColor);
+    font-size: 11px;
+    line-height: 1.35;
+  }
+
+  .champion-head .champion-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 600;
+  }
+
+  .champion-head strong {
+    flex: 0 0 auto;
+    font-weight: 600;
+  }
+
+  .champion-track {
+    margin-top: 5px;
+    height: 8px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--app-text-muted, currentColor) 16%, transparent);
+    overflow: hidden;
+  }
+
+  .champion-fill {
+    width: 100%;
+    height: 100%;
+    border-radius: inherit;
+    background: var(--accent);
+  }
+
+  .champion-tail-note {
+    margin-top: 5px;
+    color: var(--app-text-muted, currentColor);
+    font-size: 10px;
+    line-height: 1.35;
   }
 `;
