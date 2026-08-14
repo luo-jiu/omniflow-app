@@ -35,22 +35,24 @@ textarea, select, input, button {
   font-weight: 700;
 }
 
-.app-compact-confirm .semi-modal-confirm-icon-wrapper {
+.app-compact-confirm .semi-modal-icon-wrapper {
+  flex: 0 0 18px;
   width: 18px;
   margin-right: 8px;
 }
 
-.app-compact-confirm .semi-modal-confirm-icon .semi-icon {
+.app-compact-confirm .semi-modal-confirm-icon {
   font-size: 16px;
 }
 
 .app-compact-confirm .semi-modal-body-wrapper {
   margin: 0;
-  padding: 0 16px 13px;
+  padding: 13px 16px;
 }
 
 .app-compact-confirm .semi-modal-body {
-  padding: 0 !important;
+  box-sizing: border-box;
+  padding: 0 16px 13px !important;
   color: var(--semi-color-text-1);
   font-size: 12px;
   line-height: 1.55;
@@ -60,10 +62,18 @@ textarea, select, input, button {
   margin-left: 26px;
 }
 
+.app-compact-confirm .semi-modal-body-wrapper .semi-modal-body {
+  padding: 0 !important;
+}
+
+.app-compact-confirm .semi-modal-body-wrapper .semi-modal-withIcon {
+  margin-left: 0;
+}
+
 .app-compact-confirm .semi-modal-footer {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
+  gap: 12px;
   margin: 0;
   padding: 0 16px 16px !important;
 }
