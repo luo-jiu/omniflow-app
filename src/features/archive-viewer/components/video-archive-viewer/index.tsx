@@ -16,6 +16,7 @@ import { VideoArchiveViewerWrapper } from './style';
 import { useFileViewer } from '@/hooks/useFileViewer';
 import { useArchiveCardGrid } from '@/features/archive-viewer/hooks/useArchiveCardGrid';
 import ContextMenu, { type ContextMenuItem } from '@/components/ui/context-menu';
+import { openCompactConfirm } from '@/components/ui/compact-confirm';
 import { locateNodeInDirectoryTree } from '@/features/file-explorer/services/tree-locate';
 import { useNodePropertiesOverlay } from '@/features/file-explorer/hooks/useNodePropertiesOverlay';
 import type {
@@ -387,7 +388,7 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
       Toast.error('当前库参数异常');
       return;
     }
-    Modal.confirm({
+    openCompactConfirm({
       title: '确认删除',
       content: `确认将「${card.title || '未命名视频'}」移入回收站吗？`,
       okButtonProps: { theme: 'solid', type: 'danger' },

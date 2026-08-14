@@ -19,6 +19,7 @@ import {
 import { fetchTags, type TagItem } from '@/features/tag-management/services/tag.api';
 import { useArchiveCardGrid } from '@/features/archive-viewer/hooks/useArchiveCardGrid';
 import ContextMenu, { ContextMenuItem } from '@/components/ui/context-menu';
+import { openCompactConfirm } from '@/components/ui/compact-confirm';
 import { locateNodeInDirectoryTree } from '@/features/file-explorer/services/tree-locate';
 import { useNodePropertiesOverlay } from '@/features/file-explorer/hooks/useNodePropertiesOverlay';
 import {
@@ -415,7 +416,7 @@ const AsmrArchiveViewer: React.FC<AsmrArchiveViewerProps> = ({
       Toast.error('当前库参数异常');
       return;
     }
-    Modal.confirm({
+    openCompactConfirm({
       title: '确认删除',
       content: `确认将「${card.title || '未命名目录'}」移入回收站吗？`,
       okButtonProps: { theme: 'solid', type: 'danger' },

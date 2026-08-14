@@ -9,3 +9,71 @@ textarea, select, input, button {
   width: 1100px;
   margin: 0 auto;
 }
+
+// 业务二次确认统一使用该 opt-in class；复杂表单 Modal 继续由页面定义尺寸。
+.app-compact-confirm {
+  width: min(360px, calc(100vw - 32px)) !important;
+}
+
+.app-compact-confirm .semi-modal-content {
+  overflow: hidden;
+  padding: 0 !important;
+  border: 1px solid var(--app-border-strong);
+  border-radius: 8px;
+  background: var(--app-bg-elevated);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28), var(--app-shadow);
+}
+
+.app-compact-confirm .semi-modal-header {
+  margin: 0;
+  padding: 13px 16px 8px !important;
+}
+
+.app-compact-confirm .semi-modal-title {
+  font-size: 14px;
+  line-height: 1.35;
+  font-weight: 700;
+}
+
+.app-compact-confirm .semi-modal-confirm-icon-wrapper {
+  width: 18px;
+  margin-right: 8px;
+}
+
+.app-compact-confirm .semi-modal-confirm-icon .semi-icon {
+  font-size: 16px;
+}
+
+.app-compact-confirm .semi-modal-body-wrapper {
+  margin: 0;
+  padding: 0 16px 13px;
+}
+
+.app-compact-confirm .semi-modal-body {
+  padding: 0 !important;
+  color: var(--semi-color-text-1);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.app-compact-confirm .semi-modal-withIcon {
+  margin-left: 26px;
+}
+
+.app-compact-confirm .semi-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin: 0;
+  padding: 0 16px 16px !important;
+}
+
+.app-compact-confirm .semi-modal-footer .semi-button {
+  height: 28px;
+  min-width: 56px;
+  margin: 0;
+  padding: 0 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+}

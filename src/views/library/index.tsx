@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Modal, Avatar, Popover, Toast } from '@douyinfe/semi-ui'
+import { Avatar, Popover, Toast } from '@douyinfe/semi-ui'
 import { IconMusic, IconRefresh } from '@douyinfe/semi-icons'
 
 import LibraryWrapper, {
@@ -38,6 +38,7 @@ import type {
 } from '@/features/system-workspace'
 import { disposeLibraryWorkspace } from '@/features/workspace-resource-release'
 import { useViewerAccountScope } from '@/features/file-viewer/session'
+import { openCompactConfirm } from '@/components/ui/compact-confirm'
 
 type MenuState = {
   visible: boolean
@@ -231,7 +232,7 @@ const LibraryPage: React.FC = () => {
   const doDelete = () => {
     const library = menu.library;
     if (!library) return;
-    Modal.confirm({
+    openCompactConfirm({
       title: '确认删除？',
       content: `确定要删除库「${library.name}」吗？`,
       okText: '删除',
@@ -274,7 +275,7 @@ const LibraryPage: React.FC = () => {
     const library = menu.library
     if (!library) return
     setMenu(m => ({ ...m, visible: false, mode: 'blank', library: null }))
-    Modal.confirm({
+    openCompactConfirm({
       title: '释放仓库工作区？',
       content: `会清空「${library.name}」的文件页签、浏览器页签和搜索工作区状态，下次进入将从默认状态开始。`,
       okText: '释放',

@@ -29,6 +29,7 @@ import {
   type ProviderItem,
   type RoutingRule,
 } from '@/features/storage-config/services/storage-config.api';
+import { openCompactConfirm } from '@/components/ui/compact-confirm';
 
 const PROVIDER_TYPE_OPTIONS = [
   { value: 'minio', label: 'MinIO' },
@@ -255,13 +256,11 @@ const Wrapper = styled.div<{ $embedded?: boolean }>`
 `;
 
 const StorageSettingsCompactModalStyle = createGlobalStyle`
-  .storage-settings-compact-modal,
-  .storage-settings-compact-confirm {
+  .storage-settings-compact-modal {
     width: 420px !important;
   }
 
-  .storage-settings-compact-modal .semi-modal-content,
-  .storage-settings-compact-confirm .semi-modal-content {
+  .storage-settings-compact-modal .semi-modal-content {
     overflow: hidden;
     border: 1px solid var(--app-border-strong);
     border-radius: 8px;
@@ -269,29 +268,25 @@ const StorageSettingsCompactModalStyle = createGlobalStyle`
     box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28), var(--app-shadow);
   }
 
-  .storage-settings-compact-modal .semi-modal-header,
-  .storage-settings-compact-confirm .semi-modal-header {
+  .storage-settings-compact-modal .semi-modal-header {
     margin: 0;
     padding: 13px 16px 8px !important;
   }
 
-  .storage-settings-compact-modal .semi-modal-title,
-  .storage-settings-compact-confirm .semi-modal-title {
+  .storage-settings-compact-modal .semi-modal-title {
     font-size: 14px;
     line-height: 1.35;
     font-weight: 700;
   }
 
-  .storage-settings-compact-modal .semi-modal-body,
-  .storage-settings-compact-confirm .semi-modal-body {
+  .storage-settings-compact-modal .semi-modal-body {
     padding: 0 16px 13px !important;
     font-size: 12px;
     line-height: 1.55;
     color: var(--semi-color-text-1);
   }
 
-  .storage-settings-compact-modal .semi-modal-footer,
-  .storage-settings-compact-confirm .semi-modal-footer {
+  .storage-settings-compact-modal .semi-modal-footer {
     display: flex;
     justify-content: flex-end;
     gap: 8px;
@@ -299,8 +294,7 @@ const StorageSettingsCompactModalStyle = createGlobalStyle`
     padding: 0 16px 16px !important;
   }
 
-  .storage-settings-compact-modal .semi-button,
-  .storage-settings-compact-confirm .semi-button {
+  .storage-settings-compact-modal .semi-button {
     height: 28px;
     min-width: 56px;
     padding: 0 10px;
@@ -522,11 +516,10 @@ const StorageSettings: React.FC<StorageSettingsProps> = ({
       Toast.warning('不能删除默认 Provider');
       return;
     }
-    Modal.confirm({
+    openCompactConfirm({
       title: '确认删除此 Provider？',
       content: `删除后引用「${item.alias}」的文件将无法访问`,
       okType: 'danger',
-      className: 'storage-settings-compact-confirm',
       onOk: async () => {
         try {
           await deleteProvider(item.alias);

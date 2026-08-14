@@ -1,6 +1,6 @@
 # OmniFlow App 显示与可读性基线
 
-更新时间：2026-07-31
+更新时间：2026-08-14
 适用范围：`omniflow-app` 前端页面、工作区、内置浏览器、目录树、弹框、工具页和后续新页面的显示尺寸、字号、密度与可读性校准。
 
 ## 1. 概述
@@ -49,6 +49,7 @@
 - 旧的“新页面文本不得低于 `16px`”不再作为迁移期硬约束；工作区高频控件可使用 `10px ~ 13px` 文案，但必须保证行高、截断、点击热区和主题对比度可用
 - 目录树右键菜单可在通用 `directory-context-menu` 基础上叠加更紧凑样式，但必须沿用同一套颜色、圆角、hover 和图标槽语义，只压缩宽度、行高、padding 与图标尺寸
 - 目录树右键触发的弹框 / overlay（新建文件、上传确认、删除确认、属性、重命名输入）必须使用紧凑工作区基线：标题约 `14px`、正文约 `12px`、按钮高约 `28px`、输入框高约 `24px ~ 28px`，不能回到旧缩放时代的 `16px ~ 18px` 正文和 `40px` 按钮
+- 业务二次确认统一通过 `src/components/ui/compact-confirm.ts` 的 `openCompactConfirm` 打开，由 `src/assets/css/common.less` 的 `.app-compact-confirm` 提供 `360px` 最大宽度、`14px` 标题、`12px` 正文和 `28px` 按钮基线；除明确需要更宽内容并同步记录原因外，不得直接调用 Semi 默认 `Modal.confirm`
 - 顶部滑入反馈（Semi Toast / Notification）按历史舒适尺寸收敛到约 `67%`：Toast 约 `10px / 14px`、`8px` 上下 padding、最大宽度约 `348px`；Notification 标题约 `11px`、正文约 `10px`。这类全局反馈只在 `src/assets/css/feedback.less` 统一调整，业务调用点不单独写尺寸
 
 说明：

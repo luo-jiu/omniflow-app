@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import styled, { createGlobalStyle } from 'styled-components';
-import { Button, Empty, Modal, Tag, Toast } from '@douyinfe/semi-ui';
+import styled from 'styled-components';
+import { Button, Empty, Tag, Toast } from '@douyinfe/semi-ui';
 import { IconDelete, IconRefresh } from '@douyinfe/semi-icons';
 import {
   fetchRecycleBinItems,
@@ -15,6 +15,7 @@ import {
 import { useViewerAccountScope } from '@/features/file-viewer/session';
 import { markRepositoryTreeSnapshotDirty } from '@/features/file-explorer/hooks/useRepositoryTree';
 import { requestDesktopWindowActivation } from '@/utils/windowActivation';
+import { openCompactConfirm } from '@/components/ui/compact-confirm';
 import type { SystemWorkspaceViewProps } from '../../types';
 
 const RecycleBinWorkspaceWrapper = styled.div`
@@ -173,60 +174,6 @@ const RecycleBinWorkspaceWrapper = styled.div`
   }
 `;
 
-const RecycleBinConfirmModalStyle = createGlobalStyle`
-  .recycle-bin-compact-confirm {
-    width: 320px !important;
-  }
-
-  .recycle-bin-compact-confirm .semi-modal-content {
-    overflow: hidden;
-    border: 1px solid var(--app-border-strong);
-    border-radius: 8px;
-    background: var(--app-bg-elevated);
-    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28), var(--app-shadow);
-  }
-
-  .recycle-bin-compact-confirm .semi-modal-header {
-    margin: 0;
-    padding: 13px 16px 8px !important;
-  }
-
-  .recycle-bin-compact-confirm .semi-modal-title {
-    font-size: 14px;
-    line-height: 1.35;
-    font-weight: 700;
-  }
-
-  .recycle-bin-compact-confirm .semi-modal-body {
-    padding: 0 16px 13px !important;
-    font-size: 12px;
-    line-height: 1.55;
-    color: var(--semi-color-text-1);
-  }
-
-  .recycle-bin-compact-confirm .semi-modal-confirm-content {
-    font-size: 12px;
-    line-height: 1.55;
-  }
-
-  .recycle-bin-compact-confirm .semi-modal-footer {
-    display: flex;
-    justify-content: flex-end;
-    gap: 8px;
-    margin: 0;
-    padding: 0 16px 16px !important;
-  }
-
-  .recycle-bin-compact-confirm .semi-button {
-    height: 28px;
-    min-width: 56px;
-    padding: 0 10px;
-    border-radius: 6px;
-    font-size: 12px;
-    font-weight: 600;
-  }
-`;
-
 function formatBytes(size?: number): string {
   if (!size || size <= 0) return '--';
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];
@@ -379,8 +326,7 @@ const RecycleBinWorkspace: React.FC<SystemWorkspaceViewProps> = ({ libraryId }) 
 
   const openHardDeleteConfirm = (item: RecycleBinItem) => {
     requestDesktopWindowActivation(true);
-    Modal.confirm({
-      className: 'recycle-bin-compact-confirm',
+    openCompactConfirm({
       title: '确认彻底删除？',
       content: '彻底删除后无法恢复，并会清理对象存储文件。',
       okText: '彻底删除',
@@ -397,8 +343,7 @@ const RecycleBinWorkspace: React.FC<SystemWorkspaceViewProps> = ({ libraryId }) 
       return;
     }
     requestDesktopWindowActivation(true);
-    Modal.confirm({
-      className: 'recycle-bin-compact-confirm',
+    openCompactConfirm({
       title: '确认清空回收站？',
       content: `将彻底删除当前库回收站中的 ${items.length} 项内容，删除后无法恢复。`,
       okText: '清空回收站',
@@ -433,7 +378,6 @@ const RecycleBinWorkspace: React.FC<SystemWorkspaceViewProps> = ({ libraryId }) 
 
   return (
     <RecycleBinWorkspaceWrapper>
-      <RecycleBinConfirmModalStyle />
       <div className="recycle-toolbar">
         <div className="recycle-summary">{summaryText}</div>
         <div className="recycle-actions">

@@ -12,6 +12,7 @@ import { runtimeLogger } from '@/utils/runtimeLogger';
 import { ComicArchiveViewerWrapper } from './style';
 import { useArchiveCardGrid } from '@/features/archive-viewer/hooks/useArchiveCardGrid';
 import ContextMenu, { ContextMenuItem } from '@/components/ui/context-menu';
+import { openCompactConfirm } from '@/components/ui/compact-confirm';
 import { locateNodeInDirectoryTree } from '@/features/file-explorer/services/tree-locate';
 import { useNodePropertiesOverlay } from '@/features/file-explorer/hooks/useNodePropertiesOverlay';
 import type { FileViewerReturnTarget } from '@/contexts/file-viewer.context';
@@ -235,7 +236,7 @@ const ComicArchiveViewer: React.FC<ComicArchiveViewerProps> = ({
       Toast.error('当前库参数异常');
       return;
     }
-    Modal.confirm({
+    openCompactConfirm({
       title: '确认删除',
       content: `确认将「${card.title || '未命名目录'}」移入回收站吗？`,
       okButtonProps: { theme: 'solid', type: 'danger' },

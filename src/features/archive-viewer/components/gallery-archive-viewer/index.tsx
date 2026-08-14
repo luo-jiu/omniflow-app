@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Modal, Popover, Spin, Toast } from '@douyinfe/semi-ui';
+import { Popover, Spin, Toast } from '@douyinfe/semi-ui';
 import { GalleryArchiveViewerWrapper } from './style';
 import { useArchiveCardGrid } from '@/features/archive-viewer/hooks/useArchiveCardGrid';
 import {
@@ -10,6 +10,7 @@ import { softDeleteNodeSubtree } from '@/features/file-explorer/services/node-de
 import { locateNodeInDirectoryTree } from '@/features/file-explorer/services/tree-locate';
 import { useNodePropertiesOverlay } from '@/features/file-explorer/hooks/useNodePropertiesOverlay';
 import ContextMenu, { ContextMenuItem } from '@/components/ui/context-menu';
+import { openCompactConfirm } from '@/components/ui/compact-confirm';
 import type { FileViewerReturnTarget } from '@/contexts/file-viewer.context';
 import { buildFileViewerReturnTarget } from '@/contexts/file-viewer-return-target';
 import { useFileViewer } from '@/hooks/useFileViewer';
@@ -311,7 +312,7 @@ const GalleryArchiveViewer: React.FC<GalleryArchiveViewerProps> = ({
         danger: true,
         onClick: () => {
           closeContextMenu();
-          Modal.confirm({
+          openCompactConfirm({
             title: '确认删除',
             content: `确认将「${card.title || '未命名图集'}」移入回收站吗？`,
             okButtonProps: { theme: 'solid', type: 'danger' },

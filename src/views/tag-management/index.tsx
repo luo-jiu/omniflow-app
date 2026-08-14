@@ -36,6 +36,7 @@ import {
   type TagScope,
   type TagType,
 } from '@/features/tag-management/services/tag.api';
+import { openCompactConfirm } from '@/components/ui/compact-confirm';
 import {
   FILE_TAB_TARGETS,
   normalizeFileTabTargetKey,
@@ -687,13 +688,11 @@ const Wrapper = styled.div<{ $embedded?: boolean }>`
 `;
 
 const TagManagementCompactModalStyle = createGlobalStyle`
-  .tag-management-compact-modal,
-  .tag-management-compact-confirm {
+  .tag-management-compact-modal {
     width: 620px !important;
   }
 
-  .tag-management-compact-modal .semi-modal-content,
-  .tag-management-compact-confirm .semi-modal-content {
+  .tag-management-compact-modal .semi-modal-content {
     overflow: hidden;
     padding: 0 !important;
     border: 1px solid var(--app-border-strong);
@@ -702,21 +701,18 @@ const TagManagementCompactModalStyle = createGlobalStyle`
     box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28), var(--app-shadow);
   }
 
-  .tag-management-compact-modal .semi-modal-header,
-  .tag-management-compact-confirm .semi-modal-header {
+  .tag-management-compact-modal .semi-modal-header {
     margin: 0;
     padding: 18px 22px 8px !important;
   }
 
-  .tag-management-compact-modal .semi-modal-title,
-  .tag-management-compact-confirm .semi-modal-title {
+  .tag-management-compact-modal .semi-modal-title {
     font-size: 18px;
     line-height: 1.25;
     font-weight: 700;
   }
 
-  .tag-management-compact-modal .semi-modal-close,
-  .tag-management-compact-confirm .semi-modal-close {
+  .tag-management-compact-modal .semi-modal-close {
     top: 16px !important;
     right: 18px !important;
     width: 24px !important;
@@ -728,14 +724,12 @@ const TagManagementCompactModalStyle = createGlobalStyle`
     color: var(--semi-color-text-1);
   }
 
-  .tag-management-compact-modal .semi-modal-close:hover,
-  .tag-management-compact-confirm .semi-modal-close:hover {
+  .tag-management-compact-modal .semi-modal-close:hover {
     background: var(--semi-color-fill-0) !important;
     color: var(--semi-color-text-0);
   }
 
-  .tag-management-compact-modal .semi-modal-close .semi-icon,
-  .tag-management-compact-confirm .semi-modal-close .semi-icon {
+  .tag-management-compact-modal .semi-modal-close .semi-icon {
     font-size: 13px;
   }
 
@@ -750,16 +744,14 @@ const TagManagementCompactModalStyle = createGlobalStyle`
     flex-shrink: 0;
   }
 
-  .tag-management-compact-modal .semi-modal-body,
-  .tag-management-compact-confirm .semi-modal-body {
+  .tag-management-compact-modal .semi-modal-body {
     padding: 0 22px 16px !important;
     font-size: 12px;
     line-height: 1.55;
     color: var(--semi-color-text-1);
   }
 
-  .tag-management-compact-modal .semi-modal-footer,
-  .tag-management-compact-confirm .semi-modal-footer {
+  .tag-management-compact-modal .semi-modal-footer {
     display: flex;
     justify-content: flex-end;
     gap: 8px;
@@ -767,8 +759,7 @@ const TagManagementCompactModalStyle = createGlobalStyle`
     padding: 0 22px 18px !important;
   }
 
-  .tag-management-compact-modal .semi-button,
-  .tag-management-compact-confirm .semi-button {
+  .tag-management-compact-modal .semi-button {
     height: 30px;
     min-width: 64px;
     padding: 0 12px;
@@ -1119,8 +1110,7 @@ const TagManagementCompactModalStyle = createGlobalStyle`
   }
 
   @media (max-width: 680px) {
-    .tag-management-compact-modal,
-    .tag-management-compact-confirm {
+    .tag-management-compact-modal {
       width: calc(100vw - 32px) !important;
     }
 
@@ -1681,11 +1671,10 @@ const TagManagement: React.FC<TagManagementProps> = ({
   };
 
   const handleDelete = async (record: TagItem) => {
-    Modal.confirm({
+    openCompactConfirm({
       title: '确认删除该标签？',
       content: `删除后标签「${record.name}」将不可用`,
       okType: 'danger',
-      className: 'tag-management-compact-confirm',
       onOk: async () => {
         try {
           await deleteTag(record.id);

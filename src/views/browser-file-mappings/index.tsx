@@ -11,6 +11,7 @@ import {
   updateBrowserFileMapping,
   type BrowserFileMappingItem,
 } from '@/features/browser-file-mappings/services/browser-file-mapping.api';
+import { openCompactConfirm } from '@/components/ui/compact-confirm';
 
 interface FormState {
   id?: number;
@@ -213,13 +214,11 @@ const Wrapper = styled.div<{ $embedded?: boolean }>`
 `;
 
 const BrowserFileMappingsCompactModalStyle = createGlobalStyle`
-  .browser-file-mapping-compact-modal,
-  .browser-file-mapping-compact-confirm {
+  .browser-file-mapping-compact-modal {
     width: 380px !important;
   }
 
-  .browser-file-mapping-compact-modal .semi-modal-content,
-  .browser-file-mapping-compact-confirm .semi-modal-content {
+  .browser-file-mapping-compact-modal .semi-modal-content {
     overflow: hidden;
     border: 1px solid var(--app-border-strong);
     border-radius: 8px;
@@ -227,29 +226,25 @@ const BrowserFileMappingsCompactModalStyle = createGlobalStyle`
     box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28), var(--app-shadow);
   }
 
-  .browser-file-mapping-compact-modal .semi-modal-header,
-  .browser-file-mapping-compact-confirm .semi-modal-header {
+  .browser-file-mapping-compact-modal .semi-modal-header {
     margin: 0;
     padding: 13px 16px 8px !important;
   }
 
-  .browser-file-mapping-compact-modal .semi-modal-title,
-  .browser-file-mapping-compact-confirm .semi-modal-title {
+  .browser-file-mapping-compact-modal .semi-modal-title {
     font-size: 14px;
     line-height: 1.35;
     font-weight: 700;
   }
 
-  .browser-file-mapping-compact-modal .semi-modal-body,
-  .browser-file-mapping-compact-confirm .semi-modal-body {
+  .browser-file-mapping-compact-modal .semi-modal-body {
     padding: 0 16px 13px !important;
     font-size: 12px;
     line-height: 1.55;
     color: var(--semi-color-text-1);
   }
 
-  .browser-file-mapping-compact-modal .semi-modal-footer,
-  .browser-file-mapping-compact-confirm .semi-modal-footer {
+  .browser-file-mapping-compact-modal .semi-modal-footer {
     display: flex;
     justify-content: flex-end;
     gap: 8px;
@@ -257,8 +252,7 @@ const BrowserFileMappingsCompactModalStyle = createGlobalStyle`
     padding: 0 16px 16px !important;
   }
 
-  .browser-file-mapping-compact-modal .semi-button,
-  .browser-file-mapping-compact-confirm .semi-button {
+  .browser-file-mapping-compact-modal .semi-button {
     height: 28px;
     min-width: 56px;
     padding: 0 10px;
@@ -411,11 +405,10 @@ const BrowserFileMappingsPage: React.FC<BrowserFileMappingsPageProps> = ({
   }, [form, loadList]);
 
   const handleDelete = React.useCallback((item: BrowserFileMappingItem) => {
-    Modal.confirm({
+    openCompactConfirm({
       title: '确认删除该映射？',
       content: `删除后，.${item.fileExt} 将不再支持“在浏览器打开”`,
       okType: 'danger',
-      className: 'browser-file-mapping-compact-confirm',
       onOk: async () => {
         try {
           await deleteBrowserFileMapping(item.id);

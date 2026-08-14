@@ -1,6 +1,6 @@
 # OmniFlow App Frontend Review Standard
 
-更新时间：2026-04-15
+更新时间：2026-08-14
 
 适用范围：`omniflow-app` 前端、Electron renderer / preload / main、IPC、工作区交互和前端文档相关改动的代码评审。
 
@@ -95,6 +95,7 @@ views -> features -> components / hooks -> service / bridge -> backend or electr
 - 标题栏安全区、浮层、右键菜单、分栏拖拽是否稳定
 - 浏览器模式、文件模式、搜索主页切换时布局节奏是否突变
 - overlay / modal / context menu 是否会被原生 view 遮挡
+- 业务二次确认是否统一走 `openCompactConfirm`，避免 Semi 默认尺寸重新引入旧页面缩放时期的大弹框
 
 ### 2.6 验证缺口
 
