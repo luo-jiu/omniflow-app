@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExtern
 import { Button, Spin, Toast } from '@douyinfe/semi-ui';
 import {
   IconBackward,
-  IconForward,
+  IconFastForward,
   IconFullScreenStroked,
   IconMiniPlayer,
   IconMute,
@@ -104,6 +104,8 @@ const KEYBOARD_FAST_SEEK_SECONDS = 30;
 const KEYBOARD_VOLUME_STEP = 0.05;
 const PLAYLIST_LINK_EXPIRY_MINUTES = 120;
 const PLAYLIST_PAGE_SIZE = 80;
+const VIDEO_CONTROLS_HIDE_DELAY_MS = 3200;
+const VIDEO_CONTROLS_LEAVE_DELAY_MS = 220;
 
 const RightToolPanelIcon: React.FC = () => (
   <svg className="video-control-svg" viewBox="0 0 24 24" width="1em" height="1em" fill="none" aria-hidden focusable="false">
@@ -283,7 +285,6 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
     floatingVideoService.getState,
     floatingVideoService.getState,
   );
-  const progressRef = useRef<HTMLDivElement>(null);
   const volumeControlRef = useRef<HTMLDivElement>(null);
   const rateControlRef = useRef<HTMLDivElement>(null);
   const playlistControlRef = useRef<HTMLDivElement>(null);
@@ -301,7 +302,7 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
   const isMountedRef = useRef(true);
   const activeRef = useRef(active);
   const persistVideoProgressRef = useRef<(forceRemoteSync?: boolean) => void>(() => {});
-  const isDraggingProgress = useRef(false);
+  const pendingSeekTimeRef = useRef<number | null>(null);
   const thumbnailCaptureTimerRef = useRef<number>(0);
   const thumbnailCaptureAttemptRef = useRef(0);
   const thumbnailCaptureUrlRef = useRef('');
@@ -314,6 +315,9 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
   const subtitleFontSizeRef = useRef(44);
   const subtitleBottomOffsetRef = useRef(72);
   const sessionCaptureRafRef = useRef(0);
+  const controlsHideTimerRef = useRef<number>(0);
+  const controlsFocusedRef = useRef(false);
+  const controlsLockedRef = useRef(false);
   const { setVideoWideMode } = useLibraryWorkspaceControls();
 
   const [isPlaying, setIsPlaying] = useState(false);
@@ -321,6 +325,7 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [seekingTime, setSeekingTime] = useState<number | null>(null);
   const [thumbnailUrl, setThumbnailUrl] = useState<string | undefined>(undefined);
   const [volume, setVolume] = useState(0.75);
   const [isMuted, setIsMuted] = useState(false);
@@ -331,9 +336,68 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
   const [isRatePanelOpen, setIsRatePanelOpen] = useState(false);
   const [isPlaylistPanelOpen, setIsPlaylistPanelOpen] = useState(false);
   const [isLoadingPlaylistMore, setIsLoadingPlaylistMore] = useState(false);
+  const [areControlsVisible, setAreControlsVisible] = useState(true);
 
   const isVideoHostedOutsideInline = floatingVideoState.key === videoElementKey
     && floatingVideoState.hostMode !== 'inline';
+  controlsLockedRef.current = isVolumePanelOpen || isRatePanelOpen || isPlaylistPanelOpen;
+
+  const clearControlsHideTimer = useCallback(() => {
+    if (!controlsHideTimerRef.current) return;
+    window.clearTimeout(controlsHideTimerRef.current);
+    controlsHideTimerRef.current = 0;
+  }, []);
+
+  const scheduleControlsHide = useCallback((delay = VIDEO_CONTROLS_HIDE_DELAY_MS) => {
+    clearControlsHideTimer();
+    if (!active || isVideoHostedOutsideInline) {
+      setAreControlsVisible(false);
+      return;
+    }
+    controlsHideTimerRef.current = window.setTimeout(() => {
+      controlsHideTimerRef.current = 0;
+      if (
+        pendingSeekTimeRef.current !== null
+        || controlsFocusedRef.current
+        || controlsLockedRef.current
+      ) {
+        return;
+      }
+      setAreControlsVisible(false);
+    }, delay);
+  }, [active, clearControlsHideTimer, isVideoHostedOutsideInline]);
+
+  const revealControls = useCallback(() => {
+    if (!active || isVideoHostedOutsideInline) return;
+    setAreControlsVisible(true);
+    scheduleControlsHide();
+  }, [active, isVideoHostedOutsideInline, scheduleControlsHide]);
+
+  useEffect(() => {
+    if (!active || isVideoHostedOutsideInline) {
+      clearControlsHideTimer();
+      setAreControlsVisible(false);
+      return;
+    }
+    setAreControlsVisible(true);
+    scheduleControlsHide();
+    return clearControlsHideTimer;
+  }, [active, clearControlsHideTimer, isVideoHostedOutsideInline, scheduleControlsHide]);
+
+  useEffect(() => {
+    if (controlsLockedRef.current) {
+      clearControlsHideTimer();
+      setAreControlsVisible(true);
+      return;
+    }
+    scheduleControlsHide();
+  }, [
+    clearControlsHideTimer,
+    isPlaylistPanelOpen,
+    isRatePanelOpen,
+    isVolumePanelOpen,
+    scheduleControlsHide,
+  ]);
 
   const playlistItems = useMemo(() => playlist?.items ?? [], [playlist]);
   const hasPlaylist = playlistItems.length > 0;
@@ -764,31 +828,38 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
     setCurrentTime(nextTime);
   }, []);
 
-  const seekToByClientX = useCallback((clientX: number) => {
-    const video = videoRef.current;
-    const progress = progressRef.current;
-    if (!video || !progress || !duration) return;
-
-    const rect = progress.getBoundingClientRect();
-    const offsetX = Math.min(Math.max(clientX - rect.left, 0), rect.width);
-    const next = (offsetX / rect.width) * duration;
-    video.currentTime = next;
-    setCurrentTime(next);
+  const updatePendingSeek = useCallback((nextTime: number) => {
+    const normalizedTime = Math.min(Math.max(nextTime, 0), Math.max(duration, 0));
+    pendingSeekTimeRef.current = normalizedTime;
+    setSeekingTime(normalizedTime);
   }, [duration]);
 
-  const handleGlobalMouseMove = useCallback((event: MouseEvent) => {
-    if (!isDraggingProgress.current) return;
-    seekToByClientX(event.clientX);
-  }, [seekToByClientX]);
-
-  const handleGlobalMouseUp = useCallback((event: MouseEvent) => {
-    if (!isDraggingProgress.current) return;
-    seekToByClientX(event.clientX);
-    isDraggingProgress.current = false;
+  const commitPendingSeek = useCallback(() => {
+    const targetTime = pendingSeekTimeRef.current;
+    pendingSeekTimeRef.current = null;
+    setSeekingTime(null);
+    if (targetTime === null || duration <= 0) {
+      scheduleControlsHide();
+      return;
+    }
+    const video = videoRef.current;
+    if (!video) return;
+    video.currentTime = targetTime;
+    setCurrentTime(targetTime);
+    markVideoSessionInteracted();
     persistVideoProgress(true);
-    window.removeEventListener('mousemove', handleGlobalMouseMove);
-    window.removeEventListener('mouseup', handleGlobalMouseUp);
-  }, [handleGlobalMouseMove, persistVideoProgress, seekToByClientX]);
+    scheduleControlsHide();
+  }, [duration, markVideoSessionInteracted, persistVideoProgress, scheduleControlsHide]);
+
+  const cancelPendingSeek = useCallback(() => {
+    pendingSeekTimeRef.current = null;
+    setSeekingTime(null);
+    scheduleControlsHide();
+  }, [scheduleControlsHide]);
+
+  useEffect(() => {
+    cancelPendingSeek();
+  }, [cancelPendingSeek, url]);
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -799,8 +870,6 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
 
   useEffect(() => {
     return () => {
-      window.removeEventListener('mousemove', handleGlobalMouseMove);
-      window.removeEventListener('mouseup', handleGlobalMouseUp);
       if (thumbnailCaptureTimerRef.current) {
         window.clearTimeout(thumbnailCaptureTimerRef.current);
         thumbnailCaptureTimerRef.current = 0;
@@ -809,8 +878,9 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
         window.cancelAnimationFrame(sessionCaptureRafRef.current);
         sessionCaptureRafRef.current = 0;
       }
+      clearControlsHideTimer();
     };
-  }, [handleGlobalMouseMove, handleGlobalMouseUp]);
+  }, [clearControlsHideTimer]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -824,9 +894,7 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
       scheduleVideoThumbnailCapture();
     };
     const onTimeUpdate = () => {
-      if (!isDraggingProgress.current) {
-        setCurrentTime(video.currentTime || 0);
-      }
+      setCurrentTime(video.currentTime || 0);
       persistVideoProgress(false);
     };
     const onPlay = () => {
@@ -1250,7 +1318,22 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
     url,
   ]);
 
-  const toggleConsole = useCallback(() => {
+  const toggleConsole = useCallback(async () => {
+    if (document.fullscreenElement) {
+      try {
+        await document.exitFullscreen();
+      } catch (error) {
+        runtimeLogger.warn('打开视频工具台前退出全屏失败:', error);
+        return;
+      }
+      if (isWideMode) {
+        consoleOpenBeforeWideModeRef.current = true;
+        setIsWideMode(false);
+      } else {
+        setIsConsoleOpen(true);
+      }
+      return;
+    }
     if (isWideMode) {
       setIsWideMode(false);
       return;
@@ -1258,11 +1341,20 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
     setIsConsoleOpen(prev => !prev);
   }, [isWideMode]);
 
-  const handleProgressMouseDown = (event: React.MouseEvent<HTMLDivElement>) => {
-    isDraggingProgress.current = true;
-    seekToByClientX(event.clientX);
-    window.addEventListener('mousemove', handleGlobalMouseMove);
-    window.addEventListener('mouseup', handleGlobalMouseUp);
+  const handleProgressPointerDown = (event: React.PointerEvent<HTMLInputElement>) => {
+    clearControlsHideTimer();
+    setAreControlsVisible(true);
+    updatePendingSeek(Number(event.currentTarget.value));
+  };
+
+  const handleProgressPointerUp = (event: React.PointerEvent<HTMLInputElement>) => {
+    commitPendingSeek();
+    event.currentTarget.blur();
+  };
+
+  const handleProgressPointerCancel = (event: React.PointerEvent<HTMLInputElement>) => {
+    cancelPendingSeek();
+    event.currentTarget.blur();
   };
 
   const toggleFullscreen = useCallback(async () => {
@@ -1388,7 +1480,10 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown, true);
   }, [active, adjustVolumeBy, markVideoSessionInteracted, seekBy, toggleFullscreen, togglePlay]);
 
-  const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
+  const visibleCurrentTime = seekingTime ?? currentTime;
+  const progressPercent = duration > 0
+    ? Math.min(Math.max((visibleCurrentTime / duration) * 100, 0), 100)
+    : 0;
   const displayedVolume = Math.round((isMuted ? 0 : volume) * 100);
   const detachedPosterUrl = floatingVideoState.thumbnailUrl || thumbnailUrl;
   const detachedPosterStyle = useMemo<React.CSSProperties | undefined>(() => (
@@ -1410,7 +1505,12 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
           />
 
           <div className="video-stage">
-            <div className="video-shell" ref={containerRef}>
+            <div
+              className={`video-shell ${areControlsVisible || isVideoHostedOutsideInline ? 'controls-visible' : 'controls-hidden'}`}
+              ref={containerRef}
+              onPointerMove={revealControls}
+              onPointerLeave={() => scheduleControlsHide(VIDEO_CONTROLS_LEAVE_DELAY_MS)}
+            >
               <div
                 ref={videoHostRef}
                 className={`video-element-host ${isVideoHostedOutsideInline ? 'detached' : ''}`}
@@ -1458,34 +1558,91 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
                   <Spin size="large" tip="视频加载中..." />
                 </div>
               )}
-            </div>
-          </div>
 
-          <div className="controls-panel">
-            <div className="timeline-hitbox" onMouseDown={handleProgressMouseDown}>
-              <div className="timeline-rail" ref={progressRef}>
-                <div className="timeline-track" style={{ width: `${progressPercent}%` }} />
-                <div className="timeline-thumb" style={{ left: `${progressPercent}%` }} />
-              </div>
-            </div>
+              <div
+                className={`controls-panel ${areControlsVisible ? 'visible' : 'hidden'}`}
+                aria-hidden={!areControlsVisible}
+                onPointerEnter={() => {
+                  setAreControlsVisible(true);
+                  scheduleControlsHide();
+                }}
+                onPointerLeave={() => {
+                  scheduleControlsHide();
+                }}
+                onFocusCapture={(event) => {
+                  controlsFocusedRef.current = event.target instanceof Element
+                    && event.target.matches(':focus-visible');
+                  setAreControlsVisible(true);
+                  if (controlsFocusedRef.current) {
+                    clearControlsHideTimer();
+                  } else {
+                    scheduleControlsHide();
+                  }
+                }}
+                onBlurCapture={(event) => {
+                  const nextTarget = event.relatedTarget as Node | null;
+                  if (nextTarget && event.currentTarget.contains(nextTarget)) return;
+                  controlsFocusedRef.current = false;
+                  scheduleControlsHide();
+                }}
+              >
+                <div className="timeline-progress">
+                  <input
+                    type="range"
+                    min={0}
+                    max={Math.max(duration, 0)}
+                    step={0.1}
+                    value={Math.min(visibleCurrentTime, Math.max(duration, 0))}
+                    disabled={duration <= 0}
+                    onChange={(event) => updatePendingSeek(Number(event.currentTarget.value))}
+                    onPointerDown={handleProgressPointerDown}
+                    onPointerUp={handleProgressPointerUp}
+                    onPointerCancel={handleProgressPointerCancel}
+                    onKeyUp={commitPendingSeek}
+                    onBlur={commitPendingSeek}
+                    aria-label="播放进度"
+                    aria-valuetext={`${formatTime(visibleCurrentTime)} / ${formatTime(duration)}`}
+                  />
+                  <span className="timeline-progress-track" aria-hidden="true">
+                    <span style={{ width: `${progressPercent}%` }} />
+                  </span>
+                </div>
 
-            <div className="controls-row">
-              <div className="left-controls">
-                <Button icon={<IconBackward />} theme="borderless" onClick={() => seekBy(-SEEK_SECONDS)} />
-                <Button
-                  icon={isPlaying ? <IconPause /> : <IconPlay />}
-                  theme="solid"
-                  type="primary"
-                  onClick={togglePlay}
-                />
-                <Button icon={<IconForward />} theme="borderless" onClick={() => seekBy(SEEK_SECONDS)} />
-                <span className="time-text">{formatTime(currentTime)} / {formatTime(duration)}</span>
-              </div>
+                <div className="controls-row">
+                  <div className="left-controls">
+                    <Button
+                      className="video-icon-button"
+                      icon={<IconBackward />}
+                      theme="borderless"
+                      onClick={() => seekBy(-SEEK_SECONDS)}
+                      title={`后退 ${SEEK_SECONDS} 秒`}
+                      aria-label={`后退 ${SEEK_SECONDS} 秒`}
+                    />
+                    <button
+                      type="button"
+                      className="video-play-toggle-button"
+                      onClick={togglePlay}
+                      title={isPlaying ? '暂停' : '播放'}
+                      aria-label={isPlaying ? '暂停' : '播放'}
+                    >
+                      {isPlaying ? <IconPause /> : <IconPlay />}
+                    </button>
+                    <Button
+                      className="video-icon-button"
+                      icon={<IconFastForward />}
+                      theme="borderless"
+                      onClick={() => seekBy(SEEK_SECONDS)}
+                      title={`前进 ${SEEK_SECONDS} 秒`}
+                      aria-label={`前进 ${SEEK_SECONDS} 秒`}
+                    />
+                    <span className="time-text">{formatTime(visibleCurrentTime)} / {formatTime(duration)}</span>
+                  </div>
 
-              <div className="right-controls">
+                  <div className="right-controls">
                 {hasPlaylist && (
                   <div className="control-popover-box" ref={playlistControlRef}>
                     <Button
+                      className="video-icon-button"
                       icon={<IconVideoListStroked />}
                       theme={isPlaylistPanelOpen ? 'solid' : 'borderless'}
                       type={isPlaylistPanelOpen ? 'primary' : 'tertiary'}
@@ -1542,9 +1699,12 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
 
                 <div className="control-popover-box" ref={volumeControlRef}>
                   <Button
+                    className="video-icon-button"
                     icon={isMuted ? <IconMute /> : volume < 0.5 ? <IconVolume1 /> : <IconVolume2 />}
                     theme="borderless"
                     onClick={toggleVolumePanel}
+                    title={isMuted ? '取消静音' : '音量'}
+                    aria-label={isMuted ? '取消静音' : '音量'}
                   />
                   {isVolumePanelOpen && (
                     <div className="floating-control-panel volume-panel">
@@ -1569,7 +1729,13 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
                 </div>
 
                 <div className="control-popover-box" ref={rateControlRef}>
-                  <Button theme="borderless" onClick={toggleRatePanel}>
+                  <Button
+                    className="rate-control-button"
+                    theme="borderless"
+                    onClick={toggleRatePanel}
+                    title="播放速度"
+                    aria-label={`播放速度 ${playbackRate} 倍`}
+                  >
                     {playbackRate}x
                   </Button>
                   {isRatePanelOpen && (
@@ -1592,14 +1758,18 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
                 </div>
 
                 <Button
+                  className="video-icon-button"
                   icon={<span className="video-control-icon"><RightToolPanelIcon /></span>}
                   theme="borderless"
-                  onClick={toggleConsole}
-                  title={isConsoleOpen ? '隐藏工具台' : '显示工具台'}
-                  aria-label={isConsoleOpen ? '隐藏工具台' : '显示工具台'}
+                  onClick={() => {
+                    void toggleConsole();
+                  }}
+                  title={isFullscreen ? '退出全屏并显示工具台' : isConsoleOpen ? '隐藏工具台' : '显示工具台'}
+                  aria-label={isFullscreen ? '退出全屏并显示工具台' : isConsoleOpen ? '隐藏工具台' : '显示工具台'}
                 />
 
                 <Button
+                  className="video-icon-button"
                   icon={<span className="video-control-icon"><IconMiniPlayer /></span>}
                   theme={isVideoHostedOutsideInline ? 'solid' : 'borderless'}
                   type={isVideoHostedOutsideInline ? 'primary' : 'tertiary'}
@@ -1609,6 +1779,7 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
                 />
 
                 <Button
+                  className="video-icon-button"
                   icon={<span className="video-control-icon">{isWideMode ? <WideModeExitIcon /> : <WideModeEnterIcon />}</span>}
                   theme={isWideMode ? 'solid' : 'borderless'}
                   type={isWideMode ? 'primary' : 'tertiary'}
@@ -1618,6 +1789,7 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
                 />
 
                 <Button
+                  className="video-icon-button"
                   icon={(
                     <span className="video-control-icon">
                       {isFullscreen ? <IconShrinkScreenStroked /> : <IconFullScreenStroked />}
@@ -1628,6 +1800,8 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
                   title={isFullscreen ? '退出全屏' : '全屏'}
                   aria-label={isFullscreen ? '退出全屏' : '全屏'}
                 />
+                  </div>
+                </div>
               </div>
             </div>
           </div>

@@ -60,6 +60,10 @@ export const VideoViewerWrapper = styled.div`
     box-shadow: none;
   }
 
+  .video-shell.controls-hidden {
+    cursor: none;
+  }
+
   .subtitle-overlay {
     position: absolute;
     left: 50%;
@@ -434,50 +438,102 @@ export const VideoViewerWrapper = styled.div`
   }
 
   .controls-panel {
-    position: relative;
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
     z-index: 6;
-    padding: 10px 16px 12px;
-    border-top: 1px solid var(--semi-color-border);
-    background: rgba(0, 0, 0, 0.2);
-    backdrop-filter: blur(10px);
+    padding: 26px 16px 12px;
+    background: linear-gradient(180deg, transparent 0%, rgba(0, 0, 0, 0.42) 36%, rgba(0, 0, 0, 0.82) 100%);
+    opacity: 0;
+    transform: translateY(8px);
+    visibility: hidden;
+    pointer-events: none;
+    transition:
+      opacity 0.18s ease,
+      transform 0.18s ease,
+      visibility 0s linear 0.18s;
   }
 
-  .timeline-hitbox {
+  .controls-panel.visible {
+    opacity: 1;
+    transform: translateY(0);
+    visibility: visible;
+    pointer-events: auto;
+    transition-delay: 0s;
+  }
+
+  .timeline-progress {
+    position: relative;
     width: 100%;
     height: 16px;
-    display: flex;
-    align-items: center;
+  }
+
+  .timeline-progress input {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    appearance: none;
+    background: transparent;
+    opacity: 0;
     cursor: pointer;
   }
 
-  .timeline-rail {
-    position: relative;
-    width: 100%;
-    height: 4px;
-    border-radius: 999px;
-    background: rgba(255, 255, 255, 0.2);
-    overflow: visible;
+  .timeline-progress input::-webkit-slider-runnable-track {
+    height: 16px;
+    background: transparent;
   }
 
-  .timeline-track {
+  .timeline-progress input::-webkit-slider-thumb {
+    width: 1px;
+    height: 16px;
+    appearance: none;
+    border: 0;
+    background: transparent;
+  }
+
+  .timeline-progress input::-moz-range-track {
+    height: 16px;
+    border: 0;
+    background: transparent;
+  }
+
+  .timeline-progress input::-moz-range-thumb {
+    width: 1px;
+    height: 16px;
+    border: 0;
+    background: transparent;
+  }
+
+  .timeline-progress input:disabled {
+    cursor: default;
+  }
+
+  .timeline-progress-track {
     position: absolute;
-    top: 0;
     left: 0;
-    height: 100%;
-    border-radius: inherit;
-    background: var(--semi-color-primary);
+    right: 0;
+    top: 6px;
+    height: 4px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.22);
+    pointer-events: none;
+    transition: box-shadow 0.14s ease;
   }
 
-  .timeline-thumb {
-    position: absolute;
-    top: 50%;
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    transform: translate(-50%, -50%);
-    background: #fff;
-    box-shadow: 0 0 0 3px rgba(38, 110, 255, 0.24);
-    pointer-events: none;
+  .timeline-progress input:focus-visible + .timeline-progress-track {
+    box-shadow: 0 0 0 2px rgba(98, 168, 245, 0.34);
+  }
+
+  .timeline-progress-track > span {
+    display: block;
+    height: 100%;
+    border-radius: 0 999px 999px 0;
+    background: linear-gradient(90deg, #315f9f 0%, #62a8f5 100%);
   }
 
   .controls-row {
@@ -496,10 +552,66 @@ export const VideoViewerWrapper = styled.div`
   }
 
   .controls-row .semi-button {
+    min-width: 32px;
     min-height: 30px;
+    height: 32px;
     font-size: var(--video-font-control);
-    padding: 0 10px;
-    border-radius: 6px;
+    padding: 0 8px;
+    border-radius: 5px;
+    color: rgba(255, 255, 255, 0.84);
+  }
+
+  .controls-row .semi-button:hover {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.12);
+  }
+
+  .controls-row .video-icon-button {
+    width: 32px;
+    padding: 0;
+  }
+
+  .video-play-toggle-button {
+    flex: 0 0 auto;
+    width: 32px;
+    height: 32px;
+    border: 0;
+    border-radius: 5px;
+    color: rgba(255, 255, 255, 0.9);
+    background: transparent;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    cursor: pointer;
+    transition: background 0.16s ease, transform 0.16s ease;
+  }
+
+  .video-play-toggle-button:hover {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.12);
+  }
+
+  .video-play-toggle-button:active {
+    background: rgba(255, 255, 255, 0.18);
+  }
+
+  .video-play-toggle-button:focus-visible {
+    outline: 2px solid var(--semi-color-primary);
+    outline-offset: 2px;
+  }
+
+  .video-play-toggle-button .semi-icon {
+    width: 15px;
+    height: 15px;
+    font-size: 15px;
+    color: currentColor;
+  }
+
+  .controls-row .rate-control-button {
+    width: auto;
+    min-width: 42px;
+    padding: 0 7px;
   }
 
   .controls-row .semi-button-icon {
