@@ -49,7 +49,16 @@ npm run build:win
 
 macOS 交叉生成的 Windows 安装包仍需在 Windows 10/11 或 Windows 11 ARM 虚拟机中运行验证。
 
-本地联调默认后端地址是 `http://127.0.0.1:8850/api`。如果需要改成其他地址，请调整 `VITE_API_BASE_URL`。
+未配置环境变量时，后端地址回退为 `http://127.0.0.1:8850/api`。通过 `.env.local` 中的 `VITE_API_BASE_URL` 可以切换本地或云端 Go；使用 Tailscale Serve 时填写 `https://<machine>.<tailnet>.ts.net/api`，宿主系统需要登录对应 tailnet。
+
+多 MinIO 节点的 renderer CSP 允许列表由 `VITE_STORAGE_ORIGINS` 提供，支持空格或逗号分隔，例如：
+
+```dotenv
+VITE_API_BASE_URL=https://<machine>.<tailnet>.ts.net/api
+VITE_STORAGE_ORIGINS="http://<windows-minio>:9000 http://<mac-minio>:9000"
+```
+
+`vite.config.ts` 会把 API、WebSocket 和存储 origin 同时写入 dev server CSP 与构建后的 HTML；修改网络地址时不要直接手改 `index.html` 中的固定主机名。
 
 本机常用启动脚本在 `~/script/omniflow-app.sh`。默认 `dev` 会随代码修改刷新；`stable` 跑已构建的 `dist`，并通过独立 `userData` 目录和 dev 隔离。
 

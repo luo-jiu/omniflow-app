@@ -32,6 +32,7 @@ import BrowserFileMappingsPage from '@/views/browser-file-mappings';
 import StorageSettings from '@/views/storage-settings';
 import TagManagement from '@/views/tag-management';
 import type { SystemWorkspaceViewProps } from '../../types';
+import AppUpdateSettings from '@/features/app-update/components/AppUpdateSettings';
 
 const SettingsWrapper = styled.div`
   width: 100%;
@@ -266,6 +267,51 @@ const SettingsWrapper = styled.div`
     width: 92px;
     flex: 0 0 92px;
     padding: 0 10px;
+  }
+
+  .app-update-copy {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .app-update-actions {
+    width: 360px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+    flex-shrink: 0;
+  }
+
+  .app-update-actions .settings-action-btn {
+    min-width: 108px;
+  }
+
+  .app-version {
+    font-size: 11px;
+    color: var(--semi-color-text-2);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .app-update-setting .setting-desc.is-error {
+    color: var(--semi-color-danger);
+  }
+
+  .app-update-progress {
+    width: min(280px, 100%);
+    height: 4px;
+    margin-top: 8px;
+    border-radius: 999px;
+    overflow: hidden;
+    background: var(--semi-color-fill-1);
+  }
+
+  .app-update-progress > span {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: var(--semi-color-primary);
+    transition: width 0.16s ease;
   }
 `;
 
@@ -609,11 +655,13 @@ const SettingsWorkspace: React.FC<SystemWorkspaceViewProps> = ({
         </div>
       </div>
 
+      <AppUpdateSettings />
+
       <Divider style={{ margin: '16px 0' }} />
 
       <div>
         <Title heading={3} style={{ fontSize: 16, marginBottom: 7, lineHeight: 1.2 }}>关于</Title>
-        <Text style={{ fontSize: 11, color: 'var(--semi-color-text-2)' }}>Omniflow App v0.0.1</Text>
+        <Text style={{ fontSize: 11, color: 'var(--semi-color-text-2)' }}>Omniflow App</Text>
       </div>
     </SettingsWrapper>
   );

@@ -183,10 +183,6 @@ const AppMain: FC<IProps> = ({ hideTabsBar = false, workspaceActive = true }) =>
                   videoSubtitleSources={tab.videoSubtitleSources}
                   videoPlaylist={tab.videoPlaylist}
                   videoAutoPlay={tab.videoAutoPlay}
-                  audioSubtitleSources={tab.audioSubtitleSources}
-                  audioPlaylist={tab.audioPlaylist}
-                  audioAutoPlay={tab.audioAutoPlay}
-                  audioCoverUrl={tab.audioCoverUrl}
                   loading={tab.loading}
                   active={isActive}
                   reloadToken={tab.reloadToken ?? 0}

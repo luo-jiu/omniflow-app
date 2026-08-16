@@ -6,6 +6,22 @@ import https from 'node:https';
 import type { ClientRequest, IncomingMessage } from 'node:http';
 import { runtimeLogger } from '../runtimeLogger';
 
+const SENSITIVE_QUERY_PARAM = /(?:authorization|credential|password|secret|signature|token|api[-_]?key)/i;
+
+function sanitizeUrlForLog(value: string): string {
+  try {
+    const parsed = new URL(value);
+    for (const key of Array.from(parsed.searchParams.keys())) {
+      if (SENSITIVE_QUERY_PARAM.test(key)) {
+        parsed.searchParams.set(key, '<redacted>');
+      }
+    }
+    return parsed.toString();
+  } catch {
+    return '<invalid-url>';
+  }
+}
+
 function escapeMultipartDispositionValue(value: string): string {
   return String(value)
     .replace(/\\/g, '\\\\')
@@ -83,14 +99,17 @@ export function registerHttpIpc(ipcMain: Electron.IpcMain) {
 
   ipcMain.handle("http:fetch", async (_event, url: string, options: any = {}) => {
     runtimeLogger.debug("http:fetch start");
-    runtimeLogger.debug("http:fetch URL:", url);
-    runtimeLogger.debug("http:fetch options:", options);
+    runtimeLogger.debug("http:fetch request:", {
+      method: options.method || "GET",
+      url: sanitizeUrlForLog(url),
+      headerNames: Object.keys(options.headers || {}),
+      hasBody: Boolean(options.body),
+    });
     return new Promise((resolve, reject) => {
       const request = net.request({ url, method: options.method || "GET" });
 
       if (options.headers) {
         Object.entries(options.headers).forEach(([key, value]) => {
-          runtimeLogger.debug(`http:fetch set header ${key}: ${String(value)}`);
           request.setHeader(key, value as string);
         });
       }
@@ -105,7 +124,7 @@ export function registerHttpIpc(ipcMain: Electron.IpcMain) {
           body += chunk;
         });
         response.on("end", () => {
-          runtimeLogger.debug("http:fetch body preview:", body.slice(0, 500));
+          runtimeLogger.debug("http:fetch body bytes:", Buffer.byteLength(body));
           let parsedBody: any;
           try {
             parsedBody = JSON.parse(body);
@@ -132,7 +151,11 @@ export function registerHttpIpc(ipcMain: Electron.IpcMain) {
 
   ipcMain.handle("http:fetch-binary", async (_event, url: string, options: any = {}) => {
     runtimeLogger.debug("http:fetch-binary start");
-    runtimeLogger.debug("http:fetch-binary URL:", url);
+    runtimeLogger.debug("http:fetch-binary request:", {
+      method: options.method || "GET",
+      url: sanitizeUrlForLog(url),
+      headerNames: Object.keys(options.headers || {}),
+    });
     return new Promise((resolve, reject) => {
       const request = net.request({ url, method: options.method || "GET" });
       const maxBytes = Math.max(0, Number(options.maxBytes || 0));

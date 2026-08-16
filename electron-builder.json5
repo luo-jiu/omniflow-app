@@ -15,7 +15,8 @@
   ],
   "mac": {
     "target": [
-      "dmg"
+      "dmg",
+      "zip"
     ],
     "extendInfo": {
       "CFBundleName": "Omniflow",

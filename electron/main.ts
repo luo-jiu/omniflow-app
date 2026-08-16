@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, protocol, screen } from 'electron'
+import { app, BrowserWindow, ipcMain, Menu, protocol, screen } from 'electron'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -10,6 +10,8 @@ import { createOverlayWindowController } from './service/overlayWindowController
 import { registerOverlayWindowIpcHandlers } from './service/overlayWindowIpc'
 import { createSystemVideoWindowController } from './service/systemVideoWindowController'
 import { registerSystemVideoWindowIpcHandlers } from './service/systemVideoWindowIpc'
+import { registerAppUpdateIpcHandlers } from './service/appUpdateIpc'
+import { createAppUpdateService } from './service/appUpdateService'
 import { IMAGE_PREVIEW_PROTOCOL, registerImagePreviewProtocol } from './ipc/imagePreview'
 import {
   applyMainWindowPlatformBehavior,
@@ -48,6 +50,9 @@ const MIN_WINDOW_WIDTH = 1120
 const MIN_WINDOW_HEIGHT = 720
 const WINDOW_STATE_FILENAME = 'window-state.json'
 const WINDOW_STATE_SAVE_DEBOUNCE_MS = 200
+const APP_UPDATE_BASE_URL = typeof __OMNIFLOW_UPDATE_BASE_URL__ === 'string'
+  ? __OMNIFLOW_UPDATE_BASE_URL__
+  : ''
 const ENABLE_EMBEDDED_BROWSER_DEBUG =
   process.env.NODE_ENV === 'test' ||
   Boolean(VITE_DEV_SERVER_URL || process.env.ELECTRON_RENDERER_URL) ||
@@ -83,6 +88,10 @@ function getAppIconPath() {
 let mainWindow: BrowserWindow | null = null
 let isQuitting = false
 let windowStateSaveTimer: ReturnType<typeof setTimeout> | null = null
+const appUpdateService = createAppUpdateService({
+  getMainWindow: () => mainWindow,
+  updateBaseUrl: APP_UPDATE_BASE_URL,
+})
 
 interface PersistedWindowState {
   x?: number
@@ -369,6 +378,7 @@ function createWindow() {
 
 app.on('before-quit', () => {
   isQuitting = true
+  appUpdateService.dispose()
   if (mainWindow && !mainWindow.isDestroyed()) {
     saveWindowState(mainWindow)
   }
@@ -413,6 +423,7 @@ app.whenReady().then(() => {
   embeddedBrowserMainController.registerIpcHandlers()
   registerOverlayWindowIpcHandlers(overlayWindowController)
   registerSystemVideoWindowIpcHandlers(systemVideoWindowController)
+  registerAppUpdateIpcHandlers(ipcMain, appUpdateService)
 
   const toggleActiveDevToolsFromMenu = () => {
     if (embeddedBrowserMainController.toggleActiveViewDevTools()) {
@@ -485,6 +496,7 @@ app.whenReady().then(() => {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
 
   createWindow()
+  appUpdateService.initialize()
   // Pre-create overlay window so it's ready when first spec arrives
   void overlayWindowController.ensureReady()
 })

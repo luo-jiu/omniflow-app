@@ -1,6 +1,6 @@
 # MediaHub 契约
 
-更新时间：2026-06-01（含 GalleryViewer 视频接入）
+更新时间：2026-08-16（含音频音量偏好与共享控件）
 适用范围：`MediaRegistry`、`globalAudioPlayer`、`floatingVideoService`、`MediaHubPopover`、`FloatingMiniVideoPlayer`，以及 audio / video / asmr / audio-archive viewer 与 `FileViewerContext` 的 tab close 路径。
 
 > 本文是 MediaHub 行为的**单一真源**。修改任何与"出声"或 MediaHub 入口相关的代码前必须先读这里。变更行为时必须同步更新本文，并在 PR 描述中点名。
@@ -76,6 +76,14 @@ floatingVideoService.releaseForTab(tabId);
 - 视频：`mountGlobalVideoElement(key, host)` 把元素从 floating host 搬回 inline host；`floatingVideoService.bindInline()` 收起浮窗。
 - 音频：`ensureSource` 看到同一 url 时只更新 metadata，不重建 audio。
 
+### 1.6 音频音量状态
+
+- 普通 audio、ASMR 和音频归档播放器的音量唯一 owner 是 `mediaVolumePreference`，本机持久化 key 为 `omniflow:media-volume-preference:v1`。
+- `globalAudioPlayer.setVolume` / `setMuted` 只更新该 preference，再由 preference 投影到单例 `<audio>`；viewer 不得维护独立音量 state 或持久化 key。
+- 三种音频界面统一复用 `MediaVolumeControl`。布局可以不同，但静音、拖到零、恢复最后非零音量和百分比显示语义必须一致。
+- 音量偏好不属于 MediaRegistry entry、Viewer Session 或账号远端偏好；`clear()`、关闭 tab 和换播放源均不得重置音量。
+- 当前该 preference 只投影音频；视频音量接入属于后续独立改动，接入前不得让 audio viewer 直接操作 video DOM。
+
 ## 2. 接口面
 
 ### 2.1 `mediaRegistry`（模块单例）
@@ -96,20 +104,27 @@ mediaRegistry.dismiss(entryId)
 
 ### 2.2 `globalAudioPlayer`（音频服务）
 
-字段：`tabId`、`libraryId`、`thumbnailUrl`、`registration`、`registeredTabId`。
+字段：`tabId`、`libraryId`、`sourceNodeId`、`thumbnailUrl`、`registration`、`registeredTabId`。`sourceNodeId` 是当前媒体节点的稳定投影，用于 owner viewer 重建后恢复歌曲 UI，不替代 `ownerKey + tabId + libraryId` 的所有权判断。
 
 接口：
 
 ```ts
 ensureSource(url, trackName?, options?: {
-  ownerType, ownerKey, tabId, libraryId, thumbnailUrl
-})
+  ownerType, ownerKey, tabId, libraryId, thumbnailUrl, sourceNodeId, playbackRequestId
+}): boolean
+beginPlaybackRequest(): number
+cancelPlaybackRequest(playbackRequestId: number): boolean
+isPlaybackRequestCurrent(playbackRequestId: number): boolean
 releaseForTab(tabId: string): void   // 仅当 state.tabId === tabId 时 clear()
 releaseForLibrary(libraryId: number): void // 仅当 state.libraryId === libraryId 时 clear()
 clear()                              // 同时取消 registry 注册
 ```
 
-`syncMediaRegistry` 守门：必须 `src && tabId && hasStarted` 才进 hub，与 video 服务对齐。`useGlobalAudioPlayback` 接受 `tabId` / `libraryId` 选项，并在 `ensureSource(url, trackName?, thumbnailUrl?)` 中把 thumbnailUrl 透传到服务（每首曲目可换封面）。
+`syncMediaRegistry` 守门：必须 `src && tabId && hasStarted` 才进 hub，与 video 服务对齐。`useGlobalAudioPlayback` 接受 `tabId` / `libraryId` 选项，并在 `ensureSource(url, trackName?, thumbnailUrl?, sourceNodeId?, playbackRequestId?)` 中透传当前歌曲元数据。viewer 必须通过 hook 的 `isOwnedSource` 严格校验非空的 owner、tab 和 library，禁止只凭 URL 控制单例播放器，也不得把缺失的 `tabId` / `libraryId` 当作通配符。
+
+全局播放请求 generation 也由 `globalAudioPlayer` 单例持有。所有需要先异步获取临时链接的音频入口必须在请求前调用 `beginPlaybackRequest()`，并把同一 token 传给 `ensureSource` 和 `play`；任一步发现 token 已过期都不得接管播放器或写回 viewer。组件 cleanup 通过 `cancelPlaybackRequest(token)` 只取消自己仍为最新的请求，不能覆盖其他 viewer 后发起的 token。
+
+每次实际调用原生 `audio.play()` 还必须生成独立的 attempt revision。失效请求只有在自己仍是最新 attempt 且音源 revision 未变化时才能执行兜底暂停，避免页面、MediaHub 或系统媒体键对同一音源的后发播放被旧 Promise 回调暂停。
 
 ### 2.3 `floatingVideoService`（视频服务）
 
@@ -201,6 +216,7 @@ subscribePendingActivation(listener)      // 同 libraryId 内多次 set 也能�
 - ❌ **禁止**用 `display: none` 控制 `FloatingMiniVideoPlayerWrapper` 的显隐——某些浏览器会因 `<video>` 不在 layout 树中触发 pause。继续用 `transform: translate(20000px, 20000px)`。
 - ❌ **禁止**在 `isLibraryWorkspaceRoute` 调用方传 `window.location.pathname`。HashRouter 下 pathname 永远是 `/`，必须传 `window.location.hash`。
 - ❌ **禁止**让 `VideoViewer` 自己直接调用 `documentPictureInPicture` 或维护 PiP window。PiP / 应用内浮窗 / inline 的宿主切换必须继续收敛在 `floatingVideoService`。
+- ❌ **禁止**普通 audio、ASMR 或音频归档 viewer 重新维护局部音量 state、独立 localStorage key 或另一套音量控件。
 
 ## 6. 已知缺口与 v2 候补
 

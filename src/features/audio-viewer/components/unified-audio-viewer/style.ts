@@ -1,6 +1,7 @@
 import styled from 'styled-components';
 
-export const AudioArchiveViewerWrapper = styled.div`
+export const UnifiedAudioViewerWrapper = styled.div`
+  /* Shared by bare audio, semantic audio folders, and audio archives. */
   width: 100%;
   height: 100%;
   min-height: 0;
@@ -223,6 +224,12 @@ export const AudioArchiveViewerWrapper = styled.div`
     object-fit: cover;
   }
 
+  .audio-cover.is-empty {
+    color: transparent;
+    background: color-mix(in srgb, var(--semi-color-fill-0) 38%, transparent);
+    box-shadow: none;
+  }
+
   .cover-play {
     position: absolute;
     inset: 0;
@@ -335,7 +342,7 @@ export const AudioArchiveViewerWrapper = styled.div`
     flex-shrink: 0;
     height: 76px;
     display: grid;
-    grid-template-columns: minmax(180px, 1fr) minmax(190px, auto) minmax(220px, 1fr);
+    grid-template-columns: minmax(180px, 1fr) minmax(190px, auto) minmax(280px, 1fr);
     align-items: center;
     gap: 18px;
     padding: 10px 16px 9px;
@@ -346,17 +353,82 @@ export const AudioArchiveViewerWrapper = styled.div`
 
   .player-progress {
     position: absolute;
-    top: 0;
+    top: -5px;
     left: 0;
     right: 0;
-    height: 3px;
-    background: var(--semi-color-fill-0);
+    z-index: 2;
+    height: 11px;
   }
 
-  .player-progress span {
+  .player-progress input {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    appearance: none;
+    background: transparent;
+    opacity: 0;
+    cursor: pointer;
+  }
+
+  .player-progress input::-webkit-slider-runnable-track {
+    height: 11px;
+    background: transparent;
+  }
+
+  .player-progress input::-webkit-slider-thumb {
+    width: 1px;
+    height: 11px;
+    appearance: none;
+    border: 0;
+    background: transparent;
+  }
+
+  .player-progress input::-moz-range-track {
+    height: 11px;
+    border: 0;
+    background: transparent;
+  }
+
+  .player-progress input::-moz-range-thumb {
+    width: 1px;
+    height: 11px;
+    border: 0;
+    background: transparent;
+  }
+
+  .player-progress input:disabled {
+    cursor: default;
+  }
+
+  .player-progress-track {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 5px;
+    height: 4px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: var(--semi-color-fill-0);
+    pointer-events: none;
+    transition: box-shadow 0.14s ease;
+  }
+
+  .player-progress input:focus-visible + .player-progress-track {
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--player-progress-end) 32%, transparent);
+  }
+
+  .player-progress-track > span {
     display: block;
     height: 100%;
-    background: var(--semi-color-primary);
+    border-radius: 0 999px 999px 0;
+    background: linear-gradient(
+      90deg,
+      var(--player-progress-start) 0%,
+      var(--player-progress-end) 100%
+    );
   }
 
   .player-brief {
@@ -371,6 +443,11 @@ export const AudioArchiveViewerWrapper = styled.div`
     background: transparent;
     text-align: left;
     cursor: pointer;
+  }
+
+  .player-brief:disabled {
+    opacity: 1;
+    cursor: default;
   }
 
   .player-cover-trigger {
@@ -416,8 +493,7 @@ export const AudioArchiveViewerWrapper = styled.div`
   }
 
   .player-controls,
-  .player-extra,
-  .volume-pop {
+  .player-extra {
     display: flex;
     align-items: center;
   }
@@ -446,25 +522,17 @@ export const AudioArchiveViewerWrapper = styled.div`
     white-space: nowrap;
   }
 
-  .volume-pop {
-    gap: 4px;
-  }
-
-  .volume-pop input {
-    width: 58px;
-    height: 4px;
-    accent-color: var(--semi-color-primary);
-  }
-
   .expanded-player {
     flex: 1;
     min-height: 0;
     position: relative;
     display: grid;
     grid-template-columns: minmax(210px, 35%) minmax(260px, 1fr);
+    grid-template-rows: minmax(0, 1fr) clamp(96px, 15vh, 150px);
     align-items: center;
-    gap: 36px;
-    padding: 28px 48px 18px;
+    column-gap: 36px;
+    row-gap: 18px;
+    padding: 28px 48px 16px;
     background:
       radial-gradient(circle at 18% 22%, color-mix(in srgb, var(--semi-color-primary-light-default) 42%, transparent), transparent 34%),
       linear-gradient(180deg, color-mix(in srgb, var(--semi-color-bg-1) 82%, transparent), var(--semi-color-bg-0));
@@ -473,6 +541,21 @@ export const AudioArchiveViewerWrapper = styled.div`
 
   &.is-expanded .archive-main {
     display: none;
+  }
+
+  .expanded-state {
+    grid-column: 1 / -1;
+    grid-row: 1 / -1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--app-text-secondary);
+    font-size: 12px;
+    text-align: center;
+  }
+
+  .expanded-state.state-error {
+    color: var(--semi-color-danger);
   }
 
   .expanded-cover-wrap {
@@ -491,11 +574,23 @@ export const AudioArchiveViewerWrapper = styled.div`
     box-shadow: 0 24px 58px rgba(0, 0, 0, 0.22);
   }
 
+  .audio-cover.large.is-empty {
+    box-shadow: none;
+  }
+
   .expanded-lyrics {
     min-width: 0;
     display: flex;
     flex-direction: column;
     gap: 10px;
+  }
+
+  .expanded-spectrum {
+    grid-column: 1 / -1;
+    width: min(100%, 980px);
+    height: 100%;
+    min-height: 0;
+    justify-self: center;
   }
 
   .expanded-title {
@@ -619,6 +714,7 @@ export const AudioArchiveViewerWrapper = styled.div`
 
     .expanded-player {
       grid-template-columns: 1fr;
+      grid-template-rows: auto minmax(220px, 1fr) 76px;
       align-items: start;
       gap: 18px;
       padding: 44px 20px 18px;

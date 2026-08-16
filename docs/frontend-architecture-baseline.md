@@ -175,6 +175,8 @@ views -> features -> components / hooks -> service / preload bridge -> electron 
   - 目录树、路径定位、上传入口、外部导入、文件选择。
 - `file-viewer`
   - 图片、视频、音频、PDF、归档等预览分发。
+- `audio-viewer`
+  - 裸音频、普通音乐文件夹和音频归档共用的播放器编排；实际出声、owner 和实时频率数据仍由 `file-viewer/services/global-audio-player.ts` 单例拥有。
 
 不要把“文件树状态”和“预览器内部状态”做成双 source of truth。
 
@@ -269,11 +271,15 @@ Renderer 只能持有这些状态的投影，不要把 main 的内部结构当�
 
 - 鉴权头和统一错误处理已经在请求层收口。
 - 登录态失效会在请求层触发清理并跳回登录页。
+- `VITE_API_BASE_URL` 是 renderer 与 Electron HTTP 请求共享的 API 基址；未配置时回退到本机 `127.0.0.1:8850`。
+- `VITE_STORAGE_ORIGINS` 声明客户端需要直连的 MinIO origin。Vite 会把 API、WebSocket 与这些存储 origin 统一注入 dev server 响应头和构建 HTML 的 CSP。
+- 通过 Tailscale Serve 使用云端 Go 时，宿主系统本身必须加入对应 tailnet；仅运行用于 MinIO 入站转发的 Docker userspace sidecar，不会给宿主自动安装 tailnet 路由。
 
 规则：
 
 - 页面和组件不要重复实现鉴权、401 处理、统一错误语义。
 - 新接口优先复用现有请求层，不要在页面里直接拼 `fetch`。
+- 切换 API 或增加存储节点时同步维护环境变量，不在 `index.html`、`overlay.html` 或业务组件中硬编码部署地址。
 
 ### 6.2 Preload Bridge
 

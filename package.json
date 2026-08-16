@@ -1,7 +1,7 @@
 {
   "name": "omniflow-app",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,6 +10,9 @@
     "build:win": "tsc && vite build && electron-builder --win",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "test": "vitest run",
+    "signing:setup:mac": "bash tools/setup-local-mac-signing.sh",
+    "release:mac": "node tools/release-mac.mjs",
+    "update:serve": "node tools/serve-update-feed.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -40,6 +43,7 @@
     "@reduxjs/toolkit": "^2.8.2",
     "@uiw/react-codemirror": "^4.25.9",
     "echarts": "^6.0.0",
+    "electron-updater": "^6.8.9",
     "normalize.css": "^8.0.1",
     "os-utils": "^0.0.14",
     "pdfjs-dist": "^4.10.38",

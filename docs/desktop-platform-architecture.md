@@ -99,6 +99,8 @@ macOS 可以生成 Windows NSIS 产物，但交叉打包不能替代 Windows 运
 
 Windows 正式发布还需要在 x64 Windows 上做最终冒烟，并配置代码签名，不能只以虚拟机或 macOS 交叉构建成功作为发布结论。
 
+macOS 应用内更新的状态 owner、更新源、签名要求与本地验证流程见 `docs/desktop-auto-update.md`。自动更新属于共享 Electron 能力，平台层只承载签名、安装器和目标产物等真实平台差异。
+
 ## 6. 维护规则
 
 出现以下变化时必须更新本文：

@@ -456,9 +456,8 @@
 - Context value 与类型：`src/contexts/media-registry.context.ts`。
 - 消费 hook：`src/hooks/useMediaRegistry.ts` 暴露 `useMediaRegistry()`、`useMediaEntries()`、`useRegisterMediaEntry()`。
 - 当前注册者：
-  - `audio-viewer`（`kind: 'audio'`，仅在 owns globalAudioPlayer 且 `hasStarted` 时注册）
+  - 统一音频 viewer（裸音频、普通音乐文件夹和音频归档，`kind: 'audio'`，仅在 owns globalAudioPlayer 且 `hasStarted` 时注册）
   - `asmr-viewer`（`kind: 'audio'`，同上但 ownerType 为 `'asmr'`）
-  - `audio-archive-viewer`（`kind: 'audio'`，归档页底部播放器 owns globalAudioPlayer 且 `hasStarted` 时注册，entry 绑定当前归档 tab）
   - `video-viewer`（`kind: 'video'`，本 tab `<video>` 至少播放过一次后注册）
 - entry 关键字段：`entryId`（`<kind>:<tabId>` 格式）、`tabId`（用于跳转）、`title`、`isPlaying`、`currentTime`、`duration`。
 - 注册表还保存每个 entry 的 `play` / `pause` / `seek(time)` / `dismiss()` 回调；这些控制回调只存在于 registry 内部，不进入可订阅快照。

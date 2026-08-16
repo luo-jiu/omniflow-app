@@ -71,6 +71,7 @@
 - 播放器会记录 `ownerType = asmr`
 - 通过 `ownerKey` 识别当前播放属于哪个 ASMR 集合
 - 音频和视频允许并行；音频单例只负责同一时刻的一个音频源
+- 底部音量控件复用 `MediaVolumeControl`，音量和静音来自全局本机偏好，不由 ASMR viewer 独立保存
 
 所以后续如果改 ASMR 播放行为，要同时检查：
 

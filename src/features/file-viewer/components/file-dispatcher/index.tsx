@@ -1,7 +1,6 @@
 import React from 'react';
 import { Spin } from "@douyinfe/semi-ui";
 import ImageViewer from "../image-viewer";
-import AudioViewer from "../audio-viewer";
 import VideoViewer from "../video-viewer";
 import ComicViewer from "../comic-viewer";
 import GalleryViewer from "../gallery-viewer";
@@ -12,11 +11,10 @@ import AsmrArchiveViewer from "../../../archive-viewer/components/asmr-archive-v
 import ComicArchiveViewer from "../../../archive-viewer/components/comic-archive-viewer";
 import GalleryArchiveViewer from "../../../archive-viewer/components/gallery-archive-viewer";
 import VideoArchiveViewer from "../../../archive-viewer/components/video-archive-viewer";
-import AudioArchiveViewer from "../../../archive-viewer/components/audio-archive-viewer";
+import UnifiedAudioViewer from "../../../audio-viewer/components/unified-audio-viewer";
 import styled from 'styled-components';
 import type { FileViewerFileType } from '@/shared/file-viewer-types';
 import type {
-  FileViewerAudioPlaylist,
   FileViewerReturnTarget,
   FileViewerSubtitleSource,
   FileViewerVideoPlaylist,
@@ -33,10 +31,6 @@ interface FileDispatcherProps {
   videoSubtitleSources?: FileViewerSubtitleSource[];
   videoPlaylist?: FileViewerVideoPlaylist | null;
   videoAutoPlay?: boolean;
-  audioSubtitleSources?: FileViewerSubtitleSource[];
-  audioPlaylist?: FileViewerAudioPlaylist | null;
-  audioAutoPlay?: boolean;
-  audioCoverUrl?: string | null;
   loading: boolean;
   active?: boolean;
   reloadToken?: number;
@@ -102,10 +96,6 @@ const FileDispatcher: React.FC<FileDispatcherProps> = ({
   videoSubtitleSources,
   videoPlaylist,
   videoAutoPlay = false,
-  audioSubtitleSources,
-  audioPlaylist,
-  audioAutoPlay = false,
-  audioCoverUrl,
   loading,
   active = true,
   reloadToken = 0,
@@ -142,17 +132,16 @@ const FileDispatcher: React.FC<FileDispatcherProps> = ({
     
     case 'audio':
       return (
-        <AudioViewer
-          nodeId={nodeId}
-          url={fileUrl}
+        <UnifiedAudioViewer
+          accountScope={accountScope}
+          contentRevision={contentRevision}
+          folderNodeId={nodeId}
+          fileUrl={fileUrl}
           fileName={fileName}
+          libraryId={libraryId}
           active={active}
           tabId={tabId}
-          returnTarget={returnTarget}
-          subtitleSources={audioSubtitleSources}
-          playlist={audioPlaylist}
-          autoPlay={audioAutoPlay}
-          coverUrl={audioCoverUrl}
+          reloadToken={reloadToken}
         />
       );
 
@@ -313,7 +302,7 @@ const FileDispatcher: React.FC<FileDispatcherProps> = ({
 
     case 'audio_archive':
       return (
-        <AudioArchiveViewer
+        <UnifiedAudioViewer
           accountScope={accountScope}
           contentRevision={contentRevision}
           folderNodeId={nodeId}

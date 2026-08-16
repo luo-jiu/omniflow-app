@@ -1,6 +1,6 @@
 # Viewer 文档入口
 
-更新时间：2026-08-04
+更新时间：2026-08-16
 适用范围：`file-viewer`、`archive-viewer` 以及后续各类具体 viewer 的长期说明文档。
 
 ## 1. 作用
@@ -22,6 +22,8 @@
 
 - `file-viewer.md`
   - 普通 viewer 体系入口、职责和阅读顺序
+- `audio-viewer.md`
+  - 裸音频、普通音乐文件夹和音频归档共用的展开播放器、全局音量偏好与实时频谱
 - `archive-viewer.md`
   - 归档 viewer 体系入口、职责和阅读顺序；当前同时记录音频归档 viewer 的轻量规则
 - `asmr-viewer.md`
@@ -53,6 +55,7 @@
 2. `docs/viewers/file-viewer.md`
 3. `docs/viewers/archive-viewer.md`
 4. 再按需读具体 viewer：
+   - `docs/viewers/audio-viewer.md`
    - `docs/viewers/asmr-viewer.md`
    - `docs/viewers/comic-viewer.md`
    - `docs/viewers/gallery-viewer.md`
@@ -71,7 +74,7 @@
 
 - 视频 viewer 不再因为所在 tab 失活而自动 pause；保留进度落库（`persistVideoProgress(true)`），但不再触发 `<video>.pause()`。多个视频可在不同 tab 并行播放。
 - 普通视频的 `<video>` 元素由 `global-video-elements` 按 tab 管理。进入设置、传输中心、回收站等路由级页面时，视频元素会停靠到隐藏宿主继续播放；回到原 tab 后再挂回播放器容器。用户主动点击小窗按钮时，服务层优先把同一个元素搬到 Document PiP 桌面小窗，不可用时降级应用内浮窗。只有在库详情工作区内关闭对应 tab 或媒体控制中心移除时，才释放该 tab 的视频元素。
-- 音频 viewer / asmr viewer / 音频归档播放器共用 `globalAudioPlayer` 单例 `<audio>`，所以同一时刻仍只能有一个音频源在播放（属预期范围）；组件侧统一通过 `useGlobalAudioPlayback` 订阅和控制这个单例，但 UI 仍由各 viewer 自己决定。
+- 音频 viewer / asmr viewer / 音频归档播放器共用 `globalAudioPlayer` 单例 `<audio>`，所以同一时刻仍只能有一个音频源在播放（属预期范围）；组件侧统一通过 `useGlobalAudioPlayback` 订阅和控制这个单例。播放条布局仍可由各 viewer 决定，但音量统一复用 `MediaVolumeControl`，不得各自保存音量。
 - 进入设置、传输中心、回收站等非库详情工作区页面时，音频 viewer 卸载不得清空 `globalAudioPlayer`，避免后台播放被页面跳转打断；只有在库详情工作区内关闭对应 tab，或通过媒体控制中心 / 播放器自身执行关闭、暂停、切歌等对应媒体操作时，才由 owner 清理或变更播放源。
 - video 启动播放不再调用 `globalAudioPlayer.pause()` 暂停音频；audio 启动播放不再暂停所有视频。音视频可并行。
 - 所有 audio / video / asmr viewer、图集 viewer 内的视频详情，以及音频归档页内置播放器，在挂载且首次播放后向 `MediaRegistry` 注册自身，由 `library detail` 工具栏右侧的"媒体控制中心"集中展示与控制，详见 `docs/library-detail-workspace.md` §11。
@@ -86,6 +89,8 @@
 - `src/features/file-viewer/hooks/useGlobalAudioPlayback.ts`
   - 负责订阅和控制 `globalAudioPlayer` 单例，统一 owner 判断、播放、暂停、进度、音量和清理。
   - 普通 audio、ASMR、音频归档播放器可复用；底部播放条、展开歌词页、ASMR 列表播放器这些 UI 不在这个 hook 里统一。
+- `src/features/file-viewer/services/media-volume-preference.ts` 与 `components/media-volume-control/`
+  - 分别拥有本机音量持久化状态和统一音量交互；普通 audio、ASMR、音频归档播放器必须复用。
 - `src/features/file-viewer/session/`
   - 统一 viewer resource identity、Warm registry、reload generation、关闭 policy 和单库/session 释放。
   - 具体 snapshot codec 继续留在各 viewer 目录；禁止重新新增逐 viewer 模块级 cache `Map`。

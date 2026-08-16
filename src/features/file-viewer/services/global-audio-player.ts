@@ -1,8 +1,11 @@
 import { mediaRegistry } from '@/contexts/media-registry.singleton';
 import { type MediaRegistryRegistration } from '@/contexts/media-registry.context';
+import { mediaVolumePreference } from './media-volume-preference';
+import { GlobalAudioPlaybackRequestGate } from './global-audio-playback-request';
 
 export interface GlobalAudioPlayerState {
   src: string | null;
+  sourceNodeId: number | null;
   trackName: string | null;
   ownerType: 'default' | 'asmr';
   ownerKey: string | null;
@@ -25,10 +28,18 @@ const MEDIA_SESSION_POSITION_SYNC_MIN_DELTA_SECONDS = 1;
 // 单例 entryId：同一时刻最多一条 audio 记录在 MediaHub 中。详见 docs/media-hub-contract.md。
 const AUDIO_REGISTRY_ENTRY_ID = 'audio:active';
 
-class GlobalAudioPlayer {
+export class GlobalAudioPlayer {
   private readonly audio: HTMLAudioElement;
+  private audioContext: AudioContext | null = null;
+  private analyser: AnalyserNode | null = null;
+  private analyserBins: Uint8Array | null = null;
+  private analyserSetupInProgress = false;
+  private readonly playbackRequestGate = new GlobalAudioPlaybackRequestGate();
+  private playbackAttemptRevision = 0;
   private listeners = new Set<StateListener>();
   private sourceUrl: string | null = null;
+  private sourceRevision = 0;
+  private sourceNodeId: number | null = null;
   private trackName: string | null = null;
   private ownerType: 'default' | 'asmr' = 'default';
   private ownerKey: string | null = null;
@@ -41,10 +52,12 @@ class GlobalAudioPlayer {
   private registration: MediaRegistryRegistration | null = null;
   private registeredTabId: string | null = null;
 
-  constructor() {
-    this.audio = new Audio();
+  constructor(audio: HTMLAudioElement = new Audio()) {
+    this.audio = audio;
     this.audio.preload = 'metadata';
-    this.audio.volume = 0.7;
+    const volumePreference = mediaVolumePreference.getState();
+    this.audio.volume = volumePreference.volume;
+    this.audio.muted = volumePreference.muted;
 
     const emit = () => this.emitState();
     this.audio.addEventListener('loadedmetadata', emit);
@@ -56,6 +69,15 @@ class GlobalAudioPlayer {
       emit();
     });
     this.audio.addEventListener('volumechange', emit);
+
+    mediaVolumePreference.subscribe((preference) => {
+      if (this.audio.volume !== preference.volume) {
+        this.audio.volume = preference.volume;
+      }
+      if (this.audio.muted !== preference.muted) {
+        this.audio.muted = preference.muted;
+      }
+    });
 
     this.setupMediaSession();
   }
@@ -77,16 +99,29 @@ class GlobalAudioPlayer {
       tabId?: string | null;
       libraryId?: number | null;
       thumbnailUrl?: string | null;
+      sourceNodeId?: number | null;
+      playbackRequestId?: number;
     },
-  ) {
+  ): boolean {
+    const playbackRequestId = options?.playbackRequestId;
+    if (playbackRequestId === undefined) {
+      this.playbackRequestGate.begin();
+    } else if (!this.playbackRequestGate.isCurrent(playbackRequestId)) {
+      return false;
+    }
+    this.sourceRevision += 1;
     const nextOwnerType = options?.ownerType ?? 'default';
     const nextOwnerKey = options?.ownerKey ?? null;
     const nextTabId = options?.tabId ?? null;
     const nextLibraryId = options?.libraryId ?? null;
     const nextThumbnailUrl = options?.thumbnailUrl ?? null;
+    const nextSourceNodeId = Number.isFinite(options?.sourceNodeId)
+      ? Math.max(Math.floor(options?.sourceNodeId as number), 0) || null
+      : null;
     if (this.sourceUrl === url) {
       if (
         trackName !== undefined && trackName !== this.trackName
+        || nextSourceNodeId !== this.sourceNodeId
         || nextOwnerType !== this.ownerType
         || nextOwnerKey !== this.ownerKey
         || nextTabId !== this.tabId
@@ -96,6 +131,7 @@ class GlobalAudioPlayer {
         if (trackName !== undefined) {
           this.trackName = trackName;
         }
+        this.sourceNodeId = nextSourceNodeId;
         this.ownerType = nextOwnerType;
         this.ownerKey = nextOwnerKey;
         this.tabId = nextTabId;
@@ -105,9 +141,10 @@ class GlobalAudioPlayer {
         this.syncMediaSessionMetadata();
         this.emitState();
       }
-      return;
+      return true;
     }
     this.sourceUrl = url;
+    this.sourceNodeId = nextSourceNodeId;
     this.trackName = trackName ?? null;
     this.ownerType = nextOwnerType;
     this.ownerKey = nextOwnerKey;
@@ -121,6 +158,19 @@ class GlobalAudioPlayer {
     this.audio.load();
     this.syncMediaSessionMetadata();
     this.emitState();
+    return true;
+  }
+
+  beginPlaybackRequest(): number {
+    return this.playbackRequestGate.begin();
+  }
+
+  cancelPlaybackRequest(playbackRequestId: number): boolean {
+    return this.playbackRequestGate.cancel(playbackRequestId);
+  }
+
+  isPlaybackRequestCurrent(playbackRequestId: number): boolean {
+    return this.playbackRequestGate.isCurrent(playbackRequestId);
   }
 
   // 关闭某个 tab 时由 FileViewerContext 调用：若当前播放归属于该 tab，整体释放。
@@ -134,13 +184,35 @@ class GlobalAudioPlayer {
     this.clear();
   }
 
-  async play() {
+  async play(playbackRequestId?: number): Promise<boolean> {
+    const requestId = playbackRequestId ?? this.beginPlaybackRequest();
+    if (!this.isPlaybackRequestCurrent(requestId)) return false;
+    const playbackAttemptRevision = ++this.playbackAttemptRevision;
+    const requestedSourceUrl = this.sourceUrl;
+    const requestedSourceRevision = this.sourceRevision;
     await this.audio.play();
+    if (
+      !this.isPlaybackRequestCurrent(requestId)
+      || this.sourceUrl !== requestedSourceUrl
+    ) {
+      if (
+        this.sourceUrl === requestedSourceUrl
+        && this.sourceRevision === requestedSourceRevision
+        && this.playbackAttemptRevision === playbackAttemptRevision
+      ) {
+        this.audio.pause();
+        this.emitState();
+      }
+      return false;
+    }
     this.hasStarted = true;
     this.emitState();
+    void this.ensureAnalyserReady();
+    return true;
   }
 
   pause() {
+    this.playbackRequestGate.begin();
     this.audio.pause();
     this.emitState();
   }
@@ -160,17 +232,40 @@ class GlobalAudioPlayer {
   }
 
   setVolume(volume: number) {
-    const next = Math.max(0, Math.min(1, volume));
-    this.audio.volume = next;
-    if (next > 0 && this.audio.muted) {
-      this.audio.muted = false;
-    }
-    this.emitState();
+    mediaVolumePreference.setVolume(volume);
   }
 
   setMuted(muted: boolean) {
-    this.audio.muted = muted;
-    this.emitState();
+    mediaVolumePreference.setMuted(muted);
+  }
+
+  readSpectrumLevels(target: Float32Array, bandCount = target.length): boolean {
+    const analyser = this.analyser;
+    const bins = this.analyserBins;
+    const context = this.audioContext;
+    if (!analyser || !bins || !context || target.length === 0) return false;
+
+    analyser.getByteFrequencyData(bins);
+    const count = Math.min(Math.max(Math.floor(bandCount), 0), target.length);
+    const nyquist = context.sampleRate / 2;
+    const minimumFrequency = Math.min(45, nyquist);
+    const maximumFrequency = Math.min(16_000, nyquist);
+    const frequencyRatio = maximumFrequency / Math.max(minimumFrequency, 1);
+
+    for (let index = 0; index < count; index += 1) {
+      const ratio = count === 1 ? 0 : index / (count - 1);
+      const frequency = minimumFrequency * Math.pow(frequencyRatio, ratio);
+      const binPosition = Math.min(
+        Math.max((frequency / nyquist) * (bins.length - 1), 0),
+        bins.length - 1,
+      );
+      const firstIndex = Math.floor(binPosition);
+      const secondIndex = Math.min(firstIndex + 1, bins.length - 1);
+      const mix = binPosition - firstIndex;
+      target[index] = ((bins[firstIndex] || 0) * (1 - mix) + (bins[secondIndex] || 0) * mix) / 255;
+    }
+    target.fill(0, count);
+    return true;
   }
 
   clear() {
@@ -179,6 +274,8 @@ class GlobalAudioPlayer {
     this.audio.removeAttribute('src');
     this.audio.load();
     this.sourceUrl = null;
+    this.sourceRevision += 1;
+    this.sourceNodeId = null;
     this.trackName = null;
     this.ownerType = 'default';
     this.ownerKey = null;
@@ -193,6 +290,7 @@ class GlobalAudioPlayer {
   getState(): GlobalAudioPlayerState {
     return {
       src: this.sourceUrl,
+      sourceNodeId: this.sourceNodeId,
       trackName: this.trackName,
       ownerType: this.ownerType,
       ownerKey: this.ownerKey,
@@ -215,6 +313,55 @@ class GlobalAudioPlayer {
     this.syncMediaSessionPositionState(snapshot);
     this.syncMediaRegistry(snapshot);
     this.listeners.forEach(listener => listener(snapshot));
+  }
+
+  private async ensureAnalyserReady() {
+    if (this.audioContext && this.analyser) {
+      if (this.audioContext.state === 'suspended') {
+        try {
+          await this.audioContext.resume();
+        } catch {
+          // Audio playback remains available when spectrum analysis cannot resume.
+        }
+      }
+      return;
+    }
+    if (this.analyserSetupInProgress || typeof AudioContext === 'undefined') return;
+    const captureStream = (this.audio as HTMLAudioElement & {
+      captureStream?: () => MediaStream;
+    }).captureStream;
+    if (typeof captureStream !== 'function') return;
+    this.analyserSetupInProgress = true;
+
+    try {
+      const context = new AudioContext();
+      const analyser = context.createAnalyser();
+      analyser.fftSize = 2048;
+      analyser.smoothingTimeConstant = 0.58;
+      const stream = captureStream.call(this.audio);
+      if (stream.getAudioTracks().length === 0) {
+        void context.close();
+        return;
+      }
+      const source = context.createMediaStreamSource(stream);
+      source.connect(analyser);
+      this.audioContext = context;
+      this.analyser = analyser;
+      this.analyserBins = new Uint8Array(analyser.frequencyBinCount);
+      if (context.state === 'suspended') {
+        try {
+          await context.resume();
+        } catch {
+          // The next user-initiated play will retry resume without rebuilding the graph.
+        }
+      }
+    } catch {
+      this.audioContext = null;
+      this.analyser = null;
+      this.analyserBins = null;
+    } finally {
+      this.analyserSetupInProgress = false;
+    }
   }
 
   // 服务层自注册：必须 src + tabId + 已 play 过（hasStarted）才进 MediaHub；clear() 时取消注册。

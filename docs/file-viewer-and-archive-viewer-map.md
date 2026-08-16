@@ -1,6 +1,6 @@
 # File Viewer 与 Archive Viewer 映射说明
 
-更新时间：2026-08-13
+更新时间：2026-08-16
 适用范围：`features/file-viewer`、`features/archive-viewer`、`contexts/FileViewerContext.tsx`、`components/business/app-main/` 中与文件预览、viewer 分发和归档返回链路相关的代码。
 
 ## 1. 概述
@@ -42,7 +42,7 @@ OmniFlow 当前不是“一个万能 viewer”，而是多种 viewer 共同组�
 `FileDispatcher` 当前的实际分发关系是：
 
 - `image -> ImageViewer`
-- `audio -> AudioViewer`（参与 MediaRegistry 注册，kind=audio）
+- `audio -> UnifiedAudioViewer` 的裸音频展开模式（参与 MediaRegistry 注册，kind=audio）
 - `video -> VideoViewer`（参与 MediaRegistry 注册，kind=video）
 - `pdf -> PdfViewer`
 - `text -> TextViewer`
@@ -50,7 +50,7 @@ OmniFlow 当前不是“一个万能 viewer”，而是多种 viewer 共同组�
 - `gallery -> GalleryViewer`（图集目录 viewer；图片和视频详情在当前 tab 内切换，视频通过 `floatingVideoService` 接入 MediaHub）
 - `asmr -> AsmrViewer`（参与 MediaRegistry 注册，kind=audio，仅当 ownerType 为 asmr 且为该 viewer 的 ownerKey）
 - `video_archive -> VideoArchiveViewer`
-- `audio_archive -> AudioArchiveViewer`（归档页底部播放器首次播放后参与 MediaRegistry 注册，kind=audio）
+- `audio_archive -> UnifiedAudioViewer`（同时承接音频归档列表与普通 `AUDIO` 文件夹的单歌曲展开模式；首次播放后参与 MediaRegistry 注册，kind=audio）
 - `asmr_archive -> AsmrArchiveViewer`
 - `comic_archive -> ComicArchiveViewer`
 - `gallery_archive -> GalleryArchiveViewer`（图集归档卡片墙；直属普通图集卡片进入 `gallery`，直属下级归档卡片进入下一层 `gallery_archive`）
@@ -59,12 +59,15 @@ OmniFlow 当前不是“一个万能 viewer”，而是多种 viewer 共同组�
 对应代码位置：
 
 - `src/features/file-viewer/components/file-dispatcher/index.tsx`
+- `src/features/audio-viewer/components/unified-audio-viewer/index.tsx`
 
 `FileDispatcher` 现在会接收 `tabId` prop 并透传给 audio / asmr / video viewer，用于把它们的播放注册到 `MediaRegistry`，详见 `docs/library-detail-workspace.md` §11。
 
 `AppMain` 还会把认证账号 scope 与 tab 上的 `libraryId`、`contentRevision`、`reloadToken` 作为 session identity 输入交给 `FileDispatcher`。当前所有声明 Warm memory 的 viewer 都已消费这些字段接入公共 Viewer Session Registry，Text 还用稳定账号/资料库/节点身份定位 IndexedDB draft；分发器只透传身份事实，不持有阅读状态或草稿正文。
 
 公共 session 只保存最小稳定现场。Warm-capable viewer 统一写进程内 registry；policy 声明 device 的类型再由公共 Cold runtime 节流写入 IndexedDB，并按 Warm、device Cold、远端 `viewMeta` 的顺序恢复。目录 children、归档卡片、分页响应、临时文件/封面/字幕链接和媒体 DOM 都由对应 viewer 或服务 owner 重新构建；不得为了新 viewer 接入在分发器或 `workspace-resource-release` 中新增逐类型 cache switch。
+
+裸音频文件和普通 `AUDIO + archiveMode=0` 目录都是统一音频 viewer 的入口特例。裸音频保持 `fileType=audio`，直接使用当前文件 URL、文件名和空封面 / 空歌词；普通音乐文件夹使用 `audio-folder://` 并分发为 `audio_archive`，从直属一代中选择第一个音频、第一张图片和歌词候选。两者都默认显示展开页但不自动播放，也不经过归档分页接口。
 
 `FileDispatcher` 也会把 tab 上的 `returnTarget` 透传给需要继续开子层的归档 viewer。当前 `comic_archive` 会用它串起归档返回栈：父归档打开子归档时，子归档 tab 的 `returnTarget` 指向父归档；子归档再打开漫画或下一层归档时，会把自己的父级继续挂在 `returnTarget.returnTarget` 上。顶部返回按钮只按这条显式链返回，不根据目录树反查父级。返回栈的构造、规范化和 pop 逻辑统一收敛在 `src/contexts/file-viewer-return-target.ts`，后续不要在 viewer 内手写另一套对象拼装规则。
 
@@ -82,7 +85,6 @@ OmniFlow 当前不是“一个万能 viewer”，而是多种 viewer 共同组�
 当前目录下主要 viewer：
 
 - `image-viewer`
-- `audio-viewer`
 - `video-viewer`
 - `pdf-viewer`
 - `text-viewer`
@@ -92,19 +94,22 @@ OmniFlow 当前不是“一个万能 viewer”，而是多种 viewer 共同组�
 - `welcome-view`
 - `file-dispatcher`
 
-### 4.2 `archive-viewer`
+### 4.2 `audio-viewer`
 
-`archive-viewer` 当前只承接归档语义 viewer：
+`audio-viewer` 是裸音频、普通音乐文件夹和音频归档共用的中立业务域，承担统一播放器、入口内容发现与播放请求编排。普通 `file-viewer` 和归档映射都只依赖它，不允许再让普通 audio 反向依赖 `archive-viewer` 的实现目录。
+
+### 4.3 `archive-viewer`
+
+`archive-viewer` 主要承接其余归档语义 viewer；音频归档通过分发映射进入中立的 `audio-viewer`：
 
 - `video-archive-viewer`
-- `audio-archive-viewer`
 - `asmr-archive-viewer`
 - `comic-archive-viewer`
 - `gallery-archive-viewer`
 
 它和 `file-viewer` 是配套关系，不是替代关系。
 
-### 4.3 页面容器
+### 4.4 页面容器
 
 真正把这些 viewer 放进工作区的是：
 
@@ -115,7 +120,7 @@ OmniFlow 当前不是“一个万能 viewer”，而是多种 viewer 共同组�
 - 欢迎页和 viewer 页切换
 - tabs 保活
 - 把 active tab 交给 `FileDispatcher`
-- 透传 `videoPlaylist` / `audioPlaylist`、字幕候选、封面和归档返回目标
+- 透传视频播放列表、字幕候选、封面和归档返回目标；音频不再通过 tab context 传递播放列表或伴随资源
 - 协调全局音频播放器与 ASMR/普通音频 viewer 的关系
 
 ## 5. 归档返回链路
@@ -129,11 +134,11 @@ OmniFlow 当前不是“一个万能 viewer”，而是多种 viewer 共同组�
 
 决定是否显示“返回归档”的路径。
 
-当普通 `asmr / comic / video / audio` viewer 来自对应归档 viewer 时，顶部文件系统按钮会切换成绿色返回按钮：按钮背景保持透明，返回箭头图标本身常态显示为绿色，用来提示当前文件可以返回原归档入口。
+当普通 `asmr / comic / video` viewer 来自对应归档 viewer 时，顶部文件系统按钮会切换成绿色返回按钮：按钮背景保持透明，返回箭头图标本身常态显示为绿色，用来提示当前文件可以返回原归档入口。音频归档已经改为原页展开，不再产生这条普通 `audio` 返回链路。
 
 这说明归档 viewer 不只是视觉差异，它还携带额外导航语义。
 
-`audio_archive` 也可以在归档页内直接播放歌曲列表；归档页自身会在首次播放后以当前 tab 注册到 `MediaRegistry`，用于工具栏媒体控制中心的播放 / 暂停 / seek / 移除控制。只有用户从底部控制条打开普通 `audio` viewer 时，才通过 `FileViewerContext` 透传 `audioPlaylist`、`audioSubtitleSources`、`audioCoverUrl` 和 `returnTarget`。这些字段只表达打开来源和播放上下文，不拥有实际播放时间或歌词解析结果。
+`audio_archive` 可以在归档页内直接播放歌曲列表；裸音频、普通音乐文件夹和音频归档都在首次播放后以当前 tab 注册到 `MediaRegistry`，用于工具栏媒体控制中心的播放 / 暂停 / seek / 移除控制。旧页面使用的 `audioPlaylist`、`audioSubtitleSources`、`audioAutoPlay`、`audioCoverUrl` 和音频归档 `returnTarget` 已删除。
 
 ## 6. 当前最值得读的文件
 
@@ -178,7 +183,7 @@ OmniFlow 当前不是“一个万能 viewer”，而是多种 viewer 共同组�
 3. `gallery` 目录进入图集 viewer，图片 / 视频详情在同一 tab 内左右切换。
 4. `video_archive / audio_archive / comic_archive / asmr_archive / gallery_archive` 仍进入归档 viewer。
 5. 归档 viewer 返回链路仍然成立。
-6. 从 `asmr / comic / video / audio` 归档打开普通 viewer 后，顶部返回按钮显示绿色提示态。
+6. 从 `asmr / comic / video` 归档打开普通 viewer 后，顶部返回按钮显示绿色提示态；音频归档和普通 `AUDIO` 文件夹保持在音频归档 viewer 内展开。
 7. 从 `comic_archive` 打开子 `comic_archive` 后，顶部返回按钮能逐级回到父归档；从目录树直接打开中间层归档时，不显示不存在的父级返回。
 8. 不支持预览的文件仍进入降级态，而不是白屏。
 

@@ -146,7 +146,7 @@ Warm 和远端进度都存在时按合法 `updatedAt` 选择较新的进度；�
 - 提取 cue 文本
 - 根据当前时间找到活跃 cue
 
-`VideoViewer`、普通 `AudioViewer` 和 `AudioArchiveViewer` 都应复用这层 timed text 能力。后续字幕 / 歌词功能继续膨胀时，优先继续把时间轴解析、库内文本读取和当前 cue 匹配放在这里，而不是塞回各 viewer 的 `index.tsx`。
+`VideoViewer` 和 `UnifiedAudioViewer` 都应复用这层 timed text 能力。后续字幕 / 歌词功能继续膨胀时，优先继续把时间轴解析、库内文本读取和当前 cue 匹配放在这里，而不是塞回各 viewer 的 `index.tsx`。
 
 ### 5.3 工具台与宽屏模式
 

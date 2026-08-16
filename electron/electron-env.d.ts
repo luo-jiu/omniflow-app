@@ -1,5 +1,7 @@
 /// <reference types="vite-plugin-electron/electron-env" />
 
+declare const __OMNIFLOW_UPDATE_BASE_URL__: string
+
 declare namespace NodeJS {
   interface ProcessEnv {
     /**
@@ -211,6 +213,16 @@ interface Window {
       body: any;
     }>;
     uploadFormDataAbort: (uploadId: string) => Promise<boolean>;
+  };
+
+  electronAppUpdate?: {
+    getState: () => Promise<import('@/features/app-update/types').AppUpdateSnapshot>;
+    check: () => Promise<import('@/features/app-update/types').AppUpdateSnapshot>;
+    download: () => Promise<import('@/features/app-update/types').AppUpdateSnapshot>;
+    install: () => Promise<import('@/features/app-update/types').AppUpdateSnapshot>;
+    onStateChange: (
+      listener: (snapshot: import('@/features/app-update/types').AppUpdateSnapshot) => void,
+    ) => () => void;
   };
 
   electronWindow: {

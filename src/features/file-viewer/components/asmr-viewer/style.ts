@@ -515,26 +515,6 @@ export const AsmrViewerWrapper = styled.div`
     flex-shrink: 0;
   }
 
-  .player-volume {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    flex-shrink: 0;
-    justify-content: flex-end;
-    white-space: nowrap;
-  }
-
-  .player-volume-range {
-    width: 68px;
-    accent-color: var(--semi-color-primary);
-    height: 4px;
-  }
-
-  .player-volume-range::-webkit-slider-thumb {
-    width: 10px;
-    height: 10px;
-  }
-
   .asmr-player-bar .semi-button {
     min-height: 28px;
     padding: 0 8px;

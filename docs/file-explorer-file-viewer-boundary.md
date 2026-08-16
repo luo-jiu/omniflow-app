@@ -106,7 +106,7 @@ OmniFlow 当前的文件浏览主链路不是一个模块完成的，而是 3 �
 例如：
 
 - `image -> ImageViewer`
-- `audio -> AudioViewer`
+- `audio -> UnifiedAudioViewer` 的裸音频展开模式
 - `video -> VideoViewer`
 - `pdf -> PdfViewer`
 - `text -> TextViewer`

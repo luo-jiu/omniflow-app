@@ -7,36 +7,87 @@ function normalizeBaseUrl(url: string): string {
   return String(url || '').replace(/\/+$/, '');
 }
 
-function resolveApiOrigins(mode: string): { apiOrigin: string; apiWsOrigin: string } {
+function parseHttpOrigins(value: string, variableName: string): string[] {
+  return value
+    .split(/[\s,]+/)
+    .map(item => item.trim())
+    .filter(Boolean)
+    .map(item => {
+      const parsed = new URL(item);
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        throw new Error(`${variableName} only accepts http(s) origins: ${item}`);
+      }
+      return parsed.origin;
+    });
+}
+
+function resolveNetworkOrigins(mode: string): {
+  apiOrigin: string;
+  apiWsOrigin: string;
+  connectSources: string;
+} {
   const env = loadEnv(mode, process.cwd(), '');
   const fallbackBaseUrl = 'http://127.0.0.1:8850/api';
   const baseUrl = normalizeBaseUrl(env.VITE_API_BASE_URL || fallbackBaseUrl);
+  const storageOrigins = parseHttpOrigins(
+    env.VITE_STORAGE_ORIGINS || 'http://localhost:9000 http://127.0.0.1:9000',
+    'VITE_STORAGE_ORIGINS',
+  );
   try {
     const parsed = new URL(baseUrl);
     const wsProtocol = parsed.protocol === 'https:' ? 'wss:' : 'ws:';
+    const apiOrigin = parsed.origin;
+    const apiWsOrigin = `${wsProtocol}//${parsed.host}`;
     return {
-      apiOrigin: parsed.origin,
-      apiWsOrigin: `${wsProtocol}//${parsed.host}`,
+      apiOrigin,
+      apiWsOrigin,
+      connectSources: Array.from(new Set([
+        apiOrigin,
+        apiWsOrigin,
+        'http://localhost:9000',
+        'http://127.0.0.1:9000',
+        ...storageOrigins,
+      ])).join(' '),
     };
   } catch {
     return {
       apiOrigin: 'http://127.0.0.1:8850',
       apiWsOrigin: 'ws://127.0.0.1:8850',
+      connectSources: Array.from(new Set([
+        'http://127.0.0.1:8850',
+        'ws://127.0.0.1:8850',
+        'http://localhost:9000',
+        'http://127.0.0.1:9000',
+        ...storageOrigins,
+      ])).join(' '),
     };
   }
 }
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
-  const { apiOrigin, apiWsOrigin } = resolveApiOrigins(mode);
+  const { connectSources } = resolveNetworkOrigins(mode);
+  const env = loadEnv(mode, process.cwd(), '');
+  const updateBaseUrl = normalizeBaseUrl(
+    process.env.VITE_UPDATE_BASE_URL || env.VITE_UPDATE_BASE_URL || '',
+  );
   return {
   plugins: [
+    {
+      name: 'omniflow-csp-network-origins',
+      transformIndexHtml(html) {
+        return html.replaceAll('__OMNIFLOW_CSP_CONNECT_SOURCES__', connectSources);
+      },
+    },
     react(),
     electron({
       main: {
         // Shortcut of `build.lib.entry`.
         entry: 'electron/main.ts',
         vite: {
+          define: {
+            __OMNIFLOW_UPDATE_BASE_URL__: JSON.stringify(updateBaseUrl),
+          },
           build: {
             minify: false,
           },
@@ -86,7 +137,7 @@ export default defineConfig(({ mode }) => {
     strictPort: true,
     headers: {
       'Content-Security-Policy':
-        `default-src 'self'; connect-src 'self' ${apiOrigin} ${apiWsOrigin} http://localhost:9000 http://127.0.0.1:9000; img-src 'self' data: blob: omniflow-preview: http://*:*; media-src 'self' data: blob: http://*:*; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';`
+        `default-src 'self'; connect-src 'self' ${connectSources}; img-src 'self' data: blob: omniflow-preview: http://*:*; media-src 'self' data: blob: http://*:*; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';`
     }
   },
 }

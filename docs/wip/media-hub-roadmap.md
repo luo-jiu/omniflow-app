@@ -5,7 +5,7 @@
 ## 现状速览
 
 - `MediaRegistry`：库维度，`audio`/`video` kind，每条 `{ entryId, kind, tabId, title, isPlaying, currentTime, duration }`，控制回调包括 `play/pause/seek/dismiss`。
-- 三类注册者：audio-viewer / asmr-viewer / video-viewer，均在 hasStarted 后注册，卸载清理。
+- 三类注册者：统一音频 viewer / asmr-viewer / video-viewer，均由媒体服务在 hasStarted 后注册，tab 关闭时释放。
 - audio / asmr cleanup 会在自己是 globalAudioPlayer owner 时调 `clear()`，避免孤立后台音频。
 - `globalAudioPlayer` 已接入 MediaSession：系统媒体控制器标题来自真实 trackName，支持 play/pause/seek，clear 时清理系统媒体状态。
 - 已删除：`GlobalAudioMiniBar` 组件、video 跨 tab 自动 pause、audio↔video 互斥。
@@ -135,7 +135,7 @@
 **触发条件**：用户明确要"两首歌同时播"。目前没要求，**不要主动做**。媒体控制中心当前收尾不包含这项。
 
 如果做，影响面：
-- audio-viewer / asmr-viewer 各自持 `<audio>` ref。
+- 统一音频 viewer / asmr-viewer 共用 `globalAudioPlayer` 的单例 `<audio>`。
 - 删掉 ownerKey/ownerType 概念，每个 viewer 自治。
 - MediaSession 只能绑一个"主"实例（用户上次操作的那个）。
 - registry 不变。

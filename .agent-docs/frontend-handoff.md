@@ -24,6 +24,8 @@
 3. `.agent-docs/frontend-documentation-standard.md`
 4. `docs/frontend-architecture-baseline.md`
 5. 按需补读专题：
+   - `docs/current-deployment-topology.md`（云端、Tailscale、MinIO、打包或发布相关任务）
+   - `docs/local-macos-signing-and-release.md`（个人签名、bootstrap、证书恢复与 macOS 发布）
    - `docs/embedded-browser-architecture.md`
    - `docs/library-detail-workspace.md`
    - `docs/file-explorer-file-viewer-boundary.md`
@@ -53,8 +55,12 @@
 
 - 总体分层、状态 owner、IPC / Electron 边界：
   - `docs/frontend-architecture-baseline.md`
+- 当前云端、Tailscale、多 MinIO 和发布方式：
+  - `docs/current-deployment-topology.md`
 - macOS / Windows 窗口策略、平台 bridge 和构建验证：
   - `docs/desktop-platform-architecture.md`
+- macOS 个人签名、bootstrap 和后续发布：
+  - `docs/local-macos-signing-and-release.md`
 - Embedded Browser 生命周期、资源捕捉、下载导入：
   - `docs/embedded-browser-architecture.md`
 - `library detail` 工作区模式、browser / file-viewer / search-home 切换：

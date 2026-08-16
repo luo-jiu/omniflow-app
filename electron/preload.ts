@@ -7,6 +7,7 @@ import type {
   EmbeddedBrowserExternalToolOption,
   EmbeddedBrowserExternalToolSettings,
 } from '@/features/embedded-browser/external-tools/model/embedded-browser-external-tools'
+import type { AppUpdateSnapshot } from '@/features/app-update/types'
 
 // --------- Expose some API to the Renderer process ---------
 contextBridge.exposeInMainWorld('ipcRenderer', {
@@ -149,6 +150,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
     };
     ipcRenderer.on('http:upload:progress', wrapped);
     return () => ipcRenderer.removeListener('http:upload:progress', wrapped);
+  },
+})
+
+contextBridge.exposeInMainWorld('electronAppUpdate', {
+  getState: (): Promise<AppUpdateSnapshot> => ipcRenderer.invoke('app-update:get-state'),
+  check: (): Promise<AppUpdateSnapshot> => ipcRenderer.invoke('app-update:check'),
+  download: (): Promise<AppUpdateSnapshot> => ipcRenderer.invoke('app-update:download'),
+  install: (): Promise<AppUpdateSnapshot> => ipcRenderer.invoke('app-update:install'),
+  onStateChange: (listener: (snapshot: AppUpdateSnapshot) => void) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, snapshot: AppUpdateSnapshot) => listener(snapshot);
+    ipcRenderer.on('app-update:state', wrapped);
+    return () => ipcRenderer.removeListener('app-update:state', wrapped);
   },
 })
 

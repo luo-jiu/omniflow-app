@@ -898,6 +898,19 @@ export function useRepositoryTree(
         return;
       }
 
+      if (builtInType === 'AUDIO') {
+        if (onFileOpen) {
+          onFileOpen(
+            `audio-folder://library/${selectedLibraryId}/node/${node.id}`,
+            node.name,
+            'audio_archive',
+            node.id,
+            { tabTypeLabel: builtInType },
+          );
+        }
+        return;
+      }
+
       if (builtInType === 'GALLERY') {
         if (onFileOpen) {
           onFileOpen(

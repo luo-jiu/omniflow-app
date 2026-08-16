@@ -3,6 +3,7 @@ import {
   globalAudioPlayer,
   type GlobalAudioPlayerState,
 } from '@/features/file-viewer/services/global-audio-player';
+import { isGlobalAudioOwnedBy } from '@/features/file-viewer/services/global-audio-owner';
 
 type GlobalAudioOwnerType = GlobalAudioPlayerState['ownerType'];
 
@@ -26,27 +27,53 @@ export function useGlobalAudioPlayback({
     return globalAudioPlayer.subscribe(setPlayerState);
   }, []);
 
-  const isOwnedSource = Boolean(
-    ownerKey
-    && playerState.ownerType === ownerType
-    && playerState.ownerKey === ownerKey,
-  );
+  const isOwnedSource = isGlobalAudioOwnedBy(playerState, {
+    libraryId,
+    ownerKey,
+    ownerType,
+    tabId,
+  });
 
   const ensureSource = useCallback((
     url: string,
     trackName?: string | null,
     thumbnailUrl?: string | null,
+    sourceNodeId?: number | null,
+    playbackRequestId?: number,
   ) => {
-    globalAudioPlayer.ensureSource(
+    return globalAudioPlayer.ensureSource(
       url,
       trackName ?? null,
-      { ownerType, ownerKey, tabId, libraryId, thumbnailUrl: thumbnailUrl ?? null },
+      {
+        ownerType,
+        ownerKey,
+        tabId,
+        libraryId,
+        thumbnailUrl: thumbnailUrl ?? null,
+        sourceNodeId: sourceNodeId ?? null,
+        playbackRequestId,
+      },
     );
   }, [ownerKey, ownerType, tabId, libraryId]);
 
-  const play = useCallback(async () => {
-    await globalAudioPlayer.play();
+  const play = useCallback(async (playbackRequestId?: number) => {
+    return globalAudioPlayer.play(playbackRequestId);
   }, []);
+
+  const beginPlaybackRequest = useCallback(
+    () => globalAudioPlayer.beginPlaybackRequest(),
+    [],
+  );
+
+  const cancelPlaybackRequest = useCallback(
+    (playbackRequestId: number) => globalAudioPlayer.cancelPlaybackRequest(playbackRequestId),
+    [],
+  );
+
+  const isPlaybackRequestCurrent = useCallback(
+    (playbackRequestId: number) => globalAudioPlayer.isPlaybackRequestCurrent(playbackRequestId),
+    [],
+  );
 
   const pause = useCallback(() => {
     globalAudioPlayer.pause();
@@ -87,9 +114,12 @@ export function useGlobalAudioPlayback({
 
   return useMemo(() => ({
     adjustVolumeBy,
+    beginPlaybackRequest,
+    cancelPlaybackRequest,
     ensureSource,
     getPlayerState,
     isOwnedSource,
+    isPlaybackRequestCurrent,
     pause,
     play,
     playerState,
@@ -100,9 +130,12 @@ export function useGlobalAudioPlayback({
     togglePlay,
   }), [
     adjustVolumeBy,
+    beginPlaybackRequest,
+    cancelPlaybackRequest,
     ensureSource,
     getPlayerState,
     isOwnedSource,
+    isPlaybackRequestCurrent,
     pause,
     play,
     playerState,

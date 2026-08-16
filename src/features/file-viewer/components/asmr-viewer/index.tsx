@@ -3,11 +3,9 @@ import {
   IconFolder,
   IconEdit,
   IconBackward,
-  IconForward,
-  IconMute,
+  IconFastForward,
   IconPlay,
   IconPause,
-  IconVolume2,
   IconMusic,
 } from '@douyinfe/semi-icons';
 import { Button, Input, Modal, Select, Spin, Toast } from '@douyinfe/semi-ui';
@@ -38,6 +36,7 @@ import {
   type AsmrViewerSessionSnapshot,
 } from './asmr-viewer-session';
 import { useViewerSession, type ViewerSessionAdapter } from '@/features/file-viewer/session';
+import { MediaVolumeControl } from '@/features/file-viewer/components/media-volume-control';
 
 interface AsmrViewerProps {
   accountScope: string | null;
@@ -261,9 +260,12 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
   const [coverPickerItems, setCoverPickerItems] = useState<AsmrNodeItem[]>([]);
   const [coverPickerLoading, setCoverPickerLoading] = useState(false);
   const {
+    beginPlaybackRequest,
+    cancelPlaybackRequest,
     ensureSource,
     getPlayerState,
     isOwnedSource,
+    isPlaybackRequestCurrent,
     play,
     playerState,
     seekTo,
@@ -282,6 +284,7 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
   const coverRequestIdRef = useRef(0);
   const coverPickerRequestIdRef = useRef(0);
   const audioUrlCacheRef = useRef<Map<number, string>>(new Map());
+  const activePlaybackRequestIdRef = useRef<number | null>(null);
   const listViewportRef = useRef<HTMLDivElement | null>(null);
   const rowElementMapRef = useRef<Map<number, HTMLDivElement>>(new Map());
   const pathStackRef = useRef(pathStack);
@@ -491,15 +494,38 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
     return url;
   }, [libraryId]);
 
+  const cancelPendingAudioPlayback = useCallback(() => {
+    const requestId = activePlaybackRequestIdRef.current;
+    activePlaybackRequestIdRef.current = null;
+    if (requestId !== null) cancelPlaybackRequest(requestId);
+  }, [cancelPlaybackRequest]);
+
+  useEffect(() => cancelPendingAudioPlayback, [
+    asmrOwnerKey,
+    cancelPendingAudioPlayback,
+    libraryId,
+  ]);
+
   const playAudioInAsmr = useCallback(async (
     targetAudio: AsmrNodeItem,
     queue: AsmrNodeItem[],
     parentNodeId?: number | null,
   ) => {
+    const requestId = beginPlaybackRequest();
+    activePlaybackRequestIdRef.current = requestId;
     try {
       const url = await resolveAudioUrl(targetAudio);
-      ensureSource(url, resolveDisplayName(targetAudio));
-      await play();
+      if (!isPlaybackRequestCurrent(requestId)) return;
+      const claimed = ensureSource(
+        url,
+        resolveDisplayName(targetAudio),
+        null,
+        targetAudio.id,
+        requestId,
+      );
+      if (!claimed) return;
+      const started = await play(requestId);
+      if (!started || !isPlaybackRequestCurrent(requestId)) return;
       setAudioQueue(queue);
       setCurrentAudioId(targetAudio.id);
       currentAudioParentNodeIdRef.current = parentNodeId
@@ -510,10 +536,21 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
       setSelectedId(targetAudio.id);
       setSeekingTime(null);
     } catch (error: any) {
+      if (!isPlaybackRequestCurrent(requestId)) return;
       runtimeLogger.error('ASMR 音频播放失败:', error);
       Toast.error(error?.message || '播放音频失败');
+    } finally {
+      if (activePlaybackRequestIdRef.current === requestId) {
+        activePlaybackRequestIdRef.current = null;
+      }
     }
-  }, [ensureSource, play, resolveAudioUrl]);
+  }, [
+    beginPlaybackRequest,
+    ensureSource,
+    isPlaybackRequestCurrent,
+    play,
+    resolveAudioUrl,
+  ]);
 
   const resolveCover = useCallback(async (
     rootChildren: AsmrNodeItem[],
@@ -1228,7 +1265,7 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
               <Button
                 theme="borderless"
                 size="default"
-                icon={<IconForward />}
+                icon={<IconFastForward />}
                 disabled={!hasNextAudio}
                 onClick={() => {
                   void handlePlayNextAudio();
@@ -1243,28 +1280,12 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
                 <span className="player-time">{formatDuration(playerState.duration)}</span>
               </div>
 
-              <div className="player-volume">
-                <Button
-                  theme="borderless"
-                  size="default"
-                  icon={playerState.isMuted ? <IconMute /> : <IconVolume2 />}
-                  onClick={() => {
-                    setMuted(!playerState.isMuted);
-                  }}
-                />
-                <input
-                  className="player-volume-range"
-                  type="range"
-                  min={0}
-                  max={1}
-                  step={0.01}
-                  value={playerState.isMuted ? 0 : playerState.volume}
-                  onChange={(event) => {
-                    const next = Number(event.target.value);
-                    setVolume(next);
-                  }}
-                />
-              </div>
+              <MediaVolumeControl
+                muted={playerState.isMuted}
+                volume={playerState.volume}
+                onMutedChange={setMuted}
+                onVolumeChange={setVolume}
+              />
             </div>
           </div>
         ) : null}
