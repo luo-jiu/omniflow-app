@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OmniFlow Drag & Drop Lab Host</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #f5f6f8;
+      color: #20242b;
+    }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+    body { display: grid; grid-template-columns: 50% 50%; }
+    main {
+      min-width: 0;
+      height: 100vh;
+      display: grid;
+      grid-template-rows: auto auto minmax(160px, 1fr) minmax(150px, 0.8fr);
+      gap: 10px;
+      padding: 14px;
+      border-right: 1px solid #cfd4dc;
+      background: #f7f8fa;
+    }
+    h1 { margin: 0; font-size: 18px; letter-spacing: 0; }
+    .subtitle { margin: 4px 0 0; color: #626b78; font-size: 12px; line-height: 1.5; }
+    .toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+    button, .drag-card {
+      border: 1px solid #cbd1da;
+      border-radius: 6px;
+      background: #fff;
+      color: #20242b;
+      min-height: 32px;
+      padding: 7px 10px;
+      font-size: 12px;
+    }
+    button { cursor: pointer; }
+    button:hover, .drag-card:hover { border-color: #4677d5; }
+    label { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
+    .surface {
+      min-height: 0;
+      border: 1px dashed #8d99aa;
+      border-radius: 6px;
+      background: #fff;
+      padding: 12px;
+      overflow: auto;
+    }
+    .surface.is-over { border-color: #2e6bd3; background: #eef4ff; }
+    .surface h2 { margin: 0 0 6px; font-size: 13px; }
+    .drag-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 8px; }
+    .drag-card { cursor: grab; user-select: none; line-height: 1.45; }
+    .drag-card strong { display: block; font-size: 12px; }
+    .drag-card span { color: #6b7481; font-size: 11px; }
+    pre {
+      margin: 0;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .log { background: #171a1f; color: #dfe6ef; border-color: #303640; }
+    .right-placeholder {
+      display: grid;
+      place-items: center;
+      height: 100vh;
+      background: #eef1f5;
+      color: #747e8d;
+      font-size: 12px;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root { background: #15181d; color: #e6e9ee; }
+      main { background: #171b21; border-color: #343a44; }
+      .subtitle { color: #9da6b3; }
+      button, .drag-card, .surface { background: #20252d; color: #e6e9ee; border-color: #434b58; }
+      .surface.is-over { background: #192b49; border-color: #6d9ceb; }
+      .drag-card span { color: #a2aab6; }
+      .right-placeholder { background: #12151a; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Renderer DOM</h1>
+      <p class="subtitle">左侧属于宿主 renderer，右侧由独立 WebContentsView 覆盖。所有记录仅保留在内存。</p>
+    </header>
+
+    <div>
+      <div class="toolbar">
+        <button id="reveal-fixture" type="button">在系统中显示测试文件</button>
+        <button id="reset-page" type="button">重置右侧页面</button>
+        <button id="clear-log" type="button">清空记录</button>
+        <label>
+          <input id="navigate-toggle" type="checkbox">
+          允许未处理拖拽触发导航
+        </label>
+      </div>
+      <div class="drag-grid">
+        <div id="native-file-card" class="drag-card" draggable="true">
+          <strong>拖动真实测试文件</strong>
+          <span>通过 webContents.startDrag 发送 sample.txt + sample.json</span>
+        </div>
+        <div id="custom-card" class="drag-card" draggable="true">
+          <strong>拖动自定义网页数据</strong>
+          <span>发送 text/plain、text/html、text/uri-list 和自定义 MIME</span>
+        </div>
+        <div id="download-url-card" class="drag-card" draggable="true" data-ready="false">
+          <strong>拖动远程承诺文件</strong>
+          <span>仅设置 Chromium DownloadURL，不调用 Electron startDrag</span>
+        </div>
+      </div>
+    </div>
+
+    <section id="drop-zone" class="surface">
+      <h2>宿主接收区</h2>
+      <p class="subtitle">从右侧网页或 Finder / Explorer 拖到这里。该区域只诊断，不保存或上传。</p>
+      <pre id="drop-summary">等待拖拽</pre>
+    </section>
+
+    <section class="surface log">
+      <pre id="event-log"></pre>
+    </section>
+  </main>
+
+  <aside class="right-placeholder">此区域将被 WebContentsView 覆盖</aside>
+
+  <script>
+    const dropZone = document.querySelector('#drop-zone')
+    const dropSummary = document.querySelector('#drop-summary')
+    const eventLog = document.querySelector('#event-log')
+    const navigateToggle = document.querySelector('#navigate-toggle')
+    const downloadUrlCard = document.querySelector('#download-url-card')
+    let dragOverCount = 0
+    let downloadUrl = ''
+
+    function now() {
+      return new Date().toLocaleTimeString('zh-CN', { hour12: false })
+    }
+
+    function appendLog(type, payload = {}) {
+      const line = `${now()}  ${type}\n${JSON.stringify(payload, null, 2)}\n\n`
+      eventLog.textContent = `${line}${eventLog.textContent}`.slice(0, 24000)
+    }
+
+    function listFiles(dataTransfer) {
+      return Array.from(dataTransfer?.files || []).map((file) => ({
+        lastModified: file.lastModified,
+        name: file.name,
+        size: file.size,
+        type: file.type,
+      }))
+    }
+
+    function readDropPayload(dataTransfer) {
+      const types = Array.from(dataTransfer?.types || [])
+      const data = {}
+      for (const type of types) {
+        if (type === 'Files') continue
+        try {
+          data[type] = dataTransfer.getData(type)
+        } catch (error) {
+          data[type] = `[读取失败: ${String(error)}]`
+        }
+      }
+      return {
+        data,
+        dropEffect: dataTransfer.dropEffect,
+        effectAllowed: dataTransfer.effectAllowed,
+        files: listFiles(dataTransfer),
+        types,
+      }
+    }
+
+    dropZone.addEventListener('dragenter', (event) => {
+      event.preventDefault()
+      dropZone.classList.add('is-over')
+      appendLog('host:dragenter', { types: Array.from(event.dataTransfer?.types || []) })
+    })
+
+    dropZone.addEventListener('dragover', (event) => {
+      event.preventDefault()
+      event.dataTransfer.dropEffect = 'copy'
+      dragOverCount += 1
+      if (dragOverCount % 20 === 1) {
+        appendLog('host:dragover', { types: Array.from(event.dataTransfer?.types || []) })
+      }
+    })
+
+    dropZone.addEventListener('dragleave', (event) => {
+      if (dropZone.contains(event.relatedTarget)) return
+      dropZone.classList.remove('is-over')
+      appendLog('host:dragleave')
+    })
+
+    dropZone.addEventListener('drop', (event) => {
+      event.preventDefault()
+      dropZone.classList.remove('is-over')
+      const payload = readDropPayload(event.dataTransfer)
+      dropSummary.textContent = JSON.stringify(payload, null, 2)
+      appendLog('host:drop', payload)
+    })
+
+    document.querySelector('#native-file-card').addEventListener('dragstart', (event) => {
+      // This card starts Electron's OS-level drag session below. Prevent the
+      // renderer's own HTML5 drag session from running at the same time; the
+      // two sessions can otherwise overlap and swallow the next click.
+      event.preventDefault()
+      event.stopPropagation()
+      appendLog('host:start-native-drag')
+      window.dragDropLab.startNativeDrag()
+    })
+
+    document.querySelector('#custom-card').addEventListener('dragstart', (event) => {
+      event.dataTransfer.effectAllowed = 'copy'
+      event.dataTransfer.setData('text/plain', 'omniflow renderer drag lab')
+      event.dataTransfer.setData('text/html', '<p data-omniflow-drag-lab="true">renderer drag lab</p>')
+      event.dataTransfer.setData('text/uri-list', 'https://example.com/omniflow-renderer-drag-lab.txt')
+      event.dataTransfer.setData('application/x-omniflow-drag-lab', JSON.stringify({ source: 'renderer' }))
+      appendLog('host:start-custom-drag', { types: Array.from(event.dataTransfer.types) })
+    })
+
+    downloadUrlCard.addEventListener('dragstart', (event) => {
+      if (!downloadUrl) {
+        event.preventDefault()
+        appendLog('host:start-download-url-drag-blocked', { reason: 'download URL 尚未就绪' })
+        return
+      }
+      const payload = `text/plain:omniflow-download-url-sample.txt:${downloadUrl}`
+      event.dataTransfer.effectAllowed = 'copy'
+      event.dataTransfer.setData('DownloadURL', payload)
+      appendLog('host:start-download-url-drag', {
+        payload,
+        types: Array.from(event.dataTransfer.types),
+      })
+    })
+
+    downloadUrlCard.addEventListener('dragend', (event) => {
+      appendLog('host:download-url-dragend', {
+        dropEffect: event.dataTransfer?.dropEffect || '',
+        types: Array.from(event.dataTransfer?.types || []),
+      })
+    })
+
+    document.querySelector('#reveal-fixture').addEventListener('click', () => window.dragDropLab.revealFixture())
+    document.querySelector('#reset-page').addEventListener('click', () => window.dragDropLab.resetPage())
+    document.querySelector('#clear-log').addEventListener('click', () => {
+      eventLog.textContent = ''
+      dropSummary.textContent = '等待拖拽'
+    })
+    navigateToggle.addEventListener('change', async () => {
+      const result = await window.dragDropLab.setNavigateOnDrop(navigateToggle.checked)
+      appendLog('host:navigate-mode', result)
+    })
+
+    function clearDragVisualState() {
+      dragOverCount = 0
+      dropZone.classList.remove('is-over')
+    }
+
+    // A drag can cross the host renderer and the embedded WebContentsView,
+    // so the dropzone may not receive its own dragleave/drop event. Always
+    // clear transient state when the browser reports that the gesture ended.
+    window.addEventListener('dragend', clearDragVisualState)
+    window.addEventListener('drop', clearDragVisualState)
+
+    window.dragDropLab.onBrowserEvent((payload) => appendLog(`browser:${payload.type}`, payload.detail))
+    window.dragDropLab.getEnvironment().then((environment) => {
+      navigateToggle.checked = Boolean(environment.navigateOnDragDrop)
+      downloadUrl = String(environment.downloadUrl || '')
+      downloadUrlCard.dataset.ready = downloadUrl ? 'true' : 'false'
+      appendLog('host:ready', environment)
+    })
+  </script>
+</body>
+</html>

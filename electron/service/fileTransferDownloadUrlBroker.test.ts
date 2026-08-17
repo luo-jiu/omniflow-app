@@ -1,0 +1,126 @@
+import http from 'node:http'
+
+import { afterEach, describe, expect, it } from 'vitest'
+
+import { FileTransferDownloadUrlBroker } from './fileTransferDownloadUrlBroker'
+
+const brokers: FileTransferDownloadUrlBroker[] = []
+const sourceServers: http.Server[] = []
+
+async function createSourceServer(body: string): Promise<string> {
+  const server = http.createServer((request, response) => {
+    if (request.url !== '/source') {
+      response.writeHead(404).end()
+      return
+    }
+    const rangeMatch = String(request.headers.range || '').match(/^bytes=(\d+)-(\d+)$/)
+    if (rangeMatch) {
+      const start = Number(rangeMatch[1])
+      const end = Math.min(Number(rangeMatch[2]), Buffer.byteLength(body) - 1)
+      const partial = Buffer.from(body).subarray(start, end + 1)
+      response.writeHead(206, {
+        'Accept-Ranges': 'bytes',
+        'Content-Length': partial.byteLength,
+        'Content-Range': `bytes ${start}-${end}/${Buffer.byteLength(body)}`,
+        'Content-Type': 'text/plain; charset=utf-8',
+      })
+      response.end(partial)
+      return
+    }
+    response.writeHead(200, {
+      'Accept-Ranges': 'bytes',
+      'Content-Length': Buffer.byteLength(body),
+      'Content-Type': 'text/plain; charset=utf-8',
+      ETag: 'fixture-etag',
+    })
+    response.end(body)
+  })
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject)
+    server.listen(0, '127.0.0.1', () => resolve())
+  })
+  sourceServers.push(server)
+  const address = server.address()
+  if (!address || typeof address === 'string') throw new Error('source server missing port')
+  return `http://127.0.0.1:${address.port}/source`
+}
+
+async function closeServer(server: http.Server): Promise<void> {
+  await new Promise<void>((resolve) => server.close(() => resolve()))
+}
+
+afterEach(async () => {
+  await Promise.all(brokers.splice(0).map((broker) => broker.close()))
+  await Promise.all(sourceServers.splice(0).map(closeServer))
+})
+
+describe('FileTransferDownloadUrlBroker', () => {
+  it('waits for a signed source URL and streams it through a loopback claim', async () => {
+    const sourceUrl = await createSourceServer('download-url-fixture')
+    const broker = new FileTransferDownloadUrlBroker({
+      runtimeTokenFactory: () => 'runtime-token',
+      sourceWaitMs: 1_000,
+    })
+    brokers.push(broker)
+    await broker.start()
+    const environment = broker.getEnvironment()
+    const claimId = '12345678-1234-1234-1234-123456789abc'
+    const downloadUrl = `${environment.origin}/file-transfer-download/${environment.runtimeToken}/${claimId}/sample.txt`
+
+    const responsePromise = fetch(downloadUrl)
+    await new Promise(resolve => setTimeout(resolve, 10))
+    broker.resolveClaim({
+      claimId,
+      fileName: '测试 sample.txt',
+      mimeType: 'text/plain',
+      sourceUrl,
+    })
+    const response = await responsePromise
+
+    expect(response.status).toBe(200)
+    expect(response.headers.get('content-disposition')).toContain("filename*=UTF-8''")
+    expect(response.headers.get('etag')).toBe('fixture-etag')
+    expect(await response.text()).toBe('download-url-fixture')
+  })
+
+  it('keeps the runtime token private and reports rejected claims', async () => {
+    const broker = new FileTransferDownloadUrlBroker({
+      runtimeTokenFactory: () => 'runtime-token',
+      sourceWaitMs: 1_000,
+    })
+    brokers.push(broker)
+    await broker.start()
+    const environment = broker.getEnvironment()
+    const claimId = '12345678-1234-1234-1234-123456789abc'
+
+    const invalidResponse = await fetch(
+      `${environment.origin}/file-transfer-download/wrong-token/${claimId}/sample.txt`,
+    )
+    expect(invalidResponse.status).toBe(404)
+
+    const rejectedUrl = `${environment.origin}/file-transfer-download/${environment.runtimeToken}/${claimId}/sample.txt`
+    const responsePromise = fetch(rejectedUrl)
+    broker.rejectClaim({ claimId, error: 'signed link failed', fileName: 'sample.txt' })
+    const rejectedResponse = await responsePromise
+    expect(rejectedResponse.status).toBe(502)
+    expect(await rejectedResponse.text()).toContain('signed link failed')
+  })
+
+  it('forwards range requests used by desktop download clients', async () => {
+    const sourceUrl = await createSourceServer('0123456789')
+    const broker = new FileTransferDownloadUrlBroker({ runtimeTokenFactory: () => 'runtime-token' })
+    brokers.push(broker)
+    await broker.start()
+    const environment = broker.getEnvironment()
+    const claimId = '12345678-1234-1234-1234-123456789abc'
+    broker.resolveClaim({ claimId, fileName: 'range.txt', sourceUrl })
+
+    const response = await fetch(
+      `${environment.origin}/file-transfer-download/${environment.runtimeToken}/${claimId}/range.txt`,
+      { headers: { Range: 'bytes=2-5' } },
+    )
+    expect(response.status).toBe(206)
+    expect(response.headers.get('content-range')).toBe('bytes 2-5/10')
+    expect(await response.text()).toBe('2345')
+  })
+})

@@ -83,6 +83,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('fs:cleanup-staged-text-file', stagedPath),
   cleanupTempImportPath: (targetPath: string) =>
     ipcRenderer.invoke('fs:cleanup-temp-import-path', targetPath),
+  fileTransferGetDownloadUrlEnvironment: () =>
+    ipcRenderer.invoke('file-transfer:get-download-url-environment'),
+  fileTransferResolveDownloadUrlClaim: (input: {
+    claimId: string;
+    fileName: string;
+    mimeType?: string;
+    sourceUrl: string;
+  }) => ipcRenderer.invoke('file-transfer:resolve-download-url-claim', input),
+  fileTransferRejectDownloadUrlClaim: (input: {
+    claimId: string;
+    error: string;
+    fileName?: string;
+  }) => ipcRenderer.invoke('file-transfer:reject-download-url-claim', input),
   processMediaFile: (payload: {
     ffmpegPath?: string;
     inputFileName?: string;

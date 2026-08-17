@@ -274,3 +274,20 @@ Text dirty draft 属于用户数据，不跟随普通 tab 关闭、资料库释�
 维护要求：
 
 - 若后续调整“拖到子节点是否可上传到父目录”的行为，必须同时更新命中规则与高亮规则，避免交互心智分裂。
+
+## 11. 目录树单文件导出
+
+目录树到 Finder / Explorer 的第一版导出只支持单选文件，并与树内移动复用同一个 Semi Tree
+HTML5 拖拽手势：
+
+- 文件行不增加拖拽手柄，不要求先准备或重复拖动。
+- 拖拽预览直接复用当前节点的小图标与截断名称，保持透明背景，不显示应用图标、卡片背景或大尺寸缩略图；树内移动与系统导出共用同一份预览。
+- `dragstart` 只附加 Chromium `DownloadURL`，不得调用 `webContents.startDrag()`。
+- 树内 drop 继续由 `handleTreeDrop` 处理，目录和多选不附加系统导出声明。
+- `dragstart` 写入承诺后 renderer 立即异步获取该节点的短期签名链接但不下载正文；main 的 `FileTransferDownloadUrlBroker` 通过
+  `127.0.0.1` 随机端口、运行期 token 和短 TTL claim 向 Finder / Explorer 流式转发。
+- renderer 不持有本地暂存路径；broker 不提前下载完整文件。右键下载继续作为稳定兜底。
+- 导出文件名由 renderer 与 main 共用同一套跨平台规范化规则，替换非法字符并规避 Windows
+  `CON`、`AUX`、`COM1` 等保留名称及末尾句点。
+- macOS Finder 已验证 `DownloadURL` 平台能力和正式资料库单文件链路；Windows Explorer 仍需按
+  `docs/frontend-validation-matrix.md` 完成手工验证。

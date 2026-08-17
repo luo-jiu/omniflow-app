@@ -17,6 +17,8 @@ import os$1 from "node:os";
 import { Buffer as Buffer$1 } from "node:buffer";
 import crypto, { randomUUID } from "node:crypto";
 import { promisify } from "node:util";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import require$$0$1 from "constants";
 import require$$0$2 from "stream";
 import require$$4 from "util";
@@ -1821,12 +1823,314 @@ function registerImagePreviewIpc(ipcMain2) {
     }
   });
 }
+const WINDOWS_RESERVED_BASENAME = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i;
+const INVALID_FILE_NAME_CHARACTERS = new Set('<>:"/\\|?*');
+function replaceInvalidFileNameCharacters(fileName) {
+  return Array.from(fileName, (character) => character.charCodeAt(0) < 32 || INVALID_FILE_NAME_CHARACTERS.has(character) ? "_" : character).join("");
+}
+function normalizeDownloadFileName(fileName) {
+  const normalized = replaceInvalidFileNameCharacters(String(fileName || "file").normalize("NFC")).trim().replace(/[. ]+$/g, "");
+  if (!normalized || normalized === "." || normalized === "..") {
+    return "file";
+  }
+  if (WINDOWS_RESERVED_BASENAME.test(normalized)) {
+    return `_${normalized}`;
+  }
+  return normalized;
+}
+const DEFAULT_CLAIM_TTL_MS = 5 * 60 * 1e3;
+const DEFAULT_SOURCE_WAIT_MS = 30 * 1e3;
+const DOWNLOAD_ROUTE_PREFIX = "file-transfer-download";
+function normalizeClaimId(value) {
+  const claimId = String(value || "").trim();
+  if (!/^[a-zA-Z0-9_-]{16,128}$/.test(claimId)) {
+    throw new Error("无效的下载声明");
+  }
+  return claimId;
+}
+function normalizeSourceUrl(value) {
+  const sourceUrl = String(value || "").trim();
+  const parsed = new URL(sourceUrl);
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error("下载来源仅支持 HTTP(S)");
+  }
+  return sourceUrl;
+}
+function quoteContentDispositionFileName(fileName) {
+  const fallback = normalizeDownloadFileName(fileName).replace(/[^\x20-\x7e]/g, "_").replace(/["\\]/g, "_");
+  return `attachment; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(fileName)}`;
+}
+function writeError(response, statusCode, message) {
+  if (response.headersSent || response.writableEnded) return;
+  const body = Buffer.from(message, "utf8");
+  response.writeHead(statusCode, {
+    "Cache-Control": "no-store",
+    "Content-Length": body.byteLength,
+    "Content-Type": "text/plain; charset=utf-8",
+    "X-Content-Type-Options": "nosniff"
+  });
+  response.end(body);
+}
+class FileTransferDownloadUrlBroker {
+  constructor(options = {}) {
+    __publicField(this, "claimTtlMs");
+    __publicField(this, "sourceWaitMs");
+    __publicField(this, "now");
+    __publicField(this, "runtimeToken");
+    __publicField(this, "fetcher");
+    __publicField(this, "claims", /* @__PURE__ */ new Map());
+    __publicField(this, "server", null);
+    __publicField(this, "origin", "");
+    this.claimTtlMs = Number.isFinite(options.claimTtlMs) && Number(options.claimTtlMs) > 0 ? Number(options.claimTtlMs) : DEFAULT_CLAIM_TTL_MS;
+    this.sourceWaitMs = Number.isFinite(options.sourceWaitMs) && Number(options.sourceWaitMs) > 0 ? Number(options.sourceWaitMs) : DEFAULT_SOURCE_WAIT_MS;
+    this.now = options.now || Date.now;
+    this.runtimeToken = (options.runtimeTokenFactory || (() => crypto.randomBytes(32).toString("hex")))();
+    this.fetcher = options.fetcher || globalThis.fetch;
+  }
+  async start() {
+    if (this.server) return;
+    const server = http.createServer((request, response) => {
+      void this.handleRequest(request, response).catch((error2) => {
+        writeError(response, 502, error2 instanceof Error ? error2.message : "文件导出失败");
+      });
+    });
+    await new Promise((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", () => resolve());
+    });
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      server.close();
+      throw new Error("文件导出服务未取得本地端口");
+    }
+    this.server = server;
+    this.origin = `http://127.0.0.1:${address.port}`;
+  }
+  getEnvironment() {
+    if (!this.server || !this.origin) {
+      throw new Error("文件导出服务尚未启动");
+    }
+    return {
+      origin: this.origin,
+      runtimeToken: this.runtimeToken,
+      claimTtlMs: this.claimTtlMs
+    };
+  }
+  resolveClaim(input) {
+    const claimId = normalizeClaimId(input.claimId);
+    const sourceUrl = normalizeSourceUrl(input.sourceUrl);
+    const claim = this.getOrCreateClaim(claimId, input.fileName);
+    if (claim.expiresAt <= this.now()) {
+      this.claims.delete(claimId);
+      throw new Error("文件导出声明已过期");
+    }
+    claim.fileName = normalizeDownloadFileName(input.fileName || claim.fileName);
+    claim.mimeType = String(input.mimeType || "").trim() || void 0;
+    claim.sourceUrl = sourceUrl;
+    claim.error = void 0;
+    this.notifyWaiters(claim);
+  }
+  rejectClaim(input) {
+    const claimId = normalizeClaimId(input.claimId);
+    const claim = this.getOrCreateClaim(claimId, input.fileName || "file");
+    claim.error = String(input.error || "无法取得文件访问链接");
+    this.notifyWaiters(claim);
+  }
+  sweepExpired() {
+    const now = this.now();
+    const expired = [...this.claims.values()].filter((claim) => claim.expiresAt <= now);
+    expired.forEach((claim) => {
+      claim.error = "文件导出声明已过期";
+      this.notifyWaiters(claim);
+      this.claims.delete(claim.claimId);
+    });
+    return expired.length;
+  }
+  async close() {
+    this.claims.forEach((claim) => {
+      claim.error = "文件导出服务已关闭";
+      this.notifyWaiters(claim);
+    });
+    this.claims.clear();
+    const server = this.server;
+    this.server = null;
+    this.origin = "";
+    if (!server) return;
+    await new Promise((resolve) => server.close(() => resolve()));
+  }
+  getOrCreateClaim(claimId, fileName) {
+    const existing = this.claims.get(claimId);
+    if (existing) return existing;
+    const createdAt = this.now();
+    const claim = {
+      claimId,
+      fileName: normalizeDownloadFileName(fileName),
+      createdAt,
+      expiresAt: createdAt + this.claimTtlMs,
+      waiters: /* @__PURE__ */ new Set()
+    };
+    this.claims.set(claimId, claim);
+    return claim;
+  }
+  notifyWaiters(claim) {
+    const waiters = [...claim.waiters];
+    claim.waiters.clear();
+    waiters.forEach((notify) => notify());
+  }
+  async waitForClaimSource(claim) {
+    if (claim.sourceUrl || claim.error) return;
+    await new Promise((resolve) => {
+      const timeoutId = setTimeout(() => {
+        claim.waiters.delete(notify);
+        resolve();
+      }, this.sourceWaitMs);
+      const notify = () => {
+        clearTimeout(timeoutId);
+        resolve();
+      };
+      claim.waiters.add(notify);
+    });
+    if (!claim.sourceUrl && !claim.error) {
+      claim.error = "等待文件访问链接超时";
+    }
+  }
+  parseRequest(request) {
+    const requestUrl = new URL(request.url || "/", this.origin || "http://127.0.0.1");
+    const segments = requestUrl.pathname.split("/").filter(Boolean);
+    if (segments.length !== 4 || segments[0] !== DOWNLOAD_ROUTE_PREFIX) return null;
+    if (segments[1] !== this.runtimeToken) return null;
+    let fileName = "file";
+    try {
+      fileName = decodeURIComponent(segments[3]);
+    } catch {
+      return null;
+    }
+    try {
+      return {
+        claimId: normalizeClaimId(segments[2]),
+        fileName: normalizeDownloadFileName(fileName)
+      };
+    } catch {
+      return null;
+    }
+  }
+  async handleRequest(request, response) {
+    var _a2;
+    if (request.method !== "GET" && request.method !== "HEAD") {
+      writeError(response, 405, "method not allowed");
+      return;
+    }
+    const parsed = this.parseRequest(request);
+    if (!parsed) {
+      writeError(response, 404, "not found");
+      return;
+    }
+    this.sweepExpired();
+    const claim = this.getOrCreateClaim(parsed.claimId, parsed.fileName);
+    await this.waitForClaimSource(claim);
+    if (claim.error || !claim.sourceUrl) {
+      writeError(response, 502, claim.error || "文件访问链接不可用");
+      return;
+    }
+    const abortController = new AbortController();
+    response.once("close", () => {
+      if (!response.writableEnded) abortController.abort();
+    });
+    const upstreamHeaders = { "Accept-Encoding": "identity" };
+    if (request.headers.range) upstreamHeaders.Range = request.headers.range;
+    const upstream = await this.fetcher(claim.sourceUrl, {
+      headers: upstreamHeaders,
+      method: "GET",
+      redirect: "follow",
+      signal: abortController.signal
+    });
+    if (!upstream.ok || !upstream.body) {
+      await ((_a2 = upstream.body) == null ? void 0 : _a2.cancel().catch(() => void 0));
+      writeError(response, 502, `文件来源响应异常: ${upstream.status}`);
+      return;
+    }
+    const headers = {
+      "Cache-Control": "no-store",
+      "Content-Disposition": quoteContentDispositionFileName(claim.fileName),
+      "Content-Type": claim.mimeType || upstream.headers.get("content-type") || "application/octet-stream",
+      "X-Content-Type-Options": "nosniff"
+    };
+    for (const name of ["accept-ranges", "content-length", "content-range", "etag", "last-modified"]) {
+      const value = upstream.headers.get(name);
+      if (value) headers[name] = value;
+    }
+    response.writeHead(upstream.status === 206 ? 206 : 200, headers);
+    if (request.method === "HEAD") {
+      await upstream.body.cancel().catch(() => void 0);
+      response.end();
+      return;
+    }
+    try {
+      await pipeline(Readable.fromWeb(upstream.body), response);
+    } catch (error2) {
+      if (!response.destroyed) response.destroy(error2);
+    }
+  }
+}
+let downloadUrlBroker = null;
+let sweepTimer = null;
+async function initializeFileTransferRuntime() {
+  var _a2;
+  if (downloadUrlBroker) return;
+  const nextBroker = new FileTransferDownloadUrlBroker();
+  await nextBroker.start();
+  downloadUrlBroker = nextBroker;
+  sweepTimer = setInterval(() => {
+    downloadUrlBroker == null ? void 0 : downloadUrlBroker.sweepExpired();
+  }, 6e4);
+  (_a2 = sweepTimer.unref) == null ? void 0 : _a2.call(sweepTimer);
+}
+function getFileTransferDownloadUrlBroker() {
+  return downloadUrlBroker;
+}
+async function clearFileTransferRuntime() {
+  if (sweepTimer) {
+    clearInterval(sweepTimer);
+    sweepTimer = null;
+  }
+  const activeBroker = downloadUrlBroker;
+  downloadUrlBroker = null;
+  await (activeBroker == null ? void 0 : activeBroker.close());
+}
+function registerFileTransferIpc() {
+  ipcMain.handle("file-transfer:get-download-url-environment", () => {
+    var _a2;
+    return ((_a2 = getFileTransferDownloadUrlBroker()) == null ? void 0 : _a2.getEnvironment()) || null;
+  });
+  ipcMain.handle("file-transfer:resolve-download-url-claim", (_event, input) => {
+    const broker = getFileTransferDownloadUrlBroker();
+    if (!broker) throw new Error("文件导出服务不可用");
+    broker.resolveClaim({
+      claimId: String((input == null ? void 0 : input.claimId) || ""),
+      fileName: String((input == null ? void 0 : input.fileName) || "file"),
+      mimeType: String((input == null ? void 0 : input.mimeType) || "").trim() || void 0,
+      sourceUrl: String((input == null ? void 0 : input.sourceUrl) || "")
+    });
+    return true;
+  });
+  ipcMain.handle("file-transfer:reject-download-url-claim", (_event, input) => {
+    const broker = getFileTransferDownloadUrlBroker();
+    if (!broker) return false;
+    broker.rejectClaim({
+      claimId: String((input == null ? void 0 : input.claimId) || ""),
+      error: String((input == null ? void 0 : input.error) || "无法取得文件访问链接"),
+      fileName: String((input == null ? void 0 : input.fileName) || "").trim() || void 0
+    });
+    return true;
+  });
+}
 function registerIpcHandlers() {
   registerFileIpc(ipcMain);
   registerSystemIpc(ipcMain);
   registerHttpIpc(ipcMain);
   registerMediaToolIpc(ipcMain);
   registerImagePreviewIpc(ipcMain);
+  registerFileTransferIpc();
 }
 function createEmbeddedBrowserCatchToolkitGetStateScript() {
   return `
@@ -8186,7 +8490,7 @@ async function downloadMpdRepresentationToFile(input) {
     thread: Math.max(1, Number(input.threadCount || 8))
   });
   let writeChain = Promise.resolve();
-  let writeError = null;
+  let writeError2 = null;
   await new Promise((resolve, reject) => {
     let settled = false;
     const succeed = () => {
@@ -8208,9 +8512,9 @@ async function downloadMpdRepresentationToFile(input) {
         try {
           await appendFile(input.outputPath, Buffer$1.from(buffer));
         } catch (error2) {
-          writeError = error2 instanceof Error ? error2 : new Error(String(error2));
+          writeError2 = error2 instanceof Error ? error2 : new Error(String(error2));
           downloader.stop();
-          fail(writeError);
+          fail(writeError2);
         }
       });
     });
@@ -8229,8 +8533,8 @@ async function downloadMpdRepresentationToFile(input) {
     });
     downloader.on("allCompleted", () => {
       void writeChain.then(() => {
-        if (writeError) {
-          fail(writeError);
+        if (writeError2) {
+          fail(writeError2);
           return;
         }
         succeed();
@@ -27307,6 +27611,7 @@ function createWindow() {
 app.on("before-quit", () => {
   isQuitting = true;
   appUpdateService.dispose();
+  void clearFileTransferRuntime().catch(() => void 0);
   if (mainWindow && !mainWindow.isDestroyed()) {
     saveWindowState(mainWindow);
   }
@@ -27331,7 +27636,7 @@ app.on("activate", () => {
     createWindow();
   }
 });
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   const appIconPath = getAppIconPath();
   if (appIconPath && process.platform === "darwin") {
     app.dock.setIcon(appIconPath);
@@ -27339,6 +27644,9 @@ app.whenReady().then(() => {
   embeddedBrowserMainController.configureSession();
   registerImagePreviewProtocol();
   embeddedBrowserMainController.initializeBridges();
+  await initializeFileTransferRuntime().catch((error2) => {
+    console.error("[file-transfer] download URL broker failed to start", error2);
+  });
   registerIpcHandlers();
   registerWindowControlIpcHandlers({
     getMainWindow: () => mainWindow

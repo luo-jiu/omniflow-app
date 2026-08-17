@@ -8,6 +8,7 @@
     "build": "tsc && vite build && electron-builder",
     "build:mac": "tsc && vite build && electron-builder --mac",
     "build:win": "tsc && vite build && electron-builder --win",
+    "dev:drag-drop-lab": "electron tools/drag-drop-lab/main.cjs",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "test": "vitest run",
     "signing:setup:mac": "bash tools/setup-local-mac-signing.sh",

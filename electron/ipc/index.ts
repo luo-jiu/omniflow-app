@@ -7,6 +7,7 @@ import { registerSystemIpc } from './system'
 import { registerHttpIpc } from './http'
 import { registerMediaToolIpc } from './mediaTool'
 import { registerImagePreviewIpc } from './imagePreview'
+import { registerFileTransferIpc } from './fileTransfer'
 
 export default function registerIpcHandlers() {
   registerFileIpc(ipcMain)
@@ -15,4 +16,5 @@ export default function registerIpcHandlers() {
   registerHttpIpc(ipcMain)
   registerMediaToolIpc(ipcMain)
   registerImagePreviewIpc(ipcMain)
+  registerFileTransferIpc()
 }

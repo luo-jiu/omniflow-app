@@ -119,6 +119,18 @@ interface Window {
     }>;
     cleanupStagedTextFile: (stagedPath: string) => Promise<boolean>;
     cleanupTempImportPath: (targetPath: string) => Promise<boolean>;
+    fileTransferGetDownloadUrlEnvironment: () => Promise<import('@/features/file-transfer/model/file-transfer').FileTransferDownloadUrlEnvironment | null>;
+    fileTransferResolveDownloadUrlClaim: (input: {
+      claimId: string;
+      fileName: string;
+      mimeType?: string;
+      sourceUrl: string;
+    }) => Promise<boolean>;
+    fileTransferRejectDownloadUrlClaim: (input: {
+      claimId: string;
+      error: string;
+      fileName?: string;
+    }) => Promise<boolean>;
     processMediaFile: (payload: {
       ffmpegPath?: string;
       inputFileName?: string;

@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WebContentsView Drag Source</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #eef2f7;
+      color: #20242b;
+    }
+    * { box-sizing: border-box; }
+    body { min-height: 100vh; margin: 0; padding: 14px; }
+    h1 { margin: 0; font-size: 18px; letter-spacing: 0; }
+    .subtitle { margin: 4px 0 12px; color: #626b78; font-size: 12px; line-height: 1.5; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .source, .drop-zone, .log {
+      border: 1px solid #c7ced8;
+      border-radius: 6px;
+      background: #fff;
+      padding: 11px;
+    }
+    .source { min-height: 74px; cursor: grab; user-select: none; }
+    .source:hover { border-color: #4380d8; }
+    .source strong { display: block; font-size: 12px; }
+    .source span { display: block; margin-top: 4px; color: #6d7683; font-size: 11px; line-height: 1.45; }
+    .drop-zone { margin-top: 10px; min-height: 150px; border-style: dashed; }
+    .drop-zone.is-over { border-color: #2e6bd3; background: #eaf2ff; }
+    .drop-zone h2 { margin: 0 0 5px; font-size: 13px; }
+    .log { margin-top: 10px; min-height: 180px; background: #171a1f; color: #dfe6ef; border-color: #303640; }
+    pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    a { color: inherit; text-decoration: none; }
+    @media (prefers-color-scheme: dark) {
+      :root { background: #12161c; color: #e7eaf0; }
+      .subtitle, .source span { color: #a2aab6; }
+      .source, .drop-zone { background: #20252d; border-color: #434b58; }
+      .drop-zone.is-over { background: #192b49; border-color: #6d9ceb; }
+    }
+  </style>
+</head>
+<body>
+  <h1>WebContentsView 页面</h1>
+  <p class="subtitle">这里模拟真实网页。向左拖动来源，或把宿主/系统文件拖到下方接收区。</p>
+
+  <div class="grid">
+    <div id="mixed-source" class="source" draggable="true">
+      <strong>混合网页数据</strong>
+      <span>自定义设置 plain / html / uri-list / custom MIME</span>
+    </div>
+    <a id="link-source" class="source" draggable="true" href="https://example.com/omniflow-link.txt">
+      <strong>普通链接</strong>
+      <span>用于确认普通链接是否会误触发“文件上传”</span>
+    </a>
+    <a id="blob-source" class="source" draggable="true" download="drag-lab-blob.txt">
+      <strong>Blob 下载链接</strong>
+      <span>页面生命周期内有效，Node 侧不能当普通 URL 使用</span>
+    </a>
+    <div id="plain-source" class="source" draggable="true">
+      <strong>纯文本</strong>
+      <span>只发送 text/plain，不应该被文件上传接收</span>
+    </div>
+  </div>
+
+  <section id="drop-zone" class="drop-zone">
+    <h2>网页标准 Dropzone</h2>
+    <p class="subtitle">该区域会阻止默认导航并记录 FileList。可从左侧宿主或系统文件管理器拖入。</p>
+    <pre id="drop-summary">等待拖拽</pre>
+  </section>
+
+  <section class="log">
+    <pre id="event-log"></pre>
+  </section>
+
+  <script>
+    const dropZone = document.querySelector('#drop-zone')
+    const dropSummary = document.querySelector('#drop-summary')
+    const eventLog = document.querySelector('#event-log')
+    const blobUrl = URL.createObjectURL(new Blob(['OmniFlow drag lab blob fixture\n'], { type: 'text/plain' }))
+    document.querySelector('#blob-source').href = blobUrl
+
+    function now() {
+      return new Date().toLocaleTimeString('zh-CN', { hour12: false })
+    }
+
+    function appendLog(type, payload = {}) {
+      const line = `${now()}  ${type}\n${JSON.stringify(payload, null, 2)}\n\n`
+      eventLog.textContent = `${line}${eventLog.textContent}`.slice(0, 24000)
+    }
+
+    function readDropPayload(dataTransfer) {
+      const types = Array.from(dataTransfer?.types || [])
+      const data = {}
+      for (const type of types) {
+        if (type === 'Files') continue
+        try {
+          data[type] = dataTransfer.getData(type)
+        } catch (error) {
+          data[type] = `[读取失败: ${String(error)}]`
+        }
+      }
+      return {
+        data,
+        files: Array.from(dataTransfer?.files || []).map((file) => ({
+          lastModified: file.lastModified,
+          name: file.name,
+          size: file.size,
+          type: file.type,
+        })),
+        types,
+      }
+    }
+
+    document.querySelector('#mixed-source').addEventListener('dragstart', (event) => {
+      event.dataTransfer.effectAllowed = 'copy'
+      event.dataTransfer.setData('text/plain', 'omniflow webcontents drag lab')
+      event.dataTransfer.setData('text/html', '<a data-omniflow-drag-lab="true" href="https://example.com/omniflow-page-drag.txt">page drag lab</a>')
+      event.dataTransfer.setData('text/uri-list', 'https://example.com/omniflow-page-drag.txt')
+      event.dataTransfer.setData('application/x-omniflow-drag-lab', JSON.stringify({ source: 'webcontents' }))
+      appendLog('page:start-mixed-drag', { types: Array.from(event.dataTransfer.types) })
+    })
+
+    document.querySelector('#plain-source').addEventListener('dragstart', (event) => {
+      event.dataTransfer.effectAllowed = 'copy'
+      event.dataTransfer.setData('text/plain', 'plain text is not a file')
+      appendLog('page:start-plain-drag', { types: Array.from(event.dataTransfer.types) })
+    })
+
+    for (const source of document.querySelectorAll('.source')) {
+      source.addEventListener('dragend', (event) => {
+        appendLog('page:dragend', { dropEffect: event.dataTransfer?.dropEffect || '' })
+      })
+    }
+
+    dropZone.addEventListener('dragenter', (event) => {
+      event.preventDefault()
+      dropZone.classList.add('is-over')
+      appendLog('page:dragenter', { types: Array.from(event.dataTransfer?.types || []) })
+    })
+    dropZone.addEventListener('dragover', (event) => {
+      event.preventDefault()
+      event.dataTransfer.dropEffect = 'copy'
+    })
+    dropZone.addEventListener('dragleave', (event) => {
+      if (dropZone.contains(event.relatedTarget)) return
+      dropZone.classList.remove('is-over')
+      appendLog('page:dragleave')
+    })
+    dropZone.addEventListener('drop', (event) => {
+      event.preventDefault()
+      dropZone.classList.remove('is-over')
+      const payload = readDropPayload(event.dataTransfer)
+      dropSummary.textContent = JSON.stringify(payload, null, 2)
+      appendLog('page:drop', payload)
+    })
+
+    window.addEventListener('beforeunload', () => URL.revokeObjectURL(blobUrl), { once: true })
+    appendLog('page:ready', { href: location.href })
+  </script>
+</body>
+</html>

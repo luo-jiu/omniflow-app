@@ -58,6 +58,12 @@ import type {
 import { useNodePropertiesOverlay } from '@/features/file-explorer/hooks/useNodePropertiesOverlay';
 import MigrationDialog from '@/features/file-explorer/components/migration-dialog';
 import { fetchProviders } from '@/features/storage-config/services/storage-config.api';
+import {
+  createFileTransferDownloadUrlClaim,
+  rejectFileTransferDownloadUrlClaim,
+  resolveFileTransferDownloadUrlClaim,
+  warmFileTransferDownloadUrlEnvironment,
+} from '@/features/file-transfer/services/file-transfer.api';
 
 interface DirectoryTreeProps {
   treeData: any[];
@@ -99,6 +105,7 @@ interface DirectoryTreeProps {
 }
 
 interface DragPreviewNodeData {
+  id?: string | number;
   type?: string | number;
   isLeaf?: boolean;
   label?: string;
@@ -362,6 +369,51 @@ export default function DirectoryTree({
   useEffect(() => {
     treeDataRef.current = treeData;
   }, [treeData]);
+
+  useEffect(() => {
+    void warmFileTransferDownloadUrlEnvironment().catch((error) => {
+      runtimeLogger.warn('初始化目录树文件导出服务失败:', error);
+    });
+  }, []);
+
+  const attachDownloadUrlToTreeDrag = (info: any, draggedNode: any, selectedIds: number[]) => {
+    if (selectedIds.length !== 1 || resolveNodeType(draggedNode) !== 'file') {
+      return;
+    }
+    const dragEvent = info?.event || info?.nativeEvent;
+    const dataTransfer = dragEvent?.dataTransfer as DataTransfer | undefined;
+    if (!dataTransfer) return;
+
+    const nodeId = Number(draggedNode?.id);
+    const fileName = buildNodeFileName(draggedNode) || `file-${nodeId}`;
+    const claim = createFileTransferDownloadUrlClaim(fileName);
+    if (!claim) return;
+    const rawMimeType = String(draggedNode?.mimeType || '').trim();
+    const mimeType = /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/i.test(rawMimeType)
+      ? rawMimeType
+      : 'application/octet-stream';
+
+    try {
+      dataTransfer.setData('DownloadURL', `${mimeType}:${claim.fileName}:${claim.downloadUrl}`);
+      void getFileLink(nodeId, Number(libraryId), 60)
+        .then(sourceUrl => resolveFileTransferDownloadUrlClaim({
+          claimId: claim.claimId,
+          fileName: claim.fileName,
+          mimeType,
+          sourceUrl,
+        }))
+        .catch((error) => {
+          runtimeLogger.warn('准备目录树文件导出链接失败:', error);
+          return rejectFileTransferDownloadUrlClaim({
+            claimId: claim.claimId,
+            error: error instanceof Error ? error.message : String(error),
+            fileName: claim.fileName,
+          }).catch(() => false);
+        });
+    } catch (error) {
+      runtimeLogger.warn('写入目录树 DownloadURL 失败:', error);
+    }
+  };
 
   const onSelectionChangeRef = useRef(onSelectionChange);
   useEffect(() => {
@@ -1155,31 +1207,77 @@ export default function DirectoryTree({
     }
   };
 
-  const createDragPreview = (label: string, textColor: string, previewWidth: number): HTMLElement => {
+  const cloneDragPreviewIcon = (nodeInstance: HTMLElement): HTMLElement | null => {
+    const sourceIcon = nodeInstance.querySelector<HTMLElement>([
+      '.semi-tree-option-icon img',
+      '.semi-tree-option-icon .tree-file-type-icon',
+      '.semi-tree-option-icon .tree-built-in-type-icon',
+      '.tree-file-type-icon',
+      '.tree-built-in-type-icon',
+    ].join(', '));
+    if (!sourceIcon) {
+      return null;
+    }
+
+    const icon = sourceIcon.cloneNode(true) as HTMLElement;
+    icon.removeAttribute('id');
+    icon.removeAttribute('title');
+    icon.setAttribute('aria-hidden', 'true');
+    icon.querySelectorAll('[id]').forEach(element => element.removeAttribute('id'));
+    icon.style.boxSizing = 'border-box';
+    icon.style.display = 'block';
+    icon.style.width = '15px';
+    icon.style.height = '15px';
+    icon.style.margin = '0';
+    icon.style.padding = '0';
+    icon.style.flex = '0 0 15px';
+    icon.style.objectFit = 'contain';
+    return icon;
+  };
+
+  const createDragPreview = (
+    label: string,
+    textColor: string,
+    previewWidth: number,
+    sourceNode?: HTMLElement,
+  ): HTMLElement => {
     const preview = document.createElement('div');
     preview.setAttribute(TREE_DRAG_PREVIEW_ATTR, 'true');
     preview.setAttribute('aria-hidden', 'true');
-    preview.textContent = label;
     preview.style.boxSizing = 'border-box';
     preview.style.position = 'fixed';
     preview.style.top = '-10000px';
     preview.style.left = '-10000px';
     preview.style.zIndex = '-1';
     preview.style.maxWidth = `${previewWidth}px`;
-    preview.style.padding = '6px 10px';
-    preview.style.borderRadius = '8px';
-    preview.style.border = '1px solid rgba(15, 23, 42, 0.18)';
-    preview.style.background = 'rgba(255, 255, 255, 0.96)';
-    preview.style.boxShadow = '0 10px 20px rgba(15, 23, 42, 0.16)';
+    preview.style.display = 'inline-flex';
+    preview.style.alignItems = 'center';
+    preview.style.gap = '4px';
+    preview.style.padding = '1px';
+    preview.style.border = '0';
+    preview.style.background = 'transparent';
+    preview.style.boxShadow = 'none';
     preview.style.color = textColor;
-    preview.style.fontSize = '14px';
-    preview.style.fontWeight = '600';
-    preview.style.lineHeight = '20px';
+    preview.style.fontSize = '13px';
+    preview.style.fontWeight = '400';
+    preview.style.lineHeight = '17px';
     preview.style.whiteSpace = 'nowrap';
-    preview.style.overflow = 'hidden';
-    preview.style.textOverflow = 'ellipsis';
     preview.style.pointerEvents = 'none';
     preview.style.setProperty('contain', 'layout style paint');
+
+    const icon = sourceNode ? cloneDragPreviewIcon(sourceNode) : null;
+    if (icon) {
+      preview.appendChild(icon);
+    }
+
+    const text = document.createElement('span');
+    text.textContent = label;
+    text.style.display = 'block';
+    text.style.minWidth = '0';
+    text.style.overflow = 'hidden';
+    text.style.textOverflow = 'ellipsis';
+    text.style.whiteSpace = 'nowrap';
+    preview.appendChild(text);
     return preview;
   };
 
@@ -1187,15 +1285,18 @@ export default function DirectoryTree({
     removeStaleTreeDragPreviews();
 
     try {
-      const selectedCount = dragSelectionNodeIdsRef.current.length;
+      const typedNodeData = (nodeData || {}) as DragPreviewNodeData;
+      const draggedNodeId = Number(typedNodeData.id);
+      const selectedCount = Number.isFinite(draggedNodeId) && selectedNodeIds.includes(draggedNodeId)
+        ? selectedNodeIds.length
+        : 1;
       if (selectedCount > 1) {
         const containerWidth = wrapperRef.current?.parentElement?.clientWidth ?? 280;
         const previewWidth = Math.max(180, Math.min(360, Math.floor(containerWidth * 0.9)));
         const textColor = getComputedStyle(nodeInstance).color || '#1f2937';
-        return createDragPreview(`${selectedCount} 项`, textColor, previewWidth);
+        return createDragPreview(`${selectedCount} 项`, textColor, previewWidth, nodeInstance);
       }
 
-      const typedNodeData = (nodeData || {}) as DragPreviewNodeData;
       const nodeType = resolveNodeType(typedNodeData);
       const baseName = resolveNodeBaseName(typedNodeData);
       const ext = resolveNodeExt(typedNodeData);
@@ -1209,7 +1310,7 @@ export default function DirectoryTree({
       const containerWidth = wrapperRef.current?.parentElement?.clientWidth ?? 280;
       const previewWidth = Math.max(180, Math.min(360, Math.floor(containerWidth * 0.9)));
       const textColor = getComputedStyle(nodeInstance).color || '#1f2937';
-      return createDragPreview(displayName, textColor, previewWidth);
+      return createDragPreview(displayName, textColor, previewWidth, nodeInstance);
     } catch {
       return createDragPreview('移动节点', '#1f2937', 220);
     }
@@ -2433,10 +2534,12 @@ export default function DirectoryTree({
                 setSelectedNodeIds([draggedNodeId]);
                 setSelectionAnchorKey(String(draggedNode?.key || ''));
                 dragSelectionNodeIdsRef.current = [draggedNodeId];
+                attachDownloadUrlToTreeDrag(info, draggedNode, [draggedNodeId]);
                 prepareDragCollapsedNodes([draggedNodeId]);
                 return;
               }
               dragSelectionNodeIdsRef.current = [...selectedNodeIds];
+              attachDownloadUrlToTreeDrag(info, draggedNode, selectedNodeIds);
               prepareDragCollapsedNodes(selectedNodeIds);
             }}
             onDragEnd={(info) => {

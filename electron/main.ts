@@ -11,6 +11,7 @@ import { registerOverlayWindowIpcHandlers } from './service/overlayWindowIpc'
 import { createSystemVideoWindowController } from './service/systemVideoWindowController'
 import { registerSystemVideoWindowIpcHandlers } from './service/systemVideoWindowIpc'
 import { registerAppUpdateIpcHandlers } from './service/appUpdateIpc'
+import { clearFileTransferRuntime, initializeFileTransferRuntime } from './service/fileTransferRuntime'
 import { createAppUpdateService } from './service/appUpdateService'
 import { IMAGE_PREVIEW_PROTOCOL, registerImagePreviewProtocol } from './ipc/imagePreview'
 import {
@@ -379,6 +380,7 @@ function createWindow() {
 app.on('before-quit', () => {
   isQuitting = true
   appUpdateService.dispose()
+  void clearFileTransferRuntime().catch(() => undefined)
   if (mainWindow && !mainWindow.isDestroyed()) {
     saveWindowState(mainWindow)
   }
@@ -407,7 +409,7 @@ app.on('activate', () => {
   }
 })
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   const appIconPath = getAppIconPath()
   if (appIconPath && process.platform === 'darwin') {
     app.dock.setIcon(appIconPath)
@@ -416,6 +418,9 @@ app.whenReady().then(() => {
   embeddedBrowserMainController.configureSession()
   registerImagePreviewProtocol()
   embeddedBrowserMainController.initializeBridges()
+  await initializeFileTransferRuntime().catch((error) => {
+    console.error('[file-transfer] download URL broker failed to start', error)
+  })
   registerIpcHandlers()
   registerWindowControlIpcHandlers({
     getMainWindow: () => mainWindow,
