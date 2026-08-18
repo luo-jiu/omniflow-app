@@ -11,9 +11,9 @@ import {
 } from '@/features/file-explorer/services/desktop-upload-picker.api';
 import type { UploadCandidateFile } from '@/features/file-explorer/services/desktop-upload-picker.api';
 import {
-  extractExternalWebImageDropItems,
-  stageExternalWebImageUploadCandidates,
-} from '@/features/file-explorer/services/external-web-image-upload.api';
+  extractExternalBrowserResourceDrop,
+  stageExternalBrowserResourceUploadCandidates,
+} from '@/features/file-explorer/services/external-browser-resource-upload.api';
 import { normalizeUploadRelativePath, UploadPathResolver } from '@/features/file-explorer/services/upload-path-resolver';
 import { fetchProviders } from '@/features/storage-config/services/storage-config.api';
 import { openOverlay } from '@/service/overlay/overlay.api';
@@ -268,9 +268,15 @@ export function useDirectoryUpload({
 
   const handleExternalDropOnFolder = useCallback((treeNode: any, e: React.DragEvent) => {
     const files = Array.from(e.dataTransfer.files || []);
-    const webImageItems = files.length > 0 ? [] : extractExternalWebImageDropItems(e.dataTransfer);
-    if (!files.length && !webImageItems.length) {
-      Toast.warning('拖拽内容不是可上传文件或可下载图片');
+    const browserResourceDrop = files.length > 0
+      ? null
+      : extractExternalBrowserResourceDrop(e.dataTransfer);
+    if (
+      !files.length
+      && !browserResourceDrop?.sessionId
+      && !browserResourceDrop?.fallbackResources.length
+    ) {
+      Toast.warning('拖拽内容不是可上传文件或可下载网页资源');
       return;
     }
 
@@ -293,21 +299,21 @@ export function useDirectoryUpload({
     }
 
     const preparingToastId = Toast.info({
-      content: `正在下载拖拽图片（${webImageItems.length} 个）`,
-      duration: 8,
-      showClose: true,
+      content: '正在读取网页拖拽资源',
+      duration: 0,
+      showClose: false,
     });
-    void stageExternalWebImageUploadCandidates(webImageItems)
+    void stageExternalBrowserResourceUploadCandidates(browserResourceDrop!)
       .then((candidates) => {
         if (!candidates.length) {
-          Toast.warning('未获取到可上传的网页图片');
+          Toast.warning('未获取到可上传的网页资源');
           return;
         }
         void openUploadModal(targetNode, candidates);
       })
       .catch((error) => {
-        runtimeLogger.warn('网页图片拖拽导入失败:', error);
-        Toast.error((error as any)?.message || '网页图片下载失败');
+        runtimeLogger.warn('网页资源拖拽导入失败:', error);
+        Toast.error((error as any)?.message || '网页资源读取失败');
       })
       .finally(() => Toast.close(preparingToastId));
   }, [buildUploadCandidateFromDragFile, openUploadModal, toUploadModalTargetNode]);

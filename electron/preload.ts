@@ -8,6 +8,10 @@ import type {
   EmbeddedBrowserExternalToolSettings,
 } from '@/features/embedded-browser/external-tools/model/embedded-browser-external-tools'
 import type { AppUpdateSnapshot } from '@/features/app-update/types'
+import type {
+  EmbeddedBrowserStagePageDragRequest,
+  EmbeddedBrowserStagedPageDragFile,
+} from '@/features/file-transfer/model/browser-drag-transfer'
 
 // --------- Expose some API to the Renderer process ---------
 contextBridge.exposeInMainWorld('ipcRenderer', {
@@ -328,6 +332,9 @@ contextBridge.exposeInMainWorld('electronEmbeddedBrowser', {
     sourceUrl: string,
     fileName: string,
   ) => ipcRenderer.invoke('embedded-browser:open-mapped-file', tabId, pageUrl, sourceUrl, fileName),
+  stagePageDrag: (input: EmbeddedBrowserStagePageDragRequest) => (
+    ipcRenderer.invoke('embedded-browser:page-drag:stage', input) as Promise<EmbeddedBrowserStagedPageDragFile[]>
+  ),
   resolveFavicon: (payload: { iconUrl?: string; pageUrl?: string }) =>
     ipcRenderer.invoke('embedded-browser:resolve-favicon', payload),
   onStateChange: (listener: (payload: {

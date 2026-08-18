@@ -17,6 +17,10 @@ import {
   EMBEDDED_BROWSER_CREDENTIAL_CONSOLE_PREFIX,
   createCredentialDetectionScript,
 } from './embeddedBrowserCredentialDetectionScript'
+import {
+  EMBEDDED_BROWSER_PAGE_DRAG_CONSOLE_PREFIX,
+  createEmbeddedBrowserPageDragSourceScript,
+} from './embeddedBrowserPageDragSourceScript'
 import { type EmbeddedBrowserCapturedResource, recordEmbeddedBrowserProbeResource } from './embeddedBrowserResourceService'
 import {
   handleEmbeddedBrowserInputShortcut,
@@ -45,6 +49,7 @@ type CreateEmbeddedBrowserViewOptions = {
   iconUrls: Map<string, string>
   onAutoFillReady: (tabId: string, domain: string) => void
   onCredentialPayload: (tabId: string, payload: Record<string, unknown>) => void
+  onPageDragPayload: (tabId: string, payload: Record<string, unknown>) => void
   onProbePayload: (payload: Record<string, unknown>) => void
   syncBounds: (view: WebContentsView) => void
   tabId: string
@@ -133,7 +138,26 @@ export function createEmbeddedBrowserView(
   view.webContents.on('dom-ready', () => {
     void options.createIfMissingProbe(options.tabId, view)
     view.webContents.executeJavaScript(createCredentialDetectionScript(), true).catch(() => {})
+    view.webContents.executeJavaScript(
+      createEmbeddedBrowserPageDragSourceScript(options.tabId),
+      true,
+    ).catch(() => {})
   })
+  view.webContents.on(
+    'did-frame-finish-load',
+    (_event, _isMainFrame, frameProcessId, frameRoutingId) => {
+      if (view.webContents.isDestroyed()) return
+      const frame = [view.webContents.mainFrame, ...view.webContents.mainFrame.framesInSubtree]
+        .find((candidate) => (
+          candidate.processId === frameProcessId
+          && candidate.routingId === frameRoutingId
+        ))
+      frame?.executeJavaScript(
+        createEmbeddedBrowserPageDragSourceScript(options.tabId),
+        true,
+      ).catch(() => {})
+    },
+  )
   view.webContents.on('did-stop-loading', async () => {
     if (view.webContents.isDestroyed()) {
       return
@@ -248,6 +272,17 @@ export function createEmbeddedBrowserView(
         }
       } catch {
         // Malformed autofill-ready payload.
+      }
+      return
+    }
+    if (typeof message === 'string' && message.startsWith(EMBEDDED_BROWSER_PAGE_DRAG_CONSOLE_PREFIX)) {
+      try {
+        options.onPageDragPayload(
+          options.tabId,
+          JSON.parse(message.slice(EMBEDDED_BROWSER_PAGE_DRAG_CONSOLE_PREFIX.length)),
+        )
+      } catch {
+        // Malformed page drag payload — ignore silently.
       }
       return
     }

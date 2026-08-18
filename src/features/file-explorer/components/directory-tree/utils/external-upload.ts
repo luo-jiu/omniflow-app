@@ -94,19 +94,5 @@ export function resolveVisibleTreeNodeByClientY(
       return row.node;
     }
   }
-
-  for (let index = 0; index < visibleRows.length - 1; index += 1) {
-    const current = visibleRows[index];
-    const next = visibleRows[index + 1];
-    if (localY > current.bottom && localY < next.top) {
-      return current.node;
-    }
-  }
-
-  const first = visibleRows[0];
-  if (localY < first.top) {
-    return first.node;
-  }
-
-  return visibleRows[visibleRows.length - 1]?.node ?? null;
+  return null;
 }

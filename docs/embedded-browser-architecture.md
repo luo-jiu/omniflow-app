@@ -354,7 +354,35 @@ tempPath
 
 renderer 的资源列表不应该关心“这个资源是来自网络还是来自 probe 的哪一种 hook”，只关心统一的捕捉模型。
 
-### 5.5 缓存捕捉与合并链路
+### 5.5 页面资源拖入目录树
+
+内置浏览器页面资源拖到目录树不依赖落点 renderer 单独猜测 URL，而是使用两路信息合并：
+
+```text
+页面 dragstart capture
+  -> page drag source script 记录 tab / page / element / URL
+    -> console payload 写入 main 的 30 秒来源会话
+    -> DataTransfer 同时携带 session id 作为精确关联
+
+目录树 drop
+  -> renderer 解析 session id 与标准 DataTransfer 兜底
+    -> preload page-drag:stage
+      -> main 兑现来源会话
+        -> embedded browser session.fetch / 页内 blob 读取 / data 解码
+          -> 受控临时目录
+            -> 现有上传确认与 UploadManager
+```
+
+边界规则：
+
+- 页面脚本只记录当前被拖元素的资源元数据，不记录输入内容或大块 HTML。
+- 普通链接只有声明 `download` 或 URL 具有已知文件后缀时才进入文件语义。
+- HTTP(S) 暂存继承 embedded browser partition Cookie；`blob:` 必须回到原 tab frame，页面关闭或资源失效时明确失败。
+- main 拥有来源会话、下载、限额和陈旧临时目录清理；目录树不直接下载资源，也不新增上传状态机。
+- 关闭 tab 和 `closeAll()` 会清理对应来源会话，防止旧 tab 的拖拽来源被下一次操作复用。
+- 当前代码已接入；macOS 已使用非第一个资料库验证真实图片可从内置浏览器拖入目录树，且上传后的文件内容完整。普通网页或搜索结果拖出 `text/html` 时会按非文件内容拒绝；Windows 与其他边界场景仍待验证。
+
+### 5.6 缓存捕捉与合并链路
 
 缓存捕捉工具链路：
 
@@ -382,7 +410,7 @@ renderer catch toolkit action
 - renderer 不直接假设页面里只有一个 frame。
 - main controller 会优先在 frame 列表里执行 page action，再汇总结果。
 
-### 5.6 密码管理链路
+### 5.7 密码管理链路
 
 密码管理分为凭据检测和密码存储两部分：
 
@@ -412,7 +440,7 @@ renderer catch toolkit action
 - 已保存的 domain+username 提交时不再弹出保存提示（`hasEmbeddedBrowserMatchingPassword` 检查）
 - MutationObserver 确保 SPA 动态渲染的登录表单也能触发自动填充
 
-### 5.7 DevTools 与网页缩放
+### 5.8 DevTools 与网页缩放
 
 embedded browser 的 DevTools 和页面缩放由真实 `WebContentsView.webContents` 执行，不缩放 OmniFlow renderer 外壳。
 
@@ -509,6 +537,7 @@ embedded browser 的真实资源在 Electron main，不能依赖 React 组件卸
 - resource / download / state 事件 payload 变化
 - deep capture 是否仍需要刷新页面的语义变化
 - MSE 合并、manifest 下载、下载导入链路变化
+- 页面拖拽来源会话、资源暂存与目录树导入链路变化
 
 如果未来 embedded browser 继续扩展，优先方向应该是：
 

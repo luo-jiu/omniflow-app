@@ -433,6 +433,9 @@ interface Window {
     goForward: (tabId: string) => Promise<void>;
     listCapturedResources: (tabId: string) => Promise<EmbeddedBrowserResourceCaptureSnapshot>;
     navigate: (tabId: string, url: string) => Promise<void>;
+    stagePageDrag: (
+      input: import('@/features/file-transfer/model/browser-drag-transfer').EmbeddedBrowserStagePageDragRequest,
+    ) => Promise<import('@/features/file-transfer/model/browser-drag-transfer').EmbeddedBrowserStagedPageDragFile[]>;
     openCapturedResource: (tabId: string, resourceKey: string) => Promise<boolean>;
     previewCapturedResource: (tabId: string, payload: {
       mimeType?: string;

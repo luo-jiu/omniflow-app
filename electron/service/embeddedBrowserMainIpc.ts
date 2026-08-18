@@ -35,6 +35,10 @@ import type {
   EmbeddedBrowserExtractedResourcePayload,
   EmbeddedBrowserResourcePreviewPayload,
 } from './embeddedBrowserResourcePageBridge'
+import type {
+  EmbeddedBrowserStagePageDragRequest,
+  EmbeddedBrowserStagedPageDragFile,
+} from '@/features/file-transfer/model/browser-drag-transfer'
 
 type EmbeddedBrowserMainIpcHandlers = {
   activateTab: (sender: Electron.WebContents, tabId: string | null) => void | Promise<void>
@@ -116,6 +120,7 @@ type EmbeddedBrowserMainIpcHandlers = {
     payload: EmbeddedBrowserCapturedResourceSavePayload,
   ) => Promise<unknown>
   setBounds: (sender: Electron.WebContents, bounds: EmbeddedBrowserBounds) => void | Promise<void>
+  stagePageDrag: (input: EmbeddedBrowserStagePageDragRequest) => Promise<EmbeddedBrowserStagedPageDragFile[]>
   startCapturedResources: (tabId: string) => unknown
   startDeepResourceCapture: (tabId: string) => Promise<unknown>
   stopCapturedResources: (tabId: string) => unknown
@@ -304,6 +309,10 @@ export function registerEmbeddedBrowserMainIpcHandlers(handlers: EmbeddedBrowser
   ipcMain.handle('embedded-browser:set-bounds', (event, bounds: EmbeddedBrowserBounds) => (
     handlers.setBounds(event.sender, bounds)
   ))
+  ipcMain.handle(
+    'embedded-browser:page-drag:stage',
+    async (_event, input: EmbeddedBrowserStagePageDragRequest) => handlers.stagePageDrag(input),
+  )
   ipcMain.handle('embedded-browser:close-tab', (event, tabId: string) => (
     handlers.closeTab(event.sender, tabId)
   ))

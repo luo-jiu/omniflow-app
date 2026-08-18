@@ -1,6 +1,6 @@
 # 文件跨界交互临时开发方案
 
-状态：WIP / Phase 1 实施中
+状态：WIP / Phase 3 已编码，待跨平台验证
 
 更新时间：2026-08-17
 
@@ -356,10 +356,14 @@ broker 和 renderer service 分层持有各自状态，目录树只负责给当�
 
 ### Phase 3：浏览器 -> 目录树
 
-- 先支持真实 File 和普通 HTTP(S) 图片。
-- 接入页内拖拽来源会话与稳定目录命中。
-- 下载时复用浏览器会话与捕获请求头。
-- 再处理 `blob:`、`data:` 和通用下载资源。
+- 本地真实 `File` 继续复用原上传链路；普通 HTTP(S) 图片、媒体和明确下载链接已接入。
+- 页面 `dragstart` capture 会建立 30 秒来源会话，并通过自定义 DataTransfer 类型关联；标准 HTML / URI 数据作为降级输入。
+- HTTP(S) 下载已改用 embedded browser partition 的 `session.fetch`，继承 Cookie 并携带页面 Referer；文件名读取 `Content-Disposition`。
+- `blob:` 已通过原 tab frame 限额读取，`data:` 已在 main 限额解码；两者上限 32MB。
+- 目录目标取消旧的 500ms 坐标回退，只接受当前实际覆盖的可见树行；文件行仍回溯到父目录，归档目录仍阻断。
+- 暂存结果继续复用上传确认和 UploadManager；单文件 512MB、单次总量 1GB，失败整体清理，超过 24 小时的残留目录按需回收。
+- macOS 已使用非第一个资料库验证真实图片可从内置浏览器拖入目录树，上传后的文件内容完整；搜索结果缩略图若由网页提供为 `text/html`，会被明确拒绝而不会伪装成图片。
+- 本轮已执行 lint、单测和 TypeScript / Vite 编译；Windows、`blob:` / `data:`、媒体、大文件、取消与重复拖拽仍待后续按验证矩阵补测，因此暂不标记为跨平台稳定。
 
 ### Phase 4：浏览器 -> 本地与增强能力
 

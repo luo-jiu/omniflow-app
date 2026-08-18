@@ -3,6 +3,7 @@ import path from 'node:path'
 import { access, appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { app, BrowserWindow, dialog, shell, WebContentsView, type WebFrameMain } from 'electron'
 import { runtimeLogger } from '../runtimeLogger'
+import type { EmbeddedBrowserStagePageDragRequest } from '@/features/file-transfer/model/browser-drag-transfer'
 import type { EmbeddedBrowserCatchToolkitStatePayload } from './embeddedBrowserCatchToolkitPageBridge'
 import {
   getEmbeddedBrowserCatchToolkitState,
@@ -88,8 +89,15 @@ import {
 } from './embeddedBrowserResourcePageBridge'
 import {
   cleanupEmbeddedBrowserDownloadFile,
+  getEmbeddedBrowserSession,
   type EmbeddedBrowserDownloadPayload,
 } from './embeddedBrowserService'
+import {
+  clearEmbeddedBrowserPageDragSources,
+  readEmbeddedBrowserPageBlob,
+  recordEmbeddedBrowserPageDragSource,
+  stageEmbeddedBrowserPageDrag,
+} from './embeddedBrowserPageDragService'
 import {
   clearEmbeddedBrowserCapturedResources,
   disposeEmbeddedBrowserCapturedResources,
@@ -2252,6 +2260,17 @@ export function createEmbeddedBrowserMainController(
           tabId: credentialTabId,
         })
       },
+      onPageDragPayload: (pageDragTabId, payload) => {
+        const sourceUrl = typeof payload.sourceUrl === 'string' ? payload.sourceUrl.trim() : ''
+        const capturedResource = sourceUrl
+          ? getEmbeddedBrowserResourceCaptureSnapshot(pageDragTabId).resources
+            .find((resource) => resource.url === sourceUrl)
+          : undefined
+        recordEmbeddedBrowserPageDragSource(pageDragTabId, payload, {
+          referer: capturedResource?.referer,
+          requestHeaders: capturedResource?.requestHeaders,
+        })
+      },
       onProbePayload: (payload) => {
         const event = typeof payload.event === 'string' ? payload.event : ''
         const resourceKey = typeof payload.resourceKey === 'string' ? payload.resourceKey : ''
@@ -2394,6 +2413,7 @@ export function createEmbeddedBrowserMainController(
     embeddedBrowserLastCommittedUrls.delete(normalizedTabId)
     embeddedBrowserIconUrls.delete(normalizedTabId)
     embeddedBrowserIconSourceUrls.delete(normalizedTabId)
+    clearEmbeddedBrowserPageDragSources(normalizedTabId)
     disposeEmbeddedBrowserCapturedResources(normalizedTabId)
     bumpEmbeddedBrowserOpenFileRequestVersion({
       requestVersions: embeddedBrowserOpenFileRequestVersions,
@@ -2976,6 +2996,23 @@ export function createEmbeddedBrowserMainController(
     }
   }
 
+  async function handleStagePageDrag(input: EmbeddedBrowserStagePageDragRequest) {
+    const request = {
+      ...input,
+      tabId: String(input?.tabId || activeEmbeddedBrowserTabId || '').trim() || undefined,
+    }
+    return stageEmbeddedBrowserPageDrag(request, {
+      browserSession: getEmbeddedBrowserSession(),
+      readPageBlob: async (tabId, sourceUrl, maxBytes) => {
+        const view = getEmbeddedBrowserView(tabId)
+        if (!view || view.webContents.isDestroyed()) {
+          throw new Error('网页已关闭，请重新拖拽')
+        }
+        return readEmbeddedBrowserPageBlob(view, sourceUrl, maxBytes)
+      },
+    })
+  }
+
   function handleDeactivate(sender: Electron.WebContents) {
     const targetWindow = BrowserWindow.fromWebContents(sender) ?? options.getMainWindow()
     if (!targetWindow || targetWindow.isDestroyed()) {
@@ -2993,6 +3030,7 @@ export function createEmbeddedBrowserMainController(
       closeEmbeddedBrowserTab(targetWindow, tabId)
     })
     activeEmbeddedBrowserTabId = null
+    clearEmbeddedBrowserPageDragSources()
     emitEmbeddedBrowserState({ state: 'idle' })
   }
 
@@ -3035,6 +3073,7 @@ export function createEmbeddedBrowserMainController(
       restartCatchMediaCapture: (tabId) => handleCatchToolkitAction(tabId, 'restartCatchMediaCapture', 'restart'),
       saveResource: saveEmbeddedBrowserCapturedResourceForRenderer,
       setBounds: handleSetBounds,
+      stagePageDrag: handleStagePageDrag,
       startCapturedResources: (tabId) => startEmbeddedBrowserResourceCapture(String(tabId || '').trim()),
       startDeepResourceCapture: handleStartDeepResourceCapture,
       stopCapturedResources: (tabId) => stopEmbeddedBrowserResourceCapture(String(tabId || '').trim()),

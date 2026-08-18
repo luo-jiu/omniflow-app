@@ -29,7 +29,7 @@ import {
   normalizeDownloadRelativePath,
   pickDownloadDirectoryFromDesktop,
 } from '@/features/file-explorer/services/desktop-download.api';
-import { hasExternalUploadData } from '@/features/file-explorer/services/external-web-image-upload.api';
+import { hasExternalUploadData } from '@/features/file-explorer/services/external-browser-resource-upload.api';
 import { TREE_LOCATE_NODE_EVENT, type TreeLocateNodeDetail } from '@/features/file-explorer/services/tree-locate';
 import { useDirectoryUpload } from './hooks/useDirectoryUpload';
 import {
@@ -237,14 +237,8 @@ export default function DirectoryTree({
 
   // 为每个“可见行”的 label 与其内部文字 span 保持引用
   type RowRefs = { label: HTMLElement | null; text: HTMLElement | null; option: HTMLElement | null };
-  type ExternalUploadFallback = {
-    clientY: number;
-    createdAt: number;
-    resolution: ExternalUploadResolution;
-  };
   const rowRefs = useRef<Map<string, RowRefs>>(new Map());
   const visibleRowBoundsRef = useRef<VisibleRowBounds[]>([]);
-  const lastExternalDropResolutionRef = useRef<ExternalUploadFallback | null>(null);
   const treeDataRef = useRef<any[]>(treeData);
   const expandClickGuardRef = useRef<{ key: string; targetExpanded: boolean; expiresAt: number } | null>(null);
 
@@ -2370,7 +2364,6 @@ export default function DirectoryTree({
   useEffect(() => {
     const endExternalDragSession = () => {
       restoreExternalDragExpandedKeys();
-      lastExternalDropResolutionRef.current = null;
     };
 
     window.addEventListener('drop', endExternalDragSession);
@@ -2400,38 +2393,6 @@ export default function DirectoryTree({
 
     const hoveredNode = resolveVisibleTreeNodeByClientY(clientY, container, visibleRows);
     const resolution = resolveExternalUpload(hoveredNode, treeDataRef.current || []);
-    if (resolution.targetNode || resolution.blockedReason) {
-      lastExternalDropResolutionRef.current = {
-        clientY,
-        createdAt: Date.now(),
-        resolution,
-      };
-      return { hoveredNode, resolution };
-    }
-
-    const fallback = lastExternalDropResolutionRef.current;
-    if (fallback?.resolution?.targetNode && container && visibleRows.length > 0) {
-      const FALLBACK_MAX_AGE_MS = 500;
-      const FALLBACK_MAX_POINTER_DELTA = 28;
-      const FALLBACK_ROW_GAP_TOLERANCE = 10;
-      const ageMs = Date.now() - fallback.createdAt;
-      const pointerDelta = Math.abs(clientY - fallback.clientY);
-      const containerRect = container.getBoundingClientRect();
-      const localY = clientY - containerRect.top + container.scrollTop;
-      const firstRow = visibleRows[0];
-      const lastRow = visibleRows[visibleRows.length - 1];
-      const withinNearbyRows = localY >= firstRow.top - FALLBACK_ROW_GAP_TOLERANCE
-        && localY <= lastRow.bottom + FALLBACK_ROW_GAP_TOLERANCE;
-
-      if (
-        ageMs <= FALLBACK_MAX_AGE_MS
-        && pointerDelta <= FALLBACK_MAX_POINTER_DELTA
-        && withinNearbyRows
-      ) {
-        return { hoveredNode, resolution: fallback.resolution };
-      }
-    }
-
     return { hoveredNode, resolution };
   };
 
@@ -2462,7 +2423,6 @@ export default function DirectoryTree({
     e.stopPropagation();
     const { resolution } = resolveExternalUploadAtPointer(e.clientY);
     handleExternalUploadDrop(e, resolution);
-    lastExternalDropResolutionRef.current = null;
   };
 
   const handleTreeContainerExternalDragLeaveCapture = (e: React.DragEvent<HTMLDivElement>) => {
@@ -2474,7 +2434,6 @@ export default function DirectoryTree({
     if (wrapper && nextTarget && wrapper.contains(nextTarget)) {
       return;
     }
-    lastExternalDropResolutionRef.current = null;
     clearExternalUploadHover();
   };
 
