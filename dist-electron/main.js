@@ -28548,7 +28548,7 @@ const MAIN_DIST = path$n.join(process.env.APP_ROOT, "dist-electron");
 const RENDERER_DIST = path$n.join(process.env.APP_ROOT, "dist");
 process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? path$n.join(process.env.APP_ROOT, "public") : RENDERER_DIST;
 const APP_ICON_PATH = path$n.join(process.env.APP_ROOT, "build", "icons", "icon.png");
-const APP_DISPLAY_NAME = "Omniflow";
+const APP_DISPLAY_NAME = "OmniFlow";
 const LEGACY_USER_DATA_DIRNAME = "omniflow-app";
 const DEFAULT_WINDOW_WIDTH = 1400;
 const DEFAULT_WINDOW_HEIGHT = 920;
@@ -28714,6 +28714,7 @@ function createWindow() {
   const initialWidth = (persistedWindowState == null ? void 0 : persistedWindowState.width) ?? DEFAULT_WINDOW_WIDTH;
   const initialHeight = (persistedWindowState == null ? void 0 : persistedWindowState.height) ?? DEFAULT_WINDOW_HEIGHT;
   const win = new BrowserWindow({
+    title: APP_DISPLAY_NAME,
     width: initialWidth,
     height: initialHeight,
     minWidth: MIN_WINDOW_WIDTH,

@@ -21,6 +21,8 @@ import {
   SIDE_PANEL_TRAFFIC_LIGHT_SAFE_HEIGHT,
   TOOLBAR_ACTION_BUTTON_SIZE,
   TOOLBAR_ACTION_ICON_SIZE,
+  WINDOWS_CONTENT_TOOLBAR_COLLAPSED_SAFE_SPACE,
+  WINDOWS_SIDE_PANEL_TOGGLE_VISUAL_LEFT,
 } from './layout-constants';
 import {
   sidePanelCompactIconButtonStyles,
@@ -63,9 +65,21 @@ export const DetailWrapper = styled.div`
   position: relative;
   --side-panel-visual-width: ${DEFAULT_SIDE_PANEL_WIDTH}px;
   --content-toolbar-collapsed-safe-space: ${CONTENT_TOOLBAR_COLLAPSED_SAFE_SPACE}px;
+  --side-panel-toggle-visual-left: ${SIDE_PANEL_TOGGLE_VISUAL_LEFT}px;
+  --side-panel-toggle-drag-before-width: ${SIDE_PANEL_TOGGLE_LEFT - 8}px;
+  --side-panel-toggle-drag-after-left: ${SIDE_PANEL_TOGGLE_LEFT + SIDE_PANEL_TOGGLE_SIZE + 8}px;
+  --side-panel-toggle-guard-left: ${SIDE_PANEL_TOGGLE_LEFT - 6}px;
   --side-panel-transition-duration: ${SIDE_PANEL_COLLAPSE_ANIMATION_MS}ms;
   --side-panel-transition-easing: cubic-bezier(0.22, 1, 0.36, 1);
   transition: --side-panel-visual-width var(--side-panel-transition-duration) var(--side-panel-transition-easing);
+
+  html[data-platform="windows"] & {
+    --content-toolbar-collapsed-safe-space: ${WINDOWS_CONTENT_TOOLBAR_COLLAPSED_SAFE_SPACE}px;
+    --side-panel-toggle-visual-left: ${WINDOWS_SIDE_PANEL_TOGGLE_VISUAL_LEFT}px;
+    --side-panel-toggle-drag-before-width: ${Math.max(0, WINDOWS_SIDE_PANEL_TOGGLE_VISUAL_LEFT - 6)}px;
+    --side-panel-toggle-drag-after-left: ${WINDOWS_SIDE_PANEL_TOGGLE_VISUAL_LEFT + SIDE_PANEL_TOGGLE_SIZE + 8}px;
+    --side-panel-toggle-guard-left: ${Math.max(0, WINDOWS_SIDE_PANEL_TOGGLE_VISUAL_LEFT - 6)}px;
+  }
 
   &.is-side-panel-resizing {
     --side-panel-transition-duration: 0ms;
@@ -74,7 +88,7 @@ export const DetailWrapper = styled.div`
 
 export const TitlebarSidePanelToggleHost = styled.div`
   position: absolute;
-  left: ${SIDE_PANEL_TOGGLE_VISUAL_LEFT}px;
+  left: var(--side-panel-toggle-visual-left);
   top: ${SIDE_PANEL_TOGGLE_TOP}px;
   z-index: 3200;
   width: ${SIDE_PANEL_TOGGLE_SIZE}px;
@@ -146,6 +160,10 @@ export const SidePanel = styled.div`
   body[theme-mode="dark"] & {
     background: var(--app-sidebar-vibrancy);
   }
+
+  html[data-platform="windows"] & {
+    background: var(--app-bg-sidebar);
+  }
 `;
 
 export const ResizeHandle = styled.div`
@@ -181,7 +199,7 @@ export const SidePanelHeader = styled.div`
     position: absolute;
     left: 0;
     top: 0;
-    width: ${SIDE_PANEL_TOGGLE_LEFT - 8}px;
+    width: var(--side-panel-toggle-drag-before-width);
     height: 100%;
     -webkit-app-region: drag;
   }
@@ -189,7 +207,7 @@ export const SidePanelHeader = styled.div`
   &::after {
     content: "";
     position: absolute;
-    left: ${SIDE_PANEL_TOGGLE_LEFT + SIDE_PANEL_TOGGLE_SIZE + 8}px;
+    left: var(--side-panel-toggle-drag-after-left);
     right: 0;
     top: 0;
     height: 100%;
@@ -384,7 +402,7 @@ export const ContentToolbar = styled.div`
   &::before {
     content: "";
     position: absolute;
-    left: ${SIDE_PANEL_TOGGLE_LEFT - 6}px;
+    left: var(--side-panel-toggle-guard-left);
     top: 0;
     width: ${SIDE_PANEL_TOGGLE_SIZE + 12}px;
     height: 100%;

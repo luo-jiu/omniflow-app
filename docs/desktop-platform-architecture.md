@@ -1,6 +1,6 @@
 # 桌面平台适配架构
 
-更新时间：2026-07-30
+更新时间：2026-08-18
 
 适用范围：`omniflow-app` 的 macOS、Windows 和 Linux 宿主差异，包含主窗口配置、renderer 平台识别、标题栏安全区、平台专属系统能力及分平台构建验证。
 
@@ -52,12 +52,14 @@ renderer 的 `getDesktopPlatform()` 将其归一为：
 | 平台 | 标题栏 | 平台效果 | 窗口控制 |
 | --- | --- | --- | --- |
 | macOS | `hiddenInset` | `sidebar` vibrancy | 左侧系统红绿灯，固定坐标 `{ x: 14, y: 11 }` |
-| Windows | `default` | 系统默认背景 | 系统原生标题栏和右侧窗口按钮 |
+| Windows | `default` | renderer 侧栏使用不透明主题背景 | 系统原生标题栏和右侧窗口按钮，标题为 `OmniFlow` |
 | Linux / 其他 | `default` | 无额外效果 | 系统默认窗口框架 |
 
 `electron/main.ts` 继续拥有 BrowserWindow 生命周期、窗口状态持久化、overlay 同步和应用退出语义；`electron/platform` 只返回平台窗口选项并执行平台初始化，不接管业务生命周期。
 
 Windows 后续改用 `titleBarOverlay` 时，应在 `electron/platform/windows/mainWindow.ts` 内完成宿主策略，并通过 `data-platform="windows"` 收敛 renderer 安全区。不要直接把 Windows 分支重新写回 `electron/main.ts`。
+
+当前 Windows 继续使用原生标题栏，不模拟 macOS vibrancy：目录树侧栏通过 `data-platform="windows"` 使用不透明的 `--app-bg-sidebar`，亮暗主题分别继承自己的实色 token。侧栏折叠按钮在 Windows 移到内容区左上角、占用 macOS 红灯附近的横向位置；按钮宿主和周边预留区都显式使用 `no-drag`，其余顶部空白仍可拖动窗口。窗口初始标题同时由 `BrowserWindow.title` 和 renderer HTML 固定为 `OmniFlow`，避免开发模板标题短暂或持续出现在原生标题栏。
 
 ## 4. 平台能力归属
 

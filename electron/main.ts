@@ -43,7 +43,7 @@ process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL
   : RENDERER_DIST
 
 const APP_ICON_PATH = path.join(process.env.APP_ROOT, 'build', 'icons', 'icon.png')
-const APP_DISPLAY_NAME = 'Omniflow'
+const APP_DISPLAY_NAME = 'OmniFlow'
 const LEGACY_USER_DATA_DIRNAME = 'omniflow-app'
 const DEFAULT_WINDOW_WIDTH = 1400
 const DEFAULT_WINDOW_HEIGHT = 920
@@ -254,6 +254,7 @@ function createWindow() {
   const initialHeight = persistedWindowState?.height ?? DEFAULT_WINDOW_HEIGHT
 
   const win = new BrowserWindow({
+    title: APP_DISPLAY_NAME,
     width: initialWidth,
     height: initialHeight,
     minWidth: MIN_WINDOW_WIDTH,
