@@ -4,14 +4,28 @@ import http from 'node:http'
 import https from 'node:https'
 import type { IncomingMessage } from 'node:http'
 import path from 'node:path'
+import { Transform } from 'node:stream'
+import { pipeline } from 'node:stream/promises'
 
 const DOWNLOAD_REQUEST_TIMEOUT_MS = 60_000
+
+function formatByteLimit(maxBytes: number) {
+  if (maxBytes >= 1024 * 1024 * 1024 && maxBytes % (1024 * 1024 * 1024) === 0) {
+    return `${maxBytes / (1024 * 1024 * 1024)}GB`
+  }
+  if (maxBytes >= 1024 * 1024 && maxBytes % (1024 * 1024) === 0) {
+    return `${maxBytes / (1024 * 1024)}MB`
+  }
+  return `${maxBytes}B`
+}
 
 export async function downloadUrlToFile(
   url: string,
   targetPath: string,
   headers: Record<string, string> = {},
   redirectDepth = 0,
+  maxBytes = Number.POSITIVE_INFINITY,
+  signal?: AbortSignal,
 ): Promise<void> {
   const MAX_REDIRECT_DEPTH = 3
   const parsed = new URL(url)
@@ -24,6 +38,7 @@ export async function downloadUrlToFile(
 
   await new Promise<void>((resolve, reject) => {
     let settled = false
+    let responseStarted = false
     const settleResolve = () => {
       if (settled) return
       settled = true
@@ -42,7 +57,9 @@ export async function downloadUrlToFile(
       path: `${parsed.pathname}${parsed.search}`,
       method: 'GET',
       headers,
+      signal,
     }, (response: IncomingMessage) => {
+      responseStarted = true
       response.setTimeout(DOWNLOAD_REQUEST_TIMEOUT_MS, () => {
         response.destroy(new Error(`下载响应超时: ${DOWNLOAD_REQUEST_TIMEOUT_MS}ms`))
       })
@@ -57,7 +74,7 @@ export async function downloadUrlToFile(
           return
         }
         const nextUrl = new URL(redirectLocation, url).toString()
-        downloadUrlToFile(nextUrl, targetPath, headers, redirectDepth + 1)
+        downloadUrlToFile(nextUrl, targetPath, headers, redirectDepth + 1, maxBytes, signal)
           .then(settleResolve)
           .catch(settleReject)
         return
@@ -69,36 +86,39 @@ export async function downloadUrlToFile(
         return
       }
 
-      const fileStream = fsRaw.createWriteStream(targetPath)
-      const cleanupAndReject = async (error: unknown) => {
-        try {
-          fileStream.destroy()
-        } catch {
-          // ignore
-        }
-        try {
-          await fs.rm(targetPath, { force: true })
-        } catch {
-          // ignore
-        }
-        settleReject(error)
+      const declaredLength = Number(response.headers['content-length'] || 0)
+      if (Number.isFinite(maxBytes) && declaredLength > maxBytes) {
+        response.resume()
+        settleReject(new Error(`文件超过允许的 ${formatByteLimit(maxBytes)} 大小上限`))
+        return
       }
 
-      response.on('error', (error) => {
-        void cleanupAndReject(error)
+      let receivedBytes = 0
+      const sizeLimiter = new Transform({
+        transform(chunk: Buffer, _encoding, callback) {
+          receivedBytes += chunk.byteLength
+          if (Number.isFinite(maxBytes) && receivedBytes > maxBytes) {
+            callback(new Error(`文件超过允许的 ${formatByteLimit(maxBytes)} 大小上限`))
+            return
+          }
+          callback(null, chunk)
+        },
       })
-      fileStream.on('error', (error) => {
-        void cleanupAndReject(error)
-      })
-      fileStream.on('finish', () => settleResolve())
-
-      response.pipe(fileStream)
+      const fileStream = fsRaw.createWriteStream(targetPath)
+      void pipeline(response, sizeLimiter, fileStream)
+        .then(settleResolve)
+        .catch(async (error) => {
+          await fs.rm(targetPath, { force: true }).catch(() => undefined)
+          settleReject(error)
+        })
     })
 
     request.setTimeout(DOWNLOAD_REQUEST_TIMEOUT_MS, () => {
       request.destroy(new Error(`下载请求超时: ${DOWNLOAD_REQUEST_TIMEOUT_MS}ms`))
     })
-    request.on('error', (error) => settleReject(error))
+    request.on('error', (error) => {
+      if (!responseStarted) settleReject(error)
+    })
     request.end()
   })
 }

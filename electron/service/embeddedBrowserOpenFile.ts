@@ -1,11 +1,18 @@
 import { app, type WebContentsView } from 'electron'
 import fs from 'node:fs/promises'
-import { existsSync, mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync, rmSync } from 'node:fs'
 import path from 'node:path'
 
 import { downloadUrlToFile } from './fileTransfer'
+import { normalizeDownloadFileName } from '../../src/features/file-transfer/model/download-file-name'
+import {
+  EMBEDDED_BROWSER_LIBRARY_FILE_DROP_ACCEPTANCE_KEY,
+  EMBEDDED_BROWSER_LIBRARY_FILE_DROP_WORLD_ID,
+} from './embeddedBrowserLibraryFileDropScript'
 
 const EMBEDDED_BROWSER_OPEN_FILE_DIRNAME = 'embedded-browser-open-files'
+export const EMBEDDED_BROWSER_LIBRARY_FILE_DROP_MAX_BYTES = 1024 * 1024 * 1024
+const EMBEDDED_BROWSER_OPEN_FILE_STALE_MS = 24 * 60 * 60 * 1000
 const FALLBACK_FILE_INPUT_SELECTOR = 'input[data-omniflow-browser-open-fallback="true"]'
 
 function getEmbeddedBrowserOpenFileRoot() {
@@ -21,10 +28,7 @@ function ensureEmbeddedBrowserOpenFileRoot() {
 }
 
 function buildStagedFileName(fileName: string) {
-  const safeName = String(fileName || 'file')
-    .replace(/[/\\]/g, '_')
-    .trim() || 'file'
-  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${safeName}`
+  return normalizeDownloadFileName(fileName)
 }
 
 function isPathInsideDirectory(filePath: string, directoryPath: string) {
@@ -70,15 +74,7 @@ async function setFileInputFiles(view: WebContentsView, selector: string, filePa
     return false
   }
 
-  try {
-    if (!view.webContents.debugger.isAttached()) {
-      view.webContents.debugger.attach('1.3')
-    }
-  } catch (error) {
-    if (!String(error).includes('Already attached')) {
-      throw error
-    }
-  }
+  await ensureDebuggerAttached(view)
 
   const documentNode = await view.webContents.debugger.sendCommand('DOM.getDocument', {
     depth: 1,
@@ -166,11 +162,42 @@ export async function stageEmbeddedBrowserOpenFile(
   sourceUrl: string,
   fileName: string,
   headers: Record<string, string> = {},
+  options: {
+    maxBytes?: number
+    signal?: AbortSignal
+  } = {},
 ): Promise<string> {
   const openFileRoot = ensureEmbeddedBrowserOpenFileRoot()
-  const stagedPath = path.join(openFileRoot, buildStagedFileName(fileName))
-  await downloadUrlToFile(sourceUrl, stagedPath, headers)
-  return stagedPath
+  const stagingDirectory = await fs.mkdtemp(path.join(openFileRoot, 'file-'))
+  const stagedPath = path.join(stagingDirectory, buildStagedFileName(fileName))
+  try {
+    await downloadUrlToFile(
+      sourceUrl,
+      stagedPath,
+      headers,
+      0,
+      options.maxBytes ?? Number.POSITIVE_INFINITY,
+      options.signal,
+    )
+    return stagedPath
+  } catch (error) {
+    await fs.rm(stagingDirectory, { force: true, recursive: true }).catch(() => undefined)
+    throw error
+  }
+}
+
+export async function cleanupStaleEmbeddedBrowserOpenFiles(now = Date.now()): Promise<number> {
+  const openFileRoot = getEmbeddedBrowserOpenFileRoot()
+  const entries = await fs.readdir(openFileRoot, { withFileTypes: true }).catch(() => [])
+  let cleanupCount = 0
+  await Promise.all(entries.map(async (entry) => {
+    const entryPath = path.join(openFileRoot, entry.name)
+    const entryStat = await fs.stat(entryPath).catch(() => null)
+    if (!entryStat || now - entryStat.mtimeMs < EMBEDDED_BROWSER_OPEN_FILE_STALE_MS) return
+    await fs.rm(entryPath, { force: true, recursive: entry.isDirectory() }).catch(() => undefined)
+    cleanupCount += 1
+  }))
+  return cleanupCount
 }
 
 export async function cleanupEmbeddedBrowserOpenFile(stagedPath?: string): Promise<boolean> {
@@ -184,8 +211,129 @@ export async function cleanupEmbeddedBrowserOpenFile(stagedPath?: string): Promi
     return false
   }
 
+  const parentDirectory = path.dirname(normalizedPath)
+  const parentName = path.basename(parentDirectory)
+  if (path.dirname(parentDirectory) === openFileRoot && parentName.startsWith('file-')) {
+    await fs.rm(parentDirectory, { force: true, recursive: true })
+    return true
+  }
+
   await fs.rm(normalizedPath, { force: true })
   return true
+}
+
+export function cleanupEmbeddedBrowserOpenFileSync(stagedPath?: string): boolean {
+  const normalizedPath = path.resolve(String(stagedPath || '').trim())
+  if (!normalizedPath) return false
+  const openFileRoot = path.resolve(getEmbeddedBrowserOpenFileRoot())
+  if (!isPathInsideDirectory(normalizedPath, openFileRoot)) return false
+
+  const parentDirectory = path.dirname(normalizedPath)
+  const parentName = path.basename(parentDirectory)
+  if (path.dirname(parentDirectory) === openFileRoot && parentName.startsWith('file-')) {
+    rmSync(parentDirectory, { force: true, recursive: true })
+    return true
+  }
+  rmSync(normalizedPath, { force: true })
+  return true
+}
+
+async function ensureDebuggerAttached(view: WebContentsView) {
+  try {
+    if (!view.webContents.debugger.isAttached()) {
+      view.webContents.debugger.attach('1.3')
+    }
+  } catch (error) {
+    if (!String(error).includes('Already attached')) {
+      throw error
+    }
+  }
+}
+
+async function setEmbeddedBrowserFileDropAcceptance(
+  view: WebContentsView,
+  value: boolean,
+): Promise<void> {
+  const script = `(() => { window[${JSON.stringify(EMBEDDED_BROWSER_LIBRARY_FILE_DROP_ACCEPTANCE_KEY)}] = ${value}; return true })()`
+  await view.webContents.executeJavaScriptInIsolatedWorld(
+    EMBEDDED_BROWSER_LIBRARY_FILE_DROP_WORLD_ID,
+    [{ code: script }],
+    true,
+  )
+}
+
+async function didEmbeddedBrowserAcceptFileDrop(view: WebContentsView): Promise<boolean> {
+  const script = `Boolean(window[${JSON.stringify(EMBEDDED_BROWSER_LIBRARY_FILE_DROP_ACCEPTANCE_KEY)}])`
+  return Boolean(
+    await view.webContents.executeJavaScriptInIsolatedWorld(
+      EMBEDDED_BROWSER_LIBRARY_FILE_DROP_WORLD_ID,
+      [{ code: script }],
+      true,
+    ).catch(() => false),
+  )
+}
+
+export async function dispatchEmbeddedBrowserFileDrop(
+  view: WebContentsView,
+  stagedPath: string,
+  point: { x: number; y: number },
+): Promise<boolean> {
+  if (!view || view.webContents.isDestroyed()) {
+    return false
+  }
+  await ensureDebuggerAttached(view)
+  const bounds = view.getBounds()
+  const x = Math.max(0, Math.min(Math.round(Number(point.x) || 0), Math.max(0, bounds.width - 1)))
+  const y = Math.max(0, Math.min(Math.round(Number(point.y) || 0), Math.max(0, bounds.height - 1)))
+  const data = {
+    dragOperationsMask: 1,
+    files: [stagedPath],
+    items: [],
+  }
+
+  let dragEntered = false
+  try {
+    await setEmbeddedBrowserFileDropAcceptance(view, false)
+    await view.webContents.debugger.sendCommand('Input.dispatchDragEvent', {
+      data,
+      type: 'dragEnter',
+      x,
+      y,
+    })
+    dragEntered = true
+    await view.webContents.debugger.sendCommand('Input.dispatchDragEvent', {
+      data,
+      type: 'dragOver',
+      x,
+      y,
+    })
+    if (!await didEmbeddedBrowserAcceptFileDrop(view)) {
+      await view.webContents.debugger.sendCommand('Input.dispatchDragEvent', {
+        data,
+        type: 'dragCancel',
+        x,
+        y,
+      })
+      return false
+    }
+    await view.webContents.debugger.sendCommand('Input.dispatchDragEvent', {
+      data,
+      type: 'drop',
+      x,
+      y,
+    })
+    return true
+  } catch (error) {
+    if (dragEntered && !view.webContents.isDestroyed()) {
+      await view.webContents.debugger.sendCommand('Input.dispatchDragEvent', {
+        data,
+        type: 'dragCancel',
+        x,
+        y,
+      }).catch(() => undefined)
+    }
+    throw error
+  }
 }
 
 export async function injectEmbeddedBrowserOpenFile(

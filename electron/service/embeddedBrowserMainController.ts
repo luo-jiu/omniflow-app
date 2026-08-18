@@ -1,9 +1,14 @@
 import os from 'node:os'
 import path from 'node:path'
-import { access, appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { access, appendFile, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { app, BrowserWindow, dialog, shell, WebContentsView, type WebFrameMain } from 'electron'
 import { runtimeLogger } from '../runtimeLogger'
 import type { EmbeddedBrowserStagePageDragRequest } from '@/features/file-transfer/model/browser-drag-transfer'
+import type {
+  LibraryFileBrowserDropPayload,
+  LibraryFileBrowserDropResult,
+} from '@/features/file-transfer/model/file-transfer'
+import { getFileTransferDownloadUrlBroker } from './fileTransferRuntime'
 import type { EmbeddedBrowserCatchToolkitStatePayload } from './embeddedBrowserCatchToolkitPageBridge'
 import {
   getEmbeddedBrowserCatchToolkitState,
@@ -155,9 +160,14 @@ import {
   EmbeddedBrowserHlsLiveRecorder,
 } from './embeddedBrowserHlsLiveRecorder'
 import {
+  cleanupStaleEmbeddedBrowserOpenFiles,
   cleanupEmbeddedBrowserOpenFile,
+  cleanupEmbeddedBrowserOpenFileSync,
+  dispatchEmbeddedBrowserFileDrop,
+  EMBEDDED_BROWSER_LIBRARY_FILE_DROP_MAX_BYTES,
   stageEmbeddedBrowserOpenFile,
 } from './embeddedBrowserOpenFile'
+import { EmbeddedBrowserDroppedFileStore } from './embeddedBrowserDroppedFileStore'
 import {
   handleEmbeddedBrowserInputShortcut,
   toggleEmbeddedBrowserDevTools,
@@ -205,12 +215,18 @@ export function createEmbeddedBrowserMainController(
   const embeddedBrowserPendingOpenFiles = new Map<string, EmbeddedBrowserPendingOpenFile>()
   const embeddedBrowserAttachedOpenFiles = new Map<string, string>()
   const embeddedBrowserOpenFileRequestVersions = new Map<string, number>()
+  const embeddedBrowserLibraryFileDropRequests = new Map<string, Set<AbortController>>()
+  const embeddedBrowserDroppedFileStore = new EmbeddedBrowserDroppedFileStore({
+    cleanupFile: cleanupEmbeddedBrowserOpenFile,
+    cleanupFileSync: cleanupEmbeddedBrowserOpenFileSync,
+  })
   const embeddedBrowserFileSystemOriginDecisions = new Map<string, boolean>()
   const embeddedBrowserHlsRetrySessions = new Map<string, EmbeddedBrowserHlsRetrySession>()
   const embeddedBrowserHlsLiveRecordingSessions = new Map<string, EmbeddedBrowserHlsLiveRecordingSession>()
   const embeddedBrowserMseSpoolFiles = new Map<string, EmbeddedBrowserMseSpoolFile>()
   const embeddedBrowserMseSpoolWriteQueues = new Map<string, Promise<EmbeddedBrowserMseSpoolFile | null>>()
   let activeEmbeddedBrowserTabId: string | null = null
+  let selectedEmbeddedBrowserTabId: string | null = null
   let embeddedBrowserPendingBounds: EmbeddedBrowserBounds | null = null
   let embeddedBrowserSessionConfigured = false
 
@@ -245,6 +261,198 @@ export function createEmbeddedBrowserMainController(
       return
     }
     mainWindow.webContents.send('embedded-browser:hls-task', payload)
+  }
+
+  function emitEmbeddedBrowserLibraryFileDropResult(payload: LibraryFileBrowserDropResult) {
+    const mainWindow = options.getMainWindow()
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      return
+    }
+    mainWindow.webContents.send('embedded-browser:library-file-drop-result', payload)
+  }
+
+  function beginEmbeddedBrowserLibraryFileDropRequest(tabId: string) {
+    const normalizedTabId = String(tabId || '').trim()
+    const request = new AbortController()
+    const requests = embeddedBrowserLibraryFileDropRequests.get(normalizedTabId) || new Set<AbortController>()
+    requests.add(request)
+    embeddedBrowserLibraryFileDropRequests.set(normalizedTabId, requests)
+    return request
+  }
+
+  function isEmbeddedBrowserLibraryFileDropRequestActive(tabId: string, request: AbortController) {
+    return !request.signal.aborted
+      && embeddedBrowserLibraryFileDropRequests.get(tabId)?.has(request) === true
+  }
+
+  function finishEmbeddedBrowserLibraryFileDropRequest(tabId: string, request: AbortController) {
+    const requests = embeddedBrowserLibraryFileDropRequests.get(tabId)
+    if (!requests) return
+    requests.delete(request)
+    if (requests.size === 0) {
+      embeddedBrowserLibraryFileDropRequests.delete(tabId)
+    }
+  }
+
+  function cancelEmbeddedBrowserLibraryFileDropRequests(tabId: string) {
+    const normalizedTabId = String(tabId || '').trim()
+    const requests = embeddedBrowserLibraryFileDropRequests.get(normalizedTabId)
+    embeddedBrowserLibraryFileDropRequests.delete(normalizedTabId)
+    requests?.forEach((request) => request.abort())
+  }
+
+  function selectEmbeddedBrowserTab(tabId: string | null) {
+    const normalizedTabId = String(tabId || '').trim() || null
+    if (selectedEmbeddedBrowserTabId && selectedEmbeddedBrowserTabId !== normalizedTabId) {
+      cancelEmbeddedBrowserLibraryFileDropRequests(selectedEmbeddedBrowserTabId)
+    }
+    selectedEmbeddedBrowserTabId = normalizedTabId
+  }
+
+  function cleanupEmbeddedBrowserDroppedFilesForTab(tabId: string) {
+    void embeddedBrowserDroppedFileStore.releaseTab(String(tabId || '').trim())
+  }
+
+  function normalizeLibraryFileDropPayload(
+    payload: Record<string, unknown>,
+  ): LibraryFileBrowserDropPayload | null {
+    const claimId = String(payload.claimId || '').trim()
+    const fileName = String(payload.fileName || '').trim()
+    const mimeType = String(payload.mimeType || '').trim()
+    const pageUrl = String(payload.pageUrl || '').trim()
+    const frameCoordinateSupported = payload.frameCoordinateSupported === true
+    const clientX = Number(payload.clientX)
+    const clientY = Number(payload.clientY)
+    if (!/^[a-zA-Z0-9_-]{16,128}$/.test(claimId) || !fileName || fileName.length > 255) {
+      return null
+    }
+    if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) {
+      return null
+    }
+    try {
+      const parsedPageUrl = new URL(pageUrl)
+      if (!['http:', 'https:'].includes(parsedPageUrl.protocol)) return null
+    } catch {
+      return null
+    }
+    return {
+      claimId,
+      clientX: Math.max(0, clientX),
+      clientY: Math.max(0, clientY),
+      fileName,
+      frameCoordinateSupported,
+      mimeType: mimeType || undefined,
+      pageUrl,
+    }
+  }
+
+  function hasEmbeddedBrowserDocument(view: WebContentsView, pageUrl: string) {
+    const normalizeDocumentUrl = (value: string) => {
+      try {
+        const parsed = new URL(value)
+        parsed.hash = ''
+        return parsed.toString()
+      } catch {
+        return ''
+      }
+    }
+    const normalizedPageUrl = normalizeDocumentUrl(pageUrl)
+    if (!normalizedPageUrl) return false
+    const mainFrame = view.webContents.mainFrame
+    return [mainFrame, ...mainFrame.framesInSubtree]
+      .some((frame) => normalizeDocumentUrl(frame.url) === normalizedPageUrl)
+  }
+
+  async function handleLibraryFileDropPayload(tabId: string, rawPayload: Record<string, unknown>) {
+    const normalizedTabId = String(tabId || '').trim()
+    const payload = normalizeLibraryFileDropPayload(rawPayload)
+    if (!normalizedTabId || !payload) return
+    if (activeEmbeddedBrowserTabId !== normalizedTabId) return
+    if (!payload.frameCoordinateSupported) {
+      emitEmbeddedBrowserLibraryFileDropResult({
+        error: '暂不支持拖入跨域 iframe，请使用网页主页面的上传区域',
+        fileName: payload.fileName,
+        status: 'failed',
+        tabId: normalizedTabId,
+      })
+      return
+    }
+    cancelEmbeddedBrowserLibraryFileDropRequests(normalizedTabId)
+    const request = beginEmbeddedBrowserLibraryFileDropRequest(normalizedTabId)
+    emitEmbeddedBrowserLibraryFileDropResult({
+      fileName: payload.fileName,
+      status: 'preparing',
+      tabId: normalizedTabId,
+    })
+
+    let stagedPath = ''
+    let retained = false
+    try {
+      const broker = getFileTransferDownloadUrlBroker()
+      if (!broker) throw new Error('文件传输服务不可用')
+      const claim = await broker.waitForResolvedClaim(
+        payload.claimId,
+        payload.fileName,
+        request.signal,
+      )
+      if (!isEmbeddedBrowserLibraryFileDropRequestActive(normalizedTabId, request)) {
+        throw new Error('网页已切换，文件未交付')
+      }
+      stagedPath = await stageEmbeddedBrowserOpenFile(
+        claim.sourceUrl,
+        claim.fileName,
+        {},
+        {
+          maxBytes: EMBEDDED_BROWSER_LIBRARY_FILE_DROP_MAX_BYTES,
+          signal: request.signal,
+        },
+      )
+      const view = getEmbeddedBrowserView(normalizedTabId)
+      if (
+        !view
+        || view.webContents.isDestroyed()
+        || !hasEmbeddedBrowserDocument(view, payload.pageUrl)
+        || !isEmbeddedBrowserLibraryFileDropRequestActive(normalizedTabId, request)
+      ) {
+        throw new Error('网页已切换，文件未交付')
+      }
+      const stagedFile = await stat(stagedPath)
+      if (!isEmbeddedBrowserLibraryFileDropRequestActive(normalizedTabId, request)) {
+        throw new Error('网页已切换，文件未交付')
+      }
+      embeddedBrowserDroppedFileStore.retain(normalizedTabId, stagedPath, stagedFile.size)
+      retained = true
+      const delivered = await dispatchEmbeddedBrowserFileDrop(view, stagedPath, {
+        x: payload.clientX,
+        y: payload.clientY,
+      })
+      if (!delivered) throw new Error('当前网页位置没有接收这个文件')
+      stagedPath = ''
+      emitEmbeddedBrowserLibraryFileDropResult({
+        fileName: claim.fileName,
+        status: 'delivered',
+        tabId: normalizedTabId,
+      })
+    } catch (error) {
+      if (stagedPath) {
+        if (retained) {
+          const released = await embeddedBrowserDroppedFileStore.release(normalizedTabId, stagedPath)
+          if (!released) await cleanupEmbeddedBrowserOpenFile(stagedPath).catch(() => undefined)
+        } else {
+          await cleanupEmbeddedBrowserOpenFile(stagedPath).catch(() => undefined)
+        }
+      }
+      if (isEmbeddedBrowserLibraryFileDropRequestActive(normalizedTabId, request)) {
+        emitEmbeddedBrowserLibraryFileDropResult({
+          error: error instanceof Error ? error.message : String(error),
+          fileName: payload.fileName,
+          status: 'failed',
+          tabId: normalizedTabId,
+        })
+      }
+    } finally {
+      finishEmbeddedBrowserLibraryFileDropRequest(normalizedTabId, request)
+    }
   }
 
   function buildEmbeddedBrowserMseSpoolKey(tabId: string, resourceKey: string) {
@@ -449,6 +657,7 @@ export function createEmbeddedBrowserMainController(
       return
     }
     embeddedBrowserSessionConfigured = true
+    void cleanupStaleEmbeddedBrowserOpenFiles().catch(() => undefined)
     configureEmbeddedBrowserSession({
       decisionCache: embeddedBrowserFileSystemOriginDecisions,
       options,
@@ -2260,6 +2469,13 @@ export function createEmbeddedBrowserMainController(
           tabId: credentialTabId,
         })
       },
+      onDocumentNavigated: (navigatedTabId) => {
+        cancelEmbeddedBrowserLibraryFileDropRequests(navigatedTabId)
+        cleanupEmbeddedBrowserDroppedFilesForTab(navigatedTabId)
+      },
+      onLibraryFileDropPayload: (dropTabId, payload) => {
+        void handleLibraryFileDropPayload(dropTabId, payload)
+      },
       onPageDragPayload: (pageDragTabId, payload) => {
         const sourceUrl = typeof payload.sourceUrl === 'string' ? payload.sourceUrl.trim() : ''
         const capturedResource = sourceUrl
@@ -2270,6 +2486,10 @@ export function createEmbeddedBrowserMainController(
           referer: capturedResource?.referer,
           requestHeaders: capturedResource?.requestHeaders,
         })
+      },
+      onViewDestroyed: (destroyedTabId) => {
+        cancelEmbeddedBrowserLibraryFileDropRequests(destroyedTabId)
+        cleanupEmbeddedBrowserDroppedFilesForTab(destroyedTabId)
       },
       onProbePayload: (payload) => {
         const event = typeof payload.event === 'string' ? payload.event : ''
@@ -2348,6 +2568,7 @@ export function createEmbeddedBrowserMainController(
     if (!normalizedTabId) {
       return
     }
+    selectEmbeddedBrowserTab(normalizedTabId)
     const view = activateEmbeddedBrowserTab(targetWindow, normalizedTabId, { createIfMissing: true })
     if (!view || view.webContents.isDestroyed()) {
       return
@@ -2399,16 +2620,15 @@ export function createEmbeddedBrowserMainController(
     if (!normalizedTabId) {
       return
     }
-    const view = getEmbeddedBrowserView(normalizedTabId)
-    if (!view) {
-      return
-    }
-    if (targetWindow.contentView.children.includes(view)) {
-      targetWindow.contentView.removeChildView(view)
-    }
+    cancelEmbeddedBrowserLibraryFileDropRequests(normalizedTabId)
+    cleanupEmbeddedBrowserDroppedFilesForTab(normalizedTabId)
     if (activeEmbeddedBrowserTabId === normalizedTabId) {
       activeEmbeddedBrowserTabId = null
     }
+    if (selectedEmbeddedBrowserTabId === normalizedTabId) {
+      selectEmbeddedBrowserTab(null)
+    }
+    const view = getEmbeddedBrowserView(normalizedTabId)
     embeddedBrowserViews.delete(normalizedTabId)
     embeddedBrowserLastCommittedUrls.delete(normalizedTabId)
     embeddedBrowserIconUrls.delete(normalizedTabId)
@@ -2427,6 +2647,12 @@ export function createEmbeddedBrowserMainController(
     void clearEmbeddedBrowserHlsRetrySessions({ tabId: normalizedTabId })
     void clearEmbeddedBrowserHlsLiveRecordingSessions({ tabId: normalizedTabId })
     void clearEmbeddedBrowserMseSpoolFiles({ tabId: normalizedTabId })
+    if (!view) {
+      return
+    }
+    if (targetWindow.contentView.children.includes(view)) {
+      targetWindow.contentView.removeChildView(view)
+    }
     if (!view.webContents.isDestroyed()) {
       view.webContents.close({ waitForBeforeUnload: false })
     }
@@ -2435,6 +2661,7 @@ export function createEmbeddedBrowserMainController(
   async function handleOpenTab(sender: Electron.WebContents, tabId: string, url?: string) {
     const targetWindow = BrowserWindow.fromWebContents(sender) ?? options.getMainWindow()
     const normalizedTabId = String(tabId || '').trim()
+    selectEmbeddedBrowserTab(normalizedTabId)
     bumpEmbeddedBrowserOpenFileRequestVersion({
       requestVersions: embeddedBrowserOpenFileRequestVersions,
       tabId: normalizedTabId,
@@ -2446,6 +2673,7 @@ export function createEmbeddedBrowserMainController(
     })
     const normalizedUrl = String(url || '').trim()
     if (!normalizedUrl) {
+      activateEmbeddedBrowserTab(targetWindow, normalizedTabId, { createIfMissing: false })
       emitEmbeddedBrowserState({
         canGoBack: false,
         canGoForward: false,
@@ -2460,12 +2688,15 @@ export function createEmbeddedBrowserMainController(
 
   function handleActivateTab(sender: Electron.WebContents, tabId: string | null) {
     const targetWindow = BrowserWindow.fromWebContents(sender) ?? options.getMainWindow()
+    selectEmbeddedBrowserTab(tabId)
     activateEmbeddedBrowserTab(targetWindow, tabId, { createIfMissing: false })
   }
 
   async function handleNavigate(sender: Electron.WebContents, tabId: string, url: string) {
     const targetWindow = BrowserWindow.fromWebContents(sender) ?? options.getMainWindow()
     const normalizedTabId = String(tabId || '').trim()
+    cancelEmbeddedBrowserLibraryFileDropRequests(normalizedTabId)
+    cleanupEmbeddedBrowserDroppedFilesForTab(normalizedTabId)
     bumpEmbeddedBrowserOpenFileRequestVersion({
       requestVersions: embeddedBrowserOpenFileRequestVersions,
       tabId: normalizedTabId,
@@ -2493,6 +2724,9 @@ export function createEmbeddedBrowserMainController(
     if (!normalizedTabId || !normalizedPageUrl || !normalizedSourceUrl) {
       return
     }
+
+    cancelEmbeddedBrowserLibraryFileDropRequests(normalizedTabId)
+    cleanupEmbeddedBrowserDroppedFilesForTab(normalizedTabId)
 
     const requestVersion = bumpEmbeddedBrowserOpenFileRequestVersion({
       requestVersions: embeddedBrowserOpenFileRequestVersions,
@@ -3018,6 +3252,7 @@ export function createEmbeddedBrowserMainController(
     if (!targetWindow || targetWindow.isDestroyed()) {
       return
     }
+    selectEmbeddedBrowserTab(null)
     detachActiveEmbeddedBrowserView(targetWindow)
   }
 
@@ -3026,10 +3261,14 @@ export function createEmbeddedBrowserMainController(
     if (!targetWindow || targetWindow.isDestroyed()) {
       return
     }
+    for (const tabId of embeddedBrowserLibraryFileDropRequests.keys()) {
+      cancelEmbeddedBrowserLibraryFileDropRequests(tabId)
+    }
     Array.from(embeddedBrowserViews.keys()).forEach((tabId) => {
       closeEmbeddedBrowserTab(targetWindow, tabId)
     })
     activeEmbeddedBrowserTabId = null
+    selectEmbeddedBrowserTab(null)
     clearEmbeddedBrowserPageDragSources()
     emitEmbeddedBrowserState({ state: 'idle' })
   }
@@ -3125,8 +3364,29 @@ export function createEmbeddedBrowserMainController(
     })
   }
 
+  function dispose() {
+    for (const tabId of embeddedBrowserLibraryFileDropRequests.keys()) {
+      cancelEmbeddedBrowserLibraryFileDropRequests(tabId)
+    }
+    embeddedBrowserDroppedFileStore.disposeSync()
+    const openFilePaths = new Set([
+      ...[...embeddedBrowserPendingOpenFiles.values()].map(file => file.stagedPath),
+      ...embeddedBrowserAttachedOpenFiles.values(),
+    ])
+    openFilePaths.forEach((stagedPath) => {
+      try {
+        cleanupEmbeddedBrowserOpenFileSync(stagedPath)
+      } catch {
+        // A later stale-file sweep retries failed shutdown cleanup.
+      }
+    })
+    embeddedBrowserPendingOpenFiles.clear()
+    embeddedBrowserAttachedOpenFiles.clear()
+  }
+
   return {
     configureSession,
+    dispose,
     handleActiveViewInputShortcut,
     initializeBridges,
     registerIpcHandlers,

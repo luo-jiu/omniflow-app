@@ -1,6 +1,6 @@
 # 前端验证矩阵
 
-更新时间：2026-08-17
+更新时间：2026-08-18
 
 适用范围：`omniflow-app` 前端、Electron、IPC、工作区、文件树、文件预览、上传、内置浏览器和资源捕捉相关改动的提测、自测与 review 验证。
 
@@ -23,6 +23,8 @@ npm run lint
 npm test
 npm run build
 ```
+
+`npm run build` 只做 TypeScript、renderer、Electron main/preload 编译，不调用 `electron-builder` 或代码签名。平台安装包只在明确进行打包、发布或安装验证时通过 `build:mac`、`build:win` 或正式发布脚本生成，不属于每次前端改动的默认门禁。
 
 如果本次没跑，最终说明里必须写：
 
@@ -115,6 +117,7 @@ legacy 兼容检查：
 - 上传成功后节点出现在预期父目录
 - 从内置浏览器拖拽图片、媒体或明确下载文件到目录树可进入上传确认；普通本地文件拖拽上传仍走原链路，普通网页链接不误触发上传
 - 文件和目录节点在目录树内移动必须正常；单文件拖到 Finder / Explorer 时生成同名文件，目录和多选不误触发导出；不得从 Semi Tree `dragstart` 调用 `webContents.startDrag()`
+- 单个普通文件拖到已打开的内置网页时，网页 dropzone 收到同名真实 `File`；同一手势仍可完成树内移动和 Finder / Explorer 导出，目录、多选、归档目录和特殊节点不触发网页投递
 - 删除和重命名后树状态正确；从目录树或任一归档卡片删除子树后，对应 Text draft 被清理且旧 writer 不能写回
 
 边界路径：
@@ -124,6 +127,7 @@ legacy 兼容检查：
 - 自动导入与手动上传是否都能刷新树
 - 网页资源 URL 下载失败、来源会话过期、`blob:` 失效和资源超限时有明确提示，不创建空上传任务；登录态资源复用 embedded browser Cookie，归档目录仍禁止拖拽上传
 - 目录树系统导出必须验证树内移动、离开树后的 Finder / Explorer 导出、签名链接失败或过期、loopback 等待超时、大文件、Range 请求、重复拖动和切换资料库；Windows 需额外验证保留名称、末尾句点等文件名规范化和 Explorer 接收，不依赖 Windows MinIO 可达
+- 目录树到网页必须验证网页拒绝 drop、签名链接失败、单文件或全局暂存超过 1GB、30 分钟 TTL、准备期间导航或关闭 tab、同一 tab 连续拖入、退出清理和 DevTools 占用 debugger；iframe 当前不得进入暂存，提示只能表达“交给网页”，不能伪报网页上传成功
 
 ### 3.4 文件预览 / File Viewer
 
@@ -229,6 +233,8 @@ legacy 兼容检查：
 - session release / 退出登录后，所有原生 view 不残留
 - 调整窗口尺寸后，浏览器视图 bounds 正常
 - 空白页和已加载页之间切换时状态正常
+- 目录树单文件投递后，主文档导航或关闭 tab 会清理临时文件；准备期间导航不会在新页面继续投递或弹出过期失败提示
+- 本地文件或目录树文件拖到浏览器外壳、标签栏、地址栏、书签栏和空白主页时不创建 tab、不导航，也不弹出独立预览窗口；需要打开文件时继续使用明确命令或现有 Viewer
 - DevTools 打开时 deep capture 明确处于 CDP 调试降级；关闭 DevTools 后刷新页面，document-start probe 能恢复
 
 ### 3.7 资源捕捉 / Catch Toolkit

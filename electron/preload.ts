@@ -12,6 +12,7 @@ import type {
   EmbeddedBrowserStagePageDragRequest,
   EmbeddedBrowserStagedPageDragFile,
 } from '@/features/file-transfer/model/browser-drag-transfer'
+import type { LibraryFileBrowserDropResult } from '@/features/file-transfer/model/file-transfer'
 
 // --------- Expose some API to the Renderer process ---------
 contextBridge.exposeInMainWorld('ipcRenderer', {
@@ -89,6 +90,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('fs:cleanup-temp-import-path', targetPath),
   fileTransferGetDownloadUrlEnvironment: () =>
     ipcRenderer.invoke('file-transfer:get-download-url-environment'),
+  fileTransferRegisterInternalDropClaim: (input: {
+    claimId: string;
+    fileName: string;
+  }) => ipcRenderer.send('file-transfer:register-internal-drop-claim', input),
   fileTransferResolveDownloadUrlClaim: (input: {
     claimId: string;
     fileName: string;
@@ -367,6 +372,13 @@ contextBridge.exposeInMainWorld('electronEmbeddedBrowser', {
     };
     ipcRenderer.on('embedded-browser:state', wrapped);
     return () => ipcRenderer.removeListener('embedded-browser:state', wrapped);
+  },
+  onLibraryFileDropResult: (listener: (payload: LibraryFileBrowserDropResult) => void) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, payload: LibraryFileBrowserDropResult) => {
+      listener(payload);
+    };
+    ipcRenderer.on('embedded-browser:library-file-drop-result', wrapped);
+    return () => ipcRenderer.removeListener('embedded-browser:library-file-drop-result', wrapped);
   },
   onDownload: (listener: (payload: {
     downloadId: string;

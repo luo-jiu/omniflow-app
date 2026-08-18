@@ -24,6 +24,22 @@ export function registerFileTransferIpc() {
     return true
   })
 
+  ipcMain.on('file-transfer:register-internal-drop-claim', (_event, input: {
+    claimId: string
+    fileName: string
+  }) => {
+    const broker = getFileTransferDownloadUrlBroker()
+    if (!broker) return
+    try {
+      broker.registerInternalDropClaim(
+        String(input?.claimId || ''),
+        String(input?.fileName || 'file'),
+      )
+    } catch {
+      // Invalid or replayed renderer claims are ignored.
+    }
+  })
+
   ipcMain.handle('file-transfer:reject-download-url-claim', (_event, input: {
     claimId: string
     error: string

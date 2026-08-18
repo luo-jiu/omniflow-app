@@ -23,6 +23,13 @@ export interface RejectDownloadUrlClaimInput {
   fileName?: string
 }
 
+export interface ResolvedDownloadUrlClaim {
+  claimId: string
+  fileName: string
+  mimeType?: string
+  sourceUrl: string
+}
+
 export interface FileTransferDownloadUrlBrokerOptions {
   claimTtlMs?: number
   sourceWaitMs?: number
@@ -39,6 +46,8 @@ interface DownloadUrlClaim {
   error?: string
   createdAt: number
   expiresAt: number
+  internalDropConsumed: boolean
+  internalDropRegistered: boolean
   waiters: Set<() => void>
 }
 
@@ -153,6 +162,50 @@ export class FileTransferDownloadUrlBroker {
     this.notifyWaiters(claim)
   }
 
+  registerInternalDropClaim(claimId: string, fileName: string): void {
+    const normalizedClaimId = normalizeClaimId(claimId)
+    this.sweepExpired()
+    const claim = this.getOrCreateClaim(normalizedClaimId, fileName)
+    if (claim.internalDropConsumed) {
+      throw new Error('文件传输声明已被使用')
+    }
+    claim.internalDropRegistered = true
+  }
+
+  async waitForResolvedClaim(
+    claimId: string,
+    fileName: string,
+    signal?: AbortSignal,
+  ): Promise<ResolvedDownloadUrlClaim> {
+    const normalizedClaimId = normalizeClaimId(claimId)
+    this.sweepExpired()
+    const claim = this.claims.get(normalizedClaimId)
+    if (!claim?.internalDropRegistered) {
+      throw new Error('文件传输声明未授权')
+    }
+    if (claim.fileName !== normalizeDownloadFileName(fileName)) {
+      throw new Error('文件传输声明与文件名不匹配')
+    }
+    if (claim.internalDropConsumed) {
+      throw new Error('文件传输声明已被使用')
+    }
+    claim.internalDropConsumed = true
+    await this.waitForClaimSource(claim, signal)
+    if (claim.expiresAt <= this.now()) {
+      this.claims.delete(normalizedClaimId)
+      throw new Error('文件传输声明已过期')
+    }
+    if (claim.error || !claim.sourceUrl) {
+      throw new Error(claim.error || '文件访问链接不可用')
+    }
+    return {
+      claimId: normalizedClaimId,
+      fileName: claim.fileName,
+      mimeType: claim.mimeType,
+      sourceUrl: claim.sourceUrl,
+    }
+  }
+
   sweepExpired(): number {
     const now = this.now()
     const expired = [...this.claims.values()].filter((claim) => claim.expiresAt <= now)
@@ -186,6 +239,8 @@ export class FileTransferDownloadUrlBroker {
       fileName: normalizeDownloadFileName(fileName),
       createdAt,
       expiresAt: createdAt + this.claimTtlMs,
+      internalDropConsumed: false,
+      internalDropRegistered: false,
       waiters: new Set(),
     }
     this.claims.set(claimId, claim)
@@ -198,18 +253,36 @@ export class FileTransferDownloadUrlBroker {
     waiters.forEach((notify) => notify())
   }
 
-  private async waitForClaimSource(claim: DownloadUrlClaim): Promise<void> {
+  private async waitForClaimSource(claim: DownloadUrlClaim, signal?: AbortSignal): Promise<void> {
     if (claim.sourceUrl || claim.error) return
-    await new Promise<void>((resolve) => {
+    if (signal?.aborted) {
+      const error = new Error('文件传输已取消')
+      error.name = 'AbortError'
+      throw error
+    }
+    await new Promise<void>((resolve, reject) => {
+      const cleanup = () => {
+        clearTimeout(timeoutId)
+        signal?.removeEventListener('abort', abort)
+      }
       const timeoutId = setTimeout(() => {
         claim.waiters.delete(notify)
+        signal?.removeEventListener('abort', abort)
         resolve()
       }, this.sourceWaitMs)
       const notify = () => {
-        clearTimeout(timeoutId)
+        cleanup()
         resolve()
       }
+      const abort = () => {
+        claim.waiters.delete(notify)
+        cleanup()
+        const error = new Error('文件传输已取消')
+        error.name = 'AbortError'
+        reject(error)
+      }
       claim.waiters.add(notify)
+      signal?.addEventListener('abort', abort, { once: true })
     })
     if (!claim.sourceUrl && !claim.error) {
       claim.error = '等待文件访问链接超时'

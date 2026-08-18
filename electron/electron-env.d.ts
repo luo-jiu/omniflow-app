@@ -120,6 +120,10 @@ interface Window {
     cleanupStagedTextFile: (stagedPath: string) => Promise<boolean>;
     cleanupTempImportPath: (targetPath: string) => Promise<boolean>;
     fileTransferGetDownloadUrlEnvironment: () => Promise<import('@/features/file-transfer/model/file-transfer').FileTransferDownloadUrlEnvironment | null>;
+    fileTransferRegisterInternalDropClaim: (input: {
+      claimId: string;
+      fileName: string;
+    }) => void;
     fileTransferResolveDownloadUrlClaim: (input: {
       claimId: string;
       fileName: string;
@@ -433,6 +437,9 @@ interface Window {
     goForward: (tabId: string) => Promise<void>;
     listCapturedResources: (tabId: string) => Promise<EmbeddedBrowserResourceCaptureSnapshot>;
     navigate: (tabId: string, url: string) => Promise<void>;
+    onLibraryFileDropResult: (
+      listener: (payload: import('@/features/file-transfer/model/file-transfer').LibraryFileBrowserDropResult) => void,
+    ) => () => void;
     stagePageDrag: (
       input: import('@/features/file-transfer/model/browser-drag-transfer').EmbeddedBrowserStagePageDragRequest,
     ) => Promise<import('@/features/file-transfer/model/browser-drag-transfer').EmbeddedBrowserStagedPageDragFile[]>;

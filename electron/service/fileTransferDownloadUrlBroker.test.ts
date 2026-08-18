@@ -123,4 +123,57 @@ describe('FileTransferDownloadUrlBroker', () => {
     expect(response.headers.get('content-range')).toBe('bytes 2-5/10')
     expect(await response.text()).toBe('2345')
   })
+
+  it('waits for a renderer claim before exposing its source to an internal consumer', async () => {
+    const sourceUrl = await createSourceServer('internal-consumer')
+    const broker = new FileTransferDownloadUrlBroker({ sourceWaitMs: 1_000 })
+    brokers.push(broker)
+    await broker.start()
+    const claimId = '12345678-1234-1234-1234-123456789abc'
+
+    broker.registerInternalDropClaim(claimId, 'song.mp3')
+    const resolvedPromise = broker.waitForResolvedClaim(claimId, 'song.mp3')
+    await new Promise(resolve => setTimeout(resolve, 10))
+    broker.resolveClaim({
+      claimId,
+      fileName: 'song.mp3',
+      mimeType: 'audio/mpeg',
+      sourceUrl,
+    })
+
+    await expect(resolvedPromise).resolves.toEqual({
+      claimId,
+      fileName: 'song.mp3',
+      mimeType: 'audio/mpeg',
+      sourceUrl,
+    })
+  })
+
+  it('cancels an internal claim wait and prevents replaying the consumed claim', async () => {
+    const sourceUrl = await createSourceServer('still-available')
+    const broker = new FileTransferDownloadUrlBroker({ sourceWaitMs: 1_000 })
+    brokers.push(broker)
+    await broker.start()
+    const claimId = '12345678-1234-1234-1234-123456789abc'
+    const controller = new AbortController()
+
+    broker.registerInternalDropClaim(claimId, 'song.mp3')
+    const cancelled = broker.waitForResolvedClaim(claimId, 'song.mp3', controller.signal)
+    controller.abort()
+    await expect(cancelled).rejects.toMatchObject({ name: 'AbortError' })
+
+    broker.resolveClaim({ claimId, fileName: 'song.mp3', sourceUrl })
+    await expect(broker.waitForResolvedClaim(claimId, 'song.mp3')).rejects.toThrow('已被使用')
+  })
+
+  it('rejects unregistered internal claims', async () => {
+    const broker = new FileTransferDownloadUrlBroker({ sourceWaitMs: 1_000 })
+    brokers.push(broker)
+    await broker.start()
+
+    await expect(broker.waitForResolvedClaim(
+      '12345678-1234-1234-1234-123456789abc',
+      'song.mp3',
+    )).rejects.toThrow('未授权')
+  })
 })

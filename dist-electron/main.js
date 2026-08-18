@@ -4,11 +4,13 @@ var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "sy
 import require$$1$5, { dialog, app, net, protocol, ipcMain, session, systemPreferences, safeStorage, webContents, BrowserWindow, shell, Menu, WebContentsView, nativeTheme, screen } from "electron";
 import { fileURLToPath } from "node:url";
 import path$n from "node:path";
-import fs$k, { constants as constants$3, existsSync, mkdirSync, readFileSync as readFileSync$1, writeFileSync as writeFileSync$1, statSync, truncateSync, appendFileSync } from "node:fs";
+import fs$k, { constants as constants$3, existsSync, mkdirSync, readFileSync as readFileSync$1, writeFileSync as writeFileSync$1, rmSync, createWriteStream, statSync, truncateSync, appendFileSync } from "node:fs";
 import fs$l from "fs/promises";
-import fs$j, { access, mkdtemp, rm, writeFile as writeFile$1, mkdir as mkdir$4, copyFile as copyFile$2, appendFile, readFile as readFile$1 } from "node:fs/promises";
+import fs$j, { access, mkdtemp, rm, writeFile as writeFile$1, mkdir as mkdir$4, readdir, stat as stat$5, rename as rename$2, copyFile as copyFile$2, appendFile, readFile as readFile$1 } from "node:fs/promises";
 import http from "node:http";
 import https from "node:https";
+import { Transform, Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import require$$0 from "os";
 import require$$1 from "child_process";
 import require$$1$1 from "fs";
@@ -17,8 +19,6 @@ import os$1 from "node:os";
 import { Buffer as Buffer$1 } from "node:buffer";
 import crypto, { randomUUID } from "node:crypto";
 import { promisify } from "node:util";
-import { Readable } from "node:stream";
-import { pipeline } from "node:stream/promises";
 import require$$0$1 from "constants";
 import require$$0$2 from "stream";
 import require$$4 from "util";
@@ -32,7 +32,16 @@ import require$$1$4 from "string_decoder";
 import require$$14 from "zlib";
 import require$$4$1 from "http";
 const DOWNLOAD_REQUEST_TIMEOUT_MS = 6e4;
-async function downloadUrlToFile(url, targetPath, headers = {}, redirectDepth = 0) {
+function formatByteLimit(maxBytes) {
+  if (maxBytes >= 1024 * 1024 * 1024 && maxBytes % (1024 * 1024 * 1024) === 0) {
+    return `${maxBytes / (1024 * 1024 * 1024)}GB`;
+  }
+  if (maxBytes >= 1024 * 1024 && maxBytes % (1024 * 1024) === 0) {
+    return `${maxBytes / (1024 * 1024)}MB`;
+  }
+  return `${maxBytes}B`;
+}
+async function downloadUrlToFile(url, targetPath, headers = {}, redirectDepth = 0, maxBytes = Number.POSITIVE_INFINITY, signal) {
   const MAX_REDIRECT_DEPTH = 3;
   const parsed = new URL(url);
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
@@ -42,6 +51,7 @@ async function downloadUrlToFile(url, targetPath, headers = {}, redirectDepth = 
   await fs$j.mkdir(path$n.dirname(targetPath), { recursive: true });
   await new Promise((resolve, reject) => {
     let settled = false;
+    let responseStarted = false;
     const settleResolve = () => {
       if (settled) return;
       settled = true;
@@ -58,8 +68,10 @@ async function downloadUrlToFile(url, targetPath, headers = {}, redirectDepth = 
       port: parsed.port ? Number(parsed.port) : void 0,
       path: `${parsed.pathname}${parsed.search}`,
       method: "GET",
-      headers
+      headers,
+      signal
     }, (response) => {
+      responseStarted = true;
       response.setTimeout(DOWNLOAD_REQUEST_TIMEOUT_MS, () => {
         response.destroy(new Error(`下载响应超时: ${DOWNLOAD_REQUEST_TIMEOUT_MS}ms`));
       });
@@ -72,7 +84,7 @@ async function downloadUrlToFile(url, targetPath, headers = {}, redirectDepth = 
           return;
         }
         const nextUrl = new URL(redirectLocation, url).toString();
-        downloadUrlToFile(nextUrl, targetPath, headers, redirectDepth + 1).then(settleResolve).catch(settleReject);
+        downloadUrlToFile(nextUrl, targetPath, headers, redirectDepth + 1, maxBytes, signal).then(settleResolve).catch(settleReject);
         return;
       }
       if (statusCode >= 400) {
@@ -80,31 +92,35 @@ async function downloadUrlToFile(url, targetPath, headers = {}, redirectDepth = 
         settleReject(new Error(`下载失败: HTTP ${statusCode} (${url})`));
         return;
       }
+      const declaredLength = Number(response.headers["content-length"] || 0);
+      if (Number.isFinite(maxBytes) && declaredLength > maxBytes) {
+        response.resume();
+        settleReject(new Error(`文件超过允许的 ${formatByteLimit(maxBytes)} 大小上限`));
+        return;
+      }
+      let receivedBytes = 0;
+      const sizeLimiter = new Transform({
+        transform(chunk, _encoding, callback) {
+          receivedBytes += chunk.byteLength;
+          if (Number.isFinite(maxBytes) && receivedBytes > maxBytes) {
+            callback(new Error(`文件超过允许的 ${formatByteLimit(maxBytes)} 大小上限`));
+            return;
+          }
+          callback(null, chunk);
+        }
+      });
       const fileStream = fs$k.createWriteStream(targetPath);
-      const cleanupAndReject = async (error2) => {
-        try {
-          fileStream.destroy();
-        } catch {
-        }
-        try {
-          await fs$j.rm(targetPath, { force: true });
-        } catch {
-        }
+      void pipeline(response, sizeLimiter, fileStream).then(settleResolve).catch(async (error2) => {
+        await fs$j.rm(targetPath, { force: true }).catch(() => void 0);
         settleReject(error2);
-      };
-      response.on("error", (error2) => {
-        void cleanupAndReject(error2);
       });
-      fileStream.on("error", (error2) => {
-        void cleanupAndReject(error2);
-      });
-      fileStream.on("finish", () => settleResolve());
-      response.pipe(fileStream);
     });
     request.setTimeout(DOWNLOAD_REQUEST_TIMEOUT_MS, () => {
       request.destroy(new Error(`下载请求超时: ${DOWNLOAD_REQUEST_TIMEOUT_MS}ms`));
     });
-    request.on("error", (error2) => settleReject(error2));
+    request.on("error", (error2) => {
+      if (!responseStarted) settleReject(error2);
+    });
     request.end();
   });
 }
@@ -1225,7 +1241,7 @@ function normalizeEmbeddedBrowserResourceTranscodeFormat(input) {
   }
   return normalized;
 }
-function sanitizeFileName$2(input) {
+function sanitizeFileName$3(input) {
   const normalized = String(input || "").trim().replace(/[\\/:*?"<>|]+/g, "_");
   return normalized || "media";
 }
@@ -1311,8 +1327,8 @@ function buildEmbeddedBrowserResourceTranscodeArgs(request) {
   ];
 }
 function deriveEmbeddedBrowserMergedFileName(videoFileName, audioFileName) {
-  const normalizedVideoName = sanitizeFileName$2(path$n.parse(videoFileName).name);
-  const normalizedAudioName = sanitizeFileName$2(path$n.parse(audioFileName).name);
+  const normalizedVideoName = sanitizeFileName$3(path$n.parse(videoFileName).name);
+  const normalizedAudioName = sanitizeFileName$3(path$n.parse(audioFileName).name);
   const mergedBaseName = normalizedVideoName.replace(/-video$/i, "").replace(/_video$/i, "") || normalizedAudioName.replace(/-audio$/i, "").replace(/_audio$/i, "") || "merged-media";
   return `${mergedBaseName}.mp4`;
 }
@@ -1335,7 +1351,7 @@ async function writeExtractedResourceToTempFile(tempDir, resource) {
   if (!resource.base64) {
     throw new Error("缺少可写入的资源内容");
   }
-  const filePath = path$n.join(tempDir, sanitizeFileName$2(resource.fileName));
+  const filePath = path$n.join(tempDir, sanitizeFileName$3(resource.fileName));
   await writeFile$1(filePath, Buffer$1.from(resource.base64, "base64"));
   return filePath;
 }
@@ -1480,12 +1496,12 @@ async function transcodeEmbeddedBrowserResource(request) {
 function isMediaToolOperation(input) {
   return input === "extract-audio" || input === "compress-video";
 }
-function sanitizeFileName$1(input) {
+function sanitizeFileName$2(input) {
   const normalized = String(input).trim().replace(/[\\/:*?"<>|]+/g, "_");
   return normalized || "media";
 }
 function deriveOutputFileName(inputFileName, operation) {
-  const parsed = path$n.parse(sanitizeFileName$1(inputFileName || "media"));
+  const parsed = path$n.parse(sanitizeFileName$2(inputFileName || "media"));
   const baseName = parsed.name || "media";
   if (operation === "extract-audio") {
     return `${baseName}-audio.m4a`;
@@ -1936,6 +1952,44 @@ class FileTransferDownloadUrlBroker {
     claim.error = String(input.error || "无法取得文件访问链接");
     this.notifyWaiters(claim);
   }
+  registerInternalDropClaim(claimId, fileName) {
+    const normalizedClaimId = normalizeClaimId(claimId);
+    this.sweepExpired();
+    const claim = this.getOrCreateClaim(normalizedClaimId, fileName);
+    if (claim.internalDropConsumed) {
+      throw new Error("文件传输声明已被使用");
+    }
+    claim.internalDropRegistered = true;
+  }
+  async waitForResolvedClaim(claimId, fileName, signal) {
+    const normalizedClaimId = normalizeClaimId(claimId);
+    this.sweepExpired();
+    const claim = this.claims.get(normalizedClaimId);
+    if (!(claim == null ? void 0 : claim.internalDropRegistered)) {
+      throw new Error("文件传输声明未授权");
+    }
+    if (claim.fileName !== normalizeDownloadFileName(fileName)) {
+      throw new Error("文件传输声明与文件名不匹配");
+    }
+    if (claim.internalDropConsumed) {
+      throw new Error("文件传输声明已被使用");
+    }
+    claim.internalDropConsumed = true;
+    await this.waitForClaimSource(claim, signal);
+    if (claim.expiresAt <= this.now()) {
+      this.claims.delete(normalizedClaimId);
+      throw new Error("文件传输声明已过期");
+    }
+    if (claim.error || !claim.sourceUrl) {
+      throw new Error(claim.error || "文件访问链接不可用");
+    }
+    return {
+      claimId: normalizedClaimId,
+      fileName: claim.fileName,
+      mimeType: claim.mimeType,
+      sourceUrl: claim.sourceUrl
+    };
+  }
   sweepExpired() {
     const now = this.now();
     const expired = [...this.claims.values()].filter((claim) => claim.expiresAt <= now);
@@ -1967,6 +2021,8 @@ class FileTransferDownloadUrlBroker {
       fileName: normalizeDownloadFileName(fileName),
       createdAt,
       expiresAt: createdAt + this.claimTtlMs,
+      internalDropConsumed: false,
+      internalDropRegistered: false,
       waiters: /* @__PURE__ */ new Set()
     };
     this.claims.set(claimId, claim);
@@ -1977,18 +2033,36 @@ class FileTransferDownloadUrlBroker {
     claim.waiters.clear();
     waiters.forEach((notify) => notify());
   }
-  async waitForClaimSource(claim) {
+  async waitForClaimSource(claim, signal) {
     if (claim.sourceUrl || claim.error) return;
-    await new Promise((resolve) => {
+    if (signal == null ? void 0 : signal.aborted) {
+      const error2 = new Error("文件传输已取消");
+      error2.name = "AbortError";
+      throw error2;
+    }
+    await new Promise((resolve, reject) => {
+      const cleanup = () => {
+        clearTimeout(timeoutId);
+        signal == null ? void 0 : signal.removeEventListener("abort", abort);
+      };
       const timeoutId = setTimeout(() => {
         claim.waiters.delete(notify);
+        signal == null ? void 0 : signal.removeEventListener("abort", abort);
         resolve();
       }, this.sourceWaitMs);
       const notify = () => {
-        clearTimeout(timeoutId);
+        cleanup();
         resolve();
       };
+      const abort = () => {
+        claim.waiters.delete(notify);
+        cleanup();
+        const error2 = new Error("文件传输已取消");
+        error2.name = "AbortError";
+        reject(error2);
+      };
       claim.waiters.add(notify);
+      signal == null ? void 0 : signal.addEventListener("abort", abort, { once: true });
     });
     if (!claim.sourceUrl && !claim.error) {
       claim.error = "等待文件访问链接超时";
@@ -2112,6 +2186,17 @@ function registerFileTransferIpc() {
       sourceUrl: String((input == null ? void 0 : input.sourceUrl) || "")
     });
     return true;
+  });
+  ipcMain.on("file-transfer:register-internal-drop-claim", (_event, input) => {
+    const broker = getFileTransferDownloadUrlBroker();
+    if (!broker) return;
+    try {
+      broker.registerInternalDropClaim(
+        String((input == null ? void 0 : input.claimId) || ""),
+        String((input == null ? void 0 : input.fileName) || "file")
+      );
+    } catch {
+    }
   });
   ipcMain.handle("file-transfer:reject-download-url-claim", (_event, input) => {
     const broker = getFileTransferDownloadUrlBroker();
@@ -2310,6 +2395,10 @@ function registerEmbeddedBrowserMainIpcHandlers(handlers) {
   );
   ipcMain.handle("embedded-browser:resource:start-deep-capture", async (_event, tabId) => handlers.startDeepResourceCapture(tabId));
   ipcMain.handle("embedded-browser:set-bounds", (event, bounds) => handlers.setBounds(event.sender, bounds));
+  ipcMain.handle(
+    "embedded-browser:page-drag:stage",
+    async (_event, input) => handlers.stagePageDrag(input)
+  );
   ipcMain.handle("embedded-browser:close-tab", (event, tabId) => handlers.closeTab(event.sender, tabId));
   ipcMain.handle("embedded-browser:cleanup-download-file", async (_event, tempPath) => handlers.cleanupDownloadFile(tempPath));
   ipcMain.handle("embedded-browser:deactivate", (event) => handlers.deactivate(event.sender));
@@ -3169,7 +3258,7 @@ function getHeaderValue(headers, name) {
   }
   return "";
 }
-function normalizeMimeType(input) {
+function normalizeMimeType$1(input) {
   var _a2;
   return ((_a2 = String(input || "").split(";")[0]) == null ? void 0 : _a2.trim().toLowerCase()) || "";
 }
@@ -3184,7 +3273,7 @@ function getResourceExtension(url) {
   }
 }
 function classifyCapturedResource(input) {
-  const normalizedMimeType = normalizeMimeType(input.mimeType);
+  const normalizedMimeType = normalizeMimeType$1(input.mimeType);
   const extension = String(input.extHint || "").trim().toLowerCase() || getResourceExtension(input.url);
   const extensionKind = classifyCatCatchExtensionKind(extension);
   if (extensionKind === "manifest" || isCatCatchManifestMimeType(normalizedMimeType)) {
@@ -3236,7 +3325,7 @@ function inferStreamType(input) {
   if (input.streamType) {
     return input.streamType;
   }
-  const normalizedMimeType = normalizeMimeType(input.mimeType);
+  const normalizedMimeType = normalizeMimeType$1(input.mimeType);
   if (normalizedMimeType.startsWith("audio/")) {
     return "audio";
   }
@@ -3432,7 +3521,7 @@ function initializeEmbeddedBrowserResourceBridge(options) {
     const targetWebContents = webContents.fromId(details.webContentsId);
     const rawUrl = String(details.url || "").trim();
     const requestContext = requestContextsByRequestId.get(details.id);
-    const mimeType = normalizeMimeType(getHeaderValue(details.responseHeaders, "content-type"));
+    const mimeType = normalizeMimeType$1(getHeaderValue(details.responseHeaders, "content-type"));
     const pageUrl = (targetWebContents == null ? void 0 : targetWebContents.getURL()) || void 0;
     const captureEvaluation = evaluateEmbeddedBrowserResourceCapture({
       ext: getResourceExtension(rawUrl) || void 0,
@@ -3517,7 +3606,7 @@ function recordEmbeddedBrowserProbeResource(tabId, payload) {
     ext: captureEvaluation.extHint || payload.ext,
     kind,
     method: payload.method,
-    mimeType: normalizeMimeType(payload.mimeType),
+    mimeType: normalizeMimeType$1(payload.mimeType),
     pageUrl: payload.pageUrl,
     resourceType: payload.resourceType,
     resourceKey: payload.resourceKey,
@@ -3819,7 +3908,96 @@ async function resolveEmbeddedBrowserBookmarkFavicon(payload) {
     iconUrl: ""
   };
 }
+const LIBRARY_FILE_BROWSER_DRAG_DATA_TYPE = "application/x-omniflow-library-file";
+const EMBEDDED_BROWSER_LIBRARY_FILE_DROP_CONSOLE_PREFIX = "__OMNIFLOW_LIBRARY_FILE_DROP__:";
+const EMBEDDED_BROWSER_LIBRARY_FILE_DROP_ACCEPTANCE_KEY = "__OMNIFLOW_LIBRARY_FILE_DROP_ACCEPTED__";
+const EMBEDDED_BROWSER_LIBRARY_FILE_DROP_WORLD_ID = 1004;
+function createEmbeddedBrowserLibraryFileDropScript(nonce) {
+  return `(function(){
+  if(window.__OMNIFLOW_LIBRARY_FILE_DROP__)return;
+  window.__OMNIFLOW_LIBRARY_FILE_DROP__=true;
+  var DATA_TYPE=${JSON.stringify(LIBRARY_FILE_BROWSER_DRAG_DATA_TYPE)};
+  var PREFIX=${JSON.stringify(EMBEDDED_BROWSER_LIBRARY_FILE_DROP_CONSOLE_PREFIX)};
+  var NONCE=${JSON.stringify(nonce)};
+  var ACCEPTANCE_KEY=${JSON.stringify(EMBEDDED_BROWSER_LIBRARY_FILE_DROP_ACCEPTANCE_KEY)};
+  window[ACCEPTANCE_KEY]=false;
+  function hasLibraryFile(event){
+    try{
+      if(!event||event.isTrusted!==true)return false;
+      var types=Array.from(event.dataTransfer&&event.dataTransfer.types||[]);
+      return types.map(function(value){return String(value||'').toLowerCase()}).indexOf(DATA_TYPE)>=0;
+    }catch(error){return false}
+  }
+  function parsePayload(event){
+    try{
+      var raw=event.dataTransfer&&event.dataTransfer.getData(DATA_TYPE);
+      if(!raw||raw.length>4096)return null;
+      var payload=JSON.parse(raw);
+      var claimId=String(payload&&payload.claimId||'').trim();
+      var fileName=String(payload&&payload.fileName||'').trim();
+      var mimeType=String(payload&&payload.mimeType||'').trim();
+      if(!/^[a-zA-Z0-9_-]{16,128}$/.test(claimId)||!fileName)return null;
+      return{claimId:claimId,fileName:fileName,mimeType:mimeType||undefined};
+    }catch(error){return null}
+  }
+  function resolveTopPoint(event){
+    var x=Number(event.clientX||0);
+    var y=Number(event.clientY||0);
+    try{
+      var currentWindow=window;
+      while(currentWindow!==currentWindow.top){
+        var frameElement=currentWindow.frameElement;
+        if(!frameElement)return{x:x,y:y,supported:false};
+        var rect=frameElement.getBoundingClientRect();
+        x+=rect.left;
+        y+=rect.top;
+        currentWindow=currentWindow.parent;
+      }
+    }catch(error){return{x:x,y:y,supported:false}}
+    return{x:Math.max(0,x),y:Math.max(0,y),supported:true};
+  }
+  function allowDrop(event){
+    if(!hasLibraryFile(event))return;
+    event.preventDefault();
+    try{event.dataTransfer.dropEffect='copy'}catch(error){}
+  }
+  function trackNativeFileAcceptance(event){
+    try{
+      if(!event||event.isTrusted!==true)return;
+      var types=Array.from(event.dataTransfer&&event.dataTransfer.types||[]);
+      var hasFiles=types.some(function(value){return String(value||'').toLowerCase()==='files'});
+      if(!hasFiles)return;
+      Promise.resolve().then(function(){window[ACCEPTANCE_KEY]=event.defaultPrevented===true});
+    }catch(error){}
+  }
+  document.addEventListener('dragenter',allowDrop,true);
+  document.addEventListener('dragover',allowDrop,true);
+  document.addEventListener('dragover',trackNativeFileAcceptance,true);
+  document.addEventListener('drop',function(event){
+    if(!hasLibraryFile(event))return;
+    var payload=parsePayload(event);
+    if(!payload)return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    var point=resolveTopPoint(event);
+    try{
+      console.info(PREFIX+JSON.stringify({
+        claimId:payload.claimId,
+        clientX:point.x,
+        clientY:point.y,
+        fileName:payload.fileName,
+        frameCoordinateSupported:point.supported,
+        mimeType:payload.mimeType,
+        nonce:NONCE,
+        pageUrl:String(location.href||'')
+      }));
+    }catch(error){}
+  },true);
+})();`;
+}
 const EMBEDDED_BROWSER_OPEN_FILE_DIRNAME = "embedded-browser-open-files";
+const EMBEDDED_BROWSER_LIBRARY_FILE_DROP_MAX_BYTES = 1024 * 1024 * 1024;
+const EMBEDDED_BROWSER_OPEN_FILE_STALE_MS = 24 * 60 * 60 * 1e3;
 const FALLBACK_FILE_INPUT_SELECTOR = 'input[data-omniflow-browser-open-fallback="true"]';
 function getEmbeddedBrowserOpenFileRoot() {
   return path$n.join(app.getPath("userData"), EMBEDDED_BROWSER_OPEN_FILE_DIRNAME);
@@ -3832,8 +4010,7 @@ function ensureEmbeddedBrowserOpenFileRoot() {
   return root2;
 }
 function buildStagedFileName(fileName) {
-  const safeName = String(fileName).replace(/[/\\]/g, "_").trim() || "file";
-  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${safeName}`;
+  return normalizeDownloadFileName(fileName);
 }
 function isPathInsideDirectory(filePath, directoryPath) {
   const resolvedFilePath = path$n.resolve(filePath);
@@ -3875,15 +4052,7 @@ async function setFileInputFiles(view, selector, filePaths) {
   if (!selector || filePaths.length === 0) {
     return false;
   }
-  try {
-    if (!view.webContents.debugger.isAttached()) {
-      view.webContents.debugger.attach("1.3");
-    }
-  } catch (error2) {
-    if (!String(error2).includes("Already attached")) {
-      throw error2;
-    }
-  }
+  await ensureDebuggerAttached(view);
   const documentNode = await view.webContents.debugger.sendCommand("DOM.getDocument", {
     depth: 1
   });
@@ -3961,11 +4130,37 @@ async function dispatchFileToPage(view, selector) {
   `, true);
   return Boolean(result == null ? void 0 : result.ok);
 }
-async function stageEmbeddedBrowserOpenFile(sourceUrl, fileName, headers = {}) {
+async function stageEmbeddedBrowserOpenFile(sourceUrl, fileName, headers = {}, options = {}) {
   const openFileRoot = ensureEmbeddedBrowserOpenFileRoot();
-  const stagedPath = path$n.join(openFileRoot, buildStagedFileName(fileName));
-  await downloadUrlToFile(sourceUrl, stagedPath, headers);
-  return stagedPath;
+  const stagingDirectory = await fs$j.mkdtemp(path$n.join(openFileRoot, "file-"));
+  const stagedPath = path$n.join(stagingDirectory, buildStagedFileName(fileName));
+  try {
+    await downloadUrlToFile(
+      sourceUrl,
+      stagedPath,
+      headers,
+      0,
+      options.maxBytes ?? Number.POSITIVE_INFINITY,
+      options.signal
+    );
+    return stagedPath;
+  } catch (error2) {
+    await fs$j.rm(stagingDirectory, { force: true, recursive: true }).catch(() => void 0);
+    throw error2;
+  }
+}
+async function cleanupStaleEmbeddedBrowserOpenFiles(now = Date.now()) {
+  const openFileRoot = getEmbeddedBrowserOpenFileRoot();
+  const entries = await fs$j.readdir(openFileRoot, { withFileTypes: true }).catch(() => []);
+  let cleanupCount = 0;
+  await Promise.all(entries.map(async (entry) => {
+    const entryPath = path$n.join(openFileRoot, entry.name);
+    const entryStat = await fs$j.stat(entryPath).catch(() => null);
+    if (!entryStat || now - entryStat.mtimeMs < EMBEDDED_BROWSER_OPEN_FILE_STALE_MS) return;
+    await fs$j.rm(entryPath, { force: true, recursive: entry.isDirectory() }).catch(() => void 0);
+    cleanupCount += 1;
+  }));
+  return cleanupCount;
 }
 async function cleanupEmbeddedBrowserOpenFile(stagedPath) {
   const normalizedPath = path$n.resolve(String(stagedPath || "").trim());
@@ -3976,8 +4171,114 @@ async function cleanupEmbeddedBrowserOpenFile(stagedPath) {
   if (!isPathInsideDirectory(normalizedPath, openFileRoot)) {
     return false;
   }
+  const parentDirectory = path$n.dirname(normalizedPath);
+  const parentName = path$n.basename(parentDirectory);
+  if (path$n.dirname(parentDirectory) === openFileRoot && parentName.startsWith("file-")) {
+    await fs$j.rm(parentDirectory, { force: true, recursive: true });
+    return true;
+  }
   await fs$j.rm(normalizedPath, { force: true });
   return true;
+}
+function cleanupEmbeddedBrowserOpenFileSync(stagedPath) {
+  const normalizedPath = path$n.resolve(String(stagedPath || "").trim());
+  if (!normalizedPath) return false;
+  const openFileRoot = path$n.resolve(getEmbeddedBrowserOpenFileRoot());
+  if (!isPathInsideDirectory(normalizedPath, openFileRoot)) return false;
+  const parentDirectory = path$n.dirname(normalizedPath);
+  const parentName = path$n.basename(parentDirectory);
+  if (path$n.dirname(parentDirectory) === openFileRoot && parentName.startsWith("file-")) {
+    rmSync(parentDirectory, { force: true, recursive: true });
+    return true;
+  }
+  rmSync(normalizedPath, { force: true });
+  return true;
+}
+async function ensureDebuggerAttached(view) {
+  try {
+    if (!view.webContents.debugger.isAttached()) {
+      view.webContents.debugger.attach("1.3");
+    }
+  } catch (error2) {
+    if (!String(error2).includes("Already attached")) {
+      throw error2;
+    }
+  }
+}
+async function setEmbeddedBrowserFileDropAcceptance(view, value) {
+  const script = `(() => { window[${JSON.stringify(EMBEDDED_BROWSER_LIBRARY_FILE_DROP_ACCEPTANCE_KEY)}] = ${value}; return true })()`;
+  await view.webContents.executeJavaScriptInIsolatedWorld(
+    EMBEDDED_BROWSER_LIBRARY_FILE_DROP_WORLD_ID,
+    [{ code: script }],
+    true
+  );
+}
+async function didEmbeddedBrowserAcceptFileDrop(view) {
+  const script = `Boolean(window[${JSON.stringify(EMBEDDED_BROWSER_LIBRARY_FILE_DROP_ACCEPTANCE_KEY)}])`;
+  return Boolean(
+    await view.webContents.executeJavaScriptInIsolatedWorld(
+      EMBEDDED_BROWSER_LIBRARY_FILE_DROP_WORLD_ID,
+      [{ code: script }],
+      true
+    ).catch(() => false)
+  );
+}
+async function dispatchEmbeddedBrowserFileDrop(view, stagedPath, point) {
+  if (!view || view.webContents.isDestroyed()) {
+    return false;
+  }
+  await ensureDebuggerAttached(view);
+  const bounds = view.getBounds();
+  const x = Math.max(0, Math.min(Math.round(Number(point.x) || 0), Math.max(0, bounds.width - 1)));
+  const y = Math.max(0, Math.min(Math.round(Number(point.y) || 0), Math.max(0, bounds.height - 1)));
+  const data = {
+    dragOperationsMask: 1,
+    files: [stagedPath],
+    items: []
+  };
+  let dragEntered = false;
+  try {
+    await setEmbeddedBrowserFileDropAcceptance(view, false);
+    await view.webContents.debugger.sendCommand("Input.dispatchDragEvent", {
+      data,
+      type: "dragEnter",
+      x,
+      y
+    });
+    dragEntered = true;
+    await view.webContents.debugger.sendCommand("Input.dispatchDragEvent", {
+      data,
+      type: "dragOver",
+      x,
+      y
+    });
+    if (!await didEmbeddedBrowserAcceptFileDrop(view)) {
+      await view.webContents.debugger.sendCommand("Input.dispatchDragEvent", {
+        data,
+        type: "dragCancel",
+        x,
+        y
+      });
+      return false;
+    }
+    await view.webContents.debugger.sendCommand("Input.dispatchDragEvent", {
+      data,
+      type: "drop",
+      x,
+      y
+    });
+    return true;
+  } catch (error2) {
+    if (dragEntered && !view.webContents.isDestroyed()) {
+      await view.webContents.debugger.sendCommand("Input.dispatchDragEvent", {
+        data,
+        type: "dragCancel",
+        x,
+        y
+      }).catch(() => void 0);
+    }
+    throw error2;
+  }
 }
 async function injectEmbeddedBrowserOpenFile(view, stagedPath) {
   if (!view || view.webContents.isDestroyed()) {
@@ -4267,6 +4568,420 @@ async function drainEmbeddedBrowserMseResourceFromPage(executeScript, resourceKe
     resourceKey: typeof payload.resourceKey === "string" ? payload.resourceKey : normalizedResourceKey,
     streamType: payload.streamType === "audio" || payload.streamType === "video" ? payload.streamType : void 0
   };
+}
+const PAGE_DRAG_SESSION_TTL_MS = 3e4;
+const PAGE_DRAG_STAGING_MAX_AGE_MS = 24 * 60 * 60 * 1e3;
+const PAGE_DRAG_MAX_RESOURCE_COUNT = 12;
+const PAGE_DRAG_MAX_FILE_BYTES = 512 * 1024 * 1024;
+const PAGE_DRAG_MAX_TOTAL_BYTES = 1024 * 1024 * 1024;
+const PAGE_DRAG_MAX_INLINE_BYTES = 32 * 1024 * 1024;
+const PAGE_DRAG_STAGING_DIR_NAME = "omniflow-import-staging";
+const pageDragSessions = /* @__PURE__ */ new Map();
+const latestPageDragSessionByTab = /* @__PURE__ */ new Map();
+let lastStagingPruneAt = 0;
+const MIME_EXTENSIONS = {
+  "application/json": "json",
+  "application/pdf": "pdf",
+  "application/zip": "zip",
+  "audio/mpeg": "mp3",
+  "audio/ogg": "ogg",
+  "audio/wav": "wav",
+  "image/avif": "avif",
+  "image/bmp": "bmp",
+  "image/gif": "gif",
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/svg+xml": "svg",
+  "image/webp": "webp",
+  "text/html": "html",
+  "text/plain": "txt",
+  "video/mp4": "mp4",
+  "video/webm": "webm"
+};
+function getPageDragStagingRoot() {
+  return path$n.join(app.getPath("temp"), PAGE_DRAG_STAGING_DIR_NAME);
+}
+function normalizeMimeType(value) {
+  return String(value || "").split(";")[0].trim().toLowerCase();
+}
+function normalizeSupportedUrl(value) {
+  const normalized = String(value || "").trim();
+  if (!normalized) return "";
+  try {
+    const parsed = new URL(normalized);
+    return ["http:", "https:", "blob:", "data:"].includes(parsed.protocol) ? parsed.toString() : "";
+  } catch {
+    return "";
+  }
+}
+function normalizeReferrerUrl(value) {
+  const normalized = String(value || "").trim();
+  if (!normalized) return "";
+  try {
+    const parsed = new URL(normalized);
+    return ["http:", "https:"].includes(parsed.protocol) ? parsed.toString() : "";
+  } catch {
+    return "";
+  }
+}
+function sanitizeFileName$1(value, fallback) {
+  const normalized = String(value || "").trim();
+  const safeName = normalized ? normalizeDownloadFileName(normalized) : fallback;
+  const rawExtension = path$n.extname(safeName);
+  const extension = Array.from(rawExtension).length <= 20 ? rawExtension : "";
+  const maxStemLength = Math.max(1, 180 - extension.length);
+  const stem = extension ? safeName.slice(0, -extension.length) : safeName;
+  return `${Array.from(stem).slice(0, maxStemLength).join("")}${extension}`;
+}
+function decodeContentDispositionFileName(value) {
+  const encodedMatch = value.match(/filename\*\s*=\s*UTF-8''([^;]+)/i);
+  if (encodedMatch == null ? void 0 : encodedMatch[1]) {
+    try {
+      return decodeURIComponent(encodedMatch[1].trim().replace(/^"|"$/g, ""));
+    } catch {
+    }
+  }
+  const plainMatch = value.match(/filename\s*=\s*(?:"([^"]+)"|([^;]+))/i);
+  return String((plainMatch == null ? void 0 : plainMatch[1]) || (plainMatch == null ? void 0 : plainMatch[2]) || "").trim();
+}
+function fileNameFromUrl(value) {
+  try {
+    const parsed = new URL(value);
+    return decodeURIComponent(parsed.pathname.split("/").filter(Boolean).pop() || "");
+  } catch {
+    return "";
+  }
+}
+function ensureFileExtension(fileName, mimeType) {
+  if (path$n.extname(fileName)) return fileName;
+  const extension = MIME_EXTENSIONS[mimeType];
+  return extension ? `${fileName}.${extension}` : fileName;
+}
+function reserveUniqueFileName(fileName, usedFileNames) {
+  const extension = path$n.extname(fileName);
+  const stem = extension ? fileName.slice(0, -extension.length) : fileName;
+  let candidate = fileName;
+  let suffix = 2;
+  while (usedFileNames.has(candidate.toLowerCase())) {
+    candidate = `${stem} (${suffix})${extension}`;
+    suffix += 1;
+  }
+  usedFileNames.add(candidate.toLowerCase());
+  return candidate;
+}
+function resolveFileName(resource, response, index) {
+  const mimeType = normalizeMimeType((response == null ? void 0 : response.headers.get("content-type")) || resource.mimeType);
+  const contentDispositionName = decodeContentDispositionFileName(
+    (response == null ? void 0 : response.headers.get("content-disposition")) || ""
+  );
+  const candidate = contentDispositionName || resource.suggestedFileName || fileNameFromUrl((response == null ? void 0 : response.url) || resource.sourceUrl) || `web-resource-${index + 1}`;
+  return ensureFileExtension(
+    sanitizeFileName$1(candidate, `web-resource-${index + 1}`),
+    mimeType
+  );
+}
+function pruneExpiredSessions(now = Date.now()) {
+  pageDragSessions.forEach((source, sessionId) => {
+    if (now - source.capturedAt <= PAGE_DRAG_SESSION_TTL_MS) return;
+    pageDragSessions.delete(sessionId);
+    if (latestPageDragSessionByTab.get(source.tabId) === sessionId) {
+      latestPageDragSessionByTab.delete(source.tabId);
+    }
+  });
+}
+async function pruneStaleStagingDirectories() {
+  const now = Date.now();
+  if (now - lastStagingPruneAt < 60 * 60 * 1e3) return;
+  lastStagingPruneAt = now;
+  const root2 = getPageDragStagingRoot();
+  const entries = await readdir(root2, { withFileTypes: true }).catch(() => []);
+  await Promise.all(entries.map(async (entry) => {
+    if (!entry.isDirectory() || !entry.name.startsWith("page-drag-")) return;
+    const targetPath = path$n.join(root2, entry.name);
+    const targetStat = await stat$5(targetPath).catch(() => null);
+    if (!targetStat || now - targetStat.mtimeMs <= PAGE_DRAG_STAGING_MAX_AGE_MS) return;
+    await rm(targetPath, { recursive: true, force: true }).catch(() => void 0);
+  }));
+}
+function normalizeSource(tabId, payload, enrichment) {
+  const sourceUrl = normalizeSupportedUrl(String(payload.sourceUrl || ""));
+  const sessionId = String(payload.sessionId || "").trim().slice(0, 160);
+  const normalizedTabId = String(tabId || payload.tabId || "").trim();
+  if (!sourceUrl || !sessionId || !normalizedTabId) return null;
+  const sourceKind = ["image", "link", "media"].includes(String(payload.sourceKind)) ? payload.sourceKind : "unknown";
+  return {
+    capturedAt: Date.now(),
+    mimeType: normalizeMimeType(String(payload.mimeType || "")) || void 0,
+    pageUrl: normalizeReferrerUrl(String(payload.pageUrl || "")),
+    referer: normalizeReferrerUrl(enrichment == null ? void 0 : enrichment.referer) || void 0,
+    requestHeaders: enrichment == null ? void 0 : enrichment.requestHeaders,
+    sessionId,
+    sourceKind,
+    sourceUrl,
+    suggestedFileName: sanitizeFileName$1(String(payload.suggestedFileName || ""), "") || void 0,
+    tabId: normalizedTabId
+  };
+}
+function recordEmbeddedBrowserPageDragSource(tabId, payload, enrichment) {
+  pruneExpiredSessions();
+  const source = normalizeSource(tabId, payload, enrichment);
+  if (!source) return null;
+  const previousSessionId = latestPageDragSessionByTab.get(source.tabId);
+  if (previousSessionId && previousSessionId !== source.sessionId) {
+    pageDragSessions.delete(previousSessionId);
+  }
+  pageDragSessions.set(source.sessionId, source);
+  latestPageDragSessionByTab.set(source.tabId, source.sessionId);
+  return source;
+}
+function clearEmbeddedBrowserPageDragSources(tabId) {
+  const normalizedTabId = String(tabId || "").trim();
+  if (!normalizedTabId) {
+    pageDragSessions.clear();
+    latestPageDragSessionByTab.clear();
+    return;
+  }
+  pageDragSessions.forEach((source, sessionId) => {
+    if (source.tabId === normalizedTabId) {
+      pageDragSessions.delete(sessionId);
+    }
+  });
+  latestPageDragSessionByTab.delete(normalizedTabId);
+}
+function consumePageDragSource(request) {
+  pruneExpiredSessions();
+  const requestedSessionId = String(request.sessionId || "").trim();
+  const requestedTabId = String(request.tabId || "").trim();
+  const fallbackUrls = new Set(
+    (request.fallbackResources || []).map((resource) => normalizeSupportedUrl(resource.sourceUrl)).filter(Boolean)
+  );
+  const latestSessionId = requestedTabId ? latestPageDragSessionByTab.get(requestedTabId) : "";
+  const latestSource = latestSessionId ? pageDragSessions.get(latestSessionId) : null;
+  const fallbackSessionId = latestSource && fallbackUrls.has(latestSource.sourceUrl) ? latestSource.sessionId : "";
+  const sessionId = requestedSessionId || fallbackSessionId || "";
+  if (!sessionId) return null;
+  const source = pageDragSessions.get(sessionId) || null;
+  if (!source) {
+    if (requestedSessionId && !(request.fallbackResources || []).length) {
+      throw new Error("网页拖拽内容已过期，请重新拖拽");
+    }
+    return null;
+  }
+  if (requestedTabId && source.tabId !== requestedTabId) {
+    throw new Error("网页拖拽来源已切换，请重新拖拽");
+  }
+  pageDragSessions.delete(sessionId);
+  if (latestPageDragSessionByTab.get(source.tabId) === sessionId) {
+    latestPageDragSessionByTab.delete(source.tabId);
+  }
+  return source;
+}
+function normalizeFallbackResources(resources) {
+  const seen2 = /* @__PURE__ */ new Set();
+  return resources.slice(0, PAGE_DRAG_MAX_RESOURCE_COUNT).flatMap((resource) => {
+    const sourceUrl = normalizeSupportedUrl(resource.sourceUrl);
+    if (!sourceUrl || seen2.has(sourceUrl)) return [];
+    seen2.add(sourceUrl);
+    return [{
+      mimeType: normalizeMimeType(resource.mimeType) || void 0,
+      pageUrl: normalizeReferrerUrl(resource.pageUrl) || void 0,
+      sourceKind: resource.sourceKind,
+      sourceUrl,
+      suggestedFileName: sanitizeFileName$1(String(resource.suggestedFileName || ""), "") || void 0
+    }];
+  });
+}
+function decodeDataUrl(sourceUrl) {
+  const match = sourceUrl.match(/^data:([^,]*?),(.*)$/s);
+  if (!match) throw new Error("网页内嵌资源格式无效");
+  const metadata = match[1] || "";
+  const encoded = match[2] || "";
+  const mimeType = normalizeMimeType(metadata.split(";")[0]) || "application/octet-stream";
+  const buffer = /;base64(?:;|$)/i.test(metadata) ? Buffer.from(encoded, "base64") : Buffer.from(decodeURIComponent(encoded), "utf8");
+  if (buffer.length > PAGE_DRAG_MAX_INLINE_BYTES) {
+    throw new Error("网页内嵌资源超过 32MB，请先下载后再导入");
+  }
+  return { buffer, mimeType };
+}
+async function writeHttpResource(browserSession, resource, targetPath, remainingBytes) {
+  const requestHeaders = Object.fromEntries(
+    Object.entries(resource.requestHeaders || {}).filter(([headerName, headerValue]) => {
+      const normalizedName = headerName.trim().toLowerCase();
+      if (!normalizedName || !String(headerValue || "").trim()) return false;
+      return ![
+        "accept-encoding",
+        "connection",
+        "content-length",
+        "cookie",
+        "host",
+        "proxy-authorization",
+        "proxy-connection",
+        "referer",
+        "te",
+        "trailer",
+        "transfer-encoding",
+        "upgrade"
+      ].includes(normalizedName) && !normalizedName.startsWith("sec-");
+    })
+  );
+  const response = await browserSession.fetch(resource.sourceUrl, {
+    credentials: "include",
+    headers: {
+      Accept: "*/*",
+      ...requestHeaders
+    },
+    ...resource.referer || resource.pageUrl ? {
+      referrer: resource.referer || resource.pageUrl,
+      referrerPolicy: "unsafe-url"
+    } : {}
+  });
+  if (!response.ok || !response.body) {
+    throw new Error(`网页资源下载失败：HTTP ${response.status}`);
+  }
+  const responseMimeType = normalizeMimeType(response.headers.get("content-type"));
+  if (resource.sourceKind === "image" && responseMimeType && responseMimeType !== "application/octet-stream" && !responseMimeType.startsWith("image/")) {
+    throw new Error(`拖拽图片返回了非图片内容：${responseMimeType}`);
+  }
+  if (resource.sourceKind === "media" && responseMimeType && responseMimeType !== "application/octet-stream" && !responseMimeType.startsWith("audio/") && !responseMimeType.startsWith("video/")) {
+    throw new Error(`拖拽媒体返回了非媒体内容：${responseMimeType}`);
+  }
+  const declaredLength = Number(response.headers.get("content-length") || 0);
+  const maxBytes = Math.min(PAGE_DRAG_MAX_FILE_BYTES, remainingBytes);
+  if (declaredLength > maxBytes) {
+    throw new Error("网页资源过大，无法通过拖拽导入");
+  }
+  let receivedBytes = 0;
+  const limiter = new Transform({
+    transform(chunk, _encoding, callback) {
+      receivedBytes += Buffer.byteLength(chunk);
+      if (receivedBytes > maxBytes) {
+        callback(new Error("网页资源过大，无法通过拖拽导入"));
+        return;
+      }
+      callback(null, chunk);
+    }
+  });
+  await pipeline(
+    Readable.fromWeb(response.body),
+    limiter,
+    createWriteStream(targetPath)
+  );
+  return {
+    mimeType: responseMimeType || normalizeMimeType(resource.mimeType),
+    response,
+    size: receivedBytes
+  };
+}
+async function stageSingleResource(resource, index, stagingPath, remainingBytes, options, usedFileNames) {
+  const protocol2 = new URL(resource.sourceUrl).protocol;
+  let response = null;
+  let mimeType = normalizeMimeType(resource.mimeType);
+  let inlineBuffer = null;
+  if (protocol2 === "data:") {
+    const decoded = decodeDataUrl(resource.sourceUrl);
+    inlineBuffer = decoded.buffer;
+    mimeType = decoded.mimeType;
+  } else if (protocol2 === "blob:") {
+    if (!resource.tabId) {
+      throw new Error("网页临时资源已失去原页面上下文，请重新拖拽");
+    }
+    const result = await options.readPageBlob(resource.tabId, resource.sourceUrl, PAGE_DRAG_MAX_INLINE_BYTES);
+    inlineBuffer = Buffer.from(result.base64, "base64");
+    mimeType = normalizeMimeType(result.mimeType || resource.mimeType) || "application/octet-stream";
+    if (inlineBuffer.length > PAGE_DRAG_MAX_INLINE_BYTES) {
+      throw new Error("网页临时资源超过 32MB，请先下载后再导入");
+    }
+  }
+  const partPath = path$n.join(stagingPath, `.resource-${index + 1}.part`);
+  let size = 0;
+  if (inlineBuffer) {
+    if (inlineBuffer.length > remainingBytes) {
+      throw new Error("本次拖拽资源总大小超过限制");
+    }
+    await writeFile$1(partPath, inlineBuffer);
+    size = inlineBuffer.length;
+  } else {
+    const result = await writeHttpResource(options.browserSession, resource, partPath, remainingBytes);
+    response = result.response;
+    mimeType = result.mimeType;
+    size = result.size;
+  }
+  const fileName = reserveUniqueFileName(
+    resolveFileName({ ...resource, mimeType }, response, index),
+    usedFileNames
+  );
+  const filePath = path$n.join(stagingPath, fileName);
+  await rename$2(partPath, filePath);
+  return { fileName, filePath, mimeType, size };
+}
+async function stageEmbeddedBrowserPageDrag(request, options) {
+  await mkdir$4(getPageDragStagingRoot(), { recursive: true });
+  void pruneStaleStagingDirectories();
+  const capturedSource = consumePageDragSource(request);
+  const resources = capturedSource ? [{ ...capturedSource }] : normalizeFallbackResources(request.fallbackResources || []).map((resource) => ({
+    ...resource,
+    tabId: String(request.tabId || "").trim() || void 0
+  }));
+  if (!resources.length) {
+    throw new Error("没有识别到可导入的网页文件");
+  }
+  const stagingPath = await mkdtemp(path$n.join(getPageDragStagingRoot(), "page-drag-"));
+  const stagedFiles = [];
+  const usedFileNames = /* @__PURE__ */ new Set();
+  let totalBytes = 0;
+  try {
+    for (let index = 0; index < resources.length; index += 1) {
+      const resource = resources[index];
+      const staged = await stageSingleResource(
+        resource,
+        index,
+        stagingPath,
+        PAGE_DRAG_MAX_TOTAL_BYTES - totalBytes,
+        options,
+        usedFileNames
+      );
+      totalBytes += staged.size;
+      stagedFiles.push({
+        cleanupPath: stagingPath,
+        fileName: staged.fileName,
+        filePath: staged.filePath,
+        mimeType: staged.mimeType || void 0,
+        size: staged.size,
+        sourceUrl: resource.sourceUrl
+      });
+    }
+    return stagedFiles;
+  } catch (error2) {
+    await rm(stagingPath, { recursive: true, force: true }).catch(() => void 0);
+    throw error2;
+  }
+}
+async function readEmbeddedBrowserPageBlob(view, sourceUrl, maxBytes) {
+  if (view.webContents.isDestroyed()) {
+    throw new Error("网页已关闭，请重新拖拽");
+  }
+  const script = `(async function(){
+    try{
+      var response=await fetch(${JSON.stringify(sourceUrl)});
+      if(!response.ok)return null;
+      var blob=await response.blob();
+      if(blob.size>${Math.max(1, maxBytes)})throw new Error('too-large');
+      var bytes=new Uint8Array(await blob.arrayBuffer());
+      var binary='';
+      var step=32768;
+      for(var i=0;i<bytes.length;i+=step){
+        binary+=String.fromCharCode.apply(null,bytes.subarray(i,Math.min(i+step,bytes.length)));
+      }
+      return{base64:btoa(binary),mimeType:blob.type||response.headers.get('content-type')||''};
+    }catch(error){return null}
+  })()`;
+  const mainFrame = view.webContents.mainFrame;
+  const frames = mainFrame ? [mainFrame, ...mainFrame.framesInSubtree.filter((frame) => frame !== mainFrame)] : [];
+  for (const frame of frames) {
+    const result = await frame.executeJavaScript(script, true).catch(() => null);
+    if (result == null ? void 0 : result.base64) return result;
+  }
+  throw new Error("网页临时资源已失效，请重新拖拽");
 }
 function createDefaultEmbeddedBrowserExternalToolSettings() {
   return {
@@ -6818,6 +7533,105 @@ function createCredentialDetectionScript() {
   }
 })();`;
 }
+const EMBEDDED_BROWSER_PAGE_DRAG_DATA_TYPE = "application/x-omniflow-browser-page-drag";
+const EMBEDDED_BROWSER_PAGE_DRAG_CONSOLE_PREFIX = "__OMNIFLOW_PAGE_DRAG__:";
+function createEmbeddedBrowserPageDragSourceScript(tabId) {
+  return `(function(){
+  if(window.__OMNIFLOW_PAGE_DRAG_SOURCE__)return;
+  window.__OMNIFLOW_PAGE_DRAG_SOURCE__=true;
+  var PREFIX=${JSON.stringify(EMBEDDED_BROWSER_PAGE_DRAG_CONSOLE_PREFIX)};
+  var DATA_TYPE=${JSON.stringify(EMBEDDED_BROWSER_PAGE_DRAG_DATA_TYPE)};
+  var TAB_ID=${JSON.stringify(String(tabId || ""))};
+  function normalizeUrl(value){
+    try{
+      var raw=String(value||'').trim();
+      if(!raw)return'';
+      var url=new URL(raw,location.href);
+      return /^(https?:|blob:|data:)$/.test(url.protocol)?url.href:'';
+    }catch(e){return''}
+  }
+  function closestFromEvent(event,selector){
+    try{
+      var path=typeof event.composedPath==='function'?event.composedPath():[];
+      for(var i=0;i<path.length;i+=1){
+        var item=path[i];
+        if(item&&typeof item.matches==='function'&&item.matches(selector))return item;
+      }
+      return event.target&&typeof event.target.closest==='function'?event.target.closest(selector):null;
+    }catch(e){return null}
+  }
+  function fileNameFromUrl(url){
+    try{
+      var parsed=new URL(url);
+      var value=decodeURIComponent(parsed.pathname.split('/').filter(Boolean).pop()||'');
+      return value.replace(/[\\\\/:*?"<>|]/g,'_').trim();
+    }catch(e){return''}
+  }
+  function looksLikeFileUrl(url){
+    try{
+      var pathname=new URL(url).pathname.toLowerCase();
+      var name=pathname.split('/').pop()||'';
+      var dot=name.lastIndexOf('.');
+      if(dot<=0)return false;
+      var extension=name.slice(dot+1);
+      return '7z|apng|avif|avi|bmp|csv|doc|docx|epub|flac|gif|gz|ico|jpeg|jpg|json|m4a|mkv|mov|mp3|mp4|ogg|opus|pdf|png|ppt|pptx|rar|rtf|svg|tar|txt|wav|webm|webp|xls|xlsx|xml|zip'.split('|').indexOf(extension)>=0;
+    }catch(e){return false}
+  }
+  function buildSource(event){
+    var element=closestFromEvent(event,'img,a[href],video,audio,source');
+    if(!element)return null;
+    var tag=String(element.tagName||'').toLowerCase();
+    var sourceUrl='';
+    var sourceKind='unknown';
+    var mimeType='';
+    var suggestedFileName='';
+    if(tag==='img'){
+      sourceUrl=normalizeUrl(element.currentSrc||element.getAttribute('data-src')||element.getAttribute('data-original')||element.getAttribute('data-lazy-src')||element.src);
+      sourceKind='image';
+      mimeType=String(element.getAttribute('type')||'').trim();
+      var parentLink=element.closest&&element.closest('a[href]');
+      suggestedFileName=String(parentLink&&parentLink.getAttribute('download')||'').trim();
+    }else if(tag==='a'){
+      sourceUrl=normalizeUrl(element.href||element.getAttribute('href'));
+      sourceKind='link';
+      suggestedFileName=String(element.getAttribute('download')||'').trim();
+      mimeType=String(element.getAttribute('type')||'').trim();
+      if(!suggestedFileName&&!looksLikeFileUrl(sourceUrl))return null;
+    }else{
+      sourceUrl=normalizeUrl(element.currentSrc||element.src||element.getAttribute('src'));
+      sourceKind='media';
+      mimeType=String(element.getAttribute('type')||'').trim();
+    }
+    if(!sourceUrl)return null;
+    if(!suggestedFileName)suggestedFileName=fileNameFromUrl(sourceUrl);
+    var sessionId='page-drag-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,10);
+    return{
+      capturedAt:Date.now(),
+      mimeType:mimeType||undefined,
+      pageUrl:String(location.href||''),
+      sessionId:sessionId,
+      sourceKind:sourceKind,
+      sourceUrl:sourceUrl,
+      suggestedFileName:suggestedFileName||undefined,
+      tabId:TAB_ID
+    };
+  }
+  document.addEventListener('dragstart',function(event){
+    var source=buildSource(event);
+    if(!source)return;
+    try{console.info(PREFIX+JSON.stringify(source))}catch(e){}
+    try{
+      if(event.dataTransfer){
+        event.dataTransfer.setData(DATA_TYPE,JSON.stringify({
+          sessionId:source.sessionId,
+          sourceUrl:source.sourceUrl,
+          tabId:source.tabId
+        }));
+      }
+    }catch(e){}
+  },true);
+})();`;
+}
 const CHROMIUM_ZOOM_FACTORS = [
   0.25,
   0.33,
@@ -6997,9 +7811,16 @@ function createEmbeddedBrowserView(options) {
   const view = new WebContentsView({
     webPreferences: {
       devTools: true,
+      navigateOnDragDrop: false,
       partition: EMBEDDED_BROWSER_PARTITION
     }
   });
+  const libraryFileDropNonce = crypto.randomBytes(32).toString("hex");
+  const installLibraryFileDropScript = () => view.webContents.executeJavaScriptInIsolatedWorld(
+    EMBEDDED_BROWSER_LIBRARY_FILE_DROP_WORLD_ID,
+    [{ code: createEmbeddedBrowserLibraryFileDropScript(libraryFileDropNonce) }],
+    true
+  );
   view.webContents.setZoomFactor(1);
   const currentUserAgent = view.webContents.getUserAgent();
   if (currentUserAgent.includes("Electron")) {
@@ -7053,7 +7874,26 @@ function createEmbeddedBrowserView(options) {
     void options.createIfMissingProbe(options.tabId, view);
     view.webContents.executeJavaScript(createCredentialDetectionScript(), true).catch(() => {
     });
+    view.webContents.executeJavaScript(
+      createEmbeddedBrowserPageDragSourceScript(options.tabId),
+      true
+    ).catch(() => {
+    });
+    installLibraryFileDropScript().catch(() => {
+    });
   });
+  view.webContents.on(
+    "did-frame-finish-load",
+    (_event, _isMainFrame, frameProcessId, frameRoutingId) => {
+      if (view.webContents.isDestroyed()) return;
+      const frame = [view.webContents.mainFrame, ...view.webContents.mainFrame.framesInSubtree].find((candidate) => candidate.processId === frameProcessId && candidate.routingId === frameRoutingId);
+      frame == null ? void 0 : frame.executeJavaScript(
+        createEmbeddedBrowserPageDragSourceScript(options.tabId),
+        true
+      ).catch(() => {
+      });
+    }
+  );
   view.webContents.on("did-stop-loading", async () => {
     if (view.webContents.isDestroyed()) {
       return;
@@ -7070,6 +7910,7 @@ function createEmbeddedBrowserView(options) {
     });
   });
   view.webContents.on("did-navigate", (_event, url) => {
+    options.onDocumentNavigated(options.tabId, url);
     options.currentUrls.set(options.tabId, url);
     options.emitTabState(options.tabId, view, { details: "did-navigate", state: "ready", url });
     void options.tryDispatchPendingOpenFile(options.tabId, view);
@@ -7135,7 +7976,10 @@ function createEmbeddedBrowserView(options) {
       void options.createIfMissingProbe(options.tabId, view);
     }
   });
-  view.webContents.once("destroyed", cleanupDevToolsInputListener);
+  view.webContents.once("destroyed", () => {
+    cleanupDevToolsInputListener();
+    options.onViewDestroyed(options.tabId);
+  });
   view.webContents.on("console-message", (_event, level, message, line, sourceId) => {
     if (typeof message === "string" && message.startsWith(EMBEDDED_BROWSER_RESOURCE_CONSOLE_PREFIX)) {
       const rawPayload = message.slice(EMBEDDED_BROWSER_RESOURCE_CONSOLE_PREFIX.length);
@@ -7163,6 +8007,30 @@ function createEmbeddedBrowserView(options) {
         if (domain) {
           options.onAutoFillReady(options.tabId, domain);
         }
+      } catch {
+      }
+      return;
+    }
+    if (typeof message === "string" && message.startsWith(EMBEDDED_BROWSER_PAGE_DRAG_CONSOLE_PREFIX)) {
+      try {
+        options.onPageDragPayload(
+          options.tabId,
+          JSON.parse(message.slice(EMBEDDED_BROWSER_PAGE_DRAG_CONSOLE_PREFIX.length))
+        );
+      } catch {
+      }
+      return;
+    }
+    if (typeof message === "string" && message.startsWith(EMBEDDED_BROWSER_LIBRARY_FILE_DROP_CONSOLE_PREFIX)) {
+      try {
+        const payload = JSON.parse(
+          message.slice(EMBEDDED_BROWSER_LIBRARY_FILE_DROP_CONSOLE_PREFIX.length)
+        );
+        if (payload.nonce !== libraryFileDropNonce) return;
+        options.onLibraryFileDropPayload(
+          options.tabId,
+          payload
+        );
       } catch {
       }
       return;
@@ -9322,6 +10190,98 @@ class EmbeddedBrowserHlsLiveRecorder {
     });
   }
 }
+const DEFAULT_MAX_TOTAL_BYTES = 1024 * 1024 * 1024;
+const DEFAULT_TTL_MS = 30 * 60 * 1e3;
+class EmbeddedBrowserDroppedFileStore {
+  constructor(options) {
+    __publicField(this, "cleanupFile");
+    __publicField(this, "cleanupFileSync");
+    __publicField(this, "maxTotalBytes");
+    __publicField(this, "ttlMs");
+    __publicField(this, "entriesByTab", /* @__PURE__ */ new Map());
+    __publicField(this, "totalBytes", 0);
+    this.cleanupFile = options.cleanupFile;
+    this.cleanupFileSync = options.cleanupFileSync;
+    this.maxTotalBytes = Number.isFinite(options.maxTotalBytes) && Number(options.maxTotalBytes) > 0 ? Number(options.maxTotalBytes) : DEFAULT_MAX_TOTAL_BYTES;
+    this.ttlMs = Number.isFinite(options.ttlMs) && Number(options.ttlMs) > 0 ? Number(options.ttlMs) : DEFAULT_TTL_MS;
+  }
+  retain(tabId, stagedPath, sizeBytes) {
+    var _a2;
+    const normalizedTabId = String(tabId || "").trim();
+    const normalizedPath = String(stagedPath || "").trim();
+    const normalizedSize = Number(sizeBytes);
+    if (!normalizedTabId || !normalizedPath || !Number.isFinite(normalizedSize) || normalizedSize < 0) {
+      throw new Error("无效的浏览器拖拽暂存文件");
+    }
+    if (this.totalBytes + normalizedSize > this.maxTotalBytes) {
+      throw new Error("浏览器拖拽暂存文件总量超过 1GB 上限，请刷新网页后重试");
+    }
+    const tabEntries = this.entriesByTab.get(normalizedTabId) || /* @__PURE__ */ new Map();
+    const previous = tabEntries.get(normalizedPath);
+    if (previous) {
+      clearTimeout(previous.timer);
+      this.totalBytes -= previous.sizeBytes;
+    }
+    const timer = setTimeout(() => {
+      void this.release(normalizedTabId, normalizedPath);
+    }, this.ttlMs);
+    (_a2 = timer.unref) == null ? void 0 : _a2.call(timer);
+    tabEntries.set(normalizedPath, {
+      sizeBytes: normalizedSize,
+      timer
+    });
+    this.entriesByTab.set(normalizedTabId, tabEntries);
+    this.totalBytes += normalizedSize;
+  }
+  async release(tabId, stagedPath) {
+    const normalizedTabId = String(tabId || "").trim();
+    const normalizedPath = String(stagedPath || "").trim();
+    const tabEntries = this.entriesByTab.get(normalizedTabId);
+    const entry = tabEntries == null ? void 0 : tabEntries.get(normalizedPath);
+    if (!tabEntries || !entry) return false;
+    clearTimeout(entry.timer);
+    tabEntries.delete(normalizedPath);
+    this.totalBytes = Math.max(0, this.totalBytes - entry.sizeBytes);
+    if (tabEntries.size === 0) this.entriesByTab.delete(normalizedTabId);
+    await this.cleanupFile(normalizedPath).catch(() => void 0);
+    return true;
+  }
+  async releaseTab(tabId) {
+    const normalizedTabId = String(tabId || "").trim();
+    const tabEntries = this.entriesByTab.get(normalizedTabId);
+    if (!tabEntries) return;
+    this.entriesByTab.delete(normalizedTabId);
+    const entries = [...tabEntries.entries()];
+    entries.forEach(([, entry]) => {
+      clearTimeout(entry.timer);
+      this.totalBytes = Math.max(0, this.totalBytes - entry.sizeBytes);
+    });
+    await Promise.all(entries.map(([stagedPath]) => this.cleanupFile(stagedPath).catch(() => void 0)));
+  }
+  async dispose() {
+    await Promise.all([...this.entriesByTab.keys()].map((tabId) => this.releaseTab(tabId)));
+  }
+  disposeSync() {
+    var _a2;
+    for (const tabEntries of this.entriesByTab.values()) {
+      for (const [stagedPath, entry] of tabEntries.entries()) {
+        clearTimeout(entry.timer);
+        try {
+          (_a2 = this.cleanupFileSync) == null ? void 0 : _a2.call(this, stagedPath);
+        } catch {
+        }
+      }
+    }
+    this.entriesByTab.clear();
+    this.totalBytes = 0;
+  }
+  getSnapshot() {
+    return {
+      fileCount: [...this.entriesByTab.values()].reduce((total, entries) => total + entries.size, 0),
+      totalBytes: this.totalBytes
+    };
+  }
+}
 function createEmbeddedBrowserMainController(options) {
   const embeddedBrowserViews = /* @__PURE__ */ new Map();
   const embeddedBrowserLastCommittedUrls = /* @__PURE__ */ new Map();
@@ -9330,12 +10290,18 @@ function createEmbeddedBrowserMainController(options) {
   const embeddedBrowserPendingOpenFiles = /* @__PURE__ */ new Map();
   const embeddedBrowserAttachedOpenFiles = /* @__PURE__ */ new Map();
   const embeddedBrowserOpenFileRequestVersions = /* @__PURE__ */ new Map();
+  const embeddedBrowserLibraryFileDropRequests = /* @__PURE__ */ new Map();
+  const embeddedBrowserDroppedFileStore = new EmbeddedBrowserDroppedFileStore({
+    cleanupFile: cleanupEmbeddedBrowserOpenFile,
+    cleanupFileSync: cleanupEmbeddedBrowserOpenFileSync
+  });
   const embeddedBrowserFileSystemOriginDecisions = /* @__PURE__ */ new Map();
   const embeddedBrowserHlsRetrySessions = /* @__PURE__ */ new Map();
   const embeddedBrowserHlsLiveRecordingSessions = /* @__PURE__ */ new Map();
   const embeddedBrowserMseSpoolFiles = /* @__PURE__ */ new Map();
   const embeddedBrowserMseSpoolWriteQueues = /* @__PURE__ */ new Map();
   let activeEmbeddedBrowserTabId = null;
+  let selectedEmbeddedBrowserTabId = null;
   let embeddedBrowserPendingBounds = null;
   let embeddedBrowserSessionConfigured = false;
   function emitEmbeddedBrowserState(payload) {
@@ -9366,6 +10332,179 @@ function createEmbeddedBrowserMainController(options) {
       return;
     }
     mainWindow2.webContents.send("embedded-browser:hls-task", payload);
+  }
+  function emitEmbeddedBrowserLibraryFileDropResult(payload) {
+    const mainWindow2 = options.getMainWindow();
+    if (!mainWindow2 || mainWindow2.isDestroyed()) {
+      return;
+    }
+    mainWindow2.webContents.send("embedded-browser:library-file-drop-result", payload);
+  }
+  function beginEmbeddedBrowserLibraryFileDropRequest(tabId) {
+    const normalizedTabId = String(tabId || "").trim();
+    const request = new AbortController();
+    const requests = embeddedBrowserLibraryFileDropRequests.get(normalizedTabId) || /* @__PURE__ */ new Set();
+    requests.add(request);
+    embeddedBrowserLibraryFileDropRequests.set(normalizedTabId, requests);
+    return request;
+  }
+  function isEmbeddedBrowserLibraryFileDropRequestActive(tabId, request) {
+    var _a2;
+    return !request.signal.aborted && ((_a2 = embeddedBrowserLibraryFileDropRequests.get(tabId)) == null ? void 0 : _a2.has(request)) === true;
+  }
+  function finishEmbeddedBrowserLibraryFileDropRequest(tabId, request) {
+    const requests = embeddedBrowserLibraryFileDropRequests.get(tabId);
+    if (!requests) return;
+    requests.delete(request);
+    if (requests.size === 0) {
+      embeddedBrowserLibraryFileDropRequests.delete(tabId);
+    }
+  }
+  function cancelEmbeddedBrowserLibraryFileDropRequests(tabId) {
+    const normalizedTabId = String(tabId || "").trim();
+    const requests = embeddedBrowserLibraryFileDropRequests.get(normalizedTabId);
+    embeddedBrowserLibraryFileDropRequests.delete(normalizedTabId);
+    requests == null ? void 0 : requests.forEach((request) => request.abort());
+  }
+  function selectEmbeddedBrowserTab(tabId) {
+    const normalizedTabId = String(tabId || "").trim() || null;
+    if (selectedEmbeddedBrowserTabId && selectedEmbeddedBrowserTabId !== normalizedTabId) {
+      cancelEmbeddedBrowserLibraryFileDropRequests(selectedEmbeddedBrowserTabId);
+    }
+    selectedEmbeddedBrowserTabId = normalizedTabId;
+  }
+  function cleanupEmbeddedBrowserDroppedFilesForTab(tabId) {
+    void embeddedBrowserDroppedFileStore.releaseTab(String(tabId || "").trim());
+  }
+  function normalizeLibraryFileDropPayload(payload) {
+    const claimId = String(payload.claimId || "").trim();
+    const fileName = String(payload.fileName || "").trim();
+    const mimeType = String(payload.mimeType || "").trim();
+    const pageUrl = String(payload.pageUrl || "").trim();
+    const frameCoordinateSupported = payload.frameCoordinateSupported === true;
+    const clientX = Number(payload.clientX);
+    const clientY = Number(payload.clientY);
+    if (!/^[a-zA-Z0-9_-]{16,128}$/.test(claimId) || !fileName || fileName.length > 255) {
+      return null;
+    }
+    if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) {
+      return null;
+    }
+    try {
+      const parsedPageUrl = new URL(pageUrl);
+      if (!["http:", "https:"].includes(parsedPageUrl.protocol)) return null;
+    } catch {
+      return null;
+    }
+    return {
+      claimId,
+      clientX: Math.max(0, clientX),
+      clientY: Math.max(0, clientY),
+      fileName,
+      frameCoordinateSupported,
+      mimeType: mimeType || void 0,
+      pageUrl
+    };
+  }
+  function hasEmbeddedBrowserDocument(view, pageUrl) {
+    const normalizeDocumentUrl = (value) => {
+      try {
+        const parsed = new URL(value);
+        parsed.hash = "";
+        return parsed.toString();
+      } catch {
+        return "";
+      }
+    };
+    const normalizedPageUrl = normalizeDocumentUrl(pageUrl);
+    if (!normalizedPageUrl) return false;
+    const mainFrame = view.webContents.mainFrame;
+    return [mainFrame, ...mainFrame.framesInSubtree].some((frame) => normalizeDocumentUrl(frame.url) === normalizedPageUrl);
+  }
+  async function handleLibraryFileDropPayload(tabId, rawPayload) {
+    const normalizedTabId = String(tabId || "").trim();
+    const payload = normalizeLibraryFileDropPayload(rawPayload);
+    if (!normalizedTabId || !payload) return;
+    if (activeEmbeddedBrowserTabId !== normalizedTabId) return;
+    if (!payload.frameCoordinateSupported) {
+      emitEmbeddedBrowserLibraryFileDropResult({
+        error: "暂不支持拖入跨域 iframe，请使用网页主页面的上传区域",
+        fileName: payload.fileName,
+        status: "failed",
+        tabId: normalizedTabId
+      });
+      return;
+    }
+    cancelEmbeddedBrowserLibraryFileDropRequests(normalizedTabId);
+    const request = beginEmbeddedBrowserLibraryFileDropRequest(normalizedTabId);
+    emitEmbeddedBrowserLibraryFileDropResult({
+      fileName: payload.fileName,
+      status: "preparing",
+      tabId: normalizedTabId
+    });
+    let stagedPath = "";
+    let retained = false;
+    try {
+      const broker = getFileTransferDownloadUrlBroker();
+      if (!broker) throw new Error("文件传输服务不可用");
+      const claim = await broker.waitForResolvedClaim(
+        payload.claimId,
+        payload.fileName,
+        request.signal
+      );
+      if (!isEmbeddedBrowserLibraryFileDropRequestActive(normalizedTabId, request)) {
+        throw new Error("网页已切换，文件未交付");
+      }
+      stagedPath = await stageEmbeddedBrowserOpenFile(
+        claim.sourceUrl,
+        claim.fileName,
+        {},
+        {
+          maxBytes: EMBEDDED_BROWSER_LIBRARY_FILE_DROP_MAX_BYTES,
+          signal: request.signal
+        }
+      );
+      const view = getEmbeddedBrowserView(normalizedTabId);
+      if (!view || view.webContents.isDestroyed() || !hasEmbeddedBrowserDocument(view, payload.pageUrl) || !isEmbeddedBrowserLibraryFileDropRequestActive(normalizedTabId, request)) {
+        throw new Error("网页已切换，文件未交付");
+      }
+      const stagedFile = await stat$5(stagedPath);
+      if (!isEmbeddedBrowserLibraryFileDropRequestActive(normalizedTabId, request)) {
+        throw new Error("网页已切换，文件未交付");
+      }
+      embeddedBrowserDroppedFileStore.retain(normalizedTabId, stagedPath, stagedFile.size);
+      retained = true;
+      const delivered = await dispatchEmbeddedBrowserFileDrop(view, stagedPath, {
+        x: payload.clientX,
+        y: payload.clientY
+      });
+      if (!delivered) throw new Error("当前网页位置没有接收这个文件");
+      stagedPath = "";
+      emitEmbeddedBrowserLibraryFileDropResult({
+        fileName: claim.fileName,
+        status: "delivered",
+        tabId: normalizedTabId
+      });
+    } catch (error2) {
+      if (stagedPath) {
+        if (retained) {
+          const released = await embeddedBrowserDroppedFileStore.release(normalizedTabId, stagedPath);
+          if (!released) await cleanupEmbeddedBrowserOpenFile(stagedPath).catch(() => void 0);
+        } else {
+          await cleanupEmbeddedBrowserOpenFile(stagedPath).catch(() => void 0);
+        }
+      }
+      if (isEmbeddedBrowserLibraryFileDropRequestActive(normalizedTabId, request)) {
+        emitEmbeddedBrowserLibraryFileDropResult({
+          error: error2 instanceof Error ? error2.message : String(error2),
+          fileName: payload.fileName,
+          status: "failed",
+          tabId: normalizedTabId
+        });
+      }
+    } finally {
+      finishEmbeddedBrowserLibraryFileDropRequest(normalizedTabId, request);
+    }
   }
   function buildEmbeddedBrowserMseSpoolKey(tabId, resourceKey) {
     return `${String(tabId || "").trim()}:${String(resourceKey || "").trim()}`;
@@ -9531,6 +10670,7 @@ function createEmbeddedBrowserMainController(options) {
       return;
     }
     embeddedBrowserSessionConfigured = true;
+    void cleanupStaleEmbeddedBrowserOpenFiles().catch(() => void 0);
     configureEmbeddedBrowserSession({
       decisionCache: embeddedBrowserFileSystemOriginDecisions,
       options
@@ -11116,6 +12256,25 @@ function createEmbeddedBrowserMainController(options) {
           tabId: credentialTabId
         });
       },
+      onDocumentNavigated: (navigatedTabId) => {
+        cancelEmbeddedBrowserLibraryFileDropRequests(navigatedTabId);
+        cleanupEmbeddedBrowserDroppedFilesForTab(navigatedTabId);
+      },
+      onLibraryFileDropPayload: (dropTabId, payload) => {
+        void handleLibraryFileDropPayload(dropTabId, payload);
+      },
+      onPageDragPayload: (pageDragTabId, payload) => {
+        const sourceUrl = typeof payload.sourceUrl === "string" ? payload.sourceUrl.trim() : "";
+        const capturedResource = sourceUrl ? getEmbeddedBrowserResourceCaptureSnapshot(pageDragTabId).resources.find((resource) => resource.url === sourceUrl) : void 0;
+        recordEmbeddedBrowserPageDragSource(pageDragTabId, payload, {
+          referer: capturedResource == null ? void 0 : capturedResource.referer,
+          requestHeaders: capturedResource == null ? void 0 : capturedResource.requestHeaders
+        });
+      },
+      onViewDestroyed: (destroyedTabId) => {
+        cancelEmbeddedBrowserLibraryFileDropRequests(destroyedTabId);
+        cleanupEmbeddedBrowserDroppedFilesForTab(destroyedTabId);
+      },
       onProbePayload: (payload) => {
         const event = typeof payload.event === "string" ? payload.event : "";
         const resourceKey = typeof payload.resourceKey === "string" ? payload.resourceKey : "";
@@ -11179,6 +12338,7 @@ function createEmbeddedBrowserMainController(options) {
     if (!normalizedTabId) {
       return;
     }
+    selectEmbeddedBrowserTab(normalizedTabId);
     const view = activateEmbeddedBrowserTab(targetWindow, normalizedTabId, { createIfMissing: true });
     if (!view || view.webContents.isDestroyed()) {
       return;
@@ -11229,20 +12389,20 @@ function createEmbeddedBrowserMainController(options) {
     if (!normalizedTabId) {
       return;
     }
-    const view = getEmbeddedBrowserView(normalizedTabId);
-    if (!view) {
-      return;
-    }
-    if (targetWindow.contentView.children.includes(view)) {
-      targetWindow.contentView.removeChildView(view);
-    }
+    cancelEmbeddedBrowserLibraryFileDropRequests(normalizedTabId);
+    cleanupEmbeddedBrowserDroppedFilesForTab(normalizedTabId);
     if (activeEmbeddedBrowserTabId === normalizedTabId) {
       activeEmbeddedBrowserTabId = null;
     }
+    if (selectedEmbeddedBrowserTabId === normalizedTabId) {
+      selectEmbeddedBrowserTab(null);
+    }
+    const view = getEmbeddedBrowserView(normalizedTabId);
     embeddedBrowserViews.delete(normalizedTabId);
     embeddedBrowserLastCommittedUrls.delete(normalizedTabId);
     embeddedBrowserIconUrls.delete(normalizedTabId);
     embeddedBrowserIconSourceUrls.delete(normalizedTabId);
+    clearEmbeddedBrowserPageDragSources(normalizedTabId);
     disposeEmbeddedBrowserCapturedResources(normalizedTabId);
     bumpEmbeddedBrowserOpenFileRequestVersion({
       requestVersions: embeddedBrowserOpenFileRequestVersions,
@@ -11256,6 +12416,12 @@ function createEmbeddedBrowserMainController(options) {
     void clearEmbeddedBrowserHlsRetrySessions({ tabId: normalizedTabId });
     void clearEmbeddedBrowserHlsLiveRecordingSessions({ tabId: normalizedTabId });
     void clearEmbeddedBrowserMseSpoolFiles({ tabId: normalizedTabId });
+    if (!view) {
+      return;
+    }
+    if (targetWindow.contentView.children.includes(view)) {
+      targetWindow.contentView.removeChildView(view);
+    }
     if (!view.webContents.isDestroyed()) {
       view.webContents.close({ waitForBeforeUnload: false });
     }
@@ -11263,6 +12429,7 @@ function createEmbeddedBrowserMainController(options) {
   async function handleOpenTab(sender, tabId, url) {
     const targetWindow = BrowserWindow.fromWebContents(sender) ?? options.getMainWindow();
     const normalizedTabId = String(tabId || "").trim();
+    selectEmbeddedBrowserTab(normalizedTabId);
     bumpEmbeddedBrowserOpenFileRequestVersion({
       requestVersions: embeddedBrowserOpenFileRequestVersions,
       tabId: normalizedTabId
@@ -11274,6 +12441,7 @@ function createEmbeddedBrowserMainController(options) {
     });
     const normalizedUrl = String(url || "").trim();
     if (!normalizedUrl) {
+      activateEmbeddedBrowserTab(targetWindow, normalizedTabId, { createIfMissing: false });
       emitEmbeddedBrowserState({
         canGoBack: false,
         canGoForward: false,
@@ -11287,11 +12455,14 @@ function createEmbeddedBrowserMainController(options) {
   }
   function handleActivateTab(sender, tabId) {
     const targetWindow = BrowserWindow.fromWebContents(sender) ?? options.getMainWindow();
+    selectEmbeddedBrowserTab(tabId);
     activateEmbeddedBrowserTab(targetWindow, tabId, { createIfMissing: false });
   }
   async function handleNavigate(sender, tabId, url) {
     const targetWindow = BrowserWindow.fromWebContents(sender) ?? options.getMainWindow();
     const normalizedTabId = String(tabId || "").trim();
+    cancelEmbeddedBrowserLibraryFileDropRequests(normalizedTabId);
+    cleanupEmbeddedBrowserDroppedFilesForTab(normalizedTabId);
     bumpEmbeddedBrowserOpenFileRequestVersion({
       requestVersions: embeddedBrowserOpenFileRequestVersions,
       tabId: normalizedTabId
@@ -11312,6 +12483,8 @@ function createEmbeddedBrowserMainController(options) {
     if (!normalizedTabId || !normalizedPageUrl || !normalizedSourceUrl) {
       return;
     }
+    cancelEmbeddedBrowserLibraryFileDropRequests(normalizedTabId);
+    cleanupEmbeddedBrowserDroppedFilesForTab(normalizedTabId);
     const requestVersion = bumpEmbeddedBrowserOpenFileRequestVersion({
       requestVersions: embeddedBrowserOpenFileRequestVersions,
       tabId: normalizedTabId
@@ -11782,11 +12955,28 @@ function createEmbeddedBrowserMainController(options) {
       return false;
     }
   }
+  async function handleStagePageDrag(input) {
+    const request = {
+      ...input,
+      tabId: String((input == null ? void 0 : input.tabId) || activeEmbeddedBrowserTabId || "").trim() || void 0
+    };
+    return stageEmbeddedBrowserPageDrag(request, {
+      browserSession: getEmbeddedBrowserSession(),
+      readPageBlob: async (tabId, sourceUrl, maxBytes) => {
+        const view = getEmbeddedBrowserView(tabId);
+        if (!view || view.webContents.isDestroyed()) {
+          throw new Error("网页已关闭，请重新拖拽");
+        }
+        return readEmbeddedBrowserPageBlob(view, sourceUrl, maxBytes);
+      }
+    });
+  }
   function handleDeactivate(sender) {
     const targetWindow = BrowserWindow.fromWebContents(sender) ?? options.getMainWindow();
     if (!targetWindow || targetWindow.isDestroyed()) {
       return;
     }
+    selectEmbeddedBrowserTab(null);
     detachActiveEmbeddedBrowserView(targetWindow);
   }
   function handleCloseAll(sender) {
@@ -11794,10 +12984,15 @@ function createEmbeddedBrowserMainController(options) {
     if (!targetWindow || targetWindow.isDestroyed()) {
       return;
     }
+    for (const tabId of embeddedBrowserLibraryFileDropRequests.keys()) {
+      cancelEmbeddedBrowserLibraryFileDropRequests(tabId);
+    }
     Array.from(embeddedBrowserViews.keys()).forEach((tabId) => {
       closeEmbeddedBrowserTab(targetWindow, tabId);
     });
     activeEmbeddedBrowserTabId = null;
+    selectEmbeddedBrowserTab(null);
+    clearEmbeddedBrowserPageDragSources();
     emitEmbeddedBrowserState({ state: "idle" });
   }
   function registerIpcHandlers2() {
@@ -11839,6 +13034,7 @@ function createEmbeddedBrowserMainController(options) {
       restartCatchMediaCapture: (tabId) => handleCatchToolkitAction(tabId, "restartCatchMediaCapture", "restart"),
       saveResource: saveEmbeddedBrowserCapturedResourceForRenderer,
       setBounds: handleSetBounds,
+      stagePageDrag: handleStagePageDrag,
       startCapturedResources: (tabId) => startEmbeddedBrowserResourceCapture(String(tabId || "").trim()),
       startDeepResourceCapture: handleStartDeepResourceCapture,
       stopCapturedResources: (tabId) => stopEmbeddedBrowserResourceCapture(String(tabId || "").trim()),
@@ -11890,8 +13086,27 @@ function createEmbeddedBrowserMainController(options) {
       }
     });
   }
+  function dispose() {
+    for (const tabId of embeddedBrowserLibraryFileDropRequests.keys()) {
+      cancelEmbeddedBrowserLibraryFileDropRequests(tabId);
+    }
+    embeddedBrowserDroppedFileStore.disposeSync();
+    const openFilePaths = /* @__PURE__ */ new Set([
+      ...[...embeddedBrowserPendingOpenFiles.values()].map((file2) => file2.stagedPath),
+      ...embeddedBrowserAttachedOpenFiles.values()
+    ]);
+    openFilePaths.forEach((stagedPath) => {
+      try {
+        cleanupEmbeddedBrowserOpenFileSync(stagedPath);
+      } catch {
+      }
+    });
+    embeddedBrowserPendingOpenFiles.clear();
+    embeddedBrowserAttachedOpenFiles.clear();
+  }
   return {
     configureSession,
+    dispose,
     handleActiveViewInputShortcut,
     initializeBridges,
     registerIpcHandlers: registerIpcHandlers2,
@@ -13003,7 +14218,7 @@ function patch$2(fs2) {
   polyfills(fs2);
   fs2.gracefulify = patch$2;
   fs2.createReadStream = createReadStream;
-  fs2.createWriteStream = createWriteStream;
+  fs2.createWriteStream = createWriteStream2;
   var fs$readFile = fs2.readFile;
   fs2.readFile = readFile2;
   function readFile2(path2, options, cb) {
@@ -13077,9 +14292,9 @@ function patch$2(fs2) {
     }
   }
   var fs$readdir = fs2.readdir;
-  fs2.readdir = readdir;
+  fs2.readdir = readdir2;
   var noReaddirOptionVersions = /^v[0-5]\./;
-  function readdir(path2, options, cb) {
+  function readdir2(path2, options, cb) {
     if (typeof options === "function")
       cb = options, options = null;
     var go$readdir = noReaddirOptionVersions.test(process.version) ? function go$readdir2(path22, options2, cb2, startTime) {
@@ -13215,7 +14430,7 @@ function patch$2(fs2) {
   function createReadStream(path2, options) {
     return new fs2.ReadStream(path2, options);
   }
-  function createWriteStream(path2, options) {
+  function createWriteStream2(path2, options) {
     return new fs2.WriteStream(path2, options);
   }
   var fs$open = fs2.open;
@@ -27507,7 +28722,8 @@ function createWindow() {
     ...isFiniteNumber(persistedWindowState == null ? void 0 : persistedWindowState.x) && isFiniteNumber(persistedWindowState == null ? void 0 : persistedWindowState.y) ? { x: persistedWindowState.x, y: persistedWindowState.y } : {},
     webPreferences: {
       preload: path$n.join(MAIN_DIST, "preload.mjs"),
-      devTools: true
+      devTools: true,
+      navigateOnDragDrop: false
     },
     autoHideMenuBar: true,
     ...appIconPath ? { icon: appIconPath } : {}
@@ -27611,6 +28827,7 @@ function createWindow() {
 app.on("before-quit", () => {
   isQuitting = true;
   appUpdateService.dispose();
+  embeddedBrowserMainController.dispose();
   void clearFileTransferRuntime().catch(() => void 0);
   if (mainWindow && !mainWindow.isDestroyed()) {
     saveWindowState(mainWindow);

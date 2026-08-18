@@ -60,6 +60,13 @@ export function resolveFileTransferDownloadUrlClaim(input: {
   return requireBridge().fileTransferResolveDownloadUrlClaim(input)
 }
 
+export function registerFileTransferInternalDropClaim(input: {
+  claimId: string
+  fileName: string
+}): void {
+  requireBridge().fileTransferRegisterInternalDropClaim(input)
+}
+
 export function rejectFileTransferDownloadUrlClaim(input: {
   claimId: string
   error: string

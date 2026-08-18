@@ -2952,9 +2952,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
                           ? pendingBrowserFileOpenByTabId[activeBrowserTabId] ?? null
                           : null
                       }
-                      onPendingFileOpenHandled={(tabId) => {
-                        clearPendingBrowserFileOpen(tabId);
-                      }}
+                      onPendingFileOpenHandled={clearPendingBrowserFileOpen}
                       suspendNativeView={Boolean(activeBrowserDownload)}
                       onStateChange={(payload) => {
                         if (!payload.tabId) {

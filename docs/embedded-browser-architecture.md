@@ -1,6 +1,6 @@
 # Embedded Browser 架构说明
 
-更新时间：2026-07-30
+更新时间：2026-08-18
 
 适用范围：`omniflow-app` 内置浏览器的 renderer UI、preload bridge、Electron main controller、资源捕捉、下载导入与缓存捕捉工具链。
 
@@ -382,7 +382,37 @@ renderer 的资源列表不应该关心“这个资源是来自网络还是来�
 - 关闭 tab 和 `closeAll()` 会清理对应来源会话，防止旧 tab 的拖拽来源被下一次操作复用。
 - 当前代码已接入；macOS 已使用非第一个资料库验证真实图片可从内置浏览器拖入目录树，且上传后的文件内容完整。普通网页或搜索结果拖出 `text/html` 时会按非文件内容拒绝；Windows 与其他边界场景仍待验证。
 
-### 5.6 缓存捕捉与合并链路
+### 5.6 目录树文件拖入网页
+
+目录树单个普通文件可以在原有 Semi Tree 拖拽手势中交给已打开的网页：
+
+```text
+目录树 dragstart
+  -> 保留 DownloadURL，继续支持树内移动与 Finder / Explorer 导出
+  -> 附加一次性 claim id、文件名和 MIME
+    -> 网页 drop capture 记录真实落点
+      -> main 等待 renderer 解析资料库签名链接
+        -> 受控临时目录保留原始 basename
+          -> CDP Input.dispatchDragEvent 交付真实 File
+```
+
+边界规则：
+
+- 只为单选普通文件附加网页拖拽声明；文件夹、多选、归档目录和特殊节点不支持。
+- renderer 与网页只接触一次性 claim 元数据，不接触签名 URL或本地临时路径。
+- 目录树在 `dragstart` 同步向 main 注册 claim；网页投递只能消费一次已注册 claim，不接受随机 ID 或重放。
+- 网页 drop 脚本运行在独立 isolated world，要求浏览器生成的可信事件和每个 view 独有的随机 nonce；第三方网页的普通脚本与 console 输出不能直接触发 main 暂存。
+- 网页 drop 脚本只拦截 OmniFlow 自定义类型；CDP 重放的真实文件事件继续交给网页原有 drop handler。
+- 合成 `dragOver` 后会读取页面是否按 Chromium 标准调用 `preventDefault()`；未接受时发送 `dragCancel` 并报告失败，不派发 `drop`。
+- 只接受当前活动 tab 的请求；同一 tab 的新请求会取消上一个未完成请求。
+- 拖拽单文件与当前进程已交付文件总量上限均为 1GB；该限制不改变原有“映射网站打开文件”链路。
+- 已交付文件保留到该 tab 下次主文档导航、关闭或最长 30 分钟，避免网页异步读取 `File` 时路径过早失效。
+- 正常退出同步清理当前进程暂存；崩溃残留由下次启动的 24 小时陈旧扫描回收。
+- renderer 的成功提示只表示“已将文件交给网页”，不代表网页或远端服务已经上传成功。
+- 已加载的 HTTP(S) 页面只承担网页上传语义；浏览器外壳、标签栏和空白主页不接收文件打开 drop，网页拒绝 drop 时也不自动降级成打开文件。
+- 当前 iframe 上传区不支持，避免在无法建立隔离世界与可靠顶层坐标时猜测投递；CDP debugger 被 DevTools 占用时也无法保证投递。Windows 仍需实机验证。
+
+### 5.7 缓存捕捉与合并链路
 
 缓存捕捉工具链路：
 
@@ -410,7 +440,7 @@ renderer catch toolkit action
 - renderer 不直接假设页面里只有一个 frame。
 - main controller 会优先在 frame 列表里执行 page action，再汇总结果。
 
-### 5.7 密码管理链路
+### 5.8 密码管理链路
 
 密码管理分为凭据检测和密码存储两部分：
 
@@ -440,7 +470,7 @@ renderer catch toolkit action
 - 已保存的 domain+username 提交时不再弹出保存提示（`hasEmbeddedBrowserMatchingPassword` 检查）
 - MutationObserver 确保 SPA 动态渲染的登录表单也能触发自动填充
 
-### 5.8 DevTools 与网页缩放
+### 5.9 DevTools 与网页缩放
 
 embedded browser 的 DevTools 和页面缩放由真实 `WebContentsView.webContents` 执行，不缩放 OmniFlow renderer 外壳。
 
@@ -538,6 +568,7 @@ embedded browser 的真实资源在 Electron main，不能依赖 React 组件卸
 - deep capture 是否仍需要刷新页面的语义变化
 - MSE 合并、manifest 下载、下载导入链路变化
 - 页面拖拽来源会话、资源暂存与目录树导入链路变化
+- 目录树文件到网页的 claim、暂存、CDP 交付与清理规则变化
 
 如果未来 embedded browser 继续扩展，优先方向应该是：
 

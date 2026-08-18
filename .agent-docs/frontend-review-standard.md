@@ -56,6 +56,7 @@ views -> features -> components / hooks -> service / bridge -> backend or electr
 - `service` 是否开始拼页面状态机
 - `features` 是否偷偷承担页面总控
 - `electron` 是否反向承担 renderer 业务编排
+- embedded browser 页面属于未受信任内容；页面 console、DOM 全局变量或可伪造事件不能直接授权 main 执行下载、写盘、凭据读取等重操作，必须经过 isolated world、不可预测 nonce、可信事件和一次性 capability 校验
 
 ### 2.3 状态双源
 
@@ -79,6 +80,7 @@ views -> features -> components / hooks -> service / bridge -> backend or electr
 - 高频事件里是否有明显 O(n) DOM 工作
 - `useEffect` / `useLayoutEffect` 是否被无关 rerender 反复触发
 - timer、event listener、upload task、browser tab、WebContentsView、session 是否回收
+- Electron main 持有的真实临时文件是否同时具备单文件/总量配额、TTL、导航或 tab 清理、正常退出清理和崩溃残留回收
 - 异步回调是否会把旧页面 / 旧 tab / 旧库结果写回当前界面
 
 默认高风险：

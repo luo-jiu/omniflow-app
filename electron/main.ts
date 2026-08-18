@@ -265,6 +265,7 @@ function createWindow() {
     webPreferences: {
       preload: path.join(MAIN_DIST, 'preload.mjs'),
       devTools: true,
+      navigateOnDragDrop: false,
     },
     autoHideMenuBar: true,
     ...(appIconPath ? { icon: appIconPath } : {}),
@@ -380,6 +381,7 @@ function createWindow() {
 app.on('before-quit', () => {
   isQuitting = true
   appUpdateService.dispose()
+  embeddedBrowserMainController.dispose()
   void clearFileTransferRuntime().catch(() => undefined)
   if (mainWindow && !mainWindow.isDestroyed()) {
     saveWindowState(mainWindow)

@@ -1,6 +1,6 @@
 # File Explorer 与 File Viewer 边界说明
 
-更新时间：2026-08-17
+更新时间：2026-08-18
 
 适用范围：`features/file-explorer`、`features/file-viewer`、`contexts/FileViewerContext.tsx`、`views/library/detail/` 中与文件树、文件打开、预览 tab、预览分发和缓存恢复相关的代码。
 
@@ -295,3 +295,17 @@ HTML5 拖拽手势：
   `CON`、`AUX`、`COM1` 等保留名称及末尾句点。
 - macOS Finder 已验证 `DownloadURL` 平台能力和正式资料库单文件链路；Windows Explorer 仍需按
   `docs/frontend-validation-matrix.md` 完成手工验证。
+
+## 12. 目录树单文件拖入内置浏览器
+
+目录树到已打开网页继续复用第 11 节的同一个 Semi Tree HTML5 手势，不增加拖拽手柄或准备步骤：
+
+- 门禁与桌面导出一致：只支持单选普通文件；目录、多选、归档目录和特殊节点不附加网页声明。
+- `dragstart` 同时保留 `DownloadURL` 和内部 claim 声明，因此树内移动、Finder / Explorer 导出与网页投递不会切换成第二套手势。
+- `dragstart` 会同步向 main 注册一次性 claim；网页只能消费一次，并且只有活动 tab 的 isolated-world 可信 drop 消息可以触发。
+- 网页捕获真实 drop 坐标后，由 Electron main 等待同一 claim 的签名链接、暂存真实文件并通过 CDP 原生文件拖放交给网页。
+- 暂存路径只存在于 main；文件 basename 保持原名，唯一性由独立临时子目录保证。
+- 导航和关闭 tab 会取消进行中的暂存并清理已交付文件；拖拽单文件与全局保留总量上限均为 1GB，交付文件最长保留 30 分钟，正常退出同步清理。
+- “已交给网页”只确认 Chromium 已完成文件 drop 投递，不确认网页业务上传成功；网页拒绝或 CDP 不可用时显示失败，不自动改走映射网站或隐藏 input。
+- iframe 后续需要独立的 CDP isolated-world 坐标方案，不能复用顶层网页投递结果。
+- 浏览器外壳、标签栏、地址栏、书签栏和空白主页不接受“拖入即打开”文件；需要预览时使用明确的打开命令或现有 Viewer。主 renderer 与 `WebContentsView` 保持 `navigateOnDragDrop: false`，避免未支持的文件 drop 触发 Chromium 默认导航或独立窗口。

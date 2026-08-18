@@ -1,3 +1,4 @@
+import crypto from 'node:crypto'
 import { WebContentsView, type WebContents } from 'electron'
 import { runtimeLogger } from '../runtimeLogger'
 import {
@@ -21,6 +22,11 @@ import {
   EMBEDDED_BROWSER_PAGE_DRAG_CONSOLE_PREFIX,
   createEmbeddedBrowserPageDragSourceScript,
 } from './embeddedBrowserPageDragSourceScript'
+import {
+  EMBEDDED_BROWSER_LIBRARY_FILE_DROP_CONSOLE_PREFIX,
+  EMBEDDED_BROWSER_LIBRARY_FILE_DROP_WORLD_ID,
+  createEmbeddedBrowserLibraryFileDropScript,
+} from './embeddedBrowserLibraryFileDropScript'
 import { type EmbeddedBrowserCapturedResource, recordEmbeddedBrowserProbeResource } from './embeddedBrowserResourceService'
 import {
   handleEmbeddedBrowserInputShortcut,
@@ -49,8 +55,11 @@ type CreateEmbeddedBrowserViewOptions = {
   iconUrls: Map<string, string>
   onAutoFillReady: (tabId: string, domain: string) => void
   onCredentialPayload: (tabId: string, payload: Record<string, unknown>) => void
+  onDocumentNavigated: (tabId: string, url: string) => void
+  onLibraryFileDropPayload: (tabId: string, payload: Record<string, unknown>) => void
   onPageDragPayload: (tabId: string, payload: Record<string, unknown>) => void
   onProbePayload: (payload: Record<string, unknown>) => void
+  onViewDestroyed: (tabId: string) => void
   syncBounds: (view: WebContentsView) => void
   tabId: string
   tryDispatchPendingOpenFile: (tabId: string, view: WebContentsView) => Promise<boolean>
@@ -80,9 +89,16 @@ export function createEmbeddedBrowserView(
   const view = new WebContentsView({
     webPreferences: {
       devTools: true,
+      navigateOnDragDrop: false,
       partition: EMBEDDED_BROWSER_PARTITION,
     },
   })
+  const libraryFileDropNonce = crypto.randomBytes(32).toString('hex')
+  const installLibraryFileDropScript = () => view.webContents.executeJavaScriptInIsolatedWorld(
+    EMBEDDED_BROWSER_LIBRARY_FILE_DROP_WORLD_ID,
+    [{ code: createEmbeddedBrowserLibraryFileDropScript(libraryFileDropNonce) }],
+    true,
+  )
   view.webContents.setZoomFactor(1)
   const currentUserAgent = view.webContents.getUserAgent()
   if (currentUserAgent.includes('Electron')) {
@@ -142,6 +158,7 @@ export function createEmbeddedBrowserView(
       createEmbeddedBrowserPageDragSourceScript(options.tabId),
       true,
     ).catch(() => {})
+    installLibraryFileDropScript().catch(() => {})
   })
   view.webContents.on(
     'did-frame-finish-load',
@@ -174,6 +191,7 @@ export function createEmbeddedBrowserView(
     })
   })
   view.webContents.on('did-navigate', (_event, url) => {
+    options.onDocumentNavigated(options.tabId, url)
     options.currentUrls.set(options.tabId, url)
     options.emitTabState(options.tabId, view, { details: 'did-navigate', state: 'ready', url })
     void options.tryDispatchPendingOpenFile(options.tabId, view)
@@ -241,7 +259,10 @@ export function createEmbeddedBrowserView(
       void options.createIfMissingProbe(options.tabId, view)
     }
   })
-  view.webContents.once('destroyed', cleanupDevToolsInputListener)
+  view.webContents.once('destroyed', () => {
+    cleanupDevToolsInputListener()
+    options.onViewDestroyed(options.tabId)
+  })
   view.webContents.on('console-message', (_event, level, message, line, sourceId) => {
     if (typeof message === 'string' && message.startsWith(EMBEDDED_BROWSER_RESOURCE_CONSOLE_PREFIX)) {
       const rawPayload = message.slice(EMBEDDED_BROWSER_RESOURCE_CONSOLE_PREFIX.length)
@@ -283,6 +304,21 @@ export function createEmbeddedBrowserView(
         )
       } catch {
         // Malformed page drag payload — ignore silently.
+      }
+      return
+    }
+    if (typeof message === 'string' && message.startsWith(EMBEDDED_BROWSER_LIBRARY_FILE_DROP_CONSOLE_PREFIX)) {
+      try {
+        const payload = JSON.parse(
+          message.slice(EMBEDDED_BROWSER_LIBRARY_FILE_DROP_CONSOLE_PREFIX.length),
+        ) as Record<string, unknown>
+        if (payload.nonce !== libraryFileDropNonce) return
+        options.onLibraryFileDropPayload(
+          options.tabId,
+          payload,
+        )
+      } catch {
+        // Malformed library file drop payload - ignore silently.
       }
       return
     }

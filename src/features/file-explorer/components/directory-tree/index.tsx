@@ -61,9 +61,14 @@ import { fetchProviders } from '@/features/storage-config/services/storage-confi
 import {
   createFileTransferDownloadUrlClaim,
   rejectFileTransferDownloadUrlClaim,
+  registerFileTransferInternalDropClaim,
   resolveFileTransferDownloadUrlClaim,
   warmFileTransferDownloadUrlEnvironment,
 } from '@/features/file-transfer/services/file-transfer.api';
+import {
+  LIBRARY_FILE_BROWSER_DRAG_DATA_TYPE,
+  type LibraryFileBrowserDragPayload,
+} from '@/features/file-transfer/model/file-transfer';
 
 interface DirectoryTreeProps {
   treeData: any[];
@@ -388,7 +393,24 @@ export default function DirectoryTree({
       : 'application/octet-stream';
 
     try {
+      registerFileTransferInternalDropClaim({
+        claimId: claim.claimId,
+        fileName: claim.fileName,
+      });
       dataTransfer.setData('DownloadURL', `${mimeType}:${claim.fileName}:${claim.downloadUrl}`);
+      const browserDragPayload: LibraryFileBrowserDragPayload = {
+        claimId: claim.claimId,
+        fileName: claim.fileName,
+        mimeType,
+      };
+      try {
+        dataTransfer.setData(
+          LIBRARY_FILE_BROWSER_DRAG_DATA_TYPE,
+          JSON.stringify(browserDragPayload),
+        );
+      } catch (error) {
+        runtimeLogger.warn('写入目录树内部拖拽声明失败:', error);
+      }
       void getFileLink(nodeId, Number(libraryId), 60)
         .then(sourceUrl => resolveFileTransferDownloadUrlClaim({
           claimId: claim.claimId,

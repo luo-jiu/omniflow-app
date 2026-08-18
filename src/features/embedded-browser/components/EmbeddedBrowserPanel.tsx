@@ -1,4 +1,5 @@
 import React from 'react';
+import { Toast } from '@douyinfe/semi-ui';
 import styled from 'styled-components';
 
 type EmbeddedBrowserPanelProps = {
@@ -278,6 +279,21 @@ const EmbeddedBrowserPanel = React.forwardRef<EmbeddedBrowserHandle, EmbeddedBro
       });
       return unsubscribe;
     }, [activeTabId, onStateChange]);
+
+    React.useEffect(() => {
+      return window.electronEmbeddedBrowser.onLibraryFileDropResult((payload) => {
+        if (payload.tabId !== activeTabId) return;
+        if (payload.status === 'preparing') {
+          Toast.info(`正在准备 ${payload.fileName}`);
+          return;
+        }
+        if (payload.status === 'delivered') {
+          Toast.success(`已将 ${payload.fileName} 交给网页`);
+          return;
+        }
+        Toast.error(payload.error || `无法将 ${payload.fileName} 交给网页`);
+      });
+    }, [activeTabId]);
 
     React.useEffect(() => {
       if (suspendNativeView) {
