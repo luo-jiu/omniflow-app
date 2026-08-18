@@ -1,6 +1,6 @@
 # 桌面客户端自动更新
 
-更新时间：2026-08-15
+更新时间：2026-08-18
 适用范围：OmniFlow Electron 客户端的版本检测、更新下载、重启安装、本地更新源验证和后续正式发布。
 
 个人长期签名身份、`0.2.0` bootstrap、证书恢复和日常发布命令见 `docs/local-macos-signing-and-release.md`。
@@ -89,16 +89,16 @@ npm run signing:setup:mac
 构建但不上传：
 
 ```bash
-npm run release:mac -- 0.2.0
+npm run release:mac -- <version>
 ```
 
 确认本地产物后发布到国内服务器：
 
 ```bash
-npm run release:mac -- 0.2.0 --publish
+npm run release:mac -- <version> --publish
 ```
 
-发布脚本先上传 DMG、ZIP 和 blockmap，最后上传 `latest-mac.yml`。当前旧 `0.1.0` 不具备 updater，需要手工安装一次首个已签名 bootstrap；之后版本才走应用内更新。
+发布脚本先上传 DMG、ZIP 和 blockmap，最后上传 `latest-mac.yml`。当前首个已签名 bootstrap 为 `0.2.0`，线上最新版本为 `0.2.1`。旧 `0.1.0` 不具备 updater，需要先手工安装一次 bootstrap；之后版本才走应用内更新。
 
 已发布版本不可重新签名覆盖；发布脚本会读取远端 manifest，并拒绝相同或更低版本。任何修复都必须提升 semver 后向前发布。
 

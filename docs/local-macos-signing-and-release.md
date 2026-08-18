@@ -1,6 +1,6 @@
 # macOS 个人签名与发布
 
-更新时间：2026-08-15
+更新时间：2026-08-18
 
 适用范围：OmniFlow 个人长期使用的 macOS 自签名身份、bootstrap 安装、Tailscale 更新源、后续版本发布和证书恢复。
 
@@ -15,6 +15,7 @@
 - 备份密码保存在登录 keychain 的 generic password 条目 `com.loyce.omniflow.local-signing` 中。
 - 一次性配置入口：`npm run signing:setup:mac`。当前 Mac 已完成配置，重复运行只做幂等检查。
 - 已发布的首个 updater bootstrap：`0.2.0`。
+- 当前已发布版本：`0.2.1`。
 - updater 服务器目录：`omniflow-cn:/srv/omniflow/desktop-updates/stable/mac-arm64`。
 - Tailscale Serve 路由：`/desktop-updates/ -> /srv/omniflow/desktop-updates`。
 - 实际 HTTPS 域名只保存在 `.env.local`，不写入仓库。
@@ -33,9 +34,11 @@
 
 迁移到新 Mac 时必须导入现有 `.p12` 并信任现有证书，禁止直接运行 setup 生成新身份后继续旧更新链。恢复流程尚未封装为自动脚本；执行前应先核对 `.p12` 指纹和备份密码。
 
-## 3. 当前旧版本处理
+## 3. 当前安装与首次迁移
 
-本机 `/Applications/Omniflow.app` 当前仍是正在使用的旧 `0.1.0`，该版本是 ad-hoc 签名且不具备应用内更新能力。它不可能通过远端 feed 自动获得 updater，必须手工覆盖一次。
+本机 `/Applications/Omniflow.app` 当前是 `0.2.0`，已经具备应用内更新能力，可以直接检测并安装当前发布的 `0.2.1`。
+
+如果其他机器仍安装旧 `0.1.0`，该版本是 ad-hoc 签名且不具备应用内更新能力，无法通过远端 feed 自动获得 updater，必须先手工覆盖一次 bootstrap。
 
 bootstrap 产物：
 
@@ -48,7 +51,7 @@ release/0.2.0/Omniflow-Mac-0.2.0-Installer.dmg
 1. 在 OmniFlow 中完成当前操作，使用 `Cmd+Q` 完全退出；只关闭窗口会隐藏应用，不等于退出。
 2. 打开 `0.2.0` DMG。
 3. 将 `Omniflow.app` 拖入 `/Applications` 并确认覆盖旧应用。
-4. 重新打开 OmniFlow，在设置中确认当前版本为 `0.2.0`，点击检查更新后应显示已经是最新版本。
+4. 重新打开 OmniFlow，在设置中确认当前版本为 `0.2.0`，点击检查更新后应检测到更高版本。
 5. 确认登录态、工作区和本地缓存仍在。
 
 Electron 数据位于 `~/Library/Application Support/omniflow-app`。覆盖 `/Applications/Omniflow.app` 不会删除该目录；不要先卸载或手工删除数据目录。
@@ -61,7 +64,7 @@ Electron 数据位于 `~/Library/Application Support/omniflow-app`。覆盖 `/Ap
 
 ```bash
 cd /Users/loyce/personal/omniflow/omniflow-app
-npm run release:mac -- 0.2.1 --publish
+npm run release:mac -- 0.2.2 --publish
 ```
 
 脚本会依次执行：
@@ -83,7 +86,7 @@ npm run release:mac -- 0.2.1 --publish
 - 持续运行时每 6 小时检查一次。
 - 设置页可以手工点击检查更新。
 - 客户端直接读取 Tailscale HTTPS feed 的 `latest-mac.yml`，不监测 GitHub Actions 或 GitHub Release。
-- `0.2.0` 已用线上 feed 实测进入 `up-to-date`，说明 bootstrap 内的更新地址有效。
+- `0.2.0` 已用线上 feed 实测进入 `up-to-date`，说明 bootstrap 内的更新地址有效；线上 manifest 当前为 `0.2.1`。
 
 ## 6. 验证与排障
 

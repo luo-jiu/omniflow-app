@@ -143,7 +143,7 @@ VITE_UPDATE_BASE_URL=https://***/desktop-updates/stable/mac-arm64
 
 ### 4.2 当前发布方式
 
-当前已发布的 macOS updater bootstrap 为 `0.2.0`；本机 `/Applications` 中的旧 `0.1.0` 仍需手工覆盖一次。日常编译验证使用 `npm run build`，该命令不打包、不签名。平台产物入口：
+当前已发布的 macOS updater bootstrap 为 `0.2.0`，线上最新版本为 `0.2.1`；本机 `/Applications` 中的 `0.2.0` 已具备应用内更新能力。日常编译验证使用 `npm run build`，该命令不打包、不签名。平台产物入口：
 
 ```bash
 cd omniflow-app
