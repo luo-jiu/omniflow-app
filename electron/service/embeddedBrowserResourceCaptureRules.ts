@@ -1,6 +1,6 @@
 /**
  * Defaults adapted from cat-catch (https://github.com/xifangczy/cat-catch)
- * Licensed under AGPL-3.0
+ * Licensed under GPL-3.0-only
  */
 import crypto from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'

@@ -1,7 +1,7 @@
 /**
  * DASH/MPD extraction adapted from cat-catch mpd workflow.
  * Source: https://github.com/xifangczy/cat-catch
- * Licensed under AGPL-3.0
+ * Licensed under GPL-3.0-only
  */
 
 export type EmbeddedBrowserMpdContentProtection = {

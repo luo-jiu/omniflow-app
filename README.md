@@ -29,9 +29,9 @@ The embedded browser currently includes a first production-oriented version of r
 Some embedded-browser resource-capture logic in this project is adapted from cat-catch:
 
 - Project: [cat-catch](https://github.com/xifangczy/cat-catch)
-- License: `AGPL-3.0`
+- License: `GPL-3.0-only`
 
-Please preserve attribution and review AGPL-3.0 obligations carefully before redistributing derived work.
+See [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md) for source, usage, and license details.
 
 ## Development
 
@@ -40,16 +40,20 @@ npm install
 npm run build
 ```
 
-分平台构建可使用：
+`npm run build` 只执行 TypeScript、renderer、Electron main/preload 编译，不调用平台打包或代码签名。
+
+生成分平台安装包时使用：
 
 ```bash
 npm run build:mac
 npm run build:win
 ```
 
+`build:mac` 是底层打包入口，会进入 macOS 代码签名；正式 macOS 发版应使用 `npm run release:mac -- <version> [--publish]`，由发布脚本自动解锁独立签名钥匙串。
+
 macOS 交叉生成的 Windows 安装包仍需在 Windows 10/11 或 Windows 11 ARM 虚拟机中运行验证。
 
-未配置环境变量时，后端地址回退为 `http://127.0.0.1:8850/api`。通过 `.env.local` 中的 `VITE_API_BASE_URL` 可以切换本地或云端 Go；使用 Tailscale Serve 时填写 `https://<machine>.<tailnet>.ts.net/api`，宿主系统需要登录对应 tailnet。
+开发模式会通过受版本控制的 `.env.development` 默认连接本机 `http://127.0.0.1:8850/api`，不依赖云端 Tailscale。生产构建继续读取未提交的 `.env.local`，其中可以配置云端 Go；使用 Tailscale Serve 时填写 `https://<machine>.<tailnet>.ts.net/api`，宿主系统需要登录对应 tailnet。未配置任何环境变量时，后端地址也回退为本机地址。
 
 多 MinIO 节点的 renderer CSP 允许列表由 `VITE_STORAGE_ORIGINS` 提供，支持空格或逗号分隔，例如：
 
@@ -73,5 +77,6 @@ Key frontend documents live in the repo and should be treated as part of the dev
 - `docs/file-explorer-file-viewer-boundary.md`: file tree, file-open flow, viewer tabs, and dispatcher ownership
 - `docs/frontend-validation-matrix.md`: manual verification baseline for frontend and Electron changes
 - `docs/cat-catch-migration-audit.md`: embedded-browser resource-capture migration status
+- `THIRD_PARTY_NOTICES.md`: attribution and license information for incorporated third-party work
 - `.agent-docs/frontend-review-standard.md`: review gate for frontend and Electron changes
 - `.agent-docs/frontend-handoff.md`: maintenance handoff and entry map

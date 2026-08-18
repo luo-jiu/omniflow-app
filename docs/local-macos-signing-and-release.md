@@ -87,17 +87,21 @@ npm run release:mac -- 0.2.1 --publish
 
 ## 6. 验证与排障
 
-如果直接运行 `npm run build` 时 macOS 弹出钥匙串密码框，提示对应的是独立签名钥匙串 `omniflow-local-signing.keychain-db`，不是当前用户的 macOS 登录密码。该密码由 setup 随机生成并保存在登录钥匙串条目 `com.loyce.omniflow.local-signing` 中，不需要也不应该人工猜测。正式发版继续使用 `npm run release:mac -- <version> --publish`，脚本会自动读取并解锁。只做本地完整构建时可使用下面的无明文流程：
+`npm run build` 只执行 TypeScript、renderer、Electron main/preload 编译，不调用 `electron-builder`，因此不会访问 macOS 签名钥匙串。`npm run build:mac` 才是底层 macOS 打包入口，会进入代码签名；日常验证不应调用它。
+
+正式发版继续使用 `npm run release:mac -- <version> --publish`，只构建不发布时去掉 `--publish`。脚本会从登录钥匙串读取 `com.loyce.omniflow.local-signing`，自动解锁独立签名钥匙串 `omniflow-local-signing.keychain-db`。不需要也不应该在系统弹框中猜测登录密码。
+
+如果确实需要直接运行底层 `build:mac`，使用下面的无明文流程：
 
 ```bash
 signing_keychain="$HOME/Library/Keychains/omniflow-local-signing.keychain-db"
 signing_password="$(security find-generic-password -a "$(id -un)" -s com.loyce.omniflow.local-signing -w)"
 security unlock-keychain -p "$signing_password" "$signing_keychain"
 unset signing_password
-CSC_KEYCHAIN="$signing_keychain" CSC_NAME="OmniFlow Local Update" npm run build
+CSC_KEYCHAIN="$signing_keychain" CSC_NAME="OmniFlow Local Update" npm run build:mac
 ```
 
-如果误输登录密码后出现 `errSecInternalComponent`，取消密码框并按上述方式重新解锁；不要重建或替换现有签名证书。
+如果直接运行 `build:mac` 后弹出密码框，或者误输登录密码后出现 `errSecInternalComponent`，取消密码框并按上述方式重新解锁；不要重建或替换现有签名证书。
 
 检查身份：
 

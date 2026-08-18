@@ -126,7 +126,7 @@ Electron -> MinIO：直接 PUT / GET 对象
 
 ### 4.1 环境变量
 
-本机真实构建配置放在 `omniflow-app/.env.local`，该文件被 Git 忽略，不得提交。模板位于 `.env.example`。
+生产构建的本机真实配置放在 `omniflow-app/.env.local`，该文件被 Git 忽略，不得提交；开发模式使用仓库内的 `.env.development`，默认连接本机 Go 和本机 MinIO。模板位于 `.env.example`。
 
 ```dotenv
 VITE_API_BASE_URL=https://***/api
@@ -139,14 +139,15 @@ VITE_UPDATE_BASE_URL=https://***/desktop-updates/stable/mac-arm64
 - `VITE_UPDATE_BASE_URL` 决定打包后 main process 使用的静态更新 feed；正式环境必须为 HTTPS。
 - 三者都在 Vite 构建阶段写入产物，不是安装后的运行时配置。
 - API、MinIO origin 或更新地址发生变化后，需要重新构建客户端；不能只修改服务器 `.env` 期待已安装客户端自动生效。
+- Vite 的环境优先级使 `.env.development` 覆盖通用 `.env.local`，因此 `npm run dev` 不会因为生产发布配置而误连云端；`npm run build` 使用 production mode，继续读取 `.env.local` 的正式地址。
 
 ### 4.2 当前发布方式
 
-当前已发布的 macOS updater bootstrap 为 `0.2.0`；本机 `/Applications` 中的旧 `0.1.0` 仍需手工覆盖一次。构建入口：
+当前已发布的 macOS updater bootstrap 为 `0.2.0`；本机 `/Applications` 中的旧 `0.1.0` 仍需手工覆盖一次。日常编译验证使用 `npm run build`，该命令不打包、不签名。平台产物入口：
 
 ```bash
 cd omniflow-app
-npm run build:mac
+npm run release:mac -- <version> [--publish]
 npm run build:win
 ```
 

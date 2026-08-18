@@ -1,6 +1,6 @@
 /**
  * Core logic adapted from cat-catch (https://github.com/xifangczy/cat-catch)
- * Licensed under AGPL-3.0
+ * Licensed under GPL-3.0-only
  */
 import { embeddedBrowserResourceProbePageActionsBody } from './embeddedBrowserResourceProbePageActions'
 import { embeddedBrowserResourceProbeManifestHeuristicsBody } from './embeddedBrowserResourceProbeManifestHeuristics'

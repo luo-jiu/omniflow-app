@@ -80,12 +80,20 @@ Windows 后续改用 `titleBarOverlay` 时，应在 `electron/platform/windows/m
 
 ## 5. 构建与验证
 
-本地构建入口：
+日常编译验证入口：
+
+```bash
+npm run build
+```
+
+该命令不调用 `electron-builder`，不会触发 macOS 代码签名。生成平台安装包时使用：
 
 ```bash
 npm run build:mac
 npm run build:win
 ```
+
+`build:mac` 是底层打包入口，要求签名钥匙串已经解锁。正式 macOS 发版统一使用 `npm run release:mac -- <version> [--publish]`，不要把日常编译验证和签名打包混在一起。
 
 macOS 可以生成 Windows NSIS 产物，但交叉打包不能替代 Windows 运行验证。Windows 相关改动至少需要在 Windows 10/11 或 Windows 11 ARM 虚拟机中验证：
 
