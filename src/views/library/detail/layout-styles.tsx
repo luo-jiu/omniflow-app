@@ -79,6 +79,7 @@ export const DetailWrapper = styled.div`
     --side-panel-toggle-drag-before-width: ${Math.max(0, WINDOWS_SIDE_PANEL_TOGGLE_VISUAL_LEFT - 6)}px;
     --side-panel-toggle-drag-after-left: ${WINDOWS_SIDE_PANEL_TOGGLE_VISUAL_LEFT + SIDE_PANEL_TOGGLE_SIZE + 8}px;
     --side-panel-toggle-guard-left: ${Math.max(0, WINDOWS_SIDE_PANEL_TOGGLE_VISUAL_LEFT - 6)}px;
+    background: var(--app-bg-sidebar);
   }
 
   &.is-side-panel-resizing {
@@ -193,6 +194,11 @@ export const SidePanelHeader = styled.div`
   flex-shrink: 0;
   position: relative;
   z-index: 2;
+
+  html[data-platform="windows"] & {
+    height: ${CONTENT_TOOLBAR_HEIGHT}px;
+    min-height: ${CONTENT_TOOLBAR_HEIGHT}px;
+  }
 
   &::before {
     content: "";
@@ -398,6 +404,10 @@ export const ContentToolbar = styled.div`
     7px,
     calc(var(--content-toolbar-collapsed-safe-space) - var(--side-panel-visual-width))
   );
+
+  html[data-platform="windows"] &.primary-content-toolbar {
+    padding-right: calc(7px + var(--windows-caption-controls-width));
+  }
 
   &::before {
     content: "";

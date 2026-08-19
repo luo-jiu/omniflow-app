@@ -1,6 +1,6 @@
 # 桌面平台适配架构
 
-更新时间：2026-08-18
+更新时间：2026-08-19
 
 适用范围：`omniflow-app` 的 macOS、Windows 和 Linux 宿主差异，包含主窗口配置、renderer 平台识别、标题栏安全区、平台专属系统能力及分平台构建验证。
 
@@ -52,14 +52,14 @@ renderer 的 `getDesktopPlatform()` 将其归一为：
 | 平台 | 标题栏 | 平台效果 | 窗口控制 |
 | --- | --- | --- | --- |
 | macOS | `hiddenInset` | `sidebar` vibrancy | 左侧系统红绿灯，固定坐标 `{ x: 14, y: 11 }` |
-| Windows | `default` | renderer 侧栏使用不透明主题背景 | 系统原生标题栏和右侧窗口按钮，标题为 `OmniFlow` |
+| Windows | `hidden` + `titleBarOverlay` | renderer 侧栏使用不透明主题背景 | 系统窗口按钮叠入首行工具栏右侧，不显示独立标题和应用名 |
 | Linux / 其他 | `default` | 无额外效果 | 系统默认窗口框架 |
 
 `electron/main.ts` 继续拥有 BrowserWindow 生命周期、窗口状态持久化、overlay 同步和应用退出语义；`electron/platform` 只返回平台窗口选项并执行平台初始化，不接管业务生命周期。
 
-Windows 后续改用 `titleBarOverlay` 时，应在 `electron/platform/windows/mainWindow.ts` 内完成宿主策略，并通过 `data-platform="windows"` 收敛 renderer 安全区。不要直接把 Windows 分支重新写回 `electron/main.ts`。
+Windows 的 `titleBarOverlay` 策略收敛在 `electron/platform/windows/mainWindow.ts`：标题栏透明，最小化、最大化和关闭仍由 Windows 原生绘制，符号色跟随 `nativeTheme`。首行工具栏使用 Window Controls Overlay 提供的 `titlebar-area-*` CSS 环境变量计算右侧安全区，不能用固定 padding 覆盖不同 DPI；不支持环境变量时才回退到三枚标准 caption button 的宽度。
 
-当前 Windows 继续使用原生标题栏，不模拟 macOS vibrancy：目录树侧栏通过 `data-platform="windows"` 使用不透明的 `--app-bg-sidebar`，亮暗主题分别继承自己的实色 token。侧栏折叠按钮在 Windows 移到内容区左上角、占用 macOS 红灯附近的横向位置；按钮宿主和周边预留区都显式使用 `no-drag`，其余顶部空白仍可拖动窗口。窗口初始标题同时由 `BrowserWindow.title` 和 renderer HTML 固定为 `OmniFlow`，避免开发模板标题短暂或持续出现在原生标题栏。
+Windows 不模拟 macOS vibrancy：目录树侧栏和主内容圆角背板通过 `data-platform="windows"` 使用不透明的 `--app-bg-sidebar`，亮暗主题分别继承自己的实色 token，避免圆角露出 BrowserWindow 默认白底。侧栏折叠按钮位于左上角并显式使用 `no-drag`，其余顶部空白仍可拖动窗口。文件模式的刷新按钮位于“工具”和“网页”入口之间；浏览器模式继续使用地址栏左侧的网页刷新按钮。
 
 ## 4. 平台能力归属
 
@@ -80,7 +80,38 @@ Windows 后续改用 `titleBarOverlay` 时，应在 `electron/platform/windows/m
 
 平台能力如果需要跨 preload 暴露，先更新本专题和 `electron/electron-env.d.ts`，再提供 renderer service；页面不得直接新增原始 IPC channel。
 
-## 5. 构建与验证
+## 5. Renderer 演进准则
+
+Renderer 平台适配按差异强度逐级处理，不能一开始就复制页面：
+
+1. 颜色、背景、圆角、间距和安全区等纯视觉差异，继续通过根节点 `data-platform` 和共享 CSS token 处理。
+2. 少量结构差异由共享页面读取 `src/platform` 的稳定平台事实，只让平台决定组件位置或是否展示；按钮行为、业务状态和事件处理保持单一实现。
+3. 当同一窗口安全区或标题栏结构在两个以上页面重复，或一个共享页面出现三个以上平台 JSX 分支时，再建立 `src/platform/window-frame/`，抽取共享的窗口壳组件和布局 token。
+4. 只有依赖 Electron / 操作系统 API 的能力才进入 `electron/platform/<os>/`。共享窗口生命周期、IPC 契约和业务 service 不按平台复制。
+
+当前 `--windows-caption-controls-width` 由 `MainLayout` 统一计算，具体工具栏只消费该安全区 token；文件模式刷新按钮仍是同一份交互实现，仅在 Windows 与其他平台使用不同放置位置。现阶段没有第二套窗口壳，也没有重复的平台业务实现，因此不新增空目录或 capability 配置系统。
+
+### 5.1 当前架构审查结论
+
+2026-08-19 对 macOS / Windows 共存结构完成一次专项 review，当前结论如下：
+
+- 未发现需要阻止合并的分层、状态双源、生命周期或 Electron 边界问题。
+- `electron/platform` 的主进程宿主策略与 `src/platform` 的 renderer 平台事实职责清楚，继续保持现状。
+- Windows 窗口按钮安全区由 `MainLayout` 单点计算，页面只消费 token；暂不需要新增窗口壳目录。
+- 当前唯一的平台 JSX 布局选择是文件刷新按钮的位置，按钮行为和状态仍为单一实现，不构成分平台业务复制。
+- macOS 规则均由 `data-platform="windows"` 或 main 侧 `win32` 分支隔离，静态检查未发现 macOS 行为改变。
+- 残余风险是尚未在真实 Windows 上验证不同 DPI、最大化 / 还原、主题切换、窗口拖动和 caption buttons 点击命中；这些项目必须在 Windows 提测时完成。
+
+后续 review 应先对照本节判断新增差异是否已经达到第 3 条的抽取阈值，而不是仅因新增一个平台判断就拆分目录。
+
+禁止以下演进方式：
+
+- 新建 `views/windows`、`views/macos` 或分平台复制整个 feature。
+- 为了消除一个布尔判断，把单个布局选择设计成全局 capability 表。
+- 页面自行读取 user agent、`process.platform` 或原始 preload 字段。
+- 把 Windows 标题栏尺寸写成多个页面各自维护的固定 padding。
+
+## 6. 构建与验证
 
 日常编译验证入口：
 
@@ -111,7 +142,7 @@ Windows 正式发布还需要在 x64 Windows 上做最终冒烟，并配置代�
 
 macOS 应用内更新的状态 owner、更新源、签名要求与本地验证流程见 `docs/desktop-auto-update.md`。自动更新属于共享 Electron 能力，平台层只承载签名、安装器和目标产物等真实平台差异。
 
-## 6. 维护规则
+## 7. 维护规则
 
 出现以下变化时必须更新本文：
 

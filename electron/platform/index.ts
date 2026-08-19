@@ -5,7 +5,10 @@ import {
   getMacOSMainWindowOptions,
 } from './macos/mainWindow'
 import type { MainWindowPlatformOptions } from './types'
-import { getWindowsMainWindowOptions } from './windows/mainWindow'
+import {
+  applyWindowsMainWindowBehavior,
+  getWindowsMainWindowOptions,
+} from './windows/mainWindow'
 
 const DEFAULT_MAIN_WINDOW_OPTIONS: MainWindowPlatformOptions = {
   titleBarStyle: 'default',
@@ -29,5 +32,9 @@ export function applyMainWindowPlatformBehavior(
 ) {
   if (platform === 'darwin') {
     applyMacOSMainWindowBehavior(win)
+    return
+  }
+  if (platform === 'win32') {
+    applyWindowsMainWindowBehavior(win)
   }
 }

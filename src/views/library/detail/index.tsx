@@ -80,6 +80,7 @@ import {
 import { getFileLink } from '@/features/file-explorer/services/file.api';
 import { resolveBrowserFileMapping } from '@/features/browser-file-mappings/services/browser-file-mapping.api';
 import { getAppPopupContainer } from '@/utils/popup-container';
+import { getDesktopPlatform } from '@/platform';
 import { useAuth } from '@/hooks/useAuth';
 import SearchWorkspace from "./SearchWorkspace";
 import BrowserSettingsWorkspace, { type BrowserSettingsSection } from './BrowserSettingsWorkspace';
@@ -180,6 +181,7 @@ type BookmarkEditDraft = {
 
 const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) => {
   const { user } = useAuth();
+  const isWindows = getDesktopPlatform() === 'windows';
   const displayName = user?.nickname || user?.username || '未登录';
   const {
     setFileUrl,
@@ -1820,6 +1822,18 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
     reloadActiveTab();
   }, [activeBrowserTab?.url, browserModeOpen, reloadActiveTab]);
 
+  const fileRefreshButton = !browserModeOpen ? (
+    <button
+      type="button"
+      className="toolbar-action-btn"
+      onClick={handleToolbarRefresh}
+      title="刷新当前标签页"
+      disabled={!activeTabId || workspaceDisplayMode === 'tools' || workspaceDisplayMode === 'system'}
+    >
+      <IconRefresh />
+    </button>
+  ) : null;
+
   const handleBrowserBack = React.useCallback(() => {
     if (!activeBrowserTabId) {
       return;
@@ -2565,7 +2579,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
       </SidePanel>
 
       <ContentArea>
-        <ContentToolbar>
+        <ContentToolbar className="primary-content-toolbar">
           <div className="toolbar-left">
             <button
               type="button"
@@ -2615,6 +2629,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
             >
               <IconWrench />
             </button>
+            {isWindows ? fileRefreshButton : null}
             {!browserModeOpen ? (
               <button
                 type="button"
@@ -2771,17 +2786,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
                 </button>
               </Popover>
             ) : null}
-            {browserModeOpen ? null : (
-              <button
-                type="button"
-                className="toolbar-action-btn"
-                onClick={handleToolbarRefresh}
-                title="刷新当前标签页"
-                disabled={!activeTabId || workspaceDisplayMode === 'tools' || workspaceDisplayMode === 'system'}
-              >
-                <IconRefresh />
-              </button>
-            )}
+            {!isWindows ? fileRefreshButton : null}
           </div>
         </ContentToolbar>
         {!browserModeOpen ? (

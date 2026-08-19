@@ -12,6 +12,16 @@ const LayoutWrapper = styled.div`
   height: 100vh;
   width: 100vw;
   overflow: hidden;
+  --windows-caption-controls-width: 0px;
+
+  html[data-platform="windows"] & {
+    --windows-caption-controls-width: calc(
+      100vw
+      - env(titlebar-area-x, 0px)
+      - env(titlebar-area-width, calc(100vw - 138px))
+    );
+    background: var(--app-bg);
+  }
 `;
 
 const OverlayRoot = styled.div`

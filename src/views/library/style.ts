@@ -156,6 +156,10 @@ export const LibraryMainToolbar = styled.div`
   align-items: center;
   padding: 0 7px 0 12px;
 
+  html[data-platform="windows"] & {
+    padding-right: calc(7px + var(--windows-caption-controls-width));
+  }
+
   .toolbar-left {
     display: flex;
     align-items: center;

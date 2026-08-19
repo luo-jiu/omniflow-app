@@ -28509,10 +28509,34 @@ function getMacOSMainWindowOptions() {
 function applyMacOSMainWindowBehavior(win) {
   win.setWindowButtonPosition(MACOS_TRAFFIC_LIGHT_POSITION);
 }
+const WINDOWS_TITLE_BAR_OVERLAY_HEIGHT = 38;
+const WINDOWS_TITLE_BAR_OVERLAY_COLOR = "#00000000";
+const WINDOWS_TITLE_BAR_SYMBOL_COLOR_DARK = "#f2f2f2";
+const WINDOWS_TITLE_BAR_SYMBOL_COLOR_LIGHT = "#202124";
+function getWindowsTitleBarOverlay() {
+  return {
+    color: WINDOWS_TITLE_BAR_OVERLAY_COLOR,
+    symbolColor: nativeTheme.shouldUseDarkColors ? WINDOWS_TITLE_BAR_SYMBOL_COLOR_DARK : WINDOWS_TITLE_BAR_SYMBOL_COLOR_LIGHT,
+    height: WINDOWS_TITLE_BAR_OVERLAY_HEIGHT
+  };
+}
 function getWindowsMainWindowOptions() {
   return {
-    titleBarStyle: "default"
+    titleBarStyle: "hidden",
+    titleBarOverlay: getWindowsTitleBarOverlay()
   };
+}
+function applyWindowsMainWindowBehavior(win) {
+  const syncTitleBarOverlay = () => {
+    if (win.isDestroyed()) return;
+    win.setTitleBarOverlay(getWindowsTitleBarOverlay());
+  };
+  const cleanup = () => {
+    nativeTheme.off("updated", syncTitleBarOverlay);
+  };
+  syncTitleBarOverlay();
+  nativeTheme.on("updated", syncTitleBarOverlay);
+  win.once("closed", cleanup);
 }
 const DEFAULT_MAIN_WINDOW_OPTIONS = {
   titleBarStyle: "default"
@@ -28529,6 +28553,10 @@ function getMainWindowPlatformOptions(platform2 = process.platform) {
 function applyMainWindowPlatformBehavior(win, platform2 = process.platform) {
   if (platform2 === "darwin") {
     applyMacOSMainWindowBehavior(win);
+    return;
+  }
+  if (platform2 === "win32") {
+    applyWindowsMainWindowBehavior(win);
   }
 }
 const __dirname = path$n.dirname(fileURLToPath(import.meta.url));
