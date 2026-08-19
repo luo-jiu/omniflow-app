@@ -1,5 +1,6 @@
 import { mediaRegistry } from '@/contexts/media-registry.singleton';
 import { type MediaRegistryRegistration } from '@/contexts/media-registry.context';
+import { GlobalAudioSpectrumAnalyser } from './global-audio-spectrum-analyser';
 import { mediaVolumePreference } from './media-volume-preference';
 import { GlobalAudioPlaybackRequestGate } from './global-audio-playback-request';
 
@@ -30,10 +31,7 @@ const AUDIO_REGISTRY_ENTRY_ID = 'audio:active';
 
 export class GlobalAudioPlayer {
   private readonly audio: HTMLAudioElement;
-  private audioContext: AudioContext | null = null;
-  private analyser: AnalyserNode | null = null;
-  private analyserBins: Uint8Array | null = null;
-  private analyserSetupInProgress = false;
+  private readonly spectrumAnalyser: GlobalAudioSpectrumAnalyser;
   private readonly playbackRequestGate = new GlobalAudioPlaybackRequestGate();
   private playbackAttemptRevision = 0;
   private listeners = new Set<StateListener>();
@@ -54,6 +52,7 @@ export class GlobalAudioPlayer {
 
   constructor(audio: HTMLAudioElement = new Audio()) {
     this.audio = audio;
+    this.spectrumAnalyser = new GlobalAudioSpectrumAnalyser(audio);
     this.audio.preload = 'metadata';
     const volumePreference = mediaVolumePreference.getState();
     this.audio.volume = volumePreference.volume;
@@ -63,9 +62,18 @@ export class GlobalAudioPlayer {
     this.audio.addEventListener('loadedmetadata', emit);
     this.audio.addEventListener('timeupdate', emit);
     this.audio.addEventListener('play', emit);
+    this.audio.addEventListener('playing', () => {
+      this.spectrumAnalyser.ensureReady(this.sourceUrl);
+    });
+    this.audio.addEventListener('loadeddata', () => {
+      if (!this.audio.paused) {
+        this.spectrumAnalyser.ensureReady(this.sourceUrl);
+      }
+    });
     this.audio.addEventListener('pause', emit);
     this.audio.addEventListener('ended', () => {
       this.endedSerial += 1;
+      this.spectrumAnalyser.reset();
       emit();
     });
     this.audio.addEventListener('volumechange', emit);
@@ -154,6 +162,7 @@ export class GlobalAudioPlayer {
     this.hasStarted = false;
     this.endedSerial = 0;
     this.lastMediaSessionPositionSignature = '';
+    this.spectrumAnalyser.reset();
     this.audio.src = url;
     this.audio.load();
     this.syncMediaSessionMetadata();
@@ -207,7 +216,7 @@ export class GlobalAudioPlayer {
     }
     this.hasStarted = true;
     this.emitState();
-    void this.ensureAnalyserReady();
+    this.spectrumAnalyser.ensureReady(this.sourceUrl);
     return true;
   }
 
@@ -240,32 +249,7 @@ export class GlobalAudioPlayer {
   }
 
   readSpectrumLevels(target: Float32Array, bandCount = target.length): boolean {
-    const analyser = this.analyser;
-    const bins = this.analyserBins;
-    const context = this.audioContext;
-    if (!analyser || !bins || !context || target.length === 0) return false;
-
-    analyser.getByteFrequencyData(bins);
-    const count = Math.min(Math.max(Math.floor(bandCount), 0), target.length);
-    const nyquist = context.sampleRate / 2;
-    const minimumFrequency = Math.min(45, nyquist);
-    const maximumFrequency = Math.min(16_000, nyquist);
-    const frequencyRatio = maximumFrequency / Math.max(minimumFrequency, 1);
-
-    for (let index = 0; index < count; index += 1) {
-      const ratio = count === 1 ? 0 : index / (count - 1);
-      const frequency = minimumFrequency * Math.pow(frequencyRatio, ratio);
-      const binPosition = Math.min(
-        Math.max((frequency / nyquist) * (bins.length - 1), 0),
-        bins.length - 1,
-      );
-      const firstIndex = Math.floor(binPosition);
-      const secondIndex = Math.min(firstIndex + 1, bins.length - 1);
-      const mix = binPosition - firstIndex;
-      target[index] = ((bins[firstIndex] || 0) * (1 - mix) + (bins[secondIndex] || 0) * mix) / 255;
-    }
-    target.fill(0, count);
-    return true;
+    return this.spectrumAnalyser.readLevels(target, bandCount);
   }
 
   clear() {
@@ -273,6 +257,7 @@ export class GlobalAudioPlayer {
     this.audio.currentTime = 0;
     this.audio.removeAttribute('src');
     this.audio.load();
+    this.spectrumAnalyser.reset();
     this.sourceUrl = null;
     this.sourceRevision += 1;
     this.sourceNodeId = null;
@@ -313,55 +298,6 @@ export class GlobalAudioPlayer {
     this.syncMediaSessionPositionState(snapshot);
     this.syncMediaRegistry(snapshot);
     this.listeners.forEach(listener => listener(snapshot));
-  }
-
-  private async ensureAnalyserReady() {
-    if (this.audioContext && this.analyser) {
-      if (this.audioContext.state === 'suspended') {
-        try {
-          await this.audioContext.resume();
-        } catch {
-          // Audio playback remains available when spectrum analysis cannot resume.
-        }
-      }
-      return;
-    }
-    if (this.analyserSetupInProgress || typeof AudioContext === 'undefined') return;
-    const captureStream = (this.audio as HTMLAudioElement & {
-      captureStream?: () => MediaStream;
-    }).captureStream;
-    if (typeof captureStream !== 'function') return;
-    this.analyserSetupInProgress = true;
-
-    try {
-      const context = new AudioContext();
-      const analyser = context.createAnalyser();
-      analyser.fftSize = 2048;
-      analyser.smoothingTimeConstant = 0.58;
-      const stream = captureStream.call(this.audio);
-      if (stream.getAudioTracks().length === 0) {
-        void context.close();
-        return;
-      }
-      const source = context.createMediaStreamSource(stream);
-      source.connect(analyser);
-      this.audioContext = context;
-      this.analyser = analyser;
-      this.analyserBins = new Uint8Array(analyser.frequencyBinCount);
-      if (context.state === 'suspended') {
-        try {
-          await context.resume();
-        } catch {
-          // The next user-initiated play will retry resume without rebuilding the graph.
-        }
-      }
-    } catch {
-      this.audioContext = null;
-      this.analyser = null;
-      this.analyserBins = null;
-    } finally {
-      this.analyserSetupInProgress = false;
-    }
   }
 
   // 服务层自注册：必须 src + tabId + 已 play 过（hasStarted）才进 MediaHub；clear() 时取消注册。

@@ -23,14 +23,6 @@ function readSmoothedLiveLevel(levels: Float32Array, index: number, count: numbe
   return at(-2) * 0.08 + at(-1) * 0.2 + at(0) * 0.44 + at(1) * 0.2 + at(2) * 0.08;
 }
 
-function resolveFallbackLevel(index: number, time: number): number {
-  const pulse = 0.2 + Math.pow(Math.max(Math.sin(time * 2.3 + index * 0.12), 0), 2) * 0.8;
-  return Math.min(
-    0.06 + Math.abs(Math.sin(time * 4.8 + index * 0.29)) * pulse * 0.72,
-    0.82,
-  );
-}
-
 function drawBar(
   context: CanvasRenderingContext2D,
   x: number,
@@ -89,7 +81,6 @@ export const AudioSpectrumVisualizer: React.FC<AudioSpectrumVisualizerProps> = (
       }
 
       const playerState = globalAudioPlayer.getState();
-      const playbackTime = playerState.src === url ? playerState.currentTime : 0;
       const availableBarCount = Math.min(
         MAX_BAR_COUNT,
         Math.max(40, Math.floor(canvasCssWidth / 7)),
@@ -113,18 +104,10 @@ export const AudioSpectrumVisualizer: React.FC<AudioSpectrumVisualizerProps> = (
       const hasLiveSpectrum = isPlayingRef.current
         && playerState.src === url
         && globalAudioPlayer.readSpectrumLevels(liveLevelsRef.current, sourceBarCount);
-      let livePeak = 0;
-      if (hasLiveSpectrum) {
-        for (let index = 0; index < sourceBarCount; index += 1) {
-          livePeak = Math.max(livePeak, liveLevelsRef.current[index]);
-        }
-      }
 
       for (let sourceIndex = 0; sourceIndex < sourceBarCount; sourceIndex += 1) {
-        const level = isPlayingRef.current
-          ? hasLiveSpectrum && livePeak > 0.002
-            ? readSmoothedLiveLevel(liveLevelsRef.current, sourceIndex, sourceBarCount)
-            : resolveFallbackLevel(sourceIndex, playbackTime)
+        const level = isPlayingRef.current && hasLiveSpectrum
+          ? readSmoothedLiveLevel(liveLevelsRef.current, sourceIndex, sourceBarCount)
           : 0;
         const target = level > 0
           ? Math.max(minimumHeight, Math.pow(level, 1.08) * maximumHeight)
