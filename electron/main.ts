@@ -424,7 +424,7 @@ app.whenReady().then(async () => {
   await initializeFileTransferRuntime().catch((error) => {
     console.error('[file-transfer] download URL broker failed to start', error)
   })
-  registerIpcHandlers()
+  registerIpcHandlers({ getMainWindow: () => mainWindow })
   registerWindowControlIpcHandlers({
     getMainWindow: () => mainWindow,
   })

@@ -241,6 +241,26 @@ interface Window {
     ) => () => void;
   };
 
+  electronAIService?: {
+    list: () => Promise<import('@/features/ai-services/ai-service.types').AIServiceSnapshot>;
+    revealApiKey: (id: string) => Promise<string>;
+    save: (
+      input: import('@/features/ai-services/ai-service.types').AIServiceSaveInput,
+    ) => Promise<import('@/features/ai-services/ai-service.types').AIServiceSnapshot>;
+    setActive: (id: string) => Promise<import('@/features/ai-services/ai-service.types').AIServiceSnapshot>;
+    reorder: (orderedIds: string[]) => Promise<import('@/features/ai-services/ai-service.types').AIServiceSnapshot>;
+    duplicate: (id: string) => Promise<import('@/features/ai-services/ai-service.types').AIServiceSnapshot>;
+    delete: (id: string) => Promise<import('@/features/ai-services/ai-service.types').AIServiceSnapshot>;
+    listModels: () => Promise<string[]>;
+    beginRun: (
+      profileId: string,
+    ) => Promise<import('@/features/ai-services/ai-service.types').AIServiceRunSessionHandle>;
+    endRun: (runSessionId: string) => Promise<boolean>;
+    complete: (
+      input: import('@/features/ai-services/ai-service.types').AIServiceCompletionInput,
+    ) => Promise<string>;
+  };
+
   electronWindow: {
     platform: 'darwin' | 'win32' | 'linux' | 'unknown';
     minimize: () => void;

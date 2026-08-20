@@ -13,6 +13,12 @@ import type {
   EmbeddedBrowserStagedPageDragFile,
 } from '@/features/file-transfer/model/browser-drag-transfer'
 import type { LibraryFileBrowserDropResult } from '@/features/file-transfer/model/file-transfer'
+import type {
+  AIServiceCompletionInput,
+  AIServiceRunSessionHandle,
+  AIServiceSaveInput,
+  AIServiceSnapshot,
+} from '@/features/ai-services/ai-service.types'
 
 // --------- Expose some API to the Renderer process ---------
 contextBridge.exposeInMainWorld('ipcRenderer', {
@@ -185,6 +191,22 @@ contextBridge.exposeInMainWorld('electronAppUpdate', {
     ipcRenderer.on('app-update:state', wrapped);
     return () => ipcRenderer.removeListener('app-update:state', wrapped);
   },
+})
+
+contextBridge.exposeInMainWorld('electronAIService', {
+  list: (): Promise<AIServiceSnapshot> => ipcRenderer.invoke('ai-service:list'),
+  revealApiKey: (id: string): Promise<string> => ipcRenderer.invoke('ai-service:reveal-api-key', id),
+  save: (input: AIServiceSaveInput): Promise<AIServiceSnapshot> => ipcRenderer.invoke('ai-service:save', input),
+  setActive: (id: string): Promise<AIServiceSnapshot> => ipcRenderer.invoke('ai-service:set-active', id),
+  reorder: (orderedIds: string[]): Promise<AIServiceSnapshot> => ipcRenderer.invoke('ai-service:reorder', orderedIds),
+  duplicate: (id: string): Promise<AIServiceSnapshot> => ipcRenderer.invoke('ai-service:duplicate', id),
+  delete: (id: string): Promise<AIServiceSnapshot> => ipcRenderer.invoke('ai-service:delete', id),
+  listModels: (): Promise<string[]> => ipcRenderer.invoke('ai-service:list-models'),
+  beginRun: (profileId: string): Promise<AIServiceRunSessionHandle> => (
+    ipcRenderer.invoke('ai-service:run:begin', profileId)
+  ),
+  endRun: (runSessionId: string): Promise<boolean> => ipcRenderer.invoke('ai-service:run:end', runSessionId),
+  complete: (input: AIServiceCompletionInput): Promise<string> => ipcRenderer.invoke('ai-service:complete', input),
 })
 
 // 窗口控制 API

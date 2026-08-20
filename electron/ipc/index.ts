@@ -1,6 +1,6 @@
 // 统一注册 ipcMain通信
 
-import { ipcMain } from 'electron'
+import { ipcMain, type BrowserWindow } from 'electron'
 import { registerFileIpc } from './file'
 // import { registerConfigIpc } from './config'
 import { registerSystemIpc } from './system'
@@ -8,8 +8,9 @@ import { registerHttpIpc } from './http'
 import { registerMediaToolIpc } from './mediaTool'
 import { registerImagePreviewIpc } from './imagePreview'
 import { registerFileTransferIpc } from './fileTransfer'
+import { registerAIServiceIpc } from './aiService'
 
-export default function registerIpcHandlers() {
+export default function registerIpcHandlers(options: { getMainWindow: () => BrowserWindow | null }) {
   registerFileIpc(ipcMain)
   // registerConfigIpc(ipcMain)
   registerSystemIpc(ipcMain)
@@ -17,4 +18,5 @@ export default function registerIpcHandlers() {
   registerMediaToolIpc(ipcMain)
   registerImagePreviewIpc(ipcMain)
   registerFileTransferIpc()
+  registerAIServiceIpc(ipcMain, options)
 }
