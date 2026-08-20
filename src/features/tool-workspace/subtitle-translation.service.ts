@@ -1,5 +1,11 @@
 import { getFileLink, uploadLocalPathAndCreateNode } from '@/features/file-explorer/services/file.api';
 import type { SelectedTreeNode } from '@/features/file-explorer';
+import {
+  beginAIServiceRun,
+  completeWithAIService,
+  endAIServiceRun,
+  fetchActiveAIServiceModels,
+} from '@/features/ai-services/ai-service.api';
 
 import type {
   SubtitleFileFormat,
@@ -8,38 +14,18 @@ import type {
 } from './types';
 import {
   buildTranslatedSubtitleContent,
+  isSupportedSubtitleExtension,
   parseSubtitleDocument,
 } from './subtitle-translation.utils';
 
-const SUBTITLE_TRANSLATION_PREFERENCES_KEY = 'subtitle-translation-preferences:v1';
+const SUBTITLE_TRANSLATION_PREFERENCES_KEY = 'subtitle-translation-preferences:v2';
+const LEGACY_SUBTITLE_TRANSLATION_PREFERENCES_KEY = 'subtitle-translation-preferences:v1';
+export const MAX_DROPPED_SUBTITLE_FILE_BYTES = 20 * 1024 * 1024;
 
-type ModelListResponse = {
-  data?: Array<{
-    id?: string;
-    name?: string;
-  }>;
-  models?: Array<{
-    id?: string;
-    name?: string;
-  }>;
-};
-
-function normalizeBaseUrl(input: string): string {
-  return String(input || '').trim().replace(/\/+$/, '');
-}
-
-function buildApiUrl(baseUrl: string, path: string): string {
-  const normalizedBaseUrl = normalizeBaseUrl(baseUrl);
-  const normalizedPath = String(path || '').trim().replace(/^\/+/, '');
-  return `${normalizedBaseUrl}/${normalizedPath}`;
-}
-
-function buildRequestHeaders(apiKey: string): Record<string, string> {
-  const normalizedKey = String(apiKey || '').trim();
-  return {
-    'Content-Type': 'application/json',
-    ...(normalizedKey ? { Authorization: `Bearer ${normalizedKey}` } : {}),
-  };
+function normalizeContextWindow(value: unknown, fallback: number): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(0, Math.min(10, Math.floor(parsed)));
 }
 
 function readTextResponseBody(body: unknown): string {
@@ -52,41 +38,9 @@ function readTextResponseBody(body: unknown): string {
   return String(body);
 }
 
-function extractModelIds(body: ModelListResponse | null | undefined): string[] {
-  const data = Array.isArray(body?.data)
-    ? body?.data
-    : Array.isArray(body?.models)
-      ? body?.models
-      : [];
-
-  return data
-    .map((item) => String(item?.id || item?.name || '').trim())
-    .filter(Boolean);
-}
-
-function extractTranslatedText(body: any): string {
-  const content = body?.choices?.[0]?.message?.content;
-  if (typeof content === 'string') {
-    return content.trim();
-  }
-  if (Array.isArray(content)) {
-    return content
-      .map((item) => {
-        if (typeof item === 'string') {
-          return item;
-        }
-        return typeof item?.text === 'string' ? item.text : '';
-      })
-      .join('\n')
-      .trim();
-  }
-  return '';
-}
-
 function buildTranslationPrompt(
   rows: SubtitleTranslationRow[],
   rowIndex: number,
-  targetLanguage: string,
   contextWindow: number,
 ): string {
   const start = Math.max(0, rowIndex - contextWindow);
@@ -104,7 +58,7 @@ function buildTranslationPrompt(
   );
 
   return [
-    `把 CURRENT 小节翻译成 ${targetLanguage}。`,
+    '按照 SYSTEM 中指定的语言和规则翻译 CURRENT 小节。',
     '只返回 CURRENT 的译文，不要解释，不要加编号，不要输出额外标记。',
     '保留原句中的换行、专有名词和语气，必要时做自然化处理。',
     '',
@@ -129,57 +83,49 @@ function buildSystemPrompt(config: SubtitleTranslationConfig): string {
 
 export function loadSubtitleTranslationPreferences(): SubtitleTranslationConfig {
   const fallback: SubtitleTranslationConfig = {
-    apiKey: 'ollama',
-    baseUrl: 'http://localhost:11434/v1',
     contextWindow: 5,
     model: '',
     presetPrompt: '',
-    targetLanguage: '简体中文',
-    unloadModelAfterTranslate: true,
+    reasoningEffort: 'auto',
   };
 
-  const raw = localStorage.getItem(SUBTITLE_TRANSLATION_PREFERENCES_KEY);
+  const currentRaw = localStorage.getItem(SUBTITLE_TRANSLATION_PREFERENCES_KEY);
+  const legacyRaw = localStorage.getItem(LEGACY_SUBTITLE_TRANSLATION_PREFERENCES_KEY);
+  const raw = currentRaw || legacyRaw;
   if (!raw) {
     return fallback;
   }
 
   try {
     const parsed = JSON.parse(raw) as Partial<SubtitleTranslationConfig>;
-    return {
-      apiKey: String(parsed.apiKey ?? fallback.apiKey),
-      baseUrl: normalizeBaseUrl(String(parsed.baseUrl ?? fallback.baseUrl)) || fallback.baseUrl,
-      contextWindow: Math.max(0, Math.min(10, Number(parsed.contextWindow ?? fallback.contextWindow) || fallback.contextWindow)),
+    const normalized = {
+      contextWindow: normalizeContextWindow(parsed.contextWindow, fallback.contextWindow),
       model: String(parsed.model ?? fallback.model),
       presetPrompt: String(parsed.presetPrompt ?? fallback.presetPrompt),
-      targetLanguage: String(parsed.targetLanguage ?? fallback.targetLanguage) || fallback.targetLanguage,
-      unloadModelAfterTranslate: parsed.unloadModelAfterTranslate !== false,
+      reasoningEffort: parsed.reasoningEffort === 'low'
+        || parsed.reasoningEffort === 'medium'
+        || parsed.reasoningEffort === 'high'
+        ? parsed.reasoningEffort
+        : 'auto' as const,
     };
+    localStorage.setItem(SUBTITLE_TRANSLATION_PREFERENCES_KEY, JSON.stringify(normalized));
+    localStorage.removeItem(LEGACY_SUBTITLE_TRANSLATION_PREFERENCES_KEY);
+    return normalized;
   } catch {
+    localStorage.removeItem(SUBTITLE_TRANSLATION_PREFERENCES_KEY);
+    localStorage.removeItem(LEGACY_SUBTITLE_TRANSLATION_PREFERENCES_KEY);
     return fallback;
   }
 }
 
 export function saveSubtitleTranslationPreferences(config: SubtitleTranslationConfig) {
   localStorage.setItem(SUBTITLE_TRANSLATION_PREFERENCES_KEY, JSON.stringify({
-    apiKey: String(config.apiKey || ''),
-    baseUrl: normalizeBaseUrl(config.baseUrl),
-    contextWindow: Math.max(0, Math.min(10, Number(config.contextWindow) || 0)),
+    contextWindow: normalizeContextWindow(config.contextWindow, 5),
     model: String(config.model || ''),
     presetPrompt: String(config.presetPrompt || ''),
-    targetLanguage: String(config.targetLanguage || '简体中文'),
-    unloadModelAfterTranslate: config.unloadModelAfterTranslate !== false,
+    reasoningEffort: config.reasoningEffort,
   }));
-}
-
-function isLikelyOllamaEndpoint(baseUrl: string): boolean {
-  const normalized = normalizeBaseUrl(baseUrl).toLowerCase();
-  return normalized.includes('localhost:11434') || normalized.includes('127.0.0.1:11434');
-}
-
-function buildOllamaNativeApiUrl(baseUrl: string, path: string): string {
-  const normalizedBaseUrl = normalizeBaseUrl(baseUrl).replace(/\/v1$/i, '');
-  const normalizedPath = String(path || '').trim().replace(/^\/+/, '');
-  return `${normalizedBaseUrl}/${normalizedPath}`;
+  localStorage.removeItem(LEGACY_SUBTITLE_TRANSLATION_PREFERENCES_KEY);
 }
 
 export async function pickLocalSubtitleFile() {
@@ -201,6 +147,38 @@ export async function pickLocalSubtitleFile() {
   };
 }
 
+function validateDroppedSubtitleFile(file: File) {
+  const fileName = String(file?.name || '').trim();
+  if (!isSupportedSubtitleExtension(fileName)) {
+    throw new Error('当前仅支持拖入 SRT 或 VTT 字幕文件');
+  }
+  if (Number.isFinite(file.size) && file.size > MAX_DROPPED_SUBTITLE_FILE_BYTES) {
+    throw new Error('拖入字幕文件不能超过 20 MB');
+  }
+
+  return fileName;
+}
+
+export function selectSingleDroppedSubtitleFile(files: ArrayLike<File>): File {
+  const candidates = Array.from(files);
+  if (candidates.length !== 1) {
+    throw new Error(candidates.length > 1 ? '一次只能拖入一个字幕文件' : '未读取到可用的本地文件');
+  }
+  validateDroppedSubtitleFile(candidates[0]);
+  return candidates[0];
+}
+
+export async function loadSubtitleFromDroppedFile(file: File) {
+  const fileName = validateDroppedSubtitleFile(file);
+
+  const parsed = parseSubtitleDocument(await file.text(), fileName);
+  return {
+    ...parsed,
+    fileName,
+    filePath: '',
+  };
+}
+
 export async function loadSubtitleFromLibraryNode(
   libraryId: number,
   node: SelectedTreeNode,
@@ -217,84 +195,43 @@ export async function loadSubtitleFromLibraryNode(
   };
 }
 
-export async function fetchAvailableTranslationModels(config: SubtitleTranslationConfig): Promise<string[]> {
-  const response = await window.electronAPI.fetch(buildApiUrl(config.baseUrl, 'models'), {
-    headers: buildRequestHeaders(config.apiKey),
-    method: 'GET',
-  });
-  if (Number(response?.status || 0) >= 400) {
-    throw new Error('获取模型列表失败');
-  }
-  return extractModelIds(response?.body as ModelListResponse)
-    .sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'));
+export function fetchAvailableTranslationModels(): Promise<string[]> {
+  return fetchActiveAIServiceModels();
+}
+
+export async function beginSubtitleTranslationRun(serviceProfileId: string): Promise<string> {
+  const session = await beginAIServiceRun(serviceProfileId);
+  return session.id;
+}
+
+export function endSubtitleTranslationRun(runSessionId: string): Promise<boolean> {
+  return endAIServiceRun(runSessionId);
 }
 
 export async function translateSubtitleRow(
   config: SubtitleTranslationConfig,
   rows: SubtitleTranslationRow[],
   rowIndex: number,
+  serviceProfileId: string,
+  runSessionId?: string,
 ): Promise<string> {
   const model = String(config.model || '').trim();
   if (!model) {
     throw new Error('请先选择模型');
   }
 
-  const response = await window.electronAPI.fetch(buildApiUrl(config.baseUrl, 'chat/completions'), {
-    body: JSON.stringify({
-      messages: [
-        {
-          role: 'system',
-          content: buildSystemPrompt(config),
-        },
-        {
-          role: 'user',
-          content: buildTranslationPrompt(
-            rows,
-            rowIndex,
-            config.targetLanguage,
-            Math.max(0, Math.floor(Number(config.contextWindow) || 0)),
-          ),
-        },
-      ],
-      model,
-      temperature: 0.2,
-    }),
-    headers: buildRequestHeaders(config.apiKey),
-    method: 'POST',
+  return completeWithAIService({
+    model,
+    profileId: serviceProfileId,
+    reasoningEffort: config.reasoningEffort,
+    runSessionId,
+    systemPrompt: buildSystemPrompt(config),
+    userPrompt: buildTranslationPrompt(
+      rows,
+      rowIndex,
+      Math.max(0, Math.floor(Number(config.contextWindow) || 0)),
+    ),
   });
-
-  if (Number(response?.status || 0) >= 400) {
-    throw new Error(readTextResponseBody(response?.body) || '翻译请求失败');
-  }
-
-  const translated = extractTranslatedText(response?.body);
-  if (!translated) {
-    throw new Error('模型未返回可用译文');
-  }
-  return translated;
-}
-
-export async function unloadOllamaModel(config: SubtitleTranslationConfig): Promise<void> {
-  const model = String(config.model || '').trim();
-  if (!model) {
-    return;
-  }
-  if (!config.unloadModelAfterTranslate || !isLikelyOllamaEndpoint(config.baseUrl)) {
-    return;
-  }
-
-  const response = await window.electronAPI.fetch(buildOllamaNativeApiUrl(config.baseUrl, 'api/generate'), {
-    body: JSON.stringify({
-      keep_alive: 0,
-      model,
-    }),
-    headers: buildRequestHeaders(config.apiKey),
-    method: 'POST',
-  });
-
-  if (Number(response?.status || 0) >= 400) {
-    throw new Error(readTextResponseBody(response?.body) || '模型卸载失败');
-  }
 }
 
 export async function saveSubtitleToLocalFile(

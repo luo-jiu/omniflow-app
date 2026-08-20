@@ -1,5 +1,9 @@
 import type { SubtitleTranslationConfig, SubtitleTranslationRow } from './types';
-import { translateSubtitleRow, unloadOllamaModel } from './subtitle-translation.service';
+import {
+  beginSubtitleTranslationRun,
+  endSubtitleTranslationRun,
+  translateSubtitleRow,
+} from './subtitle-translation.service';
 
 type RowResult = {
   error: string;
@@ -16,6 +20,7 @@ type RunnerSnapshot = {
 };
 
 type Listener = () => void;
+type TranslationRunScope = 'all' | 'untranslated';
 
 let running = false;
 let libraryId = 0;
@@ -24,8 +29,8 @@ let doneCount = 0;
 let activeRowId: string | null = null;
 let rows: SubtitleTranslationRow[] = [];
 let currentRunId = 0;
-let activeConfig: SubtitleTranslationConfig | null = null;
-const results = new Map<string, RowResult>();
+let activeRunSessionId: string | null = null;
+const resultsByLibrary = new Map<number, Map<string, RowResult>>();
 const listeners = new Set<Listener>();
 
 function notify() {
@@ -36,40 +41,50 @@ function start(
   config: SubtitleTranslationConfig,
   inputRows: SubtitleTranslationRow[],
   targetLibraryId: number,
+  serviceProfileId: string,
+  scope: TranslationRunScope = 'untranslated',
 ) {
   stop();
 
-  // Clone rows snapshot and filter untranslated
   rows = inputRows.map((row) => ({ ...row }));
-  const untranslated = rows.filter(
-    (row) => !String(row.translatedText || '').trim(),
-  );
+  const pendingRows = scope === 'all'
+    ? rows
+    : rows.filter((row) => !String(row.translatedText || '').trim());
 
-  if (untranslated.length === 0) {
+  if (pendingRows.length === 0) {
     return;
   }
 
   const runId = currentRunId + 1;
   currentRunId = runId;
   running = true;
-  activeConfig = config;
   libraryId = targetLibraryId;
-  totalCount = untranslated.length;
+  totalCount = pendingRows.length;
   doneCount = 0;
   activeRowId = null;
-  results.clear();
+  const runResults = new Map<string, RowResult>();
+  resultsByLibrary.set(targetLibraryId, runResults);
   notify();
 
-  void runLoop(runId, config, untranslated);
+  void runLoop(runId, config, pendingRows, serviceProfileId, runResults);
 }
 
 async function runLoop(
   runId: number,
   config: SubtitleTranslationConfig,
-  untranslated: SubtitleTranslationRow[],
+  pendingRows: SubtitleTranslationRow[],
+  serviceProfileId: string,
+  runResults: Map<string, RowResult>,
 ) {
+  let runSessionId: string | null = null;
   try {
-    for (const row of untranslated) {
+    runSessionId = await beginSubtitleTranslationRun(serviceProfileId);
+    if (runId !== currentRunId) {
+      return;
+    }
+    activeRunSessionId = runSessionId;
+
+    for (const row of pendingRows) {
       if (runId !== currentRunId) {
         break;
       }
@@ -83,7 +98,13 @@ async function runLoop(
       notify();
 
       try {
-        const translatedText = await translateSubtitleRow(config, rows, rowIndex);
+        const translatedText = await translateSubtitleRow(
+          config,
+          rows,
+          rowIndex,
+          serviceProfileId,
+          runSessionId,
+        );
         if (runId !== currentRunId) {
           break;
         }
@@ -96,13 +117,16 @@ async function runLoop(
           translatedText,
         };
 
-        results.set(row.id, {
+        runResults.set(row.id, {
           error: '',
           status: 'success',
           translatedText,
         });
       } catch (error: any) {
-        results.set(row.id, {
+        if (runId !== currentRunId) {
+          break;
+        }
+        runResults.set(row.id, {
           error: error?.message || '翻译失败',
           status: 'error',
           translatedText: '',
@@ -115,30 +139,53 @@ async function runLoop(
       doneCount += 1;
       notify();
     }
-
+  } catch (error: any) {
     if (runId === currentRunId) {
-      await unloadOllamaModel(config).catch(() => undefined);
+      const message = error?.message || '翻译任务启动失败';
+      pendingRows.forEach((row) => {
+        if (!runResults.has(row.id)) {
+          runResults.set(row.id, {
+            error: message,
+            status: 'error',
+            translatedText: '',
+          });
+        }
+      });
+      doneCount = totalCount;
+      notify();
     }
   } finally {
+    if (activeRunSessionId === runSessionId) {
+      activeRunSessionId = null;
+    }
+    if (runSessionId) {
+      await endSubtitleTranslationRun(runSessionId).catch(() => false);
+    }
     if (runId === currentRunId) {
       running = false;
       activeRowId = null;
-      activeConfig = null;
       notify();
     }
   }
 }
 
-function stop() {
+function stop(targetLibraryId?: number) {
+  if (targetLibraryId !== undefined && targetLibraryId !== libraryId) {
+    return;
+  }
   currentRunId += 1;
-  const stopRunId = currentRunId;
+  const runSessionId = activeRunSessionId;
+  activeRunSessionId = null;
+  if (runSessionId) {
+    void endSubtitleTranslationRun(runSessionId).catch(() => false);
+  }
   if (!running && !activeRowId) {
-    activeConfig = null;
     return;
   }
 
   if (activeRowId) {
-    results.set(activeRowId, {
+    const activeResults = resultsByLibrary.get(libraryId);
+    activeResults?.set(activeRowId, {
       error: '',
       status: 'idle',
       translatedText: '',
@@ -150,20 +197,18 @@ function stop() {
   totalCount = 0;
   doneCount = 0;
   notify();
-
-  const config = activeConfig;
-  activeConfig = null;
-  if (config) {
-    queueMicrotask(() => {
-      if (currentRunId !== stopRunId || running) {
-        return;
-      }
-      void unloadOllamaModel(config).catch(() => undefined);
-    });
-  }
 }
 
-function getSnapshot(): RunnerSnapshot {
+function getSnapshot(targetLibraryId?: number): RunnerSnapshot {
+  if (targetLibraryId !== undefined && targetLibraryId !== libraryId) {
+    return {
+      activeRowId: null,
+      doneCount: 0,
+      libraryId: targetLibraryId,
+      running: false,
+      totalCount: 0,
+    };
+  }
   return {
     activeRowId,
     doneCount,
@@ -173,12 +218,20 @@ function getSnapshot(): RunnerSnapshot {
   };
 }
 
-function drainResults(): Map<string, RowResult> {
-  if (results.size === 0) {
+function drainResults(targetLibraryId: number): Map<string, RowResult> {
+  const results = resultsByLibrary.get(targetLibraryId);
+  if (!results || results.size === 0) {
+    if (results && (targetLibraryId !== libraryId || !running)) {
+      resultsByLibrary.delete(targetLibraryId);
+    }
     return new Map();
   }
   const drained = new Map(results);
-  results.clear();
+  if (targetLibraryId !== libraryId || !running) {
+    resultsByLibrary.delete(targetLibraryId);
+  } else {
+    results.clear();
+  }
   return drained;
 }
 
@@ -197,4 +250,4 @@ export const subtitleTranslationRunner = {
   subscribe,
 };
 
-export type { RowResult, RunnerSnapshot };
+export type { RowResult, RunnerSnapshot, TranslationRunScope };

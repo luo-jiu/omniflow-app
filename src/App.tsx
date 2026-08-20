@@ -6,6 +6,7 @@ import routes from "@/router";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import UserPreferencesBootstrap from '@/features/user/preferences/UserPreferencesBootstrap';
+import SyncedUserPreferencesProvider from '@/features/user/preferences/SyncedUserPreferencesProvider';
 import FloatingMiniVideoPlayer from '@/features/file-viewer/components/floating-mini-video-player';
 import { runtimeLogger } from '@/utils/runtimeLogger';
 import '@/features/resource-monitor/services/resource-monitor-runtime';
@@ -64,13 +65,15 @@ function App() {
   return (
     <ThemeProvider>
       <AuthProvider>
-        <UserPreferencesBootstrap />
-        <MainLayout>
-          <Suspense fallback={'loading...'}>
-            {useRoutes(routes)}
-          </Suspense>
-          <FloatingMiniVideoPlayer />
-        </MainLayout>
+        <SyncedUserPreferencesProvider>
+          <UserPreferencesBootstrap />
+          <MainLayout>
+            <Suspense fallback={'loading...'}>
+              {useRoutes(routes)}
+            </Suspense>
+            <FloatingMiniVideoPlayer />
+          </MainLayout>
+        </SyncedUserPreferencesProvider>
       </AuthProvider>
     </ThemeProvider>
   )

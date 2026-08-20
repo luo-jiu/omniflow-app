@@ -111,7 +111,8 @@ function normalizeState(raw: any): ToolWorkspaceState {
     return fallback;
   }
   const activeToolId: ToolWorkspaceToolId = (
-    raw.activeToolId === 'media-processing'
+    raw.activeToolId === 'ai-services'
+    || raw.activeToolId === 'media-processing'
     || raw.activeToolId === 'media-file-processing'
     || raw.activeToolId === 'subtitle-translation'
   )

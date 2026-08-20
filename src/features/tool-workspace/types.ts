@@ -1,4 +1,5 @@
 import type { SelectedTreeNode } from '@/features/file-explorer';
+import type { AIServiceReasoningEffort } from '@/features/ai-services/ai-service.types';
 import type {
   EmbeddedBrowserHlsDownloadPlan,
   EmbeddedBrowserHlsManifest,
@@ -9,7 +10,14 @@ import type {
 } from '@/features/embedded-browser/resources/model/embedded-browser-mpd-manifest';
 import type { EmbeddedBrowserCapturedResource } from '@/features/embedded-browser/resources/types';
 
-export type ToolWorkspaceToolId = 'subtitle-translation' | 'media-processing' | 'media-file-processing';
+export const TOOL_WORKSPACE_TOOL_IDS = [
+  'ai-services',
+  'subtitle-translation',
+  'media-file-processing',
+  'media-processing',
+] as const;
+
+export type ToolWorkspaceToolId = typeof TOOL_WORKSPACE_TOOL_IDS[number];
 
 export type ToolWorkspaceMediaMode = 'resources' | 'hls-download' | 'mpd-download';
 
@@ -67,13 +75,10 @@ export interface SubtitleTranslationRow {
 }
 
 export interface SubtitleTranslationConfig {
-  apiKey: string;
-  baseUrl: string;
   contextWindow: number;
   model: string;
   presetPrompt: string;
-  targetLanguage: string;
-  unloadModelAfterTranslate: boolean;
+  reasoningEffort: AIServiceReasoningEffort;
 }
 
 export interface SubtitleTranslationDraft {
