@@ -23,8 +23,7 @@ import {
   IconClose,
   IconArrowLeft,
   IconArrowRight,
-  IconGlobeStroke,
-  IconApps,
+  IconGlobe,
   IconFolder,
   IconStar,
   IconStarStroked,
@@ -34,6 +33,7 @@ import {
   IconWrench,
   IconMusic,
 } from "@douyinfe/semi-icons";
+import { ToolbarGridIcon } from './toolbar-icons';
 import { Avatar, Input, Modal, Popover, Select, Toast } from '@douyinfe/semi-ui';
 import ContextMenu, { type ContextMenuItem } from "@/components/ui/context-menu";
 import EmbeddedBrowserPanel, { type EmbeddedBrowserHandle } from "@/features/embedded-browser/components/EmbeddedBrowserPanel";
@@ -2587,7 +2587,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
               onClick={() => showSearchHome()}
               title="打开搜索主页"
             >
-              <IconApps />
+              <ToolbarGridIcon />
             </button>
             {browserModeOpen ? (
               <button
@@ -2637,7 +2637,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
                 onClick={openEmbeddedBrowser}
                 title="打开内置浏览器"
               >
-                <IconGlobeStroke />
+                <IconGlobe />
               </button>
             ) : null}
           </div>

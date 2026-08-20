@@ -18,7 +18,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { Tooltip } from '@douyinfe/semi-ui';
 
-import ccSwitchIconUrl from '@/assets/icons/material/cc-switch.svg';
+import claudeIconUrl from '@/assets/icons/ai-providers/claude.svg';
 import subtitleIconUrl from '@/assets/icons/material/subtitles.svg';
 import resourceGrabIconUrl from '@/assets/icons/material/resource-grab.svg';
 import videoIconUrl from '@/assets/icons/material/video.svg';
@@ -42,28 +42,27 @@ const COLLAPSED_TOOLTIP_STYLE: React.CSSProperties = {
   padding: '6px 8px',
 };
 
-function MaterialToolIcon({ url }: { url: string }) {
-  return (
-    <span
-      className="tool-material-icon"
-      style={{ WebkitMaskImage: `url(${url})`, maskImage: `url(${url})` }}
-    />
-  );
-}
-
 const TOOL_ITEMS: Array<{ icon: React.ReactNode; id: ToolWorkspaceToolId; title: string }> = [
   {
-    icon: <img className="tool-static-icon" src={ccSwitchIconUrl} alt="" />,
+    icon: <img className="tool-static-icon" src={claudeIconUrl} alt="" draggable={false} />,
     id: 'ai-services',
     title: 'AI 服务配置',
   },
   {
-    icon: <MaterialToolIcon url={subtitleIconUrl} />,
+    icon: <img className="tool-static-icon" src={subtitleIconUrl} alt="" draggable={false} />,
     id: 'subtitle-translation',
     title: 'AI 字幕翻译',
   },
-  { icon: <MaterialToolIcon url={videoIconUrl} />, id: 'media-file-processing', title: '媒体文件处理' },
-  { icon: <MaterialToolIcon url={resourceGrabIconUrl} />, id: 'media-processing', title: '资源捕获处理' },
+  {
+    icon: <img className="tool-static-icon" src={videoIconUrl} alt="" draggable={false} />,
+    id: 'media-file-processing',
+    title: '媒体文件处理',
+  },
+  {
+    icon: <img className="tool-static-icon" src={resourceGrabIconUrl} alt="" draggable={false} />,
+    id: 'media-processing',
+    title: '资源捕获处理',
+  },
 ];
 
 const TOOL_ITEM_BY_ID = new Map(TOOL_ITEMS.map((item) => [item.id, item]));
