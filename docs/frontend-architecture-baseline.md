@@ -1,6 +1,6 @@
 # OmniFlow App 前端架构基线
 
-更新时间：2026-07-30
+更新时间：2026-08-19
 
 适用范围：`omniflow-app` 的 React renderer、Electron preload/main、页面分层、状态所有权、IPC 边界和前端文档维护。
 
@@ -182,17 +182,19 @@ views -> features -> components / hooks -> service / preload bridge -> electron 
 
 ### 4.4 Tools Workspace
 
-`features/tool-workspace` 是当前新增的工具域壳层，首个承载工具为 `AI 字幕翻译`。
+`features/tool-workspace` 是工具域壳层，当前承载 `AI 服务配置`、`AI 字幕翻译` 和媒体处理工具。
 
 当前边界：
 
 - `library detail` 页面只拥有“是否进入 tools 模式”的状态。
-- 工具内部草稿、模型配置和字幕工作台状态由 `features/tool-workspace` 持有。
+- 工具内部草稿、任务模型选择和字幕工作台状态由 `features/tool-workspace` 持有。
+- 本机 AI 服务档案、provider 协议适配和加密 API Key 由 Electron main 持有；`features/ai-services` 常态只持有安全投影，进入单个已有档案的编辑页后才短暂持有该档案的明文编辑草稿。
 - 目录树当前选中节点只做只读透传，不在页面层复制一份树结构事实。
 
 专题说明见：
 
 - `docs/tools-workspace.md`
+- `docs/ai-service-architecture.md`
 
 ### 4.4 Upload Center
 
@@ -221,6 +223,9 @@ views -> features -> components / hooks -> service / preload bridge -> electron 
 - 认证状态：`contexts/AuthContext`
 - 主题状态：`contexts/ThemeContext`
 - 用户偏好初始化：`features/user/preferences`
+  - `UserPreferencesBootstrap` 继续投影历史 `users.ext` 偏好。
+  - `SyncedUserPreferencesProvider` 是 `user_preferences` 命名空间数据的应用级 owner，负责登录后加载、optimistic 投影、串行保存和账号切换清理。
+  - 跨设备偏好以数据库为事实来源；本地目录、窗口坐标和缓存路径等设备事实不得进入同步 provider。
 
 全局状态不要继续膨胀成“万能桶”。如果一个状态只在某个页面或某个 feature 内有效，就不要先放全局。
 
@@ -244,6 +249,7 @@ views -> features -> components / hooks -> service / preload bridge -> electron 
 - 上传任务
 - 文件树快照
 - 浏览器下载导入状态
+- AI 服务的 renderer 安全投影
 
 同一份业务事实不要同时保存在页面、feature、本地 ref 和 Electron 投影里，除非能明确说明“哪份是真实 owner，其他只是派生”。
 
@@ -254,6 +260,7 @@ views -> features -> components / hooks -> service / preload bridge -> electron 
 - `WebContentsView`
 - 浏览器 session / download item
 - 本地文件打开和保存对话框
+- 本机 AI 服务档案和加密 API Key
 - 资源捕捉 probe 安装状态
 
 Renderer 只能持有这些状态的投影，不要把 main 的内部结构当成 renderer 可直接依赖的数据模型。
@@ -306,6 +313,8 @@ Renderer 只能持有这些状态的投影，不要把 main 的内部结构当�
 - 文本文件选择（支持自定义 filters）
 - 文本文件写入
 - 文本 staging 文件创建与清理
+
+AI 服务使用独立的 `window.electronAIService` bridge，且 main 只接受主窗口 main frame 的调用。列表和修改响应只暴露 `hasApiKey`；模型列表与补全请求也通过该 bridge 进入主进程 provider 适配层。磁盘密文永不暴露；已保存 Key 的明文只允许在进入单个已有档案编辑页时通过 `revealApiKey(id)` 单次返回，并在取消或保存后从 renderer 草稿清除。批量 AI 任务通过 main 内存运行会话冻结连接快照，会话按 profile 和 renderer owner 隔离，生命周期内禁止编辑或删除来源档案；停止任务或 owner 销毁时由 main 取消该会话仍在执行的网络请求后释放配置锁。
 
 ### 6.3 Electron Main
 

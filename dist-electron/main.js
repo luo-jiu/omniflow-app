@@ -1,10 +1,10 @@
 var __defProp = Object.defineProperty;
 var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
 var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
-import require$$1$5, { dialog, app, net, protocol, ipcMain, session, systemPreferences, safeStorage, webContents, BrowserWindow, shell, Menu, WebContentsView, nativeTheme, screen } from "electron";
+import require$$1$5, { dialog, app, net, protocol, ipcMain, safeStorage, session, systemPreferences, webContents, BrowserWindow, shell, Menu, WebContentsView, nativeTheme, screen } from "electron";
 import { fileURLToPath } from "node:url";
 import path$n from "node:path";
-import fs$k, { constants as constants$3, existsSync, mkdirSync, readFileSync as readFileSync$1, writeFileSync as writeFileSync$1, rmSync, createWriteStream, statSync, truncateSync, appendFileSync } from "node:fs";
+import fs$k, { constants as constants$3, existsSync, readFileSync as readFileSync$1, mkdirSync, writeFileSync as writeFileSync$1, renameSync, rmSync, createWriteStream, statSync, truncateSync, appendFileSync } from "node:fs";
 import fs$l from "fs/promises";
 import fs$j, { access, mkdtemp, rm, writeFile as writeFile$1, mkdir as mkdir$4, readdir, stat as stat$5, rename as rename$2, copyFile as copyFile$2, appendFile, readFile as readFile$1 } from "node:fs/promises";
 import http from "node:http";
@@ -2209,13 +2209,617 @@ function registerFileTransferIpc() {
     return true;
   });
 }
-function registerIpcHandlers() {
+function copyConnection(connection) {
+  return {
+    apiKey: connection.apiKey,
+    baseUrl: connection.baseUrl,
+    providerType: connection.providerType
+  };
+}
+function createAIServiceRunSessionRegistry() {
+  const sessions = /* @__PURE__ */ new Map();
+  function begin(input, generatedId = crypto.randomUUID()) {
+    const session2 = {
+      activeRequests: /* @__PURE__ */ new Set(),
+      connection: copyConnection(input.connection),
+      id: generatedId,
+      ownerWebContentsId: input.ownerWebContentsId,
+      profileId: input.profileId
+    };
+    sessions.set(session2.id, session2);
+    return { id: session2.id, profileId: session2.profileId };
+  }
+  function acquireRequest(id, profileId, ownerWebContentsId) {
+    const session2 = sessions.get(String(id || ""));
+    if (!session2 || session2.profileId !== String(profileId || "") || session2.ownerWebContentsId !== ownerWebContentsId) {
+      throw new Error("AI 服务任务会话无效或已结束");
+    }
+    const controller = new AbortController();
+    session2.activeRequests.add(controller);
+    let released = false;
+    return {
+      connection: copyConnection(session2.connection),
+      release: () => {
+        if (released) return;
+        released = true;
+        session2.activeRequests.delete(controller);
+      },
+      signal: controller.signal
+    };
+  }
+  function abortRequests(session2) {
+    session2.activeRequests.forEach((controller) => controller.abort());
+    session2.activeRequests.clear();
+  }
+  function end(id, ownerWebContentsId) {
+    const session2 = sessions.get(String(id || ""));
+    if (!session2) return false;
+    if (session2.ownerWebContentsId !== ownerWebContentsId) {
+      throw new Error("无权结束该 AI 服务任务会话");
+    }
+    abortRequests(session2);
+    return sessions.delete(session2.id);
+  }
+  function releaseOwner(ownerWebContentsId) {
+    sessions.forEach((session2, id) => {
+      if (session2.ownerWebContentsId === ownerWebContentsId) {
+        abortRequests(session2);
+        sessions.delete(id);
+      }
+    });
+  }
+  function assertProfileUnlocked(profileId) {
+    const normalizedProfileId = String(profileId || "");
+    if (Array.from(sessions.values()).some((session2) => session2.profileId === normalizedProfileId)) {
+      throw new Error("该 AI 服务配置正在被任务使用，请先停止任务");
+    }
+  }
+  return {
+    acquireRequest,
+    assertProfileUnlocked,
+    begin,
+    end,
+    releaseOwner
+  };
+}
+const aiServiceRunSessionRegistry = createAIServiceRunSessionRegistry();
+const AI_SERVICE_PROVIDER_TYPES = [
+  "deepseek",
+  "openai",
+  "claude",
+  "local"
+];
+const LEGACY_PROVIDER_TYPES = {
+  "openai-compatible": "openai",
+  ollama: "local"
+};
+const EMPTY_AI_SERVICE_STATE = {
+  activeProfileId: null,
+  profiles: [],
+  version: 2
+};
+function isProviderType(value) {
+  return typeof value === "string" && AI_SERVICE_PROVIDER_TYPES.includes(value);
+}
+function normalizeProviderType(value) {
+  if (isProviderType(value)) return value;
+  return typeof value === "string" ? LEGACY_PROVIDER_TYPES[value] || null : null;
+}
+function normalizeStoredProfile(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const raw = value;
+  const id = String(raw.id || "").trim();
+  const name = String(raw.name || "").trim();
+  const baseUrl = String(raw.baseUrl || "").trim();
+  const providerType = normalizeProviderType(raw.providerType);
+  if (!id || !name || !baseUrl || !providerType) return null;
+  const createdAt = String(raw.createdAt || "");
+  const updatedAt = String(raw.updatedAt || "");
+  return {
+    baseUrl,
+    createdAt: createdAt || updatedAt,
+    id,
+    name,
+    providerType,
+    updatedAt: updatedAt || createdAt,
+    ...typeof raw.encryptedApiKey === "string" && raw.encryptedApiKey ? { encryptedApiKey: raw.encryptedApiKey } : {}
+  };
+}
+function normalizeAIServiceState(value) {
+  var _a2;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { ...EMPTY_AI_SERVICE_STATE, profiles: [] };
+  }
+  const raw = value;
+  const seen2 = /* @__PURE__ */ new Set();
+  const profiles = (Array.isArray(raw.profiles) ? raw.profiles : []).map(normalizeStoredProfile).filter((profile) => {
+    if (!profile || seen2.has(profile.id)) return false;
+    seen2.add(profile.id);
+    return true;
+  });
+  const requestedActiveId = typeof raw.activeProfileId === "string" ? raw.activeProfileId : null;
+  const activeProfileId = profiles.some((profile) => profile.id === requestedActiveId) ? requestedActiveId : ((_a2 = profiles[0]) == null ? void 0 : _a2.id) ?? null;
+  return { activeProfileId, profiles, version: 2 };
+}
+function validateAIServiceSaveInput(input) {
+  const name = String((input == null ? void 0 : input.name) || "").trim();
+  const rawBaseUrl = String((input == null ? void 0 : input.baseUrl) || "").trim();
+  if (!name) throw new Error("请输入配置名称");
+  if (name.length > 60) throw new Error("配置名称不能超过 60 个字符");
+  if (!isProviderType(input == null ? void 0 : input.providerType)) throw new Error("请选择有效的服务类型");
+  let parsedUrl;
+  try {
+    parsedUrl = new URL(rawBaseUrl);
+  } catch {
+    throw new Error("请输入有效的 Base URL");
+  }
+  if (!["http:", "https:"].includes(parsedUrl.protocol)) {
+    throw new Error("Base URL 仅支持 http 或 https");
+  }
+  if (parsedUrl.username || parsedUrl.password) {
+    throw new Error("Base URL 不能包含用户名或密码");
+  }
+  const baseUrl = rawBaseUrl.replace(/\/+$/, "");
+  return {
+    baseUrl,
+    id: input.id ? String(input.id).trim() : void 0,
+    name,
+    providerType: input.providerType,
+    removeApiKey: Boolean(input.removeApiKey),
+    ...typeof input.apiKey === "string" ? { apiKey: input.apiKey.trim() } : {}
+  };
+}
+function upsertAIServiceProfile(state, input, options) {
+  const normalized = validateAIServiceSaveInput(input);
+  const index = normalized.id ? state.profiles.findIndex((profile) => profile.id === normalized.id) : -1;
+  if (normalized.id && index < 0) throw new Error("AI 服务配置不存在");
+  const existing = index >= 0 ? state.profiles[index] : null;
+  const encryptedApiKey = normalized.removeApiKey ? void 0 : options.encryptedApiKey || (existing == null ? void 0 : existing.encryptedApiKey);
+  const nextProfile = {
+    baseUrl: normalized.baseUrl,
+    createdAt: (existing == null ? void 0 : existing.createdAt) || options.now,
+    id: (existing == null ? void 0 : existing.id) || options.generatedId,
+    name: normalized.name,
+    providerType: normalized.providerType,
+    updatedAt: options.now,
+    ...encryptedApiKey ? { encryptedApiKey } : {}
+  };
+  const profiles = [...state.profiles];
+  if (index >= 0) profiles[index] = nextProfile;
+  else profiles.push(nextProfile);
+  return {
+    activeProfileId: state.activeProfileId || nextProfile.id,
+    profiles,
+    version: 2
+  };
+}
+function duplicateAIServiceProfile(state, id, generatedId, now) {
+  const source = state.profiles.find((profile) => profile.id === id);
+  if (!source) throw new Error("AI 服务配置不存在");
+  const usedNames = new Set(state.profiles.map((profile) => profile.name));
+  let name = `${source.name} 副本`;
+  let index = 2;
+  while (usedNames.has(name)) {
+    name = `${source.name} 副本 ${index}`;
+    index += 1;
+  }
+  return {
+    ...state,
+    profiles: [
+      ...state.profiles,
+      {
+        ...source,
+        createdAt: now,
+        id: generatedId,
+        name,
+        updatedAt: now
+      }
+    ]
+  };
+}
+function deleteAIServiceProfile(state, id) {
+  var _a2;
+  if (!state.profiles.some((profile) => profile.id === id)) {
+    throw new Error("AI 服务配置不存在");
+  }
+  const profiles = state.profiles.filter((profile) => profile.id !== id);
+  return {
+    ...state,
+    activeProfileId: state.activeProfileId === id ? ((_a2 = profiles[0]) == null ? void 0 : _a2.id) ?? null : state.activeProfileId,
+    profiles
+  };
+}
+function setActiveAIServiceProfile(state, id) {
+  if (!state.profiles.some((profile) => profile.id === id)) {
+    throw new Error("AI 服务配置不存在");
+  }
+  return { ...state, activeProfileId: id };
+}
+function reorderAIServiceProfiles(state, orderedIds) {
+  if (!Array.isArray(orderedIds) || orderedIds.length !== state.profiles.length) {
+    throw new Error("AI 服务排序数据不完整");
+  }
+  const profileById = new Map(state.profiles.map((profile) => [profile.id, profile]));
+  const uniqueIds = new Set(orderedIds);
+  if (uniqueIds.size !== orderedIds.length || orderedIds.some((id) => !profileById.has(id))) {
+    throw new Error("AI 服务排序数据无效");
+  }
+  return {
+    ...state,
+    profiles: orderedIds.map((id) => profileById.get(id))
+  };
+}
+function toPublicProfile(profile) {
+  return {
+    baseUrl: profile.baseUrl,
+    createdAt: profile.createdAt,
+    hasApiKey: Boolean(profile.encryptedApiKey),
+    id: profile.id,
+    name: profile.name,
+    providerType: profile.providerType,
+    updatedAt: profile.updatedAt
+  };
+}
+function projectAIServiceSnapshot(state) {
+  return {
+    activeProfileId: state.activeProfileId,
+    profiles: state.profiles.map(toPublicProfile)
+  };
+}
+const STORE_FILE_NAME$3 = "ai-services.json";
+let cachedState = null;
+function getStorePath$1() {
+  return path$n.join(app.getPath("userData"), STORE_FILE_NAME$3);
+}
+function loadState() {
+  if (cachedState) return cachedState;
+  const filePath = getStorePath$1();
+  if (!existsSync(filePath)) {
+    cachedState = normalizeAIServiceState(null);
+    return cachedState;
+  }
+  try {
+    cachedState = normalizeAIServiceState(JSON.parse(readFileSync$1(filePath, "utf-8")));
+  } catch (error2) {
+    runtimeLogger.warn("AI service store load failed", {
+      error: error2 instanceof Error ? error2.message : String(error2)
+    });
+    cachedState = normalizeAIServiceState(null);
+  }
+  return cachedState;
+}
+function persistState(state) {
+  const filePath = getStorePath$1();
+  const directory = path$n.dirname(filePath);
+  const tempPath = `${filePath}.${process.pid}.tmp`;
+  mkdirSync(directory, { recursive: true });
+  try {
+    writeFileSync$1(tempPath, JSON.stringify(state, null, 2), { encoding: "utf-8", mode: 384 });
+    renameSync(tempPath, filePath);
+  } finally {
+    if (existsSync(tempPath)) rmSync(tempPath, { force: true });
+  }
+  cachedState = state;
+}
+function snapshot(state = loadState()) {
+  return projectAIServiceSnapshot(state);
+}
+function listAIServiceProfiles() {
+  return snapshot();
+}
+function getAIServiceRuntimeProfile(id) {
+  const state = loadState();
+  const profile = state.profiles.find((item) => item.id === String(id || ""));
+  if (!profile) {
+    throw new Error("AI 服务配置不存在或已被删除");
+  }
+  let apiKey = "";
+  if (profile.encryptedApiKey) {
+    if (!safeStorage.isEncryptionAvailable()) {
+      throw new Error("系统加密服务不可用，无法读取 API Key");
+    }
+    try {
+      apiKey = safeStorage.decryptString(Buffer.from(profile.encryptedApiKey, "base64"));
+    } catch {
+      throw new Error("API Key 解密失败，请重新保存 AI 服务配置");
+    }
+  }
+  return {
+    baseUrl: profile.baseUrl,
+    id: profile.id,
+    name: profile.name,
+    providerType: profile.providerType,
+    apiKey
+  };
+}
+function getActiveAIServiceRuntimeProfile() {
+  const state = loadState();
+  if (!state.activeProfileId) {
+    throw new Error("请先在 AI 服务配置中启用一个服务");
+  }
+  return getAIServiceRuntimeProfile(state.activeProfileId);
+}
+function revealAIServiceProfileApiKey(id) {
+  return getAIServiceRuntimeProfile(String(id || "")).apiKey;
+}
+function saveAIServiceProfile(input) {
+  if (input.id) {
+    aiServiceRunSessionRegistry.assertProfileUnlocked(String(input.id));
+  }
+  const apiKey = typeof input.apiKey === "string" ? input.apiKey.trim() : "";
+  let encryptedApiKey;
+  if (apiKey && !input.removeApiKey) {
+    if (!safeStorage.isEncryptionAvailable()) {
+      throw new Error("系统加密服务不可用，无法保存 API Key");
+    }
+    encryptedApiKey = safeStorage.encryptString(apiKey).toString("base64");
+  }
+  const next = upsertAIServiceProfile(loadState(), input, {
+    encryptedApiKey,
+    generatedId: crypto.randomUUID(),
+    now: (/* @__PURE__ */ new Date()).toISOString()
+  });
+  persistState(next);
+  return snapshot(next);
+}
+function activateAIServiceProfile(id) {
+  const next = setActiveAIServiceProfile(loadState(), String(id || ""));
+  persistState(next);
+  return snapshot(next);
+}
+function reorderAIServiceProfileList(orderedIds) {
+  const next = reorderAIServiceProfiles(loadState(), orderedIds);
+  persistState(next);
+  return snapshot(next);
+}
+function copyAIServiceProfile(id) {
+  const next = duplicateAIServiceProfile(
+    loadState(),
+    String(id || ""),
+    crypto.randomUUID(),
+    (/* @__PURE__ */ new Date()).toISOString()
+  );
+  persistState(next);
+  return snapshot(next);
+}
+function removeAIServiceProfile(id) {
+  aiServiceRunSessionRegistry.assertProfileUnlocked(String(id || ""));
+  const next = deleteAIServiceProfile(loadState(), String(id || ""));
+  persistState(next);
+  return snapshot(next);
+}
+function appendPath$1(baseUrl, path2) {
+  return `${String(baseUrl || "").trim().replace(/\/+$/, "")}/${path2.replace(/^\/+/, "")}`;
+}
+function buildHeaders(connection) {
+  const apiKey = String(connection.apiKey || "").trim();
+  if (connection.providerType === "claude") {
+    return {
+      "Content-Type": "application/json",
+      "anthropic-version": "2023-06-01",
+      ...apiKey ? { "x-api-key": apiKey } : {}
+    };
+  }
+  return {
+    "Content-Type": "application/json",
+    ...apiKey ? { Authorization: `Bearer ${apiKey}` } : {}
+  };
+}
+function buildAIServiceModelsRequest(connection) {
+  return {
+    headers: buildHeaders(connection),
+    method: "GET",
+    url: appendPath$1(connection.baseUrl, "models")
+  };
+}
+function buildAIServiceCompletionRequest(connection, input) {
+  const reasoningEffort = input.reasoningEffort && input.reasoningEffort !== "auto" ? input.reasoningEffort : null;
+  const common2 = {
+    model: input.model,
+    ...!reasoningEffort && input.temperature !== void 0 ? { temperature: input.temperature } : {}
+  };
+  const body = connection.providerType === "claude" ? {
+    ...common2,
+    max_tokens: 4096,
+    messages: [{ role: "user", content: input.userPrompt }],
+    ...reasoningEffort ? { output_config: { effort: reasoningEffort } } : {},
+    system: input.systemPrompt
+  } : {
+    ...common2,
+    messages: [
+      { role: "system", content: input.systemPrompt },
+      { role: "user", content: input.userPrompt }
+    ],
+    ...reasoningEffort ? { reasoning_effort: reasoningEffort } : {}
+  };
+  return {
+    body: JSON.stringify(body),
+    headers: buildHeaders(connection),
+    method: "POST",
+    url: appendPath$1(connection.baseUrl, connection.providerType === "claude" ? "messages" : "chat/completions")
+  };
+}
+function extractAIServiceModelIds(body) {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return [];
+  const payload = body;
+  const candidates = Array.isArray(payload.data) ? payload.data : Array.isArray(payload.models) ? payload.models : [];
+  const modelIds = candidates.map((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return "";
+    const record = item;
+    return String(record.id || record.name || "").trim();
+  }).filter(Boolean);
+  return Array.from(new Set(modelIds)).sort((left, right) => left.localeCompare(right, "zh-Hans-CN"));
+}
+function extractAIServiceCompletionText(providerType, body) {
+  var _a2, _b, _c;
+  if (!body || typeof body !== "object" || Array.isArray(body)) return "";
+  const payload = body;
+  const content = providerType === "claude" ? payload.content : (_c = (_b = (_a2 = payload.choices) == null ? void 0 : _a2[0]) == null ? void 0 : _b.message) == null ? void 0 : _c.content;
+  if (typeof content === "string") return content.trim();
+  if (!Array.isArray(content)) return "";
+  return content.map((item) => {
+    if (typeof item === "string") return item;
+    return typeof (item == null ? void 0 : item.text) === "string" ? item.text : "";
+  }).join("\n").trim();
+}
+function extractAIServiceErrorMessage(body, fallback) {
+  var _a2;
+  if (typeof body === "string" && body.trim()) return body.trim();
+  if (!body || typeof body !== "object" || Array.isArray(body)) return fallback;
+  const payload = body;
+  const message = ((_a2 = payload.error) == null ? void 0 : _a2.message) || payload.message || payload.error;
+  return typeof message === "string" && message.trim() ? message.trim() : fallback;
+}
+async function requestJson(spec, fallbackError, signal) {
+  const response = await net.fetch(spec.url, {
+    body: spec.body,
+    headers: spec.headers,
+    method: spec.method,
+    signal
+  });
+  const text = await response.text();
+  let body = text;
+  if (text) {
+    try {
+      body = JSON.parse(text);
+    } catch {
+      body = text;
+    }
+  }
+  if (!response.ok) {
+    throw new Error(extractAIServiceErrorMessage(body, fallbackError));
+  }
+  return body;
+}
+function normalizeReasoningEffort(value) {
+  return value === "low" || value === "medium" || value === "high" ? value : "auto";
+}
+function normalizeTemperature(value) {
+  if (value === void 0 || value === null || value === "") return void 0;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return void 0;
+  return Math.max(0, Math.min(2, parsed));
+}
+async function listActiveAIServiceModels() {
+  const profile = getActiveAIServiceRuntimeProfile();
+  const body = await requestJson(buildAIServiceModelsRequest(profile), "获取模型列表失败");
+  return extractAIServiceModelIds(body);
+}
+async function completeWithAIServiceProfile(input, runtimeConnection, signal) {
+  const normalized = {
+    model: String((input == null ? void 0 : input.model) || "").trim(),
+    profileId: String((input == null ? void 0 : input.profileId) || "").trim(),
+    reasoningEffort: normalizeReasoningEffort(input == null ? void 0 : input.reasoningEffort),
+    systemPrompt: String((input == null ? void 0 : input.systemPrompt) || ""),
+    temperature: normalizeTemperature(input == null ? void 0 : input.temperature),
+    userPrompt: String((input == null ? void 0 : input.userPrompt) || "")
+  };
+  if (!normalized.model) throw new Error("请先选择模型");
+  if (!normalized.profileId) throw new Error("请先启用 AI 服务配置");
+  if (!normalized.userPrompt.trim()) throw new Error("请求内容不能为空");
+  if (normalized.model.length > 200) throw new Error("模型名称过长");
+  if (normalized.systemPrompt.length + normalized.userPrompt.length > 1e6) {
+    throw new Error("请求内容过长");
+  }
+  const profile = runtimeConnection || getAIServiceRuntimeProfile(normalized.profileId);
+  const body = await requestJson(
+    buildAIServiceCompletionRequest(profile, normalized),
+    "AI 请求失败",
+    signal
+  );
+  const content = extractAIServiceCompletionText(profile.providerType, body);
+  if (!content) throw new Error("模型未返回可用内容");
+  return content;
+}
+function assertMainWindowAIServiceSender(event, getMainWindow) {
+  const mainWindow2 = getMainWindow();
+  if (!mainWindow2 || mainWindow2.isDestroyed() || mainWindow2.webContents.isDestroyed() || event.sender !== mainWindow2.webContents || event.senderFrame !== mainWindow2.webContents.mainFrame) {
+    throw new Error("当前窗口无权访问 AI 服务配置");
+  }
+  return event.sender;
+}
+function registerAIServiceIpc(ipcMain2, options) {
+  const ownersWithCleanup = /* @__PURE__ */ new Set();
+  function requireMainWindow(event) {
+    return assertMainWindowAIServiceSender(event, options.getMainWindow);
+  }
+  function ensureOwnerCleanup(sender) {
+    const ownerId = sender.id;
+    if (ownersWithCleanup.has(ownerId)) return;
+    ownersWithCleanup.add(ownerId);
+    sender.once("destroyed", () => {
+      ownersWithCleanup.delete(ownerId);
+      aiServiceRunSessionRegistry.releaseOwner(ownerId);
+    });
+  }
+  ipcMain2.handle("ai-service:list", (event) => {
+    requireMainWindow(event);
+    return listAIServiceProfiles();
+  });
+  ipcMain2.handle("ai-service:reveal-api-key", (event, id) => {
+    requireMainWindow(event);
+    return revealAIServiceProfileApiKey(id);
+  });
+  ipcMain2.handle("ai-service:save", (event, input) => {
+    requireMainWindow(event);
+    return saveAIServiceProfile(input);
+  });
+  ipcMain2.handle("ai-service:set-active", (event, id) => {
+    requireMainWindow(event);
+    return activateAIServiceProfile(id);
+  });
+  ipcMain2.handle("ai-service:reorder", (event, orderedIds) => {
+    requireMainWindow(event);
+    return reorderAIServiceProfileList(orderedIds);
+  });
+  ipcMain2.handle("ai-service:duplicate", (event, id) => {
+    requireMainWindow(event);
+    return copyAIServiceProfile(id);
+  });
+  ipcMain2.handle("ai-service:delete", (event, id) => {
+    requireMainWindow(event);
+    return removeAIServiceProfile(id);
+  });
+  ipcMain2.handle("ai-service:list-models", (event) => {
+    requireMainWindow(event);
+    return listActiveAIServiceModels();
+  });
+  ipcMain2.handle("ai-service:run:begin", (event, profileId) => {
+    const sender = requireMainWindow(event);
+    ensureOwnerCleanup(sender);
+    const profile = getAIServiceRuntimeProfile(String(profileId || ""));
+    return aiServiceRunSessionRegistry.begin({
+      connection: profile,
+      ownerWebContentsId: sender.id,
+      profileId: profile.id
+    });
+  });
+  ipcMain2.handle("ai-service:run:end", (event, runSessionId) => {
+    const sender = requireMainWindow(event);
+    return aiServiceRunSessionRegistry.end(runSessionId, sender.id);
+  });
+  ipcMain2.handle("ai-service:complete", async (event, input) => {
+    const sender = requireMainWindow(event);
+    const runRequest = (input == null ? void 0 : input.runSessionId) ? aiServiceRunSessionRegistry.acquireRequest(input.runSessionId, input.profileId, sender.id) : void 0;
+    try {
+      return await completeWithAIServiceProfile(
+        input,
+        runRequest == null ? void 0 : runRequest.connection,
+        runRequest == null ? void 0 : runRequest.signal
+      );
+    } finally {
+      runRequest == null ? void 0 : runRequest.release();
+    }
+  });
+}
+function registerIpcHandlers(options) {
   registerFileIpc(ipcMain);
   registerSystemIpc(ipcMain);
   registerHttpIpc(ipcMain);
   registerMediaToolIpc(ipcMain);
   registerImagePreviewIpc(ipcMain);
   registerFileTransferIpc();
+  registerAIServiceIpc(ipcMain, options);
 }
 function createEmbeddedBrowserCatchToolkitGetStateScript() {
   return `
@@ -3721,7 +4325,7 @@ async function collectEmbeddedBrowserDebugMeta(view, enabled) {
     return [];
   }
   try {
-    const snapshot = await view.webContents.executeJavaScript(`
+    const snapshot2 = await view.webContents.executeJavaScript(`
       (() => {
         const bodyText = document.body?.innerText?.trim() || ''
         const bodyHtmlLength = document.body?.innerHTML?.length || 0
@@ -3740,29 +4344,29 @@ async function collectEmbeddedBrowserDebugMeta(view, enabled) {
       })()
     `, true);
     const meta = [];
-    if (snapshot == null ? void 0 : snapshot.title) {
-      meta.push(`title=${snapshot.title}`);
+    if (snapshot2 == null ? void 0 : snapshot2.title) {
+      meta.push(`title=${snapshot2.title}`);
     }
-    if (snapshot == null ? void 0 : snapshot.readyState) {
-      meta.push(`readyState=${snapshot.readyState}`);
+    if (snapshot2 == null ? void 0 : snapshot2.readyState) {
+      meta.push(`readyState=${snapshot2.readyState}`);
     }
-    if (typeof (snapshot == null ? void 0 : snapshot.bodyHtmlLength) === "number") {
-      meta.push(`bodyHtml=${snapshot.bodyHtmlLength}`);
+    if (typeof (snapshot2 == null ? void 0 : snapshot2.bodyHtmlLength) === "number") {
+      meta.push(`bodyHtml=${snapshot2.bodyHtmlLength}`);
     }
-    if (typeof (snapshot == null ? void 0 : snapshot.innerWidth) === "number" && typeof (snapshot == null ? void 0 : snapshot.innerHeight) === "number") {
-      meta.push(`viewport=${snapshot.innerWidth}x${snapshot.innerHeight}`);
+    if (typeof (snapshot2 == null ? void 0 : snapshot2.innerWidth) === "number" && typeof (snapshot2 == null ? void 0 : snapshot2.innerHeight) === "number") {
+      meta.push(`viewport=${snapshot2.innerWidth}x${snapshot2.innerHeight}`);
     }
-    if (typeof (snapshot == null ? void 0 : snapshot.clientWidth) === "number" && typeof (snapshot == null ? void 0 : snapshot.clientHeight) === "number") {
-      meta.push(`client=${snapshot.clientWidth}x${snapshot.clientHeight}`);
+    if (typeof (snapshot2 == null ? void 0 : snapshot2.clientWidth) === "number" && typeof (snapshot2 == null ? void 0 : snapshot2.clientHeight) === "number") {
+      meta.push(`client=${snapshot2.clientWidth}x${snapshot2.clientHeight}`);
     }
-    if (typeof (snapshot == null ? void 0 : snapshot.devicePixelRatio) === "number") {
-      meta.push(`dpr=${snapshot.devicePixelRatio}`);
+    if (typeof (snapshot2 == null ? void 0 : snapshot2.devicePixelRatio) === "number") {
+      meta.push(`dpr=${snapshot2.devicePixelRatio}`);
     }
-    if (snapshot == null ? void 0 : snapshot.bodyTextPreview) {
-      meta.push(`preview=${snapshot.bodyTextPreview}`);
+    if (snapshot2 == null ? void 0 : snapshot2.bodyTextPreview) {
+      meta.push(`preview=${snapshot2.bodyTextPreview}`);
     }
-    if (snapshot == null ? void 0 : snapshot.userAgent) {
-      meta.push(`ua=${snapshot.userAgent}`);
+    if (snapshot2 == null ? void 0 : snapshot2.userAgent) {
+      meta.push(`ua=${snapshot2.userAgent}`);
     }
     return meta;
   } catch (error2) {
@@ -10051,17 +10655,17 @@ class EmbeddedBrowserHlsLiveRecorder {
   }
   async pollOnce(isInitial) {
     var _a2;
-    const snapshot = await fetchEmbeddedBrowserHlsLiveManifestSnapshot({
+    const snapshot2 = await fetchEmbeddedBrowserHlsLiveManifestSnapshot({
       headers: this.headers,
       manifestUrl: this.manifestUrl,
       pageUrl: this.pageUrl,
       suggestedThreadCount: this.suggestedThreadCount
     });
-    this.pollIntervalMs = Math.max(1500, Math.min(1e4, (snapshot.manifest.targetDuration || 4) * 1e3));
+    this.pollIntervalMs = Math.max(1500, Math.min(1e4, (snapshot2.manifest.targetDuration || 4) * 1e3));
     if (!this.cumulativePlan) {
       this.cumulativePlan = {
-        ...snapshot.plan,
-        fragments: snapshot.plan.fragments.map((fragment, index) => ({
+        ...snapshot2.plan,
+        fragments: snapshot2.plan.fragments.map((fragment, index) => ({
           ...fragment,
           index
         }))
@@ -10073,7 +10677,7 @@ class EmbeddedBrowserHlsLiveRecorder {
       return;
     }
     const existingFragmentKeys = new Set(this.cumulativePlan.fragments.map((fragment) => createLiveFragmentKey(fragment)));
-    const newFragments = snapshot.plan.fragments.filter((fragment) => !existingFragmentKeys.has(createLiveFragmentKey(fragment)));
+    const newFragments = snapshot2.plan.fragments.filter((fragment) => !existingFragmentKeys.has(createLiveFragmentKey(fragment)));
     if (!newFragments.length) {
       (_a2 = this.onEvent) == null ? void 0 : _a2.call(this, {
         completedFragments: this.cumulativePlan.fragmentCount,
@@ -10101,12 +10705,12 @@ class EmbeddedBrowserHlsLiveRecorder {
       fragments: [...this.cumulativePlan.fragments, ...normalizedNewFragments],
       keys: mergeUniqueByKey(
         this.cumulativePlan.keys,
-        snapshot.plan.keys,
+        snapshot2.plan.keys,
         (key) => `${key.method}|${key.url || ""}|${key.iv || ""}`
       ),
       maps: mergeUniqueByKey(
         this.cumulativePlan.maps,
-        snapshot.plan.maps,
+        snapshot2.plan.maps,
         (map2) => {
           var _a3;
           return `${map2.url}|${((_a3 = map2.byteRange) == null ? void 0 : _a3.raw) || ""}`;
@@ -10130,7 +10734,7 @@ class EmbeddedBrowserHlsLiveRecorder {
           };
         })
       ],
-      suggestedThreadCount: snapshot.plan.suggestedThreadCount
+      suggestedThreadCount: snapshot2.plan.suggestedThreadCount
     };
     await this.downloadFragments({
       fragmentIndexes: normalizedNewFragments.map((fragment) => Number(fragment.index || 0)),
@@ -12909,7 +13513,7 @@ function createEmbeddedBrowserMainController(options) {
   }
   async function handleStartDeepResourceCapture(tabId) {
     const normalizedTabId = String(tabId || "").trim();
-    const snapshot = startEmbeddedBrowserDeepResourceCapture(normalizedTabId);
+    const snapshot2 = startEmbeddedBrowserDeepResourceCapture(normalizedTabId);
     const view = getEmbeddedBrowserView(normalizedTabId);
     if (view && !view.webContents.isDestroyed()) {
       if (view.webContents.getURL()) {
@@ -12919,7 +13523,7 @@ function createEmbeddedBrowserMainController(options) {
         await tryInstallEmbeddedBrowserResourceProbe(normalizedTabId, view);
       }
     }
-    return snapshot;
+    return snapshot2;
   }
   function handleSetBounds(sender, bounds) {
     const nextBounds = {
@@ -28584,7 +29188,7 @@ const MIN_WINDOW_WIDTH = 1120;
 const MIN_WINDOW_HEIGHT = 720;
 const WINDOW_STATE_FILENAME = "window-state.json";
 const WINDOW_STATE_SAVE_DEBOUNCE_MS = 200;
-const APP_UPDATE_BASE_URL = "https://omniflow-cloud.taild0cc79.ts.net/desktop-updates/stable/mac-arm64";
+const APP_UPDATE_BASE_URL = "";
 const ENABLE_EMBEDDED_BROWSER_DEBUG = process.env.NODE_ENV === "test" || Boolean(VITE_DEV_SERVER_URL || process.env.ELECTRON_RENDERER_URL) || process.env.OMNIFLOW_ENABLE_RUNTIME_LOGS === "true";
 const ENABLE_CHROMIUM_RUNTIME_LOGS = process.env.OMNIFLOW_ENABLE_CHROMIUM_LOGS === "true";
 function resolveUserDataDirname() {
@@ -28893,7 +29497,7 @@ app.whenReady().then(async () => {
   await initializeFileTransferRuntime().catch((error2) => {
     console.error("[file-transfer] download URL broker failed to start", error2);
   });
-  registerIpcHandlers();
+  registerIpcHandlers({ getMainWindow: () => mainWindow });
   registerWindowControlIpcHandlers({
     getMainWindow: () => mainWindow
   });

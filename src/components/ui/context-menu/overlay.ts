@@ -51,9 +51,11 @@ export function resolveOverlayPlacement(
     ? (spaceRight >= popupWidth ? 'right' : 'left')
     : (spaceLeft >= popupWidth ? 'left' : 'right');
 
+  // `leftTop` / `rightTop` align the popup's top edge with the trigger and
+  // therefore need room below it. The `Bottom` variants grow upward.
   const vertical = preferredVertical === 'bottom'
-    ? (spaceBottom >= popupHeight ? 'Bottom' : 'Top')
-    : (spaceTop >= popupHeight ? 'Top' : 'Bottom');
+    ? (spaceTop >= popupHeight ? 'Bottom' : 'Top')
+    : (spaceBottom >= popupHeight ? 'Top' : 'Bottom');
 
   return `${horizontal}${vertical}` as ContextMenuPosition;
 }
