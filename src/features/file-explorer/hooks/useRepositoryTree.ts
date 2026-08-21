@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useLayoutEffect, useRef } from 'react';
 import {
   getChildrenByNodeId,
   getFileLink,
@@ -36,10 +36,22 @@ import {
 import { isDisposingLibraryWorkspace } from '@/features/workspace-resource-release';
 import type { FileViewerFileType } from '@/shared/file-viewer-types';
 import type { FileViewerOpenOptions } from '@/contexts/file-viewer.context';
+import { resolvePendingTreeExpandDecision } from '../utils/tree-expand-behavior';
 
 const PENDING_APPEND_RETRY_INTERVAL_MS = 420;
 const PENDING_APPEND_MAX_RETRY = 40;
 const PENDING_APPEND_MAX_AGE_MS = 2 * 60 * 1000;
+
+interface PendingTreeExpand {
+  repositoryId: string;
+  nodeKey: string;
+  resolve: () => void;
+  animationFrameId: number | null;
+}
+
+function buildPendingTreeExpandKey(repositoryId: string, nodeKey: string): string {
+  return `${repositoryId}:${nodeKey}`;
+}
 
 export type { Node, NodeRespDTO, AppendNodeBatchItem } from './use-repository-tree/types';
 
@@ -75,8 +87,11 @@ export function useRepositoryTree(
   // ref 追踪状态
   const loadingNodes = useRef<Set<string>>(new Set());
   const rootNodeIdRef = useRef<number | null>(cachedSnapshot?.rootNodeId ?? null);
-  const expandedKeysRef = useRef<string[]>([]);
-  const treesCacheRef = useRef<Record<string, Node[]>>({});
+  const expandedKeysRef = useRef<string[]>(cachedSnapshot?.expandedKeys || []);
+  const treesCacheRef = useRef<Record<string, Node[]>>(cachedSnapshot?.treesCache || {});
+  const selectedRepositoryRef = useRef(cachedSnapshot?.selectedRepository || defaultRepositoryId);
+  const pendingTreeExpandsRef = useRef<Map<string, PendingTreeExpand>>(new Map());
+  const disposedRef = useRef(false);
   const pendingAppendByRepositoryRef = useRef<Map<string, AppendNodeBatchItem[]>>(new Map());
   const pendingAppendRetryTimerRef = useRef<number | null>(null);
   const appendNodesByRepositoryRef = useRef<(repositoryId: string | number, items: AppendNodeBatchItem[]) => void>(() => { /* noop */ });
@@ -87,10 +102,72 @@ export function useRepositoryTree(
     rootNodeIdRef.current = rootNodeId;
   }, [rootNodeId]);
 
-  // 同步 treesCache 到 ref
-  useEffect(() => {
+  const settlePendingTreeExpand = useCallback((pendingKey: string) => {
+    const pending = pendingTreeExpandsRef.current.get(pendingKey);
+    if (!pending) {
+      return;
+    }
+    if (pending.animationFrameId !== null) {
+      window.cancelAnimationFrame(pending.animationFrameId);
+    }
+    pendingTreeExpandsRef.current.delete(pendingKey);
+    pending.resolve();
+  }, []);
+
+  useLayoutEffect(() => {
+    selectedRepositoryRef.current = selectedRepository;
     treesCacheRef.current = treesCache;
-  }, [treesCache]);
+
+    pendingTreeExpandsRef.current.forEach((pending, pendingKey) => {
+      const repositoryTree = treesCache[pending.repositoryId] || [];
+      const node = findNodeByKey(repositoryTree, pending.nodeKey);
+      const decision = resolvePendingTreeExpandDecision({
+        pendingRepositoryId: pending.repositoryId,
+        selectedRepositoryId: selectedRepositoryRef.current,
+        nodeExists: node !== null,
+        nodeType: node?.type,
+        nodeLoaded: node?.loaded,
+      });
+
+      if (decision === 'cancel') {
+        settlePendingTreeExpand(pendingKey);
+        return;
+      }
+      if (decision === 'wait' || pending.animationFrameId !== null) {
+        return;
+      }
+
+      pending.animationFrameId = window.requestAnimationFrame(() => {
+        const activePending = pendingTreeExpandsRef.current.get(pendingKey);
+        if (activePending !== pending || disposedRef.current) {
+          return;
+        }
+        pending.animationFrameId = null;
+
+        const currentTree = treesCacheRef.current[pending.repositoryId] || [];
+        const currentNode = findNodeByKey(currentTree, pending.nodeKey);
+        const currentDecision = resolvePendingTreeExpandDecision({
+          pendingRepositoryId: pending.repositoryId,
+          selectedRepositoryId: selectedRepositoryRef.current,
+          nodeExists: currentNode !== null,
+          nodeType: currentNode?.type,
+          nodeLoaded: currentNode?.loaded,
+        });
+        if (currentDecision === 'expand') {
+          setExpandedKeys(current => {
+            if (current.includes(pending.nodeKey)) {
+              expandedKeysRef.current = current;
+              return current;
+            }
+            const next = [...current, pending.nodeKey];
+            expandedKeysRef.current = next;
+            return next;
+          });
+        }
+        settlePendingTreeExpand(pendingKey);
+      });
+    });
+  }, [selectedRepository, settlePendingTreeExpand, treesCache]);
 
   // 同步 expandedKeys
   useEffect(() => {
@@ -155,6 +232,12 @@ export function useRepositoryTree(
 
   // 切换仓库
   const selectRepository = useCallback(async (id: string, options?: { resetExpanded?: boolean }) => {
+    selectedRepositoryRef.current = id;
+    pendingTreeExpandsRef.current.forEach((pending, pendingKey) => {
+      if (pending.repositoryId !== id) {
+        settlePendingTreeExpand(pendingKey);
+      }
+    });
     setSelectedRepository(id);
     if (options?.resetExpanded ?? true) {
       setExpandedKeys([]);
@@ -175,7 +258,7 @@ export function useRepositoryTree(
         [id]: mergeNodesPreservingLoadedState(current, mappedRoots),
       };
     });
-  }, [resolveLibraryRootNodeId]);
+  }, [resolveLibraryRootNodeId, settlePendingTreeExpand]);
 
   // 快照保存：切走页面后可恢复
   useEffect(() => {
@@ -521,13 +604,20 @@ export function useRepositoryTree(
     [appendNodesByRepository],
   );
 
-  useEffect(() => () => {
-    if (pendingAppendRetryTimerRef.current !== null) {
-      window.clearTimeout(pendingAppendRetryTimerRef.current);
-      pendingAppendRetryTimerRef.current = null;
-    }
-    pendingAppendByRepositoryRef.current.clear();
-  }, []);
+  useEffect(() => {
+    const pendingAppends = pendingAppendByRepositoryRef.current;
+    const pendingTreeExpands = pendingTreeExpandsRef.current;
+    disposedRef.current = false;
+    return () => {
+      disposedRef.current = true;
+      if (pendingAppendRetryTimerRef.current !== null) {
+        window.clearTimeout(pendingAppendRetryTimerRef.current);
+        pendingAppendRetryTimerRef.current = null;
+      }
+      pendingAppends.clear();
+      Array.from(pendingTreeExpands.keys()).forEach(settlePendingTreeExpand);
+    };
+  }, [settlePendingTreeExpand]);
 
   // 递归删除节点及其所有子节点
   const removeNodeFromTree = useCallback((nodes: Node[], targetKey: string): Node[] => {
@@ -661,41 +751,42 @@ export function useRepositoryTree(
     }
   }, [collectRefreshSubtreeIds, refreshParentChildren, selectedRepository]);
 
-  // 加载子节点，加载完成后下一帧展开（保证动画）
+  // 加载子节点；提交完成后由 useLayoutEffect 在下一帧展开。
   const loadChildren = useCallback(async (node: Node): Promise<void> => {
     if (node.loaded || node.type !== 'dir') return;
-    if (loadingNodes.current.has(node.key)) return;
+    const repositoryId = selectedRepositoryRef.current;
+    const loadingKey = buildPendingTreeExpandKey(repositoryId, node.key);
+    if (loadingNodes.current.has(loadingKey)) return;
 
-    loadingNodes.current.add(node.key);
+    loadingNodes.current.add(loadingKey);
 
     try {
-      const children = await getChildrenByNodeId(node.id, Number(selectedRepository));
+      const children = await getChildrenByNodeId(node.id, Number(repositoryId));
+      if (disposedRef.current || selectedRepositoryRef.current !== repositoryId) {
+        return;
+      }
       const mapped = mapChildrenToTreeNodes(children as NodeRespDTO[], node, {
         showAllSubtitles: audioArchiveShownDirectoryIdsRef.current.has(node.id),
         expandedAudioNodeIds: audioArchiveShownAudioNodeIdsRef.current,
       });
 
-      // 第一步：先把子节点数据写入树（此时节点仍然是收起状态）
-      setTreesCache(prev => ({
-        ...prev,
-        [selectedRepository]: updateNodeChildren(prev[selectedRepository], node.key, mapped),
-      }));
-
-      // 第二步：等 React 渲染完子节点后，下一帧再展开 → 触发动画
       await new Promise<void>(resolve => {
-        requestAnimationFrame(() => {
-          if (!expandedKeysRef.current.includes(node.key)) {
-            const newKeys = [...expandedKeysRef.current, node.key];
-            setExpandedKeys(newKeys);
-            expandedKeysRef.current = newKeys;
-          }
-          resolve();
+        settlePendingTreeExpand(loadingKey);
+        pendingTreeExpandsRef.current.set(loadingKey, {
+          repositoryId,
+          nodeKey: node.key,
+          resolve,
+          animationFrameId: null,
         });
+        setTreesCache(prev => ({
+          ...prev,
+          [repositoryId]: updateNodeChildren(prev[repositoryId] || [], node.key, mapped),
+        }));
       });
     } finally {
-      loadingNodes.current.delete(node.key);
+      loadingNodes.current.delete(loadingKey);
     }
-  }, [selectedRepository, updateNodeChildren]);
+  }, [settlePendingTreeExpand, updateNodeChildren]);
 
   // 处理展开事件（点击三角箭头）
   const handleExpand = useCallback((keys: string[]) => {

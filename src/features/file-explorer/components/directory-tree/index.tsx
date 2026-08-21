@@ -1,5 +1,6 @@
 import React, { ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { Tree, Toast, Input } from '@douyinfe/semi-ui';
+import { IconChevronRightStroked } from '@douyinfe/semi-icons';
 import {
   batchSetArchiveChildrenBuiltInType,
   createNode,
@@ -69,6 +70,7 @@ import {
   LIBRARY_FILE_BROWSER_DRAG_DATA_TYPE,
   type LibraryFileBrowserDragPayload,
 } from '@/features/file-transfer/model/file-transfer';
+import { containTreeExpandDoubleClick } from '@/features/file-explorer/utils/tree-expand-behavior';
 
 interface DirectoryTreeProps {
   treeData: any[];
@@ -123,6 +125,30 @@ interface DragPreviewNodeData {
 }
 
 const TREE_DRAG_PREVIEW_ATTR = 'data-omniflow-tree-drag-preview';
+
+const TREE_EXPAND_ICON = (
+  <span
+    className="tree-expand-icon"
+    role="button"
+    aria-label="展开或折叠目录"
+    onDoubleClick={containTreeExpandDoubleClick}
+  >
+    <IconChevronRightStroked className="tree-expand-icon-glyph" aria-hidden="true" />
+  </span>
+);
+
+function renderTreeNodeIcon(treeNodeProps: any): ReactNode {
+  const node = treeNodeProps?.data ?? treeNodeProps;
+  if (!node || String(node.type) === 'file') {
+    return treeNodeProps?.icon ?? null;
+  }
+
+  return getDirectoryBuiltInIcon(
+    node.builtInType,
+    node.archiveMode,
+    treeNodeProps?.expanded === true,
+  ) ?? getDirectoryBuiltInIcon('DEF', 0, treeNodeProps?.expanded === true);
+}
 
 function removeStaleTreeDragPreviews() {
   document
@@ -236,7 +262,7 @@ export default function DirectoryTree({
 
   // Tree 内容容器（可滚动内容层在 wrapper 中）
   const wrapperRef = useRef<HTMLDivElement | null>(null);
-  // 仅当用户通过“右键 -> 打开原始目录”授权后，才允许内置类型目录展开
+  // 用户显式打开一次后，在当前侧栏生命周期内保留原始目录浏览授权。
   const rawOpenAllowedKeysRef = useRef<Set<string>>(new Set());
   const [rawOpenVersion, setRawOpenVersion] = useState(0);
 
@@ -245,7 +271,6 @@ export default function DirectoryTree({
   const rowRefs = useRef<Map<string, RowRefs>>(new Map());
   const visibleRowBoundsRef = useRef<VisibleRowBounds[]>([]);
   const treeDataRef = useRef<any[]>(treeData);
-  const expandClickGuardRef = useRef<{ key: string; targetExpanded: boolean; expiresAt: number } | null>(null);
 
   // 记录上一次应用到 wrapper 的 minWidth，避免 1px 抖动
   const lastAppliedWidthRef = useRef<number>(0);
@@ -640,13 +665,6 @@ export default function DirectoryTree({
       setRawOpenVersion(v => v + 1);
     }
   };
-  const revokeRawOpen = (nodeKey: string) => {
-    const changed = rawOpenAllowedKeysRef.current.delete(nodeKey);
-    if (changed) {
-      setRawOpenVersion(v => v + 1);
-    }
-  };
-
   const handleLoadData = async (node: any) => {
     if (!loadData) return;
     if (isBuiltInFolderNode(node) && !isRawOpenAllowed(node.key)) {
@@ -656,7 +674,7 @@ export default function DirectoryTree({
   };
 
   const renderTreeData = React.useMemo(() => {
-    // 读取版本号用于触发重算（由 allow/revoke 更新）
+    // 读取版本号用于在首次授权后触发重算。
     void rawOpenVersion;
 
     const patchNodes = (nodes: any[]): any[] => {
@@ -672,14 +690,10 @@ export default function DirectoryTree({
           return node;
         }
 
-        const isExpanded = expandedKeys.includes(node.key);
-        const directoryIcon = getDirectoryBuiltInIcon(node.builtInType, node.archiveMode, isExpanded);
-
         if (!isBuiltInFolderNode(node)) {
-          // archive + DEF 等非法组合 directoryIcon 为 undefined，保留原 icon 让 Semi 兜底。
-          const nextIcon = directoryIcon ?? node.icon;
-          if (patchedChildren !== node.children || nextIcon !== node.icon) {
-            return { ...node, icon: nextIcon, children: patchedChildren };
+          // 目录开合图标由 Tree.icon 根据 expanded 动态渲染，避免视觉状态重建 treeData。
+          if (patchedChildren !== node.children || node.icon !== undefined) {
+            return { ...node, icon: undefined, children: patchedChildren };
           }
           return node;
         }
@@ -687,16 +701,16 @@ export default function DirectoryTree({
         if (isRawOpenAllowed(node.key)) {
           return {
             ...node,
-            icon: directoryIcon,
+            icon: undefined,
             isLeaf: false,
             children: patchedChildren,
           };
         }
 
-        // 回锁时清空展示态：隐藏箭头并清空当前挂载子节点
+        // 未授权时隐藏箭头和子节点；授权会保留到当前侧栏卸载。
         return {
           ...node,
-          icon: directoryIcon,
+          icon: undefined,
           isLeaf: true,
           loaded: false,
           children: [],
@@ -705,7 +719,7 @@ export default function DirectoryTree({
     };
 
     return patchNodes(treeData);
-  }, [expandedKeys, rawOpenVersion, treeData]);
+  }, [rawOpenVersion, treeData]);
 
   const visibleNodesLinear = React.useMemo(() => {
     const acc: any[] = [];
@@ -938,7 +952,14 @@ export default function DirectoryTree({
       return;
     }
 
-    collapseKeys.forEach(key => revokeRawOpen(key));
+    let rawOpenAuthorizationChanged = false;
+    collapseKeys.forEach((key) => {
+      rawOpenAuthorizationChanged = rawOpenAllowedKeysRef.current.delete(key)
+        || rawOpenAuthorizationChanged;
+    });
+    if (rawOpenAuthorizationChanged) {
+      setRawOpenVersion(version => version + 1);
+    }
     const nextExpandedKeys = expandedKeysRef.current.filter(key => !collapseKeys.has(key));
     if (nextExpandedKeys.length !== expandedKeysRef.current.length) {
       applyTemporaryExpandedKeys(nextExpandedKeys);
@@ -1426,30 +1447,21 @@ export default function DirectoryTree({
     } catch (err) {
       runtimeLogger.warn('onDoubleClick 触发懒加载失败（已忽略）：', err);
     }
-    if (!expandedKeys.includes(treeNode.key)) {
-      onExpand(Array.from(new Set([...expandedKeys, treeNode.key])));
+    const currentExpandedKeys = expandedKeysRef.current;
+    if (!currentExpandedKeys.includes(treeNode.key)) {
+      const nextExpandedKeys = Array.from(new Set([...currentExpandedKeys, treeNode.key]));
+      expandedKeysRef.current = nextExpandedKeys;
+      onExpand(nextExpandedKeys);
     }
   };
 
   // 包装后的 onExpand：触发父回调后，下一帧仅以视口重算
-  const handleExpand = (keys: string[], expandInfo?: { expanded?: boolean; node?: any }) => {
-    const infoNodeKey = String(expandInfo?.node?.key || '');
-    const infoExpanded = expandInfo?.expanded;
-    const now = performance.now();
-    const guard = expandClickGuardRef.current;
-    if (
-      guard
-      && infoNodeKey
-      && guard.key === infoNodeKey
-      && infoExpanded === !guard.targetExpanded
-      && now < guard.expiresAt
-    ) {
-      return;
-    }
+  const handleExpand = (keys: string[]) => {
+    const currentExpandedKeys = expandedKeysRef.current;
 
     const blockedNewKeys = new Set<string>();
     for (const key of keys) {
-      if (expandedKeys.includes(key)) {
+      if (currentExpandedKeys.includes(key)) {
         continue;
       }
       const node = findNodeByKey(renderTreeData, key);
@@ -1469,22 +1481,8 @@ export default function DirectoryTree({
       Toast.info('该目录为内置类型，请右键选择“打开原始目录”');
     }
 
-    const collapsedKeys = expandedKeys.filter(key => !filteredKeys.includes(key));
-    for (const key of collapsedKeys) {
-      const node = findNodeByKey(renderTreeData, key);
-      if (node && isBuiltInFolderNode(node) && isRawOpenAllowed(key)) {
-        revokeRawOpen(key);
-      }
-    }
-
+    expandedKeysRef.current = filteredKeys;
     onExpand(filteredKeys);
-    if (infoNodeKey && typeof infoExpanded === 'boolean') {
-      expandClickGuardRef.current = {
-        key: infoNodeKey,
-        targetExpanded: infoExpanded,
-        expiresAt: now + 320,
-      };
-    }
 
     requestAnimationFrame(() => {
       scheduleRecompute(); // 只看视口，不会被未见内容影响
@@ -1599,8 +1597,11 @@ export default function DirectoryTree({
       allowRawOpen(node.key);
       try {
         await handleLoadData(node);
-        if (!expandedKeys.includes(node.key)) {
-          onExpand(Array.from(new Set([...expandedKeys, node.key])));
+        const currentExpandedKeys = expandedKeysRef.current;
+        if (!currentExpandedKeys.includes(node.key)) {
+          const nextExpandedKeys = Array.from(new Set([...currentExpandedKeys, node.key]));
+          expandedKeysRef.current = nextExpandedKeys;
+          onExpand(nextExpandedKeys);
         }
         Toast.success('已打开原始目录');
       } catch (error: any) {
@@ -2554,6 +2555,8 @@ export default function DirectoryTree({
             onDoubleClick={handleTreeDoubleClick}
             loadData={handleLoadData}
             directory
+            icon={renderTreeNodeIcon}
+            expandIcon={TREE_EXPAND_ICON}
             renderLabel={renderLabel}
             style={{ padding: '2px 0 2px 0' }}
           />

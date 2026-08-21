@@ -193,11 +193,13 @@ export const DirectorySidebarWrapper = styled.aside<{ $isDragging?: boolean }>`
        但折叠态的 transform: rotate(270deg) 会让 boundingClientRect 出现亚像素差异，
        展开态 width 又比折叠态少 1px，再加 spin-icon 默认 footprint 不一致，
        三者宽度依次跳变 21 → 22 → 20，标签起点跟着右移再左回造成"加载闪烁"。
-       这里把两种插槽都锁成 border-box 22x22，从根上消除宽度跳变。 */
+       这里把展开、加载和叶节点三种前缀槽都锁成 border-box 22x22，从根上消除宽度跳变。 */
     .semi-tree-option-expand-icon,
-    .semi-tree-option-spin-icon {
+    .semi-tree-option-spin-icon,
+    .semi-tree-option-empty-icon {
       box-sizing: border-box !important;
       width: 22px !important;
+      min-width: 22px !important;
       height: 22px !important;
       padding: 4px !important;
       margin: -4px 0 !important;
@@ -210,12 +212,36 @@ export const DirectorySidebarWrapper = styled.aside<{ $isDragging?: boolean }>`
     .semi-tree-option-expand-icon {
       font-size: 13px !important;
       color: var(--app-text-muted);
-      border-radius: 4px;
       cursor: pointer;
+      line-height: 0;
+      background: transparent !important;
     }
 
-    .semi-tree-option-expand-icon:hover {
-      background: rgba(0, 0, 0, 0.06);
+    /* Semi 的默认三角形会在折叠态旋转整个 22px 插槽，视觉上偏重且不易和文字对齐。
+       外层槽位保持不动，只旋转 10px 的线性 glyph；1.3px 上移用于校准实际字形的视觉中心。 */
+    .tree-expand-icon {
+      transform: none !important;
+    }
+
+    .tree-expand-icon-glyph {
+      display: block;
+      width: 10px !important;
+      height: 10px !important;
+      flex: 0 0 10px;
+      color: currentColor;
+      transform: translateY(-1.3px) rotate(90deg);
+      transform-origin: center;
+      transition: transform 180ms ease;
+    }
+
+    .semi-tree-option-collapsed .tree-expand-icon-glyph {
+      transform: translateY(-1.3px) rotate(0deg);
+    }
+
+    .semi-tree-option-expand-icon:hover,
+    .semi-tree-option-expand-icon:active {
+      color: var(--app-text-muted);
+      background: transparent !important;
     }
   }
 
