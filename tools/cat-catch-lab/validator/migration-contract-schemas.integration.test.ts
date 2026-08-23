@@ -332,6 +332,14 @@ describe('Cat Catch dynamic edge endpoint schema', () => {
     }
     expectInvalid(validateLegacyInventory, symbolicProcessTarget)
 
+    const typedSymbolFreeTarget = clone(declaredLegacyInventory)
+    dynamicEdge(typedSymbolFreeTarget, 'edge.ffmpeg-process-handoff').target = {
+      path: 'external-process/ffmpeg',
+      symbol: null,
+      locatorKind: 'member',
+    }
+    expectInvalid(validateLegacyInventory, typedSymbolFreeTarget)
+
     for (const malformedPath of [
       'external-process/../ffmpeg',
       'external-process/.',
@@ -366,6 +374,13 @@ describe('Cat Catch dynamic edge endpoint schema', () => {
       path: `./${String(original.path)}`,
     })
 
+    expectInvalid(validateLegacyInventory, inventory)
+  })
+
+  it('restricts typed locators to declaration, member, and runtime literals', () => {
+    const inventory = clone(declaredLegacyInventory)
+    const firstEntry = asObject(asArray(inventory.entries)[0])
+    firstEntry.locatorKind = 'call-site'
     expectInvalid(validateLegacyInventory, inventory)
   })
 })

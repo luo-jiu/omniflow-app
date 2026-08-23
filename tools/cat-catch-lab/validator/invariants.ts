@@ -4,11 +4,13 @@ import {
   gitObjectExists,
   isGitAncestor,
   readGitFileAtCommit,
+  readGitPathAtCommit,
   tryReadGitHead,
 } from './git-input.ts'
 import { getString, getStringArray, isJsonObject, sha256Bytes } from './json.ts'
 import { validateReleaseConfiguration } from './release-config.ts'
 import { deriveCapabilityRiskSignals } from './risk-signals.ts'
+import { inspectSourceLocator, normalizeSourceLocatorKind } from './source-locator.ts'
 import { validateGitSourceReference } from './source-validation.ts'
 import { createIssue, type ValidationContext, type ValidationIssue } from './types.ts'
 import { validateUpstreamState as validatePinnedUpstreamState } from './upstream-validation.ts'
@@ -347,7 +349,9 @@ function locatorKey(value: Record<string, unknown>): string | null {
   if (!relativePath || !isCanonicalRepositoryPath(relativePath)) return null
   const symbol = value.symbol === null ? null : getString(value.symbol)
   if (symbol === null && value.symbol !== null) return null
-  return JSON.stringify([relativePath, symbol])
+  if (symbol === null) return value.locatorKind === undefined ? JSON.stringify([relativePath, null]) : null
+  const locatorKind = normalizeSourceLocatorKind(value.locatorKind)
+  return locatorKind ? JSON.stringify([relativePath, symbol, locatorKind]) : null
 }
 
 function isCanonicalRepositoryPath(relativePath: string): boolean {
@@ -364,14 +368,32 @@ function validateCanonicalLocatorPath(
   issuePath: string,
 ): boolean {
   const relativePath = getString(value.path)
-  if (!relativePath || isCanonicalRepositoryPath(relativePath)) return Boolean(relativePath)
-  issues.push(createIssue(
-    'error',
-    'noncanonical-repository-path',
-    `Repository path must not contain aliases, traversal, empty segments, backslashes, or control characters: ${relativePath}`,
-    `${issuePath}.path`,
-  ))
-  return false
+  const pathValid = Boolean(relativePath && isCanonicalRepositoryPath(relativePath))
+  if (relativePath && !pathValid) {
+    issues.push(createIssue(
+      'error',
+      'noncanonical-repository-path',
+      `Repository path must not contain aliases, traversal, empty segments, backslashes, or control characters: ${relativePath}`,
+      `${issuePath}.path`,
+    ))
+  }
+  const symbol = value.symbol === null ? null : getString(value.symbol)
+  if (symbol === null && value.locatorKind !== undefined) {
+    issues.push(createIssue(
+      'error',
+      'locator-kind-without-symbol',
+      'locatorKind is forbidden when symbol is null or missing',
+      `${issuePath}.locatorKind`,
+    ))
+  } else if (symbol && !normalizeSourceLocatorKind(value.locatorKind)) {
+    issues.push(createIssue(
+      'error',
+      'locator-kind-invalid',
+      `Unknown locatorKind: ${String(value.locatorKind)}`,
+      `${issuePath}.locatorKind`,
+    ))
+  }
+  return pathValid
 }
 
 function validateUniqueLocators(
@@ -525,11 +547,36 @@ function validateHistoricalCandidateSource(
     ))
   }
   const symbol = getString(candidate.symbol)
-  if (symbol && !bytes.toString('utf8').includes(symbol)) {
+  const locatorKind = normalizeSourceLocatorKind(candidate.locatorKind)
+  const locator = symbol && locatorKind
+    ? inspectSourceLocator(bytes.toString('utf8'), relativePath, symbol, locatorKind)
+    : null
+  if (symbol && !locatorKind) {
+    issues.push(createIssue(
+      'error',
+      'historical-candidate-locator-kind-invalid',
+      `Historical candidate locator kind is invalid: ${String(candidate.locatorKind)}`,
+      `${candidatePath}.locatorKind`,
+    ))
+  } else if (locator?.status === 'missing') {
     issues.push(createIssue(
       'blocker',
       'historical-candidate-symbol-missing',
       `Historical candidate symbol is missing: ${symbol}`,
+      `${candidatePath}.symbol`,
+    ))
+  } else if (locator?.status === 'ambiguous') {
+    issues.push(createIssue(
+      'blocker',
+      'historical-candidate-locator-ambiguous',
+      `Historical candidate locator has ${locator.matchCount} logical matches: ${symbol}`,
+      `${candidatePath}.symbol`,
+    ))
+  } else if (locator?.status === 'parse-error' || locator?.status === 'unsupported-language') {
+    issues.push(createIssue(
+      'blocker',
+      'historical-candidate-locator-unverifiable',
+      `Historical candidate locator cannot be parsed: ${symbol}`,
       `${candidatePath}.symbol`,
     ))
   }
@@ -659,6 +706,7 @@ function validateInventory(
   for (const [index, value] of currentNodes.entries()) {
     const nodePath = `legacy-inventory.json.entries[current:${index}]`
     issues.push(...validateGitSourceReference({
+      anchorField: 'symbol',
       commit: appHead,
       hashField: 'sourceHash',
       issuePath: nodePath,
@@ -690,6 +738,7 @@ function validateInventory(
     const rootPath = `legacy-inventory.json.bootstrapRoots[${index}]`
     validateCanonicalLocatorPath(issues, root, rootPath)
     issues.push(...validateGitSourceReference({
+      anchorField: 'symbol',
       commit: appHead,
       hashField: 'sourceHash',
       issuePath: rootPath,
@@ -780,6 +829,7 @@ function validateInventory(
     const edgePath = `legacy-inventory.json.declaredDynamicEdges[${index}]`
     const source = isJsonObject(edge.source) ? { ...edge.source, sourceHash: edge.sourceHash } : edge.source
     issues.push(...validateGitSourceReference({
+      anchorField: 'symbol',
       commit: appHead,
       hashField: 'sourceHash',
       issuePath: `${edgePath}.source`,
@@ -811,6 +861,7 @@ function validateInventory(
         ))
       } else {
         issues.push(...validateGitSourceReference({
+          anchorField: 'symbol',
           commit: appHead,
           hashField: 'sourceHash',
           issuePath: `${edgePath}.target`,
@@ -878,17 +929,47 @@ function validateInventory(
     const tombstonePath = `legacy-inventory.json.entries[tombstone:${index}]`
     const relativePath = getString(value.path)
     const symbol = getString(value.symbol)
-    const currentBytes = relativePath && appHead
-      ? readGitFileAtCommit(context.appRoot, appHead, relativePath)
-      : null
-    const stillExists = currentBytes && (!symbol || currentBytes.toString('utf8').includes(symbol))
-    if (relativePath && stillExists) {
-      issues.push(createIssue(
-        'error',
-        'tombstone-still-current',
-        `Retired tombstone still exists in the current tree: ${relativePath}`,
-        tombstonePath,
-      ))
+    if (relativePath) {
+      const currentState = appHead
+        ? readGitPathAtCommit(context.appRoot, appHead, relativePath)
+        : { status: 'unavailable' } as const
+      if (currentState.status === 'unavailable') {
+        issues.push(createIssue(
+          'blocker',
+          'tombstone-current-path-unavailable',
+          `Cannot prove that the retired tombstone path is absent from the current tree: ${relativePath}`,
+          tombstonePath,
+        ))
+      } else if (currentState.status === 'present') {
+        const locatorKind = normalizeSourceLocatorKind(value.locatorKind)
+        const currentLocator = symbol && locatorKind
+          ? inspectSourceLocator(currentState.bytes.toString('utf8'), relativePath, symbol, locatorKind)
+          : null
+        if (
+          symbol
+          && (!currentLocator
+            || currentLocator.status === 'parse-error'
+            || currentLocator.status === 'unsupported-language')
+        ) {
+          issues.push(createIssue(
+            'blocker',
+            'tombstone-current-locator-unverifiable',
+            `Cannot prove that the retired tombstone locator is absent from the current tree: ${relativePath}#${symbol}`,
+            tombstonePath,
+          ))
+        } else if (
+          !symbol
+          || currentLocator?.status === 'matched'
+          || currentLocator?.status === 'ambiguous'
+        ) {
+          issues.push(createIssue(
+            'error',
+            'tombstone-still-current',
+            `Retired tombstone still exists in the current tree: ${relativePath}`,
+            tombstonePath,
+          ))
+        }
+      }
     }
     validateInventoryMapping(issues, value, tombstonePath, ledgerIndex)
     validateTombstoneProof(context, issues, value, tombstonePath, reportEntriesById)
@@ -912,6 +993,7 @@ function validateInventory(
     const resolutionRefId = getString(value.resolution.refId)
     const resolvedEntry = resolutionRefId ? entriesById.get(resolutionRefId) : null
     const resolvedExclusion = resolutionRefId ? approvedExclusionsById.get(resolutionRefId) : null
+    const resolvedRecord = resolutionKind === 'approved-exclusion' ? resolvedExclusion : resolvedEntry
     const resolutionMatches = resolutionKind === 'approved-exclusion'
       ? resolvedExclusion?.candidateKind === 'historical'
       : resolvedEntry?.entryType === resolutionKind
@@ -920,6 +1002,13 @@ function validateInventory(
         'blocker',
         'historical-candidate-resolution-unresolved',
         `Historical candidate resolution does not identify a ${resolutionKind || 'known'} record: ${resolutionRefId || 'missing ref id'}`,
+        `${candidatePath}.resolution`,
+      ))
+    } else if (resolvedRecord && locatorKey(value) !== locatorKey(resolvedRecord)) {
+      issues.push(createIssue(
+        'blocker',
+        'historical-candidate-resolution-locator-mismatch',
+        `Historical candidate resolution points to a different locator: ${resolutionRefId}`,
         `${candidatePath}.resolution`,
       ))
     }

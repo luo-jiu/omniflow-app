@@ -1,7 +1,7 @@
 {
   "$schema": "./legacy-inventory.schema.json",
   "schemaVersion": 1,
-  "inventoryVersion": "2026-08-23.2",
+  "inventoryVersion": "2026-08-24.3",
   "discoveryRulesVersion": "2026-08-23.1",
   "bootstrapRoots": [
     {
@@ -44,6 +44,7 @@
       "category": "preload-surface",
       "path": "electron/preload.ts",
       "symbol": "electronEmbeddedBrowser",
+      "locatorKind": "runtime-literal",
       "traversal": "both"
     },
     {
@@ -171,10 +172,10 @@
   "historicalTouchsets": [
     {
       "id": "history.capture-runtime-apr14-15",
-      "fromCommit": "25b8d5969428f9e57e36287a526c50e9590080d8",
+      "fromCommit": "643d40f15fb1cdd554e25d8f08ad840a1099bbc5",
       "throughCommit": "e5b69f7148c229e1dd053d6f6dbe15a6c4871b4b",
       "pathScopes": ["electron/service", "src/features/embedded-browser", "dist-electron"],
-      "searchTerms": ["deep resource probe", "cat-catch probe heuristics", "split embedded browser resource capture", "port cat catch resource capture", "mse capture duration"]
+      "searchTerms": ["add embedded browser resource tools", "deep resource probe", "cat-catch probe heuristics", "split embedded browser resource capture", "port cat catch resource capture", "mse capture duration"]
     },
     {
       "id": "history.hls-dash-apr22-23",
@@ -187,8 +188,8 @@
       "id": "history.mse-spool-apr23",
       "fromCommit": "e5b69f7148c229e1dd053d6f6dbe15a6c4871b4b",
       "throughCommit": "352edb3f533a79007041d404233e4d4e0b936288",
-      "pathScopes": ["electron/service/embeddedBrowserMainController.ts", "electron/service/embeddedBrowserResourceProbeRuntimeCore.ts", "electron/service/embeddedBrowserResourceProbeRuntimeHooks.ts", "dist-electron"],
-      "searchTerms": ["mse duration", "mse flush", "mse reset", "spool large mse captures"]
+      "pathScopes": ["electron/service/embeddedBrowserMainController.ts", "electron/service/embeddedBrowserResourceActionService.ts", "electron/service/embeddedBrowserResourceFileSaveService.ts", "electron/service/embeddedBrowserResourceMergeService.ts", "electron/service/embeddedBrowserResourcePageBridge.ts", "electron/service/embeddedBrowserResourceProbePageActions.ts", "electron/service/embeddedBrowserResourceProbeRuntimeCore.ts", "electron/service/embeddedBrowserResourceProbeRuntimeHooks.ts", "dist-electron"],
+      "searchTerms": ["mse duration", "mse drain", "mse flush", "mse reset", "spool large mse captures", "spooled file path handoff"]
     }
   ],
   "historicalCandidates": [
@@ -198,7 +199,10 @@
       "symbol": "createEmbeddedBrowserResourceProbeScript",
       "lastKnownCommit": "49b6e999b077a0a994fff09edf6415072f322bb8",
       "sourceHash": "sha256:4a57be70f589306a6523d4901a7f2fcf79a5a4e645b0e015c800de567278c2b1",
-      "resolution": null
+      "resolution": {
+        "kind": "current-node",
+        "refId": "node.compat.probe-wrapper"
+      }
     },
     {
       "id": "historical.resource-service-before-split",
@@ -206,7 +210,10 @@
       "symbol": "initializeEmbeddedBrowserResourceBridge",
       "lastKnownCommit": "49b6e999b077a0a994fff09edf6415072f322bb8",
       "sourceHash": "sha256:364039882fbc11a35e26f49e5b7009b306f1efc0d169b9b46b2267666dbf54ea",
-      "resolution": null
+      "resolution": {
+        "kind": "current-node",
+        "refId": "node.compat.resource-service-wrapper"
+      }
     },
     {
       "id": "historical.deep-hooks-port-snapshot",
@@ -214,15 +221,21 @@
       "symbol": "embeddedBrowserResourceProbeRuntimeHooksBody",
       "lastKnownCommit": "0f84ca0b02c8ad909d7e909d0282038f92e1b097",
       "sourceHash": "sha256:8ebabb6565972c60fb469682d5bfcf9bbd34f36bd1e4da39fb790316fd512c76",
-      "resolution": null
+      "resolution": {
+        "kind": "current-node",
+        "refId": "node.page-runtime.hooks-body"
+      }
     },
     {
       "id": "historical.mse-duration-snapshot",
       "path": "electron/service/embeddedBrowserResourceProbeRuntimeCore.ts",
-      "symbol": "embeddedBrowserResourceProbeRuntimeCoreBody",
+      "symbol": "normalizeBuffersForPlayback",
       "lastKnownCommit": "e5b69f7148c229e1dd053d6f6dbe15a6c4871b4b",
       "sourceHash": "sha256:bd14f41f531d3e9c58ff34e828a06fc1ae07dfaf63598a317b8f69dc92c38e10",
-      "resolution": null
+      "resolution": {
+        "kind": "current-node",
+        "refId": "node.mse.page-buffer-normalizer"
+      }
     },
     {
       "id": "historical.hls-parser-initial-snapshot",
@@ -230,7 +243,10 @@
       "symbol": "parseEmbeddedBrowserHlsManifest",
       "lastKnownCommit": "35c5c69a6ff38d5224993cc3f3757c1c74688e73",
       "sourceHash": "sha256:de0c709cd0c49ff889172bb321c78526eb8b9fde50bc36cef29e5a98f4112ec2",
-      "resolution": null
+      "resolution": {
+        "kind": "current-node",
+        "refId": "node.hls.renderer-parser-planner"
+      }
     },
     {
       "id": "historical.dash-parser-initial-snapshot",
@@ -238,7 +254,10 @@
       "symbol": "parseEmbeddedBrowserMpdManifest",
       "lastKnownCommit": "103a1ef639f2df4b61d1f84aeadf545b922dd873",
       "sourceHash": "sha256:387637c4dc836d5e1d6015b25dfa2875fbf40a14faf15d87d96147132d85d68a",
-      "resolution": null
+      "resolution": {
+        "kind": "current-node",
+        "refId": "node.dash.renderer-parser-planner"
+      }
     }
   ],
   "declaredDynamicEdges": [
@@ -290,8 +309,8 @@
     {
       "id": "edge.worker-bootstrap-script",
       "kind": "worker-script",
-      "source": { "path": "electron/service/embeddedBrowserResourceProbeRuntimeHooks.ts", "symbol": "Worker proxy" },
-      "target": { "path": "electron/service/embeddedBrowserResourceProbeRuntimeCore.ts", "symbol": "createProbeBootstrapSource" },
+      "source": { "path": "electron/service/embeddedBrowserResourceProbeRuntimeHooks.ts", "symbol": "createInjectedWorkerUrl" },
+      "target": { "path": "electron/service/embeddedBrowserResourceProbeScriptTemplate.ts", "symbol": "createProbeBootstrapFunctionSource" },
       "sourceHash": "sha256:1cd2e9cef109da1e80dddde4a2b0a4b0e2d53218eeedcf6dfdf1853e2f3b2785",
       "resolutionRule": "Resolve the Blob worker source assembled from the generated probe bootstrap plus the original worker source or import statement.",
       "fixtureId": "closure.worker-bootstrap"
@@ -299,45 +318,126 @@
     {
       "id": "edge.console-resource-envelope",
       "kind": "serialized-envelope",
-      "source": { "path": "electron/service/embeddedBrowserResourceProbeRuntimeCore.ts", "symbol": "emitResource" },
-      "target": { "path": "electron/service/embeddedBrowserViewLifecycle.ts", "symbol": "console-message resource prefix handler" },
+      "source": { "path": "electron/service/embeddedBrowserResourceProbeRuntimeCore.ts", "symbol": "emitProbeConsolePayload" },
+      "target": { "path": "electron/service/embeddedBrowserViewLifecycle.ts", "symbol": "EMBEDDED_BROWSER_RESOURCE_CONSOLE_PREFIX" },
       "sourceHash": "sha256:a44ff9ea0fbdd08bf72a873265006516fbf7c5daa3a2a711e807dd4ebf9ccf3e",
-      "resolutionRule": "Match the fixed console prefix, parse the JSON envelope, and route the payload to the view-bound probe callback.",
+      "resolutionRule": "Match the fixed console prefix and parse the JSON envelope in the view lifecycle before invoking the view-bound probe callback.",
       "fixtureId": "closure.console-resource-envelope"
     },
     {
-      "id": "edge.console-mse-spool-envelope",
+      "id": "edge.console-probe-payload-callback",
       "kind": "serialized-envelope",
-      "source": { "path": "electron/service/embeddedBrowserResourceProbeRuntimeHooks.ts", "symbol": "mse-flush and mse-reset emitters" },
-      "target": { "path": "electron/service/embeddedBrowserMainController.ts", "symbol": "onProbePayload" },
-      "sourceHash": "sha256:1cd2e9cef109da1e80dddde4a2b0a4b0e2d53218eeedcf6dfdf1853e2f3b2785",
-      "resolutionRule": "Resolve event=mse-flush to appendEmbeddedBrowserMseSpoolChunk and event=mse-reset to clearEmbeddedBrowserMseSpoolFiles.",
+      "source": { "path": "electron/service/embeddedBrowserViewLifecycle.ts", "symbol": "EMBEDDED_BROWSER_RESOURCE_CONSOLE_PREFIX" },
+      "target": { "path": "electron/service/embeddedBrowserMainController.ts", "symbol": "onProbePayload", "locatorKind": "member" },
+      "sourceHash": "sha256:112db5131234897955eb47881f60d710a1854e4ece7685535eb615ac158a02c5",
+      "resolutionRule": "Resolve the parsed console payload through options.onProbePayload into the main-controller callback before resource recording or MSE event dispatch.",
+      "fixtureId": "closure.console-resource-envelope"
+    },
+    {
+      "id": "edge.console-mse-flush-envelope",
+      "kind": "serialized-envelope",
+      "source": { "path": "electron/service/embeddedBrowserResourceProbeRuntimeCore.ts", "symbol": "flushMseStreamBuffers" },
+      "target": { "path": "electron/service/embeddedBrowserMainController.ts", "symbol": "appendEmbeddedBrowserMseSpoolChunk" },
+      "sourceHash": "sha256:a44ff9ea0fbdd08bf72a873265006516fbf7c5daa3a2a711e807dd4ebf9ccf3e",
+      "resolutionRule": "Resolve event=mse-flush through edge.console-resource-envelope and edge.console-probe-payload-callback before onProbePayload dispatches to appendEmbeddedBrowserMseSpoolChunk.",
+      "fixtureId": "closure.console-mse-envelope"
+    },
+    {
+      "id": "edge.console-mse-reset-envelope",
+      "kind": "serialized-envelope",
+      "source": { "path": "electron/service/embeddedBrowserResourceProbeRuntimeCore.ts", "symbol": "emitMseStreamReset" },
+      "target": { "path": "electron/service/embeddedBrowserMainController.ts", "symbol": "clearEmbeddedBrowserMseSpoolFiles" },
+      "sourceHash": "sha256:a44ff9ea0fbdd08bf72a873265006516fbf7c5daa3a2a711e807dd4ebf9ccf3e",
+      "resolutionRule": "Resolve event=mse-reset through edge.console-resource-envelope and edge.console-probe-payload-callback before onProbePayload dispatches to clearEmbeddedBrowserMseSpoolFiles.",
       "fixtureId": "closure.console-mse-envelope"
     },
     {
       "id": "edge.page-probe-global-actions",
       "kind": "serialized-envelope",
       "source": { "path": "electron/service/embeddedBrowserResourcePageBridge.ts", "symbol": "createEmbeddedBrowserResourceProbeActionScript" },
-      "target": { "path": "electron/service/embeddedBrowserResourceProbeRuntimeCore.ts", "symbol": "globalThis.__OMNIFLOW_EMBEDDED_BROWSER_RESOURCE_PROBE__" },
+      "target": { "path": "electron/service/embeddedBrowserResourceProbePageActions.ts", "symbol": "globalScope.__OMNIFLOW_EMBEDDED_BROWSER_RESOURCE_PROBE__", "locatorKind": "member" },
       "sourceHash": "sha256:d73a0acbb0e48c93cc1a6c9d0920b9352706cb644b0eb8274f2ea44642c4388c",
       "resolutionRule": "Resolve the generated action script property access against the page-global probe object and enumerate invoked action names.",
       "fixtureId": "closure.page-probe-actions"
     },
     {
-      "id": "edge.catch-toolkit-global-actions",
+      "id": "edge.page-probe-resource-extract",
+      "kind": "serialized-envelope",
+      "source": { "path": "electron/service/embeddedBrowserResourcePageBridge.ts", "symbol": "createEmbeddedBrowserResourceExtractScript" },
+      "target": { "path": "electron/service/embeddedBrowserResourceProbePageActions.ts", "symbol": "readResource", "locatorKind": "member" },
+      "sourceHash": "sha256:d73a0acbb0e48c93cc1a6c9d0920b9352706cb644b0eb8274f2ea44642c4388c",
+      "resolutionRule": "Resolve the generated readResource call against the page-global probe API and preserve the extracted payload envelope.",
+      "fixtureId": "closure.page-probe-actions"
+    },
+    {
+      "id": "edge.page-probe-mse-drain",
+      "kind": "serialized-envelope",
+      "source": { "path": "electron/service/embeddedBrowserResourcePageBridge.ts", "symbol": "createEmbeddedBrowserResourceDrainMseScript" },
+      "target": { "path": "electron/service/embeddedBrowserResourceProbePageActions.ts", "symbol": "drainResource", "locatorKind": "member" },
+      "sourceHash": "sha256:d73a0acbb0e48c93cc1a6c9d0920b9352706cb644b0eb8274f2ea44642c4388c",
+      "resolutionRule": "Resolve the generated drainResource call against the page-global MSE API and preserve the drained resource payload envelope.",
+      "fixtureId": "closure.page-mse-drain"
+    },
+    {
+      "id": "edge.catch-toolkit-clear-action",
       "kind": "serialized-envelope",
       "source": { "path": "electron/service/embeddedBrowserCatchToolkitPageBridge.ts", "symbol": "createEmbeddedBrowserCatchToolkitActionScript" },
-      "target": { "path": "electron/service/embeddedBrowserResourceProbeRuntimeCore.ts", "symbol": "globalThis.__OMNIFLOW_EMBEDDED_BROWSER_RESOURCE_PROBE__" },
+      "target": { "path": "electron/service/embeddedBrowserResourceProbePageActions.ts", "symbol": "clearCatchMediaCache", "locatorKind": "member" },
       "sourceHash": "sha256:495f5f48dfd7cfcc45094db061064cae2dd99cde10ef8bfb7a91536fca5f42d7",
-      "resolutionRule": "Resolve getState, updateState, clear, download, and restart script calls against the page-global probe API.",
+      "resolutionRule": "Resolve the generated clear action against the page-global catch toolkit API.",
       "fixtureId": "closure.catch-toolkit-actions"
+    },
+    {
+      "id": "edge.catch-toolkit-download-action",
+      "kind": "serialized-envelope",
+      "source": { "path": "electron/service/embeddedBrowserCatchToolkitPageBridge.ts", "symbol": "createEmbeddedBrowserCatchToolkitActionScript" },
+      "target": { "path": "electron/service/embeddedBrowserResourceProbePageActions.ts", "symbol": "downloadCatchMedia", "locatorKind": "member" },
+      "sourceHash": "sha256:495f5f48dfd7cfcc45094db061064cae2dd99cde10ef8bfb7a91536fca5f42d7",
+      "resolutionRule": "Resolve the generated download action against the page-global catch toolkit API.",
+      "fixtureId": "closure.catch-toolkit-actions"
+    },
+    {
+      "id": "edge.catch-toolkit-restart-action",
+      "kind": "serialized-envelope",
+      "source": { "path": "electron/service/embeddedBrowserCatchToolkitPageBridge.ts", "symbol": "createEmbeddedBrowserCatchToolkitActionScript" },
+      "target": { "path": "electron/service/embeddedBrowserResourceProbePageActions.ts", "symbol": "restartCatchMediaCapture", "locatorKind": "member" },
+      "sourceHash": "sha256:495f5f48dfd7cfcc45094db061064cae2dd99cde10ef8bfb7a91536fca5f42d7",
+      "resolutionRule": "Resolve the generated restart action against the page-global catch toolkit API.",
+      "fixtureId": "closure.catch-toolkit-actions"
+    },
+    {
+      "id": "edge.catch-toolkit-get-state",
+      "kind": "serialized-envelope",
+      "source": { "path": "electron/service/embeddedBrowserCatchToolkitPageBridge.ts", "symbol": "createEmbeddedBrowserCatchToolkitGetStateScript" },
+      "target": { "path": "electron/service/embeddedBrowserResourceProbePageActions.ts", "symbol": "getCatchToolkitState", "locatorKind": "member" },
+      "sourceHash": "sha256:495f5f48dfd7cfcc45094db061064cae2dd99cde10ef8bfb7a91536fca5f42d7",
+      "resolutionRule": "Resolve the generated get-state call against the page-global catch toolkit API.",
+      "fixtureId": "closure.catch-toolkit-actions"
+    },
+    {
+      "id": "edge.catch-toolkit-update-state",
+      "kind": "serialized-envelope",
+      "source": { "path": "electron/service/embeddedBrowserCatchToolkitPageBridge.ts", "symbol": "createEmbeddedBrowserCatchToolkitUpdateStateScript" },
+      "target": { "path": "electron/service/embeddedBrowserResourceProbePageActions.ts", "symbol": "updateCatchToolkitState", "locatorKind": "member" },
+      "sourceHash": "sha256:495f5f48dfd7cfcc45094db061064cae2dd99cde10ef8bfb7a91536fca5f42d7",
+      "resolutionRule": "Resolve the generated update-state call and serialized preference payload against the page-global catch toolkit API.",
+      "fixtureId": "closure.catch-toolkit-actions"
+    },
+    {
+      "id": "edge.resource-preview-page-script",
+      "kind": "runtime-template",
+      "source": { "path": "electron/service/embeddedBrowserResourcePageBridge.ts", "symbol": "createEmbeddedBrowserResourcePreviewScript" },
+      "target": { "path": "electron/service/embeddedBrowserResourcePageBridge.ts", "symbol": "__omniflow_embedded_browser_resource_preview__", "locatorKind": "runtime-literal" },
+      "sourceHash": "sha256:d73a0acbb0e48c93cc1a6c9d0920b9352706cb644b0eb8274f2ea44642c4388c",
+      "resolutionRule": "Resolve the generated preview script into the page DOM overlay and verify the fixed overlay identity and cleanup path.",
+      "fixtureId": "closure.page-preview-script"
     },
     {
       "id": "edge.resource-ipc-command-family",
       "kind": "preload-channel",
-      "source": { "path": "electron/preload.ts", "symbol": "electronEmbeddedBrowser resource methods" },
+      "source": { "path": "electron/preload.ts", "symbol": "electronEmbeddedBrowser", "locatorKind": "runtime-literal" },
       "target": { "path": "electron/service/embeddedBrowserMainIpc.ts", "symbol": "registerEmbeddedBrowserMainIpcHandlers" },
-      "sourceHash": "sha256:363955ef267c209bead92b6090af3f93b6d3111e3844f61200a17ca2c7bdd8d4",
+      "sourceHash": "sha256:48f180b1ac3e39497bb8d623ca09cd96ea6096ce7862c858cec0b1b547afdfaa",
       "resolutionRule": "Match every embedded-browser resource invoke channel by literal channel name to exactly one ipcMain handler.",
       "fixtureId": "closure.resource-ipc-channels"
     },
@@ -345,7 +445,7 @@
       "id": "edge.resource-event-projection",
       "kind": "event-dispatch",
       "source": { "path": "electron/service/embeddedBrowserMainController.ts", "symbol": "emitEmbeddedBrowserResource" },
-      "target": { "path": "electron/preload.ts", "symbol": "onResourceCaptured" },
+      "target": { "path": "electron/preload.ts", "symbol": "onResourceCaptured", "locatorKind": "member" },
       "sourceHash": "sha256:60470fdff32b5d447437b7ab11fe254469cec282398f28bd96b608da7640e985",
       "resolutionRule": "Resolve the embedded-browser:resource webContents event through preload to renderer subscribers.",
       "fixtureId": "closure.resource-event-projection"
@@ -354,7 +454,7 @@
       "id": "edge.hls-task-event-projection",
       "kind": "event-dispatch",
       "source": { "path": "electron/service/embeddedBrowserMainController.ts", "symbol": "emitEmbeddedBrowserHlsTask" },
-      "target": { "path": "src/features/tool-workspace/hooks/useHlsDownloadTask.ts", "symbol": "subscribeEmbeddedBrowserHlsTask effect" },
+      "target": { "path": "src/features/embedded-browser/resources/services/embedded-browser-resource.api.ts", "symbol": "subscribeEmbeddedBrowserHlsTask" },
       "sourceHash": "sha256:60470fdff32b5d447437b7ab11fe254469cec282398f28bd96b608da7640e985",
       "resolutionRule": "Resolve embedded-browser:hls-task through preload and the renderer API to hook-local refs and state.",
       "fixtureId": "closure.hls-task-event"
@@ -362,8 +462,8 @@
     {
       "id": "edge.output-path-library-handoff",
       "kind": "file-handoff",
-      "source": { "path": "src/features/embedded-browser/resources/hooks/useResourceImportToLibrary.ts", "symbol": "importOutputPath" },
-      "target": { "path": "src/utils/uploadManager.ts", "symbol": "uploadManager.createBatch" },
+      "source": { "path": "src/features/embedded-browser/resources/hooks/useResourceImportToLibrary.ts", "symbol": "importOutputToLibrary" },
+      "target": { "path": "src/modules/upload-center/engine/upload-manager.ts", "symbol": "createBatch", "locatorKind": "member" },
       "sourceHash": "sha256:be758d48d7b4efabdc4241a541c3bdb74aff79191f07a3c3d94be5e0eb1072a5",
       "resolutionRule": "Track raw processing outputPath through temp-file metadata into UploadManager batch creation and terminal events.",
       "fixtureId": "closure.output-library-handoff"
@@ -371,10 +471,55 @@
     {
       "id": "edge.ffmpeg-process-handoff",
       "kind": "process-handoff",
-      "source": { "path": "electron/service/embeddedBrowserResourceManifestDownloadService.ts", "symbol": "spawn ffmpeg" },
+      "source": { "path": "electron/service/embeddedBrowserResourceManifestDownloadService.ts", "symbol": "downloadEmbeddedBrowserManifestResource" },
       "target": { "path": "external-process/ffmpeg", "symbol": null },
       "sourceHash": "sha256:5cfce59188a1999cba159c1b5930c922f4a1cbc30f6fd5571893e84766537e00",
       "resolutionRule": "Resolve the selected ffmpeg executable, arguments, output path, child lifecycle, and caller-owned cancellation/cleanup path.",
+      "fixtureId": "closure.ffmpeg-process"
+    },
+    {
+      "id": "edge.ffmpeg-manifest-track-merge-process-handoff",
+      "kind": "process-handoff",
+      "source": { "path": "electron/service/embeddedBrowserResourceManifestDownloadService.ts", "symbol": "downloadEmbeddedBrowserManifestTracks" },
+      "target": { "path": "external-process/ffmpeg", "symbol": null },
+      "sourceHash": "sha256:5cfce59188a1999cba159c1b5930c922f4a1cbc30f6fd5571893e84766537e00",
+      "resolutionRule": "Resolve the selected ffmpeg executable, dual-manifest arguments, progress streams, child terminal events, and caller-owned cancellation/cleanup path.",
+      "fixtureId": "closure.ffmpeg-process"
+    },
+    {
+      "id": "edge.ffmpeg-path-probe-process-handoff",
+      "kind": "process-handoff",
+      "source": { "path": "electron/service/embeddedBrowserResourceMergeService.ts", "symbol": "canExecuteCommand" },
+      "target": { "path": "external-process/ffmpeg", "symbol": null },
+      "sourceHash": "sha256:7dbe0413831784a6e54f425fc464bcd87a29eed4765d3592551284c79209e12b",
+      "resolutionRule": "Resolve the PATH fallback probe through its fixed -version arguments and error/exit terminal events.",
+      "fixtureId": "closure.ffmpeg-process"
+    },
+    {
+      "id": "edge.ffmpeg-resource-merge-process-handoff",
+      "kind": "process-handoff",
+      "source": { "path": "electron/service/embeddedBrowserResourceMergeService.ts", "symbol": "mergeEmbeddedBrowserResourceTracks" },
+      "target": { "path": "external-process/ffmpeg", "symbol": null },
+      "sourceHash": "sha256:7dbe0413831784a6e54f425fc464bcd87a29eed4765d3592551284c79209e12b",
+      "resolutionRule": "Resolve resource merge arguments, stdout/stderr, error/exit terminal events, and temporary input cleanup.",
+      "fixtureId": "closure.ffmpeg-process"
+    },
+    {
+      "id": "edge.ffmpeg-resource-transcode-process-handoff",
+      "kind": "process-handoff",
+      "source": { "path": "electron/service/embeddedBrowserResourceMergeService.ts", "symbol": "transcodeEmbeddedBrowserResource" },
+      "target": { "path": "external-process/ffmpeg", "symbol": null },
+      "sourceHash": "sha256:7dbe0413831784a6e54f425fc464bcd87a29eed4765d3592551284c79209e12b",
+      "resolutionRule": "Resolve resource transcode arguments, stdout/stderr, error/exit terminal events, and temporary input cleanup.",
+      "fixtureId": "closure.ffmpeg-process"
+    },
+    {
+      "id": "edge.ffmpeg-dash-merge-process-handoff",
+      "kind": "process-handoff",
+      "source": { "path": "electron/service/embeddedBrowserMpdLocalDownloaderService.ts", "symbol": "mergeMpdTrackFilesToOutput" },
+      "target": { "path": "external-process/ffmpeg", "symbol": null },
+      "sourceHash": "sha256:7d401f33614ccaf2706d127fc7bf9a8684c31ea88685dc7232b987d3e6a77bc2",
+      "resolutionRule": "Resolve single- or dual-track MPD arguments, faststart policy, stderr, error/exit terminal events, and temporary directory cleanup.",
       "fixtureId": "closure.ffmpeg-process"
     },
     {
@@ -497,6 +642,255 @@
       "provenanceRefs": ["git:e1eeb8f0ae2c2b25f5277bb70665d8c97acca39b"]
     },
     {
+      "id": "node.page-actions.mse-drain-script",
+      "entryType": "current-node",
+      "path": "electron/service/embeddedBrowserResourcePageBridge.ts",
+      "symbol": "createEmbeddedBrowserResourceDrainMseScript",
+      "sourceHash": "sha256:d73a0acbb0e48c93cc1a6c9d0920b9352706cb644b0eb8274f2ea44642c4388c",
+      "classification": "legacy",
+      "ownerRole": "adapter",
+      "capabilityId": "mse.page-capture-runtime",
+      "cutoverUnitId": "mse-runtime",
+      "provenanceRefs": ["git:352edb3f533a79007041d404233e4d4e0b936288"]
+    },
+    {
+      "id": "node.page-actions.mse-drain",
+      "entryType": "current-node",
+      "path": "electron/service/embeddedBrowserResourceProbePageActions.ts",
+      "symbol": "drainResource",
+      "locatorKind": "member",
+      "sourceHash": "sha256:146e1f1cdf82ff618a124282e0bd716fc10e618d23702f67d7611f51d1f796f3",
+      "classification": "legacy",
+      "ownerRole": "adapter",
+      "capabilityId": "mse.page-capture-runtime",
+      "cutoverUnitId": "mse-runtime",
+      "provenanceRefs": ["git:352edb3f533a79007041d404233e4d4e0b936288"]
+    },
+    {
+      "id": "node.page-actions.catch-action-script",
+      "entryType": "current-node",
+      "path": "electron/service/embeddedBrowserCatchToolkitPageBridge.ts",
+      "symbol": "createEmbeddedBrowserCatchToolkitActionScript",
+      "sourceHash": "sha256:495f5f48dfd7cfcc45094db061064cae2dd99cde10ef8bfb7a91536fca5f42d7",
+      "classification": "legacy",
+      "ownerRole": "adapter",
+      "capabilityId": "deep.catch-toolkit-page-settings",
+      "cutoverUnitId": "deep-search-runtime",
+      "provenanceRefs": ["git:4e642d9ae22083db096a24169e1a5045e5d79ce1"]
+    },
+    {
+      "id": "node.page-actions.catch-clear",
+      "entryType": "current-node",
+      "path": "electron/service/embeddedBrowserResourceProbePageActions.ts",
+      "symbol": "clearCatchMediaCache",
+      "locatorKind": "member",
+      "sourceHash": "sha256:146e1f1cdf82ff618a124282e0bd716fc10e618d23702f67d7611f51d1f796f3",
+      "classification": "legacy",
+      "ownerRole": "adapter",
+      "capabilityId": "deep.catch-toolkit-page-settings",
+      "cutoverUnitId": "deep-search-runtime",
+      "provenanceRefs": ["git:e1eeb8f0ae2c2b25f5277bb70665d8c97acca39b"]
+    },
+    {
+      "id": "node.page-actions.catch-download",
+      "entryType": "current-node",
+      "path": "electron/service/embeddedBrowserResourceProbePageActions.ts",
+      "symbol": "downloadCatchMedia",
+      "locatorKind": "member",
+      "sourceHash": "sha256:146e1f1cdf82ff618a124282e0bd716fc10e618d23702f67d7611f51d1f796f3",
+      "classification": "legacy",
+      "ownerRole": "adapter",
+      "capabilityId": "deep.catch-toolkit-page-settings",
+      "cutoverUnitId": "deep-search-runtime",
+      "provenanceRefs": ["git:e1eeb8f0ae2c2b25f5277bb70665d8c97acca39b"]
+    },
+    {
+      "id": "node.page-actions.catch-restart",
+      "entryType": "current-node",
+      "path": "electron/service/embeddedBrowserResourceProbePageActions.ts",
+      "symbol": "restartCatchMediaCapture",
+      "locatorKind": "member",
+      "sourceHash": "sha256:146e1f1cdf82ff618a124282e0bd716fc10e618d23702f67d7611f51d1f796f3",
+      "classification": "legacy",
+      "ownerRole": "adapter",
+      "capabilityId": "deep.catch-toolkit-page-settings",
+      "cutoverUnitId": "deep-search-runtime",
+      "provenanceRefs": ["git:e1eeb8f0ae2c2b25f5277bb70665d8c97acca39b"]
+    },
+    {
+      "id": "node.page-actions.catch-get-script",
+      "entryType": "current-node",
+      "path": "electron/service/embeddedBrowserCatchToolkitPageBridge.ts",
+      "symbol": "createEmbeddedBrowserCatchToolkitGetStateScript",
+      "sourceHash": "sha256:495f5f48dfd7cfcc45094db061064cae2dd99cde10ef8bfb7a91536fca5f42d7",
+      "classification": "legacy",
+      "ownerRole": "adapter",
+      "capabilityId": "deep.catch-toolkit-page-settings",
+      "cutoverUnitId": "deep-search-runtime",
+      "provenanceRefs": ["git:4e642d9ae22083db096a24169e1a5045e5d79ce1"]
+    },
+    {
+      "id": "node.page-actions.catch-get",
+      "entryType": "current-node",
+      "path": "electron/service/embeddedBrowserResourceProbePageActions.ts",
+      "symbol": "getCatchToolkitState",
+      "locatorKind": "member",
+      "sourceHash": "sha256:146e1f1cdf82ff618a124282e0bd716fc10e618d23702f67d7611f51d1f796f3",
+      "classification": "legacy",
+      "ownerRole": "adapter",
+      "capabilityId": "deep.catch-toolkit-page-settings",
+      "cutoverUnitId": "deep-search-runtime",
+      "provenanceRefs": ["git:e1eeb8f0ae2c2b25f5277bb70665d8c97acca39b"]
+    },
+    {
+      "id": "node.page-actions.catch-update-script",
+      "entryType": "current-node",
+      "path": "electron/service/embeddedBrowserCatchToolkitPageBridge.ts",
+      "symbol": "createEmbeddedBrowserCatchToolkitUpdateStateScript",
+      "sourceHash": "sha256:495f5f48dfd7cfcc45094db061064cae2dd99cde10ef8bfb7a91536fca5f42d7",
+      "classification": "legacy",
+      "ownerRole": "adapter",
+      "capabilityId": "deep.catch-toolkit-page-settings",
+      "cutoverUnitId": "deep-search-runtime",
+      "provenanceRefs": ["git:4e642d9ae22083db096a24169e1a5045e5d79ce1"]
+    },
+    {
+      "id": "node.page-actions.catch-update",
+      "entryType": "current-node",
+      "path": "electron/service/embeddedBrowserResourceProbePageActions.ts",
+      "symbol": "updateCatchToolkitState",
+      "locatorKind": "member",
+      "sourceHash": "sha256:146e1f1cdf82ff618a124282e0bd716fc10e618d23702f67d7611f51d1f796f3",
+      "classification": "legacy",
+      "ownerRole": "adapter",
+      "capabilityId": "deep.catch-toolkit-page-settings",
+      "cutoverUnitId": "deep-search-runtime",
+      "provenanceRefs": ["git:e1eeb8f0ae2c2b25f5277bb70665d8c97acca39b"]
+    },
+    {
+      "id": "node.contract.resource-event-emitter",
+      "entryType": "current-node",
+      "path": "electron/service/embeddedBrowserMainController.ts",
+      "symbol": "emitEmbeddedBrowserResource",
+      "sourceHash": "sha256:60470fdff32b5d447437b7ab11fe254469cec282398f28bd96b608da7640e985",
+      "classification": "omniflow-integration",
+      "ownerRole": "adapter",
+      "capabilityId": "capture.cross-process-contract",
+      "cutoverUnitId": "network-capture",
+      "provenanceRefs": ["git:517166e2449e45cfa70f25da511e7bf0607a211e"]
+    },
+    {
+      "id": "node.contract.preload-resource-event",
+      "entryType": "current-node",
+      "path": "electron/preload.ts",
+      "symbol": "onResourceCaptured",
+      "locatorKind": "member",
+      "sourceHash": "sha256:48f180b1ac3e39497bb8d623ca09cd96ea6096ce7862c858cec0b1b547afdfaa",
+      "classification": "omniflow-integration",
+      "ownerRole": "contract",
+      "capabilityId": "capture.cross-process-contract",
+      "cutoverUnitId": "network-capture",
+      "provenanceRefs": ["git:643d40f15fb1cdd554e25d8f08ad840a1099bbc5"]
+    },
+    {
+      "id": "node.output.hls-task-subscriber",
+      "entryType": "current-node",
+      "path": "src/features/embedded-browser/resources/services/embedded-browser-resource.api.ts",
+      "symbol": "subscribeEmbeddedBrowserHlsTask",
+      "sourceHash": "sha256:be532223761ee0a40af2bb2d91984ace8e7f8c847db1b0e8e096c4009b9edb2b",
+      "classification": "legacy",
+      "ownerRole": "adapter",
+      "capabilityId": "output.processing-staged-terminal",
+      "cutoverUnitId": "output-integration",
+      "provenanceRefs": ["git:060bcd61456bef581112c1c4cd82e5d0a7cff8a0"]
+    },
+    {
+      "id": "node.delivery.library-import-action",
+      "entryType": "current-node",
+      "path": "src/features/embedded-browser/resources/hooks/useResourceImportToLibrary.ts",
+      "symbol": "importOutputToLibrary",
+      "sourceHash": "sha256:be758d48d7b4efabdc4241a541c3bdb74aff79191f07a3c3d94be5e0eb1072a5",
+      "classification": "legacy",
+      "ownerRole": "adapter",
+      "capabilityId": "output.library-delivery-handoff",
+      "cutoverUnitId": "output-integration",
+      "provenanceRefs": ["git:4f821c393bc94b6fa7659b5debd49b47f0605c49"]
+    },
+    {
+      "id": "node.delivery.upload-manager-engine",
+      "entryType": "current-node",
+      "path": "src/modules/upload-center/engine/upload-manager.ts",
+      "symbol": "createBatch",
+      "locatorKind": "member",
+      "sourceHash": "sha256:436d1bb01f482fa64149109639a3f60888d9f05a559fe4f58e4cf68d83014cf6",
+      "classification": "omniflow-integration",
+      "ownerRole": "task-owner",
+      "capabilityId": "output.library-delivery-handoff",
+      "cutoverUnitId": "output-integration",
+      "provenanceRefs": ["git:2a6ee9495691f6a13075c90eee1de844290b74cb"]
+    },
+    {
+      "id": "node.compat.probe-wrapper",
+      "entryType": "current-node",
+      "path": "electron/service/embeddedBrowserResourceProbe.ts",
+      "symbol": "createEmbeddedBrowserResourceProbeScript",
+      "sourceHash": "sha256:deb9cb54ae893f51b5840ba0d1c1ff90e7586054a6c48e377e2af5243ab82342",
+      "classification": "legacy",
+      "ownerRole": "helper",
+      "capabilityId": "deep.runtime-hook-bundle",
+      "cutoverUnitId": "deep-search-runtime",
+      "provenanceRefs": ["git:643d40f15fb1cdd554e25d8f08ad840a1099bbc5"]
+    },
+    {
+      "id": "node.compat.resource-service-wrapper",
+      "entryType": "current-node",
+      "path": "electron/service/embeddedBrowserResourceService.ts",
+      "symbol": "initializeEmbeddedBrowserResourceBridge",
+      "sourceHash": "sha256:79fedf7d84e20ecbbb401ef127412df19b105bec28a217be97dc8ee95e38c922",
+      "classification": "legacy",
+      "ownerRole": "adapter",
+      "capabilityId": "capture.network-event-lifecycle",
+      "cutoverUnitId": "network-capture",
+      "provenanceRefs": ["git:643d40f15fb1cdd554e25d8f08ad840a1099bbc5"]
+    },
+    {
+      "id": "node.page-actions.preview-script",
+      "entryType": "current-node",
+      "path": "electron/service/embeddedBrowserResourcePageBridge.ts",
+      "symbol": "createEmbeddedBrowserResourcePreviewScript",
+      "sourceHash": "sha256:d73a0acbb0e48c93cc1a6c9d0920b9352706cb644b0eb8274f2ea44642c4388c",
+      "classification": "omniflow-integration",
+      "ownerRole": "adapter",
+      "capabilityId": "capture.cross-process-contract",
+      "cutoverUnitId": "network-capture",
+      "provenanceRefs": ["git:643d40f15fb1cdd554e25d8f08ad840a1099bbc5"]
+    },
+    {
+      "id": "node.page-actions.preview-overlay",
+      "entryType": "current-node",
+      "path": "electron/service/embeddedBrowserResourcePageBridge.ts",
+      "symbol": "__omniflow_embedded_browser_resource_preview__",
+      "locatorKind": "runtime-literal",
+      "sourceHash": "sha256:d73a0acbb0e48c93cc1a6c9d0920b9352706cb644b0eb8274f2ea44642c4388c",
+      "classification": "omniflow-integration",
+      "ownerRole": "adapter",
+      "capabilityId": "capture.cross-process-contract",
+      "cutoverUnitId": "network-capture",
+      "provenanceRefs": ["git:643d40f15fb1cdd554e25d8f08ad840a1099bbc5"]
+    },
+    {
+      "id": "node.page-actions.preview-runner",
+      "entryType": "current-node",
+      "path": "electron/service/embeddedBrowserResourceActionService.ts",
+      "symbol": "runEmbeddedBrowserResourcePreview",
+      "sourceHash": "sha256:6e0d0e6dc3998889b2de31a835954044d1c70fbc30576ed9425a50e51e82ff32",
+      "classification": "omniflow-integration",
+      "ownerRole": "adapter",
+      "capabilityId": "capture.cross-process-contract",
+      "cutoverUnitId": "network-capture",
+      "provenanceRefs": ["git:643d40f15fb1cdd554e25d8f08ad840a1099bbc5"]
+    },
+    {
       "id": "node.page-runtime.core",
       "entryType": "current-node",
       "path": "electron/service/embeddedBrowserResourceProbeRuntimeCore.ts",
@@ -566,7 +960,19 @@
       "ownerRole": "production-owner",
       "capabilityId": "mse.page-capture-runtime",
       "cutoverUnitId": "mse-runtime",
-      "provenanceRefs": ["git:400b9cdab3cd21ccefaa4065d3fb006e7bc267dd", "git:e5b69f7148c229e1dd053d6f6dbe15a6c4871b4b"]
+      "provenanceRefs": ["git:643d40f15fb1cdd554e25d8f08ad840a1099bbc5", "git:e1eeb8f0ae2c2b25f5277bb70665d8c97acca39b", "git:400b9cdab3cd21ccefaa4065d3fb006e7bc267dd", "git:e5b69f7148c229e1dd053d6f6dbe15a6c4871b4b", "git:352edb3f533a79007041d404233e4d4e0b936288"]
+    },
+    {
+      "id": "node.mse.page-buffer-normalizer",
+      "entryType": "current-node",
+      "path": "electron/service/embeddedBrowserResourceProbeRuntimeCore.ts",
+      "symbol": "normalizeBuffersForPlayback",
+      "sourceHash": "sha256:a44ff9ea0fbdd08bf72a873265006516fbf7c5daa3a2a711e807dd4ebf9ccf3e",
+      "classification": "legacy",
+      "ownerRole": "helper",
+      "capabilityId": "mse.page-capture-runtime",
+      "cutoverUnitId": "mse-runtime",
+      "provenanceRefs": ["git:e5b69f7148c229e1dd053d6f6dbe15a6c4871b4b"]
     },
     {
       "id": "node.mse.main-spool",
@@ -677,7 +1083,31 @@
       "provenanceRefs": ["git:35c5c69a6ff38d5224993cc3f3757c1c74688e73"]
     },
     {
-      "id": "node.ffmpeg.merge-transcode-executor",
+      "id": "node.ffmpeg.manifest-track-merge-executor",
+      "entryType": "current-node",
+      "path": "electron/service/embeddedBrowserResourceManifestDownloadService.ts",
+      "symbol": "downloadEmbeddedBrowserManifestTracks",
+      "sourceHash": "sha256:5cfce59188a1999cba159c1b5930c922f4a1cbc30f6fd5571893e84766537e00",
+      "classification": "legacy",
+      "ownerRole": "task-owner",
+      "capabilityId": "output.ffmpeg-process-owner",
+      "cutoverUnitId": "output-integration",
+      "provenanceRefs": ["git:e9b5070f73e01660f00052d6a482e859044dbd0b"]
+    },
+    {
+      "id": "node.ffmpeg.path-probe",
+      "entryType": "current-node",
+      "path": "electron/service/embeddedBrowserResourceMergeService.ts",
+      "symbol": "canExecuteCommand",
+      "sourceHash": "sha256:7dbe0413831784a6e54f425fc464bcd87a29eed4765d3592551284c79209e12b",
+      "classification": "legacy",
+      "ownerRole": "helper",
+      "capabilityId": "output.ffmpeg-process-owner",
+      "cutoverUnitId": "output-integration",
+      "provenanceRefs": ["git:643d40f15fb1cdd554e25d8f08ad840a1099bbc5"]
+    },
+    {
+      "id": "node.ffmpeg.resource-merge-executor",
       "entryType": "current-node",
       "path": "electron/service/embeddedBrowserResourceMergeService.ts",
       "symbol": "mergeEmbeddedBrowserResourceTracks",
@@ -687,6 +1117,30 @@
       "capabilityId": "output.ffmpeg-process-owner",
       "cutoverUnitId": "output-integration",
       "provenanceRefs": ["git:fe10fdb6c70bcecfb7ef1e5c8a170b4899242976"]
+    },
+    {
+      "id": "node.ffmpeg.resource-transcode-executor",
+      "entryType": "current-node",
+      "path": "electron/service/embeddedBrowserResourceMergeService.ts",
+      "symbol": "transcodeEmbeddedBrowserResource",
+      "sourceHash": "sha256:7dbe0413831784a6e54f425fc464bcd87a29eed4765d3592551284c79209e12b",
+      "classification": "legacy",
+      "ownerRole": "task-owner",
+      "capabilityId": "output.ffmpeg-process-owner",
+      "cutoverUnitId": "output-integration",
+      "provenanceRefs": ["git:fe10fdb6c70bcecfb7ef1e5c8a170b4899242976"]
+    },
+    {
+      "id": "node.ffmpeg.dash-track-merge-executor",
+      "entryType": "current-node",
+      "path": "electron/service/embeddedBrowserMpdLocalDownloaderService.ts",
+      "symbol": "mergeMpdTrackFilesToOutput",
+      "sourceHash": "sha256:7d401f33614ccaf2706d127fc7bf9a8684c31ea88685dc7232b987d3e6a77bc2",
+      "classification": "legacy",
+      "ownerRole": "task-owner",
+      "capabilityId": "output.ffmpeg-process-owner",
+      "cutoverUnitId": "output-integration",
+      "provenanceRefs": ["git:103a1ef639f2df4b61d1f84aeadf545b922dd873"]
     },
     {
       "id": "node.workflow.hls-hook",
@@ -785,6 +1239,18 @@
       "provenanceRefs": ["git:bb6763a0324b63d29b5a80ae859b70baa9f6de36"]
     },
     {
+      "id": "node.transfer.downloader-session-bridge",
+      "entryType": "current-node",
+      "path": "electron/service/embeddedBrowserService.ts",
+      "symbol": "handleWillDownload",
+      "sourceHash": "sha256:c877b9d74e10b579687fedb0e8bc08545b090de5cd32b7eb59da018690dc0b33",
+      "classification": "omniflow-integration",
+      "ownerRole": "adapter",
+      "capabilityId": "transfer.downloader-session-lifecycle",
+      "cutoverUnitId": "transfer-engine",
+      "provenanceRefs": ["git:b8777726d4bd014569f15316f5a23b65396f8eb0"]
+    },
+    {
       "id": "node.delivery.normal-download-hook",
       "entryType": "current-node",
       "path": "src/features/embedded-browser/downloads/hooks/useEmbeddedBrowserDownloadImport.ts",
@@ -804,6 +1270,18 @@
       "sourceHash": "sha256:36e728f9c3e52d7805af8313529617646012249f5cd54ffa23b277384b53e645",
       "classification": "legacy",
       "ownerRole": "production-owner",
+      "capabilityId": "output.external-tools-dispatch",
+      "cutoverUnitId": "output-integration",
+      "provenanceRefs": ["git:07b78337210bdfdc75f7ce7e2f70fed09f7c0088"]
+    },
+    {
+      "id": "node.integration.external-tool-defaults",
+      "entryType": "current-node",
+      "path": "src/features/embedded-browser/external-tools/model/embedded-browser-external-tools.ts",
+      "symbol": "createDefaultEmbeddedBrowserExternalToolSettings",
+      "sourceHash": "sha256:800ee3e11fa2edde737d912321550f7781ccf974ca0910e0f9a89a745f01b0b9",
+      "classification": "omniflow-integration",
+      "ownerRole": "helper",
       "capabilityId": "output.external-tools-dispatch",
       "cutoverUnitId": "output-integration",
       "provenanceRefs": ["git:07b78337210bdfdc75f7ce7e2f70fed09f7c0088"]
@@ -849,7 +1327,8 @@
       "entryType": "current-node",
       "path": "electron/preload.ts",
       "symbol": "electronEmbeddedBrowser",
-      "sourceHash": "sha256:363955ef267c209bead92b6090af3f93b6d3111e3844f61200a17ca2c7bdd8d4",
+      "locatorKind": "runtime-literal",
+      "sourceHash": "sha256:48f180b1ac3e39497bb8d623ca09cd96ea6096ce7862c858cec0b1b547afdfaa",
       "classification": "omniflow-integration",
       "ownerRole": "contract",
       "capabilityId": "capture.cross-process-contract",
@@ -857,11 +1336,230 @@
       "provenanceRefs": ["docs/cat-catch-full-migration-execution-plan.md#66-protected-request-context"]
     },
     {
+      "id": "node.composition.main-controller",
+      "entryType": "current-node",
+      "path": "electron/main.ts",
+      "symbol": "embeddedBrowserMainController",
+      "sourceHash": "sha256:f411dee1393e7a9dc71182bf09e743084e58e4c9291537e92133a2b01f6118cd",
+      "classification": "omniflow-integration",
+      "ownerRole": "adapter",
+      "capabilityId": "capture.owner-lifecycle-closure",
+      "cutoverUnitId": "network-capture",
+      "provenanceRefs": ["git:517166e2449e45cfa70f25da511e7bf0607a211e"]
+    },
+    {
+      "id": "node.composition.main-bridges",
+      "entryType": "current-node",
+      "path": "electron/service/embeddedBrowserMainSupport.ts",
+      "symbol": "initializeEmbeddedBrowserMainBridges",
+      "sourceHash": "sha256:e99d0640be9ff0ff5cc8d0936327d2ab0a1a0e10f4eee9fae2516a5d2730b580",
+      "classification": "omniflow-integration",
+      "ownerRole": "adapter",
+      "capabilityId": "capture.owner-lifecycle-closure",
+      "cutoverUnitId": "network-capture",
+      "provenanceRefs": ["git:404a24f089bb559111d954b7e4d998c1169fa7ec"]
+    },
+    {
+      "id": "node.page-runtime.template",
+      "entryType": "current-node",
+      "path": "electron/service/embeddedBrowserResourceProbeScriptTemplate.ts",
+      "symbol": "createProbeScriptTemplate",
+      "sourceHash": "sha256:62d5ab0d93a02ce488af07012fc26a23f26f2b20036ddec7a7adf63431f797e9",
+      "classification": "legacy",
+      "ownerRole": "helper",
+      "capabilityId": "deep.runtime-hook-bundle",
+      "cutoverUnitId": "deep-search-runtime",
+      "provenanceRefs": ["git:e1eeb8f0ae2c2b25f5277bb70665d8c97acca39b"]
+    },
+    {
+      "id": "node.page-runtime.hooks-body",
+      "entryType": "current-node",
+      "path": "electron/service/embeddedBrowserResourceProbeRuntimeHooks.ts",
+      "symbol": "embeddedBrowserResourceProbeRuntimeHooksBody",
+      "sourceHash": "sha256:1cd2e9cef109da1e80dddde4a2b0a4b0e2d53218eeedcf6dfdf1853e2f3b2785",
+      "classification": "legacy",
+      "ownerRole": "production-owner",
+      "capabilityId": "deep.runtime-hook-bundle",
+      "cutoverUnitId": "deep-search-runtime",
+      "provenanceRefs": ["git:e1eeb8f0ae2c2b25f5277bb70665d8c97acca39b"]
+    },
+    {
+      "id": "node.page-runtime.page-actions-body",
+      "entryType": "current-node",
+      "path": "electron/service/embeddedBrowserResourceProbePageActions.ts",
+      "symbol": "embeddedBrowserResourceProbePageActionsBody",
+      "sourceHash": "sha256:146e1f1cdf82ff618a124282e0bd716fc10e618d23702f67d7611f51d1f796f3",
+      "classification": "legacy",
+      "ownerRole": "production-owner",
+      "capabilityId": "deep.runtime-hook-bundle",
+      "cutoverUnitId": "deep-search-runtime",
+      "provenanceRefs": ["git:e1eeb8f0ae2c2b25f5277bb70665d8c97acca39b"]
+    },
+    {
+      "id": "node.page-runtime.worker-url",
+      "entryType": "current-node",
+      "path": "electron/service/embeddedBrowserResourceProbeRuntimeHooks.ts",
+      "symbol": "createInjectedWorkerUrl",
+      "sourceHash": "sha256:1cd2e9cef109da1e80dddde4a2b0a4b0e2d53218eeedcf6dfdf1853e2f3b2785",
+      "classification": "legacy",
+      "ownerRole": "inactive-owner",
+      "capabilityId": "deep.runtime-hook-bundle",
+      "cutoverUnitId": "deep-search-runtime",
+      "provenanceRefs": ["git:e1eeb8f0ae2c2b25f5277bb70665d8c97acca39b"]
+    },
+    {
+      "id": "node.page-runtime.worker-bootstrap-generator",
+      "entryType": "current-node",
+      "path": "electron/service/embeddedBrowserResourceProbeScriptTemplate.ts",
+      "symbol": "createProbeBootstrapFunctionSource",
+      "sourceHash": "sha256:62d5ab0d93a02ce488af07012fc26a23f26f2b20036ddec7a7adf63431f797e9",
+      "classification": "legacy",
+      "ownerRole": "helper",
+      "capabilityId": "deep.runtime-hook-bundle",
+      "cutoverUnitId": "deep-search-runtime",
+      "provenanceRefs": ["git:e1eeb8f0ae2c2b25f5277bb70665d8c97acca39b"]
+    },
+    {
+      "id": "node.console-relay.emitter",
+      "entryType": "current-node",
+      "path": "electron/service/embeddedBrowserResourceProbeRuntimeCore.ts",
+      "symbol": "emitProbeConsolePayload",
+      "sourceHash": "sha256:a44ff9ea0fbdd08bf72a873265006516fbf7c5daa3a2a711e807dd4ebf9ccf3e",
+      "classification": "legacy",
+      "ownerRole": "adapter",
+      "capabilityId": "deep.secure-page-relay",
+      "cutoverUnitId": "deep-search-runtime",
+      "provenanceRefs": ["git:352edb3f533a79007041d404233e4d4e0b936288"]
+    },
+    {
+      "id": "node.console-relay.probe-payload-handler",
+      "entryType": "current-node",
+      "path": "electron/service/embeddedBrowserMainController.ts",
+      "symbol": "onProbePayload",
+      "locatorKind": "member",
+      "sourceHash": "sha256:60470fdff32b5d447437b7ab11fe254469cec282398f28bd96b608da7640e985",
+      "classification": "legacy",
+      "ownerRole": "adapter",
+      "capabilityId": "deep.secure-page-relay",
+      "cutoverUnitId": "deep-search-runtime",
+      "provenanceRefs": ["git:49b6e999b077a0a994fff09edf6415072f322bb8"]
+    },
+    {
+      "id": "node.console-relay.resource-recorder",
+      "entryType": "current-node",
+      "path": "electron/service/embeddedBrowserViewLifecycle.ts",
+      "symbol": "buildEmbeddedBrowserProbeResourceRecorder",
+      "sourceHash": "sha256:112db5131234897955eb47881f60d710a1854e4ece7685535eb615ac158a02c5",
+      "classification": "legacy",
+      "ownerRole": "adapter",
+      "capabilityId": "deep.secure-page-relay",
+      "cutoverUnitId": "deep-search-runtime",
+      "provenanceRefs": ["git:49b6e999b077a0a994fff09edf6415072f322bb8"]
+    },
+    {
+      "id": "node.mse.page-reset-emitter",
+      "entryType": "current-node",
+      "path": "electron/service/embeddedBrowserResourceProbeRuntimeCore.ts",
+      "symbol": "emitMseStreamReset",
+      "sourceHash": "sha256:a44ff9ea0fbdd08bf72a873265006516fbf7c5daa3a2a711e807dd4ebf9ccf3e",
+      "classification": "legacy",
+      "ownerRole": "production-owner",
+      "capabilityId": "mse.page-capture-runtime",
+      "cutoverUnitId": "mse-runtime",
+      "provenanceRefs": ["git:352edb3f533a79007041d404233e4d4e0b936288"]
+    },
+    {
+      "id": "node.mse.page-flush-emitter",
+      "entryType": "current-node",
+      "path": "electron/service/embeddedBrowserResourceProbeRuntimeCore.ts",
+      "symbol": "flushMseStreamBuffers",
+      "sourceHash": "sha256:a44ff9ea0fbdd08bf72a873265006516fbf7c5daa3a2a711e807dd4ebf9ccf3e",
+      "classification": "legacy",
+      "ownerRole": "production-owner",
+      "capabilityId": "mse.page-capture-runtime",
+      "cutoverUnitId": "mse-runtime",
+      "provenanceRefs": ["git:352edb3f533a79007041d404233e4d4e0b936288"]
+    },
+    {
+      "id": "node.mse.main-spool-clear",
+      "entryType": "current-node",
+      "path": "electron/service/embeddedBrowserMainController.ts",
+      "symbol": "clearEmbeddedBrowserMseSpoolFiles",
+      "sourceHash": "sha256:60470fdff32b5d447437b7ab11fe254469cec282398f28bd96b608da7640e985",
+      "classification": "omniflow-integration",
+      "ownerRole": "output-owner",
+      "capabilityId": "mse.main-spool-lifecycle",
+      "cutoverUnitId": "mse-runtime",
+      "provenanceRefs": ["git:352edb3f533a79007041d404233e4d4e0b936288"]
+    },
+    {
+      "id": "node.mse.main-spool-append",
+      "entryType": "current-node",
+      "path": "electron/service/embeddedBrowserMainController.ts",
+      "symbol": "appendEmbeddedBrowserMseSpoolChunk",
+      "sourceHash": "sha256:60470fdff32b5d447437b7ab11fe254469cec282398f28bd96b608da7640e985",
+      "classification": "omniflow-integration",
+      "ownerRole": "output-owner",
+      "capabilityId": "mse.main-spool-lifecycle",
+      "cutoverUnitId": "mse-runtime",
+      "provenanceRefs": ["git:352edb3f533a79007041d404233e4d4e0b936288"]
+    },
+    {
+      "id": "node.page-actions.resource-script",
+      "entryType": "current-node",
+      "path": "electron/service/embeddedBrowserResourcePageBridge.ts",
+      "symbol": "createEmbeddedBrowserResourceProbeActionScript",
+      "sourceHash": "sha256:d73a0acbb0e48c93cc1a6c9d0920b9352706cb644b0eb8274f2ea44642c4388c",
+      "classification": "legacy",
+      "ownerRole": "adapter",
+      "capabilityId": "deep.runtime-hook-bundle",
+      "cutoverUnitId": "deep-search-runtime",
+      "provenanceRefs": ["git:643d40f15fb1cdd554e25d8f08ad840a1099bbc5"]
+    },
+    {
+      "id": "node.page-actions.global-api",
+      "entryType": "current-node",
+      "path": "electron/service/embeddedBrowserResourceProbePageActions.ts",
+      "symbol": "globalScope.__OMNIFLOW_EMBEDDED_BROWSER_RESOURCE_PROBE__",
+      "locatorKind": "member",
+      "sourceHash": "sha256:146e1f1cdf82ff618a124282e0bd716fc10e618d23702f67d7611f51d1f796f3",
+      "classification": "legacy",
+      "ownerRole": "contract",
+      "capabilityId": "deep.runtime-hook-bundle",
+      "cutoverUnitId": "deep-search-runtime",
+      "provenanceRefs": ["git:e1eeb8f0ae2c2b25f5277bb70665d8c97acca39b"]
+    },
+    {
+      "id": "node.page-actions.resource-extract-script",
+      "entryType": "current-node",
+      "path": "electron/service/embeddedBrowserResourcePageBridge.ts",
+      "symbol": "createEmbeddedBrowserResourceExtractScript",
+      "sourceHash": "sha256:d73a0acbb0e48c93cc1a6c9d0920b9352706cb644b0eb8274f2ea44642c4388c",
+      "classification": "legacy",
+      "ownerRole": "adapter",
+      "capabilityId": "deep.runtime-hook-bundle",
+      "cutoverUnitId": "deep-search-runtime",
+      "provenanceRefs": ["git:643d40f15fb1cdd554e25d8f08ad840a1099bbc5"]
+    },
+    {
+      "id": "node.page-actions.resource-read",
+      "entryType": "current-node",
+      "path": "electron/service/embeddedBrowserResourceProbePageActions.ts",
+      "symbol": "readResource",
+      "locatorKind": "member",
+      "sourceHash": "sha256:146e1f1cdf82ff618a124282e0bd716fc10e618d23702f67d7611f51d1f796f3",
+      "classification": "legacy",
+      "ownerRole": "adapter",
+      "capabilityId": "deep.runtime-hook-bundle",
+      "cutoverUnitId": "deep-search-runtime",
+      "provenanceRefs": ["git:e1eeb8f0ae2c2b25f5277bb70665d8c97acca39b"]
+    },
+    {
       "id": "node.contract.ambient-electron-env",
       "entryType": "current-node",
       "path": "electron/electron-env.d.ts",
       "symbol": "EmbeddedBrowserCapturedResource",
-      "sourceHash": "sha256:8797ba894a7bd9fd2ed1460b95f33829e18e669a4a665eaee9017f09ffa49b17",
+      "sourceHash": "sha256:3b8f74f51d8d1fce212b22c517be7388205114b585da7bec02fdb67f747bd7ca",
       "classification": "omniflow-integration",
       "ownerRole": "contract",
       "capabilityId": "capture.cross-process-contract",

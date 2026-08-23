@@ -99,19 +99,29 @@
       "type": ["string", "null"],
       "minLength": 1
     },
+    "locatorKind": {
+      "enum": ["declaration", "member", "runtime-literal"]
+    },
     "nodeLocator": {
       "type": "object",
       "additionalProperties": false,
       "required": ["path", "symbol"],
+      "dependentSchemas": {
+        "locatorKind": { "properties": { "symbol": { "type": "string" } } }
+      },
       "properties": {
         "path": { "$ref": "#/$defs/path" },
-        "symbol": { "$ref": "#/$defs/nullableSymbol" }
+        "symbol": { "$ref": "#/$defs/nullableSymbol" },
+        "locatorKind": { "$ref": "#/$defs/locatorKind" }
       }
     },
     "bootstrapRoot": {
       "type": "object",
       "additionalProperties": false,
       "required": ["id", "category", "path", "symbol", "traversal"],
+      "dependentSchemas": {
+        "locatorKind": { "properties": { "symbol": { "type": "string" } } }
+      },
       "properties": {
         "id": { "$ref": "#/$defs/identifier" },
         "category": {
@@ -131,6 +141,7 @@
         },
         "path": { "$ref": "#/$defs/path" },
         "symbol": { "$ref": "#/$defs/nullableSymbol" },
+        "locatorKind": { "$ref": "#/$defs/locatorKind" },
         "traversal": { "enum": ["forward", "reverse", "both"] }
       }
     },
@@ -190,10 +201,14 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["id", "path", "symbol", "lastKnownCommit", "sourceHash", "resolution"],
+      "dependentSchemas": {
+        "locatorKind": { "properties": { "symbol": { "type": "string" } } }
+      },
       "properties": {
         "id": { "$ref": "#/$defs/identifier" },
         "path": { "$ref": "#/$defs/path" },
         "symbol": { "$ref": "#/$defs/nullableSymbol" },
+        "locatorKind": { "$ref": "#/$defs/locatorKind" },
         "lastKnownCommit": { "$ref": "#/$defs/commit" },
         "sourceHash": { "$ref": "#/$defs/sha256" },
         "resolution": {
@@ -281,6 +296,9 @@
     "currentNode": {
       "type": "object",
       "additionalProperties": false,
+      "dependentSchemas": {
+        "locatorKind": { "properties": { "symbol": { "type": "string" } } }
+      },
       "required": [
         "id",
         "entryType",
@@ -298,6 +316,7 @@
         "entryType": { "const": "current-node" },
         "path": { "$ref": "#/$defs/path" },
         "symbol": { "$ref": "#/$defs/nullableSymbol" },
+        "locatorKind": { "$ref": "#/$defs/locatorKind" },
         "sourceHash": { "$ref": "#/$defs/sha256" },
         "classification": { "enum": ["legacy", "candidate", "target", "omniflow-integration"] },
         "ownerRole": {
@@ -326,6 +345,9 @@
     "retiredTombstone": {
       "type": "object",
       "additionalProperties": false,
+      "dependentSchemas": {
+        "locatorKind": { "properties": { "symbol": { "type": "string" } } }
+      },
       "required": [
         "id",
         "entryType",
@@ -343,6 +365,7 @@
         "entryType": { "const": "retired-tombstone" },
         "path": { "$ref": "#/$defs/path" },
         "symbol": { "$ref": "#/$defs/nullableSymbol" },
+        "locatorKind": { "$ref": "#/$defs/locatorKind" },
         "deletedSourceHash": { "$ref": "#/$defs/sha256" },
         "capabilityId": { "$ref": "#/$defs/identifier" },
         "cutoverUnitId": { "$ref": "#/$defs/identifier" },
@@ -360,11 +383,15 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["id", "candidateKind", "path", "symbol", "decision"],
+      "dependentSchemas": {
+        "locatorKind": { "properties": { "symbol": { "type": "string" } } }
+      },
       "properties": {
         "id": { "$ref": "#/$defs/identifier" },
         "candidateKind": { "enum": ["current", "historical"] },
         "path": { "$ref": "#/$defs/path" },
         "symbol": { "$ref": "#/$defs/nullableSymbol" },
+        "locatorKind": { "$ref": "#/$defs/locatorKind" },
         "decision": { "$ref": "decision-record.schema.json" }
       }
     }

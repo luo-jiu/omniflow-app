@@ -6,6 +6,7 @@ import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import {
+  getGitAncestryState,
   gitCommitContainsPathScope,
   hashGitCommitInputs,
   hashTrackedWorktreeInputs,
@@ -13,7 +14,9 @@ import {
   hashValidatorToolchainFingerprint,
   listDirtyTrackedPaths,
   listUntrackedPaths,
+  readGitCommitParents,
   readGitFileAtCommit,
+  readGitPathAtCommit,
 } from './git-input.ts'
 
 const temporaryDirectories: string[] = []
@@ -24,12 +27,17 @@ afterEach(() => {
   }
 })
 
-function createRepository(): string {
+function initializeRepository(): string {
   const repository = mkdtempSync(path.join(tmpdir(), 'cat-catch-git-input-'))
   temporaryDirectories.push(repository)
   execFileSync('git', ['init', '--quiet'], { cwd: repository })
   execFileSync('git', ['config', 'user.email', 'validator@example.invalid'], { cwd: repository })
   execFileSync('git', ['config', 'user.name', 'Validator Test'], { cwd: repository })
+  return repository
+}
+
+function createRepository(): string {
+  const repository = initializeRepository()
   mkdirSync(path.join(repository, 'docs/cat-catch/report-index'), { recursive: true })
   writeFileSync(path.join(repository, 'input.txt'), 'input-a\n')
   writeFileSync(path.join(repository, 'docs/cat-catch/report-index/index.json'), '{"entries":[]}\n')
@@ -75,6 +83,94 @@ describe('Cat Catch Git inputs', () => {
     execFileSync('git', ['commit', '--quiet', '-m', 'mode-only'], { cwd: repository })
     const secondCommit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repository, encoding: 'utf8' }).trim()
     expect(hashGitCommitInputs(repository, secondCommit)).not.toBe(firstHash)
+  })
+
+  it('distinguishes absent paths from unavailable Git objects and exposes direct parents', () => {
+    const repository = createRepository()
+    const parent = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repository, encoding: 'utf8' }).trim()
+    writeFileSync(path.join(repository, 'second.txt'), 'second\n')
+    execFileSync('git', ['add', 'second.txt'], { cwd: repository })
+    execFileSync('git', ['commit', '--quiet', '-m', 'second'], { cwd: repository })
+    const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repository, encoding: 'utf8' }).trim()
+
+    expect(readGitCommitParents(repository, head)).toEqual([parent])
+    expect(readGitCommitParents(repository, parent)).toEqual([])
+    expect(readGitPathAtCommit(repository, head, 'input.txt')).toEqual(expect.objectContaining({
+      status: 'present',
+    }))
+    expect(readGitPathAtCommit(repository, head, 'missing.txt')).toEqual({ status: 'absent' })
+    expect(readGitPathAtCommit(repository, 'f'.repeat(40), 'input.txt')).toEqual({ status: 'unavailable' })
+  })
+
+  it('reads direct parents from a root commit with an empty message', () => {
+    const repository = initializeRepository()
+    execFileSync('git', [
+      'commit',
+      '--quiet',
+      '--allow-empty',
+      '--allow-empty-message',
+      '-m',
+      '',
+    ], { cwd: repository })
+    const root = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: repository,
+      encoding: 'utf8',
+    }).trim()
+
+    expect(readGitCommitParents(repository, root)).toEqual([])
+  })
+
+  it('distinguishes complete, incomplete, and unavailable ancestry graphs', () => {
+    const completeRepository = createRepository()
+    const ancestor = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: completeRepository,
+      encoding: 'utf8',
+    }).trim()
+    execFileSync('git', ['commit', '--quiet', '--allow-empty', '-m', 'descendant'], {
+      cwd: completeRepository,
+    })
+    const descendant = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: completeRepository,
+      encoding: 'utf8',
+    }).trim()
+    expect(getGitAncestryState(completeRepository, ancestor, descendant)).toBe('ancestor')
+    expect(getGitAncestryState(completeRepository, descendant, ancestor)).toBe('not-ancestor')
+
+    const incompleteRepository = createRepository()
+    const incompleteAncestor = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: incompleteRepository,
+      encoding: 'utf8',
+    }).trim()
+    execFileSync('git', ['commit', '--quiet', '--allow-empty', '-m', 'missing middle'], {
+      cwd: incompleteRepository,
+    })
+    const missingParent = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: incompleteRepository,
+      encoding: 'utf8',
+    }).trim()
+    execFileSync('git', ['commit', '--quiet', '--allow-empty', '-m', 'incomplete descendant'], {
+      cwd: incompleteRepository,
+    })
+    const incompleteDescendant = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: incompleteRepository,
+      encoding: 'utf8',
+    }).trim()
+    rmSync(path.join(
+      incompleteRepository,
+      '.git',
+      'objects',
+      missingParent.slice(0, 2),
+      missingParent.slice(2),
+    ))
+    expect(getGitAncestryState(
+      incompleteRepository,
+      incompleteAncestor,
+      incompleteDescendant,
+    )).toBe('unavailable')
+
+    const nonRepository = mkdtempSync(path.join(tmpdir(), 'cat-catch-git-unavailable-'))
+    temporaryDirectories.push(nonRepository)
+    expect(getGitAncestryState(nonRepository, 'a'.repeat(40), 'b'.repeat(40))).toBe('unavailable')
   })
 
   it('reports tracked changes without dropping a leading porcelain status byte', () => {

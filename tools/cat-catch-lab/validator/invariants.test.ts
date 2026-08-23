@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
@@ -424,6 +424,71 @@ describe('Cat Catch contract invariants', () => {
     }))
   })
 
+  it('requires historical resolutions to preserve the exact typed locator', () => {
+    const context = createContext({
+      cutoverUnits: [{ id: 'mse' }],
+      capabilities: [{ id: 'mse.capture', cutoverUnitId: 'mse', fixtures: [] }],
+    })
+    const sourcePath = path.join(context.appRoot, 'runtime.ts')
+    writeFileSync(sourcePath, [
+      'export function normalizeBuffersForPlayback() { return true }',
+      'export function flushMseStreamBuffers() { return true }',
+      'callOnly()',
+      '',
+    ].join('\n'))
+    commitCandidateInputs(context)
+    const current = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: context.appRoot,
+      encoding: 'utf8',
+    }).trim()
+    context.documents.set('legacy-inventory.json', {
+      entries: [
+        {
+          id: 'node.mse.normalizer',
+          entryType: 'current-node',
+          path: 'runtime.ts',
+          symbol: 'normalizeBuffersForPlayback',
+          sourceHash: hashFile(sourcePath),
+          capabilityId: 'mse.capture',
+          cutoverUnitId: 'mse',
+        },
+        {
+          id: 'node.mse.flush',
+          entryType: 'current-node',
+          path: 'runtime.ts',
+          symbol: 'flushMseStreamBuffers',
+          sourceHash: hashFile(sourcePath),
+          capabilityId: 'mse.capture',
+          cutoverUnitId: 'mse',
+        },
+      ],
+      historicalCandidates: [
+        {
+          id: 'historical.mse.normalizer',
+          path: 'runtime.ts',
+          symbol: 'normalizeBuffersForPlayback',
+          lastKnownCommit: current,
+          sourceHash: hashFile(sourcePath),
+          resolution: { kind: 'current-node', refId: 'node.mse.flush' },
+        },
+        {
+          id: 'historical.call-only',
+          path: 'runtime.ts',
+          symbol: 'callOnly',
+          lastKnownCommit: current,
+          sourceHash: hashFile(sourcePath),
+          resolution: { kind: 'current-node', refId: 'node.mse.flush' },
+        },
+      ],
+    })
+
+    const issues = validateCrossFileInvariants(context)
+    expect(issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'historical-candidate-resolution-locator-mismatch' }),
+      expect.objectContaining({ code: 'historical-candidate-symbol-missing' }),
+    ]))
+  })
+
   it('requires tombstone deletion commits and evidence to be independently resolvable', () => {
     const context = createContext({
       cutoverUnits: [{ id: 'capture' }],
@@ -466,6 +531,89 @@ describe('Cat Catch contract invariants', () => {
       expect.objectContaining({ code: 'tombstone-deletion-commit-missing', severity: 'blocker' }),
       expect.objectContaining({ code: 'tombstone-deletion-evidence-unresolved', severity: 'blocker' }),
     ]))
+  })
+
+  it('fails closed when a present tombstone locator cannot be parsed', () => {
+    const context = createContext({
+      cutoverUnits: [{ id: 'capture' }],
+      capabilities: [{ id: 'capture.test', cutoverUnitId: 'capture', fixtures: [] }],
+    })
+    writeFileSync(path.join(context.appRoot, 'unsupported.vue'), '<script>export const stillCurrent = true</script>\n')
+    writeFileSync(path.join(context.appRoot, 'broken.ts'), 'export const stillCurrent = {\n')
+    commitCandidateInputs(context)
+    const current = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: context.appRoot,
+      encoding: 'utf8',
+    }).trim()
+    context.documents.set('legacy-inventory.json', {
+      entries: [
+        {
+          id: 'tombstone.unsupported',
+          entryType: 'retired-tombstone',
+          path: 'unsupported.vue',
+          symbol: 'stillCurrent',
+          deletedSourceHash: `sha256:${'0'.repeat(64)}`,
+          capabilityId: 'capture.test',
+          cutoverUnitId: 'capture',
+          deletionCommit: current,
+          deletionEvidenceRef: null,
+        },
+        {
+          id: 'tombstone.parse-error',
+          entryType: 'retired-tombstone',
+          path: 'broken.ts',
+          symbol: 'stillCurrent',
+          deletedSourceHash: `sha256:${'0'.repeat(64)}`,
+          capabilityId: 'capture.test',
+          cutoverUnitId: 'capture',
+          deletionCommit: current,
+          deletionEvidenceRef: null,
+        },
+      ],
+      historicalCandidates: [],
+    })
+
+    const issues = validateCrossFileInvariants(context)
+      .filter(issue => issue.code === 'tombstone-current-locator-unverifiable')
+    expect(issues).toHaveLength(2)
+    expect(issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: 'legacy-inventory.json.entries[tombstone:0]', severity: 'blocker' }),
+      expect.objectContaining({ path: 'legacy-inventory.json.entries[tombstone:1]', severity: 'blocker' }),
+    ]))
+  })
+
+  it('fails closed when the current tombstone Git path cannot be read as a blob', () => {
+    const context = createContext({
+      cutoverUnits: [{ id: 'capture' }],
+      capabilities: [{ id: 'capture.test', cutoverUnitId: 'capture', fixtures: [] }],
+    })
+    mkdirSync(path.join(context.appRoot, 'runtime'))
+    writeFileSync(path.join(context.appRoot, 'runtime/current.ts'), 'export const stillCurrent = true\n')
+    commitCandidateInputs(context)
+    const current = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: context.appRoot,
+      encoding: 'utf8',
+    }).trim()
+    context.documents.set('legacy-inventory.json', {
+      entries: [{
+        id: 'tombstone.unavailable',
+        entryType: 'retired-tombstone',
+        path: 'runtime',
+        symbol: null,
+        deletedSourceHash: `sha256:${'0'.repeat(64)}`,
+        capabilityId: 'capture.test',
+        cutoverUnitId: 'capture',
+        deletionCommit: current,
+        deletionEvidenceRef: null,
+      }],
+      historicalCandidates: [],
+    })
+
+    expect(validateCrossFileInvariants(context)).toContainEqual(expect.objectContaining({
+      code: 'tombstone-current-path-unavailable',
+      path: 'legacy-inventory.json.entries[tombstone:0]',
+      severity: 'blocker',
+    }))
   })
 
   it('rejects cyclic cutover dependency declarations', () => {
@@ -517,6 +665,54 @@ describe('Cat Catch contract invariants', () => {
     expect(validateCrossFileInvariants(context)).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: 'bootstrap-root-not-inventoried', severity: 'blocker' }),
       expect.objectContaining({ code: 'dynamic-edge-fixture-unmapped', severity: 'blocker' }),
+    ]))
+  })
+
+  it('requires current inventory and dynamic-edge symbols to exist in the exact input source', () => {
+    const context = createContext({
+      cutoverUnits: [{ id: 'capture', dependencyMapping: 'pending', dependsOn: [] }],
+      capabilities: [],
+    })
+    const sourcePath = path.join(context.appRoot, 'runtime.ts')
+    writeFileSync(sourcePath, 'export const realSourceNode = true\nexport const realTargetNode = true\n')
+    commitCandidateInputs(context)
+    context.documents.set('legacy-inventory.json', {
+      bootstrapRoots: [{
+        id: 'root.runtime',
+        path: 'runtime.ts',
+        symbol: 'missingBootstrapNode',
+      }],
+      semanticScanRules: [],
+      historicalTouchsets: [],
+      entries: [{
+        id: 'node.runtime',
+        entryType: 'current-node',
+        path: 'runtime.ts',
+        symbol: 'missingInventoryNode',
+        sourceHash: hashFile(sourcePath),
+        capabilityId: null,
+        cutoverUnitId: null,
+      }],
+      historicalCandidates: [],
+      approvedExclusions: [],
+      declaredDynamicEdges: [{
+        id: 'edge.runtime',
+        kind: 'runtime-template',
+        source: { path: 'runtime.ts', symbol: 'missingEdgeSource' },
+        target: { path: 'runtime.ts', symbol: 'missingEdgeTarget' },
+        sourceHash: hashFile(sourcePath),
+        fixtureId: 'closure.runtime',
+      }],
+    })
+
+    const symbolIssues = validateCrossFileInvariants(context)
+      .filter(issue => issue.code === 'source-symbol-missing')
+    expect(symbolIssues).toHaveLength(4)
+    expect(symbolIssues.map(issue => issue.path)).toEqual(expect.arrayContaining([
+      'legacy-inventory.json.entries[current:0]',
+      'legacy-inventory.json.bootstrapRoots[0]',
+      'legacy-inventory.json.declaredDynamicEdges[0].source',
+      'legacy-inventory.json.declaredDynamicEdges[0].target',
     ]))
   })
 

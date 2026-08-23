@@ -1,6 +1,6 @@
 # Cat Catch 全面重构执行契约
 
-更新时间：2026-08-23
+更新时间：2026-08-24
 
 状态：生效，`G0 事实归零` 进行中。
 
@@ -280,6 +280,15 @@ Bootstrap roots 必须覆盖以下入口族；具体 path/symbol 由 inventory �
 
 静态工具无法解析的动态边不能被忽略。它们必须成为带 source hash、解析规则和验证 fixture 的 declared dynamic edge；仍无法确定目标的边进入 `unresolvedEdges` 并阻止 Gate。每个端点使用精确的 `{path, symbol}` locator，`symbol` 是 inventory identity，不是描述性标签；同文件不同 symbol 不能只按 path 猜归属。同一 `kind + source locator + target locator` 只能声明一次。`process-handoff` 的 target 必须是 `symbol=null` 的 `external-process/<identifier>` 虚拟 locator，该 namespace 不得被其他 edge kind 使用。
 
+所有带 `symbol` 的本地 locator 都必须声明可机器验证的语义，不能退回 substring 搜索：
+
+- `declaration` 是默认类型，只匹配 AST 中的变量、函数、类、类型、模块或 import/export 声明，不匹配调用、注释和同名字符串。
+- `member` 只匹配方法、属性、accessor、对象成员或精确的成员赋值；调用表达式不能冒充 member owner。
+- `runtime-literal` 只匹配源码字符串 literal，或能按 JavaScript 语法重建的 generated template 中的字符串 literal；注释、正则、裸 identifier 和插值表达式不算 literal。
+- locator 在同一 snapshot 中必须恰好解析为一个逻辑目标。合法的 TypeScript overload group、同一 getter/setter pair 可以合并为一个目标；其他跨 scope 或同 scope 重复声明/成员均为 ambiguous blocker。源码语言不支持、AST 解析失败或 Git blob 不可用时必须 fail closed。
+
+retired tombstone 的“当前树已不存在”也使用同一精确 locator 证明：只有 path 明确 absent，或当前 blob 可读且 locator 明确为 missing 时才成立。当前 path/blob 不可用、语言不支持或解析失败不能被当成已经删除。
+
 `local-closure-report` 至少包含：
 
 - `evidenceInputCommit`、input tree hash、validator/discovery-rules version。
@@ -520,6 +529,8 @@ freshness:
 ```
 
 示例只说明声明性 schema，不代表该能力已经达到任何 evidence/deployment 状态。针对 C 生成的 capability-state report 才记录 `verifiedThrough`、各 evidence 轴、实际 deployment/freshness、解析后的 owner 和 artifact refs；因此不存在“先把 C 的 artifact id 写进 C”这一自引用。
+
+source reference 的 hash、snapshot 与 `introducedBy` 都以 Git object 为准，不读取 dirty working tree。`introducedBy` 表示该 locator 在**这个 path 上**的首次引入证明，而不是仓库范围的作者归属：声明的 commit 必须可解析为 snapshot 的祖先，目标 path/locator 必须存在于该 commit，并且它的每个 direct parent 都必须明确缺少该 path 或 locator；merge commit 必须检查全部 parents。root commit、rename/copy 后的新 path、以及 delete 后 re-add 都可以在这一定义下成为合法的 path-local introduction。annotated tag 必须先 peel 到 commit，replace refs 必须禁用；commit、parent、tree 或 blob 任一不可用时必须保持 blocker，不能把“无法读取”解释为“不存在”。
 
 `origin` 只能取：
 

@@ -1,7 +1,7 @@
 {
   "$schema": "./capability-ledger.schema.json",
   "schemaVersion": 1,
-  "ledgerVersion": "2026-08-23.2",
+  "ledgerVersion": "2026-08-24.2",
   "cutoverUnits": [
     {
       "id": "network-capture",
@@ -43,7 +43,7 @@
       "dependsOn": [],
       "dependencyMapping": "pending",
       "dispatchBoundaryRefs": [
-        "src/features/embedded-browser/resources/services/embedded-browser-resource-manifest-actions.ts#loadEmbeddedBrowserHlsManifest",
+        "src/features/embedded-browser/resources/services/embedded-browser-resource-manifest-actions.ts#analyzeHlsResource",
         "electron/service/embeddedBrowserMainController.ts#downloadEmbeddedBrowserHlsPlanResource"
       ]
     },
@@ -54,7 +54,7 @@
       "dependsOn": [],
       "dependencyMapping": "pending",
       "dispatchBoundaryRefs": [
-        "src/features/embedded-browser/resources/services/embedded-browser-resource-manifest-actions.ts#loadEmbeddedBrowserMpdManifest",
+        "src/features/embedded-browser/resources/services/embedded-browser-resource-manifest-actions.ts#analyzeMpdResource",
         "electron/service/embeddedBrowserMainController.ts#downloadEmbeddedBrowserMpdPlanResource"
       ]
     },
@@ -90,10 +90,16 @@
       "cutoverUnitId": "network-capture",
       "additionalRiskTags": ["production-runtime", "cross-process", "long-task"],
       "upstreamSources": [
-        { "path": "js/background.js", "anchor": "chrome.webRequest.onResponseStarted", "introducedBy": null, "blobHash": null }
+        { "path": "js/background.js", "anchor": "chrome.webRequest.onResponseStarted.addListener(", "introducedBy": "721ed55dc0a0032257c907b2d3fccbae3d14fb4d", "blobHash": "sha256:a6eab7da1fe2a7d904f85f84aa1a36762f5f36c698c8e0fc0aa9dc5658d80b58" },
+        { "path": "js/background.js", "anchor": "chrome.webRequest.onSendHeaders.addListener(", "introducedBy": "0ee76140c8063a8974a9725239744ff4089ae575", "blobHash": "sha256:a6eab7da1fe2a7d904f85f84aa1a36762f5f36c698c8e0fc0aa9dc5658d80b58" },
+        { "path": "js/background.js", "anchor": "chrome.webRequest.onErrorOccurred.addListener(", "introducedBy": "491b0f11920937515097cfd5281b97d257ade1a2", "blobHash": "sha256:a6eab7da1fe2a7d904f85f84aa1a36762f5f36c698c8e0fc0aa9dc5658d80b58" },
+        { "path": "manifest.json", "anchor": "\"service_worker\": \"js/background.js\"", "introducedBy": "af9247320ac028067bfeb9be5c060468b47d4b4b", "blobHash": "sha256:18a14f7f1bd4ff0cdb49b90b0c78385d8bd0f590f3f8b0372326369e735b7b1e" },
+        { "path": "manifest.firefox.json", "anchor": "\"js/polyfill.js\",", "introducedBy": "dcd236a92aa8cb80f822579821f5298f276a4f2d", "blobHash": "sha256:4d81d865583e595a6eaa3786c04233f0084531e2f496b968bb955cf2dad7762e" },
+        { "path": "js/background.js", "anchor": "importScripts(\"/js/polyfill.js\", \"/js/function.js\", \"/js/templates.js\", \"/js/init.js\");", "introducedBy": "a8976b135ff53c9fd1e096e27674d923cb758d2b", "blobHash": "sha256:a6eab7da1fe2a7d904f85f84aa1a36762f5f36c698c8e0fc0aa9dc5658d80b58" },
+        { "path": "js/polyfill.js", "anchor": "if (!chrome.downloads) {", "introducedBy": "a8976b135ff53c9fd1e096e27674d923cb758d2b", "blobHash": "sha256:7979826e7cda4604b7180b6a94411441b610dc594a134d96322df2f725657c58" }
       ],
       "localContractRefs": [
-        { "path": "electron/service/embeddedBrowserResourceBridge.ts", "anchor": "initializeEmbeddedBrowserResourceBridge", "sourceHash": null }
+        { "path": "electron/service/embeddedBrowserResourceBridge.ts", "anchor": "initializeEmbeddedBrowserResourceBridge", "sourceHash": "sha256:6e0813d2742d5aeeb25867ea2992b176eaa4a273ce9ae6490ee6a2cae5f491d9" }
       ],
       "auditedThrough": null,
       "oracleRelation": "platform-substitute",
@@ -120,12 +126,12 @@
       "cutoverUnitId": "network-capture",
       "additionalRiskTags": ["production-runtime", "cross-process", "credentials", "security-boundary"],
       "upstreamSources": [
-        { "path": "js/background.js", "anchor": "G.requestHeaders", "introducedBy": null, "blobHash": null },
-        { "path": "js/background.js", "anchor": "getRequestHeaders", "introducedBy": null, "blobHash": null }
+        { "path": "js/background.js", "anchor": "G.requestHeaders = new Map();", "introducedBy": "aafc9a68d602c98973f465e577a10ebae86f2d9d", "blobHash": "sha256:a6eab7da1fe2a7d904f85f84aa1a36762f5f36c698c8e0fc0aa9dc5658d80b58" },
+        { "path": "js/background.js", "anchor": "function getRequestHeaders(data) {", "introducedBy": "3ec1ad2c957d5979dbf64b0aa6a50d1239e9e069", "blobHash": "sha256:a6eab7da1fe2a7d904f85f84aa1a36762f5f36c698c8e0fc0aa9dc5658d80b58" }
       ],
       "localContractRefs": [
-        { "path": "electron/service/embeddedBrowserResourceBridge.ts", "anchor": "requestContextsByRequestId", "sourceHash": null },
-        { "path": "electron/service/embeddedBrowserResourceTypes.ts", "anchor": "EmbeddedBrowserCapturedRequestHeaders", "sourceHash": null }
+        { "path": "electron/service/embeddedBrowserResourceBridge.ts", "anchor": "requestContextsByRequestId", "sourceHash": "sha256:6e0813d2742d5aeeb25867ea2992b176eaa4a273ce9ae6490ee6a2cae5f491d9" },
+        { "path": "electron/service/embeddedBrowserResourceTypes.ts", "anchor": "EmbeddedBrowserCapturedRequestHeaders", "sourceHash": "sha256:424582e9a74d3b89cd3bd5aec87e3b21852fc41a227f1a7002f1986595d0ca71" }
       ],
       "auditedThrough": null,
       "oracleRelation": "platform-substitute",
@@ -152,10 +158,10 @@
       "cutoverUnitId": "network-capture",
       "additionalRiskTags": ["production-runtime", "credentials", "security-boundary"],
       "upstreamSources": [
-        { "path": "js/function.js", "anchor": "function setRequestHeaders(data = {}, callback = undefined)", "introducedBy": null, "blobHash": "sha256:f1876eeec0e22e25f2424054d0ea15510027a93237a3109d016f2e7cc16c59a0" },
-        { "path": "js/function.js", "anchor": "function setHeaders(data, callBack, tabId = -1)", "introducedBy": null, "blobHash": "sha256:f1876eeec0e22e25f2424054d0ea15510027a93237a3109d016f2e7cc16c59a0" },
-        { "path": "js/function.js", "anchor": "function isDamnUrl(url)", "introducedBy": null, "blobHash": "sha256:f1876eeec0e22e25f2424054d0ea15510027a93237a3109d016f2e7cc16c59a0" },
-        { "path": "js/function.js", "anchor": "function isLockUrl(url)", "introducedBy": null, "blobHash": "sha256:f1876eeec0e22e25f2424054d0ea15510027a93237a3109d016f2e7cc16c59a0" }
+        { "path": "js/function.js", "anchor": "function setRequestHeaders(data = {}, callback = undefined)", "introducedBy": "7b84921518a10b3ab6b675a86df6e150af816bcc", "blobHash": "sha256:f1876eeec0e22e25f2424054d0ea15510027a93237a3109d016f2e7cc16c59a0" },
+        { "path": "js/function.js", "anchor": "function setHeaders(data, callBack, tabId = -1)", "introducedBy": "8a93c407cdebc5f07f90f1f4b49cf69d86888266", "blobHash": "sha256:f1876eeec0e22e25f2424054d0ea15510027a93237a3109d016f2e7cc16c59a0" },
+        { "path": "js/function.js", "anchor": "function isDamnUrl(url)", "introducedBy": "660732bbbc1cfd779575b31f4517b375a4dcb765", "blobHash": "sha256:f1876eeec0e22e25f2424054d0ea15510027a93237a3109d016f2e7cc16c59a0" },
+        { "path": "js/function.js", "anchor": "function isLockUrl(url)", "introducedBy": "0290c42af6faebb76908041b70562bc2cf11a7d2", "blobHash": "sha256:f1876eeec0e22e25f2424054d0ea15510027a93237a3109d016f2e7cc16c59a0" }
       ],
       "localContractRefs": [],
       "auditedThrough": null,
@@ -183,12 +189,13 @@
       "cutoverUnitId": "network-capture",
       "additionalRiskTags": ["production-runtime"],
       "upstreamSources": [
-        { "path": "js/background.js", "anchor": "findMedia", "introducedBy": null, "blobHash": null },
-        { "path": "js/init.js", "anchor": "Ext", "introducedBy": null, "blobHash": null }
+        { "path": "js/background.js", "anchor": "function findMedia(data, isRegex = false, filter = false, timer = false) {", "introducedBy": "20afb94746b0b6914756e27cdd9dc962c9b82821", "blobHash": "sha256:a6eab7da1fe2a7d904f85f84aa1a36762f5f36c698c8e0fc0aa9dc5658d80b58" },
+        { "path": "js/init.js", "anchor": "items.Ext = new Map(items.Ext.map(item => {", "introducedBy": "88d316896c05d453b64d688a9eae5cc4656b3b12", "blobHash": "sha256:fd4393999ae1d4ebba3c2d8a1bc7024380afd3ba4a93566f6cb05dde7a771a54" },
+        { "path": "js/init.js", "anchor": "checkDuplicates: true,", "introducedBy": "75d174b6e47d84d25b91440ddc7566830824934e", "blobHash": "sha256:fd4393999ae1d4ebba3c2d8a1bc7024380afd3ba4a93566f6cb05dde7a771a54" }
       ],
       "localContractRefs": [
-        { "path": "electron/service/embeddedBrowserResourceCaptureRules.ts", "anchor": "evaluateEmbeddedBrowserResourceCapture", "sourceHash": null },
-        { "path": "electron/service/embeddedBrowserResourceClassifier.ts", "anchor": "classifyCapturedResource", "sourceHash": null }
+        { "path": "electron/service/embeddedBrowserResourceCaptureRules.ts", "anchor": "evaluateEmbeddedBrowserResourceCapture", "sourceHash": "sha256:773fd6c66b98ae52f307d1236fb24247a02d5f49019c29e58f1822948a2c15c4" },
+        { "path": "electron/service/embeddedBrowserResourceClassifier.ts", "anchor": "classifyCapturedResource", "sourceHash": "sha256:b68cab540cc20b7bc3c62a09b01ca8512d34149bf832e5459fecda1f288d7f36" }
       ],
       "auditedThrough": null,
       "oracleRelation": "semantic-equivalent",
@@ -213,16 +220,20 @@
     },
     {
       "id": "capture.resource-state-contract",
-      "origin": "omniflow-integration",
+      "origin": "cross-boundary",
       "boundary": "main.resource-state",
       "cutoverUnitId": "network-capture",
       "additionalRiskTags": ["production-runtime", "cross-process"],
-      "upstreamSources": [],
+      "upstreamSources": [
+        { "path": "js/init.js", "anchor": "autoClearMode: 1,", "introducedBy": "66e5d504902462253bdf4babf1b197164a5a3432", "blobHash": "sha256:fd4393999ae1d4ebba3c2d8a1bc7024380afd3ba4a93566f6cb05dde7a771a54" },
+        { "path": "js/background.js", "anchor": "if (changeInfo.status && changeInfo.status == \"loading\" && G.autoClearMode == 2) {", "introducedBy": "f0f10451081f33af7caadfde7d4be70da846aca2", "blobHash": "sha256:a6eab7da1fe2a7d904f85f84aa1a36762f5f36c698c8e0fc0aa9dc5658d80b58" },
+        { "path": "js/background.js", "anchor": "if (details.frameId == 0 && (!['auto_subframe', 'manual_subframe', 'form_submit'].includes(details.transitionType)) && G.autoClearMode == 1) {", "introducedBy": "637b750ab9a88ecc9b94fcedeb16587e6350ea00", "blobHash": "sha256:a6eab7da1fe2a7d904f85f84aa1a36762f5f36c698c8e0fc0aa9dc5658d80b58" }
+      ],
       "localContractRefs": [
-        { "path": "electron/service/embeddedBrowserResourceStateStore.ts", "anchor": "tabCaptureStates", "sourceHash": null }
+        { "path": "electron/service/embeddedBrowserResourceStateStore.ts", "anchor": "tabCaptureStates", "sourceHash": "sha256:ee5a75813afa1bccdf2fe81bd6f38a8289d2448472e52f48c0d05790a8d4d74a" }
       ],
       "auditedThrough": null,
-      "oracleRelation": "not-applicable",
+      "oracleRelation": "semantic-equivalent",
       "disposition": "pending",
       "mapping": "unmapped",
       "requiredEvidence": {
@@ -237,7 +248,7 @@
       "fixtures": ["state.capacity-ttl-dedupe", "state.tab-navigation-close"],
       "decision": null,
       "acceptedDifferences": [],
-      "notes": "The current main Map is the production state owner but has no entry budget, TTL, or application-wide disposal method."
+      "notes": "The pinned upstream defaults to normal-navigation resource clearing via autoClearMode=1. The current main Map is the production state owner but has no entry budget, TTL, or application-wide disposal method."
     },
     {
       "id": "capture.cross-process-contract",
@@ -247,9 +258,9 @@
       "additionalRiskTags": ["production-runtime", "cross-process", "security-boundary"],
       "upstreamSources": [],
       "localContractRefs": [
-        { "path": "electron/service/embeddedBrowserResourceTypes.ts", "anchor": "EmbeddedBrowserCapturedResource", "sourceHash": null },
-        { "path": "electron/preload.ts", "anchor": "electronEmbeddedBrowser", "sourceHash": null },
-        { "path": "src/features/embedded-browser/resources/types.ts", "anchor": "EmbeddedBrowserCapturedResource", "sourceHash": null }
+        { "path": "electron/service/embeddedBrowserResourceTypes.ts", "anchor": "EmbeddedBrowserCapturedResource", "sourceHash": "sha256:424582e9a74d3b89cd3bd5aec87e3b21852fc41a227f1a7002f1986595d0ca71" },
+        { "path": "electron/preload.ts", "anchor": "electronEmbeddedBrowser", "sourceHash": "sha256:48f180b1ac3e39497bb8d623ca09cd96ea6096ce7862c858cec0b1b547afdfaa" },
+        { "path": "src/features/embedded-browser/resources/types.ts", "anchor": "EmbeddedBrowserCapturedResource", "sourceHash": "sha256:e6b41dd4a7eeb2307eef9695498e0920a4d794d9d460d271d00e1b0d3c8bf5d2" }
       ],
       "auditedThrough": null,
       "oracleRelation": "not-applicable",
@@ -269,7 +280,7 @@
           "src/features/embedded-browser/resources/types.ts#EmbeddedBrowserCapturedResource"
         ]
       },
-      "fixtures": ["contract.resource-dto-single-source", "contract.renderer-safe-projection", "closure.resource-ipc-channels"],
+      "fixtures": ["contract.resource-dto-single-source", "contract.renderer-safe-projection", "closure.resource-ipc-channels", "closure.resource-event-projection", "closure.page-preview-script"],
       "decision": null,
       "acceptedDifferences": [],
       "notes": "Seed gap: resource and processing DTOs are duplicated across main, preload, ambient declarations, renderer types, and APIs."
@@ -282,8 +293,8 @@
       "additionalRiskTags": ["production-runtime", "cross-process", "long-task", "temp-file"],
       "upstreamSources": [],
       "localContractRefs": [
-        { "path": "electron/service/embeddedBrowserMainController.ts", "anchor": "closeEmbeddedBrowserTab", "sourceHash": null },
-        { "path": "electron/service/embeddedBrowserMainController.ts", "anchor": "dispose", "sourceHash": null }
+        { "path": "electron/service/embeddedBrowserMainController.ts", "anchor": "closeEmbeddedBrowserTab", "sourceHash": "sha256:60470fdff32b5d447437b7ab11fe254469cec282398f28bd96b608da7640e985" },
+        { "path": "electron/service/embeddedBrowserMainController.ts", "anchor": "dispose", "sourceHash": "sha256:60470fdff32b5d447437b7ab11fe254469cec282398f28bd96b608da7640e985" }
       ],
       "auditedThrough": null,
       "oracleRelation": "not-applicable",
@@ -310,10 +321,23 @@
       "cutoverUnitId": "deep-search-runtime",
       "additionalRiskTags": ["production-runtime", "security-boundary"],
       "upstreamSources": [
-        { "path": "catch-script/search.js", "anchor": "Worker fetch XHR JSON TextDecoder hooks", "introducedBy": null, "blobHash": null }
+        { "path": "catch-script/search.js", "anchor": "self.Worker = function (scriptURL, options) {", "introducedBy": "9552aa86540c2f61247550c52e9129e009b3f5d9", "blobHash": "sha256:f5738ce73038b8c7aa1d07b0167d11732125705e29665119fd1130b8780e7566" },
+        { "path": "catch-script/search.js", "anchor": "JSON.parse = function () {", "introducedBy": "931864e3591bd607e8bcda65172daa471bc4debe", "blobHash": "sha256:f5738ce73038b8c7aa1d07b0167d11732125705e29665119fd1130b8780e7566" },
+        { "path": "catch-script/search.js", "anchor": "XMLHttpRequest.prototype.open = function (method) {", "introducedBy": "6582ec641c9df23d457820539816ac1a4347fa74", "blobHash": "sha256:f5738ce73038b8c7aa1d07b0167d11732125705e29665119fd1130b8780e7566" },
+        { "path": "catch-script/search.js", "anchor": "fetch = async function (input, init) {", "introducedBy": "6582ec641c9df23d457820539816ac1a4347fa74", "blobHash": "sha256:f5738ce73038b8c7aa1d07b0167d11732125705e29665119fd1130b8780e7566" },
+        { "path": "catch-script/search.js", "anchor": "TextDecoder.prototype.decode = function (v, options) {", "introducedBy": "72026c5ae60d2921ef1bb52440bba3d544c7b124", "blobHash": "sha256:f5738ce73038b8c7aa1d07b0167d11732125705e29665119fd1130b8780e7566" },
+        { "path": "manifest.json", "anchor": "\"js/content-script.js\"", "introducedBy": "43ff77c9ed61d2a7d701efc9bb4b004a2300c664", "blobHash": "sha256:18a14f7f1bd4ff0cdb49b90b0c78385d8bd0f590f3f8b0372326369e735b7b1e" },
+        { "path": "manifest.json", "anchor": "\"run_at\": \"document_start\"", "introducedBy": "918ac049215af593588bbe974122ca0b4cba11f6", "blobHash": "sha256:18a14f7f1bd4ff0cdb49b90b0c78385d8bd0f590f3f8b0372326369e735b7b1e" },
+        { "path": "manifest.json", "anchor": "\"all_frames\": true", "introducedBy": "43ff77c9ed61d2a7d701efc9bb4b004a2300c664", "blobHash": "sha256:18a14f7f1bd4ff0cdb49b90b0c78385d8bd0f590f3f8b0372326369e735b7b1e" },
+        { "path": "manifest.firefox.json", "anchor": "\"js/content-script.js\"", "introducedBy": "43ff77c9ed61d2a7d701efc9bb4b004a2300c664", "blobHash": "sha256:4d81d865583e595a6eaa3786c04233f0084531e2f496b968bb955cf2dad7762e" },
+        { "path": "manifest.firefox.json", "anchor": "\"run_at\": \"document_start\"", "introducedBy": "6a94d9dae20a1d5ed7a75de60a79f20c3f0e9e82", "blobHash": "sha256:4d81d865583e595a6eaa3786c04233f0084531e2f496b968bb955cf2dad7762e" },
+        { "path": "manifest.firefox.json", "anchor": "\"all_frames\": true", "introducedBy": "43ff77c9ed61d2a7d701efc9bb4b004a2300c664", "blobHash": "sha256:4d81d865583e595a6eaa3786c04233f0084531e2f496b968bb955cf2dad7762e" },
+        { "path": "js/background.js", "anchor": "const files = [`catch-script/${Message.script}`];", "introducedBy": "32f251e7a01fd909e09184312dbbac166e014253", "blobHash": "sha256:a6eab7da1fe2a7d904f85f84aa1a36762f5f36c698c8e0fc0aa9dc5658d80b58" },
+        { "path": "js/background.js", "anchor": "script.i18n && files.unshift(\"catch-script/i18n.js\");", "introducedBy": "32f251e7a01fd909e09184312dbbac166e014253", "blobHash": "sha256:a6eab7da1fe2a7d904f85f84aa1a36762f5f36c698c8e0fc0aa9dc5658d80b58" },
+        { "path": "js/init.js", "anchor": "deepSearch: false,", "introducedBy": "4a3f3d8726659147c434b5323de2edd510f7e1f2", "blobHash": "sha256:fd4393999ae1d4ebba3c2d8a1bc7024380afd3ba4a93566f6cb05dde7a771a54" }
       ],
       "localContractRefs": [
-        { "path": "electron/service/embeddedBrowserResourceProbeRuntimeHooks.ts", "anchor": "embeddedBrowserResourceProbeRuntimeHooksBody", "sourceHash": null }
+        { "path": "electron/service/embeddedBrowserResourceProbeRuntimeHooks.ts", "anchor": "embeddedBrowserResourceProbeRuntimeHooksBody", "sourceHash": "sha256:1cd2e9cef109da1e80dddde4a2b0a4b0e2d53218eeedcf6dfdf1853e2f3b2785" }
       ],
       "auditedThrough": null,
       "oracleRelation": "exact",
@@ -328,7 +352,7 @@
         "candidate": [],
         "legacy": ["electron/service/embeddedBrowserResourceProbeRuntimeHooks.ts#embeddedBrowserResourceProbeRuntimeHooksBody"]
       },
-      "fixtures": ["deep.hook-install-sentinels", "deep.worker-csp-fallback", "deep.text-decoder-manifest", "deep.json-depth-width-cycle"],
+      "fixtures": ["deep.hook-install-sentinels", "deep.worker-csp-fallback", "deep.text-decoder-manifest", "deep.json-depth-width-cycle", "closure.runtime-template-core", "closure.runtime-template-hooks", "closure.runtime-template-manifest", "closure.runtime-template-actions", "closure.document-start-injection", "closure.worker-bootstrap", "closure.page-probe-actions"],
       "decision": null,
       "acceptedDifferences": [],
       "notes": "Known seed gap: enableDeepRuntimeHooks is hard-coded false; Worker/fetch/XHR/JSON/key hooks are inactive, TextDecoder is absent, and JSON limits differ from upstream."
@@ -340,11 +364,12 @@
       "cutoverUnitId": "deep-search-runtime",
       "additionalRiskTags": ["production-runtime", "security-boundary"],
       "upstreamSources": [
-        { "path": "catch-script/search.js", "anchor": "findMedia and key discovery", "introducedBy": null, "blobHash": null }
+        { "path": "catch-script/search.js", "anchor": "async function findMedia(data, depth = 0) {", "introducedBy": "8340a6a1d694071158de5cf3857ef2caa27d1a5b", "blobHash": "sha256:f5738ce73038b8c7aa1d07b0167d11732125705e29665119fd1130b8780e7566" },
+        { "path": "catch-script/search.js", "anchor": "function toUrl(text, ext = \"m3u8\") {", "introducedBy": "6582ec641c9df23d457820539816ac1a4347fa74", "blobHash": "sha256:f5738ce73038b8c7aa1d07b0167d11732125705e29665119fd1130b8780e7566" }
       ],
       "localContractRefs": [
-        { "path": "electron/service/embeddedBrowserResourceProbeRuntimeCore.ts", "anchor": "probeResources", "sourceHash": null },
-        { "path": "electron/service/embeddedBrowserResourceProbeManifestHeuristics.ts", "anchor": "embeddedBrowserResourceProbeManifestHeuristicsBody", "sourceHash": null }
+        { "path": "electron/service/embeddedBrowserResourceProbeRuntimeCore.ts", "anchor": "probeResources", "sourceHash": "sha256:a44ff9ea0fbdd08bf72a873265006516fbf7c5daa3a2a711e807dd4ebf9ccf3e" },
+        { "path": "electron/service/embeddedBrowserResourceProbeManifestHeuristics.ts", "anchor": "embeddedBrowserResourceProbeManifestHeuristicsBody", "sourceHash": "sha256:39249896d134d56b168bf6cb5caf0a39cca9e88553fa1ac44497ad46d16dba7f" }
       ],
       "auditedThrough": null,
       "oracleRelation": "exact",
@@ -362,7 +387,7 @@
           "electron/service/embeddedBrowserResourceProbeManifestHeuristics.ts#embeddedBrowserResourceProbeManifestHeuristicsBody"
         ]
       },
-      "fixtures": ["deep.inline-manifest-key", "deep.base-url-blob-signature"],
+      "fixtures": ["deep.inline-manifest-key", "deep.base-url-blob-signature", "closure.runtime-template-core", "closure.runtime-template-manifest"],
       "decision": null,
       "acceptedDifferences": [],
       "notes": "Current heuristics exist but no complete upstream behavior map or differential evidence is recorded."
@@ -374,11 +399,13 @@
       "cutoverUnitId": "deep-search-runtime",
       "additionalRiskTags": ["production-runtime", "cross-process", "security-boundary"],
       "upstreamSources": [
-        { "path": "catch-script/search.js", "anchor": "postMessage relay", "introducedBy": null, "blobHash": null }
+        { "path": "catch-script/search.js", "anchor": "function postData(data) {", "introducedBy": "8340a6a1d694071158de5cf3857ef2caa27d1a5b", "blobHash": "sha256:f5738ce73038b8c7aa1d07b0167d11732125705e29665119fd1130b8780e7566" },
+        { "path": "js/content-script.js", "anchor": "window.addEventListener(\"message\", (event) => {", "introducedBy": "918ac049215af593588bbe974122ca0b4cba11f6", "blobHash": "sha256:ee726d6d6b1956d96a6e757745acb5e3df83adb49f456614bf3ec6d6ff6fcca8" },
+        { "path": "js/background.js", "anchor": "if (Message.Message == \"addMedia\") {", "introducedBy": "918ac049215af593588bbe974122ca0b4cba11f6", "blobHash": "sha256:a6eab7da1fe2a7d904f85f84aa1a36762f5f36c698c8e0fc0aa9dc5658d80b58" }
       ],
       "localContractRefs": [
-        { "path": "electron/service/embeddedBrowserViewLifecycle.ts", "anchor": "console-message", "sourceHash": null },
-        { "path": "electron/service/embeddedBrowserResourceProbeScriptTemplate.ts", "anchor": "EMBEDDED_BROWSER_RESOURCE_CONSOLE_PREFIX", "sourceHash": null }
+        { "path": "electron/service/embeddedBrowserViewLifecycle.ts", "anchor": "console-message", "sourceHash": "sha256:112db5131234897955eb47881f60d710a1854e4ece7685535eb615ac158a02c5" },
+        { "path": "electron/service/embeddedBrowserResourceProbeScriptTemplate.ts", "anchor": "EMBEDDED_BROWSER_RESOURCE_CONSOLE_PREFIX", "sourceHash": "sha256:62d5ab0d93a02ce488af07012fc26a23f26f2b20036ddec7a7adf63431f797e9" }
       ],
       "auditedThrough": null,
       "oracleRelation": "platform-substitute",
@@ -393,7 +420,7 @@
         "candidate": [],
         "legacy": ["electron/service/embeddedBrowserViewLifecycle.ts#console-message", "electron/service/embeddedBrowserMainController.ts#onProbePayload"]
       },
-      "fixtures": ["deep.relay-forgery", "deep.frame-document-start"],
+      "fixtures": ["deep.relay-forgery", "deep.frame-document-start", "closure.document-start-injection", "closure.console-resource-envelope", "closure.console-mse-envelope"],
       "decision": null,
       "acceptedDifferences": [],
       "notes": "Seed security gap: the console-prefix envelope has no nonce or capability validation, so an untrusted page can forge resource and MSE events."
@@ -405,11 +432,12 @@
       "cutoverUnitId": "deep-search-runtime",
       "additionalRiskTags": ["production-runtime", "security-boundary"],
       "upstreamSources": [
-        { "path": "catch-script/catch.js", "anchor": "capture controls and media cache", "introducedBy": null, "blobHash": null }
+        { "path": "catch-script/catch.js", "anchor": "class CatCatcher {", "introducedBy": "339ed67376cfc0982cff7df8187898bb000b66f4", "blobHash": "sha256:c2ec212c7953d3ffe76192083c270f6a41d680473943b0bed88a4eee85ae0579" },
+        { "path": "catch-script/catch.js", "anchor": "localStorage.setItem(\"CatCatchCatch_autoDown\", event.target.checked ? \"checked\" : \"\");", "introducedBy": "339ed67376cfc0982cff7df8187898bb000b66f4", "blobHash": "sha256:c2ec212c7953d3ffe76192083c270f6a41d680473943b0bed88a4eee85ae0579" }
       ],
       "localContractRefs": [
-        { "path": "electron/service/embeddedBrowserResourceProbeRuntimeCore.ts", "anchor": "catchToolkitStorageKeys", "sourceHash": null },
-        { "path": "electron/service/embeddedBrowserCatchToolkitPageBridge.ts", "anchor": "createEmbeddedBrowserCatchToolkitUpdateStateScript", "sourceHash": null }
+        { "path": "electron/service/embeddedBrowserResourceProbeRuntimeCore.ts", "anchor": "catchToolkitStorageKeys", "sourceHash": "sha256:a44ff9ea0fbdd08bf72a873265006516fbf7c5daa3a2a711e807dd4ebf9ccf3e" },
+        { "path": "electron/service/embeddedBrowserCatchToolkitPageBridge.ts", "anchor": "createEmbeddedBrowserCatchToolkitUpdateStateScript", "sourceHash": "sha256:495f5f48dfd7cfcc45094db061064cae2dd99cde10ef8bfb7a91536fca5f42d7" }
       ],
       "auditedThrough": null,
       "oracleRelation": "platform-substitute",
@@ -424,7 +452,7 @@
         "candidate": [],
         "legacy": ["electron/service/embeddedBrowserResourceProbeRuntimeCore.ts#catchToolkitState"]
       },
-      "fixtures": ["deep.toolkit-origin-storage", "deep.toolkit-reload-reset"],
+      "fixtures": ["deep.toolkit-origin-storage", "deep.toolkit-reload-reset", "closure.catch-toolkit-actions"],
       "decision": null,
       "acceptedDifferences": [],
       "notes": "The eight current toolkit preferences are persisted in each visited site's origin localStorage, not in an application-level owner; capture enabled state itself is memory-only."
@@ -436,10 +464,11 @@
       "cutoverUnitId": "mse-runtime",
       "additionalRiskTags": ["production-runtime", "large-media", "long-task", "security-boundary"],
       "upstreamSources": [
-        { "path": "catch-script/catch.js", "anchor": "MediaSource.prototype.addSourceBuffer", "introducedBy": null, "blobHash": null }
+        { "path": "catch-script/catch.js", "anchor": "window.MediaSource.prototype.addSourceBuffer = new Proxy(", "introducedBy": "4d4525afcc4888ba85f294d4a7eecd997beef7f5", "blobHash": "sha256:c2ec212c7953d3ffe76192083c270f6a41d680473943b0bed88a4eee85ae0579" },
+        { "path": "catch-script/catch.js", "anchor": "window.MediaSource.prototype.endOfStream = new Proxy(window.MediaSource.prototype.endOfStream, {", "introducedBy": "5341d158993fb4a9bb91fa3415cd0bda9362ddc0", "blobHash": "sha256:c2ec212c7953d3ffe76192083c270f6a41d680473943b0bed88a4eee85ae0579" }
       ],
       "localContractRefs": [
-        { "path": "electron/service/embeddedBrowserResourceProbeRuntimeHooks.ts", "anchor": "MediaSource.prototype.addSourceBuffer", "sourceHash": null }
+        { "path": "electron/service/embeddedBrowserResourceProbeRuntimeHooks.ts", "anchor": "originalAddSourceBuffer", "sourceHash": "sha256:1cd2e9cef109da1e80dddde4a2b0a4b0e2d53218eeedcf6dfdf1853e2f3b2785" }
       ],
       "auditedThrough": null,
       "oracleRelation": "semantic-equivalent",
@@ -454,7 +483,7 @@
         "candidate": [],
         "legacy": ["electron/service/embeddedBrowserResourceProbeRuntimeHooks.ts#MediaSource.addSourceBuffer proxy"]
       },
-      "fixtures": ["mse.audio-video-flush-reset", "mse.append-observability"],
+      "fixtures": ["mse.audio-video-flush-reset", "mse.append-observability", "closure.console-mse-envelope", "closure.page-mse-drain"],
       "decision": null,
       "acceptedDifferences": [],
       "notes": "MSE is the only currently active runtime hook family; parity, bounded page retention, and append/endOfStream observability are unverified."
@@ -467,7 +496,7 @@
       "additionalRiskTags": ["production-runtime", "large-media", "long-task", "temp-file", "security-boundary"],
       "upstreamSources": [],
       "localContractRefs": [
-        { "path": "electron/service/embeddedBrowserMainController.ts", "anchor": "embeddedBrowserMseSpoolFiles", "sourceHash": null }
+        { "path": "electron/service/embeddedBrowserMainController.ts", "anchor": "embeddedBrowserMseSpoolFiles", "sourceHash": "sha256:60470fdff32b5d447437b7ab11fe254469cec282398f28bd96b608da7640e985" }
       ],
       "auditedThrough": null,
       "oracleRelation": "not-applicable",
@@ -482,7 +511,7 @@
         "candidate": [],
         "legacy": ["electron/service/embeddedBrowserMainController.ts#embeddedBrowserMseSpoolFiles"]
       },
-      "fixtures": ["mse.lifecycle-cleanup", "mse.relay-forgery", "mse.spool-budget-recovery"],
+      "fixtures": ["mse.lifecycle-cleanup", "mse.relay-forgery", "mse.spool-budget-recovery", "closure.console-mse-envelope"],
       "decision": null,
       "acceptedDifferences": [],
       "notes": "Spool files and write queues are controller Maps with no global budget, reaper, quarantine, crash recovery, or app-exit closure."
@@ -494,11 +523,23 @@
       "cutoverUnitId": "hls-engine",
       "additionalRiskTags": ["production-runtime", "large-media"],
       "upstreamSources": [
-        { "path": "js/m3u8.js", "anchor": "HLS manifest parsing and plan construction", "introducedBy": null, "blobHash": null }
+        { "path": "js/m3u8.js", "anchor": "const hls = new Hls({", "introducedBy": "d46edb17aa644c58be58db64c8b71cb4a424b5bd", "blobHash": "sha256:f906a1756c20fc1ff6d79cf8db7e4f44ae70d5fb921b843ccd825d7bf9bfa3c6" },
+        { "path": "js/m3u8.js", "anchor": "hls.on(Hls.Events.MANIFEST_LOADED, function (event, data) {", "introducedBy": "e53d5e3892a2c6a99a51ddce2325f9706cd34a84", "blobHash": "sha256:f906a1756c20fc1ff6d79cf8db7e4f44ae70d5fb921b843ccd825d7bf9bfa3c6" },
+        { "path": "js/m3u8.js", "anchor": "function parseTs(data) {", "introducedBy": "2733439bed592ff3ee6b9f0176db8ab67e6f0938", "blobHash": "sha256:f906a1756c20fc1ff6d79cf8db7e4f44ae70d5fb921b843ccd825d7bf9bfa3c6" },
+        { "path": "m3u8.html", "anchor": "<script src=\"lib/jquery.min.js\"></script>", "introducedBy": "aefb58afd1d38505bebc3f27faba369dee445bce", "blobHash": "sha256:f4bd87b0ab0b0048daa36dac706f43897a28d322a5c3cd82a226114c7a3ff492" },
+        { "path": "m3u8.html", "anchor": "<script src=\"js/polyfill.js\"></script>", "introducedBy": "a8976b135ff53c9fd1e096e27674d923cb758d2b", "blobHash": "sha256:f4bd87b0ab0b0048daa36dac706f43897a28d322a5c3cd82a226114c7a3ff492" },
+        { "path": "m3u8.html", "anchor": "<script src=\"js/init.js\"></script>", "introducedBy": "d6c8c8be375119461fa43c5e47cb336c13fb77d1", "blobHash": "sha256:f4bd87b0ab0b0048daa36dac706f43897a28d322a5c3cd82a226114c7a3ff492" },
+        { "path": "m3u8.html", "anchor": "<script src=\"js/function.js\"></script>", "introducedBy": "65b4501566e44089394dc3e054b658ebdca6d0b9", "blobHash": "sha256:f4bd87b0ab0b0048daa36dac706f43897a28d322a5c3cd82a226114c7a3ff492" },
+        { "path": "m3u8.html", "anchor": "<script src=\"js/templates.js\"></script>", "introducedBy": "45903460eaf152124a0c4374b1231d195e9ebb54", "blobHash": "sha256:f4bd87b0ab0b0048daa36dac706f43897a28d322a5c3cd82a226114c7a3ff492" },
+        { "path": "m3u8.html", "anchor": "<script src=\"lib/hls.min.js\"></script>", "introducedBy": "aefb58afd1d38505bebc3f27faba369dee445bce", "blobHash": "sha256:f4bd87b0ab0b0048daa36dac706f43897a28d322a5c3cd82a226114c7a3ff492" },
+        { "path": "m3u8.html", "anchor": "<script src=\"js/m3u8.js\"></script>", "introducedBy": "ec5c948386199099eefb736e0463312c350d4377", "blobHash": "sha256:f4bd87b0ab0b0048daa36dac706f43897a28d322a5c3cd82a226114c7a3ff492" },
+        { "path": "lib/hls.min.js", "anchor": "1.6.16", "introducedBy": "6d95c13f314526d4e90ee35143aeae6048c52a03", "blobHash": "sha256:442f599c34f103c3355b375a23bdff560592d7117d09a8c847242ea3de2d40e0" },
+        { "path": "lib/jquery.min.js", "anchor": "/*! jQuery v4.0.0", "introducedBy": "f56415b8720aeec12f40691d3987b4f61ef8ce70", "blobHash": "sha256:39a546ea9ad97f8bfaf5d3e0e8f8556adb415e470e59007ada9759dce472adaa" },
+        { "path": "lib/third-party-libraries.md", "anchor": "lib/jquery.min.js", "introducedBy": "7aea42621de9f576cf5ad4b2b688d40d8cac7317", "blobHash": "sha256:db7d2ecb228295a33642d2dfca4906ced3ac6951312e221f0ddc8892609b7c0a" }
       ],
       "localContractRefs": [
-        { "path": "src/features/embedded-browser/resources/model/embedded-browser-hls-manifest.ts", "anchor": "parseEmbeddedBrowserHlsManifest", "sourceHash": null },
-        { "path": "src/features/embedded-browser/resources/model/embedded-browser-hls-manifest.ts", "anchor": "createEmbeddedBrowserHlsDownloadPlan", "sourceHash": null }
+        { "path": "src/features/embedded-browser/resources/model/embedded-browser-hls-manifest.ts", "anchor": "parseEmbeddedBrowserHlsManifest", "sourceHash": "sha256:b25a96154e5804edf4ef29faaea2bc98d9ef8029d47e3b334b71d15e2b6c2f4b" },
+        { "path": "src/features/embedded-browser/resources/model/embedded-browser-hls-manifest.ts", "anchor": "createEmbeddedBrowserHlsDownloadPlan", "sourceHash": "sha256:b25a96154e5804edf4ef29faaea2bc98d9ef8029d47e3b334b71d15e2b6c2f4b" }
       ],
       "auditedThrough": null,
       "oracleRelation": "semantic-equivalent",
@@ -516,7 +557,7 @@
       "fixtures": ["hls.parser-core", "hls.byterange-map-key-discontinuity"],
       "decision": null,
       "acceptedDifferences": [],
-      "notes": "The renderer currently owns parser/planner semantics and sends a complete plan to main; hidden BYTERANGE offsets and full upstream closure remain unverified."
+      "notes": "The renderer currently owns parser/planner semantics and sends a complete plan to main; hidden BYTERANGE offsets and full upstream closure remain unverified. Vendor provenance blocker: the bundled jQuery banner reports 4.0.0 while lib/third-party-libraries.md declares 3.7.1."
     },
     {
       "id": "hls.segment-pipeline",
@@ -525,12 +566,37 @@
       "cutoverUnitId": "hls-engine",
       "additionalRiskTags": ["production-runtime", "large-media", "long-task", "temp-file", "credentials"],
       "upstreamSources": [
-        { "path": "js/m3u8.downloader.js", "anchor": "class Downloader", "introducedBy": null, "blobHash": null },
-        { "path": "js/m3u8.js", "anchor": "fragment processing pipeline", "introducedBy": null, "blobHash": null }
+        { "path": "js/m3u8.downloader.js", "anchor": "class Downloader {", "introducedBy": "7f246e4898ee537bd994eef55c3f1b2209cc7c80", "blobHash": "sha256:909c6a1acf0730e99fa385300949c392f44f75524606d3bc6d9c86d3d117637a" },
+        { "path": "js/m3u8.js", "anchor": "function downloadNew(start = 0, end = _fragments.length) {", "introducedBy": "1c5b2b8dbf8ae6215c039ff60cd2a96de35eca68", "blobHash": "sha256:f906a1756c20fc1ff6d79cf8db7e4f44ae70d5fb921b843ccd825d7bf9bfa3c6" },
+        { "path": "m3u8.html", "anchor": "<script src=\"lib/mux.min.js\"></script>", "introducedBy": "aefb58afd1d38505bebc3f27faba369dee445bce", "blobHash": "sha256:f4bd87b0ab0b0048daa36dac706f43897a28d322a5c3cd82a226114c7a3ff492" },
+        { "path": "m3u8.html", "anchor": "<script src=\"lib/m3u8-decrypt.js\"></script>", "introducedBy": "aefb58afd1d38505bebc3f27faba369dee445bce", "blobHash": "sha256:f4bd87b0ab0b0048daa36dac706f43897a28d322a5c3cd82a226114c7a3ff492" },
+        { "path": "m3u8.html", "anchor": "<script src=\"lib/base64.js\"></script>", "introducedBy": "aefb58afd1d38505bebc3f27faba369dee445bce", "blobHash": "sha256:f4bd87b0ab0b0048daa36dac706f43897a28d322a5c3cd82a226114c7a3ff492" },
+        { "path": "m3u8.html", "anchor": "<script src=\"lib/StreamSaver.js\"></script>", "introducedBy": "adc10f09a47eef96aeea9162221a5e5c64fde13e", "blobHash": "sha256:f4bd87b0ab0b0048daa36dac706f43897a28d322a5c3cd82a226114c7a3ff492" },
+        { "path": "m3u8.html", "anchor": "<script src=\"js/m3u8.downloader.js\"></script>", "introducedBy": "7f246e4898ee537bd994eef55c3f1b2209cc7c80", "blobHash": "sha256:f4bd87b0ab0b0048daa36dac706f43897a28d322a5c3cd82a226114c7a3ff492" },
+        { "path": "m3u8.html", "anchor": "<script src=\"js/m3u8.js\"></script>", "introducedBy": "ec5c948386199099eefb736e0463312c350d4377", "blobHash": "sha256:f4bd87b0ab0b0048daa36dac706f43897a28d322a5c3cd82a226114c7a3ff492" },
+        { "path": "lib/mux.min.js", "anchor": "/*! @name mux.js @version 7.1.0 @license Apache-2.0 */", "introducedBy": "eb1cb1cf4212cde768ddce258a17a08bfa85d6e8", "blobHash": "sha256:eb088a07f954554db7c38114487b21df6d1f28c4a84d53003644e962c7567b5b" },
+        { "path": "lib/m3u8-decrypt.js", "anchor": "class AESDecryptor {", "introducedBy": "aefb58afd1d38505bebc3f27faba369dee445bce", "blobHash": "sha256:11b5558323f781e4243016bcc8ad3039cc92c85470e4ab987f911e1b5550dbae" },
+        { "path": "lib/third-party-libraries.md", "anchor": "https://github.com/video-dev/hls.js/blob/master/src/crypt/aes-decryptor.ts", "introducedBy": "7aea42621de9f576cf5ad4b2b688d40d8cac7317", "blobHash": "sha256:db7d2ecb228295a33642d2dfca4906ced3ac6951312e221f0ddc8892609b7c0a" },
+        { "path": "lib/third-party-libraries.md", "anchor": "lib/StreamSaver.js", "introducedBy": "7aea42621de9f576cf5ad4b2b688d40d8cac7317", "blobHash": "sha256:db7d2ecb228295a33642d2dfca4906ced3ac6951312e221f0ddc8892609b7c0a" },
+        { "path": "m3u8.html", "anchor": "id=\"rangeStart\" spellcheck=\"false\" data-i18n-placeholder=\"start\" value=\"1\"", "introducedBy": "fa78a4aea9fc3be7812a306b466cba129fc43336", "blobHash": "sha256:f4bd87b0ab0b0048daa36dac706f43897a28d322a5c3cd82a226114c7a3ff492" },
+        { "path": "m3u8.html", "anchor": "value=\"6\" id=\"thread\"", "introducedBy": "920124ef94a767f64a09b92295ed108dddc9f67e", "blobHash": "sha256:f4bd87b0ab0b0048daa36dac706f43897a28d322a5c3cd82a226114c7a3ff492" },
+        { "path": "js/init.js", "anchor": "M3u8Thread: 6,", "introducedBy": "6c57974dacf1d0adc8fd1563eae0e1a672a67831", "blobHash": "sha256:fd4393999ae1d4ebba3c2d8a1bc7024380afd3ba4a93566f6cb05dde7a771a54" },
+        { "path": "js/init.js", "anchor": "M3u8Mp4: false,", "introducedBy": "6c57974dacf1d0adc8fd1563eae0e1a672a67831", "blobHash": "sha256:fd4393999ae1d4ebba3c2d8a1bc7024380afd3ba4a93566f6cb05dde7a771a54" },
+        { "path": "js/init.js", "anchor": "M3u8OnlyAudio: false,", "introducedBy": "6c57974dacf1d0adc8fd1563eae0e1a672a67831", "blobHash": "sha256:fd4393999ae1d4ebba3c2d8a1bc7024380afd3ba4a93566f6cb05dde7a771a54" },
+        { "path": "js/init.js", "anchor": "M3u8SkipDecrypt: false,", "introducedBy": "6c57974dacf1d0adc8fd1563eae0e1a672a67831", "blobHash": "sha256:fd4393999ae1d4ebba3c2d8a1bc7024380afd3ba4a93566f6cb05dde7a771a54" },
+        { "path": "js/init.js", "anchor": "M3u8StreamSaver: false,", "introducedBy": "6c57974dacf1d0adc8fd1563eae0e1a672a67831", "blobHash": "sha256:fd4393999ae1d4ebba3c2d8a1bc7024380afd3ba4a93566f6cb05dde7a771a54" },
+        { "path": "js/init.js", "anchor": "M3u8Ffmpeg: true,", "introducedBy": "6c57974dacf1d0adc8fd1563eae0e1a672a67831", "blobHash": "sha256:fd4393999ae1d4ebba3c2d8a1bc7024380afd3ba4a93566f6cb05dde7a771a54" },
+        { "path": "js/init.js", "anchor": "M3u8AutoClose: false,", "introducedBy": "6c57974dacf1d0adc8fd1563eae0e1a672a67831", "blobHash": "sha256:fd4393999ae1d4ebba3c2d8a1bc7024380afd3ba4a93566f6cb05dde7a771a54" },
+        { "path": "js/m3u8.js", "anchor": "$(\"#thread\").val(G.M3u8Thread);", "introducedBy": "6c57974dacf1d0adc8fd1563eae0e1a672a67831", "blobHash": "sha256:f906a1756c20fc1ff6d79cf8db7e4f44ae70d5fb921b843ccd825d7bf9bfa3c6" },
+        { "path": "js/m3u8.js", "anchor": "$(\"#onlyAudio\").on(\"change\", function () {", "introducedBy": "31ccc8135769a0becafb0db6164c6c7b1c76385d", "blobHash": "sha256:f906a1756c20fc1ff6d79cf8db7e4f44ae70d5fb921b843ccd825d7bf9bfa3c6" },
+        { "path": "js/m3u8.js", "anchor": "$(\"#StreamSaver\").on(\"change\", function () {", "introducedBy": "adc10f09a47eef96aeea9162221a5e5c64fde13e", "blobHash": "sha256:f906a1756c20fc1ff6d79cf8db7e4f44ae70d5fb921b843ccd825d7bf9bfa3c6" },
+        { "path": "js/m3u8.js", "anchor": "$(\"#ffmpeg\").on(\"change\", function () {", "introducedBy": "494a5441d1b0856de58cbdc76824480261eb10eb", "blobHash": "sha256:f906a1756c20fc1ff6d79cf8db7e4f44ae70d5fb921b843ccd825d7bf9bfa3c6" },
+        { "path": "js/m3u8.js", "anchor": "skipDecrypt = $(\"#skipDecrypt\").prop(\"checked\");", "introducedBy": "90548af80afffc829bfeeb4be9f16e2889fddafa", "blobHash": "sha256:f906a1756c20fc1ff6d79cf8db7e4f44ae70d5fb921b843ccd825d7bf9bfa3c6" },
+        { "path": "js/m3u8.js", "anchor": "estimateFileSize > G.chromeLimitSize", "introducedBy": "da60408d048b4ed43682ae96c80fb6c6e8abb44e", "blobHash": "sha256:f906a1756c20fc1ff6d79cf8db7e4f44ae70d5fb921b843ccd825d7bf9bfa3c6" }
       ],
       "localContractRefs": [
-        { "path": "electron/service/embeddedBrowserHlsLocalDownloaderService.ts", "anchor": "downloadEmbeddedBrowserHlsToLocalWorkDirectory", "sourceHash": null },
-        { "path": "electron/service/embeddedBrowserMainController.ts", "anchor": "downloadEmbeddedBrowserHlsPlanResource", "sourceHash": null }
+        { "path": "electron/service/embeddedBrowserHlsLocalDownloaderService.ts", "anchor": "downloadEmbeddedBrowserHlsToLocalWorkDirectory", "sourceHash": "sha256:f3a1610caab87ff894d995d8417ec7c7c07b05114b00900fe34b7b37c8898947" },
+        { "path": "electron/service/embeddedBrowserMainController.ts", "anchor": "downloadEmbeddedBrowserHlsPlanResource", "sourceHash": "sha256:60470fdff32b5d447437b7ab11fe254469cec282398f28bd96b608da7640e985" }
       ],
       "auditedThrough": null,
       "oracleRelation": "platform-substitute",
@@ -548,7 +614,7 @@
       "fixtures": ["hls.retry-cancel-range", "hls.decrypt-preprocess-order", "hls.failed-fragment-retry"],
       "decision": null,
       "acceptedDifferences": [],
-      "notes": "No single task/cancel owner spans plan execution, retry sessions, work directories, and renderer listeners."
+      "notes": "No single task/cancel owner spans plan execution, retry sessions, work directories, and renderer listeners. Vendor provenance blockers: lib/third-party-libraries.md attributes m3u8-decrypt.js to the mutable hls.js master path rather than an immutable revision; the loaded StreamSaver bundle self-reports 2.0.5 while that document declares 2.0.6, has no verified immutable artifact binding, and retains remote MITM configuration."
     },
     {
       "id": "hls.live-recording",
@@ -557,11 +623,14 @@
       "cutoverUnitId": "hls-engine",
       "additionalRiskTags": ["production-runtime", "large-media", "long-task", "temp-file", "credentials"],
       "upstreamSources": [
-        { "path": "js/m3u8.js", "anchor": "live playlist handling", "introducedBy": null, "blobHash": null }
+        { "path": "js/m3u8.js", "anchor": "function stopRecorder() {", "introducedBy": "fa78a4aea9fc3be7812a306b466cba129fc43336", "blobHash": "sha256:f906a1756c20fc1ff6d79cf8db7e4f44ae70d5fb921b843ccd825d7bf9bfa3c6" },
+        { "path": "js/m3u8.js", "anchor": "$(\"#recorder\").click(function () {", "introducedBy": "148e01d59cfc113e0dfa3a324e195bc09801d7d3", "blobHash": "sha256:f906a1756c20fc1ff6d79cf8db7e4f44ae70d5fb921b843ccd825d7bf9bfa3c6" },
+        { "path": "m3u8.html", "anchor": "value=\"0\" id=\"retryCount\"", "introducedBy": "fa78a4aea9fc3be7812a306b466cba129fc43336", "blobHash": "sha256:f4bd87b0ab0b0048daa36dac706f43897a28d322a5c3cd82a226114c7a3ff492" },
+        { "path": "lib/StreamSaver.js", "anchor": "/*! streamsaver. MIT License.", "introducedBy": "adc10f09a47eef96aeea9162221a5e5c64fde13e", "blobHash": "sha256:a110f78e0b092481dc372901c4d57ae50681d773bc9d55e62356f9a22f17e24b" }
       ],
       "localContractRefs": [
-        { "path": "electron/service/embeddedBrowserHlsLiveRecorder.ts", "anchor": "EmbeddedBrowserHlsLiveRecorder", "sourceHash": null },
-        { "path": "electron/service/embeddedBrowserMainController.ts", "anchor": "embeddedBrowserHlsLiveRecordingSessions", "sourceHash": null }
+        { "path": "electron/service/embeddedBrowserHlsLiveRecorder.ts", "anchor": "EmbeddedBrowserHlsLiveRecorder", "sourceHash": "sha256:41cea3a69ebbf2fe812e59594ef5adb7fb606ec5f805a3b676955520fcb91441" },
+        { "path": "electron/service/embeddedBrowserMainController.ts", "anchor": "embeddedBrowserHlsLiveRecordingSessions", "sourceHash": "sha256:60470fdff32b5d447437b7ab11fe254469cec282398f28bd96b608da7640e985" }
       ],
       "auditedThrough": null,
       "oracleRelation": "platform-substitute",
@@ -579,7 +648,7 @@
       "fixtures": ["hls.live-terminal", "hls.live-tab-close-exit"],
       "decision": null,
       "acceptedDifferences": [],
-      "notes": "Live recorders are held in a controller Map; close-tab attempts cleanup but app exit and crash recovery do not share the same closure."
+      "notes": "Live recorders are held in a controller Map; close-tab attempts cleanup but app exit and crash recovery do not share the same closure. Vendor provenance blocker: the upstream live path depends on the same unverified StreamSaver 2.0.5/2.0.6 bundle and remote MITM configuration recorded by transfer.streaming-memory-budget."
     },
     {
       "id": "hls.cache-fallback-disguised-fragments",
@@ -588,11 +657,11 @@
       "cutoverUnitId": "hls-engine",
       "additionalRiskTags": ["production-runtime", "large-media", "long-task"],
       "upstreamSources": [
-        { "path": "js/content-script.js", "anchor": "force-cache manifest fallback", "introducedBy": null, "blobHash": null },
-        { "path": "js/m3u8.js", "anchor": "PNG and JPEG disguised fragment preprocessing", "introducedBy": null, "blobHash": null }
+        { "path": "js/content-script.js", "anchor": "fetch(Message.url, { method: \"GET\", cache: \"force-cache\" })", "introducedBy": "0a28f40e995701f0c3ff318c21e723627139e1e5", "blobHash": "sha256:ee726d6d6b1956d96a6e757745acb5e3df83adb49f456614bf3ec6d6ff6fcca8" },
+        { "path": "js/m3u8.js", "anchor": "document.querySelector(\"#dataPreprocessing\").checked && down.use(function (buffer, fragment) {", "introducedBy": "d358fa5948f2c90b6f8c1d7d0c46aad4a25cb23e", "blobHash": "sha256:f906a1756c20fc1ff6d79cf8db7e4f44ae70d5fb921b843ccd825d7bf9bfa3c6" }
       ],
       "localContractRefs": [
-        { "path": "electron/service/embeddedBrowserHlsLocalDownloaderService.ts", "anchor": "fragment processing", "sourceHash": null }
+        { "path": "electron/service/embeddedBrowserHlsLocalDownloaderService.ts", "anchor": "downloadEmbeddedBrowserHlsToLocalWorkDirectory", "sourceHash": "sha256:f3a1610caab87ff894d995d8417ec7c7c07b05114b00900fe34b7b37c8898947" }
       ],
       "auditedThrough": null,
       "oracleRelation": "exact",
@@ -619,11 +688,23 @@
       "cutoverUnitId": "dash-engine",
       "additionalRiskTags": ["production-runtime", "large-media"],
       "upstreamSources": [
-        { "path": "js/mpd.js", "anchor": "MPD parser and track planning", "introducedBy": null, "blobHash": null }
+        { "path": "js/mpd.js", "anchor": "mpdJson = mpdParser.parse(mpdContent, { manifestUri: _url });", "introducedBy": "08d5d50b2b8ea7fdab81fc0bd53fdd9b26551448", "blobHash": "sha256:5d4a82c771d866f3153a38e52997fdaa3c04f02f22e17d81e4abcda0a34ffae9" },
+        { "path": "js/mpd.js", "anchor": "function showSegment(type, index) {", "introducedBy": "08d5d50b2b8ea7fdab81fc0bd53fdd9b26551448", "blobHash": "sha256:5d4a82c771d866f3153a38e52997fdaa3c04f02f22e17d81e4abcda0a34ffae9" },
+        { "path": "mpd.html", "anchor": "<script src=\"lib/jquery.min.js\"></script>", "introducedBy": "aefb58afd1d38505bebc3f27faba369dee445bce", "blobHash": "sha256:63763b9c061b8837c7588ab928cac428cb57e81c9365683dec6569a7b720684d" },
+        { "path": "mpd.html", "anchor": "<script src=\"js/polyfill.js\"></script>", "introducedBy": "a8976b135ff53c9fd1e096e27674d923cb758d2b", "blobHash": "sha256:63763b9c061b8837c7588ab928cac428cb57e81c9365683dec6569a7b720684d" },
+        { "path": "mpd.html", "anchor": "<script src=\"js/init.js\"></script>", "introducedBy": "15dcc452de43543addd960699319fb4b0eb5ac87", "blobHash": "sha256:63763b9c061b8837c7588ab928cac428cb57e81c9365683dec6569a7b720684d" },
+        { "path": "mpd.html", "anchor": "<script src=\"lib/mpd-parser.min.js\"></script>", "introducedBy": "aefb58afd1d38505bebc3f27faba369dee445bce", "blobHash": "sha256:63763b9c061b8837c7588ab928cac428cb57e81c9365683dec6569a7b720684d" },
+        { "path": "mpd.html", "anchor": "<script src=\"js/function.js\"></script>", "introducedBy": "65b4501566e44089394dc3e054b658ebdca6d0b9", "blobHash": "sha256:63763b9c061b8837c7588ab928cac428cb57e81c9365683dec6569a7b720684d" },
+        { "path": "mpd.html", "anchor": "<script src=\"js/templates.js\"></script>", "introducedBy": "a40052542932db509b6bcd679a3daa8102dce0ac", "blobHash": "sha256:63763b9c061b8837c7588ab928cac428cb57e81c9365683dec6569a7b720684d" },
+        { "path": "mpd.html", "anchor": "<script src=\"js/mpd.js\"></script>", "introducedBy": "15dcc452de43543addd960699319fb4b0eb5ac87", "blobHash": "sha256:63763b9c061b8837c7588ab928cac428cb57e81c9365683dec6569a7b720684d" },
+        { "path": "lib/mpd-parser.min.js", "anchor": "/*! @name mpd-parser @version 1.4.0 @license Apache-2.0 */", "introducedBy": "87b0185a5537a87b59abb08245c4dc2f29558cfa", "blobHash": "sha256:ce8de67027bc8a2852c472b358caa877494f6fd39fa8c0821f72868aba5aedea" },
+        { "path": "lib/jquery.min.js", "anchor": "/*! jQuery v4.0.0", "introducedBy": "f56415b8720aeec12f40691d3987b4f61ef8ce70", "blobHash": "sha256:39a546ea9ad97f8bfaf5d3e0e8f8556adb415e470e59007ada9759dce472adaa" },
+        { "path": "lib/third-party-libraries.md", "anchor": "lib/mpd-parser.min.js", "introducedBy": "7aea42621de9f576cf5ad4b2b688d40d8cac7317", "blobHash": "sha256:db7d2ecb228295a33642d2dfca4906ced3ac6951312e221f0ddc8892609b7c0a" },
+        { "path": "lib/third-party-libraries.md", "anchor": "lib/jquery.min.js", "introducedBy": "7aea42621de9f576cf5ad4b2b688d40d8cac7317", "blobHash": "sha256:db7d2ecb228295a33642d2dfca4906ced3ac6951312e221f0ddc8892609b7c0a" }
       ],
       "localContractRefs": [
-        { "path": "src/features/embedded-browser/resources/model/embedded-browser-mpd-manifest.ts", "anchor": "parseEmbeddedBrowserMpdManifest", "sourceHash": null },
-        { "path": "src/features/embedded-browser/resources/model/embedded-browser-mpd-manifest.ts", "anchor": "createEmbeddedBrowserMpdDownloadPlan", "sourceHash": null }
+        { "path": "src/features/embedded-browser/resources/model/embedded-browser-mpd-manifest.ts", "anchor": "parseEmbeddedBrowserMpdManifest", "sourceHash": "sha256:c312f61ee93d75e3766378fae4adf70eb9bb0ff7f5020ed562894b8deaec9052" },
+        { "path": "src/features/embedded-browser/resources/model/embedded-browser-mpd-manifest.ts", "anchor": "createEmbeddedBrowserMpdDownloadPlan", "sourceHash": "sha256:c312f61ee93d75e3766378fae4adf70eb9bb0ff7f5020ed562894b8deaec9052" }
       ],
       "auditedThrough": null,
       "oracleRelation": "semantic-equivalent",
@@ -641,7 +722,7 @@
       "fixtures": ["dash.parser-core", "dash.base-url-timeline-ranges"],
       "decision": null,
       "acceptedDifferences": [],
-      "notes": "The current hand-written renderer parser is not supported by a mature parser oracle or complete specification fixtures."
+      "notes": "The current hand-written renderer parser is not supported by a mature parser oracle or complete specification fixtures. Vendor provenance blockers: the bundled mpd-parser banner reports 1.4.0 while lib/third-party-libraries.md declares 1.4.1, and the bundled jQuery banner reports 4.0.0 while that document declares 3.7.1."
     },
     {
       "id": "dash.timeline-download-merge",
@@ -650,11 +731,12 @@
       "cutoverUnitId": "dash-engine",
       "additionalRiskTags": ["production-runtime", "large-media", "long-task", "temp-file", "credentials"],
       "upstreamSources": [
-        { "path": "js/mpd.js", "anchor": "SegmentTimeline and download flow", "introducedBy": null, "blobHash": null }
+        { "path": "js/mpd.js", "anchor": "chrome.tabs.create({ url: \"m3u8.html?getMpdId=\" + tabs.id });", "introducedBy": "1c6150d9ac68b2d7b9728863ad3c5db1a98271e6", "blobHash": "sha256:5d4a82c771d866f3153a38e52997fdaa3c04f02f22e17d81e4abcda0a34ffae9" },
+        { "path": "js/mpd.js", "anchor": "mpdJson = mpdParser.parse(mpdContent, { manifestUri: _url });", "introducedBy": "08d5d50b2b8ea7fdab81fc0bd53fdd9b26551448", "blobHash": "sha256:5d4a82c771d866f3153a38e52997fdaa3c04f02f22e17d81e4abcda0a34ffae9" }
       ],
       "localContractRefs": [
-        { "path": "electron/service/embeddedBrowserMpdLocalDownloaderService.ts", "anchor": "downloadEmbeddedBrowserMpdToOutput", "sourceHash": null },
-        { "path": "electron/service/embeddedBrowserMainController.ts", "anchor": "downloadEmbeddedBrowserMpdPlanResource", "sourceHash": null }
+        { "path": "electron/service/embeddedBrowserMpdLocalDownloaderService.ts", "anchor": "downloadEmbeddedBrowserMpdToOutput", "sourceHash": "sha256:7d401f33614ccaf2706d127fc7bf9a8684c31ea88685dc7232b987d3e6a77bc2" },
+        { "path": "electron/service/embeddedBrowserMainController.ts", "anchor": "downloadEmbeddedBrowserMpdPlanResource", "sourceHash": "sha256:60470fdff32b5d447437b7ab11fe254469cec282398f28bd96b608da7640e985" }
       ],
       "auditedThrough": null,
       "oracleRelation": "platform-substitute",
@@ -681,11 +763,20 @@
       "cutoverUnitId": "transfer-engine",
       "additionalRiskTags": ["production-runtime", "large-media", "long-task"],
       "upstreamSources": [
-        { "path": "js/m3u8.downloader.js", "anchor": "class Downloader", "introducedBy": null, "blobHash": null },
-        { "path": "js/downloader.js", "anchor": "fragment download control", "introducedBy": null, "blobHash": null }
+        { "path": "js/m3u8.downloader.js", "anchor": "class Downloader {", "introducedBy": "7f246e4898ee537bd994eef55c3f1b2209cc7c80", "blobHash": "sha256:909c6a1acf0730e99fa385300949c392f44f75524606d3bc6d9c86d3d117637a" },
+        { "path": "js/downloader.js", "anchor": "const down = new Downloader(_data);", "introducedBy": "094481ee619077e8021881658c4f423d1375b08f", "blobHash": "sha256:647e18145949d3620edb0a4ecec8320e52e752b0f38e8acb7efbfb7f05988e3f" },
+        { "path": "downloader.html", "anchor": "<script src=\"lib/jquery.min.js\"></script>", "introducedBy": "094481ee619077e8021881658c4f423d1375b08f", "blobHash": "sha256:c3d97d0a5c5d1c43d458e4034c4bd66cb9b69151bf7b61f307d6c3cfd440d382" },
+        { "path": "downloader.html", "anchor": "<script src=\"lib/StreamSaver.js\"></script>", "introducedBy": "094481ee619077e8021881658c4f423d1375b08f", "blobHash": "sha256:c3d97d0a5c5d1c43d458e4034c4bd66cb9b69151bf7b61f307d6c3cfd440d382" },
+        { "path": "downloader.html", "anchor": "<script src=\"js/polyfill.js\"></script>", "introducedBy": "a8976b135ff53c9fd1e096e27674d923cb758d2b", "blobHash": "sha256:c3d97d0a5c5d1c43d458e4034c4bd66cb9b69151bf7b61f307d6c3cfd440d382" },
+        { "path": "downloader.html", "anchor": "<script src=\"js/init.js\"></script>", "introducedBy": "094481ee619077e8021881658c4f423d1375b08f", "blobHash": "sha256:c3d97d0a5c5d1c43d458e4034c4bd66cb9b69151bf7b61f307d6c3cfd440d382" },
+        { "path": "downloader.html", "anchor": "<script src=\"js/function.js\"></script>", "introducedBy": "094481ee619077e8021881658c4f423d1375b08f", "blobHash": "sha256:c3d97d0a5c5d1c43d458e4034c4bd66cb9b69151bf7b61f307d6c3cfd440d382" },
+        { "path": "downloader.html", "anchor": "<script src=\"js/templates.js\"></script>", "introducedBy": "a40052542932db509b6bcd679a3daa8102dce0ac", "blobHash": "sha256:c3d97d0a5c5d1c43d458e4034c4bd66cb9b69151bf7b61f307d6c3cfd440d382" },
+        { "path": "downloader.html", "anchor": "<script src=\"js/m3u8.downloader.js\"></script>", "introducedBy": "094481ee619077e8021881658c4f423d1375b08f", "blobHash": "sha256:c3d97d0a5c5d1c43d458e4034c4bd66cb9b69151bf7b61f307d6c3cfd440d382" },
+        { "path": "downloader.html", "anchor": "<script src=\"js/downloader.js\"></script>", "introducedBy": "094481ee619077e8021881658c4f423d1375b08f", "blobHash": "sha256:c3d97d0a5c5d1c43d458e4034c4bd66cb9b69151bf7b61f307d6c3cfd440d382" },
+        { "path": "lib/jquery.min.js", "anchor": "/*! jQuery v4.0.0", "introducedBy": "f56415b8720aeec12f40691d3987b4f61ef8ce70", "blobHash": "sha256:39a546ea9ad97f8bfaf5d3e0e8f8556adb415e470e59007ada9759dce472adaa" }
       ],
       "localContractRefs": [
-        { "path": "electron/service/embeddedBrowserFragmentDownloader.ts", "anchor": "EmbeddedBrowserFragmentDownloader", "sourceHash": null }
+        { "path": "electron/service/embeddedBrowserFragmentDownloader.ts", "anchor": "EmbeddedBrowserFragmentDownloader", "sourceHash": "sha256:7aa23c9c4985d9b9bc4bfd305144780179349ec9aacb39d3b483b0fbeae9e22d" }
       ],
       "auditedThrough": null,
       "oracleRelation": "exact",
@@ -703,21 +794,90 @@
       "fixtures": ["transfer.concurrent-retry-abort-order", "transfer.range-terminal-race"],
       "decision": null,
       "acceptedDifferences": [],
-      "notes": "Local AbortControllers exist inside the downloader, but the orchestration layer does not retain a uniform cancel handle or terminal task record."
+      "notes": "Local AbortControllers exist inside the downloader, but the orchestration layer does not retain a uniform cancel handle or terminal task record. Vendor provenance blockers: the bundled jQuery banner reports 4.0.0 while lib/third-party-libraries.md declares 3.7.1; the loaded StreamSaver bundle has the unresolved provenance recorded by transfer.streaming-memory-budget."
+    },
+    {
+      "id": "transfer.downloader-session-lifecycle",
+      "origin": "cross-boundary",
+      "boundary": "processing.downloader-session",
+      "cutoverUnitId": "transfer-engine",
+      "additionalRiskTags": ["production-runtime", "cross-process", "large-media", "long-task", "temp-file"],
+      "upstreamSources": [
+        { "path": "js/init.js", "anchor": "catDownload: false,", "introducedBy": "a138195b9baac5d4367dbb2035ab3e472ca29a06", "blobHash": "sha256:fd4393999ae1d4ebba3c2d8a1bc7024380afd3ba4a93566f6cb05dde7a771a54" },
+        { "path": "js/init.js", "anchor": "downAutoClose: true,", "introducedBy": "323ac37e118b90d363c224d74f930d3fe99227f6", "blobHash": "sha256:fd4393999ae1d4ebba3c2d8a1bc7024380afd3ba4a93566f6cb05dde7a771a54" },
+        { "path": "js/popup.js", "anchor": "chrome.downloads.onChanged.addListener(function (item) {", "introducedBy": "1b115ebd5ee316524be66954b1181fffdde4dec4", "blobHash": "sha256:1f635f236ffb811aa1ae519c4bbe656be42172a78779daa0031981dc18f6c8c8" },
+        { "path": "js/popup.js", "anchor": "if (G.catDownload) { delete downData[item.id]; return; }", "introducedBy": "dc1f5934bbaa5fb36bfa2e7d9e27f60ecc0d01df", "blobHash": "sha256:1f635f236ffb811aa1ae519c4bbe656be42172a78779daa0031981dc18f6c8c8" },
+        { "path": "js/popup.js", "anchor": "catDownload(downData[item.id]);", "introducedBy": "a084590ef85e14229db90069a394eaeccfbd4d75", "blobHash": "sha256:1f635f236ffb811aa1ae519c4bbe656be42172a78779daa0031981dc18f6c8c8" },
+        { "path": "js/popup.js", "anchor": "function catDownload(data, extra = {}) {", "introducedBy": "6cf4b70f614df80ec15cc0e3054c37c0467acaad", "blobHash": "sha256:1f635f236ffb811aa1ae519c4bbe656be42172a78779daa0031981dc18f6c8c8" },
+        { "path": "js/popup.js", "anchor": "function createCatDownload(data, extra) {", "introducedBy": "094481ee619077e8021881658c4f423d1375b08f", "blobHash": "sha256:1f635f236ffb811aa1ae519c4bbe656be42172a78779daa0031981dc18f6c8c8" },
+        { "path": "js/background.js", "anchor": "if (G.catDownload) { delete G.downDataImageSave; return; }", "introducedBy": "047b22f8929365ea674c3629ee5504f2e0dd923a", "blobHash": "sha256:a6eab7da1fe2a7d904f85f84aa1a36762f5f36c698c8e0fc0aa9dc5658d80b58" },
+        { "path": "js/background.js", "anchor": "if (item.error && errorList.includes(item.error.current) && G.downDataImageSave) {", "introducedBy": "047b22f8929365ea674c3629ee5504f2e0dd923a", "blobHash": "sha256:a6eab7da1fe2a7d904f85f84aa1a36762f5f36c698c8e0fc0aa9dc5658d80b58" },
+        { "path": "js/background.js", "anchor": "chrome.tabs.create({ url: `downloader.html?JSON=${JSON.stringify(data)}&autoClose=true`, active: false });", "introducedBy": "3dd20ab5b7ebe64feee442fc677f81858394839e", "blobHash": "sha256:a6eab7da1fe2a7d904f85f84aa1a36762f5f36c698c8e0fc0aa9dc5658d80b58" },
+        { "path": "js/downloader.js", "anchor": "if (Message.Message == \"catDownload\" && Message.data && Array.isArray(Message.data)) {", "introducedBy": "229decfb661b2ea49997ee4f8a0db240cd65ee8a", "blobHash": "sha256:647e18145949d3620edb0a4ecec8320e52e752b0f38e8acb7efbfb7f05988e3f" },
+        { "path": "js/downloader.js", "anchor": "const _autoClose = params.get(\"autoClose\");", "introducedBy": "3dd20ab5b7ebe64feee442fc677f81858394839e", "blobHash": "sha256:647e18145949d3620edb0a4ecec8320e52e752b0f38e8acb7efbfb7f05988e3f" },
+        { "path": "js/downloader.js", "anchor": "$(\"#autoClose\").prop(\"checked\", _autoClose || G.downAutoClose);", "introducedBy": "3dd20ab5b7ebe64feee442fc677f81858394839e", "blobHash": "sha256:647e18145949d3620edb0a4ecec8320e52e752b0f38e8acb7efbfb7f05988e3f" },
+        { "path": "js/downloader.js", "anchor": "if (down.fragments.every(item => item.fileStream) && $(\"#autoClose\").prop(\"checked\")) {", "introducedBy": "a3431bc372cdb8907285ef6f48fc60da6d3ba18d", "blobHash": "sha256:647e18145949d3620edb0a4ecec8320e52e752b0f38e8acb7efbfb7f05988e3f" },
+        { "path": "js/downloader.js", "anchor": "if (down.success == down.total && Message.state == \"done\") {", "introducedBy": "d928e8ae0f56781be6673bafb1bf90d377d808d5", "blobHash": "sha256:647e18145949d3620edb0a4ecec8320e52e752b0f38e8acb7efbfb7f05988e3f" },
+        { "path": "js/downloader.js", "anchor": "chrome.downloads.onChanged.addListener(function (downloadDelta) {", "introducedBy": "094481ee619077e8021881658c4f423d1375b08f", "blobHash": "sha256:647e18145949d3620edb0a4ecec8320e52e752b0f38e8acb7efbfb7f05988e3f" },
+        { "path": "js/downloader.js", "anchor": "if (down.success == down.total) {", "introducedBy": "094481ee619077e8021881658c4f423d1375b08f", "blobHash": "sha256:647e18145949d3620edb0a4ecec8320e52e752b0f38e8acb7efbfb7f05988e3f" },
+        { "path": "js/downloader.js", "anchor": "window.addEventListener('beforeunload', function (e) {", "introducedBy": "7b3441fe8a92d7517e071f1ed57e9a040d0dbd36", "blobHash": "sha256:647e18145949d3620edb0a4ecec8320e52e752b0f38e8acb7efbfb7f05988e3f" },
+        { "path": "js/function.js", "anchor": "function closeTab(tabId = 0)", "introducedBy": "58a2728e9eb739af15d4d8a196cad3240a32aa79", "blobHash": "sha256:f1876eeec0e22e25f2424054d0ea15510027a93237a3109d016f2e7cc16c59a0" }
+      ],
+      "localContractRefs": [
+        { "path": "electron/service/embeddedBrowserService.ts", "anchor": "handleWillDownload", "sourceHash": "sha256:c877b9d74e10b579687fedb0e8bc08545b090de5cd32b7eb59da018690dc0b33" }
+      ],
+      "auditedThrough": null,
+      "oracleRelation": "platform-substitute",
+      "disposition": "pending",
+      "mapping": "unmapped",
+      "requiredEvidence": {
+        "beforeCutover": ["fixture", "behavior", "candidateIntegration", "candidateSoak"],
+        "forCompletion": ["fixture", "behavior", "candidateIntegration", "candidateSoak", "activeIntegration", "activeSoak"]
+      },
+      "ownerRefs": {
+        "targetProduction": ["electron/service/embedded-browser/processing/downloader-session-coordinator.ts#DownloaderSessionCoordinator"],
+        "candidate": [],
+        "legacy": []
+      },
+      "fixtures": ["transfer.downloader-failure-fallback", "transfer.downloader-session-reuse", "transfer.downloader-terminal-cleanup"],
+      "decision": null,
+      "acceptedDifferences": [],
+      "notes": "Pinned upstream defaults catDownload=false, so eligible native download failures enter the Cat Catch downloader; true disables that fallback. The same session shell reuses or creates a downloader tab and closes it after stream, ffmpeg, or browser-download terminal events while guarding unload. OmniFlow currently splits native download events and fragment execution across owners and has no equivalent fallback/session coordinator."
     },
     {
       "id": "transfer.streaming-memory-budget",
-      "origin": "omniflow-integration",
+      "origin": "cross-boundary",
       "boundary": "processing.transfer-memory",
       "cutoverUnitId": "transfer-engine",
       "additionalRiskTags": ["production-runtime", "large-media", "long-task"],
-      "upstreamSources": [],
+      "upstreamSources": [
+        { "path": "js/init.js", "anchor": "downStream: false,", "introducedBy": "22f0d10d8a729e340af08263c0063400ab42ddbd", "blobHash": "sha256:fd4393999ae1d4ebba3c2d8a1bc7024380afd3ba4a93566f6cb05dde7a771a54" },
+        { "path": "js/init.js", "anchor": "chromeLimitSize: 1.8 * 1024 * 1024 * 1024,", "introducedBy": "6c5fd33104d967e742e515be61308b2712e324cf", "blobHash": "sha256:fd4393999ae1d4ebba3c2d8a1bc7024380afd3ba4a93566f6cb05dde7a771a54" },
+        { "path": "js/init.js", "anchor": "G.streamSaverConfig = {", "introducedBy": "8a936aa3d63c54d6e6b7def5603af4f5e2327e0e", "blobHash": "sha256:fd4393999ae1d4ebba3c2d8a1bc7024380afd3ba4a93566f6cb05dde7a771a54" },
+        { "path": "js/init.js", "anchor": "return G.onlineServiceAddress == 0 ? \"https://stream.bmmmd.com/mitm.html\" : \"https://ffmpeg.94cat.com/mitm.html\";", "introducedBy": "5703d6df7cff7ecf5abd5897b5a3b5f6c337d1b6", "blobHash": "sha256:fd4393999ae1d4ebba3c2d8a1bc7024380afd3ba4a93566f6cb05dde7a771a54" },
+        { "path": "downloader.html", "anchor": "<script src=\"lib/StreamSaver.js\"></script>", "introducedBy": "094481ee619077e8021881658c4f423d1375b08f", "blobHash": "sha256:c3d97d0a5c5d1c43d458e4034c4bd66cb9b69151bf7b61f307d6c3cfd440d382" },
+        { "path": "lib/StreamSaver.js", "anchor": "/*! streamsaver. MIT License.", "introducedBy": "adc10f09a47eef96aeea9162221a5e5c64fde13e", "blobHash": "sha256:a110f78e0b092481dc372901c4d57ae50681d773bc9d55e62356f9a22f17e24b" },
+        { "path": "lib/StreamSaver.js", "anchor": "version: { full: '2.0.5', major: 2, minor: 0, dot: 5 },", "introducedBy": "adc10f09a47eef96aeea9162221a5e5c64fde13e", "blobHash": "sha256:a110f78e0b092481dc372901c4d57ae50681d773bc9d55e62356f9a22f17e24b" },
+        { "path": "lib/StreamSaver.js", "anchor": "mitm: 'https://jimmywarting.github.io/StreamSaver.js/mitm.html?version=2.0.0'", "introducedBy": "b02298f7f1308f7c500437169437faaef22dfb2b", "blobHash": "sha256:a110f78e0b092481dc372901c4d57ae50681d773bc9d55e62356f9a22f17e24b" },
+        { "path": "lib/third-party-libraries.md", "anchor": "lib/StreamSaver.js", "introducedBy": "7aea42621de9f576cf5ad4b2b688d40d8cac7317", "blobHash": "sha256:db7d2ecb228295a33642d2dfca4906ced3ac6951312e221f0ddc8892609b7c0a" },
+        { "path": "js/downloader.js", "anchor": "streamSaver.mitm = G.streamSaverConfig.url;", "introducedBy": "094481ee619077e8021881658c4f423d1375b08f", "blobHash": "sha256:647e18145949d3620edb0a4ecec8320e52e752b0f38e8acb7efbfb7f05988e3f" },
+        { "path": "js/downloader.js", "anchor": "if ((_downStream || G.downStream) && !_ffmpeg) {", "introducedBy": "229decfb661b2ea49997ee4f8a0db240cd65ee8a", "blobHash": "sha256:647e18145949d3620edb0a4ecec8320e52e752b0f38e8acb7efbfb7f05988e3f" },
+        { "path": "js/downloader.js", "anchor": "fragment.fileStream = streamSaver.createWriteStream(fragment.downFileName).getWriter();", "introducedBy": "be6ed7fdb99b6305691a1f333b763607dd27e46d", "blobHash": "sha256:647e18145949d3620edb0a4ecec8320e52e752b0f38e8acb7efbfb7f05988e3f" },
+        { "path": "js/downloader.js", "anchor": "fragment.fileStream = null;", "introducedBy": "094481ee619077e8021881658c4f423d1375b08f", "blobHash": "sha256:647e18145949d3620edb0a4ecec8320e52e752b0f38e8acb7efbfb7f05988e3f" },
+        { "path": "js/downloader.js", "anchor": "down.fragments[index].fileStream = null;", "introducedBy": "7b3441fe8a92d7517e071f1ed57e9a040d0dbd36", "blobHash": "sha256:647e18145949d3620edb0a4ecec8320e52e752b0f38e8acb7efbfb7f05988e3f" },
+        { "path": "js/downloader.js", "anchor": "window.addEventListener('beforeunload', function (e) {", "introducedBy": "7b3441fe8a92d7517e071f1ed57e9a040d0dbd36", "blobHash": "sha256:647e18145949d3620edb0a4ecec8320e52e752b0f38e8acb7efbfb7f05988e3f" },
+        { "path": "js/m3u8.downloader.js", "anchor": "fragment.fileStream ? fragment.fileStream.write(new Uint8Array(value)) : chunks.push(value);", "introducedBy": "3db1bc8098191db1a19037ee7de9d5802579d7c4", "blobHash": "sha256:909c6a1acf0730e99fa385300949c392f44f75524606d3bc6d9c86d3d117637a" },
+        { "path": "js/m3u8.js", "anchor": "if (!$(\"#StreamSaver\").prop(\"checked\") && estimateFileSize > G.chromeLimitSize && confirm(i18n(\"fileTooLargeStream\", [\"2G\"]))) {", "introducedBy": "e522bf8d89b690f7b793449ed96c4919f4f8a3a0", "blobHash": "sha256:f906a1756c20fc1ff6d79cf8db7e4f44ae70d5fb921b843ccd825d7bf9bfa3c6" },
+        { "path": "js/m3u8.js", "anchor": "function createStreamSaver(url) {", "introducedBy": "adc10f09a47eef96aeea9162221a5e5c64fde13e", "blobHash": "sha256:f906a1756c20fc1ff6d79cf8db7e4f44ae70d5fb921b843ccd825d7bf9bfa3c6" },
+        { "path": "js/m3u8.js", "anchor": "fileStream.close();", "introducedBy": "adc10f09a47eef96aeea9162221a5e5c64fde13e", "blobHash": "sha256:f906a1756c20fc1ff6d79cf8db7e4f44ae70d5fb921b843ccd825d7bf9bfa3c6" },
+        { "path": "js/m3u8.js", "anchor": "fileStream && fileStream.abort();", "introducedBy": "b02298f7f1308f7c500437169437faaef22dfb2b", "blobHash": "sha256:f906a1756c20fc1ff6d79cf8db7e4f44ae70d5fb921b843ccd825d7bf9bfa3c6" }
+      ],
       "localContractRefs": [
-        { "path": "electron/service/embeddedBrowserMainController.ts", "anchor": "downloadEmbeddedBrowserDirectFile", "sourceHash": null },
-        { "path": "electron/ipc/http.ts", "anchor": "HTTP IPC handlers", "sourceHash": null }
+        { "path": "electron/service/embeddedBrowserMainController.ts", "anchor": "downloadEmbeddedBrowserDirectFile", "sourceHash": "sha256:60470fdff32b5d447437b7ab11fe254469cec282398f28bd96b608da7640e985" },
+        { "path": "electron/ipc/http.ts", "anchor": "registerHttpIpc", "sourceHash": "sha256:ed212b7919bdd83c5a2ccbd240452e3da30f9dab48fec3055ffaa4f881eb1aa1" }
       ],
       "auditedThrough": null,
-      "oracleRelation": "not-applicable",
+      "oracleRelation": "platform-substitute",
       "disposition": "pending",
       "mapping": "unmapped",
       "requiredEvidence": {
@@ -732,7 +892,7 @@
       "fixtures": ["transfer.large-response-memory", "transfer.temp-budget-backpressure"],
       "decision": null,
       "acceptedDifferences": [],
-      "notes": "Known gap: direct downloads and selected HTTP/resource reads materialize complete responses in memory."
+      "notes": "Known gap: direct downloads and selected HTTP/resource reads materialize complete responses in memory. Vendor provenance blocker: the vendored StreamSaver bundle has no verified immutable upstream artifact binding, self-reports 2.0.5 while lib/third-party-libraries.md declares 2.0.6, and retains remote MITM bindings."
     },
     {
       "id": "processing.main-task-registry",
@@ -742,8 +902,8 @@
       "additionalRiskTags": ["production-runtime", "cross-process", "large-media", "long-task", "temp-file"],
       "upstreamSources": [],
       "localContractRefs": [
-        { "path": "electron/service/embeddedBrowserMainController.ts", "anchor": "embeddedBrowserHlsRetrySessions", "sourceHash": null },
-        { "path": "src/features/tool-workspace/hooks/useHlsDownloadTask.ts", "anchor": "useHlsDownloadTask", "sourceHash": null }
+        { "path": "electron/service/embeddedBrowserMainController.ts", "anchor": "embeddedBrowserHlsRetrySessions", "sourceHash": "sha256:60470fdff32b5d447437b7ab11fe254469cec282398f28bd96b608da7640e985" },
+        { "path": "src/features/tool-workspace/hooks/useHlsDownloadTask.ts", "anchor": "useHlsDownloadTask", "sourceHash": "sha256:94f0bba21dfc21660f43f42abc934071e3a0867b52db103d8cb99a607e33ef51" }
       ],
       "auditedThrough": null,
       "oracleRelation": "not-applicable",
@@ -771,8 +931,8 @@
       "additionalRiskTags": ["production-runtime", "cross-process", "large-media", "long-task", "temp-file"],
       "upstreamSources": [],
       "localContractRefs": [
-        { "path": "electron/service/embeddedBrowserMainController.ts", "anchor": "emitEmbeddedBrowserHlsTask", "sourceHash": null },
-        { "path": "electron/service/embeddedBrowserMainTypes.ts", "anchor": "EmbeddedBrowserCapturedResourceMergeResponse", "sourceHash": null }
+        { "path": "electron/service/embeddedBrowserMainController.ts", "anchor": "emitEmbeddedBrowserHlsTask", "sourceHash": "sha256:60470fdff32b5d447437b7ab11fe254469cec282398f28bd96b608da7640e985" },
+        { "path": "electron/service/embeddedBrowserMainTypes.ts", "anchor": "EmbeddedBrowserCapturedResourceMergeResponse", "sourceHash": "sha256:7d3cd4e781bc27dc808cb6517f9a22521d860e6ec5be0c3d32ec3745578c12e0" }
       ],
       "auditedThrough": null,
       "oracleRelation": "not-applicable",
@@ -787,7 +947,7 @@
         "candidate": [],
         "legacy": ["electron/service/embeddedBrowserMainController.ts#emitEmbeddedBrowserHlsTask"]
       },
-      "fixtures": ["output.staged-terminal", "output.delivery-not-processing-success"],
+      "fixtures": ["output.staged-terminal", "output.delivery-not-processing-success", "closure.hls-task-event"],
       "decision": null,
       "acceptedDifferences": [],
       "notes": "Current processing reports success with a raw outputPath before local-save or UploadManager delivery reaches a terminal state."
@@ -800,8 +960,8 @@
       "additionalRiskTags": ["production-runtime", "cross-process", "large-media", "long-task", "temp-file", "security-boundary"],
       "upstreamSources": [],
       "localContractRefs": [
-        { "path": "electron/service/embeddedBrowserMainController.ts", "anchor": "outputPath responses", "sourceHash": null },
-        { "path": "electron/service/embeddedBrowserResourceFileSaveService.ts", "anchor": "saveEmbeddedBrowserExtractedResourceFile", "sourceHash": null }
+        { "path": "electron/service/embeddedBrowserMainController.ts", "anchor": "outputPath: result.outputPath", "sourceHash": "sha256:60470fdff32b5d447437b7ab11fe254469cec282398f28bd96b608da7640e985" },
+        { "path": "electron/service/embeddedBrowserResourceFileSaveService.ts", "anchor": "saveEmbeddedBrowserExtractedResourceFile", "sourceHash": "sha256:ad9472e50d95cf1989af7d30887ad654c5bcad735eedf9f520e820752c9546ee" }
       ],
       "auditedThrough": null,
       "oracleRelation": "not-applicable",
@@ -829,9 +989,9 @@
       "additionalRiskTags": ["production-runtime", "cross-process", "large-media", "long-task", "temp-file"],
       "upstreamSources": [],
       "localContractRefs": [
-        { "path": "src/features/tool-workspace/ToolWorkspaceMedia.tsx", "anchor": "ToolWorkspaceMedia", "sourceHash": null },
-        { "path": "src/features/tool-workspace/hooks/useHlsDownloadTask.ts", "anchor": "useHlsDownloadTask", "sourceHash": null },
-        { "path": "src/features/tool-workspace/hooks/useMpdDownloadTask.ts", "anchor": "useMpdDownloadTask", "sourceHash": null }
+        { "path": "src/features/tool-workspace/ToolWorkspaceMedia.tsx", "anchor": "ToolWorkspaceMedia", "sourceHash": "sha256:bb82a0b4552a62096241bd649a23f6faa5a26c89b9692164fb9631fb16a4e2a6" },
+        { "path": "src/features/tool-workspace/hooks/useHlsDownloadTask.ts", "anchor": "useHlsDownloadTask", "sourceHash": "sha256:94f0bba21dfc21660f43f42abc934071e3a0867b52db103d8cb99a607e33ef51" },
+        { "path": "src/features/tool-workspace/hooks/useMpdDownloadTask.ts", "anchor": "useMpdDownloadTask", "sourceHash": "sha256:dd0bb0d7a98a1738b4ed7376e0d9f1c0719add6b3d6f99a19d2fceb4d62da9e4" }
       ],
       "auditedThrough": null,
       "oracleRelation": "not-applicable",
@@ -859,8 +1019,8 @@
       "additionalRiskTags": ["production-runtime", "large-media", "long-task", "temp-file"],
       "upstreamSources": [],
       "localContractRefs": [
-        { "path": "src/features/embedded-browser/resources/hooks/useResourceImportToLibrary.ts", "anchor": "useResourceImportToLibrary", "sourceHash": null },
-        { "path": "src/utils/uploadManager.ts", "anchor": "uploadManager", "sourceHash": null }
+        { "path": "src/features/embedded-browser/resources/hooks/useResourceImportToLibrary.ts", "anchor": "useResourceImportToLibrary", "sourceHash": "sha256:be758d48d7b4efabdc4241a541c3bdb74aff79191f07a3c3d94be5e0eb1072a5" },
+        { "path": "src/utils/uploadManager.ts", "anchor": "uploadManager", "sourceHash": "sha256:a75a825729cb5ba5aa8a110863ccfe7a79cedbd9d4a8c8c42bb6b894be353c20" }
       ],
       "auditedThrough": null,
       "oracleRelation": "not-applicable",
@@ -887,14 +1047,17 @@
       "cutoverUnitId": "output-integration",
       "additionalRiskTags": ["production-runtime", "large-media", "temp-file"],
       "upstreamSources": [
-        { "path": "js/function.js", "anchor": "function downloadDataURL(url, fileName)", "introducedBy": null, "blobHash": "sha256:f1876eeec0e22e25f2424054d0ea15510027a93237a3109d016f2e7cc16c59a0" },
-        { "path": "js/function.js", "anchor": "function getUrlFileName(url)", "introducedBy": null, "blobHash": "sha256:f1876eeec0e22e25f2424054d0ea15510027a93237a3109d016f2e7cc16c59a0" },
-        { "path": "js/function.js", "anchor": "function ArrayBufferToBlob(buffer, options = {})", "introducedBy": null, "blobHash": "sha256:f1876eeec0e22e25f2424054d0ea15510027a93237a3109d016f2e7cc16c59a0" },
-        { "path": "js/function.js", "anchor": "function stringModify(str, text)", "introducedBy": null, "blobHash": "sha256:f1876eeec0e22e25f2424054d0ea15510027a93237a3109d016f2e7cc16c59a0" },
-        { "path": "js/function.js", "anchor": "function filterFileName(str, text)", "introducedBy": null, "blobHash": "sha256:f1876eeec0e22e25f2424054d0ea15510027a93237a3109d016f2e7cc16c59a0" },
-        { "path": "js/templates.js", "anchor": "class Template {", "introducedBy": null, "blobHash": "sha256:93d1f86fa6c678566c3ca229d9dbba87a1447563f68acdc0d0084134c4dcbd24" },
-        { "path": "js/templates.js", "anchor": "static render(text, data) {", "introducedBy": null, "blobHash": "sha256:93d1f86fa6c678566c3ca229d9dbba87a1447563f68acdc0d0084134c4dcbd24" },
-        { "path": "js/templates.js", "anchor": "function templates(text, data)", "introducedBy": null, "blobHash": "sha256:93d1f86fa6c678566c3ca229d9dbba87a1447563f68acdc0d0084134c4dcbd24" }
+        { "path": "js/function.js", "anchor": "function downloadDataURL(url, fileName)", "introducedBy": "a97cd1d08e8b10783bb5af45ce819db752e1e8ec", "blobHash": "sha256:f1876eeec0e22e25f2424054d0ea15510027a93237a3109d016f2e7cc16c59a0" },
+        { "path": "js/function.js", "anchor": "function getUrlFileName(url)", "introducedBy": "fdf6df985e284cab24a43a5a93cbd39df717a524", "blobHash": "sha256:f1876eeec0e22e25f2424054d0ea15510027a93237a3109d016f2e7cc16c59a0" },
+        { "path": "js/function.js", "anchor": "function ArrayBufferToBlob(buffer, options = {})", "introducedBy": "c021428d89e5c97d98c330b5580863db91dd9673", "blobHash": "sha256:f1876eeec0e22e25f2424054d0ea15510027a93237a3109d016f2e7cc16c59a0" },
+        { "path": "js/function.js", "anchor": "function appendZero(date)", "introducedBy": "68c856e4872efdc1ba1b6fcae995576e9c2479d0", "blobHash": "sha256:f1876eeec0e22e25f2424054d0ea15510027a93237a3109d016f2e7cc16c59a0" },
+        { "path": "js/function.js", "anchor": "function isEmpty(obj)", "introducedBy": "65b4501566e44089394dc3e054b658ebdca6d0b9", "blobHash": "sha256:f1876eeec0e22e25f2424054d0ea15510027a93237a3109d016f2e7cc16c59a0" },
+        { "path": "js/function.js", "anchor": "function stringModify(str, text)", "introducedBy": "7ebec582b7cbb5fdaf0c47e485989f3917450d3a", "blobHash": "sha256:f1876eeec0e22e25f2424054d0ea15510027a93237a3109d016f2e7cc16c59a0" },
+        { "path": "js/function.js", "anchor": "function filterFileName(str, text)", "introducedBy": "7ebec582b7cbb5fdaf0c47e485989f3917450d3a", "blobHash": "sha256:f1876eeec0e22e25f2424054d0ea15510027a93237a3109d016f2e7cc16c59a0" },
+        { "path": "js/init.js", "anchor": "const reFilterFileName = /[<>:\"|?*~]/g;", "introducedBy": "637d9b12cf32ef5eca73fb1bda79f2dece9ebe9e", "blobHash": "sha256:fd4393999ae1d4ebba3c2d8a1bc7024380afd3ba4a93566f6cb05dde7a771a54" },
+        { "path": "js/templates.js", "anchor": "class Template {", "introducedBy": "64e9c7c548db340a250fcf44b2515dccac08c204", "blobHash": "sha256:93d1f86fa6c678566c3ca229d9dbba87a1447563f68acdc0d0084134c4dcbd24" },
+        { "path": "js/templates.js", "anchor": "static render(text, data) {", "introducedBy": "64e9c7c548db340a250fcf44b2515dccac08c204", "blobHash": "sha256:93d1f86fa6c678566c3ca229d9dbba87a1447563f68acdc0d0084134c4dcbd24" },
+        { "path": "js/templates.js", "anchor": "function templates(text, data)", "introducedBy": "45903460eaf152124a0c4374b1231d195e9ebb54", "blobHash": "sha256:93d1f86fa6c678566c3ca229d9dbba87a1447563f68acdc0d0084134c4dcbd24" }
       ],
       "localContractRefs": [],
       "auditedThrough": null,
@@ -952,8 +1115,8 @@
       "additionalRiskTags": ["production-runtime", "cross-process", "large-media", "long-task", "temp-file"],
       "upstreamSources": [],
       "localContractRefs": [
-        { "path": "electron/service/embeddedBrowserService.ts", "anchor": "initializeEmbeddedBrowserDownloadBridge", "sourceHash": null },
-        { "path": "src/features/embedded-browser/downloads/hooks/useEmbeddedBrowserDownloadImport.ts", "anchor": "useEmbeddedBrowserDownloadImport", "sourceHash": null }
+        { "path": "electron/service/embeddedBrowserService.ts", "anchor": "initializeEmbeddedBrowserDownloadBridge", "sourceHash": "sha256:c877b9d74e10b579687fedb0e8bc08545b090de5cd32b7eb59da018690dc0b33" },
+        { "path": "src/features/embedded-browser/downloads/hooks/useEmbeddedBrowserDownloadImport.ts", "anchor": "useEmbeddedBrowserDownloadImport", "sourceHash": "sha256:b100bb6fdb9de49cd309a26ad05a33476bf25ac7bff687022a68165a2db18b2c" }
       ],
       "auditedThrough": null,
       "oracleRelation": "not-applicable",
@@ -971,7 +1134,7 @@
       "fixtures": ["output.normal-download-import-cleanup"],
       "decision": null,
       "acceptedDifferences": [],
-      "notes": "Normal BrowserWindow download completion and optional library import form a separate handoff from captured-output local save and retain their own cleanup lifecycle."
+      "notes": "Normal BrowserWindow download completion and optional library import form a separate OmniFlow handoff from captured-output local save and retain their own cleanup lifecycle. Cat Catch browser-download fallback and downloader-page lifecycle are mapped under the transfer capabilities instead of being conflated with this local contract."
     },
     {
       "id": "output.ffmpeg-process-owner",
@@ -981,8 +1144,12 @@
       "additionalRiskTags": ["production-runtime", "large-media", "long-task", "temp-file", "security-boundary"],
       "upstreamSources": [],
       "localContractRefs": [
-        { "path": "electron/service/embeddedBrowserResourceManifestDownloadService.ts", "anchor": "downloadEmbeddedBrowserManifestResource", "sourceHash": null },
-        { "path": "electron/service/embeddedBrowserResourceMergeService.ts", "anchor": "mergeEmbeddedBrowserResourceTracks", "sourceHash": null }
+        { "path": "electron/service/embeddedBrowserResourceManifestDownloadService.ts", "anchor": "downloadEmbeddedBrowserManifestResource", "sourceHash": "sha256:5cfce59188a1999cba159c1b5930c922f4a1cbc30f6fd5571893e84766537e00" },
+        { "path": "electron/service/embeddedBrowserResourceManifestDownloadService.ts", "anchor": "downloadEmbeddedBrowserManifestTracks", "sourceHash": "sha256:5cfce59188a1999cba159c1b5930c922f4a1cbc30f6fd5571893e84766537e00" },
+        { "path": "electron/service/embeddedBrowserResourceMergeService.ts", "anchor": "canExecuteCommand", "sourceHash": "sha256:7dbe0413831784a6e54f425fc464bcd87a29eed4765d3592551284c79209e12b" },
+        { "path": "electron/service/embeddedBrowserResourceMergeService.ts", "anchor": "mergeEmbeddedBrowserResourceTracks", "sourceHash": "sha256:7dbe0413831784a6e54f425fc464bcd87a29eed4765d3592551284c79209e12b" },
+        { "path": "electron/service/embeddedBrowserResourceMergeService.ts", "anchor": "transcodeEmbeddedBrowserResource", "sourceHash": "sha256:7dbe0413831784a6e54f425fc464bcd87a29eed4765d3592551284c79209e12b" },
+        { "path": "electron/service/embeddedBrowserMpdLocalDownloaderService.ts", "anchor": "mergeMpdTrackFilesToOutput", "sourceHash": "sha256:7d401f33614ccaf2706d127fc7bf9a8684c31ea88685dc7232b987d3e6a77bc2" }
       ],
       "auditedThrough": null,
       "oracleRelation": "not-applicable",
@@ -995,25 +1162,38 @@
       "ownerRefs": {
         "targetProduction": ["electron/service/embedded-browser/processing/ffmpeg-executor.ts#FfmpegTaskExecutor"],
         "candidate": [],
-        "legacy": ["electron/service/embeddedBrowserResourceManifestDownloadService.ts#downloadEmbeddedBrowserManifestResource", "electron/service/embeddedBrowserResourceMergeService.ts#mergeEmbeddedBrowserResourceTracks"]
+        "legacy": [
+          "electron/service/embeddedBrowserResourceManifestDownloadService.ts#downloadEmbeddedBrowserManifestResource",
+          "electron/service/embeddedBrowserResourceManifestDownloadService.ts#downloadEmbeddedBrowserManifestTracks",
+          "electron/service/embeddedBrowserResourceMergeService.ts#canExecuteCommand",
+          "electron/service/embeddedBrowserResourceMergeService.ts#mergeEmbeddedBrowserResourceTracks",
+          "electron/service/embeddedBrowserResourceMergeService.ts#transcodeEmbeddedBrowserResource",
+          "electron/service/embeddedBrowserMpdLocalDownloaderService.ts#mergeMpdTrackFilesToOutput"
+        ]
       },
       "fixtures": ["output.ffmpeg-process-cleanup", "output.ffmpeg-cancel-exit", "closure.ffmpeg-process"],
       "decision": null,
       "acceptedDifferences": [],
-      "notes": "ffmpeg child processes are created by multiple services and are not registered under a common task/cancel/app-exit owner."
+      "notes": "Six direct ffmpeg child-process sites across manifest download, manifest track merge, executable probing, resource merge, resource transcode, and MPD track merge are not registered under a common task/cancel/app-exit owner."
     },
     {
       "id": "output.external-tools-dispatch",
-      "origin": "omniflow-integration",
+      "origin": "cross-boundary",
       "boundary": "main.external-tools",
       "cutoverUnitId": "output-integration",
       "additionalRiskTags": ["production-runtime", "cross-process", "credentials", "security-boundary"],
-      "upstreamSources": [],
+      "upstreamSources": [
+        { "path": "js/init.js", "anchor": "m3u8dl: 0,", "introducedBy": "f00f0b929cbc19dcc2a291f8409f8931df94d80e", "blobHash": "sha256:fd4393999ae1d4ebba3c2d8a1bc7024380afd3ba4a93566f6cb05dde7a771a54" },
+        { "path": "js/m3u8.js", "anchor": "const m3u8dl = 'm3u8dl:' + (G.m3u8dl == 1 ? Base64.encode(m3u8dlArg) : m3u8dlArg);", "introducedBy": "8043a550ad5108b1651e6b8bbd1fbbf8b1a1d84e", "blobHash": "sha256:f906a1756c20fc1ff6d79cf8db7e4f44ae70d5fb921b843ccd825d7bf9bfa3c6" },
+        { "path": "m3u8.html", "anchor": "<script src=\"lib/base64.js\"></script>", "introducedBy": "aefb58afd1d38505bebc3f27faba369dee445bce", "blobHash": "sha256:f4bd87b0ab0b0048daa36dac706f43897a28d322a5c3cd82a226114c7a3ff492" },
+        { "path": "lib/base64.js", "anchor": "class Base64 {", "introducedBy": "737718ca43ef26a574c4dc0fb9339da632f61658", "blobHash": "sha256:08e9954c252792290cebaaaf9740f83129edfd7118acc79800fad00d697e88cd" }
+      ],
       "localContractRefs": [
-        { "path": "electron/service/embeddedBrowserExternalTools.ts", "anchor": "dispatchEmbeddedBrowserExternalTool", "sourceHash": null }
+        { "path": "electron/service/embeddedBrowserExternalTools.ts", "anchor": "dispatchEmbeddedBrowserExternalTool", "sourceHash": "sha256:36e728f9c3e52d7805af8313529617646012249f5cd54ffa23b277384b53e645" },
+        { "path": "src/features/embedded-browser/external-tools/model/embedded-browser-external-tools.ts", "anchor": "createDefaultEmbeddedBrowserExternalToolSettings", "sourceHash": "sha256:800ee3e11fa2edde737d912321550f7781ccf974ca0910e0f9a89a745f01b0b9" }
       ],
       "auditedThrough": null,
-      "oracleRelation": "not-applicable",
+      "oracleRelation": "platform-substitute",
       "disposition": "pending",
       "mapping": "unmapped",
       "requiredEvidence": {
@@ -1025,10 +1205,10 @@
         "candidate": [],
         "legacy": ["electron/service/embeddedBrowserExternalTools.ts#dispatchEmbeddedBrowserExternalTool"]
       },
-      "fixtures": ["output.external-tool-auth-boundary", "output.external-tool-process-terminal", "closure.external-tool-process"],
+      "fixtures": ["output.external-tool-auth-boundary", "output.external-tool-process-terminal", "output.m3u8dl-protocol-encoding", "closure.external-tool-process"],
       "decision": null,
       "acceptedDifferences": [],
-      "notes": "The current main dispatcher consumes renderer-supplied URL and header payloads and spawns external processes without the planned protected-context capability boundary."
+      "notes": "Pinned upstream Base64-encodes m3u8dl custom-protocol payloads when configured. OmniFlow substitutes a generic protocol/command/aria2 dispatcher with a matching m3u8dl URL template, but it consumes renderer-supplied URL and header payloads without the planned protected-context capability boundary. Options import/export is a separate peripheral Base64 consumer and remains outside this initial runtime mapping."
     }
   ]
 }
