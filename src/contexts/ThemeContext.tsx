@@ -1,4 +1,11 @@
-import React, { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from 'react';
 import { ThemeContext, type ResolvedThemeMode, type ThemeMode } from './theme.context';
 
 const THEME_STORAGE_KEY = 'app-theme';
@@ -20,22 +27,44 @@ function resolveThemeMode(theme: ThemeMode, prefersDark: boolean): ResolvedTheme
   return theme;
 }
 
+function readStoredTheme(): ThemeMode {
+  if (typeof window === 'undefined') return 'light';
+  try {
+    const savedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
+    return isThemeMode(savedTheme) ? savedTheme : 'light';
+  } catch {
+    return 'light';
+  }
+}
+
+function readStoredToggleAnchor(): ResolvedThemeMode {
+  if (typeof window === 'undefined') return 'light';
+  try {
+    const savedToggleAnchor = window.localStorage.getItem(THEME_TOGGLE_ANCHOR_STORAGE_KEY);
+    return isResolvedThemeMode(savedToggleAnchor) ? savedToggleAnchor : 'light';
+  } catch {
+    return 'light';
+  }
+}
+
+function readSystemPrefersDark(): boolean {
+  return typeof window !== 'undefined'
+    && typeof window.matchMedia === 'function'
+    && window.matchMedia(SYSTEM_THEME_QUERY).matches;
+}
+
 export const ThemeProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [theme, setThemeState] = useState<ThemeMode>('light');
-  const [systemPrefersDark, setSystemPrefersDark] = useState(false);
-  const [toggleAnchor, setToggleAnchor] = useState<ResolvedThemeMode>('light');
+  const [theme, setThemeState] = useState<ThemeMode>(readStoredTheme);
+  const [systemPrefersDark, setSystemPrefersDark] = useState(readSystemPrefersDark);
+  const [toggleAnchor, setToggleAnchor] = useState<ResolvedThemeMode>(readStoredToggleAnchor);
 
   useEffect(() => {
-    if (typeof window === 'undefined') {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
       return undefined;
     }
 
     const mediaQuery = window.matchMedia(SYSTEM_THEME_QUERY);
-    const savedTheme = localStorage.getItem(THEME_STORAGE_KEY);
-    const savedToggleAnchor = localStorage.getItem(THEME_TOGGLE_ANCHOR_STORAGE_KEY);
     setSystemPrefersDark(mediaQuery.matches);
-    setThemeState(isThemeMode(savedTheme) ? savedTheme : 'light');
-    setToggleAnchor(isResolvedThemeMode(savedToggleAnchor) ? savedToggleAnchor : 'light');
 
     const handleChange = (event: MediaQueryListEvent) => {
       setSystemPrefersDark(event.matches);
@@ -52,11 +81,18 @@ export const ThemeProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     [systemPrefersDark, theme],
   );
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     document.body.setAttribute('theme-mode', resolvedTheme);
     document.body.setAttribute('theme-source', theme);
-    localStorage.setItem(THEME_STORAGE_KEY, theme);
-    localStorage.setItem(THEME_TOGGLE_ANCHOR_STORAGE_KEY, toggleAnchor);
+  }, [resolvedTheme, theme]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(THEME_STORAGE_KEY, theme);
+      window.localStorage.setItem(THEME_TOGGLE_ANCHOR_STORAGE_KEY, toggleAnchor);
+    } catch {
+      // Theme remains active for this session when storage is unavailable.
+    }
     if (window.electronWindow?.setThemeSource) {
       window.electronWindow.setThemeSource(theme === 'system' ? 'system' : resolvedTheme);
     }
