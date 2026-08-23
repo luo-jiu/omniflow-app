@@ -436,20 +436,29 @@ legacy 兼容检查：
 - 新建会话后旧会话仍在会话管理页；历史列表可以搜索、打开、内联重命名和删除，超过 50 条后可按游标继续加载且总数准确，当前会话删除后回到空态
 - 同一会话连续提交两轮时保持同一个 `sessionId`、生成不同 `runId`，第二轮能获得前一轮的 user / assistant 上下文
 - 流式回复、停止、provider 错误、只读 Tool 开始 / 进度 / 完成均只更新当前会话；新会话创建时 `start` 返回前，以及恢复仍在运行的会话读取快照期间，抢跑事件均不丢失；Tool 前后分段的 assistant 内容在完成、取消或失败时不重复，离开页面期间漏掉的部分在失败事件后也能立即补齐
+- 在当前目录请求“创建一个叫测试的文件夹”时显示精确确认卡片；允许后只创建一次，后端返回节点后先提交 authoritative result，再刷新目标目录树并通过 `file.list` 感知到同一个 `createdNodeId` 后继续回答；取消后不创建，模型能依据拒绝结果结束本轮
+- 选中单个普通音频或视频后请求“检查这个媒体文件”，`media.inspect` 不弹写操作确认，能返回真实容器、时长和媒体流元数据；未安装 ffprobe 时明确提示环境缺失且不显示模拟结果。真实媒体由用户手工验证，自动化只使用 JSON fixture，不播放媒体
+- 在 macOS 本地 MinIO 的非第一个资料库中选中单个视频后请求“提取音频”，确认卡片准确显示源文件、当前目录、输出名和格式；拒绝时不生成文件，允许后只上传到授权时的当前目录，默认生成 `*-audio.m4a`，长名称仍保留 `-audio.<格式>` 且不超过 240 UTF-8 bytes，同名时 Tool 结果使用后端实际自动改名后的名称。真实媒体内容与格式由用户手工验证，自动化不得播放媒体
+- `media.extractAudio` 分别验证停止 ffmpeg、上传中停止、上传失败、无音轨、未安装 ffmpeg、目录刷新失败和应用窗口关闭：commit 前 main 取消或 Broker 超时会发出 Renderer 取消事件，进程树、主进程 PUT、后端 multipart Session、loopback claim 与本地临时产物均被清理；上传创建节点成功后立即 commit，此后停止、页面卸载、刷新失败或最终回执超时均保留该实际文件并使用 committed fallback，不得再次提取造成重复文件
+- 等待确认时离开再返回 Agent 工作区，确认卡片可从当前会话恢复；停止任务、确认超时、注销、窗口销毁或应用重启后动作失效，不能在恢复时自动执行
 - Agent 消息区域、输入框和会话管理页复用 `8px` 工作区滚动条，在亮色 / 暗色主题下没有白色宽轨或不跟随主题的滑块；流式输出只在用户原本接近底部时自动跟随，向上回看后不会被每个增量强制拉回底部
-- 关闭并重新打开应用后，已完成会话可以恢复；退出时仍为 `running` 的 Run / ToolRun 显示为“上一轮已中断”，不自动重放请求或 Tool
+- 关闭并重新打开应用后，已完成会话可以恢复；退出时仍为 `running` / `awaiting_approval` 的 Run / ToolRun 显示为“上一轮已中断”，不自动重放请求、确认或 Tool
 - 打包产物中的 `sqlite3` 原生模块位于 ASAR 解包目录，macOS / Windows 对应安装包均能创建和重新打开 `agent-sessions.sqlite3`
 
 边界路径：
 
 - 从资料库 A 切到资料库 B 时立即清空 A 的会话投影；A 的迟到列表响应或流式事件不写入 B，B 没有历史时也不残留 A 的消息；仍在读取 A 感知快照的待提交请求不得在切换后启动 provider
 - 相同 `libraryId` 下切换用户或 API 基址时不能看到、续接、重命名或删除其他 owner 的会话；v1 数据升级后不能被新 owner 自动认领。任何验证场景禁止使用第一个资料库，`Win` 可用时优先使用 `Win`
-- Session ID 不属于当前 owner scope 或 `libraryId` 时读取、续接、重命名和删除均被拒绝；注销或 401 清理会取消当前主窗口全部 Agent Run，普通工作区切换仍允许已启动 Run 在 main 后台完成
+- Session ID 不属于当前 owner scope 或 `libraryId` 时读取、续接、重命名和删除均被拒绝；注销或 401 清理会取消当前主窗口全部 Agent Run。普通工作区切换允许纯 main Run 在后台完成，但正在执行 Renderer 上传的 Run 必须中止上传并停止，不能在 main 悬挂到超时
 - 同一 Session 正在启动或运行时拒绝第二个 Run 和删除；停止只能由发起该 Run 的主窗口执行
 - Run 开始后编辑或删除来源 AI 服务配置会被拒绝；切换 active 配置不改变本轮连接，后续 Tool 轮次与 fallback 仍使用启动时固定的 provider、Base URL 和 Key，终止后配置锁释放
 - overlay、独立媒体窗口和非主 frame 调用 Agent IPC 时被拒绝
+- 确认、Renderer 内部能力、写入 commit 或执行完成请求只要窗口、owner scope、资料库、Session、Run 或一次性 ID 任一不匹配就被拒绝；同一媒体来源能力、commit 和执行结果均不能重复提交
 - Agent SQLite、IPC 响应、日志和消息中不出现 AI Service API Key、Cookie、签名 URL 或完整环境变量；升级 `sqlite3` 或 N-API 版本后打包必须重新准备目标原生模块，不能复用旧缓存
-- 不支持 Tool Calling 的本地模型退回有界感知快照；未注册 Tool 和非 `read` Tool 不执行；达到 4 轮 / 8 次 Tool 上限后明确失败
+- `media.inspect` 的签名 URL 只在 Renderer 到 main 的受权瞬时 IPC 和 main 内存代理中存在；ffprobe 命令行只出现 loopback URL，Tool 结果只保留白名单元数据，原始 tags、文件来源、代理 token 和 stderr 不进入消息或 SQLite
+- `media.extractAudio` 的 6 小时签名 URL、loopback token、ffmpeg stderr、本地路径和 artifact ID 不进入 Agent 消息、Tool 结果、SQLite 或日志；来源 capability 不能重放，产物只能由匹配窗口、Session、Run 和 execution 释放，单文件 2 GiB、4 个活跃产物、默认 8 GiB 总预留和 1 小时无活动 TTL 上限均生效，近期崩溃残留计入总量，应用启动会清理过期残留，持续上传时进度能续期 lease
+- 不支持 Tool Calling 的本地模型退回有界感知快照；未注册 Tool、未配置权限策略的非 `read` Tool、没有显式只读授权的 Renderer Tool 和绕过确认的 Renderer 写 Tool 不执行；达到 4 轮 / 8 次 Tool 上限后明确失败
+- 内部 `AgentLocalProcessRunner` 只接受绝对可执行文件路径和参数数组，不启用 shell、不继承完整环境；并发、输出、超时和取消均命中上限，取消后清理 macOS / Linux 进程组或 Windows 进程树。该基座没有注册为模型 Tool 时，Agent 不能通过它执行任意命令
 
 ### 3.15 QQ 音乐歌词工具
 

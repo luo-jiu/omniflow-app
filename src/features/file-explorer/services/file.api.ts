@@ -313,6 +313,8 @@ export async function uploadLocalPathAndCreateNode(
   options?: {
     contentType?: string;
     conflictPolicy?: NodeNameConflictPolicy;
+    onProgress?: (uploadedBytes: number) => void;
+    setAbort?: (aborter: () => Promise<void>) => void;
     storageProvider?: string;
   },
 ) {
@@ -332,6 +334,8 @@ export async function uploadLocalPathAndCreateNode(
     parentId,
     storageProvider: options?.storageProvider,
     conflictPolicy: options?.conflictPolicy,
+    onProgress: options?.onProgress,
+    setAbort: options?.setAbort,
   });
 
   const d = extractDataPayload<Record<string, unknown>>(json);
@@ -666,6 +670,7 @@ export async function getFileLink(nodeId: number, libraryId: number, expiry: num
   
   const body = await request(`/v1/directory/link?${query}`, {
     method: 'GET',
+    sensitiveResponse: true,
   });
   return body.data || body;
 }

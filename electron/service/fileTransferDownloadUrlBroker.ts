@@ -8,6 +8,7 @@ import { normalizeDownloadFileName } from '../../src/features/file-transfer/mode
 
 const DEFAULT_CLAIM_TTL_MS = 5 * 60 * 1000
 const DEFAULT_SOURCE_WAIT_MS = 30 * 1000
+const MAX_RESOLVED_SOURCE_TTL_MS = 24 * 60 * 60 * 1000
 const DOWNLOAD_ROUTE_PREFIX = 'file-transfer-download'
 
 export interface ResolveDownloadUrlClaimInput {
@@ -28,6 +29,15 @@ export interface ResolvedDownloadUrlClaim {
   fileName: string
   mimeType?: string
   sourceUrl: string
+}
+
+export interface ResolvedLoopbackSource {
+  claimId: string
+  url: string
+}
+
+export interface ResolvedLoopbackSourceOptions {
+  ttlMs?: number
 }
 
 export interface FileTransferDownloadUrlBrokerOptions {
@@ -153,6 +163,36 @@ export class FileTransferDownloadUrlBroker {
     claim.sourceUrl = sourceUrl
     claim.error = undefined
     this.notifyWaiters(claim)
+  }
+
+  createResolvedLoopbackSource(
+    input: Omit<ResolveDownloadUrlClaimInput, 'claimId'>,
+    options: ResolvedLoopbackSourceOptions = {},
+  ): ResolvedLoopbackSource {
+    const environment = this.getEnvironment()
+    const claimId = crypto.randomUUID()
+    const fileName = normalizeDownloadFileName(input.fileName)
+    this.resolveClaim({ ...input, claimId, fileName })
+    const requestedTtlMs = Number(options.ttlMs)
+    if (Number.isFinite(requestedTtlMs) && requestedTtlMs > 0) {
+      const claim = this.claims.get(claimId)
+      if (claim) {
+        claim.expiresAt = this.now() + Math.min(requestedTtlMs, MAX_RESOLVED_SOURCE_TTL_MS)
+      }
+    }
+    return {
+      claimId,
+      url: `${environment.origin}/${DOWNLOAD_ROUTE_PREFIX}/${environment.runtimeToken}/${claimId}/${encodeURIComponent(fileName)}`,
+    }
+  }
+
+  releaseClaim(claimId: string): boolean {
+    const normalizedClaimId = normalizeClaimId(claimId)
+    const claim = this.claims.get(normalizedClaimId)
+    if (!claim) return false
+    claim.error = '文件来源声明已释放'
+    this.notifyWaiters(claim)
+    return this.claims.delete(normalizedClaimId)
   }
 
   rejectClaim(input: RejectDownloadUrlClaimInput): void {

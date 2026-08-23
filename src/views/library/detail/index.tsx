@@ -3024,6 +3024,9 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
             <div className="workspace-pane active">
               <AgentWorkspace
                 libraryId={libraryId}
+                onRefreshDirectory={(directoryId) => (
+                  directorySidebarRef.current?.refreshNodeSubtree(directoryId)
+                )}
                 ownerScope={agentOwnerScope}
                 rootNodeId={treeRootNodeId}
                 selectedTreeNode={selectedTreeNode}

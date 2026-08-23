@@ -83,7 +83,10 @@ export async function ipcRequest<T = any>(path: string, options?: any): Promise<
       throw new Error(`${message} (${path})`);
     }
 
-    runtimeLogger.debug("📦 IPC Renderer 收到数据:", body);
+    runtimeLogger.debug(
+      "📦 IPC Renderer 收到数据:",
+      options?.sensitiveResponse ? '[sensitive response omitted]' : body,
+    );
     return body as T;
   } catch (err) {
     runtimeLogger.error('❌ IPC Renderer 请求失败:', err);

@@ -33,27 +33,27 @@ function context() {
 describe('Agent read tools', () => {
   it('lists only the perceived current directory', async () => {
     const executionContext = context();
-    const result = await fileListTool.execute({}, executionContext);
+    const result = await fileListTool.execute!({}, executionContext);
 
     expect(result.ok).toBe(true);
     expect(result.data).toMatchObject({ entryCount: 2 });
     expect(executionContext.onProgress).toHaveBeenCalledWith({ message: '正在读取 视频' });
 
-    await expect(fileListTool.execute({ directoryId: 11 }, executionContext))
+    await expect(fileListTool.execute!({ directoryId: 11 }, executionContext))
       .resolves.toMatchObject({ ok: false });
   });
 
   it('stats selected or visible nodes and rejects unknown nodes', async () => {
     const executionContext = context();
-    await expect(fileStatTool.execute({}, executionContext)).resolves.toMatchObject({
+    await expect(fileStatTool.execute!({}, executionContext)).resolves.toMatchObject({
       data: { id: 8, mimeType: 'video/mp4' },
       ok: true,
     });
-    await expect(fileStatTool.execute({ nodeId: 2 }, executionContext)).resolves.toMatchObject({
+    await expect(fileStatTool.execute!({ nodeId: 2 }, executionContext)).resolves.toMatchObject({
       data: { id: 2, type: 'dir' },
       ok: true,
     });
-    await expect(fileStatTool.execute({ nodeId: 999 }, executionContext)).resolves.toMatchObject({
+    await expect(fileStatTool.execute!({ nodeId: 999 }, executionContext)).resolves.toMatchObject({
       ok: false,
     });
   });

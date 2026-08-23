@@ -11,6 +11,7 @@ import { registerOverlayWindowIpcHandlers } from './service/overlayWindowIpc'
 import { createSystemVideoWindowController } from './service/systemVideoWindowController'
 import { registerSystemVideoWindowIpcHandlers } from './service/systemVideoWindowIpc'
 import { registerAppUpdateIpcHandlers } from './service/appUpdateIpc'
+import { agentMediaArtifactStore } from './service/agent/agent-media-artifact-store'
 import { clearFileTransferRuntime, initializeFileTransferRuntime } from './service/fileTransferRuntime'
 import { createAppUpdateService } from './service/appUpdateService'
 import { IMAGE_PREVIEW_PROTOCOL, registerImagePreviewProtocol } from './ipc/imagePreview'
@@ -423,6 +424,9 @@ app.whenReady().then(async () => {
   embeddedBrowserMainController.initializeBridges()
   await initializeFileTransferRuntime().catch((error) => {
     console.error('[file-transfer] download URL broker failed to start', error)
+  })
+  await agentMediaArtifactStore.sweepExpired().catch((error) => {
+    console.error('[agent] media artifact sweep failed to start', error)
   })
   registerIpcHandlers({ getMainWindow: () => mainWindow })
   registerWindowControlIpcHandlers({

@@ -1,4 +1,5 @@
 import type {
+  AgentActionPreview,
   AgentAppContext,
   AgentPerceptionSnapshot,
   AgentToolProgress,
@@ -13,15 +14,40 @@ export interface AgentToolExecutionContext {
   signal: AbortSignal;
 }
 
+export type AgentToolExecutor = 'main' | 'renderer';
+
+export type AgentToolValidation =
+  | { ok: true }
+  | { message: string; ok: false };
+
+export type AgentToolPermissionDecision =
+  | { behavior: 'allow'; risk: AgentToolRisk }
+  | { behavior: 'ask'; preview: AgentActionPreview; risk: AgentToolRisk }
+  | { behavior: 'deny'; message: string; risk: AgentToolRisk };
+
 export interface AgentTool {
+  assess?: (
+    input: unknown,
+    context: AgentToolExecutionContext,
+  ) => AgentToolPermissionDecision | Promise<AgentToolPermissionDecision>;
+  createRendererRequest?: (
+    input: unknown,
+    context: AgentToolExecutionContext,
+  ) => unknown;
   description: string;
-  execute: (
+  execute?: (
     input: unknown,
     context: AgentToolExecutionContext,
   ) => Promise<AgentToolResult>;
+  executor?: AgentToolExecutor;
   inputSchema: unknown;
   name: string;
   risk: AgentToolRisk;
+  timeoutMs?: number;
+  validate?: (
+    input: unknown,
+    context: AgentToolExecutionContext,
+  ) => AgentToolValidation | Promise<AgentToolValidation>;
 }
 
 export function createAgentToolRegistry(initialTools: AgentTool[] = []) {
@@ -57,6 +83,9 @@ export function createAgentToolRegistry(initialTools: AgentTool[] = []) {
     }
     if (context.signal.aborted) {
       throw new Error('Agent Tool 执行已取消');
+    }
+    if ((tool.executor || 'main') !== 'main' || !tool.execute) {
+      throw new Error(`Agent Tool 不能在主进程直接执行：${tool.name}`);
     }
     return tool.execute(input, context);
   }

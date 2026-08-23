@@ -90,6 +90,103 @@ async function createLegacyV1Database(databasePath: string): Promise<void> {
   });
 }
 
+async function createPreApprovalV2Database(databasePath: string): Promise<void> {
+  const database = await new Promise<sqlite3.Database>((resolve, reject) => {
+    const opened = new sqlite3.Database(databasePath, error => (
+      error ? reject(error) : resolve(opened)
+    ));
+  });
+  await new Promise<void>((resolve, reject) => {
+    database.exec(`
+      CREATE TABLE agent_sessions (
+        id TEXT PRIMARY KEY,
+        backend_scope TEXT NOT NULL,
+        account_scope TEXT NOT NULL,
+        library_id INTEGER NOT NULL,
+        title TEXT NOT NULL,
+        context_json TEXT NOT NULL,
+        last_message_preview TEXT NOT NULL DEFAULT '',
+        archived_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE agent_runs (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        user_prompt TEXT NOT NULL,
+        profile_id TEXT NOT NULL,
+        model TEXT NOT NULL,
+        reasoning_effort TEXT NOT NULL,
+        current_step TEXT,
+        error TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        finished_at TEXT
+      );
+      CREATE TABLE agent_messages (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        run_id TEXT,
+        sequence INTEGER NOT NULL,
+        role TEXT NOT NULL,
+        content TEXT NOT NULL,
+        tool_call_id TEXT,
+        tool_name TEXT,
+        created_at TEXT NOT NULL
+      );
+      CREATE TABLE agent_tool_runs (
+        id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL,
+        call_id TEXT NOT NULL,
+        tool_name TEXT NOT NULL,
+        input_json TEXT NOT NULL,
+        result_json TEXT,
+        status TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        finished_at TEXT
+      );
+      PRAGMA user_version = 2;
+    `, error => error ? reject(error) : resolve());
+  });
+  await new Promise<void>((resolve, reject) => {
+    database.close(error => error ? reject(error) : resolve());
+  });
+}
+
+async function setDatabaseVersion(databasePath: string, version: number): Promise<void> {
+  const database = await new Promise<sqlite3.Database>((resolve, reject) => {
+    const opened = new sqlite3.Database(databasePath, error => (
+      error ? reject(error) : resolve(opened)
+    ));
+  });
+  await new Promise<void>((resolve, reject) => {
+    database.exec(`PRAGMA user_version = ${version}`, error => (
+      error ? reject(error) : resolve()
+    ));
+  });
+  await new Promise<void>((resolve, reject) => {
+    database.close(error => error ? reject(error) : resolve());
+  });
+}
+
+async function readDatabaseVersion(databasePath: string): Promise<number> {
+  const database = await new Promise<sqlite3.Database>((resolve, reject) => {
+    const opened = new sqlite3.Database(databasePath, error => (
+      error ? reject(error) : resolve(opened)
+    ));
+  });
+  const version = await new Promise<{ user_version: number }>((resolve, reject) => {
+    database.get('PRAGMA user_version', (error, row) => (
+      error ? reject(error) : resolve(row as { user_version: number })
+    ));
+  });
+  await new Promise<void>((resolve, reject) => {
+    database.close(error => error ? reject(error) : resolve());
+  });
+  return version.user_version;
+}
+
 function message(
   sessionId: string,
   runId: string,
@@ -224,7 +321,9 @@ describe('SQLite Agent session store', () => {
       id: 'tool-running',
       input: {},
       now: timestamp(2),
+      permissionBehavior: 'allow',
       runId: 'run-running',
+      status: 'running',
       toolName: 'file.list',
     });
     await firstStore.close();
@@ -247,6 +346,114 @@ describe('SQLite Agent session store', () => {
     await createSession(store, 'scoped-session', 3, '新会话');
     expect((await store.listSessions(OWNER_SCOPE, 3)).sessions.map(item => item.id))
       .toEqual(['scoped-session']);
+  });
+
+  it('adds approval columns in place without changing the v2 schema version', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'omniflow-agent-session-v2-'));
+    temporaryDirectories.push(directory);
+    const databasePath = path.join(directory, 'agent-sessions.sqlite3');
+    await createPreApprovalV2Database(databasePath);
+
+    const store = await createStore(databasePath);
+    await createSession(store, 'session-approval', 3, '等待确认');
+    await store.createRun({
+      id: 'run-approval',
+      model: 'model-a',
+      now: timestamp(1),
+      profileId: 'profile-a',
+      reasoningEffort: 'auto',
+      sessionId: 'session-approval',
+      userPrompt: '创建测试目录',
+    });
+    await store.createToolRun({
+      approvalId: 'approval-1',
+      approvalInputHash: 'hash-1',
+      approvalPreview: {
+        description: '将在当前目录创建文件夹“测试”。',
+        risk: 'write',
+        title: '创建文件夹',
+      },
+      callId: 'call-approval',
+      id: 'tool-approval',
+      input: { name: '测试' },
+      now: timestamp(2),
+      permissionBehavior: 'ask',
+      runId: 'run-approval',
+      status: 'awaiting_approval',
+      toolName: 'directory.create',
+    });
+    await store.updateRun('run-approval', {
+      currentStep: '等待确认 directory.create',
+      status: 'awaiting_approval',
+      updatedAt: timestamp(2),
+    });
+
+    expect(await store.getSession('session-approval', OWNER_SCOPE, 3)).toMatchObject({
+      lastRunStatus: 'awaiting_approval',
+      pendingApprovals: [expect.objectContaining({ approvalId: 'approval-1' })],
+    });
+    await store.resolveToolApproval('approval-1', 'denied', timestamp(3));
+    expect((await store.getSession('session-approval', OWNER_SCOPE, 3))?.pendingApprovals).toEqual([]);
+
+    await store.close();
+    stores.splice(stores.indexOf(store), 1);
+    const database = await new Promise<sqlite3.Database>((resolve, reject) => {
+      const opened = new sqlite3.Database(databasePath, error => (
+        error ? reject(error) : resolve(opened)
+      ));
+    });
+    const version = await new Promise<{ user_version: number }>((resolve, reject) => {
+      database.get('PRAGMA user_version', (error, row) => (
+        error ? reject(error) : resolve(row as { user_version: number })
+      ));
+    });
+    const columns = await new Promise<Array<{ name: string }>>((resolve, reject) => {
+      database.all('PRAGMA table_info(agent_tool_runs)', (error, rows) => (
+        error ? reject(error) : resolve(rows as Array<{ name: string }>)
+      ));
+    });
+    await new Promise<void>((resolve, reject) => {
+      database.close(error => error ? reject(error) : resolve());
+    });
+    expect(version.user_version).toBe(2);
+    expect(columns.map(column => column.name)).toEqual(expect.arrayContaining([
+      'permission_behavior',
+      'approval_id',
+      'approval_input_hash',
+      'approval_preview_json',
+      'approval_status',
+      'approval_decided_at',
+    ]));
+  });
+
+  it('normalizes the known intermediate approval schema marker without losing sessions', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'omniflow-agent-session-v3-marker-'));
+    temporaryDirectories.push(directory);
+    const databasePath = path.join(directory, 'agent-sessions.sqlite3');
+    const initialStore = await createStore(databasePath);
+    await createSession(initialStore, 'preserved-session', 3, '保留的会话');
+    await initialStore.close();
+    stores.splice(stores.indexOf(initialStore), 1);
+    await setDatabaseVersion(databasePath, 3);
+
+    const reopenedStore = await createStore(databasePath);
+    expect((await reopenedStore.listSessions(OWNER_SCOPE, 3)).sessions).toEqual([
+      expect.objectContaining({ id: 'preserved-session', title: '保留的会话' }),
+    ]);
+    await reopenedStore.close();
+    stores.splice(stores.indexOf(reopenedStore), 1);
+    expect(await readDatabaseVersion(databasePath)).toBe(2);
+  });
+
+  it('rejects an unknown version 3 table shape instead of rewriting it', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'omniflow-agent-session-unknown-v3-'));
+    temporaryDirectories.push(directory);
+    const databasePath = path.join(directory, 'agent-sessions.sqlite3');
+    await createPreApprovalV2Database(databasePath);
+    await setDatabaseVersion(databasePath, 3);
+
+    await expect(createStore(databasePath)).rejects.toThrow('版本过新且结构无法识别：3');
+    expect(await readDatabaseVersion(databasePath)).toBe(3);
   });
 
   it('isolates matching library ids by backend and account scope', async () => {

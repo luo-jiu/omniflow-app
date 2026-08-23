@@ -20,6 +20,7 @@ import type {
 } from '@/shared/agent/agent.types';
 import { serializeAgentOwnerScope } from '@/shared/agent/agent-owner-scope';
 import AgentSessionManager from './components/AgentSessionManager';
+import AgentConfirmationCard from './components/AgentConfirmationCard';
 import {
   loadAgentModelPreferences,
   saveAgentModelPreferences,
@@ -256,6 +257,7 @@ const ComposerResizeHandle = styled.button`
 
 type AgentWorkspaceProps = {
   libraryId: number;
+  onRefreshDirectory?: (directoryId: number) => Promise<void> | void;
   ownerScope: AgentOwnerScope | null;
   rootNodeId: number | null;
   selectedTreeNode: SelectedTreeNode | null;
@@ -289,6 +291,7 @@ function buildAppContext(
 
 export default function AgentWorkspace({
   libraryId,
+  onRefreshDirectory,
   ownerScope,
   rootNodeId,
   selectedTreeNode,
@@ -381,6 +384,7 @@ export default function AgentWorkspace({
   const session = useAgentSession({
     appContext,
     model: modelPreferences.model,
+    onRefreshDirectory,
     onSessionChanged: handleSessionChanged,
     ownerScope,
     profileId: aiServices?.activeProfileId || '',
@@ -635,6 +639,16 @@ export default function AgentWorkspace({
               >
                 {message.toolName ? `${message.toolName} · ${message.content}` : message.content}
               </MessageBubble>
+            ))}
+            {session.pendingApprovals.map(approval => (
+              <AgentConfirmationCard
+                approval={approval}
+                busy={session.approvalBusyIds.has(approval.approvalId)}
+                key={approval.approvalId}
+                onResolve={(approved) => {
+                  void session.resolveApproval(approval, approved);
+                }}
+              />
             ))}
             {workspaceError ? <div role="alert">{workspaceError}</div> : null}
             {session.warning ? <div role="status">{session.warning}</div> : null}

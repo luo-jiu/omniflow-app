@@ -1,6 +1,6 @@
 # 桌面平台适配架构
 
-更新时间：2026-08-19
+更新时间：2026-08-23
 
 适用范围：`omniflow-app` 的 macOS、Windows 和 Linux 宿主差异，包含主窗口配置、renderer 平台识别、标题栏安全区、平台专属系统能力及分平台构建验证。
 
@@ -14,6 +14,8 @@ Omniflow 继续保持一个 Electron 项目。页面、业务状态、HTTP、IPC
 electron/platform/
   index.ts                 main 侧平台策略入口
   types.ts                 主窗口平台配置类型
+  processTree.ts           受控本地进程的跨平台终止策略
+  mediaExecutable.ts       ffprobe 等媒体可执行文件的跨平台绝对路径解析
   macos/mainWindow.ts      macOS 主窗口策略
   windows/mainWindow.ts    Windows 主窗口策略
 
@@ -79,6 +81,8 @@ Windows 不模拟 macOS vibrancy：目录树侧栏和主内容圆角背板通过
 - 跨平台文件路径拼接、系统对话框和 `app.getPath()` 能覆盖的目录
 
 平台能力如果需要跨 preload 暴露，先更新本专题和 `electron/electron-env.d.ts`，再提供 renderer service；页面不得直接新增原始 IPC channel。
+
+Agent 的受控本地进程生命周期继续由共享 `electron/service/agent/agent-local-process-runner.ts` 持有，不按平台复制 Tool 或任务状态。Runner 只把“如何结束整棵进程树”委托给 `electron/platform/processTree.ts`：macOS / Linux 终止独立进程组，Windows 使用系统 `taskkill.exe /T` 并在不可用时退回直接终止子进程。该能力没有 preload / IPC 暴露，也不是任意 Shell 入口。
 
 ## 5. Renderer 演进准则
 

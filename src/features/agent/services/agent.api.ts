@@ -2,11 +2,20 @@ import type {
   AgentChatRequest,
   AgentChatStartResult,
   AgentChatStreamEvent,
+  AgentMediaArtifactReleaseRequest,
+  AgentMediaAudioExtractionRequest,
+  AgentMediaAudioExtractionResult,
+  AgentMediaInspectionRequest,
   AgentOwnerScope,
   AgentSessionCursor,
   AgentSessionPage,
   AgentSessionSnapshot,
   AgentSessionSummary,
+  AgentToolApprovalDecisionRequest,
+  AgentToolApprovalDecisionResult,
+  AgentToolExecutionCompletion,
+  AgentToolExecutionCommit,
+  AgentToolExecutionProgressRequest,
 } from '@/shared/agent/agent.types';
 
 function bridge() {
@@ -26,6 +35,48 @@ export function stopAgentChat(sessionId: string): Promise<boolean> {
 
 export function releaseAgentOwnerRuns(): Promise<boolean> {
   return bridge().releaseOwner();
+}
+
+export function resolveAgentToolApproval(
+  input: AgentToolApprovalDecisionRequest,
+): Promise<AgentToolApprovalDecisionResult> {
+  return bridge().resolveToolApproval(input);
+}
+
+export function completeAgentToolExecution(
+  input: AgentToolExecutionCompletion,
+): Promise<boolean> {
+  return bridge().completeToolExecution(input);
+}
+
+export function markAgentToolExecutionCommitted(
+  input: AgentToolExecutionCommit,
+): Promise<boolean> {
+  return bridge().markToolExecutionCommitted(input);
+}
+
+export function reportAgentToolExecutionProgress(
+  input: AgentToolExecutionProgressRequest,
+): Promise<boolean> {
+  return bridge().reportToolExecutionProgress(input);
+}
+
+export function inspectAgentMedia(
+  input: AgentMediaInspectionRequest,
+): Promise<import('@/shared/agent/agent.types').AgentToolResult> {
+  return bridge().inspectMedia(input);
+}
+
+export function extractAgentMediaAudio(
+  input: AgentMediaAudioExtractionRequest,
+): Promise<AgentMediaAudioExtractionResult> {
+  return bridge().extractMediaAudio(input);
+}
+
+export function releaseAgentMediaArtifact(
+  input: AgentMediaArtifactReleaseRequest,
+): Promise<boolean> {
+  return bridge().releaseMediaArtifact(input);
 }
 
 export function listAgentSessions(

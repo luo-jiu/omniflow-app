@@ -23,11 +23,20 @@ import type {
   AgentChatRequest,
   AgentChatStartResult,
   AgentChatStreamEvent,
+  AgentMediaArtifactReleaseRequest,
+  AgentMediaAudioExtractionRequest,
+  AgentMediaAudioExtractionResult,
+  AgentMediaInspectionRequest,
   AgentOwnerScope,
   AgentSessionCursor,
   AgentSessionPage,
   AgentSessionSnapshot,
   AgentSessionSummary,
+  AgentToolApprovalDecisionRequest,
+  AgentToolApprovalDecisionResult,
+  AgentToolExecutionCompletion,
+  AgentToolExecutionCommit,
+  AgentToolExecutionProgressRequest,
 } from '@/shared/agent/agent.types'
 import type {
   QQMusicLyricsOperation,
@@ -232,6 +241,31 @@ contextBridge.exposeInMainWorld('electronAgent', {
   ),
   stopChat: (sessionId: string): Promise<boolean> => ipcRenderer.invoke('agent:chat:stop', sessionId),
   releaseOwner: (): Promise<boolean> => ipcRenderer.invoke('agent:owner:release'),
+  resolveToolApproval: (
+    input: AgentToolApprovalDecisionRequest,
+  ): Promise<AgentToolApprovalDecisionResult> => (
+    ipcRenderer.invoke('agent:tool:approval:resolve', input)
+  ),
+  completeToolExecution: (input: AgentToolExecutionCompletion): Promise<boolean> => (
+    ipcRenderer.invoke('agent:tool:execution:complete', input)
+  ),
+  markToolExecutionCommitted: (input: AgentToolExecutionCommit): Promise<boolean> => (
+    ipcRenderer.invoke('agent:tool:execution:commit', input)
+  ),
+  reportToolExecutionProgress: (input: AgentToolExecutionProgressRequest): Promise<boolean> => (
+    ipcRenderer.invoke('agent:tool:execution:progress', input)
+  ),
+  inspectMedia: (input: AgentMediaInspectionRequest) => (
+    ipcRenderer.invoke('agent:media:inspect', input)
+  ),
+  extractMediaAudio: (
+    input: AgentMediaAudioExtractionRequest,
+  ): Promise<AgentMediaAudioExtractionResult> => (
+    ipcRenderer.invoke('agent:media:extract-audio', input)
+  ),
+  releaseMediaArtifact: (input: AgentMediaArtifactReleaseRequest): Promise<boolean> => (
+    ipcRenderer.invoke('agent:media:artifact:release', input)
+  ),
   listSessions: (
     ownerScope: AgentOwnerScope,
     libraryId: number,

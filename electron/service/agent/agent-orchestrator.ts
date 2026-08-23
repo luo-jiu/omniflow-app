@@ -6,13 +6,24 @@ import type {
   AgentChatRequest,
   AgentChatStartResult,
   AgentChatStreamEvent,
+  AgentMediaArtifactReleaseRequest,
+  AgentMediaAudioExtractionRequest,
+  AgentMediaAudioExtractionResult,
   AgentMessage,
+  AgentMediaInspectionRequest,
   AgentOwnerScope,
   AgentReasoningEffort,
   AgentSessionCursor,
   AgentSessionPage,
   AgentSessionSnapshot,
   AgentSessionSummary,
+  AgentToolApprovalDecisionRequest,
+  AgentToolApprovalDecisionResult,
+  AgentToolExecutionCompletion,
+  AgentToolExecutionCommit,
+  AgentToolExecutionProgressRequest,
+  AgentToolApprovalSnapshot,
+  AgentToolProgress,
   AgentToolResult,
 } from '@/shared/agent/agent.types';
 import { normalizeAgentOwnerScope } from '../../../src/shared/agent/agent-owner-scope';
@@ -22,25 +33,38 @@ import { aiServiceRunSessionRegistry } from '../aiServiceRunSession';
 import { getAIServiceRuntimeProfile } from '../aiServiceStore';
 import { streamAgentProviderTurn } from './agent-provider-client';
 import type { AgentProviderMessage, AgentProviderToolCall } from './agent-provider-model';
+import { buildAgentFallbackSystemPrompt, buildAgentSystemPrompt } from './agent-prompt-assembler';
+import { extractAgentMediaAudio } from './agent-media-audio-extractor';
+import { agentMediaArtifactStore, type AgentMediaArtifactStore } from './agent-media-artifact-store';
+import { inspectAgentMediaSource } from './agent-media-inspector';
+import { assessAgentToolPermission } from './agent-permission-gate';
 import { getAgentSessionStore } from './agent-session-store-runtime';
 import type { AgentSessionStore } from './agent-session-store';
-import { agentToolRegistry } from './agent-tool-registry';
+import {
+  createAgentToolBroker,
+  type AgentToolBroker,
+  type AgentToolExecutionOutcome,
+} from './agent-tool-broker';
+import {
+  agentToolRegistry,
+  type AgentToolExecutionContext,
+  type AgentToolExecutor,
+} from './agent-tool-registry';
+import { getBuiltInActionTools } from './tools/directory-create-tool';
 import { getBuiltInReadTools } from './tools/file-read-tools';
+import {
+  mediaExtractAudioTool,
+  normalizeAgentAudioOutputFormat,
+} from './tools/media-extract-audio-tool';
+import { mediaInspectTool } from './tools/media-inspect-tool';
 
 const MAX_TOOL_ROUNDS = 4;
 const MAX_TOOL_CALLS = 8;
+const TOOL_APPROVAL_TIMEOUT_MS = 10 * 60 * 1000;
 
-getBuiltInReadTools().forEach((tool) => {
+[...getBuiltInReadTools(), mediaInspectTool, mediaExtractAudioTool, ...getBuiltInActionTools()].forEach((tool) => {
   if (!agentToolRegistry.get(tool.name)) agentToolRegistry.register(tool);
 });
-
-const AGENT_SYSTEM_PROMPT = [
-  '你是 OmniFlow 内置 Agent。',
-  '你负责帮助用户理解当前工作区，并在获得工具能力后组织 OmniFlow 的受控工具流程。',
-  '当前阶段只提供当前工作区的只读感知快照，不要声称已经执行命令、修改文件或完成未提供的工具操作。',
-  '凡是涉及当前目录内容或节点元数据的事实，必须先调用 file.list 或 file.stat，不要仅根据节点 ID 或名称猜测。',
-  '回答要直接、简洁；如果用户要求当前阶段尚未提供的能力，要明确说明限制。',
-].join('\n');
 
 interface ActiveAgentRun {
   controller: AbortController;
@@ -53,10 +77,35 @@ interface StartingAgentRun {
   ownerWebContentsId: number;
 }
 
+type AgentApprovalOutcome =
+  | { approved: false }
+  | { approved: true; execution?: Promise<AgentToolExecutionOutcome> };
+
+interface PendingAgentApproval {
+  appContext: AgentAppContext;
+  approval: AgentToolApprovalSnapshot;
+  executor: AgentToolExecutor;
+  executionInput: unknown;
+  ownerScope: AgentOwnerScope;
+  ownerWebContentsId: number;
+  onProgress: (progress: AgentToolProgress) => void;
+  onCancel: (executionId: string) => void;
+  resolve: (outcome: AgentApprovalOutcome) => void;
+  signal: AbortSignal;
+  store: AgentSessionStore;
+  timeoutMs: number;
+}
+
 interface AgentOrchestratorOptions {
+  approvalTimeoutMs?: number;
+  extractMediaAudio?: typeof extractAgentMediaAudio;
   getRuntimeProfile?: (profileId: string) => AIServiceRuntimeConnection;
   getSessionStore?: () => Promise<AgentSessionStore>;
+  inspectMediaSource?: typeof inspectAgentMediaSource;
+  mediaArtifactStore?: Pick<AgentMediaArtifactStore, 'release' | 'releaseOwner' | 'releaseRun'>
+    & Partial<Pick<AgentMediaArtifactStore, 'touchExecution'>>;
   runSessionRegistry?: Pick<typeof aiServiceRunSessionRegistry, 'begin' | 'end'>;
+  toolBroker?: AgentToolBroker;
 }
 
 function now(): string {
@@ -93,26 +142,6 @@ function normalizeContext(input: AgentAppContext): AgentAppContext {
 
 function normalizeReasoningEffort(value: unknown): AgentReasoningEffort {
   return value === 'low' || value === 'medium' || value === 'high' ? value : 'auto';
-}
-
-function buildSystemPrompt(
-  context: AgentAppContext,
-  perception: AgentChatRequest['perception'],
-): string {
-  const perceptionScope = perception
-    ? '\n\n本轮只读感知范围已经准备好；需要目录或节点事实时调用提供的 Tool。'
-    : '\n\n本轮没有可用的文件感知范围，相关问题应明确说明无法读取。';
-  return `${AGENT_SYSTEM_PROMPT}\n\n当前应用上下文：\n${JSON.stringify(context)}${perceptionScope}`;
-}
-
-function buildFallbackSystemPrompt(
-  context: AgentAppContext,
-  perception: AgentChatRequest['perception'],
-): string {
-  const snapshot = perception
-    ? `\n\n本轮只读感知快照：\n${JSON.stringify(perception)}`
-    : '';
-  return `${AGENT_SYSTEM_PROMPT}\n\n当前应用上下文：\n${JSON.stringify(context)}${snapshot}\n\n当前模型不支持 Tool Calling，请直接依据快照回答，不能把未列出的内容当作已知。`;
 }
 
 function normalizePerception(
@@ -210,18 +239,297 @@ function sessionTitleFromPrompt(prompt: string): string {
   return prompt.replace(/\s+/g, ' ').trim().slice(0, 80);
 }
 
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, item]) => `${JSON.stringify(key)}:${stableJson(item)}`)
+      .join(',')}}`;
+  }
+  const serialized = JSON.stringify(value);
+  return serialized === undefined ? 'null' : serialized;
+}
+
+function hashToolInput(value: unknown): string {
+  return crypto.createHash('sha256').update(stableJson(value)).digest('hex');
+}
+
+function sameOwnerScope(left: AgentOwnerScope, right: AgentOwnerScope): boolean {
+  return left.accountScope === right.accountScope && left.backendScope === right.backendScope;
+}
+
+function abortError(message = 'Agent 任务已取消'): Error {
+  const error = new Error(message);
+  error.name = 'AbortError';
+  return error;
+}
+
 export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) {
   const resolveRuntimeProfile = options.getRuntimeProfile || getAIServiceRuntimeProfile;
   const resolveSessionStore = options.getSessionStore || getAgentSessionStore;
   const runSessionRegistry = options.runSessionRegistry || aiServiceRunSessionRegistry;
+  const inspectMediaSource = options.inspectMediaSource || inspectAgentMediaSource;
+  const extractMediaAudioSource = options.extractMediaAudio || extractAgentMediaAudio;
+  const mediaArtifactStore = options.mediaArtifactStore || agentMediaArtifactStore;
+  const approvalTimeoutMs = Math.max(1, options.approvalTimeoutMs || TOOL_APPROVAL_TIMEOUT_MS);
+  const toolBroker = options.toolBroker || createAgentToolBroker({ normalizePerception });
   const activeRuns = new Map<string, ActiveAgentRun>();
   const startingRuns = new Map<string, StartingAgentRun>();
   const startingSessions = new Set<string>();
+  const pendingApprovals = new Map<string, PendingAgentApproval>();
 
   function emit(sender: WebContents, event: AgentChatStreamEvent): void {
     if (!sender.isDestroyed()) {
       sender.send('agent:chat:event', event);
     }
+  }
+
+  function waitForApproval(input: {
+    appContext: AgentAppContext;
+    approval: AgentToolApprovalSnapshot;
+    executor: AgentToolExecutor;
+    executionInput: unknown;
+    ownerScope: AgentOwnerScope;
+    ownerWebContentsId: number;
+    onProgress: (progress: AgentToolProgress) => void;
+    onCancel: (executionId: string) => void;
+    signal: AbortSignal;
+    store: AgentSessionStore;
+    timeoutMs: number;
+  }): Promise<AgentApprovalOutcome> {
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const finish = (handler: () => void) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        handler();
+      };
+      const handleAbort = () => {
+        void input.store.resolveToolApproval(
+          input.approval.approvalId,
+          'cancelled',
+          now(),
+        ).catch(() => undefined);
+        finish(() => reject(abortError()));
+      };
+      const timer = setTimeout(() => {
+        void input.store.resolveToolApproval(
+          input.approval.approvalId,
+          'expired',
+          now(),
+        ).catch(() => undefined);
+        finish(() => reject(new Error('用户确认已超时')));
+      }, approvalTimeoutMs);
+      const cleanup = () => {
+        clearTimeout(timer);
+        input.signal.removeEventListener('abort', handleAbort);
+        pendingApprovals.delete(input.approval.approvalId);
+      };
+      pendingApprovals.set(input.approval.approvalId, {
+        ...input,
+        resolve: outcome => finish(() => resolve(outcome)),
+      });
+      if (input.signal.aborted) handleAbort();
+      else input.signal.addEventListener('abort', handleAbort, { once: true });
+    });
+  }
+
+  async function resolveToolApproval(
+    ownerWebContentsId: number,
+    input: AgentToolApprovalDecisionRequest,
+  ): Promise<AgentToolApprovalDecisionResult> {
+    const approvalId = String(input?.approvalId || '').trim();
+    const pending = pendingApprovals.get(approvalId);
+    if (!pending) throw new Error('Agent 确认请求不存在或已经失效');
+    const ownerScope = normalizeAgentOwnerScope(input.ownerScope);
+    if (
+      pending.ownerWebContentsId !== ownerWebContentsId
+      || pending.approval.runId !== String(input.runId || '')
+      || pending.approval.sessionId !== String(input.sessionId || '')
+      || Number(pending.appContext.libraryId) !== Number(input.libraryId)
+      || !sameOwnerScope(pending.ownerScope, ownerScope)
+    ) {
+      throw new Error('当前窗口无权处理该 Agent 确认请求');
+    }
+    if (pending.signal.aborted) throw abortError();
+
+    const approved = input.approved === true;
+    await pending.store.resolveToolApproval(approvalId, approved ? 'approved' : 'denied', now());
+    await pending.store.updateRun(pending.approval.runId, {
+      currentStep: approved ? `执行 ${pending.approval.call.name}` : '用户已取消操作',
+      status: 'running',
+      updatedAt: now(),
+    });
+
+    if (!approved) {
+      pending.resolve({ approved: false });
+      return { approved: false };
+    }
+
+    if (pending.executor !== 'renderer') {
+      pending.resolve({ approved: true });
+      return { approved: true };
+    }
+
+    const execution = toolBroker.prepareRendererExecution({
+      appContext: pending.appContext,
+      executionInput: pending.executionInput,
+      ownerScope: pending.ownerScope,
+      ownerWebContentsId: pending.ownerWebContentsId,
+      onProgress: pending.onProgress,
+      onCancel: pending.onCancel,
+      runId: pending.approval.runId,
+      sessionId: pending.approval.sessionId,
+      signal: pending.signal,
+      timeoutMs: pending.timeoutMs,
+      toolName: pending.approval.call.name,
+    });
+    pending.resolve({ approved: true, execution: execution.outcome });
+    return { approved: true, execution: execution.request };
+  }
+
+  function completeToolExecution(
+    ownerWebContentsId: number,
+    input: AgentToolExecutionCompletion,
+  ): boolean {
+    return toolBroker.completeRendererExecution(ownerWebContentsId, input);
+  }
+
+  function markToolExecutionCommitted(
+    ownerWebContentsId: number,
+    input: AgentToolExecutionCommit,
+  ): boolean {
+    return toolBroker.markRendererExecutionCommitted(ownerWebContentsId, input);
+  }
+
+  function reportToolExecutionProgress(
+    ownerWebContentsId: number,
+    input: AgentToolExecutionProgressRequest,
+  ): boolean {
+    const reported = toolBroker.reportRendererProgress(ownerWebContentsId, input);
+    mediaArtifactStore.touchExecution?.({
+      executionId: String(input?.executionId || ''),
+      ownerWebContentsId,
+      runId: String(input?.runId || ''),
+      sessionId: String(input?.sessionId || ''),
+    });
+    return reported;
+  }
+
+  function normalizeMediaSourceUrl(input: unknown): string {
+    const sourceUrl = String(input || '').trim();
+    if (!sourceUrl || sourceUrl.length > 16 * 1024) throw new Error('媒体临时访问链接无效');
+    let parsedUrl: URL;
+    try {
+      parsedUrl = new URL(sourceUrl);
+    } catch {
+      throw new Error('媒体临时访问链接无效');
+    }
+    if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+      throw new Error('媒体临时访问链接仅支持 HTTP(S)');
+    }
+    return sourceUrl;
+  }
+
+  async function inspectMedia(
+    ownerWebContentsId: number,
+    input: AgentMediaInspectionRequest,
+  ): Promise<AgentToolResult> {
+    const capability = toolBroker.claimRendererCapability(ownerWebContentsId, {
+      capability: 'media.inspect.source',
+      executionId: input?.executionId,
+      libraryId: Number(input?.libraryId),
+      ownerScope: input?.ownerScope,
+      runId: input?.runId,
+      sessionId: input?.sessionId,
+    }, 'media.inspect');
+    if (!capability.executionInput || typeof capability.executionInput !== 'object') {
+      throw new Error('媒体检查执行参数无效');
+    }
+    const executionInput = capability.executionInput as Record<string, unknown>;
+    const nodeId = Number(executionInput.nodeId);
+    const fileName = String(executionInput.fileName || '').trim();
+    const libraryId = Number(executionInput.libraryId);
+    if (
+      !Number.isFinite(nodeId)
+      || nodeId <= 0
+      || !fileName
+      || libraryId !== Number(input.libraryId)
+      || nodeId !== Number(input.nodeId)
+      || fileName !== String(input.fileName || '').trim()
+    ) {
+      throw new Error('媒体检查目标与受权节点不匹配');
+    }
+    const sourceUrl = normalizeMediaSourceUrl(input.sourceUrl);
+    return inspectMediaSource({
+      fileName,
+      ...(executionInput.mimeType ? { mimeType: String(executionInput.mimeType) } : {}),
+      nodeId,
+      sourceUrl,
+    }, capability.signal);
+  }
+
+  async function extractMediaAudio(
+    ownerWebContentsId: number,
+    input: AgentMediaAudioExtractionRequest,
+  ): Promise<AgentMediaAudioExtractionResult> {
+    const capability = toolBroker.claimRendererCapability(ownerWebContentsId, {
+      capability: 'media.extractAudio.source',
+      executionId: input?.executionId,
+      libraryId: Number(input?.libraryId),
+      ownerScope: input?.ownerScope,
+      runId: input?.runId,
+      sessionId: input?.sessionId,
+    }, 'media.extractAudio');
+    if (!capability.executionInput || typeof capability.executionInput !== 'object') {
+      throw new Error('音频提取执行参数无效');
+    }
+    const executionInput = capability.executionInput as Record<string, unknown>;
+    const nodeId = Number(executionInput.nodeId);
+    const fileName = String(executionInput.sourceFileName || '').trim();
+    const outputFileName = String(executionInput.outputFileName || '').trim();
+    const outputFormat = normalizeAgentAudioOutputFormat({
+      format: executionInput.outputFormat,
+    });
+    const libraryId = Number(executionInput.libraryId);
+    if (
+      !Number.isFinite(nodeId)
+      || nodeId <= 0
+      || !fileName
+      || !outputFileName
+      || libraryId !== Number(input.libraryId)
+      || nodeId !== Number(input.nodeId)
+      || fileName !== String(input.fileName || '').trim()
+      || outputFileName !== String(input.outputFileName || '').trim()
+      || outputFormat !== input.outputFormat
+    ) {
+      throw new Error('音频提取目标与受权节点不匹配');
+    }
+    return extractMediaAudioSource({
+      executionId: input.executionId,
+      fileName,
+      ...(executionInput.mimeType ? { mimeType: String(executionInput.mimeType) } : {}),
+      outputFileName,
+      outputFormat,
+      ownerWebContentsId,
+      runId: input.runId,
+      sessionId: input.sessionId,
+      sourceUrl: normalizeMediaSourceUrl(input.sourceUrl),
+    }, capability.signal, capability.onProgress);
+  }
+
+  async function releaseMediaArtifact(
+    ownerWebContentsId: number,
+    input: AgentMediaArtifactReleaseRequest,
+  ): Promise<boolean> {
+    return mediaArtifactStore.release(String(input?.artifactId || ''), {
+      executionId: String(input?.executionId || ''),
+      ownerWebContentsId,
+      runId: String(input?.runId || ''),
+      sessionId: String(input?.sessionId || ''),
+    });
   }
 
   async function executeToolCall(
@@ -232,14 +540,77 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     call: AgentProviderToolCall,
     input: AgentChatRequest,
     signal: AbortSignal,
+    perception: AgentChatRequest['perception'],
+    onPerception: (next: AgentChatRequest['perception']) => void,
   ): Promise<AgentToolResult> {
     const toolRunId = crypto.randomUUID();
+    const tool = agentToolRegistry.get(call.name);
+    const executionContext: AgentToolExecutionContext = {
+      appContext: input.appContext,
+      onProgress: progress => emit(sender, {
+        callId: call.id,
+        progress,
+        runId,
+        sessionId,
+        type: 'tool-progress',
+      }),
+      perception,
+      signal,
+    };
+    const cancelRendererExecution = (executionId: string) => emit(sender, {
+      executionId,
+      runId,
+      sessionId,
+      type: 'tool-execution-cancelled',
+    });
+    let decision = call.inputError
+      ? { behavior: 'deny' as const, message: call.inputError, risk: tool?.risk || 'read' as const }
+      : tool
+        ? await assessAgentToolPermission(tool, call.input, executionContext)
+        : {
+            behavior: 'deny' as const,
+            message: `Agent Tool 不存在：${call.name}`,
+            risk: 'read' as const,
+          };
+    let rendererExecutionInput: unknown;
+    if (
+      decision.behavior !== 'deny'
+      && (tool?.executor || 'main') === 'renderer'
+    ) {
+      if (!tool?.createRendererRequest) {
+        decision = {
+          behavior: 'deny',
+          message: `工具 ${call.name} 缺少 Renderer 执行契约`,
+          risk: tool?.risk || 'write',
+        };
+      } else {
+        try {
+          rendererExecutionInput = tool.createRendererRequest(call.input, executionContext);
+        } catch (error) {
+          decision = {
+            behavior: 'deny',
+            message: error instanceof Error ? error.message : `${call.name} 执行参数无效`,
+            risk: tool.risk,
+          };
+        }
+      }
+    }
+    const approvalId = decision.behavior === 'ask' ? crypto.randomUUID() : undefined;
     await store.createToolRun({
+      ...(approvalId ? { approvalId } : {}),
+      ...(decision.behavior === 'ask'
+        ? {
+            approvalInputHash: hashToolInput(call.input),
+            approvalPreview: decision.preview,
+          }
+        : {}),
       callId: call.id,
       id: toolRunId,
       input: call.input,
       now: now(),
+      permissionBehavior: decision.behavior,
       runId,
+      status: decision.behavior === 'ask' ? 'awaiting_approval' : 'running',
       toolName: call.name,
     });
     emit(sender, {
@@ -249,35 +620,97 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       type: 'tool-started',
     });
     await store.updateRun(runId, {
-      currentStep: `执行 ${call.name}`,
-      status: 'running',
+      currentStep: decision.behavior === 'ask'
+        ? `等待确认 ${call.name}`
+        : `执行 ${call.name}`,
+      status: decision.behavior === 'ask' ? 'awaiting_approval' : 'running',
       updatedAt: now(),
     });
 
     let result: AgentToolResult;
     try {
-      if (call.inputError) {
-        result = { message: call.inputError, ok: false };
-      } else {
-        const tool = agentToolRegistry.get(call.name);
-        if (!tool) {
-          result = { message: `Agent Tool 不存在：${call.name}`, ok: false };
-        } else if (tool.risk !== 'read') {
-          result = { message: `工具 ${call.name} 需要用户确认，当前阶段尚未开放`, ok: false };
+      if (decision.behavior === 'deny') {
+        result = { message: decision.message, ok: false };
+      } else if (!tool) {
+        result = { message: `Agent Tool 不存在：${call.name}`, ok: false };
+      } else if (decision.behavior === 'ask' && approvalId) {
+        const approval: AgentToolApprovalSnapshot = {
+          approvalId,
+          call: { id: call.id, input: call.input, name: call.name },
+          preview: decision.preview,
+          runId,
+          sessionId,
+        };
+        const approvalResult = waitForApproval({
+          appContext: input.appContext,
+          approval,
+          executor: tool.executor || 'main',
+          executionInput: rendererExecutionInput,
+          ownerScope: input.ownerScope,
+          ownerWebContentsId: sender.id,
+          onProgress: executionContext.onProgress,
+          onCancel: cancelRendererExecution,
+          signal,
+          store,
+          timeoutMs: Math.max(1_000, tool.timeoutMs || 30_000),
+        });
+        emit(sender, {
+          approval,
+          runId,
+          sessionId,
+          type: 'tool-approval-required',
+        });
+        const approved = await approvalResult;
+        emit(sender, {
+          approvalId,
+          approved: approved.approved,
+          runId,
+          sessionId,
+          type: 'tool-approval-resolved',
+        });
+        if (!approved.approved) {
+          result = { message: `用户取消了 ${decision.preview.title}`, ok: false };
+        } else if ((tool.executor || 'main') === 'renderer') {
+          if (!approved.execution) throw new Error(`工具 ${call.name} 缺少 Renderer 执行请求`);
+          const outcome = await approved.execution;
+          if (outcome.perception) onPerception(outcome.perception);
+          result = outcome.result;
         } else {
-          result = await agentToolRegistry.execute(call.name, call.input, {
-            appContext: input.appContext,
-            onProgress: progress => emit(sender, {
-              callId: call.id,
-              progress,
-              runId,
-              sessionId,
-              type: 'tool-progress',
-            }),
-            perception: input.perception,
-            signal,
-          });
+          result = await toolBroker.executeMain(call.name, call.input, {
+            ...executionContext,
+            perception,
+          }, tool.timeoutMs);
         }
+      } else if ((tool.executor || 'main') === 'renderer') {
+        const execution = toolBroker.prepareRendererExecution({
+          appContext: input.appContext,
+          executionInput: rendererExecutionInput,
+          ownerScope: input.ownerScope,
+          ownerWebContentsId: sender.id,
+          onProgress: executionContext.onProgress,
+          onCancel: cancelRendererExecution,
+          runId,
+          sessionId,
+          signal,
+          timeoutMs: Math.max(1_000, tool.timeoutMs || 30_000),
+          toolName: call.name,
+        });
+        emit(sender, {
+          execution: execution.request,
+          runId,
+          sessionId,
+          type: 'tool-execution-requested',
+        });
+        const outcome = await execution.outcome;
+        if (outcome.perception) onPerception(outcome.perception);
+        result = outcome.result;
+      } else {
+        result = await toolBroker.executeMain(
+          call.name,
+          call.input,
+          executionContext,
+          tool.timeoutMs,
+        );
       }
     } catch (error) {
       if (isAbortError(error, signal)) {
@@ -346,12 +779,14 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
           role: message.role as 'user' | 'assistant',
         }));
       const tools = agentToolRegistry.list();
+      const capabilities = tools.map(tool => tool.name);
       const plainMessages = messages.map(message => ({
         content: message.content,
         role: message.role as 'user' | 'assistant',
       }));
       let toolCallCount = 0;
       let completed = false;
+      let currentPerception = input.perception;
       const seenToolCallIds = new Set<string>();
 
       for (let round = 0; round <= MAX_TOOL_ROUNDS; round += 1) {
@@ -367,7 +802,11 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
             messages,
             model: input.model,
             reasoningEffort: input.reasoningEffort,
-            systemPrompt: buildSystemPrompt(input.appContext, input.perception),
+            systemPrompt: buildAgentSystemPrompt(
+              input.appContext,
+              currentPerception,
+              capabilities,
+            ),
             tools,
           }, (delta) => {
             content += delta;
@@ -382,7 +821,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
             model: input.model,
             profileId: input.profileId,
             reasoningEffort: input.reasoningEffort,
-            systemPrompt: buildFallbackSystemPrompt(input.appContext, input.perception),
+            systemPrompt: buildAgentFallbackSystemPrompt(input.appContext, currentPerception),
           }, (delta) => {
             content += delta;
             emit(sender, { delta, runId, sessionId, type: 'delta' });
@@ -424,6 +863,10 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
             call,
             input,
             controller.signal,
+            currentPerception,
+            (nextPerception) => {
+              currentPerception = nextPerception;
+            },
           );
           messages.push({
             content: JSON.stringify(result),
@@ -487,6 +930,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         });
       }
     } finally {
+      await mediaArtifactStore.releaseRun(runId).catch(() => undefined);
       const active = activeRuns.get(sessionId);
       if (active?.runId === runId) activeRuns.delete(sessionId);
       runSessionRegistry.end(runId, sender.id);
@@ -641,6 +1085,8 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         runtime.controller.abort();
       }
     });
+    toolBroker.releaseOwner(ownerWebContentsId);
+    void mediaArtifactStore.releaseOwner(ownerWebContentsId);
   }
 
   async function listSessions(
@@ -704,11 +1150,18 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
   }
 
   return {
+    completeToolExecution,
     deleteSession,
+    extractMediaAudio,
     getSession,
+    inspectMedia,
     listSessions,
+    markToolExecutionCommitted,
+    releaseMediaArtifact,
     releaseOwner,
     renameSession,
+    reportToolExecutionProgress,
+    resolveToolApproval,
     start,
     stop,
   };

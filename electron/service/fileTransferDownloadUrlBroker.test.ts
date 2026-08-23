@@ -124,6 +124,42 @@ describe('FileTransferDownloadUrlBroker', () => {
     expect(await response.text()).toBe('2345')
   })
 
+  it('creates and releases a main-only loopback source without exposing the upstream URL', async () => {
+    const sourceUrl = await createSourceServer('agent-inspect-source')
+    const broker = new FileTransferDownloadUrlBroker({ runtimeTokenFactory: () => 'runtime-token' })
+    brokers.push(broker)
+    await broker.start()
+
+    const source = broker.createResolvedLoopbackSource({ fileName: 'movie.mp4', sourceUrl })
+    expect(source.url).not.toContain(sourceUrl)
+    expect(await (await fetch(source.url)).text()).toBe('agent-inspect-source')
+    expect(broker.releaseClaim(source.claimId)).toBe(true)
+    expect(broker.releaseClaim(source.claimId)).toBe(false)
+  })
+
+  it('keeps a long-running main-only source alive for its explicit bounded TTL', async () => {
+    let now = 1_000
+    const sourceUrl = await createSourceServer('long-running-agent-source')
+    const broker = new FileTransferDownloadUrlBroker({
+      claimTtlMs: 100,
+      now: () => now,
+      runtimeTokenFactory: () => 'runtime-token',
+    })
+    brokers.push(broker)
+    await broker.start()
+
+    const source = broker.createResolvedLoopbackSource(
+      { fileName: 'movie.mp4', sourceUrl },
+      { ttlMs: 6 * 60 * 60 * 1_000 },
+    )
+    now += 101
+    expect(broker.sweepExpired()).toBe(0)
+    expect(await (await fetch(source.url)).text()).toBe('long-running-agent-source')
+
+    now += 6 * 60 * 60 * 1_000
+    expect(broker.sweepExpired()).toBe(1)
+  })
+
   it('waits for a renderer claim before exposing its source to an internal consumer', async () => {
     const sourceUrl = await createSourceServer('internal-consumer')
     const broker = new FileTransferDownloadUrlBroker({ sourceWaitMs: 1_000 })

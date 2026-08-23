@@ -2,8 +2,15 @@ import type { BrowserWindow, IpcMain, IpcMainInvokeEvent, WebContents } from 'el
 
 import type {
   AgentChatRequest,
+  AgentMediaArtifactReleaseRequest,
+  AgentMediaAudioExtractionRequest,
+  AgentMediaInspectionRequest,
   AgentOwnerScope,
   AgentSessionCursor,
+  AgentToolApprovalDecisionRequest,
+  AgentToolExecutionCompletion,
+  AgentToolExecutionCommit,
+  AgentToolExecutionProgressRequest,
 } from '@/shared/agent/agent.types';
 import { agentOrchestrator } from '../service/agent/agent-orchestrator';
 import { assertMainWindowAgentSender } from './aiServiceAccess';
@@ -47,6 +54,65 @@ export function registerAgentIpc(
     agentOrchestrator.releaseOwner(sender.id);
     return true;
   });
+
+  ipcMain.handle(
+    'agent:tool:approval:resolve',
+    (event, input: AgentToolApprovalDecisionRequest) => {
+      const sender = requireMainWindow(event);
+      ensureOwnerCleanup(sender);
+      return agentOrchestrator.resolveToolApproval(sender.id, input);
+    },
+  );
+
+  ipcMain.handle(
+    'agent:media:inspect',
+    (event, input: AgentMediaInspectionRequest) => {
+      const sender = requireMainWindow(event);
+      ensureOwnerCleanup(sender);
+      return agentOrchestrator.inspectMedia(sender.id, input);
+    },
+  );
+
+  ipcMain.handle(
+    'agent:media:extract-audio',
+    (event, input: AgentMediaAudioExtractionRequest) => {
+      const sender = requireMainWindow(event);
+      ensureOwnerCleanup(sender);
+      return agentOrchestrator.extractMediaAudio(sender.id, input);
+    },
+  );
+
+  ipcMain.handle(
+    'agent:media:artifact:release',
+    (event, input: AgentMediaArtifactReleaseRequest) => {
+      const sender = requireMainWindow(event);
+      return agentOrchestrator.releaseMediaArtifact(sender.id, input);
+    },
+  );
+
+  ipcMain.handle(
+    'agent:tool:execution:progress',
+    (event, input: AgentToolExecutionProgressRequest) => {
+      const sender = requireMainWindow(event);
+      return agentOrchestrator.reportToolExecutionProgress(sender.id, input);
+    },
+  );
+
+  ipcMain.handle(
+    'agent:tool:execution:commit',
+    (event, input: AgentToolExecutionCommit) => {
+      const sender = requireMainWindow(event);
+      return agentOrchestrator.markToolExecutionCommitted(sender.id, input);
+    },
+  );
+
+  ipcMain.handle(
+    'agent:tool:execution:complete',
+    (event, input: AgentToolExecutionCompletion) => {
+      const sender = requireMainWindow(event);
+      return agentOrchestrator.completeToolExecution(sender.id, input);
+    },
+  );
 
   ipcMain.handle('agent:session:list', (event, input: {
     cursor?: AgentSessionCursor;

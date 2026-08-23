@@ -267,6 +267,27 @@ interface Window {
     ) => Promise<import('@/shared/agent/agent.types').AgentChatStartResult>;
     stopChat: (sessionId: string) => Promise<boolean>;
     releaseOwner: () => Promise<boolean>;
+    resolveToolApproval: (
+      input: import('@/shared/agent/agent.types').AgentToolApprovalDecisionRequest,
+    ) => Promise<import('@/shared/agent/agent.types').AgentToolApprovalDecisionResult>;
+    completeToolExecution: (
+      input: import('@/shared/agent/agent.types').AgentToolExecutionCompletion,
+    ) => Promise<boolean>;
+    markToolExecutionCommitted: (
+      input: import('@/shared/agent/agent.types').AgentToolExecutionCommit,
+    ) => Promise<boolean>;
+    reportToolExecutionProgress: (
+      input: import('@/shared/agent/agent.types').AgentToolExecutionProgressRequest,
+    ) => Promise<boolean>;
+    inspectMedia: (
+      input: import('@/shared/agent/agent.types').AgentMediaInspectionRequest,
+    ) => Promise<import('@/shared/agent/agent.types').AgentToolResult>;
+    extractMediaAudio: (
+      input: import('@/shared/agent/agent.types').AgentMediaAudioExtractionRequest,
+    ) => Promise<import('@/shared/agent/agent.types').AgentMediaAudioExtractionResult>;
+    releaseMediaArtifact: (
+      input: import('@/shared/agent/agent.types').AgentMediaArtifactReleaseRequest,
+    ) => Promise<boolean>;
     listSessions: (
       ownerScope: import('@/shared/agent/agent.types').AgentOwnerScope,
       libraryId: number,

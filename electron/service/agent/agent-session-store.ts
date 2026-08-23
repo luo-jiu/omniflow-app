@@ -3,6 +3,7 @@ import path from 'node:path';
 import sqlite3 from 'sqlite3';
 
 import type {
+  AgentActionPreview,
   AgentAppContext,
   AgentMessage,
   AgentOwnerScope,
@@ -12,14 +13,26 @@ import type {
   AgentSessionPage,
   AgentSessionSnapshot,
   AgentSessionSummary,
+  AgentToolApprovalSnapshot,
+  AgentToolCallSnapshot,
   AgentToolResult,
 } from '@/shared/agent/agent.types';
 import { normalizeAgentOwnerScope } from '../../../src/shared/agent/agent-owner-scope';
 
 const AGENT_SESSION_SCHEMA_VERSION = 2;
+const INTERMEDIATE_APPROVAL_SCHEMA_VERSION = 3;
 const MAX_SESSION_TITLE_LENGTH = 80;
 const MAX_SEARCH_LENGTH = 120;
 const SESSION_PAGE_SIZE = 50;
+
+const TOOL_APPROVAL_COLUMNS = [
+  ['permission_behavior', "TEXT NOT NULL DEFAULT 'allow'"],
+  ['approval_id', 'TEXT'],
+  ['approval_input_hash', 'TEXT'],
+  ['approval_preview_json', 'TEXT'],
+  ['approval_status', 'TEXT'],
+  ['approval_decided_at', 'TEXT'],
+] as const;
 
 interface SessionRow {
   created_at: string;
@@ -41,6 +54,16 @@ interface MessageRow {
   session_id: string;
   tool_call_id: string | null;
   tool_name: string | null;
+}
+
+interface ToolApprovalRow {
+  approval_id: string;
+  approval_preview_json: string;
+  call_id: string;
+  input_json: string;
+  run_id: string;
+  session_id: string;
+  tool_name: string;
 }
 
 interface RunStatementResult {
@@ -75,11 +98,16 @@ export interface AgentRunUpdate {
 }
 
 export interface CreateAgentToolRunInput {
+  approvalId?: string;
+  approvalInputHash?: string;
+  approvalPreview?: AgentActionPreview;
   callId: string;
   id: string;
   input: unknown;
   now: string;
+  permissionBehavior: 'allow' | 'ask' | 'deny';
   runId: string;
+  status: 'awaiting_approval' | 'running';
   toolName: string;
 }
 
@@ -117,6 +145,11 @@ export interface AgentSessionStore {
     title: string,
     now: string,
   ) => Promise<AgentSessionSummary>;
+  resolveToolApproval: (
+    approvalId: string,
+    resolution: 'approved' | 'denied' | 'expired' | 'cancelled',
+    now: string,
+  ) => Promise<void>;
   updateRun: (runId: string, update: AgentRunUpdate) => Promise<void>;
   updateSessionContext: (
     sessionId: string,
@@ -236,6 +269,33 @@ function toMessage(row: MessageRow): AgentMessage {
   };
 }
 
+function parseStoredJson<T>(value: string, fallback: T): T {
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function toPendingApproval(row: ToolApprovalRow): AgentToolApprovalSnapshot {
+  const call: AgentToolCallSnapshot = {
+    id: row.call_id,
+    input: parseStoredJson(row.input_json, {}),
+    name: row.tool_name,
+  };
+  return {
+    approvalId: row.approval_id,
+    call,
+    preview: parseStoredJson<AgentActionPreview>(row.approval_preview_json, {
+      description: `工具 ${row.tool_name} 正在等待确认`,
+      risk: 'write',
+      title: '确认操作',
+    }),
+    runId: row.run_id,
+    sessionId: row.session_id,
+  };
+}
+
 const SESSION_SELECT = `
   SELECT
     sessions.id,
@@ -256,6 +316,45 @@ const SESSION_SELECT = `
   LEFT JOIN agent_messages AS messages ON messages.session_id = sessions.id
 `;
 
+async function ensureToolApprovalColumns(database: sqlite3.Database): Promise<void> {
+  const existingColumns = new Set(
+    (await all<{ name: string }>(database, 'PRAGMA table_info(agent_tool_runs)'))
+      .map(column => column.name),
+  );
+  for (const [name, definition] of TOOL_APPROVAL_COLUMNS) {
+    if (!existingColumns.has(name)) {
+      await exec(database, `ALTER TABLE agent_tool_runs ADD COLUMN ${name} ${definition}`);
+    }
+  }
+  await exec(database, `
+    CREATE UNIQUE INDEX IF NOT EXISTS agent_tool_runs_approval_idx
+      ON agent_tool_runs (approval_id)
+      WHERE approval_id IS NOT NULL;
+  `);
+}
+
+async function isKnownIntermediateApprovalSchema(database: sqlite3.Database): Promise<boolean> {
+  const requiredTables = new Set([
+    'agent_messages',
+    'agent_runs',
+    'agent_sessions',
+    'agent_tool_runs',
+  ]);
+  const tables = await all<{ name: string }>(database, `
+    SELECT name
+    FROM sqlite_master
+    WHERE type = 'table'
+  `);
+  for (const table of tables) requiredTables.delete(table.name);
+  if (requiredTables.size > 0) return false;
+
+  const toolRunColumns = new Set(
+    (await all<{ name: string }>(database, 'PRAGMA table_info(agent_tool_runs)'))
+      .map(column => column.name),
+  );
+  return TOOL_APPROVAL_COLUMNS.every(([name]) => toolRunColumns.has(name));
+}
+
 async function initializeDatabase(database: sqlite3.Database): Promise<void> {
   await exec(database, `
     PRAGMA foreign_keys = ON;
@@ -265,7 +364,14 @@ async function initializeDatabase(database: sqlite3.Database): Promise<void> {
   `);
 
   const versionRow = await get<{ user_version: number }>(database, 'PRAGMA user_version');
-  const schemaVersion = Number(versionRow?.user_version || 0);
+  let schemaVersion = Number(versionRow?.user_version || 0);
+  if (schemaVersion === INTERMEDIATE_APPROVAL_SCHEMA_VERSION) {
+    if (!(await isKnownIntermediateApprovalSchema(database))) {
+      throw new Error(`Agent 会话数据库版本过新且结构无法识别：${schemaVersion}`);
+    }
+    await exec(database, `PRAGMA user_version = ${AGENT_SESSION_SCHEMA_VERSION}`);
+    schemaVersion = AGENT_SESSION_SCHEMA_VERSION;
+  }
   if (schemaVersion > AGENT_SESSION_SCHEMA_VERSION) {
     throw new Error(`Agent 会话数据库版本过新：${schemaVersion}`);
   }
@@ -339,10 +445,20 @@ async function initializeDatabase(database: sqlite3.Database): Promise<void> {
         input_json TEXT NOT NULL,
         result_json TEXT,
         status TEXT NOT NULL,
+        permission_behavior TEXT NOT NULL DEFAULT 'allow',
+        approval_id TEXT,
+        approval_input_hash TEXT,
+        approval_preview_json TEXT,
+        approval_status TEXT,
+        approval_decided_at TEXT,
         created_at TEXT NOT NULL,
         finished_at TEXT,
         UNIQUE (run_id, call_id)
       );
+
+      CREATE UNIQUE INDEX agent_tool_runs_approval_idx
+        ON agent_tool_runs (approval_id)
+        WHERE approval_id IS NOT NULL;
 
       CREATE TRIGGER agent_runs_create_user_message
       AFTER INSERT ON agent_runs
@@ -397,6 +513,8 @@ async function initializeDatabase(database: sqlite3.Database): Promise<void> {
     `);
   }
 
+  await ensureToolApprovalColumns(database);
+
   const recoveredAt = new Date().toISOString();
   await run(database, `
     UPDATE agent_runs
@@ -406,15 +524,19 @@ async function initializeDatabase(database: sqlite3.Database): Promise<void> {
       error = '应用退出时任务仍在运行，可重新发送上一条消息',
       updated_at = ?,
       finished_at = ?
-    WHERE status = 'running'
+    WHERE status IN ('running', 'awaiting_approval')
   `, [recoveredAt, recoveredAt]);
   await run(database, `
     UPDATE agent_tool_runs
     SET
       status = 'interrupted',
       result_json = ?,
+      approval_status = CASE
+        WHEN approval_status = 'pending' THEN 'interrupted'
+        ELSE approval_status
+      END,
       finished_at = ?
-    WHERE status = 'running'
+    WHERE status IN ('running', 'awaiting_approval')
   `, [JSON.stringify({ message: '应用退出时 Agent Tool 仍在运行', ok: false }), recoveredAt]);
 }
 
@@ -526,15 +648,30 @@ export async function createSQLiteAgentSessionStore(
       ]);
       const created = await readSummary(input.id, ownerScope, libraryId);
       if (!created) throw new Error('Agent 会话创建失败');
-      return { ...created, messages: [] };
+      return { ...created, messages: [], pendingApprovals: [] };
     },
 
     async createToolRun(input) {
       await run(database, `
         INSERT INTO agent_tool_runs (
-          id, run_id, call_id, tool_name, input_json, status, created_at
-        ) VALUES (?, ?, ?, ?, ?, 'running', ?)
-      `, [input.id, input.runId, input.callId, input.toolName, JSON.stringify(input.input), input.now]);
+          id, run_id, call_id, tool_name, input_json, status,
+          permission_behavior, approval_id, approval_input_hash,
+          approval_preview_json, approval_status, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `, [
+        input.id,
+        input.runId,
+        input.callId,
+        input.toolName,
+        JSON.stringify(input.input),
+        input.status,
+        input.permissionBehavior,
+        input.approvalId || null,
+        input.approvalInputHash || null,
+        input.approvalPreview ? JSON.stringify(input.approvalPreview) : null,
+        input.permissionBehavior === 'ask' ? 'pending' : null,
+        input.now,
+      ]);
     },
 
     async deleteSession(sessionId, ownerScope, libraryId) {
@@ -560,7 +697,29 @@ export async function createSQLiteAgentSessionStore(
         WHERE session_id = ?
         ORDER BY sequence ASC
       `, [sessionId]);
-      return { ...summary, messages: rows.map(toMessage) };
+      const approvalRows = await all<ToolApprovalRow>(database, `
+        SELECT
+          tools.approval_id,
+          tools.approval_preview_json,
+          tools.call_id,
+          tools.input_json,
+          tools.run_id,
+          runs.session_id,
+          tools.tool_name
+        FROM agent_tool_runs AS tools
+        JOIN agent_runs AS runs ON runs.id = tools.run_id
+        WHERE runs.session_id = ?
+          AND tools.status = 'awaiting_approval'
+          AND tools.approval_status = 'pending'
+          AND tools.approval_id IS NOT NULL
+          AND tools.approval_preview_json IS NOT NULL
+        ORDER BY tools.created_at ASC, tools.rowid ASC
+      `, [sessionId]);
+      return {
+        ...summary,
+        messages: rows.map(toMessage),
+        pendingApprovals: approvalRows.map(toPendingApproval),
+      };
     },
 
     async listSessions(ownerScope, libraryId, query = '', cursorInput) {
@@ -641,6 +800,26 @@ export async function createSQLiteAgentSessionStore(
       const updated = await readSummary(sessionId, scope, libraryId);
       if (!updated) throw new Error('Agent 会话不存在');
       return updated;
+    },
+
+    async resolveToolApproval(approvalId, resolution, now) {
+      const approved = resolution === 'approved';
+      const result = await run(database, `
+        UPDATE agent_tool_runs
+        SET
+          approval_status = ?,
+          approval_decided_at = ?,
+          status = ?
+        WHERE approval_id = ?
+          AND status = 'awaiting_approval'
+          AND approval_status = 'pending'
+      `, [
+        resolution,
+        now,
+        approved ? 'running' : 'failed',
+        approvalId,
+      ]);
+      if (result.changes === 0) throw new Error('Agent 确认请求不存在或已经处理');
     },
 
     async updateRun(runId, update) {
