@@ -261,6 +261,39 @@ interface Window {
     ) => Promise<string>;
   };
 
+  electronAgent?: {
+    startChat: (
+      input: import('@/shared/agent/agent.types').AgentChatRequest,
+    ) => Promise<import('@/shared/agent/agent.types').AgentChatStartResult>;
+    stopChat: (sessionId: string) => Promise<boolean>;
+    releaseOwner: () => Promise<boolean>;
+    listSessions: (
+      ownerScope: import('@/shared/agent/agent.types').AgentOwnerScope,
+      libraryId: number,
+      query?: string,
+      cursor?: import('@/shared/agent/agent.types').AgentSessionCursor,
+    ) => Promise<import('@/shared/agent/agent.types').AgentSessionPage>;
+    getSession: (
+      ownerScope: import('@/shared/agent/agent.types').AgentOwnerScope,
+      libraryId: number,
+      sessionId: string,
+    ) => Promise<import('@/shared/agent/agent.types').AgentSessionSnapshot>;
+    renameSession: (
+      ownerScope: import('@/shared/agent/agent.types').AgentOwnerScope,
+      libraryId: number,
+      sessionId: string,
+      title: string,
+    ) => Promise<import('@/shared/agent/agent.types').AgentSessionSummary>;
+    deleteSession: (
+      ownerScope: import('@/shared/agent/agent.types').AgentOwnerScope,
+      libraryId: number,
+      sessionId: string,
+    ) => Promise<boolean>;
+    onEvent: (
+      listener: (event: import('@/shared/agent/agent.types').AgentChatStreamEvent) => void,
+    ) => () => void;
+  };
+
   electronWindow: {
     platform: 'darwin' | 'win32' | 'linux' | 'unknown';
     minimize: () => void;

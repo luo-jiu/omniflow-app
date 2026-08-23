@@ -1,4 +1,5 @@
 import type {
+  AIServiceChatCompletionInput,
   AIServiceCompletionInput,
   AIServiceProviderType,
 } from '@/features/ai-services/ai-service.types'
@@ -82,6 +83,64 @@ export function buildAIServiceCompletionRequest(
   }
 }
 
+function buildAIServiceChatBody(
+  connection: AIServiceRuntimeConnection,
+  input: AIServiceChatCompletionInput,
+  stream: boolean,
+): Record<string, unknown> {
+  const reasoningEffort = input.reasoningEffort && input.reasoningEffort !== 'auto'
+    ? input.reasoningEffort
+    : null
+  const common = {
+    model: input.model,
+    ...(stream ? { stream: true } : {}),
+    ...(!reasoningEffort && input.temperature !== undefined
+      ? { temperature: input.temperature }
+      : {}),
+  }
+  if (connection.providerType === 'claude') {
+    return {
+      ...common,
+      max_tokens: 4096,
+      messages: input.messages,
+      ...(reasoningEffort ? { output_config: { effort: reasoningEffort } } : {}),
+      system: input.systemPrompt,
+    }
+  }
+  return {
+    ...common,
+    messages: [
+      { role: 'system', content: input.systemPrompt },
+      ...input.messages,
+    ],
+    ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
+  }
+}
+
+export function buildAIServiceChatCompletionRequest(
+  connection: AIServiceRuntimeConnection,
+  input: AIServiceChatCompletionInput,
+): AIServiceRequestSpec {
+  return {
+    body: JSON.stringify(buildAIServiceChatBody(connection, input, false)),
+    headers: buildHeaders(connection),
+    method: 'POST',
+    url: appendPath(connection.baseUrl, connection.providerType === 'claude' ? 'messages' : 'chat/completions'),
+  }
+}
+
+export function buildAIServiceStreamingChatRequest(
+  connection: AIServiceRuntimeConnection,
+  input: AIServiceChatCompletionInput,
+): AIServiceRequestSpec {
+  return {
+    body: JSON.stringify(buildAIServiceChatBody(connection, input, true)),
+    headers: buildHeaders(connection),
+    method: 'POST',
+    url: appendPath(connection.baseUrl, connection.providerType === 'claude' ? 'messages' : 'chat/completions'),
+  }
+}
+
 export function extractAIServiceModelIds(body: unknown): string[] {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return []
   const payload = body as Record<string, unknown>
@@ -119,6 +178,34 @@ export function extractAIServiceCompletionText(
     })
     .join('\n')
     .trim()
+}
+
+export function extractAIServiceStreamDelta(
+  providerType: AIServiceProviderType,
+  body: unknown,
+): string {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return ''
+  const payload = body as Record<string, any>
+  if (providerType === 'claude') {
+    return payload.type === 'content_block_delta' && payload.delta?.type === 'text_delta'
+      ? String(payload.delta.text || '')
+      : ''
+  }
+  const delta = payload.choices?.[0]?.delta
+  if (!delta || typeof delta !== 'object') return ''
+  if (typeof delta.content === 'string') return delta.content
+  if (Array.isArray(delta.content)) {
+    return delta.content
+      .map((item: unknown) => (
+        typeof item === 'string'
+          ? item
+          : typeof (item as { text?: unknown } | null)?.text === 'string'
+            ? (item as { text: string }).text
+            : ''
+      ))
+      .join('')
+  }
+  return ''
 }
 
 export function extractAIServiceErrorMessage(body: unknown, fallback: string): string {

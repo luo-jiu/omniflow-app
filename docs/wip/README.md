@@ -17,3 +17,4 @@
 - `resource-monitor-console-roadmap.md` — 资源监测控制台规划草案。
 - `resource-monitor-dashboard-v2-roadmap.md` — 资源监测仪表盘 V2 改进规划草案。
 - `system-workspace-roadmap.md` — 设置 / 上传 / 回收站等系统页面改成资料库工作区视图的规划草案。
+- `built-in-agent-development-notes.md` — 内置 Agent 后续 Tool / Skill、长期记忆和受控本地进程的开发讨论稿；已落地边界见 `docs/built-in-agent-architecture.md`。

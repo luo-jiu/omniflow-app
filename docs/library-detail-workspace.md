@@ -100,6 +100,7 @@
 
 - `DirectorySidebar`
   - 文件树与选择入口
+  - 将当前资料库根节点 ID 独立投影给页面 owner；该投影不依赖用户先选择目录，供工具区保存目标和 Agent 上下文回退使用
 - `SearchWorkspace`
   - 搜索主页和搜索模式切换
 - `EmbeddedBrowserPanel`

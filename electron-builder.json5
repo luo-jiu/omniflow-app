@@ -3,6 +3,11 @@
   "$schema": "https://raw.githubusercontent.com/electron-userland/electron-builder/master/packages/app-builder-lib/scheme.json",
   "appId": "com.loyce.omniflow",
   "asar": true,
+  "beforeBuild": "tools/prepare-sqlite3-native.cjs",
+  "asarUnpack": [
+    "node_modules/sqlite3/**",
+    "build/native/sqlite3/**"
+  ],
   "productName": "Omniflow",
   "executableName": "Omniflow",
   "icon": "build/icons/icon.png",
@@ -11,9 +16,34 @@
   },
   "files": [
     "dist",
-    "dist-electron"
+    "dist-electron",
+    {
+      "from": "node_modules/sqlite3",
+      "to": "node_modules/sqlite3",
+      "filter": [
+        "lib/**/*",
+        "package.json"
+      ]
+    },
+    {
+      "from": "node_modules/bindings",
+      "to": "node_modules/bindings"
+    },
+    {
+      "from": "node_modules/file-uri-to-path",
+      "to": "node_modules/file-uri-to-path"
+    }
   ],
   "mac": {
+    "files": [
+      {
+        "from": "build/native/sqlite3/darwin-${arch}/build/Release",
+        "to": "node_modules/sqlite3/build/Release",
+        "filter": [
+          "node_sqlite3.node"
+        ]
+      }
+    ],
     "target": [
       "dmg",
       "zip"
@@ -25,6 +55,15 @@
     "artifactName": "${productName}-Mac-${version}-Installer.${ext}"
   },
   "win": {
+    "files": [
+      {
+        "from": "build/native/sqlite3/win32-${arch}/build/Release",
+        "to": "node_modules/sqlite3/build/Release",
+        "filter": [
+          "node_sqlite3.node"
+        ]
+      }
+    ],
     "target": [
       {
         "target": "nsis",
@@ -42,6 +81,15 @@
     "deleteAppDataOnUninstall": false
   },
   "linux": {
+    "files": [
+      {
+        "from": "build/native/sqlite3/linux-${arch}/build/Release",
+        "to": "node_modules/sqlite3/build/Release",
+        "filter": [
+          "node_sqlite3.node"
+        ]
+      }
+    ],
     "target": [
       "AppImage"
     ],

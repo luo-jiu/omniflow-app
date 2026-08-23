@@ -1,6 +1,6 @@
 # OmniFlow App 前端架构基线
 
-更新时间：2026-08-19
+更新时间：2026-08-23
 
 适用范围：`omniflow-app` 的 React renderer、Electron preload/main、页面分层、状态所有权、IPC 边界和前端文档维护。
 
@@ -315,6 +315,8 @@ Renderer 只能持有这些状态的投影，不要把 main 的内部结构当�
 - 文本 staging 文件创建与清理
 
 AI 服务使用独立的 `window.electronAIService` bridge，且 main 只接受主窗口 main frame 的调用。列表和修改响应只暴露 `hasApiKey`；模型列表与补全请求也通过该 bridge 进入主进程 provider 适配层。磁盘密文永不暴露；已保存 Key 的明文只允许在进入单个已有档案编辑页时通过 `revealApiKey(id)` 单次返回，并在取消或保存后从 renderer 草稿清除。批量 AI 任务通过 main 内存运行会话冻结连接快照，会话按 profile 和 renderer owner 隔离，生命周期内禁止编辑或删除来源档案；停止任务或 owner 销毁时由 main 取消该会话仍在执行的网络请求后释放配置锁。
+
+内置 Agent 使用独立的 `window.electronAgent` bridge。Session 持久化由 Electron main 的 SQLite Store 独占，renderer 只持有当前投影；所有会话操作按 API 基址、数字用户 ID 和资料库 ID 共同隔离。每个 Agent Run 复用 AI Service 运行会话边界冻结连接并锁定来源配置，认证会话释放时由 workspace disposer 通过 bridge 取消当前窗口全部 Run。
 
 ### 6.3 Electron Main
 

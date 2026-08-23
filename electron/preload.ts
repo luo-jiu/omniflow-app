@@ -19,6 +19,16 @@ import type {
   AIServiceSaveInput,
   AIServiceSnapshot,
 } from '@/features/ai-services/ai-service.types'
+import type {
+  AgentChatRequest,
+  AgentChatStartResult,
+  AgentChatStreamEvent,
+  AgentOwnerScope,
+  AgentSessionCursor,
+  AgentSessionPage,
+  AgentSessionSnapshot,
+  AgentSessionSummary,
+} from '@/shared/agent/agent.types'
 
 // --------- Expose some API to the Renderer process ---------
 contextBridge.exposeInMainWorld('ipcRenderer', {
@@ -207,6 +217,51 @@ contextBridge.exposeInMainWorld('electronAIService', {
   ),
   endRun: (runSessionId: string): Promise<boolean> => ipcRenderer.invoke('ai-service:run:end', runSessionId),
   complete: (input: AIServiceCompletionInput): Promise<string> => ipcRenderer.invoke('ai-service:complete', input),
+})
+
+contextBridge.exposeInMainWorld('electronAgent', {
+  startChat: (input: AgentChatRequest): Promise<AgentChatStartResult> => (
+    ipcRenderer.invoke('agent:chat:start', input)
+  ),
+  stopChat: (sessionId: string): Promise<boolean> => ipcRenderer.invoke('agent:chat:stop', sessionId),
+  releaseOwner: (): Promise<boolean> => ipcRenderer.invoke('agent:owner:release'),
+  listSessions: (
+    ownerScope: AgentOwnerScope,
+    libraryId: number,
+    query?: string,
+    cursor?: AgentSessionCursor,
+  ): Promise<AgentSessionPage> => (
+    ipcRenderer.invoke('agent:session:list', { cursor, libraryId, ownerScope, query })
+  ),
+  getSession: (
+    ownerScope: AgentOwnerScope,
+    libraryId: number,
+    sessionId: string,
+  ): Promise<AgentSessionSnapshot> => (
+    ipcRenderer.invoke('agent:session:get', { libraryId, ownerScope, sessionId })
+  ),
+  renameSession: (
+    ownerScope: AgentOwnerScope,
+    libraryId: number,
+    sessionId: string,
+    title: string,
+  ): Promise<AgentSessionSummary> => (
+    ipcRenderer.invoke('agent:session:rename', { libraryId, ownerScope, sessionId, title })
+  ),
+  deleteSession: (
+    ownerScope: AgentOwnerScope,
+    libraryId: number,
+    sessionId: string,
+  ): Promise<boolean> => (
+    ipcRenderer.invoke('agent:session:delete', { libraryId, ownerScope, sessionId })
+  ),
+  onEvent: (listener: (event: AgentChatStreamEvent) => void) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, payload: AgentChatStreamEvent) => {
+      listener(payload)
+    }
+    ipcRenderer.on('agent:chat:event', wrapped)
+    return () => ipcRenderer.removeListener('agent:chat:event', wrapped)
+  },
 })
 
 // 窗口控制 API

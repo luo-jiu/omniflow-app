@@ -26,6 +26,7 @@ import {
   clearAllToolWorkspaceStates,
   clearToolWorkspaceState,
 } from '@/features/tool-workspace/tool-workspace.state';
+import { releaseAgentOwnerRuns } from '@/features/agent/services/agent.api';
 import {
   beginLibraryDisposing,
   beginSessionDisposing,
@@ -143,6 +144,11 @@ export async function disposeSessionWorkspaces() {
     if (hasWindow() && window.electronEmbeddedBrowser) {
       await window.electronEmbeddedBrowser.closeAll().catch((error: unknown) => {
         runtimeLogger.warn('close all embedded browser tabs during session release failed', error);
+      });
+    }
+    if (hasWindow() && window.electronAgent) {
+      await releaseAgentOwnerRuns().catch((error: unknown) => {
+        runtimeLogger.warn('release Agent runs during session release failed', error);
       });
     }
     globalAudioPlayer.clear();

@@ -82,7 +82,9 @@ import { resolveBrowserFileMapping } from '@/features/browser-file-mappings/serv
 import { getAppPopupContainer } from '@/utils/popup-container';
 import { getDesktopPlatform } from '@/platform';
 import { useAuth } from '@/hooks/useAuth';
-import SearchWorkspace from "./SearchWorkspace";
+import AgentWorkspace from '@/features/agent/AgentWorkspace';
+import { createAgentOwnerScope } from '@/shared/agent/agent-owner-scope';
+import { API_CONFIG } from '@/config/api';
 import BrowserSettingsWorkspace, { type BrowserSettingsSection } from './BrowserSettingsWorkspace';
 import ToolWorkspace from "@/features/tool-workspace";
 import SystemWorkspace, {
@@ -183,6 +185,10 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   const { user } = useAuth();
   const isWindows = getDesktopPlatform() === 'windows';
   const displayName = user?.nickname || user?.username || '未登录';
+  const agentOwnerScope = React.useMemo(
+    () => createAgentOwnerScope(API_CONFIG.BASE_URL, user?.id),
+    [user?.id],
+  );
   const {
     setFileUrl,
     tabs,
@@ -278,7 +284,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   } | null>(null);
   const [browserInput, setBrowserInput] = React.useState(initialWorkspaceState.browserInput);
   const [searchMode, setSearchMode] = React.useState<SearchWorkspaceMode>(initialWorkspaceState.searchMode);
-  const [searchDraft, setSearchDraft] = React.useState(initialWorkspaceState.searchDraft);
+  const [searchDraft] = React.useState(initialWorkspaceState.searchDraft);
   const [selectedTreeNode, setSelectedTreeNode] = React.useState<SelectedTreeNode | null>(null);
   const [treeRootNodeId, setTreeRootNodeId] = React.useState<number | null>(null);
   const [workspaceDisplayMode, setWorkspaceDisplayMode] = React.useState<WorkspaceDisplayMode>(initialWorkspaceState.workspaceDisplayMode);
@@ -1722,34 +1728,6 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
     browserRef.current?.navigate(resolvedTabId, nextUrl);
   }, [applyBrowserTabUpdate, getPreferredBrowserPageTabId, normalizeBrowserUrl]);
 
-  const handleSearchWorkspaceSubmit = React.useCallback(async (rawValue: string) => {
-    const trimmed = String(rawValue || '').trim();
-    if (!trimmed) {
-      return;
-    }
-    if (searchMode === 'web') {
-      setBrowserInput(trimmed);
-      setSearchDraft(trimmed);
-      const existingTabId = getPreferredBrowserPageTabId();
-      const targetTabId = existingTabId ?? createAndActivateBrowserTab();
-      setBrowserModeOpen(true);
-      setWorkspaceDisplayMode('browser');
-      if (targetTabId) {
-        setActiveBrowserTabId(targetTabId);
-        window.requestAnimationFrame(() => {
-          submitBrowserInput(trimmed, targetTabId);
-        });
-      }
-      return;
-    }
-    setSearchDraft(trimmed);
-  }, [
-    createAndActivateBrowserTab,
-    getPreferredBrowserPageTabId,
-    searchMode,
-    submitBrowserInput,
-  ]);
-
   const handleBrowserSubmit = React.useCallback((event: React.FormEvent) => {
     event.preventDefault();
     submitBrowserInput(browserInput);
@@ -2517,9 +2495,9 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
             libraryId={libraryId}
             onFileOpen={handleFileOpen}
             onOpenMediaTool={openLibraryMediaProcessingWorkspace}
+            onRootNodeIdChange={setTreeRootNodeId}
             onSelectionChange={(payload) => {
               setSelectedTreeNode(payload.primaryNode);
-              setTreeRootNodeId(payload.rootNodeId);
             }}
             onOpenFileInBrowser={handleOpenFileInBrowser}
             browserModeOpen={browserModeOpen}
@@ -3000,15 +2978,11 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
             </div>
           ) : workspaceDisplayMode === 'search-home' ? (
             <div className="workspace-pane active">
-              <SearchWorkspace
-                mode={searchMode}
-                value={searchDraft}
-                onValueChange={setSearchDraft}
-                onModeChange={setSearchMode}
-                onSubmit={handleSearchWorkspaceSubmit}
-                placeholder={searchMode === 'web' ? '输入网址或关键词' : '搜索文件或文件夹'}
-                title="Omniflow"
-                description="输入网址或关键词开始"
+              <AgentWorkspace
+                libraryId={libraryId}
+                ownerScope={agentOwnerScope}
+                rootNodeId={treeRootNodeId}
+                selectedTreeNode={selectedTreeNode}
               />
             </div>
           ) : workspaceDisplayMode === 'tools' ? (

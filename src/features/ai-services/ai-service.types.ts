@@ -39,6 +39,20 @@ export interface AIServiceCompletionInput {
   userPrompt: string;
 }
 
+export interface AIServiceChatMessage {
+  content: string;
+  role: 'user' | 'assistant';
+}
+
+export interface AIServiceChatCompletionInput {
+  messages: AIServiceChatMessage[];
+  model: string;
+  profileId: string;
+  reasoningEffort?: AIServiceReasoningEffort;
+  systemPrompt: string;
+  temperature?: number;
+}
+
 export interface AIServiceRunSessionHandle {
   id: string;
   profileId: string;

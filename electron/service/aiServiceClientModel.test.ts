@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
+  buildAIServiceStreamingChatRequest,
   buildAIServiceCompletionRequest,
+  extractAIServiceStreamDelta,
   buildAIServiceModelsRequest,
   extractAIServiceCompletionText,
   extractAIServiceErrorMessage,
@@ -110,6 +112,34 @@ describe('aiServiceClientModel', () => {
     expect(extractAIServiceCompletionText('claude', {
       content: [{ type: 'text', text: ' translated ' }],
     })).toBe('translated')
+  })
+
+  it('builds streaming chat requests and extracts provider deltas', () => {
+    const request = buildAIServiceStreamingChatRequest({
+      apiKey: 'secret',
+      baseUrl: 'https://api.openai.com/v1',
+      providerType: 'openai',
+    }, {
+      messages: [{ content: 'hello', role: 'user' }],
+      model: 'gpt-5-mini',
+      profileId: 'profile-1',
+      systemPrompt: 'system',
+    })
+    expect(JSON.parse(request.body || '')).toMatchObject({
+      messages: [
+        { content: 'system', role: 'system' },
+        { content: 'hello', role: 'user' },
+      ],
+      model: 'gpt-5-mini',
+      stream: true,
+    })
+    expect(extractAIServiceStreamDelta('openai', {
+      choices: [{ delta: { content: ' world' } }],
+    })).toBe(' world')
+    expect(extractAIServiceStreamDelta('claude', {
+      delta: { text: ' there', type: 'text_delta' },
+      type: 'content_block_delta',
+    })).toBe(' there')
   })
 
   it('preserves provider error messages', () => {

@@ -28,6 +28,7 @@ interface Props {
     rootNodeId: number | null;
     selectedNodeIds: number[];
   }) => void;
+  onRootNodeIdChange?: (rootNodeId: number | null) => void;
   browserModeOpen?: boolean;
 }
 
@@ -67,6 +68,7 @@ const DirectorySidebar = React.forwardRef<DirectorySidebarHandle, Props>(({
   onFileOpen,
   onOpenFileInBrowser,
   onOpenMediaTool,
+  onRootNodeIdChange,
   onSelectionChange,
   browserModeOpen = false,
 }, ref) => {
@@ -87,6 +89,10 @@ const DirectorySidebar = React.forwardRef<DirectorySidebarHandle, Props>(({
     toggleAudioArchiveSubtitles,
     isAudioArchiveSubtitlesVisible,
   } = useRepositoryTree(libraryId, onFileOpen);
+
+  React.useEffect(() => {
+    onRootNodeIdChange?.(rootNodeId);
+  }, [onRootNodeIdChange, rootNodeId]);
 
   React.useImperativeHandle(ref, () => ({
     refreshNodeSubtree,

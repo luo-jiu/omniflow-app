@@ -90,6 +90,9 @@ export default defineConfig(({ mode }) => {
           },
           build: {
             minify: false,
+            rollupOptions: {
+              external: ['sqlite3'],
+            },
           },
         },
       },

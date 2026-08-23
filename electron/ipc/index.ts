@@ -9,6 +9,7 @@ import { registerMediaToolIpc } from './mediaTool'
 import { registerImagePreviewIpc } from './imagePreview'
 import { registerFileTransferIpc } from './fileTransfer'
 import { registerAIServiceIpc } from './aiService'
+import { registerAgentIpc } from './agent'
 
 export default function registerIpcHandlers(options: { getMainWindow: () => BrowserWindow | null }) {
   registerFileIpc(ipcMain)
@@ -19,4 +20,5 @@ export default function registerIpcHandlers(options: { getMainWindow: () => Brow
   registerImagePreviewIpc(ipcMain)
   registerFileTransferIpc()
   registerAIServiceIpc(ipcMain, options)
+  registerAgentIpc(ipcMain, options)
 }
