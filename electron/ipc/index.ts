@@ -10,6 +10,7 @@ import { registerImagePreviewIpc } from './imagePreview'
 import { registerFileTransferIpc } from './fileTransfer'
 import { registerAIServiceIpc } from './aiService'
 import { registerAgentIpc } from './agent'
+import { registerQQMusicLyricsIpc } from './qqMusicLyrics'
 
 export default function registerIpcHandlers(options: { getMainWindow: () => BrowserWindow | null }) {
   registerFileIpc(ipcMain)
@@ -21,4 +22,5 @@ export default function registerIpcHandlers(options: { getMainWindow: () => Brow
   registerFileTransferIpc()
   registerAIServiceIpc(ipcMain, options)
   registerAgentIpc(ipcMain, options)
+  registerQQMusicLyricsIpc(ipcMain, options)
 }

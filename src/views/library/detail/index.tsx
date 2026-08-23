@@ -36,6 +36,7 @@ import {
 import { ToolbarGridIcon } from './toolbar-icons';
 import { Avatar, Input, Modal, Popover, Select, Toast } from '@douyinfe/semi-ui';
 import ContextMenu, { type ContextMenuItem } from "@/components/ui/context-menu";
+import { beginDocumentDragSession } from '@/components/ui/document-drag-session';
 import EmbeddedBrowserPanel, { type EmbeddedBrowserHandle } from "@/features/embedded-browser/components/EmbeddedBrowserPanel";
 import EmbeddedBrowserAutoFillBar from "@/features/embedded-browser/passwords/components/EmbeddedBrowserAutoFillBar";
 import EmbeddedBrowserPasswordSaveBar from "@/features/embedded-browser/passwords/components/EmbeddedBrowserPasswordSaveBar";
@@ -304,10 +305,15 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
     sidePanelWidth: number;
   } | null>(null);
   const latestBrowserResourcePanelWidthRef = React.useRef<number>(browserResourcePanelWidth);
+  const detailWrapperRef = React.useRef<HTMLDivElement>(null);
   const resizeMoveHandlerRef = React.useRef<((event: MouseEvent) => void) | null>(null);
   const resizeUpHandlerRef = React.useRef<(() => void) | null>(null);
   const browserResourcePanelResizeMoveHandlerRef = React.useRef<((event: MouseEvent) => void) | null>(null);
   const browserResourcePanelResizeUpHandlerRef = React.useRef<(() => void) | null>(null);
+  const sidePanelResizePreviewFrameRef = React.useRef<number | null>(null);
+  const pendingSidePanelVisualWidthRef = React.useRef(sidePanelVisualWidth);
+  const sidePanelDocumentDragReleaseRef = React.useRef<(() => void) | null>(null);
+  const browserResourcePanelDocumentDragReleaseRef = React.useRef<(() => void) | null>(null);
 
   const activeBrowserTab = React.useMemo(() => {
     if (!activeBrowserTabId) {
@@ -420,8 +426,12 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
       document.removeEventListener("mouseup", resizeUpHandlerRef.current);
       resizeUpHandlerRef.current = null;
     }
-    document.body.style.cursor = "";
-    document.body.style.userSelect = "";
+    if (sidePanelResizePreviewFrameRef.current !== null) {
+      cancelAnimationFrame(sidePanelResizePreviewFrameRef.current);
+      sidePanelResizePreviewFrameRef.current = null;
+    }
+    sidePanelDocumentDragReleaseRef.current?.();
+    sidePanelDocumentDragReleaseRef.current = null;
   }, []);
 
   const cleanupBrowserResourcePanelResizeListeners = React.useCallback(() => {
@@ -433,15 +443,41 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
       document.removeEventListener("mouseup", browserResourcePanelResizeUpHandlerRef.current);
       browserResourcePanelResizeUpHandlerRef.current = null;
     }
-    document.body.style.cursor = "";
-    document.body.style.userSelect = "";
+    browserResourcePanelDocumentDragReleaseRef.current?.();
+    browserResourcePanelDocumentDragReleaseRef.current = null;
   }, []);
+
+  const applySidePanelVisualWidthPreview = React.useCallback((nextWidth: number) => {
+    detailWrapperRef.current?.style.setProperty('--side-panel-visual-width', `${nextWidth}px`);
+  }, []);
+
+  const flushSidePanelVisualWidthPreview = React.useCallback(() => {
+    if (sidePanelResizePreviewFrameRef.current !== null) {
+      cancelAnimationFrame(sidePanelResizePreviewFrameRef.current);
+      sidePanelResizePreviewFrameRef.current = null;
+    }
+    applySidePanelVisualWidthPreview(pendingSidePanelVisualWidthRef.current);
+  }, [applySidePanelVisualWidthPreview]);
+
+  const previewSidePanelVisualWidth = React.useCallback((nextWidth: number) => {
+    const normalizedWidth = Math.max(0, Math.floor(nextWidth));
+    sidePanelVisualWidthRef.current = normalizedWidth;
+    pendingSidePanelVisualWidthRef.current = normalizedWidth;
+    if (sidePanelResizePreviewFrameRef.current === null) {
+      sidePanelResizePreviewFrameRef.current = requestAnimationFrame(() => {
+        sidePanelResizePreviewFrameRef.current = null;
+        applySidePanelVisualWidthPreview(pendingSidePanelVisualWidthRef.current);
+      });
+    }
+  }, [applySidePanelVisualWidthPreview]);
 
   const setSidePanelVisualWidth = React.useCallback((nextWidth: number) => {
     const normalizedWidth = Math.max(0, Math.floor(nextWidth));
     sidePanelVisualWidthRef.current = normalizedWidth;
+    pendingSidePanelVisualWidthRef.current = normalizedWidth;
+    applySidePanelVisualWidthPreview(normalizedWidth);
     setSidePanelVisualWidthState(normalizedWidth);
-  }, []);
+  }, [applySidePanelVisualWidthPreview]);
 
   const toggleSidePanelCollapsed = React.useCallback(() => {
     cleanupResizeListeners();
@@ -574,16 +610,18 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
     sidePanelCollapsedRef.current = false;
     const startX = e.clientX;
     const startWidth = sidePanelRef.current?.getBoundingClientRect().width || sidePanelWidth;
+    pendingSidePanelVisualWidthRef.current = startWidth;
 
     const onMouseMove = (ev: MouseEvent) => {
       if (!sidePanelRef.current) return;
       const maxWidth = Math.floor(window.innerWidth * 0.8);
       const newWidth = Math.min(Math.max(startWidth + ev.clientX - startX, MIN_SIDE_PANEL_WIDTH), maxWidth);
-      setSidePanelVisualWidth(newWidth);
+      previewSidePanelVisualWidth(newWidth);
       latestPanelWidthRef.current = newWidth;
     };
 
     const onMouseUp = () => {
+      flushSidePanelVisualWidthPreview();
       const finalWidth = Math.floor(latestPanelWidthRef.current);
       setSidePanelWidth(finalWidth);
       setSidePanelVisualWidth(finalWidth);
@@ -594,11 +632,17 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
 
     resizeMoveHandlerRef.current = onMouseMove;
     resizeUpHandlerRef.current = onMouseUp;
-    document.body.style.cursor = "col-resize";
-    document.body.style.userSelect = "none";
+    sidePanelDocumentDragReleaseRef.current = beginDocumentDragSession('col-resize');
     document.addEventListener("mousemove", onMouseMove);
     document.addEventListener("mouseup", onMouseUp);
-  }, [cleanupResizeListeners, libraryId, setSidePanelVisualWidth, sidePanelWidth]);
+  }, [
+    cleanupResizeListeners,
+    flushSidePanelVisualWidthPreview,
+    libraryId,
+    previewSidePanelVisualWidth,
+    setSidePanelVisualWidth,
+    sidePanelWidth,
+  ]);
 
   const handleBrowserResourcePanelResizeMouseDown = React.useCallback((event: React.MouseEvent) => {
     event.preventDefault();
@@ -630,8 +674,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
 
     browserResourcePanelResizeMoveHandlerRef.current = onMouseMove;
     browserResourcePanelResizeUpHandlerRef.current = onMouseUp;
-    document.body.style.cursor = "col-resize";
-    document.body.style.userSelect = "none";
+    browserResourcePanelDocumentDragReleaseRef.current = beginDocumentDragSession('col-resize');
     document.addEventListener("mousemove", onMouseMove);
     document.addEventListener("mouseup", onMouseUp);
   }, [
@@ -2470,6 +2513,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
       <LibraryWorkspaceControlsContext.Provider value={libraryWorkspaceControls}>
         <SidePanelMotionProperty />
         <DetailWrapper
+          ref={detailWrapperRef}
           className={sidePanelResizing ? 'is-side-panel-resizing' : ''}
           style={detailWrapperStyle}
         >

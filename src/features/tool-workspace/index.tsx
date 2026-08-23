@@ -1,6 +1,7 @@
 import React from 'react';
 import { IconDoubleChevronLeft } from '@douyinfe/semi-icons';
 
+import { beginDocumentDragSession } from '@/components/ui/document-drag-session';
 import {
   type SelectedTreeNode,
 } from '@/features/file-explorer';
@@ -16,6 +17,7 @@ import { isDisposingLibraryWorkspace } from '@/features/workspace-resource-relea
 import ToolWorkspaceSubtitle from './ToolWorkspaceSubtitle';
 import ToolWorkspaceMedia from './ToolWorkspaceMedia';
 import ToolWorkspaceNav from './ToolWorkspaceNav';
+import ToolWorkspaceQQMusicLyrics from './ToolWorkspaceQQMusicLyrics';
 import LibraryMediaTool from '@/features/media-tools/LibraryMediaTool';
 import AIServiceWorkspace from '@/features/ai-services/AIServiceWorkspace';
 import type {
@@ -76,6 +78,7 @@ const ToolWorkspace: React.FC<ToolWorkspaceProps> = ({
     startWidth: number;
     startX: number;
   } | null>(null);
+  const toolNavDocumentDragReleaseRef = React.useRef<(() => void) | null>(null);
   const toolNavWidthRef = React.useRef(toolNavWidth);
   const toolNavWrapperRef = React.useRef<HTMLDivElement>(null);
   const toolNavCollapseButtonRef = React.useRef<HTMLButtonElement>(null);
@@ -212,27 +215,27 @@ const ToolWorkspace: React.FC<ToolWorkspaceProps> = ({
 
   const finishToolNavResize = React.useCallback((target?: HTMLElement, pointerId?: number) => {
     const resize = toolNavResizeRef.current;
-    if (resize) flushToolNavWidthPreview();
+    if (!resize) return;
+    flushToolNavWidthPreview();
     toolNavResizeRef.current = null;
     setIsToolNavResizing(false);
-    document.body.style.cursor = '';
-    document.body.style.userSelect = '';
+    toolNavDocumentDragReleaseRef.current?.();
+    toolNavDocumentDragReleaseRef.current = null;
     if (target && pointerId !== undefined && target.hasPointerCapture(pointerId)) {
       target.releasePointerCapture(pointerId);
     }
-    target?.blur();
-    if (resize) {
-      setToolNavWidth(toolNavWidthRef.current);
-      if (toolNavWidthRef.current > MIN_TOOL_NAV_WIDTH) {
-        lastExpandedToolNavWidthRef.current = toolNavWidthRef.current;
-      }
-      saveNavWidth(toolNavWidthRef.current);
+    setToolNavWidth(toolNavWidthRef.current);
+    if (toolNavWidthRef.current > MIN_TOOL_NAV_WIDTH) {
+      lastExpandedToolNavWidthRef.current = toolNavWidthRef.current;
     }
+    saveNavWidth(toolNavWidthRef.current);
   }, [flushToolNavWidthPreview, saveNavWidth]);
 
   const handleToolNavResizePointerDown = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
-    if (event.button !== 0) return;
+    if (event.button !== 0 || toolNavResizeRef.current) return;
     event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.focus();
     if (toolNavWidth > MIN_TOOL_NAV_WIDTH) {
       lastExpandedToolNavWidthRef.current = toolNavWidth;
     }
@@ -244,18 +247,20 @@ const ToolWorkspace: React.FC<ToolWorkspaceProps> = ({
     };
     setIsToolNavResizing(true);
     event.currentTarget.setPointerCapture(event.pointerId);
-    document.body.style.cursor = 'col-resize';
-    document.body.style.userSelect = 'none';
+    toolNavDocumentDragReleaseRef.current?.();
+    toolNavDocumentDragReleaseRef.current = beginDocumentDragSession('col-resize');
   }, [toolNavWidth]);
 
   const handleToolNavResizePointerMove = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     const resize = toolNavResizeRef.current;
     if (!resize || resize.pointerId !== event.pointerId) return;
+    event.stopPropagation();
     previewToolNavWidth(resize.startWidth + event.clientX - resize.startX);
   }, [previewToolNavWidth]);
 
   const handleToolNavResizePointerUp = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (toolNavResizeRef.current?.pointerId !== event.pointerId) return;
+    event.stopPropagation();
     finishToolNavResize(event.currentTarget, event.pointerId);
   }, [finishToolNavResize]);
 
@@ -278,8 +283,8 @@ const ToolWorkspace: React.FC<ToolWorkspaceProps> = ({
     if (toolNavPreviewFrameRef.current !== null) {
       cancelAnimationFrame(toolNavPreviewFrameRef.current);
     }
-    document.body.style.cursor = '';
-    document.body.style.userSelect = '';
+    toolNavDocumentDragReleaseRef.current?.();
+    toolNavDocumentDragReleaseRef.current = null;
   }, []);
 
   React.useLayoutEffect(() => {
@@ -345,6 +350,15 @@ const ToolWorkspace: React.FC<ToolWorkspaceProps> = ({
 
       <WorkspaceMain>
         {activeToolId === 'ai-services' ? <AIServiceWorkspace /> : null}
+
+        {activeToolId === 'qqmusic-lyrics' ? (
+          <ToolWorkspaceQQMusicLyrics
+            libraryId={libraryId}
+            onRefreshDirectory={onRefreshDirectory}
+            rootNodeId={rootNodeId}
+            selectedTreeNode={selectedTreeNode}
+          />
+        ) : null}
 
         {activeToolId === 'media-processing' ? (
           <ToolWorkspaceMedia

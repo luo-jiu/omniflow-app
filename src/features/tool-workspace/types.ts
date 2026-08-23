@@ -12,6 +12,7 @@ import type { EmbeddedBrowserCapturedResource } from '@/features/embedded-browse
 
 export const TOOL_WORKSPACE_TOOL_IDS = [
   'ai-services',
+  'qqmusic-lyrics',
   'subtitle-translation',
   'media-file-processing',
   'media-processing',

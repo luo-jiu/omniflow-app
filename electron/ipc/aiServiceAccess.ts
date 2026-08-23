@@ -14,6 +14,13 @@ export function assertMainWindowAgentSender(
   return assertMainWindowSender(event, getMainWindow, '当前窗口无权访问内置 Agent')
 }
 
+export function assertMainWindowQQMusicLyricsSender(
+  event: IpcMainInvokeEvent,
+  getMainWindow: () => BrowserWindow | null,
+): WebContents {
+  return assertMainWindowSender(event, getMainWindow, '当前窗口无权访问 QQ 音乐本地歌词')
+}
+
 function assertMainWindowSender(
   event: IpcMainInvokeEvent,
   getMainWindow: () => BrowserWindow | null,

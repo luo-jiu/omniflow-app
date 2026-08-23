@@ -16,6 +16,7 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import { IconMusic } from '@douyinfe/semi-icons';
 import { Tooltip } from '@douyinfe/semi-ui';
 
 import claudeIconUrl from '@/assets/icons/ai-providers/claude.svg';
@@ -52,6 +53,11 @@ const TOOL_ITEMS: Array<{ icon: React.ReactNode; id: ToolWorkspaceToolId; title:
     icon: <img className="tool-static-icon" src={subtitleIconUrl} alt="" draggable={false} />,
     id: 'subtitle-translation',
     title: 'AI 字幕翻译',
+  },
+  {
+    icon: <IconMusic />,
+    id: 'qqmusic-lyrics',
+    title: 'QQ 音乐歌词',
   },
   {
     icon: <img className="tool-static-icon" src={videoIconUrl} alt="" draggable={false} />,

@@ -83,14 +83,14 @@ const ModalBody = styled.div`
   }
 
   .crumb-btn {
-    height: 24px;
+    height: 26px;
     border: 1px solid var(--app-border);
     border-radius: 6px;
     padding: 0 8px;
     background: color-mix(in srgb, var(--app-bg-elevated) 92%, transparent);
     color: var(--app-text);
     cursor: pointer;
-    font-size: 11px;
+    font-size: 12px;
     line-height: 1;
   }
 
@@ -102,7 +102,7 @@ const ModalBody = styled.div`
 
   .crumb-sep {
     color: var(--app-text-muted);
-    font-size: 11px;
+    font-size: 12px;
   }
 
   .node-panel {
@@ -132,7 +132,7 @@ const ModalBody = styled.div`
     background: transparent;
     color: var(--app-text);
     cursor: pointer;
-    min-height: 30px;
+    min-height: 32px;
     padding: 5px 8px;
     text-align: left;
   }
@@ -178,7 +178,7 @@ const ModalBody = styled.div`
   .node-action {
     flex-shrink: 0;
     color: var(--app-text-muted);
-    font-size: 11px;
+    font-size: 12px;
   }
 `;
 

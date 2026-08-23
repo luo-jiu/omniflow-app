@@ -294,6 +294,20 @@ interface Window {
     ) => () => void;
   };
 
+  electronQQMusicLyrics?: {
+    status: () => Promise<import('@/shared/qqmusic-lyrics/qqmusic-lyrics.types').QQMusicLyricsStatus>;
+    search: (
+      input: import('@/shared/qqmusic-lyrics/qqmusic-lyrics.types').QQMusicLyricsSearchInput,
+    ) => Promise<import('@/shared/qqmusic-lyrics/qqmusic-lyrics.types').QQMusicLyricsOperation<
+      import('@/shared/qqmusic-lyrics/qqmusic-lyrics.types').QQMusicLyricsSong[]
+    >>;
+    preview: (
+      songId: number,
+    ) => Promise<import('@/shared/qqmusic-lyrics/qqmusic-lyrics.types').QQMusicLyricsOperation<
+      import('@/shared/qqmusic-lyrics/qqmusic-lyrics.types').QQMusicLyricsPreview
+    >>;
+  };
+
   electronWindow: {
     platform: 'darwin' | 'win32' | 'linux' | 'unknown';
     minimize: () => void;

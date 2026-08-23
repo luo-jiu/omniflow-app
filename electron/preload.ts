@@ -29,6 +29,13 @@ import type {
   AgentSessionSnapshot,
   AgentSessionSummary,
 } from '@/shared/agent/agent.types'
+import type {
+  QQMusicLyricsOperation,
+  QQMusicLyricsPreview,
+  QQMusicLyricsSearchInput,
+  QQMusicLyricsSong,
+  QQMusicLyricsStatus,
+} from '@/shared/qqmusic-lyrics/qqmusic-lyrics.types'
 
 // --------- Expose some API to the Renderer process ---------
 contextBridge.exposeInMainWorld('ipcRenderer', {
@@ -262,6 +269,18 @@ contextBridge.exposeInMainWorld('electronAgent', {
     ipcRenderer.on('agent:chat:event', wrapped)
     return () => ipcRenderer.removeListener('agent:chat:event', wrapped)
   },
+})
+
+contextBridge.exposeInMainWorld('electronQQMusicLyrics', {
+  status: (): Promise<QQMusicLyricsStatus> => ipcRenderer.invoke('qqmusic-lyrics:status'),
+  search: (
+    input: QQMusicLyricsSearchInput,
+  ): Promise<QQMusicLyricsOperation<QQMusicLyricsSong[]>> => (
+    ipcRenderer.invoke('qqmusic-lyrics:search', input)
+  ),
+  preview: (songId: number): Promise<QQMusicLyricsOperation<QQMusicLyricsPreview>> => (
+    ipcRenderer.invoke('qqmusic-lyrics:preview', songId)
+  ),
 })
 
 // 窗口控制 API

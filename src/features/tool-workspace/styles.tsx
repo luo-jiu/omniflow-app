@@ -184,6 +184,15 @@ export const ToolNav = styled.aside`
     height: 16px;
   }
 
+  .tool-card-icon .semi-icon-music,
+  .tool-card-icon .semi-icon-music svg {
+    color: #ec4141;
+  }
+
+  .tool-card-icon .semi-icon-music svg path {
+    fill: #ec4141;
+  }
+
   .tool-card-icon .tool-static-icon {
     display: block;
     width: 16px;

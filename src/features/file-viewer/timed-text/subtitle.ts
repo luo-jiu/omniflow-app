@@ -12,6 +12,15 @@ export interface TimedTextSegment {
   end: number;
 }
 
+function clampPercent(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.min(Math.max(value, 0), 100);
+}
+
+function getTextUnitCount(text: string): number {
+  return Math.max(Array.from(text).length, 1);
+}
+
 function normalizeSubtitleText(raw: string): string {
   return raw.replace(/^\uFEFF/u, '').replace(/\r\n?/gu, '\n').trim();
 }
@@ -216,29 +225,49 @@ function parseQrcLineSegments(payload: string, lineStart: number, lineEnd: numbe
   }
 
   const rawSegments: TimedTextSegment[] = [];
-  const leadingText = payload.slice(0, matches[0].index ?? 0);
+  const markerPrecedesText = (matches[0].index ?? -1) === 0;
 
-  matches.forEach((match, index) => {
-    const markerEnd = (match.index ?? 0) + match[0].length;
-    const nextMarkerStart = matches[index + 1]?.index ?? payload.length;
-    const text = payload.slice(markerEnd, nextMarkerStart);
-    if (!text) return;
+  if (markerPrecedesText) {
+    matches.forEach((match, index) => {
+      const markerEnd = (match.index ?? 0) + match[0].length;
+      const nextMarkerStart = matches[index + 1]?.index ?? payload.length;
+      const text = payload.slice(markerEnd, nextMarkerStart);
+      if (!text) return;
 
-    const start = Number(match[1]) / 1000;
-    const duration = Number(match[2]) / 1000;
-    rawSegments.push({
-      text,
-      start,
-      end: duration > 0 ? start + duration : start,
+      const start = Number(match[1]) / 1000;
+      const duration = Number(match[2]) / 1000;
+      rawSegments.push({
+        text,
+        start,
+        end: duration > 0 ? start + duration : start,
+      });
     });
-  });
+  } else {
+    let textStart = 0;
+    matches.forEach((match) => {
+      const markerStart = match.index ?? textStart;
+      const text = payload.slice(textStart, markerStart);
+      textStart = markerStart + match[0].length;
+      if (!text) return;
 
-  if (leadingText) {
-    rawSegments.unshift({
-      text: leadingText,
-      start: lineStart,
-      end: rawSegments[0]?.end ?? lineEnd,
+      const start = Number(match[1]) / 1000;
+      const duration = Number(match[2]) / 1000;
+      rawSegments.push({
+        text,
+        start,
+        end: duration > 0 ? start + duration : start,
+      });
     });
+
+    const trailingText = payload.slice(textStart);
+    if (trailingText) {
+      const previousEnd = rawSegments.at(-1)?.end ?? lineStart;
+      rawSegments.push({
+        text: trailingText,
+        start: previousEnd,
+        end: lineEnd,
+      });
+    }
   }
 
   return rawSegments
@@ -326,4 +355,50 @@ export function findActiveTimedTextCue(
   }
 
   return null;
+}
+
+export function resolveFocusedTimedTextCueIndex(
+  cues: TimedTextCue[],
+  currentTime: number,
+): number {
+  if (cues.length === 0) return -1;
+  const activeIndex = cues.findIndex(cue => currentTime >= cue.start && currentTime <= cue.end);
+  if (activeIndex >= 0) return activeIndex;
+
+  for (let index = cues.length - 1; index >= 0; index -= 1) {
+    if (currentTime >= cues[index].start) {
+      return Math.min(index + 1, cues.length - 1);
+    }
+  }
+
+  return 0;
+}
+
+export function resolveTimedTextCueSweepPercent(
+  cue: TimedTextCue,
+  lineIndex: number,
+  currentTime: number,
+): number {
+  const segments = cue.segmentLines?.[lineIndex];
+  if (!segments?.length) {
+    return clampPercent(((currentTime - cue.start) / Math.max(cue.end - cue.start, 0.1)) * 100);
+  }
+
+  const totalUnits = segments.reduce((sum, segment) => sum + getTextUnitCount(segment.text), 0);
+  let elapsedUnits = 0;
+
+  for (const segment of segments) {
+    const segmentUnits = getTextUnitCount(segment.text);
+    if (currentTime >= segment.end) {
+      elapsedUnits += segmentUnits;
+      continue;
+    }
+    if (currentTime <= segment.start) {
+      return clampPercent((elapsedUnits / totalUnits) * 100);
+    }
+    const ratio = (currentTime - segment.start) / Math.max(segment.end - segment.start, 0.08);
+    return clampPercent(((elapsedUnits + segmentUnits * ratio) / totalUnits) * 100);
+  }
+
+  return 100;
 }

@@ -19,6 +19,7 @@ describe('tool workspace layout', () => {
       'media-processing',
       'subtitle-translation',
       'ai-services',
+      'qqmusic-lyrics',
       'media-file-processing',
     ]);
   });
@@ -33,6 +34,7 @@ describe('tool workspace layout', () => {
       navWidth: 208,
       toolOrder: [
         'ai-services',
+        'qqmusic-lyrics',
         'subtitle-translation',
         'media-file-processing',
         'media-processing',

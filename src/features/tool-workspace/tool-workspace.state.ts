@@ -112,6 +112,7 @@ function normalizeState(raw: any): ToolWorkspaceState {
   }
   const activeToolId: ToolWorkspaceToolId = (
     raw.activeToolId === 'ai-services'
+    || raw.activeToolId === 'qqmusic-lyrics'
     || raw.activeToolId === 'media-processing'
     || raw.activeToolId === 'media-file-processing'
     || raw.activeToolId === 'subtitle-translation'

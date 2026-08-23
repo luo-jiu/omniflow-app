@@ -277,11 +277,15 @@ export async function uploadGeneratedSubtitleContent(
   content: string,
   libraryId: number,
   parentId: number,
+  options?: {
+    storageProvider?: string;
+  },
 ) {
   const staged = await window.electronAPI.createStagedTextFile(fileName, content);
   try {
     return await uploadLocalPathAndCreateNode(staged.filePath, parentId, libraryId, {
       conflictPolicy: 'auto_rename',
+      storageProvider: options?.storageProvider,
     });
   } finally {
     await window.electronAPI.cleanupStagedTextFile(staged.filePath).catch(() => false);

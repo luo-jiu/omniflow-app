@@ -5,6 +5,11 @@ import fs from 'fs/promises';
 import path from 'node:path';
 
 import { downloadUrlToFile } from '../service/fileTransfer';
+import {
+  isPathInsideAllowedRoots,
+  normalizeStagedFileName,
+  resolveTempImportStagingRoot,
+} from '../service/stagedFilePolicy';
 
 interface DesktopUploadFileEntry {
   name: string;
@@ -62,7 +67,6 @@ const AUTO_IMPORT_OBSERVE_TTL_MS = 10 * 60 * 1000;
 const AUTO_IMPORT_MIN_STABLE_COUNT = 2;
 const AUTO_IMPORT_MIN_MTIME_AGE_MS = 2_000;
 const AUTO_IMPORT_DEFAULT_MAX_FILES = 12;
-const TEMP_IMPORT_STAGING_DIR_NAME = 'omniflow-import-staging';
 const MAC_CHROME_BOOKMARK_RELATIVE_PATH = path.join(
   'Library',
   'Application Support',
@@ -124,7 +128,7 @@ function getTextFileStagingRoot(): string {
 }
 
 function getTempImportStagingRoot(): string {
-  return path.join(app.getPath('temp'), TEMP_IMPORT_STAGING_DIR_NAME);
+  return resolveTempImportStagingRoot(app.getPath('temp'));
 }
 
 function normalizeDialogFilters(
@@ -609,7 +613,7 @@ export function registerFileIpc(ipcMain: Electron.IpcMain) {
     const subDir = path.join(stagingRoot, `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
     await fs.mkdir(subDir, { recursive: true });
 
-    const safeName = String(fileName || 'subtitle.txt').replace(/[/\\]/g, '_').trim() || 'unknown';
+    const safeName = normalizeStagedFileName(fileName, 'subtitle.txt');
     const stagedPath = path.join(subDir, safeName);
     const normalizedContent = String(content ?? '');
     await fs.writeFile(stagedPath, normalizedContent, 'utf-8');
@@ -652,8 +656,8 @@ export function registerFileIpc(ipcMain: Electron.IpcMain) {
     filePath: string,
   ): Promise<{ filePath: string; name: string; size: number }> => {
     const normalizedPath = path.resolve(String(filePath || '').trim());
-    const stagingRoot = getTempImportStagingRoot();
-    if (!normalizedPath || !isPathInsideDirectory(normalizedPath, stagingRoot)) {
+    const stagingRoots = [getTempImportStagingRoot(), getTextFileStagingRoot()];
+    if (!normalizedPath || !isPathInsideAllowedRoots(normalizedPath, stagingRoots)) {
       throw new Error('无效的临时导入文件');
     }
     const stat = await fs.stat(normalizedPath);
