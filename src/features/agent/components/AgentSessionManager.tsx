@@ -230,6 +230,7 @@ const Manager = styled.section`
 
 const RUN_STATUS_LABELS: Partial<Record<AgentRunStatus, string>> = {
   awaiting_approval: '等待确认',
+  awaiting_interaction: '等待输入',
   failed: '上一轮失败',
   interrupted: '上一轮已中断',
   running: '正在运行',

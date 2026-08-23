@@ -1,5 +1,5 @@
 import React from 'react';
-import { IconHistory, IconPlus, IconSend, IconStop } from '@douyinfe/semi-icons';
+import { IconBookmark, IconHistory, IconPlus, IconSend, IconStop } from '@douyinfe/semi-icons';
 import { Toast } from '@douyinfe/semi-ui';
 import styled, { css } from 'styled-components';
 
@@ -7,6 +7,7 @@ import AIModelSettingsControl from '@/features/ai-services/components/AIModelSet
 import { openCompactConfirm } from '@/components/ui/compact-confirm';
 import { workspaceScrollbarStyles } from '@/components/ui/workspace-scrollbar';
 import type { SelectedTreeNode } from '@/features/file-explorer';
+import { locateNodeInDirectoryTree } from '@/features/file-explorer/services/tree-locate';
 import {
   fetchActiveAIServiceModels,
   fetchAIServiceProfiles,
@@ -15,12 +16,17 @@ import type { AIServiceSnapshot } from '@/features/ai-services/ai-service.types'
 import type {
   AgentAppContext,
   AgentOwnerScope,
+  AgentPresentationAction,
   AgentSessionCursor,
   AgentSessionSummary,
 } from '@/shared/agent/agent.types';
 import { serializeAgentOwnerScope } from '@/shared/agent/agent-owner-scope';
+import AgentMemoryManager, {
+  type AgentMemoryDeleteInput,
+  type AgentMemoryUpdateInput,
+} from './components/AgentMemoryManager';
 import AgentSessionManager from './components/AgentSessionManager';
-import AgentConfirmationCard from './components/AgentConfirmationCard';
+import AgentTimeline from './components/AgentTimeline';
 import {
   loadAgentModelPreferences,
   saveAgentModelPreferences,
@@ -33,6 +39,7 @@ import {
   MIN_AGENT_COMPOSER_HEIGHT,
   resolveAgentComposerDragHeight,
 } from './agent-composer-layout';
+import { useAgentMemories } from './hooks/useAgentMemories';
 import { useAgentSession } from './hooks/useAgentSession';
 import {
   deleteAgentSession,
@@ -97,32 +104,6 @@ const AgentEmpty = styled.div`
     font-size: 13px;
     text-align: center;
   }
-`;
-
-const MessageBubble = styled.article<{ $role: 'user' | 'assistant' | 'tool' }>`
-  align-self: ${({ $role }) => ($role === 'user' ? 'flex-end' : 'flex-start')};
-  max-width: ${({ $role }) => ($role === 'tool' ? 'min(560px, 76%)' : 'min(760px, 84%)')};
-  padding: ${({ $role }) => ($role === 'tool' ? '8px 12px' : '11px 14px')};
-  border: 1px solid ${({ $role }) => (
-    $role === 'user'
-      ? 'color-mix(in srgb, var(--semi-color-primary) 42%, var(--app-border))'
-      : 'var(--app-border)'
-  )};
-  border-radius: ${({ $role }) => (
-    $role === 'tool' ? '8px' : $role === 'user' ? '16px 16px 5px 16px' : '16px 16px 16px 5px'
-  )};
-  background: ${({ $role }) => (
-    $role === 'user'
-      ? 'color-mix(in srgb, var(--semi-color-primary) 16%, var(--app-bg-elevated))'
-      : $role === 'tool'
-        ? 'color-mix(in srgb, var(--app-text-muted) 7%, var(--app-bg))'
-        : 'var(--app-bg-elevated)'
-  )};
-  color: ${({ $role }) => ($role === 'tool' ? 'var(--app-text-muted)' : 'var(--app-text)')};
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  font-size: ${({ $role }) => ($role === 'tool' ? '13px' : '14px')};
-  line-height: 1.6;
 `;
 
 const ComposerFrame = styled.div`
@@ -310,7 +291,7 @@ export default function AgentWorkspace({
   const [sessionsLoadingMore, setSessionsLoadingMore] = React.useState(false);
   const [sessionsNextCursor, setSessionsNextCursor] = React.useState<AgentSessionCursor | null>(null);
   const [sessionsTotal, setSessionsTotal] = React.useState(0);
-  const [sessionManagerOpen, setSessionManagerOpen] = React.useState(false);
+  const [managerMode, setManagerMode] = React.useState<'memories' | 'sessions' | null>(null);
   const [sessionQuery, setSessionQuery] = React.useState('');
   const scrollRef = React.useRef<HTMLDivElement | null>(null);
   const scrollFrameRef = React.useRef<number | null>(null);
@@ -331,6 +312,25 @@ export default function AgentWorkspace({
     [libraryId, rootNodeId, selectedTreeNode],
   );
   const activeProfile = aiServices?.profiles.find(profile => profile.id === aiServices.activeProfileId) || null;
+  const {
+    error: memoryLoadError,
+    hasMore: memoriesHasMore,
+    loadMore: loadMoreMemories,
+    loadMoreError: memoryLoadMoreError,
+    loading: memoriesLoading,
+    loadingMore: memoriesLoadingMore,
+    memories,
+    query: memoryQuery,
+    remove: removeMemory,
+    retry: retryMemories,
+    setQuery: setMemoryQuery,
+    total: memoriesTotal,
+    update: updateMemory,
+  } = useAgentMemories({
+    active: managerMode === 'memories',
+    libraryId,
+    ownerScope,
+  });
   const loadSessions = React.useCallback(async (
     query = '',
     cursor?: AgentSessionCursor,
@@ -421,7 +421,7 @@ export default function AgentWorkspace({
     setSessions([]);
     setSessionsNextCursor(null);
     setSessionsTotal(0);
-    setSessionManagerOpen(false);
+    setManagerMode(null);
     setSessionQuery('');
     let active = true;
     void loadSessions().then((nextSessions) => {
@@ -434,12 +434,12 @@ export default function AgentWorkspace({
   }, [loadSessions, restoreSession, sessionScopeKey]);
 
   React.useEffect(() => {
-    if (!sessionManagerOpen) return;
+    if (managerMode !== 'sessions') return;
     const timer = window.setTimeout(() => {
       void loadSessions(sessionQuery);
     }, 160);
     return () => window.clearTimeout(timer);
-  }, [loadSessions, sessionManagerOpen, sessionQuery]);
+  }, [loadSessions, managerMode, sessionQuery]);
 
   React.useLayoutEffect(() => {
     const element = scrollRef.current;
@@ -448,7 +448,7 @@ export default function AgentWorkspace({
       window.cancelAnimationFrame(scrollFrameRef.current);
       scrollFrameRef.current = null;
     }
-    if (sessionManagerOpen) {
+    if (managerMode) {
       element.scrollTop = 0;
       shouldFollowScrollRef.current = true;
       return;
@@ -466,7 +466,7 @@ export default function AgentWorkspace({
         scrollFrameRef.current = null;
       }
     };
-  }, [session.messages, session.isStreaming, sessionManagerOpen]);
+  }, [managerMode, session.messages, session.runs, session.toolActivities, session.isStreaming]);
 
   const persistModelPreferences = React.useCallback((nextPreferences: AgentModelPreferences) => {
     setModelPreferences(nextPreferences);
@@ -535,11 +535,43 @@ export default function AgentWorkspace({
   const workspaceError = ownerScope
     ? configError
     : '当前账号身份不完整，Agent 会话暂不可用';
+  const hasTimelineContent = session.messages.length > 0
+    || session.runs.length > 0
+    || session.toolActivities.length > 0;
+  const submitInteraction = session.submitInteraction;
+  const toolActivities = session.toolActivities;
+
+  const handlePresentationAction = React.useCallback((action: AgentPresentationAction) => {
+    if (action.action === 'tree.revealNode') {
+      if (
+        action.libraryId !== libraryId
+        || !Number.isInteger(action.nodeId)
+        || action.nodeId <= 0
+      ) {
+        Toast.warning('该 Agent 结果不属于当前资料库');
+        return;
+      }
+      locateNodeInDirectoryTree({ libraryId: action.libraryId, nodeId: action.nodeId });
+      return;
+    }
+    if (action.action === 'agent.interaction.submit') {
+      const activity = toolActivities.find(item => (
+        item.interaction?.interactionId === action.interactionId
+      ));
+      if (!activity) {
+        Toast.warning('该 Agent 交互请求已经失效');
+        return;
+      }
+      void submitInteraction(activity, action.response);
+      return;
+    }
+    Toast.info('该 Agent 结果操作尚未接入当前工作区');
+  }, [libraryId, submitInteraction, toolActivities]);
 
   const handleOpenSession = React.useCallback(async (target: AgentSessionSummary) => {
     if (await restoreSession(target.id)) {
       shouldFollowScrollRef.current = true;
-      setSessionManagerOpen(false);
+      setManagerMode(null);
     }
   }, [restoreSession]);
 
@@ -550,7 +582,7 @@ export default function AgentWorkspace({
     }
     resetSession();
     setSessionQuery('');
-    setSessionManagerOpen(false);
+    setManagerMode(null);
   }, [resetSession, sessionBusy]);
 
   const handleRenameSession = React.useCallback(async (
@@ -589,11 +621,44 @@ export default function AgentWorkspace({
     });
   }, [currentSessionId, libraryId, loadSessions, ownerScope, resetSession, sessionQuery]);
 
+  const handleUpdateMemory = React.useCallback(async (
+    input: AgentMemoryUpdateInput,
+  ): Promise<boolean> => {
+    const outcome = await updateMemory(input);
+    if (!outcome.ok && outcome.error) {
+      Toast.error(outcome.error);
+    }
+    return outcome.ok;
+  }, [updateMemory]);
+
+  const handleDeleteMemory = React.useCallback((
+    input: AgentMemoryDeleteInput,
+  ): void => {
+    openCompactConfirm({
+      cancelText: '取消',
+      content: `确定删除“${input.title}”吗？删除后不会再用于后续 Agent 会话。`,
+      okButtonProps: { type: 'danger' },
+      okText: '删除',
+      onOk: async () => {
+        const outcome = await removeMemory({
+          id: input.id,
+          revision: input.revision,
+        });
+        if (!outcome.ok) {
+          const message = outcome.error || '长期记忆删除失败';
+          if (outcome.error) Toast.error(outcome.error);
+          throw new Error(message);
+        }
+      },
+      title: '删除长期记忆',
+    });
+  }, [removeMemory]);
+
   return (
     <AgentRoot>
       <AgentScroll
         onScroll={(event) => {
-          if (sessionManagerOpen) return;
+          if (managerMode) return;
           const element = event.currentTarget;
           shouldFollowScrollRef.current = (
             element.scrollHeight - element.scrollTop - element.clientHeight <= 48
@@ -601,7 +666,7 @@ export default function AgentWorkspace({
         }}
         ref={scrollRef}
       >
-        {sessionManagerOpen ? (
+        {managerMode === 'sessions' ? (
           <AgentSessionManager
             activeSessionId={session.sessionId}
             hasMore={Boolean(sessionsNextCursor)}
@@ -609,7 +674,7 @@ export default function AgentWorkspace({
             loadingMore={sessionsLoadingMore}
             onBack={() => {
               shouldFollowScrollRef.current = true;
-              setSessionManagerOpen(false);
+              setManagerMode(null);
             }}
             onDelete={handleDeleteSession}
             onNew={handleNewSession}
@@ -623,7 +688,27 @@ export default function AgentWorkspace({
             sessions={sessions}
             total={sessionsTotal}
           />
-        ) : session.messages.length === 0 ? (
+        ) : managerMode === 'memories' ? (
+          <AgentMemoryManager
+            error={memoryLoadError}
+            hasMore={memoriesHasMore}
+            loadMoreError={memoryLoadMoreError}
+            loading={memoriesLoading}
+            loadingMore={memoriesLoadingMore}
+            memories={memories}
+            onBack={() => {
+              shouldFollowScrollRef.current = true;
+              setManagerMode(null);
+            }}
+            onDelete={handleDeleteMemory}
+            onLoadMore={() => { void loadMoreMemories(); }}
+            onQueryChange={setMemoryQuery}
+            onRetry={() => { void retryMemories(); }}
+            onSave={handleUpdateMemory}
+            query={memoryQuery}
+            total={memoriesTotal}
+          />
+        ) : !hasTimelineContent ? (
           <AgentEmpty>
             <div>
               <h1 className="agent-empty-title">OmniFlow Agent</h1>
@@ -632,41 +717,35 @@ export default function AgentWorkspace({
           </AgentEmpty>
         ) : (
           <AgentContent>
-            {session.messages.map(message => (
-              <MessageBubble
-                key={message.id}
-                $role={message.role === 'user' ? 'user' : message.role === 'tool' ? 'tool' : 'assistant'}
-              >
-                {message.toolName ? `${message.toolName} · ${message.content}` : message.content}
-              </MessageBubble>
-            ))}
-            {session.pendingApprovals.map(approval => (
-              <AgentConfirmationCard
-                approval={approval}
-                busy={session.approvalBusyIds.has(approval.approvalId)}
-                key={approval.approvalId}
-                onResolve={(approved) => {
-                  void session.resolveApproval(approval, approved);
-                }}
-              />
-            ))}
+            <AgentTimeline
+              approvalBusyIds={session.approvalBusyIds}
+              interactionBusyIds={session.interactionBusyIds}
+              libraryId={libraryId}
+              messages={session.messages}
+              onAction={handlePresentationAction}
+              onResolveApproval={(approval, approved) => {
+                void session.resolveApproval(approval, approved);
+              }}
+              runs={session.runs}
+              toolActivities={session.toolActivities}
+            />
             {workspaceError ? <div role="alert">{workspaceError}</div> : null}
             {session.warning ? <div role="status">{session.warning}</div> : null}
             {session.error ? <div role="alert">{session.error}</div> : null}
           </AgentContent>
         )}
-        {!sessionManagerOpen && session.messages.length === 0 && workspaceError ? (
+        {!managerMode && !hasTimelineContent && workspaceError ? (
           <div role="alert">{workspaceError}</div>
         ) : null}
-        {!sessionManagerOpen && session.messages.length === 0 && session.warning ? (
+        {!managerMode && !hasTimelineContent && session.warning ? (
           <div role="status">{session.warning}</div>
         ) : null}
-        {!sessionManagerOpen && session.messages.length === 0 && session.error ? (
+        {!managerMode && !hasTimelineContent && session.error ? (
           <div role="alert">{session.error}</div>
         ) : null}
       </AgentScroll>
 
-      {!sessionManagerOpen ? <ComposerFrame>
+      {!managerMode ? <ComposerFrame>
         <Composer onSubmit={(event) => {
           event.preventDefault();
           shouldFollowScrollRef.current = true;
@@ -730,14 +809,27 @@ export default function AgentWorkspace({
               onClick={() => {
                 setSessionQuery('');
                 setSessionsLoading(true);
-                setSessionManagerOpen(true);
+                setManagerMode('sessions');
               }}
               title="会话记录"
               type="button"
             >
               <IconHistory aria-hidden="true" />
             </button>
-            {session.messages.length > 0 && !session.isBusy ? (
+            <button
+              aria-label="管理 Agent 长期记忆"
+              className="agent-reset"
+              disabled={session.isBusy || !ownerScope}
+              onClick={() => {
+                setMemoryQuery('');
+                setManagerMode('memories');
+              }}
+              title="长期记忆"
+              type="button"
+            >
+              <IconBookmark aria-hidden="true" />
+            </button>
+            {hasTimelineContent && !session.isBusy ? (
               <button
                 aria-label="新建 Agent 会话"
                 className="agent-reset"

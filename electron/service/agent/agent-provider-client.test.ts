@@ -48,6 +48,7 @@ describe('Agent provider client', () => {
       baseUrl: 'https://api.example/v1',
       providerType: 'openai',
     }, {
+      maxOutputTokens: 768,
       messages: [{ content: '检查媒体', role: 'user' }],
       model: 'gpt-test',
       systemPrompt: 'system',
@@ -56,5 +57,36 @@ describe('Agent provider client', () => {
 
     expect(deltas.join('')).toBe('编码档次：LC');
     expect(result.content).toBe('编码档次：LC');
+    expect(JSON.parse(String(mocks.fetch.mock.calls[0]?.[1]?.body))).toMatchObject({
+      max_completion_tokens: 768,
+    });
+  });
+
+  it('cancels a stream whose pending SSE event exceeds the configured limit', async () => {
+    const cancel = vi.fn();
+    mocks.fetch.mockResolvedValueOnce(new Response(new ReadableStream({
+      cancel,
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('x'.repeat(64)));
+      },
+    }), {
+      headers: { 'Content-Type': 'text/event-stream; charset=utf-8' },
+      status: 200,
+    }));
+
+    await expect(streamAgentProviderTurn({
+      apiKey: 'secret',
+      baseUrl: 'https://api.example/v1',
+      providerType: 'openai',
+    }, {
+      maxOutputTokens: 512,
+      messages: [{ content: '检查媒体', role: 'user' }],
+      model: 'gpt-test',
+      systemPrompt: 'system',
+      tools: [],
+    }, vi.fn(), new AbortController().signal, {
+      maxEventBufferCharacters: 32,
+    })).rejects.toThrow('Agent Provider 流式事件超过安全上限');
+    expect(cancel).toHaveBeenCalledOnce();
   });
 });

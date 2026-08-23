@@ -270,6 +270,9 @@ interface Window {
     resolveToolApproval: (
       input: import('@/shared/agent/agent.types').AgentToolApprovalDecisionRequest,
     ) => Promise<import('@/shared/agent/agent.types').AgentToolApprovalDecisionResult>;
+    submitInteraction: (
+      input: import('@/shared/agent/agent.types').AgentInteractionSubmissionRequest,
+    ) => Promise<import('@/shared/agent/agent.types').AgentInteractionSubmissionResult>;
     completeToolExecution: (
       input: import('@/shared/agent/agent.types').AgentToolExecutionCompletion,
     ) => Promise<boolean>;
@@ -309,6 +312,18 @@ interface Window {
       ownerScope: import('@/shared/agent/agent.types').AgentOwnerScope,
       libraryId: number,
       sessionId: string,
+    ) => Promise<boolean>;
+    listMemories: (
+      ownerScope: import('@/shared/agent/agent.types').AgentOwnerScope,
+      libraryId: number,
+      query?: string,
+      cursor?: import('@/shared/agent/agent.types').AgentMemoryCursor,
+    ) => Promise<import('@/shared/agent/agent.types').AgentMemoryPage>;
+    updateMemory: (
+      input: import('@/shared/agent/agent.types').AgentMemoryUpdateRequest,
+    ) => Promise<import('@/shared/agent/agent.types').AgentMemoryItem>;
+    deleteMemory: (
+      input: import('@/shared/agent/agent.types').AgentMemoryDeleteRequest,
     ) => Promise<boolean>;
     onEvent: (
       listener: (event: import('@/shared/agent/agent.types').AgentChatStreamEvent) => void,

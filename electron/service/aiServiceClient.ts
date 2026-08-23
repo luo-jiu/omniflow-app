@@ -11,6 +11,7 @@ import {
   buildAIServiceCompletionRequest,
   buildAIServiceStreamingChatRequest,
   buildAIServiceModelsRequest,
+  resolveAIServiceOutputTokenLimit,
   extractAIServiceCompletionText,
   extractAIServiceErrorMessage,
   extractAIServiceModelIds,
@@ -18,6 +19,14 @@ import {
   type AIServiceRequestSpec,
   type AIServiceRuntimeConnection,
 } from './aiServiceClientModel'
+import {
+  AI_SERVICE_HTTP_BODY_LIMITS,
+  appendBoundedAIServiceStreamText,
+  readBoundedAIServiceResponseText,
+  resolveAIServiceStreamLimits,
+  type AIServiceStreamLimits,
+  type ResolvedAIServiceStreamLimits,
+} from './aiServiceStreamLimits'
 
 async function requestJson(
   spec: AIServiceRequestSpec,
@@ -30,7 +39,11 @@ async function requestJson(
     method: spec.method,
     signal,
   })
-  const text = await response.text()
+  const text = await readBoundedAIServiceResponseText(
+    response,
+    response.ok ? AI_SERVICE_HTTP_BODY_LIMITS.jsonBytes : AI_SERVICE_HTTP_BODY_LIMITS.errorBytes,
+    response.ok ? 'AI 服务响应' : 'AI 服务错误响应',
+  )
   let body: unknown = text
   if (text) {
     try {
@@ -96,6 +109,7 @@ export async function completeWithAIServiceProfile(
 
 function normalizeChatInput(input: AIServiceChatCompletionInput): AIServiceChatCompletionInput {
   return {
+    maxOutputTokens: resolveAIServiceOutputTokenLimit(input?.maxOutputTokens),
     messages: Array.isArray(input?.messages)
       ? input.messages
         .filter(message => message?.role === 'user' || message?.role === 'assistant')
@@ -129,6 +143,7 @@ function parseStreamData(
   rawData: string,
   onDelta: (delta: string) => void,
   state: { content: string },
+  limits: ResolvedAIServiceStreamLimits,
 ): void {
   const data = rawData.trim()
   if (!data || data === '[DONE]') return
@@ -140,7 +155,12 @@ function parseStreamData(
   }
   const delta = extractAIServiceStreamDelta(providerType, body)
   if (!delta) return
-  state.content += delta
+  state.content = appendBoundedAIServiceStreamText(
+    state.content,
+    delta,
+    limits.maxContentCharacters,
+    'AI 流式响应内容',
+  )
   onDelta(delta)
 }
 
@@ -149,6 +169,7 @@ export async function streamAIServiceProfile(
   onDelta: (delta: string) => void,
   runtimeConnection?: AIServiceRuntimeConnection,
   signal?: AbortSignal,
+  limits?: AIServiceStreamLimits,
 ): Promise<string> {
   const normalized = normalizeChatInput(input)
   validateChatInput(normalized)
@@ -161,7 +182,11 @@ export async function streamAIServiceProfile(
     signal,
   })
   if (!response.ok) {
-    const text = await response.text()
+    const text = await readBoundedAIServiceResponseText(
+      response,
+      AI_SERVICE_HTTP_BODY_LIMITS.errorBytes,
+      'AI 服务错误响应',
+    )
     let body: unknown = text
     if (text) {
       try {
@@ -179,6 +204,7 @@ export async function streamAIServiceProfile(
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
   const state = { content: '' }
+  const resolvedLimits = resolveAIServiceStreamLimits(limits)
   let buffer = ''
 
   const consumeBuffer = (flush = false) => {
@@ -190,7 +216,7 @@ export async function streamAIServiceProfile(
     }
     for (const line of lines) {
       if (!line.startsWith('data:')) continue
-      parseStreamData(profile.providerType, line.slice(5), onDelta, state)
+      parseStreamData(profile.providerType, line.slice(5), onDelta, state, resolvedLimits)
     }
   }
 
@@ -202,11 +228,25 @@ export async function streamAIServiceProfile(
         streamDone = true
         break
       }
-      buffer += decoder.decode(value, { stream: true })
-      consumeBuffer()
+      const fragment = decoder.decode(value, { stream: true })
+      buffer = appendBoundedAIServiceStreamText(
+        buffer,
+        fragment,
+        resolvedLimits.maxEventBufferCharacters,
+        'AI 流式响应事件',
+      )
+      if (fragment.includes('\n')) consumeBuffer()
     }
-    buffer += decoder.decode()
+    buffer = appendBoundedAIServiceStreamText(
+      buffer,
+      decoder.decode(),
+      resolvedLimits.maxEventBufferCharacters,
+      'AI 流式响应事件',
+    )
     consumeBuffer(true)
+  } catch (error) {
+    await reader.cancel().catch(() => undefined)
+    throw error
   } finally {
     reader.releaseLock()
   }

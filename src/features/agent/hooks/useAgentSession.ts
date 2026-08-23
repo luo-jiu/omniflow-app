@@ -3,9 +3,12 @@ import React from 'react';
 import type {
   AgentAppContext,
   AgentChatStreamEvent,
+  AgentInteractionResponse,
   AgentMessage,
   AgentOwnerScope,
   AgentReasoningEffort,
+  AgentRunSnapshot,
+  AgentToolActivitySnapshot,
   AgentToolApprovalSnapshot,
   AgentToolExecutionRequest,
 } from '@/shared/agent/agent.types';
@@ -15,6 +18,7 @@ import {
   completeAgentToolExecution,
   markAgentToolExecutionCommitted,
   resolveAgentToolApproval,
+  submitAgentInteraction,
   startAgentChat,
   stopAgentChat,
   subscribeAgentChat,
@@ -25,6 +29,11 @@ import {
   appendBufferedAgentEvent,
   reconcileCanonicalAgentRunMessages,
 } from '../agent-stream-messages';
+import {
+  reconcileCanonicalAgentRunActivities,
+  upsertAgentToolActivity,
+} from '../agent-tool-activities';
+import { upsertAgentRun } from '../agent-runs';
 
 interface UseAgentSessionInput {
   appContext: AgentAppContext;
@@ -47,6 +56,29 @@ function isAgentMessage(value: AgentMessage | null): value is AgentMessage {
   return Boolean(value);
 }
 
+function ensureToolTimelineAnchor(
+  current: AgentMessage[],
+  activity: AgentToolActivitySnapshot,
+): AgentMessage[] {
+  if (current.some(message => (
+    message.runId === activity.runId
+    && message.toolCallId === activity.call.id
+  ))) return current;
+  return [
+    ...current,
+    {
+      content: `正在调用 ${activity.call.name}`,
+      createdAt: activity.createdAt,
+      id: `agent-tool-anchor-${activity.runId}-${activity.call.id}`,
+      role: 'tool',
+      runId: activity.runId,
+      sessionId: activity.sessionId,
+      toolCallId: activity.call.id,
+      toolName: activity.call.name,
+    },
+  ];
+}
+
 export function useAgentSession({
   appContext,
   model,
@@ -63,12 +95,15 @@ export function useAgentSession({
   const [isPreparing, setIsPreparing] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [warning, setWarning] = React.useState<string | null>(null);
-  const [pendingApprovals, setPendingApprovals] = React.useState<AgentToolApprovalSnapshot[]>([]);
+  const [runs, setRuns] = React.useState<AgentRunSnapshot[]>([]);
+  const [toolActivities, setToolActivities] = React.useState<AgentToolActivitySnapshot[]>([]);
   const [approvalBusyIds, setApprovalBusyIds] = React.useState<Set<string>>(() => new Set());
+  const [interactionBusyIds, setInteractionBusyIds] = React.useState<Set<string>>(() => new Set());
   const ownerScopeKey = serializeAgentOwnerScope(ownerScope);
   const sessionScopeKey = `${ownerScopeKey}\u0000${Number(appContext.libraryId)}`;
   const sessionScopeKeyRef = React.useRef(sessionScopeKey);
   const sessionIdRef = React.useRef<string | null>(null);
+  const optimisticMessageIdRef = React.useRef<string | null>(null);
   const streamMessageIdRef = React.useRef<string | null>(null);
   const streamedContentLengthRef = React.useRef<Map<string, number>>(new Map());
   const pendingEventsRef = React.useRef<Map<string, AgentChatStreamEvent[]>>(new Map());
@@ -78,6 +113,7 @@ export function useAgentSession({
   const isPreparingRef = React.useRef(false);
   const mountedRef = React.useRef(true);
   const approvalsInFlightRef = React.useRef<Set<string>>(new Set());
+  const interactionsInFlightRef = React.useRef<Set<string>>(new Set());
   const rendererExecutionsInFlightRef = React.useRef<Map<string, {
     committed: boolean;
     controller: AbortController;
@@ -152,8 +188,22 @@ export function useAgentSession({
       if (!streamedContentLengthRef.current.has(event.runId)) {
         streamedContentLengthRef.current.set(event.runId, 0);
       }
+      const optimisticMessageId = optimisticMessageIdRef.current;
+      if (optimisticMessageId) {
+        setMessages(current => current.map(message => (
+          message.id === optimisticMessageId
+            ? { ...message, runId: event.runId, sessionId: event.sessionId }
+            : message
+        )));
+        optimisticMessageIdRef.current = null;
+      }
       setIsStreaming(true);
       setError(null);
+      setRuns(current => upsertAgentRun(current, event.run));
+      return;
+    }
+    if (event.type === 'run-updated') {
+      setRuns(current => upsertAgentRun(current, event.run));
       return;
     }
     if (event.type === 'delta') {
@@ -187,33 +237,35 @@ export function useAgentSession({
     }
     if (event.type === 'tool-started') {
       setIsStreaming(true);
+      const activity = event.activity || {
+        call: event.call,
+        createdAt: new Date().toISOString(),
+        id: `agent-tool-${event.runId}-${event.call.id}`,
+        ordinal: 0,
+        permissionBehavior: 'allow' as const,
+        revision: 0,
+        runId: event.runId,
+        sessionId: event.sessionId,
+        status: 'running' as const,
+      };
+      setMessages(current => ensureToolTimelineAnchor(current, activity));
       streamMessageIdRef.current = null;
-      const messageId = `agent-tool-${event.runId}-${event.call.id}`;
-      setMessages(current => current.some(message => (
-        message.runId === event.runId && message.toolCallId === event.call.id
-      ))
-        ? current
-        : [
-            ...current,
-            {
-              content: `正在调用 ${event.call.name}`,
-              createdAt: new Date().toISOString(),
-              id: messageId,
-              role: 'tool',
-              runId: event.runId,
-              sessionId: event.sessionId,
-              toolCallId: event.call.id,
-              toolName: event.call.name,
-            },
-          ]);
+      setToolActivities(current => upsertAgentToolActivity(current, activity));
       return;
     }
     if (event.type === 'tool-progress') {
-      setMessages(current => current.map(message => (
-        message.runId === event.runId && message.toolCallId === event.callId
-      )
-        ? { ...message, content: event.progress.message }
-        : message));
+      setToolActivities((current) => {
+        if (event.activity) return upsertAgentToolActivity(current, event.activity);
+        return current.map(activity => (
+          activity.runId === event.runId && activity.call.id === event.callId
+            ? {
+                ...activity,
+                progress: event.progress,
+                progressUpdatedAt: new Date().toISOString(),
+              }
+            : activity
+        ));
+      });
       return;
     }
     if (event.type === 'tool-execution-requested') {
@@ -226,44 +278,66 @@ export function useAgentSession({
     }
     if (event.type === 'tool-approval-required') {
       setIsStreaming(true);
-      setPendingApprovals(current => current.some(item => (
-        item.approvalId === event.approval.approvalId
-      )) ? current : [...current, event.approval]);
+      const activity = event.activity || {
+        approval: {
+          approvalId: event.approval.approvalId,
+          preview: event.approval.preview,
+          status: 'pending' as const,
+        },
+        call: event.approval.call,
+        createdAt: new Date().toISOString(),
+        id: `agent-tool-${event.runId}-${event.approval.call.id}`,
+        ordinal: 0,
+        permissionBehavior: 'ask' as const,
+        revision: 0,
+        runId: event.runId,
+        sessionId: event.sessionId,
+        status: 'awaiting_approval' as const,
+      };
+      setToolActivities(current => upsertAgentToolActivity(current, activity));
       return;
     }
     if (event.type === 'tool-approval-resolved') {
-      setPendingApprovals(current => current.filter(item => item.approvalId !== event.approvalId));
+      setToolActivities((current) => {
+        if (event.activity) return upsertAgentToolActivity(current, event.activity);
+        return current.map(activity => activity.approval?.approvalId === event.approvalId
+          ? {
+              ...activity,
+              approval: {
+                ...activity.approval,
+                decidedAt: new Date().toISOString(),
+                status: event.approved ? 'approved' as const : 'denied' as const,
+              },
+              status: event.approved ? 'running' as const : 'failed' as const,
+            }
+          : activity);
+      });
+      return;
+    }
+    if (event.type === 'tool-interaction-required') {
+      setIsStreaming(true);
+      setToolActivities(current => upsertAgentToolActivity(current, event.activity));
+      return;
+    }
+    if (event.type === 'tool-interaction-resolved') {
+      setToolActivities(current => upsertAgentToolActivity(current, event.activity));
       return;
     }
     if (event.type === 'tool-completed') {
-      const messageId = `agent-tool-${event.runId}-${event.call.id}`;
-      const content = event.result.message
-        || (event.result.ok ? `${event.call.name} 已完成` : `${event.call.name} 执行失败`);
-      setMessages((current) => {
-        const existing = current.some(message => (
-          message.runId === event.runId && message.toolCallId === event.call.id
-        ));
-        if (existing) {
-          return current.map(message => (
-            message.runId === event.runId && message.toolCallId === event.call.id
-          )
-            ? { ...message, content }
-            : message);
-        }
-        return [
-          ...current,
-          {
-            content,
-            createdAt: new Date().toISOString(),
-            id: messageId,
-            role: 'tool',
-            runId: event.runId,
-            sessionId: event.sessionId,
-            toolCallId: event.call.id,
-            toolName: event.call.name,
-          },
-        ];
-      });
+      const activity = event.activity || {
+        call: event.call,
+        createdAt: new Date().toISOString(),
+        finishedAt: new Date().toISOString(),
+        id: `agent-tool-${event.runId}-${event.call.id}`,
+        ordinal: 0,
+        permissionBehavior: 'allow' as const,
+        revision: 0,
+        result: event.result,
+        runId: event.runId,
+        sessionId: event.sessionId,
+        status: event.result.ok ? 'completed' as const : 'failed' as const,
+      };
+      setToolActivities(current => upsertAgentToolActivity(current, activity));
       streamMessageIdRef.current = null;
       return;
     }
@@ -278,7 +352,17 @@ export function useAgentSession({
         Math.max(renderedLength, event.content.length),
       );
       setIsStreaming(false);
-      setPendingApprovals(current => current.filter(item => item.runId !== event.runId));
+      if (event.run) {
+        const runSnapshot = event.run;
+        setRuns(current => upsertAgentRun(current, runSnapshot));
+      }
+      if (event.toolActivities) {
+        setToolActivities(current => reconcileCanonicalAgentRunActivities(
+          current,
+          event.runId,
+          event.toolActivities || [],
+        ));
+      }
       setMessages((current) => {
         if (event.messages) {
           return reconcileCanonicalAgentRunMessages(current, event.runId, event.messages);
@@ -330,6 +414,7 @@ export function useAgentSession({
   React.useEffect(() => {
     const pendingEvents = pendingEventsRef.current;
     const approvalsInFlight = approvalsInFlightRef.current;
+    const interactionsInFlight = interactionsInFlightRef.current;
     const rendererExecutionsInFlight = rendererExecutionsInFlightRef.current;
     mountedRef.current = true;
     return () => {
@@ -339,6 +424,7 @@ export function useAgentSession({
       restoringSessionIdRef.current = null;
       pendingEvents.clear();
       approvalsInFlight.clear();
+      interactionsInFlight.clear();
       const sessionsToStop = new Set<string>();
       rendererExecutionsInFlight.forEach((execution) => {
         if (execution.committed) {
@@ -392,15 +478,19 @@ export function useAgentSession({
     });
     streamedContentLengthRef.current.clear();
     sessionIdRef.current = null;
+    optimisticMessageIdRef.current = null;
     streamMessageIdRef.current = null;
     setSessionId(null);
     setMessages([]);
     setDraft('');
     setError(null);
     setWarning(null);
-    setPendingApprovals([]);
+    setRuns([]);
+    setToolActivities([]);
     setApprovalBusyIds(new Set());
+    setInteractionBusyIds(new Set());
     approvalsInFlightRef.current.clear();
+    interactionsInFlightRef.current.clear();
     setIsStreaming(false);
     setPreparing(false);
   }, [sessionScopeKey, setPreparing]);
@@ -438,7 +528,12 @@ export function useAgentSession({
       sessionIdRef.current = snapshot.id;
       setSessionId(snapshot.id);
       setMessages(snapshot.messages);
-      setPendingApprovals(snapshot.pendingApprovals);
+      setRuns(snapshot.runs);
+      setToolActivities(snapshot.toolActivities);
+      approvalsInFlightRef.current.clear();
+      interactionsInFlightRef.current.clear();
+      setApprovalBusyIds(new Set());
+      setInteractionBusyIds(new Set());
       const restoredContentLengths = new Map<string, number>();
       snapshot.messages.forEach((message) => {
         if (message.role !== 'assistant' || !message.runId) return;
@@ -451,7 +546,8 @@ export function useAgentSession({
       setDraft('');
       streamMessageIdRef.current = null;
       const running = snapshot.lastRunStatus === 'running'
-        || snapshot.lastRunStatus === 'awaiting_approval';
+        || snapshot.lastRunStatus === 'awaiting_approval'
+        || snapshot.lastRunStatus === 'awaiting_interaction';
       setIsStreaming(running);
       if (snapshot.lastRunStatus === 'interrupted') {
         setWarning('上一轮在应用退出时中断，可以继续对话或重新发送请求');
@@ -503,6 +599,7 @@ export function useAgentSession({
       role: 'user',
       sessionId: optimisticSessionId,
     };
+    optimisticMessageIdRef.current = optimisticId;
     setMessages(current => [...current, userMessage]);
     setDraft('');
     setError(null);
@@ -559,10 +656,16 @@ export function useAgentSession({
           : message
       )));
       flushPendingEvents(result.sessionId);
+      if (optimisticMessageIdRef.current === optimisticId) {
+        optimisticMessageIdRef.current = null;
+      }
       acceptPendingEventsRef.current = false;
       onSessionChanged?.(result.sessionId);
     } catch (submitError) {
       if (preparationTokenRef.current === preparationToken) {
+        if (optimisticMessageIdRef.current === optimisticId) {
+          optimisticMessageIdRef.current = null;
+        }
         setMessages(current => current.filter(message => message.id !== optimisticId));
         setDraft(userPrompt);
         setError(submitError instanceof Error ? submitError.message : 'Agent 请求失败');
@@ -656,6 +759,54 @@ export function useAgentSession({
     }
   }, [appContext.libraryId, executeRendererRequest, ownerScope, sessionScopeKey]);
 
+  const submitInteraction = React.useCallback(async (
+    activity: AgentToolActivitySnapshot,
+    response: AgentInteractionResponse,
+  ) => {
+    const interactionId = activity.interaction?.interactionId;
+    const libraryId = Number(appContext.libraryId);
+    if (
+      !interactionId
+      || activity.interaction?.status !== 'pending'
+      || interactionsInFlightRef.current.has(interactionId)
+      || !ownerScope
+      || !Number.isFinite(libraryId)
+      || libraryId <= 0
+    ) return;
+
+    interactionsInFlightRef.current.add(interactionId);
+    setInteractionBusyIds(current => new Set(current).add(interactionId));
+    setError(null);
+    try {
+      const result = await submitAgentInteraction({
+        interactionId,
+        libraryId,
+        ownerScope,
+        response,
+        runId: activity.runId,
+        sessionId: activity.sessionId,
+      });
+      if (mountedRef.current && sessionScopeKeyRef.current === sessionScopeKey) {
+        setToolActivities(current => upsertAgentToolActivity(current, result.activity));
+      }
+    } catch (interactionError) {
+      if (mountedRef.current && sessionScopeKeyRef.current === sessionScopeKey) {
+        setError(interactionError instanceof Error
+          ? interactionError.message
+          : 'Agent 交互回答提交失败');
+      }
+    } finally {
+      interactionsInFlightRef.current.delete(interactionId);
+      if (mountedRef.current && sessionScopeKeyRef.current === sessionScopeKey) {
+        setInteractionBusyIds((current) => {
+          const next = new Set(current);
+          next.delete(interactionId);
+          return next;
+        });
+      }
+    }
+  }, [appContext.libraryId, ownerScope, sessionScopeKey]);
+
   const reset = React.useCallback(() => {
     if (isStreaming) return;
     preparationTokenRef.current += 1;
@@ -666,15 +817,19 @@ export function useAgentSession({
     restoringSessionIdRef.current = null;
     streamedContentLengthRef.current.clear();
     sessionIdRef.current = null;
+    optimisticMessageIdRef.current = null;
     streamMessageIdRef.current = null;
     setSessionId(null);
     setMessages([]);
     setDraft('');
     setError(null);
     setWarning(null);
-    setPendingApprovals([]);
+    setRuns([]);
+    setToolActivities([]);
     setApprovalBusyIds(new Set());
+    setInteractionBusyIds(new Set());
     approvalsInFlightRef.current.clear();
+    interactionsInFlightRef.current.clear();
     setPreparing(false);
   }, [isStreaming, setPreparing]);
 
@@ -685,10 +840,13 @@ export function useAgentSession({
     isPreparing,
     isStreaming,
     messages: messages.filter(isAgentMessage),
-    pendingApprovals,
+    runs,
+    toolActivities,
     approvalBusyIds,
+    interactionBusyIds,
     reset,
     resolveApproval,
+    submitInteraction,
     restore,
     sessionId,
     setDraft,

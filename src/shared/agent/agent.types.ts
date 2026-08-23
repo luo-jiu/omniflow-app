@@ -2,19 +2,122 @@ export type AgentMessageRole = 'system' | 'user' | 'assistant' | 'tool';
 
 export type AgentToolRisk = 'read' | 'write' | 'destructive' | 'external';
 
-export type AgentReasoningEffort = 'auto' | 'low' | 'medium' | 'high';
+export type AgentToolPermissionBehavior = 'allow' | 'ask' | 'deny';
 
-export type AgentRunStatus =
+export type AgentToolActivityStatus =
   | 'awaiting_approval'
+  | 'awaiting_interaction'
   | 'running'
   | 'completed'
   | 'failed'
   | 'cancelled'
   | 'interrupted';
 
+export type AgentToolApprovalStatus =
+  | 'pending'
+  | 'approved'
+  | 'denied'
+  | 'expired'
+  | 'cancelled'
+  | 'interrupted';
+
+export type AgentReasoningEffort = 'auto' | 'low' | 'medium' | 'high';
+
+export type AgentRunStatus =
+  | 'awaiting_approval'
+  | 'awaiting_interaction'
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+  | 'interrupted';
+
+export interface AgentRunPlanStepSnapshot {
+  expectedToolName: string;
+  id: string;
+  ordinal: number;
+  title: string;
+}
+
+export interface AgentRunPlanSnapshot {
+  createdAt: string;
+  steps: AgentRunPlanStepSnapshot[];
+  title?: string;
+  version: 1;
+}
+
+export interface AgentRunSnapshot {
+  createdAt: string;
+  currentStep?: string;
+  error?: string;
+  finishedAt?: string;
+  id: string;
+  model: string;
+  plan?: AgentRunPlanSnapshot;
+  profileId: string;
+  reasoningEffort: AgentReasoningEffort;
+  revision: number;
+  sessionId: string;
+  status: AgentRunStatus;
+  updatedAt: string;
+  userPrompt: string;
+}
+
 export interface AgentOwnerScope {
   accountScope: string;
   backendScope: string;
+}
+
+export type AgentMemoryKind = 'preference' | 'project' | 'reference';
+
+export type AgentMemoryScope = 'global' | 'library';
+
+export interface AgentMemoryProposal {
+  application: string;
+  content: string;
+  kind: AgentMemoryKind;
+  reason: string;
+  scope: AgentMemoryScope;
+  title: string;
+}
+
+export interface AgentMemoryItem extends AgentMemoryProposal {
+  createdAt: string;
+  id: string;
+  libraryId?: number;
+  revision: number;
+  sourceRunId?: string;
+  sourceSessionId?: string;
+  updatedAt: string;
+}
+
+export interface AgentMemoryCursor {
+  id: string;
+  updatedAt: string;
+}
+
+export interface AgentMemoryPage {
+  memories: AgentMemoryItem[];
+  nextCursor?: AgentMemoryCursor;
+  total: number;
+}
+
+export interface AgentMemoryUpdateRequest {
+  application: string;
+  content: string;
+  id: string;
+  libraryId: number;
+  ownerScope: AgentOwnerScope;
+  reason: string;
+  revision: number;
+  title: string;
+}
+
+export interface AgentMemoryDeleteRequest {
+  id: string;
+  libraryId: number;
+  ownerScope: AgentOwnerScope;
+  revision: number;
 }
 
 export interface AgentAppContext {
@@ -98,6 +201,105 @@ export interface AgentToolApprovalSnapshot {
   preview: AgentActionPreview;
   runId: string;
   sessionId: string;
+}
+
+export interface AgentToolActivityApproval {
+  approvalId: string;
+  decidedAt?: string;
+  preview: AgentActionPreview;
+  status: AgentToolApprovalStatus;
+}
+
+export type AgentInteractionStatus =
+  | 'pending'
+  | 'submitted'
+  | 'expired'
+  | 'cancelled'
+  | 'interrupted';
+
+export interface AgentInteractionOption {
+  description?: string;
+  id: string;
+  label: string;
+}
+
+export interface AgentInteractionField {
+  id: string;
+  label: string;
+  placeholder?: string;
+  required?: boolean;
+  type: 'text' | 'number' | 'boolean' | 'select';
+  values?: Array<{ id: string; label: string }>;
+}
+
+export type AgentInteractionRequest =
+  | {
+      kind: 'choice';
+      multiple?: boolean;
+      options: AgentInteractionOption[];
+      prompt: string;
+      submitLabel?: string;
+      title?: string;
+    }
+  | {
+      fields: AgentInteractionField[];
+      kind: 'form';
+      prompt: string;
+      submitLabel?: string;
+      title?: string;
+    };
+
+export type AgentInteractionValue = string | number | boolean;
+
+export type AgentInteractionResponse =
+  | {
+      kind: 'choice';
+      selectedOptionIds: string[];
+    }
+  | {
+      kind: 'form';
+      values: Record<string, AgentInteractionValue>;
+    };
+
+export interface AgentToolActivityInteraction {
+  decidedAt?: string;
+  interactionId: string;
+  request: AgentInteractionRequest;
+  response?: AgentInteractionResponse;
+  status: AgentInteractionStatus;
+}
+
+export interface AgentToolActivitySnapshot {
+  approval?: AgentToolActivityApproval;
+  call: AgentToolCallSnapshot;
+  createdAt: string;
+  finishedAt?: string;
+  id: string;
+  interaction?: AgentToolActivityInteraction;
+  ordinal: number;
+  permissionBehavior: AgentToolPermissionBehavior;
+  planStepId?: string;
+  progress?: AgentToolProgress;
+  progressUpdatedAt?: string;
+  revision: number;
+  result?: AgentToolResult;
+  runId: string;
+  sessionId: string;
+  status: AgentToolActivityStatus;
+}
+
+export interface AgentInteractionSubmissionRequest {
+  interactionId: string;
+  libraryId: number;
+  ownerScope: AgentOwnerScope;
+  response: AgentInteractionResponse;
+  runId: string;
+  sessionId: string;
+}
+
+export interface AgentInteractionSubmissionResult {
+  activity: AgentToolActivitySnapshot;
+  accepted: true;
 }
 
 export interface AgentToolApprovalDecisionRequest {
@@ -195,10 +397,24 @@ export interface AgentToolExecutionProgressRequest {
 }
 
 export type AgentChatStreamEvent =
-  | { runId: string; sessionId: string; type: 'started' }
+  | { run: AgentRunSnapshot; runId: string; sessionId: string; type: 'started' }
+  | { run: AgentRunSnapshot; runId: string; sessionId: string; type: 'run-updated' }
   | { delta: string; runId: string; sessionId: string; type: 'delta' }
-  | { call: AgentToolCallSnapshot; runId: string; sessionId: string; type: 'tool-started' }
-  | { callId: string; progress: AgentToolProgress; runId: string; sessionId: string; type: 'tool-progress' }
+  | {
+      activity?: AgentToolActivitySnapshot;
+      call: AgentToolCallSnapshot;
+      runId: string;
+      sessionId: string;
+      type: 'tool-started';
+    }
+  | {
+      activity?: AgentToolActivitySnapshot;
+      callId: string;
+      progress: AgentToolProgress;
+      runId: string;
+      sessionId: string;
+      type: 'tool-progress';
+    }
   | {
       execution: AgentToolExecutionRequest;
       runId: string;
@@ -211,23 +427,69 @@ export type AgentChatStreamEvent =
       sessionId: string;
       type: 'tool-execution-cancelled';
     }
-  | { approval: AgentToolApprovalSnapshot; runId: string; sessionId: string; type: 'tool-approval-required' }
   | {
+      activity?: AgentToolActivitySnapshot;
+      approval: AgentToolApprovalSnapshot;
+      runId: string;
+      sessionId: string;
+      type: 'tool-approval-required';
+    }
+  | {
+      activity?: AgentToolActivitySnapshot;
       approvalId: string;
       approved: boolean;
       runId: string;
       sessionId: string;
       type: 'tool-approval-resolved';
     }
-  | { call: AgentToolCallSnapshot; result: AgentToolResult; runId: string; sessionId: string; type: 'tool-completed' }
-  | { content: string; messages?: AgentMessage[]; runId: string; sessionId: string; type: 'completed' }
-  | { content: string; messages?: AgentMessage[]; runId: string; sessionId: string; type: 'cancelled' }
+  | {
+      activity: AgentToolActivitySnapshot;
+      interactionId: string;
+      runId: string;
+      sessionId: string;
+      type: 'tool-interaction-required';
+    }
+  | {
+      activity: AgentToolActivitySnapshot;
+      interactionId: string;
+      runId: string;
+      sessionId: string;
+      type: 'tool-interaction-resolved';
+    }
+  | {
+      activity?: AgentToolActivitySnapshot;
+      call: AgentToolCallSnapshot;
+      result: AgentToolResult;
+      runId: string;
+      sessionId: string;
+      type: 'tool-completed';
+    }
+  | {
+      content: string;
+      messages?: AgentMessage[];
+      run?: AgentRunSnapshot;
+      runId: string;
+      sessionId: string;
+      toolActivities?: AgentToolActivitySnapshot[];
+      type: 'completed';
+    }
+  | {
+      content: string;
+      messages?: AgentMessage[];
+      run?: AgentRunSnapshot;
+      runId: string;
+      sessionId: string;
+      toolActivities?: AgentToolActivitySnapshot[];
+      type: 'cancelled';
+    }
   | {
       content: string;
       message: string;
       messages?: AgentMessage[];
+      run?: AgentRunSnapshot;
       runId: string;
       sessionId: string;
+      toolActivities?: AgentToolActivitySnapshot[];
       type: 'error';
     };
 
@@ -255,7 +517,8 @@ export interface AgentSessionSummary {
 
 export interface AgentSessionSnapshot extends AgentSessionSummary {
   messages: AgentMessage[];
-  pendingApprovals: AgentToolApprovalSnapshot[];
+  runs: AgentRunSnapshot[];
+  toolActivities: AgentToolActivitySnapshot[];
 }
 
 export interface AgentToolProgress {
@@ -268,3 +531,102 @@ export interface AgentToolResult {
   message?: string;
   ok: boolean;
 }
+
+export type AgentArtifactKind =
+  | 'audio'
+  | 'directory'
+  | 'file'
+  | 'image'
+  | 'other'
+  | 'subtitle'
+  | 'video';
+
+export interface AgentArtifactReference {
+  id: string;
+  kind: AgentArtifactKind;
+  libraryId?: number;
+  mimeType?: string;
+  name: string;
+  nodeId?: number;
+}
+
+export type AgentPresentationAction =
+  | {
+      action: 'artifact.preview';
+      artifact: AgentArtifactReference;
+      label: string;
+    }
+  | {
+      action: 'tree.revealNode';
+      label: string;
+      libraryId: number;
+      nodeId: number;
+    }
+  | {
+      action: 'workspace.openNode';
+      label: string;
+      libraryId: number;
+      nodeId: number;
+    }
+  | {
+      action: 'agent.interaction.submit';
+      interactionId: string;
+      label: string;
+      response: AgentInteractionResponse;
+    };
+
+export type AgentPresentationTone = 'neutral' | 'info' | 'success' | 'warning' | 'danger';
+
+export type AgentPresentationBlock =
+  | {
+      detail?: string;
+      label: string;
+      tone: AgentPresentationTone;
+      type: 'status';
+    }
+  | {
+      label: string;
+      percent?: number;
+      type: 'progress';
+    }
+  | {
+      approvalId: string;
+      type: 'approval';
+    }
+  | {
+      actions?: AgentPresentationAction[];
+      artifact: AgentArtifactReference;
+      type: 'artifact';
+    }
+  | {
+      entries: Array<{ label: string; value: string }>;
+      title?: string;
+      type: 'details';
+    }
+  | {
+      interactionId: string;
+      multiple?: boolean;
+      options: AgentInteractionOption[];
+      prompt: string;
+      response?: Extract<AgentInteractionResponse, { kind: 'choice' }>;
+      status: AgentInteractionStatus;
+      submitLabel?: string;
+      title?: string;
+      type: 'choice';
+    }
+  | {
+      fields: AgentInteractionField[];
+      interactionId: string;
+      prompt: string;
+      response?: Extract<AgentInteractionResponse, { kind: 'form' }>;
+      status: AgentInteractionStatus;
+      submitLabel?: string;
+      title?: string;
+      type: 'form';
+    }
+  | {
+      message: string;
+      title?: string;
+      tone: AgentPresentationTone;
+      type: 'notice';
+    };

@@ -1,4 +1,5 @@
 import type { AgentChatStreamEvent, AgentMessage } from '@/shared/agent/agent.types';
+import { mergeAgentRun } from './agent-runs';
 
 export function appendBufferedAgentEvent(
   current: AgentChatStreamEvent[],
@@ -14,6 +15,18 @@ export function appendBufferedAgentEvent(
     return [
       ...current.slice(0, -1),
       { ...event, delta: `${previous.delta}${event.delta}` },
+    ];
+  }
+  if (
+    previous?.type === 'run-updated'
+    && event.type === 'run-updated'
+    && previous.runId === event.runId
+    && previous.sessionId === event.sessionId
+  ) {
+    const mergedRun = mergeAgentRun(previous.run, event.run);
+    return [
+      ...current.slice(0, -1),
+      mergedRun === previous.run ? previous : { ...event, run: mergedRun },
     ];
   }
   return [...current, event];

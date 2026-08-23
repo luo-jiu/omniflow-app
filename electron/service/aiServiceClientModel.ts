@@ -17,6 +17,34 @@ export interface AIServiceRequestSpec {
   url: string
 }
 
+export const MAX_AI_SERVICE_OUTPUT_TOKENS = 1_000_000
+
+export function resolveAIServiceOutputTokenLimit(value: unknown): number | undefined {
+  if (value === undefined) return undefined
+  if (
+    typeof value !== 'number'
+    || !Number.isSafeInteger(value)
+    || value <= 0
+    || value > MAX_AI_SERVICE_OUTPUT_TOKENS
+  ) {
+    throw new Error(
+      `AI 输出 token 上限必须是 1 到 ${MAX_AI_SERVICE_OUTPUT_TOKENS} 之间的整数`,
+    )
+  }
+  return value
+}
+
+export function buildAIServiceOutputTokenFields(
+  providerType: AIServiceProviderType,
+  value: unknown,
+): Record<string, number> {
+  const limit = resolveAIServiceOutputTokenLimit(value)
+  if (limit === undefined) return {}
+  return providerType === 'openai'
+    ? { max_completion_tokens: limit }
+    : { max_tokens: limit }
+}
+
 function appendPath(baseUrl: string, path: string) {
   return `${String(baseUrl || '').trim().replace(/\/+$/, '')}/${path.replace(/^\/+/, '')}`
 }
@@ -62,7 +90,7 @@ export function buildAIServiceCompletionRequest(
   const body = connection.providerType === 'claude'
     ? {
         ...common,
-        max_tokens: 4096,
+        ...buildAIServiceOutputTokenFields(connection.providerType, 4096),
         messages: [{ role: 'user', content: input.userPrompt }],
         ...(reasoningEffort ? { output_config: { effort: reasoningEffort } } : {}),
         system: input.systemPrompt,
@@ -98,10 +126,14 @@ function buildAIServiceChatBody(
       ? { temperature: input.temperature }
       : {}),
   }
+  const outputTokenFields = buildAIServiceOutputTokenFields(
+    connection.providerType,
+    input.maxOutputTokens ?? (connection.providerType === 'claude' ? 4096 : undefined),
+  )
   if (connection.providerType === 'claude') {
     return {
       ...common,
-      max_tokens: 4096,
+      ...outputTokenFields,
       messages: input.messages,
       ...(reasoningEffort ? { output_config: { effort: reasoningEffort } } : {}),
       system: input.systemPrompt,
@@ -109,6 +141,7 @@ function buildAIServiceChatBody(
   }
   return {
     ...common,
+    ...outputTokenFields,
     messages: [
       { role: 'system', content: input.systemPrompt },
       ...input.messages,

@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { createAgentToolBroker } from './agent-tool-broker';
-import type { AgentToolExecutionContext } from './agent-tool-registry';
+import { createAgentToolBroker, normalizeAgentToolResult } from './agent-tool-broker';
+import {
+  createAgentToolRegistry,
+  type AgentToolExecutionContext,
+} from './agent-tool-registry';
 
 const OWNER_SCOPE = {
   accountScope: 'user:7',
@@ -30,6 +33,27 @@ function prepareInput(signal: AbortSignal) {
 }
 
 describe('Agent tool broker', () => {
+  it('removes credentials from canonical Tool results before persistence or events', () => {
+    const input = {
+      data: {
+        authorization: 'Bearer private-token',
+        nested: { url: 'https://example.com/file?X-Amz-Signature=private' },
+      },
+      message: 'password=private-value',
+      ok: true,
+    };
+
+    expect(normalizeAgentToolResult(input)).toEqual({
+      data: {
+        authorization: '[REDACTED]',
+        nested: { url: 'https://example.com/file?[SIGNED_QUERY_REDACTED]' },
+      },
+      message: 'password=[REDACTED]',
+      ok: true,
+    });
+    expect(input.data.authorization).toBe('Bearer private-token');
+  });
+
   it('dispatches main-process tools through the registry', async () => {
     const execute = vi.fn(async () => ({ message: 'done', ok: true }));
     const broker = createAgentToolBroker({ toolRegistry: { execute } });
@@ -48,6 +72,32 @@ describe('Agent tool broker', () => {
       onProgress: expect.any(Function),
       signal: expect.any(AbortSignal),
     }));
+  });
+
+  it('does not dispatch invalid input to a main-process Tool executor', async () => {
+    const execute = vi.fn(async () => ({ ok: true }));
+    const toolRegistry = createAgentToolRegistry([{
+      description: 'Strict tool',
+      execute,
+      inputSchema: {
+        additionalProperties: false,
+        properties: { nodeId: { type: 'integer' } },
+        required: ['nodeId'],
+        type: 'object',
+      },
+      name: 'file.strict-stat',
+      risk: 'read',
+    }]);
+    const broker = createAgentToolBroker({ toolRegistry });
+    const context = {
+      appContext: prepareInput(new AbortController().signal).appContext,
+      onProgress: vi.fn(),
+      signal: new AbortController().signal,
+    };
+
+    await expect(broker.executeMain('file.strict-stat', { nodeId: '8' }, context))
+      .rejects.toThrow('Agent Tool 参数不符合输入约束');
+    expect(execute).not.toHaveBeenCalled();
   });
 
   it('aborts a main-process tool when its execution timeout expires', async () => {
@@ -72,7 +122,7 @@ describe('Agent tool broker', () => {
       const rejected = expect(running).rejects.toThrow('执行超时');
       await Promise.resolve();
 
-      await vi.advanceTimersByTimeAsync(20);
+      await vi.advanceTimersByTimeAsync(20 + 6_000);
 
       await rejected;
       expect(executionSignal?.aborted).toBe(true);

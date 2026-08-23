@@ -6,13 +6,17 @@ import {
   type AgentSessionStore,
 } from './agent-session-store';
 
-const AGENT_SESSION_DATABASE_FILENAME = 'agent-sessions.sqlite3';
+export const AGENT_SESSION_DATABASE_FILENAME = 'agent-sessions.sqlite3';
+
+export function getAgentSessionDatabasePath(): string {
+  return path.join(app.getPath('userData'), AGENT_SESSION_DATABASE_FILENAME);
+}
 
 let storePromise: Promise<AgentSessionStore> | null = null;
 
 export function getAgentSessionStore(): Promise<AgentSessionStore> {
   if (!storePromise) {
-    const databasePath = path.join(app.getPath('userData'), AGENT_SESSION_DATABASE_FILENAME);
+    const databasePath = getAgentSessionDatabasePath();
     storePromise = createSQLiteAgentSessionStore(databasePath).catch((error) => {
       storePromise = null;
       throw error;

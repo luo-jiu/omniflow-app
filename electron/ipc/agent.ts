@@ -2,9 +2,13 @@ import type { BrowserWindow, IpcMain, IpcMainInvokeEvent, WebContents } from 'el
 
 import type {
   AgentChatRequest,
+  AgentInteractionSubmissionRequest,
   AgentMediaArtifactReleaseRequest,
   AgentMediaAudioExtractionRequest,
   AgentMediaInspectionRequest,
+  AgentMemoryCursor,
+  AgentMemoryDeleteRequest,
+  AgentMemoryUpdateRequest,
   AgentOwnerScope,
   AgentSessionCursor,
   AgentToolApprovalDecisionRequest,
@@ -61,6 +65,15 @@ export function registerAgentIpc(
       const sender = requireMainWindow(event);
       ensureOwnerCleanup(sender);
       return agentOrchestrator.resolveToolApproval(sender.id, input);
+    },
+  );
+
+  ipcMain.handle(
+    'agent:interaction:submit',
+    (event, input: AgentInteractionSubmissionRequest) => {
+      const sender = requireMainWindow(event);
+      ensureOwnerCleanup(sender);
+      return agentOrchestrator.submitInteraction(sender.id, input);
     },
   );
 
@@ -168,5 +181,30 @@ export function registerAgentIpc(
       input?.ownerScope,
       Number(input?.libraryId),
     );
+  });
+
+  ipcMain.handle('agent:memory:list', (event, input: {
+    cursor?: AgentMemoryCursor;
+    libraryId: number;
+    ownerScope: AgentOwnerScope;
+    query?: string;
+  }) => {
+    requireMainWindow(event);
+    return agentOrchestrator.listMemories(
+      input?.ownerScope,
+      Number(input?.libraryId),
+      String(input?.query || ''),
+      input?.cursor,
+    );
+  });
+
+  ipcMain.handle('agent:memory:update', (event, input: AgentMemoryUpdateRequest) => {
+    requireMainWindow(event);
+    return agentOrchestrator.updateMemory(input);
+  });
+
+  ipcMain.handle('agent:memory:delete', (event, input: AgentMemoryDeleteRequest) => {
+    requireMainWindow(event);
+    return agentOrchestrator.deleteMemory(input);
   });
 }

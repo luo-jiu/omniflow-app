@@ -2,10 +2,17 @@ import type {
   AgentChatRequest,
   AgentChatStartResult,
   AgentChatStreamEvent,
+  AgentInteractionSubmissionRequest,
+  AgentInteractionSubmissionResult,
   AgentMediaArtifactReleaseRequest,
   AgentMediaAudioExtractionRequest,
   AgentMediaAudioExtractionResult,
   AgentMediaInspectionRequest,
+  AgentMemoryCursor,
+  AgentMemoryDeleteRequest,
+  AgentMemoryItem,
+  AgentMemoryPage,
+  AgentMemoryUpdateRequest,
   AgentOwnerScope,
   AgentSessionCursor,
   AgentSessionPage,
@@ -41,6 +48,12 @@ export function resolveAgentToolApproval(
   input: AgentToolApprovalDecisionRequest,
 ): Promise<AgentToolApprovalDecisionResult> {
   return bridge().resolveToolApproval(input);
+}
+
+export function submitAgentInteraction(
+  input: AgentInteractionSubmissionRequest,
+): Promise<AgentInteractionSubmissionResult> {
+  return bridge().submitInteraction(input);
 }
 
 export function completeAgentToolExecution(
@@ -111,6 +124,27 @@ export function deleteAgentSession(
   sessionId: string,
 ): Promise<boolean> {
   return bridge().deleteSession(ownerScope, libraryId, sessionId);
+}
+
+export function listAgentMemories(
+  ownerScope: AgentOwnerScope,
+  libraryId: number,
+  query?: string,
+  cursor?: AgentMemoryCursor,
+): Promise<AgentMemoryPage> {
+  return bridge().listMemories(ownerScope, libraryId, query, cursor);
+}
+
+export function updateAgentMemory(
+  input: AgentMemoryUpdateRequest,
+): Promise<AgentMemoryItem> {
+  return bridge().updateMemory(input);
+}
+
+export function deleteAgentMemory(
+  input: AgentMemoryDeleteRequest,
+): Promise<boolean> {
+  return bridge().deleteMemory(input);
 }
 
 export function subscribeAgentChat(

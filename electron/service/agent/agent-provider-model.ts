@@ -1,6 +1,19 @@
-import type { AIServiceRuntimeConnection } from '../aiServiceClientModel';
+import {
+  buildAIServiceOutputTokenFields,
+  resolveAIServiceOutputTokenLimit,
+  type AIServiceRuntimeConnection,
+} from '../aiServiceClientModel';
+import {
+  AIServiceStreamLimitError,
+  appendBoundedAIServiceStreamText,
+} from '../aiServiceStreamLimits';
 import type { AgentReasoningEffort } from '@/shared/agent/agent.types';
-import type { AgentTool } from './agent-tool-registry';
+
+export interface AgentProviderToolDefinition {
+  description: string;
+  inputSchema: unknown;
+  name: string;
+}
 
 export interface AgentProviderToolCall {
   id: string;
@@ -15,11 +28,12 @@ export type AgentProviderMessage =
   | { content: string; name: string; role: 'tool'; toolCallId: string };
 
 export interface AgentProviderTurnInput {
+  maxOutputTokens: number;
   messages: AgentProviderMessage[];
   model: string;
   reasoningEffort?: AgentReasoningEffort;
   systemPrompt: string;
-  tools: AgentTool[];
+  tools: AgentProviderToolDefinition[];
 }
 
 interface StreamingToolCallState {
@@ -36,10 +50,69 @@ interface AgentProviderToolNameMap {
 
 const PROVIDER_TOOL_NAME_MAX_LENGTH = 64;
 const PROVIDER_TOOL_NAME_PATTERN = /^[a-zA-Z0-9_-]+$/;
+const PROVIDER_TOOL_CALL_ID_MAX_LENGTH = 128;
+
+export interface AgentProviderStreamLimits {
+  maxAssistantContentCharacters?: number;
+  maxEventBufferCharacters?: number;
+  maxToolArgumentCharacters?: number;
+  maxToolArgumentTotalCharacters?: number;
+  maxToolCalls?: number;
+}
+
+export interface ResolvedAgentProviderStreamLimits {
+  maxAssistantContentCharacters: number;
+  maxEventBufferCharacters: number;
+  maxToolArgumentCharacters: number;
+  maxToolArgumentTotalCharacters: number;
+  maxToolCalls: number;
+}
+
+export const DEFAULT_AGENT_PROVIDER_STREAM_LIMITS: Readonly<ResolvedAgentProviderStreamLimits> = Object.freeze({
+  maxAssistantContentCharacters: 64_000,
+  maxEventBufferCharacters: 128_000,
+  maxToolArgumentCharacters: 64_000,
+  maxToolArgumentTotalCharacters: 128_000,
+  maxToolCalls: 16,
+});
 
 export interface AgentProviderStreamState {
   content: string;
+  limits: ResolvedAgentProviderStreamLimits;
+  toolArgumentCharacters: number;
   toolCalls: Map<number, StreamingToolCallState>;
+}
+
+function positiveInteger(value: unknown, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+export function resolveAgentProviderStreamLimits(
+  limits: AgentProviderStreamLimits = {},
+): ResolvedAgentProviderStreamLimits {
+  return {
+    maxAssistantContentCharacters: positiveInteger(
+      limits.maxAssistantContentCharacters,
+      DEFAULT_AGENT_PROVIDER_STREAM_LIMITS.maxAssistantContentCharacters,
+    ),
+    maxEventBufferCharacters: positiveInteger(
+      limits.maxEventBufferCharacters,
+      DEFAULT_AGENT_PROVIDER_STREAM_LIMITS.maxEventBufferCharacters,
+    ),
+    maxToolArgumentCharacters: positiveInteger(
+      limits.maxToolArgumentCharacters,
+      DEFAULT_AGENT_PROVIDER_STREAM_LIMITS.maxToolArgumentCharacters,
+    ),
+    maxToolArgumentTotalCharacters: positiveInteger(
+      limits.maxToolArgumentTotalCharacters,
+      DEFAULT_AGENT_PROVIDER_STREAM_LIMITS.maxToolArgumentTotalCharacters,
+    ),
+    maxToolCalls: positiveInteger(
+      limits.maxToolCalls,
+      DEFAULT_AGENT_PROVIDER_STREAM_LIMITS.maxToolCalls,
+    ),
+  };
 }
 
 function toProviderToolName(name: string): string {
@@ -53,7 +126,7 @@ function toProviderToolName(name: string): string {
   return providerName;
 }
 
-function createProviderToolNameMap(tools: AgentTool[]): AgentProviderToolNameMap {
+function createProviderToolNameMap(tools: AgentProviderToolDefinition[]): AgentProviderToolNameMap {
   const canonicalToProvider = new Map<string, string>();
   const providerToCanonical = new Map<string, string>();
   tools.forEach((tool) => {
@@ -80,7 +153,12 @@ function requireProviderToolName(name: string, names: AgentProviderToolNameMap):
   return providerName;
 }
 
-function openAITool(tool: AgentTool, names: AgentProviderToolNameMap) {
+function providerToolHistoryName(name: string, names: AgentProviderToolNameMap): string {
+  const canonicalName = String(name || '').trim();
+  return names.canonicalToProvider.get(canonicalName) || toProviderToolName(canonicalName);
+}
+
+function openAITool(tool: AgentProviderToolDefinition, names: AgentProviderToolNameMap) {
   return {
     function: {
       description: tool.description,
@@ -91,7 +169,7 @@ function openAITool(tool: AgentTool, names: AgentProviderToolNameMap) {
   };
 }
 
-function claudeTool(tool: AgentTool, names: AgentProviderToolNameMap) {
+function claudeTool(tool: AgentProviderToolDefinition, names: AgentProviderToolNameMap) {
   return {
     description: tool.description,
     input_schema: tool.inputSchema,
@@ -117,7 +195,7 @@ function buildOpenAIMessages(input: AgentProviderTurnInput, names: AgentProvider
           tool_calls: message.toolCalls.map(call => ({
             function: {
               arguments: JSON.stringify(call.input ?? {}),
-              name: requireProviderToolName(call.name, names),
+              name: providerToolHistoryName(call.name, names),
             },
             id: call.id,
             type: 'function',
@@ -155,7 +233,7 @@ function buildClaudeMessages(input: AgentProviderTurnInput, names: AgentProvider
         ...message.toolCalls.map(call => ({
           id: call.id,
           input: call.input ?? {},
-          name: requireProviderToolName(call.name, names),
+          name: providerToolHistoryName(call.name, names),
           type: 'tool_use',
         })),
       ]);
@@ -171,12 +249,20 @@ export function buildAgentProviderRequestBody(
   input: AgentProviderTurnInput,
 ): Record<string, unknown> {
   const toolNames = createProviderToolNameMap(input.tools);
+  const maxOutputTokens = resolveAIServiceOutputTokenLimit(input.maxOutputTokens);
+  if (maxOutputTokens === undefined) {
+    throw new Error('Agent Provider 请求缺少输出 token 上限');
+  }
+  const outputTokenFields = buildAIServiceOutputTokenFields(
+    connection.providerType,
+    maxOutputTokens,
+  );
   const reasoningEffort = input.reasoningEffort && input.reasoningEffort !== 'auto'
     ? input.reasoningEffort
     : null;
   if (connection.providerType === 'claude') {
     return {
-      max_tokens: 4096,
+      ...outputTokenFields,
       messages: buildClaudeMessages(input, toolNames),
       model: input.model,
       ...(reasoningEffort ? { output_config: { effort: reasoningEffort } } : {}),
@@ -186,6 +272,7 @@ export function buildAgentProviderRequestBody(
     };
   }
   return {
+    ...outputTokenFields,
     messages: buildOpenAIMessages(input, toolNames),
     model: input.model,
     ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
@@ -194,18 +281,89 @@ export function buildAgentProviderRequestBody(
   };
 }
 
-export function createAgentProviderStreamState(): AgentProviderStreamState {
-  return { content: '', toolCalls: new Map() };
+export function createAgentProviderStreamState(
+  limits: AgentProviderStreamLimits = {},
+): AgentProviderStreamState {
+  return {
+    content: '',
+    limits: resolveAgentProviderStreamLimits(limits),
+    toolArgumentCharacters: 0,
+    toolCalls: new Map(),
+  };
 }
 
 function toolCallAt(state: AgentProviderStreamState, index: number): StreamingToolCallState {
-  const current = state.toolCalls.get(index) || {
+  const existing = state.toolCalls.get(index);
+  if (existing) return existing;
+  if (state.toolCalls.size >= state.limits.maxToolCalls) {
+    throw new Error(`Agent Tool 调用数量超过安全上限（最多 ${state.limits.maxToolCalls} 个）`);
+  }
+  const current = {
     arguments: '',
     id: '',
     name: '',
   };
   state.toolCalls.set(index, current);
   return current;
+}
+
+function toolCallIndex(value: unknown, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+function boundedToolCallIdentity(value: unknown, maximum: number, label: string): string {
+  return appendBoundedAIServiceStreamText('', String(value || ''), maximum, label);
+}
+
+function appendToolArguments(
+  state: AgentProviderStreamState,
+  call: StreamingToolCallState,
+  fragment: string,
+): void {
+  const nextArguments = appendBoundedAIServiceStreamText(
+    call.arguments,
+    fragment,
+    state.limits.maxToolArgumentCharacters,
+    'Agent Tool 参数',
+  );
+  if (fragment.length > state.limits.maxToolArgumentTotalCharacters - state.toolArgumentCharacters) {
+    throw new AIServiceStreamLimitError(
+      'Agent Tool 参数总量',
+      state.limits.maxToolArgumentTotalCharacters,
+    );
+  }
+  call.arguments = nextArguments;
+  state.toolArgumentCharacters += fragment.length;
+}
+
+function setInitialToolInput(
+  state: AgentProviderStreamState,
+  call: StreamingToolCallState,
+  input: unknown,
+): void {
+  if (input === undefined) return;
+  let serialized: string | undefined;
+  try {
+    serialized = JSON.stringify(input);
+  } catch {
+    throw new Error('模型返回的 Tool 参数无法序列化');
+  }
+  if (serialized === undefined) throw new Error('模型返回的 Tool 参数格式无效');
+  if (serialized.length > state.limits.maxToolArgumentCharacters) {
+    throw new AIServiceStreamLimitError(
+      'Agent Tool 参数',
+      state.limits.maxToolArgumentCharacters,
+    );
+  }
+  if (serialized.length > state.limits.maxToolArgumentTotalCharacters - state.toolArgumentCharacters) {
+    throw new AIServiceStreamLimitError(
+      'Agent Tool 参数总量',
+      state.limits.maxToolArgumentTotalCharacters,
+    );
+  }
+  state.toolArgumentCharacters += serialized.length;
+  call.input = input;
 }
 
 export function consumeAgentProviderStreamEvent(
@@ -216,37 +374,66 @@ export function consumeAgentProviderStreamEvent(
   if (!event || typeof event !== 'object' || Array.isArray(event)) return '';
   const payload = event as Record<string, any>;
   if (providerType === 'claude') {
-    const index = Number(payload.index);
+    const index = toolCallIndex(payload.index, state.toolCalls.size);
     if (payload.type === 'content_block_start' && payload.content_block?.type === 'tool_use') {
-      const call = toolCallAt(state, Number.isFinite(index) ? index : state.toolCalls.size);
-      call.id = String(payload.content_block.id || call.id);
-      call.name = String(payload.content_block.name || call.name);
-      call.input = payload.content_block.input;
+      const call = toolCallAt(state, index);
+      call.id = boundedToolCallIdentity(
+        payload.content_block.id || call.id,
+        PROVIDER_TOOL_CALL_ID_MAX_LENGTH,
+        'Agent Tool 调用 ID',
+      );
+      call.name = boundedToolCallIdentity(
+        payload.content_block.name || call.name,
+        PROVIDER_TOOL_NAME_MAX_LENGTH,
+        'Agent Tool 名称',
+      );
+      setInitialToolInput(state, call, payload.content_block.input);
       return '';
     }
     if (payload.type !== 'content_block_delta') return '';
     if (payload.delta?.type === 'input_json_delta') {
-      const call = toolCallAt(state, Number.isFinite(index) ? index : state.toolCalls.size);
-      call.arguments += String(payload.delta.partial_json || '');
+      const call = toolCallAt(state, index);
+      appendToolArguments(state, call, String(payload.delta.partial_json || ''));
       return '';
     }
     if (payload.delta?.type !== 'text_delta') return '';
     const delta = String(payload.delta.text || '');
-    state.content += delta;
+    state.content = appendBoundedAIServiceStreamText(
+      state.content,
+      delta,
+      state.limits.maxAssistantContentCharacters,
+      'Agent 回答',
+    );
     return delta;
   }
 
   const delta = payload.choices?.[0]?.delta;
   if (!delta || typeof delta !== 'object') return '';
   const content = typeof delta.content === 'string' ? delta.content : '';
-  state.content += content;
+  state.content = appendBoundedAIServiceStreamText(
+    state.content,
+    content,
+    state.limits.maxAssistantContentCharacters,
+    'Agent 回答',
+  );
   if (Array.isArray(delta.tool_calls)) {
     delta.tool_calls.forEach((chunk: Record<string, any>, fallbackIndex: number) => {
-      const index = Number.isFinite(Number(chunk.index)) ? Number(chunk.index) : fallbackIndex;
+      const index = toolCallIndex(chunk.index, fallbackIndex);
       const call = toolCallAt(state, index);
-      if (chunk.id) call.id = String(chunk.id);
-      call.name += String(chunk.function?.name || '');
-      call.arguments += String(chunk.function?.arguments || '');
+      if (chunk.id) {
+        call.id = boundedToolCallIdentity(
+          chunk.id,
+          PROVIDER_TOOL_CALL_ID_MAX_LENGTH,
+          'Agent Tool 调用 ID',
+        );
+      }
+      call.name = appendBoundedAIServiceStreamText(
+        call.name,
+        String(chunk.function?.name || ''),
+        PROVIDER_TOOL_NAME_MAX_LENGTH,
+        'Agent Tool 名称',
+      );
+      appendToolArguments(state, call, String(chunk.function?.arguments || ''));
     });
   }
   return content;
@@ -254,7 +441,7 @@ export function consumeAgentProviderStreamEvent(
 
 export function finalizeAgentProviderToolCalls(
   state: AgentProviderStreamState,
-  tools: AgentTool[],
+  tools: AgentProviderToolDefinition[],
 ): AgentProviderToolCall[] {
   const toolNames = createProviderToolNameMap(tools);
   return Array.from(state.toolCalls.entries())

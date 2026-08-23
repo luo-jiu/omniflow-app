@@ -16,10 +16,15 @@ import {
   agentToolRegistry,
   type AgentToolExecutionContext,
 } from './agent-tool-registry';
+import {
+  sanitizeAgentSensitiveText,
+  sanitizeAgentSensitiveValue,
+} from './agent-sensitive-data';
 
 const MAX_TOOL_RESULT_JSON_LENGTH = 100_000;
 const DEFAULT_MAIN_EXECUTION_TIMEOUT_MS = 30_000;
 const MAX_MAIN_EXECUTION_TIMEOUT_MS = 6 * 60 * 60 * 1_000;
+const MAIN_CANCELLATION_SETTLE_TIMEOUT_MS = 6_000;
 const MIN_RENDERER_EXECUTION_TIMEOUT_MS = 1_000;
 const MAX_RENDERER_EXECUTION_TIMEOUT_MS = 6 * 60 * 60 * 1_000;
 const RENDERER_COMMIT_SETTLE_TIMEOUT_MS = 30_000;
@@ -104,11 +109,12 @@ function sameOwnerScope(left: AgentOwnerScope, right: AgentOwnerScope): boolean 
 export function normalizeAgentToolResult(input: AgentToolResult): AgentToolResult {
   const message = input?.message === undefined
     ? undefined
-    : String(input.message).slice(0, 2_000);
+    : sanitizeAgentSensitiveText(String(input.message).slice(0, 2_000));
   let data = input?.data;
   if (data !== undefined) {
     try {
-      const serialized = JSON.stringify(data);
+      const sanitized = sanitizeAgentSensitiveValue(data);
+      const serialized = JSON.stringify(sanitized);
       data = serialized.length <= MAX_TOOL_RESULT_JSON_LENGTH
         ? JSON.parse(serialized)
         : { truncated: true };
@@ -137,6 +143,8 @@ export function createAgentToolBroker(options: AgentToolBrokerOptions = {}) {
     const boundedTimeoutMs = Math.max(1, Math.min(timeoutMs, MAX_MAIN_EXECUTION_TIMEOUT_MS));
     return new Promise((resolve, reject) => {
       const controller = new AbortController();
+      let cancellationError: Error | undefined;
+      let cancellationTimer: ReturnType<typeof setTimeout> | undefined;
       let settled = false;
       const finish = (handler: () => void) => {
         if (settled) return;
@@ -144,33 +152,40 @@ export function createAgentToolBroker(options: AgentToolBrokerOptions = {}) {
         cleanup();
         handler();
       };
-      const handleAbort = () => {
+      const requestCancellation = (error: Error) => {
+        if (settled || cancellationError) return;
+        cancellationError = error;
         controller.abort();
-        finish(() => reject(abortError()));
+        cancellationTimer = setTimeout(() => {
+          finish(() => reject(error));
+        }, MAIN_CANCELLATION_SETTLE_TIMEOUT_MS);
+        cancellationTimer.unref?.();
       };
+      const handleAbort = () => requestCancellation(abortError());
       const timer = setTimeout(() => {
-        controller.abort();
-        finish(() => reject(new Error(`工具 ${name} 执行超时`)));
+        requestCancellation(new Error(`工具 ${name} 执行超时`));
       }, boundedTimeoutMs);
       timer.unref?.();
       const cleanup = () => {
         clearTimeout(timer);
+        if (cancellationTimer) clearTimeout(cancellationTimer);
         context.signal.removeEventListener('abort', handleAbort);
       };
       if (context.signal.aborted) {
-        handleAbort();
+        controller.abort();
+        finish(() => reject(abortError()));
         return;
       }
       context.signal.addEventListener('abort', handleAbort, { once: true });
       void Promise.resolve().then(() => toolRegistry.execute(name, input, {
         ...context,
         onProgress: progress => {
-          if (!settled) context.onProgress(progress);
+          if (!settled && !cancellationError) context.onProgress(progress);
         },
         signal: controller.signal,
       })).then(
         result => finish(() => resolve(result)),
-        error => finish(() => reject(error)),
+        error => finish(() => reject(cancellationError || error)),
       );
     });
   }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  MAX_AI_SERVICE_OUTPUT_TOKENS,
   buildAIServiceStreamingChatRequest,
   buildAIServiceCompletionRequest,
   extractAIServiceStreamDelta,
@@ -7,6 +8,7 @@ import {
   extractAIServiceCompletionText,
   extractAIServiceErrorMessage,
   extractAIServiceModelIds,
+  resolveAIServiceOutputTokenLimit,
 } from './aiServiceClientModel'
 
 describe('aiServiceClientModel', () => {
@@ -133,6 +135,8 @@ describe('aiServiceClientModel', () => {
       model: 'gpt-5-mini',
       stream: true,
     })
+    expect(JSON.parse(request.body || '')).not.toHaveProperty('max_completion_tokens')
+    expect(JSON.parse(request.body || '')).not.toHaveProperty('max_tokens')
     expect(extractAIServiceStreamDelta('openai', {
       choices: [{ delta: { content: ' world' } }],
     })).toBe(' world')
@@ -140,6 +144,58 @@ describe('aiServiceClientModel', () => {
       delta: { text: ' there', type: 'text_delta' },
       type: 'content_block_delta',
     })).toBe(' there')
+  })
+
+  it.each([
+    ['openai', 'max_completion_tokens', 'max_tokens'],
+    ['deepseek', 'max_tokens', 'max_completion_tokens'],
+    ['local', 'max_tokens', 'max_completion_tokens'],
+    ['claude', 'max_tokens', 'max_completion_tokens'],
+  ] as const)(
+    'maps an explicit output budget for %s without sending competing fields',
+    (providerType, expectedField, excludedField) => {
+      const request = buildAIServiceStreamingChatRequest({
+        apiKey: 'secret',
+        baseUrl: 'https://api.example/v1',
+        providerType,
+      }, {
+        maxOutputTokens: 2_048,
+        messages: [{ content: 'hello', role: 'user' }],
+        model: 'test-model',
+        profileId: 'profile-1',
+        systemPrompt: 'system',
+      })
+      const body = JSON.parse(request.body || '')
+
+      expect(body[expectedField]).toBe(2_048)
+      expect(body).not.toHaveProperty(excludedField)
+    },
+  )
+
+  it('preserves the default Claude streaming output limit without an explicit budget', () => {
+    const request = buildAIServiceStreamingChatRequest({
+      apiKey: 'secret',
+      baseUrl: 'https://api.anthropic.com/v1',
+      providerType: 'claude',
+    }, {
+      messages: [{ content: 'hello', role: 'user' }],
+      model: 'claude-sonnet-4-5',
+      profileId: 'profile-1',
+      systemPrompt: 'system',
+    })
+    const body = JSON.parse(request.body || '')
+
+    expect(body.max_tokens).toBe(4_096)
+    expect(body).not.toHaveProperty('max_completion_tokens')
+  })
+
+  it('rejects non-integer or unreasonably large output token limits', () => {
+    expect(resolveAIServiceOutputTokenLimit(1)).toBe(1)
+    for (const value of [0, -1, 1.5, MAX_AI_SERVICE_OUTPUT_TOKENS + 1, '2048', null]) {
+      expect(() => resolveAIServiceOutputTokenLimit(value)).toThrow(
+        'AI 输出 token 上限必须是',
+      )
+    }
   })
 
   it('preserves provider error messages', () => {

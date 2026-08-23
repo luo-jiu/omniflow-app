@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import type { AgentMessage } from '@/shared/agent/agent.types';
+import type { AgentMessage, AgentRunSnapshot } from '@/shared/agent/agent.types';
 import {
   appendBufferedAgentEvent,
   reconcileCanonicalAgentRunMessages,
@@ -14,6 +14,21 @@ function message(id: string, runId: string, role: AgentMessage['role'], content:
     role,
     runId,
     sessionId: 'session-1',
+  };
+}
+
+function run(revision: number, updatedAt: string): AgentRunSnapshot {
+  return {
+    createdAt: '2026-08-23T00:00:00.000Z',
+    id: 'run-current',
+    model: 'model-a',
+    profileId: 'profile-a',
+    reasoningEffort: 'medium',
+    revision,
+    sessionId: 'session-1',
+    status: 'running',
+    updatedAt,
+    userPrompt: '读取目录',
   };
 }
 
@@ -53,6 +68,36 @@ describe('Agent terminal message reconciliation', () => {
       .reduce(appendBufferedAgentEvent, []);
 
     expect(buffered).toEqual([firstDelta, toolStarted, secondDelta]);
+  });
+
+  it('keeps only the newest consecutive canonical Run update while restoring', () => {
+    const older = {
+      run: run(1, '2026-08-23T00:00:02.000Z'),
+      runId: 'run-current',
+      sessionId: 'session-1',
+      type: 'run-updated' as const,
+    };
+    const newer = {
+      ...older,
+      run: run(2, '2026-08-23T00:00:01.000Z'),
+    };
+
+    expect([older, newer].reduce(appendBufferedAgentEvent, [])).toEqual([newer]);
+  });
+
+  it('does not let a delayed active update replace a buffered terminal Run', () => {
+    const completed = {
+      run: { ...run(2, '2026-08-23T00:00:02.000Z'), status: 'completed' as const },
+      runId: 'run-current',
+      sessionId: 'session-1',
+      type: 'run-updated' as const,
+    };
+    const delayed = {
+      ...completed,
+      run: run(3, '2026-08-23T00:00:03.000Z'),
+    };
+
+    expect([completed, delayed].reduce(appendBufferedAgentEvent, [])).toEqual([completed]);
   });
 
   it('replaces incomplete streamed messages with the canonical tool-ordered run projection', () => {

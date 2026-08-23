@@ -13,8 +13,12 @@ vi.mock('../aiServiceClient', () => ({
 }));
 
 import { createAgentOrchestrator } from './agent-orchestrator';
+import { estimateAgentProviderTurnTokens } from './agent-context-projection';
+import { buildAgentSystemPrompt } from './agent-prompt-assembler';
+import { agentPlanControlTool } from './agent-plan-model';
 import { createSQLiteAgentSessionStore, type AgentSessionStore } from './agent-session-store';
 import { agentToolRegistry } from './agent-tool-registry';
+import { MINIMUM_AGENT_PROVIDER_TOOL_RESULT_CONTENT } from './agent-tool-result-projection';
 import { createAIServiceRunSessionRegistry } from '../aiServiceRunSession';
 
 const OWNER_SCOPE = {
@@ -89,6 +93,7 @@ describe('Agent orchestrator', () => {
   it('executes a read tool and persists the complete run', async () => {
     mocks.streamAgentProviderTurn
       .mockImplementationOnce(async (_profileId, input, onDelta) => {
+        expect(input.maxOutputTokens).toBe(4_096);
         expect(input.systemPrompt).toContain('调用提供的 Tool');
         expect(input.systemPrompt).not.toContain('movie.mp4');
         expect(input.reasoningEffort).toBe('high');
@@ -99,6 +104,7 @@ describe('Agent orchestrator', () => {
         };
       })
       .mockImplementationOnce(async (_profileId, input, onDelta) => {
+        expect(input.maxOutputTokens).toBe(4_096);
         expect(input.messages.at(-1)).toMatchObject({
           name: 'file.list',
           role: 'tool',
@@ -138,9 +144,422 @@ describe('Agent orchestrator', () => {
       '当前目录有一个视频。',
     ]);
     expect(mocks.streamAgentProviderTurn).toHaveBeenCalledTimes(2);
+    const startedEvent = webContents.send.mock.calls
+      .map(call => call[1])
+      .find(event => event?.type === 'started');
+    expect(startedEvent).toMatchObject({
+      run: {
+        id: started.runId,
+        status: 'running',
+        userPrompt: '当前目录有什么？',
+      },
+    });
+    expect(webContents.send.mock.calls.map(call => call[1])).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        run: expect.objectContaining({ currentStep: '执行 file.list', status: 'running' }),
+        type: 'run-updated',
+      }),
+      expect.objectContaining({
+        run: expect.objectContaining({ currentStep: '已完成', status: 'completed' }),
+        type: 'run-updated',
+      }),
+    ]));
     expect(webContents.send.mock.calls.map(call => call[1]?.type)).toContain('tool-started');
     expect(webContents.send.mock.calls.map(call => call[1]?.type)).toContain('tool-completed');
+    const completedEvent = webContents.send.mock.calls
+      .map(call => call[1])
+      .find(event => event?.type === 'completed');
+    expect(completedEvent.toolActivities).toEqual([
+      expect.objectContaining({
+        call: expect.objectContaining({ id: 'call-1', name: 'file.list' }),
+        ordinal: 1,
+        result: expect.objectContaining({ ok: true }),
+        status: 'completed',
+      }),
+    ]);
+    expect(completedEvent.run).toMatchObject({
+      currentStep: '已完成',
+      id: started.runId,
+      status: 'completed',
+    });
     expect(mocks.streamAIServiceProfile).not.toHaveBeenCalled();
+  });
+
+  it('persists a provider plan without creating a fake ToolRun and links real Tools', async () => {
+    mocks.streamAgentProviderTurn
+      .mockImplementationOnce(async (_connection, input) => {
+        expect(input.tools.map((tool: { name: string }) => tool.name)).toContain('agent.plan.set');
+        return {
+          content: '',
+          toolCalls: [
+            {
+              id: 'call-plan',
+              input: {
+                steps: [
+                  { title: '读取当前目录', toolName: 'file.list' },
+                  { title: '检查目标文件', toolName: 'file.stat' },
+                ],
+                title: '检查目录内容',
+              },
+              name: 'agent.plan.set',
+            },
+            { id: 'call-list', input: {}, name: 'file.list' },
+          ],
+        };
+      })
+      .mockImplementationOnce(async (_connection, input, onDelta) => {
+        const results = input.messages.slice(-2);
+        expect(results[0]).toMatchObject({ name: 'agent.plan.set', role: 'tool' });
+        expect(JSON.parse(results[0].content)).toMatchObject({
+          message: '已记录 2 个计划步骤',
+          ok: true,
+        });
+        expect(results[1]).toMatchObject({ name: 'file.list', role: 'tool' });
+        onDelta('目录读取完成。');
+        return { content: '目录读取完成。', toolCalls: [] };
+      });
+    const webContents = sender();
+    const orchestrator = createOrchestrator();
+
+    const started = await orchestrator.start(webContents as never, {
+      ...request(),
+      userPrompt: '先读取目录，再检查目标文件',
+    });
+    await vi.waitFor(() => {
+      expect(webContents.send).toHaveBeenCalledWith('agent:chat:event', expect.objectContaining({
+        type: 'completed',
+      }));
+    });
+
+    const snapshot = await store.getSession(started.sessionId, OWNER_SCOPE, 3);
+    expect(snapshot?.runs[0].plan).toMatchObject({
+      title: '检查目录内容',
+      version: 1,
+    });
+    expect(snapshot?.runs[0].plan?.steps).toHaveLength(2);
+    expect(snapshot?.toolActivities).toHaveLength(1);
+    expect(snapshot?.toolActivities[0]).toMatchObject({
+      call: { name: 'file.list' },
+      planStepId: snapshot?.runs[0].plan?.steps[0].id,
+    });
+    expect(snapshot?.messages.some(message => message.toolName === 'agent.plan.set')).toBe(false);
+    expect(webContents.send.mock.calls
+      .map(call => call[1])
+      .filter(event => event?.type === 'tool-started'))
+      .toHaveLength(1);
+    const runEvents = webContents.send.mock.calls
+      .map(call => call[1])
+      .filter(event => event?.type === 'started' || event?.type === 'run-updated');
+    expect(runEvents.map(event => event.run.revision)).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(runEvents.find(event => event.run.plan)?.run).toMatchObject({
+      id: started.runId,
+      plan: expect.objectContaining({ title: '检查目录内容' }),
+      revision: 3,
+    });
+  });
+
+  it('returns an invalid plan to the provider without inventing execution facts', async () => {
+    mocks.streamAgentProviderTurn
+      .mockResolvedValueOnce({
+        content: '',
+        toolCalls: [{
+          id: 'call-invalid-plan',
+          input: {
+            steps: [
+              { status: 'completed', title: '读取目录', toolName: 'file.list' },
+              { title: '检查文件', toolName: 'file.stat' },
+            ],
+          },
+          name: 'agent.plan.set',
+        }],
+      })
+      .mockImplementationOnce(async (_connection, input, onDelta) => {
+        expect(JSON.parse(input.messages.at(-1).content)).toMatchObject({
+          message: expect.stringContaining('不允许的字段：status'),
+          ok: false,
+        });
+        onDelta('我无法记录这份计划。');
+        return { content: '我无法记录这份计划。', toolCalls: [] };
+      });
+    const webContents = sender();
+    const orchestrator = createOrchestrator();
+
+    const started = await orchestrator.start(webContents as never, request());
+    await vi.waitFor(() => {
+      expect(webContents.send).toHaveBeenCalledWith('agent:chat:event', expect.objectContaining({
+        type: 'completed',
+      }));
+    });
+
+    const snapshot = await store.getSession(started.sessionId, OWNER_SCOPE, 3);
+    expect(snapshot?.runs[0].plan).toBeUndefined();
+    expect(snapshot?.toolActivities).toEqual([]);
+    expect(webContents.send.mock.calls.map(call => call[1]?.type)).not.toContain('tool-started');
+  });
+
+  it('does not count the provider plan against the business Tool quota', async () => {
+    mocks.streamAgentProviderTurn
+      .mockResolvedValueOnce({
+        content: '',
+        toolCalls: [
+          {
+            id: 'call-plan-before-eight-tools',
+            input: {
+              steps: Array.from({ length: 8 }, (_, index) => ({
+                title: `第 ${index + 1} 次读取目录`,
+                toolName: 'file.list',
+              })),
+            },
+            name: 'agent.plan.set',
+          },
+          ...Array.from({ length: 8 }, (_, index) => ({
+            id: `call-list-${index + 1}`,
+            input: {},
+            name: 'file.list',
+          })),
+        ],
+      })
+      .mockImplementationOnce(async (_connection, input, onDelta) => {
+        const toolResults = (input.messages as Array<{ name?: string; role: string }>)
+          .filter(message => message.role === 'tool');
+        expect(toolResults).toHaveLength(9);
+        expect(toolResults.filter(message => message.name === 'agent.plan.set')).toHaveLength(1);
+        expect(toolResults.filter(message => message.name === 'file.list')).toHaveLength(8);
+        onDelta('八次目录读取均已完成。');
+        return { content: '八次目录读取均已完成。', toolCalls: [] };
+      });
+    const webContents = sender();
+    const orchestrator = createOrchestrator();
+
+    const started = await orchestrator.start(webContents as never, request());
+    await vi.waitFor(() => {
+      expect(webContents.send).toHaveBeenCalledWith('agent:chat:event', expect.objectContaining({
+        type: 'completed',
+      }));
+    });
+
+    const snapshot = await store.getSession(started.sessionId, OWNER_SCOPE, 3);
+    expect(snapshot?.runs[0]).toMatchObject({ status: 'completed' });
+    expect(snapshot?.toolActivities).toHaveLength(8);
+    expect(snapshot?.toolActivities.every(activity => activity.call.name === 'file.list')).toBe(true);
+    expect(snapshot?.messages.some(message => message.toolName === 'agent.plan.set')).toBe(false);
+  });
+
+  it('rejects an over-quota provider turn before executing any business Tool', async () => {
+    const executeMain = vi.fn(async () => ({ message: '不应执行', ok: true }));
+    mocks.streamAgentProviderTurn.mockResolvedValueOnce({
+      content: '',
+      toolCalls: Array.from({ length: 9 }, (_, index) => ({
+        id: `call-over-quota-${index + 1}`,
+        input: {},
+        name: 'file.list',
+      })),
+    });
+    const webContents = sender();
+    const orchestrator = createAgentOrchestrator({
+      getRuntimeProfile: () => ({
+        apiKey: 'test-key',
+        baseUrl: 'https://ai.example.com/v1',
+        providerType: 'openai',
+      }),
+      getSessionStore: async () => store,
+      runSessionRegistry: createAIServiceRunSessionRegistry(),
+      toolBroker: { executeMain } as never,
+    });
+
+    const started = await orchestrator.start(webContents as never, request());
+    await vi.waitFor(() => {
+      expect(webContents.send).toHaveBeenCalledWith('agent:chat:event', expect.objectContaining({
+        message: expect.stringContaining('本轮未执行工具'),
+        runId: started.runId,
+        type: 'error',
+      }));
+    });
+
+    expect(executeMain).not.toHaveBeenCalled();
+    expect((await store.getSession(started.sessionId, OWNER_SCOPE, 3))?.toolActivities)
+      .toEqual([]);
+  });
+
+  it('rejects a plan that follows the first business Tool in the same provider turn', async () => {
+    mocks.streamAgentProviderTurn
+      .mockResolvedValueOnce({
+        content: '',
+        toolCalls: [
+          { id: 'call-list-before-plan', input: {}, name: 'file.list' },
+          {
+            id: 'call-plan-after-list',
+            input: {
+              steps: [
+                { title: '再次读取目录', toolName: 'file.list' },
+                { title: '检查目标文件', toolName: 'file.stat' },
+              ],
+            },
+            name: 'agent.plan.set',
+          },
+        ],
+      })
+      .mockImplementationOnce(async (_connection, input, onDelta) => {
+        const results = input.messages.slice(-2);
+        expect(results[0]).toMatchObject({ name: 'file.list', role: 'tool' });
+        expect(results[1]).toMatchObject({ name: 'agent.plan.set', role: 'tool' });
+        expect(JSON.parse(results[1].content)).toMatchObject({
+          message: expect.stringContaining('首个 Tool 前设置一次'),
+          ok: false,
+        });
+        onDelta('目录已读取，后续计划未被记录。');
+        return { content: '目录已读取，后续计划未被记录。', toolCalls: [] };
+      });
+    const webContents = sender();
+    const orchestrator = createOrchestrator();
+
+    const started = await orchestrator.start(webContents as never, request());
+    await vi.waitFor(() => {
+      expect(webContents.send).toHaveBeenCalledWith('agent:chat:event', expect.objectContaining({
+        type: 'completed',
+      }));
+    });
+
+    const snapshot = await store.getSession(started.sessionId, OWNER_SCOPE, 3);
+    expect(snapshot?.runs[0].plan).toBeUndefined();
+    expect(snapshot?.toolActivities).toHaveLength(1);
+    expect(snapshot?.toolActivities[0].call.name).toBe('file.list');
+    expect(webContents.send.mock.calls
+      .map(call => call[1])
+      .some(event => event?.type === 'run-updated' && event.run?.plan))
+      .toBe(false);
+  });
+
+  it('keeps the first plan immutable when the provider declares a second plan', async () => {
+    mocks.streamAgentProviderTurn
+      .mockResolvedValueOnce({
+        content: '',
+        toolCalls: [
+          {
+            id: 'call-plan-first',
+            input: {
+              steps: [
+                { title: '首次读取目录', toolName: 'file.list' },
+                { title: '首次检查文件', toolName: 'file.stat' },
+              ],
+              title: '首次计划',
+            },
+            name: 'agent.plan.set',
+          },
+          {
+            id: 'call-plan-second',
+            input: {
+              steps: [
+                { title: '再次读取目录', toolName: 'file.list' },
+                { title: '再次检查文件', toolName: 'file.stat' },
+              ],
+              title: '覆盖计划',
+            },
+            name: 'agent.plan.set',
+          },
+        ],
+      })
+      .mockImplementationOnce(async (_connection, input, onDelta) => {
+        const results = input.messages.slice(-2);
+        expect(JSON.parse(results[0].content)).toMatchObject({ ok: true });
+        expect(JSON.parse(results[1].content)).toMatchObject({
+          message: expect.stringContaining('首个 Tool 前设置一次'),
+          ok: false,
+        });
+        onDelta('保留首次计划。');
+        return { content: '保留首次计划。', toolCalls: [] };
+      });
+    const webContents = sender();
+    const orchestrator = createOrchestrator();
+
+    const started = await orchestrator.start(webContents as never, request());
+    await vi.waitFor(() => {
+      expect(webContents.send).toHaveBeenCalledWith('agent:chat:event', expect.objectContaining({
+        type: 'completed',
+      }));
+    });
+
+    const snapshot = await store.getSession(started.sessionId, OWNER_SCOPE, 3);
+    expect(snapshot?.runs[0].plan).toMatchObject({ title: '首次计划' });
+    expect(snapshot?.toolActivities).toEqual([]);
+    expect(webContents.send.mock.calls.map(call => call[1]?.type)).not.toContain('tool-started');
+    expect(webContents.send.mock.calls
+      .map(call => call[1])
+      .some(event => event?.run?.plan?.title === '覆盖计划'))
+      .toBe(false);
+  });
+
+  it('keeps business Tool approval mandatory after accepting a plan', async () => {
+    mocks.streamAgentProviderTurn
+      .mockResolvedValueOnce({
+        content: '',
+        toolCalls: [
+          {
+            id: 'call-plan-before-write',
+            input: {
+              steps: [
+                { title: '创建目标文件夹', toolName: 'directory.create' },
+                { title: '确认目录内容', toolName: 'file.list' },
+              ],
+            },
+            name: 'agent.plan.set',
+          },
+          {
+            id: 'call-create-after-plan',
+            input: { name: '测试目录' },
+            name: 'directory.create',
+          },
+        ],
+      })
+      .mockImplementationOnce(async (_connection, input, onDelta) => {
+        expect(JSON.parse(input.messages.at(-1).content)).toMatchObject({
+          message: expect.stringContaining('用户取消'),
+          ok: false,
+        });
+        onDelta('文件夹没有创建。');
+        return { content: '文件夹没有创建。', toolCalls: [] };
+      });
+    const webContents = sender();
+    const orchestrator = createOrchestrator();
+
+    const started = await orchestrator.start(webContents as never, {
+      ...request(),
+      userPrompt: '创建测试目录后确认目录内容',
+    });
+    await vi.waitFor(() => {
+      expect(webContents.send).toHaveBeenCalledWith('agent:chat:event', expect.objectContaining({
+        type: 'tool-approval-required',
+      }));
+    });
+    const approval = webContents.send.mock.calls
+      .map(call => call[1])
+      .find(event => event?.type === 'tool-approval-required').approval;
+    expect(approval.call.name).toBe('directory.create');
+    await orchestrator.resolveToolApproval(webContents.id, {
+      approvalId: approval.approvalId,
+      approved: false,
+      libraryId: 3,
+      ownerScope: OWNER_SCOPE,
+      runId: started.runId,
+      sessionId: started.sessionId,
+    });
+    await vi.waitFor(() => {
+      expect(webContents.send).toHaveBeenCalledWith('agent:chat:event', expect.objectContaining({
+        type: 'completed',
+      }));
+    });
+
+    const snapshot = await store.getSession(started.sessionId, OWNER_SCOPE, 3);
+    expect(snapshot?.runs[0].plan).toBeDefined();
+    expect(snapshot?.toolActivities).toEqual([
+      expect.objectContaining({
+        call: expect.objectContaining({ name: 'directory.create' }),
+        permissionBehavior: 'ask',
+        status: 'failed',
+      }),
+    ]);
+    expect(webContents.send.mock.calls.map(call => call[1]?.type))
+      .not.toContain('tool-execution-requested');
   });
 
   it('dispatches read-only media inspection through one authorized renderer execution', async () => {
@@ -334,10 +753,12 @@ describe('Agent orchestrator', () => {
     }), expect.any(AbortSignal), expect.any(Function));
     await expect(orchestrator.extractMediaAudio(webContents.id, extractionRequest))
       .rejects.toThrow('已经使用');
-    expect(webContents.send).toHaveBeenCalledWith('agent:chat:event', expect.objectContaining({
-      progress: { message: '音频提取完成，准备上传', percent: 60 },
-      type: 'tool-progress',
-    }));
+    await vi.waitFor(() => {
+      expect(webContents.send).toHaveBeenCalledWith('agent:chat:event', expect.objectContaining({
+        progress: { message: '音频提取完成，准备上传', percent: 60 },
+        type: 'tool-progress',
+      }));
+    });
     expect(orchestrator.reportToolExecutionProgress(webContents.id, {
       executionId: execution.executionId,
       libraryId: 3,
@@ -492,7 +913,13 @@ describe('Agent orchestrator', () => {
     const approval = approvalEvent.approval;
     expect(await store.getSession(started.sessionId, OWNER_SCOPE, 3)).toMatchObject({
       lastRunStatus: 'awaiting_approval',
-      pendingApprovals: [expect.objectContaining({ approvalId: approval.approvalId })],
+      toolActivities: [expect.objectContaining({
+        approval: expect.objectContaining({
+          approvalId: approval.approvalId,
+          status: 'pending',
+        }),
+        status: 'awaiting_approval',
+      })],
     });
     await expect(orchestrator.resolveToolApproval(webContents.id, {
       approvalId: approval.approvalId,
@@ -567,7 +994,8 @@ describe('Agent orchestrator', () => {
         type: 'completed',
       }));
     });
-    expect((await store.getSession(started.sessionId, OWNER_SCOPE, 3))?.pendingApprovals).toEqual([]);
+    expect((await store.getSession(started.sessionId, OWNER_SCOPE, 3))?.toolActivities[0])
+      .toMatchObject({ approval: { status: 'approved' }, status: 'completed' });
     expect(mocks.streamAgentProviderTurn).toHaveBeenCalledTimes(3);
   });
 
@@ -672,7 +1100,8 @@ describe('Agent orchestrator', () => {
         type: 'completed',
       }));
     });
-    expect((await store.getSession(started.sessionId, OWNER_SCOPE, 3))?.pendingApprovals).toEqual([]);
+    expect((await store.getSession(started.sessionId, OWNER_SCOPE, 3))?.toolActivities[0])
+      .toMatchObject({ approval: { status: 'denied' }, status: 'failed' });
   });
 
   it('cancels and invalidates an action that is waiting for approval', async () => {
@@ -708,6 +1137,8 @@ describe('Agent orchestrator', () => {
       runId: started.runId,
       sessionId: started.sessionId,
     })).rejects.toThrow('不存在或已经失效');
+    expect((await store.getSession(started.sessionId, OWNER_SCOPE, 3))?.toolActivities[0])
+      .toMatchObject({ approval: { status: 'cancelled' }, status: 'cancelled' });
   });
 
   it('expires an unanswered approval without leaving a resumable action behind', async () => {
@@ -742,21 +1173,234 @@ describe('Agent orchestrator', () => {
     });
     expect(await store.getSession(started.sessionId, OWNER_SCOPE, 3)).toMatchObject({
       lastRunStatus: 'completed',
-      pendingApprovals: [],
+      toolActivities: [expect.objectContaining({
+        approval: expect.objectContaining({ status: 'expired' }),
+        status: 'failed',
+      })],
+    });
+  });
+
+  it('persists a bounded interaction, authorizes one answer and resumes the model', async () => {
+    mocks.streamAgentProviderTurn
+      .mockImplementationOnce(async (_connection, _input, onDelta) => {
+        onDelta('需要确认输出格式。');
+        return {
+          content: '需要确认输出格式。',
+          toolCalls: [{
+            id: 'call-interaction',
+            input: {
+              kind: 'choice',
+              options: [
+                { description: '兼容性更好', id: 'mp3', label: 'MP3' },
+                { description: '保留无损音频', id: 'wav', label: 'WAV' },
+              ],
+              prompt: '请选择输出格式',
+              title: '输出格式',
+            },
+            name: 'interaction.request',
+          }],
+        };
+      })
+      .mockImplementationOnce(async (_connection, input, onDelta) => {
+        expect(input.messages.at(-1)).toMatchObject({
+          name: 'interaction.request',
+          role: 'tool',
+        });
+        expect(input.messages.at(-1)?.content).toContain('"selectedOptionIds":["mp3"]');
+        onDelta('将使用 MP3 格式。');
+        return { content: '将使用 MP3 格式。', toolCalls: [] };
+      });
+    const webContents = sender();
+    const orchestrator = createOrchestrator();
+    const started = await orchestrator.start(webContents as never, request());
+
+    await vi.waitFor(() => {
+      expect(webContents.send).toHaveBeenCalledWith(
+        'agent:chat:event',
+        expect.objectContaining({ type: 'tool-interaction-required' }),
+      );
+    });
+    const interactionEvent = webContents.send.mock.calls
+      .map(call => call[1])
+      .find(event => event?.type === 'tool-interaction-required');
+    const interactionId = interactionEvent.interactionId as string;
+    const validSubmission = {
+      interactionId,
+      libraryId: 3,
+      ownerScope: OWNER_SCOPE,
+      response: { kind: 'choice' as const, selectedOptionIds: ['mp3'] },
+      runId: started.runId,
+      sessionId: started.sessionId,
+    };
+    expect(await store.getSession(started.sessionId, OWNER_SCOPE, 3)).toMatchObject({
+      lastRunStatus: 'awaiting_interaction',
+      toolActivities: [expect.objectContaining({
+        interaction: expect.objectContaining({ interactionId, status: 'pending' }),
+        status: 'awaiting_interaction',
+      })],
+    });
+
+    await expect(orchestrator.submitInteraction(88, validSubmission))
+      .rejects.toThrow('无权提交');
+    for (const invalidSubmission of [
+      { ...validSubmission, libraryId: 4 },
+      { ...validSubmission, ownerScope: OTHER_OWNER_SCOPE },
+      { ...validSubmission, runId: 'other-run' },
+      { ...validSubmission, sessionId: 'other-session' },
+    ]) {
+      await expect(orchestrator.submitInteraction(webContents.id, invalidSubmission))
+        .rejects.toThrow('无权提交');
+    }
+    await expect(orchestrator.submitInteraction(webContents.id, {
+      ...validSubmission,
+      response: { kind: 'choice', selectedOptionIds: ['unknown'] },
+    })).rejects.toThrow('选择项无效');
+
+    await expect(orchestrator.submitInteraction(webContents.id, validSubmission))
+      .resolves.toMatchObject({
+        accepted: true,
+        activity: {
+          interaction: {
+            response: { kind: 'choice', selectedOptionIds: ['mp3'] },
+            status: 'submitted',
+          },
+          status: 'running',
+        },
+      });
+    await expect(orchestrator.submitInteraction(webContents.id, validSubmission))
+      .rejects.toThrow('不存在或已经失效');
+
+    await vi.waitFor(() => {
+      expect(webContents.send).toHaveBeenCalledWith('agent:chat:event', expect.objectContaining({
+        content: '需要确认输出格式。将使用 MP3 格式。',
+        type: 'completed',
+      }));
+    });
+    expect((await store.getSession(started.sessionId, OWNER_SCOPE, 3))?.toolActivities[0])
+      .toMatchObject({
+        interaction: {
+          response: { kind: 'choice', selectedOptionIds: ['mp3'] },
+          status: 'submitted',
+        },
+        status: 'completed',
+      });
+  });
+
+  it('cancels and invalidates an interaction when the run is stopped', async () => {
+    mocks.streamAgentProviderTurn.mockResolvedValueOnce({
+      content: '',
+      toolCalls: [{
+        id: 'call-interaction-stop',
+        input: {
+          kind: 'choice',
+          options: [{ id: 'continue', label: '继续' }, { id: 'cancel', label: '取消' }],
+          prompt: '是否继续？',
+        },
+        name: 'interaction.request',
+      }],
+    });
+    const webContents = sender();
+    const orchestrator = createOrchestrator();
+    const started = await orchestrator.start(webContents as never, request());
+    await vi.waitFor(() => {
+      expect(webContents.send).toHaveBeenCalledWith(
+        'agent:chat:event',
+        expect.objectContaining({ type: 'tool-interaction-required' }),
+      );
+    });
+    const interactionId = webContents.send.mock.calls
+      .map(call => call[1])
+      .find(event => event?.type === 'tool-interaction-required').interactionId;
+
+    expect(orchestrator.stop(started.sessionId, webContents.id)).toBe(true);
+    await vi.waitFor(() => {
+      expect(webContents.send).toHaveBeenCalledWith('agent:chat:event', expect.objectContaining({
+        runId: started.runId,
+        type: 'cancelled',
+      }));
+    });
+    await expect(orchestrator.submitInteraction(webContents.id, {
+      interactionId,
+      libraryId: 3,
+      ownerScope: OWNER_SCOPE,
+      response: { kind: 'choice', selectedOptionIds: ['continue'] },
+      runId: started.runId,
+      sessionId: started.sessionId,
+    })).rejects.toThrow('不存在或已经失效');
+    expect((await store.getSession(started.sessionId, OWNER_SCOPE, 3))?.toolActivities[0])
+      .toMatchObject({ interaction: { status: 'cancelled' }, status: 'cancelled' });
+  });
+
+  it('expires an unanswered interaction and lets the model explain the failure', async () => {
+    mocks.streamAgentProviderTurn
+      .mockResolvedValueOnce({
+        content: '',
+        toolCalls: [{
+          id: 'call-interaction-expired',
+          input: {
+            kind: 'choice',
+            options: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }],
+            prompt: '请选择',
+          },
+          name: 'interaction.request',
+        }],
+      })
+      .mockImplementationOnce(async (_connection, input, onDelta) => {
+        expect(input.messages.at(-1)?.content).toContain('用户输入已超时');
+        onDelta('输入请求已超时，本次没有采用任何选项。');
+        return { content: '输入请求已超时，本次没有采用任何选项。', toolCalls: [] };
+      });
+    const webContents = sender();
+    const orchestrator = createAgentOrchestrator({
+      getRuntimeProfile: () => ({
+        apiKey: 'test-key',
+        baseUrl: 'https://ai.example.com/v1',
+        providerType: 'openai',
+      }),
+      getSessionStore: async () => store,
+      interactionTimeoutMs: 5,
+      runSessionRegistry: createAIServiceRunSessionRegistry(),
+    });
+    const started = await orchestrator.start(webContents as never, request());
+
+    await vi.waitFor(() => {
+      expect(webContents.send).toHaveBeenCalledWith('agent:chat:event', expect.objectContaining({
+        content: '输入请求已超时，本次没有采用任何选项。',
+        type: 'completed',
+      }));
+    });
+    expect(await store.getSession(started.sessionId, OWNER_SCOPE, 3)).toMatchObject({
+      lastRunStatus: 'completed',
+      toolActivities: [expect.objectContaining({
+        interaction: expect.objectContaining({ status: 'expired' }),
+        status: 'failed',
+      })],
     });
   });
 
   it('falls back to the bounded snapshot when a local model rejects tool calling', async () => {
     mocks.streamAgentProviderTurn.mockRejectedValueOnce(new Error('model does not support tools'));
     mocks.streamAIServiceProfile.mockImplementationOnce(async (input, onDelta) => {
-      expect(input.systemPrompt).toContain('movie.mp4');
+      expect(input.maxOutputTokens).toBe(1_234);
+      expect(input.systemPrompt).not.toContain('movie.mp4');
       expect(input.systemPrompt).toContain('当前模型不支持 Tool Calling');
+      expect(JSON.stringify(input.messages)).toContain('低权限只读感知数据');
+      expect(JSON.stringify(input.messages)).toContain('movie.mp4');
       expect(input.reasoningEffort).toBe('high');
       onDelta('当前目录有 movie.mp4。');
       return '当前目录有 movie.mp4。';
     });
     const webContents = sender();
-    const orchestrator = createOrchestrator();
+    const orchestrator = createAgentOrchestrator({
+      contextBudget: { outputReserveTokens: 1_234 },
+      getRuntimeProfile: () => ({
+        apiKey: 'test-key',
+        baseUrl: 'https://ai.example.com/v1',
+        providerType: 'openai',
+      }),
+      getSessionStore: async () => store,
+      runSessionRegistry: createAIServiceRunSessionRegistry(),
+    });
 
     const started = await orchestrator.start(webContents as never, request());
     await vi.waitFor(() => {
@@ -769,6 +1413,505 @@ describe('Agent orchestrator', () => {
     });
 
     expect(mocks.streamAIServiceProfile).toHaveBeenCalledTimes(1);
+  });
+
+  it('projects a large Tool result into a bounded structured provider message', async () => {
+    const largeEntries = Array.from({ length: 100 }, (_, index) => ({
+      id: index + 1,
+      name: `file-${index}-${'x'.repeat(500)}`,
+    }));
+    const executeMain = vi.fn(async () => ({
+      data: { entries: largeEntries, entryCount: largeEntries.length },
+      message: '读取完成',
+      ok: true,
+    }));
+    mocks.streamAgentProviderTurn
+      .mockResolvedValueOnce({
+        content: '',
+        toolCalls: [{ id: 'call-large-result', input: {}, name: 'file.list' }],
+      })
+      .mockImplementationOnce(async (_connection, input, onDelta) => {
+        const providerResult = JSON.parse(input.messages.at(-1).content);
+        expect(providerResult.ok).toBe(true);
+        expect(providerResult._omniflowProjection).toMatchObject({
+          reason: 'provider_context_budget',
+          truncated: true,
+        });
+        expect(input.messages.at(-1).content.length).toBeLessThan(10_000);
+        onDelta('已读取目录。');
+        return { content: '已读取目录。', toolCalls: [] };
+      });
+    const webContents = sender();
+    const orchestrator = createAgentOrchestrator({
+      getRuntimeProfile: () => ({
+        apiKey: 'test-key',
+        baseUrl: 'https://ai.example.com/v1',
+        providerType: 'openai',
+      }),
+      getSessionStore: async () => store,
+      runSessionRegistry: createAIServiceRunSessionRegistry(),
+      toolBroker: { executeMain } as never,
+    });
+
+    const started = await orchestrator.start(webContents as never, request());
+    await vi.waitFor(() => {
+      expect(webContents.send).toHaveBeenCalledWith(
+        'agent:chat:event',
+        expect.objectContaining({ runId: started.runId, type: 'completed' }),
+      );
+    });
+
+    const snapshot = await store.getSession(started.sessionId, OWNER_SCOPE, 3);
+    expect(snapshot?.toolActivities[0].result?.data).toMatchObject({
+      entryCount: 100,
+      entries: expect.arrayContaining([expect.objectContaining({ id: 100 })]),
+    });
+  });
+
+  it('sanitizes main Tool progress and canonical results before persistence or events', async () => {
+    const executeMain = vi.fn(async (
+      _name: string,
+      _input: unknown,
+      context: { onProgress: (progress: { message: string; percent?: number }) => void },
+    ) => {
+      context.onProgress({
+        message: 'Authorization: Bearer progress-private-token',
+        percent: 500,
+      });
+      return {
+        data: {
+          authorization: 'Bearer result-private-token',
+          url: 'https://example.com/file?X-Amz-Signature=signed-private-value',
+        },
+        message: 'password=result-private-value',
+        ok: true,
+      };
+    });
+    mocks.streamAgentProviderTurn
+      .mockResolvedValueOnce({
+        content: '',
+        toolCalls: [{ id: 'call-sensitive-result', input: {}, name: 'file.list' }],
+      })
+      .mockImplementationOnce(async (_connection, input, onDelta) => {
+        const providerHistory = JSON.stringify(input.messages);
+        expect(providerHistory).toContain('[REDACTED]');
+        expect(providerHistory).not.toContain('result-private');
+        expect(providerHistory).not.toContain('signed-private');
+        onDelta('结果已安全处理。');
+        return { content: '结果已安全处理。', toolCalls: [] };
+      });
+    const webContents = sender();
+    const orchestrator = createAgentOrchestrator({
+      getRuntimeProfile: () => ({
+        apiKey: 'test-key',
+        baseUrl: 'https://ai.example.com/v1',
+        providerType: 'openai',
+      }),
+      getSessionStore: async () => store,
+      runSessionRegistry: createAIServiceRunSessionRegistry(),
+      toolBroker: { executeMain } as never,
+    });
+
+    const started = await orchestrator.start(webContents as never, request());
+    await vi.waitFor(() => {
+      expect(webContents.send).toHaveBeenCalledWith(
+        'agent:chat:event',
+        expect.objectContaining({ runId: started.runId, type: 'completed' }),
+      );
+    });
+
+    const snapshot = await store.getSession(started.sessionId, OWNER_SCOPE, 3);
+    const serializedSnapshot = JSON.stringify(snapshot);
+    const serializedEvents = JSON.stringify(webContents.send.mock.calls);
+    expect(snapshot?.toolActivities[0].progress).toEqual({
+      message: 'Authorization: [REDACTED]',
+      percent: 100,
+    });
+    expect(snapshot?.toolActivities[0].result).toEqual({
+      data: {
+        authorization: '[REDACTED]',
+        url: 'https://example.com/file?[SIGNED_QUERY_REDACTED]',
+      },
+      message: 'password=[REDACTED]',
+      ok: true,
+    });
+    expect(serializedSnapshot).not.toContain('private-token');
+    expect(serializedSnapshot).not.toContain('private-value');
+    expect(serializedEvents).not.toContain('private-token');
+    expect(serializedEvents).not.toContain('private-value');
+  });
+
+  it('stops before a second provider turn when Tool loop messages exceed the window', async () => {
+    const executeMain = vi.fn(async () => ({ message: '不应执行', ok: true }));
+    mocks.streamAgentProviderTurn.mockResolvedValueOnce({
+      content: 'x'.repeat(60_000),
+      toolCalls: [{ id: 'call-overflow', input: {}, name: 'file.list' }],
+    });
+    const webContents = sender();
+    const orchestrator = createAgentOrchestrator({
+      getRuntimeProfile: () => ({
+        apiKey: 'test-key',
+        baseUrl: 'https://ai.example.com/v1',
+        providerType: 'openai',
+      }),
+      getSessionStore: async () => store,
+      runSessionRegistry: createAIServiceRunSessionRegistry(),
+      toolBroker: { executeMain } as never,
+    });
+
+    const started = await orchestrator.start(webContents as never, request());
+    await vi.waitFor(() => {
+      expect(webContents.send).toHaveBeenCalledWith('agent:chat:event', expect.objectContaining({
+        message: expect.stringContaining('本轮未执行工具'),
+        runId: started.runId,
+        type: 'error',
+      }));
+    });
+
+    expect(mocks.streamAgentProviderTurn).toHaveBeenCalledTimes(1);
+    expect(executeMain).not.toHaveBeenCalled();
+  });
+
+  it('preflights every minimum legal Tool result before executing the provider turn', async () => {
+    const currentRequest = request();
+    const registeredTools = agentToolRegistry.list();
+    const providerTools = [agentPlanControlTool, ...registeredTools];
+    const toolCalls = [
+      { id: 'call-boundary-list', input: {}, name: 'file.list' },
+      { id: 'call-boundary-stat', input: { nodeId: 8 }, name: 'file.stat' },
+    ];
+    const systemPrompt = buildAgentSystemPrompt(
+      currentRequest.appContext,
+      currentRequest.perception,
+      registeredTools.map(tool => tool.name),
+    );
+    const messages = [
+      { content: currentRequest.userPrompt, role: 'user' as const },
+      { content: '准备执行。', role: 'assistant' as const, toolCalls },
+    ];
+    const continuationBaseTokens = estimateAgentProviderTurnTokens({
+      messages,
+      systemPrompt,
+      tools: providerTools,
+    });
+    const continuationWithMinimumResults = estimateAgentProviderTurnTokens({
+      messages: [
+        ...messages,
+        ...toolCalls.map(call => ({
+          content: MINIMUM_AGENT_PROVIDER_TOOL_RESULT_CONTENT,
+          name: call.name,
+          role: 'tool' as const,
+          toolCallId: call.id,
+        })),
+      ],
+      systemPrompt,
+      tools: providerTools,
+    });
+    const outputReserveTokens = 1_000;
+    const providerRequestLimit = continuationWithMinimumResults - 1;
+    expect(continuationBaseTokens).toBeLessThan(providerRequestLimit);
+
+    const executeMain = vi.fn(async () => ({ message: '不应执行', ok: true }));
+    mocks.streamAgentProviderTurn.mockResolvedValueOnce({
+      content: '准备执行。',
+      toolCalls,
+    });
+    const webContents = sender();
+    const orchestrator = createAgentOrchestrator({
+      contextBudget: {
+        contextWindowTokens: providerRequestLimit + outputReserveTokens,
+        outputReserveTokens,
+        recentHistoryTokens: 100,
+        summaryReserveTokens: 1,
+        toolLoopReserveTokens: 1,
+      },
+      getRuntimeProfile: () => ({
+        apiKey: 'test-key',
+        baseUrl: 'https://ai.example.com/v1',
+        providerType: 'openai',
+      }),
+      getSessionStore: async () => store,
+      runSessionRegistry: createAIServiceRunSessionRegistry(),
+      toolBroker: { executeMain } as never,
+    });
+
+    const started = await orchestrator.start(webContents as never, currentRequest);
+    await vi.waitFor(() => {
+      expect(webContents.send).toHaveBeenCalledWith('agent:chat:event', expect.objectContaining({
+        message: expect.stringContaining('本轮未执行工具'),
+        runId: started.runId,
+        type: 'error',
+      }));
+    });
+
+    expect(mocks.streamAgentProviderTurn).toHaveBeenCalledTimes(1);
+    expect(executeMain).not.toHaveBeenCalled();
+    expect((await store.getSession(started.sessionId, OWNER_SCOPE, 3))?.toolActivities)
+      .toEqual([]);
+  });
+
+  it('reserves a possible post-Tool perception prompt before any side effect', async () => {
+    const currentRequest = { ...request(), perception: undefined };
+    const registeredTools = agentToolRegistry.list();
+    const providerTools = [agentPlanControlTool, ...registeredTools];
+    const capabilities = registeredTools.map(tool => tool.name);
+    const toolCalls = [{ id: 'call-create-boundary', input: { name: '测试' }, name: 'directory.create' }];
+    const messages = [
+      { content: currentRequest.userPrompt, role: 'user' as const },
+      { content: '', role: 'assistant' as const, toolCalls },
+      {
+        content: MINIMUM_AGENT_PROVIDER_TOOL_RESULT_CONTENT,
+        name: 'directory.create',
+        role: 'tool' as const,
+        toolCallId: 'call-create-boundary',
+      },
+    ];
+    const withoutPerceptionTokens = estimateAgentProviderTurnTokens({
+      messages,
+      systemPrompt: buildAgentSystemPrompt(currentRequest.appContext, undefined, capabilities),
+      tools: providerTools,
+    });
+    const withPerceptionTokens = estimateAgentProviderTurnTokens({
+      messages,
+      systemPrompt: buildAgentSystemPrompt(currentRequest.appContext, {
+        collectedAt: '2026-08-23T00:00:00.000Z',
+        selectedNodes: [],
+      }, capabilities),
+      tools: providerTools,
+    });
+    expect(withPerceptionTokens).toBeGreaterThan(withoutPerceptionTokens);
+    const outputReserveTokens = 1_000;
+    const providerRequestLimit = withPerceptionTokens - 1;
+    expect(withoutPerceptionTokens).toBeLessThanOrEqual(providerRequestLimit);
+
+    mocks.streamAgentProviderTurn.mockResolvedValueOnce({ content: '', toolCalls });
+    const webContents = sender();
+    const orchestrator = createAgentOrchestrator({
+      contextBudget: {
+        contextWindowTokens: providerRequestLimit + outputReserveTokens,
+        outputReserveTokens,
+        recentHistoryTokens: 100,
+        summaryReserveTokens: 1,
+        toolLoopReserveTokens: 1,
+      },
+      getRuntimeProfile: () => ({
+        apiKey: 'test-key',
+        baseUrl: 'https://ai.example.com/v1',
+        providerType: 'openai',
+      }),
+      getSessionStore: async () => store,
+      runSessionRegistry: createAIServiceRunSessionRegistry(),
+    });
+
+    const started = await orchestrator.start(webContents as never, currentRequest);
+    await vi.waitFor(() => {
+      expect(webContents.send).toHaveBeenCalledWith('agent:chat:event', expect.objectContaining({
+        message: expect.stringContaining('本轮未执行工具'),
+        runId: started.runId,
+        type: 'error',
+      }));
+    });
+
+    expect(webContents.send.mock.calls.map(call => call[1]?.type))
+      .not.toContain('tool-approval-required');
+    expect((await store.getSession(started.sessionId, OWNER_SCOPE, 3))?.toolActivities)
+      .toEqual([]);
+  });
+
+  it('reserves exact minimum result space for later Tool calls with asymmetric identities', async () => {
+    const currentRequest = request();
+    const registeredTools = agentToolRegistry.list();
+    const providerTools = [agentPlanControlTool, ...registeredTools];
+    const toolCalls = [
+      { id: 'a', input: {}, name: 'file.list' },
+      { id: `call-${'x'.repeat(123)}`, input: { nodeId: 8 }, name: 'file.stat' },
+    ];
+    const systemPrompt = buildAgentSystemPrompt(
+      currentRequest.appContext,
+      currentRequest.perception,
+      registeredTools.map(tool => tool.name),
+    );
+    const messages = [
+      { content: currentRequest.userPrompt, role: 'user' as const },
+      { content: '', role: 'assistant' as const, toolCalls },
+    ];
+    const providerRequestLimit = estimateAgentProviderTurnTokens({
+      messages: [
+        ...messages,
+        ...toolCalls.map(call => ({
+          content: MINIMUM_AGENT_PROVIDER_TOOL_RESULT_CONTENT,
+          name: call.name,
+          role: 'tool' as const,
+          toolCallId: call.id,
+        })),
+      ],
+      systemPrompt,
+      tools: providerTools,
+    });
+    const outputReserveTokens = 1_000;
+    const executeMain = vi.fn(async () => ({
+      data: { entries: Array.from({ length: 50 }, () => 'x'.repeat(1_000)) },
+      ok: true,
+    }));
+    mocks.streamAgentProviderTurn
+      .mockResolvedValueOnce({ content: '', toolCalls })
+      .mockImplementationOnce(async (_connection, input, onDelta) => {
+        const results = input.messages.slice(-2);
+        expect(results).toEqual([
+          expect.objectContaining({ name: 'file.list', role: 'tool' }),
+          expect.objectContaining({ name: 'file.stat', role: 'tool' }),
+        ]);
+        results.forEach((result: { content: string }) => {
+          expect(JSON.parse(result.content)._omniflowProjection).toMatchObject({
+            reason: 'provider_context_budget',
+            truncated: true,
+          });
+        });
+        onDelta('两个工具均已完成。');
+        return { content: '两个工具均已完成。', toolCalls: [] };
+      });
+    const webContents = sender();
+    const orchestrator = createAgentOrchestrator({
+      contextBudget: {
+        contextWindowTokens: providerRequestLimit + outputReserveTokens,
+        outputReserveTokens,
+        recentHistoryTokens: 100,
+        summaryReserveTokens: 1,
+        toolLoopReserveTokens: 1,
+      },
+      getRuntimeProfile: () => ({
+        apiKey: 'test-key',
+        baseUrl: 'https://ai.example.com/v1',
+        providerType: 'openai',
+      }),
+      getSessionStore: async () => store,
+      runSessionRegistry: createAIServiceRunSessionRegistry(),
+      toolBroker: { executeMain } as never,
+    });
+
+    const started = await orchestrator.start(webContents as never, currentRequest);
+    await vi.waitFor(() => {
+      expect(webContents.send).toHaveBeenCalledWith('agent:chat:event', expect.objectContaining({
+        runId: started.runId,
+        type: 'completed',
+      }));
+    });
+
+    expect(executeMain).toHaveBeenCalledTimes(2);
+    const activities = (await store.getSession(started.sessionId, OWNER_SCOPE, 3))?.toolActivities;
+    expect(activities).toHaveLength(2);
+    activities?.forEach((activity) => {
+      expect((activity.result?.data as { entries?: unknown[] })?.entries).toHaveLength(50);
+    });
+  });
+
+  it('fails an oversized current user message without calling the provider', async () => {
+    const webContents = sender();
+    const orchestrator = createOrchestrator();
+    const createRun = vi.spyOn(store, 'createRun');
+
+    await expect(orchestrator.start(webContents as never, {
+      ...request(),
+      userPrompt: 'x'.repeat(60_000),
+    })).rejects.toThrow('本次不会截断当前消息');
+
+    expect(mocks.streamAgentProviderTurn).not.toHaveBeenCalled();
+    expect(createRun).not.toHaveBeenCalled();
+    expect((await store.listSessions(OWNER_SCOPE, 3)).total).toBe(0);
+    expect(webContents.send).not.toHaveBeenCalled();
+  });
+
+  it('fails before the provider when fixed input and reserves exceed a small window', async () => {
+    const webContents = sender();
+    const createRun = vi.spyOn(store, 'createRun');
+    const orchestrator = createAgentOrchestrator({
+      contextBudget: {
+        contextWindowTokens: 4_000,
+        outputReserveTokens: 1_500,
+        toolLoopReserveTokens: 1_500,
+      },
+      getRuntimeProfile: () => ({
+        apiKey: 'test-key',
+        baseUrl: 'https://ai.example.com/v1',
+        providerType: 'openai',
+      }),
+      getSessionStore: async () => store,
+      runSessionRegistry: createAIServiceRunSessionRegistry(),
+    });
+
+    await expect(orchestrator.start(webContents as never, request()))
+      .rejects.toThrow('固定输入和安全预留超过模型上下文窗口');
+
+    expect(mocks.streamAgentProviderTurn).not.toHaveBeenCalled();
+    expect(createRun).not.toHaveBeenCalled();
+    expect((await store.listSessions(OWNER_SCOPE, 3)).total).toBe(0);
+  });
+
+  it('rejects an output reserve above the provider safety ceiling before creating a Run', async () => {
+    const webContents = sender();
+    const createRun = vi.spyOn(store, 'createRun');
+    const orchestrator = createAgentOrchestrator({
+      contextBudget: {
+        contextWindowTokens: 2_000_000,
+        outputReserveTokens: 1_000_001,
+        toolLoopReserveTokens: 1,
+      },
+      getRuntimeProfile: () => ({
+        apiKey: 'test-key',
+        baseUrl: 'https://ai.example.com/v1',
+        providerType: 'openai',
+      }),
+      getSessionStore: async () => store,
+      runSessionRegistry: createAIServiceRunSessionRegistry(),
+    });
+
+    await expect(orchestrator.start(webContents as never, request()))
+      .rejects.toThrow('AI 输出 token 上限必须是');
+    expect(mocks.streamAgentProviderTurn).not.toHaveBeenCalled();
+    expect(createRun).not.toHaveBeenCalled();
+  });
+
+  it('supports a configured small context window when the complete request fits', async () => {
+    mocks.streamAgentProviderTurn.mockImplementationOnce(async (_connection, input, onDelta) => {
+      expect(input.maxOutputTokens).toBe(1_000);
+      expect(input.messages.at(-1)?.content).toBe('短请求');
+      onDelta('完成。');
+      return { content: '完成。', toolCalls: [] };
+    });
+    const webContents = sender();
+    const resolveContextBudget = vi.fn(() => ({ contextWindowTokens: 8_000 }));
+    const orchestrator = createAgentOrchestrator({
+      contextBudget: {
+        outputReserveTokens: 1_000,
+        recentHistoryTokens: 1_000,
+        summaryReserveTokens: 250,
+        toolLoopReserveTokens: 1_000,
+      },
+      getRuntimeProfile: () => ({
+        apiKey: 'test-key',
+        baseUrl: 'https://ai.example.com/v1',
+        providerType: 'openai',
+      }),
+      getSessionStore: async () => store,
+      resolveContextBudget,
+      runSessionRegistry: createAIServiceRunSessionRegistry(),
+    });
+
+    const started = await orchestrator.start(webContents as never, {
+      ...request(),
+      userPrompt: '短请求',
+    });
+    await vi.waitFor(() => {
+      expect(webContents.send).toHaveBeenCalledWith(
+        'agent:chat:event',
+        expect.objectContaining({ runId: started.runId, type: 'completed' }),
+      );
+    });
+    expect(mocks.streamAgentProviderTurn).toHaveBeenCalledTimes(1);
+    expect(resolveContextBudget).toHaveBeenCalledWith({
+      model: 'test-model',
+      providerType: 'openai',
+    });
   });
 
   it('continues an existing session with a new run', async () => {
@@ -811,6 +1954,110 @@ describe('Agent orchestrator', () => {
     expect(second.sessionId).toBe(first.sessionId);
     expect(second.runId).not.toBe(first.runId);
     expect((await store.getSession(first.sessionId, OWNER_SCOPE, 3))?.messages).toHaveLength(4);
+  });
+
+  it('compacts long terminal Runs before the provider call without changing transcript facts', async () => {
+    const sessionId = 'session-long-context';
+    const firstOnly = `FIRST_ONLY_SECRET ${'first '.repeat(5_000)}`;
+    const recent = `SECOND_RECENT ${'second '.repeat(200)}`;
+    await store.createSession({
+      appContext: request().appContext,
+      id: sessionId,
+      now: '2026-08-23T00:00:00.000Z',
+      ownerScope: OWNER_SCOPE,
+      title: '长会话',
+    });
+    await store.createRun({
+      id: 'run-old-1',
+      model: 'test-model',
+      now: '2026-08-23T00:00:01.000Z',
+      profileId: 'profile-1',
+      reasoningEffort: 'auto',
+      sessionId,
+      userPrompt: firstOnly,
+    });
+    await store.appendMessage({
+      content: firstOnly,
+      createdAt: '2026-08-23T00:00:02.000Z',
+      id: 'old-assistant-1',
+      role: 'assistant',
+      runId: 'run-old-1',
+      sessionId,
+    });
+    await store.updateRun('run-old-1', {
+      finishedAt: '2026-08-23T00:00:03.000Z',
+      status: 'completed',
+      updatedAt: '2026-08-23T00:00:03.000Z',
+    });
+    await store.createRun({
+      id: 'run-old-2',
+      model: 'test-model',
+      now: '2026-08-23T00:00:04.000Z',
+      profileId: 'profile-1',
+      reasoningEffort: 'auto',
+      sessionId,
+      userPrompt: recent,
+    });
+    await store.appendMessage({
+      content: recent,
+      createdAt: '2026-08-23T00:00:05.000Z',
+      id: 'old-assistant-2',
+      role: 'assistant',
+      runId: 'run-old-2',
+      sessionId,
+    });
+    await store.updateRun('run-old-2', {
+      finishedAt: '2026-08-23T00:00:06.000Z',
+      status: 'completed',
+      updatedAt: '2026-08-23T00:00:06.000Z',
+    });
+
+    const summaryPayloads: string[] = [];
+    mocks.streamAIServiceProfile.mockImplementation(async (input) => {
+      expect(input.systemPrompt).toContain('会话摘要压缩器');
+      summaryPayloads.push(input.messages[0].content);
+      return JSON.stringify({
+        constraintsAndPreferences: [],
+        decisionsAndRationale: [],
+        goalsAndIntent: ['保留较早会话目标。'],
+        taskContext: ['较早会话已经压缩。'],
+        unresolvedAndNextSteps: ['继续当前问题。'],
+        version: 1,
+      });
+    });
+    mocks.streamAgentProviderTurn.mockImplementationOnce(async (_connection, input, onDelta) => {
+      const serializedMessages = JSON.stringify(input.messages);
+      expect(serializedMessages).toContain('低权限历史上下文投影');
+      expect(serializedMessages).toContain('保留较早会话目标');
+      expect(serializedMessages).not.toContain('FIRST_ONLY_SECRET');
+      expect(serializedMessages).toContain('SECOND_RECENT');
+      expect(serializedMessages).toContain('继续处理');
+      onDelta('已经继续。');
+      return { content: '已经继续。', toolCalls: [] };
+    });
+
+    const webContents = sender();
+    const orchestrator = createOrchestrator();
+    const started = await orchestrator.start(webContents as never, {
+      ...request(),
+      sessionId,
+      userPrompt: '继续处理',
+    });
+    await vi.waitFor(() => {
+      expect(webContents.send).toHaveBeenCalledWith(
+        'agent:chat:event',
+        expect.objectContaining({ runId: started.runId, type: 'completed' }),
+      );
+    });
+
+    expect(mocks.streamAIServiceProfile.mock.calls.length).toBeGreaterThan(1);
+    expect(mocks.streamAIServiceProfile.mock.calls.length).toBeLessThanOrEqual(4);
+    expect(summaryPayloads.join('\n')).toContain('FIRST_ONLY_SECRET');
+    expect((await store.readContextCheckpointState(sessionId, OWNER_SCOPE, 3))?.latestCompleted)
+      .toMatchObject({ status: 'completed', throughMessageId: 'old-assistant-1' });
+    const snapshot = await store.getSession(sessionId, OWNER_SCOPE, 3);
+    expect(snapshot?.messages.some(item => item.content.includes('FIRST_ONLY_SECRET'))).toBe(true);
+    expect(snapshot?.messages).toHaveLength(6);
   });
 
   it('freezes the AI service connection and locks its profile for the entire run', async () => {
@@ -861,7 +2108,7 @@ describe('Agent orchestrator', () => {
   it('includes persisted partial content in provider error events', async () => {
     mocks.streamAgentProviderTurn.mockImplementationOnce(async (_connection, _input, onDelta) => {
       onDelta('已经生成的部分内容');
-      throw new Error('provider disconnected');
+      throw new Error('Authorization: Bearer provider-private-token');
     });
     const webContents = sender();
     const orchestrator = createOrchestrator();
@@ -870,7 +2117,7 @@ describe('Agent orchestrator', () => {
     await vi.waitFor(() => {
       expect(webContents.send).toHaveBeenCalledWith('agent:chat:event', expect.objectContaining({
         content: '已经生成的部分内容',
-        message: 'provider disconnected',
+        message: 'Authorization: [REDACTED]',
         messages: expect.arrayContaining([
           expect.objectContaining({ content: '已经生成的部分内容', role: 'assistant' }),
         ]),
@@ -881,6 +2128,9 @@ describe('Agent orchestrator', () => {
     });
     expect((await store.getSession(started.sessionId, OWNER_SCOPE, 3))?.messages.at(-1)?.content)
       .toBe('已经生成的部分内容');
+    const snapshot = await store.getSession(started.sessionId, OWNER_SCOPE, 3);
+    expect(snapshot?.runs.at(-1)?.error).toBe('Authorization: [REDACTED]');
+    expect(JSON.stringify(snapshot)).not.toContain('provider-private-token');
   });
 
   it('aborts an owner run without allowing the same session to restart before cleanup', async () => {
@@ -956,5 +2206,359 @@ describe('Agent orchestrator', () => {
     expect(mocks.streamAgentProviderTurn).not.toHaveBeenCalled();
     expect(() => registry.assertProfileUnlocked('profile-1')).not.toThrow();
     expect((await store.listSessions(OWNER_SCOPE, 3)).total).toBe(0);
+  });
+
+  it('rejects a high-confidence secret in the user prompt before creating a session or Run', async () => {
+    const webContents = sender();
+    const orchestrator = createOrchestrator();
+    const createRun = vi.spyOn(store, 'createRun');
+
+    await expect(orchestrator.start(webContents as never, {
+      ...request(),
+      userPrompt: '请使用 API 密钥为 sk-proj-abcdefghijklmnopqrstuvwxyz 继续处理',
+    })).rejects.toThrow('请求中包含 API Key、密码、Cookie、令牌、私钥或其他凭据');
+
+    expect(createRun).not.toHaveBeenCalled();
+    expect(mocks.streamAgentProviderTurn).not.toHaveBeenCalled();
+    expect((await store.listSessions(OWNER_SCOPE, 3)).total).toBe(0);
+    expect(webContents.send).not.toHaveBeenCalled();
+  });
+
+  it('rejects oversized request identifiers before starting or persisting a Run', async () => {
+    const webContents = sender();
+    const orchestrator = createOrchestrator();
+
+    await expect(orchestrator.start(webContents as never, {
+      ...request(),
+      profileId: 'p'.repeat(201),
+    })).rejects.toThrow('AI 服务配置 ID 过长');
+    await expect(orchestrator.start(webContents as never, {
+      ...request(),
+      model: 'm'.repeat(201),
+    })).rejects.toThrow('模型名称过长');
+    await expect(orchestrator.start(webContents as never, {
+      ...request(),
+      sessionId: 's'.repeat(201),
+    })).rejects.toThrow('Agent 会话 ID 过长');
+
+    expect(mocks.streamAgentProviderTurn).not.toHaveBeenCalled();
+    expect((await store.listSessions(OWNER_SCOPE, 3)).total).toBe(0);
+    expect(webContents.send).not.toHaveBeenCalled();
+  });
+
+  it('bounds app context strings and selected node IDs in main', async () => {
+    mocks.streamAgentProviderTurn.mockImplementationOnce(async (_connection, input, onDelta) => {
+      expect(input.systemPrompt).not.toContain('directory-private-tail');
+      onDelta('已完成。');
+      return { content: '已完成。', toolCalls: [] };
+    });
+    const webContents = sender();
+    const orchestrator = createOrchestrator();
+    const createSession = vi.spyOn(store, 'createSession');
+    const started = await orchestrator.start(webContents as never, {
+      ...request(),
+      appContext: {
+        activeToolId: 'a'.repeat(500),
+        currentDirectory: {
+          id: 10,
+          name: `${'d'.repeat(600)}directory-private-tail`,
+        },
+        libraryId: 3,
+        platform: 'darwin',
+        selectedNodeIds: Array.from({ length: 1_000 }, (_, index) => index + 1),
+      },
+    });
+    await vi.waitFor(() => {
+      expect(webContents.send).toHaveBeenCalledWith(
+        'agent:chat:event',
+        expect.objectContaining({ runId: started.runId, type: 'completed' }),
+      );
+    });
+
+    const persistedContext = createSession.mock.calls[0]?.[0].appContext;
+    expect(persistedContext?.activeToolId).toHaveLength(100);
+    expect(persistedContext?.currentDirectory?.name).toHaveLength(500);
+    expect(persistedContext?.selectedNodeIds).toHaveLength(200);
+  });
+
+  it('sanitizes user-controlled names in approval previews before persistence or events', async () => {
+    mocks.streamAgentProviderTurn.mockResolvedValueOnce({
+      content: '',
+      toolCalls: [{
+        id: 'call-safe-preview',
+        input: { name: '测试目录' },
+        name: 'directory.create',
+      }],
+    });
+    const webContents = sender();
+    const orchestrator = createOrchestrator();
+    const started = await orchestrator.start(webContents as never, {
+      ...request(),
+      appContext: {
+        ...request().appContext,
+        currentDirectory: { id: 10, name: 'password=preview-private-value' },
+      },
+    });
+
+    await vi.waitFor(() => {
+      expect(webContents.send).toHaveBeenCalledWith(
+        'agent:chat:event',
+        expect.objectContaining({ type: 'tool-approval-required' }),
+      );
+    });
+    const snapshot = await store.getSession(started.sessionId, OWNER_SCOPE, 3);
+    const serializedSnapshot = JSON.stringify(snapshot);
+    const serializedEvents = JSON.stringify(webContents.send.mock.calls);
+    expect(serializedSnapshot).toContain('[REDACTED]');
+    expect(serializedSnapshot).not.toContain('preview-private-value');
+    expect(serializedEvents).not.toContain('preview-private-value');
+
+    expect(orchestrator.stop(started.sessionId, webContents.id)).toBe(true);
+    await vi.waitFor(() => {
+      expect(webContents.send).toHaveBeenCalledWith(
+        'agent:chat:event',
+        expect.objectContaining({ runId: started.runId, type: 'cancelled' }),
+      );
+    });
+  });
+
+  it('omits a secret-soliciting interaction before ToolRun persistence or raw event emission', async () => {
+    mocks.streamAgentProviderTurn
+      .mockResolvedValueOnce({
+        content: '',
+        toolCalls: [{
+          id: 'call-secret-interaction',
+          input: {
+            fields: [{ id: 'a.p.i-k_e_y', label: '连接值', type: 'text' }],
+            kind: 'form',
+            prompt: '补充连接参数',
+          },
+          name: 'interaction.request',
+        }],
+      })
+      .mockImplementationOnce(async (_connection, input, onDelta) => {
+        const providerHistory = JSON.stringify(input.messages);
+        expect(providerHistory).toContain('sensitive interaction request omitted');
+        expect(providerHistory).not.toContain('a.p.i-k_e_y');
+        expect(providerHistory).not.toContain('补充连接参数');
+        onDelta('我不能通过对话索取凭据。');
+        return { content: '我不能通过对话索取凭据。', toolCalls: [] };
+      });
+    const webContents = sender();
+    const orchestrator = createOrchestrator();
+    const started = await orchestrator.start(webContents as never, request());
+
+    await vi.waitFor(() => {
+      expect(webContents.send).toHaveBeenCalledWith('agent:chat:event', expect.objectContaining({
+        content: '我不能通过对话索取凭据。',
+        type: 'completed',
+      }));
+    });
+    const snapshot = await store.getSession(started.sessionId, OWNER_SCOPE, 3);
+    expect(snapshot?.toolActivities).toEqual([]);
+    expect(JSON.stringify(snapshot)).not.toContain('a.p.i-k_e_y');
+    expect(JSON.stringify(webContents.send.mock.calls)).not.toContain('a.p.i-k_e_y');
+    expect(webContents.send.mock.calls.map(call => call[1]?.type)).not.toContain('tool-started');
+    expect(webContents.send.mock.calls.map(call => call[1]?.type))
+      .not.toContain('tool-interaction-required');
+  });
+
+  it('validates Tool schemas before domain validation, permission checks, or side effects', async () => {
+    const validate = vi.fn(() => ({ ok: true as const }));
+    const assess = vi.fn(() => ({ behavior: 'allow' as const, risk: 'read' as const }));
+    const execute = vi.fn(async () => ({ message: '不应执行', ok: true }));
+    agentToolRegistry.register({
+      assess,
+      description: 'strict schema preflight test',
+      execute,
+      inputSchema: {
+        additionalProperties: false,
+        properties: { count: { type: 'integer' } },
+        required: ['count'],
+        type: 'object',
+      },
+      name: 'test.schema-preflight',
+      risk: 'read',
+      validate,
+    });
+    mocks.streamAgentProviderTurn
+      .mockResolvedValueOnce({
+        content: '',
+        toolCalls: [{
+          id: 'call-invalid-schema',
+          input: { count: '3', privateValue: 'schema-private-value' },
+          name: 'test.schema-preflight',
+        }],
+      })
+      .mockImplementationOnce(async (_connection, input, onDelta) => {
+        const providerHistory = JSON.stringify(input.messages);
+        expect(providerHistory).toContain('invalid Tool input omitted');
+        expect(providerHistory).toContain('Agent Tool 参数不符合输入约束');
+        expect(providerHistory).not.toContain('schema-private-value');
+        onDelta('工具参数无效，未执行。');
+        return { content: '工具参数无效，未执行。', toolCalls: [] };
+      });
+    const webContents = sender();
+    const orchestrator = createOrchestrator();
+    const started = await orchestrator.start(webContents as never, request());
+
+    await vi.waitFor(() => {
+      expect(webContents.send).toHaveBeenCalledWith('agent:chat:event', expect.objectContaining({
+        content: '工具参数无效，未执行。',
+        type: 'completed',
+      }));
+    });
+
+    expect(validate).not.toHaveBeenCalled();
+    expect(assess).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
+    const snapshot = await store.getSession(started.sessionId, OWNER_SCOPE, 3);
+    expect(snapshot?.toolActivities).toEqual([]);
+    expect(JSON.stringify(snapshot)).not.toContain('schema-private-value');
+    expect(JSON.stringify(webContents.send.mock.calls)).not.toContain('schema-private-value');
+    expect(webContents.send.mock.calls.map(call => call[1]?.type)).not.toContain('tool-started');
+  });
+
+  it('persists and emits only a bounded sanitized projection for an unknown sensitive Tool', async () => {
+    const rawSecret = 'sk-proj-abcdefghijklmnopqrstuvwxyz';
+    const oversized = 'x'.repeat(20_000);
+    mocks.streamAgentProviderTurn
+      .mockResolvedValueOnce({
+        content: '',
+        toolCalls: [{
+          id: 'call-unknown-sensitive',
+          input: {
+            apiKey: rawSecret,
+            nested: { authorization: 'Bearer abcdefghijklmnop' },
+            payload: oversized,
+            safe: 'visible',
+          },
+          name: 'unknown.external',
+        }],
+      })
+      .mockImplementationOnce(async (_connection, input, onDelta) => {
+        const providerHistory = JSON.stringify(input.messages);
+        expect(providerHistory).toContain('[REDACTED]');
+        expect(providerHistory).toContain('visible');
+        expect(providerHistory).not.toContain(rawSecret);
+        expect(providerHistory).not.toContain('abcdefghijklmnop');
+        expect(providerHistory).not.toContain('x'.repeat(1_000));
+        onDelta('未知工具没有执行。');
+        return { content: '未知工具没有执行。', toolCalls: [] };
+      });
+    const webContents = sender();
+    const orchestrator = createOrchestrator();
+    const started = await orchestrator.start(webContents as never, request());
+
+    await vi.waitFor(() => {
+      expect(webContents.send).toHaveBeenCalledWith('agent:chat:event', expect.objectContaining({
+        content: '未知工具没有执行。',
+        type: 'completed',
+      }));
+    });
+    const snapshot = await store.getSession(started.sessionId, OWNER_SCOPE, 3);
+    expect(snapshot?.toolActivities).toHaveLength(1);
+    expect(snapshot?.toolActivities[0]).toMatchObject({
+      call: { name: 'unknown.external' },
+      permissionBehavior: 'deny',
+      status: 'failed',
+    });
+    const persisted = JSON.stringify(snapshot?.toolActivities[0]);
+    const emitted = JSON.stringify(webContents.send.mock.calls);
+    expect(persisted).toContain('[REDACTED]');
+    expect(persisted.length).toBeLessThan(8_000);
+    expect(persisted).not.toContain(rawSecret);
+    expect(persisted).not.toContain('x'.repeat(1_000));
+    expect(emitted).not.toContain(rawSecret);
+    expect(emitted).not.toContain('x'.repeat(1_000));
+  });
+
+  it('rejects prototype mutation Tool input before Broker execution', async () => {
+    const executeMain = vi.fn(async () => ({ message: '不应执行', ok: true }));
+    const unsafeInput = JSON.parse(
+      '{"__proto__":{"polluted":true},"constructor":{"prototype":{"polluted":true}},'
+      + '"safe":"visible"}',
+    );
+    mocks.streamAgentProviderTurn
+      .mockResolvedValueOnce({
+        content: '',
+        toolCalls: [{ id: 'call-unsafe-prototype', input: unsafeInput, name: 'file.list' }],
+      })
+      .mockImplementationOnce(async (_connection, input, onDelta) => {
+        const providerHistory = JSON.stringify(input.messages);
+        expect(input.messages.at(-1)).toMatchObject({ name: 'file.list', role: 'tool' });
+        expect(input.messages.at(-1)?.content).toContain('Agent Tool 参数不符合输入约束');
+        expect(providerHistory).toContain('invalid Tool input omitted');
+        expect(providerHistory).not.toContain('polluted');
+        onDelta('该工具参数已被拒绝。');
+        return { content: '该工具参数已被拒绝。', toolCalls: [] };
+      });
+    const webContents = sender();
+    const orchestrator = createAgentOrchestrator({
+      getRuntimeProfile: () => ({
+        apiKey: 'test-key',
+        baseUrl: 'https://ai.example.com/v1',
+        providerType: 'openai',
+      }),
+      getSessionStore: async () => store,
+      runSessionRegistry: createAIServiceRunSessionRegistry(),
+      toolBroker: { executeMain } as never,
+    });
+
+    const started = await orchestrator.start(webContents as never, request());
+    await vi.waitFor(() => {
+      expect(webContents.send).toHaveBeenCalledWith('agent:chat:event', expect.objectContaining({
+        content: '该工具参数已被拒绝。',
+        type: 'completed',
+      }));
+    });
+
+    expect(executeMain).not.toHaveBeenCalled();
+    const snapshot = await store.getSession(started.sessionId, OWNER_SCOPE, 3);
+    expect(snapshot?.toolActivities).toEqual([]);
+    const persisted = JSON.stringify(snapshot);
+    const emitted = JSON.stringify(webContents.send.mock.calls);
+    expect(persisted).not.toContain('polluted');
+    expect(emitted).not.toContain('polluted');
+    expect(({} as { polluted?: boolean }).polluted).toBeUndefined();
+  });
+
+  it('fails during streaming before assistant content can exceed the Run-wide limit', async () => {
+    let turn = 0;
+    mocks.streamAgentProviderTurn.mockImplementation(async (_connection, _input, onDelta) => {
+      turn += 1;
+      const delta = 'z'.repeat(turn <= 4 ? 15_000 : 5_000);
+      onDelta(delta);
+      return {
+        content: delta,
+        toolCalls: turn <= 4
+          ? [{ id: `call-list-${turn}`, input: {}, name: 'file.list' }]
+          : [],
+      };
+    });
+    const webContents = sender();
+    const orchestrator = createAgentOrchestrator({
+      contextBudget: { contextWindowTokens: 200_000 },
+      getRuntimeProfile: () => ({
+        apiKey: 'test-key',
+        baseUrl: 'https://ai.example.com/v1',
+        providerType: 'openai',
+      }),
+      getSessionStore: async () => store,
+      runSessionRegistry: createAIServiceRunSessionRegistry(),
+    });
+    const started = await orchestrator.start(webContents as never, request());
+
+    await vi.waitFor(() => {
+      expect(webContents.send).toHaveBeenCalledWith('agent:chat:event', expect.objectContaining({
+        message: expect.stringContaining('Agent 单次运行回答超过安全上限'),
+        type: 'error',
+      }));
+    });
+    const snapshot = await store.getSession(started.sessionId, OWNER_SCOPE, 3);
+    expect(snapshot?.lastRunStatus).toBe('failed');
+    expect(snapshot?.messages
+      .filter(message => message.role === 'assistant')
+      .reduce((total, message) => total + message.content.length, 0)).toBe(60_000);
   });
 });

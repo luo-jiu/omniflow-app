@@ -23,10 +23,17 @@ import type {
   AgentChatRequest,
   AgentChatStartResult,
   AgentChatStreamEvent,
+  AgentInteractionSubmissionRequest,
+  AgentInteractionSubmissionResult,
   AgentMediaArtifactReleaseRequest,
   AgentMediaAudioExtractionRequest,
   AgentMediaAudioExtractionResult,
   AgentMediaInspectionRequest,
+  AgentMemoryCursor,
+  AgentMemoryDeleteRequest,
+  AgentMemoryItem,
+  AgentMemoryPage,
+  AgentMemoryUpdateRequest,
   AgentOwnerScope,
   AgentSessionCursor,
   AgentSessionPage,
@@ -246,6 +253,11 @@ contextBridge.exposeInMainWorld('electronAgent', {
   ): Promise<AgentToolApprovalDecisionResult> => (
     ipcRenderer.invoke('agent:tool:approval:resolve', input)
   ),
+  submitInteraction: (
+    input: AgentInteractionSubmissionRequest,
+  ): Promise<AgentInteractionSubmissionResult> => (
+    ipcRenderer.invoke('agent:interaction:submit', input)
+  ),
   completeToolExecution: (input: AgentToolExecutionCompletion): Promise<boolean> => (
     ipcRenderer.invoke('agent:tool:execution:complete', input)
   ),
@@ -295,6 +307,20 @@ contextBridge.exposeInMainWorld('electronAgent', {
     sessionId: string,
   ): Promise<boolean> => (
     ipcRenderer.invoke('agent:session:delete', { libraryId, ownerScope, sessionId })
+  ),
+  listMemories: (
+    ownerScope: AgentOwnerScope,
+    libraryId: number,
+    query?: string,
+    cursor?: AgentMemoryCursor,
+  ): Promise<AgentMemoryPage> => (
+    ipcRenderer.invoke('agent:memory:list', { cursor, libraryId, ownerScope, query })
+  ),
+  updateMemory: (input: AgentMemoryUpdateRequest): Promise<AgentMemoryItem> => (
+    ipcRenderer.invoke('agent:memory:update', input)
+  ),
+  deleteMemory: (input: AgentMemoryDeleteRequest): Promise<boolean> => (
+    ipcRenderer.invoke('agent:memory:delete', input)
   ),
   onEvent: (listener: (event: AgentChatStreamEvent) => void) => {
     const wrapped = (_event: Electron.IpcRendererEvent, payload: AgentChatStreamEvent) => {

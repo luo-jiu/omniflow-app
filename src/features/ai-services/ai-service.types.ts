@@ -45,6 +45,7 @@ export interface AIServiceChatMessage {
 }
 
 export interface AIServiceChatCompletionInput {
+  maxOutputTokens?: number;
   messages: AIServiceChatMessage[];
   model: string;
   profileId: string;

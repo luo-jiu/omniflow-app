@@ -5,10 +5,16 @@ import {
   type AIServiceRuntimeConnection,
 } from '../aiServiceClientModel';
 import {
+  AI_SERVICE_HTTP_BODY_LIMITS,
+  appendBoundedAIServiceStreamText,
+  readBoundedAIServiceResponseText,
+} from '../aiServiceStreamLimits';
+import {
   buildAgentProviderRequestBody,
   consumeAgentProviderStreamEvent,
   createAgentProviderStreamState,
   finalizeAgentProviderToolCalls,
+  type AgentProviderStreamLimits,
   type AgentProviderTurnInput,
 } from './agent-provider-model';
 
@@ -40,6 +46,7 @@ export async function streamAgentProviderTurn(
   input: AgentProviderTurnInput,
   onDelta: (delta: string) => void,
   signal: AbortSignal,
+  limits?: AgentProviderStreamLimits,
 ): Promise<AgentProviderTurnResult> {
   const url = appendPath(
     profile.baseUrl,
@@ -52,7 +59,11 @@ export async function streamAgentProviderTurn(
     signal,
   });
   if (!response.ok) {
-    const text = await response.text();
+    const text = await readBoundedAIServiceResponseText(
+      response,
+      AI_SERVICE_HTTP_BODY_LIMITS.errorBytes,
+      'Agent Provider 错误响应',
+    );
     let body: unknown = text;
     try {
       body = text ? JSON.parse(text) : text;
@@ -65,7 +76,7 @@ export async function streamAgentProviderTurn(
 
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
-  const state = createAgentProviderStreamState();
+  const state = createAgentProviderStreamState(limits);
   let buffer = '';
   const consume = (flush = false) => {
     const lines = buffer.split(/\r?\n/);
@@ -98,12 +109,26 @@ export async function streamAgentProviderTurn(
       const chunk = await reader.read();
       done = chunk.done;
       if (chunk.value) {
-        buffer += decoder.decode(chunk.value, { stream: !done });
-        consume();
+        const fragment = decoder.decode(chunk.value, { stream: !done });
+        buffer = appendBoundedAIServiceStreamText(
+          buffer,
+          fragment,
+          state.limits.maxEventBufferCharacters,
+          'Agent Provider 流式事件',
+        );
+        if (fragment.includes('\n')) consume();
       }
     }
-    buffer += decoder.decode();
+    buffer = appendBoundedAIServiceStreamText(
+      buffer,
+      decoder.decode(),
+      state.limits.maxEventBufferCharacters,
+      'Agent Provider 流式事件',
+    );
     consume(true);
+  } catch (error) {
+    await reader.cancel().catch(() => undefined);
+    throw error;
   } finally {
     reader.releaseLock();
   }

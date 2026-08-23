@@ -5,7 +5,7 @@ import styled from 'styled-components';
 import type { AgentToolApprovalSnapshot } from '@/shared/agent/agent.types';
 
 const ConfirmationCard = styled.article`
-  width: min(560px, 100%);
+  width: min(620px, 100%);
   align-self: flex-start;
   padding: 14px;
   border: 1px solid color-mix(in srgb, var(--semi-color-warning) 42%, var(--app-border));

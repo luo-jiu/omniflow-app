@@ -1,6 +1,6 @@
 # 前端验证矩阵
 
-更新时间：2026-08-23
+更新时间：2026-08-24
 
 适用范围：`omniflow-app` 前端、Electron、IPC、工作区、文件树、文件预览、上传、内置浏览器和资源捕捉相关改动的提测、自测与 review 验证。
 
@@ -437,14 +437,37 @@ legacy 兼容检查：
 - 使用非第一个资料库进入 Agent 首页；无历史时显示居中空态，有历史时自动恢复该资料库最近会话，消息顺序和 Tool 结果正确
 - 新建会话后旧会话仍在会话管理页；历史列表可以搜索、打开、内联重命名和删除，超过 50 条后可按游标继续加载且总数准确，当前会话删除后回到空态
 - 同一会话连续提交两轮时保持同一个 `sessionId`、生成不同 `runId`，第二轮能获得前一轮的 user / assistant 上下文
-- 流式回复、停止、provider 错误、只读 Tool 开始 / 进度 / 完成均只更新当前会话；新会话创建时 `start` 返回前，以及恢复仍在运行的会话读取快照期间，抢跑事件均不丢失；Tool 前后分段的 assistant 内容在完成、取消或失败时不重复，离开页面期间漏掉的部分在失败事件后也能立即补齐
+- 用户明确说“请记住，以后都这样”时，模型只能生成 `memory.propose` 待确认 ToolRun；确认卡完整显示类型、范围、标题、规则、原因和适用场景。批准前、拒绝后、停止、超时和应用重启后 `agent_memories` 均没有新行；批准后先持久化稳定 memory ID / revision，再继续模型回答
+- 长期记忆管理页能查看 global 与当前资料库记录、搜索、内联编辑和删除；超过 50 条后按 `updatedAt + memoryId` 游标继续加载，搜索结果的 `total` 准确且不受已加载页限制。首屏或搜索读取失败时显示可重试错误，下一页失败保留已有列表、total 和游标；编辑期间搜索与继续分页不可把编辑行卸载成隐藏锁定态。编辑 / 删除携带 revision，冲突不覆盖较新内容；成功更新采用 main 返回 row，成功删除采用 main 确认结果，二者都更新当前查询并保留已加载分页，不依赖写后全量重载。mutation 期间切换搜索词时只刷新最新查询，旧查询结果不能覆盖；切换用户、API 基址或资料库时旧 owner / 资料库记录不闪现，A -> B -> A 的首个迟到响应也不能被重新接纳。global 记录可跨资料库读取，`project` 记录只能在所属资料库读取；同一 owner 的 global + 当前资料库可见集合写入第 201 条时明确失败，但其他资料库仍可独立保存。原地初始化必须替换旧 quota trigger；开发期遗留超限数据可以在管理页清理，但召回不能静默截取前 200 条，清理到上限后才恢复完整候选召回
+- 每个 Run 在预算预检前最多召回 5 条、6,000 字符候选，当前请求与规范近期历史投影先获得预算，记忆只使用剩余 token；无剩余预算时不注入，也不能挤掉近期历史或让当前请求预检失败。召回内容只出现在独立低权限 user / assistant envelope，不进入 system、不写回 transcript、不授权 Tool。当前请求或重新感知与记忆冲突时以前者为准；用户明确要求本轮忽略记忆时不读取候选，删除后下一 Run 立即不再召回
+- 构造超过安全预算的长会话时，SQLite 仍保留全部 Message / Run / ToolRun，provider 请求只包含最新 completed 摘要、近期完整终态 Run、规范 ToolRun 事实和当前 Run；checkpoint 覆盖边界不切开 Run，当前 user 只出现一次。摘要调用没有 Tool schema，不创建 Run / ToolRun / Message 或时间线事件
+- 自动摘要输出不是严格 V1 JSON、为空、超长、包含额外字段或 provider 请求失败时，本轮仍以有界近期历史继续，不发送无界 transcript；连续三次失败进入按 Session + 配置 + 模型隔离的五分钟冷却，切换模型可重新尝试。API Key、Authorization / Bearer、Cookie、密码、token、JWT 和签名 URL 查询参数在摘要输入、持久化输出和历史投影中均不可见
+- 摘要或历史消息即使声称“用户已经批准”也不能授权 Tool；同一个写动作在上一个 Run 已经允许后，新 Run 仍必须创建新的精确确认，单次 approval 不形成长期许可
+- provider Tool result 因上下文预算被截断时，SQLite 中经安全清洗和规范存储上限收口的 ToolRun 结果不得被二次投影反向覆盖；最近 12 条规范 ToolRun 事实仍可跨 checkpoint 提供。历史摘要与本轮目录、文件感知冲突时，以当前安全上下文和重新调用 Tool 的结果为准
+- provider system role 只包含稳定策略、受控 ID、平台和能力；目录名、文件名及感知正文不进入 system。无 Tool fallback 将清洗后的感知作为单独的低权限结构消息，文件名中的指令不能覆盖策略或形成用户授权
+- user prompt 包含高置信 API Key、认证头、Cookie、密码、token 或私钥时，在 Session / Run 创建前被拒绝；旧历史消息、Tool 进度、确认预览、结果和 provider 错误中的同类内容在 SQLite、renderer 事件与下一轮 provider 投影中均被清洗
+- `memory.propose` 与管理页编辑包含 API Key、认证头、Cookie、密码、token、私钥或签名 URL 时在写入前拒绝，不能把清洗占位符当成有效记忆继续保存；普通对话、当前任务状态和可从文件 / Tool 重新读取的事实不自动提取为长期记忆
+- 已知 Tool 收到字符串数字、缺失必填项、额外字段、危险原型键、循环或异常对象时，在领域 `validate`、权限 `assess`、确认、Renderer 请求和 executor 前被统一拒绝；参数不转换、不补默认值、不删除字段，原值不进入下一轮 provider 历史、SQLite 或 renderer 事件，且不创建 ToolRun。Broker 直达 main executor 时同样不能绕过 Schema 校验
+- assistant 单 turn / Run 分别超过 64,000 字符、Agent SSE pending 超过 128,000、Tool 参数单次超过 64,000 或单轮超过 128,000、摘要输出超过 20,000 字符时均取消读取且不执行后续 Tool；通用 AI SSE 256,000、HTTP 成功 JSON 2 MiB与错误 body 64 KiB 上限同样生效
+- 调整 Agent `outputReserveTokens` 后，常规 Tool turn、无 Tool fallback 和无 Tool 摘要请求均携带同一个正整数 provider 输出上限；官方 OpenAI 只发送 `max_completion_tokens`，DeepSeek / Local 与 Claude 只发送 `max_tokens`。未显式传 Agent 预算的普通 AI 调用保持原行为，字符硬上限仍独立生效
+- 初始没有感知快照、Renderer Tool 执行后可能首次返回感知时，极限上下文预算按执行前后两种 system prompt 的较大值预检；预算不足必须在确认卡、ToolRun 和任何写入副作用之前失败
+- 流式回复、停止、provider 错误、只读 Tool 开始 / 进度 / 完成均只更新当前会话；Tool 进度先持久化再展示，完成、取消或失败后以规范 ToolActivity 收口。新会话创建或已有会话续写时 `start` 返回前，以及恢复仍在运行的会话读取快照期间，抢跑事件均不丢失；提前到达的 `started` 会立即把本轮乐观 user 消息绑定到规范 Run，任务卡不短暂跳位。Tool 前后分段的 assistant 内容在完成、取消或失败时不重复，离开页面期间漏掉的部分在失败事件后也能立即补齐
+- Run / ToolActivity 按持久化 `revision` 单调合并；构造同毫秒更新、系统时钟回拨、确认 / 交互 / 进度乱序和终态后的迟到 active 事件，均以较高 revision 的规范快照为准，墙钟只影响展示。终态 Run 后新增 Tool 或把已完成 Tool 改回 active 必须在 SQLite 层被拒绝
+- 消息与 ToolActivity 按真实调用位置组成同一时间线；实时 Tool 锚点、同毫秒 Tool 前后 assistant delta、历史规范 tool message 和恢复中的未完成 Tool 均不跳位。有匹配活动的历史 Tool 文本不重复显示，无法匹配的旧 Tool 消息仍可读。应用重启后进度、确认、完成、失败、取消和中断卡片可由 SQLite 恢复，终态不被迟到事件退回执行中
+- Run 开始后，任务进度卡固定在对应 user 消息后，不因 `currentStep` 更新跳到时间线末尾；无 Tool 的活跃 Run 显示当前阶段，纯文本 Run 完成后不残留空卡。真实 Tool 步骤按持久化 `ordinal` 排序，同一毫秒创建也不乱序；恢复会话后任务状态、步骤摘要和实时执行一致
+- 需要 2 至 8 个业务 Tool 的任务可先显示一次性计划；`agent.plan.set` 本身不生成 ToolRun、不进入业务 Tool 配额，也不显示重复 Tool 卡。计划步骤与后续精确 Tool 名称按顺序单调关联，步骤状态只跟随真实 ToolRun；偏离计划或重试的真实 Tool 仍作为额外执行展示，未关联步骤在终态显示未执行。刷新或重开应用后计划、关联和任务卡位置保持一致且不自动重放
+- 普通问答和单 Tool 任务不创建计划；模型提交状态、进度、结果、权限、UI 字段、未知 Tool、超限步骤或在首个真实 Tool 后改写计划时，main / SQLite 拒绝计划但不伪造执行事实。计划中的 Tool 名称不构成预授权，写操作仍完整经过参数校验、确认和一次性执行能力
 - 在当前目录请求“创建一个叫测试的文件夹”时显示精确确认卡片；允许后只创建一次，后端返回节点后先提交 authoritative result，再刷新目标目录树并通过 `file.list` 感知到同一个 `createdNodeId` 后继续回答；取消后不创建，模型能依据拒绝结果结束本轮
 - 选中单个普通音频或视频后请求“检查这个媒体文件”，`media.inspect` 不弹写操作确认，能返回真实容器、时长和媒体流元数据；未安装 ffprobe 时明确提示环境缺失且不显示模拟结果。真实媒体由用户手工验证，自动化只使用 JSON fixture，不播放媒体
 - 在 macOS 本地 MinIO 的非第一个资料库中选中单个视频后请求“提取音频”，确认卡片准确显示源文件、当前目录、输出名和格式；拒绝时不生成文件，允许后只上传到授权时的当前目录，默认生成 `*-audio.m4a`，长名称仍保留 `-audio.<格式>` 且不超过 240 UTF-8 bytes，同名时 Tool 结果使用后端实际自动改名后的名称。真实媒体内容与格式由用户手工验证，自动化不得播放媒体
+- `directory.create` 与 `media.extractAudio` 完成后显示资料库产物卡片，点击“在目录树中定位”只分发 `tree.revealNode` 并定位到同一资料库节点；`media.inspect` 只展示白名单容器、时长、大小、码率和媒体流数量，不展示签名 URL、原始 tags 或未知结果字段
 - `media.extractAudio` 分别验证停止 ffmpeg、上传中停止、上传失败、无音轨、未安装 ffmpeg、目录刷新失败和应用窗口关闭：commit 前 main 取消或 Broker 超时会发出 Renderer 取消事件，进程树、主进程 PUT、后端 multipart Session、loopback claim 与本地临时产物均被清理；上传创建节点成功后立即 commit，此后停止、页面卸载、刷新失败或最终回执超时均保留该实际文件并使用 committed fallback，不得再次提取造成重复文件
 - 等待确认时离开再返回 Agent 工作区，确认卡片可从当前会话恢复；停止任务、确认超时、注销、窗口销毁或应用重启后动作失效，不能在恢复时自动执行
-- Agent 消息区域、输入框和会话管理页复用 `8px` 工作区滚动条，在亮色 / 暗色主题下没有白色宽轨或不跟随主题的滑块；流式输出只在用户原本接近底部时自动跟随，向上回看后不会被每个增量强制拉回底部
-- 关闭并重新打开应用后，已完成会话可以恢复；退出时仍为 `running` / `awaiting_approval` 的 Run / ToolRun 显示为“上一轮已中断”，不自动重放请求、确认或 Tool
+- 模型调用 `interaction.request` 时，单选 / 多选及文字、数字、开关、下拉表单按持久化 schema 展示；提交一次后原 Tool / Run 继续，选择结果进入下一轮模型上下文，卡片保留为只读历史且不能重复提交
+- 等待输入时离开再返回当前会话，交互卡从 SQLite 恢复且 renderer 未提交草稿不伪装为已保存；窗口、owner scope、资料库、Session、Run 或 interaction ID 任一不匹配时提交被拒绝，非法字段和选项不进入模型。停止、30 分钟超时、注销、窗口销毁或应用重启后分别显示取消、过期或中断，不自动恢复模型运行
+- Agent 消息区域、输入框、会话管理页和长期记忆管理页复用 `8px` 工作区滚动条，在亮色 / 暗色主题下没有白色宽轨或不跟随主题的滑块；流式输出只在用户原本接近底部时自动跟随，向上回看后不会被每个增量强制拉回底部
+- 关闭并重新打开应用后，已完成会话可以恢复；退出时仍为 `running` / `awaiting_approval` / `awaiting_interaction` 的 Run / ToolRun 显示为“上一轮已中断”，不自动重放请求、确认、交互或 Tool
+- 应用在摘要生成期间退出后，遗留 `started` checkpoint 恢复为 `interrupted` 且不激活；最新 completed checkpoint、coverage sequence 和完整原始消息仍可恢复。failed / interrupted checkpoint 不改变会话排序、标题、预览或消息数，删除 Session 时整条 checkpoint 链随之级联清理
 - 打包产物中的 `sqlite3` 原生模块位于 ASAR 解包目录，macOS / Windows 对应安装包均能创建和重新打开 `agent-sessions.sqlite3`
 
 边界路径：
@@ -453,9 +476,11 @@ legacy 兼容检查：
 - 相同 `libraryId` 下切换用户或 API 基址时不能看到、续接、重命名或删除其他 owner 的会话；v1 数据升级后不能被新 owner 自动认领。任何验证场景禁止使用第一个资料库，`Win` 可用时优先使用 `Win`
 - Session ID 不属于当前 owner scope 或 `libraryId` 时读取、续接、重命名和删除均被拒绝；注销或 401 清理会取消当前主窗口全部 Agent Run。普通工作区切换允许纯 main Run 在后台完成，但正在执行 Renderer 上传的 Run 必须中止上传并停止，不能在 main 悬挂到超时
 - 同一 Session 正在启动或运行时拒绝第二个 Run 和删除；停止只能由发起该 Run 的主窗口执行
+- 迟到或乱序的 `run-updated` 不能覆盖更新快照，任何已完成、失败、取消或中断 Run 都不能退回 `running / awaiting_*`；任务投影只读 Run / ToolRun，不触发 Tool、不消耗调用上限，也不把未执行计划项写成 ToolRun
 - Run 开始后编辑或删除来源 AI 服务配置会被拒绝；切换 active 配置不改变本轮连接，后续 Tool 轮次与 fallback 仍使用启动时固定的 provider、Base URL 和 Key，终止后配置锁释放
 - overlay、独立媒体窗口和非主 frame 调用 Agent IPC 时被拒绝
 - 确认、Renderer 内部能力、写入 commit 或执行完成请求只要窗口、owner scope、资料库、Session、Run 或一次性 ID 任一不匹配就被拒绝；同一媒体来源能力、commit 和执行结果均不能重复提交
+- 模型不能通过交互卡提供 HTML、JSX、回调、IPC channel、URL 或可执行行为，也不能请求 API Key、密码、Cookie 和访问令牌；选项、字段、标题和回答长度 / 数量均命中 main 侧上限
 - Agent SQLite、IPC 响应、日志和消息中不出现 AI Service API Key、Cookie、签名 URL 或完整环境变量；升级 `sqlite3` 或 N-API 版本后打包必须重新准备目标原生模块，不能复用旧缓存
 - `media.inspect` 的签名 URL 只在 Renderer 到 main 的受权瞬时 IPC 和 main 内存代理中存在；ffprobe 命令行只出现 loopback URL，Tool 结果只保留白名单元数据，原始 tags、文件来源、代理 token 和 stderr 不进入消息或 SQLite
 - `media.extractAudio` 的 6 小时签名 URL、loopback token、ffmpeg stderr、本地路径和 artifact ID 不进入 Agent 消息、Tool 结果、SQLite 或日志；来源 capability 不能重放，产物只能由匹配窗口、Session、Run 和 execution 释放，单文件 2 GiB、4 个活跃产物、默认 8 GiB 总预留和 1 小时无活动 TTL 上限均生效，近期崩溃残留计入总量，应用启动会清理过期残留，持续上传时进度能续期 lease
