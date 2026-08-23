@@ -4,6 +4,7 @@ import {
   CardItem,
   CardActions,
   ActionIconBtn,
+  CardArtwork,
   CardIcon,
   CardName
 } from '../../style';
@@ -50,10 +51,8 @@ const LibraryCard: React.FC<LibraryCardProps> = ({
       </CardActions>
 
       <div className="card-main">
-        <CardIcon
-          style={{ backgroundImage: `url(${libraryFolderImage})` }}
-          aria-hidden
-        >
+        <CardIcon aria-hidden>
+          <CardArtwork src={libraryFolderImage} alt="" draggable={false} />
           <CardName>{library.name}</CardName>
         </CardIcon>
       </div>

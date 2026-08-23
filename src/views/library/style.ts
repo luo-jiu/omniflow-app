@@ -354,24 +354,20 @@ export const CardIcon = styled.div`
   width: 100%;
   height: 120px;
   background: transparent;
-  background-position: center;
-  background-size: contain;
-  background-repeat: no-repeat;
+  user-select: none;
+  pointer-events: none;
+`
+
+export const CardArtwork = styled.img`
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
   user-select: none;
   pointer-events: none;
 
-  &::after {
-    content: '';
-    position: absolute;
-    inset: 0;
-    border-radius: 8px;
-    background: transparent;
-    pointer-events: none;
-    z-index: 1;
-  }
-
-  body[theme-mode="dark"] &::after {
-    background: rgba(15, 18, 24, 0.24);
+  body[theme-mode="dark"] & {
+    filter: brightness(0.78);
   }
 `
 
