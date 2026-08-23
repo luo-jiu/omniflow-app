@@ -1,0 +1,1034 @@
+{
+  "$schema": "./capability-ledger.schema.json",
+  "schemaVersion": 1,
+  "ledgerVersion": "2026-08-23.2",
+  "cutoverUnits": [
+    {
+      "id": "network-capture",
+      "description": "Request timing, protected context, headers, rules, classification, deduplication, and resource-state handoff.",
+      "atomicCutover": true,
+      "dependsOn": [],
+      "dependencyMapping": "pending",
+      "dispatchBoundaryRefs": [
+        "electron/service/embeddedBrowserMainSupport.ts#initializeEmbeddedBrowserMainBridges",
+        "electron/service/embeddedBrowserResourceBridge.ts#initializeEmbeddedBrowserResourceBridge"
+      ]
+    },
+    {
+      "id": "deep-search-runtime",
+      "description": "Document-start Worker, fetch, XHR, JSON, TextDecoder, key, manifest, and page-action runtime bundle.",
+      "atomicCutover": true,
+      "dependsOn": [],
+      "dependencyMapping": "pending",
+      "dispatchBoundaryRefs": [
+        "electron/service/embeddedBrowserResourceProbeScriptTemplate.ts#createEmbeddedBrowserResourceProbeScript",
+        "electron/service/embeddedBrowserViewLifecycle.ts#installEmbeddedBrowserResourceProbe"
+      ]
+    },
+    {
+      "id": "mse-runtime",
+      "description": "MediaSource capture, bounded page buffering, main spool, reset, finalize, and merge lifecycle.",
+      "atomicCutover": true,
+      "dependsOn": [],
+      "dependencyMapping": "pending",
+      "dispatchBoundaryRefs": [
+        "electron/service/embeddedBrowserResourceProbeRuntimeHooks.ts#embeddedBrowserResourceProbeRuntimeHooksBody",
+        "electron/service/embeddedBrowserMainController.ts#onProbePayload"
+      ]
+    },
+    {
+      "id": "hls-engine",
+      "description": "HLS parse, plan, key, map, range, rendition, live, retry, preprocessing, and byte-output semantics.",
+      "atomicCutover": true,
+      "dependsOn": [],
+      "dependencyMapping": "pending",
+      "dispatchBoundaryRefs": [
+        "src/features/embedded-browser/resources/services/embedded-browser-resource-manifest-actions.ts#loadEmbeddedBrowserHlsManifest",
+        "electron/service/embeddedBrowserMainController.ts#downloadEmbeddedBrowserHlsPlanResource"
+      ]
+    },
+    {
+      "id": "dash-engine",
+      "description": "DASH parse, plan, BaseURL, timeline, track, range, download, merge, and rejection semantics.",
+      "atomicCutover": true,
+      "dependsOn": [],
+      "dependencyMapping": "pending",
+      "dispatchBoundaryRefs": [
+        "src/features/embedded-browser/resources/services/embedded-browser-resource-manifest-actions.ts#loadEmbeddedBrowserMpdManifest",
+        "electron/service/embeddedBrowserMainController.ts#downloadEmbeddedBrowserMpdPlanResource"
+      ]
+    },
+    {
+      "id": "transfer-engine",
+      "description": "Concurrent transfer, Range, retry, abort, ordered output, cancellation, memory budget, and task ownership.",
+      "atomicCutover": true,
+      "dependsOn": [],
+      "dependencyMapping": "pending",
+      "dispatchBoundaryRefs": [
+        "electron/service/embeddedBrowserFragmentDownloader.ts#EmbeddedBrowserFragmentDownloader",
+        "electron/service/embeddedBrowserMainController.ts#registerIpcHandlers"
+      ]
+    },
+    {
+      "id": "output-integration",
+      "description": "Verified staged output, leases, ffmpeg, local save, library delivery, normal downloads, external tools, and workflow projection.",
+      "atomicCutover": true,
+      "dependsOn": [],
+      "dependencyMapping": "pending",
+      "dispatchBoundaryRefs": [
+        "electron/service/embeddedBrowserMainController.ts#registerIpcHandlers",
+        "src/features/tool-workspace/ToolWorkspaceMedia.tsx#ToolWorkspaceMedia"
+      ]
+    }
+  ],
+  "exclusionFamilies": [],
+  "capabilities": [
+    {
+      "id": "capture.network-event-lifecycle",
+      "origin": "cross-boundary",
+      "boundary": "main.network-adapter",
+      "cutoverUnitId": "network-capture",
+      "additionalRiskTags": ["production-runtime", "cross-process", "long-task"],
+      "upstreamSources": [
+        { "path": "js/background.js", "anchor": "chrome.webRequest.onResponseStarted", "introducedBy": null, "blobHash": null }
+      ],
+      "localContractRefs": [
+        { "path": "electron/service/embeddedBrowserResourceBridge.ts", "anchor": "initializeEmbeddedBrowserResourceBridge", "sourceHash": null }
+      ],
+      "auditedThrough": null,
+      "oracleRelation": "platform-substitute",
+      "disposition": "pending",
+      "mapping": "unmapped",
+      "requiredEvidence": {
+        "beforeCutover": ["fixture", "behavior", "candidateIntegration", "candidateSoak"],
+        "forCompletion": ["fixture", "behavior", "candidateIntegration", "candidateSoak", "activeIntegration", "activeSoak"]
+      },
+      "ownerRefs": {
+        "targetProduction": ["electron/service/embedded-browser/capture/adapters/electron-network.ts#ElectronNetworkCaptureAdapter"],
+        "candidate": [],
+        "legacy": ["electron/service/embeddedBrowserResourceBridge.ts#initializeEmbeddedBrowserResourceBridge"]
+      },
+      "fixtures": ["network.first-byte-long-response", "network.context-terminal-cleanup"],
+      "decision": null,
+      "acceptedDifferences": [],
+      "notes": "Seed gap: the current bridge records onCompleted rather than first byte and has no explicit cancellation/redirect closure contract. Local closure remains incomplete."
+    },
+    {
+      "id": "capture.protected-request-context",
+      "origin": "cross-boundary",
+      "boundary": "main.context-vault",
+      "cutoverUnitId": "network-capture",
+      "additionalRiskTags": ["production-runtime", "cross-process", "credentials", "security-boundary"],
+      "upstreamSources": [
+        { "path": "js/background.js", "anchor": "G.requestHeaders", "introducedBy": null, "blobHash": null },
+        { "path": "js/background.js", "anchor": "getRequestHeaders", "introducedBy": null, "blobHash": null }
+      ],
+      "localContractRefs": [
+        { "path": "electron/service/embeddedBrowserResourceBridge.ts", "anchor": "requestContextsByRequestId", "sourceHash": null },
+        { "path": "electron/service/embeddedBrowserResourceTypes.ts", "anchor": "EmbeddedBrowserCapturedRequestHeaders", "sourceHash": null }
+      ],
+      "auditedThrough": null,
+      "oracleRelation": "platform-substitute",
+      "disposition": "pending",
+      "mapping": "unmapped",
+      "requiredEvidence": {
+        "beforeCutover": ["fixture", "behavior", "candidateIntegration", "candidateSoak"],
+        "forCompletion": ["fixture", "behavior", "candidateIntegration", "candidateSoak", "activeIntegration", "activeSoak"]
+      },
+      "ownerRefs": {
+        "targetProduction": ["electron/service/embedded-browser/capture/state/network-context-vault.ts#NetworkContextVault"],
+        "candidate": [],
+        "legacy": ["electron/service/embeddedBrowserResourceBridge.ts#requestContextsByRequestId"]
+      },
+      "fixtures": ["network.sensitive-header-projection", "network.context-ttl-purpose-binding"],
+      "decision": null,
+      "acceptedDifferences": [],
+      "notes": "Seed gap: sensitive header values cross main, preload, renderer, plans, tools, and download commands; the current Map has no TTL or capacity budget."
+    },
+    {
+      "id": "capture.request-url-helpers",
+      "origin": "upstream-derived",
+      "boundary": "capture.request-url-policy",
+      "cutoverUnitId": "network-capture",
+      "additionalRiskTags": ["production-runtime", "credentials", "security-boundary"],
+      "upstreamSources": [
+        { "path": "js/function.js", "anchor": "function setRequestHeaders(data = {}, callback = undefined)", "introducedBy": null, "blobHash": "sha256:f1876eeec0e22e25f2424054d0ea15510027a93237a3109d016f2e7cc16c59a0" },
+        { "path": "js/function.js", "anchor": "function setHeaders(data, callBack, tabId = -1)", "introducedBy": null, "blobHash": "sha256:f1876eeec0e22e25f2424054d0ea15510027a93237a3109d016f2e7cc16c59a0" },
+        { "path": "js/function.js", "anchor": "function isDamnUrl(url)", "introducedBy": null, "blobHash": "sha256:f1876eeec0e22e25f2424054d0ea15510027a93237a3109d016f2e7cc16c59a0" },
+        { "path": "js/function.js", "anchor": "function isLockUrl(url)", "introducedBy": null, "blobHash": "sha256:f1876eeec0e22e25f2424054d0ea15510027a93237a3109d016f2e7cc16c59a0" }
+      ],
+      "localContractRefs": [],
+      "auditedThrough": null,
+      "oracleRelation": "exact",
+      "disposition": "pending",
+      "mapping": "unmapped",
+      "requiredEvidence": {
+        "beforeCutover": ["fixture", "behavior", "candidateIntegration", "candidateSoak"],
+        "forCompletion": ["fixture", "behavior", "candidateIntegration", "candidateSoak", "activeIntegration", "activeSoak"]
+      },
+      "ownerRefs": {
+        "targetProduction": ["electron/service/embedded-browser/cat-catch-port/network/request-url-helpers.ts#RequestUrlHelpers"],
+        "candidate": [],
+        "legacy": []
+      },
+      "fixtures": ["network.request-header-rule-scope", "network.url-filtering-parity"],
+      "decision": null,
+      "acceptedDifferences": [],
+      "notes": "Seed only: Cat Catch request-header and URL filtering helpers are now anchored to the observed upstream bytes, but their dependency closure and OmniFlow mapping have not been audited."
+    },
+    {
+      "id": "capture.rules-classification-deduplication",
+      "origin": "cross-boundary",
+      "boundary": "capture.network-core",
+      "cutoverUnitId": "network-capture",
+      "additionalRiskTags": ["production-runtime"],
+      "upstreamSources": [
+        { "path": "js/background.js", "anchor": "findMedia", "introducedBy": null, "blobHash": null },
+        { "path": "js/init.js", "anchor": "Ext", "introducedBy": null, "blobHash": null }
+      ],
+      "localContractRefs": [
+        { "path": "electron/service/embeddedBrowserResourceCaptureRules.ts", "anchor": "evaluateEmbeddedBrowserResourceCapture", "sourceHash": null },
+        { "path": "electron/service/embeddedBrowserResourceClassifier.ts", "anchor": "classifyCapturedResource", "sourceHash": null }
+      ],
+      "auditedThrough": null,
+      "oracleRelation": "semantic-equivalent",
+      "disposition": "pending",
+      "mapping": "unmapped",
+      "requiredEvidence": {
+        "beforeCutover": ["fixture", "behavior", "candidateIntegration", "candidateSoak"],
+        "forCompletion": ["fixture", "behavior", "candidateIntegration", "candidateSoak", "activeIntegration", "activeSoak"]
+      },
+      "ownerRefs": {
+        "targetProduction": ["electron/service/embedded-browser/cat-catch-port/network/classifier.ts#classifyResource"],
+        "candidate": [],
+        "legacy": [
+          "electron/service/embeddedBrowserResourceCaptureRules.ts#evaluateEmbeddedBrowserResourceCapture",
+          "electron/service/embeddedBrowserResourceClassifier.ts#classifyCapturedResource"
+        ]
+      },
+      "fixtures": ["network.rule-ordering", "network.mime-extension-dedupe"],
+      "decision": null,
+      "acceptedDifferences": [],
+      "notes": "Seed mapping only; ordering and heuristic parity have not been proven against the pinned upstream closure."
+    },
+    {
+      "id": "capture.resource-state-contract",
+      "origin": "omniflow-integration",
+      "boundary": "main.resource-state",
+      "cutoverUnitId": "network-capture",
+      "additionalRiskTags": ["production-runtime", "cross-process"],
+      "upstreamSources": [],
+      "localContractRefs": [
+        { "path": "electron/service/embeddedBrowserResourceStateStore.ts", "anchor": "tabCaptureStates", "sourceHash": null }
+      ],
+      "auditedThrough": null,
+      "oracleRelation": "not-applicable",
+      "disposition": "pending",
+      "mapping": "unmapped",
+      "requiredEvidence": {
+        "beforeCutover": ["fixture", "behavior", "candidateIntegration", "candidateSoak"],
+        "forCompletion": ["fixture", "behavior", "candidateIntegration", "candidateSoak", "activeIntegration", "activeSoak"]
+      },
+      "ownerRefs": {
+        "targetProduction": ["electron/service/embedded-browser/capture/state/resource-state-store.ts#ResourceStateStore"],
+        "candidate": [],
+        "legacy": ["electron/service/embeddedBrowserResourceStateStore.ts#tabCaptureStates"]
+      },
+      "fixtures": ["state.capacity-ttl-dedupe", "state.tab-navigation-close"],
+      "decision": null,
+      "acceptedDifferences": [],
+      "notes": "The current main Map is the production state owner but has no entry budget, TTL, or application-wide disposal method."
+    },
+    {
+      "id": "capture.cross-process-contract",
+      "origin": "omniflow-integration",
+      "boundary": "electron.resource-contract",
+      "cutoverUnitId": "network-capture",
+      "additionalRiskTags": ["production-runtime", "cross-process", "security-boundary"],
+      "upstreamSources": [],
+      "localContractRefs": [
+        { "path": "electron/service/embeddedBrowserResourceTypes.ts", "anchor": "EmbeddedBrowserCapturedResource", "sourceHash": null },
+        { "path": "electron/preload.ts", "anchor": "electronEmbeddedBrowser", "sourceHash": null },
+        { "path": "src/features/embedded-browser/resources/types.ts", "anchor": "EmbeddedBrowserCapturedResource", "sourceHash": null }
+      ],
+      "auditedThrough": null,
+      "oracleRelation": "not-applicable",
+      "disposition": "pending",
+      "mapping": "unmapped",
+      "requiredEvidence": {
+        "beforeCutover": ["fixture", "behavior", "candidateIntegration", "candidateSoak"],
+        "forCompletion": ["fixture", "behavior", "candidateIntegration", "candidateSoak", "activeIntegration", "activeSoak"]
+      },
+      "ownerRefs": {
+        "targetProduction": ["electron/service/embedded-browser/contracts/captured-resource.ts#CapturedResourceContract"],
+        "candidate": [],
+        "legacy": [
+          "electron/service/embeddedBrowserResourceTypes.ts#EmbeddedBrowserCapturedResource",
+          "electron/preload.ts#electronEmbeddedBrowser",
+          "electron/electron-env.d.ts#EmbeddedBrowserCapturedResource",
+          "src/features/embedded-browser/resources/types.ts#EmbeddedBrowserCapturedResource"
+        ]
+      },
+      "fixtures": ["contract.resource-dto-single-source", "contract.renderer-safe-projection", "closure.resource-ipc-channels"],
+      "decision": null,
+      "acceptedDifferences": [],
+      "notes": "Seed gap: resource and processing DTOs are duplicated across main, preload, ambient declarations, renderer types, and APIs."
+    },
+    {
+      "id": "capture.owner-lifecycle-closure",
+      "origin": "omniflow-integration",
+      "boundary": "electron.lifecycle",
+      "cutoverUnitId": "network-capture",
+      "additionalRiskTags": ["production-runtime", "cross-process", "long-task", "temp-file"],
+      "upstreamSources": [],
+      "localContractRefs": [
+        { "path": "electron/service/embeddedBrowserMainController.ts", "anchor": "closeEmbeddedBrowserTab", "sourceHash": null },
+        { "path": "electron/service/embeddedBrowserMainController.ts", "anchor": "dispose", "sourceHash": null }
+      ],
+      "auditedThrough": null,
+      "oracleRelation": "not-applicable",
+      "disposition": "pending",
+      "mapping": "unmapped",
+      "requiredEvidence": {
+        "beforeCutover": ["fixture", "behavior", "candidateIntegration", "candidateSoak"],
+        "forCompletion": ["fixture", "behavior", "candidateIntegration", "candidateSoak", "activeIntegration", "activeSoak"]
+      },
+      "ownerRefs": {
+        "targetProduction": ["electron/service/embedded-browser/shell/embedded-browser-lifecycle.ts#EmbeddedBrowserLifecycle"],
+        "candidate": [],
+        "legacy": ["electron/service/embeddedBrowserMainController.ts#closeEmbeddedBrowserTab", "electron/service/embeddedBrowserMainController.ts#dispose"]
+      },
+      "fixtures": ["lifecycle.navigation-close-exit-crash", "lifecycle.spontaneous-view-destroy"],
+      "decision": null,
+      "acceptedDifferences": [],
+      "notes": "Explicit tab close is the strongest current cleanup path; navigation, render-process-gone, spontaneous destruction, and app exit leave different owner subsets behind."
+    },
+    {
+      "id": "deep.runtime-hook-bundle",
+      "origin": "upstream-derived",
+      "boundary": "page.deep-search",
+      "cutoverUnitId": "deep-search-runtime",
+      "additionalRiskTags": ["production-runtime", "security-boundary"],
+      "upstreamSources": [
+        { "path": "catch-script/search.js", "anchor": "Worker fetch XHR JSON TextDecoder hooks", "introducedBy": null, "blobHash": null }
+      ],
+      "localContractRefs": [
+        { "path": "electron/service/embeddedBrowserResourceProbeRuntimeHooks.ts", "anchor": "embeddedBrowserResourceProbeRuntimeHooksBody", "sourceHash": null }
+      ],
+      "auditedThrough": null,
+      "oracleRelation": "exact",
+      "disposition": "pending",
+      "mapping": "unmapped",
+      "requiredEvidence": {
+        "beforeCutover": ["fixture", "behavior", "candidateIntegration", "candidateSoak"],
+        "forCompletion": ["fixture", "behavior", "candidateIntegration", "candidateSoak", "activeIntegration", "activeSoak"]
+      },
+      "ownerRefs": {
+        "targetProduction": ["electron/service/embedded-browser/cat-catch-port/deep-search/runtime.ts#installDeepSearchRuntime"],
+        "candidate": [],
+        "legacy": ["electron/service/embeddedBrowserResourceProbeRuntimeHooks.ts#embeddedBrowserResourceProbeRuntimeHooksBody"]
+      },
+      "fixtures": ["deep.hook-install-sentinels", "deep.worker-csp-fallback", "deep.text-decoder-manifest", "deep.json-depth-width-cycle"],
+      "decision": null,
+      "acceptedDifferences": [],
+      "notes": "Known seed gap: enableDeepRuntimeHooks is hard-coded false; Worker/fetch/XHR/JSON/key hooks are inactive, TextDecoder is absent, and JSON limits differ from upstream."
+    },
+    {
+      "id": "deep.manifest-key-discovery",
+      "origin": "upstream-derived",
+      "boundary": "page.deep-search",
+      "cutoverUnitId": "deep-search-runtime",
+      "additionalRiskTags": ["production-runtime", "security-boundary"],
+      "upstreamSources": [
+        { "path": "catch-script/search.js", "anchor": "findMedia and key discovery", "introducedBy": null, "blobHash": null }
+      ],
+      "localContractRefs": [
+        { "path": "electron/service/embeddedBrowserResourceProbeRuntimeCore.ts", "anchor": "probeResources", "sourceHash": null },
+        { "path": "electron/service/embeddedBrowserResourceProbeManifestHeuristics.ts", "anchor": "embeddedBrowserResourceProbeManifestHeuristicsBody", "sourceHash": null }
+      ],
+      "auditedThrough": null,
+      "oracleRelation": "exact",
+      "disposition": "pending",
+      "mapping": "unmapped",
+      "requiredEvidence": {
+        "beforeCutover": ["fixture", "behavior", "candidateIntegration", "candidateSoak"],
+        "forCompletion": ["fixture", "behavior", "candidateIntegration", "candidateSoak", "activeIntegration", "activeSoak"]
+      },
+      "ownerRefs": {
+        "targetProduction": ["electron/service/embedded-browser/cat-catch-port/deep-search/discovery.ts#discoverResources"],
+        "candidate": [],
+        "legacy": [
+          "electron/service/embeddedBrowserResourceProbeRuntimeCore.ts#embeddedBrowserResourceProbeRuntimeCoreBody",
+          "electron/service/embeddedBrowserResourceProbeManifestHeuristics.ts#embeddedBrowserResourceProbeManifestHeuristicsBody"
+        ]
+      },
+      "fixtures": ["deep.inline-manifest-key", "deep.base-url-blob-signature"],
+      "decision": null,
+      "acceptedDifferences": [],
+      "notes": "Current heuristics exist but no complete upstream behavior map or differential evidence is recorded."
+    },
+    {
+      "id": "deep.secure-page-relay",
+      "origin": "cross-boundary",
+      "boundary": "page.main-relay",
+      "cutoverUnitId": "deep-search-runtime",
+      "additionalRiskTags": ["production-runtime", "cross-process", "security-boundary"],
+      "upstreamSources": [
+        { "path": "catch-script/search.js", "anchor": "postMessage relay", "introducedBy": null, "blobHash": null }
+      ],
+      "localContractRefs": [
+        { "path": "electron/service/embeddedBrowserViewLifecycle.ts", "anchor": "console-message", "sourceHash": null },
+        { "path": "electron/service/embeddedBrowserResourceProbeScriptTemplate.ts", "anchor": "EMBEDDED_BROWSER_RESOURCE_CONSOLE_PREFIX", "sourceHash": null }
+      ],
+      "auditedThrough": null,
+      "oracleRelation": "platform-substitute",
+      "disposition": "pending",
+      "mapping": "unmapped",
+      "requiredEvidence": {
+        "beforeCutover": ["fixture", "behavior", "candidateIntegration", "candidateSoak"],
+        "forCompletion": ["fixture", "behavior", "candidateIntegration", "candidateSoak", "activeIntegration", "activeSoak"]
+      },
+      "ownerRefs": {
+        "targetProduction": ["electron/service/embedded-browser/capture/adapters/page-runtime-relay.ts#SecurePageRuntimeRelay"],
+        "candidate": [],
+        "legacy": ["electron/service/embeddedBrowserViewLifecycle.ts#console-message", "electron/service/embeddedBrowserMainController.ts#onProbePayload"]
+      },
+      "fixtures": ["deep.relay-forgery", "deep.frame-document-start"],
+      "decision": null,
+      "acceptedDifferences": [],
+      "notes": "Seed security gap: the console-prefix envelope has no nonce or capability validation, so an untrusted page can forge resource and MSE events."
+    },
+    {
+      "id": "deep.catch-toolkit-page-settings",
+      "origin": "cross-boundary",
+      "boundary": "page.toolkit-state",
+      "cutoverUnitId": "deep-search-runtime",
+      "additionalRiskTags": ["production-runtime", "security-boundary"],
+      "upstreamSources": [
+        { "path": "catch-script/catch.js", "anchor": "capture controls and media cache", "introducedBy": null, "blobHash": null }
+      ],
+      "localContractRefs": [
+        { "path": "electron/service/embeddedBrowserResourceProbeRuntimeCore.ts", "anchor": "catchToolkitStorageKeys", "sourceHash": null },
+        { "path": "electron/service/embeddedBrowserCatchToolkitPageBridge.ts", "anchor": "createEmbeddedBrowserCatchToolkitUpdateStateScript", "sourceHash": null }
+      ],
+      "auditedThrough": null,
+      "oracleRelation": "platform-substitute",
+      "disposition": "pending",
+      "mapping": "unmapped",
+      "requiredEvidence": {
+        "beforeCutover": ["fixture", "behavior", "candidateIntegration", "candidateSoak"],
+        "forCompletion": ["fixture", "behavior", "candidateIntegration", "candidateSoak", "activeIntegration", "activeSoak"]
+      },
+      "ownerRefs": {
+        "targetProduction": ["electron/service/embedded-browser/cat-catch-port/deep-search/toolkit-state.ts#CatchToolkitState"],
+        "candidate": [],
+        "legacy": ["electron/service/embeddedBrowserResourceProbeRuntimeCore.ts#catchToolkitState"]
+      },
+      "fixtures": ["deep.toolkit-origin-storage", "deep.toolkit-reload-reset"],
+      "decision": null,
+      "acceptedDifferences": [],
+      "notes": "The eight current toolkit preferences are persisted in each visited site's origin localStorage, not in an application-level owner; capture enabled state itself is memory-only."
+    },
+    {
+      "id": "mse.page-capture-runtime",
+      "origin": "upstream-derived",
+      "boundary": "page.mse-runtime",
+      "cutoverUnitId": "mse-runtime",
+      "additionalRiskTags": ["production-runtime", "large-media", "long-task", "security-boundary"],
+      "upstreamSources": [
+        { "path": "catch-script/catch.js", "anchor": "MediaSource.prototype.addSourceBuffer", "introducedBy": null, "blobHash": null }
+      ],
+      "localContractRefs": [
+        { "path": "electron/service/embeddedBrowserResourceProbeRuntimeHooks.ts", "anchor": "MediaSource.prototype.addSourceBuffer", "sourceHash": null }
+      ],
+      "auditedThrough": null,
+      "oracleRelation": "semantic-equivalent",
+      "disposition": "pending",
+      "mapping": "unmapped",
+      "requiredEvidence": {
+        "beforeCutover": ["fixture", "behavior", "candidateIntegration", "candidateSoak"],
+        "forCompletion": ["fixture", "behavior", "candidateIntegration", "candidateSoak", "activeIntegration", "activeSoak"]
+      },
+      "ownerRefs": {
+        "targetProduction": ["electron/service/embedded-browser/cat-catch-port/mse/runtime.ts#installMseRuntime"],
+        "candidate": [],
+        "legacy": ["electron/service/embeddedBrowserResourceProbeRuntimeHooks.ts#MediaSource.addSourceBuffer proxy"]
+      },
+      "fixtures": ["mse.audio-video-flush-reset", "mse.append-observability"],
+      "decision": null,
+      "acceptedDifferences": [],
+      "notes": "MSE is the only currently active runtime hook family; parity, bounded page retention, and append/endOfStream observability are unverified."
+    },
+    {
+      "id": "mse.main-spool-lifecycle",
+      "origin": "omniflow-integration",
+      "boundary": "main.mse-filesystem",
+      "cutoverUnitId": "mse-runtime",
+      "additionalRiskTags": ["production-runtime", "large-media", "long-task", "temp-file", "security-boundary"],
+      "upstreamSources": [],
+      "localContractRefs": [
+        { "path": "electron/service/embeddedBrowserMainController.ts", "anchor": "embeddedBrowserMseSpoolFiles", "sourceHash": null }
+      ],
+      "auditedThrough": null,
+      "oracleRelation": "not-applicable",
+      "disposition": "pending",
+      "mapping": "unmapped",
+      "requiredEvidence": {
+        "beforeCutover": ["fixture", "behavior", "candidateIntegration", "candidateSoak"],
+        "forCompletion": ["fixture", "behavior", "candidateIntegration", "candidateSoak", "activeIntegration", "activeSoak"]
+      },
+      "ownerRefs": {
+        "targetProduction": ["electron/service/embedded-browser/processing/mse-spool.ts#MseSpoolStore"],
+        "candidate": [],
+        "legacy": ["electron/service/embeddedBrowserMainController.ts#embeddedBrowserMseSpoolFiles"]
+      },
+      "fixtures": ["mse.lifecycle-cleanup", "mse.relay-forgery", "mse.spool-budget-recovery"],
+      "decision": null,
+      "acceptedDifferences": [],
+      "notes": "Spool files and write queues are controller Maps with no global budget, reaper, quarantine, crash recovery, or app-exit closure."
+    },
+    {
+      "id": "hls.parser-planner",
+      "origin": "upstream-derived",
+      "boundary": "manifest.hls-core",
+      "cutoverUnitId": "hls-engine",
+      "additionalRiskTags": ["production-runtime", "large-media"],
+      "upstreamSources": [
+        { "path": "js/m3u8.js", "anchor": "HLS manifest parsing and plan construction", "introducedBy": null, "blobHash": null }
+      ],
+      "localContractRefs": [
+        { "path": "src/features/embedded-browser/resources/model/embedded-browser-hls-manifest.ts", "anchor": "parseEmbeddedBrowserHlsManifest", "sourceHash": null },
+        { "path": "src/features/embedded-browser/resources/model/embedded-browser-hls-manifest.ts", "anchor": "createEmbeddedBrowserHlsDownloadPlan", "sourceHash": null }
+      ],
+      "auditedThrough": null,
+      "oracleRelation": "semantic-equivalent",
+      "disposition": "pending",
+      "mapping": "unmapped",
+      "requiredEvidence": {
+        "beforeCutover": ["fixture", "behavior", "candidateIntegration", "candidateSoak"],
+        "forCompletion": ["fixture", "behavior", "candidateIntegration", "candidateSoak", "activeIntegration", "activeSoak"]
+      },
+      "ownerRefs": {
+        "targetProduction": ["electron/service/embedded-browser/cat-catch-port/hls/parser.ts#parseHlsManifest"],
+        "candidate": [],
+        "legacy": ["src/features/embedded-browser/resources/model/embedded-browser-hls-manifest.ts#parseEmbeddedBrowserHlsManifest"]
+      },
+      "fixtures": ["hls.parser-core", "hls.byterange-map-key-discontinuity"],
+      "decision": null,
+      "acceptedDifferences": [],
+      "notes": "The renderer currently owns parser/planner semantics and sends a complete plan to main; hidden BYTERANGE offsets and full upstream closure remain unverified."
+    },
+    {
+      "id": "hls.segment-pipeline",
+      "origin": "cross-boundary",
+      "boundary": "main.hls-executor",
+      "cutoverUnitId": "hls-engine",
+      "additionalRiskTags": ["production-runtime", "large-media", "long-task", "temp-file", "credentials"],
+      "upstreamSources": [
+        { "path": "js/m3u8.downloader.js", "anchor": "class Downloader", "introducedBy": null, "blobHash": null },
+        { "path": "js/m3u8.js", "anchor": "fragment processing pipeline", "introducedBy": null, "blobHash": null }
+      ],
+      "localContractRefs": [
+        { "path": "electron/service/embeddedBrowserHlsLocalDownloaderService.ts", "anchor": "downloadEmbeddedBrowserHlsToLocalWorkDirectory", "sourceHash": null },
+        { "path": "electron/service/embeddedBrowserMainController.ts", "anchor": "downloadEmbeddedBrowserHlsPlanResource", "sourceHash": null }
+      ],
+      "auditedThrough": null,
+      "oracleRelation": "platform-substitute",
+      "disposition": "pending",
+      "mapping": "unmapped",
+      "requiredEvidence": {
+        "beforeCutover": ["fixture", "behavior", "candidateIntegration", "candidateSoak"],
+        "forCompletion": ["fixture", "behavior", "candidateIntegration", "candidateSoak", "activeIntegration", "activeSoak"]
+      },
+      "ownerRefs": {
+        "targetProduction": ["electron/service/embedded-browser/processing/hls-task.ts#HlsTaskExecutor"],
+        "candidate": [],
+        "legacy": ["electron/service/embeddedBrowserHlsLocalDownloaderService.ts#downloadEmbeddedBrowserHlsToLocalWorkDirectory", "electron/service/embeddedBrowserMainController.ts#downloadEmbeddedBrowserHlsPlanResource"]
+      },
+      "fixtures": ["hls.retry-cancel-range", "hls.decrypt-preprocess-order", "hls.failed-fragment-retry"],
+      "decision": null,
+      "acceptedDifferences": [],
+      "notes": "No single task/cancel owner spans plan execution, retry sessions, work directories, and renderer listeners."
+    },
+    {
+      "id": "hls.live-recording",
+      "origin": "cross-boundary",
+      "boundary": "main.hls-live",
+      "cutoverUnitId": "hls-engine",
+      "additionalRiskTags": ["production-runtime", "large-media", "long-task", "temp-file", "credentials"],
+      "upstreamSources": [
+        { "path": "js/m3u8.js", "anchor": "live playlist handling", "introducedBy": null, "blobHash": null }
+      ],
+      "localContractRefs": [
+        { "path": "electron/service/embeddedBrowserHlsLiveRecorder.ts", "anchor": "EmbeddedBrowserHlsLiveRecorder", "sourceHash": null },
+        { "path": "electron/service/embeddedBrowserMainController.ts", "anchor": "embeddedBrowserHlsLiveRecordingSessions", "sourceHash": null }
+      ],
+      "auditedThrough": null,
+      "oracleRelation": "platform-substitute",
+      "disposition": "pending",
+      "mapping": "unmapped",
+      "requiredEvidence": {
+        "beforeCutover": ["fixture", "behavior", "candidateIntegration", "candidateSoak"],
+        "forCompletion": ["fixture", "behavior", "candidateIntegration", "candidateSoak", "activeIntegration", "activeSoak"]
+      },
+      "ownerRefs": {
+        "targetProduction": ["electron/service/embedded-browser/processing/hls-live-task.ts#HlsLiveTask"],
+        "candidate": [],
+        "legacy": ["electron/service/embeddedBrowserHlsLiveRecorder.ts#EmbeddedBrowserHlsLiveRecorder", "electron/service/embeddedBrowserMainController.ts#embeddedBrowserHlsLiveRecordingSessions"]
+      },
+      "fixtures": ["hls.live-terminal", "hls.live-tab-close-exit"],
+      "decision": null,
+      "acceptedDifferences": [],
+      "notes": "Live recorders are held in a controller Map; close-tab attempts cleanup but app exit and crash recovery do not share the same closure."
+    },
+    {
+      "id": "hls.cache-fallback-disguised-fragments",
+      "origin": "upstream-derived",
+      "boundary": "manifest.hls-pipeline",
+      "cutoverUnitId": "hls-engine",
+      "additionalRiskTags": ["production-runtime", "large-media", "long-task"],
+      "upstreamSources": [
+        { "path": "js/content-script.js", "anchor": "force-cache manifest fallback", "introducedBy": null, "blobHash": null },
+        { "path": "js/m3u8.js", "anchor": "PNG and JPEG disguised fragment preprocessing", "introducedBy": null, "blobHash": null }
+      ],
+      "localContractRefs": [
+        { "path": "electron/service/embeddedBrowserHlsLocalDownloaderService.ts", "anchor": "fragment processing", "sourceHash": null }
+      ],
+      "auditedThrough": null,
+      "oracleRelation": "exact",
+      "disposition": "pending",
+      "mapping": "unmapped",
+      "requiredEvidence": {
+        "beforeCutover": ["fixture", "behavior", "candidateIntegration", "candidateSoak"],
+        "forCompletion": ["fixture", "behavior", "candidateIntegration", "candidateSoak", "activeIntegration", "activeSoak"]
+      },
+      "ownerRefs": {
+        "targetProduction": ["electron/service/embedded-browser/cat-catch-port/hls/pipeline.ts#preprocessFragment"],
+        "candidate": [],
+        "legacy": []
+      },
+      "fixtures": ["hls.cache-fallback-disguised", "hls.decrypt-preprocess-order"],
+      "decision": null,
+      "acceptedDifferences": [],
+      "notes": "Known unmapped gap: one-shot manifest cache fallback and PNG/JPEG disguised-fragment preprocessing are not present in the local production path."
+    },
+    {
+      "id": "dash.parser-planner",
+      "origin": "upstream-derived",
+      "boundary": "manifest.dash-core",
+      "cutoverUnitId": "dash-engine",
+      "additionalRiskTags": ["production-runtime", "large-media"],
+      "upstreamSources": [
+        { "path": "js/mpd.js", "anchor": "MPD parser and track planning", "introducedBy": null, "blobHash": null }
+      ],
+      "localContractRefs": [
+        { "path": "src/features/embedded-browser/resources/model/embedded-browser-mpd-manifest.ts", "anchor": "parseEmbeddedBrowserMpdManifest", "sourceHash": null },
+        { "path": "src/features/embedded-browser/resources/model/embedded-browser-mpd-manifest.ts", "anchor": "createEmbeddedBrowserMpdDownloadPlan", "sourceHash": null }
+      ],
+      "auditedThrough": null,
+      "oracleRelation": "semantic-equivalent",
+      "disposition": "pending",
+      "mapping": "unmapped",
+      "requiredEvidence": {
+        "beforeCutover": ["fixture", "behavior", "candidateIntegration", "candidateSoak"],
+        "forCompletion": ["fixture", "behavior", "candidateIntegration", "candidateSoak", "activeIntegration", "activeSoak"]
+      },
+      "ownerRefs": {
+        "targetProduction": ["electron/service/embedded-browser/cat-catch-port/dash/parser.ts#parseDashManifest"],
+        "candidate": [],
+        "legacy": ["src/features/embedded-browser/resources/model/embedded-browser-mpd-manifest.ts#parseEmbeddedBrowserMpdManifest"]
+      },
+      "fixtures": ["dash.parser-core", "dash.base-url-timeline-ranges"],
+      "decision": null,
+      "acceptedDifferences": [],
+      "notes": "The current hand-written renderer parser is not supported by a mature parser oracle or complete specification fixtures."
+    },
+    {
+      "id": "dash.timeline-download-merge",
+      "origin": "cross-boundary",
+      "boundary": "main.dash-executor",
+      "cutoverUnitId": "dash-engine",
+      "additionalRiskTags": ["production-runtime", "large-media", "long-task", "temp-file", "credentials"],
+      "upstreamSources": [
+        { "path": "js/mpd.js", "anchor": "SegmentTimeline and download flow", "introducedBy": null, "blobHash": null }
+      ],
+      "localContractRefs": [
+        { "path": "electron/service/embeddedBrowserMpdLocalDownloaderService.ts", "anchor": "downloadEmbeddedBrowserMpdToOutput", "sourceHash": null },
+        { "path": "electron/service/embeddedBrowserMainController.ts", "anchor": "downloadEmbeddedBrowserMpdPlanResource", "sourceHash": null }
+      ],
+      "auditedThrough": null,
+      "oracleRelation": "platform-substitute",
+      "disposition": "pending",
+      "mapping": "unmapped",
+      "requiredEvidence": {
+        "beforeCutover": ["fixture", "behavior", "candidateIntegration", "candidateSoak"],
+        "forCompletion": ["fixture", "behavior", "candidateIntegration", "candidateSoak", "activeIntegration", "activeSoak"]
+      },
+      "ownerRefs": {
+        "targetProduction": ["electron/service/embedded-browser/processing/dash-task.ts#DashTaskExecutor"],
+        "candidate": [],
+        "legacy": ["electron/service/embeddedBrowserMpdLocalDownloaderService.ts#downloadEmbeddedBrowserMpdToOutput", "electron/service/embeddedBrowserMainController.ts#downloadEmbeddedBrowserMpdPlanResource"]
+      },
+      "fixtures": ["dash.negative-repeat", "dash.download-merge-cancel", "dash.dynamic-drm-rejection"],
+      "decision": null,
+      "acceptedDifferences": [],
+      "notes": "Known seed gap includes SegmentTimeline r=-1 and incomplete dynamic MPD semantics; main trusts the renderer-supplied plan."
+    },
+    {
+      "id": "transfer.concurrent-retry-abort-order",
+      "origin": "upstream-derived",
+      "boundary": "processing.transfer-core",
+      "cutoverUnitId": "transfer-engine",
+      "additionalRiskTags": ["production-runtime", "large-media", "long-task"],
+      "upstreamSources": [
+        { "path": "js/m3u8.downloader.js", "anchor": "class Downloader", "introducedBy": null, "blobHash": null },
+        { "path": "js/downloader.js", "anchor": "fragment download control", "introducedBy": null, "blobHash": null }
+      ],
+      "localContractRefs": [
+        { "path": "electron/service/embeddedBrowserFragmentDownloader.ts", "anchor": "EmbeddedBrowserFragmentDownloader", "sourceHash": null }
+      ],
+      "auditedThrough": null,
+      "oracleRelation": "exact",
+      "disposition": "pending",
+      "mapping": "unmapped",
+      "requiredEvidence": {
+        "beforeCutover": ["fixture", "behavior", "candidateIntegration", "candidateSoak"],
+        "forCompletion": ["fixture", "behavior", "candidateIntegration", "candidateSoak", "activeIntegration", "activeSoak"]
+      },
+      "ownerRefs": {
+        "targetProduction": ["electron/service/embedded-browser/cat-catch-port/processing/transfer-engine.ts#TransferEngine"],
+        "candidate": [],
+        "legacy": ["electron/service/embeddedBrowserFragmentDownloader.ts#EmbeddedBrowserFragmentDownloader"]
+      },
+      "fixtures": ["transfer.concurrent-retry-abort-order", "transfer.range-terminal-race"],
+      "decision": null,
+      "acceptedDifferences": [],
+      "notes": "Local AbortControllers exist inside the downloader, but the orchestration layer does not retain a uniform cancel handle or terminal task record."
+    },
+    {
+      "id": "transfer.streaming-memory-budget",
+      "origin": "omniflow-integration",
+      "boundary": "processing.transfer-memory",
+      "cutoverUnitId": "transfer-engine",
+      "additionalRiskTags": ["production-runtime", "large-media", "long-task"],
+      "upstreamSources": [],
+      "localContractRefs": [
+        { "path": "electron/service/embeddedBrowserMainController.ts", "anchor": "downloadEmbeddedBrowserDirectFile", "sourceHash": null },
+        { "path": "electron/ipc/http.ts", "anchor": "HTTP IPC handlers", "sourceHash": null }
+      ],
+      "auditedThrough": null,
+      "oracleRelation": "not-applicable",
+      "disposition": "pending",
+      "mapping": "unmapped",
+      "requiredEvidence": {
+        "beforeCutover": ["fixture", "behavior", "candidateIntegration", "candidateSoak"],
+        "forCompletion": ["fixture", "behavior", "candidateIntegration", "candidateSoak", "activeIntegration", "activeSoak"]
+      },
+      "ownerRefs": {
+        "targetProduction": ["electron/service/embedded-browser/processing/streaming-transfer.ts#StreamingTransfer"],
+        "candidate": [],
+        "legacy": ["electron/service/embeddedBrowserMainController.ts#downloadEmbeddedBrowserDirectFile", "electron/ipc/http.ts#HTTP IPC handlers"]
+      },
+      "fixtures": ["transfer.large-response-memory", "transfer.temp-budget-backpressure"],
+      "decision": null,
+      "acceptedDifferences": [],
+      "notes": "Known gap: direct downloads and selected HTTP/resource reads materialize complete responses in memory."
+    },
+    {
+      "id": "processing.main-task-registry",
+      "origin": "omniflow-integration",
+      "boundary": "main.task-registry",
+      "cutoverUnitId": "transfer-engine",
+      "additionalRiskTags": ["production-runtime", "cross-process", "large-media", "long-task", "temp-file"],
+      "upstreamSources": [],
+      "localContractRefs": [
+        { "path": "electron/service/embeddedBrowserMainController.ts", "anchor": "embeddedBrowserHlsRetrySessions", "sourceHash": null },
+        { "path": "src/features/tool-workspace/hooks/useHlsDownloadTask.ts", "anchor": "useHlsDownloadTask", "sourceHash": null }
+      ],
+      "auditedThrough": null,
+      "oracleRelation": "not-applicable",
+      "disposition": "pending",
+      "mapping": "unmapped",
+      "requiredEvidence": {
+        "beforeCutover": ["fixture", "behavior", "candidateIntegration", "candidateSoak"],
+        "forCompletion": ["fixture", "behavior", "candidateIntegration", "candidateSoak", "activeIntegration", "activeSoak"]
+      },
+      "ownerRefs": {
+        "targetProduction": ["electron/service/embedded-browser/processing/task-registry.ts#ProcessingTaskRegistry"],
+        "candidate": [],
+        "legacy": ["electron/service/embeddedBrowserMainController.ts#embeddedBrowserHlsRetrySessions", "src/features/tool-workspace/hooks/useHlsDownloadTask.ts#useHlsDownloadTask", "src/features/tool-workspace/hooks/useMpdDownloadTask.ts#useMpdDownloadTask"]
+      },
+      "fixtures": ["task.registry-recovery-cancel", "task.renderer-unmount-recovery"],
+      "decision": null,
+      "acceptedDifferences": [],
+      "notes": "There is no application-wide task registry; task truth is split across controller Maps, child operations, component refs, hooks, and promises."
+    },
+    {
+      "id": "output.processing-staged-terminal",
+      "origin": "omniflow-integration",
+      "boundary": "processing.output-contract",
+      "cutoverUnitId": "output-integration",
+      "additionalRiskTags": ["production-runtime", "cross-process", "large-media", "long-task", "temp-file"],
+      "upstreamSources": [],
+      "localContractRefs": [
+        { "path": "electron/service/embeddedBrowserMainController.ts", "anchor": "emitEmbeddedBrowserHlsTask", "sourceHash": null },
+        { "path": "electron/service/embeddedBrowserMainTypes.ts", "anchor": "EmbeddedBrowserCapturedResourceMergeResponse", "sourceHash": null }
+      ],
+      "auditedThrough": null,
+      "oracleRelation": "not-applicable",
+      "disposition": "pending",
+      "mapping": "unmapped",
+      "requiredEvidence": {
+        "beforeCutover": ["fixture", "behavior", "candidateIntegration", "candidateSoak"],
+        "forCompletion": ["fixture", "behavior", "candidateIntegration", "candidateSoak", "activeIntegration", "activeSoak"]
+      },
+      "ownerRefs": {
+        "targetProduction": ["electron/service/embedded-browser/contracts/processing-task.ts#ProcessingTaskTerminal"],
+        "candidate": [],
+        "legacy": ["electron/service/embeddedBrowserMainController.ts#emitEmbeddedBrowserHlsTask"]
+      },
+      "fixtures": ["output.staged-terminal", "output.delivery-not-processing-success"],
+      "decision": null,
+      "acceptedDifferences": [],
+      "notes": "Current processing reports success with a raw outputPath before local-save or UploadManager delivery reaches a terminal state."
+    },
+    {
+      "id": "output.staged-output-lease",
+      "origin": "omniflow-integration",
+      "boundary": "main.output-lease",
+      "cutoverUnitId": "output-integration",
+      "additionalRiskTags": ["production-runtime", "cross-process", "large-media", "long-task", "temp-file", "security-boundary"],
+      "upstreamSources": [],
+      "localContractRefs": [
+        { "path": "electron/service/embeddedBrowserMainController.ts", "anchor": "outputPath responses", "sourceHash": null },
+        { "path": "electron/service/embeddedBrowserResourceFileSaveService.ts", "anchor": "saveEmbeddedBrowserExtractedResourceFile", "sourceHash": null }
+      ],
+      "auditedThrough": null,
+      "oracleRelation": "not-applicable",
+      "disposition": "pending",
+      "mapping": "unmapped",
+      "requiredEvidence": {
+        "beforeCutover": ["fixture", "behavior", "candidateIntegration", "candidateSoak"],
+        "forCompletion": ["fixture", "behavior", "candidateIntegration", "candidateSoak", "activeIntegration", "activeSoak"]
+      },
+      "ownerRefs": {
+        "targetProduction": ["electron/service/embedded-browser/processing/staged-output-lease.ts#StagedOutputLeaseStore"],
+        "candidate": [],
+        "legacy": ["electron/service/embeddedBrowserMainController.ts#outputPath responses"]
+      },
+      "fixtures": ["output.lease-reaper", "output.lease-purpose-ttl", "output.crash-quarantine"],
+      "decision": null,
+      "acceptedDifferences": [],
+      "notes": "Raw paths and temporary directories are held by renderer workflows; no opaque lease, TTL, owner task, reaper, or quarantine exists."
+    },
+    {
+      "id": "output.application-workflow-coordinator",
+      "origin": "omniflow-integration",
+      "boundary": "renderer.application-workflow",
+      "cutoverUnitId": "output-integration",
+      "additionalRiskTags": ["production-runtime", "cross-process", "large-media", "long-task", "temp-file"],
+      "upstreamSources": [],
+      "localContractRefs": [
+        { "path": "src/features/tool-workspace/ToolWorkspaceMedia.tsx", "anchor": "ToolWorkspaceMedia", "sourceHash": null },
+        { "path": "src/features/tool-workspace/hooks/useHlsDownloadTask.ts", "anchor": "useHlsDownloadTask", "sourceHash": null },
+        { "path": "src/features/tool-workspace/hooks/useMpdDownloadTask.ts", "anchor": "useMpdDownloadTask", "sourceHash": null }
+      ],
+      "auditedThrough": null,
+      "oracleRelation": "not-applicable",
+      "disposition": "pending",
+      "mapping": "unmapped",
+      "requiredEvidence": {
+        "beforeCutover": ["fixture", "behavior", "candidateIntegration", "candidateSoak"],
+        "forCompletion": ["fixture", "behavior", "candidateIntegration", "candidateSoak", "activeIntegration", "activeSoak"]
+      },
+      "ownerRefs": {
+        "targetProduction": ["src/features/embedded-browser/workflows/captured-output-workflow-coordinator.ts#CapturedOutputWorkflowCoordinator"],
+        "candidate": [],
+        "legacy": ["src/features/tool-workspace/ToolWorkspaceMedia.tsx#ToolWorkspaceMedia", "src/features/tool-workspace/hooks/useHlsDownloadTask.ts#useHlsDownloadTask", "src/features/tool-workspace/hooks/useMpdDownloadTask.ts#useMpdDownloadTask"]
+      },
+      "fixtures": ["output.workflow-remount", "output.workflow-derived-terminal", "output.single-delivery-no-partial"],
+      "decision": null,
+      "acceptedDifferences": [],
+      "notes": "Feature component unmount currently loses the task projection and listener ownership; no application-scoped recovery projection exists."
+    },
+    {
+      "id": "output.library-delivery-handoff",
+      "origin": "omniflow-integration",
+      "boundary": "renderer.upload-handoff",
+      "cutoverUnitId": "output-integration",
+      "additionalRiskTags": ["production-runtime", "large-media", "long-task", "temp-file"],
+      "upstreamSources": [],
+      "localContractRefs": [
+        { "path": "src/features/embedded-browser/resources/hooks/useResourceImportToLibrary.ts", "anchor": "useResourceImportToLibrary", "sourceHash": null },
+        { "path": "src/utils/uploadManager.ts", "anchor": "uploadManager", "sourceHash": null }
+      ],
+      "auditedThrough": null,
+      "oracleRelation": "not-applicable",
+      "disposition": "pending",
+      "mapping": "unmapped",
+      "requiredEvidence": {
+        "beforeCutover": ["fixture", "behavior", "candidateIntegration", "candidateSoak"],
+        "forCompletion": ["fixture", "behavior", "candidateIntegration", "candidateSoak", "activeIntegration", "activeSoak"]
+      },
+      "ownerRefs": {
+        "targetProduction": ["src/features/embedded-browser/workflows/captured-output-workflow-coordinator.ts#linkUploadTask"],
+        "candidate": [],
+        "legacy": ["src/features/embedded-browser/resources/hooks/useResourceImportToLibrary.ts#useResourceImportToLibrary"]
+      },
+      "fixtures": ["output.upload-terminal", "output.upload-retry-retain-release", "closure.output-library-handoff"],
+      "decision": null,
+      "acceptedDifferences": [],
+      "notes": "UploadManager is the upload task owner, but the current embedded-browser workflow awaits creation flow rather than maintaining a durable processing/delivery association."
+    },
+    {
+      "id": "output.filename-template-helpers",
+      "origin": "upstream-derived",
+      "boundary": "output.shared-helpers",
+      "cutoverUnitId": "output-integration",
+      "additionalRiskTags": ["production-runtime", "large-media", "temp-file"],
+      "upstreamSources": [
+        { "path": "js/function.js", "anchor": "function downloadDataURL(url, fileName)", "introducedBy": null, "blobHash": "sha256:f1876eeec0e22e25f2424054d0ea15510027a93237a3109d016f2e7cc16c59a0" },
+        { "path": "js/function.js", "anchor": "function getUrlFileName(url)", "introducedBy": null, "blobHash": "sha256:f1876eeec0e22e25f2424054d0ea15510027a93237a3109d016f2e7cc16c59a0" },
+        { "path": "js/function.js", "anchor": "function ArrayBufferToBlob(buffer, options = {})", "introducedBy": null, "blobHash": "sha256:f1876eeec0e22e25f2424054d0ea15510027a93237a3109d016f2e7cc16c59a0" },
+        { "path": "js/function.js", "anchor": "function stringModify(str, text)", "introducedBy": null, "blobHash": "sha256:f1876eeec0e22e25f2424054d0ea15510027a93237a3109d016f2e7cc16c59a0" },
+        { "path": "js/function.js", "anchor": "function filterFileName(str, text)", "introducedBy": null, "blobHash": "sha256:f1876eeec0e22e25f2424054d0ea15510027a93237a3109d016f2e7cc16c59a0" },
+        { "path": "js/templates.js", "anchor": "class Template {", "introducedBy": null, "blobHash": "sha256:93d1f86fa6c678566c3ca229d9dbba87a1447563f68acdc0d0084134c4dcbd24" },
+        { "path": "js/templates.js", "anchor": "static render(text, data) {", "introducedBy": null, "blobHash": "sha256:93d1f86fa6c678566c3ca229d9dbba87a1447563f68acdc0d0084134c4dcbd24" },
+        { "path": "js/templates.js", "anchor": "function templates(text, data)", "introducedBy": null, "blobHash": "sha256:93d1f86fa6c678566c3ca229d9dbba87a1447563f68acdc0d0084134c4dcbd24" }
+      ],
+      "localContractRefs": [],
+      "auditedThrough": null,
+      "oracleRelation": "exact",
+      "disposition": "pending",
+      "mapping": "unmapped",
+      "requiredEvidence": {
+        "beforeCutover": ["fixture", "behavior", "candidateIntegration", "candidateSoak"],
+        "forCompletion": ["fixture", "behavior", "candidateIntegration", "candidateSoak", "activeIntegration", "activeSoak"]
+      },
+      "ownerRefs": {
+        "targetProduction": ["electron/service/embedded-browser/cat-catch-port/shared/output-helpers.ts#OutputHelpers"],
+        "candidate": [],
+        "legacy": []
+      },
+      "fixtures": ["output.filename-template-parity", "output.large-buffer-delivery"],
+      "decision": null,
+      "acceptedDifferences": [],
+      "notes": "Seed only: filename filtering, template evaluation, large-buffer conversion, and direct data-URL output are anchored, but helper consumers and output semantics remain unmapped."
+    },
+    {
+      "id": "output.local-save-delivery",
+      "origin": "omniflow-integration",
+      "boundary": "main.local-save-delivery",
+      "cutoverUnitId": "output-integration",
+      "additionalRiskTags": ["production-runtime", "cross-process", "large-media", "long-task", "temp-file"],
+      "upstreamSources": [],
+      "localContractRefs": [
+        { "path": "electron/service/embeddedBrowserResourceFileSaveService.ts", "anchor": "saveEmbeddedBrowserExtractedResourceFile", "sourceHash": "sha256:ad9472e50d95cf1989af7d30887ad654c5bcad735eedf9f520e820752c9546ee" },
+        { "path": "electron/service/embeddedBrowserMainController.ts", "anchor": "saveEmbeddedBrowserExtractedResourceFile", "sourceHash": "sha256:60470fdff32b5d447437b7ab11fe254469cec282398f28bd96b608da7640e985" }
+      ],
+      "auditedThrough": null,
+      "oracleRelation": "not-applicable",
+      "disposition": "pending",
+      "mapping": "unmapped",
+      "requiredEvidence": {
+        "beforeCutover": ["fixture", "behavior", "candidateIntegration", "candidateSoak"],
+        "forCompletion": ["fixture", "behavior", "candidateIntegration", "candidateSoak", "activeIntegration", "activeSoak"]
+      },
+      "ownerRefs": {
+        "targetProduction": ["src/features/embedded-browser/workflows/local-save-delivery-adapter.ts#LocalSaveDeliveryAdapter"],
+        "candidate": [],
+        "legacy": ["electron/service/embeddedBrowserResourceFileSaveService.ts#saveEmbeddedBrowserExtractedResourceFile"]
+      },
+      "fixtures": ["output.local-save-terminal"],
+      "decision": null,
+      "acceptedDifferences": [],
+      "notes": "The current main-process file-save service copies or writes extracted resource bytes to a user-selected path, but delivery terminal state and staged-output release are not yet owned by the planned adapter."
+    },
+    {
+      "id": "output.normal-download-handoff",
+      "origin": "omniflow-integration",
+      "boundary": "renderer.normal-download-handoff",
+      "cutoverUnitId": "output-integration",
+      "additionalRiskTags": ["production-runtime", "cross-process", "large-media", "long-task", "temp-file"],
+      "upstreamSources": [],
+      "localContractRefs": [
+        { "path": "electron/service/embeddedBrowserService.ts", "anchor": "initializeEmbeddedBrowserDownloadBridge", "sourceHash": null },
+        { "path": "src/features/embedded-browser/downloads/hooks/useEmbeddedBrowserDownloadImport.ts", "anchor": "useEmbeddedBrowserDownloadImport", "sourceHash": null }
+      ],
+      "auditedThrough": null,
+      "oracleRelation": "not-applicable",
+      "disposition": "pending",
+      "mapping": "unmapped",
+      "requiredEvidence": {
+        "beforeCutover": ["fixture", "behavior", "candidateIntegration", "candidateSoak"],
+        "forCompletion": ["fixture", "behavior", "candidateIntegration", "candidateSoak", "activeIntegration", "activeSoak"]
+      },
+      "ownerRefs": {
+        "targetProduction": ["src/features/embedded-browser/downloads/services/download-handoff.ts#DownloadHandoff"],
+        "candidate": [],
+        "legacy": ["electron/service/embeddedBrowserService.ts#initializeEmbeddedBrowserDownloadBridge", "src/features/embedded-browser/downloads/hooks/useEmbeddedBrowserDownloadImport.ts#useEmbeddedBrowserDownloadImport"]
+      },
+      "fixtures": ["output.normal-download-import-cleanup"],
+      "decision": null,
+      "acceptedDifferences": [],
+      "notes": "Normal BrowserWindow download completion and optional library import form a separate handoff from captured-output local save and retain their own cleanup lifecycle."
+    },
+    {
+      "id": "output.ffmpeg-process-owner",
+      "origin": "omniflow-integration",
+      "boundary": "main.ffmpeg-executor",
+      "cutoverUnitId": "output-integration",
+      "additionalRiskTags": ["production-runtime", "large-media", "long-task", "temp-file", "security-boundary"],
+      "upstreamSources": [],
+      "localContractRefs": [
+        { "path": "electron/service/embeddedBrowserResourceManifestDownloadService.ts", "anchor": "downloadEmbeddedBrowserManifestResource", "sourceHash": null },
+        { "path": "electron/service/embeddedBrowserResourceMergeService.ts", "anchor": "mergeEmbeddedBrowserResourceTracks", "sourceHash": null }
+      ],
+      "auditedThrough": null,
+      "oracleRelation": "not-applicable",
+      "disposition": "pending",
+      "mapping": "unmapped",
+      "requiredEvidence": {
+        "beforeCutover": ["fixture", "behavior", "candidateIntegration", "candidateSoak"],
+        "forCompletion": ["fixture", "behavior", "candidateIntegration", "candidateSoak", "activeIntegration", "activeSoak"]
+      },
+      "ownerRefs": {
+        "targetProduction": ["electron/service/embedded-browser/processing/ffmpeg-executor.ts#FfmpegTaskExecutor"],
+        "candidate": [],
+        "legacy": ["electron/service/embeddedBrowserResourceManifestDownloadService.ts#downloadEmbeddedBrowserManifestResource", "electron/service/embeddedBrowserResourceMergeService.ts#mergeEmbeddedBrowserResourceTracks"]
+      },
+      "fixtures": ["output.ffmpeg-process-cleanup", "output.ffmpeg-cancel-exit", "closure.ffmpeg-process"],
+      "decision": null,
+      "acceptedDifferences": [],
+      "notes": "ffmpeg child processes are created by multiple services and are not registered under a common task/cancel/app-exit owner."
+    },
+    {
+      "id": "output.external-tools-dispatch",
+      "origin": "omniflow-integration",
+      "boundary": "main.external-tools",
+      "cutoverUnitId": "output-integration",
+      "additionalRiskTags": ["production-runtime", "cross-process", "credentials", "security-boundary"],
+      "upstreamSources": [],
+      "localContractRefs": [
+        { "path": "electron/service/embeddedBrowserExternalTools.ts", "anchor": "dispatchEmbeddedBrowserExternalTool", "sourceHash": null }
+      ],
+      "auditedThrough": null,
+      "oracleRelation": "not-applicable",
+      "disposition": "pending",
+      "mapping": "unmapped",
+      "requiredEvidence": {
+        "beforeCutover": ["fixture", "behavior", "candidateIntegration", "candidateSoak"],
+        "forCompletion": ["fixture", "behavior", "candidateIntegration", "candidateSoak", "activeIntegration", "activeSoak"]
+      },
+      "ownerRefs": {
+        "targetProduction": ["electron/service/embedded-browser/integrations/external-tools.ts#ExternalToolDispatcher"],
+        "candidate": [],
+        "legacy": ["electron/service/embeddedBrowserExternalTools.ts#dispatchEmbeddedBrowserExternalTool"]
+      },
+      "fixtures": ["output.external-tool-auth-boundary", "output.external-tool-process-terminal", "closure.external-tool-process"],
+      "decision": null,
+      "acceptedDifferences": [],
+      "notes": "The current main dispatcher consumes renderer-supplied URL and header payloads and spawns external processes without the planned protected-context capability boundary."
+    }
+  ]
+}

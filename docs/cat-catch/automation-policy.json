@@ -1,0 +1,41 @@
+{
+  "$schema": "./automation-policy.schema.json",
+  "schemaVersion": 1,
+  "policyVersion": "2026-08-23.1",
+  "runtimeModificationMode": "report-only",
+  "maxFiles": 0,
+  "maxBehavioralHunks": 0,
+  "maxChangedLines": 0,
+  "maxNewDependencies": 0,
+  "allowedChromeApis": [],
+  "allowedNodeApis": [],
+  "protectedPaths": [
+    "docs/cat-catch-full-migration-execution-plan.md",
+    "docs/cat-catch/*.schema.json",
+    "docs/cat-catch/*-policy.json",
+    "tools/cat-catch-lab/validator/**",
+    "electron/preload.ts",
+    "electron/ipc/**",
+    "electron/service/embeddedBrowserMainController.ts",
+    "electron/service/embeddedBrowserResourceStateStore.ts"
+  ],
+  "allowedRuntimePaths": [
+    "electron/service/embedded-browser/cat-catch-port/**"
+  ],
+  "requiredChecks": [
+    "schema",
+    "lint",
+    "test",
+    "build",
+    "cat-catch-lab",
+    "relevant-electron-smoke"
+  ],
+  "blockers": [
+    {
+      "id": "automation.validator-trust-unresolved",
+      "reason": "No trusted validator bundle or runner identity has an immutable external approval yet.",
+      "resolutionCriteria": "Activate validator-trust-policy with approved validator and runner bindings, then set non-zero limits through a separately reviewed policy change.",
+      "blocks": ["automatic-runtime-modification", "accepted-golden-promotion"]
+    }
+  ]
+}

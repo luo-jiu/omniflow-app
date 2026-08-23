@@ -1,0 +1,178 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omniflow.local/schemas/cat-catch/automation-policy.schema.json",
+  "title": "Cat Catch weekly automation policy",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "schemaVersion",
+    "policyVersion",
+    "runtimeModificationMode",
+    "maxFiles",
+    "maxBehavioralHunks",
+    "maxChangedLines",
+    "maxNewDependencies",
+    "allowedChromeApis",
+    "allowedNodeApis",
+    "protectedPaths",
+    "allowedRuntimePaths",
+    "requiredChecks",
+    "blockers"
+  ],
+  "properties": {
+    "$schema": {
+      "const": "./automation-policy.schema.json"
+    },
+    "schemaVersion": {
+      "const": 1
+    },
+    "policyVersion": {
+      "$ref": "#/$defs/version"
+    },
+    "runtimeModificationMode": {
+      "enum": ["report-only", "runtime-changes-enabled"]
+    },
+    "maxFiles": {
+      "$ref": "#/$defs/threshold"
+    },
+    "maxBehavioralHunks": {
+      "$ref": "#/$defs/threshold"
+    },
+    "maxChangedLines": {
+      "$ref": "#/$defs/threshold"
+    },
+    "maxNewDependencies": {
+      "$ref": "#/$defs/threshold"
+    },
+    "allowedChromeApis": {
+      "$ref": "#/$defs/stringSet"
+    },
+    "allowedNodeApis": {
+      "$ref": "#/$defs/stringSet"
+    },
+    "protectedPaths": {
+      "$ref": "#/$defs/pathSet"
+    },
+    "allowedRuntimePaths": {
+      "$ref": "#/$defs/pathSet"
+    },
+    "requiredChecks": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/identifier"
+      }
+    },
+    "blockers": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/blocker"
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "runtimeModificationMode": {
+            "const": "report-only"
+          }
+        },
+        "required": ["runtimeModificationMode"]
+      },
+      "then": {
+        "properties": {
+          "maxFiles": { "const": 0 },
+          "maxBehavioralHunks": { "const": 0 },
+          "maxChangedLines": { "const": 0 },
+          "maxNewDependencies": { "const": 0 },
+          "allowedChromeApis": { "type": "array", "maxItems": 0 },
+          "allowedNodeApis": { "type": "array", "maxItems": 0 },
+          "blockers": {
+            "type": "array",
+            "minItems": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "runtimeModificationMode": {
+            "const": "runtime-changes-enabled"
+          }
+        },
+        "required": ["runtimeModificationMode"]
+      },
+      "then": {
+        "properties": {
+          "maxFiles": { "type": "integer", "minimum": 1 },
+          "maxBehavioralHunks": { "type": "integer", "minimum": 1 },
+          "maxChangedLines": { "type": "integer", "minimum": 1 },
+          "allowedRuntimePaths": { "type": "array", "minItems": 1 },
+          "blockers": { "type": "array", "maxItems": 0 }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}\\.[1-9][0-9]*$"
+    },
+    "identifier": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]*$"
+    },
+    "threshold": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "stringSet": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "pathSet": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "^(?!/)"
+      }
+    },
+    "blocker": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "reason", "resolutionCriteria", "blocks"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "resolutionCriteria": {
+          "type": "string",
+          "minLength": 1
+        },
+        "blocks": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": ["automatic-runtime-modification", "accepted-golden-promotion"]
+          }
+        }
+      }
+    }
+  }
+}

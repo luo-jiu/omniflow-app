@@ -1,0 +1,407 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omniflow.local/schemas/cat-catch/local-closure-report.schema.json",
+  "title": "Cat Catch local closure report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "schemaVersion",
+    "reportId",
+    "validator",
+    "generatedAt",
+    "evidenceInputCommit",
+    "evidenceInputTreeHash",
+    "discoveryRulesVersion",
+    "inputHashes",
+    "sourceManifest",
+    "bootstrapRoots",
+    "discoveredNodes",
+    "edges",
+    "semanticCandidates",
+    "historicalCandidates",
+    "declaredDynamicEdges",
+    "unresolvedDynamicEdges",
+    "approvedExclusions",
+    "retiredTombstones",
+    "counts",
+    "findings",
+    "status",
+    "blockers"
+  ],
+  "properties": {
+    "$schema": {
+      "const": "https://omniflow.local/schemas/cat-catch/local-closure-report.schema.json"
+    },
+    "schemaVersion": { "const": 1 },
+    "reportId": { "$ref": "#/$defs/identifier" },
+    "validator": { "$ref": "validator-trust-policy.schema.json#/$defs/validatorBinding" },
+    "generatedAt": { "type": "string", "format": "date-time" },
+    "evidenceInputCommit": { "$ref": "#/$defs/commit" },
+    "evidenceInputTreeHash": { "$ref": "#/$defs/sha256" },
+    "discoveryRulesVersion": { "type": "string", "minLength": 1 },
+    "inputHashes": { "$ref": "#/$defs/inputHashes" },
+    "sourceManifest": { "$ref": "#/$defs/sourceManifest" },
+    "bootstrapRoots": { "$ref": "#/$defs/nodeRefSet" },
+    "discoveredNodes": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/discoveredNode" }
+    },
+    "edges": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/edge" }
+    },
+    "semanticCandidates": { "$ref": "#/$defs/candidateSet" },
+    "historicalCandidates": { "$ref": "#/$defs/candidateSet" },
+    "declaredDynamicEdges": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/edge" }
+    },
+    "unresolvedDynamicEdges": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/unresolvedEdge" }
+    },
+    "approvedExclusions": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/approvedExclusion" }
+    },
+    "retiredTombstones": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/retiredTombstone" }
+    },
+    "counts": { "$ref": "#/$defs/counts" },
+    "findings": { "$ref": "#/$defs/findings" },
+    "status": { "enum": ["passed", "failed", "blocked", "stale"] },
+    "blockers": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/finding" }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "status": { "const": "passed" } },
+        "required": ["status"]
+      },
+      "then": {
+        "properties": {
+          "validator": {
+            "type": "object",
+            "properties": { "trustClassification": { "const": "trusted" } }
+          },
+          "sourceManifest": {
+            "type": "object",
+            "properties": {
+              "entries": { "type": "array", "minItems": 1 }
+            }
+          },
+          "bootstrapRoots": { "type": "array", "minItems": 1 },
+          "discoveredNodes": { "type": "array", "minItems": 1 },
+          "semanticCandidates": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["resolutionKind"],
+              "properties": {
+                "resolutionKind": {
+                  "enum": ["current-node", "approved-exclusion", "retired-tombstone"]
+                }
+              }
+            }
+          },
+          "historicalCandidates": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["resolutionKind"],
+              "properties": {
+                "resolutionKind": {
+                  "enum": ["current-node", "approved-exclusion", "retired-tombstone"]
+                }
+              }
+            }
+          },
+          "unresolvedDynamicEdges": { "type": "array", "maxItems": 0 },
+          "counts": {
+            "type": "object",
+            "properties": {
+              "unresolvedEdges": { "const": 0 },
+              "unmappedInScopeNodes": { "const": 0 },
+              "multipleOwnerPaths": { "const": 0 }
+            }
+          },
+          "blockers": { "type": "array", "maxItems": 0 }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    },
+    "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "sha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "nullableIdentifier": {
+      "oneOf": [
+        { "$ref": "#/$defs/identifier" },
+        { "type": "null" }
+      ]
+    },
+    "inputHashes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaBundle", "capabilityLedger", "legacyInventory", "discoveryRules", "validatorTrustPolicy"],
+      "properties": {
+        "schemaBundle": { "$ref": "#/$defs/sha256" },
+        "capabilityLedger": { "$ref": "#/$defs/sha256" },
+        "legacyInventory": { "$ref": "#/$defs/sha256" },
+        "discoveryRules": { "$ref": "#/$defs/sha256" },
+        "validatorTrustPolicy": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "manifestEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "mode", "byteLength", "contentHash"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1, "pattern": "^(?!/)" },
+        "mode": { "enum": ["100644", "100755", "120000"] },
+        "byteLength": { "type": "integer", "minimum": 0 },
+        "contentHash": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "manifestExclusion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pathPattern", "reason", "sourceInputRefs"],
+      "properties": {
+        "pathPattern": { "type": "string", "minLength": 1 },
+        "reason": { "type": "string", "minLength": 1 },
+        "sourceInputRefs": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "sourceManifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["manifestHash", "entries", "exclusions"],
+      "properties": {
+        "manifestHash": { "$ref": "#/$defs/sha256" },
+        "entries": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/manifestEntry" }
+        },
+        "exclusions": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/manifestExclusion" }
+        }
+      }
+    },
+    "nodeRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["nodeId", "path", "symbol"],
+      "properties": {
+        "nodeId": { "$ref": "#/$defs/identifier" },
+        "path": { "type": "string", "minLength": 1, "pattern": "^(?!/)" },
+        "symbol": { "type": ["string", "null"], "minLength": 1 }
+      }
+    },
+    "nodeRefSet": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/nodeRef" }
+    },
+    "discoveredNode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "nodeId",
+        "path",
+        "symbol",
+        "sourceHash",
+        "reachability",
+        "inventoryEntryId",
+        "capabilityId",
+        "cutoverUnitId",
+        "ownerRole"
+      ],
+      "properties": {
+        "nodeId": { "$ref": "#/$defs/identifier" },
+        "path": { "type": "string", "minLength": 1, "pattern": "^(?!/)" },
+        "symbol": { "type": ["string", "null"], "minLength": 1 },
+        "sourceHash": { "$ref": "#/$defs/sha256" },
+        "reachability": { "enum": ["reachable", "unreachable"] },
+        "inventoryEntryId": { "$ref": "#/$defs/nullableIdentifier" },
+        "capabilityId": { "$ref": "#/$defs/nullableIdentifier" },
+        "cutoverUnitId": { "$ref": "#/$defs/nullableIdentifier" },
+        "ownerRole": {
+          "oneOf": [
+            { "enum": ["production-owner", "candidate-owner", "inactive-owner", "adapter", "contract", "state-owner", "task-owner", "output-owner", "helper", "test-helper"] },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+    "edge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["edgeId", "fromNodeId", "toNodeId", "kind", "provenance", "sourceHash"],
+      "properties": {
+        "edgeId": { "$ref": "#/$defs/identifier" },
+        "fromNodeId": { "$ref": "#/$defs/identifier" },
+        "toNodeId": { "$ref": "#/$defs/identifier" },
+        "kind": {
+          "enum": [
+            "import",
+            "export",
+            "call",
+            "construct",
+            "dependency-injection",
+            "dynamic-import",
+            "dynamic-require",
+            "path-load",
+            "ipc-channel",
+            "preload-channel",
+            "event-dispatch",
+            "runtime-template",
+            "worker-script",
+            "serialized-envelope",
+            "file-handoff",
+            "process-handoff",
+            "reverse-dependency"
+          ]
+        },
+        "provenance": { "enum": ["static", "declared-dynamic", "runtime-fixture", "historical"] },
+        "sourceHash": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["candidateId", "path", "symbol", "sourceHash", "resolutionKind", "resolutionRefId"],
+      "properties": {
+        "candidateId": { "$ref": "#/$defs/identifier" },
+        "path": { "type": "string", "minLength": 1, "pattern": "^(?!/)" },
+        "symbol": { "type": ["string", "null"], "minLength": 1 },
+        "sourceHash": { "$ref": "#/$defs/sha256" },
+        "resolutionKind": { "enum": ["current-node", "approved-exclusion", "retired-tombstone", "unresolved"] },
+        "resolutionRefId": { "$ref": "#/$defs/nullableIdentifier" }
+      }
+    },
+    "candidateSet": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/candidate" }
+    },
+    "unresolvedEdge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["edgeId", "sourceNodeId", "kind", "reason"],
+      "properties": {
+        "edgeId": { "$ref": "#/$defs/identifier" },
+        "sourceNodeId": { "$ref": "#/$defs/identifier" },
+        "kind": { "type": "string", "minLength": 1 },
+        "reason": { "type": "string", "minLength": 1 }
+      }
+    },
+    "approvedExclusion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["exclusionId", "candidateId", "decisionId", "decisionHash"],
+      "properties": {
+        "exclusionId": { "$ref": "#/$defs/identifier" },
+        "candidateId": { "$ref": "#/$defs/identifier" },
+        "decisionId": { "$ref": "#/$defs/identifier" },
+        "decisionHash": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "retiredTombstone": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["inventoryEntryId", "path", "symbol", "deletedSourceHash", "deletionCommit", "deletionEvidenceRef"],
+      "properties": {
+        "inventoryEntryId": { "$ref": "#/$defs/identifier" },
+        "path": { "type": "string", "minLength": 1, "pattern": "^(?!/)" },
+        "symbol": { "type": ["string", "null"], "minLength": 1 },
+        "deletedSourceHash": { "$ref": "#/$defs/sha256" },
+        "deletionCommit": { "$ref": "#/$defs/commit" },
+        "deletionEvidenceRef": { "$ref": "report-index-entry.schema.json#/$defs/artifactReference" }
+      }
+    },
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reachableLegacyProductionOwners",
+        "deadLegacySymbols",
+        "unmappedInScopeNodes",
+        "multipleOwnerPaths",
+        "activeLegacyGuidanceRefs",
+        "unresolvedEdges",
+        "auditRefs"
+      ],
+      "properties": {
+        "reachableLegacyProductionOwners": { "$ref": "#/$defs/count" },
+        "deadLegacySymbols": { "$ref": "#/$defs/count" },
+        "unmappedInScopeNodes": { "$ref": "#/$defs/count" },
+        "multipleOwnerPaths": { "$ref": "#/$defs/count" },
+        "activeLegacyGuidanceRefs": { "$ref": "#/$defs/count" },
+        "unresolvedEdges": { "$ref": "#/$defs/count" },
+        "auditRefs": { "$ref": "#/$defs/count" }
+      }
+    },
+    "count": { "type": "integer", "minimum": 0 },
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "refId", "message"],
+      "properties": {
+        "code": { "$ref": "#/$defs/identifier" },
+        "refId": { "$ref": "#/$defs/identifier" },
+        "message": { "type": "string", "minLength": 1 }
+      }
+    },
+    "findingSet": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/finding" }
+    },
+    "findings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reachableLegacyProductionOwners",
+        "deadLegacySymbols",
+        "unmappedInScopeNodes",
+        "multipleOwnerPaths",
+        "activeLegacyGuidanceRefs",
+        "unresolvedEdges",
+        "auditRefs"
+      ],
+      "properties": {
+        "reachableLegacyProductionOwners": { "$ref": "#/$defs/findingSet" },
+        "deadLegacySymbols": { "$ref": "#/$defs/findingSet" },
+        "unmappedInScopeNodes": { "$ref": "#/$defs/findingSet" },
+        "multipleOwnerPaths": { "$ref": "#/$defs/findingSet" },
+        "activeLegacyGuidanceRefs": { "$ref": "#/$defs/findingSet" },
+        "unresolvedEdges": { "$ref": "#/$defs/findingSet" },
+        "auditRefs": { "$ref": "#/$defs/findingSet" }
+      }
+    }
+  }
+}

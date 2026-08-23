@@ -1,0 +1,10 @@
+{
+  "$schema": "./upstream-state.schema.json",
+  "schemaVersion": 1,
+  "repository": "https://github.com/xifangczy/cat-catch",
+  "baselineCursor": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
+  "observedHead": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
+  "auditedThrough": null,
+  "verificationTarget": null,
+  "releaseCursor": null
+}

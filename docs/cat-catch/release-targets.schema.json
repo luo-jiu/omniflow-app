@@ -1,0 +1,278 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omniflow.local/schemas/cat-catch/release-targets.schema.json",
+  "title": "Cat Catch release targets",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["$schema", "schemaVersion", "policyVersion", "targets", "blockers"],
+  "properties": {
+    "$schema": {
+      "const": "./release-targets.schema.json"
+    },
+    "schemaVersion": {
+      "const": 1
+    },
+    "policyVersion": {
+      "$ref": "#/$defs/version"
+    },
+    "targets": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/target"
+      }
+    },
+    "blockers": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/blocker"
+      }
+    }
+  },
+  "$defs": {
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}\\.[1-9][0-9]*$"
+    },
+    "identifier": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]*$"
+    },
+    "sourceRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "selector"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?!/)"
+        },
+        "selector": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "signing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requirement", "method", "requiredChecks"],
+      "properties": {
+        "requirement": {
+          "enum": ["required", "not-required", "undecided"]
+        },
+        "method": {
+          "type": ["string", "null"],
+          "minLength": 1
+        },
+        "requiredChecks": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/identifier"
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "requirement": { "const": "required" } },
+            "required": ["requirement"]
+          },
+          "then": {
+            "properties": {
+              "method": { "type": "string", "minLength": 1 },
+              "requiredChecks": { "type": "array", "minItems": 1 }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "requirement": { "const": "undecided" } },
+            "required": ["requirement"]
+          },
+          "then": {
+            "properties": {
+              "method": { "type": "null" }
+            }
+          }
+        }
+      ]
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "platform",
+        "architectures",
+        "packageFormats",
+        "scopeDecision",
+        "decisionRef",
+        "signing",
+        "requiredSmokes",
+        "sourceRefs",
+        "blockerIds"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "platform": {
+          "enum": ["macos", "windows", "linux"]
+        },
+        "architectures": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": ["arm64", "x64"]
+          }
+        },
+        "packageFormats": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": ["dmg", "zip", "nsis", "appimage"]
+          }
+        },
+        "scopeDecision": {
+          "enum": ["included", "excluded", "undecided"]
+        },
+        "decisionRef": {
+          "type": ["string", "null"],
+          "minLength": 1
+        },
+        "signing": {
+          "$ref": "#/$defs/signing"
+        },
+        "requiredSmokes": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/identifier"
+          }
+        },
+        "sourceRefs": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/sourceRef"
+          }
+        },
+        "blockerIds": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/identifier"
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "scopeDecision": {
+                "const": "excluded"
+              }
+            },
+            "required": ["scopeDecision"]
+          },
+          "then": {
+            "properties": {
+              "decisionRef": {
+                "type": "string",
+                "minLength": 1
+              },
+              "requiredSmokes": { "type": "array", "maxItems": 0 },
+              "blockerIds": { "type": "array", "maxItems": 0 }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "scopeDecision": {
+                "const": "undecided"
+              }
+            },
+            "required": ["scopeDecision"]
+          },
+          "then": {
+            "properties": {
+              "signing": {
+                "type": "object",
+                "properties": {
+                  "requirement": { "const": "undecided" }
+                }
+              },
+              "blockerIds": {
+                "type": "array",
+                "minItems": 1
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "scopeDecision": {
+                "const": "included"
+              }
+            },
+            "required": ["scopeDecision"]
+          },
+          "then": {
+            "properties": {
+              "signing": {
+                "type": "object",
+                "properties": {
+                  "requirement": { "enum": ["required", "not-required"] }
+                }
+              },
+              "requiredSmokes": {
+                "type": "array",
+                "minItems": 1
+              },
+              "blockerIds": { "type": "array", "maxItems": 0 }
+            }
+          }
+        }
+      ]
+    },
+    "blocker": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "targetId", "reason", "resolutionCriteria", "blocksGates"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "targetId": {
+          "$ref": "#/$defs/identifier"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "resolutionCriteria": {
+          "type": "string",
+          "minLength": 1
+        },
+        "blocksGates": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": ["G0", "G5", "G7"]
+          }
+        }
+      }
+    }
+  }
+}

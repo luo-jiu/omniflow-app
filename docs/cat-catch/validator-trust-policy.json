@@ -1,0 +1,26 @@
+{
+  "$schema": "./validator-trust-policy.schema.json",
+  "schemaVersion": 1,
+  "policyVersion": "2026-08-23.1",
+  "trustMode": "blocked",
+  "hashProfile": "sha256-raw-source-manifest-v1",
+  "approvalProviders": [],
+  "trustedValidatorBundles": [],
+  "trustedRunnerIdentities": [],
+  "protectedPaths": [
+    "docs/cat-catch/*.schema.json",
+    "docs/cat-catch/*-policy.json",
+    "tools/cat-catch-lab/validator/**",
+    "package.json",
+    "package-lock.json",
+    "tsconfig.cat-catch-tools.json"
+  ],
+  "blockers": [
+    {
+      "id": "trust.bootstrap-approval-unresolved",
+      "reason": "The initial validator source manifest, approval provider, and trusted runner identity have not been anchored outside the validator itself.",
+      "resolutionCriteria": "Bind a reviewed validator source manifest and runner identity to an immutable user decision, protected pull-request review, or signed commit; then activate this policy.",
+      "blocksGates": ["G0", "G1", "G2", "G3", "G4", "G5", "G6", "G7"]
+    }
+  ]
+}

@@ -1,0 +1,72 @@
+{
+  "$schema": "./risk-policy.schema.json",
+  "schemaVersion": 1,
+  "policyVersion": "2026-08-23.1",
+  "evaluationMode": "additive-fail-closed",
+  "knownRiskTags": [
+    "production-runtime",
+    "cross-process",
+    "long-task",
+    "credentials",
+    "security-boundary",
+    "temp-file",
+    "large-media",
+    "unclassified-risk"
+  ],
+  "rules": [
+    {
+      "id": "risk.production-runtime",
+      "whenAnySignals": ["production-runtime", "production-owner", "runtime-adapter"],
+      "addRiskTags": ["production-runtime"],
+      "requireBeforeCutover": ["candidateIntegration"],
+      "requireForCompletion": ["candidateIntegration", "activeIntegration"]
+    },
+    {
+      "id": "risk.cross-process",
+      "whenAnySignals": ["cross-process", "ipc", "preload", "page-main-boundary"],
+      "addRiskTags": ["cross-process"],
+      "requireBeforeCutover": ["candidateIntegration"],
+      "requireForCompletion": ["candidateIntegration", "activeIntegration"]
+    },
+    {
+      "id": "risk.long-task",
+      "whenAnySignals": ["long-task", "retry", "cancel", "poller"],
+      "addRiskTags": ["long-task"],
+      "requireBeforeCutover": ["candidateSoak"],
+      "requireForCompletion": ["candidateSoak", "activeSoak"]
+    },
+    {
+      "id": "risk.credentials",
+      "whenAnySignals": ["credentials", "authorization-header", "cookie", "request-context"],
+      "addRiskTags": ["credentials", "security-boundary"],
+      "requireBeforeCutover": ["candidateIntegration", "candidateSoak"],
+      "requireForCompletion": ["candidateIntegration", "candidateSoak", "activeIntegration", "activeSoak"]
+    },
+    {
+      "id": "risk.security-boundary",
+      "whenAnySignals": ["security-boundary", "untrusted-page", "isolated-world", "external-process"],
+      "addRiskTags": ["security-boundary"],
+      "requireBeforeCutover": ["candidateIntegration", "candidateSoak"],
+      "requireForCompletion": ["candidateIntegration", "candidateSoak", "activeIntegration", "activeSoak"]
+    },
+    {
+      "id": "risk.temp-file",
+      "whenAnySignals": ["temp-file", "spool", "staged-output", "work-directory"],
+      "addRiskTags": ["temp-file"],
+      "requireBeforeCutover": ["candidateSoak"],
+      "requireForCompletion": ["candidateSoak", "activeSoak"]
+    },
+    {
+      "id": "risk.large-media",
+      "whenAnySignals": ["large-media", "mse", "hls", "dash", "ffmpeg"],
+      "addRiskTags": ["large-media", "long-task"],
+      "requireBeforeCutover": ["candidateSoak"],
+      "requireForCompletion": ["candidateSoak", "activeSoak"]
+    }
+  ],
+  "unclassifiedBehavior": {
+    "riskTag": "unclassified-risk",
+    "gateEffect": "blocked",
+    "automaticRuntimeModification": "forbidden"
+  }
+}

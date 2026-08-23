@@ -1,0 +1,736 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omniflow.local/schemas/cat-catch/gate-report.schema.json",
+  "title": "Cat Catch gate report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "schemaVersion",
+    "reportId",
+    "gateId",
+    "validator",
+    "generatedAt",
+    "evidenceInputCommit",
+    "evidenceInputTreeHash",
+    "inputHashes",
+    "referencedEvidence",
+    "derivedReportRefs",
+    "transitionHistoryRefs",
+    "requiredChecks",
+    "sourceToolchainFingerprints",
+    "availabilityCheck",
+    "status",
+    "failures",
+    "blockers"
+  ],
+  "properties": {
+    "$schema": {
+      "const": "https://omniflow.local/schemas/cat-catch/gate-report.schema.json"
+    },
+    "schemaVersion": { "const": 1 },
+    "reportId": { "$ref": "#/$defs/identifier" },
+    "gateId": { "enum": ["G0", "G1", "G2", "G3", "G4", "G5", "G6", "G7-pre-seal"] },
+    "validator": { "$ref": "validator-trust-policy.schema.json#/$defs/validatorBinding" },
+    "generatedAt": { "type": "string", "format": "date-time" },
+    "evidenceInputCommit": { "$ref": "#/$defs/commit" },
+    "evidenceInputTreeHash": { "$ref": "#/$defs/sha256" },
+    "inputHashes": { "$ref": "#/$defs/inputHashes" },
+    "referencedEvidence": { "$ref": "#/$defs/artifactRefSet" },
+    "derivedReportRefs": { "$ref": "#/$defs/derivedReportRefs" },
+    "transitionHistoryRefs": { "$ref": "#/$defs/artifactRefSet" },
+    "requiredChecks": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/check" }
+    },
+    "sourceToolchainFingerprints": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/toolchainFingerprint" }
+    },
+    "availabilityCheck": { "$ref": "#/$defs/availabilityCheck" },
+    "status": { "enum": ["pending", "in-progress", "passed", "blocked", "stale"] },
+    "failures": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/failure" }
+    },
+    "blockers": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/failure" }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "status": { "const": "passed" } },
+        "required": ["status"]
+      },
+      "then": {
+        "properties": {
+          "validator": {
+            "type": "object",
+            "properties": { "trustClassification": { "const": "trusted" } }
+          },
+          "derivedReportRefs": {
+            "type": "object",
+            "properties": {
+              "capabilityState": { "$ref": "#/$defs/capabilityStateReportRef" },
+              "localClosure": { "$ref": "#/$defs/localClosureReportRef" },
+              "artifactAvailability": { "$ref": "#/$defs/artifactAvailabilityReportRef" }
+            }
+          },
+          "referencedEvidence": { "type": "array", "minItems": 1 },
+          "requiredChecks": {
+            "type": "array",
+            "allOf": [
+              { "$ref": "#/$defs/passedRequiredChecks" }
+            ],
+            "items": {
+              "type": "object",
+              "properties": {
+                "result": { "const": "passed" },
+                "preExistingFailure": { "const": false }
+              },
+              "required": ["result", "preExistingFailure"]
+            }
+          },
+          "availabilityCheck": {
+            "type": "object",
+            "properties": {
+              "reportRef": { "$ref": "#/$defs/artifactRef" },
+              "checkedAt": { "type": "string", "format": "date-time" },
+              "nextCheckDueAt": { "type": "string", "format": "date-time" },
+              "status": { "const": "current" }
+            },
+            "required": ["reportRef", "checkedAt", "nextCheckDueAt", "status"]
+          },
+          "failures": { "type": "array", "maxItems": 0 },
+          "blockers": { "type": "array", "maxItems": 0 }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "gateId": { "const": "G0" },
+          "status": { "const": "passed" }
+        },
+        "required": ["gateId", "status"]
+      },
+      "then": {
+        "properties": {
+          "transitionHistoryRefs": { "type": "array", "minItems": 1 },
+          "requiredChecks": {
+            "$ref": "#/$defs/g0RequiredChecks"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "gateId": { "const": "G1" },
+          "status": { "const": "passed" }
+        },
+        "required": ["gateId", "status"]
+      },
+      "then": {
+        "properties": {
+          "requiredChecks": { "$ref": "#/$defs/g1RequiredChecks" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "gateId": { "const": "G2" },
+          "status": { "const": "passed" }
+        },
+        "required": ["gateId", "status"]
+      },
+      "then": {
+        "properties": {
+          "requiredChecks": { "$ref": "#/$defs/g2RequiredChecks" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "gateId": { "const": "G3" },
+          "status": { "const": "passed" }
+        },
+        "required": ["gateId", "status"]
+      },
+      "then": {
+        "properties": {
+          "requiredChecks": { "$ref": "#/$defs/g3RequiredChecks" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "gateId": { "const": "G4" },
+          "status": { "const": "passed" }
+        },
+        "required": ["gateId", "status"]
+      },
+      "then": {
+        "properties": {
+          "requiredChecks": { "$ref": "#/$defs/g4RequiredChecks" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "gateId": { "const": "G5" },
+          "status": { "const": "passed" }
+        },
+        "required": ["gateId", "status"]
+      },
+      "then": {
+        "properties": {
+          "requiredChecks": { "$ref": "#/$defs/g5RequiredChecks" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "gateId": { "const": "G6" },
+          "status": { "const": "passed" }
+        },
+        "required": ["gateId", "status"]
+      },
+      "then": {
+        "properties": {
+          "requiredChecks": { "$ref": "#/$defs/g6RequiredChecks" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "gateId": { "const": "G7-pre-seal" },
+          "status": { "const": "passed" }
+        },
+        "required": ["gateId", "status"]
+      },
+      "then": {
+        "properties": {
+          "requiredChecks": { "$ref": "#/$defs/g7PreSealRequiredChecks" }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    },
+    "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "sha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "inputHashes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaBundle",
+        "upstreamState",
+        "capabilityLedger",
+        "legacyInventory",
+        "releaseTargets",
+        "riskPolicy",
+        "automationPolicy",
+        "evidenceRetentionPolicy",
+        "validatorTrustPolicy"
+      ],
+      "properties": {
+        "schemaBundle": { "$ref": "#/$defs/sha256" },
+        "upstreamState": { "$ref": "#/$defs/sha256" },
+        "capabilityLedger": { "$ref": "#/$defs/sha256" },
+        "legacyInventory": { "$ref": "#/$defs/sha256" },
+        "releaseTargets": { "$ref": "#/$defs/sha256" },
+        "riskPolicy": { "$ref": "#/$defs/sha256" },
+        "automationPolicy": { "$ref": "#/$defs/sha256" },
+        "evidenceRetentionPolicy": { "$ref": "#/$defs/sha256" },
+        "validatorTrustPolicy": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "artifactRef": {
+      "$ref": "report-index-entry.schema.json#/$defs/artifactReference"
+    },
+    "nullableArtifactRef": {
+      "oneOf": [
+        { "$ref": "#/$defs/artifactRef" },
+        { "type": "null" }
+      ]
+    },
+    "capabilityStateReportRef": {
+      "allOf": [
+        { "$ref": "#/$defs/artifactRef" },
+        {
+          "type": "object",
+          "required": ["artifactSchemaId"],
+          "properties": {
+            "artifactSchemaId": {
+              "const": "https://omniflow.local/schemas/cat-catch/capability-state-report.schema.json"
+            }
+          }
+        }
+      ]
+    },
+    "localClosureReportRef": {
+      "allOf": [
+        { "$ref": "#/$defs/artifactRef" },
+        {
+          "type": "object",
+          "required": ["artifactSchemaId"],
+          "properties": {
+            "artifactSchemaId": {
+              "const": "https://omniflow.local/schemas/cat-catch/local-closure-report.schema.json"
+            }
+          }
+        }
+      ]
+    },
+    "artifactAvailabilityReportRef": {
+      "allOf": [
+        { "$ref": "#/$defs/artifactRef" },
+        {
+          "type": "object",
+          "required": ["artifactSchemaId"],
+          "properties": {
+            "artifactSchemaId": {
+              "const": "https://omniflow.local/schemas/cat-catch/artifact-availability-report.schema.json"
+            }
+          }
+        }
+      ]
+    },
+    "nullableCapabilityStateReportRef": {
+      "oneOf": [
+        { "$ref": "#/$defs/capabilityStateReportRef" },
+        { "type": "null" }
+      ]
+    },
+    "nullableLocalClosureReportRef": {
+      "oneOf": [
+        { "$ref": "#/$defs/localClosureReportRef" },
+        { "type": "null" }
+      ]
+    },
+    "nullableArtifactAvailabilityReportRef": {
+      "oneOf": [
+        { "$ref": "#/$defs/artifactAvailabilityReportRef" },
+        { "type": "null" }
+      ]
+    },
+    "artifactRefSet": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/artifactRef" }
+    },
+    "passedRequiredChecks": {
+      "type": "array",
+      "minItems": 5,
+      "allOf": [
+        {
+          "contains": {
+            "type": "object",
+            "properties": { "checkId": { "const": "input-integrity" } },
+            "required": ["checkId"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "properties": { "checkId": { "const": "canonical-artifact-resolution" } },
+            "required": ["checkId"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "properties": { "checkId": { "const": "artifact-availability" } },
+            "required": ["checkId"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "properties": { "checkId": { "const": "validator-trust" } },
+            "required": ["checkId"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "properties": { "checkId": { "const": "gate-invariants" } },
+            "required": ["checkId"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        }
+      ]
+    },
+    "g0RequiredChecks": {
+      "type": "array",
+      "allOf": [
+        {
+          "contains": {
+            "type": "object",
+            "properties": { "checkId": { "const": "g0-fact-baseline" } },
+            "required": ["checkId"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "properties": { "checkId": { "const": "g0-dependency-closure" } },
+            "required": ["checkId"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "properties": { "checkId": { "const": "g0-release-scope" } },
+            "required": ["checkId"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        }
+      ]
+    },
+    "g1RequiredChecks": {
+      "type": "array",
+      "allOf": [
+        {
+          "contains": {
+            "type": "object",
+            "properties": { "checkId": { "const": "g1-foundation-boundaries" } },
+            "required": ["checkId"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "properties": { "checkId": { "const": "g1-transition-history" } },
+            "required": ["checkId"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        }
+      ]
+    },
+    "g2RequiredChecks": {
+      "type": "array",
+      "allOf": [
+        {
+          "contains": {
+            "type": "object",
+            "properties": { "checkId": { "const": "g2-oracle-integrity" } },
+            "required": ["checkId"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "properties": { "checkId": { "const": "g2-health-sentinels" } },
+            "required": ["checkId"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "properties": { "checkId": { "const": "g2-reproducible-fixtures" } },
+            "required": ["checkId"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        }
+      ]
+    },
+    "g3RequiredChecks": {
+      "type": "array",
+      "allOf": [
+        {
+          "contains": {
+            "type": "object",
+            "properties": { "checkId": { "const": "g3-upstream-coverage" } },
+            "required": ["checkId"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "properties": { "checkId": { "const": "g3-capability-evidence" } },
+            "required": ["checkId"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "properties": { "checkId": { "const": "g3-approved-exclusions" } },
+            "required": ["checkId"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        }
+      ]
+    },
+    "g4RequiredChecks": {
+      "type": "array",
+      "allOf": [
+        {
+          "contains": {
+            "type": "object",
+            "properties": { "checkId": { "const": "g4-cutover-history" } },
+            "required": ["checkId"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "properties": { "checkId": { "const": "g4-single-owner-closure" } },
+            "required": ["checkId"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "properties": { "checkId": { "const": "g4-production-smoke" } },
+            "required": ["checkId"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        }
+      ]
+    },
+    "g5RequiredChecks": {
+      "type": "array",
+      "allOf": [
+        {
+          "contains": {
+            "type": "object",
+            "properties": { "checkId": { "const": "g5-lifecycle-resource-safety" } },
+            "required": ["checkId"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "properties": { "checkId": { "const": "g5-active-evidence" } },
+            "required": ["checkId"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "properties": { "checkId": { "const": "g5-output-correctness" } },
+            "required": ["checkId"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "properties": { "checkId": { "const": "g5-packaged-target-smoke" } },
+            "required": ["checkId"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        }
+      ]
+    },
+    "g6RequiredChecks": {
+      "type": "array",
+      "allOf": [
+        {
+          "contains": {
+            "type": "object",
+            "properties": { "checkId": { "const": "g6-legacy-closure" } },
+            "required": ["checkId"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "properties": { "checkId": { "const": "g6-retired-tombstones" } },
+            "required": ["checkId"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "properties": { "checkId": { "const": "g6-rollback-rehearsal" } },
+            "required": ["checkId"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        }
+      ]
+    },
+    "g7PreSealRequiredChecks": {
+      "type": "array",
+      "allOf": [
+        {
+          "contains": {
+            "type": "object",
+            "properties": { "checkId": { "const": "g7-release-cursor-coverage" } },
+            "required": ["checkId"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "properties": { "checkId": { "const": "g7-full-validation" } },
+            "required": ["checkId"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "properties": { "checkId": { "const": "g7-release-target-evidence" } },
+            "required": ["checkId"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "properties": { "checkId": { "const": "g7-provenance-and-notices" } },
+            "required": ["checkId"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "properties": { "checkId": { "const": "g7-cross-gate-coherence" } },
+            "required": ["checkId"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        }
+      ]
+    },
+    "derivedReportRefs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["capabilityState", "localClosure", "artifactAvailability"],
+      "properties": {
+        "capabilityState": { "$ref": "#/$defs/nullableCapabilityStateReportRef" },
+        "localClosure": { "$ref": "#/$defs/nullableLocalClosureReportRef" },
+        "artifactAvailability": { "$ref": "#/$defs/nullableArtifactAvailabilityReportRef" }
+      }
+    },
+    "check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["checkId", "result", "preExistingFailure", "evidenceRefs", "details"],
+      "properties": {
+        "checkId": { "$ref": "#/$defs/identifier" },
+        "result": { "enum": ["passed", "failed", "blocked", "stale"] },
+        "preExistingFailure": { "type": "boolean" },
+        "evidenceRefs": { "$ref": "#/$defs/artifactRefSet" },
+        "details": { "type": "string" }
+      }
+    },
+    "toolchainFingerprint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version", "sourceHash"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "version": { "type": "string", "minLength": 1 },
+        "sourceHash": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "availabilityCheck": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["policyHash", "reportRef", "checkedAt", "nextCheckDueAt", "status"],
+      "properties": {
+        "policyHash": { "$ref": "#/$defs/sha256" },
+        "reportRef": { "$ref": "#/$defs/nullableArtifactRef" },
+        "checkedAt": {
+          "oneOf": [
+            { "type": "string", "format": "date-time" },
+            { "type": "null" }
+          ]
+        },
+        "nextCheckDueAt": {
+          "oneOf": [
+            { "type": "string", "format": "date-time" },
+            { "type": "null" }
+          ]
+        },
+        "status": { "enum": ["missing", "current", "stale"] }
+      }
+    },
+    "failure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "checkId", "message", "preExisting"],
+      "properties": {
+        "code": { "$ref": "#/$defs/identifier" },
+        "checkId": {
+          "oneOf": [
+            { "$ref": "#/$defs/identifier" },
+            { "type": "null" }
+          ]
+        },
+        "message": { "type": "string", "minLength": 1 },
+        "preExisting": { "type": "boolean" }
+      }
+    }
+  }
+}

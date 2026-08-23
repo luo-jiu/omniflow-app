@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omniflow.local/schemas/cat-catch/report-index.schema.json",
+  "title": "Cat Catch report index",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["$schema", "schemaVersion", "entries"],
+  "properties": {
+    "$schema": { "const": "../report-index.schema.json" },
+    "schemaVersion": { "const": 1 },
+    "entries": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "report-index-entry.schema.json"
+      }
+    }
+  }
+}

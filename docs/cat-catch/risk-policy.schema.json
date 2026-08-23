@@ -1,0 +1,418 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omniflow.local/schemas/cat-catch/risk-policy.schema.json",
+  "title": "Cat Catch additive risk policy",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "schemaVersion",
+    "policyVersion",
+    "evaluationMode",
+    "knownRiskTags",
+    "rules",
+    "unclassifiedBehavior"
+  ],
+  "properties": {
+    "$schema": {
+      "const": "./risk-policy.schema.json"
+    },
+    "schemaVersion": {
+      "const": 1
+    },
+    "policyVersion": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}\\.[1-9][0-9]*$"
+    },
+    "evaluationMode": {
+      "const": "additive-fail-closed"
+    },
+    "knownRiskTags": {
+      "type": "array",
+      "minItems": 8,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/riskTag"
+      },
+      "allOf": [
+        { "contains": { "const": "production-runtime" } },
+        { "contains": { "const": "cross-process" } },
+        { "contains": { "const": "long-task" } },
+        { "contains": { "const": "credentials" } },
+        { "contains": { "const": "security-boundary" } },
+        { "contains": { "const": "temp-file" } },
+        { "contains": { "const": "large-media" } },
+        { "contains": { "const": "unclassified-risk" } }
+      ]
+    },
+    "rules": {
+      "type": "array",
+      "minItems": 7,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/rule"
+      },
+      "allOf": [
+        {
+          "contains": {
+            "type": "object",
+            "required": ["id"],
+            "properties": { "id": { "const": "risk.production-runtime" } }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": ["id"],
+            "properties": { "id": { "const": "risk.cross-process" } }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": ["id"],
+            "properties": { "id": { "const": "risk.long-task" } }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": ["id"],
+            "properties": { "id": { "const": "risk.credentials" } }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": ["id"],
+            "properties": { "id": { "const": "risk.security-boundary" } }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": ["id"],
+            "properties": { "id": { "const": "risk.temp-file" } }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": ["id"],
+            "properties": { "id": { "const": "risk.large-media" } }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        }
+      ]
+    },
+    "unclassifiedBehavior": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["riskTag", "gateEffect", "automaticRuntimeModification"],
+      "properties": {
+        "riskTag": {
+          "const": "unclassified-risk"
+        },
+        "gateEffect": {
+          "const": "blocked"
+        },
+        "automaticRuntimeModification": {
+          "const": "forbidden"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]*$"
+    },
+    "riskTag": {
+      "$ref": "#/$defs/identifier"
+    },
+    "evidenceDimension": {
+      "enum": [
+        "fixture",
+        "behavior",
+        "candidateIntegration",
+        "candidateSoak",
+        "activeIntegration",
+        "activeSoak"
+      ]
+    },
+    "rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "whenAnySignals", "addRiskTags", "requireBeforeCutover", "requireForCompletion"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "whenAnySignals": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/identifier"
+          }
+        },
+        "addRiskTags": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/riskTag"
+          }
+        },
+        "requireBeforeCutover": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/evidenceDimension"
+          }
+        },
+        "requireForCompletion": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/evidenceDimension"
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "id": { "const": "risk.production-runtime" } },
+            "required": ["id"]
+          },
+          "then": {
+            "properties": {
+              "whenAnySignals": {
+                "type": "array",
+                "contains": { "const": "production-runtime" }
+              },
+              "addRiskTags": {
+                "type": "array",
+                "contains": { "const": "production-runtime" }
+              },
+              "requireBeforeCutover": {
+                "type": "array",
+                "contains": { "const": "candidateIntegration" }
+              },
+              "requireForCompletion": {
+                "type": "array",
+                "allOf": [
+                  { "contains": { "const": "candidateIntegration" } },
+                  { "contains": { "const": "activeIntegration" } }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "id": { "const": "risk.cross-process" } },
+            "required": ["id"]
+          },
+          "then": {
+            "properties": {
+              "whenAnySignals": {
+                "type": "array",
+                "contains": { "const": "cross-process" }
+              },
+              "addRiskTags": {
+                "type": "array",
+                "contains": { "const": "cross-process" }
+              },
+              "requireBeforeCutover": {
+                "type": "array",
+                "contains": { "const": "candidateIntegration" }
+              },
+              "requireForCompletion": {
+                "type": "array",
+                "allOf": [
+                  { "contains": { "const": "candidateIntegration" } },
+                  { "contains": { "const": "activeIntegration" } }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "id": { "const": "risk.long-task" } },
+            "required": ["id"]
+          },
+          "then": {
+            "properties": {
+              "whenAnySignals": {
+                "type": "array",
+                "contains": { "const": "long-task" }
+              },
+              "addRiskTags": {
+                "type": "array",
+                "contains": { "const": "long-task" }
+              },
+              "requireBeforeCutover": {
+                "type": "array",
+                "contains": { "const": "candidateSoak" }
+              },
+              "requireForCompletion": {
+                "type": "array",
+                "allOf": [
+                  { "contains": { "const": "candidateSoak" } },
+                  { "contains": { "const": "activeSoak" } }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "id": { "const": "risk.credentials" } },
+            "required": ["id"]
+          },
+          "then": {
+            "properties": {
+              "whenAnySignals": {
+                "type": "array",
+                "contains": { "const": "credentials" }
+              },
+              "addRiskTags": {
+                "type": "array",
+                "allOf": [
+                  { "contains": { "const": "credentials" } },
+                  { "contains": { "const": "security-boundary" } }
+                ]
+              },
+              "requireBeforeCutover": {
+                "type": "array",
+                "allOf": [
+                  { "contains": { "const": "candidateIntegration" } },
+                  { "contains": { "const": "candidateSoak" } }
+                ]
+              },
+              "requireForCompletion": {
+                "type": "array",
+                "allOf": [
+                  { "contains": { "const": "candidateIntegration" } },
+                  { "contains": { "const": "candidateSoak" } },
+                  { "contains": { "const": "activeIntegration" } },
+                  { "contains": { "const": "activeSoak" } }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "id": { "const": "risk.security-boundary" } },
+            "required": ["id"]
+          },
+          "then": {
+            "properties": {
+              "whenAnySignals": {
+                "type": "array",
+                "contains": { "const": "security-boundary" }
+              },
+              "addRiskTags": {
+                "type": "array",
+                "contains": { "const": "security-boundary" }
+              },
+              "requireBeforeCutover": {
+                "type": "array",
+                "allOf": [
+                  { "contains": { "const": "candidateIntegration" } },
+                  { "contains": { "const": "candidateSoak" } }
+                ]
+              },
+              "requireForCompletion": {
+                "type": "array",
+                "allOf": [
+                  { "contains": { "const": "candidateIntegration" } },
+                  { "contains": { "const": "candidateSoak" } },
+                  { "contains": { "const": "activeIntegration" } },
+                  { "contains": { "const": "activeSoak" } }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "id": { "const": "risk.temp-file" } },
+            "required": ["id"]
+          },
+          "then": {
+            "properties": {
+              "whenAnySignals": {
+                "type": "array",
+                "contains": { "const": "temp-file" }
+              },
+              "addRiskTags": {
+                "type": "array",
+                "contains": { "const": "temp-file" }
+              },
+              "requireBeforeCutover": {
+                "type": "array",
+                "contains": { "const": "candidateSoak" }
+              },
+              "requireForCompletion": {
+                "type": "array",
+                "allOf": [
+                  { "contains": { "const": "candidateSoak" } },
+                  { "contains": { "const": "activeSoak" } }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "id": { "const": "risk.large-media" } },
+            "required": ["id"]
+          },
+          "then": {
+            "properties": {
+              "whenAnySignals": {
+                "type": "array",
+                "contains": { "const": "large-media" }
+              },
+              "addRiskTags": {
+                "type": "array",
+                "allOf": [
+                  { "contains": { "const": "large-media" } },
+                  { "contains": { "const": "long-task" } }
+                ]
+              },
+              "requireBeforeCutover": {
+                "type": "array",
+                "contains": { "const": "candidateSoak" }
+              },
+              "requireForCompletion": {
+                "type": "array",
+                "allOf": [
+                  { "contains": { "const": "candidateSoak" } },
+                  { "contains": { "const": "activeSoak" } }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}
