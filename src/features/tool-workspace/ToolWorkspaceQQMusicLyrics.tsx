@@ -1,15 +1,20 @@
 import React from 'react';
 import {
   IconAlertCircle,
+  IconFile,
+  IconList,
   IconMusic,
   IconPause,
   IconPlay,
   IconRefresh,
-  IconSave,
+  IconSaveStroked,
   IconSearch,
   IconTickCircle,
 } from '@douyinfe/semi-icons';
 import { Button, Input, Modal, Select, Spin, Tag, Toast } from '@douyinfe/semi-ui';
+import { xml } from '@codemirror/lang-xml';
+import { EditorView } from '@codemirror/view';
+import CodeMirror from '@uiw/react-codemirror';
 import styled, { createGlobalStyle } from 'styled-components';
 
 import { beginDocumentDragSession } from '@/components/ui/document-drag-session';
@@ -24,6 +29,7 @@ import {
   resolveTimedTextCueSweepPercent,
   type TimedTextCue,
 } from '@/features/file-viewer/timed-text/subtitle';
+import { useTheme } from '@/hooks/useTheme';
 import type {
   QQMusicLyricsPreview,
   QQMusicLyricsSong,
@@ -44,8 +50,14 @@ import { WorkspaceHeader } from './styles';
 import {
   getQQMusicLyricsListKeyboardWidth,
   getQQMusicLyricsListWidthBounds,
+  getQQMusicLyricsCenteredScrollTop,
+  getQQMusicLyricsStageHeightBounds,
+  getQQMusicLyricsStageKeyboardHeight,
+  shouldAnimateQQMusicLyricsFollow,
   clampQQMusicLyricsListWidth,
+  clampQQMusicLyricsStageHeight,
   type QQMusicLyricsListWidthBounds,
+  type QQMusicLyricsStageHeightBounds,
 } from './qqmusic-lyrics.layout';
 import {
   clearQQMusicLyricsSaveDirectory,
@@ -144,6 +156,8 @@ const QQMusicLyricsWorkspace = styled.div`
 
   .qq-search-pane {
     border-right: 1px solid var(--app-border);
+    container-name: qqmusic-song-list;
+    container-type: inline-size;
   }
 
   .qq-list-resize-handle {
@@ -365,6 +379,19 @@ const QQMusicLyricsWorkspace = styled.div`
     gap: 8px;
   }
 
+  .qq-preview-actions {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .qq-preview-icon-actions {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+  }
+
   .qq-save-trigger {
     flex: none;
   }
@@ -393,45 +420,120 @@ const QQMusicLyricsWorkspace = styled.div`
   }
 
   .qq-preview-content {
+    --qq-stage-default-height: max(156px, 42%);
+    --qq-stage-effective-height: min(
+      var(--qq-stage-height, var(--qq-stage-default-height)),
+      var(--qq-stage-default-height)
+    );
+
     flex: 1;
     min-height: 0;
     display: grid;
-    grid-template-rows: minmax(156px, 42%) minmax(0, 1fr) auto;
+    grid-template-rows: var(--qq-stage-effective-height) minmax(0, 1fr) auto;
+    position: relative;
+  }
+
+  .qq-preview-content[data-mode='xml'] {
+    display: flex;
+    flex-direction: column;
   }
 
   .qq-stage {
     position: relative;
     overflow: hidden;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 18px 30px;
     background: color-mix(in srgb, var(--app-bg-elevated) 72%, var(--app-bg));
     border-bottom: 1px solid var(--app-border);
   }
 
-  .qq-stage-lines {
-    width: min(780px, 100%);
+  .qq-stage-resize-handle {
+    position: absolute;
+    top: var(--qq-stage-effective-height);
+    left: 3px;
+    right: 0;
+    height: 6px;
+    transform: translateY(-3px);
+    cursor: row-resize;
+    touch-action: none;
+    z-index: 2;
+    -webkit-app-region: no-drag;
+  }
+
+  .qq-stage-resize-handle::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: transparent;
+  }
+
+  .qq-stage-resize-handle:hover::after,
+  .qq-stage-resize-handle:focus-visible::after,
+  .qq-stage-resize-handle[data-resizing='true']::after {
+    background: var(--semi-color-primary);
+  }
+
+  .qq-stage-resize-handle:focus-visible {
+    outline: none;
+  }
+
+  .qq-stage-scroll {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    scrollbar-width: none;
+    mask-image: linear-gradient(180deg, transparent 0%, #000 18%, #000 82%, transparent 100%);
+  }
+
+  .qq-stage-scroll::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+    display: none;
+  }
+
+  .qq-stage-roller {
+    width: 100%;
+    min-height: 100%;
     display: flex;
     flex-direction: column;
-    gap: 11px;
+    align-items: center;
+    gap: 6px;
+    padding: max(54px, calc((var(--qq-stage-effective-height) - 42px) / 2)) 30px;
     text-align: center;
   }
 
   .qq-stage-line {
-    min-height: 24px;
-    font-size: 14px;
-    line-height: 1.65;
+    flex: none;
+    width: min(780px, 100%);
+    min-height: 42px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 19px;
+    line-height: 1.45;
     color: var(--app-text-muted);
-    opacity: 0.56;
+    opacity: 0.38;
+    transition:
+      color 0.22s ease,
+      opacity 0.22s ease;
+  }
+
+  .qq-stage-line-content {
+    display: inline-block;
+    max-width: 100%;
+    transform: scale(0.84);
+    transition: transform 0.22s ease;
   }
 
   .qq-stage-line.is-active {
-    min-height: 34px;
-    font-size: 21px;
     font-weight: 700;
     color: color-mix(in srgb, var(--app-text) 62%, var(--app-text-muted));
     opacity: 1;
+  }
+
+  .qq-stage-line.is-active .qq-stage-line-content {
+    transform: scale(1.08);
   }
 
   .qq-lyric-sweep {
@@ -441,8 +543,8 @@ const QQMusicLyricsWorkspace = styled.div`
       linear-gradient(
         90deg,
         color-mix(in srgb, var(--semi-color-primary) 74%, var(--semi-color-text-0)) 0%,
-        color-mix(in srgb, var(--semi-color-primary) 74%, var(--semi-color-text-0)) var(--qq-lyric-progress),
-        var(--semi-color-text-0) var(--qq-lyric-progress),
+        color-mix(in srgb, var(--semi-color-primary) 74%, var(--semi-color-text-0)) var(--qq-lyric-progress, 0%),
+        var(--semi-color-text-0) var(--qq-lyric-progress, 0%),
         var(--semi-color-text-0) 100%
       );
     background-clip: text;
@@ -484,6 +586,68 @@ const QQMusicLyricsWorkspace = styled.div`
     font-family: 'JetBrains Mono', monospace;
     font-size: 12px;
     color: var(--app-text-muted);
+  }
+
+  .qq-xml-preview {
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    background: var(--semi-color-bg-0);
+  }
+
+  .qq-xml-preview > div {
+    flex: 1;
+    min-height: 0;
+  }
+
+  .qq-xml-preview .cm-editor {
+    height: 100%;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    line-height: 1.65;
+  }
+
+  .qq-xml-preview .cm-editor.cm-focused {
+    outline: none;
+  }
+
+  .qq-xml-preview .cm-scroller {
+    overflow: auto !important;
+    padding-block: 10px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--app-scrollbar-thumb) var(--app-scrollbar-track);
+  }
+
+  .qq-xml-preview .cm-scroller::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  .qq-xml-preview .cm-scroller::-webkit-scrollbar-track,
+  .qq-xml-preview .cm-scroller::-webkit-scrollbar-corner {
+    background: var(--app-scrollbar-track);
+  }
+
+  .qq-xml-preview .cm-scroller::-webkit-scrollbar-thumb {
+    min-width: 28px;
+    min-height: 28px;
+    border: 2px solid transparent;
+    border-radius: 999px;
+    background: var(--app-scrollbar-thumb);
+    background-clip: padding-box;
+  }
+
+  .qq-xml-preview .cm-scroller::-webkit-scrollbar-thumb:hover {
+    background: var(--app-scrollbar-thumb-hover);
+    background-clip: padding-box;
+  }
+
+  .qq-xml-preview .cm-gutters {
+    border-right: 1px solid var(--app-border);
+    background: var(--semi-color-bg-1);
+    font-size: 12px;
   }
 
   .qq-transport {
@@ -587,6 +751,13 @@ const QQMusicLyricsWorkspace = styled.div`
     text-align: center;
   }
 
+  @media (prefers-reduced-motion: reduce) {
+    .qq-stage-line,
+    .qq-stage-line-content {
+      transition-duration: 0.01ms;
+    }
+  }
+
   @container qqmusic-lyrics-workspace (max-width: 760px) {
     .qq-layout {
       --qq-list-default-width: 40%;
@@ -609,6 +780,51 @@ const QQMusicLyricsWorkspace = styled.div`
       grid-template-columns: 30px 60px minmax(64px, 1fr) 60px;
       gap: 4px;
       padding-inline: 8px;
+    }
+  }
+
+  @container qqmusic-song-list (max-width: 360px) {
+    .qq-search-form {
+      grid-template-columns: minmax(0, 1fr) 32px;
+    }
+
+    .qq-search-form .qq-song-input {
+      grid-column: 1 / -1;
+      grid-row: 1;
+    }
+
+    .qq-search-form .qq-singer-input {
+      grid-column: 1;
+      grid-row: 2;
+    }
+
+    .qq-search-form .semi-button {
+      grid-column: 2;
+      grid-row: 2;
+    }
+  }
+
+  @container qqmusic-song-list (max-width: 280px) {
+    .qq-search-scope,
+    .qq-search-form,
+    .qq-result {
+      padding-inline: 10px;
+    }
+
+    .qq-search-scope-tabs button {
+      min-width: 58px;
+      padding-inline: 6px;
+    }
+
+    .qq-result-meta {
+      align-items: stretch;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .qq-result-cache {
+      width: 100%;
+      justify-content: space-between;
     }
   }
 `;
@@ -744,8 +960,26 @@ type ToolWorkspaceQQMusicLyricsProps = {
 };
 
 type QQMusicLyricsSearchScope = 'cached' | 'library';
+type QQMusicLyricsPreviewMode = 'timeline' | 'xml';
 
 const SEARCH_PAGE_SIZE = 50;
+const QQ_MUSIC_LYRICS_XML_EXTENSIONS = [
+  xml(),
+  EditorView.lineWrapping,
+  EditorView.contentAttributes.of({
+    'aria-label': 'QRC XML 文件预览',
+    'aria-readonly': 'true',
+  }),
+];
+const QQ_MUSIC_LYRICS_XML_BASIC_SETUP = {
+  bracketMatching: true,
+  closeBrackets: false,
+  foldGutter: true,
+  highlightActiveLine: false,
+  highlightActiveLineGutter: false,
+  indentOnInput: false,
+  lineNumbers: true,
+} as const;
 
 function formatTime(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) return '00:00.000';
@@ -791,16 +1025,35 @@ function fallbackSaveDirectory(
   return null;
 }
 
-function cueSweepText(cue: TimedTextCue, currentTime: number) {
-  const sweepPercent = resolveTimedTextCueSweepPercent(cue, 0, currentTime);
+function cueSweepText(
+  cue: TimedTextCue,
+  activeSweepRef: React.RefObject<HTMLSpanElement>,
+) {
   return (
-    <span
-      className="qq-lyric-sweep"
-      style={{ '--qq-lyric-progress': `${sweepPercent}%` } as React.CSSProperties}
-    >
+    <span ref={activeSweepRef} className="qq-lyric-sweep">
       {cue.lines.join(' ')}
     </span>
   );
+}
+
+function scrollLyricsRowToCenter(
+  container: HTMLElement,
+  row: HTMLElement,
+  behavior: ScrollBehavior,
+) {
+  if (container.clientHeight <= 0) return;
+  const containerRect = container.getBoundingClientRect();
+  const rowRect = row.getBoundingClientRect();
+  container.scrollTo({
+    behavior,
+    top: getQQMusicLyricsCenteredScrollTop({
+      itemHeight: rowRect.height,
+      itemTop: rowRect.top - containerRect.top,
+      scrollHeight: container.scrollHeight,
+      scrollTop: container.scrollTop,
+      viewportHeight: container.clientHeight,
+    }),
+  });
 }
 
 type QQMusicLyricsSongListProps = {
@@ -826,11 +1079,8 @@ const QQMusicLyricsSongList = React.memo(function QQMusicLyricsSongList({
         <span>{song.singer}</span>
         <span className="qq-result-cache">
           <Tag color={song.cachedKinds.includes('qrc') ? 'green' : 'grey'} size="small">
-            {song.cachedKinds.includes('qrc') ? 'QRC' : '未缓存'}
+            {song.cachedKinds.includes('qrc') ? 'QRC' : '无 QRC'}
           </Tag>
-          {song.cachedKinds.includes('lrc') ? <Tag color="blue" size="small">LRC</Tag> : null}
-          {song.cachedKinds.includes('translation') ? <Tag color="cyan" size="small">译</Tag> : null}
-          {song.cachedKinds.includes('transliteration') ? <Tag color="violet" size="small">音</Tag> : null}
           <span>{song.songId}</span>
         </span>
       </span>
@@ -838,17 +1088,44 @@ const QQMusicLyricsSongList = React.memo(function QQMusicLyricsSongList({
   ));
 });
 
+type QQMusicLyricsStageLineProps = {
+  activeLineRef: React.RefObject<HTMLDivElement>;
+  activeSweepRef: React.RefObject<HTMLSpanElement>;
+  cue: TimedTextCue;
+  focused: boolean;
+};
+
+const QQMusicLyricsStageLine = React.memo(function QQMusicLyricsStageLine({
+  activeLineRef,
+  activeSweepRef,
+  cue,
+  focused,
+}: QQMusicLyricsStageLineProps) {
+  return (
+    <div
+      ref={focused ? activeLineRef : undefined}
+      aria-current={focused ? 'true' : undefined}
+      className={`qq-stage-line ${focused ? 'is-active' : ''}`}
+      role="listitem"
+    >
+      <span className="qq-stage-line-content">
+        {focused ? cueSweepText(cue, activeSweepRef) : cue.lines.join(' ')}
+      </span>
+    </div>
+  );
+});
+
 type QQMusicLyricsTimelineRowProps = {
   activeRowRef: React.RefObject<HTMLDivElement>;
+  activeSweepRef: React.RefObject<HTMLSpanElement>;
   cue: TimedTextCue;
-  currentTime: number;
   focused: boolean;
 };
 
 const QQMusicLyricsTimelineRow = React.memo(function QQMusicLyricsTimelineRow({
   activeRowRef,
+  activeSweepRef,
   cue,
-  currentTime,
   focused,
 }: QQMusicLyricsTimelineRowProps) {
   return (
@@ -857,7 +1134,69 @@ const QQMusicLyricsTimelineRow = React.memo(function QQMusicLyricsTimelineRow({
       className={`qq-timeline-row ${focused ? 'is-active' : ''}`}
     >
       <span className="qq-timeline-time">{formatTime(cue.start)}</span>
-      <span>{focused ? cueSweepText(cue, currentTime) : cue.lines.join(' ')}</span>
+      <span>{focused ? cueSweepText(cue, activeSweepRef) : cue.lines.join(' ')}</span>
+    </div>
+  );
+});
+
+type QQMusicLyricsCueListProps = {
+  activeCueRef: React.RefObject<HTMLDivElement>;
+  activeSweepRef: React.RefObject<HTMLSpanElement>;
+  cues: TimedTextCue[];
+  focusedCueIndex: number;
+};
+
+const QQMusicLyricsStageCueList = React.memo(function QQMusicLyricsStageCueList({
+  activeCueRef,
+  activeSweepRef,
+  cues,
+  focusedCueIndex,
+}: QQMusicLyricsCueListProps) {
+  return cues.map((cue, cueIndex) => (
+    <QQMusicLyricsStageLine
+      key={cue.id}
+      activeLineRef={activeCueRef}
+      activeSweepRef={activeSweepRef}
+      cue={cue}
+      focused={cueIndex === focusedCueIndex}
+    />
+  ));
+});
+
+const QQMusicLyricsTimelineCueList = React.memo(function QQMusicLyricsTimelineCueList({
+  activeCueRef,
+  activeSweepRef,
+  cues,
+  focusedCueIndex,
+}: QQMusicLyricsCueListProps) {
+  return cues.map((cue, cueIndex) => (
+    <QQMusicLyricsTimelineRow
+      key={cue.id}
+      activeRowRef={activeCueRef}
+      activeSweepRef={activeSweepRef}
+      cue={cue}
+      focused={cueIndex === focusedCueIndex}
+    />
+  ));
+});
+
+const QQMusicLyricsXmlPreview = React.memo(function QQMusicLyricsXmlPreview({
+  content,
+}: {
+  content: string;
+}) {
+  const { resolvedTheme } = useTheme();
+
+  return (
+    <div className="qq-xml-preview">
+      <CodeMirror
+        basicSetup={QQ_MUSIC_LYRICS_XML_BASIC_SETUP}
+        extensions={QQ_MUSIC_LYRICS_XML_EXTENSIONS}
+        height="100%"
+        readOnly
+        theme={resolvedTheme === 'dark' ? 'dark' : 'light'}
+        value={content}
+      />
     </div>
   );
 });
@@ -894,16 +1233,29 @@ const ToolWorkspaceQQMusicLyrics: React.FC<ToolWorkspaceQQMusicLyricsProps> = ({
   const [saveDraftDirectory, setSaveDraftDirectory] = React.useState<QQMusicLyricsSaveDirectory | null>(null);
   const [currentTime, setCurrentTime] = React.useState(0);
   const [playing, setPlaying] = React.useState(false);
+  const [previewMode, setPreviewMode] = React.useState<QQMusicLyricsPreviewMode>('timeline');
   const [saving, setSaving] = React.useState(false);
   const [lyricsListBounds, setLyricsListBounds] = React.useState<QQMusicLyricsListWidthBounds>(() => (
     getQQMusicLyricsListWidthBounds(1000)
   ));
   const [lyricsListWidth, setLyricsListWidth] = React.useState<number | null>(null);
   const [lyricsListResizing, setLyricsListResizing] = React.useState(false);
+  const [lyricsStageBounds, setLyricsStageBounds] = React.useState<QQMusicLyricsStageHeightBounds>(() => (
+    getQQMusicLyricsStageHeightBounds(900)
+  ));
+  const [lyricsStageHeight, setLyricsStageHeight] = React.useState<number | null>(null);
+  const [lyricsStageResizing, setLyricsStageResizing] = React.useState(false);
+  const [lyricsViewportRevision, setLyricsViewportRevision] = React.useState(0);
   const [storageProviders, setStorageProviders] = React.useState<QQMusicStorageProviderOption[]>([]);
   const [defaultStorageProvider, setDefaultStorageProvider] = React.useState('');
   const playbackRef = React.useRef({ startedAt: 0, startingTime: 0 });
   const activeRowRef = React.useRef<HTMLDivElement | null>(null);
+  const activeStageLineRef = React.useRef<HTMLDivElement | null>(null);
+  const activeTimelineSweepRef = React.useRef<HTMLSpanElement | null>(null);
+  const activeStageSweepRef = React.useRef<HTMLSpanElement | null>(null);
+  const timelineListRef = React.useRef<HTMLDivElement | null>(null);
+  const stageScrollRef = React.useRef<HTMLDivElement | null>(null);
+  const lastFollowedCueRef = React.useRef<{ cueIndex: number; songId: number } | null>(null);
   const initialListRequestedRef = React.useRef(false);
   const lastSearchRef = React.useRef({ query: '', scope: 'cached' as QQMusicLyricsSearchScope, singer: '' });
   const previewRequestRef = React.useRef(0);
@@ -920,6 +1272,20 @@ const ToolWorkspaceQQMusicLyrics: React.FC<ToolWorkspaceQQMusicLyricsProps> = ({
   const lyricsListPreviewFrameRef = React.useRef<number | null>(null);
   const pendingLyricsListWidthRef = React.useRef(0);
   const lyricsListDocumentDragReleaseRef = React.useRef<(() => void) | null>(null);
+  const lyricsPreviewContentRef = React.useRef<HTMLDivElement>(null);
+  const lyricsStageRef = React.useRef<HTMLDivElement>(null);
+  const lyricsStageHeightRef = React.useRef<number | null>(null);
+  const lyricsStageResizeRef = React.useRef<{
+    bounds: QQMusicLyricsStageHeightBounds;
+    pointerId: number;
+    startHeight: number;
+    startY: number;
+  } | null>(null);
+  const lyricsStagePreviewFrameRef = React.useRef<number | null>(null);
+  const pendingLyricsStageHeightRef = React.useRef(0);
+  const lyricsStageDocumentDragReleaseRef = React.useRef<(() => void) | null>(null);
+  const lyricsViewportResizeTimerRef = React.useRef<number | null>(null);
+  const lastLyricsViewportSizeRef = React.useRef<{ height: number; width: number } | null>(null);
 
   const timeline = React.useMemo(() => {
     const cues = preview ? parseTimedText(preview.qrcXml) : [];
@@ -934,7 +1300,7 @@ const ToolWorkspaceQQMusicLyrics: React.FC<ToolWorkspaceQQMusicLyricsProps> = ({
   }, [preview]);
   const { cues, duration, segmentCount } = timeline;
   const focusedCueIndex = resolveFocusedTimedTextCueIndex(cues, currentTime);
-  const focusedCue = focusedCueIndex >= 0 ? cues[focusedCueIndex] : null;
+  const previewSongId = preview?.song.songId ?? null;
   const contextualTarget = React.useMemo(
     () => contextualSaveDirectory(selectedTreeNode, rootNodeId),
     [rootNodeId, selectedTreeNode],
@@ -1069,6 +1435,167 @@ const ToolWorkspaceQQMusicLyrics: React.FC<ToolWorkspaceQQMusicLyricsProps> = ({
     setLyricsListWidth(nextWidth);
   }, [applyLyricsListWidthPreview]);
 
+  const applyLyricsStageHeightPreview = React.useCallback((height: number) => {
+    lyricsPreviewContentRef.current?.style.setProperty('--qq-stage-height', `${height}px`);
+  }, []);
+
+  const syncLyricsStageBounds = React.useCallback(() => {
+    if (!lyricsPreviewContentRef.current) return;
+    const nextBounds = getQQMusicLyricsStageHeightBounds(
+      lyricsPreviewContentRef.current.getBoundingClientRect().height,
+    );
+    setLyricsStageBounds((currentBounds) => (
+      currentBounds.min === nextBounds.min && currentBounds.max === nextBounds.max
+        ? currentBounds
+        : nextBounds
+    ));
+    if (lyricsStageHeightRef.current === null) return;
+    const nextHeight = clampQQMusicLyricsStageHeight(
+      lyricsStageHeightRef.current,
+      nextBounds,
+    );
+    lyricsStageHeightRef.current = nextHeight;
+    pendingLyricsStageHeightRef.current = nextHeight;
+    applyLyricsStageHeightPreview(nextHeight);
+    setLyricsStageHeight(currentHeight => (
+      currentHeight === nextHeight ? currentHeight : nextHeight
+    ));
+  }, [applyLyricsStageHeightPreview]);
+
+  const flushLyricsStageHeightPreview = React.useCallback(() => {
+    if (lyricsStagePreviewFrameRef.current !== null) {
+      cancelAnimationFrame(lyricsStagePreviewFrameRef.current);
+      lyricsStagePreviewFrameRef.current = null;
+    }
+    applyLyricsStageHeightPreview(pendingLyricsStageHeightRef.current);
+  }, [applyLyricsStageHeightPreview]);
+
+  const previewLyricsStageHeight = React.useCallback((
+    height: number,
+    bounds: QQMusicLyricsStageHeightBounds,
+  ) => {
+    const nextHeight = clampQQMusicLyricsStageHeight(height, bounds);
+    lyricsStageHeightRef.current = nextHeight;
+    pendingLyricsStageHeightRef.current = nextHeight;
+    if (lyricsStagePreviewFrameRef.current === null) {
+      lyricsStagePreviewFrameRef.current = requestAnimationFrame(() => {
+        lyricsStagePreviewFrameRef.current = null;
+        applyLyricsStageHeightPreview(pendingLyricsStageHeightRef.current);
+      });
+    }
+    return nextHeight;
+  }, [applyLyricsStageHeightPreview]);
+
+  const cancelLyricsStageResizeSession = React.useCallback(() => {
+    if (lyricsStagePreviewFrameRef.current !== null) {
+      cancelAnimationFrame(lyricsStagePreviewFrameRef.current);
+      lyricsStagePreviewFrameRef.current = null;
+    }
+    lyricsStageResizeRef.current = null;
+    lyricsStageDocumentDragReleaseRef.current?.();
+    lyricsStageDocumentDragReleaseRef.current = null;
+  }, []);
+
+  const finishLyricsStageResize = React.useCallback((target?: HTMLElement, pointerId?: number) => {
+    const resize = lyricsStageResizeRef.current;
+    if (!resize) return;
+    flushLyricsStageHeightPreview();
+    cancelLyricsStageResizeSession();
+    setLyricsStageResizing(false);
+    if (target && pointerId !== undefined && target.hasPointerCapture(pointerId)) {
+      target.releasePointerCapture(pointerId);
+    }
+    setLyricsStageHeight(lyricsStageHeightRef.current);
+  }, [cancelLyricsStageResizeSession, flushLyricsStageHeightPreview]);
+
+  const handleLyricsStageResizePointerDown = React.useCallback((
+    event: React.PointerEvent<HTMLDivElement>,
+  ) => {
+    if (
+      event.button !== 0
+      || lyricsStageResizeRef.current
+      || !lyricsPreviewContentRef.current
+      || !lyricsStageRef.current
+    ) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.focus();
+    const bounds = getQQMusicLyricsStageHeightBounds(
+      lyricsPreviewContentRef.current.getBoundingClientRect().height,
+    );
+    const startHeight = clampQQMusicLyricsStageHeight(
+      lyricsStageRef.current.getBoundingClientRect().height,
+      bounds,
+    );
+    lyricsStageHeightRef.current = startHeight;
+    pendingLyricsStageHeightRef.current = startHeight;
+    applyLyricsStageHeightPreview(startHeight);
+    lyricsStageResizeRef.current = {
+      bounds,
+      pointerId: event.pointerId,
+      startHeight,
+      startY: event.clientY,
+    };
+    setLyricsStageBounds(bounds);
+    setLyricsStageHeight(startHeight);
+    setLyricsStageResizing(true);
+    event.currentTarget.setPointerCapture(event.pointerId);
+    lyricsStageDocumentDragReleaseRef.current?.();
+    lyricsStageDocumentDragReleaseRef.current = beginDocumentDragSession('row-resize');
+  }, [applyLyricsStageHeightPreview]);
+
+  const handleLyricsStageResizePointerMove = React.useCallback((
+    event: React.PointerEvent<HTMLDivElement>,
+  ) => {
+    const resize = lyricsStageResizeRef.current;
+    if (!resize || resize.pointerId !== event.pointerId) return;
+    event.stopPropagation();
+    previewLyricsStageHeight(
+      resize.startHeight + event.clientY - resize.startY,
+      resize.bounds,
+    );
+  }, [previewLyricsStageHeight]);
+
+  const handleLyricsStageResizePointerUp = React.useCallback((
+    event: React.PointerEvent<HTMLDivElement>,
+  ) => {
+    if (lyricsStageResizeRef.current?.pointerId !== event.pointerId) return;
+    event.stopPropagation();
+    finishLyricsStageResize(event.currentTarget, event.pointerId);
+  }, [finishLyricsStageResize]);
+
+  const handleLyricsStageResizeKeyDown = React.useCallback((
+    event: React.KeyboardEvent<HTMLDivElement>,
+  ) => {
+    if (!lyricsPreviewContentRef.current || !lyricsStageRef.current) return;
+    const bounds = getQQMusicLyricsStageHeightBounds(
+      lyricsPreviewContentRef.current.getBoundingClientRect().height,
+    );
+    const currentHeight = clampQQMusicLyricsStageHeight(
+      lyricsStageRef.current.getBoundingClientRect().height,
+      bounds,
+    );
+    const nextHeight = getQQMusicLyricsStageKeyboardHeight(currentHeight, event.key, bounds);
+    if (nextHeight === null) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setLyricsStageBounds(bounds);
+    lyricsStageHeightRef.current = nextHeight;
+    pendingLyricsStageHeightRef.current = nextHeight;
+    applyLyricsStageHeightPreview(nextHeight);
+    setLyricsStageHeight(nextHeight);
+  }, [applyLyricsStageHeightPreview]);
+
+  const togglePreviewMode = React.useCallback(() => {
+    if (previewMode === 'timeline') {
+      finishLyricsStageResize();
+      setPlaying(false);
+      setPreviewMode('xml');
+      return;
+    }
+    setPreviewMode('timeline');
+  }, [finishLyricsStageResize, previewMode]);
+
   const loadStatus = React.useCallback(async () => {
     setStatusError('');
     try {
@@ -1093,6 +1620,71 @@ const ToolWorkspaceQQMusicLyrics: React.FC<ToolWorkspaceQQMusicLyricsProps> = ({
     if (statusReady) syncLyricsListBounds();
   }, [statusReady, syncLyricsListBounds]);
 
+  React.useLayoutEffect(() => {
+    if (
+      !statusReady
+      || !preview
+      || previewMode !== 'timeline'
+      || !lyricsPreviewContentRef.current
+    ) {
+      return undefined;
+    }
+    const previewContent = lyricsPreviewContentRef.current;
+    const handlePreviewContentResize = () => {
+      syncLyricsStageBounds();
+      const { height, width } = previewContent.getBoundingClientRect();
+      const nextSize = {
+        height: Math.round(height),
+        width: Math.round(width),
+      };
+      const previousSize = lastLyricsViewportSizeRef.current;
+      lastLyricsViewportSizeRef.current = nextSize;
+      if (
+        !previousSize
+        || (previousSize.height === nextSize.height && previousSize.width === nextSize.width)
+        || lyricsListResizeRef.current
+        || lyricsStageResizeRef.current
+      ) {
+        return;
+      }
+      if (lyricsViewportResizeTimerRef.current !== null) {
+        window.clearTimeout(lyricsViewportResizeTimerRef.current);
+      }
+      lyricsViewportResizeTimerRef.current = window.setTimeout(() => {
+        lyricsViewportResizeTimerRef.current = null;
+        setLyricsViewportRevision(currentRevision => currentRevision + 1);
+      }, 80);
+    };
+    handlePreviewContentResize();
+    const resizeObserver = typeof ResizeObserver === 'undefined'
+      ? null
+      : new ResizeObserver(handlePreviewContentResize);
+    resizeObserver?.observe(previewContent);
+    return () => {
+      resizeObserver?.disconnect();
+      if (lyricsViewportResizeTimerRef.current !== null) {
+        window.clearTimeout(lyricsViewportResizeTimerRef.current);
+        lyricsViewportResizeTimerRef.current = null;
+      }
+      lastLyricsViewportSizeRef.current = null;
+      cancelLyricsStageResizeSession();
+    };
+  }, [
+    cancelLyricsStageResizeSession,
+    preview,
+    previewMode,
+    statusReady,
+    syncLyricsStageBounds,
+  ]);
+
+  React.useEffect(() => {
+    if (statusReady) return;
+    finishLyricsListResize();
+    cancelLyricsStageResizeSession();
+    setLyricsListResizing(false);
+    setLyricsStageResizing(false);
+  }, [cancelLyricsStageResizeSession, finishLyricsListResize, statusReady]);
+
   React.useEffect(() => {
     let active = true;
     void fetchQQMusicStorageProviders()
@@ -1116,9 +1708,22 @@ const ToolWorkspaceQQMusicLyrics: React.FC<ToolWorkspaceQQMusicLyricsProps> = ({
     searchRequestRef.current += 1;
     if (lyricsListPreviewFrameRef.current !== null) {
       cancelAnimationFrame(lyricsListPreviewFrameRef.current);
+      lyricsListPreviewFrameRef.current = null;
     }
+    if (lyricsStagePreviewFrameRef.current !== null) {
+      cancelAnimationFrame(lyricsStagePreviewFrameRef.current);
+      lyricsStagePreviewFrameRef.current = null;
+    }
+    if (lyricsViewportResizeTimerRef.current !== null) {
+      window.clearTimeout(lyricsViewportResizeTimerRef.current);
+      lyricsViewportResizeTimerRef.current = null;
+    }
+    lyricsListResizeRef.current = null;
+    lyricsStageResizeRef.current = null;
     lyricsListDocumentDragReleaseRef.current?.();
     lyricsListDocumentDragReleaseRef.current = null;
+    lyricsStageDocumentDragReleaseRef.current?.();
+    lyricsStageDocumentDragReleaseRef.current = null;
   }, []);
 
   React.useEffect(() => {
@@ -1138,9 +1743,57 @@ const ToolWorkspaceQQMusicLyrics: React.FC<ToolWorkspaceQQMusicLyricsProps> = ({
     return () => cancelAnimationFrame(frame);
   }, [duration, playing]);
 
+  React.useLayoutEffect(() => {
+    const cue = cues[focusedCueIndex];
+    const sweepPercent = cue
+      ? resolveTimedTextCueSweepPercent(cue, 0, currentTime)
+      : 0;
+    const progress = `${sweepPercent}%`;
+    activeStageSweepRef.current?.style.setProperty('--qq-lyric-progress', progress);
+    activeTimelineSweepRef.current?.style.setProperty('--qq-lyric-progress', progress);
+  }, [cues, currentTime, focusedCueIndex, previewMode, statusReady]);
+
   React.useEffect(() => {
-    activeRowRef.current?.scrollIntoView({ block: 'nearest' });
-  }, [focusedCueIndex]);
+    if (previewSongId === null) {
+      lastFollowedCueRef.current = null;
+      return undefined;
+    }
+    if (!statusReady || previewMode !== 'timeline' || focusedCueIndex < 0) {
+      return undefined;
+    }
+    const previousCue = lastFollowedCueRef.current;
+    const nextCue = {
+      cueIndex: focusedCueIndex,
+      songId: previewSongId,
+    };
+    const shouldAnimate = shouldAnimateQQMusicLyricsFollow(
+      previousCue,
+      nextCue,
+      window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false,
+    );
+    const frame = requestAnimationFrame(() => {
+      const behavior: ScrollBehavior = shouldAnimate ? 'smooth' : 'auto';
+      let followed = false;
+      if (stageScrollRef.current && activeStageLineRef.current) {
+        scrollLyricsRowToCenter(stageScrollRef.current, activeStageLineRef.current, behavior);
+        followed = true;
+      }
+      if (timelineListRef.current && activeRowRef.current) {
+        scrollLyricsRowToCenter(timelineListRef.current, activeRowRef.current, behavior);
+        followed = true;
+      }
+      if (followed) lastFollowedCueRef.current = nextCue;
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [
+    focusedCueIndex,
+    lyricsListWidth,
+    lyricsStageHeight,
+    lyricsViewportRevision,
+    previewMode,
+    previewSongId,
+    statusReady,
+  ]);
 
   const handleSearch = React.useCallback(async (
     scope: QQMusicLyricsSearchScope = searchScope,
@@ -1153,6 +1806,7 @@ const ToolWorkspaceQQMusicLyrics: React.FC<ToolWorkspaceQQMusicLyricsProps> = ({
     if (append) {
       setLoadingMore(true);
     } else {
+      finishLyricsStageResize();
       lastSearchRef.current = searchInput;
       previewRequestRef.current += 1;
       setSearching(true);
@@ -1193,7 +1847,7 @@ const ToolWorkspaceQQMusicLyrics: React.FC<ToolWorkspaceQQMusicLyricsProps> = ({
         setLoadingMore(false);
       }
     }
-  }, [query, searchScope, singer, songs.length]);
+  }, [finishLyricsStageResize, query, searchScope, singer, songs.length]);
 
   React.useEffect(() => {
     if (!statusReady || initialListRequestedRef.current) return;
@@ -1208,6 +1862,7 @@ const ToolWorkspaceQQMusicLyrics: React.FC<ToolWorkspaceQQMusicLyricsProps> = ({
   }, [handleSearch, searchScope]);
 
   const handlePreview = React.useCallback(async (song: QQMusicLyricsSong) => {
+    finishLyricsStageResize();
     const requestId = ++previewRequestRef.current;
     setSelectedSongId(song.songId);
     setPreviewError('');
@@ -1235,7 +1890,7 @@ const ToolWorkspaceQQMusicLyrics: React.FC<ToolWorkspaceQQMusicLyricsProps> = ({
     } finally {
       if (requestId === previewRequestRef.current) setPreviewing(false);
     }
-  }, []);
+  }, [finishLyricsStageResize]);
 
   const togglePlayback = React.useCallback(() => {
     if (!preview || duration <= 0) return;
@@ -1402,6 +2057,7 @@ const ToolWorkspaceQQMusicLyrics: React.FC<ToolWorkspaceQQMusicLyricsProps> = ({
             >
               <Input
                 aria-label="歌曲名"
+                className="qq-song-input"
                 placeholder="歌曲名"
                 value={query}
                 onChange={setQuery}
@@ -1489,71 +2145,107 @@ const ToolWorkspaceQQMusicLyrics: React.FC<ToolWorkspaceQQMusicLyricsProps> = ({
                       {preview.song.singer} · {cues.length} 行 · {segmentCount} 个时间片
                     </div>
                   </div>
-                  <Tag color="green" size="small">QRC</Tag>
-                  <Button
-                    aria-label="保存到资料库"
-                    className="qq-icon-button qq-save-trigger"
-                    icon={<IconSave />}
-                    theme="borderless"
-                    title="保存到资料库"
-                    onClick={openSaveDialog}
-                  />
-                </div>
-                <div className="qq-preview-content">
-                  <div className="qq-stage">
-                    <div className="qq-stage-lines">
-                      <div className="qq-stage-line">
-                        {focusedCueIndex > 0 ? cues[focusedCueIndex - 1].lines.join(' ') : ''}
-                      </div>
-                      <div className="qq-stage-line is-active">
-                        {focusedCue ? cueSweepText(focusedCue, currentTime) : ''}
-                      </div>
-                      <div className="qq-stage-line">
-                        {focusedCueIndex >= 0 ? cues[focusedCueIndex + 1]?.lines.join(' ') : ''}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="qq-timeline-list">
-                    {cues.map((cue, cueIndex) => {
-                      const focused = cueIndex === focusedCueIndex;
-                      return (
-                        <QQMusicLyricsTimelineRow
-                          key={cue.id}
-                          activeRowRef={activeRowRef}
-                          cue={cue}
-                          currentTime={focused ? currentTime : 0}
-                          focused={focused}
-                        />
-                      );
-                    })}
-                  </div>
-                  <div className="qq-transport">
-                    <Button
-                      aria-label={playing ? '暂停预览' : '播放预览'}
-                      className="qq-icon-button"
-                      icon={playing ? <IconPause /> : <IconPlay />}
-                      theme="borderless"
-                      title={playing ? '暂停预览' : '播放预览'}
-                      onClick={togglePlayback}
-                    />
-                    <span className="qq-time">{formatTime(currentTime)}</span>
-                    <div className="qq-progress">
-                      <input
-                        aria-label="预览进度"
-                        disabled={duration <= 0}
-                        max={Math.max(duration, 0)}
-                        min={0}
-                        step={0.01}
-                        type="range"
-                        value={Math.min(currentTime, Math.max(duration, 0))}
-                        onChange={event => handleSeek(Number(event.currentTarget.value))}
+                  <div className="qq-preview-actions">
+                    <Tag color="green" size="small">QRC</Tag>
+                    <div className="qq-preview-icon-actions">
+                      <Button
+                        aria-label={previewMode === 'timeline' ? '查看 XML 文件' : '返回歌词时间轴'}
+                        className="qq-icon-button"
+                        icon={previewMode === 'timeline' ? <IconFile /> : <IconList />}
+                        theme="borderless"
+                        title={previewMode === 'timeline' ? '查看 XML 文件' : '返回歌词时间轴'}
+                        onClick={togglePreviewMode}
                       />
-                      <span className="qq-progress-track" aria-hidden="true">
-                        <span style={{ width: `${duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0}%` }} />
-                      </span>
+                      <Button
+                        aria-label="保存到资料库"
+                        className="qq-icon-button qq-save-trigger"
+                        icon={<IconSaveStroked />}
+                        theme="borderless"
+                        title="保存到资料库"
+                        onClick={openSaveDialog}
+                      />
                     </div>
-                    <span className="qq-time">{formatTime(duration)}</span>
                   </div>
+                </div>
+                <div
+                  ref={lyricsPreviewContentRef}
+                  className="qq-preview-content"
+                  data-mode={previewMode}
+                >
+                  {previewMode === 'xml' ? (
+                    <QQMusicLyricsXmlPreview content={preview.qrcXml} />
+                  ) : (
+                    <>
+                      <div ref={lyricsStageRef} className="qq-stage">
+                        <div ref={stageScrollRef} className="qq-stage-scroll">
+                          <div className="qq-stage-roller" role="list" aria-label="滚动歌词预览">
+                            <QQMusicLyricsStageCueList
+                              activeCueRef={activeStageLineRef}
+                              activeSweepRef={activeStageSweepRef}
+                              cues={cues}
+                              focusedCueIndex={focusedCueIndex}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                      <div
+                        aria-label="调整歌词预览高度"
+                        aria-orientation="horizontal"
+                        aria-valuemax={lyricsStageBounds.max}
+                        aria-valuemin={lyricsStageBounds.min}
+                        aria-valuenow={clampQQMusicLyricsStageHeight(
+                          lyricsStageHeight ?? lyricsStageBounds.max,
+                          lyricsStageBounds,
+                        )}
+                        className="qq-stage-resize-handle"
+                        data-resizing={lyricsStageResizing ? 'true' : 'false'}
+                        role="separator"
+                        tabIndex={0}
+                        onFocus={syncLyricsStageBounds}
+                        onKeyDown={handleLyricsStageResizeKeyDown}
+                        onLostPointerCapture={() => finishLyricsStageResize()}
+                        onPointerCancel={handleLyricsStageResizePointerUp}
+                        onPointerDown={handleLyricsStageResizePointerDown}
+                        onPointerMove={handleLyricsStageResizePointerMove}
+                        onPointerUp={handleLyricsStageResizePointerUp}
+                      />
+                      <div ref={timelineListRef} className="qq-timeline-list">
+                        <QQMusicLyricsTimelineCueList
+                          activeCueRef={activeRowRef}
+                          activeSweepRef={activeTimelineSweepRef}
+                          cues={cues}
+                          focusedCueIndex={focusedCueIndex}
+                        />
+                      </div>
+                      <div className="qq-transport">
+                        <Button
+                          aria-label={playing ? '暂停预览' : '播放预览'}
+                          className="qq-icon-button"
+                          icon={playing ? <IconPause /> : <IconPlay />}
+                          theme="borderless"
+                          title={playing ? '暂停预览' : '播放预览'}
+                          onClick={togglePlayback}
+                        />
+                        <span className="qq-time">{formatTime(currentTime)}</span>
+                        <div className="qq-progress">
+                          <input
+                            aria-label="预览进度"
+                            disabled={duration <= 0}
+                            max={Math.max(duration, 0)}
+                            min={0}
+                            step={0.01}
+                            type="range"
+                            value={Math.min(currentTime, Math.max(duration, 0))}
+                            onChange={event => handleSeek(Number(event.currentTarget.value))}
+                          />
+                          <span className="qq-progress-track" aria-hidden="true">
+                            <span style={{ width: `${duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0}%` }} />
+                          </span>
+                        </div>
+                        <span className="qq-time">{formatTime(duration)}</span>
+                      </div>
+                    </>
+                  )}
                 </div>
               </>
             ) : null}
