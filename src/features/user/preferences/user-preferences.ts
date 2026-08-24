@@ -24,7 +24,7 @@ export type ResolvedUserPreferences = {
 };
 
 export const DEFAULT_USER_PREFERENCES: ResolvedUserPreferences = {
-  theme: 'light',
+  theme: 'system',
   language: 'zh-CN',
   fileTreeShowSuffix: true,
   autoImportEnabled: false,

@@ -15,7 +15,7 @@ function readStoredTheme(): ThemeMode {
   } catch {
     // localStorage may be unavailable; fall through
   }
-  return 'light';
+  return 'system';
 }
 
 function resolveTheme(mode: ThemeMode, prefersDark: boolean): ResolvedThemeMode {

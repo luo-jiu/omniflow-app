@@ -28,12 +28,12 @@ function resolveThemeMode(theme: ThemeMode, prefersDark: boolean): ResolvedTheme
 }
 
 function readStoredTheme(): ThemeMode {
-  if (typeof window === 'undefined') return 'light';
+  if (typeof window === 'undefined') return 'system';
   try {
     const savedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
-    return isThemeMode(savedTheme) ? savedTheme : 'light';
+    return isThemeMode(savedTheme) ? savedTheme : 'system';
   } catch {
-    return 'light';
+    return 'system';
   }
 }
 
