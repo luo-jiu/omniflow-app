@@ -47,6 +47,7 @@ export interface AgentRunPlanSnapshot {
 }
 
 export interface AgentRunSnapshot {
+  capabilityIdentity?: string;
   createdAt: string;
   currentStep?: string;
   error?: string;
@@ -58,7 +59,9 @@ export interface AgentRunSnapshot {
   reasoningEffort: AgentReasoningEffort;
   revision: number;
   sessionId: string;
+  skillCatalogRevision?: number;
   status: AgentRunStatus;
+  toolCatalogRevision?: number;
   updatedAt: string;
   userPrompt: string;
 }

@@ -68,6 +68,10 @@ import {
   buildAgentFallbackSystemPrompt,
   buildAgentSystemPrompt,
 } from './agent-prompt-assembler';
+import {
+  projectAgentChatStreamEventForRenderer,
+  projectAgentSessionForRenderer,
+} from './agent-renderer-projection';
 import { extractAgentMediaAudio } from './agent-media-audio-extractor';
 import { agentMediaArtifactStore, type AgentMediaArtifactStore } from './agent-media-artifact-store';
 import { inspectAgentMediaSource } from './agent-media-inspector';
@@ -113,6 +117,24 @@ import {
   type AgentToolExecutor,
   type AgentToolPermissionDecision,
 } from './agent-tool-registry';
+import {
+  createAgentRunCapabilitySnapshot,
+  type AgentRunCapabilitySnapshot,
+} from './agent-run-capability-snapshot';
+import { createBuiltInAgentCapabilitySnapshot } from './capabilities/agent-capability-runtime';
+import type {
+  AgentCapabilitySnapshot,
+  AgentCapabilitySnapshotRequest,
+} from './capabilities/agent-capability.types';
+import {
+  builtInAgentSkillRegistry,
+  ensureBuiltInAgentCapabilities,
+} from './skills/agent-skill-runtime';
+import { resolveAgentSkillActivationResult } from './skills/skill-activate-tool';
+import {
+  AGENT_SKILL_ACTIVATE_TOOL_NAME,
+  type AgentSkillSummaryV1,
+} from './skills/agent-skill.types';
 import { getBuiltInActionTools } from './tools/directory-create-tool';
 import { getBuiltInReadTools } from './tools/file-read-tools';
 import {
@@ -123,8 +145,9 @@ import { mediaInspectTool } from './tools/media-inspect-tool';
 import { interactionRequestTool } from './tools/interaction-request-tool';
 import { memoryProposeTool } from './tools/memory-propose-tool';
 
-const MAX_TOOL_ROUNDS = 4;
 const MAX_TOOL_CALLS = 8;
+// One Skill activation turn, eight serial business Tool turns, then a final answer.
+const MAX_PROVIDER_TURNS = 10;
 const MAX_ASSISTANT_TURN_CHARACTERS = 64_000;
 const MAX_ASSISTANT_RUN_CHARACTERS = 64_000;
 const MAX_PROVIDER_TOOL_RESULT_TOKENS = 1_024;
@@ -146,6 +169,7 @@ const AVAILABLE_PERCEPTION_BUDGET_PROBE: AgentPerceptionSnapshot = {
 [...getBuiltInReadTools(), interactionRequestTool, memoryProposeTool, mediaInspectTool, mediaExtractAudioTool, ...getBuiltInActionTools()].forEach((tool) => {
   if (!agentToolRegistry.get(tool.name)) agentToolRegistry.register(tool);
 });
+ensureBuiltInAgentCapabilities();
 
 interface ActiveAgentRun {
   controller: AbortController;
@@ -205,6 +229,9 @@ interface AgentOrchestratorOptions {
   interactionTimeoutMs?: number;
   mediaArtifactStore?: Pick<AgentMediaArtifactStore, 'release' | 'releaseOwner' | 'releaseRun'>
     & Partial<Pick<AgentMediaArtifactStore, 'touchExecution'>>;
+  resolveCapabilitySnapshot?: (
+    input: AgentCapabilitySnapshotRequest,
+  ) => Promise<AgentCapabilitySnapshot>;
   resolveContextBudget?: (input: {
     model: string;
     providerType: AIServiceRuntimeConnection['providerType'];
@@ -260,6 +287,8 @@ function estimateContinuationTokensBeforeSideEffects(input: {
   capabilities: string[];
   currentPerception: AgentChatRequest['perception'];
   messages: readonly AgentProviderMessage[];
+  omittedSkillCount: number;
+  skillSummaries: readonly AgentSkillSummaryV1[];
   tools: readonly unknown[];
 }): number {
   const perceptionStates = input.currentPerception
@@ -272,6 +301,8 @@ function estimateContinuationTokensBeforeSideEffects(input: {
       input.appContext,
       perception,
       input.capabilities,
+      input.skillSummaries,
+      input.omittedSkillCount,
     ),
     tools: input.tools,
   })));
@@ -430,6 +461,14 @@ function hashToolInput(value: unknown): string {
   return crypto.createHash('sha256').update(stableJson(value)).digest('hex');
 }
 
+function getActivatedSkillId(result: AgentToolResult): string | undefined {
+  if (!result.ok || !result.data || typeof result.data !== 'object' || Array.isArray(result.data)) {
+    return undefined;
+  }
+  const skillId = String((result.data as Record<string, unknown>).skillId || '').trim();
+  return skillId || undefined;
+}
+
 function sameOwnerScope(left: AgentOwnerScope, right: AgentOwnerScope): boolean {
   return left.accountScope === right.accountScope && left.backendScope === right.backendScope;
 }
@@ -461,6 +500,8 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
   const inspectMediaSource = options.inspectMediaSource || inspectAgentMediaSource;
   const extractMediaAudioSource = options.extractMediaAudio || extractAgentMediaAudio;
   const mediaArtifactStore = options.mediaArtifactStore || agentMediaArtifactStore;
+  const resolveCapabilitySnapshot = options.resolveCapabilitySnapshot
+    || createBuiltInAgentCapabilitySnapshot;
   const contextManager = options.contextManager || createAgentContextManager({
     budget: options.contextBudget,
   });
@@ -478,7 +519,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
 
   function emit(sender: WebContents, event: AgentChatStreamEvent): void {
     if (!sender.isDestroyed()) {
-      sender.send('agent:chat:event', event);
+      sender.send('agent:chat:event', projectAgentChatStreamEventForRenderer(event));
     }
   }
 
@@ -902,11 +943,19 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     input: AgentChatRequest,
     signal: AbortSignal,
     perception: AgentChatRequest['perception'],
+    capabilitySnapshot: AgentRunCapabilitySnapshot,
+    activeSkillId: string | undefined,
     onPerception: (next: AgentChatRequest['perception']) => void,
   ): Promise<AgentToolResult> {
-    const tool = agentToolRegistry.get(call.name);
+    const tool = capabilitySnapshot.getTool(call.name, activeSkillId);
+    const registeredTool = capabilitySnapshot.toolSnapshot.get(call.name);
     if (tool && !call.inputError) {
-      const schemaValidation = agentToolRegistry.validateInput(tool.name, call.input);
+      const schemaValidation = capabilitySnapshot.validateInput(
+        tool.name,
+        call.input,
+        activeSkillId,
+        tool.registrationId,
+      );
       if (!schemaValidation.ok) {
         call.input = { _omniflowAudit: 'invalid Tool input omitted' };
         return { message: schemaValidation.message, ok: false };
@@ -945,9 +994,11 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       });
     };
     const executionContext: AgentToolExecutionContext = {
+      activeSkillId,
       appContext: input.appContext,
       onProgress: persistAndEmitProgress,
       perception,
+      runCapabilitySnapshot: capabilitySnapshot,
       saveMemoryProposal: async (
         proposal: AgentMemoryProposal,
         operationSignal: AbortSignal,
@@ -1022,6 +1073,20 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       },
       signal,
     };
+    const runToolRegistry = {
+      execute: (
+        name: string,
+        toolInput: unknown,
+        toolContext: AgentToolExecutionContext,
+        expectedRegistrationId?: string,
+      ) => capabilitySnapshot.execute(
+        name,
+        toolInput,
+        toolContext,
+        activeSkillId,
+        expectedRegistrationId,
+      ),
+    };
     const cancelRendererExecution = (executionId: string) => emit(sender, {
       executionId,
       runId,
@@ -1050,11 +1115,11 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         message: auditProjection.sensitive
           ? 'Agent Tool 参数包含不能进入会话的敏感凭据'
           : 'Agent Tool 参数超过安全审计上限',
-        risk: tool?.risk || 'external',
+        risk: registeredTool?.risk || 'external',
       };
     }
     let decision = preflightDecision || (call.inputError
-      ? { behavior: 'deny' as const, message: call.inputError, risk: tool?.risk || 'external' as const }
+      ? { behavior: 'deny' as const, message: call.inputError, risk: registeredTool?.risk || 'external' as const }
       : tool
         ? await assessAgentToolPermission(tool, call.input, executionContext)
         : {
@@ -1071,7 +1136,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         decision = {
           behavior: 'deny',
           message: `工具 ${call.name} 缺少 Renderer 执行契约`,
-          risk: tool?.risk || 'write',
+          risk: registeredTool?.risk || 'write',
         };
       } else {
         try {
@@ -1118,6 +1183,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       permissionBehavior: decision.behavior,
       runId,
       status: decision.behavior === 'ask' ? 'awaiting_approval' : 'running',
+      toolKind: tool?.kind || registeredTool?.kind || 'business',
       toolName: call.name,
     });
     emit(sender, {
@@ -1191,7 +1257,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
           result = await toolBroker.executeMain(call.name, call.input, {
             ...executionContext,
             perception,
-          }, tool.timeoutMs);
+          }, tool.timeoutMs, runToolRegistry);
         }
       } else if ((tool.executor || 'main') === 'renderer') {
         const execution = toolBroker.prepareRendererExecution({
@@ -1222,6 +1288,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
           call.input,
           executionContext,
           tool.timeoutMs,
+          runToolRegistry,
         );
       }
     } catch (error) {
@@ -1308,6 +1375,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     controller: AbortController,
     contextBudget: AgentContextBudget,
     recalledMemories: AgentMemoryItem[],
+    capabilitySnapshot: AgentRunCapabilitySnapshot,
   ): Promise<void> {
     const sessionId = session.id;
     let content = '';
@@ -1350,14 +1418,25 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       }
     };
     try {
-      const tools = agentToolRegistry.list();
-      const availableToolNames = new Set(tools.map(tool => tool.name));
-      const providerTools = [agentPlanControlTool, ...tools];
-      const capabilities = [...availableToolNames];
+      const skillSummaries = capabilitySnapshot.skillSnapshot.listSummaries();
+      const omittedSkillCount = capabilitySnapshot.skillSnapshot.omittedSkillCount;
+      const getProviderCapabilityView = (activeSkillId?: string) => {
+        const visibleTools = capabilitySnapshot.listTools(activeSkillId);
+        return {
+          availableBusinessToolNames: new Set(
+            capabilitySnapshot.listBusinessTools(activeSkillId).map(tool => tool.name),
+          ),
+          capabilities: visibleTools.map(tool => tool.name),
+          providerTools: [agentPlanControlTool, ...visibleTools],
+        };
+      };
+      const initialCapabilityView = getProviderCapabilityView();
       const initialSystemPrompt = buildAgentSystemPrompt(
         input.appContext,
         input.perception,
-        capabilities,
+        initialCapabilityView.capabilities,
+        skillSummaries,
+        omittedSkillCount,
       );
       const initialFallbackSystemPrompt = buildAgentFallbackSystemPrompt(
         input.appContext,
@@ -1365,7 +1444,10 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       );
       const fallbackContextMessages = buildAgentFallbackContextMessages(input.perception);
       const fixedInputTokens = Math.max(
-        estimateAgentFixedInputTokens([initialSystemPrompt], providerTools),
+        estimateAgentFixedInputTokens(
+          [initialSystemPrompt],
+          initialCapabilityView.providerTools,
+        ),
         estimateAgentFixedInputTokens([initialFallbackSystemPrompt], [])
           + estimateAgentProviderMessagesTokens(fallbackContextMessages),
       );
@@ -1399,9 +1481,11 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       let toolCallCount = 0;
       let completed = false;
       let currentPerception = input.perception;
+      let activeSkillId: string | undefined;
       const seenToolCallIds = new Set<string>();
 
-      for (let round = 0; round <= MAX_TOOL_ROUNDS; round += 1) {
+      for (let round = 0; round < MAX_PROVIDER_TURNS; round += 1) {
+        const roundCapabilityView = getProviderCapabilityView(activeSkillId);
         await updateRunAndEmit(sender, store, sessionId, runId, {
           currentStep: round === 0 ? '请求 AI 服务' : '根据工具结果继续思考',
           status: 'running',
@@ -1413,7 +1497,9 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
           const systemPrompt = buildAgentSystemPrompt(
             input.appContext,
             currentPerception,
-            capabilities,
+            roundCapabilityView.capabilities,
+            skillSummaries,
+            omittedSkillCount,
           );
           const providerTurnInput = {
             maxOutputTokens: contextBudget.outputReserveTokens,
@@ -1421,7 +1507,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
             model: input.model,
             reasoningEffort: input.reasoningEffort,
             systemPrompt,
-            tools: providerTools,
+            tools: roundCapabilityView.providerTools,
           };
           assertAgentProviderTurnFitsContext(
             providerTurnInput,
@@ -1481,14 +1567,79 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
           break;
         }
         await persistPendingAssistantContent();
-        if (round === MAX_TOOL_ROUNDS) {
-          throw new Error('Agent 工具调用轮数超过安全上限');
+        if (round === MAX_PROVIDER_TURNS - 1) {
+          throw new Error('Agent Provider 轮数超过安全上限');
+        }
+        const activationCalls = toolCalls.filter(
+          call => call.name === AGENT_SKILL_ACTIVATE_TOOL_NAME,
+        );
+        if (activationCalls.length > 0 && toolCalls.length !== 1) {
+          const rejection = projectAgentToolResultForProvider({
+            message: 'skill.activate 必须独占一次 Tool 调用；本轮所有 Tool 均未执行，请下一轮只调用 skill.activate',
+            ok: false,
+          }, MAX_PROVIDER_TOOL_RESULT_TOKENS);
+          const rejectedToolMessages: AgentProviderMessage[] = toolCalls.map(call => ({
+            content: rejection.content,
+            name: call.name,
+            role: 'tool',
+            toolCallId: call.id,
+          }));
+          assertAgentProviderTurnFitsContext({
+            messages: [...messages, ...rejectedToolMessages],
+            systemPrompt: buildAgentSystemPrompt(
+              input.appContext,
+              currentPerception,
+              roundCapabilityView.capabilities,
+              skillSummaries,
+              omittedSkillCount,
+            ),
+            tools: roundCapabilityView.providerTools,
+          }, contextBudget, 'Agent Skill 激活协议拒绝续接请求');
+          messages.push(...rejectedToolMessages);
+          continue;
         }
         const businessToolCallsInRound = toolCalls.filter(
-          call => call.name !== AGENT_PLAN_CONTROL_TOOL_NAME,
+          call => call.name !== AGENT_PLAN_CONTROL_TOOL_NAME
+            && capabilitySnapshot.getToolKind(call.name) !== 'control',
         ).length;
         if (toolCallCount + businessToolCallsInRound > MAX_TOOL_CALLS) {
           throw new Error('Agent 工具调用次数超过安全上限；本轮未执行工具');
+        }
+
+        let expectedExclusiveActivationResult: AgentToolResult | undefined;
+        let minimumContinuationCapabilityView = roundCapabilityView;
+        const exclusiveActivationCall = toolCalls.length === 1
+          && toolCalls[0].name === AGENT_SKILL_ACTIVATE_TOOL_NAME
+          ? toolCalls[0]
+          : undefined;
+        if (exclusiveActivationCall && !exclusiveActivationCall.inputError) {
+          const activationTool = capabilitySnapshot.getTool(
+            exclusiveActivationCall.name,
+            activeSkillId,
+          );
+          const activationInputValidation = activationTool
+            ? capabilitySnapshot.validateInput(
+                exclusiveActivationCall.name,
+                exclusiveActivationCall.input,
+                activeSkillId,
+                activationTool.registrationId,
+              )
+            : { ok: false as const };
+          if (activationInputValidation.ok) {
+            expectedExclusiveActivationResult = resolveAgentSkillActivationResult(
+              exclusiveActivationCall.input,
+              {
+                activeSkillId,
+                runCapabilitySnapshot: capabilitySnapshot,
+              },
+            );
+            const expectedActivatedSkillId = getActivatedSkillId(
+              expectedExclusiveActivationResult,
+            );
+            minimumContinuationCapabilityView = getProviderCapabilityView(
+              expectedActivatedSkillId || activeSkillId,
+            );
+          }
         }
 
         const minimumToolResultMessages: AgentProviderMessage[] = toolCalls.map(call => ({
@@ -1499,10 +1650,12 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         }));
         const minimumContinuationTokens = estimateContinuationTokensBeforeSideEffects({
           appContext: input.appContext,
-          capabilities,
+          capabilities: minimumContinuationCapabilityView.capabilities,
           currentPerception,
           messages: [...messages, ...minimumToolResultMessages],
-          tools: providerTools,
+          omittedSkillCount,
+          skillSummaries,
+          tools: minimumContinuationCapabilityView.providerTools,
         });
         const providerRequestLimit = getAgentProviderRequestTokenLimit(contextBudget);
         if (minimumContinuationTokens > providerRequestLimit) {
@@ -1517,14 +1670,16 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
           const currentMinimumResultMessage = minimumToolResultMessages[callIndex];
           const preExecutionMinimumTokens = estimateContinuationTokensBeforeSideEffects({
             appContext: input.appContext,
-            capabilities,
+            capabilities: minimumContinuationCapabilityView.capabilities,
             currentPerception,
             messages: [
               ...messages,
               currentMinimumResultMessage,
               ...futureMinimumResultMessages,
             ],
-            tools: providerTools,
+            omittedSkillCount,
+            skillSummaries,
+            tools: minimumContinuationCapabilityView.providerTools,
           });
           if (preExecutionMinimumTokens > providerRequestLimit) {
             throw new Error(
@@ -1533,6 +1688,52 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
               + `${providerRequestLimit} token；当前工具未执行`,
             );
           }
+          const expectedActivationResult = call === exclusiveActivationCall
+            ? expectedExclusiveActivationResult
+            : undefined;
+          if (expectedActivationResult) {
+            const expectedCapabilityView = minimumContinuationCapabilityView;
+            const requestWithEmptyActivationResultTokens = estimateAgentProviderTurnTokens({
+              messages: [
+                ...messages,
+                {
+                  content: '',
+                  name: call.name,
+                  role: 'tool',
+                  toolCallId: call.id,
+                },
+              ],
+              systemPrompt: buildAgentSystemPrompt(
+                input.appContext,
+                currentPerception,
+                expectedCapabilityView.capabilities,
+                skillSummaries,
+                omittedSkillCount,
+              ),
+              tools: expectedCapabilityView.providerTools,
+            });
+            const exactActivationResultBudget = Math.min(
+              MAX_PROVIDER_TOOL_RESULT_TOKENS,
+              providerRequestLimit
+                - requestWithEmptyActivationResultTokens
+                + estimateAgentTextTokens(''),
+            );
+            if (exactActivationResultBudget < MINIMUM_AGENT_PROVIDER_TOOL_RESULT_TOKENS) {
+              throw new Error(
+                `Agent Skill 完整说明没有足够的模型上下文预算；当前 Skill 未激活`,
+              );
+            }
+            const expectedProjection = projectAgentToolResultForProvider(
+              expectedActivationResult,
+              exactActivationResultBudget,
+            );
+            if (expectedProjection.truncated) {
+              throw new Error(
+                `Agent Skill 完整说明无法放入当前模型上下文；当前 Skill 未激活`,
+              );
+            }
+          }
+
           const result = call.name === AGENT_PLAN_CONTROL_TOOL_NAME
             ? await executePlanControlCall(
                 sender,
@@ -1540,12 +1741,14 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
                 sessionId,
                 runId,
                 call,
-                availableToolNames,
+                roundCapabilityView.availableBusinessToolNames,
               )
             : await (async () => {
-                toolCallCount += 1;
-                if (toolCallCount > MAX_TOOL_CALLS) {
-                  throw new Error('Agent 工具调用次数超过安全上限');
+                if (capabilitySnapshot.getToolKind(call.name) !== 'control') {
+                  toolCallCount += 1;
+                  if (toolCallCount > MAX_TOOL_CALLS) {
+                    throw new Error('Agent 工具调用次数超过安全上限');
+                  }
                 }
                 return executeToolCall(
                   sender,
@@ -1556,15 +1759,27 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
                   input,
                   controller.signal,
                   currentPerception,
+                  capabilitySnapshot,
+                  activeSkillId,
                   (nextPerception) => {
                     currentPerception = nextPerception;
                   },
                 );
               })();
+          if (expectedActivationResult) {
+            if (stableJson(result) !== stableJson(expectedActivationResult)) {
+              throw new Error('Agent Skill 激活结果与预检不一致；当前 Skill 未激活');
+            }
+            const activatedSkillId = getActivatedSkillId(result);
+            if (activatedSkillId) activeSkillId = activatedSkillId;
+          }
+          const continuationCapabilityView = getProviderCapabilityView(activeSkillId);
           const currentSystemPrompt = buildAgentSystemPrompt(
             input.appContext,
             currentPerception,
-            capabilities,
+            continuationCapabilityView.capabilities,
+            skillSummaries,
+            omittedSkillCount,
           );
           const emptyCurrentResultMessage: AgentProviderMessage = {
             content: '',
@@ -1579,7 +1794,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
               ...futureMinimumResultMessages,
             ],
             systemPrompt: currentSystemPrompt,
-            tools: providerTools,
+            tools: continuationCapabilityView.providerTools,
           });
           const resultTokenBudget = Math.min(
             MAX_PROVIDER_TOOL_RESULT_TOKENS,
@@ -1595,6 +1810,9 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
             );
           }
           const projectedResult = projectAgentToolResultForProvider(result, resultTokenBudget);
+          if (call.name === AGENT_SKILL_ACTIVATE_TOOL_NAME && projectedResult.truncated) {
+            throw new Error('Agent Skill 完整说明在 Provider 投影中被截断；已停止当前 Run');
+          }
           messages.push({
             content: projectedResult.content,
             name: call.name,
@@ -1721,21 +1939,42 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         }),
       });
       resolveAIServiceOutputTokenLimit(contextBudget.outputReserveTokens);
+      const toolSnapshot = agentToolRegistry.createSnapshot();
+      const skillSnapshot = builtInAgentSkillRegistry.createRunSnapshot();
+      const capabilityIds = Array.from(new Set(toolSnapshot.tools.flatMap(tool => [
+        ...tool.availability.requiredCapabilities,
+        ...tool.availability.optionalCapabilities,
+      ])));
+      const environmentCapabilitySnapshot = await resolveCapabilitySnapshot({
+        capabilityIds,
+        libraryId,
+        ownerScope,
+        signal: controller.signal,
+      });
+      throwIfAborted(controller.signal);
+      const capabilitySnapshot = createAgentRunCapabilitySnapshot({
+        capabilitySnapshot: environmentCapabilitySnapshot,
+        skillSnapshot,
+        toolSnapshot,
+      });
       const recalledMemories = await retrieveMemories({
         libraryId,
         ownerScope,
         query: userPrompt,
       }).catch(() => []);
-      const preflightTools = [agentPlanControlTool, ...agentToolRegistry.list()];
+      const preflightVisibleTools = capabilitySnapshot.listTools();
+      const preflightTools = [agentPlanControlTool, ...preflightVisibleTools];
+      const preflightSkillSummaries = capabilitySnapshot.skillSnapshot.listSummaries();
+      const preflightOmittedSkillCount = capabilitySnapshot.skillSnapshot.omittedSkillCount;
       const preflightFallbackContextMessages = buildAgentFallbackContextMessages(perception);
       const preflightFixedInputTokens = Math.max(
         estimateAgentFixedInputTokens([
           buildAgentSystemPrompt(
             context,
             perception,
-            preflightTools
-              .filter(tool => tool.name !== AGENT_PLAN_CONTROL_TOOL_NAME)
-              .map(tool => tool.name),
+            preflightVisibleTools.map(tool => tool.name),
+            preflightSkillSummaries,
+            preflightOmittedSkillCount,
           ),
         ], preflightTools),
         estimateAgentFixedInputTokens([
@@ -1778,12 +2017,15 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       throwIfAborted(controller.signal);
 
       const createdRun = await store.createRun({
+        capabilityIdentity: capabilitySnapshot.identity,
         id: runId,
         model,
         now: startedAt,
         profileId,
         reasoningEffort,
         sessionId: session.id,
+        skillCatalogRevision: capabilitySnapshot.skillRevision,
+        toolCatalogRevision: capabilitySnapshot.toolRevision,
         userPrompt,
       });
       runCreated = true;
@@ -1813,7 +2055,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         reasoningEffort,
         sessionId: session.id,
         userPrompt,
-      }, runtimeConnection, controller, contextBudget, recalledMemories);
+      }, runtimeConnection, controller, contextBudget, recalledMemories, capabilitySnapshot);
       return { runId, sessionId: session.id };
     } catch (error) {
       if (session && store && isAbortError(error, controller.signal)) {
@@ -1890,7 +2132,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       libraryId,
     );
     if (!session) throw new Error('Agent 会话不存在或不属于当前资料库');
-    return session;
+    return projectAgentSessionForRenderer(session);
   }
 
   async function renameSession(

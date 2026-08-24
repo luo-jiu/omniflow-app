@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import { estimateAgentTextTokens } from '../agent-context-projection';
+import { projectAgentToolResultForProvider } from '../agent-tool-result-projection';
 import { getBuiltInAgentSkills, mediaExtractAudioSkill } from './agent-skill-catalog';
 import {
   createAgentSkillRegistry,
@@ -22,7 +24,7 @@ describe('built-in Agent Skill catalog', () => {
 
   it('fits the activation result budget used by the registry', () => {
     const registry = createAgentSkillRegistry({
-      estimateTokens: text => Math.ceil([...text].length / 2),
+      estimateTokens: estimateAgentTextTokens,
       maxSummaryTokens: 256,
       maxActivationTokens: 1_024,
       toolExists: () => true,
@@ -32,6 +34,12 @@ describe('built-in Agent Skill catalog', () => {
     const envelope = snapshot.getActivationEnvelope(mediaExtractAudioSkill.id);
     expect(envelope).not.toBeNull();
     expect(serializeAgentSkillActivationEnvelope(envelope!)).not.toContain('undefined');
+    const projection = projectAgentToolResultForProvider({
+      data: envelope,
+      message: `已加载 Skill ${envelope!.skillId}（${envelope!.version}）`,
+      ok: true,
+    }, 1_024);
+    expect(projection.truncated).toBe(false);
   });
 
   it('returns an isolated definition projection for callers', () => {

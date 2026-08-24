@@ -23,6 +23,8 @@ const ALLOWED_DEFINITION_KEYS = new Set([
   'description',
   'id',
   'instructions',
+  'optionalTools',
+  'requiredTools',
   'source',
   'toolAllowlist',
   'version',
@@ -48,11 +50,15 @@ export const AGENT_SKILL_INVALID_DEFINITION_MESSAGE = 'Agent Skill 定义无效'
 type TokenEstimator = (serialized: string) => number;
 
 function defaultEstimateTokens(serialized: string): number {
-  // This is only a conservative registration fallback.  Production callers
-  // should pass the same provider-aware estimator used by the Agent budget
-  // preflight.
-  const characters = Array.from(serialized).length;
-  return Math.ceil(characters / 2);
+  // Keep the standalone fallback aligned with the Agent context estimator:
+  // non-ASCII text is roughly one token per character, while ASCII is denser.
+  let nonAsciiCharacters = 0;
+  let otherCharacters = 0;
+  for (const character of String(serialized || '')) {
+    if (character.codePointAt(0)! > 0x7f) nonAsciiCharacters += 1;
+    else otherCharacters += 1;
+  }
+  return Math.max(1, Math.ceil((nonAsciiCharacters * 1.1) + (otherCharacters / 3.5)));
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -138,6 +144,27 @@ function normalizeToolAllowlist(value: unknown): string[] {
   return names;
 }
 
+function normalizeToolClassification(value: unknown, field: string): string[] {
+  if (!Array.isArray(value)) {
+    throw new Error(`Agent Skill ${field} 必须是数组`);
+  }
+  if (Reflect.ownKeys(value).some(key => (
+    typeof key === 'symbol'
+    || (typeof key === 'string' && key !== 'length' && !/^\d+$/u.test(key))
+  ))) {
+    throw new Error(AGENT_SKILL_INVALID_DEFINITION_MESSAGE);
+  }
+  const seen = new Set<string>();
+  return value.map((rawName, index) => {
+    const name = normalizeText(rawName, `Agent Skill ${field}（第 ${index + 1} 项）`, 160, {
+      collapseWhitespace: true,
+    });
+    if (seen.has(name)) throw new Error(`Agent Skill ${field} 包含重复 Tool：${name}`);
+    seen.add(name);
+    return name;
+  });
+}
+
 function cloneAndFreezeDefinition(input: unknown): AgentSkillDefinitionV1 {
   if (!isPlainObject(input)) throw new Error(AGENT_SKILL_INVALID_DEFINITION_MESSAGE);
   assertAllowedKeys(input);
@@ -179,10 +206,28 @@ function cloneAndFreezeDefinition(input: unknown): AgentSkillDefinitionV1 {
     throw new Error('Agent Skill 当前只支持 built-in 来源');
   }
   const toolAllowlist = normalizeToolAllowlist(input.toolAllowlist);
+  const requiredTools = normalizeToolClassification(input.requiredTools, 'requiredTools');
+  const optionalTools = normalizeToolClassification(input.optionalTools, 'optionalTools');
+  const allowlist = new Set(toolAllowlist);
+  const classified = new Set<string>();
+  for (const toolName of [...requiredTools, ...optionalTools]) {
+    if (!allowlist.has(toolName)) {
+      throw new Error(`Agent Skill Tool 分类不在 allowlist 中：${toolName}`);
+    }
+    if (classified.has(toolName)) {
+      throw new Error(`Agent Skill required / optional Tool 不能重复：${toolName}`);
+    }
+    classified.add(toolName);
+  }
+  if (classified.size !== allowlist.size) {
+    throw new Error('Agent Skill allowlist 中的 Tool 必须归入 requiredTools 或 optionalTools');
+  }
   return Object.freeze({
     description,
     id,
     instructions,
+    optionalTools: Object.freeze(optionalTools),
+    requiredTools: Object.freeze(requiredTools),
     source: AGENT_SKILL_SOURCE_V1,
     toolAllowlist: Object.freeze(toolAllowlist),
     version,
@@ -224,6 +269,17 @@ export function serializeAgentSkillActivationEnvelope(
   envelope: AgentSkillActivationEnvelopeV1,
 ): string {
   return stableStringify(envelope);
+}
+
+/** Exact canonical Tool result shape used by `skill.activate` budget checks. */
+export function serializeAgentSkillActivationToolResult(
+  envelope: AgentSkillActivationEnvelopeV1,
+): string {
+  return stableStringify({
+    data: envelope,
+    message: `已加载 Skill ${envelope.skillId}（${envelope.version}）`,
+    ok: true,
+  });
 }
 
 function createSummary(definition: AgentSkillDefinitionV1): AgentSkillSummaryV1 {
@@ -314,7 +370,7 @@ export function createAgentSkillRegistry(options: AgentSkillRegistryOptionsV1 = 
     const envelope = createAgentSkillActivationEnvelope(definition);
     assertEstimatedBudget(
       estimateTokens,
-      serializeAgentSkillActivationEnvelope(envelope),
+      serializeAgentSkillActivationToolResult(envelope),
       maxActivationTokens,
       `Agent Skill 正文（${definition.id}）`,
     );
@@ -344,27 +400,42 @@ export function createAgentSkillRegistry(options: AgentSkillRegistryOptionsV1 = 
     snapshotOptions: AgentSkillSnapshotOptionsV1 = {},
   ): AgentSkillSnapshotV1 {
     const definitions = sortDefinitions(skills.values());
-    const snapshotSkills = Object.freeze(definitions.map(definition => definition));
+    const catalogBudget = snapshotOptions.maxCatalogTokens === undefined
+      ? configuredCatalogBudget
+      : normalizeBudget(snapshotOptions.maxCatalogTokens, maxSummaryTokens);
+    let includedCount = definitions.length;
+    for (let count = definitions.length; count >= 0; count -= 1) {
+      const projectedSummaries = definitions.slice(0, count).map(createSummary);
+      const catalogProjection = stableStringify({
+        omittedSkillCount: definitions.length - count,
+        skills: projectedSummaries,
+        truncated: count < definitions.length,
+      });
+      try {
+        assertEstimatedBudget(
+          estimateTokens,
+          catalogProjection,
+          catalogBudget,
+          'Agent Skill 摘要目录',
+        );
+        includedCount = count;
+        break;
+      } catch {
+        if (count === 0) throw new Error('Agent Skill 摘要目录无法在预算内完整标记');
+      }
+    }
+    const snapshotSkills = Object.freeze(
+      definitions.slice(0, includedCount).map(definition => definition),
+    );
     const snapshotById = new Map(snapshotSkills.map(definition => [definition.id, definition]));
     const summaries = Object.freeze(snapshotSkills.map(createSummary));
     const summaryById = new Map(summaries.map(summary => [summary.id, summary]));
     const activationEnvelopes = new Map(
       snapshotSkills.map(definition => [definition.id, createAgentSkillActivationEnvelope(definition)]),
     );
-    const catalogBudget = snapshotOptions.maxCatalogTokens === undefined
-      ? configuredCatalogBudget
-      : normalizeBudget(snapshotOptions.maxCatalogTokens, maxSummaryTokens);
-    if (catalogBudget !== undefined) {
-      assertEstimatedBudget(
-        estimateTokens,
-        stableStringify(summaries),
-        catalogBudget,
-        'Agent Skill 摘要目录',
-      );
-    }
-
     const snapshot: AgentSkillSnapshotV1 = {
       catalogRevision,
+      catalogTruncated: includedCount < definitions.length,
       get: (skillId: string) => snapshotById.get(String(skillId || '').trim()) || null,
       getActivationEnvelope: (skillId: string) => (
         activationEnvelopes.get(String(skillId || '').trim()) || null
@@ -372,6 +443,7 @@ export function createAgentSkillRegistry(options: AgentSkillRegistryOptionsV1 = 
       getSummary: (skillId: string) => summaryById.get(String(skillId || '').trim()) || null,
       list: () => snapshotSkills,
       listSummaries: () => summaries,
+      omittedSkillCount: definitions.length - includedCount,
       skills: snapshotSkills,
     };
     return Object.freeze(snapshot);

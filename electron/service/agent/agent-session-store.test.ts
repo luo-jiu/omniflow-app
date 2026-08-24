@@ -1115,15 +1115,23 @@ describe('SQLite Agent session store', () => {
     const store = await createStore();
     await createSession(store, 'session-plan-once', 3, '一次性计划');
     const createdRun = await store.createRun({
+      capabilityIdentity: `v2:${'a'.repeat(64)}`,
       id: 'run-plan-once',
       model: 'model-a',
       now: timestamp(1),
       profileId: 'profile-a',
       reasoningEffort: 'medium',
       sessionId: 'session-plan-once',
+      skillCatalogRevision: 2,
+      toolCatalogRevision: 7,
       userPrompt: '检查目录和文件',
     });
-    expect(createdRun).toMatchObject({ revision: 1 });
+    expect(createdRun).toMatchObject({
+      capabilityIdentity: `v2:${'a'.repeat(64)}`,
+      revision: 1,
+      skillCatalogRevision: 2,
+      toolCatalogRevision: 7,
+    });
     expect(createdRun).not.toHaveProperty('plan');
 
     const plan = runPlan();
@@ -1176,6 +1184,49 @@ describe('SQLite Agent session store', () => {
     });
     await expect(store.setRunPlan('run-plan-terminal', runPlan(timestamp(3))))
       .rejects.toThrow('首个 Tool 前设置一次');
+  });
+
+  it('allows a plan after Skill activation without binding the control Tool to a plan step', async () => {
+    const store = await createStore();
+    await createSession(store, 'session-plan-after-skill', 3, 'Skill 后计划');
+    await store.createRun({
+      id: 'run-plan-after-skill',
+      model: 'model-a',
+      now: timestamp(1),
+      profileId: 'profile-a',
+      reasoningEffort: 'auto',
+      sessionId: 'session-plan-after-skill',
+      userPrompt: '先加载流程，再执行计划',
+    });
+    const activation = await store.createToolRun({
+      callId: 'call-activate-before-plan',
+      id: 'tool-activate-before-plan',
+      input: { skillId: 'media-extract-audio' },
+      now: timestamp(2),
+      permissionBehavior: 'allow',
+      runId: 'run-plan-after-skill',
+      status: 'running',
+      toolKind: 'control',
+      toolName: 'test.control',
+    });
+    expect(activation).not.toHaveProperty('planStepId');
+    await store.completeToolRun(activation.id, { ok: true }, timestamp(3));
+
+    const plan = runPlan(timestamp(4));
+    await expect(store.setRunPlan('run-plan-after-skill', plan)).resolves.toMatchObject({
+      plan,
+    });
+    const firstBusinessTool = await store.createToolRun({
+      callId: 'call-list-after-skill-plan',
+      id: 'tool-list-after-skill-plan',
+      input: {},
+      now: timestamp(5),
+      permissionBehavior: 'allow',
+      runId: 'run-plan-after-skill',
+      status: 'running',
+      toolName: 'file.list',
+    });
+    expect(firstBusinessTool.planStepId).toBe(plan.steps[0].id);
   });
 
   it('associates only the next matching planned Tool without consuming a step on deviation', async () => {
@@ -1549,9 +1600,23 @@ describe('SQLite Agent session store', () => {
     `)).rejects.toThrow('Agent Tool plan association identity is immutable');
     await expect(execute(`
       UPDATE agent_tool_runs
+      SET tool_kind = 'control'
+      WHERE id = 'tool-plan-direct-first'
+    `)).rejects.toThrow('Agent Tool plan association identity is immutable');
+    await expect(execute(`
+      UPDATE agent_tool_runs
       SET ordinal = 99
       WHERE id = 'tool-plan-direct-first'
     `)).rejects.toThrow('Agent Tool plan association identity is immutable');
+    await expect(execute(`
+      INSERT INTO agent_tool_runs (
+        id, run_id, call_id, tool_name, tool_kind, input_json,
+        status, ordinal, plan_step_id, created_at
+      ) VALUES (
+        'tool-plan-direct-control', 'run-plan-direct', 'call-plan-direct-control',
+        'file.stat', 'control', '{}', 'running', 2, 'plan-step-stat', '${timestamp(4)}'
+      )
+    `)).rejects.toThrow('Agent Tool plan step association is invalid');
     await expect(execute(`
       INSERT OR REPLACE INTO agent_tool_runs (
         id, run_id, call_id, tool_name, input_json, status, ordinal, plan_step_id, created_at
@@ -1847,6 +1912,22 @@ describe('SQLite Agent session store', () => {
     temporaryDirectories.push(directory);
     const databasePath = path.join(directory, 'agent-sessions.sqlite3');
     await createPreApprovalV2Database(databasePath);
+    await executeDatabaseSql(databasePath, `
+      INSERT INTO agent_tool_runs (
+        id, run_id, call_id, tool_name, input_json, result_json, status,
+        created_at, finished_at
+      ) VALUES (
+        'preexisting-tool-activation',
+        'preexisting-run',
+        'preexisting-call-activation',
+        'skill.activate',
+        '{"skillId":"media-extract-audio"}',
+        '{"ok":true}',
+        'completed',
+        '${timestamp(2)}',
+        '${timestamp(3)}'
+      );
+    `);
 
     const store = await createStore(databasePath);
     expect(await store.getSession('preexisting-session', OWNER_SCOPE, 3)).toMatchObject({
@@ -1854,8 +1935,14 @@ describe('SQLite Agent session store', () => {
       toolActivities: [
         expect.objectContaining({ id: 'preexisting-tool-first', ordinal: 1, revision: 1 }),
         expect.objectContaining({ id: 'preexisting-tool-second', ordinal: 2, revision: 1 }),
+        expect.objectContaining({ id: 'preexisting-tool-activation', ordinal: 3, revision: 1 }),
       ],
     });
+    expect(await readDatabaseRow<{ tool_kind: string }>(
+      databasePath,
+      'SELECT tool_kind FROM agent_tool_runs WHERE id = ?',
+      ['preexisting-tool-activation'],
+    )).toEqual({ tool_kind: 'control' });
     const legacyAssistant = message(
       'preexisting-session',
       'preexisting-run',
@@ -1947,6 +2034,7 @@ describe('SQLite Agent session store', () => {
       toolActivities: [
         expect.objectContaining({ id: 'preexisting-tool-first', ordinal: 1, revision: 1 }),
         expect.objectContaining({ id: 'preexisting-tool-second', ordinal: 2, revision: 1 }),
+        expect.objectContaining({ id: 'preexisting-tool-activation', ordinal: 3, revision: 1 }),
       ],
     });
     expect(await reopenedStore.readContextCheckpointState(
@@ -1990,10 +2078,14 @@ describe('SQLite Agent session store', () => {
     });
     expect(version.user_version).toBe(2);
     expect(runColumns.map(column => column.name)).toEqual(expect.arrayContaining([
+      'capability_identity',
       'plan_json',
       'revision',
+      'skill_catalog_revision',
+      'tool_catalog_revision',
     ]));
     expect(toolColumns.map(column => column.name)).toEqual(expect.arrayContaining([
+      'tool_kind',
       'permission_behavior',
       'approval_id',
       'approval_input_hash',

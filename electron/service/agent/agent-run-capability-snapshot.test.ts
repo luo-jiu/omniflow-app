@@ -4,41 +4,69 @@ import {
   createAgentRunCapabilitySnapshot,
   type AgentRunCapabilityToolKind,
 } from './agent-run-capability-snapshot';
+import { createAgentCapabilitySnapshot } from './capabilities/agent-capability-registry';
 import { createAgentToolRegistry, type AgentTool } from './agent-tool-registry';
 import { createAgentSkillRegistry } from './skills/agent-skill-registry';
-import type { AgentSkillDefinitionV1 } from './skills/agent-skill.types';
+import {
+  AGENT_SKILL_ACTIVATE_TOOL_REGISTRATION_ID,
+  type AgentSkillDefinitionV1,
+} from './skills/agent-skill.types';
 
 function tool(
   name: string,
   kind: AgentRunCapabilityToolKind = 'business',
   execute = vi.fn(async () => ({ message: name, ok: true })),
+  availability?: AgentTool['availability'],
 ): AgentTool {
-  // `kind` is consumed from the built-in registry contract. The field is
-  // intentionally cast here until the registry's public type is updated.
   return {
+    ...(availability ? { availability } : {}),
     description: name,
     execute,
     inputSchema: { type: 'object' },
     kind,
     name,
+    ...(kind === 'control'
+      ? { executor: 'main' as const, registrationId: AGENT_SKILL_ACTIVATE_TOOL_REGISTRATION_ID }
+      : {}),
     risk: 'read',
-  } as AgentTool;
+  };
+}
+
+function capabilities(entries: Array<{
+  id: string;
+  reasonCode?: string;
+  state: 'available' | 'unavailable' | 'unknown';
+}>) {
+  return createAgentCapabilitySnapshot({
+    entries: entries.map(entry => ({
+      checkedAt: 1,
+      definitionRevision: `${entry.id}@1`,
+      id: entry.id,
+      ...(entry.reasonCode ? { reasonCode: entry.reasonCode } : {}),
+      scopeIdentity: 'machine',
+      state: entry.state,
+    })),
+    registryRevision: entries.length,
+  });
 }
 
 function skill(overrides: Partial<AgentSkillDefinitionV1> = {}): AgentSkillDefinitionV1 {
+  const toolAllowlist = overrides.toolAllowlist || ['file.list'];
   return {
     description: '测试流程',
     id: 'test.skill',
     instructions: '先读取，再执行，最后重新感知。',
     source: 'built-in',
-    toolAllowlist: ['file.list'],
+    optionalTools: overrides.optionalTools || [],
+    requiredTools: overrides.requiredTools || toolAllowlist,
+    toolAllowlist,
     version: '1.0.0',
     whenToUse: '用于测试 Skill 能力收窄。',
     ...overrides,
   };
 }
 
-function createFixture() {
+function createFixture(skillOverrides: Partial<AgentSkillDefinitionV1> = {}) {
   const executeList = vi.fn(async () => ({ message: 'file.list', ok: true }));
   const registry = createAgentToolRegistry([
     tool('file.list', 'business', executeList),
@@ -52,7 +80,7 @@ function createFixture() {
     maxSummaryTokens: 10_000,
     toolExists: name => registry.get(name) !== null,
   });
-  skills.register(skill());
+  skills.register(skill(skillOverrides));
   return {
     executeList,
     registry,
@@ -113,6 +141,20 @@ describe('Agent Run capability snapshot', () => {
     expect(() => snapshot.validateInput('file.stat', {}, 'test.skill')).toThrow();
   });
 
+  it('rejects an explicitly empty expected registration identity', async () => {
+    const { snapshot } = createFixture();
+    const context = {
+      appContext: { platform: 'darwin' as const, selectedNodeIds: [] },
+      onProgress: () => undefined,
+      signal: new AbortController().signal,
+    };
+
+    expect(() => snapshot.validateInput('file.list', {}, undefined, ''))
+      .toThrow('registration identity 不匹配');
+    await expect(snapshot.execute('file.list', {}, context, undefined, ''))
+      .rejects.toThrow('registration identity 不匹配');
+  });
+
   it('remains stable after live registries receive later definitions', () => {
     const { registry, skills, snapshot } = createFixture();
     const identity = snapshot.identity;
@@ -156,5 +198,122 @@ describe('Agent Run capability snapshot', () => {
 
     expect(second.identity).toBe(first.identity);
   });
-});
 
+  it('changes identity when a Skill summary changes', () => {
+    const baseline = createFixture().snapshot.identity;
+
+    expect(createFixture({ description: '另一段摘要描述' }).snapshot.identity).not.toBe(baseline);
+    expect(createFixture({ whenToUse: '另一种适用场景。' }).snapshot.identity).not.toBe(baseline);
+  });
+
+  it('blocks required Capability Tools and their dependent Skills before provider exposure', () => {
+    const registry = createAgentToolRegistry([
+      tool('media.inspect', 'business', undefined, {
+        requiredCapabilities: ['media.ffprobe'],
+      }),
+      tool('skill.activate', 'control'),
+    ]);
+    const skills = createAgentSkillRegistry({
+      estimateTokens: text => text.length,
+      maxActivationTokens: 10_000,
+      maxCatalogTokens: 10_000,
+      maxSummaryTokens: 10_000,
+      toolExists: name => registry.get(name) !== null,
+    });
+    skills.register(skill({
+      id: 'media.inspect-flow',
+      optionalTools: [],
+      requiredTools: ['media.inspect'],
+      toolAllowlist: ['media.inspect'],
+    }));
+    const snapshot = createAgentRunCapabilitySnapshot({
+      capabilitySnapshot: capabilities([{
+        id: 'media.ffprobe',
+        reasonCode: 'media.ffprobe_not_found',
+        state: 'unavailable',
+      }]),
+      skillSnapshot: skills.createRunSnapshot(),
+      toolSnapshot: registry.createSnapshot(),
+    });
+
+    expect(snapshot.listTools().map(item => item.name)).toEqual(['skill.activate']);
+    expect(snapshot.getToolReadiness('media.inspect')).toMatchObject({ state: 'blocked' });
+    expect(snapshot.getSkillReadiness('media.inspect-flow')).toMatchObject({ state: 'blocked' });
+    expect(snapshot.getSkillSummary('media.inspect-flow')).toBeNull();
+    expect(() => snapshot.validateInput('media.inspect', {})).toThrow('未被 Run capability');
+  });
+
+  it('keeps optional Capability Tools and required Skills visible as degraded', () => {
+    const registry = createAgentToolRegistry([
+      tool('media.inspect', 'business', undefined, {
+        optionalCapabilities: ['media.metadata-extra'],
+      }),
+    ]);
+    const skills = createAgentSkillRegistry({
+      estimateTokens: text => text.length,
+      maxActivationTokens: 10_000,
+      maxCatalogTokens: 10_000,
+      maxSummaryTokens: 10_000,
+      toolExists: name => registry.get(name) !== null,
+    });
+    skills.register(skill({
+      id: 'media.inspect-flow',
+      optionalTools: [],
+      requiredTools: ['media.inspect'],
+      toolAllowlist: ['media.inspect'],
+    }));
+    const snapshot = createAgentRunCapabilitySnapshot({
+      capabilitySnapshot: capabilities([{
+        id: 'media.metadata-extra',
+        reasonCode: 'media.extra_unknown',
+        state: 'unknown',
+      }]),
+      skillSnapshot: skills.createRunSnapshot(),
+      toolSnapshot: registry.createSnapshot(),
+    });
+
+    expect(snapshot.listTools().map(item => item.name)).toEqual(['media.inspect']);
+    expect(snapshot.getToolReadiness('media.inspect')).toMatchObject({ state: 'degraded' });
+    expect(snapshot.getSkillReadiness('media.inspect-flow')).toMatchObject({ state: 'degraded' });
+    expect(snapshot.getSkillSummary('media.inspect-flow')?.id).toBe('media.inspect-flow');
+  });
+
+  it('ignores checkedAt in Run identity but includes normalized Capability state', () => {
+    const registry = createAgentToolRegistry([
+      tool('media.inspect', 'business', undefined, {
+        requiredCapabilities: ['media.ffprobe'],
+      }),
+    ]);
+    const skills = createAgentSkillRegistry().createRunSnapshot();
+    const entry = {
+      checkedAt: 1,
+      definitionRevision: 'media.ffprobe@1',
+      id: 'media.ffprobe',
+      scopeIdentity: 'machine',
+      state: 'available' as const,
+    };
+    const create = (capabilitySnapshot: ReturnType<typeof createAgentCapabilitySnapshot>) => (
+      createAgentRunCapabilitySnapshot({
+        capabilitySnapshot,
+        skillSnapshot: skills,
+        toolSnapshot: registry.createSnapshot(),
+      })
+    );
+    const first = create(createAgentCapabilitySnapshot({ entries: [entry], registryRevision: 1 }));
+    const later = create(createAgentCapabilitySnapshot({
+      entries: [{ ...entry, checkedAt: 2 }],
+      registryRevision: 1,
+    }));
+    const missing = create(createAgentCapabilitySnapshot({
+      entries: [{
+        ...entry,
+        reasonCode: 'media.ffprobe_not_found',
+        state: 'unavailable',
+      }],
+      registryRevision: 1,
+    }));
+
+    expect(later.identity).toBe(first.identity);
+    expect(missing.identity).not.toBe(first.identity);
+  });
+});

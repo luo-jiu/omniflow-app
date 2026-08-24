@@ -2,10 +2,10 @@
 
 > **临时文档。** 本文记录 OmniFlow 内置 Agent 的阶段性讨论结论和当前落地边界，不是最终架构契约。方案稳定后，应将有效边界整理到工具工作区、AI 服务和对应任务文档中，并删除或归档本文。
 
-更新时间：2026-08-23
+更新时间：2026-08-24
 适用范围：`src/features/tool-workspace/`、`src/features/ai-services/`、Electron 本地任务能力，以及未来的内置 Agent 工具区。
 
-> 已落地的 Agent IPC、会话存储、运行恢复、ToolBroker、长期记忆、本地进程基座和状态所有权以 `docs/built-in-agent-architecture.md` 为准。本文后续章节主要记录尚未实现的 Tool、Skill、向量检索和媒体处理路线。
+> 已落地的 Agent IPC、会话存储、运行恢复、ToolBroker、长期记忆、本地进程基座、Skill 主链和状态所有权以 `docs/built-in-agent-architecture.md` 为准。Skill V1 的设计理由、Claude Code / OpenCode 调研取舍和剩余验收门禁单独保留在同目录的 `built-in-agent-skill-v1-design.md`；本文不再维护另一套 Skill 契约。
 
 ## 1. 目标
 
@@ -87,28 +87,13 @@ file.importToLibrary
 workspace.openResult
 ```
 
-第一批只需要覆盖：当前上下文感知、音视频转码 / 提取音频、结果保存和打开。字幕翻译属于后续可选 Skill，不进入 Agent 核心链路。
+第一批已经覆盖当前上下文感知、提取音频、结果保存和打开；通用音视频转码仍需先有受控 `media.transcode` Tool。字幕翻译属于后续候选 Skill，不进入 Agent 核心链路。
 
 ### 3.2 Skill
 
-Skill 是 Tool 的使用说明和流程配方，不是任意代码插件。它可以用 Markdown + manifest 描述：
+Skill 是 Tool 的按需编排说明，不是任意代码插件、executor、权限入口或 Workflow 状态机。当前第一版只支持 Electron main 中随应用发布的内置 TypeScript 定义，并通过受控 `skill.activate` 渐进加载正文；不发现本地 Markdown，不绑定插件市场，也不允许 Skill 携带 UI 或可执行代码。
 
-```yaml
-name: subtitle-translation
-tools:
-  - subtitle.load
-  - subtitle.translate
-  - file.saveLocal
-  - file.importToLibrary
-```
-
-正文规定：缺少模型时如何提示、默认翻译哪些行、保存前需要询问什么。Tool 表达“能做什么”，Skill 表达“何时以及怎样组合它们”。
-
-未来工具市场可以让插件同时注册：
-
-- Tool：可执行能力。
-- Skill：Agent 使用该能力的规则。
-- UI：需要人工精细调整时的可视化页面。
+Skill 的 `toolAllowlist` 只能缩小本轮模型可见能力，不能授权 Tool。Tool 的 Schema、动态权限、确认、Broker、取消、审计和再感知仍是唯一执行边界。有效 Tool 集、控制调用、同轮激活和快照语义不在本文重复定义，统一以 `built-in-agent-skill-v1-design.md` 为准。
 
 ## 4. 本地进程与 Shell
 
@@ -344,11 +329,13 @@ AI Service 继续负责 provider、模型和 Key；Agent 只请求当前启用�
 - 会话摘要、有界上下文投影与 checkpoint 已落地；确认式用户偏好、资料库记忆、结构化召回和管理页也已落地。FTS / 向量召回仍是后续派生层。
 - 高风险动作的统一确认门已落地，且单次确认不会跨 Run 继承。
 
-### Phase 3：Skill 与插件
+### Phase 3：内置 Skill V1（代码与自动化已落地，端到端待验证）
 
-- 加载受控 Skill manifest。
-- Tool / Skill / UI 三者建立注册协议。
-- 工具市场只允许声明权限和依赖，不允许插件绕过 main 侧安全边界。
+- 已注册受控的内置 TypeScript Skill catalog，并在 Run 启动时与 Tool catalog 一起冻结快照。
+- 初始上下文已经只注入 Skill 摘要；模型通过独占的 `skill.activate` 加载完整说明，下一 turn 才收窄业务 Tool。
+- 第一条 `media-extract-audio` 已进入 catalog，只编排现有 Tool，不新增 executor、权限路径或任务状态机。
+- Main 会在事件与 Session 返回边界剥离 Skill 正文，provider 总上限为 10 turn、业务 Tool 调用上限仍为 8；真实 provider 和媒体端到端手工路径仍未验证。
+- 插件、磁盘 Markdown、远程来源、Hook、子 Agent 和热更新全部延期，详见 `built-in-agent-skill-v1-design.md`。
 
 ### Phase 4：高级本地命令能力
 
@@ -360,7 +347,7 @@ AI Service 继续负责 provider、模型和 Key；Agent 只请求当前启用�
 
 - 未来 Workflow 是否需要跨资料库编排；当前 Session 明确按 `backend_scope + account_scope + library_id` 隔离。
 - 长期记忆当前固定为仅本机 owner scope；未来是否增加用户明确选择的跨设备同步仍未决，不能直接同步当前 SQLite 或敏感内容。
-- 插件市场的 Skill 是否允许附带本地可执行程序。
+- 远期 Skill 来源扩展是否具备签名、版本锁定、原子更新、撤回和离线降级；在这些条件满足前不开放插件或远程 Skill，更不允许附带本地可执行程序。
 
 ## 10. 维护规则
 
@@ -576,18 +563,19 @@ Electron main
 ```text
 src/shared/agent/
   agent.types.ts             renderer / main 共用的协议类型
-  agent-events.ts            流式事件和任务状态枚举
+  agent-owner-scope.ts       owner 隔离规范化
+  agent-memory-query.ts      记忆查询契约
 
 src/features/agent/
   AgentWorkspace.tsx         页面级 Agent 工作区
   components/
-    AgentComposer.tsx        输入、模型投影、提交 / 停止
     AgentTimeline.tsx        消息和工具执行时间线
     AgentWorkflowCard.tsx    由 Run / ToolRun 事实派生的任务现场
     AgentToolActivityCard.tsx Tool 调用、进度、结果和错误
     AgentConfirmationCard.tsx 高风险动作确认
     AgentInteractionBlock.tsx 有限选择与少量参数表单
-    AgentContextStrip.tsx    当前文件、目录和资料库上下文
+    AgentSessionManager.tsx  会话管理
+    AgentMemoryManager.tsx   长期记忆管理
   agent-tool-presentation.ts 受控展示块与 Tool presenter 注册表
   agent-runs.ts              Run 实时快照的单调合并
   agent-workflow-projection.ts Run + ToolRun 的纯任务投影
@@ -596,40 +584,48 @@ src/features/agent/
     useAgentMemories.ts      长期记忆管理页的 scope / 查询 / 分页临时投影
   services/
     agent.api.ts             preload bridge 的 renderer 封装
-  state/
-    agent-view.state.ts      仅保存输入草稿和展示态
-  skills/
-    subtitle-translation/    字幕 Skill 的配置和结果展示
-
+    agent-context.api.ts     当前资料库与选中节点的感知投影
+    agent-tool-executor.ts   一次性 renderer Tool 执行分发
 electron/ipc/agent.ts        IPC 权限、sender 校验和事件转发
 electron/service/agent/
   agent-orchestrator.ts      感知 -> 思考 -> 执行 -> 再感知循环
-  agent-context-provider.ts  安全应用上下文投影
+  agent-prompt-assembler.ts  稳定策略、能力与 Skill 摘要组装
+  agent-context-manager.ts   有界历史与 checkpoint 编排
+  agent-context-projection.ts provider 历史和终态执行事实投影
+  agent-run-capability-snapshot.ts  Run 内冻结的 Tool / Skill 共同能力视图
+  agent-renderer-projection.ts  main 到 renderer 的 Skill 结果安全投影
   agent-tool-registry.ts     Tool 白名单与注册
   agent-interaction-model.ts 交互请求与回答的 main 侧规范化
   agent-tool-broker.ts       main / renderer executor 分发、一次性回执与内部能力防重放
   agent-session-store.ts     Session / Run / Message / ToolRun 的 SQLite 存储
   agent-permission-gate.ts   风险确认门
   agent-memory-store.ts      SQLite 记忆主存储
+  agent-memory-retriever.ts  结构化候选召回
   agent-local-process-runner.ts 受控本地进程
   agent-media-inspector.ts   ffprobe 参数、输出清洗和临时来源代理
-  providers/                  provider 流式请求和 Tool Calling 适配
+  agent-media-audio-extractor.ts 受控 ffmpeg 提取
+  agent-provider-client.ts   provider 流式请求
+  agent-provider-model.ts    Tool Calling 协议映射
   tools/
     interaction-request-tool.ts
-    file-list.ts
-    file-stat.ts
-    media-inspect.ts
-    media-extract-audio.ts
-    subtitle-translate.ts
+    file-read-tools.ts
+    media-inspect-tool.ts
+    media-extract-audio-tool.ts
+    directory-create-tool.ts
+    memory-propose-tool.ts
   skills/
-    subtitle-translation.ts  Tool 的组合规则，不直接操作 UI
+    agent-skill.types.ts
+    agent-skill-registry.ts
+    agent-skill-catalog.ts
+    agent-skill-runtime.ts
+    skill-activate-tool.ts
 ```
 
-当前已经创建的 `ToolRegistry`、`AgentToolBroker`、`AgentSessionStore`、`AgentLocalProcessRunner`、`interaction.request`、`media.inspect` 和只读任务投影属于这个结构的第一批基座；协议类型归位到 `src/shared/agent`，避免 main 反向依赖页面 feature。
+当前已经创建的 `ToolRegistry`、`AgentToolBroker`、`AgentSessionStore`、`AgentLocalProcessRunner`、`interaction.request`、`media.inspect`、Run capability snapshot 和 Skill Registry 属于这个结构的基座；协议类型归位到 `src/shared/agent`，避免 main 反向依赖页面 feature。首条 Skill 定义暂时直接收敛在 `agent-skill-catalog.ts`，数量增长产生真实维护成本后再拆 `definitions/`。Skill 完整定义与 Registry 只存在于 main；renderer 未来如需专用结果交互，应复用本地 presenter / component，而不是复制 Skill 或执行逻辑。现有 `agent-renderer-projection.ts` 只负责在统一事件与 Session 返回边界剥离 Skill instructions / allowlist，并保留紧凑激活身份。
 
-## 14. 可选 Skill：字幕翻译
+## 14. 后续候选 Skill：字幕翻译
 
-字幕翻译暂时不参与 Agent 核心开发。未来需要接入时，迁移顺序固定为：
+字幕翻译不是第一条 Skill，暂时不参与 Skill V1 验证。先以 `media-extract-audio` 验证 Registry、渐进披露、权限收窄和既有 Tool 闭环；未来需要接入字幕时，迁移顺序固定为：
 
 1. 保留现有字幕解析、行状态、批量翻译、保存和取消逻辑，先把它们收敛成可被 Tool 调用的 service。
 2. 新增 `subtitle.load`、`subtitle.translate`、`subtitle.save` Tool 和 `subtitle-translation` Skill。
@@ -662,7 +658,7 @@ electron/service/agent/
 - 实现只读 `file.list`、`file.stat`。
 - 跑通“你能看到当前目录结构吗？”。
 
-当前实现已完成本步骤：发送消息前由 renderer 的 `agent-context.api` 读取当前目录直属节点和选中节点详情，形成有数量上限的 `AgentPerceptionSnapshot`；主进程在接收后再次做字段清洗和截断。OpenAI 兼容服务与 Claude 均通过各自原生 Tool Calling 协议调用 `file.list` / `file.stat`，Tool Registry 只允许自动执行 `read` 风险工具，并将结构化结果交给模型继续回答；明确不支持 Tool Calling 的本地兼容模型会退回普通流式回答，仍只能依据同一份只读快照。当前最多执行 4 轮、8 次 Tool 调用；快照是请求级感知，不进入长期记忆，也不授予任意目录遍历、文件正文读取或写入能力。工具时间线已统一展示可恢复的开始、进度、确认、结果和中断状态。
+当前实现已完成本步骤：发送消息前由 renderer 的 `agent-context.api` 读取当前目录直属节点和选中节点详情，形成有数量上限的 `AgentPerceptionSnapshot`；主进程在接收后再次做字段清洗和截断。OpenAI 兼容服务与 Claude 均通过各自原生 Tool Calling 协议调用 `file.list` / `file.stat`，Tool Registry 只允许自动执行 `read` 风险工具，并将结构化结果交给模型继续回答；明确不支持 Tool Calling 的本地兼容模型会退回普通流式回答，仍只能依据同一份只读快照。当前最多执行 10 个 provider turn、8 次业务 Tool 调用，可容纳一次 Skill 激活、8 个串行业务 Tool turn 和最终回答；快照是请求级感知，不进入长期记忆，也不授予任意目录遍历、文件正文读取或写入能力。工具时间线已统一展示可恢复的开始、进度、确认、结果和中断状态。
 
 内部 Tool ID 继续使用 `file.list` 这类带命名空间的稳定名称；Provider 传输边界会将其转换为 `file_list` 等兼容名称，并在流式 Tool Calling 返回后还原。协议映射会拒绝转换或 64 字符截断后重名的 Tool，Provider 命名限制不得反向污染 Tool Registry、任务时间线或 Skill 定义。
 
@@ -673,7 +669,7 @@ electron/service/agent/
 - 已接入只读 `media.inspect` 和需要确认、临时输出、上传及结果落地校验的 `media.extractAudio`。
 - 字幕翻译等复杂 Skill 暂不阻塞核心 Agent 进度。
 
-当前已经跑通 `directory.create`、只读 `media.inspect` 和 `media.extractAudio`。目录创建由 main 完成参数校验、权限评估、确认持久化和一次性执行关联，Renderer 复用现有目录 API 创建节点。所有 Renderer 写操作在后端确认节点创建后先提交 authoritative result，再刷新并重新感知；只有最新目录包含同一个 `createdNodeId` 才视为已验证，刷新失败、取消或最终回执超时时由 `AgentToolBroker` 使用 committed fallback，不能把真实写入误报失败后重复执行。媒体读取与提取都只允许当前感知范围中的单个文件，Renderer 依据 main 生成的一次性请求取得签名链接，main 再校验窗口、owner、资料库、Session、Run、execution ID 和内部能力防重放；签名链接只进入瞬时 IPC 和本机 loopback 代理。音频提取使用固定 ffmpeg 参数，只支持 `m4a / mp3 / wav`，默认 `m4a`；输出名在确认前限制为 240 UTF-8 bytes，自动改名后以服务端实际节点名称为准。main 的 Artifact Store 负责 2 GiB 单文件上限、4 个活跃产物、默认 8 GiB 总预留、1 小时无活动 TTL 和 Run / 窗口 / 崩溃残留清理，近期残留计入总量，应用启动时清理过期残留，上传进度会续期产物 lease。commit 前停止任务或 Broker 超时会反向通知 Renderer，并同时取消进程与上传；commit 后只收口刷新和 Run，不撤销已经成功的写入。模型与 SQLite 只获得清洗后的结构化结果，不接触 URL、本地路径、artifact ID 或 stderr。三条链路的 main / renderer 分发均收敛到 `AgentToolBroker`，本地进程生命周期收敛到 `AgentLocalProcessRunner`。结果定位、基于执行事实的任务现场，以及 Run 内一次性受限计划与真实 ToolRun 的关联已经补齐；下一步可评估 `media.transcode`，仍不扩展通用 Shell。项目尚未正式发布，确认审计字段与当前任务投影所需字段直接并入 schema 2 建表定义，本机已有 schema 2 数据库以幂等补列原地兼容，不新增 schema 版本。
+当前已经跑通 `directory.create`、只读 `media.inspect` 和 `media.extractAudio` 各自的 Tool 闭环。目录创建由 main 完成参数校验、权限评估、确认持久化和一次性执行关联，Renderer 复用现有目录 API 创建节点。所有 Renderer 写操作在后端确认节点创建后先提交 authoritative result，再刷新并重新感知；只有最新目录包含同一个 `createdNodeId` 才视为已验证，刷新失败、取消或最终回执超时时由 `AgentToolBroker` 使用 committed fallback，不能把真实写入误报失败后重复执行。媒体读取与提取都只允许当前感知范围中的单个文件，Renderer 依据 main 生成的一次性请求取得签名链接，main 再校验窗口、owner、资料库、Session、Run、execution ID 和内部能力防重放；签名链接只进入瞬时 IPC 和本机 loopback 代理。音频提取使用固定 ffmpeg 参数，只支持 `m4a / mp3 / wav`，默认 `m4a`；输出名在确认前限制为 240 UTF-8 bytes，自动改名后以服务端实际节点名称为准。main 的 Artifact Store 负责 2 GiB 单文件上限、4 个活跃产物、默认 8 GiB 总预留、1 小时无活动 TTL 和 Run / 窗口 / 崩溃残留清理，近期残留计入总量，应用启动时清理过期残留，上传进度会续期产物 lease。commit 前停止任务或 Broker 超时会反向通知 Renderer，并同时取消进程与上传；commit 后只收口刷新和 Run，不撤销已经成功的写入。模型与 SQLite 只获得清洗后的结构化结果，不接触 URL、本地路径、artifact ID 或 stderr。三条链路的 main / renderer 分发均收敛到 `AgentToolBroker`，本地进程生命周期收敛到 `AgentLocalProcessRunner`。结果定位、基于执行事实的任务现场，以及 Run 内一次性受限计划与真实 ToolRun 的关联已经补齐；`media-extract-audio` Skill 的组合端到端验证通过后，才评估 `media.transcode`，仍不扩展通用 Shell。项目尚未正式发布，确认审计字段与当前任务投影所需字段直接并入 schema 2 建表定义，本机已有 schema 2 数据库以幂等补列原地兼容，不新增 schema 版本。
 
 工具闭环也已接入同一 ToolActivity 内的 `interaction.request` 阶段。模型只有在完成任务确实缺少有限选择或少量参数时才能请求 `choice / form`；main 先规范化请求并持久化，再发出 `tool-interaction-required`。Renderer 只保存未提交草稿，提交时必须匹配窗口、owner、资料库、Session、Run 和一次性 interaction ID，回答还要重新按原请求 schema 校验。成功后原 ToolRun / Run 恢复执行并把结构化回答交给模型；重复提交、停止、超时和重启均不能复活请求。交互卡不能索取 Key、密码、Cookie 或令牌，也不能携带任意 UI、回调、URL 和执行行为。
 
@@ -713,7 +709,7 @@ AgentContextPrompt    当前资料库、工作记忆、能力和相关长期记�
 ProviderToolSchema    由 ToolRegistry 按当前可用能力生成
 ```
 
-当前 `agent-orchestrator.ts` 内的短提示词适合作为验证阶段实现，但 Action Runtime 落地前应移入独立的 `agent-prompt-assembler.ts`。Orchestrator 只传入结构化上下文，不继续拼接越来越多的字符串。
+当前稳定策略和安全上下文已经收敛到 `agent-prompt-assembler.ts` 并由测试覆盖，Orchestrator 只传入结构化上下文。Skill 有界摘要目录也已经由该 assembler 注入；完整 Skill 正文只在激活后作为当前 Run 的受控 Tool 结果进入 provider，不能重新堆进稳定系统提示词。
 
 ### 16.2 系统提示词不能代替安全边界
 
@@ -815,15 +811,13 @@ Tool 返回成功后仍要根据结果或重新感知确认真实状态。失败
 默认使用用户当前使用的语言回答。用户使用中文且没有另行指定时，使用规范简体中文；技术名称可以保留原文，但不要混入无关文字系统。
 ```
 
-动态上下文不写成自然语言长文，而使用带版本的安全投影：
+动态上下文不写成自然语言长文，而使用带版本的安全投影。当前 `AgentPromptContextV1` 只包含受控应用 ID、平台和能力名称；会话历史、规范 Tool 事实、长期记忆和当前感知继续由各自独立的低权限投影负责，不再引入第二份 `AgentWorkingMemory`：
 
 ```ts
 interface AgentPromptContextV1 {
   version: 1;
   app: AgentAppContext;
   capabilities: string[];
-  workingMemory?: AgentWorkingMemory;
-  relevantMemories?: AgentMemoryProjection[];
 }
 ```
 

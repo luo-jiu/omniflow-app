@@ -9,6 +9,7 @@ import {
   type AgentConversationSummaryV1,
 } from './agent-conversation-summary';
 import type { AgentProviderMessage } from './agent-provider-model';
+import { AGENT_SKILL_ACTIVATE_TOOL_NAME } from './skills/agent-skill.types';
 
 export const DEFAULT_AGENT_CONTEXT_WINDOW_TOKENS = 16_384;
 const DEFAULT_OUTPUT_RESERVE_TOKENS = 4_096;
@@ -307,6 +308,33 @@ function summarizeToolActivities(
       && activity.status !== 'awaiting_interaction')
     .slice(-MAX_EXECUTION_FACTS)
     .map((activity) => {
+      if (
+        activity.call.name === AGENT_SKILL_ACTIVATE_TOOL_NAME
+        && activity.result?.ok
+        && activity.result.data
+        && typeof activity.result.data === 'object'
+        && !Array.isArray(activity.result.data)
+      ) {
+        const data = activity.result.data as Record<string, unknown>;
+        const skillId = sanitizeAgentMemoryText(String(data.skillId || '')).trim().slice(0, 128);
+        const version = sanitizeAgentMemoryText(String(data.version || '')).trim().slice(0, 64);
+        const instructionsHash = /^[a-f0-9]{64}$/u.test(String(data.instructionsHash || ''))
+          ? String(data.instructionsHash)
+          : '';
+        if (skillId && version && instructionsHash) {
+          return {
+            content: JSON.stringify({
+              instructionsHash,
+              ok: true,
+              runId: activity.runId,
+              skillId,
+              status: activity.status,
+              version,
+            }),
+            toolName: AGENT_SKILL_ACTIVATE_TOOL_NAME,
+          };
+        }
+      }
       const rawMessage = activity.result?.message
         || (activity.status === 'completed' ? 'Tool 已完成' : `Tool 状态：${activity.status}`);
       const content = sanitizeAgentMemoryText(rawMessage)

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
+  resolveCapabilitySnapshot: vi.fn(),
   streamAgentProviderTurn: vi.fn(),
   streamAIServiceProfile: vi.fn(),
 }));
@@ -11,14 +12,28 @@ vi.mock('./agent-provider-client', () => ({
 vi.mock('../aiServiceClient', () => ({
   streamAIServiceProfile: mocks.streamAIServiceProfile,
 }));
+vi.mock('./capabilities/agent-capability-runtime', () => ({
+  AGENT_CAPABILITY_MEDIA_FFMPEG: 'media.ffmpeg',
+  AGENT_CAPABILITY_MEDIA_FFPROBE: 'media.ffprobe',
+  createBuiltInAgentCapabilitySnapshot: mocks.resolveCapabilitySnapshot,
+}));
 
 import { createAgentOrchestrator } from './agent-orchestrator';
-import { estimateAgentProviderTurnTokens } from './agent-context-projection';
+import {
+  estimateAgentProviderTurnTokens,
+} from './agent-context-projection';
 import { buildAgentSystemPrompt } from './agent-prompt-assembler';
 import { agentPlanControlTool } from './agent-plan-model';
+import { createAgentRunCapabilitySnapshot } from './agent-run-capability-snapshot';
+import { createAgentCapabilitySnapshot } from './capabilities/agent-capability-registry';
 import { createSQLiteAgentSessionStore, type AgentSessionStore } from './agent-session-store';
 import { agentToolRegistry } from './agent-tool-registry';
-import { MINIMUM_AGENT_PROVIDER_TOOL_RESULT_CONTENT } from './agent-tool-result-projection';
+import {
+  MINIMUM_AGENT_PROVIDER_TOOL_RESULT_CONTENT,
+  projectAgentToolResultForProvider,
+} from './agent-tool-result-projection';
+import { builtInAgentSkillRegistry } from './skills/agent-skill-runtime';
+import { resolveAgentSkillActivationResult } from './skills/skill-activate-tool';
 import { createAIServiceRunSessionRegistry } from '../aiServiceRunSession';
 
 const OWNER_SCOPE = {
@@ -30,6 +45,19 @@ const OTHER_OWNER_SCOPE = {
   accountScope: 'user:8',
   backendScope: 'https://example.com/api',
 };
+
+function availableCapabilitySnapshot(capabilityIds = ['media.ffmpeg', 'media.ffprobe']) {
+  return createAgentCapabilitySnapshot({
+    entries: capabilityIds.map(id => ({
+      checkedAt: 1,
+      definitionRevision: `test:${id}@1`,
+      id,
+      scopeIdentity: 'test-machine',
+      state: 'available' as const,
+    })),
+    registryRevision: 2,
+  });
+}
 
 function sender() {
   return {
@@ -65,10 +93,22 @@ function request() {
   };
 }
 
+function skillPromptCatalog() {
+  const snapshot = builtInAgentSkillRegistry.createRunSnapshot();
+  return {
+    omittedSkillCount: snapshot.omittedSkillCount,
+    summaries: snapshot.listSummaries(),
+  };
+}
+
 describe('Agent orchestrator', () => {
   let store: AgentSessionStore;
 
   beforeEach(async () => {
+    mocks.resolveCapabilitySnapshot.mockReset();
+    mocks.resolveCapabilitySnapshot.mockImplementation(async ({ capabilityIds }) => (
+      availableCapabilitySnapshot(capabilityIds)
+    ));
     mocks.streamAgentProviderTurn.mockReset();
     mocks.streamAIServiceProfile.mockReset();
     store = await createSQLiteAgentSessionStore(':memory:');
@@ -89,6 +129,51 @@ describe('Agent orchestrator', () => {
       runSessionRegistry: createAIServiceRunSessionRegistry(),
     });
   }
+
+  it('filters unavailable media capabilities before provider materialization and persists identity', async () => {
+    mocks.resolveCapabilitySnapshot.mockResolvedValueOnce(createAgentCapabilitySnapshot({
+      entries: [
+        {
+          checkedAt: 1,
+          definitionRevision: 'test:media.ffmpeg@1',
+          id: 'media.ffmpeg',
+          reasonCode: 'media.ffmpeg_not_found',
+          scopeIdentity: 'test-machine',
+          state: 'unavailable',
+        },
+        {
+          checkedAt: 1,
+          definitionRevision: 'test:media.ffprobe@1',
+          id: 'media.ffprobe',
+          scopeIdentity: 'test-machine',
+          state: 'available',
+        },
+      ],
+      registryRevision: 2,
+    }));
+    mocks.streamAgentProviderTurn.mockImplementationOnce(async (_connection, input, onDelta) => {
+      const toolNames = input.tools.map((tool: { name: string }) => tool.name);
+      expect(toolNames).toContain('media.inspect');
+      expect(toolNames).not.toContain('media.extractAudio');
+      expect(input.systemPrompt).not.toContain('media-extract-audio');
+      onDelta('当前环境没有可用的音频提取能力。');
+      return { content: '当前环境没有可用的音频提取能力。', toolCalls: [] };
+    });
+    const webContents = sender();
+    const started = await createOrchestrator().start(webContents as never, request());
+
+    await vi.waitFor(() => {
+      expect(webContents.send).toHaveBeenCalledWith('agent:chat:event', expect.objectContaining({
+        type: 'completed',
+      }));
+    });
+    const session = await store.getSession(started.sessionId, OWNER_SCOPE, 3);
+    expect(session?.runs[0]).toMatchObject({
+      capabilityIdentity: expect.stringMatching(/^v2:[a-f0-9]{64}$/u),
+      skillCatalogRevision: expect.any(Number),
+      toolCatalogRevision: expect.any(Number),
+    });
+  });
 
   it('executes a read tool and persists the complete run', async () => {
     mocks.streamAgentProviderTurn
@@ -256,6 +341,291 @@ describe('Agent orchestrator', () => {
       plan: expect.objectContaining({ title: '检查目录内容' }),
       revision: 3,
     });
+  });
+
+  it('publishes only Skill summaries before activation and narrows Tools from the next turn', async () => {
+    mocks.streamAgentProviderTurn
+      .mockImplementationOnce(async (_connection, input) => {
+        expect(input.systemPrompt).toContain('media-extract-audio');
+        expect(input.systemPrompt).toContain('从一个明确的音视频文件中提取音轨');
+        expect(input.systemPrompt).not.toContain('只在用户明确要求从一个音视频文件提取音轨时使用本流程');
+        expect(input.tools.map((tool: { name: string }) => tool.name)).toEqual(expect.arrayContaining([
+          'agent.plan.set',
+          'skill.activate',
+          'directory.create',
+        ]));
+        return {
+          content: '',
+          toolCalls: [{
+            id: 'call-activate-audio-skill',
+            input: { skillId: 'media-extract-audio' },
+            name: 'skill.activate',
+          }],
+        };
+      })
+      .mockImplementationOnce(async (_connection, input, onDelta) => {
+        const toolNames = input.tools.map((tool: { name: string }) => tool.name);
+        expect(toolNames).toEqual([
+          'agent.plan.set',
+          'file.list',
+          'file.stat',
+          'interaction.request',
+          'media.inspect',
+          'media.extractAudio',
+          'skill.activate',
+        ]);
+        expect(toolNames).not.toContain('directory.create');
+        const activationResult = JSON.parse(input.messages.at(-1).content);
+        expect(activationResult).toMatchObject({
+          data: {
+            skillId: 'media-extract-audio',
+            toolAllowlist: expect.arrayContaining(['media.extractAudio']),
+          },
+          ok: true,
+        });
+        expect(activationResult.data.instructions).toContain('重新用 file.list 或 file.stat 感知');
+        onDelta('流程已经加载。');
+        return { content: '流程已经加载。', toolCalls: [] };
+      });
+    const webContents = sender();
+    const orchestrator = createOrchestrator();
+
+    const started = await orchestrator.start(webContents as never, {
+      ...request(),
+      userPrompt: '提取当前视频的音频',
+    });
+    await vi.waitFor(() => {
+      expect(webContents.send).toHaveBeenCalledWith('agent:chat:event', expect.objectContaining({
+        runId: started.runId,
+        type: 'completed',
+      }));
+    });
+
+    const snapshot = await store.getSession(started.sessionId, OWNER_SCOPE, 3);
+    expect(snapshot?.toolActivities).toEqual([
+      expect.objectContaining({
+        call: expect.objectContaining({ name: 'skill.activate' }),
+        result: expect.objectContaining({ ok: true }),
+      }),
+    ]);
+    expect(snapshot?.toolActivities[0]).not.toHaveProperty('planStepId');
+    expect(JSON.stringify(snapshot)).toContain(
+      '只在用户明确要求从一个音视频文件提取音轨时使用本流程',
+    );
+
+    const rendererEvents = JSON.stringify(webContents.send.mock.calls);
+    expect(rendererEvents).not.toContain(
+      '只在用户明确要求从一个音视频文件提取音轨时使用本流程',
+    );
+    const completedToolEvent = webContents.send.mock.calls
+      .map(call => call[1])
+      .find(event => event?.type === 'tool-completed');
+    expect(completedToolEvent?.result?.data).toEqual({
+      instructionsHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
+      skillId: 'media-extract-audio',
+      version: expect.any(String),
+    });
+    const restored = await orchestrator.getSession(started.sessionId, OWNER_SCOPE, 3);
+    expect(JSON.stringify(restored)).not.toContain(
+      '只在用户明确要求从一个音视频文件提取音轨时使用本流程',
+    );
+  });
+
+  it('rejects an activation mixed with another Tool before creating any ToolRun', async () => {
+    mocks.streamAgentProviderTurn
+      .mockResolvedValueOnce({
+        content: '',
+        toolCalls: [
+          {
+            id: 'call-mixed-activation',
+            input: { skillId: 'media-extract-audio' },
+            name: 'skill.activate',
+          },
+          { id: 'call-mixed-list', input: {}, name: 'file.list' },
+        ],
+      })
+      .mockImplementationOnce(async (_connection, input, onDelta) => {
+        const results = input.messages.slice(-2).map((message: { content: string }) => (
+          JSON.parse(message.content)
+        ));
+        expect(results).toEqual([
+          expect.objectContaining({ message: expect.stringContaining('必须独占'), ok: false }),
+          expect.objectContaining({ message: expect.stringContaining('必须独占'), ok: false }),
+        ]);
+        expect(input.tools.map((tool: { name: string }) => tool.name)).toContain('directory.create');
+        onDelta('我会改为单独激活。');
+        return { content: '我会改为单独激活。', toolCalls: [] };
+      });
+    const webContents = sender();
+    const orchestrator = createOrchestrator();
+
+    const started = await orchestrator.start(webContents as never, request());
+    await vi.waitFor(() => {
+      expect(webContents.send).toHaveBeenCalledWith('agent:chat:event', expect.objectContaining({
+        type: 'completed',
+      }));
+    });
+
+    expect((await store.getSession(started.sessionId, OWNER_SCOPE, 3))?.toolActivities)
+      .toEqual([]);
+    expect(webContents.send.mock.calls.map(call => call[1]?.type)).not.toContain('tool-started');
+  });
+
+  it('does not count skill activation against the business Tool quota and permits a later plan', async () => {
+    mocks.streamAgentProviderTurn
+      .mockResolvedValueOnce({
+        content: '',
+        toolCalls: [{
+          id: 'call-activate-before-plan-and-tools',
+          input: { skillId: 'media-extract-audio' },
+          name: 'skill.activate',
+        }],
+      })
+      .mockResolvedValueOnce({
+        content: '',
+        toolCalls: [
+          {
+            id: 'call-plan-after-activation',
+            input: {
+              steps: Array.from({ length: 8 }, (_, index) => ({
+                title: `第 ${index + 1} 次读取目录`,
+                toolName: 'file.list',
+              })),
+            },
+            name: 'agent.plan.set',
+          },
+          ...Array.from({ length: 8 }, (_, index) => ({
+            id: `call-skilled-list-${index + 1}`,
+            input: {},
+            name: 'file.list',
+          })),
+        ],
+      })
+      .mockImplementationOnce(async (_connection, input, onDelta) => {
+        const toolResults = input.messages.filter(
+          (message: { role: string }) => message.role === 'tool',
+        );
+        expect(toolResults.filter((message: { name: string }) => message.name === 'skill.activate'))
+          .toHaveLength(1);
+        expect(toolResults.filter((message: { name: string }) => message.name === 'agent.plan.set'))
+          .toHaveLength(1);
+        expect(toolResults.filter((message: { name: string }) => message.name === 'file.list'))
+          .toHaveLength(8);
+        onDelta('八次读取完成。');
+        return { content: '八次读取完成。', toolCalls: [] };
+      });
+    const webContents = sender();
+    const orchestrator = createOrchestrator();
+
+    const started = await orchestrator.start(webContents as never, request());
+    await vi.waitFor(() => {
+      expect(webContents.send).toHaveBeenCalledWith('agent:chat:event', expect.objectContaining({
+        type: 'completed',
+      }));
+    });
+
+    const snapshot = await store.getSession(started.sessionId, OWNER_SCOPE, 3);
+    expect(snapshot?.runs[0].plan).toBeDefined();
+    expect(snapshot?.toolActivities).toHaveLength(9);
+    expect(snapshot?.toolActivities[0]).toMatchObject({
+      call: { name: 'skill.activate' },
+    });
+    expect(snapshot?.toolActivities[0]).not.toHaveProperty('planStepId');
+    expect(snapshot?.toolActivities.slice(1).every(activity => activity.call.name === 'file.list'))
+      .toBe(true);
+  });
+
+  it('allows Skill activation, eight serial business Tool turns, and a final answer', async () => {
+    let providerTurn = 0;
+    mocks.streamAgentProviderTurn.mockImplementation(async (_connection, _input, onDelta) => {
+      providerTurn += 1;
+      if (providerTurn === 1) {
+        return {
+          content: '',
+          toolCalls: [{
+            id: 'call-serial-activation',
+            input: { skillId: 'media-extract-audio' },
+            name: 'skill.activate',
+          }],
+        };
+      }
+      if (providerTurn <= 9) {
+        return {
+          content: '',
+          toolCalls: [{
+            id: `call-serial-list-${providerTurn - 1}`,
+            input: {},
+            name: 'file.list',
+          }],
+        };
+      }
+      onDelta('串行流程已经完成。');
+      return { content: '串行流程已经完成。', toolCalls: [] };
+    });
+    const webContents = sender();
+    const orchestrator = createAgentOrchestrator({
+      contextBudget: { contextWindowTokens: 200_000 },
+      getRuntimeProfile: () => ({
+        apiKey: 'test-key',
+        baseUrl: 'https://ai.example.com/v1',
+        providerType: 'openai',
+      }),
+      getSessionStore: async () => store,
+      runSessionRegistry: createAIServiceRunSessionRegistry(),
+    });
+
+    const started = await orchestrator.start(webContents as never, request());
+    await vi.waitFor(() => {
+      expect(webContents.send).toHaveBeenCalledWith('agent:chat:event', expect.objectContaining({
+        content: '串行流程已经完成。',
+        type: 'completed',
+      }));
+    });
+
+    expect(mocks.streamAgentProviderTurn).toHaveBeenCalledTimes(10);
+    const snapshot = await store.getSession(started.sessionId, OWNER_SCOPE, 3);
+    expect(snapshot?.toolActivities).toHaveLength(9);
+    expect(snapshot?.toolActivities[0].call.name).toBe('skill.activate');
+    expect(snapshot?.toolActivities.slice(1).every(activity => activity.call.name === 'file.list'))
+      .toBe(true);
+  });
+
+  it('applies the provider turn limit even when only a control Tool is called', async () => {
+    let providerTurn = 0;
+    mocks.streamAgentProviderTurn.mockImplementation(async () => {
+      providerTurn += 1;
+      return {
+        content: '',
+        toolCalls: [{
+          id: `call-control-turn-${providerTurn}`,
+          input: { skillId: 'media-extract-audio' },
+          name: 'skill.activate',
+        }],
+      };
+    });
+    const webContents = sender();
+    const orchestrator = createAgentOrchestrator({
+      contextBudget: { contextWindowTokens: 200_000 },
+      getRuntimeProfile: () => ({
+        apiKey: 'test-key',
+        baseUrl: 'https://ai.example.com/v1',
+        providerType: 'openai',
+      }),
+      getSessionStore: async () => store,
+      runSessionRegistry: createAIServiceRunSessionRegistry(),
+    });
+
+    const started = await orchestrator.start(webContents as never, request());
+    await vi.waitFor(() => {
+      expect(webContents.send).toHaveBeenCalledWith('agent:chat:event', expect.objectContaining({
+        message: expect.stringContaining('Provider 轮数超过安全上限'),
+        type: 'error',
+      }));
+    });
+
+    expect(mocks.streamAgentProviderTurn).toHaveBeenCalledTimes(10);
+    expect((await store.getSession(started.sessionId, OWNER_SCOPE, 3))?.toolActivities)
+      .toHaveLength(9);
   });
 
   it('returns an invalid plan to the provider without inventing execution facts', async () => {
@@ -1580,10 +1950,13 @@ describe('Agent orchestrator', () => {
       { id: 'call-boundary-list', input: {}, name: 'file.list' },
       { id: 'call-boundary-stat', input: { nodeId: 8 }, name: 'file.stat' },
     ];
+    const catalog = skillPromptCatalog();
     const systemPrompt = buildAgentSystemPrompt(
       currentRequest.appContext,
       currentRequest.perception,
       registeredTools.map(tool => tool.name),
+      catalog.summaries,
+      catalog.omittedSkillCount,
     );
     const messages = [
       { content: currentRequest.userPrompt, role: 'user' as const },
@@ -1655,6 +2028,7 @@ describe('Agent orchestrator', () => {
     const registeredTools = agentToolRegistry.list();
     const providerTools = [agentPlanControlTool, ...registeredTools];
     const capabilities = registeredTools.map(tool => tool.name);
+    const catalog = skillPromptCatalog();
     const toolCalls = [{ id: 'call-create-boundary', input: { name: '测试' }, name: 'directory.create' }];
     const messages = [
       { content: currentRequest.userPrompt, role: 'user' as const },
@@ -1668,7 +2042,13 @@ describe('Agent orchestrator', () => {
     ];
     const withoutPerceptionTokens = estimateAgentProviderTurnTokens({
       messages,
-      systemPrompt: buildAgentSystemPrompt(currentRequest.appContext, undefined, capabilities),
+      systemPrompt: buildAgentSystemPrompt(
+        currentRequest.appContext,
+        undefined,
+        capabilities,
+        catalog.summaries,
+        catalog.omittedSkillCount,
+      ),
       tools: providerTools,
     });
     const withPerceptionTokens = estimateAgentProviderTurnTokens({
@@ -1676,7 +2056,7 @@ describe('Agent orchestrator', () => {
       systemPrompt: buildAgentSystemPrompt(currentRequest.appContext, {
         collectedAt: '2026-08-23T00:00:00.000Z',
         selectedNodes: [],
-      }, capabilities),
+      }, capabilities, catalog.summaries, catalog.omittedSkillCount),
       tools: providerTools,
     });
     expect(withPerceptionTokens).toBeGreaterThan(withoutPerceptionTokens);
@@ -1726,10 +2106,13 @@ describe('Agent orchestrator', () => {
       { id: 'a', input: {}, name: 'file.list' },
       { id: `call-${'x'.repeat(123)}`, input: { nodeId: 8 }, name: 'file.stat' },
     ];
+    const catalog = skillPromptCatalog();
     const systemPrompt = buildAgentSystemPrompt(
       currentRequest.appContext,
       currentRequest.perception,
       registeredTools.map(tool => tool.name),
+      catalog.summaries,
+      catalog.omittedSkillCount,
     );
     const messages = [
       { content: currentRequest.userPrompt, role: 'user' as const },
@@ -2561,4 +2944,409 @@ describe('Agent orchestrator', () => {
       .filter(message => message.role === 'assistant')
       .reduce((total, message) => total + message.content.length, 0)).toBe(60_000);
   });
+
+  it('rejects a Skill whose complete activation result cannot fit the continuation budget', async () => {
+    const skillId = 'test.activation-continuation-budget';
+    const skillTools = agentToolRegistry.list()
+      .filter(tool => tool.kind === 'business')
+      .map(tool => tool.name);
+    builtInAgentSkillRegistry.register({
+      description: '用于验证完整 Skill 激活结果的续接预算边界。',
+      id: skillId,
+      instructions: 'Follow the registered tools in order and verify every result. '.repeat(45),
+      optionalTools: [],
+      requiredTools: skillTools,
+      source: 'built-in',
+      toolAllowlist: skillTools,
+      version: '1.0.0',
+      whenToUse: '只用于测试 continuation 剩余预算不足时必须在执行前拒绝。',
+    });
+    const currentRequest = {
+      ...request(),
+      userPrompt: '激活预算边界测试流程',
+    };
+    const capabilitySnapshot = createAgentRunCapabilitySnapshot({
+      capabilitySnapshot: availableCapabilitySnapshot(),
+      skillSnapshot: builtInAgentSkillRegistry.createRunSnapshot(),
+      toolSnapshot: agentToolRegistry.createSnapshot(),
+    });
+    const skillSummaries = capabilitySnapshot.skillSnapshot.listSummaries();
+    const omittedSkillCount = capabilitySnapshot.skillSnapshot.omittedSkillCount;
+    const initialVisibleTools = capabilitySnapshot.listTools();
+    const initialProviderTools = [agentPlanControlTool, ...initialVisibleTools];
+    const initialSystemPrompt = buildAgentSystemPrompt(
+      currentRequest.appContext,
+      currentRequest.perception,
+      initialVisibleTools.map(tool => tool.name),
+      skillSummaries,
+      omittedSkillCount,
+    );
+    const activationCall = {
+      id: 'call-activation-continuation-budget',
+      input: { skillId },
+      name: 'skill.activate',
+    };
+    const initialMessages = [{
+      content: currentRequest.userPrompt,
+      role: 'user' as const,
+    }];
+    const messagesAfterActivationCall = [
+      ...initialMessages,
+      {
+        content: '',
+        role: 'assistant' as const,
+        toolCalls: [activationCall],
+      },
+    ];
+    const activatedVisibleTools = capabilitySnapshot.listTools(skillId);
+    const activatedProviderTools = [agentPlanControlTool, ...activatedVisibleTools];
+    const activatedSystemPrompt = buildAgentSystemPrompt(
+      currentRequest.appContext,
+      currentRequest.perception,
+      activatedVisibleTools.map(tool => tool.name),
+      skillSummaries,
+      omittedSkillCount,
+    );
+    const activationResult = resolveAgentSkillActivationResult(activationCall.input, {
+      runCapabilitySnapshot: capabilitySnapshot,
+    });
+    const completeProjection = projectAgentToolResultForProvider(activationResult, 1_024);
+    expect(completeProjection.truncated).toBe(false);
+    const initialTurnTokens = estimateAgentProviderTurnTokens({
+      messages: initialMessages,
+      systemPrompt: initialSystemPrompt,
+      tools: initialProviderTools,
+    });
+    const minimumUnactivatedContinuationTokens = estimateAgentProviderTurnTokens({
+      messages: [
+        ...messagesAfterActivationCall,
+        {
+          content: MINIMUM_AGENT_PROVIDER_TOOL_RESULT_CONTENT,
+          name: activationCall.name,
+          role: 'tool' as const,
+          toolCallId: activationCall.id,
+        },
+      ],
+      systemPrompt: initialSystemPrompt,
+      tools: initialProviderTools,
+    });
+    const emptyActivatedContinuationTokens = estimateAgentProviderTurnTokens({
+      messages: [
+        ...messagesAfterActivationCall,
+        {
+          content: '',
+          name: activationCall.name,
+          role: 'tool' as const,
+          toolCallId: activationCall.id,
+        },
+      ],
+      systemPrompt: activatedSystemPrompt,
+      tools: activatedProviderTools,
+    });
+    const completeActivatedContinuationTokens = estimateAgentProviderTurnTokens({
+      messages: [
+        ...messagesAfterActivationCall,
+        {
+          content: completeProjection.content,
+          name: activationCall.name,
+          role: 'tool' as const,
+          toolCallId: activationCall.id,
+        },
+      ],
+      systemPrompt: activatedSystemPrompt,
+      tools: activatedProviderTools,
+    });
+    const providerRequestLimit = completeActivatedContinuationTokens - 1;
+    expect(Math.max(
+      initialTurnTokens,
+      minimumUnactivatedContinuationTokens,
+      emptyActivatedContinuationTokens,
+    )).toBeLessThanOrEqual(providerRequestLimit);
+
+    mocks.streamAgentProviderTurn.mockResolvedValueOnce({
+      content: '',
+      toolCalls: [activationCall],
+    });
+    const createToolRun = vi.spyOn(store, 'createToolRun');
+    const outputReserveTokens = 1_000;
+    const webContents = sender();
+    const orchestrator = createAgentOrchestrator({
+      contextBudget: {
+        contextWindowTokens: providerRequestLimit + outputReserveTokens,
+        outputReserveTokens,
+        recentHistoryTokens: 100,
+        summaryReserveTokens: 1,
+        toolLoopReserveTokens: 1,
+      },
+      getRuntimeProfile: () => ({
+        apiKey: 'test-key',
+        baseUrl: 'https://ai.example.com/v1',
+        providerType: 'openai',
+      }),
+      getSessionStore: async () => store,
+      runSessionRegistry: createAIServiceRunSessionRegistry(),
+    });
+
+    const started = await orchestrator.start(webContents as never, currentRequest);
+    await vi.waitFor(() => {
+      expect(webContents.send).toHaveBeenCalledWith('agent:chat:event', expect.objectContaining({
+        message: expect.stringContaining('完整说明无法放入当前模型上下文'),
+        runId: started.runId,
+        type: 'error',
+      }));
+    });
+
+    expect(mocks.streamAgentProviderTurn).toHaveBeenCalledTimes(1);
+    expect(createToolRun).not.toHaveBeenCalled();
+    expect(await store.getSession(started.sessionId, OWNER_SCOPE, 3)).toMatchObject({
+      runs: [expect.objectContaining({
+        error: expect.stringContaining('完整说明无法放入当前模型上下文'),
+        status: 'failed',
+      })],
+      toolActivities: [],
+    });
+    expect(webContents.send.mock.calls.map(call => call[1]?.type)).not.toContain('tool-started');
+  });
+
+  it('budgets a valid Skill activation against the narrowed next-turn Tool set', async () => {
+    const skillId = 'test.activation-narrowed-budget';
+    const paddingToolNames = Array.from(
+      { length: 12 },
+      (_, index) => `test.activation-budget-padding-${index + 1}`,
+    );
+    paddingToolNames.forEach((name) => {
+      agentToolRegistry.register({
+        description: `Only used to make the pre-activation Provider schema larger. ${'detail '.repeat(30)}`,
+        execute: vi.fn(async () => ({ message: name, ok: true })),
+        inputSchema: {
+          additionalProperties: false,
+          properties: {
+            value: {
+              description: 'A deliberately verbose test-only input field. '.repeat(8),
+              type: 'string',
+            },
+          },
+          type: 'object',
+        },
+        name,
+        risk: 'read',
+      });
+    });
+    builtInAgentSkillRegistry.register({
+      description: '用于验证激活续接预算使用收窄后的 Tool 集。',
+      id: skillId,
+      instructions: 'Call file.list once, then answer from its authoritative result.',
+      optionalTools: [],
+      requiredTools: ['file.list'],
+      source: 'built-in',
+      toolAllowlist: ['file.list'],
+      version: '1.0.0',
+      whenToUse: '只用于激活前后 Provider Tool schema 大小差异测试。',
+    });
+
+    const currentRequest = {
+      ...request(),
+      userPrompt: '执行收窄预算测试流程',
+    };
+    const capabilitySnapshot = createAgentRunCapabilitySnapshot({
+      capabilitySnapshot: availableCapabilitySnapshot(),
+      skillSnapshot: builtInAgentSkillRegistry.createRunSnapshot(),
+      toolSnapshot: agentToolRegistry.createSnapshot(),
+    });
+    const skillSummaries = capabilitySnapshot.skillSnapshot.listSummaries();
+    const omittedSkillCount = capabilitySnapshot.skillSnapshot.omittedSkillCount;
+    const initialVisibleTools = capabilitySnapshot.listTools();
+    const initialProviderTools = [agentPlanControlTool, ...initialVisibleTools];
+    const initialSystemPrompt = buildAgentSystemPrompt(
+      currentRequest.appContext,
+      currentRequest.perception,
+      initialVisibleTools.map(tool => tool.name),
+      skillSummaries,
+      omittedSkillCount,
+    );
+    const activationCall = {
+      id: 'call-activation-narrowed-budget',
+      input: { skillId },
+      name: 'skill.activate',
+    };
+    const initialMessages = [{
+      content: currentRequest.userPrompt,
+      role: 'user' as const,
+    }];
+    const messagesAfterActivationCall = [
+      ...initialMessages,
+      {
+        content: '',
+        role: 'assistant' as const,
+        toolCalls: [activationCall],
+      },
+    ];
+    const activatedVisibleTools = capabilitySnapshot.listTools(skillId);
+    const activatedProviderTools = [agentPlanControlTool, ...activatedVisibleTools];
+    const activatedSystemPrompt = buildAgentSystemPrompt(
+      currentRequest.appContext,
+      currentRequest.perception,
+      activatedVisibleTools.map(tool => tool.name),
+      skillSummaries,
+      omittedSkillCount,
+    );
+    const activationResult = resolveAgentSkillActivationResult(activationCall.input, {
+      runCapabilitySnapshot: capabilitySnapshot,
+    });
+    const completeProjection = projectAgentToolResultForProvider(activationResult, 1_024);
+    expect(completeProjection.truncated).toBe(false);
+
+    const initialTurnTokens = estimateAgentProviderTurnTokens({
+      messages: initialMessages,
+      systemPrompt: initialSystemPrompt,
+      tools: initialProviderTools,
+    });
+    const unactivatedMinimumContinuationTokens = estimateAgentProviderTurnTokens({
+      messages: [
+        ...messagesAfterActivationCall,
+        {
+          content: MINIMUM_AGENT_PROVIDER_TOOL_RESULT_CONTENT,
+          name: activationCall.name,
+          role: 'tool' as const,
+          toolCallId: activationCall.id,
+        },
+      ],
+      systemPrompt: initialSystemPrompt,
+      tools: initialProviderTools,
+    });
+    const activatedCompleteContinuationTokens = estimateAgentProviderTurnTokens({
+      messages: [
+        ...messagesAfterActivationCall,
+        {
+          content: completeProjection.content,
+          name: activationCall.name,
+          role: 'tool' as const,
+          toolCallId: activationCall.id,
+        },
+      ],
+      systemPrompt: activatedSystemPrompt,
+      tools: activatedProviderTools,
+    });
+    const providerRequestLimit = Math.max(
+      initialTurnTokens,
+      activatedCompleteContinuationTokens,
+    );
+    expect(unactivatedMinimumContinuationTokens).toBeGreaterThan(providerRequestLimit);
+
+    mocks.streamAgentProviderTurn
+      .mockResolvedValueOnce({ content: '', toolCalls: [activationCall] })
+      .mockImplementationOnce(async (_connection, input, onDelta) => {
+        const visibleToolNames = input.tools.map((tool: { name: string }) => tool.name);
+        expect(visibleToolNames).toContain('file.list');
+        expect(visibleToolNames).toContain('skill.activate');
+        expect(visibleToolNames).not.toContain(paddingToolNames[0]);
+        expect(JSON.parse(input.messages.at(-1).content)).toMatchObject({
+          data: { skillId },
+          ok: true,
+        });
+        onDelta('收窄后的续接请求已成功。');
+        return { content: '收窄后的续接请求已成功。', toolCalls: [] };
+      });
+    const outputReserveTokens = 1_000;
+    const webContents = sender();
+    const orchestrator = createAgentOrchestrator({
+      contextBudget: {
+        contextWindowTokens: providerRequestLimit + outputReserveTokens,
+        outputReserveTokens,
+        recentHistoryTokens: 100,
+        summaryReserveTokens: 1,
+        toolLoopReserveTokens: 1,
+      },
+      getRuntimeProfile: () => ({
+        apiKey: 'test-key',
+        baseUrl: 'https://ai.example.com/v1',
+        providerType: 'openai',
+      }),
+      getSessionStore: async () => store,
+      runSessionRegistry: createAIServiceRunSessionRegistry(),
+    });
+
+    const started = await orchestrator.start(webContents as never, currentRequest);
+    await vi.waitFor(() => {
+      expect(webContents.send).toHaveBeenCalledWith('agent:chat:event', expect.objectContaining({
+        content: '收窄后的续接请求已成功。',
+        runId: started.runId,
+        type: 'completed',
+      }));
+    });
+    expect(mocks.streamAgentProviderTurn).toHaveBeenCalledTimes(2);
+    expect((await store.getSession(started.sessionId, OWNER_SCOPE, 3))?.toolActivities)
+      .toEqual([expect.objectContaining({
+        call: expect.objectContaining({ name: 'skill.activate' }),
+        status: 'completed',
+      })]);
+  });
+
+  it('keeps live Tool and Skill registrations out of an already-started Run', async () => {
+    const liveToolName = 'test.live-snapshot-tool';
+    const liveSkillId = 'test.live-snapshot-skill';
+    mocks.streamAgentProviderTurn
+      .mockImplementationOnce(async (_connection, input) => {
+        expect(input.tools.map((tool: { name: string }) => tool.name)).not.toContain(liveToolName);
+        expect(input.systemPrompt).not.toContain(liveSkillId);
+        agentToolRegistry.register({
+          description: 'Only registrations created after a Run snapshot can see this Tool.',
+          execute: vi.fn(async () => ({ message: '不应被当前 Run 执行', ok: true })),
+          inputSchema: {
+            additionalProperties: false,
+            properties: {},
+            type: 'object',
+          },
+          name: liveToolName,
+          risk: 'read',
+        });
+        builtInAgentSkillRegistry.register({
+          description: 'Run 启动后才出现的 Skill 摘要。',
+          id: liveSkillId,
+          instructions: 'Use only the live snapshot test Tool and verify its result.',
+          optionalTools: [],
+          requiredTools: [liveToolName],
+          source: 'built-in',
+          toolAllowlist: [liveToolName],
+          version: '1.0.0',
+          whenToUse: '只用于验证当前 Run 不读取 live Registry。',
+        });
+        return {
+          content: '',
+          toolCalls: [{ id: 'call-before-live-registration', input: {}, name: 'file.list' }],
+        };
+      })
+      .mockImplementationOnce(async (_connection, input, onDelta) => {
+        expect(input.tools.map((tool: { name: string }) => tool.name)).not.toContain(liveToolName);
+        expect(input.systemPrompt).not.toContain(liveSkillId);
+        expect(input.systemPrompt).not.toContain('Run 启动后才出现的 Skill 摘要');
+        onDelta('当前 Run 仍使用启动时能力快照。');
+        return { content: '当前 Run 仍使用启动时能力快照。', toolCalls: [] };
+      });
+    const webContents = sender();
+    const orchestrator = createAgentOrchestrator({
+      contextBudget: { contextWindowTokens: 200_000 },
+      getRuntimeProfile: () => ({
+        apiKey: 'test-key',
+        baseUrl: 'https://ai.example.com/v1',
+        providerType: 'openai',
+      }),
+      getSessionStore: async () => store,
+      runSessionRegistry: createAIServiceRunSessionRegistry(),
+    });
+
+    const started = await orchestrator.start(webContents as never, request());
+    await vi.waitFor(() => {
+      expect(webContents.send).toHaveBeenCalledWith('agent:chat:event', expect.objectContaining({
+        content: '当前 Run 仍使用启动时能力快照。',
+        type: 'completed',
+      }));
+    });
+
+    expect(agentToolRegistry.get(liveToolName)).not.toBeNull();
+    expect(builtInAgentSkillRegistry.get(liveSkillId)).not.toBeNull();
+    expect((await store.getSession(started.sessionId, OWNER_SCOPE, 3))?.toolActivities)
+      .toEqual([expect.objectContaining({ call: expect.objectContaining({ name: 'file.list' }) })]);
+  });
+
 });

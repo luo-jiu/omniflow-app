@@ -14,6 +14,7 @@ import type {
 import { normalizeAgentOwnerScope } from '../../../src/shared/agent/agent-owner-scope';
 import {
   agentToolRegistry,
+  type AgentToolRegistrySnapshot,
   type AgentToolExecutionContext,
 } from './agent-tool-registry';
 import {
@@ -39,6 +40,7 @@ interface AgentToolRegistryExecutor {
     name: string,
     input: unknown,
     context: AgentToolExecutionContext,
+    expectedRegistrationId?: string,
   ) => Promise<AgentToolResult>;
 }
 
@@ -139,6 +141,7 @@ export function createAgentToolBroker(options: AgentToolBrokerOptions = {}) {
     input: unknown,
     context: AgentToolExecutionContext,
     timeoutMs = DEFAULT_MAIN_EXECUTION_TIMEOUT_MS,
+    runToolRegistry?: AgentToolRegistryExecutor | AgentToolRegistrySnapshot,
   ): Promise<AgentToolResult> {
     const boundedTimeoutMs = Math.max(1, Math.min(timeoutMs, MAX_MAIN_EXECUTION_TIMEOUT_MS));
     return new Promise((resolve, reject) => {
@@ -177,13 +180,20 @@ export function createAgentToolBroker(options: AgentToolBrokerOptions = {}) {
         return;
       }
       context.signal.addEventListener('abort', handleAbort, { once: true });
-      void Promise.resolve().then(() => toolRegistry.execute(name, input, {
+      const executionRegistry = runToolRegistry || toolRegistry;
+      const expectedRegistrationId = context.runCapabilitySnapshot
+        ?.getTool(name, context.activeSkillId)?.registrationId;
+      const executionContext = {
         ...context,
-        onProgress: progress => {
+        onProgress: (progress: AgentToolProgress) => {
           if (!settled && !cancellationError) context.onProgress(progress);
         },
         signal: controller.signal,
-      })).then(
+      };
+      void Promise.resolve().then(() => expectedRegistrationId === undefined
+        ? executionRegistry.execute(name, input, executionContext)
+        : executionRegistry.execute(name, input, executionContext, expectedRegistrationId)
+      ).then(
         result => finish(() => resolve(result)),
         error => finish(() => reject(cancellationError || error)),
       );

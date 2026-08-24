@@ -7,12 +7,20 @@
 export const AGENT_SKILL_SOURCE_V1 = 'built-in' as const;
 export type AgentSkillSourceV1 = typeof AGENT_SKILL_SOURCE_V1;
 
+/** The only Tool name allowed to participate in the Skill control protocol. */
+export const AGENT_SKILL_ACTIVATE_TOOL_NAME = 'skill.activate' as const;
+export const AGENT_SKILL_ACTIVATE_TOOL_REGISTRATION_ID = 'builtin:skill.activate@1' as const;
+
 export interface AgentSkillDefinitionV1 {
   readonly id: string;
   readonly version: string;
   readonly description: string;
   readonly whenToUse: string;
   readonly toolAllowlist: readonly string[];
+  /** Tools required for the core workflow to remain discoverable. */
+  readonly requiredTools: readonly string[];
+  /** Tools that only enable optional branches of the workflow. */
+  readonly optionalTools: readonly string[];
   readonly instructions: string;
   readonly source: AgentSkillSourceV1;
 }
@@ -40,6 +48,8 @@ export interface AgentSkillActivationEnvelopeV1 {
 
 export interface AgentSkillSnapshotV1 {
   readonly catalogRevision: number;
+  readonly catalogTruncated: boolean;
+  readonly omittedSkillCount: number;
   readonly skills: readonly AgentSkillDefinitionV1[];
   readonly get: (skillId: string) => AgentSkillDefinitionV1 | null;
   readonly list: () => readonly AgentSkillDefinitionV1[];
@@ -73,4 +83,3 @@ export interface AgentSkillSnapshotOptionsV1 {
   /** Override the default catalog token budget for this Run snapshot. */
   readonly maxCatalogTokens?: number;
 }
-

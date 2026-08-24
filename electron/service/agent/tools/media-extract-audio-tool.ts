@@ -2,6 +2,7 @@ import path from 'node:path';
 
 import { STAGED_FILE_NAME_MAX_BYTES } from '../../stagedFilePolicy';
 import type { AgentTool } from '../agent-tool-registry';
+import { AGENT_CAPABILITY_MEDIA_FFMPEG } from '../capabilities/agent-capability-runtime';
 import { buildAgentMediaFileName, resolveAgentMediaNode } from './media-tool-node';
 
 export const AGENT_AUDIO_OUTPUT_FORMATS = ['m4a', 'mp3', 'wav'] as const;
@@ -56,6 +57,9 @@ export function deriveAgentAudioOutputFileName(
 }
 
 export const mediaExtractAudioTool: AgentTool = {
+  availability: {
+    requiredCapabilities: [AGENT_CAPABILITY_MEDIA_FFMPEG],
+  },
   description: '从当前可见的单个媒体文件中提取第一条音轨，并将结果上传到 OmniFlow 当前目录。支持 m4a、mp3、wav，默认 m4a；目标目录和输出文件名由安全上下文确定，每次执行前必须由用户确认。',
   executor: 'renderer',
   inputSchema: {

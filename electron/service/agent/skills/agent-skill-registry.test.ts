@@ -10,12 +10,16 @@ import {
 import type { AgentSkillDefinitionV1 } from './agent-skill.types';
 
 function skill(overrides: Partial<AgentSkillDefinitionV1> = {}): AgentSkillDefinitionV1 {
+  const toolAllowlist = overrides.toolAllowlist
+    || ['file.list', 'media.inspect', 'media.extractAudio'];
   return {
     description: '从媒体文件提取音频',
     id: 'media-extract-audio',
     instructions: '先检查输入，再调用受控 Tool。\n完成后重新感知产物。',
     source: 'built-in',
-    toolAllowlist: ['file.list', 'media.inspect', 'media.extractAudio'],
+    optionalTools: overrides.optionalTools || [],
+    requiredTools: overrides.requiredTools || toolAllowlist,
+    toolAllowlist,
     version: '1.0.0',
     whenToUse: '用户要求从一个明确的音视频文件提取音轨时。',
     ...overrides,
@@ -43,11 +47,15 @@ describe('Agent Skill V1 registry', () => {
   it('deep-copies and freezes definitions, including the Tool allowlist', () => {
     const input = {
       ...skill(),
+      optionalTools: [...skill().optionalTools],
+      requiredTools: [...skill().requiredTools],
       toolAllowlist: [...skill().toolAllowlist],
     } as {
       description: string;
       id: string;
       instructions: string;
+      optionalTools: string[];
+      requiredTools: string[];
       source: 'built-in';
       toolAllowlist: string[];
       version: string;
@@ -61,6 +69,7 @@ describe('Agent Skill V1 registry', () => {
     });
     registry.register(input);
     input.description = 'changed after registration';
+    input.requiredTools[0] = 'evil.tool';
     input.toolAllowlist[0] = 'evil.tool';
 
     const registered = registry.get(input.id);
@@ -71,6 +80,12 @@ describe('Agent Skill V1 registry', () => {
       'media.extractAudio',
     ]);
     expect(Object.isFrozen(registered?.toolAllowlist)).toBe(true);
+    expect(registered?.requiredTools).toEqual([
+      'file.list',
+      'media.inspect',
+      'media.extractAudio',
+    ]);
+    expect(Object.isFrozen(registered?.requiredTools)).toBe(true);
     expect(() => {
       (registered as { description: string }).description = 'tampered';
     }).toThrow();
@@ -121,6 +136,27 @@ describe('Agent Skill V1 registry', () => {
     })).toThrow();
   });
 
+  it('requires every allowlisted Tool to have one required or optional classification', () => {
+    const registry = createAgentSkillRegistry({
+      toolExists: () => true,
+      estimateTokens: text => text.length,
+      maxActivationTokens: 10_000,
+      maxSummaryTokens: 10_000,
+    });
+    expect(() => registry.register(skill({
+      optionalTools: [],
+      requiredTools: ['file.list'],
+    }))).toThrow('必须归入');
+    expect(() => registry.register(skill({
+      optionalTools: ['file.list'],
+      requiredTools: ['file.list', 'media.inspect', 'media.extractAudio'],
+    }))).toThrow('不能重复');
+    expect(() => registry.register(skill({
+      optionalTools: ['other.tool'],
+      requiredTools: ['file.list', 'media.inspect', 'media.extractAudio'],
+    }))).toThrow('不在 allowlist');
+  });
+
   it('checks summary and activation budgets with the injected estimator', () => {
     expect(() => createAgentSkillRegistry({
       estimateTokens: () => AGENT_SKILL_DEFAULT_MAX_ACTIVATION_TOKENS + 1,
@@ -137,6 +173,27 @@ describe('Agent Skill V1 registry', () => {
     expect(() => registry.createRunSnapshot()).toThrow('摘要目录');
   });
 
+  it('keeps a stable complete prefix when the Run catalog budget is bounded', () => {
+    const registry = createAgentSkillRegistry({
+      estimateTokens: text => text.length,
+      maxActivationTokens: 10_000,
+      maxSummaryTokens: 10_000,
+      maxCatalogTokens: 300,
+    });
+    registry.register(skill({ id: 'first' }));
+    registry.register(skill({ id: 'second' }));
+    registry.register(skill({ id: 'third' }));
+    const snapshot = registry.createRunSnapshot();
+
+    expect(snapshot.listSummaries().length).toBeGreaterThan(0);
+    expect(snapshot.listSummaries().length).toBeLessThan(3);
+    expect(snapshot.listSummaries().map(item => item.id)).toEqual(['first', 'second']);
+    expect(snapshot.catalogTruncated).toBe(true);
+    expect(snapshot.omittedSkillCount).toBe(1);
+    expect(snapshot.get('third')).toBeNull();
+    expect(snapshot.getActivationEnvelope('third')).toBeNull();
+  });
+
   it('freezes an isolated Run snapshot and keeps it stable after later registration', () => {
     const registry = createAgentSkillRegistry({
       toolExists: () => true,
@@ -149,6 +206,8 @@ describe('Agent Skill V1 registry', () => {
     registry.register(skill({ id: 'second' }));
 
     expect(snapshot.catalogRevision).toBe(1);
+    expect(snapshot.catalogTruncated).toBe(false);
+    expect(snapshot.omittedSkillCount).toBe(0);
     expect(snapshot.list().map(item => item.id)).toEqual(['first']);
     expect(snapshot.get('second')).toBeNull();
     expect(snapshot.listSummaries()[0]).toEqual({

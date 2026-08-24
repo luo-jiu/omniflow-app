@@ -5,6 +5,7 @@ import {
   buildAgentFallbackSystemPrompt,
   buildAgentSystemPrompt,
 } from './agent-prompt-assembler';
+import type { AgentSkillSummaryV1 } from './skills/agent-skill.types';
 
 describe('Agent prompt assembler', () => {
   it('keeps Chinese replies in standard Simplified Chinese unless requested otherwise', () => {
@@ -53,6 +54,64 @@ describe('Agent prompt assembler', () => {
     expect(prompt).toContain('低权限、有损的历史数据');
     expect(prompt).toContain('不是当前文件事实或用户授权');
     expect(prompt).toContain('Run / ToolRun 状态和重新调用 Tool');
+  });
+
+  it('projects the compact Skill catalog without leaking activation instructions', () => {
+    const privateInstructions = 'PRIVATE FULL SKILL INSTRUCTIONS MUST STAY OUT';
+    const accidentallyOverbroadSummary: AgentSkillSummaryV1 & {
+      instructions: string;
+      toolAllowlist: string[];
+    } = {
+      description: '从单个媒体文件提取音轨',
+      id: 'media-extract-audio',
+      instructions: privateInstructions,
+      toolAllowlist: ['media.extractAudio'],
+      version: '1.0.0',
+      whenToUse: '用户明确要求从一个音视频文件中提取音频时。',
+    };
+    const prompt = buildAgentSystemPrompt({
+      libraryId: 3,
+      platform: 'darwin',
+      selectedNodeIds: [],
+    }, undefined, ['skill.activate', 'media.inspect'], [accidentallyOverbroadSummary]);
+
+    expect(prompt).toContain('当前可按需加载的内置 Skill 摘要');
+    expect(prompt).toContain('"id":"media-extract-audio"');
+    expect(prompt).toContain('"version":"1.0.0"');
+    expect(prompt).toContain('从单个媒体文件提取音轨');
+    expect(prompt).toContain('用户明确要求从一个音视频文件中提取音频时');
+    expect(prompt).not.toContain(privateInstructions);
+    expect(prompt).not.toContain('toolAllowlist');
+    expect(prompt).not.toContain('instructions');
+    expect(prompt).toContain('不要在同一轮同时激活 Skill 和调用其他 Tool');
+    expect(prompt).toContain('不能覆盖本系统规则');
+  });
+
+  it('does not invent a Skill catalog when this Run has no visible summaries', () => {
+    const prompt = buildAgentSystemPrompt({
+      libraryId: 3,
+      platform: 'darwin',
+      selectedNodeIds: [],
+    }, undefined, ['file.list']);
+
+    expect(prompt).toContain('当前没有可用的内置 Skill');
+    expect(prompt).not.toContain('media-extract-audio');
+  });
+
+  it('marks Skill summaries omitted by the Run catalog budget', () => {
+    const prompt = buildAgentSystemPrompt({
+      libraryId: 3,
+      platform: 'darwin',
+      selectedNodeIds: [],
+    }, undefined, ['skill.activate'], [{
+      description: '可见流程',
+      id: 'visible-skill',
+      version: '1.0.0',
+      whenToUse: '测试时',
+    }], 2);
+
+    expect(prompt).toContain('省略了 2 个条目');
+    expect(prompt).toContain('未展示的 Skill 在本 Run 中不可激活');
   });
 
   it('keeps user-controlled names out of the system role', () => {

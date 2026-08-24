@@ -74,6 +74,36 @@ describe('Agent tool broker', () => {
     }));
   });
 
+  it('prefers the Run-frozen registry and forwards its expected registration identity', async () => {
+    const liveExecute = vi.fn(async () => ({ message: 'live', ok: true }));
+    const runExecute = vi.fn(async () => ({ message: 'snapshot', ok: true }));
+    const broker = createAgentToolBroker({ toolRegistry: { execute: liveExecute } });
+    const signal = new AbortController().signal;
+    const context = {
+      appContext: prepareInput(signal).appContext,
+      onProgress: vi.fn(),
+      runCapabilitySnapshot: {
+        getTool: () => ({ registrationId: 'file.list@run' }),
+      },
+      signal,
+    } as unknown as AgentToolExecutionContext;
+
+    await expect(broker.executeMain(
+      'file.list',
+      {},
+      context,
+      30_000,
+      { execute: runExecute },
+    )).resolves.toEqual({ message: 'snapshot', ok: true });
+    expect(liveExecute).not.toHaveBeenCalled();
+    expect(runExecute).toHaveBeenCalledWith(
+      'file.list',
+      {},
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      'file.list@run',
+    );
+  });
+
   it('does not dispatch invalid input to a main-process Tool executor', async () => {
     const execute = vi.fn(async () => ({ ok: true }));
     const toolRegistry = createAgentToolRegistry([{

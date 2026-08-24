@@ -1,18 +1,19 @@
+import type { AgentToolResult } from '@/shared/agent/agent.types';
 import type { AgentTool, AgentToolExecutionContext } from '../agent-tool-registry';
-import type {
-  AgentSkillSnapshotV1,
+import {
+  AGENT_SKILL_ACTIVATE_TOOL_NAME,
+  AGENT_SKILL_ACTIVATE_TOOL_REGISTRATION_ID,
 } from './agent-skill.types';
-import { AGENT_SKILL_ACTIVATE_TOOL_NAME } from './agent-skill.types';
 
 export { AGENT_SKILL_ACTIVATE_TOOL_NAME } from './agent-skill.types';
 
 const MAX_SKILL_ID_LENGTH = 128;
 const SKILL_ID_PATTERN = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/u;
 
-type SkillActivationExecutionContext = AgentToolExecutionContext & {
-  /** Frozen at Run start; the Tool must never consult the live registry. */
-  readonly skillSnapshot?: AgentSkillSnapshotV1;
-};
+export type AgentSkillActivationExecutionContext = Pick<
+  AgentToolExecutionContext,
+  'activeSkillId' | 'runCapabilitySnapshot'
+>;
 
 function normalizedSkillId(input: unknown): string | null {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
@@ -21,19 +22,28 @@ function normalizedSkillId(input: unknown): string | null {
   const normalized = value.trim();
   if (
     !normalized
+    || normalized !== value
     || [...normalized].length > MAX_SKILL_ID_LENGTH
     || !SKILL_ID_PATTERN.test(normalized)
   ) return null;
   return normalized;
 }
 
-function getActivationEnvelope(
+/**
+ * Resolve the deterministic activation result without executing any Tool or
+ * consulting a live registry. The orchestrator may use this exact result for
+ * its pre-side-effect provider-budget check.
+ */
+export function resolveAgentSkillActivationResult(
   input: unknown,
-  context: SkillActivationExecutionContext,
-) {
+  context: AgentSkillActivationExecutionContext,
+): AgentToolResult {
   const skillId = normalizedSkillId(input);
   if (!skillId) return { message: 'Skill ID 无效', ok: false as const };
-  const snapshot = context.skillSnapshot;
+  if (context.activeSkillId && context.activeSkillId !== skillId) {
+    return { message: '当前 Run 已激活另一个 Skill，请为新的流程新建 Run', ok: false as const };
+  }
+  const snapshot = context.runCapabilitySnapshot?.skillSnapshot;
   if (!snapshot) {
     return { message: '当前 Agent 运行未提供 Skill 快照', ok: false as const };
   }
@@ -46,7 +56,11 @@ function getActivationEnvelope(
   if (!envelope) {
     return { message: `当前运行不可激活 Skill：${skillId}`, ok: false as const };
   }
-  return { envelope, ok: true as const };
+  return {
+    data: envelope,
+    message: `已加载 Skill ${envelope.skillId}（${envelope.version}）`,
+    ok: true,
+  };
 }
 
 /**
@@ -59,17 +73,8 @@ export const skillActivateTool: AgentTool & { readonly kind: 'control' } = {
     return { behavior: 'allow', risk: 'read' };
   },
   description: '加载当前运行中可见的内置 Skill 流程说明。只接受 Skill ID，不读取路径、URL 或模型提供的正文。',
-  execute(input, rawContext) {
-    const result = getActivationEnvelope(
-      input,
-      rawContext as SkillActivationExecutionContext,
-    );
-    if (!result.ok) return Promise.resolve(result);
-    return Promise.resolve({
-      data: result.envelope,
-      message: `已加载 Skill ${result.envelope.skillId}（${result.envelope.version}）`,
-      ok: true,
-    });
+  execute(input, context) {
+    return Promise.resolve(resolveAgentSkillActivationResult(input, context));
   },
   executor: 'main',
   inputSchema: {
@@ -87,7 +92,7 @@ export const skillActivateTool: AgentTool & { readonly kind: 'control' } = {
   },
   kind: 'control',
   name: AGENT_SKILL_ACTIVATE_TOOL_NAME,
-  registrationId: 'builtin:skill.activate@1',
+  registrationId: AGENT_SKILL_ACTIVATE_TOOL_REGISTRATION_ID,
   risk: 'read',
   validate(input) {
     return normalizedSkillId(input)

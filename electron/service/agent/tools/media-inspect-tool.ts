@@ -1,7 +1,11 @@
 import type { AgentTool } from '../agent-tool-registry';
+import { AGENT_CAPABILITY_MEDIA_FFPROBE } from '../capabilities/agent-capability-runtime';
 import { buildAgentMediaFileName, resolveAgentMediaNode } from './media-tool-node';
 
 export const mediaInspectTool: AgentTool = {
+  availability: {
+    requiredCapabilities: [AGENT_CAPABILITY_MEDIA_FFPROBE],
+  },
   assess() {
     return { behavior: 'allow', risk: 'read' };
   },

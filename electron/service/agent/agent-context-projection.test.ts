@@ -208,6 +208,43 @@ describe('Agent context projection', () => {
     expect(serializedFacts).toContain('run-recent-12');
   });
 
+  it('keeps only Skill activation identity in terminal history facts', () => {
+    const activity: AgentToolActivitySnapshot = {
+      ...toolActivity('run-skill'),
+      call: {
+        id: 'call-skill',
+        input: { skillId: 'media-extract-audio' },
+        name: 'skill.activate',
+      },
+      result: {
+        data: {
+          instructions: '完整流程正文不应再次进入历史上下文',
+          instructionsHash: 'a'.repeat(64),
+          skillId: 'media-extract-audio',
+          toolAllowlist: ['file.list'],
+          version: '1.0.0',
+        },
+        message: '已加载 Skill media-extract-audio（1.0.0）',
+        ok: true,
+      },
+    };
+    const projection = createAgentContextProjection({
+      fixedInputTokens: 100,
+      messages: [
+        message('m1', 'run-skill', 'user', '提取音频'),
+        message('m2', 'run-current', 'user', '继续'),
+      ],
+      runs: [run('run-skill', 'completed'), run('run-current', 'running')],
+      toolActivities: [activity],
+    });
+    const serialized = JSON.stringify(projection.messages);
+
+    expect(serialized).toContain('media-extract-audio');
+    expect(serialized).toContain('a'.repeat(64));
+    expect(serialized).not.toContain('完整流程正文');
+    expect(serialized).not.toContain('toolAllowlist');
+  });
+
   it('rejects an oversized active Run instead of silently truncating it', () => {
     expect(() => createAgentContextProjection({
       budget: {

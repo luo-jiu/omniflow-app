@@ -34,6 +34,7 @@ import {
   serializeAgentConversationSummary,
 } from './agent-conversation-summary';
 import { parseStoredAgentRunPlan } from './agent-plan-model';
+import type { AgentToolKind } from './agent-tool-registry';
 
 const AGENT_SESSION_SCHEMA_VERSION = 2;
 const INTERMEDIATE_APPROVAL_SCHEMA_VERSION = 3;
@@ -68,14 +69,18 @@ const TOOL_INTERACTION_COLUMNS = [
 ] as const;
 
 const TOOL_RUNTIME_COLUMNS = [
+  ['tool_kind', "TEXT NOT NULL DEFAULT 'business'"],
   ['ordinal', 'INTEGER NOT NULL DEFAULT 0'],
   ['plan_step_id', 'TEXT'],
   ['revision', 'INTEGER NOT NULL DEFAULT 1'],
 ] as const;
 
 const RUN_RUNTIME_COLUMNS = [
+  ['capability_identity', "TEXT NOT NULL DEFAULT 'legacy'"],
   ['plan_json', 'TEXT'],
   ['revision', 'INTEGER NOT NULL DEFAULT 1'],
+  ['skill_catalog_revision', 'INTEGER NOT NULL DEFAULT 0'],
+  ['tool_catalog_revision', 'INTEGER NOT NULL DEFAULT 0'],
 ] as const;
 
 const CONTEXT_CHECKPOINT_TABLE_SQL = `
@@ -139,6 +144,7 @@ interface MessageRow {
 }
 
 interface RunRow {
+  capability_identity: string;
   created_at: string;
   current_step: string | null;
   error: string | null;
@@ -150,7 +156,9 @@ interface RunRow {
   reasoning_effort: AgentReasoningEffort;
   revision: number;
   session_id: string;
+  skill_catalog_revision: number;
   status: AgentRunStatus;
+  tool_catalog_revision: number;
   updated_at: string;
   user_prompt: string;
 }
@@ -212,12 +220,15 @@ export interface CreateAgentSessionInput {
 }
 
 export interface CreateAgentRunInput {
+  capabilityIdentity?: string;
   id: string;
   model: string;
   now: string;
   profileId: string;
   reasoningEffort: AgentReasoningEffort;
   sessionId: string;
+  skillCatalogRevision?: number;
+  toolCatalogRevision?: number;
   userPrompt: string;
 }
 
@@ -240,6 +251,7 @@ export interface CreateAgentToolRunInput {
   permissionBehavior: 'allow' | 'ask' | 'deny';
   runId: string;
   status: 'awaiting_approval' | 'running';
+  toolKind?: AgentToolKind;
   toolName: string;
 }
 
@@ -428,6 +440,22 @@ function normalizeLibraryId(value: unknown): number {
   return libraryId;
 }
 
+function normalizeRunCapabilityIdentity(value: unknown): string {
+  const identity = String(value || 'legacy').trim();
+  if (identity === 'legacy' || /^v[1-9][0-9]*:[a-f0-9]{64}$/u.test(identity)) {
+    return identity;
+  }
+  throw new Error('Agent Run capability identity 无效');
+}
+
+function normalizeCatalogRevision(value: unknown): number {
+  const revision = Number(value || 0);
+  if (!Number.isInteger(revision) || revision < 0) {
+    throw new Error('Agent Run catalog revision 无效');
+  }
+  return revision;
+}
+
 function normalizeSessionTitle(value: unknown): string {
   const title = String(value || '').replace(/\s+/g, ' ').trim();
   if (!title) throw new Error('Agent 会话标题不能为空');
@@ -524,6 +552,7 @@ function toMessage(row: MessageRow): AgentMessage {
 function toRunSnapshot(row: RunRow): AgentRunSnapshot {
   const plan = parseStoredAgentRunPlan(row.plan_json);
   return {
+    capabilityIdentity: row.capability_identity,
     createdAt: row.created_at,
     ...(row.current_step ? { currentStep: row.current_step } : {}),
     ...(row.error ? { error: row.error } : {}),
@@ -535,7 +564,9 @@ function toRunSnapshot(row: RunRow): AgentRunSnapshot {
     reasoningEffort: row.reasoning_effort,
     revision: Number(row.revision),
     sessionId: row.session_id,
+    skillCatalogRevision: Number(row.skill_catalog_revision),
     status: row.status,
+    toolCatalogRevision: Number(row.tool_catalog_revision),
     updatedAt: row.updated_at,
     userPrompt: row.user_prompt,
   };
@@ -761,8 +792,19 @@ async function ensureRunPlanTriggers(database: sqlite3.Database): Promise<void> 
     DROP TRIGGER IF EXISTS agent_tool_runs_require_next_ordinal_on_insert;
     DROP TRIGGER IF EXISTS agent_tool_runs_reject_replace;
     DROP TRIGGER IF EXISTS agent_tool_runs_delete_only_with_run;
+    DROP TRIGGER IF EXISTS agent_tool_runs_validate_kind_on_insert;
     DROP TRIGGER IF EXISTS agent_tool_runs_validate_plan_step_on_insert;
     DROP TRIGGER IF EXISTS agent_tool_runs_plan_step_is_immutable;
+
+    UPDATE agent_tool_runs
+    SET
+      tool_kind = 'control',
+      plan_step_id = NULL
+    WHERE tool_name = 'skill.activate'
+      AND (
+        tool_kind <> 'control'
+        OR plan_step_id IS NOT NULL
+      );
 
     CREATE TRIGGER agent_runs_plan_must_start_empty
     BEFORE INSERT ON agent_runs
@@ -886,7 +928,10 @@ async function ensureRunPlanTriggers(database: sqlite3.Database): Promise<void> 
           OR OLD.plan_json IS NOT NULL
           OR OLD.status NOT IN ('running', 'awaiting_approval', 'awaiting_interaction')
           OR EXISTS (
-            SELECT 1 FROM agent_tool_runs WHERE run_id = OLD.id
+            SELECT 1
+            FROM agent_tool_runs
+            WHERE run_id = OLD.id
+              AND tool_kind = 'business'
           )
           OR NEW.revision <> OLD.revision + 1
           OR NEW.updated_at <> json_extract(NEW.plan_json, '$.createdAt')
@@ -938,32 +983,43 @@ async function ensureRunPlanTriggers(database: sqlite3.Database): Promise<void> 
       SELECT RAISE(ABORT, 'Agent Tool run can only be deleted with its Run');
     END;
 
+    CREATE TRIGGER agent_tool_runs_validate_kind_on_insert
+    BEFORE INSERT ON agent_tool_runs
+    WHEN NEW.tool_kind NOT IN ('business', 'control')
+    BEGIN
+      SELECT RAISE(ABORT, 'Agent Tool kind is invalid');
+    END;
+
     CREATE TRIGGER agent_tool_runs_validate_plan_step_on_insert
     BEFORE INSERT ON agent_tool_runs
     WHEN NEW.plan_step_id IS NOT NULL
-      AND NOT EXISTS (
-        SELECT 1
-        FROM agent_runs AS runs
-        JOIN json_each(runs.plan_json, '$.steps') AS step
-        WHERE runs.id = NEW.run_id
-          AND json_extract(step.value, '$.id') = NEW.plan_step_id
-          AND json_extract(step.value, '$.expectedToolName') = NEW.tool_name
-          AND CAST(json_extract(step.value, '$.ordinal') AS INTEGER) = COALESCE((
-            SELECT MAX(CAST(json_extract(linked_step.value, '$.ordinal') AS INTEGER))
-            FROM agent_tool_runs AS linked_tool
-            JOIN json_each(runs.plan_json, '$.steps') AS linked_step
-              ON json_extract(linked_step.value, '$.id') = linked_tool.plan_step_id
-            WHERE linked_tool.run_id = NEW.run_id
-          ), 0) + 1
+      AND (
+        NEW.tool_kind <> 'business'
+        OR NOT EXISTS (
+          SELECT 1
+          FROM agent_runs AS runs
+          JOIN json_each(runs.plan_json, '$.steps') AS step
+          WHERE runs.id = NEW.run_id
+            AND json_extract(step.value, '$.id') = NEW.plan_step_id
+            AND json_extract(step.value, '$.expectedToolName') = NEW.tool_name
+            AND CAST(json_extract(step.value, '$.ordinal') AS INTEGER) = COALESCE((
+              SELECT MAX(CAST(json_extract(linked_step.value, '$.ordinal') AS INTEGER))
+              FROM agent_tool_runs AS linked_tool
+              JOIN json_each(runs.plan_json, '$.steps') AS linked_step
+                ON json_extract(linked_step.value, '$.id') = linked_tool.plan_step_id
+              WHERE linked_tool.run_id = NEW.run_id
+            ), 0) + 1
+        )
       )
     BEGIN
       SELECT RAISE(ABORT, 'Agent Tool plan step association is invalid');
     END;
 
     CREATE TRIGGER agent_tool_runs_plan_step_is_immutable
-    BEFORE UPDATE OF run_id, tool_name, ordinal, plan_step_id ON agent_tool_runs
+    BEFORE UPDATE OF run_id, tool_name, tool_kind, ordinal, plan_step_id ON agent_tool_runs
     WHEN NEW.run_id IS NOT OLD.run_id
       OR NEW.tool_name IS NOT OLD.tool_name
+      OR NEW.tool_kind IS NOT OLD.tool_kind
       OR NEW.ordinal IS NOT OLD.ordinal
       OR NEW.plan_step_id IS NOT OLD.plan_step_id
     BEGIN
@@ -1285,6 +1341,7 @@ async function initializeDatabase(database: sqlite3.Database): Promise<void> {
       CREATE TABLE agent_runs (
         id TEXT PRIMARY KEY,
         session_id TEXT NOT NULL REFERENCES agent_sessions(id) ON DELETE CASCADE,
+        capability_identity TEXT NOT NULL DEFAULT 'legacy',
         status TEXT NOT NULL,
         user_prompt TEXT NOT NULL,
         profile_id TEXT NOT NULL,
@@ -1294,6 +1351,8 @@ async function initializeDatabase(database: sqlite3.Database): Promise<void> {
         error TEXT,
         plan_json TEXT,
         revision INTEGER NOT NULL DEFAULT 1,
+        skill_catalog_revision INTEGER NOT NULL DEFAULT 0,
+        tool_catalog_revision INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         finished_at TEXT
@@ -1325,6 +1384,9 @@ async function initializeDatabase(database: sqlite3.Database): Promise<void> {
         run_id TEXT NOT NULL REFERENCES agent_runs(id) ON DELETE CASCADE,
         call_id TEXT NOT NULL,
         tool_name TEXT NOT NULL,
+        tool_kind TEXT NOT NULL DEFAULT 'business' CHECK (
+          tool_kind IN ('business', 'control')
+        ),
         input_json TEXT NOT NULL,
         result_json TEXT,
         status TEXT NOT NULL,
@@ -1513,11 +1575,14 @@ export async function createSQLiteAgentSessionStore(
       SELECT
         id,
         session_id,
+        capability_identity,
         status,
         user_prompt,
         profile_id,
         model,
         reasoning_effort,
+        skill_catalog_revision,
+        tool_catalog_revision,
         plan_json,
         revision,
         current_step,
@@ -1767,16 +1832,20 @@ export async function createSQLiteAgentSessionStore(
     async createRun(input) {
       await run(database, `
         INSERT INTO agent_runs (
-          id, session_id, status, user_prompt, profile_id, model, reasoning_effort,
+          id, session_id, capability_identity, status, user_prompt, profile_id, model,
+          reasoning_effort, skill_catalog_revision, tool_catalog_revision,
           current_step, created_at, updated_at
-        ) VALUES (?, ?, 'running', ?, ?, ?, ?, '请求 AI 服务', ?, ?)
+        ) VALUES (?, ?, ?, 'running', ?, ?, ?, ?, ?, ?, '请求 AI 服务', ?, ?)
       `, [
         input.id,
         input.sessionId,
+        normalizeRunCapabilityIdentity(input.capabilityIdentity),
         input.userPrompt,
         input.profileId,
         input.model,
         input.reasoningEffort,
+        normalizeCatalogRevision(input.skillCatalogRevision),
+        normalizeCatalogRevision(input.toolCatalogRevision),
         input.now,
         input.now,
       ]);
@@ -1837,7 +1906,7 @@ export async function createSQLiteAgentSessionStore(
             = target_run.next_plan_ordinal
         )
         INSERT INTO agent_tool_runs (
-          id, run_id, call_id, tool_name, input_json, status,
+          id, run_id, call_id, tool_name, tool_kind, input_json, status,
           permission_behavior, approval_id, approval_input_hash,
           approval_preview_json, approval_status, ordinal, plan_step_id, created_at
         )
@@ -1853,9 +1922,12 @@ export async function createSQLiteAgentSessionStore(
           ?,
           ?,
           ?,
+          ?,
           target_run.next_tool_ordinal,
           CASE
-            WHEN next_plan_step.expected_tool_name = ? THEN next_plan_step.step_id
+            WHEN ? = 'business'
+              AND next_plan_step.expected_tool_name = ?
+              THEN next_plan_step.step_id
             ELSE NULL
           END,
           ?
@@ -1866,6 +1938,7 @@ export async function createSQLiteAgentSessionStore(
         input.id,
         input.callId,
         input.toolName,
+        input.toolKind || 'business',
         JSON.stringify(input.input),
         input.status,
         input.permissionBehavior,
@@ -1873,6 +1946,7 @@ export async function createSQLiteAgentSessionStore(
         input.approvalInputHash || null,
         input.approvalPreview ? JSON.stringify(input.approvalPreview) : null,
         input.permissionBehavior === 'ask' ? 'pending' : null,
+        input.toolKind || 'business',
         input.toolName,
         input.now,
       ]);
@@ -1945,11 +2019,14 @@ export async function createSQLiteAgentSessionStore(
         SELECT
           id,
           session_id,
+          capability_identity,
           status,
           user_prompt,
           profile_id,
           model,
           reasoning_effort,
+          skill_catalog_revision,
+          tool_catalog_revision,
           plan_json,
           revision,
           current_step,
@@ -2129,7 +2206,10 @@ export async function createSQLiteAgentSessionStore(
           AND plan_json IS NULL
           AND status IN ('running', 'awaiting_approval', 'awaiting_interaction')
           AND NOT EXISTS (
-            SELECT 1 FROM agent_tool_runs WHERE run_id = agent_runs.id
+            SELECT 1
+            FROM agent_tool_runs
+            WHERE run_id = agent_runs.id
+              AND tool_kind = 'business'
           )
       `, [JSON.stringify(canonicalPlan), canonicalPlan.createdAt, runId]);
       if (result.changes === 0) {

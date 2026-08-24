@@ -13,6 +13,7 @@ vi.mock('../aiServiceClient', () => ({
 }));
 
 import { createAIServiceRunSessionRegistry } from '../aiServiceRunSession';
+import { createAgentCapabilitySnapshot } from './capabilities/agent-capability-registry';
 import { createSQLiteAgentMemoryStore, type AgentMemoryStore } from './agent-memory-store';
 import { createAgentOrchestrator } from './agent-orchestrator';
 import { createSQLiteAgentSessionStore, type AgentSessionStore } from './agent-session-store';
@@ -71,6 +72,16 @@ describe('Agent long-term memory orchestration', () => {
         providerType: 'openai',
       }),
       getSessionStore: async () => sessionStore,
+      resolveCapabilitySnapshot: async ({ capabilityIds }) => createAgentCapabilitySnapshot({
+        entries: capabilityIds.map(id => ({
+          checkedAt: 1,
+          definitionRevision: `test:${id}@1`,
+          id,
+          scopeIdentity: 'test-machine',
+          state: 'available',
+        })),
+        registryRevision: 2,
+      }),
       runSessionRegistry: createAIServiceRunSessionRegistry(),
       ...overrides,
     });
