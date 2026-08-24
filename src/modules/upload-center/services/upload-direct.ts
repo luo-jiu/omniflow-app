@@ -2,8 +2,11 @@ import {
   abortUploadSession,
   completeUploadSession,
   initUploadSession,
+  reconcileUploadCompletion,
   renewUploadSession,
   signUploadParts,
+  UploadSessionExpiredError,
+  UploadSessionRequestError,
   UploadSessionNotFoundError,
 } from './upload-session.api';
 import { runtimeLogger } from '@/utils/runtimeLogger';
@@ -39,6 +42,56 @@ export interface DirectUploadInput {
   setAbort?: (aborter: () => Promise<void>) => void;
 }
 
+export class UploadCommitUnknownError extends Error {
+  readonly uploadId: string;
+  readonly clientOperationId: string;
+  readonly cause: unknown;
+
+  constructor(uploadId: string, clientOperationId: string, cause: unknown) {
+    super(`上传提交结果暂时无法确认 (operation: ${clientOperationId})`);
+    this.name = 'UploadCommitUnknownError';
+    this.uploadId = uploadId;
+    this.clientOperationId = clientOperationId;
+    this.cause = cause;
+  }
+}
+
+function createCompletionOperationId(): string {
+  const randomUuid = globalThis.crypto?.randomUUID?.();
+  if (randomUuid) return randomUuid;
+  return `upload-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function isDefinitiveCompletionFailure(error: unknown): boolean {
+  if (error instanceof UploadSessionExpiredError) return true;
+  if (error instanceof UploadSessionNotFoundError) return true;
+  if (error instanceof UploadSessionRequestError) {
+    return error.status >= 400
+      && error.status < 500
+      && error.status !== 408
+      && error.status !== 429;
+  }
+  return false;
+}
+
+async function completeWithReconciliation(
+  request: Parameters<typeof completeUploadSession>[0],
+): Promise<unknown> {
+  try {
+    return await completeUploadSession(request);
+  } catch (error) {
+    if (isDefinitiveCompletionFailure(error)) throw error;
+
+    try {
+      const status = await reconcileUploadCompletion(request.clientOperationId);
+      if (status.state === 'committed' && status.node) return status.node;
+    } catch (reconcileError) {
+      runtimeLogger.warn('upload completion reconciliation failed', reconcileError);
+    }
+    throw new UploadCommitUnknownError(request.uploadId, request.clientOperationId, error);
+  }
+}
+
 export async function runDirectUpload(input: DirectUploadInput): Promise<unknown> {
   const initResult = await initUploadSession({
     libraryId: input.libraryId,
@@ -50,6 +103,7 @@ export async function runDirectUpload(input: DirectUploadInput): Promise<unknown
   });
 
   const { uploadId, mode, partSize, totalParts } = initResult;
+  const clientOperationId = createCompletionOperationId();
 
   const partBytes = new Map<number, number>();
   let aborted = false;
@@ -154,8 +208,9 @@ export async function runDirectUpload(input: DirectUploadInput): Promise<unknown
       etag: collectedEtags.get(partNumber) ?? '',
     }));
 
-    const node = await completeUploadSession({
+    const node = await completeWithReconciliation({
       uploadId,
+      clientOperationId,
       parts: mode === 'single' ? [] : completeRequestParts,
       conflictPolicy: input.conflictPolicy,
     });
@@ -164,7 +219,7 @@ export async function runDirectUpload(input: DirectUploadInput): Promise<unknown
     return node;
   } catch (err) {
     cleanup();
-    if (!aborted) {
+    if (!aborted && !(err instanceof UploadCommitUnknownError)) {
       try {
         await abortUploadSession(uploadId);
       } catch (abortErr) {

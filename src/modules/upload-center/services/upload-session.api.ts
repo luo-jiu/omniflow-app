@@ -45,8 +45,16 @@ export interface UploadSessionPart {
 
 export interface CompleteUploadSessionRequest {
   uploadId: string;
+  clientOperationId: string;
   parts: Array<{ partNumber: number; etag: string }>;
   conflictPolicy?: 'error' | 'auto_rename' | 'replace';
+}
+
+export type UploadCompletionState = 'unknown' | 'uncommitted' | 'committed';
+
+export interface UploadCompletionStatusResult {
+  state: UploadCompletionState;
+  node?: unknown;
 }
 
 interface IpcHttpResponse<T = unknown> {
@@ -62,7 +70,7 @@ interface ApiEnvelope<T> {
   success?: boolean;
 }
 
-class UploadSessionExpiredError extends Error {
+export class UploadSessionExpiredError extends Error {
   constructor(message = 'upload session lease expired') {
     super(message);
     this.name = 'UploadSessionExpiredError';
@@ -76,7 +84,15 @@ export class UploadSessionNotFoundError extends Error {
   }
 }
 
-export const uploadSessionExpired = UploadSessionExpiredError;
+export class UploadSessionRequestError extends Error {
+  readonly status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = 'UploadSessionRequestError';
+    this.status = status;
+  }
+}
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null;
@@ -120,7 +136,7 @@ async function requestJson<T>(path: string, init: { method: string; body?: unkno
       reason: `upload session auth expired ${path}`,
       redirectToLogin: true,
     });
-    throw new Error(`登录状态已失效，请重新登录 (${path})`);
+    throw new UploadSessionRequestError(401, `登录状态已失效，请重新登录 (${path})`);
   }
   if (status === 404) {
     throw new UploadSessionNotFoundError(`upload session not found (${path})`);
@@ -134,7 +150,7 @@ async function requestJson<T>(path: string, init: { method: string; body?: unkno
   if (status >= 400) {
     const body = res?.body as unknown;
     const msg = isObject(body) ? String((body as ApiEnvelope<T>).message ?? '') : '';
-    throw new Error(`upload session HTTP ${status}: ${msg || path}`);
+    throw new UploadSessionRequestError(status, `upload session HTTP ${status}: ${msg || path}`);
   }
 
   return unwrapData<T>(res?.body);
@@ -174,6 +190,15 @@ export async function completeUploadSession(req: CompleteUploadSessionRequest): 
     method: 'POST',
     body: req,
   });
+}
+
+export async function reconcileUploadCompletion(
+  clientOperationId: string,
+): Promise<UploadCompletionStatusResult> {
+  return requestJson<UploadCompletionStatusResult>(
+    `/v1/upload/complete/status?clientOperationId=${encodeURIComponent(clientOperationId)}`,
+    { method: 'GET' },
+  );
 }
 
 export async function abortUploadSession(uploadId: string): Promise<void> {

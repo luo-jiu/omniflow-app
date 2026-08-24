@@ -2,7 +2,7 @@
 
 更新时间：2026-08-24
 
-状态：阶段 A 已实现并通过自动化门禁；阶段 B 至 E 尚未开始。
+状态：阶段 A 已实现并通过自动化门禁；阶段 B 的上传完成回执前置依赖已落地，prepare 主体尚未开始；阶段 C 至 E 尚未开始。
 
 适用范围：
 
@@ -386,7 +386,7 @@ type UploadCommitState = 'uncommitted' | 'commit_unknown' | 'committed';
 - `commit_unknown` 必须先使用 upload ID / idempotency identity 做服务端 reconciliation；仍无法确认时向用户报告“提交状态待确认”。
 - 服务端明确返回节点后才是 `committed`；后续刷新失败不得重复上传或本机保存。
 
-当前后端尚无可满足上述规则的 reconciliation 契约：complete 成功后会删除 upload session，complete 本身不保证幂等，也没有 completion receipt / status 查询。因此阶段 B 必须先在后端增加持久化 completion receipt 与 client operation ID，或等价的幂等完成及状态查询接口，并让查询结果明确区分 `uncommitted / committed(node) / unknown`。该契约落地前，前端遇到 `commit_unknown` 只能失败关闭并报告状态待确认，不能宣称已完成核对，也不能自动重传、abort 后重传或转存本机。
+上述后端前置契约已经落地：`upload_sessions` 保存稳定 `clientOperationId` 与 7 天 completion receipt，complete 可重放同一 node，`GET /api/v1/upload/complete/status` 明确返回 `unknown / uncommitted / committed(node)`。共享 Electron 上传层会在 complete 网络错误、`408 / 429 / 5xx` 后核对状态，恢复 committed node；仍不明确时抛出 `UploadCommitUnknownError` 并保留 session，不自动 abort。阶段 B 仍需在 Tool prepare/executor 上层把“complete 尚未发出”的失败与该错误统一投影为 `uncommitted / commit_unknown / committed`，本机兜底才能按冻结策略正式接入。
 
 系统 Save As 必须新增 Agent 专用能力，禁止扩权 Embedded Browser 的下载 IPC：
 
@@ -532,7 +532,7 @@ src/features/agent/
 - 目标选择和 renderer prepare 发生在审批前，由 main 生成不可变 prepared action 后再展示审批。
 - 冻结并显式传递物理 provider。
 - 新增 Agent 专用、owner-bound 的系统 Save As capability。
-- 先补齐后端上传 completion receipt / idempotency 与 reconciliation 契约，再让共享上传层区分 `uncommitted / commit_unknown / committed`；只有明确未 commit 时才允许本机兜底。
+- 上传 completion receipt / idempotency、status reconciliation 与共享上传层的安全保留行为已完成；继续在 Tool prepare/executor 层补齐 `uncommitted / commit_unknown / committed` 结构化投影，只有明确未 commit 时才允许本机兜底。
 
 ### 阶段 C：首条 Skill 验收与诊断（未开始）
 

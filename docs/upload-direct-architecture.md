@@ -1,6 +1,6 @@
 # 直传 MinIO 上传链路（前端视角）
 
-更新时间：2026-06-03
+更新时间：2026-08-24
 状态：已落地（与 `omniflow-go/docs/architecture/upload-direct-design.md` 配套）
 
 ## 1. 全链路一览
@@ -16,17 +16,21 @@ runDirectUpload (src/modules/upload-center/services/upload-direct.ts)
    ├─ for each batch (4 并发):
    │    ├─ signUploadParts (POST /api/v1/upload/parts/sign)   → presigned PUT URLs
    │    └─ electronAPI.uploadPresignedPut(...)                → MinIO 直传，main 进程出口
-   ├─ completeUploadSession(POST /api/v1/upload/complete)     → node
+   ├─ completeUploadSession(POST /api/v1/upload/complete)     → node / 不确定结果
+   ├─ reconcileUploadCompletion(GET /api/v1/upload/complete/status)
+   │                                                    → unknown / uncommitted / committed(node)
    └─ on error / cancel:
         ├─ electronAPI.uploadAbort(uploadId)                  ← 杀 in-flight part 请求
         └─ abortUploadSession(uploadId)                       (DELETE /api/v1/upload/:id)
+
+complete 一旦发出且结果不确定，不进入上述 abort 分支，保留 session 等待核对。
 ```
 
 ## 2. 关键文件
 
 | 文件 | 角色 |
 |---|---|
-| `src/modules/upload-center/services/upload-session.api.ts` | 6 个端点的 fetch 包装，统一 401/404/410 错误语义 |
+| `src/modules/upload-center/services/upload-session.api.ts` | 7 个端点的 fetch 包装，统一 401/404/410 与 reconciliation 语义 |
 | `src/modules/upload-center/services/upload-direct.ts` | `runDirectUpload` 共享流程：init → sign+PUT → complete + 心跳 + abort |
 | `src/utils/uploadManager.ts` | 薄 executor 适配器：把 `UploadTaskInput` 翻译成 `runDirectUpload` 入参 |
 | `src/features/file-explorer/services/file.api.ts::uploadLocalPathAndCreateNode` | 文本编辑器另存为 / 字幕保存等独立路径，**不进 UploadManager 队列**，直接调 `runDirectUpload` |
@@ -51,8 +55,18 @@ runDirectUpload (src/modules/upload-center/services/upload-direct.ts)
 - aborter 先调 `electronAPI.uploadAbort(uploadId)`：主进程把所有 in-flight part 请求 destroy（含 `fs.ReadStream` 和 `ClientRequest`）；
 - 然后调 `abortUploadSession(uploadId)`：后端 multipart 调 `AbortMultipartUpload`，single 模式 best-effort 删除已 PUT 对象，最后删 session 行。
 - 顺序：先杀网络请求再删后端 session，避免后端在 Abort 时还有 part 在写。
+- complete operation 已被后端认领时，abort 返回冲突且不会删除对象；committed 回执上的 abort 是安全 no-op。
 
-## 6. 嗅探 / 下载链路 0 改动不变量
+## 6. complete 幂等与结果核对
+
+- 每次 `runDirectUpload` 在 init 后生成稳定 `clientOperationId`，同一次 complete 与 status 查询复用该值。
+- complete 网络错误、`408 / 429 / 5xx` 时调用 `reconcileUploadCompletion`；状态为 `committed` 时直接恢复后端保存的 node。
+- status 为 `unknown / uncommitted` 或 status 查询本身失败时，抛出带 `uploadId / clientOperationId` 的 `UploadCommitUnknownError`，并禁止自动 abort。
+- `404 / 410` 与其他明确 `4xx` 是确定失败，仍走普通清理路径。
+- 后端 committed 回执保留 7 天；重复 complete 不会创建第二个 node。旧客户端未传 operation ID 时由后端按 upload ID 生成兼容身份。
+- 这层只保证共享上传不会在提交结果不确定时破坏会话。Agent 阶段 B 仍需在 prepare/executor 上层把调用结果投影为 `uncommitted / commit_unknown / committed`，才能决定本机兜底。
+
+## 7. 嗅探 / 下载链路 0 改动不变量
 
 `UploadTaskInput` 形状（`file`、`libraryId`、`parentId`、`relativePath`、可选 `storageProvider`）不变。任何调用 `uploadManager.createBatch([...])` 的入口都不感知底层链路切换。
 
@@ -64,13 +78,13 @@ runDirectUpload (src/modules/upload-center/services/upload-direct.ts)
 - `src/features/auto-import/runner.ts:61`
 - `src/features/file-explorer/hooks/useDirectoryUpload.ts:144`
 
-## 7. 文本另存为 / 字幕保存的特例
+## 8. 文本另存为 / 字幕保存的特例
 
 文本编辑器“另存为”和字幕保存通过 `uploadLocalPathAndCreateNode` 走直传，但**不进 UploadManager 队列**，避免在上传中心 UI 出现“1 个文件正在上传”的体验干扰。它们直接调 `runDirectUpload`，不发 `UploadManagerEvent`。
 
 `conflictPolicy='auto_rename'` 在 `runDirectUpload({ conflictPolicy })` 中透传到 `complete` 阶段。
 
-## 8. 已删除的旧前端链路
+## 9. 已删除的旧前端链路
 
 | 删除 | 替代 |
 |---|---|
