@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 
 import type {
   AgentToolExecutionContext,
+  AgentToolKind,
   AgentToolRegistrySnapshot,
   AgentToolSnapshot,
   AgentToolValidation,
@@ -19,11 +20,7 @@ import type { AgentToolResult } from '@/shared/agent/agent.types';
  * Tool classification is part of the built-in Tool registration contract.
  * The registry owns the value; a Run snapshot only consumes it.
  */
-export type AgentRunCapabilityToolKind = 'business' | 'control';
-
-type ToolWithKind = AgentToolSnapshot & {
-  readonly kind?: AgentRunCapabilityToolKind;
-};
+export type AgentRunCapabilityToolKind = AgentToolKind;
 
 const SNAPSHOT_VERSION = 1;
 const INVISIBLE_TOOL_MESSAGE = 'Agent Tool 当前未被 Run capability snapshot 暴露';
@@ -34,10 +31,7 @@ function normalizeId(value: unknown): string {
 }
 
 function toolKind(tool: AgentToolSnapshot): AgentRunCapabilityToolKind {
-  // `kind` is validated and frozen by AgentToolRegistry.  Keeping the
-  // defensive fallback here makes snapshots compatible with old registries
-  // while preserving the safe default: an unclassified Tool is business.
-  return (tool as ToolWithKind).kind === 'control' ? 'control' : 'business';
+  return tool.kind;
 }
 
 function stableSerialize(value: unknown): string {
