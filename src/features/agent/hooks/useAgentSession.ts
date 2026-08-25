@@ -6,16 +6,19 @@ import type {
   AgentInteractionResponse,
   AgentMessage,
   AgentOwnerScope,
+  AgentPreparedActionPublic,
   AgentReasoningEffort,
   AgentRunSnapshot,
   AgentToolActivitySnapshot,
   AgentToolApprovalSnapshot,
   AgentToolExecutionRequest,
+  AgentToolPrepareRequest,
 } from '@/shared/agent/agent.types';
 import { serializeAgentOwnerScope } from '@/shared/agent/agent-owner-scope';
 import {
   getAgentSession,
   completeAgentToolExecution,
+  completeAgentToolPreparation,
   markAgentToolExecutionCommitted,
   resolveAgentToolApproval,
   submitAgentInteraction,
@@ -25,6 +28,7 @@ import {
 } from '../services/agent.api';
 import { readAgentPerception } from '../services/agent-context.api';
 import { executeAgentRendererTool } from '../services/agent-tool-executor';
+import { prepareAgentRendererTool } from '../services/agent-tool-preparer';
 import {
   appendBufferedAgentEvent,
   reconcileCanonicalAgentRunMessages,
@@ -114,6 +118,11 @@ export function useAgentSession({
   const mountedRef = React.useRef(true);
   const approvalsInFlightRef = React.useRef<Set<string>>(new Set());
   const interactionsInFlightRef = React.useRef<Set<string>>(new Set());
+  const rendererPreparationsInFlightRef = React.useRef<Map<string, {
+    controller: AbortController;
+    runId: string;
+    sessionId: string;
+  }>>(new Map());
   const rendererExecutionsInFlightRef = React.useRef<Map<string, {
     committed: boolean;
     controller: AbortController;
@@ -182,6 +191,46 @@ export function useAgentSession({
       }
     }
   }, [onRefreshDirectory]);
+
+  const prepareRendererRequest = React.useCallback(async (
+    request: AgentToolPrepareRequest,
+  ) => {
+    if (rendererPreparationsInFlightRef.current.has(request.prepareId)) return;
+    const controller = new AbortController();
+    rendererPreparationsInFlightRef.current.set(request.prepareId, {
+      controller,
+      runId: request.runId,
+      sessionId: request.sessionId,
+    });
+    try {
+      const result = await prepareAgentRendererTool(request, { signal: controller.signal });
+      if (controller.signal.aborted) return;
+      await completeAgentToolPreparation({
+        callId: request.callId,
+        inputHash: request.inputHash,
+        libraryId: Number(request.appContext.libraryId),
+        ownerScope: request.ownerScope,
+        prepareId: request.prepareId,
+        result,
+        runId: request.runId,
+        sessionId: request.sessionId,
+        toolRunId: request.toolRunId,
+      });
+    } catch (preparationError) {
+      const cancelled = controller.signal.aborted
+        || (preparationError instanceof Error && preparationError.name === 'AbortError');
+      if (mountedRef.current && !cancelled) {
+        setError(preparationError instanceof Error
+          ? preparationError.message
+          : 'Agent Tool 准备失败');
+      }
+    } finally {
+      const active = rendererPreparationsInFlightRef.current.get(request.prepareId);
+      if (active?.controller === controller) {
+        rendererPreparationsInFlightRef.current.delete(request.prepareId);
+      }
+    }
+  }, []);
 
   const applyEvent = React.useCallback((event: AgentChatStreamEvent) => {
     if (event.type === 'started') {
@@ -268,6 +317,14 @@ export function useAgentSession({
       });
       return;
     }
+    if (event.type === 'tool-prepare-requested') {
+      void prepareRendererRequest(event.preparation);
+      return;
+    }
+    if (event.type === 'tool-prepare-cancelled') {
+      rendererPreparationsInFlightRef.current.get(event.prepareId)?.controller.abort();
+      return;
+    }
     if (event.type === 'tool-execution-requested') {
       void executeRendererRequest(event.execution);
       return;
@@ -342,6 +399,9 @@ export function useAgentSession({
       return;
     }
     if (event.type === 'completed' || event.type === 'cancelled' || event.type === 'error') {
+      rendererPreparationsInFlightRef.current.forEach((preparation) => {
+        if (preparation.runId === event.runId) preparation.controller.abort();
+      });
       rendererExecutionsInFlightRef.current.forEach((execution) => {
         if (execution.runId === event.runId) execution.controller.abort();
       });
@@ -409,12 +469,13 @@ export function useAgentSession({
       onSessionChanged?.(event.sessionId);
       return;
     }
-  }, [executeRendererRequest, onSessionChanged]);
+  }, [executeRendererRequest, onSessionChanged, prepareRendererRequest]);
 
   React.useEffect(() => {
     const pendingEvents = pendingEventsRef.current;
     const approvalsInFlight = approvalsInFlightRef.current;
     const interactionsInFlight = interactionsInFlightRef.current;
+    const rendererPreparationsInFlight = rendererPreparationsInFlightRef.current;
     const rendererExecutionsInFlight = rendererExecutionsInFlightRef.current;
     mountedRef.current = true;
     return () => {
@@ -425,6 +486,8 @@ export function useAgentSession({
       pendingEvents.clear();
       approvalsInFlight.clear();
       interactionsInFlight.clear();
+      rendererPreparationsInFlight.forEach(preparation => preparation.controller.abort());
+      rendererPreparationsInFlight.clear();
       const sessionsToStop = new Set<string>();
       rendererExecutionsInFlight.forEach((execution) => {
         if (execution.committed) {
@@ -464,6 +527,8 @@ export function useAgentSession({
     acceptPendingEventsRef.current = false;
     restoringSessionIdRef.current = null;
     pendingEventsRef.current.clear();
+    rendererPreparationsInFlightRef.current.forEach(preparation => preparation.controller.abort());
+    rendererPreparationsInFlightRef.current.clear();
     const sessionsToStop = new Set<string>();
     rendererExecutionsInFlightRef.current.forEach((execution) => {
       if (execution.committed) {
@@ -546,6 +611,7 @@ export function useAgentSession({
       setDraft('');
       streamMessageIdRef.current = null;
       const running = snapshot.lastRunStatus === 'running'
+        || snapshot.lastRunStatus === 'preparing'
         || snapshot.lastRunStatus === 'awaiting_approval'
         || snapshot.lastRunStatus === 'awaiting_interaction';
       setIsStreaming(running);
@@ -696,6 +762,9 @@ export function useAgentSession({
     const currentSessionId = sessionIdRef.current;
     if (!currentSessionId || !isStreaming) return;
     let deferStopUntilCommitReceipt = false;
+    rendererPreparationsInFlightRef.current.forEach((preparation) => {
+      if (preparation.sessionId === currentSessionId) preparation.controller.abort();
+    });
     rendererExecutionsInFlightRef.current.forEach((execution) => {
       if (execution.sessionId !== currentSessionId) return;
       if (execution.committed) {
@@ -712,6 +781,7 @@ export function useAgentSession({
   const resolveApproval = React.useCallback(async (
     approval: AgentToolApprovalSnapshot,
     approved: boolean,
+    preparedAction?: AgentPreparedActionPublic,
   ) => {
     const libraryId = Number(appContext.libraryId);
     if (
@@ -730,6 +800,12 @@ export function useAgentSession({
         approved,
         libraryId,
         ownerScope,
+        ...(approval.preparation
+          ? {
+              preparedAction: preparedAction || approval.preparation.action,
+              preparedActionId: approval.preparation.preparedActionId,
+            }
+          : {}),
         runId: approval.runId,
         sessionId: approval.sessionId,
       });
@@ -812,6 +888,8 @@ export function useAgentSession({
     preparationTokenRef.current += 1;
     acceptPendingEventsRef.current = false;
     pendingEventsRef.current.clear();
+    rendererPreparationsInFlightRef.current.forEach(preparation => preparation.controller.abort());
+    rendererPreparationsInFlightRef.current.clear();
     rendererExecutionsInFlightRef.current.forEach(execution => execution.controller.abort());
     rendererExecutionsInFlightRef.current.clear();
     restoringSessionIdRef.current = null;

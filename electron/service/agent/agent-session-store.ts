@@ -10,6 +10,7 @@ import type {
   AgentInteractionStatus,
   AgentMessage,
   AgentOwnerScope,
+  AgentPreparedActionPublic,
   AgentReasoningEffort,
   AgentRunPlanSnapshot,
   AgentRunSnapshot,
@@ -25,6 +26,7 @@ import type {
   AgentToolProgress,
 } from '@/shared/agent/agent.types';
 import { normalizeAgentOwnerScope } from '../../../src/shared/agent/agent-owner-scope';
+import { normalizeAgentPreparedActionPublic } from '../../../src/shared/agent/agent-prepared-action';
 import {
   normalizeAgentInteractionRequest,
   normalizeAgentInteractionResponse,
@@ -66,6 +68,12 @@ const TOOL_INTERACTION_COLUMNS = [
   ['interaction_status', 'TEXT'],
   ['interaction_response_json', 'TEXT'],
   ['interaction_decided_at', 'TEXT'],
+] as const;
+
+const TOOL_PREPARATION_COLUMNS = [
+  ['prepared_action_id', 'TEXT'],
+  ['prepared_action_json', 'TEXT'],
+  ['prepared_snapshot_hash', 'TEXT'],
 ] as const;
 
 const TOOL_RUNTIME_COLUMNS = [
@@ -181,6 +189,9 @@ interface ToolActivityRow {
   ordinal: number;
   permission_behavior: AgentToolActivitySnapshot['permissionBehavior'];
   plan_step_id: string | null;
+  prepared_action_id: string | null;
+  prepared_action_json: string | null;
+  prepared_snapshot_hash: string | null;
   progress_json: string | null;
   progress_updated_at: string | null;
   revision: number;
@@ -250,9 +261,29 @@ export interface CreateAgentToolRunInput {
   now: string;
   permissionBehavior: 'allow' | 'ask' | 'deny';
   runId: string;
-  status: 'awaiting_approval' | 'running';
+  status: 'preparing' | 'awaiting_approval' | 'running';
   toolKind?: AgentToolKind;
   toolName: string;
+}
+
+export interface CompleteAgentToolPreparationInput {
+  action: AgentPreparedActionPublic;
+  approvalId: string;
+  approvalInputHash: string;
+  approvalPreview: AgentActionPreview;
+  id: string;
+  permissionBehavior: 'allow' | 'ask';
+  preparedActionId: string;
+  snapshotHash: string;
+}
+
+export interface ResolveAgentToolApprovalPreparation {
+  action: AgentPreparedActionPublic;
+  approvalInputHash: string;
+  approvalPreview: AgentActionPreview;
+  expectedPreparedActionId: string;
+  preparedActionId: string;
+  snapshotHash: string;
 }
 
 export type AgentContextCheckpointStatus =
@@ -309,6 +340,9 @@ export interface AgentSessionStore {
     now: string,
     status?: Extract<AgentToolActivityStatus, 'cancelled' | 'completed' | 'failed'>,
   ) => Promise<AgentToolActivitySnapshot>;
+  completeToolPreparation: (
+    input: CompleteAgentToolPreparationInput,
+  ) => Promise<AgentToolActivitySnapshot>;
   createRun: (input: CreateAgentRunInput) => Promise<AgentRunSnapshot>;
   createSession: (input: CreateAgentSessionInput) => Promise<AgentSessionSnapshot>;
   createToolInteraction: (
@@ -355,6 +389,7 @@ export interface AgentSessionStore {
     approvalId: string,
     resolution: 'approved' | 'denied' | 'expired' | 'cancelled',
     now: string,
+    preparation?: ResolveAgentToolApprovalPreparation,
   ) => Promise<AgentToolActivitySnapshot>;
   resolveToolInteraction: (
     interactionId: string,
@@ -611,8 +646,27 @@ function restoreToolInteraction(
   }
 }
 
+function restoreToolPreparation(
+  row: ToolActivityRow,
+): AgentToolActivitySnapshot['preparation'] | undefined {
+  if (!row.prepared_action_id || !row.prepared_action_json || !row.prepared_snapshot_hash) {
+    return undefined;
+  }
+  if (!/^[a-f0-9]{64}$/u.test(row.prepared_snapshot_hash)) return undefined;
+  try {
+    return {
+      action: normalizeAgentPreparedActionPublic(JSON.parse(row.prepared_action_json)),
+      preparedActionId: row.prepared_action_id,
+      snapshotHash: row.prepared_snapshot_hash,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
 function toToolActivity(row: ToolActivityRow): AgentToolActivitySnapshot {
   const interaction = restoreToolInteraction(row);
+  const preparation = restoreToolPreparation(row);
   return {
     ...(row.approval_id && row.approval_preview_json && row.approval_status
       ? {
@@ -640,6 +694,7 @@ function toToolActivity(row: ToolActivityRow): AgentToolActivitySnapshot {
     ordinal: Number(row.ordinal),
     permissionBehavior: row.permission_behavior,
     ...(row.plan_step_id ? { planStepId: row.plan_step_id } : {}),
+    ...(preparation ? { preparation } : {}),
     ...(row.progress_json
       ? { progress: parseStoredJson<AgentToolProgress>(row.progress_json, { message: '' }) }
       : {}),
@@ -744,6 +799,7 @@ async function ensureToolRunColumns(database: sqlite3.Database): Promise<void> {
     ...TOOL_APPROVAL_COLUMNS,
     ...TOOL_PROGRESS_COLUMNS,
     ...TOOL_INTERACTION_COLUMNS,
+    ...TOOL_PREPARATION_COLUMNS,
     ...TOOL_RUNTIME_COLUMNS,
   ]) {
     if (!existingColumns.has(name)) {
@@ -778,6 +834,82 @@ async function ensureToolRunColumns(database: sqlite3.Database): Promise<void> {
     CREATE UNIQUE INDEX IF NOT EXISTS agent_tool_runs_run_plan_step_idx
       ON agent_tool_runs (run_id, plan_step_id)
       WHERE plan_step_id IS NOT NULL;
+  `);
+}
+
+async function ensureToolPreparationTriggers(database: sqlite3.Database): Promise<void> {
+  const validation = `
+    SELECT CASE WHEN
+      (NEW.prepared_action_id IS NULL) <> (NEW.prepared_action_json IS NULL)
+      OR (NEW.prepared_action_id IS NULL) <> (NEW.prepared_snapshot_hash IS NULL)
+    THEN RAISE(ABORT, 'Agent Tool preparation fields must be set atomically') END;
+    SELECT CASE WHEN NEW.prepared_action_id IS NOT NULL AND (
+      trim(NEW.prepared_action_id) = ''
+      OR length(NEW.prepared_action_id) > 200
+      OR length(NEW.prepared_snapshot_hash) <> 64
+      OR lower(NEW.prepared_snapshot_hash) GLOB '*[^0-9a-f]*'
+      OR json_valid(NEW.prepared_action_json) <> 1
+    ) THEN RAISE(ABORT, 'Agent Tool preparation identity is invalid') END;
+    SELECT CASE WHEN NEW.prepared_action_json IS NOT NULL
+      AND json_valid(NEW.prepared_action_json) = 1
+      AND (
+        json_type(NEW.prepared_action_json) <> 'object'
+        OR COALESCE(json_type(NEW.prepared_action_json, '$.libraryId'), '') <> 'integer'
+        OR CAST(json_extract(NEW.prepared_action_json, '$.libraryId') AS INTEGER) <= 0
+        OR COALESCE(json_type(NEW.prepared_action_json, '$.sourceNodeId'), '') <> 'integer'
+        OR CAST(json_extract(NEW.prepared_action_json, '$.sourceNodeId') AS INTEGER) <= 0
+        OR COALESCE(json_type(NEW.prepared_action_json, '$.destination'), '') <> 'text'
+        OR json_extract(NEW.prepared_action_json, '$.destination') NOT IN ('library', 'local')
+        OR COALESCE(json_type(NEW.prepared_action_json, '$.fallbackPolicy'), '') <> 'text'
+        OR json_extract(NEW.prepared_action_json, '$.fallbackPolicy') NOT IN ('prompt_local', 'none')
+        OR (
+          json_extract(NEW.prepared_action_json, '$.destination') = 'local'
+          AND json_extract(NEW.prepared_action_json, '$.fallbackPolicy') <> 'none'
+        )
+        OR COALESCE(json_type(NEW.prepared_action_json, '$.conflictPolicy'), '') <> 'text'
+        OR json_extract(NEW.prepared_action_json, '$.conflictPolicy')
+          NOT IN ('auto_rename', 'error', 'replace')
+        OR COALESCE(json_type(NEW.prepared_action_json, '$.outputFileName'), '') <> 'text'
+        OR trim(json_extract(NEW.prepared_action_json, '$.outputFileName')) = ''
+        OR length(json_extract(NEW.prepared_action_json, '$.outputFileName')) > 255
+        OR COALESCE(json_type(NEW.prepared_action_json, '$.outputFormat'), '') <> 'text'
+        OR trim(json_extract(NEW.prepared_action_json, '$.outputFormat')) = ''
+        OR length(json_extract(NEW.prepared_action_json, '$.outputFormat')) > 32
+        OR COALESCE(json_type(NEW.prepared_action_json, '$.targetLabel'), '') <> 'text'
+        OR trim(json_extract(NEW.prepared_action_json, '$.targetLabel')) = ''
+        OR length(json_extract(NEW.prepared_action_json, '$.targetLabel')) > 500
+        OR (
+          json_extract(NEW.prepared_action_json, '$.destination') = 'library'
+          AND (
+            COALESCE(json_type(NEW.prepared_action_json, '$.parentId'), '') <> 'integer'
+            OR CAST(json_extract(NEW.prepared_action_json, '$.parentId') AS INTEGER) <= 0
+          )
+        )
+        OR EXISTS (
+          SELECT 1
+          FROM json_each(NEW.prepared_action_json) AS field
+          WHERE field.key NOT IN (
+            'conflictPolicy', 'destination', 'fallbackPolicy', 'libraryId',
+            'outputFileName', 'outputFormat', 'parentId', 'sourceNodeId', 'targetLabel'
+          )
+        )
+      )
+    THEN RAISE(ABORT, 'Agent Tool prepared action is invalid') END;
+  `;
+  await exec(database, `
+    DROP TRIGGER IF EXISTS agent_tool_runs_validate_preparation_insert;
+    DROP TRIGGER IF EXISTS agent_tool_runs_validate_preparation_update;
+    CREATE TRIGGER agent_tool_runs_validate_preparation_insert
+    BEFORE INSERT ON agent_tool_runs
+    BEGIN
+      ${validation}
+    END;
+    CREATE TRIGGER agent_tool_runs_validate_preparation_update
+    BEFORE UPDATE OF prepared_action_id, prepared_action_json, prepared_snapshot_hash
+    ON agent_tool_runs
+    BEGIN
+      ${validation}
+    END;
   `);
 }
 
@@ -926,7 +1058,7 @@ async function ensureRunPlanTriggers(database: sqlite3.Database): Promise<void> 
       SELECT CASE
         WHEN NEW.plan_json IS NULL
           OR OLD.plan_json IS NOT NULL
-          OR OLD.status NOT IN ('running', 'awaiting_approval', 'awaiting_interaction')
+          OR OLD.status NOT IN ('preparing', 'running', 'awaiting_approval', 'awaiting_interaction')
           OR EXISTS (
             SELECT 1
             FROM agent_tool_runs
@@ -945,7 +1077,7 @@ async function ensureRunPlanTriggers(database: sqlite3.Database): Promise<void> 
       SELECT 1
       FROM agent_runs
       WHERE id = NEW.run_id
-        AND status IN ('running', 'awaiting_approval', 'awaiting_interaction')
+        AND status IN ('preparing', 'running', 'awaiting_approval', 'awaiting_interaction')
     )
       AND NEW.ordinal <> COALESCE((
         SELECT MAX(existing.ordinal)
@@ -1043,7 +1175,7 @@ async function ensureRunFinalizationTriggers(database: sqlite3.Database): Promis
       SELECT 1
       FROM agent_runs
       WHERE id = NEW.run_id
-        AND status IN ('running', 'awaiting_approval', 'awaiting_interaction')
+        AND status IN ('preparing', 'running', 'awaiting_approval', 'awaiting_interaction')
     )
     BEGIN
       SELECT RAISE(ABORT, 'Agent Tool requires an active Run');
@@ -1051,12 +1183,12 @@ async function ensureRunFinalizationTriggers(database: sqlite3.Database): Promis
 
     CREATE TRIGGER agent_tool_runs_require_active_run_on_reactivation
     BEFORE UPDATE OF status ON agent_tool_runs
-    WHEN NEW.status IN ('running', 'awaiting_approval', 'awaiting_interaction')
+    WHEN NEW.status IN ('preparing', 'running', 'awaiting_approval', 'awaiting_interaction')
       AND NOT EXISTS (
         SELECT 1
         FROM agent_runs
         WHERE id = NEW.run_id
-          AND status IN ('running', 'awaiting_approval', 'awaiting_interaction')
+          AND status IN ('preparing', 'running', 'awaiting_approval', 'awaiting_interaction')
       )
     BEGIN
       SELECT RAISE(ABORT, 'Agent Tool requires an active Run');
@@ -1069,7 +1201,7 @@ async function ensureRunFinalizationTriggers(database: sqlite3.Database): Promis
         SELECT 1
         FROM agent_tool_runs
         WHERE run_id = NEW.id
-          AND status IN ('running', 'awaiting_approval', 'awaiting_interaction')
+          AND status IN ('preparing', 'running', 'awaiting_approval', 'awaiting_interaction')
       )
     BEGIN
       SELECT RAISE(ABORT, 'Agent Run still has unfinished Tool');
@@ -1109,7 +1241,7 @@ async function ensureRunFinalizationTriggers(database: sqlite3.Database): Promis
         revision = revision + 1,
         finished_at = NEW.updated_at
       WHERE run_id = NEW.id
-        AND status IN ('running', 'awaiting_approval', 'awaiting_interaction');
+        AND status IN ('preparing', 'running', 'awaiting_approval', 'awaiting_interaction');
     END;
     COMMIT;
   `);
@@ -1398,6 +1530,9 @@ async function initializeDatabase(database: sqlite3.Database): Promise<void> {
         approval_decided_at TEXT,
         progress_json TEXT,
         progress_updated_at TEXT,
+        prepared_action_id TEXT,
+        prepared_action_json TEXT,
+        prepared_snapshot_hash TEXT,
         interaction_id TEXT,
         interaction_request_json TEXT,
         interaction_status TEXT,
@@ -1481,6 +1616,7 @@ async function initializeDatabase(database: sqlite3.Database): Promise<void> {
 
   await ensureRunColumns(database);
   await ensureToolRunColumns(database);
+  await ensureToolPreparationTriggers(database);
   await ensureRunPlanTriggers(database);
   await ensureRunFinalizationTriggers(database);
   await ensureContextCheckpointSchema(database);
@@ -1500,7 +1636,7 @@ async function initializeDatabase(database: sqlite3.Database): Promise<void> {
       revision = revision + 1,
       updated_at = ?,
       finished_at = ?
-    WHERE status IN ('running', 'awaiting_approval', 'awaiting_interaction')
+    WHERE status IN ('preparing', 'running', 'awaiting_approval', 'awaiting_interaction')
   `, [recoveredAt, recoveredAt]);
   await run(database, `
     UPDATE agent_tool_runs
@@ -1525,7 +1661,7 @@ async function initializeDatabase(database: sqlite3.Database): Promise<void> {
       END,
       revision = revision + 1,
       finished_at = ?
-    WHERE status IN ('running', 'awaiting_approval', 'awaiting_interaction')
+    WHERE status IN ('preparing', 'running', 'awaiting_approval', 'awaiting_interaction')
   `, [
     JSON.stringify({ message: '应用退出时 Agent Tool 仍在运行', ok: false }),
     recoveredAt,
@@ -1613,6 +1749,9 @@ export async function createSQLiteAgentSessionStore(
         tools.approval_decided_at,
         tools.progress_json,
         tools.progress_updated_at,
+        tools.prepared_action_id,
+        tools.prepared_action_json,
+        tools.prepared_snapshot_hash,
         tools.interaction_id,
         tools.interaction_request_json,
         tools.interaction_status,
@@ -1811,7 +1950,7 @@ export async function createSQLiteAgentSessionStore(
           finished_at = ?
         WHERE id = ?
           AND (
-            status IN ('running', 'awaiting_approval', 'awaiting_interaction')
+            status IN ('preparing', 'running', 'awaiting_approval', 'awaiting_interaction')
             OR (status = ? AND result_json IS NULL)
           )
       `, [
@@ -1827,6 +1966,41 @@ export async function createSQLiteAgentSessionStore(
       ]);
       if (update.changes === 0) throw new Error('Agent Tool 运行记录不存在或已经结束');
       return readToolActivity(id);
+    },
+
+    async completeToolPreparation(input) {
+      const awaitingApproval = input.permissionBehavior === 'ask';
+      const result = await run(database, `
+        UPDATE agent_tool_runs
+        SET
+          permission_behavior = ?,
+          prepared_action_id = ?,
+          prepared_action_json = ?,
+          prepared_snapshot_hash = ?,
+          approval_id = ?,
+          approval_input_hash = ?,
+          approval_preview_json = ?,
+          approval_status = ?,
+          revision = revision + 1,
+          status = ?
+        WHERE id = ?
+          AND status = 'preparing'
+          AND prepared_action_id IS NULL
+          AND approval_id IS NULL
+      `, [
+        input.permissionBehavior,
+        input.preparedActionId,
+        JSON.stringify(input.action),
+        input.snapshotHash,
+        awaitingApproval ? input.approvalId : null,
+        input.approvalInputHash,
+        JSON.stringify(input.approvalPreview),
+        awaitingApproval ? 'pending' : null,
+        awaitingApproval ? 'awaiting_approval' : 'running',
+        input.id,
+      ]);
+      if (result.changes === 0) throw new Error('Agent Tool 准备结果无法提交');
+      return readToolActivity(input.id);
     },
 
     async createRun(input) {
@@ -2053,6 +2227,9 @@ export async function createSQLiteAgentSessionStore(
           tools.approval_decided_at,
           tools.progress_json,
           tools.progress_updated_at,
+          tools.prepared_action_id,
+          tools.prepared_action_json,
+          tools.prepared_snapshot_hash,
           tools.interaction_id,
           tools.interaction_request_json,
           tools.interaction_status,
@@ -2204,7 +2381,7 @@ export async function createSQLiteAgentSessionStore(
           updated_at = ?
         WHERE id = ?
           AND plan_json IS NULL
-          AND status IN ('running', 'awaiting_approval', 'awaiting_interaction')
+          AND status IN ('preparing', 'running', 'awaiting_approval', 'awaiting_interaction')
           AND NOT EXISTS (
             SELECT 1
             FROM agent_tool_runs
@@ -2218,9 +2395,39 @@ export async function createSQLiteAgentSessionStore(
       return readRun(runId);
     },
 
-    async resolveToolApproval(approvalId, resolution, now) {
+    async resolveToolApproval(approvalId, resolution, now, preparation) {
       const approved = resolution === 'approved';
-      const result = await run(database, `
+      if (preparation && !approved) {
+        throw new Error('只有批准操作可以更新 prepared action');
+      }
+      const result = preparation
+        ? await run(database, `
+          UPDATE agent_tool_runs
+          SET
+            prepared_action_id = ?,
+            prepared_action_json = ?,
+            prepared_snapshot_hash = ?,
+            approval_input_hash = ?,
+            approval_preview_json = ?,
+            approval_status = 'approved',
+            approval_decided_at = ?,
+            revision = revision + 1,
+            status = 'running'
+          WHERE approval_id = ?
+            AND status = 'awaiting_approval'
+            AND approval_status = 'pending'
+            AND prepared_action_id = ?
+        `, [
+          preparation.preparedActionId,
+          JSON.stringify(preparation.action),
+          preparation.snapshotHash,
+          preparation.approvalInputHash,
+          JSON.stringify(preparation.approvalPreview),
+          now,
+          approvalId,
+          preparation.expectedPreparedActionId,
+        ])
+        : await run(database, `
         UPDATE agent_tool_runs
         SET
           approval_status = ?,
@@ -2283,7 +2490,7 @@ export async function createSQLiteAgentSessionStore(
           progress_updated_at = ?,
           revision = revision + 1
         WHERE id = ?
-          AND status IN ('running', 'awaiting_approval')
+          AND status IN ('preparing', 'running', 'awaiting_approval')
       `, [JSON.stringify(progress), updatedAt, id]);
       if (result.changes === 0) throw new Error('Agent Tool 运行记录不存在或已经结束');
       return readToolActivity(id);

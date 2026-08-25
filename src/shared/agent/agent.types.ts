@@ -5,6 +5,7 @@ export type AgentToolRisk = 'read' | 'write' | 'destructive' | 'external';
 export type AgentToolPermissionBehavior = 'allow' | 'ask' | 'deny';
 
 export type AgentToolActivityStatus =
+  | 'preparing'
   | 'awaiting_approval'
   | 'awaiting_interaction'
   | 'running'
@@ -24,6 +25,7 @@ export type AgentToolApprovalStatus =
 export type AgentReasoningEffort = 'auto' | 'low' | 'medium' | 'high';
 
 export type AgentRunStatus =
+  | 'preparing'
   | 'awaiting_approval'
   | 'awaiting_interaction'
   | 'running'
@@ -198,9 +200,32 @@ export interface AgentActionPreview {
   title: string;
 }
 
+export type AgentPreparedDestination = 'library' | 'local';
+
+export type AgentPreparedFallbackPolicy = 'prompt_local' | 'none';
+
+export interface AgentPreparedActionPublic {
+  conflictPolicy: 'auto_rename' | 'error' | 'replace';
+  destination: AgentPreparedDestination;
+  fallbackPolicy: AgentPreparedFallbackPolicy;
+  libraryId: number;
+  outputFileName: string;
+  outputFormat: string;
+  parentId?: number;
+  sourceNodeId: number;
+  targetLabel: string;
+}
+
+export interface AgentToolPreparationSnapshot {
+  action: AgentPreparedActionPublic;
+  preparedActionId: string;
+  snapshotHash: string;
+}
+
 export interface AgentToolApprovalSnapshot {
   approvalId: string;
   call: AgentToolCallSnapshot;
+  preparation?: AgentToolPreparationSnapshot;
   preview: AgentActionPreview;
   runId: string;
   sessionId: string;
@@ -282,6 +307,7 @@ export interface AgentToolActivitySnapshot {
   ordinal: number;
   permissionBehavior: AgentToolPermissionBehavior;
   planStepId?: string;
+  preparation?: AgentToolPreparationSnapshot;
   progress?: AgentToolProgress;
   progressUpdatedAt?: string;
   revision: number;
@@ -310,8 +336,35 @@ export interface AgentToolApprovalDecisionRequest {
   approved: boolean;
   libraryId: number;
   ownerScope: AgentOwnerScope;
+  preparedAction?: AgentPreparedActionPublic;
+  preparedActionId?: string;
   runId: string;
   sessionId: string;
+}
+
+export interface AgentToolPrepareRequest {
+  appContext: AgentAppContext;
+  callId: string;
+  input: unknown;
+  inputHash: string;
+  ownerScope: AgentOwnerScope;
+  prepareId: string;
+  runId: string;
+  sessionId: string;
+  toolRunId: string;
+  toolName: string;
+}
+
+export interface AgentToolPrepareCompletion {
+  callId: string;
+  inputHash: string;
+  libraryId: number;
+  ownerScope: AgentOwnerScope;
+  prepareId: string;
+  result: unknown;
+  runId: string;
+  sessionId: string;
+  toolRunId: string;
 }
 
 export interface AgentToolExecutionRequest {
@@ -367,6 +420,23 @@ export interface AgentMediaArtifactReleaseRequest {
   sessionId: string;
 }
 
+export interface AgentMediaArtifactSaveRequest {
+  artifactId: string;
+  defaultFileName: string;
+  executionId: string;
+  libraryId: number;
+  ownerScope: AgentOwnerScope;
+  preparedActionId: string;
+  purpose: 'destination' | 'upload_fallback';
+  runId: string;
+  sessionId: string;
+  snapshotHash: string;
+}
+
+export type AgentMediaArtifactSaveResult =
+  | { canceled: true }
+  | { canceled: false; fileName: string };
+
 export type AgentToolApprovalDecisionResult =
   | { approved: false }
   | { approved: true; execution?: AgentToolExecutionRequest };
@@ -417,6 +487,18 @@ export type AgentChatStreamEvent =
       runId: string;
       sessionId: string;
       type: 'tool-progress';
+    }
+  | {
+      preparation: AgentToolPrepareRequest;
+      runId: string;
+      sessionId: string;
+      type: 'tool-prepare-requested';
+    }
+  | {
+      prepareId: string;
+      runId: string;
+      sessionId: string;
+      type: 'tool-prepare-cancelled';
     }
   | {
       execution: AgentToolExecutionRequest;

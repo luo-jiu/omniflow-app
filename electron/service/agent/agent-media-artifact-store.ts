@@ -181,6 +181,19 @@ export function createAgentMediaArtifactStore(
     return true;
   }
 
+  function getOwned(
+    artifactId: string,
+    owner: AgentMediaArtifactOwner,
+  ): AgentMediaArtifact {
+    const record = records.get(String(artifactId || '').trim());
+    if (!record) throw new Error('Agent 媒体临时产物不存在或已经失效');
+    if (!sameOwner(record, owner)) {
+      throw new Error('当前窗口无权读取该 Agent 媒体临时产物');
+    }
+    record.createdAt = now();
+    return { ...record };
+  }
+
   function touchExecution(owner: AgentMediaArtifactOwner): boolean {
     const record = Array.from(records.values()).find(candidate => sameOwner(candidate, owner));
     if (!record) return false;
@@ -203,6 +216,7 @@ export function createAgentMediaArtifactStore(
   return {
     create,
     finalize,
+    getOwned,
     release,
     releaseOwner,
     releaseRun,

@@ -26,6 +26,8 @@ import type {
   AgentInteractionSubmissionRequest,
   AgentInteractionSubmissionResult,
   AgentMediaArtifactReleaseRequest,
+  AgentMediaArtifactSaveRequest,
+  AgentMediaArtifactSaveResult,
   AgentMediaAudioExtractionRequest,
   AgentMediaAudioExtractionResult,
   AgentMediaInspectionRequest,
@@ -44,6 +46,7 @@ import type {
   AgentToolExecutionCompletion,
   AgentToolExecutionCommit,
   AgentToolExecutionProgressRequest,
+  AgentToolPrepareCompletion,
 } from '@/shared/agent/agent.types'
 import type {
   QQMusicLyricsOperation,
@@ -258,6 +261,9 @@ contextBridge.exposeInMainWorld('electronAgent', {
   ): Promise<AgentInteractionSubmissionResult> => (
     ipcRenderer.invoke('agent:interaction:submit', input)
   ),
+  completeToolPreparation: (input: AgentToolPrepareCompletion): Promise<boolean> => (
+    ipcRenderer.invoke('agent:tool:prepare:complete', input)
+  ),
   completeToolExecution: (input: AgentToolExecutionCompletion): Promise<boolean> => (
     ipcRenderer.invoke('agent:tool:execution:complete', input)
   ),
@@ -277,6 +283,11 @@ contextBridge.exposeInMainWorld('electronAgent', {
   ),
   releaseMediaArtifact: (input: AgentMediaArtifactReleaseRequest): Promise<boolean> => (
     ipcRenderer.invoke('agent:media:artifact:release', input)
+  ),
+  saveMediaArtifact: (
+    input: AgentMediaArtifactSaveRequest,
+  ): Promise<AgentMediaArtifactSaveResult> => (
+    ipcRenderer.invoke('agent:media:artifact:save', input)
   ),
   listSessions: (
     ownerScope: AgentOwnerScope,

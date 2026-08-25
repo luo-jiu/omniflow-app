@@ -23,6 +23,18 @@ function completedActivity(
 }
 
 describe('Agent Tool presentation registry', () => {
+  it('shows preparation as an active state instead of a failure', () => {
+    const activity = completedActivity('media.extractAudio', {});
+    activity.status = 'preparing';
+    activity.result = undefined;
+
+    expect(buildAgentToolPresentation(activity, 3)).toEqual([{
+      label: '正在准备执行目标',
+      tone: 'info',
+      type: 'status',
+    }]);
+  });
+
   it('creates only a semantic tree action for a persisted library artifact', () => {
     const blocks = buildAgentToolPresentation(completedActivity('media.extractAudio', {
       createdNodeId: 22,

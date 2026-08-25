@@ -460,14 +460,14 @@ legacy 兼容检查：
 - 普通问答和单 Tool 任务不创建计划；模型提交状态、进度、结果、权限、UI 字段、未知 Tool、超限步骤或在首个真实 Tool 后改写计划时，main / SQLite 拒绝计划但不伪造执行事实。计划中的 Tool 名称不构成预授权，写操作仍完整经过参数校验、确认和一次性执行能力
 - 在当前目录请求“创建一个叫测试的文件夹”时显示精确确认卡片；允许后只创建一次，后端返回节点后先提交 authoritative result，再刷新目标目录树并通过 `file.list` 感知到同一个 `createdNodeId` 后继续回答；取消后不创建，模型能依据拒绝结果结束本轮
 - 选中单个普通音频或视频后请求“检查这个媒体文件”，`media.inspect` 不弹写操作确认，能返回真实容器、时长和媒体流元数据；未安装 ffprobe 时明确提示环境缺失且不显示模拟结果。真实媒体由用户手工验证，自动化只使用 JSON fixture，不播放媒体
-- 在 macOS 本地 MinIO 的非第一个资料库中选中单个视频后请求“提取音频”，确认卡片准确显示源文件、当前目录、输出名和格式；拒绝时不生成文件，允许后只上传到授权时的当前目录，默认生成 `*-audio.m4a`，长名称仍保留 `-audio.<格式>` 且不超过 240 UTF-8 bytes，同名时 Tool 结果使用后端实际自动改名后的名称。真实媒体内容与格式由用户手工验证，自动化不得播放媒体
+- 在 macOS 本地 MinIO 的非第一个资料库中选中单个视频后请求“提取音频”，ToolRun 先显示 `preparing` 而不是失败；健康源 provider 优先继承，源不可用时能按输出格式路由到其他健康 provider。确认卡准确显示源文件、目标类型、目标目录、输出名、格式和提交前失败兜底；可改为资料库其他目录或本机，也可修改文件名和 M4A / MP3 / WAV，修改后生成新的 prepared action ID / hash 并使用该格式对应的冻结 provider。拒绝时不生成文件，允许后只写入批准的精确目标，默认生成 `*-audio.m4a`，长名称仍保留 `-audio.<格式>` 且不超过 240 UTF-8 bytes，同名时 Tool 结果使用后端实际自动改名后的名称。真实媒体内容与格式由用户手工验证，自动化不得播放媒体
 - `directory.create` 与 `media.extractAudio` 完成后显示资料库产物卡片，点击“在目录树中定位”只分发 `tree.revealNode` 并定位到同一资料库节点；`media.inspect` 只展示白名单容器、时长、大小、码率和媒体流数量，不展示签名 URL、原始 tags 或未知结果字段
-- `media.extractAudio` 分别验证停止 ffmpeg、上传中停止、上传失败、无音轨、未安装 ffmpeg、目录刷新失败和应用窗口关闭：commit 前 main 取消或 Broker 超时会发出 Renderer 取消事件，进程树、主进程 PUT、后端 multipart Session、loopback claim 与本地临时产物均被清理；上传创建节点成功后立即 commit，此后停止、页面卸载、刷新失败或最终回执超时均保留该实际文件并使用 committed fallback，不得再次提取造成重复文件
+- `media.extractAudio` 分别验证停止 ffmpeg、prepare 超时、上传中停止、上传失败、无音轨、未安装 ffmpeg、目录刷新失败、Save As 取消和应用窗口关闭：commit 前 main 取消或 Broker 超时会中止 execution 并发出 Renderer 取消事件，进程树、主进程 PUT、后端 multipart Session、loopback claim 与本地临时产物均被清理；本机复制收口前不得提前删除 artifact。上传只在明确 `uncommitted` 且批准了兜底时打开 Save As；`commit_unknown` 不兜底、不重传，服务端返回节点或 authoritative commit 回执失败后也不生成第二份本机文件。上传创建节点成功后立即 commit，此后停止、页面卸载、刷新失败或最终回执超时均保留该实际文件并使用 committed fallback，不得再次提取造成重复文件
 - 等待确认时离开再返回 Agent 工作区，确认卡片可从当前会话恢复；停止任务、确认超时、注销、窗口销毁或应用重启后动作失效，不能在恢复时自动执行
 - 模型调用 `interaction.request` 时，单选 / 多选及文字、数字、开关、下拉表单按持久化 schema 展示；提交一次后原 Tool / Run 继续，选择结果进入下一轮模型上下文，卡片保留为只读历史且不能重复提交
 - 等待输入时离开再返回当前会话，交互卡从 SQLite 恢复且 renderer 未提交草稿不伪装为已保存；窗口、owner scope、资料库、Session、Run 或 interaction ID 任一不匹配时提交被拒绝，非法字段和选项不进入模型。停止、30 分钟超时、注销、窗口销毁或应用重启后分别显示取消、过期或中断，不自动恢复模型运行
 - Agent 消息区域、输入框、会话管理页和长期记忆管理页复用 `8px` 工作区滚动条，在亮色 / 暗色主题下没有白色宽轨或不跟随主题的滑块；流式输出只在用户原本接近底部时自动跟随，向上回看后不会被每个增量强制拉回底部
-- 关闭并重新打开应用后，已完成会话可以恢复；退出时仍为 `running` / `awaiting_approval` / `awaiting_interaction` 的 Run / ToolRun 显示为“上一轮已中断”，不自动重放请求、确认、交互或 Tool
+- 关闭并重新打开应用后，已完成会话可以恢复；退出时仍为 `preparing` / `running` / `awaiting_approval` / `awaiting_interaction` 的 Run / ToolRun 显示为“上一轮已中断”，不自动重放 prepare、provider binding、请求、确认、交互或 Tool
 - 应用在摘要生成期间退出后，遗留 `started` checkpoint 恢复为 `interrupted` 且不激活；最新 completed checkpoint、coverage sequence 和完整原始消息仍可恢复。failed / interrupted checkpoint 不改变会话排序、标题、预览或消息数，删除 Session 时整条 checkpoint 链随之级联清理
 - 打包产物中的 `sqlite3` 原生模块位于 ASAR 解包目录，macOS / Windows 对应安装包均能创建和重新打开 `agent-sessions.sqlite3`
 
@@ -480,7 +480,7 @@ legacy 兼容检查：
 - 迟到或乱序的 `run-updated` 不能覆盖更新快照，任何已完成、失败、取消或中断 Run 都不能退回 `running / awaiting_*`；任务投影只读 Run / ToolRun，不触发 Tool、不消耗调用上限，也不把未执行计划项写成 ToolRun
 - Run 开始后编辑或删除来源 AI 服务配置会被拒绝；切换 active 配置不改变本轮连接，后续 Tool 轮次与 fallback 仍使用启动时固定的 provider、Base URL 和 Key，终止后配置锁释放
 - overlay、独立媒体窗口和非主 frame 调用 Agent IPC 时被拒绝
-- 确认、Renderer 内部能力、写入 commit 或执行完成请求只要窗口、owner scope、资料库、Session、Run 或一次性 ID 任一不匹配就被拒绝；同一媒体来源能力、commit 和执行结果均不能重复提交
+- prepare、确认、Renderer 内部能力、写入 commit 或执行完成请求只要窗口、owner scope、资料库、Session、Run、ToolRun、call、输入 hash 或一次性 ID 中的适用字段任一不匹配就被拒绝；同一 prepare、媒体来源能力、Save As、commit 和执行结果均不能重复提交，并发提交同一确认只能有一个进入处理
 - 模型不能通过交互卡提供 HTML、JSX、回调、IPC channel、URL 或可执行行为，也不能请求 API Key、密码、Cookie 和访问令牌；选项、字段、标题和回答长度 / 数量均命中 main 侧上限
 - Agent SQLite、IPC 响应、日志和消息中不出现 AI Service API Key、Cookie、签名 URL 或完整环境变量；升级 `sqlite3` 或 N-API 版本后打包必须重新准备目标原生模块，不能复用旧缓存
 - `media.inspect` 的签名 URL 只在 Renderer 到 main 的受权瞬时 IPC 和 main 内存代理中存在；ffprobe 命令行只出现 loopback URL，Tool 结果只保留白名单元数据，原始 tags、文件来源、代理 token 和 stderr 不进入消息或 SQLite

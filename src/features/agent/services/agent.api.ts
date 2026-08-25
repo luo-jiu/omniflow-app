@@ -5,6 +5,8 @@ import type {
   AgentInteractionSubmissionRequest,
   AgentInteractionSubmissionResult,
   AgentMediaArtifactReleaseRequest,
+  AgentMediaArtifactSaveRequest,
+  AgentMediaArtifactSaveResult,
   AgentMediaAudioExtractionRequest,
   AgentMediaAudioExtractionResult,
   AgentMediaInspectionRequest,
@@ -23,6 +25,7 @@ import type {
   AgentToolExecutionCompletion,
   AgentToolExecutionCommit,
   AgentToolExecutionProgressRequest,
+  AgentToolPrepareCompletion,
 } from '@/shared/agent/agent.types';
 
 function bridge() {
@@ -42,6 +45,12 @@ export function stopAgentChat(sessionId: string): Promise<boolean> {
 
 export function releaseAgentOwnerRuns(): Promise<boolean> {
   return bridge().releaseOwner();
+}
+
+export function completeAgentToolPreparation(
+  input: AgentToolPrepareCompletion,
+): Promise<boolean> {
+  return bridge().completeToolPreparation(input);
 }
 
 export function resolveAgentToolApproval(
@@ -90,6 +99,12 @@ export function releaseAgentMediaArtifact(
   input: AgentMediaArtifactReleaseRequest,
 ): Promise<boolean> {
   return bridge().releaseMediaArtifact(input);
+}
+
+export function saveAgentMediaArtifact(
+  input: AgentMediaArtifactSaveRequest,
+): Promise<AgentMediaArtifactSaveResult> {
+  return bridge().saveMediaArtifact(input);
 }
 
 export function listAgentSessions(

@@ -210,6 +210,7 @@ export function createAgentToolBroker(options: AgentToolBrokerOptions = {}) {
       Math.min(input.timeoutMs, MAX_RENDERER_EXECUTION_TIMEOUT_MS),
     );
     const outcome = new Promise<AgentToolExecutionOutcome>((resolve, reject) => {
+      const executionController = new AbortController();
       let settled = false;
       let committedResult: AgentToolResult | undefined;
       let cancellationNotified = false;
@@ -226,6 +227,7 @@ export function createAgentToolBroker(options: AgentToolBrokerOptions = {}) {
         input.onCancel(executionId);
       };
       const settleAfterCancellation = (error: Error) => {
+        executionController.abort();
         notifyCancellation();
         if (committedResult) {
           finish(() => resolve({ result: committedResult as AgentToolResult }));
@@ -265,7 +267,7 @@ export function createAgentToolBroker(options: AgentToolBrokerOptions = {}) {
         resolve: value => finish(() => resolve(value)),
         runId: input.runId,
         sessionId: input.sessionId,
-        signal: input.signal,
+        signal: executionController.signal,
         toolName: input.toolName,
       });
       scheduleTimeout(timeoutMs);

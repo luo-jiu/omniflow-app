@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import type { AgentToolExecutionRequest } from '@/shared/agent/agent.types';
+import type {
+  AgentMediaArtifactSaveResult,
+  AgentToolExecutionRequest,
+} from '@/shared/agent/agent.types';
+import { UploadCommitUnknownError } from '@/modules/upload-center/services/upload-direct';
 import { executeAgentRendererTool } from './agent-tool-executor';
 
 function request(): AgentToolExecutionRequest {
@@ -25,6 +29,40 @@ function request(): AgentToolExecutionRequest {
     runId: 'run-1',
     sessionId: 'session-1',
     toolName: 'directory.create',
+  };
+}
+
+function mediaExtractRequest(
+  input: Record<string, unknown> = {},
+): AgentToolExecutionRequest {
+  const mediaRequest = request();
+  mediaRequest.toolName = 'media.extractAudio';
+  mediaRequest.input = {
+    conflictPolicy: 'auto_rename',
+    destination: 'library',
+    fallbackPolicy: 'prompt_local',
+    libraryId: 3,
+    mimeType: 'video/mp4',
+    nodeId: 8,
+    outputFileName: 'movie-audio.m4a',
+    outputFormat: 'm4a',
+    parentId: 10,
+    preparedActionId: 'prepared-1',
+    snapshotHash: 'snapshot-1',
+    sourceFileName: 'movie.mp4',
+    storageProvider: 'local-minio',
+    ...input,
+  };
+  return mediaRequest;
+}
+
+function extractedArtifact() {
+  return {
+    artifactId: 'artifact-1',
+    fileName: 'movie-audio.m4a',
+    filePath: '/tmp/agent-media/movie-audio.m4a',
+    mimeType: 'audio/mp4',
+    sizeBytes: 100,
   };
 }
 
@@ -142,26 +180,9 @@ describe('Agent renderer tool executor', () => {
   });
 
   it('extracts audio, uploads it to the current directory and releases the local artifact', async () => {
-    const mediaRequest = request();
-    mediaRequest.toolName = 'media.extractAudio';
-    mediaRequest.input = {
-      conflictPolicy: 'auto_rename',
-      libraryId: 3,
-      mimeType: 'video/mp4',
-      nodeId: 8,
-      outputFileName: 'movie-audio.m4a',
-      outputFormat: 'm4a',
-      parentId: 10,
-      sourceFileName: 'movie.mp4',
-    };
+    const mediaRequest = mediaExtractRequest();
     const getMediaFileLink = vi.fn(async () => 'https://storage.example/signed?secret=value');
-    const extractMediaAudio = vi.fn(async () => ({
-      artifactId: 'artifact-1',
-      fileName: 'movie-audio.m4a',
-      filePath: '/tmp/agent-media/movie-audio.m4a',
-      mimeType: 'audio/mp4',
-      sizeBytes: 100,
-    }));
+    const extractMediaAudio = vi.fn(async () => extractedArtifact());
     const uploadLocalFile = vi.fn(async (
       _filePath: string,
       _parentId: number,
@@ -233,17 +254,10 @@ describe('Agent renderer tool executor', () => {
   });
 
   it('aborts an active upload and still releases the extracted artifact', async () => {
-    const mediaRequest = request();
-    mediaRequest.toolName = 'media.extractAudio';
-    mediaRequest.input = {
-      conflictPolicy: 'auto_rename',
-      libraryId: 3,
-      nodeId: 8,
-      outputFileName: 'movie-audio.m4a',
-      outputFormat: 'm4a',
-      parentId: 10,
-      sourceFileName: 'movie.mp4',
-    };
+    const mediaRequest = mediaExtractRequest({
+      preparedActionId: 'prepared-cancel',
+      snapshotHash: 'snapshot-cancel',
+    });
     const controller = new AbortController();
     const uploadAbort = vi.fn(async () => undefined);
     const releaseMediaArtifact = vi.fn(async () => true);
@@ -281,5 +295,197 @@ describe('Agent renderer tool executor', () => {
     expect(releaseMediaArtifact).toHaveBeenCalledWith(expect.objectContaining({
       artifactId: 'artifact-cancel',
     }));
+  });
+
+  it('does not create a local fallback after the upload committed but its main receipt failed', async () => {
+    const saveMediaArtifact = vi.fn();
+    const outcome = await executeAgentRendererTool(mediaExtractRequest(), {
+      extractMediaAudio: vi.fn(async () => extractedArtifact()),
+      getMediaFileLink: vi.fn(async () => 'https://storage.example/source'),
+      onCommitted: vi.fn(async () => {
+        throw new Error('commit receipt transport failed');
+      }),
+      readPerception: vi.fn(async () => ({
+        collectedAt: '2026-08-25T00:00:00.000Z',
+        currentDirectory: { entries: [], entryCount: 0, id: 10, name: '视频' },
+        selectedNodes: [],
+      })),
+      releaseMediaArtifact: vi.fn(async () => true),
+      reportProgress: vi.fn(async () => true),
+      saveMediaArtifact,
+      uploadLocalFile: vi.fn(async () => ({
+        ext: 'm4a',
+        id: 32,
+        name: 'movie-audio',
+      })) as never,
+    });
+
+    expect(saveMediaArtifact).not.toHaveBeenCalled();
+    expect(outcome).toMatchObject({
+      committed: true,
+      result: {
+        data: {
+          createdNodeId: 32,
+          destination: 'library',
+          uploadCommitState: 'committed',
+        },
+        ok: true,
+      },
+    });
+  });
+
+  it('saves a directly prepared local destination without uploading', async () => {
+    const mediaRequest = mediaExtractRequest({
+      destination: 'local',
+      fallbackPolicy: 'none',
+      parentId: undefined,
+      storageProvider: undefined,
+    });
+    const uploadLocalFile = vi.fn();
+    const saveMediaArtifact = vi.fn(async () => ({
+      canceled: false as const,
+      fileName: 'chosen-name.m4a',
+    }));
+
+    const outcome = await executeAgentRendererTool(mediaRequest, {
+      extractMediaAudio: vi.fn(async () => extractedArtifact()),
+      getMediaFileLink: vi.fn(async () => 'https://storage.example/source'),
+      releaseMediaArtifact: vi.fn(async () => true),
+      reportProgress: vi.fn(async () => true),
+      saveMediaArtifact,
+      uploadLocalFile: uploadLocalFile as never,
+    });
+
+    expect(uploadLocalFile).not.toHaveBeenCalled();
+    expect(saveMediaArtifact).toHaveBeenCalledWith(expect.objectContaining({
+      preparedActionId: 'prepared-1',
+      purpose: 'destination',
+      snapshotHash: 'snapshot-1',
+    }));
+    expect(outcome).toEqual({
+      committed: true,
+      result: {
+        data: {
+          destination: 'local',
+          format: 'm4a',
+          name: 'chosen-name.m4a',
+          uploadCommitState: 'uncommitted',
+        },
+        message: '已提取并保存“chosen-name.m4a”到本机',
+        ok: true,
+      },
+    });
+  });
+
+  it('falls back locally only after a definitively uncommitted upload failure', async () => {
+    const saveMediaArtifact = vi.fn(async () => ({
+      canceled: false as const,
+      fileName: 'fallback.m4a',
+    }));
+    const outcome = await executeAgentRendererTool(mediaExtractRequest(), {
+      extractMediaAudio: vi.fn(async () => extractedArtifact()),
+      getMediaFileLink: vi.fn(async () => 'https://storage.example/source'),
+      releaseMediaArtifact: vi.fn(async () => true),
+      reportProgress: vi.fn(async () => true),
+      saveMediaArtifact,
+      uploadLocalFile: vi.fn(async () => {
+        throw new Error('upload init failed');
+      }) as never,
+    });
+
+    expect(saveMediaArtifact).toHaveBeenCalledWith(expect.objectContaining({
+      purpose: 'upload_fallback',
+    }));
+    expect(outcome).toEqual({
+      committed: true,
+      result: {
+        data: {
+          destination: 'local',
+          fallbackFrom: 'library',
+          format: 'm4a',
+          name: 'fallback.m4a',
+          uploadCommitState: 'uncommitted',
+        },
+        message: '资料库上传未提交，已将“fallback.m4a”保存到本机',
+        ok: true,
+      },
+    });
+  });
+
+  it('does not offer fallback when the prepared policy disables it', async () => {
+    const saveMediaArtifact = vi.fn();
+    const outcome = await executeAgentRendererTool(mediaExtractRequest({
+      fallbackPolicy: 'none',
+    }), {
+      extractMediaAudio: vi.fn(async () => extractedArtifact()),
+      getMediaFileLink: vi.fn(async () => 'https://storage.example/source'),
+      releaseMediaArtifact: vi.fn(async () => true),
+      reportProgress: vi.fn(async () => true),
+      saveMediaArtifact,
+      uploadLocalFile: vi.fn(async () => {
+        throw new Error('upload init failed');
+      }) as never,
+    });
+
+    expect(saveMediaArtifact).not.toHaveBeenCalled();
+    expect(outcome).toMatchObject({
+      result: {
+        data: {
+          destination: 'library',
+          parentId: 10,
+          uploadCommitState: 'uncommitted',
+        },
+        ok: false,
+      },
+    });
+  });
+
+  it('never saves locally when upload commit state is unknown', async () => {
+    const saveMediaArtifact = vi.fn();
+    const outcome = await executeAgentRendererTool(mediaExtractRequest(), {
+      extractMediaAudio: vi.fn(async () => extractedArtifact()),
+      getMediaFileLink: vi.fn(async () => 'https://storage.example/source'),
+      releaseMediaArtifact: vi.fn(async () => true),
+      reportProgress: vi.fn(async () => true),
+      saveMediaArtifact,
+      uploadLocalFile: vi.fn(async () => {
+        throw new UploadCommitUnknownError('upload-1', 'operation-1', new Error('timeout'));
+      }) as never,
+    });
+
+    expect(saveMediaArtifact).not.toHaveBeenCalled();
+    expect(outcome).toMatchObject({
+      result: {
+        data: { uploadCommitState: 'commit_unknown' },
+        message: expect.stringContaining('不要重复执行'),
+        ok: false,
+      },
+    });
+  });
+
+  it('reports Save As cancellation without exposing the artifact path', async () => {
+    const outcome = await executeAgentRendererTool(mediaExtractRequest({
+      destination: 'local',
+      fallbackPolicy: 'none',
+      parentId: undefined,
+      storageProvider: undefined,
+    }), {
+      extractMediaAudio: vi.fn(async () => extractedArtifact()),
+      getMediaFileLink: vi.fn(async () => 'https://storage.example/source'),
+      releaseMediaArtifact: vi.fn(async () => true),
+      reportProgress: vi.fn(async () => true),
+      saveMediaArtifact: vi.fn(async (): Promise<AgentMediaArtifactSaveResult> => ({
+        canceled: true,
+      })),
+    });
+
+    expect(outcome).toMatchObject({
+      result: {
+        data: { destination: 'local', uploadCommitState: 'uncommitted' },
+        message: '用户取消了本机保存',
+        ok: false,
+      },
+    });
+    expect(JSON.stringify(outcome)).not.toContain('/tmp/agent-media');
   });
 });

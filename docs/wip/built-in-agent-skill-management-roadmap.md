@@ -1,8 +1,8 @@
 # 内置 Agent Skill 管理与能力可用性路线图
 
-更新时间：2026-08-24
+更新时间：2026-08-25
 
-状态：阶段 A 已实现并通过自动化门禁；阶段 B 的上传完成回执前置依赖已落地，prepare 主体尚未开始；阶段 C 至 E 尚未开始。
+状态：阶段 A、B 已实现并通过自动化门禁；阶段 C 的真实媒体、本机 Save As 和非首个资料库上传核心路径已完成用户验收；阶段 D、E 尚未开始。
 
 适用范围：
 
@@ -23,14 +23,14 @@
 1. **能力可用性**：在 Run 开始前知道相关 Tool、操作系统能力和受控依赖是否可用，并向模型与 UI 提供安全、结构化的状态。
 2. **执行目标准备**：涉及写入时先解析并让用户确定目标，再把精确动作冻结为不可变快照，之后才进入既有审批和执行链。
 
-其中第一层已落地到 Run 创建与持久化诊断边界，第二层仍未开始。Skill 管理必须等执行目标准备闭环后再开始，否则管理页只能显示“已启用”，却无法回答一次写操作的目标是否真的可执行；停用 Skill 也容易被误解为禁用了底层 Tool。
+两层通用基建均已落地到 Run、ToolRun、审批、执行和恢复边界，首条真实媒体核心路径也已完成验收。下一步进入 Skill 本机启停与只读管理投影；Skill 管理核心仍不应绕过现有能力快照或把停用 Skill 误解为禁用底层 Tool。
 
 推荐顺序：
 
 ```text
 能力可用性与 Run 诊断身份（阶段 A 已实现）
-  -> 执行目标准备与冻结
-  -> media-extract-audio 完整验收
+  -> 执行目标准备与冻结（阶段 B 已实现）
+  -> media-extract-audio 真实路径验收（阶段 C 已完成）
   -> Skill 本机启停与只读管理投影
   -> Skill 管理 UI
 ```
@@ -63,8 +63,6 @@ Run / ToolRun 状态与时间线
 
 当前主要缺口：
 
-- `media.extractAudio` 的目标固定为当前目录，上传时没有冻结物理存储 provider。
-- 确认卡只能批准或取消，不能承担确认前的目标选择。
 - 没有本机 Skill 启停偏好、renderer-safe 管理目录或管理 UI。
 
 ## 3. 外部实现调研
@@ -335,7 +333,7 @@ Skill 组织流程
 `prepared action` 是现有 ToolRun 执行事实的扩展，不建立第二套 Workflow 或独立业务 Store：
 
 - `prepare` 是 Tool registration 可选的通用生命周期契约，不是 Orchestrator 对 `media.extractAudio` 的分支特判。
-- 需要审批前补全环境事实的 Tool 先创建状态为 `preparing` 的 ToolRun；这要求同步扩展 shared status、SQLite 持久化和 renderer-safe 投影。Run 本身在准备期间保持 `running`，通过 `currentStep` 展示准备进度。
+- 需要审批前补全环境事实的 Tool 先创建状态为 `preparing` 的 ToolRun；Run 同步进入 `preparing` 并通过 `currentStep` 展示准备进度，renderer 时间线将其视为活跃状态而不是失败。
 - Orchestrator 通过独立的 Agent Tool Prepare Broker 驱动 main / renderer prepare request、超时、取消和 owner 校验。Prepare Broker 与执行 Broker 分离，prepare capability 不能被当作 execution capability 使用。
 - prepare 只能规范化输入、读取环境并让用户选择目标，不能上传、转码、复制或提交业务副作用。
 - 成功后状态按权限决策进入 `awaiting_approval` 或 `running`；失败、取消、停止、owner release 和窗口销毁分别收口到既有终态并清理内部 capability。
@@ -361,7 +359,7 @@ interface AgentPreparedActionInternal {
 }
 ```
 
-ToolRun 持久化安全的 public projection、`preparedActionId` 和 `snapshotHash`；物理 provider binding 只保留在 main 的短生命周期 capability store。当前应用重启会把待确认 Run 标记为 interrupted，因此无需跨进程恢复内部 binding。
+ToolRun 只持久化安全的 public projection、`preparedActionId` 和 `snapshotHash`；物理 provider binding 在 prepare 和审批期间只存在于 main，批准后仅通过一次性 execution request 交给 renderer executor 的局部变量，不进入 React state、事件历史、SQLite、ToolResult 或模型上下文。当前应用重启会把待确认 Run 标记为 interrupted，因此不恢复内部 binding。
 
 规则：
 
@@ -386,7 +384,7 @@ type UploadCommitState = 'uncommitted' | 'commit_unknown' | 'committed';
 - `commit_unknown` 必须先使用 upload ID / idempotency identity 做服务端 reconciliation；仍无法确认时向用户报告“提交状态待确认”。
 - 服务端明确返回节点后才是 `committed`；后续刷新失败不得重复上传或本机保存。
 
-上述后端前置契约已经落地：`upload_sessions` 保存稳定 `clientOperationId` 与 7 天 completion receipt，complete 可重放同一 node，`GET /api/v1/upload/complete/status` 明确返回 `unknown / uncommitted / committed(node)`。共享 Electron 上传层会在 complete 网络错误、`408 / 429 / 5xx` 后核对状态，恢复 committed node；仍不明确时抛出 `UploadCommitUnknownError` 并保留 session，不自动 abort。阶段 B 仍需在 Tool prepare/executor 上层把“complete 尚未发出”的失败与该错误统一投影为 `uncommitted / commit_unknown / committed`，本机兜底才能按冻结策略正式接入。
+上述契约已经贯通：`upload_sessions` 保存稳定 `clientOperationId` 与 7 天 completion receipt，complete 可重放同一 node，`GET /api/v1/upload/complete/status` 明确返回 `unknown / uncommitted / committed(node)`。共享 Electron 上传层会在 complete 网络错误、`408 / 429 / 5xx` 后核对状态，恢复 committed node；仍不明确时抛出 `UploadCommitUnknownError` 并保留 session，不自动 abort。Tool executor 已统一投影 `uncommitted / commit_unknown / committed`，只在明确 `uncommitted` 且冻结策略允许时打开本机 Save As；authoritative commit 回执失败也不能把已经成功的资料库写入误判成本机兜底条件。
 
 系统 Save As 必须新增 Agent 专用能力，禁止扩权 Embedded Browser 的下载 IPC：
 
@@ -525,20 +523,20 @@ src/features/agent/
 
 当前实现没有新增 IPC、preload 或 UI；`checking / stale / refreshing` 管理投影不属于阶段 A。
 
-### 阶段 B：执行目标准备（未开始）
+### 阶段 B：执行目标准备（已实现）
 
 - 先实现通用 Tool prepare 契约、`preparing` ToolRun 状态、Prepare Broker / IPC，以及超时、取消、失败和 owner release 的持久化收口；禁止在 Orchestrator 中为媒体 Tool 写特判。
 - 为 `media.extractAudio` 增加语义目标与兜底策略。
 - 目标选择和 renderer prepare 发生在审批前，由 main 生成不可变 prepared action 后再展示审批。
 - 冻结并显式传递物理 provider。
 - 新增 Agent 专用、owner-bound 的系统 Save As capability。
-- 上传 completion receipt / idempotency、status reconciliation 与共享上传层的安全保留行为已完成；继续在 Tool prepare/executor 层补齐 `uncommitted / commit_unknown / committed` 结构化投影，只有明确未 commit 时才允许本机兜底。
+- 上传 completion receipt / idempotency、status reconciliation 与共享上传层的安全保留行为已完成；Tool prepare/executor 已补齐 `uncommitted / commit_unknown / committed` 结构化投影，只有明确未 commit 时才允许本机兜底。
 
-### 阶段 C：首条 Skill 验收与诊断（未开始）
+### 阶段 C：首条 Skill 验收与诊断（已完成）
 
-- 完成媒体提取自动化边界测试。
-- 由用户执行真实媒体路径验证，避免自动播放或外放。
-- 根据真实 provider 调用记录调整 Skill 摘要和 instructions。
+- 媒体提取、prepare、审批编辑、provider 重新绑定、上传三态、Save As、防重放、取消和 SQLite 恢复的自动化边界测试已完成。
+- 2026-08-25 用户在 macOS 本机 MinIO 的非第一个资料库中验证真实视频路径：provider 正确激活 Skill，完成媒体检查、音频提取、本机 Save As、资料库上传和目录树新节点定位。
+- 本轮真实调用没有暴露需要立即调整的 Skill 摘要或 instructions；新增格式、平台或 provider 差异时再补定向诊断。
 
 ### 阶段 D：管理核心（未开始）
 

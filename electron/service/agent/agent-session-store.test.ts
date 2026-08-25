@@ -331,6 +331,20 @@ function runPlan(
   };
 }
 
+function preparedAction(outputFileName = 'movie-audio.m4a') {
+  return {
+    conflictPolicy: 'auto_rename' as const,
+    destination: 'library' as const,
+    fallbackPolicy: 'prompt_local' as const,
+    libraryId: 3,
+    outputFileName,
+    outputFormat: 'm4a',
+    parentId: 10,
+    sourceNodeId: 8,
+    targetLabel: '视频',
+  };
+}
+
 describe('SQLite Agent session store', () => {
   const stores: AgentSessionStore[] = [];
   const temporaryDirectories: string[] = [];
@@ -1849,6 +1863,159 @@ describe('SQLite Agent session store', () => {
     });
   });
 
+  it('interrupts a preparing Run and Tool without restoring an executable action', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'omniflow-agent-prepare-recovery-'));
+    temporaryDirectories.push(directory);
+    const databasePath = path.join(directory, 'agent-sessions.sqlite3');
+    const firstStore = await createStore(databasePath);
+    await createSession(firstStore, 'session-preparing', 3, '准备中的会话');
+    await firstStore.createRun({
+      id: 'run-preparing',
+      model: 'model-a',
+      now: timestamp(1),
+      profileId: 'profile-a',
+      reasoningEffort: 'auto',
+      sessionId: 'session-preparing',
+      userPrompt: '提取音频',
+    });
+    await firstStore.createToolRun({
+      callId: 'call-preparing',
+      id: 'tool-preparing',
+      input: {},
+      now: timestamp(2),
+      permissionBehavior: 'ask',
+      runId: 'run-preparing',
+      status: 'preparing',
+      toolName: 'media.extractAudio',
+    });
+    await firstStore.updateRun('run-preparing', {
+      currentStep: '准备 media.extractAudio',
+      status: 'preparing',
+      updatedAt: timestamp(2),
+    });
+    await firstStore.close();
+    stores.splice(stores.indexOf(firstStore), 1);
+
+    const reopenedStore = await createStore(databasePath);
+    const snapshot = await reopenedStore.getSession('session-preparing', OWNER_SCOPE, 3);
+    expect(snapshot).toMatchObject({
+      lastRunStatus: 'interrupted',
+      runs: [expect.objectContaining({ revision: 3, status: 'interrupted' })],
+      toolActivities: [expect.objectContaining({
+        id: 'tool-preparing',
+        revision: 2,
+        status: 'interrupted',
+      })],
+    });
+    expect(snapshot?.toolActivities[0]).not.toHaveProperty('preparation');
+  });
+
+  it('persists prepared actions atomically and freezes edits through approval', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'omniflow-agent-prepared-action-'));
+    temporaryDirectories.push(directory);
+    const databasePath = path.join(directory, 'agent-sessions.sqlite3');
+    const store = await createStore(databasePath);
+    await createSession(store, 'session-prepared-action', 3, '目标确认');
+    await store.createRun({
+      id: 'run-prepared-action',
+      model: 'model-a',
+      now: timestamp(1),
+      profileId: 'profile-a',
+      reasoningEffort: 'auto',
+      sessionId: 'session-prepared-action',
+      userPrompt: '提取音频',
+    });
+    await store.createToolRun({
+      callId: 'call-prepared-action',
+      id: 'tool-prepared-action',
+      input: {},
+      now: timestamp(2),
+      permissionBehavior: 'ask',
+      runId: 'run-prepared-action',
+      status: 'preparing',
+      toolName: 'media.extractAudio',
+    });
+
+    await expect(executeDatabaseSql(databasePath, `
+      UPDATE agent_tool_runs
+      SET prepared_action_id = 'partial-action'
+      WHERE id = 'tool-prepared-action';
+    `)).rejects.toThrow('must be set atomically');
+
+    const initialAction = preparedAction();
+    await expect(store.completeToolPreparation({
+      action: initialAction,
+      approvalId: 'approval-prepared-action',
+      approvalInputHash: 'a'.repeat(64),
+      approvalPreview: {
+        description: '提取并上传音频',
+        risk: 'write',
+        title: '提取音频',
+      },
+      id: 'tool-prepared-action',
+      permissionBehavior: 'ask',
+      preparedActionId: 'prepared-action-1',
+      snapshotHash: 'a'.repeat(64),
+    })).resolves.toMatchObject({
+      preparation: {
+        action: initialAction,
+        preparedActionId: 'prepared-action-1',
+        snapshotHash: 'a'.repeat(64),
+      },
+      revision: 2,
+      status: 'awaiting_approval',
+    });
+    await expect(store.completeToolPreparation({
+      action: initialAction,
+      approvalId: 'approval-replay',
+      approvalInputHash: 'b'.repeat(64),
+      approvalPreview: {
+        description: '重复准备',
+        risk: 'write',
+        title: '提取音频',
+      },
+      id: 'tool-prepared-action',
+      permissionBehavior: 'ask',
+      preparedActionId: 'prepared-action-replay',
+      snapshotHash: 'b'.repeat(64),
+    })).rejects.toThrow('无法提交');
+
+    const editedAction = preparedAction('renamed.m4a');
+    const editedPreparation = {
+      action: editedAction,
+      approvalInputHash: 'c'.repeat(64),
+      approvalPreview: {
+        description: '提取并上传重命名后的音频',
+        risk: 'write' as const,
+        title: '提取音频',
+      },
+      expectedPreparedActionId: 'prepared-action-1',
+      preparedActionId: 'prepared-action-2',
+      snapshotHash: 'c'.repeat(64),
+    };
+    await expect(store.resolveToolApproval(
+      'approval-prepared-action',
+      'approved',
+      timestamp(3),
+      { ...editedPreparation, expectedPreparedActionId: 'stale-action' },
+    )).rejects.toThrow('不存在或已经处理');
+    await expect(store.resolveToolApproval(
+      'approval-prepared-action',
+      'approved',
+      timestamp(3),
+      editedPreparation,
+    )).resolves.toMatchObject({
+      approval: { status: 'approved' },
+      preparation: {
+        action: editedAction,
+        preparedActionId: 'prepared-action-2',
+        snapshotHash: 'c'.repeat(64),
+      },
+      revision: 3,
+      status: 'running',
+    });
+  });
+
   it('preserves the immutable plan and Tool step association when recovery interrupts a Run', async () => {
     const directory = await mkdtemp(path.join(tmpdir(), 'omniflow-agent-plan-recovery-'));
     temporaryDirectories.push(directory);
@@ -1930,6 +2097,11 @@ describe('SQLite Agent session store', () => {
     `);
 
     const store = await createStore(databasePath);
+    expect(await readDatabaseRow<{ count: number }>(databasePath, `
+      SELECT COUNT(*) AS count
+      FROM pragma_table_info('agent_tool_runs')
+      WHERE name IN ('prepared_action_id', 'prepared_action_json', 'prepared_snapshot_hash')
+    `)).toEqual({ count: 3 });
     expect(await store.getSession('preexisting-session', OWNER_SCOPE, 3)).toMatchObject({
       runs: [expect.objectContaining({ id: 'preexisting-run', revision: 1 })],
       toolActivities: [

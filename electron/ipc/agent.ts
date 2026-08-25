@@ -4,6 +4,7 @@ import type {
   AgentChatRequest,
   AgentInteractionSubmissionRequest,
   AgentMediaArtifactReleaseRequest,
+  AgentMediaArtifactSaveRequest,
   AgentMediaAudioExtractionRequest,
   AgentMediaInspectionRequest,
   AgentMemoryCursor,
@@ -15,6 +16,7 @@ import type {
   AgentToolExecutionCompletion,
   AgentToolExecutionCommit,
   AgentToolExecutionProgressRequest,
+  AgentToolPrepareCompletion,
 } from '@/shared/agent/agent.types';
 import { agentOrchestrator } from '../service/agent/agent-orchestrator';
 import { assertMainWindowAgentSender } from './aiServiceAccess';
@@ -100,6 +102,24 @@ export function registerAgentIpc(
     (event, input: AgentMediaArtifactReleaseRequest) => {
       const sender = requireMainWindow(event);
       return agentOrchestrator.releaseMediaArtifact(sender.id, input);
+    },
+  );
+
+  ipcMain.handle(
+    'agent:media:artifact:save',
+    (event, input: AgentMediaArtifactSaveRequest) => {
+      const sender = requireMainWindow(event);
+      ensureOwnerCleanup(sender);
+      return agentOrchestrator.saveMediaArtifact(sender, input);
+    },
+  );
+
+  ipcMain.handle(
+    'agent:tool:prepare:complete',
+    (event, input: AgentToolPrepareCompletion) => {
+      const sender = requireMainWindow(event);
+      ensureOwnerCleanup(sender);
+      return agentOrchestrator.completeToolPreparation(sender.id, input);
     },
   );
 

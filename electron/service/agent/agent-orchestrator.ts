@@ -18,11 +18,14 @@ import type {
   AgentMemoryProposal,
   AgentMemoryUpdateRequest,
   AgentMediaArtifactReleaseRequest,
+  AgentMediaArtifactSaveRequest,
+  AgentMediaArtifactSaveResult,
   AgentMediaAudioExtractionRequest,
   AgentMediaAudioExtractionResult,
   AgentMessage,
   AgentMediaInspectionRequest,
   AgentOwnerScope,
+  AgentPreparedActionPublic,
   AgentPerceptionSnapshot,
   AgentReasoningEffort,
   AgentRunSnapshot,
@@ -36,11 +39,13 @@ import type {
   AgentToolExecutionCompletion,
   AgentToolExecutionCommit,
   AgentToolExecutionProgressRequest,
+  AgentToolPrepareCompletion,
   AgentToolApprovalSnapshot,
   AgentToolProgress,
   AgentToolResult,
 } from '@/shared/agent/agent.types';
 import { normalizeAgentOwnerScope } from '../../../src/shared/agent/agent-owner-scope';
+import { normalizeAgentPreparedActionPublic } from '../../../src/shared/agent/agent-prepared-action';
 import { streamAIServiceProfile } from '../aiServiceClient';
 import {
   resolveAIServiceOutputTokenLimit,
@@ -74,6 +79,7 @@ import {
 } from './agent-renderer-projection';
 import { extractAgentMediaAudio } from './agent-media-audio-extractor';
 import { agentMediaArtifactStore, type AgentMediaArtifactStore } from './agent-media-artifact-store';
+import { saveAgentMediaArtifactAs } from './agent-media-save-as';
 import { inspectAgentMediaSource } from './agent-media-inspector';
 import { buildAgentMemoryContextMessagesWithinBudget } from './agent-memory-context';
 import { getAgentMemoryStore } from './agent-memory-store-runtime';
@@ -105,6 +111,10 @@ import {
   type AgentToolBroker,
   type AgentToolExecutionOutcome,
 } from './agent-tool-broker';
+import {
+  createAgentToolPrepareBroker,
+  type AgentToolPrepareBroker,
+} from './agent-tool-prepare-broker';
 import { projectAgentToolAuditInput } from './agent-tool-audit';
 import {
   MINIMUM_AGENT_PROVIDER_TOOL_RESULT_CONTENT,
@@ -116,6 +126,7 @@ import {
   type AgentToolExecutionContext,
   type AgentToolExecutor,
   type AgentToolPermissionDecision,
+  type AgentToolPreparationResult,
 } from './agent-tool-registry';
 import {
   createAgentRunCapabilitySnapshot,
@@ -200,10 +211,24 @@ interface PendingAgentApproval {
   sender: WebContents;
   onProgress: (progress: AgentToolProgress) => void;
   onCancel: (executionId: string) => void;
+  resolving: boolean;
   resolve: (outcome: AgentApprovalOutcome) => void;
   signal: AbortSignal;
   store: AgentSessionStore;
   timeoutMs: number;
+  prepared?: {
+    current: AgentPreparedRuntime;
+    finalize: (requestedAction?: AgentPreparedActionPublic) => Promise<AgentPreparedRuntime>;
+  };
+}
+
+interface AgentPreparedRuntime {
+  action: AgentPreparedActionPublic;
+  executionInput: unknown;
+  permissionBehavior: 'allow' | 'ask';
+  preparedActionId: string;
+  preview: AgentActionPreview;
+  snapshotHash: string;
 }
 
 interface PendingAgentInteraction {
@@ -217,6 +242,12 @@ interface PendingAgentInteraction {
   submit: (response: AgentInteractionResponse) => Promise<AgentToolActivitySnapshot>;
 }
 
+interface ActiveMediaArtifactSave {
+  ownerWebContentsId: number;
+  runId: string;
+  task: Promise<AgentMediaArtifactSaveResult>;
+}
+
 interface AgentOrchestratorOptions {
   approvalTimeoutMs?: number;
   contextBudget?: Partial<AgentContextBudget>;
@@ -228,7 +259,7 @@ interface AgentOrchestratorOptions {
   inspectMediaSource?: typeof inspectAgentMediaSource;
   interactionTimeoutMs?: number;
   mediaArtifactStore?: Pick<AgentMediaArtifactStore, 'release' | 'releaseOwner' | 'releaseRun'>
-    & Partial<Pick<AgentMediaArtifactStore, 'touchExecution'>>;
+    & Partial<Pick<AgentMediaArtifactStore, 'getOwned' | 'touchExecution'>>;
   resolveCapabilitySnapshot?: (
     input: AgentCapabilitySnapshotRequest,
   ) => Promise<AgentCapabilitySnapshot>;
@@ -237,7 +268,9 @@ interface AgentOrchestratorOptions {
     providerType: AIServiceRuntimeConnection['providerType'];
   }) => Partial<AgentContextBudget> | undefined;
   runSessionRegistry?: Pick<typeof aiServiceRunSessionRegistry, 'begin' | 'end'>;
+  saveMediaArtifactAs?: typeof saveAgentMediaArtifactAs;
   retrieveMemories?: (input: AgentMemoryRetrievalInput) => Promise<AgentMemoryItem[]>;
+  toolPrepareBroker?: AgentToolPrepareBroker;
   toolBroker?: AgentToolBroker;
 }
 
@@ -461,6 +494,38 @@ function hashToolInput(value: unknown): string {
   return crypto.createHash('sha256').update(stableJson(value)).digest('hex');
 }
 
+function createPreparedRuntime(result: AgentToolPreparationResult): AgentPreparedRuntime {
+  if (result.decision.behavior !== 'ask' && result.decision.behavior !== 'allow') {
+    throw new Error('Agent Tool prepare 不能生成拒绝后的执行动作');
+  }
+  const action = normalizeAgentPreparedActionPublic(result.publicAction);
+  const preparedActionId = crypto.randomUUID();
+  const snapshotHash = hashToolInput({
+    action,
+    snapshotMaterial: result.snapshotMaterial ?? null,
+  });
+  const executionInput = result.executionInput && typeof result.executionInput === 'object'
+    && !Array.isArray(result.executionInput)
+    ? { ...(result.executionInput as Record<string, unknown>), preparedActionId, snapshotHash }
+    : result.executionInput;
+  return {
+    action,
+    executionInput,
+    permissionBehavior: result.decision.behavior,
+    preparedActionId,
+    preview: normalizeActionPreview(
+      result.decision.behavior === 'ask'
+        ? result.decision.preview
+        : {
+            description: '执行已经准备完成',
+            risk: result.decision.risk,
+            title: '执行操作',
+          },
+    ),
+    snapshotHash,
+  };
+}
+
 function getActivatedSkillId(result: AgentToolResult): string | undefined {
   if (!result.ok || !result.data || typeof result.data !== 'object' || Array.isArray(result.data)) {
     return undefined;
@@ -500,6 +565,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
   const inspectMediaSource = options.inspectMediaSource || inspectAgentMediaSource;
   const extractMediaAudioSource = options.extractMediaAudio || extractAgentMediaAudio;
   const mediaArtifactStore = options.mediaArtifactStore || agentMediaArtifactStore;
+  const saveMediaArtifactAs = options.saveMediaArtifactAs || saveAgentMediaArtifactAs;
   const resolveCapabilitySnapshot = options.resolveCapabilitySnapshot
     || createBuiltInAgentCapabilitySnapshot;
   const contextManager = options.contextManager || createAgentContextManager({
@@ -511,11 +577,22 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     options.interactionTimeoutMs || TOOL_INTERACTION_TIMEOUT_MS,
   );
   const toolBroker = options.toolBroker || createAgentToolBroker({ normalizePerception });
+  const toolPrepareBroker = options.toolPrepareBroker || createAgentToolPrepareBroker();
   const activeRuns = new Map<string, ActiveAgentRun>();
   const startingRuns = new Map<string, StartingAgentRun>();
   const startingSessions = new Set<string>();
   const pendingApprovals = new Map<string, PendingAgentApproval>();
   const pendingInteractions = new Map<string, PendingAgentInteraction>();
+  const activeMediaArtifactSaves = new Set<ActiveMediaArtifactSave>();
+
+  async function waitForMediaArtifactSaves(predicate: (
+    save: ActiveMediaArtifactSave,
+  ) => boolean): Promise<void> {
+    const tasks = Array.from(activeMediaArtifactSaves)
+      .filter(predicate)
+      .map(save => save.task);
+    if (tasks.length > 0) await Promise.allSettled(tasks);
+  }
 
   function emit(sender: WebContents, event: AgentChatStreamEvent): void {
     if (!sender.isDestroyed()) {
@@ -553,6 +630,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     signal: AbortSignal;
     store: AgentSessionStore;
     timeoutMs: number;
+    prepared?: PendingAgentApproval['prepared'];
   }): Promise<AgentApprovalOutcome> {
     return new Promise((resolve, reject) => {
       let settled = false;
@@ -570,14 +648,22 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
           now(),
         ).catch(() => undefined).finally(() => reject(abortError()));
       };
-      const timer = setTimeout(() => {
+      let timer: ReturnType<typeof setTimeout>;
+      const handleTimeout = () => {
+        const pending = pendingApprovals.get(input.approval.approvalId);
+        if (pending?.resolving) {
+          timer = setTimeout(handleTimeout, 1_000);
+          timer.unref?.();
+          return;
+        }
         if (!takeSettlement()) return;
         void input.store.resolveToolApproval(
           input.approval.approvalId,
           'expired',
           now(),
         ).catch(() => undefined).finally(() => reject(new Error('用户确认已超时')));
-      }, approvalTimeoutMs);
+      };
+      timer = setTimeout(handleTimeout, approvalTimeoutMs);
       const cleanup = () => {
         clearTimeout(timer);
         input.signal.removeEventListener('abort', handleAbort);
@@ -585,6 +671,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       };
       pendingApprovals.set(input.approval.approvalId, {
         ...input,
+        resolving: false,
         resolve: (outcome) => {
           if (takeSettlement()) resolve(outcome);
         },
@@ -612,50 +699,95 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       throw new Error('当前窗口无权处理该 Agent 确认请求');
     }
     if (pending.signal.aborted) throw abortError();
+    if (pending.resolving) throw new Error('Agent 确认请求正在处理');
+    pending.resolving = true;
 
-    const approved = input.approved === true;
-    const activity = await pending.store.resolveToolApproval(
-      approvalId,
-      approved ? 'approved' : 'denied',
-      now(),
-    );
-    await updateRunAndEmit(
-      pending.sender,
-      pending.store,
-      pending.approval.sessionId,
-      pending.approval.runId,
-      {
-        currentStep: approved ? `执行 ${pending.approval.call.name}` : '用户已取消操作',
-        status: 'running',
-        updatedAt: now(),
-      },
-    );
+    try {
+      const approved = input.approved === true;
+      let finalized: AgentPreparedRuntime | undefined;
+      let preparedResolution: Parameters<AgentSessionStore['resolveToolApproval']>[3];
+      if (approved && pending.prepared) {
+        const expectedPreparedActionId = String(input.preparedActionId || '').trim();
+        if (
+          !expectedPreparedActionId
+          || expectedPreparedActionId !== pending.prepared.current.preparedActionId
+          || !input.preparedAction
+        ) {
+          throw new Error('Agent prepared action 已变化，请按最新确认内容重试');
+        }
+        finalized = await pending.prepared.finalize(input.preparedAction);
+        preparedResolution = {
+          action: finalized.action,
+          approvalInputHash: finalized.snapshotHash,
+          approvalPreview: finalized.preview,
+          expectedPreparedActionId,
+          preparedActionId: finalized.preparedActionId,
+          snapshotHash: finalized.snapshotHash,
+        };
+      } else if (approved && (input.preparedAction || input.preparedActionId)) {
+        throw new Error('当前 Agent Tool 不接受 prepared action');
+      }
+      throwIfAborted(pending.signal);
+      const activity = await pending.store.resolveToolApproval(
+        approvalId,
+        approved ? 'approved' : 'denied',
+        now(),
+        preparedResolution,
+      );
+      throwIfAborted(pending.signal);
+      if (finalized && pending.prepared) {
+        pending.executionInput = finalized.executionInput;
+        pending.prepared.current = finalized;
+        pending.approval = {
+          ...pending.approval,
+          preparation: {
+            action: finalized.action,
+            preparedActionId: finalized.preparedActionId,
+            snapshotHash: finalized.snapshotHash,
+          },
+          preview: finalized.preview,
+        };
+      }
+      await updateRunAndEmit(
+        pending.sender,
+        pending.store,
+        pending.approval.sessionId,
+        pending.approval.runId,
+        {
+          currentStep: approved ? `执行 ${pending.approval.call.name}` : '用户已取消操作',
+          status: 'running',
+          updatedAt: now(),
+        },
+      );
 
-    if (!approved) {
-      pending.resolve({ activity, approved: false });
-      return { approved: false };
+      if (!approved) {
+        pending.resolve({ activity, approved: false });
+        return { approved: false };
+      }
+
+      if (pending.executor !== 'renderer') {
+        pending.resolve({ activity, approved: true });
+        return { approved: true };
+      }
+
+      const execution = toolBroker.prepareRendererExecution({
+        appContext: pending.appContext,
+        executionInput: pending.executionInput,
+        ownerScope: pending.ownerScope,
+        ownerWebContentsId: pending.ownerWebContentsId,
+        onProgress: pending.onProgress,
+        onCancel: pending.onCancel,
+        runId: pending.approval.runId,
+        sessionId: pending.approval.sessionId,
+        signal: pending.signal,
+        timeoutMs: pending.timeoutMs,
+        toolName: pending.approval.call.name,
+      });
+      pending.resolve({ activity, approved: true, execution: execution.outcome });
+      return { approved: true, execution: execution.request };
+    } finally {
+      if (pendingApprovals.get(approvalId) === pending) pending.resolving = false;
     }
-
-    if (pending.executor !== 'renderer') {
-      pending.resolve({ activity, approved: true });
-      return { approved: true };
-    }
-
-    const execution = toolBroker.prepareRendererExecution({
-      appContext: pending.appContext,
-      executionInput: pending.executionInput,
-      ownerScope: pending.ownerScope,
-      ownerWebContentsId: pending.ownerWebContentsId,
-      onProgress: pending.onProgress,
-      onCancel: pending.onCancel,
-      runId: pending.approval.runId,
-      sessionId: pending.approval.sessionId,
-      signal: pending.signal,
-      timeoutMs: pending.timeoutMs,
-      toolName: pending.approval.call.name,
-    });
-    pending.resolve({ activity, approved: true, execution: execution.outcome });
-    return { approved: true, execution: execution.request };
   }
 
   function waitForInteraction(input: {
@@ -799,6 +931,13 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     return toolBroker.completeRendererExecution(ownerWebContentsId, input);
   }
 
+  function completeToolPreparation(
+    ownerWebContentsId: number,
+    input: AgentToolPrepareCompletion,
+  ): boolean {
+    return toolPrepareBroker.completeRenderer(ownerWebContentsId, input);
+  }
+
   function markToolExecutionCommitted(
     ownerWebContentsId: number,
     input: AgentToolExecutionCommit,
@@ -932,6 +1071,72 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       runId: String(input?.runId || ''),
       sessionId: String(input?.sessionId || ''),
     });
+  }
+
+  async function saveMediaArtifact(
+    sender: WebContents,
+    input: AgentMediaArtifactSaveRequest,
+  ): Promise<AgentMediaArtifactSaveResult> {
+    const purpose = input?.purpose === 'destination' || input?.purpose === 'upload_fallback'
+      ? input.purpose
+      : null;
+    const capability = toolBroker.claimRendererCapability(sender.id, {
+      capability: 'media.extractAudio.save-local',
+      executionId: input?.executionId,
+      libraryId: Number(input?.libraryId),
+      ownerScope: input?.ownerScope,
+      runId: input?.runId,
+      sessionId: input?.sessionId,
+    }, 'media.extractAudio');
+    if (!purpose || !capability.executionInput || typeof capability.executionInput !== 'object') {
+      throw new Error('本机保存执行参数无效');
+    }
+    const executionInput = capability.executionInput as Record<string, unknown>;
+    const destination = String(executionInput.destination || '');
+    const fallbackPolicy = String(executionInput.fallbackPolicy || '');
+    const outputFileName = String(executionInput.outputFileName || '').trim();
+    const preparedActionId = String(executionInput.preparedActionId || '').trim();
+    const snapshotHash = String(executionInput.snapshotHash || '').trim();
+    const purposeAllowed = purpose === 'destination'
+      ? destination === 'local'
+      : destination === 'library' && fallbackPolicy === 'prompt_local';
+    if (
+      !purposeAllowed
+      || outputFileName !== String(input.defaultFileName || '').trim()
+      || !preparedActionId
+      || preparedActionId !== String(input.preparedActionId || '').trim()
+      || !snapshotHash
+      || snapshotHash !== String(input.snapshotHash || '').trim()
+    ) {
+      throw new Error('本机保存目标与冻结后的 Agent 动作不匹配');
+    }
+    const owner = {
+      executionId: String(input.executionId || ''),
+      ownerWebContentsId: sender.id,
+      runId: String(input.runId || ''),
+      sessionId: String(input.sessionId || ''),
+    };
+    if (!mediaArtifactStore.getOwned) {
+      throw new Error('当前运行时不支持 Agent 本机保存');
+    }
+    const artifact = mediaArtifactStore.getOwned(String(input.artifactId || ''), owner);
+    const task = saveMediaArtifactAs({
+      artifact,
+      defaultFileName: outputFileName,
+      sender,
+      signal: capability.signal,
+    });
+    const activeSave: ActiveMediaArtifactSave = {
+      ownerWebContentsId: sender.id,
+      runId: String(input.runId || ''),
+      task,
+    };
+    activeMediaArtifactSaves.add(activeSave);
+    try {
+      return await task;
+    } finally {
+      activeMediaArtifactSaves.delete(activeSave);
+    }
   }
 
   async function executeToolCall(
@@ -1118,35 +1323,172 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         risk: registeredTool?.risk || 'external',
       };
     }
-    let decision = preflightDecision || (call.inputError
-      ? { behavior: 'deny' as const, message: call.inputError, risk: registeredTool?.risk || 'external' as const }
-      : tool
-        ? await assessAgentToolPermission(tool, call.input, executionContext)
-        : {
-            behavior: 'deny' as const,
-            message: `Agent Tool 不存在：${call.name}`,
-            risk: 'external' as const,
-          });
+    const usesRendererPreparation = Boolean(
+      tool?.createRendererPrepareRequest && tool.finalizeRendererPreparation,
+    );
+    let decision: AgentToolPermissionDecision;
     let rendererExecutionInput: unknown;
-    if (
-      decision.behavior !== 'deny'
-      && (tool?.executor || 'main') === 'renderer'
-    ) {
-      if (!tool?.createRendererRequest) {
+    let preparedApproval: PendingAgentApproval['prepared'];
+    let approvalId: string | undefined;
+
+    if (!preflightDecision && !call.inputError && tool && usesRendererPreparation) {
+      const validation = await tool.validate?.(call.input, executionContext);
+      if (validation && !validation.ok) {
         decision = {
           behavior: 'deny',
-          message: `工具 ${call.name} 缺少 Renderer 执行契约`,
-          risk: registeredTool?.risk || 'write',
+          message: validation.message,
+          risk: tool.risk,
         };
       } else {
+        activity = await store.createToolRun({
+          callId: call.id,
+          id: toolRunId,
+          input: call.input,
+          now: now(),
+          permissionBehavior: tool.risk === 'read' ? 'allow' : 'ask',
+          runId,
+          status: 'preparing',
+          toolKind: tool.kind,
+          toolName: call.name,
+        });
+        emit(sender, {
+          activity,
+          call: { id: call.id, input: call.input, name: call.name },
+          runId,
+          sessionId,
+          type: 'tool-started',
+        });
+        await updateRunAndEmit(sender, store, sessionId, runId, {
+          currentStep: `准备 ${call.name}`,
+          status: 'preparing',
+          updatedAt: now(),
+        });
         try {
-          rendererExecutionInput = tool.createRendererRequest(call.input, executionContext);
+          const prepareInput = tool.createRendererPrepareRequest!(call.input, executionContext);
+          const preparation = toolPrepareBroker.prepareRenderer({
+            appContext: input.appContext,
+            callId: call.id,
+            inputHash: hashToolInput(call.input),
+            onCancel: prepareId => emit(sender, {
+              prepareId,
+              runId,
+              sessionId,
+              type: 'tool-prepare-cancelled',
+            }),
+            ownerScope: input.ownerScope,
+            ownerWebContentsId: sender.id,
+            prepareInput,
+            runId,
+            sessionId,
+            signal,
+            toolRunId,
+            toolName: call.name,
+          });
+          emit(sender, {
+            preparation: preparation.request,
+            runId,
+            sessionId,
+            type: 'tool-prepare-requested',
+          });
+          const rendererPreparation = await preparation.outcome;
+          const finalizePrepared = async (requestedAction?: AgentPreparedActionPublic) => (
+            createPreparedRuntime(await tool.finalizeRendererPreparation!(
+              call.input,
+              rendererPreparation,
+              requestedAction,
+              executionContext,
+            ))
+          );
+          const prepared = await finalizePrepared();
+          decision = prepared.permissionBehavior === 'ask'
+            ? { behavior: 'ask', preview: prepared.preview, risk: tool.risk }
+            : { behavior: 'allow', risk: tool.risk };
+          rendererExecutionInput = prepared.executionInput;
+          approvalId = prepared.permissionBehavior === 'ask' ? crypto.randomUUID() : undefined;
+          preparedApproval = {
+            current: prepared,
+            finalize: finalizePrepared,
+          };
+          activity = await store.completeToolPreparation({
+            action: prepared.action,
+            approvalId: approvalId || crypto.randomUUID(),
+            approvalInputHash: prepared.snapshotHash,
+            approvalPreview: prepared.preview,
+            id: toolRunId,
+            permissionBehavior: prepared.permissionBehavior,
+            preparedActionId: prepared.preparedActionId,
+            snapshotHash: prepared.snapshotHash,
+          });
+          emit(sender, {
+            activity,
+            call: { id: call.id, input: call.input, name: call.name },
+            runId,
+            sessionId,
+            type: 'tool-started',
+          });
+          await updateRunAndEmit(sender, store, sessionId, runId, {
+            currentStep: prepared.permissionBehavior === 'ask'
+              ? `等待确认 ${call.name}`
+              : `执行 ${call.name}`,
+            status: prepared.permissionBehavior === 'ask' ? 'awaiting_approval' : 'running',
+            updatedAt: now(),
+          });
         } catch (error) {
+          if (isAbortError(error, signal)) {
+            activity = await store.completeToolRun(
+              toolRunId,
+              { message: 'Agent Tool 准备已取消', ok: false },
+              now(),
+              'cancelled',
+            );
+            throw error;
+          }
           decision = {
             behavior: 'deny',
-            message: error instanceof Error ? error.message : `${call.name} 执行参数无效`,
+            message: normalizeAgentErrorMessage(error, `${call.name} 准备失败`),
             risk: tool.risk,
           };
+          await updateRunAndEmit(sender, store, sessionId, runId, {
+            currentStep: `${call.name} 准备失败`,
+            status: 'running',
+            updatedAt: now(),
+          });
+        }
+      }
+    } else {
+      decision = preflightDecision || (call.inputError
+        ? {
+            behavior: 'deny' as const,
+            message: call.inputError,
+            risk: registeredTool?.risk || 'external' as const,
+          }
+        : tool
+          ? await assessAgentToolPermission(tool, call.input, executionContext)
+          : {
+              behavior: 'deny' as const,
+              message: `Agent Tool 不存在：${call.name}`,
+              risk: 'external' as const,
+            });
+      if (
+        decision.behavior !== 'deny'
+        && (tool?.executor || 'main') === 'renderer'
+      ) {
+        if (!tool?.createRendererRequest) {
+          decision = {
+            behavior: 'deny',
+            message: `工具 ${call.name} 缺少 Renderer 执行契约`,
+            risk: registeredTool?.risk || 'write',
+          };
+        } else {
+          try {
+            rendererExecutionInput = tool.createRendererRequest(call.input, executionContext);
+          } catch (error) {
+            decision = {
+              behavior: 'deny',
+              message: error instanceof Error ? error.message : `${call.name} 执行参数无效`,
+              risk: tool.risk,
+            };
+          }
         }
       }
     }
@@ -1167,39 +1509,41 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         return { message, ok: false };
       }
     }
-    const approvalId = decision.behavior === 'ask' ? crypto.randomUUID() : undefined;
-    activity = await store.createToolRun({
-      ...(approvalId ? { approvalId } : {}),
-      ...(decision.behavior === 'ask'
-        ? {
-            approvalInputHash: hashToolInput(call.input),
-            approvalPreview: decision.preview,
-          }
-        : {}),
-      callId: call.id,
-      id: toolRunId,
-      input: call.input,
-      now: now(),
-      permissionBehavior: decision.behavior,
-      runId,
-      status: decision.behavior === 'ask' ? 'awaiting_approval' : 'running',
-      toolKind: tool?.kind || registeredTool?.kind || 'business',
-      toolName: call.name,
-    });
-    emit(sender, {
-      activity,
-      call: { id: call.id, input: call.input, name: call.name },
-      runId,
-      sessionId,
-      type: 'tool-started',
-    });
-    await updateRunAndEmit(sender, store, sessionId, runId, {
-      currentStep: decision.behavior === 'ask'
-        ? `等待确认 ${call.name}`
-        : `执行 ${call.name}`,
-      status: decision.behavior === 'ask' ? 'awaiting_approval' : 'running',
-      updatedAt: now(),
-    });
+    if (!activity) {
+      approvalId = decision.behavior === 'ask' ? crypto.randomUUID() : undefined;
+      activity = await store.createToolRun({
+        ...(approvalId ? { approvalId } : {}),
+        ...(decision.behavior === 'ask'
+          ? {
+              approvalInputHash: hashToolInput(call.input),
+              approvalPreview: decision.preview,
+            }
+          : {}),
+        callId: call.id,
+        id: toolRunId,
+        input: call.input,
+        now: now(),
+        permissionBehavior: decision.behavior,
+        runId,
+        status: decision.behavior === 'ask' ? 'awaiting_approval' : 'running',
+        toolKind: tool?.kind || registeredTool?.kind || 'business',
+        toolName: call.name,
+      });
+      emit(sender, {
+        activity,
+        call: { id: call.id, input: call.input, name: call.name },
+        runId,
+        sessionId,
+        type: 'tool-started',
+      });
+      await updateRunAndEmit(sender, store, sessionId, runId, {
+        currentStep: decision.behavior === 'ask'
+          ? `等待确认 ${call.name}`
+          : `执行 ${call.name}`,
+        status: decision.behavior === 'ask' ? 'awaiting_approval' : 'running',
+        updatedAt: now(),
+      });
+    }
 
     let result: AgentToolResult;
     try {
@@ -1211,6 +1555,15 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         const approval: AgentToolApprovalSnapshot = {
           approvalId,
           call: { id: call.id, input: call.input, name: call.name },
+          ...(preparedApproval
+            ? {
+                preparation: {
+                  action: preparedApproval.current.action,
+                  preparedActionId: preparedApproval.current.preparedActionId,
+                  snapshotHash: preparedApproval.current.snapshotHash,
+                },
+              }
+            : {}),
           preview: decision.preview,
           runId,
           sessionId,
@@ -1228,6 +1581,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
           signal,
           store,
           timeoutMs: Math.max(1_000, tool.timeoutMs || 30_000),
+          ...(preparedApproval ? { prepared: preparedApproval } : {}),
         });
         emit(sender, {
           activity,
@@ -1875,6 +2229,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         });
       }
     } finally {
+      await waitForMediaArtifactSaves(save => save.runId === runId);
       await mediaArtifactStore.releaseRun(runId).catch(() => undefined);
       const active = activeRuns.get(sessionId);
       if (active?.runId === runId) activeRuns.delete(sessionId);
@@ -2104,7 +2459,10 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       }
     });
     toolBroker.releaseOwner(ownerWebContentsId);
-    void mediaArtifactStore.releaseOwner(ownerWebContentsId);
+    toolPrepareBroker.releaseOwner(ownerWebContentsId);
+    void waitForMediaArtifactSaves(save => save.ownerWebContentsId === ownerWebContentsId)
+      .then(() => mediaArtifactStore.releaseOwner(ownerWebContentsId))
+      .catch(() => undefined);
   }
 
   async function listSessions(
@@ -2207,6 +2565,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
   }
 
   return {
+    completeToolPreparation,
     completeToolExecution,
     deleteMemory,
     deleteSession,
@@ -2221,6 +2580,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     renameSession,
     reportToolExecutionProgress,
     resolveToolApproval,
+    saveMediaArtifact,
     submitInteraction,
     start,
     stop,

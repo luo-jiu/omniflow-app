@@ -100,6 +100,7 @@ const WorkflowCard = styled.article`
   }
 
   .agent-workflow-step[data-status='running'] .agent-workflow-step-icon,
+  .agent-workflow-step[data-status='preparing'] .agent-workflow-step-icon,
   .agent-workflow-step[data-status='awaiting_approval'] .agent-workflow-step-icon,
   .agent-workflow-step[data-status='awaiting_interaction'] .agent-workflow-step-icon {
     color: var(--semi-color-primary);
@@ -115,7 +116,8 @@ const WorkflowCard = styled.article`
     color: color-mix(in srgb, var(--app-text-muted) 72%, transparent);
   }
 
-  .agent-workflow-step[data-status='running'] .agent-workflow-step-icon svg {
+  .agent-workflow-step[data-status='running'] .agent-workflow-step-icon svg,
+  .agent-workflow-step[data-status='preparing'] .agent-workflow-step-icon svg {
     animation: agent-workflow-spin 900ms linear infinite;
   }
 
@@ -154,6 +156,7 @@ function statusIcon(status: AgentWorkflowStepStatus) {
 }
 
 const RUN_STATUS_LABELS: Record<AgentWorkflowProjection['status'], string> = {
+  preparing: '准备中',
   awaiting_approval: '等待确认',
   awaiting_interaction: '等待输入',
   cancelled: '已取消',

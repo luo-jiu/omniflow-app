@@ -30,6 +30,7 @@ export interface AgentWorkflowProjection {
 }
 
 function activityDetail(activity: AgentToolActivitySnapshot): string {
+  if (activity.status === 'preparing') return '正在准备执行目标';
   if (activity.status === 'awaiting_approval') return '等待确认';
   if (activity.status === 'awaiting_interaction') return '等待输入';
   if (activity.status === 'running') return activity.progress?.message || '正在执行';
@@ -51,7 +52,8 @@ function activityOrder(
 }
 
 function isActive(status: AgentRunSnapshot['status']): boolean {
-  return status === 'running'
+  return status === 'preparing'
+    || status === 'running'
     || status === 'awaiting_approval'
     || status === 'awaiting_interaction';
 }

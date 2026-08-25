@@ -1047,11 +1047,19 @@ describe('Agent orchestrator', () => {
       };
     });
     const mediaArtifactStore = {
+      getOwned: vi.fn(() => ({
+        artifactId: 'artifact-1',
+        directoryPath: '/tmp/agent-media',
+        fileName: 'movie-audio.m4a',
+        filePath: '/tmp/agent-media/movie-audio.m4a',
+        sizeBytes: 512,
+      })),
       release: vi.fn(async () => true),
       releaseOwner: vi.fn(async () => undefined),
       releaseRun: vi.fn(async () => undefined),
       touchExecution: vi.fn(() => true),
     };
+    const saveMediaArtifactAs = vi.fn(async () => ({ canceled: true as const }));
     const webContents = sender();
     const orchestrator = createAgentOrchestrator({
       extractMediaAudio: extractMediaAudio as never,
@@ -1063,11 +1071,44 @@ describe('Agent orchestrator', () => {
       getSessionStore: async () => store,
       mediaArtifactStore,
       runSessionRegistry: createAIServiceRunSessionRegistry(),
+      saveMediaArtifactAs,
     });
     const started = await orchestrator.start(webContents as never, {
       ...request(),
       userPrompt: '提取当前视频的音频',
     });
+    await vi.waitFor(() => {
+      expect(webContents.send).toHaveBeenCalledWith(
+        'agent:chat:event',
+        expect.objectContaining({ type: 'tool-prepare-requested' }),
+      );
+    });
+    const preparation = webContents.send.mock.calls
+      .map(call => call[1])
+      .find(event => event?.type === 'tool-prepare-requested').preparation;
+    expect(preparation).toMatchObject({
+      input: { libraryId: 3, nodeId: 8, outputFormat: 'm4a', parentId: 10 },
+      ownerScope: OWNER_SCOPE,
+      toolName: 'media.extractAudio',
+    });
+    expect(orchestrator.completeToolPreparation(webContents.id, {
+      callId: preparation.callId,
+      inputHash: preparation.inputHash,
+      libraryId: 3,
+      ownerScope: OWNER_SCOPE,
+      prepareId: preparation.prepareId,
+      result: {
+        providerBindings: {
+          m4a: {
+            providerAlias: 'local-minio',
+            providerLabel: '本机 MinIO',
+          },
+        },
+      },
+      runId: started.runId,
+      sessionId: started.sessionId,
+      toolRunId: preparation.toolRunId,
+    })).toBe(true);
     await vi.waitFor(() => {
       expect(webContents.send).toHaveBeenCalledWith(
         'agent:chat:event',
@@ -1078,26 +1119,50 @@ describe('Agent orchestrator', () => {
       .map(call => call[1])
       .find(event => event?.type === 'tool-approval-required').approval;
     expect(approval.preview).toMatchObject({ risk: 'write', title: '提取音频' });
+    expect(approval.preparation).toMatchObject({
+      action: {
+        destination: 'library',
+        outputFileName: 'movie-audio.m4a',
+        outputFormat: 'm4a',
+        parentId: 10,
+      },
+      preparedActionId: expect.any(String),
+      snapshotHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
+    });
 
-    const decision = await orchestrator.resolveToolApproval(webContents.id, {
+    const approvalDecision = {
       approvalId: approval.approvalId,
       approved: true,
       libraryId: 3,
       ownerScope: OWNER_SCOPE,
+      preparedAction: approval.preparation.action,
+      preparedActionId: approval.preparation.preparedActionId,
       runId: started.runId,
       sessionId: started.sessionId,
-    });
+    };
+    const resolvingApproval = orchestrator.resolveToolApproval(
+      webContents.id,
+      approvalDecision,
+    );
+    await expect(orchestrator.resolveToolApproval(webContents.id, approvalDecision))
+      .rejects.toThrow('正在处理');
+    const decision = await resolvingApproval;
     if (!decision.approved || !decision.execution) throw new Error('expected renderer execution');
     const execution = decision.execution;
     expect(execution).toMatchObject({
       input: {
         conflictPolicy: 'auto_rename',
+        destination: 'library',
+        fallbackPolicy: 'prompt_local',
         libraryId: 3,
         nodeId: 8,
         outputFileName: 'movie-audio.m4a',
         outputFormat: 'm4a',
         parentId: 10,
+        preparedActionId: expect.any(String),
+        snapshotHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
         sourceFileName: 'movie.mp4',
+        storageProvider: 'local-minio',
       },
       toolName: 'media.extractAudio',
     });
@@ -1123,6 +1188,39 @@ describe('Agent orchestrator', () => {
     }), expect.any(AbortSignal), expect.any(Function));
     await expect(orchestrator.extractMediaAudio(webContents.id, extractionRequest))
       .rejects.toThrow('已经使用');
+    if (!execution.input || typeof execution.input !== 'object') {
+      throw new Error('expected prepared media execution input');
+    }
+    const preparedInput = execution.input as Record<string, unknown>;
+    const saveRequest = {
+      artifactId: artifact.artifactId,
+      defaultFileName: 'movie-audio.m4a',
+      executionId: execution.executionId,
+      libraryId: 3,
+      ownerScope: OWNER_SCOPE,
+      preparedActionId: String(preparedInput.preparedActionId),
+      purpose: 'upload_fallback' as const,
+      runId: started.runId,
+      sessionId: started.sessionId,
+      snapshotHash: String(preparedInput.snapshotHash),
+    };
+    await expect(orchestrator.saveMediaArtifact({ ...webContents, id: 88 } as never, saveRequest))
+      .rejects.toThrow('无权使用');
+    await expect(orchestrator.saveMediaArtifact(webContents as never, saveRequest))
+      .resolves.toEqual({ canceled: true });
+    await expect(orchestrator.saveMediaArtifact(webContents as never, saveRequest))
+      .rejects.toThrow('已经使用');
+    expect(mediaArtifactStore.getOwned).toHaveBeenCalledWith('artifact-1', {
+      executionId: execution.executionId,
+      ownerWebContentsId: webContents.id,
+      runId: started.runId,
+      sessionId: started.sessionId,
+    });
+    expect(saveMediaArtifactAs).toHaveBeenCalledWith(expect.objectContaining({
+      defaultFileName: 'movie-audio.m4a',
+      sender: webContents,
+      signal: expect.any(AbortSignal),
+    }));
     await vi.waitFor(() => {
       expect(webContents.send).toHaveBeenCalledWith('agent:chat:event', expect.objectContaining({
         progress: { message: '音频提取完成，准备上传', percent: 60 },
@@ -1150,9 +1248,11 @@ describe('Agent orchestrator', () => {
       result: {
         data: {
           createdNodeId: 32,
+          destination: 'library',
           format: 'm4a',
           name: 'movie-audio.m4a',
           parentId: 10,
+          uploadCommitState: 'committed',
           verified: false,
         },
         message: '已提取并上传“movie-audio.m4a”',
@@ -1184,9 +1284,11 @@ describe('Agent orchestrator', () => {
       result: {
         data: {
           createdNodeId: 32,
+          destination: 'library',
           format: 'm4a',
           name: 'movie-audio.m4a',
           parentId: 10,
+          uploadCommitState: 'committed',
           verified: true,
         },
         message: '已提取并上传“movie-audio.m4a”',

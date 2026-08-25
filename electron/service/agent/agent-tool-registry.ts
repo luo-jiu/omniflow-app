@@ -9,6 +9,7 @@ import type {
   AgentInteractionResponse,
   AgentMemoryItem,
   AgentMemoryProposal,
+  AgentPreparedActionPublic,
   AgentPerceptionSnapshot,
   AgentToolProgress,
   AgentToolResult,
@@ -67,6 +68,14 @@ export type AgentToolPermissionDecision =
   | { behavior: 'ask'; preview: AgentActionPreview; risk: AgentToolRisk }
   | { behavior: 'deny'; message: string; risk: AgentToolRisk };
 
+export interface AgentToolPreparationResult {
+  decision: AgentToolPermissionDecision;
+  executionInput: unknown;
+  publicAction: AgentPreparedActionPublic;
+  /** Main-only material included in the approval hash and never persisted or projected. */
+  snapshotMaterial?: unknown;
+}
+
 export interface AgentTool {
   readonly availability?: Partial<AgentToolAvailabilityPolicy>;
   readonly assess?: (
@@ -74,6 +83,10 @@ export interface AgentTool {
     context: AgentToolExecutionContext,
   ) => AgentToolPermissionDecision | Promise<AgentToolPermissionDecision>;
   readonly createRendererRequest?: (
+    input: unknown,
+    context: AgentToolExecutionContext,
+  ) => unknown;
+  readonly createRendererPrepareRequest?: (
     input: unknown,
     context: AgentToolExecutionContext,
   ) => unknown;
@@ -95,6 +108,12 @@ export interface AgentTool {
    * identity from the immutable public definition and schema.
    */
   readonly registrationId?: string;
+  readonly finalizeRendererPreparation?: (
+    input: unknown,
+    rendererResult: unknown,
+    requestedAction: AgentPreparedActionPublic | undefined,
+    context: AgentToolExecutionContext,
+  ) => AgentToolPreparationResult | Promise<AgentToolPreparationResult>;
   readonly timeoutMs?: number;
   readonly validate?: (
     input: unknown,
@@ -294,6 +313,7 @@ function deriveRegistrationId(input: {
   name: string;
   risk: AgentToolRisk;
   timeoutMs?: number;
+  usesRendererPreparation: boolean;
   explicitRegistrationId?: unknown;
 }): string {
   const explicit = normalizeRegistrationId(input.explicitRegistrationId);
@@ -308,6 +328,7 @@ function deriveRegistrationId(input: {
     name: input.name,
     risk: input.risk,
     timeoutMs: input.timeoutMs ?? null,
+    usesRendererPreparation: input.usesRendererPreparation,
   })).digest('hex');
   return `derived:${fingerprint}`;
 }
@@ -416,6 +437,17 @@ export function createAgentToolRegistry(initialTools: AgentTool[] = []) {
       throw new Error(`Agent 控制 Tool 不能声明业务 Capability：${name}`);
     }
     const inputSchema = cloneToolInputSchema(tool.inputSchema);
+    const hasPrepareRequest = typeof tool.createRendererPrepareRequest === 'function';
+    const hasPrepareFinalizer = typeof tool.finalizeRendererPreparation === 'function';
+    if (hasPrepareRequest !== hasPrepareFinalizer) {
+      throw new Error(`Agent Tool prepare 契约不完整：${name}`);
+    }
+    if (hasPrepareRequest && (tool.executor || 'main') !== 'renderer') {
+      throw new Error(`Agent Tool prepare 只支持 Renderer executor：${name}`);
+    }
+    if (hasPrepareRequest && typeof tool.createRendererRequest === 'function') {
+      throw new Error(`Agent Tool prepare 与旧 Renderer request 契约不能并存：${name}`);
+    }
     const validator = compileToolInputSchema(inputSchemaCompiler, inputSchema);
     const registrationId = deriveRegistrationId({
       availability,
@@ -427,6 +459,7 @@ export function createAgentToolRegistry(initialTools: AgentTool[] = []) {
       name,
       risk: tool.risk,
       timeoutMs: tool.timeoutMs,
+      usesRendererPreparation: hasPrepareRequest,
     });
     const existingName = registrationIds.get(registrationId);
     if (existingName && existingName !== name) {

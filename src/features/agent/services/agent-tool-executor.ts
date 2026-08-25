@@ -12,11 +12,13 @@ import {
   getFileLink,
   uploadLocalPathAndCreateNode,
 } from '@/features/file-explorer/services/file.api';
+import { UploadCommitUnknownError } from '@/modules/upload-center/services/upload-direct';
 import {
   extractAgentMediaAudio,
   inspectAgentMedia,
   releaseAgentMediaArtifact,
   reportAgentToolExecutionProgress,
+  saveAgentMediaArtifact,
 } from './agent.api';
 import { readAgentPerception } from './agent-context.api';
 import { buildFileFullName } from '@/utils/fileTreeSettings';
@@ -35,16 +37,39 @@ interface MediaInspectExecutionInput {
   nodeId: number;
 }
 
-interface MediaExtractAudioExecutionInput {
+interface MediaExtractAudioExecutionBase {
   conflictPolicy: 'auto_rename';
   libraryId: number;
   mimeType?: string;
   nodeId: number;
   outputFileName: string;
   outputFormat: 'm4a' | 'mp3' | 'wav';
-  parentId: number;
+  preparedActionId: string;
+  snapshotHash: string;
   sourceFileName: string;
 }
+
+type MediaExtractAudioExecutionInput = MediaExtractAudioExecutionBase & (
+  | {
+      destination: 'library';
+      fallbackPolicy: 'prompt_local' | 'none';
+      parentId: number;
+      storageProvider: string;
+    }
+  | {
+      destination: 'local';
+      fallbackPolicy: 'none';
+      parentId?: never;
+      storageProvider?: never;
+    }
+);
+
+type LibraryMediaExtractAudioExecutionInput = Extract<
+  MediaExtractAudioExecutionInput,
+  { destination: 'library' }
+>;
+
+type AgentUploadCommitState = 'uncommitted' | 'commit_unknown' | 'committed';
 
 export interface AgentRendererToolOutcome {
   committed?: boolean;
@@ -62,6 +87,7 @@ export interface AgentRendererToolExecutorDependencies {
   readPerception?: (appContext: AgentAppContext) => ReturnType<typeof readAgentPerception>;
   releaseMediaArtifact?: typeof releaseAgentMediaArtifact;
   reportProgress?: typeof reportAgentToolExecutionProgress;
+  saveMediaArtifact?: typeof saveAgentMediaArtifact;
   signal?: AbortSignal;
   uploadLocalFile?: typeof uploadLocalPathAndCreateNode;
 }
@@ -79,6 +105,17 @@ function throwIfAborted(signal?: AbortSignal): void {
 function isAbortError(error: unknown, signal?: AbortSignal): boolean {
   return signal?.aborted === true
     || (error instanceof Error && error.name === 'AbortError');
+}
+
+async function submitAuthoritativeCommit(
+  callback: AgentRendererToolExecutorDependencies['onCommitted'],
+  result: AgentToolResult,
+): Promise<void> {
+  try {
+    await callback?.(result);
+  } catch {
+    // The business write is already authoritative; final completion gets one more delivery attempt.
+  }
 }
 
 function resolveCreatedNode(input: unknown, fallbackName: string): {
@@ -181,6 +218,15 @@ function normalizeMediaExtractAudioInput(
   const outputFileName = String(source.outputFileName || '').trim();
   const outputFormat = String(source.outputFormat || '').trim().toLowerCase();
   const mimeType = String(source.mimeType || '').trim() || undefined;
+  const destination = source.destination === 'library' || source.destination === 'local'
+    ? source.destination
+    : null;
+  const fallbackPolicy = source.fallbackPolicy === 'prompt_local' || source.fallbackPolicy === 'none'
+    ? source.fallbackPolicy
+    : null;
+  const preparedActionId = String(source.preparedActionId || '').trim();
+  const snapshotHash = String(source.snapshotHash || '').trim();
+  const storageProvider = String(source.storageProvider || '').trim() || undefined;
   const validFormat = outputFormat === 'm4a' || outputFormat === 'mp3' || outputFormat === 'wav';
   const hasUnsafeFileName = (value: string) => (
     !value
@@ -196,32 +242,60 @@ function normalizeMediaExtractAudioInput(
     source.conflictPolicy !== 'auto_rename'
     || !Number.isFinite(libraryId)
     || libraryId <= 0
-    || !Number.isFinite(parentId)
-    || parentId <= 0
+    || !destination
+    || !fallbackPolicy
+    || (destination === 'library' && (!Number.isFinite(parentId) || parentId <= 0))
+    || (destination === 'library' && !storageProvider)
+    || (destination === 'local' && fallbackPolicy !== 'none')
+    || (destination === 'local' && (source.parentId !== undefined || source.storageProvider !== undefined))
     || !Number.isFinite(nodeId)
     || nodeId <= 0
     || hasUnsafeFileName(sourceFileName)
     || hasUnsafeFileName(outputFileName)
     || !validFormat
     || !outputFileName.toLowerCase().endsWith(`.${outputFormat}`)
+    || !preparedActionId
+    || !snapshotHash
   ) {
     throw new Error('音频提取的执行参数无效');
   }
   if (
     libraryId !== Number(request.appContext.libraryId)
-    || parentId !== Number(request.appContext.currentDirectory?.id)
   ) {
     throw new Error('音频提取的目标上下文已经变化');
   }
-  return {
+  const base: MediaExtractAudioExecutionBase = {
     conflictPolicy: 'auto_rename',
     libraryId,
     ...(mimeType ? { mimeType } : {}),
     nodeId,
     outputFileName,
     outputFormat,
-    parentId,
+    preparedActionId,
+    snapshotHash,
     sourceFileName,
+  };
+  return destination === 'library'
+    ? {
+        ...base,
+        destination,
+        fallbackPolicy,
+        parentId,
+        storageProvider: storageProvider as string,
+      }
+    : { ...base, destination, fallbackPolicy: 'none' };
+}
+
+function buildUploadStateData(
+  state: AgentUploadCommitState,
+  input: MediaExtractAudioExecutionInput,
+): Record<string, unknown> {
+  return {
+    destination: input.destination,
+    format: input.outputFormat,
+    name: input.outputFileName,
+    ...(input.destination === 'library' ? { parentId: input.parentId } : {}),
+    uploadCommitState: state,
   };
 }
 
@@ -265,7 +339,7 @@ export async function executeAgentRendererTool(
       type: 'dir',
     });
     const committedResult = buildDirectoryCreateResult(created, input, false, false);
-    await dependencies.onCommitted?.(committedResult);
+    await submitAuthoritativeCommit(dependencies.onCommitted, committedResult);
     return await finishDirectoryCreateExecution(created, input, request, dependencies);
   } catch (error) {
     return {
@@ -341,6 +415,7 @@ async function executeMediaExtractAudio(
   const getMediaFileLink = dependencies.getMediaFileLink || getFileLink;
   const extractMediaAudio = dependencies.extractMediaAudio || extractAgentMediaAudio;
   const releaseMediaArtifact = dependencies.releaseMediaArtifact || releaseAgentMediaArtifact;
+  const saveMediaArtifact = dependencies.saveMediaArtifact || saveAgentMediaArtifact;
   const uploadLocalFile = dependencies.uploadLocalFile || uploadLocalPathAndCreateNode;
   const reportProgress = dependencies.reportProgress || reportAgentToolExecutionProgress;
   let artifactId = '';
@@ -394,6 +469,52 @@ async function executeMediaExtractAudio(
       throw new Error('音频提取返回了无效的临时产物');
     }
     throwIfAborted(signal);
+    if (input.destination === 'local') {
+      emitProgress({ message: '请选择本机保存位置', percent: 90 });
+      let saved;
+      try {
+        saved = await saveMediaArtifact({
+          artifactId,
+          defaultFileName: input.outputFileName,
+          executionId: request.executionId,
+          libraryId: input.libraryId,
+          ownerScope: request.ownerScope,
+          preparedActionId: input.preparedActionId,
+          purpose: 'destination',
+          runId: request.runId,
+          sessionId: request.sessionId,
+          snapshotHash: input.snapshotHash,
+        });
+      } catch (saveError) {
+        if (isAbortError(saveError, signal)) throw abortError();
+        return {
+          result: {
+            data: buildUploadStateData('uncommitted', input),
+            message: '本机保存未完成',
+            ok: false,
+          },
+        };
+      }
+      if (saved.canceled) {
+        return {
+          result: {
+            data: buildUploadStateData('uncommitted', input),
+            message: '用户取消了本机保存',
+            ok: false,
+          },
+        };
+      }
+      const committedResult: AgentToolResult = {
+        data: {
+          ...buildUploadStateData('uncommitted', input),
+          name: saved.fileName,
+        },
+        message: `已提取并保存“${saved.fileName}”到本机`,
+        ok: true,
+      };
+      await submitAuthoritativeCommit(dependencies.onCommitted, committedResult);
+      return { committed: true, result: committedResult };
+    }
     emitProgress({ message: '正在上传提取后的音频', percent: 65 });
     const created = await uploadLocalFile(
       artifact.filePath,
@@ -402,6 +523,7 @@ async function executeMediaExtractAudio(
       {
         conflictPolicy: input.conflictPolicy,
         contentType: artifact.mimeType,
+        storageProvider: input.storageProvider,
         onProgress: (uploadedBytes) => {
           if (signal?.aborted) return;
           const ratio = Math.max(0, Math.min(1, uploadedBytes / artifact.sizeBytes));
@@ -417,11 +539,77 @@ async function executeMediaExtractAudio(
       },
     );
     const committedResult = buildMediaExtractAudioResult(created, input, false, false);
-    await dependencies.onCommitted?.(committedResult);
+    await submitAuthoritativeCommit(dependencies.onCommitted, committedResult);
     emitProgress({ message: '音频已上传，正在刷新目录', percent: 99 });
     return await finishMediaExtractAudioExecution(created, input, request, dependencies);
   } catch (error) {
     if (isAbortError(error, signal)) throw abortError();
+    if (error instanceof UploadCommitUnknownError) {
+      return {
+        result: {
+          data: buildUploadStateData('commit_unknown', input),
+          message: '音频上传的提交状态暂时无法确认；请稍后检查目标目录，不要重复执行',
+          ok: false,
+        },
+      };
+    }
+    if (artifactId && input.destination === 'library') {
+      if (input.fallbackPolicy === 'prompt_local') {
+        try {
+          emitProgress({ message: '资料库上传未提交，请选择本机保存位置', percent: 90 });
+          const saved = await saveMediaArtifact({
+            artifactId,
+            defaultFileName: input.outputFileName,
+            executionId: request.executionId,
+            libraryId: input.libraryId,
+            ownerScope: request.ownerScope,
+            preparedActionId: input.preparedActionId,
+            purpose: 'upload_fallback',
+            runId: request.runId,
+            sessionId: request.sessionId,
+            snapshotHash: input.snapshotHash,
+          });
+          if (saved.canceled) {
+            return {
+              result: {
+                data: buildUploadStateData('uncommitted', input),
+                message: '资料库上传未提交，用户取消了本机保存',
+                ok: false,
+              },
+            };
+          }
+          const committedResult: AgentToolResult = {
+            data: {
+              destination: 'local',
+              fallbackFrom: 'library',
+              format: input.outputFormat,
+              name: saved.fileName,
+              uploadCommitState: 'uncommitted',
+            },
+            message: `资料库上传未提交，已将“${saved.fileName}”保存到本机`,
+            ok: true,
+          };
+          await submitAuthoritativeCommit(dependencies.onCommitted, committedResult);
+          return { committed: true, result: committedResult };
+        } catch (saveError) {
+          if (isAbortError(saveError, signal)) throw abortError();
+          return {
+            result: {
+              data: buildUploadStateData('uncommitted', input),
+              message: '资料库上传未提交，本机保存也未完成',
+              ok: false,
+            },
+          };
+        }
+      }
+      return {
+        result: {
+          data: buildUploadStateData('uncommitted', input),
+          message: '音频已提取，但资料库上传未提交',
+          ok: false,
+        },
+      };
+    }
     return {
       result: {
         message: error instanceof Error ? error.message : '音频提取失败',
@@ -445,7 +633,7 @@ async function executeMediaExtractAudio(
 
 async function finishMediaExtractAudioExecution(
   created: Awaited<ReturnType<typeof uploadLocalPathAndCreateNode>>,
-  input: MediaExtractAudioExecutionInput,
+  input: LibraryMediaExtractAudioExecutionInput,
   request: AgentToolExecutionRequest,
   dependencies: AgentRendererToolExecutorDependencies,
 ): Promise<AgentRendererToolOutcome> {
@@ -476,17 +664,16 @@ async function finishMediaExtractAudioExecution(
 
 function buildMediaExtractAudioResult(
   created: Awaited<ReturnType<typeof uploadLocalPathAndCreateNode>>,
-  input: MediaExtractAudioExecutionInput,
+  input: LibraryMediaExtractAudioExecutionInput,
   verified: boolean,
   verificationFailed: boolean,
 ): AgentToolResult {
   const createdNode = resolveCreatedNode(created, input.outputFileName);
   return {
     data: {
+      ...buildUploadStateData('committed', input),
       ...(createdNode.id ? { createdNodeId: createdNode.id } : {}),
-      format: input.outputFormat,
       name: createdNode.name,
-      parentId: input.parentId,
       verified,
     },
     message: verificationFailed

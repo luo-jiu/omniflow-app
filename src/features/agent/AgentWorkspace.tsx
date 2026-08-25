@@ -723,8 +723,8 @@ export default function AgentWorkspace({
               libraryId={libraryId}
               messages={session.messages}
               onAction={handlePresentationAction}
-              onResolveApproval={(approval, approved) => {
-                void session.resolveApproval(approval, approved);
+              onResolveApproval={(approval, approved, preparedAction) => {
+                void session.resolveApproval(approval, approved, preparedAction);
               }}
               runs={session.runs}
               toolActivities={session.toolActivities}

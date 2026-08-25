@@ -11,6 +11,7 @@ import styled from 'styled-components';
 import type {
   AgentPresentationAction,
   AgentPresentationBlock,
+  AgentPreparedActionPublic,
   AgentToolActivitySnapshot,
   AgentToolApprovalSnapshot,
 } from '@/shared/agent/agent.types';
@@ -63,6 +64,11 @@ const ActivityCard = styled.article`
     color: var(--semi-color-primary);
   }
 
+  &[data-status='preparing'] .agent-activity-status-icon {
+    color: var(--semi-color-primary);
+  }
+
+  &[data-status='preparing'] .agent-activity-status-icon svg,
   &[data-status='running'] .agent-activity-status-icon svg {
     animation: agent-activity-spin 900ms linear infinite;
   }
@@ -183,6 +189,7 @@ const ActivityCard = styled.article`
 `;
 
 const STATUS_LABELS: Record<AgentToolActivitySnapshot['status'], string> = {
+  preparing: '准备中',
   awaiting_approval: '等待确认',
   awaiting_interaction: '等待输入',
   cancelled: '已取消',
@@ -287,7 +294,11 @@ interface AgentToolActivityCardProps {
   interactionBusy: boolean;
   libraryId: number;
   onAction?: (action: AgentPresentationAction) => void;
-  onResolveApproval: (approval: AgentToolApprovalSnapshot, approved: boolean) => void;
+  onResolveApproval: (
+    approval: AgentToolApprovalSnapshot,
+    approved: boolean,
+    preparedAction?: AgentPreparedActionPublic,
+  ) => void;
 }
 
 export default function AgentToolActivityCard({
@@ -302,6 +313,7 @@ export default function AgentToolActivityCard({
     const approval: AgentToolApprovalSnapshot = {
       approvalId: activity.approval.approvalId,
       call: activity.call,
+      ...(activity.preparation ? { preparation: activity.preparation } : {}),
       preview: activity.approval.preview,
       runId: activity.runId,
       sessionId: activity.sessionId,
@@ -310,7 +322,10 @@ export default function AgentToolActivityCard({
       <AgentConfirmationCard
         approval={approval}
         busy={approvalBusy}
-        onResolve={approved => onResolveApproval(approval, approved)}
+        libraryId={libraryId}
+        onResolve={(approved, preparedAction) => (
+          onResolveApproval(approval, approved, preparedAction)
+        )}
       />
     );
   }

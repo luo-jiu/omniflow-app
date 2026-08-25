@@ -223,10 +223,13 @@ describe('Agent tool broker', () => {
       sessionId: 'session-1',
     };
 
-    expect(broker.claimRendererCapability(77, claim, 'media.inspect')).toMatchObject({
+    const capability = broker.claimRendererCapability(77, claim, 'media.inspect');
+    expect(capability).toMatchObject({
       executionInput: { fileName: 'movie.mp4', libraryId: 3, nodeId: 8 },
-      signal: controller.signal,
+      signal: expect.any(AbortSignal),
     });
+    expect(capability.signal).not.toBe(controller.signal);
+    expect(capability.signal.aborted).toBe(false);
     expect(() => broker.claimRendererCapability(77, claim, 'media.inspect'))
       .toThrow('已经使用');
     expect(() => broker.claimRendererCapability(88, {
@@ -296,11 +299,20 @@ describe('Agent tool broker', () => {
         onCancel,
         timeoutMs: 1,
       });
+      const capability = broker.claimRendererCapability(77, {
+        capability: 'media.extractAudio.save-local',
+        executionId: 'execution-timeout',
+        libraryId: 3,
+        ownerScope: OWNER_SCOPE,
+        runId: 'run-1',
+        sessionId: 'session-1',
+      }, 'directory.create');
       const rejected = expect(prepared.outcome).rejects.toThrow('执行超时');
 
       await vi.advanceTimersByTimeAsync(1_000);
 
       await rejected;
+      expect(capability.signal.aborted).toBe(true);
       expect(onCancel).toHaveBeenCalledWith('execution-timeout');
       expect(() => broker.completeRendererExecution(77, {
         executionId: 'execution-timeout',

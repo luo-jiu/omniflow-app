@@ -273,6 +273,9 @@ interface Window {
     submitInteraction: (
       input: import('@/shared/agent/agent.types').AgentInteractionSubmissionRequest,
     ) => Promise<import('@/shared/agent/agent.types').AgentInteractionSubmissionResult>;
+    completeToolPreparation: (
+      input: import('@/shared/agent/agent.types').AgentToolPrepareCompletion,
+    ) => Promise<boolean>;
     completeToolExecution: (
       input: import('@/shared/agent/agent.types').AgentToolExecutionCompletion,
     ) => Promise<boolean>;
@@ -291,6 +294,9 @@ interface Window {
     releaseMediaArtifact: (
       input: import('@/shared/agent/agent.types').AgentMediaArtifactReleaseRequest,
     ) => Promise<boolean>;
+    saveMediaArtifact: (
+      input: import('@/shared/agent/agent.types').AgentMediaArtifactSaveRequest,
+    ) => Promise<import('@/shared/agent/agent.types').AgentMediaArtifactSaveResult>;
     listSessions: (
       ownerScope: import('@/shared/agent/agent.types').AgentOwnerScope,
       libraryId: number,

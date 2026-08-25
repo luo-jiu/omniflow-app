@@ -3,6 +3,7 @@ import styled from 'styled-components';
 
 import type {
   AgentMessage,
+  AgentPreparedActionPublic,
   AgentPresentationAction,
   AgentRunSnapshot,
   AgentToolActivitySnapshot,
@@ -47,7 +48,11 @@ interface AgentTimelineProps {
   libraryId: number;
   messages: AgentMessage[];
   onAction?: (action: AgentPresentationAction) => void;
-  onResolveApproval: (approval: AgentToolApprovalSnapshot, approved: boolean) => void;
+  onResolveApproval: (
+    approval: AgentToolApprovalSnapshot,
+    approved: boolean,
+    preparedAction?: AgentPreparedActionPublic,
+  ) => void;
   runs: AgentRunSnapshot[];
   toolActivities: AgentToolActivitySnapshot[];
 }

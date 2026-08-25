@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 
-import { assessAgentToolPermission } from '../agent-permission-gate';
 import {
   deriveAgentAudioOutputFileName,
   mediaExtractAudioTool,
@@ -32,39 +31,122 @@ function context(selectedNodeIds: number[] = [8]) {
 describe('media.extractAudio Agent tool', () => {
   it('binds one perceived file to a deterministic current-directory output', async () => {
     const executionContext = context();
-    await expect(assessAgentToolPermission(
-      mediaExtractAudioTool,
+    expect(mediaExtractAudioTool.validate?.({ format: 'mp3' }, executionContext)).toEqual({ ok: true });
+    expect(mediaExtractAudioTool.createRendererPrepareRequest?.(
       { format: 'mp3' },
       executionContext,
-    )).resolves.toMatchObject({
-      behavior: 'ask',
-      preview: {
-        description: '将从“演示:视频.mp4”提取音频，并上传到“视频”。',
-        title: '提取音频',
-      },
-    });
-    expect(mediaExtractAudioTool.createRendererRequest?.(
-      { format: 'mp3' },
-      executionContext,
-    )).toEqual({
-      conflictPolicy: 'auto_rename',
+    )).toMatchObject({
       libraryId: 3,
-      mimeType: 'video/mp4',
       nodeId: 8,
-      outputFileName: '演示_视频-audio.mp3',
       outputFormat: 'mp3',
       parentId: 10,
       sourceFileName: '演示:视频.mp4',
+    });
+
+    const prepared = await mediaExtractAudioTool.finalizeRendererPreparation?.(
+      { format: 'mp3' },
+      {
+        providerBindings: {
+          mp3: {
+            providerAlias: 'local-minio',
+            providerLabel: '本机 MinIO',
+          },
+        },
+      },
+      undefined,
+      executionContext,
+    );
+    expect(prepared).toMatchObject({
+      decision: {
+        behavior: 'ask',
+        preview: {
+          description: '将从“演示:视频.mp4”提取音频，并上传到“视频”。',
+          title: '提取音频',
+        },
+      },
+      executionInput: {
+        conflictPolicy: 'auto_rename',
+        destination: 'library',
+        fallbackPolicy: 'prompt_local',
+        libraryId: 3,
+        mimeType: 'video/mp4',
+        nodeId: 8,
+        outputFileName: '演示_视频-audio.mp3',
+        outputFormat: 'mp3',
+        parentId: 10,
+        sourceFileName: '演示:视频.mp4',
+        storageProvider: 'local-minio',
+      },
+      publicAction: {
+        destination: 'library',
+        outputFileName: '演示_视频-audio.mp3',
+        outputFormat: 'mp3',
+        parentId: 10,
+      },
+      snapshotMaterial: { storageProviderBinding: 'local-minio' },
     });
   });
 
   it('rejects unsupported formats and unsafe nodes', async () => {
     expect(() => normalizeAgentAudioOutputFormat({ format: 'exe' })).toThrow('只支持');
-    await expect(assessAgentToolPermission(
-      mediaExtractAudioTool,
-      { nodeId: 9 },
-      context([]),
-    )).resolves.toMatchObject({ behavior: 'deny' });
+    expect(mediaExtractAudioTool.validate?.({ nodeId: 9 }, context([])))
+      .toMatchObject({ ok: false });
+  });
+
+  it('falls back to a canonical local action when library storage is unavailable', async () => {
+    const executionContext = context();
+    const prepared = await mediaExtractAudioTool.finalizeRendererPreparation?.(
+      {},
+      { providerBindings: {} },
+      undefined,
+      executionContext,
+    );
+
+    expect(prepared).toMatchObject({
+      executionInput: {
+        destination: 'local',
+        fallbackPolicy: 'none',
+        outputFileName: '演示_视频-audio.m4a',
+      },
+      publicAction: {
+        destination: 'local',
+        fallbackPolicy: 'none',
+        targetLabel: '本机（执行时选择位置）',
+      },
+      snapshotMaterial: { storageProviderBinding: null },
+    });
+    expect(prepared?.executionInput).not.toHaveProperty('parentId');
+    expect(prepared?.executionInput).not.toHaveProperty('storageProvider');
+    expect(prepared?.publicAction).not.toHaveProperty('parentId');
+  });
+
+  it('rebinds the physical provider when approval changes the output format', async () => {
+    const prepared = await mediaExtractAudioTool.finalizeRendererPreparation?.(
+      {},
+      {
+        providerBindings: {
+          m4a: { providerAlias: 'm4a-minio' },
+          mp3: { providerAlias: 'mp3-minio' },
+        },
+      },
+      {
+        conflictPolicy: 'auto_rename',
+        destination: 'library',
+        fallbackPolicy: 'prompt_local',
+        libraryId: 3,
+        outputFileName: 'custom.mp3',
+        outputFormat: 'mp3',
+        parentId: 10,
+        sourceNodeId: 8,
+        targetLabel: '视频',
+      },
+      context(),
+    );
+
+    expect(prepared).toMatchObject({
+      executionInput: { outputFormat: 'mp3', storageProvider: 'mp3-minio' },
+      snapshotMaterial: { storageProviderBinding: 'mp3-minio' },
+    });
   });
 
   it('derives a Windows-compatible output name without accepting a path', () => {

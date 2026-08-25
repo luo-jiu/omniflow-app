@@ -150,14 +150,18 @@ export function buildAgentToolPresentation(
   if (activity.status === 'awaiting_approval' && activity.approval?.status === 'pending') {
     return [{ approvalId: activity.approval.approvalId, type: 'approval' }];
   }
-  if (activity.status === 'running') {
+  if (activity.status === 'preparing' || activity.status === 'running') {
     return activity.progress
       ? [{
           label: activity.progress.message,
           ...(activity.progress.percent === undefined ? {} : { percent: activity.progress.percent }),
           type: 'progress',
         }]
-      : [{ label: '正在执行', tone: 'info', type: 'status' }];
+      : [{
+          label: activity.status === 'preparing' ? '正在准备执行目标' : '正在执行',
+          tone: 'info',
+          type: 'status',
+        }];
   }
   if (activity.status === 'completed') {
     const specific = TOOL_PRESENTERS[activity.call.name]?.(activity, libraryId) || [];

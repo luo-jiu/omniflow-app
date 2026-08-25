@@ -303,7 +303,8 @@ function summarizeToolActivities(
 ): AgentExecutionFact[] {
   return activities
     .filter(activity => terminalIds.has(activity.runId))
-    .filter(activity => activity.status !== 'running'
+    .filter(activity => activity.status !== 'preparing'
+      && activity.status !== 'running'
       && activity.status !== 'awaiting_approval'
       && activity.status !== 'awaiting_interaction')
     .slice(-MAX_EXECUTION_FACTS)

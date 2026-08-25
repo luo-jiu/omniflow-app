@@ -1,6 +1,8 @@
 import path from 'node:path';
 
 import { STAGED_FILE_NAME_MAX_BYTES } from '../../stagedFilePolicy';
+import type { AgentPreparedActionPublic } from '@/shared/agent/agent.types';
+import { normalizeAgentPreparedActionPublic } from '../../../../src/shared/agent/agent-prepared-action';
 import type { AgentTool } from '../agent-tool-registry';
 import { AGENT_CAPABILITY_MEDIA_FFMPEG } from '../capabilities/agent-capability-runtime';
 import { buildAgentMediaFileName, resolveAgentMediaNode } from './media-tool-node';
@@ -56,11 +58,166 @@ export function deriveAgentAudioOutputFileName(
   return `${boundedStem || 'media'}${suffix}`;
 }
 
+function normalizeAgentAudioOutputFileName(
+  value: unknown,
+  format: AgentAudioOutputFormat,
+): string {
+  const fileName = String(value || '').trim();
+  const parsed = path.parse(fileName);
+  if (
+    !fileName
+    || fileName === '.'
+    || fileName === '..'
+    || Buffer.byteLength(fileName, 'utf8') > STAGED_FILE_NAME_MAX_BYTES
+    || INVALID_FILE_NAME_CHARACTER.test(fileName)
+    || Array.from(fileName).some(character => character.charCodeAt(0) < 32)
+    || WINDOWS_RESERVED_NAME.test(parsed.name)
+    || parsed.ext.toLowerCase() !== `.${format}`
+  ) {
+    throw new Error(`输出文件名必须是有效的 .${format} 文件名`);
+  }
+  return fileName;
+}
+
+interface MediaExtractAudioProviderBinding {
+  providerAlias: string;
+  providerLabel?: string;
+}
+
+interface MediaExtractAudioPreparationResult {
+  providerBindings: Partial<Record<AgentAudioOutputFormat, MediaExtractAudioProviderBinding>>;
+}
+
+function normalizePreparationResult(input: unknown): MediaExtractAudioPreparationResult {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    return { providerBindings: {} };
+  }
+  const source = input as Record<string, unknown>;
+  const bindings = source.providerBindings && typeof source.providerBindings === 'object'
+    && !Array.isArray(source.providerBindings)
+    ? source.providerBindings as Record<string, unknown>
+    : {};
+  const providerBindings: MediaExtractAudioPreparationResult['providerBindings'] = {};
+  for (const format of AGENT_AUDIO_OUTPUT_FORMATS) {
+    const value = bindings[format];
+    if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+    const binding = value as Record<string, unknown>;
+    const providerAlias = String(binding.providerAlias || '').trim();
+    const providerLabel = String(binding.providerLabel || '').trim().slice(0, 160);
+    if (providerAlias && providerAlias.length <= 200) {
+      providerBindings[format] = {
+        providerAlias,
+        ...(providerLabel ? { providerLabel } : {}),
+      };
+    }
+  }
+  return {
+    providerBindings,
+  };
+}
+
+function buildPreparedAction(
+  input: unknown,
+  context: Parameters<NonNullable<AgentTool['validate']>>[1],
+  rendererResult: MediaExtractAudioPreparationResult,
+  requestedAction?: AgentPreparedActionPublic,
+) {
+  const node = resolveAgentMediaNode(input, context);
+  const requestedFormat = requestedAction?.outputFormat
+    ? normalizeAgentAudioOutputFormat({ format: requestedAction.outputFormat })
+    : normalizeAgentAudioOutputFormat(input);
+  const providerBinding = rendererResult.providerBindings[requestedFormat];
+  const sourceFileName = buildAgentMediaFileName(node);
+  const libraryId = Number(context.appContext.libraryId);
+  const currentParentId = Number(context.appContext.currentDirectory?.id);
+  const currentDirectoryName = String(context.appContext.currentDirectory?.name || '当前目录');
+  const defaultDestination = providerBinding ? 'library' : 'local';
+  const defaultAction: AgentPreparedActionPublic = {
+    conflictPolicy: 'auto_rename',
+    destination: defaultDestination,
+    fallbackPolicy: defaultDestination === 'library' ? 'prompt_local' : 'none',
+    libraryId,
+    outputFileName: deriveAgentAudioOutputFileName(sourceFileName, requestedFormat),
+    outputFormat: requestedFormat,
+    ...(defaultDestination === 'library' ? { parentId: currentParentId } : {}),
+    sourceNodeId: node.id,
+    targetLabel: defaultDestination === 'library'
+      ? currentDirectoryName
+      : '本机（执行时选择位置）',
+  };
+  const action = normalizeAgentPreparedActionPublic(requestedAction || defaultAction);
+  if (action.libraryId !== libraryId || action.sourceNodeId !== node.id) {
+    throw new Error('Agent prepared action 的资料库或源文件已经变化');
+  }
+  const outputFormat = normalizeAgentAudioOutputFormat({ format: action.outputFormat });
+  const outputFileName = normalizeAgentAudioOutputFileName(action.outputFileName, outputFormat);
+  if (action.destination === 'library' && !providerBinding) {
+    throw new Error('资料库存储当前不可用，请改为保存到本机');
+  }
+  const targetLabel = action.destination === 'library'
+    ? action.targetLabel
+    : '本机（执行时选择位置）';
+  const publicAction = normalizeAgentPreparedActionPublic({
+    ...action,
+    fallbackPolicy: action.destination === 'library' ? action.fallbackPolicy : 'none',
+    outputFileName,
+    outputFormat,
+    targetLabel,
+  });
+  const locationDescription = publicAction.destination === 'library'
+    ? `上传到“${publicAction.targetLabel}”`
+    : '保存到执行时选择的本机位置';
+  return {
+    decision: {
+      behavior: 'ask' as const,
+      preview: {
+        description: `将从“${sourceFileName}”提取音频，并${locationDescription}。`,
+        details: [
+          { label: '源文件', value: sourceFileName },
+          { label: '输出', value: publicAction.outputFileName },
+          { label: '格式', value: FORMAT_LABELS[outputFormat] },
+          { label: '位置', value: publicAction.targetLabel },
+          ...(publicAction.destination === 'library'
+            ? [{
+                label: '上传失败',
+                value: publicAction.fallbackPolicy === 'prompt_local'
+                  ? '提交前失败时询问保存到本机'
+                  : '不保存到本机',
+              }]
+            : []),
+        ],
+        risk: 'write' as const,
+        title: '提取音频',
+      },
+      risk: 'write' as const,
+    },
+    executionInput: {
+      conflictPolicy: publicAction.conflictPolicy,
+      destination: publicAction.destination,
+      fallbackPolicy: publicAction.fallbackPolicy,
+      libraryId,
+      ...(node.mimeType ? { mimeType: node.mimeType } : {}),
+      nodeId: node.id,
+      outputFileName: publicAction.outputFileName,
+      outputFormat,
+      ...(publicAction.parentId ? { parentId: publicAction.parentId } : {}),
+      ...(publicAction.destination === 'library' && providerBinding
+        ? { storageProvider: providerBinding.providerAlias }
+        : {}),
+      sourceFileName,
+    },
+    publicAction,
+    snapshotMaterial: publicAction.destination === 'library'
+      ? { storageProviderBinding: providerBinding?.providerAlias }
+      : { storageProviderBinding: null },
+  };
+}
+
 export const mediaExtractAudioTool: AgentTool = {
   availability: {
     requiredCapabilities: [AGENT_CAPABILITY_MEDIA_FFMPEG],
   },
-  description: '从当前可见的单个媒体文件中提取第一条音轨，并将结果上传到 OmniFlow 当前目录。支持 m4a、mp3、wav，默认 m4a；目标目录和输出文件名由安全上下文确定，每次执行前必须由用户确认。',
+  description: '从当前可见的单个媒体文件中提取第一条音轨。支持 m4a、mp3、wav，默认 m4a；执行前会准备并冻结资料库或本机目标、输出文件名、格式和安全兜底策略，再由用户确认。',
   executor: 'renderer',
   inputSchema: {
     additionalProperties: false,
@@ -98,41 +255,26 @@ export const mediaExtractAudioTool: AgentTool = {
     }
     return { ok: true };
   },
-  assess(input, context) {
+  createRendererPrepareRequest(input, context) {
     const node = resolveAgentMediaNode(input, context);
     const format = normalizeAgentAudioOutputFormat(input);
     const sourceFileName = buildAgentMediaFileName(node);
-    const outputFileName = deriveAgentAudioOutputFileName(sourceFileName, format);
-    const directoryName = String(context.appContext.currentDirectory?.name || '当前目录');
     return {
-      behavior: 'ask',
-      preview: {
-        description: `将从“${sourceFileName}”提取音频，并上传到“${directoryName}”。`,
-        details: [
-          { label: '源文件', value: sourceFileName },
-          { label: '输出', value: outputFileName },
-          { label: '格式', value: FORMAT_LABELS[format] },
-          { label: '位置', value: directoryName },
-        ],
-        risk: 'write',
-        title: '提取音频',
-      },
-      risk: 'write',
-    };
-  },
-  createRendererRequest(input, context) {
-    const node = resolveAgentMediaNode(input, context);
-    const outputFormat = normalizeAgentAudioOutputFormat(input);
-    const sourceFileName = buildAgentMediaFileName(node);
-    return {
-      conflictPolicy: 'auto_rename',
+      fileSize: Number(node.fileSize || 0),
       libraryId: Number(context.appContext.libraryId),
-      ...(node.mimeType ? { mimeType: node.mimeType } : {}),
+      mimeType: node.mimeType,
       nodeId: node.id,
-      outputFileName: deriveAgentAudioOutputFileName(sourceFileName, outputFormat),
-      outputFormat,
+      outputFormat: format,
       parentId: Number(context.appContext.currentDirectory?.id),
       sourceFileName,
     };
+  },
+  finalizeRendererPreparation(input, rendererResult, requestedAction, context) {
+    return buildPreparedAction(
+      input,
+      context,
+      normalizePreparationResult(rendererResult),
+      requestedAction,
+    );
   },
 };
