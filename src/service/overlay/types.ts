@@ -9,6 +9,7 @@ export type OverlayTargetNode = {
   key: string;
   label: string;
   libraryId: number;
+  path: string;
 };
 
 export type OverlayStorageProvider = {

@@ -1,9 +1,19 @@
 import React from 'react';
 import { Modal, Select } from '@douyinfe/semi-ui';
-import { IconFile, IconFolder } from '@douyinfe/semi-icons';
+import {
+  IconChevronDownStroked,
+  IconCrossStroked,
+  IconFile,
+  IconFolder,
+} from '@douyinfe/semi-icons';
 import styled from 'styled-components';
 import { formatSize } from '@/utils/formatSize';
 import { DirectoryTreeCompactModalStyle } from './compact-modal-style';
+import { formatStorageProviderAlias } from './storage-provider-display';
+import {
+  StorageProviderDropdownStyle,
+  StorageProviderOption,
+} from './storage-provider-option';
 import type {
   OverlayFileSummary,
   OverlayStorageProvider,
@@ -29,20 +39,11 @@ const Content = styled.div`
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 1px 0 2px;
-
-  .upload-summary {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
+  padding: 0;
 
   .upload-info-card {
     min-width: 0;
-    border: 1px solid var(--semi-color-border);
-    border-radius: 7px;
-    padding: 9px 12px;
-    background: var(--semi-color-fill-0);
+    padding: 0;
   }
 
   .upload-info-label {
@@ -54,21 +55,22 @@ const Content = styled.div`
   .upload-info-value {
     margin-top: 4px;
     font-size: 12px;
-    line-height: 1.4;
+    line-height: 1.5;
     font-weight: 600;
     color: var(--semi-color-text-0);
     word-break: break-word;
+    overflow-wrap: anywhere;
   }
 
   .provider-select {
     width: 100%;
-    margin-top: 8px;
+    margin-top: 4px;
   }
 
   .provider-select.semi-select,
   .provider-select .semi-select {
-    height: 46px;
-    max-height: 46px !important;
+    height: 30px;
+    max-height: 30px !important;
     overflow: hidden !important;
   }
 
@@ -80,13 +82,13 @@ const Content = styled.div`
   }
 
   .provider-select .semi-select-selection {
-    height: 46px;
-    min-height: 46px;
-    max-height: 46px;
+    height: 30px;
+    min-height: 30px;
+    max-height: 30px;
     align-items: center;
     overflow: hidden !important;
-    padding-top: 5px;
-    padding-bottom: 5px;
+    padding-top: 0;
+    padding-bottom: 0;
   }
 
   .provider-select .semi-select-selection-placeholder,
@@ -99,8 +101,8 @@ const Content = styled.div`
   .provider-select .semi-select-selection-text {
     max-height: none !important;
     overflow: hidden !important;
-    white-space: normal;
-    line-height: 1.35;
+    white-space: nowrap;
+    line-height: 1.25;
   }
 
   .provider-select .semi-select-selection-text::-webkit-scrollbar {
@@ -108,38 +110,20 @@ const Content = styled.div`
   }
 
   .provider-select .semi-select-arrow {
+    display: inline-flex;
+    width: 24px;
+    flex: 0 0 24px;
     align-self: center;
-  }
-
-  .provider-option {
-    display: flex;
-    min-width: 0;
-    flex-direction: column;
-    gap: 3px;
-    padding: 4px 0;
-  }
-
-  .provider-option-title {
-    min-width: 0;
-    word-break: break-word;
+    align-items: center;
+    justify-content: center;
+    color: var(--semi-color-text-1);
     font-size: 12px;
-    line-height: 1.35;
-    color: var(--semi-color-text-0);
-  }
-
-  .provider-option-meta {
-    min-width: 0;
-    word-break: break-word;
-    font-size: 11px;
-    line-height: 1.35;
-    color: var(--semi-color-text-2);
   }
 
   .provider-selected {
     display: flex;
     min-width: 0;
-    flex-direction: column;
-    gap: 1px;
+    align-items: center;
     overflow: hidden;
     padding-right: 6px;
   }
@@ -155,23 +139,12 @@ const Content = styled.div`
     color: var(--semi-color-text-0);
   }
 
-  .provider-selected-meta {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-size: 11px;
-    line-height: 1.25;
-    color: var(--semi-color-text-2);
-  }
-
   .file-list {
-    max-height: 220px;
+    max-height: 180px;
     overflow-y: auto;
-    border: 1px solid var(--semi-color-border);
-    border-radius: 7px;
-    padding: 4px 8px;
-    background: var(--semi-color-bg-0);
+    border: 0;
+    padding: 0;
+    background: transparent;
   }
 
   .file-row {
@@ -193,10 +166,16 @@ const Content = styled.div`
     min-width: 0;
     align-items: center;
     gap: 6px;
+    overflow: hidden;
     color: var(--semi-color-text-0);
   }
 
+  .file-name .semi-icon {
+    flex: 0 0 auto;
+  }
+
   .file-name-text {
+    flex: 1 1 auto;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -207,6 +186,7 @@ const Content = styled.div`
     flex-shrink: 0;
     font-size: 11px;
     color: var(--semi-color-text-2);
+    white-space: nowrap;
   }
 
   .upload-footer {
@@ -232,8 +212,8 @@ const UploadConfirmModal: React.FC<UploadConfirmModalProps> = ({
   onCancel,
 }) => {
   const containsFolderStructure = fileSummaries.some(item => (item.relativePath || '').includes('/'));
-  const modalTitle = title || (containsFolderStructure ? '文件夹上传确认' : '文件上传确认');
-  const confirmText = okText || '确定上传';
+  const modalTitle = title || (containsFolderStructure ? '上传文件夹' : '上传文件');
+  const confirmText = okText || '确定';
   const directoryLabel = targetLabel || '上传目录';
   const summaryTaskLabel = taskLabel || '上传任务';
   const fallbackProvider = defaultProvider || providers[0]?.alias || '';
@@ -287,16 +267,12 @@ const UploadConfirmModal: React.FC<UploadConfirmModalProps> = ({
   const selectedProviderInfo = providers.find(provider => provider.alias === selectedProvider);
   const renderSelectedProvider = React.useCallback(() => {
     if (!selectedProviderInfo) {
-      return selectedProvider || '选择存储 Provider';
+      return selectedProvider || '选择存储桶';
     }
     return (
       <div className="provider-selected">
         <div className="provider-selected-title">
-          {selectedProviderInfo.label || selectedProviderInfo.alias}
-          {selectedProviderInfo.alias === defaultProvider ? '（默认）' : ''}
-        </div>
-        <div className="provider-selected-meta">
-          {selectedProviderInfo.alias} · {selectedProviderInfo.endpoint} · {selectedProviderInfo.bucket}
+          {formatStorageProviderAlias(selectedProviderInfo, defaultProvider)}
         </div>
       </div>
     );
@@ -305,8 +281,10 @@ const UploadConfirmModal: React.FC<UploadConfirmModalProps> = ({
   return (
     <>
       <DirectoryTreeCompactModalStyle />
+      <StorageProviderDropdownStyle />
       <Modal
-        className="directory-tree-compact-modal"
+        className="directory-tree-compact-modal directory-tree-upload-modal"
+        closeIcon={<IconCrossStroked size="small" />}
         title={modalTitle}
         visible={visible}
         onOk={() => onConfirm(selectedProvider)}
@@ -316,44 +294,11 @@ const UploadConfirmModal: React.FC<UploadConfirmModalProps> = ({
         cancelText="取消"
         maskClosable={false}
         centered
-        width={560}
+        width={420}
+        style={{ maxWidth: 'calc(100vw - 32px)' }}
       >
         {fileSummaries.length > 0 && targetNode && (
           <Content>
-            <div className="upload-summary">
-              <div className="upload-info-card">
-                <div className="upload-info-label">{directoryLabel}</div>
-                <div className="upload-info-value">{targetNode.label}</div>
-              </div>
-              <div className="upload-info-card">
-                <div className="upload-info-label">存储位置</div>
-                <Select
-                  className="provider-select"
-                  value={selectedProvider}
-                  disabled={providers.length === 0}
-                  placeholder="选择存储 Provider"
-                  size="small"
-                  dropdownStyle={{ maxHeight: 180, overflowY: 'auto' }}
-                  onChange={(value) => setSelectedProvider(String(value || ''))}
-                  renderSelectedItem={renderSelectedProvider}
-                >
-                  {providers.map((provider) => (
-                    <Select.Option key={provider.alias} value={provider.alias}>
-                      <div className="provider-option">
-                        <div className="provider-option-title">
-                          {provider.label || provider.alias}
-                          {provider.alias === defaultProvider ? '（默认）' : ''}
-                        </div>
-                        <div className="provider-option-meta">
-                          {provider.alias} · {provider.endpoint} · {provider.bucket}
-                        </div>
-                      </div>
-                    </Select.Option>
-                  ))}
-                </Select>
-              </div>
-            </div>
-
             <div className="file-list">
               {summaryItems.folders.map((folder) => (
                 <div key={`folder-${folder.name}`} className="file-row">
@@ -379,10 +324,44 @@ const UploadConfirmModal: React.FC<UploadConfirmModalProps> = ({
               ))}
             </div>
 
-            <div className="upload-footer">
-              共 {summaryItems.folders.length} 个文件夹、{summaryItems.files.length} 个文件、{fileSummaries.length} 个{summaryTaskLabel}，
-              总大小 {formatSize(totalBytes)}。
+            <div className="upload-info-card">
+              <div className="upload-info-label">{directoryLabel}</div>
+              <div className="upload-info-value">{targetNode.path}</div>
             </div>
+
+            <div className="upload-info-card">
+              <div id="directory-upload-storage-provider-label" className="upload-info-label">
+                存储桶
+              </div>
+              <Select
+                aria-labelledby="directory-upload-storage-provider-label"
+                arrowIcon={<IconChevronDownStroked size="small" />}
+                className="provider-select"
+                dropdownClassName="directory-tree-storage-provider-dropdown"
+                value={selectedProvider}
+                disabled={providers.length === 0}
+                placeholder="选择存储桶"
+                size="small"
+                dropdownStyle={{ maxHeight: 180, overflowY: 'auto' }}
+                onChange={(value) => setSelectedProvider(String(value || ''))}
+                renderSelectedItem={renderSelectedProvider}
+              >
+                {providers.map((provider) => (
+                  <Select.Option key={provider.alias} value={provider.alias} showTick={false}>
+                    <StorageProviderOption>
+                      {formatStorageProviderAlias(provider, defaultProvider)}
+                    </StorageProviderOption>
+                  </Select.Option>
+                ))}
+              </Select>
+            </div>
+
+            {containsFolderStructure && (
+              <div className="upload-footer">
+                共 {summaryItems.folders.length} 个文件夹、{summaryItems.files.length} 个文件、{fileSummaries.length} 个{summaryTaskLabel}，
+                总大小 {formatSize(totalBytes)}。
+              </div>
+            )}
           </Content>
         )}
       </Modal>

@@ -2,6 +2,7 @@ import { createGlobalStyle } from 'styled-components';
 
 export const DirectoryTreeCompactModalStyle = createGlobalStyle`
   .directory-tree-compact-modal .semi-modal-content {
+    position: relative;
     overflow: hidden;
     border: 1px solid var(--app-border-strong);
     border-radius: 10px;
@@ -10,8 +11,9 @@ export const DirectoryTreeCompactModalStyle = createGlobalStyle`
   }
 
   .directory-tree-compact-modal .semi-modal-header {
+    min-height: 50px;
     margin: 0;
-    padding: 14px 16px 8px !important;
+    padding: 14px 44px 8px 16px !important;
   }
 
   .directory-tree-compact-modal .semi-modal-title {
@@ -21,14 +23,34 @@ export const DirectoryTreeCompactModalStyle = createGlobalStyle`
   }
 
   .directory-tree-compact-modal .semi-modal-close {
-    top: 13px;
-    right: 14px;
+    position: absolute !important;
+    top: 9px !important;
+    right: 10px !important;
+    display: inline-flex !important;
+    width: 24px !important;
+    min-width: 24px !important;
+    height: 24px !important;
+    align-items: center;
+    justify-content: center;
+    padding: 0 !important;
+    border-radius: var(--app-radius-medium, 10px) !important;
+    background: transparent !important;
     color: var(--app-text-muted);
+    line-height: 1;
   }
 
   .directory-tree-compact-modal .semi-modal-close:hover {
     color: var(--app-text);
-    background: color-mix(in srgb, var(--app-text) 8%, transparent);
+    background: color-mix(in srgb, var(--app-text) 8%, transparent) !important;
+  }
+
+  .directory-tree-compact-modal .semi-modal-close .semi-icon {
+    display: inline-flex;
+    width: 12px;
+    height: 12px;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
   }
 
   .directory-tree-compact-modal .semi-modal-body {
@@ -43,7 +65,7 @@ export const DirectoryTreeCompactModalStyle = createGlobalStyle`
     padding: 0 16px 16px !important;
   }
 
-  .directory-tree-compact-modal .semi-button {
+  .directory-tree-compact-modal .semi-modal-footer .semi-button {
     height: 28px;
     min-width: 56px;
     padding: 0 10px;
@@ -68,6 +90,33 @@ export const DirectoryTreeCompactModalStyle = createGlobalStyle`
     width: 100%;
     height: 30px;
     min-height: 30px;
+  }
+
+  .directory-tree-upload-modal .semi-modal-header {
+    min-height: 44px;
+    padding: 14px 44px 8px 18px !important;
+  }
+
+  .directory-tree-upload-modal .semi-modal-content {
+    padding-right: 0;
+    padding-left: 0;
+  }
+
+  .directory-tree-upload-modal .semi-modal-title {
+    font-size: 18px;
+    line-height: 1.25;
+  }
+
+  .directory-tree-upload-modal .semi-modal-body {
+    padding-right: 18px !important;
+    padding-bottom: 10px !important;
+    padding-left: 18px !important;
+  }
+
+  .directory-tree-upload-modal .semi-modal-footer {
+    padding-right: 18px !important;
+    padding-bottom: 12px !important;
+    padding-left: 18px !important;
   }
 
   .directory-tree-compact-modal .semi-input,

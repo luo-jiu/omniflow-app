@@ -17,20 +17,20 @@ import {
 import { normalizeUploadRelativePath, UploadPathResolver } from '@/features/file-explorer/services/upload-path-resolver';
 import { fetchProviders } from '@/features/storage-config/services/storage-config.api';
 import { openOverlay } from '@/service/overlay/overlay.api';
-import type { OverlayStorageProvider, UploadConfirmResult } from '@/service/overlay/types';
+import type {
+  OverlayStorageProvider,
+  OverlayTargetNode,
+  UploadConfirmResult,
+} from '@/service/overlay/types';
 
-type UploadModalTargetNode = {
-  id: number;
-  key: string;
-  label: string;
-  libraryId: number;
-};
+type UploadModalTargetNode = OverlayTargetNode;
 
 type UseDirectoryUploadArgs = {
   libraryId: number;
   onUploadSuccess?: (parentNode: any, newNode: any) => void;
   resolveParentNodeForAppend: (parentId: number) => any | null;
   resolveRootParentId: () => number | null;
+  resolveTargetPath: (node: any) => string;
   rootNodeId: number | null;
 };
 
@@ -86,6 +86,7 @@ export function useDirectoryUpload({
   onUploadSuccess,
   resolveParentNodeForAppend,
   resolveRootParentId,
+  resolveTargetPath,
   rootNodeId,
 }: UseDirectoryUploadArgs) {
   const toUploadModalTargetNode = useCallback((node: any | null): UploadModalTargetNode | null => {
@@ -97,6 +98,7 @@ export function useDirectoryUpload({
         key: 'root',
         label: '根目录',
         libraryId,
+        path: '/',
       };
     }
     const fallbackId = rootNodeId !== null ? rootNodeId : Number(node.id);
@@ -105,8 +107,9 @@ export function useDirectoryUpload({
       key: String(node.key || 'root'),
       label: String(node.label || node.data?.rawName || '根目录'),
       libraryId: Number(node.libraryId || libraryId),
+      path: resolveTargetPath(node),
     };
-  }, [libraryId, resolveRootParentId, rootNodeId]);
+  }, [libraryId, resolveRootParentId, resolveTargetPath, rootNodeId]);
 
   const buildUploadCandidateFromDragFile = useCallback((file: File): UploadCandidateFile => {
     const rawRelativePath = (file as any).webkitRelativePath || file.name;

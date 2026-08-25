@@ -22,6 +22,48 @@ export function findNodeByKey(nodes: any[], targetKey: string): any | null {
   return null;
 }
 
+export function buildNodeLogicalPath(
+  nodes: any[],
+  targetNode: any,
+  rootNodeId: number | null,
+): string {
+  const normalizedRootId = Number(rootNodeId);
+  const hasRootId = Number.isFinite(normalizedRootId) && normalizedRootId > 0;
+  const segments: string[] = [];
+  const visited = new Set<number>();
+  let currentNode = targetNode;
+
+  while (currentNode) {
+    const currentId = Number(currentNode.id);
+    if (hasRootId && currentId === normalizedRootId) {
+      break;
+    }
+    if (Number.isFinite(currentId)) {
+      if (visited.has(currentId)) {
+        break;
+      }
+      visited.add(currentId);
+    }
+
+    const name = resolveNodeBaseName(currentNode);
+    if (name) {
+      segments.unshift(name);
+    }
+
+    const parentId = Number(currentNode.parentId);
+    if (
+      !Number.isFinite(parentId)
+      || parentId <= 0
+      || (hasRootId && parentId === normalizedRootId)
+    ) {
+      break;
+    }
+    currentNode = findNodeById(nodes, parentId);
+  }
+
+  return segments.length > 0 ? `/${segments.join('/')}` : '/';
+}
+
 export const resolveNodeType = (node: any): 'dir' | 'file' => {
   const type = String(node?.type ?? '');
   return type === 'file' || type === '1' || node?.isLeaf === true ? 'file' : 'dir';

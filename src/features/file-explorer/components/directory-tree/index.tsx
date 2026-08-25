@@ -41,6 +41,7 @@ import {
   resolveVisibleTreeNodeByClientY,
 } from './utils/external-upload';
 import {
+  buildNodeLogicalPath,
   buildNodeFileName,
   findNodeById,
   findNodeByKey,
@@ -311,6 +312,11 @@ export default function DirectoryTree({
       return findNodeById(treeDataRef.current || [], parentId);
     },
     resolveRootParentId,
+    resolveTargetPath: (node: any) => buildNodeLogicalPath(
+      treeDataRef.current || [],
+      node,
+      ROOT_PARENT_ID,
+    ),
     rootNodeId: ROOT_PARENT_ID,
   });
 
@@ -1850,7 +1856,8 @@ export default function DirectoryTree({
           label: provider.label,
           useSSL: provider.useSSL,
         }));
-        const defaultProvider = providerData.defaultProvider || providers[0]?.alias || '';
+        const defaultProvider = providerData.defaultProvider || '';
+        const selectedProvider = defaultProvider || providers[0]?.alias || '';
         setCreateModal(prev => (
           prev.visible && prev.type === 'file'
             ? {
@@ -1858,7 +1865,7 @@ export default function DirectoryTree({
               defaultProvider,
               providers,
               providerLoading: false,
-              selectedProvider: defaultProvider,
+              selectedProvider,
             }
             : prev
         ));

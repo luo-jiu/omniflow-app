@@ -61,9 +61,9 @@ OmniFlow 当前的文件浏览主链路不是一个模块完成的，而是 3 �
 
 右键“属性”里的“位置”是资料库目录树内的逻辑所在目录，不包含当前节点自身名称；文件节点额外展示“物理存储”，来源于 `GET /api/v1/nodes/:nodeId` 返回的 `storageProvider`、`storageEndpoint`、`storageBucket` 和 `storageKey`，用于区分同为 MinIO 的不同机器或不同桶。节点所属类型、内置类型和归档模式作为“视图与模式”字段展示，不再重复放在名称下方。
 
-上传确认弹框由主 renderer 先读取 `/v1/storage/providers`，overlay 只展示可序列化后的 provider 摘要。用户在弹框里选择 provider 后，上传任务把 `storageProvider` 透传到后端；未取到 provider 列表时，上传仍可走后端默认分配。
+上传确认弹框由主 renderer 先读取 `/v1/storage/providers`，overlay 只展示可序列化后的 provider 摘要。主 renderer 同时从当前目录树快照生成 `/` 开头的逻辑目标路径并传给 overlay，根目录显示 `/`，overlay 不再只展示节点名称或自行查询目录状态。弹框标题按来源显示“上传文件”或“上传文件夹”，采用与新建节点弹框一致的标题位置和左右留白；文件摘要位于内容首位且不显示独立边框或背景，目标路径、存储桶选择和文件摘要共用同一左右边界与紧凑间距。单文件上传不重复显示底部统计，文件夹上传保留整体统计。存储桶选中项和下拉列表只展示 provider alias；下拉项不保留默认勾选图标列，并使用紧凑单行高度；后端默认 alias 标记为“默认”，非默认且 endpoint 为 loopback 的 provider 标记为“本机”，两者重合时只显示“默认”。用户在弹框里选择 provider 后，上传任务把 `storageProvider` 透传到后端；未取到 provider 列表时，上传仍可走后端默认分配。
 
-右键新建文件在新建弹框内直接展示创建目录和存储位置，不再额外弹上传确认 overlay。新建文件的首次空内容写入会把用户选择的 `storageProvider` 传给 `PUT /v1/nodes/:nodeId/content`，并显式使用 `text/plain; charset=utf-8`，避免空 `.ts` 文件被后端按后缀推断为 MPEG-TS 视频。
+右键新建文件在紧凑新建弹框内直接展示文件名和单行存储桶选择，不再额外弹上传确认 overlay；存储桶下拉复用上传确认的紧凑单行样式且不显示默认勾选图标列。新建文件夹沿用同一弹框的无存储桶模式。新建文件的首次空内容写入会把用户选择的 `storageProvider` 传给 `PUT /v1/nodes/:nodeId/content`，并显式使用 `text/plain; charset=utf-8`，避免空 `.ts` 文件被后端按后缀推断为 MPEG-TS 视频。
 
 回收站列表会展示文件节点的物理存储位置；目录节点使用后端返回的 `storageLocations` 聚合子树内文件实际分布。前端默认只展示前两个存储位置，更多位置通过行内“更多”按钮展开。
 
