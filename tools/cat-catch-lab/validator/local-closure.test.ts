@@ -19,7 +19,6 @@ import {
   tryReadGitHead,
 } from './git-input.ts'
 import {
-  createLocalClosureSchemaProjectionBlocker,
   generateCandidateLocalClosureReport,
   hashLocalClosureSourceManifestContent,
   validateCandidateLocalClosureReportAtCommit,
@@ -99,44 +98,79 @@ describe('Cat Catch candidate local-closure generator', () => {
       approvalRef: null,
       trustClassification: 'candidate-untrusted',
     }))
-    expect(report.bootstrapRoots).toHaveLength(roots.length)
-    expect(report.discoveredNodes).toHaveLength(roots.length)
-    expect(report.discoveredNodes.every(node => node.reachability === 'reachable')).toBe(true)
-    expect(new Set(report.discoveredNodes.map(node => node.nodeId))).toEqual(
-      new Set(report.bootstrapRoots.map(root => root.nodeId)),
-    )
+    expect(report.schemaVersion).toBe(2)
+    expect(report.bootstrapRoots.length).toBeLessThanOrEqual(roots.length)
+    expect(report.discoveredNodes.length).toBeLessThanOrEqual(currentNodes.length)
+    expect(report.bootstrapRoots.every(root => (
+      typeof root.rootId === 'string'
+      && typeof root.category === 'string'
+      && typeof root.traversal === 'string'
+    ))).toBe(true)
+    const rootNodeIds = new Set(report.bootstrapRoots.map(root => root.nodeId))
+    expect(report.discoveredNodes.every(node => (
+      node.reachability === (rootNodeIds.has(node.nodeId) ? 'reachable' : 'unknown')
+    ))).toBe(true)
+    const currentNodeIds = new Set(currentNodes.map(node => node.id))
+    expect(report.discoveredNodes.every(node => currentNodeIds.has(node.nodeId))).toBe(true)
+    const blockerRefIds = new Set(report.blockers.map(blocker => blocker.refId))
+    for (const node of currentNodes) {
+      if (typeof node.id !== 'string') continue
+      expect(
+        report.discoveredNodes.some(discovered => discovered.nodeId === node.id)
+        || blockerRefIds.has(node.id),
+      ).toBe(true)
+    }
+    const emittedRootIds = new Set(report.bootstrapRoots.map(root => root.rootId))
+    for (const root of roots) {
+      if (typeof root.id !== 'string') continue
+      expect(emittedRootIds.has(root.id) || blockerRefIds.has(root.id)).toBe(true)
+    }
+    expect(report.discoveredNodes.every(node => (
+      typeof node.classification === 'string' && Array.isArray(node.provenanceRefs)
+    ))).toBe(true)
     expect(report.counts.unmappedInScopeNodes).toBe(0)
     expect(report.findings.unmappedInScopeNodes).toEqual([])
     const undeterminedReachability = report.blockers.filter(blocker => (
       blocker.code === 'closure.current-node-reachability-undetermined'
     ))
-    expect(undeterminedReachability).toHaveLength(currentNodes.length - roots.length)
+    expect(undeterminedReachability).toHaveLength(
+      report.discoveredNodes.filter(node => node.reachability === 'unknown').length,
+    )
     const undeterminedIds = new Set(undeterminedReachability.map(blocker => blocker.refId))
-    for (const node of currentNodes) {
-      if (
-        typeof node.id === 'string'
-        && typeof node.capabilityId === 'string'
-        && typeof node.cutoverUnitId === 'string'
-        && !report.discoveredNodes.some(discovered => discovered.nodeId === node.id)
-      ) {
-        expect(undeterminedIds.has(node.id)).toBe(true)
+    for (const node of report.discoveredNodes) {
+      if (node.reachability === 'unknown') {
+        expect(undeterminedIds.has(node.nodeId)).toBe(true)
       }
     }
-    expect(report.declaredDynamicEdges).toHaveLength(dynamicEdges.length)
+    expect(report.declaredDynamicEdges.length + report.unresolvedDynamicEdges.length).toBe(dynamicEdges.length)
+    expect(report.declaredDynamicEdges.every(edge => (
+      typeof edge.fixtureId === 'string'
+      && typeof edge.resolutionRule === 'string'
+      && typeof edge.source.path === 'string'
+      && typeof edge.target.path === 'string'
+    ))).toBe(true)
     expect(report.edges).toEqual([])
     expect(report.semanticCandidates).toEqual([])
     expect(report.historicalCandidates).toHaveLength(historicalCandidates.length)
+    expect(report.historicalCandidates.every(candidate => (
+      candidate.candidateKind === 'historical'
+      && candidate.discoveryRuleIds.length === 0
+      && typeof candidate.lastKnownCommit === 'string'
+    ))).toBe(true)
+    expect(report.discoveryCoverage).toEqual({
+      cutoverDependencyGraph: 'pending',
+      declaredDynamicEdges: 'complete',
+      historicalTouchsetScan: 'pending',
+      leastFixedPoint: 'pending',
+      reverseDependencyGraph: 'pending',
+      semanticScan: 'pending',
+      staticDependencyGraph: 'pending',
+    })
     expect(report.blockers.map(blocker => blocker.code)).toEqual(expect.arrayContaining([
       'closure.candidate-untrusted',
       'closure.discovery-engine-unimplemented',
-      'closure.schema-projection-incomplete',
     ]))
-    expect(report.blockers.find(blocker => blocker.code === 'closure.schema-projection-incomplete')?.message)
-      .toContain('locatorKind')
-    expect(report.blockers.find(blocker => blocker.code === 'closure.schema-projection-incomplete')?.message)
-      .toContain('lastKnownCommit')
-    expect(report.blockers.find(blocker => blocker.code === 'closure.schema-projection-incomplete')?.message)
-      .toContain('external-process virtual endpoint')
+    expect(report.blockers.some(blocker => blocker.code === 'closure.schema-projection-incomplete')).toBe(false)
     for (const group of Object.keys(report.counts) as Array<keyof typeof report.counts>) {
       expect(report.counts[group]).toBe(report.findings[group].length)
     }
@@ -230,6 +264,33 @@ describe('Cat Catch candidate local-closure generator', () => {
       .filter(nodeId => nodeId.startsWith('external-process.'))
     expect(externalTargets.length).toBeGreaterThan(0)
     expect(report.discoveredNodes.some(node => externalTargets.includes(node.nodeId))).toBe(false)
+    expect(new Set(report.externalProcessEndpoints.map(endpoint => endpoint.nodeId))).toEqual(
+      new Set(externalTargets),
+    )
+    for (const endpoint of report.externalProcessEndpoints) {
+      expect(endpoint.path).toMatch(/^external-process\//)
+      expect(endpoint.symbol).toBeNull()
+      expect(endpoint.locatorKind).toBeNull()
+      expect(endpoint.attributions.length).toBeGreaterThan(0)
+      expect(endpoint.attributions.every(attribution => (
+        typeof attribution.edgeId === 'string'
+        && typeof attribution.sourceNodeId === 'string'
+        && typeof attribution.capabilityId === 'string'
+        && typeof attribution.cutoverUnitId === 'string'
+        && ['reachable', 'unknown'].includes(attribution.sourceReachability)
+      ))).toBe(true)
+    }
+  })
+
+  it('returns schema issues instead of throwing for a malformed candidate report', () => {
+    const issues = validateCandidateLocalClosureReportAtCommit(
+      appRoot,
+      currentHead(),
+      {} as CandidateLocalClosureReport,
+    )
+
+    expect(issues.length).toBeGreaterThan(0)
+    expect(issues.every(issue => issue.severity === 'error')).toBe(true)
   })
 
   it.each([
@@ -247,6 +308,38 @@ describe('Cat Catch candidate local-closure generator', () => {
     ['historicalRef', (report: CandidateLocalClosureReport) => {
       const candidate = report.historicalCandidates[0]
       if (candidate) candidate.resolutionRefId = 'node.nonexistent'
+    }],
+    ['historicalCommit', (report: CandidateLocalClosureReport) => {
+      const candidate = report.historicalCandidates[0]
+      if (candidate) candidate.lastKnownCommit = '0'.repeat(40)
+    }],
+    ['rootTraversal', (report: CandidateLocalClosureReport) => {
+      const root = report.bootstrapRoots[0]
+      if (root) root.traversal = root.traversal === 'both' ? 'forward' : 'both'
+    }],
+    ['locatorKind', (report: CandidateLocalClosureReport) => {
+      const node = report.discoveredNodes.find(candidate => candidate.locatorKind !== null)
+      if (node) node.locatorKind = node.locatorKind === 'member' ? 'declaration' : 'member'
+    }],
+    ['classification', (report: CandidateLocalClosureReport) => {
+      const node = report.discoveredNodes[0]
+      if (node) node.classification = node.classification === 'legacy' ? 'target' : 'legacy'
+    }],
+    ['provenanceRefs', (report: CandidateLocalClosureReport) => {
+      const node = report.discoveredNodes[0]
+      if (node) node.provenanceRefs = ['test:tampered']
+    }],
+    ['discoveryCoverage', (report: CandidateLocalClosureReport) => {
+      report.discoveryCoverage.staticDependencyGraph = 'complete'
+    }],
+    ['dynamicFixture', (report: CandidateLocalClosureReport) => {
+      const edge = report.declaredDynamicEdges[0]
+      if (edge) edge.fixtureId = 'fixture.tampered'
+    }],
+    ['externalAttribution', (report: CandidateLocalClosureReport) => {
+      const endpoint = report.externalProcessEndpoints[0]
+      const attribution = endpoint?.attributions[0]
+      if (attribution) attribution.capabilityId = 'capture.tampered'
     }],
     ['duplicateRoot', (report: CandidateLocalClosureReport) => {
       const root = report.bootstrapRoots[0]
@@ -399,7 +492,37 @@ describe('Cat Catch candidate local-closure generator', () => {
     }))
   })
 
-  it('keeps a declared dynamic edge unresolved when its synchronized endpoint locator is invented', () => {
+  it('refuses to project structurally contradictory exact-commit declarations', () => {
+    const repository = cloneRepository()
+    const head = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: repository,
+      encoding: 'utf8',
+    }).trim()
+    const inventoryState = readGitPathAtCommit(repository, head, 'docs/cat-catch/legacy-inventory.json')
+    if (inventoryState.status !== 'present') throw new Error('fixture inventory is unavailable')
+    const inventory = JSON.parse(inventoryState.bytes.toString('utf8')) as JsonObject
+    const node = objectArray(inventory.entries).find(entry => entry.entryType === 'current-node')
+    if (!node || typeof node.id !== 'string') throw new Error('fixture current node is unavailable')
+    objectArray(inventory.entries).push({
+      ...node,
+      path: 'electron/service/__duplicateInventoryIdFixture.ts',
+      symbol: '__duplicateInventoryIdFixture',
+    })
+    writeFileSync(
+      path.join(repository, 'docs/cat-catch/legacy-inventory.json'),
+      `${JSON.stringify(inventory, null, 2)}\n`,
+    )
+    const commit = commitAll(repository, 'add contradictory inventory id')
+
+    const result = generateCandidateLocalClosureReport(repository, commit, generatedAt)
+    expect(result.report).toBeNull()
+    expect(result.issues).toContainEqual(expect.objectContaining({
+      code: 'exact-closure-duplicate-id',
+      severity: 'error',
+    }))
+  })
+
+  it('preserves full unresolved edge evidence when declarations are coherently stale', () => {
     const repository = cloneRepository()
     const head = execFileSync('git', ['rev-parse', 'HEAD'], {
       cwd: repository,
@@ -428,29 +551,44 @@ describe('Cat Catch candidate local-closure generator', () => {
     ))
     if (!node || typeof node.id !== 'string') throw new Error('fixture dynamic source node is unavailable')
 
-    const inventedSymbol = '__omniflow_missing_dynamic_edge_symbol__'
-    source.symbol = inventedSymbol
-    node.symbol = inventedSymbol
+    const staleHash = `sha256:${'0'.repeat(64)}`
+    node.sourceHash = staleHash
+    const affectedDeclarations = declarations.filter(candidate => {
+      const candidateSource = candidate.source
+      return typeof candidateSource === 'object'
+        && candidateSource !== null
+        && !Array.isArray(candidateSource)
+        && (candidateSource as JsonObject).path === source.path
+        && (candidateSource as JsonObject).symbol === source.symbol
+        && ((candidateSource as JsonObject).locatorKind || 'declaration') === (source.locatorKind || 'declaration')
+    })
+    for (const affected of affectedDeclarations) affected.sourceHash = staleHash
     writeFileSync(
       path.join(repository, 'docs/cat-catch/legacy-inventory.json'),
       `${JSON.stringify(inventory, null, 2)}\n`,
     )
-    const commit = commitAll(repository, 'invent synchronized dynamic endpoint locator')
+    const commit = commitAll(repository, 'make dynamic source declarations coherently stale')
     const result = generateCandidateLocalClosureReport(repository, commit, generatedAt)
     expect(result.issues).toEqual([])
     if (!result.report) throw new Error('candidate local-closure report was not generated')
-    expect(result.report.declaredDynamicEdges.some(edge => edge.edgeId === declaration.id)).toBe(false)
-    expect(result.report.unresolvedDynamicEdges).toContainEqual(expect.objectContaining({
-      edgeId: declaration.id,
-      sourceNodeId: node.id,
-    }))
-    expect(result.report.findings.unresolvedEdges).toContainEqual(expect.objectContaining({
-      code: 'closure.declared-dynamic-edge-unresolved',
-      refId: declaration.id,
-    }))
+    for (const affected of affectedDeclarations) {
+      expect(result.report.declaredDynamicEdges.some(edge => edge.edgeId === affected.id)).toBe(false)
+      expect(result.report.unresolvedDynamicEdges).toContainEqual(expect.objectContaining({
+        actualSourceHash: expect.stringMatching(/^sha256:/),
+        declaredSourceHash: staleHash,
+        edgeId: affected.id,
+        fixtureId: affected.fixtureId,
+        resolutionRule: affected.resolutionRule,
+        sourceNodeId: node.id,
+      }))
+      expect(result.report.findings.unresolvedEdges).toContainEqual(expect.objectContaining({
+        code: 'closure.declared-dynamic-edge-source-hash-mismatch',
+        refId: affected.id,
+      }))
+    }
   })
 
-  it('keeps a declared dynamic edge unresolved when its source hash is stale', () => {
+  it('rejects a declared dynamic edge whose source hash contradicts its inventory node', () => {
     const repository = cloneRepository()
     const head = execFileSync('git', ['rev-parse', 'HEAD'], {
       cwd: repository,
@@ -471,16 +609,11 @@ describe('Cat Catch candidate local-closure generator', () => {
 
     const commit = commitAll(repository, 'stale dynamic edge source hash')
     const result = generateCandidateLocalClosureReport(repository, commit, generatedAt)
-    expect(result.issues).toEqual([])
-    expect(result.report?.declaredDynamicEdges.some(edge => edge.edgeId === declaration.id)).toBe(false)
-    expect(result.report?.unresolvedDynamicEdges).toContainEqual(expect.objectContaining({
-      edgeId: declaration.id,
+    expect(result.report).toBeNull()
+    expect(result.issues).toContainEqual(expect.objectContaining({
+      code: 'exact-closure-dynamic-source-hash-ref-mismatch',
+      severity: 'error',
     }))
-    expect(result.report?.findings.unresolvedEdges).toContainEqual(expect.objectContaining({
-      code: 'closure.declared-dynamic-edge-source-hash-mismatch',
-      refId: declaration.id,
-    }))
-    expect(result.report?.counts.unresolvedEdges).toBeGreaterThan(0)
   })
 
   it('binds a historical approved exclusion back to the matching candidate', () => {
@@ -560,18 +693,12 @@ describe('Cat Catch candidate local-closure generator', () => {
     const inventoryState = readGitPathAtCommit(repository, head, 'docs/cat-catch/legacy-inventory.json')
     if (inventoryState.status !== 'present') throw new Error('fixture inventory is unavailable')
     const inventory = JSON.parse(inventoryState.bytes.toString('utf8')) as JsonObject
-    const node = objectArray(inventory.entries).find(entry => (
-      entry.entryType === 'current-node' && typeof entry.symbol === 'string'
-    ))
-    if (!node || typeof node.path !== 'string' || typeof node.symbol !== 'string') {
-      throw new Error('fixture typed inventory node is unavailable')
-    }
     inventory.approvedExclusions = [{
       id: 'exclusion.current-without-candidate',
       candidateKind: 'current',
-      path: node.path,
-      symbol: node.symbol,
-      locatorKind: node.locatorKind || 'declaration',
+      path: 'electron/service/__excludedCurrentCandidateFixture.ts',
+      symbol: '__excludedCurrentCandidateFixture',
+      locatorKind: 'declaration',
       decision: {
         schemaVersion: 1,
         decisionId: 'decision.current-without-candidate',
@@ -624,12 +751,81 @@ describe('Cat Catch candidate local-closure generator', () => {
     }))
   })
 
-  it('keeps tombstone attribution loss explicit until the schema can encode it', () => {
-    const blocker = createLocalClosureSchemaProjectionBlocker(1, 1, 1)
-    expect(blocker.message).toContain('locatorKind')
-    expect(blocker.message).toContain('lastKnownCommit')
-    expect(blocker.message).toContain('capabilityId/cutoverUnitId/provenanceRefs')
-    expect(blocker.message).toContain('external-process virtual endpoint')
+  it('preserves retired tombstone attribution and historical resolution', () => {
+    const repository = cloneRepository()
+    const sourcePath = 'electron/service/__localClosureRetiredFixture.ts'
+    const source = 'export function localClosureRetiredFixture(): void {}\n'
+    writeFileSync(path.join(repository, sourcePath), source)
+    const lastKnownCommit = commitAll(repository, 'add local closure retirement fixture')
+    rmSync(path.join(repository, sourcePath))
+    const deletionCommit = commitAll(repository, 'delete local closure retirement fixture')
+
+    const inventoryPath = path.join(repository, 'docs/cat-catch/legacy-inventory.json')
+    const inventory = JSON.parse(readFileSync(inventoryPath, 'utf8')) as JsonObject
+    const mappedNode = objectArray(inventory.entries).find(entry => (
+      entry.entryType === 'current-node'
+      && typeof entry.capabilityId === 'string'
+      && typeof entry.cutoverUnitId === 'string'
+    ))
+    if (!mappedNode || typeof mappedNode.capabilityId !== 'string' || typeof mappedNode.cutoverUnitId !== 'string') {
+      throw new Error('mapped inventory fixture node is unavailable')
+    }
+    const tombstoneId = 'node.retired.local-closure-fixture'
+    const sourceHash = sha256Bytes(source)
+    objectArray(inventory.entries).push({
+      id: tombstoneId,
+      entryType: 'retired-tombstone',
+      path: sourcePath,
+      symbol: 'localClosureRetiredFixture',
+      locatorKind: 'declaration',
+      deletedSourceHash: sourceHash,
+      capabilityId: mappedNode.capabilityId,
+      cutoverUnitId: mappedNode.cutoverUnitId,
+      deletionCommit,
+      deletionEvidenceRef: {
+        artifactId: 'evidence.local-closure-retirement-fixture',
+        artifactSchemaId: 'https://omniflow.local/schemas/cat-catch/evidence-artifact.schema.json',
+        contentHash: `sha256:${'3'.repeat(64)}`,
+      },
+      provenanceRefs: ['test:local-closure-retirement-fixture'],
+    })
+    objectArray(inventory.historicalCandidates).push({
+      id: 'historical.local-closure-retirement-fixture',
+      path: sourcePath,
+      symbol: 'localClosureRetiredFixture',
+      locatorKind: 'declaration',
+      lastKnownCommit,
+      sourceHash,
+      resolution: { kind: 'retired-tombstone', refId: tombstoneId },
+    })
+    writeFileSync(inventoryPath, `${JSON.stringify(inventory, null, 2)}\n`)
+    const commit = commitAll(repository, 'inventory local closure retirement fixture')
+
+    const result = generateCandidateLocalClosureReport(repository, commit, generatedAt)
+    expect(result.issues).toEqual([])
+    expect(result.report?.retiredTombstones).toContainEqual({
+      capabilityId: mappedNode.capabilityId,
+      cutoverUnitId: mappedNode.cutoverUnitId,
+      deletedSourceHash: sourceHash,
+      deletionCommit,
+      deletionEvidenceRef: {
+        artifactId: 'evidence.local-closure-retirement-fixture',
+        artifactSchemaId: 'https://omniflow.local/schemas/cat-catch/evidence-artifact.schema.json',
+        contentHash: `sha256:${'3'.repeat(64)}`,
+      },
+      inventoryEntryId: tombstoneId,
+      locatorKind: 'declaration',
+      path: sourcePath,
+      provenanceRefs: ['test:local-closure-retirement-fixture'],
+      symbol: 'localClosureRetiredFixture',
+    })
+    expect(result.report?.historicalCandidates).toContainEqual(expect.objectContaining({
+      candidateId: 'historical.local-closure-retirement-fixture',
+      candidateKind: 'historical',
+      lastKnownCommit,
+      resolutionKind: 'retired-tombstone',
+      resolutionRefId: tombstoneId,
+    }))
   })
 
   it('fails closed for a non-full commit', () => {

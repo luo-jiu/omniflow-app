@@ -13,11 +13,13 @@
     "evidenceInputCommit",
     "evidenceInputTreeHash",
     "discoveryRulesVersion",
+    "discoveryCoverage",
     "inputHashes",
     "sourceManifest",
     "bootstrapRoots",
     "discoveredNodes",
     "edges",
+    "externalProcessEndpoints",
     "semanticCandidates",
     "historicalCandidates",
     "declaredDynamicEdges",
@@ -33,16 +35,21 @@
     "$schema": {
       "const": "https://omniflow.local/schemas/cat-catch/local-closure-report.schema.json"
     },
-    "schemaVersion": { "const": 1 },
+    "schemaVersion": { "const": 2 },
     "reportId": { "$ref": "#/$defs/identifier" },
     "validator": { "$ref": "validator-trust-policy.schema.json#/$defs/validatorBinding" },
     "generatedAt": { "type": "string", "format": "date-time" },
     "evidenceInputCommit": { "$ref": "#/$defs/commit" },
     "evidenceInputTreeHash": { "$ref": "#/$defs/sha256" },
     "discoveryRulesVersion": { "type": "string", "minLength": 1 },
+    "discoveryCoverage": { "$ref": "#/$defs/discoveryCoverage" },
     "inputHashes": { "$ref": "#/$defs/inputHashes" },
     "sourceManifest": { "$ref": "#/$defs/sourceManifest" },
-    "bootstrapRoots": { "$ref": "#/$defs/nodeRefSet" },
+    "bootstrapRoots": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/bootstrapRoot" }
+    },
     "discoveredNodes": {
       "type": "array",
       "uniqueItems": true,
@@ -53,12 +60,17 @@
       "uniqueItems": true,
       "items": { "$ref": "#/$defs/edge" }
     },
-    "semanticCandidates": { "$ref": "#/$defs/candidateSet" },
-    "historicalCandidates": { "$ref": "#/$defs/candidateSet" },
+    "externalProcessEndpoints": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/externalProcessEndpoint" }
+    },
+    "semanticCandidates": { "$ref": "#/$defs/currentCandidateSet" },
+    "historicalCandidates": { "$ref": "#/$defs/historicalCandidateSet" },
     "declaredDynamicEdges": {
       "type": "array",
       "uniqueItems": true,
-      "items": { "$ref": "#/$defs/edge" }
+      "items": { "$ref": "#/$defs/declaredDynamicEdge" }
     },
     "unresolvedDynamicEdges": {
       "type": "array",
@@ -102,8 +114,46 @@
               "entries": { "type": "array", "minItems": 1 }
             }
           },
+          "discoveryCoverage": {
+            "type": "object",
+            "properties": {
+              "staticDependencyGraph": { "const": "complete" },
+              "reverseDependencyGraph": { "const": "complete" },
+              "semanticScan": { "const": "complete" },
+              "historicalTouchsetScan": { "const": "complete" },
+              "declaredDynamicEdges": { "const": "complete" },
+              "leastFixedPoint": { "const": "complete" },
+              "cutoverDependencyGraph": { "const": "complete" }
+            }
+          },
           "bootstrapRoots": { "type": "array", "minItems": 1 },
-          "discoveredNodes": { "type": "array", "minItems": 1 },
+          "discoveredNodes": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "properties": {
+                "reachability": { "enum": ["reachable", "unreachable"] }
+              }
+            }
+          },
+          "externalProcessEndpoints": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "attributions": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "sourceReachability": { "enum": ["reachable", "unreachable"] }
+                    }
+                  }
+                }
+              }
+            }
+          },
           "semanticCandidates": {
             "type": "array",
             "items": {
@@ -149,11 +199,99 @@
     },
     "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
     "sha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "repositoryPath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!external-process/)(?!(?:.*/)?\\.{1,2}(?:/|$))(?!.*[\\\\\\u0000-\\u001F\\u007F])[^/]+(?:/[^/]+)*$"
+    },
+    "externalProcessPath": {
+      "type": "string",
+      "pattern": "^external-process/[a-z0-9][a-z0-9._-]*$"
+    },
     "nullableIdentifier": {
       "oneOf": [
         { "$ref": "#/$defs/identifier" },
         { "type": "null" }
       ]
+    },
+    "locatorKind": {
+      "enum": ["declaration", "member", "runtime-literal"]
+    },
+    "nullableLocatorKind": {
+      "oneOf": [
+        { "$ref": "#/$defs/locatorKind" },
+        { "type": "null" }
+      ]
+    },
+    "locator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "symbol", "locatorKind"],
+      "allOf": [
+        {
+          "if": {
+            "properties": { "symbol": { "type": "null" } },
+            "required": ["symbol"]
+          },
+          "then": {
+            "properties": { "locatorKind": { "type": "null" } }
+          },
+          "else": {
+            "properties": { "locatorKind": { "$ref": "#/$defs/locatorKind" } }
+          }
+        },
+        {
+          "if": {
+            "properties": { "path": { "type": "string", "pattern": "^external-process/" } },
+            "required": ["path"]
+          },
+          "then": {
+            "properties": {
+              "path": { "$ref": "#/$defs/externalProcessPath" },
+              "symbol": { "type": "null" },
+              "locatorKind": { "type": "null" }
+            }
+          }
+        }
+      ],
+      "properties": {
+        "path": {
+          "oneOf": [
+            { "$ref": "#/$defs/repositoryPath" },
+            { "$ref": "#/$defs/externalProcessPath" }
+          ]
+        },
+        "symbol": { "type": ["string", "null"], "minLength": 1 },
+        "locatorKind": { "$ref": "#/$defs/nullableLocatorKind" }
+      }
+    },
+    "discoveryCoverageStatus": {
+      "enum": ["pending", "complete"]
+    },
+    "discoveryCoverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "staticDependencyGraph",
+        "reverseDependencyGraph",
+        "semanticScan",
+        "historicalTouchsetScan",
+        "declaredDynamicEdges",
+        "leastFixedPoint",
+        "cutoverDependencyGraph"
+      ],
+      "properties": {
+        "staticDependencyGraph": { "$ref": "#/$defs/discoveryCoverageStatus" },
+        "reverseDependencyGraph": { "$ref": "#/$defs/discoveryCoverageStatus" },
+        "semanticScan": { "$ref": "#/$defs/discoveryCoverageStatus" },
+        "historicalTouchsetScan": { "$ref": "#/$defs/discoveryCoverageStatus" },
+        "declaredDynamicEdges": {
+          "$ref": "#/$defs/discoveryCoverageStatus",
+          "description": "Whether every declared dynamic edge was visited and validated; unresolved results remain represented separately and still block closure."
+        },
+        "leastFixedPoint": { "$ref": "#/$defs/discoveryCoverageStatus" },
+        "cutoverDependencyGraph": { "$ref": "#/$defs/discoveryCoverageStatus" }
+      }
     },
     "inputHashes": {
       "type": "object",
@@ -172,7 +310,7 @@
       "additionalProperties": false,
       "required": ["path", "mode", "byteLength", "contentHash"],
       "properties": {
-        "path": { "type": "string", "minLength": 1, "pattern": "^(?!/)" },
+        "path": { "$ref": "#/$defs/repositoryPath" },
         "mode": { "enum": ["100644", "100755", "120000"] },
         "byteLength": { "type": "integer", "minimum": 0 },
         "contentHash": { "$ref": "#/$defs/sha256" }
@@ -214,17 +352,74 @@
     "nodeRef": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["nodeId", "path", "symbol"],
+      "required": ["nodeId", "path", "symbol", "locatorKind"],
+      "allOf": [
+        {
+          "if": {
+            "properties": { "symbol": { "type": "null" } },
+            "required": ["symbol"]
+          },
+          "then": { "properties": { "locatorKind": { "type": "null" } } },
+          "else": { "properties": { "locatorKind": { "$ref": "#/$defs/locatorKind" } } }
+        }
+      ],
       "properties": {
         "nodeId": { "$ref": "#/$defs/identifier" },
-        "path": { "type": "string", "minLength": 1, "pattern": "^(?!/)" },
-        "symbol": { "type": ["string", "null"], "minLength": 1 }
+        "path": { "$ref": "#/$defs/repositoryPath" },
+        "symbol": { "type": ["string", "null"], "minLength": 1 },
+        "locatorKind": { "$ref": "#/$defs/nullableLocatorKind" }
       }
     },
     "nodeRefSet": {
       "type": "array",
       "uniqueItems": true,
       "items": { "$ref": "#/$defs/nodeRef" }
+    },
+    "bootstrapRoot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rootId",
+        "category",
+        "traversal",
+        "nodeId",
+        "path",
+        "symbol",
+        "locatorKind"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": { "symbol": { "type": "null" } },
+            "required": ["symbol"]
+          },
+          "then": { "properties": { "locatorKind": { "type": "null" } } },
+          "else": { "properties": { "locatorKind": { "$ref": "#/$defs/locatorKind" } } }
+        }
+      ],
+      "properties": {
+        "rootId": { "$ref": "#/$defs/identifier" },
+        "category": {
+          "enum": [
+            "composition-root",
+            "service-construction",
+            "session-view-lifecycle",
+            "ipc-registration",
+            "preload-surface",
+            "shared-contract",
+            "renderer-workflow",
+            "runtime-builder",
+            "state-owner",
+            "task-output-owner",
+            "config-switch"
+          ]
+        },
+        "traversal": { "enum": ["forward", "reverse", "both"] },
+        "nodeId": { "$ref": "#/$defs/identifier" },
+        "path": { "$ref": "#/$defs/repositoryPath" },
+        "symbol": { "type": ["string", "null"], "minLength": 1 },
+        "locatorKind": { "$ref": "#/$defs/nullableLocatorKind" }
+      }
     },
     "discoveredNode": {
       "type": "object",
@@ -233,72 +428,293 @@
         "nodeId",
         "path",
         "symbol",
+        "locatorKind",
         "sourceHash",
         "reachability",
         "inventoryEntryId",
         "capabilityId",
+        "classification",
         "cutoverUnitId",
-        "ownerRole"
+        "ownerRole",
+        "provenanceRefs"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": { "symbol": { "type": "null" } },
+            "required": ["symbol"]
+          },
+          "then": { "properties": { "locatorKind": { "type": "null" } } },
+          "else": { "properties": { "locatorKind": { "$ref": "#/$defs/locatorKind" } } }
+        }
       ],
       "properties": {
         "nodeId": { "$ref": "#/$defs/identifier" },
-        "path": { "type": "string", "minLength": 1, "pattern": "^(?!/)" },
+        "path": { "$ref": "#/$defs/repositoryPath" },
         "symbol": { "type": ["string", "null"], "minLength": 1 },
+        "locatorKind": { "$ref": "#/$defs/nullableLocatorKind" },
         "sourceHash": { "$ref": "#/$defs/sha256" },
-        "reachability": { "enum": ["reachable", "unreachable"] },
+        "reachability": { "enum": ["reachable", "unreachable", "unknown"] },
         "inventoryEntryId": { "$ref": "#/$defs/nullableIdentifier" },
         "capabilityId": { "$ref": "#/$defs/nullableIdentifier" },
+        "classification": { "enum": ["legacy", "candidate", "target", "omniflow-integration"] },
         "cutoverUnitId": { "$ref": "#/$defs/nullableIdentifier" },
         "ownerRole": {
           "oneOf": [
             { "enum": ["production-owner", "candidate-owner", "inactive-owner", "adapter", "contract", "state-owner", "task-owner", "output-owner", "helper", "test-helper"] },
             { "type": "null" }
           ]
+        },
+        "provenanceRefs": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
         }
       }
+    },
+    "edgeKind": {
+      "enum": [
+        "import",
+        "export",
+        "call",
+        "construct",
+        "dependency-injection",
+        "dynamic-import",
+        "dynamic-require",
+        "path-load",
+        "ipc-channel",
+        "preload-channel",
+        "event-dispatch",
+        "runtime-template",
+        "worker-script",
+        "serialized-envelope",
+        "file-handoff",
+        "process-handoff",
+        "reverse-dependency"
+      ]
+    },
+    "dynamicEdgeKind": {
+      "enum": [
+        "dynamic-import",
+        "dynamic-require",
+        "path-load",
+        "ipc-channel",
+        "preload-channel",
+        "event-dispatch",
+        "runtime-template",
+        "worker-script",
+        "serialized-envelope",
+        "file-handoff",
+        "process-handoff"
+      ]
     },
     "edge": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["edgeId", "fromNodeId", "toNodeId", "kind", "provenance", "sourceHash"],
+      "required": [
+        "edgeId",
+        "fromNodeId",
+        "toNodeId",
+        "source",
+        "target",
+        "kind",
+        "provenance",
+        "sourceHash",
+        "resolutionRule",
+        "fixtureId"
+      ],
+      "allOf": [
+        {
+          "properties": {
+            "source": {
+              "type": "object",
+              "properties": { "path": { "$ref": "#/$defs/repositoryPath" } }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "kind": { "const": "process-handoff" } },
+            "required": ["kind"]
+          },
+          "then": {
+            "properties": {
+              "target": {
+                "type": "object",
+                "properties": { "path": { "$ref": "#/$defs/externalProcessPath" } }
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "target": {
+                "type": "object",
+                "properties": { "path": { "$ref": "#/$defs/repositoryPath" } }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "provenance": { "enum": ["declared-dynamic", "runtime-fixture"] } },
+            "required": ["provenance"]
+          },
+          "then": {
+            "properties": {
+              "resolutionRule": { "type": "string", "minLength": 1 },
+              "fixtureId": { "$ref": "#/$defs/identifier" }
+            }
+          }
+        }
+      ],
       "properties": {
         "edgeId": { "$ref": "#/$defs/identifier" },
         "fromNodeId": { "$ref": "#/$defs/identifier" },
         "toNodeId": { "$ref": "#/$defs/identifier" },
-        "kind": {
-          "enum": [
-            "import",
-            "export",
-            "call",
-            "construct",
-            "dependency-injection",
-            "dynamic-import",
-            "dynamic-require",
-            "path-load",
-            "ipc-channel",
-            "preload-channel",
-            "event-dispatch",
-            "runtime-template",
-            "worker-script",
-            "serialized-envelope",
-            "file-handoff",
-            "process-handoff",
-            "reverse-dependency"
-          ]
-        },
+        "source": { "$ref": "#/$defs/locator" },
+        "target": { "$ref": "#/$defs/locator" },
+        "kind": { "$ref": "#/$defs/edgeKind" },
         "provenance": { "enum": ["static", "declared-dynamic", "runtime-fixture", "historical"] },
-        "sourceHash": { "$ref": "#/$defs/sha256" }
+        "sourceHash": { "$ref": "#/$defs/sha256" },
+        "resolutionRule": { "type": ["string", "null"], "minLength": 1 },
+        "fixtureId": {
+          "oneOf": [
+            { "$ref": "#/$defs/identifier" },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+    "declaredDynamicEdge": {
+      "allOf": [
+        { "$ref": "#/$defs/edge" },
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "$ref": "#/$defs/dynamicEdgeKind" },
+            "provenance": { "const": "declared-dynamic" },
+            "resolutionRule": { "type": "string", "minLength": 1 },
+            "fixtureId": { "$ref": "#/$defs/identifier" }
+          }
+        }
+      ]
+    },
+    "externalProcessEndpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "nodeId",
+        "path",
+        "symbol",
+        "locatorKind",
+        "attributions"
+      ],
+      "properties": {
+        "nodeId": { "$ref": "#/$defs/identifier" },
+        "path": { "$ref": "#/$defs/externalProcessPath" },
+        "symbol": { "type": "null" },
+        "locatorKind": { "type": "null" },
+        "attributions": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/externalProcessAttribution" }
+        }
+      }
+    },
+    "externalProcessAttribution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "edgeId",
+        "sourceNodeId",
+        "capabilityId",
+        "cutoverUnitId",
+        "sourceHash",
+        "sourceReachability"
+      ],
+      "properties": {
+        "edgeId": { "$ref": "#/$defs/identifier" },
+        "sourceNodeId": { "$ref": "#/$defs/identifier" },
+        "capabilityId": { "$ref": "#/$defs/identifier" },
+        "cutoverUnitId": { "$ref": "#/$defs/identifier" },
+        "sourceHash": { "$ref": "#/$defs/sha256" },
+        "sourceReachability": { "enum": ["reachable", "unreachable", "unknown"] }
       }
     },
     "candidate": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["candidateId", "path", "symbol", "sourceHash", "resolutionKind", "resolutionRefId"],
+      "required": [
+        "candidateId",
+        "candidateKind",
+        "path",
+        "symbol",
+        "locatorKind",
+        "sourceHash",
+        "discoveryRuleIds",
+        "lastKnownCommit",
+        "resolutionKind",
+        "resolutionRefId"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": { "symbol": { "type": "null" } },
+            "required": ["symbol"]
+          },
+          "then": { "properties": { "locatorKind": { "type": "null" } } },
+          "else": { "properties": { "locatorKind": { "$ref": "#/$defs/locatorKind" } } }
+        },
+        {
+          "if": {
+            "properties": { "candidateKind": { "const": "historical" } },
+            "required": ["candidateKind"]
+          },
+          "then": {
+            "properties": {
+              "lastKnownCommit": { "$ref": "#/$defs/commit" },
+              "discoveryRuleIds": { "type": "array", "maxItems": 0 }
+            }
+          },
+          "else": {
+            "properties": {
+              "lastKnownCommit": { "type": "null" },
+              "discoveryRuleIds": { "type": "array", "minItems": 1 }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "resolutionKind": { "const": "unresolved" } },
+            "required": ["resolutionKind"]
+          },
+          "then": {
+            "properties": { "resolutionRefId": { "type": "null" } }
+          },
+          "else": {
+            "properties": { "resolutionRefId": { "$ref": "#/$defs/identifier" } }
+          }
+        }
+      ],
       "properties": {
         "candidateId": { "$ref": "#/$defs/identifier" },
-        "path": { "type": "string", "minLength": 1, "pattern": "^(?!/)" },
+        "candidateKind": { "enum": ["current", "historical"] },
+        "path": { "$ref": "#/$defs/repositoryPath" },
         "symbol": { "type": ["string", "null"], "minLength": 1 },
+        "locatorKind": { "$ref": "#/$defs/nullableLocatorKind" },
         "sourceHash": { "$ref": "#/$defs/sha256" },
+        "discoveryRuleIds": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/identifier" }
+        },
+        "lastKnownCommit": {
+          "oneOf": [
+            { "$ref": "#/$defs/commit" },
+            { "type": "null" }
+          ]
+        },
         "resolutionKind": { "enum": ["current-node", "approved-exclusion", "retired-tombstone", "unresolved"] },
         "resolutionRefId": { "$ref": "#/$defs/nullableIdentifier" }
       }
@@ -308,24 +724,134 @@
       "uniqueItems": true,
       "items": { "$ref": "#/$defs/candidate" }
     },
+    "currentCandidateSet": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "allOf": [
+          { "$ref": "#/$defs/candidate" },
+          {
+            "type": "object",
+            "properties": {
+              "candidateKind": { "const": "current" },
+              "resolutionKind": {
+                "enum": ["current-node", "approved-exclusion", "unresolved"]
+              }
+            }
+          }
+        ]
+      }
+    },
+    "historicalCandidateSet": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "allOf": [
+          { "$ref": "#/$defs/candidate" },
+          {
+            "type": "object",
+            "properties": { "candidateKind": { "const": "historical" } }
+          }
+        ]
+      }
+    },
     "unresolvedEdge": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["edgeId", "sourceNodeId", "kind", "reason"],
+      "required": [
+        "edgeId",
+        "sourceNodeId",
+        "targetNodeId",
+        "source",
+        "target",
+        "kind",
+        "declaredSourceHash",
+        "actualSourceHash",
+        "resolutionRule",
+        "fixtureId",
+        "reason"
+      ],
+      "allOf": [
+        {
+          "properties": {
+            "source": {
+              "type": "object",
+              "properties": { "path": { "$ref": "#/$defs/repositoryPath" } }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "kind": { "const": "process-handoff" } },
+            "required": ["kind"]
+          },
+          "then": {
+            "properties": {
+              "target": {
+                "type": "object",
+                "properties": { "path": { "$ref": "#/$defs/externalProcessPath" } }
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "target": {
+                "type": "object",
+                "properties": { "path": { "$ref": "#/$defs/repositoryPath" } }
+              }
+            }
+          }
+        }
+      ],
       "properties": {
         "edgeId": { "$ref": "#/$defs/identifier" },
         "sourceNodeId": { "$ref": "#/$defs/identifier" },
-        "kind": { "type": "string", "minLength": 1 },
+        "targetNodeId": { "$ref": "#/$defs/identifier" },
+        "source": { "$ref": "#/$defs/locator" },
+        "target": { "$ref": "#/$defs/locator" },
+        "kind": { "$ref": "#/$defs/dynamicEdgeKind" },
+        "declaredSourceHash": { "$ref": "#/$defs/sha256" },
+        "actualSourceHash": {
+          "oneOf": [
+            { "$ref": "#/$defs/sha256" },
+            { "type": "null" }
+          ]
+        },
+        "resolutionRule": { "type": "string", "minLength": 1 },
+        "fixtureId": { "$ref": "#/$defs/identifier" },
         "reason": { "type": "string", "minLength": 1 }
       }
     },
     "approvedExclusion": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["exclusionId", "candidateId", "decisionId", "decisionHash"],
+      "required": [
+        "exclusionId",
+        "candidateId",
+        "candidateKind",
+        "path",
+        "symbol",
+        "locatorKind",
+        "decisionId",
+        "decisionHash"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": { "symbol": { "type": "null" } },
+            "required": ["symbol"]
+          },
+          "then": { "properties": { "locatorKind": { "type": "null" } } },
+          "else": { "properties": { "locatorKind": { "$ref": "#/$defs/locatorKind" } } }
+        }
+      ],
       "properties": {
         "exclusionId": { "$ref": "#/$defs/identifier" },
         "candidateId": { "$ref": "#/$defs/identifier" },
+        "candidateKind": { "enum": ["current", "historical"] },
+        "path": { "$ref": "#/$defs/repositoryPath" },
+        "symbol": { "type": ["string", "null"], "minLength": 1 },
+        "locatorKind": { "$ref": "#/$defs/nullableLocatorKind" },
         "decisionId": { "$ref": "#/$defs/identifier" },
         "decisionHash": { "$ref": "#/$defs/sha256" }
       }
@@ -333,14 +859,44 @@
     "retiredTombstone": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["inventoryEntryId", "path", "symbol", "deletedSourceHash", "deletionCommit", "deletionEvidenceRef"],
+      "required": [
+        "inventoryEntryId",
+        "path",
+        "symbol",
+        "locatorKind",
+        "deletedSourceHash",
+        "capabilityId",
+        "cutoverUnitId",
+        "deletionCommit",
+        "deletionEvidenceRef",
+        "provenanceRefs"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": { "symbol": { "type": "null" } },
+            "required": ["symbol"]
+          },
+          "then": { "properties": { "locatorKind": { "type": "null" } } },
+          "else": { "properties": { "locatorKind": { "$ref": "#/$defs/locatorKind" } } }
+        }
+      ],
       "properties": {
         "inventoryEntryId": { "$ref": "#/$defs/identifier" },
-        "path": { "type": "string", "minLength": 1, "pattern": "^(?!/)" },
+        "path": { "$ref": "#/$defs/repositoryPath" },
         "symbol": { "type": ["string", "null"], "minLength": 1 },
+        "locatorKind": { "$ref": "#/$defs/nullableLocatorKind" },
         "deletedSourceHash": { "$ref": "#/$defs/sha256" },
+        "capabilityId": { "$ref": "#/$defs/identifier" },
+        "cutoverUnitId": { "$ref": "#/$defs/identifier" },
         "deletionCommit": { "$ref": "#/$defs/commit" },
-        "deletionEvidenceRef": { "$ref": "report-index-entry.schema.json#/$defs/artifactReference" }
+        "deletionEvidenceRef": { "$ref": "report-index-entry.schema.json#/$defs/artifactReference" },
+        "provenanceRefs": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        }
       }
     },
     "counts": {

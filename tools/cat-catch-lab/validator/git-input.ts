@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import {
   existsSync,
   lstatSync,
@@ -18,7 +19,7 @@ const objectExistsCache = new Map<string, boolean>()
 const pathStateCache = new Map<string, GitPathState>()
 const touchedPathCache = new Map<string, boolean>()
 
-const GIT_GLOBAL_ARGS = ['--no-replace-objects'] as const
+const GIT_GLOBAL_ARGS = ['--no-replace-objects', '--literal-pathspecs'] as const
 
 function compareCodeUnits(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0
@@ -51,6 +52,16 @@ function runGitBufferWithInput(cwd: string, args: string[], input: Buffer): Buff
     maxBuffer: 128 * 1024 * 1024,
     stdio: ['pipe', 'pipe', 'pipe'],
   })
+}
+
+function gitObjectBytesMatchId(type: 'blob', bytes: Buffer, objectId: string): boolean {
+  const algorithm = objectId.length === 40 ? 'sha1' : objectId.length === 64 ? 'sha256' : null
+  if (!algorithm) return false
+  const actualObjectId = createHash(algorithm)
+    .update(`${type} ${bytes.length}\0`)
+    .update(bytes)
+    .digest('hex')
+  return actualObjectId === objectId
 }
 
 export function tryReadGitHead(cwd: string): string | null {
@@ -152,6 +163,7 @@ export function gitCommitTouchesPath(cwd: string, commit: string, relativePath: 
       '--name-only',
       '-z',
       '-r',
+      '-m',
       commit,
       '--',
       relativePath,
@@ -348,7 +360,9 @@ export function readGitBlobObjects(cwd: string, objectIds: string[]): Map<string
       const contentStart = headerEnd + 1
       const contentEnd = contentStart + byteLength
       if (contentEnd >= output.length || output[contentEnd] !== 0x0a) return null
-      blobs.set(requestedObjectId, output.subarray(contentStart, contentEnd))
+      const bytes = output.subarray(contentStart, contentEnd)
+      if (!gitObjectBytesMatchId('blob', bytes, requestedObjectId)) return null
+      blobs.set(requestedObjectId, bytes)
       offset = contentEnd + 1
     }
     return offset === output.length ? blobs : null
@@ -390,10 +404,13 @@ export function readGitPathAtCommit(
       pathStateCache.set(cacheKey, result)
       return result
     }
-    const result = {
-      status: 'present',
-      bytes: runGitBuffer(cwd, ['cat-file', 'blob', entry.objectId]),
-    } as const
+    const bytes = runGitBuffer(cwd, ['cat-file', 'blob', entry.objectId])
+    if (!gitObjectBytesMatchId('blob', bytes, entry.objectId)) {
+      const result = { status: 'unavailable' } as const
+      pathStateCache.set(cacheKey, result)
+      return result
+    }
+    const result = { status: 'present', bytes } as const
     pathStateCache.set(cacheKey, result)
     return result
   } catch {

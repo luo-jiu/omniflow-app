@@ -93,7 +93,9 @@ function printLocalClosureReport(report: CandidateLocalClosureReport, outputPath
   console.log(`Input commit: ${report.evidenceInputCommit}`)
   console.log(`Input tree hash: ${report.evidenceInputTreeHash}`)
   console.log(`Tracked blob manifest entries: ${report.sourceManifest.entries.length}`)
-  console.log(`Proven reachable roots: ${report.discoveredNodes.length}`)
+  console.log(`Verified current nodes: ${report.discoveredNodes.length}`)
+  console.log(`Proven reachable roots: ${report.discoveredNodes.filter(node => node.reachability === 'reachable').length}`)
+  console.log(`Unknown reachability: ${report.discoveredNodes.filter(node => node.reachability === 'unknown').length}`)
   console.log(`Unmapped in-scope nodes: ${report.counts.unmappedInScopeNodes}`)
   console.log(`Blockers: ${report.blockers.length}`)
   for (const blocker of report.blockers) {

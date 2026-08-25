@@ -9,6 +9,7 @@ import {
   readGitBlobObjects,
   tryResolveGitCommit,
 } from './git-input.ts'
+import { validateExactCommitClosureInvariants } from './exact-closure-invariants.ts'
 import { decodeUtf8Bytes, getString, isJsonObject, sha256Bytes } from './json.ts'
 import {
   loadAndValidateLocalClosureContractsAtCommit,
@@ -20,20 +21,25 @@ import {
   type CandidateLocalClosureReport,
   type JsonObject,
   type LoadedContracts,
+  type LocalClosureBootstrapRoot,
   type LocalClosureCandidate,
   type LocalClosureDiscoveredNode,
+  type LocalClosureDiscoveryCoverage,
   type LocalClosureEdge,
+  type LocalClosureExternalProcessAttribution,
+  type LocalClosureExternalProcessEndpoint,
   type LocalClosureFinding,
   type LocalClosureFindingGroup,
+  type LocalClosureLocator,
+  type LocalClosureLocatorKind,
   type LocalClosureManifestEntry,
-  type LocalClosureNodeRef,
   type ValidationIssue,
 } from './types.ts'
 import { inspectSourceLocator, normalizeSourceLocatorKind } from './source-locator.ts'
 
 const LOCAL_CLOSURE_SCHEMA_FILE = 'local-closure-report.schema.json'
 const LOCAL_CLOSURE_SCHEMA_ID = 'https://omniflow.local/schemas/cat-catch/local-closure-report.schema.json'
-const LOCAL_CLOSURE_GENERATOR_VERSION = 'candidate-local-closure-v1'
+const LOCAL_CLOSURE_GENERATOR_VERSION = 'candidate-local-closure-v2'
 const REPORT_INDEX_PATH = 'docs/cat-catch/report-index'
 const EXECUTING_APP_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..')
 const FINDING_GROUPS: LocalClosureFindingGroup[] = [
@@ -80,8 +86,10 @@ type InventoryProjection = Pick<CandidateLocalClosureReport,
   | 'bootstrapRoots'
   | 'counts'
   | 'declaredDynamicEdges'
+  | 'discoveryCoverage'
   | 'discoveredNodes'
   | 'edges'
+  | 'externalProcessEndpoints'
   | 'findings'
   | 'historicalCandidates'
   | 'retiredTombstones'
@@ -344,6 +352,11 @@ function prepareExactClosureInputs(appRoot: string, commit: string): PreparedClo
     }
   }
 
+  const invariantResult = validateExactCommitClosureInvariants(appRoot, exactCommit)
+  if (!invariantResult.canGenerateReport) {
+    return { inputs: null, issues: invariantResult.issues }
+  }
+
   const sourceSnapshot = createExactSourceManifest(appRoot, exactCommit)
   if (!sourceSnapshot.sourceManifest || !sourceSnapshot.treeHash || sourceSnapshot.issues.length > 0) {
     return { inputs: null, issues: sourceSnapshot.issues }
@@ -404,10 +417,18 @@ function prepareExactClosureInputs(appRoot: string, commit: string): PreparedClo
   }
 }
 
-function normalizedLocatorKind(locator: JsonObject): string | null {
+function normalizedLocatorKind(locator: JsonObject): LocalClosureLocatorKind | null {
   const symbol = nullableString(locator.symbol, 'locator.symbol')
   if (symbol === null) return null
-  return getString(locator.locatorKind) || 'declaration'
+  return normalizeSourceLocatorKind(locator.locatorKind) || 'declaration'
+}
+
+function projectLocator(locator: JsonObject, label: string): LocalClosureLocator {
+  return {
+    locatorKind: normalizedLocatorKind(locator),
+    path: requireString(locator, 'path', label),
+    symbol: nullableString(locator.symbol, `${label}.symbol`),
+  }
 }
 
 function locatorKey(locator: JsonObject): string {
@@ -442,31 +463,8 @@ function createEmptyFindings(): Record<LocalClosureFindingGroup, LocalClosureFin
   }
 }
 
-export function createLocalClosureSchemaProjectionBlocker(
-  historicalCandidateCount: number,
-  tombstoneCount: number,
-  externalProcessEndpointCount = 0,
-): LocalClosureFinding {
-  const lostFields = ['locatorKind']
-  if (historicalCandidateCount > 0) lostFields.push('historicalCandidates.lastKnownCommit')
-  if (tombstoneCount > 0) {
-    lostFields.push('retiredTombstones.capabilityId/cutoverUnitId/provenanceRefs')
-  }
-  if (externalProcessEndpointCount > 0) {
-    lostFields.push('external-process virtual endpoint attribution/sourceHash')
-  }
-  return finding(
-    'closure.schema-projection-incomplete',
-    'schema.local-closure-projection',
-    `The current local-closure schema cannot encode ${lostFields.join(', ')}; exact inventory remains authoritative and this candidate cannot satisfy closure completion.`,
-  )
-}
-
 function projectionBlockers(
   inputs: ExactClosureInputs,
-  historicalCandidateCount: number,
-  tombstoneCount: number,
-  externalProcessEndpointCount: number,
 ): LocalClosureFinding[] {
   const blockers = [
     finding(
@@ -478,11 +476,6 @@ function projectionBlockers(
       'closure.discovery-engine-unimplemented',
       'discovery.static-reverse-semantic',
       'AST static/import/call discovery, reverse dependency traversal, semantic scans, and the complete least-fixed-point closure are not implemented; only bootstrap roots have proven reachability.',
-    ),
-    createLocalClosureSchemaProjectionBlocker(
-      historicalCandidateCount,
-      tombstoneCount,
-      externalProcessEndpointCount,
     ),
   ]
   if (
@@ -610,15 +603,7 @@ function projectInventory(inputs: ExactClosureInputs): InventoryProjection {
   }
 
   const findings = createEmptyFindings()
-  const externalProcessEndpointCount = dynamicDeclarations.filter(declaration => (
-    declaration.kind === 'process-handoff'
-  )).length
-  const blockers = projectionBlockers(
-    inputs,
-    historicalDeclarations.length,
-    tombstones.length,
-    externalProcessEndpointCount,
-  )
+  const blockers = projectionBlockers(inputs)
   const verifiedCurrentNodeIds = new Set<string>()
   for (const node of currentNodes) {
     const nodeId = requireString(node, 'id', 'inventoryNode')
@@ -654,8 +639,35 @@ function projectInventory(inputs: ExactClosureInputs): InventoryProjection {
     }
     if (verifyCurrentNodeAtExactCommit(inputs, node, blockers)) verifiedCurrentNodeIds.add(nodeId)
   }
-  const bootstrapRoots: LocalClosureNodeRef[] = []
+
+  const bootstrapRoots: LocalClosureBootstrapRoot[] = []
   const discoveredById = new Map<string, LocalClosureDiscoveredNode>()
+  for (const node of currentNodes) {
+    const nodeId = requireString(node, 'id', 'inventoryNode')
+    if (!verifiedCurrentNodeIds.has(nodeId)) continue
+    const locator = projectLocator(node, 'inventoryNode')
+    const manifestEntry = inputs.manifestByPath.get(locator.path)
+    if (!manifestEntry) continue
+    discoveredById.set(nodeId, {
+      capabilityId: nullableString(node.capabilityId, 'inventoryNode.capabilityId'),
+      classification: requireString(
+        node,
+        'classification',
+        'inventoryNode',
+      ) as LocalClosureDiscoveredNode['classification'],
+      cutoverUnitId: nullableString(node.cutoverUnitId, 'inventoryNode.cutoverUnitId'),
+      inventoryEntryId: nodeId,
+      ...locator,
+      nodeId,
+      ownerRole: nullableString(node.ownerRole, 'inventoryNode.ownerRole'),
+      provenanceRefs: Array.isArray(node.provenanceRefs)
+        ? node.provenanceRefs.filter((ref): ref is string => typeof ref === 'string').sort(compareCodeUnits)
+        : [],
+      reachability: 'unknown',
+      sourceHash: manifestEntry.contentHash,
+    })
+  }
+
   for (const root of bootstrapDeclarations) {
     const rootId = requireString(root, 'id', 'bootstrapRoot')
     const matches = currentByLocator.get(locatorKey(root)) || []
@@ -669,49 +681,41 @@ function projectInventory(inputs: ExactClosureInputs): InventoryProjection {
     }
     const node = matches[0] || {}
     const nodeId = requireString(node, 'id', 'inventoryNode')
-    const path = requireString(node, 'path', 'inventoryNode')
-    const symbol = nullableString(node.symbol, 'inventoryNode.symbol')
-    const manifestEntry = inputs.manifestByPath.get(path)
-    if (!manifestEntry || !verifiedCurrentNodeIds.has(nodeId)) {
+    const locator = projectLocator(node, 'inventoryNode')
+    const discoveredNode = discoveredById.get(nodeId)
+    if (!discoveredNode) {
       blockers.push(finding(
         'closure.bootstrap-root-source-unavailable',
         rootId,
-        `Bootstrap root source hash and locator are not both verified at the exact commit: ${path}${symbol ? `#${symbol}` : ''}.`,
+        `Bootstrap root source hash and locator are not both verified at the exact commit: ${locator.path}${locator.symbol ? `#${locator.symbol}` : ''}.`,
       ))
       continue
     }
-    bootstrapRoots.push({ nodeId, path, symbol })
-    discoveredById.set(nodeId, {
-      capabilityId: nullableString(node.capabilityId, 'inventoryNode.capabilityId'),
-      cutoverUnitId: nullableString(node.cutoverUnitId, 'inventoryNode.cutoverUnitId'),
-      inventoryEntryId: nodeId,
+    bootstrapRoots.push({
+      category: requireString(root, 'category', 'bootstrapRoot'),
+      ...locator,
       nodeId,
-      ownerRole: nullableString(node.ownerRole, 'inventoryNode.ownerRole'),
-      path,
-      reachability: 'reachable',
-      sourceHash: manifestEntry.contentHash,
-      symbol,
+      rootId,
+      traversal: requireString(root, 'traversal', 'bootstrapRoot') as LocalClosureBootstrapRoot['traversal'],
     })
+    discoveredNode.reachability = 'reachable'
     if (node.classification === 'legacy' && node.ownerRole === 'production-owner') {
       findings.reachableLegacyProductionOwners.push(finding(
         'closure.reachable-legacy-production-owner',
         nodeId,
-        `Legacy production owner is a declared bootstrap root: ${path}${symbol ? `#${symbol}` : ''}.`,
+        `Legacy production owner is a declared bootstrap root: ${locator.path}${locator.symbol ? `#${locator.symbol}` : ''}.`,
       ))
     }
   }
   const discoveredNodes = [...discoveredById.values()].sort((left, right) => compareCodeUnits(left.nodeId, right.nodeId))
-  bootstrapRoots.sort((left, right) => compareCodeUnits(left.nodeId, right.nodeId))
+  bootstrapRoots.sort((left, right) => compareCodeUnits(left.rootId, right.rootId))
 
-  for (const node of currentNodes) {
-    const nodeId = requireString(node, 'id', 'inventoryNode')
-    if (discoveredById.has(nodeId)) continue
-    const path = requireString(node, 'path', 'inventoryNode')
-    const symbol = nullableString(node.symbol, 'inventoryNode.symbol')
+  for (const node of discoveredNodes) {
+    if (node.reachability !== 'unknown') continue
     blockers.push(finding(
       'closure.current-node-reachability-undetermined',
-      nodeId,
-      `Inventory current node is mapped but intentionally omitted from discoveredNodes until complete closure traversal proves reachability: ${path}${symbol ? `#${symbol}` : ''}.`,
+      node.nodeId,
+      `Inventory current node is verified but its reachability remains unknown until complete closure traversal: ${node.path}${node.symbol ? `#${node.symbol}` : ''}.`,
     ))
   }
 
@@ -732,27 +736,30 @@ function projectInventory(inputs: ExactClosureInputs): InventoryProjection {
     side: 'source' | 'target',
     locator: JsonObject,
     kind: string,
-  ): { nodeId: string; unresolvedReason: string | null } => {
+  ): { node: JsonObject | null; nodeId: string; unresolvedReason: string | null } => {
     const path = requireString(locator, 'path', `${edgeId}.${side}`)
     const symbol = nullableString(locator.symbol, `${edgeId}.${side}.symbol`)
     if (side === 'target' && kind === 'process-handoff' && path.startsWith('external-process/') && symbol === null) {
-      return { nodeId: externalProcessNodeId(path), unresolvedReason: null }
+      return { node: null, nodeId: externalProcessNodeId(path), unresolvedReason: null }
     }
     const matches = currentByLocator.get(locatorKey(locator)) || []
     if (matches.length === 1) {
       const nodeId = requireString(matches[0] || {}, 'id', `${edgeId}.${side}`)
       if (!verifiedCurrentNodeIds.has(nodeId)) {
         return {
+          node: matches[0] || null,
           nodeId,
           unresolvedReason: `${side} locator resolves to an inventory node whose exact-commit source hash or locator is unverified`,
         }
       }
       return {
+        node: matches[0] || null,
         nodeId,
         unresolvedReason: null,
       }
     }
     return {
+      node: null,
       nodeId: `unresolved-${side}.${edgeId}`,
       unresolvedReason: `${side} locator resolved to ${matches.length} inventory current nodes`,
     }
@@ -760,83 +767,121 @@ function projectInventory(inputs: ExactClosureInputs): InventoryProjection {
 
   const declaredDynamicEdges: LocalClosureEdge[] = []
   const unresolvedDynamicEdges: CandidateLocalClosureReport['unresolvedDynamicEdges'] = []
+  const externalEndpointSets = new Map<string, {
+    attributions: LocalClosureExternalProcessAttribution[]
+    endpoint: LocalClosureExternalProcessEndpoint
+  }>()
   for (const declaration of dynamicDeclarations) {
     const edgeId = requireString(declaration, 'id', 'dynamicEdge')
     const kind = requireString(declaration, 'kind', edgeId)
     const source = asObject(declaration.source, `${edgeId}.source`)
     const target = asObject(declaration.target, `${edgeId}.target`)
+    const sourceLocator = projectLocator(source, `${edgeId}.source`)
+    const targetLocator = projectLocator(target, `${edgeId}.target`)
     const sourceEndpoint = resolveEndpoint(edgeId, 'source', source, kind)
     const targetEndpoint = resolveEndpoint(edgeId, 'target', target, kind)
-    const reasons = [sourceEndpoint.unresolvedReason, targetEndpoint.unresolvedReason].filter(Boolean)
-    if (reasons.length > 0) {
-      const reason = reasons.join('; ')
-      unresolvedDynamicEdges.push({
-        edgeId,
-        kind,
-        reason,
-        sourceNodeId: sourceEndpoint.nodeId,
-      })
-      findings.unresolvedEdges.push(finding(
-        'closure.declared-dynamic-edge-unresolved',
-        edgeId,
-        reason,
-      ))
-      continue
-    }
-    const sourcePath = requireString(source, 'path', `${edgeId}.source`)
+    const resolutionRule = requireString(declaration, 'resolutionRule', edgeId)
+    const fixtureId = requireString(declaration, 'fixtureId', edgeId)
     const declaredSourceHash = requireString(declaration, 'sourceHash', edgeId)
-    const actualSourceHash = sourceHashAtPath(inputs, sourcePath)
+    const actualSourceHash = sourceHashAtPath(inputs, sourceLocator.path)
+    const reasons = [sourceEndpoint.unresolvedReason, targetEndpoint.unresolvedReason].filter(
+      (reason): reason is string => Boolean(reason),
+    )
     if (!actualSourceHash) {
-      const reason = `source path is absent from the exact commit blob manifest: ${sourcePath}`
-      unresolvedDynamicEdges.push({
-        edgeId,
-        kind,
-        reason,
-        sourceNodeId: sourceEndpoint.nodeId,
-      })
-      findings.unresolvedEdges.push(finding(
-        'closure.declared-dynamic-edge-source-missing',
-        edgeId,
-        reason,
-      ))
+      reasons.push(`source path is absent from the exact commit blob manifest: ${sourceLocator.path}`)
       blockers.push(finding(
         'closure.dynamic-edge-source-blob-missing',
         edgeId,
-        `Declared dynamic edge source blob is unavailable: ${sourcePath}.`,
+        `Declared dynamic edge source blob is unavailable: ${sourceLocator.path}.`,
       ))
-      continue
-    }
-    if (actualSourceHash !== declaredSourceHash) {
-      const reason = `declared source hash does not match the exact commit blob: ${sourcePath}`
-      unresolvedDynamicEdges.push({
-        edgeId,
-        kind,
-        reason,
-        sourceNodeId: sourceEndpoint.nodeId,
-      })
-      findings.unresolvedEdges.push(finding(
-        'closure.declared-dynamic-edge-source-hash-mismatch',
-        edgeId,
-        reason,
-      ))
+    } else if (actualSourceHash !== declaredSourceHash) {
+      reasons.push(`declared source hash does not match the exact commit blob: ${sourceLocator.path}`)
       blockers.push(finding(
         'closure.dynamic-edge-source-hash-mismatch',
         edgeId,
-        `Declared dynamic edge source hash does not match exact commit blob ${sourcePath}.`,
+        `Declared dynamic edge source hash does not match exact commit blob ${sourceLocator.path}.`,
       ))
+    }
+    const sourceCapabilityId = sourceEndpoint.node
+      ? nullableString(sourceEndpoint.node.capabilityId, `${edgeId}.source.capabilityId`)
+      : null
+    const sourceCutoverUnitId = sourceEndpoint.node
+      ? nullableString(sourceEndpoint.node.cutoverUnitId, `${edgeId}.source.cutoverUnitId`)
+      : null
+    const sourceDiscoveredNode = discoveredById.get(sourceEndpoint.nodeId) || null
+    if (
+      kind === 'process-handoff'
+      && (!sourceCapabilityId || !sourceCutoverUnitId || !sourceDiscoveredNode)
+    ) {
+      reasons.push('process-handoff source is missing capability/cutover attribution')
+    }
+    if (reasons.length > 0) {
+      const reason = reasons.join('; ')
+      unresolvedDynamicEdges.push({
+        actualSourceHash,
+        declaredSourceHash,
+        edgeId,
+        fixtureId,
+        kind,
+        reason,
+        resolutionRule,
+        source: sourceLocator,
+        sourceNodeId: sourceEndpoint.nodeId,
+        target: targetLocator,
+        targetNodeId: targetEndpoint.nodeId,
+      })
+      const findingCode = !actualSourceHash
+        ? 'closure.declared-dynamic-edge-source-missing'
+        : actualSourceHash !== declaredSourceHash
+          ? 'closure.declared-dynamic-edge-source-hash-mismatch'
+          : 'closure.declared-dynamic-edge-unresolved'
+      findings.unresolvedEdges.push(finding(findingCode, edgeId, reason))
       continue
     }
+    if (!actualSourceHash) throw new Error(`Verified dynamic edge source hash is missing: ${edgeId}`)
     declaredDynamicEdges.push({
       edgeId,
+      fixtureId,
       fromNodeId: sourceEndpoint.nodeId,
       kind,
       provenance: 'declared-dynamic',
+      resolutionRule,
+      source: sourceLocator,
       sourceHash: actualSourceHash,
+      target: targetLocator,
       toNodeId: targetEndpoint.nodeId,
     })
+    if (kind === 'process-handoff' && sourceCapabilityId && sourceCutoverUnitId) {
+      let endpointSets = externalEndpointSets.get(targetEndpoint.nodeId)
+      if (!endpointSets) {
+        endpointSets = {
+          attributions: [],
+          endpoint: {
+            attributions: [],
+            locatorKind: null,
+            nodeId: targetEndpoint.nodeId,
+            path: targetLocator.path,
+            symbol: null,
+          },
+        }
+        externalEndpointSets.set(targetEndpoint.nodeId, endpointSets)
+      }
+      endpointSets.attributions.push({
+        capabilityId: sourceCapabilityId,
+        cutoverUnitId: sourceCutoverUnitId,
+        edgeId,
+        sourceHash: actualSourceHash,
+        sourceNodeId: sourceEndpoint.nodeId,
+        sourceReachability: sourceDiscoveredNode?.reachability || 'unknown',
+      })
+    }
   }
   declaredDynamicEdges.sort((left, right) => compareCodeUnits(left.edgeId, right.edgeId))
   unresolvedDynamicEdges.sort((left, right) => compareCodeUnits(left.edgeId, right.edgeId))
+  const externalProcessEndpoints = [...externalEndpointSets.values()].map(sets => ({
+    ...sets.endpoint,
+    attributions: sets.attributions.sort((left, right) => compareCodeUnits(left.edgeId, right.edgeId)),
+  })).sort((left, right) => compareCodeUnits(left.nodeId, right.nodeId))
 
   const historicalCandidates: LocalClosureCandidate[] = historicalDeclarations.map(candidate => {
     const resolution = candidate.resolution === null
@@ -844,7 +889,10 @@ function projectInventory(inputs: ExactClosureInputs): InventoryProjection {
       : asObject(candidate.resolution, 'historicalCandidate.resolution')
     return {
       candidateId: requireString(candidate, 'id', 'historicalCandidate'),
-      path: requireString(candidate, 'path', 'historicalCandidate'),
+      candidateKind: 'historical' as const,
+      discoveryRuleIds: [],
+      lastKnownCommit: requireString(candidate, 'lastKnownCommit', 'historicalCandidate'),
+      ...projectLocator(candidate, 'historicalCandidate'),
       resolutionKind: resolution
         ? requireString(resolution, 'kind', 'historicalCandidate.resolution') as LocalClosureCandidate['resolutionKind']
         : 'unresolved',
@@ -852,7 +900,6 @@ function projectInventory(inputs: ExactClosureInputs): InventoryProjection {
         ? requireString(resolution, 'refId', 'historicalCandidate.resolution')
         : null,
       sourceHash: requireString(candidate, 'sourceHash', 'historicalCandidate'),
-      symbol: nullableString(candidate.symbol, 'historicalCandidate.symbol'),
     }
   }).sort((left, right) => compareCodeUnits(left.candidateId, right.candidateId))
 
@@ -879,19 +926,35 @@ function projectInventory(inputs: ExactClosureInputs): InventoryProjection {
     }
     return [{
       candidateId: requireString(candidates[0] || {}, 'id', 'approvedExclusion.candidate'),
+      candidateKind: candidateKind as 'current' | 'historical',
       decisionHash: sha256Bytes(stableJson(decision)),
       decisionId: requireString(decision, 'decisionId', 'approvedExclusion.decision'),
       exclusionId,
+      ...projectLocator(exclusion, 'approvedExclusion'),
     }]
   }).sort((left, right) => compareCodeUnits(left.exclusionId, right.exclusionId))
   const retiredTombstones = tombstones.map(tombstone => ({
+    capabilityId: requireString(tombstone, 'capabilityId', 'retiredTombstone'),
+    cutoverUnitId: requireString(tombstone, 'cutoverUnitId', 'retiredTombstone'),
     deletedSourceHash: requireString(tombstone, 'deletedSourceHash', 'retiredTombstone'),
     deletionCommit: requireString(tombstone, 'deletionCommit', 'retiredTombstone'),
     deletionEvidenceRef: asObject(tombstone.deletionEvidenceRef, 'retiredTombstone.deletionEvidenceRef'),
     inventoryEntryId: requireString(tombstone, 'id', 'retiredTombstone'),
-    path: requireString(tombstone, 'path', 'retiredTombstone'),
-    symbol: nullableString(tombstone.symbol, 'retiredTombstone.symbol'),
+    ...projectLocator(tombstone, 'retiredTombstone'),
+    provenanceRefs: Array.isArray(tombstone.provenanceRefs)
+      ? tombstone.provenanceRefs.filter((ref): ref is string => typeof ref === 'string').sort(compareCodeUnits)
+      : [],
   }))
+
+  const discoveryCoverage: LocalClosureDiscoveryCoverage = {
+    cutoverDependencyGraph: 'pending',
+    declaredDynamicEdges: 'complete',
+    historicalTouchsetScan: 'pending',
+    leastFixedPoint: 'pending',
+    reverseDependencyGraph: 'pending',
+    semanticScan: 'pending',
+    staticDependencyGraph: 'pending',
+  }
 
   for (const group of FINDING_GROUPS) {
     findings[group].sort((left, right) => compareCodeUnits(left.refId, right.refId))
@@ -906,8 +969,10 @@ function projectInventory(inputs: ExactClosureInputs): InventoryProjection {
     bootstrapRoots,
     counts,
     declaredDynamicEdges,
+    discoveryCoverage,
     discoveredNodes,
     edges: [],
+    externalProcessEndpoints,
     findings,
     historicalCandidates,
     retiredTombstones,
@@ -943,8 +1008,10 @@ function validateCandidateSemantics(
     ['inputHashes', report.inputHashes, inputs.expectedInputHashes],
     ['sourceManifest', report.sourceManifest, inputs.sourceManifest],
     ['bootstrapRoots', report.bootstrapRoots, expectedProjection.bootstrapRoots],
+    ['discoveryCoverage', report.discoveryCoverage, expectedProjection.discoveryCoverage],
     ['discoveredNodes', report.discoveredNodes, expectedProjection.discoveredNodes],
     ['edges', report.edges, expectedProjection.edges],
+    ['externalProcessEndpoints', report.externalProcessEndpoints, expectedProjection.externalProcessEndpoints],
     ['semanticCandidates', report.semanticCandidates, expectedProjection.semanticCandidates],
     ['historicalCandidates', report.historicalCandidates, expectedProjection.historicalCandidates],
     ['declaredDynamicEdges', report.declaredDynamicEdges, expectedProjection.declaredDynamicEdges],
@@ -979,11 +1046,22 @@ function validateCandidateSemantics(
   }
 
   const uniqueChecks: Array<[string, string[]]> = [
+    ['bootstrapRoots.rootId', report.bootstrapRoots.map(root => root.rootId)],
     ['bootstrapRoots.nodeId', report.bootstrapRoots.map(root => root.nodeId)],
-    ['bootstrapRoots.locator', report.bootstrapRoots.map(root => stableJson([root.path, root.symbol]))],
+    ['bootstrapRoots.locator', report.bootstrapRoots.map(root => stableJson([root.path, root.symbol, root.locatorKind]))],
     ['discoveredNodes.nodeId', report.discoveredNodes.map(node => node.nodeId)],
-    ['discoveredNodes.locator', report.discoveredNodes.map(node => stableJson([node.path, node.symbol]))],
+    ['graphNodes.nodeId', [
+      ...report.discoveredNodes.map(node => node.nodeId),
+      ...report.externalProcessEndpoints.map(endpoint => endpoint.nodeId),
+    ]],
+    ['discoveredNodes.locator', report.discoveredNodes.map(node => stableJson([node.path, node.symbol, node.locatorKind]))],
     ['declaredDynamicEdges.edgeId', report.declaredDynamicEdges.map(edge => edge.edgeId)],
+    ['externalProcessEndpoints.nodeId', report.externalProcessEndpoints.map(endpoint => endpoint.nodeId)],
+    ['externalProcessEndpoints.locator', report.externalProcessEndpoints.map(endpoint => stableJson([
+      endpoint.path,
+      endpoint.symbol,
+      endpoint.locatorKind,
+    ]))],
     ['historicalCandidates.candidateId', report.historicalCandidates.map(candidate => candidate.candidateId)],
     ['approvedExclusions.exclusionId', report.approvedExclusions.map(exclusion => String(exclusion.exclusionId))],
     ['approvedExclusions.candidateId', report.approvedExclusions.map(exclusion => String(exclusion.candidateId))],
@@ -1006,16 +1084,20 @@ function validateCandidateSemantics(
   }
 
   const discoveredIds = new Set(report.discoveredNodes.map(node => node.nodeId))
+  const rootNodeIds = new Set(report.bootstrapRoots.map(root => root.nodeId))
   for (const root of report.bootstrapRoots) {
     if (!discoveredIds.has(root.nodeId)) {
       issues.push(semanticMismatch('bootstrapRoots', `Bootstrap root does not reference a discovered node: ${root.nodeId}`))
     }
   }
-  if (report.discoveredNodes.some(node => node.reachability !== 'reachable')) {
-    issues.push(semanticMismatch(
-      'discoveredNodes',
-      'This partial candidate may only emit directly proven reachable bootstrap roots; it must not claim unreachable nodes',
-    ))
+  for (const node of report.discoveredNodes) {
+    const expectedReachability = rootNodeIds.has(node.nodeId) ? 'reachable' : 'unknown'
+    if (node.reachability !== expectedReachability) {
+      issues.push(semanticMismatch(
+        'discoveredNodes',
+        `Partial discovery must mark roots reachable and every other verified current node unknown: ${node.nodeId}`,
+      ))
+    }
   }
   const candidatesById = new Map(
     [...report.semanticCandidates, ...report.historicalCandidates]
@@ -1058,7 +1140,7 @@ function buildCandidateReport(
     generatedAt,
     inputHashes: inputs.expectedInputHashes,
     reportId: `local-closure.candidate:${inputs.commit}`,
-    schemaVersion: 1,
+    schemaVersion: 2,
     sourceManifest: inputs.sourceManifest,
     status: 'blocked',
     validator: {
@@ -1109,10 +1191,21 @@ export function validateCandidateLocalClosureReportAtCommit(
 ): ValidationIssue[] {
   const prepared = prepareExactClosureInputs(appRoot, commit)
   if (!prepared.inputs) return prepared.issues
-  return [
-    ...validateContractDocument(prepared.inputs.contracts, LOCAL_CLOSURE_SCHEMA_FILE, report),
-    ...validateCandidateSemantics(report, prepared.inputs),
-  ]
+  const schemaIssues = validateContractDocument(
+    prepared.inputs.contracts,
+    LOCAL_CLOSURE_SCHEMA_FILE,
+    report,
+  )
+  if (schemaIssues.length > 0) return schemaIssues
+  try {
+    return validateCandidateSemantics(report, prepared.inputs)
+  } catch (error) {
+    return [createIssue(
+      'error',
+      'local-closure-semantic-validation-failed',
+      error instanceof Error ? error.message : String(error),
+    )]
+  }
 }
 
 export function isLocalClosureReportIndexPath(appRoot: string, outputPath: string): boolean {

@@ -14,6 +14,15 @@ const catCatchDirectory = path.join(appRoot, 'docs/cat-catch')
 const commit = 'a'.repeat(40)
 const sha256 = `sha256:${'a'.repeat(64)}`
 const generatedAt = '2026-08-23T00:00:00.000Z'
+const discoveryCoverageKeys = [
+  'staticDependencyGraph',
+  'reverseDependencyGraph',
+  'semanticScan',
+  'historicalTouchsetScan',
+  'declaredDynamicEdges',
+  'leastFixedPoint',
+  'cutoverDependencyGraph',
+] as const
 
 const canonicalRiskRequirements = [
   {
@@ -120,14 +129,52 @@ function validatorBinding(): JsonObject {
   }
 }
 
-function closureCandidate(candidateId: string, resolutionKind = 'current-node'): JsonObject {
+function closureCandidate(
+  candidateId: string,
+  candidateKind: 'current' | 'historical',
+  resolutionKind: 'current-node' | 'approved-exclusion' | 'retired-tombstone' | 'unresolved',
+  resolutionRefId: string | null,
+): JsonObject {
+  const historical = candidateKind === 'historical'
   return {
     candidateId,
+    candidateKind,
+    discoveryRuleIds: historical ? [] : ['semantic.capture'],
+    lastKnownCommit: historical ? commit : null,
+    locatorKind: historical ? 'declaration' : null,
     path: `electron/service/${candidateId}.ts`,
-    symbol: null,
+    symbol: historical ? 'legacyCapture' : null,
     sourceHash: sha256,
     resolutionKind,
-    resolutionRefId: resolutionKind === 'unresolved' ? null : 'node.capture',
+    resolutionRefId,
+  }
+}
+
+function completeDiscoveryCoverage(): JsonObject {
+  return Object.fromEntries(discoveryCoverageKeys.map(key => [key, 'complete']))
+}
+
+function unresolvedDynamicEdge(): JsonObject {
+  return {
+    actualSourceHash: null,
+    declaredSourceHash: sha256,
+    edgeId: 'edge.dynamic-unresolved',
+    fixtureId: 'fixture.dynamic-unresolved',
+    kind: 'dynamic-import',
+    reason: 'The runtime target could not be resolved.',
+    resolutionRule: 'Resolve the generated module path from the command payload.',
+    source: {
+      path: 'electron/service/capture.ts',
+      symbol: null,
+      locatorKind: null,
+    },
+    sourceNodeId: 'node.capture',
+    target: {
+      path: 'electron/service/generated-target.ts',
+      symbol: null,
+      locatorKind: null,
+    },
+    targetNodeId: 'unresolved-target.edge.dynamic-unresolved',
   }
 }
 
@@ -143,13 +190,14 @@ function passedLocalClosure(): JsonObject {
   }
   return {
     $schema: 'https://omniflow.local/schemas/cat-catch/local-closure-report.schema.json',
-    schemaVersion: 1,
+    schemaVersion: 2,
     reportId: 'local-closure.test',
     validator: validatorBinding(),
     generatedAt,
     evidenceInputCommit: commit,
     evidenceInputTreeHash: sha256,
     discoveryRulesVersion: '1.0.0',
+    discoveryCoverage: completeDiscoveryCoverage(),
     inputHashes: {
       schemaBundle: sha256,
       capabilityLedger: sha256,
@@ -167,25 +215,103 @@ function passedLocalClosure(): JsonObject {
       }],
       exclusions: [],
     },
-    bootstrapRoots: [{ nodeId: 'node.capture', path: 'electron/service/capture.ts', symbol: null }],
+    bootstrapRoots: [{
+      rootId: 'root.capture',
+      category: 'composition-root',
+      traversal: 'both',
+      nodeId: 'node.capture',
+      path: 'electron/service/capture.ts',
+      symbol: null,
+      locatorKind: null,
+    }],
     discoveredNodes: [{
       nodeId: 'node.capture',
       path: 'electron/service/capture.ts',
       symbol: null,
+      locatorKind: null,
       sourceHash: sha256,
       reachability: 'reachable',
       inventoryEntryId: 'inventory.capture',
       capabilityId: 'capture.test',
+      classification: 'legacy',
       cutoverUnitId: 'capture.unit',
       ownerRole: 'production-owner',
+      provenanceRefs: ['docs/cat-catch/migration-audit.md#capture'],
     }],
     edges: [],
-    semanticCandidates: [closureCandidate('semantic.capture')],
-    historicalCandidates: [closureCandidate('historical.capture')],
-    declaredDynamicEdges: [],
+    externalProcessEndpoints: [{
+      nodeId: 'external-process.ffmpeg',
+      path: 'external-process/ffmpeg',
+      symbol: null,
+      locatorKind: null,
+      attributions: [{
+        edgeId: 'edge.ffmpeg',
+        sourceNodeId: 'node.capture',
+        capabilityId: 'capture.test',
+        cutoverUnitId: 'capture.unit',
+        sourceHash: sha256,
+        sourceReachability: 'reachable',
+      }],
+    }],
+    semanticCandidates: [closureCandidate(
+      'semantic.capture',
+      'current',
+      'approved-exclusion',
+      'exclusion.semantic-capture',
+    )],
+    historicalCandidates: [closureCandidate(
+      'historical.capture',
+      'historical',
+      'retired-tombstone',
+      'inventory.retired-capture',
+    )],
+    declaredDynamicEdges: [{
+      edgeId: 'edge.ffmpeg',
+      fromNodeId: 'node.capture',
+      toNodeId: 'external-process.ffmpeg',
+      source: {
+        path: 'electron/service/capture.ts',
+        symbol: null,
+        locatorKind: null,
+      },
+      target: {
+        path: 'external-process/ffmpeg',
+        symbol: null,
+        locatorKind: null,
+      },
+      kind: 'process-handoff',
+      provenance: 'declared-dynamic',
+      sourceHash: sha256,
+      resolutionRule: 'Spawn ffmpeg through the processing adapter.',
+      fixtureId: 'fixture.ffmpeg-process',
+    }],
     unresolvedDynamicEdges: [],
-    approvedExclusions: [],
-    retiredTombstones: [],
+    approvedExclusions: [{
+      exclusionId: 'exclusion.semantic-capture',
+      candidateId: 'semantic.capture',
+      candidateKind: 'current',
+      path: 'electron/service/semantic.capture.ts',
+      symbol: null,
+      locatorKind: null,
+      decisionId: 'decision.semantic-capture',
+      decisionHash: sha256,
+    }],
+    retiredTombstones: [{
+      inventoryEntryId: 'inventory.retired-capture',
+      path: 'electron/service/historical.capture.ts',
+      symbol: 'legacyCapture',
+      locatorKind: 'declaration',
+      deletedSourceHash: sha256,
+      capabilityId: 'capture.test',
+      cutoverUnitId: 'capture.unit',
+      deletionCommit: commit,
+      deletionEvidenceRef: {
+        artifactId: 'transition.retired-capture',
+        artifactSchemaId: 'https://omniflow.local/schemas/cat-catch/evidence-artifact.schema.json',
+        contentHash: sha256,
+      },
+      provenanceRefs: ['docs/cat-catch/migration-audit.md#retired-capture'],
+    }],
     counts: {
       reachableLegacyProductionOwners: 0,
       deadLegacySymbols: 0,
@@ -386,7 +512,7 @@ describe('Cat Catch dynamic edge endpoint schema', () => {
 })
 
 describe('Cat Catch local closure report schema', () => {
-  it('accepts a non-vacuous, fully resolved passed report', () => {
+  it('accepts a non-vacuous, lossless schemaVersion 2 passed report', () => {
     expectValid(validateLocalClosure, passedLocalClosure())
   })
 
@@ -406,21 +532,203 @@ describe('Cat Catch local closure report schema', () => {
 
   it('rejects unresolved candidates and dynamic edges in passed reports', () => {
     const unresolvedSemantic = passedLocalClosure()
-    unresolvedSemantic.semanticCandidates = [closureCandidate('semantic.capture', 'unresolved')]
+    unresolvedSemantic.semanticCandidates = [closureCandidate(
+      'semantic.unresolved',
+      'current',
+      'unresolved',
+      null,
+    )]
     expectInvalid(validateLocalClosure, unresolvedSemantic)
 
     const unresolvedHistorical = passedLocalClosure()
-    unresolvedHistorical.historicalCandidates = [closureCandidate('historical.capture', 'unresolved')]
+    unresolvedHistorical.historicalCandidates = [closureCandidate(
+      'historical.unresolved',
+      'historical',
+      'unresolved',
+      null,
+    )]
     expectInvalid(validateLocalClosure, unresolvedHistorical)
 
     const unresolvedDynamic = passedLocalClosure()
-    unresolvedDynamic.unresolvedDynamicEdges = [{
-      edgeId: 'edge.dynamic',
-      sourceNodeId: 'node.capture',
-      kind: 'dynamic-import',
-      reason: 'The runtime target could not be resolved.',
-    }]
+    unresolvedDynamic.unresolvedDynamicEdges = [unresolvedDynamicEdge()]
     expectInvalid(validateLocalClosure, unresolvedDynamic)
+  })
+
+  it('allows pending discovery and unknown reachability only before passed', () => {
+    const blocked = passedLocalClosure()
+    blocked.status = 'blocked'
+    asObject(blocked.discoveryCoverage).staticDependencyGraph = 'pending'
+    asObject(asArray(blocked.discoveredNodes)[0]).reachability = 'unknown'
+    const blockedEndpoint = asObject(asArray(blocked.externalProcessEndpoints)[0])
+    asObject(asArray(blockedEndpoint.attributions)[0]).sourceReachability = 'unknown'
+    blocked.unresolvedDynamicEdges = [unresolvedDynamicEdge()]
+    expectValid(validateLocalClosure, blocked)
+
+    for (const coverageKey of discoveryCoverageKeys) {
+      const pending = passedLocalClosure()
+      asObject(pending.discoveryCoverage)[coverageKey] = 'pending'
+      expectInvalid(validateLocalClosure, pending)
+    }
+
+    const unknownReachability = passedLocalClosure()
+    asObject(asArray(unknownReachability.discoveredNodes)[0]).reachability = 'unknown'
+    expectInvalid(validateLocalClosure, unknownReachability)
+  })
+
+  it('requires every stable discovery coverage dimension', () => {
+    for (const coverageKey of discoveryCoverageKeys) {
+      const report = passedLocalClosure()
+      delete asObject(report.discoveryCoverage)[coverageKey]
+      expectInvalid(validateLocalClosure, report)
+    }
+
+    const unknownCoverage = passedLocalClosure()
+    asObject(unknownCoverage.discoveryCoverage).semanticScan = 'unknown'
+    expectInvalid(validateLocalClosure, unknownCoverage)
+  })
+
+  it('preserves bootstrap, locator, candidate, and edge projection fields', () => {
+    const projectionFields: Array<[string, (report: JsonObject) => JsonObject]> = [
+      ['rootId', report => asObject(asArray(report.bootstrapRoots)[0])],
+      ['category', report => asObject(asArray(report.bootstrapRoots)[0])],
+      ['traversal', report => asObject(asArray(report.bootstrapRoots)[0])],
+      ['locatorKind', report => asObject(asArray(report.bootstrapRoots)[0])],
+      ['locatorKind', report => asObject(asArray(report.discoveredNodes)[0])],
+      ['classification', report => asObject(asArray(report.discoveredNodes)[0])],
+      ['provenanceRefs', report => asObject(asArray(report.discoveredNodes)[0])],
+      ['source', report => asObject(asArray(report.declaredDynamicEdges)[0])],
+      ['target', report => asObject(asArray(report.declaredDynamicEdges)[0])],
+      ['resolutionRule', report => asObject(asArray(report.declaredDynamicEdges)[0])],
+      ['fixtureId', report => asObject(asArray(report.declaredDynamicEdges)[0])],
+      ['candidateKind', report => asObject(asArray(report.semanticCandidates)[0])],
+      ['locatorKind', report => asObject(asArray(report.semanticCandidates)[0])],
+      ['discoveryRuleIds', report => asObject(asArray(report.semanticCandidates)[0])],
+      ['lastKnownCommit', report => asObject(asArray(report.semanticCandidates)[0])],
+      ['candidateKind', report => asObject(asArray(report.historicalCandidates)[0])],
+      ['locatorKind', report => asObject(asArray(report.historicalCandidates)[0])],
+      ['discoveryRuleIds', report => asObject(asArray(report.historicalCandidates)[0])],
+      ['lastKnownCommit', report => asObject(asArray(report.historicalCandidates)[0])],
+    ]
+
+    for (const [field, select] of projectionFields) {
+      const report = passedLocalClosure()
+      delete select(report)[field]
+      expectInvalid(validateLocalClosure, report)
+    }
+
+    const wrongSemanticKind = passedLocalClosure()
+    asObject(asArray(wrongSemanticKind.semanticCandidates)[0]).candidateKind = 'historical'
+    expectInvalid(validateLocalClosure, wrongSemanticKind)
+
+    const wrongHistoricalKind = passedLocalClosure()
+    asObject(asArray(wrongHistoricalKind.historicalCandidates)[0]).candidateKind = 'current'
+    expectInvalid(validateLocalClosure, wrongHistoricalKind)
+
+    const missingHistoricalResolutionRef = passedLocalClosure()
+    asObject(asArray(missingHistoricalResolutionRef.historicalCandidates)[0]).resolutionRefId = null
+    expectInvalid(validateLocalClosure, missingHistoricalResolutionRef)
+
+    const typedSymbolFreeLocator = passedLocalClosure()
+    asObject(asArray(typedSymbolFreeLocator.discoveredNodes)[0]).locatorKind = 'declaration'
+    expectInvalid(validateLocalClosure, typedSymbolFreeLocator)
+  })
+
+  it('requires complete external-process endpoint attribution', () => {
+    for (const field of [
+      'nodeId',
+      'path',
+      'symbol',
+      'locatorKind',
+      'attributions',
+    ]) {
+      const report = passedLocalClosure()
+      delete asObject(asArray(report.externalProcessEndpoints)[0])[field]
+      expectInvalid(validateLocalClosure, report)
+    }
+
+    const attributionFields = [
+      'edgeId',
+      'sourceNodeId',
+      'capabilityId',
+      'cutoverUnitId',
+      'sourceHash',
+      'sourceReachability',
+    ]
+    for (const field of attributionFields) {
+      const report = passedLocalClosure()
+      const endpoint = asObject(asArray(report.externalProcessEndpoints)[0])
+      delete asObject(asArray(endpoint.attributions)[0])[field]
+      expectInvalid(validateLocalClosure, report)
+    }
+
+    const emptyAttributions = passedLocalClosure()
+    asObject(asArray(emptyAttributions.externalProcessEndpoints)[0]).attributions = []
+    expectInvalid(validateLocalClosure, emptyAttributions)
+
+    const unknownSource = passedLocalClosure()
+    const endpoint = asObject(asArray(unknownSource.externalProcessEndpoints)[0])
+    asObject(asArray(endpoint.attributions)[0]).sourceReachability = 'unknown'
+    expectInvalid(validateLocalClosure, unknownSource)
+
+    const nonProcessTarget = passedLocalClosure()
+    asObject(asObject(asArray(nonProcessTarget.declaredDynamicEdges)[0]).target).path = 'electron/service/ffmpeg.ts'
+    expectInvalid(validateLocalClosure, nonProcessTarget)
+  })
+
+  it('preserves approved exclusion and retired tombstone provenance', () => {
+    for (const field of [
+      'candidateKind',
+      'path',
+      'symbol',
+      'locatorKind',
+      'decisionId',
+      'decisionHash',
+    ]) {
+      const report = passedLocalClosure()
+      delete asObject(asArray(report.approvedExclusions)[0])[field]
+      expectInvalid(validateLocalClosure, report)
+    }
+
+    for (const field of [
+      'locatorKind',
+      'capabilityId',
+      'cutoverUnitId',
+      'deletionCommit',
+      'deletionEvidenceRef',
+      'provenanceRefs',
+    ]) {
+      const report = passedLocalClosure()
+      delete asObject(asArray(report.retiredTombstones)[0])[field]
+      expectInvalid(validateLocalClosure, report)
+    }
+
+    const emptyProvenance = passedLocalClosure()
+    asObject(asArray(emptyProvenance.retiredTombstones)[0]).provenanceRefs = []
+    expectInvalid(validateLocalClosure, emptyProvenance)
+  })
+
+  it('requires lossless unresolved dynamic edge diagnostics', () => {
+    const requiredFields = [
+      'actualSourceHash',
+      'declaredSourceHash',
+      'edgeId',
+      'fixtureId',
+      'kind',
+      'reason',
+      'resolutionRule',
+      'source',
+      'sourceNodeId',
+      'target',
+      'targetNodeId',
+    ]
+
+    for (const field of requiredFields) {
+      const report = passedLocalClosure()
+      report.status = 'blocked'
+      report.unresolvedDynamicEdges = [unresolvedDynamicEdge()]
+      delete asObject(asArray(report.unresolvedDynamicEdges)[0])[field]
+      expectInvalid(validateLocalClosure, report)
+    }
   })
 })
 

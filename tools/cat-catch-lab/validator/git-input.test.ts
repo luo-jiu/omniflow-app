@@ -2,12 +2,14 @@ import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import { deflateSync } from 'node:zlib'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
 import {
   getGitAncestryState,
   gitCommitContainsPathScope,
+  gitCommitTouchesPath,
   hashGitCommitInputs,
   hashTrackedWorktreeInputs,
   hashValidatorSourceManifest,
@@ -148,6 +150,57 @@ describe('Cat Catch Git inputs', () => {
       status: 'present',
     })
     expect(hashGitCommitInputs(repository, head)).toMatch(/^sha256:[0-9a-f]{64}$/)
+  })
+
+  it('treats exact Git paths containing pathspec characters literally', () => {
+    const repository = createRepository()
+    const relativePath = 'literal[owner]*?.txt'
+    writeFileSync(path.join(repository, relativePath), 'literal pathspec bytes\n')
+    execFileSync('git', ['add', '-A'], { cwd: repository })
+    execFileSync('git', ['commit', '--quiet', '-m', 'literal pathspec'], { cwd: repository })
+    const head = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: repository,
+      encoding: 'utf8',
+    }).trim()
+
+    expect(readGitPathAtCommit(repository, head, relativePath)).toEqual({
+      bytes: Buffer.from('literal pathspec bytes\n'),
+      status: 'present',
+    })
+    const scopedTree = listGitTreeEntriesAtCommit(repository, head, relativePath)
+    expect(scopedTree).toEqual(expect.objectContaining({ status: 'present' }))
+    if (scopedTree.status !== 'present') throw new Error('literal pathspec tree is unavailable')
+    expect(scopedTree.entries.map(entry => entry.relativePath)).toEqual([relativePath])
+    expect(gitCommitTouchesPath(repository, head, relativePath)).toBe(true)
+  })
+
+  it('rejects blob bytes that no longer hash to their exact tree object id', () => {
+    const repository = createRepository()
+    const head = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: repository,
+      encoding: 'utf8',
+    }).trim()
+    const objectId = execFileSync('git', ['rev-parse', `${head}:input.txt`], {
+      cwd: repository,
+      encoding: 'utf8',
+    }).trim()
+    const forgedBytes = Buffer.from('forged bytes\n')
+    const forgedObject = Buffer.concat([
+      Buffer.from(`blob ${forgedBytes.length}\0`),
+      forgedBytes,
+    ])
+    const objectPath = path.join(
+      repository,
+      '.git',
+      'objects',
+      objectId.slice(0, 2),
+      objectId.slice(2),
+    )
+    rmSync(objectPath)
+    writeFileSync(objectPath, deflateSync(forgedObject))
+
+    expect(readGitBlobObjects(repository, [objectId])).toBeNull()
+    expect(readGitPathAtCommit(repository, head, 'input.txt')).toEqual({ status: 'unavailable' })
   })
 
   it('fails closed when an exact tree contains a non-UTF-8 path', () => {
