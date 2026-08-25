@@ -1,7 +1,7 @@
 {
   "$schema": "./capability-ledger.schema.json",
   "schemaVersion": 1,
-  "ledgerVersion": "2026-08-24.2",
+  "ledgerVersion": "2026-08-25.1",
   "cutoverUnits": [
     {
       "id": "network-capture",
@@ -418,7 +418,7 @@
       "ownerRefs": {
         "targetProduction": ["electron/service/embedded-browser/capture/adapters/page-runtime-relay.ts#SecurePageRuntimeRelay"],
         "candidate": [],
-        "legacy": ["electron/service/embeddedBrowserViewLifecycle.ts#console-message", "electron/service/embeddedBrowserMainController.ts#onProbePayload"]
+        "legacy": ["electron/service/embeddedBrowserViewLifecycle.ts#EMBEDDED_BROWSER_RESOURCE_CONSOLE_PREFIX", "electron/service/embeddedBrowserMainController.ts#onProbePayload"]
       },
       "fixtures": ["deep.relay-forgery", "deep.frame-document-start", "closure.document-start-injection", "closure.console-resource-envelope", "closure.console-mse-envelope"],
       "decision": null,
@@ -481,7 +481,7 @@
       "ownerRefs": {
         "targetProduction": ["electron/service/embedded-browser/cat-catch-port/mse/runtime.ts#installMseRuntime"],
         "candidate": [],
-        "legacy": ["electron/service/embeddedBrowserResourceProbeRuntimeHooks.ts#MediaSource.addSourceBuffer proxy"]
+        "legacy": ["electron/service/embeddedBrowserResourceProbeRuntimeHooks.ts#originalAddSourceBuffer"]
       },
       "fixtures": ["mse.audio-video-flush-reset", "mse.append-observability", "closure.console-mse-envelope", "closure.page-mse-drain"],
       "decision": null,
@@ -609,7 +609,7 @@
       "ownerRefs": {
         "targetProduction": ["electron/service/embedded-browser/processing/hls-task.ts#HlsTaskExecutor"],
         "candidate": [],
-        "legacy": ["electron/service/embeddedBrowserHlsLocalDownloaderService.ts#downloadEmbeddedBrowserHlsToLocalWorkDirectory", "electron/service/embeddedBrowserMainController.ts#downloadEmbeddedBrowserHlsPlanResource"]
+        "legacy": ["electron/service/embeddedBrowserHlsLocalDownloaderService.ts#downloadEmbeddedBrowserHlsToLocalWorkDirectory", "electron/service/embeddedBrowserMainController.ts#downloadEmbeddedBrowserHlsPlanResource", "electron/service/embeddedBrowserMainController.ts#embeddedBrowserHlsRetrySessions"]
       },
       "fixtures": ["hls.retry-cancel-range", "hls.decrypt-preprocess-order", "hls.failed-fragment-retry"],
       "decision": null,
@@ -887,7 +887,7 @@
       "ownerRefs": {
         "targetProduction": ["electron/service/embedded-browser/processing/streaming-transfer.ts#StreamingTransfer"],
         "candidate": [],
-        "legacy": ["electron/service/embeddedBrowserMainController.ts#downloadEmbeddedBrowserDirectFile", "electron/ipc/http.ts#HTTP IPC handlers"]
+        "legacy": ["electron/service/embeddedBrowserMainController.ts#downloadEmbeddedBrowserDirectFile", "electron/ipc/http.ts#registerHttpIpc"]
       },
       "fixtures": ["transfer.large-response-memory", "transfer.temp-budget-backpressure"],
       "decision": null,
@@ -916,12 +916,12 @@
       "ownerRefs": {
         "targetProduction": ["electron/service/embedded-browser/processing/task-registry.ts#ProcessingTaskRegistry"],
         "candidate": [],
-        "legacy": ["electron/service/embeddedBrowserMainController.ts#embeddedBrowserHlsRetrySessions", "src/features/tool-workspace/hooks/useHlsDownloadTask.ts#useHlsDownloadTask", "src/features/tool-workspace/hooks/useMpdDownloadTask.ts#useMpdDownloadTask"]
+        "legacy": []
       },
       "fixtures": ["task.registry-recovery-cancel", "task.renderer-unmount-recovery"],
       "decision": null,
       "acceptedDifferences": [],
-      "notes": "There is no application-wide task registry; task truth is split across controller Maps, child operations, component refs, hooks, and promises."
+      "notes": "There is no application-wide task registry, so this capability has no single legacy owner. Task truth is split across protocol-specific controller Maps, child operations, component refs, hooks, and promises; those existing owners remain attributed to their protocol or application-workflow capabilities."
     },
     {
       "id": "output.processing-staged-terminal",
@@ -974,12 +974,12 @@
       "ownerRefs": {
         "targetProduction": ["electron/service/embedded-browser/processing/staged-output-lease.ts#StagedOutputLeaseStore"],
         "candidate": [],
-        "legacy": ["electron/service/embeddedBrowserMainController.ts#outputPath responses"]
+        "legacy": []
       },
       "fixtures": ["output.lease-reaper", "output.lease-purpose-ttl", "output.crash-quarantine"],
       "decision": null,
       "acceptedDifferences": [],
-      "notes": "Raw paths and temporary directories are held by renderer workflows; no opaque lease, TTL, owner task, reaper, or quarantine exists."
+      "notes": "No staged-output lease owner exists in the legacy runtime. Raw paths and temporary directories are returned by protocol task functions and held by renderer workflows; there is no opaque lease, TTL, owner task, reaper, or quarantine."
     },
     {
       "id": "output.application-workflow-coordinator",

@@ -1,6 +1,6 @@
 # Embedded Browser 架构说明
 
-更新时间：2026-08-18
+更新时间：2026-08-23
 
 适用范围：`omniflow-app` 内置浏览器的 renderer UI、preload bridge、Electron main controller、资源捕捉、下载导入与缓存捕捉工具链。
 
@@ -351,6 +351,8 @@ tempPath
 - main 安装 probe 并在需要时 reload
 - probe 通过 console payload / page action 输出资源和缓存工具状态
 - main 解析并汇总回 renderer
+
+当前事实：上述生命周期入口存在，但 `embeddedBrowserResourceProbeRuntimeHooks.ts` 把 `enableDeepRuntimeHooks` 写死为 `false`，Worker、fetch、XHR、JSON、key 等 hooks 没有实际启用，只有外围 MSE hooks 仍运行。因此本节只描述当前理论链路，不代表深度捕捉行为已经完成；重构状态和验收以 `docs/cat-catch-full-migration-execution-plan.md` 为准。
 
 renderer 的资源列表不应该关心“这个资源是来自网络还是来自 probe 的哪一种 hook”，只关心统一的捕捉模型。
 

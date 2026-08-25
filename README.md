@@ -4,13 +4,12 @@ Omniflow App is the desktop client for browsing, collecting, previewing, and man
 
 ## Current Resource Capture Status
 
-The embedded browser currently includes a first production-oriented version of resource capture inspired by cat-catch:
+The embedded browser has an existing Cat Catch-inspired capture implementation, but its behavioral parity is being re-baselined before a full rearchitecture:
 
-- Network resource capture for common media and manifest formats
-- Deep capture from `fetch`, `XMLHttpRequest`, `JSON.parse`, and `MediaSource`
-- `MSE` audio/video stream collection with in-page preview and export
-- Main audio/video track pairing with local `ffmpeg` merge into `mp4`
-- Resource filtering and grouped presentation inside the embedded browser panel
+- Electron network capture, resource filtering, and grouped presentation exist but are not yet parity-verified
+- The current deep `Worker` / `fetch` / `XMLHttpRequest` / `JSON.parse` hooks are disabled; the surrounding `MediaSource` hook remains active
+- `MSE` collection, local `ffmpeg`, HLS/DASH processing, and library import paths exist but are currently classified as implemented-unverified
+- The authoritative completion contract is `docs/cat-catch-full-migration-execution-plan.md`
 
 ### Formats Currently Recognized
 
@@ -20,9 +19,9 @@ The embedded browser currently includes a first production-oriented version of r
 
 ## Known Limitations
 
-- The current merge path extracts captured `MSE` tracks through page-side `base64`, so very large videos can consume a lot of memory.
-- Multi-audio, multi-quality, or more advanced track-selection scenarios are not fully handled yet. The UI currently prioritizes the main playable audio/video pair.
-- Manifest parsing, segment reconstruction, key capture, and broader worker-level probing are planned but not complete.
+- The current capture core has no dedicated Cat Catch differential test suite.
+- Deep runtime capture is not currently active beyond the surrounding `MSE` hooks.
+- Manifest parsing, downloader behavior, cancellation, cleanup, and large-media budgets still require equivalence and integration evidence.
 
 ## Attribution
 
@@ -73,10 +72,11 @@ Key frontend documents live in the repo and should be treated as part of the dev
 - `docs/frontend-architecture-baseline.md`: current renderer / Electron layering, state ownership, and IPC boundary rules
 - `docs/desktop-platform-architecture.md`: macOS / Windows host strategy, renderer platform bridge, and platform validation
 - `docs/embedded-browser-architecture.md`: embedded browser lifecycle, capture, download, and main/preload responsibilities
+- `docs/cat-catch-full-migration-execution-plan.md`: authoritative Cat Catch rearchitecture and completion contract
 - `docs/library-detail-workspace.md`: library detail workspace modes, browser tab ownership, and persistence rules
 - `docs/file-explorer-file-viewer-boundary.md`: file tree, file-open flow, viewer tabs, and dispatcher ownership
 - `docs/frontend-validation-matrix.md`: manual verification baseline for frontend and Electron changes
-- `docs/cat-catch-migration-audit.md`: embedded-browser resource-capture migration status
+- `docs/cat-catch-migration-audit.md`: current evidence-based Cat Catch rearchitecture summary
 - `THIRD_PARTY_NOTICES.md`: attribution and license information for incorporated third-party work
 - `.agent-docs/frontend-review-standard.md`: review gate for frontend and Electron changes
 - `.agent-docs/frontend-handoff.md`: maintenance handoff and entry map

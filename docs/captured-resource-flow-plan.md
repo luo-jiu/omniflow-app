@@ -2,14 +2,16 @@
 
 更新时间：2026-04-22
 
-状态：终态架构方案。本文定义的"客户端处理 → 上传"路径是最终目标架构，不是过渡方案。
+状态：保留的输出架构意图。本文的实现进度和“现状”表格是 2026-04-22 历史快照，不作为当前完成度依据。
+
+> 范围说明：本文只保留处理结果输出流向的历史设计背景。当前捕捉、处理和输出状态以 `docs/embedded-browser-architecture.md`、`docs/cat-catch-migration-audit.md` 与实际代码为准；Cat Catch 全面重构、完成判断以及 `processingTask -> stagedOutputLease -> deliveryTask` 合同以 `docs/cat-catch-full-migration-execution-plan.md` 为准。本文后文若直接传递 `outputPath/tempPath`，只能理解为旧实现描述，不能覆盖 opaque lease 边界。
 
 ## 1. 背景
 
-内置浏览器已具备完整的资源嗅探能力（网络捕捉 + MSE 深度捕捉），能拿到 m3u8 manifest、MSE 音视频流、直链媒体等资源。当前所有处理结果（ffmpeg 合并、转码、HLS 下载）只能保存到本地磁盘。用户实际需要两条出口：
+内置浏览器已经存在网络捕捉、MSE 捕捉和 manifest 处理实现，但这些实现尚未按全面重构契约证明与 Cat Catch 行为等价。本文只假设上游处理链能够产出 staged file，并定义它后续如何保存或进入资源库。
 
-- **下载到本地**：已有（save dialog / 指定路径）
-- **上传到资源库**：缺失 — 这是本文要规划的核心
+- **下载到本地**：实现存在，尚未按新契约验真
+- **处理成品上传到资源库**：统一 handoff 缺失，这是本文原先规划的核心
 
 典型场景：用户在内置浏览器中嗅探一个 2GB 的 m3u8 视频，希望直接存入资源库而不是先下载再手动上传。
 
@@ -21,14 +23,14 @@
 
 | 能力 | 状态 | 入口 |
 |------|------|------|
-| 网络资源捕捉 | ✅ | `session.webRequest` hooks |
-| MSE 深度捕捉 | ✅ | probe 注入 + `appendBuffer` 拦截 |
-| ffmpeg 合并（MSE 音+视频） | ✅ | `merge-mse` → temp file → save dialog |
-| ffmpeg 转码 | ✅ | `transcode` → temp file → save dialog |
-| HLS manifest 下载 | ✅ | `download-hls` → ffmpeg 流式下载 → save dialog |
-| DASH manifest 下载 | ✅ | `download-mpd` → ffmpeg 流式下载 → save dialog |
-| 普通下载导入资源库 | ✅ | `useEmbeddedBrowserDownloadImport` → `uploadManager.createBatch` |
-| 分片上传（≥100MB） | ✅ | `http:chunked-upload` IPC handler（刚实现）|
+| 网络资源捕捉 | 实现存在，未验真 | `session.webRequest` hooks |
+| MSE 深度捕捉 | 实现存在，未验真 | probe 注入 + `appendBuffer` 拦截 |
+| ffmpeg 合并（MSE 音+视频） | 实现存在，未验真 | `merge-mse` → temp file → save dialog |
+| ffmpeg 转码 | 实现存在，未验真 | `transcode` → temp file → save dialog |
+| HLS manifest 下载 | 实现存在，未验真 | `download-hls` → local downloader / ffmpeg |
+| DASH manifest 下载 | 实现存在，未验真 | `download-mpd` → local downloader / ffmpeg |
+| 普通下载导入资源库 | 实现存在，未验真 | `useEmbeddedBrowserDownloadImport` → `uploadManager.createBatch` |
+| 分片上传（≥100MB） | 实现存在，未验真 | `http:chunked-upload` IPC handler |
 
 ### 2.2 缺失环节
 
@@ -51,7 +53,7 @@
   → 成功后 cleanupDownloadFile(tempPath)
 ```
 
-这条链路已经验证可用，是最小阻力的复用路径。
+这条链路在旧实现中存在，可作为 characterization 和 UploadManager 复用参考；它尚未按全面重构契约验证，不能直接据此升级完成状态。
 
 ## 3. 资源类型与处理特征
 
@@ -67,10 +69,10 @@
 
 ### 3.2 处理链路差异
 
-**MSE 捕捉**：数据在页面 JS 内存中 → 通过 `executeJavaScript` 提取为 base64 → IPC 传到主进程 → 写 temp file → ffmpeg 合并 → 输出文件
+**MSE 捕捉**：page runtime 当前会在 pending buffer 超过阈值后分批编码并交给 main 追加到 spool file，最终残余 buffer 再 flush，由 main 使用 staged file 做合并或导出。
 
-- 瓶颈：base64 膨胀 33%、IPC 传输大数据。2GB MSE 原始数据 → ~2.67GB base64 → 写盘后 ffmpeg 再读。
-- 现实约束：MSE 数据只存在于页面内存，无法绕过提取步骤。
+- 当前方向避免把整段媒体长期留在页面并一次性通过 IPC 搬运，但 chunk 编码、spool 配额、异常清理和超长媒体内存曲线仍需按全面重构契约验真。
+- MSE 原始数据来自页面运行时，page 到 main 的传输边界无法完全省略；需要通过有界 chunk、背压和清理合同控制风险。
 
 **HLS/DASH**：ffmpeg 直接从 URL 流式拉取全部 segment → 合并输出
 
@@ -185,7 +187,7 @@
 
 ### 5.2 关键设计：复用现有导入模式
 
-浏览器下载导入已有一条成熟路径：
+浏览器下载导入已有一条可复用评估的旧路径：
 
 ```typescript
 // useEmbeddedBrowserDownloadImport.ts 中的模式
@@ -193,7 +195,7 @@ const file = toUploadFile(download); // { name, size, type, path: tempPath }
 uploadManager.createBatch([{ file, libraryId, parentId, relativePath }]);
 ```
 
-**所有嗅探资源的"导入到资源库"都应该走这条路径**，统一收敛到 `uploadManager`。具体来说：
+**所有嗅探资源的“导入到资源库”仍应统一收敛到 `uploadManager`，但处理成品必须先进入 main-owned staged output lease，不能把裸 `outputPath` 变成 renderer 的长期 owner。** 后续步骤是 2026-04-22 的旧方案草图，实施时以全面重构契约 6.5 为准：
 
 1. 处理层产出 temp file（merge/transcode/HLS download 已经都会产出 outputPath）
 2. 将 `outputPath` 包装为 `FileWithPath` 对象

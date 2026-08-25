@@ -315,6 +315,10 @@
             "required": ["mapping"]
           },
           "then": {
+            "not": {
+              "properties": { "disposition": { "const": "pending" } },
+              "required": ["disposition"]
+            },
             "properties": {
               "auditedThrough": { "$ref": "#/$defs/commit" },
               "upstreamSources": {

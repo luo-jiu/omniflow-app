@@ -475,6 +475,27 @@ describe('Cat Catch capability ledger audit binding', () => {
     expectInvalid(validateCapabilityLedger, specifiedLedger(false, null))
   })
 
+  it('requires a classified disposition for specified mappings', () => {
+    const ledger = specifiedLedger()
+    const capability = asObject(asArray(ledger.capabilities)[0])
+    capability.disposition = 'pending'
+    expectInvalid(validateCapabilityLedger, ledger)
+  })
+
+  it('keeps derived closure artifact refs out of specified cutover declarations', () => {
+    const ledger = specifiedLedger()
+    const cutoverUnit = asObject(asArray(ledger.cutoverUnits)[0])
+    expect(cutoverUnit).not.toHaveProperty('dependencyEvidenceRefs')
+    expectValid(validateCapabilityLedger, ledger)
+
+    cutoverUnit.dependencyEvidenceRefs = [{
+      artifactId: 'local-closure.test',
+      artifactSchemaId: 'https://omniflow.local/schemas/cat-catch/local-closure-report.schema.json',
+      contentHash: sha256,
+    }]
+    expectInvalid(validateCapabilityLedger, ledger)
+  })
+
   it('applies the audit requirement to intentional exclusions', () => {
     expectValid(validateCapabilityLedger, specifiedLedger(true))
     expectInvalid(validateCapabilityLedger, specifiedLedger(true, null))

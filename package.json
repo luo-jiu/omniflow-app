@@ -8,6 +8,7 @@
     "build": "tsc && vite build",
     "build:mac": "npm run build && electron-builder --mac",
     "build:win": "npm run build && electron-builder --win",
+    "cat-catch:generate-local-closure": "tsc -p tsconfig.cat-catch-tools.json && tsx tools/cat-catch-lab/validator/cli.ts generate-local-closure",
     "cat-catch:validate": "tsc -p tsconfig.cat-catch-tools.json && tsx tools/cat-catch-lab/validator/cli.ts validate",
     "dev:drag-drop-lab": "electron tools/drag-drop-lab/main.cjs",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",

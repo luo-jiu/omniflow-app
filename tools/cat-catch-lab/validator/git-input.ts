@@ -10,7 +10,7 @@ import {
 import path from 'node:path'
 import process from 'node:process'
 
-import { sha256Bytes } from './json.ts'
+import { decodeUtf8Bytes, sha256Bytes } from './json.ts'
 
 const ancestorCache = new Map<string, GitAncestryState>()
 const commitParentsCache = new Map<string, string[]>()
@@ -20,13 +20,18 @@ const touchedPathCache = new Map<string, boolean>()
 
 const GIT_GLOBAL_ARGS = ['--no-replace-objects'] as const
 
+function compareCodeUnits(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0
+}
+
 function runGit(cwd: string, args: string[]): string {
-  return execFileSync('git', [...GIT_GLOBAL_ARGS, ...args], {
+  const output = execFileSync('git', [...GIT_GLOBAL_ARGS, ...args], {
     cwd,
-    encoding: 'utf8',
+    encoding: 'buffer',
     maxBuffer: 128 * 1024 * 1024,
     stdio: ['ignore', 'pipe', 'pipe'],
-  }).trimEnd()
+  })
+  return decodeUtf8Bytes(output, 'Git command output').trimEnd()
 }
 
 function runGitBuffer(cwd: string, args: string[]): Buffer {
@@ -35,6 +40,16 @@ function runGitBuffer(cwd: string, args: string[]): Buffer {
     encoding: 'buffer',
     maxBuffer: 128 * 1024 * 1024,
     stdio: ['ignore', 'pipe', 'pipe'],
+  })
+}
+
+function runGitBufferWithInput(cwd: string, args: string[], input: Buffer): Buffer {
+  return execFileSync('git', [...GIT_GLOBAL_ARGS, ...args], {
+    cwd,
+    encoding: 'buffer',
+    input,
+    maxBuffer: 128 * 1024 * 1024,
+    stdio: ['pipe', 'pipe', 'pipe'],
   })
 }
 
@@ -130,17 +145,20 @@ export function gitCommitTouchesPath(cwd: string, commit: string, relativePath: 
   const cached = touchedPathCache.get(cacheKey)
   if (cached !== undefined) return cached
   try {
-    const output = runGit(cwd, [
+    const output = runGitBuffer(cwd, [
       'diff-tree',
       '--root',
       '--no-commit-id',
       '--name-only',
+      '-z',
       '-r',
       commit,
       '--',
       relativePath,
     ])
-    const touched = output.split('\n').includes(relativePath)
+    const touchedPaths = decodeNullTerminatedGitRecords(output, 'Git diff-tree paths')
+    if (!touchedPaths) throw new Error('Git diff-tree returned malformed path records')
+    const touched = touchedPaths.includes(relativePath)
     touchedPathCache.set(cacheKey, touched)
     return touched
   } catch {
@@ -183,6 +201,69 @@ export type GitPathState =
   | { status: 'present'; bytes: Buffer }
   | { status: 'unavailable' }
 
+export type GitTreeEntry = {
+  mode: string
+  objectId: string
+  objectType: 'blob' | 'commit'
+  relativePath: string
+}
+
+export type GitTreeState =
+  | { status: 'absent' }
+  | { status: 'present'; entries: GitTreeEntry[] }
+  | { status: 'unavailable' }
+
+function decodeNullTerminatedGitRecords(output: Buffer, source: string): string[] | null {
+  if (output.length === 0) return []
+  if (output[output.length - 1] !== 0x00) return null
+
+  const records: string[] = []
+  let offset = 0
+  while (offset < output.length) {
+    const recordEnd = output.indexOf(0x00, offset)
+    if (recordEnd <= offset) return null
+    try {
+      records.push(decodeUtf8Bytes(output.subarray(offset, recordEnd), source))
+    } catch {
+      return null
+    }
+    offset = recordEnd + 1
+  }
+  return records
+}
+
+function parseGitTreeEntries(output: Buffer, pathScope?: string): GitTreeState {
+  const records = decodeNullTerminatedGitRecords(output, 'Git tree path')
+  if (!records) return { status: 'unavailable' }
+  if (records.length === 0) {
+    return pathScope ? { status: 'absent' } : { entries: [], status: 'present' }
+  }
+
+  const pathPrefix = pathScope ? `${pathScope.replace(/\/+$/, '')}/` : null
+  const entries: GitTreeEntry[] = []
+  for (const record of records) {
+    const separatorIndex = record.indexOf('\t')
+    const match = /^(\d+) (blob|commit) ((?:[0-9a-f]{40}|[0-9a-f]{64}))$/.exec(
+      separatorIndex < 0 ? '' : record.slice(0, separatorIndex),
+    )
+    const relativePath = separatorIndex < 0 ? '' : record.slice(separatorIndex + 1)
+    if (
+      !match
+      || !relativePath
+      || (pathScope && !relativePath.startsWith(pathPrefix || '') && relativePath !== pathScope)
+    ) {
+      return { status: 'unavailable' }
+    }
+    entries.push({
+      mode: match[1] || '',
+      objectId: match[3] || '',
+      objectType: match[2] as GitTreeEntry['objectType'],
+      relativePath,
+    })
+  }
+  return { entries, status: 'present' }
+}
+
 export function readGitCommitParents(cwd: string, commit: string): string[] | null {
   const cacheKey = `${cwd}\0${commit}`
   const cached = commitParentsCache.get(cacheKey)
@@ -191,13 +272,86 @@ export function readGitCommitParents(cwd: string, commit: string): string[] | nu
     const commitObject = runGitBuffer(cwd, ['cat-file', 'commit', `${commit}^{commit}`])
     const headerEnd = commitObject.indexOf('\n\n')
     if (headerEnd < 0) return null
-    const headerLines = commitObject.subarray(0, headerEnd).toString('utf8').split('\n')
+    const headerLines = decodeUtf8Bytes(
+      commitObject.subarray(0, headerEnd),
+      'Git commit header',
+    ).split('\n')
     const parents = headerLines
       .filter(line => line.startsWith('parent '))
       .map(line => line.slice('parent '.length))
     const result = parents.every(parent => /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(parent)) ? parents : null
     if (result !== null) commitParentsCache.set(cacheKey, result)
     return result
+  } catch {
+    return null
+  }
+}
+
+export function listGitTreeEntriesAtCommit(
+  cwd: string,
+  commit: string,
+  relativePath: string,
+): GitTreeState {
+  assertRepositoryRelativePath(relativePath)
+  try {
+    return parseGitTreeEntries(runGitBuffer(cwd, [
+      'ls-tree',
+      '-rz',
+      '--full-tree',
+      '-r',
+      `${commit}^{commit}`,
+      '--',
+      relativePath,
+    ]), relativePath)
+  } catch {
+    return { status: 'unavailable' }
+  }
+}
+
+export function listGitCommitTreeEntries(cwd: string, commit: string): GitTreeState {
+  try {
+    return parseGitTreeEntries(runGitBuffer(cwd, [
+      'ls-tree',
+      '-rz',
+      '--full-tree',
+      '-r',
+      `${commit}^{commit}`,
+    ]))
+  } catch {
+    return { status: 'unavailable' }
+  }
+}
+
+export function readGitBlobObjects(cwd: string, objectIds: string[]): Map<string, Buffer> | null {
+  const uniqueObjectIds = [...new Set(objectIds)].sort()
+  if (uniqueObjectIds.length === 0) return new Map()
+  if (!uniqueObjectIds.every(objectId => /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(objectId))) {
+    return null
+  }
+
+  try {
+    const output = runGitBufferWithInput(
+      cwd,
+      ['cat-file', '--batch'],
+      Buffer.from(`${uniqueObjectIds.join('\n')}\n`),
+    )
+    const blobs = new Map<string, Buffer>()
+    let offset = 0
+    for (const requestedObjectId of uniqueObjectIds) {
+      const headerEnd = output.indexOf(0x0a, offset)
+      if (headerEnd < 0) return null
+      const header = decodeUtf8Bytes(output.subarray(offset, headerEnd), 'Git batch header')
+      const match = /^([0-9a-f]{40}|[0-9a-f]{64}) blob ([0-9]+)$/.exec(header)
+      if (!match || match[1] !== requestedObjectId) return null
+      const byteLength = Number(match[2])
+      if (!Number.isSafeInteger(byteLength) || byteLength < 0) return null
+      const contentStart = headerEnd + 1
+      const contentEnd = contentStart + byteLength
+      if (contentEnd >= output.length || output[contentEnd] !== 0x0a) return null
+      blobs.set(requestedObjectId, output.subarray(contentStart, contentEnd))
+      offset = contentEnd + 1
+    }
+    return offset === output.length ? blobs : null
   } catch {
     return null
   }
@@ -213,25 +367,33 @@ export function readGitPathAtCommit(
   const cached = pathStateCache.get(cacheKey)
   if (cached) return cached
   try {
-    const treeEntry = runGitBuffer(cwd, ['ls-tree', '-z', `${commit}^{commit}`, '--', relativePath]).toString('utf8')
-    if (!treeEntry) {
+    const treeState = parseGitTreeEntries(runGitBuffer(cwd, [
+      'ls-tree',
+      '-z',
+      `${commit}^{commit}`,
+      '--',
+      relativePath,
+    ]), relativePath)
+    if (treeState.status === 'absent') {
       const result = { status: 'absent' } as const
       pathStateCache.set(cacheKey, result)
       return result
     }
-    const records = treeEntry.split('\0').filter(Boolean)
-    if (records.length !== 1) {
+    if (treeState.status !== 'present' || treeState.entries.length !== 1) {
       const result = { status: 'unavailable' } as const
       pathStateCache.set(cacheKey, result)
       return result
     }
-    const match = /^(\d+) blob ((?:[0-9a-f]{40}|[0-9a-f]{64}))\t(.+)$/.exec(records[0] || '')
-    if (!match || match[3] !== relativePath) {
+    const entry = treeState.entries[0]
+    if (!entry || entry.objectType !== 'blob' || entry.relativePath !== relativePath) {
       const result = { status: 'unavailable' } as const
       pathStateCache.set(cacheKey, result)
       return result
     }
-    const result = { status: 'present', bytes: runGitBuffer(cwd, ['cat-file', 'blob', match[2] || '']) } as const
+    const result = {
+      status: 'present',
+      bytes: runGitBuffer(cwd, ['cat-file', 'blob', entry.objectId]),
+    } as const
     pathStateCache.set(cacheKey, result)
     return result
   } catch {
@@ -249,12 +411,16 @@ export function listDirtyTrackedPaths(cwd: string): string[] {
 
 function listTrackedPaths(cwd: string): string[] {
   const output = runGitBuffer(cwd, ['ls-files', '-z'])
-  return output.toString('utf8').split('\0').filter(Boolean).sort()
+  const paths = decodeNullTerminatedGitRecords(output, 'Git tracked path')
+  if (!paths) throw new Error('Git returned malformed tracked path records')
+  return paths.sort()
 }
 
 export function listUntrackedPaths(cwd: string): string[] {
   const output = runGitBuffer(cwd, ['ls-files', '--others', '--exclude-standard', '-z'])
-  return output.toString('utf8').split('\0').filter(Boolean).sort()
+  const paths = decodeNullTerminatedGitRecords(output, 'Git untracked path')
+  if (!paths) throw new Error('Git returned malformed untracked path records')
+  return paths.sort()
 }
 
 function isReportIndexPath(relativePath: string): boolean {
@@ -286,15 +452,11 @@ export function hashTrackedWorktreeInputs(cwd: string): string {
 export function hashGitCommitInputs(cwd: string, commit: string): string | null {
   const resolvedCommit = tryResolveGitCommit(cwd, commit)
   if (!resolvedCommit) return null
-  const records = runGitBuffer(cwd, ['ls-tree', '-rz', '--full-tree', '-r', resolvedCommit])
-    .toString('utf8')
-    .split('\0')
-    .filter(Boolean)
-    .filter(record => {
-      const separatorIndex = record.indexOf('\t')
-      if (separatorIndex < 0) return true
-      return !isReportIndexPath(record.slice(separatorIndex + 1))
-    })
+  const treeState = listGitCommitTreeEntries(cwd, resolvedCommit)
+  if (treeState.status !== 'present') return null
+  const records = treeState.entries
+    .filter(entry => !isReportIndexPath(entry.relativePath))
+    .map(entry => `${entry.mode} ${entry.objectType} ${entry.objectId}\t${entry.relativePath}`)
     .sort()
   return sha256Bytes(records.join('\0'))
 }
@@ -331,18 +493,36 @@ export function hashValidatorSourceManifest(appRoot: string): string {
     path.join(appRoot, 'tsconfig.cat-catch-tools.json'),
   ].filter(existsSync)
   const files = [...new Set([...sourceFiles, ...toolchainInputs])].sort()
+  return hashValidatorSourceHashEntries(files.map(filePath => ({
+    contentHash: sha256Bytes(readFileSync(filePath)),
+    relativePath: normalizeWorktreeRelativePath(path.relative(appRoot, filePath)),
+  })))
+}
 
-  const manifest = files.map(filePath => {
-    const relativePath = path.relative(appRoot, filePath)
-    return `${relativePath}\0${sha256Bytes(readFileSync(filePath))}`
-  }).join('\0')
+export function normalizeWorktreeRelativePath(
+  relativePath: string,
+  hostSeparator = path.sep,
+): string {
+  return hostSeparator === '/' ? relativePath : relativePath.split(hostSeparator).join('/')
+}
+
+export function hashValidatorSourceHashEntries(
+  entries: Array<{ contentHash: string; relativePath: string }>,
+): string {
+  const manifest = entries
+    .sort((left, right) => compareCodeUnits(left.relativePath, right.relativePath))
+    .map(entry => `${entry.relativePath}\0${entry.contentHash}`)
+    .join('\0')
   return sha256Bytes(manifest)
 }
 
 function tryReadPackageVersion(appRoot: string, packageName: string): string | null {
   const packagePath = path.join(appRoot, 'node_modules', packageName, 'package.json')
   try {
-    const packageDocument: unknown = JSON.parse(readFileSync(packagePath, 'utf8'))
+    const packageDocument: unknown = JSON.parse(decodeUtf8Bytes(
+      readFileSync(packagePath),
+      packagePath,
+    ))
     if (!packageDocument || typeof packageDocument !== 'object' || Array.isArray(packageDocument)) return null
     const version = (packageDocument as Record<string, unknown>).version
     return typeof version === 'string' ? version : null

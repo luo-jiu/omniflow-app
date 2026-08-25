@@ -216,7 +216,8 @@ function passedAvailability(): Record<string, unknown> {
     evidenceInputCommit: commit,
     evidenceInputTreeHash: sha256,
     retentionPolicyHash: sha256,
-    reportIndexHash: sha256,
+    projectionHashProfile: 'report-index-covered-projection-jcs-v1',
+    coveredIndexProjectionHash: sha256,
     checkedAt: generatedAt,
     nextCheckDueAt,
     supportedReleases: [{
@@ -383,6 +384,19 @@ describe('Cat Catch passed report invariants', () => {
     const unavailableArtifact = passedAvailability()
     unavailableArtifact.artifactChecks = [artifactCheck(false)]
     expectInvalid(validateAvailability, unavailableArtifact)
+  })
+
+  it('rejects the obsolete whole-index availability hash field', () => {
+    const availability = passedAvailability()
+    delete availability.coveredIndexProjectionHash
+    availability.reportIndexHash = sha256
+    expectInvalid(validateAvailability, availability)
+  })
+
+  it('rejects unknown availability projection hash profiles', () => {
+    const availability = passedAvailability()
+    availability.projectionHashProfile = 'report-index-covered-projection-jcs-v2'
+    expectInvalid(validateAvailability, availability)
   })
 
   it('rejects arbitrary single-check gates and null availability bindings', () => {

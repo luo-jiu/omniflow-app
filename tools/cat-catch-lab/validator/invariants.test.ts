@@ -10,7 +10,6 @@ import { hashFile } from './json.ts'
 import type { JsonObject, ValidationContext } from './types.ts'
 
 const temporaryDirectories: string[] = []
-
 afterEach(() => {
   for (const directory of temporaryDirectories.splice(0)) {
     rmSync(directory, { force: true, recursive: true })
@@ -107,6 +106,21 @@ describe('Cat Catch contract invariants', () => {
 
     const issues = validateCrossFileInvariants(context)
     expect(issues.filter(issue => issue.code === 'fixed-evidence-minimum-missing')).toHaveLength(2)
+  })
+
+  it('accepts a specified cutover graph declaration without embedded artifact refs', () => {
+    const context = createContext({
+      cutoverUnits: [
+        { id: 'capture', dependencyMapping: 'specified', dependsOn: [] },
+        { id: 'output', dependencyMapping: 'specified', dependsOn: ['capture'] },
+      ],
+      capabilities: [],
+    })
+
+    const dependencyIssues = validateCrossFileInvariants(context).filter(issue => (
+      issue.code.startsWith('cutover-dependency-')
+    ))
+    expect(dependencyIssues).toEqual([])
   })
 
   it('detects stale local source hashes without treating them as schema errors', () => {
@@ -308,11 +322,32 @@ describe('Cat Catch contract invariants', () => {
     expect(issues).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: 'artifact-schema-kind-mismatch', severity: 'error' }),
       expect.objectContaining({ code: 'artifact-canonical-location-invalid', severity: 'error' }),
-      expect.objectContaining({ code: 'artifact-index-summary-not-passed', severity: 'blocker' }),
+      expect.objectContaining({ code: 'artifact-index-summary-invalid', severity: 'blocker' }),
       expect.objectContaining({ code: 'g0-report-unresolved', severity: 'blocker' }),
       expect.objectContaining({ code: 'canonical-artifact-resolution-not-implemented', severity: 'blocker' }),
     ]))
     expect(issues).not.toContainEqual(expect.objectContaining({ code: 'g0-report-missing' }))
+  })
+
+  it('allows schema-valid indexed reports to remain in progress', () => {
+    const context = createContext({ cutoverUnits: [], capabilities: [] })
+    context.documents.set('report-index/index.json', {
+      entries: [{
+        artifactId: 'capability-state.in-progress',
+        artifactKind: 'capability-state',
+        artifactSchemaId: 'https://omniflow.local/schemas/cat-catch/capability-state-report.schema.json',
+        contentHash: `sha256:${'0'.repeat(64)}`,
+        locations: [{ canonical: true }],
+        validationSummary: {
+          schemaValidated: true,
+          hashValidated: true,
+          reportedStatus: 'in-progress',
+        },
+      }],
+    })
+
+    const issues = validateCrossFileInvariants(context)
+    expect(issues).not.toContainEqual(expect.objectContaining({ code: 'artifact-index-summary-invalid' }))
   })
 
   it('requires inventory cutover mappings to agree with the capability ledger', () => {
@@ -353,6 +388,54 @@ describe('Cat Catch contract invariants', () => {
       code: 'inventory-cutover-unit-mismatch',
       severity: 'error',
     }))
+  })
+
+  it('requires legacy owner refs to resolve back to the same inventory capability', () => {
+    const context = createContext({
+      cutoverUnits: [{ id: 'capture' }, { id: 'other' }],
+      capabilities: [{
+        id: 'capture.test',
+        auditedThrough: null,
+        cutoverUnitId: 'capture',
+        disposition: 'pending',
+        localContractRefs: [],
+        mapping: 'unmapped',
+        origin: 'omniflow-integration',
+        ownerRefs: {
+          targetProduction: ['future.ts#Owner'],
+          candidate: [],
+          legacy: ['legacy.ts#owner'],
+        },
+        requiredEvidence: {
+          beforeCutover: ['fixture', 'behavior'],
+          forCompletion: ['fixture', 'behavior'],
+        },
+        upstreamSources: [],
+      }],
+    })
+
+    expect(validateCrossFileInvariants(context)).toContainEqual(expect.objectContaining({
+      code: 'legacy-owner-ref-uninventoried',
+      severity: 'blocker',
+    }))
+
+    const inventory = context.documents.get('legacy-inventory.json')
+    if (!inventory) throw new Error('test inventory missing')
+    inventory.entries = [{
+      id: 'node.legacy-owner',
+      entryType: 'current-node',
+      path: 'legacy.ts',
+      symbol: 'owner',
+      classification: 'legacy',
+      ownerRole: 'production-owner',
+      capabilityId: 'other.test',
+      cutoverUnitId: 'other',
+    }]
+    const mismatchedIssues = validateCrossFileInvariants(context)
+    expect(mismatchedIssues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'legacy-owner-ref-capability-mismatch', severity: 'blocker' }),
+      expect.objectContaining({ code: 'legacy-owner-ref-cutover-unit-mismatch', severity: 'blocker' }),
+    ]))
   })
 
   it('rejects duplicate inventory ids and locators even when the records differ', () => {

@@ -1,6 +1,6 @@
 # Cat Catch 全面重构执行契约
 
-更新时间：2026-08-24
+更新时间：2026-08-25
 
 状态：生效，`G0 事实归零` 进行中。
 
@@ -387,7 +387,7 @@ validator 必须校验 evidence role/dimension、deployment under test、release
 
 Gate 的 `passed` 只能由 validator 从这些输入生成。G7 seal 必须证明 `G0-G6` 的 final-invariant reports 与全部 pre-seal current evidence 指向同一 `evidenceInputCommit` 和 input tree hash；跨平台 current evidence 可以来自不同机器，但必须属于同一输入提交和同一 release-target policy。显式标记的 `transition-history` artifact 可以绑定其历史 commit，但只能作为过程溯源，不能替代 final invariant。
 
-原始 evidence/gate report 是 content-addressed 外部 artifact 或本地未跟踪候选 artifact，不直接提交到源码树。仓库中的 `docs/cat-catch/report-index/` 只保存 artifact id、hash、存储位置和验证摘要。临时 CI artifact 不能作为唯一正式存储。
+原始 evidence/gate report 是 content-addressed 外部 artifact 或本地未跟踪候选 artifact，不直接提交到源码树。仓库中的 `docs/cat-catch/report-index/` 只保存 artifact id、hash、存储位置和验证摘要。索引允许记录 schema/hash 有效但自身状态仍为 `in-progress` 或 `blocked` 的报告；`validationSummary.reportedStatus` 只复述该 artifact 的报告状态，不代表索引通过，更不代表任一全局 Gate 已经 `passed`。具体 Gate 必须按自己的阶段、artifact kind、状态和 invariants 消费这些报告，不能把“已索引”当成完成。临时 CI artifact 不能作为唯一正式存储。
 
 证据保留合同：
 
@@ -395,6 +395,7 @@ Gate 的 `passed` 只能由 validator 从这些输入生成。G7 seal 必须证�
 - Gate 所依赖的 canonical JSON evidence/gate report 必须进入 durable release asset 或独立 evidence store；大体积附件可以分离，但 Gate 直接依赖的内容不能只留在会自动过期的 CI URL。
 - 正式 artifact 至少保留到：所有引用它的 Gate 已被新证据替代，并且依赖它的受支持 release 已结束维护及回滚窗口。具体期限由版本生命周期推出，不在本文写死天数。
 - Gate validator 每次运行都必须解析 report-index 指向的既有 artifact 并校验 schema/hash/存储类型；独立 availability validator 还必须按 policy 周期运行并生成正式 `artifact-availability-report`。检查本身是 required check，不能只写在操作说明里。
+- availability report 使用固定的 `projectionHashProfile=report-index-covered-projection-jcs-v1` 和 `coveredIndexProjectionHash`，只对其 `artifactChecks` 实际消费的 report-index entries 做确定性投影，不能绑定整个可继续增长的 report-index。v1 对每个被唯一解析的 entry 仅投影 `schemaVersion`、`artifactId`、`artifactKind`、`artifactSchemaId`、`contentHash`、`byteLength`、`evidenceInputCommit`、`evidenceInputTreeHash` 与完整 `locations`；locations 按 `canonical` 降序、`storeId`、`uri` 排序，entries 按 `artifactId`、`contentHash` 排序，再按 RFC 8785 JCS 编码 UTF-8 bytes 并计算 `sha256:<lowercase hex>`。expected hash/schema、唯一 entry 与唯一 canonical location 任一不匹配都不能计算为通过。当前 availability artifact 自身以及消费该 availability 的 Gate artifact 都必须排除在 `artifactChecks` 和该投影之外，由下一次 availability report 与 Gate 重跑分别接续验证，避免 availability、index 与 Gate 形成哈希环；正式 resolver 必须从 canonical bytes 和 Gate 反向引用验证这项排除，不能只相信 report 内摘要。
 - availability report 超过 `nextCheckDueAt`、丢失、无法读取、无法解析、hash 不匹配或唯一存储即将早于保留期限过期时，依赖它的 evidence 与 Gate 立即变为 `stale`；availability report 自身由下一次报告替代，不自我引用。
 - 删除旧 artifact 前必须证明 replacement 覆盖相同 capability、evidence dimension、artifact type、release target、upstream snapshot 和 input commit，且没有仍受支持的 release 引用它；删除动作本身要留下可审计记录。
 
@@ -416,6 +417,7 @@ Schema 校验通过只能证明“数据符合当前 validator 的规则”，�
 - validator source manifest 至少绑定 validator 源码、全部 Cat Catch schemas、`package.json`、`package-lock.json` 和 `tsconfig.cat-catch-tools.json`；Node/Ajv/Electron/ffmpeg 等实际版本另进入 toolchain/environment fingerprint。
 - dirty worktree 运行只产生 `candidate-untrusted` / `candidate-local` preflight，固定为 non-promotable；它不得写 report-index、推进游标或满足 Gate。
 - 正式 validator 必须从精确 Git commit C 读取 runtime、tests、fixtures、ledger、inventory、policies 和 schemas，禁止读取同名工作树文件兜底；运行后记录 C、input tree hash、validator manifest hash、trust policy hash 和 runner attestation。
+- 从 clean exact commit 生成的 local-closure report 仍只是 candidate：在 trusted runner 身份和 attestation 通过、canonical bytes 进入 policy 允许的 durable store 之前固定为 non-promotable。exact commit、schema/hash 有效或 report-index 摘要都只是必要条件，不能单独满足同输入 G0 Gate 的 `derivedReportRefs.localClosure`、G0 或任何后续 Gate。
 - `trusted` report 只有在 source manifest 命中 `trustedValidatorBundles`、runner 命中 `trustedRunnerIdentities`、approvalRef 可由已登记 provider 解析且 attestation 验证通过时成立。任一项缺失只能生成候选报告。
 - 首次启用信任必须由 validator 输出之外的不可变用户决策、受保护 PR review 或 signed commit 锚定批准 payload hash；Agent、候选报告或待批准 bundle 不能批准自身。
 - 修改 schema、policy、validator、依赖锁文件或专用 tsconfig 会改变 validator bundle/input hash，使依赖旧 bundle 的 capability-state、Gate 与 seal report 失效并要求重新批准、重跑。
@@ -518,7 +520,7 @@ freshness:
     ],
     "candidate": [],
     "legacy": [
-      "electron/service/embeddedBrowserResourceProbeRuntimeHooks.ts"
+      "electron/service/embeddedBrowserResourceProbeRuntimeHooks.ts#embeddedBrowserResourceProbeRuntimeHooksBody"
     ]
   },
   "fixtures": ["deep/text-decoder-inline-manifest"],
@@ -529,6 +531,8 @@ freshness:
 ```
 
 示例只说明声明性 schema，不代表该能力已经达到任何 evidence/deployment 状态。针对 C 生成的 capability-state report 才记录 `verifiedThrough`、各 evidence 轴、实际 deployment/freshness、解析后的 owner 和 artifact refs；因此不存在“先把 C 的 artifact id 写进 C”这一自引用。
+
+`ownerRefs.legacy` 不是仅供阅读的 path 标签，必须使用规范的 `path#symbol` locator。validator 必须从每个 ledger legacy ref 反向解析到恰好一个 current inventory locator，并确认该 entry 的 `capabilityId` 与 `cutoverUnitId` 分别等于引用它的 capability 和 cutover unit；缺失、歧义或任一归属不一致都阻止 G0。这样 inventory 不能只单向声称覆盖了 ledger，而 ledger 也不能引用一个未登记或登记到别处的旧 owner。
 
 source reference 的 hash、snapshot 与 `introducedBy` 都以 Git object 为准，不读取 dirty working tree。`introducedBy` 表示该 locator 在**这个 path 上**的首次引入证明，而不是仓库范围的作者归属：声明的 commit 必须可解析为 snapshot 的祖先，目标 path/locator 必须存在于该 commit，并且它的每个 direct parent 都必须明确缺少该 path 或 locator；merge commit 必须检查全部 parents。root commit、rename/copy 后的新 path、以及 delete 后 re-add 都可以在这一定义下成为合法的 path-local introduction。annotated tag 必须先 peel 到 commit，replace refs 必须禁用；commit、parent、tree 或 blob 任一不可用时必须保持 blocker，不能把“无法读取”解释为“不存在”。
 
@@ -815,7 +819,7 @@ network adapter captures headers
 | `transfer-engine` | 并发、Range、重试、Abort、顺序输出、取消 | task registry 是唯一任务 owner，失败/取消语义一致 |
 | `output-integration` | 文件名、ffmpeg、本地保存、资料库导入、外部工具 | 属于 OmniFlow integration，不能只由 Cat Catch oracle 验收 |
 
-每个 unit 的 `dependsOn` 只记录直接前置 unit，不能把传递依赖重复展开；`dependencyMapping` 表示这份依赖声明是否已经完成闭包审计。`pending` 下的空数组只表示“尚未建立依赖图”，绝不表示该 unit 已被证明没有依赖；只有 `specified` 下的空数组才表示已验证的根节点。把 unit 设为 `specified` 前，validator 必须确认所有引用都指向现有 unit、没有自依赖、没有环，并且动态边、contract、owner 与 dispatch boundary 的依赖已经映射。任何 `dependencyMapping=pending` 都阻止 G0、cutover、rollback rehearsal 和最终完成。
+每个 unit 的 `dependsOn` 只记录直接前置 unit，不能把传递依赖重复展开；`dependencyMapping` 表示这份依赖声明是否已经完成闭包审计。ledger 只保存这两个声明字段，不保存 local-closure artifact id/hash：同输入 closure 的内容会绑定 ledger hash，把其 content hash 再写回 ledger 会形成不可生成的哈希自引用。`pending` 下的空数组只表示“尚未建立依赖图”，绝不表示该 unit 已被证明没有依赖；只有 `specified` 下的空数组才声明该 unit 是已审计的根节点，但声明本身不能自证。正式 G0 Gate 必须通过同一 `evidenceInputCommit` 的 `derivedReportRefs.localClosure` 解析 trusted、durably stored 的 canonical local-closure bytes，确认所有引用都指向现有 unit、没有自依赖、没有环，动态边、contract、owner 与 dispatch boundary 的依赖已经映射，并且报告覆盖全部 unit、派生的直接依赖 graph 与 ledger 完全一致；空 `dependsOn` 也由该 closure 证明“没有直接前置 unit”。任何 `dependencyMapping=pending`、缺失/不匹配的同输入 closure 或非晋级候选 closure 都阻止 G0、cutover、rollback rehearsal 和最终完成。
 
 ### 7.1 `network-capture`
 
@@ -1143,8 +1147,8 @@ G3 与 G4 可以按 cutover unit 滚动推进，不要求等所有 candidate 写
 - 建立并校验 validator trust policy 与 report-index entry/index schema；在外部 approval provider、validator bundle 和 trusted runner 尚未配置时保持显式 blocker，候选 preflight 不得冒充 G0 evidence。
 - 对上游目标范围做初始依赖闭包扫描，新增文件和第三方库也在范围内。
 - 静态快照审计覆盖 `baselineCursor` 的所有 bootstrap roots 与传递依赖，完成后 `auditedThrough` 才能初始化为 `baselineCursor`。
-- 针对当前 OmniFlow tree 生成 local-closure report；bootstrap/current semantic candidates 全部进入 current inventory/capability 或带 approvalRef 的排除，historical candidates 还可解析到带删除证据的 retired tombstone，`unresolvedEdges=0`、`unmappedInScopeNodes=0`。
-- 审计每个 cutover unit 的直接依赖，把动态边、contract、owner 与 dispatch boundary 解析到现有 unit，建立引用完整、无自依赖且无环的 graph；只有审计证据通过后才能把所有 `dependencyMapping` 从 `pending` 改为 `specified`，空 `dependsOn` 也必须有“已验证为根节点”的证据。
+- 针对当前 OmniFlow tree 生成 local-closure report；bootstrap/current semantic candidates 全部进入 current inventory/capability 或带 approvalRef 的排除，historical candidates 还可解析到带删除证据的 retired tombstone，`unresolvedEdges=0`、`unmappedInScopeNodes=0`。ledger 的每个 `ownerRefs.legacy` 都以 `path#symbol` 反向唯一解析到 capability/cutover 均一致的 current inventory entry。
+- 审计每个 cutover unit 的直接依赖，把动态边、contract、owner 与 dispatch boundary 解析到现有 unit，建立引用完整、无自依赖且无环的 graph，并在 ledger 中把完成审计的声明从 `dependencyMapping=pending` 改为 `specified`；同一输入的 G0 Gate 再通过 `derivedReportRefs.localClosure` 绑定 trusted、durably stored 的 canonical local-closure evidence，验证其覆盖全部 unit 且派生 graph 与 ledger 完全一致，空 `dependsOn` 也由该 closure 证明该 unit 是根节点。closure 证据不写回 ledger。
 - `g0-baseline` transition-history artifact 绑定最初事实归零 commit，记录当时所有相关 owner、`implemented-unverified`/`unmapped` 状态、IPC/preload/resource model/state owner/lifecycle 黑盒基线和 seed gaps。
 - final-invariant report 证明 baseline artifact 的每项都已解析到当前 capability/current node、带删除证据的 tombstone 或带 approvalRef 的排除；已确认的敏感 header 暴露作为 contract migration capability 完成，不能因旧黑盒基线而保留。
 - 从产品政策、`package.json` 和 `electron-builder.json5` 冻结支持平台/架构/package/smoke matrix；未决平台作为 blocker，不静默排除。

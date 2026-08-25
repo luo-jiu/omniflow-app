@@ -33,6 +33,7 @@
    - `docs/file-viewer-and-archive-viewer-map.md`
    - `docs/viewers/README.md`
    - `docs/frontend-validation-matrix.md`
+   - `docs/cat-catch-full-migration-execution-plan.md`
    - `docs/cat-catch-migration-audit.md`
 
 ## 3. 入口地图
@@ -63,6 +64,8 @@
   - `docs/local-macos-signing-and-release.md`
 - Embedded Browser 生命周期、资源捕捉、下载导入：
   - `docs/embedded-browser-architecture.md`
+- Cat Catch 全面重构、证据门禁与完成定义：
+  - `docs/cat-catch-full-migration-execution-plan.md`
 - `library detail` 工作区模式、browser / file-viewer / search-home 切换：
   - `docs/library-detail-workspace.md`
 - 文件树、文件打开、预览 tab、viewer 分发边界：

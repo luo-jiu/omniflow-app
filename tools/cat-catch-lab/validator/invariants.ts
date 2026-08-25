@@ -216,7 +216,6 @@ function validateLedger(context: ValidationContext, issues: ValidationIssue[]): 
   const capabilityCutoverUnitIds = new Map<string, string>()
   const fixtureIds = new Set<string>()
   const fixturesByCapability = new Map<string, Set<string>>()
-
   const cutoverDependencies = new Map<string, string[]>()
   for (const [index, value] of cutoverUnits.entries()) {
     if (!isJsonObject(value)) continue
@@ -509,6 +508,92 @@ function validateInventoryMapping(
   }
 }
 
+function ownerRefKey(relativePath: string, symbol: string): string {
+  return `${relativePath}#${symbol}`
+}
+
+function parseOwnerRef(value: string): { path: string; symbol: string } | null {
+  const separatorIndex = value.lastIndexOf('#')
+  if (separatorIndex <= 0 || separatorIndex === value.length - 1) return null
+  const relativePath = value.slice(0, separatorIndex)
+  const symbol = value.slice(separatorIndex + 1)
+  return isCanonicalRepositoryPath(relativePath) ? { path: relativePath, symbol } : null
+}
+
+function validateLegacyOwnerRefs(
+  context: ValidationContext,
+  issues: ValidationIssue[],
+  currentNodes: Record<string, unknown>[],
+): void {
+  const nodesByOwnerRef = new Map<string, Record<string, unknown>[]>()
+  for (const node of currentNodes) {
+    const relativePath = getString(node.path)
+    const symbol = getString(node.symbol)
+    if (!relativePath || !symbol) continue
+    const key = ownerRefKey(relativePath, symbol)
+    const matches = nodesByOwnerRef.get(key) || []
+    matches.push(node)
+    nodesByOwnerRef.set(key, matches)
+  }
+
+  const capabilities = readArray(context.documents.get('capability-ledger.json'), 'capabilities')
+  for (const [capabilityIndex, capability] of capabilities.entries()) {
+    if (!isJsonObject(capability)) continue
+    const capabilityId = getString(capability.id)
+    const cutoverUnitId = getString(capability.cutoverUnitId)
+    const ownerRefs = isJsonObject(capability.ownerRefs) ? capability.ownerRefs : null
+    for (const [ownerIndex, ownerRef] of getStringArray(ownerRefs?.legacy).entries()) {
+      const issuePath = `capability-ledger.json.capabilities[${capabilityIndex}].ownerRefs.legacy[${ownerIndex}]`
+      const parsed = parseOwnerRef(ownerRef)
+      if (!parsed) {
+        issues.push(createIssue(
+          'error',
+          'legacy-owner-ref-invalid',
+          `Legacy owner ref must use a canonical path#symbol locator: ${ownerRef}`,
+          issuePath,
+        ))
+        continue
+      }
+      const matches = nodesByOwnerRef.get(ownerRefKey(parsed.path, parsed.symbol)) || []
+      if (matches.length === 0) {
+        issues.push(createIssue(
+          'blocker',
+          'legacy-owner-ref-uninventoried',
+          `Legacy owner ref is not represented by a current inventory locator: ${ownerRef}`,
+          issuePath,
+        ))
+        continue
+      }
+      if (matches.length > 1) {
+        issues.push(createIssue(
+          'blocker',
+          'legacy-owner-ref-ambiguous',
+          `Legacy owner ref resolves to multiple current inventory entries: ${ownerRef}`,
+          issuePath,
+        ))
+        continue
+      }
+      const [node] = matches
+      if (capabilityId && node?.capabilityId !== capabilityId) {
+        issues.push(createIssue(
+          'blocker',
+          'legacy-owner-ref-capability-mismatch',
+          `Legacy owner ref ${ownerRef} is inventoried under ${String(node?.capabilityId)}, not ${capabilityId}`,
+          issuePath,
+        ))
+      }
+      if (cutoverUnitId && node?.cutoverUnitId !== cutoverUnitId) {
+        issues.push(createIssue(
+          'blocker',
+          'legacy-owner-ref-cutover-unit-mismatch',
+          `Legacy owner ref ${ownerRef} is inventoried under ${String(node?.cutoverUnitId)}, not ${cutoverUnitId}`,
+          issuePath,
+        ))
+      }
+    }
+  }
+}
+
 function validateHistoricalCandidateSource(
   context: ValidationContext,
   issues: ValidationIssue[],
@@ -703,6 +788,7 @@ function validateInventory(
   )
 
   const currentNodes = objectEntries.filter(value => value.entryType === 'current-node')
+  validateLegacyOwnerRefs(context, issues, currentNodes)
   for (const [index, value] of currentNodes.entries()) {
     const nodePath = `legacy-inventory.json.entries[current:${index}]`
     issues.push(...validateGitSourceReference({
@@ -1197,12 +1283,11 @@ function validateReportIndex(context: ValidationContext, issues: ValidationIssue
     if (
       validationSummary.schemaValidated !== true
       || validationSummary.hashValidated !== true
-      || validationSummary.reportedStatus !== 'passed'
     ) {
       issues.push(createIssue(
         'blocker',
-        'artifact-index-summary-not-passed',
-        'Indexed artifact summary is not schema-valid, hash-valid, and passed',
+        'artifact-index-summary-invalid',
+        'Indexed artifact summary is not schema-valid and hash-valid',
         `${entryPath}.validationSummary`,
       ))
     }

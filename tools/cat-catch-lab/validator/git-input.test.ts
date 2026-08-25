@@ -11,13 +11,19 @@ import {
   hashGitCommitInputs,
   hashTrackedWorktreeInputs,
   hashValidatorSourceManifest,
+  hashValidatorSourceHashEntries,
   hashValidatorToolchainFingerprint,
+  listGitCommitTreeEntries,
+  listGitTreeEntriesAtCommit,
   listDirtyTrackedPaths,
   listUntrackedPaths,
+  normalizeWorktreeRelativePath,
   readGitCommitParents,
+  readGitBlobObjects,
   readGitFileAtCommit,
   readGitPathAtCommit,
 } from './git-input.ts'
+import { sha256Bytes } from './json.ts'
 
 const temporaryDirectories: string[] = []
 
@@ -100,6 +106,104 @@ describe('Cat Catch Git inputs', () => {
     }))
     expect(readGitPathAtCommit(repository, head, 'missing.txt')).toEqual({ status: 'absent' })
     expect(readGitPathAtCommit(repository, 'f'.repeat(40), 'input.txt')).toEqual({ status: 'unavailable' })
+  })
+
+  it('lists recursive tree entries without consulting uncommitted paths', () => {
+    const repository = createRepository()
+    const head = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: repository,
+      encoding: 'utf8',
+    }).trim()
+    writeFileSync(path.join(repository, 'docs/cat-catch/worktree-only.json'), '{}\n')
+
+    const tree = listGitTreeEntriesAtCommit(repository, head, 'docs/cat-catch')
+    expect(tree).toEqual(expect.objectContaining({ status: 'present' }))
+    if (tree.status !== 'present') throw new Error('fixture tree is unavailable')
+    expect(tree.entries.map(entry => entry.relativePath)).toEqual([
+      'docs/cat-catch/report-index/index.json',
+    ])
+    expect(listGitTreeEntriesAtCommit(repository, head, 'missing')).toEqual({ status: 'absent' })
+    expect(listGitTreeEntriesAtCommit(repository, 'f'.repeat(40), 'docs')).toEqual({
+      status: 'unavailable',
+    })
+  })
+
+  it('preserves newlines in NUL-delimited tree paths', () => {
+    const repository = createRepository()
+    const relativePath = 'line\nbreak.txt'
+    writeFileSync(path.join(repository, relativePath), 'newline path\n')
+    execFileSync('git', ['add', '.'], { cwd: repository })
+    execFileSync('git', ['commit', '--quiet', '-m', 'newline path'], { cwd: repository })
+    const head = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: repository,
+      encoding: 'utf8',
+    }).trim()
+
+    const tree = listGitCommitTreeEntries(repository, head)
+    expect(tree).toEqual(expect.objectContaining({ status: 'present' }))
+    if (tree.status !== 'present') throw new Error('fixture tree is unavailable')
+    expect(tree.entries.map(entry => entry.relativePath)).toContain(relativePath)
+    expect(readGitPathAtCommit(repository, head, relativePath)).toEqual({
+      bytes: Buffer.from('newline path\n'),
+      status: 'present',
+    })
+    expect(hashGitCommitInputs(repository, head)).toMatch(/^sha256:[0-9a-f]{64}$/)
+  })
+
+  it('fails closed when an exact tree contains a non-UTF-8 path', () => {
+    const repository = initializeRepository()
+    const blob = execFileSync('git', ['hash-object', '-w', '--stdin'], {
+      cwd: repository,
+      encoding: 'utf8',
+      input: 'invalid path bytes\n',
+    }).trim()
+    const treeInput = Buffer.concat([
+      Buffer.from(`100644 blob ${blob}\tinvalid-`),
+      Buffer.from([0xff]),
+      Buffer.from('.txt\0'),
+    ])
+    const tree = execFileSync('git', ['mktree', '-z'], {
+      cwd: repository,
+      encoding: 'utf8',
+      input: treeInput,
+    }).trim()
+    const commit = execFileSync('git', ['commit-tree', tree, '-m', 'invalid path bytes'], {
+      cwd: repository,
+      encoding: 'utf8',
+    }).trim()
+
+    expect(listGitCommitTreeEntries(repository, commit)).toEqual({ status: 'unavailable' })
+    expect(hashGitCommitInputs(repository, commit)).toBeNull()
+  })
+
+  it('batch reads raw blobs from the complete exact-commit tree', () => {
+    const repository = createRepository()
+    const binaryBytes = Buffer.from([0x00, 0x0a, 0x41, 0x00, 0x0a, 0xff])
+    writeFileSync(path.join(repository, 'binary-input.bin'), binaryBytes)
+    execFileSync('git', ['add', 'binary-input.bin'], { cwd: repository })
+    execFileSync('git', ['commit', '--quiet', '-m', 'binary input'], { cwd: repository })
+    const head = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: repository,
+      encoding: 'utf8',
+    }).trim()
+    writeFileSync(path.join(repository, 'input.txt'), 'worktree-only\n')
+
+    const tree = listGitCommitTreeEntries(repository, head)
+    expect(tree).toEqual(expect.objectContaining({ status: 'present' }))
+    if (tree.status !== 'present') throw new Error('fixture tree is unavailable')
+    const blobs = readGitBlobObjects(
+      repository,
+      tree.entries.filter(entry => entry.objectType === 'blob').map(entry => entry.objectId),
+    )
+    expect(blobs).not.toBeNull()
+    const inputEntry = tree.entries.find(entry => entry.relativePath === 'input.txt')
+    if (!inputEntry) throw new Error('fixture input tree entry is missing')
+    expect(blobs?.get(inputEntry.objectId)?.toString('utf8')).toBe('input-a\n')
+    const binaryEntry = tree.entries.find(entry => entry.relativePath === 'binary-input.bin')
+    if (!binaryEntry) throw new Error('fixture binary tree entry is missing')
+    expect(blobs?.get(binaryEntry.objectId)).toEqual(binaryBytes)
+    expect(readGitBlobObjects(repository, ['not-an-object-id'])).toBeNull()
+    expect(listGitCommitTreeEntries(repository, 'f'.repeat(40))).toEqual({ status: 'unavailable' })
   })
 
   it('reads direct parents from a root commit with an empty message', () => {
@@ -187,9 +291,60 @@ describe('Cat Catch Git inputs', () => {
     writeFileSync(path.join(repository, 'package-lock.json'), '{"lockfileVersion":3}\n')
     writeFileSync(path.join(repository, 'tsconfig.cat-catch-tools.json'), '{}\n')
     const before = hashValidatorSourceManifest(repository)
+    execFileSync('git', ['add', '.'], { cwd: repository })
+    execFileSync('git', ['commit', '--quiet', '-m', 'validator sources'], { cwd: repository })
+    const head = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: repository,
+      encoding: 'utf8',
+    }).trim()
+    const tree = listGitCommitTreeEntries(repository, head)
+    if (tree.status !== 'present') throw new Error('fixture tree is unavailable')
+    const validatorEntries = tree.entries.filter(entry => (
+      (entry.relativePath.startsWith('tools/cat-catch-lab/validator/') && entry.relativePath.endsWith('.ts'))
+      || entry.relativePath === 'package.json'
+      || entry.relativePath === 'package-lock.json'
+      || entry.relativePath === 'tsconfig.cat-catch-tools.json'
+    ))
+    const blobs = readGitBlobObjects(repository, validatorEntries.map(entry => entry.objectId))
+    if (!blobs) throw new Error('fixture blobs are unavailable')
+    const exactCommitHash = hashValidatorSourceHashEntries(validatorEntries.map(entry => ({
+      contentHash: sha256Bytes(blobs.get(entry.objectId) || Buffer.alloc(0)),
+      relativePath: entry.relativePath,
+    })))
+    expect(exactCommitHash).toBe(before)
 
     writeFileSync(path.join(repository, 'package-lock.json'), '{"lockfileVersion":3,"changed":true}\n')
     expect(hashValidatorSourceManifest(repository)).not.toBe(before)
+  })
+
+  it('uses locale-independent code-unit ordering for validator source hashes', () => {
+    const firstHash = `sha256:${'1'.repeat(64)}`
+    const secondHash = `sha256:${'2'.repeat(64)}`
+    const entries = [
+      { contentHash: secondHash, relativePath: 'validator/é.ts' },
+      { contentHash: firstHash, relativePath: 'validator/z.ts' },
+    ]
+    expect(hashValidatorSourceHashEntries(entries)).toBe(sha256Bytes(
+      `validator/z.ts\0${firstHash}\0validator/é.ts\0${secondHash}`,
+    ))
+    expect(hashValidatorSourceHashEntries([...entries].reverse())).toBe(
+      hashValidatorSourceHashEntries(entries),
+    )
+  })
+
+  it('normalizes host separators before hashing without collapsing POSIX backslashes', () => {
+    expect(normalizeWorktreeRelativePath(
+      'tools\\cat-catch-lab\\validator\\cli.ts',
+      '\\',
+    )).toBe('tools/cat-catch-lab/validator/cli.ts')
+    expect(normalizeWorktreeRelativePath('validator/a\\b.ts', '/')).toBe('validator/a\\b.ts')
+
+    const contentHash = `sha256:${'1'.repeat(64)}`
+    expect(hashValidatorSourceHashEntries([
+      { contentHash, relativePath: 'validator/a\\b.ts' },
+    ])).not.toBe(hashValidatorSourceHashEntries([
+      { contentHash, relativePath: 'validator/a/b.ts' },
+    ]))
   })
 
   it('separately fingerprints the validator runtime toolchain', () => {

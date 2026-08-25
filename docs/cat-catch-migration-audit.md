@@ -1,256 +1,82 @@
-# Cat Catch 功能夺舍对照表
+# Cat Catch 全面重构现状摘要
 
-更新时间：2026-04-22
-功能实现基线：截至 `omniflow-app` 提交 `2805ccf`，对照对象 `project/cat-catch`
+更新时间：2026-08-23
 
-目标：先把 Cat Catch 的功能能力尽量完整迁过来，再统一调整正式 UI。正式资源面板 UI 暂不定型；如需验证，优先做薄 demo / debug 入口。
+状态：临时人工摘要；`G0` 完成后应由声明性 ledger 与 capability-state/Gate reports 联合生成。
 
-维护方式补充：
+完成标准、目标架构和状态机以 `docs/cat-catch-full-migration-execution-plan.md` 为唯一权威。本文只回答“目前明确知道什么”，不定义项目是否完成。
 
-- “如果不熟悉 Cat Catch、媒体格式或 OmniFlow 当前主线，想先快速建立全局视角” 先看 `docs/cat-catch-overview-and-migration-map.md`。
-- “当前已经迁了什么、还缺什么” 看本文档。
-- “某个 Cat Catch 提交该不该迁、迁到哪一层、是否只是浏览器扩展 workaround” 先看 `docs/cat-catch-sync-maintenance-guide.md`。
+## 1. 状态规则
 
-状态说明：
+- 不再使用“已夺舍”“部分夺舍”或迁移百分比。
+- 代码存在但没有等价证据，统一记为 `implemented-unverified`。
+- 页面或生产链路没有实际启用的能力，不能因为源码存在而算可用。
+- Cat Catch 上游是行为参考；旧 OmniFlow 只能用于 characterization。
+- 本表不是能力穷举。未完成初始依赖闭包扫描前，不能推断没有列出的能力已经被覆盖。
 
-- `已夺舍`：主链路已经在 OmniFlow 内可用，后续主要靠真实站点压测补边角。
-- `部分夺舍`：已有核心实现，但还缺 Cat Catch 的完整经验逻辑、下载参数、验证能力或 UI 操作面。
-- `未夺舍`：还没有迁入，或只存在很弱的替代能力。
-- `暂缓/另议`：可能不适合直接搬，需确认是否符合 OmniFlow 产品定位。
+## 2. 当前上游
 
-## 总览
+| 字段 | 值 |
+| --- | --- |
+| baseline / observed HEAD | `2cb981d7c2f4614732edccc167c4b5793d1cb138` |
+| description | `2.7.2-22-g2cb981d` |
+| latest commit date | 2026-08-14 |
+| auditedThrough | 未建立 |
+| verifiedThrough | 未建立 |
+| releaseCursor | 未确定 |
 
-| Cat Catch 能力 | 对应源码 | OmniFlow 当前状态 | 下一步 |
+## 3. 当前能力族摘要
+
+| 能力族 | 派生摘要 | 当前部署 | 已知结论 |
 | --- | --- | --- | --- |
-| 当前页网络资源嗅探 | `js/background.js`, `js/popup.js` | 已夺舍 | 继续补规则过滤和真实站点验证 |
-| 深度搜索注入 | `catch-script/search.js` | 部分夺舍 | 补更多经验规则、特殊 JSON、站点边角 |
-| Worker 注入嗅探 | `catch-script/search.js` | 已夺舍 | 测 worker-heavy 页面 |
-| fetch / XHR / JSON 扫描 | `catch-script/search.js` | 已夺舍 | 测相对 URL、嵌套 JSON、一次性 m3u8 |
-| HLS/m3u8 内联识别 | `catch-script/search.js`, `js/m3u8.js` | 部分夺舍 | parser / 测试入口已补，继续补 downloader 能力 |
-| DASH/mpd 内联识别 | `catch-script/search.js`, `js/mpd.js` | 部分夺舍 | 基础 mpd parser / 测试入口已补，继续补轨道选择与下载 |
-| Vimeo playlist.json 转 m3u8 | `catch-script/search.js` | 已夺舍 | 测 Vimeo 页面 |
-| key 候选捕获 | `catch-script/search.js`, `js/content-script.js`, `js/m3u8.js` | 部分夺舍 | 真实 key 验证入口、工具区自定义 key 和工具区二次验证已补；当前已能区分“不需要 key / 无候选 / 候选未命中 / 验证失败”，并已开始抽前面几段 AES-128 分片一起验证 |
-| MSE 缓存捕获 | `catch-script/catch.js` | 已夺舍 | 长视频继续测；1GB 自动保存策略暂不作为默认同步目标 |
-| 自动跳缓冲末尾 | `catch-script/catch.js` | 已夺舍 | 真实播放页验证 |
-| 去额外媒体头 | `catch-script/catch.js` | 已夺舍 | 多格式验证 |
-| 本地 ffmpeg 合并 MSE 音视频 | `catch-script/catch.js`, `js/m3u8.js` | 部分夺舍 | 从 B 站 m4s 扩到 HLS/DASH |
-| m3u8 parser 页面 | `m3u8.html`, `js/m3u8.js` | 部分夺舍 | 先做功能/demo，不急着定正式 UI |
-| m3u8 downloader | `js/m3u8.downloader.js` | 部分夺舍 | 已补下载任务模型、Electron 下载队列内核，并把网络/本地 manifest 两条 HLS 主线接进工具区；工具区已补阶段进度、结构化日志、失败分片编号（含复制）、失败分片重试、下载速度/ETA、ffmpeg 处理反馈、媒体 playlist 的线程数/分片范围控制，以及网络 master playlist 的 variant 选择、独立音轨选择与 ffmpeg 合并、字幕轨单独下载，继续补轨道联动验真 |
-| mpd parser 页面 | `mpd.html`, `js/mpd.js` | 未夺舍 | 迁轨道解析/选择，或引入等价 parser |
-| N_m3u8DL 协议调用 | `options.html`, `js/popup.js`, `js/m3u8.js` | 未夺舍 | 评估是否作为外部工具导出 |
-| aria2 RPC | `js/function.js`, `js/popup.js`, `js/preview.js` | 未夺舍 | 可作为外部下载器适配 |
-| invoke 本地程序 | `js/function.js`, `js/popup.js`, `js/preview.js` | 未夺舍 | 可作为命令模板/外部工具适配 |
-| MQTT 推送 | `js/pupup-utils.js`, `js/preview.js`, `options.html` | 未夺舍 | 暂缓/另议 |
-| 自动下载 | `js/popup.js`, `options.html` | 部分夺舍 | MSE 完成后自动下载已有；普通资源未完整迁 |
-| 规则过滤 / Regex / 黑白名单 | `js/init.js`, `js/background.js`, `js/function.js` | 部分夺舍 | 抽成规则模块，不塞回 probe |
-| 请求头保留 / Referer / Cookie | `js/background.js`, `js/function.js`, `js/m3u8.js` | 部分夺舍 | 下载链路统一透传 headers |
-| 下载器边下边存 / StreamSaver | `downloader.html`, `js/downloader.js`, `lib/StreamSaver.js` | 未夺舍 | Electron 内可用本地文件流替代 |
-| 录屏 / WebRTC / recorder | `catch-script/recorder*.js`, `catch-script/webrtc.js` | 未夺舍 | 暂缓/另议，和“资源嗅探”分开做 |
-| 媒体控制 / 截图 / 画中画 | `js/content-script.js`, `js/media-control.js` | 未夺舍 | 暂缓/另议 |
-| JSON 查看器 | `json.html`, `js/json.js` | 未夺舍 | 暂缓/另议 |
-| 移动 UA / 移动标签 | `js/init.js`, `options.html` | 未夺舍 | 暂缓/另议 |
-
-## 已经夺舍的核心链路
-
-### 资源捕获与深度搜索
-
-- 当前页资源列表：已接入 Electron 主进程网络捕获和前端资源面板。
-- 深度捕获：已通过当前页注入 probe，覆盖 `fetch`、`XMLHttpRequest`、`JSON.parse`、`btoa`、`atob`、`String.fromCharCode`、TypedArray、DataView、Worker。
-- Worker 注入：已支持 worker 内 relay 回主页面，和 Cat Catch `search.js` 的方向一致。
-- JSON 递归：已支持从 JSON 中扫描 URL、manifest、key 候选；相对 URL 会使用 response URL 作为 base。
-- inline script 扫描：已补 m3u8/mp4/flv 的内联脚本扫描。
-
-### HLS / DASH / Manifest
-
-- HLS inline m3u8：已能生成 page-context blob resource。
-- m3u8 baseUrl：已实现 Cat Catch 类似的 `joinBaseUrlTask` 思路，先缓存相对 m3u8，后续看到真实 media/manifest URL 时补发。
-- HLS 引用：已解析 `EXT-X-KEY`、`EXT-X-MAP`、普通分片/子 playlist URI。
-- HLS 工具区承接：已能把资源卡解析出的 HLS 计划送入工具区媒体处理模式。
-- HLS 执行分流：
-  - 网络 manifest：继续走 `ffmpeg` 直拉。
-  - blob / 页内内存 manifest：已接本地 downloader，执行链为 `plan -> local workdir -> rewritten local-playlist.m3u8 -> ffmpeg`。
-- HLS 自定义 key：工具区已支持手动输入 16 字节 AES-128 key（hex / base64）；填写后会切到本地 downloader 主链，用本地 key 文件重写 playlist。
-- HLS 工具区 key 验证：工具区已可直接发起 key 验证；候选来源会合并 manifest key URL、当前 tab 已捕获 key 资源，以及工具区手动输入 key。
-- HLS variant 选择：工具区已支持网络 master playlist 的第一版变体选择，默认保持“自动”，也可锁到具体 variant URL 后再交给 ffmpeg。
-- HLS 下载控制：对媒体 playlist，工具区已补第一版 Cat Catch 风格的线程数和分片范围控制；只要改了这里，就会切到本地 downloader 主链。
-- DASH inline mpd：已能生成 manifest resource。
-- MPD 引用：已解析 `BaseURL`、`Location`、`media`、`initialization`、`sourceURL`，并跳过 `$Number$` 这类模板 URL。
-- MPD BaseURL：已让 `BaseURL` 参与后续相对分片 URL 解析。
-- Vimeo playlist.json：已转换为 m3u8 master/stream manifest。
-
-### Key 候选
-
-- 已覆盖 base64 key、hex key、ArrayBuffer / TypedArray / DataView 16-byte key、重复扩展 key buffer。
-- 已过滤全 0 base64 key、MP4 `ftyp` 头误报。
-- HLS data URI key 已尝试进入 key 候选捕获。
-
-### MSE 缓存捕获
-
-- 已捕获 `MediaSource.addSourceBuffer` / `SourceBuffer.appendBuffer`。
-- 已识别 audio/video stream。
-- 已支持 MSE 流导出、清缓存、自动跳缓冲末尾、捕获完成后自动下载、去额外媒体头。
-- Cat Catch 的“每 1GB 自动保存一次”当前只记录为可选保险策略，不作为 OmniFlow 默认主链能力。
-- 已打通本地 ffmpeg 合并音视频流，B 站 m4s 链路已跑通。
-
-## 部分夺舍，优先补齐
-
-### 1. m3u8 parser / downloader
-
-Cat Catch 里这块很厚，主要在 `m3u8.html`、`js/m3u8.js`、`js/m3u8.downloader.js`。
-
-OmniFlow 当前有 manifest 捕获、key 候选和 ffmpeg 合并基础，但还缺：
-
-- m3u8 parser 的层级 playlist 展开：已补纯函数解析与资源卡测试入口，能输出 variants / renditions / keys / maps / segments；下载计划 JSON 已开始对齐 Cat Catch downloader 的 fragment 任务模型。
-- Electron 端下载队列内核：已补并发、范围、重试、顺序推送与停止能力，并已接入 HLS 本地 manifest 执行主链。
-- 多 variant / 多清晰度选择：已能解析 variant 与 rendition 元数据，工具区已补网络 master playlist 的 variant 选择、独立音轨选择与 ffmpeg 合并、字幕轨单独下载，并能展示关联的音轨/字幕 group；剩余重点是轨道联动验真。
-- `EXT-X-KEY` 下载、验证、替换、自定义 key：已能解析 key 元数据、做真实 key 验证，并在工具区支持手动输入自定义 key和直接二次验证；当前 `master playlist + 手动 key` 仍会显式拦住，避免误走错误主链；更完整的验证和选择体验仍未完成。
-- `EXT-X-MAP` 下载与解密处理：已能解析 map 与 byterange 元数据，并在本地 manifest 重写时生成独立本地文件引用；更完整的解密与验证仍未完成。
-- 下载范围：序号范围、时间范围 `HH:MM:SS`。
-- 下载队列、并发线程：已补基础内核；工具区已支持本地 HLS 任务的失败分片重试，并补了第一版线程数 / 分片范围控制；时间范围和更细的下载器控制面还没有补。
-- 直播录制与直播结束处理。
-- 估算大小、进度、速度、剩余时间：本地 downloader 已补字节进度、速度和 ETA；`ffmpeg` 阶段已补处理秒数和速度文本，但还没有真正媒体级精确百分比。
-- 只要音频、转码为 mp4、ffmpeg 转码参数。
-- 边下边存 / 大文件分片写入。
-
-当前下一步重点：
-
-1. 补更完整的 key 错误分类与多片段验证 UI。
-2. 继续补更细的执行反馈，不要让 ffmpeg 阶段继续像黑盒。
-3. 继续把 variant 选择扩到更完整的轨道/清晰度场景，不要先横向扩散到更多 UI。
-
-### 2. mpd parser
-
-Cat Catch 依赖 `lib/mpd-parser.min.js` 和 `js/mpd.js`。
-
-OmniFlow 当前已补基础 MPD parser 与资源卡测试入口：
-
-- 已能解析 audio/video representation、DRM ContentProtection、BaseURL。
-- 已能展开常见 `SegmentTemplate` / `SegmentTimeline` 与 `SegmentList`。
-- 已能输出 MPD 下载计划 JSON。
-
-还缺：
-
-- 视频轨 / 音频轨选择。
-- headers / referer 透传到下载器。
-- 更完整的 DASH 规范覆盖与真实站点压测。
-
-建议：优先引入稳定 parser 或迁移最小解析器，不手写完整 DASH 规范。
-
-### 3. key 验证体系
-
-Cat Catch 的 m3u8 页面支持“疑似密钥验证真实 key”。
-
-OmniFlow 当前已收集 key 候选，并补了资源卡内的 HLS key 验证入口：
-
-- 已能把 manifest key URL 与当前资源列表里的 key 候选合并去重。
-- 已能抓取第一个 AES-128 片段，用候选 key 尝试解密并按 Cat Catch 的媒体魔数经验验证。
-
-还缺：
-
-- key 格式展示：hex / base64。
-- 更完整的错误分类和多片段验证。
-
-建议先做内部 API：`manifest + keyCandidates -> verifiedKey?`，UI 后置。
-
-### 4. 下载/外部工具
-
-Cat Catch 覆盖多种出口：
-
-- 浏览器下载。
-- m3u8DL URL protocol。
-- aria2 RPC。
-- invoke 本地程序。
-- 在线 ffmpeg。
-- send2local。
-- MQTT。
-
-OmniFlow 当前更适合走 Electron 本地下载 / 本地 ffmpeg。未夺舍部分建议拆成外部工具适配层：
-
-- command template / URL protocol：可迁。
-- aria2：可迁。
-- MQTT：暂缓/另议。
-- send2local：如果 OmniFlow 后续需要自动化输出，可迁。
-
-### 5. 规则过滤与黑白名单
-
-Cat Catch 默认配置在 `js/init.js`，运行逻辑在 `js/background.js` / `js/function.js`。
-
-已迁：
-
-- 多数默认扩展名。
-- m3u8/mpd/m4s 等关键 MIME。
-- 基础 regex 筛选入口。
-
-还缺：
-
-- 默认 Regex 规则：爱奇艺 JSON、B 站直播 m4s 黑名单、Instagram/Facebook bytestart 规则等。
-- `damnUrl` 全局屏蔽。
-- 用户自定义 Ext / Type / Regex 的完整存储与启停。
-- 黑名单资源去重和过滤状态。
-- blockUrl / whitelist 模式。
-
-建议：抽 `resourceCaptureRules`，不要塞回 probe。
-
-## 未夺舍或暂缓项
-
-### 录制类脚本
-
-来源：`catch-script/recorder.js`、`recorder2.js`、`webrtc.js`。
-
-当前未迁。它们更像录屏/录制能力，不是当前“资源嗅探 + 下载”主链。建议暂缓，独立立项。
-
-### 媒体控制与截图
-
-来源：`js/content-script.js`、`js/media-control.js`。
-
-当前未迁。包括页面视频控制、截图、画中画、全屏等。建议暂缓，后续作为浏览器辅助工具独立做。
-
-### JSON viewer
-
-来源：`json.html`、`js/json.js`。
-
-当前未迁。可用现有 UI 或调试工具替代，暂缓。
-
-### MQTT
-
-来源：`options.html`、`js/pupup-utils.js`、`js/preview.js`。
-
-当前未迁。属于外部通知/推送能力，和资源夺舍主线不是一类。建议暂缓或作为外部输出适配。
-
-## 测试 Demo 建议
-
-正式 UI 先不定型，但为了后续测试，可以做一个轻量 debug/demo：
-
-- 位置：嵌入浏览器资源面板内的折叠区，或单独 `/debug/cat-catch` 开发入口。
-- 输入：当前捕获资源、m3u8/mpd URL、内联 manifest 文本、key 候选。
-- 输出：
-  - manifest 类型：HLS / DASH / Vimeo converted。
-  - baseUrl 决策记录。
-  - keys / maps / init segments / media segments。
-  - headers / referer。
-  - 可生成的下载任务 JSON。
-  - 可生成的 ffmpeg / m3u8DL / aria2 命令预览。
-- 原则：只服务测试，不作为正式交互方案。
-
-## 下一批建议顺序
-
-1. 补 `resourceCaptureRules`：默认 Regex / block / ext / MIME 规则。
-2. 做 HLS parser service：m3u8 text/url -> playlists / keys / maps / segments。
-3. 做 key 验证 API：manifest + key candidates -> verified key。
-4. 做 MPD parser service：优先 SegmentTemplate / SegmentTimeline / Representation。
-5. 做下载任务模型：manifest resource -> normalized download plan。
-6. 做 debug/demo UI：仅用于验证，不锁正式 UI。
-7. 再把正式 UI 和下载体验统一调整。
-
-## 当前结论
-
-按“当前产品需要的资源嗅探 + 缓存捕获 + 本地合并”算，已经约 `75%-80%`。
-
-按“Cat Catch 功能全量夺舍”算，约 `60%-65%`。差距主要不在 probe 注入，而在：
-
-- m3u8/downloader 的完整 parser + 下载器。
-- MPD parser 的完整轨道/模板解析。
-- key 验证与自定义 key。
-- 规则过滤体系。
-- 外部工具出口。
-- recorder / webrtc / 媒体控制等外围能力。
+| network capture | `implemented-unverified` | legacy owner | Electron tab 归属可保留；事件阶段、context、headers、规则语义需重迁和验真 |
+| deep-search runtime | `implemented-unverified` | `legacy-inactive` | 深度 hooks 写死关闭，只有外围 MSE hook 运行；不能视为产品能力 |
+| MSE runtime | `implemented-unverified` | legacy owner | 已有增量 spool 思路，没有专项差分、输出和稳定性证据 |
+| HLS engine | `implemented-unverified` | legacy owner | 已有 parser/downloader，但存在 BYTERANGE、cache fallback、伪装分片等明确缺口 |
+| DASH engine | `implemented-unverified` | legacy owner | 手写 parser 对负 repeat 等语义处理错误，应改用成熟 parser 并验真 |
+| transfer engine | `implemented-unverified` | multiple local owners | 并发/重试代码可复用评估，但缺统一 task/cancel/cleanup owner |
+| output integration | `implemented-unverified` | legacy owners | 本地保存、ffmpeg、资料库导入和外部工具已有实现，应作为 adapter/integration 保留并补证据 |
+
+## 4. 已确认的高优先级 seed gaps
+
+以下只用于启动 capability ledger，不是最终完成清单：
+
+1. `embeddedBrowserResourceProbeRuntimeHooks.ts` 的 `enableDeepRuntimeHooks = false`。
+2. 网络捕捉使用 `onCompleted`，Cat Catch 使用首字节阶段的 `onResponseStarted`。
+3. request context 无明确容量/TTL，鉴权 header 规则落后于上游；当前 public resource DTO 还会把 Cookie/Authorization 值发到 renderer，目标必须改成 main-owned opaque ref。
+4. Cat Catch `TextDecoder.decode` inline manifest hook 本地缺失。
+5. Cat Catch JSON 搜索深度与本地深度/宽度截断不同，尚无 accepted difference。
+6. Worker Blob CSP 异步失败回退不等价。
+7. HLS 隐式 BYTERANGE offset、一次性 manifest cache fallback、PNG/JPEG 伪装分片缺失。
+8. MPD `r="-1"`、多 BaseURL、动态时间和 range 等语义不完整。
+9. ffmpeg、HLS/MPD、直播、普通下载和 temp 目录没有统一 task registry。
+10. 资源捕捉主链没有专项自动化测试和 Cat Catch differential oracle。
+
+## 5. 保留、替换与适配方向
+
+| 处置 | 当前模块或能力 |
+| --- | --- |
+| 记录并默认保持契约 | IPC/preload 黑盒行为、资源模型、renderer snapshot；protected request context 是已确认的安全迁移例外，敏感 header 值必须移出 public DTO |
+| 保留 owner | main 的 tab/view lifecycle 与 `ResourceStateStore`，除非独立决策证明必须迁移 |
+| 忠实重迁 | network classifier/rules、deep-search、MSE 经验分支、HLS parser/pipeline、downloader 竞态逻辑 |
+| 成熟库替换 | DASH/MPD parser core |
+| 降级为 adapter | Electron webRequest、page relay、filesystem、ffmpeg、外部工具和资料库导入 |
+| 最后拆分 | `embeddedBrowserMainController.ts` |
+
+## 6. 状态更新规则
+
+- capability 未进入 ledger 前，不得从本文推断它已完成。
+- fixture 就绪只能让 validator 派生 `evidence.fixture=ready`，不能直接把行为设为通过。
+- Cat Catch oracle 差分或批准的独立 spec expectation 通过后，report 才能派生 `evidence.behavior=pass`。
+- 切换前的 production-equivalent harness 与切换后的真实 dispatch 分别产生 candidate/active integration/soak evidence，不能互相代替。
+- 切换 production owner 且 local closure 证明旧路径删除后，report 才能派生 `legacy-removed`。
+- 上游或本地 owner 发生相关行为改动时，派生状态必须自动变为 `stale` 并重新验证；pass/artifact binding/`verifiedThrough` 不写回声明性 ledger。
+
+## 7. 维护方式
+
+`G0` 建立机器 ledger 后：
+
+- 本文只保留由声明性 ledger 与 capability-state/Gate report 生成的汇总和关键阻塞项。
+- 不手工维护逐函数、逐网站或逐提交流水账。
+- source anchor/hash、fixture/test ref、disposition 与 accepted difference 进入 ledger；pass/stale/freshness、artifact binding 和 `verifiedThrough` 只进入派生 report。
+- 任何人工说明与机器产物冲突时，按全面重构执行契约的事实 owner 和 validator 结果处理，冲突本身阻止 Gate。

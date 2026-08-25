@@ -32,6 +32,7 @@
 - macOS 个人签名与发布：`docs/local-macos-signing-and-release.md`
 - 显示与可读性基线：`docs/ui-display-readability-baseline.md`
 - Embedded Browser 专题：`docs/embedded-browser-architecture.md`
+- Cat Catch 全面重构与完成契约：`docs/cat-catch-full-migration-execution-plan.md`
 - Cat Catch 总览与迁移地图：`docs/cat-catch-overview-and-migration-map.md`
 - Cat Catch 同步维护指南：`docs/cat-catch-sync-maintenance-guide.md`
 - Overlay 窗口专题与迁移规范：`docs/overlay-window-architecture.md`
@@ -42,7 +43,7 @@
 - Viewer 文档入口：`docs/viewers/README.md`
 - MediaHub 契约（出声实体注册 / 浮窗 / tab 关闭释放）：`docs/media-hub-contract.md`
 - 前端验证矩阵：`docs/frontend-validation-matrix.md`
-- 资源捕捉迁移审计：`docs/cat-catch-migration-audit.md`
+- 资源捕捉重构现状摘要：`docs/cat-catch-migration-audit.md`
 - 上传中心局部说明：`src/modules/upload-center/README.md`
 
 ## 项目规范

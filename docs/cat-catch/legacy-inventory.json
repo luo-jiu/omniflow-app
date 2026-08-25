@@ -1,7 +1,7 @@
 {
   "$schema": "./legacy-inventory.schema.json",
   "schemaVersion": 1,
-  "inventoryVersion": "2026-08-24.3",
+  "inventoryVersion": "2026-08-25.1",
   "discoveryRulesVersion": "2026-08-23.1",
   "bootstrapRoots": [
     {
@@ -1150,8 +1150,8 @@
       "sourceHash": "sha256:94f0bba21dfc21660f43f42abc934071e3a0867b52db103d8cb99a607e33ef51",
       "classification": "legacy",
       "ownerRole": "task-owner",
-      "capabilityId": "processing.main-task-registry",
-      "cutoverUnitId": "transfer-engine",
+      "capabilityId": "output.application-workflow-coordinator",
+      "cutoverUnitId": "output-integration",
       "provenanceRefs": ["git:35c5c69a6ff38d5224993cc3f3757c1c74688e73"]
     },
     {
@@ -1162,8 +1162,8 @@
       "sourceHash": "sha256:dd0bb0d7a98a1738b4ed7376e0d9f1c0719add6b3d6f99a19d2fceb4d62da9e4",
       "classification": "legacy",
       "ownerRole": "task-owner",
-      "capabilityId": "processing.main-task-registry",
-      "cutoverUnitId": "transfer-engine",
+      "capabilityId": "output.application-workflow-coordinator",
+      "cutoverUnitId": "output-integration",
       "provenanceRefs": ["git:103a1ef639f2df4b61d1f84aeadf545b922dd873"]
     },
     {
@@ -1589,6 +1589,90 @@
       "capabilityId": "capture.cross-process-contract",
       "cutoverUnitId": "network-capture",
       "provenanceRefs": ["docs/cat-catch-full-migration-execution-plan.md#66-protected-request-context"]
+    },
+    {
+      "id": "node.lifecycle.close-tab",
+      "entryType": "current-node",
+      "path": "electron/service/embeddedBrowserMainController.ts",
+      "symbol": "closeEmbeddedBrowserTab",
+      "sourceHash": "sha256:60470fdff32b5d447437b7ab11fe254469cec282398f28bd96b608da7640e985",
+      "classification": "omniflow-integration",
+      "ownerRole": "production-owner",
+      "capabilityId": "capture.owner-lifecycle-closure",
+      "cutoverUnitId": "network-capture",
+      "provenanceRefs": ["git:517166e2449e45cfa70f25da511e7bf0607a211e"]
+    },
+    {
+      "id": "node.lifecycle.dispose",
+      "entryType": "current-node",
+      "path": "electron/service/embeddedBrowserMainController.ts",
+      "symbol": "dispose",
+      "sourceHash": "sha256:60470fdff32b5d447437b7ab11fe254469cec282398f28bd96b608da7640e985",
+      "classification": "omniflow-integration",
+      "ownerRole": "production-owner",
+      "capabilityId": "capture.owner-lifecycle-closure",
+      "cutoverUnitId": "network-capture",
+      "provenanceRefs": ["git:9ae55be93e8d17c3519b61136e2ee40497d6bd5b"]
+    },
+    {
+      "id": "node.hls.plan-task",
+      "entryType": "current-node",
+      "path": "electron/service/embeddedBrowserMainController.ts",
+      "symbol": "downloadEmbeddedBrowserHlsPlanResource",
+      "sourceHash": "sha256:60470fdff32b5d447437b7ab11fe254469cec282398f28bd96b608da7640e985",
+      "classification": "legacy",
+      "ownerRole": "task-owner",
+      "capabilityId": "hls.segment-pipeline",
+      "cutoverUnitId": "hls-engine",
+      "provenanceRefs": ["git:35c5c69a6ff38d5224993cc3f3757c1c74688e73"]
+    },
+    {
+      "id": "node.hls.live-session-state",
+      "entryType": "current-node",
+      "path": "electron/service/embeddedBrowserMainController.ts",
+      "symbol": "embeddedBrowserHlsLiveRecordingSessions",
+      "sourceHash": "sha256:60470fdff32b5d447437b7ab11fe254469cec282398f28bd96b608da7640e985",
+      "classification": "legacy",
+      "ownerRole": "state-owner",
+      "capabilityId": "hls.live-recording",
+      "cutoverUnitId": "hls-engine",
+      "provenanceRefs": ["git:6da222f5180c2cccea81848220caba40b3089dbc"]
+    },
+    {
+      "id": "node.hls.retry-session-state",
+      "entryType": "current-node",
+      "path": "electron/service/embeddedBrowserMainController.ts",
+      "symbol": "embeddedBrowserHlsRetrySessions",
+      "sourceHash": "sha256:60470fdff32b5d447437b7ab11fe254469cec282398f28bd96b608da7640e985",
+      "classification": "legacy",
+      "ownerRole": "state-owner",
+      "capabilityId": "hls.segment-pipeline",
+      "cutoverUnitId": "hls-engine",
+      "provenanceRefs": ["git:7cea96156b49d45f9d8fa5215080d5d7e68c8343"]
+    },
+    {
+      "id": "node.dash.plan-task",
+      "entryType": "current-node",
+      "path": "electron/service/embeddedBrowserMainController.ts",
+      "symbol": "downloadEmbeddedBrowserMpdPlanResource",
+      "sourceHash": "sha256:60470fdff32b5d447437b7ab11fe254469cec282398f28bd96b608da7640e985",
+      "classification": "legacy",
+      "ownerRole": "task-owner",
+      "capabilityId": "dash.timeline-download-merge",
+      "cutoverUnitId": "dash-engine",
+      "provenanceRefs": ["git:103a1ef639f2df4b61d1f84aeadf545b922dd873"]
+    },
+    {
+      "id": "node.transfer.http-ipc",
+      "entryType": "current-node",
+      "path": "electron/ipc/http.ts",
+      "symbol": "registerHttpIpc",
+      "sourceHash": "sha256:ed212b7919bdd83c5a2ccbd240452e3da30f9dab48fec3055ffaa4f881eb1aa1",
+      "classification": "legacy",
+      "ownerRole": "adapter",
+      "capabilityId": "transfer.streaming-memory-budget",
+      "cutoverUnitId": "transfer-engine",
+      "provenanceRefs": ["git:0b56033a4fd96666d38e950456fbf4966a53e469"]
     }
   ],
   "approvedExclusions": []

@@ -3,6 +3,8 @@
 更新时间：2026-04-22
 适用范围：给不熟悉 Cat Catch、媒体格式和 OmniFlow 内置嗅探链路的开发者快速建立全局视角。
 
+状态：概念导览。本文中“OmniFlow 当前状态”和优先级描述是 2026-04-22 的历史快照，未经过行为等价验证，不得作为完成度或实施依据。全面重构以 `docs/cat-catch-full-migration-execution-plan.md` 为权威，当前事实摘要见 `docs/cat-catch-migration-audit.md`。
+
 ## 1. 先看结论
 
 如果只想先记住最重要的三件事，可以先看这里：
