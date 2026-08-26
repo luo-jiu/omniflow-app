@@ -316,4 +316,46 @@ describe('EmbeddedBrowserCaptureRuntime', () => {
     })
     runtime.dispose()
   })
+
+  it('network.opaque-probe-resource-resolution resolves a current probe resource id to its main-only page key', () => {
+    const webRequest = new FakeWebRequest()
+    let resourceIndex = 0
+    const runtime = new EmbeddedBrowserCaptureRuntime({
+      createDocumentToken: () => 'document_token_for_probe_resolution',
+      emitChange: () => {},
+      fetch: async () => new Response('fixture'),
+      resourceStateOptions: {
+        createResourceId: () => `resource-${++resourceIndex}`,
+      },
+      webRequest,
+    })
+    const view = new FakeWebContents(61, 'https://page.example/watch/one')
+    runtime.registerView({
+      clearResourcesOnNavigation: false,
+      tabId: 'tab-probe',
+      webContents: view,
+    })
+    runtime.setCaptureMode('tab-probe', 'deep')
+    const document = runtime.bindProbeDocument('tab-probe')
+    view.emitConsole(`${document?.consolePrefix}${JSON.stringify({
+      kind: 'media',
+      resourceKey: 'mse-video-main-only',
+      resourceType: 'mse-stream',
+      url: 'blob:https://page.example/video',
+    })}`)
+
+    const snapshot = runtime.getSnapshot('tab-probe')
+    if (snapshot?.status !== 'active') throw new Error('Expected active resource state')
+    const resourceId = snapshot.resources[0]?.id || ''
+    expect(runtime.resolvePageResourceKey('tab-probe', resourceId)).toBe('mse-video-main-only')
+    expect(runtime.resolvePageResourceKey('another-tab', resourceId)).toBeNull()
+
+    view.navigate('https://page.example/watch/two')
+    expect(runtime.getSnapshot('tab-probe')).toMatchObject({
+      resources: [expect.objectContaining({ id: resourceId })],
+    })
+    expect(runtime.resolvePageResourceKey('tab-probe', resourceId)).toBeNull()
+    runtime.dispose()
+    expect(runtime.resolvePageResourceKey('tab-probe', resourceId)).toBeNull()
+  })
 })

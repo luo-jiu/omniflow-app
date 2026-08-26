@@ -347,7 +347,8 @@
       ],
       "targetRefs": [
         "electron/service/embedded-browser/capture/state/resource-state-store.ts#ResourceStateStore",
-        "electron/service/embedded-browser/capture/adapters/page-probe.ts#PageProbeCaptureAdapter"
+        "electron/service/embedded-browser/capture/adapters/page-probe.ts#PageProbeCaptureAdapter",
+        "electron/service/embedded-browser/orchestration/embedded-browser-capture-runtime.ts#resolvePageResourceKey"
       ],
       "relationToUpstream": "semantic-equivalent",
       "syncState": "ported-unverified",
@@ -355,19 +356,21 @@
       "plannedTestIds": [
         "state.capacity-ttl-dedupe",
         "state.tab-navigation-close",
-        "network.probe-store-handoff"
+        "network.probe-store-handoff",
+        "network.opaque-probe-resource-resolution"
       ],
       "testRefs": [
         "electron/service/embedded-browser/capture/state/resource-state-store.test.ts#state.capacity-ttl-dedupe",
         "electron/service/embedded-browser/capture/state/resource-state-store.test.ts#state.tab-navigation-close",
-        "electron/service/embedded-browser/capture/adapters/page-probe.test.ts#network.probe-store-handoff"
+        "electron/service/embedded-browser/capture/adapters/page-probe.test.ts#network.probe-store-handoff",
+        "electron/service/embedded-browser/orchestration/embedded-browser-capture-runtime.test.ts#network.opaque-probe-resource-resolution"
       ],
       "acceptedDifferences": [
         "OmniFlow expires captured resource metadata after six hours and releases main-only request contexts on capacity reset, TTL sweep, navigation clear, tab/WebContents disposal, and application disposal; Cat Catch has no equivalent resource TTL or main-only context lifecycle.",
         "OmniFlow stable probe resources upsert by navigation generation plus page-owned resource key. Updating an existing key keeps its opaque id even at capacity, while the same key in a later document creates a new resource instead of merging metadata across pages.",
         "Renderer-safe state exposes opaque resource ids, revision/incarnation stamps, and whitelisted metadata/header capabilities only; page resource keys, context refs and values, page origin, WebContents id, and captured navigation owner facts remain main-owned."
       ],
-      "notes": "The pinned main-only store preserves the desktop 10,000-entry overflow reset/drop behavior, exact-URL dedupe including the 500-fingerprint reset boundary, explicit navigation clear/retain, stable probe upsert, bounded TTL, newest-first snapshots, single-owner context release, and revision/incarnation tombstones. The unregistered PageProbeCaptureAdapter now binds one document generation to deep-only stable-key writes, ignores page-supplied tab/timestamp authority, keeps resourceKey main-only, and emits every accepted upsert through the same revisioned change path. It is not composed with the production console listener or target lifecycle yet. NetworkContextVault invalidations already feed Store changes through the target network adapter; the legacy Map remains the only production owner until atomic cutover."
+      "notes": "The pinned main-only store preserves the desktop 10,000-entry overflow reset/drop behavior, exact-URL dedupe including the 500-fingerprint reset boundary, explicit navigation clear/retain, stable probe upsert, bounded TTL, newest-first snapshots, single-owner context release, and revision/incarnation tombstones. The unregistered PageProbeCaptureAdapter binds one document generation to deep-only stable-key writes, ignores page-supplied tab/timestamp authority, keeps resourceKey main-only, and emits every accepted upsert through the same revisioned change path. EmbeddedBrowserCaptureRuntime resolves an opaque probe resource id back to its page key only while the tab, incarnation, navigation generation, page origin and WebContents owner all remain current; renderer never receives that key. The target composition is not connected to the production console listener yet. NetworkContextVault invalidations already feed Store changes through the target network adapter; the legacy Map remains the only production owner until atomic cutover."
     },
     {
       "id": "capture.cross-process-contract",

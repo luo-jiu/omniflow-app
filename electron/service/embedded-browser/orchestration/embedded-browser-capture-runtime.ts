@@ -184,6 +184,28 @@ export class EmbeddedBrowserCaptureRuntime {
     return this.store.getSnapshot(tabId)
   }
 
+  resolvePageResourceKey(tabId: string, resourceId: string): string | null {
+    if (this.disposed) return null
+    const normalizedTabId = normalizeTabId(tabId)
+    const normalizedResourceId = String(resourceId ?? '').trim()
+    if (!normalizedTabId || !normalizedResourceId) return null
+    const binding = this.store.getCaptureBinding(normalizedTabId)
+    const resource = this.store.getOwnedResource(normalizedTabId, normalizedResourceId)
+    if (
+      !binding
+      || !resource
+      || resource.source !== 'probe'
+      || !resource.resourceKey
+      || resource.capturedIncarnation !== binding.incarnation
+      || resource.capturedNavigationGeneration !== binding.navigationGeneration
+      || resource.capturedPageOrigin !== binding.pageOrigin
+      || resource.capturedWebContentsId !== binding.webContentsId
+    ) {
+      return null
+    }
+    return resource.resourceKey
+  }
+
   setCaptureMode(tabId: string, captureMode: CaptureMode) {
     if (this.disposed) return null
     return this.lifecycle.setCaptureMode(tabId, captureMode)

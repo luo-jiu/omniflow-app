@@ -241,6 +241,20 @@
 - legacy cleanup: 无；旧 settings evaluation 只有在 network-capture 原子切换后才删除，持久化、标准化和 UI 继续保留。
 - validation: network target chain 15 files/58 tests、同步校验 16/16、固定 metadata/192 anchors/106 cleanup entries/81 unique planned IDs、TypeScript、全量 ESLint 和 Cat Catch 作用域 diff check 通过；排除已由 `node --test` 专门执行的同步校验文件后，全量 Vitest 为 149 files、809 passed、1 skipped。未运行会覆盖其他 Agent `dist-electron/**` 的 build；目标 runtime 尚未接生产，因此没有可执行的真实页面手工验证。
 
+## 2026-08-26: same target (opaque probe resource resolution partial)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动。
+- reviewedThrough / portedThrough: 均保持 `null`；本切片只完成 main-only probe/MSE key 的安全解析边界，未完成 production wiring 或任何 unit cutover。
+- change groups: `security-boundary`（renderer 只提交 opaque `tabId/resourceId`）与 `stability`（当前 incarnation/navigation/page origin/WebContents owner 复核）。
+- affected capability IDs: `capture.resource-state-contract` 保持 `ported-unverified`；新增 active `network.opaque-probe-resource-resolution`，active 计划测试 ID 增至 27，总唯一计划 ID 增至 82；所有 unit 仍为 0 cutover。
+- fixtures/tests: 无 fixture；`embedded-browser-capture-runtime.test.ts#network.opaque-probe-resource-resolution` 覆盖当前 probe resource key 解析、cross-tab 拒绝、保留资源在导航后失效和 runtime dispose 后拒绝。
+- accepted difference: 无新增；probe/MSE page key 继续是 main-only owner fact，不进入 renderer-safe resource projection。
+- excluded changes and reasons: 不在本切片接入 production MSE/probe command IPC；该入口必须与 safe state contract、production runtime 和旧 DTO 清理一起切换，避免 renderer 在过渡态重新获得私有 key。
+- unresolved gaps: production composition 实例化、probe install、safe IPC/preload/renderer reducer、四类 consumer entry 和 network unit 原子 cutover。
+- runtime changes: 未注册 `EmbeddedBrowserCaptureRuntime` 新增 opaque resource id 到当前 probe page key 的受控解析；网络资源、跨 tab、过期 document owner 和已 dispose runtime 均返回空。
+- legacy cleanup: 无；旧 renderer `resourceKey` DTO 在 network-capture 原子切换前仍由旧链使用。
+- validation: network target chain 15 files/59 tests、同步校验 16/16、固定 metadata/192 anchors/106 cleanup entries/82 unique planned IDs、TypeScript、全量 ESLint 和 Cat Catch 作用域 diff check 通过；排除已由 `node --test` 专门执行的同步校验文件后，全量 Vitest 为 149 files、810 passed、1 skipped。未运行会覆盖其他 Agent `dist-electron/**` 的 build；目标 runtime 尚未接生产，因此没有可执行的真实页面手工验证。
+
 ## Template
 
 ```markdown
