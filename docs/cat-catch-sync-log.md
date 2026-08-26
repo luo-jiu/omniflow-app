@@ -185,6 +185,20 @@
 - legacy cleanup: 无；旧 external-tool dispatcher 和 header-bearing DTO 在安全 IPC 与 network-capture 原子切换前继续作为唯一生产 owner。
 - validation: external/access integration Vitest 5/5、network target chain 47/47、同步校验 16/16、固定 metadata/192 anchors/106 cleanup entries、TypeScript 和全量 ESLint 通过；排除已由 `node --test` 专门执行的同步校验文件后，全量 Vitest 为 146 files、798 passed、1 skipped。Cat Catch 作用域 diff check 通过；全仓 diff check 仅命中其他 Agent 已修改的 `dist-electron/main.js` 尾随空格。未运行会覆盖其他 Agent `dist-electron/**` 的 build，目标链尚未接生产，因此没有可执行的真实页面手工验证。
 
+## 2026-08-26: same target (bounded resource inspection partial)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动。
+- reviewedThrough / portedThrough: 均保持 `null`；本切片只完成 network resource inspection target consumer，未完成 production wiring 或任何 unit cutover。
+- change groups: `security-boundary`（opaque inspection command、main-owned URL/header/byte budget、安全结果投影）与 `stability`（流式预算、超限主动 cancel、无 body、传输异常清理）。
+- affected capability IDs: `capture.protected-request-context` 保持 `ported-unverified`；新增 active `network.owned-resource-inspection`，active 计划测试 ID 增至 23，总计划 ID 增至 78；所有 unit 仍为 0 cutover。
+- fixtures/tests: 无 fixture；新增 `captured-resource-inspection.test.ts#network.owned-resource-inspection`，覆盖 renderer URL/header/maxBytes 注入丢弃、main-owned credentials、utf8/base64、安全 content-type 投影、响应 header 隔离、空 body、流异常 reader 释放、超限截断/cancel、非法 encoding 和导航迟到资源拒绝。
+- accepted difference: 无新增；target inspection 继续采用原始捕捉 URL 作为 renderer-safe resource identity，不向 renderer 暴露 redirect target。
+- excluded changes and reasons: 不修改页面管理的 probe/MSE `resourceKey` 提取；它属于 deep/MSE 后续 unit。暂不修改 production 通用 HTTP IPC、manifest renderer parser 或 preload，避免 network unit 就绪前半切换。
+- unresolved gaps: production inspection IPC/renderer、下载、页面拖拽、probe 安装、安全 resource projection 和 network unit 原子 cutover；通用 `http:fetch` 的其他非 Cat Catch 调用方不在本切片迁移范围。
+- runtime changes: 新增未注册 `CapturedResourceInspectionService`，默认 4 MiB main-owned budget，流式输出 `utf8/base64`，只投影 status/content-type/receivedBytes/truncated 和安全资源事实。生产旧链无变化。
+- legacy cleanup: 无；renderer manifest/key inspection 仍经通用 HTTP IPC 提交 URL/header，直到安全 IPC 与 network-capture 原子切换。
+- validation: inspection Vitest 4/4、network target chain 51/51、同步校验 16/16、固定 metadata/192 anchors/106 cleanup entries/78 planned IDs、TypeScript 和全量 ESLint 通过；排除已由 `node --test` 专门执行的同步校验文件后，全量 Vitest 为 147 files、802 passed、1 skipped。Cat Catch 作用域 diff check 通过。未运行会覆盖其他 Agent `dist-electron/**` 的 build，目标链尚未接生产，因此没有可执行的真实页面手工验证。
+
 ## Template
 
 ```markdown
