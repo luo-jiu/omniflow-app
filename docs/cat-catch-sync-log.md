@@ -130,6 +130,20 @@
 - legacy cleanup: 无；旧 consumer/listener/DTO 只能在 `network-capture` 原子 cutover 时同片删除。
 - validation: network target chain Vitest 40/40、同步校验 16/16、固定 metadata/192 anchors/106 cleanup entries、TypeScript、全量 ESLint 和 diff check 通过；排除已由 `node --test` 专门执行的同步校验文件后，全量 Vitest 为 142 files、791 passed、1 skipped。未运行会覆盖其他 Agent `dist-electron/**` 的 build；目标链尚未接生产，因此没有可执行的真实页面手工验证。
 
+## 2026-08-26: same target (OmniFlow policy and probe ingress partial)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动。
+- reviewedThrough / portedThrough: 均保持 `null`；本切片只收口 `network-capture` 的产品差异和 probe Store handoff。
+- change groups: `omniflow-integration`（image/key/document/expanded-subtitle policy、page probe ingress）与 `security-boundary`（regex blacklist 不可覆盖、document binding、main-owned tab/timestamp、resourceKey 不投影）。
+- affected capability IDs: `capture.rules-classification-deduplication` 与 `capture.resource-state-contract` 保持 `ported-unverified`；新增 2 个 active test ID，整个 unit 仍为 0 cutover。
+- fixtures/tests: 无 fixture；新增 `omniflow-capture-policy.test.ts#network.omniflow-policy-boundary` 和 `page-probe.test.ts#network.probe-store-handoff`，覆盖 Cat Catch 优先级、产品类型补充、opaque key、stable upsert、deep/off、旧 navigation binding 和新文档 replacement。
+- accepted difference: OmniFlow 在 adapter 层捕捉 Cat Catch 默认范围之外的图片、key、PDF 和扩展字幕；不会覆盖 regex blacklist，也不会把 Cat Catch 对非产品媒体类型的 hard reject 改成 capture。probe 捕捉时间由 main 接收时刻决定，不信任页面时间戳。
+- excluded changes and reasons: 不修改 page probe runtime、生产 console listener 或 lifecycle 接线；它们与安全 IPC/consumer 一起留到 production-equivalent integration 后原子切换。
+- unresolved gaps: 每个安装 probe 的 document 必须携带或解析其 capture binding，避免导航后的迟到 console payload 被新文档接收；生产 IPC/preload/renderer 和四类 consumer 仍未切换。
+- runtime changes: 未注册 network adapter 开始使用分层产品 policy；新增未注册 `PageProbeCaptureAdapter`。生产旧 classifier、probe recorder 和 Store 均未改变。
+- legacy cleanup: 无；旧 policy/classifier/probe recorder 只在 `network-capture` cutover 同片删除。
+- validation: network target chain Vitest 42/42、同步校验 16/16、固定 metadata/192 anchors/106 cleanup entries、TypeScript、全量 ESLint 和 diff check 通过；排除已由 `node --test` 专门执行的同步校验文件后，全量 Vitest 为 144 files、793 passed、1 skipped。未运行会覆盖其他 Agent `dist-electron/**` 的 build；目标链尚未接生产，因此没有可执行的真实页面手工验证。
+
 ## Template
 
 ```markdown

@@ -1,8 +1,4 @@
 import {
-  classifyResource,
-  type NetworkResourceClassification,
-} from '../../cat-catch-port/network/classifier'
-import {
   evaluateCatCatchPageUrlPolicy,
   isCatCatchSpecialPageUrl,
   type CompiledCatCatchUrlFilterRule,
@@ -11,6 +7,10 @@ import {
   compileCatCatchRules,
   type CatCatchCompiledRules,
 } from '../../cat-catch-port/network/rules'
+import {
+  classifyOmniFlowNetworkResource,
+  type OmniFlowNetworkResourceClassification,
+} from '../policy/omniflow-capture-policy'
 import {
   NETWORK_CONTEXT_PURPOSES,
   type NetworkContextProjection,
@@ -85,10 +85,10 @@ type PendingEvent = {
   webContentsId: number
 }
 
-type CapturedClassification = NetworkResourceClassification & { decision: 'capture' }
+type CapturedClassification = OmniFlowNetworkResourceClassification & { decision: 'capture' }
 
 function isCapturedClassification(
-  classification: NetworkResourceClassification,
+  classification: OmniFlowNetworkResourceClassification,
 ): classification is CapturedClassification {
   return classification.decision === 'capture'
 }
@@ -242,7 +242,7 @@ export class ElectronNetworkCaptureAdapter {
     })
     if (pageDecision.decision === 'block' || !binding.pageOrigin) return
 
-    const classification = classifyResource({
+    const classification = classifyOmniFlowNetworkResource({
       resourceType: details.resourceType,
       stage: 'request',
       url: details.url,
@@ -300,7 +300,7 @@ export class ElectronNetworkCaptureAdapter {
     }
 
     const mimeType = normalizeMimeType(getHeaderValue(details.responseHeaders, 'content-type'))
-    const classification = classifyResource({
+    const classification = classifyOmniFlowNetworkResource({
       contentDisposition: getHeaderValue(details.responseHeaders, 'content-disposition'),
       mimeType,
       resourceType: details.resourceType,
