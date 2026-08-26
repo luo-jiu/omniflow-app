@@ -94,14 +94,40 @@ describe('network.probe-store-handoff', () => {
       },
     })
 
+    expect(nextAdapter.capture({
+      ext: 'vtt',
+      resourceType: 'fetch',
+      source: 'fetch',
+      url: 'https://cdn.example/captions.vtt',
+    })).toMatchObject({
+      decision: 'accepted',
+      resource: {
+        id: 'resource-3',
+        kind: 'subtitle',
+      },
+    })
+    expect(nextAdapter.capture({
+      ext: 'vtt',
+      resourceType: 'fetch',
+      source: 'fetch',
+      url: 'https://cdn.example/captions.vtt',
+    })).toMatchObject({
+      decision: 'accepted',
+      resource: { id: 'resource-3' },
+    })
+
     store.setCaptureMode('tab-1', 'network')
     expect(nextAdapter.capture({
       resourceKey: 'network-mode-resource',
       url: 'https://cdn.example/ignored.mp4',
     })).toMatchObject({ decision: 'capture-disabled' })
     expect(nextAdapter.capture({
-      url: 'https://cdn.example/missing-key.mp4',
+      resourceKey: '   ',
+      url: 'https://cdn.example/invalid-explicit-key.mp4',
     })).toMatchObject({ decision: 'invalid' })
-    expect(changes).toHaveLength(3)
+    expect(nextAdapter.capture({
+      url: 'javascript:alert(1)',
+    })).toMatchObject({ decision: 'invalid' })
+    expect(changes).toHaveLength(5)
   })
 })

@@ -210,9 +210,13 @@ export function createProbeScriptTemplate(input: {
   ].join('\n')
 }
 
-export function createEmbeddedBrowserResourceProbeScript() {
+export function createEmbeddedBrowserResourceProbeScript(input?: {
+  consolePrefix?: string
+}) {
+  const consolePrefix = String(input?.consolePrefix || '').trim()
+    || EMBEDDED_BROWSER_RESOURCE_CONSOLE_PREFIX
   return createProbeScriptTemplate({
-    consolePrefix: EMBEDDED_BROWSER_RESOURCE_CONSOLE_PREFIX,
+    consolePrefix,
     manifestHeuristicsBodySource: restoreProbeRuntimeNames(getScriptFunctionBody(embeddedBrowserResourceProbeManifestHeuristicsBody)),
     pageActionsBodySource: restoreProbeRuntimeNames(getScriptFunctionBody(embeddedBrowserResourceProbePageActionsBody)),
     runtimeCoreBodySource: restoreProbeRuntimeNames(getScriptFunctionBody(embeddedBrowserResourceProbeRuntimeCoreBody)),

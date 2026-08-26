@@ -1,3 +1,5 @@
+import crypto from 'node:crypto'
+
 import { classifyOmniFlowProbeResourceKind } from '../policy/omniflow-capture-policy'
 import {
   type ResourceStateChange,
@@ -32,6 +34,21 @@ function readNonNegativeNumber(value: unknown) {
     : undefined
 }
 
+function deriveResourceKey(
+  payload: Record<string, unknown>,
+  resourceType: string | undefined,
+  url: string,
+) {
+  if (Object.prototype.hasOwnProperty.call(payload, 'resourceKey')) {
+    return readBoundedString(payload.resourceKey, MAX_RESOURCE_KEY_LENGTH)
+  }
+  const source = readBoundedString(payload.source, 128) || 'probe'
+  const digest = crypto.createHash('sha256')
+    .update(JSON.stringify([source, resourceType || '', url]))
+    .digest('base64url')
+  return `discovered:${digest}`
+}
+
 function rejectInvalid(): ResourceWriteResult {
   return { change: null, decision: 'invalid', resource: null }
 }
@@ -56,13 +73,14 @@ export class PageProbeCaptureAdapter {
 
   capture(payload: unknown): ResourceWriteResult {
     if (!isRecord(payload)) return rejectInvalid()
-    const resourceKey = readBoundedString(payload.resourceKey, MAX_RESOURCE_KEY_LENGTH)
     const url = readBoundedString(payload.url, MAX_RESOURCE_URL_LENGTH)
-    if (!resourceKey || !url || /^javascript:/i.test(url)) return rejectInvalid()
+    if (!url || /^javascript:/i.test(url)) return rejectInvalid()
 
     const ext = readBoundedString(payload.ext, 32)?.replace(/^\./, '').toLowerCase()
     const mimeType = readBoundedString(payload.mimeType, 256)?.toLowerCase()
     const resourceType = readBoundedString(payload.resourceType, 128)?.toLowerCase()
+    const resourceKey = deriveResourceKey(payload, resourceType, url)
+    if (!resourceKey) return rejectInvalid()
     const streamType = payload.streamType === 'audio' || payload.streamType === 'video'
       ? payload.streamType
       : undefined

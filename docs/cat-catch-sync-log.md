@@ -157,6 +157,20 @@
 - legacy cleanup: 无；旧 probe recorder 在 network unit 原子 cutover 前继续作为唯一 production owner。
 - validation: network target chain Vitest 43/43、同步校验 16/16、固定 metadata/192 anchors/106 cleanup entries、TypeScript、全量 ESLint 和 diff check 通过；排除已由 `node --test` 专门执行的同步校验文件后，全量 Vitest 为 144 files、794 passed、1 skipped。未运行会覆盖其他 Agent `dist-electron/**` 的 build；目标链尚未接生产，因此没有可执行的真实页面手工验证。
 
+## 2026-08-26: same target (tokenized probe console routing partial)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动。
+- reviewedThrough / portedThrough: 均保持 `null`；本切片只建立 target probe console transport，不切 production install。
+- change groups: `security-boundary`（随机 document token、逐消息 binding 复核、旧 token/crash/dispose 隔离）与 `omniflow-integration`（普通 discovery 稳定 key、MSE control/resource 分流）。
+- affected capability IDs: `capture.owner-lifecycle` 与 `capture.resource-state-contract` 保持 `ported-unverified`；新增 `network.probe-console-generation-routing`，整个 unit 仍为 0 cutover。
+- fixtures/tests: 无 fixture；fake Electron console/lifecycle integration 覆盖基础 prefix 伪造、malformed JSON、当前 token、无 page key discovery、MSE control 白名单/异常隔离、未知 control 拒绝、导航迟到消息、崩溃、恢复和 dispose。
+- accepted difference: 普通 probe discovery 未提供 `resourceKey` 时，main 根据 `source/resourceType/url` 派生 document-scoped stable key；页面时间戳、tab 和派生 key均不进入授权事实或 renderer projection。
+- excluded changes and reasons: `createEmbeddedBrowserResourceProbeScript` 仅增加可选 prefix，旧无参生产调用保持原行为；production install/listener 不注册新 adapter，避免 network unit 未就绪时出现双 owner。MSE control 仍交给对应后续 unit，不在 Resource Store 中伪装成资源。
+- unresolved gaps: production probe 安装必须改用 adapter 返回的脚本/prefix；下载、检查、拖拽、外部工具与安全 IPC/renderer 仍待接线。
+- runtime changes: 新增未注册 `ElectronPageProbeEventAdapter`；`PageProbeCaptureAdapter` 补 main-derived stable key。生产行为无变化。
+- legacy cleanup: 无；旧 console recorder 在原子 cutover 前仍为唯一 production owner。
+- validation: network target chain Vitest 44/44、同步校验 16/16、固定 metadata/192 anchors/106 cleanup entries、TypeScript、全量 ESLint 和 diff check 通过；排除已由 `node --test` 专门执行的同步校验文件后，全量 Vitest 为 145 files、795 passed、1 skipped。未运行会覆盖其他 Agent `dist-electron/**` 的 build；目标链尚未接生产，因此没有可执行的真实页面手工验证。
+
 ## Template
 
 ```markdown
