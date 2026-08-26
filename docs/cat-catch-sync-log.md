@@ -213,6 +213,20 @@
 - legacy cleanup: 无；旧 direct download、page-drag captured-header enrichment 与 renderer fallback DTO 在 network-capture 原子切换前继续作为唯一生产 owner/OmniFlow integration。
 - validation: transfer consumer Vitest 4/4、network target chain 55/55、同步校验 16/16、固定 metadata/192 anchors/106 cleanup entries/79 planned IDs、TypeScript 和全量 ESLint 通过；排除已由 `node --test` 专门执行的同步校验文件后，全量 Vitest 为 148 files、806 passed、1 skipped。Cat Catch 作用域 diff check 通过。未运行会覆盖其他 Agent `dist-electron/**` 的 build，目标链尚未接生产，因此没有可执行的真实页面手工验证。
 
+## 2026-08-26: same target (main capture composition partial)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动。
+- reviewedThrough / portedThrough: 均保持 `null`；本切片只建立未注册的 production-equivalent main composition，未完成 production wiring 或任何 unit cutover。
+- change groups: `electron-integration`（唯一 session network adapter、每 view 唯一 probe adapter、Store/Vault/lifecycle/access composition）与 `stability/security-boundary`（导航 generation、view replacement、destroy/dispose、deep-only probe ingress）。
+- affected capability IDs: `capture.owner-lifecycle` 保持 `ported-unverified`；新增 active `network.production-equivalent-composition`，active 计划测试 ID 增至 25，总计划 ID 增至 80；所有 unit 仍为 0 cutover。
+- fixtures/tests: 无 fixture；新增 `embedded-browser-capture-runtime.test.ts#network.production-equivalent-composition`，覆盖单一 network/probe 事件链、first-byte 资源写入、敏感 header 仅 main 兑现、安全 projection、deep-only token 签发、导航迟到 token 拒绝、重新绑定、view replacement、自发 destroy 和完整 listener dispose。
+- accepted difference: 无新增；composition 复用同一 embedded browser partition 的 Electron session fetch，后续 production wiring 仍必须从该捕捉 session 注入，不能使用 Node/global fetch。
+- excluded changes and reasons: 本切片不实例化 production runtime，不修改旧 listener/probe/IPC/preload/renderer 或四类 consumer 入口；构造 runtime 即会占用 session `webRequest` listener，只允许在 network unit 原子 cutover 时发生。
+- unresolved gaps: production probe script 安装、safe resource state IPC/preload/renderer reducer、四类 consumer sink/entry、唯一 MainSupport dispatch 切换和旧 network/request-context/header DTO 清理。
+- runtime changes: 新增未注册 `EmbeddedBrowserCaptureRuntime`，组合既有目标模块而不重写分类、状态或 consumer 算法。生产旧链无变化。
+- legacy cleanup: 无；旧 bridge/recorder/DTO 继续作为唯一 production owner，等待安全跨进程链完成后同片删除。
+- validation: main composition Vitest 1/1、network target chain 56/56、同步校验 16/16、固定 metadata/192 anchors/106 cleanup entries/80 planned IDs、TypeScript、全量 ESLint 和 Cat Catch 作用域 diff check 通过；排除已由 `node --test` 专门执行的同步校验文件后，全量 Vitest 为 149 files、807 passed、1 skipped。未运行会覆盖其他 Agent `dist-electron/**` 的 build；目标链尚未接生产，因此没有可执行的真实页面手工验证。
+
 ## Template
 
 ```markdown

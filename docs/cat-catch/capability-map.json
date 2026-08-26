@@ -419,7 +419,8 @@
       ],
       "targetRefs": [
         "electron/service/embedded-browser/shell/embedded-browser-lifecycle.ts#EmbeddedBrowserLifecycle",
-        "electron/service/embedded-browser/capture/adapters/electron-page-probe.ts#ElectronPageProbeEventAdapter"
+        "electron/service/embedded-browser/capture/adapters/electron-page-probe.ts#ElectronPageProbeEventAdapter",
+        "electron/service/embedded-browser/orchestration/embedded-browser-capture-runtime.ts#EmbeddedBrowserCaptureRuntime"
       ],
       "relationToUpstream": "not-applicable",
       "syncState": "ported-unverified",
@@ -428,16 +429,18 @@
         "lifecycle.navigation-close-exit-crash",
         "lifecycle.spontaneous-view-destroy",
         "lifecycle.probe-document-binding",
-        "network.probe-console-generation-routing"
+        "network.probe-console-generation-routing",
+        "network.production-equivalent-composition"
       ],
       "testRefs": [
         "electron/service/embedded-browser/shell/embedded-browser-lifecycle.test.ts#lifecycle.navigation-close-exit-crash",
         "electron/service/embedded-browser/shell/embedded-browser-lifecycle.test.ts#lifecycle.spontaneous-view-destroy",
         "electron/service/embedded-browser/shell/embedded-browser-lifecycle.test.ts#lifecycle.probe-document-binding",
-        "electron/service/embedded-browser/capture/adapters/electron-page-probe.test.ts#network.probe-console-generation-routing"
+        "electron/service/embedded-browser/capture/adapters/electron-page-probe.test.ts#network.probe-console-generation-routing",
+        "electron/service/embedded-browser/orchestration/embedded-browser-capture-runtime.test.ts#network.production-equivalent-composition"
       ],
       "acceptedDifferences": [],
-      "notes": "The unregistered target lifecycle composes the real network/probe adapters, context vault, resource store, and safe change contract through fake Electron integration. It owns tab/view registration and replacement, explicit clear/retain navigation, crash quarantine and recovery, spontaneous WebContents destruction, explicit tab/WebContents close, closeAll, maintenance, and application disposal. Probe ingress is minted only for the current non-crashed document binding. ElectronPageProbeEventAdapter adds a random per-document console prefix, rechecks the binding before every message, ignores malformed/base-prefix/old-token/crashed/disposed messages, forwards only mse-flush/mse-reset through the separate control callback, and contains callback errors. Ordinary discovery payloads without a page key receive a main-derived stable key that remains opaque. Production controller/view lifecycle still uses the legacy recorder until protected-context consumers, IPC/preload/renderer projection, production probe installation, and atomic cutover are ready."
+      "notes": "The unregistered target lifecycle and EmbeddedBrowserCaptureRuntime compose exactly one network adapter, the context vault, resource store, safe change contract, per-view tokenized probe adapter, opaque access authority, and bounded inspection through fake Electron integration. The runtime owns tab/view registration and replacement, explicit clear/retain navigation, crash quarantine and recovery, spontaneous WebContents destruction, explicit tab/WebContents close, closeAll, maintenance, and application disposal; constructing it claims the session webRequest listener boundary, so production must not instantiate it before the atomic cutover. Probe ingress is minted only for the current non-crashed document binding while capture mode is deep. ElectronPageProbeEventAdapter adds a random per-document console prefix, rechecks the binding before every message, ignores malformed/base-prefix/old-token/crashed/disposed messages, forwards only mse-flush/mse-reset through the separate control callback, and contains callback errors. Ordinary discovery payloads without a page key receive a main-derived stable key that remains opaque. Production controller/view lifecycle still uses the legacy recorder until protected-context consumers, IPC/preload/renderer projection, production probe installation, and atomic cutover are ready."
     },
     {
       "id": "deep.runtime-hook-bundle",

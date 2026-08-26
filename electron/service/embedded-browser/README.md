@@ -20,4 +20,6 @@ embedded-browser/
 - 仍承担 Electron、IPC、文件、UploadManager 等产品职责的代码保留或改造成 adapter。
 - 不维持长期双栈；Git 历史负责回滚。
 
+当前 `orchestration/embedded-browser-capture-runtime.ts` 是未注册的 network-capture composition root。构造它会占用 embedded browser session 的 `webRequest` listener，因此只能在旧 bridge 同片删除的原子 cutover 中接入 production；测试或后续 Agent 不得为了“先接一点”让它与旧 bridge 同时运行。
+
 逐项映射见 `docs/cat-catch/capability-map.json`；初始迁移期间的旧位置处置见 `docs/cat-catch/legacy-cleanup.json`。
