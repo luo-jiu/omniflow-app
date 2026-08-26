@@ -140,7 +140,7 @@ unit 是生产切换与删除旧实现的最小边界。可以在 unit 内逐项
 
 ## 7. 当前状态怎么判断
 
-当前固定目标为 Cat Catch `2cb981d7c2f4614732edccc167c4b5793d1cb138`。初始映射包含 7 个 unit 和 32 项 capability；它们目前全部为 `pending`，计划测试名称也尚未落成真实 fixture/test。
+当前固定目标为 Cat Catch `2cb981d7c2f4614732edccc167c4b5793d1cb138`。初始映射包含 7 个 unit 和 32 项 capability；其中 network classifier/rules 为 `ported-unverified`，其余 31 项仍为 `pending`。目前只有 2 个计划测试 ID 已落成真实 pure behavior test，尚未建立 production-equivalent integration 或完成任何 unit cutover。
 
 旧代码中存在网络捕捉、MSE、HLS、DASH、下载、ffmpeg 和资料库导入入口，只能说明有 characterization 输入，不能据此宣称已经迁移。完成一项能力至少需要：
 

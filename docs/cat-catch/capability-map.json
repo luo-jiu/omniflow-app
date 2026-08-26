@@ -208,14 +208,25 @@
         {
           "path": "js/background.js",
           "anchors": [
-            "function findMedia(data, isRegex = false, filter = false, timer = false) {"
+            "G.urlMap = new Map();   // url查重map",
+            "const reFilename = /filename=\"?([^\"]+)\"?/;",
+            "function CheckExtension(ext, size) {",
+            "function CheckType(dataType, dataSize) {",
+            "function fileNameParse(pathname) {",
+            "function findMedia(data, isRegex = false, filter = false, timer = false) {",
+            "function operatorCheck(size, Obj) {"
           ]
         },
         {
           "path": "js/init.js",
           "anchors": [
+            "Ext: [",
+            "Regex: [",
+            "Type: [",
             "checkDuplicates: true,",
-            "items.Ext = new Map(items.Ext.map(item => {"
+            "items.Ext = new Map(items.Ext.map(item => {",
+            "items.Regex = items.Regex.map(item => {",
+            "items.Type = new Map(items.Type.map(item => {"
           ]
         }
       ],
@@ -224,18 +235,23 @@
         "electron/service/embeddedBrowserResourceClassifier.ts#classifyCapturedResource"
       ],
       "targetRefs": [
-        "electron/service/embedded-browser/cat-catch-port/network/classifier.ts#classifyResource"
+        "electron/service/embedded-browser/cat-catch-port/network/classifier.ts#classifyResource",
+        "electron/service/embedded-browser/cat-catch-port/network/classifier.ts#classifyResourceFingerprint",
+        "electron/service/embedded-browser/cat-catch-port/network/rules.ts#compileCatCatchRules"
       ],
       "relationToUpstream": "semantic-equivalent",
-      "syncState": "pending",
-      "syncedThrough": null,
+      "syncState": "ported-unverified",
+      "syncedThrough": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
       "plannedTestIds": [
         "network.rule-ordering",
         "network.mime-extension-dedupe"
       ],
-      "testRefs": [],
+      "testRefs": [
+        "electron/service/embedded-browser/cat-catch-port/network/classifier.test.ts#network.rule-ordering",
+        "electron/service/embedded-browser/cat-catch-port/network/classifier.test.ts#network.mime-extension-dedupe"
+      ],
       "acceptedDifferences": [],
-      "notes": "Seed mapping only; ordering and heuristic parity have not been verified against the pinned upstream behavior."
+      "notes": "Pinned pure port now covers ordered request regex, upstream default rule states, extension/MIME/Content-Disposition/media fallback precedence, hard break semantics, size operators, wildcard MIME priority, and exact-URL dedupe/reset decisions. It is not wired to Electron events or the production ResourceStateStore, and OmniFlow-only image/key/expanded-subtitle policy still needs an explicit adapter mapping before cutover. The capability remains ported-unverified until the network-capture unit has production-equivalent integration, cutover, and legacy cleanup."
     },
     {
       "id": "capture.resource-state-contract",

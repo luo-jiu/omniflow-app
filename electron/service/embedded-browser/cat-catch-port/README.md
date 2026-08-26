@@ -32,6 +32,13 @@ downloader/
 
 模块只在第一个真实 capability 落地时创建，不预建空文件。
 
+当前首批已落地：
+
+- `network/rules.ts`：固定上游默认规则与大小判断语义。
+- `network/classifier.ts`：纯 request/response 分类和去重决策。
+
+这个首个 capability 当前为 `ported-unverified`，没有接入 Electron 生产 listener；整个 `network-capture` unit 完成前，旧实现仍是唯一生产 owner。
+
 ## 来源注释
 
 从 Cat Catch 迁入的非显然逻辑，在文件或复杂分支附近记录：

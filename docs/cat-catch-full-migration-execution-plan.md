@@ -62,7 +62,7 @@ OmniFlow 不运行 Cat Catch 浏览器扩展，而是把与产品目标相关的
 - HLS 已知缺少隐式 BYTERANGE offset、一次性 manifest cache fallback、伪装分片预处理等经验分支。
 - DASH 手写 parser 对 `r=-1`、多 BaseURL、动态 MPD 等语义不完整。
 - HLS、DASH、MSE、ffmpeg、临时文件和输出交付尚无统一 task/cleanup 合同。
-- 当前没有 active 的 Cat Catch 专项行为 fixture/test；账本中的 `plannedTestIds` 都只是需求种子。
+- 当前只有 network classifier/rules 的 2 个计划 ID 已落成专项纯行为测试；其余计划 ID 仍只是需求种子，尚无 active fixture/test。
 
 因此能力映射默认从 `pending` 开始，不能因为同名代码存在就标记为已迁移。
 
@@ -309,6 +309,6 @@ tools/cat-catch-lab/fixtures/<fixture-id>/
 ## 12. 当前下一步
 
 1. 运行轻量 `cat-catch:validate`，确认版本、32 项能力和 104 个旧位置自洽。
-2. 以 `network-capture` 的 classifier/rules 创建首个真实 port module 和行为测试；需要结构化输入时再创建 fixture。
-3. 对固定目标 commit 完成相关上游依赖阅读，更新 capability 的真实 test refs。
-4. 切换前保持旧实现不动；切换成功后按 unit 删除旧代码。
+2. 按同一协议继续 `network-capture` 的事件阶段、request context、URL helper、resource state、跨进程合同和 owner lifecycle；需要结构化输入时再创建 fixture。
+3. 为剩余能力补固定目标的直接行为依赖、真实 test refs 和 production-equivalent integration，不把现有 legacy 行为当 oracle。
+4. 整个 unit 就绪前保持旧实现为唯一生产 owner；切换成功后在同一 unit 提交中删除对应旧代码。
