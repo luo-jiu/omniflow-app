@@ -30,6 +30,7 @@ import {
   type LocalClosureExternalProcessEndpoint,
   type LocalClosureFinding,
   type LocalClosureFindingGroup,
+  type LocalClosureHistoricalDiscoveryEvidence,
   type LocalClosureLocator,
   type LocalClosureLocatorKind,
   type LocalClosureManifestEntry,
@@ -115,10 +116,90 @@ function requireString(object: JsonObject, property: string, label: string): str
   return value
 }
 
+function requireSafeInteger(
+  object: JsonObject,
+  property: string,
+  label: string,
+  minimum = 0,
+): number {
+  const value = object[property]
+  if (!Number.isSafeInteger(value) || Number(value) < minimum) {
+    throw new Error(`${label}.${property} must be a safe integer >= ${minimum}`)
+  }
+  return Number(value)
+}
+
 function nullableString(value: unknown, label: string): string | null {
   if (value === null) return null
   if (typeof value === 'string') return value
   throw new Error(`${label} must be a string or null`)
+}
+
+function projectHistoricalDiscoveryEvidence(
+  candidate: JsonObject,
+): LocalClosureHistoricalDiscoveryEvidence {
+  const evidence = asObject(candidate.discoveryEvidence, 'historicalCandidate.discoveryEvidence')
+  const kind = requireString(evidence, 'kind', 'historicalCandidate.discoveryEvidence')
+  const queryId = requireString(evidence, 'queryId', 'historicalCandidate.discoveryEvidence')
+  const queryHit = asObject(
+    evidence.queryHit,
+    'historicalCandidate.discoveryEvidence.queryHit',
+  )
+  const hitLabel = 'historicalCandidate.discoveryEvidence.queryHit'
+  const commonHit = {
+    byteEnd: requireSafeInteger(queryHit, 'byteEnd', hitLabel, 1),
+    byteStart: requireSafeInteger(queryHit, 'byteStart', hitLabel),
+    commitId: requireString(queryHit, 'commitId', hitLabel),
+    parentCommitId: nullableString(queryHit.parentCommitId, `${hitLabel}.parentCommitId`),
+    rawSourceHash: requireString(queryHit, 'rawSourceHash', hitLabel),
+  }
+  if (kind === 'changed-blob-query-hit') {
+    const side = requireString(queryHit, 'side', hitLabel)
+    if (side !== 'before' && side !== 'after') {
+      throw new Error(`${hitLabel}.side must be before or after`)
+    }
+    return {
+      kind,
+      queryId,
+      queryHit: {
+        ...commonHit,
+        path: requireString(queryHit, 'path', hitLabel),
+        side,
+      },
+    }
+  }
+  if (kind === 'commit-message-query-hit-with-path-change') {
+    if (queryHit.path !== null || queryHit.side !== 'commit-message') {
+      throw new Error(`${hitLabel} must identify a commit-message occurrence`)
+    }
+    const candidateSource = asObject(
+      evidence.candidateSource,
+      'historicalCandidate.discoveryEvidence.candidateSource',
+    )
+    const sourceLabel = 'historicalCandidate.discoveryEvidence.candidateSource'
+    const sourceSide = requireString(candidateSource, 'side', sourceLabel)
+    if (sourceSide !== 'before' && sourceSide !== 'after') {
+      throw new Error(`${sourceLabel}.side must be before or after`)
+    }
+    return {
+      candidateSource: {
+        changeCommitId: requireString(candidateSource, 'changeCommitId', sourceLabel),
+        parentCommitId: nullableString(
+          candidateSource.parentCommitId,
+          `${sourceLabel}.parentCommitId`,
+        ),
+        side: sourceSide,
+      },
+      kind,
+      queryId,
+      queryHit: {
+        ...commonHit,
+        path: null,
+        side: 'commit-message',
+      },
+    }
+  }
+  throw new Error(`historicalCandidate.discoveryEvidence.kind is unsupported: ${kind}`)
 }
 
 function stableJson(value: unknown): string {
@@ -883,13 +964,14 @@ function projectInventory(inputs: ExactClosureInputs): InventoryProjection {
     attributions: sets.attributions.sort((left, right) => compareCodeUnits(left.edgeId, right.edgeId)),
   })).sort((left, right) => compareCodeUnits(left.nodeId, right.nodeId))
 
-  const historicalCandidates: LocalClosureCandidate[] = historicalDeclarations.map(candidate => {
+  const historicalCandidates = historicalDeclarations.map((candidate): LocalClosureCandidate => {
     const resolution = candidate.resolution === null
       ? null
       : asObject(candidate.resolution, 'historicalCandidate.resolution')
     return {
       candidateId: requireString(candidate, 'id', 'historicalCandidate'),
       candidateKind: 'historical' as const,
+      discoveryEvidence: projectHistoricalDiscoveryEvidence(candidate),
       discoveryRuleIds: [],
       lastKnownCommit: requireString(candidate, 'lastKnownCommit', 'historicalCandidate'),
       ...projectLocator(candidate, 'historicalCandidate'),
@@ -900,6 +982,7 @@ function projectInventory(inputs: ExactClosureInputs): InventoryProjection {
         ? requireString(resolution, 'refId', 'historicalCandidate.resolution')
         : null,
       sourceHash: requireString(candidate, 'sourceHash', 'historicalCandidate'),
+      touchsetId: requireString(candidate, 'touchsetId', 'historicalCandidate'),
     }
   }).sort((left, right) => compareCodeUnits(left.candidateId, right.candidateId))
 

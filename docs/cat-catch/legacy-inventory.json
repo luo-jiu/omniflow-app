@@ -1,8 +1,8 @@
 {
   "$schema": "./legacy-inventory.schema.json",
-  "schemaVersion": 1,
-  "inventoryVersion": "2026-08-25.1",
-  "discoveryRulesVersion": "2026-08-23.1",
+  "schemaVersion": 2,
+  "inventoryVersion": "2026-08-26.1",
+  "discoveryRulesVersion": "2026-08-26.1",
   "bootstrapRoots": [
     {
       "id": "root.main-controller-composition",
@@ -128,44 +128,80 @@
   "semanticScanRules": [
     {
       "id": "scan.embedded-browser-symbols",
+      "matchProfile": "utf8-literal-case-sensitive-v1",
       "pathScopes": ["electron", "src"],
-      "patterns": ["embeddedBrowser", "embedded-browser", "CapturedResource", "ResourceCapture"],
+      "includedExtensions": [".cjs", ".cts", ".js", ".jsx", ".mjs", ".mts", ".ts", ".tsx"],
+      "resultKind": "candidate",
+      "patternGroups": [["embeddedBrowser", "embedded-browser", "CapturedResource", "ResourceCapture"]],
       "excludedPaths": []
     },
     {
-      "id": "scan.cat-catch-provenance",
-      "pathScopes": ["electron", "src", "docs"],
-      "patterns": ["cat-catch", "Cat Catch", "LOVEPUPU", "OmniflowCatchToolkit"],
+      "id": "scan.cat-catch-code-provenance",
+      "matchProfile": "utf8-literal-case-sensitive-v1",
+      "pathScopes": ["electron", "src"],
+      "includedExtensions": [".cjs", ".cts", ".js", ".jsx", ".mjs", ".mts", ".ts", ".tsx"],
+      "resultKind": "candidate",
+      "patternGroups": [["cat-catch", "Cat Catch", "LOVEPUPU", "OmniflowCatchToolkit"]],
+      "excludedPaths": []
+    },
+    {
+      "id": "scan.cat-catch-docs-provenance",
+      "matchProfile": "utf8-literal-case-sensitive-v1",
+      "pathScopes": ["docs"],
+      "includedExtensions": [".json", ".md"],
+      "resultKind": "audit-reference",
+      "patternGroups": [["cat-catch", "Cat Catch", "LOVEPUPU", "OmniflowCatchToolkit"]],
       "excludedPaths": []
     },
     {
       "id": "scan.cross-process-channels",
+      "matchProfile": "utf8-literal-case-sensitive-v1",
       "pathScopes": ["electron", "src"],
-      "patterns": ["embedded-browser:", "ipcMain.handle", "ipcRenderer.invoke", "webContents.send"],
+      "includedExtensions": [".cjs", ".cts", ".js", ".jsx", ".mjs", ".mts", ".ts", ".tsx"],
+      "resultKind": "candidate",
+      "patternGroups": [["embedded-browser:"]],
       "excludedPaths": []
     },
     {
       "id": "scan.dynamic-runtime",
+      "matchProfile": "utf8-literal-case-sensitive-v1",
       "pathScopes": ["electron/service", "src/features/embedded-browser"],
-      "patterns": ["executeJavaScript", "addScriptToEvaluateOnNewDocument", "Function.prototype.toString", ".toString()", "__OMNIFLOW_EMBEDDED_BROWSER_RESOURCE_PROBE__", "console-message"],
+      "includedExtensions": [".cjs", ".cts", ".js", ".jsx", ".mjs", ".mts", ".ts", ".tsx"],
+      "resultKind": "candidate",
+      "patternGroups": [["executeJavaScript", "addScriptToEvaluateOnNewDocument", "Function.prototype.toString", "__OMNIFLOW_EMBEDDED_BROWSER_RESOURCE_PROBE__", "console-message"]],
       "excludedPaths": []
     },
     {
       "id": "scan.owner-and-output-state",
+      "matchProfile": "utf8-literal-case-sensitive-v1",
       "pathScopes": ["electron", "src/features", "src/utils"],
-      "patterns": ["new Map", "AbortController", "spawn(", "outputPath", "mkdtemp", "createBatch", "status: 'success'"],
+      "includedExtensions": [".cjs", ".cts", ".js", ".jsx", ".mjs", ".mts", ".ts", ".tsx"],
+      "resultKind": "candidate",
+      "patternGroups": [
+        ["embeddedBrowser", "EmbeddedBrowser", "embedded-browser"],
+        ["new Map", "AbortController", "spawn(", "outputPath", "mkdtemp", "createBatch", "status: 'success'"]
+      ],
       "excludedPaths": []
     },
     {
       "id": "scan.sensitive-request-context",
+      "matchProfile": "utf8-literal-case-sensitive-v1",
       "pathScopes": ["electron", "src"],
-      "patterns": ["requestHeaders", "authorization", "cookie", "referer", "token", "session"],
+      "includedExtensions": [".cjs", ".cts", ".js", ".jsx", ".mjs", ".mts", ".ts", ".tsx"],
+      "resultKind": "candidate",
+      "patternGroups": [
+        ["embeddedBrowser", "EmbeddedBrowser", "embedded-browser"],
+        ["requestHeaders", "authorization", "cookie", "referer", "token", "session"]
+      ],
       "excludedPaths": []
     },
     {
       "id": "scan.tracked-generated-runtime",
+      "matchProfile": "utf8-literal-case-sensitive-v1",
       "pathScopes": ["dist-electron"],
-      "patterns": ["embedded-browser:", "__OMNIFLOW_EMBEDDED_BROWSER_RESOURCE_PROBE__", "requestHeaders", "outputPath"],
+      "includedExtensions": [".cjs", ".cts", ".js", ".jsx", ".mjs", ".mts", ".ts", ".tsx"],
+      "resultKind": "generated-mirror",
+      "patternGroups": [["embedded-browser:", "__OMNIFLOW_EMBEDDED_BROWSER_RESOURCE_PROBE__", "requestHeaders", "outputPath"]],
       "excludedPaths": []
     }
   ],
@@ -175,30 +211,71 @@
       "fromCommit": "643d40f15fb1cdd554e25d8f08ad840a1099bbc5",
       "throughCommit": "e5b69f7148c229e1dd053d6f6dbe15a6c4871b4b",
       "pathScopes": ["electron/service", "src/features/embedded-browser", "dist-electron"],
-      "searchTerms": ["add embedded browser resource tools", "deep resource probe", "cat-catch probe heuristics", "split embedded browser resource capture", "port cat catch resource capture", "mse capture duration"]
+      "queries": [
+        { "id": "capture.resource-tools", "profile": "commit-message-literal-v1", "literal": "add embedded browser resource tools" },
+        { "id": "capture.deep-resource-probe", "profile": "commit-message-literal-v1", "literal": "deep resource probe" },
+        { "id": "capture.resource-capture-split", "profile": "commit-message-literal-v1", "literal": "split embedded browser resource capture" },
+        { "id": "capture.cat-catch-probe-heuristics", "profile": "commit-message-literal-v1", "literal": "cat-catch probe heuristics" },
+        { "id": "capture.cat-catch-resource-port", "profile": "commit-message-literal-v1", "literal": "port cat catch resource capture" },
+        { "id": "capture.mse-duration", "profile": "commit-message-literal-v1", "literal": "preserve mse capture duration" },
+        { "id": "candidate.probe-monolith", "profile": "changed-blob-literal-v1", "literal": "createEmbeddedBrowserResourceProbeScript" },
+        { "id": "candidate.resource-service", "profile": "changed-blob-literal-v1", "literal": "initializeEmbeddedBrowserResourceBridge" },
+        { "id": "candidate.deep-hooks", "profile": "changed-blob-literal-v1", "literal": "embeddedBrowserResourceProbeRuntimeHooksBody" }
+      ]
     },
     {
       "id": "history.hls-dash-apr22-23",
       "fromCommit": "35c5c69a6ff38d5224993cc3f3757c1c74688e73",
       "throughCommit": "103a1ef639f2df4b61d1f84aeadf545b922dd873",
       "pathScopes": ["electron/service", "src/features/embedded-browser/resources", "src/features/tool-workspace", "dist-electron"],
-      "searchTerms": ["hls tool workspace", "hls downloader", "hls retry", "hls track", "live hls", "mpd download workflow"]
+      "queries": [
+        { "id": "hls-dash.workspace", "profile": "commit-message-literal-v1", "literal": "add hls tool workspace flow" },
+        { "id": "hls-dash.downloader", "profile": "commit-message-literal-v1", "literal": "expand hls downloader controls" },
+        { "id": "hls-dash.retry", "profile": "commit-message-literal-v1", "literal": "hls migration plan and retry flow" },
+        { "id": "hls-dash.track-selection", "profile": "commit-message-literal-v1", "literal": "add hls track selection flows" },
+        { "id": "hls-dash.live-recording", "profile": "commit-message-literal-v1", "literal": "add live hls recording workflow" },
+        { "id": "hls-dash.mpd-download", "profile": "commit-message-literal-v1", "literal": "add mpd download workflow" },
+        { "id": "candidate.hls-parser", "profile": "changed-blob-literal-v1", "literal": "parseEmbeddedBrowserHlsManifest" },
+        { "id": "candidate.mpd-parser", "profile": "changed-blob-literal-v1", "literal": "parseEmbeddedBrowserMpdManifest" }
+      ]
     },
     {
       "id": "history.mse-spool-apr23",
       "fromCommit": "e5b69f7148c229e1dd053d6f6dbe15a6c4871b4b",
       "throughCommit": "352edb3f533a79007041d404233e4d4e0b936288",
       "pathScopes": ["electron/service/embeddedBrowserMainController.ts", "electron/service/embeddedBrowserResourceActionService.ts", "electron/service/embeddedBrowserResourceFileSaveService.ts", "electron/service/embeddedBrowserResourceMergeService.ts", "electron/service/embeddedBrowserResourcePageBridge.ts", "electron/service/embeddedBrowserResourceProbePageActions.ts", "electron/service/embeddedBrowserResourceProbeRuntimeCore.ts", "electron/service/embeddedBrowserResourceProbeRuntimeHooks.ts", "dist-electron"],
-      "searchTerms": ["mse duration", "mse drain", "mse flush", "mse reset", "spool large mse captures", "spooled file path handoff"]
+      "queries": [
+        { "id": "mse-spool.duration", "profile": "commit-message-literal-v1", "literal": "preserve mse capture duration" },
+        { "id": "mse-spool.drain", "profile": "changed-blob-literal-v1", "literal": "drainEmbeddedBrowserMseResourceFromPage" },
+        { "id": "mse-spool.flush", "profile": "changed-blob-literal-v1", "literal": "event: 'mse-flush'" },
+        { "id": "mse-spool.reset", "profile": "changed-blob-literal-v1", "literal": "event: 'mse-reset'" },
+        { "id": "mse-spool.disk-spool", "profile": "commit-message-literal-v1", "literal": "spool large mse captures to disk" },
+        { "id": "mse-spool.file-path-handoff", "profile": "changed-blob-literal-v1", "literal": "filePath: nextSpoolFile.filePath" },
+        { "id": "candidate.mse-duration", "profile": "changed-blob-literal-v1", "literal": "normalizeBuffersForPlayback" }
+      ]
     }
   ],
   "historicalCandidates": [
     {
       "id": "historical.probe-monolith-before-split",
+      "touchsetId": "history.capture-runtime-apr14-15",
       "path": "electron/service/embeddedBrowserResourceProbe.ts",
       "symbol": "createEmbeddedBrowserResourceProbeScript",
       "lastKnownCommit": "49b6e999b077a0a994fff09edf6415072f322bb8",
       "sourceHash": "sha256:4a57be70f589306a6523d4901a7f2fcf79a5a4e645b0e015c800de567278c2b1",
+      "discoveryEvidence": {
+        "kind": "changed-blob-query-hit",
+        "queryId": "candidate.probe-monolith",
+        "queryHit": {
+          "commitId": "e1eeb8f0ae2c2b25f5277bb70665d8c97acca39b",
+          "parentCommitId": "49b6e999b077a0a994fff09edf6415072f322bb8",
+          "path": "electron/service/embeddedBrowserResourceProbe.ts",
+          "side": "before",
+          "rawSourceHash": "sha256:4a57be70f589306a6523d4901a7f2fcf79a5a4e645b0e015c800de567278c2b1",
+          "byteStart": 228,
+          "byteEnd": 268
+        }
+      },
       "resolution": {
         "kind": "current-node",
         "refId": "node.compat.probe-wrapper"
@@ -206,10 +283,24 @@
     },
     {
       "id": "historical.resource-service-before-split",
+      "touchsetId": "history.capture-runtime-apr14-15",
       "path": "electron/service/embeddedBrowserResourceService.ts",
       "symbol": "initializeEmbeddedBrowserResourceBridge",
       "lastKnownCommit": "49b6e999b077a0a994fff09edf6415072f322bb8",
       "sourceHash": "sha256:364039882fbc11a35e26f49e5b7009b306f1efc0d169b9b46b2267666dbf54ea",
+      "discoveryEvidence": {
+        "kind": "changed-blob-query-hit",
+        "queryId": "candidate.resource-service",
+        "queryHit": {
+          "commitId": "e1eeb8f0ae2c2b25f5277bb70665d8c97acca39b",
+          "parentCommitId": "49b6e999b077a0a994fff09edf6415072f322bb8",
+          "path": "electron/service/embeddedBrowserResourceService.ts",
+          "side": "before",
+          "rawSourceHash": "sha256:364039882fbc11a35e26f49e5b7009b306f1efc0d169b9b46b2267666dbf54ea",
+          "byteStart": 12294,
+          "byteEnd": 12333
+        }
+      },
       "resolution": {
         "kind": "current-node",
         "refId": "node.compat.resource-service-wrapper"
@@ -217,10 +308,24 @@
     },
     {
       "id": "historical.deep-hooks-port-snapshot",
+      "touchsetId": "history.capture-runtime-apr14-15",
       "path": "electron/service/embeddedBrowserResourceProbeRuntimeHooks.ts",
       "symbol": "embeddedBrowserResourceProbeRuntimeHooksBody",
       "lastKnownCommit": "0f84ca0b02c8ad909d7e909d0282038f92e1b097",
       "sourceHash": "sha256:8ebabb6565972c60fb469682d5bfcf9bbd34f36bd1e4da39fb790316fd512c76",
+      "discoveryEvidence": {
+        "kind": "changed-blob-query-hit",
+        "queryId": "candidate.deep-hooks",
+        "queryHit": {
+          "commitId": "0f84ca0b02c8ad909d7e909d0282038f92e1b097",
+          "parentCommitId": "e1eeb8f0ae2c2b25f5277bb70665d8c97acca39b",
+          "path": "electron/service/embeddedBrowserResourceProbeRuntimeHooks.ts",
+          "side": "after",
+          "rawSourceHash": "sha256:8ebabb6565972c60fb469682d5bfcf9bbd34f36bd1e4da39fb790316fd512c76",
+          "byteStart": 240,
+          "byteEnd": 284
+        }
+      },
       "resolution": {
         "kind": "current-node",
         "refId": "node.page-runtime.hooks-body"
@@ -228,10 +333,24 @@
     },
     {
       "id": "historical.mse-duration-snapshot",
+      "touchsetId": "history.mse-spool-apr23",
       "path": "electron/service/embeddedBrowserResourceProbeRuntimeCore.ts",
       "symbol": "normalizeBuffersForPlayback",
       "lastKnownCommit": "e5b69f7148c229e1dd053d6f6dbe15a6c4871b4b",
       "sourceHash": "sha256:bd14f41f531d3e9c58ff34e828a06fc1ae07dfaf63598a317b8f69dc92c38e10",
+      "discoveryEvidence": {
+        "kind": "changed-blob-query-hit",
+        "queryId": "candidate.mse-duration",
+        "queryHit": {
+          "commitId": "e5b69f7148c229e1dd053d6f6dbe15a6c4871b4b",
+          "parentCommitId": "400b9cdab3cd21ccefaa4065d3fb006e7bc267dd",
+          "path": "electron/service/embeddedBrowserResourceProbeRuntimeCore.ts",
+          "side": "after",
+          "rawSourceHash": "sha256:bd14f41f531d3e9c58ff34e828a06fc1ae07dfaf63598a317b8f69dc92c38e10",
+          "byteStart": 27937,
+          "byteEnd": 27964
+        }
+      },
       "resolution": {
         "kind": "current-node",
         "refId": "node.mse.page-buffer-normalizer"
@@ -239,10 +358,24 @@
     },
     {
       "id": "historical.hls-parser-initial-snapshot",
+      "touchsetId": "history.hls-dash-apr22-23",
       "path": "src/features/embedded-browser/resources/model/embedded-browser-hls-manifest.ts",
       "symbol": "parseEmbeddedBrowserHlsManifest",
       "lastKnownCommit": "35c5c69a6ff38d5224993cc3f3757c1c74688e73",
       "sourceHash": "sha256:de0c709cd0c49ff889172bb321c78526eb8b9fde50bc36cef29e5a98f4112ec2",
+      "discoveryEvidence": {
+        "kind": "changed-blob-query-hit",
+        "queryId": "candidate.hls-parser",
+        "queryHit": {
+          "commitId": "35c5c69a6ff38d5224993cc3f3757c1c74688e73",
+          "parentCommitId": "f0829e77b14ff8992d5a2656ad53bcbcbf59961f",
+          "path": "src/features/embedded-browser/resources/model/embedded-browser-hls-manifest.ts",
+          "side": "after",
+          "rawSourceHash": "sha256:de0c709cd0c49ff889172bb321c78526eb8b9fde50bc36cef29e5a98f4112ec2",
+          "byteStart": 8500,
+          "byteEnd": 8531
+        }
+      },
       "resolution": {
         "kind": "current-node",
         "refId": "node.hls.renderer-parser-planner"
@@ -250,10 +383,24 @@
     },
     {
       "id": "historical.dash-parser-initial-snapshot",
+      "touchsetId": "history.hls-dash-apr22-23",
       "path": "src/features/embedded-browser/resources/model/embedded-browser-mpd-manifest.ts",
       "symbol": "parseEmbeddedBrowserMpdManifest",
       "lastKnownCommit": "103a1ef639f2df4b61d1f84aeadf545b922dd873",
       "sourceHash": "sha256:387637c4dc836d5e1d6015b25dfa2875fbf40a14faf15d87d96147132d85d68a",
+      "discoveryEvidence": {
+        "kind": "changed-blob-query-hit",
+        "queryId": "candidate.mpd-parser",
+        "queryHit": {
+          "commitId": "103a1ef639f2df4b61d1f84aeadf545b922dd873",
+          "parentCommitId": "6da222f5180c2cccea81848220caba40b3089dbc",
+          "path": "src/features/embedded-browser/resources/model/embedded-browser-mpd-manifest.ts",
+          "side": "after",
+          "rawSourceHash": "sha256:387637c4dc836d5e1d6015b25dfa2875fbf40a14faf15d87d96147132d85d68a",
+          "byteStart": 10689,
+          "byteEnd": 10720
+        }
+      },
       "resolution": {
         "kind": "current-node",
         "refId": "node.dash.renderer-parser-planner"
@@ -437,7 +584,7 @@
       "kind": "preload-channel",
       "source": { "path": "electron/preload.ts", "symbol": "electronEmbeddedBrowser", "locatorKind": "runtime-literal" },
       "target": { "path": "electron/service/embeddedBrowserMainIpc.ts", "symbol": "registerEmbeddedBrowserMainIpcHandlers" },
-      "sourceHash": "sha256:48f180b1ac3e39497bb8d623ca09cd96ea6096ce7862c858cec0b1b547afdfaa",
+      "sourceHash": "sha256:3e431e5dfb68cd814f2a1ca134b0ce73431b932d331ad89ae4b7a9d96f7714fa",
       "resolutionRule": "Match every embedded-browser resource invoke channel by literal channel name to exactly one ipcMain handler.",
       "fixtureId": "closure.resource-ipc-channels"
     },
@@ -785,7 +932,7 @@
       "path": "electron/preload.ts",
       "symbol": "onResourceCaptured",
       "locatorKind": "member",
-      "sourceHash": "sha256:48f180b1ac3e39497bb8d623ca09cd96ea6096ce7862c858cec0b1b547afdfaa",
+      "sourceHash": "sha256:3e431e5dfb68cd814f2a1ca134b0ce73431b932d331ad89ae4b7a9d96f7714fa",
       "classification": "omniflow-integration",
       "ownerRole": "contract",
       "capabilityId": "capture.cross-process-contract",
@@ -1328,7 +1475,7 @@
       "path": "electron/preload.ts",
       "symbol": "electronEmbeddedBrowser",
       "locatorKind": "runtime-literal",
-      "sourceHash": "sha256:48f180b1ac3e39497bb8d623ca09cd96ea6096ce7862c858cec0b1b547afdfaa",
+      "sourceHash": "sha256:3e431e5dfb68cd814f2a1ca134b0ce73431b932d331ad89ae4b7a9d96f7714fa",
       "classification": "omniflow-integration",
       "ownerRole": "contract",
       "capabilityId": "capture.cross-process-contract",
@@ -1559,7 +1706,7 @@
       "entryType": "current-node",
       "path": "electron/electron-env.d.ts",
       "symbol": "EmbeddedBrowserCapturedResource",
-      "sourceHash": "sha256:3b8f74f51d8d1fce212b22c517be7388205114b585da7bec02fdb67f747bd7ca",
+      "sourceHash": "sha256:0d42148c06d11d39a2781e65ebc71d60c708ab225796a963a016f3ea72c38191",
       "classification": "omniflow-integration",
       "ownerRole": "contract",
       "capabilityId": "capture.cross-process-contract",

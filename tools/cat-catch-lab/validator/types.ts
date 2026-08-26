@@ -97,11 +97,47 @@ export type LocalClosureEdge = {
   toNodeId: string
 }
 
-export type LocalClosureCandidate = {
+export type LocalClosureChangedBlobQueryHit = {
+  byteEnd: number
+  byteStart: number
+  commitId: string
+  parentCommitId: string | null
+  path: string
+  rawSourceHash: string
+  side: 'after' | 'before'
+}
+
+export type LocalClosureCommitMessageQueryHit = {
+  byteEnd: number
+  byteStart: number
+  commitId: string
+  parentCommitId: string | null
+  path: null
+  rawSourceHash: string
+  side: 'commit-message'
+}
+
+export type LocalClosureHistoricalCandidateSource = {
+  changeCommitId: string
+  parentCommitId: string | null
+  side: 'after' | 'before'
+}
+
+export type LocalClosureHistoricalDiscoveryEvidence =
+  | {
+      kind: 'changed-blob-query-hit'
+      queryId: string
+      queryHit: LocalClosureChangedBlobQueryHit
+    }
+  | {
+      candidateSource: LocalClosureHistoricalCandidateSource
+      kind: 'commit-message-query-hit-with-path-change'
+      queryId: string
+      queryHit: LocalClosureCommitMessageQueryHit
+    }
+
+type LocalClosureCandidateBase = {
   candidateId: string
-  candidateKind: 'current' | 'historical'
-  discoveryRuleIds: string[]
-  lastKnownCommit: string | null
   locatorKind: LocalClosureLocatorKind | null
   path: string
   resolutionKind: 'current-node' | 'approved-exclusion' | 'retired-tombstone' | 'unresolved'
@@ -109,6 +145,23 @@ export type LocalClosureCandidate = {
   sourceHash: string
   symbol: string | null
 }
+
+export type LocalClosureCandidate = LocalClosureCandidateBase & (
+  | {
+      candidateKind: 'current'
+      discoveryEvidence: null
+      discoveryRuleIds: string[]
+      lastKnownCommit: null
+      touchsetId: null
+    }
+  | {
+      candidateKind: 'historical'
+      discoveryEvidence: LocalClosureHistoricalDiscoveryEvidence
+      discoveryRuleIds: []
+      lastKnownCommit: string
+      touchsetId: string
+    }
+)
 
 export type LocalClosureExternalProcessAttribution = {
   capabilityId: string

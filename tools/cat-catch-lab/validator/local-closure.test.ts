@@ -156,7 +156,15 @@ describe('Cat Catch candidate local-closure generator', () => {
       candidate.candidateKind === 'historical'
       && candidate.discoveryRuleIds.length === 0
       && typeof candidate.lastKnownCommit === 'string'
+      && typeof candidate.touchsetId === 'string'
+      && candidate.discoveryEvidence !== null
     ))).toBe(true)
+    for (const candidate of report.historicalCandidates) {
+      const declaration = historicalCandidates.find(value => value.id === candidate.candidateId)
+      expect(declaration).toBeDefined()
+      expect(candidate.touchsetId).toBe(declaration?.touchsetId)
+      expect(candidate.discoveryEvidence).toEqual(declaration?.discoveryEvidence)
+    }
     expect(report.discoveryCoverage).toEqual({
       cutoverDependencyGraph: 'pending',
       declaredDynamicEdges: 'complete',
@@ -312,6 +320,16 @@ describe('Cat Catch candidate local-closure generator', () => {
     ['historicalCommit', (report: CandidateLocalClosureReport) => {
       const candidate = report.historicalCandidates[0]
       if (candidate) candidate.lastKnownCommit = '0'.repeat(40)
+    }],
+    ['historicalTouchset', (report: CandidateLocalClosureReport) => {
+      const candidate = report.historicalCandidates[0]
+      if (candidate?.candidateKind === 'historical') candidate.touchsetId = 'history.tampered'
+    }],
+    ['historicalEvidence', (report: CandidateLocalClosureReport) => {
+      const candidate = report.historicalCandidates[0]
+      if (candidate?.candidateKind === 'historical') {
+        candidate.discoveryEvidence.queryId = 'history.tampered'
+      }
     }],
     ['rootTraversal', (report: CandidateLocalClosureReport) => {
       const root = report.bootstrapRoots[0]
@@ -622,32 +640,64 @@ describe('Cat Catch candidate local-closure generator', () => {
       cwd: repository,
       encoding: 'utf8',
     }).trim()
-    const inventoryState = readGitPathAtCommit(repository, head, 'docs/cat-catch/legacy-inventory.json')
+    const candidatePath = 'electron/service/__historicalExclusionFixture.ts'
+    const candidateSymbol = 'historicalExclusionFixture'
+    const candidateSource = `export function ${candidateSymbol}(): void {}\n`
+    writeFileSync(path.join(repository, candidatePath), candidateSource)
+    const historicalCommit = commitAll(repository, 'add historical exclusion source fixture')
+    const inventoryState = readGitPathAtCommit(
+      repository,
+      historicalCommit,
+      'docs/cat-catch/legacy-inventory.json',
+    )
     if (inventoryState.status !== 'present') throw new Error('fixture inventory is unavailable')
     const inventory = JSON.parse(inventoryState.bytes.toString('utf8')) as JsonObject
-    const node = objectArray(inventory.entries).find(entry => (
-      entry.entryType === 'current-node' && typeof entry.symbol === 'string'
-    ))
-    if (!node || typeof node.path !== 'string' || typeof node.symbol !== 'string') {
-      throw new Error('fixture typed inventory node is unavailable')
-    }
     const candidateId = 'candidate.historical-exclusion-test'
     const exclusionId = 'exclusion.historical-test'
+    const touchsetId = 'history.historical-exclusion-test'
+    const literal = candidateSymbol
+    const byteStart = candidateSource.indexOf(literal)
+    const sourceHash = sha256Bytes(candidateSource)
+    inventory.historicalTouchsets = [{
+      id: touchsetId,
+      fromCommit: historicalCommit,
+      throughCommit: historicalCommit,
+      pathScopes: [candidatePath],
+      queries: [{
+        id: 'historical-exclusion.source',
+        profile: 'changed-blob-literal-v1',
+        literal,
+      }],
+    }]
     inventory.historicalCandidates = [{
       id: candidateId,
-      path: node.path,
-      symbol: node.symbol,
-      locatorKind: node.locatorKind || 'declaration',
-      lastKnownCommit: head,
-      sourceHash: node.sourceHash,
+      touchsetId,
+      discoveryEvidence: {
+        kind: 'changed-blob-query-hit',
+        queryId: 'historical-exclusion.source',
+        queryHit: {
+          byteEnd: byteStart + literal.length,
+          byteStart,
+          commitId: historicalCommit,
+          parentCommitId: head,
+          path: candidatePath,
+          rawSourceHash: sourceHash,
+          side: 'after',
+        },
+      },
+      path: candidatePath,
+      symbol: candidateSymbol,
+      locatorKind: 'declaration',
+      lastKnownCommit: historicalCommit,
+      sourceHash,
       resolution: { kind: 'approved-exclusion', refId: exclusionId },
     }]
     inventory.approvedExclusions = [{
       id: exclusionId,
       candidateKind: 'historical',
-      path: node.path,
-      symbol: node.symbol,
-      locatorKind: node.locatorKind || 'declaration',
+      path: candidatePath,
+      symbol: candidateSymbol,
+      locatorKind: 'declaration',
       decision: {
         schemaVersion: 1,
         decisionId: 'decision.historical-exclusion-test',
@@ -681,6 +731,14 @@ describe('Cat Catch candidate local-closure generator', () => {
       exclusionId,
     }))
     if (!result.report) throw new Error('candidate local-closure report was not generated')
+    expect(result.report.historicalCandidates).toContainEqual(expect.objectContaining({
+      candidateId,
+      discoveryEvidence: expect.objectContaining({
+        kind: 'changed-blob-query-hit',
+        queryId: 'historical-exclusion.source',
+      }),
+      touchsetId,
+    }))
     expect(validateCandidateLocalClosureReportAtCommit(repository, commit, result.report)).toEqual([])
   })
 
@@ -757,6 +815,10 @@ describe('Cat Catch candidate local-closure generator', () => {
     const source = 'export function localClosureRetiredFixture(): void {}\n'
     writeFileSync(path.join(repository, sourcePath), source)
     const lastKnownCommit = commitAll(repository, 'add local closure retirement fixture')
+    const historicalParentCommit = execFileSync('git', ['rev-parse', `${lastKnownCommit}^`], {
+      cwd: repository,
+      encoding: 'utf8',
+    }).trim()
     rmSync(path.join(repository, sourcePath))
     const deletionCommit = commitAll(repository, 'delete local closure retirement fixture')
 
@@ -771,6 +833,7 @@ describe('Cat Catch candidate local-closure generator', () => {
       throw new Error('mapped inventory fixture node is unavailable')
     }
     const tombstoneId = 'node.retired.local-closure-fixture'
+    const touchsetId = 'history.local-closure-retirement-fixture'
     const sourceHash = sha256Bytes(source)
     objectArray(inventory.entries).push({
       id: tombstoneId,
@@ -791,12 +854,37 @@ describe('Cat Catch candidate local-closure generator', () => {
     })
     objectArray(inventory.historicalCandidates).push({
       id: 'historical.local-closure-retirement-fixture',
+      touchsetId,
       path: sourcePath,
       symbol: 'localClosureRetiredFixture',
       locatorKind: 'declaration',
       lastKnownCommit,
       sourceHash,
+      discoveryEvidence: {
+        kind: 'changed-blob-query-hit',
+        queryId: 'local-closure-retirement.source',
+        queryHit: {
+          byteEnd: source.indexOf('localClosureRetiredFixture') + 'localClosureRetiredFixture'.length,
+          byteStart: source.indexOf('localClosureRetiredFixture'),
+          commitId: lastKnownCommit,
+          parentCommitId: historicalParentCommit,
+          path: sourcePath,
+          rawSourceHash: sourceHash,
+          side: 'after',
+        },
+      },
       resolution: { kind: 'retired-tombstone', refId: tombstoneId },
+    })
+    objectArray(inventory.historicalTouchsets).push({
+      id: touchsetId,
+      fromCommit: lastKnownCommit,
+      throughCommit: lastKnownCommit,
+      pathScopes: [sourcePath],
+      queries: [{
+        id: 'local-closure-retirement.source',
+        profile: 'changed-blob-literal-v1',
+        literal: 'localClosureRetiredFixture',
+      }],
     })
     writeFileSync(inventoryPath, `${JSON.stringify(inventory, null, 2)}\n`)
     const commit = commitAll(repository, 'inventory local closure retirement fixture')
@@ -822,9 +910,14 @@ describe('Cat Catch candidate local-closure generator', () => {
     expect(result.report?.historicalCandidates).toContainEqual(expect.objectContaining({
       candidateId: 'historical.local-closure-retirement-fixture',
       candidateKind: 'historical',
+      discoveryEvidence: expect.objectContaining({
+        kind: 'changed-blob-query-hit',
+        queryId: 'local-closure-retirement.source',
+      }),
       lastKnownCommit,
       resolutionKind: 'retired-tombstone',
       resolutionRefId: tombstoneId,
+      touchsetId,
     }))
   })
 

@@ -19,7 +19,7 @@
   ],
   "properties": {
     "$schema": { "const": "./legacy-inventory.schema.json" },
-    "schemaVersion": { "const": 1 },
+    "schemaVersion": { "const": 2 },
     "inventoryVersion": { "$ref": "#/$defs/version" },
     "discoveryRulesVersion": { "$ref": "#/$defs/version" },
     "bootstrapRoots": {
@@ -148,20 +148,46 @@
     "semanticScanRule": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "pathScopes", "patterns", "excludedPaths"],
+      "required": [
+        "id",
+        "matchProfile",
+        "pathScopes",
+        "includedExtensions",
+        "resultKind",
+        "patternGroups",
+        "excludedPaths"
+      ],
       "properties": {
         "id": { "$ref": "#/$defs/identifier" },
+        "matchProfile": { "const": "utf8-literal-case-sensitive-v1" },
         "pathScopes": {
           "type": "array",
           "minItems": 1,
           "uniqueItems": true,
           "items": { "$ref": "#/$defs/path" }
         },
-        "patterns": {
+        "includedExtensions": {
           "type": "array",
           "minItems": 1,
           "uniqueItems": true,
-          "items": { "type": "string", "minLength": 1 }
+          "items": {
+            "type": "string",
+            "pattern": "^\\.[A-Za-z0-9]+(?:\\.[A-Za-z0-9]+)*$"
+          }
+        },
+        "resultKind": {
+          "enum": ["candidate", "audit-reference", "generated-mirror"]
+        },
+        "patternGroups": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": { "type": "string", "minLength": 1 }
+          }
         },
         "excludedPaths": {
           "type": "array",
@@ -173,15 +199,10 @@
     "historicalTouchset": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "fromCommit", "throughCommit", "pathScopes", "searchTerms"],
+      "required": ["id", "fromCommit", "throughCommit", "pathScopes", "queries"],
       "properties": {
         "id": { "$ref": "#/$defs/identifier" },
-        "fromCommit": {
-          "oneOf": [
-            { "$ref": "#/$defs/commit" },
-            { "type": "null" }
-          ]
-        },
+        "fromCommit": { "$ref": "#/$defs/commit" },
         "throughCommit": { "$ref": "#/$defs/commit" },
         "pathScopes": {
           "type": "array",
@@ -189,23 +210,40 @@
           "uniqueItems": true,
           "items": { "$ref": "#/$defs/path" }
         },
-        "searchTerms": {
+        "queries": {
           "type": "array",
           "minItems": 1,
           "uniqueItems": true,
-          "items": { "type": "string", "minLength": 1 }
+          "items": { "$ref": "#/$defs/historicalQuery" }
+        }
+      }
+    },
+    "historicalQuery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "profile", "literal"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "profile": {
+          "enum": ["commit-message-literal-v1", "changed-blob-literal-v1"]
+        },
+        "literal": {
+          "type": "string",
+          "minLength": 1
         }
       }
     },
     "historicalCandidate": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "path", "symbol", "lastKnownCommit", "sourceHash", "resolution"],
+      "required": ["id", "touchsetId", "discoveryEvidence", "path", "symbol", "lastKnownCommit", "sourceHash", "resolution"],
       "dependentSchemas": {
         "locatorKind": { "properties": { "symbol": { "type": "string" } } }
       },
       "properties": {
         "id": { "$ref": "#/$defs/identifier" },
+        "touchsetId": { "$ref": "#/$defs/identifier" },
+        "discoveryEvidence": { "$ref": "#/$defs/historicalDiscoveryEvidence" },
         "path": { "$ref": "#/$defs/path" },
         "symbol": { "$ref": "#/$defs/nullableSymbol" },
         "locatorKind": { "$ref": "#/$defs/locatorKind" },
@@ -217,6 +255,86 @@
             { "type": "null" }
           ]
         }
+      }
+    },
+    "historicalDiscoveryEvidence": {
+      "oneOf": [
+        { "$ref": "#/$defs/changedBlobDiscoveryEvidence" },
+        { "$ref": "#/$defs/commitMessageDiscoveryEvidence" }
+      ]
+    },
+    "changedBlobDiscoveryEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "queryId", "queryHit"],
+      "properties": {
+        "kind": { "const": "changed-blob-query-hit" },
+        "queryId": { "$ref": "#/$defs/identifier" },
+        "queryHit": { "$ref": "#/$defs/changedBlobQueryHit" }
+      }
+    },
+    "commitMessageDiscoveryEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "queryId", "queryHit", "candidateSource"],
+      "properties": {
+        "kind": { "const": "commit-message-query-hit-with-path-change" },
+        "queryId": { "$ref": "#/$defs/identifier" },
+        "queryHit": { "$ref": "#/$defs/commitMessageQueryHit" },
+        "candidateSource": { "$ref": "#/$defs/historicalCandidateSource" }
+      }
+    },
+    "changedBlobQueryHit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commitId", "parentCommitId", "path", "side", "rawSourceHash", "byteStart", "byteEnd"],
+      "properties": {
+        "commitId": { "$ref": "#/$defs/commit" },
+        "parentCommitId": {
+          "oneOf": [
+            { "$ref": "#/$defs/commit" },
+            { "type": "null" }
+          ]
+        },
+        "path": { "$ref": "#/$defs/path" },
+        "side": { "enum": ["before", "after"] },
+        "rawSourceHash": { "$ref": "#/$defs/sha256" },
+        "byteStart": { "type": "integer", "minimum": 0 },
+        "byteEnd": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "commitMessageQueryHit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commitId", "parentCommitId", "path", "side", "rawSourceHash", "byteStart", "byteEnd"],
+      "properties": {
+        "commitId": { "$ref": "#/$defs/commit" },
+        "parentCommitId": {
+          "oneOf": [
+            { "$ref": "#/$defs/commit" },
+            { "type": "null" }
+          ]
+        },
+        "path": { "type": "null" },
+        "side": { "const": "commit-message" },
+        "rawSourceHash": { "$ref": "#/$defs/sha256" },
+        "byteStart": { "type": "integer", "minimum": 0 },
+        "byteEnd": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "historicalCandidateSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["changeCommitId", "parentCommitId", "side"],
+      "properties": {
+        "changeCommitId": { "$ref": "#/$defs/commit" },
+        "parentCommitId": {
+          "oneOf": [
+            { "$ref": "#/$defs/commit" },
+            { "type": "null" }
+          ]
+        },
+        "side": { "enum": ["before", "after"] }
       }
     },
     "candidateResolution": {

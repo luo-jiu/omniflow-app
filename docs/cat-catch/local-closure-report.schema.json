@@ -652,8 +652,10 @@
         "symbol",
         "locatorKind",
         "sourceHash",
+        "discoveryEvidence",
         "discoveryRuleIds",
         "lastKnownCommit",
+        "touchsetId",
         "resolutionKind",
         "resolutionRefId"
       ],
@@ -673,14 +675,20 @@
           },
           "then": {
             "properties": {
+              "discoveryEvidence": {
+                "$ref": "legacy-inventory.schema.json#/$defs/historicalDiscoveryEvidence"
+              },
               "lastKnownCommit": { "$ref": "#/$defs/commit" },
-              "discoveryRuleIds": { "type": "array", "maxItems": 0 }
+              "discoveryRuleIds": { "type": "array", "maxItems": 0 },
+              "touchsetId": { "$ref": "#/$defs/identifier" }
             }
           },
           "else": {
             "properties": {
+              "discoveryEvidence": { "type": "null" },
               "lastKnownCommit": { "type": "null" },
-              "discoveryRuleIds": { "type": "array", "minItems": 1 }
+              "discoveryRuleIds": { "type": "array", "minItems": 1 },
+              "touchsetId": { "type": "null" }
             }
           }
         },
@@ -704,6 +712,12 @@
         "symbol": { "type": ["string", "null"], "minLength": 1 },
         "locatorKind": { "$ref": "#/$defs/nullableLocatorKind" },
         "sourceHash": { "$ref": "#/$defs/sha256" },
+        "discoveryEvidence": {
+          "oneOf": [
+            { "$ref": "legacy-inventory.schema.json#/$defs/historicalDiscoveryEvidence" },
+            { "type": "null" }
+          ]
+        },
         "discoveryRuleIds": {
           "type": "array",
           "uniqueItems": true,
@@ -715,6 +729,7 @@
             { "type": "null" }
           ]
         },
+        "touchsetId": { "$ref": "#/$defs/nullableIdentifier" },
         "resolutionKind": { "enum": ["current-node", "approved-exclusion", "retired-tombstone", "unresolved"] },
         "resolutionRefId": { "$ref": "#/$defs/nullableIdentifier" }
       }

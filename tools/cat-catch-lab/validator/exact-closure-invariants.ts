@@ -5,6 +5,17 @@ import {
   readGitPathAtCommit,
   tryResolveGitCommit,
 } from './git-input.ts'
+import {
+  CHANGED_BLOB_LITERAL_PROFILE,
+  COMMIT_MESSAGE_LITERAL_PROFILE,
+  DEFAULT_EXACT_HISTORY_SCAN_BUDGETS,
+  scanExactGitHistory,
+  type ExactHistoryChange,
+  type ExactHistoryQueryHit,
+  type ExactHistoryScanBudgets,
+  type ExactHistoryScanResult,
+  type ExactHistoryTouchset,
+} from './exact-history-scan.ts'
 import { decodeUtf8Bytes, getString, getStringArray, isJsonObject, sha256Bytes } from './json.ts'
 import { inspectSourceLocator, normalizeSourceLocatorKind } from './source-locator.ts'
 import { createIssue, type JsonObject, type ValidationIssue } from './types.ts'
@@ -46,6 +57,10 @@ function isCanonicalRepositoryPath(relativePath: string): boolean {
       const codePoint = character.codePointAt(0) ?? 0
       return codePoint <= 0x1f || codePoint === 0x7f
     })
+}
+
+function isWithinPathScope(relativePath: string, pathScope: string): boolean {
+  return relativePath === pathScope || relativePath.startsWith(`${pathScope}/`)
 }
 
 function readExactJsonObject(
@@ -288,6 +303,116 @@ function oneRecord(
   return matches.length === 1 ? matches[0] || null : null
 }
 
+function nullableStringField(
+  value: JsonObject,
+  field: string,
+): string | null | undefined {
+  if (!(field in value)) return undefined
+  if (value[field] === null) return null
+  return getString(value[field]) || undefined
+}
+
+function nonNegativeIntegerField(value: JsonObject, field: string): number | null {
+  const candidate = value[field]
+  return Number.isSafeInteger(candidate) && Number(candidate) >= 0
+    ? Number(candidate)
+    : null
+}
+
+function exactHistoryHitMatches(
+  hit: ExactHistoryQueryHit,
+  queryId: string,
+  selector: JsonObject,
+): boolean {
+  const parentCommitId = nullableStringField(selector, 'parentCommitId')
+  const relativePath = nullableStringField(selector, 'path')
+  const byteStart = nonNegativeIntegerField(selector, 'byteStart')
+  const byteEnd = nonNegativeIntegerField(selector, 'byteEnd')
+  return parentCommitId !== undefined
+    && relativePath !== undefined
+    && byteStart !== null
+    && byteEnd !== null
+    && hit.queryId === queryId
+    && hit.commitId === getString(selector.commitId)
+    && hit.parentCommitId === parentCommitId
+    && hit.path === relativePath
+    && hit.side === getString(selector.side)
+    && hit.rawSourceHash === getString(selector.rawSourceHash)
+    && hit.byteStart === byteStart
+    && hit.byteEnd === byteEnd
+}
+
+function findHistoricalChange(
+  changes: ExactHistoryChange[],
+  changeCommitId: string | null,
+  parentCommitId: string | null | undefined,
+  relativePath: string,
+): ExactHistoryChange | null {
+  if (!changeCommitId || parentCommitId === undefined) return null
+  const matches = changes.filter(change => (
+    change.afterCommitId === changeCommitId
+    && change.beforeCommitId === parentCommitId
+    && change.path === relativePath
+  ))
+  return matches.length === 1 ? matches[0] || null : null
+}
+
+function historicalChangeSourceMatches(
+  change: ExactHistoryChange | null,
+  side: string | null,
+  lastKnownCommit: string | null,
+  sourceHash: string | null,
+  includedCommitIds: ReadonlySet<string>,
+): boolean {
+  if (!change || (side !== 'before' && side !== 'after')) return false
+  const source = change[side]
+  return source !== null
+    && source.commitId === lastKnownCommit
+    && source.rawSourceHash === sourceHash
+    && (side === 'before' || includedCommitIds.has(source.commitId))
+}
+
+function exactHistoryPhysicalHitIdentity(hit: ExactHistoryQueryHit): string {
+  if (hit.profile === COMMIT_MESSAGE_LITERAL_PROFILE) {
+    return JSON.stringify([
+      'commit-message',
+      hit.commitId,
+      hit.rawSourceHash,
+      hit.byteStart,
+      hit.byteEnd,
+    ])
+  }
+  const sourceCommitId = hit.side === 'before' ? hit.parentCommitId : hit.commitId
+  return JSON.stringify([
+    'blob',
+    sourceCommitId,
+    hit.path,
+    hit.rawSourceHash,
+    hit.byteStart,
+    hit.byteEnd,
+  ])
+}
+
+function allocateExactHistoryScanBudget(
+  touchsetCount: number,
+): ExactHistoryScanBudgets {
+  const divisor = Math.max(1, touchsetCount)
+  const share = (total: number): number => Math.floor(total / divisor)
+  return {
+    maxAncestryCommits: share(DEFAULT_EXACT_HISTORY_SCAN_BUDGETS.maxAncestryCommits),
+    maxBlobBytes: share(DEFAULT_EXACT_HISTORY_SCAN_BUDGETS.maxBlobBytes),
+    maxBlobObjects: share(DEFAULT_EXACT_HISTORY_SCAN_BUDGETS.maxBlobObjects),
+    maxChanges: share(DEFAULT_EXACT_HISTORY_SCAN_BUDGETS.maxChanges),
+    maxCommitBytes: share(DEFAULT_EXACT_HISTORY_SCAN_BUDGETS.maxCommitBytes),
+    maxComparedPaths: share(DEFAULT_EXACT_HISTORY_SCAN_BUDGETS.maxComparedPaths),
+    maxHits: share(DEFAULT_EXACT_HISTORY_SCAN_BUDGETS.maxHits),
+    maxPathScopes: share(DEFAULT_EXACT_HISTORY_SCAN_BUDGETS.maxPathScopes),
+    maxQueries: share(DEFAULT_EXACT_HISTORY_SCAN_BUDGETS.maxQueries),
+    maxSearchBytes: share(DEFAULT_EXACT_HISTORY_SCAN_BUDGETS.maxSearchBytes),
+    maxTreeEntries: share(DEFAULT_EXACT_HISTORY_SCAN_BUDGETS.maxTreeEntries),
+  }
+}
+
 function validateExactClosureDocuments(
   repositoryRoot: string,
   commit: string,
@@ -323,7 +448,12 @@ function validateExactClosureDocuments(
   const entriesById = indexByStringField(entries, 'id', 'inventory entry', issues)
   indexByStringField(roots, 'id', 'bootstrap root', issues)
   indexByStringField(semanticRules, 'id', 'semantic scan rule', issues)
-  indexByStringField(historicalTouchsets, 'id', 'historical touchset', issues)
+  const historicalTouchsetsById = indexByStringField(
+    historicalTouchsets,
+    'id',
+    'historical touchset',
+    issues,
+  )
   indexByStringField(historicalCandidates, 'id', 'historical candidate', issues)
   indexByStringField(dynamicEdges, 'id', 'declared dynamic edge', issues)
   const approvedExclusionsById = indexByStringField(
@@ -332,6 +462,41 @@ function validateExactClosureDocuments(
     'approved exclusion',
     issues,
   )
+
+  const historicalScans = new Map<LocatedObject, ExactHistoryScanResult>()
+  const historyScanBudget = allocateExactHistoryScanBudget(historicalTouchsets.length)
+  for (const touchset of historicalTouchsets) {
+    const scan = scanExactGitHistory(
+      repositoryRoot,
+      touchset.value as unknown as ExactHistoryTouchset,
+      historyScanBudget,
+    )
+    historicalScans.set(touchset, scan)
+    if (!scan.ok) {
+      for (const scanIssue of scan.issues) {
+        issues.push(error(
+          'exact-closure-historical-touchset-scan-failed',
+          `${scanIssue.code}: ${scanIssue.message}`,
+          scanIssue.queryId
+            ? `${touchset.path}.queries.${scanIssue.queryId}`
+            : touchset.path,
+        ))
+      }
+      continue
+    }
+    const throughCommit = getString(touchset.value.throughCommit)
+    const ancestry = throughCommit
+      ? getGitAncestryState(repositoryRoot, throughCommit, commit)
+      : 'unavailable'
+    if (ancestry === 'ancestor') continue
+    issues.push(error(
+      ancestry === 'not-ancestor'
+        ? 'exact-closure-historical-touchset-through-after-input'
+        : 'exact-closure-historical-touchset-through-unavailable',
+      `Historical touchset throughCommit must be available and ancestral to the selected commit: ${throughCommit || 'missing'}`,
+      `${touchset.path}.throughCommit`,
+    ))
+  }
 
   const entryLocators = indexLocators(entries, 'inventory', issues)
   const currentNodes = entries.filter(record => record.value.entryType === 'current-node')
@@ -576,26 +741,191 @@ function validateExactClosureDocuments(
     }
   }
 
+  const claimedHistoricalQueryHits = new Map<string, string>()
   for (const candidate of historicalCandidates) {
+    const touchsetId = getString(candidate.value.touchsetId)
+    const touchsetMatches = touchsetId ? historicalTouchsetsById.get(touchsetId) || [] : []
+    const touchset = touchsetMatches.length === 1 ? touchsetMatches[0] || null : null
+    if (touchsetMatches.length !== 1) {
+      issues.push(error(
+        'exact-closure-historical-touchset-ref-invalid',
+        `Historical candidate must reference exactly one historical touchset: ${touchsetId || 'missing'}`,
+        `${candidate.path}.touchsetId`,
+      ))
+    }
     const lastKnownCommit = getString(candidate.value.lastKnownCommit)
     const candidateLocator = normalizeLocator(candidate.value, candidate.path, issues)
-    const exactLastKnownCommit = lastKnownCommit && EXACT_COMMIT_PATTERN.test(lastKnownCommit)
-      ? tryResolveGitCommit(repositoryRoot, lastKnownCommit)
-      : null
-    if (!lastKnownCommit || exactLastKnownCommit !== lastKnownCommit) {
-      issues.push(error(
-        'exact-closure-historical-commit-invalid',
-        'Historical lastKnownCommit must identify an available lowercase 40-character commit object',
-        `${candidate.path}.lastKnownCommit`,
+    if (
+      touchset
+      && candidateLocator
+      && !getStringArray(touchset.value.pathScopes).some(pathScope => (
+        isWithinPathScope(candidateLocator.path, pathScope)
       ))
-    } else {
-      const ancestry = getGitAncestryState(repositoryRoot, lastKnownCommit, commit)
-      if (ancestry !== 'ancestor') {
+    ) {
+      issues.push(error(
+        'exact-closure-historical-touchset-path-mismatch',
+        `Historical candidate path is outside its touchset scopes: ${candidateLocator.path}`,
+        `${candidate.path}.touchsetId`,
+      ))
+    }
+    const evidence = isJsonObject(candidate.value.discoveryEvidence)
+      ? candidate.value.discoveryEvidence
+      : null
+    const scan = touchset ? historicalScans.get(touchset) || null : null
+    if (!evidence) {
+      issues.push(error(
+        'exact-closure-historical-evidence-invalid',
+        'Historical candidate discoveryEvidence must be a typed exact query-hit binding',
+        `${candidate.path}.discoveryEvidence`,
+      ))
+    } else if (scan?.ok && candidateLocator) {
+      const includedCommitIds = new Set(scan.result.commits.map(item => item.commitId))
+      const evidenceKind = getString(evidence.kind)
+      const queryId = getString(evidence.queryId)
+      const queryHit = isJsonObject(evidence.queryHit) ? evidence.queryHit : null
+      const queryMatches = queryId
+        ? scan.result.touchset.queries.filter(query => query.id === queryId)
+        : []
+      if (queryMatches.length !== 1) {
         issues.push(error(
-          ancestry === 'not-ancestor'
-            ? 'exact-closure-historical-commit-after-input'
-            : 'exact-closure-historical-commit-unavailable',
-          `Historical lastKnownCommit must be available and ancestral to the selected commit: ${lastKnownCommit}`,
+          'exact-closure-historical-evidence-query-ref-invalid',
+          `Historical discovery evidence queryId must resolve exactly once in ${touchsetId}: ${queryId || 'missing'}`,
+          `${candidate.path}.discoveryEvidence.queryId`,
+        ))
+      }
+      const query = queryMatches.length === 1 ? queryMatches[0] || null : null
+      const expectedProfile = evidenceKind === 'changed-blob-query-hit'
+        ? CHANGED_BLOB_LITERAL_PROFILE
+        : evidenceKind === 'commit-message-query-hit-with-path-change'
+          ? COMMIT_MESSAGE_LITERAL_PROFILE
+          : null
+      if (!expectedProfile) {
+        issues.push(error(
+          'exact-closure-historical-evidence-kind-invalid',
+          `Historical discovery evidence kind is unsupported: ${evidenceKind || 'missing'}`,
+          `${candidate.path}.discoveryEvidence.kind`,
+        ))
+      } else if (query && query.profile !== expectedProfile) {
+        issues.push(error(
+          'exact-closure-historical-evidence-query-profile-mismatch',
+          `Historical discovery evidence kind requires ${expectedProfile}: ${queryId}`,
+          `${candidate.path}.discoveryEvidence.queryId`,
+        ))
+      }
+
+      const exactHits = queryId && queryHit
+        ? scan.result.queryHits.filter(hit => exactHistoryHitMatches(hit, queryId, queryHit))
+        : []
+      if (exactHits.length !== 1) {
+        issues.push(error(
+          'exact-closure-historical-evidence-query-hit-unproven',
+          `Historical discovery evidence must identify exactly one exact query hit: ${queryId || 'missing'}`,
+          `${candidate.path}.discoveryEvidence.queryHit`,
+        ))
+      }
+      const exactHit = exactHits.length === 1 ? exactHits[0] || null : null
+      if (exactHit) {
+        const hitIdentity = exactHistoryPhysicalHitIdentity(exactHit)
+        const candidateId = getString(candidate.value.id) || candidate.path
+        const existingCandidateId = claimedHistoricalQueryHits.get(hitIdentity)
+        if (existingCandidateId) {
+          issues.push(error(
+            'exact-closure-historical-evidence-query-hit-reused',
+            `Historical query hit is already bound to ${existingCandidateId}: ${candidateId}`,
+            `${candidate.path}.discoveryEvidence.queryHit`,
+          ))
+        } else {
+          claimedHistoricalQueryHits.set(hitIdentity, candidateId)
+        }
+      }
+      const declaredSourceHash = getString(candidate.value.sourceHash)
+      const lastKnownCommit = getString(candidate.value.lastKnownCommit)
+      if (exactHit && expectedProfile === CHANGED_BLOB_LITERAL_PROFILE) {
+        if (exactHit.path !== candidateLocator.path) {
+          issues.push(error(
+            'exact-closure-historical-evidence-candidate-path-mismatch',
+            `Changed-blob query hit belongs to ${exactHit.path || '<message>'}, not ${candidateLocator.path}`,
+            `${candidate.path}.discoveryEvidence.queryHit.path`,
+          ))
+        }
+        const change = exactHit.path
+          ? findHistoricalChange(
+              scan.result.changes,
+              exactHit.commitId,
+              exactHit.parentCommitId,
+              exactHit.path,
+            )
+          : null
+        if (
+          exactHit.path !== candidateLocator.path
+          || exactHit.rawSourceHash !== declaredSourceHash
+          || !historicalChangeSourceMatches(
+            change,
+            exactHit.side,
+            lastKnownCommit,
+            declaredSourceHash,
+            includedCommitIds,
+          )
+        ) {
+          issues.push(error(
+            'exact-closure-historical-evidence-candidate-source-unproven',
+            'Changed-blob query hit does not directly identify the declared candidate source side',
+            `${candidate.path}.discoveryEvidence`,
+          ))
+        }
+      }
+      if (exactHit && expectedProfile === COMMIT_MESSAGE_LITERAL_PROFILE) {
+        const candidateSource = isJsonObject(evidence.candidateSource)
+          ? evidence.candidateSource
+          : null
+        const changeCommitId = candidateSource
+          ? getString(candidateSource.changeCommitId)
+          : null
+        const parentCommitId = candidateSource
+          ? nullableStringField(candidateSource, 'parentCommitId')
+          : undefined
+        const sourceSide = candidateSource ? getString(candidateSource.side) : null
+        const correlated = changeCommitId === exactHit.commitId
+          && parentCommitId !== undefined
+          && parentCommitId === exactHit.parentCommitId
+        if (!correlated) {
+          issues.push(error(
+            'exact-closure-historical-evidence-message-change-mismatch',
+            'Commit-message evidence must select a candidate-path change for the exact hit commit and direct parent',
+            `${candidate.path}.discoveryEvidence.candidateSource`,
+          ))
+        }
+        const change = correlated
+          ? findHistoricalChange(
+              scan.result.changes,
+              changeCommitId,
+              parentCommitId,
+              candidateLocator.path,
+            )
+          : null
+        if (!historicalChangeSourceMatches(
+          change,
+          sourceSide,
+          lastKnownCommit,
+          declaredSourceHash,
+          includedCommitIds,
+        )) {
+          issues.push(error(
+            'exact-closure-historical-evidence-candidate-source-unproven',
+            'Commit-message evidence is not correlated with the declared candidate source bytes at its path',
+            `${candidate.path}.discoveryEvidence.candidateSource`,
+          ))
+        }
+      }
+    }
+    if (scan?.ok) {
+      const exactLastKnownCommit = lastKnownCommit && EXACT_COMMIT_PATTERN.test(lastKnownCommit)
+        ? tryResolveGitCommit(repositoryRoot, lastKnownCommit)
+        : null
+      if (!lastKnownCommit || exactLastKnownCommit !== lastKnownCommit) {
+        issues.push(error(
+          'exact-closure-historical-commit-invalid',
+          'Historical lastKnownCommit must identify an available lowercase 40-character commit object',
           `${candidate.path}.lastKnownCommit`,
         ))
       } else if (candidateLocator) {

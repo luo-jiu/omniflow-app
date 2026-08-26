@@ -5,6 +5,7 @@ import Ajv2020, { type ValidateFunction } from 'ajv/dist/2020.js'
 import addFormats from 'ajv-formats'
 import { beforeAll, describe, expect, it } from 'vitest'
 
+import { scanExactGitHistory, type ExactHistoryTouchset } from './exact-history-scan.ts'
 import { loadAndValidateContracts } from './schema-registry.ts'
 
 type JsonObject = Record<string, unknown>
@@ -136,15 +137,32 @@ function closureCandidate(
   resolutionRefId: string | null,
 ): JsonObject {
   const historical = candidateKind === 'historical'
+  const candidatePath = `electron/service/${candidateId}.ts`
   return {
     candidateId,
     candidateKind,
+    discoveryEvidence: historical
+      ? {
+          kind: 'changed-blob-query-hit',
+          queryId: 'history.fixture.source',
+          queryHit: {
+            byteEnd: 16,
+            byteStart: 1,
+            commitId: commit,
+            parentCommitId: null,
+            path: candidatePath,
+            rawSourceHash: sha256,
+            side: 'after',
+          },
+        }
+      : null,
     discoveryRuleIds: historical ? [] : ['semantic.capture'],
     lastKnownCommit: historical ? commit : null,
     locatorKind: historical ? 'declaration' : null,
-    path: `electron/service/${candidateId}.ts`,
+    path: candidatePath,
     symbol: historical ? 'legacyCapture' : null,
     sourceHash: sha256,
+    touchsetId: historical ? 'history.fixture' : null,
     resolutionKind,
     resolutionRefId,
   }
@@ -343,6 +361,48 @@ function dynamicEdge(inventory: JsonObject, id: string): JsonObject {
   return match
 }
 
+function semanticRule(inventory: JsonObject, id: string): JsonObject {
+  const match = asArray(inventory.semanticScanRules)
+    .map(value => asObject(value))
+    .find(rule => rule.id === id)
+  if (!match) throw new Error(`Semantic scan rule is missing: ${id}`)
+  return match
+}
+
+function historicalTouchset(inventory: JsonObject, id: string): JsonObject {
+  const match = asArray(inventory.historicalTouchsets)
+    .map(value => asObject(value))
+    .find(touchset => touchset.id === id)
+  if (!match) throw new Error(`Historical touchset is missing: ${id}`)
+  return match
+}
+
+function historicalCandidate(inventory: JsonObject, id: string): JsonObject {
+  const match = asArray(inventory.historicalCandidates)
+    .map(value => asObject(value))
+    .find(candidate => candidate.id === id)
+  if (!match) throw new Error(`Historical candidate is missing: ${id}`)
+  return match
+}
+
+function historicalTouchsetReferenceIssues(inventory: JsonObject): string[] {
+  const touchsetCounts = new Map<string, number>()
+  for (const touchset of asArray(inventory.historicalTouchsets).map(value => asObject(value))) {
+    if (typeof touchset.id !== 'string') continue
+    touchsetCounts.set(touchset.id, (touchsetCounts.get(touchset.id) || 0) + 1)
+  }
+  return asArray(inventory.historicalCandidates)
+    .map(value => asObject(value))
+    .flatMap(candidate => {
+      const candidateId = typeof candidate.id === 'string' ? candidate.id : '<missing>'
+      const touchsetId = typeof candidate.touchsetId === 'string'
+        ? candidate.touchsetId
+        : '<missing>'
+      const count = touchsetCounts.get(touchsetId) || 0
+      return count === 1 ? [] : [`${candidateId}:${touchsetId}:${count}`]
+    })
+}
+
 function removeArrayValue(object: JsonObject, property: string, value: string): void {
   object[property] = asArray(object[property]).filter(item => item !== value)
 }
@@ -438,6 +498,277 @@ beforeAll(() => {
   validateLegacyInventory = requireValidator(ajv, 'https://omniflow.local/schemas/cat-catch/legacy-inventory.schema.json')
   validateLocalClosure = requireValidator(ajv, 'https://omniflow.local/schemas/cat-catch/local-closure-report.schema.json')
   validateRiskPolicy = requireValidator(ajv, 'https://omniflow.local/schemas/cat-catch/risk-policy.schema.json')
+})
+
+describe('Cat Catch semantic scan rule schema v2', () => {
+  it('validates the executable checked-in v2 declaration and its result classifications', () => {
+    expectValid(validateLegacyInventory, declaredLegacyInventory)
+    expect(declaredLegacyInventory.schemaVersion).toBe(2)
+    expect(declaredLegacyInventory.inventoryVersion).toBe('2026-08-26.1')
+    expect(declaredLegacyInventory.discoveryRulesVersion).toBe('2026-08-26.1')
+
+    const rules = asArray(declaredLegacyInventory.semanticScanRules).map(value => asObject(value))
+    const staticGraphExtensions = ['.cjs', '.cts', '.js', '.jsx', '.mjs', '.mts', '.ts', '.tsx']
+    expect(rules.every(rule => rule.matchProfile === 'utf8-literal-case-sensitive-v1')).toBe(true)
+    expect(rules.every(rule => asArray(rule.includedExtensions).length > 0)).toBe(true)
+    expect(rules.every(rule => asArray(rule.excludedPaths).length === 0)).toBe(true)
+    const codeRules = rules.filter(rule => rule.resultKind !== 'audit-reference')
+    expect(codeRules.map(rule => rule.includedExtensions))
+      .toEqual(codeRules.map(() => staticGraphExtensions))
+
+    expect(semanticRule(declaredLegacyInventory, 'scan.cat-catch-code-provenance'))
+      .toEqual(expect.objectContaining({ resultKind: 'candidate', pathScopes: ['electron', 'src'] }))
+    expect(semanticRule(declaredLegacyInventory, 'scan.cat-catch-docs-provenance'))
+      .toEqual(expect.objectContaining({
+        includedExtensions: ['.json', '.md'],
+        resultKind: 'audit-reference',
+        pathScopes: ['docs'],
+      }))
+    expect(semanticRule(declaredLegacyInventory, 'scan.tracked-generated-runtime').resultKind)
+      .toBe('generated-mirror')
+
+    const crossProcessPatterns = asArray(asArray(
+      semanticRule(declaredLegacyInventory, 'scan.cross-process-channels').patternGroups,
+    )[0])
+    expect(crossProcessPatterns).toEqual(['embedded-browser:'])
+    const dynamicPatterns = asArray(asArray(
+      semanticRule(declaredLegacyInventory, 'scan.dynamic-runtime').patternGroups,
+    )[0])
+    expect(dynamicPatterns).not.toContain('.toString()')
+    const ownerAndOutputGroups = asArray(semanticRule(
+      declaredLegacyInventory,
+      'scan.owner-and-output-state',
+    ).patternGroups)
+    expect(ownerAndOutputGroups).toHaveLength(2)
+    expect(ownerAndOutputGroups[0]).toEqual(['embeddedBrowser', 'EmbeddedBrowser', 'embedded-browser'])
+    const sensitiveContextGroups = asArray(semanticRule(
+      declaredLegacyInventory,
+      'scan.sensitive-request-context',
+    ).patternGroups)
+    expect(sensitiveContextGroups).toHaveLength(2)
+    expect(sensitiveContextGroups[0]).toEqual(['embeddedBrowser', 'EmbeddedBrowser', 'embedded-browser'])
+  })
+
+  it('rejects legacy flat patterns and vacuous or unsupported v2 fields', () => {
+    const legacy = clone(declaredLegacyInventory)
+    const legacyRule = semanticRule(legacy, 'scan.embedded-browser-symbols')
+    legacyRule.patterns = ['embeddedBrowser']
+    delete legacyRule.patternGroups
+    expectInvalid(validateLegacyInventory, legacy)
+
+    const emptyOuterGroup = clone(declaredLegacyInventory)
+    semanticRule(emptyOuterGroup, 'scan.embedded-browser-symbols').patternGroups = []
+    expectInvalid(validateLegacyInventory, emptyOuterGroup)
+
+    const emptyInnerGroup = clone(declaredLegacyInventory)
+    semanticRule(emptyInnerGroup, 'scan.embedded-browser-symbols').patternGroups = [[]]
+    expectInvalid(validateLegacyInventory, emptyInnerGroup)
+
+    const unsupportedResultKind = clone(declaredLegacyInventory)
+    semanticRule(unsupportedResultKind, 'scan.embedded-browser-symbols').resultKind = 'candidate-or-audit'
+    expectInvalid(validateLegacyInventory, unsupportedResultKind)
+  })
+})
+
+describe('Cat Catch historical scan declaration schema v2', () => {
+  it('binds every checked-in historical candidate to one typed touchset and exact query hit', () => {
+    expectValid(validateLegacyInventory, declaredLegacyInventory)
+    expect(historicalTouchsetReferenceIssues(declaredLegacyInventory)).toEqual([])
+    expect(Object.fromEntries(
+      asArray(declaredLegacyInventory.historicalCandidates)
+        .map(value => asObject(value))
+        .map(candidate => [candidate.id, candidate.touchsetId]),
+    )).toEqual({
+      'historical.probe-monolith-before-split': 'history.capture-runtime-apr14-15',
+      'historical.resource-service-before-split': 'history.capture-runtime-apr14-15',
+      'historical.deep-hooks-port-snapshot': 'history.capture-runtime-apr14-15',
+      'historical.mse-duration-snapshot': 'history.mse-spool-apr23',
+      'historical.hls-parser-initial-snapshot': 'history.hls-dash-apr22-23',
+      'historical.dash-parser-initial-snapshot': 'history.hls-dash-apr22-23',
+    })
+    expect(Object.fromEntries(
+      asArray(declaredLegacyInventory.historicalCandidates)
+        .map(value => asObject(value))
+        .map(candidate => [candidate.id, asObject(candidate.discoveryEvidence).queryId]),
+    )).toEqual({
+      'historical.probe-monolith-before-split': 'candidate.probe-monolith',
+      'historical.resource-service-before-split': 'candidate.resource-service',
+      'historical.deep-hooks-port-snapshot': 'candidate.deep-hooks',
+      'historical.mse-duration-snapshot': 'candidate.mse-duration',
+      'historical.hls-parser-initial-snapshot': 'candidate.hls-parser',
+      'historical.dash-parser-initial-snapshot': 'candidate.mpd-parser',
+    })
+
+    const scanCache = new Map<string, ReturnType<typeof scanExactGitHistory>>()
+    for (const candidateValue of asArray(declaredLegacyInventory.historicalCandidates)) {
+      const candidate = asObject(candidateValue)
+      const touchsetId = String(candidate.touchsetId)
+      let scan = scanCache.get(touchsetId)
+      if (!scan) {
+        scan = scanExactGitHistory(
+          appRoot,
+          historicalTouchset(
+            declaredLegacyInventory,
+            touchsetId,
+          ) as unknown as ExactHistoryTouchset,
+        )
+        scanCache.set(touchsetId, scan)
+      }
+      expect(scan.ok, JSON.stringify(scan.issues, null, 2)).toBe(true)
+      if (!scan.ok) continue
+      const evidence = asObject(candidate.discoveryEvidence)
+      const selector = asObject(evidence.queryHit)
+      const exactHits = scan.result.queryHits.filter(hit => (
+        hit.queryId === evidence.queryId
+        && hit.commitId === selector.commitId
+        && hit.parentCommitId === selector.parentCommitId
+        && hit.path === selector.path
+        && hit.side === selector.side
+        && hit.rawSourceHash === selector.rawSourceHash
+        && hit.byteStart === selector.byteStart
+        && hit.byteEnd === selector.byteEnd
+      ))
+      expect(exactHits, String(candidate.id)).toHaveLength(1)
+      const hit = exactHits[0]
+      expect(evidence.kind).toBe('changed-blob-query-hit')
+      expect(hit?.profile).toBe('changed-blob-literal-v1')
+      expect(hit?.path).toBe(candidate.path)
+      expect(hit?.rawSourceHash).toBe(candidate.sourceHash)
+      expect(hit?.side === 'after' ? hit.commitId : hit?.parentCommitId)
+        .toBe(candidate.lastKnownCommit)
+    }
+  })
+
+  it('rejects legacy, nullable, empty, unsupported, and exactly duplicated query declarations', () => {
+    const legacy = clone(declaredLegacyInventory)
+    const legacyTouchset = historicalTouchset(legacy, 'history.capture-runtime-apr14-15')
+    legacyTouchset.searchTerms = ['deep resource probe']
+    delete legacyTouchset.queries
+    expectInvalid(validateLegacyInventory, legacy)
+
+    const nullableStart = clone(declaredLegacyInventory)
+    historicalTouchset(nullableStart, 'history.capture-runtime-apr14-15').fromCommit = null
+    expectInvalid(validateLegacyInventory, nullableStart)
+
+    const emptyQueryId = clone(declaredLegacyInventory)
+    const emptyIdQueries = asArray(historicalTouchset(
+      emptyQueryId,
+      'history.capture-runtime-apr14-15',
+    ).queries)
+    asObject(emptyIdQueries[0]).id = ''
+    expectInvalid(validateLegacyInventory, emptyQueryId)
+
+    const unsupportedProfile = clone(declaredLegacyInventory)
+    const unsupportedQueries = asArray(historicalTouchset(
+      unsupportedProfile,
+      'history.capture-runtime-apr14-15',
+    ).queries)
+    asObject(unsupportedQueries[0]).profile = 'git-grep-regex-v1'
+    expectInvalid(validateLegacyInventory, unsupportedProfile)
+
+    const exactDuplicate = clone(declaredLegacyInventory)
+    const duplicateQueries = asArray(historicalTouchset(
+      exactDuplicate,
+      'history.capture-runtime-apr14-15',
+    ).queries)
+    duplicateQueries.push(clone(duplicateQueries[0]))
+    expectInvalid(validateLegacyInventory, exactDuplicate)
+
+    const missingTouchsetRef = clone(declaredLegacyInventory)
+    delete historicalCandidate(
+      missingTouchsetRef,
+      'historical.probe-monolith-before-split',
+    ).touchsetId
+    expectInvalid(validateLegacyInventory, missingTouchsetRef)
+
+    const missingEvidence = clone(declaredLegacyInventory)
+    delete historicalCandidate(
+      missingEvidence,
+      'historical.probe-monolith-before-split',
+    ).discoveryEvidence
+    expectInvalid(validateLegacyInventory, missingEvidence)
+
+    const freeTextEvidence = clone(declaredLegacyInventory)
+    historicalCandidate(
+      freeTextEvidence,
+      'historical.probe-monolith-before-split',
+    ).discoveryEvidence = {
+      rationale: 'This source was probably introduced by the touchset.',
+    }
+    expectInvalid(validateLegacyInventory, freeTextEvidence)
+
+    const incompleteHit = clone(declaredLegacyInventory)
+    const incompleteEvidence = asObject(historicalCandidate(
+      incompleteHit,
+      'historical.probe-monolith-before-split',
+    ).discoveryEvidence)
+    delete asObject(incompleteEvidence.queryHit).rawSourceHash
+    expectInvalid(validateLegacyInventory, incompleteHit)
+
+    const uncorrelatedMessage = clone(declaredLegacyInventory)
+    historicalCandidate(
+      uncorrelatedMessage,
+      'historical.probe-monolith-before-split',
+    ).discoveryEvidence = {
+      kind: 'commit-message-query-hit-with-path-change',
+      queryId: 'capture.resource-capture-split',
+      queryHit: {
+        byteEnd: 59,
+        byteStart: 20,
+        commitId: 'e1eeb8f0ae2c2b25f5277bb70665d8c97acca39b',
+        parentCommitId: '49b6e999b077a0a994fff09edf6415072f322bb8',
+        path: null,
+        rawSourceHash: 'sha256:d57f31a6e266e09d1a1e1f3f77b796afe6f422f090475b562de2f537b3869b3e',
+        side: 'commit-message',
+      },
+    }
+    expectInvalid(validateLegacyInventory, uncorrelatedMessage)
+  })
+
+  it('leaves cross-record identity checks to executable fail-closed invariants', () => {
+    const duplicateQueryId = clone(declaredLegacyInventory)
+    const duplicateIdTouchset = historicalTouchset(
+      duplicateQueryId,
+      'history.capture-runtime-apr14-15',
+    )
+    const duplicateIdQueries = asArray(duplicateIdTouchset.queries)
+    asObject(duplicateIdQueries[1]).id = asObject(duplicateIdQueries[0]).id
+    expectValid(validateLegacyInventory, duplicateQueryId)
+
+    const scan = scanExactGitHistory(
+      '/not/a/repository',
+      duplicateIdTouchset as unknown as ExactHistoryTouchset,
+    )
+    expect(scan).toEqual(expect.objectContaining({ ok: false, result: null }))
+    expect(scan.issues).toContainEqual(expect.objectContaining({
+      code: 'history-scan.query-id-duplicate',
+      queryId: 'capture.resource-tools',
+    }))
+
+    const danglingTouchsetRef = clone(declaredLegacyInventory)
+    historicalCandidate(
+      danglingTouchsetRef,
+      'historical.probe-monolith-before-split',
+    ).touchsetId = 'history.missing'
+    expectValid(validateLegacyInventory, danglingTouchsetRef)
+    expect(historicalTouchsetReferenceIssues(danglingTouchsetRef)).toEqual([
+      'historical.probe-monolith-before-split:history.missing:0',
+    ])
+
+    const duplicateTouchsetId = clone(declaredLegacyInventory)
+    historicalTouchset(
+      duplicateTouchsetId,
+      'history.hls-dash-apr22-23',
+    ).id = 'history.capture-runtime-apr14-15'
+    expectValid(validateLegacyInventory, duplicateTouchsetId)
+    expect(historicalTouchsetReferenceIssues(duplicateTouchsetId)).toEqual([
+      'historical.probe-monolith-before-split:history.capture-runtime-apr14-15:2',
+      'historical.resource-service-before-split:history.capture-runtime-apr14-15:2',
+      'historical.deep-hooks-port-snapshot:history.capture-runtime-apr14-15:2',
+      'historical.hls-parser-initial-snapshot:history.hls-dash-apr22-23:0',
+      'historical.dash-parser-initial-snapshot:history.hls-dash-apr22-23:0',
+    ])
+  })
 })
 
 describe('Cat Catch dynamic edge endpoint schema', () => {
@@ -602,12 +933,16 @@ describe('Cat Catch local closure report schema', () => {
       ['fixtureId', report => asObject(asArray(report.declaredDynamicEdges)[0])],
       ['candidateKind', report => asObject(asArray(report.semanticCandidates)[0])],
       ['locatorKind', report => asObject(asArray(report.semanticCandidates)[0])],
+      ['discoveryEvidence', report => asObject(asArray(report.semanticCandidates)[0])],
       ['discoveryRuleIds', report => asObject(asArray(report.semanticCandidates)[0])],
       ['lastKnownCommit', report => asObject(asArray(report.semanticCandidates)[0])],
+      ['touchsetId', report => asObject(asArray(report.semanticCandidates)[0])],
       ['candidateKind', report => asObject(asArray(report.historicalCandidates)[0])],
       ['locatorKind', report => asObject(asArray(report.historicalCandidates)[0])],
+      ['discoveryEvidence', report => asObject(asArray(report.historicalCandidates)[0])],
       ['discoveryRuleIds', report => asObject(asArray(report.historicalCandidates)[0])],
       ['lastKnownCommit', report => asObject(asArray(report.historicalCandidates)[0])],
+      ['touchsetId', report => asObject(asArray(report.historicalCandidates)[0])],
     ]
 
     for (const [field, select] of projectionFields) {
@@ -623,6 +958,19 @@ describe('Cat Catch local closure report schema', () => {
     const wrongHistoricalKind = passedLocalClosure()
     asObject(asArray(wrongHistoricalKind.historicalCandidates)[0]).candidateKind = 'current'
     expectInvalid(validateLocalClosure, wrongHistoricalKind)
+
+    const currentWithHistoricalEvidence = passedLocalClosure()
+    const semanticCandidate = asObject(asArray(currentWithHistoricalEvidence.semanticCandidates)[0])
+    const historicalCandidate = asObject(asArray(currentWithHistoricalEvidence.historicalCandidates)[0])
+    semanticCandidate.discoveryEvidence = clone(historicalCandidate.discoveryEvidence)
+    semanticCandidate.touchsetId = historicalCandidate.touchsetId
+    expectInvalid(validateLocalClosure, currentWithHistoricalEvidence)
+
+    const historicalWithoutTypedEvidence = passedLocalClosure()
+    asObject(asArray(historicalWithoutTypedEvidence.historicalCandidates)[0]).discoveryEvidence = {
+      rationale: 'A free-text claim is not exact discovery evidence.',
+    }
+    expectInvalid(validateLocalClosure, historicalWithoutTypedEvidence)
 
     const missingHistoricalResolutionRef = passedLocalClosure()
     asObject(asArray(missingHistoricalResolutionRef.historicalCandidates)[0]).resolutionRefId = null
