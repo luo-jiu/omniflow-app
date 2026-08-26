@@ -1,26 +1,53 @@
 import crypto from 'node:crypto'
 
 import { classifyResourceFingerprint } from '../../cat-catch-port/network/classifier'
+import {
+  CAPTURE_MODES,
+  CAPTURED_RESOURCE_KINDS,
+  type ActiveResourceStateSnapshot,
+  type CaptureMode,
+  type CapturedResourceContextProjection,
+  type CapturedResourceKind,
+  type CapturedResourceProjection,
+  type CapturedResourceSource,
+  type CapturedResourceStreamType,
+  type DisposedResourceStateSnapshot,
+  type ResourceStateActiveResetCause,
+  type ResourceStateChange,
+  type ResourceStateDisposeCause,
+  type ResourceStateModeChange,
+  type ResourceStateRemoveChange,
+  type ResourceStateResetChange,
+  type ResourceStateSnapshot,
+  type ResourceStateStamp,
+  type ResourceStateUpsertChange,
+} from '../../contracts/captured-resource'
 import type { NetworkContextProjection } from './network-context-vault'
+
+export {
+  CAPTURE_MODES,
+  CAPTURED_RESOURCE_KINDS,
+  type ActiveResourceStateSnapshot,
+  type CaptureMode,
+  type CapturedResourceContextProjection,
+  type CapturedResourceKind,
+  type CapturedResourceProjection,
+  type CapturedResourceSource,
+  type CapturedResourceStreamType,
+  type DisposedResourceStateSnapshot,
+  type ResourceStateActiveResetCause,
+  type ResourceStateChange,
+  type ResourceStateDisposeCause,
+  type ResourceStateModeChange,
+  type ResourceStateRemoveChange,
+  type ResourceStateResetChange,
+  type ResourceStateSnapshot,
+  type ResourceStateStamp,
+  type ResourceStateUpsertChange,
+} from '../../contracts/captured-resource'
 
 const DEFAULT_MAX_RESOURCES_PER_TAB = 10_000
 const DEFAULT_RESOURCE_TTL_MS = 6 * 60 * 60_000
-
-export const CAPTURE_MODES = ['off', 'network', 'deep'] as const
-export const CAPTURED_RESOURCE_KINDS = [
-  'manifest',
-  'media',
-  'image',
-  'subtitle',
-  'document',
-  'key',
-  'other',
-] as const
-
-export type CaptureMode = typeof CAPTURE_MODES[number]
-export type CapturedResourceKind = typeof CAPTURED_RESOURCE_KINDS[number]
-export type CapturedResourceSource = 'network' | 'probe'
-export type CapturedResourceStreamType = 'audio' | 'video'
 
 export type CapturedResourceMetadataInput = {
   capturedAt?: number
@@ -34,30 +61,6 @@ export type CapturedResourceMetadataInput = {
   resourceType?: string
   statusCode?: number
   streamType?: CapturedResourceStreamType
-  url: string
-}
-
-export type CapturedResourceContextProjection = {
-  hasAuthorization: boolean
-  hasCookie: boolean
-  headerNames: string[]
-}
-
-export type CapturedResourceProjection = {
-  capturedAt: number
-  contentLength?: number
-  context?: CapturedResourceContextProjection
-  ext?: string
-  id: string
-  kind: CapturedResourceKind
-  method?: string
-  mimeType?: string
-  name?: string
-  resourceType?: string
-  source: CapturedResourceSource
-  statusCode?: number
-  streamType?: CapturedResourceStreamType
-  tabId: string
   url: string
 }
 
@@ -77,74 +80,6 @@ export type TabCaptureBinding = {
   tabId: string
   webContentsId: number
 }
-
-export type ResourceStateStamp = {
-  incarnation: number
-  revision: number
-  tabId: string
-}
-
-export type ActiveResourceStateSnapshot = ResourceStateStamp & {
-  captureMode: CaptureMode
-  resources: CapturedResourceProjection[]
-  status: 'active'
-}
-
-export type DisposedResourceStateSnapshot = ResourceStateStamp & {
-  status: 'disposed'
-}
-
-export type ResourceStateSnapshot =
-  | ActiveResourceStateSnapshot
-  | DisposedResourceStateSnapshot
-
-export type ResourceStateUpsertChange = ResourceStateStamp & {
-  resources: CapturedResourceProjection[]
-  type: 'upsert'
-}
-
-export type ResourceStateRemoveChange = ResourceStateStamp & {
-  reason: 'ttl'
-  resourceIds: string[]
-  type: 'remove'
-}
-
-export type ResourceStateActiveResetCause =
-  | 'capacity'
-  | 'clear'
-  | 'navigation'
-  | 'register'
-  | 'replace'
-
-export type ResourceStateDisposeCause =
-  | 'app-dispose'
-  | 'tab-dispose'
-  | 'web-contents-dispose'
-
-export type ResourceStateResetChange = ResourceStateStamp & (
-  | {
-    captureMode: CaptureMode
-    cause: ResourceStateActiveResetCause
-    status: 'active'
-    type: 'reset'
-  }
-  | {
-    cause: ResourceStateDisposeCause
-    status: 'disposed'
-    type: 'reset'
-  }
-)
-
-export type ResourceStateModeChange = ResourceStateStamp & {
-  captureMode: CaptureMode
-  type: 'mode'
-}
-
-export type ResourceStateChange =
-  | ResourceStateModeChange
-  | ResourceStateRemoveChange
-  | ResourceStateResetChange
-  | ResourceStateUpsertChange
 
 export type ResourceWriteDecision =
   | 'accepted'

@@ -369,15 +369,18 @@
         "electron/service/embedded-browser/contracts/captured-resource.ts#CapturedResourceContract"
       ],
       "relationToUpstream": "not-applicable",
-      "syncState": "pending",
-      "syncedThrough": null,
+      "syncState": "ported-unverified",
+      "syncedThrough": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
       "plannedTestIds": [
         "contract.resource-dto-single-source",
         "contract.renderer-safe-projection"
       ],
-      "testRefs": [],
+      "testRefs": [
+        "electron/service/embedded-browser/contracts/captured-resource.test.ts#contract.resource-dto-single-source",
+        "electron/service/embedded-browser/contracts/captured-resource.test.ts#contract.renderer-safe-projection"
+      ],
       "acceptedDifferences": [],
-      "notes": "Seed gap: resource and processing DTOs are duplicated across main, preload, ambient declarations, renderer types, and APIs."
+      "notes": "The target contract now owns renderer-safe resource/snapshot/change DTOs, whitelist parsing, and the revision/incarnation reducer. The new Store imports and re-exports these types for migration compatibility. Legacy preload, ambient, and renderer DTO copies remain reachable only through the production legacy chain and must be removed in the atomic network-capture cutover."
     },
     {
       "id": "capture.owner-lifecycle",

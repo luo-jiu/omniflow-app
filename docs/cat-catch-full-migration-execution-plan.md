@@ -62,9 +62,9 @@ OmniFlow 不运行 Cat Catch 浏览器扩展，而是把与产品目标相关的
 - HLS 已知缺少隐式 BYTERANGE offset、一次性 manifest cache fallback、伪装分片预处理等经验分支。
 - DASH 手写 parser 对 `r=-1`、多 BaseURL、动态 MPD 等语义不完整。
 - HLS、DASH、MSE、ffmpeg、临时文件和输出交付尚无统一 task/cleanup 合同。
-- 当前 network classifier/rules、page URL policy、main-only request context vault、main-owned resource state contract 与未注册的 Electron network adapter 的 11 个计划 ID 已落成专项纯行为/合同或 fake `webRequest` integration test；adapter 已按 `onSendHeaders -> onResponseStarted` 接通 vault/store 并同步投影 context 失效，但尚未接入生产入口、IPC/reducer 或下载 consumer，其余计划 ID 仍只是需求种子，尚无 active fixture/test。
+- 当前 network classifier/rules、page URL policy、main-only request context vault、main-owned resource state、renderer-safe cross-process contract/reducer 与未注册的 Electron network adapter 的 13 个计划 ID 已落成专项纯行为/合同或 fake `webRequest` integration test；adapter 已按 `onSendHeaders -> onResponseStarted` 接通 vault/store 并同步投影 context 失效，目标合同也已覆盖乱序、revision gap、incarnation 与 tombstone，但尚未接入生产 IPC/preload/renderer 或下载 consumer，其余计划 ID 仍只是需求种子，尚无 active fixture/test。
 
-因此当前有 5 项能力达到 `ported-unverified`，其余 27 项仍为 `pending`；不能因为同名代码存在就标记为已迁移或已验证。
+因此当前有 6 项能力达到 `ported-unverified`，其余 26 项仍为 `pending`；不能因为同名代码存在就标记为已迁移或已验证。
 
 ## 4. 长期事实文件
 
