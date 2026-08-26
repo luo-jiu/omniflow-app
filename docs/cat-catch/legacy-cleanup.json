@@ -74,6 +74,26 @@
       "cleanupAction": "remove-after-cutover"
     },
     {
+      "id": "node.network.default-blocked-page-patterns",
+      "path": "electron/service/embeddedBrowserResourceCaptureRules.ts",
+      "symbol": "catCatchDefaultBlockedPagePatterns",
+      "capabilityId": "capture.request-url-helpers",
+      "cutoverUnitId": "network-capture",
+      "classification": "legacy",
+      "role": "policy",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.network.default-blocked-page-matcher",
+      "path": "electron/service/embeddedBrowserResourceCaptureRules.ts",
+      "symbol": "isCatCatchDefaultBlockedPageUrl",
+      "capabilityId": "capture.request-url-helpers",
+      "cutoverUnitId": "network-capture",
+      "classification": "legacy",
+      "role": "policy",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
       "id": "node.page-hook.installer",
       "path": "electron/service/embeddedBrowserViewLifecycle.ts",
       "symbol": "installEmbeddedBrowserResourceProbe",

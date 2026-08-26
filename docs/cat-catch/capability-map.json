@@ -140,6 +140,13 @@
             "G.requestHeaders = new Map();",
             "function getRequestHeaders(data) {"
           ]
+        },
+        {
+          "path": "js/function.js",
+          "anchors": [
+            "function setHeaders(data, callBack, tabId = -1)",
+            "function setRequestHeaders(data = {}, callback = undefined)"
+          ]
         }
       ],
       "currentImplementationRefs": [
@@ -154,11 +161,12 @@
       "syncedThrough": null,
       "plannedTestIds": [
         "network.sensitive-header-projection",
-        "network.context-ttl-purpose-binding"
+        "network.context-ttl-purpose-binding",
+        "network.request-header-rule-scope"
       ],
       "testRefs": [],
       "acceptedDifferences": [],
-      "notes": "Seed gap: sensitive header values cross main, preload, renderer, plans, tools, and download commands; the current Map has no TTL or capacity budget."
+      "notes": "Seed gap: sensitive header values cross main, preload, renderer, plans, tools, and download commands; the current Map has no TTL or capacity budget. Cat Catch's DNR helpers preserve tab/initiator, URL-filter, resource-type, header-order, and cookie scope, but Electron must realize those semantics through purpose-bound main consumers rather than copied session rules."
     },
     {
       "id": "capture.request-url-helpers",
@@ -167,7 +175,6 @@
       "boundary": "capture.request-url-policy",
       "risks": [
         "production-runtime",
-        "credentials",
         "security-boundary"
       ],
       "upstreamRefs": [
@@ -175,26 +182,52 @@
           "path": "js/function.js",
           "anchors": [
             "function isDamnUrl(url)",
-            "function isLockUrl(url)",
-            "function setHeaders(data, callBack, tabId = -1)",
-            "function setRequestHeaders(data = {}, callback = undefined)"
+            "function isLockUrl(url)"
+          ]
+        },
+        {
+          "path": "js/init.js",
+          "anchors": [
+            "G.damnUrl = [",
+            "blockUrl: [],",
+            "blockUrlWhite: false,",
+            "damn: false,",
+            "function wildcardToRegex(urlPattern) {"
+          ]
+        },
+        {
+          "path": "js/background.js",
+          "anchors": [
+            "if (G.damn && G.damnUrlSet.has(data.tabId)) {",
+            "if (!G.enable || (G.blockUrlWhite ? !blockUrlFlag : blockUrlFlag) || data?.method == \"OPTIONS\") {",
+            "function isSpecialPage(url) {"
           ]
         }
       ],
-      "currentImplementationRefs": [],
+      "currentImplementationRefs": [
+        "electron/service/embeddedBrowserResourceCaptureRules.ts#catCatchDefaultBlockedPagePatterns",
+        "electron/service/embeddedBrowserResourceCaptureRules.ts#isCatCatchDefaultBlockedPageUrl"
+      ],
       "targetRefs": [
-        "electron/service/embedded-browser/cat-catch-port/network/request-url-helpers.ts#RequestUrlHelpers"
+        "electron/service/embedded-browser/cat-catch-port/network/request-url-helpers.ts#compileCatCatchUrlFilterRules",
+        "electron/service/embedded-browser/cat-catch-port/network/request-url-helpers.ts#evaluateCatCatchPageUrlPolicy",
+        "electron/service/embedded-browser/cat-catch-port/network/request-url-helpers.ts#isCatCatchForcedBlockedUrl",
+        "electron/service/embedded-browser/cat-catch-port/network/request-url-helpers.ts#isCatCatchSpecialPageUrl",
+        "electron/service/embedded-browser/cat-catch-port/network/request-url-helpers.ts#matchesCatCatchUrlFilter"
       ],
       "relationToUpstream": "exact",
-      "syncState": "pending",
-      "syncedThrough": null,
+      "syncState": "ported-unverified",
+      "syncedThrough": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
       "plannedTestIds": [
-        "network.request-header-rule-scope",
-        "network.url-filtering-parity"
+        "network.url-filtering-parity",
+        "network.special-page-parity"
       ],
-      "testRefs": [],
+      "testRefs": [
+        "electron/service/embedded-browser/cat-catch-port/network/request-url-helpers.test.ts#network.url-filtering-parity",
+        "electron/service/embedded-browser/cat-catch-port/network/request-url-helpers.test.ts#network.special-page-parity"
+      ],
       "acceptedDifferences": [],
-      "notes": "Seed only: Cat Catch request-header and URL filtering helpers are anchored to the observed upstream bytes, but their direct behavior dependencies and OmniFlow mapping have not been audited."
+      "notes": "Pinned pure port covers full-string case-insensitive wildcard page rules, disabled-rule skipping, the default-off Douyin forced block, blacklist/whitelist inversion, and special-page protocol checks. It does not own per-tab membership and is not connected to production. The current local domain rules filter resource hosts rather than Cat Catch's top-level page/tab URL, so a later adapter must map that product difference explicitly."
     },
     {
       "id": "capture.rules-classification-deduplication",
