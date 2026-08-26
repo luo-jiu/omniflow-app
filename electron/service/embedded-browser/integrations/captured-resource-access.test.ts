@@ -188,6 +188,51 @@ describe('network.owned-resource-consumer', () => {
       tabId: 'tab-1',
     })).toBeNull()
   })
+
+  it('rejects a retained context-free resource after its document owner changes', () => {
+    const vault = new NetworkContextVault()
+    const store = new ResourceStateStore({
+      createResourceId: () => 'probe-resource-opaque',
+    })
+    const registration = store.registerTab({
+      pageUrl: 'https://page.example/watch',
+      tabId: 'tab-probe',
+      webContentsId: 51,
+    })!
+    store.setCaptureMode('tab-probe', 'deep')
+    expect(store.upsertProbeResource({
+      binding: registration.binding,
+      metadata: {
+        kind: 'manifest',
+        resourceKey: 'probe-manifest',
+        url: 'https://media.example/playlist.m3u8',
+      },
+    }).decision).toBe('accepted')
+
+    const access = new CapturedResourceAccessService({
+      fetch: (input, init) => fetch(input, init),
+      store,
+      vault,
+    })
+    expect(access.redeem({
+      purpose: 'external-tool',
+      resourceId: 'probe-resource-opaque',
+      tabId: 'tab-probe',
+    })).not.toBeNull()
+
+    const navigation = store.commitNavigation({
+      binding: registration.binding,
+      clearResources: false,
+      pageUrl: 'https://page.example/next',
+    })!
+    expect(navigation.change).toBeNull()
+    expect(store.getOwnedResource('tab-probe', 'probe-resource-opaque')).not.toBeNull()
+    expect(access.redeem({
+      purpose: 'external-tool',
+      resourceId: 'probe-resource-opaque',
+      tabId: 'tab-probe',
+    })).toBeNull()
+  })
 })
 
 describe('network.redirect-hop-isolation', () => {

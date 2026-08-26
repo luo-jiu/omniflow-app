@@ -62,9 +62,9 @@ OmniFlow 不运行 Cat Catch 浏览器扩展，而是把与产品目标相关的
 - HLS 已知缺少隐式 BYTERANGE offset、一次性 manifest cache fallback、伪装分片预处理等经验分支。
 - DASH 手写 parser 对 `r=-1`、多 BaseURL、动态 MPD 等语义不完整。
 - HLS、DASH、MSE、ffmpeg、临时文件和输出交付尚无统一 task/cleanup 合同。
-- 当前 network classifier/rules、OmniFlow 产品 policy、page URL policy、main-only request context vault、main-owned resource state、renderer-safe cross-process contract/reducer、未注册的 Electron network/probe adapter、owner lifecycle 与 main-only resource access consumer 的 21 个计划 ID 已落成专项纯行为/合同、fake Electron integration 或 loopback redirect test。产品 policy 显式补充 image/key/document/expanded-subtitle 且不覆盖 regex blacklist；probe console adapter 使用随机 document token 并在每条消息前复核 lifecycle binding，无 key 的普通 discovery 由 main 派生稳定 key，MSE 控制消息不写 Resource Store；access consumer 只接受 opaque resource ID 与固定 purpose。目标链仍未接入生产 IPC/preload/renderer、probe 安装入口或四类旧 consumer，其余计划 ID 仍只是需求种子，尚无 active fixture/test。
+- 当前 network classifier/rules、OmniFlow 产品 policy、page URL policy、main-only request context vault、main-owned resource state、renderer-safe cross-process contract/reducer、未注册的 Electron network/probe adapter、owner lifecycle、main-only resource access consumer 与 external-tool consumer 的 22 个计划 ID 已落成专项纯行为/合同、fake Electron integration 或 loopback redirect test。产品 policy 显式补充 image/key/document/expanded-subtitle 且不覆盖 regex blacklist；probe console adapter 使用随机 document token 并在每条消息前复核 lifecycle binding，无 key 的普通 discovery 由 main 派生稳定 key，MSE 控制消息不写 Resource Store；access consumer 只接受 opaque resource ID 与固定 purpose，external-tool dispatcher 只接受 `tabId/resourceId/toolKey`。目标链仍未接入生产 IPC/preload/renderer、probe 安装入口或四类旧 consumer 的生产入口，其余计划 ID 仍只是需求种子，尚无 active fixture/test。
 
-因此当前 `network-capture` 的 7 项目标能力均达到 `ported-unverified`，其余 25 项仍为 `pending`；尚无 production cutover，不能因为目标链测试通过就标记为 `verified`。
+因此当前 `network-capture` 的 7 项目标能力均达到 `ported-unverified`，`output.external-tools-dispatch` 为 `porting`，其余 24 项仍为 `pending`；尚无 production cutover，不能因为目标链测试通过就标记为 `verified`。
 
 ## 4. 长期事实文件
 
@@ -309,6 +309,6 @@ tools/cat-catch-lab/fixtures/<fixture-id>/
 ## 12. 当前下一步
 
 1. 运行轻量 `cat-catch:validate`，确认版本、32 项能力和 106 个旧位置自洽。
-2. 将 main-only resource access consumer 接入下载、检查、页面拖拽和外部工具，删除这些路径对 renderer `url/headers/referer` 的信任；让 production probe 安装入口使用 lifecycle 签发的 tokenized document ingress，并让 IPC/preload/renderer 只消费安全合同。
+2. 继续将 main-only resource access consumer 接入下载、检查和页面拖拽，并在原子切换时把已完成的 external-tool dispatcher 接到生产入口，删除这些路径对 renderer `url/headers/referer` 的信任；让 production probe 安装入口使用 lifecycle 签发的 tokenized document ingress，并让 IPC/preload/renderer 只消费安全合同。
 3. 上述 consumer 与 production-equivalent integration 通过后，在唯一 `MainSupport` dispatch boundary 原子切换，随同删除旧 listener、request context Map、classifier/rules 和敏感 header DTO；不得并行注册新旧 `webRequest` listener。
 4. 为其余 unit 补固定目标的直接行为依赖、真实 test refs 和 production-equivalent integration，不把现有 legacy 行为当 oracle。

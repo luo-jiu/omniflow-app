@@ -181,7 +181,7 @@
         "When Cat Catch regex classification rewrites a request URL, OmniFlow does not inherit credentials from the observed URL; a new main-owned context is required for the rewritten exact URL.",
         "After an HTTP redirect, OmniFlow never forwards the previous hop's protected headers, including for a same-origin target. The target needs its own main-owned captured context; page-drag staging may still use the captured tab's Electron session cookie jar for cookies scoped to the target URL."
       ],
-      "notes": "The pinned main-only vault preserves Cat Catch's protected-header selection and adds bounded pending/retained lifecycles, opaque renderer-safe projection, purpose and owner bindings, independent source/replay resource types, exact resource URL redemption, page-drag Cookie policy, and value-free invalidation events for every retained context deletion reason. The unregistered CapturedResourceAccessService now accepts only tabId, opaque resourceId, and one of four fixed purposes; it derives URL, replay type, owner generation, page origin, WebContents, and header values from Store/Vault, rejects stale owners, forces manual redirect, and strips protected headers from every later hop. Page-drag omits the captured Cookie and requests cookie-jar credentials through a mandatory injected transport; production wiring must bind that transport to the captured tab's Electron session. The target service is not wired to production download, inspection, drag staging, external tools, IPC, or renderer; the legacy Map and header-bearing DTO remain the only production path until the atomic network-capture cutover."
+      "notes": "The pinned main-only vault preserves Cat Catch's protected-header selection and adds bounded pending/retained lifecycles, opaque renderer-safe projection, purpose and owner bindings, independent source/replay resource types, exact resource URL redemption, page-drag Cookie policy, and value-free invalidation events for every retained context deletion reason. The unregistered CapturedResourceAccessService now accepts only tabId, opaque resourceId, and one of four fixed purposes; it derives URL, replay type, owner generation, page origin, WebContents, and header values from Store/Vault, rejects stale owners for both context-bearing and context-free resources, forces manual redirect, and strips protected headers from every later hop. Page-drag omits the captured Cookie and requests cookie-jar credentials through a mandatory injected transport; production wiring must bind that transport to the captured tab's Electron session. An unregistered ExternalToolDispatcher now consumes this authority, but production download, inspection, drag staging, external-tool IPC/renderer, and the other legacy paths remain unchanged until the atomic network-capture cutover."
     },
     {
       "id": "capture.request-url-helpers",
@@ -1624,16 +1624,18 @@
         "electron/service/embedded-browser/integrations/external-tools.ts#ExternalToolDispatcher"
       ],
       "relationToUpstream": "platform-substitute",
-      "syncState": "pending",
+      "syncState": "porting",
       "syncedThrough": null,
       "plannedTestIds": [
         "output.external-tool-auth-boundary",
         "output.external-tool-process-terminal",
         "output.m3u8dl-protocol-encoding"
       ],
-      "testRefs": [],
+      "testRefs": [
+        "electron/service/embedded-browser/integrations/external-tools.test.ts#output.external-tool-auth-boundary"
+      ],
       "acceptedDifferences": [],
-      "notes": "Pinned upstream Base64-encodes m3u8dl custom-protocol payloads when configured. OmniFlow substitutes a generic protocol/command/aria2 dispatcher with a matching m3u8dl URL template, but it consumes renderer-supplied URL and header payloads without the planned protected-context capability boundary. Options import/export is a separate peripheral Base64 consumer and remains outside this initial runtime mapping."
+      "notes": "Pinned upstream Base64-encodes m3u8dl custom-protocol payloads when configured. The unregistered ExternalToolDispatcher now accepts only tabId, opaque resourceId, and toolKey, redeems URL/metadata/protected headers from the main-owned Store/Vault, and rejects invalid, cross-tab, or stale requests before execution. Production IPC/preload/renderer still call the legacy generic protocol/command/aria2 dispatcher with renderer-supplied URL/header payloads; process terminal behavior, m3u8dl Base64 protocol encoding, production wiring, and legacy cleanup remain open. Options import/export is a separate peripheral Base64 consumer and remains outside this initial runtime mapping."
     }
   ]
 }

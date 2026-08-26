@@ -134,20 +134,21 @@ export class CapturedResourceAccessService {
     const resourceUrl = normalizeHttpUrl(owned.url)
     if (!resourceUrl) return null
 
+    const currentBinding = this.options.store.getCaptureBinding(tabId)
+    if (
+      !currentBinding
+      || currentBinding.incarnation !== owned.capturedIncarnation
+      || currentBinding.navigationGeneration !== owned.capturedNavigationGeneration
+      || currentBinding.pageOrigin !== owned.capturedPageOrigin
+      || currentBinding.webContentsId !== owned.capturedWebContentsId
+    ) {
+      return null
+    }
+
     const replayResourceType = inferReplayResourceType(owned)
     let headers: Array<[name: string, value: string]> = []
     if (owned.contextRef) {
-      const currentBinding = this.options.store.getCaptureBinding(tabId)
-      if (
-        !currentBinding
-        || currentBinding.incarnation !== owned.capturedIncarnation
-        || currentBinding.navigationGeneration !== owned.capturedNavigationGeneration
-        || currentBinding.pageOrigin !== owned.capturedPageOrigin
-        || currentBinding.webContentsId !== owned.capturedWebContentsId
-        || !owned.capturedPageOrigin
-      ) {
-        return null
-      }
+      if (!owned.capturedPageOrigin) return null
       const redemption = this.options.vault.redeem({
         contextRef: owned.contextRef,
         navigationGeneration: owned.capturedNavigationGeneration,

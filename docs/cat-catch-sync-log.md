@@ -171,6 +171,20 @@
 - legacy cleanup: 无；旧 console recorder 在原子 cutover 前仍为唯一 production owner。
 - validation: network target chain Vitest 44/44、同步校验 16/16、固定 metadata/192 anchors/106 cleanup entries、TypeScript、全量 ESLint 和 diff check 通过；排除已由 `node --test` 专门执行的同步校验文件后，全量 Vitest 为 145 files、795 passed、1 skipped。未运行会覆盖其他 Agent `dist-electron/**` 的 build；目标链尚未接生产，因此没有可执行的真实页面手工验证。
 
+## 2026-08-26: same target (external-tool authority partial)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动。
+- reviewedThrough / portedThrough: 均保持 `null`；本切片只完成 external-tool 的 opaque resource authority，未完成该 output capability 或任何 unit cutover。
+- change groups: `security-boundary`（renderer command 只保留 `tabId/resourceId/toolKey`、main-owned URL/metadata/protected header、cross-tab/stale owner 拒绝）与 `omniflow-integration`（目标 authority 到现有 external-tool executor 的未注册 execution port）。
+- affected capability IDs: `capture.protected-request-context` 保持 `ported-unverified`；`output.external-tools-dispatch` -> `porting`；active 计划测试 ID 增至 22，所有 unit 仍为 0 cutover。
+- fixtures/tests: 无 fixture；新增 `external-tools.test.ts#output.external-tool-auth-boundary`，覆盖 renderer 注入 URL/header/referer 丢弃、main-owned payload、非法 tool、cross-tab、导航迟到资源和 executor 不触发；`network.owned-resource-consumer` 补 context-free probe 资源的导航 owner 失效。
+- accepted difference: 无新增；本切片不处理 Cat Catch `m3u8dl` Base64 配置语义。
+- excluded changes and reasons: 不修改 production IPC/preload/renderer、旧 external-tool dispatcher 或其他 consumer，避免 network unit 就绪前半切换；不提前宣称 process terminal 或 protocol encoding 已完成。
+- unresolved gaps: external-tool process terminal、shell 输入安全、`m3u8dl` protocol encoding、production wiring/cleanup；下载、检查、页面拖拽、probe 安装、安全 IPC/renderer 和 network unit 原子 cutover 仍待完成。
+- runtime changes: 新增未注册 `ExternalToolDispatcher`；`CapturedResourceAccessService` 对 context-bearing/context-free 资源统一执行当前 owner 校验。生产旧链无变化。
+- legacy cleanup: 无；旧 external-tool dispatcher 和 header-bearing DTO 在安全 IPC 与 network-capture 原子切换前继续作为唯一生产 owner。
+- validation: external/access integration Vitest 5/5、network target chain 47/47、同步校验 16/16、固定 metadata/192 anchors/106 cleanup entries、TypeScript 和全量 ESLint 通过；排除已由 `node --test` 专门执行的同步校验文件后，全量 Vitest 为 146 files、798 passed、1 skipped。Cat Catch 作用域 diff check 通过；全仓 diff check 仅命中其他 Agent 已修改的 `dist-electron/main.js` 尾随空格。未运行会覆盖其他 Agent `dist-electron/**` 的 build，目标链尚未接生产，因此没有可执行的真实页面手工验证。
+
 ## Template
 
 ```markdown
