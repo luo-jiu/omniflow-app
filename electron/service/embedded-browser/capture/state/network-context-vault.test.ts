@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   NetworkContextVault,
+  type NetworkContextInvalidation,
   type NetworkContextPurpose,
   type NetworkContextRedemptionInput,
   type PromoteNetworkRequestInput,
@@ -149,6 +150,63 @@ describe('network.sensitive-header-projection', () => {
 })
 
 describe('network.context-ttl-purpose-binding', () => {
+  it('reports each retained context invalidation without exposing header values', () => {
+    let now = 1_000
+    const invalidations: NetworkContextInvalidation[] = []
+    const vault = createVault({
+      contextTtlMs: 100,
+      maxContextEntries: 1,
+      now: () => now,
+      onContextInvalidated: invalidation => invalidations.push(invalidation),
+    })
+    const request = (index: number) => ({
+      ...BASE_REQUEST,
+      observedRequestUrl: `https://media.example/invalidation-${index}.mp4`,
+      requestHeaders: { Authorization: `Bearer invalidation-secret-${index}` },
+      requestId: `invalidation-${index}`,
+    })
+
+    const first = recordAndPromote(vault, request(1))!
+    const secondRequest = request(2)
+    const second = recordAndPromote(vault, secondRequest)!
+    expect(invalidations).toEqual([{
+      contextRef: first.contextRef,
+      reason: 'capacity',
+    }])
+
+    now = 1_100
+    expect(vault.redeem({
+      ...BASE_REDEMPTION,
+      contextRef: second.contextRef,
+      purpose: 'resource-download',
+      resourceUrl: secondRequest.observedRequestUrl,
+    })).toBeNull()
+
+    const third = recordAndPromote(vault, request(3))!
+    now = 1_200
+    expect(vault.sweepExpired()).toBe(1)
+
+    const fourth = recordAndPromote(vault, request(4))!
+    expect(vault.release(fourth.contextRef)).toBe(true)
+    const fifth = recordAndPromote(vault, request(5))!
+    expect(vault.clearTab(BASE_REQUEST.tabId)).toBe(1)
+    const sixth = recordAndPromote(vault, request(6))!
+    expect(vault.clearWebContents(BASE_REQUEST.webContentsId)).toBe(1)
+    const seventh = recordAndPromote(vault, request(7))!
+    expect(vault.clear()).toBe(1)
+
+    expect(invalidations).toEqual([
+      { contextRef: first.contextRef, reason: 'capacity' },
+      { contextRef: second.contextRef, reason: 'expired' },
+      { contextRef: third.contextRef, reason: 'expired' },
+      { contextRef: fourth.contextRef, reason: 'release' },
+      { contextRef: fifth.contextRef, reason: 'tab-clear' },
+      { contextRef: sixth.contextRef, reason: 'web-contents-clear' },
+      { contextRef: seventh.contextRef, reason: 'vault-clear' },
+    ])
+    expect(JSON.stringify(invalidations)).not.toContain('invalidation-secret')
+  })
+
   it('requires owner, navigation, URL, page-origin, replay type, and purpose bindings', () => {
     let now = 1_000
     const vault = createVault({ contextTtlMs: 100, now: () => now })

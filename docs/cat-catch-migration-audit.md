@@ -19,7 +19,7 @@
 
 | 能力族 | 当前实现 | 已知结论 |
 | --- | --- | --- |
-| network capture | legacy production owner + pure classifier/helper/context/state contract | 规则顺序、默认值、大小判断、去重、页面 URL policy、main-only context vault 与 revisioned ResourceStateStore 已有专项测试；listener、vault 淘汰通知、IPC/reducer、安全 consumer、逐跳 redirect 与生产 cutover 仍待迁移和验证 |
+| network capture | legacy production owner + pure classifier/helper/context/state contract | 规则顺序、默认值、大小判断、去重、页面 URL policy、带精确失效通知的 main-only context vault 与 revisioned ResourceStateStore 已有专项测试；listener/adapter、IPC/reducer、安全 consumer、逐跳 redirect 与生产 cutover 仍待迁移和验证 |
 | deep-search runtime | legacy inactive | 深度 hooks 写死关闭，外围 MSE hook 仍运行 |
 | MSE runtime | legacy owner | 有增量 spool 思路，但没有专项差分、输出和稳定性测试 |
 | HLS engine | legacy owner | parser/downloader 存在，BYTERANGE、cache fallback、伪装分片有明确缺口 |
@@ -31,7 +31,7 @@
 
 1. `enableDeepRuntimeHooks = false`。
 2. 网络捕捉为 `onCompleted`，而不是 Cat Catch 的首字节阶段识别。
-3. 生产 request context 仍无容量/TTL，敏感 header 值仍进入 renderer DTO；新 vault/store 尚未接线，vault 淘汰也还不能通知 store 清除已失效 capability。
+3. 生产 request context 仍无容量/TTL，敏感 header 值仍进入 renderer DTO；新 vault/store 尚未接线，精确失效通知也还没有由 adapter 转成 store change。
 4. TextDecoder inline manifest hook 缺失。
 5. JSON 深度/宽度/cycle 语义未与上游对齐。
 6. Worker Blob CSP 异步失败回退不等价。
@@ -51,4 +51,4 @@
 
 ## 5. 当前下一步
 
-下一步优先建立唯一 Electron network adapter：按 `onSendHeaders -> onResponseStarted` 把 vault 与 ResourceStateStore 接起来，并让 vault 容量/TTL 淘汰精确失效 store capability；随后实现 revisioned IPC snapshot/change reducer，以及禁用自动 redirect 或逐跳重新兑换的下载、检查、拖拽和外部工具 consumer。整个 unit 通过 production-equivalent integration 后，再在唯一入口切换并删除对应旧实现；当前 pure contract 不接生产，也不提前删除旧链。
+下一步优先建立唯一 Electron network adapter：按 `onSendHeaders -> onResponseStarted` 把 vault 与 ResourceStateStore 接起来，并把 vault invalidation 同步转成 store change；随后实现 revisioned IPC snapshot/change reducer，以及禁用自动 redirect 或逐跳重新兑换的下载、检查、拖拽和外部工具 consumer。整个 unit 通过 production-equivalent integration 后，再在唯一入口切换并删除对应旧实现；当前 pure contract 不接生产，也不提前删除旧链。

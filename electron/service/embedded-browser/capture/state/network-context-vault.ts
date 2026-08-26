@@ -28,8 +28,24 @@ export const NETWORK_CONTEXT_PURPOSES = [
   'resource-inspection',
 ] as const
 
+export const NETWORK_CONTEXT_INVALIDATION_REASONS = [
+  'capacity',
+  'expired',
+  'release',
+  'tab-clear',
+  'web-contents-clear',
+  'vault-clear',
+] as const
+
 export type NetworkContextPurpose = typeof NETWORK_CONTEXT_PURPOSES[number]
 export type NetworkContextReplayResourceType = 'xhr' | 'media' | 'image'
+export type NetworkContextInvalidationReason =
+  typeof NETWORK_CONTEXT_INVALIDATION_REASONS[number]
+
+export type NetworkContextInvalidation = {
+  contextRef: string
+  reason: NetworkContextInvalidationReason
+}
 
 export type NetworkRequestHeaderInput = {
   binaryValue?: Uint8Array
@@ -99,6 +115,7 @@ export type NetworkContextVaultOptions = {
   maxContextEntries?: number
   maxPendingEntries?: number
   now?: () => number
+  onContextInvalidated?: (invalidation: NetworkContextInvalidation) => void
   pendingTtlMs?: number
 }
 
@@ -349,6 +366,7 @@ export class NetworkContextVault {
   private readonly maxContextEntries: number
   private readonly maxPendingEntries: number
   private readonly now: () => number
+  private readonly onContextInvalidated: (invalidation: NetworkContextInvalidation) => void
   private readonly pendingTtlMs: number
   private readonly pendingRequests = new Map<string, PendingRequestContext>()
   private readonly retainedContexts = new Map<string, RetainedNetworkContext>()
@@ -366,6 +384,7 @@ export class NetworkContextVault {
       DEFAULT_MAX_PENDING_ENTRIES,
     )
     this.now = options.now || Date.now
+    this.onContextInvalidated = options.onContextInvalidated || (() => {})
     this.pendingTtlMs = normalizePositiveNumber(options.pendingTtlMs, DEFAULT_PENDING_TTL_MS)
   }
 
@@ -406,7 +425,7 @@ export class NetworkContextVault {
     }
 
     while (this.retainedContexts.size >= this.maxContextEntries) {
-      if (!deleteOldestEntry(this.retainedContexts)) break
+      if (!this.deleteOldestRetainedContext('capacity')) break
     }
     const contextRef = this.createUniqueContextRef()
     const createdAt = this.now()
@@ -458,7 +477,7 @@ export class NetworkContextVault {
     }
     const context = this.retainedContexts.get(contextRef)
     if (context && context.expiresAt <= this.now()) {
-      this.retainedContexts.delete(contextRef)
+      this.deleteRetainedContext(contextRef, 'expired')
       return null
     }
     if (
@@ -482,19 +501,22 @@ export class NetworkContextVault {
   }
 
   release(contextRef: string) {
-    return this.retainedContexts.delete(String(contextRef || '').trim())
+    return this.deleteRetainedContext(String(contextRef || '').trim(), 'release')
   }
 
   clearTab(tabId: string) {
     const normalizedTabId = normalizeTabId(tabId)
     if (!normalizedTabId) return 0
-    return this.deleteMatching(record => record.tabId === normalizedTabId)
+    return this.deleteMatching(record => record.tabId === normalizedTabId, 'tab-clear')
   }
 
   clearWebContents(webContentsId: number) {
     const normalizedWebContentsId = normalizeWebContentsId(webContentsId)
     if (normalizedWebContentsId === null) return 0
-    return this.deleteMatching(record => record.webContentsId === normalizedWebContentsId)
+    return this.deleteMatching(
+      record => record.webContentsId === normalizedWebContentsId,
+      'web-contents-clear',
+    )
   }
 
   sweepExpired() {
@@ -508,7 +530,7 @@ export class NetworkContextVault {
     }
     for (const [contextRef, record] of this.retainedContexts) {
       if (record.expiresAt <= now) {
-        this.retainedContexts.delete(contextRef)
+        this.deleteRetainedContext(contextRef, 'expired')
         removed += 1
       }
     }
@@ -518,7 +540,9 @@ export class NetworkContextVault {
   clear() {
     const removed = this.pendingRequests.size + this.retainedContexts.size
     this.pendingRequests.clear()
-    this.retainedContexts.clear()
+    for (const contextRef of Array.from(this.retainedContexts.keys())) {
+      this.deleteRetainedContext(contextRef, 'vault-clear')
+    }
     return removed
   }
 
@@ -530,8 +554,23 @@ export class NetworkContextVault {
     throw new Error('Unable to allocate a unique network context reference')
   }
 
+  private deleteOldestRetainedContext(reason: NetworkContextInvalidationReason) {
+    const oldest = this.retainedContexts.keys().next()
+    return !oldest.done && this.deleteRetainedContext(oldest.value, reason)
+  }
+
+  private deleteRetainedContext(
+    contextRef: string,
+    reason: NetworkContextInvalidationReason,
+  ) {
+    if (!contextRef || !this.retainedContexts.delete(contextRef)) return false
+    this.onContextInvalidated({ contextRef, reason })
+    return true
+  }
+
   private deleteMatching(
     predicate: (record: PendingRequestContext | RetainedNetworkContext) => boolean,
+    retainedReason: NetworkContextInvalidationReason,
   ) {
     let removed = 0
     for (const [key, record] of this.pendingRequests) {
@@ -542,7 +581,7 @@ export class NetworkContextVault {
     }
     for (const [contextRef, record] of this.retainedContexts) {
       if (predicate(record)) {
-        this.retainedContexts.delete(contextRef)
+        this.deleteRetainedContext(contextRef, retainedReason)
         removed += 1
       }
     }
