@@ -1,0 +1,1047 @@
+{
+  "schemaVersion": 1,
+  "purpose": "Temporary checklist for replacing or retaining current Cat Catch-related implementation locations.",
+  "deleteWhen": "Delete this file after every cutover unit is closed (all capabilities verified or excluded), every unit retains at least one verified capability, and all remove-after-cutover symbols are gone.",
+  "entries": [
+    {
+      "id": "node.tab-view.main-controller",
+      "path": "electron/service/embeddedBrowserMainController.ts",
+      "symbol": "createEmbeddedBrowserMainController",
+      "capabilityId": "capture.owner-lifecycle",
+      "cutoverUnitId": "network-capture",
+      "classification": "omniflow-integration",
+      "role": "production-owner",
+      "cleanupAction": "retain-or-adapt"
+    },
+    {
+      "id": "node.tab-view.lifecycle-service",
+      "path": "electron/service/embeddedBrowserViewLifecycle.ts",
+      "symbol": "createEmbeddedBrowserView",
+      "capabilityId": "capture.owner-lifecycle",
+      "cutoverUnitId": "network-capture",
+      "classification": "omniflow-integration",
+      "role": "adapter",
+      "cleanupAction": "retain-or-adapt"
+    },
+    {
+      "id": "node.network.request-context-map",
+      "path": "electron/service/embeddedBrowserResourceBridge.ts",
+      "symbol": "requestContextsByRequestId",
+      "capabilityId": "capture.protected-request-context",
+      "cutoverUnitId": "network-capture",
+      "classification": "legacy",
+      "role": "production-owner",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.network.webrequest-bridge",
+      "path": "electron/service/embeddedBrowserResourceBridge.ts",
+      "symbol": "initializeEmbeddedBrowserResourceBridge",
+      "capabilityId": "capture.network-event-lifecycle",
+      "cutoverUnitId": "network-capture",
+      "classification": "legacy",
+      "role": "adapter",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.resource-state.tab-capture-map",
+      "path": "electron/service/embeddedBrowserResourceStateStore.ts",
+      "symbol": "tabCaptureStates",
+      "capabilityId": "capture.resource-state-contract",
+      "cutoverUnitId": "network-capture",
+      "classification": "omniflow-integration",
+      "role": "state-owner",
+      "cleanupAction": "retain-or-adapt"
+    },
+    {
+      "id": "node.network.classifier",
+      "path": "electron/service/embeddedBrowserResourceClassifier.ts",
+      "symbol": "classifyCapturedResource",
+      "capabilityId": "capture.rules-classification-deduplication",
+      "cutoverUnitId": "network-capture",
+      "classification": "legacy",
+      "role": "production-owner",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.network.capture-rules",
+      "path": "electron/service/embeddedBrowserResourceCaptureRules.ts",
+      "symbol": "evaluateEmbeddedBrowserResourceCapture",
+      "capabilityId": "capture.rules-classification-deduplication",
+      "cutoverUnitId": "network-capture",
+      "classification": "legacy",
+      "role": "production-owner",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.page-hook.installer",
+      "path": "electron/service/embeddedBrowserViewLifecycle.ts",
+      "symbol": "installEmbeddedBrowserResourceProbe",
+      "capabilityId": "deep.secure-page-relay",
+      "cutoverUnitId": "deep-search-runtime",
+      "classification": "omniflow-integration",
+      "role": "adapter",
+      "cleanupAction": "retain-or-adapt"
+    },
+    {
+      "id": "node.page-runtime.builder",
+      "path": "electron/service/embeddedBrowserResourceProbeScriptTemplate.ts",
+      "symbol": "createEmbeddedBrowserResourceProbeScript",
+      "capabilityId": "deep.runtime-hook-bundle",
+      "cutoverUnitId": "deep-search-runtime",
+      "classification": "legacy",
+      "role": "production-owner",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.page-actions.mse-drain-script",
+      "path": "electron/service/embeddedBrowserResourcePageBridge.ts",
+      "symbol": "createEmbeddedBrowserResourceDrainMseScript",
+      "capabilityId": "mse.page-capture-runtime",
+      "cutoverUnitId": "mse-runtime",
+      "classification": "legacy",
+      "role": "adapter",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.page-actions.mse-drain",
+      "path": "electron/service/embeddedBrowserResourceProbePageActions.ts",
+      "symbol": "drainResource",
+      "capabilityId": "mse.page-capture-runtime",
+      "cutoverUnitId": "mse-runtime",
+      "classification": "legacy",
+      "role": "adapter",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.page-actions.catch-action-script",
+      "path": "electron/service/embeddedBrowserCatchToolkitPageBridge.ts",
+      "symbol": "createEmbeddedBrowserCatchToolkitActionScript",
+      "capabilityId": "deep.catch-toolkit-page-settings",
+      "cutoverUnitId": "deep-search-runtime",
+      "classification": "legacy",
+      "role": "adapter",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.page-actions.catch-clear",
+      "path": "electron/service/embeddedBrowserResourceProbePageActions.ts",
+      "symbol": "clearCatchMediaCache",
+      "capabilityId": "deep.catch-toolkit-page-settings",
+      "cutoverUnitId": "deep-search-runtime",
+      "classification": "legacy",
+      "role": "adapter",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.page-actions.catch-download",
+      "path": "electron/service/embeddedBrowserResourceProbePageActions.ts",
+      "symbol": "downloadCatchMedia",
+      "capabilityId": "deep.catch-toolkit-page-settings",
+      "cutoverUnitId": "deep-search-runtime",
+      "classification": "legacy",
+      "role": "adapter",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.page-actions.catch-restart",
+      "path": "electron/service/embeddedBrowserResourceProbePageActions.ts",
+      "symbol": "restartCatchMediaCapture",
+      "capabilityId": "deep.catch-toolkit-page-settings",
+      "cutoverUnitId": "deep-search-runtime",
+      "classification": "legacy",
+      "role": "adapter",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.page-actions.catch-get-script",
+      "path": "electron/service/embeddedBrowserCatchToolkitPageBridge.ts",
+      "symbol": "createEmbeddedBrowserCatchToolkitGetStateScript",
+      "capabilityId": "deep.catch-toolkit-page-settings",
+      "cutoverUnitId": "deep-search-runtime",
+      "classification": "legacy",
+      "role": "adapter",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.page-actions.catch-get",
+      "path": "electron/service/embeddedBrowserResourceProbePageActions.ts",
+      "symbol": "getCatchToolkitState",
+      "capabilityId": "deep.catch-toolkit-page-settings",
+      "cutoverUnitId": "deep-search-runtime",
+      "classification": "legacy",
+      "role": "adapter",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.page-actions.catch-update-script",
+      "path": "electron/service/embeddedBrowserCatchToolkitPageBridge.ts",
+      "symbol": "createEmbeddedBrowserCatchToolkitUpdateStateScript",
+      "capabilityId": "deep.catch-toolkit-page-settings",
+      "cutoverUnitId": "deep-search-runtime",
+      "classification": "legacy",
+      "role": "adapter",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.page-actions.catch-update",
+      "path": "electron/service/embeddedBrowserResourceProbePageActions.ts",
+      "symbol": "updateCatchToolkitState",
+      "capabilityId": "deep.catch-toolkit-page-settings",
+      "cutoverUnitId": "deep-search-runtime",
+      "classification": "legacy",
+      "role": "adapter",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.contract.resource-event-emitter",
+      "path": "electron/service/embeddedBrowserMainController.ts",
+      "symbol": "emitEmbeddedBrowserResource",
+      "capabilityId": "capture.cross-process-contract",
+      "cutoverUnitId": "network-capture",
+      "classification": "omniflow-integration",
+      "role": "adapter",
+      "cleanupAction": "retain-or-adapt"
+    },
+    {
+      "id": "node.contract.preload-resource-event",
+      "path": "electron/preload.ts",
+      "symbol": "onResourceCaptured",
+      "capabilityId": "capture.cross-process-contract",
+      "cutoverUnitId": "network-capture",
+      "classification": "omniflow-integration",
+      "role": "contract",
+      "cleanupAction": "retain-or-adapt"
+    },
+    {
+      "id": "node.output.hls-task-subscriber",
+      "path": "src/features/embedded-browser/resources/services/embedded-browser-resource.api.ts",
+      "symbol": "subscribeEmbeddedBrowserHlsTask",
+      "capabilityId": "output.processing-staged-terminal",
+      "cutoverUnitId": "output-integration",
+      "classification": "legacy",
+      "role": "adapter",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.delivery.library-import-action",
+      "path": "src/features/embedded-browser/resources/hooks/useResourceImportToLibrary.ts",
+      "symbol": "importOutputToLibrary",
+      "capabilityId": "output.library-delivery-handoff",
+      "cutoverUnitId": "output-integration",
+      "classification": "legacy",
+      "role": "adapter",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.delivery.upload-manager-engine",
+      "path": "src/modules/upload-center/engine/upload-manager.ts",
+      "symbol": "createBatch",
+      "capabilityId": "output.library-delivery-handoff",
+      "cutoverUnitId": "output-integration",
+      "classification": "omniflow-integration",
+      "role": "task-owner",
+      "cleanupAction": "retain-or-adapt"
+    },
+    {
+      "id": "node.compat.probe-wrapper",
+      "path": "electron/service/embeddedBrowserResourceProbe.ts",
+      "symbol": "createEmbeddedBrowserResourceProbeScript",
+      "capabilityId": "deep.runtime-hook-bundle",
+      "cutoverUnitId": "deep-search-runtime",
+      "classification": "legacy",
+      "role": "helper",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.compat.resource-service-wrapper",
+      "path": "electron/service/embeddedBrowserResourceService.ts",
+      "symbol": "initializeEmbeddedBrowserResourceBridge",
+      "capabilityId": "capture.network-event-lifecycle",
+      "cutoverUnitId": "network-capture",
+      "classification": "legacy",
+      "role": "adapter",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.page-actions.preview-script",
+      "path": "electron/service/embeddedBrowserResourcePageBridge.ts",
+      "symbol": "createEmbeddedBrowserResourcePreviewScript",
+      "capabilityId": "capture.cross-process-contract",
+      "cutoverUnitId": "network-capture",
+      "classification": "omniflow-integration",
+      "role": "adapter",
+      "cleanupAction": "retain-or-adapt"
+    },
+    {
+      "id": "node.page-actions.preview-overlay",
+      "path": "electron/service/embeddedBrowserResourcePageBridge.ts",
+      "symbol": "__omniflow_embedded_browser_resource_preview__",
+      "capabilityId": "capture.cross-process-contract",
+      "cutoverUnitId": "network-capture",
+      "classification": "omniflow-integration",
+      "role": "adapter",
+      "cleanupAction": "retain-or-adapt"
+    },
+    {
+      "id": "node.page-actions.preview-runner",
+      "path": "electron/service/embeddedBrowserResourceActionService.ts",
+      "symbol": "runEmbeddedBrowserResourcePreview",
+      "capabilityId": "capture.cross-process-contract",
+      "cutoverUnitId": "network-capture",
+      "classification": "omniflow-integration",
+      "role": "adapter",
+      "cleanupAction": "retain-or-adapt"
+    },
+    {
+      "id": "node.page-runtime.core",
+      "path": "electron/service/embeddedBrowserResourceProbeRuntimeCore.ts",
+      "symbol": "embeddedBrowserResourceProbeRuntimeCoreBody",
+      "capabilityId": "deep.manifest-key-discovery",
+      "cutoverUnitId": "deep-search-runtime",
+      "classification": "legacy",
+      "role": "production-owner",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.page-runtime.deep-hooks-disabled",
+      "path": "electron/service/embeddedBrowserResourceProbeRuntimeHooks.ts",
+      "symbol": "enableDeepRuntimeHooks",
+      "capabilityId": "deep.runtime-hook-bundle",
+      "cutoverUnitId": "deep-search-runtime",
+      "classification": "legacy",
+      "role": "inactive-owner",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.page-runtime.manifest-heuristics",
+      "path": "electron/service/embeddedBrowserResourceProbeManifestHeuristics.ts",
+      "symbol": "embeddedBrowserResourceProbeManifestHeuristicsBody",
+      "capabilityId": "deep.manifest-key-discovery",
+      "cutoverUnitId": "deep-search-runtime",
+      "classification": "legacy",
+      "role": "production-owner",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.page-runtime.toolkit-state",
+      "path": "electron/service/embeddedBrowserResourceProbeRuntimeCore.ts",
+      "symbol": "catchToolkitState",
+      "capabilityId": "deep.catch-toolkit-page-settings",
+      "cutoverUnitId": "deep-search-runtime",
+      "classification": "legacy",
+      "role": "state-owner",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.console-relay.resource-handler",
+      "path": "electron/service/embeddedBrowserViewLifecycle.ts",
+      "symbol": "EMBEDDED_BROWSER_RESOURCE_CONSOLE_PREFIX",
+      "capabilityId": "deep.secure-page-relay",
+      "cutoverUnitId": "deep-search-runtime",
+      "classification": "legacy",
+      "role": "adapter",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.mse.page-runtime",
+      "path": "electron/service/embeddedBrowserResourceProbeRuntimeHooks.ts",
+      "symbol": "originalAddSourceBuffer",
+      "capabilityId": "mse.page-capture-runtime",
+      "cutoverUnitId": "mse-runtime",
+      "classification": "legacy",
+      "role": "production-owner",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.mse.page-buffer-normalizer",
+      "path": "electron/service/embeddedBrowserResourceProbeRuntimeCore.ts",
+      "symbol": "normalizeBuffersForPlayback",
+      "capabilityId": "mse.page-capture-runtime",
+      "cutoverUnitId": "mse-runtime",
+      "classification": "legacy",
+      "role": "helper",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.mse.main-spool",
+      "path": "electron/service/embeddedBrowserMainController.ts",
+      "symbol": "embeddedBrowserMseSpoolFiles",
+      "capabilityId": "mse.main-spool-lifecycle",
+      "cutoverUnitId": "mse-runtime",
+      "classification": "omniflow-integration",
+      "role": "output-owner",
+      "cleanupAction": "retain-or-adapt"
+    },
+    {
+      "id": "node.transfer.fragment-downloader",
+      "path": "electron/service/embeddedBrowserFragmentDownloader.ts",
+      "symbol": "EmbeddedBrowserFragmentDownloader",
+      "capabilityId": "transfer.concurrent-retry-abort-order",
+      "cutoverUnitId": "transfer-engine",
+      "classification": "legacy",
+      "role": "production-owner",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.transfer.direct-download",
+      "path": "electron/service/embeddedBrowserMainController.ts",
+      "symbol": "downloadEmbeddedBrowserDirectFile",
+      "capabilityId": "transfer.streaming-memory-budget",
+      "cutoverUnitId": "transfer-engine",
+      "classification": "legacy",
+      "role": "production-owner",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.hls.renderer-parser-planner",
+      "path": "src/features/embedded-browser/resources/model/embedded-browser-hls-manifest.ts",
+      "symbol": "parseEmbeddedBrowserHlsManifest",
+      "capabilityId": "hls.parser-planner",
+      "cutoverUnitId": "hls-engine",
+      "classification": "legacy",
+      "role": "production-owner",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.hls.local-downloader",
+      "path": "electron/service/embeddedBrowserHlsLocalDownloaderService.ts",
+      "symbol": "downloadEmbeddedBrowserHlsToLocalWorkDirectory",
+      "capabilityId": "hls.segment-pipeline",
+      "cutoverUnitId": "hls-engine",
+      "classification": "legacy",
+      "role": "production-owner",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.hls.live-recorder",
+      "path": "electron/service/embeddedBrowserHlsLiveRecorder.ts",
+      "symbol": "EmbeddedBrowserHlsLiveRecorder",
+      "capabilityId": "hls.live-recording",
+      "cutoverUnitId": "hls-engine",
+      "classification": "legacy",
+      "role": "task-owner",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.dash.renderer-parser-planner",
+      "path": "src/features/embedded-browser/resources/model/embedded-browser-mpd-manifest.ts",
+      "symbol": "parseEmbeddedBrowserMpdManifest",
+      "capabilityId": "dash.parser-planner",
+      "cutoverUnitId": "dash-engine",
+      "classification": "legacy",
+      "role": "production-owner",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.dash.local-downloader",
+      "path": "electron/service/embeddedBrowserMpdLocalDownloaderService.ts",
+      "symbol": "downloadEmbeddedBrowserMpdToOutput",
+      "capabilityId": "dash.timeline-download-merge",
+      "cutoverUnitId": "dash-engine",
+      "classification": "legacy",
+      "role": "production-owner",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.ffmpeg.manifest-executor",
+      "path": "electron/service/embeddedBrowserResourceManifestDownloadService.ts",
+      "symbol": "downloadEmbeddedBrowserManifestResource",
+      "capabilityId": "output.ffmpeg-process-owner",
+      "cutoverUnitId": "output-integration",
+      "classification": "legacy",
+      "role": "task-owner",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.ffmpeg.manifest-track-merge-executor",
+      "path": "electron/service/embeddedBrowserResourceManifestDownloadService.ts",
+      "symbol": "downloadEmbeddedBrowserManifestTracks",
+      "capabilityId": "output.ffmpeg-process-owner",
+      "cutoverUnitId": "output-integration",
+      "classification": "legacy",
+      "role": "task-owner",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.ffmpeg.path-probe",
+      "path": "electron/service/embeddedBrowserResourceMergeService.ts",
+      "symbol": "canExecuteCommand",
+      "capabilityId": "output.ffmpeg-process-owner",
+      "cutoverUnitId": "output-integration",
+      "classification": "legacy",
+      "role": "helper",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.ffmpeg.resource-merge-executor",
+      "path": "electron/service/embeddedBrowserResourceMergeService.ts",
+      "symbol": "mergeEmbeddedBrowserResourceTracks",
+      "capabilityId": "output.ffmpeg-process-owner",
+      "cutoverUnitId": "output-integration",
+      "classification": "legacy",
+      "role": "task-owner",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.ffmpeg.resource-transcode-executor",
+      "path": "electron/service/embeddedBrowserResourceMergeService.ts",
+      "symbol": "transcodeEmbeddedBrowserResource",
+      "capabilityId": "output.ffmpeg-process-owner",
+      "cutoverUnitId": "output-integration",
+      "classification": "legacy",
+      "role": "task-owner",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.ffmpeg.dash-track-merge-executor",
+      "path": "electron/service/embeddedBrowserMpdLocalDownloaderService.ts",
+      "symbol": "mergeMpdTrackFilesToOutput",
+      "capabilityId": "output.ffmpeg-process-owner",
+      "cutoverUnitId": "output-integration",
+      "classification": "legacy",
+      "role": "task-owner",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.workflow.hls-hook",
+      "path": "src/features/tool-workspace/hooks/useHlsDownloadTask.ts",
+      "symbol": "useHlsDownloadTask",
+      "capabilityId": "output.application-workflow-coordinator",
+      "cutoverUnitId": "output-integration",
+      "classification": "legacy",
+      "role": "task-owner",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.workflow.dash-hook",
+      "path": "src/features/tool-workspace/hooks/useMpdDownloadTask.ts",
+      "symbol": "useMpdDownloadTask",
+      "capabilityId": "output.application-workflow-coordinator",
+      "cutoverUnitId": "output-integration",
+      "classification": "legacy",
+      "role": "task-owner",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.workflow.media-component",
+      "path": "src/features/tool-workspace/ToolWorkspaceMedia.tsx",
+      "symbol": "ToolWorkspaceMedia",
+      "capabilityId": "output.application-workflow-coordinator",
+      "cutoverUnitId": "output-integration",
+      "classification": "legacy",
+      "role": "task-owner",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.output.raw-path-responses",
+      "path": "electron/service/embeddedBrowserMainController.ts",
+      "symbol": "emitEmbeddedBrowserHlsTask",
+      "capabilityId": "output.processing-staged-terminal",
+      "cutoverUnitId": "output-integration",
+      "classification": "legacy",
+      "role": "output-owner",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.delivery.library-import-hook",
+      "path": "src/features/embedded-browser/resources/hooks/useResourceImportToLibrary.ts",
+      "symbol": "useResourceImportToLibrary",
+      "capabilityId": "output.library-delivery-handoff",
+      "cutoverUnitId": "output-integration",
+      "classification": "legacy",
+      "role": "adapter",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.delivery.upload-manager",
+      "path": "src/utils/uploadManager.ts",
+      "symbol": "uploadManager",
+      "capabilityId": "output.library-delivery-handoff",
+      "cutoverUnitId": "output-integration",
+      "classification": "omniflow-integration",
+      "role": "task-owner",
+      "cleanupAction": "retain-or-adapt"
+    },
+    {
+      "id": "node.delivery.extracted-resource-file-save",
+      "path": "electron/service/embeddedBrowserResourceFileSaveService.ts",
+      "symbol": "saveEmbeddedBrowserExtractedResourceFile",
+      "capabilityId": "output.local-save-delivery",
+      "cutoverUnitId": "output-integration",
+      "classification": "legacy",
+      "role": "output-owner",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.delivery.normal-download-bridge",
+      "path": "electron/service/embeddedBrowserService.ts",
+      "symbol": "initializeEmbeddedBrowserDownloadBridge",
+      "capabilityId": "output.normal-download-handoff",
+      "cutoverUnitId": "output-integration",
+      "classification": "omniflow-integration",
+      "role": "adapter",
+      "cleanupAction": "retain-or-adapt"
+    },
+    {
+      "id": "node.transfer.downloader-session-bridge",
+      "path": "electron/service/embeddedBrowserService.ts",
+      "symbol": "handleWillDownload",
+      "capabilityId": "transfer.downloader-session-lifecycle",
+      "cutoverUnitId": "transfer-engine",
+      "classification": "omniflow-integration",
+      "role": "adapter",
+      "cleanupAction": "retain-or-adapt"
+    },
+    {
+      "id": "node.delivery.normal-download-hook",
+      "path": "src/features/embedded-browser/downloads/hooks/useEmbeddedBrowserDownloadImport.ts",
+      "symbol": "useEmbeddedBrowserDownloadImport",
+      "capabilityId": "output.normal-download-handoff",
+      "cutoverUnitId": "output-integration",
+      "classification": "legacy",
+      "role": "adapter",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.integration.external-tools",
+      "path": "electron/service/embeddedBrowserExternalTools.ts",
+      "symbol": "dispatchEmbeddedBrowserExternalTool",
+      "capabilityId": "output.external-tools-dispatch",
+      "cutoverUnitId": "output-integration",
+      "classification": "legacy",
+      "role": "production-owner",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.integration.external-tool-defaults",
+      "path": "src/features/embedded-browser/external-tools/model/embedded-browser-external-tools.ts",
+      "symbol": "createDefaultEmbeddedBrowserExternalToolSettings",
+      "capabilityId": "output.external-tools-dispatch",
+      "cutoverUnitId": "output-integration",
+      "classification": "omniflow-integration",
+      "role": "helper",
+      "cleanupAction": "retain-or-adapt"
+    },
+    {
+      "id": "node.contract.main-resource-types",
+      "path": "electron/service/embeddedBrowserResourceTypes.ts",
+      "symbol": "EmbeddedBrowserCapturedResource",
+      "capabilityId": "capture.cross-process-contract",
+      "cutoverUnitId": "network-capture",
+      "classification": "omniflow-integration",
+      "role": "contract",
+      "cleanupAction": "retain-or-adapt"
+    },
+    {
+      "id": "node.contract.main-processing-types",
+      "path": "electron/service/embeddedBrowserMainTypes.ts",
+      "symbol": "EmbeddedBrowserCapturedResourceMergePayload",
+      "capabilityId": "capture.cross-process-contract",
+      "cutoverUnitId": "network-capture",
+      "classification": "omniflow-integration",
+      "role": "contract",
+      "cleanupAction": "retain-or-adapt"
+    },
+    {
+      "id": "node.contract.ipc-registration",
+      "path": "electron/service/embeddedBrowserMainIpc.ts",
+      "symbol": "registerEmbeddedBrowserMainIpcHandlers",
+      "capabilityId": "capture.cross-process-contract",
+      "cutoverUnitId": "network-capture",
+      "classification": "omniflow-integration",
+      "role": "adapter",
+      "cleanupAction": "retain-or-adapt"
+    },
+    {
+      "id": "node.contract.preload-surface",
+      "path": "electron/preload.ts",
+      "symbol": "electronEmbeddedBrowser",
+      "capabilityId": "capture.cross-process-contract",
+      "cutoverUnitId": "network-capture",
+      "classification": "omniflow-integration",
+      "role": "contract",
+      "cleanupAction": "retain-or-adapt"
+    },
+    {
+      "id": "node.composition.main-controller",
+      "path": "electron/main.ts",
+      "symbol": "embeddedBrowserMainController",
+      "capabilityId": "capture.owner-lifecycle",
+      "cutoverUnitId": "network-capture",
+      "classification": "omniflow-integration",
+      "role": "adapter",
+      "cleanupAction": "retain-or-adapt"
+    },
+    {
+      "id": "node.composition.main-bridges",
+      "path": "electron/service/embeddedBrowserMainSupport.ts",
+      "symbol": "initializeEmbeddedBrowserMainBridges",
+      "capabilityId": "capture.owner-lifecycle",
+      "cutoverUnitId": "network-capture",
+      "classification": "omniflow-integration",
+      "role": "adapter",
+      "cleanupAction": "retain-or-adapt"
+    },
+    {
+      "id": "node.page-runtime.template",
+      "path": "electron/service/embeddedBrowserResourceProbeScriptTemplate.ts",
+      "symbol": "createProbeScriptTemplate",
+      "capabilityId": "deep.runtime-hook-bundle",
+      "cutoverUnitId": "deep-search-runtime",
+      "classification": "legacy",
+      "role": "helper",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.page-runtime.hooks-body",
+      "path": "electron/service/embeddedBrowserResourceProbeRuntimeHooks.ts",
+      "symbol": "embeddedBrowserResourceProbeRuntimeHooksBody",
+      "capabilityId": "deep.runtime-hook-bundle",
+      "cutoverUnitId": "deep-search-runtime",
+      "classification": "legacy",
+      "role": "production-owner",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.page-runtime.page-actions-body",
+      "path": "electron/service/embeddedBrowserResourceProbePageActions.ts",
+      "symbol": "embeddedBrowserResourceProbePageActionsBody",
+      "capabilityId": "deep.runtime-hook-bundle",
+      "cutoverUnitId": "deep-search-runtime",
+      "classification": "legacy",
+      "role": "production-owner",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.page-runtime.worker-url",
+      "path": "electron/service/embeddedBrowserResourceProbeRuntimeHooks.ts",
+      "symbol": "createInjectedWorkerUrl",
+      "capabilityId": "deep.runtime-hook-bundle",
+      "cutoverUnitId": "deep-search-runtime",
+      "classification": "legacy",
+      "role": "inactive-owner",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.page-runtime.worker-bootstrap-generator",
+      "path": "electron/service/embeddedBrowserResourceProbeScriptTemplate.ts",
+      "symbol": "createProbeBootstrapFunctionSource",
+      "capabilityId": "deep.runtime-hook-bundle",
+      "cutoverUnitId": "deep-search-runtime",
+      "classification": "legacy",
+      "role": "helper",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.console-relay.emitter",
+      "path": "electron/service/embeddedBrowserResourceProbeRuntimeCore.ts",
+      "symbol": "emitProbeConsolePayload",
+      "capabilityId": "deep.secure-page-relay",
+      "cutoverUnitId": "deep-search-runtime",
+      "classification": "legacy",
+      "role": "adapter",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.console-relay.probe-payload-handler",
+      "path": "electron/service/embeddedBrowserMainController.ts",
+      "symbol": "onProbePayload",
+      "capabilityId": "deep.secure-page-relay",
+      "cutoverUnitId": "deep-search-runtime",
+      "classification": "legacy",
+      "role": "adapter",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.console-relay.resource-recorder",
+      "path": "electron/service/embeddedBrowserViewLifecycle.ts",
+      "symbol": "buildEmbeddedBrowserProbeResourceRecorder",
+      "capabilityId": "deep.secure-page-relay",
+      "cutoverUnitId": "deep-search-runtime",
+      "classification": "legacy",
+      "role": "adapter",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.mse.page-reset-emitter",
+      "path": "electron/service/embeddedBrowserResourceProbeRuntimeCore.ts",
+      "symbol": "emitMseStreamReset",
+      "capabilityId": "mse.page-capture-runtime",
+      "cutoverUnitId": "mse-runtime",
+      "classification": "legacy",
+      "role": "production-owner",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.mse.page-flush-emitter",
+      "path": "electron/service/embeddedBrowserResourceProbeRuntimeCore.ts",
+      "symbol": "flushMseStreamBuffers",
+      "capabilityId": "mse.page-capture-runtime",
+      "cutoverUnitId": "mse-runtime",
+      "classification": "legacy",
+      "role": "production-owner",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.mse.main-spool-clear",
+      "path": "electron/service/embeddedBrowserMainController.ts",
+      "symbol": "clearEmbeddedBrowserMseSpoolFiles",
+      "capabilityId": "mse.main-spool-lifecycle",
+      "cutoverUnitId": "mse-runtime",
+      "classification": "omniflow-integration",
+      "role": "output-owner",
+      "cleanupAction": "retain-or-adapt"
+    },
+    {
+      "id": "node.mse.main-spool-append",
+      "path": "electron/service/embeddedBrowserMainController.ts",
+      "symbol": "appendEmbeddedBrowserMseSpoolChunk",
+      "capabilityId": "mse.main-spool-lifecycle",
+      "cutoverUnitId": "mse-runtime",
+      "classification": "omniflow-integration",
+      "role": "output-owner",
+      "cleanupAction": "retain-or-adapt"
+    },
+    {
+      "id": "node.page-actions.resource-script",
+      "path": "electron/service/embeddedBrowserResourcePageBridge.ts",
+      "symbol": "createEmbeddedBrowserResourceProbeActionScript",
+      "capabilityId": "deep.runtime-hook-bundle",
+      "cutoverUnitId": "deep-search-runtime",
+      "classification": "legacy",
+      "role": "adapter",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.page-actions.global-api",
+      "path": "electron/service/embeddedBrowserResourceProbePageActions.ts",
+      "symbol": "globalScope.__OMNIFLOW_EMBEDDED_BROWSER_RESOURCE_PROBE__",
+      "capabilityId": "deep.runtime-hook-bundle",
+      "cutoverUnitId": "deep-search-runtime",
+      "classification": "legacy",
+      "role": "contract",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.page-actions.resource-extract-script",
+      "path": "electron/service/embeddedBrowserResourcePageBridge.ts",
+      "symbol": "createEmbeddedBrowserResourceExtractScript",
+      "capabilityId": "deep.runtime-hook-bundle",
+      "cutoverUnitId": "deep-search-runtime",
+      "classification": "legacy",
+      "role": "adapter",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.page-actions.resource-read",
+      "path": "electron/service/embeddedBrowserResourceProbePageActions.ts",
+      "symbol": "readResource",
+      "capabilityId": "deep.runtime-hook-bundle",
+      "cutoverUnitId": "deep-search-runtime",
+      "classification": "legacy",
+      "role": "adapter",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.contract.ambient-electron-env",
+      "path": "electron/electron-env.d.ts",
+      "symbol": "EmbeddedBrowserCapturedResource",
+      "capabilityId": "capture.cross-process-contract",
+      "cutoverUnitId": "network-capture",
+      "classification": "omniflow-integration",
+      "role": "contract",
+      "cleanupAction": "retain-or-adapt"
+    },
+    {
+      "id": "node.contract.renderer-resource-types",
+      "path": "src/features/embedded-browser/resources/types.ts",
+      "symbol": "EmbeddedBrowserCapturedResource",
+      "capabilityId": "capture.cross-process-contract",
+      "cutoverUnitId": "network-capture",
+      "classification": "omniflow-integration",
+      "role": "contract",
+      "cleanupAction": "retain-or-adapt"
+    },
+    {
+      "id": "node.contract.renderer-resource-api",
+      "path": "src/features/embedded-browser/resources/services/embedded-browser-resource.api.ts",
+      "symbol": "listEmbeddedBrowserCapturedResources",
+      "capabilityId": "capture.cross-process-contract",
+      "cutoverUnitId": "network-capture",
+      "classification": "omniflow-integration",
+      "role": "adapter",
+      "cleanupAction": "retain-or-adapt"
+    },
+    {
+      "id": "node.lifecycle.close-tab",
+      "path": "electron/service/embeddedBrowserMainController.ts",
+      "symbol": "closeEmbeddedBrowserTab",
+      "capabilityId": "capture.owner-lifecycle",
+      "cutoverUnitId": "network-capture",
+      "classification": "omniflow-integration",
+      "role": "production-owner",
+      "cleanupAction": "retain-or-adapt"
+    },
+    {
+      "id": "node.lifecycle.dispose",
+      "path": "electron/service/embeddedBrowserMainController.ts",
+      "symbol": "dispose",
+      "capabilityId": "capture.owner-lifecycle",
+      "cutoverUnitId": "network-capture",
+      "classification": "omniflow-integration",
+      "role": "production-owner",
+      "cleanupAction": "retain-or-adapt"
+    },
+    {
+      "id": "node.hls.plan-task",
+      "path": "electron/service/embeddedBrowserMainController.ts",
+      "symbol": "downloadEmbeddedBrowserHlsPlanResource",
+      "capabilityId": "hls.segment-pipeline",
+      "cutoverUnitId": "hls-engine",
+      "classification": "legacy",
+      "role": "task-owner",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.hls.live-session-state",
+      "path": "electron/service/embeddedBrowserMainController.ts",
+      "symbol": "embeddedBrowserHlsLiveRecordingSessions",
+      "capabilityId": "hls.live-recording",
+      "cutoverUnitId": "hls-engine",
+      "classification": "legacy",
+      "role": "state-owner",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.hls.retry-session-state",
+      "path": "electron/service/embeddedBrowserMainController.ts",
+      "symbol": "embeddedBrowserHlsRetrySessions",
+      "capabilityId": "hls.segment-pipeline",
+      "cutoverUnitId": "hls-engine",
+      "classification": "legacy",
+      "role": "state-owner",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.dash.plan-task",
+      "path": "electron/service/embeddedBrowserMainController.ts",
+      "symbol": "downloadEmbeddedBrowserMpdPlanResource",
+      "capabilityId": "dash.timeline-download-merge",
+      "cutoverUnitId": "dash-engine",
+      "classification": "legacy",
+      "role": "task-owner",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.transfer.http-ipc",
+      "path": "electron/ipc/http.ts",
+      "symbol": "registerHttpIpc",
+      "capabilityId": "transfer.streaming-memory-budget",
+      "cutoverUnitId": "transfer-engine",
+      "classification": "legacy",
+      "role": "adapter",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.network.renderer-request-headers",
+      "path": "electron/service/embeddedBrowserResourceTypes.ts",
+      "symbol": "EmbeddedBrowserCapturedRequestHeaders",
+      "capabilityId": "capture.protected-request-context",
+      "cutoverUnitId": "network-capture",
+      "classification": "legacy",
+      "role": "contract",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.page-runtime.probe-resource-state",
+      "path": "electron/service/embeddedBrowserResourceProbeRuntimeCore.ts",
+      "symbol": "probeResources",
+      "capabilityId": "deep.manifest-key-discovery",
+      "cutoverUnitId": "deep-search-runtime",
+      "classification": "legacy",
+      "role": "state-owner",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.console-relay.template-prefix",
+      "path": "electron/service/embeddedBrowserResourceProbeScriptTemplate.ts",
+      "symbol": "EMBEDDED_BROWSER_RESOURCE_CONSOLE_PREFIX",
+      "capabilityId": "deep.secure-page-relay",
+      "cutoverUnitId": "deep-search-runtime",
+      "classification": "legacy",
+      "role": "contract",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.console-relay.console-listener",
+      "path": "electron/service/embeddedBrowserViewLifecycle.ts",
+      "symbol": "console-message",
+      "capabilityId": "deep.secure-page-relay",
+      "cutoverUnitId": "deep-search-runtime",
+      "classification": "omniflow-integration",
+      "role": "adapter",
+      "cleanupAction": "retain-or-adapt"
+    },
+    {
+      "id": "node.page-runtime.toolkit-storage-keys",
+      "path": "electron/service/embeddedBrowserResourceProbeRuntimeCore.ts",
+      "symbol": "catchToolkitStorageKeys",
+      "capabilityId": "deep.catch-toolkit-page-settings",
+      "cutoverUnitId": "deep-search-runtime",
+      "classification": "legacy",
+      "role": "state-owner",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.hls.renderer-download-plan",
+      "path": "src/features/embedded-browser/resources/model/embedded-browser-hls-manifest.ts",
+      "symbol": "createEmbeddedBrowserHlsDownloadPlan",
+      "capabilityId": "hls.parser-planner",
+      "cutoverUnitId": "hls-engine",
+      "classification": "legacy",
+      "role": "production-owner",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.dash.renderer-download-plan",
+      "path": "src/features/embedded-browser/resources/model/embedded-browser-mpd-manifest.ts",
+      "symbol": "createEmbeddedBrowserMpdDownloadPlan",
+      "capabilityId": "dash.parser-planner",
+      "cutoverUnitId": "dash-engine",
+      "classification": "legacy",
+      "role": "production-owner",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.output.raw-path-response-contract",
+      "path": "electron/service/embeddedBrowserMainTypes.ts",
+      "symbol": "EmbeddedBrowserCapturedResourceMergeResponse",
+      "capabilityId": "output.processing-staged-terminal",
+      "cutoverUnitId": "output-integration",
+      "classification": "legacy",
+      "role": "contract",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.output.raw-path-assignment",
+      "path": "electron/service/embeddedBrowserMainController.ts",
+      "symbol": "outputPath: result.outputPath",
+      "capabilityId": "output.staged-output-lease",
+      "cutoverUnitId": "output-integration",
+      "classification": "legacy",
+      "role": "output-owner",
+      "cleanupAction": "remove-after-cutover"
+    },
+    {
+      "id": "node.delivery.controller-extracted-save",
+      "path": "electron/service/embeddedBrowserMainController.ts",
+      "symbol": "saveEmbeddedBrowserExtractedResourceFile",
+      "capabilityId": "output.local-save-delivery",
+      "cutoverUnitId": "output-integration",
+      "classification": "legacy",
+      "role": "adapter",
+      "cleanupAction": "remove-after-cutover"
+    }
+  ]
+}

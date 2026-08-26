@@ -1,444 +1,173 @@
 # Cat Catch 总览与迁移地图
 
-更新时间：2026-04-22
-适用范围：给不熟悉 Cat Catch、媒体格式和 OmniFlow 内置嗅探链路的开发者快速建立全局视角。
+更新时间：2026-08-26
 
-状态：概念导览。本文中“OmniFlow 当前状态”和优先级描述是 2026-04-22 的历史快照，未经过行为等价验证，不得作为完成度或实施依据。全面重构以 `docs/cat-catch-full-migration-execution-plan.md` 为权威，当前事实摘要见 `docs/cat-catch-migration-audit.md`。
+适用范围：帮助不熟悉 Cat Catch、媒体格式和 OmniFlow 内置浏览器捕捉链路的开发者建立全局视角。
 
-## 1. 先看结论
+状态：概念导览。本文不记录完成度；全面重构以 `docs/cat-catch-full-migration-execution-plan.md` 为权威，逐项状态以 `docs/cat-catch/capability-map.json` 为准，当前事实摘要见 `docs/cat-catch-migration-audit.md`。
 
-如果只想先记住最重要的三件事，可以先看这里：
+## 1. 核心模型
 
-1. **Cat Catch 的核心不是某个按钮，而是一整条“识别资源 -> 判断类型 -> 选择处理器 -> 输出文件”的链路。**
-2. **OmniFlow 的目标不是把 Cat Catch 的浏览器扩展实现逐行搬过来，而是把它的能力迁进来，并按桌面客户端的最佳实践重组。**
-3. **当前最值得优先做完整的是 `m3u8/HLS` 主线；它做顺了，后面的 MPD、MSE、导入资源库、大文件处理都会更顺。**
-
-这份文档的作用不是替代代码文档，而是帮你先洞观全局，知道：
-
-- Cat Catch 到底有哪些能力
-- 这些能力大概分成哪几类
-- 不同媒体格式到底是什么
-- Cat Catch 怎么做
-- OmniFlow 现在做到哪一步
-- 后面应该优先补什么
-
-## 2. 先统一一个总模型
-
-可以把整个系统先看成下面这条链：
+Cat Catch 的价值不是某个按钮，而是多年积累的一条资源处理链：
 
 ```text
-页面里出现资源
-  -> 嗅探到资源
-  -> 判断这是什么类型
-  -> 交给对应处理器
-  -> 生成成品文件
-  -> 保存到本地 / 导入资源库
+页面或网络出现资源
+  -> 发现候选
+    -> 判断类型与上下文
+      -> 解析播放计划
+        -> 下载、重试、解密或合并
+          -> 交付文件
 ```
 
-所谓“Cat Catch 很强”，本质上是它在这几层都做了很多经验积累：
+它的经验主要集中在：
 
-- 更会嗅探
-- 更会判断
-- 更会解析
-- 更会下载
-- 更会处理奇怪站点的边角
+- 何时观察网络请求，以及哪些 headers、URL 和 tab 状态必须一起保留。
+- 如何从 Worker、fetch/XHR、JSON、TextDecoder、内联文本和 MSE 中发现资源。
+- 如何识别 HLS、DASH、直链和页内缓存流。
+- 如何处理 key、map、BYTERANGE、variant、track、live、retry 和异常分片。
+- 如何在导航、取消、关闭 tab、进程退出和失败时回收任务与临时资源。
 
-而 OmniFlow 现在做的事情，就是把这整条链一点点补起来。
+OmniFlow 的目标不是运行浏览器扩展，也不是逐文件照搬，而是忠实迁移这些与产品相关的行为，再用 Electron 的主进程、文件系统、ffmpeg 和 UploadManager 做平台等价适配。
 
-## 3. 先认识几个关键格式
+## 2. 常见资源类型
 
-如果不熟悉媒体格式，最容易在这里迷路。下面这几个概念够用。
+### 2.1 HLS / m3u8
 
-### 3.1 `m3u8 / HLS` 是什么
+`m3u8` 是播放清单，通常引用媒体分片，也可能包含：
 
-可以把 `m3u8` 理解成一种**播放列表文件**。
+- master playlist 与多清晰度 variant。
+- 独立音轨或字幕 rendition。
+- AES key。
+- `EXT-X-MAP` 初始化片段。
+- `BYTERANGE` 字节范围。
+- live playlist 与持续新增的分片。
 
-它通常不是视频本体，而更像：
+正确实现不只是“能解析文本”，还包括 URL 解析、隐式 offset、下载顺序、重试、解密、伪装分片预处理、取消和输出字节语义。
 
-```text
-头文件 / 播放列表
-  -> 告诉播放器去哪里找真正的视频碎片
-```
+### 2.2 DASH / MPD
 
-常见组成：
+`mpd` 是另一种播放计划，常把视频、音频、初始化片段和媒体片段分开描述。重点边界包括多层 `BaseURL`、`SegmentTemplate`、`SegmentTimeline`、负 repeat、动态 MPD、range、轨道选择和 DRM 拒绝语义。
 
-- 一个 `m3u8` 文件
-- 一堆媒体分片（`.ts`、`.m4s` 等）
-- 有时还有 key（加密密钥）
-- 有时还有 map / init segment（初始化片段）
+### 2.3 MSE
 
-你可以把它想成：
+MSE 页面通过 `MediaSource` / `SourceBuffer.appendBuffer()` 增量喂入媒体。稳定 URL 可能不存在，因此需要在页面运行时观察 append、区分音视频、控制页面内存、增量写入 main spool，并在 reset、end-of-stream、导航和关闭时正确收口。
 
-```text
-目录文件 + 一堆碎片文件
-```
+### 2.4 直链资源
 
-播放器拿到 `m3u8` 后，会按顺序去拉这些碎片，最后连续播放。
+直链资源有稳定 HTTP(S) URL，看似简单，但仍需要处理请求上下文、Range、大响应内存、失败 fallback、文件名、取消、临时文件与最终交付。
 
-### 3.2 `mpd / DASH` 是什么
+## 3. Cat Catch 能力族
 
-`mpd` 和 `m3u8` 很像，也是**清单 / 播放计划**，只是标准不同。
+### 3.1 网络捕捉
 
-它通常描述：
+- 请求发送、首字节、失败、重定向和终态清理。
+- request headers 与受保护上下文。
+- URL、MIME、扩展名、regex、黑白名单和去重规则。
+- tab/navigation 归属与资源状态。
 
-- 视频轨有哪些
-- 音频轨有哪些
-- 每条轨的初始化片段和后续分片在哪里
+### 3.2 页面深搜
 
-可以把它理解成：**另一种格式的播放列表标准**。
+- document-start 注入与 all-frame 语义。
+- Worker、fetch、XHR、JSON、TextDecoder 和内联 manifest/key 发现。
+- 页面事件到 main 的可信 relay。
+- 页面工具设置、重载和缓存重置。
 
-### 3.3 MSE 是什么
+### 3.3 MSE 捕捉
 
-MSE（Media Source Extensions）可以简单理解为：
+- MediaSource/SourceBuffer hook。
+- 音视频分轨、append 可观察性和 flush。
+- 页面缓冲预算、main spool、恢复和清理。
 
-**网页播放器不是拿到一个稳定的视频文件地址，而是自己在页面里一段一段往播放器喂数据。**
+### 3.4 HLS 与 DASH
 
-这种场景下，最麻烦的点是：
+- parser 与下载计划。
+- key、map、range、variant、rendition、track 和 timeline。
+- 分片并发、重试、abort、顺序输出和 merge。
+- live、动态清单、异常格式和明确拒绝。
 
-- 你可能拿不到完整稳定的 `m3u8` / `mp4` 地址
-- 真正的数据已经进了页面内存
+### 3.5 传输与输出
 
-所以这类资源经常不能像普通 `m3u8` 那样直接让 `ffmpeg` 去拉。
+- downloader session、内存预算、临时目录和 task registry。
+- ffmpeg 进程、取消、退出和终态。
+- 本地保存、普通下载、外部工具与资料库导入。
+- staged output lease 和 processing/delivery 的单一状态 owner。
 
-### 3.4 直链媒体是什么
+扩展 popup、options、side panel 的 CSS、翻译和纯视觉行为默认不迁。扩展 service worker、Chrome action、context menu、Blob 下载限制 workaround 等实现方式也不直接照搬；但排除前必须检查它们是否携带行为默认值、依赖或脚本入口。
 
-这个最简单，就是：
-
-- 一个 `mp4`
-- 一个 `webm`
-- 一个音频文件 URL
-
-拿到链接基本就能直接下载。
-
-### 3.5 key、map、byterange 是什么
-
-#### key
-
-有些 `m3u8` 分片是加密的，播放前需要一个 key 才能解出来。
-
-#### map / init segment
-
-有些分片不是完整可独立播放的数据，播放前还需要一个初始化片段。这个初始化片段就是 `EXT-X-MAP` 常见场景。
-
-#### byterange
-
-有时一个大文件里只用到某一段字节范围，而不是整个文件。  
-这时候播放列表里会写：
-
-```text
-从某个文件的某个偏移，截取多少字节
-```
-
-这就是 `BYTERANGE`。
-
-## 4. Cat Catch 具备的能力，可以分成哪几大类
-
-把 Cat Catch 的能力拆开看，会更容易理解它为什么显得“什么都能抓”。
-
-### 4.1 资源发现与嗅探
-
-- 当前页网络请求嗅探
-- 深度搜索注入
-- Worker 注入
-- fetch / XHR / JSON 扫描
-- 内联脚本里的资源提取
-- key 候选捕获
-- MSE 缓存捕捉
-
-### 4.2 资源判断与解析
-
-- 判断这是 HLS、DASH、直链还是 MSE
-- 解析 `m3u8`
-- 解析 `mpd`
-- 找到 key / map / 分片 / variant / 轨道
-- 修正相对 URL 和 baseUrl
-
-### 4.3 下载与处理
-
-- `m3u8 downloader`
-- `mpd` 下载
-- MSE 音视频导出和合并
-- 本地 ffmpeg 合并 / 转码
-- 自动下载
-
-### 4.4 外部工具与输出
-
-- `N_m3u8DL` 协议
-- `aria2 RPC`
-- 调用本地程序
-- send2local
-- MQTT
-
-### 4.5 外围辅助能力
-
-- 录屏 / recorder / WebRTC
-- 媒体控制
-- 截图 / 画中画
-- JSON viewer
-- 移动 UA / 移动标签
-
-## 5. OmniFlow 当前大图
-
-OmniFlow 不是浏览器扩展，而是 Electron 客户端，所以整体路线应该这样理解：
-
-```text
-Renderer
-  负责：展示资源、发起动作、展示工具页
-
-Electron main / 本地工具 / ffmpeg
-  负责：真正的下载、写文件、合并、转码
-
-后端
-  负责：接收成品、存进 MinIO、创建目录树节点
-```
-
-所以 OmniFlow 当前的目标不是：
-
-```text
-像浏览器插件一样把所有事都在页面里做完
-```
-
-而是：
-
-```text
-把 Cat Catch 的识别与处理能力迁进来
-  -> 用客户端方式重新组织
-  -> 让大文件、ffmpeg、本地文件系统发挥作用
-```
-
-## 6. Cat Catch 和 OmniFlow 的核心区别
+## 4. Cat Catch 与 OmniFlow 的边界差异
 
 | 维度 | Cat Catch | OmniFlow |
 | --- | --- | --- |
-| 运行环境 | 浏览器扩展 | Electron 客户端 |
-| 主要限制 | Blob、浏览器下载、扩展页面参数传播 | 本地文件系统、IPC、主进程边界 |
-| 重处理位置 | 扩展页面 / 页面脚本 | Electron main / 本地工具 / ffmpeg |
-| 对大文件的主要思路 | 浏览器环境下想办法继续活 | 客户端本地写盘、ffmpeg、后续分片上传 |
-| 是否需要照搬 workaround | 经常需要 | 经常不需要 |
+| 运行环境 | 浏览器扩展 | Electron 桌面客户端 |
+| 页面承载 | 浏览器 tab | main-owned `WebContentsView` |
+| 平台通信 | extension message | preload / IPC / isolated page relay |
+| 重处理 | 扩展页与浏览器下载能力 | Electron main、文件系统与 ffmpeg |
+| 输出 | 浏览器下载或外部工具 | 本地保存、外部工具或 UploadManager |
+| 回收边界 | 扩展 tab/page 生命周期 | tab、view、task、temp、进程和应用退出 |
 
-一句话说：
+因此迁移时应区分两类内容：
 
-**Cat Catch 值得学的是“它怎么识别和怎么踩坑”，不是“它在浏览器扩展里是怎么活下来的”。**
+- `cat-catch-port`：协议、识别、解析、计划、重试等纯行为与经验分支。
+- OmniFlow adapter/integration：Electron 网络事件、页面注入、IPC、安全、文件、ffmpeg、资料库和用户工作流。
 
-## 7. 按处理器来看：不同资源怎么处理
-
-这一节最适合快速建立全局感。
-
-### 7.1 HLS / `m3u8`
-
-#### 这是什么
-
-- 一个播放列表
-- 里面列着很多视频碎片
-- 可能有 key
-- 可能有 map
-- 可能有多清晰度 variant
-
-#### Cat Catch 会做什么
-
-- 识别 `m3u8`
-- 解析 master / media playlist
-- 识别 key / map / 分片
-- 下载分片
-- 处理重试、线程、范围、直播录制等
-
-#### OmniFlow 现在怎么做
-
-- 已能识别 `m3u8`
-- 已能解析 variants / renditions / keys / maps / segments
-- 已能把 HLS 计划送入工具区，并在工具区看到阶段进度、执行链、结构化最近日志、失败分片编号、本地下载速度/ETA、ffmpeg 处理反馈，以及本地任务的失败分片重试入口
-- 对媒体 playlist，工具区已补第一版 Cat Catch 风格的线程数和分片范围控制；只要改了这里，就会切到本地 downloader 主链
-- 已有两条执行主线：
-  - 网络 manifest：`ffmpeg` 直拉
-  - 页内 / blob manifest：本地 downloader -> local playlist -> `ffmpeg`
-- key 验证已经开始细分结果：不需要 key、还没有候选、候选未命中、验证过程失败
-- key 验证现在会抽前面几段 AES-128 分片一起验证，不再只看第一段
-- 工具区已支持手动输入 AES-128 自定义 key；一旦填写，会切到本地 downloader 主链，用本地 key 文件重写 playlist 后再交给 `ffmpeg`
-- 工具区也能直接做一轮 key 验证；会同时尝试 manifest key URL、当前 tab 已捕获 key，以及手动输入 key
-- 工具区已补基础执行反馈：当前阶段、最近日志、分片完成数；本地 downloader 失败后已能直接重试失败分片
-- 网络 master playlist 已补第一版完整轨道处理：默认保持“自动”，也可以锁到某个具体 variant URL；当前还支持选择独立音轨并走 ffmpeg 合并，以及选择字幕轨单独下载；工具区会展示该 variant 关联的音轨组 / 字幕组和现有 renditions 摘要
-- 当前 `master playlist + 手动 key` 仍不是完整支持场景，工具区会先显式拦住，避免误走错误主链
-
-#### 还缺什么
-
-- 更完整 key / map 体验
-- 轨道联动和真实样本验真
-- 更细的日志 / 进度 / 执行控制 UI
-- 边下边存 / 更稳的大文件策略
-
-### 7.2 DASH / `mpd`
-
-#### 这是什么
-
-- 另一种播放计划格式
-- 通常会分别描述音轨、视频轨、初始化片段和分片模板
-
-#### Cat Catch 会做什么
-
-- 解析 `mpd`
-- 展开轨道和分片
-- 提供下载能力
-
-#### OmniFlow 现在怎么做
-
-- 已能识别和基础解析 `mpd`
-- 已能展开一部分常见 `SegmentTemplate` / `SegmentTimeline`
-- 已能输出下载计划 JSON
-
-#### 还缺什么
-
-- 轨道选择
-- 真正 downloader 主链
-- 真实站点验证
-
-### 7.3 MSE / 页内缓存流
-
-#### 这是什么
-
-- 数据不是一个稳定地址
-- 播放器自己在页面里一段一段喂
-
-#### Cat Catch 会做什么
-
-- 拦 `appendBuffer`
-- 识别音频流 / 视频流
-- 导出缓存
-- 必要时合并
-
-#### OmniFlow 现在怎么做
-
-- 已有 MSE 深度捕捉
-- 已能识别 audio/video
-- 已能导出和本地 ffmpeg 合并
-
-#### 还缺什么
-
-- 更大文件下更稳的写盘策略
-- 与 HLS / DASH 更统一的导入体验
-
-### 7.4 直链媒体
-
-#### 这是什么
-
-- 一个稳定文件地址
-
-#### Cat Catch 会做什么
-
-- 直接下载
-- 转发给外部工具
-
-#### OmniFlow 现在怎么做
-
-- 可直接下载
-- 部分已可导入资源库
-- 后面可继续统一到工具区/导入链路
-
-## 8. 猫抓能力总表：按全局看
-
-下面这张表不是给 review 用的，是给快速看全局用的。
-
-| 能力大类 | Cat Catch 有什么 | OmniFlow 现在到哪 |
-| --- | --- | --- |
-| 网络资源嗅探 | 很强，已成熟 | 已有主链 |
-| 深度注入 / JSON / Worker | 很强 | 已有主链，继续补经验规则 |
-| HLS 识别与解析 | 很成熟 | 已有主链，继续补 downloader 完整度 |
-| MPD 识别与解析 | 有 | 已有基础 parser，离完整还远 |
-| key 候选与验证 | 有 | 已有候选和验证入口，还缺自定义 key |
-| MSE 捕捉与导出 | 很强 | 已有主链，继续测长视频和大文件 |
-| m3u8 下载器 | 很成熟 | 已有骨架和两条执行主线，继续补 UI 和完整参数 |
-| MPD 下载器 | 有 | 还没完整迁 |
-| 外部工具输出 | 很多 | 大多未迁 |
-| 规则过滤 | 很成熟 | 只有基础，规则体系还缺很多 |
-| 录制/JSON/控制类 | 有不少外围能力 | 目前基本暂缓 |
-
-## 9. OmniFlow 当前最值得优先做的
-
-如果目标是“舒服地、不遗漏地、符合客户端最佳实践地迁 Cat Catch”，我建议优先级这样排：
-
-1. **把 `m3u8/HLS` 做完整**
-   - key
-   - map
-   - variant 选择
-   - 日志 / 进度 / 失败重试
-   - 大文件策略
-
-2. **补 MPD 主链**
-   - 轨道选择
-   - 更完整 parser
-   - downloader
-
-3. **补规则过滤体系**
-   - regex
-   - 黑白名单
-   - block / whitelist
-
-4. **补外部工具出口**
-   - `aria2`
-   - `N_m3u8DL`
-   - 本地命令模板
-
-5. **最后再看外围能力**
-   - recorder
-   - 媒体控制
-   - JSON viewer
-
-## 10. 为什么你会觉得“做了又有、还有就又做”
-
-因为这里不是一个按钮开发，而是一个系统开发。
-
-你现在和我一起做的，很多时候只是下面这些层里的某一层：
-
-- 识别层
-- parser 层
-- 计划层
-- 执行层
-- 输出层
-- 导入层
-
-所以看起来像：
+## 5. 目标分层
 
 ```text
-做了 HLS
-  -> 其实只是做了 HLS parser
-做了 downloader
-  -> 其实只是做了 downloader 内核
-接了工具页
-  -> 其实只是接了入口，还没补日志和重试
+renderer
+  -> preload / typed contracts
+    -> orchestration
+      -> Electron network/page adapters
+        -> cat-catch-port pure behavior
+      -> task / filesystem / ffmpeg processing
+        -> local save / external tools / UploadManager integration
 ```
 
-这不是反复打补丁，而是同一条主链在逐层闭环。
+`cat-catch-port` 不依赖 Electron、React、IPC、Node 文件系统、ffmpeg 或资料库。平台层负责输入适配和生命周期，不应重新实现 classifier、parser 或 downloader 算法。
 
-## 11. 现在该怎么用这些文档
+## 6. 七个 Cutover Unit
 
-后面如果你想快速判断问题，建议这样用：
+| 顺序 | unit | 范围 |
+| --- | --- | --- |
+| 1 | `network-capture` | 请求时机、context、规则、分类、去重、资源状态和跨进程合同 |
+| 2 | `deep-search-runtime` | document-start、Worker/fetch/XHR/JSON/TextDecoder、manifest/key 与安全 relay |
+| 3 | `mse-runtime` | page capture、main spool、预算、reset、finalize 和清理 |
+| 4 | `hls-engine` | parser、plan、key/map/range、分片、live、retry 和预处理 |
+| 5 | `dash-engine` | parser、BaseURL、timeline、track、range、下载和 merge |
+| 6 | `transfer-engine` | 并发、重试、abort、顺序、session、内存预算和 task registry |
+| 7 | `output-integration` | staged output、ffmpeg、本地保存、资料库、普通下载、外部工具和工作流投影 |
 
-### 想快速洞观全局
+unit 是生产切换与删除旧实现的最小边界。可以在 unit 内逐项开发和测试，但不能让新旧 listener、hook、parser 或 downloader 在生产中长期并存。
 
-先看本文档。
+## 7. 当前状态怎么判断
 
-### 想知道“已经做了什么、还缺什么”
+当前固定目标为 Cat Catch `2cb981d7c2f4614732edccc167c4b5793d1cb138`。初始映射包含 7 个 unit 和 32 项 capability；它们目前全部为 `pending`，计划测试名称也尚未落成真实 fixture/test。
 
-看 [cat-catch-migration-audit.md](/Users/loyce/personal/omniflow/omniflow-app/docs/cat-catch-migration-audit.md)
+旧代码中存在网络捕捉、MSE、HLS、DASH、下载、ffmpeg 和资料库导入入口，只能说明有 characterization 输入，不能据此宣称已经迁移。完成一项能力至少需要：
 
-### 想知道“Cat Catch 某个提交值不值得迁”
+1. 固定上游来源和行为依赖。
+2. 建立能失败的真实 fixture/test。
+3. 在纯 port 或明确的 adapter 中实现。
+4. 通过行为、集成、输出和清理验证。
+5. 在 unit 的唯一 dispatch boundary 切换 owner。
+6. 同一切片删除对应旧实现与兼容分支。
 
-看 [cat-catch-sync-maintenance-guide.md](/Users/loyce/personal/omniflow/omniflow-app/docs/cat-catch-sync-maintenance-guide.md)
+具体状态查询：
 
-### 想知道“代码当前结构怎么分层”
+- 版本游标：`docs/cat-catch/upstream-state.json`。
+- 能力、来源、目标和测试：`docs/cat-catch/capability-map.json`。
+- 迁移期间的旧位置：`docs/cat-catch/legacy-cleanup.json`。
+- 当前已确认缺口：`docs/cat-catch-migration-audit.md`。
+- 每次上游同步：`docs/cat-catch-sync-log.md`。
 
-看 [embedded-browser-architecture.md](/Users/loyce/personal/omniflow/omniflow-app/docs/embedded-browser-architecture.md)
+## 8. 阅读顺序
 
-### 想知道“处理结果为什么要先在客户端成型再导入资源库”
+- 想理解概念和边界：本文。
+- 想实施迁移：`docs/cat-catch-full-migration-execution-plan.md`。
+- 想同步新上游：`docs/cat-catch-sync-maintenance-guide.md`。
+- 想理解现有 Electron 生产链：`docs/embedded-browser-architecture.md`。
+- 想理解处理结果如何进入资源库：`docs/captured-resource-flow-plan.md`。
+- 想实现纯 port：`electron/service/embedded-browser/cat-catch-port/README.md`。
 
-看 [captured-resource-flow-plan.md](/Users/loyce/personal/omniflow/omniflow-app/docs/captured-resource-flow-plan.md)
+## 9. 保留原则
 
-## 12. 最后再总结一次
-
-你真正想要的不是“把猫抓看起来像是迁过来了”，而是：
-
-- Cat Catch 的能力尽量完整迁入
-- 不遗漏主链
-- 做法符合 OmniFlow 的客户端视角
-- 大文件、工具区、资源库导入、后续维护都能说得通
-
-这也是这份文档的目的：让人先看到整张地图，再去看某一段路。
+需要长期保留的是可执行行为、必要的平台集成、来源映射和测试，不是历史实现本身。每个 unit 验证切换后删除旧算法、旧 listener/handler、flag、fallback、无期限 wrapper 和旧 helper；全部 unit 完成后先带清理表通过最终校验，再同时删除临时 `legacy-cleanup.json`、legacy refs 及其专用校验分支/测试。回滚依靠 Git commit 或发布版本。

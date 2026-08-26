@@ -13,7 +13,6 @@ dist-electron
 dist-ssr
 /release/
 /build/native/
-/tools/cat-catch-lab/artifacts/
 *.local
 
 # Editor directories and files

@@ -8,7 +8,7 @@ The embedded browser has an existing Cat Catch-inspired capture implementation, 
 
 - Electron network capture, resource filtering, and grouped presentation exist but are not yet parity-verified
 - The current deep `Worker` / `fetch` / `XMLHttpRequest` / `JSON.parse` hooks are disabled; the surrounding `MediaSource` hook remains active
-- `MSE` collection, local `ffmpeg`, HLS/DASH processing, and library import paths exist but are currently classified as implemented-unverified
+- `MSE` collection, local `ffmpeg`, HLS/DASH processing, and library import paths exist as legacy characterization inputs; the migration map remains pending until behavior tests and cutover pass
 - The authoritative completion contract is `docs/cat-catch-full-migration-execution-plan.md`
 
 ### Formats Currently Recognized
@@ -21,7 +21,7 @@ The embedded browser has an existing Cat Catch-inspired capture implementation, 
 
 - The current capture core has no dedicated Cat Catch differential test suite.
 - Deep runtime capture is not currently active beyond the surrounding `MSE` hooks.
-- Manifest parsing, downloader behavior, cancellation, cleanup, and large-media budgets still require equivalence and integration evidence.
+- Manifest parsing, downloader behavior, cancellation, cleanup, and large-media budgets still require behavior fixtures and integration tests.
 
 ## Attribution
 
@@ -76,7 +76,7 @@ Key frontend documents live in the repo and should be treated as part of the dev
 - `docs/library-detail-workspace.md`: library detail workspace modes, browser tab ownership, and persistence rules
 - `docs/file-explorer-file-viewer-boundary.md`: file tree, file-open flow, viewer tabs, and dispatcher ownership
 - `docs/frontend-validation-matrix.md`: manual verification baseline for frontend and Electron changes
-- `docs/cat-catch-migration-audit.md`: current evidence-based Cat Catch rearchitecture summary
+- `docs/cat-catch-migration-audit.md`: current verified facts and gaps for the Cat Catch migration
 - `THIRD_PARTY_NOTICES.md`: attribution and license information for incorporated third-party work
 - `.agent-docs/frontend-review-standard.md`: review gate for frontend and Electron changes
 - `.agent-docs/frontend-handoff.md`: maintenance handoff and entry map
