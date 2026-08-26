@@ -13,13 +13,13 @@
 | reviewedThrough | 未建立 |
 | portedThrough | 未建立 |
 
-当前映射包含 7 个 cutover unit、32 项能力、192 个上游 anchor、106 个本地旧位置和 71 个唯一计划测试 ID。network event adapter、classifier/rules、page URL policy、main-only request context vault、main-owned resource state 与 renderer-safe cross-process contract/reducer 已达到 `ported-unverified`，其余 26 项仍为 `pending`；13 个计划测试 ID 已落成 active pure behavior/contract 或 fake `webRequest` integration test，尚无已完成的 cutover unit。
+当前映射包含 7 个 cutover unit、32 项能力、192 个上游 anchor、106 个本地旧位置和 71 个唯一计划测试 ID。`network-capture` 的 event adapter、classifier/rules、page URL policy、main-only request context vault、main-owned resource state、renderer-safe cross-process contract/reducer 与 owner lifecycle 共 7 项均达到 `ported-unverified`，其余 25 项仍为 `pending`；15 个计划测试 ID 已落成 active pure behavior/contract 或 fake Electron integration test，尚无已完成的 cutover unit。
 
 ## 2. 能力族
 
 | 能力族 | 当前实现 | 已知结论 |
 | --- | --- | --- |
-| network capture | legacy production owner + unregistered target adapter/contracts | 规则顺序、默认值、大小判断、去重、页面 URL policy、main-only context vault、revisioned ResourceStateStore、首字节捕捉、逐跳 redirect、终态清理、context 失效投影与 renderer-safe reducer 已有专项测试；生产 IPC/preload/renderer、安全 consumer 与 cutover 仍待迁移和验证 |
+| network capture | legacy production owner + unregistered target adapter/contracts/lifecycle | 规则顺序、默认值、大小判断、去重、页面 URL policy、main-only context vault、revisioned ResourceStateStore、首字节捕捉、逐跳 redirect、终态清理、context 失效投影、renderer-safe reducer 与 tab/navigation/WebContents/crash/app lifecycle 已有专项测试；生产 probe、IPC/preload/renderer、安全 consumer 与 cutover 仍待迁移和验证 |
 | deep-search runtime | legacy inactive | 深度 hooks 写死关闭，外围 MSE hook 仍运行 |
 | MSE runtime | legacy owner | 有增量 spool 思路，但没有专项差分、输出和稳定性测试 |
 | HLS engine | legacy owner | parser/downloader 存在，BYTERANGE、cache fallback、伪装分片有明确缺口 |
@@ -38,7 +38,7 @@
 7. HLS 隐式 BYTERANGE、一次性 cache fallback、PNG/JPEG 伪装分片缺失。
 8. MPD `r=-1`、多 BaseURL、动态 timeline/range 不完整。
 9. ffmpeg、HLS/DASH、直播、普通下载和 temp 没有统一 task registry。
-10. 目前 classifier/rules、page URL policy、request context、resource state、cross-process reducer 与 event adapter 有 13 个 pure contract 或 fake `webRequest` integration test ref；生产 IPC/preload/renderer、安全 consumer 及后续 unit 仍无实际 fixture、differential 或 production-equivalent integration test。
+10. 目前 `network-capture` 7 项能力有 15 个 pure contract 或 fake Electron integration test ref；生产 probe、IPC/preload/renderer、安全 consumer 及后续 unit 仍无实际 fixture、differential 或 production cutover 证据。
 
 ## 4. 保留、迁移与删除
 
@@ -51,4 +51,4 @@
 
 ## 5. 当前下一步
 
-下一步补齐 tab/navigation/WebContents/app owner lifecycle，以及禁用自动 redirect 或逐跳重新兑换的下载、检查、拖拽和外部工具 consumer；随后建立整个 network-capture unit 的 production-equivalent integration。整个 unit 通过后，再原子切换 production IPC/preload/renderer 并删除对应旧实现；当前 adapter/contract 不接生产，也不提前删除旧链。
+下一步迁移 probe 写入和下载、检查、拖拽、外部工具的逐跳安全 context consumer，再把安全合同接入 production IPC/preload/renderer 并建立 cutover integration。证据完整后，在唯一 dispatch boundary 原子切换并删除对应旧实现；当前 adapter/contract/lifecycle 不接生产，也不提前删除旧链。

@@ -103,6 +103,19 @@
 - legacy cleanup: 无；旧 main/preload/ambient/renderer DTO copies 在整个 unit 切换时同片删除。
 - validation: 网络/合同相关 Vitest 36/36、同步校验 16/16、固定上游 metadata/192 anchors/106 cleanup entries、TypeScript 与全量 ESLint 通过。全量 Vitest 实际有 140 个文件、787 个测试通过，另 1 个测试跳过；命令仍只因 `node:test` 同步校验文件被 Vitest 二次收集后报告无 Vitest suite 而退出 1，该文件已由专用命令 16/16 通过。未运行会覆盖并行 `dist-electron/**` 的 build，也未进行真实页面手工验证。
 
+## 2026-08-26: same target (owner lifecycle partial)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动。
+- reviewedThrough / portedThrough: 均保持 `null`；初始目标的其余能力仍未完成分类和迁移。
+- change groups: `omniflow-integration`（tab/view registration/replacement、显式 clear/retain navigation、closeAll/app disposal）与 `stability/security-boundary`（render crash quarantine/recovery、WebContents spontaneous destruction、stale incarnation callback 拒绝、adapter-first shutdown、tab/WebContents/app vault cleanup）。
+- affected capability IDs: `capture.owner-lifecycle` -> `ported-unverified`；`network-capture` 达到 7/7 `ported-unverified`，仍为 0 cutover。
+- fixtures/tests: 无 fixture；新增 `embedded-browser-lifecycle.test.ts#lifecycle.navigation-close-exit-crash` 与 `#lifecycle.spontaneous-view-destroy`，使用真实目标 adapter/vault/store/contract 和 fake Electron event source 做 2 个组合 integration case。
+- excluded changes and reasons: 本切片不改生产 controller/view lifecycle、MainSupport、IPC/preload/renderer、probe 或 context consumer；同类 Electron `webRequest` listener 不能与旧 bridge 并存。
+- unresolved gaps: probe 写入新 Store；下载、检查、页面拖拽和外部工具逐跳兑换；OmniFlow-only image/key/字幕规则；production IPC/preload/renderer projection；network unit 原子 cutover 和旧实现删除。
+- runtime changes: 新增未注册 `EmbeddedBrowserLifecycle`；生产旧 bridge/lifecycle 仍是唯一 owner。
+- legacy cleanup: 无；整个 `network-capture` unit 的安全 consumer 和 production-equivalent integration 完成后，才在唯一 dispatch boundary 切换并同片执行 cleanup 清单。
+- validation: lifecycle 目标测试 2/2、network target chain Vitest 38/38、同步校验 16/16、固定 metadata/192 anchors/106 cleanup entries、TypeScript 与全量 ESLint 通过。排除已由 `node --test` 专门执行的同步校验文件后，全量 Vitest 为 141 files、789 passed、1 skipped。未运行会覆盖并行 `dist-electron/**` 的 build，也未进行真实页面手工验证。
+
 ## Template
 
 ```markdown
