@@ -38,7 +38,7 @@ downloader/
 - `network/classifier.ts`：纯 request/response 分类和去重决策。
 - `network/request-url-helpers.ts`：页面 URL pattern、黑白名单反转与 special-page 规则。
 
-这两个 capability 当前为 `ported-unverified`，没有接入 Electron 生产 listener；整个 `network-capture` unit 完成前，旧实现仍是唯一生产 owner。
+这些 capability 当前为 `ported-unverified`，没有接入 Electron 生产 listener；整个 `network-capture` unit 完成前，旧实现仍是唯一生产 owner。
 
 ## 来源注释
 

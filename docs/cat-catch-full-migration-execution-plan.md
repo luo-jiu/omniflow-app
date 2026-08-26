@@ -62,9 +62,9 @@ OmniFlow 不运行 Cat Catch 浏览器扩展，而是把与产品目标相关的
 - HLS 已知缺少隐式 BYTERANGE offset、一次性 manifest cache fallback、伪装分片预处理等经验分支。
 - DASH 手写 parser 对 `r=-1`、多 BaseURL、动态 MPD 等语义不完整。
 - HLS、DASH、MSE、ffmpeg、临时文件和输出交付尚无统一 task/cleanup 合同。
-- 当前 network classifier/rules、page URL policy 与 main-only request context vault 的 7 个计划 ID 已落成专项纯行为/合同测试；vault 尚未接入生产 listener、ResourceStateStore、IPC 或下载 consumer，其余计划 ID 仍只是需求种子，尚无 active fixture/test。
+- 当前 network classifier/rules、page URL policy、main-only request context vault 与 main-owned resource state contract 的 9 个计划 ID 已落成专项纯行为/合同测试；vault/store 尚未接入生产 listener、IPC/reducer 或下载 consumer，vault 淘汰也尚未向 store 投影 context 失效，其余计划 ID 仍只是需求种子，尚无 active fixture/test。
 
-因此当前只有 3 项能力达到 `ported-unverified`，其余 29 项仍为 `pending`；不能因为同名代码存在就标记为已迁移或已验证。
+因此当前只有 4 项能力达到 `ported-unverified`，其余 28 项仍为 `pending`；不能因为同名代码存在就标记为已迁移或已验证。
 
 ## 4. 长期事实文件
 
@@ -309,6 +309,6 @@ tools/cat-catch-lab/fixtures/<fixture-id>/
 ## 12. 当前下一步
 
 1. 运行轻量 `cat-catch:validate`，确认版本、32 项能力和 106 个旧位置自洽。
-2. 按同一协议继续 `network-capture` 的事件阶段，把现有 request context vault 接入 main-owned resource state 与逐跳安全 consumer，再推进 URL helper、跨进程合同和 owner lifecycle；需要结构化输入时再创建 fixture。
+2. 按同一协议继续 `network-capture` 的事件阶段，通过唯一 Electron adapter 把现有 request context vault 接入 main-owned resource state，并补 vault 淘汰失效通知、revisioned IPC reducer 与逐跳安全 consumer；需要结构化输入时再创建 fixture。
 3. 为剩余能力补固定目标的直接行为依赖、真实 test refs 和 production-equivalent integration，不把现有 legacy 行为当 oracle。
 4. 整个 unit 就绪前保持旧实现为唯一生产 owner；切换成功后在同一 unit 提交中删除对应旧代码。

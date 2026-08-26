@@ -305,6 +305,9 @@
         {
           "path": "js/background.js",
           "anchors": [
+            "if (cacheData[data.tabId].length > G.maxLength) {",
+            "if (G.checkDuplicates && cacheData[data.tabId].length <= 500) {",
+            "if (tabFingerprints.size >= 500) {",
             "if (changeInfo.status && changeInfo.status == \"loading\" && G.autoClearMode == 2) {",
             "if (details.frameId == 0 && (!['auto_subframe', 'manual_subframe', 'form_submit'].includes(details.transitionType)) && G.autoClearMode == 1) {"
           ]
@@ -312,7 +315,9 @@
         {
           "path": "js/init.js",
           "anchors": [
-            "autoClearMode: 1,"
+            "autoClearMode: 1,",
+            "checkDuplicates: true,",
+            "maxLength: G.isMobile ? 999 : 9999,"
           ]
         }
       ],
@@ -323,15 +328,22 @@
         "electron/service/embedded-browser/capture/state/resource-state-store.ts#ResourceStateStore"
       ],
       "relationToUpstream": "semantic-equivalent",
-      "syncState": "pending",
-      "syncedThrough": null,
+      "syncState": "ported-unverified",
+      "syncedThrough": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
       "plannedTestIds": [
         "state.capacity-ttl-dedupe",
         "state.tab-navigation-close"
       ],
-      "testRefs": [],
-      "acceptedDifferences": [],
-      "notes": "The pinned upstream defaults to normal-navigation resource clearing via autoClearMode=1. The current main Map is the production state owner but has no entry budget, TTL, or application-wide disposal method."
+      "testRefs": [
+        "electron/service/embedded-browser/capture/state/resource-state-store.test.ts#state.capacity-ttl-dedupe",
+        "electron/service/embedded-browser/capture/state/resource-state-store.test.ts#state.tab-navigation-close"
+      ],
+      "acceptedDifferences": [
+        "OmniFlow expires captured resource metadata after six hours and releases main-only request contexts on capacity reset, TTL sweep, navigation clear, tab/WebContents disposal, and application disposal; Cat Catch has no equivalent resource TTL or main-only context lifecycle.",
+        "OmniFlow stable probe resources upsert by navigation generation plus page-owned resource key. Updating an existing key keeps its opaque id even at capacity, while the same key in a later document creates a new resource instead of merging metadata across pages.",
+        "Renderer-safe state exposes opaque resource ids, revision/incarnation stamps, and whitelisted metadata/header capabilities only; page resource keys, context refs and values, page origin, WebContents id, and captured navigation owner facts remain main-owned."
+      ],
+      "notes": "The pinned main-only store now preserves the desktop 10,000-entry overflow reset/drop behavior, exact-URL dedupe including the 500-fingerprint reset boundary, explicit navigation clear/retain, stable probe upsert, bounded TTL, newest-first snapshots, single-owner context release, and revision/incarnation tombstones. Every renderer-visible mutation returns a revisioned upsert/remove/reset/mode change, but no Electron listener, IPC, renderer reducer, or production consumer uses this contract yet. Auto-clear event mapping still belongs to the lifecycle adapter, and NetworkContextVault capacity/TTL eviction must report invalidated context refs before cutover so stale header capabilities cannot remain projected. The legacy Map remains the only production owner until the network-capture unit cutover."
     },
     {
       "id": "capture.cross-process-contract",
