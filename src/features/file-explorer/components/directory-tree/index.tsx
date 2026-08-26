@@ -72,6 +72,11 @@ import {
   type LibraryFileBrowserDragPayload,
 } from '@/features/file-transfer/model/file-transfer';
 import { containTreeExpandDoubleClick } from '@/features/file-explorer/utils/tree-expand-behavior';
+import {
+  ensureStorageProviderAvailable,
+  selectPreferredStorageProvider,
+} from '@/features/resource-monitor/services/storage-provider-health';
+import { resourceMonitorProbeRuntime } from '@/features/resource-monitor/services/resource-monitor-runtime';
 
 interface DirectoryTreeProps {
   treeData: any[];
@@ -82,6 +87,8 @@ interface DirectoryTreeProps {
   loadData?: (node: any) => Promise<void>;
   // 上传成功后，通知父组件刷新某个节点
   onUploadSuccess?: (parentNode: any, newNode: any) => void;
+  // 新建节点需要立即进入行内编辑，不经过上传批量追加队列。
+  onCreateSuccess?: (parentNode: any, newNode: any) => void;
   // 删除成功后，通知父组件刷新（通常刷新父节点或整树）
   // deletedNodeKey 是节点的 key，格式为 `${parentId}:${id}`
   onDeleteSuccess?: (parentNode: any, deletedNodeKey: string) => void;
@@ -181,6 +188,7 @@ export default function DirectoryTree({
   onExpand,
   onDoubleClick,
   onUploadSuccess,
+  onCreateSuccess,
   onDeleteSuccess,
   onRenameSuccess,
   onConfigSuccess,
@@ -238,6 +246,7 @@ export default function DirectoryTree({
   // 内联编辑状态（重命名用）
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [editingName, setEditingName] = useState<string>('');
+  const creatingDirectoryRef = useRef(false);
   const [selectedNodeIds, setSelectedNodeIds] = useState<number[]>([]);
   const [selectionAnchorKey, setSelectionAnchorKey] = useState<string | null>(null);
 
@@ -1857,7 +1866,11 @@ export default function DirectoryTree({
           useSSL: provider.useSSL,
         }));
         const defaultProvider = providerData.defaultProvider || '';
-        const selectedProvider = defaultProvider || providers[0]?.alias || '';
+        const selectedProvider = selectPreferredStorageProvider(
+          providers,
+          defaultProvider,
+          resourceMonitorProbeRuntime.getState().snapshot,
+        );
         setCreateModal(prev => (
           prev.visible && prev.type === 'file'
             ? {
@@ -1878,17 +1891,44 @@ export default function DirectoryTree({
         ));
       }
     } else if (action === '新建文件夹') {
-      setCreateModal({
-        visible: true,
-        type: 'dir',
-        parentNode: node,
-        name: '',
-        loading: false,
-        defaultProvider: '',
-        providers: [],
-        providerLoading: false,
-        selectedProvider: '',
-      });
+      if (creatingDirectoryRef.current) {
+        return;
+      }
+      const parentId = node ? Number(node.id) : ROOT_PARENT_ID;
+      if (!Number.isFinite(parentId) || Number(parentId) <= 0) {
+        Toast.warning('目录根节点初始化中，请稍后重试');
+        return;
+      }
+
+      creatingDirectoryRef.current = true;
+      try {
+        const newDirectory = await createNode({
+          name: '新建文件夹',
+          parentId: Number(parentId),
+          libraryId,
+          type: 'dir',
+          conflictPolicy: 'auto_rename',
+        });
+        const parentNode = node || { id: Number(parentId), key: 'root' };
+        const newDirectoryKey = `${newDirectory.parentId}:${newDirectory.id}`;
+
+        onCreateSuccess?.(parentNode, newDirectory);
+        if (!onCreateSuccess) {
+          onUploadSuccess?.(parentNode, newDirectory);
+        }
+        if (node && !expandedKeysRef.current.includes(String(node.key))) {
+          ensureLazyLoadThenExpand(node);
+        }
+        setEditingName(String(newDirectory.name || '新建文件夹'));
+        setEditingKey(newDirectoryKey);
+        alignNodeStartForRename(newDirectoryKey);
+        scheduleRecompute();
+      } catch (error: any) {
+        runtimeLogger.error('新建文件夹失败:', error);
+        Toast.error(error?.message || '新建文件夹失败');
+      } finally {
+        creatingDirectoryRef.current = false;
+      }
     } else if (action === '重命名') {
       const currentBaseName = node.data?.rawName || node.label || '';
       const currentExt = node.data?.rawExt ?? node.ext ?? '';
@@ -2020,7 +2060,10 @@ export default function DirectoryTree({
 
   // 确认创建文件/文件夹
   const handleConfirmCreate = async () => {
-    const { type, parentNode, name, providerLoading, selectedProvider } = createModal;
+    const { type, parentNode, name, loading, providerLoading, selectedProvider } = createModal;
+    if (loading) {
+      return;
+    }
     if (!type || !name.trim()) {
       Toast.warning('请输入名称');
       return;
@@ -2029,11 +2072,19 @@ export default function DirectoryTree({
       Toast.warning('存储位置加载中，请稍后');
       return;
     }
-
     const resolvedRootParentId = ROOT_PARENT_ID;
     if (!parentNode && resolvedRootParentId === null) {
       Toast.warning('目录根节点初始化中，请稍后重试');
       return;
+    }
+    if (type === 'file') {
+      setCreateModal(prev => ({ ...prev, loading: true }));
+      const availability = await ensureStorageProviderAvailable(selectedProvider);
+      if (!availability.available) {
+        Toast.warning(availability.message);
+        setCreateModal(prev => ({ ...prev, loading: false }));
+        return;
+      }
     }
 
     try {
@@ -2299,6 +2350,9 @@ export default function DirectoryTree({
             onChange={setEditingName}
             onBlur={() => handleRenameConfirm(treeNode)}
             onKeyDown={(e) => {
+              if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) {
+                return;
+              }
               if (e.key === 'Enter') {
                 (e.target as HTMLInputElement).blur();
               }

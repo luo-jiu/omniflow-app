@@ -367,8 +367,10 @@ contextBridge.exposeInMainWorld('electronWindow', {
 });
 
 contextBridge.exposeInMainWorld('electronOverlay', {
-  open: (type: string, props: unknown) =>
-    ipcRenderer.invoke('overlay:open', { type, props }),
+  open: (type: string, props: unknown, requestId?: string) =>
+    ipcRenderer.invoke('overlay:open', { requestId, type, props }),
+  update: (requestId: string, props: unknown) =>
+    ipcRenderer.invoke('overlay:update', { requestId, props }),
 });
 
 contextBridge.exposeInMainWorld('electronOverlayHost', {
@@ -385,6 +387,13 @@ contextBridge.exposeInMainWorld('electronOverlayHost', {
     };
     ipcRenderer.on('overlay:host:dismiss-from-main', wrapped);
     return () => ipcRenderer.removeListener('overlay:host:dismiss-from-main', wrapped);
+  },
+  onUpdate: (listener: (payload: { requestId: string; props: unknown }) => void) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, payload: { requestId: string; props: unknown }) => {
+      listener(payload);
+    };
+    ipcRenderer.on('overlay:host:update', wrapped);
+    return () => ipcRenderer.removeListener('overlay:host:update', wrapped);
   },
   resolve: (requestId: string, result: unknown) =>
     ipcRenderer.send('overlay:host:resolve', { requestId, result }),

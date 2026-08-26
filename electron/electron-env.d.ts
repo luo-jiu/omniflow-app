@@ -360,12 +360,14 @@ interface Window {
   };
 
   electronOverlay: {
-    open: <T = unknown>(type: string, props: unknown) => Promise<T>;
+    open: <T = unknown>(type: string, props: unknown, requestId?: string) => Promise<T>;
+    update: (requestId: string, props: unknown) => Promise<boolean>;
   };
 
   electronOverlayHost: {
     onShow: (listener: (spec: { requestId: string; type: string; props: unknown }) => void) => () => void;
     onDismissFromMain: (listener: (payload: { requestId: string }) => void) => () => void;
+    onUpdate: (listener: (payload: { requestId: string; props: unknown }) => void) => () => void;
     resolve: (requestId: string, result: unknown) => void;
     dismiss: (requestId: string, reason?: string) => void;
     reportReady: () => void;

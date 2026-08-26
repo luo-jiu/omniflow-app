@@ -1,5 +1,6 @@
 import React from 'react';
-import { Modal, Input } from '@douyinfe/semi-ui';
+import { Input } from '@douyinfe/semi-ui';
+import { CompactModal } from '@/components/ui/compact-modal';
 
 interface LibraryCreateModalProps {
   visible: boolean;
@@ -17,12 +18,13 @@ const LibraryCreateModal: React.FC<LibraryCreateModalProps> = ({
   onCancel
 }) => {
   return (
-    <Modal
+    <CompactModal
       title="新建库"
       visible={visible}
       onOk={onConfirm}
       onCancel={onCancel}
       okText="创建"
+      cancelText="取消"
     >
       <Input
         placeholder="请输入库名称"
@@ -31,9 +33,8 @@ const LibraryCreateModal: React.FC<LibraryCreateModalProps> = ({
         autoFocus
         onEnterPress={onConfirm}
       />
-    </Modal>
+    </CompactModal>
   );
 };
 
 export default LibraryCreateModal;
-

@@ -9,8 +9,10 @@ import {HashRouter} from "react-router-dom";
 import {ThemeProvider} from "styled-components";
 import theme from "./assets/theme";
 import { installDesktopPlatformDomState } from '@/platform';
+import { installAppInputModalityTracking } from '@/components/ui/input-modality';
 
 installDesktopPlatformDomState();
+installAppInputModalityTracking();
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

@@ -5,17 +5,29 @@ textarea, select, input, button {
   background-color: var(--app-bg);
 }
 
+// Semi Modal 会在挂载时主动聚焦首个控件；鼠标操作保留真实焦点，但不显示键盘焦点圈。
+html[data-app-input-modality='pointer'] .semi-modal button:focus-visible {
+  outline: none !important;
+}
+
 .wrap-v1 {
   width: 1100px;
   margin: 0 auto;
 }
 
-// 业务二次确认统一使用该 opt-in class；复杂表单 Modal 继续由页面定义尺寸。
-.app-compact-confirm {
+// 紧凑表单和业务二次确认共用弹框表面、关闭按钮与 footer 基线。
+.app-compact-modal .semi-modal,
+.app-compact-confirm .semi-modal {
+  max-width: calc(100vw - 32px);
+}
+
+.app-compact-confirm .semi-modal {
   width: min(360px, calc(100vw - 32px)) !important;
 }
 
+.app-compact-modal .semi-modal-content,
 .app-compact-confirm .semi-modal-content {
+  position: relative;
   overflow: hidden;
   padding: 0 !important;
   border: 1px solid var(--app-border-strong);
@@ -24,15 +36,62 @@ textarea, select, input, button {
   box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28), var(--app-shadow);
 }
 
-.app-compact-confirm .semi-modal-header {
+.app-compact-modal .semi-modal-header {
+  min-height: 44px;
   margin: 0;
-  padding: 13px 16px 8px !important;
+  padding: 14px 44px 8px 18px !important;
+}
+
+.app-compact-confirm .semi-modal-header {
+  min-height: 40px;
+  margin: 0;
+  padding: 13px 44px 8px 16px !important;
+}
+
+.app-compact-modal .semi-modal-title {
+  font-size: 18px;
+  line-height: 1.25;
+  font-weight: 700;
 }
 
 .app-compact-confirm .semi-modal-title {
   font-size: 14px;
   line-height: 1.35;
   font-weight: 700;
+}
+
+.app-compact-modal .semi-modal-close,
+.app-compact-confirm .semi-modal-close {
+  position: absolute !important;
+  top: 9px !important;
+  right: 10px !important;
+  display: inline-flex !important;
+  width: 24px !important;
+  min-width: 24px !important;
+  height: 24px !important;
+  align-items: center;
+  justify-content: center;
+  padding: 0 !important;
+  border-radius: var(--app-radius-medium, 10px) !important;
+  background: transparent !important;
+  color: var(--app-text-muted);
+  line-height: 1;
+}
+
+.app-compact-modal .semi-modal-close:hover,
+.app-compact-confirm .semi-modal-close:hover {
+  color: var(--app-text);
+  background: color-mix(in srgb, var(--app-text) 8%, transparent) !important;
+}
+
+.app-compact-modal .semi-modal-close .semi-icon,
+.app-compact-confirm .semi-modal-close .semi-icon {
+  display: inline-flex;
+  width: 12px;
+  height: 12px;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
 }
 
 .app-compact-confirm .semi-modal-icon-wrapper {
@@ -43,6 +102,20 @@ textarea, select, input, button {
 
 .app-compact-confirm .semi-modal-confirm-icon {
   font-size: 16px;
+}
+
+.app-compact-modal .semi-modal-body {
+  padding: 4px 18px 12px !important;
+}
+
+.app-compact-modal .semi-input-wrapper {
+  min-height: 32px;
+  height: 32px;
+  border-radius: 7px;
+}
+
+.app-compact-modal .semi-input {
+  font-size: 13px;
 }
 
 .app-compact-confirm .semi-modal-body-wrapper {
@@ -70,18 +143,34 @@ textarea, select, input, button {
   margin-left: 0;
 }
 
+.app-compact-modal .semi-modal-footer,
 .app-compact-confirm .semi-modal-footer {
   display: flex;
   justify-content: flex-end;
-  gap: 12px;
   margin: 0;
-  padding: 0 16px 16px !important;
 }
 
+.app-compact-modal .semi-modal-footer > div,
+.app-compact-confirm .semi-modal-footer > div {
+  display: flex;
+  width: 100%;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.app-compact-modal .semi-modal-footer {
+  padding: 0 18px 14px !important;
+}
+
+.app-compact-confirm .semi-modal-footer {
+  padding: 0 16px 14px !important;
+}
+
+.app-compact-modal .semi-modal-footer .semi-button,
 .app-compact-confirm .semi-modal-footer .semi-button {
   height: 28px;
   min-width: 56px;
-  margin: 0;
+  margin: 0 !important;
   padding: 0 10px;
   border-radius: 6px;
   font-size: 12px;

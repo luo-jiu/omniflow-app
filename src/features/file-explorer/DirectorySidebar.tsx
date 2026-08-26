@@ -202,6 +202,19 @@ const DirectorySidebar = React.forwardRef<DirectorySidebarHandle, Props>(({
           onUploadSuccess={(parentNode, newNode) => {
             enqueueUploadedNodeAppend(parentNode, newNode);
           }}
+          onCreateSuccess={(parentNode, newNode) => {
+            if (!isNodeRespDTO(newNode)) {
+              return;
+            }
+            const parentNodeKey = (
+              !parentNode
+              || parentNode.key === 'root'
+              || (rootNodeId !== null && Number(parentNode.id) === Number(rootNodeId))
+            )
+              ? 'root'
+              : String(parentNode.key);
+            appendNodeUnderParent(parentNodeKey, newNode);
+          }}
           onDeleteSuccess={(_parentNode, deletedNodeKey) => {
             removeNode(deletedNodeKey);
           }}

@@ -24,7 +24,6 @@ import type { QuickAccessMode } from './components/quick-access-sidebar'
 import LibraryCard from './components/library-card'
 import LibraryContextMenu from './components/library-context-menu'
 import LibraryCreateModal from './components/library-create-modal'
-import LibraryEditModal from './components/library-edit-modal'
 import type { Library } from "@/features/file-explorer/services/file.api"
 import { useMediaEntries } from '@/hooks/useMediaRegistry'
 import { mediaRegistry } from '@/contexts/media-registry.singleton'
@@ -65,7 +64,7 @@ const LibraryPage: React.FC = () => {
     loadLibraries,
     handleCreateLibrary,
     handleDeleteLibrary,
-    applyLocalLibraryEdit,
+    handleRenameLibrary,
     toggleStar
   } = useLibraryPage()
 
@@ -78,15 +77,20 @@ const LibraryPage: React.FC = () => {
     mode: 'blank',
     library: null,
   })
-  const [editVisible, setEditVisible] = useState(false)
-  const [editingLibrary, setEditingLibrary] = useState<Library | null>(null)
-  const [editName, setEditName] = useState('')
-  const [editStarred, setEditStarred] = useState(false)
+  const [editingLibraryId, setEditingLibraryId] = useState<number | null>(null)
+  const [renameValue, setRenameValue] = useState('')
+  const [renamingLibraryId, setRenamingLibraryId] = useState<number | null>(null)
   const [quickAccessMode, setQuickAccessMode] = useState<QuickAccessMode>('all')
   const [librarySystemView, setLibrarySystemView] = useState<LibrarySystemView | null>(null)
   const [librarySettingsSection, setLibrarySettingsSection] = useState<SettingsWorkspaceSection>('home')
 
   const wrapperRef = useRef<HTMLDivElement>(null)
+  const renameSubmitRef = useRef<number | null>(null)
+
+  const clearRenameDraft = () => {
+    setEditingLibraryId(null)
+    setRenameValue('')
+  }
 
   const userContent = (
     <div
@@ -121,6 +125,7 @@ const LibraryPage: React.FC = () => {
   }
 
   const handleMediaRefresh = () => {
+    if (renameSubmitRef.current !== null) return
     void loadLibraries()
   }
 
@@ -168,9 +173,17 @@ const LibraryPage: React.FC = () => {
     return { x: Math.min(x, maxX), y: Math.min(y, maxY) }
   }
 
+  const editingLibrary = editingLibraryId === null
+    ? null
+    : libraries.find(library => library.id === editingLibraryId) ?? null
+  const isInlineRenameVisible = librarySystemView === null
+    && editingLibrary !== null
+    && (quickAccessMode !== 'favorites' || editingLibrary.starred)
+
   const handleContextMenu = (e: React.MouseEvent, library: Library) => {
     e.preventDefault()
     e.stopPropagation()
+    if (isInlineRenameVisible || renameSubmitRef.current !== null) return
     const { x, y } = clampToViewport(e.clientX, e.clientY)
 
     if (menu.visible) {
@@ -186,12 +199,14 @@ const LibraryPage: React.FC = () => {
   const handleBlankContextMenu = (e: React.MouseEvent) => {
     e.preventDefault()
     e.stopPropagation()
+    if (isInlineRenameVisible || renameSubmitRef.current !== null) return
     const { x, y } = clampToViewport(e.clientX, e.clientY)
     setMenu({ visible: true, x, y, mode: 'blank', library: null })
   }
 
   const handleMoreClick = (e: React.MouseEvent, library: Library) => {
     e.stopPropagation()
+    if (isInlineRenameVisible || renameSubmitRef.current !== null) return
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
     const { x, y } = clampToViewport(rect.right, rect.bottom)
     setMenu({ visible: true, x, y, mode: 'library', library })
@@ -205,28 +220,54 @@ const LibraryPage: React.FC = () => {
     }
   }
 
-  const openEditModal = () => {
+  const enterRename = () => {
+    if (renameSubmitRef.current !== null) return
     if (menu.mode !== 'library' || !menu.library) return
-    setEditingLibrary(menu.library)
-    setEditName(menu.library.name)
-    setEditStarred(!!menu.library.starred)
-    setEditVisible(true)
+    setEditingLibraryId(menu.library.id)
+    setRenameValue(menu.library.name)
     setMenu(m => ({ ...m, visible: false, mode: 'blank', library: null }))
   }
 
-  const submitEdit = () => {
-    if (!editingLibrary) return
-    const nextName = editName.trim()
+  const cancelRename = () => {
+    if (renameSubmitRef.current !== null) return
+    clearRenameDraft()
+  }
+
+  const submitRename = async (): Promise<boolean> => {
+    const libraryId = editingLibraryId
+    if (libraryId === null) return true
+    if (renameSubmitRef.current !== null) return false
+
+    const library = libraries.find(item => item.id === libraryId)
+    if (!library) {
+      clearRenameDraft()
+      return true
+    }
+
+    const nextName = renameValue.trim()
     if (!nextName) {
       Toast.warning('仓库名称不能为空')
-      return
+      return false
     }
-    applyLocalLibraryEdit(editingLibrary.id, {
-      name: nextName,
-      starred: editStarred,
-    })
-    setEditVisible(false)
-    setEditingLibrary(null)
+    if (nextName === library.name) {
+      clearRenameDraft()
+      return true
+    }
+
+    renameSubmitRef.current = libraryId
+    setRenamingLibraryId(libraryId)
+    try {
+      const success = await handleRenameLibrary(libraryId, nextName)
+      if (success) {
+        clearRenameDraft()
+      }
+      return success
+    } finally {
+      if (renameSubmitRef.current === libraryId) {
+        renameSubmitRef.current = null
+      }
+      setRenamingLibraryId(current => current === libraryId ? null : current)
+    }
   }
 
   const doDelete = () => {
@@ -379,7 +420,7 @@ const LibraryPage: React.FC = () => {
                 className="toolbar-action-btn"
                 onClick={handleMediaRefresh}
                 title="刷新库列表"
-                disabled={loading}
+                disabled={loading || renamingLibraryId !== null}
               >
                 <IconRefresh />
               </button>
@@ -413,6 +454,12 @@ const LibraryPage: React.FC = () => {
                   <LibraryCard
                     key={library.id}
                     library={library}
+                    isEditing={editingLibraryId === library.id}
+                    isSubmittingRename={renamingLibraryId === library.id}
+                    renameValue={renameValue}
+                    onRenameChange={setRenameValue}
+                    onRenameSubmit={submitRename}
+                    onRenameCancel={cancelRename}
                     onContextMenu={(e) => handleContextMenu(e, library)}
                     onMoreClick={(e) => handleMoreClick(e, library)}
                     onDoubleClick={() => navigate(`/libraries/${library.id}`)}
@@ -432,7 +479,7 @@ const LibraryPage: React.FC = () => {
         mode={menu.mode}
         library={menu.library}
         onCreate={openCreateModalFromMenu}
-        onEdit={openEditModal}
+        onEdit={enterRename}
         onReleaseWorkspace={doReleaseWorkspace}
         onDelete={doDelete}
         onClose={() => setMenu(m => ({ ...m, visible: false, mode: 'blank', library: null }))}
@@ -446,18 +493,6 @@ const LibraryPage: React.FC = () => {
         onCancel={() => setCreateVisible(false)}
       />
 
-      <LibraryEditModal
-        visible={editVisible}
-        name={editName}
-        starred={editStarred}
-        onNameChange={setEditName}
-        onStarredChange={setEditStarred}
-        onConfirm={submitEdit}
-        onCancel={() => {
-          setEditVisible(false)
-          setEditingLibrary(null)
-        }}
-      />
     </LibraryWrapper>
   )
 }

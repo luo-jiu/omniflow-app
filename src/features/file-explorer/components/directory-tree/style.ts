@@ -285,6 +285,7 @@ export const DirectorySidebarWrapper = styled.aside<{ $isDragging?: boolean }>`
     height: 20px;
     line-height: 18px !important;
     vertical-align: middle;
+    margin-left: -3px;
     border-color: var(--semi-color-primary);
     border-radius: 6px;
     background: var(--semi-color-bg-1);
@@ -294,6 +295,7 @@ export const DirectorySidebarWrapper = styled.aside<{ $isDragging?: boolean }>`
     display: block;
     height: 18px;
     line-height: 18px;
+    padding-left: 2px;
     padding-top: 0;
     padding-bottom: 0;
   }

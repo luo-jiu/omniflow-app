@@ -3,14 +3,17 @@ import { Toast } from '@douyinfe/semi-ui';
 import {
   fetchNodeDetailById,
   getAllDescendantsByNodeId,
-  getChildrenByNodeId,
   type NodeDetailDTO,
 } from '@/features/file-explorer/services/file.api';
-import { resolveNodeType } from '@/features/file-explorer/components/directory-tree/utils/tree-node';
-import { openOverlay } from '@/service/overlay/overlay.api';
+import { openOverlay, openOverlaySession } from '@/service/overlay/overlay.api';
 import type { NodePropertiesOverlayProps } from '@/service/overlay/types';
 import { buildFileFullName } from '@/utils/fileTreeSettings';
 import { runtimeLogger } from '@/utils/runtimeLogger';
+import {
+  formatNodeFileSize,
+  resolveFolderStatisticsValues,
+  type FolderStatistics,
+} from './node-properties-statistics';
 
 interface UseNodePropertiesOverlayParams {
   libraryId: number | null;
@@ -34,17 +37,6 @@ interface ShowNodePropertiesNode {
   builtInType?: string;
 }
 
-function formatFileSize(size: unknown): string {
-  const bytes = Number(size);
-  if (!Number.isFinite(bytes) || bytes < 0) return '-';
-  if (bytes === 0) return '0 B';
-  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-  const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
-  const value = bytes / (1024 ** index);
-  const precision = index <= 1 ? 0 : 2;
-  return `${value.toFixed(precision)} ${units[index]}`;
-}
-
 function formatBuiltInTypeLabel(value: unknown): string {
   const normalized = String(value || 'DEF').trim().toUpperCase();
   if (normalized === 'COMIC') return '漫画';
@@ -52,11 +44,21 @@ function formatBuiltInTypeLabel(value: unknown): string {
   if (normalized === 'VIDEO') return '视频';
   if (normalized === 'AUDIO') return '音频';
   if (normalized === 'GALLERY') return '图集';
-  return '默认';
+  return '-';
 }
 
 function formatArchiveModeLabel(value: unknown): string {
-  return Number(value ?? 0) === 1 ? '开启' : '关闭';
+  return Number(value ?? 0) === 1 ? '开启' : '-';
+}
+
+function formatTimestamp(value: unknown): string {
+  const normalized = String(value || '').trim();
+  if (!normalized) return '-';
+  const timestamp = new Date(normalized);
+  if (Number.isNaN(timestamp.getTime())) return '-';
+  const pad = (part: number) => String(part).padStart(2, '0');
+  return `${timestamp.getFullYear()}年${timestamp.getMonth() + 1}月${timestamp.getDate()} `
+    + `${pad(timestamp.getHours())}:${pad(timestamp.getMinutes())}:${pad(timestamp.getSeconds())}`;
 }
 
 function getNodeFullName(params: {
@@ -72,7 +74,10 @@ export function useNodePropertiesOverlay({
   libraryId,
   rootNodeId = null,
 }: UseNodePropertiesOverlayParams) {
-  const buildAncestorDetailPathByNodeId = useCallback(async (targetNodeId: number): Promise<NodeDetailDTO[]> => {
+  const buildAncestorDetailPathByNodeId = useCallback(async (
+    targetNodeId: number,
+    targetDetail?: NodeDetailDTO,
+  ): Promise<NodeDetailDTO[]> => {
     if (!Number.isFinite(Number(libraryId)) || Number(libraryId) <= 0) {
       throw new Error('当前库参数异常');
     }
@@ -83,7 +88,12 @@ export function useNodePropertiesOverlay({
 
     while (Number.isFinite(currentId) && currentId > 0 && !visited.has(currentId)) {
       visited.add(currentId);
-      const detail = await fetchNodeDetailById(currentId);
+      let detail: NodeDetailDTO;
+      if (targetDetail && currentId === Number(targetDetail.id)) {
+        detail = targetDetail;
+      } else {
+        detail = await fetchNodeDetailById(currentId);
+      }
       const detailLibraryId = Number(detail.libraryId);
       if (detailLibraryId !== Number(libraryId)) {
         throw new Error('节点不在当前资料库中');
@@ -102,12 +112,11 @@ export function useNodePropertiesOverlay({
 
   const buildNodePropertiesOverlayProps = useCallback((params: {
     detail: NodeDetailDTO;
-    directChildren: any[];
-    descendants: any[];
+    folderStatistics?: FolderStatistics;
     node: ShowNodePropertiesNode;
     pathDetails: NodeDetailDTO[];
   }): NodePropertiesOverlayProps => {
-    const { detail, directChildren, descendants, node, pathDetails } = params;
+    const { detail, folderStatistics, node, pathDetails } = params;
     const isFile = detail.type === 'file';
     const baseName = String(detail.name || node?.data?.rawName || node?.label || node?.name || '');
     const ext = String(detail.ext ?? node?.data?.rawExt ?? node?.ext ?? '').replace(/^\./, '');
@@ -126,17 +135,7 @@ export function useNodePropertiesOverlay({
       ? `${storageProviderLabel}（${storageProvider}）`
       : storageProviderLabel || storageProvider || '-';
 
-    const directFileCount = directChildren.filter((item) => resolveNodeType(item) === 'file').length;
-    const directDirCount = directChildren.filter((item) => resolveNodeType(item) === 'dir').length;
-    const directFileBytes = directChildren.reduce((sum, item) => (
-      resolveNodeType(item) === 'file' ? sum + Number(item?.fileSize || 0) : sum
-    ), 0);
-    const descendantsWithoutSelf = descendants.filter((item) => Number(item?.id) !== Number(detail.id));
-    const totalFileCount = descendantsWithoutSelf.filter((item) => resolveNodeType(item) === 'file').length;
-    const totalDirCount = descendantsWithoutSelf.filter((item) => resolveNodeType(item) === 'dir').length;
-    const totalFileBytes = descendantsWithoutSelf.reduce((sum, item) => (
-      resolveNodeType(item) === 'file' ? sum + Number(item?.fileSize || 0) : sum
-    ), 0);
+    const folderStatisticsValues = resolveFolderStatisticsValues(Number(detail.id), folderStatistics);
 
     const renderPathName = (item: NodeDetailDTO): string => {
       const itemBaseName = String(item.name || '').trim();
@@ -156,23 +155,31 @@ export function useNodePropertiesOverlay({
       .map(renderPathName)
       .filter(Boolean);
     const path = pathSegments.length > 0 ? `/ ${pathSegments.join(' / ')}` : '/';
+    const parentDetail = pathDetails.length > 1
+      ? pathDetails[pathDetails.length - 2]
+      : null;
+    const createdAt = formatTimestamp(detail.createdAt);
+    const updatedAt = formatTimestamp(detail.updatedAt);
 
     const sections = isFile
       ? [
         {
           title: '基本信息',
           items: [
-            { label: '文件大小', value: formatFileSize(detail.fileSize ?? node?.data?.fileSize ?? node?.fileSize) },
+            { label: '位置', value: path },
+            { label: '所属类型', value: '文件' },
+            { label: '大小', value: formatNodeFileSize(detail.fileSize ?? node?.data?.fileSize ?? node?.fileSize) },
             { label: '后缀', value: ext || '-' },
             { label: 'MIME', value: mimeType || '-' },
+            { label: '创建时间', value: createdAt },
+            { label: '修改时间', value: updatedAt },
           ],
         },
         {
           title: '视图与模式',
           items: [
-            { label: '所属类型', value: '文件' },
             { label: '内置类型', value: builtInTypeLabel },
-            { label: '归档模式', value: archiveModeLabel },
+            { label: '归档类型', value: archiveModeLabel },
             { label: '视图配置', value: viewMetaState },
           ],
         },
@@ -189,33 +196,38 @@ export function useNodePropertiesOverlay({
       ]
       : [
         {
-          title: '视图与模式',
+          title: '基本信息',
           items: [
+            { label: '位置', value: path },
             { label: '所属类型', value: '文件夹' },
-            { label: '内置类型', value: builtInTypeLabel },
-            { label: '归档模式', value: archiveModeLabel },
-            { label: '视图配置', value: viewMetaState },
+            { label: '大小', value: folderStatisticsValues.size },
+            { label: '文件数量', value: folderStatisticsValues.count },
+            { label: '创建时间', value: createdAt },
+            { label: '修改时间', value: updatedAt },
           ],
         },
         {
-          title: '内容统计',
+          title: '视图与模式',
           items: [
-            { label: '直接子项', value: `${directChildren.length} 项` },
-            { label: '其中文件', value: `${directFileCount} 个` },
-            { label: '其中文件夹', value: `${directDirCount} 个` },
-            { label: '直接文件大小', value: directFileCount > 0 ? formatFileSize(directFileBytes) : '-' },
-            { label: '子树总项数', value: `${descendantsWithoutSelf.length} 项` },
-            { label: '子树文件数', value: `${totalFileCount} 个` },
-            { label: '子树文件夹数', value: `${totalDirCount} 个` },
-            { label: '子树文件总大小', value: totalFileCount > 0 ? formatFileSize(totalFileBytes) : '-' },
+            { label: '内置类型', value: builtInTypeLabel },
+            { label: '归档类型', value: archiveModeLabel },
+            { label: '视图配置', value: viewMetaState },
           ],
         },
       ];
 
     return {
-      chips: [],
       fullName: fullName || '-',
-      path,
+      icon: {
+        archiveMode: Number(detail.archiveMode ?? node?.archiveMode ?? 0) === 1 ? 1 : 0,
+        builtInType: String(detail.builtInType ?? node?.builtInType ?? 'DEF'),
+        ext,
+        fileName: fullName || baseName,
+        mimeType,
+        nodeType: isFile ? 'file' : 'dir',
+        parentArchiveMode: Number(parentDetail?.archiveMode ?? 0) === 1 ? 1 : 0,
+        parentBuiltInType: String(parentDetail?.builtInType ?? 'DEF'),
+      },
       sections,
       title: isFile ? '文件属性' : '文件夹属性',
     };
@@ -234,25 +246,38 @@ export function useNodePropertiesOverlay({
 
     try {
       const detail = await fetchNodeDetailById(nodeId);
-      const pathDetails = await buildAncestorDetailPathByNodeId(nodeId);
-      let directChildren: any[] = [];
-      let descendants: any[] = [detail];
+      const pathDetails = await buildAncestorDetailPathByNodeId(nodeId, detail);
 
       if (detail.type === 'dir') {
-        const [directChildrenResult, descendantsResult] = await Promise.all([
-          getChildrenByNodeId(nodeId, Number(libraryId)),
-          getAllDescendantsByNodeId(nodeId, Number(libraryId)),
-        ]);
-        directChildren = Array.isArray(directChildrenResult) ? directChildrenResult : [];
-        descendants = Array.isArray(descendantsResult) && descendantsResult.length > 0
-          ? descendantsResult
-          : [detail];
+        const buildProps = (folderStatistics: FolderStatistics) => buildNodePropertiesOverlayProps({
+          detail,
+          folderStatistics,
+          node,
+          pathDetails,
+        });
+        const session = openOverlaySession('node-properties', buildProps({ status: 'loading' }));
+        void getAllDescendantsByNodeId(nodeId, Number(libraryId)).then(
+          (descendantsResult) => {
+            void session.updateProps(buildProps({
+              status: 'ready',
+              descendants: Array.isArray(descendantsResult) ? descendantsResult : null,
+            })).catch((error) => {
+              runtimeLogger.warn('文件夹属性统计结果未能更新到弹框:', error);
+            });
+          },
+          (error) => {
+            runtimeLogger.warn('文件夹属性统计暂不可用:', error);
+            void session.updateProps(buildProps({ status: 'error' })).catch((updateError) => {
+              runtimeLogger.warn('文件夹属性统计失败状态未能更新到弹框:', updateError);
+            });
+          },
+        );
+        await session.result;
+        return;
       }
 
       const props = buildNodePropertiesOverlayProps({
         detail,
-        directChildren,
-        descendants,
         node,
         pathDetails,
       });

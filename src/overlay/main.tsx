@@ -3,8 +3,11 @@ import 'normalize.css';
 import '@douyinfe/semi-ui/dist/css/semi.min.css';
 import '@/assets/css/index.less';
 
+import { installAppInputModalityTracking } from '@/components/ui/input-modality';
 import { OverlayThemeBridge } from './OverlayThemeBridge';
 import { OverlayHost } from './OverlayHost';
+
+installAppInputModalityTracking();
 
 // NOTE: Intentionally NOT wrapped in React.StrictMode.
 // Semi UI's Modal uses an internal portal that gets torn down on the

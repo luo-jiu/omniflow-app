@@ -11,6 +11,7 @@ import { formatSize } from '@/utils/formatSize';
 import { DirectoryTreeCompactModalStyle } from './compact-modal-style';
 import { formatStorageProviderAlias } from './storage-provider-display';
 import {
+  StorageProviderHealthDot,
   StorageProviderDropdownStyle,
   StorageProviderOption,
 } from './storage-provider-option';
@@ -124,6 +125,7 @@ const Content = styled.div`
     display: flex;
     min-width: 0;
     align-items: center;
+    gap: 7px;
     overflow: hidden;
     padding-right: 6px;
   }
@@ -265,18 +267,20 @@ const UploadConfirmModal: React.FC<UploadConfirmModalProps> = ({
     [fileSummaries],
   );
   const selectedProviderInfo = providers.find(provider => provider.alias === selectedProvider);
+  const selectedProviderStatus = selectedProviderInfo?.healthStatus || 'unknown';
   const renderSelectedProvider = React.useCallback(() => {
     if (!selectedProviderInfo) {
       return selectedProvider || '选择存储桶';
     }
     return (
       <div className="provider-selected">
+        <StorageProviderHealthDot status={selectedProviderStatus} />
         <div className="provider-selected-title">
           {formatStorageProviderAlias(selectedProviderInfo, defaultProvider)}
         </div>
       </div>
     );
-  }, [defaultProvider, selectedProvider, selectedProviderInfo]);
+  }, [defaultProvider, selectedProvider, selectedProviderInfo, selectedProviderStatus]);
 
   return (
     <>
@@ -290,6 +294,7 @@ const UploadConfirmModal: React.FC<UploadConfirmModalProps> = ({
         onOk={() => onConfirm(selectedProvider)}
         onCancel={onCancel}
         confirmLoading={Boolean(loading)}
+        okButtonProps={{ disabled: !selectedProvider }}
         okText={confirmText}
         cancelText="取消"
         maskClosable={false}
@@ -349,6 +354,7 @@ const UploadConfirmModal: React.FC<UploadConfirmModalProps> = ({
                 {providers.map((provider) => (
                   <Select.Option key={provider.alias} value={provider.alias} showTick={false}>
                     <StorageProviderOption>
+                      <StorageProviderHealthDot status={provider.healthStatus || 'unknown'} />
                       {formatStorageProviderAlias(provider, defaultProvider)}
                     </StorageProviderOption>
                   </Select.Option>

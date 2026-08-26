@@ -5,7 +5,13 @@ export type OverlaySpec = {
 };
 
 export type OverlayOpenPayload = {
+  requestId?: string;
   type: string;
+  props: unknown;
+};
+
+export type OverlayUpdatePayload = {
+  requestId: string;
   props: unknown;
 };
 

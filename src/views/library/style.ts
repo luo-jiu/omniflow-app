@@ -312,7 +312,8 @@ export const CardGrid = styled.div`
 
 export const CardItem = styled.div`
   position: relative;
-  min-height: 120px;
+  height: 158px;
+  min-height: 158px;
   width: min(100%, 132px);
   justify-self: center;
   box-sizing: border-box;
@@ -322,46 +323,50 @@ export const CardItem = styled.div`
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  justify-content: flex-end;
+  justify-content: flex-start;
   gap: 0;
   cursor: pointer;
-  transition: transform .15s ease;
   user-select: none;
   padding: 0;
 
-  &:hover {
-    transform: translateY(-1px);
-  }
-
-  &:hover .card-actions {
-    opacity: 1;
-    pointer-events: auto;
+  &:focus-visible {
+    outline: 1px solid var(--semi-color-primary);
+    outline-offset: 2px;
   }
 
   .card-main {
     width: 100%;
     display: flex;
-    align-items: flex-end;
-    justify-content: center;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
   }
 `
 
 export const CardIcon = styled.div`
   position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  height: 120px;
+  width: 115px;
+  height: 90px;
+  flex: 0 0 90px;
+  margin-top: 13px;
   background: transparent;
   user-select: none;
-  pointer-events: none;
+
+  &:hover .card-actions,
+  &:focus-within .card-actions {
+    opacity: 1;
+    pointer-events: auto;
+  }
 `
 
 export const CardArtwork = styled.img`
+  position: absolute;
+  top: -12px;
+  left: -2px;
   display: block;
-  width: 100%;
-  height: 100%;
+  width: 120px;
+  height: 120px;
+  max-width: none;
   object-fit: contain;
   user-select: none;
   pointer-events: none;
@@ -372,27 +377,23 @@ export const CardArtwork = styled.img`
 `
 
 export const CardName = styled.div`
-  position: absolute;
-  top: 58px;
-  left: 18px;
-  right: 16px;
+  width: 126px;
+  height: 45px;
+  margin-top: 10px;
   min-width: 0;
-  text-align: left;
-  white-space: nowrap;
-  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  text-align: center;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   overflow: hidden;
   font-size: 11px;
-  font-weight: 700;
-  color: #6d4b0a;
-  text-shadow: 0 1px 0 rgba(255, 243, 209, 0.45);
-  line-height: 1.4;
+  font-weight: 500;
+  color: var(--app-text);
+  line-height: 15px;
   pointer-events: none;
-  z-index: 2;
-
-  body[theme-mode="dark"] & {
-    color: #f3e0b2;
-    text-shadow: 0 1px 0 rgba(25, 22, 14, 0.52);
-  }
 `
 
 /* 实验版文件夹样式备份（当前停用）
@@ -479,22 +480,45 @@ const FolderLabel = styled.div`
 
 export const CardNameEdit = styled.div`
   display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  width: 100%;
+  align-items: flex-start;
+  justify-content: center;
+  width: 126px;
+  height: 45px;
+  margin-top: 10px;
 
-  .semi-input-wrapper,
-  input {
-    height: 30px;
+  .library-card-rename-input {
+    width: 126px;
+    height: 24px;
+    box-sizing: border-box;
+    padding: 2px 5px;
+    border: 1px solid var(--semi-color-primary);
+    outline: none;
+    background: var(--app-bg-elevated);
+    color: var(--app-text);
+    font-family: inherit;
     font-size: 11px;
-    border-radius: 6px;
+    font-weight: 500;
+    line-height: 18px;
+    text-align: center;
+    border-radius: var(--app-radius-small);
+    user-select: text;
+  }
+
+  .library-card-rename-input:focus {
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--semi-color-primary) 24%, transparent);
+  }
+
+  .library-card-rename-input:disabled {
+    cursor: progress;
+    opacity: 0.72;
   }
 `
 
 export const CardActions = styled.div`
   position: absolute;
-  top: 8px;
-  right: 8px;
+  top: 4px;
+  right: 4px;
+  z-index: 3;
   display: flex;
   gap: 4px;
   opacity: 0;

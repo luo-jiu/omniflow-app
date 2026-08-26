@@ -12,9 +12,8 @@ export const NodePropertiesOverlayAdapter: React.FC<
   return (
     <NodePropertiesModal
       visible
-      chips={props.chips}
       fullName={props.fullName}
-      path={props.path}
+      icon={props.icon}
       sections={props.sections}
       title={props.title}
       onClose={() => onResolve({ type: 'close' })}

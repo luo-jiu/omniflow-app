@@ -1,12 +1,20 @@
 import React from 'react';
 import { Modal } from '@douyinfe/semi-ui';
+import { IconCrossStroked } from '@douyinfe/semi-icons';
 import styled, { createGlobalStyle } from 'styled-components';
-import type { NodePropertiesOverlaySection } from '@/service/overlay/types';
+import {
+  getDirectoryBuiltInIcon,
+  getFileNodeIconByParentBuiltInType,
+} from '@/features/file-explorer/utils/file-node-icon';
+import type {
+  NodePropertiesOverlayIcon,
+  NodePropertiesOverlaySection,
+} from '@/service/overlay/types';
+import { DirectoryTreeCompactModalStyle } from './compact-modal-style';
 
 interface NodePropertiesModalProps {
-  chips: string[];
   fullName: string;
-  path: string;
+  icon: NodePropertiesOverlayIcon;
   sections: NodePropertiesOverlaySection[];
   title: string;
   visible: boolean;
@@ -16,16 +24,45 @@ interface NodePropertiesModalProps {
 const Content = styled.div`
   display: flex;
   flex-direction: column;
-  gap: 9px;
+  gap: 0;
   color: var(--semi-color-text-0);
 
   .properties-hero {
+    position: relative;
     display: flex;
-    flex-direction: column;
-    gap: 0;
+    min-width: 0;
+    align-items: center;
+    gap: 8px;
+    padding-bottom: 10px;
+  }
+
+  .properties-hero::after {
+    position: absolute;
+    right: 12px;
+    bottom: 0;
+    left: 12px;
+    height: 1px;
+    background: var(--semi-color-border);
+    content: '';
+  }
+
+  .properties-name-icon {
+    display: inline-flex;
+    width: 18px;
+    height: 18px;
+    flex: 0 0 18px;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .properties-name-icon .tree-file-type-icon {
+    width: 18px;
+    height: 18px;
+    object-fit: contain;
   }
 
   .properties-name {
+    min-width: 0;
     font-size: 17px;
     line-height: 1.25;
     font-weight: 700;
@@ -33,39 +70,25 @@ const Content = styled.div`
     word-break: break-word;
   }
 
-  .properties-path {
-    padding: 8px 10px;
-    border-radius: 7px;
-    border: 1px solid var(--semi-color-border);
-    background: var(--semi-color-fill-0);
-  }
-
-  .properties-path-label {
-    font-size: 11px;
-    line-height: 1.35;
-    font-weight: 600;
-    color: var(--semi-color-text-1);
-    margin-bottom: 2px;
-  }
-
-  .properties-path-value {
-    font-size: 12px;
-    line-height: 1.45;
-    color: var(--semi-color-text-0);
-    word-break: break-word;
-  }
-
   .properties-grid {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 0;
   }
 
   .properties-card {
-    border-radius: 7px;
-    border: 1px solid var(--semi-color-border);
-    background: var(--semi-color-bg-1);
+    position: relative;
     padding: 10px 12px;
+  }
+
+  .properties-card + .properties-card::before {
+    position: absolute;
+    top: 0;
+    right: 12px;
+    left: 12px;
+    height: 1px;
+    background: var(--semi-color-border);
+    content: '';
   }
 
   .properties-card-title {
@@ -103,22 +126,6 @@ const Content = styled.div`
     word-break: break-word;
   }
 
-  .properties-field-chip {
-    display: inline-flex;
-    align-items: center;
-    min-height: 21px;
-    max-width: 100%;
-    padding: 1px 7px;
-    border-radius: 999px;
-    background: color-mix(in srgb, var(--semi-color-primary) 10%, var(--semi-color-fill-0) 90%);
-    border: 1px solid color-mix(in srgb, var(--semi-color-primary) 24%, var(--semi-color-border) 76%);
-    color: var(--semi-color-primary);
-    font-size: 11px;
-    line-height: 1.35;
-    font-weight: 600;
-    word-break: break-word;
-  }
-
   @media (max-width: 960px) {
     .properties-name {
       font-size: 16px;
@@ -132,77 +139,69 @@ const Content = styled.div`
 
 const ModalStyle = createGlobalStyle`
   .node-properties-modal .semi-modal-content {
+    padding-right: 0;
+    padding-left: 0;
     border-radius: 8px;
   }
 
   .node-properties-modal .semi-modal-header {
+    min-height: 44px;
     margin: 0;
-    padding: 15px 18px 5px;
+    padding: 14px 44px 8px 18px !important;
   }
 
   .node-properties-modal .semi-modal-title {
-    font-size: 14px;
-    line-height: 1.3;
+    font-size: 18px;
+    line-height: 1.25;
     font-weight: 700;
   }
 
-  .node-properties-modal .semi-modal-close {
-    top: 12px;
-    right: 13px;
-  }
-
   .node-properties-modal .semi-modal-body {
-    padding: 0 18px 13px !important;
+    padding: 0 18px 9px !important;
   }
 
   .node-properties-modal .semi-modal-footer {
-    margin: 0;
-    padding: 0 18px 15px;
-  }
-
-  .node-properties-modal .semi-button {
-    height: 28px;
-    min-width: 64px;
-    padding: 0 12px;
-    border-radius: 6px;
-    font-size: 11px;
-    font-weight: 600;
+    display: none;
   }
 `;
 
-const CHIP_FIELD_LABELS = new Set(['所属类型', '内置类型', '归档模式']);
-
 const NodePropertiesModal: React.FC<NodePropertiesModalProps> = ({
   fullName,
-  path,
+  icon,
   sections,
   title,
   visible,
   onClose,
 }) => {
+  const nodeIcon = icon.nodeType === 'dir'
+    ? getDirectoryBuiltInIcon(icon.builtInType, icon.archiveMode, false)
+    : getFileNodeIconByParentBuiltInType(
+      icon.ext,
+      icon.parentBuiltInType,
+      icon.parentArchiveMode,
+      icon.fileName,
+      { mimeType: icon.mimeType },
+    );
+
   return (
     <>
+      <DirectoryTreeCompactModalStyle />
       <ModalStyle />
       <Modal
-        className="node-properties-modal"
+        className="directory-tree-compact-modal node-properties-modal"
+        closeIcon={<IconCrossStroked size="small" />}
         title={title}
         visible={visible}
         onCancel={onClose}
-        onOk={onClose}
-        okText="关闭"
-        cancelButtonProps={{ style: { display: 'none' } }}
+        footer={null}
         centered
         width={520}
         maskClosable
       >
         <Content>
           <div className="properties-hero">
+            <span className="properties-name-icon" aria-hidden="true">{nodeIcon}</span>
             <div className="properties-name">{fullName || '-'}</div>
-          </div>
-
-          <div className="properties-path">
-            <div className="properties-path-label">位置</div>
-            <div className="properties-path-value">{path || '-'}</div>
           </div>
 
           <div className="properties-grid">
@@ -214,11 +213,7 @@ const NodePropertiesModal: React.FC<NodePropertiesModalProps> = ({
                     <div key={`${section.title}-${item.label}`} className="properties-field">
                       <div className="properties-field-label">{item.label}</div>
                       <div className="properties-field-value">
-                        {CHIP_FIELD_LABELS.has(item.label) ? (
-                          <span className="properties-field-chip">{item.value || '-'}</span>
-                        ) : (
-                          item.value || '-'
-                        )}
+                        {item.value || '-'}
                       </div>
                     </div>
                   ))}

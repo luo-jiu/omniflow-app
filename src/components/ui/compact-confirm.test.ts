@@ -6,6 +6,10 @@ vi.mock('@douyinfe/semi-ui', () => ({
   Modal: { confirm },
 }));
 
+vi.mock('@douyinfe/semi-icons', () => ({
+  IconCrossStroked: () => null,
+}));
+
 import { openCompactConfirm } from './compact-confirm';
 
 describe('openCompactConfirm', () => {
@@ -18,6 +22,8 @@ describe('openCompactConfirm', () => {
 
     expect(confirm).toHaveBeenCalledWith(expect.objectContaining({
       className: 'app-compact-confirm',
+      closeIcon: expect.anything(),
+      icon: null,
       title: '确认操作？',
     }));
   });
@@ -28,5 +34,12 @@ describe('openCompactConfirm', () => {
     expect(confirm).toHaveBeenCalledWith(expect.objectContaining({
       className: 'app-compact-confirm feature-confirm',
     }));
+  });
+
+  it('允许业务显式提供有语义的状态图标', () => {
+    const icon = 'warning-icon';
+    openCompactConfirm({ icon, title: '确认操作？' });
+
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ icon }));
   });
 });

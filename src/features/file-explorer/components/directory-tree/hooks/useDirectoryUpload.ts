@@ -16,12 +16,17 @@ import {
 } from '@/features/file-explorer/services/external-browser-resource-upload.api';
 import { normalizeUploadRelativePath, UploadPathResolver } from '@/features/file-explorer/services/upload-path-resolver';
 import { fetchProviders } from '@/features/storage-config/services/storage-config.api';
-import { openOverlay } from '@/service/overlay/overlay.api';
+import { openOverlaySession } from '@/service/overlay/overlay.api';
 import type {
   OverlayStorageProvider,
   OverlayTargetNode,
   UploadConfirmResult,
 } from '@/service/overlay/types';
+import { resourceMonitorProbeRuntime } from '@/features/resource-monitor/services/resource-monitor-runtime';
+import {
+  ensureStorageProviderAvailable,
+  getStorageProviderProbeStatus,
+} from '@/features/resource-monitor/services/storage-provider-health';
 
 type UploadModalTargetNode = OverlayTargetNode;
 
@@ -223,27 +228,56 @@ export function useDirectoryUpload({
         bucket: provider.bucket,
         label: provider.label,
         useSSL: provider.useSSL,
+        healthStatus: getStorageProviderProbeStatus(
+          resourceMonitorProbeRuntime.getState().snapshot,
+          provider.alias,
+        ),
       }));
     } catch (error) {
       runtimeLogger.warn('加载存储 Provider 失败，上传确认弹框将使用后端默认分配:', error);
     }
 
+    const buildOverlayProps = () => ({
+      defaultProvider,
+      fileSummaries,
+      providers: providers.map((provider) => ({
+        ...provider,
+        healthStatus: getStorageProviderProbeStatus(
+          resourceMonitorProbeRuntime.getState().snapshot,
+          provider.alias,
+        ),
+      })),
+      targetNode,
+    });
+
     let result: UploadConfirmResult;
+    let stopHealthUpdates: (() => void) | null = null;
     try {
-      result = await openOverlay('upload-confirm', {
-        defaultProvider,
-        fileSummaries,
-        providers,
-        targetNode,
+      const session = openOverlaySession('upload-confirm', buildOverlayProps());
+      stopHealthUpdates = resourceMonitorProbeRuntime.subscribe(() => {
+        void session.updateProps(buildOverlayProps()).catch((error) => {
+          runtimeLogger.warn('上传确认弹框未能同步存储探活状态:', error);
+        });
       });
+      resourceMonitorProbeRuntime.start();
+      void resourceMonitorProbeRuntime.refresh({ silent: true });
+      result = await session.result;
     } catch (error) {
       runtimeLogger.error('上传确认弹框无法打开:', error);
       Toast.error('上传确认弹框无法打开');
       void cleanupUploadCandidateTempPaths(files);
       return;
+    } finally {
+      stopHealthUpdates?.();
     }
 
     if (result.type !== 'confirm') {
+      void cleanupUploadCandidateTempPaths(files);
+      return;
+    }
+    const availability = await ensureStorageProviderAvailable(result.storageProvider);
+    if (!availability.available) {
+      Toast.warning(availability.message);
       void cleanupUploadCandidateTempPaths(files);
       return;
     }

@@ -51,6 +51,8 @@
 - `features/system-workspace` 只负责 system view 的宿主和注册；资源监测实际页面通过懒加载壳进入，避免图表库成本扩散到设置、上传中心等其他 system view。
 - `features/resource-monitor` 负责资源监测自己的请求、格式化、加载态、错误态和展示。
 - 资源探针历史由 `features/resource-monitor/services/resource-monitor-runtime.ts` 维护，生命周期跟随登录后的应用进程，不归属页面组件。
+- storage provider 的写入门禁复用同一 runtime，不另建页面级轮询。新建文件和上传确认读取相同的对象存储探针状态；写入前只在结果未知或超过 1 分钟时补一次探活，并复用 runtime 的并发请求合并，不能按上传文件逐个探活。
+- 写入门禁采用失败关闭：只有选中 provider 的新鲜探针状态为 `ok` 才允许创建节点或把上传批次加入队列；`error`、`unknown`、探活请求失败或 provider 列表缺失都必须停止写入。探活只是前置门禁，不能移除实际写入失败后的节点 / 临时文件清理。
 - 资源监测只能跳转到已有管理入口：存储配置进入 system workspace 设置页的存储分区，资料库详情页内的回收站关联进入当前资料库 system workspace 回收站，迁移任务进入迁移中心 `migration` tab。
 - 页面层不得直接拼 `/v1/resource-monitor/snapshot`。
 

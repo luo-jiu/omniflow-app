@@ -6,9 +6,11 @@ import type {
   OverlayOpenPayload,
   OverlayResolvePayload,
   OverlaySpec,
+  OverlayUpdatePayload,
 } from './overlayWindowTypes';
 
 const OVERLAY_REQUEST_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
+const OVERLAY_REQUEST_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 type Pending = {
   requestId: string;
@@ -87,8 +89,22 @@ export function registerOverlayWindowIpcHandlers(controller: OverlayWindowContro
     }
   }
 
+  function findPending(requestId: string): Pending | null {
+    if (currentRequest?.requestId === requestId) {
+      return currentRequest;
+    }
+    return queue.find((pending) => pending.requestId === requestId) ?? null;
+  }
+
   ipcMain.handle('overlay:open', async (event, payload: OverlayOpenPayload) => {
-    const requestId = randomUUID();
+    const requestedId = String(payload?.requestId || '').trim();
+    if (requestedId && !OVERLAY_REQUEST_ID_PATTERN.test(requestedId)) {
+      throw new Error('invalid overlay request id');
+    }
+    const requestId = requestedId || randomUUID();
+    if (findPending(requestId)) {
+      throw new Error('overlay request id already exists');
+    }
     return new Promise((resolve, reject) => {
       const pending: Pending = {
         requestId,
@@ -108,6 +124,19 @@ export function registerOverlayWindowIpcHandlers(controller: OverlayWindowContro
         promote(pending);
       }
     });
+  });
+
+  ipcMain.handle('overlay:update', (event, payload: OverlayUpdatePayload) => {
+    const requestId = String(payload?.requestId || '').trim();
+    if (!requestId) return false;
+    const pending = findPending(requestId);
+    if (!pending || pending.senderContents !== event.sender) return false;
+
+    pending.props = payload.props;
+    if (currentRequest === pending) {
+      controller.updateSpec({ requestId, props: payload.props });
+    }
+    return true;
   });
 
   ipcMain.on('overlay:host:resolve', (_event, payload: OverlayResolvePayload) => {

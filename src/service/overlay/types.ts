@@ -19,6 +19,7 @@ export type OverlayStorageProvider = {
   bucket: string;
   label: string;
   useSSL: boolean;
+  healthStatus?: 'ok' | 'error' | 'unknown';
 };
 
 export type UploadConfirmOverlayProps = {
@@ -56,10 +57,20 @@ export type NodePropertiesOverlaySection = {
   items: NodePropertiesOverlayField[];
 };
 
+export type NodePropertiesOverlayIcon = {
+  archiveMode: number;
+  builtInType: string;
+  ext: string;
+  fileName: string;
+  mimeType: string;
+  nodeType: 'dir' | 'file';
+  parentArchiveMode: number;
+  parentBuiltInType: string;
+};
+
 export type NodePropertiesOverlayProps = {
-  chips: string[];
   fullName: string;
-  path: string;
+  icon: NodePropertiesOverlayIcon;
   sections: NodePropertiesOverlaySection[];
   title: string;
 };

@@ -18,10 +18,18 @@ export const OverlayHost: React.FC = () => {
     const offDismiss = window.electronOverlayHost.onDismissFromMain((payload) => {
       setCurrent((prev) => (prev && prev.requestId === payload.requestId ? null : prev));
     });
+    const offUpdate = window.electronOverlayHost.onUpdate((payload) => {
+      setCurrent((prev) => (
+        prev?.requestId === payload.requestId
+          ? { ...prev, props: payload.props }
+          : prev
+      ));
+    });
     window.electronOverlayHost.reportReady();
     return () => {
       offShow?.();
       offDismiss?.();
+      offUpdate?.();
     };
   }, []);
 

@@ -3,6 +3,7 @@ import path from 'node:path';
 import type {
   OverlayDismissFromMainPayload,
   OverlaySpec,
+  OverlayUpdatePayload,
 } from './overlayWindowTypes';
 
 type OverlayWindowControllerOptions = {
@@ -17,6 +18,7 @@ export type OverlayWindowController = {
   markReady: (fromWebContents: Electron.WebContents) => void;
   getWindow: () => BrowserWindow | null;
   showSpec: (spec: OverlaySpec) => void;
+  updateSpec: (payload: OverlayUpdatePayload) => void;
   dismissSpec: (payload: OverlayDismissFromMainPayload) => void;
   setClickThrough: (ignore: boolean) => void;
   hideIdle: () => void;
@@ -153,6 +155,15 @@ export function createOverlayWindowController(
     overlayWin.webContents.send('overlay:host:dismiss-from-main', payload);
   }
 
+  function updateSpec(payload: OverlayUpdatePayload) {
+    if (!overlayWin || overlayWin.isDestroyed()) return;
+    void (async () => {
+      await ensureReady();
+      if (!overlayWin || overlayWin.isDestroyed()) return;
+      overlayWin.webContents.send('overlay:host:update', payload);
+    })();
+  }
+
   function setClickThrough(ignore: boolean) {
     if (!overlayWin || overlayWin.isDestroyed()) return;
     if (ignore) {
@@ -189,6 +200,7 @@ export function createOverlayWindowController(
     markReady,
     getWindow: () => overlayWin,
     showSpec,
+    updateSpec,
     dismissSpec,
     setClickThrough,
     hideIdle,

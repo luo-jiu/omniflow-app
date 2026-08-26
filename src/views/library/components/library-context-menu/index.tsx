@@ -64,7 +64,7 @@ const LibraryContextMenu: React.FC<LibraryContextMenuProps> = ({
     : [
       {
         key: 'edit',
-        label: '编辑',
+        label: '重命名',
         onClick: onEdit,
       },
       {

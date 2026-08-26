@@ -1,4 +1,5 @@
 import styled, { createGlobalStyle } from 'styled-components';
+import type { ResourceMonitorProbeStatus } from '@/features/resource-monitor/services/resource-monitor.api';
 
 export const StorageProviderDropdownStyle = createGlobalStyle`
   .directory-tree-storage-provider-dropdown.semi-select-option-list-wrapper {
@@ -28,6 +29,7 @@ export const StorageProviderOption = styled.div`
   height: 24px;
   min-height: 24px;
   align-items: center;
+  gap: 7px;
   overflow: hidden;
   padding: 0;
   color: var(--semi-color-text-0);
@@ -37,3 +39,20 @@ export const StorageProviderOption = styled.div`
   text-overflow: ellipsis;
   white-space: nowrap;
 `;
+
+const HealthDot = styled.span<{ $status: ResourceMonitorProbeStatus }>`
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+  border-radius: 50%;
+  background: ${({ $status }) => {
+    if ($status === 'ok') return 'var(--semi-color-success)';
+    if ($status === 'error') return 'var(--semi-color-danger)';
+    return 'var(--semi-color-fill-2)';
+  }};
+`;
+
+export function StorageProviderHealthDot({ status }: { status: ResourceMonitorProbeStatus }) {
+  const label = status === 'ok' ? '连接正常' : status === 'error' ? '连接失败' : '等待探活';
+  return <HealthDot $status={status} aria-label={label} title={label} />;
+}

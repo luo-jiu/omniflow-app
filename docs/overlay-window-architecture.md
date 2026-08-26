@@ -1,6 +1,6 @@
 # Overlay 窗口架构与迁移规范
 
-更新时间：2026-04-19
+更新时间：2026-08-26
 
 适用范围：`omniflow-app` 的跨 renderer 浮层子系统(overlay BrowserWindow),及其承载的弹框 / 右键菜单 / 气泡等迁移流程。
 
@@ -49,13 +49,17 @@
 
 | channel | 方向 | 类型 | payload |
 |---|---|---|---|
-| `overlay:open` | 主 renderer → main | `handle` | `{ type, props }` → `Promise<result>` |
+| `overlay:open` | 主 renderer → main | `handle` | `{ requestId?, type, props }` → `Promise<result>` |
+| `overlay:update` | 主 renderer → main | `handle` | `{ requestId, props }` → `Promise<boolean>` |
 | `overlay:host:resolve` | overlay → main | `on` | `{ requestId, result }` |
 | `overlay:host:dismiss` | overlay → main | `on` | `{ requestId, reason }` |
 | `overlay:host:show` | main → overlay | `send` | `{ requestId, type, props }` |
+| `overlay:host:update` | main → overlay | `send` | `{ requestId, props }` |
 | `overlay:host:dismiss-from-main` | main → overlay | `send` | `{ requestId }` |
 
-**requestId 由 main 生成**(`crypto.randomUUID`);`ipcMain.handle('overlay:open')` 的 handler 返回一个长 Promise,main 在收到 `overlay:host:resolve` 时 resolve 这个 Promise,作为 `invoke` 的返回值回到主 renderer。
+一次性 `openOverlay` 的 `requestId` 仍由 main 生成。需要渐进更新 props 时，`openOverlaySession` 在主 renderer 生成 UUID 并随 `overlay:open` 传入，使调用方在长 Promise 结算前可以调用 `updateProps`。main 只接受原始 sender 对当前或排队中同一请求的更新；请求结算、超时或 sender 销毁后更新返回 `false`。overlay host 对相同 `requestId` 只替换 props，不重建当前 overlay 请求。
+
+`ipcMain.handle('overlay:open')` 的 handler 返回一个长 Promise，main 在收到 `overlay:host:resolve` 时 resolve 这个 Promise，作为 `invoke` 的返回值回到主 renderer。
 
 **并发策略**:串行队列,`currentRequest` + `queue`。并发 open 调用会排队等前一个结算后才显示,不支持栈叠(MVP)。
 
@@ -71,6 +75,14 @@ import type { UploadConfirmResult } from '@/service/overlay/types';
 
 const result = await openOverlay('upload-confirm', { fileSummaries, targetNode });
 // result: { type: 'confirm' } | { type: 'cancel' }
+```
+
+需要先展示再更新进度或探活结果时，使用受控会话，状态 owner 仍留在主 renderer：
+
+```ts
+const session = openOverlaySession('node-properties', loadingProps);
+void loadStatistics().then((statistics) => session.updateProps(buildProps(statistics)));
+const result = await session.result;
 ```
 
 ### 2.4 overlay 渲染进程结构

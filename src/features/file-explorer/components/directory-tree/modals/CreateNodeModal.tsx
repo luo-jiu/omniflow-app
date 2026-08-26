@@ -5,9 +5,17 @@ import styled from 'styled-components';
 import type { OverlayStorageProvider } from '@/service/overlay/types';
 import { formatStorageProviderAlias } from './storage-provider-display';
 import {
+  StorageProviderHealthDot,
   StorageProviderDropdownStyle,
   StorageProviderOption,
 } from './storage-provider-option';
+import { resourceMonitorProbeRuntime } from '@/features/resource-monitor/services/resource-monitor-runtime';
+import {
+  findStorageProviderProbe,
+  getStorageProviderProbeStatus,
+  isStorageProviderProbeFresh,
+  selectPreferredStorageProvider,
+} from '@/features/resource-monitor/services/storage-provider-health';
 
 interface CreateNodeModalProps {
   visible: boolean;
@@ -172,6 +180,7 @@ const Panel = styled.div`
     display: flex;
     min-width: 0;
     align-items: center;
+    gap: 7px;
   }
 
   .provider-selected-title {
@@ -244,19 +253,67 @@ const CreateNodeModal: React.FC<CreateNodeModalProps> = ({
   onCancel
 }) => {
   const isFolder = type === 'dir';
+  const providerSelectionWasManualRef = React.useRef(false);
+  const probeRuntime = React.useSyncExternalStore(
+    resourceMonitorProbeRuntime.subscribe,
+    resourceMonitorProbeRuntime.getState,
+    resourceMonitorProbeRuntime.getState,
+  );
   const selectedProviderInfo = providers.find(provider => provider.alias === selectedProvider);
+  const selectedProviderStatus = getStorageProviderProbeStatus(
+    probeRuntime.snapshot,
+    selectedProvider || '',
+  );
+
+  React.useEffect(() => {
+    if (!visible) {
+      providerSelectionWasManualRef.current = false;
+    }
+  }, [visible]);
+
+  React.useEffect(() => {
+    if (!visible || isFolder || providerSelectionWasManualRef.current) {
+      return;
+    }
+    if (getStorageProviderProbeStatus(probeRuntime.snapshot, selectedProvider || '') === 'ok') {
+      return;
+    }
+    const preferredProvider = selectPreferredStorageProvider(
+      providers,
+      defaultProvider || '',
+      probeRuntime.snapshot,
+    );
+    if (preferredProvider && preferredProvider !== selectedProvider) {
+      onProviderChange?.(preferredProvider);
+    }
+  }, [defaultProvider, isFolder, onProviderChange, probeRuntime.snapshot, providers, selectedProvider, visible]);
+
+  React.useEffect(() => {
+    if (!visible || isFolder || !selectedProvider) {
+      return;
+    }
+    const probe = findStorageProviderProbe(probeRuntime.snapshot, selectedProvider);
+    if (probeRuntime.snapshot && !probe) {
+      return;
+    }
+    if (!isStorageProviderProbeFresh(probe)) {
+      void resourceMonitorProbeRuntime.refresh({ silent: true });
+    }
+  }, [isFolder, probeRuntime.snapshot, selectedProvider, visible]);
+
   const renderSelectedProvider = React.useCallback(() => {
     if (!selectedProviderInfo) {
       return selectedProvider || '选择存储桶';
     }
     return (
       <div className="provider-selected">
+        <StorageProviderHealthDot status={selectedProviderStatus} />
         <div className="provider-selected-title">
           {formatStorageProviderAlias(selectedProviderInfo, defaultProvider)}
         </div>
       </div>
     );
-  }, [defaultProvider, selectedProvider, selectedProviderInfo]);
+  }, [defaultProvider, selectedProvider, selectedProviderInfo, selectedProviderStatus]);
 
   React.useEffect(() => {
     if (!visible) {
@@ -325,16 +382,23 @@ const CreateNodeModal: React.FC<CreateNodeModalProps> = ({
                   placeholder={providerLoading ? '正在加载存储桶' : '选择存储桶'}
                   size="small"
                   dropdownStyle={{ maxHeight: 180, overflowY: 'auto' }}
-                  onChange={(value) => onProviderChange?.(String(value || ''))}
+                  onChange={(value) => {
+                    providerSelectionWasManualRef.current = true;
+                    onProviderChange?.(String(value || ''));
+                  }}
                   renderSelectedItem={renderSelectedProvider}
                 >
-                  {providers.map((provider) => (
-                    <Select.Option key={provider.alias} value={provider.alias} showTick={false}>
-                      <StorageProviderOption>
-                        {formatStorageProviderAlias(provider, defaultProvider)}
-                      </StorageProviderOption>
-                    </Select.Option>
-                  ))}
+                  {providers.map((provider) => {
+                    const status = getStorageProviderProbeStatus(probeRuntime.snapshot, provider.alias);
+                    return (
+                      <Select.Option key={provider.alias} value={provider.alias} showTick={false}>
+                        <StorageProviderOption>
+                          <StorageProviderHealthDot status={status} />
+                          {formatStorageProviderAlias(provider, defaultProvider)}
+                        </StorageProviderOption>
+                      </Select.Option>
+                    );
+                  })}
                 </Select>
               </div>
             )}
@@ -351,7 +415,8 @@ const CreateNodeModal: React.FC<CreateNodeModalProps> = ({
             <button
               className="create-action create-action-primary"
               type="button"
-              disabled={loading || (!isFolder && providerLoading)}
+              disabled={loading || (!isFolder && (providerLoading || selectedProviderStatus !== 'ok'))}
+              title={!isFolder && selectedProviderStatus !== 'ok' ? '当前存储桶不可用' : undefined}
               onClick={onConfirm}
             >
               确定
