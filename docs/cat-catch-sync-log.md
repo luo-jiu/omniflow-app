@@ -199,6 +199,20 @@
 - legacy cleanup: 无；renderer manifest/key inspection 仍经通用 HTTP IPC 提交 URL/header，直到安全 IPC 与 network-capture 原子切换。
 - validation: inspection Vitest 4/4、network target chain 51/51、同步校验 16/16、固定 metadata/192 anchors/106 cleanup entries/78 planned IDs、TypeScript 和全量 ESLint 通过；排除已由 `node --test` 专门执行的同步校验文件后，全量 Vitest 为 147 files、802 passed、1 skipped。Cat Catch 作用域 diff check 通过。未运行会覆盖其他 Agent `dist-electron/**` 的 build，目标链尚未接生产，因此没有可执行的真实页面手工验证。
 
+## 2026-08-26: same target (download/page-drag authority partial)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动。
+- reviewedThrough / portedThrough: 均保持 `null`；本切片只完成 captured download/page-drag 到 main sink 的目标 consumer，未完成 production wiring、transfer/output task 或任何 unit cutover。
+- change groups: `security-boundary`（两类命令只接受 `tabId/resourceId`、忽略 renderer URL/header/redirect/destination 注入、迟到 owner 拒绝）与 `platform-adaptation`（download 回放 main-owned context，page-drag 只通过捕捉 tab session cookie jar 携带 Cookie）。
+- affected capability IDs: `capture.protected-request-context` 保持 `ported-unverified`；新增 active `network.owned-resource-transfer-consumers`，active 计划测试 ID 增至 24，总计划 ID 增至 79；所有 unit 仍为 0 cutover。
+- fixtures/tests: 无 fixture；新增 `captured-resource-transfer-consumers.test.ts#network.owned-resource-transfer-consumers`，覆盖 download/page-drag 固定 purpose、main-owned URL/header、main-only AbortSignal、page-drag Cookie 隔离、renderer 字段注入丢弃、sink 失败时取消未消费 body，以及 invalid/cross-tab/navigation-stale 请求在 fetch/sink 前拒绝。
+- accepted difference: 无新增；沿用已记录的 page-drag Cookie 适配：不回放 vault Cookie header，由捕捉 tab 的 Electron session cookie jar 按目标 URL 发送。
+- excluded changes and reasons: 不在本切片实现 direct-download 流式写盘、task registry、staged output lease 或 delivery terminal，它们分别属于 `transfer-engine`/`output-integration`；通用网页 `data:/blob:/URL` 拖拽 fallback 是 OmniFlow 自有输入，不因 captured resource consumer 存在而删除。
+- unresolved gaps: production download/page-drag sink 组合、probe 安装、安全 IPC/preload/renderer、四类 consumer production entry、network unit 原子 cutover；旧 direct download 仍一次性 materialize response，留到 transfer unit 解决。
+- runtime changes: 新增未注册 `CapturedResourceDownloadService` 与 `CapturedResourcePageDragService`，只把受权 Response 和安全 resource projection 交给注入的 main sink。生产旧链无变化。
+- legacy cleanup: 无；旧 direct download、page-drag captured-header enrichment 与 renderer fallback DTO 在 network-capture 原子切换前继续作为唯一生产 owner/OmniFlow integration。
+- validation: transfer consumer Vitest 4/4、network target chain 55/55、同步校验 16/16、固定 metadata/192 anchors/106 cleanup entries/79 planned IDs、TypeScript 和全量 ESLint 通过；排除已由 `node --test` 专门执行的同步校验文件后，全量 Vitest 为 148 files、806 passed、1 skipped。Cat Catch 作用域 diff check 通过。未运行会覆盖其他 Agent `dist-electron/**` 的 build，目标链尚未接生产，因此没有可执行的真实页面手工验证。
+
 ## Template
 
 ```markdown

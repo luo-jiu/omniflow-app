@@ -140,7 +140,7 @@ unit 是生产切换与删除旧实现的最小边界。可以在 unit 内逐项
 
 ## 7. 当前状态怎么判断
 
-当前固定目标为 Cat Catch `2cb981d7c2f4614732edccc167c4b5793d1cb138`。初始映射包含 7 个 unit 和 32 项 capability；`network-capture` 的 7 项目标能力均为 `ported-unverified`，`output.external-tools-dispatch` 为 `porting`，其余 24 项仍为 `pending`。目前有 23 个计划测试 ID 已落成真实 pure behavior/contract、fake Electron integration 或 loopback redirect test，尚未完成任何 unit cutover。未注册 network/probe adapter 已接通目标 policy/vault/store，owner lifecycle 已覆盖 tokenized document routing、navigation/tab/WebContents/crash/closeAll/app disposal；main-only access consumer 只接受 opaque resource ID 与固定 purpose，external-tool dispatcher 只接受 `tabId/resourceId/toolKey`，inspection consumer 只返回 main 有界读取的安全结果。production probe install、四类旧 consumer 的生产入口、IPC/preload/renderer 尚未迁入目标 owner，因此旧链仍是唯一 production owner。
+当前固定目标为 Cat Catch `2cb981d7c2f4614732edccc167c4b5793d1cb138`。初始映射包含 7 个 unit 和 32 项 capability；`network-capture` 的 7 项目标能力均为 `ported-unverified`，`output.external-tools-dispatch` 为 `porting`，其余 24 项仍为 `pending`。目前有 24 个计划测试 ID 已落成真实 pure behavior/contract、fake Electron integration 或 loopback redirect test，尚未完成任何 unit cutover。未注册 network/probe adapter 已接通目标 policy/vault/store，owner lifecycle 已覆盖 tokenized document routing、navigation/tab/WebContents/crash/closeAll/app disposal；main-only access consumer 只接受 opaque resource ID 与固定 purpose，下载、检查、页面拖拽、external-tool 四类 consumer 均从该 authority 获取执行输入，其中 inspection 只返回 main 有界读取的安全结果，下载和页面拖拽只把受权 Response 交给 main sink。production probe install、四类 consumer 的生产入口、IPC/preload/renderer 尚未迁入目标 owner，因此旧链仍是唯一 production owner。
 
 旧代码中存在网络捕捉、MSE、HLS、DASH、下载、ffmpeg 和资料库导入入口，只能说明有 characterization 输入，不能据此宣称已经迁移。完成一项能力至少需要：
 

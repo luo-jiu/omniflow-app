@@ -159,7 +159,9 @@
       "targetRefs": [
         "electron/service/embedded-browser/capture/state/network-context-vault.ts#NetworkContextVault",
         "electron/service/embedded-browser/integrations/captured-resource-access.ts#CapturedResourceAccessService",
-        "electron/service/embedded-browser/integrations/captured-resource-inspection.ts#CapturedResourceInspectionService"
+        "electron/service/embedded-browser/integrations/captured-resource-inspection.ts#CapturedResourceInspectionService",
+        "electron/service/embedded-browser/integrations/captured-resource-transfer-consumers.ts#CapturedResourceDownloadService",
+        "electron/service/embedded-browser/integrations/captured-resource-transfer-consumers.ts#CapturedResourcePageDragService"
       ],
       "relationToUpstream": "platform-substitute",
       "syncState": "ported-unverified",
@@ -170,6 +172,7 @@
         "network.request-header-rule-scope",
         "network.owned-resource-consumer",
         "network.owned-resource-inspection",
+        "network.owned-resource-transfer-consumers",
         "network.redirect-hop-isolation"
       ],
       "testRefs": [
@@ -178,13 +181,14 @@
         "electron/service/embedded-browser/capture/state/network-context-vault.test.ts#network.request-header-rule-scope",
         "electron/service/embedded-browser/integrations/captured-resource-access.test.ts#network.owned-resource-consumer",
         "electron/service/embedded-browser/integrations/captured-resource-inspection.test.ts#network.owned-resource-inspection",
+        "electron/service/embedded-browser/integrations/captured-resource-transfer-consumers.test.ts#network.owned-resource-transfer-consumers",
         "electron/service/embedded-browser/integrations/captured-resource-access.test.ts#network.redirect-hop-isolation"
       ],
       "acceptedDifferences": [
         "When Cat Catch regex classification rewrites a request URL, OmniFlow does not inherit credentials from the observed URL; a new main-owned context is required for the rewritten exact URL.",
         "After an HTTP redirect, OmniFlow never forwards the previous hop's protected headers, including for a same-origin target. The target needs its own main-owned captured context; page-drag staging may still use the captured tab's Electron session cookie jar for cookies scoped to the target URL."
       ],
-      "notes": "The pinned main-only vault preserves Cat Catch's protected-header selection and adds bounded pending/retained lifecycles, opaque renderer-safe projection, purpose and owner bindings, independent source/replay resource types, exact resource URL redemption, page-drag Cookie policy, and value-free invalidation events for every retained context deletion reason. The unregistered CapturedResourceAccessService now accepts only tabId, opaque resourceId, and one of four fixed purposes; it derives URL, replay type, owner generation, page origin, WebContents, and header values from Store/Vault, rejects stale owners for both context-bearing and context-free resources, forces manual redirect, and strips protected headers from every later hop. Page-drag omits the captured Cookie and requests cookie-jar credentials through a mandatory injected transport; production wiring must bind that transport to the captured tab's Electron session. Unregistered ExternalToolDispatcher and CapturedResourceInspectionService consumers now use this authority; inspection has a main-owned byte budget, cancels oversized streams, and projects neither request credentials nor arbitrary response headers/redirect targets (only a content-type projection). Production download, inspection, drag staging, external-tool IPC/renderer, and the other legacy paths remain unchanged until the atomic network-capture cutover."
+      "notes": "The pinned main-only vault preserves Cat Catch's protected-header selection and adds bounded pending/retained lifecycles, opaque renderer-safe projection, purpose and owner bindings, independent source/replay resource types, exact resource URL redemption, page-drag Cookie policy, and value-free invalidation events for every retained context deletion reason. The unregistered CapturedResourceAccessService now accepts only tabId, opaque resourceId, and one of four fixed purposes; it derives URL, replay type, owner generation, page origin, WebContents, and header values from Store/Vault, rejects stale owners for both context-bearing and context-free resources, forces manual redirect, and strips protected headers from every later hop. Page-drag omits the captured Cookie and requests cookie-jar credentials through a mandatory injected transport; production wiring must bind that transport to the captured tab's Electron session. Unregistered download, inspection, page-drag, and external-tool consumers now use this authority. Inspection has a main-owned byte budget and safe result projection; download/page-drag pass the authorized Response only to an injected main sink and never accept renderer URL/header/redirect/destination fields. Production download, inspection, drag staging, external-tool IPC/renderer, and the other legacy paths remain unchanged until the atomic network-capture cutover."
     },
     {
       "id": "capture.request-url-helpers",
