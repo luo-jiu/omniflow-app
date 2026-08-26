@@ -1,6 +1,6 @@
 # Embedded Browser 架构说明
 
-更新时间：2026-08-23
+更新时间：2026-08-26
 
 适用范围：`omniflow-app` 内置浏览器的 renderer UI、preload bridge、Electron main controller、资源捕捉、下载导入与缓存捕捉工具链。
 
@@ -345,7 +345,7 @@ tempPath
 - 由 main 侧的浏览器网络能力记录
 - 以 `embedded-browser:resource` 事件推回 renderer
 
-全面迁移中的目标 network chain 已在未注册路径由 `EmbeddedBrowserCaptureRuntime` 组合唯一 `ElectronNetworkCaptureAdapter`、每个 view 唯一 `ElectronPageProbeEventAdapter`、`PageProbeCaptureAdapter`、Cat Catch/OmniFlow 分层 policy、main-only context vault、revisioned `ResourceStateStore`、安全跨进程合同、`EmbeddedBrowserLifecycle`、main-only resource access consumer 和 bounded inspection。lifecycle 只在 capture mode 为 deep 时为当前非崩溃 document binding 签发 probe ingress；console transport 使用随机 document token 并在每条消息前复核 binding，导航、崩溃、view 替换或关闭后旧 token 不再生效。普通无 key discovery 由 main 派生 stable key，MSE flush/reset 保持独立控制路径。产品 policy 显式补充 image/key/document/expanded-subtitle，不能覆盖 Cat Catch regex blacklist。access consumer 的 transport 必须由 production adapter 注入并绑定到捕捉 tab 的 Electron session，不能回退到主进程全局 `fetch`。未注册下载、检查、页面拖拽和 external-tool 四类 consumer 均只接受 `tabId/resourceId` 或额外固定 `toolKey`；inspection 以 main-owned byte budget 流式读取并只返回安全结果，下载与页面拖拽只把受权 Response 交给注入的 main sink。构造该 runtime 会占用 session `webRequest` listener，只有原子 cutover 时才能在 production dispatch boundary 实例化。现有 production direct-download、page-drag、external-tool 与通用 HTTP IPC 仍接受或转存 renderer/旧 DTO 的 URL/header；production probe install、四类 consumer 的入口、IPC/preload/renderer 也尚未迁移。当前旧 bridge 仍是唯一 production owner，同一种 `webRequest` event 不得同时注册新旧 listener。逐项状态以 Cat Catch capability map 为准。
+全面迁移中的目标 network chain 已在未注册路径由 `EmbeddedBrowserCaptureRuntime` 组合唯一 `ElectronNetworkCaptureAdapter`、每个 view 唯一 `ElectronPageProbeEventAdapter`、`PageProbeCaptureAdapter`、Cat Catch/OmniFlow 分层 policy、main-only context vault、revisioned `ResourceStateStore`、安全跨进程合同、`EmbeddedBrowserLifecycle`、main-only resource access consumer 和 bounded inspection。lifecycle 只在 capture mode 为 deep 时为当前非崩溃 document binding 签发 probe ingress；console transport 使用随机 document token 并在每条消息前复核 binding，导航、崩溃、view 替换或关闭后旧 token 不再生效。普通无 key discovery 由 main 派生 stable key，MSE flush/reset 保持独立控制路径。产品 policy 显式补充 image/key/document/expanded-subtitle，不能覆盖 Cat Catch regex blacklist；现有持久化 extension/MIME/regex/domain 设置会编译到目标 policy，并可在不替换 `webRequest` listener 的情况下原地更新。access consumer 的 transport 必须由 production adapter 注入并绑定到捕捉 tab 的 Electron session，不能回退到主进程全局 `fetch`。未注册下载、检查、页面拖拽和 external-tool 四类 consumer 均只接受 `tabId/resourceId` 或额外固定 `toolKey`；inspection 以 main-owned byte budget 流式读取并只返回安全结果，下载与页面拖拽只把受权 Response 交给注入的 main sink。构造该 runtime 会占用 session `webRequest` listener，只有原子 cutover 时才能在 production dispatch boundary 实例化。现有 production direct-download、page-drag、external-tool 与通用 HTTP IPC 仍接受或转存 renderer/旧 DTO 的 URL/header；production probe install、四类 consumer 的入口、IPC/preload/renderer 也尚未迁移。当前旧 bridge 仍是唯一 production owner，同一种 `webRequest` event 不得同时注册新旧 listener。逐项状态以 Cat Catch capability map 为准。
 
 #### 深度捕捉
 

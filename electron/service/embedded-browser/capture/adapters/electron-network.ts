@@ -9,6 +9,7 @@ import {
 } from '../../cat-catch-port/network/rules'
 import {
   classifyOmniFlowNetworkResource,
+  type CompiledOmniFlowCaptureSettings,
   type OmniFlowNetworkResourceClassification,
 } from '../policy/omniflow-capture-policy'
 import {
@@ -58,6 +59,7 @@ export type ElectronNetworkWebRequestRegistrar = {
 }
 
 export type ElectronNetworkCaptureAdapterOptions = {
+  captureSettings?: CompiledOmniFlowCaptureSettings
   emitChange: (change: ResourceStateChange) => void
   maxPendingEvents?: number
   now?: () => number
@@ -171,22 +173,24 @@ function toMetadata(
  * complete network-capture cutover unit is ready.
  */
 export class ElectronNetworkCaptureAdapter {
+  private captureSettings: CompiledOmniFlowCaptureSettings | undefined
   private disposed = false
   private readonly maxPendingEvents: number
   private readonly now: () => number
   private readonly options: ElectronNetworkCaptureAdapterOptions
   private readonly pendingEvents = new Map<string, PendingEvent>()
-  private readonly rules: CatCatchCompiledRules
+  private rules: CatCatchCompiledRules
   private readonly unsubscribeInvalidations: () => void
 
   constructor(options: ElectronNetworkCaptureAdapterOptions) {
     this.options = options
+    this.captureSettings = options.captureSettings
     this.maxPendingEvents = Number.isInteger(options.maxPendingEvents)
       && Number(options.maxPendingEvents) > 0
       ? Number(options.maxPendingEvents)
       : DEFAULT_MAX_PENDING_EVENTS
     this.now = options.now || Date.now
-    this.rules = options.rules || compileCatCatchRules()
+    this.rules = options.captureSettings?.rules || options.rules || compileCatCatchRules()
     this.unsubscribeInvalidations = options.vault.subscribeContextInvalidations(({ contextRef }) => {
       for (const change of options.store.invalidateContext(contextRef)) options.emitChange(change)
     })
@@ -214,6 +218,13 @@ export class ElectronNetworkCaptureAdapter {
     this.unsubscribeInvalidations()
   }
 
+  updateCaptureSettings(captureSettings: CompiledOmniFlowCaptureSettings) {
+    if (this.disposed) return false
+    this.captureSettings = captureSettings
+    this.rules = captureSettings.rules
+    return true
+  }
+
   sweepExpired() {
     this.options.vault.sweepExpired()
     for (const change of this.options.store.sweepExpired()) this.options.emitChange(change)
@@ -233,6 +244,12 @@ export class ElectronNetworkCaptureAdapter {
     const binding = this.options.resolveBindingByWebContentsId(webContentsId)
     const pageUrl = this.options.resolvePageUrlByWebContentsId(webContentsId)
     if (!binding || binding.webContentsId !== webContentsId || !pageUrl) return
+    if (this.captureSettings && !this.captureSettings.allowsResourceUrl({
+      pageUrl,
+      url: details.url,
+    })) {
+      return
+    }
     const pageDecision = evaluateCatCatchPageUrlPolicy({
       blockUrlWhite: this.options.pageUrlPolicy?.blockUrlWhite,
       damn: this.options.pageUrlPolicy?.damn,
@@ -246,7 +263,7 @@ export class ElectronNetworkCaptureAdapter {
       resourceType: details.resourceType,
       stage: 'request',
       url: details.url,
-    }, this.rules)
+    }, this.rules, this.captureSettings)
     const pending: PendingEvent = {
       binding,
       blocked: classification.decision === 'reject',
@@ -307,7 +324,7 @@ export class ElectronNetworkCaptureAdapter {
       size: parseContentLength(details.responseHeaders),
       stage: 'response',
       url: details.url,
-    }, this.rules)
+    }, this.rules, this.captureSettings)
     if (!isCapturedClassification(classification)) {
       this.options.vault.finishRequest(pending)
       return

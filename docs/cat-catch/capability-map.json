@@ -301,15 +301,17 @@
       "plannedTestIds": [
         "network.rule-ordering",
         "network.mime-extension-dedupe",
-        "network.omniflow-policy-boundary"
+        "network.omniflow-policy-boundary",
+        "network.omniflow-settings-adaptation"
       ],
       "testRefs": [
         "electron/service/embedded-browser/cat-catch-port/network/classifier.test.ts#network.rule-ordering",
         "electron/service/embedded-browser/cat-catch-port/network/classifier.test.ts#network.mime-extension-dedupe",
-        "electron/service/embedded-browser/capture/policy/omniflow-capture-policy.test.ts#network.omniflow-policy-boundary"
+        "electron/service/embedded-browser/capture/policy/omniflow-capture-policy.test.ts#network.omniflow-policy-boundary",
+        "electron/service/embedded-browser/capture/policy/omniflow-capture-policy.test.ts#network.omniflow-settings-adaptation"
       ],
       "acceptedDifferences": [],
-      "notes": "Pinned pure port covers ordered request regex, upstream default rule states, extension/MIME/Content-Disposition/media fallback precedence, hard break semantics, size operators, wildcard MIME priority, and exact-URL dedupe/reset decisions. A separate OmniFlow capture policy now adds image, key, document, and expanded-subtitle kinds at the target adapter boundary: Cat Catch capture results remain authoritative, regex blacklist is never overridden, and non-product media rejection remains intact. The unregistered Electron adapter consumes this policy, but production still uses the legacy classifier/rules until atomic cutover."
+      "notes": "Pinned pure port covers ordered request regex, upstream default rule states, extension/MIME/Content-Disposition/media fallback precedence, hard break semantics, size operators, wildcard MIME priority, and exact-URL dedupe/reset decisions. A separate OmniFlow capture policy now adds image, key, document, and expanded-subtitle kinds at the target adapter boundary: Cat Catch capture results remain authoritative, regex blacklist is never overridden, and non-product media rejection remains intact. The persisted OmniFlow extension, MIME, regex, domain whitelist, and domain blacklist settings compile into this target policy, and the unregistered runtime can replace the compiled settings without replacing its owned webRequest listeners. Production still uses the legacy classifier/rules until atomic cutover."
     },
     {
       "id": "capture.resource-state-contract",

@@ -227,6 +227,20 @@
 - legacy cleanup: 无；旧 bridge/recorder/DTO 继续作为唯一 production owner，等待安全跨进程链完成后同片删除。
 - validation: main composition Vitest 1/1、network target chain 56/56、同步校验 16/16、固定 metadata/192 anchors/106 cleanup entries/80 planned IDs、TypeScript、全量 ESLint 和 Cat Catch 作用域 diff check 通过；排除已由 `node --test` 专门执行的同步校验文件后，全量 Vitest 为 149 files、807 passed、1 skipped。未运行会覆盖其他 Agent `dist-electron/**` 的 build；目标链尚未接生产，因此没有可执行的真实页面手工验证。
 
+## 2026-08-26: same target (persisted capture settings adaptation partial)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动。
+- reviewedThrough / portedThrough: 均保持 `null`；本切片只让目标 classifier/runtime 消费现有 OmniFlow 用户设置，不切 production owner。
+- change groups: `omniflow-integration`（extension、MIME wildcard、regex、domain whitelist/blacklist 编译）与 `electron-integration`（已注册 listener 的原地 policy 热更新）。
+- affected capability IDs: `capture.rules-classification-deduplication` 保持 `ported-unverified`；新增 active `network.omniflow-settings-adaptation`，active 计划测试 ID 增至 26，总唯一计划 ID 增至 81；所有 unit 仍为 0 cutover。
+- fixtures/tests: 无 fixture；目标 policy 测试覆盖自定义 extension、禁用默认媒体、产品图片开关、regex URL rewrite、domain whitelist 与 blacklist 优先级；runtime fake Electron integration 覆盖设置更新不替换所拥有的 `webRequest` listener，且后续请求使用新规则。
+- accepted difference: 现有 OmniFlow 设置只表达启用集合，没有 Cat Catch 的逐规则 size/operator 字段；编译器对启用项使用 `>= 0 KB`，同时保留 Cat Catch classifier 的 extension hard-break、MIME wildcard 和 regex 优先级。
+- excluded changes and reasons: 不删除或改写持久化规则 Store/UI；它们是 OmniFlow 产品设置 owner，生产 cutover 时只把读取/更新结果编译后交给 runtime。当前不实例化 production runtime，避免双 `webRequest` listener。
+- unresolved gaps: production 设置加载/保存入口仍需调用 runtime 初始编译与热更新；safe resource state IPC/preload/renderer、probe install、四类 consumer entry 和原子 cutover 仍待完成。
+- runtime changes: 未注册 `ElectronNetworkCaptureAdapter` 与 `EmbeddedBrowserCaptureRuntime` 新增 compiled settings 输入和原地更新；生产旧 classifier/rules 行为不变。
+- legacy cleanup: 无；旧 settings evaluation 只有在 network-capture 原子切换后才删除，持久化、标准化和 UI 继续保留。
+- validation: network target chain 15 files/58 tests、同步校验 16/16、固定 metadata/192 anchors/106 cleanup entries/81 unique planned IDs、TypeScript、全量 ESLint 和 Cat Catch 作用域 diff check 通过；排除已由 `node --test` 专门执行的同步校验文件后，全量 Vitest 为 149 files、809 passed、1 skipped。未运行会覆盖其他 Agent `dist-electron/**` 的 build；目标 runtime 尚未接生产，因此没有可执行的真实页面手工验证。
+
 ## Template
 
 ```markdown

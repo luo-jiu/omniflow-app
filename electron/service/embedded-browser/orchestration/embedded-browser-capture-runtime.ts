@@ -4,6 +4,7 @@ import {
   type ElectronNetworkCaptureAdapterOptions,
   type ElectronNetworkWebRequestRegistrar,
 } from '../capture/adapters/electron-network'
+import type { CompiledOmniFlowCaptureSettings } from '../capture/policy/omniflow-capture-policy'
 import {
   ElectronPageProbeEventAdapter,
   type BoundPageProbeDocument,
@@ -42,6 +43,7 @@ export type RegisterEmbeddedBrowserCaptureViewInput = {
 }
 
 export type EmbeddedBrowserCaptureRuntimeOptions = {
+  captureSettings?: CompiledOmniFlowCaptureSettings
   createDocumentToken?: () => string
   emitChange: (change: ResourceStateChange) => void
   fetch: CapturedResourceFetch
@@ -83,6 +85,7 @@ export class EmbeddedBrowserCaptureRuntime {
 
   private disposed = false
   private readonly lifecycle: EmbeddedBrowserLifecycle
+  private readonly networkAdapter: ElectronNetworkCaptureAdapter
   private readonly options: EmbeddedBrowserCaptureRuntimeOptions
   private readonly probeRegistrationsByTabId = new Map<string, ProbeRegistration>()
   private readonly probeRegistrationsByWebContentsId = new Map<number, ProbeRegistration>()
@@ -102,7 +105,8 @@ export class EmbeddedBrowserCaptureRuntime {
       vault: this.vault,
     })
 
-    const networkAdapter = new ElectronNetworkCaptureAdapter({
+    this.networkAdapter = new ElectronNetworkCaptureAdapter({
+      captureSettings: options.captureSettings,
       emitChange: options.emitChange,
       maxPendingEvents: options.maxPendingEvents,
       pageUrlPolicy: options.pageUrlPolicy,
@@ -117,7 +121,7 @@ export class EmbeddedBrowserCaptureRuntime {
       vault: this.vault,
       webRequest: options.webRequest,
     })
-    this.lifecycle.attachNetworkAdapter(networkAdapter)
+    this.lifecycle.attachNetworkAdapter(this.networkAdapter)
 
     this.access = new CapturedResourceAccessService({
       fetch: options.fetch,
@@ -183,6 +187,11 @@ export class EmbeddedBrowserCaptureRuntime {
   setCaptureMode(tabId: string, captureMode: CaptureMode) {
     if (this.disposed) return null
     return this.lifecycle.setCaptureMode(tabId, captureMode)
+  }
+
+  updateCaptureSettings(captureSettings: CompiledOmniFlowCaptureSettings) {
+    if (this.disposed) return false
+    return this.networkAdapter.updateCaptureSettings(captureSettings)
   }
 
   clearResources(tabId: string) {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { ElectronNetworkWebRequestRegistrar } from '../capture/adapters/electron-network'
+import { compileOmniFlowCaptureSettings } from '../capture/policy/omniflow-capture-policy'
 import type { ResourceStateChange } from '../contracts/captured-resource'
 import {
   EmbeddedBrowserCaptureRuntime,
@@ -268,5 +269,51 @@ describe('EmbeddedBrowserCaptureRuntime', () => {
     expect(webRequest.beforeRedirect).toBeNull()
     expect(webRequest.completed).toBeNull()
     expect(webRequest.errorOccurred).toBeNull()
+  })
+
+  it('refreshes capture settings without replacing the owned webRequest listeners', () => {
+    const webRequest = new FakeWebRequest()
+    let resourceIndex = 0
+    const runtime = new EmbeddedBrowserCaptureRuntime({
+      captureSettings: compileOmniFlowCaptureSettings({
+        extensions: [],
+        mimeTypes: [],
+        regexRules: [],
+      }),
+      emitChange: () => {},
+      fetch: async () => new Response('fixture'),
+      resourceStateOptions: {
+        createResourceId: () => `resource-${++resourceIndex}`,
+      },
+      webRequest,
+    })
+    runtime.registerView({
+      tabId: 'tab-settings',
+      webContents: new FakeWebContents(51, 'https://page.example/watch'),
+    })
+    runtime.setCaptureMode('tab-settings', 'network')
+
+    const firstSendListener = webRequest.sendHeaders
+    const firstResponseListener = webRequest.responseStarted
+    const blockedUrl = 'https://cdn.example/blocked.mp4'
+    webRequest.sendHeaders?.(sendDetails(1, 51, blockedUrl))
+    webRequest.responseStarted?.(responseDetails(1, 51, blockedUrl))
+    expect(runtime.getSnapshot('tab-settings')).toMatchObject({ resources: [] })
+
+    expect(runtime.updateCaptureSettings(compileOmniFlowCaptureSettings({
+      extensions: ['mp4'],
+      mimeTypes: [],
+      regexRules: [],
+    }))).toBe(true)
+    expect(webRequest.sendHeaders).toBe(firstSendListener)
+    expect(webRequest.responseStarted).toBe(firstResponseListener)
+
+    const allowedUrl = 'https://cdn.example/allowed.mp4'
+    webRequest.sendHeaders?.(sendDetails(2, 51, allowedUrl))
+    webRequest.responseStarted?.(responseDetails(2, 51, allowedUrl))
+    expect(runtime.getSnapshot('tab-settings')).toMatchObject({
+      resources: [expect.objectContaining({ url: allowedUrl })],
+    })
+    runtime.dispose()
   })
 })
