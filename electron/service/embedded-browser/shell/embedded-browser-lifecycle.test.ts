@@ -401,3 +401,93 @@ describe('lifecycle.spontaneous-view-destroy', () => {
     harness.lifecycle.dispose()
   })
 })
+
+describe('lifecycle.probe-document-binding', () => {
+  it('invalidates document-bound probe ingress across navigation, crash, replacement, and close', () => {
+    const harness = createHarness()
+    const firstWebContents = new FakeWebContents(61, 'https://page.example/first')
+    harness.lifecycle.registerView({
+      tabId: 'tab-probe',
+      webContents: firstWebContents,
+    })
+    harness.lifecycle.setCaptureMode('tab-probe', 'deep')
+    const firstProbe = harness.lifecycle.bindProbeCapture({
+      tabId: 'tab-probe',
+      webContentsId: 61,
+    })!
+    expect(firstProbe.capture({
+      ext: 'mp4',
+      resourceKey: 'probe-first',
+      url: 'blob:https://page.example/first-media',
+    })).toMatchObject({
+      decision: 'accepted',
+      resource: { id: 'resource-1', source: 'probe' },
+    })
+
+    firstWebContents.navigate('https://page.example/second')
+    expect(firstProbe.capture({
+      resourceKey: 'probe-late',
+      url: 'https://cdn.example/late.mp4',
+    })).toMatchObject({ decision: 'stale-binding' })
+    const secondProbe = harness.lifecycle.bindProbeCapture({
+      tabId: 'tab-probe',
+      webContentsId: 61,
+    })!
+    expect(secondProbe.capture({
+      resourceKey: 'probe-second',
+      url: 'https://cdn.example/second.mp4',
+    })).toMatchObject({
+      decision: 'accepted',
+      resource: { id: 'resource-2' },
+    })
+
+    firstWebContents.crash()
+    expect(secondProbe.capture({
+      resourceKey: 'probe-after-crash',
+      url: 'https://cdn.example/crashed.mp4',
+    })).toMatchObject({ decision: 'stale-binding' })
+    expect(harness.lifecycle.bindProbeCapture({
+      tabId: 'tab-probe',
+      webContentsId: 61,
+    })).toBeNull()
+
+    firstWebContents.navigate('https://page.example/recovered')
+    const recoveredProbe = harness.lifecycle.bindProbeCapture({
+      tabId: 'tab-probe',
+      webContentsId: 61,
+    })!
+    const replacementWebContents = new FakeWebContents(62, 'https://page.example/replaced')
+    harness.lifecycle.registerView({
+      tabId: 'tab-probe',
+      webContents: replacementWebContents,
+    })
+    expect(recoveredProbe.capture({
+      resourceKey: 'probe-replaced-late',
+      url: 'https://cdn.example/replaced-late.mp4',
+    })).toMatchObject({ decision: 'stale-binding' })
+
+    harness.lifecycle.setCaptureMode('tab-probe', 'deep')
+    const replacementProbe = harness.lifecycle.bindProbeCapture({
+      tabId: 'tab-probe',
+      webContentsId: 62,
+    })!
+    expect(replacementProbe.capture({
+      resourceKey: 'probe-replacement',
+      url: 'https://cdn.example/replacement.mp4',
+    })).toMatchObject({
+      decision: 'accepted',
+      resource: { id: 'resource-3' },
+    })
+    harness.lifecycle.closeTab('tab-probe')
+    expect(replacementProbe.capture({
+      resourceKey: 'probe-after-close',
+      url: 'https://cdn.example/closed.mp4',
+    })).toMatchObject({ decision: 'stale-binding' })
+    expect(harness.lifecycle.bindProbeCapture({
+      tabId: 'tab-probe',
+      webContentsId: 62,
+    })).toBeNull()
+
+    harness.lifecycle.dispose()
+  })
+})

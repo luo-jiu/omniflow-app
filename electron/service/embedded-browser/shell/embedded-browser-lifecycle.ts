@@ -1,4 +1,5 @@
 import type { ResourceStateChange } from '../contracts/captured-resource'
+import { PageProbeCaptureAdapter } from '../capture/adapters/page-probe'
 import type { NetworkContextVault } from '../capture/state/network-context-vault'
 import {
   type CaptureMode,
@@ -45,6 +46,11 @@ export type RegisterEmbeddedBrowserViewInput = {
 export type CommitEmbeddedBrowserNavigationInput = {
   clearResources?: boolean
   pageUrl: string
+  tabId: string
+  webContentsId: number
+}
+
+export type BindEmbeddedBrowserProbeInput = {
   tabId: string
   webContentsId: number
 }
@@ -169,6 +175,36 @@ export class EmbeddedBrowserLifecycle {
       : this.registrationsByWebContentsId.get(normalizedWebContentsId)
     if (!registration || registration.crashed || !this.isCurrent(registration)) return null
     return registration.pageUrl || null
+  }
+
+  bindProbeCapture(input: BindEmbeddedBrowserProbeInput) {
+    if (this.disposed) return null
+    const tabId = normalizeTabId(input.tabId)
+    const webContentsId = normalizeWebContentsId(input.webContentsId)
+    if (!tabId || webContentsId === null) return null
+    const registration = this.registrationsByTabId.get(tabId)
+    if (
+      !registration
+      || registration.webContents.id !== webContentsId
+      || registration.crashed
+      || !this.isCurrent(registration)
+    ) {
+      return null
+    }
+    const binding = this.options.store.getCaptureBinding(tabId)
+    if (
+      !binding
+      || binding.incarnation !== registration.binding.incarnation
+      || binding.navigationGeneration !== registration.binding.navigationGeneration
+      || binding.webContentsId !== webContentsId
+    ) {
+      return null
+    }
+    return new PageProbeCaptureAdapter({
+      binding,
+      emitChange: this.options.emitChange,
+      store: this.options.store,
+    })
   }
 
   setCaptureMode(tabId: string, captureMode: CaptureMode) {

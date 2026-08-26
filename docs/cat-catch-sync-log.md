@@ -144,6 +144,19 @@
 - legacy cleanup: 无；旧 policy/classifier/probe recorder 只在 `network-capture` cutover 同片删除。
 - validation: network target chain Vitest 42/42、同步校验 16/16、固定 metadata/192 anchors/106 cleanup entries、TypeScript、全量 ESLint 和 diff check 通过；排除已由 `node --test` 专门执行的同步校验文件后，全量 Vitest 为 144 files、793 passed、1 skipped。未运行会覆盖其他 Agent `dist-electron/**` 的 build；目标链尚未接生产，因此没有可执行的真实页面手工验证。
 
+## 2026-08-26: same target (probe document lifecycle partial)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动。
+- reviewedThrough / portedThrough: 均保持 `null`；本切片只组合 target probe ingress 与 owner lifecycle。
+- change groups: `stability/security-boundary`（trusted tab/WebContents 绑定、document generation、crash quarantine、replacement/close stale isolation）。
+- affected capability IDs: `capture.owner-lifecycle` 保持 `ported-unverified`；新增 `lifecycle.probe-document-binding`，整个 unit 仍为 0 cutover。
+- fixtures/tests: 无 fixture；lifecycle fake Electron integration 覆盖首次绑定、导航后旧 ingress 拒绝、新文档重新绑定、崩溃期间拒绝、恢复、view replacement 和 close。
+- excluded changes and reasons: 不修改 production probe 安装或 console listener；当前切片先固定 owner contract，避免生产接线反向决定生命周期语义。
+- unresolved gaps: production 安装完成时必须保存 lifecycle 签发的 ingress，并把对应 document 的 console payload 路由给它；不得对每条消息查询当前 tab binding，否则旧页面迟到消息会串入新导航。
+- runtime changes: `EmbeddedBrowserLifecycle.bindProbeCapture` 签发真实 `PageProbeCaptureAdapter`；生产 controller/view lifecycle 无变化。
+- legacy cleanup: 无；旧 probe recorder 在 network unit 原子 cutover 前继续作为唯一 production owner。
+- validation: network target chain Vitest 43/43、同步校验 16/16、固定 metadata/192 anchors/106 cleanup entries、TypeScript、全量 ESLint 和 diff check 通过；排除已由 `node --test` 专门执行的同步校验文件后，全量 Vitest 为 144 files、794 passed、1 skipped。未运行会覆盖其他 Agent `dist-electron/**` 的 build；目标链尚未接生产，因此没有可执行的真实页面手工验证。
+
 ## Template
 
 ```markdown
