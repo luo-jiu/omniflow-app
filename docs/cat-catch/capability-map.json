@@ -112,15 +112,18 @@
         "electron/service/embedded-browser/capture/adapters/electron-network.ts#ElectronNetworkCaptureAdapter"
       ],
       "relationToUpstream": "platform-substitute",
-      "syncState": "pending",
-      "syncedThrough": null,
+      "syncState": "ported-unverified",
+      "syncedThrough": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
       "plannedTestIds": [
         "network.first-byte-long-response",
         "network.context-terminal-cleanup"
       ],
-      "testRefs": [],
+      "testRefs": [
+        "electron/service/embedded-browser/capture/adapters/electron-network.test.ts#network.first-byte-long-response",
+        "electron/service/embedded-browser/capture/adapters/electron-network.test.ts#network.context-terminal-cleanup"
+      ],
       "acceptedDifferences": [],
-      "notes": "Seed gap: the current bridge records onCompleted rather than first byte and has no explicit cancellation, redirect, or terminal cleanup contract. The affected behavior and owners have not been fully mapped."
+      "notes": "The unregistered Electron adapter now preserves Cat Catch request-stage regex handling and response-start classification, binds each redirect hop to a fresh onSendHeaders event, cleans pending state on redirect/completion/error/dispose, rejects stale navigation owners, and converts vault invalidation into revisioned Store changes. The legacy onCompleted bridge remains the only production owner until the network-capture unit cutover."
     },
     {
       "id": "capture.protected-request-context",

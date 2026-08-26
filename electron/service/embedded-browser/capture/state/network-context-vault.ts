@@ -47,6 +47,10 @@ export type NetworkContextInvalidation = {
   reason: NetworkContextInvalidationReason
 }
 
+export type NetworkContextInvalidationListener = (
+  invalidation: NetworkContextInvalidation,
+) => void
+
 export type NetworkRequestHeaderInput = {
   binaryValue?: Uint8Array
   name: string
@@ -370,6 +374,7 @@ export class NetworkContextVault {
   private readonly pendingTtlMs: number
   private readonly pendingRequests = new Map<string, PendingRequestContext>()
   private readonly retainedContexts = new Map<string, RetainedNetworkContext>()
+  private readonly invalidationListeners = new Set<NetworkContextInvalidationListener>()
 
   constructor(options: NetworkContextVaultOptions = {}) {
     this.contextTtlMs = normalizePositiveNumber(options.contextTtlMs, DEFAULT_CONTEXT_TTL_MS)
@@ -453,6 +458,13 @@ export class NetworkContextVault {
     const webContentsId = normalizeWebContentsId(input.webContentsId)
     if (!requestId || webContentsId === null) return false
     return this.pendingRequests.delete(buildPendingKey(webContentsId, requestId))
+  }
+
+  subscribeContextInvalidations(listener: NetworkContextInvalidationListener) {
+    this.invalidationListeners.add(listener)
+    return () => {
+      this.invalidationListeners.delete(listener)
+    }
   }
 
   redeem(input: NetworkContextRedemptionInput): NetworkContextRedemption | null {
@@ -564,7 +576,9 @@ export class NetworkContextVault {
     reason: NetworkContextInvalidationReason,
   ) {
     if (!contextRef || !this.retainedContexts.delete(contextRef)) return false
-    this.onContextInvalidated({ contextRef, reason })
+    const invalidation = { contextRef, reason }
+    this.onContextInvalidated(invalidation)
+    for (const listener of this.invalidationListeners) listener(invalidation)
     return true
   }
 

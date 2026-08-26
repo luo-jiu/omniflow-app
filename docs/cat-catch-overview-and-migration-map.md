@@ -140,7 +140,7 @@ unit 是生产切换与删除旧实现的最小边界。可以在 unit 内逐项
 
 ## 7. 当前状态怎么判断
 
-当前固定目标为 Cat Catch `2cb981d7c2f4614732edccc167c4b5793d1cb138`。初始映射包含 7 个 unit 和 32 项 capability；其中 network classifier/rules、page URL policy、main-only request context vault 与 main-owned resource state contract 为 `ported-unverified`，其余 28 项仍为 `pending`。目前有 9 个计划测试 ID 已落成真实 pure behavior/contract test，尚未建立 production-equivalent integration 或完成任何 unit cutover。vault 已能报告 retained context 的精确失效，但 vault/store 还没有接入 Electron listener、IPC/reducer 和下载 consumer，因此生产旧链仍是唯一 owner。
+当前固定目标为 Cat Catch `2cb981d7c2f4614732edccc167c4b5793d1cb138`。初始映射包含 7 个 unit 和 32 项 capability；其中 network event adapter、classifier/rules、page URL policy、main-only request context vault 与 main-owned resource state contract 为 `ported-unverified`，其余 27 项仍为 `pending`。目前有 11 个计划测试 ID 已落成真实 pure behavior/contract 或 fake `webRequest` integration test，尚未完成任何 unit cutover。未注册 adapter 已按 `onSendHeaders -> onResponseStarted` 接通 vault/store，并把 retained context 失效同步转成 revisioned Store change；IPC/reducer 和安全 consumer 尚未迁移，因此生产旧链仍是唯一 owner。
 
 旧代码中存在网络捕捉、MSE、HLS、DASH、下载、ffmpeg 和资料库导入入口，只能说明有 characterization 输入，不能据此宣称已经迁移。完成一项能力至少需要：
 
