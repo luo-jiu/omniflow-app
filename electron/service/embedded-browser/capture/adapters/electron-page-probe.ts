@@ -43,7 +43,7 @@ export type BoundPageProbeDocument = {
 }
 
 type ActiveDocumentRoute = BoundPageProbeDocument & {
-  capture: NonNullable<ReturnType<ElectronPageProbeLifecycle['bindProbeCapture']>>
+  capture: NonNullable<ReturnType<ElectronPageProbeLifecycle['bindProbeCapture']>> | null
   incarnation: number
   navigationGeneration: number
 }
@@ -80,6 +80,7 @@ export class ElectronPageProbeEventAdapter {
   private activeRoute: ActiveDocumentRoute | null = null
   private readonly createDocumentToken: () => string
   private disposed = false
+  private nextRoute: ActiveDocumentRoute | null = null
   private readonly options: ElectronPageProbeEventAdapterOptions
   private readonly tabId: string
 
@@ -97,39 +98,69 @@ export class ElectronPageProbeEventAdapter {
     if (this.disposed) return null
     const binding = this.resolveCurrentBinding()
     if (!binding) return null
-    if (
-      this.activeRoute
-      && this.activeRoute.incarnation === binding.incarnation
-      && this.activeRoute.navigationGeneration === binding.navigationGeneration
-    ) {
-      return {
-        consolePrefix: this.activeRoute.consolePrefix,
-        script: this.activeRoute.script,
-      }
-    }
-
     const capture = this.options.lifecycle.bindProbeCapture({
       tabId: this.tabId,
       webContentsId: this.options.webContents.id,
     })
-    const token = normalizeDocumentToken(this.createDocumentToken())
-    if (!capture || !token) return null
-    const consolePrefix = `${EMBEDDED_BROWSER_RESOURCE_CONSOLE_PREFIX}${token}:`
-    const script = createEmbeddedBrowserResourceProbeScript({ consolePrefix })
-    this.activeRoute = {
+    if (!capture) return null
+    if (this.routeMatchesBinding(this.nextRoute, binding)) {
+      this.activeRoute = this.nextRoute
+      this.nextRoute = null
+    }
+    if (this.routeMatchesBinding(this.activeRoute, binding)) {
+      this.activeRoute!.capture = capture
+      return {
+        consolePrefix: this.activeRoute!.consolePrefix,
+        script: this.activeRoute!.script,
+      }
+    }
+
+    const route = this.createRoute({
       capture,
-      consolePrefix,
       incarnation: binding.incarnation,
       navigationGeneration: binding.navigationGeneration,
-      script,
+    })
+    if (!route) return null
+    this.activeRoute = route
+    return { consolePrefix: route.consolePrefix, script: route.script }
+  }
+
+  prepareNextDocument(): BoundPageProbeDocument | null {
+    if (this.disposed) return null
+    const binding = this.resolveCurrentBinding()
+    if (!binding) return null
+    if (!this.options.lifecycle.bindProbeCapture({
+      tabId: this.tabId,
+      webContentsId: this.options.webContents.id,
+    })) {
+      return null
     }
-    return { consolePrefix, script }
+    const nextNavigationGeneration = binding.navigationGeneration + 1
+    if (
+      this.nextRoute
+      && this.nextRoute.incarnation === binding.incarnation
+      && this.nextRoute.navigationGeneration === nextNavigationGeneration
+    ) {
+      return {
+        consolePrefix: this.nextRoute.consolePrefix,
+        script: this.nextRoute.script,
+      }
+    }
+    const route = this.createRoute({
+      capture: null,
+      incarnation: binding.incarnation,
+      navigationGeneration: nextNavigationGeneration,
+    })
+    if (!route) return null
+    this.nextRoute = route
+    return { consolePrefix: route.consolePrefix, script: route.script }
   }
 
   dispose() {
     if (this.disposed) return
     this.disposed = true
     this.activeRoute = null
+    this.nextRoute = null
     this.options.webContents.removeListener('console-message', this.handleConsoleMessage)
   }
 
@@ -138,12 +169,11 @@ export class ElectronPageProbeEventAdapter {
     _level,
     message,
   ) => {
-    const route = this.activeRoute
+    const route = this.resolveMessageRoute(message)
     if (
       this.disposed
       || !route
       || typeof message !== 'string'
-      || !message.startsWith(route.consolePrefix)
       || !this.isRouteCurrent(route)
     ) {
       return
@@ -151,13 +181,19 @@ export class ElectronPageProbeEventAdapter {
     const payload = parsePayload(message.slice(route.consolePrefix.length))
     if (!payload) return
     try {
+      const capture = this.options.lifecycle.bindProbeCapture({
+        tabId: this.tabId,
+        webContentsId: this.options.webContents.id,
+      })
+      if (!capture) return
+      route.capture = capture
       if (typeof payload.event === 'string') {
         if (supportedControlEvents.has(payload.event)) {
           this.options.onControlPayload?.(payload)
         }
         return
       }
-      route.capture.capture(payload)
+      capture.capture(payload)
     } catch (error) {
       try {
         this.options.onError?.(error)
@@ -176,8 +212,43 @@ export class ElectronPageProbeEventAdapter {
 
   private isRouteCurrent(route: ActiveDocumentRoute) {
     const binding = this.resolveCurrentBinding()
+    if (!this.routeMatchesBinding(route, binding)) return false
+    if (route === this.nextRoute) {
+      this.activeRoute = route
+      this.nextRoute = null
+    }
+    return true
+  }
+
+  private createRoute(input: Pick<ActiveDocumentRoute, 'capture' | 'incarnation' | 'navigationGeneration'>) {
+    const token = normalizeDocumentToken(this.createDocumentToken())
+    if (!token) return null
+    const consolePrefix = `${EMBEDDED_BROWSER_RESOURCE_CONSOLE_PREFIX}${token}:`
+    return {
+      ...input,
+      consolePrefix,
+      script: createEmbeddedBrowserResourceProbeScript({ consolePrefix }),
+    }
+  }
+
+  private resolveMessageRoute(message: unknown) {
+    if (typeof message !== 'string') return null
+    if (this.activeRoute && message.startsWith(this.activeRoute.consolePrefix)) {
+      return this.activeRoute
+    }
+    if (this.nextRoute && message.startsWith(this.nextRoute.consolePrefix)) {
+      return this.nextRoute
+    }
+    return null
+  }
+
+  private routeMatchesBinding(
+    route: ActiveDocumentRoute | null,
+    binding: TabCaptureBinding | null,
+  ) {
     return Boolean(
-      binding
+      route
+      && binding
       && binding.incarnation === route.incarnation
       && binding.navigationGeneration === route.navigationGeneration,
     )

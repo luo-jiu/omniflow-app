@@ -197,6 +197,7 @@ describe('EmbeddedBrowserCaptureRuntime', () => {
     expect(runtime.bindProbeDocument('tab-1')).toBeNull()
     runtime.setCaptureMode('tab-1', 'network')
     expect(runtime.bindProbeDocument('tab-1')).toBeNull()
+    expect(runtime.prepareNextProbeDocument('tab-1')).toBeNull()
 
     const resourceUrl = 'https://cdn.example/resource?id=1'
     webRequest.sendHeaders?.(sendDetails(1, 41, resourceUrl))
@@ -221,7 +222,9 @@ describe('EmbeddedBrowserCaptureRuntime', () => {
 
     runtime.setCaptureMode('tab-1', 'deep')
     const firstDocument = runtime.bindProbeDocument('tab-1')
+    const nextDocument = runtime.prepareNextProbeDocument('tab-1')
     expect(firstDocument?.script).toContain(firstDocument?.consolePrefix)
+    expect(nextDocument?.consolePrefix).not.toBe(firstDocument?.consolePrefix)
     firstView.emitConsole(`${firstDocument?.consolePrefix}${JSON.stringify({
       kind: 'media',
       resourceKey: 'mse-video',
@@ -243,7 +246,7 @@ describe('EmbeddedBrowserCaptureRuntime', () => {
     expect(runtime.getSnapshot('tab-1')).toMatchObject({ resources: [] })
 
     const secondDocument = runtime.bindProbeDocument('tab-1')
-    expect(secondDocument?.consolePrefix).not.toBe(firstDocument?.consolePrefix)
+    expect(secondDocument).toEqual(nextDocument)
     firstView.emitConsole(`${secondDocument?.consolePrefix}${JSON.stringify({
       resourceKey: 'current-resource',
       url: 'https://cdn.example/current.mp4',

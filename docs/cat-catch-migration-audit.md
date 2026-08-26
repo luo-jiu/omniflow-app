@@ -13,13 +13,13 @@
 | reviewedThrough | 未建立 |
 | portedThrough | 未建立 |
 
-当前映射包含 7 个 cutover unit、32 项能力、192 个上游 anchor、106 个本地旧位置和 82 个唯一计划测试 ID。`network-capture` 的 7 项能力均达到 `ported-unverified`，`output.external-tools-dispatch` 为 `porting`，其余 24 项仍为 `pending`；27 个计划测试 ID 已落成 active pure behavior/contract、fake Electron integration 或 loopback redirect test，尚无已完成的 cutover unit。
+当前映射包含 7 个 cutover unit、32 项能力、192 个上游 anchor、106 个本地旧位置和 83 个唯一计划测试 ID。`network-capture` 的 7 项能力均达到 `ported-unverified`，`output.external-tools-dispatch` 为 `porting`，其余 24 项仍为 `pending`；28 个计划测试 ID 已落成 active pure behavior/contract、fake Electron integration 或 loopback redirect test，尚无已完成的 cutover unit。
 
 ## 2. 能力族
 
 | 能力族 | 当前实现 | 已知结论 |
 | --- | --- | --- |
-| network capture | legacy production owner + unregistered target composition/adapters/contracts/lifecycle/access consumers | Cat Catch 规则与产品 policy 分层、page policy、vault/store、tokenized document-bound probe routing、renderer-safe reducer、唯一 network/per-view probe composition、owner lifecycle、四类 opaque resource consumer、bounded inspection、当前 document owner 限定的 main-only probe key 解析、context-free stale owner 拒绝和 redirect hop 凭据隔离已有专项测试；production composition 实例化、probe install、四类 consumer 的生产入口、IPC/preload/renderer 与 cutover 仍待迁移和验证 |
+| network capture | legacy production owner + unregistered target composition/adapters/contracts/lifecycle/access consumers | Cat Catch 规则与产品 policy 分层、page policy、vault/store、当前/下一 navigation generation 的 tokenized probe routing、renderer-safe reducer、唯一 network/per-view probe composition、owner lifecycle、四类 opaque resource consumer、bounded inspection、当前 document owner 限定的 main-only probe key 解析、context-free stale owner 拒绝和 redirect hop 凭据隔离已有专项测试；production composition 实例化、probe install、四类 consumer 的生产入口、IPC/preload/renderer 与 cutover 仍待迁移和验证 |
 | deep-search runtime | legacy inactive | 深度 hooks 写死关闭，外围 MSE hook 仍运行 |
 | MSE runtime | legacy owner | 有增量 spool 思路，但没有专项差分、输出和稳定性测试 |
 | HLS engine | legacy owner | parser/downloader 存在，BYTERANGE、cache fallback、伪装分片有明确缺口 |
@@ -38,7 +38,7 @@
 7. HLS 隐式 BYTERANGE、一次性 cache fallback、PNG/JPEG 伪装分片缺失。
 8. MPD `r=-1`、多 BaseURL、动态 timeline/range 不完整。
 9. ffmpeg、HLS/DASH、直播、普通下载和 temp 没有统一 task registry。
-10. 目前有 27 个 active pure contract、fake Electron integration 或 loopback redirect test ID；main composition、持久化捕捉设置热更新、main-only probe key 解析与下载、检查、页面拖拽、external-tool target consumer 已有 owner/opaque authority 证据，但 production composition 实例化、probe install、四类 consumer 的生产入口、IPC/preload/renderer 及所有 unit 仍无 production cutover 证据。
+10. 目前有 28 个 active pure contract、fake Electron integration 或 loopback redirect test ID；main composition、持久化捕捉设置热更新、下一文档 token 路由、main-only probe key 解析与下载、检查、页面拖拽、external-tool target consumer 已有 owner/opaque authority 证据，但 production composition 实例化、probe install、四类 consumer 的生产入口、IPC/preload/renderer 及所有 unit 仍无 production cutover 证据。
 
 ## 4. 保留、迁移与删除
 

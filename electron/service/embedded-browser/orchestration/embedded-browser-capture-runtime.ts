@@ -179,6 +179,16 @@ export class EmbeddedBrowserCaptureRuntime {
       || null
   }
 
+  prepareNextProbeDocument(tabId: string): BoundPageProbeDocument | null {
+    if (this.disposed) return null
+    const normalizedTabId = normalizeTabId(tabId)
+    if (!normalizedTabId) return null
+    const snapshot = this.store.getSnapshot(normalizedTabId)
+    if (snapshot?.status !== 'active' || snapshot.captureMode !== 'deep') return null
+    return this.probeRegistrationsByTabId.get(normalizedTabId)?.adapter.prepareNextDocument()
+      || null
+  }
+
   getSnapshot(tabId: string): ResourceStateSnapshot | null {
     if (this.disposed) return null
     return this.store.getSnapshot(tabId)

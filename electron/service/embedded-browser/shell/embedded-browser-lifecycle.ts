@@ -192,8 +192,11 @@ export class EmbeddedBrowserLifecycle {
       return null
     }
     const binding = this.options.store.getCaptureBinding(tabId)
+    const snapshot = this.options.store.getSnapshot(tabId)
     if (
       !binding
+      || snapshot?.status !== 'active'
+      || snapshot.captureMode !== 'deep'
       || binding.incarnation !== registration.binding.incarnation
       || binding.navigationGeneration !== registration.binding.navigationGeneration
       || binding.webContentsId !== webContentsId

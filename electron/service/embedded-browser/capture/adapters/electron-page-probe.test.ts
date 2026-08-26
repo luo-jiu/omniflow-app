@@ -116,7 +116,7 @@ describe('network.probe-console-generation-routing', () => {
     lifecycle.setCaptureMode('tab-probe', 'deep')
     const tokens = [
       'first_document_token_00000001',
-      'second_document_token_0000002',
+      'next_document_token_000000002',
       'recovered_document_token_00003',
     ]
     const adapter = new ElectronPageProbeEventAdapter({
@@ -166,6 +166,9 @@ describe('network.probe-console-generation-routing', () => {
     expect(controlPayloads).toHaveLength(2)
     expect(errors).toHaveLength(1)
 
+    const nextDocument = adapter.prepareNextDocument()!
+    expect(nextDocument.consolePrefix).not.toBe(first.consolePrefix)
+    expect(adapter.prepareNextDocument()).toEqual(nextDocument)
     webContents.navigate('https://page.example/second')
     webContents.emitConsole(`${first.consolePrefix}${JSON.stringify({
       ext: 'mp4',
@@ -179,7 +182,7 @@ describe('network.probe-console-generation-routing', () => {
     expect(controlPayloads).toHaveLength(2)
 
     const second = adapter.bindCurrentDocument()!
-    expect(second.consolePrefix).not.toBe(first.consolePrefix)
+    expect(second).toEqual(nextDocument)
     webContents.emitConsole(`${second.consolePrefix}${JSON.stringify({
       ext: 'vtt',
       url: 'https://cdn.example/second.vtt',
@@ -187,6 +190,19 @@ describe('network.probe-console-generation-routing', () => {
     expect(store.getOwnedResource('tab-probe', 'resource-2')).toMatchObject({
       kind: 'subtitle',
     })
+
+    lifecycle.setCaptureMode('tab-probe', 'off')
+    webContents.emitConsole(`${second.consolePrefix}${JSON.stringify({
+      event: 'mse-reset',
+      resourceKey: 'mse:stopped',
+    })}`)
+    webContents.emitConsole(`${second.consolePrefix}${JSON.stringify({
+      url: 'https://cdn.example/stopped.mp4',
+    })}`)
+    expect(controlPayloads).toHaveLength(2)
+    expect(resourceIndex).toBe(2)
+    expect(adapter.bindCurrentDocument()).toBeNull()
+    expect(adapter.prepareNextDocument()).toBeNull()
 
     webContents.crash()
     webContents.emitConsole(`${second.consolePrefix}${JSON.stringify({
@@ -197,6 +213,7 @@ describe('network.probe-console-generation-routing', () => {
     expect(resourceIndex).toBe(2)
 
     webContents.navigate('https://page.example/recovered')
+    lifecycle.setCaptureMode('tab-probe', 'deep')
     const recovered = adapter.bindCurrentDocument()!
     expect(recovered.consolePrefix).not.toBe(second.consolePrefix)
     adapter.dispose()
@@ -207,6 +224,47 @@ describe('network.probe-console-generation-routing', () => {
       url: 'https://cdn.example/disposed.mp4',
     })}`)
     expect(resourceIndex).toBe(2)
+    lifecycle.dispose()
+  })
+
+  it('network.probe-next-document-routing accepts a prepared document-start token after navigation', () => {
+    let resourceIndex = 0
+    const store = new ResourceStateStore({
+      createResourceId: () => `resource-${++resourceIndex}`,
+    })
+    const lifecycle = new EmbeddedBrowserLifecycle({
+      emitChange: () => {},
+      store,
+      vault: new NetworkContextVault(),
+    })
+    const webContents = new FakeWebContents(72, 'https://page.example/current')
+    lifecycle.registerView({ tabId: 'tab-next', webContents })
+    lifecycle.setCaptureMode('tab-next', 'deep')
+    const tokens = ['current_document_token_000001', 'next_document_token_00000002']
+    const adapter = new ElectronPageProbeEventAdapter({
+      createDocumentToken: () => tokens.shift() || '',
+      lifecycle,
+      tabId: 'tab-next',
+      webContents,
+    })
+
+    const currentDocument = adapter.bindCurrentDocument()!
+    const nextDocument = adapter.prepareNextDocument()!
+    webContents.navigate('https://page.example/next')
+    webContents.emitConsole(`${currentDocument.consolePrefix}${JSON.stringify({
+      url: 'https://cdn.example/stale.mp4',
+    })}`)
+    webContents.emitConsole(`${nextDocument.consolePrefix}${JSON.stringify({
+      url: 'https://cdn.example/document-start.mp4',
+    })}`)
+
+    expect(resourceIndex).toBe(1)
+    expect(store.getOwnedResource('tab-next', 'resource-1')).toMatchObject({
+      capturedNavigationGeneration: 1,
+      url: 'https://cdn.example/document-start.mp4',
+    })
+    expect(adapter.bindCurrentDocument()).toEqual(nextDocument)
+    adapter.dispose()
     lifecycle.dispose()
   })
 })

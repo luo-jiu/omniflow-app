@@ -255,6 +255,20 @@
 - legacy cleanup: 无；旧 renderer `resourceKey` DTO 在 network-capture 原子切换前仍由旧链使用。
 - validation: network target chain 15 files/59 tests、同步校验 16/16、固定 metadata/192 anchors/106 cleanup entries/82 unique planned IDs、TypeScript、全量 ESLint 和 Cat Catch 作用域 diff check 通过；排除已由 `node --test` 专门执行的同步校验文件后，全量 Vitest 为 149 files、810 passed、1 skipped。未运行会覆盖其他 Agent `dist-electron/**` 的 build；目标 runtime 尚未接生产，因此没有可执行的真实页面手工验证。
 
+## 2026-08-26: same target (next-document probe routing partial)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动。
+- reviewedThrough / portedThrough: 均保持 `null`；本切片修复 production probe 接线前发现的 document-start token/generation 缺口，未完成 production wiring 或任何 unit cutover。
+- change groups: `security-boundary`（上一文档 token 拒绝）与 `electron-integration`（预签下一 navigation generation 的 document-start route）。
+- affected capability IDs: `capture.owner-lifecycle` 保持 `ported-unverified`；新增 active `network.probe-next-document-routing`，active 计划测试 ID 增至 28，总唯一计划 ID 增至 83；所有 unit 仍为 0 cutover。
+- fixtures/tests: 无 fixture；`electron-page-probe.test.ts#network.probe-next-document-routing` 覆盖当前/下一 token 分离、导航后无需 dom-ready 重新签发即可接收 document-start payload、旧 token 拒绝和下一 route 提升复用。
+- accepted difference: 无新增；下一 route 只预签 token 和期望 owner stamp，直到 binding 真实前进后才由 main 获取 capture authority。
+- excluded changes and reasons: 不修改 production CDP probe installer；本切片先让 target adapter 能正确表达当前脚本与下一 document-start 脚本，接线时再一次替换旧无 token installer。
+- unresolved gaps: production composition 实例化、CDP installer 使用 current/next scripts、safe IPC/preload/renderer reducer、四类 consumer entry 和 network unit 原子 cutover。
+- runtime changes: `ElectronPageProbeEventAdapter` 增加单个 bounded next route；`EmbeddedBrowserCaptureRuntime` 只在 deep mode 暴露下一文档脚本。导航、崩溃、replacement 和 dispose 的原有 owner 规则不变。
+- legacy cleanup: 无；旧无 token production probe listener/installer 仍等待 network-capture 原子切换。
+- validation: network target chain 15 files/60 tests、同步校验 16/16、固定 metadata/192 anchors/106 cleanup entries/83 unique planned IDs、TypeScript、全量 ESLint 和 Cat Catch 作用域 diff check 通过；排除已由 `node --test` 专门执行的同步校验文件后，全量 Vitest 为 149 files、811 passed、1 skipped。未运行会覆盖其他 Agent `dist-electron/**` 的 build；目标 runtime 尚未接生产，因此没有可执行的真实页面手工验证。
+
 ## Template
 
 ```markdown
