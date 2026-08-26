@@ -157,16 +157,22 @@
         "electron/service/embedded-browser/capture/state/network-context-vault.ts#NetworkContextVault"
       ],
       "relationToUpstream": "platform-substitute",
-      "syncState": "pending",
-      "syncedThrough": null,
+      "syncState": "ported-unverified",
+      "syncedThrough": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
       "plannedTestIds": [
         "network.sensitive-header-projection",
         "network.context-ttl-purpose-binding",
         "network.request-header-rule-scope"
       ],
-      "testRefs": [],
-      "acceptedDifferences": [],
-      "notes": "Seed gap: sensitive header values cross main, preload, renderer, plans, tools, and download commands; the current Map has no TTL or capacity budget. Cat Catch's DNR helpers preserve tab/initiator, URL-filter, resource-type, header-order, and cookie scope, but Electron must realize those semantics through purpose-bound main consumers rather than copied session rules."
+      "testRefs": [
+        "electron/service/embedded-browser/capture/state/network-context-vault.test.ts#network.sensitive-header-projection",
+        "electron/service/embedded-browser/capture/state/network-context-vault.test.ts#network.context-ttl-purpose-binding",
+        "electron/service/embedded-browser/capture/state/network-context-vault.test.ts#network.request-header-rule-scope"
+      ],
+      "acceptedDifferences": [
+        "When Cat Catch regex classification rewrites a request URL, OmniFlow does not inherit credentials from the observed URL; a new main-owned context is required for the rewritten exact URL."
+      ],
+      "notes": "The pinned main-only vault preserves Cat Catch's protected-header selection and adds bounded pending/retained lifecycles, opaque renderer-safe projection, purpose and owner bindings, independent source/replay resource types, exact resource URL redemption, page-drag Cookie policy, and a manual-redirect consumer contract. It is not connected to Electron webRequest, ResourceStateStore, renderer projection, downloads, inspection, drag staging, or external tools; those consumers must provide main-owned generation/origin facts and disable automatic redirect or redeem each hop. The legacy Map and header-bearing DTO remain the only production path until the network-capture cutover."
     },
     {
       "id": "capture.request-url-helpers",
