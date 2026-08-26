@@ -62,7 +62,7 @@ OmniFlow 不运行 Cat Catch 浏览器扩展，而是把与产品目标相关的
 - HLS 已知缺少隐式 BYTERANGE offset、一次性 manifest cache fallback、伪装分片预处理等经验分支。
 - DASH 手写 parser 对 `r=-1`、多 BaseURL、动态 MPD 等语义不完整。
 - HLS、DASH、MSE、ffmpeg、临时文件和输出交付尚无统一 task/cleanup 合同。
-- 当前 network classifier/rules、page URL policy、main-only request context vault、main-owned resource state、renderer-safe cross-process contract/reducer、未注册的 Electron network adapter 与 owner lifecycle 的 15 个计划 ID 已落成专项纯行为/合同或 fake Electron integration test；adapter 已按 `onSendHeaders -> onResponseStarted` 接通 vault/store 并同步投影 context 失效，目标合同覆盖乱序、revision gap、incarnation 与 tombstone，lifecycle 覆盖 navigation/tab/WebContents/crash/closeAll/app disposal 及 stale callback 隔离，但尚未接入生产 IPC/preload/renderer、probe 或受保护 context consumer，其余计划 ID 仍只是需求种子，尚无 active fixture/test。
+- 当前 network classifier/rules、page URL policy、main-only request context vault、main-owned resource state、renderer-safe cross-process contract/reducer、未注册的 Electron network adapter、owner lifecycle 与 main-only resource access consumer 的 17 个计划 ID 已落成专项纯行为/合同、fake Electron integration 或 loopback redirect test；adapter 已按 `onSendHeaders -> onResponseStarted` 接通 vault/store，lifecycle 覆盖 navigation/tab/WebContents/crash/closeAll/app disposal，access consumer 只接受 opaque resource ID 与固定 purpose，并在 redirect 后剥离上一跳受保护 header。目标链尚未接入生产 IPC/preload/renderer、probe 或四类旧 consumer，其余计划 ID 仍只是需求种子，尚无 active fixture/test。
 
 因此当前 `network-capture` 的 7 项目标能力均达到 `ported-unverified`，其余 25 项仍为 `pending`；尚无 production cutover，不能因为目标链测试通过就标记为 `verified`。
 
@@ -309,6 +309,6 @@ tools/cat-catch-lab/fixtures/<fixture-id>/
 ## 12. 当前下一步
 
 1. 运行轻量 `cat-catch:validate`，确认版本、32 项能力和 106 个旧位置自洽。
-2. 为 `network-capture` 补生产迁移前的安全 consumer 和 integration：probe 写入新 Store；下载、检查、页面拖拽和外部工具逐跳兑换 context；IPC/preload/renderer 只消费安全合同；OmniFlow-only 图片/key/字幕规则显式保留。
+2. 将 main-only resource access consumer 接入下载、检查、页面拖拽和外部工具，删除这些路径对 renderer `url/headers/referer` 的信任；同时把 probe 写入新 Store，让 IPC/preload/renderer 只消费安全合同，并显式保留 OmniFlow-only 图片/key/字幕规则。
 3. 上述 consumer 与 production-equivalent integration 通过后，在唯一 `MainSupport` dispatch boundary 原子切换，随同删除旧 listener、request context Map、classifier/rules 和敏感 header DTO；不得并行注册新旧 `webRequest` listener。
 4. 为其余 unit 补固定目标的直接行为依赖、真实 test refs 和 production-equivalent integration，不把现有 legacy 行为当 oracle。

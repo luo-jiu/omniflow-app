@@ -116,6 +116,20 @@
 - legacy cleanup: 无；整个 `network-capture` unit 的安全 consumer 和 production-equivalent integration 完成后，才在唯一 dispatch boundary 切换并同片执行 cleanup 清单。
 - validation: lifecycle 目标测试 2/2、network target chain Vitest 38/38、同步校验 16/16、固定 metadata/192 anchors/106 cleanup entries、TypeScript 与全量 ESLint 通过。排除已由 `node --test` 专门执行的同步校验文件后，全量 Vitest 为 141 files、789 passed、1 skipped。未运行会覆盖并行 `dist-electron/**` 的 build，也未进行真实页面手工验证。
 
+## 2026-08-26: same target (protected resource access partial)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动。
+- reviewedThrough / portedThrough: 均保持 `null`；初始目标的其余能力仍未完成分类和迁移。
+- change groups: `security-boundary`（opaque resource authority、固定 purpose、main-owned owner/context 校验、redirect hop 凭据隔离）与 `omniflow-integration`（下载、检查、页面拖拽和外部工具共用 main-only access 边界）。
+- affected capability IDs: `capture.protected-request-context` 保持 `ported-unverified`；新增 2 个 active test ID，`network-capture` 仍为 7/7 `ported-unverified`、0 cutover。
+- fixtures/tests: 无 fixture；新增 `captured-resource-access.test.ts#network.owned-resource-consumer` 与 `#network.redirect-hop-isolation`，覆盖四类 purpose、错误 tab/resource、导航失效、page-drag captured Cookie 隔离和 loopback 跨 origin redirect。
+- accepted difference: 任意 redirect 后不继承上一跳受保护 header，同源也不例外；目标 hop 如需 header，必须拥有独立捕捉 context。page-drag 不回放 vault 中的 Cookie，而由绑定到捕捉 tab Electron session 的 transport 按目标 URL 使用 cookie jar。
+- excluded changes and reasons: 本切片只建立可复用 access authority，不接生产四类 consumer、IPC/preload/renderer 或 listener；防止在整个 network unit 就绪前产生半切换或双栈。
+- unresolved gaps: production adapter 必须按捕捉 WebContents 解析并注入对应 partition 的 `session.fetch`；四类 consumer 仍需改为只提交 `tabId/resourceId/purpose`；probe、OmniFlow-only capture policy 和原子 cutover 仍未完成。
+- runtime changes: 新增未注册 `CapturedResourceAccessService`；生产路径无变化，旧 request Map 与 header-bearing DTO 仍是唯一运行链。
+- legacy cleanup: 无；旧 consumer/listener/DTO 只能在 `network-capture` 原子 cutover 时同片删除。
+- validation: network target chain Vitest 40/40、同步校验 16/16、固定 metadata/192 anchors/106 cleanup entries、TypeScript、全量 ESLint 和 diff check 通过；排除已由 `node --test` 专门执行的同步校验文件后，全量 Vitest 为 142 files、791 passed、1 skipped。未运行会覆盖其他 Agent `dist-electron/**` 的 build；目标链尚未接生产，因此没有可执行的真实页面手工验证。
+
 ## Template
 
 ```markdown

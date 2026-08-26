@@ -345,7 +345,7 @@ tempPath
 - 由 main 侧的浏览器网络能力记录
 - 以 `embedded-browser:resource` 事件推回 renderer
 
-全面迁移中的目标 network chain 已在未注册路径组合 `ElectronNetworkCaptureAdapter`、main-only context vault、revisioned `ResourceStateStore`、安全跨进程合同和 `EmbeddedBrowserLifecycle`，自动测试覆盖 navigation、tab/WebContents、render crash、closeAll、app disposal 与 stale callback 隔离。该链尚未接 production probe、context consumer、IPC/preload/renderer；当前旧 bridge 仍是唯一生产 owner，同一种 `webRequest` event 不得同时注册新旧 listener。逐项状态以 Cat Catch capability map 为准。
+全面迁移中的目标 network chain 已在未注册路径组合 `ElectronNetworkCaptureAdapter`、main-only context vault、revisioned `ResourceStateStore`、安全跨进程合同、`EmbeddedBrowserLifecycle` 和 main-only resource access consumer。自动测试覆盖 owner lifecycle、opaque resource ID/purpose authority、page-drag 不回放捕捉 Cookie，以及 redirect 后剥离上一跳受保护 header。access consumer 的 transport 必须由 production adapter 注入并绑定到捕捉 tab 的 Electron session，不能回退到主进程全局 `fetch`。该链尚未接 production probe、四类旧 consumer、IPC/preload/renderer；当前旧 bridge 仍是唯一生产 owner，同一种 `webRequest` event 不得同时注册新旧 listener。逐项状态以 Cat Catch capability map 为准。
 
 #### 深度捕捉
 

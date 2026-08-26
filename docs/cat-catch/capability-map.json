@@ -157,7 +157,8 @@
         "electron/service/embeddedBrowserResourceTypes.ts#EmbeddedBrowserCapturedRequestHeaders"
       ],
       "targetRefs": [
-        "electron/service/embedded-browser/capture/state/network-context-vault.ts#NetworkContextVault"
+        "electron/service/embedded-browser/capture/state/network-context-vault.ts#NetworkContextVault",
+        "electron/service/embedded-browser/integrations/captured-resource-access.ts#CapturedResourceAccessService"
       ],
       "relationToUpstream": "platform-substitute",
       "syncState": "ported-unverified",
@@ -165,17 +166,22 @@
       "plannedTestIds": [
         "network.sensitive-header-projection",
         "network.context-ttl-purpose-binding",
-        "network.request-header-rule-scope"
+        "network.request-header-rule-scope",
+        "network.owned-resource-consumer",
+        "network.redirect-hop-isolation"
       ],
       "testRefs": [
         "electron/service/embedded-browser/capture/state/network-context-vault.test.ts#network.sensitive-header-projection",
         "electron/service/embedded-browser/capture/state/network-context-vault.test.ts#network.context-ttl-purpose-binding",
-        "electron/service/embedded-browser/capture/state/network-context-vault.test.ts#network.request-header-rule-scope"
+        "electron/service/embedded-browser/capture/state/network-context-vault.test.ts#network.request-header-rule-scope",
+        "electron/service/embedded-browser/integrations/captured-resource-access.test.ts#network.owned-resource-consumer",
+        "electron/service/embedded-browser/integrations/captured-resource-access.test.ts#network.redirect-hop-isolation"
       ],
       "acceptedDifferences": [
-        "When Cat Catch regex classification rewrites a request URL, OmniFlow does not inherit credentials from the observed URL; a new main-owned context is required for the rewritten exact URL."
+        "When Cat Catch regex classification rewrites a request URL, OmniFlow does not inherit credentials from the observed URL; a new main-owned context is required for the rewritten exact URL.",
+        "After an HTTP redirect, OmniFlow never forwards the previous hop's protected headers, including for a same-origin target. The target needs its own main-owned captured context; page-drag staging may still use the captured tab's Electron session cookie jar for cookies scoped to the target URL."
       ],
-      "notes": "The pinned main-only vault preserves Cat Catch's protected-header selection and adds bounded pending/retained lifecycles, opaque renderer-safe projection, purpose and owner bindings, independent source/replay resource types, exact resource URL redemption, page-drag Cookie policy, a manual-redirect consumer contract, and value-free invalidation events for every retained context deletion reason. It is not connected to Electron webRequest, ResourceStateStore, renderer projection, downloads, inspection, drag staging, or external tools; the future adapter must consume invalidations, provide main-owned generation/origin facts, and disable automatic redirect or redeem each hop. The legacy Map and header-bearing DTO remain the only production path until the network-capture cutover."
+      "notes": "The pinned main-only vault preserves Cat Catch's protected-header selection and adds bounded pending/retained lifecycles, opaque renderer-safe projection, purpose and owner bindings, independent source/replay resource types, exact resource URL redemption, page-drag Cookie policy, and value-free invalidation events for every retained context deletion reason. The unregistered CapturedResourceAccessService now accepts only tabId, opaque resourceId, and one of four fixed purposes; it derives URL, replay type, owner generation, page origin, WebContents, and header values from Store/Vault, rejects stale owners, forces manual redirect, and strips protected headers from every later hop. Page-drag omits the captured Cookie and requests cookie-jar credentials through a mandatory injected transport; production wiring must bind that transport to the captured tab's Electron session. The target service is not wired to production download, inspection, drag staging, external tools, IPC, or renderer; the legacy Map and header-bearing DTO remain the only production path until the atomic network-capture cutover."
     },
     {
       "id": "capture.request-url-helpers",
