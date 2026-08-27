@@ -955,6 +955,20 @@
 - legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
 - validation: 固定 Cat Catch vendor executable oracle 输出 `4 fragments / duration=8 / sn=5..8 / levelCount=1 / audioTrackCount=0`，两个 mixed-syntax URI 为零时长且共同继承 init/key 与逐 sequence IV。失败证据为 parser `31/32`：manifest 被误标 master，生成 2 个 variant/1 个 rendition 并漏掉两片。实现后 parser `32/32`、完整 HLS 集合 `89/89`、TypeScript、全仓 ESLint、fixture/capability JSON、轻量 validator、固定上游校验、同步校验 `16/16`、metadata `7 units / 32 capabilities / 197 anchors / 106 cleanup entries / 139 planned IDs / 93 active refs` 和 scoped diff check 通过。排除 4 个需监听本机端口的文件及已由 `node --test` 单独执行的同步文件后，全量 Vitest 为 `178 files / 1163 passed / 3 skipped`；4 个 loopback 文件在沙箱外复跑 `20/20`，合计全部可执行测试 `1183 passed / 3 skipped`。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
 
+## 2026-08-28: same target (HLS master parser mode isolation)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，固定实际 vendor 为 hls.js `1.6.16`。
+- reviewedThrough / portedThrough: 均保持 `null`；本步闭合 `isMediaPlaylist=false` 后 media-only 标签和游离 URI 不能污染 master 下载状态的反向边界，仍未完成 hls-engine cutover。
+- change groups: `behavioral`（固定 master parser 分发）与 `state-isolation`（media key/MAP/range/fragment 状态在 master 中不可达）。
+- affected capability IDs: `hls.parser-planner` 保持 `ported-unverified`；新增 1 个 active test ID，复用既有 `isMediaPlaylist=function(e){return qr.test(e)}` 上游 anchor。
+- fixtures/tests: 新增 upstream-executable fixture `hls-master-parser-mode-isolation`；`hls.master-parser-mode-isolation` 覆盖合法 master 混入 `KEY/MAP/BYTERANGE` 和游离 URI 时只保留普通 variant，且只有这些杂项、没有 level 的 master 继续报 `no levels found in manifest`。
+- accepted difference: 无。合法 variant URI 仍由 pending `STREAM-INF` 消费；master `DEFINE/SESSION-KEY/MEDIA` 等已有分支保持原顺序，只有 media-only 状态和未绑定 variant 的 URI 被忽略。
+- excluded changes and reasons: 不投影 Cat Catch `parseTs` 不消费的播放 metadata，不新增 parser 框架、IPC 或 renderer 状态，也不扩大到下一项 HLS 标签差分。
+- unresolved gaps: HLS 其余真正影响下载的 parser 差分、live 未捕获 URL 过渡 DTO、加密 fMP4/video 真实输出组合、真实网站手工验证和最终 hls-engine cutover。
+- runtime changes: 普通 URI 仅在 media 模式调用 `addSegment`；master-only 的 `SESSION-KEY/STREAM-INF/MEDIA` 分支处理后，master 不再落入 `MEDIA-SEQUENCE/TARGETDURATION/KEY/MAP/BYTERANGE` 等 media 标签状态机。既有 owner、DTO 和生产接线不变。
+- legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
+- validation: 固定 Cat Catch vendor executable oracle 只产生 `variant.m3u8 / bandwidth=1000000`，不产生 fragment/key/MAP/range；无普通 level 输入报 `no levels found in manifest`。失败证据为 parser `32/33`，错误生成 `stray.ts`、AES key、MAP 和 `10@0` range。实现后 parser `33/33`、完整 HLS 集合 `90/90`、fixture/capability JSON、全仓 ESLint、轻量 validator、固定上游校验、同步校验 `16/16`、metadata `7 units / 32 capabilities / 197 anchors / 106 cleanup entries / 140 planned IDs / 94 active refs` 和 scoped diff check 通过。排除 4 个需监听本机端口的文件及已由 `node --test` 单独执行的同步文件后，全量 Vitest 为 `178 files / 1166 passed / 3 skipped`；4 个 loopback 文件在沙箱外复跑 `20/20`，合计全部可执行测试 `1186 passed / 3 skipped`。TypeScript 当前仅被其他 Agent 在途的 `agent-orchestrator.test.ts` 泛型 mock 与 `agent-tool-executor.ts` 旧 `filePath` 字段共 3 个类型错误阻断。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
+
 ## Template
 
 ```markdown

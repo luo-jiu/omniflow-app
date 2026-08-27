@@ -1,0 +1,4 @@
+#EXTM3U
+#EXT-X-KEY:METHOD=AES-128,URI="wrong-key.bin"
+#EXT-X-MAP:URI="wrong-init.mp4"
+stray.ts

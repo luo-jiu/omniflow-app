@@ -9,7 +9,7 @@
  * Fixtures: hls.byterange-map-key-discontinuity, hls.map-byterange-independent,
  * hls.map-leading-byterange-transfer, hls-valued-tag-boundary,
  * hls-extinf-token-boundary, hls-empty-valued-tag-boundary,
- * hls-media-parser-mode-isolation
+ * hls-media-parser-mode-isolation, hls-master-parser-mode-isolation
  */
 
 import { createHlsDefaultIv } from './decrypt'
@@ -691,7 +691,8 @@ function hlsKeysMatch(left: CatCatchHlsKey, right: CatCatchHlsKey) {
 
 /**
  * Upstream: xifangczy/cat-catch@2cb981d7c2f4614732edccc167c4b5793d1cb138
- * Source: lib/hls.min.js#parseLevelPlaylist and handlePlaylistLoaded
+ * Source: lib/hls.min.js#M3U8Parser.isMediaPlaylist, parseMasterPlaylist,
+ * parseLevelPlaylist, and handlePlaylistLoaded
  * Reason: playlist parsing errors prevent Cat Catch's LEVEL_LOADED -> parseTs
  * path, so malformed input must not become an executable OmniFlow plan.
  * Fixture: hls-media-playlist-structure-errors
@@ -801,7 +802,7 @@ export function parseHlsManifest(input: {
       continue
     }
     if (!line.startsWith('#')) {
-      addSegment(line, false)
+      if (hasMediaPlaylistSyntax) addSegment(line, false)
       continue
     }
     if (line.startsWith('#EXT-X-DEFINE:')) {
@@ -829,6 +830,7 @@ export function parseHlsManifest(input: {
       if (rendition) renditions.push(rendition)
       continue
     }
+    if (!hasMediaPlaylistSyntax) continue
     const parsedMediaSequence = parseHlsUnsignedIntegerTag(line, 'MEDIA-SEQUENCE')
     if (parsedMediaSequence !== undefined) {
       if (mediaSequence !== 0) {

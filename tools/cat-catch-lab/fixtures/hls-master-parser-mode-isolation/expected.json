@@ -1,0 +1,10 @@
+{
+  "baseUrl": "https://media.example/master-mode/master.m3u8",
+  "noLevelsError": "no levels found in manifest",
+  "variants": [
+    {
+      "bandwidth": 1000000,
+      "url": "https://media.example/master-mode/variant.m3u8"
+    }
+  ]
+}

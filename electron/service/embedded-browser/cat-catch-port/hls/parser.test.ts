@@ -157,6 +157,22 @@ const mediaModeExpected = JSON.parse(readFileSync(`${mediaModeFixtureRoot}/${med
     url: string
   }>
 }
+const masterModeFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-master-parser-mode-isolation', import.meta.url))
+const masterModeFixture = JSON.parse(readFileSync(`${masterModeFixtureRoot}/fixture.json`, 'utf8')) as {
+  expected: string
+  inputs: {
+    master: string
+    noLevels: string
+  }
+}
+const masterModeExpected = JSON.parse(readFileSync(`${masterModeFixtureRoot}/${masterModeFixture.expected}`, 'utf8')) as {
+  baseUrl: string
+  noLevelsError: string
+  variants: Array<{
+    bandwidth: number
+    url: string
+  }>
+}
 const integerTagFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-integer-tag-token-boundary', import.meta.url))
 const integerTagFixture = JSON.parse(readFileSync(`${integerTagFixtureRoot}/fixture.json`, 'utf8')) as {
   expected: string
@@ -1049,6 +1065,43 @@ describe('Cat Catch HLS parser', () => {
       sequence: fragment.sequence,
       url: fragment.url,
     }))).toEqual(mediaModeExpected.fragments)
+  })
+
+  it('hls.master-parser-mode-isolation', () => {
+    const manifest = parseHlsManifest({
+      baseUrl: masterModeExpected.baseUrl,
+      text: readFileSync(
+        `${masterModeFixtureRoot}/${masterModeFixture.inputs.master}`,
+        'utf8',
+      ),
+    })
+    expect(manifest).toMatchObject({
+      durationSeconds: 0,
+      isMaster: true,
+      keys: [],
+      maps: [],
+      renditions: [],
+      segments: [],
+    })
+    expect(manifest.variants.map(variant => ({
+      bandwidth: variant.bandwidth,
+      url: variant.url,
+    }))).toEqual(masterModeExpected.variants)
+
+    const plan = createEmbeddedBrowserHlsDownloadPlan({
+      manifest,
+      manifestUrl: masterModeExpected.baseUrl,
+    })
+    expect(plan.fragments).toEqual([])
+    expect(plan.durationSeconds).toBe(0)
+
+    expect(() => parseHlsManifest({
+      baseUrl: new URL(masterModeFixture.inputs.noLevels, masterModeExpected.baseUrl).href,
+      text: readFileSync(
+        `${masterModeFixtureRoot}/${masterModeFixture.inputs.noLevels}`,
+        'utf8',
+      ),
+    })).toThrow(masterModeExpected.noLevelsError)
   })
 
   it('hls.integer-tag-token-boundary', () => {
