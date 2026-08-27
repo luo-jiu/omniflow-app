@@ -132,7 +132,7 @@ library detail page
   - blob / 页内内存 manifest：走 Electron main 本地 downloader，先生成 local workdir 和 rewritten local playlist，再交给 `ffmpeg`；wrapper 只有在进程零退出且目标文件存在、为普通文件并且非空时才报告成功。
 - 网络 master playlist 已补第一版 variant 选择；默认保持“自动”，也可锁到具体 variant URL 后再走 `ffmpeg`。
 - 如果用户在工具区填写了手动 AES-128 key，也会切到本地 downloader 主链，由 Electron main 写本地 key 文件后重写 playlist。
-- live HLS 第一版走显式“开始录制 / 停止录制”主线；停止后才交给 `ffmpeg` 导出。切换到别的 HLS 请求或离开工具区时，会把未导出的 live session 当作放弃处理，不做隐式自动导出。recorder 的 manifest/segment 请求共用一个 `AbortController`，discard 会中止在途请求；页面导航、tab/view 销毁、render-process loss 和 controller dispose 都会触发匹配 session 的 discard 与临时目录清理。
+- live HLS 第一版走显式“开始录制 / 停止录制”主线；停止后才交给 `ffmpeg` 导出。切换到别的 HLS 请求或离开工具区时，会把未导出的 live session 当作放弃处理，不做隐式自动导出。recorder 的 manifest/segment 请求共用一个 `AbortController`，discard 会中止在途请求；retry/live 会话由 `EmbeddedBrowserHlsSessionOwner` 按 `tabId + requestId` 复合标识持有，页面导航、tab/view 销毁、render-process loss 和 controller dispose 都通过该 owner 先移除状态，再触发匹配 recorder 的 discard 与临时目录清理。active plan 和 `ffmpeg` 进程尚未纳入同一取消边界。
 - 工具区也可直接发起 HLS key 验证；候选会合并 manifest key URL、当前 tab 已捕获 key 资源和工具区手动输入 key。
 - 当前 `master playlist + 手动 key` 已要求先明确选择具体 variant，再回到现有本地主链。
 - main 侧会把 HLS 执行阶段事件回推给 renderer；工具区据此展示当前阶段、最近日志、分片完成数和错误状态。

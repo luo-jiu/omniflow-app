@@ -161,6 +161,9 @@ import {
   EmbeddedBrowserHlsLiveRecorder,
 } from './embeddedBrowserHlsLiveRecorder'
 import {
+  EmbeddedBrowserHlsSessionOwner,
+} from './embedded-browser/processing/hls-session-owner'
+import {
   cleanupStaleEmbeddedBrowserOpenFiles,
   cleanupEmbeddedBrowserOpenFile,
   cleanupEmbeddedBrowserOpenFileSync,
@@ -223,8 +226,10 @@ export function createEmbeddedBrowserMainController(
     cleanupFileSync: cleanupEmbeddedBrowserOpenFileSync,
   })
   const embeddedBrowserFileSystemOriginDecisions = new Map<string, boolean>()
-  const embeddedBrowserHlsRetrySessions = new Map<string, EmbeddedBrowserHlsRetrySession>()
-  const embeddedBrowserHlsLiveRecordingSessions = new Map<string, EmbeddedBrowserHlsLiveRecordingSession>()
+  const embeddedBrowserHlsSessionOwner = new EmbeddedBrowserHlsSessionOwner<
+    EmbeddedBrowserHlsRetrySession,
+    EmbeddedBrowserHlsLiveRecordingSession
+  >()
   const embeddedBrowserMseSpoolFiles = new Map<string, EmbeddedBrowserMseSpoolFile>()
   const embeddedBrowserMseSpoolWriteQueues = new Map<string, Promise<EmbeddedBrowserMseSpoolFile | null>>()
   let activeEmbeddedBrowserTabId: string | null = null
@@ -571,33 +576,7 @@ export function createEmbeddedBrowserMainController(
     requestId?: string
     tabId?: string
   }) {
-    const normalizedRequestId = String(options.requestId || '').trim()
-    const normalizedTabId = String(options.tabId || '').trim()
-    if (!options.all && !normalizedRequestId && !normalizedTabId) {
-      return
-    }
-
-    const matchedSessions = Array.from(embeddedBrowserHlsRetrySessions.entries()).filter(([requestId, session]) => {
-      if (options.all) {
-        return true
-      }
-      if (normalizedRequestId && requestId === normalizedRequestId) {
-        return true
-      }
-      if (normalizedTabId && session.tabId === normalizedTabId) {
-        return true
-      }
-      return false
-    })
-
-    if (!matchedSessions.length) {
-      return
-    }
-
-    await Promise.all(matchedSessions.map(async ([requestId, session]) => {
-      embeddedBrowserHlsRetrySessions.delete(requestId)
-      await rm(session.workDirectoryPath, { force: true, recursive: true }).catch(() => undefined)
-    }))
+    await embeddedBrowserHlsSessionOwner.clearRetry(options)
   }
 
   async function clearEmbeddedBrowserHlsLiveRecordingSessions(options: {
@@ -605,41 +584,7 @@ export function createEmbeddedBrowserMainController(
     requestId?: string
     tabId?: string
   }) {
-    const normalizedRequestId = String(options.requestId || '').trim()
-    const normalizedTabId = String(options.tabId || '').trim()
-    if (!options.all && !normalizedRequestId && !normalizedTabId) {
-      return
-    }
-
-    const matchedSessions = Array.from(embeddedBrowserHlsLiveRecordingSessions.entries()).filter(([requestId, session]) => {
-      if (options.all) {
-        return true
-      }
-      if (normalizedRequestId && requestId === normalizedRequestId) {
-        return true
-      }
-      if (normalizedTabId && session.tabId === normalizedTabId) {
-        return true
-      }
-      return false
-    })
-
-    if (!matchedSessions.length) {
-      return
-    }
-
-    await Promise.all(matchedSessions.map(async ([requestId, session]) => {
-      embeddedBrowserHlsLiveRecordingSessions.delete(requestId)
-      try {
-        await session.recorder.discard().catch(() => undefined)
-      } catch {
-        // ignore cleanup discard errors
-      }
-      const workDirectoryPath = session.workDirectoryPath || session.recorder.getCurrentWorkDirectoryPath()
-      if (workDirectoryPath) {
-        await rm(workDirectoryPath, { force: true, recursive: true }).catch(() => undefined)
-      }
-    }))
+    await embeddedBrowserHlsSessionOwner.clearLive(options)
   }
 
   function emitCredentialCaptured(payload: EmbeddedBrowserCapturedCredentialEvent) {
@@ -1953,7 +1898,7 @@ export function createEmbeddedBrowserMainController(
       }
     } catch (error) {
       if (requestId && workDirectoryPath && outputPath && latestFailedFragments?.length) {
-        embeddedBrowserHlsRetrySessions.set(requestId, {
+        embeddedBrowserHlsSessionOwner.upsertRetry({
           failedFragments: latestFailedFragments,
           ffmpegPath: payload.ffmpegPath,
           manualKeyBase64: payload.manualKeyBase64,
@@ -1966,7 +1911,7 @@ export function createEmbeddedBrowserMainController(
         })
         retainRetrySession = true
       } else if (requestId) {
-        embeddedBrowserHlsRetrySessions.delete(requestId)
+        embeddedBrowserHlsSessionOwner.takeRetry(requestId, normalizedTabId)
       }
       emitEmbeddedBrowserHlsTask({
         durationSeconds: payload.plan.durationSeconds,
@@ -2034,9 +1979,7 @@ export function createEmbeddedBrowserMainController(
       ? Object.fromEntries(authorityGrant.headers)
       : {}
 
-    const existingSession = Array.from(embeddedBrowserHlsLiveRecordingSessions.values()).find((session) => (
-      session.tabId === normalizedTabId
-    ))
+    const existingSession = embeddedBrowserHlsSessionOwner.findLiveByTab(normalizedTabId)
     if (existingSession) {
       return {
         error: '当前 tab 仍有未完成的直播录制，请先停止录制或重试导出',
@@ -2104,7 +2047,7 @@ export function createEmbeddedBrowserMainController(
         suggestedThreadCount: payload.suggestedThreadCount,
       })
 
-      embeddedBrowserHlsLiveRecordingSessions.set(requestId, {
+      embeddedBrowserHlsSessionOwner.upsertLive({
         ffmpegPath: payload.ffmpegPath,
         manifestUrl,
         outputPath,
@@ -2113,7 +2056,7 @@ export function createEmbeddedBrowserMainController(
         tabId: normalizedTabId,
       })
       await recorder.start()
-      embeddedBrowserHlsLiveRecordingSessions.set(requestId, {
+      embeddedBrowserHlsSessionOwner.upsertLive({
         ffmpegPath: payload.ffmpegPath,
         manifestUrl,
         outputPath,
@@ -2168,8 +2111,8 @@ export function createEmbeddedBrowserMainController(
         ok: false,
       }
     }
-    const session = embeddedBrowserHlsLiveRecordingSessions.get(requestId)
-    if (!session || session.tabId !== normalizedTabId) {
+    const session = embeddedBrowserHlsSessionOwner.getLive(requestId, normalizedTabId)
+    if (!session) {
       return {
         error: '直播录制任务不存在或已结束',
         ok: false,
@@ -2238,7 +2181,7 @@ export function createEmbeddedBrowserMainController(
         tabId: normalizedTabId,
         totalFragments: completedRecording.totalFragments,
       })
-      embeddedBrowserHlsLiveRecordingSessions.delete(requestId)
+      embeddedBrowserHlsSessionOwner.takeLive(requestId, normalizedTabId)
       await rm(completedRecording.workDirectoryPath, { force: true, recursive: true }).catch(() => undefined)
       return {
         ffmpegPath: result.ffmpegPath,
@@ -2257,10 +2200,7 @@ export function createEmbeddedBrowserMainController(
         tabId: normalizedTabId,
       })
       if (!stopResult) {
-        embeddedBrowserHlsLiveRecordingSessions.delete(requestId)
-      }
-      if (!stopResult && session.workDirectoryPath) {
-        await rm(session.workDirectoryPath, { force: true, recursive: true }).catch(() => undefined)
+        await clearEmbeddedBrowserHlsLiveRecordingSessions({ requestId, tabId: normalizedTabId })
       }
       return {
         error: error instanceof Error ? error.message : String(error),
@@ -2282,14 +2222,14 @@ export function createEmbeddedBrowserMainController(
       }
     }
 
-    const session = embeddedBrowserHlsLiveRecordingSessions.get(requestId)
-    if (!session || session.tabId !== normalizedTabId) {
+    const session = embeddedBrowserHlsSessionOwner.getLive(requestId, normalizedTabId)
+    if (!session) {
       return {
         ok: true,
       }
     }
 
-    await clearEmbeddedBrowserHlsLiveRecordingSessions({ requestId })
+    await clearEmbeddedBrowserHlsLiveRecordingSessions({ requestId, tabId: normalizedTabId })
     return {
       ok: true,
     }
@@ -2308,8 +2248,8 @@ export function createEmbeddedBrowserMainController(
       }
     }
 
-    const session = embeddedBrowserHlsRetrySessions.get(requestId)
-    if (!session || session.tabId !== normalizedTabId) {
+    const session = embeddedBrowserHlsSessionOwner.getRetry(requestId, normalizedTabId)
+    if (!session) {
       return {
         error: '这条 HLS 失败任务已经过期，请重新执行一次完整下载',
         ok: false,
@@ -2412,7 +2352,7 @@ export function createEmbeddedBrowserMainController(
         outputPath: session.outputPath,
       })
 
-      embeddedBrowserHlsRetrySessions.delete(requestId)
+      embeddedBrowserHlsSessionOwner.takeRetry(requestId, normalizedTabId)
       emitEmbeddedBrowserHlsTask({
         completedFragments: session.plan.fragmentCount,
         durationSeconds: session.plan.durationSeconds,
@@ -2436,13 +2376,13 @@ export function createEmbeddedBrowserMainController(
       }
     } catch (error) {
       if (latestFailedFragments?.length) {
-        embeddedBrowserHlsRetrySessions.set(requestId, {
+        embeddedBrowserHlsSessionOwner.upsertRetry({
           ...session,
           failedFragments: latestFailedFragments,
         })
         retainRetrySession = true
       } else {
-        embeddedBrowserHlsRetrySessions.delete(requestId)
+        embeddedBrowserHlsSessionOwner.takeRetry(requestId, normalizedTabId)
       }
       emitEmbeddedBrowserHlsTask({
         durationSeconds: session.plan.durationSeconds,
@@ -3591,10 +3531,7 @@ export function createEmbeddedBrowserMainController(
   }
 
   function dispose() {
-    const hlsCleanupPromise = Promise.all([
-      clearEmbeddedBrowserHlsRetrySessions({ all: true }),
-      clearEmbeddedBrowserHlsLiveRecordingSessions({ all: true }),
-    ])
+    const hlsCleanupPromise = embeddedBrowserHlsSessionOwner.dispose()
     captureRuntime?.dispose()
     captureRuntime = null
     for (const tabId of embeddedBrowserLibraryFileDropRequests.keys()) {

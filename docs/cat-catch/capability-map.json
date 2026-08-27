@@ -859,10 +859,11 @@
       "currentImplementationRefs": [
         "electron/service/embeddedBrowserHlsLocalDownloaderService.ts#downloadEmbeddedBrowserHlsToLocalWorkDirectory",
         "electron/service/embeddedBrowserMainController.ts#downloadEmbeddedBrowserHlsPlanResource",
-        "electron/service/embeddedBrowserMainController.ts#embeddedBrowserHlsRetrySessions"
+        "electron/service/embedded-browser/processing/hls-session-owner.ts#retrySessions"
       ],
       "targetRefs": [
         "electron/service/embedded-browser/processing/hls-task.ts#HlsTaskExecutor",
+        "electron/service/embedded-browser/processing/hls-session-owner.ts#EmbeddedBrowserHlsSessionOwner",
         "electron/service/embedded-browser/cat-catch-port/hls/decrypt.ts#decryptHlsAes128"
       ],
       "relationToUpstream": "platform-substitute",
@@ -877,7 +878,8 @@
         "hls.cancel-aborts-static-refs",
         "hls.static-ref-range",
         "hls.local-output-smoke",
-        "hls.plan-authority-fetch"
+        "hls.plan-authority-fetch",
+        "hls.session-owner-dispose"
       ],
       "testRefs": [
         "electron/service/embeddedBrowserFragmentDownloader.test.ts#hls.plan-authority-fetch",
@@ -887,10 +889,11 @@
         "electron/service/embeddedBrowserHlsLocalDownloaderService.test.ts#hls.cancel-aborts-static-refs",
         "electron/service/embeddedBrowserFragmentDownloader.test.ts#hls.failed-fragment-retry",
         "electron/service/embeddedBrowserHlsLocalDownloaderService.test.ts#hls.static-ref-range",
-        "electron/service/embeddedBrowserHlsOutput.test.ts#hls.local-output-smoke"
+        "electron/service/embeddedBrowserHlsOutput.test.ts#hls.local-output-smoke",
+        "electron/service/embedded-browser/processing/hls-session-owner.test.ts#hls.session-owner-dispose"
       ],
       "acceptedDifferences": [],
-      "notes": "Plan execution now accepts a main-owned fetch transport: captured fragment/key/map URLs are redeemed through the current tab resource authority with bounded Range support, while unrecognized URLs retain the embedded-session fallback. The fragment downloader now supports an ordered async processor chain, emits each processed stage, retries failed fetch or processor attempts, and exposes an aborted terminal event. HLS local execution carries one AbortSignal through key, map, and media-fragment fetches and destroys the downloader on success, failure, or cancellation, preserving the Cat Catch use() pipeline boundary for decrypt/transcode steps. A production-contract smoke verifies the rewritten local playlist plus key/map/media files are handed to the ffmpeg wrapper and that zero-exit without a non-empty output is rejected; real ffmpeg/ffprobe container correctness is still open. No single task/cancel owner spans plan execution, retry sessions, work directories, ffmpeg, and renderer listeners. Vendor provenance blockers: lib/third-party-libraries.md attributes m3u8-decrypt.js to the mutable hls.js master path rather than an immutable revision; the loaded StreamSaver bundle self-reports 2.0.5 while that document declares 2.0.6, has no verified immutable artifact binding, and retains remote MITM configuration."
+      "notes": "Plan execution now accepts a main-owned fetch transport: captured fragment/key/map URLs are redeemed through the current tab resource authority with bounded Range support, while unrecognized URLs retain the embedded-session fallback. The fragment downloader now supports an ordered async processor chain, emits each processed stage, retries failed fetch or processor attempts, and exposes an aborted terminal event. HLS local execution carries one AbortSignal through key, map, and media-fragment fetches and destroys the downloader on success, failure, or cancellation, preserving the Cat Catch use() pipeline boundary for decrypt/transcode steps. A production-contract smoke verifies the rewritten local playlist plus key/map/media files are handed to the ffmpeg wrapper and that zero-exit without a non-empty output is rejected; real ffmpeg/ffprobe container correctness is still open. A dedicated tab/request-scoped HLS session owner now holds retry and live state and owns their work-directory/discard cleanup, but active plan execution, ffmpeg processes, and renderer listeners are not yet covered by one task/cancel owner. Vendor provenance blockers: lib/third-party-libraries.md attributes m3u8-decrypt.js to the mutable hls.js master path rather than an immutable revision; the loaded StreamSaver bundle self-reports 2.0.5 while that document declares 2.0.6, has no verified immutable artifact binding, and retains remote MITM configuration."
     },
     {
       "id": "hls.live-recording",
@@ -927,10 +930,11 @@
       ],
       "currentImplementationRefs": [
         "electron/service/embeddedBrowserHlsLiveRecorder.ts#EmbeddedBrowserHlsLiveRecorder",
-        "electron/service/embeddedBrowserMainController.ts#embeddedBrowserHlsLiveRecordingSessions"
+        "electron/service/embedded-browser/processing/hls-session-owner.ts#liveSessions"
       ],
       "targetRefs": [
-        "electron/service/embedded-browser/processing/hls-live-task.ts#HlsLiveTask"
+        "electron/service/embedded-browser/processing/hls-live-task.ts#HlsLiveTask",
+        "electron/service/embedded-browser/processing/hls-session-owner.ts#EmbeddedBrowserHlsSessionOwner"
       ],
       "relationToUpstream": "platform-substitute",
       "syncState": "porting",
@@ -938,14 +942,16 @@
       "plannedTestIds": [
         "hls.live-terminal",
         "hls.live-discard-abort",
-        "hls.live-tab-close-exit"
+        "hls.live-tab-close-exit",
+        "hls.session-owner-tab-cleanup"
       ],
       "testRefs": [
         "electron/service/embeddedBrowserHlsLiveRecorder.test.ts#hls.live-terminal",
-        "electron/service/embeddedBrowserHlsLiveRecorder.test.ts#hls.live-discard-abort"
+        "electron/service/embeddedBrowserHlsLiveRecorder.test.ts#hls.live-discard-abort",
+        "electron/service/embedded-browser/processing/hls-session-owner.test.ts#hls.session-owner-tab-cleanup"
       ],
       "acceptedDifferences": [],
-      "notes": "Live start accepts an opaque resourceId and binds captured manifest/segment polling to the current tab's authority-aware fetch; unrecognized URLs still use the embedded-session fallback. The recorder now owns one AbortController across manifest and segment polling, exposes discard, and has executable terminal/discard tests. Navigation, tab/view destruction, render-process loss, and controller disposal remove matching retry/live sessions and synchronously initiate abort before asynchronous temp cleanup. Live and retry sessions are still separate controller Maps rather than the target task owner; active plan/ffmpeg cancellation, awaited app-exit cleanup, and a production lifecycle integration test remain open. Vendor provenance blocker: the upstream live path depends on the same unverified StreamSaver 2.0.5/2.0.6 bundle and remote MITM configuration recorded by transfer.streaming-memory-budget."
+      "notes": "Live start accepts an opaque resourceId and binds captured manifest/segment polling to the current tab's authority-aware fetch; unrecognized URLs still use the embedded-session fallback. The recorder now owns one AbortController across manifest and segment polling, exposes discard, and has executable terminal/discard tests. Navigation, tab/view destruction, render-process loss, and controller disposal route tab/request-scoped retry/live cleanup through a dedicated HLS session owner, which synchronously drops ownership before awaiting abort and temp cleanup. Active plan/ffmpeg cancellation, awaited app-exit cleanup, and a production lifecycle integration test remain open. Vendor provenance blocker: the upstream live path depends on the same unverified StreamSaver 2.0.5/2.0.6 bundle and remote MITM configuration recorded by transfer.streaming-memory-budget."
     },
     {
       "id": "hls.cache-fallback-disguised-fragments",

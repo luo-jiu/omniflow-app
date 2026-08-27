@@ -479,6 +479,20 @@
 - legacy cleanup: 无；现有 controller orchestration 和旧输出路径继续保留。
 - validation: 完整 HLS 集合 21/21、仓库级 lint、TypeScript、`cat-catch:validate`、同步校验 16/16 和 scoped diff 检查通过；未重复运行上一切片已记录为环境/并行模块失败的全量 Vitest，完整 build 仍因共享工作区的 `dist-electron/**` 改动不运行。
 
+## 2026-08-27: same target (HLS retry/live session owner)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动。
+- reviewedThrough / portedThrough: 均保持 `null`；本步只收敛 HLS retry/live 会话状态和清理责任，仍未完成 hls-engine cutover。
+- change groups: `platform-adaptation`（Electron tab/request 复合身份、recorder discard 与本地 workdir 生命周期）。
+- affected capability IDs: `hls.segment-pipeline`、`hls.live-recording` 均保持 `porting`。
+- fixtures/tests: `hls.session-owner-tab-cleanup` 覆盖按 tab 同时清理 retry/live 且不影响另一 tab；`hls.session-owner-dispose` 覆盖全量 discard/workdir 清理；另有跨 tab 相同 renderer request ID 隔离和 terminal ownership transfer 回归。
+- accepted difference: Cat Catch 通过扩展 tab/downloader 状态管理任务；OmniFlow 使用 main-only、`tabId + requestId` 复合标识的专用 HLS owner，不向 renderer 增加第二份状态源。
+- excluded changes and reasons: 不在本步把 active plan、ffmpeg child process 或 renderer listener 纳入 owner，也不进行 hls-engine dispatch cutover 或删除旧 downloader/recorder。
+- unresolved gaps: active plan/ffmpeg 取消、awaited app-exit cleanup、production lifecycle integration、真实 ffmpeg/ffprobe output、一次性 cache fallback、完整 parser 与 decrypt responsibility。
+- runtime changes: controller 内两张 retry/live Map 由 `EmbeddedBrowserHlsSessionOwner` 替代；owner 在异步 discard/workdir 删除前先释放匹配状态，所有查找和终态 transfer 都校验 tab/request 复合身份。
+- legacy cleanup: 删除已不存在的两张 legacy controller Map 记录，新增 `hls-session-owner.ts#retrySessions` 与 `#liveSessions` 两项 `omniflow-integration / retain-or-adapt` 事实；其余 HLS legacy task/downloader/recorder 条目不变。
+- validation: 完整 HLS Vitest 25/25、仓库级 lint、TypeScript、`cat-catch:validate`、同步校验 16/16 和 scoped diff check 通过。全量 Vitest 为 906 passed / 1 skipped / 16 loopback sandbox failures，相关 4 个 loopback 文件在允许监听本机端口的环境复跑 20/20 通过；另有既有 `tools/cat-catch-sync/validate.test.mjs` 被 Vitest 扫描后报告 no suite。完整 build 未运行，避免覆盖其他 Agent 正在修改的 `dist-electron/**`。
+
 ## Template
 
 ```markdown

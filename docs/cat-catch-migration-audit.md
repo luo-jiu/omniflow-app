@@ -13,7 +13,7 @@
 | reviewedThrough | 未建立 |
 | portedThrough | 未建立 |
 
-当前映射包含 7 个 cutover unit、32 项能力、192 个上游 anchor、105 个 cleanup entry 和 90 个唯一计划测试 ID。8 项能力达到 `ported-unverified`，5 项为 `porting`，其余 19 项仍为 `pending`；41 个唯一计划测试引用已落成 active pure behavior/contract、fake Electron integration 或 loopback redirect test，尚无已完成的 cutover unit。
+当前映射包含 7 个 cutover unit、32 项能力、192 个上游 anchor、105 个 cleanup entry 和 92 个唯一计划测试 ID。8 项能力达到 `ported-unverified`，5 项为 `porting`，其余 19 项仍为 `pending`；43 个唯一计划测试引用已落成 active pure behavior/contract、fake Electron integration 或 loopback redirect test，尚无已完成的 cutover unit。
 
 ## 2. 能力族
 
@@ -22,7 +22,7 @@
 | network capture | target runtime 已在 production controller 实例化，legacy bridge/consumer 仍并存 | Cat Catch 规则与产品 policy 分层、page policy、vault/store、当前/下一 navigation generation 的 tokenized probe routing、renderer-safe reducer、唯一 network/per-view probe composition、owner lifecycle、main-only probe key 解析、context-free stale owner 拒绝和 redirect hop 凭据隔离已有专项测试；资源状态事件、opaque inspection、普通资源下载、probe open/export/read、external-tool dispatch 已接入 production IPC/preload/renderer；已捕获 URL 的页面拖拽会绑定当前 tab 的 opaque resource authority，未捕获、data/blob 和外部拖拽仍走受限 fallback；HLS/DASH 计划下载和旧 catch toolkit 仍待迁移与验证 |
 | deep-search runtime | legacy inactive | 深度 hooks 写死关闭，外围 MSE hook 仍运行 |
 | MSE runtime | legacy owner | 有增量 spool 思路，但没有专项差分、输出和稳定性测试 |
-| HLS engine | pure parser/pipeline slices + legacy pipeline + partial authority transport | 纯 port 已接管 manifest parse facade，并用 fixture 覆盖同一资源隐式 BYTERANGE offset、初始/增量 discontinuity sequence、map/key，以及 PNG/JPEG 伪装分片前缀剔除；计划下载和 live 录制的已捕获 manifest/分片/key/map 已优先走当前 tab authority；本地 HLS 分片链已接入可选预处理、有序 processor chain、AES-128 key 长度校验，key/map/media 共用取消信号，直播 manifest/segment 轮询也可由 discard 主动中止；local playlist/key/map/fragment 到 ffmpeg wrapper 的 handoff smoke 已覆盖并拒绝空输出，但真实 ffmpeg/ffprobe 容器正确性、一次性 cache fallback、完整 parser 语义、生产解密接入和统一 task owner 仍有明确缺口 |
+| HLS engine | pure parser/pipeline slices + legacy pipeline + partial authority transport | 纯 port 已接管 manifest parse facade，并用 fixture 覆盖同一资源隐式 BYTERANGE offset、初始/增量 discontinuity sequence、map/key，以及 PNG/JPEG 伪装分片前缀剔除；计划下载和 live 录制的已捕获 manifest/分片/key/map 已优先走当前 tab authority；本地 HLS 分片链已接入可选预处理、有序 processor chain、AES-128 key 长度校验，key/map/media 共用取消信号，直播 manifest/segment 轮询也可由 discard 主动中止；retry/live 会话及其 workdir/discard 清理由专用、按 tab/request 复合标识的 HLS owner 管理；local playlist/key/map/fragment 到 ffmpeg wrapper 的 handoff smoke 已覆盖并拒绝空输出，但真实 ffmpeg/ffprobe 容器正确性、一次性 cache fallback、完整 parser 语义、生产解密接入和 active plan/ffmpeg 统一取消仍有明确缺口 |
 | DASH engine | legacy owner + partial authority transport | 计划下载的已捕获 init/media 分片已优先走当前 tab authority；手写 parser 对负 repeat、多 BaseURL、动态 MPD 等语义仍不完整 |
 | transfer engine | multiple owners | 并发/重试代码可复用评估，但没有统一 task/cancel/cleanup owner |
 | output integration | mixed: opaque resource authority + legacy HLS/DASH/drag/toolkit paths | external-tool、inspection、普通资源下载、已捕获页面拖拽和 HLS/DASH 计划分片传输已接入 main-owned authority；data/blob、未捕获资源和多资源 fallback 仍走旧链；HLS/DASH 直拉、派生字幕 URL、process terminal、m3u8dl encoding、本地保存、ffmpeg、资料库导入与统一任务合同仍待迁移 |
@@ -37,8 +37,8 @@
 6. Worker Blob CSP 异步失败回退不等价。
 7. HLS 隐式 BYTERANGE offset、初始 discontinuity sequence 和 PNG/JPEG 伪装分片剔除已在纯 port/fixture 中覆盖，本地分片下载也已接入预处理；local-to-ffmpeg handoff smoke 已验证本地 key/map/media 引用与非空输出约束，但真实 ffmpeg/ffprobe output、完整 parser 差分和一次性 cache fallback 仍缺失。
 8. MPD `r=-1`、多 BaseURL、动态 timeline/range 不完整。
-9. ffmpeg、HLS/DASH、直播、普通下载和 temp 没有统一 task registry；导航、tab/view 销毁、render-process loss 和 controller dispose 已能发起 HLS retry/live abort 与临时目录清理，但 active plan/ffmpeg 不在同一 owner 中，应用退出也尚未等待这些异步清理完成。
-10. 目前有 40 个唯一 active test ref；main composition、持久化捕捉设置热更新、下一文档 token 路由、main-only probe key 解析与下载、检查、probe 动作、external-tool target consumer、已捕获页面拖拽暂存、HLS/DASH 计划/live 分片 authority transport，以及 HLS static/live abort 已有专项证据，普通资源下载和 inspection 已有 production IPC 入口；页面拖拽 fallback、HLS parser 完整标签语义/直拉/track、旧 toolkit 及完整 unit cutover 仍无 production cutover 证据。
+9. ffmpeg、HLS/DASH、直播、普通下载和 temp 没有统一 task registry；导航、tab/view 销毁、render-process loss 和 controller dispose 已通过专用 HLS session owner 发起 retry/live abort 与临时目录清理，但 active plan/ffmpeg 还不在该 owner 中，应用退出也尚未等待这些异步清理完成。
+10. 目前有 43 个唯一 active test ref；main composition、持久化捕捉设置热更新、下一文档 token 路由、main-only probe key 解析与下载、检查、probe 动作、external-tool target consumer、已捕获页面拖拽暂存、HLS/DASH 计划/live 分片 authority transport，以及 HLS static/live abort/session cleanup 已有专项证据，普通资源下载和 inspection 已有 production IPC 入口；页面拖拽 fallback、HLS parser 完整标签语义/直拉/track、旧 toolkit 及完整 unit cutover 仍无 production cutover 证据。
 
 ## 4. 保留、迁移与删除
 
@@ -51,4 +51,4 @@
 
 ## 5. 当前下一步
 
-下一步把 active plan、retry、live、ffmpeg 与 workdir 收敛到单一 task/cancel owner，并为 tab close/app exit/ffmpeg terminal 补 production lifecycle integration；随后继续处理真实 ffmpeg/ffprobe output、一次性 manifest cache fallback、直拉/track authority 和完整 parser 语义。证据完整前不进行 hls-engine cutover，也不提前删除旧链。
+下一步把 active plan 与 ffmpeg 进程纳入现有 retry/live HLS session owner 的取消边界，并为 tab close/app exit/ffmpeg terminal 补 production lifecycle integration；随后继续处理真实 ffmpeg/ffprobe output、一次性 manifest cache fallback、直拉/track authority 和完整 parser 语义。证据完整前不进行 hls-engine cutover，也不提前删除旧链。

@@ -914,24 +914,24 @@
       "cleanupAction": "remove-after-cutover"
     },
     {
-      "id": "node.hls.live-session-state",
-      "path": "electron/service/embeddedBrowserMainController.ts",
-      "symbol": "embeddedBrowserHlsLiveRecordingSessions",
+      "id": "node.hls.session-owner-live-state",
+      "path": "electron/service/embedded-browser/processing/hls-session-owner.ts",
+      "symbol": "liveSessions",
       "capabilityId": "hls.live-recording",
       "cutoverUnitId": "hls-engine",
-      "classification": "legacy",
+      "classification": "omniflow-integration",
       "role": "state-owner",
-      "cleanupAction": "remove-after-cutover"
+      "cleanupAction": "retain-or-adapt"
     },
     {
-      "id": "node.hls.retry-session-state",
-      "path": "electron/service/embeddedBrowserMainController.ts",
-      "symbol": "embeddedBrowserHlsRetrySessions",
+      "id": "node.hls.session-owner-retry-state",
+      "path": "electron/service/embedded-browser/processing/hls-session-owner.ts",
+      "symbol": "retrySessions",
       "capabilityId": "hls.segment-pipeline",
       "cutoverUnitId": "hls-engine",
-      "classification": "legacy",
+      "classification": "omniflow-integration",
       "role": "state-owner",
-      "cleanupAction": "remove-after-cutover"
+      "cleanupAction": "retain-or-adapt"
     },
     {
       "id": "node.dash.plan-task",
