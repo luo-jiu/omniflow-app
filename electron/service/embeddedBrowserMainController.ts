@@ -587,6 +587,18 @@ export function createEmbeddedBrowserMainController(
     await embeddedBrowserHlsSessionOwner.clearLive(options)
   }
 
+  async function clearEmbeddedBrowserHlsSessions(options: {
+    all?: boolean
+    requestId?: string
+    tabId?: string
+  }) {
+    await embeddedBrowserHlsSessionOwner.clearActive(options)
+    await Promise.all([
+      embeddedBrowserHlsSessionOwner.clearRetry(options),
+      embeddedBrowserHlsSessionOwner.clearLive(options),
+    ])
+  }
+
   function emitCredentialCaptured(payload: EmbeddedBrowserCapturedCredentialEvent) {
     const mainWindow = options.getMainWindow()
     if (!mainWindow || mainWindow.isDestroyed()) {
@@ -1556,7 +1568,7 @@ export function createEmbeddedBrowserMainController(
         })
       }
 
-      const result = await downloadEmbeddedBrowserManifestResource({
+      const executeManifestDownload = (signal?: AbortSignal) => downloadEmbeddedBrowserManifestResource({
         durationSeconds: payload.durationSeconds,
         ffmpegPath: payload.ffmpegPath,
         headers: requestHeaders,
@@ -1578,7 +1590,14 @@ export function createEmbeddedBrowserMainController(
             }
           : undefined,
         outputPath,
+        signal,
       })
+      const result = kind === 'hls'
+        ? await embeddedBrowserHlsSessionOwner.runActiveTask({
+            requestId,
+            tabId: normalizedTabId,
+          }, executeManifestDownload)
+        : await executeManifestDownload()
       if (kind === 'hls') {
         emitEmbeddedBrowserHlsTask({
           durationSeconds: payload.durationSeconds,
@@ -1662,6 +1681,7 @@ export function createEmbeddedBrowserMainController(
           ok: false,
         }
       }
+      const resolvedOutputPath = outputPath
 
       emitEmbeddedBrowserHlsTask({
         durationSeconds: payload.durationSeconds,
@@ -1674,7 +1694,10 @@ export function createEmbeddedBrowserMainController(
         tabId: normalizedTabId,
       })
 
-      const result = await downloadEmbeddedBrowserManifestTracks({
+      const result = await embeddedBrowserHlsSessionOwner.runActiveTask({
+        requestId,
+        tabId: normalizedTabId,
+      }, (signal) => downloadEmbeddedBrowserManifestTracks({
         audioManifestUrl,
         durationSeconds: payload.durationSeconds,
         ffmpegPath: payload.ffmpegPath,
@@ -1695,9 +1718,10 @@ export function createEmbeddedBrowserMainController(
             })
           }
           : undefined,
-        outputPath,
+        outputPath: resolvedOutputPath,
+        signal,
         videoManifestUrl,
-      })
+      }))
 
       emitEmbeddedBrowserHlsTask({
         durationSeconds: payload.durationSeconds,
@@ -1767,6 +1791,10 @@ export function createEmbeddedBrowserMainController(
     let outputPath: string | null = null
     let retainRetrySession = false
     let workDirectoryPath = ''
+    let activeTask: {
+      complete: () => void
+      signal: AbortSignal
+    } | undefined
     const requestId = String(payload.requestId || '').trim() || undefined
     try {
       const defaultFileName = String(payload.suggestedFileName || '').trim()
@@ -1785,6 +1813,10 @@ export function createEmbeddedBrowserMainController(
           ok: false,
         }
       }
+      activeTask = embeddedBrowserHlsSessionOwner.beginActiveTask({
+        requestId,
+        tabId: normalizedTabId,
+      })
 
       emitEmbeddedBrowserHlsTask({
         manifestUrl: payload.plan.manifestUrl,
@@ -1835,6 +1867,7 @@ export function createEmbeddedBrowserMainController(
           manifestUrl: payload.plan.manifestUrl,
           suggestedThreadCount: payload.plan.suggestedThreadCount,
         },
+        signal: activeTask.signal,
         workDirectoryPath,
       })
       workDirectoryPath = localDownloadResult.workDirectoryPath
@@ -1876,6 +1909,7 @@ export function createEmbeddedBrowserMainController(
           })
         },
         outputPath,
+        signal: activeTask.signal,
       })
       emitEmbeddedBrowserHlsTask({
         completedFragments: payload.plan.fragmentCount,
@@ -1897,7 +1931,9 @@ export function createEmbeddedBrowserMainController(
         outputPath: result.outputPath,
       }
     } catch (error) {
-      if (requestId && workDirectoryPath && outputPath && latestFailedFragments?.length) {
+      const wasAborted = activeTask?.signal.aborted
+        || (error instanceof Error && error.name === 'AbortError')
+      if (!wasAborted && requestId && workDirectoryPath && outputPath && latestFailedFragments?.length) {
         embeddedBrowserHlsSessionOwner.upsertRetry({
           failedFragments: latestFailedFragments,
           ffmpegPath: payload.ffmpegPath,
@@ -1931,6 +1967,12 @@ export function createEmbeddedBrowserMainController(
         manifestUrl: payload.plan.manifestUrl,
         tabId: normalizedTabId,
       })
+      if (wasAborted) {
+        return {
+          cancelled: true,
+          ok: false,
+        }
+      }
       return {
         error: error instanceof Error ? error.message : String(error),
         ok: false,
@@ -1939,6 +1981,7 @@ export function createEmbeddedBrowserMainController(
       if (workDirectoryPath && !retainRetrySession) {
         await rm(workDirectoryPath, { force: true, recursive: true }).catch(() => undefined)
       }
+      activeTask?.complete()
     }
   }
 
@@ -2120,7 +2163,15 @@ export function createEmbeddedBrowserMainController(
     }
 
     let stopResult: Awaited<ReturnType<EmbeddedBrowserHlsLiveRecorder['stop']>> | null = null
+    let activeTask: {
+      complete: () => void
+      signal: AbortSignal
+    } | undefined
     try {
+      activeTask = embeddedBrowserHlsSessionOwner.beginActiveTask({
+        requestId,
+        tabId: normalizedTabId,
+      })
       emitEmbeddedBrowserHlsTask({
         manifestUrl: session.manifestUrl,
         message: '正在停止直播录制并整理本地 playlist',
@@ -2167,6 +2218,7 @@ export function createEmbeddedBrowserMainController(
           })
         },
         outputPath: session.outputPath,
+        signal: activeTask.signal,
       })
       emitEmbeddedBrowserHlsTask({
         completedFragments: completedRecording.totalFragments,
@@ -2189,6 +2241,8 @@ export function createEmbeddedBrowserMainController(
         outputPath: result.outputPath,
       }
     } catch (error) {
+      const wasAborted = activeTask?.signal.aborted
+        || (error instanceof Error && error.name === 'AbortError')
       emitEmbeddedBrowserHlsTask({
         error: error instanceof Error ? error.message : String(error),
         manifestUrl: session.manifestUrl,
@@ -2202,10 +2256,18 @@ export function createEmbeddedBrowserMainController(
       if (!stopResult) {
         await clearEmbeddedBrowserHlsLiveRecordingSessions({ requestId, tabId: normalizedTabId })
       }
+      if (wasAborted) {
+        return {
+          cancelled: true,
+          ok: false,
+        }
+      }
       return {
         error: error instanceof Error ? error.message : String(error),
         ok: false,
       }
+    } finally {
+      activeTask?.complete()
     }
   }
 
@@ -2229,7 +2291,7 @@ export function createEmbeddedBrowserMainController(
       }
     }
 
-    await clearEmbeddedBrowserHlsLiveRecordingSessions({ requestId, tabId: normalizedTabId })
+    await clearEmbeddedBrowserHlsSessions({ requestId, tabId: normalizedTabId })
     return {
       ok: true,
     }
@@ -2258,7 +2320,15 @@ export function createEmbeddedBrowserMainController(
 
     let latestFailedFragments: number[] | undefined = session.failedFragments
     let retainRetrySession = false
+    let activeTask: {
+      complete: () => void
+      signal: AbortSignal
+    } | undefined
     try {
+      activeTask = embeddedBrowserHlsSessionOwner.beginActiveTask({
+        requestId,
+        tabId: normalizedTabId,
+      })
       emitEmbeddedBrowserHlsTask({
         completedFragments: Math.max(0, session.plan.fragmentCount - session.failedFragments.length),
         durationSeconds: session.plan.durationSeconds,
@@ -2310,6 +2380,7 @@ export function createEmbeddedBrowserMainController(
           manifestUrl: session.plan.manifestUrl,
           suggestedThreadCount: session.plan.suggestedThreadCount,
         },
+        signal: activeTask.signal,
         workDirectoryPath: session.workDirectoryPath,
       })
       latestFailedFragments = undefined
@@ -2350,6 +2421,7 @@ export function createEmbeddedBrowserMainController(
           })
         },
         outputPath: session.outputPath,
+        signal: activeTask.signal,
       })
 
       embeddedBrowserHlsSessionOwner.takeRetry(requestId, normalizedTabId)
@@ -2375,7 +2447,9 @@ export function createEmbeddedBrowserMainController(
         outputPath: result.outputPath,
       }
     } catch (error) {
-      if (latestFailedFragments?.length) {
+      const wasAborted = activeTask?.signal.aborted
+        || (error instanceof Error && error.name === 'AbortError')
+      if (!wasAborted && latestFailedFragments?.length) {
         embeddedBrowserHlsSessionOwner.upsertRetry({
           ...session,
           failedFragments: latestFailedFragments,
@@ -2401,10 +2475,18 @@ export function createEmbeddedBrowserMainController(
       if (!retainRetrySession) {
         await rm(session.workDirectoryPath, { force: true, recursive: true }).catch(() => undefined)
       }
+      if (wasAborted) {
+        return {
+          cancelled: true,
+          ok: false,
+        }
+      }
       return {
         error: error instanceof Error ? error.message : String(error),
         ok: false,
       }
+    } finally {
+      activeTask?.complete()
     }
   }
 
@@ -2602,8 +2684,7 @@ export function createEmbeddedBrowserMainController(
       onDocumentNavigated: (navigatedTabId) => {
         cancelEmbeddedBrowserLibraryFileDropRequests(navigatedTabId)
         cleanupEmbeddedBrowserDroppedFilesForTab(navigatedTabId)
-        void clearEmbeddedBrowserHlsRetrySessions({ tabId: navigatedTabId })
-        void clearEmbeddedBrowserHlsLiveRecordingSessions({ tabId: navigatedTabId })
+        void clearEmbeddedBrowserHlsSessions({ tabId: navigatedTabId })
       },
       onLibraryFileDropPayload: (dropTabId, payload) => {
         void handleLibraryFileDropPayload(dropTabId, payload)
@@ -2619,12 +2700,10 @@ export function createEmbeddedBrowserMainController(
       onViewDestroyed: (destroyedTabId) => {
         cancelEmbeddedBrowserLibraryFileDropRequests(destroyedTabId)
         cleanupEmbeddedBrowserDroppedFilesForTab(destroyedTabId)
-        void clearEmbeddedBrowserHlsRetrySessions({ tabId: destroyedTabId })
-        void clearEmbeddedBrowserHlsLiveRecordingSessions({ tabId: destroyedTabId })
+        void clearEmbeddedBrowserHlsSessions({ tabId: destroyedTabId })
       },
       onViewRenderProcessGone: (crashedTabId) => {
-        void clearEmbeddedBrowserHlsRetrySessions({ tabId: crashedTabId })
-        void clearEmbeddedBrowserHlsLiveRecordingSessions({ tabId: crashedTabId })
+        void clearEmbeddedBrowserHlsSessions({ tabId: crashedTabId })
       },
       syncBounds: syncEmbeddedBrowserViewBounds,
       tabId,
@@ -2772,8 +2851,7 @@ export function createEmbeddedBrowserMainController(
       pendingOpenFiles: embeddedBrowserPendingOpenFiles,
       tabId: normalizedTabId,
     })
-    void clearEmbeddedBrowserHlsRetrySessions({ tabId: normalizedTabId })
-    void clearEmbeddedBrowserHlsLiveRecordingSessions({ tabId: normalizedTabId })
+    void clearEmbeddedBrowserHlsSessions({ tabId: normalizedTabId })
     void clearEmbeddedBrowserMseSpoolFiles({ tabId: normalizedTabId })
     if (!view) {
       return

@@ -4,10 +4,17 @@ import path from 'node:path'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const spawnMock = vi.hoisted(() => vi.fn())
+const { spawnMock, terminateProcessTreeMock } = vi.hoisted(() => ({
+  spawnMock: vi.fn(),
+  terminateProcessTreeMock: vi.fn(),
+}))
 
 vi.mock('node:child_process', () => ({
   spawn: spawnMock,
+}))
+
+vi.mock('../platform/processTree', () => ({
+  terminateDesktopProcessTree: terminateProcessTreeMock,
 }))
 
 import { downloadEmbeddedBrowserHlsToLocalWorkDirectory } from './embeddedBrowserHlsLocalDownloaderService'
@@ -15,9 +22,11 @@ import { downloadEmbeddedBrowserManifestResource } from './embeddedBrowserResour
 
 function createFakeFfmpegChild() {
   const child = new EventEmitter() as EventEmitter & {
+    pid?: number
     stderr: EventEmitter
     stdout: EventEmitter
   }
+  child.pid = 42
   child.stderr = new EventEmitter()
   child.stdout = new EventEmitter()
   return child
@@ -26,6 +35,7 @@ function createFakeFfmpegChild() {
 describe('EmbeddedBrowser HLS output handoff', () => {
   beforeEach(() => {
     spawnMock.mockReset()
+    terminateProcessTreeMock.mockReset()
   })
 
   it('hls.local-output-smoke', async () => {
@@ -134,6 +144,76 @@ describe('EmbeddedBrowser HLS output handoff', () => {
         outputPath: path.join(directory, 'missing.mp4'),
       })
       await expect(resultPromise).rejects.toThrow('没有生成可用的输出文件')
+    } finally {
+      await rm(directory, { force: true, recursive: true })
+    }
+  })
+
+  it('output.ffmpeg-cancel-exit', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'omniflow-hls-output-abort-test-'))
+    const outputPath = path.join(directory, 'partial.mp4')
+    const abortController = new AbortController()
+    let child: ReturnType<typeof createFakeFfmpegChild> | undefined
+    spawnMock.mockImplementation(() => {
+      child = createFakeFfmpegChild()
+      return child
+    })
+    terminateProcessTreeMock.mockImplementation((runningChild, options) => {
+      if (!options.force) {
+        queueMicrotask(() => {
+          runningChild.emit('exit', null)
+        })
+      }
+    })
+
+    try {
+      await writeFile(outputPath, Buffer.from('partial-output'))
+      const resultPromise = downloadEmbeddedBrowserManifestResource({
+        ffmpegPath: process.execPath,
+        kind: 'hls',
+        manifestUrl: path.join(directory, 'local-playlist.m3u8'),
+        outputPath,
+        signal: abortController.signal,
+      })
+      await vi.waitFor(() => {
+        expect(spawnMock).toHaveBeenCalledTimes(1)
+      })
+
+      abortController.abort()
+
+      await expect(resultPromise).rejects.toMatchObject({ name: 'AbortError' })
+      expect(terminateProcessTreeMock).toHaveBeenCalledWith(child, expect.objectContaining({
+        force: false,
+      }))
+      await expect(readFile(outputPath)).rejects.toThrow()
+    } finally {
+      await rm(directory, { force: true, recursive: true })
+    }
+  })
+
+  it('output.ffmpeg-process-cleanup', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'omniflow-hls-output-failure-test-'))
+    const outputPath = path.join(directory, 'partial.mp4')
+    spawnMock.mockImplementation(() => {
+      const child = createFakeFfmpegChild()
+      queueMicrotask(() => {
+        child.stderr.emit('data', 'invalid media')
+        child.emit('exit', 1)
+      })
+      return child
+    })
+
+    try {
+      await writeFile(outputPath, Buffer.from('partial-output'))
+      const resultPromise = downloadEmbeddedBrowserManifestResource({
+        ffmpegPath: process.execPath,
+        kind: 'hls',
+        manifestUrl: path.join(directory, 'local-playlist.m3u8'),
+        outputPath,
+      })
+
+      await expect(resultPromise).rejects.toThrow('invalid media')
+      await expect(readFile(outputPath)).rejects.toThrow()
     } finally {
       await rm(directory, { force: true, recursive: true })
     }

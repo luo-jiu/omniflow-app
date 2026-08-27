@@ -934,6 +934,16 @@
       "cleanupAction": "retain-or-adapt"
     },
     {
+      "id": "node.hls.session-owner-active-tasks",
+      "path": "electron/service/embedded-browser/processing/hls-session-owner.ts",
+      "symbol": "activeTasks",
+      "capabilityId": "hls.segment-pipeline",
+      "cutoverUnitId": "hls-engine",
+      "classification": "omniflow-integration",
+      "role": "task-owner",
+      "cleanupAction": "retain-or-adapt"
+    },
+    {
       "id": "node.dash.plan-task",
       "path": "electron/service/embeddedBrowserMainController.ts",
       "symbol": "downloadEmbeddedBrowserMpdPlanResource",

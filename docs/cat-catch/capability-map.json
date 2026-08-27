@@ -859,7 +859,8 @@
       "currentImplementationRefs": [
         "electron/service/embeddedBrowserHlsLocalDownloaderService.ts#downloadEmbeddedBrowserHlsToLocalWorkDirectory",
         "electron/service/embeddedBrowserMainController.ts#downloadEmbeddedBrowserHlsPlanResource",
-        "electron/service/embedded-browser/processing/hls-session-owner.ts#retrySessions"
+        "electron/service/embedded-browser/processing/hls-session-owner.ts#retrySessions",
+        "electron/service/embedded-browser/processing/hls-session-owner.ts#activeTasks"
       ],
       "targetRefs": [
         "electron/service/embedded-browser/processing/hls-task.ts#HlsTaskExecutor",
@@ -879,7 +880,8 @@
         "hls.static-ref-range",
         "hls.local-output-smoke",
         "hls.plan-authority-fetch",
-        "hls.session-owner-dispose"
+        "hls.session-owner-dispose",
+        "hls.active-task-tab-cancel"
       ],
       "testRefs": [
         "electron/service/embeddedBrowserFragmentDownloader.test.ts#hls.plan-authority-fetch",
@@ -890,10 +892,11 @@
         "electron/service/embeddedBrowserFragmentDownloader.test.ts#hls.failed-fragment-retry",
         "electron/service/embeddedBrowserHlsLocalDownloaderService.test.ts#hls.static-ref-range",
         "electron/service/embeddedBrowserHlsOutput.test.ts#hls.local-output-smoke",
-        "electron/service/embedded-browser/processing/hls-session-owner.test.ts#hls.session-owner-dispose"
+        "electron/service/embedded-browser/processing/hls-session-owner.test.ts#hls.session-owner-dispose",
+        "electron/service/embedded-browser/processing/hls-session-owner.test.ts#hls.active-task-tab-cancel"
       ],
       "acceptedDifferences": [],
-      "notes": "Plan execution now accepts a main-owned fetch transport: captured fragment/key/map URLs are redeemed through the current tab resource authority with bounded Range support, while unrecognized URLs retain the embedded-session fallback. The fragment downloader now supports an ordered async processor chain, emits each processed stage, retries failed fetch or processor attempts, and exposes an aborted terminal event. HLS local execution carries one AbortSignal through key, map, and media-fragment fetches and destroys the downloader on success, failure, or cancellation, preserving the Cat Catch use() pipeline boundary for decrypt/transcode steps. A production-contract smoke verifies the rewritten local playlist plus key/map/media files are handed to the ffmpeg wrapper and that zero-exit without a non-empty output is rejected; real ffmpeg/ffprobe container correctness is still open. A dedicated tab/request-scoped HLS session owner now holds retry and live state and owns their work-directory/discard cleanup, but active plan execution, ffmpeg processes, and renderer listeners are not yet covered by one task/cancel owner. Vendor provenance blockers: lib/third-party-libraries.md attributes m3u8-decrypt.js to the mutable hls.js master path rather than an immutable revision; the loaded StreamSaver bundle self-reports 2.0.5 while that document declares 2.0.6, has no verified immutable artifact binding, and retains remote MITM configuration."
+      "notes": "Plan execution now accepts a main-owned fetch transport: captured fragment/key/map URLs are redeemed through the current tab resource authority with bounded Range support, while unrecognized URLs retain the embedded-session fallback. The fragment downloader now supports an ordered async processor chain, emits each processed stage, retries failed fetch or processor attempts, and exposes an aborted terminal event. HLS local execution carries one AbortSignal through key, map, and media-fragment fetches and destroys the downloader on success, failure, or cancellation, preserving the Cat Catch use() pipeline boundary for decrypt/transcode steps. A production-contract smoke verifies the rewritten local playlist plus key/map/media files are handed to the ffmpeg wrapper and that zero-exit without a non-empty output is rejected; real ffmpeg/ffprobe container correctness is still open. The tab/request-scoped HLS session owner now holds active direct/track/plan/retry/live-export tasks as well as retry/live state; lifecycle cancellation aborts active fetch/ffmpeg work, waits for settlement, and only then removes session work directories. Renderer listener recovery and awaited application shutdown remain open. Vendor provenance blockers: lib/third-party-libraries.md attributes m3u8-decrypt.js to the mutable hls.js master path rather than an immutable revision; the loaded StreamSaver bundle self-reports 2.0.5 while that document declares 2.0.6, has no verified immutable artifact binding, and retains remote MITM configuration."
     },
     {
       "id": "hls.live-recording",
@@ -951,7 +954,7 @@
         "electron/service/embedded-browser/processing/hls-session-owner.test.ts#hls.session-owner-tab-cleanup"
       ],
       "acceptedDifferences": [],
-      "notes": "Live start accepts an opaque resourceId and binds captured manifest/segment polling to the current tab's authority-aware fetch; unrecognized URLs still use the embedded-session fallback. The recorder now owns one AbortController across manifest and segment polling, exposes discard, and has executable terminal/discard tests. Navigation, tab/view destruction, render-process loss, and controller disposal route tab/request-scoped retry/live cleanup through a dedicated HLS session owner, which synchronously drops ownership before awaiting abort and temp cleanup. Active plan/ffmpeg cancellation, awaited app-exit cleanup, and a production lifecycle integration test remain open. Vendor provenance blocker: the upstream live path depends on the same unverified StreamSaver 2.0.5/2.0.6 bundle and remote MITM configuration recorded by transfer.streaming-memory-budget."
+      "notes": "Live start accepts an opaque resourceId and binds captured manifest/segment polling to the current tab's authority-aware fetch; unrecognized URLs still use the embedded-session fallback. The recorder now owns one AbortController across manifest and segment polling, exposes discard, and has executable terminal/discard tests. Navigation, tab/view destruction, render-process loss, and controller disposal route tab/request-scoped retry/live cleanup through a dedicated HLS session owner; live export ffmpeg is registered as an active task, so cleanup aborts and awaits it before discarding the recorder and work directory. Awaited app-exit cleanup and a production controller/view lifecycle integration test remain open. Vendor provenance blocker: the upstream live path depends on the same unverified StreamSaver 2.0.5/2.0.6 bundle and remote MITM configuration recorded by transfer.streaming-memory-budget."
     },
     {
       "id": "hls.cache-fallback-disguised-fragments",
@@ -1343,7 +1346,7 @@
         "electron/service/embedded-browser/processing/task-registry.ts#ProcessingTaskRegistry"
       ],
       "relationToUpstream": "not-applicable",
-      "syncState": "pending",
+      "syncState": "porting",
       "syncedThrough": null,
       "plannedTestIds": [
         "task.registry-recovery-cancel",
@@ -1624,9 +1627,12 @@
         "output.ffmpeg-process-cleanup",
         "output.ffmpeg-cancel-exit"
       ],
-      "testRefs": [],
+      "testRefs": [
+        "electron/service/embeddedBrowserHlsOutput.test.ts#output.ffmpeg-process-cleanup",
+        "electron/service/embeddedBrowserHlsOutput.test.ts#output.ffmpeg-cancel-exit"
+      ],
       "acceptedDifferences": [],
-      "notes": "Six direct ffmpeg child-process sites across manifest download, manifest track merge, executable probing, resource merge, resource transcode, and MPD track merge are not registered under a common task/cancel/app-exit owner."
+      "notes": "Manifest download and manifest track merge now share a cancel-aware process runner: HLS calls register its AbortSignal with the tab/request owner, termination uses the cross-platform process-tree adapter, and aborted/non-zero tasks remove partial output. Executable probing, resource merge, resource transcode, and MPD track merge remain separate child-process sites, so no application-wide ffmpeg task/app-exit owner exists yet."
     },
     {
       "id": "output.external-tools-dispatch",

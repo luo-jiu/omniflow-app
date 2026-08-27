@@ -1,6 +1,7 @@
-import { spawn } from 'node:child_process'
-import { stat } from 'node:fs/promises'
+import { spawn, type ChildProcess } from 'node:child_process'
+import { rm, stat } from 'node:fs/promises'
 import path from 'node:path'
+import { terminateDesktopProcessTree } from '../platform/processTree'
 import { resolveEmbeddedBrowserFfmpegPath } from './embeddedBrowserResourceMergeService'
 
 export type EmbeddedBrowserManifestDownloadKind = 'hls' | 'mpd'
@@ -16,6 +17,7 @@ export type EmbeddedBrowserManifestDownloadRequest = {
     speedText?: string
   }) => void
   outputPath: string
+  signal?: AbortSignal
 }
 
 export type EmbeddedBrowserManifestDownloadResult = {
@@ -36,8 +38,12 @@ export type EmbeddedBrowserManifestTrackMergeRequest = {
     speedText?: string
   }) => void
   outputPath: string
+  signal?: AbortSignal
   videoManifestUrl: string
 }
+
+const FFMPEG_TERMINATION_GRACE_MS = 1_500
+const FFMPEG_TERMINATION_SETTLE_MS = 3_500
 
 const FFMPEG_MANIFEST_HEADER_BLACKLIST = new Set([
   'accept-encoding',
@@ -175,28 +181,111 @@ async function assertManifestOutputFile(outputPath: string) {
   throw new Error('ffmpeg 已退出，但没有生成可用的输出文件')
 }
 
-export async function downloadEmbeddedBrowserManifestResource(
-  request: EmbeddedBrowserManifestDownloadRequest,
-): Promise<EmbeddedBrowserManifestDownloadResult> {
-  const ffmpegPath = await resolveEmbeddedBrowserFfmpegPath(request.ffmpegPath)
-  if (!ffmpegPath) {
-    throw new Error('未找到可用的 ffmpeg，可在系统环境变量里配置，或确认 /opt/homebrew/bin/ffmpeg 可执行')
+function createManifestFfmpegAbortError() {
+  const error = new Error('ffmpeg task aborted')
+  error.name = 'AbortError'
+  return error
+}
+
+function terminateManifestFfmpegProcess(child: ChildProcess, force: boolean) {
+  terminateDesktopProcessTree(child, {
+    environment: process.env,
+    force,
+  })
+}
+
+async function executeEmbeddedBrowserManifestFfmpeg(input: {
+  commandArgs: string[]
+  durationSeconds?: number
+  ffmpegPath: string
+  onProgress?: EmbeddedBrowserManifestDownloadRequest['onProgress']
+  outputPath: string
+  signal?: AbortSignal
+}): Promise<EmbeddedBrowserManifestDownloadResult> {
+  if (input.signal?.aborted) {
+    throw createManifestFfmpegAbortError()
   }
-  const commandArgs = buildEmbeddedBrowserManifestDownloadArgs(request)
   return new Promise<EmbeddedBrowserManifestDownloadResult>((resolve, reject) => {
     const stdout: string[] = []
     const stderr: string[] = []
+    let child: ChildProcess | null = null
+    let forceTimer: ReturnType<typeof setTimeout> | undefined
     let lastProcessedSeconds = -1
     let lastSpeedText = ''
+    let settleTimer: ReturnType<typeof setTimeout> | undefined
+    let settled = false
+    let terminationError: Error | null = null
     const progressState: {
       processedSeconds?: number
       speedText?: string
     } = {}
-    const child = spawn(ffmpegPath, commandArgs, {
-      stdio: ['ignore', 'pipe', 'pipe'],
-    })
 
-    child.stdout.on('data', (chunk) => {
+    const cleanup = () => {
+      if (forceTimer) {
+        clearTimeout(forceTimer)
+      }
+      if (settleTimer) {
+        clearTimeout(settleTimer)
+      }
+      input.signal?.removeEventListener('abort', handleAbort)
+      child?.stdout?.removeAllListeners()
+      child?.stderr?.removeAllListeners()
+      child?.removeAllListeners()
+    }
+    const finish = (handler: () => void) => {
+      if (settled) {
+        return
+      }
+      settled = true
+      cleanup()
+      handler()
+    }
+    const rejectTask = (error: unknown, removePartialOutput: boolean) => {
+      const normalizedError = error instanceof Error ? error : new Error(String(error))
+      const rejectResult = () => finish(() => reject(normalizedError))
+      if (!removePartialOutput) {
+        rejectResult()
+        return
+      }
+      void rm(input.outputPath, { force: true })
+        .catch(() => undefined)
+        .then(rejectResult)
+    }
+    const terminate = (error: Error) => {
+      if (terminationError) {
+        return
+      }
+      terminationError = error
+      if (!child) {
+        rejectTask(error, false)
+        return
+      }
+      const runningChild = child
+      terminateManifestFfmpegProcess(runningChild, false)
+      forceTimer = setTimeout(() => {
+        terminateManifestFfmpegProcess(runningChild, true)
+      }, FFMPEG_TERMINATION_GRACE_MS)
+      forceTimer.unref?.()
+      settleTimer = setTimeout(() => {
+        rejectTask(error, true)
+      }, FFMPEG_TERMINATION_SETTLE_MS)
+      settleTimer.unref?.()
+    }
+    const handleAbort = () => terminate(createManifestFfmpegAbortError())
+
+    try {
+      child = spawn(input.ffmpegPath, input.commandArgs, {
+        detached: process.platform !== 'win32',
+        shell: false,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
+      })
+    } catch (error) {
+      rejectTask(error, false)
+      return
+    }
+
+    child.stdout?.on('data', (chunk) => {
       const chunkText = String(chunk)
       stdout.push(chunkText)
       parseFfmpegProgressChunk(progressState, chunkText)
@@ -216,37 +305,63 @@ export async function downloadEmbeddedBrowserManifestResource(
       if (nextSpeedText) {
         lastSpeedText = nextSpeedText
       }
-      request.onProgress?.({
+      input.onProgress?.({
         processedSeconds: typeof nextProcessedSeconds === 'number'
-          ? Math.min(nextProcessedSeconds, request.durationSeconds || Number.POSITIVE_INFINITY)
+          ? Math.min(nextProcessedSeconds, input.durationSeconds || Number.POSITIVE_INFINITY)
           : undefined,
         speedText: nextSpeedText || undefined,
       })
     })
-    child.stderr.on('data', (chunk) => {
+    child.stderr?.on('data', (chunk) => {
       stderr.push(String(chunk))
     })
     child.once('error', (error) => {
-      reject(error)
+      rejectTask(terminationError || error, Boolean(terminationError))
     })
-    child.once('exit', async (code) => {
-      if (code === 0) {
-        try {
-          await assertManifestOutputFile(request.outputPath)
-          resolve({
-            commandArgs,
-            ffmpegPath,
-            outputPath: request.outputPath,
-            stderr: stderr.join(''),
-            stdout: stdout.join(''),
-          })
-        } catch (error) {
-          reject(error)
-        }
+    child.once('exit', (code) => {
+      if (terminationError) {
+        rejectTask(terminationError, true)
         return
       }
-      reject(new Error(stderr.join('').trim() || `ffmpeg 退出码异常: ${code}`))
+      if (code !== 0) {
+        rejectTask(new Error(stderr.join('').trim() || `ffmpeg 退出码异常: ${code}`), true)
+        return
+      }
+      void assertManifestOutputFile(input.outputPath)
+        .then(() => {
+          finish(() => resolve({
+            commandArgs: input.commandArgs,
+            ffmpegPath: input.ffmpegPath,
+            outputPath: input.outputPath,
+            stderr: stderr.join(''),
+            stdout: stdout.join(''),
+          }))
+        })
+        .catch((error) => rejectTask(error, true))
     })
+    if (input.signal?.aborted) {
+      handleAbort()
+    } else {
+      input.signal?.addEventListener('abort', handleAbort, { once: true })
+    }
+  })
+}
+
+export async function downloadEmbeddedBrowserManifestResource(
+  request: EmbeddedBrowserManifestDownloadRequest,
+): Promise<EmbeddedBrowserManifestDownloadResult> {
+  const ffmpegPath = await resolveEmbeddedBrowserFfmpegPath(request.ffmpegPath)
+  if (!ffmpegPath) {
+    throw new Error('未找到可用的 ffmpeg，可在系统环境变量里配置，或确认 /opt/homebrew/bin/ffmpeg 可执行')
+  }
+  const commandArgs = buildEmbeddedBrowserManifestDownloadArgs(request)
+  return executeEmbeddedBrowserManifestFfmpeg({
+    commandArgs,
+    durationSeconds: request.durationSeconds,
+    ffmpegPath,
+    onProgress: request.onProgress,
+    outputPath: request.outputPath,
+    signal: request.signal,
   })
 }
 
@@ -258,69 +373,12 @@ export async function downloadEmbeddedBrowserManifestTracks(
     throw new Error('未找到可用的 ffmpeg，可在系统环境变量里配置，或确认 /opt/homebrew/bin/ffmpeg 可执行')
   }
   const commandArgs = buildEmbeddedBrowserManifestTrackMergeArgs(request)
-  return new Promise<EmbeddedBrowserManifestDownloadResult>((resolve, reject) => {
-    const stdout: string[] = []
-    const stderr: string[] = []
-    let lastProcessedSeconds = -1
-    let lastSpeedText = ''
-    const progressState: {
-      processedSeconds?: number
-      speedText?: string
-    } = {}
-    const child = spawn(ffmpegPath, commandArgs, {
-      stdio: ['ignore', 'pipe', 'pipe'],
-    })
-
-    child.stdout.on('data', (chunk) => {
-      const chunkText = String(chunk)
-      stdout.push(chunkText)
-      parseFfmpegProgressChunk(progressState, chunkText)
-      const nextProcessedSeconds = progressState.processedSeconds
-      const nextSpeedText = progressState.speedText || ''
-      const progressChanged = (
-        (typeof nextProcessedSeconds === 'number'
-          && Math.abs(nextProcessedSeconds - lastProcessedSeconds) >= 0.5)
-        || (nextSpeedText && nextSpeedText !== lastSpeedText)
-      )
-      if (!progressChanged) {
-        return
-      }
-      if (typeof nextProcessedSeconds === 'number') {
-        lastProcessedSeconds = nextProcessedSeconds
-      }
-      if (nextSpeedText) {
-        lastSpeedText = nextSpeedText
-      }
-      request.onProgress?.({
-        processedSeconds: typeof nextProcessedSeconds === 'number'
-          ? Math.min(nextProcessedSeconds, request.durationSeconds || Number.POSITIVE_INFINITY)
-          : undefined,
-        speedText: nextSpeedText || undefined,
-      })
-    })
-    child.stderr.on('data', (chunk) => {
-      stderr.push(String(chunk))
-    })
-    child.once('error', (error) => {
-      reject(error)
-    })
-    child.once('exit', async (code) => {
-      if (code === 0) {
-        try {
-          await assertManifestOutputFile(request.outputPath)
-          resolve({
-            commandArgs,
-            ffmpegPath,
-            outputPath: request.outputPath,
-            stderr: stderr.join(''),
-            stdout: stdout.join(''),
-          })
-        } catch (error) {
-          reject(error)
-        }
-        return
-      }
-      reject(new Error(stderr.join('').trim() || `ffmpeg 退出码异常: ${code}`))
-    })
+  return executeEmbeddedBrowserManifestFfmpeg({
+    commandArgs,
+    durationSeconds: request.durationSeconds,
+    ffmpegPath,
+    onProgress: request.onProgress,
+    outputPath: request.outputPath,
+    signal: request.signal,
   })
 }

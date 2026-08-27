@@ -104,9 +104,34 @@ describe('EmbeddedBrowser HLS session owner', () => {
       tabId: 'tab-b',
       workDirectoryPath: '/tmp/live-b',
     })
+    let activeSignal: AbortSignal | undefined
+    let finishActiveTask: () => void = () => {}
+    const activeTask = owner.runActiveTask({
+      requestId: 'active-a',
+      tabId: 'tab-a',
+    }, async (signal) => {
+      activeSignal = signal
+      await new Promise<void>((resolve) => {
+        signal.addEventListener('abort', () => resolve(), { once: true })
+      })
+      await new Promise<void>((resolve) => {
+        finishActiveTask = resolve
+      })
+      return 'aborted'
+    })
 
-    await owner.dispose()
+    const disposePromise = owner.dispose()
+    await vi.waitFor(() => {
+      expect(activeSignal?.aborted).toBe(true)
+    })
+    expect(firstDiscard).not.toHaveBeenCalled()
+    expect(secondDiscard).not.toHaveBeenCalled()
+    expect(removedDirectories).toEqual([])
+    finishActiveTask()
+    await disposePromise
 
+    await expect(activeTask).resolves.toBe('aborted')
+    expect(activeSignal?.aborted).toBe(true)
     expect(owner.findLiveByTab('tab-a')).toBeUndefined()
     expect(firstDiscard).toHaveBeenCalledTimes(1)
     expect(secondDiscard).toHaveBeenCalledTimes(1)
@@ -115,6 +140,41 @@ describe('EmbeddedBrowser HLS session owner', () => {
       '/tmp/live-a',
       '/tmp/live-b',
     ]))
+  })
+
+  it('hls.active-task-tab-cancel', async () => {
+    const owner = new EmbeddedBrowserHlsSessionOwner<RetrySession, LiveSession>()
+    let firstSignal: AbortSignal | undefined
+    let secondSignal: AbortSignal | undefined
+    let finishSecondTask: () => void = () => {}
+    const firstTask = owner.runActiveTask({
+      requestId: 'active-1',
+      tabId: 'tab-1',
+    }, async (signal) => {
+      firstSignal = signal
+      await new Promise<void>((resolve) => {
+        signal.addEventListener('abort', () => resolve(), { once: true })
+      })
+      return 'first-finished'
+    })
+    const secondTask = owner.runActiveTask({
+      requestId: 'active-2',
+      tabId: 'tab-2',
+    }, async (signal) => {
+      secondSignal = signal
+      await new Promise<void>((resolve) => {
+        finishSecondTask = resolve
+      })
+      return 'second-finished'
+    })
+
+    await owner.clearActive({ tabId: 'tab-1' })
+
+    await expect(firstTask).resolves.toBe('first-finished')
+    expect(firstSignal?.aborted).toBe(true)
+    expect(secondSignal?.aborted).toBe(false)
+    finishSecondTask()
+    await expect(secondTask).resolves.toBe('second-finished')
   })
 
   it('keeps equal renderer request ids isolated by tab', async () => {
@@ -171,5 +231,33 @@ describe('EmbeddedBrowser HLS session owner', () => {
 
     expect(discard).not.toHaveBeenCalled()
     expect(removeWorkDirectory).not.toHaveBeenCalled()
+  })
+
+  it('rejects and cleans sessions created after disposal', async () => {
+    const removeWorkDirectory = vi.fn(async () => undefined)
+    const discard = vi.fn(async () => undefined)
+    const owner = new EmbeddedBrowserHlsSessionOwner<RetrySession, LiveSession>({ removeWorkDirectory })
+    await owner.dispose()
+
+    expect(owner.upsertRetry({
+      failedFragments: [1],
+      requestId: 'late-retry',
+      tabId: 'tab-1',
+      workDirectoryPath: '/tmp/late-retry',
+    })).toBe(false)
+    expect(owner.upsertLive({
+      recorder: {
+        discard,
+        getCurrentWorkDirectoryPath: () => '/tmp/late-live',
+      },
+      requestId: 'late-live',
+      tabId: 'tab-1',
+    })).toBe(false)
+    await expect(owner.runActiveTask({ tabId: 'tab-1' }, async () => undefined))
+      .rejects.toMatchObject({ name: 'AbortError' })
+    await vi.waitFor(() => {
+      expect(discard).toHaveBeenCalledTimes(1)
+      expect(removeWorkDirectory).toHaveBeenCalledTimes(2)
+    })
   })
 })

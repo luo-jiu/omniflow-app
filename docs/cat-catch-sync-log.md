@@ -493,6 +493,20 @@
 - legacy cleanup: 删除已不存在的两张 legacy controller Map 记录，新增 `hls-session-owner.ts#retrySessions` 与 `#liveSessions` 两项 `omniflow-integration / retain-or-adapt` 事实；其余 HLS legacy task/downloader/recorder 条目不变。
 - validation: 完整 HLS Vitest 25/25、仓库级 lint、TypeScript、`cat-catch:validate`、同步校验 16/16 和 scoped diff check 通过。全量 Vitest 为 906 passed / 1 skipped / 16 loopback sandbox failures，相关 4 个 loopback 文件在允许监听本机端口的环境复跑 20/20 通过；另有既有 `tools/cat-catch-sync/validate.test.mjs` 被 Vitest 扫描后报告 no suite。完整 build 未运行，避免覆盖其他 Agent 正在修改的 `dist-electron/**`。
 
+## 2026-08-27: same target (HLS active-task and ffmpeg cancellation)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动。
+- reviewedThrough / portedThrough: 均保持 `null`；本步闭合 active HLS fetch/ffmpeg 的宿主取消传播，仍未完成 hls-engine 或 output-integration cutover。
+- change groups: `platform-adaptation`（main-only active-task ownership、跨平台 ffmpeg process-tree 终止和 partial output 清理）。
+- affected capability IDs: `hls.segment-pipeline`、`hls.live-recording` 保持 `porting`；`output.ffmpeg-process-owner` 从 `pending` 进入 `porting`。
+- fixtures/tests: `hls.active-task-tab-cancel` 覆盖只中止匹配 tab 并等待 settlement；扩展 `hls.session-owner-dispose` 锁定 active task 完成前不得删除 retry/live workdir；`output.ffmpeg-cancel-exit` 覆盖 AbortSignal 到进程树终止与 partial output 删除；`output.ffmpeg-process-cleanup` 覆盖非零退出清理。
+- accepted difference: Cat Catch 由扩展 downloader tab/unload 管理任务；OmniFlow 让专用 HLS owner 持有 `AbortController + settled Promise`，不实现通用 scheduler、持久化任务中心或第二份 renderer 状态。
+- excluded changes and reasons: 不在本步迁移 ffmpeg path probe、resource merge/transcode、MPD merge，也不修改其他 Agent 正在接入的应用 graceful-shutdown 代码。
+- unresolved gaps: controller/view lifecycle production integration test、应用退出 await controller dispose、ffmpeg path probe 取消、真实 ffmpeg/ffprobe output、一次性 cache fallback、完整 parser 与 decrypt responsibility。
+- runtime changes: HLS direct manifest、track merge、local plan、failed-fragment retry 和 live export 都注册 active task；navigation、tab/view destroy、render-process loss、discard 和 controller dispose 会先 abort/await active task，再清理 retry/live/workdir。manifest 与 track ffmpeg 入口共享一个有界 TERM/KILL runner，取消和非零退出会删除 partial output。
+- legacy cleanup: 新增 `hls-session-owner.ts#activeTasks` 的 `omniflow-integration / retain-or-adapt` 事实；6 个现有 ffmpeg 入口仍保留 `remove-after-cutover`，没有提前删除旧 output owner。
+- validation: 完整 HLS Vitest 29/29、仓库级 lint、TypeScript、`cat-catch:validate`、同步校验 16/16 和 scoped diff check 通过；本切片未重复运行紧邻上一提交已完成的全量 Vitest，完整 build 仍未运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`。
+
 ## Template
 
 ```markdown
