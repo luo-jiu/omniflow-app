@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Toast } from '@douyinfe/semi-ui';
 import { useAuth } from '@/hooks/useAuth';
 import { useTheme } from '@/hooks/useTheme';
@@ -136,6 +136,13 @@ const LoginWrapper = styled.div`
     min-height: 540px;
     position: relative;
     z-index: 1;
+  }
+
+  .auth-filter-defs {
+    position: absolute;
+    width: 0;
+    height: 0;
+    pointer-events: none;
   }
 
   .welcome {
@@ -493,6 +500,8 @@ const LoginWrapper = styled.div`
     border-radius: 38% 62% 57% 43% / 42% 47% 53% 58%;
     transform: rotate(0deg) scale(1);
     box-shadow: 0 10px 20px rgba(95, 106, 125, 0.16);
+    filter: url('#auth-liquify');
+    animation: auth-flower-light 17s ease-in-out infinite;
     transition:
       border-radius 620ms cubic-bezier(0.22, 1, 0.36, 1),
       box-shadow 480ms cubic-bezier(0.22, 1, 0.36, 1),
@@ -509,6 +518,74 @@ const LoginWrapper = styled.div`
     transition:
       opacity 520ms cubic-bezier(0.22, 1, 0.36, 1),
       transform 620ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  @keyframes auth-flower-light {
+    0%,
+    100% {
+      border-radius: 38% 62% 57% 43% / 42% 47% 53% 58%;
+    }
+
+    25% {
+      border-radius: 44% 56% 52% 48% / 47% 42% 58% 53%;
+    }
+
+    50% {
+      border-radius: 51% 49% 45% 55% / 53% 40% 60% 47%;
+    }
+
+    75% {
+      border-radius: 47% 53% 61% 39% / 39% 56% 44% 61%;
+    }
+  }
+
+  @keyframes auth-flower-light-alt {
+    0%,
+    100% {
+      border-radius: 64% 36% 46% 54% / 34% 58% 42% 66%;
+    }
+
+    33% {
+      border-radius: 56% 44% 57% 43% / 44% 47% 53% 56%;
+    }
+
+    66% {
+      border-radius: 42% 58% 39% 61% / 56% 38% 62% 44%;
+    }
+  }
+
+  @keyframes auth-flower-dark {
+    0%,
+    100% {
+      border-radius: 52% 48% 39% 61% / 46% 58% 42% 54%;
+    }
+
+    25% {
+      border-radius: 47% 53% 44% 56% / 53% 50% 50% 47%;
+    }
+
+    50% {
+      border-radius: 57% 43% 49% 51% / 41% 64% 36% 59%;
+    }
+
+    75% {
+      border-radius: 44% 56% 59% 41% / 58% 44% 56% 42%;
+    }
+  }
+
+  @keyframes auth-flower-dark-alt {
+    0%,
+    100% {
+      border-radius: 42% 58% 62% 38% / 56% 39% 61% 44%;
+    }
+
+    33% {
+      border-radius: 52% 48% 56% 44% / 44% 55% 45% 56%;
+    }
+
+    66% {
+      border-radius: 38% 62% 46% 54% / 63% 41% 59% 37%;
+    }
   }
 
   .deco-flower::before {
@@ -532,6 +609,8 @@ const LoginWrapper = styled.div`
   .deco-flower.alt {
     border-radius: 64% 36% 46% 54% / 34% 58% 42% 66%;
     transform: rotate(-8deg) scale(1);
+    animation-name: auth-flower-light-alt;
+    animation-duration: 20s;
     box-shadow:
       0 12px 24px rgba(95, 106, 125, 0.18),
       inset 0 0 0 1px rgba(255, 255, 255, 0.42);
@@ -554,6 +633,8 @@ const LoginWrapper = styled.div`
   &[data-theme='dark'] .deco-flower {
     border-radius: 52% 48% 39% 61% / 46% 58% 42% 54%;
     transform: rotate(2deg) scale(0.985);
+    animation-name: auth-flower-dark;
+    animation-duration: 22s;
     box-shadow:
       0 18px 34px rgba(5, 8, 16, 0.36),
       inset 0 0 0 1px rgba(255, 228, 238, 0.12);
@@ -570,6 +651,27 @@ const LoginWrapper = styled.div`
   &[data-theme='dark'] .deco-flower.alt {
     border-radius: 42% 58% 62% 38% / 56% 39% 61% 44%;
     transform: rotate(-3deg) scale(0.985);
+    animation-name: auth-flower-dark-alt;
+    animation-duration: 26s;
+  }
+
+  &[data-theme-transitioning='true'] .deco-flower {
+    animation: none;
+  }
+
+  &[data-theme-transitioning='true'] .deco-flower::before,
+  &[data-theme-transitioning='true'] .deco-flower::after {
+    border-radius: inherit;
+    animation: none;
+    transition:
+      opacity 520ms cubic-bezier(0.22, 1, 0.36, 1),
+      transform 620ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .welcome:not(.is-signup) .side.left .deco-flower,
+  .welcome.is-signup .side.right .deco-flower {
+    animation-play-state: paused;
+    filter: none;
   }
 
   .side-account {
@@ -749,6 +851,16 @@ const LoginWrapper = styled.div`
       transition-delay: 0ms !important;
     }
 
+    .deco-flower::before,
+    .deco-flower::after {
+      animation: none !important;
+    }
+
+    .deco-flower {
+      animation: none !important;
+      filter: none;
+    }
+
     .panel:not(.nodisplay) .auth-form > * {
       animation: none !important;
     }
@@ -768,9 +880,17 @@ const Login: React.FC = () => {
   const [signupEmail, setSignupEmail] = useState('');
   const [signupPassword, setSignupPassword] = useState('');
   const [signupConfirm, setSignupConfirm] = useState('');
+  const [isThemeTransitioning, setIsThemeTransitioning] = useState(false);
+  // Keep the old theme rendered for one layout pass so every theme change can snapshot the live outline.
+  const [displayedTheme, setDisplayedTheme] = useState(resolvedTheme);
   const signinUsernameRef = useRef<HTMLInputElement>(null);
   const signupUsernameRef = useRef<HTMLInputElement>(null);
   const modeFocusTimerRef = useRef<number | null>(null);
+  const themeTransitionTimerRef = useRef<number | null>(null);
+  const themeTransitionFrameRef = useRef<number | null>(null);
+  const transitionFlowersRef = useRef<HTMLElement[]>([]);
+  const signinFlowerRef = useRef<HTMLDivElement>(null);
+  const signupFlowerRef = useRef<HTMLDivElement>(null);
 
   const signInButtonText = useMemo(() => (loading ? 'Signing In...' : 'Sign In'), [loading]);
   const signUpButtonText = useMemo(() => (registering ? 'Creating...' : 'Create Account'), [registering]);
@@ -780,7 +900,48 @@ const Login: React.FC = () => {
     if (modeFocusTimerRef.current !== null) {
       window.clearTimeout(modeFocusTimerRef.current);
     }
+    if (themeTransitionTimerRef.current !== null) {
+      window.clearTimeout(themeTransitionTimerRef.current);
+    }
+    if (themeTransitionFrameRef.current !== null) {
+      window.cancelAnimationFrame(themeTransitionFrameRef.current);
+    }
   }, []);
+
+  useLayoutEffect(() => {
+    if (displayedTheme === resolvedTheme) return;
+
+    const flowers = [signinFlowerRef.current, signupFlowerRef.current]
+      .filter((flower): flower is HTMLDivElement => Boolean(flower));
+
+    flowers.forEach(flower => {
+      flower.style.setProperty('border-radius', getComputedStyle(flower).borderRadius);
+    });
+    transitionFlowersRef.current = flowers;
+    setIsThemeTransitioning(true);
+
+    if (themeTransitionTimerRef.current !== null) {
+      window.clearTimeout(themeTransitionTimerRef.current);
+    }
+    if (themeTransitionFrameRef.current !== null) {
+      window.cancelAnimationFrame(themeTransitionFrameRef.current);
+    }
+
+    setDisplayedTheme(resolvedTheme);
+    themeTransitionFrameRef.current = window.requestAnimationFrame(() => {
+      transitionFlowersRef.current.forEach(flower => flower.style.removeProperty('border-radius'));
+      transitionFlowersRef.current = [];
+      themeTransitionFrameRef.current = null;
+    });
+    themeTransitionTimerRef.current = window.setTimeout(() => {
+      setIsThemeTransitioning(false);
+      themeTransitionTimerRef.current = null;
+    }, 760);
+  }, [displayedTheme, resolvedTheme]);
+
+  const handleThemeToggle = () => {
+    setTheme(resolvedTheme === 'dark' ? 'light' : 'dark');
+  };
 
   const switchMode = (nextMode: 'signin' | 'signup') => {
     if (nextMode === mode) return;
@@ -852,7 +1013,50 @@ const Login: React.FC = () => {
   };
 
   return (
-    <LoginWrapper data-theme={resolvedTheme}>
+    <LoginWrapper data-theme={displayedTheme} data-theme-transitioning={isThemeTransitioning}>
+      <svg className="auth-filter-defs" aria-hidden="true" focusable="false">
+        <defs>
+          <filter
+            id="auth-liquify"
+            x="-12%"
+            y="-12%"
+            width="124%"
+            height="124%"
+            colorInterpolationFilters="sRGB"
+          >
+            <feGaussianBlur in="SourceGraphic" stdDeviation="0.18" result="auth-soft-source" />
+            <feTurbulence
+              type="fractalNoise"
+              baseFrequency="0.016 0.022"
+              numOctaves="2"
+              seed="7"
+              result="auth-noise"
+            >
+              <animate
+                attributeName="baseFrequency"
+                dur="17s"
+                values="0.016 0.022;0.022 0.016;0.016 0.022"
+                repeatCount="indefinite"
+              />
+              <animate
+                attributeName="seed"
+                dur="23s"
+                values="7;11;7"
+                repeatCount="indefinite"
+              />
+            </feTurbulence>
+            <feDisplacementMap
+              in="auth-soft-source"
+              in2="auth-noise"
+              scale="1.1"
+              xChannelSelector="R"
+              yChannelSelector="G"
+              result="auth-liquid-edge"
+            />
+            <feGaussianBlur in="auth-liquid-edge" stdDeviation="0.1" />
+          </filter>
+        </defs>
+      </svg>
       <div className="auth-shell">
         <div className={`welcome ${mode === 'signup' ? 'is-signup' : ''}`}>
           <div className="panel-box">
@@ -861,7 +1065,7 @@ const Login: React.FC = () => {
               type="button"
               aria-label={`切换到${nextThemeLabel}`}
               title={`切换到${nextThemeLabel}`}
-              onClick={() => setTheme(resolvedTheme === 'dark' ? 'light' : 'dark')}
+              onClick={handleThemeToggle}
             >
               <span className="auth-theme-icon moon" aria-hidden="true"><AuthMoonIcon /></span>
               <span className="auth-theme-icon sun" aria-hidden="true"><AuthSunIcon /></span>
@@ -954,7 +1158,7 @@ const Login: React.FC = () => {
               <span className="brand-flow">&amp; FLOW</span>
             </h2>
             <p className="side-desc">file system crafted for active creators</p>
-            <div className="deco-flower" />
+            <div ref={signupFlowerRef} className="deco-flower" />
             <p className="side-account">Already inside the workspace?</p>
             <button
               className="toggle-btn"
@@ -972,7 +1176,7 @@ const Login: React.FC = () => {
               <span className="brand-flow">&amp; FLOW</span>
             </h2>
             <p className="side-desc">build your own structured content hub</p>
-            <div className="deco-flower alt" />
+            <div ref={signinFlowerRef} className="deco-flower alt" />
             <p className="side-account">Need a new workspace identity?</p>
             <button
               className="toggle-btn"
