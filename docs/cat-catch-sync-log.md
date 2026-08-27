@@ -619,6 +619,20 @@
 - legacy cleanup: 无；旧 HLS 链继续保留到 hls-engine 原子 cutover。
 - validation: 两层失败证据分别为 authority `1/3` 与 recorder `1/5` 失败；实现和 review 修正后 authority/recorder/lifecycle 20/20、完整 HLS Vitest 57/57、TypeScript、全仓 ESLint、固定上游 validator、同步校验 16/16、metadata 7 units/32 capabilities/192 anchors/106 cleanup entries/108 unique planned IDs/62 active refs 和 scoped diff check 通过。全量 Vitest 为 951 passed / 1 skipped / 17 failed：16 条为 sandbox-only loopback 监听失败，其中本切片相关 redirect isolation 在允许监听本机端口的环境复跑 3/3 通过；另 1 条为其他 Agent 正在修改的 `agent-orchestrator.test.ts` 断言失败，Node 专用同步 validator 文件被 Vitest 收集后另报告 no suite。完整 build 不运行以避免覆盖其他 Agent 的 `dist-electron/**`，暂无真实网站手工场景。
 
+## 2026-08-27: same target (empty HLS media rejection)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动。
+- reviewedThrough / portedThrough: 均保持 `null`；本步补齐固定 hls.js 的空 media loader 拒绝语义，仍未完成 hls-engine cutover。
+- change groups: `behavioral`（没有完整 fragment 的 media playlist 不进入 Cat Catch `LEVEL_LOADED -> parseTs`）与 `verification`（固定 vendor executable oracle）。
+- affected capability IDs: `hls.parser-planner` 保持 `ported-unverified`。
+- fixtures/tests: 新增 upstream-executable fixture `hls-empty-media-playlist`；`hls.empty-media-rejection` 覆盖普通空 playlist 与只有 LL-HLS PART、没有完整 EXTINF fragment 的 playlist。
+- accepted difference: 固定 hls.js 先发 `MANIFEST_LOADED`，随后发 `levelEmptyError / No Segments found in Playlist`；同步 OmniFlow facade 没有 evented loader 边界，因此在创建 download plan 前抛出同一错误。
+- excluded changes and reasons: 不把 master playlist 自身没有媒体分片视为错误；本步不迁移其他 loader event、renderer listener recovery 或 live 过渡 DTO。
+- unresolved gaps: HLS 其余 parser 标签差分、renderer listener recovery、HLS live 未捕获 URL 过渡 DTO、真实网站手工验证和最终 hls-engine cutover。
+- runtime changes: `parseHlsManifest` 在 variable parsing error 之后拒绝 `variants.length === 0 && segments.length === 0`；master variant 解析和既有第一错误优先级不变。
+- legacy cleanup: 无；旧 HLS 链继续保留到 hls-engine 原子 cutover。
+- validation: 固定 vendor 对两个输入均执行得到 `levelEmptyError / No Segments found in Playlist`；失败证据为 parser 7/8，实现后 parser 8/8、完整 HLS Vitest 58/58、TypeScript、全仓 ESLint、固定上游 validator、同步校验 16/16、metadata 7 units/32 capabilities/192 anchors/106 cleanup entries/109 unique planned IDs/63 active refs 和 scoped diff check 通过。全量 Vitest 为 958 passed / 1 skipped / 16 sandbox-only loopback failures，Node 专用同步 validator 文件被 Vitest 收集后另报告 no suite；本切片不涉及 loopback。完整 build 不运行以避免覆盖其他 Agent 的 `dist-electron/**`，暂无真实网站手工场景。
+
 ## Template
 
 ```markdown

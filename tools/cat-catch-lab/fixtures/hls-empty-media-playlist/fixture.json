@@ -1,0 +1,21 @@
+{
+  "fixtureId": "hls-empty-media-playlist",
+  "capabilityIds": [
+    "hls.parser-planner"
+  ],
+  "upstreamCommit": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
+  "status": "active",
+  "oracle": "upstream-executable",
+  "sourceRefs": [
+    "lib/hls.min.js#handlePlaylistLoaded",
+    "js/m3u8.js#Hls.Events.LEVEL_LOADED"
+  ],
+  "inputs": [
+    "empty.m3u8",
+    "parts-only.m3u8"
+  ],
+  "expectedError": "No Segments found in Playlist",
+  "testRefs": [
+    "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.empty-media-rejection"
+  ]
+}

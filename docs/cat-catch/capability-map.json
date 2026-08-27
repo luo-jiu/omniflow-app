@@ -773,18 +773,21 @@
         "hls.parser-core",
         "hls.byterange-map-key-discontinuity",
         "hls.ll-parts-fragment-parity",
-        "hls.variable-substitution"
+        "hls.variable-substitution",
+        "hls.empty-media-rejection"
       ],
       "testRefs": [
         "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.parser-core",
         "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.byterange-map-key-discontinuity",
         "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.ll-parts-fragment-parity",
-        "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.variable-substitution"
+        "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.variable-substitution",
+        "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.empty-media-rejection"
       ],
       "acceptedDifferences": [
-        "Pinned hls.js records the first variable parsing error on the playlist and its evented loader rejects that parse; the synchronous OmniFlow facade throws the same first error because it has no loader event boundary."
+        "Pinned hls.js records the first variable parsing error on the playlist and its evented loader rejects that parse; the synchronous OmniFlow facade throws the same first error because it has no loader event boundary.",
+        "Pinned hls.js emits levelEmptyError after manifest loading when a media playlist has no complete fragment; the synchronous OmniFlow facade throws the same No Segments found in Playlist error before creating a download plan."
       ],
-      "notes": "The pure Cat Catch parser now owns the manifest parse path behind the renderer compatibility facade, resolves omitted BYTERANGE offsets per resource, and preserves the initial discontinuity sequence, matching hls.js Fragment.setByteRange and parseLevelPlaylist. LL-HLS EXT-X-PART entries remain outside the downloadable fragment list because pinned hls.js stores them in LevelDetails.partList while Cat Catch parseTs copies only LevelDetails.fragments; complete EXTINF sequence and duration therefore stay authoritative. EXT-X-DEFINE now follows pinned hls.js 1.6.16 for NAME/VALUE, QUERYPARAM, explicit master-to-media IMPORT, single-pass variable replacement in URI lines plus quoted/hexadecimal attributes, and first-error duplicate/missing rejection. The renderer compatibility facade carries the master variable list into its explicit local child-playlist resolver; live recording derives the same list from the main-owned captured master only when a child declares IMPORT, validates that the selected child belongs to that master, and never accepts renderer-supplied variable values. The broader upstream parser/dependency behavior remains unverified. Vendor provenance blocker: the bundled jQuery banner reports 4.0.0 while lib/third-party-libraries.md declares 3.7.1."
+      "notes": "The pure Cat Catch parser now owns the manifest parse path behind the renderer compatibility facade, resolves omitted BYTERANGE offsets per resource, and preserves the initial discontinuity sequence, matching hls.js Fragment.setByteRange and parseLevelPlaylist. LL-HLS EXT-X-PART entries remain outside the downloadable fragment list because pinned hls.js stores them in LevelDetails.partList while Cat Catch parseTs copies only LevelDetails.fragments; complete EXTINF sequence and duration therefore stay authoritative, and empty or PART-only media playlists are rejected before plan creation with the pinned loader error. EXT-X-DEFINE now follows pinned hls.js 1.6.16 for NAME/VALUE, QUERYPARAM, explicit master-to-media IMPORT, single-pass variable replacement in URI lines plus quoted/hexadecimal attributes, and first-error duplicate/missing rejection. The renderer compatibility facade carries the master variable list into its explicit local child-playlist resolver; live recording derives the same list from the main-owned captured master only when a child declares IMPORT, validates that the selected child belongs to that master, and never accepts renderer-supplied variable values. The broader upstream parser/dependency behavior remains unverified. Vendor provenance blocker: the bundled jQuery banner reports 4.0.0 while lib/third-party-libraries.md declares 3.7.1."
     },
     {
       "id": "hls.segment-pipeline",

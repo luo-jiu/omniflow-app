@@ -58,6 +58,12 @@ const llHlsExpected = JSON.parse(readFileSync(`${llHlsFixtureRoot}/${llHlsFixtur
   }>
 }
 
+const emptyMediaFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-empty-media-playlist', import.meta.url))
+const emptyMediaFixture = JSON.parse(readFileSync(`${emptyMediaFixtureRoot}/fixture.json`, 'utf8')) as {
+  expectedError: string
+  inputs: string[]
+}
+
 const variableFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-variable-substitution', import.meta.url))
 const variableFixture = JSON.parse(readFileSync(`${variableFixtureRoot}/fixture.json`, 'utf8')) as {
   expected: string
@@ -158,6 +164,16 @@ describe('Cat Catch HLS parser', () => {
       segmentCount: llHlsExpected.segmentCount,
     })
     expect(plan.fragments.every(fragment => !fragment.part)).toBe(true)
+  })
+
+  it('hls.empty-media-rejection', () => {
+    for (const input of emptyMediaFixture.inputs) {
+      const text = readFileSync(`${emptyMediaFixtureRoot}/${input}`, 'utf8')
+      expect(() => parseHlsManifest({
+        baseUrl: `https://media.example/${input}`,
+        text,
+      })).toThrow(emptyMediaFixture.expectedError)
+    }
   })
 
   it('hls.variable-substitution', () => {

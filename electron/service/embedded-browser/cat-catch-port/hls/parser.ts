@@ -542,6 +542,13 @@ export function parseHlsManifest(input: {
   if (variableState.playlistParsingError) {
     throw variableState.playlistParsingError
   }
+  if (!variants.length && !segments.length) {
+    // Upstream: xifangczy/cat-catch@2cb981d7c2f4614732edccc167c4b5793d1cb138
+    // Source: lib/hls.min.js#handlePlaylistLoaded; js/m3u8.js#LEVEL_LOADED
+    // Cat Catch never reaches parseTs when hls.js finds no complete fragment.
+    // PART-only live snapshots are therefore empty, not downloadable media.
+    throw new Error('No Segments found in Playlist')
+  }
 
   const durationSeconds = segments.reduce((total, segment) => total + segment.duration, 0)
   return {
