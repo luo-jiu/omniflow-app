@@ -402,9 +402,11 @@ export function parseHlsManifest(input: {
       continue
     }
     if (line.startsWith('#EXT-X-PART')) {
-      const attributes = parseHlsAttributeList(getTagValue(line))
-      pendingSegment = { duration: parseNumber(attributes.DURATION) || 0 }
-      addSegment(attributes.URI || '', true, parseHlsByteRange(attributes.BYTERANGE) || pendingByteRange)
+      // Upstream: xifangczy/cat-catch@2cb981d7c2f4614732edccc167c4b5793d1cb138
+      // Source: lib/hls.min.js#partList; js/m3u8.js#parseTs(data)
+      // Pinned hls.js keeps LL-HLS parts outside LevelDetails.fragments, while
+      // Cat Catch's parseTs copies only fragments into its downloader.
+      // Treating parts as fragments duplicates them once EXTINF is published.
       continue
     }
     if (line.startsWith('#EXT-X-ENDLIST')) hasEndList = true

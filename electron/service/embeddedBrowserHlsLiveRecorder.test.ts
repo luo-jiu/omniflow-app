@@ -122,4 +122,62 @@ describe('EmbeddedBrowser HLS live recorder', () => {
       await rm(directory, { force: true, recursive: true })
     }
   })
+
+  it('hls.live-ll-parts-cumulative-parity', async () => {
+    vi.useFakeTimers()
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'omniflow-hls-live-ll-parts-test-'))
+    const initialManifest = await readFile(
+      new URL('../../tools/cat-catch-lab/fixtures/hls-low-latency-parts/playlist.m3u8', import.meta.url),
+      'utf8',
+    )
+    const nextManifest = await readFile(
+      new URL('../../tools/cat-catch-lab/fixtures/hls-low-latency-parts/playlist-next.m3u8', import.meta.url),
+      'utf8',
+    )
+    const requestedUrls: string[] = []
+    let manifestRequestCount = 0
+    let resolveNewCompleteFragment: (() => void) | undefined
+    const newCompleteFragment = new Promise<void>((resolve) => {
+      resolveNewCompleteFragment = resolve
+    })
+    const fetchImpl = vi.fn(async (url: string) => {
+      requestedUrls.push(url)
+      if (url.endsWith('/live.m3u8')) {
+        manifestRequestCount += 1
+        return new Response(manifestRequestCount === 1 ? initialManifest : nextManifest)
+      }
+      if (url.endsWith('/segment102.m4s')) {
+        resolveNewCompleteFragment?.()
+      }
+      return new Response(Uint8Array.from([0x00, 0x01, 0x02, 0x03]).buffer)
+    })
+    const recorder = new EmbeddedBrowserHlsLiveRecorder({
+      fetch: fetchImpl,
+      manifestUrl: 'https://media.example/ll-hls/live.m3u8',
+      workDirectoryPath: directory,
+    })
+
+    try {
+      await recorder.start()
+      await vi.advanceTimersByTimeAsync(4000)
+      await newCompleteFragment
+      const result = await recorder.stop()
+
+      expect(result).toMatchObject({
+        durationSeconds: 12,
+        totalFragments: 3,
+      })
+      expect(requestedUrls.filter(url => url.endsWith('/live.m3u8'))).toHaveLength(2)
+      expect(requestedUrls.filter(url => /segment\d+\.m4s$/.test(url))).toEqual([
+        'https://media.example/ll-hls/segment100.m4s',
+        'https://media.example/ll-hls/segment101.m4s',
+        'https://media.example/ll-hls/segment102.m4s',
+      ])
+      expect(requestedUrls.some(url => /segment\d+\.\d+\.m4s$/.test(url))).toBe(false)
+    } finally {
+      await recorder.discard()
+      await rm(directory, { force: true, recursive: true })
+      vi.useRealTimers()
+    }
+  })
 })

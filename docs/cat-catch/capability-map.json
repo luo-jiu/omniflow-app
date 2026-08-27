@@ -771,14 +771,16 @@
       "syncedThrough": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
       "plannedTestIds": [
         "hls.parser-core",
-        "hls.byterange-map-key-discontinuity"
+        "hls.byterange-map-key-discontinuity",
+        "hls.ll-parts-fragment-parity"
       ],
       "testRefs": [
         "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.parser-core",
-        "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.byterange-map-key-discontinuity"
+        "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.byterange-map-key-discontinuity",
+        "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.ll-parts-fragment-parity"
       ],
       "acceptedDifferences": [],
-      "notes": "The pure Cat Catch parser now owns the manifest parse path behind the renderer compatibility facade, resolves omitted BYTERANGE offsets per resource, and preserves the initial discontinuity sequence, matching hls.js Fragment.setByteRange and parseLevelPlaylist. The download-plan projection and the broader upstream parser/dependency behavior remain unverified. Vendor provenance blocker: the bundled jQuery banner reports 4.0.0 while lib/third-party-libraries.md declares 3.7.1."
+      "notes": "The pure Cat Catch parser now owns the manifest parse path behind the renderer compatibility facade, resolves omitted BYTERANGE offsets per resource, and preserves the initial discontinuity sequence, matching hls.js Fragment.setByteRange and parseLevelPlaylist. LL-HLS EXT-X-PART entries remain outside the downloadable fragment list because pinned hls.js stores them in LevelDetails.partList while Cat Catch parseTs copies only LevelDetails.fragments; complete EXTINF sequence and duration therefore stay authoritative. The broader upstream parser/dependency behavior remains unverified. Vendor provenance blocker: the bundled jQuery banner reports 4.0.0 while lib/third-party-libraries.md declares 3.7.1."
     },
     {
       "id": "hls.segment-pipeline",
@@ -964,17 +966,19 @@
         "hls.live-discard-abort",
         "hls.live-tab-close-exit",
         "hls.live-manifest-force-cache-fallback",
+        "hls.live-ll-parts-cumulative-parity",
         "hls.session-owner-tab-cleanup"
       ],
       "testRefs": [
         "electron/service/embeddedBrowserHlsLiveRecorder.test.ts#hls.live-terminal",
         "electron/service/embeddedBrowserHlsLiveRecorder.test.ts#hls.live-discard-abort",
         "electron/service/embeddedBrowserHlsLiveRecorder.test.ts#hls.live-manifest-force-cache-fallback",
+        "electron/service/embeddedBrowserHlsLiveRecorder.test.ts#hls.live-ll-parts-cumulative-parity",
         "electron/service/embedded-browser/processing/hls-session-owner.test.ts#hls.session-owner-tab-cleanup",
         "electron/service/embedded-browser/processing/hls-session-owner.test.ts#hls.live-tab-close-exit"
       ],
       "acceptedDifferences": [],
-      "notes": "Live start accepts an opaque resourceId and binds captured manifest/segment polling to the current tab's authority-aware fetch; unrecognized URLs still use the embedded-session fallback. Its initial manifest request preserves Cat Catch's single force-cache recovery after an HTTP failure; later live polls and response-less network errors do not retry. The recorder owns one AbortController across manifest and segment polling, exposes discard, and has executable terminal/discard tests. Navigation, tab close, view destruction, render-process loss, controller disposal, and graceful application exit route through the production HLS host lifecycle; live export ffmpeg is registered as an active task, so cleanup aborts and awaits it before discarding the recorder and work directory. Concurrent lifecycle cleanup is tracked so shutdown cannot finish while an earlier discard/workdir cleanup is still pending. Vendor provenance blocker: the upstream live path depends on the same unverified StreamSaver 2.0.5/2.0.6 bundle and remote MITM configuration recorded by transfer.streaming-memory-budget."
+      "notes": "Live start accepts an opaque resourceId and binds captured manifest/segment polling to the current tab's authority-aware fetch; unrecognized URLs still use the embedded-session fallback. Its initial manifest request preserves Cat Catch's single force-cache recovery after an HTTP failure; later live polls and response-less network errors do not retry. The recorder owns one AbortController across manifest and segment polling, exposes discard, and has executable terminal/discard tests. Consecutive LL-HLS snapshots append only newly completed EXTINF fragments; partial and preload entries neither download nor inflate cumulative duration. Navigation, tab close, view destruction, render-process loss, controller disposal, and graceful application exit route through the production HLS host lifecycle; live export ffmpeg is registered as an active task, so cleanup aborts and awaits it before discarding the recorder and work directory. Concurrent lifecycle cleanup is tracked so shutdown cannot finish while an earlier discard/workdir cleanup is still pending. Vendor provenance blocker: the upstream live path depends on the same unverified StreamSaver 2.0.5/2.0.6 bundle and remote MITM configuration recorded by transfer.streaming-memory-budget."
     },
     {
       "id": "hls.cache-fallback-disguised-fragments",

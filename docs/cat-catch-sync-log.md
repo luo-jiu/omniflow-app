@@ -563,6 +563,20 @@
 - legacy cleanup: 无；旧 HLS parser/downloader/recorder 和过渡 live/DASH/toolkit 路径仍保留到对应 unit 证据完整，未新增双 owner 或 fallback。
 - validation: 完整 HLS Vitest 47/47、全量 ESLint、TypeScript、`cat-catch:validate`、同步校验 16/16、固定 metadata 7 units/32 capabilities/192 anchors/106 cleanup entries/101 unique planned IDs/55 active refs，以及本切片 scoped diff check 通过。全量 Vitest 为 931 passed / 1 skipped / 16 loopback sandbox failures；4 个相关 loopback 文件在允许监听本机端口的环境复跑 20/20，通过后折算全部可执行测试为 947 passed / 1 skipped。`tools/cat-catch-sync/validate.test.mjs` 由 Node test runner 16/16 通过，被 Vitest 扫描时仅报告 no suite。完整 build 不运行，避免覆盖其他 Agent 正在修改的 `dist-electron/**`；全仓 diff check 也只被该生成文件既有尾随空格阻断。
 
+## 2026-08-27: same target (LL-HLS complete-fragment parity)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动。
+- reviewedThrough / portedThrough: 均保持 `null`；本步补齐 LL-HLS PART 与完整下载分片的一个 parser/live 行为切片，仍未完成 hls-engine cutover。
+- change groups: `behavioral`（PART 不再与随后完整 EXTINF 分片重复下载或计时）与 `verification`（连续 live snapshot 累计）。
+- affected capability IDs: `hls.parser-planner` 保持 `ported-unverified`；`hls.live-recording` 保持 `porting`。
+- fixtures/tests: source-derived fixture `hls-low-latency-parts` 依据固定版 hls.js 的独立 `partList` 与 Cat Catch `parseTs(data.fragments)` 记录两个连续 LL-HLS media playlist；`hls.ll-parts-fragment-parity` 锁定 parser/download-plan 的完整分片、序号、时长和 `partCount=0`；`hls.live-ll-parts-cumulative-parity` 锁定第二轮只下载新完成的 EXTINF 分片，PART 与 PRELOAD-HINT 都不进入累计。
+- accepted difference: 现有 OmniFlow DTO 暂时保留 `part` / `partCount` 兼容字段，但 Cat Catch 等价计划不把原始 PART tag 作为下载项或额外状态源，因此该路径固定为 `false` / `0`。
+- excluded changes and reasons: 本步不实现独立 LL-HLS part 下载器，也不扩展 UI 展示原始 partList；固定 Cat Catch 下载路径本身不消费该列表。
+- unresolved gaps: HLS 其余 parser 标签差分、生产 decrypt responsibility、renderer listener recovery、HLS live 过渡 DTO、真实网站手工验证和最终 hls-engine cutover。
+- runtime changes: pure parser 显式跳过 `EXT-X-PART` 与 `EXT-X-PART-INF`；完整 `EXTINF` 分片保留连续 media sequence，计划时长和直播累计只由这些完整分片组成。
+- legacy cleanup: 无；旧 HLS 链继续保留到 hls-engine 原子 cutover。
+- validation: 完整 HLS Vitest 51/51（含真实 ffmpeg/ffprobe output）、定向 ESLint、`cat-catch:validate`（含固定上游源码）、同步校验 16/16、metadata 计数和 scoped diff check 通过。全量 Vitest 为 929 passed / 1 skipped / 20 failed：其中 16 条 sandbox-only loopback 失败在允许监听本机端口的环境复跑相关 4 文件 20/20 通过，折算后仍有并行内置 Agent 改动导致的 4 条失败；全局 TypeScript 与全仓 lint 同样只被 `electron/service/agent/**` 的在途修改阻断。完整 build 未运行，避免覆盖其他 Agent 正在修改的 `dist-electron/**`；暂无可用真实网站和手工测试场景。
+
 ## Template
 
 ```markdown

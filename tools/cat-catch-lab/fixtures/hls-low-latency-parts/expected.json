@@ -1,0 +1,20 @@
+{
+  "baseUrl": "https://media.example/ll-hls/live.m3u8",
+  "isLive": true,
+  "segmentCount": 2,
+  "fragmentCount": 2,
+  "partCount": 0,
+  "durationSeconds": 8,
+  "segments": [
+    {
+      "url": "https://media.example/ll-hls/segment100.m4s",
+      "sequence": 100,
+      "duration": 4
+    },
+    {
+      "url": "https://media.example/ll-hls/segment101.m4s",
+      "sequence": 101,
+      "duration": 4
+    }
+  ]
+}

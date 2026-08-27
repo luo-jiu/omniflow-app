@@ -1,0 +1,21 @@
+{
+  "fixtureId": "hls-low-latency-parts",
+  "capabilityIds": [
+    "hls.parser-planner",
+    "hls.live-recording"
+  ],
+  "upstreamCommit": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
+  "status": "active",
+  "oracle": "source-derived",
+  "sourceRefs": [
+    "lib/hls.min.js#partList",
+    "js/m3u8.js#parseTs(data)"
+  ],
+  "input": "playlist.m3u8",
+  "nextInput": "playlist-next.m3u8",
+  "expected": "expected.json",
+  "testRefs": [
+    "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.ll-parts-fragment-parity",
+    "electron/service/embeddedBrowserHlsLiveRecorder.test.ts#hls.live-ll-parts-cumulative-parity"
+  ]
+}
