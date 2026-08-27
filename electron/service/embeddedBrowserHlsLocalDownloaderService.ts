@@ -178,11 +178,10 @@ function getRequiredLocalRef<T extends ResourceRefRecord>(
   throw new Error(`重写本地 playlist 失败：分片序号 ${fragmentSequence} 缺少对应的本地${collectionName}文件`)
 }
 
-async function downloadStaticResource(input: {
+async function fetchStaticResourceBuffer(input: {
   byteRange?: EmbeddedBrowserDownloadByteRange
   fetch?: EmbeddedBrowserFragmentFetch
   headers?: Record<string, string>
-  outputPath: string
   url: string
 }) {
   const headers = new Headers(input.headers)
@@ -196,7 +195,17 @@ async function downloadStaticResource(input: {
   if (!response.ok) {
     throw new Error(`HTTP ${response.status}`)
   }
-  const buffer = await response.arrayBuffer()
+  return response.arrayBuffer()
+}
+
+async function downloadStaticResource(input: {
+  byteRange?: EmbeddedBrowserDownloadByteRange
+  fetch?: EmbeddedBrowserFragmentFetch
+  headers?: Record<string, string>
+  outputPath: string
+  url: string
+}) {
+  const buffer = await fetchStaticResourceBuffer(input)
   await writeFile(input.outputPath, new Uint8Array(buffer))
 }
 
@@ -289,12 +298,15 @@ async function prepareKeyRefs(input: {
     if (manualKeyBytes && normalizedMethod === 'AES-128') {
       await writeFile(outputPath, manualKeyBytes)
     } else if (ref.url) {
-      await downloadStaticResource({
+      const keyBuffer = await fetchStaticResourceBuffer({
         fetch: input.fetch,
         headers: input.headers,
-        outputPath,
         url: ref.url,
       })
+      if (normalizedMethod === 'AES-128' && keyBuffer.byteLength !== 16) {
+        throw new Error(`AES-128 key must be 16 bytes, received ${keyBuffer.byteLength}`)
+      }
+      await writeFile(outputPath, new Uint8Array(keyBuffer))
     } else {
       continue
     }

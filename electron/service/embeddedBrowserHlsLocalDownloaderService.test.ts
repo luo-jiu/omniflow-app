@@ -61,4 +61,36 @@ describe('EmbeddedBrowser HLS local downloader', () => {
       ])
     }
   })
+
+  it('hls.key-length-validation', async () => {
+    const fetchImpl = vi.fn(async (url: string) => {
+      if (url.endsWith('/key.bin')) {
+        return new Response(Uint8Array.from([1, 2, 3]).buffer)
+      }
+      return new Response(Uint8Array.from([0x47, 0x01]).buffer)
+    })
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'omniflow-hls-invalid-key-test-'))
+    const plan = {
+      ...createPlan(),
+      fragments: [{
+        ...createPlan().fragments[0],
+        key: {
+          method: 'AES-128',
+          url: 'https://media.example/key.bin',
+        },
+      }],
+    }
+
+    try {
+      await expect(downloadEmbeddedBrowserHlsToLocalWorkDirectory({
+        fetch: fetchImpl,
+        plan,
+        workDirectoryPath: directory,
+      })).rejects.toThrow('AES-128 key must be 16 bytes')
+      expect(fetchImpl).toHaveBeenCalledTimes(1)
+      expect(fetchImpl).toHaveBeenCalledWith('https://media.example/key.bin', expect.anything())
+    } finally {
+      await rm(directory, { force: true, recursive: true })
+    }
+  })
 })

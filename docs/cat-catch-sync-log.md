@@ -395,6 +395,20 @@
 - legacy cleanup: 无；现有 ffmpeg/playlist 解密路径继续承担生产职责。
 - validation: 定向 decrypt 测试 4/4；待本步提交前重跑 HLS 全集、TypeScript、定向 ESLint、`cat-catch:validate`、同步校验和 diff 检查；完整 build 仍因其他 Agent 的 `dist-electron/**` 修改未运行。
 
+## 2026-08-27: same target (HLS AES-128 key length guard)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动。
+- reviewedThrough / portedThrough: 均保持 `null`；本步补齐上游 key fetch 对 AES-128 16-byte 内容的前置约束，仍未完成 hls-engine cutover。
+- change groups: `behavioral`（key 内容长度校验失败时停止准备，不继续下载媒体分片）。
+- affected capability IDs: `hls.segment-pipeline` 继续为 `porting`。
+- fixtures/tests: `embeddedBrowserHlsLocalDownloaderService.test.ts#hls.key-length-validation` 使用 3-byte key，断言在 key 请求后立即失败且媒体 URL 未被请求。
+- accepted difference: 手动输入 key 在已有 base64/16-byte 规范化阶段校验；本步只覆盖网络 key，非 AES 方法仍按原有 playlist 兼容路径保留。
+- excluded changes and reasons: 不在本步实现 key 解密、key cache 生命周期、统一 task/cancel owner 或旧 downloader 删除。
+- unresolved gaps: production decrypt adapter、key authority/redirect 语义、完整 output smoke、一次性 cache fallback、统一 task/cleanup 和 page validation。
+- runtime changes: 抽出 `fetchStaticResourceBuffer`，网络 AES-128 key 写盘前严格要求 16 字节；map 与普通静态资源继续复用同一读取路径。
+- legacy cleanup: 无；现有 ffmpeg/playlist 解密路径继续承担生产职责。
+- validation: HLS 相关 Vitest 11/11、TypeScript、定向 ESLint、`cat-catch:validate` 和同步校验 16/16 通过；完整 build 未运行，原因仍是其他 Agent 修改了 `dist-electron/**`。
+
 ## Template
 
 ```markdown
