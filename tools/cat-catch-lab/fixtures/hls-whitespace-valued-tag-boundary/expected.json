@@ -1,0 +1,20 @@
+{
+  "baseUrlRoot": "https://media.example/whitespace/",
+  "define": {
+    "durationSeconds": 4,
+    "fragments": [
+      {
+        "duration": 4,
+        "sequence": 0,
+        "url": "https://media.example/whitespace/.ts"
+      }
+    ]
+  },
+  "errors": {
+    "byterange": "Invalid HLS BYTERANGE",
+    "map": "EXT-X-MAP URI must be a non-empty string",
+    "partInf": "#EXT-X-PART-INF must not appear more than once (#EXT-X-PART-INF:   )",
+    "playlistType": "#EXT-X-PLAYLIST-TYPE must not appear more than once (#EXT-X-PLAYLIST-TYPE:VOD)",
+    "serverControl": "#EXT-X-SERVER-CONTROL must not appear more than once (#EXT-X-SERVER-CONTROL:   )"
+  }
+}

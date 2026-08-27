@@ -9,7 +9,8 @@
  * Fixtures: hls.byterange-map-key-discontinuity, hls.map-byterange-independent,
  * hls.map-leading-byterange-transfer, hls-valued-tag-boundary,
  * hls-extinf-token-boundary, hls-empty-valued-tag-boundary,
- * hls-media-parser-mode-isolation, hls-master-parser-mode-isolation
+ * hls-whitespace-valued-tag-boundary, hls-media-parser-mode-isolation,
+ * hls-master-parser-mode-isolation
  */
 
 import { createHlsDefaultIv } from './decrypt'
@@ -711,7 +712,8 @@ export function parseHlsManifest(input: {
   }
   const lines = text
     .split(/\r?\n/)
-    .map(line => line.trim())
+    // The pinned (.+) valued-tag branch treats trailing whitespace as payload.
+    .map(line => line.trimStart())
     .filter(Boolean)
 
   if (lines[0] !== '#EXTM3U') {
@@ -724,6 +726,7 @@ export function parseHlsManifest(input: {
   let targetDuration: number | undefined
   let playlistVersion: number | undefined
   let playlistType: string | undefined
+  let playlistTypeSeen = false
   let hasEndList = false
   let initialDiscontinuitySequence = 0
   let discontinuitySequence = 0
@@ -859,9 +862,10 @@ export function parseHlsManifest(input: {
     }
     if (line.startsWith('#EXT-X-PLAYLIST-TYPE:')) {
       if (!hasHlsValuedTagPayload(line)) continue
-      if (playlistType !== undefined) {
+      if (playlistTypeSeen) {
         assignMultipleMediaPlaylistTagError(variableState, 'PLAYLIST-TYPE', line)
       }
+      playlistTypeSeen = true
       playlistType = getTagValue(line).toUpperCase() || undefined
       continue
     }
@@ -928,7 +932,7 @@ export function parseHlsManifest(input: {
       if (!hasHlsValuedTagPayload(line)) continue
       const rawByteRange = getTagValue(line)
       pendingByteRange = parseHlsByteRange(rawByteRange)
-      if (rawByteRange && !pendingByteRange) {
+      if (!pendingByteRange) {
         rememberVariableParsingError(variableState, 'Invalid HLS BYTERANGE')
       }
       continue
@@ -957,7 +961,7 @@ export function parseHlsManifest(input: {
       continue
     }
     if (line.startsWith('#EXT-X-PART-INF:')) {
-      if (!getTagValue(line)) continue
+      if (!hasHlsValuedTagPayload(line)) continue
       if (partTarget) {
         assignMultipleMediaPlaylistTagError(variableState, 'PART-INF', line)
       }
@@ -974,7 +978,7 @@ export function parseHlsManifest(input: {
       continue
     }
     if (line.startsWith('#EXT-X-SERVER-CONTROL:')) {
-      if (!getTagValue(line)) continue
+      if (!hasHlsValuedTagPayload(line)) continue
       if (serverControlSeen) {
         assignMultipleMediaPlaylistTagError(variableState, 'SERVER-CONTROL', line)
       }

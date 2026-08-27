@@ -140,7 +140,7 @@ unit 是生产切换与删除旧实现的最小边界。可以在 unit 内逐项
 
 ## 7. 当前状态怎么判断
 
-当前固定目标为 Cat Catch `2cb981d7c2f4614732edccc167c4b5793d1cb138`。初始映射包含 7 个 unit 和 32 项 capability；逐项状态以 capability map 为准，目前有 94 个唯一计划测试引用已落成真实 pure behavior/contract、fake/real Electron integration 或 loopback redirect test，尚未完成任何 unit cutover。目标 network runtime、opaque resource authority、部分 HLS/DASH transport 与 HLS pure parser 已进入 production 或等价测试链，但未捕获 fallback、旧 toolkit、完整 parser/processing 语义及 unit 原子 cutover 仍待完成，因此旧链仍部分承担生产职责。
+当前固定目标为 Cat Catch `2cb981d7c2f4614732edccc167c4b5793d1cb138`。初始映射包含 7 个 unit 和 32 项 capability；逐项状态以 capability map 为准，目前有 95 个唯一计划测试引用已落成真实 pure behavior/contract、fake/real Electron integration 或 loopback redirect test，尚未完成任何 unit cutover。目标 network runtime、opaque resource authority、部分 HLS/DASH transport 与 HLS pure parser 已进入 production 或等价测试链，但未捕获 fallback、旧 toolkit、完整 parser/processing 语义及 unit 原子 cutover 仍待完成，因此旧链仍部分承担生产职责。
 
 旧代码中存在网络捕捉、MSE、HLS、DASH、下载、ffmpeg 和资料库导入入口，只能说明有 characterization 输入，不能据此宣称已经迁移。完成一项能力至少需要：
 

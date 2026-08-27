@@ -804,7 +804,8 @@
         "hls.extinf-token-boundary",
         "hls.empty-valued-tag-boundary",
         "hls.media-parser-mode-isolation",
-        "hls.master-parser-mode-isolation"
+        "hls.master-parser-mode-isolation",
+        "hls.whitespace-valued-tag-boundary"
       ],
       "testRefs": [
         "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.parser-core",
@@ -836,7 +837,8 @@
         "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.extinf-token-boundary",
         "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.empty-valued-tag-boundary",
         "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.media-parser-mode-isolation",
-        "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.master-parser-mode-isolation"
+        "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.master-parser-mode-isolation",
+        "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.whitespace-valued-tag-boundary"
       ],
       "acceptedDifferences": [
         "Pinned hls.js records the first variable parsing error on the playlist and its evented loader rejects that parse; the synchronous OmniFlow facade throws the same first error because it has no loader event boundary.",

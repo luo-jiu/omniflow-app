@@ -969,6 +969,20 @@
 - legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
 - validation: 固定 Cat Catch vendor executable oracle 只产生 `variant.m3u8 / bandwidth=1000000`，不产生 fragment/key/MAP/range；无普通 level 输入报 `no levels found in manifest`。失败证据为 parser `32/33`，错误生成 `stray.ts`、AES key、MAP 和 `10@0` range。实现后 parser `33/33`、完整 HLS 集合 `90/90`、fixture/capability JSON、全仓 ESLint、轻量 validator、固定上游校验、同步校验 `16/16`、metadata `7 units / 32 capabilities / 197 anchors / 106 cleanup entries / 140 planned IDs / 94 active refs` 和 scoped diff check 通过。排除 4 个需监听本机端口的文件及已由 `node --test` 单独执行的同步文件后，全量 Vitest 为 `178 files / 1166 passed / 3 skipped`；4 个 loopback 文件在沙箱外复跑 `20/20`，合计全部可执行测试 `1186 passed / 3 skipped`。TypeScript 当前仅被其他 Agent 在途的 `agent-orchestrator.test.ts` 泛型 mock 与 `agent-tool-executor.ts` 旧 `filePath` 字段共 3 个类型错误阻断。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
 
+## 2026-08-28: same target (HLS whitespace valued tag payload boundary)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，固定实际 vendor 为 hls.js `1.6.16`。
+- reviewedThrough / portedThrough: 均保持 `null`；本步闭合 media slow regex 把行尾 whitespace 识别为 `(.+)` payload 的词法边界，仍未完成 hls-engine cutover。
+- change groups: `behavioral`（固定 zero-character 与 whitespace payload 的分支差异）与 `state-stability`（MAP/range/variable/singleton 状态顺序）。
+- affected capability IDs: `hls.parser-planner` 保持 `ported-unverified`；新增 1 个 active test ID，复用既有 media slow regex 上游 anchor。
+- fixtures/tests: 新增 upstream-executable fixture `hls-whitespace-valued-tag-boundary`；`hls.whitespace-valued-tag-boundary` 用 JSON `\u0020` 显式保留不可见行尾，覆盖 whitespace-only `MAP/BYTERANGE/DEFINE/PLAYLIST-TYPE/PART-INF/SERVER-CONTROL` 对 init/range/变量替换和重复声明的影响，并锁定 define 后 manifest/download plan 的 `.ts` URL、duration 和 sequence。
+- accepted difference: 固定 hls.js 对 whitespace MAP 生成 `url=""` init，对 whitespace BYTERANGE 保留 `[0, NaN]`，Cat Catch 随后会抓取错误 init 或构造不可执行 Range；OmniFlow 复用已记录的稳定拒绝，分别报空 MAP URI 和非法 BYTERANGE。DEFINE 替换及三类 singleton error 与上游一致。
+- excluded changes and reasons: 不投影 `PROGRAM-DATE-TIME/GAP/DATERANGE/BITRATE/PRELOAD-HINT/RENDITION-REPORT` 等 Cat Catch `parseTs` 不消费的播放 metadata，不新增 parser 框架、IPC 或 renderer 状态。
+- unresolved gaps: HLS 其余真正影响下载的 parser 差分、live 未捕获 URL 过渡 DTO、加密 fMP4/video 真实输出组合、真实网站手工验证和最终 hls-engine cutover。
+- runtime changes: manifest 行只移除前导 whitespace，保留行尾供 `hasHlsValuedTagPayload` 判定；属性解析和 URI 仍按既有规则 trim。PLAYLIST-TYPE 独立记录 branch seen 状态，PART-INF/SERVER-CONTROL 用原始 payload 门禁，whitespace BYTERANGE 进入既有非法范围拒绝；bare `TAG:` 行为不变。
+- legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
+- validation: 固定 Cat Catch vendor executable oracle 证明 whitespace DEFINE 把 `{$undefined}.ts` 解析为 `.ts`，whitespace MAP 生成空 init、whitespace BYTERANGE 生成 `[0, NaN]`，PLAYLIST-TYPE/PART-INF/SERVER-CONTROL 分别保留固定重复声明错误。失败证据为 parser `33/34`，DEFINE 行被预先 trim 后错误报告缺失变量。实现后 parser `34/34`、完整 HLS 集合 `91/91`、TypeScript、全仓 ESLint、fixture/capability JSON、轻量 validator、固定上游校验、同步校验 `16/16`、metadata `7 units / 32 capabilities / 197 anchors / 106 cleanup entries / 141 planned IDs / 95 active refs` 和 scoped diff check 通过。排除 5 个需监听本机端口的文件及已由 `node --test` 单独执行的同步文件后，全量 Vitest 为 `178 files / 1171 passed / 3 skipped`；5 个 loopback 文件在沙箱外复跑 `23/23`，合计全部可执行测试 `1194 passed / 3 skipped`。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
+
 ## Template
 
 ```markdown

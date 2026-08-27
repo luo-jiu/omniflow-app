@@ -140,6 +140,24 @@ const emptyValuedTagExpected = JSON.parse(readFileSync(`${emptyValuedTagFixtureR
   playlistType: string
   undefinedVariableError: string
 }
+const whitespaceValuedTagFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-whitespace-valued-tag-boundary', import.meta.url))
+const whitespaceValuedTagFixture = JSON.parse(readFileSync(`${whitespaceValuedTagFixtureRoot}/fixture.json`, 'utf8')) as {
+  expected: string
+  input: string
+}
+const whitespaceValuedTagInputs = JSON.parse(readFileSync(`${whitespaceValuedTagFixtureRoot}/${whitespaceValuedTagFixture.input}`, 'utf8')) as Record<string, string[]>
+const whitespaceValuedTagExpected = JSON.parse(readFileSync(`${whitespaceValuedTagFixtureRoot}/${whitespaceValuedTagFixture.expected}`, 'utf8')) as {
+  baseUrlRoot: string
+  define: {
+    durationSeconds: number
+    fragments: Array<{
+      duration: number
+      sequence: number
+      url: string
+    }>
+  }
+  errors: Record<string, string>
+}
 const mediaModeFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-media-parser-mode-isolation', import.meta.url))
 const mediaModeFixture = JSON.parse(readFileSync(`${mediaModeFixtureRoot}/fixture.json`, 'utf8')) as {
   expected: string
@@ -1030,6 +1048,34 @@ describe('Cat Catch HLS parser', () => {
         'utf8',
       ),
     })).toThrow(emptyValuedTagExpected.undefinedVariableError)
+  })
+
+  it('hls.whitespace-valued-tag-boundary', () => {
+    const parseInput = (name: string) => parseHlsManifest({
+      baseUrl: `${whitespaceValuedTagExpected.baseUrlRoot}${name}.m3u8`,
+      text: `${whitespaceValuedTagInputs[name].join('\n')}\n`,
+    })
+    const manifest = parseInput('define')
+    expect(manifest.durationSeconds).toBe(whitespaceValuedTagExpected.define.durationSeconds)
+    expect(manifest.segments.map(segment => ({
+      duration: segment.duration,
+      sequence: segment.sequence,
+      url: segment.url,
+    }))).toEqual(whitespaceValuedTagExpected.define.fragments)
+
+    const plan = createEmbeddedBrowserHlsDownloadPlan({
+      manifest,
+      manifestUrl: `${whitespaceValuedTagExpected.baseUrlRoot}define.m3u8`,
+    })
+    expect(plan.fragments.map(fragment => ({
+      duration: fragment.duration,
+      sequence: fragment.sequence,
+      url: fragment.url,
+    }))).toEqual(whitespaceValuedTagExpected.define.fragments)
+
+    for (const [name, expectedError] of Object.entries(whitespaceValuedTagExpected.errors)) {
+      expect(() => parseInput(name), name).toThrow(expectedError)
+    }
   })
 
   it('hls.media-parser-mode-isolation', () => {

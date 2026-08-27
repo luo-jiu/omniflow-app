@@ -1,0 +1,55 @@
+{
+  "byterange": [
+    "#EXTM3U",
+    "#EXT-X-TARGETDURATION:4",
+    "#EXT-X-BYTERANGE:10@20",
+    "#EXT-X-BYTERANGE:\u0020\u0020\u0020",
+    "#EXTINF:4,",
+    "a.ts",
+    "#EXT-X-ENDLIST"
+  ],
+  "define": [
+    "#EXTM3U",
+    "#EXT-X-TARGETDURATION:4",
+    "#EXT-X-DEFINE:\u0020\u0020\u0020",
+    "#EXTINF:4,",
+    "{$undefined}.ts",
+    "#EXT-X-ENDLIST"
+  ],
+  "map": [
+    "#EXTM3U",
+    "#EXT-X-TARGETDURATION:4",
+    "#EXT-X-MAP:URI=\"old.mp4\"",
+    "#EXT-X-MAP:\u0020\u0020\u0020",
+    "#EXTINF:4,",
+    "a.m4s",
+    "#EXT-X-ENDLIST"
+  ],
+  "partInf": [
+    "#EXTM3U",
+    "#EXT-X-TARGETDURATION:4",
+    "#EXT-X-PART-INF:PART-TARGET=1",
+    "#EXT-X-PART-INF:\u0020\u0020\u0020",
+    "#EXTINF:4,",
+    "a.ts",
+    "#EXT-X-ENDLIST"
+  ],
+  "playlistType": [
+    "#EXTM3U",
+    "#EXT-X-TARGETDURATION:4",
+    "#EXT-X-PLAYLIST-TYPE:\u0020\u0020\u0020",
+    "#EXT-X-PLAYLIST-TYPE:VOD",
+    "#EXTINF:4,",
+    "a.ts",
+    "#EXT-X-ENDLIST"
+  ],
+  "serverControl": [
+    "#EXTM3U",
+    "#EXT-X-TARGETDURATION:4",
+    "#EXT-X-SERVER-CONTROL:CAN-BLOCK-RELOAD=YES",
+    "#EXT-X-SERVER-CONTROL:\u0020\u0020\u0020",
+    "#EXTINF:4,",
+    "a.ts",
+    "#EXT-X-ENDLIST"
+  ]
+}
