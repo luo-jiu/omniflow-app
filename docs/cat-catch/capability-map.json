@@ -878,7 +878,9 @@
         "electron/service/embedded-browser/integrations/hls-manifest-authority.ts#resolveHlsManifestAuthority",
         "electron/service/embedded-browser/integrations/hls-manifest-authority.ts#resolveHlsTrackAuthorities",
         "electron/service/embeddedBrowserResourceManifestDownloadService.ts#buildEmbeddedBrowserManifestTrackMergeArgs",
-        "src/features/embedded-browser/resources/model/embedded-browser-hls-resource-authority.ts#resolveCapturedHlsManifestResourceId"
+        "src/features/embedded-browser/resources/model/embedded-browser-hls-resource-authority.ts#resolveCapturedHlsManifestResourceId",
+        "electron/service/embedded-browser/processing/hls-session-owner.ts#taskSnapshots",
+        "src/features/tool-workspace/hooks/useHlsDownloadTask.ts#useHlsDownloadTask"
       ],
       "relationToUpstream": "platform-substitute",
       "syncState": "porting",
@@ -901,7 +903,9 @@
         "hls.track-independent-authority",
         "hls.renderer-exact-manifest-authority",
         "hls.renderer-requires-both-track-authorities",
-        "hls.track-input-header-isolation"
+        "hls.track-input-header-isolation",
+        "hls.renderer-task-listener-recovery",
+        "hls.renderer-task-snapshot-ipc"
       ],
       "testRefs": [
         "electron/service/embeddedBrowserFragmentDownloader.test.ts#hls.plan-authority-fetch",
@@ -921,12 +925,14 @@
         "electron/service/embedded-browser/integrations/hls-manifest-authority.test.ts#hls.track-independent-authority",
         "src/features/embedded-browser/resources/model/embedded-browser-hls-resource-authority.test.ts#hls.renderer-exact-manifest-authority",
         "src/features/embedded-browser/resources/model/embedded-browser-hls-resource-authority.test.ts#hls.renderer-requires-both-track-authorities",
-        "electron/service/embeddedBrowserHlsOutput.test.ts#hls.track-input-header-isolation"
+        "electron/service/embeddedBrowserHlsOutput.test.ts#hls.track-input-header-isolation",
+        "src/features/tool-workspace/hooks/useHlsDownloadTask.test.ts#hls.renderer-task-listener-recovery",
+        "electron/service/embeddedBrowserMainIpc.test.ts#hls.renderer-task-snapshot-ipc"
       ],
       "acceptedDifferences": [
         "Cat Catch decrypts AES-128 fragments in its JavaScript downloader; OmniFlow preserves the pure key/IV behavior port but delegates production local-playlist decryption and remuxing to the single cancellable ffmpeg owner, avoiding a second decrypt pass."
       ],
-      "notes": "Plan execution now accepts a main-owned fetch transport: captured fragment/key/map URLs are redeemed through the current tab resource authority with bounded Range support, while unrecognized URLs retain the embedded-session fallback. Direct HLS download now accepts only one exact opaque resource id; track merge accepts independent video/audio resource ids, redeems each URL and protected header set in main, and applies the two header sets to separate ffmpeg inputs. Renderer resolves those ids only from the current active resource snapshot and explicitly rejects uncaptured selected child manifests instead of reusing a parent authority. The fragment downloader now supports an ordered async processor chain, emits each processed stage, retries failed fetch or processor attempts, and exposes an aborted terminal event. HLS local execution carries one AbortSignal through key, map, and media-fragment fetches and destroys the downloader on success, failure, or cancellation, preserving the Cat Catch use() pipeline boundary for decrypt/transcode steps. A production-contract smoke verifies the rewritten local playlist plus key/map/media files are handed to the ffmpeg wrapper and that zero-exit without a non-empty output is rejected; conditional real-binary integrations verify both clear and AES-128 encrypted local HLS through the production ffmpeg wrapper, then use ffprobe to prove non-empty MP4 output with an AAC stream and positive duration. The tab/request-scoped HLS session owner now holds active direct/track/plan/retry/live-export tasks as well as retry/live state. Production navigation, tab close, view destruction, render-process loss, controller disposal, and application graceful shutdown all route through one HLS host lifecycle; it aborts and awaits active work before removing retry/live work directories, and controller disposal also waits for cleanup already claimed by an earlier lifecycle event. Renderer listener recovery remains open. Vendor provenance blockers: lib/third-party-libraries.md attributes m3u8-decrypt.js to the mutable hls.js master path rather than an immutable revision; the loaded StreamSaver bundle self-reports 2.0.5 while that document declares 2.0.6, has no verified immutable artifact binding, and retains remote MITM configuration."
+      "notes": "Plan execution now accepts a main-owned fetch transport: captured fragment/key/map URLs are redeemed through the current tab resource authority with bounded Range support, while unrecognized URLs retain the embedded-session fallback. Direct HLS download now accepts only one exact opaque resource id; track merge accepts independent video/audio resource ids, redeems each URL and protected header set in main, and applies the two header sets to separate ffmpeg inputs. Renderer resolves those ids only from the current active resource snapshot and explicitly rejects uncaptured selected child manifests instead of reusing a parent authority. The fragment downloader now supports an ordered async processor chain, emits each processed stage, retries failed fetch or processor attempts, and exposes an aborted terminal event. HLS local execution carries one AbortSignal through key, map, and media-fragment fetches and destroys the downloader on success, failure, or cancellation, preserving the Cat Catch use() pipeline boundary for decrypt/transcode steps. A production-contract smoke verifies the rewritten local playlist plus key/map/media files are handed to the ffmpeg wrapper and that zero-exit without a non-empty output is rejected; conditional real-binary integrations verify both clear and AES-128 encrypted local HLS through the production ffmpeg wrapper, then use ffprobe to prove non-empty MP4 output with an AAC stream and positive duration. The tab/request-scoped HLS session owner now holds active direct/track/plan/retry/live-export tasks, retry/live state, and at most 32 latest safe task projections. Every emitted projection receives a main-owned monotonic revision; renderer subscribes before reading the snapshot IPC, rejects older revisions and restores only the current tab plus current manifest/variant/rendition set. Ordinary task projections survive renderer listener remount; live recording still discards on tool unmount and cleans its frozen output directory because the library delivery target is not application-scoped yet. Production navigation, tab close, view destruction, render-process loss, controller disposal, and application graceful shutdown all route through one HLS host lifecycle; it aborts and awaits active work, clears task projections, removes retry/live work directories, and controller disposal also waits for cleanup already claimed by an earlier lifecycle event. Vendor provenance blockers: lib/third-party-libraries.md attributes m3u8-decrypt.js to the mutable hls.js master path rather than an immutable revision; the loaded StreamSaver bundle self-reports 2.0.5 while that document declares 2.0.6, has no verified immutable artifact binding, and retains remote MITM configuration."
     },
     {
       "id": "hls.live-recording",
@@ -967,7 +973,8 @@
       ],
       "targetRefs": [
         "electron/service/embedded-browser/processing/hls-live-task.ts#HlsLiveTask",
-        "electron/service/embedded-browser/processing/hls-session-owner.ts#EmbeddedBrowserHlsSessionOwner"
+        "electron/service/embedded-browser/processing/hls-session-owner.ts#EmbeddedBrowserHlsSessionOwner",
+        "src/features/tool-workspace/hooks/useHlsDownloadTask.ts#useHlsDownloadTask"
       ],
       "relationToUpstream": "platform-substitute",
       "syncState": "porting",
@@ -981,7 +988,8 @@
         "hls.session-owner-tab-cleanup",
         "hls.live-parent-variable-authority",
         "hls.live-import-variable-recording",
-        "hls.live-parent-variable-abort"
+        "hls.live-parent-variable-abort",
+        "hls.live-unmount-output-cleanup"
       ],
       "testRefs": [
         "electron/service/embeddedBrowserHlsLiveRecorder.test.ts#hls.live-terminal",
@@ -992,10 +1000,11 @@
         "electron/service/embedded-browser/processing/hls-session-owner.test.ts#hls.live-tab-close-exit",
         "electron/service/embedded-browser/integrations/hls-manifest-authority.test.ts#hls.live-parent-variable-authority",
         "electron/service/embeddedBrowserHlsLiveRecorder.test.ts#hls.live-import-variable-recording",
-        "electron/service/embeddedBrowserHlsLiveRecorder.test.ts#hls.live-parent-variable-abort"
+        "electron/service/embeddedBrowserHlsLiveRecorder.test.ts#hls.live-parent-variable-abort",
+        "src/features/tool-workspace/hooks/useHlsDownloadTask.test.ts#hls.live-unmount-output-cleanup"
       ],
       "acceptedDifferences": [],
-      "notes": "Live start accepts an opaque resourceId and binds captured manifest/segment polling to the current tab's authority-aware fetch; unrecognized URLs still use the embedded-session fallback. When a selected child playlist declares EXT-X-DEFINE:IMPORT, the recorder lazily asks a main-owned resolver to fetch the original captured master with its retained authority, verifies that the child URL belongs to that master, and reuses only the explicitly imported variable list across later polls; the resolver shares the recorder AbortSignal and renderer values cannot override it. Its initial manifest request preserves Cat Catch's single force-cache recovery after an HTTP failure; later live polls and response-less network errors do not retry. The recorder owns one AbortController across parent resolution, manifest and segment polling, exposes discard, and has executable terminal/discard tests. Consecutive LL-HLS snapshots append only newly completed EXTINF fragments; partial and preload entries neither download nor inflate cumulative duration. Navigation, tab close, view destruction, render-process loss, controller disposal, and graceful application exit route through the production HLS host lifecycle; live export ffmpeg is registered as an active task, so cleanup aborts and awaits it before discarding the recorder and work directory. Concurrent lifecycle cleanup is tracked so shutdown cannot finish while an earlier discard/workdir cleanup is still pending. Vendor provenance blocker: the upstream live path depends on the same unverified StreamSaver 2.0.5/2.0.6 bundle and remote MITM configuration recorded by transfer.streaming-memory-budget."
+      "notes": "Live start accepts an opaque resourceId and binds captured manifest/segment polling to the current tab's authority-aware fetch; unrecognized URLs still use the embedded-session fallback. When a selected child playlist declares EXT-X-DEFINE:IMPORT, the recorder lazily asks a main-owned resolver to fetch the original captured master with its retained authority, verifies that the child URL belongs to that master, and reuses only the explicitly imported variable list across later polls; the resolver shares the recorder AbortSignal and renderer values cannot override it. Its initial manifest request preserves Cat Catch's single force-cache recovery after an HTTP failure; later live polls and response-less network errors do not retry. The recorder owns one AbortController across parent resolution, manifest and segment polling, exposes discard, and has executable terminal/discard tests. Consecutive LL-HLS snapshots append only newly completed EXTINF fragments; partial and preload entries neither download nor inflate cumulative duration. Main keeps a bounded live task projection, but the feature-scoped library delivery target cannot be reconstructed after unmount yet; switching HLS request or unmounting the tool therefore discards the live session and cleans the frozen output directory instead of presenting a false recovery. A newly mounted renderer does not adopt a briefly retained live snapshot while that discard is settling. Navigation, tab close, view destruction, render-process loss, controller disposal, and graceful application exit route through the production HLS host lifecycle; live export ffmpeg is registered as an active task, so cleanup aborts and awaits it before discarding the recorder, task projection, and work directory. Concurrent lifecycle cleanup is tracked so shutdown cannot finish while an earlier discard/workdir cleanup is still pending. Vendor provenance blocker: the upstream live path depends on the same unverified StreamSaver 2.0.5/2.0.6 bundle and remote MITM configuration recorded by transfer.streaming-memory-budget."
     },
     {
       "id": "hls.cache-fallback-disguised-fragments",
@@ -1497,7 +1506,7 @@
       ],
       "testRefs": [],
       "acceptedDifferences": [],
-      "notes": "Feature component unmount currently loses the task projection and listener ownership; no application-scoped recovery projection exists."
+      "notes": "HLS now recovers a bounded main-owned task projection after renderer listener remount, but processing and delivery are still not a single application-scoped workflow. In particular, the frozen library target and UploadManager handoff remain feature-scoped, so live recording must discard on tool unmount until this coordinator and staged-output lease exist."
     },
     {
       "id": "output.library-delivery-handoff",

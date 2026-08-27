@@ -17,8 +17,10 @@ import {
   downloadEmbeddedBrowserHlsTracks,
   downloadEmbeddedBrowserHlsPlan,
   listEmbeddedBrowserCapturedResources,
+  listEmbeddedBrowserHlsTaskSnapshots,
   retryEmbeddedBrowserHlsPlanFailed,
   subscribeEmbeddedBrowserHlsTask,
+  type EmbeddedBrowserHlsTaskProjection,
 } from '@/features/embedded-browser/resources/services/embedded-browser-resource.api';
 import { withResourceRefererHeader } from '@/features/embedded-browser/resources/services/embedded-browser-resource-request';
 import {
@@ -29,6 +31,7 @@ import {
   resolveCapturedHlsManifestResourceId,
   resolveCapturedHlsTrackResourceIds,
 } from '@/features/embedded-browser/resources/model/embedded-browser-hls-resource-authority';
+import { selectNewestMatchingHlsTaskProjection } from './hls-task-projection';
 
 import type { ToolWorkspaceMediaHlsRequest } from '../types';
 
@@ -386,6 +389,7 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
   });
   const activeHlsTaskRequestIdRef = React.useRef('');
   const activeHlsTaskManifestUrlRef = React.useRef('');
+  const activeHlsTaskRevisionRef = React.useRef(0);
   const activeHlsKeyVerificationTokenRef = React.useRef('');
   const hlsLiveRecordingStateRef = React.useRef<HlsLiveRecordingState>('idle');
   const hlsTaskStateRef = React.useRef<HlsTaskStatus['state']>('idle');
@@ -469,6 +473,11 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
   const hlsSelectedSubtitleRendition = React.useMemo(() => (
     hlsSubtitleRenditions.find((rendition) => rendition.url === selectedHlsSubtitleRenditionUrl) || null
   ), [hlsSubtitleRenditions, selectedHlsSubtitleRenditionUrl]);
+  const hlsTaskManifestUrls = React.useMemo(() => Array.from(new Set([
+    hlsRequest?.plan.manifestUrl,
+    ...(hlsRequest?.plan.variants || []).map(variant => variant.url),
+    ...(hlsRequest?.plan.renditions || []).map(rendition => rendition.url),
+  ].map(value => String(value || '').trim()).filter(Boolean))), [hlsRequest]);
   const hlsCanSelectVariant = Boolean(
     hlsRequest?.plan.isMaster
     && /^https?:\/\//i.test(hlsRequest?.plan.manifestUrl || '')
@@ -516,19 +525,23 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
       const shouldDiscardLiveSession = (
         previousRequest?.plan.isLive
         && (
-        liveState === 'recording'
-        || liveState === 'starting'
-        || (liveState === 'idle' && hlsTaskStateRef.current === 'error')
+          liveState === 'recording'
+          || liveState === 'starting'
+          || (liveState === 'idle' && hlsTaskStateRef.current === 'error')
         )
       );
       if (!previousRequest || !requestId || !shouldDiscardLiveSession) {
         return;
       }
+      const outputTarget = hlsOutputTargetRef.current?.requestId === requestId
+        ? hlsOutputTargetRef.current
+        : null;
       void discardEmbeddedBrowserHlsRecording(previousRequest.resource.tabId, {
         requestId,
       })
         .catch(() => undefined)
-        .finally(() => {
+        .finally(async () => {
+          await outputTarget?.cleanupOutputDirectory().catch(() => undefined);
           if (activeHlsTaskRequestIdRef.current === requestId) {
             activeHlsTaskRequestIdRef.current = '';
             activeHlsTaskManifestUrlRef.current = '';
@@ -551,6 +564,7 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
     setHlsLiveRecordingState('idle');
     activeHlsTaskRequestIdRef.current = '';
     activeHlsTaskManifestUrlRef.current = '';
+    activeHlsTaskRevisionRef.current = 0;
     activeHlsKeyVerificationTokenRef.current = '';
     hlsOutputTargetRef.current = null;
     setHlsTaskStatus({
@@ -592,19 +606,37 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
   }, [hlsManualKeyDraft, selectedHlsVariantUrl, hlsRequest]);
 
   React.useEffect(() => {
-    const unsubscribe = subscribeEmbeddedBrowserHlsTask((payload) => {
-      if (!hlsRequest || payload.tabId !== hlsRequest.resource.tabId) {
+    if (!hlsRequest) {
+      return;
+    }
+    let disposed = false;
+    const applyProjection = (candidate: EmbeddedBrowserHlsTaskProjection) => {
+      if (hlsRequest.plan.isLive && !activeHlsTaskRequestIdRef.current) {
         return;
       }
-      if (payload.requestId && activeHlsTaskRequestIdRef.current && payload.requestId !== activeHlsTaskRequestIdRef.current) {
+      const payload = selectNewestMatchingHlsTaskProjection([candidate], {
+        afterRevision: activeHlsTaskRevisionRef.current,
+        manifestUrls: hlsTaskManifestUrls,
+        requestId: activeHlsTaskRequestIdRef.current || undefined,
+        tabId: hlsRequest.resource.tabId,
+      });
+      if (!payload) {
         return;
       }
-      if (payload.manifestUrl !== (activeHlsTaskManifestUrlRef.current || hlsRequest.plan.manifestUrl)) {
-        return;
+      activeHlsTaskRevisionRef.current = payload.revision;
+      if (!activeHlsTaskRequestIdRef.current && payload.requestId) {
+        activeHlsTaskRequestIdRef.current = payload.requestId;
+        activeHlsTaskManifestUrlRef.current = payload.manifestUrl;
       }
-      if (payload.requestId && payload.requestId === activeHlsTaskRequestIdRef.current) {
-        if (payload.status === 'error' || payload.status === 'success') {
+      if (hlsRequest.plan.isLive && payload.requestId === activeHlsTaskRequestIdRef.current) {
+        if (payload.status !== 'running') {
           setHlsLiveRecordingState('idle');
+        } else if (payload.stage === 'preparing') {
+          setHlsLiveRecordingState('starting');
+        } else if (payload.stage === 'rewriting-playlist' || payload.stage === 'ffmpeg') {
+          setHlsLiveRecordingState('stopping');
+        } else {
+          setHlsLiveRecordingState('recording');
         }
       }
       setHlsTaskStatus((previous) => {
@@ -645,9 +677,29 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
           totalFragments: payload.totalFragments ?? previous.totalFragments,
         };
       });
-    });
-    return unsubscribe;
-  }, [hlsRequest]);
+    };
+    const unsubscribe = subscribeEmbeddedBrowserHlsTask(applyProjection);
+    void listEmbeddedBrowserHlsTaskSnapshots(hlsRequest.resource.tabId)
+      .then((snapshots) => {
+        if (disposed) {
+          return;
+        }
+        const snapshot = selectNewestMatchingHlsTaskProjection(snapshots, {
+          afterRevision: activeHlsTaskRevisionRef.current,
+          manifestUrls: hlsTaskManifestUrls,
+          requestId: activeHlsTaskRequestIdRef.current || undefined,
+          tabId: hlsRequest.resource.tabId,
+        });
+        if (snapshot) {
+          applyProjection(snapshot);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      disposed = true;
+      unsubscribe();
+    };
+  }, [hlsRequest, hlsTaskManifestUrls]);
 
   const handleSaveHls = React.useCallback(async () => {
     if (!hlsRequest) {

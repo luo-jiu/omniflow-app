@@ -633,6 +633,20 @@
 - legacy cleanup: 无；旧 HLS 链继续保留到 hls-engine 原子 cutover。
 - validation: 固定 vendor 对两个输入均执行得到 `levelEmptyError / No Segments found in Playlist`；失败证据为 parser 7/8，实现后 parser 8/8、完整 HLS Vitest 58/58、TypeScript、全仓 ESLint、固定上游 validator、同步校验 16/16、metadata 7 units/32 capabilities/192 anchors/106 cleanup entries/109 unique planned IDs/63 active refs 和 scoped diff check 通过。全量 Vitest 为 958 passed / 1 skipped / 16 sandbox-only loopback failures，Node 专用同步 validator 文件被 Vitest 收集后另报告 no suite；本切片不涉及 loopback。完整 build 不运行以避免覆盖其他 Agent 的 `dist-electron/**`，暂无真实网站手工场景。
 
+## 2026-08-27: same target (HLS renderer task recovery)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动。
+- reviewedThrough / portedThrough: 均保持 `null`；本步闭合 HLS renderer listener 重挂恢复，仍未完成 hls-engine cutover。
+- change groups: `platform-adaptation`（main-owned 有界任务投影与只读 snapshot IPC）和 `lifecycle/state-ownership`（单调 revision、subscribe-before-snapshot、直播卸载时保持既有 discard 并补输出目录清理）。
+- affected capability IDs: `hls.segment-pipeline` 与 `hls.live-recording` 保持 `porting`。
+- fixtures/tests: `hls.renderer-task-listener-recovery` 覆盖旧 snapshot 不覆盖更新实时事件以及普通任务重挂恢复终态；`hls.live-unmount-output-cleanup` 锁定直播卸载时 discard、等待 main 收口后清理冻结输出目录，并拒绝重挂组件接管清理期间短暂残留的 live snapshot；`hls.renderer-task-snapshot-ipc` 锁定只读 IPC 委托；owner 测试覆盖事件合并、同 request ID 跨 tab 隔离、navigation/tab close/view destroyed/render-process-gone 清理和最多 32 条投影上限。
+- accepted difference: Cat Catch 的 extension downloader page 自身承载任务 UI；OmniFlow 的 renderer 工具组件可以卸载，因此 main 保留当前宿主生命周期内的最新安全投影，并通过 revision 恢复普通任务 UI。它不持久化任务、凭据或完整日志，也不产生 renderer task owner；直播的资料库交付目标仍是 feature-scoped closure，所以在 application workflow coordinator 落地前继续随工具卸载 discard。
+- excluded changes and reasons: 不建设通用 task registry，不扩张到 MPD、其他 ffmpeg 或 application output coordinator；后者仍属于 output-integration unit，不能用仅恢复 UI 投影替代。不改变 HLS parser/downloader 行为，不进行 cutover 或删除旧链。
+- unresolved gaps: HLS 其余 parser 标签差分、live 未捕获 URL 过渡 DTO、视频+AES 真实组合、真实网站手工验证和最终 hls-engine cutover。
+- runtime changes: `EmbeddedBrowserHlsSessionOwner` 在 emit 前合并每个 tab/request 的最新安全投影并分配全局单调 revision，最多保留 32 条；navigation/tab/view/controller 生命周期与 dispose 清理投影。preload 暴露只读 snapshot，renderer 先订阅事件再读取当前 tab，并只接受当前 manifest/variant/rendition 且 revision 更新的结果；切换另一 HLS request 或卸载工具组件仍 discard 上一 live session，且 discard 收口后清理对应输出目录。
+- legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
+- validation: 失败证据为 owner 11/17 通过且 6 条投影/生命周期测试失败、renderer selector 模块缺失；实现、测试环境与输出交付边界修正后新增 owner/selector/hook/IPC 定向测试 24/24、完整 HLS Vitest 73/73（clear 与 AES-128 真实 ffmpeg/ffprobe output 均实际执行）、TypeScript、全仓 ESLint、固定上游 validator、同步校验 16/16、metadata 7 units/32 capabilities/192 anchors/106 cleanup entries/112 unique planned IDs/66 active refs 和 scoped diff check 通过。全量 Vitest 为 974 passed / 1 skipped / 16 sandbox-only loopback failures，Node 专用同步 validator 文件被 Vitest 收集后另报告 no suite；完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
+
 ## Template
 
 ```markdown

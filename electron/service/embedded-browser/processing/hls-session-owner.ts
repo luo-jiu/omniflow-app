@@ -1,5 +1,10 @@
 import { rm } from 'node:fs/promises'
 
+import type {
+  EmbeddedBrowserHlsTaskEventInput,
+  EmbeddedBrowserHlsTaskEventPayload,
+} from '../../embeddedBrowserMainTypes'
+
 export type EmbeddedBrowserHlsRetrySessionBase = {
   requestId: string
   tabId: string
@@ -28,6 +33,7 @@ type EmbeddedBrowserHlsActiveTaskInput = {
 }
 
 type EmbeddedBrowserHlsSessionOwnerOptions = {
+  maxTaskSnapshots?: number
   removeWorkDirectory?: (workDirectoryPath: string) => Promise<void>
 }
 
@@ -51,6 +57,50 @@ function createSessionKey(tabId: string, requestId: string) {
   return `${tabId}\u0000${requestId}`
 }
 
+function createTaskSnapshotKey(event: EmbeddedBrowserHlsTaskEventInput) {
+  const taskId = event.requestId
+    || `anonymous\u0000${event.mode}\u0000${event.manifestUrl}`
+  return createSessionKey(event.tabId, taskId)
+}
+
+function cloneTaskSnapshot(snapshot: EmbeddedBrowserHlsTaskEventPayload) {
+  return {
+    ...snapshot,
+    failedFragments: snapshot.failedFragments ? [...snapshot.failedFragments] : undefined,
+  }
+}
+
+function projectTaskEvent(
+  previous: EmbeddedBrowserHlsTaskEventPayload | undefined,
+  event: EmbeddedBrowserHlsTaskEventInput,
+  revision: number,
+): EmbeddedBrowserHlsTaskEventPayload {
+  const running = event.status === 'running'
+  const runningFfmpeg = running && event.stage === 'ffmpeg'
+  const failedFragments = event.status === 'error'
+    ? (event.failedFragments ?? previous?.failedFragments)
+    : event.failedFragments
+  return {
+    ...event,
+    bytesReceived: event.bytesReceived ?? (running ? previous?.bytesReceived : undefined),
+    bytesTotal: event.bytesTotal ?? (running ? previous?.bytesTotal : undefined),
+    completedFragments: event.completedFragments ?? previous?.completedFragments,
+    durationSeconds: event.durationSeconds ?? previous?.durationSeconds,
+    error: event.status === 'error' ? event.error : undefined,
+    etaSeconds: event.etaSeconds ?? (running ? previous?.etaSeconds : undefined),
+    failedFragments: failedFragments ? [...failedFragments] : undefined,
+    ffmpegSpeedText: event.ffmpegSpeedText ?? (runningFfmpeg ? previous?.ffmpegSpeedText : undefined),
+    message: event.message,
+    outputPath: event.outputPath || previous?.outputPath,
+    processedSeconds: event.processedSeconds ?? (runningFfmpeg ? previous?.processedSeconds : undefined),
+    requestId: event.requestId || previous?.requestId,
+    revision,
+    speedBps: event.speedBps ?? (running ? previous?.speedBps : undefined),
+    totalFragments: event.totalFragments ?? previous?.totalFragments,
+    usingManualKey: event.usingManualKey ?? previous?.usingManualKey,
+  }
+}
+
 function createHlsTaskAbortError() {
   const error = new Error('HLS task aborted')
   error.name = 'AbortError'
@@ -72,7 +122,11 @@ export class EmbeddedBrowserHlsSessionOwner<
 
   private readonly liveSessions = new Map<string, LiveSession>()
 
+  private readonly maxTaskSnapshots: number
+
   private nextActiveTaskId = 0
+
+  private nextTaskRevision = 1
 
   private readonly pendingSessionCleanups = new Set<Promise<void>>()
 
@@ -80,7 +134,10 @@ export class EmbeddedBrowserHlsSessionOwner<
 
   private readonly retrySessions = new Map<string, RetrySession>()
 
+  private readonly taskSnapshots = new Map<string, EmbeddedBrowserHlsTaskEventPayload>()
+
   constructor(options: EmbeddedBrowserHlsSessionOwnerOptions = {}) {
+    this.maxTaskSnapshots = Math.max(1, Math.floor(options.maxTaskSnapshots || 32))
     this.removeWorkDirectory = options.removeWorkDirectory || (async (workDirectoryPath) => {
       await rm(workDirectoryPath, { force: true, recursive: true })
     })
@@ -128,6 +185,43 @@ export class EmbeddedBrowserHlsSessionOwner<
     const session = this.liveSessions.get(sessionKey)
     this.liveSessions.delete(sessionKey)
     return session
+  }
+
+  recordTaskEvent(event: EmbeddedBrowserHlsTaskEventInput) {
+    if (this.disposed) {
+      return null
+    }
+    const taskKey = createTaskSnapshotKey(event)
+    const snapshot = projectTaskEvent(
+      this.taskSnapshots.get(taskKey),
+      event,
+      this.nextTaskRevision,
+    )
+    this.nextTaskRevision += 1
+    this.taskSnapshots.delete(taskKey)
+    this.taskSnapshots.set(taskKey, snapshot)
+    while (this.taskSnapshots.size > this.maxTaskSnapshots) {
+      const oldestKey = this.taskSnapshots.keys().next().value
+      if (oldestKey === undefined) {
+        break
+      }
+      this.taskSnapshots.delete(oldestKey)
+    }
+    return cloneTaskSnapshot(snapshot)
+  }
+
+  listTaskSnapshots(filter: EmbeddedBrowserHlsSessionFilter) {
+    return Array.from(this.taskSnapshots.values())
+      .filter((snapshot) => matchesSession(snapshot, filter))
+      .map(cloneTaskSnapshot)
+  }
+
+  clearTaskSnapshots(filter: EmbeddedBrowserHlsSessionFilter) {
+    for (const [taskKey, snapshot] of this.taskSnapshots) {
+      if (matchesSession(snapshot, filter)) {
+        this.taskSnapshots.delete(taskKey)
+      }
+    }
   }
 
   async runActiveTask<Result>(
@@ -207,6 +301,7 @@ export class EmbeddedBrowserHlsSessionOwner<
       this.clearRetry(filter),
       this.clearLive(filter),
     ])
+    this.clearTaskSnapshots(filter)
   }
 
   async dispose() {

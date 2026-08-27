@@ -13,6 +13,7 @@ import type {
   EmbeddedBrowserStagedPageDragFile,
 } from '@/features/file-transfer/model/browser-drag-transfer'
 import type { LibraryFileBrowserDropResult } from '@/features/file-transfer/model/file-transfer'
+import type { EmbeddedBrowserHlsTaskEventPayload } from './service/embeddedBrowserMainTypes'
 import type {
   AIServiceCompletionInput,
   AIServiceRunSessionHandle,
@@ -587,50 +588,8 @@ contextBridge.exposeInMainWorld('electronEmbeddedBrowser', {
     ipcRenderer.on('embedded-browser:download', wrapped);
     return () => ipcRenderer.removeListener('embedded-browser:download', wrapped);
   },
-  onHlsTask: (listener: (payload: {
-    bytesReceived?: number;
-    bytesTotal?: number;
-    completedFragments?: number;
-    durationSeconds?: number;
-    error?: string;
-    etaSeconds?: number;
-    ffmpegSpeedText?: string;
-    failedFragments?: number[];
-    manifestUrl: string;
-    message?: string;
-    mode: 'direct-manifest' | 'local-plan';
-    outputPath?: string;
-    processedSeconds?: number;
-    requestId?: string;
-    speedBps?: number;
-    stage: 'preparing' | 'downloading-fragments' | 'rewriting-playlist' | 'ffmpeg' | 'completed' | 'error';
-    status: 'running' | 'success' | 'error';
-    tabId: string;
-    totalFragments?: number;
-    usingManualKey?: boolean;
-  }) => void) => {
-    const wrapped = (_event: Electron.IpcRendererEvent, payload: {
-      bytesReceived?: number;
-      bytesTotal?: number;
-      completedFragments?: number;
-      durationSeconds?: number;
-      error?: string;
-      etaSeconds?: number;
-      ffmpegSpeedText?: string;
-      failedFragments?: number[];
-      manifestUrl: string;
-      message?: string;
-      mode: 'direct-manifest' | 'local-plan';
-      outputPath?: string;
-      processedSeconds?: number;
-      requestId?: string;
-      speedBps?: number;
-      stage: 'preparing' | 'downloading-fragments' | 'rewriting-playlist' | 'ffmpeg' | 'completed' | 'error';
-      status: 'running' | 'success' | 'error';
-      tabId: string;
-      totalFragments?: number;
-      usingManualKey?: boolean;
-    }) => {
+  onHlsTask: (listener: (payload: EmbeddedBrowserHlsTaskEventPayload) => void) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, payload: EmbeddedBrowserHlsTaskEventPayload) => {
       listener(payload);
     };
     ipcRenderer.on('embedded-browser:hls-task', wrapped);
@@ -647,6 +606,7 @@ contextBridge.exposeInMainWorld('electronEmbeddedBrowser', {
   exportCapturedResource: (tabId: string, resourceId: string) =>
     ipcRenderer.invoke('embedded-browser:resource:export', tabId, resourceId),
   listCapturedResources: (tabId: string) => ipcRenderer.invoke('embedded-browser:resource:list', tabId) as Promise<import('./service/embedded-browser/contracts/captured-resource').ResourceStateSnapshot | null>,
+  listHlsTaskSnapshots: (tabId: string) => ipcRenderer.invoke('embedded-browser:resource:list-hls-task-snapshots', tabId) as Promise<EmbeddedBrowserHlsTaskEventPayload[]>,
   openCapturedResource: (tabId: string, resourceId: string) =>
     ipcRenderer.invoke('embedded-browser:resource:open', tabId, resourceId),
   readCapturedResource: (tabId: string, resourceId: string) =>

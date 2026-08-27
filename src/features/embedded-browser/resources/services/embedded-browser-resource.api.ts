@@ -3,6 +3,30 @@ import type {
   EmbeddedBrowserResourceStateSnapshot,
 } from '../types';
 
+export type EmbeddedBrowserHlsTaskProjection = {
+  bytesReceived?: number;
+  bytesTotal?: number;
+  completedFragments?: number;
+  durationSeconds?: number;
+  error?: string;
+  etaSeconds?: number;
+  ffmpegSpeedText?: string;
+  failedFragments?: number[];
+  manifestUrl: string;
+  message?: string;
+  mode: 'direct-manifest' | 'local-plan';
+  outputPath?: string;
+  processedSeconds?: number;
+  requestId?: string;
+  revision: number;
+  speedBps?: number;
+  stage: 'preparing' | 'downloading-fragments' | 'rewriting-playlist' | 'ffmpeg' | 'completed' | 'error';
+  status: 'running' | 'success' | 'error';
+  tabId: string;
+  totalFragments?: number;
+  usingManualKey?: boolean;
+};
+
 function assertDesktopSupport() {
   if (!window.electronEmbeddedBrowser) {
     throw new Error('当前环境不支持浏览器资源捕获');
@@ -22,31 +46,15 @@ export async function listEmbeddedBrowserCapturedResources(tabId: string) {
 }
 
 export function subscribeEmbeddedBrowserHlsTask(
-  listener: (payload: {
-    bytesReceived?: number;
-    bytesTotal?: number;
-    completedFragments?: number;
-    durationSeconds?: number;
-    error?: string;
-    etaSeconds?: number;
-    ffmpegSpeedText?: string;
-    failedFragments?: number[];
-    manifestUrl: string;
-    message?: string;
-    mode: 'direct-manifest' | 'local-plan';
-    outputPath?: string;
-    processedSeconds?: number;
-    requestId?: string;
-    speedBps?: number;
-    stage: 'preparing' | 'downloading-fragments' | 'rewriting-playlist' | 'ffmpeg' | 'completed' | 'error';
-    status: 'running' | 'success' | 'error';
-    tabId: string;
-    totalFragments?: number;
-    usingManualKey?: boolean;
-  }) => void,
+  listener: (payload: EmbeddedBrowserHlsTaskProjection) => void,
 ) {
   assertDesktopSupport();
   return window.electronEmbeddedBrowser.onHlsTask(listener);
+}
+
+export async function listEmbeddedBrowserHlsTaskSnapshots(tabId: string) {
+  assertDesktopSupport();
+  return window.electronEmbeddedBrowser.listHlsTaskSnapshots(tabId) as Promise<EmbeddedBrowserHlsTaskProjection[]>;
 }
 
 export async function startEmbeddedBrowserResourceCapture(tabId: string) {

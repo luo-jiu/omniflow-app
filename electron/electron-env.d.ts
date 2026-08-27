@@ -530,6 +530,7 @@ interface Window {
     goBack: (tabId: string) => Promise<void>;
     goForward: (tabId: string) => Promise<void>;
     listCapturedResources: (tabId: string) => Promise<import('./service/embedded-browser/contracts/captured-resource').ResourceStateSnapshot | null>;
+    listHlsTaskSnapshots: (tabId: string) => Promise<import('./service/embeddedBrowserMainTypes').EmbeddedBrowserHlsTaskEventPayload[]>;
     navigate: (tabId: string, url: string) => Promise<void>;
     onLibraryFileDropResult: (
       listener: (payload: import('@/features/file-transfer/model/file-transfer').LibraryFileBrowserDropResult) => void,
@@ -709,28 +710,9 @@ interface Window {
       totalBytes: number;
       url: string;
     }) => void) => () => void;
-    onHlsTask: (listener: (payload: {
-      bytesReceived?: number;
-      bytesTotal?: number;
-      completedFragments?: number;
-      durationSeconds?: number;
-      error?: string;
-      etaSeconds?: number;
-      ffmpegSpeedText?: string;
-      failedFragments?: number[];
-      manifestUrl: string;
-      message?: string;
-      mode: 'direct-manifest' | 'local-plan';
-      outputPath?: string;
-      processedSeconds?: number;
-      requestId?: string;
-      speedBps?: number;
-      stage: 'preparing' | 'downloading-fragments' | 'rewriting-playlist' | 'ffmpeg' | 'completed' | 'error';
-      status: 'running' | 'success' | 'error';
-      tabId: string;
-      totalFragments?: number;
-      usingManualKey?: boolean;
-    }) => void) => () => void;
+    onHlsTask: (
+      listener: (payload: import('./service/embeddedBrowserMainTypes').EmbeddedBrowserHlsTaskEventPayload) => void,
+    ) => () => void;
     onResourceStateChange: (
       listener: (payload: import('./service/embedded-browser/contracts/captured-resource').ResourceStateChange) => void,
     ) => () => void;

@@ -12,6 +12,7 @@ import type {
   EmbeddedBrowserHlsTrackMergePayload,
   EmbeddedBrowserHlsPlanDownloadPayload,
   EmbeddedBrowserHlsPlanRetryPayload,
+  EmbeddedBrowserHlsTaskEventPayload,
   EmbeddedBrowserMpdDownloadPayload,
   EmbeddedBrowserMpdPlanDownloadPayload,
   EmbeddedBrowserDirectFileDownloadPayload,
@@ -105,6 +106,7 @@ type EmbeddedBrowserMainIpcHandlers = {
   goBack: (tabId: string) => Promise<void>
   goForward: (tabId: string) => Promise<void>
   listCapturedResources: (tabId: string) => unknown
+  listHlsTaskSnapshots: (tabId: string) => EmbeddedBrowserHlsTaskEventPayload[]
   mergeMseResources: (
     tabId: string,
     payload: EmbeddedBrowserCapturedResourceMergePayload,
@@ -198,6 +200,10 @@ export function registerEmbeddedBrowserMainIpcHandlers(handlers: EmbeddedBrowser
   ipcMain.handle('embedded-browser:go-forward', async (_event, tabId: string) => handlers.goForward(tabId))
 
   ipcMain.handle('embedded-browser:resource:list', (_event, tabId: string) => handlers.listCapturedResources(tabId))
+  ipcMain.handle(
+    'embedded-browser:resource:list-hls-task-snapshots',
+    (_event, tabId: string) => handlers.listHlsTaskSnapshots(tabId),
+  )
   ipcMain.handle('embedded-browser:resource:start', (_event, tabId: string) => handlers.startCapturedResources(tabId))
   ipcMain.handle('embedded-browser:resource:stop', (_event, tabId: string) => handlers.stopCapturedResources(tabId))
   ipcMain.handle('embedded-browser:resource:clear', (_event, tabId: string) => handlers.clearCapturedResources(tabId))

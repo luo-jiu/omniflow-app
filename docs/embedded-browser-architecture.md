@@ -136,17 +136,17 @@ library detail page
 - 固定版 hls.js 在 media playlist 没有完整 fragment 时发出 `levelEmptyError / No Segments found in Playlist`，Cat Catch 因而不会进入 `LEVEL_LOADED -> parseTs`。同步 parser 对空 playlist 和仅含 PART 的 snapshot 抛同一错误，不再生成一个看似可执行的空下载计划；含 variant 的 master playlist 不受此限制。
 - HLS parser 已按固定 hls.js 1.6.16 支持 `EXT-X-DEFINE` 的 `NAME/VALUE`、playlist URL `QUERYPARAM`、master 到 media 的显式 `IMPORT`，并在 URI line、quoted-string 与 hexadecimal attribute 中做单次替换；重复定义、缺失 query/import/reference 只保留并抛出第一条等价 parsing error。工具区显式解析 master child 时会传递 master variable list；live recorder 在 child 实际声明 `IMPORT` 时，才通过原始 opaque resource id 从 main-owned captured master 派生变量、校验 selected child 归属，并把同一列表复用于后续轮询。parent resolver 与 manifest/segment 请求共用 recorder AbortSignal，renderer 不提交变量值或 protected headers。
 - 如果用户在工具区填写了手动 AES-128 key，也会切到本地 downloader 主链，由 Electron main 写本地 key 文件后重写 playlist。生产解密只由随后同一个可取消 ffmpeg 进程负责，不再叠加一轮 JavaScript decrypt；条件式真实二进制测试已生成 AES-128 encrypted HLS，并经本地 downloader、生产 wrapper 和 ffprobe 验证为 MP4/AAC/正时长输出。
-- live HLS 第一版走显式“开始录制 / 停止录制”主线；停止后才交给 `ffmpeg` 导出。切换到别的 HLS 请求或离开工具区时，会把未导出的 live session 当作放弃处理，不做隐式自动导出。recorder 的 manifest/segment 请求共用一个 `AbortController`，discard 会中止在途请求；`EmbeddedBrowserHlsSessionOwner` 按 tab/request 归属 active direct/track/plan/retry/live-export 任务和 retry/live 会话。生产 controller 把页面导航、tab close、view 销毁、render-process loss 和 controller dispose 都收敛到唯一 HLS host lifecycle：先取消并等待匹配的 active fetch/ffmpeg，再 discard recorder、删除 workdir；close/close-all IPC 和应用 graceful shutdown 都会等待该清理完成，已经被先前生命周期事件取走的 session cleanup 也会纳入 dispose 等待。manifest/track ffmpeg runner 在取消或非零退出后删除 partial output。
+- live HLS 第一版走显式“开始录制 / 停止录制”主线；停止后才交给 `ffmpeg` 导出。切换到另一条 HLS 请求或卸载工具组件时，会把未导出的 live session 当作放弃处理，并清理该任务冻结的 renderer 输出目录；在 staged output lease 与 application workflow coordinator 落地前，不把只有 main 任务投影、却无法恢复资料库交付目标的直播伪装成可跨卸载恢复。recorder 的 manifest/segment 请求共用一个 `AbortController`，discard 会中止在途请求；`EmbeddedBrowserHlsSessionOwner` 按 tab/request 归属 active direct/track/plan/retry/live-export 任务、retry/live 会话和最多 32 条最新安全任务投影。生产 controller 把页面导航、tab close、view 销毁、render-process loss 和 controller dispose 都收敛到唯一 HLS host lifecycle：先取消并等待匹配的 active fetch/ffmpeg，再清理任务投影、discard recorder、删除 workdir；close/close-all IPC 和应用 graceful shutdown 都会等待该清理完成，已经被先前生命周期事件取走的 session cleanup 也会纳入 dispose 等待。manifest/track ffmpeg runner 在取消或非零退出后删除 partial output。
 - 工具区也可直接发起 HLS key 验证；候选会合并 manifest key URL、当前 tab 已捕获 key 资源和工具区手动输入 key。
 - 当前 `master playlist + 手动 key` 已要求先明确选择具体 variant，再回到现有本地主链。
-- main 侧会把 HLS 执行阶段事件回推给 renderer；工具区据此展示当前阶段、最近日志、分片完成数和错误状态。
+- main 侧会给每次 HLS 执行阶段事件分配单调 `revision`，先写入有界安全投影再回推 renderer；工具区先订阅实时事件，再通过只读 IPC 获取当前 tab 的 snapshot，只接受当前 manifest、variant 或 rendition 且 revision 更新的投影。snapshot 是 main 任务真相的恢复视图，不是 renderer 的第二份任务 owner。
 - MSE 深度捕捉当前已补第一版增量写盘：page runtime 在 `appendBuffer` 累积超过阈值后，会通过 probe console payload 把 chunk flush 给 main，main 落到 temp spool file；后续 `save / merge / transcode` 优先读取 file-backed 资源，而不是再次整段 base64 提取。
 
 这些 hook 应继续通过 `services/*.api.ts` 调 preload bridge，不要直接在 hook 或组件里散落原始 bridge 调用。
 
 ### 3.4 Preload / IPC / Main
 
-`electron/preload.ts` 当前提供五类嵌入浏览器相关桥接：
+`electron/preload.ts` 当前提供以下嵌入浏览器相关桥接：
 
 - 页面和 tab 控制
 - 下载事件和资源事件订阅
@@ -168,6 +168,7 @@ library detail page
 - MSE 读取、导出、保存、合并、manifest 下载
 - HLS 本地计划下载：`plan -> main-owned/embedded-session fetch -> local workdir -> local playlist -> ffmpeg`
 - HLS live 录制：`轮询 media playlist -> main-owned/embedded-session fetch 增量补分片 -> 手动停止 -> ffmpeg 导出`；放弃或宿主终态通过 recorder-owned abort 中止 manifest/segment 请求。
+- HLS 任务投影：main 记录有界最新状态并提供只读 snapshot；renderer 不提交 revision、凭据或任务状态。
 
 ## 4. 核心概念
 
@@ -565,6 +566,9 @@ embedded browser 的真实资源在 Electron main，不能依赖 React 组件卸
 
 5. 下载导入与上传中心的衔接
 原因：当前下载导入是复用上传体系，如果擅自拆开，很容易产生重复状态机和清理遗漏。
+
+6. `useHlsDownloadTask`
+原因：必须保持“先订阅、后 snapshot、按 revision 去旧”的恢复顺序；普通 main-owned 任务可通过投影恢复，但直播在输出交付目标尚未 application-scope 前仍须随工具卸载 discard，不能只恢复 UI 而丢失资料库交付。
 
 ## 8. 维护规则
 

@@ -50,7 +50,7 @@ import {
   type EmbeddedBrowserHlsDownloadPayload,
   type EmbeddedBrowserHlsTrackMergePayload,
   type EmbeddedBrowserHlsTrackMergeResponse,
-  type EmbeddedBrowserHlsTaskEventPayload,
+  type EmbeddedBrowserHlsTaskEventInput,
   type EmbeddedBrowserHlsPlanDownloadPayload,
   type EmbeddedBrowserHlsPlanDownloadResponse,
   type EmbeddedBrowserHlsPlanRetryPayload,
@@ -290,12 +290,16 @@ export function createEmbeddedBrowserMainController(
     mainWindow.webContents.send('embedded-browser:resource-state-change', payload)
   }
 
-  function emitEmbeddedBrowserHlsTask(payload: EmbeddedBrowserHlsTaskEventPayload) {
+  function emitEmbeddedBrowserHlsTask(payload: EmbeddedBrowserHlsTaskEventInput) {
+    const snapshot = embeddedBrowserHlsSessionOwner.recordTaskEvent(payload)
+    if (!snapshot) {
+      return
+    }
     const mainWindow = options.getMainWindow()
     if (!mainWindow || mainWindow.isDestroyed()) {
       return
     }
-    mainWindow.webContents.send('embedded-browser:hls-task', payload)
+    mainWindow.webContents.send('embedded-browser:hls-task', snapshot)
   }
 
   function emitEmbeddedBrowserLibraryFileDropResult(payload: LibraryFileBrowserDropResult) {
@@ -3571,6 +3575,7 @@ export function createEmbeddedBrowserMainController(
       goBack: handleGoBack,
       goForward: handleGoForward,
       listCapturedResources: getEmbeddedBrowserCaptureSnapshot,
+      listHlsTaskSnapshots: (tabId) => embeddedBrowserHlsSessionOwner.listTaskSnapshots({ tabId }),
       mergeMseResources: mergeEmbeddedBrowserCapturedMseResources,
       navigate: handleNavigate,
       openMappedFile: handleOpenMappedFile,

@@ -196,7 +196,7 @@ export type EmbeddedBrowserCapturedResourceDownloadPayload = {
 
 export type EmbeddedBrowserDirectFileDownloadResponse = EmbeddedBrowserHlsDownloadResponse
 
-export type EmbeddedBrowserHlsTaskEventPayload = {
+export type EmbeddedBrowserHlsTaskEventInput = {
   bytesReceived?: number
   bytesTotal?: number
   completedFragments?: number
@@ -223,6 +223,10 @@ export type EmbeddedBrowserHlsTaskEventPayload = {
   tabId: string
   totalFragments?: number
   usingManualKey?: boolean
+}
+
+export type EmbeddedBrowserHlsTaskEventPayload = EmbeddedBrowserHlsTaskEventInput & {
+  revision: number
 }
 
 export type EmbeddedBrowserMpdDownloadPayload = {

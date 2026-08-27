@@ -321,4 +321,110 @@ describe('EmbeddedBrowser HLS session owner', () => {
       expect(removeWorkDirectory).toHaveBeenCalledTimes(2)
     })
   })
+
+  it('recovers the latest task projection after a renderer listener gap', () => {
+    const owner = new EmbeddedBrowserHlsSessionOwner<RetrySession, LiveSession>()
+
+    const preparing = owner.recordTaskEvent({
+      manifestUrl: 'https://example.com/live.m3u8',
+      message: 'preparing',
+      mode: 'local-plan',
+      requestId: 'request-1',
+      stage: 'preparing',
+      status: 'running',
+      tabId: 'tab-1',
+      totalFragments: 4,
+    })
+    const downloading = owner.recordTaskEvent({
+      completedFragments: 3,
+      manifestUrl: 'https://example.com/live.m3u8',
+      message: 'downloading',
+      mode: 'local-plan',
+      requestId: 'request-1',
+      stage: 'downloading-fragments',
+      status: 'running',
+      tabId: 'tab-1',
+    })
+
+    expect(preparing?.revision).toBe(1)
+    expect(downloading?.revision).toBe(2)
+    expect(owner.listTaskSnapshots({ tabId: 'tab-1' })).toEqual([expect.objectContaining({
+      completedFragments: 3,
+      manifestUrl: 'https://example.com/live.m3u8',
+      message: 'downloading',
+      requestId: 'request-1',
+      revision: 2,
+      stage: 'downloading-fragments',
+      totalFragments: 4,
+    })])
+  })
+
+  it('isolates task projections with equal request ids by tab', () => {
+    const owner = new EmbeddedBrowserHlsSessionOwner<RetrySession, LiveSession>()
+    owner.recordTaskEvent({
+      manifestUrl: 'https://example.com/a.m3u8',
+      mode: 'direct-manifest',
+      requestId: 'shared-request',
+      stage: 'preparing',
+      status: 'running',
+      tabId: 'tab-a',
+    })
+    owner.recordTaskEvent({
+      manifestUrl: 'https://example.com/b.m3u8',
+      mode: 'direct-manifest',
+      requestId: 'shared-request',
+      stage: 'completed',
+      status: 'success',
+      tabId: 'tab-b',
+    })
+
+    expect(owner.listTaskSnapshots({ tabId: 'tab-a' })).toEqual([
+      expect.objectContaining({ manifestUrl: 'https://example.com/a.m3u8', tabId: 'tab-a' }),
+    ])
+    expect(owner.listTaskSnapshots({ tabId: 'tab-b' })).toEqual([
+      expect.objectContaining({ manifestUrl: 'https://example.com/b.m3u8', tabId: 'tab-b' }),
+    ])
+  })
+
+  it('keeps the latest task projection store bounded', () => {
+    const owner = new EmbeddedBrowserHlsSessionOwner<RetrySession, LiveSession>({ maxTaskSnapshots: 2 })
+    const record = (requestId: string, message: string) => owner.recordTaskEvent({
+      manifestUrl: `https://example.com/${requestId}.m3u8`,
+      message,
+      mode: 'local-plan',
+      requestId,
+      stage: 'preparing',
+      status: 'running',
+      tabId: 'tab-1',
+    })
+    record('request-1', 'first')
+    record('request-2', 'second')
+    record('request-1', 'first-updated')
+    record('request-3', 'third')
+
+    expect(owner.listTaskSnapshots({ tabId: 'tab-1' }).map(snapshot => snapshot.requestId))
+      .toEqual(['request-1', 'request-3'])
+  })
+
+  it.each([
+    'onDocumentNavigated',
+    'onTabClosed',
+    'onViewDestroyed',
+    'onViewRenderProcessGone',
+  ] as const)('clears stale task projections on %s', async (lifecycleEvent) => {
+    const owner = new EmbeddedBrowserHlsSessionOwner<RetrySession, LiveSession>()
+    const lifecycle = createEmbeddedBrowserHlsHostLifecycle(owner)
+    owner.recordTaskEvent({
+      manifestUrl: 'https://example.com/stale.m3u8',
+      mode: 'local-plan',
+      requestId: 'stale-request',
+      stage: 'preparing',
+      status: 'running',
+      tabId: 'tab-stale',
+    })
+
+    await lifecycle[lifecycleEvent]('tab-stale')
+
+    expect(owner.listTaskSnapshots({ tabId: 'tab-stale' })).toEqual([])
+  })
 })
