@@ -464,7 +464,7 @@ legacy 兼容检查：
 - 普通问答和单 Tool 任务不创建计划；模型提交状态、进度、结果、权限、UI 字段、未知 Tool、超限步骤或在首个真实 Tool 后改写计划时，main / SQLite 拒绝计划但不伪造执行事实。计划中的 Tool 名称不构成预授权，写操作仍完整经过参数校验、确认和一次性执行能力
 - 在当前目录请求“创建一个叫测试的文件夹”时显示精确确认卡片；允许后只创建一次，后端返回节点后先提交 authoritative result，再刷新目标目录树并通过 `file.list` 感知到同一个 `createdNodeId` 后继续回答；取消后不创建，模型能依据拒绝结果结束本轮
 - 选中单个普通音频或视频后请求“检查这个媒体文件”，`media.inspect` 不弹写操作确认，能返回真实容器、时长和媒体流元数据；未安装 ffprobe 时明确提示环境缺失且不显示模拟结果。真实媒体由用户手工验证，自动化只使用 JSON fixture，不播放媒体
-- 在 macOS 本地 MinIO 的非第一个资料库中选中单个视频后请求“提取音频”，ToolRun 先显示 `preparing` 而不是失败；健康源 provider 优先继承，源不可用时能按输出格式路由到其他健康 provider。确认卡准确显示源文件、目标类型、目标目录、输出名、格式和提交前失败兜底；可改为资料库其他目录或本机，也可修改文件名和 M4A / MP3 / WAV，修改后生成新的 prepared action ID / hash 并使用该格式对应的冻结 provider。拒绝时不生成文件，允许后只写入批准的精确目标，默认生成 `*-audio.m4a`，长名称仍保留 `-audio.<格式>` 且不超过 240 UTF-8 bytes，同名时 Tool 结果使用后端实际自动改名后的名称。真实媒体内容与格式由用户手工验证，自动化不得播放媒体
+- 在 macOS 本地 MinIO 的非第一个资料库中选中单个视频后请求“提取音频”，ToolRun 先显示 `preparing` 而不是失败；健康源 provider 优先继承，源不可用时能按输出格式路由到其他健康 provider。确认卡准确显示源文件、目标类型、目标目录、输出名、格式和提交前失败兜底；public action 明确携带 `kind = 'media.extractAudio', version = 1`，可改为资料库其他目录或本机，也可修改文件名和 M4A / MP3 / WAV，修改后保留判别字段、生成新的 prepared action ID / hash 并使用该格式对应的冻结 provider。篡改 kind / version、错误原始类型、额外或重复字段、Tool / action 串型均 fail-closed，原确认仍可重试；未知或损坏 preparation 的确认卡只允许取消。拒绝时不生成文件，允许后只写入批准的精确目标，默认生成 `*-audio.m4a`，长名称仍保留 `-audio.<格式>` 且不超过 240 UTF-8 bytes，同名时 Tool 结果使用后端实际自动改名后的名称。真实媒体内容与格式由用户手工验证，自动化不得播放媒体
 - `directory.create` 与 `media.extractAudio` 完成后显示资料库产物卡片，点击“在目录树中定位”只分发 `tree.revealNode` 并定位到同一资料库节点；`media.inspect` 只展示白名单容器、时长、大小、码率和媒体流数量，不展示签名 URL、原始 tags 或未知结果字段
 - `media.extractAudio` 分别验证停止 ffmpeg、prepare 超时、上传中停止、上传失败、无音轨、未安装 ffmpeg、目录刷新失败、Save As 取消和应用窗口关闭：commit 前 main 取消或 Broker 超时会中止 execution 并发出 Renderer 取消事件，进程树、主进程 PUT、后端 multipart Session、loopback claim 与本地临时产物均被清理；本机复制收口前不得提前删除 artifact。上传只在明确 `uncommitted` 且批准了兜底时打开 Save As；`commit_unknown` 不兜底、不重传，服务端返回节点或 authoritative commit 回执失败后也不生成第二份本机文件。上传创建节点成功后立即 commit，此后停止、页面卸载、刷新失败或最终回执超时均保留该实际文件并使用 committed fallback，不得再次提取造成重复文件
 - 等待确认时离开再返回 Agent 工作区，确认卡片可从当前会话恢复；停止任务、确认超时、注销、窗口销毁或应用重启后动作失效，不能在恢复时自动执行
@@ -488,9 +488,23 @@ legacy 兼容检查：
 - 模型不能通过交互卡提供 HTML、JSX、回调、IPC channel、URL 或可执行行为，也不能请求 API Key、密码、Cookie 和访问令牌；选项、字段、标题和回答长度 / 数量均命中 main 侧上限
 - Agent SQLite、IPC 响应、日志和消息中不出现 AI Service API Key、Cookie、签名 URL 或完整环境变量；升级 `sqlite3` 或 N-API 版本后打包必须重新准备目标原生模块，不能复用旧缓存
 - `media.inspect` 的签名 URL 只在 Renderer 到 main 的受权瞬时 IPC 和 main 内存代理中存在；ffprobe 命令行只出现 loopback URL，Tool 结果只保留白名单元数据，原始 tags、文件来源、代理 token 和 stderr 不进入消息或 SQLite
-- `media.extractAudio` 的 6 小时签名 URL、loopback token、ffmpeg stderr、本地路径和 artifact ID 不进入 Agent 消息、Tool 结果、SQLite 或日志；来源 capability 不能重放，产物只能由匹配窗口、Session、Run 和 execution 释放，单文件 2 GiB、4 个活跃产物、默认 8 GiB 总预留和 1 小时无活动 TTL 上限均生效，近期崩溃残留计入总量，应用启动会清理过期残留，持续上传时进度能续期 lease
-- 不支持 Tool Calling 的本地模型退回有界感知快照；未注册 Tool、未配置权限策略的非 `read` Tool、没有显式只读授权的 Renderer Tool 和绕过确认的 Renderer 写 Tool 不执行；达到 4 轮 / 8 次 Tool 上限后明确失败
+- `media.extractAudio` 的 6 小时签名 URL、loopback token、ffmpeg stderr、本地路径和 artifact ID 不进入 Agent 消息、Tool 结果或普通日志；SQLite 只保存不含路径的 opaque resource ref 与配额事实。来源 capability 不能重放，产物只能由匹配账号环境、窗口、Session、Run 和 execution 释放；单文件 2 GiB、4 个当前进程活跃产物、与 Shell workspace 共享的默认 8 GiB 总额度和 1 小时无活动 TTL 均生效。生成期间 live lease 阻止 sweep，持续上传时进度续期 TTL；重启不恢复未完成媒体任务，但持久 quota ledger 能在 TTL 后经 adapter 清理实际目录，旧版无 ledger 的过期目录也会回收
+- 不支持 Tool Calling 的本地模型退回有界感知快照；未注册 Tool、未配置权限策略的非 `read` Tool、没有显式只读授权的 Renderer Tool 和绕过确认的 Renderer 写 Tool 不执行；达到 10 个 provider turn / 8 次业务 Tool 上限后明确失败
 - 内部 `AgentLocalProcessRunner` 只接受绝对可执行文件路径和参数数组，不启用 shell、不继承完整环境；并发、输出、超时和取消均命中上限，取消后清理 macOS / Linux 进程组或 Windows 进程树。该基座没有注册为模型 Tool 时，Agent 不能通过它执行任意命令
+- 新建与开发期已有 Agent SQLite 都保持 schema 2：唯一 Schema Coordinator 完成 reconcile 并发布 barrier 后，Session / Memory / Quota / Workspace Store 才能打开业务连接；`media.extractAudio@1` prepared action 按 `kind / version` 严格校验，`prepared_action_id / prepared_action_json / prepared_snapshot_hash / approval_input_hash` 保持 `text`，审批 hash 与冻结快照 hash 必须一致。直接 Store 写入不一致 hash、SQL 单列篡改或把 ASCII JSON / ID / hash 写成 BLOB 都会被 trigger 拒绝；旧媒体 action 原地回填且损坏行使 bootstrap 整体回滚。workspace / quota ledger 幂等补齐并重建受影响 trigger，不新增 schema 3 / 4
+
+#### Shell 目标实现门禁（当前尚不可执行）
+
+当前没有 `shell.run`，下面是 `docs/built-in-agent-shell-architecture.md` 落地后必须新增的完成门禁，不属于现有能力：
+
+- macOS Zsh、Linux Bash 和 Windows PowerShell 分别覆盖 Unicode、空格路径、多行、管道、重定向、条件、替换、解析失败和非零退出；Provider、cwd、env、timeout 或 workspace generation 在批准后漂移时拒绝旧动作。外部进程在批准后直接改写 cwd 时，spawn 前 rehash / execution generation 必须失效，不能只信任 generation 计数
+- 权限规则按带版本的 canonical matcher 绑定 AST token、原子操作、重定向、网络目的地、cwd、Provider、风险分面及 analyzer / policy / env policy revision；`npm test` 不匹配 `npm test && rm ...`，也不能跨另一个项目内容身份复用。动态 head、嵌套解释器、encoded PowerShell、外部路径、未知语法和无法证明 read set 的工作区不能生成 Session / 长期规则，deny 始终优先
+- `file.stage` 只接受本 Run 已感知或用户显式选择、且 owner / library / 内容授权仍有效的普通文件；fetch 前和原子 commit 前分别重验读取 grant、node revision、content identity / ETag 与 storage binding，撤权或漂移时删除半文件并废止 capability。Shell allow 规则同时绑定 staged source content hash、完整 workspace content identity 与 AI profile / 配置 revision / provider / Base URL identity，切换本地与远端 AI、暂存同名新内容、网络下载或前序命令改写项目后重新 ask
+- PATH / HOME / loader / credential 环境不能被模型覆盖；API Key、Cookie、token、签名 URL、物理 workspace / log 路径和未清洗输出不进入 SQLite、时间线或 provider 投影
+- stdout / stderr 只有经过带 carry buffer 的增量 decoder / control parser / secret redactor 后才按单调 sequence 投影；事件同时绑定 Session / Run / ToolRun / execution，单 frame / batch / flush 频率 / 未 ack IPC 队列均命中固定上限。慢 renderer 触发 live batch 丢弃后不堵塞进程，跨 chunk UTF-8、秘密、PowerShell 编码、ANSI / OSC、二进制、输出洪泛、重复 batch、sequence gap、`afterSequence` replay、cursor 失效和日志过期均有确定行为。详细日志只剩前缀、tail 只剩远端最新区间时，`availableRanges / nextAvailableSequence / unavailableThrough` 明确标出中间缺口并允许 resolved 水位继续；SQLite 只有带水位的有界 tail 与安全 logRef，配额内的有界全流日志由 main TTL Store 托管
+- 停止、超时、注销、窗口销毁和应用退出会按 Tool 专用 settle budget 收口受管进程；单纯页面卸载时纯 main Shell 继续，返回后从规范 ToolRun 和 tail 恢复。Windows 必须验证禁用 breakaway 的 Job 收口，不能以 `taskkill` 失败后的直接子进程 fallback 通过；POSIX daemonize 逃逸按专题记录为残余风险
+- `file.stage` 与 `file.publish` 作为两个计入业务配额的 strict Registry Tool，根对象和每个嵌套判别分支都拒绝额外字段；覆盖 renderer 不在场 / 中途卸载、hash、共享原子 reservation、半文件删除后才返还额度、真实字节校正、symlink / junction / UNC、canonical 目标写授权与 commit 前重验、资料库 commit、刷新失败、Save As 取消和一次性 grant 重放。commit 后超过 30 秒只允许新刷新 / 新 Tool 再感知，不回写终态 ToolRun 或续跑旧 Run；真实资料库验证仍禁止第一个资料库，媒体命令只使用无声 fixture
+- Shell 落地仍保持 schema 2：Rule Store 必须加入现有 Schema Coordinator barrier；`shell.run / file.stage / file.publish` 分别增加自己的 prepared action branch，Shell ToolRun audit、日志水位和规则索引幂等补齐并重建受影响 trigger。删除 Session 后的 Shell workspace / 日志资源由唯一 Quota Manager 经 Store adapter 删除，并通过 `deleting` ledger 在崩溃后继续回收
 
 ### 3.15 QQ 音乐歌词工具
 

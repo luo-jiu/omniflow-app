@@ -15,6 +15,7 @@ import {
   normalizeAgentMemoryEditableFields,
   normalizeAgentMemoryProposal,
 } from './agent-memory-model';
+import { agentDatabaseSchemaCoordinator } from './storage/agent-database-schema-coordinator';
 
 const MAX_MEMORY_ID_LENGTH = 200;
 const MAX_SOURCE_ID_LENGTH = 200;
@@ -215,12 +216,19 @@ const MEMORY_SELECT = `
   FROM agent_memories
 `;
 
-async function initializeDatabase(database: sqlite3.Database): Promise<void> {
+async function configureDatabaseConnection(database: sqlite3.Database): Promise<void> {
   await exec(database, `
     PRAGMA foreign_keys = ON;
     PRAGMA journal_mode = WAL;
     PRAGMA synchronous = NORMAL;
     PRAGMA busy_timeout = 5000;
+  `);
+}
+
+export async function initializeAgentMemoryDatabaseSchema(
+  database: sqlite3.Database,
+): Promise<void> {
+  await exec(database, `
 
     CREATE TABLE IF NOT EXISTS agent_memories (
       id TEXT PRIMARY KEY,
@@ -307,7 +315,17 @@ export async function createSQLiteAgentMemoryStore(
   }
   const database = await openDatabase(databasePath);
   try {
-    await initializeDatabase(database);
+    await configureDatabaseConnection(database);
+    if (databasePath === ':memory:') {
+      await initializeAgentMemoryDatabaseSchema(database);
+    } else {
+      await agentDatabaseSchemaCoordinator.ensureReady(
+        databasePath,
+        'memory',
+        () => initializeAgentMemoryDatabaseSchema(database),
+        database,
+      );
+    }
   } catch (error) {
     await close(database).catch(() => undefined);
     throw error;

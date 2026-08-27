@@ -204,17 +204,33 @@ export type AgentPreparedDestination = 'library' | 'local';
 
 export type AgentPreparedFallbackPolicy = 'prompt_local' | 'none';
 
-export interface AgentPreparedActionPublic {
+export const AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_KIND = 'media.extractAudio' as const;
+
+export const AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_VERSION = 1 as const;
+
+export const AGENT_PREPARED_ACTION_PUBLIC_IDENTITIES = [{
+  kind: AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_KIND,
+  version: AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_VERSION,
+}] as const;
+
+export type AgentMediaExtractAudioOutputFormat = 'm4a' | 'mp3' | 'wav';
+
+export interface AgentMediaExtractAudioPreparedActionPublicV1 {
   conflictPolicy: 'auto_rename' | 'error' | 'replace';
   destination: AgentPreparedDestination;
   fallbackPolicy: AgentPreparedFallbackPolicy;
+  kind: typeof AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_KIND;
   libraryId: number;
   outputFileName: string;
-  outputFormat: string;
+  outputFormat: AgentMediaExtractAudioOutputFormat;
   parentId?: number;
   sourceNodeId: number;
   targetLabel: string;
+  version: typeof AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_VERSION;
 }
+
+export type AgentPreparedActionPublic =
+  | AgentMediaExtractAudioPreparedActionPublicV1;
 
 export interface AgentToolPreparationSnapshot {
   action: AgentPreparedActionPublic;

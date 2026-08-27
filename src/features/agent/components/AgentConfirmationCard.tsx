@@ -7,9 +7,12 @@ import {
   type LibraryNodePickerSelection,
 } from '@/features/file-explorer';
 import type {
+  AgentMediaExtractAudioOutputFormat,
+  AgentMediaExtractAudioPreparedActionPublicV1,
   AgentPreparedActionPublic,
   AgentToolApprovalSnapshot,
 } from '@/shared/agent/agent.types';
+import { normalizeAgentPreparedActionPublic } from '@/shared/agent/agent-prepared-action';
 
 const ConfirmationCard = styled.article`
   width: min(620px, 100%);
@@ -199,6 +202,30 @@ interface AgentConfirmationCardProps {
 
 const OUTPUT_FORMATS = ['m4a', 'mp3', 'wav'] as const;
 
+interface LibraryTargetDraft {
+  parentId?: number;
+  targetLabel: string;
+}
+
+interface PreparedActionDraft {
+  action: AgentMediaExtractAudioPreparedActionPublicV1;
+  preparedActionId: string;
+}
+
+function normalizeMediaPreparedAction(
+  action: AgentPreparedActionPublic | undefined,
+): AgentMediaExtractAudioPreparedActionPublicV1 | undefined {
+  if (!action) return undefined;
+  try {
+    const normalized = normalizeAgentPreparedActionPublic(action);
+    return normalized.kind === 'media.extractAudio' && normalized.version === 1
+      ? normalized
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function replaceOutputExtension(fileName: string, format: string): string {
   const normalized = String(fileName || '').trim();
   if (!normalized) return `extracted-audio.${format}`;
@@ -214,28 +241,60 @@ export default function AgentConfirmationCard({
   libraryId,
   onResolve,
 }: AgentConfirmationCardProps) {
-  const initialAction = approval.preparation?.action;
-  const [preparedAction, setPreparedAction] = React.useState(initialAction);
+  const preparation = approval.preparation;
+  const preparedActionId = preparation?.preparedActionId;
+  const initialAction = React.useMemo(
+    () => normalizeMediaPreparedAction(preparation?.action),
+    [preparation?.action],
+  );
+  const [preparedActionDraft, setPreparedActionDraft] = React.useState<PreparedActionDraft | undefined>(
+    () => initialAction && preparedActionId
+      ? { action: initialAction, preparedActionId }
+      : undefined,
+  );
   const [pickerVisible, setPickerVisible] = React.useState(false);
+  const preparedAction = preparedActionDraft && preparedActionDraft.preparedActionId === preparedActionId
+    ? preparedActionDraft.action
+    : initialAction;
+  const unsupportedPreparation = Boolean(preparation && !initialAction);
   const libraryAvailable = initialAction?.destination === 'library';
-  const libraryTargetRef = React.useRef<Pick<AgentPreparedActionPublic, 'parentId' | 'targetLabel'>>({
+  const libraryTargetRef = React.useRef<LibraryTargetDraft>({
     parentId: initialAction?.parentId,
     targetLabel: initialAction?.targetLabel || '当前目录',
   });
 
   React.useEffect(() => {
-    setPreparedAction(initialAction);
+    setPreparedActionDraft(initialAction && preparedActionId
+      ? { action: initialAction, preparedActionId }
+      : undefined);
+    setPickerVisible(false);
     if (initialAction?.destination === 'library') {
       libraryTargetRef.current = {
         parentId: initialAction.parentId,
         targetLabel: initialAction.targetLabel,
       };
     }
-  }, [initialAction]);
+  }, [initialAction, preparedActionId]);
+
+  const updatePreparedAction = React.useCallback((
+    update: (
+      current: AgentMediaExtractAudioPreparedActionPublicV1,
+    ) => AgentMediaExtractAudioPreparedActionPublicV1,
+  ) => {
+    if (!preparedActionId) return;
+    setPreparedActionDraft((current) => {
+      const currentAction = current?.preparedActionId === preparedActionId
+        ? current.action
+        : initialAction;
+      return currentAction
+        ? { action: update(currentAction), preparedActionId }
+        : current;
+    });
+  }, [initialAction, preparedActionId]);
 
   const updateDestination = React.useCallback((destination: 'library' | 'local') => {
-    setPreparedAction((current) => {
-      if (!current || current.destination === destination) return current;
+    updatePreparedAction((current) => {
+      if (current.destination === destination) return current;
       if (destination === 'library') {
         return {
           ...current,
@@ -251,28 +310,29 @@ export default function AgentConfirmationCard({
           targetLabel: current.targetLabel,
         };
       }
+      const localAction = { ...current };
+      delete localAction.parentId;
       return {
-        ...current,
+        ...localAction,
         destination,
         fallbackPolicy: 'none',
-        parentId: undefined,
         targetLabel: '本机（执行时选择位置）',
       };
     });
-  }, []);
+  }, [updatePreparedAction]);
 
   const handleDirectorySelected = React.useCallback((selection: LibraryNodePickerSelection) => {
     libraryTargetRef.current = {
       parentId: selection.node.id,
       targetLabel: selection.pathLabel,
     };
-    setPreparedAction(current => current ? {
+    updatePreparedAction(current => ({
       ...current,
       parentId: selection.node.id,
       targetLabel: selection.pathLabel,
-    } : current);
+    }));
     setPickerVisible(false);
-  }, []);
+  }, [updatePreparedAction]);
 
   return (
     <>
@@ -282,7 +342,9 @@ export default function AgentConfirmationCard({
           <h3>{approval.preview.title}</h3>
         </div>
         <p>{approval.preview.description}</p>
-        {preparedAction ? (
+        {unsupportedPreparation ? (
+          <p role="alert">当前版本无法识别此准备动作，请取消后重试。</p>
+        ) : preparedAction ? (
           <div className="agent-confirmation-editor">
             <div className="agent-confirmation-destination" role="group" aria-label="保存位置">
               <button
@@ -306,10 +368,10 @@ export default function AgentConfirmationCard({
               <span>文件名</span>
               <input
                 disabled={busy}
-                onChange={event => setPreparedAction(current => current ? {
+                onChange={event => updatePreparedAction(current => ({
                   ...current,
                   outputFileName: event.target.value,
-                } : current)}
+                }))}
                 value={preparedAction.outputFileName}
               />
             </label>
@@ -318,12 +380,12 @@ export default function AgentConfirmationCard({
               <select
                 disabled={busy}
                 onChange={(event) => {
-                  const outputFormat = event.target.value;
-                  setPreparedAction(current => current ? {
+                  const outputFormat = event.target.value as AgentMediaExtractAudioOutputFormat;
+                  updatePreparedAction(current => ({
                     ...current,
                     outputFileName: replaceOutputExtension(current.outputFileName, outputFormat),
                     outputFormat,
-                  } : current);
+                  }));
                 }}
                 value={preparedAction.outputFormat}
               >
@@ -353,10 +415,10 @@ export default function AgentConfirmationCard({
                 <input
                   checked={preparedAction.fallbackPolicy === 'prompt_local'}
                   disabled={busy}
-                  onChange={event => setPreparedAction(current => current ? {
+                  onChange={event => updatePreparedAction(current => ({
                     ...current,
                     fallbackPolicy: event.target.checked ? 'prompt_local' : 'none',
-                  } : current)}
+                  }))}
                   type="checkbox"
                 />
                 上传在提交前明确失败时，询问保存到本机
@@ -384,7 +446,7 @@ export default function AgentConfirmationCard({
           </button>
           <button
             className="agent-confirmation-allow"
-            disabled={busy || Boolean(initialAction && !preparedAction)}
+            disabled={busy || unsupportedPreparation || Boolean(initialAction && !preparedAction)}
             onClick={() => onResolve(true, preparedAction)}
             type="button"
           >

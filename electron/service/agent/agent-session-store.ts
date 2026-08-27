@@ -2,29 +2,32 @@ import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import sqlite3 from 'sqlite3';
 
-import type {
-  AgentActionPreview,
-  AgentAppContext,
-  AgentInteractionRequest,
-  AgentInteractionResponse,
-  AgentInteractionStatus,
-  AgentMessage,
-  AgentOwnerScope,
-  AgentPreparedActionPublic,
-  AgentReasoningEffort,
-  AgentRunPlanSnapshot,
-  AgentRunSnapshot,
-  AgentRunStatus,
-  AgentSessionCursor,
-  AgentSessionPage,
-  AgentSessionSnapshot,
-  AgentSessionSummary,
-  AgentToolApprovalStatus,
-  AgentToolActivitySnapshot,
-  AgentToolActivityStatus,
-  AgentToolResult,
-  AgentToolProgress,
-} from '@/shared/agent/agent.types';
+import {
+  AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_KIND,
+  AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_VERSION,
+  AGENT_PREPARED_ACTION_PUBLIC_IDENTITIES,
+  type AgentActionPreview,
+  type AgentAppContext,
+  type AgentInteractionRequest,
+  type AgentInteractionResponse,
+  type AgentInteractionStatus,
+  type AgentMessage,
+  type AgentOwnerScope,
+  type AgentPreparedActionPublic,
+  type AgentReasoningEffort,
+  type AgentRunPlanSnapshot,
+  type AgentRunSnapshot,
+  type AgentRunStatus,
+  type AgentSessionCursor,
+  type AgentSessionPage,
+  type AgentSessionSnapshot,
+  type AgentSessionSummary,
+  type AgentToolApprovalStatus,
+  type AgentToolActivitySnapshot,
+  type AgentToolActivityStatus,
+  type AgentToolProgress,
+  type AgentToolResult,
+} from '../../../src/shared/agent/agent.types';
 import { normalizeAgentOwnerScope } from '../../../src/shared/agent/agent-owner-scope';
 import { normalizeAgentPreparedActionPublic } from '../../../src/shared/agent/agent-prepared-action';
 import {
@@ -37,8 +40,9 @@ import {
 } from './agent-conversation-summary';
 import { parseStoredAgentRunPlan } from './agent-plan-model';
 import type { AgentToolKind } from './agent-tool-registry';
+import { agentDatabaseSchemaCoordinator } from './storage/agent-database-schema-coordinator';
 
-const AGENT_SESSION_SCHEMA_VERSION = 2;
+export const AGENT_SESSION_SCHEMA_VERSION = 2;
 const INTERMEDIATE_APPROVAL_SCHEMA_VERSION = 3;
 const MAX_SESSION_TITLE_LENGTH = 80;
 const MAX_SEARCH_LENGTH = 120;
@@ -47,7 +51,39 @@ const MAX_CONTEXT_CHECKPOINT_ID_LENGTH = 200;
 const MAX_CONTEXT_CHECKPOINT_PROFILE_ID_LENGTH = 200;
 const MAX_CONTEXT_CHECKPOINT_MODEL_LENGTH = 500;
 const MAX_CONTEXT_CHECKPOINT_SUMMARY_BYTES = 64 * 1024;
+const MAX_SAFE_SQLITE_AGENT_ID = Number.MAX_SAFE_INTEGER;
 
+function sqlText(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
+const PREPARED_ACTION_SUPPORTED_IDENTITY_SQL = AGENT_PREPARED_ACTION_PUBLIC_IDENTITIES
+  .map(identity => `(
+    json_extract(NEW.prepared_action_json, '$.kind') = ${sqlText(identity.kind)}
+    AND CAST(json_extract(NEW.prepared_action_json, '$.version') AS INTEGER) = ${identity.version}
+  )`)
+  .join(' OR ');
+const PREPARED_ACTION_OUTPUT_FILE_NAME_CONTROL_SQL = Array.from(
+  { length: 32 },
+  (_, code) => `instr(
+            CAST(json_extract(NEW.prepared_action_json, '$.outputFileName') AS BLOB),
+            X'${code.toString(16).padStart(2, '0')}'
+          ) > 0`,
+).join('\n          OR ');
+const PREPARED_ACTION_TARGET_LABEL_CONTROL_SQL = Array.from(
+  { length: 32 },
+  (_, code) => `instr(
+            CAST(json_extract(NEW.prepared_action_json, '$.targetLabel') AS BLOB),
+            X'${code.toString(16).padStart(2, '0')}'
+          ) > 0`,
+).join('\n          OR ');
+const PREPARED_ACTION_TRIM_CHARACTERS_SQL = [
+  9, 10, 11, 12, 13, 32, 160, 5_760,
+  8_192, 8_193, 8_194, 8_195, 8_196, 8_197, 8_198, 8_199, 8_200, 8_201, 8_202,
+  8_232, 8_233, 8_239, 8_287, 12_288, 65_279,
+].map(code => `char(${code})`).join(' || ');
+const PREPARED_ACTION_JSON_WITHOUT_ESCAPED_BACKSLASHES_SQL =
+  "replace(NEW.prepared_action_json, char(92) || char(92), '')";
 const TOOL_APPROVAL_COLUMNS = [
   ['permission_behavior', "TEXT NOT NULL DEFAULT 'allow'"],
   ['approval_id', 'TEXT'],
@@ -837,27 +873,105 @@ async function ensureToolRunColumns(database: sqlite3.Database): Promise<void> {
   `);
 }
 
-async function ensureToolPreparationTriggers(database: sqlite3.Database): Promise<void> {
+interface StoredPreparedActionRow {
+  id: string;
+  prepared_action_json: string;
+}
+
+interface StoredPreparedActionField {
+  key: string;
+}
+
+async function reconcileStoredPreparedActions(database: sqlite3.Database): Promise<void> {
+  const rows = await all<StoredPreparedActionRow>(database, `
+    SELECT id, prepared_action_json
+    FROM agent_tool_runs
+    WHERE prepared_action_json IS NOT NULL
+  `);
+  for (const row of rows) {
+    try {
+      const parsed = JSON.parse(row.prepared_action_json) as unknown;
+      const source = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? parsed as Record<string, unknown>
+        : null;
+      if (source) {
+        const fields = await all<StoredPreparedActionField>(
+          database,
+          'SELECT key FROM json_each(?)',
+          [row.prepared_action_json],
+        );
+        if (new Set(fields.map(field => field.key)).size !== fields.length) {
+          throw new Error('prepared action contains duplicate fields');
+        }
+      }
+      const hasKind = source
+        ? Object.prototype.hasOwnProperty.call(source, 'kind')
+        : false;
+      const hasVersion = source
+        ? Object.prototype.hasOwnProperty.call(source, 'version')
+        : false;
+      if (hasKind !== hasVersion) throw new Error('prepared action discriminator is partial');
+      const candidate = source && !hasKind
+        ? {
+            ...source,
+            kind: AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_KIND,
+            version: AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_VERSION,
+          }
+        : parsed;
+      const normalized = normalizeAgentPreparedActionPublic(candidate);
+      await run(database, `
+        UPDATE agent_tool_runs
+        SET prepared_action_json = ?
+        WHERE id = ?
+      `, [JSON.stringify(normalized), row.id]);
+    } catch {
+      throw new Error(`Agent Tool prepared action 无法升级：${row.id}`);
+    }
+  }
+}
+
+async function ensureToolPreparationTriggers(
+  database: sqlite3.Database,
+  manageTransaction: boolean,
+): Promise<void> {
   const validation = `
     SELECT CASE WHEN
       (NEW.prepared_action_id IS NULL) <> (NEW.prepared_action_json IS NULL)
       OR (NEW.prepared_action_id IS NULL) <> (NEW.prepared_snapshot_hash IS NULL)
     THEN RAISE(ABORT, 'Agent Tool preparation fields must be set atomically') END;
     SELECT CASE WHEN NEW.prepared_action_id IS NOT NULL AND (
-      trim(NEW.prepared_action_id) = ''
+      typeof(NEW.prepared_action_id) <> 'text'
+      OR typeof(NEW.prepared_action_json) <> 'text'
+      OR typeof(NEW.prepared_snapshot_hash) <> 'text'
+      OR typeof(NEW.approval_input_hash) <> 'text'
+      OR NEW.approval_input_hash <> NEW.prepared_snapshot_hash
+      OR trim(NEW.prepared_action_id) = ''
       OR length(NEW.prepared_action_id) > 200
-      OR length(NEW.prepared_snapshot_hash) <> 64
-      OR lower(NEW.prepared_snapshot_hash) GLOB '*[^0-9a-f]*'
+      OR length(CAST(NEW.prepared_snapshot_hash AS BLOB)) <> 64
+      OR instr(CAST(NEW.prepared_snapshot_hash AS BLOB), X'00') > 0
+      OR NEW.prepared_snapshot_hash GLOB '*[^0-9a-f]*'
       OR json_valid(NEW.prepared_action_json) <> 1
     ) THEN RAISE(ABORT, 'Agent Tool preparation identity is invalid') END;
     SELECT CASE WHEN NEW.prepared_action_json IS NOT NULL
       AND json_valid(NEW.prepared_action_json) = 1
       AND (
         json_type(NEW.prepared_action_json) <> 'object'
+        OR instr(
+          lower(${PREPARED_ACTION_JSON_WITHOUT_ESCAPED_BACKSLASHES_SQL}),
+          char(92) || 'u0000'
+        ) > 0
+        OR COALESCE(json_type(NEW.prepared_action_json, '$.kind'), '') <> 'text'
+        OR json_extract(NEW.prepared_action_json, '$.kind') <> NEW.tool_name
+        OR COALESCE(json_type(NEW.prepared_action_json, '$.version'), '') <> 'integer'
+        OR NOT (${PREPARED_ACTION_SUPPORTED_IDENTITY_SQL})
         OR COALESCE(json_type(NEW.prepared_action_json, '$.libraryId'), '') <> 'integer'
         OR CAST(json_extract(NEW.prepared_action_json, '$.libraryId') AS INTEGER) <= 0
+        OR CAST(json_extract(NEW.prepared_action_json, '$.libraryId') AS INTEGER)
+          > ${MAX_SAFE_SQLITE_AGENT_ID}
         OR COALESCE(json_type(NEW.prepared_action_json, '$.sourceNodeId'), '') <> 'integer'
         OR CAST(json_extract(NEW.prepared_action_json, '$.sourceNodeId') AS INTEGER) <= 0
+        OR CAST(json_extract(NEW.prepared_action_json, '$.sourceNodeId') AS INTEGER)
+          > ${MAX_SAFE_SQLITE_AGENT_ID}
         OR COALESCE(json_type(NEW.prepared_action_json, '$.destination'), '') <> 'text'
         OR json_extract(NEW.prepared_action_json, '$.destination') NOT IN ('library', 'local')
         OR COALESCE(json_type(NEW.prepared_action_json, '$.fallbackPolicy'), '') <> 'text'
@@ -871,51 +985,98 @@ async function ensureToolPreparationTriggers(database: sqlite3.Database): Promis
           NOT IN ('auto_rename', 'error', 'replace')
         OR COALESCE(json_type(NEW.prepared_action_json, '$.outputFileName'), '') <> 'text'
         OR trim(json_extract(NEW.prepared_action_json, '$.outputFileName')) = ''
+        OR json_extract(NEW.prepared_action_json, '$.outputFileName') <> trim(
+          json_extract(NEW.prepared_action_json, '$.outputFileName'),
+          ${PREPARED_ACTION_TRIM_CHARACTERS_SQL}
+        )
         OR length(json_extract(NEW.prepared_action_json, '$.outputFileName')) > 255
+        OR json_extract(NEW.prepared_action_json, '$.outputFileName') IN ('.', '..')
+        OR instr(json_extract(NEW.prepared_action_json, '$.outputFileName'), '/') > 0
+        OR instr(json_extract(NEW.prepared_action_json, '$.outputFileName'), '\\') > 0
+        OR ${PREPARED_ACTION_OUTPUT_FILE_NAME_CONTROL_SQL}
         OR COALESCE(json_type(NEW.prepared_action_json, '$.outputFormat'), '') <> 'text'
-        OR trim(json_extract(NEW.prepared_action_json, '$.outputFormat')) = ''
-        OR length(json_extract(NEW.prepared_action_json, '$.outputFormat')) > 32
+        OR json_extract(NEW.prepared_action_json, '$.outputFormat') NOT IN ('m4a', 'mp3', 'wav')
         OR COALESCE(json_type(NEW.prepared_action_json, '$.targetLabel'), '') <> 'text'
         OR trim(json_extract(NEW.prepared_action_json, '$.targetLabel')) = ''
+        OR json_extract(NEW.prepared_action_json, '$.targetLabel') <> trim(
+          json_extract(NEW.prepared_action_json, '$.targetLabel'),
+          ${PREPARED_ACTION_TRIM_CHARACTERS_SQL}
+        )
         OR length(json_extract(NEW.prepared_action_json, '$.targetLabel')) > 500
+        OR ${PREPARED_ACTION_TARGET_LABEL_CONTROL_SQL}
         OR (
           json_extract(NEW.prepared_action_json, '$.destination') = 'library'
           AND (
             COALESCE(json_type(NEW.prepared_action_json, '$.parentId'), '') <> 'integer'
             OR CAST(json_extract(NEW.prepared_action_json, '$.parentId') AS INTEGER) <= 0
+            OR CAST(json_extract(NEW.prepared_action_json, '$.parentId') AS INTEGER)
+              > ${MAX_SAFE_SQLITE_AGENT_ID}
           )
+        )
+        OR (
+          json_extract(NEW.prepared_action_json, '$.destination') = 'local'
+          AND json_type(NEW.prepared_action_json, '$.parentId') IS NOT NULL
         )
         OR EXISTS (
           SELECT 1
           FROM json_each(NEW.prepared_action_json) AS field
           WHERE field.key NOT IN (
-            'conflictPolicy', 'destination', 'fallbackPolicy', 'libraryId',
-            'outputFileName', 'outputFormat', 'parentId', 'sourceNodeId', 'targetLabel'
+            'conflictPolicy', 'destination', 'fallbackPolicy', 'kind', 'libraryId',
+            'outputFileName', 'outputFormat', 'parentId', 'sourceNodeId', 'targetLabel',
+            'version'
           )
         )
+        OR (
+          SELECT COUNT(*)
+          FROM json_each(NEW.prepared_action_json)
+        ) <> CASE
+          WHEN json_extract(NEW.prepared_action_json, '$.destination') = 'library' THEN 11
+          ELSE 10
+        END
       )
     THEN RAISE(ABORT, 'Agent Tool prepared action is invalid') END;
   `;
-  await exec(database, `
-    DROP TRIGGER IF EXISTS agent_tool_runs_validate_preparation_insert;
-    DROP TRIGGER IF EXISTS agent_tool_runs_validate_preparation_update;
-    CREATE TRIGGER agent_tool_runs_validate_preparation_insert
-    BEFORE INSERT ON agent_tool_runs
-    BEGIN
-      ${validation}
-    END;
-    CREATE TRIGGER agent_tool_runs_validate_preparation_update
-    BEFORE UPDATE OF prepared_action_id, prepared_action_json, prepared_snapshot_hash
-    ON agent_tool_runs
-    BEGIN
-      ${validation}
-    END;
-  `);
+  if (manageTransaction) await exec(database, 'BEGIN IMMEDIATE;');
+  try {
+    await exec(database, `
+      DROP TRIGGER IF EXISTS agent_tool_runs_validate_preparation_insert;
+      DROP TRIGGER IF EXISTS agent_tool_runs_validate_preparation_update;
+    `);
+    await reconcileStoredPreparedActions(database);
+    await exec(database, `
+      CREATE TRIGGER agent_tool_runs_validate_preparation_insert
+      BEFORE INSERT ON agent_tool_runs
+      BEGIN
+        ${validation}
+      END;
+      CREATE TRIGGER agent_tool_runs_validate_preparation_update
+      BEFORE UPDATE OF
+        prepared_action_id, prepared_action_json, prepared_snapshot_hash, approval_input_hash
+      ON agent_tool_runs
+      BEGIN
+        ${validation}
+      END;
+    `);
+    await exec(database, `
+      UPDATE agent_tool_runs
+      SET prepared_action_json = prepared_action_json
+      WHERE prepared_action_id IS NOT NULL
+        OR prepared_action_json IS NOT NULL
+        OR prepared_snapshot_hash IS NOT NULL;
+    `);
+    if (manageTransaction) await exec(database, 'COMMIT;');
+  } catch (error) {
+    if (manageTransaction) await exec(database, 'ROLLBACK;').catch(() => undefined);
+    throw error;
+  }
 }
 
-async function ensureRunPlanTriggers(database: sqlite3.Database): Promise<void> {
+async function ensureRunPlanTriggers(
+  database: sqlite3.Database,
+  manageTransaction: boolean,
+): Promise<void> {
   await exec(database, `
-    BEGIN IMMEDIATE;
+    ${manageTransaction ? 'BEGIN IMMEDIATE;' : ''}
     DROP TRIGGER IF EXISTS agent_runs_plan_must_start_empty;
     DROP TRIGGER IF EXISTS agent_runs_reject_replace;
     DROP TRIGGER IF EXISTS agent_runs_delete_only_with_session;
@@ -1157,13 +1318,16 @@ async function ensureRunPlanTriggers(database: sqlite3.Database): Promise<void> 
     BEGIN
       SELECT RAISE(ABORT, 'Agent Tool plan association identity is immutable');
     END;
-    COMMIT;
+    ${manageTransaction ? 'COMMIT;' : ''}
   `);
 }
 
-async function ensureRunFinalizationTriggers(database: sqlite3.Database): Promise<void> {
+async function ensureRunFinalizationTriggers(
+  database: sqlite3.Database,
+  manageTransaction: boolean,
+): Promise<void> {
   await exec(database, `
-    BEGIN IMMEDIATE;
+    ${manageTransaction ? 'BEGIN IMMEDIATE;' : ''}
     DROP TRIGGER IF EXISTS agent_runs_block_completed_with_open_tools;
     DROP TRIGGER IF EXISTS agent_runs_finalize_open_tools;
     DROP TRIGGER IF EXISTS agent_tool_runs_require_active_run_on_insert;
@@ -1243,13 +1407,16 @@ async function ensureRunFinalizationTriggers(database: sqlite3.Database): Promis
       WHERE run_id = NEW.id
         AND status IN ('preparing', 'running', 'awaiting_approval', 'awaiting_interaction');
     END;
-    COMMIT;
+    ${manageTransaction ? 'COMMIT;' : ''}
   `);
 }
 
-async function ensureContextCheckpointSchema(database: sqlite3.Database): Promise<void> {
+async function ensureContextCheckpointSchema(
+  database: sqlite3.Database,
+  manageTransaction: boolean,
+): Promise<void> {
   await exec(database, `
-    BEGIN IMMEDIATE;
+    ${manageTransaction ? 'BEGIN IMMEDIATE;' : ''}
     ${CONTEXT_CHECKPOINT_TABLE_SQL}
 
     CREATE INDEX IF NOT EXISTS agent_context_checkpoints_session_completed_idx
@@ -1267,7 +1434,7 @@ async function ensureContextCheckpointSchema(database: sqlite3.Database): Promis
     DROP TRIGGER IF EXISTS agent_context_checkpoints_validate_insert;
     DROP TRIGGER IF EXISTS agent_context_checkpoints_validate_transition;
     DROP TRIGGER IF EXISTS agent_context_checkpoints_delete_only_with_session;
-    COMMIT;
+    ${manageTransaction ? 'COMMIT;' : ''}
   `);
 
   const completedRows = await all<Pick<ContextCheckpointRow, 'id' | 'summary_json'>>(
@@ -1286,7 +1453,7 @@ async function ensureContextCheckpointSchema(database: sqlite3.Database): Promis
     }
   });
   if (invalidIds.length > 0) {
-    await exec(database, 'BEGIN IMMEDIATE;');
+    if (manageTransaction) await exec(database, 'BEGIN IMMEDIATE;');
     try {
       for (const id of invalidIds) {
         await run(database, `
@@ -1296,15 +1463,15 @@ async function ensureContextCheckpointSchema(database: sqlite3.Database): Promis
           WHERE id = ? AND status = 'completed'
         `, [id]);
       }
-      await exec(database, 'COMMIT;');
+      if (manageTransaction) await exec(database, 'COMMIT;');
     } catch (error) {
-      await exec(database, 'ROLLBACK;').catch(() => undefined);
+      if (manageTransaction) await exec(database, 'ROLLBACK;').catch(() => undefined);
       throw error;
     }
   }
 
   await exec(database, `
-    BEGIN IMMEDIATE;
+    ${manageTransaction ? 'BEGIN IMMEDIATE;' : ''}
 
     CREATE TRIGGER agent_context_checkpoints_validate_insert
     BEFORE INSERT ON agent_context_checkpoints
@@ -1396,7 +1563,7 @@ async function ensureContextCheckpointSchema(database: sqlite3.Database): Promis
     BEGIN
       SELECT RAISE(ABORT, 'Agent context checkpoint can only be deleted with its Session');
     END;
-    COMMIT;
+    ${manageTransaction ? 'COMMIT;' : ''}
   `);
 }
 
@@ -1422,14 +1589,70 @@ async function isKnownIntermediateApprovalSchema(database: sqlite3.Database): Pr
   return TOOL_APPROVAL_COLUMNS.every(([name]) => toolRunColumns.has(name));
 }
 
-async function initializeDatabase(database: sqlite3.Database): Promise<void> {
+async function configureDatabaseConnection(database: sqlite3.Database): Promise<void> {
   await exec(database, `
     PRAGMA foreign_keys = ON;
     PRAGMA journal_mode = WAL;
     PRAGMA synchronous = NORMAL;
     PRAGMA busy_timeout = 5000;
   `);
+}
 
+async function recoverInterruptedState(database: sqlite3.Database): Promise<void> {
+  const recoveredAt = new Date().toISOString();
+  await run(database, `
+    UPDATE agent_context_checkpoints
+    SET status = 'interrupted', finished_at = ?
+    WHERE status = 'started'
+  `, [recoveredAt]);
+  await run(database, `
+    UPDATE agent_runs
+    SET
+      status = 'interrupted',
+      current_step = '上次运行已中断',
+      error = '应用退出时任务仍在运行，可重新发送上一条消息',
+      revision = revision + 1,
+      updated_at = ?,
+      finished_at = ?
+    WHERE status IN ('preparing', 'running', 'awaiting_approval', 'awaiting_interaction')
+  `, [recoveredAt, recoveredAt]);
+  await run(database, `
+    UPDATE agent_tool_runs
+    SET
+      status = 'interrupted',
+      result_json = ?,
+      approval_status = CASE
+        WHEN approval_status = 'pending' THEN 'interrupted'
+        ELSE approval_status
+      END,
+      approval_decided_at = CASE
+        WHEN approval_status = 'pending' THEN ?
+        ELSE approval_decided_at
+      END,
+      interaction_status = CASE
+        WHEN interaction_status = 'pending' THEN 'interrupted'
+        ELSE interaction_status
+      END,
+      interaction_decided_at = CASE
+        WHEN interaction_status = 'pending' THEN ?
+        ELSE interaction_decided_at
+      END,
+      revision = revision + 1,
+      finished_at = ?
+    WHERE status IN ('preparing', 'running', 'awaiting_approval', 'awaiting_interaction')
+  `, [
+    JSON.stringify({ message: '应用退出时 Agent Tool 仍在运行', ok: false }),
+    recoveredAt,
+    recoveredAt,
+    recoveredAt,
+  ]);
+}
+
+export async function initializeAgentSessionDatabaseSchema(
+  database: sqlite3.Database,
+  options: { manageTransactions?: boolean } = {},
+): Promise<void> {
+  const manageTransactions = options.manageTransactions !== false;
   const versionRow = await get<{ user_version: number }>(database, 'PRAGMA user_version');
   let schemaVersion = Number(versionRow?.user_version || 0);
   if (schemaVersion === INTERMEDIATE_APPROVAL_SCHEMA_VERSION) {
@@ -1445,7 +1668,7 @@ async function initializeDatabase(database: sqlite3.Database): Promise<void> {
 
   if (schemaVersion === 0) {
     await exec(database, `
-      BEGIN IMMEDIATE;
+      ${manageTransactions ? 'BEGIN IMMEDIATE;' : ''}
 
       CREATE TABLE agent_sessions (
         id TEXT PRIMARY KEY,
@@ -1590,11 +1813,11 @@ async function initializeDatabase(database: sqlite3.Database): Promise<void> {
       END;
 
       PRAGMA user_version = ${AGENT_SESSION_SCHEMA_VERSION};
-      COMMIT;
+      ${manageTransactions ? 'COMMIT;' : ''}
     `);
   } else if (schemaVersion === 1) {
     await exec(database, `
-      BEGIN IMMEDIATE;
+      ${manageTransactions ? 'BEGIN IMMEDIATE;' : ''}
       ALTER TABLE agent_sessions
         ADD COLUMN backend_scope TEXT NOT NULL DEFAULT 'legacy';
       ALTER TABLE agent_sessions
@@ -1610,64 +1833,17 @@ async function initializeDatabase(database: sqlite3.Database): Promise<void> {
           id DESC
         );
       PRAGMA user_version = ${AGENT_SESSION_SCHEMA_VERSION};
-      COMMIT;
+      ${manageTransactions ? 'COMMIT;' : ''}
     `);
   }
 
   await ensureRunColumns(database);
   await ensureToolRunColumns(database);
-  await ensureToolPreparationTriggers(database);
-  await ensureRunPlanTriggers(database);
-  await ensureRunFinalizationTriggers(database);
-  await ensureContextCheckpointSchema(database);
+  await ensureToolPreparationTriggers(database, manageTransactions);
+  await ensureRunPlanTriggers(database, manageTransactions);
+  await ensureRunFinalizationTriggers(database, manageTransactions);
+  await ensureContextCheckpointSchema(database, manageTransactions);
 
-  const recoveredAt = new Date().toISOString();
-  await run(database, `
-    UPDATE agent_context_checkpoints
-    SET status = 'interrupted', finished_at = ?
-    WHERE status = 'started'
-  `, [recoveredAt]);
-  await run(database, `
-    UPDATE agent_runs
-    SET
-      status = 'interrupted',
-      current_step = '上次运行已中断',
-      error = '应用退出时任务仍在运行，可重新发送上一条消息',
-      revision = revision + 1,
-      updated_at = ?,
-      finished_at = ?
-    WHERE status IN ('preparing', 'running', 'awaiting_approval', 'awaiting_interaction')
-  `, [recoveredAt, recoveredAt]);
-  await run(database, `
-    UPDATE agent_tool_runs
-    SET
-      status = 'interrupted',
-      result_json = ?,
-      approval_status = CASE
-        WHEN approval_status = 'pending' THEN 'interrupted'
-        ELSE approval_status
-      END,
-      approval_decided_at = CASE
-        WHEN approval_status = 'pending' THEN ?
-        ELSE approval_decided_at
-      END,
-      interaction_status = CASE
-        WHEN interaction_status = 'pending' THEN 'interrupted'
-        ELSE interaction_status
-      END,
-      interaction_decided_at = CASE
-        WHEN interaction_status = 'pending' THEN ?
-        ELSE interaction_decided_at
-      END,
-      revision = revision + 1,
-      finished_at = ?
-    WHERE status IN ('preparing', 'running', 'awaiting_approval', 'awaiting_interaction')
-  `, [
-    JSON.stringify({ message: '应用退出时 Agent Tool 仍在运行', ok: false }),
-    recoveredAt,
-    recoveredAt,
-    recoveredAt,
-  ]);
 }
 
 export async function createSQLiteAgentSessionStore(
@@ -1678,7 +1854,18 @@ export async function createSQLiteAgentSessionStore(
   }
   const database = await openDatabase(databasePath);
   try {
-    await initializeDatabase(database);
+    await configureDatabaseConnection(database);
+    if (databasePath === ':memory:') {
+      await initializeAgentSessionDatabaseSchema(database);
+    } else {
+      await agentDatabaseSchemaCoordinator.ensureReady(
+        databasePath,
+        'session',
+        () => initializeAgentSessionDatabaseSchema(database),
+        database,
+      );
+    }
+    await recoverInterruptedState(database);
   } catch (error) {
     await close(database).catch(() => undefined);
     throw error;
@@ -1970,6 +2157,7 @@ export async function createSQLiteAgentSessionStore(
 
     async completeToolPreparation(input) {
       const awaitingApproval = input.permissionBehavior === 'ask';
+      const preparedAction = normalizeAgentPreparedActionPublic(input.action);
       const result = await run(database, `
         UPDATE agent_tool_runs
         SET
@@ -1990,7 +2178,7 @@ export async function createSQLiteAgentSessionStore(
       `, [
         input.permissionBehavior,
         input.preparedActionId,
-        JSON.stringify(input.action),
+        JSON.stringify(preparedAction),
         input.snapshotHash,
         awaitingApproval ? input.approvalId : null,
         input.approvalInputHash,
@@ -2400,7 +2588,13 @@ export async function createSQLiteAgentSessionStore(
       if (preparation && !approved) {
         throw new Error('只有批准操作可以更新 prepared action');
       }
-      const result = preparation
+      const normalizedPreparation = preparation
+        ? {
+            ...preparation,
+            action: normalizeAgentPreparedActionPublic(preparation.action),
+          }
+        : undefined;
+      const result = normalizedPreparation
         ? await run(database, `
           UPDATE agent_tool_runs
           SET
@@ -2418,14 +2612,14 @@ export async function createSQLiteAgentSessionStore(
             AND approval_status = 'pending'
             AND prepared_action_id = ?
         `, [
-          preparation.preparedActionId,
-          JSON.stringify(preparation.action),
-          preparation.snapshotHash,
-          preparation.approvalInputHash,
-          JSON.stringify(preparation.approvalPreview),
+          normalizedPreparation.preparedActionId,
+          JSON.stringify(normalizedPreparation.action),
+          normalizedPreparation.snapshotHash,
+          normalizedPreparation.approvalInputHash,
+          JSON.stringify(normalizedPreparation.approvalPreview),
           now,
           approvalId,
-          preparation.expectedPreparedActionId,
+          normalizedPreparation.expectedPreparedActionId,
         ])
         : await run(database, `
         UPDATE agent_tool_runs

@@ -8,9 +8,15 @@ import {
   AGENT_MEDIA_MAX_ARTIFACT_BYTES,
   createAgentMediaArtifactStore,
 } from './agent-media-artifact-store';
+import { createAgentLocalStorageQuotaManager } from './storage/agent-local-storage-quota-manager';
+import { createSQLiteAgentLocalStorageQuotaPersistence } from './storage/agent-local-storage-quota-sqlite';
 
 const OWNER = {
   executionId: 'execution-1',
+  ownerScope: {
+    accountScope: 'user:7',
+    backendScope: 'https://api.example.test/v1',
+  },
   ownerWebContentsId: 77,
   runId: 'run-1',
   sessionId: 'session-1',
@@ -24,8 +30,9 @@ describe('Agent media artifact store', () => {
   });
 
   async function createStore(options: {
-    maxTotalArtifactBytes?: number;
+    createId?: () => string;
     now?: () => number;
+    quotaManager?: ReturnType<typeof createAgentLocalStorageQuotaManager>;
     ttlMs?: number;
   } = {}) {
     const root = await mkdtemp(path.join(os.tmpdir(), 'omniflow-agent-artifact-test-'));
@@ -49,6 +56,10 @@ describe('Agent media artifact store', () => {
       ...OWNER,
       ownerWebContentsId: 88,
     })).rejects.toThrow('无权释放');
+    await expect(store.release(artifact.artifactId, {
+      ...OWNER,
+      ownerScope: { ...OWNER.ownerScope, accountScope: 'user:8' },
+    })).rejects.toThrow('无权释放');
     await expect(access(artifact.filePath)).resolves.toBeUndefined();
     await expect(store.release(artifact.artifactId, OWNER)).resolves.toBe(true);
     await expect(access(artifact.filePath)).rejects.toThrow();
@@ -66,6 +77,19 @@ describe('Agent media artifact store', () => {
     await truncate(oversized.filePath, AGENT_MEDIA_MAX_ARTIFACT_BYTES + 1);
     await expect(store.finalize(oversized.artifactId)).rejects.toThrow('超过 2 GiB');
     await expect(access(oversized.directoryPath)).rejects.toThrow();
+  });
+
+  it('does not remove an existing artifact when a generated ID collides', async () => {
+    const { store } = await createStore({ createId: () => 'fixed-artifact-id' });
+    const first = await store.create('first.m4a', OWNER);
+    await writeFile(first.filePath, 'audio');
+    await store.finalize(first.artifactId);
+
+    await expect(store.create('second.m4a', {
+      ...OWNER,
+      executionId: 'execution-2',
+    })).rejects.toThrow();
+    await expect(access(first.filePath)).resolves.toBeUndefined();
   });
 
   it('sweeps expired records and crash leftovers', async () => {
@@ -113,8 +137,9 @@ describe('Agent media artifact store', () => {
     await store.finalize(artifact.artifactId);
     now += 900;
 
-    expect(store.touchExecution({ ...OWNER, executionId: 'another-execution' })).toBe(false);
-    expect(store.touchExecution(OWNER)).toBe(true);
+    await expect(store.touchExecution({ ...OWNER, executionId: 'another-execution' }))
+      .resolves.toBe(false);
+    await expect(store.touchExecution(OWNER)).resolves.toBe(true);
     now += 900;
     await store.sweepExpired();
     await expect(access(artifact.filePath)).resolves.toBeUndefined();
@@ -124,14 +149,75 @@ describe('Agent media artifact store', () => {
     await expect(access(artifact.filePath)).rejects.toThrow();
   });
 
-  it('counts recent crash residue against the aggregate artifact reservation', async () => {
-    const { root, store } = await createStore({
-      maxTotalArtifactBytes: AGENT_MEDIA_MAX_ARTIFACT_BYTES,
+  it('shares the aggregate reservation with other Agent storage categories', async () => {
+    const quotaManager = createAgentLocalStorageQuotaManager({
+      maxTotalBytes: AGENT_MEDIA_MAX_ARTIFACT_BYTES,
     });
+    quotaManager.registerAdapter('shell-workspace-test', { remove: async () => undefined });
+    await quotaManager.reserve(
+      OWNER.ownerScope,
+      'workspace',
+      'another-run',
+      1,
+      10_000,
+      'shell-workspace-test',
+    );
+    const { store } = await createStore({ quotaManager });
+
+    await expect(store.create('next.wav', OWNER)).rejects.toThrow('总量已达到上限');
+  });
+
+  it('uses the persisted quota ledger to remove a crash artifact after restart', async () => {
+    let now = 10_000;
+    const root = await mkdtemp(path.join(os.tmpdir(), 'omniflow-agent-artifact-restart-test-'));
+    roots.push(root);
+    const databasePath = path.join(root, 'agent.sqlite3');
+    const firstPersistence = await createSQLiteAgentLocalStorageQuotaPersistence(databasePath);
+    const firstQuotaManager = createAgentLocalStorageQuotaManager({
+      now: () => now,
+      persistence: firstPersistence,
+    });
+    const firstStore = createAgentMediaArtifactStore({
+      now: () => now,
+      quotaManager: firstQuotaManager,
+      rootPath: root,
+      ttlMs: 1_000,
+    });
+    const artifact = await firstStore.create('crash.m4a', OWNER);
+    await writeFile(artifact.filePath, 'audio');
+    await firstStore.finalize(artifact.artifactId);
+    await firstQuotaManager.close();
+
+    now += 500;
+    const secondPersistence = await createSQLiteAgentLocalStorageQuotaPersistence(databasePath);
+    const secondQuotaManager = createAgentLocalStorageQuotaManager({
+      now: () => now,
+      persistence: secondPersistence,
+    });
+    const secondStore = createAgentMediaArtifactStore({
+      now: () => now,
+      quotaManager: secondQuotaManager,
+      rootPath: root,
+      ttlMs: 1_000,
+    });
+    await secondStore.sweepExpired();
+    await expect(access(artifact.filePath)).resolves.toBeUndefined();
+
+    now += 501;
+    await secondStore.sweepExpired();
+    await expect(access(artifact.directoryPath)).rejects.toThrow();
+    await secondQuotaManager.close();
+  });
+
+  it('removes expired legacy directories that do not have a quota ledger entry', async () => {
+    const now = 10_000;
+    const { root, store } = await createStore({ now: () => now, ttlMs: 1_000 });
     const orphan = path.join(root, 'agent-media-recent-crash');
     await mkdir(orphan);
     await writeFile(path.join(orphan, 'leftover.wav'), 'x');
+    await utimes(orphan, new Date(0), new Date(0));
 
-    await expect(store.create('next.wav', OWNER)).rejects.toThrow('总量已达到上限');
+    await store.sweepExpired();
+    await expect(access(orphan)).rejects.toThrow();
   });
 });

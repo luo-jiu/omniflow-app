@@ -346,6 +346,7 @@ export function useAgentSession({
         id: `agent-tool-${event.runId}-${event.approval.call.id}`,
         ordinal: 0,
         permissionBehavior: 'ask' as const,
+        ...(event.approval.preparation ? { preparation: event.approval.preparation } : {}),
         revision: 0,
         runId: event.runId,
         sessionId: event.sessionId,

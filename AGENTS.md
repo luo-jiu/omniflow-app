@@ -42,6 +42,9 @@
 - Viewer 映射专题：`docs/file-viewer-and-archive-viewer-map.md`
 - Viewer 文档入口：`docs/viewers/README.md`
 - MediaHub 契约（出声实体注册 / 浮窗 / tab 关闭释放）：`docs/media-hub-contract.md`
+- 内置 Agent 架构（执行 / 持久化 / IPC / 安全）：`docs/built-in-agent-architecture.md`
+- 内置 Agent Shell 目标架构（raw Shell / 权限 / Provider / 工作区桥）：`docs/built-in-agent-shell-architecture.md`
+- 内置 Agent UI 契约（工作区 / 状态投影 / 受控交互）：`docs/built-in-agent-ui-contract.md`
 - 前端验证矩阵：`docs/frontend-validation-matrix.md`
 - 资源捕捉重构现状摘要：`docs/cat-catch-migration-audit.md`
 - 上传中心局部说明：`src/modules/upload-center/README.md`
@@ -63,6 +66,8 @@
   3. `.agent-docs/frontend-documentation-standard.md`
 - 涉及整体分层、状态 owner、API / IPC、Electron、工作区模式、文件树 / 文件预览、embedded browser、资源捕捉、上传或验证时，必须继续查阅对应专题文档。
 - 涉及字号、排版、控件密度、目录树宽度、工具栏高度、弹框观感、亮暗主题可见性时，必须先阅读 `docs/ui-display-readability-baseline.md`。
+- 涉及内置 Agent 的页面、组件、时间线、Composer、会话 / 记忆管理或 Tool 展示时，必须同时阅读 `docs/built-in-agent-architecture.md` 和 `docs/built-in-agent-ui-contract.md`；UI 改动不得新增 Session / Run / ToolRun / Workflow 状态源，也不得绕过受控展示协议直连执行能力。
+- 涉及 Agent Shell、命令权限、本地进程、Run 工作区、日志或资料库暂存 / 回传时，必须继续阅读 `docs/built-in-agent-shell-architecture.md`；在其实现与双平台验收完成前，不得把目标设计写成当前能力，也不得直接向模型或 renderer 暴露 `AgentLocalProcessRunner`。
 - 当前显示基线处于恢复 `100%` 页面缩放的迁移阶段；新页面和新模块必须先参考 `docs/ui-display-readability-baseline.md` 的最新结论，不能继续套用旧的 `16px` 最小字号硬规则。高频工作区控件允许使用更紧凑字号，但必须同时保证行高、截断、点击热区、主题对比度和 `Cmd/Ctrl+0` 下的可读性。
 - 按当前前端依赖方向开发：
 

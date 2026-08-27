@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type {
+  AgentMediaExtractAudioPreparedActionPublicV1,
+  AgentToolApprovalSnapshot,
+} from '@/shared/agent/agent.types';
+
 const mocks = vi.hoisted(() => ({
   resolveCapabilitySnapshot: vi.fn(),
   streamAgentProviderTurn: vi.fn(),
@@ -27,7 +32,11 @@ import { agentPlanControlTool } from './agent-plan-model';
 import { createAgentRunCapabilitySnapshot } from './agent-run-capability-snapshot';
 import { createAgentCapabilitySnapshot } from './capabilities/agent-capability-registry';
 import { createSQLiteAgentSessionStore, type AgentSessionStore } from './agent-session-store';
-import { agentToolRegistry } from './agent-tool-registry';
+import {
+  agentToolRegistry,
+  createAgentToolRegistry,
+  type AgentTool,
+} from './agent-tool-registry';
 import {
   MINIMUM_AGENT_PROVIDER_TOOL_RESULT_CONTENT,
   projectAgentToolResultForProvider,
@@ -93,6 +102,25 @@ function request() {
   };
 }
 
+function mediaPreparedAction(
+  overrides: Partial<AgentMediaExtractAudioPreparedActionPublicV1> = {},
+): AgentMediaExtractAudioPreparedActionPublicV1 {
+  return {
+    conflictPolicy: 'auto_rename',
+    destination: 'library',
+    fallbackPolicy: 'prompt_local',
+    kind: 'media.extractAudio',
+    libraryId: 3,
+    outputFileName: 'movie-audio.m4a',
+    outputFormat: 'm4a',
+    parentId: 10,
+    sourceNodeId: 8,
+    targetLabel: '视频',
+    version: 1,
+    ...overrides,
+  };
+}
+
 function skillPromptCatalog() {
   const snapshot = builtInAgentSkillRegistry.createRunSnapshot();
   return {
@@ -128,6 +156,56 @@ describe('Agent orchestrator', () => {
       getSessionStore: async () => store,
       runSessionRegistry: createAIServiceRunSessionRegistry(),
     });
+  }
+
+  async function startPreparedAudioApproval() {
+    mocks.streamAgentProviderTurn.mockResolvedValueOnce({
+      content: '',
+      toolCalls: [{ id: 'call-extract-audio', input: {}, name: 'media.extractAudio' }],
+    });
+    const webContents = sender();
+    const orchestrator = createOrchestrator();
+    const started = await orchestrator.start(webContents as never, {
+      ...request(),
+      userPrompt: '提取当前视频的音频',
+    });
+    await vi.waitFor(() => {
+      expect(webContents.send).toHaveBeenCalledWith(
+        'agent:chat:event',
+        expect.objectContaining({ type: 'tool-prepare-requested' }),
+      );
+    });
+    const preparation = webContents.send.mock.calls
+      .map(call => call[1])
+      .find(event => event?.type === 'tool-prepare-requested').preparation;
+    expect(orchestrator.completeToolPreparation(webContents.id, {
+      callId: preparation.callId,
+      inputHash: preparation.inputHash,
+      libraryId: 3,
+      ownerScope: OWNER_SCOPE,
+      prepareId: preparation.prepareId,
+      result: {
+        providerBindings: {
+          m4a: {
+            providerAlias: 'local-minio',
+            providerLabel: '本机 MinIO',
+          },
+        },
+      },
+      runId: started.runId,
+      sessionId: started.sessionId,
+      toolRunId: preparation.toolRunId,
+    })).toBe(true);
+    await vi.waitFor(() => {
+      expect(webContents.send).toHaveBeenCalledWith(
+        'agent:chat:event',
+        expect.objectContaining({ type: 'tool-approval-required' }),
+      );
+    });
+    const approval = webContents.send.mock.calls
+      .map(call => call[1])
+      .find(event => event?.type === 'tool-approval-required').approval as AgentToolApprovalSnapshot;
+    return { approval, orchestrator, started, webContents };
   }
 
   it('filters unavailable media capabilities before provider materialization and persists identity', async () => {
@@ -1017,6 +1095,159 @@ describe('Agent orchestrator', () => {
     });
   });
 
+  it('rejects tampered prepared action discriminators and extra fields before approval', async () => {
+    const cases = [
+      {
+        error: '类型或版本不受支持',
+        mutate: (action: AgentMediaExtractAudioPreparedActionPublicV1) => ({
+          ...action,
+          kind: 'shell.run',
+        }),
+      },
+      {
+        error: '类型或版本不受支持',
+        mutate: (action: AgentMediaExtractAudioPreparedActionPublicV1) => ({
+          ...action,
+          version: 2,
+        }),
+      },
+      {
+        error: '包含未知字段',
+        mutate: (action: AgentMediaExtractAudioPreparedActionPublicV1) => ({
+          ...action,
+          untrusted: true,
+        }),
+      },
+    ];
+
+    for (const testCase of cases) {
+      const { approval, orchestrator, started, webContents } = await startPreparedAudioApproval();
+      if (!approval.preparation) throw new Error('expected prepared approval');
+      await expect(orchestrator.resolveToolApproval(webContents.id, {
+        approvalId: approval.approvalId,
+        approved: true,
+        libraryId: 3,
+        ownerScope: OWNER_SCOPE,
+        preparedAction: testCase.mutate(approval.preparation.action) as never,
+        preparedActionId: approval.preparation.preparedActionId,
+        runId: started.runId,
+        sessionId: started.sessionId,
+      })).rejects.toThrow(testCase.error);
+
+      expect(await store.getSession(started.sessionId, OWNER_SCOPE, 3)).toMatchObject({
+        lastRunStatus: 'awaiting_approval',
+        toolActivities: [expect.objectContaining({
+          approval: expect.objectContaining({ status: 'pending' }),
+          preparation: {
+            action: approval.preparation.action,
+            preparedActionId: approval.preparation.preparedActionId,
+            snapshotHash: approval.preparation.snapshotHash,
+          },
+          status: 'awaiting_approval',
+        })],
+      });
+      expect(orchestrator.stop(started.sessionId, webContents.id)).toBe(true);
+      await vi.waitFor(() => {
+        expect(webContents.send.mock.calls.map(call => call[1]?.type)).toContain('cancelled');
+      });
+    }
+  });
+
+  it('rejects a prepared action whose discriminator belongs to another Tool', async () => {
+    const mismatchedTool: AgentTool = {
+      createRendererPrepareRequest: () => ({}),
+      description: '用于验证 prepared action 与 Tool 的绑定',
+      executor: 'renderer',
+      finalizeRendererPreparation: () => ({
+        decision: {
+          behavior: 'ask',
+          preview: {
+            description: '不应展示此确认',
+            risk: 'write',
+            title: '错误准备动作',
+          },
+          risk: 'write',
+        },
+        executionInput: {},
+        publicAction: mediaPreparedAction(),
+      }),
+      inputSchema: {
+        additionalProperties: false,
+        type: 'object',
+      },
+      name: 'test.preparedActionMismatch',
+      risk: 'write',
+    };
+    const testRegistry = createAgentToolRegistry([
+      ...agentToolRegistry.list(),
+      mismatchedTool,
+    ]);
+    const snapshotSpy = vi.spyOn(agentToolRegistry, 'createSnapshot')
+      .mockReturnValue(testRegistry.createSnapshot());
+
+    try {
+      mocks.streamAgentProviderTurn
+        .mockResolvedValueOnce({
+          content: '',
+          toolCalls: [{ id: 'call-mismatch', input: {}, name: mismatchedTool.name }],
+        })
+        .mockImplementationOnce(async (_connection, input, onDelta) => {
+          expect(JSON.parse(input.messages.at(-1).content)).toMatchObject({
+            message: expect.stringContaining('prepared action 与 Tool 不匹配'),
+            ok: false,
+          });
+          onDelta('准备动作已被拒绝。');
+          return { content: '准备动作已被拒绝。', toolCalls: [] };
+        });
+      const webContents = sender();
+      const orchestrator = createOrchestrator();
+      const started = await orchestrator.start(webContents as never, request());
+      await vi.waitFor(() => {
+        expect(webContents.send).toHaveBeenCalledWith(
+          'agent:chat:event',
+          expect.objectContaining({ type: 'tool-prepare-requested' }),
+        );
+      });
+      const preparation = webContents.send.mock.calls
+        .map(call => call[1])
+        .find(event => event?.type === 'tool-prepare-requested').preparation;
+
+      expect(orchestrator.completeToolPreparation(webContents.id, {
+        callId: preparation.callId,
+        inputHash: preparation.inputHash,
+        libraryId: 3,
+        ownerScope: OWNER_SCOPE,
+        prepareId: preparation.prepareId,
+        result: {},
+        runId: started.runId,
+        sessionId: started.sessionId,
+        toolRunId: preparation.toolRunId,
+      })).toBe(true);
+      await vi.waitFor(() => {
+        expect(webContents.send).toHaveBeenCalledWith(
+          'agent:chat:event',
+          expect.objectContaining({ type: 'completed' }),
+        );
+      });
+
+      expect(webContents.send.mock.calls.map(call => call[1]?.type))
+        .not.toContain('tool-approval-required');
+      expect(await store.getSession(started.sessionId, OWNER_SCOPE, 3)).toMatchObject({
+        lastRunStatus: 'completed',
+        toolActivities: [expect.objectContaining({
+          call: expect.objectContaining({ name: mismatchedTool.name }),
+          result: {
+            message: expect.stringContaining('prepared action 与 Tool 不匹配'),
+            ok: false,
+          },
+          status: 'failed',
+        })],
+      });
+    } finally {
+      snapshotSpy.mockRestore();
+    }
+  });
+
   it('runs approved audio extraction through one exact renderer capability', async () => {
     mocks.streamAgentProviderTurn
       .mockResolvedValueOnce({
@@ -1057,7 +1288,7 @@ describe('Agent orchestrator', () => {
       release: vi.fn(async () => true),
       releaseOwner: vi.fn(async () => undefined),
       releaseRun: vi.fn(async () => undefined),
-      touchExecution: vi.fn(() => true),
+      touchExecution: vi.fn(async () => true),
     };
     const saveMediaArtifactAs = vi.fn(async () => ({ canceled: true as const }));
     const webContents = sender();
@@ -1122,9 +1353,11 @@ describe('Agent orchestrator', () => {
     expect(approval.preparation).toMatchObject({
       action: {
         destination: 'library',
+        kind: 'media.extractAudio',
         outputFileName: 'movie-audio.m4a',
         outputFormat: 'm4a',
         parentId: 10,
+        version: 1,
       },
       preparedActionId: expect.any(String),
       snapshotHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
@@ -1212,6 +1445,7 @@ describe('Agent orchestrator', () => {
       .rejects.toThrow('已经使用');
     expect(mediaArtifactStore.getOwned).toHaveBeenCalledWith('artifact-1', {
       executionId: execution.executionId,
+      ownerScope: OWNER_SCOPE,
       ownerWebContentsId: webContents.id,
       runId: started.runId,
       sessionId: started.sessionId,
@@ -1237,6 +1471,7 @@ describe('Agent orchestrator', () => {
     })).toBe(true);
     expect(mediaArtifactStore.touchExecution).toHaveBeenCalledWith({
       executionId: execution.executionId,
+      ownerScope: OWNER_SCOPE,
       ownerWebContentsId: webContents.id,
       runId: started.runId,
       sessionId: started.sessionId,
@@ -1272,6 +1507,7 @@ describe('Agent orchestrator', () => {
     });
     expect(mediaArtifactStore.release).toHaveBeenCalledWith('artifact-1', {
       executionId: execution.executionId,
+      ownerScope: OWNER_SCOPE,
       ownerWebContentsId: webContents.id,
       runId: started.runId,
       sessionId: started.sessionId,

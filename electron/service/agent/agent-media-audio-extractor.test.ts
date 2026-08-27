@@ -7,6 +7,10 @@ import {
 
 const OWNER = {
   executionId: 'execution-1',
+  ownerScope: {
+    accountScope: 'user:7',
+    backendScope: 'https://api.example.test/v1',
+  },
   ownerWebContentsId: 77,
   runId: 'run-1',
   sessionId: 'session-1',

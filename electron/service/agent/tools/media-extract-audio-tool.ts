@@ -1,8 +1,15 @@
 import path from 'node:path';
 
 import { STAGED_FILE_NAME_MAX_BYTES } from '../../stagedFilePolicy';
-import type { AgentPreparedActionPublic } from '@/shared/agent/agent.types';
-import { normalizeAgentPreparedActionPublic } from '../../../../src/shared/agent/agent-prepared-action';
+import {
+  AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_KIND,
+  AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_VERSION,
+  type AgentMediaExtractAudioPreparedActionPublicV1,
+  type AgentPreparedActionPublic,
+} from '../../../../src/shared/agent/agent.types';
+import {
+  normalizeAgentMediaExtractAudioPreparedActionPublicV1,
+} from '../../../../src/shared/agent/agent-prepared-action';
 import type { AgentTool } from '../agent-tool-registry';
 import { AGENT_CAPABILITY_MEDIA_FFMPEG } from '../capabilities/agent-capability-runtime';
 import { buildAgentMediaFileName, resolveAgentMediaNode } from './media-tool-node';
@@ -123,8 +130,11 @@ function buildPreparedAction(
   requestedAction?: AgentPreparedActionPublic,
 ) {
   const node = resolveAgentMediaNode(input, context);
-  const requestedFormat = requestedAction?.outputFormat
-    ? normalizeAgentAudioOutputFormat({ format: requestedAction.outputFormat })
+  const normalizedRequestedAction = requestedAction === undefined
+    ? undefined
+    : normalizeAgentMediaExtractAudioPreparedActionPublicV1(requestedAction);
+  const requestedFormat = normalizedRequestedAction?.outputFormat
+    ? normalizeAgentAudioOutputFormat({ format: normalizedRequestedAction.outputFormat })
     : normalizeAgentAudioOutputFormat(input);
   const providerBinding = rendererResult.providerBindings[requestedFormat];
   const sourceFileName = buildAgentMediaFileName(node);
@@ -132,10 +142,11 @@ function buildPreparedAction(
   const currentParentId = Number(context.appContext.currentDirectory?.id);
   const currentDirectoryName = String(context.appContext.currentDirectory?.name || '当前目录');
   const defaultDestination = providerBinding ? 'library' : 'local';
-  const defaultAction: AgentPreparedActionPublic = {
+  const defaultAction: AgentMediaExtractAudioPreparedActionPublicV1 = {
     conflictPolicy: 'auto_rename',
     destination: defaultDestination,
     fallbackPolicy: defaultDestination === 'library' ? 'prompt_local' : 'none',
+    kind: AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_KIND,
     libraryId,
     outputFileName: deriveAgentAudioOutputFileName(sourceFileName, requestedFormat),
     outputFormat: requestedFormat,
@@ -144,8 +155,11 @@ function buildPreparedAction(
     targetLabel: defaultDestination === 'library'
       ? currentDirectoryName
       : '本机（执行时选择位置）',
+    version: AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_VERSION,
   };
-  const action = normalizeAgentPreparedActionPublic(requestedAction || defaultAction);
+  const action = normalizeAgentMediaExtractAudioPreparedActionPublicV1(
+    normalizedRequestedAction || defaultAction,
+  );
   if (action.libraryId !== libraryId || action.sourceNodeId !== node.id) {
     throw new Error('Agent prepared action 的资料库或源文件已经变化');
   }
@@ -157,7 +171,7 @@ function buildPreparedAction(
   const targetLabel = action.destination === 'library'
     ? action.targetLabel
     : '本机（执行时选择位置）';
-  const publicAction = normalizeAgentPreparedActionPublic({
+  const publicAction = normalizeAgentMediaExtractAudioPreparedActionPublicV1({
     ...action,
     fallbackPolicy: action.destination === 'library' ? action.fallbackPolicy : 'none',
     outputFileName,

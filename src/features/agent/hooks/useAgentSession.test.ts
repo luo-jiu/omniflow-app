@@ -4,8 +4,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type {
   AgentChatStreamEvent,
+  AgentMediaExtractAudioPreparedActionPublicV1,
   AgentRunSnapshot,
   AgentSessionSnapshot,
+  AgentToolApprovalSnapshot,
   AgentToolActivitySnapshot,
 } from '@/shared/agent/agent.types';
 import { useAgentSession } from './useAgentSession';
@@ -95,6 +97,25 @@ function withPlan(snapshot: AgentRunSnapshot): AgentRunSnapshot {
       title: '检查当前文件',
       version: 1,
     },
+  };
+}
+
+function mediaPreparedAction(
+  overrides: Partial<AgentMediaExtractAudioPreparedActionPublicV1> = {},
+): AgentMediaExtractAudioPreparedActionPublicV1 {
+  return {
+    conflictPolicy: 'auto_rename',
+    destination: 'library',
+    fallbackPolicy: 'prompt_local',
+    kind: 'media.extractAudio',
+    libraryId: 3,
+    outputFileName: 'movie-audio.m4a',
+    outputFormat: 'm4a',
+    parentId: 10,
+    sourceNodeId: 8,
+    targetLabel: '视频',
+    version: 1,
+    ...overrides,
   };
 }
 
@@ -329,6 +350,69 @@ describe('useAgentSession event coordination', () => {
     await act(async () => {
       startRequest.resolve({ runId: 'run-2', sessionId: 'session-1' });
       await submitPromise;
+    });
+    hook.unmount();
+  });
+
+  it('preserves fallback approval preparation and submits the edited discriminator unchanged', async () => {
+    apiMocks.resolveAgentToolApproval.mockResolvedValue({ approved: false });
+    apiMocks.getAgentSession.mockResolvedValue(sessionSnapshot());
+    const hook = renderSessionHook();
+    await act(async () => {
+      await hook.current.restore('session-1');
+    });
+    const preparedAction = mediaPreparedAction();
+    const approval: AgentToolApprovalSnapshot = {
+      approvalId: 'approval-prepared',
+      call: { id: 'call-prepared', input: {}, name: 'media.extractAudio' },
+      preparation: {
+        action: preparedAction,
+        preparedActionId: 'prepared-action-1',
+        snapshotHash: 'a'.repeat(64),
+      },
+      preview: {
+        description: '从当前视频提取音频',
+        risk: 'write',
+        title: '提取音频',
+      },
+      runId: 'run-1',
+      sessionId: 'session-1',
+    };
+    const preparation = approval.preparation;
+    if (!preparation) throw new Error('expected prepared approval');
+
+    act(() => {
+      listener?.({
+        approval,
+        runId: approval.runId,
+        sessionId: approval.sessionId,
+        type: 'tool-approval-required',
+      });
+    });
+
+    expect(hook.current.toolActivities).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        preparation,
+        status: 'awaiting_approval',
+      }),
+    ]));
+    const editedAction = mediaPreparedAction({
+      outputFileName: 'renamed.mp3',
+      outputFormat: 'mp3',
+    });
+    await act(async () => {
+      await hook.current.resolveApproval(approval, true, editedAction);
+    });
+
+    expect(apiMocks.resolveAgentToolApproval).toHaveBeenCalledWith({
+      approvalId: approval.approvalId,
+      approved: true,
+      libraryId: 3,
+      ownerScope: OWNER_SCOPE,
+      preparedAction: editedAction,
+      preparedActionId: preparation.preparedActionId,
+      runId: approval.runId,
+      sessionId: approval.sessionId,
     });
     hook.unmount();
   });

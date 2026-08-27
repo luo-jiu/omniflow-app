@@ -82,7 +82,6 @@ import { agentMediaArtifactStore, type AgentMediaArtifactStore } from './agent-m
 import { saveAgentMediaArtifactAs } from './agent-media-save-as';
 import { inspectAgentMediaSource } from './agent-media-inspector';
 import { buildAgentMemoryContextMessagesWithinBudget } from './agent-memory-context';
-import { getAgentMemoryStore } from './agent-memory-store-runtime';
 import type { AgentMemoryStore } from './agent-memory-store';
 import {
   createStructuredAgentMemoryRetriever,
@@ -103,8 +102,8 @@ import {
   containsAgentSensitiveData,
   sanitizeAgentSensitiveText,
 } from './agent-sensitive-data';
-import { getAgentSessionStore } from './agent-session-store-runtime';
 import type { AgentRunUpdate, AgentSessionStore } from './agent-session-store';
+import { getAgentPersistenceRuntime } from './agent-persistence-runtime';
 import {
   createAgentToolBroker,
   normalizeAgentToolResult,
@@ -494,11 +493,17 @@ function hashToolInput(value: unknown): string {
   return crypto.createHash('sha256').update(stableJson(value)).digest('hex');
 }
 
-function createPreparedRuntime(result: AgentToolPreparationResult): AgentPreparedRuntime {
+function createPreparedRuntime(
+  result: AgentToolPreparationResult,
+  expectedToolName: string,
+): AgentPreparedRuntime {
   if (result.decision.behavior !== 'ask' && result.decision.behavior !== 'allow') {
     throw new Error('Agent Tool prepare 不能生成拒绝后的执行动作');
   }
   const action = normalizeAgentPreparedActionPublic(result.publicAction);
+  if (action.kind !== expectedToolName) {
+    throw new Error('Agent prepared action 与 Tool 不匹配');
+  }
   const preparedActionId = crypto.randomUUID();
   const snapshotHash = hashToolInput({
     action,
@@ -551,9 +556,10 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       ? async (): Promise<AgentMemoryStore> => {
           throw new Error('测试运行时未配置长期记忆 Store');
         }
-      : getAgentMemoryStore
+      : async () => (await getAgentPersistenceRuntime()).memoryStore
   );
-  const resolveSessionStore = options.getSessionStore || getAgentSessionStore;
+  const resolveSessionStore = options.getSessionStore
+    || (async () => (await getAgentPersistenceRuntime()).sessionStore);
   const retrieveMemories = options.retrieveMemories || (
     options.getSessionStore && !options.getMemoryStore
       ? async () => []
@@ -584,6 +590,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
   const pendingApprovals = new Map<string, PendingAgentApproval>();
   const pendingInteractions = new Map<string, PendingAgentInteraction>();
   const activeMediaArtifactSaves = new Set<ActiveMediaArtifactSave>();
+  let shuttingDown = false;
 
   async function waitForMediaArtifactSaves(predicate: (
     save: ActiveMediaArtifactSave,
@@ -715,7 +722,11 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         ) {
           throw new Error('Agent prepared action 已变化，请按最新确认内容重试');
         }
-        finalized = await pending.prepared.finalize(input.preparedAction);
+        const requestedAction = normalizeAgentPreparedActionPublic(input.preparedAction);
+        if (requestedAction.kind !== pending.approval.call.name) {
+          throw new Error('Agent prepared action 与 Tool 不匹配');
+        }
+        finalized = await pending.prepared.finalize(requestedAction);
         preparedResolution = {
           action: finalized.action,
           approvalInputHash: finalized.snapshotHash,
@@ -950,12 +961,13 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     input: AgentToolExecutionProgressRequest,
   ): boolean {
     const reported = toolBroker.reportRendererProgress(ownerWebContentsId, input);
-    mediaArtifactStore.touchExecution?.({
+    void Promise.resolve(mediaArtifactStore.touchExecution?.({
       executionId: String(input?.executionId || ''),
+      ownerScope: input?.ownerScope,
       ownerWebContentsId,
       runId: String(input?.runId || ''),
       sessionId: String(input?.sessionId || ''),
-    });
+    })).catch(() => undefined);
     return reported;
   }
 
@@ -1054,6 +1066,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       ...(executionInput.mimeType ? { mimeType: String(executionInput.mimeType) } : {}),
       outputFileName,
       outputFormat,
+      ownerScope: normalizeAgentOwnerScope(input.ownerScope),
       ownerWebContentsId,
       runId: input.runId,
       sessionId: input.sessionId,
@@ -1067,6 +1080,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
   ): Promise<boolean> {
     return mediaArtifactStore.release(String(input?.artifactId || ''), {
       executionId: String(input?.executionId || ''),
+      ownerScope: normalizeAgentOwnerScope(input?.ownerScope),
       ownerWebContentsId,
       runId: String(input?.runId || ''),
       sessionId: String(input?.sessionId || ''),
@@ -1112,6 +1126,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     }
     const owner = {
       executionId: String(input.executionId || ''),
+      ownerScope: normalizeAgentOwnerScope(input.ownerScope),
       ownerWebContentsId: sender.id,
       runId: String(input.runId || ''),
       sessionId: String(input.sessionId || ''),
@@ -1392,12 +1407,15 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
           });
           const rendererPreparation = await preparation.outcome;
           const finalizePrepared = async (requestedAction?: AgentPreparedActionPublic) => (
-            createPreparedRuntime(await tool.finalizeRendererPreparation!(
-              call.input,
-              rendererPreparation,
-              requestedAction,
-              executionContext,
-            ))
+            createPreparedRuntime(
+              await tool.finalizeRendererPreparation!(
+                call.input,
+                rendererPreparation,
+                requestedAction,
+                executionContext,
+              ),
+              call.name,
+            )
           );
           const prepared = await finalizePrepared();
           decision = prepared.permissionBehavior === 'ask'
@@ -2238,6 +2256,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
   }
 
   async function start(sender: WebContents, input: AgentChatRequest): Promise<AgentChatStartResult> {
+    if (shuttingDown) throw new Error('Agent 正在退出，暂时不能开始新任务');
     const userPrompt = String(input?.userPrompt || '').trim();
     const profileId = String(input?.profileId || '').trim();
     const model = String(input?.model || '').trim();
@@ -2465,6 +2484,26 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       .catch(() => undefined);
   }
 
+  async function shutdown(timeoutMs = 6_000): Promise<boolean> {
+    shuttingDown = true;
+    const owners = new Set<number>();
+    startingRuns.forEach(runtime => owners.add(runtime.ownerWebContentsId));
+    activeRuns.forEach(runtime => owners.add(runtime.ownerWebContentsId));
+    activeMediaArtifactSaves.forEach(save => owners.add(save.ownerWebContentsId));
+    owners.forEach(releaseOwner);
+
+    const deadline = Date.now() + Math.max(0, timeoutMs);
+    while (
+      startingRuns.size > 0
+      || activeRuns.size > 0
+      || activeMediaArtifactSaves.size > 0
+    ) {
+      if (Date.now() >= deadline) return false;
+      await new Promise(resolve => setTimeout(resolve, 25));
+    }
+    return true;
+  }
+
   async function listSessions(
     ownerScope: AgentOwnerScope,
     libraryId: number,
@@ -2581,6 +2620,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     reportToolExecutionProgress,
     resolveToolApproval,
     saveMediaArtifact,
+    shutdown,
     submitInteraction,
     start,
     stop,

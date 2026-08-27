@@ -11,7 +11,13 @@ import { registerOverlayWindowIpcHandlers } from './service/overlayWindowIpc'
 import { createSystemVideoWindowController } from './service/systemVideoWindowController'
 import { registerSystemVideoWindowIpcHandlers } from './service/systemVideoWindowIpc'
 import { registerAppUpdateIpcHandlers } from './service/appUpdateIpc'
+import { createAppGracefulShutdown } from './service/appGracefulShutdown'
 import { agentMediaArtifactStore } from './service/agent/agent-media-artifact-store'
+import { agentOrchestrator } from './service/agent/agent-orchestrator'
+import {
+  disposeAgentPersistenceRuntime,
+  getAgentPersistenceRuntime,
+} from './service/agent/agent-persistence-runtime'
 import { clearFileTransferRuntime, initializeFileTransferRuntime } from './service/fileTransferRuntime'
 import { createAppUpdateService } from './service/appUpdateService'
 import { IMAGE_PREVIEW_PROTOCOL, registerImagePreviewProtocol } from './ipc/imagePreview'
@@ -380,16 +386,35 @@ function createWindow() {
   return win
 }
 
-app.on('before-quit', () => {
+const appGracefulShutdown = createAppGracefulShutdown({
+  cleanup: async () => {
+    appUpdateService.dispose()
+    embeddedBrowserMainController.dispose()
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      saveWindowState(mainWindow)
+    }
+    overlayWindowController.destroy()
+    systemVideoWindowController.destroy()
+    let agentSettled = await agentOrchestrator.shutdown()
+    await clearFileTransferRuntime()
+    if (!agentSettled) {
+      agentSettled = await agentOrchestrator.shutdown(1_000)
+    }
+    if (agentSettled) {
+      await disposeAgentPersistenceRuntime()
+    } else {
+      console.error('[agent] active work did not settle; persistence will remain open until process exit')
+    }
+  },
+  onError: (error) => {
+    console.error('[app] graceful shutdown failed', error)
+  },
+  quit: () => app.quit(),
+})
+
+app.on('before-quit', (event) => {
   isQuitting = true
-  appUpdateService.dispose()
-  embeddedBrowserMainController.dispose()
-  void clearFileTransferRuntime().catch(() => undefined)
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    saveWindowState(mainWindow)
-  }
-  overlayWindowController.destroy()
-  systemVideoWindowController.destroy()
+  appGracefulShutdown.handleBeforeQuit(event)
 })
 
 app.on('window-all-closed', () => {
@@ -424,6 +449,9 @@ app.whenReady().then(async () => {
   embeddedBrowserMainController.initializeBridges()
   await initializeFileTransferRuntime().catch((error) => {
     console.error('[file-transfer] download URL broker failed to start', error)
+  })
+  await getAgentPersistenceRuntime().catch((error) => {
+    console.error('[agent] persistence runtime failed to start', error)
   })
   await agentMediaArtifactStore.sweepExpired().catch((error) => {
     console.error('[agent] media artifact sweep failed to start', error)

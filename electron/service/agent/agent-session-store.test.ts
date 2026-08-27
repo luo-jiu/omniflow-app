@@ -243,12 +243,36 @@ async function executeDatabaseSql(databasePath: string, sql: string): Promise<vo
       error ? reject(error) : resolve(opened)
     ));
   });
-  await new Promise<void>((resolve, reject) => {
-    database.exec(sql, error => error ? reject(error) : resolve());
+  try {
+    await new Promise<void>((resolve, reject) => {
+      database.exec(sql, error => error ? reject(error) : resolve());
+    });
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      database.close(error => error ? reject(error) : resolve());
+    });
+  }
+}
+
+async function runDatabaseSql(
+  databasePath: string,
+  sql: string,
+  parameters: unknown[] = [],
+): Promise<void> {
+  const database = await new Promise<sqlite3.Database>((resolve, reject) => {
+    const opened = new sqlite3.Database(databasePath, error => (
+      error ? reject(error) : resolve(opened)
+    ));
   });
-  await new Promise<void>((resolve, reject) => {
-    database.close(error => error ? reject(error) : resolve());
-  });
+  try {
+    await new Promise<void>((resolve, reject) => {
+      database.run(sql, parameters, error => error ? reject(error) : resolve());
+    });
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      database.close(error => error ? reject(error) : resolve());
+    });
+  }
 }
 
 async function readDatabaseVersion(databasePath: string): Promise<number> {
@@ -336,12 +360,14 @@ function preparedAction(outputFileName = 'movie-audio.m4a') {
     conflictPolicy: 'auto_rename' as const,
     destination: 'library' as const,
     fallbackPolicy: 'prompt_local' as const,
+    kind: 'media.extractAudio' as const,
     libraryId: 3,
     outputFileName,
-    outputFormat: 'm4a',
+    outputFormat: 'm4a' as const,
     parentId: 10,
     sourceNodeId: 8,
     targetLabel: '视频',
+    version: 1 as const,
   };
 }
 
@@ -381,6 +407,111 @@ describe('SQLite Agent session store', () => {
       ownerScope,
       title,
     });
+  }
+
+  async function createStoredPreparedAction(
+    databasePath: string,
+    suffix: string,
+    hashCharacter: string,
+  ) {
+    const store = await createStore(databasePath);
+    const sessionId = `session-prepared-${suffix}`;
+    const runId = `run-prepared-${suffix}`;
+    const toolId = `tool-prepared-${suffix}`;
+    const preparedActionId = `prepared-action-${suffix}`;
+    const snapshotHash = hashCharacter.repeat(64);
+    await createSession(store, sessionId, 3, `准备动作 ${suffix}`);
+    await store.createRun({
+      id: runId,
+      model: 'model-a',
+      now: timestamp(1),
+      profileId: 'profile-a',
+      reasoningEffort: 'auto',
+      sessionId,
+      userPrompt: '提取音频',
+    });
+    await store.createToolRun({
+      callId: `call-prepared-${suffix}`,
+      id: toolId,
+      input: {},
+      now: timestamp(2),
+      permissionBehavior: 'allow',
+      runId,
+      status: 'preparing',
+      toolName: 'media.extractAudio',
+    });
+    await store.completeToolPreparation({
+      action: preparedAction(`${suffix}.m4a`),
+      approvalId: `approval-prepared-${suffix}`,
+      approvalInputHash: snapshotHash,
+      approvalPreview: {
+        description: '提取并上传音频',
+        risk: 'write',
+        title: '提取音频',
+      },
+      id: toolId,
+      permissionBehavior: 'allow',
+      preparedActionId,
+      snapshotHash,
+    });
+    await store.completeToolRun(
+      toolId,
+      { message: '音频提取完成', ok: true },
+      timestamp(3),
+    );
+    await store.updateRun(runId, {
+      currentStep: '已完成',
+      finishedAt: timestamp(3),
+      status: 'completed',
+      updatedAt: timestamp(3),
+    });
+    await store.close();
+    stores.splice(stores.indexOf(store), 1);
+    return { preparedActionId, sessionId, snapshotHash, toolId };
+  }
+
+  async function restoreLegacyPreparedActionSchema(
+    databasePath: string,
+    toolIds: readonly string[],
+  ): Promise<void> {
+    await executeDatabaseSql(databasePath, `
+      DROP TRIGGER IF EXISTS agent_tool_runs_validate_preparation_insert;
+      DROP TRIGGER IF EXISTS agent_tool_runs_validate_preparation_update;
+    `);
+    for (const toolId of toolIds) {
+      await runDatabaseSql(databasePath, `
+        UPDATE agent_tool_runs
+        SET prepared_action_json = json_remove(
+          prepared_action_json,
+          '$.kind',
+          '$.version'
+        )
+        WHERE id = ?
+      `, [toolId]);
+    }
+    await executeDatabaseSql(databasePath, `
+      CREATE TRIGGER agent_tool_runs_validate_preparation_insert
+      BEFORE INSERT ON agent_tool_runs
+      WHEN NEW.prepared_action_json IS NOT NULL
+        AND (
+          json_type(NEW.prepared_action_json, '$.kind') IS NOT NULL
+          OR json_type(NEW.prepared_action_json, '$.version') IS NOT NULL
+        )
+      BEGIN
+        SELECT RAISE(ABORT, 'Legacy Agent prepared action has unknown fields');
+      END;
+      CREATE TRIGGER agent_tool_runs_validate_preparation_update
+      BEFORE UPDATE OF prepared_action_id, prepared_action_json, prepared_snapshot_hash
+      ON agent_tool_runs
+      WHEN NEW.prepared_action_json IS NOT NULL
+        AND (
+          json_type(NEW.prepared_action_json, '$.kind') IS NOT NULL
+          OR json_type(NEW.prepared_action_json, '$.version') IS NOT NULL
+        )
+      BEGIN
+        SELECT RAISE(ABORT, 'Legacy Agent prepared action has unknown fields');
+      END;
+    `);
   }
 
   async function createCompletedTurn(
@@ -1946,6 +2077,20 @@ describe('SQLite Agent session store', () => {
     await expect(store.completeToolPreparation({
       action: initialAction,
       approvalId: 'approval-prepared-action',
+      approvalInputHash: 'b'.repeat(64),
+      approvalPreview: {
+        description: '提取并上传音频',
+        risk: 'write',
+        title: '提取音频',
+      },
+      id: 'tool-prepared-action',
+      permissionBehavior: 'ask',
+      preparedActionId: 'prepared-action-1',
+      snapshotHash: 'a'.repeat(64),
+    })).rejects.toThrow('preparation identity is invalid');
+    await expect(store.completeToolPreparation({
+      action: initialAction,
+      approvalId: 'approval-prepared-action',
       approvalInputHash: 'a'.repeat(64),
       approvalPreview: {
         description: '提取并上传音频',
@@ -1964,6 +2109,36 @@ describe('SQLite Agent session store', () => {
       },
       revision: 2,
       status: 'awaiting_approval',
+    });
+    await expect(runDatabaseSql(databasePath, `
+      UPDATE agent_tool_runs
+      SET approval_input_hash = ?
+      WHERE id = 'tool-prepared-action'
+    `, ['b'.repeat(64)])).rejects.toThrow('preparation identity is invalid');
+    for (const column of [
+      'prepared_action_id',
+      'prepared_action_json',
+      'prepared_snapshot_hash',
+    ]) {
+      await expect(executeDatabaseSql(databasePath, `
+        UPDATE agent_tool_runs
+        SET ${column} = CAST(${column} AS BLOB)
+        WHERE id = 'tool-prepared-action';
+      `)).rejects.toThrow('preparation identity is invalid');
+    }
+    expect(await readDatabaseRow(databasePath, `
+      SELECT
+        typeof(prepared_action_id) AS prepared_action_id_type,
+        typeof(prepared_action_json) AS prepared_action_json_type,
+        typeof(prepared_snapshot_hash) AS prepared_snapshot_hash_type,
+        typeof(approval_input_hash) AS approval_input_hash_type
+      FROM agent_tool_runs
+      WHERE id = 'tool-prepared-action'
+    `)).toEqual({
+      approval_input_hash_type: 'text',
+      prepared_action_id_type: 'text',
+      prepared_action_json_type: 'text',
+      prepared_snapshot_hash_type: 'text',
     });
     await expect(store.completeToolPreparation({
       action: initialAction,
@@ -2003,6 +2178,12 @@ describe('SQLite Agent session store', () => {
       'approval-prepared-action',
       'approved',
       timestamp(3),
+      { ...editedPreparation, approvalInputHash: 'd'.repeat(64) },
+    )).rejects.toThrow('preparation identity is invalid');
+    await expect(store.resolveToolApproval(
+      'approval-prepared-action',
+      'approved',
+      timestamp(3),
       editedPreparation,
     )).resolves.toMatchObject({
       approval: { status: 'approved' },
@@ -2014,6 +2195,317 @@ describe('SQLite Agent session store', () => {
       revision: 3,
       status: 'running',
     });
+  });
+
+  it('rejects unsupported, malformed, and non-canonical prepared action writes', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'omniflow-agent-prepared-validation-'));
+    temporaryDirectories.push(directory);
+    const databasePath = path.join(directory, 'agent-sessions.sqlite3');
+    const store = await createStore(databasePath);
+    await createSession(store, 'session-prepared-validation', 3, '准备动作校验');
+    await store.createRun({
+      id: 'run-prepared-validation',
+      model: 'model-a',
+      now: timestamp(1),
+      profileId: 'profile-a',
+      reasoningEffort: 'auto',
+      sessionId: 'session-prepared-validation',
+      userPrompt: '提取音频',
+    });
+    await store.createToolRun({
+      callId: 'call-prepared-validation',
+      id: 'tool-prepared-validation',
+      input: {},
+      now: timestamp(2),
+      permissionBehavior: 'allow',
+      runId: 'run-prepared-validation',
+      status: 'preparing',
+      toolName: 'media.extractAudio',
+    });
+
+    const validAction = preparedAction();
+    const legacyAction: Record<string, unknown> = { ...validAction };
+    delete legacyAction.kind;
+    delete legacyAction.version;
+    const partialIdentity: Record<string, unknown> = { ...validAction };
+    delete partialIdentity.version;
+    const invalidActions: unknown[] = [
+      legacyAction,
+      partialIdentity,
+      { ...validAction, kind: 'shell.run' },
+      { ...validAction, version: 2 },
+      { ...validAction, version: '1' },
+      { ...validAction, unexpected: true },
+      { ...validAction, libraryId: '3' },
+      { ...validAction, destination: 'local', fallbackPolicy: 'none' },
+      { ...validAction, outputFileName: ' . ' },
+      { ...validAction, targetLabel: '\u00a0' },
+      { ...validAction, targetLabel: '视频\n目录' },
+    ];
+    for (const action of invalidActions) {
+      await expect(store.completeToolPreparation({
+        action: action as never,
+        approvalId: 'approval-prepared-validation',
+        approvalInputHash: 'a'.repeat(64),
+        approvalPreview: {
+          description: '提取并上传音频',
+          risk: 'write',
+          title: '提取音频',
+        },
+        id: 'tool-prepared-validation',
+        permissionBehavior: 'allow',
+        preparedActionId: 'prepared-action-validation',
+        snapshotHash: 'a'.repeat(64),
+      })).rejects.toThrow();
+    }
+
+    for (const snapshotHash of [
+      'A'.repeat(64),
+      `${'a'.repeat(64)}\0suffix`,
+      `${'a'.repeat(63)}\0`,
+    ]) {
+      await expect(store.completeToolPreparation({
+        action: validAction,
+        approvalId: 'approval-prepared-validation',
+        approvalInputHash: 'a'.repeat(64),
+        approvalPreview: {
+          description: '提取并上传音频',
+          risk: 'write',
+          title: '提取音频',
+        },
+        id: 'tool-prepared-validation',
+        permissionBehavior: 'allow',
+        preparedActionId: 'prepared-action-validation',
+        snapshotHash,
+      })).rejects.toThrow('preparation identity is invalid');
+    }
+
+    const nonCanonicalAction = {
+      ...validAction,
+      outputFileName: ' movie-audio.m4a ',
+      outputFormat: ' M4A ',
+      targetLabel: ' 视频 ',
+    };
+    await expect(store.completeToolPreparation({
+      action: nonCanonicalAction as never,
+      approvalId: 'approval-prepared-validation',
+      approvalInputHash: '441d16fa52fa337561eb2ae2ef848b6739c27d69c26f9e3444bda3f320ba0920',
+      approvalPreview: {
+        description: '提取并上传音频',
+        risk: 'write',
+        title: '提取音频',
+      },
+      id: 'tool-prepared-validation',
+      permissionBehavior: 'allow',
+      preparedActionId: 'prepared-action-validation',
+      snapshotHash: '441d16fa52fa337561eb2ae2ef848b6739c27d69c26f9e3444bda3f320ba0920',
+    })).resolves.toMatchObject({
+      preparation: { action: validAction },
+      status: 'running',
+    });
+
+    await store.createToolRun({
+      callId: 'call-prepared-mismatch',
+      id: 'tool-prepared-mismatch',
+      input: {},
+      now: timestamp(3),
+      permissionBehavior: 'allow',
+      runId: 'run-prepared-validation',
+      status: 'preparing',
+      toolName: 'directory.create',
+    });
+    await expect(store.completeToolPreparation({
+      action: validAction,
+      approvalId: 'approval-prepared-mismatch',
+      approvalInputHash: 'b'.repeat(64),
+      approvalPreview: {
+        description: '不匹配的准备动作',
+        risk: 'write',
+        title: '错误动作',
+      },
+      id: 'tool-prepared-mismatch',
+      permissionBehavior: 'allow',
+      preparedActionId: 'prepared-action-mismatch',
+      snapshotHash: 'b'.repeat(64),
+    })).rejects.toThrow('prepared action is invalid');
+
+    const duplicateDiscriminator = JSON.stringify(validAction).replace(
+      '"kind":"media.extractAudio"',
+      '"kind":"media.extractAudio","kind":"media.extractAudio"',
+    );
+    await expect(runDatabaseSql(databasePath, `
+      UPDATE agent_tool_runs
+      SET prepared_action_json = ?
+      WHERE id = 'tool-prepared-validation'
+    `, [duplicateDiscriminator])).rejects.toThrow('prepared action is invalid');
+    for (const [label, invalidPersistedAction] of [
+      ['backslash file name', { ...validAction, outputFileName: 'folder\\movie.m4a' }],
+      ['NUL file name', { ...validAction, outputFileName: 'bad\0name.m4a' }],
+      ['whitespace target', { ...validAction, targetLabel: '\u00a0' }],
+      ['control target', { ...validAction, targetLabel: '视频\n目录' }],
+    ] as const) {
+      try {
+        await runDatabaseSql(databasePath, `
+          UPDATE agent_tool_runs
+          SET prepared_action_json = ?
+          WHERE id = 'tool-prepared-validation'
+        `, [JSON.stringify(invalidPersistedAction)]);
+      } catch (error) {
+        expect(error).toMatchObject({ message: expect.stringContaining('prepared action is invalid') });
+        continue;
+      }
+      throw new Error(`SQLite accepted ${label}`);
+    }
+    expect(await readDatabaseRow<{ prepared_action_json: string }>(databasePath, `
+      SELECT prepared_action_json
+      FROM agent_tool_runs
+      WHERE id = 'tool-prepared-validation'
+    `)).toEqual({ prepared_action_json: JSON.stringify(validAction) });
+  });
+
+  it('reconciles legacy schema 2 prepared actions once and remains idempotent', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'omniflow-agent-prepared-reconcile-'));
+    temporaryDirectories.push(directory);
+    const databasePath = path.join(directory, 'agent-sessions.sqlite3');
+    const seeded = await createStoredPreparedAction(databasePath, 'legacy', 'a');
+    await restoreLegacyPreparedActionSchema(databasePath, [seeded.toolId]);
+
+    const legacyRow = await readDatabaseRow<{ prepared_action_json: string }>(databasePath, `
+      SELECT prepared_action_json
+      FROM agent_tool_runs
+      WHERE id = '${seeded.toolId}'
+    `);
+    expect(JSON.parse(legacyRow?.prepared_action_json || '{}')).not.toHaveProperty('kind');
+    expect(JSON.parse(legacyRow?.prepared_action_json || '{}')).not.toHaveProperty('version');
+
+    const migratedStore = await createStore(databasePath);
+    expect(await migratedStore.getSession(seeded.sessionId, OWNER_SCOPE, 3)).toMatchObject({
+      toolActivities: [expect.objectContaining({
+        id: seeded.toolId,
+        preparation: {
+          action: preparedAction('legacy.m4a'),
+          preparedActionId: seeded.preparedActionId,
+          snapshotHash: seeded.snapshotHash,
+        },
+      })],
+    });
+    await migratedStore.close();
+    stores.splice(stores.indexOf(migratedStore), 1);
+
+    const firstMigration = await readDatabaseRow<{
+      prepared_action_id: string;
+      prepared_action_json: string;
+      prepared_snapshot_hash: string;
+      revision: number;
+    }>(databasePath, `
+      SELECT prepared_action_id, prepared_action_json, prepared_snapshot_hash, revision
+      FROM agent_tool_runs
+      WHERE id = '${seeded.toolId}'
+    `);
+    expect(firstMigration).toEqual({
+      prepared_action_id: seeded.preparedActionId,
+      prepared_action_json: JSON.stringify(preparedAction('legacy.m4a')),
+      prepared_snapshot_hash: seeded.snapshotHash,
+      revision: 3,
+    });
+    expect(await readDatabaseVersion(databasePath)).toBe(2);
+
+    const reopenedStore = await createStore(databasePath);
+    await reopenedStore.close();
+    stores.splice(stores.indexOf(reopenedStore), 1);
+    expect(await readDatabaseRow(databasePath, `
+      SELECT prepared_action_id, prepared_action_json, prepared_snapshot_hash, revision
+      FROM agent_tool_runs
+      WHERE id = '${seeded.toolId}'
+    `)).toEqual(firstMigration);
+    expect(await readDatabaseVersion(databasePath)).toBe(2);
+  });
+
+  it('rolls back legacy prepared action reconciliation atomically for damaged rows', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'omniflow-agent-prepared-rollback-'));
+    temporaryDirectories.push(directory);
+    const databasePath = path.join(directory, 'agent-sessions.sqlite3');
+    const valid = await createStoredPreparedAction(databasePath, 'valid', 'a');
+    const damaged = await createStoredPreparedAction(databasePath, 'damaged', 'b');
+    await restoreLegacyPreparedActionSchema(databasePath, [valid.toolId, damaged.toolId]);
+    await runDatabaseSql(databasePath, `
+      UPDATE agent_tool_runs
+      SET approval_input_hash = ?
+      WHERE id = ?
+    `, ['c'.repeat(64), damaged.toolId]);
+    const legacyValidRow = await readDatabaseRow<{ prepared_action_json: string }>(databasePath, `
+      SELECT prepared_action_json
+      FROM agent_tool_runs
+      WHERE id = '${valid.toolId}'
+    `);
+
+    await expect(createStore(databasePath)).rejects.toThrow('preparation identity is invalid');
+    expect(await readDatabaseRow<{ prepared_action_json: string }>(databasePath, `
+      SELECT prepared_action_json
+      FROM agent_tool_runs
+      WHERE id = '${valid.toolId}'
+    `)).toEqual(legacyValidRow);
+    expect(JSON.parse(legacyValidRow?.prepared_action_json || '{}')).not.toHaveProperty('kind');
+    expect(await readDatabaseRow<{ sql: string }>(databasePath, `
+      SELECT sql
+      FROM sqlite_master
+      WHERE type = 'trigger'
+        AND name = 'agent_tool_runs_validate_preparation_update'
+    `)).toEqual({
+      sql: expect.stringContaining('Legacy Agent prepared action has unknown fields'),
+    });
+
+    await runDatabaseSql(databasePath, `
+      UPDATE agent_tool_runs
+      SET approval_input_hash = ?
+      WHERE id = ?
+    `, [damaged.snapshotHash, damaged.toolId]);
+    const retriedStore = await createStore(databasePath);
+    await retriedStore.close();
+    stores.splice(stores.indexOf(retriedStore), 1);
+    for (const seeded of [valid, damaged]) {
+      const row = await readDatabaseRow<{ prepared_action_json: string }>(databasePath, `
+        SELECT prepared_action_json
+        FROM agent_tool_runs
+        WHERE id = '${seeded.toolId}'
+      `);
+      expect(JSON.parse(row?.prepared_action_json || '{}')).toMatchObject({
+        kind: 'media.extractAudio',
+        version: 1,
+      });
+    }
+    expect(await readDatabaseVersion(databasePath)).toBe(2);
+  });
+
+  it('rejects duplicate fields before legacy prepared actions are normalized', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'omniflow-agent-prepared-duplicates-'));
+    temporaryDirectories.push(directory);
+    const databasePath = path.join(directory, 'agent-sessions.sqlite3');
+    const seeded = await createStoredPreparedAction(databasePath, 'duplicate', 'c');
+    await restoreLegacyPreparedActionSchema(databasePath, [seeded.toolId]);
+    const legacyRow = await readDatabaseRow<{ prepared_action_json: string }>(databasePath, `
+      SELECT prepared_action_json
+      FROM agent_tool_runs
+      WHERE id = '${seeded.toolId}'
+    `);
+    const duplicateAction = String(legacyRow?.prepared_action_json || '').replace(
+      '"outputFormat":"m4a"',
+      '"outputFormat":"m4a","outputFormat":"m4a"',
+    );
+    await runDatabaseSql(databasePath, `
+      UPDATE agent_tool_runs
+      SET prepared_action_json = ?
+      WHERE id = ?
+    `, [duplicateAction, seeded.toolId]);
+
+    await expect(createStore(databasePath)).rejects.toThrow(
+      `Agent Tool prepared action 无法升级：${seeded.toolId}`,
+    );
+    expect(await readDatabaseRow<{ prepared_action_json: string }>(databasePath, `
+      SELECT prepared_action_json
+      FROM agent_tool_runs
+      WHERE id = '${seeded.toolId}'
+    `)).toEqual({ prepared_action_json: duplicateAction });
   });
 
   it('preserves the immutable plan and Tool step association when recovery interrupts a Run', async () => {

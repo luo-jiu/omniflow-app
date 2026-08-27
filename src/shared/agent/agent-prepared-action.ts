@@ -1,20 +1,60 @@
-import type { AgentPreparedActionPublic } from './agent.types';
+import {
+  AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_KIND,
+  AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_VERSION,
+  type AgentMediaExtractAudioOutputFormat,
+  type AgentMediaExtractAudioPreparedActionPublicV1,
+  type AgentPreparedActionPublic,
+} from './agent.types';
 
 const MAX_OUTPUT_FILE_NAME_CHARACTERS = 255;
-const MAX_OUTPUT_FORMAT_CHARACTERS = 32;
 const MAX_TARGET_LABEL_CHARACTERS = 500;
+const MEDIA_EXTRACT_AUDIO_FIELDS = new Set([
+  'conflictPolicy',
+  'destination',
+  'fallbackPolicy',
+  'kind',
+  'libraryId',
+  'outputFileName',
+  'outputFormat',
+  'parentId',
+  'sourceNodeId',
+  'targetLabel',
+  'version',
+]);
+const MEDIA_EXTRACT_AUDIO_OUTPUT_FORMATS = new Set<AgentMediaExtractAudioOutputFormat>([
+  'm4a',
+  'mp3',
+  'wav',
+]);
+
+function strictObject(input: unknown): Record<string, unknown> {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    throw new Error('Agent prepared action 无效');
+  }
+  const prototype = Object.getPrototypeOf(input);
+  if (prototype !== Object.prototype && prototype !== null) {
+    throw new Error('Agent prepared action 无效');
+  }
+  return input as Record<string, unknown>;
+}
+
+function assertExactFields(source: Record<string, unknown>, allowed: ReadonlySet<string>): void {
+  if (Object.keys(source).some(key => !allowed.has(key))) {
+    throw new Error('Agent prepared action 包含未知字段');
+  }
+}
 
 function positiveId(value: unknown, label: string): number {
-  const normalized = Number(value);
-  if (!Number.isSafeInteger(normalized) || normalized <= 0) {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) {
     throw new Error(`${label}无效`);
   }
-  return normalized;
+  return value;
 }
 
 function boundedText(value: unknown, label: string, maximum: number): string {
-  const normalized = String(value || '').trim();
-  if (!normalized || normalized.length > maximum) throw new Error(`${label}无效`);
+  if (typeof value !== 'string') throw new Error(`${label}无效`);
+  const normalized = value.trim();
+  if (!normalized || Array.from(normalized).length > maximum) throw new Error(`${label}无效`);
   return normalized;
 }
 
@@ -34,13 +74,33 @@ function safeFileName(value: unknown): string {
   return normalized;
 }
 
-export function normalizeAgentPreparedActionPublic(
-  input: unknown,
-): AgentPreparedActionPublic {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) {
-    throw new Error('Agent prepared action 无效');
+function safeTargetLabel(value: unknown): string {
+  const normalized = boundedText(value, '目标位置', MAX_TARGET_LABEL_CHARACTERS);
+  if (Array.from(normalized).some(character => character.charCodeAt(0) < 32)) {
+    throw new Error('目标位置无效');
   }
-  const source = input as Record<string, unknown>;
+  return normalized;
+}
+
+function outputFormat(value: unknown): AgentMediaExtractAudioOutputFormat {
+  const normalized = boundedText(value, '输出格式', 32).toLowerCase();
+  if (!MEDIA_EXTRACT_AUDIO_OUTPUT_FORMATS.has(normalized as AgentMediaExtractAudioOutputFormat)) {
+    throw new Error('输出格式无效');
+  }
+  return normalized as AgentMediaExtractAudioOutputFormat;
+}
+
+export function normalizeAgentMediaExtractAudioPreparedActionPublicV1(
+  input: unknown,
+): AgentMediaExtractAudioPreparedActionPublicV1 {
+  const source = strictObject(input);
+  if (
+    source.kind !== AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_KIND
+    || source.version !== AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_VERSION
+  ) {
+    throw new Error('Agent prepared action 类型或版本不受支持');
+  }
+  assertExactFields(source, MEDIA_EXTRACT_AUDIO_FIELDS);
   const destination = source.destination === 'library' || source.destination === 'local'
     ? source.destination
     : null;
@@ -55,37 +115,63 @@ export function normalizeAgentPreparedActionPublic(
   if (!destination || !fallbackPolicy || !conflictPolicy) {
     throw new Error('Agent prepared action 策略无效');
   }
-  const parentId = source.parentId === undefined
+  const hasParentId = Object.prototype.hasOwnProperty.call(source, 'parentId');
+  const parentId = !hasParentId
     ? undefined
     : positiveId(source.parentId, '目标目录');
   if (destination === 'library' && !parentId) {
     throw new Error('资料库目标目录无效');
   }
+  if (destination === 'local' && hasParentId) {
+    throw new Error('本机目标不能包含资料库目录');
+  }
   return {
     conflictPolicy,
     destination,
     fallbackPolicy: destination === 'local' ? 'none' : fallbackPolicy,
+    kind: AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_KIND,
     libraryId: positiveId(source.libraryId, '资料库'),
     outputFileName: safeFileName(source.outputFileName),
-    outputFormat: boundedText(source.outputFormat, '输出格式', MAX_OUTPUT_FORMAT_CHARACTERS)
-      .toLowerCase(),
+    outputFormat: outputFormat(source.outputFormat),
     ...(destination === 'library' && parentId ? { parentId } : {}),
     sourceNodeId: positiveId(source.sourceNodeId, '源文件'),
-    targetLabel: boundedText(source.targetLabel, '目标位置', MAX_TARGET_LABEL_CHARACTERS),
+    targetLabel: safeTargetLabel(source.targetLabel),
+    version: AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_VERSION,
   };
 }
 
+export function normalizeAgentPreparedActionPublic(
+  input: unknown,
+): AgentPreparedActionPublic {
+  const source = strictObject(input);
+  if (
+    source.kind === AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_KIND
+    && source.version === AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_VERSION
+  ) {
+    return normalizeAgentMediaExtractAudioPreparedActionPublicV1(source);
+  }
+  throw new Error('Agent prepared action 类型或版本不受支持');
+}
+
 export function equalAgentPreparedActionPublic(
-  left: AgentPreparedActionPublic,
-  right: AgentPreparedActionPublic,
+  left: unknown,
+  right: unknown,
 ): boolean {
-  return left.conflictPolicy === right.conflictPolicy
-    && left.destination === right.destination
-    && left.fallbackPolicy === right.fallbackPolicy
-    && left.libraryId === right.libraryId
-    && left.outputFileName === right.outputFileName
-    && left.outputFormat === right.outputFormat
-    && left.parentId === right.parentId
-    && left.sourceNodeId === right.sourceNodeId
-    && left.targetLabel === right.targetLabel;
+  try {
+    const normalizedLeft = normalizeAgentPreparedActionPublic(left);
+    const normalizedRight = normalizeAgentPreparedActionPublic(right);
+    return normalizedLeft.kind === normalizedRight.kind
+      && normalizedLeft.version === normalizedRight.version
+      && normalizedLeft.conflictPolicy === normalizedRight.conflictPolicy
+      && normalizedLeft.destination === normalizedRight.destination
+      && normalizedLeft.fallbackPolicy === normalizedRight.fallbackPolicy
+      && normalizedLeft.libraryId === normalizedRight.libraryId
+      && normalizedLeft.outputFileName === normalizedRight.outputFileName
+      && normalizedLeft.outputFormat === normalizedRight.outputFormat
+      && normalizedLeft.parentId === normalizedRight.parentId
+      && normalizedLeft.sourceNodeId === normalizedRight.sourceNodeId
+      && normalizedLeft.targetLabel === normalizedRight.targetLabel;
+  } catch {
+    return false;
+  }
 }

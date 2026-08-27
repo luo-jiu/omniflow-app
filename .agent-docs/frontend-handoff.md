@@ -1,6 +1,6 @@
 # OmniFlow App 前端交接索引
 
-更新时间：2026-07-30
+更新时间：2026-08-26
 
 适用对象：继续维护 `omniflow-app` 前端、Electron 主进程、IPC、桌面交互和前端文档的开发者或 Coding Agent。
 
@@ -28,6 +28,9 @@
    - `docs/local-macos-signing-and-release.md`（个人签名、bootstrap、证书恢复与 macOS 发布）
    - `docs/embedded-browser-architecture.md`
    - `docs/library-detail-workspace.md`
+   - `docs/built-in-agent-architecture.md`（Agent 执行、持久化、IPC 和安全事实）
+   - `docs/built-in-agent-shell-architecture.md`（Agent raw Shell 的目标权限、平台、工作区和日志契约；当前尚未实现）
+   - `docs/built-in-agent-ui-contract.md`（Agent 工作区、状态投影和受控交互）
    - `docs/file-explorer-file-viewer-boundary.md`
    - `docs/built-in-type-and-archive-mode.md`
    - `docs/file-viewer-and-archive-viewer-map.md`
@@ -68,6 +71,10 @@
   - `docs/cat-catch-full-migration-execution-plan.md`
 - `library detail` 工作区模式、browser / file-viewer / search-home 切换：
   - `docs/library-detail-workspace.md`
+- 内置 Agent 的执行、持久化、IPC、安全和 renderer UI 边界：
+  - `docs/built-in-agent-architecture.md`
+  - `docs/built-in-agent-shell-architecture.md`
+  - `docs/built-in-agent-ui-contract.md`
 - 文件树、文件打开、预览 tab、viewer 分发边界：
   - `docs/file-explorer-file-viewer-boundary.md`
 - 内置类型、归档模式、目录树特殊语义：
