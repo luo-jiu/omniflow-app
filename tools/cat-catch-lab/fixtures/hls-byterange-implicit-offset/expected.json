@@ -55,7 +55,7 @@
       "duration": 4,
       "title": null,
       "length": 6,
-      "offset": 0,
+      "offset": 405,
       "keyUrl": "https://media.example/hls/key.bin",
       "mapUrl": "https://media.example/hls/init.mp4"
     }

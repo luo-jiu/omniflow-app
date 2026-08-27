@@ -71,6 +71,18 @@ const mediaStructureFixture = JSON.parse(readFileSync(`${mediaStructureFixtureRo
 }
 const mediaStructureExpected = JSON.parse(readFileSync(`${mediaStructureFixtureRoot}/${mediaStructureFixture.expected}`, 'utf8')) as Record<string, string>
 
+const mapByteRangeFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-map-byterange-independent', import.meta.url))
+const mapByteRangeFixture = JSON.parse(readFileSync(`${mapByteRangeFixtureRoot}/fixture.json`, 'utf8')) as {
+  expected: string
+  input: string
+}
+const mapByteRangePlaylist = readFileSync(`${mapByteRangeFixtureRoot}/${mapByteRangeFixture.input}`, 'utf8')
+const mapByteRangeExpected = JSON.parse(readFileSync(`${mapByteRangeFixtureRoot}/${mapByteRangeFixture.expected}`, 'utf8')) as {
+  baseUrl: string
+  maps: Array<{ length: number; offset: number; url: string }>
+  segmentMapOffsets: number[]
+}
+
 const variableFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-variable-substitution', import.meta.url))
 const variableFixture = JSON.parse(readFileSync(`${variableFixtureRoot}/fixture.json`, 'utf8')) as {
   expected: string
@@ -142,6 +154,20 @@ describe('Cat Catch HLS parser', () => {
       title: segment.title || null,
       url: segment.url,
     }))).toEqual(expected.segments)
+  })
+
+  it('hls.map-byterange-independent', () => {
+    const manifest = parseHlsManifest({
+      baseUrl: mapByteRangeExpected.baseUrl,
+      text: mapByteRangePlaylist,
+    })
+    expect(manifest.maps.map(map => ({
+      length: map.byteRange?.length,
+      offset: map.byteRange?.offset,
+      url: map.url,
+    }))).toEqual(mapByteRangeExpected.maps)
+    expect(manifest.segments.map(segment => segment.map?.byteRange?.offset))
+      .toEqual(mapByteRangeExpected.segmentMapOffsets)
   })
 
   it('hls.ll-parts-fragment-parity', () => {

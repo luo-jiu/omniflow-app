@@ -317,7 +317,7 @@
 - reviewedThrough / portedThrough: 均保持 `null`；本切片只完成纯 HLS manifest parser 的第一段行为迁移，未完成 hls-engine cutover。
 - change groups: `behavioral`（`EXT-X-BYTERANGE` 隐式 offset 继承）与 `platform-adaptation`（renderer 模型通过兼容 facade 调用纯 port）。
 - affected capability IDs: `hls.parser-planner` 改为 `ported-unverified`，`syncedThrough` 记录到 migration target；所有 unit 仍为 0 cutover。
-- fixtures/tests: 新增 active fixture `hls-byterange-implicit-offset`，覆盖 parser core、map/key/discontinuity 和同一资源省略 offset 的连续 range。
+- fixtures/tests: 新增 active fixture `hls-byterange-implicit-offset`，覆盖 parser core、map/key/discontinuity 和连续 range；该步最初把跨 URI 省略 offset 误记为按资源重置，后续由固定 vendor executable oracle 修正为继承紧邻前一个 fragment。
 - accepted difference: 仍保留现有 OmniFlow manifest/download-plan DTO；仅把 manifest parse owner 移到纯 port，尚未迁移 hls.js 全部 parser 事件、cache fallback、伪装分片和 track merge。
 - excluded changes and reasons: 不在本切片接入 task/ffmpeg/filesystem，也不删除 renderer plan builder 或旧 downloader；这些需要后续 pipeline/output 证据。
 - unresolved gaps: HLS parser 完整标签语义、cache fallback/预处理、direct/live/track nested authority、统一 task/cleanup 和 production-equivalent smoke。
@@ -660,6 +660,20 @@
 - runtime changes: `parseHlsManifest` 在生成计划前复刻固定 hls.js 的格式头、目标时长、单例标签和标签顺序校验；结构错误沿用 hls.js 的后写覆盖顺序，变量替换错误继续只保留第一条。媒体整数标签改用 `parseInt` 语义，目标时长最小为 1，playlist type 归一为大写。
 - legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
 - validation: 固定 vendor 对 6 个输入均实际执行并得到对应 `levelParsingError`，失败证据为 parser 8/9；实现与 review 后 parser 10/10、完整 HLS Vitest 73/73、全仓 ESLint、固定上游 validator、同步校验 16/16、metadata 7 units/32 capabilities/192 anchors/106 cleanup entries/113 unique planned IDs/67 active refs 和 scoped diff check 通过。全局 TypeScript 被其他 Agent 在途的 PowerShell/Agent 测试类型错误阻断；全量 Vitest 为 1000 passed / 1 skipped / 27 failed，其中 16 条是 sandbox-only loopback 监听失败，另 11 条来自其他 Agent 在途的 Shell Provider / orchestrator 改动，Node 专用同步 validator 文件被 Vitest 收集后另报告 no suite。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
+
+## 2026-08-27: same target (HLS BYTERANGE previous-segment semantics)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动。
+- reviewedThrough / portedThrough: 均保持 `null`；本步修正固定 hls.js 的媒体分片与 MAP 两套 BYTERANGE 前序语义，仍未完成 hls-engine cutover。
+- change groups: `behavioral`（媒体分片继承紧邻 previous fragment，MAP 独立解析）与 `verification`（固定 vendor executable oracle）。
+- affected capability IDs: `hls.parser-planner` 保持 `ported-unverified`。
+- fixtures/tests: 扩展 `hls-byterange-implicit-offset`，锁定媒体分片即使 URI 切换仍继承紧邻前一 fragment 的 range end；新增 upstream-executable fixture `hls-map-byterange-independent`，锁定同 URI MAP 省略 offset 时从 `0` 开始。
+- accepted difference: 无；两类结果均直接对齐固定 hls.js 1.6.16。
+- excluded changes and reasons: 不扩展到 HLS 其余 parser 标签、loader event、live 过渡 DTO；不进行 cutover 或删除旧链。
+- unresolved gaps: HLS 其余 parser 与 key 支持差分、live 未捕获 URL 过渡 DTO、视频+AES 真实组合、真实网站手工验证和最终 hls-engine cutover。
+- runtime changes: 删除按资源 URL 维护的通用 range-end map；媒体分片只继承紧邻前一条带 range 的 fragment end，紧邻无 range 分片会重置；每条 `EXT-X-MAP` 不接收 previous fragment，省略 offset 时独立取 `0`。
+- legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
+- validation: 固定 vendor executable oracle 分别得到跨 URI media `10@100 -> 10@110` 与同 URI MAP `10@100 -> 10@0`；失败证据为 parser 9/11，实现后 parser 11/11、完整 HLS Vitest 74/74；本次收尾复跑 pure HLS port 16/16、固定上游 validator、同步校验 16/16、metadata 7 units/32 capabilities/192 anchors/106 cleanup entries/114 unique planned IDs/68 active refs 和 scoped diff check 均通过。未复跑全仓 Vitest、ESLint、TypeScript 或 build；并行 Agent 的在途改动仍会影响全仓结果，且 build 会覆盖其 `dist-electron/**`，暂无真实网站手工场景。
 
 ## Template
 

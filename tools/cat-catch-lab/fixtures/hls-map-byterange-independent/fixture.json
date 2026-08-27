@@ -1,5 +1,5 @@
 {
-  "fixtureId": "hls-byterange-implicit-offset",
+  "fixtureId": "hls-map-byterange-independent",
   "capabilityIds": [
     "hls.parser-planner"
   ],
@@ -7,13 +7,12 @@
   "status": "active",
   "oracle": "upstream-executable",
   "sourceRefs": [
-    "lib/hls.min.js#setByteRange",
+    "lib/hls.min.js#setInitSegment",
     "js/m3u8.js#parseTs(data)"
   ],
   "input": "playlist.m3u8",
   "expected": "expected.json",
   "testRefs": [
-    "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.parser-core",
-    "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.byterange-map-key-discontinuity"
+    "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.map-byterange-independent"
   ]
 }

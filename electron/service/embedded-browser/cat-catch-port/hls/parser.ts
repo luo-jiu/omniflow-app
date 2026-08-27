@@ -3,10 +3,10 @@
  *
  * Upstream: xifangczy/cat-catch@2cb981d7c2f4614732edccc167c4b5793d1cb138
  * Source: lib/hls.min.js#Fragment.setByteRange and parseLevelPlaylist
- * Reason: hls.js carries an omitted BYTERANGE offset forward for the same
- * resource; losing that state makes every later range start at byte zero.
+ * Reason: hls.js carries an omitted media BYTERANGE offset from the immediately
+ * previous fragment, while each EXT-X-MAP range is parsed independently.
  * Adaptation: pure parser only; Electron fetching and output stay outside the port.
- * Fixture: hls.byterange-map-key-discontinuity
+ * Fixtures: hls.byterange-map-key-discontinuity, hls.map-byterange-independent
  */
 
 export type CatCatchHlsAttributeMap = Record<string, string>
@@ -303,7 +303,6 @@ function createHlsKey(
 function createHlsMap(
   line: string,
   baseUrl: string,
-  rangeEnds: Map<string, number>,
   variableState: HlsVariableState,
 ): CatCatchHlsMap | null {
   const attributes = parseHlsAttributeListWithVariables(getTagValue(line), variableState)
@@ -311,7 +310,7 @@ function createHlsMap(
   if (!uri) return null
   const url = resolveHlsUrl(uri, baseUrl)
   return {
-    byteRange: resolveByteRange(parseHlsByteRange(attributes.BYTERANGE), url, rangeEnds),
+    byteRange: resolveByteRange(parseHlsByteRange(attributes.BYTERANGE)),
     rawAttributes: attributes,
     rawLine: line,
     uri,
@@ -413,15 +412,11 @@ function parseHlsVariableDefinition(line: string, state: HlsVariableState) {
 
 function resolveByteRange(
   byteRange: CatCatchHlsByteRange | undefined,
-  resourceUrl: string,
-  rangeEnds: Map<string, number>,
+  previousEnd?: number,
 ) {
   if (!byteRange) return undefined
-  const previousEnd = rangeEnds.get(resourceUrl)
   const offset = byteRange.offset ?? previousEnd ?? 0
-  const resolved = { ...byteRange, offset }
-  rangeEnds.set(resourceUrl, offset + byteRange.length)
-  return resolved
+  return { ...byteRange, offset }
 }
 
 /**
@@ -464,14 +459,13 @@ export function parseHlsManifest(input: {
   let pendingSegment: PendingSegment | undefined
   let pendingByteRange: CatCatchHlsByteRange | undefined
   let pendingVariantLine: string | undefined
+  let previousSegmentByteRangeEnd: number | undefined
 
   const keys = new Map<string, CatCatchHlsKey>()
   const maps = new Map<string, CatCatchHlsMap>()
   const segments: CatCatchHlsSegment[] = []
   const variants: CatCatchHlsVariant[] = []
   const renditions: CatCatchHlsRendition[] = []
-  const segmentRangeEnds = new Map<string, number>()
-  const mapRangeEnds = new Map<string, number>()
 
   function rememberKey(key: CatCatchHlsKey) {
     const keyId = `${key.method}:${key.url || key.uri || key.rawLine}:${key.iv || ''}`
@@ -487,8 +481,9 @@ export function parseHlsManifest(input: {
     if (!normalizedUri) return
     const url = resolveHlsUrl(normalizedUri, baseUrl)
     const index = segments.length
+    const resolvedByteRange = resolveByteRange(byteRange, previousSegmentByteRangeEnd)
     segments.push({
-      byteRange: resolveByteRange(byteRange, url, segmentRangeEnds),
+      byteRange: resolvedByteRange,
       discontinuitySequence,
       duration: pendingSegment?.duration || 0,
       index,
@@ -500,6 +495,9 @@ export function parseHlsManifest(input: {
       uri: normalizedUri,
       url,
     })
+    previousSegmentByteRangeEnd = resolvedByteRange
+      ? resolvedByteRange.offset + resolvedByteRange.length
+      : undefined
     pendingSegment = undefined
     pendingByteRange = undefined
   }
@@ -565,7 +563,7 @@ export function parseHlsManifest(input: {
       continue
     }
     if (line.startsWith('#EXT-X-MAP')) {
-      const map = createHlsMap(line, baseUrl, mapRangeEnds, variableState)
+      const map = createHlsMap(line, baseUrl, variableState)
       if (map) {
         currentMap = map
         rememberMap(map)
