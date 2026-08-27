@@ -265,4 +265,108 @@ describe('useHlsDownloadTask task projection recovery', () => {
     })
     remount.unmount()
   })
+
+  it('hls.segment-query-static-plan-integration', async () => {
+    const request = createStaticHlsRequest()
+    request.plan = {
+      ...request.plan,
+      fragmentCount: 1,
+      fragments: [{
+        discontinuitySequence: 0,
+        duration: 4,
+        index: 0,
+        initSegment: {
+          url: 'https://example.com/init.mp4?map-auth=keep',
+        },
+        key: {
+          method: 'AES-128',
+          url: 'https://example.com/key.bin?key-auth=keep',
+        },
+        part: false,
+        sequence: 1,
+        url: 'https://example.com/segment.ts?old=1',
+      }],
+      keys: [{
+        method: 'AES-128',
+        url: 'https://example.com/key.bin?key-auth=keep',
+      }],
+      maps: [{
+        url: 'https://example.com/init.mp4?map-auth=keep',
+      }],
+      segmentCount: 1,
+      segments: [{
+        discontinuitySequence: 0,
+        duration: 4,
+        keyUrl: 'https://example.com/key.bin?key-auth=keep',
+        mapUrl: 'https://example.com/init.mp4?map-auth=keep',
+        part: false,
+        sequence: 1,
+        url: 'https://example.com/segment.ts?old=1',
+      }],
+    }
+    const persistOutput = vi.fn().mockResolvedValue(undefined)
+    apiMocks.downloadEmbeddedBrowserHlsPlan.mockResolvedValue({
+      ok: true,
+      outputPath: '/tmp/hls-query.mp4',
+    })
+    const mount = renderHlsHook(request, {
+      createOutputTargetSnapshot: async () => ({
+        cleanupOutputDirectory: async () => undefined,
+        outputDirectoryPath: '/tmp/hls-query-output',
+        persistOutput,
+      }),
+    })
+
+    act(() => {
+      mount.current.handlers.onSetHlsSegmentQueryEnabled(true)
+      mount.current.handlers.onSetHlsSegmentQueryDraft('token=new&expires=9')
+    })
+    act(() => {
+      mount.current.handlers.onSaveHls()
+    })
+
+    await vi.waitFor(() => {
+      expect(apiMocks.downloadEmbeddedBrowserHlsPlan).toHaveBeenCalledTimes(1)
+    })
+    const payload = apiMocks.downloadEmbeddedBrowserHlsPlan.mock.calls[0]?.[1]
+    expect(payload.plan.fragments[0]).toMatchObject({
+      initSegment: { url: 'https://example.com/init.mp4?map-auth=keep' },
+      key: { url: 'https://example.com/key.bin?key-auth=keep' },
+      url: 'https://example.com/segment.ts?token=new&expires=9',
+    })
+    expect(payload.plan.segments[0]).toMatchObject({
+      keyUrl: 'https://example.com/key.bin?key-auth=keep',
+      mapUrl: 'https://example.com/init.mp4?map-auth=keep',
+      url: 'https://example.com/segment.ts?token=new&expires=9',
+    })
+    expect(apiMocks.downloadEmbeddedBrowserHlsManifest).not.toHaveBeenCalled()
+    await vi.waitFor(() => expect(persistOutput).toHaveBeenCalledWith('/tmp/hls-query.mp4'))
+    mount.unmount()
+  })
+
+  it('hls.segment-query-live-empty-integration', async () => {
+    apiMocks.startEmbeddedBrowserHlsRecording.mockResolvedValue({ ok: true })
+    const mount = renderHlsHook(createLiveHlsRequest(), {
+      createOutputTargetSnapshot: async () => ({
+        cleanupOutputDirectory: async () => undefined,
+        outputDirectoryPath: '/tmp/hls-live-query-output',
+        persistOutput: async () => undefined,
+      }),
+    })
+
+    act(() => {
+      mount.current.handlers.onSetHlsSegmentQueryEnabled(true)
+      mount.current.handlers.onSetHlsSegmentQueryDraft('')
+    })
+    act(() => {
+      mount.current.handlers.onStartLiveRecording()
+    })
+
+    await vi.waitFor(() => {
+      expect(apiMocks.startEmbeddedBrowserHlsRecording).toHaveBeenCalledTimes(1)
+    })
+    expect(apiMocks.startEmbeddedBrowserHlsRecording.mock.calls[0]?.[1])
+      .toEqual(expect.objectContaining({ segmentQuery: '' }))
+    mount.unmount()
+  })
 })

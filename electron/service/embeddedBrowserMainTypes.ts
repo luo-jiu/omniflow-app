@@ -137,6 +137,7 @@ export type EmbeddedBrowserHlsRecordingStartPayload = {
   outputDirectoryPath?: string
   resourceId: string
   requestId: string
+  segmentQuery?: string
   suggestedFileName?: string
   suggestedThreadCount?: number
   useSystemSaveDialog?: boolean

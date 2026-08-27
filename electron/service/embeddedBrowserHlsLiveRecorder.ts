@@ -41,6 +41,7 @@ type EmbeddedBrowserHlsLiveRecorderOptions = {
   resolveParentVariableList?: (
     signal?: AbortSignal,
   ) => Promise<Readonly<EmbeddedBrowserHlsVariableList> | undefined>
+  segmentQuery?: string
   suggestedThreadCount?: number
   workDirectoryPath?: string
 }
@@ -88,6 +89,7 @@ async function fetchEmbeddedBrowserHlsLiveManifestSnapshot(input: {
   parentVariableList?: Readonly<EmbeddedBrowserHlsVariableList>
   pageUrl?: string
   signal?: AbortSignal
+  segmentQuery?: string
   suggestedThreadCount?: number
 }): Promise<EmbeddedBrowserHlsLiveManifestSnapshot> {
   const fetchImpl = input.fetch || ((url: string, init?: RequestInit) => fetch(url, init))
@@ -119,6 +121,7 @@ async function fetchEmbeddedBrowserHlsLiveManifestSnapshot(input: {
     manifest,
     manifestUrl: input.manifestUrl,
     pageUrl: input.pageUrl,
+    segmentQuery: input.segmentQuery,
   })
   if (plan.isMaster) {
     throw new Error('直播录制当前只支持具体 media playlist，不直接录制 master playlist')
@@ -173,6 +176,8 @@ export class EmbeddedBrowserHlsLiveRecorder {
 
   private readonly resolveParentVariableList?: EmbeddedBrowserHlsLiveRecorderOptions['resolveParentVariableList']
 
+  private readonly segmentQuery?: string
+
   private readonly suggestedThreadCount?: number
 
   private workDirectoryPath = ''
@@ -185,6 +190,7 @@ export class EmbeddedBrowserHlsLiveRecorder {
     this.onEvent = options.onEvent
     this.pageUrl = options.pageUrl
     this.resolveParentVariableList = options.resolveParentVariableList
+    this.segmentQuery = options.segmentQuery
     this.suggestedThreadCount = options.suggestedThreadCount
     this.workDirectoryPath = options.workDirectoryPath || ''
   }
@@ -294,6 +300,7 @@ export class EmbeddedBrowserHlsLiveRecorder {
       parentVariableList: this.parentVariableList,
       pageUrl: this.pageUrl,
       signal: this.abortController?.signal,
+      segmentQuery: this.segmentQuery,
       suggestedThreadCount: this.suggestedThreadCount,
     })
     this.parentVariableList = snapshot.parentVariableList

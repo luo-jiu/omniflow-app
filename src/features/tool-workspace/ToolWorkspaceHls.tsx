@@ -1,6 +1,7 @@
 import React from 'react';
 import {
   Button,
+  Checkbox,
   Empty,
   Input,
   InputNumber,
@@ -90,6 +91,8 @@ type ToolWorkspaceHlsProps = {
   hlsRangeEnd: number;
   hlsRangeStart: number;
   hlsRequest: ToolWorkspaceMediaHlsRequest | null;
+  hlsSegmentQueryDraft: string;
+  hlsSegmentQueryEnabled: boolean;
   hlsSelectedAudioRendition: ToolWorkspaceMediaHlsRequest['plan']['renditions'][number] | null;
   hlsSelectedSubtitleRendition: ToolWorkspaceMediaHlsRequest['plan']['renditions'][number] | null;
   hlsSelectedVariant: ToolWorkspaceMediaHlsRequest['plan']['variants'][number] | null;
@@ -123,6 +126,8 @@ type ToolWorkspaceHlsProps = {
   onSetSelectedHlsAudioRenditionUrl: (value: string) => void;
   onSetSelectedHlsSubtitleRenditionUrl: (value: string) => void;
   onSetHlsManualKeyDraft: (value: string) => void;
+  onSetHlsSegmentQueryDraft: (value: string) => void;
+  onSetHlsSegmentQueryEnabled: (value: boolean) => void;
   onSetHlsRangeEnd: (value: number) => void;
   onSetHlsRangeStart: (value: number) => void;
   onSetHlsThreadCount: (value: number) => void;
@@ -254,6 +259,8 @@ const ToolWorkspaceHls: React.FC<ToolWorkspaceHlsProps> = ({
   hlsRangeEnd,
   hlsRangeStart,
   hlsRequest,
+  hlsSegmentQueryDraft,
+  hlsSegmentQueryEnabled,
   hlsSelectedAudioRendition,
   hlsSelectedSubtitleRendition,
   hlsSelectedVariant,
@@ -281,6 +288,8 @@ const ToolWorkspaceHls: React.FC<ToolWorkspaceHlsProps> = ({
   onSetSelectedHlsAudioRenditionUrl,
   onSetSelectedHlsSubtitleRenditionUrl,
   onSetHlsManualKeyDraft,
+  onSetHlsSegmentQueryDraft,
+  onSetHlsSegmentQueryEnabled,
   onSetHlsRangeEnd,
   onSetHlsRangeStart,
   onSetHlsThreadCount,
@@ -555,6 +564,24 @@ const ToolWorkspaceHls: React.FC<ToolWorkspaceHlsProps> = ({
           </ActionRow>
         </>
       ) : null}
+      <ActionRow>
+        <Checkbox
+          checked={hlsSegmentQueryEnabled}
+          onChange={(event) => onSetHlsSegmentQueryEnabled(Boolean(event.target.checked))}
+        >
+          替换分片参数
+        </Checkbox>
+        <Input
+          disabled={!hlsSegmentQueryEnabled}
+          value={hlsSegmentQueryDraft}
+          placeholder="name=value&expires=..."
+          onChange={onSetHlsSegmentQueryDraft}
+          style={{ minWidth: 260 }}
+        />
+        <Tag color={hlsSegmentQueryEnabled ? 'blue' : 'grey'}>
+          {hlsSegmentQueryEnabled ? '已启用' : '保持原参数'}
+        </Tag>
+      </ActionRow>
       <div className="panel-desc" style={{ marginBottom: 7 }}>
         如果站点的 AES-128 key 没被自动识别，可以在这里手动粘贴 16 字节 key。
         支持 32 位 hex，或 16 字节 base64。填写后会自动切到本地 downloader 主链。
@@ -641,8 +668,8 @@ const ToolWorkspaceHls: React.FC<ToolWorkspaceHlsProps> = ({
             复制失败分片
           </Button>
         ) : null}
-        <Tag color={!/^https?:\/\//i.test(selectedHlsVariantUrl || hlsRequest.plan.manifestUrl) || normalizedHlsManualKey || hlsUsingCustomThreadCount || hlsUsingFragmentRange ? 'orange' : 'green'}>
-          {!/^https?:\/\//i.test(selectedHlsVariantUrl || hlsRequest.plan.manifestUrl) || normalizedHlsManualKey || hlsUsingCustomThreadCount || hlsUsingFragmentRange ? '本地 downloader 主链' : '网络 manifest 主链'}
+        <Tag color={!/^https?:\/\//i.test(selectedHlsVariantUrl || hlsRequest.plan.manifestUrl) || normalizedHlsManualKey || hlsSegmentQueryEnabled || hlsUsingCustomThreadCount || hlsUsingFragmentRange ? 'orange' : 'green'}>
+          {!/^https?:\/\//i.test(selectedHlsVariantUrl || hlsRequest.plan.manifestUrl) || normalizedHlsManualKey || hlsSegmentQueryEnabled || hlsUsingCustomThreadCount || hlsUsingFragmentRange ? '本地 downloader 主链' : '网络 manifest 主链'}
         </Tag>
         {selectedHlsVariantUrl ? (
           <Tag color="white">

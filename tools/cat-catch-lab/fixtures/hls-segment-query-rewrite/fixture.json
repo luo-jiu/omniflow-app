@@ -1,0 +1,20 @@
+{
+  "fixtureId": "hls-segment-query-rewrite",
+  "capabilityIds": [
+    "hls.parser-planner"
+  ],
+  "upstreamCommit": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
+  "status": "active",
+  "oracle": "spec-derived",
+  "sourceRefs": [
+    "js/m3u8.js#let tsAddArg = params.get(\"tsAddArg\")",
+    "js/m3u8.js#function parseTs(data)",
+    "js/m3u8.js#if (tsAddArg != null)",
+    "js/m3u8.js#m3u8Arg = /\\.m3u8\\?([^\\n]*)/.exec(_m3u8Url)?.[1]"
+  ],
+  "input": "input.json",
+  "expected": "expected.json",
+  "testRefs": [
+    "electron/service/embedded-browser/cat-catch-port/hls/segment-query.test.ts#hls.segment-query-rewrite"
+  ]
+}

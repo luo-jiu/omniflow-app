@@ -983,6 +983,20 @@
 - legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
 - validation: 固定 Cat Catch vendor executable oracle 证明 whitespace DEFINE 把 `{$undefined}.ts` 解析为 `.ts`，whitespace MAP 生成空 init、whitespace BYTERANGE 生成 `[0, NaN]`，PLAYLIST-TYPE/PART-INF/SERVER-CONTROL 分别保留固定重复声明错误。失败证据为 parser `33/34`，DEFINE 行被预先 trim 后错误报告缺失变量。实现后 parser `34/34`、完整 HLS 集合 `91/91`、TypeScript、全仓 ESLint、fixture/capability JSON、轻量 validator、固定上游校验、同步校验 `16/16`、metadata `7 units / 32 capabilities / 197 anchors / 106 cleanup entries / 141 planned IDs / 95 active refs` 和 scoped diff check 通过。排除 5 个需监听本机端口的文件及已由 `node --test` 单独执行的同步文件后，全量 Vitest 为 `178 files / 1171 passed / 3 skipped`；5 个 loopback 文件在沙箱外复跑 `23/23`，合计全部可执行测试 `1194 passed / 3 skipped`。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
 
+## 2026-08-28: same target (HLS segment query compatibility)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，行为来自固定 Cat Catch `js/m3u8.js` 的 `tsAddArg`、`parseTs` 与参数按钮分支。
+- reviewedThrough / portedThrough: 均保持 `null`；本步补齐下载对象 URL 的用户可控兼容经验，仍未完成 hls-engine cutover。
+- change groups: `behavioral`（fragment query 保留/替换/清除）、`renderer-integration`（现有 HLS 草稿 owner）与 `main-integration`（直播 recorder 每轮 plan）。
+- affected capability IDs: `hls.parser-planner` 保持 `ported-unverified`；新增 4 个 active test ID、4 个上游 anchor 和纯 port target ref。
+- fixtures/tests: 新增 spec-derived fixture `hls-segment-query-rewrite`；`hls.segment-query-rewrite` 覆盖 `null`、非空、空字符串、无原 query、大小写敏感默认值提取及 key/MAP 不改；`hls.segment-query-static-plan-integration` 证明静态任务强制走改写后的本地 plan；`hls.segment-query-live-empty-integration` 锁定 IPC 的空字符串语义；`hls.segment-query-live-recorder` 证明 manifest URL 保持而实际直播 fragment 请求被改写。
+- accepted difference: Cat Catch 用扩展页面 query、prompt 和 reload 保存 `tsAddArg`；OmniFlow 用现有工具页内的 checkbox + 受控草稿表达同一三态，关闭为 `null`，开启后保留原始输入，包括空字符串。下载行为和 manifest query 默认提取正则保持固定上游语义。
+- excluded changes and reasons: 不迁移 `m3u8.html` 的按钮 CSS、页面 reload 和扩展 query 编排；不把 fragment 参数应用到 key、MAP、manifest、独立音轨或外部工具 URL，也不把参数值写入任务日志。
+- unresolved gaps: HLS 其余真正影响下载的 parser 差分、独立音轨与自定义 fragment query 的组合策略、加密 fMP4/video 真实输出组合、真实网站手工验证和最终 hls-engine cutover。
+- runtime changes: 新纯模块在 post-parse plan 只改 `fragments[].url` 与 summary `segments[].url`；无设置时返回原 plan。工具页从当前 manifest 的小写 `.m3u8?` 后预填草稿，但必须显式启用；静态任务因此不走 ffmpeg 直拉，master 先解析用户选择的具体 variant。直播 IPC 新增可选 `segmentQuery`，main 仅在其为字符串时交给 recorder，每轮 snapshot 复用同一纯 plan 变换。
+- legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
+- validation: 失败证据分别为纯测试无法加载尚不存在的 `segment-query` 模块，以及 hook 集成 `2/4` 因目标 handler 不存在而失败。实现后专项 HLS `75/75`、新增纯/hook/recorder 集合 `13/13`、TypeScript、全仓 ESLint、fixture/capability JSON、轻量 validator、固定上游校验和同步校验 `16/16` 通过；metadata 为 `7 units / 32 capabilities / 201 anchors / 106 cleanup entries / 145 planned IDs / 99 active refs`。全仓 Vitest 在沙箱内除 5 个 loopback 文件外为 `1180 passed / 3 skipped`，5 个文件在允许本机监听后 `23/23`，合计 `1198 passed / 3 skipped`。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
+
 ## Template
 
 ```markdown

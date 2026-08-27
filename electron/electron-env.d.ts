@@ -595,6 +595,7 @@ interface Window {
       pageUrl?: string;
       resourceId?: string;
       requestId?: string;
+      segmentQuery?: string;
       suggestedFileName?: string;
       suggestedThreadCount?: number;
       useSystemSaveDialog?: boolean;

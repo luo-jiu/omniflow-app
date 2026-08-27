@@ -55,6 +55,36 @@ describe('EmbeddedBrowser HLS live recorder', () => {
     }
   })
 
+  it('hls.segment-query-live-recorder', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'omniflow-hls-live-segment-query-test-'))
+    const requestedUrls: string[] = []
+    const fetchImpl = vi.fn(async (url: string) => {
+      requestedUrls.push(url)
+      if (url.includes('/live.m3u8?')) {
+        return new Response(LIVE_MANIFEST)
+      }
+      return new Response(Uint8Array.from([0x47, 0x01, 0x02, 0x03]).buffer)
+    })
+    const recorder = new EmbeddedBrowserHlsLiveRecorder({
+      fetch: fetchImpl,
+      manifestUrl: 'https://media.example/live.m3u8?manifest=keep',
+      segmentQuery: 'token=new&expires=9',
+      workDirectoryPath: directory,
+    })
+
+    try {
+      await recorder.start()
+      await recorder.stop()
+      expect(requestedUrls).toEqual([
+        'https://media.example/live.m3u8?manifest=keep',
+        'https://media.example/segment-7.ts?token=new&expires=9',
+      ])
+    } finally {
+      await recorder.discard()
+      await rm(directory, { force: true, recursive: true })
+    }
+  })
+
   it('hls.live-selected-child-authority', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'omniflow-hls-live-child-authority-test-'))
     const fetchImpl = vi.fn(async () => new Response(LIVE_MANIFEST))

@@ -1,0 +1,51 @@
+{
+  "manifestQueryDefaults": [
+    "token=abc&expires=7",
+    null,
+    null,
+    "token=line-one"
+  ],
+  "rewrittenUrls": [
+    "https://cdn.example/segment.ts?old=1#part",
+    "https://cdn.example/segment.ts?token=new&expires=9",
+    "https://cdn.example/segment.ts",
+    "https://cdn.example/segment.ts?token=new",
+    "https://cdn.example/segment.ts#part?token=new"
+  ],
+  "plan": {
+    "fragments": [
+      {
+        "url": "https://cdn.example/segment-1.ts?token=new&expires=9",
+        "key": {
+          "url": "https://keys.example/key.bin?key-auth=keep"
+        },
+        "initSegment": {
+          "url": "https://cdn.example/init.mp4?map-auth=keep"
+        }
+      },
+      {
+        "url": "https://cdn.example/segment-2.ts?token=new&expires=9"
+      }
+    ],
+    "segments": [
+      {
+        "url": "https://cdn.example/segment-1.ts?token=new&expires=9",
+        "keyUrl": "https://keys.example/key.bin?key-auth=keep",
+        "mapUrl": "https://cdn.example/init.mp4?map-auth=keep"
+      },
+      {
+        "url": "https://cdn.example/segment-2.ts?token=new&expires=9"
+      }
+    ],
+    "keys": [
+      {
+        "url": "https://keys.example/key.bin?key-auth=keep"
+      }
+    ],
+    "maps": [
+      {
+        "url": "https://cdn.example/init.mp4?map-auth=keep"
+      }
+    ]
+  }
+}

@@ -37,6 +37,8 @@ downloader/
 - `network/rules.ts`：固定上游默认规则与大小判断语义。
 - `network/classifier.ts`：纯 request/response 分类和去重决策。
 - `network/request-url-helpers.ts`：页面 URL pattern、黑白名单反转与 special-page 规则。
+- `hls/parser.ts`：固定 hls.js/Cat Catch 的 manifest 下载相关解析语义。
+- `hls/segment-query.ts`：固定 `tsAddArg` 的默认值提取和 fragment-only query 改写。
 
 这些 capability 当前为 `ported-unverified`，没有接入 Electron 生产 listener；整个 `network-capture` unit 完成前，旧实现仍是唯一生产 owner。
 

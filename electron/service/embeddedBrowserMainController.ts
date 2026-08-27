@@ -2124,6 +2124,7 @@ export function createEmbeddedBrowserMainController(
               tabId: normalizedTabId,
             })
           : undefined,
+        segmentQuery: typeof payload.segmentQuery === 'string' ? payload.segmentQuery : undefined,
         suggestedThreadCount: payload.suggestedThreadCount,
       })
 

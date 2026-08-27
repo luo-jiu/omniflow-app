@@ -218,6 +218,7 @@ export async function startEmbeddedBrowserHlsRecording(
     outputDirectoryPath?: string;
     resourceId: string;
     requestId: string;
+    segmentQuery?: string;
     suggestedFileName?: string;
     suggestedThreadCount?: number;
     useSystemSaveDialog?: boolean;

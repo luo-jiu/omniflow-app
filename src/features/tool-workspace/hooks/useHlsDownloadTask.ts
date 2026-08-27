@@ -5,7 +5,9 @@ import {
   verifyHlsResourceKey,
 } from '@/features/embedded-browser/resources/services/embedded-browser-resource-panel-actions';
 import {
+  applyEmbeddedBrowserHlsSegmentQuery,
   createEmbeddedBrowserHlsDownloadPlan,
+  extractEmbeddedBrowserHlsSegmentQueryDefault,
   parseEmbeddedBrowserHlsManifest,
 } from '@/features/embedded-browser/resources/model/embedded-browser-hls-manifest';
 import {
@@ -320,6 +322,7 @@ async function resolveMasterVariantToMediaPlan(input: {
   headers: Record<string, string>;
   pageUrl?: string;
   parentVariableList?: Readonly<Record<string, string>>;
+  segmentQuery: string | null;
   variantManifestUrl: string;
 }) {
   const response = await window.electronAPI.fetch(input.variantManifestUrl, { headers: input.headers });
@@ -342,6 +345,7 @@ async function resolveMasterVariantToMediaPlan(input: {
     manifest,
     manifestUrl: input.variantManifestUrl,
     pageUrl: input.pageUrl,
+    segmentQuery: input.segmentQuery,
   });
   if (plan.isMaster) {
     throw new Error('当前选择的变体仍然是 master playlist，先换一个具体媒体变体再试');
@@ -367,6 +371,8 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
   const [savingHls, setSavingHls] = React.useState(false);
   const [verifyingHlsKey, setVerifyingHlsKey] = React.useState(false);
   const [hlsManualKeyDraft, setHlsManualKeyDraft] = React.useState('');
+  const [hlsSegmentQueryDraft, setHlsSegmentQueryDraft] = React.useState('');
+  const [hlsSegmentQueryEnabled, setHlsSegmentQueryEnabled] = React.useState(false);
   const [selectedHlsVariantUrl, setSelectedHlsVariantUrl] = React.useState('');
   const [selectedHlsAudioRenditionUrl, setSelectedHlsAudioRenditionUrl] = React.useState('');
   const [selectedHlsSubtitleRenditionUrl, setSelectedHlsSubtitleRenditionUrl] = React.useState('');
@@ -411,6 +417,7 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
     return /^(?:0x)?[0-9a-f]{32}$/i.test(normalizedDraft) ? 'hex' : 'base64';
   }, [hlsManualKeyDraft]);
   const hlsManualKeyInvalid = Boolean(String(hlsManualKeyDraft || '').trim()) && !normalizedHlsManualKey;
+  const hlsSegmentQuery = hlsSegmentQueryEnabled ? hlsSegmentQueryDraft : null;
   const hlsAes128KeyCount = React.useMemo(() => (
     hlsRequest?.plan.keys.filter((key) => String(key.method || '').toUpperCase() === 'AES-128').length || 0
   ), [hlsRequest]);
@@ -552,6 +559,8 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
 
   React.useEffect(() => {
     setHlsManualKeyDraft('');
+    setHlsSegmentQueryDraft(extractEmbeddedBrowserHlsSegmentQueryDefault(hlsRequest?.plan.manifestUrl || '') || '');
+    setHlsSegmentQueryEnabled(false);
     setSelectedHlsVariantUrl('');
     setSelectedHlsAudioRenditionUrl('');
     setSelectedHlsSubtitleRenditionUrl('');
@@ -579,7 +588,7 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
       speedBps: undefined,
       totalFragments: hlsRequest?.plan.fragmentCount || 0,
     });
-  }, [hlsRequest?.id, hlsRequest?.plan.durationSeconds, hlsRequest?.plan.fragmentCount, hlsRequest?.plan.suggestedThreadCount]);
+  }, [hlsRequest?.id, hlsRequest?.plan.durationSeconds, hlsRequest?.plan.fragmentCount, hlsRequest?.plan.manifestUrl, hlsRequest?.plan.suggestedThreadCount]);
 
   React.useEffect(() => {
     if (selectedHlsAudioRenditionUrl && !hlsAudioRenditionOptions.some((option) => option.value === selectedHlsAudioRenditionUrl)) {
@@ -713,14 +722,15 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
       Toast.warning('自定义 key 需要是 16 字节 AES-128，支持 hex 或 base64');
       return;
     }
-    if (selectedHlsAudioRenditionUrl && (normalizedHlsManualKey || hlsUsingCustomThreadCount || hlsUsingFragmentRange)) {
+    if (selectedHlsAudioRenditionUrl && (normalizedHlsManualKey || hlsSegmentQueryEnabled || hlsUsingCustomThreadCount || hlsUsingFragmentRange)) {
       Toast.warning('独立音轨合并当前只支持网络 manifest 主链，不和手动 key / 本地 downloader 控制混用');
       return;
     }
-    const shouldUseLocalPlanForControls = hlsCanTuneLocalDownloader && (hlsUsingCustomThreadCount || hlsUsingFragmentRange);
-    let effectivePlan = hlsRequest.plan;
-    if (shouldUseLocalPlanForControls) {
-      const slicedPlanResult = createHlsPlanSlice(hlsRequest.plan, {
+    const shouldUseLocalPlanForControls = hlsSegmentQueryEnabled
+      || (hlsCanTuneLocalDownloader && (hlsUsingCustomThreadCount || hlsUsingFragmentRange));
+    let effectivePlan = applyEmbeddedBrowserHlsSegmentQuery(hlsRequest.plan, hlsSegmentQuery);
+    if (hlsCanTuneLocalDownloader && (hlsUsingCustomThreadCount || hlsUsingFragmentRange)) {
+      const slicedPlanResult = createHlsPlanSlice(effectivePlan, {
         endFragment: normalizedHlsRangeEnd,
         startFragment: normalizedHlsRangeStart,
         threadCount: normalizedHlsThreadCount,
@@ -733,12 +743,12 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
     }
     const shouldResolveMasterVariantToLocalPlan = Boolean(
       hlsRequest.plan.isMaster
-      && normalizedHlsManualKey
+      && (normalizedHlsManualKey || hlsSegmentQueryEnabled)
       && selectedHlsVariantUrl
       && /^https?:\/\//i.test(selectedHlsVariantUrl),
     );
-    if (hlsRequest.plan.isMaster && normalizedHlsManualKey && !shouldResolveMasterVariantToLocalPlan) {
-      Toast.warning('master playlist 使用手动 key 时，先明确选择一个具体变体');
+    if (hlsRequest.plan.isMaster && (normalizedHlsManualKey || hlsSegmentQueryEnabled) && !shouldResolveMasterVariantToLocalPlan) {
+      Toast.warning('master playlist 使用本地下载控制时，先明确选择一个具体变体');
       return;
     }
     setSavingHls(true);
@@ -759,6 +769,7 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
           headers: resourceHeaders,
           pageUrl: undefined,
           parentVariableList: hlsRequest.manifest.variableList,
+          segmentQuery: hlsSegmentQuery,
           variantManifestUrl: selectedHlsVariantUrl,
         });
         effectivePlan = resolvedVariant.plan;
@@ -835,7 +846,9 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
           ...(shouldUseLocalPlanForControls ? [createHlsTaskLogEntry({
             mode: 'local-plan',
             stage: 'preparing',
-            text: `使用下载控制：线程 ${normalizedHlsThreadCount}，分片 #${normalizedHlsRangeStart}-#${normalizedHlsRangeEnd}`,
+            text: hlsSegmentQueryEnabled
+              ? '已启用分片参数替换'
+              : `使用下载控制：线程 ${normalizedHlsThreadCount}，分片 #${normalizedHlsRangeStart}-#${normalizedHlsRangeEnd}`,
           })] : []),
         ],
         mode: shouldUseDirectManifestDownload || shouldUseDirectManifestTrackMerge ? 'direct-manifest' : 'local-plan',
@@ -944,6 +957,8 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
     hlsEffectiveVariant,
     hlsManualKeyInvalid,
     hlsRequest,
+    hlsSegmentQuery,
+    hlsSegmentQueryEnabled,
     hlsSelectedAudioRendition,
     hlsSelectedVariantLabel,
     hlsUsingCustomThreadCount,
@@ -1153,6 +1168,7 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
         outputDirectoryPath: outputTarget.outputDirectoryPath,
         resourceId: hlsRequest.resource.id,
         requestId,
+        segmentQuery: hlsSegmentQueryEnabled ? hlsSegmentQueryDraft : undefined,
         suggestedFileName: deriveHlsOutputFileName(effectiveManifestUrl),
         suggestedThreadCount: hlsCanTuneLocalDownloader ? normalizedHlsThreadCount : hlsRequest.plan.suggestedThreadCount,
         useSystemSaveDialog: false,
@@ -1217,6 +1233,8 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
     hlsCanTuneLocalDownloader,
     hlsManualKeyInvalid,
     hlsRequest,
+    hlsSegmentQueryDraft,
+    hlsSegmentQueryEnabled,
     hlsTaskStatus,
     hlsSelectedVariantLabel,
     normalizedHlsManualKey,
@@ -1339,6 +1357,8 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
     hlsRangeEnd: normalizedHlsRangeEnd,
     hlsRangeStart: normalizedHlsRangeStart,
     hlsRequest,
+    hlsSegmentQueryDraft,
+    hlsSegmentQueryEnabled,
     hlsSelectedVariant,
     hlsSelectedVariantLabel,
     hlsSelectedAudioRendition,
@@ -1371,6 +1391,8 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
       onSetSelectedHlsAudioRenditionUrl: setSelectedHlsAudioRenditionUrl,
       onSetSelectedHlsSubtitleRenditionUrl: setSelectedHlsSubtitleRenditionUrl,
       onSetHlsManualKeyDraft: setHlsManualKeyDraft,
+      onSetHlsSegmentQueryDraft: setHlsSegmentQueryDraft,
+      onSetHlsSegmentQueryEnabled: setHlsSegmentQueryEnabled,
       onSetHlsRangeEnd: (value: number) => setHlsRangeEndDraft(Number(value || 1)),
       onSetHlsRangeStart: (value: number) => setHlsRangeStartDraft(Number(value || 1)),
       onSetHlsThreadCount: (value: number) => setHlsThreadCountDraft(Number(value || 1)),

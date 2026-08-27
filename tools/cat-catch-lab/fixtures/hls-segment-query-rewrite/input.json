@@ -1,0 +1,67 @@
+{
+  "manifestUrlCases": [
+    "https://media.example/master.m3u8?token=abc&expires=7",
+    "https://media.example/master.M3U8?token=upper",
+    "https://media.example/master.m3u?token=short",
+    "https://media.example/master.m3u8?token=line-one\nignored=true"
+  ],
+  "rewriteCases": [
+    {
+      "url": "https://cdn.example/segment.ts?old=1#part",
+      "segmentQuery": null
+    },
+    {
+      "url": "https://cdn.example/segment.ts?old=1#part",
+      "segmentQuery": "token=new&expires=9"
+    },
+    {
+      "url": "https://cdn.example/segment.ts?old=1#part",
+      "segmentQuery": ""
+    },
+    {
+      "url": "https://cdn.example/segment.ts",
+      "segmentQuery": "token=new"
+    },
+    {
+      "url": "https://cdn.example/segment.ts#part",
+      "segmentQuery": "token=new"
+    }
+  ],
+  "plan": {
+    "fragments": [
+      {
+        "url": "https://cdn.example/segment-1.ts?old=1",
+        "key": {
+          "url": "https://keys.example/key.bin?key-auth=keep"
+        },
+        "initSegment": {
+          "url": "https://cdn.example/init.mp4?map-auth=keep"
+        }
+      },
+      {
+        "url": "https://cdn.example/segment-2.ts"
+      }
+    ],
+    "segments": [
+      {
+        "url": "https://cdn.example/segment-1.ts?old=1",
+        "keyUrl": "https://keys.example/key.bin?key-auth=keep",
+        "mapUrl": "https://cdn.example/init.mp4?map-auth=keep"
+      },
+      {
+        "url": "https://cdn.example/segment-2.ts"
+      }
+    ],
+    "keys": [
+      {
+        "url": "https://keys.example/key.bin?key-auth=keep"
+      }
+    ],
+    "maps": [
+      {
+        "url": "https://cdn.example/init.mp4?map-auth=keep"
+      }
+    ]
+  },
+  "segmentQuery": "token=new&expires=9"
+}

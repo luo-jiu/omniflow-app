@@ -5,6 +5,10 @@
  */
 
 import { parseHlsManifest } from '../../../../../electron/service/embedded-browser/cat-catch-port/hls/parser'
+import {
+  applyCatCatchHlsSegmentQueryToPlan,
+  extractCatCatchHlsSegmentQueryDefault,
+} from '../../../../../electron/service/embedded-browser/cat-catch-port/hls/segment-query'
 
 export type EmbeddedBrowserHlsAttributeMap = Record<string, string>
 
@@ -272,6 +276,7 @@ export function createEmbeddedBrowserHlsDownloadPlan(input: {
   manifest: EmbeddedBrowserHlsManifest
   manifestUrl: string
   pageUrl?: string
+  segmentQuery?: string | null
 }): EmbeddedBrowserHlsDownloadPlan {
   const { manifest } = input
   const fragments = manifest.segments.map((segment) => ({
@@ -301,7 +306,7 @@ export function createEmbeddedBrowserHlsDownloadPlan(input: {
     url: segment.url,
   }))
   const suggestedThreadCount = Math.min(6, Math.max(1, fragments.length || 1))
-  return {
+  const plan: EmbeddedBrowserHlsDownloadPlan = {
     durationSeconds: manifest.durationSeconds,
     encryptedSegmentCount: fragments.filter((fragment) => fragment.key?.url || fragment.key?.method === 'AES-128').length,
     fragmentCount: fragments.length,
@@ -364,4 +369,16 @@ export function createEmbeddedBrowserHlsDownloadPlan(input: {
       url: variant.url,
     })),
   }
+  return applyCatCatchHlsSegmentQueryToPlan(plan, input.segmentQuery ?? null)
+}
+
+export function applyEmbeddedBrowserHlsSegmentQuery(
+  plan: EmbeddedBrowserHlsDownloadPlan,
+  segmentQuery: string | null,
+) {
+  return applyCatCatchHlsSegmentQueryToPlan(plan, segmentQuery)
+}
+
+export function extractEmbeddedBrowserHlsSegmentQueryDefault(manifestUrl: string) {
+  return extractCatCatchHlsSegmentQueryDefault(manifestUrl)
 }
