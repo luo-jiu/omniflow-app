@@ -6,6 +6,8 @@ export interface EmbeddedBrowserPageDragSource {
   capturedAt: number;
   mimeType?: string;
   pageUrl: string;
+  /** Main-only opaque authority id when the source was captured in this tab. */
+  resourceId?: string;
   sessionId: string;
   sourceKind: EmbeddedBrowserPageDragSourceKind;
   sourceUrl: string;

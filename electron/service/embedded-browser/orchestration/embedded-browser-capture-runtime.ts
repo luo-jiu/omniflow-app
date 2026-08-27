@@ -217,6 +217,14 @@ export class EmbeddedBrowserCaptureRuntime {
     return resource.resourceKey
   }
 
+  resolveResourceIdByUrl(tabId: string, url: string): string | null {
+    if (this.disposed) return null
+    const normalizedTabId = normalizeTabId(tabId)
+    const normalizedUrl = String(url ?? '').trim()
+    if (!normalizedTabId || !normalizedUrl) return null
+    return this.store.getOwnedResourceByUrl(normalizedTabId, normalizedUrl)?.id || null
+  }
+
   setCaptureMode(tabId: string, captureMode: CaptureMode) {
     if (this.disposed) return null
     return this.lifecycle.setCaptureMode(tabId, captureMode)

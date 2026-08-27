@@ -632,6 +632,26 @@ export class ResourceStateStore {
     return resource ? cloneOwnedResource(resource) : null
   }
 
+  /** Main-only lookup used to bind a page drag to the captured URL authority. */
+  getOwnedResourceByUrl(tabId: string, url: string) {
+    const state = this.getTab(tabId)
+    const normalizedUrl = String(url || '').trim()
+    if (!state || !normalizedUrl) return null
+    let latest: StoredResource | null = null
+    for (const resource of state.resources.values()) {
+      if (
+        resource.url !== normalizedUrl
+        || resource.expiresAt <= this.now()
+        || resource.capturedIncarnation !== state.incarnation
+        || resource.capturedNavigationGeneration !== state.navigationGeneration
+        || resource.capturedPageOrigin !== state.pageOrigin
+        || resource.capturedWebContentsId !== state.webContentsId
+      ) continue
+      if (!latest || resource.sequence > latest.sequence) latest = resource
+    }
+    return latest ? cloneOwnedResource(latest) : null
+  }
+
   invalidateContext(contextRef: string): ResourceStateUpsertChange[] {
     const normalizedContextRef = String(contextRef || '').trim()
     if (!normalizedContextRef) return []

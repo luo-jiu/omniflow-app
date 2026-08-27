@@ -19,26 +19,26 @@
 
 | 能力族 | 当前实现 | 已知结论 |
 | --- | --- | --- |
-| network capture | target runtime 已在 production controller 实例化，legacy bridge/consumer 仍并存 | Cat Catch 规则与产品 policy 分层、page policy、vault/store、当前/下一 navigation generation 的 tokenized probe routing、renderer-safe reducer、唯一 network/per-view probe composition、owner lifecycle、main-only probe key 解析、context-free stale owner 拒绝和 redirect hop 凭据隔离已有专项测试；资源状态事件、opaque inspection、普通资源下载、probe open/export/read、external-tool dispatch 已接入 production IPC/preload/renderer，页面拖拽、HLS/DASH 计划下载和旧 catch toolkit 仍待迁移与验证 |
+| network capture | target runtime 已在 production controller 实例化，legacy bridge/consumer 仍并存 | Cat Catch 规则与产品 policy 分层、page policy、vault/store、当前/下一 navigation generation 的 tokenized probe routing、renderer-safe reducer、唯一 network/per-view probe composition、owner lifecycle、main-only probe key 解析、context-free stale owner 拒绝和 redirect hop 凭据隔离已有专项测试；资源状态事件、opaque inspection、普通资源下载、probe open/export/read、external-tool dispatch 已接入 production IPC/preload/renderer；已捕获 URL 的页面拖拽会绑定当前 tab 的 opaque resource authority，未捕获、data/blob 和外部拖拽仍走受限 fallback；HLS/DASH 计划下载和旧 catch toolkit 仍待迁移与验证 |
 | deep-search runtime | legacy inactive | 深度 hooks 写死关闭，外围 MSE hook 仍运行 |
 | MSE runtime | legacy owner | 有增量 spool 思路，但没有专项差分、输出和稳定性测试 |
 | HLS engine | legacy owner | parser/downloader 存在，BYTERANGE、cache fallback、伪装分片有明确缺口 |
 | DASH engine | legacy owner | 手写 parser 对负 repeat、多 BaseURL、动态 MPD 等语义不完整 |
 | transfer engine | multiple owners | 并发/重试代码可复用评估，但没有统一 task/cancel/cleanup owner |
-| output integration | mixed: opaque resource authority + legacy HLS/DASH/drag/toolkit paths | external-tool、inspection、普通资源下载和 probe 资源动作已改为 main-owned opaque authority；HLS/DASH 直拉、派生字幕 URL、页面拖拽、process terminal、m3u8dl encoding、本地保存、ffmpeg、资料库导入与统一任务合同仍待迁移 |
+| output integration | mixed: opaque resource authority + legacy HLS/DASH/drag/toolkit paths | external-tool、inspection、普通资源下载和 probe 资源动作已改为 main-owned opaque authority；已捕获资源的页面拖拽暂存已接入同一 authority，但 data/blob、未捕获资源和多资源 fallback 仍走旧暂存链；HLS/DASH 直拉、派生字幕 URL、process terminal、m3u8dl encoding、本地保存、ffmpeg、资料库导入与统一任务合同仍待迁移 |
 
 ## 3. 高优先级缺口
 
 1. `enableDeepRuntimeHooks = false`。
 2. 生产网络捕捉仍为 `onCompleted`；目标 adapter 已实现首字节阶段识别，但在整个 unit 就绪前不能与旧 listener 同时注册。
-3. 生产 request context 的新 vault/store 已接入 target runtime；旧 request context/富 DTO 仍被 HLS/DASH、页面拖拽和 catch toolkit 路径使用，尚未完成统一清理。
+3. 生产 request context 的新 vault/store 已接入 target runtime；旧 request context/富 DTO 仍被 HLS/DASH、未捕获页面拖拽 fallback 和 catch toolkit 路径使用，尚未完成统一清理。
 4. TextDecoder inline manifest hook 缺失。
 5. JSON 深度/宽度/cycle 语义未与上游对齐。
 6. Worker Blob CSP 异步失败回退不等价。
 7. HLS 隐式 BYTERANGE、一次性 cache fallback、PNG/JPEG 伪装分片缺失。
 8. MPD `r=-1`、多 BaseURL、动态 timeline/range 不完整。
 9. ffmpeg、HLS/DASH、直播、普通下载和 temp 没有统一 task registry。
-10. 目前有 28 个 active pure contract、fake Electron integration 或 loopback redirect test ID；main composition、持久化捕捉设置热更新、下一文档 token 路由、main-only probe key 解析与下载、检查、probe 动作、external-tool target consumer 已有 owner/opaque authority 证据，普通资源下载和 inspection 已有 production IPC 入口；页面拖拽、HLS/DASH、旧 toolkit 及完整 unit cutover 仍无 production cutover 证据。
+10. 目前有 28 个 active pure contract、fake Electron integration 或 loopback redirect test ID；main composition、持久化捕捉设置热更新、下一文档 token 路由、main-only probe key 解析与下载、检查、probe 动作、external-tool target consumer 和已捕获页面拖拽暂存已有 owner/opaque authority 证据，普通资源下载和 inspection 已有 production IPC 入口；页面拖拽 fallback、HLS/DASH、旧 toolkit 及完整 unit cutover 仍无 production cutover 证据。
 
 ## 4. 保留、迁移与删除
 
@@ -51,4 +51,4 @@
 
 ## 5. 当前下一步
 
-下一步把 page-drag、HLS/DASH 和 catch toolkit 的请求改成同一套 `tabId/resourceId` authority，并补 production-equivalent cutover integration。证据完整后，在唯一 dispatch boundary 原子切换并删除对应旧实现；当前仍保留必要的过渡 lookup，不提前删除旧链。
+下一步补 page-drag authority 的 production-equivalent integration，并把 HLS/DASH 和 catch toolkit 的请求改成同一套 `tabId/resourceId` authority。证据完整后，在唯一 dispatch boundary 原子切换并删除对应旧实现；当前仍保留 data/blob 与未捕获资源的必要 fallback，不提前删除旧链。

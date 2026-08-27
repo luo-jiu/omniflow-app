@@ -25,11 +25,18 @@ type FetchCall = {
   init?: RequestInit
 }
 
-function createOptions(fetchImpl?: (input: string, init?: RequestInit) => Promise<Response>) {
+function createOptions(
+  fetchImpl?: (input: string, init?: RequestInit) => Promise<Response>,
+  fetchCapturedResource?: (input: { resourceId: string; tabId: string }) => Promise<{
+    resource: { mimeType?: string; name?: string; url: string }
+    response: Response
+  }>,
+) {
   return {
     browserSession: {
       fetch: fetchImpl || (() => Promise.reject(new Error('unexpected HTTP fetch'))),
     } as Electron.Session,
+    fetchCapturedResource,
     readPageBlob: () => Promise.reject(new Error('unexpected blob read')),
   }
 }
@@ -103,6 +110,42 @@ describe('embeddedBrowserPageDragService', () => {
     expect(new Headers(calls[0].init?.headers).has('cookie')).toBe(false)
     expect(staged.fileName).toBe('cover.png')
     expect(await readFile(staged.filePath, 'utf8')).toBe('image-body')
+  })
+
+  it('uses the main-owned resource authority when a captured drag source is available', async () => {
+    recordEmbeddedBrowserPageDragSource('tab-1', {
+      pageUrl: 'https://www.example.test/gallery',
+      resourceId: 'resource-opaque',
+      sessionId: 'drag-session-authority',
+      sourceKind: 'media',
+      sourceUrl: 'https://renderer.example/untrusted.mp4',
+      tabId: 'tab-1',
+    })
+
+    const browserFetch = vi.fn(async () => new Response('wrong-body'))
+    const authorityFetch = vi.fn(async () => ({
+      resource: {
+        mimeType: 'video/mp4',
+        name: 'episode.mp4',
+        url: 'https://media.example/episode.mp4',
+      },
+      response: new Response('authority-body', {
+        headers: { 'Content-Type': 'video/mp4' },
+      }),
+    }))
+    const [staged] = await stageEmbeddedBrowserPageDrag({
+      sessionId: 'drag-session-authority',
+      tabId: 'tab-1',
+    }, createOptions(browserFetch, authorityFetch))
+
+    expect(authorityFetch).toHaveBeenCalledWith({
+      resourceId: 'resource-opaque',
+      tabId: 'tab-1',
+    })
+    expect(browserFetch).not.toHaveBeenCalled()
+    expect(staged.fileName).toBe('episode.mp4')
+    expect(staged.sourceUrl).toBe('https://media.example/episode.mp4')
+    expect(await readFile(staged.filePath, 'utf8')).toBe('authority-body')
   })
 
   it('rejects HTML returned for an image drag and removes the partial staging directory', async () => {

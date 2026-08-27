@@ -2555,7 +2555,12 @@ export function createEmbeddedBrowserMainController(
         void handleLibraryFileDropPayload(dropTabId, payload)
       },
       onPageDragPayload: (pageDragTabId, payload) => {
-        recordEmbeddedBrowserPageDragSource(pageDragTabId, payload)
+        const sourceUrl = typeof payload.sourceUrl === 'string' ? payload.sourceUrl : ''
+        const resourceId = captureRuntime?.resolveResourceIdByUrl(pageDragTabId, sourceUrl)
+        recordEmbeddedBrowserPageDragSource(
+          pageDragTabId,
+          resourceId ? { ...payload, resourceId } : payload,
+        )
       },
       onViewDestroyed: (destroyedTabId) => {
         cancelEmbeddedBrowserLibraryFileDropRequests(destroyedTabId)
@@ -3310,6 +3315,24 @@ export function createEmbeddedBrowserMainController(
     }
     return stageEmbeddedBrowserPageDrag(request, {
       browserSession: getEmbeddedBrowserSession(),
+      fetchCapturedResource: async ({ resourceId, tabId: resourceTabId }) => {
+        if (!captureRuntime) {
+          throw new Error('捕捉资源 authority 不可用，请重新拖拽')
+        }
+        const result = await captureRuntime.access.fetch({
+          purpose: 'page-drag-stage',
+          resourceId,
+          tabId: resourceTabId,
+        })
+        return {
+          resource: {
+            mimeType: result.resource.mimeType,
+            name: result.resource.name,
+            url: result.resource.url,
+          },
+          response: result.response,
+        }
+      },
       readPageBlob: async (tabId, sourceUrl, maxBytes) => {
         const view = getEmbeddedBrowserView(tabId)
         if (!view || view.webContents.isDestroyed()) {

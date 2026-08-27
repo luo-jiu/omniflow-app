@@ -269,6 +269,20 @@
 - legacy cleanup: 无；旧无 token production probe listener/installer 仍等待 network-capture 原子切换。
 - validation: network target chain 15 files/60 tests、同步校验 16/16、固定 metadata/192 anchors/106 cleanup entries/83 unique planned IDs、TypeScript、全量 ESLint 和 Cat Catch 作用域 diff check 通过；排除已由 `node --test` 专门执行的同步校验文件后，全量 Vitest 为 149 files、811 passed、1 skipped。未运行会覆盖其他 Agent `dist-electron/**` 的 build；目标 runtime 尚未接生产，因此没有可执行的真实页面手工验证。
 
+## 2026-08-27: same target (captured page-drag authority partial)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动。
+- reviewedThrough / portedThrough: 均保持 `null`；本切片只把已捕获 URL 的页面拖拽暂存接入 main-owned authority，未完成 network unit cutover。
+- change groups: `security-boundary`（拖拽来源按当前 tab/URL 绑定 opaque resource id，authority 恢复 URL 与 context）与 `platform-adaptation`（授权 Response 注入既有暂存 sink，保留 data/blob/未捕获 fallback）。
+- affected capability IDs: `capture.protected-request-context` 保持 `ported-unverified`；已有 `network.owned-resource-transfer-consumers` 测试扩展，所有 unit 仍为 0 cutover。
+- fixtures/tests: 无 fixture；扩展 `embeddedBrowserPageDragService.test.ts` 覆盖 authority URL/header/body 与 legacy session fetch 隔离，扩展 `resource-state-store.test.ts` 覆盖 URL lookup 的当前 generation/TTL 约束，`embedded-browser-capture-runtime.test.ts` 覆盖 runtime URL 到 opaque id 解析。
+- accepted difference: 页面拖拽的 data/blob、未捕获 URL 和多资源 fallback 仍是 OmniFlow 自有路径，不强行伪装成 captured resource；已捕获 HTTP(S) 不再使用 renderer 提供的 URL 或 header。
+- excluded changes and reasons: 不在本切片迁移 HLS/DASH plan、旧 catch toolkit、transfer task registry 或 staging lease；它们继续等待各自 unit 的 production-equivalent 证据。
+- unresolved gaps: 多资源 drag fallback、production smoke、完整 network-capture 原子切换、旧 request context/富 DTO 清理。
+- runtime changes: `ResourceStateStore.getOwnedResourceByUrl` 与 `EmbeddedBrowserCaptureRuntime.resolveResourceIdByUrl` 新增当前 owner 约束；page-drag source 在 main 侧按 URL 绑定 id，staging service 对绑定资源调用 `CapturedResourceAccessService`。
+- legacy cleanup: 无新增；legacy page-drag fallback 保留至 network-capture/output unit 收口。
+- validation: TypeScript、page-drag/resource-store/runtime 27 项定向测试通过；同步校验 16/16。未运行会覆盖其他 Agent `dist-electron/**` 的 build，也未做真实页面手工验证。
+
 ## Template
 
 ```markdown

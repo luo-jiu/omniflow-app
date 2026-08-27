@@ -208,6 +208,8 @@ describe('EmbeddedBrowserCaptureRuntime', () => {
     if (networkSnapshot?.status !== 'active') throw new Error('Expected active resource state')
     expect(networkSnapshot.resources).toHaveLength(1)
     const networkResource = networkSnapshot.resources[0]
+    expect(runtime.resolveResourceIdByUrl('tab-1', resourceUrl)).toBe(networkResource.id)
+    expect(runtime.resolveResourceIdByUrl('tab-1', 'https://cdn.example/missing')).toBeNull()
     expect(JSON.stringify(networkResource)).not.toContain('runtime-secret')
     expect(networkResource.context).toEqual({
       hasAuthorization: true,

@@ -228,6 +228,34 @@ describe('state.capacity-ttl-dedupe', () => {
     expect(releasedContexts).toEqual(['context-duplicate'])
   })
 
+  it('resolves the newest live resource for a page URL without exposing owner metadata', () => {
+    const { store } = createStore()
+    const binding = registerCapturingTab(store)
+    const url = 'https://media.example/dragged.mp4'
+    const first = recordNetworkResource(store, binding, { url })
+    const second = store.recordNetworkResource({
+      binding,
+      metadata: { ...NETWORK_RESOURCE, url },
+    }, { checkDuplicates: false })
+
+    expect(first.decision).toBe('accepted')
+    expect(second.decision).toBe('accepted')
+    expect(store.getOwnedResourceByUrl(binding.tabId, url)).toMatchObject({
+      id: second.resource?.id,
+      url,
+    })
+    expect(store.getOwnedResourceByUrl(binding.tabId, 'https://media.example/missing.mp4'))
+      .toBeNull()
+
+    const retainedNavigation = store.commitNavigation({
+      binding,
+      clearResources: false,
+      pageUrl: 'https://page.example/watch/two',
+    })!
+    expect(store.getOwnedResourceByUrl(binding.tabId, url)).toBeNull()
+    expect(store.getOwnedResourceByUrl(retainedNavigation.binding.tabId, url)).toBeNull()
+  })
+
   it('keeps a contextRef single-owned and releases it exactly once', () => {
     const { releasedContexts, store } = createStore()
     const binding = registerCapturingTab(store)

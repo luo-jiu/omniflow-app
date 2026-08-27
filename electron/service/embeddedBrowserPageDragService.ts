@@ -23,6 +23,7 @@ const PAGE_DRAG_STAGING_DIR_NAME = 'omniflow-import-staging'
 type PageDragResource = EmbeddedBrowserPageDragFallbackResource & {
   requestHeaders?: Record<string, string>
   referer?: string
+  resourceId?: string
   sessionId?: string
   tabId?: string
 }
@@ -39,6 +40,17 @@ type ReadPageBlobResult = {
 
 type StagePageDragOptions = {
   browserSession: Session
+  fetchCapturedResource?: (input: {
+    resourceId: string
+    tabId: string
+  }) => Promise<{
+    resource: {
+      mimeType?: string
+      name?: string
+      url: string
+    }
+    response: Response
+  }>
   readPageBlob: (tabId: string, sourceUrl: string, maxBytes: number) => Promise<ReadPageBlobResult>
 }
 
@@ -205,6 +217,7 @@ function normalizeSource(
     pageUrl: normalizeReferrerUrl(String(payload.pageUrl || '')),
     referer: normalizeReferrerUrl(enrichment?.referer) || undefined,
     requestHeaders: enrichment?.requestHeaders,
+    resourceId: String(payload.resourceId || '').trim() || undefined,
     sessionId,
     sourceKind,
     sourceUrl,
@@ -314,38 +327,53 @@ async function writeHttpResource(
   resource: PageDragResource,
   targetPath: string,
   remainingBytes: number,
+  options: StagePageDragOptions,
 ) {
-  const requestHeaders = Object.fromEntries(
-    Object.entries(resource.requestHeaders || {}).filter(([headerName, headerValue]) => {
-      const normalizedName = headerName.trim().toLowerCase()
-      if (!normalizedName || !String(headerValue || '').trim()) return false
-      return ![
-        'accept-encoding',
-        'connection',
-        'content-length',
-        'cookie',
-        'host',
-        'proxy-authorization',
-        'proxy-connection',
-        'referer',
-        'te',
-        'trailer',
-        'transfer-encoding',
-        'upgrade',
-      ].includes(normalizedName) && !normalizedName.startsWith('sec-')
-    }),
-  )
-  const response = await browserSession.fetch(resource.sourceUrl, {
-    credentials: 'include',
-    headers: {
-      Accept: '*/*',
-      ...requestHeaders,
-    },
-    ...(resource.referer || resource.pageUrl ? {
-      referrer: resource.referer || resource.pageUrl,
-      referrerPolicy: 'unsafe-url',
-    } : {}),
-  })
+  let response: Response
+  let authorityUrl = resource.sourceUrl
+  if (resource.resourceId) {
+    if (!resource.tabId || !options.fetchCapturedResource) {
+      throw new Error('捕捉资源 authority 不可用，请重新拖拽')
+    }
+    const captured = await options.fetchCapturedResource({
+      resourceId: resource.resourceId,
+      tabId: resource.tabId,
+    })
+    response = captured.response
+    authorityUrl = captured.resource.url
+  } else {
+    const requestHeaders = Object.fromEntries(
+      Object.entries(resource.requestHeaders || {}).filter(([headerName, headerValue]) => {
+        const normalizedName = headerName.trim().toLowerCase()
+        if (!normalizedName || !String(headerValue || '').trim()) return false
+        return ![
+          'accept-encoding',
+          'connection',
+          'content-length',
+          'cookie',
+          'host',
+          'proxy-authorization',
+          'proxy-connection',
+          'referer',
+          'te',
+          'trailer',
+          'transfer-encoding',
+          'upgrade',
+        ].includes(normalizedName) && !normalizedName.startsWith('sec-')
+      }),
+    )
+    response = await browserSession.fetch(resource.sourceUrl, {
+      credentials: 'include',
+      headers: {
+        Accept: '*/*',
+        ...requestHeaders,
+      },
+      ...(resource.referer || resource.pageUrl ? {
+        referrer: resource.referer || resource.pageUrl,
+        referrerPolicy: 'unsafe-url',
+      } : {}),
+    })
+  }
   if (!response.ok || !response.body) {
     throw new Error(`网页资源下载失败：HTTP ${response.status}`)
   }
@@ -391,6 +419,7 @@ async function writeHttpResource(
   return {
     mimeType: responseMimeType || normalizeMimeType(resource.mimeType),
     response,
+    sourceUrl: authorityUrl,
     size: receivedBytes,
   }
 }
@@ -407,6 +436,7 @@ async function stageSingleResource(
   let response: Response | null = null
   let mimeType = normalizeMimeType(resource.mimeType)
   let inlineBuffer: Buffer | null = null
+  let sourceUrl = resource.sourceUrl
 
   if (protocol === 'data:') {
     const decoded = decodeDataUrl(resource.sourceUrl)
@@ -434,19 +464,26 @@ async function stageSingleResource(
     await writeFile(partPath, inlineBuffer)
     size = inlineBuffer.length
   } else {
-    const result = await writeHttpResource(options.browserSession, resource, partPath, remainingBytes)
+    const result = await writeHttpResource(
+      options.browserSession,
+      resource,
+      partPath,
+      remainingBytes,
+      options,
+    )
     response = result.response
     mimeType = result.mimeType
+    sourceUrl = result.sourceUrl
     size = result.size
   }
 
   const fileName = reserveUniqueFileName(
-    resolveFileName({ ...resource, mimeType }, response, index),
+    resolveFileName({ ...resource, mimeType, sourceUrl }, response, index),
     usedFileNames,
   )
   const filePath = path.join(stagingPath, fileName)
   await rename(partPath, filePath)
-  return { fileName, filePath, mimeType, size }
+  return { fileName, filePath, mimeType, size, sourceUrl }
 }
 
 export async function stageEmbeddedBrowserPageDrag(
@@ -489,7 +526,7 @@ export async function stageEmbeddedBrowserPageDrag(
         filePath: staged.filePath,
         mimeType: staged.mimeType || undefined,
         size: staged.size,
-        sourceUrl: resource.sourceUrl,
+        sourceUrl: staged.sourceUrl,
       })
     }
     return stagedFiles

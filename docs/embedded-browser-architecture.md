@@ -343,9 +343,9 @@ tempPath
 #### 网络捕捉
 
 - 由 main 侧的浏览器网络能力记录
-- 以 `embedded-browser:resource` 事件推回 renderer
+- 以 `embedded-browser:resource-state-change` 事件推回 renderer
 
-全面迁移中的 network chain 已由 production controller 实例化 `EmbeddedBrowserCaptureRuntime`，它组合唯一 `ElectronNetworkCaptureAdapter`、每个 view 唯一 `ElectronPageProbeEventAdapter`、`PageProbeCaptureAdapter`、Cat Catch/OmniFlow 分层 policy、main-only context vault、revisioned `ResourceStateStore`、安全跨进程合同、`EmbeddedBrowserLifecycle`、main-only resource access consumer 和 bounded inspection。lifecycle 只在 capture mode 为 deep 时签发 probe ingress；console transport 分别持有当前文档和预签的下一 navigation generation 随机 token，document-start token 只有在预期 binding 变为当前 owner 后才被提升，上一文档 token 随即失效，每条消息仍会复核 binding。普通无 key discovery 由 main 派生 stable key，MSE flush/reset 保持独立控制路径；需要操作 probe/MSE 私有 page key 时，main 只能用 opaque `tabId/resourceId` 解析，并再次校验当前 incarnation、navigation、page origin 与 WebContents owner，renderer 永远不接触该 key。产品 policy 显式补充 image/key/document/expanded-subtitle，不能覆盖 Cat Catch regex blacklist；现有持久化 extension/MIME/regex/domain 设置会编译到目标 policy，并可在不替换 `webRequest` listener 的情况下原地更新。access consumer 的 transport 必须由 production adapter 注入并绑定到捕捉 tab 的 Electron session，不能回退到主进程全局 `fetch`。资源状态事件、opaque inspection、普通资源下载、probe open/export/read 和 external-tool dispatch 已接入 production IPC/preload/renderer；页面拖拽、HLS/DASH 计划下载、派生字幕 URL 和旧 catch toolkit 仍使用过渡 DTO。构造该 runtime 会占用 session `webRequest` listener，当前必须保证旧 bridge 不再同时注册同一种 `webRequest` event；逐项状态以 Cat Catch capability map 为准。
+全面迁移中的 network chain 已由 production controller 实例化 `EmbeddedBrowserCaptureRuntime`，它组合唯一 `ElectronNetworkCaptureAdapter`、每个 view 唯一 `ElectronPageProbeEventAdapter`、`PageProbeCaptureAdapter`、Cat Catch/OmniFlow 分层 policy、main-only context vault、revisioned `ResourceStateStore`、安全跨进程合同、`EmbeddedBrowserLifecycle`、main-only resource access consumer 和 bounded inspection。lifecycle 只在 capture mode 为 deep 时签发 probe ingress；console transport 分别持有当前文档和预签的下一 navigation generation 随机 token，document-start token 只有在预期 binding 变为当前 owner 后才被提升，上一文档 token 随即失效，每条消息仍会复核 binding。普通无 key discovery 由 main 派生 stable key，MSE flush/reset 保持独立控制路径；需要操作 probe/MSE 私有 page key 时，main 只能用 opaque `tabId/resourceId` 解析，并再次校验当前 incarnation、navigation、page origin 与 WebContents owner，renderer 永远不接触该 key。产品 policy 显式补充 image/key/document/expanded-subtitle，不能覆盖 Cat Catch regex blacklist；现有持久化 extension/MIME/regex/domain 设置会编译到目标 policy，并可在不替换 `webRequest` listener 的情况下原地更新。access consumer 的 transport 必须由 production adapter 注入并绑定到捕捉 tab 的 Electron session，不能回退到主进程全局 `fetch`。资源状态事件、opaque inspection、普通资源下载、probe open/export/read 和 external-tool dispatch 已接入 production IPC/preload/renderer；已捕获 URL 的页面拖拽暂存也通过当前 tab 的 opaque `resourceId` 进入 main authority，data/blob、未捕获资源和多资源 fallback 仍使用过渡 DTO；HLS/DASH 计划下载、派生字幕 URL 和旧 catch toolkit 仍使用过渡 DTO。构造该 runtime 会占用 session `webRequest` listener，当前必须保证旧 bridge 不再同时注册同一种 `webRequest` event；逐项状态以 Cat Catch capability map 为准。
 
 #### 深度捕捉
 
@@ -365,14 +365,14 @@ renderer 的资源列表不应该关心“这个资源是来自网络还是来�
 ```text
 页面 dragstart capture
   -> page drag source script 记录 tab / page / element / URL
-    -> console payload 写入 main 的 30 秒来源会话
+    -> console payload 写入 main 的 30 秒来源会话，并按当前 tab/URL 绑定 opaque resourceId（若已捕获）
     -> DataTransfer 同时携带 session id 作为精确关联
 
 目录树 drop
   -> renderer 解析 session id 与标准 DataTransfer 兜底
     -> preload page-drag:stage
-      -> main 兑现来源会话
-        -> embedded browser session.fetch / 页内 blob 读取 / data 解码
+        -> main 兑现来源会话
+          -> 已捕获 HTTP(S) 走 main-owned resource authority；其余走 embedded browser session.fetch / 页内 blob 读取 / data 解码
           -> 受控临时目录
             -> 现有上传确认与 UploadManager
 ```
@@ -381,7 +381,7 @@ renderer 的资源列表不应该关心“这个资源是来自网络还是来�
 
 - 页面脚本只记录当前被拖元素的资源元数据，不记录输入内容或大块 HTML。
 - 普通链接只有声明 `download` 或 URL 具有已知文件后缀时才进入文件语义。
-- HTTP(S) 暂存继承 embedded browser partition Cookie；`blob:` 必须回到原 tab frame，页面关闭或资源失效时明确失败。
+- 已捕获 HTTP(S) 暂存由 `ResourceStateStore/Vault` 恢复原始请求上下文，并通过 embedded browser partition Cookie 补充目标 URL 的会话凭据；未捕获 HTTP(S) 仍走受限 session fallback；`blob:` 必须回到原 tab frame，页面关闭或资源失效时明确失败。
 - main 拥有来源会话、下载、限额和陈旧临时目录清理；目录树不直接下载资源，也不新增上传状态机。
 - 关闭 tab 和 `closeAll()` 会清理对应来源会话，防止旧 tab 的拖拽来源被下一次操作复用。
 - 当前代码已接入；macOS 已使用非第一个资料库验证真实图片可从内置浏览器拖入目录树，且上传后的文件内容完整。普通网页或搜索结果拖出 `text/html` 时会按非文件内容拒绝；Windows 与其他边界场景仍待验证。
