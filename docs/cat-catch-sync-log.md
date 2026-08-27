@@ -367,6 +367,20 @@
 - legacy cleanup: 无；现有 downloader 仍是生产 owner，尚未切换或删除旧实现。
 - validation: 定向 Vitest 5/5、TypeScript、定向 ESLint、`cat-catch:validate` 和同步校验 16/16 通过；未运行会覆盖其他 Agent `dist-electron/**` 的 build，也未做真实页面手工验证。
 
+## 2026-08-27: same target (ordered HLS processor chain)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动。
+- reviewedThrough / portedThrough: 均保持 `null`；本步补齐 Cat Catch `Downloader.use` 的有序异步处理边界，仍未完成 hls-engine cutover。
+- change groups: `behavioral`（多处理步骤按声明顺序执行，并在每步后暴露处理结果）。
+- affected capability IDs: `hls.segment-pipeline` 改为 `porting`；`hls.cache-fallback-disguised-fragments` 继续复用该边界，仍为 `porting`。
+- fixtures/tests: `embeddedBrowserFragmentDownloader.test.ts` 新增 processor chain 顺序和 `processedBuffer` 事件测试；定向测试覆盖 6/6。
+- accepted difference: 旧单 processor 选项继续兼容；未引入 Cat Catch UI 中的 processor 名称或扩展页状态。
+- excluded changes and reasons: 不在本步实现 AES 解密、mux/transcode、统一 task/cancel owner 或旧 downloader 删除。
+- unresolved gaps: 解密实现及其与预处理的顺序证据、HLS output smoke、一次性 cache fallback、统一 task/cleanup 和 production-equivalent page validation。
+- runtime changes: `EmbeddedBrowserFragmentDownloader` 支持 `bufferProcessors` 有序异步链，每步发出 `processedBuffer`；HLS 本地预处理改用单元素 processor chain。
+- legacy cleanup: 无；现有 downloader 仍是生产 owner，尚未切换或删除旧实现。
+- validation: 定向 Vitest 6/6、TypeScript、定向 ESLint 通过；待提交前再运行 `cat-catch:validate`、同步校验和目标 diff 检查，完整 build 仍因其他 Agent 的 `dist-electron/**` 修改未运行。
+
 ## Template
 
 ```markdown

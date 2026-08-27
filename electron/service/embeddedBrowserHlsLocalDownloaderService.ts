@@ -509,8 +509,8 @@ export async function downloadEmbeddedBrowserHlsToLocalWorkDirectory(
     : 0
 
   const downloader = new EmbeddedBrowserFragmentDownloader({
-    bufferProcessor: request.preprocessFragments
-      ? (preprocessFragment as EmbeddedBrowserFragmentBufferProcessor)
+    bufferProcessors: request.preprocessFragments
+      ? [preprocessFragment as EmbeddedBrowserFragmentBufferProcessor]
       : undefined,
     fetch: request.fetch,
     fragments: fragmentsToDownload,

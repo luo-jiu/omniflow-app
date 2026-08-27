@@ -43,6 +43,11 @@ export type EmbeddedBrowserFragmentDownloaderEventMap = {
     contentLength: number,
     chunk?: Uint8Array,
   ) => void
+  processedBuffer: (
+    buffer: ArrayBuffer,
+    fragment: EmbeddedBrowserDownloadFragment,
+    processorIndex: number,
+  ) => void
   rawBuffer: (
     buffer: ArrayBuffer,
     fragment: EmbeddedBrowserDownloadFragment,
@@ -74,6 +79,7 @@ export type EmbeddedBrowserFragmentBufferProcessor = (
 
 type EmbeddedBrowserFragmentDownloaderOptions = {
   bufferProcessor?: EmbeddedBrowserFragmentBufferProcessor
+  bufferProcessors?: EmbeddedBrowserFragmentBufferProcessor[]
   fetch?: EmbeddedBrowserFragmentFetch
   fragments?: EmbeddedBrowserDownloadFragment[]
   headers?: Record<string, string>
@@ -200,6 +206,8 @@ export class EmbeddedBrowserFragmentDownloader {
 
   private readonly bufferProcessor?: EmbeddedBrowserFragmentBufferProcessor
 
+  private readonly bufferProcessors: EmbeddedBrowserFragmentBufferProcessor[]
+
   private maxRetries: number
 
   private pendingQueue: EmbeddedBrowserFragmentDownloadTask[]
@@ -210,6 +218,9 @@ export class EmbeddedBrowserFragmentDownloader {
     this.maxRetries = Math.max(0, Number(options?.maxRetries || 2))
     this.fetchImpl = options?.fetch || ((input, init) => fetch(input, init))
     this.bufferProcessor = options?.bufferProcessor
+    this.bufferProcessors = (options?.bufferProcessors
+      || (this.bufferProcessor ? [this.bufferProcessor] : []))
+      .filter((processor): processor is EmbeddedBrowserFragmentBufferProcessor => typeof processor === 'function')
     this.headers = options?.headers
     this.allFragments = []
     this.fragmentsInternal = []
@@ -431,9 +442,11 @@ export class EmbeddedBrowserFragmentDownloader {
       }
       const rawBuffer = await readResponseBuffer(response, fragment, this.emit.bind(this))
       this.emit('rawBuffer', rawBuffer, fragment)
-      const buffer = this.bufferProcessor
-        ? await this.bufferProcessor(rawBuffer, fragment)
-        : rawBuffer
+      let buffer = rawBuffer
+      for (const [processorIndex, processor] of this.bufferProcessors.entries()) {
+        buffer = await processor(buffer, fragment)
+        this.emit('processedBuffer', buffer, fragment, processorIndex)
+      }
       this.buffer[fragment.index] = buffer
       this.success += 1
       this.buffersize += buffer.byteLength
