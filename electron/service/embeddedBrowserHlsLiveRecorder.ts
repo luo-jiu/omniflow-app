@@ -317,6 +317,7 @@ export class EmbeddedBrowserHlsLiveRecorder {
       fetch: this.fetch,
       fragmentIndexes: input.fragmentIndexes,
       manualKeyBase64: this.manualKeyBase64,
+      preprocessFragments: true,
       onEvent: (event) => {
         const nextBytesReceived = typeof event.bytesReceived === 'number'
           ? bytesOffset + event.bytesReceived

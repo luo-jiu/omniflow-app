@@ -22,7 +22,7 @@
 | network capture | target runtime 已在 production controller 实例化，legacy bridge/consumer 仍并存 | Cat Catch 规则与产品 policy 分层、page policy、vault/store、当前/下一 navigation generation 的 tokenized probe routing、renderer-safe reducer、唯一 network/per-view probe composition、owner lifecycle、main-only probe key 解析、context-free stale owner 拒绝和 redirect hop 凭据隔离已有专项测试；资源状态事件、opaque inspection、普通资源下载、probe open/export/read、external-tool dispatch 已接入 production IPC/preload/renderer；已捕获 URL 的页面拖拽会绑定当前 tab 的 opaque resource authority，未捕获、data/blob 和外部拖拽仍走受限 fallback；HLS/DASH 计划下载和旧 catch toolkit 仍待迁移与验证 |
 | deep-search runtime | legacy inactive | 深度 hooks 写死关闭，外围 MSE hook 仍运行 |
 | MSE runtime | legacy owner | 有增量 spool 思路，但没有专项差分、输出和稳定性测试 |
-| HLS engine | pure parser/pipeline slices + legacy pipeline + partial authority transport | 纯 port 已接管 manifest parse facade，并用 fixture 覆盖同一资源隐式 BYTERANGE offset、初始/增量 discontinuity sequence、map/key，以及 PNG/JPEG 伪装分片前缀剔除；计划下载和 live 录制的已捕获 manifest/分片/key/map 已优先走当前 tab authority；cache fallback、pipeline wiring、完整 parser 语义和 task owner 仍有明确缺口 |
+| HLS engine | pure parser/pipeline slices + legacy pipeline + partial authority transport | 纯 port 已接管 manifest parse facade，并用 fixture 覆盖同一资源隐式 BYTERANGE offset、初始/增量 discontinuity sequence、map/key，以及 PNG/JPEG 伪装分片前缀剔除；计划下载和 live 录制的已捕获 manifest/分片/key/map 已优先走当前 tab authority；本地 HLS 分片链已接入可选预处理，但一次性 cache fallback、完整 parser 语义和 task owner 仍有明确缺口 |
 | DASH engine | legacy owner + partial authority transport | 计划下载的已捕获 init/media 分片已优先走当前 tab authority；手写 parser 对负 repeat、多 BaseURL、动态 MPD 等语义仍不完整 |
 | transfer engine | multiple owners | 并发/重试代码可复用评估，但没有统一 task/cancel/cleanup owner |
 | output integration | mixed: opaque resource authority + legacy HLS/DASH/drag/toolkit paths | external-tool、inspection、普通资源下载、已捕获页面拖拽和 HLS/DASH 计划分片传输已接入 main-owned authority；data/blob、未捕获资源和多资源 fallback 仍走旧链；HLS/DASH 直拉、派生字幕 URL、process terminal、m3u8dl encoding、本地保存、ffmpeg、资料库导入与统一任务合同仍待迁移 |
@@ -35,7 +35,7 @@
 4. TextDecoder inline manifest hook 缺失。
 5. JSON 深度/宽度/cycle 语义未与上游对齐。
 6. Worker Blob CSP 异步失败回退不等价。
-7. HLS 隐式 BYTERANGE offset、初始 discontinuity sequence 和 PNG/JPEG 伪装分片剔除已在纯 port/fixture 中覆盖，但 pipeline wiring、完整 parser/output 差分和一次性 cache fallback 仍缺失。
+7. HLS 隐式 BYTERANGE offset、初始 discontinuity sequence 和 PNG/JPEG 伪装分片剔除已在纯 port/fixture 中覆盖，本地分片下载也已接入预处理，但完整 parser/output 差分和一次性 cache fallback 仍缺失。
 8. MPD `r=-1`、多 BaseURL、动态 timeline/range 不完整。
 9. ffmpeg、HLS/DASH、直播、普通下载和 temp 没有统一 task registry。
 10. 目前有 31 个 active pure contract、fixture、fake Electron integration 或 loopback redirect test ID；main composition、持久化捕捉设置热更新、下一文档 token 路由、main-only probe key 解析与下载、检查、probe 动作、external-tool target consumer、已捕获页面拖拽暂存和 HLS/DASH 计划/live 分片 authority transport 已有 owner/opaque authority 证据，普通资源下载和 inspection 已有 production IPC 入口；页面拖拽 fallback、HLS parser 完整标签语义/直拉/track、旧 toolkit 及完整 unit cutover 仍无 production cutover 证据。

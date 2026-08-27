@@ -1849,6 +1849,7 @@ export function createEmbeddedBrowserMainController(
       workDirectoryPath = await mkdtemp(path.join(os.tmpdir(), 'omniflow-hls-download-'))
       const localDownloadResult = await downloadEmbeddedBrowserHlsToLocalWorkDirectory({
         fetch: createEmbeddedBrowserCapturedResourceFetch(normalizedTabId, resourceId),
+        preprocessFragments: true,
         onEvent: (event) => {
           if (event.failedFragments?.length) {
             latestFailedFragments = event.failedFragments
@@ -2329,6 +2330,7 @@ export function createEmbeddedBrowserMainController(
         fetch: createEmbeddedBrowserCapturedResourceFetch(normalizedTabId, session.resourceId),
         fragmentIndexes: session.failedFragments.map((value) => value - 1).filter((value) => value >= 0),
         manualKeyBase64: session.manualKeyBase64,
+        preprocessFragments: true,
         onEvent: (event) => {
           if (event.failedFragments?.length) {
             latestFailedFragments = event.failedFragments

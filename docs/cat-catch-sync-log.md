@@ -353,6 +353,20 @@
 - legacy cleanup: 无；`embeddedBrowserHlsLocalDownloaderService` 继续是生产 owner，直到 pipeline 证据完成。
 - validation: preprocessing fixture 1/1、TypeScript、定向 lint、`cat-catch:validate` 和同步校验 16/16 通过；未运行会覆盖其他 Agent `dist-electron/**` 的 build，也未做真实页面验证。
 
+## 2026-08-27: same target (HLS fragment preprocessing pipeline wiring)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动。
+- reviewedThrough / portedThrough: 均保持 `null`；本步把纯预处理接入本地 HLS 分片下载生命周期，仍未完成 hls-engine cutover。
+- change groups: `platform-adaptation`（下载器注入可选 buffer processor，保留 rawBuffer 原始事件并在顺序输出前处理）。
+- affected capability IDs: `hls.cache-fallback-disguised-fragments` 保持 `porting`；`hls.decrypt-preprocess-order` 仍待实现。
+- fixtures/tests: 扩展 `embeddedBrowserFragmentDownloader.test.ts#raw-bytes-before-processed-output`，覆盖原始字节事件与顺序输出字节的边界；纯 preprocessing fixture 继续有效。
+- accepted difference: `preprocessFragments` 默认关闭；当前 local-plan、failed-fragment retry 和 live recorder 路径显式开启，直拉 ffmpeg 路径不变。
+- excluded changes and reasons: 不在本步实现一次性 manifest cache fallback、AES 解密顺序、统一 task/cleanup 或旧 downloader 删除。
+- unresolved gaps: cache fallback 入口的完整语义、preprocess/decrypt 顺序、HLS output smoke、统一 task/cleanup 和 production-equivalent page validation。
+- runtime changes: `EmbeddedBrowserFragmentDownloader` 新增可选异步 `bufferProcessor`；`downloadEmbeddedBrowserHlsToLocalWorkDirectory` 增加 `preprocessFragments`，在 rawBuffer 之后调用 `preprocessFragment`，写盘和 sequentialPush 使用处理后 buffer。
+- legacy cleanup: 无；现有 downloader 仍是生产 owner，尚未切换或删除旧实现。
+- validation: 定向 Vitest 5/5、TypeScript、定向 ESLint、`cat-catch:validate` 和同步校验 16/16 通过；未运行会覆盖其他 Agent `dist-electron/**` 的 build，也未做真实页面手工验证。
+
 ## Template
 
 ```markdown

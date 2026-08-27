@@ -961,7 +961,7 @@
         "electron/service/embedded-browser/cat-catch-port/hls/pipeline.ts#preprocessFragment"
       ],
       "relationToUpstream": "exact",
-      "syncState": "pending",
+      "syncState": "porting",
       "syncedThrough": null,
       "plannedTestIds": [
         "hls.cache-fallback-disguised",
@@ -971,7 +971,7 @@
         "electron/service/embedded-browser/cat-catch-port/hls/pipeline.test.ts#hls.cache-fallback-disguised"
       ],
       "acceptedDifferences": [],
-      "notes": "The pure port now preserves Cat Catch's conservative PNG/JPEG prefix removal with an unchanged-buffer fallback for incomplete signatures. One-shot manifest cache fallback, pipeline wiring, and decrypt/preprocess ordering remain open."
+      "notes": "The pure port preserves Cat Catch's conservative PNG/JPEG prefix removal with an unchanged-buffer fallback for incomplete signatures. The local HLS fragment downloader now optionally applies it after rawBuffer emission and before sequential output; current local-plan and live-recording paths enable the option. One-shot manifest cache fallback, decrypt/preprocess ordering, and production-equivalent HLS output verification remain open."
     },
     {
       "id": "dash.parser-planner",

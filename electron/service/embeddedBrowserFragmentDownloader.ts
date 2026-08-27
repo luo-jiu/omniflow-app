@@ -67,7 +67,13 @@ export type EmbeddedBrowserFragmentFetch = (
   init?: RequestInit,
 ) => Promise<Response>
 
+export type EmbeddedBrowserFragmentBufferProcessor = (
+  buffer: ArrayBuffer,
+  fragment: EmbeddedBrowserDownloadFragment,
+) => ArrayBuffer | Promise<ArrayBuffer>
+
 type EmbeddedBrowserFragmentDownloaderOptions = {
+  bufferProcessor?: EmbeddedBrowserFragmentBufferProcessor
   fetch?: EmbeddedBrowserFragmentFetch
   fragments?: EmbeddedBrowserDownloadFragment[]
   headers?: Record<string, string>
@@ -192,6 +198,8 @@ export class EmbeddedBrowserFragmentDownloader {
 
   private readonly fetchImpl: EmbeddedBrowserFragmentFetch
 
+  private readonly bufferProcessor?: EmbeddedBrowserFragmentBufferProcessor
+
   private maxRetries: number
 
   private pendingQueue: EmbeddedBrowserFragmentDownloadTask[]
@@ -201,6 +209,7 @@ export class EmbeddedBrowserFragmentDownloader {
     this.thread = Math.max(1, Number(options?.thread || 6))
     this.maxRetries = Math.max(0, Number(options?.maxRetries || 2))
     this.fetchImpl = options?.fetch || ((input, init) => fetch(input, init))
+    this.bufferProcessor = options?.bufferProcessor
     this.headers = options?.headers
     this.allFragments = []
     this.fragmentsInternal = []
@@ -420,8 +429,11 @@ export class EmbeddedBrowserFragmentDownloader {
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`)
       }
-      const buffer = await readResponseBuffer(response, fragment, this.emit.bind(this))
-      this.emit('rawBuffer', buffer, fragment)
+      const rawBuffer = await readResponseBuffer(response, fragment, this.emit.bind(this))
+      this.emit('rawBuffer', rawBuffer, fragment)
+      const buffer = this.bufferProcessor
+        ? await this.bufferProcessor(rawBuffer, fragment)
+        : rawBuffer
       this.buffer[fragment.index] = buffer
       this.success += 1
       this.buffersize += buffer.byteLength

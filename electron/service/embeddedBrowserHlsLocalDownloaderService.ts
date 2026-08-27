@@ -5,8 +5,10 @@ import {
   EmbeddedBrowserFragmentDownloader,
   type EmbeddedBrowserDownloadByteRange,
   type EmbeddedBrowserDownloadFragment,
+  type EmbeddedBrowserFragmentBufferProcessor,
   type EmbeddedBrowserFragmentFetch,
 } from './embeddedBrowserFragmentDownloader'
+import { preprocessFragment } from './embedded-browser/cat-catch-port/hls/pipeline'
 
 export type EmbeddedBrowserHlsLocalDownloadKeyRef = {
   iv?: string
@@ -39,6 +41,8 @@ export type EmbeddedBrowserHlsLocalDownloadPlan = {
 }
 
 export type EmbeddedBrowserHlsLocalDownloadRequest = {
+  /** Cat Catch cache-fallback compatibility for image-prefixed media bytes. */
+  preprocessFragments?: boolean
   fetch?: EmbeddedBrowserFragmentFetch
   fragmentIndexes?: number[]
   manualKeyBase64?: string
@@ -505,6 +509,9 @@ export async function downloadEmbeddedBrowserHlsToLocalWorkDirectory(
     : 0
 
   const downloader = new EmbeddedBrowserFragmentDownloader({
+    bufferProcessor: request.preprocessFragments
+      ? (preprocessFragment as EmbeddedBrowserFragmentBufferProcessor)
+      : undefined,
     fetch: request.fetch,
     fragments: fragmentsToDownload,
     headers: plan.headers,
