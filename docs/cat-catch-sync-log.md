@@ -703,6 +703,20 @@
 - legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
 - validation: 固定 hls.js oracle 输出 MAP `map.key/IV=0` 与 media sequence 7/8 的 `media.key/IV=7/8`；失败证据为 parser/local downloader 合计 18/20，实现后 20/20，完整 HLS Vitest 77/77、定向 ESLint、metadata 7 units/32 capabilities/192 anchors/106 cleanup entries/118 unique planned IDs/72 active refs 和 scoped diff check 通过。全局 TypeScript 仅被其他 Agent 的 `agent-orchestrator.test.ts` prepared-action 类型错误阻断；完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
 
+## 2026-08-27: same target (HLS master variant filtering)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动。
+- reviewedThrough / portedThrough: 均保持 `null`；本步闭合固定 hls.js master 普通 level/I-frame/混合未知 codec 的选择边界，仍未完成 hls-engine cutover。
+- change groups: `behavioral`（I-frame 不进入 Cat Catch 可选 `data.levels`、混合未知 codec level 过滤、无普通 level 拒绝）与 `dependency`（固定 hls.js 1.6.16 codec prefix 表）。
+- affected capability IDs: `hls.parser-planner` 保持 `ported-unverified`；新增 2 个 active test ID。
+- fixtures/tests: 新增 upstream-executable fixture `hls-master-variant-filtering`；`hls.master-variant-filtering` 锁定普通已知 codec level 与 audio rendition，并排除混入的未知 codec 和 I-frame URL；`hls.master-no-levels-rejection` 锁定 I-frame-only master 的 `manifestParsingError / no levels found in manifest`；既有变量 fixture 修正为不再把 I-frame URI 当普通 variant。
+- accepted difference: 固定 hls.js 在所有普通 level 都只有未知 codec 时会在后续 browser MediaSource 兼容阶段拒绝；OmniFlow pure parser 保留这些普通 level 给 ffmpeg execution boundary 尝试，不把 renderer codec 支持当作 main 执行权限。
+- excluded changes and reasons: 不在本步迁移 `SESSION-KEY`、content steering、daterange/program-date-time、delta playlist 或浏览器 MSE codec selection；它们属于独立 parser/runtime 行为，不能混入 master level 列表修正。
+- unresolved gaps: HLS 其余 master/media parser 标签与 key 差分、live 未捕获 URL 过渡 DTO、加密 fMP4/video 真实输出组合、真实网站手工验证和最终 hls-engine cutover。
+- runtime changes: pure parser 只从 `EXT-X-STREAM-INF` 生成普通 variant，使用固定 1.6.16 codec prefix 表执行 parse-time 混合过滤，并在非 media playlist 没有普通 level 时抛固定错误；renderer facade 与后续 variant 选择自动继承该结果，没有新增状态 owner 或 IPC。
+- legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
+- validation: 固定 `lib/hls.min.js@1.6.16` oracle 对混合 fixture 实际输出 1 个普通 level/1 个 audio track，对 I-frame-only fixture 输出 `manifestParsingError / no levels found in manifest`；失败证据为 parser 12/15 且 3 条预期差分失败，实现与边界测试后 parser 16/16、广义 HLS Vitest 80/80、全仓 ESLint、固定上游 validator、同步校验 16/16、metadata 7 units/32 capabilities/192 anchors/106 cleanup entries/120 unique planned IDs/74 active refs 和 scoped diff check 通过。全局 TypeScript 仅被其他 Agent 在途的 Shell/Agent preparation 与 orchestrator test 类型错误阻断；完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
+
 ## Template
 
 ```markdown

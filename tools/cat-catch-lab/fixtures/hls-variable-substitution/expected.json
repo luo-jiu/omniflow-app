@@ -6,8 +6,7 @@
     "root": "https://edge.example/assets/abc/123"
   },
   "variantUrls": [
-    "https://edge.example/assets/abc/123/video/index.m3u8?session=media%20query",
-    "https://edge.example/assets/abc/123/iframe/index.m3u8"
+    "https://edge.example/assets/abc/123/video/index.m3u8?session=media%20query"
   ],
   "rendition": {
     "groupId": "audio-abc/123",

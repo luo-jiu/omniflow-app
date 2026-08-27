@@ -1,0 +1,22 @@
+{
+  "fixtureId": "hls-master-variant-filtering",
+  "capabilityIds": [
+    "hls.parser-planner"
+  ],
+  "upstreamCommit": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
+  "status": "active",
+  "oracle": "upstream-executable",
+  "sourceRefs": [
+    "lib/hls.min.js#parseMasterPlaylist",
+    "js/m3u8.js#Hls.Events.MANIFEST_PARSED"
+  ],
+  "expected": "expected.json",
+  "inputs": {
+    "mixed": "mixed-codecs.m3u8",
+    "iframeOnly": "iframe-only.m3u8"
+  },
+  "testRefs": [
+    "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.master-variant-filtering",
+    "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.master-no-levels-rejection"
+  ]
+}

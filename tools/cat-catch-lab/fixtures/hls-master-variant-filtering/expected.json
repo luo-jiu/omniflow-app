@@ -1,0 +1,18 @@
+{
+  "baseUrl": "https://media.example/master/index.m3u8",
+  "iframeOnlyError": "no levels found in manifest",
+  "renditions": [
+    {
+      "groupId": "audio",
+      "name": "English",
+      "url": "https://media.example/master/audio/en.m3u8"
+    }
+  ],
+  "variants": [
+    {
+      "bandwidth": 1200000,
+      "codecs": "avc1.64001f,mp4a.40.2",
+      "url": "https://media.example/master/video/known.m3u8"
+    }
+  ]
+}

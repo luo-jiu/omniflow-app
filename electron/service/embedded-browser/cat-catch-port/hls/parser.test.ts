@@ -113,6 +113,21 @@ const encryptedMapExpected = JSON.parse(readFileSync(`${encryptedMapFixtureRoot}
   }>
 }
 
+const masterVariantFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-master-variant-filtering', import.meta.url))
+const masterVariantFixture = JSON.parse(readFileSync(`${masterVariantFixtureRoot}/fixture.json`, 'utf8')) as {
+  expected: string
+  inputs: {
+    iframeOnly: string
+    mixed: string
+  }
+}
+const masterVariantExpected = JSON.parse(readFileSync(`${masterVariantFixtureRoot}/${masterVariantFixture.expected}`, 'utf8')) as {
+  baseUrl: string
+  iframeOnlyError: string
+  renditions: Array<{ groupId: string; name: string; url: string }>
+  variants: Array<{ bandwidth: number; codecs: string; url: string }>
+}
+
 const variableFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-variable-substitution', import.meta.url))
 const variableFixture = JSON.parse(readFileSync(`${variableFixtureRoot}/fixture.json`, 'utf8')) as {
   expected: string
@@ -232,6 +247,41 @@ describe('Cat Catch HLS parser', () => {
       sequence: segment.sequence,
       url: segment.url,
     }))).toEqual(encryptedMapExpected.segments)
+  })
+
+  it('hls.master-variant-filtering', () => {
+    const manifest = parseHlsManifest({
+      baseUrl: masterVariantExpected.baseUrl,
+      text: readFileSync(`${masterVariantFixtureRoot}/${masterVariantFixture.inputs.mixed}`, 'utf8'),
+    })
+    expect(manifest.variants.map(variant => ({
+      bandwidth: variant.bandwidth,
+      codecs: variant.codecs,
+      url: variant.url,
+    }))).toEqual(masterVariantExpected.variants)
+    expect(manifest.renditions.map(rendition => ({
+      groupId: rendition.groupId,
+      name: rendition.name,
+      url: rendition.url,
+    }))).toEqual(masterVariantExpected.renditions)
+  })
+
+  it('hls.master-no-levels-rejection', () => {
+    expect(() => parseHlsManifest({
+      baseUrl: masterVariantExpected.baseUrl,
+      text: readFileSync(`${masterVariantFixtureRoot}/${masterVariantFixture.inputs.iframeOnly}`, 'utf8'),
+    })).toThrow(masterVariantExpected.iframeOnlyError)
+  })
+
+  it('keeps normal master variants when every codec set is unknown', () => {
+    const manifest = parseHlsManifest({
+      baseUrl: masterVariantExpected.baseUrl,
+      text: '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1,CODECS="future-video.1"\nfuture-video.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=2,CODECS="future-audio.1"\nfuture-audio.m3u8\n',
+    })
+    expect(manifest.variants.map(variant => variant.url)).toEqual([
+      'https://media.example/master/future-video.m3u8',
+      'https://media.example/master/future-audio.m3u8',
+    ])
   })
 
   it('hls.ll-parts-fragment-parity', () => {
@@ -367,7 +417,7 @@ describe('Cat Catch HLS parser', () => {
   it('substitutes each variable reference only once', () => {
     const manifest = parseHlsManifest({
       baseUrl: 'https://example.test/master.m3u8?literal=%7B%24root%7D',
-      text: '#EXTM3U\n#EXT-X-DEFINE:NAME="root",VALUE="real.m3u8"\n#EXT-X-DEFINE:QUERYPARAM="literal"\n#EXT-X-I-FRAME-STREAM-INF:BANDWIDTH=120000,URI="{$literal}"\n',
+      text: '#EXTM3U\n#EXT-X-DEFINE:NAME="root",VALUE="real.m3u8"\n#EXT-X-DEFINE:QUERYPARAM="literal"\n#EXT-X-STREAM-INF:BANDWIDTH=120000\n{$literal}\n',
     })
     expect(manifest.variants[0]?.uri).toBe('{$root}')
     expect(manifest.variants[0]?.url).toBe('https://example.test/%7B$root%7D')

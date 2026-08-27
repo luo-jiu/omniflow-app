@@ -130,6 +130,23 @@ const HLS_HEXADECIMAL_ATTRIBUTES = new Set([
   'SCTE35-OUT',
 ])
 
+// hls.js 1.6.16 src/utils/codecs.ts#sampleEntryCodesISO. Keep this list
+// pinned to the vendored parser instead of consulting runtime MediaSource:
+// Cat Catch first removes mixed-in unknown codec levels at parse time, while
+// browser codec support is a later, environment-specific decision.
+const HLS_KNOWN_CODEC_PREFIXES = new Set([
+  'a3ds', 'ac-3', 'ac-4', 'alac', 'alaw', 'dra1', 'dts+', 'dts-',
+  'dtsc', 'dtse', 'dtsh', 'ec-3', 'enca', 'fLaC', 'flac', 'FLAC',
+  'g719', 'g726', 'm4ae', 'mha1', 'mha2', 'mhm1', 'mhm2', 'mlpa',
+  'mp4a', 'raw ', 'Opus', 'opus', 'samr', 'sawb', 'sawp', 'sevc',
+  'sqcp', 'ssmv', 'twos', 'ulaw',
+  'avc1', 'avc2', 'avc3', 'avc4', 'avcp', 'av01', 'dav1', 'drac',
+  'dva1', 'dvav', 'dvh1', 'dvhe', 'encv', 'hev1', 'hvc1', 'mjp2',
+  'mp4v', 'mvc1', 'mvc2', 'mvc3', 'mvc4', 'resv', 'rv60', 's263',
+  'svc1', 'svc2', 'vc-1', 'vp08', 'vp09',
+  'stpp', 'wvtt',
+])
+
 function parseNumber(value?: string) {
   if (!value) return undefined
   const parsed = Number(value)
@@ -349,6 +366,11 @@ function createHlsVariant(
   }
 }
 
+function hasOnlyKnownHlsCodecs(variant: CatCatchHlsVariant) {
+  const codecs = String(variant.codecs || '').split(/[ ,]+/).filter(Boolean)
+  return codecs.every(codec => HLS_KNOWN_CODEC_PREFIXES.has(codec.slice(0, 4)))
+}
+
 function createHlsRendition(
   line: string,
   baseUrl: string,
@@ -559,11 +581,6 @@ export function parseHlsManifest(input: {
       pendingVariantLine = line
       continue
     }
-    if (line.startsWith('#EXT-X-I-FRAME-STREAM-INF')) {
-      const variant = createHlsVariant(line, undefined, baseUrl, variableState)
-      if (variant) variants.push(variant)
-      continue
-    }
     if (line.startsWith('#EXT-X-MEDIA:')) {
       renditions.push(createHlsRendition(line, baseUrl, variableState))
       continue
@@ -646,12 +663,30 @@ export function parseHlsManifest(input: {
   if (variableState.playlistParsingError) {
     throw variableState.playlistParsingError
   }
+
+  /**
+   * Upstream: xifangczy/cat-catch@2cb981d7c2f4614732edccc167c4b5793d1cb138
+   * Source: lib/hls.min.js#parseMasterPlaylist; js/m3u8.js#MANIFEST_PARSED
+   * Reason: Cat Catch's selectable data.levels excludes I-frame streams and,
+   * when at least one normal level has only recognized codecs, drops normal
+   * levels containing unknown codec identifiers.
+   * Adaptation: retain every normal level when all codec sets are unknown so
+   * the parser boundary stays independent from runtime MediaSource support.
+   * Fixture: hls-master-variant-filtering
+   */
+  const variantsWithKnownCodecs = variants.filter(hasOnlyKnownHlsCodecs)
+  if (variantsWithKnownCodecs.length > 0 && variantsWithKnownCodecs.length < variants.length) {
+    variants.splice(0, variants.length, ...variantsWithKnownCodecs)
+  }
   if (!variants.length && !segments.length) {
     // Upstream: xifangczy/cat-catch@2cb981d7c2f4614732edccc167c4b5793d1cb138
-    // Source: lib/hls.min.js#handlePlaylistLoaded; js/m3u8.js#LEVEL_LOADED
-    // Cat Catch never reaches parseTs when hls.js finds no complete fragment.
-    // PART-only live snapshots are therefore empty, not downloadable media.
-    throw new Error('No Segments found in Playlist')
+    // Source: lib/hls.min.js#parseMasterPlaylist/handlePlaylistLoaded
+    // Cat Catch rejects a master with no normal levels and never reaches
+    // parseTs for media with no complete fragment. I-frame-only masters and
+    // PART-only live snapshots therefore cannot become executable plans.
+    throw new Error(hasMediaPlaylistSyntax
+      ? 'No Segments found in Playlist'
+      : 'no levels found in manifest')
   }
 
   const durationSeconds = segments.reduce((total, segment) => total + segment.duration, 0)
