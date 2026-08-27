@@ -396,21 +396,24 @@ function createHlsRendition(
   line: string,
   baseUrl: string,
   variableState: HlsVariableState,
-): CatCatchHlsRendition {
+): CatCatchHlsRendition | null {
   const attributes = parseHlsAttributeListWithVariables(getTagValue(line), variableState)
+  const type = attributes.TYPE
+  if (type !== 'AUDIO' && type !== 'SUBTITLES') return null
   const uri = attributes.URI
+  const language = attributes.LANGUAGE
   return {
-    autoselect: parseBoolean(attributes.AUTOSELECT),
-    default: parseBoolean(attributes.DEFAULT),
-    forced: parseBoolean(attributes.FORCED),
-    groupId: attributes['GROUP-ID'],
-    language: attributes.LANGUAGE,
-    name: attributes.NAME,
+    autoselect: parseBoolean(attributes.AUTOSELECT) || false,
+    default: parseBoolean(attributes.DEFAULT) || false,
+    forced: parseBoolean(attributes.FORCED) || false,
+    groupId: attributes['GROUP-ID'] || '',
+    language,
+    name: attributes.NAME || language || '',
     rawAttributes: attributes,
     rawLine: line,
-    type: attributes.TYPE,
+    type,
     uri,
-    url: uri ? resolveHlsUrl(uri, baseUrl) : undefined,
+    url: uri ? resolveHlsUrl(uri, baseUrl) : '',
   }
 }
 
@@ -664,7 +667,8 @@ export function parseHlsManifest(input: {
       continue
     }
     if (line.startsWith('#EXT-X-MEDIA:')) {
-      renditions.push(createHlsRendition(line, baseUrl, variableState))
+      const rendition = createHlsRendition(line, baseUrl, variableState)
+      if (rendition) renditions.push(rendition)
       continue
     }
     if (line.startsWith('#EXT-X-MEDIA-SEQUENCE')) {

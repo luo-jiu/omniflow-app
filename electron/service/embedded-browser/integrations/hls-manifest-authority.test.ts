@@ -210,4 +210,25 @@ describe('HLS manifest authority', () => {
     })).resolves.toBeUndefined()
     expect(fetchImpl).toHaveBeenCalledTimes(2)
   })
+
+  it('hls.master-rendition-authority', async () => {
+    const masterPlaylist = readFileSync(
+      new URL('../../../../tools/cat-catch-lab/fixtures/hls-master-rendition-projection/master.m3u8', import.meta.url),
+      'utf8',
+    )
+    const fetchImpl = vi.fn(async () => new Response(masterPlaylist))
+    const harness = createHarness(fetchImpl)
+
+    await expect(resolveHlsLiveParentVariableList(harness.access, {
+      selectedManifestUrl: 'https://origin.example/audio/en.m3u8',
+      sourceResourceId: harness.masterResourceId,
+      tabId: 'tab-1',
+    })).resolves.toBeUndefined()
+    await expect(resolveHlsLiveParentVariableList(harness.access, {
+      selectedManifestUrl: 'https://origin.example/cc/weird.m3u8',
+      sourceResourceId: harness.masterResourceId,
+      tabId: 'tab-1',
+    })).rejects.toThrow('所选直播 playlist 不属于当前 captured master')
+    expect(fetchImpl).toHaveBeenCalledTimes(2)
+  })
 })

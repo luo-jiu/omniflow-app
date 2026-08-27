@@ -1,0 +1,34 @@
+{
+  "renditions": [
+    {
+      "autoselect": true,
+      "default": true,
+      "forced": false,
+      "groupId": "aud",
+      "language": "en",
+      "name": "English",
+      "type": "AUDIO",
+      "url": "https://media.example/master/audio/en.m3u8"
+    },
+    {
+      "autoselect": false,
+      "default": false,
+      "forced": false,
+      "groupId": "aud",
+      "language": "fr",
+      "name": "fr",
+      "type": "AUDIO",
+      "url": ""
+    },
+    {
+      "autoselect": false,
+      "default": false,
+      "forced": true,
+      "groupId": "sub",
+      "language": "es",
+      "name": "es",
+      "type": "SUBTITLES",
+      "url": "https://media.example/master/sub/es.m3u8"
+    }
+  ]
+}

@@ -781,6 +781,8 @@
         "hls.encrypted-map-key-context",
         "hls.master-variant-filtering",
         "hls.master-no-levels-rejection",
+        "hls.master-rendition-projection",
+        "hls.master-rendition-authority",
         "hls.key-support-inheritance",
         "hls.delta-playlist-rejection",
         "hls.media-playlist-singleton-tag-rejection"
@@ -797,6 +799,8 @@
         "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.encrypted-map-key-context",
         "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.master-variant-filtering",
         "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.master-no-levels-rejection",
+        "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.master-rendition-projection",
+        "electron/service/embedded-browser/integrations/hls-manifest-authority.test.ts#hls.master-rendition-authority",
         "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.key-support-inheritance",
         "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.delta-playlist-rejection",
         "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.media-playlist-singleton-tag-rejection"

@@ -759,6 +759,20 @@
 - legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
 - validation: 固定 vendor executable oracle 对四类重复输入分别输出对应 `levelParsingError` reason，并对三类允许输入进入 `LEVEL_LOADED`；失败证据为 parser 18/19，实现与前缀顺序 review 后 parser 19/19、广义 HLS/inspection/projection Vitest 84/84、全仓 ESLint、`cat-catch:validate`、同步校验 16/16、fixture JSON、metadata 7 units/32 capabilities/192 anchors/106 cleanup entries/123 unique planned IDs/77 active refs 和 scoped diff check 通过。全量 Vitest 为 1089 passed / 1 skipped / 16 sandbox-only loopback failures，4 个相关 loopback 文件在允许监听本机端口的环境复跑 20/20，通过后折算全部可执行测试为 1105 passed / 1 skipped；Node 专用同步 validator 被 Vitest 收集后另报告 no suite。全局 TypeScript 只被其他 Agent 在途的 Shell preparation 与 Agent orchestrator test 类型错误阻断；完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
 
+## 2026-08-28: same target (HLS master rendition projection)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动。
+- reviewedThrough / portedThrough: 均保持 `null`；本步闭合固定 hls.js 1.6.16 到 Cat Catch `MANIFEST_PARSED` 的 audio/subtitle rendition 投影，并约束 captured master child authority，仍未完成 hls-engine cutover。
+- change groups: `behavioral`（AUDIO/SUBTITLES 过滤与字段默认值）和 `security`（非下载 rendition URL 不获得 parent authority）。
+- affected capability IDs: `hls.parser-planner` 保持 `ported-unverified`；新增 2 个 active test ID。
+- fixtures/tests: 新增 upstream-executable fixture `hls-master-rendition-projection`；`hls.master-rendition-projection` 覆盖有效 AUDIO/SUBTITLES、embedded audio 空 URL、NAME 回退 LANGUAGE、boolean 默认值，以及 CLOSED-CAPTIONS/未知/缺失/小写 TYPE 排除；`hls.master-rendition-authority` 证明合法 AUDIO child 可通过而 captions URI 被拒绝。
+- accepted difference: 无。DTO 的 `language` 对应上游 track `lang`，其余被消费字段逐项相同。
+- excluded changes and reasons: 不迁移 `data.captions`、音轨 codec 猜测、content steering clone 或播放 track controller；Cat Catch 当前下载 UI 只消费 `data.audioTracks` / `data.subtitleTracks`，OmniFlow child authority 也只应覆盖实际可选 manifest URL。
+- unresolved gaps: HLS 其余 master/media parser 标签差分、内嵌 main audio 合成轨的产品取舍、真正有 previous snapshot 的 delta recording、live 未捕获 URL 过渡 DTO、加密 fMP4/video 真实输出组合、真实网站手工验证和最终 hls-engine cutover。
+- runtime changes: pure parser 只投影大小写精确的 AUDIO/SUBTITLES rendition；合法无 URI 音轨保留 `url=""`，缺失 NAME 回退 LANGUAGE，缺失布尔字段归一为 false。live parent resolver 自动继承过滤结果，没有新增 authority 状态源。
+- legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
+- validation: 固定 vendor executable oracle 输出 2 条 AUDIO 与 1 条 SUBTITLES，排除 4 条其他 EXT-X-MEDIA；失败证据为 parser 19/20，实现后 parser 20/20、parser/authority 24/24、广义 HLS/inspection/projection Vitest 86/86、全仓 ESLint、TypeScript、`cat-catch:validate`、同步校验 16/16、fixture JSON、metadata 7 units/32 capabilities/192 anchors/106 cleanup entries/125 unique planned IDs/79 active refs 和 scoped diff check 通过。全量 Vitest 为 1091 passed / 1 skipped / 16 sandbox-only loopback failures，4 个相关 loopback 文件在允许监听本机端口的环境复跑 20/20，通过后折算全部可执行测试为 1107 passed / 1 skipped；Node 专用同步 validator 被 Vitest 收集后另报告 no suite。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
+
 ## Template
 
 ```markdown

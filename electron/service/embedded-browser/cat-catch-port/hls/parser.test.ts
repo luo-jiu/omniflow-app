@@ -149,6 +149,24 @@ const masterVariantExpected = JSON.parse(readFileSync(`${masterVariantFixtureRoo
   variants: Array<{ bandwidth: number; codecs: string; url: string }>
 }
 
+const masterRenditionFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-master-rendition-projection', import.meta.url))
+const masterRenditionFixture = JSON.parse(readFileSync(`${masterRenditionFixtureRoot}/fixture.json`, 'utf8')) as {
+  expected: string
+  input: string
+}
+const masterRenditionExpected = JSON.parse(readFileSync(`${masterRenditionFixtureRoot}/${masterRenditionFixture.expected}`, 'utf8')) as {
+  renditions: Array<{
+    autoselect: boolean
+    default: boolean
+    forced: boolean
+    groupId: string
+    language?: string
+    name: string
+    type: string
+    url: string
+  }>
+}
+
 const keySupportFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-key-support-boundary', import.meta.url))
 const keySupportFixture = JSON.parse(readFileSync(`${keySupportFixtureRoot}/fixture.json`, 'utf8')) as {
   expected: string
@@ -311,6 +329,23 @@ describe('Cat Catch HLS parser', () => {
       baseUrl: masterVariantExpected.baseUrl,
       text: readFileSync(`${masterVariantFixtureRoot}/${masterVariantFixture.inputs.iframeOnly}`, 'utf8'),
     })).toThrow(masterVariantExpected.iframeOnlyError)
+  })
+
+  it('hls.master-rendition-projection', () => {
+    const manifest = parseHlsManifest({
+      baseUrl: 'https://media.example/master/index.m3u8',
+      text: readFileSync(`${masterRenditionFixtureRoot}/${masterRenditionFixture.input}`, 'utf8'),
+    })
+    expect(manifest.renditions.map(rendition => ({
+      autoselect: rendition.autoselect,
+      default: rendition.default,
+      forced: rendition.forced,
+      groupId: rendition.groupId,
+      language: rendition.language,
+      name: rendition.name,
+      type: rendition.type,
+      url: rendition.url,
+    }))).toEqual(masterRenditionExpected.renditions)
   })
 
   it('hls.key-support-inheritance', () => {
