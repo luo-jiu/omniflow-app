@@ -689,6 +689,20 @@
 - legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
 - validation: 固定 vendor 对同一 fixture 实际输出 sequence 7/8/9 对应 `IV 07/08/2a`；失败证据为 parser/local downloader 合计 16/18 且两条预期差分失败，实现后 18/18、完整 HLS Vitest 75/75（clear、显式 IV AES-128、隐式 IV AES-128 的真实 ffmpeg/ffprobe output 均实际执行）、全仓 ESLint、固定上游 validator、同步校验 16/16、metadata 7 units/32 capabilities/192 anchors/106 cleanup entries/116 unique planned IDs/70 active refs 和 scoped diff check 通过。全局 TypeScript 仅被其他 Agent 在途的 Shell Provider / Agent prepared-action 测试类型错误阻断；全量 Vitest 为 1030 passed / 1 skipped / 22 failed，其中 16 条是 sandbox-only loopback 监听失败，另 5 条来自 Shell Provider registry、1 条来自 Agent orchestrator，Node 专用同步 validator 被 Vitest 收集后另报告 no suite。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
 
+## 2026-08-27: same target (encrypted HLS map key context)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动。
+- reviewedThrough / portedThrough: 均保持 `null`；本步闭合 AES-128 `EXT-X-MAP` 声明时的独立 key/IV context，仍未完成 hls-engine cutover。
+- change groups: `behavioral`（MAP 捕获声明时 key，缺省 IV 使用 sequence zero）与 `platform-adaptation`（本地 playlist 按播放状态重放 MAP/media key）。
+- affected capability IDs: `hls.parser-planner` 保持 `ported-unverified`；`hls.segment-pipeline` 保持 `porting`。
+- fixtures/tests: 新增 upstream-executable fixture `hls-encrypted-map-key-context`；`hls.encrypted-map-key-context` 锁定 MAP 使用 `map.key/IV=0`、media sequence 7/8 使用 `media.key/IV=7/8`；`hls.encrypted-map-local-playlist-key-order` 锁定 `MAP key -> EXT-X-MAP -> media key -> EXTINF`，且 key/map 文件仍按资源去重。
+- accepted difference: Cat Catch 由固定 hls.js fragment/initSegment decryptdata 保留上述上下文；OmniFlow 将等价状态固化进 DTO 和本地 playlist，仍由唯一 ffmpeg owner 解密/remux。
+- excluded changes and reasons: 固定 Cat Catch 对 `EXT-X-SKIP` 的原始 fragments 可含 `null` 占位，而其 `parseTs` 未处理；本步不自创 delta playlist 行为，也不扩展 SAMPLE-AES/DRM、session key、视频加密组合或其他 parser 标签。
+- unresolved gaps: HLS 其余 parser/key 标签差分、live 未捕获 URL 过渡 DTO、加密 fMP4/video 真实输出组合、真实网站手工验证和最终 hls-engine cutover。
+- runtime changes: pure parser 在创建 MAP 时克隆当时的 key，并为缺省 IV 的 AES-128 MAP 固化 zero IV；download plan 与本地 downloader 传递 MAP key，在 MAP 与 media 状态切换处输出对应 `EXT-X-KEY`。
+- legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
+- validation: 固定 hls.js oracle 输出 MAP `map.key/IV=0` 与 media sequence 7/8 的 `media.key/IV=7/8`；失败证据为 parser/local downloader 合计 18/20，实现后 20/20，完整 HLS Vitest 77/77、定向 ESLint、metadata 7 units/32 capabilities/192 anchors/106 cleanup entries/118 unique planned IDs/72 active refs 和 scoped diff check 通过。全局 TypeScript 仅被其他 Agent 的 `agent-orchestrator.test.ts` prepared-action 类型错误阻断；完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
+
 ## Template
 
 ```markdown

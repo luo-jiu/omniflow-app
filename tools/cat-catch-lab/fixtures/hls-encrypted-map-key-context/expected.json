@@ -1,0 +1,35 @@
+{
+  "baseUrl": "https://media.example/encrypted-map/playlist.m3u8",
+  "maps": [
+    {
+      "iv": "0x00000000000000000000000000000000",
+      "keyUrl": "https://media.example/encrypted-map/map.key",
+      "method": "AES-128",
+      "url": "https://media.example/encrypted-map/init.mp4"
+    }
+  ],
+  "segments": [
+    {
+      "iv": "0x00000000000000000000000000000007",
+      "keyUrl": "https://media.example/encrypted-map/media.key",
+      "mapIv": "0x00000000000000000000000000000000",
+      "mapKeyUrl": "https://media.example/encrypted-map/map.key",
+      "sequence": 7,
+      "url": "https://media.example/encrypted-map/segment-7.m4s"
+    },
+    {
+      "iv": "0x00000000000000000000000000000008",
+      "keyUrl": "https://media.example/encrypted-map/media.key",
+      "mapIv": "0x00000000000000000000000000000000",
+      "mapKeyUrl": "https://media.example/encrypted-map/map.key",
+      "sequence": 8,
+      "url": "https://media.example/encrypted-map/segment-8.m4s"
+    }
+  ],
+  "localKeyLines": [
+    "#EXT-X-KEY:METHOD=AES-128,URI=\"keys/key-001.key\",IV=0x00000000000000000000000000000000",
+    "#EXT-X-KEY:METHOD=AES-128,URI=\"keys/key-002.key\",IV=0x00000000000000000000000000000007",
+    "#EXT-X-KEY:METHOD=AES-128,URI=\"keys/key-002.key\",IV=0x00000000000000000000000000000008"
+  ],
+  "localMapLine": "#EXT-X-MAP:URI=\"maps/map-001.mp4\""
+}

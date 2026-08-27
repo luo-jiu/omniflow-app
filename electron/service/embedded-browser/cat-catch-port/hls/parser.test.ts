@@ -94,6 +94,25 @@ const aesIvExpected = JSON.parse(readFileSync(`${aesIvFixtureRoot}/${aesIvFixtur
   segments: Array<{ iv: string; keyUrl: string; sequence: number; url: string }>
 }
 
+const encryptedMapFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-encrypted-map-key-context', import.meta.url))
+const encryptedMapFixture = JSON.parse(readFileSync(`${encryptedMapFixtureRoot}/fixture.json`, 'utf8')) as {
+  expected: string
+  input: string
+}
+const encryptedMapPlaylist = readFileSync(`${encryptedMapFixtureRoot}/${encryptedMapFixture.input}`, 'utf8')
+const encryptedMapExpected = JSON.parse(readFileSync(`${encryptedMapFixtureRoot}/${encryptedMapFixture.expected}`, 'utf8')) as {
+  baseUrl: string
+  maps: Array<{ iv: string; keyUrl: string; method: string; url: string }>
+  segments: Array<{
+    iv: string
+    keyUrl: string
+    mapIv: string
+    mapKeyUrl: string
+    sequence: number
+    url: string
+  }>
+}
+
 const variableFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-variable-substitution', import.meta.url))
 const variableFixture = JSON.parse(readFileSync(`${variableFixtureRoot}/fixture.json`, 'utf8')) as {
   expected: string
@@ -192,6 +211,27 @@ describe('Cat Catch HLS parser', () => {
       sequence: segment.sequence,
       url: segment.url,
     }))).toEqual(aesIvExpected.segments)
+  })
+
+  it('hls.encrypted-map-key-context', () => {
+    const manifest = parseHlsManifest({
+      baseUrl: encryptedMapExpected.baseUrl,
+      text: encryptedMapPlaylist,
+    })
+    expect(manifest.maps.map(map => ({
+      iv: map.key?.iv,
+      keyUrl: map.key?.url,
+      method: map.key?.method,
+      url: map.url,
+    }))).toEqual(encryptedMapExpected.maps)
+    expect(manifest.segments.map(segment => ({
+      iv: segment.key?.iv,
+      keyUrl: segment.key?.url,
+      mapIv: segment.map?.key?.iv,
+      mapKeyUrl: segment.map?.key?.url,
+      sequence: segment.sequence,
+      url: segment.url,
+    }))).toEqual(encryptedMapExpected.segments)
   })
 
   it('hls.ll-parts-fragment-parity', () => {

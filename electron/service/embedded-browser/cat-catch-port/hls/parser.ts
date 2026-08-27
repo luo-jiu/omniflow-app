@@ -34,6 +34,7 @@ export type CatCatchHlsKey = {
 
 export type CatCatchHlsMap = {
   byteRange?: CatCatchHlsByteRange
+  key?: CatCatchHlsKey
   rawAttributes: CatCatchHlsAttributeMap
   rawLine: string
   uri: string
@@ -305,6 +306,7 @@ function createHlsKey(
 function createHlsMap(
   line: string,
   baseUrl: string,
+  currentKey: CatCatchHlsKey | undefined,
   variableState: HlsVariableState,
 ): CatCatchHlsMap | null {
   const attributes = parseHlsAttributeListWithVariables(getTagValue(line), variableState)
@@ -313,6 +315,7 @@ function createHlsMap(
   const url = resolveHlsUrl(uri, baseUrl)
   return {
     byteRange: resolveByteRange(parseHlsByteRange(attributes.BYTERANGE)),
+    key: resolveHlsKeyForSequence(currentKey, 0),
     rawAttributes: attributes,
     rawLine: line,
     uri,
@@ -430,12 +433,12 @@ function createHlsDefaultIvHex(sequence: number) {
 /**
  * Upstream: xifangczy/cat-catch@2cb981d7c2f4614732edccc167c4b5793d1cb138
  * Source: lib/hls.min.js#LevelKey.getDecryptData and createInitializationVector
- * Reason: every AES-128 fragment without an explicit IV uses its own media
- * sequence encoded as a 16-byte big-endian IV.
+ * Reason: every AES-128 media fragment without an explicit IV uses its media
+ * sequence, while hls.js resolves an EXT-X-MAP init segment with sequence zero.
  * Adaptation: expose the effective IV as the existing hexadecimal DTO string.
- * Fixture: hls-aes128-iv-semantics
+ * Fixtures: hls-aes128-iv-semantics, hls-encrypted-map-key-context
  */
-function resolveHlsSegmentKey(
+function resolveHlsKeyForSequence(
   key: CatCatchHlsKey | undefined,
   sequence: number,
 ) {
@@ -500,7 +503,14 @@ export function parseHlsManifest(input: {
   }
 
   function rememberMap(map: CatCatchHlsMap) {
-    maps.set(`${map.url}:${map.byteRange?.raw || ''}:${map.byteRange?.offset ?? ''}`, map)
+    maps.set([
+      map.url,
+      map.byteRange?.raw || '',
+      map.byteRange?.offset ?? '',
+      map.key?.method || '',
+      map.key?.url || '',
+      map.key?.iv || '',
+    ].join(':'), map)
   }
 
   function addSegment(uri: string, part: boolean, byteRange = pendingByteRange) {
@@ -515,7 +525,7 @@ export function parseHlsManifest(input: {
       discontinuitySequence,
       duration: pendingSegment?.duration || 0,
       index,
-      key: resolveHlsSegmentKey(currentKey, sequence),
+      key: resolveHlsKeyForSequence(currentKey, sequence),
       map: currentMap,
       part,
       sequence,
@@ -591,7 +601,7 @@ export function parseHlsManifest(input: {
       continue
     }
     if (line.startsWith('#EXT-X-MAP')) {
-      const map = createHlsMap(line, baseUrl, variableState)
+      const map = createHlsMap(line, baseUrl, currentKey, variableState)
       if (map) {
         currentMap = map
         rememberMap(map)

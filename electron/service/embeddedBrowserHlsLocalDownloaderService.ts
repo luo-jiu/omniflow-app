@@ -19,6 +19,7 @@ export type EmbeddedBrowserHlsLocalDownloadKeyRef = {
 
 export type EmbeddedBrowserHlsLocalDownloadMapRef = {
   byteRange?: EmbeddedBrowserDownloadByteRange
+  key?: EmbeddedBrowserHlsLocalDownloadKeyRef
   url: string
 }
 
@@ -367,8 +368,38 @@ function buildLocalPlaylist(input: {
 
   let previousDiscontinuity = input.fragments[0]?.discontinuitySequence ?? 0
   let previousKeyStateKey = ''
-  let previousMapCacheKey = ''
+  let previousMapStateKey = ''
   let hadKey = false
+
+  function getKeyIdentity(key: EmbeddedBrowserHlsLocalDownloadKeyRef | undefined) {
+    if (!key) return { refCacheKey: '', stateKey: '' }
+    const refCacheKey = createKeyRefCacheKey({
+      manualKeyBase64: input.manualKeyBase64,
+      method: key.method,
+      url: key.url,
+    })
+    return {
+      refCacheKey,
+      stateKey: `${refCacheKey}|${key.iv || ''}|${key.keyFormat || ''}`,
+    }
+  }
+
+  function appendKeyTransition(
+    key: EmbeddedBrowserHlsLocalDownloadKeyRef | undefined,
+    fragmentSequence: number,
+  ) {
+    const { refCacheKey, stateKey } = getKeyIdentity(key)
+    if (key && stateKey !== previousKeyStateKey) {
+      const keyRecord = getRequiredLocalRef('key', input.keyRefs.get(refCacheKey), fragmentSequence)
+      lines.push(createHlsKeyLine(key, keyRecord.playlistPath))
+      previousKeyStateKey = stateKey
+      hadKey = true
+    } else if (!key && hadKey) {
+      lines.push('#EXT-X-KEY:METHOD=NONE')
+      previousKeyStateKey = ''
+      hadKey = false
+    }
+  }
 
   input.fragments.forEach((fragment, index) => {
     if (index > 0 && fragment.discontinuitySequence !== previousDiscontinuity) {
@@ -376,38 +407,24 @@ function buildLocalPlaylist(input: {
       previousDiscontinuity = fragment.discontinuitySequence
     }
 
-    const nextKeyRefCacheKey = fragment.key
-      ? createKeyRefCacheKey({
-          manualKeyBase64: input.manualKeyBase64,
-          method: fragment.key.method,
-          url: fragment.key.url,
-        })
-      : ''
-    const nextKeyStateKey = fragment.key
-      ? `${nextKeyRefCacheKey}|${fragment.key.iv || ''}|${fragment.key.keyFormat || ''}`
-      : ''
-    if (fragment.key && nextKeyStateKey !== previousKeyStateKey) {
-      const keyRecord = getRequiredLocalRef('key', input.keyRefs.get(nextKeyRefCacheKey), fragment.sequence)
-      lines.push(createHlsKeyLine(fragment.key, keyRecord.playlistPath))
-      previousKeyStateKey = nextKeyStateKey
-      hadKey = true
-    } else if (!fragment.key && hadKey) {
-      lines.push('#EXT-X-KEY:METHOD=NONE')
-      previousKeyStateKey = ''
-      hadKey = false
-    }
-
-    const nextMapCacheKey = fragment.initSegment?.url
+    const nextMapRefCacheKey = fragment.initSegment?.url
       ? createResourceCacheKey({
           byteRange: fragment.initSegment.byteRange,
           url: fragment.initSegment.url,
         })
       : ''
-    if (fragment.initSegment && nextMapCacheKey !== previousMapCacheKey) {
-      const mapRecord = getRequiredLocalRef('map', input.mapRefs.get(nextMapCacheKey), fragment.sequence)
+    const nextMapKeyState = getKeyIdentity(fragment.initSegment?.key).stateKey
+    const nextMapStateKey = fragment.initSegment
+      ? `${nextMapRefCacheKey}|${nextMapKeyState}`
+      : ''
+    if (fragment.initSegment && nextMapStateKey !== previousMapStateKey) {
+      appendKeyTransition(fragment.initSegment.key, fragment.sequence)
+      const mapRecord = getRequiredLocalRef('map', input.mapRefs.get(nextMapRefCacheKey), fragment.sequence)
       lines.push(createHlsMapLine(mapRecord.playlistPath))
-      previousMapCacheKey = nextMapCacheKey
+      previousMapStateKey = nextMapStateKey
     }
+
+    appendKeyTransition(fragment.key, fragment.sequence)
 
     const fragmentPath = input.fragmentPaths[index]
     if (!fragmentPath) {
@@ -479,10 +496,16 @@ export async function downloadEmbeddedBrowserHlsToLocalWorkDirectory(
     headers: plan.headers,
     manualKeyBase64: request.manualKeyBase64,
     outputDirectoryPath,
-    refs: plan.fragments.map((fragment) => ({
-      method: fragment.key?.method,
-      url: fragment.key?.url,
-    })),
+    refs: plan.fragments.flatMap((fragment) => ([
+      {
+        method: fragment.initSegment?.key?.method,
+        url: fragment.initSegment?.key?.url,
+      },
+      {
+        method: fragment.key?.method,
+        url: fragment.key?.url,
+      },
+    ])),
     signal: request.signal,
   })
 

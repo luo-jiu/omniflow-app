@@ -29,6 +29,7 @@ export type EmbeddedBrowserHlsKey = {
 
 export type EmbeddedBrowserHlsMap = {
   byteRange?: EmbeddedBrowserHlsByteRange
+  key?: EmbeddedBrowserHlsKey
   rawAttributes: EmbeddedBrowserHlsAttributeMap
   rawLine: string
   uri: string
@@ -105,6 +106,7 @@ export type EmbeddedBrowserHlsDownloadKeyRef = {
 
 export type EmbeddedBrowserHlsDownloadMapRef = {
   byteRange?: EmbeddedBrowserHlsByteRange
+  key?: EmbeddedBrowserHlsDownloadKeyRef
   url: string
 }
 
@@ -139,6 +141,7 @@ export type EmbeddedBrowserHlsDownloadPlan = {
   mapTag: string
   maps: Array<{
     byteRange?: EmbeddedBrowserHlsByteRange
+    key?: EmbeddedBrowserHlsDownloadKeyRef
     url: string
   }>
   pageUrl?: string
@@ -274,6 +277,12 @@ export function createEmbeddedBrowserHlsDownloadPlan(input: {
     index: segment.index,
     initSegment: segment.map ? {
       byteRange: segment.map.byteRange,
+      key: segment.map.key ? {
+        iv: segment.map.key.iv,
+        keyFormat: segment.map.key.keyFormat,
+        method: segment.map.key.method,
+        url: segment.map.key.url,
+      } : undefined,
       url: segment.map.url,
     } : undefined,
     key: segment.key ? {
@@ -305,6 +314,12 @@ export function createEmbeddedBrowserHlsDownloadPlan(input: {
     manifestUrl: input.manifestUrl,
     maps: manifest.maps.map((map) => ({
       byteRange: map.byteRange,
+      key: map.key ? {
+        iv: map.key.iv,
+        keyFormat: map.key.keyFormat,
+        method: map.key.method,
+        url: map.key.url,
+      } : undefined,
       url: map.url,
     })),
     mapTag: manifest.maps[0]?.url || '',

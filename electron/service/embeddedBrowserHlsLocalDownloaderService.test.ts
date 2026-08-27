@@ -4,6 +4,10 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { describe, expect, it, vi } from 'vitest'
 
 import {
+  createEmbeddedBrowserHlsDownloadPlan,
+  parseEmbeddedBrowserHlsManifest,
+} from '../../src/features/embedded-browser/resources/model/embedded-browser-hls-manifest'
+import {
   downloadEmbeddedBrowserHlsToLocalWorkDirectory,
 } from './embeddedBrowserHlsLocalDownloaderService'
 
@@ -270,6 +274,51 @@ describe('EmbeddedBrowser HLS local downloader', () => {
       )
       expect(fetchImpl.mock.calls.filter(([url]) => url === keyUrl)).toHaveLength(1)
       expect(result.keyCount).toBe(1)
+    } finally {
+      await rm(directory, { force: true, recursive: true })
+    }
+  })
+
+  it('hls.encrypted-map-local-playlist-key-order', async () => {
+    const fixtureRoot = new URL('../../tools/cat-catch-lab/fixtures/hls-encrypted-map-key-context/', import.meta.url)
+    const [playlist, expectedText] = await Promise.all([
+      readFile(new URL('playlist.m3u8', fixtureRoot), 'utf8'),
+      readFile(new URL('expected.json', fixtureRoot), 'utf8'),
+    ])
+    const expected = JSON.parse(expectedText) as {
+      baseUrl: string
+      localKeyLines: string[]
+      localMapLine: string
+    }
+    const manifest = parseEmbeddedBrowserHlsManifest({
+      baseUrl: expected.baseUrl,
+      text: playlist,
+    })
+    const plan = createEmbeddedBrowserHlsDownloadPlan({
+      manifest,
+      manifestUrl: expected.baseUrl,
+    })
+    const keyUrls = new Set(['https://media.example/encrypted-map/map.key', 'https://media.example/encrypted-map/media.key'])
+    const fetchImpl = vi.fn(async (url: string) => new Response(
+      keyUrls.has(url)
+        ? new Uint8Array(16).buffer
+        : Uint8Array.from([0x47, 0x01]).buffer,
+    ))
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'omniflow-hls-encrypted-map-test-'))
+
+    try {
+      const result = await downloadEmbeddedBrowserHlsToLocalWorkDirectory({
+        fetch: fetchImpl,
+        plan,
+        workDirectoryPath: directory,
+      })
+      const localPlaylist = await readFile(result.playlistPath, 'utf8')
+      const lines = localPlaylist.trim().split('\n')
+      expect(lines.filter(line => line.startsWith('#EXT-X-KEY:'))).toEqual(expected.localKeyLines)
+      expect(lines.indexOf(expected.localKeyLines[0])).toBeLessThan(lines.indexOf(expected.localMapLine))
+      expect(lines.indexOf(expected.localMapLine)).toBeLessThan(lines.indexOf(expected.localKeyLines[1]))
+      expect(fetchImpl.mock.calls.filter(([url]) => keyUrls.has(url))).toHaveLength(2)
+      expect(result).toMatchObject({ keyCount: 2, mapCount: 1 })
     } finally {
       await rm(directory, { force: true, recursive: true })
     }
