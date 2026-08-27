@@ -579,10 +579,8 @@ interface Window {
     downloadHlsManifest: (tabId: string, payload: {
       durationSeconds?: number;
       ffmpegPath?: string;
-      headers?: Record<string, string>;
-      manifestUrl?: string;
       outputDirectoryPath?: string;
-      resourceId?: string;
+      resourceId: string;
       requestId?: string;
       suggestedFileName?: string;
       useSystemSaveDialog?: boolean;
@@ -615,15 +613,14 @@ interface Window {
       ok: boolean;
     }>;
     downloadHlsTracks: (tabId: string, payload: {
-      audioManifestUrl?: string;
+      audioResourceId: string;
       durationSeconds?: number;
       ffmpegPath?: string;
-      headers?: Record<string, string>;
       outputDirectoryPath?: string;
       requestId?: string;
       suggestedFileName?: string;
       useSystemSaveDialog?: boolean;
-      videoManifestUrl?: string;
+      videoResourceId: string;
     }) => Promise<EmbeddedBrowserCapturedResourceMergeResponse>;
     downloadHlsPlan: (tabId: string, payload: {
       ffmpegPath?: string;

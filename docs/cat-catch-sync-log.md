@@ -549,6 +549,20 @@
 - legacy cleanup: 无；旧 HLS dispatch/downloader/recorder 仍保留到 cutover 证据完整。
 - validation: 完整相关 HLS/inspection Vitest 42/42、access redirect Vitest 3/3（允许 loopback 的环境）、TypeScript、scoped ESLint、`cat-catch:validate`、同步校验 16/16、台账计数和 scoped diff check 通过。最终全仓 lint 仅被其他 Agent 正在编辑的 `agent-orchestrator.test.ts` 两个未使用参数阻断，本切片实现完成后曾通过全仓 lint；完整 build 不运行，避免覆盖其他 Agent 正在修改的 `dist-electron/**`。
 
+## 2026-08-27: same target (HLS direct/track opaque authority)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动。
+- reviewedThrough / portedThrough: 均保持 `null`；本步只收口 HLS direct/track 的跨进程资源权限，仍未完成 hls-engine cutover。
+- change groups: `security-boundary`（renderer URL/header 不再进入 HLS direct/track 执行输入）与 `platform-adaptation`（两个 ffmpeg input 独立兑换 main-owned authority）。
+- affected capability IDs: `hls.segment-pipeline` 保持 `porting`；能力状态仍为 9 `ported-unverified`、5 `porting`、18 `pending`，7 个 unit 均未 cutover。
+- fixtures/tests: `hls.direct-manifest-authority` 覆盖恶意 renderer URL/header 无法覆盖 main 兑换结果、cross-tab 和导航后 stale 拒绝；`hls.track-independent-authority` 覆盖 video/audio 独立 URL/header grant 且任一缺失即拒绝；`hls.renderer-exact-manifest-authority` 与 `hls.renderer-requires-both-track-authorities` 覆盖当前 active snapshot 的精确 URL→ID 映射；`hls.track-input-header-isolation` 锁定两个 ffmpeg input 不串用 headers。
+- accepted difference: Cat Catch 扩展页可直接持有 URL/header；OmniFlow renderer 只提交 opaque resource id。所选 variant/rendition 尚未被当前页面实际捕捉时，当前明确提示先播放对应清晰度/音轨，而不是复用父 manifest 的 protected headers 或静默执行无权限直拉。
+- excluded changes and reasons: 本步不改变 HLS live 的过渡 fallback、DASH 直拉、local-plan 未捕捉 URL 的 embedded-session fallback、完整 parser/decrypt 或非 HLS ffmpeg owner。
+- unresolved gaps: HLS 完整 parser 标签差分、生产 decrypt responsibility、renderer listener recovery、HLS live 过渡 DTO、真实网站手工验证和最终 hls-engine cutover。
+- runtime changes: direct HLS IPC/preload/renderer contract 只接受一个精确 `resourceId`；track contract 只接受 `videoResourceId / audioResourceId`。renderer 在发起动作前读取当前 safe snapshot，main 再按当前 tab/document owner 独立 redeem；cross-tab、过期或缺失 authority 在保存对话框/ffmpeg 前失败。track ffmpeg 参数分别绑定 video/audio headers。
+- legacy cleanup: 无；旧 HLS parser/downloader/recorder 和过渡 live/DASH/toolkit 路径仍保留到对应 unit 证据完整，未新增双 owner 或 fallback。
+- validation: 完整 HLS Vitest 47/47、全量 ESLint、TypeScript、`cat-catch:validate`、同步校验 16/16、固定 metadata 7 units/32 capabilities/192 anchors/106 cleanup entries/101 unique planned IDs/55 active refs，以及本切片 scoped diff check 通过。全量 Vitest 为 931 passed / 1 skipped / 16 loopback sandbox failures；4 个相关 loopback 文件在允许监听本机端口的环境复跑 20/20，通过后折算全部可执行测试为 947 passed / 1 skipped。`tools/cat-catch-sync/validate.test.mjs` 由 Node test runner 16/16 通过，被 Vitest 扫描时仅报告 no suite。完整 build 不运行，避免覆盖其他 Agent 正在修改的 `dist-electron/**`；全仓 diff check 也只被该生成文件既有尾随空格阻断。
+
 ## Template
 
 ```markdown

@@ -92,10 +92,8 @@ export type EmbeddedBrowserCapturedResourceSaveResponse = {
 export type EmbeddedBrowserHlsDownloadPayload = {
   durationSeconds?: number
   ffmpegPath?: string
-  headers?: Record<string, string>
-  manifestUrl?: string
   outputDirectoryPath?: string
-  resourceId?: string
+  resourceId: string
   requestId?: string
   suggestedFileName?: string
   useSystemSaveDialog?: boolean
@@ -169,15 +167,14 @@ export type EmbeddedBrowserHlsRecordingDiscardResponse = {
 }
 
 export type EmbeddedBrowserHlsTrackMergePayload = {
-  audioManifestUrl?: string
+  audioResourceId: string
   durationSeconds?: number
   ffmpegPath?: string
-  headers?: Record<string, string>
   outputDirectoryPath?: string
   requestId?: string
   suggestedFileName?: string
   useSystemSaveDialog?: boolean
-  videoManifestUrl?: string
+  videoResourceId: string
 }
 
 export type EmbeddedBrowserHlsTrackMergeResponse = EmbeddedBrowserHlsDownloadResponse
@@ -228,7 +225,17 @@ export type EmbeddedBrowserHlsTaskEventPayload = {
   usingManualKey?: boolean
 }
 
-export type EmbeddedBrowserMpdDownloadPayload = EmbeddedBrowserHlsDownloadPayload
+export type EmbeddedBrowserMpdDownloadPayload = {
+  durationSeconds?: number
+  ffmpegPath?: string
+  headers?: Record<string, string>
+  manifestUrl?: string
+  outputDirectoryPath?: string
+  resourceId?: string
+  requestId?: string
+  suggestedFileName?: string
+  useSystemSaveDialog?: boolean
+}
 
 export type EmbeddedBrowserMpdDownloadResponse = EmbeddedBrowserHlsDownloadResponse
 

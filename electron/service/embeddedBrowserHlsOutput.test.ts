@@ -18,7 +18,10 @@ vi.mock('../platform/processTree', () => ({
 }))
 
 import { downloadEmbeddedBrowserHlsToLocalWorkDirectory } from './embeddedBrowserHlsLocalDownloaderService'
-import { downloadEmbeddedBrowserManifestResource } from './embeddedBrowserResourceManifestDownloadService'
+import {
+  buildEmbeddedBrowserManifestTrackMergeArgs,
+  downloadEmbeddedBrowserManifestResource,
+} from './embeddedBrowserResourceManifestDownloadService'
 
 function createFakeFfmpegChild() {
   const child = new EventEmitter() as EventEmitter & {
@@ -36,6 +39,36 @@ describe('EmbeddedBrowser HLS output handoff', () => {
   beforeEach(() => {
     spawnMock.mockReset()
     terminateProcessTreeMock.mockReset()
+  })
+
+  it('hls.track-input-header-isolation', () => {
+    const args = buildEmbeddedBrowserManifestTrackMergeArgs({
+      audioHeaders: {
+        authorization: 'Bearer audio-secret',
+        range: 'bytes=1-2',
+      },
+      audioManifestUrl: 'https://audio.example/track.m3u8',
+      outputPath: '/tmp/output.mp4',
+      videoHeaders: {
+        authorization: 'Bearer video-secret',
+        cookie: 'video-session=1',
+      },
+      videoManifestUrl: 'https://video.example/track.m3u8',
+    })
+    const inputIndexes = args.reduce<number[]>((indexes, value, index) => {
+      if (value === '-i') indexes.push(index)
+      return indexes
+    }, [])
+
+    expect(inputIndexes).toHaveLength(2)
+    expect(args[inputIndexes[0] - 4]).toBe('-headers')
+    expect(args[inputIndexes[0] - 3]).toContain('authorization: Bearer video-secret')
+    expect(args[inputIndexes[0] - 3]).toContain('cookie: video-session=1')
+    expect(args[inputIndexes[0] - 3]).not.toContain('audio-secret')
+    expect(args[inputIndexes[1] - 2]).toBe('-headers')
+    expect(args[inputIndexes[1] - 1]).toContain('authorization: Bearer audio-secret')
+    expect(args[inputIndexes[1] - 1]).not.toContain('video-secret')
+    expect(args[inputIndexes[1] - 1]).not.toContain('range:')
   })
 
   it('hls.local-output-smoke', async () => {

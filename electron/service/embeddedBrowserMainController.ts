@@ -118,6 +118,10 @@ import {
 } from './embeddedBrowserExternalTools'
 import { ExternalToolDispatcher } from './embedded-browser/integrations/external-tools'
 import {
+  resolveHlsManifestAuthority,
+  resolveHlsTrackAuthorities,
+} from './embedded-browser/integrations/hls-manifest-authority'
+import {
   createEmbeddedBrowserView as createEmbeddedBrowserManagedView,
   installEmbeddedBrowserResourceProbe,
 } from './embeddedBrowserViewLifecycle'
@@ -1512,12 +1516,25 @@ export function createEmbeddedBrowserMainController(
   ): Promise<EmbeddedBrowserHlsDownloadResponse | EmbeddedBrowserMpdDownloadResponse> {
     const normalizedTabId = String(tabId || '').trim()
     const resourceId = String(payload.resourceId || '').trim()
-    const grant = resourceId && captureRuntime
+    const hlsAuthority = kind === 'hls'
+      ? resolveHlsManifestAuthority(captureRuntime?.access || null, {
+          resourceId,
+          tabId: normalizedTabId,
+        })
+      : null
+    const mpdGrant = kind === 'mpd' && resourceId && captureRuntime
       ? captureRuntime.access.redeem({ purpose: 'resource-download', resourceId, tabId: normalizedTabId })
       : null
-    const manifestUrl = String(grant?.resource.url || payload.manifestUrl || '').trim()
-    const requestHeaders = grant ? Object.fromEntries(grant.headers) : payload.headers
-    if (resourceId && !grant) {
+    const mpdPayload = payload as EmbeddedBrowserMpdDownloadPayload
+    const manifestUrl = String(
+      hlsAuthority?.manifestUrl
+      || mpdGrant?.resource.url
+      || (kind === 'mpd' ? mpdPayload.manifestUrl : '')
+      || '',
+    ).trim()
+    const requestHeaders = hlsAuthority?.headers
+      || (mpdGrant ? Object.fromEntries(mpdGrant.headers) : mpdPayload.headers)
+    if ((kind === 'hls' && !hlsAuthority) || (kind === 'mpd' && resourceId && !mpdGrant)) {
       return { error: '捕捉资源已过期或不属于当前页面', ok: false }
     }
     if (!normalizedTabId || !manifestUrl) {
@@ -1656,12 +1673,17 @@ export function createEmbeddedBrowserMainController(
     payload: EmbeddedBrowserHlsTrackMergePayload,
   ): Promise<EmbeddedBrowserHlsTrackMergeResponse> {
     const normalizedTabId = String(tabId || '').trim()
-    const videoManifestUrl = String(payload.videoManifestUrl || '').trim()
-    const audioManifestUrl = String(payload.audioManifestUrl || '').trim()
+    const authorities = resolveHlsTrackAuthorities(captureRuntime?.access || null, {
+      audioResourceId: payload.audioResourceId,
+      tabId: normalizedTabId,
+      videoResourceId: payload.videoResourceId,
+    })
+    const videoManifestUrl = authorities?.video.manifestUrl || ''
+    const audioManifestUrl = authorities?.audio.manifestUrl || ''
     const requestId = String(payload.requestId || '').trim() || undefined
-    if (!normalizedTabId || !/^https?:\/\//i.test(videoManifestUrl) || !/^https?:\/\//i.test(audioManifestUrl)) {
+    if (!authorities) {
       return {
-        error: '缺少可合并的视频或音轨 manifest',
+        error: '视频或音轨 manifest 未被当前页面捕捉，或捕捉记录已过期',
         ok: false,
       }
     }
@@ -1699,10 +1721,10 @@ export function createEmbeddedBrowserMainController(
         requestId,
         tabId: normalizedTabId,
       }, (signal) => downloadEmbeddedBrowserManifestTracks({
+        audioHeaders: authorities.audio.headers,
         audioManifestUrl,
         durationSeconds: payload.durationSeconds,
         ffmpegPath: payload.ffmpegPath,
-        headers: payload.headers,
         onProgress: payload.durationSeconds
           ? (progress) => {
             emitEmbeddedBrowserHlsTask({
@@ -1721,6 +1743,7 @@ export function createEmbeddedBrowserMainController(
           : undefined,
         outputPath: resolvedOutputPath,
         signal,
+        videoHeaders: authorities.video.headers,
         videoManifestUrl,
       }))
 

@@ -25,6 +25,10 @@ import {
   normalizeHlsKeyCandidateValue,
   type EmbeddedBrowserHlsKeyVerificationResult,
 } from '@/features/embedded-browser/resources/model/embedded-browser-hls-key-verifier';
+import {
+  resolveCapturedHlsManifestResourceId,
+  resolveCapturedHlsTrackResourceIds,
+} from '@/features/embedded-browser/resources/model/embedded-browser-hls-resource-authority';
 
 import type { ToolWorkspaceMediaHlsRequest } from '../types';
 
@@ -707,8 +711,6 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
         effectiveManifestUrl = resolvedVariant.plan.manifestUrl;
         effectiveVideoManifestUrl = resolvedVariant.plan.manifestUrl;
       }
-      activeHlsTaskRequestIdRef.current = requestId;
-      activeHlsTaskManifestUrlRef.current = selectedHlsAudioRenditionUrl ? effectiveVideoManifestUrl : effectiveManifestUrl;
       const shouldUseDirectManifestTrackMerge = Boolean(
         selectedHlsAudioRenditionUrl
         && /^https?:\/\//i.test(effectiveVideoManifestUrl)
@@ -720,6 +722,36 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
         && !normalizedHlsManualKey
         && !shouldUseLocalPlanForControls
         && !shouldUseDirectManifestTrackMerge;
+      let directManifestResourceId: string | null = null;
+      let directTrackResourceIds: {
+        audioResourceId: string;
+        videoResourceId: string;
+      } | null = null;
+      if (shouldUseDirectManifestDownload || shouldUseDirectManifestTrackMerge) {
+        const snapshot = await listEmbeddedBrowserCapturedResources(hlsRequest.resource.tabId);
+        directManifestResourceId = shouldUseDirectManifestDownload
+          ? resolveCapturedHlsManifestResourceId(
+            snapshot,
+            hlsRequest.resource.tabId,
+            effectiveManifestUrl,
+          )
+          : null;
+        directTrackResourceIds = shouldUseDirectManifestTrackMerge
+          ? resolveCapturedHlsTrackResourceIds(snapshot, {
+            audioManifestUrl: selectedHlsAudioRenditionUrl,
+            tabId: hlsRequest.resource.tabId,
+            videoManifestUrl: effectiveVideoManifestUrl,
+          })
+          : null;
+        if (
+          (shouldUseDirectManifestDownload && !directManifestResourceId)
+          || (shouldUseDirectManifestTrackMerge && !directTrackResourceIds)
+        ) {
+          throw new Error('所选 HLS manifest 尚未被当前页面捕捉，请先在网页中播放对应清晰度或音轨后重试');
+        }
+      }
+      activeHlsTaskRequestIdRef.current = requestId;
+      activeHlsTaskManifestUrlRef.current = selectedHlsAudioRenditionUrl ? effectiveVideoManifestUrl : effectiveManifestUrl;
       setHlsTaskStatus({
         bytesReceived: undefined,
         bytesTotal: undefined,
@@ -779,21 +811,19 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
       };
       const result = shouldUseDirectManifestTrackMerge
         ? await downloadEmbeddedBrowserHlsTracks(hlsRequest.resource.tabId, {
-            audioManifestUrl: selectedHlsAudioRenditionUrl,
+            audioResourceId: directTrackResourceIds!.audioResourceId,
             durationSeconds: effectivePlan.durationSeconds,
-            headers: withResourceRefererHeader(hlsRequest.resource),
             outputDirectoryPath: taskOutputDirectoryPath,
             requestId,
             suggestedFileName: deriveHlsOutputFileName(effectiveVideoManifestUrl),
             useSystemSaveDialog: false,
-            videoManifestUrl: effectiveVideoManifestUrl,
+            videoResourceId: directTrackResourceIds!.videoResourceId,
           })
         : shouldUseDirectManifestDownload
           ? await downloadEmbeddedBrowserHlsManifest(hlsRequest.resource.tabId, {
             durationSeconds: effectivePlan.durationSeconds,
-            headers: resourceHeaders,
-            manifestUrl: effectiveManifestUrl,
             outputDirectoryPath: taskOutputDirectoryPath,
+            resourceId: directManifestResourceId!,
             requestId,
             suggestedFileName: deriveHlsOutputFileName(effectiveManifestUrl),
             useSystemSaveDialog: false,

@@ -184,10 +184,8 @@ export async function downloadEmbeddedBrowserHlsManifest(
   payload: {
     durationSeconds?: number;
     ffmpegPath?: string;
-    headers?: Record<string, string>;
-    manifestUrl?: string;
     outputDirectoryPath?: string;
-    resourceId?: string;
+    resourceId: string;
     requestId?: string;
     suggestedFileName?: string;
     useSystemSaveDialog?: boolean;
@@ -260,15 +258,14 @@ export async function discardEmbeddedBrowserHlsRecording(
 export async function downloadEmbeddedBrowserHlsTracks(
   tabId: string,
   payload: {
-    audioManifestUrl?: string;
+    audioResourceId: string;
     durationSeconds?: number;
     ffmpegPath?: string;
-    headers?: Record<string, string>;
     outputDirectoryPath?: string;
     requestId?: string;
     suggestedFileName?: string;
     useSystemSaveDialog?: boolean;
-    videoManifestUrl?: string;
+    videoResourceId: string;
   },
 ) {
   assertDesktopSupport();

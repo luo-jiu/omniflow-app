@@ -702,10 +702,8 @@ contextBridge.exposeInMainWorld('electronEmbeddedBrowser', {
   downloadHlsManifest: (tabId: string, payload: {
     durationSeconds?: number;
     ffmpegPath?: string;
-    headers?: Record<string, string>;
-    manifestUrl?: string;
     outputDirectoryPath?: string;
-    resourceId?: string;
+    resourceId: string;
     requestId?: string;
     suggestedFileName?: string;
     useSystemSaveDialog?: boolean;
@@ -730,15 +728,14 @@ contextBridge.exposeInMainWorld('electronEmbeddedBrowser', {
     requestId?: string;
   }) => ipcRenderer.invoke('embedded-browser:resource:discard-hls-recording', tabId, payload),
   downloadHlsTracks: (tabId: string, payload: {
-    audioManifestUrl?: string;
+    audioResourceId: string;
     durationSeconds?: number;
     ffmpegPath?: string;
-    headers?: Record<string, string>;
     outputDirectoryPath?: string;
     requestId?: string;
     suggestedFileName?: string;
     useSystemSaveDialog?: boolean;
-    videoManifestUrl?: string;
+    videoResourceId: string;
   }) => ipcRenderer.invoke('embedded-browser:resource:download-hls-tracks', tabId, payload),
   downloadHlsPlan: (tabId: string, payload: {
     ffmpegPath?: string;

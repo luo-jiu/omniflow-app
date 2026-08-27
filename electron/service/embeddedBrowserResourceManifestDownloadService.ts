@@ -29,16 +29,17 @@ export type EmbeddedBrowserManifestDownloadResult = {
 }
 
 export type EmbeddedBrowserManifestTrackMergeRequest = {
+  audioHeaders?: Record<string, string>
   audioManifestUrl: string
   durationSeconds?: number
   ffmpegPath?: string
-  headers?: Record<string, string>
   onProgress?: (payload: {
     processedSeconds?: number
     speedText?: string
   }) => void
   outputPath: string
   signal?: AbortSignal
+  videoHeaders?: Record<string, string>
   videoManifestUrl: string
 }
 
@@ -118,12 +119,12 @@ export function buildEmbeddedBrowserManifestTrackMergeArgs(request: EmbeddedBrow
     'file,http,https,tcp,tls,crypto,data',
     '-allowed_extensions',
     'ALL',
-    ...buildFfmpegHttpHeaderArgs(request.headers),
+    ...buildFfmpegHttpHeaderArgs(request.videoHeaders),
     '-progress',
     'pipe:1',
     '-i',
     request.videoManifestUrl,
-    ...buildFfmpegHttpHeaderArgs(request.headers),
+    ...buildFfmpegHttpHeaderArgs(request.audioHeaders),
     '-i',
     request.audioManifestUrl,
     '-map',
