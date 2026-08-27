@@ -129,4 +129,53 @@ describe('EmbeddedBrowser HLS local downloader', () => {
       await rm(directory, { force: true, recursive: true })
     }
   })
+
+  it('hls.static-ref-range', async () => {
+    const calls: Array<{ range: string | null; url: string }> = []
+    const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({
+        range: new Headers(init?.headers).get('range'),
+        url,
+      })
+      if (url.endsWith('/key.bin')) {
+        return new Response(new Uint8Array(16).buffer)
+      }
+      if (url.endsWith('/init.mp4')) {
+        return new Response(Uint8Array.from([0, 1]).buffer)
+      }
+      return new Response(Uint8Array.from([0x47, 0x01, 0x02]).buffer)
+    })
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'omniflow-hls-range-test-'))
+    const baseFragment = createPlan().fragments[0]
+    const plan = {
+      ...createPlan(),
+      fragments: [{
+        ...baseFragment,
+        byteRange: { length: 3, offset: 5, raw: '3@5' },
+        initSegment: {
+          byteRange: { length: 2, offset: 1, raw: '2@1' },
+          url: 'https://media.example/init.mp4',
+        },
+        key: {
+          method: 'AES-128',
+          url: 'https://media.example/key.bin',
+        },
+      }],
+    }
+
+    try {
+      await downloadEmbeddedBrowserHlsToLocalWorkDirectory({
+        fetch: fetchImpl,
+        plan,
+        workDirectoryPath: directory,
+      })
+      expect(calls).toEqual([
+        { range: null, url: 'https://media.example/key.bin' },
+        { range: 'bytes=1-2', url: 'https://media.example/init.mp4' },
+        { range: 'bytes=5-7', url: 'https://media.example/segment.ts' },
+      ])
+    } finally {
+      await rm(directory, { force: true, recursive: true })
+    }
+  })
 })

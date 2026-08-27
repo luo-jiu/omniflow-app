@@ -437,6 +437,20 @@
 - legacy cleanup: 无；现有 ffmpeg/playlist 解密路径继续承担生产职责。
 - validation: 定向 HLS downloader 测试 5/5 通过；待本步提交前重跑全 HLS 集合、lint、Cat Catch validator、同步校验和 diff 检查；全局 TypeScript 仍受其他 agent storage 改动阻断。
 
+## 2026-08-27: same target (HLS static reference Range contract)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动。
+- reviewedThrough / portedThrough: 均保持 `null`；本步锁定 key、EXT-X-MAP 和媒体分片的静态资源 Range 请求契约，仍未完成 hls-engine cutover。
+- change groups: `platform-adaptation`（统一 fetch/authority 入口和字节范围转换）。
+- affected capability IDs: `hls.segment-pipeline` 继续为 `porting`。
+- fixtures/tests: `embeddedBrowserHlsLocalDownloaderService.test.ts#hls.static-ref-range` 断言 key 无 Range、map `bytes=1-2`、媒体 `bytes=5-7`，并验证请求顺序。
+- accepted difference: Range 只在首跳由 `CapturedResourceAccessService` 携带，重定向目标不复用敏感上下文；本测试只验证 local adapter 发出的首跳请求。
+- excluded changes and reasons: 不在本步调整 redirect、缓存、并发、统一 task registry 或旧 downloader 删除。
+- unresolved gaps: redirect/Range output smoke、一次性 cache fallback、key 生命周期与解密 adapter、统一 task/cleanup 和 page validation。
+- runtime changes: 无新增生产逻辑；现有 `downloadStaticResource` 与 fragment downloader 的 Range 计算得到独立回归证据。
+- legacy cleanup: 无；现有 ffmpeg/playlist 解密路径继续承担生产职责。
+- validation: local HLS 测试 4/4 通过；待本步提交前重跑全 HLS 集合、lint、Cat Catch validator、同步校验和 diff 检查；全局 TypeScript 仍受其他 agent storage 改动阻断。
+
 ## Template
 
 ```markdown
