@@ -409,6 +409,20 @@
 - legacy cleanup: 无；现有 ffmpeg/playlist 解密路径继续承担生产职责。
 - validation: HLS 相关 Vitest 11/11、TypeScript、定向 ESLint、`cat-catch:validate` 和同步校验 16/16 通过；完整 build 未运行，原因仍是其他 Agent 修改了 `dist-electron/**`。
 
+## 2026-08-27: same target (HLS local cancellation and cleanup)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动。
+- reviewedThrough / portedThrough: 均保持 `null`；本步补齐本地 HLS 下载取消的终态通知、AbortSignal 接入和 downloader 清理，仍未完成 hls-engine cutover。
+- change groups: `behavioral`（取消不再永久等待）与 `platform-adaptation`（local service 的 Promise、临时写盘和 downloader 生命周期绑定）。
+- affected capability IDs: `hls.segment-pipeline` 继续为 `porting`。
+- fixtures/tests: `embeddedBrowserFragmentDownloader.test.ts#hls.retry-cancel-range` 覆盖下载器 aborted 事件；`embeddedBrowserHlsLocalDownloaderService.test.ts#hls.cancel-aborts-local-download` 覆盖 service 取消拒绝和请求中断。
+- accepted difference: AbortSignal 是 OmniFlow adapter 合同，不改变 Cat Catch 扩展页面 API；未新增 renderer 取消状态源。
+- excluded changes and reasons: 不在本步接入 IPC 取消按钮、统一 task registry、临时目录 TTL 或旧 downloader 删除。
+- unresolved gaps: IPC/task owner 取消传播、key authority/redirect 语义、完整 output smoke、一次性 cache fallback、统一 task/cleanup 和 page validation。
+- runtime changes: `EmbeddedBrowserFragmentDownloader.stop()` 对活跃任务发出一次 `aborted`；HLS local request 支持 `signal`，所有下载终态移除监听并销毁 downloader。
+- legacy cleanup: 无；现有 ffmpeg/playlist 解密路径继续承担生产职责。
+- validation: HLS 相关 Vitest 14/14、定向 ESLint、`cat-catch:validate` 和同步校验 16/16 通过；全局 TypeScript 仍被其他 agent 的 `agent-local-storage-quota-manager.ts` 两处错误阻断，完整 build 未运行。
+
 ## Template
 
 ```markdown

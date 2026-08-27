@@ -18,6 +18,7 @@ export type EmbeddedBrowserFragmentDownloaderState =
   | 'aborted'
 
 export type EmbeddedBrowserFragmentDownloaderEventMap = {
+  aborted: () => void
   allCompleted: (
     buffers: Array<ArrayBuffer | null>,
     fragments: EmbeddedBrowserDownloadFragment[],
@@ -298,11 +299,15 @@ export class EmbeddedBrowserFragmentDownloader {
       this.controller[index]?.abort()
       return
     }
+    const shouldEmitAborted = this.state === 'running' || this.running > 0 || this.pendingQueue.length > 0
     this.controller.forEach((controller) => {
       controller?.abort()
     })
     this.pendingQueue = []
     this.state = 'aborted'
+    if (shouldEmitAborted) {
+      this.emit('aborted')
+    }
   }
 
   destroy() {

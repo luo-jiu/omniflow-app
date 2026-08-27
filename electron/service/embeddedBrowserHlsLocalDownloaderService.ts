@@ -47,6 +47,7 @@ export type EmbeddedBrowserHlsLocalDownloadRequest = {
   fragmentIndexes?: number[]
   manualKeyBase64?: string
   maxRetries?: number
+  signal?: AbortSignal
   onEvent?: (event: {
     bytesReceived?: number
     bytesTotal?: number
@@ -625,22 +626,51 @@ export async function downloadEmbeddedBrowserHlsToLocalWorkDirectory(
     })
   })
 
-  await new Promise<void>((resolve, reject) => {
-    downloader.on('allCompleted', () => {
-      resolve()
+  const createAbortError = () => {
+    const error = new Error('HLS download aborted')
+    error.name = 'AbortError'
+    return error
+  }
+  if (request.signal?.aborted) {
+    downloader.destroy()
+    throw createAbortError()
+  }
+
+  let abortListener: (() => void) | undefined
+  try {
+    await new Promise<void>((resolve, reject) => {
+      downloader.on('allCompleted', () => {
+        resolve()
+      })
+      downloader.on('aborted', () => {
+        reject(createAbortError())
+      })
+      downloader.on('error', (message) => {
+        reject(new Error(message))
+      })
+      downloader.on('failed', (_, errors) => {
+        const firstErrorFragment = Array.from(errors)[0]
+        const fragmentIndex = firstErrorFragment
+          ? Math.max(0, getFragmentSourceIndex(firstErrorFragment))
+          : 0
+        reject(downloadError || new Error(`下载分片失败：#${fragmentIndex + 1}`))
+      })
+      abortListener = () => {
+        downloader.stop()
+      }
+      request.signal?.addEventListener('abort', abortListener, { once: true })
+      if (request.signal?.aborted) {
+        downloader.stop()
+        return
+      }
+      downloader.start()
     })
-    downloader.on('error', (message) => {
-      reject(new Error(message))
-    })
-    downloader.on('failed', (_, errors) => {
-      const firstErrorFragment = Array.from(errors)[0]
-      const fragmentIndex = firstErrorFragment
-        ? Math.max(0, getFragmentSourceIndex(firstErrorFragment))
-        : 0
-      reject(downloadError || new Error(`下载分片失败：#${fragmentIndex + 1}`))
-    })
-    downloader.start()
-  })
+  } finally {
+    if (abortListener) {
+      request.signal?.removeEventListener('abort', abortListener)
+    }
+    downloader.destroy()
+  }
 
   const pendingWriteResults = await Promise.allSettled(
     pendingWrites.map((entry) => entry.promise),

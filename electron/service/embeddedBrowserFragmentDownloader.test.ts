@@ -97,4 +97,38 @@ describe('EmbeddedBrowserFragmentDownloader', () => {
     expect(stages).toEqual(['first:1', 'event0:2', 'second:2', 'event1:3'])
     downloader.destroy()
   })
+
+  it('hls.retry-cancel-range', async () => {
+    let resolveStarted: (() => void) | undefined
+    const started = new Promise<void>((resolve) => {
+      resolveStarted = resolve
+    })
+    const fetchImpl = vi.fn(async (_input: string, init?: RequestInit) => {
+      resolveStarted?.()
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => {
+          reject(new DOMException('aborted', 'AbortError'))
+        }, { once: true })
+      })
+    })
+    const downloader = new EmbeddedBrowserFragmentDownloader({
+      fetch: fetchImpl,
+      fragments: [{ index: 0, url: 'https://media.example/segment.ts' }],
+      thread: 1,
+    })
+    const aborted = new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('aborted event was not emitted')), 250)
+      downloader.on('aborted', () => {
+        clearTimeout(timeout)
+        resolve()
+      })
+    })
+
+    downloader.start()
+    await started
+    downloader.stop()
+    await aborted
+    expect(downloader.state).toBe('aborted')
+    downloader.destroy()
+  })
 })

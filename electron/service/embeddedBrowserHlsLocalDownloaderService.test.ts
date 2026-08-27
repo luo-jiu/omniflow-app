@@ -93,4 +93,40 @@ describe('EmbeddedBrowser HLS local downloader', () => {
       await rm(directory, { force: true, recursive: true })
     }
   })
+
+  it('hls.cancel-aborts-local-download', async () => {
+    const controller = new AbortController()
+    let resolveStarted: (() => void) | undefined
+    const started = new Promise<void>((resolve) => {
+      resolveStarted = resolve
+    })
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      resolveStarted?.()
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => {
+          reject(new DOMException('aborted', 'AbortError'))
+        }, { once: true })
+      })
+    })
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'omniflow-hls-cancel-test-'))
+    const downloadPromise = downloadEmbeddedBrowserHlsToLocalWorkDirectory({
+      fetch: fetchImpl,
+      plan: createPlan(),
+      signal: controller.signal,
+      workDirectoryPath: directory,
+    })
+
+    try {
+      await started
+      controller.abort()
+      await expect(Promise.race([
+        downloadPromise,
+        new Promise<never>((_, reject) => {
+          setTimeout(() => reject(new Error('local downloader cancellation timed out')), 250)
+        }),
+      ])).rejects.toThrow('aborted')
+    } finally {
+      await rm(directory, { force: true, recursive: true })
+    }
+  })
 })
