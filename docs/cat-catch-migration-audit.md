@@ -13,7 +13,7 @@
 | reviewedThrough | 未建立 |
 | portedThrough | 未建立 |
 
-当前映射包含 7 个 cutover unit、32 项能力、192 个上游 anchor、106 个 cleanup entry 和 130 个唯一计划测试 ID。9 项能力达到 `ported-unverified`，5 项为 `porting`，其余 18 项仍为 `pending`；84 个唯一计划测试引用已落成 active pure behavior/contract、fake/real Electron integration 或 loopback redirect test，尚无已完成的 cutover unit。
+当前映射包含 7 个 cutover unit、32 项能力、192 个上游 anchor、106 个 cleanup entry 和 131 个唯一计划测试 ID。9 项能力达到 `ported-unverified`，5 项为 `porting`，其余 18 项仍为 `pending`；85 个唯一计划测试引用已落成 active pure behavior/contract、fake/real Electron integration 或 loopback redirect test，尚无已完成的 cutover unit。
 
 ## 2. 能力族
 
@@ -27,7 +27,7 @@
 | transfer engine | multiple owners | 并发/重试代码可复用评估，但没有统一 task/cancel/cleanup owner |
 | output integration | mixed: opaque resource authority + legacy DASH/drag/toolkit paths | external-tool、inspection、普通资源下载、已捕获页面拖拽、HLS direct/track 和 HLS/DASH 计划分片传输已接入 main-owned authority；HLS manifest/track 两个 ffmpeg 入口已共享可取消 process runner、独立绑定双轨 headers，并清理失败 partial output；HLS renderer 可恢复 main 任务投影，但资料库交付目标仍是 feature-scoped closure，因此直播在工具卸载时继续 discard 并清理输出目录；data/blob、未捕获资源和多资源 fallback 仍走旧链，另外 4 个 ffmpeg 入口、DASH、派生字幕 URL、process terminal、m3u8dl encoding、staged output lease、本地保存、资料库导入与 application workflow coordinator 仍待迁移 |
 
-HLS master 现已按固定 level identity 合并同 URI 的重复 variant，并在 parser、download plan 与工具区保留完整且有序去重的 AUDIO/SUBTITLES group 集合；单值字段只作为兼容首组。显式 `PATHWAY-ID` 的跨 URI fallback 尚未进入可执行 DTO，当前保持独立 variant，不能为追求表面去重而丢弃备用 URL。
+HLS master 现已按固定 level identity 与 resolved URI 合并重复 variant；即使相同 URI 被其他 URI 隔开，parser、download plan 与工具区仍保留完整且有序去重的 AUDIO/SUBTITLES group 集合，单值字段只作为兼容首组。固定 hls.js 的 `MANIFEST_LOADED` 会保留跨 URI 声明，但 Cat Catch 生成选择项所消费的 `MANIFEST_PARSED` 只暴露首 URI；显式相同 `PATHWAY-ID` 时还会把后续 URI 的 group 合到首 URI。OmniFlow 接受数据保留差异：每个 identity/URI 继续独立可选，不增加 fallback 顺序或 failover 执行语义。
 
 ## 3. 高优先级缺口
 

@@ -424,18 +424,25 @@ function appendUniqueHlsGroupIds(target: string[] | undefined, source: string[] 
  * Reason: repeated EXT-X-STREAM-INF entries can describe one selectable level
  * while attaching different AUDIO/SUBTITLES groups. Exposing each declaration
  * as a variant duplicates the quality choice and hides valid renditions.
- * Adaptation: only identical resolved URIs merge. The pinned Level controller
- * also models cross-URI pathway fallbacks, which need a separate executable DTO.
- * Fixture: hls-master-variant-group-merge
+ * Adaptation: the pinned MANIFEST_PARSED event exposes only the first URI for
+ * cross-URI pathway entries. OmniFlow keeps each unique URI selectable to avoid
+ * data loss, while merging all matching identity/URI declarations regardless
+ * of their position. This does not add ordered fallback or failover semantics.
+ * Fixtures: hls-master-variant-group-merge, hls-master-pathway-uri-boundary
  */
 function mergeHlsVariantGroups(variants: CatCatchHlsVariant[]) {
-  const variantsByIdentity = new Map<string, CatCatchHlsVariant>()
+  const variantsByIdentity = new Map<string, Map<string, CatCatchHlsVariant>>()
   const mergedVariants: CatCatchHlsVariant[] = []
   variants.forEach((variant) => {
     const identity = getHlsVariantIdentity(variant)
-    const existing = variantsByIdentity.get(identity)
-    if (!existing || existing.url !== variant.url) {
-      variantsByIdentity.set(identity, variant)
+    let variantsByUrl = variantsByIdentity.get(identity)
+    if (!variantsByUrl) {
+      variantsByUrl = new Map<string, CatCatchHlsVariant>()
+      variantsByIdentity.set(identity, variantsByUrl)
+    }
+    const existing = variantsByUrl.get(variant.url)
+    if (!existing) {
+      variantsByUrl.set(variant.url, variant)
       mergedVariants.push(variant)
       return
     }

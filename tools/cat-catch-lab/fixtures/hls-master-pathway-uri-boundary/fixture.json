@@ -1,0 +1,24 @@
+{
+  "fixtureId": "hls-master-pathway-uri-boundary",
+  "capabilityIds": [
+    "hls.parser-planner"
+  ],
+  "upstreamCommit": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
+  "upstreamDependency": "hls.js@1.6.16",
+  "status": "active",
+  "oracle": "upstream-executable",
+  "sourceRefs": [
+    "lib/hls.min.js#LevelController.onManifestLoaded level identity and synthetic pathway",
+    "lib/hls.min.js#ContentSteeringController.filterParsedLevels",
+    "lib/hls.min.js#Level.addGroupId/addFallback",
+    "js/m3u8.js#Hls.Events.MANIFEST_LOADED/MANIFEST_PARSED"
+  ],
+  "inputs": {
+    "implicit": "implicit-pathway.m3u8",
+    "explicit": "explicit-pathway.m3u8"
+  },
+  "expected": "expected.json",
+  "testRefs": [
+    "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.master-pathway-uri-boundary"
+  ]
+}

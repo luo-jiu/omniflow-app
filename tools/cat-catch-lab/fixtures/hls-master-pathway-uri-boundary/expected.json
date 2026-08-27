@@ -1,0 +1,59 @@
+{
+  "baseUrl": "https://media.example/master/index.m3u8",
+  "variants": [
+    {
+      "audioGroupId": "audio-a1",
+      "audioGroupIds": [
+        "audio-a1",
+        "audio-a2"
+      ],
+      "pathwayId": null,
+      "subtitlesGroupId": "sub-a1",
+      "subtitlesGroupIds": [
+        "sub-a1",
+        "sub-a2"
+      ],
+      "url": "https://media.example/master/video-a.m3u8"
+    },
+    {
+      "audioGroupId": "audio-b",
+      "audioGroupIds": [
+        "audio-b"
+      ],
+      "pathwayId": null,
+      "subtitlesGroupId": "sub-b",
+      "subtitlesGroupIds": [
+        "sub-b"
+      ],
+      "url": "https://media.example/master/video-b.m3u8"
+    }
+  ],
+  "explicitVariants": [
+    {
+      "audioGroupId": "audio-a1",
+      "audioGroupIds": [
+        "audio-a1",
+        "audio-a2"
+      ],
+      "pathwayId": "cdn-a",
+      "subtitlesGroupId": "sub-a1",
+      "subtitlesGroupIds": [
+        "sub-a1",
+        "sub-a2"
+      ],
+      "url": "https://media.example/master/video-a.m3u8"
+    },
+    {
+      "audioGroupId": "audio-b",
+      "audioGroupIds": [
+        "audio-b"
+      ],
+      "pathwayId": "cdn-a",
+      "subtitlesGroupId": "sub-b",
+      "subtitlesGroupIds": [
+        "sub-b"
+      ],
+      "url": "https://media.example/master/video-b.m3u8"
+    }
+  ]
+}

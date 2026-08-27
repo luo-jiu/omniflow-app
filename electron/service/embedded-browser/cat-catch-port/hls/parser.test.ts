@@ -212,6 +212,28 @@ const masterVariantGroupExpected = JSON.parse(readFileSync(`${masterVariantGroup
   }>
 }
 
+const masterPathwayFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-master-pathway-uri-boundary', import.meta.url))
+const masterPathwayFixture = JSON.parse(readFileSync(`${masterPathwayFixtureRoot}/fixture.json`, 'utf8')) as {
+  expected: string
+  inputs: {
+    explicit: string
+    implicit: string
+  }
+}
+type MasterPathwayExpectedVariant = {
+  audioGroupId: string
+  audioGroupIds: string[]
+  pathwayId: string | null
+  subtitlesGroupId: string
+  subtitlesGroupIds: string[]
+  url: string
+}
+const masterPathwayExpected = JSON.parse(readFileSync(`${masterPathwayFixtureRoot}/${masterPathwayFixture.expected}`, 'utf8')) as {
+  baseUrl: string
+  explicitVariants: MasterPathwayExpectedVariant[]
+  variants: MasterPathwayExpectedVariant[]
+}
+
 const masterSessionKeyFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-master-session-key-boundary', import.meta.url))
 const masterSessionKeyFixture = JSON.parse(readFileSync(`${masterSessionKeyFixtureRoot}/fixture.json`, 'utf8')) as {
   expected: string
@@ -494,6 +516,25 @@ describe('Cat Catch HLS parser', () => {
       subtitlesGroupIds: variant.subtitlesGroupIds,
       url: variant.url,
     }))).toEqual(masterVariantGroupExpected.variants)
+  })
+
+  it('hls.master-pathway-uri-boundary', () => {
+    const projectVariants = (input: string) => parseHlsManifest({
+      baseUrl: masterPathwayExpected.baseUrl,
+      text: readFileSync(`${masterPathwayFixtureRoot}/${input}`, 'utf8'),
+    }).variants.map(variant => ({
+      audioGroupId: variant.audioGroupId,
+      audioGroupIds: variant.audioGroupIds,
+      pathwayId: variant.rawAttributes['PATHWAY-ID'] || null,
+      subtitlesGroupId: variant.subtitlesGroupId,
+      subtitlesGroupIds: variant.subtitlesGroupIds,
+      url: variant.url,
+    }))
+
+    expect(projectVariants(masterPathwayFixture.inputs.implicit))
+      .toEqual(masterPathwayExpected.variants)
+    expect(projectVariants(masterPathwayFixture.inputs.explicit))
+      .toEqual(masterPathwayExpected.explicitVariants)
   })
 
   it('hls.master-session-key-exclusion', () => {

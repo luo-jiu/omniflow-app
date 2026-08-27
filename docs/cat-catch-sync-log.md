@@ -822,12 +822,26 @@
 - change groups: `behavioral`（固定 level identity、同 URI variant 合并、有序 group 去重）与 `renderer-projection`（plan 完整 group 数组、音轨/字幕过滤与高亮）。
 - affected capability IDs: `hls.parser-planner` 保持 `ported-unverified`；新增 2 个 active test ID。
 - fixtures/tests: 新增 upstream-executable fixture `hls-master-variant-group-merge`；`hls.master-variant-group-merge` 覆盖四条同 identity/同 URI 的 `EXT-X-STREAM-INF`（首条无 group）合并为一个 variant，并保留首个实际单值与完整的 `audio-en/audio-ja`、`sub-en/sub-ja` group；`hls.master-variant-rendition-groups` 覆盖工具区允许两组合关联轨道、排除未关联 `fr` 轨道，以及无 group variant 不错误收窄候选。
-- accepted difference: 固定 hls.js 还能把不同 URI 建模为显式 `PATHWAY-ID` fallback。当前 DTO/执行器没有 ordered fallback URL 语义，因此 OmniFlow 只合并同 identity 且同 resolved URI 的声明；跨 URI pathway entry 继续独立可选，不静默吞掉备用 URL。
+- accepted difference: 后续固定 vendor boundary fixture 证实，Cat Catch 用来生成选择项的 `MANIFEST_PARSED` 对 implicit/explicit pathway 都只暴露首 URI，并没有 ordered URL fallback；OmniFlow 继续保留每个 identity/URI 为独立可选项，不静默吞掉后续 URL，也不新增 failover 语义。
 - excluded changes and reasons: 本步不实现 content steering、跨 URI pathway failover、轨道 codec 推断或播放 controller；不切换或删除 legacy HLS owner。
-- unresolved gaps: HLS 跨 URI pathway fallback、其余 master/media parser 差分、live 未捕获 URL 过渡 DTO、加密 fMP4/video 真实输出组合、真实网站手工验证和最终 hls-engine cutover。
+- unresolved gaps: HLS 其余 master/media parser 差分、live 未捕获 URL 过渡 DTO、加密 fMP4/video 真实输出组合、真实网站手工验证和最终 hls-engine cutover。
 - runtime changes: pure parser 按 `PATHWAY-ID/BANDWIDTH/RESOLUTION/FRAME-RATE/CODECS/VIDEO-RANGE/HDCP-LEVEL` identity 合并同 URL variant，兼容单值 group ID 保留首组，新增数组贯穿 manifest 与 download plan；renderer 通过纯 helper 统一过滤、展示和高亮完整 group 集合，没有新增状态 owner、IPC channel 或 main authority。
 - legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
 - validation: 固定 vendor executable oracle 对 fixture 的 `MANIFEST_PARSED` 输出 1 个 level、首个实际单值 `audio-en/sub-en`、`audioGroups=[audio-en,audio-ja]`、`subtitleGroups=[sub-en,sub-ja]`；失败证据为 parser `23/24` 且收到 4 个重复 variant，renderer 新测试在 helper 未实现时无法加载。实现后 parser/renderer `26/26`，广义 HLS/authority/projection `40/40`，TypeScript、全仓 ESLint、固定上游 validator、同步校验 `16/16`、fixture JSON、metadata `7 units / 32 capabilities / 192 anchors / 106 cleanup entries / 130 planned IDs / 84 active refs` 和 scoped diff check 通过。排除其他 Agent 正在修改且当前 `17/18` 的 quota-manager 文件，以及应由 `node --test` 执行的同步文件后，全量 Vitest 为 `1115 passed / 3 skipped`；4 个 loopback 文件在 sandbox 外复跑 `20/20`。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
+
+## 2026-08-28: same target (HLS master pathway URI boundary)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，固定实际 vendor 为 hls.js `1.6.16`。
+- reviewedThrough / portedThrough: 均保持 `null`；本步纠正跨 URI pathway 的先前静态判断，并闭合相同 URI 被其他声明隔开时的 group 合并，仍未完成 hls-engine cutover。
+- change groups: `behavioral-correction`（区分 `MANIFEST_LOADED` 原始 levels 与 Cat Catch 消费的 `MANIFEST_PARSED` 选择层）、`accepted-difference`（保留后续 URI）和 `parser-stability`（非相邻同 URI 合并）。
+- affected capability IDs: `hls.parser-planner` 保持 `ported-unverified`；新增 1 个 active test ID。
+- fixtures/tests: 新增 upstream-executable fixture `hls-master-pathway-uri-boundary`；`hls.master-pathway-uri-boundary` 同时覆盖 implicit pathway 与显式相同 `PATHWAY-ID` 的 `A -> B -> A` URI 声明，并验证 OmniFlow 按首次出现顺序保留 A/B 两项、把 A 首尾 AUDIO/SUBTITLES group 有序合并。
+- accepted difference: 固定 vendor 的 `MANIFEST_LOADED` 对 implicit 输入保留三条 level 并赋予 `. / .. / ...`，对 explicit 输入保留三条相同 `cdn-a` level；Cat Catch 生成选择项所消费的 `MANIFEST_PARSED` 在两种输入中都只暴露首 A，explicit 时还把 A1/B/A2 group 全部挂到首 A。OmniFlow 为避免数据损失保留每个 identity/URI 为独立可选项，但不建立 fallback 顺序、自动 failover 或 content steering 执行器。
+- excluded changes and reasons: 不新增 fallback URL DTO、重试策略、content steering controller、IPC 或 renderer 状态；固定 Cat Catch 下载选择层没有提供可忠实迁移的 ordered fallback 行为。
+- unresolved gaps: HLS 其余 master/media parser 差分、live 未捕获 URL 过渡 DTO、加密 fMP4/video 真实输出组合、真实网站手工验证和最终 hls-engine cutover。
+- runtime changes: `mergeHlsVariantGroups` 现在在每个固定 level identity 下按 resolved URI 分桶；首次 URI 顺序保持不变，同一 URI 的重复声明无论是否相邻都合并 group，跨 URI 项保持独立。
+- legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
+- validation: 固定 Cat Catch vendor executable oracle 输出上述 `MANIFEST_LOADED / MANIFEST_PARSED` 两层证据；失败证据为 parser `24/25` 且 implicit 用例得到 `A/B/A` 三项。实现后 parser `25/25`，广义 HLS/authority/projection `41/41`，TypeScript、全仓 ESLint、fixture JSON、轻量 validator、固定上游 anchor 校验、同步校验 `16/16`、metadata `7 units / 32 capabilities / 192 anchors / 106 cleanup entries / 131 planned IDs / 85 active refs` 和本切片 diff check 通过。排除已由 `node --test` 单独执行的同步文件后，全量 Vitest 在 sandbox 内为 `1129 passed / 3 skipped / 16 loopback EPERM`；4 个 loopback 文件在 sandbox 外复跑 `20/20`，折算全部可执行测试为 `1145 passed / 3 skipped`。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
 
 ## Template
 
