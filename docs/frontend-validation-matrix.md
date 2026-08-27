@@ -1,6 +1,6 @@
 # 前端验证矩阵
 
-更新时间：2026-08-26
+更新时间：2026-08-27
 
 适用范围：`omniflow-app` 前端、Electron、IPC、工作区、文件树、文件预览、上传、内置浏览器和资源捕捉相关改动的提测、自测与 review 验证。
 
@@ -485,6 +485,7 @@ legacy 兼容检查：
 - Run 开始后编辑或删除来源 AI 服务配置会被拒绝；切换 active 配置不改变本轮连接，后续 Tool 轮次与 fallback 仍使用启动时固定的 provider、Base URL 和 Key，终止后配置锁释放
 - overlay、独立媒体窗口和非主 frame 调用 Agent IPC 时被拒绝
 - prepare、确认、Renderer 内部能力、写入 commit 或执行完成请求只要窗口、owner scope、资料库、Session、Run、ToolRun、call、输入 hash 或一次性 ID 中的适用字段任一不匹配就被拒绝；同一 prepare、媒体来源能力、Save As、commit 和执行结果均不能重复提交，并发提交同一确认只能有一个进入处理
+- Registry 拒绝 main / renderer 双 prepare owner、executor 错配、prepared Tool 与独立 `assess` 并存及 preparation mode identity 漂移。main-owned prepare 必须先持久化 `preparing`，不发送 renderer prepare / execution IPC；自动允许和精确批准都继续用原始 Schema-valid Tool input，签发与执行复验共用同一个 canonical input hash。私有 binding / snapshot material 任一单项及完整规范快照均不得超过 256 KiB，只能经有界深拷贝、冻结和 hash 绑定后的 main execution context 传递，不进入 SQLite、事件或 provider；progress / result / error 也不能带出其直接引用。每次批准都重新 prepare：action / preview / behavior / private binding / material 漂移时必须以新 approval / prepared ID 再确认，稳定时 SQLite CAS 先保存并执行最新 capability，CAS 失败后旧确认仍可重试。审批 CAS 成功后即使 Run / UI 投影失败也必须结算等待者并使旧卡失效，不得重复执行或卡在不可重试状态。prepare 永不返回时停止必须快速收口，迟到结果不能产生确认或执行；重新准备异常不得把凭据、本机路径或原始错误正文带回 renderer
 - 模型不能通过交互卡提供 HTML、JSX、回调、IPC channel、URL 或可执行行为，也不能请求 API Key、密码、Cookie 和访问令牌；选项、字段、标题和回答长度 / 数量均命中 main 侧上限
 - Agent SQLite、IPC 响应、日志和消息中不出现 AI Service API Key、Cookie、签名 URL 或完整环境变量；升级 `sqlite3` 或 N-API 版本后打包必须重新准备目标原生模块，不能复用旧缓存
 - `media.inspect` 的签名 URL 只在 Renderer 到 main 的受权瞬时 IPC 和 main 内存代理中存在；ffprobe 命令行只出现 loopback URL，Tool 结果只保留白名单元数据，原始 tags、文件来源、代理 token 和 stderr 不进入消息或 SQLite

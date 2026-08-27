@@ -318,6 +318,19 @@ export interface ResolveAgentToolApprovalPreparation {
   approvalInputHash: string;
   approvalPreview: AgentActionPreview;
   expectedPreparedActionId: string;
+  expectedSnapshotHash: string;
+  preparedActionId: string;
+  snapshotHash: string;
+}
+
+export interface ReplacePendingAgentToolApprovalInput {
+  action: AgentPreparedActionPublic;
+  approvalInputHash: string;
+  approvalPreview: AgentActionPreview;
+  currentApprovalId: string;
+  expectedPreparedActionId: string;
+  expectedSnapshotHash: string;
+  nextApprovalId: string;
   preparedActionId: string;
   snapshotHash: string;
 }
@@ -420,6 +433,9 @@ export interface AgentSessionStore {
     ownerScope: AgentOwnerScope,
     libraryId: number,
   ) => Promise<AgentContextCheckpointState | null>;
+  replacePendingToolApproval: (
+    input: ReplacePendingAgentToolApprovalInput,
+  ) => Promise<AgentToolActivitySnapshot>;
   setRunPlan: (runId: string, plan: AgentRunPlanSnapshot) => Promise<AgentRunSnapshot>;
   resolveToolApproval: (
     approvalId: string,
@@ -2583,6 +2599,49 @@ export async function createSQLiteAgentSessionStore(
       return readRun(runId);
     },
 
+    async replacePendingToolApproval(input) {
+      const preparedAction = normalizeAgentPreparedActionPublic(input.action);
+      const result = await run(database, `
+        UPDATE agent_tool_runs
+        SET
+          approval_id = ?,
+          prepared_action_id = ?,
+          prepared_action_json = ?,
+          prepared_snapshot_hash = ?,
+          approval_input_hash = ?,
+          approval_preview_json = ?,
+          approval_status = 'pending',
+          approval_decided_at = NULL,
+          revision = revision + 1,
+          status = 'awaiting_approval'
+        WHERE approval_id = ?
+          AND status = 'awaiting_approval'
+          AND approval_status = 'pending'
+          AND prepared_action_id = ?
+          AND prepared_snapshot_hash = ?
+          AND approval_input_hash = ?
+      `, [
+        input.nextApprovalId,
+        input.preparedActionId,
+        JSON.stringify(preparedAction),
+        input.snapshotHash,
+        input.approvalInputHash,
+        JSON.stringify(input.approvalPreview),
+        input.currentApprovalId,
+        input.expectedPreparedActionId,
+        input.expectedSnapshotHash,
+        input.expectedSnapshotHash,
+      ]);
+      if (result.changes === 0) {
+        throw new Error('Agent pending confirmation has changed');
+      }
+      const row = await get<{ id: string }>(database, `
+        SELECT id FROM agent_tool_runs WHERE approval_id = ?
+      `, [input.nextApprovalId]);
+      if (!row) throw new Error('Agent Tool 运行记录不存在');
+      return readToolActivity(row.id);
+    },
+
     async resolveToolApproval(approvalId, resolution, now, preparation) {
       const approved = resolution === 'approved';
       if (preparation && !approved) {
@@ -2611,6 +2670,8 @@ export async function createSQLiteAgentSessionStore(
             AND status = 'awaiting_approval'
             AND approval_status = 'pending'
             AND prepared_action_id = ?
+            AND prepared_snapshot_hash = ?
+            AND approval_input_hash = ?
         `, [
           normalizedPreparation.preparedActionId,
           JSON.stringify(normalizedPreparation.action),
@@ -2620,6 +2681,8 @@ export async function createSQLiteAgentSessionStore(
           now,
           approvalId,
           normalizedPreparation.expectedPreparedActionId,
+          normalizedPreparation.expectedSnapshotHash,
+          normalizedPreparation.expectedSnapshotHash,
         ])
         : await run(database, `
         UPDATE agent_tool_runs

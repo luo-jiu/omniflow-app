@@ -1,6 +1,6 @@
 # 内置 Agent UI 契约
 
-更新时间：2026-08-26
+更新时间：2026-08-27
 
 适用范围：
 
@@ -81,7 +81,7 @@ Agent 是通用前端分层里“renderer 负责编排”的明确例外：Agent
 
 `AgentWorkspace` 当前只在 `workspaceDisplayMode === 'search-home'` 时挂载。切到文件、浏览器、工具区或系统视图会卸载 Agent renderer，但不等于 owner / library scope 变化：
 
-- 没有 renderer prepare / execution 的纯 main Run 可以在 UI 卸载后继续由 main 完成；返回 Agent 后从 Session 规范快照恢复，不依赖旧 React 实例。这里的“继续”不等于 detached OS 后台 Job：当前没有跨重启进程、PTY 或脱离 Run 生命周期的命令能力。
+- 没有 renderer prepare / execution 的纯 main Run（包括 main-owned prepare）可以在 UI 卸载后继续由 main 完成；返回 Agent 后从 Session 规范快照恢复，不依赖旧 React 实例。这里的“继续”不等于 detached OS 后台 Job：当前没有跨重启进程、PTY 或脱离 Run 生命周期的命令能力。
 - 正在 renderer prepare 的请求在卸载时取消。
 - renderer 写操作在 authoritative commit 前卸载时取消执行并停止对应 Run，不能把可能尚未写入的操作留到超时。
 - authoritative commit 后卸载不能撤销已经成功的真实写入；在途 executor继续收口规范结果，再按既有 stop-after-commit 语义结束。
@@ -132,7 +132,7 @@ Run 和 ToolActivity 当前共享八种状态 ID：
 
 | 状态 | 含义 | UI 约束 |
 | --- | --- | --- |
-| `preparing` | 已创建的 Tool 正在完成 renderer prepare、尚未进入真实执行 | 显示规范准备态，不伪造进度或副作用 |
+| `preparing` | 已创建的 Tool 正在完成 main-owned 或 renderer-owned prepare、尚未进入真实执行 | 显示规范准备态，不伪造进度或副作用；main-owned prepare 不要求 renderer 事件 |
 | `awaiting_approval` | 等待用户批准准备好的动作 | 待决审批卡必须可见；只有规范 pending 审批可操作 |
 | `awaiting_interaction` | 等待用户回答有限选择或表单 | 待决交互必须可见且可恢复 |
 | `running` | provider 或 Tool 正在执行 | 使用规范进度；没有进度时只显示通用运行态 |
@@ -197,7 +197,7 @@ agent.interaction.submit
 - 可以维护尚未提交的 public prepared action 编辑稿，例如目标目录、文件名或格式。
 - 批准或拒绝必须继续调用 `useAgentSession.resolveApproval` 对应的既有 bridge / IPC。
 - UI 不直接执行目录创建、上传、保存或媒体进程，也不乐观标记 approved。
-- 提交必须保留规范的 approval、Session、Run、prepared action 身份；main 负责重新准备、校验并冻结动作。
+- 提交必须保留规范的 approval、Session、Run、prepared action 身份；main 每次批准都重新准备、校验并冻结动作。动作、预览、权限行为或私有执行绑定漂移时，原提交返回 `reapprovalRequired` 并由新的规范待确认卡继续展示，UI 不能把它当成拒绝或自行复用旧卡。SQLite CAS 成功后旧 approval 已不可操作，即使随后 Run / 事件投影失败也不能重新显示或重试旧卡。
 - `approvalBusyIds` 是防重复提交的 UI 协调，不得删除后靠按钮动画替代。
 
 交互卡：

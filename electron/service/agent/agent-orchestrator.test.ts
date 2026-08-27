@@ -35,7 +35,10 @@ import { createSQLiteAgentSessionStore, type AgentSessionStore } from './agent-s
 import {
   agentToolRegistry,
   createAgentToolRegistry,
+  hashAgentToolInputForPreparation,
   type AgentTool,
+  type AgentToolMainPreparationContext,
+  type AgentToolMainPreparationResult,
 } from './agent-tool-registry';
 import {
   MINIMUM_AGENT_PROVIDER_TOOL_RESULT_CONTENT,
@@ -1379,6 +1382,32 @@ describe('Agent orchestrator', () => {
     );
     await expect(orchestrator.resolveToolApproval(webContents.id, approvalDecision))
       .rejects.toThrow('正在处理');
+    await vi.waitFor(() => {
+      expect(webContents.send.mock.calls
+        .map(call => call[1])
+        .filter(event => event?.type === 'tool-prepare-requested')).toHaveLength(2);
+    });
+    const approvalPreparation = webContents.send.mock.calls
+      .map(call => call[1])
+      .filter(event => event?.type === 'tool-prepare-requested')[1].preparation;
+    expect(orchestrator.completeToolPreparation(webContents.id, {
+      callId: approvalPreparation.callId,
+      inputHash: approvalPreparation.inputHash,
+      libraryId: 3,
+      ownerScope: OWNER_SCOPE,
+      prepareId: approvalPreparation.prepareId,
+      result: {
+        providerBindings: {
+          m4a: {
+            providerAlias: 'local-minio',
+            providerLabel: '本机 MinIO',
+          },
+        },
+      },
+      runId: started.runId,
+      sessionId: started.sessionId,
+      toolRunId: approvalPreparation.toolRunId,
+    })).toBe(true);
     const decision = await resolvingApproval;
     if (!decision.approved || !decision.execution) throw new Error('expected renderer execution');
     const execution = decision.execution;
@@ -1768,6 +1797,1131 @@ describe('Agent orchestrator', () => {
       { value: 1 },
       expect.objectContaining({ appContext: expect.objectContaining({ libraryId: 3 }) }),
     );
+  });
+
+  it('re-prepares an approved main Tool and keeps its private binding out of persistence and IPC', async () => {
+    const prepareMain = vi.fn(async (
+      _input: unknown,
+      requestedAction: AgentMediaExtractAudioPreparedActionPublicV1 | undefined,
+      _context: AgentToolMainPreparationContext,
+    ) => {
+      void _context;
+      const publicAction = requestedAction || mediaPreparedAction();
+      return {
+        binding: {
+          privateMarker: `main-only:${publicAction.outputFileName}`,
+        },
+        decision: {
+          behavior: 'ask' as const,
+          preview: {
+            description: `准备 ${publicAction.outputFileName}`,
+            risk: 'write' as const,
+            title: '准备 main 操作',
+          },
+          risk: 'write' as const,
+        },
+        publicAction,
+        snapshotMaterial: {
+          bindingRevision: publicAction.outputFileName,
+        },
+      };
+    });
+    const execute = vi.fn(async (
+      toolInput: unknown,
+      toolContext: Parameters<NonNullable<AgentTool['execute']>>[1],
+    ) => {
+      void toolInput;
+      void toolContext;
+      return { message: 'main prepared completed', ok: true };
+    });
+    const mainPreparedTool: AgentTool = {
+      description: 'test main prepared tool',
+      execute,
+      inputSchema: {
+        additionalProperties: false,
+        properties: {
+          format: { enum: ['m4a'], type: 'string' },
+        },
+        required: ['format'],
+        type: 'object',
+      },
+      name: 'media.extractAudio',
+      prepareMain,
+      risk: 'write',
+    };
+    const testRegistry = createAgentToolRegistry([
+      ...agentToolRegistry.list().filter(tool => tool.name !== mainPreparedTool.name),
+      mainPreparedTool,
+    ]);
+    const snapshotSpy = vi.spyOn(agentToolRegistry, 'createSnapshot')
+      .mockReturnValue(testRegistry.createSnapshot());
+
+    try {
+      mocks.streamAgentProviderTurn
+        .mockResolvedValueOnce({
+          content: '',
+          toolCalls: [{
+            id: 'call-main-prepared',
+            input: { format: 'm4a' },
+            name: mainPreparedTool.name,
+          }],
+        })
+        .mockImplementationOnce(async (_connection, input, onDelta) => {
+          expect(input.messages.at(-1)?.content).toContain('main prepared completed');
+          onDelta('main prepare 已完成。');
+          return { content: 'main prepare 已完成。', toolCalls: [] };
+        });
+      const webContents = sender();
+      const orchestrator = createOrchestrator();
+      const started = await orchestrator.start(webContents as never, request());
+      await vi.waitFor(() => {
+        expect(webContents.send).toHaveBeenCalledWith(
+          'agent:chat:event',
+          expect.objectContaining({ type: 'tool-approval-required' }),
+        );
+      });
+      const approval = (webContents.send.mock.calls
+        .map(call => call[1])
+        .find(event => event?.type === 'tool-approval-required').approval
+      ) as AgentToolApprovalSnapshot;
+      if (!approval.preparation) throw new Error('expected main prepared approval');
+
+      const initialPreparationContext = prepareMain.mock.calls[0]?.[2];
+      expect(Object.keys(initialPreparationContext || {}).sort()).toEqual([
+        'activeSkillId',
+        'appContext',
+        'ownerScope',
+        'ownerWebContentsId',
+        'perception',
+        'preparationIdentity',
+        'signal',
+      ]);
+      expect(initialPreparationContext?.preparationIdentity).toMatchObject({
+        aiDestinationIdentity: expect.stringMatching(/^v1:[a-f0-9]{64}$/u),
+        callId: 'call-main-prepared',
+        libraryId: 3,
+        ownerScope: OWNER_SCOPE,
+        ownerWebContentsId: webContents.id,
+        preparedActionId: approval.preparation.preparedActionId,
+        runCapabilityIdentity: expect.stringMatching(/^v2:[a-f0-9]{64}$/u),
+        runId: started.runId,
+        sessionId: started.sessionId,
+        toolInputHash: hashAgentToolInputForPreparation({ format: 'm4a' }),
+        toolName: mainPreparedTool.name,
+        toolRegistrationId: expect.any(String),
+        toolRunId: expect.any(String),
+      });
+      expect(initialPreparationContext).not.toHaveProperty('onProgress');
+      expect(initialPreparationContext).not.toHaveProperty('requestInteraction');
+      expect(initialPreparationContext).not.toHaveProperty('runCapabilitySnapshot');
+      expect(initialPreparationContext).not.toHaveProperty('saveMemoryProposal');
+
+      expect(webContents.send.mock.calls.map(call => call[1]?.type))
+        .not.toContain('tool-prepare-requested');
+      expect(webContents.send.mock.calls.map(call => call[1]?.type))
+        .not.toContain('tool-execution-requested');
+      expect(JSON.stringify(webContents.send.mock.calls)).not.toContain('main-only:');
+      expect(JSON.stringify(await store.getSession(started.sessionId, OWNER_SCOPE, 3)))
+        .not.toContain('main-only:');
+
+      const editedAction = {
+        ...approval.preparation.action,
+        outputFileName: 'approved-audio.m4a',
+      } as AgentMediaExtractAudioPreparedActionPublicV1;
+      await expect(orchestrator.resolveToolApproval(webContents.id, {
+        approvalId: approval.approvalId,
+        approved: true,
+        libraryId: 3,
+        ownerScope: OWNER_SCOPE,
+        preparedAction: editedAction,
+        preparedActionId: approval.preparation.preparedActionId,
+        runId: started.runId,
+        sessionId: started.sessionId,
+      })).resolves.toEqual({ approved: false, reapprovalRequired: true });
+      expect(execute).not.toHaveBeenCalled();
+      await vi.waitFor(() => {
+        expect(webContents.send.mock.calls
+          .map(call => call[1])
+          .filter(event => event?.type === 'tool-approval-required')).toHaveLength(2);
+      });
+      const replacementApproval = (webContents.send.mock.calls
+        .map(call => call[1])
+        .filter(event => event?.type === 'tool-approval-required')[1].approval
+      ) as AgentToolApprovalSnapshot;
+      if (!replacementApproval.preparation) {
+        throw new Error('expected replacement main prepared approval');
+      }
+      expect(replacementApproval).toMatchObject({
+        approvalId: expect.not.stringMatching(new RegExp(`^${approval.approvalId}$`, 'u')),
+        preparation: {
+          action: { outputFileName: 'approved-audio.m4a' },
+          preparedActionId: expect.not.stringMatching(
+            new RegExp(`^${approval.preparation.preparedActionId}$`, 'u'),
+          ),
+        },
+      });
+      await expect(orchestrator.resolveToolApproval(webContents.id, {
+        approvalId: replacementApproval.approvalId,
+        approved: true,
+        libraryId: 3,
+        ownerScope: OWNER_SCOPE,
+        preparedAction: replacementApproval.preparation.action,
+        preparedActionId: replacementApproval.preparation.preparedActionId,
+        runId: started.runId,
+        sessionId: started.sessionId,
+      })).resolves.toEqual({ approved: true });
+      await vi.waitFor(() => {
+        expect(webContents.send).toHaveBeenCalledWith('agent:chat:event', expect.objectContaining({
+          content: 'main prepare 已完成。',
+          type: 'completed',
+        }));
+      });
+
+      expect(prepareMain).toHaveBeenCalledTimes(3);
+      expect(prepareMain.mock.calls[1]?.[1]).toMatchObject({
+        outputFileName: 'approved-audio.m4a',
+      });
+      expect(prepareMain.mock.calls[2]?.[1]).toMatchObject({
+        outputFileName: 'approved-audio.m4a',
+      });
+      const finalPreparationIdentity = prepareMain.mock.calls[2]?.[2].preparationIdentity;
+      expect(finalPreparationIdentity.preparedActionId)
+        .not.toBe(replacementApproval.preparation.preparedActionId);
+      expect(execute).toHaveBeenCalledTimes(1);
+      const executed = execute.mock.calls[0];
+      if (!executed?.[1].preparation) throw new Error('expected main preparation context');
+      expect(executed[0]).toEqual({ format: 'm4a' });
+      expect(executed[1]).toMatchObject({
+        preparation: {
+          binding: { privateMarker: 'main-only:approved-audio.m4a' },
+          preparedActionId: finalPreparationIdentity.preparedActionId,
+          publicAction: { outputFileName: 'approved-audio.m4a' },
+          snapshotHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
+        },
+      });
+      const snapshot = await store.getSession(started.sessionId, OWNER_SCOPE, 3);
+      expect(snapshot?.toolActivities[0]).toMatchObject({
+        preparation: {
+          action: { outputFileName: 'approved-audio.m4a' },
+          preparedActionId: executed[1].preparation.preparedActionId,
+          snapshotHash: executed[1].preparation.snapshotHash,
+        },
+        status: 'completed',
+      });
+      expect(JSON.stringify(snapshot)).not.toContain('main-only:');
+      expect(JSON.stringify(webContents.send.mock.calls)).not.toContain('main-only:');
+      const resolvedEvents = webContents.send.mock.calls
+        .map(call => call[1])
+        .filter(event => event?.type === 'tool-approval-resolved');
+      expect(resolvedEvents).toHaveLength(1);
+      expect(resolvedEvents[0]).toMatchObject({
+        approvalId: replacementApproval.approvalId,
+        approved: true,
+      });
+    } finally {
+      snapshotSpy.mockRestore();
+    }
+  });
+
+  it('opens a fresh approval round when private binding, preview, or behavior drifts', async () => {
+    let preparationRound = 0;
+    const prepareMain = vi.fn(async (
+      _input: unknown,
+      _requestedAction: AgentMediaExtractAudioPreparedActionPublicV1 | undefined,
+      _context: AgentToolMainPreparationContext,
+    ) => {
+      void _input;
+      void _requestedAction;
+      void _context;
+      preparationRound += 1;
+      const behavior = preparationRound >= 4 ? 'allow' as const : 'ask' as const;
+      return {
+        binding: {
+          privateRevision: preparationRound >= 2 ? 'binding-v2' : 'binding-v1',
+        },
+        decision: behavior === 'ask'
+          ? {
+              behavior,
+              preview: {
+                description: preparationRound >= 3 ? 'preview-v2' : 'preview-v1',
+                risk: 'write' as const,
+                title: '准备 main 操作',
+              },
+              risk: 'write' as const,
+            }
+          : { behavior, risk: 'write' as const },
+        publicAction: mediaPreparedAction(),
+        snapshotMaterial: { policyRevision: 'policy-v1' },
+      };
+    });
+    const execute = vi.fn(async (
+      _input: unknown,
+      _context: Parameters<NonNullable<AgentTool['execute']>>[1],
+    ) => {
+      void _input;
+      void _context;
+      return { message: 'drift checks completed', ok: true };
+    });
+    const mainPreparedTool: AgentTool = {
+      description: 'test main preparation drift',
+      execute,
+      inputSchema: { additionalProperties: false, type: 'object' },
+      name: 'media.extractAudio',
+      prepareMain,
+      risk: 'write',
+    };
+    const testRegistry = createAgentToolRegistry([
+      ...agentToolRegistry.list().filter(tool => tool.name !== mainPreparedTool.name),
+      mainPreparedTool,
+    ]);
+    const snapshotSpy = vi.spyOn(agentToolRegistry, 'createSnapshot')
+      .mockReturnValue(testRegistry.createSnapshot());
+
+    try {
+      mocks.streamAgentProviderTurn
+        .mockResolvedValueOnce({
+          content: '',
+          toolCalls: [{ id: 'call-main-drift', input: {}, name: mainPreparedTool.name }],
+        })
+        .mockImplementationOnce(async (_connection, input, onDelta) => {
+          expect(input.messages.at(-1)?.content).toContain('drift checks completed');
+          onDelta('漂移检查已完成。');
+          return { content: '漂移检查已完成。', toolCalls: [] };
+        });
+      const webContents = sender();
+      const orchestrator = createOrchestrator();
+      const started = await orchestrator.start(webContents as never, request());
+      const approvalEvents = () => webContents.send.mock.calls
+        .map(call => call[1])
+        .filter(event => event?.type === 'tool-approval-required');
+      await vi.waitFor(() => expect(approvalEvents()).toHaveLength(1));
+
+      for (let index = 0; index < 3; index += 1) {
+        const approval = approvalEvents().at(-1)?.approval as AgentToolApprovalSnapshot;
+        if (!approval.preparation) throw new Error('expected prepared approval');
+        await expect(orchestrator.resolveToolApproval(webContents.id, {
+          approvalId: approval.approvalId,
+          approved: true,
+          libraryId: 3,
+          ownerScope: OWNER_SCOPE,
+          preparedAction: approval.preparation.action,
+          preparedActionId: approval.preparation.preparedActionId,
+          runId: started.runId,
+          sessionId: started.sessionId,
+        })).resolves.toEqual({ approved: false, reapprovalRequired: true });
+        await vi.waitFor(() => expect(approvalEvents()).toHaveLength(index + 2));
+        expect(execute).not.toHaveBeenCalled();
+      }
+
+      const finalApproval = approvalEvents().at(-1)?.approval as AgentToolApprovalSnapshot;
+      if (!finalApproval.preparation) throw new Error('expected final prepared approval');
+      await expect(orchestrator.resolveToolApproval(webContents.id, {
+        approvalId: finalApproval.approvalId,
+        approved: true,
+        libraryId: 3,
+        ownerScope: OWNER_SCOPE,
+        preparedAction: finalApproval.preparation.action,
+        preparedActionId: finalApproval.preparation.preparedActionId,
+        runId: started.runId,
+        sessionId: started.sessionId,
+      })).resolves.toEqual({ approved: true });
+      await vi.waitFor(() => {
+        expect(webContents.send).toHaveBeenCalledWith('agent:chat:event', expect.objectContaining({
+          content: '漂移检查已完成。',
+          type: 'completed',
+        }));
+      });
+
+      expect(prepareMain).toHaveBeenCalledTimes(5);
+      expect(execute).toHaveBeenCalledTimes(1);
+      expect(execute.mock.calls[0]?.[1].preparation).toMatchObject({
+        binding: { privateRevision: 'binding-v2' },
+        preparedActionId: prepareMain.mock.calls[4]?.[2].preparationIdentity.preparedActionId,
+      });
+      expect(execute.mock.calls[0]?.[1].preparation?.preparedActionId)
+        .not.toBe(finalApproval.preparation.preparedActionId);
+      expect(webContents.send.mock.calls
+        .map(call => call[1])
+        .filter(event => event?.type === 'tool-approval-resolved')).toHaveLength(1);
+    } finally {
+      snapshotSpy.mockRestore();
+    }
+  });
+
+  it('keeps the visible approval retryable when the stable approval CAS fails', async () => {
+    const prepareMain = vi.fn(async (
+      _input: unknown,
+      _requestedAction: AgentMediaExtractAudioPreparedActionPublicV1 | undefined,
+      _context: AgentToolMainPreparationContext,
+    ) => {
+      void _input;
+      void _requestedAction;
+      void _context;
+      return {
+        binding: { privateRevision: 'stable-binding' },
+        decision: {
+          behavior: 'ask' as const,
+          preview: {
+            description: '等待确认',
+            risk: 'write' as const,
+            title: '准备 main 操作',
+          },
+          risk: 'write' as const,
+        },
+        publicAction: mediaPreparedAction(),
+        snapshotMaterial: { policyRevision: 'stable-policy' },
+      };
+    });
+    const execute = vi.fn(async (
+      _input: unknown,
+      _context: Parameters<NonNullable<AgentTool['execute']>>[1],
+    ) => {
+      void _input;
+      void _context;
+      return { message: 'retry completed', ok: true };
+    });
+    const mainPreparedTool: AgentTool = {
+      description: 'test approval CAS retry',
+      execute,
+      inputSchema: { additionalProperties: false, type: 'object' },
+      name: 'media.extractAudio',
+      prepareMain,
+      risk: 'write',
+    };
+    const testRegistry = createAgentToolRegistry([
+      ...agentToolRegistry.list().filter(tool => tool.name !== mainPreparedTool.name),
+      mainPreparedTool,
+    ]);
+    const snapshotSpy = vi.spyOn(agentToolRegistry, 'createSnapshot')
+      .mockReturnValue(testRegistry.createSnapshot());
+    const resolveApproval = store.resolveToolApproval.bind(store);
+    const resolveSpy = vi.spyOn(store, 'resolveToolApproval')
+      .mockRejectedValueOnce(new Error('temporary approval store failure'))
+      .mockImplementation(resolveApproval);
+
+    try {
+      mocks.streamAgentProviderTurn
+        .mockResolvedValueOnce({
+          content: '',
+          toolCalls: [{ id: 'call-cas-retry', input: {}, name: mainPreparedTool.name }],
+        })
+        .mockImplementationOnce(async (_connection, input, onDelta) => {
+          expect(input.messages.at(-1)?.content).toContain('retry completed');
+          onDelta('确认重试已完成。');
+          return { content: '确认重试已完成。', toolCalls: [] };
+        });
+      const webContents = sender();
+      const orchestrator = createOrchestrator();
+      const started = await orchestrator.start(webContents as never, request());
+      await vi.waitFor(() => {
+        expect(webContents.send).toHaveBeenCalledWith(
+          'agent:chat:event',
+          expect.objectContaining({ type: 'tool-approval-required' }),
+        );
+      });
+      const approval = webContents.send.mock.calls
+        .map(call => call[1])
+        .find(event => event?.type === 'tool-approval-required').approval as AgentToolApprovalSnapshot;
+      if (!approval.preparation) throw new Error('expected prepared approval');
+      const decision = {
+        approvalId: approval.approvalId,
+        approved: true,
+        libraryId: 3,
+        ownerScope: OWNER_SCOPE,
+        preparedAction: approval.preparation.action,
+        preparedActionId: approval.preparation.preparedActionId,
+        runId: started.runId,
+        sessionId: started.sessionId,
+      };
+
+      await expect(orchestrator.resolveToolApproval(webContents.id, decision))
+        .rejects.toThrow('temporary approval store failure');
+      expect(execute).not.toHaveBeenCalled();
+      expect((await store.getSession(started.sessionId, OWNER_SCOPE, 3))?.toolActivities[0])
+        .toMatchObject({
+          approval: { approvalId: approval.approvalId, status: 'pending' },
+          preparation: {
+            preparedActionId: approval.preparation.preparedActionId,
+            snapshotHash: approval.preparation.snapshotHash,
+          },
+          status: 'awaiting_approval',
+        });
+
+      await expect(orchestrator.resolveToolApproval(webContents.id, decision))
+        .resolves.toEqual({ approved: true });
+      await vi.waitFor(() => {
+        expect(webContents.send).toHaveBeenCalledWith('agent:chat:event', expect.objectContaining({
+          content: '确认重试已完成。',
+          type: 'completed',
+        }));
+      });
+      expect(prepareMain).toHaveBeenCalledTimes(3);
+      expect(execute).toHaveBeenCalledTimes(1);
+      expect(execute.mock.calls[0]?.[1].preparation?.preparedActionId)
+        .toBe(prepareMain.mock.calls[2]?.[2].preparationIdentity.preparedActionId);
+    } finally {
+      resolveSpy.mockRestore();
+      snapshotSpy.mockRestore();
+    }
+  });
+
+  it('executes the latest main capability when the approved CAS commits before a Run update fails', async () => {
+    const prepareMain = vi.fn(async (
+      _input: unknown,
+      _requestedAction: AgentMediaExtractAudioPreparedActionPublicV1 | undefined,
+      _context: AgentToolMainPreparationContext,
+    ) => {
+      void _input;
+      void _requestedAction;
+      void _context;
+      return {
+        binding: { privateRevision: 'committed-binding' },
+        decision: {
+          behavior: 'ask' as const,
+          preview: {
+            description: '等待确认',
+            risk: 'write' as const,
+            title: '准备 main 操作',
+          },
+          risk: 'write' as const,
+        },
+        publicAction: mediaPreparedAction(),
+        snapshotMaterial: { policyRevision: 'committed-policy' },
+      };
+    });
+    const execute = vi.fn(async (
+      _input: unknown,
+      _context: Parameters<NonNullable<AgentTool['execute']>>[1],
+    ) => {
+      void _input;
+      void _context;
+      return { message: 'committed approval completed', ok: true };
+    });
+    const mainPreparedTool: AgentTool = {
+      description: 'test committed approval projection failure',
+      execute,
+      inputSchema: { additionalProperties: false, type: 'object' },
+      name: 'media.extractAudio',
+      prepareMain,
+      risk: 'write',
+    };
+    const testRegistry = createAgentToolRegistry([
+      ...agentToolRegistry.list().filter(tool => tool.name !== mainPreparedTool.name),
+      mainPreparedTool,
+    ]);
+    const snapshotSpy = vi.spyOn(agentToolRegistry, 'createSnapshot')
+      .mockReturnValue(testRegistry.createSnapshot());
+    const resolveApproval = store.resolveToolApproval.bind(store);
+    const updateRun = store.updateRun.bind(store);
+    let failNextRunUpdate = false;
+    let failedRunUpdates = 0;
+    const resolveSpy = vi.spyOn(store, 'resolveToolApproval').mockImplementation(async (...args) => {
+      const activity = await resolveApproval(...args);
+      failNextRunUpdate = true;
+      return activity;
+    });
+    const updateSpy = vi.spyOn(store, 'updateRun').mockImplementation(async (...args) => {
+      if (failNextRunUpdate) {
+        failNextRunUpdate = false;
+        failedRunUpdates += 1;
+        throw new Error('post-approval Run projection failed');
+      }
+      return updateRun(...args);
+    });
+    const webContents = sender();
+    const orchestrator = createOrchestrator();
+    let started: Awaited<ReturnType<typeof orchestrator.start>> | undefined;
+
+    try {
+      mocks.streamAgentProviderTurn
+        .mockResolvedValueOnce({
+          content: '',
+          toolCalls: [{ id: 'call-committed-approval', input: {}, name: mainPreparedTool.name }],
+        })
+        .mockImplementationOnce(async (_connection, input, onDelta) => {
+          expect(input.messages.at(-1)?.content).toContain('committed approval completed');
+          onDelta('已完成提交后的执行。');
+          return { content: '已完成提交后的执行。', toolCalls: [] };
+        });
+      started = await orchestrator.start(webContents as never, request());
+      await vi.waitFor(() => {
+        expect(webContents.send).toHaveBeenCalledWith(
+          'agent:chat:event',
+          expect.objectContaining({ type: 'tool-approval-required' }),
+        );
+      });
+      const approval = webContents.send.mock.calls
+        .map(call => call[1])
+        .find(event => event?.type === 'tool-approval-required').approval as AgentToolApprovalSnapshot;
+      if (!approval.preparation) throw new Error('expected prepared approval');
+      const decision = {
+        approvalId: approval.approvalId,
+        approved: true,
+        libraryId: 3,
+        ownerScope: OWNER_SCOPE,
+        preparedAction: approval.preparation.action,
+        preparedActionId: approval.preparation.preparedActionId,
+        runId: started.runId,
+        sessionId: started.sessionId,
+      };
+
+      await expect(orchestrator.resolveToolApproval(webContents.id, decision))
+        .resolves.toEqual({ approved: true });
+      await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
+      await vi.waitFor(() => {
+        expect(webContents.send).toHaveBeenCalledWith('agent:chat:event', expect.objectContaining({
+          content: '已完成提交后的执行。',
+          type: 'completed',
+        }));
+      });
+      expect(failedRunUpdates).toBe(1);
+      expect(execute.mock.calls[0]?.[1].preparation).toMatchObject({
+        binding: { privateRevision: 'committed-binding' },
+        preparedActionId: prepareMain.mock.calls[1]?.[2].preparationIdentity.preparedActionId,
+      });
+      await expect(orchestrator.resolveToolApproval(webContents.id, decision))
+        .rejects.toThrow('不存在或已经失效');
+      expect(resolveSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      if (started) await orchestrator.shutdown();
+      updateSpy.mockRestore();
+      resolveSpy.mockRestore();
+      snapshotSpy.mockRestore();
+    }
+  });
+
+  it('publishes a replacement approval when its CAS commits before a Run update fails', async () => {
+    let preparationRound = 0;
+    const prepareMain = vi.fn(async (
+      _input: unknown,
+      _requestedAction: AgentMediaExtractAudioPreparedActionPublicV1 | undefined,
+      _context: AgentToolMainPreparationContext,
+    ) => {
+      void _input;
+      void _requestedAction;
+      void _context;
+      preparationRound += 1;
+      return {
+        binding: {
+          privateRevision: preparationRound >= 2 ? 'replacement-v2' : 'replacement-v1',
+        },
+        decision: {
+          behavior: 'ask' as const,
+          preview: {
+            description: preparationRound >= 2 ? 'replacement preview v2' : 'replacement preview v1',
+            risk: 'write' as const,
+            title: '准备 main 操作',
+          },
+          risk: 'write' as const,
+        },
+        publicAction: mediaPreparedAction(),
+        snapshotMaterial: { policyRevision: 'replacement-policy' },
+      };
+    });
+    const execute = vi.fn(async () => ({ message: 'unexpected execution', ok: true }));
+    const mainPreparedTool: AgentTool = {
+      description: 'test replacement approval projection failure',
+      execute,
+      inputSchema: { additionalProperties: false, type: 'object' },
+      name: 'media.extractAudio',
+      prepareMain,
+      risk: 'write',
+    };
+    const testRegistry = createAgentToolRegistry([
+      ...agentToolRegistry.list().filter(tool => tool.name !== mainPreparedTool.name),
+      mainPreparedTool,
+    ]);
+    const snapshotSpy = vi.spyOn(agentToolRegistry, 'createSnapshot')
+      .mockReturnValue(testRegistry.createSnapshot());
+    const replaceApproval = store.replacePendingToolApproval.bind(store);
+    const updateRun = store.updateRun.bind(store);
+    let failNextRunUpdate = false;
+    let failedRunUpdates = 0;
+    const replaceSpy = vi.spyOn(store, 'replacePendingToolApproval')
+      .mockImplementation(async (...args) => {
+        const activity = await replaceApproval(...args);
+        failNextRunUpdate = true;
+        return activity;
+      });
+    const updateSpy = vi.spyOn(store, 'updateRun').mockImplementation(async (...args) => {
+      if (failNextRunUpdate) {
+        failNextRunUpdate = false;
+        failedRunUpdates += 1;
+        throw new Error('replacement Run projection failed');
+      }
+      return updateRun(...args);
+    });
+    const webContents = sender();
+    const orchestrator = createOrchestrator();
+    let started: Awaited<ReturnType<typeof orchestrator.start>> | undefined;
+
+    try {
+      mocks.streamAgentProviderTurn.mockResolvedValueOnce({
+        content: '',
+        toolCalls: [{ id: 'call-replacement-approval', input: {}, name: mainPreparedTool.name }],
+      });
+      started = await orchestrator.start(webContents as never, request());
+      const approvalEvents = () => webContents.send.mock.calls
+        .map(call => call[1])
+        .filter(event => event?.type === 'tool-approval-required');
+      await vi.waitFor(() => expect(approvalEvents()).toHaveLength(1));
+      const approval = approvalEvents()[0].approval as AgentToolApprovalSnapshot;
+      if (!approval.preparation) throw new Error('expected prepared approval');
+      const decision = {
+        approvalId: approval.approvalId,
+        approved: true,
+        libraryId: 3,
+        ownerScope: OWNER_SCOPE,
+        preparedAction: approval.preparation.action,
+        preparedActionId: approval.preparation.preparedActionId,
+        runId: started.runId,
+        sessionId: started.sessionId,
+      };
+
+      await expect(orchestrator.resolveToolApproval(webContents.id, decision))
+        .resolves.toEqual({ approved: false, reapprovalRequired: true });
+      await vi.waitFor(() => expect(approvalEvents()).toHaveLength(2));
+      const replacement = approvalEvents()[1].approval as AgentToolApprovalSnapshot;
+      expect(replacement).toMatchObject({
+        approvalId: expect.not.stringMatching(new RegExp(`^${approval.approvalId}$`, 'u')),
+        preview: { description: 'replacement preview v2' },
+      });
+      expect(failedRunUpdates).toBe(1);
+      expect(execute).not.toHaveBeenCalled();
+      await expect(orchestrator.resolveToolApproval(webContents.id, decision))
+        .rejects.toThrow('不存在或已经失效');
+      expect(replaceSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      if (started) await orchestrator.shutdown();
+      updateSpy.mockRestore();
+      replaceSpy.mockRestore();
+      snapshotSpy.mockRestore();
+    }
+  });
+
+  it('settles a denied approval when its CAS commits before a Run update fails', async () => {
+    const prepareMain = vi.fn(async () => ({
+      binding: { privateRevision: 'denied-binding' },
+      decision: {
+        behavior: 'ask' as const,
+        preview: {
+          description: '等待确认',
+          risk: 'write' as const,
+          title: '准备 main 操作',
+        },
+        risk: 'write' as const,
+      },
+      publicAction: mediaPreparedAction(),
+      snapshotMaterial: { policyRevision: 'denied-policy' },
+    }));
+    const execute = vi.fn(async () => ({ message: 'unexpected execution', ok: true }));
+    const mainPreparedTool: AgentTool = {
+      description: 'test denied approval projection failure',
+      execute,
+      inputSchema: { additionalProperties: false, type: 'object' },
+      name: 'media.extractAudio',
+      prepareMain,
+      risk: 'write',
+    };
+    const testRegistry = createAgentToolRegistry([
+      ...agentToolRegistry.list().filter(tool => tool.name !== mainPreparedTool.name),
+      mainPreparedTool,
+    ]);
+    const snapshotSpy = vi.spyOn(agentToolRegistry, 'createSnapshot')
+      .mockReturnValue(testRegistry.createSnapshot());
+    const resolveApproval = store.resolveToolApproval.bind(store);
+    const updateRun = store.updateRun.bind(store);
+    let failNextRunUpdate = false;
+    let failedRunUpdates = 0;
+    const resolveSpy = vi.spyOn(store, 'resolveToolApproval').mockImplementation(async (...args) => {
+      const activity = await resolveApproval(...args);
+      failNextRunUpdate = true;
+      return activity;
+    });
+    const updateSpy = vi.spyOn(store, 'updateRun').mockImplementation(async (...args) => {
+      if (failNextRunUpdate) {
+        failNextRunUpdate = false;
+        failedRunUpdates += 1;
+        throw new Error('denied Run projection failed');
+      }
+      return updateRun(...args);
+    });
+    const webContents = sender();
+    const orchestrator = createOrchestrator();
+    let started: Awaited<ReturnType<typeof orchestrator.start>> | undefined;
+
+    try {
+      mocks.streamAgentProviderTurn
+        .mockResolvedValueOnce({
+          content: '',
+          toolCalls: [{ id: 'call-denied-approval', input: {}, name: mainPreparedTool.name }],
+        })
+        .mockImplementationOnce(async (_connection, input, onDelta) => {
+          expect(input.messages.at(-1)?.content).toContain('用户取消了');
+          onDelta('已取消操作。');
+          return { content: '已取消操作。', toolCalls: [] };
+        });
+      started = await orchestrator.start(webContents as never, request());
+      await vi.waitFor(() => {
+        expect(webContents.send).toHaveBeenCalledWith(
+          'agent:chat:event',
+          expect.objectContaining({ type: 'tool-approval-required' }),
+        );
+      });
+      const approval = webContents.send.mock.calls
+        .map(call => call[1])
+        .find(event => event?.type === 'tool-approval-required').approval as AgentToolApprovalSnapshot;
+      const decision = {
+        approvalId: approval.approvalId,
+        approved: false,
+        libraryId: 3,
+        ownerScope: OWNER_SCOPE,
+        runId: started.runId,
+        sessionId: started.sessionId,
+      };
+
+      await expect(orchestrator.resolveToolApproval(webContents.id, decision))
+        .resolves.toEqual({ approved: false });
+      await vi.waitFor(() => {
+        expect(webContents.send).toHaveBeenCalledWith('agent:chat:event', expect.objectContaining({
+          content: '已取消操作。',
+          type: 'completed',
+        }));
+      });
+      expect(failedRunUpdates).toBe(1);
+      expect(execute).not.toHaveBeenCalled();
+      await expect(orchestrator.resolveToolApproval(webContents.id, decision))
+        .rejects.toThrow('不存在或已经失效');
+      expect(resolveSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      if (started) await orchestrator.shutdown();
+      updateSpy.mockRestore();
+      resolveSpy.mockRestore();
+      snapshotSpy.mockRestore();
+    }
+  });
+
+  it('executes an automatically allowed main prepared Tool without renderer coordination', async () => {
+    const execute = vi.fn(async (
+      toolInput: unknown,
+      toolContext: Parameters<NonNullable<AgentTool['execute']>>[1],
+    ) => {
+      void toolInput;
+      void toolContext;
+      return { message: 'main prepared read completed', ok: true };
+    });
+    const mainPreparedTool: AgentTool = {
+      description: 'test allowed main prepared tool',
+      execute,
+      inputSchema: { additionalProperties: false, type: 'object' },
+      name: 'media.extractAudio',
+      prepareMain: async () => ({
+        binding: { privateMarker: 'allowed-main-only' },
+        decision: { behavior: 'allow', risk: 'write' },
+        publicAction: mediaPreparedAction(),
+      }),
+      risk: 'write',
+    };
+    const testRegistry = createAgentToolRegistry([
+      ...agentToolRegistry.list().filter(tool => tool.name !== mainPreparedTool.name),
+      mainPreparedTool,
+    ]);
+    const snapshotSpy = vi.spyOn(agentToolRegistry, 'createSnapshot')
+      .mockReturnValue(testRegistry.createSnapshot());
+
+    try {
+      mocks.streamAgentProviderTurn
+        .mockResolvedValueOnce({
+          content: '',
+          toolCalls: [{ id: 'call-main-prepared-read', input: {}, name: mainPreparedTool.name }],
+        })
+        .mockImplementationOnce(async (_connection, input, onDelta) => {
+          expect(input.messages.at(-1)?.content).toContain('main prepared read completed');
+          onDelta('main 只读准备已完成。');
+          return { content: 'main 只读准备已完成。', toolCalls: [] };
+        });
+      const webContents = sender();
+      const orchestrator = createOrchestrator();
+      const started = await orchestrator.start(webContents as never, request());
+      await vi.waitFor(() => {
+        expect(webContents.send).toHaveBeenCalledWith('agent:chat:event', expect.objectContaining({
+          content: 'main 只读准备已完成。',
+          type: 'completed',
+        }));
+      });
+
+      expect(execute).toHaveBeenCalledTimes(1);
+      expect(execute.mock.calls[0]?.[1]).toMatchObject({
+        preparation: {
+          binding: { privateMarker: 'allowed-main-only' },
+          publicAction: { kind: 'media.extractAudio', version: 1 },
+        },
+      });
+      const eventTypes = webContents.send.mock.calls.map(call => call[1]?.type);
+      expect(eventTypes).not.toContain('tool-approval-required');
+      expect(eventTypes).not.toContain('tool-prepare-requested');
+      expect(eventTypes).not.toContain('tool-execution-requested');
+      expect(JSON.stringify(webContents.send.mock.calls)).not.toContain('allowed-main-only');
+      expect(JSON.stringify(await store.getSession(started.sessionId, OWNER_SCOPE, 3)))
+        .not.toContain('allowed-main-only');
+    } finally {
+      snapshotSpy.mockRestore();
+    }
+  });
+
+  it('does not execute a main prepared Tool when preparation resolves after cancellation', async () => {
+    let resolvePreparation: (() => void) | undefined;
+    const prepareMain = vi.fn(() => new Promise<AgentToolMainPreparationResult>(
+      (resolve) => {
+        resolvePreparation = () => resolve({
+          binding: { privateMarker: 'late-main-only' },
+          decision: {
+            behavior: 'ask',
+            preview: {
+              description: '不应进入确认',
+              risk: 'write',
+              title: '迟到准备',
+            },
+            risk: 'write',
+          },
+          publicAction: mediaPreparedAction(),
+        });
+      },
+    ));
+    const execute = vi.fn(async () => ({ ok: true }));
+    const mainPreparedTool: AgentTool = {
+      description: 'test late main preparation',
+      execute,
+      inputSchema: { additionalProperties: false, type: 'object' },
+      name: 'media.extractAudio',
+      prepareMain,
+      risk: 'write',
+    };
+    const testRegistry = createAgentToolRegistry([
+      ...agentToolRegistry.list().filter(tool => tool.name !== mainPreparedTool.name),
+      mainPreparedTool,
+    ]);
+    const snapshotSpy = vi.spyOn(agentToolRegistry, 'createSnapshot')
+      .mockReturnValue(testRegistry.createSnapshot());
+
+    try {
+      mocks.streamAgentProviderTurn.mockResolvedValueOnce({
+        content: '',
+        toolCalls: [{ id: 'call-late-main-prepare', input: {}, name: mainPreparedTool.name }],
+      });
+      const webContents = sender();
+      const orchestrator = createOrchestrator();
+      const started = await orchestrator.start(webContents as never, request());
+      await vi.waitFor(() => expect(resolvePreparation).toBeTypeOf('function'));
+
+      expect(orchestrator.stop(started.sessionId, webContents.id)).toBe(true);
+      await vi.waitFor(() => {
+        expect(webContents.send).toHaveBeenCalledWith('agent:chat:event', expect.objectContaining({
+          runId: started.runId,
+          type: 'cancelled',
+        }));
+      });
+      resolvePreparation?.();
+      await Promise.resolve();
+
+      expect(execute).not.toHaveBeenCalled();
+      expect(webContents.send.mock.calls.map(call => call[1]?.type))
+        .not.toContain('tool-approval-required');
+      expect(webContents.send.mock.calls.map(call => call[1]?.type))
+        .not.toContain('tool-prepare-requested');
+      expect(JSON.stringify(webContents.send.mock.calls)).not.toContain('late-main-only');
+      expect(await store.getSession(started.sessionId, OWNER_SCOPE, 3)).toMatchObject({
+        lastRunStatus: 'cancelled',
+        toolActivities: [expect.objectContaining({ status: 'cancelled' })],
+      });
+    } finally {
+      snapshotSpy.mockRestore();
+    }
+  });
+
+  it('settles stop while an approval re-prepare never resolves', async () => {
+    let preparationRound = 0;
+    let reprepareStarted = false;
+    const prepareMain = vi.fn(async () => {
+      preparationRound += 1;
+      if (preparationRound > 1) {
+        reprepareStarted = true;
+        return new Promise<AgentToolMainPreparationResult>(() => undefined);
+      }
+      return {
+        binding: { privateMarker: 'initial-main-only' },
+        decision: {
+          behavior: 'ask' as const,
+          preview: {
+            description: '等待确认',
+            risk: 'write' as const,
+            title: '准备 main 操作',
+          },
+          risk: 'write' as const,
+        },
+        publicAction: mediaPreparedAction(),
+      };
+    });
+    const execute = vi.fn(async () => ({ ok: true }));
+    const mainPreparedTool: AgentTool = {
+      description: 'test never settling re-prepare',
+      execute,
+      inputSchema: { additionalProperties: false, type: 'object' },
+      name: 'media.extractAudio',
+      prepareMain,
+      risk: 'write',
+    };
+    const testRegistry = createAgentToolRegistry([
+      ...agentToolRegistry.list().filter(tool => tool.name !== mainPreparedTool.name),
+      mainPreparedTool,
+    ]);
+    const snapshotSpy = vi.spyOn(agentToolRegistry, 'createSnapshot')
+      .mockReturnValue(testRegistry.createSnapshot());
+
+    try {
+      mocks.streamAgentProviderTurn.mockResolvedValueOnce({
+        content: '',
+        toolCalls: [{ id: 'call-never-reprepare', input: {}, name: mainPreparedTool.name }],
+      });
+      const webContents = sender();
+      const orchestrator = createOrchestrator();
+      const started = await orchestrator.start(webContents as never, request());
+      await vi.waitFor(() => {
+        expect(webContents.send).toHaveBeenCalledWith(
+          'agent:chat:event',
+          expect.objectContaining({ type: 'tool-approval-required' }),
+        );
+      });
+      const approval = webContents.send.mock.calls
+        .map(call => call[1])
+        .find(event => event?.type === 'tool-approval-required').approval as AgentToolApprovalSnapshot;
+      if (!approval.preparation) throw new Error('expected prepared approval');
+      const decision = orchestrator.resolveToolApproval(webContents.id, {
+        approvalId: approval.approvalId,
+        approved: true,
+        libraryId: 3,
+        ownerScope: OWNER_SCOPE,
+        preparedAction: approval.preparation.action,
+        preparedActionId: approval.preparation.preparedActionId,
+        runId: started.runId,
+        sessionId: started.sessionId,
+      });
+      const observedDecision = decision.then(
+        value => ({ status: 'resolved' as const, value }),
+        error => ({ error, status: 'rejected' as const }),
+      );
+      await vi.waitFor(() => expect(reprepareStarted).toBe(true));
+
+      expect(orchestrator.stop(started.sessionId, webContents.id)).toBe(true);
+      const stoppedDecision = await observedDecision;
+      expect(stoppedDecision.status).toBe('rejected');
+      if (stoppedDecision.status === 'rejected') {
+        expect(stoppedDecision.error).toMatchObject({ name: 'AbortError' });
+      }
+      await vi.waitFor(() => {
+        expect(webContents.send).toHaveBeenCalledWith('agent:chat:event', expect.objectContaining({
+          runId: started.runId,
+          type: 'cancelled',
+        }));
+      });
+
+      expect(execute).not.toHaveBeenCalled();
+      expect(webContents.send.mock.calls
+        .map(call => call[1])
+        .filter(event => event?.type === 'tool-approval-required')).toHaveLength(1);
+      expect(webContents.send.mock.calls
+        .map(call => call[1])
+        .filter(event => event?.type === 'tool-approval-resolved')).toHaveLength(0);
+      expect(await store.getSession(started.sessionId, OWNER_SCOPE, 3)).toMatchObject({
+        lastRunStatus: 'cancelled',
+        toolActivities: [expect.objectContaining({ status: 'cancelled' })],
+      });
+    } finally {
+      snapshotSpy.mockRestore();
+    }
+  });
+
+  it('does not expose main re-prepare failures through the approval IPC result', async () => {
+    let preparationRound = 0;
+    const privateError = 'api_key=sk-private-reprepare-token at /Users/private/workspace';
+    const prepareMain = vi.fn(async () => {
+      preparationRound += 1;
+      if (preparationRound > 1) throw new Error(privateError);
+      return {
+        binding: { privateMarker: 'initial-main-only' },
+        decision: {
+          behavior: 'ask' as const,
+          preview: {
+            description: '等待确认',
+            risk: 'write' as const,
+            title: '准备 main 操作',
+          },
+          risk: 'write' as const,
+        },
+        publicAction: mediaPreparedAction(),
+      };
+    });
+    const execute = vi.fn(async () => ({ ok: true }));
+    const mainPreparedTool: AgentTool = {
+      description: 'test private re-prepare failure',
+      execute,
+      inputSchema: { additionalProperties: false, type: 'object' },
+      name: 'media.extractAudio',
+      prepareMain,
+      risk: 'write',
+    };
+    const testRegistry = createAgentToolRegistry([
+      ...agentToolRegistry.list().filter(tool => tool.name !== mainPreparedTool.name),
+      mainPreparedTool,
+    ]);
+    const snapshotSpy = vi.spyOn(agentToolRegistry, 'createSnapshot')
+      .mockReturnValue(testRegistry.createSnapshot());
+
+    try {
+      mocks.streamAgentProviderTurn.mockResolvedValueOnce({
+        content: '',
+        toolCalls: [{ id: 'call-private-reprepare', input: {}, name: mainPreparedTool.name }],
+      });
+      const webContents = sender();
+      const orchestrator = createOrchestrator();
+      const started = await orchestrator.start(webContents as never, request());
+      await vi.waitFor(() => {
+        expect(webContents.send).toHaveBeenCalledWith(
+          'agent:chat:event',
+          expect.objectContaining({ type: 'tool-approval-required' }),
+        );
+      });
+      const approval = webContents.send.mock.calls
+        .map(call => call[1])
+        .find(event => event?.type === 'tool-approval-required').approval as AgentToolApprovalSnapshot;
+      if (!approval.preparation) throw new Error('expected prepared approval');
+
+      const error = await orchestrator.resolveToolApproval(webContents.id, {
+        approvalId: approval.approvalId,
+        approved: true,
+        libraryId: 3,
+        ownerScope: OWNER_SCOPE,
+        preparedAction: approval.preparation.action,
+        preparedActionId: approval.preparation.preparedActionId,
+        runId: started.runId,
+        sessionId: started.sessionId,
+      }).then(() => undefined, reason => reason as Error);
+      expect(error?.message).toBe(`工具 ${mainPreparedTool.name} 重新准备失败，请重试`);
+      expect(error?.message).not.toContain('sk-private');
+      expect(error?.message).not.toContain('/Users/');
+      expect(JSON.stringify(webContents.send.mock.calls)).not.toContain(privateError);
+      expect(execute).not.toHaveBeenCalled();
+
+      expect(orchestrator.stop(started.sessionId, webContents.id)).toBe(true);
+      await vi.waitFor(() => {
+        expect(webContents.send).toHaveBeenCalledWith('agent:chat:event', expect.objectContaining({
+          runId: started.runId,
+          type: 'cancelled',
+        }));
+      });
+    } finally {
+      snapshotSpy.mockRestore();
+    }
   });
 
   it('returns a denied directory action to the model without executing it', async () => {

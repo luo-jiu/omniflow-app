@@ -1,10 +1,63 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { createAgentToolRegistry } from './agent-tool-registry';
+import type { AgentMediaExtractAudioPreparedActionPublicV1 } from '@/shared/agent/agent.types';
+import {
+  createAgentToolRegistry,
+  hashAgentToolInputForPreparation,
+  type AgentToolExecutionContext,
+  type AgentToolMainPreparationIdentity,
+} from './agent-tool-registry';
 import {
   AGENT_SKILL_ACTIVATE_TOOL_NAME,
   AGENT_SKILL_ACTIVATE_TOOL_REGISTRATION_ID,
 } from './skills/agent-skill.types';
+
+const PREPARED_TOOL_NAME = 'media.extractAudio';
+const PREPARED_TOOL_REGISTRATION_ID = 'media.extractAudio@test';
+
+function hashPreparationInput(input: unknown): string {
+  return hashAgentToolInputForPreparation(input);
+}
+
+function mainPreparationIdentity(
+  toolInput: unknown,
+  preparedActionId = 'prepared-action-1',
+): AgentToolMainPreparationIdentity {
+  return {
+    aiDestinationIdentity: `v1:${'a'.repeat(64)}`,
+    callId: 'call-1',
+    libraryId: 3,
+    ownerScope: {
+      accountScope: 'user:7',
+      backendScope: 'http://localhost:9000',
+    },
+    ownerWebContentsId: 17,
+    preparedActionId,
+    runCapabilityIdentity: `v2:${'b'.repeat(64)}`,
+    runId: 'run-1',
+    sessionId: 'session-1',
+    toolInputHash: hashPreparationInput(toolInput),
+    toolName: PREPARED_TOOL_NAME,
+    toolRegistrationId: PREPARED_TOOL_REGISTRATION_ID,
+    toolRunId: 'tool-run-1',
+  };
+}
+
+function mediaPreparedAction(): AgentMediaExtractAudioPreparedActionPublicV1 {
+  return {
+    conflictPolicy: 'auto_rename',
+    destination: 'library',
+    fallbackPolicy: 'prompt_local',
+    kind: 'media.extractAudio',
+    libraryId: 3,
+    outputFileName: 'movie-audio.m4a',
+    outputFormat: 'm4a',
+    parentId: 10,
+    sourceNodeId: 8,
+    targetLabel: '视频',
+    version: 1,
+  };
+}
 
 describe('Agent Tool registry', () => {
   it('registers and executes only known tools', async () => {
@@ -238,6 +291,525 @@ describe('Agent Tool registry', () => {
     }]);
     expect(explicit.getSnapshot('test.explicit-identity')?.registrationId)
       .toBe('media.extractAudio@1');
+  });
+
+  it('accepts main preparation and rejects mixed or mismatched prepare contracts', () => {
+    const prepareMain = vi.fn(async () => {
+      throw new Error('not executed');
+    });
+    const mainRegistry = createAgentToolRegistry([{
+      description: 'Main preparation',
+      execute: async () => ({ ok: true }),
+      inputSchema: { type: 'object' },
+      name: 'test.main-preparation',
+      prepareMain,
+      risk: 'write',
+    }]);
+
+    expect(mainRegistry.get('test.main-preparation')?.prepareMain).toBe(prepareMain);
+    expect(() => createAgentToolRegistry([{
+      description: 'Invalid executor',
+      executor: 'worker' as never,
+      inputSchema: { type: 'object' },
+      name: 'test.invalid-executor',
+      prepareMain,
+      risk: 'write',
+    }])).toThrow('executor 无效');
+    expect(() => createAgentToolRegistry([{
+      description: 'Main preparation with renderer executor',
+      executor: 'renderer',
+      inputSchema: { type: 'object' },
+      name: 'test.main-preparation-renderer',
+      prepareMain,
+      risk: 'write',
+    }])).toThrow('main prepare 只支持 main executor');
+    expect(() => createAgentToolRegistry([{
+      createRendererPrepareRequest: () => ({}),
+      description: 'Renderer preparation with main executor',
+      execute: async () => ({ ok: true }),
+      finalizeRendererPreparation: async () => {
+        throw new Error('not executed');
+      },
+      inputSchema: { type: 'object' },
+      name: 'test.renderer-preparation-main',
+      risk: 'write',
+    }])).toThrow('prepare 只支持 Renderer executor');
+    expect(() => createAgentToolRegistry([{
+      createRendererPrepareRequest: () => ({}),
+      description: 'Mixed preparation owners',
+      executor: 'renderer',
+      finalizeRendererPreparation: async () => {
+        throw new Error('not executed');
+      },
+      inputSchema: { type: 'object' },
+      name: 'test.mixed-preparation',
+      prepareMain,
+      risk: 'write',
+    }])).toThrow('prepare 不能同时由 main 与 Renderer 持有');
+    expect(() => createAgentToolRegistry([{
+      createRendererRequest: () => ({}),
+      description: 'Main preparation with renderer execution request',
+      execute: async () => ({ ok: true }),
+      inputSchema: { type: 'object' },
+      name: 'test.main-preparation-renderer-request',
+      prepareMain,
+      risk: 'write',
+    }])).toThrow('main prepare 与 Renderer request 契约不能并存');
+    expect(() => createAgentToolRegistry([{
+      description: 'Main preparation without execution',
+      inputSchema: { type: 'object' },
+      name: 'test.main-preparation-without-execution',
+      prepareMain,
+      risk: 'write',
+    }])).toThrow('main prepare 缺少 main executor');
+    expect(() => createAgentToolRegistry([{
+      assess: () => ({ behavior: 'allow', risk: 'write' }),
+      description: 'Main preparation with duplicate assessment',
+      execute: async () => ({ ok: true }),
+      inputSchema: { type: 'object' },
+      name: 'test.main-preparation-with-assess',
+      prepareMain,
+      risk: 'write',
+    }])).toThrow('prepare 与独立 assess 契约不能并存');
+  });
+
+  it('includes the main, renderer, or absent preparation mode in derived identities', () => {
+    const base = {
+      description: 'Preparation identity',
+      inputSchema: { type: 'object' },
+      name: 'test.preparation-identity',
+      risk: 'write' as const,
+    };
+    const withoutPreparation = createAgentToolRegistry([{
+      ...base,
+      execute: async () => ({ ok: true }),
+    }]).get('test.preparation-identity')?.registrationId;
+    const mainPreparation = createAgentToolRegistry([{
+      ...base,
+      execute: async () => ({ ok: true }),
+      prepareMain: async () => {
+        throw new Error('not executed');
+      },
+    }]).get('test.preparation-identity')?.registrationId;
+    const rendererPreparation = createAgentToolRegistry([{
+      ...base,
+      createRendererPrepareRequest: () => ({}),
+      executor: 'renderer' as const,
+      finalizeRendererPreparation: async () => {
+        throw new Error('not executed');
+      },
+    }]).get('test.preparation-identity')?.registrationId;
+
+    expect(new Set([
+      withoutPreparation,
+      mainPreparation,
+      rendererPreparation,
+    ]).size).toBe(3);
+  });
+
+  it('seals main prepared bindings behind an opaque capability before execution', async () => {
+    const execute = vi.fn(async (
+      toolInput: unknown,
+      toolContext: AgentToolExecutionContext,
+    ) => {
+      void toolInput;
+      void toolContext;
+      return { ok: true };
+    });
+    const registry = createAgentToolRegistry([{
+      description: 'Prepared audio execution',
+      execute,
+      inputSchema: {
+        additionalProperties: false,
+        properties: { format: { enum: ['m4a'], type: 'string' } },
+        required: ['format'],
+        type: 'object',
+      },
+      name: PREPARED_TOOL_NAME,
+      prepareMain: async () => {
+        throw new Error('not executed');
+      },
+      registrationId: PREPARED_TOOL_REGISTRATION_ID,
+      risk: 'write',
+    }]);
+    const snapshot = registry.createSnapshot();
+    const toolInput = { format: 'm4a' };
+    const baseContext = {
+      appContext: { libraryId: 3, platform: 'darwin' as const, selectedNodeIds: [] },
+      onProgress: () => undefined,
+      signal: new AbortController().signal,
+    };
+    const sourceBinding = {
+      provider: { alias: 'local-minio' },
+    };
+    const sealed = snapshot.sealMainPreparedExecution(PREPARED_TOOL_NAME, {
+      approvalSemantics: {
+        behavior: 'ask',
+        preview: { description: 'Extract audio', risk: 'write', title: 'Extract' },
+        risk: 'write',
+      },
+      binding: sourceBinding,
+      identity: mainPreparationIdentity(toolInput),
+      publicAction: mediaPreparedAction(),
+      snapshotMaterial: { sourceRevision: 'revision-1' },
+    });
+    sourceBinding.provider.alias = 'mutated-after-seal';
+
+    await expect(snapshot.execute(PREPARED_TOOL_NAME, toolInput, baseContext))
+      .rejects.toThrow('缺少 main prepared execution capability');
+    await expect(snapshot.execute(PREPARED_TOOL_NAME, {
+      binding: sourceBinding,
+      format: 'm4a',
+    }, {
+      ...baseContext,
+      mainPreparationCapability: sealed.capability,
+      mainPreparationIdentity: sealed.identity,
+    })).rejects.toThrow('参数不符合输入约束');
+    await expect(snapshot.execute(PREPARED_TOOL_NAME, toolInput, {
+      ...baseContext,
+      mainPreparationCapability: sealed.capability,
+      mainPreparationIdentity: sealed.identity,
+    })).resolves.toEqual({ ok: true });
+    expect(execute).toHaveBeenCalledTimes(1);
+    const executionContext = execute.mock.calls[0]?.[1];
+    expect(executionContext?.preparation).toMatchObject({
+      binding: { provider: { alias: 'local-minio' } },
+      preparedActionId: 'prepared-action-1',
+    });
+    expect(Object.isFrozen(executionContext?.preparation)).toBe(true);
+    expect(Object.isFrozen(executionContext?.preparation?.binding)).toBe(true);
+    expect(Object.isFrozen(executionContext?.preparation?.binding.provider)).toBe(true);
+  });
+
+  it('rejects oversized main preparation bindings and snapshot material before hashing', () => {
+    const registry = createAgentToolRegistry([{
+      description: 'Prepared audio execution',
+      execute: async () => ({ ok: true }),
+      inputSchema: { additionalProperties: false, type: 'object' },
+      name: PREPARED_TOOL_NAME,
+      prepareMain: async () => {
+        throw new Error('not executed');
+      },
+      registrationId: PREPARED_TOOL_REGISTRATION_ID,
+      risk: 'write',
+    }]);
+    const snapshot = registry.createSnapshot();
+    const seal = (binding: Record<string, unknown>, snapshotMaterial?: unknown) => (
+      snapshot.sealMainPreparedExecution(PREPARED_TOOL_NAME, {
+        approvalSemantics: { behavior: 'ask', risk: 'write' },
+        binding,
+        identity: mainPreparationIdentity({}),
+        publicAction: mediaPreparedAction(),
+        snapshotMaterial,
+      })
+    );
+
+    expect(() => seal({ value: 'x'.repeat(300_000) }))
+      .toThrow('main preparation binding 无效');
+    expect(() => seal({}, { value: 'x'.repeat(300_000) }))
+      .toThrow('main preparation snapshot material 无效');
+    expect(() => seal(
+      { first: 'x'.repeat(150_000) },
+      { second: 'x'.repeat(150_000) },
+    )).toThrow('main preparation seal 无效');
+  });
+
+  it('rejects forged, replayed, cross-snapshot, and unexpected main capabilities', async () => {
+    const executePrepared = vi.fn(async () => ({ ok: true }));
+    const preparedRegistry = createAgentToolRegistry([{
+      description: 'Prepared audio execution',
+      execute: executePrepared,
+      inputSchema: { additionalProperties: false, type: 'object' },
+      name: PREPARED_TOOL_NAME,
+      prepareMain: async () => {
+        throw new Error('not executed');
+      },
+      registrationId: PREPARED_TOOL_REGISTRATION_ID,
+      risk: 'write',
+    }]);
+    const firstSnapshot = preparedRegistry.createSnapshot();
+    const secondSnapshot = preparedRegistry.createSnapshot();
+    const toolInput = {};
+    const context = {
+      appContext: { libraryId: 3, platform: 'darwin' as const, selectedNodeIds: [] },
+      onProgress: () => undefined,
+      signal: new AbortController().signal,
+    };
+    const sealed = firstSnapshot.sealMainPreparedExecution(PREPARED_TOOL_NAME, {
+      approvalSemantics: { behavior: 'ask', risk: 'write' },
+      binding: { providerAlias: 'local-minio' },
+      identity: mainPreparationIdentity(toolInput),
+      publicAction: mediaPreparedAction(),
+    });
+
+    await expect(firstSnapshot.execute(PREPARED_TOOL_NAME, toolInput, {
+      ...context,
+      mainPreparationCapability: Object.freeze({}) as never,
+      mainPreparationIdentity: sealed.identity,
+    })).rejects.toThrow('capability 无效或已使用');
+    await expect(firstSnapshot.execute(PREPARED_TOOL_NAME, toolInput, {
+      ...context,
+      mainPreparationCapability: Object.freeze({ ...sealed.capability }) as never,
+      mainPreparationIdentity: sealed.identity,
+    })).rejects.toThrow('capability 无效或已使用');
+    await expect(secondSnapshot.execute(PREPARED_TOOL_NAME, toolInput, {
+      ...context,
+      mainPreparationCapability: sealed.capability,
+      mainPreparationIdentity: sealed.identity,
+    })).rejects.toThrow('capability 无效或已使用');
+
+    const ordinaryRegistry = createAgentToolRegistry([{
+      description: 'Ordinary main execution',
+      execute: async () => ({ ok: true }),
+      inputSchema: { type: 'object' },
+      name: 'test.ordinary-main',
+      risk: 'read',
+    }]);
+    await expect(ordinaryRegistry.execute('test.ordinary-main', {}, {
+      ...context,
+      mainPreparationCapability: sealed.capability,
+      mainPreparationIdentity: sealed.identity,
+    })).rejects.toThrow('不接受 main prepared execution capability');
+
+    await expect(firstSnapshot.execute(PREPARED_TOOL_NAME, toolInput, {
+      ...context,
+      mainPreparationCapability: sealed.capability,
+      mainPreparationIdentity: sealed.identity,
+    })).resolves.toEqual({ ok: true });
+    await expect(firstSnapshot.execute(PREPARED_TOOL_NAME, toolInput, {
+      ...context,
+      mainPreparationCapability: sealed.capability,
+      mainPreparationIdentity: sealed.identity,
+    })).rejects.toThrow('capability 无效或已使用');
+    expect(executePrepared).toHaveBeenCalledTimes(1);
+  });
+
+  it('binds main capabilities to owner, profile, run, input, and registration identities', async () => {
+    const executePrepared = vi.fn(async () => ({ ok: true }));
+    const registry = createAgentToolRegistry([{
+      description: 'Prepared identity execution',
+      execute: executePrepared,
+      inputSchema: {
+        additionalProperties: false,
+        properties: {
+          PATH: { type: 'string' },
+          Path: { type: 'string' },
+          format: { type: 'string' },
+        },
+        required: ['PATH', 'Path', 'format'],
+        type: 'object',
+      },
+      name: PREPARED_TOOL_NAME,
+      prepareMain: async () => {
+        throw new Error('not executed');
+      },
+      registrationId: PREPARED_TOOL_REGISTRATION_ID,
+      risk: 'write',
+    }]);
+    const snapshot = registry.createSnapshot();
+    const toolInput = {
+      Path: '/prepared/path',
+      PATH: '/prepared/PATH',
+      format: 'm4a',
+    };
+    const sealed = snapshot.sealMainPreparedExecution(PREPARED_TOOL_NAME, {
+      approvalSemantics: { behavior: 'ask', risk: 'write' },
+      binding: { providerAlias: 'local-minio' },
+      identity: mainPreparationIdentity(toolInput),
+      publicAction: mediaPreparedAction(),
+    });
+    const context = {
+      appContext: { libraryId: 3, platform: 'darwin' as const, selectedNodeIds: [] },
+      onProgress: () => undefined,
+      signal: new AbortController().signal,
+    };
+    const mismatchedIdentities: AgentToolMainPreparationIdentity[] = [
+      {
+        ...sealed.identity,
+        ownerScope: {
+          ...sealed.identity.ownerScope,
+          accountScope: 'user:8',
+        },
+      },
+      { ...sealed.identity, ownerWebContentsId: 18 },
+      { ...sealed.identity, aiDestinationIdentity: `v1:${'c'.repeat(64)}` },
+      { ...sealed.identity, runId: 'run-2' },
+      { ...sealed.identity, runCapabilityIdentity: `v2:${'c'.repeat(64)}` },
+    ];
+
+    for (const mismatchedIdentity of mismatchedIdentities) {
+      await expect(snapshot.execute(PREPARED_TOOL_NAME, toolInput, {
+        ...context,
+        mainPreparationCapability: sealed.capability,
+        mainPreparationIdentity: mismatchedIdentity,
+      })).rejects.toThrow('identity 不匹配');
+    }
+    await expect(snapshot.execute(PREPARED_TOOL_NAME, toolInput, {
+      ...context,
+      appContext: { ...context.appContext, libraryId: 4 },
+      mainPreparationCapability: sealed.capability,
+      mainPreparationIdentity: sealed.identity,
+    })).rejects.toThrow('identity 不匹配');
+    await expect(snapshot.execute(PREPARED_TOOL_NAME, {
+      ...toolInput,
+      Path: '/different/path',
+    }, {
+      ...context,
+      mainPreparationCapability: sealed.capability,
+      mainPreparationIdentity: sealed.identity,
+    })).rejects.toThrow('identity 不匹配');
+    await expect(snapshot.execute(PREPARED_TOOL_NAME, toolInput, {
+      ...context,
+      mainPreparationCapability: sealed.capability,
+      mainPreparationIdentity: {
+        ...sealed.identity,
+        toolRegistrationId: 'media.extractAudio@different',
+      },
+    })).rejects.toThrow('invalid preparation identity');
+    await expect(snapshot.execute(PREPARED_TOOL_NAME, toolInput, {
+      ...context,
+      mainPreparationCapability: sealed.capability,
+      mainPreparationIdentity: sealed.identity,
+    }, 'media.extractAudio@different')).rejects.toThrow('registration identity 不匹配');
+
+    await expect(snapshot.execute(PREPARED_TOOL_NAME, toolInput, {
+      ...context,
+      mainPreparationCapability: sealed.capability,
+      mainPreparationIdentity: sealed.identity,
+    })).resolves.toEqual({ ok: true });
+    expect(executePrepared).toHaveBeenCalledTimes(1);
+  });
+
+  it('consumes a main capability before the executor can fail', async () => {
+    const executePrepared = vi.fn()
+      .mockRejectedValueOnce(new Error('initial executor failure'))
+      .mockResolvedValue({ ok: true });
+    const registry = createAgentToolRegistry([{
+      description: 'Prepared failure execution',
+      execute: executePrepared,
+      inputSchema: { additionalProperties: false, type: 'object' },
+      name: PREPARED_TOOL_NAME,
+      prepareMain: async () => {
+        throw new Error('not executed');
+      },
+      registrationId: PREPARED_TOOL_REGISTRATION_ID,
+      risk: 'write',
+    }]);
+    const snapshot = registry.createSnapshot();
+    const toolInput = {};
+    const sealed = snapshot.sealMainPreparedExecution(PREPARED_TOOL_NAME, {
+      approvalSemantics: { behavior: 'ask', risk: 'write' },
+      binding: { providerAlias: 'local-minio' },
+      identity: mainPreparationIdentity(toolInput),
+      publicAction: mediaPreparedAction(),
+    });
+    const context = {
+      appContext: { libraryId: 3, platform: 'darwin' as const, selectedNodeIds: [] },
+      mainPreparationCapability: sealed.capability,
+      mainPreparationIdentity: sealed.identity,
+      onProgress: () => undefined,
+      signal: new AbortController().signal,
+    };
+
+    await expect(snapshot.execute(PREPARED_TOOL_NAME, toolInput, context))
+      .rejects.toThrow('initial executor failure');
+    await expect(snapshot.execute(PREPARED_TOOL_NAME, toolInput, context))
+      .rejects.toThrow('capability 无效或已使用');
+    expect(executePrepared).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['progress', 'progress 不能包含 main-only preparation binding'],
+    ['result', 'result 不能包含 main-only preparation binding'],
+    ['error', 'error 不能包含 main-only preparation binding'],
+  ] as const)('blocks direct private binding references in executor %s', async (
+    leakTarget,
+    expectedMessage,
+  ) => {
+    const forwardedProgress = vi.fn();
+    const registry = createAgentToolRegistry([{
+      description: 'Prepared private binding execution',
+      execute: async (_toolInput, toolContext) => {
+        const privateBinding = toolContext.preparation?.binding;
+        if (!privateBinding) throw new Error('missing private binding');
+        if (leakTarget === 'progress') {
+          toolContext.onProgress({
+            message: 'unsafe progress',
+            privateBinding,
+          } as never);
+          return { ok: true };
+        }
+        if (leakTarget === 'result') {
+          return { data: { privateBinding }, ok: true };
+        }
+        throw Object.assign(new Error('unsafe executor error'), { privateBinding });
+      },
+      inputSchema: { additionalProperties: false, type: 'object' },
+      name: PREPARED_TOOL_NAME,
+      prepareMain: async () => {
+        throw new Error('not executed');
+      },
+      registrationId: PREPARED_TOOL_REGISTRATION_ID,
+      risk: 'write',
+    }]);
+    const snapshot = registry.createSnapshot();
+    const toolInput = {};
+    const sealed = snapshot.sealMainPreparedExecution(PREPARED_TOOL_NAME, {
+      approvalSemantics: { behavior: 'ask', risk: 'write' },
+      binding: { provider: { alias: 'private-minio' } },
+      identity: mainPreparationIdentity(toolInput),
+      publicAction: mediaPreparedAction(),
+    });
+
+    await expect(snapshot.execute(PREPARED_TOOL_NAME, toolInput, {
+      appContext: { libraryId: 3, platform: 'darwin', selectedNodeIds: [] },
+      mainPreparationCapability: sealed.capability,
+      mainPreparationIdentity: sealed.identity,
+      onProgress: forwardedProgress,
+      signal: new AbortController().signal,
+    })).rejects.toThrow(expectedMessage);
+    expect(forwardedProgress).not.toHaveBeenCalled();
+  });
+
+  it('keeps the stability hash independent from only the prepared action identity', () => {
+    const registry = createAgentToolRegistry([{
+      description: 'Prepared audio execution',
+      execute: async () => ({ ok: true }),
+      inputSchema: { additionalProperties: false, type: 'object' },
+      name: PREPARED_TOOL_NAME,
+      prepareMain: async () => {
+        throw new Error('not executed');
+      },
+      registrationId: PREPARED_TOOL_REGISTRATION_ID,
+      risk: 'write',
+    }]);
+    const snapshot = registry.createSnapshot();
+    const seal = (preparedActionId: string, privateRevision: string) => (
+      snapshot.sealMainPreparedExecution(PREPARED_TOOL_NAME, {
+        approvalSemantics: {
+          behavior: 'ask',
+          preview: { description: 'Extract audio', risk: 'write', title: 'Extract' },
+          risk: 'write',
+        },
+        binding: {
+          source: { privateRevision },
+        },
+        identity: mainPreparationIdentity({}, preparedActionId),
+        publicAction: mediaPreparedAction(),
+        snapshotMaterial: { executableRevision: 'ffmpeg-v1' },
+      })
+    );
+
+    const first = seal('prepared-action-1', 'source-v1');
+    const rotated = seal('prepared-action-2', 'source-v1');
+    const changedBinding = seal('prepared-action-3', 'source-v2');
+
+    expect(first.stabilityHash).toMatch(/^[a-f0-9]{64}$/u);
+    expect(first.snapshotHash).toMatch(/^[a-f0-9]{64}$/u);
+    expect(rotated.stabilityHash).toBe(first.stabilityHash);
+    expect(rotated.snapshotHash).not.toBe(first.snapshotHash);
+    expect(changedBinding.stabilityHash).not.toBe(first.stabilityHash);
+    expect(Object.isFrozen(first)).toBe(true);
   });
 
   it('freezes a registry snapshot and rejects a stale registration identity', async () => {

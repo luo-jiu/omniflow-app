@@ -4,8 +4,10 @@ import type { AgentToolResult } from '@/shared/agent/agent.types';
 import { createAgentCapabilitySnapshot } from './capabilities/agent-capability-registry';
 import type { AgentCapabilitySnapshot } from './capabilities/agent-capability.types';
 import type {
-  AgentToolExecutionContext,
+  AgentToolDispatchContext,
   AgentToolKind,
+  AgentToolMainPreparationSealInput,
+  AgentToolMainPreparationSealResult,
   AgentToolRegistrySnapshot,
   AgentToolSnapshot,
   AgentToolValidation,
@@ -185,10 +187,16 @@ export interface AgentRunCapabilitySnapshot {
   readonly execute: (
     name: string,
     input: unknown,
-    context: AgentToolExecutionContext,
+    context: AgentToolDispatchContext,
     activeSkillId?: string | null,
     expectedRegistrationId?: string,
   ) => Promise<AgentToolResult>;
+  readonly sealMainPreparedExecution: (
+    name: string,
+    input: AgentToolMainPreparationSealInput,
+    activeSkillId?: string | null,
+    expectedRegistrationId?: string,
+  ) => AgentToolMainPreparationSealResult;
 }
 
 /**
@@ -365,6 +373,14 @@ export function createAgentRunCapabilitySnapshot(
       visibleTools(activeSkillId).filter(tool => toolKind(tool) === 'control'),
     ),
     listTools: activeSkillId => visibleTools(activeSkillId),
+    sealMainPreparedExecution: (name, input, activeSkillId, expectedRegistrationId) => {
+      const tool = requireVisibleTool(name, activeSkillId);
+      return options.toolSnapshot.sealMainPreparedExecution(
+        tool.name,
+        input,
+        expectedRegistrationId ?? tool.registrationId,
+      );
+    },
     skillRevision: options.skillSnapshot.catalogRevision,
     skills: effectiveSkills,
     skillSnapshot: effectiveSkillSnapshot,

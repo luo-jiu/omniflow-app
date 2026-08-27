@@ -43,9 +43,13 @@ import type {
   AgentToolApprovalSnapshot,
   AgentToolProgress,
   AgentToolResult,
+  AgentToolRisk,
 } from '@/shared/agent/agent.types';
 import { normalizeAgentOwnerScope } from '../../../src/shared/agent/agent-owner-scope';
-import { normalizeAgentPreparedActionPublic } from '../../../src/shared/agent/agent-prepared-action';
+import {
+  equalAgentPreparedActionPublic,
+  normalizeAgentPreparedActionPublic,
+} from '../../../src/shared/agent/agent-prepared-action';
 import { streamAIServiceProfile } from '../aiServiceClient';
 import {
   resolveAIServiceOutputTokenLimit,
@@ -122,8 +126,14 @@ import {
 } from './agent-tool-result-projection';
 import {
   agentToolRegistry,
+  hashAgentToolInputForPreparation,
+  type AgentToolDispatchContext,
   type AgentToolExecutionContext,
   type AgentToolExecutor,
+  type AgentToolMainPreparedCapability,
+  type AgentToolMainPreparationContext,
+  type AgentToolMainPreparationIdentity,
+  type AgentToolMainPreparationResult,
   type AgentToolPermissionDecision,
   type AgentToolPreparationResult,
 } from './agent-tool-registry';
@@ -193,11 +203,13 @@ interface StartingAgentRun {
 }
 
 type AgentApprovalOutcome =
-  | { activity: AgentToolActivitySnapshot; approved: false }
+  | { activity: AgentToolActivitySnapshot; approvalId: string; approved: false }
   | {
       activity: AgentToolActivitySnapshot;
+      approvalId: string;
       approved: true;
       execution?: Promise<AgentToolExecutionOutcome>;
+      prepared?: AgentPreparedRuntime;
     };
 
 interface PendingAgentApproval {
@@ -210,24 +222,36 @@ interface PendingAgentApproval {
   sender: WebContents;
   onProgress: (progress: AgentToolProgress) => void;
   onCancel: (executionId: string) => void;
+  pauseTimeout: () => void;
+  reject: (error: unknown) => void;
+  replaceRound: (approval: AgentToolApprovalSnapshot) => void;
   resolving: boolean;
+  resumeTimeout: () => void;
   resolve: (outcome: AgentApprovalOutcome) => void;
   signal: AbortSignal;
   store: AgentSessionStore;
   timeoutMs: number;
   prepared?: {
     current: AgentPreparedRuntime;
-    finalize: (requestedAction?: AgentPreparedActionPublic) => Promise<AgentPreparedRuntime>;
+    finalize: (
+      requestedAction?: AgentPreparedActionPublic,
+      preparedActionId?: string,
+    ) => Promise<AgentPreparedRuntime>;
   };
 }
 
 interface AgentPreparedRuntime {
   action: AgentPreparedActionPublic;
+  approvalSemanticsHash: string;
   executionInput: unknown;
+  mainPreparationCapability?: AgentToolMainPreparedCapability;
+  mainPreparationIdentity?: AgentToolMainPreparationIdentity;
   permissionBehavior: 'allow' | 'ask';
+  preparationMode: 'main' | 'renderer';
   preparedActionId: string;
   preview: AgentActionPreview;
   snapshotHash: string;
+  stabilityHash: string;
 }
 
 interface PendingAgentInteraction {
@@ -493,41 +517,142 @@ function hashToolInput(value: unknown): string {
   return crypto.createHash('sha256').update(stableJson(value)).digest('hex');
 }
 
+function createAgentAiDestinationIdentity(
+  input: AgentChatRequest,
+  runtimeConnection: AIServiceRuntimeConnection,
+): string {
+  const baseUrl = String(runtimeConnection.baseUrl || '').trim().replace(/\/+$/u, '');
+  return `v1:${hashToolInput({
+    baseUrl,
+    model: String(input.model || '').trim(),
+    profileId: String(input.profileId || '').trim(),
+    providerType: runtimeConnection.providerType,
+  })}`;
+}
+
+interface CreatePreparedRuntimeOptions {
+  identity?: AgentToolMainPreparationIdentity;
+  preparedActionId?: string;
+  sealMain?: (input: {
+    approvalSemantics: unknown;
+    binding: AgentToolMainPreparationResult['binding'];
+    identity: AgentToolMainPreparationIdentity;
+    publicAction: AgentPreparedActionPublic;
+    snapshotMaterial?: unknown;
+  }) => {
+    capability: AgentToolMainPreparedCapability;
+    identity: AgentToolMainPreparationIdentity;
+    publicAction: AgentPreparedActionPublic;
+    snapshotHash: string;
+    stabilityHash: string;
+  };
+}
+
 function createPreparedRuntime(
-  result: AgentToolPreparationResult,
+  result: AgentToolMainPreparationResult | AgentToolPreparationResult,
   expectedToolName: string,
+  expectedRisk: AgentToolRisk,
+  preparationMode: AgentPreparedRuntime['preparationMode'],
+  options: CreatePreparedRuntimeOptions = {},
 ): AgentPreparedRuntime {
   if (result.decision.behavior !== 'ask' && result.decision.behavior !== 'allow') {
-    throw new Error('Agent Tool prepare 不能生成拒绝后的执行动作');
+    throw new Error(result.decision.message || 'Agent Tool prepare 已拒绝执行动作');
   }
-  const action = normalizeAgentPreparedActionPublic(result.publicAction);
+  if (
+    result.decision.risk !== expectedRisk
+    || (result.decision.behavior === 'ask' && result.decision.preview.risk !== expectedRisk)
+  ) {
+    throw new Error('Agent Tool prepare 风险等级与注册定义不匹配');
+  }
+  let action = Object.freeze(normalizeAgentPreparedActionPublic(result.publicAction));
   if (action.kind !== expectedToolName) {
     throw new Error('Agent prepared action 与 Tool 不匹配');
   }
-  const preparedActionId = crypto.randomUUID();
-  const snapshotHash = hashToolInput({
+  const preview = Object.freeze(normalizeActionPreview(
+    result.decision.behavior === 'ask'
+      ? result.decision.preview
+      : {
+          description: '执行已经准备完成',
+          risk: result.decision.risk,
+          title: '执行操作',
+        },
+  ));
+  const approvalSemantics = Object.freeze({
     action,
-    snapshotMaterial: result.snapshotMaterial ?? null,
+    behavior: result.decision.behavior,
+    preview,
+    risk: result.decision.risk,
   });
-  const executionInput = result.executionInput && typeof result.executionInput === 'object'
-    && !Array.isArray(result.executionInput)
-    ? { ...(result.executionInput as Record<string, unknown>), preparedActionId, snapshotHash }
-    : result.executionInput;
+  const approvalSemanticsHash = hashToolInput(approvalSemantics);
+  let preparedActionId: string;
+  let snapshotHash: string;
+  let stabilityHash: string;
+  let mainPreparationCapability: AgentToolMainPreparedCapability | undefined;
+  let mainPreparationIdentity: AgentToolMainPreparationIdentity | undefined;
+  let preparedValue: unknown;
+  if (preparationMode === 'main') {
+    if (!options.identity || !options.sealMain) {
+      throw new Error('Agent main Tool 缺少 preparation issuer');
+    }
+    const sealed = options.sealMain({
+      approvalSemantics,
+      binding: (result as AgentToolMainPreparationResult).binding,
+      identity: options.identity,
+      publicAction: action,
+      snapshotMaterial: result.snapshotMaterial,
+    });
+    action = sealed.publicAction;
+    preparedActionId = sealed.identity.preparedActionId;
+    snapshotHash = sealed.snapshotHash;
+    stabilityHash = sealed.stabilityHash;
+    mainPreparationCapability = sealed.capability;
+    mainPreparationIdentity = sealed.identity;
+  } else {
+    preparedValue = (result as AgentToolPreparationResult).executionInput;
+    preparedActionId = String(options.preparedActionId || '').trim() || crypto.randomUUID();
+    snapshotHash = hashToolInput({
+      action,
+      snapshotMaterial: result.snapshotMaterial ?? null,
+    });
+    stabilityHash = snapshotHash;
+  }
+  const executionInput = preparationMode === 'renderer'
+    && preparedValue
+    && typeof preparedValue === 'object'
+    && !Array.isArray(preparedValue)
+    ? { ...(preparedValue as Record<string, unknown>), preparedActionId, snapshotHash }
+    : preparedValue;
   return {
     action,
+    approvalSemanticsHash,
     executionInput,
+    ...(mainPreparationCapability ? { mainPreparationCapability } : {}),
+    ...(mainPreparationIdentity ? { mainPreparationIdentity } : {}),
     permissionBehavior: result.decision.behavior,
+    preparationMode,
     preparedActionId,
-    preview: normalizeActionPreview(
-      result.decision.behavior === 'ask'
-        ? result.decision.preview
-        : {
-            description: '执行已经准备完成',
-            risk: result.decision.risk,
-            title: '执行操作',
-          },
-    ),
+    preview,
     snapshotHash,
+    stabilityHash,
+  };
+}
+
+function withMainPreparedExecution(
+  context: AgentToolExecutionContext,
+  prepared: AgentPreparedRuntime | undefined,
+): AgentToolDispatchContext {
+  if (
+    !prepared
+    || prepared.preparationMode !== 'main'
+    || !prepared.mainPreparationCapability
+    || !prepared.mainPreparationIdentity
+  ) {
+    throw new Error('Agent main Tool 缺少已冻结的 prepare 结果');
+  }
+  return {
+    ...context,
+    mainPreparationCapability: prepared.mainPreparationCapability,
+    mainPreparationIdentity: prepared.mainPreparationIdentity,
   };
 }
 
@@ -624,6 +749,20 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     return runSnapshot;
   }
 
+  async function updateRunAndEmitAfterApprovalCommit(
+    sender: WebContents,
+    store: AgentSessionStore,
+    sessionId: string,
+    runId: string,
+    update: AgentRunUpdate,
+  ): Promise<void> {
+    try {
+      await updateRunAndEmit(sender, store, sessionId, runId, update);
+    } catch {
+      // The approval CAS is authoritative; a projection failure cannot revive its stale card.
+    }
+  }
+
   function waitForApproval(input: {
     appContext: AgentAppContext;
     approval: AgentToolApprovalSnapshot;
@@ -641,6 +780,25 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
   }): Promise<AgentApprovalOutcome> {
     return new Promise((resolve, reject) => {
       let settled = false;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let deadlineAt = 0;
+      let remainingMs = approvalTimeoutMs;
+      const clearApprovalTimer = () => {
+        if (!timer) return;
+        clearTimeout(timer);
+        timer = undefined;
+      };
+      const removeCurrentRegistration = () => {
+        const currentApprovalId = pending.approval.approvalId;
+        if (pendingApprovals.get(currentApprovalId) === pending) {
+          pendingApprovals.delete(currentApprovalId);
+        }
+      };
+      const cleanup = () => {
+        clearApprovalTimer();
+        input.signal.removeEventListener('abort', handleAbort);
+        removeCurrentRegistration();
+      };
       const takeSettlement = () => {
         if (settled) return false;
         settled = true;
@@ -648,41 +806,64 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         return true;
       };
       const handleAbort = () => {
+        const currentApprovalId = pending.approval.approvalId;
         if (!takeSettlement()) return;
         void input.store.resolveToolApproval(
-          input.approval.approvalId,
+          currentApprovalId,
           'cancelled',
           now(),
         ).catch(() => undefined).finally(() => reject(abortError()));
       };
-      let timer: ReturnType<typeof setTimeout>;
       const handleTimeout = () => {
-        const pending = pendingApprovals.get(input.approval.approvalId);
-        if (pending?.resolving) {
-          timer = setTimeout(handleTimeout, 1_000);
-          timer.unref?.();
-          return;
-        }
+        timer = undefined;
+        const currentApprovalId = pending.approval.approvalId;
         if (!takeSettlement()) return;
         void input.store.resolveToolApproval(
-          input.approval.approvalId,
+          currentApprovalId,
           'expired',
           now(),
         ).catch(() => undefined).finally(() => reject(new Error('用户确认已超时')));
       };
-      timer = setTimeout(handleTimeout, approvalTimeoutMs);
-      const cleanup = () => {
-        clearTimeout(timer);
-        input.signal.removeEventListener('abort', handleAbort);
-        pendingApprovals.delete(input.approval.approvalId);
+      const armTimeout = (durationMs: number) => {
+        clearApprovalTimer();
+        remainingMs = Math.max(0, durationMs);
+        deadlineAt = Date.now() + remainingMs;
+        timer = setTimeout(handleTimeout, remainingMs);
+        timer.unref?.();
       };
-      pendingApprovals.set(input.approval.approvalId, {
+      const pending: PendingAgentApproval = {
         ...input,
+        pauseTimeout: () => {
+          if (!timer || settled) return;
+          remainingMs = Math.max(0, deadlineAt - Date.now());
+          clearApprovalTimer();
+        },
+        reject: (error) => {
+          if (takeSettlement()) reject(error);
+        },
+        replaceRound: (approval) => {
+          if (settled) throw new Error('Agent 确认请求已经失效');
+          const previousApprovalId = pending.approval.approvalId;
+          if (pendingApprovals.get(previousApprovalId) !== pending) {
+            throw new Error('Agent 确认请求已经变化');
+          }
+          clearApprovalTimer();
+          pendingApprovals.delete(previousApprovalId);
+          pending.approval = approval;
+          pendingApprovals.set(approval.approvalId, pending);
+          armTimeout(approvalTimeoutMs);
+        },
         resolving: false,
+        resumeTimeout: () => {
+          if (timer || settled) return;
+          armTimeout(remainingMs);
+        },
         resolve: (outcome) => {
           if (takeSettlement()) resolve(outcome);
         },
-      });
+      };
+      pendingApprovals.set(input.approval.approvalId, pending);
+      armTimeout(approvalTimeoutMs);
       if (input.signal.aborted) handleAbort();
       else input.signal.addEventListener('abort', handleAbort, { once: true });
     });
@@ -708,11 +889,13 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     if (pending.signal.aborted) throw abortError();
     if (pending.resolving) throw new Error('Agent 确认请求正在处理');
     pending.resolving = true;
+    let approvalCommitted = false;
 
     try {
       const approved = input.approved === true;
-      let finalized: AgentPreparedRuntime | undefined;
       let preparedResolution: Parameters<AgentSessionStore['resolveToolApproval']>[3];
+      let finalizedPrepared: AgentPreparedRuntime | undefined;
+      pending.pauseTimeout();
       if (approved && pending.prepared) {
         const expectedPreparedActionId = String(input.preparedActionId || '').trim();
         if (
@@ -726,12 +909,94 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         if (requestedAction.kind !== pending.approval.call.name) {
           throw new Error('Agent prepared action 与 Tool 不匹配');
         }
-        finalized = await pending.prepared.finalize(requestedAction);
+        const currentPrepared = pending.prepared.current;
+        let finalized: AgentPreparedRuntime;
+        try {
+          finalized = await pending.prepared.finalize(requestedAction);
+        } catch (error) {
+          if (isAbortError(error, pending.signal)) throw error;
+          throw new Error(`工具 ${pending.approval.call.name} 重新准备失败，请重试`);
+        }
+        throwIfAborted(pending.signal);
+        if (
+          pendingApprovals.get(approvalId) !== pending
+          || pending.approval.approvalId !== approvalId
+        ) {
+          throw new Error('Agent 确认请求已经变化');
+        }
+        const preparationStable = (
+          equalAgentPreparedActionPublic(requestedAction, currentPrepared.action)
+          && equalAgentPreparedActionPublic(finalized.action, currentPrepared.action)
+          && finalized.approvalSemanticsHash === currentPrepared.approvalSemanticsHash
+          && finalized.preparationMode === currentPrepared.preparationMode
+          && finalized.stabilityHash === currentPrepared.stabilityHash
+        );
+        if (!preparationStable) {
+          const nextApprovalId = crypto.randomUUID();
+          const nextApproval: AgentToolApprovalSnapshot = {
+            ...pending.approval,
+            approvalId: nextApprovalId,
+            preparation: {
+              action: finalized.action,
+              preparedActionId: finalized.preparedActionId,
+              snapshotHash: finalized.snapshotHash,
+            },
+            preview: finalized.preview,
+          };
+          const activity = await pending.store.replacePendingToolApproval({
+            action: finalized.action,
+            approvalInputHash: finalized.snapshotHash,
+            approvalPreview: finalized.preview,
+            currentApprovalId: approvalId,
+            expectedPreparedActionId,
+            expectedSnapshotHash: currentPrepared.snapshotHash,
+            nextApprovalId,
+            preparedActionId: finalized.preparedActionId,
+            snapshotHash: finalized.snapshotHash,
+          });
+          throwIfAborted(pending.signal);
+          if (
+            activity.status !== 'awaiting_approval'
+            || activity.approval?.approvalId !== nextApprovalId
+            || activity.approval.status !== 'pending'
+            || activity.preparation?.preparedActionId !== finalized.preparedActionId
+            || activity.preparation.snapshotHash !== finalized.snapshotHash
+            || pendingApprovals.get(approvalId) !== pending
+          ) {
+            throw new Error('Agent 新确认轮次未能建立');
+          }
+          pending.executionInput = finalized.executionInput;
+          pending.prepared.current = finalized;
+          pending.replaceRound(nextApproval);
+          await updateRunAndEmitAfterApprovalCommit(
+            pending.sender,
+            pending.store,
+            nextApproval.sessionId,
+            nextApproval.runId,
+            {
+              currentStep: `等待确认 ${nextApproval.call.name}`,
+              status: 'awaiting_approval',
+              updatedAt: now(),
+            },
+          );
+          throwIfAborted(pending.signal);
+          if (pendingApprovals.get(nextApprovalId) !== pending) throw abortError();
+          emit(pending.sender, {
+            activity,
+            approval: nextApproval,
+            runId: nextApproval.runId,
+            sessionId: nextApproval.sessionId,
+            type: 'tool-approval-required',
+          });
+          return { approved: false, reapprovalRequired: true };
+        }
+        finalizedPrepared = finalized;
         preparedResolution = {
           action: finalized.action,
           approvalInputHash: finalized.snapshotHash,
           approvalPreview: finalized.preview,
-          expectedPreparedActionId,
+          expectedPreparedActionId: currentPrepared.preparedActionId,
+          expectedSnapshotHash: currentPrepared.snapshotHash,
           preparedActionId: finalized.preparedActionId,
           snapshotHash: finalized.snapshotHash,
         };
@@ -745,21 +1010,13 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         now(),
         preparedResolution,
       );
+      approvalCommitted = true;
       throwIfAborted(pending.signal);
-      if (finalized && pending.prepared) {
-        pending.executionInput = finalized.executionInput;
-        pending.prepared.current = finalized;
-        pending.approval = {
-          ...pending.approval,
-          preparation: {
-            action: finalized.action,
-            preparedActionId: finalized.preparedActionId,
-            snapshotHash: finalized.snapshotHash,
-          },
-          preview: finalized.preview,
-        };
+      if (approved && finalizedPrepared && pending.prepared) {
+        pending.executionInput = finalizedPrepared.executionInput;
+        pending.prepared.current = finalizedPrepared;
       }
-      await updateRunAndEmit(
+      await updateRunAndEmitAfterApprovalCommit(
         pending.sender,
         pending.store,
         pending.approval.sessionId,
@@ -772,12 +1029,17 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       );
 
       if (!approved) {
-        pending.resolve({ activity, approved: false });
+        pending.resolve({ activity, approvalId, approved: false });
         return { approved: false };
       }
 
       if (pending.executor !== 'renderer') {
-        pending.resolve({ activity, approved: true });
+        pending.resolve({
+          activity,
+          approvalId,
+          approved: true,
+          ...(pending.prepared ? { prepared: pending.prepared.current } : {}),
+        });
         return { approved: true };
       }
 
@@ -794,10 +1056,25 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         timeoutMs: pending.timeoutMs,
         toolName: pending.approval.call.name,
       });
-      pending.resolve({ activity, approved: true, execution: execution.outcome });
+      pending.resolve({
+        activity,
+        approvalId,
+        approved: true,
+        execution: execution.outcome,
+      });
       return { approved: true, execution: execution.request };
+    } catch (error) {
+      if (approvalCommitted) {
+        pending.reject(error);
+      } else if (
+        !pending.signal.aborted
+        && pendingApprovals.get(pending.approval.approvalId) === pending
+      ) {
+        pending.resumeTimeout();
+      }
+      throw error;
     } finally {
-      if (pendingApprovals.get(approvalId) === pending) pending.resolving = false;
+      pending.resolving = false;
     }
   }
 
@@ -1165,6 +1442,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     perception: AgentChatRequest['perception'],
     capabilitySnapshot: AgentRunCapabilitySnapshot,
     activeSkillId: string | undefined,
+    aiDestinationIdentity: string,
     onPerception: (next: AgentChatRequest['perception']) => void,
   ): Promise<AgentToolResult> {
     const tool = capabilitySnapshot.getTool(call.name, activeSkillId);
@@ -1297,7 +1575,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       execute: (
         name: string,
         toolInput: unknown,
-        toolContext: AgentToolExecutionContext,
+        toolContext: AgentToolDispatchContext,
         expectedRegistrationId?: string,
       ) => capabilitySnapshot.execute(
         name,
@@ -1338,15 +1616,17 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         risk: registeredTool?.risk || 'external',
       };
     }
-    const usesRendererPreparation = Boolean(
-      tool?.createRendererPrepareRequest && tool.finalizeRendererPreparation,
-    );
+    const preparationMode: AgentPreparedRuntime['preparationMode'] | 'none' = tool?.prepareMain
+      ? 'main'
+      : tool?.createRendererPrepareRequest && tool.finalizeRendererPreparation
+        ? 'renderer'
+        : 'none';
     let decision: AgentToolPermissionDecision;
     let rendererExecutionInput: unknown;
     let preparedApproval: PendingAgentApproval['prepared'];
     let approvalId: string | undefined;
 
-    if (!preflightDecision && !call.inputError && tool && usesRendererPreparation) {
+    if (!preflightDecision && !call.inputError && tool && preparationMode !== 'none') {
       const validation = await tool.validate?.(call.input, executionContext);
       if (validation && !validation.ok) {
         decision = {
@@ -1379,49 +1659,128 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
           updatedAt: now(),
         });
         try {
-          const prepareInput = tool.createRendererPrepareRequest!(call.input, executionContext);
-          const preparation = toolPrepareBroker.prepareRenderer({
-            appContext: input.appContext,
-            callId: call.id,
-            inputHash: hashToolInput(call.input),
-            onCancel: prepareId => emit(sender, {
-              prepareId,
-              runId,
-              sessionId,
-              type: 'tool-prepare-cancelled',
-            }),
-            ownerScope: input.ownerScope,
-            ownerWebContentsId: sender.id,
-            prepareInput,
-            runId,
-            sessionId,
-            signal,
-            toolRunId,
-            toolName: call.name,
-          });
-          emit(sender, {
-            preparation: preparation.request,
-            runId,
-            sessionId,
-            type: 'tool-prepare-requested',
-          });
-          const rendererPreparation = await preparation.outcome;
-          const finalizePrepared = async (requestedAction?: AgentPreparedActionPublic) => (
-            createPreparedRuntime(
-              await tool.finalizeRendererPreparation!(
-                call.input,
-                rendererPreparation,
-                requestedAction,
-                executionContext,
-              ),
-              call.name,
-            )
-          );
+          let finalizePrepared: (
+            requestedAction?: AgentPreparedActionPublic,
+            preparedActionId?: string,
+          ) => Promise<AgentPreparedRuntime>;
+          if (preparationMode === 'renderer') {
+            finalizePrepared = async (requestedAction, preparedActionId = crypto.randomUUID()) => {
+              const prepareInput = tool.createRendererPrepareRequest!(call.input, executionContext);
+              const preparation = toolPrepareBroker.prepareRenderer({
+                appContext: input.appContext,
+                callId: call.id,
+                inputHash: hashToolInput(call.input),
+                onCancel: prepareId => emit(sender, {
+                  prepareId,
+                  runId,
+                  sessionId,
+                  type: 'tool-prepare-cancelled',
+                }),
+                ownerScope: input.ownerScope,
+                ownerWebContentsId: sender.id,
+                prepareInput,
+                runId,
+                sessionId,
+                signal,
+                toolRunId,
+                toolName: call.name,
+              });
+              emit(sender, {
+                preparation: preparation.request,
+                runId,
+                sessionId,
+                type: 'tool-prepare-requested',
+              });
+              const rendererPreparation = await preparation.outcome;
+              throwIfAborted(signal);
+              return toolPrepareBroker.prepareMain({
+                prepare: async (preparationSignal) => {
+                  const preparationContext: AgentToolExecutionContext = {
+                    activeSkillId,
+                    appContext: input.appContext,
+                    onProgress: () => undefined,
+                    perception,
+                    runCapabilitySnapshot: capabilitySnapshot,
+                    signal: preparationSignal,
+                  };
+                  const result = await tool.finalizeRendererPreparation!(
+                    call.input,
+                    rendererPreparation,
+                    requestedAction,
+                    preparationContext,
+                  );
+                  throwIfAborted(preparationSignal);
+                  return createPreparedRuntime(result, call.name, tool.risk, 'renderer', {
+                    preparedActionId,
+                  });
+                },
+                signal,
+                toolName: call.name,
+              });
+            };
+          } else {
+            const ownerScope = Object.freeze(normalizeAgentOwnerScope(input.ownerScope));
+            const libraryId = Number(input.appContext.libraryId);
+            if (!Number.isSafeInteger(libraryId) || libraryId <= 0) {
+              throw new Error('Agent main Tool 缺少有效的资料库身份');
+            }
+            const toolInputHash = hashAgentToolInputForPreparation(call.input);
+            finalizePrepared = async (requestedAction, preparedActionId = crypto.randomUUID()) => {
+              const preparationIdentity: AgentToolMainPreparationIdentity = Object.freeze({
+                aiDestinationIdentity,
+                callId: call.id,
+                libraryId,
+                ownerScope,
+                ownerWebContentsId: sender.id,
+                preparedActionId,
+                runCapabilityIdentity: capabilitySnapshot.identity,
+                runId,
+                sessionId,
+                toolInputHash,
+                toolName: call.name,
+                toolRegistrationId: tool.registrationId,
+                toolRunId,
+              });
+              return toolPrepareBroker.prepareMain({
+                prepare: async (preparationSignal) => {
+                  const preparationContext: AgentToolMainPreparationContext = {
+                    activeSkillId,
+                    appContext: input.appContext,
+                    ownerScope,
+                    ownerWebContentsId: sender.id,
+                    perception,
+                    preparationIdentity,
+                    signal: preparationSignal,
+                  };
+                  const result = await tool.prepareMain!(
+                    call.input,
+                    requestedAction,
+                    preparationContext,
+                  );
+                  throwIfAborted(preparationSignal);
+                  return createPreparedRuntime(result, call.name, tool.risk, 'main', {
+                    identity: preparationIdentity,
+                    sealMain: sealInput => capabilitySnapshot.sealMainPreparedExecution(
+                      call.name,
+                      sealInput,
+                      activeSkillId,
+                      tool.registrationId,
+                    ),
+                  });
+                },
+                signal,
+                toolName: call.name,
+              });
+            };
+          }
           const prepared = await finalizePrepared();
+          throwIfAborted(signal);
           decision = prepared.permissionBehavior === 'ask'
             ? { behavior: 'ask', preview: prepared.preview, risk: tool.risk }
             : { behavior: 'allow', risk: tool.risk };
-          rendererExecutionInput = prepared.executionInput;
+          if (preparationMode === 'renderer') {
+            rendererExecutionInput = prepared.executionInput;
+          }
           approvalId = prepared.permissionBehavior === 'ask' ? crypto.randomUUID() : undefined;
           preparedApproval = {
             current: prepared,
@@ -1612,7 +1971,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         activity = approved.activity;
         emit(sender, {
           activity,
-          approvalId,
+          approvalId: approved.approvalId,
           approved: approved.approved,
           runId,
           sessionId,
@@ -1626,9 +1985,17 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
           if (outcome.perception) onPerception(outcome.perception);
           result = outcome.result;
         } else {
+          const mainExecutionContext = tool.prepareMain
+            ? withMainPreparedExecution({
+                ...executionContext,
+                perception,
+              }, approved.prepared)
+            : {
+                ...executionContext,
+                perception,
+              };
           result = await toolBroker.executeMain(call.name, call.input, {
-            ...executionContext,
-            perception,
+            ...mainExecutionContext,
           }, tool.timeoutMs, runToolRegistry);
         }
       } else if ((tool.executor || 'main') === 'renderer') {
@@ -1655,10 +2022,13 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         if (outcome.perception) onPerception(outcome.perception);
         result = outcome.result;
       } else {
+        const mainExecutionContext = tool.prepareMain
+          ? withMainPreparedExecution(executionContext, preparedApproval?.current)
+          : executionContext;
         result = await toolBroker.executeMain(
           call.name,
           call.input,
-          executionContext,
+          mainExecutionContext,
           tool.timeoutMs,
           runToolRegistry,
         );
@@ -2133,6 +2503,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
                   currentPerception,
                   capabilitySnapshot,
                   activeSkillId,
+                  createAgentAiDestinationIdentity(input, runtimeConnection),
                   (nextPerception) => {
                     currentPerception = nextPerception;
                   },

@@ -25,6 +25,7 @@ Agent renderer 的页面模式、组件职责、时间线投影、受控交互�
 - 经过确认的 `directory.create` 写操作，以及执行后的目录树刷新和再感知。
 - 经过确认的 `media.extractAudio`：先无副作用解析源 provider、按 M4A / MP3 / WAV 分别准备资料库路由与本机兜底，再允许用户选择资料库目录或本机、修改文件名与格式并冻结精确动作；批准后提取第一条音轨，上传并刷新再感知，或通过 main 持有的系统 Save As 保存到本机。
 - main / renderer Tool 的统一执行分发，以及只由已注册媒体 Tool 间接使用的受控本地进程基座。
+- Tool Registry 与 Orchestrator 的通用 prepare 生命周期：声明 prepare 的 Tool 必须由 main 或 renderer 单一持有；main-owned prepare 直接从 Run 冻结快照生成 public action、不可变私有 binding 和 hash，私有 binding 只经 main execution context 交给同一冻结 Tool 实现，不进入模型输入、SQLite 或 renderer IPC。当前没有生产 Tool 使用 main-owned prepare，`shell.run` 仍未注册。
 - 本机会话分页列表、搜索、新建、打开、重命名和删除。
 - 等待确认状态持久化、应用重启后的会话恢复，以及未完成运行的中断标记。
 - 由持久化 ToolRun 驱动的统一 Agent 时间线：实时进度、确认、结果、产物和中断状态在恢复后保持一致。
@@ -72,8 +73,10 @@ AgentOrchestrator
 AgentToolBroker
   main / renderer 执行分发与 memory.propose 审批写入
        |
-AgentToolPrepareBroker
-  审批前的 owner-bound 环境读取、超时、取消与防重放
+Prepared Tool lifecycle
+  |-- main-owned prepare -> Run 快照内 hook -> main-only 不可变 binding
+  `-- renderer-owned prepare -> AgentToolPrepareBroker
+        owner-bound 环境读取、超时、取消与防重放
        |
 media.inspect / media.extractAudio
   Renderer 临时链接 -> main 一次性能力校验
@@ -182,14 +185,17 @@ Run / ToolRun 每次成功状态 mutation 都在同一条 SQL 中执行 `revisio
   -> 激活结果完整进入当前 provider 上下文，下一 turn 按 allowlist 收窄业务 Tool
   -> 执行任一 Tool 前原子预检整轮业务 Tool 配额和全部最小合法结果消息
   -> 声明 prepare 契约的 Tool 先创建 preparing ToolRun
-  -> main 发出绑定 owner / ToolRun / call / 输入 hash 的一次性 prepare request
-  -> renderer 只读取节点、provider 路由和健康状态，不产生上传或本机写入
+  -> main-owned prepare 直接调用 Run 冻结 Tool hook，不产生 renderer request
+  -> renderer-owned prepare 由 main 发出绑定 owner / ToolRun / call / 输入 hash 的一次性 request
+  -> renderer prepare 只读取节点、provider 路由和健康状态，不产生上传或本机写入
   -> main 生成并持久化 public prepared action、ID 与 snapshot hash
+  -> main-owned 私有 binding 与 snapshot material 被有界深拷贝、冻结并纳入 hash，只保留在当前进程内存；任一单项和完整规范快照均受 256 KiB 上限约束
   -> 写操作进入 awaiting_approval 并等待精确动作确认
-  -> 用户编辑目标后重新生成 prepared action 与 provider binding，SQLite 批准成功后才更新内存执行输入
+  -> 用户批准时始终由原 prepare owner 重新生成 action 与 binding；动作、预览、行为、私有 binding 或 snapshot material 漂移时以 SQLite CAS 建立全新确认轮次
+  -> 稳定复核通过时，SQLite CAS 先保存本次最新 prepared ID / hash，成功后才推进内存并执行本次新签发的一次性 capability；CAS 失败时旧确认仍可重试，CAS 成功后 Run / UI 投影失败只能降级，不能复活或重新武装旧确认
   -> 缺少有限参数时，interaction.request 进入 awaiting_interaction
   -> 用户一次性提交受控回答后，原 ToolRun / Run 回到 running
-  -> 批准后由一次性 Renderer execution request 执行
+  -> 批准后，main Tool 以原始 Schema-valid 输入加私有 prepared context 执行，renderer Tool 使用一次性 execution request
   -> 只读 Renderer Tool 由 main 生成一次性 execution request 后自动派发
   -> 写入成功后立即提交 authoritative result
   -> 刷新目录树并重新感知真实结果
@@ -303,6 +309,7 @@ Renderer 写操作有两个不同的回执边界：后端已经确认创建节�
 - `skill.activate` 必须独占 provider turn。若模型把激活与计划或其他 Tool 放在同一响应中，Orchestrator 在创建任何 ToolRun 和执行任何副作用前整批拒绝；激活正文与 allowlist 收窄只从下一 turn 生效。
 - 完整激活 envelope 包含 `skillId / version / instructions / toolAllowlist / instructionsHash`，注册期和执行前都必须完整落入 1,024 token 的 provider Tool result 上限以及当前 continuation 剩余预算；不能截断说明后继续。终态 Run 的近期执行事实和 renderer-safe 投影都只保留 `skillId / version / instructionsHash`，不向后续 provider 或 UI 回灌正文；完整结果只留在 main 的当前 Run 上下文与 SQLite 规范审计事实中。
 - Tool Registry 在注册时要求 `inputSchema` 具有明确的对象根，深拷贝并冻结后再严格编译；无效或 Provider 不兼容的 schema 不能完成注册，调用方后续修改原对象或 Registry 返回值也不能让 Provider 声明与运行时校验器漂移。每个 Tool 同时冻结 `business / control` 分类和显式或派生的 registration identity；重复 identity 和未声明的控制 Tool 会被拒绝。运行时不做类型转换、默认值填充或额外字段删除。已知 Tool 的原始参数必须先通过统一 JSON Schema 和危险对象结构检查，再进入 Tool 自己的领域 `validate`、动态权限 `assess`、确认和执行。Schema 失败时以固定安全占位替换 provider 历史中的原参数并返回结构化错误，不创建 ToolRun、不发出 Tool 事件，也不调用领域校验、权限判断、Renderer 请求或 executor；Registry 在 main 执行入口再次校验，防止 Broker 直达路径绕过。
+- main-owned prepare 使用与 Registry 执行复验相同的 canonical 输入 hash；opaque capability 同时绑定 owner、窗口、资料库、AI destination、Run capability、Session、Run、ToolRun、call、Tool input 与 registration identity，且在调用 executor 前即一次性消费。prepare hook 只取得无 progress / interaction / memory / Registry execute 回调的窄上下文。私有 binding、snapshot material 任一单项及完整规范快照都不得超过 256 KiB，超限时在哈希和持久化前拒绝。批准复核失败只向 renderer 返回稳定通用错误，不透传 hook 的本机路径、凭据或异常正文。审批 CAS 是不可回滚的提交边界：提交前故障保留当前卡重试，提交后即使 Run 状态或事件投影失败也必须结算等待者并清理旧卡。
 - 通过 Schema 的 Tool 参数再生成有界审计投影；发现敏感字段或无法完整审计时不产生副作用。Tool 进度、确认预览、规范结果和 Run 错误都必须在写入 SQLite 或发送 renderer 事件前完成文本或结构化递归清洗；未知、拒绝和失败 Tool 同样不能把原始参数或上游错误旁路到时间线。
 - 当前每个 Run 最多 10 个 provider turn 和 8 次业务 Tool 调用：10 turn 可容纳一次 Skill 激活、最多 8 个串行业务 Tool turn 与最终回答。模型单轮返回的业务 Tool 数会与 Run 已用配额一起原子预检；超额时整轮拒绝，不能先执行一部分再失败。`agent.plan.set` 和 `skill.activate` 均不计入业务 Tool 调用配额，`skill.activate` 也不绑定计划步骤；控制 Tool 仍受 provider 总 turn 限制，不能无限续接。
 - provider 上下文按每一次完整请求重新估算 system、Tool schema、消息、Tool Call 参数和 Tool result；当前缺少可靠模型窗口元数据时使用保守 `16,384` token fallback，并为回答和后续 Tool loop 分别预留固定额度。main 可通过只接收 `providerType + model` 的预算 resolver 注入真实窗口，不向 resolver 暴露 Key，也暂不扩展配置 UI。解析后的回答预留同时作为常规 Tool turn、无 Tool fallback 和摘要请求的真实 provider 输出上限：官方 OpenAI 使用 `max_completion_tokens`，DeepSeek / Local 的 OpenAI-compatible Chat Completions 与 Claude 使用 `max_tokens`，两类字段不能同时发送；字符硬上限继续作为独立的本地内存保护。固定输入与预留已经占满窗口、当前 user message 超过剩余预算时，在创建 Session / Run 前明确拒绝；不能用最小预算下限制造负预算，也不能静默截断当前 Run。每轮 Tool Call 在执行任一 Tool 前必须能容纳全部最小合法 Tool 结果消息，逐项投影时还要精确保留后续 callId、Tool 名和最小结果的完整协议开销；若 Renderer Tool 可能在副作用后首次返回感知快照，预检必须同时覆盖执行前后两种 system prompt 状态。

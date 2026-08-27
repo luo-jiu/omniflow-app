@@ -2,7 +2,7 @@
 
 更新时间：2026-08-27
 
-状态：**目标架构已批准；持久化与共享存储基座进行中，`shell.run` 尚未实现**。
+状态：**目标架构已批准；持久化、共享存储与 main prepare 基座已完成，`shell.run` 尚未实现**。
 
 适用范围：
 
@@ -851,7 +851,7 @@ src/features/agent/
 当前代码不能直接注册 `shell.run`，至少存在这些前置差距：
 
 - `AgentPreparedActionPublic` 的严格判别联合基座已经落地，目前只有 `media.extractAudio@1` 分支；Shell 必须新增自己的 public / main-only binding 分支，不能复用或扩宽媒体结构。
-- 通用 prepare hook 当前只支持 Renderer prepare；Shell 需要 main prepare，但仍必须复用同一 Orchestrator / ToolRun 生命周期。
+- 通用 main prepare hook 已落地：Registry 冻结 `none / renderer / main` preparation identity，Orchestrator 复用同一 `preparing -> approval -> execution` 生命周期；main-only binding 与 snapshot material 被有界深拷贝、冻结并纳入 snapshot hash，任一单项和完整规范快照均限制为 256 KiB，只经 main execution context 交给 Run 快照中的同一 Tool 实现。批准时始终重新 prepare；稳定时以 SQLite CAS 保存并执行最新 capability，任一公开审批语义、私有 binding 或 material 漂移都建立新确认轮次。CAS 前失败保留当前确认重试，CAS 后 Run / UI 投影失败不得重新武装旧确认。当前尚无生产 Tool 使用该 hook，Shell 仍需自己的 prepared action 分支与 PreparationService。
 - `AgentPermissionGate` 没有 Shell rule Store、canonical matcher、analyzer / policy / env policy revision、workspace content identity 和命中审计。
 - 当前 Run snapshot / ToolRun 还没有可供 Shell 规则绑定的 AI profile config revision、Base URL identity 与 staged source provenance；只绑定命令 token 会造成跨数据、跨 AI 目的地复用。
 - `AgentToolBroker` 对 main Tool 固定使用 6 秒取消收口；Shell 需要由 registration identity 冻结并受全局上限约束的专用 settle budget，避免 Broker 先结束、进程后清理。
@@ -867,7 +867,7 @@ src/features/agent/
 
 ### Phase 1A：前台 Shell 核心
 
-- 以已落地的单一 Schema Coordinator 与 prepared action 判别联合为基础，继续完成 main prepare hook、Provider Registry 和 `shell.run`。
+- 以已落地的单一 Schema Coordinator、prepared action 判别联合与 main prepare hook 为基础，继续完成 Provider Registry、Shell PreparationService 和 `shell.run`。
 - 共享 Quota Manager、基础 Run workspace / manifest、仅本次审批、逻辑 cwd、受控 env、非交互执行、实时 tail、日志 Store。
 - macOS 与 Windows 的整树取消、超时、应用退出和中断恢复。
 

@@ -9,12 +9,15 @@ import type {
   AgentInteractionResponse,
   AgentMemoryItem,
   AgentMemoryProposal,
+  AgentOwnerScope,
   AgentPreparedActionPublic,
   AgentPerceptionSnapshot,
   AgentToolProgress,
   AgentToolResult,
   AgentToolRisk,
 } from '@/shared/agent/agent.types';
+import { normalizeAgentOwnerScope } from '../../../src/shared/agent/agent-owner-scope';
+import { normalizeAgentPreparedActionPublic } from '../../../src/shared/agent/agent-prepared-action';
 import {
   AGENT_SKILL_ACTIVATE_TOOL_NAME,
   AGENT_SKILL_ACTIVATE_TOOL_REGISTRATION_ID,
@@ -27,16 +30,89 @@ const MAX_INPUT_SCAN_DEPTH = 16;
 const MAX_INPUT_SCAN_NODES = 4_096;
 const MAX_SCHEMA_CLONE_DEPTH = 32;
 const MAX_SCHEMA_CLONE_NODES = 10_000;
+const MAX_MAIN_PREPARATION_SNAPSHOT_BYTES = 256 * 1024;
 const MAX_TOOL_REGISTRATION_ID_LENGTH = 200;
 const UNSAFE_INPUT_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 const INVALID_TOOL_REGISTRATION_ID_MESSAGE = 'Agent Tool registration identity 无效';
 const DUPLICATE_TOOL_REGISTRATION_ID_MESSAGE = 'Agent Tool registration identity 已注册';
 const STALE_TOOL_SNAPSHOT_MESSAGE = 'Agent Tool registration identity 不匹配';
+const MAX_PREPARED_ACTION_ID_LENGTH = 200;
+const PREPARED_SNAPSHOT_HASH_PATTERN = /^[a-f0-9]{64}$/u;
+const MAIN_PREPARATION_IDENTITY_FIELDS = new Set([
+  'aiDestinationIdentity',
+  'callId',
+  'libraryId',
+  'ownerScope',
+  'ownerWebContentsId',
+  'preparedActionId',
+  'runCapabilityIdentity',
+  'runId',
+  'sessionId',
+  'toolInputHash',
+  'toolName',
+  'toolRegistrationId',
+  'toolRunId',
+]);
+const MAIN_PREPARATION_OWNER_SCOPE_FIELDS = new Set(['accountScope', 'backendScope']);
+const MAIN_PREPARATION_IDENTITY_HASH_PATTERN = /^v1:[a-f0-9]{64}$/u;
+const RUN_CAPABILITY_IDENTITY_PATTERN = /^v[1-9]\d*:[a-f0-9]{64}$/u;
+
+export type AgentToolMainPreparationBinding = Readonly<Record<string, unknown>>;
+
+export interface AgentToolMainPreparationIdentity {
+  readonly aiDestinationIdentity: string;
+  readonly callId: string;
+  readonly libraryId: number;
+  readonly ownerScope: AgentOwnerScope;
+  readonly ownerWebContentsId: number;
+  readonly preparedActionId: string;
+  readonly runCapabilityIdentity: string;
+  readonly runId: string;
+  readonly sessionId: string;
+  readonly toolInputHash: string;
+  readonly toolName: string;
+  readonly toolRegistrationId: string;
+  readonly toolRunId: string;
+}
+
+export interface AgentToolMainPreparedExecution {
+  readonly binding: AgentToolMainPreparationBinding;
+  readonly identity: AgentToolMainPreparationIdentity;
+  readonly preparedActionId: string;
+  readonly publicAction: AgentPreparedActionPublic;
+  readonly snapshotHash: string;
+}
+
+declare const AGENT_TOOL_MAIN_PREPARED_CAPABILITY: unique symbol;
+
+/** Opaque, single-use execution authority issued by one immutable Registry snapshot. */
+export type AgentToolMainPreparedCapability = Readonly<{
+  [AGENT_TOOL_MAIN_PREPARED_CAPABILITY]: true;
+}>;
+
+export interface AgentToolMainPreparationSealInput {
+  readonly approvalSemantics: unknown;
+  readonly binding: AgentToolMainPreparationBinding;
+  readonly identity: AgentToolMainPreparationIdentity;
+  readonly publicAction: AgentPreparedActionPublic;
+  readonly snapshotMaterial?: unknown;
+}
+
+export interface AgentToolMainPreparationSealResult {
+  readonly capability: AgentToolMainPreparedCapability;
+  readonly identity: AgentToolMainPreparationIdentity;
+  readonly publicAction: AgentPreparedActionPublic;
+  readonly snapshotHash: string;
+  /** Canonical preparation content without the per-round preparedActionId. */
+  readonly stabilityHash: string;
+}
 
 export interface AgentToolExecutionContext {
   appContext: AgentAppContext;
   onProgress: (progress: AgentToolProgress) => void;
   perception?: AgentPerceptionSnapshot;
+  /** Main-owned prepared binding. It is never part of model Tool input or Renderer IPC. */
+  preparation?: AgentToolMainPreparedExecution;
   /** Immutable Tool + Skill capabilities captured when the current Run started. */
   runCapabilitySnapshot?: AgentRunCapabilitySnapshot;
   /** Skill already active in this Run, if any. */
@@ -49,7 +125,24 @@ export interface AgentToolExecutionContext {
   signal: AbortSignal;
 }
 
+export interface AgentToolDispatchContext extends Omit<AgentToolExecutionContext, 'preparation'> {
+  readonly mainPreparationCapability?: AgentToolMainPreparedCapability;
+  readonly mainPreparationIdentity?: AgentToolMainPreparationIdentity;
+}
+
+export interface AgentToolMainPreparationContext {
+  readonly activeSkillId?: string;
+  readonly appContext: AgentAppContext;
+  readonly ownerScope: AgentOwnerScope;
+  readonly ownerWebContentsId: number;
+  readonly perception?: AgentPerceptionSnapshot;
+  readonly preparationIdentity: AgentToolMainPreparationIdentity;
+  readonly signal: AbortSignal;
+}
+
 export type AgentToolExecutor = 'main' | 'renderer';
+
+type AgentToolPreparationMode = 'main' | 'none' | 'renderer';
 
 /** Closed classification used by Run capability snapshots. */
 export type AgentToolKind = 'business' | 'control';
@@ -71,6 +164,15 @@ export type AgentToolPermissionDecision =
 export interface AgentToolPreparationResult {
   decision: AgentToolPermissionDecision;
   executionInput: unknown;
+  publicAction: AgentPreparedActionPublic;
+  /** Main-only material included in the approval hash and never persisted or projected. */
+  snapshotMaterial?: unknown;
+}
+
+export interface AgentToolMainPreparationResult {
+  /** Main-only execution binding. It is neither persisted nor validated as model Tool input. */
+  binding: AgentToolMainPreparationBinding;
+  decision: AgentToolPermissionDecision;
   publicAction: AgentPreparedActionPublic;
   /** Main-only material included in the approval hash and never persisted or projected. */
   snapshotMaterial?: unknown;
@@ -108,6 +210,11 @@ export interface AgentTool {
    * identity from the immutable public definition and schema.
    */
   readonly registrationId?: string;
+  readonly prepareMain?: (
+    input: unknown,
+    requestedAction: AgentPreparedActionPublic | undefined,
+    context: AgentToolMainPreparationContext,
+  ) => AgentToolMainPreparationResult | Promise<AgentToolMainPreparationResult>;
   readonly finalizeRendererPreparation?: (
     input: unknown,
     rendererResult: unknown,
@@ -145,11 +252,16 @@ export interface AgentToolRegistrySnapshot {
   readonly execute: (
     name: string,
     input: unknown,
-    context: AgentToolExecutionContext,
+    context: AgentToolDispatchContext,
     expectedRegistrationId?: string,
   ) => Promise<AgentToolResult>;
   readonly get: (name: string) => AgentToolSnapshot | null;
   readonly list: () => AgentToolSnapshot[];
+  readonly sealMainPreparedExecution: (
+    name: string,
+    input: AgentToolMainPreparationSealInput,
+    expectedRegistrationId?: string,
+  ) => AgentToolMainPreparationSealResult;
   readonly validateInput: (
     name: string,
     input: unknown,
@@ -169,27 +281,54 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 
 function cloneSchemaValue(
   value: unknown,
-  state: { active: WeakSet<object>; nodes: number },
+  state: {
+    active: WeakSet<object>;
+    bytes?: number;
+    maxBytes?: number;
+    nodes: number;
+  },
   depth: number,
 ): unknown {
   state.nodes += 1;
   if (state.nodes > MAX_SCHEMA_CLONE_NODES || depth > MAX_SCHEMA_CLONE_DEPTH) {
     throw new Error(INVALID_TOOL_SCHEMA_MESSAGE);
   }
-  if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  const accountBytes = (bytes: number) => {
+    if (state.maxBytes === undefined) return;
+    state.bytes = (state.bytes || 0) + bytes;
+    if (state.bytes > state.maxBytes) throw new Error(INVALID_TOOL_SCHEMA_MESSAGE);
+  };
+  if (value === null) {
+    accountBytes(4);
+    return value;
+  }
+  if (typeof value === 'string') {
+    accountBytes(Buffer.byteLength(value, 'utf8') + 2);
+    return value;
+  }
+  if (typeof value === 'boolean') {
+    accountBytes(value ? 4 : 5);
+    return value;
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    accountBytes(32);
+    return value;
+  }
   if (!value || typeof value !== 'object') throw new Error(INVALID_TOOL_SCHEMA_MESSAGE);
   if (state.active.has(value)) throw new Error(INVALID_TOOL_SCHEMA_MESSAGE);
   state.active.add(value);
 
   try {
     if (Array.isArray(value)) {
+      accountBytes(value.length + 2);
       return Object.freeze(value.map(item => cloneSchemaValue(item, state, depth + 1)));
     }
     if (!isPlainObject(value)) throw new Error(INVALID_TOOL_SCHEMA_MESSAGE);
     const clone: Record<string, unknown> = {};
+    accountBytes(Object.keys(value).length + 2);
     for (const [key, item] of Object.entries(value)) {
       if (UNSAFE_INPUT_KEYS.has(key)) throw new Error(INVALID_TOOL_SCHEMA_MESSAGE);
+      accountBytes(Buffer.byteLength(key, 'utf8') + 3);
       clone[key] = cloneSchemaValue(item, state, depth + 1);
     }
     return Object.freeze(clone);
@@ -210,6 +349,102 @@ function cloneToolInputSchema(inputSchema: unknown): Readonly<Record<string, unk
   } catch {
     throw new Error(INVALID_TOOL_SCHEMA_MESSAGE);
   }
+}
+
+export function normalizeAgentToolMainPreparationBinding(
+  input: unknown,
+): AgentToolMainPreparationBinding {
+  try {
+    if (!isPlainObject(input)) throw new Error('invalid binding');
+    return cloneSchemaValue(input, {
+      active: new WeakSet<object>(),
+      bytes: 0,
+      maxBytes: MAX_MAIN_PREPARATION_SNAPSHOT_BYTES,
+      nodes: 0,
+    }, 0) as AgentToolMainPreparationBinding;
+  } catch {
+    throw new Error('Agent Tool main preparation binding 无效');
+  }
+}
+
+function normalizeBoundedIdentityText(input: unknown): string {
+  const normalized = typeof input === 'string' ? input.trim() : '';
+  if (
+    !normalized
+    || normalized.length > MAX_TOOL_REGISTRATION_ID_LENGTH
+    || Array.from(normalized).some((character) => {
+      const code = character.charCodeAt(0);
+      return code <= 0x1f || code === 0x7f;
+    })
+  ) {
+    throw new Error('invalid identity text');
+  }
+  return normalized;
+}
+
+function normalizeMainPreparationIdentity(
+  input: unknown,
+  expectedToolName: string,
+  expectedRegistrationId: string,
+): AgentToolMainPreparationIdentity {
+  if (!isPlainObject(input)) throw new Error('invalid preparation identity');
+  const keys = Object.keys(input);
+  if (
+    keys.length !== MAIN_PREPARATION_IDENTITY_FIELDS.size
+    || keys.some(key => !MAIN_PREPARATION_IDENTITY_FIELDS.has(key))
+  ) {
+    throw new Error('invalid preparation identity');
+  }
+  if (!isPlainObject(input.ownerScope)) throw new Error('invalid owner scope');
+  const ownerScopeKeys = Object.keys(input.ownerScope);
+  if (
+    ownerScopeKeys.length !== MAIN_PREPARATION_OWNER_SCOPE_FIELDS.size
+    || ownerScopeKeys.some(key => !MAIN_PREPARATION_OWNER_SCOPE_FIELDS.has(key))
+  ) {
+    throw new Error('invalid owner scope');
+  }
+  const ownerScope = Object.freeze(normalizeAgentOwnerScope(input.ownerScope));
+  const libraryId = Number(input.libraryId);
+  const ownerWebContentsId = Number(input.ownerWebContentsId);
+  if (
+    !Number.isSafeInteger(libraryId)
+    || libraryId <= 0
+    || !Number.isSafeInteger(ownerWebContentsId)
+    || ownerWebContentsId <= 0
+  ) {
+    throw new Error('invalid preparation owner identity');
+  }
+  const preparedActionId = normalizeBoundedIdentityText(input.preparedActionId);
+  const toolName = normalizeBoundedIdentityText(input.toolName);
+  const toolRegistrationId = normalizeBoundedIdentityText(input.toolRegistrationId);
+  const aiDestinationIdentity = normalizeBoundedIdentityText(input.aiDestinationIdentity);
+  const runCapabilityIdentity = normalizeBoundedIdentityText(input.runCapabilityIdentity);
+  const toolInputHash = normalizeBoundedIdentityText(input.toolInputHash);
+  if (
+    preparedActionId.length > MAX_PREPARED_ACTION_ID_LENGTH
+    || toolName !== expectedToolName
+    || toolRegistrationId !== expectedRegistrationId
+    || !MAIN_PREPARATION_IDENTITY_HASH_PATTERN.test(aiDestinationIdentity)
+    || !RUN_CAPABILITY_IDENTITY_PATTERN.test(runCapabilityIdentity)
+    || !PREPARED_SNAPSHOT_HASH_PATTERN.test(toolInputHash)
+  ) {
+    throw new Error('invalid preparation identity');
+  }
+  return Object.freeze({
+    aiDestinationIdentity,
+    callId: normalizeBoundedIdentityText(input.callId),
+    libraryId,
+    ownerScope,
+    ownerWebContentsId,
+    preparedActionId,
+    runCapabilityIdentity,
+    runId: normalizeBoundedIdentityText(input.runId),
+    sessionId: normalizeBoundedIdentityText(input.sessionId),
+    toolInputHash,
+    toolName,
+    toolRegistrationId,
+    toolRunId: normalizeBoundedIdentityText(input.toolRunId),
+  });
 }
 
 const CAPABILITY_ID_PATTERN = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/u;
@@ -288,6 +523,10 @@ function stableSerialize(value: unknown): string {
   )).join(',')}}`;
 }
 
+export function hashAgentToolInputForPreparation(value: unknown): string {
+  return crypto.createHash('sha256').update(stableSerialize(value)).digest('hex');
+}
+
 function normalizeRegistrationId(value: unknown): string | undefined {
   if (value === undefined || value === null) return undefined;
   const normalized = String(value).trim();
@@ -311,24 +550,24 @@ function deriveRegistrationId(input: {
   inputSchema: Readonly<Record<string, unknown>>;
   kind: AgentToolKind;
   name: string;
+  preparationMode: AgentToolPreparationMode;
   risk: AgentToolRisk;
   timeoutMs?: number;
-  usesRendererPreparation: boolean;
   explicitRegistrationId?: unknown;
 }): string {
   const explicit = normalizeRegistrationId(input.explicitRegistrationId);
   if (explicit) return explicit;
   const fingerprint = crypto.createHash('sha256').update(stableSerialize({
-    schemaVersion: 1,
+    schemaVersion: 2,
     availability: input.availability,
     description: input.description,
     executor: input.executor,
     inputSchema: input.inputSchema,
     kind: input.kind,
     name: input.name,
+    preparationMode: input.preparationMode,
     risk: input.risk,
     timeoutMs: input.timeoutMs ?? null,
-    usesRendererPreparation: input.usesRendererPreparation,
   })).digest('hex');
   return `derived:${fingerprint}`;
 }
@@ -395,10 +634,183 @@ function hasUnsafeInputStructure(input: unknown): boolean {
   return false;
 }
 
+interface SealedMainPreparationEntry {
+  claimed: boolean;
+  execution: AgentToolMainPreparedExecution;
+  registrationId: string;
+  toolName: string;
+}
+
+function cloneMainPreparationJson(input: unknown, label: string): unknown {
+  try {
+    return cloneSchemaValue(input ?? null, {
+      active: new WeakSet<object>(),
+      bytes: 0,
+      maxBytes: MAX_MAIN_PREPARATION_SNAPSHOT_BYTES,
+      nodes: 0,
+    }, 0);
+  } catch {
+    throw new Error(`Agent Tool main preparation ${label} 无效`);
+  }
+}
+
+function sealMainPreparedExecutionFromMaps(
+  toolMap: ReadonlyMap<string, AgentToolSnapshot>,
+  sealedPreparations: WeakMap<object, SealedMainPreparationEntry>,
+  name: string,
+  input: AgentToolMainPreparationSealInput,
+  expectedRegistrationId?: string,
+): AgentToolMainPreparationSealResult {
+  const normalizedName = String(name || '').trim();
+  const tool = toolMap.get(normalizedName);
+  if (!tool) throw new Error(`Agent Tool 不存在：${normalizedName}`);
+  if (
+    expectedRegistrationId !== undefined
+    && tool.registrationId !== String(expectedRegistrationId || '').trim()
+  ) {
+    throw new Error(STALE_TOOL_SNAPSHOT_MESSAGE);
+  }
+  if (typeof tool.prepareMain !== 'function') {
+    throw new Error(`Agent Tool 不支持 main preparation：${tool.name}`);
+  }
+  try {
+    const identity = normalizeMainPreparationIdentity(
+      input.identity,
+      tool.name,
+      tool.registrationId,
+    );
+    const publicAction = cloneMainPreparationJson(
+      normalizeAgentPreparedActionPublic(input.publicAction),
+      'public action',
+    ) as AgentPreparedActionPublic;
+    if (publicAction.kind !== tool.name) throw new Error('invalid action kind');
+    const binding = normalizeAgentToolMainPreparationBinding(input.binding);
+    const approvalSemantics = cloneMainPreparationJson(
+      input.approvalSemantics,
+      'approval semantics',
+    );
+    const snapshotMaterial = cloneMainPreparationJson(
+      input.snapshotMaterial,
+      'snapshot material',
+    );
+    const snapshotContent = {
+      action: publicAction,
+      approvalSemantics,
+      binding,
+      snapshotMaterial,
+    };
+    if (
+      Buffer.byteLength(stableSerialize(snapshotContent), 'utf8')
+      > MAX_MAIN_PREPARATION_SNAPSHOT_BYTES
+    ) {
+      throw new Error('main preparation snapshot exceeds byte limit');
+    }
+    const stableIdentity = {
+      aiDestinationIdentity: identity.aiDestinationIdentity,
+      callId: identity.callId,
+      libraryId: identity.libraryId,
+      ownerScope: identity.ownerScope,
+      ownerWebContentsId: identity.ownerWebContentsId,
+      runCapabilityIdentity: identity.runCapabilityIdentity,
+      runId: identity.runId,
+      sessionId: identity.sessionId,
+      toolInputHash: identity.toolInputHash,
+      toolName: identity.toolName,
+      toolRegistrationId: identity.toolRegistrationId,
+      toolRunId: identity.toolRunId,
+    };
+    const stabilityHash = crypto.createHash('sha256')
+      .update(stableSerialize({
+        ...snapshotContent,
+        domain: 'omniflow.agent.main-preparation.stability',
+        identity: stableIdentity,
+        version: 1,
+      }))
+      .digest('hex');
+    const snapshotHash = crypto.createHash('sha256').update(stableSerialize({
+      ...snapshotContent,
+      domain: 'omniflow.agent.main-preparation',
+      identity,
+      version: 1,
+    })).digest('hex');
+    const execution = Object.freeze({
+      binding,
+      identity,
+      preparedActionId: identity.preparedActionId,
+      publicAction,
+      snapshotHash,
+    });
+    const capability = Object.freeze({}) as AgentToolMainPreparedCapability;
+    sealedPreparations.set(capability, {
+      claimed: false,
+      execution,
+      registrationId: tool.registrationId,
+      toolName: tool.name,
+    });
+    return Object.freeze({
+      capability,
+      identity,
+      publicAction,
+      snapshotHash,
+      stabilityHash,
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('Agent Tool main preparation')) {
+      throw error;
+    }
+    throw new Error('Agent Tool main preparation seal 无效');
+  }
+}
+
+function collectPrivateObjectReferences(root: object): WeakSet<object> {
+  const references = new WeakSet<object>();
+  const pending: object[] = [root];
+  let visited = 0;
+  while (pending.length > 0) {
+    const current = pending.pop();
+    if (!current || references.has(current)) continue;
+    references.add(current);
+    visited += 1;
+    if (visited > MAX_SCHEMA_CLONE_NODES) {
+      throw new Error('Agent Tool main preparation binding 超过安全上限');
+    }
+    for (const value of Object.values(current)) {
+      if (value && typeof value === 'object') pending.push(value);
+    }
+  }
+  return references;
+}
+
+function containsPrivateObjectReference(
+  input: unknown,
+  privateReferences: WeakSet<object>,
+): boolean {
+  if (!input || typeof input !== 'object') return false;
+  const pending: Array<{ depth: number; value: object }> = [{ depth: 0, value: input }];
+  const seen = new WeakSet<object>();
+  let visited = 0;
+  while (pending.length > 0) {
+    const current = pending.pop();
+    if (!current) break;
+    if (privateReferences.has(current.value)) return true;
+    if (seen.has(current.value)) continue;
+    seen.add(current.value);
+    visited += 1;
+    if (visited > MAX_INPUT_SCAN_NODES || current.depth > MAX_INPUT_SCAN_DEPTH) return true;
+    for (const value of Object.values(current.value)) {
+      if (value && typeof value === 'object') {
+        pending.push({ depth: current.depth + 1, value });
+      }
+    }
+  }
+  return false;
+}
+
 export function createAgentToolRegistry(initialTools: AgentTool[] = []) {
   const tools = new Map<string, AgentToolSnapshot>();
   const registrationIds = new Map<string, string>();
   const inputValidators = new Map<string, ValidateFunction>();
+  const sealedMainPreparations = new WeakMap<object, SealedMainPreparationEntry>();
   const inputSchemaCompiler = createToolInputSchemaCompiler();
   let revision = 0;
 
@@ -439,27 +851,53 @@ export function createAgentToolRegistry(initialTools: AgentTool[] = []) {
     const inputSchema = cloneToolInputSchema(tool.inputSchema);
     const hasPrepareRequest = typeof tool.createRendererPrepareRequest === 'function';
     const hasPrepareFinalizer = typeof tool.finalizeRendererPreparation === 'function';
+    const hasMainPreparation = typeof tool.prepareMain === 'function';
     if (hasPrepareRequest !== hasPrepareFinalizer) {
       throw new Error(`Agent Tool prepare 契约不完整：${name}`);
     }
-    if (hasPrepareRequest && (tool.executor || 'main') !== 'renderer') {
+    const hasRendererPreparation = hasPrepareRequest && hasPrepareFinalizer;
+    if (hasMainPreparation && hasRendererPreparation) {
+      throw new Error(`Agent Tool prepare 不能同时由 main 与 Renderer 持有：${name}`);
+    }
+    const executor = tool.executor || 'main';
+    if (executor !== 'main' && executor !== 'renderer') {
+      throw new Error(`Agent Tool executor 无效：${name}`);
+    }
+    if (hasRendererPreparation && executor !== 'renderer') {
       throw new Error(`Agent Tool prepare 只支持 Renderer executor：${name}`);
     }
-    if (hasPrepareRequest && typeof tool.createRendererRequest === 'function') {
+    if (hasMainPreparation && executor !== 'main') {
+      throw new Error(`Agent Tool main prepare 只支持 main executor：${name}`);
+    }
+    if (hasRendererPreparation && typeof tool.createRendererRequest === 'function') {
       throw new Error(`Agent Tool prepare 与旧 Renderer request 契约不能并存：${name}`);
+    }
+    if (hasMainPreparation && typeof tool.createRendererRequest === 'function') {
+      throw new Error(`Agent Tool main prepare 与 Renderer request 契约不能并存：${name}`);
+    }
+    const preparationMode: AgentToolPreparationMode = hasMainPreparation
+      ? 'main'
+      : hasRendererPreparation
+        ? 'renderer'
+        : 'none';
+    if (preparationMode !== 'none' && typeof tool.assess === 'function') {
+      throw new Error(`Agent Tool prepare 与独立 assess 契约不能并存：${name}`);
+    }
+    if (hasMainPreparation && typeof tool.execute !== 'function') {
+      throw new Error(`Agent Tool main prepare 缺少 main executor：${name}`);
     }
     const validator = compileToolInputSchema(inputSchemaCompiler, inputSchema);
     const registrationId = deriveRegistrationId({
       availability,
       description: String(tool.description || '').trim(),
-      executor: tool.executor || 'main',
+      executor,
       explicitRegistrationId: tool.registrationId,
       inputSchema,
       kind,
       name,
+      preparationMode,
       risk: tool.risk,
       timeoutMs: tool.timeoutMs,
-      usesRendererPreparation: hasPrepareRequest,
     });
     const existingName = registrationIds.get(registrationId);
     if (existingName && existingName !== name) {
@@ -535,9 +973,10 @@ export function createAgentToolRegistry(initialTools: AgentTool[] = []) {
   async function executeFromMaps(
     toolMap: ReadonlyMap<string, AgentToolSnapshot>,
     validatorMap: ReadonlyMap<string, ValidateFunction>,
+    preparedCapabilities: WeakMap<object, SealedMainPreparationEntry>,
     name: string,
     input: unknown,
-    context: AgentToolExecutionContext,
+    context: AgentToolDispatchContext,
     expectedRegistrationId?: string,
   ): Promise<AgentToolResult> {
     const normalizedName = String(name || '').trim();
@@ -565,18 +1004,90 @@ export function createAgentToolRegistry(initialTools: AgentTool[] = []) {
       expectedRegistrationId,
     );
     if (!validation.ok) throw new Error(validation.message);
-    return tool.execute(input, context);
+    if (Object.prototype.hasOwnProperty.call(context, 'preparation')) {
+      throw new Error(`Agent Tool dispatch context 不能直接提供 preparation：${tool.name}`);
+    }
+    const hasPreparationCapability = Object.prototype.hasOwnProperty.call(
+      context,
+      'mainPreparationCapability',
+    );
+    const hasPreparationIdentity = Object.prototype.hasOwnProperty.call(
+      context,
+      'mainPreparationIdentity',
+    );
+    const requiresMainPreparation = typeof tool.prepareMain === 'function';
+    if (requiresMainPreparation && (!hasPreparationCapability || !hasPreparationIdentity)) {
+      throw new Error(`Agent Tool 缺少 main prepared execution capability：${tool.name}`);
+    }
+    if (!requiresMainPreparation && (hasPreparationCapability || hasPreparationIdentity)) {
+      throw new Error(`Agent Tool 不接受 main prepared execution capability：${tool.name}`);
+    }
+    if (!requiresMainPreparation) return tool.execute(input, context);
+
+    const capability = context.mainPreparationCapability;
+    if (!capability || typeof capability !== 'object') {
+      throw new Error(`Agent Tool main prepared execution capability 无效：${tool.name}`);
+    }
+    const entry = preparedCapabilities.get(capability);
+    if (
+      !entry
+      || entry.claimed
+      || entry.toolName !== tool.name
+      || entry.registrationId !== tool.registrationId
+    ) {
+      throw new Error(`Agent Tool main prepared execution capability 无效或已使用：${tool.name}`);
+    }
+    const dispatchIdentity = normalizeMainPreparationIdentity(
+      context.mainPreparationIdentity,
+      tool.name,
+      tool.registrationId,
+    );
+    if (
+      stableSerialize(dispatchIdentity) !== stableSerialize(entry.execution.identity)
+      || hashAgentToolInputForPreparation(input) !== entry.execution.identity.toolInputHash
+      || Number(context.appContext.libraryId) !== entry.execution.identity.libraryId
+    ) {
+      throw new Error(`Agent Tool main prepared execution identity 不匹配：${tool.name}`);
+    }
+    entry.claimed = true;
+    const privateReferences = collectPrivateObjectReferences(entry.execution.binding);
+    const baseContext = Object.fromEntries(Object.entries(context).filter(([key]) => (
+      key !== 'mainPreparationCapability' && key !== 'mainPreparationIdentity'
+    ))) as AgentToolExecutionContext;
+    const executionContext: AgentToolExecutionContext = {
+      ...baseContext,
+      onProgress: (progress) => {
+        if (containsPrivateObjectReference(progress, privateReferences)) {
+          throw new Error('Agent Tool progress 不能包含 main-only preparation binding');
+        }
+        context.onProgress(progress);
+      },
+      preparation: entry.execution,
+    };
+    try {
+      const result = await tool.execute(input, executionContext);
+      if (containsPrivateObjectReference(result, privateReferences)) {
+        throw new Error('Agent Tool result 不能包含 main-only preparation binding');
+      }
+      return result;
+    } catch (error) {
+      if (containsPrivateObjectReference(error, privateReferences)) {
+        throw new Error('Agent Tool error 不能包含 main-only preparation binding');
+      }
+      throw error;
+    }
   }
 
   async function execute(
     name: string,
     input: unknown,
-    context: AgentToolExecutionContext,
+    context: AgentToolDispatchContext,
     expectedRegistrationId?: string,
   ): Promise<AgentToolResult> {
     return executeFromMaps(
       tools,
       inputValidators,
+      sealedMainPreparations,
       name,
       input,
       context,
@@ -604,10 +1115,12 @@ export function createAgentToolRegistry(initialTools: AgentTool[] = []) {
         return [tool.name, validator];
       }),
     );
+    const snapshotSealedPreparations = new WeakMap<object, SealedMainPreparationEntry>();
     const snapshot: AgentToolRegistrySnapshot = {
       execute: (name, input, context, expectedRegistrationId) => executeFromMaps(
         snapshotToolMap,
         snapshotValidatorMap,
+        snapshotSealedPreparations,
         name,
         input,
         context,
@@ -616,6 +1129,15 @@ export function createAgentToolRegistry(initialTools: AgentTool[] = []) {
       get: (name) => snapshotToolMap.get(String(name || '').trim()) || null,
       list: () => Array.from(snapshotTools),
       revision,
+      sealMainPreparedExecution: (name, input, expectedRegistrationId) => (
+        sealMainPreparedExecutionFromMaps(
+          snapshotToolMap,
+          snapshotSealedPreparations,
+          name,
+          input,
+          expectedRegistrationId,
+        )
+      ),
       tools: snapshotTools,
       validateInput: (name, input, expectedRegistrationId) => validateInputFromMaps(
         snapshotToolMap,
@@ -644,7 +1166,7 @@ export function createAgentToolRegistry(initialTools: AgentTool[] = []) {
     snapshot: AgentToolRegistrySnapshot,
     name: string,
     input: unknown,
-    context: AgentToolExecutionContext,
+    context: AgentToolDispatchContext,
     expectedRegistrationId?: string,
   ): Promise<AgentToolResult> {
     if (!snapshot || typeof snapshot.execute !== 'function') {

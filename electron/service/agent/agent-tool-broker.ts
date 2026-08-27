@@ -14,8 +14,8 @@ import type {
 import { normalizeAgentOwnerScope } from '../../../src/shared/agent/agent-owner-scope';
 import {
   agentToolRegistry,
+  type AgentToolDispatchContext,
   type AgentToolRegistrySnapshot,
-  type AgentToolExecutionContext,
 } from './agent-tool-registry';
 import {
   sanitizeAgentSensitiveText,
@@ -39,7 +39,7 @@ interface AgentToolRegistryExecutor {
   execute: (
     name: string,
     input: unknown,
-    context: AgentToolExecutionContext,
+    context: AgentToolDispatchContext,
     expectedRegistrationId?: string,
   ) => Promise<AgentToolResult>;
 }
@@ -139,7 +139,7 @@ export function createAgentToolBroker(options: AgentToolBrokerOptions = {}) {
   function executeMain(
     name: string,
     input: unknown,
-    context: AgentToolExecutionContext,
+    context: AgentToolDispatchContext,
     timeoutMs = DEFAULT_MAIN_EXECUTION_TIMEOUT_MS,
     runToolRegistry?: AgentToolRegistryExecutor | AgentToolRegistrySnapshot,
   ): Promise<AgentToolResult> {

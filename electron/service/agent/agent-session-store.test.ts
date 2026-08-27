@@ -2165,6 +2165,7 @@ describe('SQLite Agent session store', () => {
         title: '提取音频',
       },
       expectedPreparedActionId: 'prepared-action-1',
+      expectedSnapshotHash: 'a'.repeat(64),
       preparedActionId: 'prepared-action-2',
       snapshotHash: 'c'.repeat(64),
     };
@@ -2195,6 +2196,151 @@ describe('SQLite Agent session store', () => {
       revision: 3,
       status: 'running',
     });
+  });
+
+  it('replaces pending prepared approvals with compare-and-swap semantics', async () => {
+    const store = await createStore();
+    const sessionId = 'session-prepared-approval-cas';
+    const runId = 'run-prepared-approval-cas';
+    const toolId = 'tool-prepared-approval-cas';
+    const approvalA = 'approval-prepared-approval-a';
+    const approvalB = 'approval-prepared-approval-b';
+    const preparedActionA = 'prepared-action-approval-a';
+    const preparedActionB = 'prepared-action-approval-b';
+    const snapshotHashA = 'a'.repeat(64);
+    const snapshotHashB = 'b'.repeat(64);
+    const snapshotHashC = 'c'.repeat(64);
+    await createSession(store, sessionId, 3, '确认 CAS');
+    await store.createRun({
+      id: runId,
+      model: 'model-a',
+      now: timestamp(1),
+      profileId: 'profile-a',
+      reasoningEffort: 'auto',
+      sessionId,
+      userPrompt: '提取音频',
+    });
+    await store.createToolRun({
+      callId: 'call-prepared-approval-cas',
+      id: toolId,
+      input: {},
+      now: timestamp(2),
+      permissionBehavior: 'ask',
+      runId,
+      status: 'preparing',
+      toolName: 'media.extractAudio',
+    });
+    await expect(store.completeToolPreparation({
+      action: preparedAction('approval-a.m4a'),
+      approvalId: approvalA,
+      approvalInputHash: snapshotHashA,
+      approvalPreview: {
+        description: '确认动作 A',
+        risk: 'write',
+        title: '提取音频 A',
+      },
+      id: toolId,
+      permissionBehavior: 'ask',
+      preparedActionId: preparedActionA,
+      snapshotHash: snapshotHashA,
+    })).resolves.toMatchObject({
+      approval: { approvalId: approvalA, status: 'pending' },
+      revision: 2,
+      status: 'awaiting_approval',
+    });
+
+    const actionB = preparedAction('approval-b.m4a');
+    const previewB = {
+      description: '确认动作 B',
+      risk: 'write' as const,
+      title: '提取音频 B',
+    };
+    const replacementB = {
+      action: actionB,
+      approvalInputHash: snapshotHashB,
+      approvalPreview: previewB,
+      currentApprovalId: approvalA,
+      expectedPreparedActionId: preparedActionA,
+      expectedSnapshotHash: snapshotHashA,
+      nextApprovalId: approvalB,
+      preparedActionId: preparedActionB,
+      snapshotHash: snapshotHashB,
+    };
+    const replaced = await store.replacePendingToolApproval(replacementB);
+    expect(replaced).toMatchObject({
+      revision: 3,
+      status: 'awaiting_approval',
+    });
+    expect(replaced.approval).toEqual({
+      approvalId: approvalB,
+      preview: previewB,
+      status: 'pending',
+    });
+    expect(replaced.preparation).toEqual({
+      action: actionB,
+      preparedActionId: preparedActionB,
+      snapshotHash: snapshotHashB,
+    });
+
+    const replacementC = {
+      action: preparedAction('approval-c.m4a'),
+      approvalInputHash: snapshotHashC,
+      approvalPreview: {
+        description: '确认动作 C',
+        risk: 'write' as const,
+        title: '提取音频 C',
+      },
+      currentApprovalId: approvalB,
+      expectedPreparedActionId: preparedActionB,
+      expectedSnapshotHash: snapshotHashB,
+      nextApprovalId: 'approval-prepared-approval-c',
+      preparedActionId: 'prepared-action-approval-c',
+      snapshotHash: snapshotHashC,
+    };
+    await expect(store.replacePendingToolApproval({
+      ...replacementC,
+      currentApprovalId: approvalA,
+    })).rejects.toThrow('Agent pending confirmation has changed');
+    await expect(store.replacePendingToolApproval({
+      ...replacementC,
+      expectedPreparedActionId: preparedActionA,
+    })).rejects.toThrow('Agent pending confirmation has changed');
+    await expect(store.replacePendingToolApproval({
+      ...replacementC,
+      expectedSnapshotHash: snapshotHashA,
+    })).rejects.toThrow('Agent pending confirmation has changed');
+
+    expect((await store.getSession(sessionId, OWNER_SCOPE, 3))?.toolActivities[0])
+      .toMatchObject({
+        approval: { approvalId: approvalB, status: 'pending' },
+        preparation: {
+          action: actionB,
+          preparedActionId: preparedActionB,
+          snapshotHash: snapshotHashB,
+        },
+        revision: 3,
+        status: 'awaiting_approval',
+      });
+
+    await expect(store.updateRun(runId, {
+      currentStep: '执行失败',
+      error: '测试终态',
+      finishedAt: timestamp(3),
+      status: 'failed',
+      updatedAt: timestamp(3),
+    })).resolves.toMatchObject({ status: 'failed' });
+    await expect(store.replacePendingToolApproval(replacementC))
+      .rejects.toThrow('Agent pending confirmation has changed');
+    expect((await store.getSession(sessionId, OWNER_SCOPE, 3))?.toolActivities[0])
+      .toMatchObject({
+        approval: {
+          approvalId: approvalB,
+          decidedAt: timestamp(3),
+          status: 'interrupted',
+        },
+        revision: 4,
+        status: 'interrupted',
+      });
   });
 
   it('rejects unsupported, malformed, and non-canonical prepared action writes', async () => {

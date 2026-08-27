@@ -44,6 +44,106 @@ function completion(prepareId: string) {
 }
 
 describe('Agent tool prepare broker', () => {
+  it('returns the result of a bounded main preparation', async () => {
+    const broker = createAgentToolPrepareBroker();
+    const parentController = new AbortController();
+    const prepare = vi.fn((signal: AbortSignal) => {
+      expect(signal).not.toBe(parentController.signal);
+      expect(signal.aborted).toBe(false);
+      return { providerId: 'zsh', workspaceGeneration: 2 };
+    });
+
+    await expect(broker.prepareMain({
+      prepare,
+      signal: parentController.signal,
+      toolName: 'shell.run',
+    })).resolves.toEqual({ providerId: 'zsh', workspaceGeneration: 2 });
+    expect(prepare).toHaveBeenCalledTimes(1);
+  });
+
+  it('aborts the scoped main preparation and ignores its late result', async () => {
+    const broker = createAgentToolPrepareBroker();
+    const parentController = new AbortController();
+    let scopedSignal: AbortSignal | undefined;
+    let resolveLate!: (value: string) => void;
+    const lateResult = new Promise<string>((resolve) => {
+      resolveLate = resolve;
+    });
+    const outcome = broker.prepareMain({
+      prepare: (signal) => {
+        scopedSignal = signal;
+        return lateResult;
+      },
+      signal: parentController.signal,
+      toolName: 'shell.run',
+    });
+    const observed = outcome.then(
+      value => ({ status: 'resolved' as const, value }),
+      error => ({ error, status: 'rejected' as const }),
+    );
+
+    await vi.waitFor(() => expect(scopedSignal).toBeDefined());
+    parentController.abort();
+
+    const rejected = await observed;
+    expect(rejected.status).toBe('rejected');
+    if (rejected.status === 'rejected') {
+      expect(rejected.error).toMatchObject({ name: 'AbortError' });
+    }
+    expect(scopedSignal?.aborted).toBe(true);
+
+    resolveLate('late-result');
+    await Promise.resolve();
+    await expect(outcome).rejects.toMatchObject({ name: 'AbortError' });
+  });
+
+  it('times out a never-settling main preparation and aborts its scoped signal', async () => {
+    vi.useFakeTimers();
+    try {
+      const broker = createAgentToolPrepareBroker({ timeoutMs: 1 });
+      let scopedSignal: AbortSignal | undefined;
+      const outcome = broker.prepareMain({
+        prepare: (signal) => {
+          scopedSignal = signal;
+          return new Promise<never>(() => undefined);
+        },
+        signal: new AbortController().signal,
+        toolName: 'shell.run',
+      });
+      const rejected = expect(outcome).rejects.toThrow('工具 shell.run 准备超时');
+
+      await Promise.resolve();
+      expect(scopedSignal?.aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      await rejected;
+      expect(scopedSignal?.aborted).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('propagates synchronous and asynchronous main preparation errors', async () => {
+    const broker = createAgentToolPrepareBroker();
+    const syncError = new Error('sync prepare failed');
+    const asyncError = new Error('async prepare failed');
+
+    await expect(broker.prepareMain({
+      prepare: () => {
+        throw syncError;
+      },
+      signal: new AbortController().signal,
+      toolName: 'shell.sync',
+    })).rejects.toBe(syncError);
+    await expect(broker.prepareMain({
+      prepare: async () => {
+        throw asyncError;
+      },
+      signal: new AbortController().signal,
+      toolName: 'shell.async',
+    })).rejects.toBe(asyncError);
+  });
+
   it('accepts one exact owner-bound result and rejects replay', async () => {
     const broker = createAgentToolPrepareBroker({ createId: () => 'prepare-1' });
     const prepared = broker.prepareRenderer(prepareInput(new AbortController().signal));

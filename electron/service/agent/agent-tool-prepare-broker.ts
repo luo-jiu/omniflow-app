@@ -32,6 +32,12 @@ interface PrepareRendererToolInput {
   toolName: string;
 }
 
+interface PrepareMainToolInput<T> {
+  prepare: (signal: AbortSignal) => T | Promise<T>;
+  signal: AbortSignal;
+  toolName: string;
+}
+
 interface PendingPreparation {
   callId: string;
   cancel: () => void;
@@ -69,6 +75,50 @@ export function createAgentToolPrepareBroker(options: AgentToolPrepareBrokerOpti
   const createId = options.createId || crypto.randomUUID;
   const timeoutMs = Math.max(1_000, Number(options.timeoutMs) || DEFAULT_PREPARE_TIMEOUT_MS);
   const pendingPreparations = new Map<string, PendingPreparation>();
+
+  function prepareMain<T>(input: PrepareMainToolInput<T>): Promise<T> {
+    const toolName = String(input.toolName || '').trim();
+    if (!toolName || typeof input.prepare !== 'function') {
+      throw new Error('Agent main Tool 准备请求无效');
+    }
+    return new Promise<T>((resolve, reject) => {
+      const controller = new AbortController();
+      let settled = false;
+      const cleanup = () => {
+        clearTimeout(timer);
+        input.signal.removeEventListener('abort', handleAbort);
+      };
+      const settle = (handler: () => void) => {
+        if (settled) return false;
+        settled = true;
+        cleanup();
+        handler();
+        return true;
+      };
+      const handleAbort = () => {
+        if (!settle(() => reject(abortError()))) return;
+        controller.abort();
+      };
+      const timer = setTimeout(() => {
+        if (!settle(() => reject(new Error(`工具 ${toolName} 准备超时`)))) return;
+        controller.abort();
+      }, timeoutMs);
+      timer.unref?.();
+      if (input.signal.aborted) {
+        handleAbort();
+        return;
+      }
+      input.signal.addEventListener('abort', handleAbort, { once: true });
+      void Promise.resolve()
+        .then(() => input.prepare(controller.signal))
+        .then(
+          result => settle(() => resolve(result)),
+          error => settle(() => reject(
+            error instanceof Error ? error : new Error(`工具 ${toolName} 准备失败`),
+          )),
+        );
+    });
+  }
 
   function prepareRenderer(input: PrepareRendererToolInput): {
     outcome: Promise<unknown>;
@@ -175,7 +225,7 @@ export function createAgentToolPrepareBroker(options: AgentToolPrepareBrokerOpti
     });
   }
 
-  return { completeRenderer, prepareRenderer, releaseOwner };
+  return { completeRenderer, prepareMain, prepareRenderer, releaseOwner };
 }
 
 export type AgentToolPrepareBroker = ReturnType<typeof createAgentToolPrepareBroker>;

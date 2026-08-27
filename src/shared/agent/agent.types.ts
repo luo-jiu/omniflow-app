@@ -454,7 +454,8 @@ export type AgentMediaArtifactSaveResult =
   | { canceled: false; fileName: string };
 
 export type AgentToolApprovalDecisionResult =
-  | { approved: false }
+  | { approved: false; reapprovalRequired?: false }
+  | { approved: false; reapprovalRequired: true }
   | { approved: true; execution?: AgentToolExecutionRequest };
 
 export interface AgentToolExecutionCompletion {
