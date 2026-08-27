@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { lstat, mkdir, rm } from 'node:fs/promises';
+import { lstat, mkdir, realpath, rm } from 'node:fs/promises';
 import path from 'node:path';
 
 import {
@@ -8,8 +8,8 @@ import {
   type AgentLocalStorageQuotaOwner,
 } from '../storage/agent-local-storage-quota-manager';
 import { normalizeAgentOwnerScope } from '../../../../src/shared/agent/agent-owner-scope';
+import { normalizeAgentShellLogicalPath } from '../../../../src/shared/agent/shell/agent-shell.types';
 
-const MAX_LOGICAL_PATH_BYTES = 1_024;
 const MAX_WORKSPACE_ID_LENGTH = 200;
 const MAX_RUN_ID_LENGTH = 200;
 const MAX_SESSION_ID_LENGTH = 200;
@@ -66,6 +66,18 @@ export interface AgentShellWorkspaceManifestUpdate {
   remove?: string[];
 }
 
+/** Main-only resolution used while freezing a Shell prepared action. */
+export interface AgentShellWorkspacePreparationContext {
+  generation: number;
+  logicalCwd: string;
+  workspaceMetadataIdentity: string;
+  physicalCwdPath: string;
+  physicalHomePath: string;
+  physicalTempPath: string;
+  runId: string;
+  workspaceId: string;
+}
+
 export interface AgentShellWorkspaceStoreOptions {
   adapterId?: string;
   createId?: () => string;
@@ -103,10 +115,6 @@ interface WorkspaceRecord {
   workspaceId: string;
 }
 
-function utf8Length(value: string): number {
-  return Buffer.byteLength(value, 'utf8');
-}
-
 function normalizeString(value: unknown, label: string, maximum: number): string {
   const normalized = String(value ?? '').trim();
   if (!normalized || normalized.length > maximum || normalized.includes('\u0000')) {
@@ -142,26 +150,7 @@ function normalizeRunId(value: unknown): string {
 }
 
 function normalizeLogicalPath(value: unknown): string {
-  const logicalPath = normalizeString(value, 'Agent workspace 逻辑路径', MAX_LOGICAL_PATH_BYTES);
-  if (
-    utf8Length(logicalPath) > MAX_LOGICAL_PATH_BYTES
-    || logicalPath.includes('\\')
-    || logicalPath.startsWith('/')
-    || logicalPath.startsWith('\\')
-    || /^[A-Za-z]:/u.test(logicalPath)
-    || path.win32.isAbsolute(logicalPath)
-  ) {
-    throw new Error('Agent workspace 逻辑路径无效');
-  }
-  const segments = logicalPath.split('/');
-  if (
-    segments.some(segment => !segment || segment === '.' || segment === '..')
-    || segments.length === 0
-    || !WORKSPACE_ROOTS.includes(segments[0] as AgentShellWorkspaceRoot)
-  ) {
-    throw new Error('Agent workspace 逻辑路径越界');
-  }
-  return segments.join('/');
+  return normalizeAgentShellLogicalPath(value);
 }
 
 function normalizeProvenance(value: unknown): string {
@@ -204,6 +193,18 @@ function cloneWorkspace(record: WorkspaceRecord): AgentShellWorkspace {
     runId: record.runId,
     workspaceId: record.workspaceId,
   };
+}
+
+function hashManifestMetadata(record: WorkspaceRecord): string {
+  const manifest = cloneManifest(record);
+  return `v1:${crypto.createHash('sha256').update(JSON.stringify({
+    domain: 'omniflow.agent.shell.workspace-manifest',
+    entries: manifest.entries,
+    generation: manifest.generation,
+    provenance: manifest.provenance,
+    version: 1,
+    workspaceId: manifest.workspaceId,
+  })).digest('hex')}`;
 }
 
 function isMissingFileError(error: unknown): boolean {
@@ -445,6 +446,80 @@ export function createAgentShellWorkspaceStore(options: AgentShellWorkspaceStore
     return { logicalPath, workspaceId: record.workspaceId };
   }
 
+  async function resolvePreparationContext(
+    workspaceIdInput: string,
+    logicalCwdInput: string,
+    expectedRunIdInput: string,
+    ownerInput: AgentShellWorkspaceOwner,
+  ): Promise<AgentShellWorkspacePreparationContext> {
+    await ready;
+    const record = getRecord(workspaceIdInput);
+    assertWorkspaceOwner(record, ownerInput);
+    const expectedRunId = normalizeRunId(expectedRunIdInput);
+    if (record.runId !== expectedRunId) throw new Error('Agent workspace Run 不匹配');
+    const initialGeneration = record.generation;
+    const { logicalPath } = await resolveLogicalPath(
+      record.workspaceId,
+      logicalCwdInput,
+      ownerInput,
+    );
+    const physicalCwdPath = path.resolve(record.rootPath, ...logicalPath.split('/'));
+    const physicalHomePath = path.join(record.rootPath, 'home');
+    const physicalTempPath = path.join(record.rootPath, 'tmp');
+    const cwdStat = await lstat(physicalCwdPath).catch((error) => {
+      if (isMissingFileError(error)) throw new Error('Agent workspace cwd 不存在');
+      throw error;
+    });
+    if (cwdStat.isSymbolicLink() || !cwdStat.isDirectory()) {
+      throw new Error('Agent workspace cwd 不是目录');
+    }
+    const [homeStat, tempStat] = await Promise.all([
+      lstat(physicalHomePath),
+      lstat(physicalTempPath),
+    ]);
+    if (
+      homeStat.isSymbolicLink()
+      || !homeStat.isDirectory()
+      || tempStat.isSymbolicLink()
+      || !tempStat.isDirectory()
+    ) {
+      throw new Error('Agent workspace home 或 tmp 不是受控目录');
+    }
+    const [canonicalRoot, canonicalCwd, canonicalHome, canonicalTemp] = await Promise.all([
+      realpath(record.rootPath),
+      realpath(physicalCwdPath),
+      realpath(physicalHomePath),
+      realpath(physicalTempPath),
+    ]);
+    const rootPrefix = `${canonicalRoot}${path.sep}`;
+    const expectedHome = path.join(canonicalRoot, 'home');
+    const expectedTemp = path.join(canonicalRoot, 'tmp');
+    if (
+      (canonicalCwd !== canonicalRoot && !canonicalCwd.startsWith(rootPrefix))
+      || canonicalHome !== expectedHome
+      || canonicalTemp !== expectedTemp
+    ) {
+      throw new Error('Agent workspace cwd 已逃逸受控目录');
+    }
+    if (
+      records.get(record.workspaceId) !== record
+      || record.status !== 'active'
+      || record.generation !== initialGeneration
+    ) {
+      throw new Error('Agent workspace generation 已变化');
+    }
+    return Object.freeze({
+      generation: record.generation,
+      logicalCwd: logicalPath,
+      workspaceMetadataIdentity: hashManifestMetadata(record),
+      physicalCwdPath: canonicalCwd,
+      physicalHomePath: canonicalHome,
+      physicalTempPath: canonicalTemp,
+      runId: record.runId,
+      workspaceId: record.workspaceId,
+    });
+  }
+
   async function create(runIdInput: string, ownerInput: AgentShellWorkspaceOwner): Promise<AgentShellWorkspace> {
     await ready;
     const runId = normalizeRunId(runIdInput);
@@ -664,6 +739,7 @@ export function createAgentShellWorkspaceStore(options: AgentShellWorkspaceStore
     reportUsage,
     requestCleanup,
     resolveLogicalPath,
+    resolvePreparationContext,
     touch,
     updateManifest,
   };

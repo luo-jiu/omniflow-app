@@ -17,11 +17,12 @@ import type {
   AgentToolRisk,
 } from '@/shared/agent/agent.types';
 import { normalizeAgentOwnerScope } from '../../../src/shared/agent/agent-owner-scope';
-import { normalizeAgentPreparedActionPublic } from '../../../src/shared/agent/agent-prepared-action';
+import { normalizeAgentPreparedActionPublicForMain } from './agent-prepared-action';
 import {
   AGENT_SKILL_ACTIVATE_TOOL_NAME,
   AGENT_SKILL_ACTIVATE_TOOL_REGISTRATION_ID,
 } from './skills/agent-skill.types';
+import type { AgentToolMainAiDestinationSnapshot } from './agent-ai-destination';
 import type { AgentRunCapabilitySnapshot } from './agent-run-capability-snapshot';
 
 const INVALID_TOOL_INPUT_MESSAGE = 'Agent Tool 参数不符合输入约束';
@@ -132,11 +133,14 @@ export interface AgentToolDispatchContext extends Omit<AgentToolExecutionContext
 
 export interface AgentToolMainPreparationContext {
   readonly activeSkillId?: string;
+  readonly aiDestination: AgentToolMainAiDestinationSnapshot;
   readonly appContext: AgentAppContext;
   readonly ownerScope: AgentOwnerScope;
   readonly ownerWebContentsId: number;
   readonly perception?: AgentPerceptionSnapshot;
   readonly preparationIdentity: AgentToolMainPreparationIdentity;
+  /** Immutable Tool, Skill, environment, and Provider capabilities captured for this Run. */
+  readonly runCapabilitySnapshot: AgentRunCapabilitySnapshot;
   readonly signal: AbortSignal;
 }
 
@@ -680,7 +684,7 @@ function sealMainPreparedExecutionFromMaps(
       tool.registrationId,
     );
     const publicAction = cloneMainPreparationJson(
-      normalizeAgentPreparedActionPublic(input.publicAction),
+      normalizeAgentPreparedActionPublicForMain(input.publicAction),
       'public action',
     ) as AgentPreparedActionPublic;
     if (publicAction.kind !== tool.name) throw new Error('invalid action kind');

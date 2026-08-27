@@ -1,6 +1,10 @@
 import crypto from 'node:crypto';
 
 import type { AgentToolResult } from '@/shared/agent/agent.types';
+import type {
+  AgentShellProvider,
+  AgentShellProviderPublicIdentity,
+} from '../../platform/shell/shell-provider.types';
 import { createAgentCapabilitySnapshot } from './capabilities/agent-capability-registry';
 import type { AgentCapabilitySnapshot } from './capabilities/agent-capability.types';
 import type {
@@ -22,6 +26,7 @@ import {
   createAgentSkillActivationEnvelope,
   getAgentSkillInstructionsHash,
 } from './skills/agent-skill-registry';
+import type { AgentShellProviderRegistrySnapshot } from './shell/agent-shell-provider-registry';
 
 export type AgentRunCapabilityToolKind = AgentToolKind;
 export type AgentToolReadiness = 'ready' | 'degraded' | 'blocked';
@@ -67,6 +72,7 @@ function stableSerialize(value: unknown): string {
 function createSnapshotIdentity(input: {
   capabilitySnapshot: AgentCapabilitySnapshot;
   omittedSkillCount: number;
+  shellProviderSnapshot: AgentShellProviderRegistrySnapshot | null;
   skillReadiness: ReadonlyMap<string, AgentSkillReadinessSnapshot>;
   skillRevision: number;
   skills: readonly AgentSkillDefinitionV1[];
@@ -96,9 +102,19 @@ function createSnapshotIdentity(input: {
       whenToUse: skill.whenToUse,
     }))
     .sort((left, right) => left.id.localeCompare(right.id));
+  const shellProviderMaterial = input.shellProviderSnapshot
+    ? {
+        defaultProviderId: input.shellProviderSnapshot.defaultProviderId,
+        defaultProviderRegistrationIdentity:
+          input.shellProviderSnapshot.defaultProviderRegistrationIdentity,
+        probeGeneration: input.shellProviderSnapshot.probeGeneration,
+        snapshotIdentity: input.shellProviderSnapshot.snapshotIdentity,
+      }
+    : null;
   const payload = stableSerialize({
     capabilityIdentity: input.capabilitySnapshot.identity,
     omittedSkillCount: input.omittedSkillCount,
+    ...(shellProviderMaterial ? { shellProviderSnapshot: shellProviderMaterial } : {}),
     skillRevision: input.skillRevision,
     skills: normalizedSkills,
     snapshotVersion: SNAPSHOT_VERSION,
@@ -149,19 +165,27 @@ function createEffectiveSkillSnapshot(
 
 export interface AgentRunCapabilitySnapshotOptions {
   readonly capabilitySnapshot?: AgentCapabilitySnapshot;
+  readonly shellProviderSnapshot?: AgentShellProviderRegistrySnapshot;
   readonly skillSnapshot: AgentSkillSnapshotV1;
   readonly toolSnapshot: AgentToolRegistrySnapshot;
 }
 
 export interface AgentRunCapabilitySnapshot {
   readonly capabilitySnapshot: AgentCapabilitySnapshot;
+  readonly shellProviderSnapshot: AgentShellProviderRegistrySnapshot | null;
   readonly skillSnapshot: AgentSkillSnapshotV1;
   readonly toolSnapshot: AgentToolRegistrySnapshot;
   readonly identity: string;
+  readonly shellProviderSnapshotIdentity: string | null;
+  readonly defaultShellProviderId: string | null;
+  readonly defaultShellProviderRegistrationIdentity: string | null;
   readonly toolRevision: number;
   readonly skillRevision: number;
+  readonly shellProviders: readonly AgentShellProviderPublicIdentity[];
   readonly tools: readonly AgentToolSnapshot[];
   readonly skills: readonly AgentSkillDefinitionV1[];
+  readonly getShellProvider: (registrationIdentity: string) => AgentShellProvider | null;
+  readonly getShellProviderById: (providerId: string) => AgentShellProvider | null;
   readonly getToolKind: (name: string) => AgentRunCapabilityToolKind | null;
   readonly getToolReadiness: (name: string) => AgentToolReadinessSnapshot | null;
   readonly getSkillReadiness: (skillId: string) => AgentSkillReadinessSnapshot | null;
@@ -211,6 +235,38 @@ export function createAgentRunCapabilitySnapshot(
   }
 
   const capabilitySnapshot = options.capabilitySnapshot || createAgentCapabilitySnapshot();
+  const shellProviderSnapshot = options.shellProviderSnapshot || null;
+  const shellProviders = Object.freeze([...(shellProviderSnapshot?.providers || [])]);
+  const defaultShellProviderId = shellProviderSnapshot?.defaultProviderId || null;
+  const defaultShellProviderRegistrationIdentity =
+    shellProviderSnapshot?.defaultProviderRegistrationIdentity || null;
+  const shellProviderByRegistrationIdentity = new Map<string, AgentShellProvider>();
+  const shellProviderById = new Map<string, AgentShellProvider>();
+  for (const identity of shellProviders) {
+    const provider = shellProviderSnapshot?.getProvider(identity.registrationIdentity);
+    if (!provider
+      || provider.publicIdentity.registrationIdentity !== identity.registrationIdentity
+      || provider.publicIdentity.providerId !== identity.providerId) {
+      throw new Error(`Agent Shell Provider 快照绑定不一致：${identity.providerId}`);
+    }
+    if (shellProviderByRegistrationIdentity.has(identity.registrationIdentity)
+      || shellProviderById.has(identity.providerId)) {
+      throw new Error(`Agent Shell Provider 快照包含重复身份：${identity.providerId}`);
+    }
+    shellProviderByRegistrationIdentity.set(identity.registrationIdentity, provider);
+    shellProviderById.set(identity.providerId, provider);
+  }
+  if ((defaultShellProviderId === null) !== (defaultShellProviderRegistrationIdentity === null)) {
+    throw new Error('Agent Shell Provider 默认身份不完整');
+  }
+  if (defaultShellProviderId && defaultShellProviderRegistrationIdentity) {
+    const providerById = shellProviderById.get(defaultShellProviderId);
+    const providerByRegistrationIdentity = shellProviderByRegistrationIdentity
+      .get(defaultShellProviderRegistrationIdentity);
+    if (!providerById || providerById !== providerByRegistrationIdentity) {
+      throw new Error('Agent Shell Provider 默认身份与冻结快照不一致');
+    }
+  }
   const registeredTools = Object.freeze([...options.toolSnapshot.tools]);
   const sourceSkills = Object.freeze([...options.skillSnapshot.skills]);
   const kindByName = new Map(registeredTools.map(tool => [tool.name, toolKind(tool)]));
@@ -337,6 +393,8 @@ export function createAgentRunCapabilitySnapshot(
 
   const snapshot: AgentRunCapabilitySnapshot = {
     capabilitySnapshot,
+    defaultShellProviderId,
+    defaultShellProviderRegistrationIdentity,
     execute: (name, input, context, activeSkillId, expectedRegistrationId) => {
       const tool = requireVisibleTool(name, activeSkillId);
       return options.toolSnapshot.execute(
@@ -352,12 +410,19 @@ export function createAgentRunCapabilitySnapshot(
     ),
     getSkillReadiness: skillId => skillReadiness.get(normalizeId(skillId)) || null,
     getSkillSummary: skillId => effectiveSkillSnapshot.getSummary(normalizeId(skillId)),
+    getShellProvider: registrationIdentity => (
+      shellProviderByRegistrationIdentity.get(normalizeId(registrationIdentity)) || null
+    ),
+    getShellProviderById: providerId => (
+      shellProviderById.get(normalizeId(providerId)) || null
+    ),
     getTool: (name, activeSkillId) => visibleTool(name, activeSkillId),
     getToolKind: name => kindByName.get(normalizeId(name)) || null,
     getToolReadiness: name => toolReadiness.get(normalizeId(name)) || null,
     identity: createSnapshotIdentity({
       capabilitySnapshot,
       omittedSkillCount: options.skillSnapshot.omittedSkillCount,
+      shellProviderSnapshot,
       skillReadiness,
       skillRevision: options.skillSnapshot.catalogRevision,
       skills: sourceSkills,
@@ -381,6 +446,9 @@ export function createAgentRunCapabilitySnapshot(
         expectedRegistrationId ?? tool.registrationId,
       );
     },
+    shellProviderSnapshot,
+    shellProviderSnapshotIdentity: shellProviderSnapshot?.snapshotIdentity || null,
+    shellProviders,
     skillRevision: options.skillSnapshot.catalogRevision,
     skills: effectiveSkills,
     skillSnapshot: effectiveSkillSnapshot,

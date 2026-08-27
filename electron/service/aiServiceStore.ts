@@ -84,6 +84,7 @@ export function getAIServiceRuntimeProfile(id: string) {
 
   return {
     baseUrl: profile.baseUrl,
+    configurationRevision: profile.updatedAt,
     id: profile.id,
     name: profile.name,
     providerType: profile.providerType,

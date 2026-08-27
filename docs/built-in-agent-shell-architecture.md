@@ -1,8 +1,8 @@
 # 内置 Agent Shell 架构
 
-更新时间：2026-08-27
+更新时间：2026-08-28
 
-状态：**目标架构已批准；持久化、共享存储与 main prepare 基座已完成，`shell.run` 尚未实现**。
+状态：**目标架构已批准；非执行的 Provider、协议、持久化与 main prepare 基座已完成，可执行 `shell.run` Tool 尚未注册**。
 
 适用范围：
 
@@ -219,7 +219,7 @@ PSModulePath POWERSHELL_TELEMETRY_OPTOUT
 
 ### 7.2 Public prepared action
 
-严格的 `AgentPreparedActionPublic` 判别联合已经落地，目前只有 `media.extractAudio@1` 分支。Shell 落地时必须新增独立的 `shell.run@1` 分支，目标结构为：
+严格的 `AgentPreparedActionPublic` 判别联合已经包含独立的 `media.extractAudio@1` 与 `shell.run@1` 分支。Shell 分支已在共享 normalizer、main-only command hash seal、Registry seal、SessionStore bootstrap / 写入边界和 schema 2 trigger 中 fail-closed；它目前只是不可执行的准备与审计契约，结构为：
 
 ```ts
 interface AgentShellPreparedActionPublicV1 {
@@ -301,9 +301,9 @@ interactive / detached / privilege_escalation
 prepare 或 approval 成功都不直接等于可以 spawn。`AgentShellRuntime` 必须先向 `AgentShellWorkspaceStore` 取得当前 execution lease，并在该 lease 内紧邻 spawn 完成最后复验：
 
 1. 重新校验 owner、Session、Run、ToolRun、prepared action / execution identity、Provider registration、command bytes / hash、逻辑 cwd realpath、环境策略、AI destination、规则 ID / revision 和全部 policy revision。
-2. 对当前 cwd 重新枚举有界 manifest 并计算 `workspaceContentIdentity`，与 prepared binding 逐项比较；只看 workspace generation 不足以发现同用户外部进程或先前逃逸进程直接改写文件。
+2. 对命令可读取的完整 Run workspace（`input / work / output / tmp / home`）重新枚举有界 manifest 并计算 `workspaceContentIdentity`，与 prepared binding 逐项比较；只有分析器能证明更小的精确 read set 时才允许收窄。只看 cwd 或 workspace generation 不足以发现同用户外部进程、先前逃逸进程或 `../input` 等跨逻辑根读取所涉及的内容变化。
 3. 任一内容、realpath、symlink / junction、来源 provenance 或授权身份变化都废止旧 execution capability，回到新 prepare / ask；不能把“执行失败”当成继续使用旧批准的理由。
-4. Session / 持久规则自动允许只有在 WorkspaceStore 能从刚复验的内容创建 main-owned 新 execution generation 时才可用：先复制 / clone 出内容一致的执行快照，绑定 resolved cwd handle，再启动 Provider；命令写入该 generation，进程收口后重新生成 manifest 并把它切换为规范 workspace generation。无法对完整 cwd 建立有界快照、或命令依赖无法冻结的外部内容时降级为“仅运行本次”。
+4. Session / 持久规则自动允许只有在 WorkspaceStore 能从刚复验的内容创建 main-owned 新 execution generation 时才可用：先复制 / clone 出内容一致的执行快照，绑定 resolved cwd handle，再启动 Provider；命令写入该 generation，进程收口后重新生成 manifest 并把它切换为规范 workspace generation。无法对命令可读取的完整 Run workspace 建立有界快照、或命令依赖无法冻结的外部内容时降级为“仅运行本次”。
 5. “仅运行本次”同样在 spawn 前重验内容；能使用 execution generation 时继续使用。平台只能做到 rehash 后立即 spawn、无法彻底关闭同系统用户的 rehash-to-spawn 竞态时，必须在审批中保留该残余风险；execution lease 建立到 Provider spawn 完成之间，filesystem watcher 发现内容漂移就废止动作。spawn 后命令自身会合法写入，不能再把所有文件事件当成外部篡改；这仍不是 OS sandbox。
 
 execution lease 只排除 OmniFlow 自己的并发 stage / publish / Shell mutation，不能阻止拥有相同宿主用户权限的外部进程。实现不得因为有 lease、snapshot 或 watcher 就删除第 4 节的宿主权限声明；真正消除此类竞态仍需要后续 OS containment。
@@ -744,9 +744,9 @@ Shell 审批卡必须显示：
 
 ## 14. 持久化与审计
 
-ToolRun 仍是 Shell 执行状态的唯一规范事实。Shell 分支复用现有 prepared action 三字段，并需要增加以下持久事实：
+ToolRun 仍是 Shell 执行状态的唯一规范事实。Shell 分支复用现有 prepared action 三字段；`shell.run@1` strict branch 与 exact command hash 的 main 边界已经落地，执行闭环还需要增加以下持久事实：
 
-- 在现有 `kind / version`、public snapshot 和 hash 契约中增加独立的 `shell.run@1` branch 校验。
+- 保持现有 `shell.run@1` public snapshot、exact command bytes / hash 和 SQLite strict branch 同源，不允许后续 runtime 绕过 main canonical normalizer。
 - permission behavior、命中 / 创建的 Shell rule ID、revision、canonical matcher hash 与当时的 rule audit snapshot。
 - Provider identity、逻辑 cwd、环境键、风险分面和 analyzer revision。
 - exit code、termination reason、duration、输出计数、tail 的 `firstSequence / lastSequence / truncatedBefore`、truncated 和 `logRef`。
@@ -774,7 +774,7 @@ Coordinator 的启动过程必须在单个事务中：
 3. 删除并重新创建所有受影响的已知 trigger，避免旧 trigger 因 `IF NOT EXISTS` 静默保留旧规则。
 4. 运行结构和关键不变量自检，成功后仍写 `user_version = 2`；任一步失败回滚并拒绝打开。
 
-`prepared_action_json` 已升级为 `kind / version` 判别联合。三字段 `prepared_action_id / prepared_action_json / prepared_snapshot_hash` 继续全有或全无；prepared action 存在时，三者与 `approval_input_hash` 必须以 SQLite `text` 保存，且审批 hash 必须与冻结快照 hash 完全相等。当前 `media.extractAudio@1` 分支由共享身份清单、TypeScript strict normalizer、Tool / action 绑定校验和 SQLite trigger 共同约束，验证 JSON 根对象、原始字段类型、精确字段集合、重复键、跨字段规则与有界长度。现有媒体结构在 reconcile 时补成明确的 `kind = 'media.extractAudio', version = 1` 分支，历史 snapshot hash 原样保留但不恢复执行能力；任何损坏行、hash 绑定漂移或 BLOB 类型漂移都会让 bootstrap 事务整体回滚。后续需要持久化 prepared action 的 `shell.run / file.stage / file.publish` 也必须各自增加独立 `version = 1` 分支，不能只扩充身份清单而复用媒体字段校验，不能只要 JSON 中“碰巧有 outputFileName”就通过，也不能让未知 kind 绕过约束。
+`prepared_action_json` 已升级为 `kind / version` 判别联合。三字段 `prepared_action_id / prepared_action_json / prepared_snapshot_hash` 继续全有或全无；prepared action 存在时，三者与 `approval_input_hash` 必须以 SQLite `text` 保存，且审批 hash 必须与冻结快照 hash 完全相等。当前 `media.extractAudio@1` 与不可执行的 `shell.run@1` 分支都由共享身份清单、TypeScript strict normalizer、Tool / action 绑定校验和 SQLite trigger 共同约束，验证 JSON 根对象、原始字段类型、精确字段集合、重复键、跨字段规则与有界长度；Shell 的 main canonical normalizer 还会验证 command hash 对应精确 command bytes。现有媒体结构在 reconcile 时补成明确的 `kind = 'media.extractAudio', version = 1` 分支，历史 snapshot hash 原样保留但不恢复执行能力；任何损坏行、hash 绑定漂移、Shell command hash 漂移或 BLOB 类型漂移都会让 bootstrap 事务整体回滚。后续 `file.stage@1` 与 `file.publish@1` 必须各自增加独立分支，不能复用媒体或 Shell 字段校验，也不能让未知 kind 绕过约束。
 
 首次公开稳定版冻结 baseline 后，才切换为编号迁移：create DDL 代表最新 schema，旧版本按一次性、有序 migration 升级，未知更高版本继续 fail-closed。届时不得继续用“项目未发布”为由原地重写已经发布的数据契约。
 
@@ -850,16 +850,16 @@ src/features/agent/
 
 当前代码不能直接注册 `shell.run`，至少存在这些前置差距：
 
-- `AgentPreparedActionPublic` 的严格判别联合基座已经落地，目前只有 `media.extractAudio@1` 分支；Shell 必须新增自己的 public / main-only binding 分支，不能复用或扩宽媒体结构。
-- 通用 main prepare hook 已落地：Registry 冻结 `none / renderer / main` preparation identity，Orchestrator 复用同一 `preparing -> approval -> execution` 生命周期；main-only binding 与 snapshot material 被有界深拷贝、冻结并纳入 snapshot hash，任一单项和完整规范快照均限制为 256 KiB，只经 main execution context 交给 Run 快照中的同一 Tool 实现。批准时始终重新 prepare；稳定时以 SQLite CAS 保存并执行最新 capability，任一公开审批语义、私有 binding 或 material 漂移都建立新确认轮次。CAS 前失败保留当前确认重试，CAS 后 Run / UI 投影失败不得重新武装旧确认。当前尚无生产 Tool 使用该 hook，Shell 仍需自己的 prepared action 分支与 PreparationService。
+- `shell.run@1` strict public action、main-only exact command hash seal、AI destination binding、Provider probe / Registry、可选 Run snapshot binding 和无副作用 `AgentShellPreparationService` 已落地。PreparationService 当前固定 `ask + destructive`、`persistentRuleEligible: false`、`executionReady: false`，不包含 AST、规则或 spawn；生产 Orchestrator 尚未注入 Provider snapshot，生产 Registry 也明确没有 `shell.run`。
+- 通用 main prepare hook 已落地：Registry 冻结 `none / renderer / main` preparation identity，Orchestrator 复用同一 `preparing -> approval -> execution` 生命周期；main-only binding 与 snapshot material 被有界深拷贝、冻结并纳入 snapshot hash，任一单项和完整规范快照均限制为 256 KiB，只经 main execution context 交给 Run 快照中的同一 Tool 实现。批准时始终重新 prepare；稳定时以 SQLite CAS 保存并执行最新 capability，任一公开审批语义、私有 binding 或 material 漂移都建立新确认轮次。当前尚无生产 Tool 使用该 hook。
 - `AgentPermissionGate` 没有 Shell rule Store、canonical matcher、analyzer / policy / env policy revision、workspace content identity 和命中审计。
-- 当前 Run snapshot / ToolRun 还没有可供 Shell 规则绑定的 AI profile config revision、Base URL identity 与 staged source provenance；只绑定命令 token 会造成跨数据、跨 AI 目的地复用。
+- AI destination main snapshot 已绑定 profile、配置 revision、provider 与规范 endpoint identity；当前仍缺生产 Provider 注入、Shell ToolRun 专用 audit、完整 workspace content identity 与 staged source provenance。
 - `AgentToolBroker` 对 main Tool 固定使用 6 秒取消收口；Shell 需要由 registration identity 冻结并受全局上限约束的专用 settle budget，避免 Broker 先结束、进程后清理。
 - `AgentToolProgress` 只有 message / percent，不能承载带完整事件身份、sequence 水位、gap replay 和 cursor 分页的双流日志 tail。
 - `AgentLocalProcessRunner` 把完整输出留在内存并在超限时杀进程，环境与输出策略也不适合 raw Shell。
 - Windows 当前取消兜底不能证明任意孙进程已经结束。
-- UI 当前没有 Shell safe presenter、日志 action 和规则管理入口。
-- 当前 `AgentShellWorkspaceStore` 已提供 main-only 的 Run 工作区目录创建、`input / work / output / tmp / home` 逻辑路径解析、owner / Session 绑定、symlink / traversal 边界、generation、有限批次的累积 provenance manifest 和 Quota Manager cleanup adapter；SQLite persistence adapter 可在重启后恢复 workspace metadata / manifest / owner / status，并通过固定 workspace 根目录重建物理路径。启动恢复会交叉校验 ledger adapter、Run 和实际目录；缺失、非目录、symlink、已进入 `deleting` 或失去匹配 ledger 的工作区立即转入清理，受管资源经 Quota Manager adapter 删除，无法匹配 ledger 的旧 metadata 只清理固定受控根内的物理目录并保留失败重试状态。创建时的同名目录碰撞不会删除既有目录。它尚未接入 stage / publish 和 Shell runtime 目录监控，也不能替代现有媒体 ArtifactStore。
+- UI 当前没有 Shell safe presenter、日志 action 和规则管理入口。通用 action preview 会截断 detail 数量与长度并 trim 文本，不能用于批准 raw command；注册前必须由完整 public action 渲染精确 command/env，明确不可见字符与任何展示截断，并把展示语义纳入冻结快照。
+- 当前 `AgentShellWorkspaceStore` 已提供 main-only 的 Run 工作区目录创建、`input / work / output / tmp / home` 逻辑路径解析、owner / Session 绑定、symlink / traversal 边界、generation、有限批次的累积 provenance manifest 和 Quota Manager cleanup adapter；SQLite persistence adapter 可在重启后恢复 workspace metadata / manifest / owner / status，并通过固定 workspace 根目录重建物理路径。启动恢复会交叉校验 ledger adapter、Run 和实际目录；缺失、非目录、symlink、已进入 `deleting` 或失去匹配 ledger 的工作区立即转入清理。当前 preparation 的 `workspaceMetadataIdentity` 只哈希已登记 manifest metadata，不代表磁盘实时字节；尚缺完整 Run workspace 的真实 content identity、Store 独占 mutation gate、执行期 Quota live lease、spawn 前重扫与短期 watcher，也尚未接入 stage / publish。
 - 当前 schema 2 已包含 workspace metadata、共享存储 ledger 和严格 prepared action 判别联合，并由统一 bootstrap 原地 reconcile / 自检；当前仍没有 Shell Rule 表、Shell ToolRun 审计字段和日志水位。
 - `AgentLocalStorageQuotaManager` 已落地为 main-only 的 owner-bound ledger 基座，支持分类 / Run / 全局 / 单资源 / 低磁盘水位检查、真实字节 commit / adjust、live lease、TTL、deleting 保留和失败后 sweep 重试；SQLite `agent_local_storage_resources` write-through adapter 可在启动时恢复 reservation / resource 状态，lease 不跨进程恢复。`agent-shell-storage-runtime` 打开同一 Agent 数据库、恢复 quota/workspace 并执行启动 sweep；`AgentMediaArtifactStore` 已通过稳定 `media-artifact` adapter 接入同一 manager，创建前预留、落盘后 bind、finalize 后按真实大小 commit，重启后不恢复媒体任务但保留 TTL 清理索引。统一 persistence runtime 和独占 Schema Coordinator 已进入应用启动与退出顺序，退出会先取消并等待活跃 Agent，再关闭文件传输和 SQLite。当前尚未接入日志 Store。默认单资源上限为 2 GiB、总量上限为 8 GiB。
 
@@ -867,13 +867,14 @@ src/features/agent/
 
 ### Phase 1A：前台 Shell 核心
 
-- 以已落地的单一 Schema Coordinator、prepared action 判别联合与 main prepare hook 为基础，继续完成 Provider Registry、Shell PreparationService 和 `shell.run`。
-- 共享 Quota Manager、基础 Run workspace / manifest、仅本次审批、逻辑 cwd、受控 env、非交互执行、实时 tail、日志 Store。
+- 以已落地的 Schema Coordinator、`shell.run@1` 判别联合、Provider Registry、Run snapshot binding 与 main PreparationService 为基础，完成 Analyzer、Policy、专用 safe presenter、Runtime 和可执行 `shell.run` 注册。
+- 注册前完成命令可读取的完整 Run workspace 真实 content identity、WorkspaceStore 独占 mutation gate、Quota live lease、spawn 前重扫、短期 watcher 和一次性 spawn authority；只扫描 cwd 或只比较 metadata generation 不得进入执行。
+- 完成仅本次审批、逻辑 cwd、受控 env、非交互执行、实时 tail 与日志 Store。
 - macOS 与 Windows 的整树取消、超时、应用退出和中断恢复。
 
 ### Phase 1B：文件闭环
 
-- 扩展 workspace provenance 与 content identity。
+- 扩展 `file.stage` / `file.publish` 所需的细粒度 staged provenance；Phase 1A 的完整 workspace content identity 不得推迟到本阶段。
 - `file.stage` 资料库 / 本机输入和递归 strict Schema。
 - `file.publish` 资料库 / Save As、commit、刷新和再感知。
 

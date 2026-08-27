@@ -66,7 +66,7 @@ describe('Agent prepared action public contract', () => {
 
   it.each([
     ['missing kind', libraryAction({ kind: undefined })],
-    ['unknown kind', libraryAction({ kind: 'shell.run' })],
+    ['unknown kind', libraryAction({ kind: 'shell.other' })],
     ['missing version', libraryAction({ version: undefined })],
     ['string version', libraryAction({ version: '1' })],
     ['unknown version', libraryAction({ version: 2 })],

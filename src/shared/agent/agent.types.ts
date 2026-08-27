@@ -1,3 +1,15 @@
+import {
+  AGENT_SHELL_PREPARED_ACTION_VERSION,
+  AGENT_SHELL_RUN_TOOL_NAME,
+  type AgentShellPreparedActionPublicV1,
+} from './shell/agent-shell.types';
+
+export {
+  AGENT_SHELL_PREPARED_ACTION_VERSION,
+  AGENT_SHELL_RUN_TOOL_NAME,
+  type AgentShellPreparedActionPublicV1,
+} from './shell/agent-shell.types';
+
 export type AgentMessageRole = 'system' | 'user' | 'assistant' | 'tool';
 
 export type AgentToolRisk = 'read' | 'write' | 'destructive' | 'external';
@@ -192,10 +204,10 @@ export interface AgentToolCallSnapshot {
 
 export interface AgentActionPreview {
   description: string;
-  details?: Array<{
+  details?: readonly Readonly<{
     label: string;
     value: string;
-  }>;
+  }>[];
   risk: AgentToolRisk;
   title: string;
 }
@@ -211,6 +223,9 @@ export const AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_VERSION = 1 as const;
 export const AGENT_PREPARED_ACTION_PUBLIC_IDENTITIES = [{
   kind: AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_KIND,
   version: AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_VERSION,
+}, {
+  kind: AGENT_SHELL_RUN_TOOL_NAME,
+  version: AGENT_SHELL_PREPARED_ACTION_VERSION,
 }] as const;
 
 export type AgentMediaExtractAudioOutputFormat = 'm4a' | 'mp3' | 'wav';
@@ -230,7 +245,8 @@ export interface AgentMediaExtractAudioPreparedActionPublicV1 {
 }
 
 export type AgentPreparedActionPublic =
-  | AgentMediaExtractAudioPreparedActionPublicV1;
+  | AgentMediaExtractAudioPreparedActionPublicV1
+  | AgentShellPreparedActionPublicV1;
 
 export interface AgentToolPreparationSnapshot {
   action: AgentPreparedActionPublic;

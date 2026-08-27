@@ -6,6 +6,7 @@ import {
 } from './agent-run-capability-snapshot';
 import { createAgentCapabilitySnapshot } from './capabilities/agent-capability-registry';
 import { createAgentToolRegistry, type AgentTool } from './agent-tool-registry';
+import { createAgentShellProviderRegistry } from './shell/agent-shell-provider-registry';
 import { createAgentSkillRegistry } from './skills/agent-skill-registry';
 import {
   AGENT_SKILL_ACTIVATE_TOOL_REGISTRATION_ID,
@@ -47,6 +48,26 @@ function capabilities(entries: Array<{
       state: entry.state,
     })),
     registryRevision: entries.length,
+  });
+}
+
+function shellProviderRegistry() {
+  return createAgentShellProviderRegistry({
+    candidates: { darwin: ['/bin/zsh'] },
+    platform: 'darwin',
+    probeDependencies: {
+      accessExecutable: vi.fn(async () => undefined),
+      readExecutableIdentity: vi.fn(async () => ({
+        sha256: 'a'.repeat(64),
+        sizeBytes: 1,
+      })),
+      resolveExecutable: vi.fn(async executable => executable),
+      runProbe: vi.fn(async () => ({
+        exitCode: 0,
+        stderr: '',
+        stdout: 'zsh 5.9',
+      })),
+    },
   });
 }
 
@@ -174,6 +195,53 @@ describe('Agent Run capability snapshot', () => {
     expect(Object.isFrozen(snapshot)).toBe(true);
     expect(Object.isFrozen(snapshot.tools)).toBe(true);
     expect(Object.isFrozen(snapshot.skills)).toBe(true);
+  });
+
+  it('captures Shell Providers by Run and includes the frozen Probe snapshot in identity', async () => {
+    const providerRegistry = shellProviderRegistry();
+    const firstProviderSnapshot = await providerRegistry.refresh();
+    const firstProvider = firstProviderSnapshot.getProviderById('system-zsh');
+    const toolSnapshot = createAgentToolRegistry([]).createSnapshot();
+    const skillSnapshot = createAgentSkillRegistry().createRunSnapshot();
+    const withoutProviders = createAgentRunCapabilitySnapshot({
+      skillSnapshot,
+      toolSnapshot,
+    });
+    const first = createAgentRunCapabilitySnapshot({
+      shellProviderSnapshot: firstProviderSnapshot,
+      skillSnapshot,
+      toolSnapshot,
+    });
+    const firstIdentity = first.identity;
+
+    expect(first.shellProviderSnapshot).toBe(firstProviderSnapshot);
+    expect(first.shellProviderSnapshotIdentity).toBe(firstProviderSnapshot.snapshotIdentity);
+    expect(first.defaultShellProviderId).toBe('system-zsh');
+    expect(first.defaultShellProviderRegistrationIdentity)
+      .toBe(firstProvider?.publicIdentity.registrationIdentity);
+    expect(Object.isFrozen(first.shellProviders)).toBe(true);
+    expect(first.getShellProviderById('system-zsh')).toBe(firstProvider);
+    expect(first.getShellProvider(firstProvider?.publicIdentity.registrationIdentity || ''))
+      .toBe(firstProvider);
+    expect(first.identity).not.toBe(withoutProviders.identity);
+
+    const laterProviderSnapshot = await providerRegistry.refresh();
+    const laterProvider = laterProviderSnapshot.getProviderById('system-zsh');
+    const later = createAgentRunCapabilitySnapshot({
+      shellProviderSnapshot: laterProviderSnapshot,
+      skillSnapshot,
+      toolSnapshot,
+    });
+
+    expect(laterProvider?.publicIdentity.registrationIdentity)
+      .toBe(firstProvider?.publicIdentity.registrationIdentity);
+    expect(laterProvider?.registrationHandle).not.toBe(firstProvider?.registrationHandle);
+    expect(later.identity).not.toBe(firstIdentity);
+    expect(first.identity).toBe(firstIdentity);
+    expect(first.shellProviderSnapshot).toBe(firstProviderSnapshot);
+    expect(first.getShellProviderById('system-zsh')).toBe(firstProvider);
+    expect(first.getShellProviderById('system-zsh')).not.toBe(laterProvider);
+    expect(later.getShellProviderById('system-zsh')).toBe(laterProvider);
   });
 
   it('produces the same identity for equivalent Tool and Skill definitions in another order', () => {

@@ -2,11 +2,13 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { AgentMediaExtractAudioPreparedActionPublicV1 } from '@/shared/agent/agent.types';
 import {
+  agentToolRegistry,
   createAgentToolRegistry,
   hashAgentToolInputForPreparation,
   type AgentToolExecutionContext,
   type AgentToolMainPreparationIdentity,
 } from './agent-tool-registry';
+import { sealAgentShellPreparedActionPublicV1 } from './shell/agent-shell-prepared-action';
 import {
   AGENT_SKILL_ACTIVATE_TOOL_NAME,
   AGENT_SKILL_ACTIVATE_TOOL_REGISTRATION_ID,
@@ -60,6 +62,60 @@ function mediaPreparedAction(): AgentMediaExtractAudioPreparedActionPublicV1 {
 }
 
 describe('Agent Tool registry', () => {
+  it('keeps shell.run out of the production registry until execution gates are complete', () => {
+    expect(agentToolRegistry.get('shell.run')).toBeNull();
+  });
+
+  it('rejects a shell action whose exact command no longer matches its main-owned hash', () => {
+    const toolName = 'shell.run';
+    const registrationId = 'omniflow.shell.run.test';
+    const registry = createAgentToolRegistry([{
+      description: 'Test-only Shell preparation boundary',
+      execute: async () => ({ ok: true }),
+      inputSchema: { additionalProperties: false, type: 'object' },
+      name: toolName,
+      prepareMain: async () => {
+        throw new Error('not executed');
+      },
+      registrationId,
+      risk: 'destructive',
+    }]);
+    const action = sealAgentShellPreparedActionPublicV1({
+      aiDestination: {
+        identityHash: `v1:${'a'.repeat(64)}`,
+        profileLabel: 'Local DeepSeek',
+        providerType: 'openai-compatible',
+      },
+      assessment: {
+        facets: ['unknown_syntax'],
+        operations: [],
+        persistentRuleEligible: false,
+        risk: 'destructive',
+        unresolved: ['ast-analysis-unavailable'],
+      },
+      command: 'git --version',
+      cwd: { kind: 'run-workspace', path: 'work' },
+      dataScope: { stagedInputs: [], unresolvedWorkspaceRead: true },
+      environment: [],
+      kind: 'shell.run',
+      provider: { dialect: 'zsh', id: 'system-zsh', version: '5.9' },
+      timeoutMs: 60_000,
+      version: 1,
+    });
+    const identity = {
+      ...mainPreparationIdentity({}),
+      toolName,
+      toolRegistrationId: registrationId,
+    };
+
+    expect(() => registry.createSnapshot().sealMainPreparedExecution(toolName, {
+      approvalSemantics: { behavior: 'ask', risk: 'destructive' },
+      binding: {},
+      identity,
+      publicAction: { ...action, command: 'git status' },
+    })).toThrow('Agent Tool main preparation seal 无效');
+  });
+
   it('registers and executes only known tools', async () => {
     const registry = createAgentToolRegistry([
       {

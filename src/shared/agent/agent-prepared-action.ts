@@ -1,10 +1,13 @@
 import {
   AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_KIND,
   AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_VERSION,
+  AGENT_SHELL_PREPARED_ACTION_VERSION,
+  AGENT_SHELL_RUN_TOOL_NAME,
   type AgentMediaExtractAudioOutputFormat,
   type AgentMediaExtractAudioPreparedActionPublicV1,
   type AgentPreparedActionPublic,
 } from './agent.types';
+import { normalizeAgentShellPreparedActionPublicV1 } from './shell/agent-shell.types';
 
 const MAX_OUTPUT_FILE_NAME_CHARACTERS = 255;
 const MAX_TARGET_LABEL_CHARACTERS = 500;
@@ -150,7 +153,28 @@ export function normalizeAgentPreparedActionPublic(
   ) {
     return normalizeAgentMediaExtractAudioPreparedActionPublicV1(source);
   }
+  if (
+    source.kind === AGENT_SHELL_RUN_TOOL_NAME
+    && source.version === AGENT_SHELL_PREPARED_ACTION_VERSION
+  ) {
+    return normalizeAgentShellPreparedActionPublicV1(source);
+  }
   throw new Error('Agent prepared action 类型或版本不受支持');
+}
+
+function stableSerialize(value: unknown): string {
+  if (value === null) return 'null';
+  if (typeof value === 'string') return JSON.stringify(value);
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
+  if (typeof value === 'number') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableSerialize).join(',')}]`;
+  if (value && typeof value === 'object') {
+    const source = value as Record<string, unknown>;
+    return `{${Object.keys(source).sort().map(key => (
+      `${JSON.stringify(key)}:${stableSerialize(source[key])}`
+    )).join(',')}}`;
+  }
+  return 'null';
 }
 
 export function equalAgentPreparedActionPublic(
@@ -160,17 +184,7 @@ export function equalAgentPreparedActionPublic(
   try {
     const normalizedLeft = normalizeAgentPreparedActionPublic(left);
     const normalizedRight = normalizeAgentPreparedActionPublic(right);
-    return normalizedLeft.kind === normalizedRight.kind
-      && normalizedLeft.version === normalizedRight.version
-      && normalizedLeft.conflictPolicy === normalizedRight.conflictPolicy
-      && normalizedLeft.destination === normalizedRight.destination
-      && normalizedLeft.fallbackPolicy === normalizedRight.fallbackPolicy
-      && normalizedLeft.libraryId === normalizedRight.libraryId
-      && normalizedLeft.outputFileName === normalizedRight.outputFileName
-      && normalizedLeft.outputFormat === normalizedRight.outputFormat
-      && normalizedLeft.parentId === normalizedRight.parentId
-      && normalizedLeft.sourceNodeId === normalizedRight.sourceNodeId
-      && normalizedLeft.targetLabel === normalizedRight.targetLabel;
+    return stableSerialize(normalizedLeft) === stableSerialize(normalizedRight);
   } catch {
     return false;
   }

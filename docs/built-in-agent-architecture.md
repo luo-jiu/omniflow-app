@@ -1,6 +1,6 @@
 # 内置 Agent 架构
 
-更新时间：2026-08-27
+更新时间：2026-08-28
 
 适用范围：
 
@@ -10,7 +10,7 @@
 - `electron/service/agent/`
 - Agent 使用的 AI 服务访问边界
 
-本文记录已经落地的架构事实与明确未验收边界。尚未实现的动态 Skill 来源、向量检索、通用媒体转码和高级本地命令能力不属于当前架构事实。已经批准但尚未实现的 Code Agent 级 Shell 目标契约见 `docs/built-in-agent-shell-architecture.md`；该专题不能反向证明当前代码具备 Shell 能力。
+本文记录已经落地的架构事实与明确未验收边界。尚未实现的动态 Skill 来源、向量检索、通用媒体转码和高级本地命令能力不属于当前用户能力。Code Agent 级 Shell 的非执行准备基座与目标契约见 `docs/built-in-agent-shell-architecture.md`；准备基座不能反向证明当前代码可以执行 Shell。
 
 Agent renderer 的页面模式、组件职责、时间线投影、受控交互和视觉验证边界见 `docs/built-in-agent-ui-contract.md`。修改 Agent UI 时必须同时遵守两份文档；UI 契约不能反向改变本文定义的执行、持久化、IPC 和安全事实。
 
@@ -43,6 +43,8 @@ Agent renderer 的页面模式、组件职责、时间线投影、受控交互�
 Skill V1 的代码、自动化门禁和首条真实媒体核心路径已经收口。2026-08-25 用户在 macOS 本机 MinIO 的非第一个资料库中验证：真实 provider 能选择并激活 `media-extract-audio` Skill，完成媒体检查、音频提取、本机 Save As，以及资料库上传、目录树刷新和新节点定位。格式修改、取消、上传三态和异常恢复继续由自动化覆盖，后续发现真实环境差异时再补定向验收。
 
 当前代码尚未注册 `shell.run`，模型仍不能执行宿主命令；目标架构与实现门禁见 `docs/built-in-agent-shell-architecture.md`。当前同样不提供通用文件写入、通用媒体转码 Tool、可重写计划、跨多轮 Workflow、自动恢复未完成运行、后台自动记忆提取、跨机器同步或向量检索。Skill 也不支持本地 `SKILL.md`、远程来源、插件注册、热更新、多 Skill 组合、Hook、子 Agent 或专用管理 UI。`AgentLocalProcessRunner` 只被 `media.inspect`、`media.extractAudio` 等具体 Tool 内部使用，不是模型可调用的 Tool。
+
+Shell 的非执行准备基座已经包含 `shell.run@1` strict input / public action、schema 2 持久化分支、main-only exact command hash、macOS Zsh / Linux Bash / Windows PowerShell Provider discovery、可选 Run snapshot、AI destination binding 和无副作用 PreparationService。所有 Provider 仍为 `executionReady: false`，生产 Orchestrator 尚未注入 Provider snapshot，生产 Registry 没有 `shell.run`，也没有 Runtime、AST / Policy、日志、进程 supervisor、Shell permission rule 或 safe presenter。
 
 ## 2. 分层与所有权
 
@@ -101,7 +103,7 @@ Renderer 复用现有 MinIO 直传
 - Renderer 不把会话历史复制到 `localStorage`，只保留本机模型 / 推理强度偏好和临时展示状态。
 - `LibraryDetail` 只向 Agent 投影当前 `libraryId`、目录和选中节点，不持有 Agent 会话副本。
 - API Key 继续由 AI Service 的本机安全存储负责，禁止进入 Agent 数据库、消息或事件。
-- Capability Registry、Tool Registry 与 Skill Registry 是应用内置定义的 owner；每个 Run 只读取启动边界生成的组合内存快照。完整 Capability 状态、Effective View 和 executor 引用不跨进程恢复，但稳定的 capability identity、Tool catalog revision 与 Skill catalog revision 随 Run 持久化用于诊断。当前激活 Skill 只属于该活跃 Run，`skill.activate` 的 ToolRun 是持久化审计事实。
+- Capability Registry、Tool Registry、Skill Registry 与可选 Shell Provider Registry 是应用内置定义的 owner；每个 Run 只读取启动边界生成的组合内存快照。Shell Provider identity 已能参与快照 hash，但生产路径尚未提供该快照。完整 Capability 状态、Effective View、Provider binding 和 executor 引用不跨进程恢复，稳定的 capability identity、Tool catalog revision 与 Skill catalog revision 随 Run 持久化用于诊断。当前激活 Skill 只属于该活跃 Run，`skill.activate` 的 ToolRun 是持久化审计事实。
 - 会话 owner 由规范化 `VITE_API_BASE_URL`、数字用户 ID 和 `libraryId` 共同确定；同一台机器切换账号或后端环境时不得复用其他 owner 的会话。
 - 长期记忆按同一 `backend_scope + account_scope` 隔离；`library_id IS NULL` 表示用户级记忆，非空值只能在对应资料库读取。Renderer 只持有管理页临时投影，不能直接打开数据库。
 
@@ -136,14 +138,14 @@ agent_shell_workspaces
 - `agent_runs`：一次用户提交对应一个 Run，保存 provider 配置 ID、模型、推理强度、状态、当前步骤、错误、可空的受限计划快照、稳定的 `capability_identity`、`tool_catalog_revision`、`skill_catalog_revision` 和从 `1` 起单调递增的 `revision`。诊断身份不包含 Probe 的 `checkedAt`，也不保存完整 Capability / Tool / Skill 定义。
 - `agent_messages`：按 Session 内单调递增的 `sequence` 排序，保存 user / assistant / tool 消息。
 - `agent_context_checkpoints`：append-only 的派生摘要记录，保存 base checkpoint、覆盖到的消息和 `sequence`、模型来源及 `started / completed / failed / interrupted` 状态。只有 `completed` 能进入 provider 投影；它不改变 Session 排序、预览、消息数或任何 Run / ToolRun 事实。
-- `agent_tool_runs`：保存 Tool 输入、结构化结果、最新进度、权限决策、确认快照、交互请求 / 回答、`business / control` 分类、Run 内稳定 `ordinal`、可空的 `plan_step_id`、从 `1` 起单调递增的 `revision` 和运行状态，不把 Tool 状态压进聊天文本作为唯一事实。需要审批前准备的 Tool 还原子保存 `prepared_action_id / prepared_action_json / prepared_snapshot_hash`；三字段禁止半状态，三者与 `approval_input_hash` 在 prepared action 存在时必须以 SQLite `text` 保存，且两个 hash 必须完全相等。public action 使用严格的 `kind / version` 判别联合，TypeScript normalizer、Tool 绑定校验与 SQLite branch trigger 共同拒绝未知版本、错误字段类型、额外或重复字段。交互字段为 `interaction_id / interaction_request_json / interaction_status / interaction_response_json / interaction_decided_at`，请求和最终回答都归属于原 ToolRun。
+- `agent_tool_runs`：保存 Tool 输入、结构化结果、最新进度、权限决策、确认快照、交互请求 / 回答、`business / control` 分类、Run 内稳定 `ordinal`、可空的 `plan_step_id`、从 `1` 起单调递增的 `revision` 和运行状态，不把 Tool 状态压进聊天文本作为唯一事实。需要审批前准备的 Tool 还原子保存 `prepared_action_id / prepared_action_json / prepared_snapshot_hash`；三字段禁止半状态，三者与 `approval_input_hash` 在 prepared action 存在时必须以 SQLite `text` 保存，且两个 hash 必须完全相等。public action 使用包含 `media.extractAudio@1` 与不可执行 `shell.run@1` 的严格 `kind / version` 判别联合，TypeScript normalizer、main hash / Tool 绑定校验与 SQLite branch trigger 共同拒绝未知版本、错误字段类型、额外或重复字段。交互字段为 `interaction_id / interaction_request_json / interaction_status / interaction_response_json / interaction_decided_at`，请求和最终回答都归属于原 ToolRun。
 - `agent_memories`：只保存已经确认的 `preference / project / reference`，正文拆分为标题、规则、保存原因和适用场景，同时记录 global / library scope、来源 Session / Run、创建时间、更新时间和乐观锁 `revision`。删除 Session 不删除已经确认的长期记忆。
 - `agent_local_storage_resources`：保存 owner、adapter、opaque resource ref、Run、预留 / 实际字节、状态、TTL 和安全错误码，是媒体 artifact 与 Shell workspace 共享配额及崩溃清理的规范 ledger；不保存业务文件正文或物理路径。
 - `agent_shell_workspaces`：保存 Run 工作区的 owner、Run、quota resource ref、generation、状态和 manifest JSON；物理根仍由 main-owned Store 从固定托管根重建，不进入模型、renderer 或普通日志。
 
 创建 Run 和首条用户消息必须原子完成。当前由 SQLite 的 `agent_runs_create_user_message` trigger 在插入 Run 时同步创建 user message，避免进程退出后出现只有 Run 或只有消息的半状态。
 
-当前 schema 标记保持为 `2`。v1 升级时原有会话保留为不可认领的 `legacy` scope，不能自动暴露给升级后首先登录的账号；新会话写入完整 owner scope。项目仍处于未正式发布阶段，确认审计字段、prepared action 字段、进度字段、交互字段、Run / ToolRun `revision`、Tool `ordinal`、Tool `tool_kind`、Run `plan_json`、ToolRun `plan_step_id`、Run 的 `capability_identity / tool_catalog_revision / skill_catalog_revision` 和上下文 checkpoint 表直接并入当前建表定义；本机已有的 schema 2 数据库幂等补列、补表和补 trigger，旧媒体 prepared action 在同一 bootstrap 事务内回填为 `kind = 'media.extractAudio', version = 1`，损坏或无法证明属于旧媒体结构的数据会使整个 bootstrap 回滚。历史 snapshot hash 原样保留且不恢复执行能力。旧 Run 的能力身份使用明确的 legacy 缺省值，已有 Run / ToolRun 的 `revision` 初始化为 `1`，普通 Tool 的 `tool_kind` 初始化为 `business`，既有 `skill.activate` 记录回填为 `control` 并清除旧计划绑定，再按既有 `rowid` 回填 Run 内 Tool 顺序，原地兼容且不新增 schema 版本。`agent_memories` 也由独立 Store 在同一数据库中幂等建表，不改变 `user_version`。开发期间曾短暂写入过 `user_version = 3`；启动时仅在四张核心表和确认审计字段均匹配该已知中间结构时保留数据并把标记归回 `2`，其他更高版本或未知结构仍拒绝打开。不能在无法证明归属时自动认领历史数据。
+当前 schema 标记保持为 `2`。v1 升级时原有会话保留为不可认领的 `legacy` scope，不能自动暴露给升级后首先登录的账号；新会话写入完整 owner scope。项目仍处于未正式发布阶段，确认审计字段、prepared action 字段、进度字段、交互字段、Run / ToolRun `revision`、Tool `ordinal`、Tool `tool_kind`、Run `plan_json`、ToolRun `plan_step_id`、Run 的 `capability_identity / tool_catalog_revision / skill_catalog_revision` 和上下文 checkpoint 表直接并入当前建表定义；本机已有的 schema 2 数据库幂等补列、补表和补 trigger，旧媒体 prepared action 在同一 bootstrap 事务内回填为 `kind = 'media.extractAudio', version = 1`，不可执行的 `shell.run@1` 使用独立 strict branch 与 main command hash 校验，损坏或无法证明归属的数据会使整个 bootstrap 回滚。历史 snapshot hash 原样保留且不恢复执行能力。旧 Run 的能力身份使用明确的 legacy 缺省值，已有 Run / ToolRun 的 `revision` 初始化为 `1`，普通 Tool 的 `tool_kind` 初始化为 `business`，既有 `skill.activate` 记录回填为 `control` 并清除旧计划绑定，再按既有 `rowid` 回填 Run 内 Tool 顺序，原地兼容且不新增 schema 版本。`agent_memories` 也由独立 Store 在同一数据库中幂等建表，不改变 `user_version`。开发期间曾短暂写入过 `user_version = 3`；启动时仅在四张核心表和确认审计字段均匹配该已知中间结构时保留数据并把标记归回 `2`，其他更高版本或未知结构仍拒绝打开。不能在无法证明归属时自动认领历史数据。
 
 生产启动由 `bootstrapAgentPersistenceDatabase()` 统一进入唯一 `AgentDatabaseSchemaCoordinator`：Coordinator 自己打开独占 bootstrap connection，在同一个 `BEGIN EXCLUSIVE` 事务中依次执行 Session、Memory、Quota 和 Shell workspace 的领域 DDL / reconcile，再完整自检 `user_version`、必需表、全部已知列、命名 index 与 trigger；全部通过后才提交并释放一次性 readiness barrier，任一步失败都回滚并允许后续重试。canonical DDL 仍按领域维护在对应 Store 模块，但生产业务连接只能在 barrier 后打开，不再重复执行 DDL。`:memory:` 和直接 Store 测试继续由各 Store 自行初始化，不把测试兼容入口误作生产 schema owner。
 
@@ -391,6 +393,12 @@ Agent Session Store 使用 `sqlite3` 原生依赖：
 - `electron/service/agent/capabilities/agent-capability-registry.test.ts`
 - `electron/service/agent/capabilities/agent-capability-runtime.test.ts`
 - `electron/service/agent/agent-tool-registry.test.ts`
+- `electron/service/agent/agent-ai-destination.test.ts`
+- `electron/service/agent/shell/agent-shell-prepared-action.test.ts`
+- `electron/service/agent/shell/agent-shell-provider-registry.test.ts`
+- `electron/service/agent/shell/agent-shell-preparation-service.test.ts`
+- `electron/platform/shell/shell-providers.test.ts`
+- `src/shared/agent/shell/agent-shell.types.test.ts`
 - `electron/service/agent/agent-tool-broker.test.ts`
 - `electron/service/agent/agent-tool-prepare-broker.test.ts`
 - `electron/service/agent/agent-media-save-as.test.ts`

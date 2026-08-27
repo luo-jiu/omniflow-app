@@ -4,9 +4,14 @@ import path from 'node:path';
 import sqlite3 from 'sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import type { AgentMessage, AgentRunPlanSnapshot } from '@/shared/agent/agent.types';
+import type {
+  AgentMessage,
+  AgentRunPlanSnapshot,
+  AgentShellPreparedActionPublicV1,
+} from '@/shared/agent/agent.types';
 import type { AgentConversationSummaryV1 } from './agent-conversation-summary';
 import { createSQLiteAgentSessionStore, type AgentSessionStore } from './agent-session-store';
+import { createAgentShellCommandHash } from './shell/agent-shell-prepared-action';
 
 function timestamp(second: number): string {
   return `2026-08-22T12:00:${String(second).padStart(2, '0')}.000Z`;
@@ -368,6 +373,48 @@ function preparedAction(outputFileName = 'movie-audio.m4a') {
     sourceNodeId: 8,
     targetLabel: '视频',
     version: 1 as const,
+  };
+}
+
+function shellPreparedAction(
+  overrides: Partial<AgentShellPreparedActionPublicV1> = {},
+): AgentShellPreparedActionPublicV1 {
+  const command = 'git --version';
+  return {
+    aiDestination: {
+      identityHash: `v1:${'a'.repeat(64)}`,
+      profileLabel: 'Local DeepSeek',
+      providerType: 'openai-compatible',
+    },
+    assessment: {
+      facets: ['filesystem.read'],
+      operations: [{
+        argvPrefix: ['--version'],
+        effects: ['filesystem.read'],
+        executable: 'git',
+      }],
+      persistentRuleEligible: false,
+      risk: 'read',
+      unresolved: ['workspace-read-set'],
+    },
+    command,
+    commandHash: createAgentShellCommandHash(command),
+    cwd: { kind: 'run-workspace', path: 'work' },
+    dataScope: {
+      stagedInputs: [{
+        contentHash: `sha256:${'c'.repeat(64)}`,
+        displayName: 'fixture.txt',
+        logicalPath: 'input/fixture.txt',
+        sourceKind: 'library',
+      }],
+      unresolvedWorkspaceRead: true,
+    },
+    environment: [{ name: 'MODE', value: 'test' }],
+    kind: 'shell.run',
+    provider: { dialect: 'zsh', id: 'system-zsh', version: '5.9' },
+    timeoutMs: 60_000,
+    version: 1,
+    ...overrides,
   };
 }
 
@@ -2198,6 +2245,220 @@ describe('SQLite Agent session store', () => {
     });
   });
 
+  it('persists and restores shell.run v1 prepared actions in schema 2', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'omniflow-agent-shell-prepared-'));
+    temporaryDirectories.push(directory);
+    const databasePath = path.join(directory, 'agent-sessions.sqlite3');
+    const store = await createStore(databasePath);
+    const sessionId = 'session-shell-prepared';
+    const runId = 'run-shell-prepared';
+    const toolId = 'tool-shell-prepared';
+    const action = shellPreparedAction();
+    await createSession(store, sessionId, 3, 'Shell 准备动作');
+    await store.createRun({
+      id: runId,
+      model: 'model-a',
+      now: timestamp(1),
+      profileId: 'profile-a',
+      reasoningEffort: 'auto',
+      sessionId,
+      userPrompt: '检查版本',
+    });
+    await store.createToolRun({
+      callId: 'call-shell-prepared',
+      id: toolId,
+      input: {},
+      now: timestamp(2),
+      permissionBehavior: 'allow',
+      runId,
+      status: 'preparing',
+      toolName: 'shell.run',
+    });
+    await expect(store.completeToolPreparation({
+      action,
+      approvalId: 'approval-shell-prepared',
+      approvalInputHash: 'd'.repeat(64),
+      approvalPreview: {
+        description: '运行版本检查',
+        risk: 'read',
+        title: '运行 Shell',
+      },
+      id: toolId,
+      permissionBehavior: 'allow',
+      preparedActionId: 'prepared-shell-action',
+      snapshotHash: 'd'.repeat(64),
+    })).resolves.toMatchObject({
+      preparation: {
+        action,
+        preparedActionId: 'prepared-shell-action',
+        snapshotHash: 'd'.repeat(64),
+      },
+      status: 'running',
+    });
+    await store.completeToolRun(toolId, { message: '版本检查完成', ok: true }, timestamp(3));
+    await store.updateRun(runId, {
+      currentStep: '已完成',
+      finishedAt: timestamp(3),
+      status: 'completed',
+      updatedAt: timestamp(3),
+    });
+    await store.close();
+    stores.splice(stores.indexOf(store), 1);
+
+    const reopenedStore = await createStore(databasePath);
+    expect(await reopenedStore.getSession(sessionId, OWNER_SCOPE, 3)).toMatchObject({
+      toolActivities: [expect.objectContaining({
+        id: toolId,
+        preparation: {
+          action,
+          preparedActionId: 'prepared-shell-action',
+          snapshotHash: 'd'.repeat(64),
+        },
+        status: 'completed',
+      })],
+    });
+    expect(await readDatabaseVersion(databasePath)).toBe(2);
+  });
+
+  it('rejects malformed shell.run persistence at every strict union boundary', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'omniflow-agent-shell-validation-'));
+    temporaryDirectories.push(directory);
+    const databasePath = path.join(directory, 'agent-sessions.sqlite3');
+    const store = await createStore(databasePath);
+    const action = shellPreparedAction();
+    await createSession(store, 'session-shell-validation', 3, 'Shell 持久化校验');
+    await store.createRun({
+      id: 'run-shell-validation',
+      model: 'model-a',
+      now: timestamp(1),
+      profileId: 'profile-a',
+      reasoningEffort: 'auto',
+      sessionId: 'session-shell-validation',
+      userPrompt: '检查版本',
+    });
+    await store.createToolRun({
+      callId: 'call-shell-validation',
+      id: 'tool-shell-validation',
+      input: {},
+      now: timestamp(2),
+      permissionBehavior: 'allow',
+      runId: 'run-shell-validation',
+      status: 'preparing',
+      toolName: 'shell.run',
+    });
+    await store.completeToolPreparation({
+      action,
+      approvalId: 'approval-shell-validation',
+      approvalInputHash: 'e'.repeat(64),
+      approvalPreview: {
+        description: '运行版本检查',
+        risk: 'read',
+        title: '运行 Shell',
+      },
+      id: 'tool-shell-validation',
+      permissionBehavior: 'allow',
+      preparedActionId: 'prepared-shell-validation',
+      snapshotHash: 'e'.repeat(64),
+    });
+
+    const missingProvider = { ...action } as Record<string, unknown>;
+    delete missingProvider.provider;
+    const stagedInput = action.dataScope.stagedInputs[0];
+    const invalidPersistedActions: unknown[] = [
+      { ...action, unexpected: true },
+      missingProvider,
+      { ...action, kind: 'unknown.shell' },
+      { ...action, timeoutMs: '60000' },
+      { ...action, timeoutMs: 21_600_001 },
+      { ...action, command: 'x'.repeat(24_577) },
+      { ...action, command: 'printf ok\u0000' },
+      { ...action, commandHash: 'b'.repeat(64) },
+      { ...action, cwd: { ...action.cwd, extra: true } },
+      { ...action, cwd: { kind: 'run-workspace', path: 'Work/file.txt' } },
+      { ...action, cwd: { kind: 'run-workspace', path: 'work/D:relative' } },
+      { ...action, cwd: { kind: 'run-workspace', path: 'work/trailing.' } },
+      { ...action, cwd: { kind: 'run-workspace', path: 'work/CON.txt' } },
+      { ...action, provider: { ...action.provider, id: '/bin/zsh' } },
+      { ...action, aiDestination: { ...action.aiDestination, identityHash: 'profile' } },
+      { ...action, assessment: { ...action.assessment, facets: [1] } },
+      {
+        ...action,
+        assessment: {
+          ...action.assessment,
+          operations: [{ ...action.assessment.operations[0], extra: true }],
+        },
+      },
+      {
+        ...action,
+        dataScope: { ...action.dataScope, stagedInputs: [stagedInput, stagedInput] },
+      },
+      {
+        ...action,
+        dataScope: {
+          ...action.dataScope,
+          stagedInputs: [{ ...stagedInput, extra: true }],
+        },
+      },
+      { ...action, environment: [{ name: 'MODE', value: 'test', extra: true }] },
+      { ...action, environment: [{ name: 'PATH', value: '/tmp' }] },
+      { ...action, environment: [{ name: 'JAVA_TOOL_OPTIONS', value: '-javaagent:evil' }] },
+      { ...action, environment: [{ name: 'GIT_CONFIG_COUNT', value: '1' }] },
+      { ...action, environment: [{ name: '__proto__', value: 'polluted' }] },
+      { ...action, environment: [{ name: 'MODE', value: 'test\u0000' }] },
+      {
+        ...action,
+        environment: Array.from({ length: 33 }, (_, index) => ({
+          name: `VALUE_${index}`,
+          value: 'x',
+        })),
+      },
+    ];
+    for (const invalidAction of invalidPersistedActions) {
+      await expect(runDatabaseSql(databasePath, `
+        UPDATE agent_tool_runs
+        SET prepared_action_json = ?
+        WHERE id = 'tool-shell-validation'
+      `, [JSON.stringify(invalidAction)])).rejects.toThrow('prepared action is invalid');
+    }
+    await expect(store.completeToolPreparation({
+      action: { ...action, command: 'git status' },
+      approvalId: 'approval-shell-validation-tampered',
+      approvalInputHash: 'f'.repeat(64),
+      approvalPreview: {
+        description: '运行被篡改的命令',
+        risk: 'read',
+        title: '运行 Shell',
+      },
+      id: 'tool-shell-validation',
+      permissionBehavior: 'allow',
+      preparedActionId: 'prepared-shell-validation-tampered',
+      snapshotHash: 'f'.repeat(64),
+    })).rejects.toThrow('command hash 不匹配');
+
+    const serializedAction = JSON.stringify(action);
+    for (const duplicateAction of [
+      serializedAction.replace(
+        '"kind":"shell.run"',
+        '"kind":"shell.run","kind":"shell.run"',
+      ),
+      serializedAction.replace(
+        '"executable":"git"',
+        '"executable":"git","executable":"git"',
+      ),
+    ]) {
+      await expect(runDatabaseSql(databasePath, `
+        UPDATE agent_tool_runs
+        SET prepared_action_json = ?
+        WHERE id = 'tool-shell-validation'
+      `, [duplicateAction])).rejects.toThrow('prepared action is invalid');
+    }
+    expect(await readDatabaseRow<{ prepared_action_json: string }>(databasePath, `
+      SELECT prepared_action_json
+      FROM agent_tool_runs
+      WHERE id = 'tool-shell-validation'
+    `)).toEqual({ prepared_action_json: serializedAction });
+  });
+
   it('replaces pending prepared approvals with compare-and-swap semantics', async () => {
     const store = await createStore();
     const sessionId = 'session-prepared-approval-cas';
@@ -2652,6 +2913,88 @@ describe('SQLite Agent session store', () => {
       FROM agent_tool_runs
       WHERE id = '${seeded.toolId}'
     `)).toEqual({ prepared_action_json: duplicateAction });
+  });
+
+  it.each([
+    {
+      caseId: 'nested-duplicate',
+      corrupt: (action: AgentShellPreparedActionPublicV1) => JSON.stringify(action).replace(
+        '"executable":"git"',
+        '"executable":"git","executable":"git"',
+      ),
+    },
+    {
+      caseId: 'command-hash-mismatch',
+      corrupt: (action: AgentShellPreparedActionPublicV1) => JSON.stringify({
+        ...action,
+        command: 'git status',
+      }),
+    },
+  ])('rejects $caseId in stored shell actions during bootstrap', async ({ caseId, corrupt }) => {
+    const directory = await mkdtemp(path.join(tmpdir(), `omniflow-agent-shell-${caseId}-`));
+    temporaryDirectories.push(directory);
+    const databasePath = path.join(directory, 'agent-sessions.sqlite3');
+    const store = await createStore(databasePath);
+    const sessionId = `session-shell-${caseId}`;
+    const runId = `run-shell-${caseId}`;
+    const toolId = `tool-shell-${caseId}`;
+    const action = shellPreparedAction();
+    await createSession(store, sessionId, 3, 'Shell 损坏审计事实');
+    await store.createRun({
+      id: runId,
+      model: 'model-a',
+      now: timestamp(1),
+      profileId: 'profile-a',
+      reasoningEffort: 'auto',
+      sessionId,
+      userPrompt: '检查版本',
+    });
+    await store.createToolRun({
+      callId: `call-shell-${caseId}`,
+      id: toolId,
+      input: {},
+      now: timestamp(2),
+      permissionBehavior: 'allow',
+      runId,
+      status: 'preparing',
+      toolName: 'shell.run',
+    });
+    await store.completeToolPreparation({
+      action,
+      approvalId: 'approval-shell-nested-duplicate',
+      approvalInputHash: 'f'.repeat(64),
+      approvalPreview: {
+        description: '运行版本检查',
+        risk: 'read',
+        title: '运行 Shell',
+      },
+      id: toolId,
+      permissionBehavior: 'allow',
+      preparedActionId: `prepared-shell-${caseId}`,
+      snapshotHash: 'f'.repeat(64),
+    });
+    await store.close();
+    stores.splice(stores.indexOf(store), 1);
+
+    await executeDatabaseSql(databasePath, `
+      DROP TRIGGER IF EXISTS agent_tool_runs_validate_preparation_insert;
+      DROP TRIGGER IF EXISTS agent_tool_runs_validate_preparation_update;
+    `);
+    const corruptedAction = corrupt(action);
+    await runDatabaseSql(databasePath, `
+      UPDATE agent_tool_runs
+      SET prepared_action_json = ?
+      WHERE id = ?
+    `, [corruptedAction, toolId]);
+
+    await expect(createStore(databasePath)).rejects.toThrow(
+      `Agent Tool prepared action 无法升级：${toolId}`,
+    );
+    expect(await readDatabaseRow<{ prepared_action_json: string }>(databasePath, `
+      SELECT prepared_action_json
+      FROM agent_tool_runs
+      WHERE id = '${toolId}'
+    `)).toEqual({ prepared_action_json: corruptedAction });
   });
 
   it('preserves the immutable plan and Tool step association when recovery interrupts a Run', async () => {

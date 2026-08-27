@@ -184,6 +184,54 @@ describe('Agent shell workspace store', () => {
     }
   });
 
+  it('resolves a main-only preparation context bound to the current Run and generation', async () => {
+    const { root, store } = await createStore();
+    const workspace = await store.create('run-1', OWNER);
+    const resolved = await store.resolvePreparationContext(
+      workspace.workspaceId,
+      'work',
+      'run-1',
+      OWNER,
+    );
+
+    expect(resolved).toMatchObject({
+      generation: 1,
+      logicalCwd: 'work',
+      runId: 'run-1',
+      workspaceId: workspace.workspaceId,
+    });
+    expect(resolved.workspaceMetadataIdentity).toMatch(/^v1:[a-f0-9]{64}$/u);
+    expect(resolved.physicalCwdPath).toContain(path.join(root, `workspace-${workspace.workspaceId}`));
+    expect(resolved.physicalHomePath).toContain(path.join(root, `workspace-${workspace.workspaceId}`));
+    expect(resolved.physicalTempPath).toContain(path.join(root, `workspace-${workspace.workspaceId}`));
+    await expect(store.resolvePreparationContext(
+      workspace.workspaceId,
+      'work',
+      'run-other',
+      OWNER,
+    )).rejects.toThrow('Run 不匹配');
+  });
+
+  it('requires the preparation cwd to exist as a real directory', async () => {
+    const { root, store } = await createStore();
+    const workspace = await store.create('run-1', OWNER);
+    const workspaceRoot = path.join(root, `workspace-${workspace.workspaceId}`);
+    await writeFile(path.join(workspaceRoot, 'work', 'file.txt'), 'content');
+
+    await expect(store.resolvePreparationContext(
+      workspace.workspaceId,
+      'work/missing',
+      'run-1',
+      OWNER,
+    )).rejects.toThrow('不存在');
+    await expect(store.resolvePreparationContext(
+      workspace.workspaceId,
+      'work/file.txt',
+      'run-1',
+      OWNER,
+    )).rejects.toThrow('不是目录');
+  });
+
   it('rejects symlink escape even when the logical path remains inside a root', async () => {
     const { root, store } = await createStore();
     const workspace = await store.create('run-1', OWNER);
@@ -195,6 +243,21 @@ describe('Agent shell workspace store', () => {
 
     await expect(store.resolveLogicalPath(workspace.workspaceId, 'work/linked/secret.txt', OWNER))
       .rejects.toThrow('symlink');
+  });
+
+  it.each(['home', 'tmp'])('rejects a redirected fixed %s root during preparation', async (rootName) => {
+    const { root, store } = await createStore();
+    const workspace = await store.create('run-1', OWNER);
+    const workspaceRoot = path.join(root, `workspace-${workspace.workspaceId}`);
+    await rm(path.join(workspaceRoot, rootName), { recursive: true });
+    await symlink(path.join(workspaceRoot, 'input'), path.join(workspaceRoot, rootName));
+
+    await expect(store.resolvePreparationContext(
+      workspace.workspaceId,
+      'work',
+      'run-1',
+      OWNER,
+    )).rejects.toThrow('受控目录');
   });
 
   it('updates the manifest with optimistic generation and cumulative provenance', async () => {

@@ -138,6 +138,11 @@ import {
   type AgentToolPreparationResult,
 } from './agent-tool-registry';
 import {
+  createAgentAiDestinationSnapshot,
+  type AgentRuntimeProfile,
+  type AgentToolMainAiDestinationSnapshot,
+} from './agent-ai-destination';
+import {
   createAgentRunCapabilitySnapshot,
   type AgentRunCapabilitySnapshot,
 } from './agent-run-capability-snapshot';
@@ -276,7 +281,7 @@ interface AgentOrchestratorOptions {
   contextBudget?: Partial<AgentContextBudget>;
   contextManager?: AgentContextManager;
   extractMediaAudio?: typeof extractAgentMediaAudio;
-  getRuntimeProfile?: (profileId: string) => AIServiceRuntimeConnection;
+  getRuntimeProfile?: (profileId: string) => AgentRuntimeProfile;
   getMemoryStore?: () => Promise<AgentMemoryStore>;
   getSessionStore?: () => Promise<AgentSessionStore>;
   inspectMediaSource?: typeof inspectAgentMediaSource;
@@ -515,19 +520,6 @@ function stableJson(value: unknown): string {
 
 function hashToolInput(value: unknown): string {
   return crypto.createHash('sha256').update(stableJson(value)).digest('hex');
-}
-
-function createAgentAiDestinationIdentity(
-  input: AgentChatRequest,
-  runtimeConnection: AIServiceRuntimeConnection,
-): string {
-  const baseUrl = String(runtimeConnection.baseUrl || '').trim().replace(/\/+$/u, '');
-  return `v1:${hashToolInput({
-    baseUrl,
-    model: String(input.model || '').trim(),
-    profileId: String(input.profileId || '').trim(),
-    providerType: runtimeConnection.providerType,
-  })}`;
 }
 
 interface CreatePreparedRuntimeOptions {
@@ -1442,7 +1434,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     perception: AgentChatRequest['perception'],
     capabilitySnapshot: AgentRunCapabilitySnapshot,
     activeSkillId: string | undefined,
-    aiDestinationIdentity: string,
+    aiDestination: AgentToolMainAiDestinationSnapshot,
     onPerception: (next: AgentChatRequest['perception']) => void,
   ): Promise<AgentToolResult> {
     const tool = capabilitySnapshot.getTool(call.name, activeSkillId);
@@ -1727,7 +1719,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
             const toolInputHash = hashAgentToolInputForPreparation(call.input);
             finalizePrepared = async (requestedAction, preparedActionId = crypto.randomUUID()) => {
               const preparationIdentity: AgentToolMainPreparationIdentity = Object.freeze({
-                aiDestinationIdentity,
+                aiDestinationIdentity: aiDestination.identity,
                 callId: call.id,
                 libraryId,
                 ownerScope,
@@ -1745,11 +1737,13 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
                 prepare: async (preparationSignal) => {
                   const preparationContext: AgentToolMainPreparationContext = {
                     activeSkillId,
+                    aiDestination,
                     appContext: input.appContext,
                     ownerScope,
                     ownerWebContentsId: sender.id,
                     perception,
                     preparationIdentity,
+                    runCapabilitySnapshot: capabilitySnapshot,
                     signal: preparationSignal,
                   };
                   const result = await tool.prepareMain!(
@@ -2503,7 +2497,11 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
                   currentPerception,
                   capabilitySnapshot,
                   activeSkillId,
-                  createAgentAiDestinationIdentity(input, runtimeConnection),
+                  createAgentAiDestinationSnapshot({
+                    model: input.model,
+                    profileId: input.profileId,
+                    runtimeConnection,
+                  }),
                   (nextPerception) => {
                     currentPerception = nextPerception;
                   },

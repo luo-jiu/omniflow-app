@@ -492,11 +492,11 @@ legacy 兼容检查：
 - `media.extractAudio` 的 6 小时签名 URL、loopback token、ffmpeg stderr、本地路径和 artifact ID 不进入 Agent 消息、Tool 结果或普通日志；SQLite 只保存不含路径的 opaque resource ref 与配额事实。来源 capability 不能重放，产物只能由匹配账号环境、窗口、Session、Run 和 execution 释放；单文件 2 GiB、4 个当前进程活跃产物、与 Shell workspace 共享的默认 8 GiB 总额度和 1 小时无活动 TTL 均生效。生成期间 live lease 阻止 sweep，持续上传时进度续期 TTL；重启不恢复未完成媒体任务，但持久 quota ledger 能在 TTL 后经 adapter 清理实际目录，旧版无 ledger 的过期目录也会回收
 - 不支持 Tool Calling 的本地模型退回有界感知快照；未注册 Tool、未配置权限策略的非 `read` Tool、没有显式只读授权的 Renderer Tool 和绕过确认的 Renderer 写 Tool 不执行；达到 10 个 provider turn / 8 次业务 Tool 上限后明确失败
 - 内部 `AgentLocalProcessRunner` 只接受绝对可执行文件路径和参数数组，不启用 shell、不继承完整环境；并发、输出、超时和取消均命中上限，取消后清理 macOS / Linux 进程组或 Windows 进程树。该基座没有注册为模型 Tool 时，Agent 不能通过它执行任意命令
-- 新建与开发期已有 Agent SQLite 都保持 schema 2：唯一 Schema Coordinator 完成 reconcile 并发布 barrier 后，Session / Memory / Quota / Workspace Store 才能打开业务连接；`media.extractAudio@1` prepared action 按 `kind / version` 严格校验，`prepared_action_id / prepared_action_json / prepared_snapshot_hash / approval_input_hash` 保持 `text`，审批 hash 与冻结快照 hash 必须一致。直接 Store 写入不一致 hash、SQL 单列篡改或把 ASCII JSON / ID / hash 写成 BLOB 都会被 trigger 拒绝；旧媒体 action 原地回填且损坏行使 bootstrap 整体回滚。workspace / quota ledger 幂等补齐并重建受影响 trigger，不新增 schema 3 / 4
+- 新建与开发期已有 Agent SQLite 都保持 schema 2：唯一 Schema Coordinator 完成 reconcile 并发布 barrier 后，Session / Memory / Quota / Workspace Store 才能打开业务连接；`media.extractAudio@1` 与不可执行的 `shell.run@1` prepared action 分别按 `kind / version` 严格校验，Shell command hash 必须对应精确 command bytes。`prepared_action_id / prepared_action_json / prepared_snapshot_hash / approval_input_hash` 保持 `text`，审批 hash 与冻结快照 hash 必须一致。直接 Store 写入禁用环境变量、SQL 单列篡改、command/hash 漂移或把 ASCII JSON / ID / hash 写成 BLOB 都会在 trigger 或 bootstrap main normalizer 边界被拒绝；旧媒体 action 原地回填且损坏行使 bootstrap 整体回滚。workspace / quota ledger 幂等补齐并重建受影响 trigger，不新增 schema 3 / 4
 
 #### Shell 目标实现门禁（当前尚不可执行）
 
-当前没有 `shell.run`，下面是 `docs/built-in-agent-shell-architecture.md` 落地后必须新增的完成门禁，不属于现有能力：
+生产 Registry 尚未注册可执行 `shell.run`。当前只允许验证无副作用准备基座：exact command bytes/hash、Provider path-free public identity、可选 Run snapshot identity、AI destination binding、受控环境和 PreparationService 始终不 spawn。下面是注册前必须补齐的完成门禁，不属于现有能力：
 
 - macOS Zsh、Linux Bash 和 Windows PowerShell 分别覆盖 Unicode、空格路径、多行、管道、重定向、条件、替换、解析失败和非零退出；Provider、cwd、env、timeout 或 workspace generation 在批准后漂移时拒绝旧动作。外部进程在批准后直接改写 cwd 时，spawn 前 rehash / execution generation 必须失效，不能只信任 generation 计数
 - 权限规则按带版本的 canonical matcher 绑定 AST token、原子操作、重定向、网络目的地、cwd、Provider、风险分面及 analyzer / policy / env policy revision；`npm test` 不匹配 `npm test && rm ...`，也不能跨另一个项目内容身份复用。动态 head、嵌套解释器、encoded PowerShell、外部路径、未知语法和无法证明 read set 的工作区不能生成 Session / 长期规则，deny 始终优先
@@ -505,7 +505,7 @@ legacy 兼容检查：
 - stdout / stderr 只有经过带 carry buffer 的增量 decoder / control parser / secret redactor 后才按单调 sequence 投影；事件同时绑定 Session / Run / ToolRun / execution，单 frame / batch / flush 频率 / 未 ack IPC 队列均命中固定上限。慢 renderer 触发 live batch 丢弃后不堵塞进程，跨 chunk UTF-8、秘密、PowerShell 编码、ANSI / OSC、二进制、输出洪泛、重复 batch、sequence gap、`afterSequence` replay、cursor 失效和日志过期均有确定行为。详细日志只剩前缀、tail 只剩远端最新区间时，`availableRanges / nextAvailableSequence / unavailableThrough` 明确标出中间缺口并允许 resolved 水位继续；SQLite 只有带水位的有界 tail 与安全 logRef，配额内的有界全流日志由 main TTL Store 托管
 - 停止、超时、注销、窗口销毁和应用退出会按 Tool 专用 settle budget 收口受管进程；单纯页面卸载时纯 main Shell 继续，返回后从规范 ToolRun 和 tail 恢复。Windows 必须验证禁用 breakaway 的 Job 收口，不能以 `taskkill` 失败后的直接子进程 fallback 通过；POSIX daemonize 逃逸按专题记录为残余风险
 - `file.stage` 与 `file.publish` 作为两个计入业务配额的 strict Registry Tool，根对象和每个嵌套判别分支都拒绝额外字段；覆盖 renderer 不在场 / 中途卸载、hash、共享原子 reservation、半文件删除后才返还额度、真实字节校正、symlink / junction / UNC、canonical 目标写授权与 commit 前重验、资料库 commit、刷新失败、Save As 取消和一次性 grant 重放。commit 后超过 30 秒只允许新刷新 / 新 Tool 再感知，不回写终态 ToolRun 或续跑旧 Run；真实资料库验证仍禁止第一个资料库，媒体命令只使用无声 fixture
-- Shell 落地仍保持 schema 2：Rule Store 必须加入现有 Schema Coordinator barrier；`shell.run / file.stage / file.publish` 分别增加自己的 prepared action branch，Shell ToolRun audit、日志水位和规则索引幂等补齐并重建受影响 trigger。删除 Session 后的 Shell workspace / 日志资源由唯一 Quota Manager 经 Store adapter 删除，并通过 `deleting` ledger 在崩溃后继续回收
+- Shell 落地仍保持 schema 2：Rule Store 必须加入现有 Schema Coordinator barrier；保留现有 `shell.run@1` strict branch，并为 `file.stage@1 / file.publish@1` 分别增加独立 branch，Shell ToolRun audit、日志水位和规则索引幂等补齐并重建受影响 trigger。删除 Session 后的 Shell workspace / 日志资源由唯一 Quota Manager 经 Store adapter 删除，并通过 `deleting` ledger 在崩溃后继续回收
 
 ### 3.15 QQ 音乐歌词工具
 

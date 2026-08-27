@@ -29,7 +29,18 @@ import {
   type AgentToolResult,
 } from '../../../src/shared/agent/agent.types';
 import { normalizeAgentOwnerScope } from '../../../src/shared/agent/agent-owner-scope';
-import { normalizeAgentPreparedActionPublic } from '../../../src/shared/agent/agent-prepared-action';
+import {
+  AGENT_SHELL_FORBIDDEN_ENVIRONMENT_NAMES,
+  AGENT_SHELL_FORBIDDEN_ENVIRONMENT_PREFIXES,
+  AGENT_SHELL_MAX_COMMAND_BYTES,
+  AGENT_SHELL_MAX_CWD_BYTES,
+  AGENT_SHELL_MAX_ENVIRONMENT_BYTES,
+  AGENT_SHELL_MAX_ENVIRONMENT_ENTRIES,
+  AGENT_SHELL_MAX_TIMEOUT_MS,
+  AGENT_SHELL_PREPARED_ACTION_VERSION,
+  AGENT_SHELL_RUN_TOOL_NAME,
+  AGENT_SHELL_SENSITIVE_ENVIRONMENT_NAME_PARTS,
+} from '../../../src/shared/agent/shell/agent-shell.types';
 import {
   normalizeAgentInteractionRequest,
   normalizeAgentInteractionResponse,
@@ -38,6 +49,7 @@ import {
   parseAgentConversationSummary,
   serializeAgentConversationSummary,
 } from './agent-conversation-summary';
+import { normalizeAgentPreparedActionPublicForMain } from './agent-prepared-action';
 import { parseStoredAgentRunPlan } from './agent-plan-model';
 import type { AgentToolKind } from './agent-tool-registry';
 import { agentDatabaseSchemaCoordinator } from './storage/agent-database-schema-coordinator';
@@ -84,6 +96,472 @@ const PREPARED_ACTION_TRIM_CHARACTERS_SQL = [
 ].map(code => `char(${code})`).join(' || ');
 const PREPARED_ACTION_JSON_WITHOUT_ESCAPED_BACKSLASHES_SQL =
   "replace(NEW.prepared_action_json, char(92) || char(92), '')";
+
+function sqlList(values: readonly string[]): string {
+  return values.map(sqlText).join(', ');
+}
+
+function safeJsonFieldSql(
+  sourceSql: string,
+  pathSql: string,
+  expectedType: 'array' | 'object',
+): string {
+  const fallback = expectedType === 'array' ? '[]' : '{}';
+  return `CASE
+    WHEN json_type(${sourceSql}, ${sqlText(pathSql)}) = '${expectedType}'
+    THEN json_extract(${sourceSql}, ${sqlText(pathSql)})
+    ELSE '${fallback}'
+  END`;
+}
+
+function strictJsonObjectInvalidSql(sourceSql: string, fields: readonly string[]): string {
+  return `(
+    json_type(${sourceSql}) <> 'object'
+    OR EXISTS (
+      SELECT 1
+      FROM json_each(${sourceSql}) AS strict_field
+      WHERE strict_field.key NOT IN (${sqlList(fields)})
+    )
+    OR (SELECT COUNT(*) FROM json_each(${sourceSql})) <> ${fields.length}
+  )`;
+}
+
+function containsShellControlCharacterSql(valueSql: string): string {
+  return [...Array.from({ length: 32 }, (_, code) => code), 127]
+    .map(code => `instr(
+      CAST(${valueSql} AS BLOB),
+      X'${code.toString(16).padStart(2, '0')}'
+    ) > 0`)
+    .join('\n      OR ');
+}
+
+function invalidCanonicalShellTextSql(valueSql: string, maximumBytes: number): string {
+  return `(
+    length(CAST(${valueSql} AS BLOB)) = 0
+    OR length(CAST(${valueSql} AS BLOB)) > ${maximumBytes}
+    OR ${valueSql} <> trim(${valueSql}, ${PREPARED_ACTION_TRIM_CHARACTERS_SQL})
+    OR ${containsShellControlCharacterSql(valueSql)}
+  )`;
+}
+
+function invalidShellSha256Sql(valueSql: string): string {
+  return `(
+    length(CAST(${valueSql} AS BLOB)) <> 71
+    OR substr(${valueSql}, 1, 7) <> 'sha256:'
+    OR substr(${valueSql}, 8) GLOB '*[^0-9a-f]*'
+  )`;
+}
+
+function invalidShellVersionedIdentitySql(valueSql: string): string {
+  const separatorSql = `instr(${valueSql}, ':')`;
+  const versionSql = `substr(${valueSql}, 2, ${separatorSql} - 2)`;
+  const digestSql = `substr(${valueSql}, ${separatorSql} + 1)`;
+  return `(
+    length(CAST(${valueSql} AS BLOB)) > 80
+    OR substr(${valueSql}, 1, 1) <> 'v'
+    OR ${separatorSql} <> length(${valueSql}) - 64
+    OR length(${versionSql}) = 0
+    OR substr(${versionSql}, 1, 1) NOT GLOB '[1-9]'
+    OR ${versionSql} GLOB '*[^0-9]*'
+    OR length(CAST(${digestSql} AS BLOB)) <> 64
+    OR ${digestSql} GLOB '*[^0-9a-f]*'
+  )`;
+}
+
+function invalidShellIdentifierSql(valueSql: string): string {
+  return `(
+    length(CAST(${valueSql} AS BLOB)) = 0
+    OR length(CAST(${valueSql} AS BLOB)) > 128
+    OR substr(${valueSql}, 1, 1) NOT GLOB '[a-z0-9]'
+    OR substr(${valueSql}, -1, 1) NOT GLOB '[a-z0-9]'
+    OR ${valueSql} GLOB '*[^a-z0-9._-]*'
+    OR ${valueSql} GLOB '*[._-][._-]*'
+  )`;
+}
+
+function invalidShellLogicalPathSql(valueSql: string): string {
+  const portableReservedSegments = [
+    'aux',
+    ...Array.from({ length: 9 }, (_, index) => `com${index + 1}`),
+    'con',
+    ...Array.from({ length: 9 }, (_, index) => `lpt${index + 1}`),
+    'nul',
+    'prn',
+  ];
+  const wrappedLowerPathSql = `lower('/' || ${valueSql} || '/')`;
+  return `(
+    length(CAST(${valueSql} AS BLOB)) = 0
+    OR length(CAST(${valueSql} AS BLOB)) > ${AGENT_SHELL_MAX_CWD_BYTES}
+    OR ${containsShellControlCharacterSql(valueSql)}
+    OR instr(${valueSql}, char(92)) > 0
+    OR instr(${valueSql}, ':') > 0
+    OR instr(${valueSql}, '<') > 0
+    OR instr(${valueSql}, '>') > 0
+    OR instr(${valueSql}, '"') > 0
+    OR instr(${valueSql}, '|') > 0
+    OR instr(${valueSql}, '?') > 0
+    OR instr(${valueSql}, '*') > 0
+    OR ${valueSql} GLOB '*[. ]'
+    OR ${valueSql} GLOB '*[. ]/*'
+    OR ${portableReservedSegments.map(segment => `(
+      ${wrappedLowerPathSql} LIKE ${sqlText(`%/${segment}/%`)}
+      OR ${wrappedLowerPathSql} LIKE ${sqlText(`%/${segment}.%`)}
+    )`).join('\n    OR ')}
+    OR instr('/' || ${valueSql} || '/', '//') > 0
+    OR instr('/' || ${valueSql} || '/', '/./') > 0
+    OR instr('/' || ${valueSql} || '/', '/../') > 0
+    OR NOT (
+      ${valueSql} IN ('home', 'input', 'output', 'tmp', 'work')
+      OR ${valueSql} GLOB 'home/*'
+      OR ${valueSql} GLOB 'input/*'
+      OR ${valueSql} GLOB 'output/*'
+      OR ${valueSql} GLOB 'tmp/*'
+      OR ${valueSql} GLOB 'work/*'
+    )
+  )`;
+}
+
+const SHELL_RISKS_SQL = sqlList(['destructive', 'external', 'read', 'write']);
+const SHELL_RISK_FACETS_SQL = sqlList([
+  'command_substitution',
+  'detached',
+  'dynamic_command_head',
+  'environment_change',
+  'external_path',
+  'filesystem.delete',
+  'filesystem.read',
+  'filesystem.write',
+  'interactive',
+  'nested_shell',
+  'network',
+  'package_install',
+  'privilege_escalation',
+  'process_launch',
+  'redirection',
+  'system_configuration',
+  'unknown_syntax',
+]);
+const SHELL_FORBIDDEN_ENVIRONMENT_NAMES_SQL = sqlList(
+  AGENT_SHELL_FORBIDDEN_ENVIRONMENT_NAMES,
+);
+
+const SHELL_ROOT_JSON_SQL = 'NEW.prepared_action_json';
+const SHELL_AI_DESTINATION_JSON_SQL = safeJsonFieldSql(
+  SHELL_ROOT_JSON_SQL,
+  '$.aiDestination',
+  'object',
+);
+const SHELL_ASSESSMENT_JSON_SQL = safeJsonFieldSql(
+  SHELL_ROOT_JSON_SQL,
+  '$.assessment',
+  'object',
+);
+const SHELL_ASSESSMENT_FACETS_JSON_SQL = safeJsonFieldSql(
+  SHELL_ASSESSMENT_JSON_SQL,
+  '$.facets',
+  'array',
+);
+const SHELL_ASSESSMENT_OPERATIONS_JSON_SQL = safeJsonFieldSql(
+  SHELL_ASSESSMENT_JSON_SQL,
+  '$.operations',
+  'array',
+);
+const SHELL_ASSESSMENT_UNRESOLVED_JSON_SQL = safeJsonFieldSql(
+  SHELL_ASSESSMENT_JSON_SQL,
+  '$.unresolved',
+  'array',
+);
+const SHELL_CWD_JSON_SQL = safeJsonFieldSql(SHELL_ROOT_JSON_SQL, '$.cwd', 'object');
+const SHELL_DATA_SCOPE_JSON_SQL = safeJsonFieldSql(
+  SHELL_ROOT_JSON_SQL,
+  '$.dataScope',
+  'object',
+);
+const SHELL_STAGED_INPUTS_JSON_SQL = safeJsonFieldSql(
+  SHELL_DATA_SCOPE_JSON_SQL,
+  '$.stagedInputs',
+  'array',
+);
+const SHELL_ENVIRONMENT_JSON_SQL = safeJsonFieldSql(
+  SHELL_ROOT_JSON_SQL,
+  '$.environment',
+  'array',
+);
+const SHELL_PROVIDER_JSON_SQL = safeJsonFieldSql(
+  SHELL_ROOT_JSON_SQL,
+  '$.provider',
+  'object',
+);
+const SHELL_OPERATION_JSON_SQL = "CASE WHEN operation.type = 'object' THEN operation.value ELSE '{}' END";
+const SHELL_OPERATION_ARGV_JSON_SQL = safeJsonFieldSql(
+  SHELL_OPERATION_JSON_SQL,
+  '$.argvPrefix',
+  'array',
+);
+const SHELL_OPERATION_EFFECTS_JSON_SQL = safeJsonFieldSql(
+  SHELL_OPERATION_JSON_SQL,
+  '$.effects',
+  'array',
+);
+const SHELL_STAGED_INPUT_JSON_SQL =
+  "CASE WHEN staged_input.type = 'object' THEN staged_input.value ELSE '{}' END";
+const SHELL_ENVIRONMENT_ENTRY_JSON_SQL =
+  "CASE WHEN environment_entry.type = 'object' THEN environment_entry.value ELSE '{}' END";
+const SHELL_LEFT_STAGED_INPUT_JSON_SQL =
+  "CASE WHEN left_staged.type = 'object' THEN left_staged.value ELSE '{}' END";
+const SHELL_RIGHT_STAGED_INPUT_JSON_SQL =
+  "CASE WHEN right_staged.type = 'object' THEN right_staged.value ELSE '{}' END";
+const SHELL_LEFT_ENVIRONMENT_ENTRY_JSON_SQL =
+  "CASE WHEN left_environment.type = 'object' THEN left_environment.value ELSE '{}' END";
+const SHELL_RIGHT_ENVIRONMENT_ENTRY_JSON_SQL =
+  "CASE WHEN right_environment.type = 'object' THEN right_environment.value ELSE '{}' END";
+const SHELL_PREPARED_ACTION_INVALID_SQL = `
+  ${strictJsonObjectInvalidSql(SHELL_ROOT_JSON_SQL, [
+    'aiDestination',
+    'assessment',
+    'command',
+    'commandHash',
+    'cwd',
+    'dataScope',
+    'environment',
+    'kind',
+    'provider',
+    'timeoutMs',
+    'version',
+  ])}
+  OR COALESCE(json_type(${SHELL_ROOT_JSON_SQL}, '$.command'), '') <> 'text'
+  OR length(CAST(json_extract(${SHELL_ROOT_JSON_SQL}, '$.command') AS BLOB))
+    > ${AGENT_SHELL_MAX_COMMAND_BYTES}
+  OR instr(
+    CAST(json_extract(${SHELL_ROOT_JSON_SQL}, '$.command') AS BLOB),
+    X'00'
+  ) > 0
+  OR trim(
+    json_extract(${SHELL_ROOT_JSON_SQL}, '$.command'),
+    ${PREPARED_ACTION_TRIM_CHARACTERS_SQL}
+  ) = ''
+  OR COALESCE(json_type(${SHELL_ROOT_JSON_SQL}, '$.commandHash'), '') <> 'text'
+  OR ${invalidShellSha256Sql(`json_extract(${SHELL_ROOT_JSON_SQL}, '$.commandHash')`)}
+  OR COALESCE(json_type(${SHELL_ROOT_JSON_SQL}, '$.timeoutMs'), '') <> 'integer'
+  OR CAST(json_extract(${SHELL_ROOT_JSON_SQL}, '$.timeoutMs') AS INTEGER) <= 0
+  OR CAST(json_extract(${SHELL_ROOT_JSON_SQL}, '$.timeoutMs') AS INTEGER)
+    > ${AGENT_SHELL_MAX_TIMEOUT_MS}
+
+  OR COALESCE(json_type(${SHELL_ROOT_JSON_SQL}, '$.aiDestination'), '') <> 'object'
+  OR ${strictJsonObjectInvalidSql(SHELL_AI_DESTINATION_JSON_SQL, [
+    'identityHash',
+    'profileLabel',
+    'providerType',
+  ])}
+  OR COALESCE(json_type(${SHELL_AI_DESTINATION_JSON_SQL}, '$.identityHash'), '') <> 'text'
+  OR ${invalidShellVersionedIdentitySql(
+    `json_extract(${SHELL_AI_DESTINATION_JSON_SQL}, '$.identityHash')`,
+  )}
+  OR COALESCE(json_type(${SHELL_AI_DESTINATION_JSON_SQL}, '$.profileLabel'), '') <> 'text'
+  OR ${invalidCanonicalShellTextSql(
+    `json_extract(${SHELL_AI_DESTINATION_JSON_SQL}, '$.profileLabel')`,
+    512,
+  )}
+  OR COALESCE(json_type(${SHELL_AI_DESTINATION_JSON_SQL}, '$.providerType'), '') <> 'text'
+  OR ${invalidCanonicalShellTextSql(
+    `json_extract(${SHELL_AI_DESTINATION_JSON_SQL}, '$.providerType')`,
+    128,
+  )}
+
+  OR COALESCE(json_type(${SHELL_ROOT_JSON_SQL}, '$.assessment'), '') <> 'object'
+  OR ${strictJsonObjectInvalidSql(SHELL_ASSESSMENT_JSON_SQL, [
+    'facets',
+    'operations',
+    'persistentRuleEligible',
+    'risk',
+    'unresolved',
+  ])}
+  OR COALESCE(json_type(${SHELL_ASSESSMENT_JSON_SQL}, '$.facets'), '') <> 'array'
+  OR (SELECT COUNT(*) FROM json_each(${SHELL_ASSESSMENT_FACETS_JSON_SQL})) > 32
+  OR EXISTS (
+    SELECT 1
+    FROM json_each(${SHELL_ASSESSMENT_FACETS_JSON_SQL}) AS facet
+    WHERE facet.type <> 'text'
+      OR facet.value NOT IN (${SHELL_RISK_FACETS_SQL})
+  )
+  OR EXISTS (
+    SELECT 1
+    FROM json_each(${SHELL_ASSESSMENT_FACETS_JSON_SQL}) AS facet
+    GROUP BY facet.value
+    HAVING COUNT(*) > 1
+  )
+  OR COALESCE(json_type(${SHELL_ASSESSMENT_JSON_SQL}, '$.operations'), '') <> 'array'
+  OR (SELECT COUNT(*) FROM json_each(${SHELL_ASSESSMENT_OPERATIONS_JSON_SQL})) > 128
+  OR EXISTS (
+    SELECT 1
+    FROM json_each(${SHELL_ASSESSMENT_OPERATIONS_JSON_SQL}) AS operation
+    WHERE operation.type <> 'object'
+      OR ${strictJsonObjectInvalidSql(SHELL_OPERATION_JSON_SQL, [
+        'argvPrefix',
+        'effects',
+        'executable',
+      ])}
+      OR COALESCE(json_type(${SHELL_OPERATION_JSON_SQL}, '$.argvPrefix'), '') <> 'array'
+      OR (SELECT COUNT(*) FROM json_each(${SHELL_OPERATION_ARGV_JSON_SQL})) > 32
+      OR EXISTS (
+        SELECT 1
+        FROM json_each(${SHELL_OPERATION_ARGV_JSON_SQL}) AS argument
+        WHERE argument.type <> 'text'
+          OR ${invalidCanonicalShellTextSql('argument.value', 1_024)}
+      )
+      OR COALESCE(json_type(${SHELL_OPERATION_JSON_SQL}, '$.effects'), '') <> 'array'
+      OR (SELECT COUNT(*) FROM json_each(${SHELL_OPERATION_EFFECTS_JSON_SQL})) > 32
+      OR EXISTS (
+        SELECT 1
+        FROM json_each(${SHELL_OPERATION_EFFECTS_JSON_SQL}) AS effect
+        WHERE effect.type <> 'text'
+          OR effect.value NOT IN (${SHELL_RISK_FACETS_SQL})
+      )
+      OR EXISTS (
+        SELECT 1
+        FROM json_each(${SHELL_OPERATION_EFFECTS_JSON_SQL}) AS effect
+        GROUP BY effect.value
+        HAVING COUNT(*) > 1
+      )
+      OR COALESCE(json_type(${SHELL_OPERATION_JSON_SQL}, '$.executable'), '') <> 'text'
+      OR ${invalidCanonicalShellTextSql(
+        `json_extract(${SHELL_OPERATION_JSON_SQL}, '$.executable')`,
+        1_024,
+      )}
+  )
+  OR COALESCE(
+    json_type(${SHELL_ASSESSMENT_JSON_SQL}, '$.persistentRuleEligible'),
+    ''
+  ) NOT IN ('true', 'false')
+  OR COALESCE(json_type(${SHELL_ASSESSMENT_JSON_SQL}, '$.risk'), '') <> 'text'
+  OR json_extract(${SHELL_ASSESSMENT_JSON_SQL}, '$.risk') NOT IN (${SHELL_RISKS_SQL})
+  OR COALESCE(json_type(${SHELL_ASSESSMENT_JSON_SQL}, '$.unresolved'), '') <> 'array'
+  OR (SELECT COUNT(*) FROM json_each(${SHELL_ASSESSMENT_UNRESOLVED_JSON_SQL})) > 64
+  OR EXISTS (
+    SELECT 1
+    FROM json_each(${SHELL_ASSESSMENT_UNRESOLVED_JSON_SQL}) AS unresolved
+    WHERE unresolved.type <> 'text'
+      OR ${invalidCanonicalShellTextSql('unresolved.value', 512)}
+  )
+
+  OR COALESCE(json_type(${SHELL_ROOT_JSON_SQL}, '$.cwd'), '') <> 'object'
+  OR ${strictJsonObjectInvalidSql(SHELL_CWD_JSON_SQL, ['kind', 'path'])}
+  OR COALESCE(json_type(${SHELL_CWD_JSON_SQL}, '$.kind'), '') <> 'text'
+  OR json_extract(${SHELL_CWD_JSON_SQL}, '$.kind') <> 'run-workspace'
+  OR COALESCE(json_type(${SHELL_CWD_JSON_SQL}, '$.path'), '') <> 'text'
+  OR ${invalidShellLogicalPathSql(`json_extract(${SHELL_CWD_JSON_SQL}, '$.path')`)}
+
+  OR COALESCE(json_type(${SHELL_ROOT_JSON_SQL}, '$.dataScope'), '') <> 'object'
+  OR ${strictJsonObjectInvalidSql(SHELL_DATA_SCOPE_JSON_SQL, [
+    'stagedInputs',
+    'unresolvedWorkspaceRead',
+  ])}
+  OR COALESCE(json_type(${SHELL_DATA_SCOPE_JSON_SQL}, '$.stagedInputs'), '') <> 'array'
+  OR (SELECT COUNT(*) FROM json_each(${SHELL_STAGED_INPUTS_JSON_SQL})) > 256
+  OR EXISTS (
+    SELECT 1
+    FROM json_each(${SHELL_STAGED_INPUTS_JSON_SQL}) AS staged_input
+    WHERE staged_input.type <> 'object'
+      OR ${strictJsonObjectInvalidSql(SHELL_STAGED_INPUT_JSON_SQL, [
+        'contentHash',
+        'displayName',
+        'logicalPath',
+        'sourceKind',
+      ])}
+      OR COALESCE(json_type(${SHELL_STAGED_INPUT_JSON_SQL}, '$.contentHash'), '') <> 'text'
+      OR ${invalidShellSha256Sql(
+        `json_extract(${SHELL_STAGED_INPUT_JSON_SQL}, '$.contentHash')`,
+      )}
+      OR COALESCE(json_type(${SHELL_STAGED_INPUT_JSON_SQL}, '$.displayName'), '') <> 'text'
+      OR ${invalidCanonicalShellTextSql(
+        `json_extract(${SHELL_STAGED_INPUT_JSON_SQL}, '$.displayName')`,
+        1_024,
+      )}
+      OR COALESCE(json_type(${SHELL_STAGED_INPUT_JSON_SQL}, '$.logicalPath'), '') <> 'text'
+      OR ${invalidShellLogicalPathSql(
+        `json_extract(${SHELL_STAGED_INPUT_JSON_SQL}, '$.logicalPath')`,
+      )}
+      OR COALESCE(json_type(${SHELL_STAGED_INPUT_JSON_SQL}, '$.sourceKind'), '') <> 'text'
+      OR json_extract(${SHELL_STAGED_INPUT_JSON_SQL}, '$.sourceKind')
+        NOT IN ('library', 'local-picker')
+  )
+  OR EXISTS (
+    SELECT 1
+    FROM json_each(${SHELL_STAGED_INPUTS_JSON_SQL}) AS left_staged
+    JOIN json_each(${SHELL_STAGED_INPUTS_JSON_SQL}) AS right_staged
+      ON CAST(left_staged.key AS INTEGER) < CAST(right_staged.key AS INTEGER)
+    WHERE json_extract(${SHELL_LEFT_STAGED_INPUT_JSON_SQL}, '$.logicalPath')
+      = json_extract(${SHELL_RIGHT_STAGED_INPUT_JSON_SQL}, '$.logicalPath')
+  )
+  OR COALESCE(
+    json_type(${SHELL_DATA_SCOPE_JSON_SQL}, '$.unresolvedWorkspaceRead'),
+    ''
+  ) NOT IN ('true', 'false')
+
+  OR COALESCE(json_type(${SHELL_ROOT_JSON_SQL}, '$.environment'), '') <> 'array'
+  OR (SELECT COUNT(*) FROM json_each(${SHELL_ENVIRONMENT_JSON_SQL}))
+    > ${AGENT_SHELL_MAX_ENVIRONMENT_ENTRIES}
+  OR EXISTS (
+    SELECT 1
+    FROM json_each(${SHELL_ENVIRONMENT_JSON_SQL}) AS environment_entry
+    WHERE environment_entry.type <> 'object'
+      OR ${strictJsonObjectInvalidSql(SHELL_ENVIRONMENT_ENTRY_JSON_SQL, ['name', 'value'])}
+      OR COALESCE(json_type(${SHELL_ENVIRONMENT_ENTRY_JSON_SQL}, '$.name'), '') <> 'text'
+      OR length(json_extract(${SHELL_ENVIRONMENT_ENTRY_JSON_SQL}, '$.name')) = 0
+      OR length(json_extract(${SHELL_ENVIRONMENT_ENTRY_JSON_SQL}, '$.name')) > 64
+      OR substr(json_extract(${SHELL_ENVIRONMENT_ENTRY_JSON_SQL}, '$.name'), 1, 1)
+        NOT GLOB '[A-Za-z_]'
+      OR json_extract(${SHELL_ENVIRONMENT_ENTRY_JSON_SQL}, '$.name')
+        GLOB '*[^A-Za-z0-9_]*'
+      OR upper(json_extract(${SHELL_ENVIRONMENT_ENTRY_JSON_SQL}, '$.name'))
+        IN (${SHELL_FORBIDDEN_ENVIRONMENT_NAMES_SQL})
+      OR ${AGENT_SHELL_FORBIDDEN_ENVIRONMENT_PREFIXES.map(prefix => `substr(
+        upper(json_extract(${SHELL_ENVIRONMENT_ENTRY_JSON_SQL}, '$.name')),
+        1,
+        ${prefix.length}
+      ) = ${sqlText(prefix)}`).join('\n      OR ')}
+      OR ${AGENT_SHELL_SENSITIVE_ENVIRONMENT_NAME_PARTS.map(part => `instr(
+        upper(json_extract(${SHELL_ENVIRONMENT_ENTRY_JSON_SQL}, '$.name')),
+        ${sqlText(part)}
+      ) > 0`).join('\n      OR ')}
+      OR COALESCE(json_type(${SHELL_ENVIRONMENT_ENTRY_JSON_SQL}, '$.value'), '') <> 'text'
+      OR length(CAST(
+        json_extract(${SHELL_ENVIRONMENT_ENTRY_JSON_SQL}, '$.value') AS BLOB
+      )) > 2048
+      OR instr(
+        CAST(json_extract(${SHELL_ENVIRONMENT_ENTRY_JSON_SQL}, '$.value') AS BLOB),
+        X'00'
+      ) > 0
+  )
+  OR EXISTS (
+    SELECT 1
+    FROM json_each(${SHELL_ENVIRONMENT_JSON_SQL}) AS left_environment
+    JOIN json_each(${SHELL_ENVIRONMENT_JSON_SQL}) AS right_environment
+      ON CAST(left_environment.key AS INTEGER) < CAST(right_environment.key AS INTEGER)
+    WHERE upper(json_extract(${SHELL_LEFT_ENVIRONMENT_ENTRY_JSON_SQL}, '$.name'))
+      = upper(json_extract(${SHELL_RIGHT_ENVIRONMENT_ENTRY_JSON_SQL}, '$.name'))
+  )
+  OR COALESCE((
+    SELECT SUM(
+      length(CAST(json_extract(${SHELL_ENVIRONMENT_ENTRY_JSON_SQL}, '$.name') AS BLOB))
+      + length(CAST(json_extract(${SHELL_ENVIRONMENT_ENTRY_JSON_SQL}, '$.value') AS BLOB))
+    )
+    FROM json_each(${SHELL_ENVIRONMENT_JSON_SQL}) AS environment_entry
+  ), 0) > ${AGENT_SHELL_MAX_ENVIRONMENT_BYTES}
+
+  OR COALESCE(json_type(${SHELL_ROOT_JSON_SQL}, '$.provider'), '') <> 'object'
+  OR ${strictJsonObjectInvalidSql(SHELL_PROVIDER_JSON_SQL, ['dialect', 'id', 'version'])}
+  OR COALESCE(json_type(${SHELL_PROVIDER_JSON_SQL}, '$.dialect'), '') <> 'text'
+  OR json_extract(${SHELL_PROVIDER_JSON_SQL}, '$.dialect')
+    NOT IN ('bash', 'powershell', 'zsh')
+  OR COALESCE(json_type(${SHELL_PROVIDER_JSON_SQL}, '$.id'), '') <> 'text'
+  OR ${invalidShellIdentifierSql(`json_extract(${SHELL_PROVIDER_JSON_SQL}, '$.id')`)}
+  OR COALESCE(json_type(${SHELL_PROVIDER_JSON_SQL}, '$.version'), '') <> 'text'
+  OR ${invalidCanonicalShellTextSql(
+    `json_extract(${SHELL_PROVIDER_JSON_SQL}, '$.version')`,
+    128,
+  )}
+`;
 const TOOL_APPROVAL_COLUMNS = [
   ['permission_behavior', "TEXT NOT NULL DEFAULT 'allow'"],
   ['approval_id', 'TEXT'],
@@ -707,7 +1185,7 @@ function restoreToolPreparation(
   if (!/^[a-f0-9]{64}$/u.test(row.prepared_snapshot_hash)) return undefined;
   try {
     return {
-      action: normalizeAgentPreparedActionPublic(JSON.parse(row.prepared_action_json)),
+      action: normalizeAgentPreparedActionPublicForMain(JSON.parse(row.prepared_action_json)),
       preparedActionId: row.prepared_action_id,
       snapshotHash: row.prepared_snapshot_hash,
     };
@@ -911,12 +1389,19 @@ async function reconcileStoredPreparedActions(database: sqlite3.Database): Promi
         ? parsed as Record<string, unknown>
         : null;
       if (source) {
-        const fields = await all<StoredPreparedActionField>(
+        const duplicateFields = await all<StoredPreparedActionField>(
           database,
-          'SELECT key FROM json_each(?)',
+          `
+            SELECT CAST(key AS TEXT) AS key
+            FROM json_tree(?)
+            WHERE key IS NOT NULL
+            GROUP BY parent, key
+            HAVING COUNT(*) > 1
+            LIMIT 1
+          `,
           [row.prepared_action_json],
         );
-        if (new Set(fields.map(field => field.key)).size !== fields.length) {
+        if (duplicateFields.length > 0) {
           throw new Error('prepared action contains duplicate fields');
         }
       }
@@ -934,7 +1419,7 @@ async function reconcileStoredPreparedActions(database: sqlite3.Database): Promi
             version: AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_VERSION,
           }
         : parsed;
-      const normalized = normalizeAgentPreparedActionPublic(candidate);
+      const normalized = normalizeAgentPreparedActionPublicForMain(candidate);
       await run(database, `
         UPDATE agent_tool_runs
         SET prepared_action_json = ?
@@ -980,75 +1465,92 @@ async function ensureToolPreparationTriggers(
         OR json_extract(NEW.prepared_action_json, '$.kind') <> NEW.tool_name
         OR COALESCE(json_type(NEW.prepared_action_json, '$.version'), '') <> 'integer'
         OR NOT (${PREPARED_ACTION_SUPPORTED_IDENTITY_SQL})
-        OR COALESCE(json_type(NEW.prepared_action_json, '$.libraryId'), '') <> 'integer'
-        OR CAST(json_extract(NEW.prepared_action_json, '$.libraryId') AS INTEGER) <= 0
-        OR CAST(json_extract(NEW.prepared_action_json, '$.libraryId') AS INTEGER)
-          > ${MAX_SAFE_SQLITE_AGENT_ID}
-        OR COALESCE(json_type(NEW.prepared_action_json, '$.sourceNodeId'), '') <> 'integer'
-        OR CAST(json_extract(NEW.prepared_action_json, '$.sourceNodeId') AS INTEGER) <= 0
-        OR CAST(json_extract(NEW.prepared_action_json, '$.sourceNodeId') AS INTEGER)
-          > ${MAX_SAFE_SQLITE_AGENT_ID}
-        OR COALESCE(json_type(NEW.prepared_action_json, '$.destination'), '') <> 'text'
-        OR json_extract(NEW.prepared_action_json, '$.destination') NOT IN ('library', 'local')
-        OR COALESCE(json_type(NEW.prepared_action_json, '$.fallbackPolicy'), '') <> 'text'
-        OR json_extract(NEW.prepared_action_json, '$.fallbackPolicy') NOT IN ('prompt_local', 'none')
         OR (
-          json_extract(NEW.prepared_action_json, '$.destination') = 'local'
-          AND json_extract(NEW.prepared_action_json, '$.fallbackPolicy') <> 'none'
-        )
-        OR COALESCE(json_type(NEW.prepared_action_json, '$.conflictPolicy'), '') <> 'text'
-        OR json_extract(NEW.prepared_action_json, '$.conflictPolicy')
-          NOT IN ('auto_rename', 'error', 'replace')
-        OR COALESCE(json_type(NEW.prepared_action_json, '$.outputFileName'), '') <> 'text'
-        OR trim(json_extract(NEW.prepared_action_json, '$.outputFileName')) = ''
-        OR json_extract(NEW.prepared_action_json, '$.outputFileName') <> trim(
-          json_extract(NEW.prepared_action_json, '$.outputFileName'),
-          ${PREPARED_ACTION_TRIM_CHARACTERS_SQL}
-        )
-        OR length(json_extract(NEW.prepared_action_json, '$.outputFileName')) > 255
-        OR json_extract(NEW.prepared_action_json, '$.outputFileName') IN ('.', '..')
-        OR instr(json_extract(NEW.prepared_action_json, '$.outputFileName'), '/') > 0
-        OR instr(json_extract(NEW.prepared_action_json, '$.outputFileName'), '\\') > 0
-        OR ${PREPARED_ACTION_OUTPUT_FILE_NAME_CONTROL_SQL}
-        OR COALESCE(json_type(NEW.prepared_action_json, '$.outputFormat'), '') <> 'text'
-        OR json_extract(NEW.prepared_action_json, '$.outputFormat') NOT IN ('m4a', 'mp3', 'wav')
-        OR COALESCE(json_type(NEW.prepared_action_json, '$.targetLabel'), '') <> 'text'
-        OR trim(json_extract(NEW.prepared_action_json, '$.targetLabel')) = ''
-        OR json_extract(NEW.prepared_action_json, '$.targetLabel') <> trim(
-          json_extract(NEW.prepared_action_json, '$.targetLabel'),
-          ${PREPARED_ACTION_TRIM_CHARACTERS_SQL}
-        )
-        OR length(json_extract(NEW.prepared_action_json, '$.targetLabel')) > 500
-        OR ${PREPARED_ACTION_TARGET_LABEL_CONTROL_SQL}
-        OR (
-          json_extract(NEW.prepared_action_json, '$.destination') = 'library'
+          json_extract(NEW.prepared_action_json, '$.kind')
+            = ${sqlText(AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_KIND)}
+          AND CAST(json_extract(NEW.prepared_action_json, '$.version') AS INTEGER)
+            = ${AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_VERSION}
           AND (
-            COALESCE(json_type(NEW.prepared_action_json, '$.parentId'), '') <> 'integer'
-            OR CAST(json_extract(NEW.prepared_action_json, '$.parentId') AS INTEGER) <= 0
-            OR CAST(json_extract(NEW.prepared_action_json, '$.parentId') AS INTEGER)
+            COALESCE(json_type(NEW.prepared_action_json, '$.libraryId'), '') <> 'integer'
+            OR CAST(json_extract(NEW.prepared_action_json, '$.libraryId') AS INTEGER) <= 0
+            OR CAST(json_extract(NEW.prepared_action_json, '$.libraryId') AS INTEGER)
               > ${MAX_SAFE_SQLITE_AGENT_ID}
+            OR COALESCE(json_type(NEW.prepared_action_json, '$.sourceNodeId'), '') <> 'integer'
+            OR CAST(json_extract(NEW.prepared_action_json, '$.sourceNodeId') AS INTEGER) <= 0
+            OR CAST(json_extract(NEW.prepared_action_json, '$.sourceNodeId') AS INTEGER)
+              > ${MAX_SAFE_SQLITE_AGENT_ID}
+            OR COALESCE(json_type(NEW.prepared_action_json, '$.destination'), '') <> 'text'
+            OR json_extract(NEW.prepared_action_json, '$.destination')
+              NOT IN ('library', 'local')
+            OR COALESCE(json_type(NEW.prepared_action_json, '$.fallbackPolicy'), '') <> 'text'
+            OR json_extract(NEW.prepared_action_json, '$.fallbackPolicy')
+              NOT IN ('prompt_local', 'none')
+            OR (
+              json_extract(NEW.prepared_action_json, '$.destination') = 'local'
+              AND json_extract(NEW.prepared_action_json, '$.fallbackPolicy') <> 'none'
+            )
+            OR COALESCE(json_type(NEW.prepared_action_json, '$.conflictPolicy'), '') <> 'text'
+            OR json_extract(NEW.prepared_action_json, '$.conflictPolicy')
+              NOT IN ('auto_rename', 'error', 'replace')
+            OR COALESCE(json_type(NEW.prepared_action_json, '$.outputFileName'), '') <> 'text'
+            OR trim(json_extract(NEW.prepared_action_json, '$.outputFileName')) = ''
+            OR json_extract(NEW.prepared_action_json, '$.outputFileName') <> trim(
+              json_extract(NEW.prepared_action_json, '$.outputFileName'),
+              ${PREPARED_ACTION_TRIM_CHARACTERS_SQL}
+            )
+            OR length(json_extract(NEW.prepared_action_json, '$.outputFileName')) > 255
+            OR json_extract(NEW.prepared_action_json, '$.outputFileName') IN ('.', '..')
+            OR instr(json_extract(NEW.prepared_action_json, '$.outputFileName'), '/') > 0
+            OR instr(json_extract(NEW.prepared_action_json, '$.outputFileName'), '\\') > 0
+            OR ${PREPARED_ACTION_OUTPUT_FILE_NAME_CONTROL_SQL}
+            OR COALESCE(json_type(NEW.prepared_action_json, '$.outputFormat'), '') <> 'text'
+            OR json_extract(NEW.prepared_action_json, '$.outputFormat')
+              NOT IN ('m4a', 'mp3', 'wav')
+            OR COALESCE(json_type(NEW.prepared_action_json, '$.targetLabel'), '') <> 'text'
+            OR trim(json_extract(NEW.prepared_action_json, '$.targetLabel')) = ''
+            OR json_extract(NEW.prepared_action_json, '$.targetLabel') <> trim(
+              json_extract(NEW.prepared_action_json, '$.targetLabel'),
+              ${PREPARED_ACTION_TRIM_CHARACTERS_SQL}
+            )
+            OR length(json_extract(NEW.prepared_action_json, '$.targetLabel')) > 500
+            OR ${PREPARED_ACTION_TARGET_LABEL_CONTROL_SQL}
+            OR (
+              json_extract(NEW.prepared_action_json, '$.destination') = 'library'
+              AND (
+                COALESCE(json_type(NEW.prepared_action_json, '$.parentId'), '') <> 'integer'
+                OR CAST(json_extract(NEW.prepared_action_json, '$.parentId') AS INTEGER) <= 0
+                OR CAST(json_extract(NEW.prepared_action_json, '$.parentId') AS INTEGER)
+                  > ${MAX_SAFE_SQLITE_AGENT_ID}
+              )
+            )
+            OR (
+              json_extract(NEW.prepared_action_json, '$.destination') = 'local'
+              AND json_type(NEW.prepared_action_json, '$.parentId') IS NOT NULL
+            )
+            OR EXISTS (
+              SELECT 1
+              FROM json_each(NEW.prepared_action_json) AS field
+              WHERE field.key NOT IN (
+                'conflictPolicy', 'destination', 'fallbackPolicy', 'kind', 'libraryId',
+                'outputFileName', 'outputFormat', 'parentId', 'sourceNodeId', 'targetLabel',
+                'version'
+              )
+            )
+            OR (
+              SELECT COUNT(*)
+              FROM json_each(NEW.prepared_action_json)
+            ) <> CASE
+              WHEN json_extract(NEW.prepared_action_json, '$.destination') = 'library' THEN 11
+              ELSE 10
+            END
           )
         )
         OR (
-          json_extract(NEW.prepared_action_json, '$.destination') = 'local'
-          AND json_type(NEW.prepared_action_json, '$.parentId') IS NOT NULL
+          json_extract(NEW.prepared_action_json, '$.kind') = ${sqlText(AGENT_SHELL_RUN_TOOL_NAME)}
+          AND CAST(json_extract(NEW.prepared_action_json, '$.version') AS INTEGER)
+            = ${AGENT_SHELL_PREPARED_ACTION_VERSION}
+          AND (${SHELL_PREPARED_ACTION_INVALID_SQL})
         )
-        OR EXISTS (
-          SELECT 1
-          FROM json_each(NEW.prepared_action_json) AS field
-          WHERE field.key NOT IN (
-            'conflictPolicy', 'destination', 'fallbackPolicy', 'kind', 'libraryId',
-            'outputFileName', 'outputFormat', 'parentId', 'sourceNodeId', 'targetLabel',
-            'version'
-          )
-        )
-        OR (
-          SELECT COUNT(*)
-          FROM json_each(NEW.prepared_action_json)
-        ) <> CASE
-          WHEN json_extract(NEW.prepared_action_json, '$.destination') = 'library' THEN 11
-          ELSE 10
-        END
       )
     THEN RAISE(ABORT, 'Agent Tool prepared action is invalid') END;
   `;
@@ -2173,7 +2675,7 @@ export async function createSQLiteAgentSessionStore(
 
     async completeToolPreparation(input) {
       const awaitingApproval = input.permissionBehavior === 'ask';
-      const preparedAction = normalizeAgentPreparedActionPublic(input.action);
+      const preparedAction = normalizeAgentPreparedActionPublicForMain(input.action);
       const result = await run(database, `
         UPDATE agent_tool_runs
         SET
@@ -2600,7 +3102,7 @@ export async function createSQLiteAgentSessionStore(
     },
 
     async replacePendingToolApproval(input) {
-      const preparedAction = normalizeAgentPreparedActionPublic(input.action);
+      const preparedAction = normalizeAgentPreparedActionPublicForMain(input.action);
       const result = await run(database, `
         UPDATE agent_tool_runs
         SET
@@ -2650,7 +3152,7 @@ export async function createSQLiteAgentSessionStore(
       const normalizedPreparation = preparation
         ? {
             ...preparation,
-            action: normalizeAgentPreparedActionPublic(preparation.action),
+            action: normalizeAgentPreparedActionPublicForMain(preparation.action),
           }
         : undefined;
       const result = normalizedPreparation

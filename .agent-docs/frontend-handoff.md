@@ -29,7 +29,7 @@
    - `docs/embedded-browser-architecture.md`
    - `docs/library-detail-workspace.md`
    - `docs/built-in-agent-architecture.md`（Agent 执行、持久化、IPC 和安全事实）
-   - `docs/built-in-agent-shell-architecture.md`（Agent raw Shell 的目标权限、平台、工作区和日志契约；当前尚未实现）
+   - `docs/built-in-agent-shell-architecture.md`（Agent raw Shell 的目标权限、平台、工作区和日志契约；非执行准备基座已落地，可执行 Tool 尚未注册）
    - `docs/built-in-agent-ui-contract.md`（Agent 工作区、状态投影和受控交互）
    - `docs/file-explorer-file-viewer-boundary.md`
    - `docs/built-in-type-and-archive-mode.md`

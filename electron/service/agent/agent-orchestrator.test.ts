@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type {
   AgentMediaExtractAudioPreparedActionPublicV1,
+  AgentPreparedActionPublic,
   AgentToolApprovalSnapshot,
 } from '@/shared/agent/agent.types';
 
@@ -29,7 +30,10 @@ import {
 } from './agent-context-projection';
 import { buildAgentSystemPrompt } from './agent-prompt-assembler';
 import { agentPlanControlTool } from './agent-plan-model';
-import { createAgentRunCapabilitySnapshot } from './agent-run-capability-snapshot';
+import {
+  createAgentRunCapabilitySnapshot,
+  type AgentRunCapabilitySnapshot,
+} from './agent-run-capability-snapshot';
 import { createAgentCapabilitySnapshot } from './capabilities/agent-capability-registry';
 import { createSQLiteAgentSessionStore, type AgentSessionStore } from './agent-session-store';
 import {
@@ -1101,7 +1105,7 @@ describe('Agent orchestrator', () => {
   it('rejects tampered prepared action discriminators and extra fields before approval', async () => {
     const cases = [
       {
-        error: '类型或版本不受支持',
+        error: '包含未知字段',
         mutate: (action: AgentMediaExtractAudioPreparedActionPublicV1) => ({
           ...action,
           kind: 'shell.run',
@@ -1126,6 +1130,9 @@ describe('Agent orchestrator', () => {
     for (const testCase of cases) {
       const { approval, orchestrator, started, webContents } = await startPreparedAudioApproval();
       if (!approval.preparation) throw new Error('expected prepared approval');
+      if (approval.preparation.action.kind !== 'media.extractAudio') {
+        throw new Error('expected media prepared action');
+      }
       await expect(orchestrator.resolveToolApproval(webContents.id, {
         approvalId: approval.approvalId,
         approved: true,
@@ -1802,11 +1809,14 @@ describe('Agent orchestrator', () => {
   it('re-prepares an approved main Tool and keeps its private binding out of persistence and IPC', async () => {
     const prepareMain = vi.fn(async (
       _input: unknown,
-      requestedAction: AgentMediaExtractAudioPreparedActionPublicV1 | undefined,
+      requestedAction: AgentPreparedActionPublic | undefined,
       _context: AgentToolMainPreparationContext,
     ) => {
       void _context;
       const publicAction = requestedAction || mediaPreparedAction();
+      if (publicAction.kind !== 'media.extractAudio') {
+        throw new Error('expected media prepared action');
+      }
       return {
         binding: {
           privateMarker: `main-only:${publicAction.outputFileName}`,
@@ -1889,11 +1899,13 @@ describe('Agent orchestrator', () => {
       const initialPreparationContext = prepareMain.mock.calls[0]?.[2];
       expect(Object.keys(initialPreparationContext || {}).sort()).toEqual([
         'activeSkillId',
+        'aiDestination',
         'appContext',
         'ownerScope',
         'ownerWebContentsId',
         'perception',
         'preparationIdentity',
+        'runCapabilitySnapshot',
         'signal',
       ]);
       expect(initialPreparationContext?.preparationIdentity).toMatchObject({
@@ -1911,9 +1923,18 @@ describe('Agent orchestrator', () => {
         toolRegistrationId: expect.any(String),
         toolRunId: expect.any(String),
       });
+      expect(initialPreparationContext?.runCapabilitySnapshot.identity)
+        .toBe(initialPreparationContext?.preparationIdentity.runCapabilityIdentity);
+      expect(initialPreparationContext?.aiDestination).toMatchObject({
+        configurationIdentity: expect.stringMatching(/^v1:[a-f0-9]{64}$/u),
+        identity: initialPreparationContext?.preparationIdentity.aiDestinationIdentity,
+        model: 'test-model',
+        profileId: 'profile-1',
+        profileLabel: 'profile-1',
+        providerType: 'openai',
+      });
       expect(initialPreparationContext).not.toHaveProperty('onProgress');
       expect(initialPreparationContext).not.toHaveProperty('requestInteraction');
-      expect(initialPreparationContext).not.toHaveProperty('runCapabilitySnapshot');
       expect(initialPreparationContext).not.toHaveProperty('saveMemoryProposal');
 
       expect(webContents.send.mock.calls.map(call => call[1]?.type))
@@ -2027,7 +2048,7 @@ describe('Agent orchestrator', () => {
     let preparationRound = 0;
     const prepareMain = vi.fn(async (
       _input: unknown,
-      _requestedAction: AgentMediaExtractAudioPreparedActionPublicV1 | undefined,
+      _requestedAction: AgentPreparedActionPublic | undefined,
       _context: AgentToolMainPreparationContext,
     ) => {
       void _input;
@@ -2151,7 +2172,7 @@ describe('Agent orchestrator', () => {
   it('keeps the visible approval retryable when the stable approval CAS fails', async () => {
     const prepareMain = vi.fn(async (
       _input: unknown,
-      _requestedAction: AgentMediaExtractAudioPreparedActionPublicV1 | undefined,
+      _requestedAction: AgentPreparedActionPublic | undefined,
       _context: AgentToolMainPreparationContext,
     ) => {
       void _input;
@@ -2268,7 +2289,7 @@ describe('Agent orchestrator', () => {
   it('executes the latest main capability when the approved CAS commits before a Run update fails', async () => {
     const prepareMain = vi.fn(async (
       _input: unknown,
-      _requestedAction: AgentMediaExtractAudioPreparedActionPublicV1 | undefined,
+      _requestedAction: AgentPreparedActionPublic | undefined,
       _context: AgentToolMainPreparationContext,
     ) => {
       void _input;
@@ -2394,7 +2415,7 @@ describe('Agent orchestrator', () => {
     let preparationRound = 0;
     const prepareMain = vi.fn(async (
       _input: unknown,
-      _requestedAction: AgentMediaExtractAudioPreparedActionPublicV1 | undefined,
+      _requestedAction: AgentPreparedActionPublic | undefined,
       _context: AgentToolMainPreparationContext,
     ) => {
       void _input;
@@ -2602,6 +2623,7 @@ describe('Agent orchestrator', () => {
   });
 
   it('executes an automatically allowed main prepared Tool without renderer coordination', async () => {
+    let preparationCapabilitySnapshot: AgentRunCapabilitySnapshot | undefined;
     const execute = vi.fn(async (
       toolInput: unknown,
       toolContext: Parameters<NonNullable<AgentTool['execute']>>[1],
@@ -2615,11 +2637,16 @@ describe('Agent orchestrator', () => {
       execute,
       inputSchema: { additionalProperties: false, type: 'object' },
       name: 'media.extractAudio',
-      prepareMain: async () => ({
-        binding: { privateMarker: 'allowed-main-only' },
-        decision: { behavior: 'allow', risk: 'write' },
-        publicAction: mediaPreparedAction(),
-      }),
+      prepareMain: async (_input, _requestedAction, context) => {
+        preparationCapabilitySnapshot = context.runCapabilitySnapshot;
+        expect(context.runCapabilitySnapshot.identity)
+          .toBe(context.preparationIdentity.runCapabilityIdentity);
+        return {
+          binding: { privateMarker: 'allowed-main-only' },
+          decision: { behavior: 'allow', risk: 'write' },
+          publicAction: mediaPreparedAction(),
+        };
+      },
       risk: 'write',
     };
     const testRegistry = createAgentToolRegistry([
@@ -2651,6 +2678,9 @@ describe('Agent orchestrator', () => {
       });
 
       expect(execute).toHaveBeenCalledTimes(1);
+      expect(preparationCapabilitySnapshot).toBeDefined();
+      expect(execute.mock.calls[0]?.[1].runCapabilitySnapshot)
+        .toBe(preparationCapabilitySnapshot);
       expect(execute.mock.calls[0]?.[1]).toMatchObject({
         preparation: {
           binding: { privateMarker: 'allowed-main-only' },
