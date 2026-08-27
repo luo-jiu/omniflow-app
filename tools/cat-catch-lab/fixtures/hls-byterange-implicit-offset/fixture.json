@@ -1,0 +1,14 @@
+{
+  "fixtureId": "hls-byterange-implicit-offset",
+  "capabilityIds": [
+    "hls.parser-planner"
+  ],
+  "upstreamCommit": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
+  "status": "active",
+  "input": "playlist.m3u8",
+  "expected": "expected.json",
+  "testRefs": [
+    "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.parser-core",
+    "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.byterange-map-key-discontinuity"
+  ]
+}

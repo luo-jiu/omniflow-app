@@ -767,15 +767,18 @@
         "electron/service/embedded-browser/cat-catch-port/hls/parser.ts#parseHlsManifest"
       ],
       "relationToUpstream": "semantic-equivalent",
-      "syncState": "pending",
-      "syncedThrough": null,
+      "syncState": "ported-unverified",
+      "syncedThrough": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
       "plannedTestIds": [
         "hls.parser-core",
         "hls.byterange-map-key-discontinuity"
       ],
-      "testRefs": [],
+      "testRefs": [
+        "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.parser-core",
+        "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.byterange-map-key-discontinuity"
+      ],
       "acceptedDifferences": [],
-      "notes": "The renderer currently owns parser/planner semantics and sends a complete plan to main; hidden BYTERANGE offsets and the complete upstream behavior/dependency set remain unverified. Vendor provenance blocker: the bundled jQuery banner reports 4.0.0 while lib/third-party-libraries.md declares 3.7.1."
+      "notes": "The pure Cat Catch parser now owns the manifest parse path behind the renderer compatibility facade and resolves omitted BYTERANGE offsets per resource, matching hls.js Fragment.setByteRange. The download-plan projection and the broader upstream parser/dependency behavior remain unverified. Vendor provenance blocker: the bundled jQuery banner reports 4.0.0 while lib/third-party-libraries.md declares 3.7.1."
     },
     {
       "id": "hls.segment-pipeline",

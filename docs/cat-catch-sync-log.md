@@ -311,6 +311,20 @@
 - legacy cleanup: 无；旧 live controller Map、renderer DTO 和未捕获 fallback 继续保留。
 - validation: TypeScript、定向 lint、5 个相关 Vitest 文件 27/27、同步校验 16/16、目标文件 `git diff --check` 通过；未运行会覆盖其他 Agent `dist-electron/**` 的 build，也未做真实页面手工验证。
 
+## 2026-08-27: same target (HLS parser vertical slice)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`; 游标不移动。
+- reviewedThrough / portedThrough: 均保持 `null`；本切片只完成纯 HLS manifest parser 的第一段行为迁移，未完成 hls-engine cutover。
+- change groups: `behavioral`（`EXT-X-BYTERANGE` 隐式 offset 继承）与 `platform-adaptation`（renderer 模型通过兼容 facade 调用纯 port）。
+- affected capability IDs: `hls.parser-planner` 改为 `ported-unverified`，`syncedThrough` 记录到 migration target；所有 unit 仍为 0 cutover。
+- fixtures/tests: 新增 active fixture `hls-byterange-implicit-offset`，覆盖 parser core、map/key/discontinuity 和同一资源省略 offset 的连续 range。
+- accepted difference: 仍保留现有 OmniFlow manifest/download-plan DTO；仅把 manifest parse owner 移到纯 port，尚未迁移 hls.js 全部 parser 事件、cache fallback、伪装分片和 track merge。
+- excluded changes and reasons: 不在本切片接入 task/ffmpeg/filesystem，也不删除 renderer plan builder 或旧 downloader；这些需要后续 pipeline/output 证据。
+- unresolved gaps: HLS parser 完整标签语义、cache fallback/预处理、direct/live/track nested authority、统一 task/cleanup 和 production-equivalent smoke。
+- runtime changes: `electron/service/embedded-browser/cat-catch-port/hls/parser.ts#parseHlsManifest` 成为 parse path owner；`parseEmbeddedBrowserHlsManifest` 仅保留 renderer 兼容 facade。
+- legacy cleanup: 无；`parseEmbeddedBrowserHlsManifest` 与 download-plan builder 在 hls-engine cutover 前继续保留为兼容入口。
+- validation: parser fixture 2/2、HLS 相关 Vitest 3/3、TypeScript、定向 lint、`cat-catch:validate` 和同步校验 16/16 通过；未运行会覆盖其他 Agent `dist-electron/**` 的 build，也未做真实页面验证。
+
 ## Template
 
 ```markdown
