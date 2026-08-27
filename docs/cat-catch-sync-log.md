@@ -507,6 +507,20 @@
 - legacy cleanup: 新增 `hls-session-owner.ts#activeTasks` 的 `omniflow-integration / retain-or-adapt` 事实；6 个现有 ffmpeg 入口仍保留 `remove-after-cutover`，没有提前删除旧 output owner。
 - validation: 完整 HLS Vitest 29/29、仓库级 lint、TypeScript、`cat-catch:validate`、同步校验 16/16 和 scoped diff check 通过；本切片未重复运行紧邻上一提交已完成的全量 Vitest，完整 build 仍未运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`。
 
+## 2026-08-27: same target (real HLS container output)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动。
+- reviewedThrough / portedThrough: 均保持 `null`；本步只补真实二进制输出证据，仍未完成 hls-engine 或 output-integration cutover。
+- change groups: `verification`（生产 manifest ffmpeg wrapper 的真实容器与音轨交付检查）。
+- affected capability IDs: `hls.segment-pipeline`、`output.ffmpeg-process-owner` 均保持 `porting`。
+- fixtures/tests: `embeddedBrowserHlsRealOutput.test.ts#hls.real-ffmpeg-ffprobe-output` 运行时生成 0.5 秒 AAC HLS，调用生产 wrapper，并用 ffprobe 断言输出为非空 MP4、包含 AAC 音轨且时长为正；本机缺少 ffmpeg/ffprobe 时明确 skip。
+- accepted difference: 测试不提交二进制 fixture；使用本机已解析的桌面媒体二进制生成临时输入，测试结束删除全部临时文件。
+- excluded changes and reasons: 不在本步覆盖视频、加密 HLS、应用退出等待、一次性 cache fallback、完整 parser 或生产 decrypt 接入。
+- unresolved gaps: production lifecycle integration、awaited app-exit cleanup、视频/加密 output、一次性 cache fallback、完整 parser 与 decrypt responsibility。
+- runtime changes: 无；只为现有生产 ffmpeg wrapper 增加真实二进制 integration 证据。
+- legacy cleanup: 无；旧 output 路径继续保留到 cutover 证据完整。
+- validation: 真实输出测试 1/1、完整 HLS Vitest 30/30、仓库级 lint、TypeScript、`cat-catch:validate`、同步校验 16/16 和 scoped diff check 通过；完整 build 未运行，避免覆盖其他 Agent 正在修改的 `dist-electron/**`。
+
 ## Template
 
 ```markdown
