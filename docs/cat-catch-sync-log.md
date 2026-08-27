@@ -927,6 +927,20 @@
 - legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
 - validation: 固定 Cat Catch vendor executable oracle 与 fixture expected 逐字段比对为 `same=true / 14 fragments / duration=12.5 / sn=10..23`，并锁定每项 URL 与 AES IV；失败证据先后为 parser `29/30` 且总时长 `308.5`，以及补入 overflow 后总时长 `Infinity`。实现后 parser `30/30`、完整 HLS 集合 `87/87`、TypeScript、全仓 ESLint、fixture/capability JSON、轻量 validator、固定上游校验、同步校验 `16/16`、metadata `7 units / 32 capabilities / 195 anchors / 106 cleanup entries / 137 planned IDs / 91 active refs` 和 scoped diff check 通过。排除 4 个需监听本机端口的文件及已由 `node --test` 单独执行的同步文件后，全量 Vitest 为 `178 files / 1160 passed / 3 skipped`；4 个 loopback 文件在沙箱外复跑 `20/20`，合计全部可执行测试 `1180 passed / 3 skipped`。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
 
+## 2026-08-28: same target (HLS empty valued tag payload boundary)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，固定实际 vendor 为 hls.js `1.6.16`。
+- reviewedThrough / portedThrough: 均保持 `null`；本步闭合 media-playlist slow regex 的零字符 payload 分发边界，仍未完成 hls-engine cutover。
+- change groups: `behavioral`（固定 `Qr` 的 `(.+)` payload 门禁）与 `state-stability`（裸标签不清除下载状态或创建幽灵变量）。
+- affected capability IDs: `hls.parser-planner` 保持 `ported-unverified`；新增 1 个 active test ID 和 1 个固定上游 anchor。
+- fixtures/tests: 新增 upstream-executable fixture `hls-empty-valued-tag-boundary`；`hls.empty-valued-tag-boundary` 覆盖裸 `BYTERANGE:` 保留 pending range、裸 `MAP:` 保留 init、裸 `PLAYLIST-TYPE:` 不形成重复声明、裸 `DEFINE:` 后的未定义变量继续报固定错误，并同时锁定 manifest/download plan 的 URL、range、MAP、AES key/implicit IV、sequence 和总时长。
+- accepted difference: 无。这里区分的是未进入 MAP 分支的裸标签与已经进入分支、但属性 URI 缺失/空/whitespace-only 的 MAP；后者仍沿用 OmniFlow 已记录的稳定拒绝适配。
+- excluded changes and reasons: 不投影 `PROGRAM-DATE-TIME/GAP/DATERANGE/BITRATE/PRELOAD-HINT/RENDITION-REPORT` 等 Cat Catch `parseTs` 不消费的播放 metadata，不在本步扩大到 master/media 混合语法或原始行首尾 whitespace 归一化。
+- unresolved gaps: HLS 其余真正影响下载的 parser 差分、live 未捕获 URL 过渡 DTO、加密 fMP4/video 真实输出组合、真实网站手工验证和最终 hls-engine cutover。
+- runtime changes: media parser 已实现的 `DEFINE/PLAYLIST-TYPE/SKIP/KEY/MAP/BYTERANGE` valued branches 只在冒号后有 payload 时执行；bare fallback 保留既有 key/map/range/type/variable owner，master DEFINE 的独立正则语义不变。
+- legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
+- validation: 固定 Cat Catch vendor executable oracle 输出 `3 fragments / duration=12 / sn=10..12 / type=VOD`，保留首片 `20..24` range、三片共同 MAP/key 与逐 sequence IV；裸 DEFINE 引用报 `Missing preceding EXT-X-DEFINE...`。失败证据为 parser `30/31`，空 PLAYLIST-TYPE 被误判为重复声明。实现后 parser `31/31`、完整 HLS 集合 `88/88`、TypeScript、全仓 ESLint、fixture/capability JSON、轻量 validator、固定上游校验、同步校验 `16/16`、metadata `7 units / 32 capabilities / 196 anchors / 106 cleanup entries / 138 planned IDs / 92 active refs` 和 scoped diff check 通过。排除 4 个需监听本机端口的文件及已由 `node --test` 单独执行的同步文件后，全量 Vitest 为 `178 files / 1162 passed / 3 skipped`；4 个 loopback 文件在沙箱外复跑 `20/20`，合计全部可执行测试 `1182 passed / 3 skipped`。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
+
 ## Template
 
 ```markdown

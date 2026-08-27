@@ -8,7 +8,7 @@
  * Adaptation: pure parser only; Electron fetching and output stay outside the port.
  * Fixtures: hls.byterange-map-key-discontinuity, hls.map-byterange-independent,
  * hls.map-leading-byterange-transfer, hls-valued-tag-boundary,
- * hls-extinf-token-boundary
+ * hls-extinf-token-boundary, hls-empty-valued-tag-boundary
  */
 
 import { createHlsDefaultIv } from './decrypt'
@@ -340,6 +340,12 @@ function resolveHlsUrl(uri: string, baseUrl: string) {
 function getTagValue(line: string) {
   const colonIndex = line.indexOf(':')
   return colonIndex >= 0 ? line.slice(colonIndex + 1).trim() : ''
+}
+
+// The pinned media-playlist slow regex uses (.+) for valued tag payloads.
+function hasHlsValuedTagPayload(line: string) {
+  const colonIndex = line.indexOf(':')
+  return colonIndex >= 0 && colonIndex < line.length - 1
 }
 
 function parseExtinf(line: string, currentSegment?: PendingSegment): ParsedExtinf {
@@ -798,6 +804,7 @@ export function parseHlsManifest(input: {
       continue
     }
     if (line.startsWith('#EXT-X-DEFINE:')) {
+      if (hasMediaPlaylistSyntax && !hasHlsValuedTagPayload(line)) continue
       parseHlsVariableDefinition(line, variableState)
       continue
     }
@@ -848,6 +855,7 @@ export function parseHlsManifest(input: {
       continue
     }
     if (line.startsWith('#EXT-X-PLAYLIST-TYPE:')) {
+      if (!hasHlsValuedTagPayload(line)) continue
       if (playlistType !== undefined) {
         assignMultipleMediaPlaylistTagError(variableState, 'PLAYLIST-TYPE', line)
       }
@@ -855,6 +863,7 @@ export function parseHlsManifest(input: {
       continue
     }
     if (line.startsWith('#EXT-X-SKIP:')) {
+      if (!hasHlsValuedTagPayload(line)) continue
       if (skippedSegmentCount !== 0) {
         assignMultipleMediaPlaylistTagError(variableState, 'SKIP', line)
       }
@@ -866,6 +875,7 @@ export function parseHlsManifest(input: {
       continue
     }
     if (line.startsWith('#EXT-X-KEY:')) {
+      if (!hasHlsValuedTagPayload(line)) continue
       const key = createHlsKey(line, baseUrl, variableState)
       if (!isSupportedHlsKey(key)) continue
       if (key.method === 'NONE') {
@@ -883,6 +893,7 @@ export function parseHlsManifest(input: {
       continue
     }
     if (line.startsWith('#EXT-X-MAP:')) {
+      if (!hasHlsValuedTagPayload(line)) continue
       // Pinned hls.js reuses a preceding EXT-X-BYTERANGE for the MAP only
       // while no positive EXTINF is pending. It also carries that same range
       // into the next media fragment, so pendingByteRange remains intact.
@@ -911,6 +922,7 @@ export function parseHlsManifest(input: {
       continue
     }
     if (line.startsWith('#EXT-X-BYTERANGE:')) {
+      if (!hasHlsValuedTagPayload(line)) continue
       const rawByteRange = getTagValue(line)
       pendingByteRange = parseHlsByteRange(rawByteRange)
       if (rawByteRange && !pendingByteRange) {

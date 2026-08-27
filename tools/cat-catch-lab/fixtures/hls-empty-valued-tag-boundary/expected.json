@@ -1,0 +1,44 @@
+{
+  "baseUrl": "https://media.example/empty-tags/playlist.m3u8",
+  "durationSeconds": 12,
+  "playlistType": "VOD",
+  "undefinedVariableError": "Missing preceding EXT-X-DEFINE tag for Variable Reference: \"undefined\"",
+  "fragments": [
+    {
+      "duration": 4,
+      "initLength": 10,
+      "initOffset": 0,
+      "initUrl": "https://media.example/empty-tags/init.mp4",
+      "iv": "0x0000000000000000000000000000000a",
+      "keyUrl": "https://media.example/empty-tags/key.bin",
+      "length": 4,
+      "offset": 20,
+      "sequence": 10,
+      "url": "https://media.example/empty-tags/a.m4s"
+    },
+    {
+      "duration": 4,
+      "initLength": 10,
+      "initOffset": 0,
+      "initUrl": "https://media.example/empty-tags/init.mp4",
+      "iv": "0x0000000000000000000000000000000b",
+      "keyUrl": "https://media.example/empty-tags/key.bin",
+      "length": null,
+      "offset": null,
+      "sequence": 11,
+      "url": "https://media.example/empty-tags/b.m4s"
+    },
+    {
+      "duration": 4,
+      "initLength": 10,
+      "initOffset": 0,
+      "initUrl": "https://media.example/empty-tags/init.mp4",
+      "iv": "0x0000000000000000000000000000000c",
+      "keyUrl": "https://media.example/empty-tags/key.bin",
+      "length": null,
+      "offset": null,
+      "sequence": 12,
+      "url": "https://media.example/empty-tags/c.m4s"
+    }
+  ]
+}

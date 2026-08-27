@@ -1,0 +1,6 @@
+#EXTM3U
+#EXT-X-TARGETDURATION:4
+#EXT-X-DEFINE:
+#EXTINF:4,invalid
+{$undefined}.ts
+#EXT-X-ENDLIST

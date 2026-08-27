@@ -114,6 +114,32 @@ const valuedTagExpected = JSON.parse(readFileSync(`${valuedTagFixtureRoot}/${val
   }>
   targetDuration: number
 }
+const emptyValuedTagFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-empty-valued-tag-boundary', import.meta.url))
+const emptyValuedTagFixture = JSON.parse(readFileSync(`${emptyValuedTagFixtureRoot}/fixture.json`, 'utf8')) as {
+  expected: string
+  inputs: {
+    stateful: string
+    undefinedVariable: string
+  }
+}
+const emptyValuedTagExpected = JSON.parse(readFileSync(`${emptyValuedTagFixtureRoot}/${emptyValuedTagFixture.expected}`, 'utf8')) as {
+  baseUrl: string
+  durationSeconds: number
+  fragments: Array<{
+    duration: number
+    initLength: number
+    initOffset: number
+    initUrl: string
+    iv: string
+    keyUrl: string
+    length: number | null
+    offset: number | null
+    sequence: number
+    url: string
+  }>
+  playlistType: string
+  undefinedVariableError: string
+}
 const integerTagFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-integer-tag-token-boundary', import.meta.url))
 const integerTagFixture = JSON.parse(readFileSync(`${integerTagFixtureRoot}/fixture.json`, 'utf8')) as {
   expected: string
@@ -919,6 +945,58 @@ describe('Cat Catch HLS parser', () => {
       sequence: segment.sequence,
       url: segment.url,
     })))
+  })
+
+  it('hls.empty-valued-tag-boundary', () => {
+    const manifest = parseHlsManifest({
+      baseUrl: emptyValuedTagExpected.baseUrl,
+      text: readFileSync(
+        `${emptyValuedTagFixtureRoot}/${emptyValuedTagFixture.inputs.stateful}`,
+        'utf8',
+      ),
+    })
+    expect(manifest).toMatchObject({
+      durationSeconds: emptyValuedTagExpected.durationSeconds,
+      playlistType: emptyValuedTagExpected.playlistType,
+    })
+    expect(manifest.segments.map(segment => ({
+      duration: segment.duration,
+      initLength: segment.map?.byteRange?.length,
+      initOffset: segment.map?.byteRange?.offset,
+      initUrl: segment.map?.url,
+      iv: segment.key?.iv,
+      keyUrl: segment.key?.url,
+      length: segment.byteRange?.length ?? null,
+      offset: segment.byteRange?.offset ?? null,
+      sequence: segment.sequence,
+      url: segment.url,
+    }))).toEqual(emptyValuedTagExpected.fragments)
+
+    const plan = createEmbeddedBrowserHlsDownloadPlan({
+      manifest,
+      manifestUrl: emptyValuedTagExpected.baseUrl,
+    })
+    expect(plan.durationSeconds).toBe(emptyValuedTagExpected.durationSeconds)
+    expect(plan.fragments.map(fragment => ({
+      duration: fragment.duration,
+      initLength: fragment.initSegment?.byteRange?.length,
+      initOffset: fragment.initSegment?.byteRange?.offset,
+      initUrl: fragment.initSegment?.url,
+      iv: fragment.key?.iv,
+      keyUrl: fragment.key?.url,
+      length: fragment.byteRange?.length ?? null,
+      offset: fragment.byteRange?.offset ?? null,
+      sequence: fragment.sequence,
+      url: fragment.url,
+    }))).toEqual(emptyValuedTagExpected.fragments)
+
+    expect(() => parseHlsManifest({
+      baseUrl: `${emptyValuedTagExpected.baseUrl}undefined.m3u8`,
+      text: readFileSync(
+        `${emptyValuedTagFixtureRoot}/${emptyValuedTagFixture.inputs.undefinedVariable}`,
+        'utf8',
+      ),
+    })).toThrow(emptyValuedTagExpected.undefinedVariableError)
   })
 
   it('hls.integer-tag-token-boundary', () => {

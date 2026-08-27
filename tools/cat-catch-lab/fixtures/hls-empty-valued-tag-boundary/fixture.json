@@ -1,0 +1,22 @@
+{
+  "fixtureId": "hls-empty-valued-tag-boundary",
+  "capabilityIds": [
+    "hls.parser-planner"
+  ],
+  "upstreamCommit": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
+  "status": "active",
+  "oracle": "upstream-executable",
+  "sourceRefs": [
+    "lib/hls.min.js#parseLevelPlaylist Qr valued tag regex",
+    "lib/hls.min.js#VARIABLE_REPLACEMENT_REGEX",
+    "js/m3u8.js#parseTs(data)"
+  ],
+  "inputs": {
+    "stateful": "stateful-empty-tags.m3u8",
+    "undefinedVariable": "empty-define-variable.m3u8"
+  },
+  "expected": "expected.json",
+  "testRefs": [
+    "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.empty-valued-tag-boundary"
+  ]
+}
