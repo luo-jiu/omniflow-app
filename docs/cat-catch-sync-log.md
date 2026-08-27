@@ -351,7 +351,7 @@
 - unresolved gaps: cache fallback、preprocess/decrypt 顺序、pipeline integration、HLS 统一 task/cleanup 和 production-equivalent smoke。
 - runtime changes: 新增 `electron/service/embedded-browser/cat-catch-port/hls/pipeline.ts#preprocessFragment`，只移除已确认完整的图片前缀，否则原样返回。
 - legacy cleanup: 无；`embeddedBrowserHlsLocalDownloaderService` 继续是生产 owner，直到 pipeline 证据完成。
-- validation: preprocessing fixture 1/1、TypeScript、定向 lint、`cat-catch:validate` 和同步校验待本步最终门禁确认；未运行会覆盖其他 Agent `dist-electron/**` 的 build，也未做真实页面验证。
+- validation: preprocessing fixture 1/1、TypeScript、定向 lint、`cat-catch:validate` 和同步校验 16/16 通过；未运行会覆盖其他 Agent `dist-electron/**` 的 build，也未做真实页面验证。
 
 ## Template
 
