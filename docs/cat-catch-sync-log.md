@@ -913,6 +913,20 @@
 - legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
 - validation: 固定 Cat Catch vendor executable oracle 输出 recovered/prefix 的 `startSN=10 / startCC=2 / cc=2 / target=4`、fallback 的 `startSN=0 / startCC=0 / cc=1 / target=4`，signed-only target 报 `Missing Target Duration`；失败证据先后为 parser `28/29`（错误接受 signed sequence）和 `28/29`（startCC/current cc 未分离）。实现后 parser `29/29`、完整 HLS 集合 `86/86`、TypeScript、全仓 ESLint、fixture/capability JSON、轻量 validator、固定上游校验、同步校验 `16/16`、metadata `7 units / 32 capabilities / 194 anchors / 106 cleanup entries / 136 planned IDs / 90 active refs` 和 scoped diff check 通过。排除已由 `node --test` 单独执行的同步文件后，全量 Vitest 在沙箱内为 `1155 passed / 3 skipped / 16 loopback EPERM`；4 个 loopback 文件在沙箱外复跑 `20/20`，折算全部可执行测试为 `1171 passed / 3 skipped`。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
 
+## 2026-08-28: same target (HLS EXTINF token boundary)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，固定实际 vendor 为 hls.js `1.6.16`。
+- reviewedThrough / portedThrough: 均保持 `null`；本步闭合 fast EXTINF regex 从时长前缀到 Cat Catch 下载列表的回扫边界，仍未完成 hls-engine cutover。
+- change groups: `behavioral`（固定无符号 decimal token）与 `download-projection`（remainder URI、sequence、implicit IV、总时长贯穿 plan）。
+- affected capability IDs: `hls.parser-planner` 保持 `ported-unverified`；新增 1 个 active test ID 和 1 个固定上游 anchor。
+- fixtures/tests: 新增 upstream-executable fixture `hls-extinf-token-boundary`；`hls.extinf-token-boundary` 覆盖合法整数/leading-dot、signed、指数、尾随文本、十六进制、空 duration、超长十进制的非有限状态及有效 duration 恢复，并同时断言 pure manifest 与 download plan 的 14 个 fragment URL、duration、sequence 和 AES implicit IV。
+- accepted difference: 无。OmniFlow 不把非规范输入稳定拒绝或宽松数值化；固定 fast regex 回扫得到的额外 URI 正是 Cat Catch `LEVEL_LOADED -> parseTs` 会加入下载列表的黑盒行为。
+- excluded changes and reasons: 不投影 Cat Catch `parseTs` 未复制的 hls.js title artifact，不扩展到 PROGRAM-DATE-TIME/DATERANGE/BITRATE 等播放 metadata，也不新增 IPC 或 renderer 状态。
+- unresolved gaps: HLS 其余真正影响下载的 parser 差分、live 未捕获 URL 过渡 DTO、加密 fMP4/video 真实输出组合、真实网站手工验证和最终 hls-engine cutover。
+- runtime changes: `parseExtinf` 只消费固定 `\d*(?:\.\d+)?` 前缀；非逗号 remainder 按固定 URI alternative 立即物化一个 fragment，下一条真实 URI 继续物化零时长 fragment。非有限 duration 会阻止 URI 物化，空 duration 复用当前 fragment 状态；既有 key/map/sequence owner 不变。
+- legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
+- validation: 固定 Cat Catch vendor executable oracle 与 fixture expected 逐字段比对为 `same=true / 14 fragments / duration=12.5 / sn=10..23`，并锁定每项 URL 与 AES IV；失败证据先后为 parser `29/30` 且总时长 `308.5`，以及补入 overflow 后总时长 `Infinity`。实现后 parser `30/30`、完整 HLS 集合 `87/87`、TypeScript、全仓 ESLint、fixture/capability JSON、轻量 validator、固定上游校验、同步校验 `16/16`、metadata `7 units / 32 capabilities / 195 anchors / 106 cleanup entries / 137 planned IDs / 91 active refs` 和 scoped diff check 通过。排除 4 个需监听本机端口的文件及已由 `node --test` 单独执行的同步文件后，全量 Vitest 为 `178 files / 1160 passed / 3 skipped`；4 个 loopback 文件在沙箱外复跑 `20/20`，合计全部可执行测试 `1180 passed / 3 skipped`。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
+
 ## Template
 
 ```markdown

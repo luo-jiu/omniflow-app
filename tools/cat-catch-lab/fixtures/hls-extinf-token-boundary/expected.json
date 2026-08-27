@@ -1,0 +1,20 @@
+{
+  "baseUrl": "https://media.example/extinf/playlist.m3u8",
+  "durationSeconds": 12.5,
+  "fragments": [
+    { "duration": 4, "iv": "0x0000000000000000000000000000000a", "sequence": 10, "url": "https://media.example/extinf/valid.ts" },
+    { "duration": 0.5, "iv": "0x0000000000000000000000000000000b", "sequence": 11, "url": "https://media.example/extinf/leading-dot.ts" },
+    { "duration": 0, "iv": "0x0000000000000000000000000000000c", "sequence": 12, "url": "https://media.example/extinf/-3,negative" },
+    { "duration": 0, "iv": "0x0000000000000000000000000000000d", "sequence": 13, "url": "https://media.example/extinf/signed-negative.ts" },
+    { "duration": 0, "iv": "0x0000000000000000000000000000000e", "sequence": 14, "url": "https://media.example/extinf/+3,positive" },
+    { "duration": 0, "iv": "0x0000000000000000000000000000000f", "sequence": 15, "url": "https://media.example/extinf/signed-positive.ts" },
+    { "duration": 3, "iv": "0x00000000000000000000000000000010", "sequence": 16, "url": "https://media.example/extinf/e2,exponent" },
+    { "duration": 0, "iv": "0x00000000000000000000000000000011", "sequence": 17, "url": "https://media.example/extinf/exponent.ts" },
+    { "duration": 4, "iv": "0x00000000000000000000000000000012", "sequence": 18, "url": "https://media.example/extinf/tail,tail" },
+    { "duration": 0, "iv": "0x00000000000000000000000000000013", "sequence": 19, "url": "https://media.example/extinf/trailing.ts" },
+    { "duration": 0, "iv": "0x00000000000000000000000000000014", "sequence": 20, "url": "https://media.example/extinf/x4,hex" },
+    { "duration": 0, "iv": "0x00000000000000000000000000000015", "sequence": 21, "url": "https://media.example/extinf/hex.ts" },
+    { "duration": 0, "iv": "0x00000000000000000000000000000016", "sequence": 22, "url": "https://media.example/extinf/empty.ts" },
+    { "duration": 1, "iv": "0x00000000000000000000000000000017", "sequence": 23, "url": "https://media.example/extinf/recovered.ts" }
+  ]
+}

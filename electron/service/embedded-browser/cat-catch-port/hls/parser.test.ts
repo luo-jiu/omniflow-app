@@ -137,6 +137,21 @@ const integerTagExpected = JSON.parse(readFileSync(`${integerTagFixtureRoot}/${i
   }>
   targetDuration: number
 }
+const extinfTokenFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-extinf-token-boundary', import.meta.url))
+const extinfTokenFixture = JSON.parse(readFileSync(`${extinfTokenFixtureRoot}/fixture.json`, 'utf8')) as {
+  expected: string
+  input: string
+}
+const extinfTokenExpected = JSON.parse(readFileSync(`${extinfTokenFixtureRoot}/${extinfTokenFixture.expected}`, 'utf8')) as {
+  baseUrl: string
+  durationSeconds: number
+  fragments: Array<{
+    duration: number
+    iv: string
+    sequence: number
+    url: string
+  }>
+}
 const mediaStructureExpected = JSON.parse(readFileSync(`${mediaStructureFixtureRoot}/${mediaStructureFixture.expected}`, 'utf8')) as Record<string, string>
 
 const mapByteRangeFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-map-byterange-independent', import.meta.url))
@@ -952,6 +967,33 @@ describe('Cat Catch HLS parser', () => {
         'utf8',
       ),
     })).toThrow(integerTagExpected.missingTargetError)
+  })
+
+  it('hls.extinf-token-boundary', () => {
+    const manifest = parseHlsManifest({
+      baseUrl: extinfTokenExpected.baseUrl,
+      text: readFileSync(`${extinfTokenFixtureRoot}/${extinfTokenFixture.input}`, 'utf8'),
+    })
+    const expectedFragments = extinfTokenExpected.fragments
+    expect(manifest.durationSeconds).toBe(extinfTokenExpected.durationSeconds)
+    expect(manifest.segments.map(segment => ({
+      duration: segment.duration,
+      iv: segment.key?.iv,
+      sequence: segment.sequence,
+      url: segment.url,
+    }))).toEqual(expectedFragments)
+
+    const plan = createEmbeddedBrowserHlsDownloadPlan({
+      manifest,
+      manifestUrl: extinfTokenExpected.baseUrl,
+    })
+    expect(plan.durationSeconds).toBe(extinfTokenExpected.durationSeconds)
+    expect(plan.fragments.map(fragment => ({
+      duration: fragment.duration,
+      iv: fragment.key?.iv,
+      sequence: fragment.sequence,
+      url: fragment.url,
+    }))).toEqual(expectedFragments)
   })
 
   it('normalizes integer media tags like pinned hls.js', () => {

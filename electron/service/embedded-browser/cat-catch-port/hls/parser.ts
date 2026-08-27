@@ -7,7 +7,8 @@
  * previous fragment, while each EXT-X-MAP range is parsed independently.
  * Adaptation: pure parser only; Electron fetching and output stay outside the port.
  * Fixtures: hls.byterange-map-key-discontinuity, hls.map-byterange-independent,
- * hls.map-leading-byterange-transfer, hls-valued-tag-boundary
+ * hls.map-leading-byterange-transfer, hls-valued-tag-boundary,
+ * hls-extinf-token-boundary
  */
 
 import { createHlsDefaultIv } from './decrypt'
@@ -109,6 +110,11 @@ export type CatCatchHlsManifest = {
 type PendingSegment = {
   duration: number
   title?: string
+}
+
+type ParsedExtinf = {
+  inlineUri?: string
+  segment: PendingSegment
 }
 
 type HlsVariableState = {
@@ -336,12 +342,26 @@ function getTagValue(line: string) {
   return colonIndex >= 0 ? line.slice(colonIndex + 1).trim() : ''
 }
 
-function parseExtinf(line: string): PendingSegment {
+function parseExtinf(line: string, currentSegment?: PendingSegment): ParsedExtinf {
   const value = getTagValue(line)
-  const commaIndex = value.indexOf(',')
-  const durationText = commaIndex >= 0 ? value.slice(0, commaIndex) : value
-  const title = commaIndex >= 0 ? value.slice(commaIndex + 1).trim() : undefined
-  return { duration: parseNumber(durationText) || 0, title: title || undefined }
+  const durationText = /^(\d*(?:\.\d+)?)/.exec(value)?.[1] || ''
+  const remainder = value.slice(durationText.length)
+  const hasTitle = remainder.startsWith(',')
+  const title = hasTitle && durationText
+    ? remainder.slice(1).trim() || undefined
+    : undefined
+  const inlineUri = hasTitle
+    ? undefined
+    : remainder.trimStart()
+
+  return {
+    // The fixed fast regex leaves a non-decimal remainder to its URI
+    // alternative. Cat Catch then downloads that remainder as a fragment.
+    inlineUri: inlineUri && !inlineUri.startsWith('#') ? inlineUri : undefined,
+    segment: durationText
+      ? { duration: Number.parseFloat(durationText), title }
+      : currentSegment || { duration: 0 },
+  }
 }
 
 /**
@@ -739,6 +759,8 @@ export function parseHlsManifest(input: {
   function addSegment(uri: string, part: boolean, byteRange = pendingByteRange) {
     const normalizedUri = substituteHlsVariables(String(uri || '').trim(), variableState)
     if (!normalizedUri) return
+    // hls.js retains this fragment until a later valid EXTINF resets duration.
+    if (pendingSegment && !Number.isFinite(pendingSegment.duration)) return
     const url = resolveHlsUrl(normalizedUri, baseUrl)
     const index = segments.length
     const sequence = mediaSequence + index
@@ -914,7 +936,9 @@ export function parseHlsManifest(input: {
       continue
     }
     if (line.startsWith('#EXTINF:')) {
-      pendingSegment = parseExtinf(line)
+      const parsedExtinf = parseExtinf(line, pendingSegment)
+      pendingSegment = parsedExtinf.segment
+      if (parsedExtinf.inlineUri) addSegment(parsedExtinf.inlineUri, false)
       continue
     }
     if (line.startsWith('#EXT-X-PART-INF:')) {
