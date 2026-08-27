@@ -131,4 +131,36 @@ describe('EmbeddedBrowserFragmentDownloader', () => {
     expect(downloader.state).toBe('aborted')
     downloader.destroy()
   })
+
+  it('hls.failed-fragment-retry', async () => {
+    let attempts = 0
+    const failedAttempts: number[] = []
+    const fetchImpl = vi.fn(async () => {
+      attempts += 1
+      if (attempts === 1) {
+        return new Response('temporary failure', { status: 503 })
+      }
+      return new Response(Uint8Array.from([7]).buffer)
+    })
+    const downloader = new EmbeddedBrowserFragmentDownloader({
+      fetch: fetchImpl,
+      fragments: [{ index: 0, url: 'https://media.example/segment.ts' }],
+      maxRetries: 1,
+      thread: 1,
+    })
+    const completed = new Promise<void>((resolve, reject) => {
+      downloader.on('downloadError', (_fragment, _error, attempt) => {
+        failedAttempts.push(attempt)
+      })
+      downloader.on('allCompleted', () => resolve())
+      downloader.on('failed', (_fragments, errors) => reject(new Error(`unexpected failures: ${errors.size}`)))
+    })
+
+    downloader.start()
+    await completed
+    expect(fetchImpl).toHaveBeenCalledTimes(2)
+    expect(failedAttempts).toEqual([1])
+    expect(downloader.success).toBe(1)
+    downloader.destroy()
+  })
 })

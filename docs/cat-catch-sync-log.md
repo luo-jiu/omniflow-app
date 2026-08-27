@@ -423,6 +423,20 @@
 - legacy cleanup: 无；现有 ffmpeg/playlist 解密路径继续承担生产职责。
 - validation: HLS 相关 Vitest 14/14、定向 ESLint、`cat-catch:validate` 和同步校验 16/16 通过；全局 TypeScript 仍被其他 agent 的 `agent-local-storage-quota-manager.ts` 两处错误阻断，完整 build 未运行。
 
+## 2026-08-27: same target (HLS fragment retry evidence)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动。
+- reviewedThrough / portedThrough: 均保持 `null`；本步补齐 Cat Catch downloader 的失败 attempt 重试证据，仍未完成 hls-engine cutover。
+- change groups: `behavioral`（HTTP 失败按 maxRetries 重新排队，成功后恢复 allCompleted 终态）。
+- affected capability IDs: `hls.segment-pipeline` 继续为 `porting`。
+- fixtures/tests: `embeddedBrowserFragmentDownloader.test.ts#hls.failed-fragment-retry` 首次返回 503、第二次成功，断言两次请求、attempt=1 错误事件和最终 success=1。
+- accepted difference: 重试不引入上游 UI 的 retry button 或延迟文案；当前 adapter 保持立即重新排队，取消仍由 AbortSignal 控制。
+- excluded changes and reasons: 不在本步调整 retry delay/backoff、统一 task registry、临时目录 TTL 或旧 downloader 删除。
+- unresolved gaps: retry backoff/全 task cancel 语义、key authority/redirect、完整 output smoke、一次性 cache fallback、统一 task/cleanup 和 page validation。
+- runtime changes: 无新增生产逻辑；以现有有序 processor chain 和 downloader retry 实现建立可执行回归证据。
+- legacy cleanup: 无；现有 ffmpeg/playlist 解密路径继续承担生产职责。
+- validation: 定向 HLS downloader 测试 5/5 通过；待本步提交前重跑全 HLS 集合、lint、Cat Catch validator、同步校验和 diff 检查；全局 TypeScript 仍受其他 agent storage 改动阻断。
+
 ## Template
 
 ```markdown
