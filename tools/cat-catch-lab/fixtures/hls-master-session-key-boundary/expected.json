@@ -1,0 +1,15 @@
+{
+  "masterBaseUrl": "https://media.example/master.m3u8",
+  "childBaseUrl": "https://media.example/child.m3u8",
+  "variantUrl": "https://media.example/child.m3u8",
+  "masterDownloadKeyCount": 0,
+  "childSegments": [
+    {
+      "encrypted": false,
+      "keyUrl": null,
+      "sequence": 10,
+      "url": "https://media.example/clear.ts"
+    }
+  ],
+  "missingVariableError": "Missing preceding EXT-X-DEFINE tag for Variable Reference: \"missing\""
+}

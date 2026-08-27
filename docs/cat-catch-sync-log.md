@@ -773,6 +773,20 @@
 - legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
 - validation: 固定 vendor executable oracle 输出 2 条 AUDIO 与 1 条 SUBTITLES，排除 4 条其他 EXT-X-MEDIA；失败证据为 parser 19/20，实现后 parser 20/20、parser/authority 24/24、广义 HLS/inspection/projection Vitest 86/86、全仓 ESLint、TypeScript、`cat-catch:validate`、同步校验 16/16、fixture JSON、metadata 7 units/32 capabilities/192 anchors/106 cleanup entries/125 unique planned IDs/79 active refs 和 scoped diff check 通过。全量 Vitest 为 1091 passed / 1 skipped / 16 sandbox-only loopback failures，4 个相关 loopback 文件在允许监听本机端口的环境复跑 20/20，通过后折算全部可执行测试为 1107 passed / 1 skipped；Node 专用同步 validator 被 Vitest 收集后另报告 no suite。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
 
+## 2026-08-28: same target (HLS master session-key download boundary)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动。
+- reviewedThrough / portedThrough: 均保持 `null`；本步只闭合固定 hls.js 1.6.16 `EXT-X-SESSION-KEY` 到 Cat Catch 下载链的边界，仍未完成 hls-engine cutover。
+- change groups: `behavioral`（master session-key attribute/变量解析错误）与 `explicit-exclusion`（默认关闭 EME 时不把 session key 传播成 fragment key）。
+- affected capability IDs: `hls.parser-planner` 保持 `ported-unverified`；新增 1 个 active test ID。
+- fixtures/tests: 新增 upstream-executable fixture `hls-master-session-key-boundary`；`hls.master-session-key-exclusion` 覆盖 valid master session key 不进入 `manifest.keys`、media parser 忽略不属于该层的 session-key、clear child fragment 保持 `encrypted=false / key=null`，以及 master session-key 中前置缺失变量仍触发固定 parsing error。
+- accepted difference: 无。同步 facade 抛出与固定 loader 相同的第一条变量 parsing reason；事件式 error 与同步 throw 的既有表示差异已记录在 `hls.parser-planner`。
+- excluded changes and reasons: 不新增 session-key DTO、DRM preload、license/key-system 选择或 master-to-child key context。Cat Catch 下载页用默认 `emeEnabled=false` 创建 Hls，`MANIFEST_PARSED` 只读取 levels/audioTracks/subtitleTracks，`LEVEL_LOADED -> parseTs` 只读取 child fragments；这些 EME 能力不属于当前下载行为。
+- unresolved gaps: HLS 其余 master/media parser 标签差分、真正有 previous snapshot 的 delta recording、live 未捕获 URL 过渡 DTO、加密 fMP4/video 真实输出组合、真实网站手工验证和最终 hls-engine cutover。
+- runtime changes: pure parser 对 `EXT-X-SESSION-KEY` 只执行 quoted/hex attribute 的有序变量替换以保留 parsing error，随后丢弃；不写 `keys/currentKeys`，child 仍必须通过自己的 `EXT-X-KEY` 才能加密 fragment。
+- legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
+- validation: 固定 vendor executable oracle 先输出 `MANIFEST_LOADED sessionKeys=1 / emeEnabled=false`，随后 child `LEVEL_LOADED` fragment 为 `encrypted=false / decryptdata=null`；session-key 先于对应 `EXT-X-DEFINE` 时输出 fatal `manifestParsingError`。失败证据为 parser 20/21，实现后 parser 21/21、parser/authority 25/25、广义 HLS Vitest 75/75、全仓 ESLint、TypeScript、`cat-catch:validate`、同步校验 16/16、fixture JSON、metadata 7 units/32 capabilities/192 anchors/106 cleanup entries/126 unique planned IDs/80 active refs 和 scoped diff check 通过。全量 Vitest 为 1097 passed / 1 skipped / 16 sandbox-only loopback failures，4 个相关 loopback 文件在允许监听本机端口的环境复跑 20/20，通过后折算全部可执行测试为 1113 passed / 1 skipped；Node 专用同步 validator 被 Vitest 收集后另报告 no suite。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
+
 ## Template
 
 ```markdown

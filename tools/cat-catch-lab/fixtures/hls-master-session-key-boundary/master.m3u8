@@ -1,0 +1,5 @@
+#EXTM3U
+#EXT-X-DEFINE:NAME="key-root",VALUE="https://keys.example"
+#EXT-X-SESSION-KEY:METHOD=AES-128,URI="{$key-root}/session.key"
+#EXT-X-STREAM-INF:BANDWIDTH=1000
+child.m3u8

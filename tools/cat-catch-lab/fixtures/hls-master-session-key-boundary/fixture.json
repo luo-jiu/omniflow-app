@@ -1,0 +1,24 @@
+{
+  "fixtureId": "hls-master-session-key-boundary",
+  "capabilityIds": [
+    "hls.parser-planner"
+  ],
+  "upstreamCommit": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
+  "status": "active",
+  "oracle": "upstream-executable",
+  "sourceRefs": [
+    "lib/hls.min.js#parseMasterPlaylist EXT-X-SESSION-KEY",
+    "lib/hls.min.js#M3U8Parser.isMediaPlaylist/parseLevelPlaylist",
+    "lib/hls.min.js#EmeController.onManifestLoaded",
+    "js/m3u8.js#new Hls(...)/MANIFEST_PARSED/LEVEL_LOADED"
+  ],
+  "inputs": {
+    "child": "child.m3u8",
+    "master": "master.m3u8",
+    "missingVariable": "missing-variable.m3u8"
+  },
+  "expected": "expected.json",
+  "testRefs": [
+    "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.master-session-key-exclusion"
+  ]
+}

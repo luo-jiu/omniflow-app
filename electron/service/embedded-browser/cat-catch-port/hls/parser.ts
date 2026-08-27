@@ -662,6 +662,15 @@ export function parseHlsManifest(input: {
       parseHlsVariableDefinition(line, variableState)
       continue
     }
+    if (!hasMediaPlaylistSyntax && line.startsWith('#EXT-X-SESSION-KEY:')) {
+      // Upstream: xifangczy/cat-catch@2cb981d7c2f4614732edccc167c4b5793d1cb138
+      // Source: lib/hls.min.js#parseMasterPlaylist/EmeController.onManifestLoaded
+      // Cat Catch leaves emeEnabled=false and never consumes sessionKeys in its
+      // download handlers. Parse attributes for ordered variable errors only;
+      // SESSION-KEY must not enter the fragment key state.
+      parseHlsAttributeListWithVariables(getTagValue(line), variableState)
+      continue
+    }
     if (line.startsWith('#EXT-X-STREAM-INF')) {
       pendingVariantLine = line
       continue

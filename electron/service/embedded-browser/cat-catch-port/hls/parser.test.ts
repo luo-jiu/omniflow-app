@@ -167,6 +167,29 @@ const masterRenditionExpected = JSON.parse(readFileSync(`${masterRenditionFixtur
   }>
 }
 
+const masterSessionKeyFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-master-session-key-boundary', import.meta.url))
+const masterSessionKeyFixture = JSON.parse(readFileSync(`${masterSessionKeyFixtureRoot}/fixture.json`, 'utf8')) as {
+  expected: string
+  inputs: {
+    child: string
+    master: string
+    missingVariable: string
+  }
+}
+const masterSessionKeyExpected = JSON.parse(readFileSync(`${masterSessionKeyFixtureRoot}/${masterSessionKeyFixture.expected}`, 'utf8')) as {
+  childBaseUrl: string
+  childSegments: Array<{
+    encrypted: boolean
+    keyUrl: string | null
+    sequence: number
+    url: string
+  }>
+  masterBaseUrl: string
+  masterDownloadKeyCount: number
+  missingVariableError: string
+  variantUrl: string
+}
+
 const keySupportFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-key-support-boundary', import.meta.url))
 const keySupportFixture = JSON.parse(readFileSync(`${keySupportFixtureRoot}/fixture.json`, 'utf8')) as {
   expected: string
@@ -346,6 +369,34 @@ describe('Cat Catch HLS parser', () => {
       type: rendition.type,
       url: rendition.url,
     }))).toEqual(masterRenditionExpected.renditions)
+  })
+
+  it('hls.master-session-key-exclusion', () => {
+    const master = parseHlsManifest({
+      baseUrl: masterSessionKeyExpected.masterBaseUrl,
+      text: readFileSync(`${masterSessionKeyFixtureRoot}/${masterSessionKeyFixture.inputs.master}`, 'utf8'),
+    })
+    expect(master.keys).toHaveLength(masterSessionKeyExpected.masterDownloadKeyCount)
+    expect(master.variants.map(variant => variant.url)).toEqual([
+      masterSessionKeyExpected.variantUrl,
+    ])
+
+    const child = parseHlsManifest({
+      baseUrl: masterSessionKeyExpected.childBaseUrl,
+      parentVariableList: master.variableList,
+      text: readFileSync(`${masterSessionKeyFixtureRoot}/${masterSessionKeyFixture.inputs.child}`, 'utf8'),
+    })
+    expect(child.segments.map(segment => ({
+      encrypted: segment.encrypted,
+      keyUrl: segment.key?.url || null,
+      sequence: segment.sequence,
+      url: segment.url,
+    }))).toEqual(masterSessionKeyExpected.childSegments)
+
+    expect(() => parseHlsManifest({
+      baseUrl: masterSessionKeyExpected.masterBaseUrl,
+      text: readFileSync(`${masterSessionKeyFixtureRoot}/${masterSessionKeyFixture.inputs.missingVariable}`, 'utf8'),
+    })).toThrow(masterSessionKeyExpected.missingVariableError)
   })
 
   it('hls.key-support-inheritance', () => {

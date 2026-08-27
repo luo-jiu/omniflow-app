@@ -1,0 +1,7 @@
+#EXTM3U
+#EXT-X-TARGETDURATION:4
+#EXT-X-SESSION-KEY:METHOD=AES-128,URI="{$missing}/ignored-media-session.key"
+#EXT-X-MEDIA-SEQUENCE:10
+#EXTINF:4,
+clear.ts
+#EXT-X-ENDLIST
