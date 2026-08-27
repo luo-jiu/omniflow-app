@@ -140,6 +140,23 @@ const emptyValuedTagExpected = JSON.parse(readFileSync(`${emptyValuedTagFixtureR
   playlistType: string
   undefinedVariableError: string
 }
+const mediaModeFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-media-parser-mode-isolation', import.meta.url))
+const mediaModeFixture = JSON.parse(readFileSync(`${mediaModeFixtureRoot}/fixture.json`, 'utf8')) as {
+  expected: string
+  input: string
+}
+const mediaModeExpected = JSON.parse(readFileSync(`${mediaModeFixtureRoot}/${mediaModeFixture.expected}`, 'utf8')) as {
+  baseUrl: string
+  durationSeconds: number
+  fragments: Array<{
+    duration: number
+    initUrl: string
+    iv: string
+    keyUrl: string
+    sequence: number
+    url: string
+  }>
+}
 const integerTagFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-integer-tag-token-boundary', import.meta.url))
 const integerTagFixture = JSON.parse(readFileSync(`${integerTagFixtureRoot}/fixture.json`, 'utf8')) as {
   expected: string
@@ -997,6 +1014,41 @@ describe('Cat Catch HLS parser', () => {
         'utf8',
       ),
     })).toThrow(emptyValuedTagExpected.undefinedVariableError)
+  })
+
+  it('hls.media-parser-mode-isolation', () => {
+    const manifest = parseHlsManifest({
+      baseUrl: mediaModeExpected.baseUrl,
+      text: readFileSync(`${mediaModeFixtureRoot}/${mediaModeFixture.input}`, 'utf8'),
+    })
+    expect(manifest).toMatchObject({
+      durationSeconds: mediaModeExpected.durationSeconds,
+      isMaster: false,
+      renditions: [],
+      variants: [],
+    })
+    expect(manifest.segments.map(segment => ({
+      duration: segment.duration,
+      initUrl: segment.map?.url,
+      iv: segment.key?.iv,
+      keyUrl: segment.key?.url,
+      sequence: segment.sequence,
+      url: segment.url,
+    }))).toEqual(mediaModeExpected.fragments)
+
+    const plan = createEmbeddedBrowserHlsDownloadPlan({
+      manifest,
+      manifestUrl: mediaModeExpected.baseUrl,
+    })
+    expect(plan.durationSeconds).toBe(mediaModeExpected.durationSeconds)
+    expect(plan.fragments.map(fragment => ({
+      duration: fragment.duration,
+      initUrl: fragment.initSegment?.url,
+      iv: fragment.key?.iv,
+      keyUrl: fragment.key?.url,
+      sequence: fragment.sequence,
+      url: fragment.url,
+    }))).toEqual(mediaModeExpected.fragments)
   })
 
   it('hls.integer-tag-token-boundary', () => {

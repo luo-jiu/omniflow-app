@@ -735,6 +735,7 @@
             "#EXTINF:\\s*(\\d*(?:\\.\\d+)?)(?:,(.*)\\s+)?",
             "#EXT-X-(PROGRAM-DATE-TIME|BYTERANGE|DATERANGE|DEFINE|KEY|MAP|PART|PART-INF|PLAYLIST-TYPE|PRELOAD-HINT|RENDITION-REPORT|SERVER-CONTROL|SKIP|START):(.+)",
             "hexadecimalInteger",
+            "isMediaPlaylist=function(e){return qr.test(e)}",
             "setByteRange"
           ]
         },
@@ -801,7 +802,8 @@
         "hls.valued-tag-boundary",
         "hls.integer-tag-token-boundary",
         "hls.extinf-token-boundary",
-        "hls.empty-valued-tag-boundary"
+        "hls.empty-valued-tag-boundary",
+        "hls.media-parser-mode-isolation"
       ],
       "testRefs": [
         "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.parser-core",
@@ -831,7 +833,8 @@
         "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.valued-tag-boundary",
         "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.integer-tag-token-boundary",
         "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.extinf-token-boundary",
-        "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.empty-valued-tag-boundary"
+        "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.empty-valued-tag-boundary",
+        "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.media-parser-mode-isolation"
       ],
       "acceptedDifferences": [
         "Pinned hls.js records the first variable parsing error on the playlist and its evented loader rejects that parse; the synchronous OmniFlow facade throws the same first error because it has no loader event boundary.",

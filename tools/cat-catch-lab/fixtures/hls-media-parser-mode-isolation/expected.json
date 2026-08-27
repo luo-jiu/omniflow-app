@@ -1,0 +1,38 @@
+{
+  "baseUrl": "https://media.example/mode/playlist.m3u8",
+  "durationSeconds": 8,
+  "fragments": [
+    {
+      "duration": 4,
+      "initUrl": "https://media.example/mode/init.mp4",
+      "iv": "0x00000000000000000000000000000005",
+      "keyUrl": "https://media.example/mode/key.bin",
+      "sequence": 5,
+      "url": "https://media.example/mode/a.m4s"
+    },
+    {
+      "duration": 0,
+      "initUrl": "https://media.example/mode/init.mp4",
+      "iv": "0x00000000000000000000000000000006",
+      "keyUrl": "https://media.example/mode/key.bin",
+      "sequence": 6,
+      "url": "https://media.example/mode/shadow-nonempty.m4s"
+    },
+    {
+      "duration": 0,
+      "initUrl": "https://media.example/mode/init.mp4",
+      "iv": "0x00000000000000000000000000000007",
+      "keyUrl": "https://media.example/mode/key.bin",
+      "sequence": 7,
+      "url": "https://media.example/mode/shadow-empty.m4s"
+    },
+    {
+      "duration": 4,
+      "initUrl": "https://media.example/mode/init.mp4",
+      "iv": "0x00000000000000000000000000000008",
+      "keyUrl": "https://media.example/mode/key.bin",
+      "sequence": 8,
+      "url": "https://media.example/mode/c.m4s"
+    }
+  ]
+}

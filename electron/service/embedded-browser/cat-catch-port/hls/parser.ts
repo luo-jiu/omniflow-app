@@ -8,7 +8,8 @@
  * Adaptation: pure parser only; Electron fetching and output stay outside the port.
  * Fixtures: hls.byterange-map-key-discontinuity, hls.map-byterange-independent,
  * hls.map-leading-byterange-transfer, hls-valued-tag-boundary,
- * hls-extinf-token-boundary, hls-empty-valued-tag-boundary
+ * hls-extinf-token-boundary, hls-empty-valued-tag-boundary,
+ * hls-media-parser-mode-isolation
  */
 
 import { createHlsDefaultIv } from './decrypt'
@@ -819,11 +820,11 @@ export function parseHlsManifest(input: {
     }
     // Pinned hls.js requires a colon immediately after valued tag names. Its
     // no-value tag regex has different prefix behavior, preserved below.
-    if (line.startsWith('#EXT-X-STREAM-INF:')) {
+    if (!hasMediaPlaylistSyntax && line.startsWith('#EXT-X-STREAM-INF:')) {
       pendingVariantLine = line
       continue
     }
-    if (line.startsWith('#EXT-X-MEDIA:')) {
+    if (!hasMediaPlaylistSyntax && line.startsWith('#EXT-X-MEDIA:')) {
       const rendition = createHlsRendition(line, baseUrl, variableState)
       if (rendition) renditions.push(rendition)
       continue

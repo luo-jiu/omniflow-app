@@ -941,6 +941,20 @@
 - legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
 - validation: 固定 Cat Catch vendor executable oracle 输出 `3 fragments / duration=12 / sn=10..12 / type=VOD`，保留首片 `20..24` range、三片共同 MAP/key 与逐 sequence IV；裸 DEFINE 引用报 `Missing preceding EXT-X-DEFINE...`。失败证据为 parser `30/31`，空 PLAYLIST-TYPE 被误判为重复声明。实现后 parser `31/31`、完整 HLS 集合 `88/88`、TypeScript、全仓 ESLint、fixture/capability JSON、轻量 validator、固定上游校验、同步校验 `16/16`、metadata `7 units / 32 capabilities / 196 anchors / 106 cleanup entries / 138 planned IDs / 92 active refs` 和 scoped diff check 通过。排除 4 个需监听本机端口的文件及已由 `node --test` 单独执行的同步文件后，全量 Vitest 为 `178 files / 1162 passed / 3 skipped`；4 个 loopback 文件在沙箱外复跑 `20/20`，合计全部可执行测试 `1182 passed / 3 skipped`。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
 
+## 2026-08-28: same target (HLS media parser mode isolation)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，固定实际 vendor 为 hls.js `1.6.16`。
+- reviewedThrough / portedThrough: 均保持 `null`；本步闭合 `isMediaPlaylist` 判定后 master-only 标签不能反向污染 media 下载列表的边界，仍未完成 hls-engine cutover。
+- change groups: `behavioral`（固定 master/media parser 选择）与 `download-projection`（被错误吞掉的 media URI 恢复到 fragment/plan）。
+- affected capability IDs: `hls.parser-planner` 保持 `ported-unverified`；新增 1 个 active test ID 和 1 个固定上游 anchor。
+- fixtures/tests: 新增 upstream-executable fixture `hls-media-parser-mode-isolation`；`hls.media-parser-mode-isolation` 覆盖 media playlist 内非空/裸 `STREAM-INF` 和 `EXT-X-MEDIA` 只走 level fallback，两个后续 URI 均作为零时长 fragment，并同时锁定 manifest/download plan 的 URL、sequence、MAP、AES key/implicit IV 和总时长。
+- accepted difference: 无。Cat Catch 的 hls.js loader 先用 `EXTINF/TARGETDURATION` 选择 `parseLevelPlaylist`；OmniFlow pure facade 在同一判定后隔离 master-only variant/rendition 分支。
+- excluded changes and reasons: 不扩展到未被 `isMediaPlaylist` 选中的 master 内混入其他 media-only 标签，也不投影 Cat Catch `parseTs` 不消费的播放 metadata。
+- unresolved gaps: HLS 其余真正影响下载的 parser 差分、live 未捕获 URL 过渡 DTO、加密 fMP4/video 真实输出组合、真实网站手工验证和最终 hls-engine cutover。
+- runtime changes: `EXT-X-STREAM-INF` 与 `EXT-X-MEDIA` 仅在 `hasMediaPlaylistSyntax=false` 时进入 master parser；media 模式下标签保持 fallback，其后的 URI 继续走既有 `addSegment` 并继承当前 MAP/key/sequence owner。
+- legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
+- validation: 固定 Cat Catch vendor executable oracle 输出 `4 fragments / duration=8 / sn=5..8 / levelCount=1 / audioTrackCount=0`，两个 mixed-syntax URI 为零时长且共同继承 init/key 与逐 sequence IV。失败证据为 parser `31/32`：manifest 被误标 master，生成 2 个 variant/1 个 rendition 并漏掉两片。实现后 parser `32/32`、完整 HLS 集合 `89/89`、TypeScript、全仓 ESLint、fixture/capability JSON、轻量 validator、固定上游校验、同步校验 `16/16`、metadata `7 units / 32 capabilities / 197 anchors / 106 cleanup entries / 139 planned IDs / 93 active refs` 和 scoped diff check 通过。排除 4 个需监听本机端口的文件及已由 `node --test` 单独执行的同步文件后，全量 Vitest 为 `178 files / 1163 passed / 3 skipped`；4 个 loopback 文件在沙箱外复跑 `20/20`，合计全部可执行测试 `1183 passed / 3 skipped`。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
+
 ## Template
 
 ```markdown
