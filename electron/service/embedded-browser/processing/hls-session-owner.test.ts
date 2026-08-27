@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import { EmbeddedBrowserHlsSessionOwner } from './hls-session-owner'
+import {
+  createEmbeddedBrowserHlsHostLifecycle,
+  EmbeddedBrowserHlsSessionOwner,
+} from './hls-session-owner'
 
 type RetrySession = {
   failedFragments: number[]
@@ -175,6 +178,64 @@ describe('EmbeddedBrowser HLS session owner', () => {
     expect(secondSignal?.aborted).toBe(false)
     finishSecondTask()
     await expect(secondTask).resolves.toBe('second-finished')
+  })
+
+  it.each([
+    'onDocumentNavigated',
+    'onTabClosed',
+    'onViewDestroyed',
+    'onViewRenderProcessGone',
+  ] as const)('hls.live-tab-close-exit: %s', async (lifecycleEvent) => {
+    const owner = new EmbeddedBrowserHlsSessionOwner<RetrySession, LiveSession>()
+    const lifecycle = createEmbeddedBrowserHlsHostLifecycle(owner)
+    let activeSignal: AbortSignal | undefined
+    const activeTask = owner.runActiveTask({
+      requestId: `active-${lifecycleEvent}`,
+      tabId: 'tab-lifecycle',
+    }, async (signal) => {
+      activeSignal = signal
+      await new Promise<void>((resolve) => {
+        signal.addEventListener('abort', () => resolve(), { once: true })
+      })
+    })
+
+    await lifecycle[lifecycleEvent]('tab-lifecycle')
+
+    await expect(activeTask).resolves.toBeUndefined()
+    expect(activeSignal?.aborted).toBe(true)
+  })
+
+  it('awaits cleanup already claimed by a lifecycle event during disposal', async () => {
+    let finishDiscard: () => void = () => {}
+    const discard = vi.fn(async () => {
+      await new Promise<void>((resolve) => {
+        finishDiscard = resolve
+      })
+    })
+    const owner = new EmbeddedBrowserHlsSessionOwner<RetrySession, LiveSession>()
+    owner.upsertLive({
+      recorder: {
+        discard,
+        getCurrentWorkDirectoryPath: () => '',
+      },
+      requestId: 'live-pending-cleanup',
+      tabId: 'tab-pending-cleanup',
+    })
+
+    const lifecycleCleanup = owner.clear({ tabId: 'tab-pending-cleanup' })
+    await vi.waitFor(() => {
+      expect(discard).toHaveBeenCalledOnce()
+    })
+    let disposeSettled = false
+    const disposePromise = owner.dispose().then(() => {
+      disposeSettled = true
+    })
+    await Promise.resolve()
+    expect(disposeSettled).toBe(false)
+
+    finishDiscard()
+    await Promise.all([lifecycleCleanup, disposePromise])
+    expect(disposeSettled).toBe(true)
   })
 
   it('keeps equal renderer request ids isolated by tab', async () => {

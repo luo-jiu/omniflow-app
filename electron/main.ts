@@ -389,7 +389,7 @@ function createWindow() {
 const appGracefulShutdown = createAppGracefulShutdown({
   cleanup: async () => {
     appUpdateService.dispose()
-    embeddedBrowserMainController.dispose()
+    await embeddedBrowserMainController.dispose()
     if (mainWindow && !mainWindow.isDestroyed()) {
       saveWindowState(mainWindow)
     }

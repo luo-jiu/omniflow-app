@@ -161,6 +161,7 @@ import {
   EmbeddedBrowserHlsLiveRecorder,
 } from './embeddedBrowserHlsLiveRecorder'
 import {
+  createEmbeddedBrowserHlsHostLifecycle,
   EmbeddedBrowserHlsSessionOwner,
 } from './embedded-browser/processing/hls-session-owner'
 import {
@@ -230,6 +231,9 @@ export function createEmbeddedBrowserMainController(
     EmbeddedBrowserHlsRetrySession,
     EmbeddedBrowserHlsLiveRecordingSession
   >()
+  const embeddedBrowserHlsHostLifecycle = createEmbeddedBrowserHlsHostLifecycle(
+    embeddedBrowserHlsSessionOwner,
+  )
   const embeddedBrowserMseSpoolFiles = new Map<string, EmbeddedBrowserMseSpoolFile>()
   const embeddedBrowserMseSpoolWriteQueues = new Map<string, Promise<EmbeddedBrowserMseSpoolFile | null>>()
   let activeEmbeddedBrowserTabId: string | null = null
@@ -592,11 +596,7 @@ export function createEmbeddedBrowserMainController(
     requestId?: string
     tabId?: string
   }) {
-    await embeddedBrowserHlsSessionOwner.clearActive(options)
-    await Promise.all([
-      embeddedBrowserHlsSessionOwner.clearRetry(options),
-      embeddedBrowserHlsSessionOwner.clearLive(options),
-    ])
+    await embeddedBrowserHlsSessionOwner.clear(options)
   }
 
   function emitCredentialCaptured(payload: EmbeddedBrowserCapturedCredentialEvent) {
@@ -2684,7 +2684,7 @@ export function createEmbeddedBrowserMainController(
       onDocumentNavigated: (navigatedTabId) => {
         cancelEmbeddedBrowserLibraryFileDropRequests(navigatedTabId)
         cleanupEmbeddedBrowserDroppedFilesForTab(navigatedTabId)
-        void clearEmbeddedBrowserHlsSessions({ tabId: navigatedTabId })
+        void embeddedBrowserHlsHostLifecycle.onDocumentNavigated(navigatedTabId)
       },
       onLibraryFileDropPayload: (dropTabId, payload) => {
         void handleLibraryFileDropPayload(dropTabId, payload)
@@ -2700,10 +2700,10 @@ export function createEmbeddedBrowserMainController(
       onViewDestroyed: (destroyedTabId) => {
         cancelEmbeddedBrowserLibraryFileDropRequests(destroyedTabId)
         cleanupEmbeddedBrowserDroppedFilesForTab(destroyedTabId)
-        void clearEmbeddedBrowserHlsSessions({ tabId: destroyedTabId })
+        void embeddedBrowserHlsHostLifecycle.onViewDestroyed(destroyedTabId)
       },
       onViewRenderProcessGone: (crashedTabId) => {
-        void clearEmbeddedBrowserHlsSessions({ tabId: crashedTabId })
+        void embeddedBrowserHlsHostLifecycle.onViewRenderProcessGone(crashedTabId)
       },
       syncBounds: syncEmbeddedBrowserViewBounds,
       tabId,
@@ -2819,7 +2819,7 @@ export function createEmbeddedBrowserMainController(
     }
   }
 
-  function closeEmbeddedBrowserTab(targetWindow: BrowserWindow | null, tabId: string) {
+  async function closeEmbeddedBrowserTab(targetWindow: BrowserWindow | null, tabId: string) {
     if (!targetWindow || targetWindow.isDestroyed()) {
       return
     }
@@ -2827,6 +2827,7 @@ export function createEmbeddedBrowserMainController(
     if (!normalizedTabId) {
       return
     }
+    const hlsCleanupPromise = embeddedBrowserHlsHostLifecycle.onTabClosed(normalizedTabId)
     cancelEmbeddedBrowserLibraryFileDropRequests(normalizedTabId)
     cleanupEmbeddedBrowserDroppedFilesForTab(normalizedTabId)
     if (activeEmbeddedBrowserTabId === normalizedTabId) {
@@ -2851,17 +2852,16 @@ export function createEmbeddedBrowserMainController(
       pendingOpenFiles: embeddedBrowserPendingOpenFiles,
       tabId: normalizedTabId,
     })
-    void clearEmbeddedBrowserHlsSessions({ tabId: normalizedTabId })
     void clearEmbeddedBrowserMseSpoolFiles({ tabId: normalizedTabId })
-    if (!view) {
-      return
+    if (view) {
+      if (targetWindow.contentView.children.includes(view)) {
+        targetWindow.contentView.removeChildView(view)
+      }
+      if (!view.webContents.isDestroyed()) {
+        view.webContents.close({ waitForBeforeUnload: false })
+      }
     }
-    if (targetWindow.contentView.children.includes(view)) {
-      targetWindow.contentView.removeChildView(view)
-    }
-    if (!view.webContents.isDestroyed()) {
-      view.webContents.close({ waitForBeforeUnload: false })
-    }
+    await hlsCleanupPromise
   }
 
   async function handleOpenTab(sender: Electron.WebContents, tabId: string, url?: string) {
@@ -3070,7 +3070,7 @@ export function createEmbeddedBrowserMainController(
       state: 'loading',
       url: reloadUrl,
     })
-    closeEmbeddedBrowserTab(targetWindow, normalizedTabId)
+    await closeEmbeddedBrowserTab(targetWindow, normalizedTabId)
     const nextView = activateEmbeddedBrowserTab(targetWindow, normalizedTabId, { createIfMissing: true })
     if (!nextView) {
       return false
@@ -3433,9 +3433,9 @@ export function createEmbeddedBrowserMainController(
     activeView.setBounds(nextBounds)
   }
 
-  function handleCloseTab(sender: Electron.WebContents, tabId: string) {
+  async function handleCloseTab(sender: Electron.WebContents, tabId: string) {
     const targetWindow = BrowserWindow.fromWebContents(sender) ?? options.getMainWindow()
-    closeEmbeddedBrowserTab(targetWindow, tabId)
+    await closeEmbeddedBrowserTab(targetWindow, tabId)
   }
 
   async function handleCleanupDownloadFile(tempPath: string) {
@@ -3490,7 +3490,7 @@ export function createEmbeddedBrowserMainController(
     detachActiveEmbeddedBrowserView(targetWindow)
   }
 
-  function handleCloseAll(sender: Electron.WebContents) {
+  async function handleCloseAll(sender: Electron.WebContents) {
     const targetWindow = BrowserWindow.fromWebContents(sender) ?? options.getMainWindow()
     if (!targetWindow || targetWindow.isDestroyed()) {
       return
@@ -3498,9 +3498,11 @@ export function createEmbeddedBrowserMainController(
     for (const tabId of embeddedBrowserLibraryFileDropRequests.keys()) {
       cancelEmbeddedBrowserLibraryFileDropRequests(tabId)
     }
-    Array.from(embeddedBrowserViews.keys()).forEach((tabId) => {
-      closeEmbeddedBrowserTab(targetWindow, tabId)
-    })
+    await Promise.all(
+      Array.from(embeddedBrowserViews.keys()).map((tabId) => (
+        closeEmbeddedBrowserTab(targetWindow, tabId)
+      )),
+    )
     activeEmbeddedBrowserTabId = null
     selectEmbeddedBrowserTab(null)
     clearEmbeddedBrowserPageDragSources()
@@ -3608,8 +3610,8 @@ export function createEmbeddedBrowserMainController(
     })
   }
 
-  function dispose() {
-    const hlsCleanupPromise = embeddedBrowserHlsSessionOwner.dispose()
+  async function dispose() {
+    const hlsCleanupPromise = embeddedBrowserHlsHostLifecycle.dispose()
     captureRuntime?.dispose()
     captureRuntime = null
     for (const tabId of embeddedBrowserLibraryFileDropRequests.keys()) {
@@ -3629,7 +3631,7 @@ export function createEmbeddedBrowserMainController(
     })
     embeddedBrowserPendingOpenFiles.clear()
     embeddedBrowserAttachedOpenFiles.clear()
-    void hlsCleanupPromise.catch(() => undefined)
+    await hlsCleanupPromise
   }
 
   return {

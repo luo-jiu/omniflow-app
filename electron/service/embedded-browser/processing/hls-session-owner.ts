@@ -74,6 +74,8 @@ export class EmbeddedBrowserHlsSessionOwner<
 
   private nextActiveTaskId = 0
 
+  private readonly pendingSessionCleanups = new Set<Promise<void>>()
+
   private readonly removeWorkDirectory: (workDirectoryPath: string) => Promise<void>
 
   private readonly retrySessions = new Map<string, RetrySession>()
@@ -86,7 +88,7 @@ export class EmbeddedBrowserHlsSessionOwner<
 
   upsertRetry(session: RetrySession) {
     if (this.disposed) {
-      void this.cleanupRetrySession(session)
+      void this.trackSessionCleanup(this.cleanupRetrySession(session))
       return false
     }
     this.retrySessions.set(createSessionKey(session.tabId, session.requestId), session)
@@ -106,7 +108,7 @@ export class EmbeddedBrowserHlsSessionOwner<
 
   upsertLive(session: LiveSession) {
     if (this.disposed) {
-      void this.cleanupLiveSession(session)
+      void this.trackSessionCleanup(this.cleanupLiveSession(session))
       return false
     }
     this.liveSessions.set(createSessionKey(session.tabId, session.requestId), session)
@@ -184,7 +186,9 @@ export class EmbeddedBrowserHlsSessionOwner<
     sessions.forEach((session) => {
       this.retrySessions.delete(createSessionKey(session.tabId, session.requestId))
     })
-    await Promise.all(sessions.map((session) => this.cleanupRetrySession(session)))
+    await this.trackSessionCleanup(
+      Promise.all(sessions.map((session) => this.cleanupRetrySession(session))).then(() => undefined),
+    )
   }
 
   async clearLive(filter: EmbeddedBrowserHlsSessionFilter) {
@@ -192,16 +196,33 @@ export class EmbeddedBrowserHlsSessionOwner<
     sessions.forEach((session) => {
       this.liveSessions.delete(createSessionKey(session.tabId, session.requestId))
     })
-    await Promise.all(sessions.map((session) => this.cleanupLiveSession(session)))
+    await this.trackSessionCleanup(
+      Promise.all(sessions.map((session) => this.cleanupLiveSession(session))).then(() => undefined),
+    )
+  }
+
+  async clear(filter: EmbeddedBrowserHlsSessionFilter) {
+    await this.clearActive(filter)
+    await Promise.all([
+      this.clearRetry(filter),
+      this.clearLive(filter),
+    ])
   }
 
   async dispose() {
     this.disposed = true
-    await this.clearActive({ all: true })
-    await Promise.all([
-      this.clearRetry({ all: true }),
-      this.clearLive({ all: true }),
-    ])
+    await this.clear({ all: true })
+    while (this.pendingSessionCleanups.size) {
+      await Promise.all(this.pendingSessionCleanups)
+    }
+  }
+
+  private trackSessionCleanup(cleanup: Promise<void>) {
+    this.pendingSessionCleanups.add(cleanup)
+    void cleanup.finally(() => {
+      this.pendingSessionCleanups.delete(cleanup)
+    })
+    return cleanup
   }
 
   private async cleanupRetrySession(session: RetrySession) {
@@ -215,5 +236,20 @@ export class EmbeddedBrowserHlsSessionOwner<
     if (workDirectoryPath) {
       await this.removeWorkDirectory(workDirectoryPath).catch(() => undefined)
     }
+  }
+}
+
+export function createEmbeddedBrowserHlsHostLifecycle<
+  RetrySession extends EmbeddedBrowserHlsRetrySessionBase,
+  LiveSession extends EmbeddedBrowserHlsLiveSessionBase,
+>(owner: EmbeddedBrowserHlsSessionOwner<RetrySession, LiveSession>) {
+  const clearTab = (tabId: string) => owner.clear({ tabId })
+
+  return {
+    dispose: () => owner.dispose(),
+    onDocumentNavigated: clearTab,
+    onTabClosed: clearTab,
+    onViewDestroyed: clearTab,
+    onViewRenderProcessGone: clearTab,
   }
 }

@@ -498,7 +498,7 @@
 - observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动。
 - reviewedThrough / portedThrough: 均保持 `null`；本步闭合 active HLS fetch/ffmpeg 的宿主取消传播，仍未完成 hls-engine 或 output-integration cutover。
 - change groups: `platform-adaptation`（main-only active-task ownership、跨平台 ffmpeg process-tree 终止和 partial output 清理）。
-- affected capability IDs: `hls.segment-pipeline`、`hls.live-recording` 保持 `porting`；`output.ffmpeg-process-owner` 从 `pending` 进入 `porting`。
+- affected capability IDs: `hls.segment-pipeline`、`hls.live-recording` 保持 `porting`；`output.ffmpeg-process-owner` 保持 `pending`，本步只闭合其 HLS 子路径。
 - fixtures/tests: `hls.active-task-tab-cancel` 覆盖只中止匹配 tab 并等待 settlement；扩展 `hls.session-owner-dispose` 锁定 active task 完成前不得删除 retry/live workdir；`output.ffmpeg-cancel-exit` 覆盖 AbortSignal 到进程树终止与 partial output 删除；`output.ffmpeg-process-cleanup` 覆盖非零退出清理。
 - accepted difference: Cat Catch 由扩展 downloader tab/unload 管理任务；OmniFlow 让专用 HLS owner 持有 `AbortController + settled Promise`，不实现通用 scheduler、持久化任务中心或第二份 renderer 状态。
 - excluded changes and reasons: 不在本步迁移 ffmpeg path probe、resource merge/transcode、MPD merge，也不修改其他 Agent 正在接入的应用 graceful-shutdown 代码。
@@ -512,7 +512,7 @@
 - observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动。
 - reviewedThrough / portedThrough: 均保持 `null`；本步只补真实二进制输出证据，仍未完成 hls-engine 或 output-integration cutover。
 - change groups: `verification`（生产 manifest ffmpeg wrapper 的真实容器与音轨交付检查）。
-- affected capability IDs: `hls.segment-pipeline`、`output.ffmpeg-process-owner` 均保持 `porting`。
+- affected capability IDs: `hls.segment-pipeline` 保持 `porting`；`output.ffmpeg-process-owner` 保持 `pending`，本步只补其 HLS 子路径证据。
 - fixtures/tests: `embeddedBrowserHlsRealOutput.test.ts#hls.real-ffmpeg-ffprobe-output` 运行时生成 0.5 秒 AAC HLS，调用生产 wrapper，并用 ffprobe 断言输出为非空 MP4、包含 AAC 音轨且时长为正；本机缺少 ffmpeg/ffprobe 时明确 skip。
 - accepted difference: 测试不提交二进制 fixture；使用本机已解析的桌面媒体二进制生成临时输入，测试结束删除全部临时文件。
 - excluded changes and reasons: 不在本步覆盖视频、加密 HLS、应用退出等待、一次性 cache fallback、完整 parser 或生产 decrypt 接入。
@@ -520,6 +520,20 @@
 - runtime changes: 无；只为现有生产 ffmpeg wrapper 增加真实二进制 integration 证据。
 - legacy cleanup: 无；旧 output 路径继续保留到 cutover 证据完整。
 - validation: 真实输出测试 1/1、完整 HLS Vitest 30/30、仓库级 lint、TypeScript、`cat-catch:validate`、同步校验 16/16 和 scoped diff check 通过；完整 build 未运行，避免覆盖其他 Agent 正在修改的 `dist-electron/**`。
+
+## 2026-08-27: same target (production HLS host lifecycle)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动。
+- reviewedThrough / portedThrough: 均保持 `null`；本步闭合 HLS 宿主生命周期和应用退出等待，仍未完成 hls-engine cutover。
+- change groups: `platform-adaptation`（Electron view/controller/app 生命周期到 main-only HLS owner）。
+- affected capability IDs: `hls.segment-pipeline`、`hls.live-recording` 保持 `porting`；`output.ffmpeg-process-owner` 保持 `pending`，因为非 HLS 的 4 个 ffmpeg 入口仍未统一。
+- fixtures/tests: `hls.live-tab-close-exit` 逐项覆盖 navigation、tab close、view destroyed 和 render-process-gone 到 active task AbortSignal；owner disposal 测试补充“先前事件已取走的 live session cleanup 仍必须被退出等待”。
+- accepted difference: Cat Catch 由扩展 tab/downloader unload 管理；OmniFlow 使用 controller-owned host lifecycle，并让 close/close-all IPC 与 graceful shutdown 返回/等待异步清理，不增加 renderer task owner。
+- excluded changes and reasons: 不在本步创建应用级通用 task registry，也不迁移 MPD、resource merge/transcode、ffmpeg probe 或旧 toolkit。
+- unresolved gaps: 一次性 manifest cache fallback、直拉/track authority、完整 parser、生产 decrypt、renderer listener recovery 和非 HLS ffmpeg owner。
+- runtime changes: HLS owner 新增统一 clear 与在途 session cleanup 跟踪；生产 navigation、tab close、view destroyed、render-process-gone 和 controller dispose 统一进入 host lifecycle；main graceful shutdown 显式 await controller dispose。
+- legacy cleanup: 无；旧 HLS dispatch/downloader/recorder 仍保留到 cutover 证据完整。
+- validation: 定向 HLS/shutdown Vitest 37/37、仓库级 lint、TypeScript、`cat-catch:validate`、同步校验 16/16 和 scoped diff check 通过；完整 build 未运行，避免覆盖其他 Agent 正在修改的 `dist-electron/**`。
 
 ## Template
 
