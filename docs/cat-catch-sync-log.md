@@ -339,6 +339,20 @@
 - legacy cleanup: 无。
 - validation: 失败 fixture 先复现 `1/2`，实现后 parser fixture 2/2、HLS 相关 Vitest 3/3、TypeScript、定向 lint、`cat-catch:validate` 和同步校验 16/16 通过；未运行会覆盖其他 Agent `dist-electron/**` 的 build，也未做真实页面验证。
 
+## 2026-08-27: same target (HLS disguised-fragment preprocessing)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动。
+- reviewedThrough / portedThrough: 均保持 `null`；本步只完成纯 preprocessing port，未接入下载 pipeline 或 hls-engine cutover。
+- change groups: `behavioral`（`dataPreprocessing` 对 PNG/JPEG 前缀、完整结束标记和异常回退的处理）。
+- affected capability IDs: `hls.cache-fallback-disguised-fragments` 改为 `porting`，`hls.decrypt-preprocess-order` 仍待实现。
+- fixtures/tests: 新增 active fixture `hls-disguised-fragment-preprocess`，覆盖 PNG、JPEG、缺失结束标记、普通媒体和短输入。
+- accepted difference: 纯函数保持 ArrayBuffer 输入和原始 buffer 回退；是否启用预处理仍由后续 application/pipeline adapter 决定。
+- excluded changes and reasons: 不在本步实现一次性 manifest cache fallback、解密顺序、下载器 wiring 或生产 output 变更。
+- unresolved gaps: cache fallback、preprocess/decrypt 顺序、pipeline integration、HLS 统一 task/cleanup 和 production-equivalent smoke。
+- runtime changes: 新增 `electron/service/embedded-browser/cat-catch-port/hls/pipeline.ts#preprocessFragment`，只移除已确认完整的图片前缀，否则原样返回。
+- legacy cleanup: 无；`embeddedBrowserHlsLocalDownloaderService` 继续是生产 owner，直到 pipeline 证据完成。
+- validation: preprocessing fixture 1/1、TypeScript、定向 lint、`cat-catch:validate` 和同步校验待本步最终门禁确认；未运行会覆盖其他 Agent `dist-electron/**` 的 build，也未做真实页面验证。
+
 ## Template
 
 ```markdown

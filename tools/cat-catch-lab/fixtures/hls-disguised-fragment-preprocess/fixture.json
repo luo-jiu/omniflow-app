@@ -1,0 +1,13 @@
+{
+  "fixtureId": "hls-disguised-fragment-preprocess",
+  "capabilityIds": [
+    "hls.cache-fallback-disguised-fragments"
+  ],
+  "upstreamCommit": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
+  "status": "active",
+  "input": "input.json",
+  "expected": "expected.json",
+  "testRefs": [
+    "electron/service/embedded-browser/cat-catch-port/hls/pipeline.test.ts#hls.cache-fallback-disguised"
+  ]
+}

@@ -506,7 +506,7 @@
         "electron/service/embedded-browser/cat-catch-port/deep-search/runtime.ts#installDeepSearchRuntime"
       ],
       "relationToUpstream": "exact",
-      "syncState": "pending",
+      "syncState": "porting",
       "syncedThrough": null,
       "plannedTestIds": [
         "deep.hook-install-sentinels",
@@ -967,9 +967,11 @@
         "hls.cache-fallback-disguised",
         "hls.decrypt-preprocess-order"
       ],
-      "testRefs": [],
+      "testRefs": [
+        "electron/service/embedded-browser/cat-catch-port/hls/pipeline.test.ts#hls.cache-fallback-disguised"
+      ],
       "acceptedDifferences": [],
-      "notes": "Known unmapped gap: one-shot manifest cache fallback and PNG/JPEG disguised-fragment preprocessing are not present in the local production path."
+      "notes": "The pure port now preserves Cat Catch's conservative PNG/JPEG prefix removal with an unchanged-buffer fallback for incomplete signatures. One-shot manifest cache fallback, pipeline wiring, and decrypt/preprocess ordering remain open."
     },
     {
       "id": "dash.parser-planner",
