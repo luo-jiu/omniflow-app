@@ -52,5 +52,5 @@ export const sidePanelCompactIconButtonStyles = css`
   ${sidePanelIconButtonInteractiveStyles}
   width: ${SIDE_PANEL_TOGGLE_SIZE - 2}px;
   height: ${SIDE_PANEL_TOGGLE_SIZE - 2}px;
-  ${sidePanelIconGlyphStyles(15)}
+  ${sidePanelIconGlyphStyles(16)}
 `;

@@ -1,5 +1,4 @@
 import React from 'react';
-import { IconStar, IconStarStroked, IconMore } from '@douyinfe/semi-icons';
 import {
   CardItem,
   CardActions,
@@ -11,6 +10,39 @@ import {
 } from '../../style';
 import type { Library } from "@/features/file-explorer/services/file.api";
 import libraryFolderImage from '@/assets/images/library-folder-windows11.png';
+
+const LibraryCardStarIcon: React.FC<{ filled?: boolean }> = ({ filled = false }) => (
+  <svg
+    className="library-card-action-icon"
+    viewBox="0 0 16 16"
+    width="16"
+    height="16"
+    aria-hidden="true"
+    focusable="false"
+  >
+    <path
+      d="M8 1.75 9.83 5.5l4.14.6-3 2.92.71 4.12L8 11.2l-3.68 1.94.71-4.12-3-2.92 4.14-.6L8 1.75Z"
+      fill={filled ? 'currentColor' : 'none'}
+      stroke={filled ? 'none' : 'currentColor'}
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
+const LibraryCardMoreIcon: React.FC = () => (
+  <svg
+    className="library-card-action-icon"
+    viewBox="0 0 16 16"
+    width="16"
+    height="16"
+    aria-hidden="true"
+    focusable="false"
+  >
+    <path d="M2 7h2v2H2V7Zm5 0h2v2H7V7Zm5 0h2v2h-2V7Z" fill="currentColor" />
+  </svg>
+);
 
 interface LibraryCardProps {
   library: Library;
@@ -103,7 +135,7 @@ const LibraryCard: React.FC<LibraryCardProps> = ({
                 onClick={onToggleStar}
                 title={library.starred ? '取消收藏' : '收藏'}
               >
-                {library.starred ? <IconStar /> : <IconStarStroked />}
+                <LibraryCardStarIcon filled={library.starred} />
               </ActionIconBtn>
 
               <ActionIconBtn
@@ -111,7 +143,7 @@ const LibraryCard: React.FC<LibraryCardProps> = ({
                 onClick={onMoreClick}
                 title="更多操作"
               >
-                <IconMore />
+                <LibraryCardMoreIcon />
               </ActionIconBtn>
             </CardActions>
           ) : null}

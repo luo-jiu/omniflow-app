@@ -110,6 +110,23 @@ export const SideMenuAction = styled.button`
   align-items: center;
   justify-content: center;
 
+  .semi-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    font-size: 16px;
+    line-height: 1;
+  }
+
+  .semi-icon > svg,
+  svg {
+    display: block;
+    width: 16px;
+    height: 16px;
+  }
+
   &:hover {
     background: rgba(0, 0, 0, 0.05);
     color: var(--app-text);
@@ -201,9 +218,9 @@ export const LibraryMainToolbar = styled.div`
   }
 
   .toolbar-action-btn .semi-icon {
-    width: 15px;
-    height: 15px;
-    font-size: 15px;
+    width: 16px;
+    height: 16px;
+    font-size: 16px;
     line-height: 1;
     display: inline-flex;
     align-items: center;
@@ -212,8 +229,8 @@ export const LibraryMainToolbar = styled.div`
 
   .toolbar-action-btn .semi-icon > svg,
   .toolbar-action-btn svg {
-    width: 15px;
-    height: 15px;
+    width: 16px;
+    height: 16px;
     display: block;
   }
 
@@ -538,6 +555,13 @@ export const ActionIconBtn = styled.button`
   background: var(--app-bg-elevated);
   color: var(--app-text-secondary);
   cursor: pointer;
+
+  .library-card-action-icon {
+    display: block;
+    flex: 0 0 16px;
+    width: 16px;
+    height: 16px;
+  }
 
   &:hover {
     background: var(--app-panel-muted);

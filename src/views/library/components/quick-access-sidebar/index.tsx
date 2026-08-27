@@ -62,7 +62,7 @@ const QuickAccessSidebar: React.FC<QuickAccessSidebarProps> = ({
               title="资源监测"
               aria-label="资源监测"
             >
-              <IconPulse style={{ fontSize: 15 }} />
+              <IconPulse />
             </SideMenuAction>
           ) : null}
           <SideMenuAction
@@ -73,7 +73,7 @@ const QuickAccessSidebar: React.FC<QuickAccessSidebarProps> = ({
             title="设置"
             aria-label="设置"
           >
-            <IconSetting style={{ fontSize: 15 }} />
+            <IconSetting />
           </SideMenuAction>
         </div>
         {footerContent ? (
