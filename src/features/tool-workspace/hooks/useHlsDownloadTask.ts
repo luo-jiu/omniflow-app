@@ -1099,7 +1099,6 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
     } | null = null;
     try {
       const requestId = `hls-live-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const resourceHeaders = withResourceRefererHeader(hlsRequest.resource);
       activeHlsTaskRequestIdRef.current = requestId;
       activeHlsTaskManifestUrlRef.current = effectiveManifestUrl;
       setHlsTaskStatus({
@@ -1149,11 +1148,9 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
         requestId,
       };
       const result = await startEmbeddedBrowserHlsRecording(hlsRequest.resource.tabId, {
-        headers: resourceHeaders,
         manifestUrl: effectiveManifestUrl,
         manualKeyBase64: normalizedHlsManualKey || undefined,
         outputDirectoryPath: outputTarget.outputDirectoryPath,
-        pageUrl: undefined,
         resourceId: hlsRequest.resource.id,
         requestId,
         suggestedFileName: deriveHlsOutputFileName(effectiveManifestUrl),

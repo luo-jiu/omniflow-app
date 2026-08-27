@@ -2038,7 +2038,7 @@ export function createEmbeddedBrowserMainController(
           tabId: normalizedTabId,
         })
       : null
-    if (requestedResourceId && !authorityGrant && !exactResourceId) {
+    if (!authorityGrant) {
       return {
         error: 'HLS 直播捕捉资源已过期或不属于当前页面',
         ok: false,
@@ -2116,7 +2116,6 @@ export function createEmbeddedBrowserMainController(
             usingManualKey: Boolean(payload.manualKeyBase64),
           })
         },
-        pageUrl: payload.pageUrl,
         resolveParentVariableList: requestedResourceId && parentVariableAccess
           ? signal => resolveHlsLiveParentVariableList(parentVariableAccess, {
               selectedManifestUrl: manifestUrl,

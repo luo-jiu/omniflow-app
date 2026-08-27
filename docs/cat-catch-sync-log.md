@@ -871,6 +871,20 @@
 - legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
 - validation: 固定 Cat Catch vendor executable oracle 证明 MAP `[300,320]`、media `[100,115]`、implicit media `[115,127]` 及上述五类非法输出；失败证据为 parser `26/27` 且 MAP range 为 `undefined`。实现后 parser `27/27`、完整 HLS 集合 `83/83`、TypeScript、全仓 ESLint、fixture JSON、轻量 validator、固定上游 anchor 校验、同步校验 `16/16`、metadata `7 units / 32 capabilities / 194 anchors / 106 cleanup entries / 133 planned IDs / 87 active refs` 和本切片 diff check 通过。排除已由 `node --test` 单独执行的同步文件后，全量 Vitest 在沙箱内为 `1139 passed / 3 skipped / 16 loopback EPERM`；4 个 loopback 文件在沙箱外复跑 `20/20`，折算全部可执行测试为 `1155 passed / 3 skipped`。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
 
+## 2026-08-28: same target (live HLS selected child authority)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，固定实际 vendor 为 hls.js `1.6.16`。
+- reviewedThrough / portedThrough: 均保持 `null`；本步闭合 live start 从 captured source 到 selected child 首次请求的 authority 边界，仍未完成 hls-engine cutover。
+- change groups: `platform-adaptation`（opaque captured source 到 child 归属验证）与 `security-boundary`（验证前零 child fetch、收窄 live-start IPC）。
+- affected capability IDs: `hls.live-recording` 保持 `porting`；新增 1 个 active test ID，固定上游 anchor 不变。
+- fixtures/tests: `hls.live-selected-child-authority` 证明 main-owned resolver 在首次 child manifest fetch 前执行，hostile child 被拒绝后 fetch 次数为零；既有 parent-variable/abort/live terminal 用例同时证明 resolver 一次缓存和同一 AbortSignal。
+- accepted difference: Cat Catch 扩展页由自身 hls.js loader 直接持有 master/child 关系；OmniFlow 的 renderer 只提交 selected URL 和 opaque source resource id，main 重新读取 captured source 并验证 exact resource 或 variant/rendition 归属。该平台替代不改变合法 child、变量 IMPORT 或后续分片列表。
+- excluded changes and reasons: 不要求直播期间新出现的 key/map/media 预先被资源面板捕获；这些 URL 只能来自 main 已验证并解析的 child manifest，未命中 resource authority 时继续使用绑定 tab session 的 fetch。不扩展到 DASH 直拉、计划 shape 或旧 catch toolkit。
+- unresolved gaps: HLS 其余 master/media parser 差分、加密 fMP4/video 真实输出组合、真实网站手工验证、application-level output workflow 和最终 hls-engine cutover。
+- runtime changes: live-start IPC 的 `manifestUrl/resourceId/requestId` 改为必填并删除 renderer `headers/pageUrl`；main 无有效 source authority 时立即拒绝。Recorder 在首次 child fetch 前一次性调用 parent resolver，缓存 variable list 供后续 poll，拒绝时不请求 child；每次重新 start 都重新验证，并让 authority/manifest/segment 继续共用 recorder AbortSignal。
+- legacy cleanup: 删除 live-start renderer headers/pageUrl 过渡字段；未删除旧 HLS 执行链，保留到 hls-engine 原子 cutover。
+- validation: 失败证据为 live recorder `6/7`，hostile child start 错误地成功且 resolver 未执行；实现后 recorder `7/7`、定向 authority/IPC/renderer `14/14`、完整 HLS 集合 `84/84`、TypeScript、全仓 ESLint、轻量 validator、固定上游 anchor 校验、同步校验 `16/16`、metadata `7 units / 32 capabilities / 194 anchors / 106 cleanup entries / 134 planned IDs / 88 active refs` 和本切片 diff check 通过。排除已由 `node --test` 单独执行的同步文件后，全量 Vitest 在沙箱内为 `1140 passed / 3 skipped / 16 loopback EPERM`；4 个 loopback 文件在沙箱外复跑 `20/20`，折算全部可执行测试为 `1156 passed / 3 skipped`。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
+
 ## Template
 
 ```markdown

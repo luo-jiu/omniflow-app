@@ -48,7 +48,30 @@ describe('EmbeddedBrowser HLS live recorder', () => {
       expect(playlist).toContain('segments/00001.ts')
       expect(segment).toEqual(Buffer.from([0x47, 0x01, 0x02, 0x03]))
       expect(fetchImpl).toHaveBeenCalledTimes(2)
-      expect(resolveParentVariableList).not.toHaveBeenCalled()
+      expect(resolveParentVariableList).toHaveBeenCalledTimes(1)
+    } finally {
+      await recorder.discard()
+      await rm(directory, { force: true, recursive: true })
+    }
+  })
+
+  it('hls.live-selected-child-authority', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'omniflow-hls-live-child-authority-test-'))
+    const fetchImpl = vi.fn(async () => new Response(LIVE_MANIFEST))
+    const resolveParentVariableList = vi.fn(async () => {
+      throw new Error('所选直播 playlist 不属于当前 captured master')
+    })
+    const recorder = new EmbeddedBrowserHlsLiveRecorder({
+      fetch: fetchImpl,
+      manifestUrl: 'https://attacker.example/live.m3u8',
+      resolveParentVariableList,
+      workDirectoryPath: directory,
+    })
+
+    try {
+      await expect(recorder.start()).rejects.toThrow('所选直播 playlist 不属于当前 captured master')
+      expect(resolveParentVariableList).toHaveBeenCalledTimes(1)
+      expect(fetchImpl).not.toHaveBeenCalled()
     } finally {
       await recorder.discard()
       await rm(directory, { force: true, recursive: true })

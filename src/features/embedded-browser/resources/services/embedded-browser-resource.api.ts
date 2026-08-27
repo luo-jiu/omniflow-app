@@ -213,13 +213,11 @@ export async function startEmbeddedBrowserHlsRecording(
   tabId: string,
   payload: {
     ffmpegPath?: string;
-    headers?: Record<string, string>;
-    manifestUrl?: string;
+    manifestUrl: string;
     manualKeyBase64?: string;
     outputDirectoryPath?: string;
-    pageUrl?: string;
-    resourceId?: string;
-    requestId?: string;
+    resourceId: string;
+    requestId: string;
     suggestedFileName?: string;
     suggestedThreadCount?: number;
     useSystemSaveDialog?: boolean;

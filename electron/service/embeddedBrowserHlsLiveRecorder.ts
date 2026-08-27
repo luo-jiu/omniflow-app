@@ -58,8 +58,6 @@ type EmbeddedBrowserHlsLiveManifestSnapshot = {
   plan: EmbeddedBrowserHlsDownloadPlan
 }
 
-const HLS_IMPORT_DEFINE_PATTERN = /^#EXT-X-DEFINE:\s*IMPORT\s*=/m
-
 function createLiveFragmentKey(fragment: EmbeddedBrowserHlsDownloadFragment) {
   return `${fragment.sequence}|${fragment.url}`
 }
@@ -89,7 +87,6 @@ async function fetchEmbeddedBrowserHlsLiveManifestSnapshot(input: {
   manifestUrl: string
   parentVariableList?: Readonly<EmbeddedBrowserHlsVariableList>
   pageUrl?: string
-  resolveParentVariableList?: EmbeddedBrowserHlsLiveRecorderOptions['resolveParentVariableList']
   signal?: AbortSignal
   suggestedThreadCount?: number
 }): Promise<EmbeddedBrowserHlsLiveManifestSnapshot> {
@@ -112,13 +109,9 @@ async function fetchEmbeddedBrowserHlsLiveManifestSnapshot(input: {
   if (!text.includes('#EXTM3U')) {
     throw new Error('当前直播返回内容不像 HLS playlist')
   }
-  const parentVariableList = input.parentVariableList
-    || (HLS_IMPORT_DEFINE_PATTERN.test(text)
-      ? await input.resolveParentVariableList?.(input.signal)
-      : undefined)
   const manifest = parseEmbeddedBrowserHlsManifest({
     baseUrl: input.manifestUrl,
-    parentVariableList,
+    parentVariableList: input.parentVariableList,
     text,
   })
   const plan = createEmbeddedBrowserHlsDownloadPlan({
@@ -135,7 +128,7 @@ async function fetchEmbeddedBrowserHlsLiveManifestSnapshot(input: {
   }
   return {
     manifest,
-    parentVariableList,
+    parentVariableList: input.parentVariableList,
     plan: input.suggestedThreadCount && input.suggestedThreadCount > 0
       ? {
           ...plan,
@@ -170,6 +163,8 @@ export class EmbeddedBrowserHlsLiveRecorder {
 
   private parentVariableList?: Readonly<EmbeddedBrowserHlsVariableList>
 
+  private parentAuthorityResolved = false
+
   private playlistPath = ''
 
   private pollIntervalMs = 4000
@@ -203,6 +198,8 @@ export class EmbeddedBrowserHlsLiveRecorder {
       throw new Error('直播录制已经在进行中')
     }
     this.abortController = new AbortController()
+    this.parentAuthorityResolved = false
+    this.parentVariableList = undefined
     this.isRecording = true
     try {
       this.workDirectoryPath = this.workDirectoryPath || await mkdtemp(path.join(os.tmpdir(), 'omniflow-hls-live-'))
@@ -283,6 +280,12 @@ export class EmbeddedBrowserHlsLiveRecorder {
   }
 
   private async pollOnce(isInitial: boolean) {
+    if (!this.parentAuthorityResolved) {
+      this.parentVariableList = await this.resolveParentVariableList?.(
+        this.abortController?.signal,
+      )
+      this.parentAuthorityResolved = true
+    }
     const snapshot = await fetchEmbeddedBrowserHlsLiveManifestSnapshot({
       allowForceCacheFallback: isInitial,
       fetch: this.fetch,
@@ -290,7 +293,6 @@ export class EmbeddedBrowserHlsLiveRecorder {
       manifestUrl: this.manifestUrl,
       parentVariableList: this.parentVariableList,
       pageUrl: this.pageUrl,
-      resolveParentVariableList: this.resolveParentVariableList,
       signal: this.abortController?.signal,
       suggestedThreadCount: this.suggestedThreadCount,
     })

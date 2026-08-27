@@ -132,13 +132,11 @@ export type EmbeddedBrowserHlsRetrySessionCleanupPayload = {
 
 export type EmbeddedBrowserHlsRecordingStartPayload = {
   ffmpegPath?: string
-  headers?: Record<string, string>
-  manifestUrl?: string
+  manifestUrl: string
   manualKeyBase64?: string
   outputDirectoryPath?: string
-  pageUrl?: string
-  resourceId?: string
-  requestId?: string
+  resourceId: string
+  requestId: string
   suggestedFileName?: string
   suggestedThreadCount?: number
   useSystemSaveDialog?: boolean

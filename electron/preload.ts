@@ -670,13 +670,11 @@ contextBridge.exposeInMainWorld('electronEmbeddedBrowser', {
   }) => ipcRenderer.invoke('embedded-browser:resource:download-hls', tabId, payload),
   startHlsRecording: (tabId: string, payload: {
     ffmpegPath?: string;
-    headers?: Record<string, string>;
-    manifestUrl?: string;
+    manifestUrl: string;
     manualKeyBase64?: string;
     outputDirectoryPath?: string;
-    pageUrl?: string;
-    resourceId?: string;
-    requestId?: string;
+    resourceId: string;
+    requestId: string;
     suggestedFileName?: string;
     suggestedThreadCount?: number;
     useSystemSaveDialog?: boolean;
