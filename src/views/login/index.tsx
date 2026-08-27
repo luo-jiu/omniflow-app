@@ -1,5 +1,4 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { IconSun } from '@douyinfe/semi-icons';
 import { Toast } from '@douyinfe/semi-ui';
 import { useAuth } from '@/hooks/useAuth';
 import { useTheme } from '@/hooks/useTheme';
@@ -7,11 +6,18 @@ import { useNavigate } from 'react-router-dom';
 import styled from 'styled-components';
 
 const AuthMoonIcon: React.FC = () => (
-  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" shapeRendering="geometricPrecision">
     <path
       d="M17 15c.48 0 .94-.05 1.39-.14a7 7 0 1 1-7.78-9.72A7 7 0 0 0 17 15Z"
       transform="translate(12 12) scale(1.5) translate(-12 -12)"
     />
+  </svg>
+);
+
+const AuthSunIcon: React.FC = () => (
+  <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false" shapeRendering="geometricPrecision">
+    <circle cx="10" cy="10" r="3.35" />
+    <path d="M10 1.65v2.1M10 16.25v2.1M1.65 10h2.1M16.25 10h2.1M4.1 4.1l1.48 1.48M14.42 14.42l1.48 1.48M15.9 4.1l-1.48 1.48M5.58 14.42L4.1 15.9" />
   </svg>
 );
 
@@ -246,55 +252,52 @@ const LoginWrapper = styled.div`
 
   .auth-theme-icon {
     grid-area: 1 / 1;
-    width: 17px;
-    height: 17px;
+    width: 20px;
+    height: 20px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     color: var(--auth-theme-icon);
     transition:
-      opacity 220ms ease,
-      transform 280ms cubic-bezier(0.22, 1, 0.36, 1);
+      opacity 220ms ease;
   }
 
   .auth-theme-icon svg {
-    width: 17px;
-    height: 17px;
+    display: block;
+    width: 20px;
+    height: 20px;
     overflow: visible;
   }
 
-  .auth-theme-icon svg path {
+  .auth-theme-icon.moon svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  .auth-theme-icon svg path,
+  .auth-theme-icon svg circle {
     fill: none;
     stroke: currentColor;
-    stroke-width: 1.25;
+    stroke-width: 1.35;
     stroke-linecap: round;
     stroke-linejoin: round;
     vector-effect: non-scaling-stroke;
   }
 
-  .auth-theme-icon.sun svg path:not(:last-child) {
-    fill: currentColor;
-    stroke: none;
-  }
-
   .auth-theme-icon.sun {
     opacity: 0;
-    transform: rotate(-24deg) scale(0.72);
   }
 
   .auth-theme-icon.moon {
     opacity: 1;
-    transform: rotate(0deg) scale(1);
   }
 
   &[data-theme='dark'] .auth-theme-icon.sun {
     opacity: 1;
-    transform: rotate(0deg) scale(1);
   }
 
   &[data-theme='dark'] .auth-theme-icon.moon {
     opacity: 0;
-    transform: rotate(24deg) scale(0.72);
   }
 
   .panel h1 {
@@ -861,7 +864,7 @@ const Login: React.FC = () => {
               onClick={() => setTheme(resolvedTheme === 'dark' ? 'light' : 'dark')}
             >
               <span className="auth-theme-icon moon" aria-hidden="true"><AuthMoonIcon /></span>
-              <span className="auth-theme-icon sun" aria-hidden="true"><IconSun /></span>
+              <span className="auth-theme-icon sun" aria-hidden="true"><AuthSunIcon /></span>
             </button>
 
             <div
