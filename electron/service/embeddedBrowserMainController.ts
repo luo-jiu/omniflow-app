@@ -64,6 +64,7 @@ import {
   type EmbeddedBrowserHlsDownloadResponse,
   type EmbeddedBrowserDirectFileDownloadPayload,
   type EmbeddedBrowserDirectFileDownloadResponse,
+  type EmbeddedBrowserCapturedResourceDownloadPayload,
   type EmbeddedBrowserMainControllerOptions,
   type EmbeddedBrowserMpdDownloadPayload,
   type EmbeddedBrowserMpdDownloadResponse,
@@ -104,16 +105,6 @@ import {
   stageEmbeddedBrowserPageDrag,
 } from './embeddedBrowserPageDragService'
 import {
-  clearEmbeddedBrowserCapturedResources,
-  disposeEmbeddedBrowserCapturedResources,
-  getEmbeddedBrowserResourceCaptureSnapshot,
-  isEmbeddedBrowserDeepCaptureEnabled,
-  startEmbeddedBrowserDeepResourceCapture,
-  startEmbeddedBrowserResourceCapture,
-  stopEmbeddedBrowserResourceCapture,
-  type EmbeddedBrowserCapturedResource,
-} from './embeddedBrowserResourceService'
-import {
   listEmbeddedBrowserResourceCaptureRules,
   resetEmbeddedBrowserResourceCaptureRules,
   updateEmbeddedBrowserResourceCaptureRules,
@@ -125,11 +116,20 @@ import {
   resetEmbeddedBrowserExternalToolSettings,
   updateEmbeddedBrowserExternalToolSettings,
 } from './embeddedBrowserExternalTools'
+import { ExternalToolDispatcher } from './embedded-browser/integrations/external-tools'
 import {
-  buildEmbeddedBrowserProbeResourceRecorder,
   createEmbeddedBrowserView as createEmbeddedBrowserManagedView,
   installEmbeddedBrowserResourceProbe,
 } from './embeddedBrowserViewLifecycle'
+import { EmbeddedBrowserCaptureRuntime } from './embedded-browser/orchestration/embedded-browser-capture-runtime'
+import {
+  compileOmniFlowCaptureSettings,
+} from './embedded-browser/capture/policy/omniflow-capture-policy'
+import type {
+  ResourceStateChange,
+  ResourceStateSnapshot,
+} from './embedded-browser/contracts/captured-resource'
+import type { ExternalToolKey } from './embedded-browser/integrations/external-tools'
 import {
   EMBEDDED_BROWSER_RESOURCE_INSTALL_ERROR_KEY,
 } from './embeddedBrowserResourceProbe'
@@ -229,6 +229,25 @@ export function createEmbeddedBrowserMainController(
   let selectedEmbeddedBrowserTabId: string | null = null
   let embeddedBrowserPendingBounds: EmbeddedBrowserBounds | null = null
   let embeddedBrowserSessionConfigured = false
+  let captureRuntime: EmbeddedBrowserCaptureRuntime | null = null
+
+  async function dispatchCapturedResourceToExternalTool(
+    toolKey: ExternalToolKey,
+    request: { resourceId: string; tabId: string },
+  ) {
+    if (!captureRuntime) {
+      throw new Error('资源捕捉尚未初始化')
+    }
+    const dispatcher = new ExternalToolDispatcher({
+      access: captureRuntime.access,
+      execute: (key, payload) => dispatchEmbeddedBrowserExternalTool(key, payload),
+    })
+    return dispatcher.dispatch({
+      resourceId: request.resourceId,
+      tabId: request.tabId,
+      toolKey,
+    })
+  }
 
   function emitEmbeddedBrowserState(payload: EmbeddedBrowserStatePayload) {
     runtimeLogger.log('[embedded-browser:main]', payload)
@@ -247,12 +266,12 @@ export function createEmbeddedBrowserMainController(
     mainWindow.webContents.send('embedded-browser:download', payload)
   }
 
-  function emitEmbeddedBrowserResource(payload: EmbeddedBrowserCapturedResource) {
+  function emitEmbeddedBrowserResourceChange(payload: ResourceStateChange) {
     const mainWindow = options.getMainWindow()
     if (!mainWindow || mainWindow.isDestroyed()) {
       return
     }
-    mainWindow.webContents.send('embedded-browser:resource', payload)
+    mainWindow.webContents.send('embedded-browser:resource-state-change', payload)
   }
 
   function emitEmbeddedBrowserHlsTask(payload: EmbeddedBrowserHlsTaskEventPayload) {
@@ -643,15 +662,6 @@ export function createEmbeddedBrowserMainController(
     return null
   }
 
-  function resolveEmbeddedBrowserTabIdByWebContentsId(targetWebContentsId: number) {
-    for (const [tabId, view] of embeddedBrowserViews.entries()) {
-      if (view.webContents.id === targetWebContentsId) {
-        return tabId
-      }
-    }
-    return null
-  }
-
   function configureSession() {
     if (embeddedBrowserSessionConfigured) {
       return
@@ -665,11 +675,47 @@ export function createEmbeddedBrowserMainController(
   }
 
   function initializeBridges() {
+    const browserSession = getEmbeddedBrowserSession()
     initializeEmbeddedBrowserMainBridges({
       emitDownload: emitEmbeddedBrowserDownload,
-      emitResource: emitEmbeddedBrowserResource,
       resolveTabIdByWebContents: resolveEmbeddedBrowserTabIdByWebContents,
-      resolveTabIdByWebContentsId: resolveEmbeddedBrowserTabIdByWebContentsId,
+    })
+    if (captureRuntime) {
+      return
+    }
+    captureRuntime = new EmbeddedBrowserCaptureRuntime({
+      captureSettings: compileOmniFlowCaptureSettings(
+        listEmbeddedBrowserResourceCaptureRules(),
+      ),
+      emitChange: emitEmbeddedBrowserResourceChange,
+      fetch: (url, init) => browserSession.fetch(url, init),
+      onProbeControlPayload: (tabId, payload) => {
+        const event = typeof payload.event === 'string' ? payload.event : ''
+        const resourceKey = typeof payload.resourceKey === 'string' ? payload.resourceKey : ''
+        if (event === 'mse-flush') {
+          void appendEmbeddedBrowserMseSpoolChunk(tabId, {
+            base64: typeof payload.base64 === 'string' ? payload.base64 : '',
+            fileName: typeof payload.fileName === 'string' ? payload.fileName : undefined,
+            mimeType: typeof payload.mimeType === 'string' ? payload.mimeType : undefined,
+            resourceKey,
+            streamType: payload.streamType === 'audio' || payload.streamType === 'video'
+              ? payload.streamType
+              : undefined,
+          })
+          return
+        }
+        if (event === 'mse-reset') {
+          void clearEmbeddedBrowserMseSpoolFiles({ resourceKey, tabId })
+        }
+      },
+      onProbeError: (tabId, error) => {
+        runtimeLogger.warn('embedded browser resource probe payload rejected', {
+          error: error instanceof Error ? error.message : String(error),
+          tabId,
+        })
+      },
+      pageUrlPolicy: { damn: true },
+      webRequest: browserSession.webRequest,
     })
   }
 
@@ -726,7 +772,7 @@ export function createEmbeddedBrowserMainController(
       embeddedBrowserLastCommittedUrls.delete(tabId)
       embeddedBrowserIconUrls.delete(tabId)
       embeddedBrowserIconSourceUrls.delete(tabId)
-      disposeEmbeddedBrowserCapturedResources(tabId)
+      if (view) captureRuntime?.disposeWebContents(view.webContents.id)
       return null
     }
     return view
@@ -758,11 +804,49 @@ export function createEmbeddedBrowserMainController(
   }
 
   async function tryInstallEmbeddedBrowserResourceProbe(tabId: string, view: WebContentsView) {
+    const current = captureRuntime?.bindProbeDocument(tabId) || null
+    const next = captureRuntime?.prepareNextProbeDocument(tabId) || null
     return installEmbeddedBrowserResourceProbe(
       tabId,
       view,
-      isEmbeddedBrowserDeepCaptureEnabled,
+      current && next ? { current, next } : null,
     )
+  }
+
+  function getEmbeddedBrowserCaptureSnapshot(tabId: string): ResourceStateSnapshot | null {
+    return captureRuntime?.getSnapshot(String(tabId || '').trim()) || null
+  }
+
+  function setEmbeddedBrowserCaptureMode(
+    tabId: string,
+    mode: 'deep' | 'network' | 'off',
+  ): ResourceStateSnapshot | null {
+    const normalizedTabId = String(tabId || '').trim()
+    if (!normalizedTabId || !captureRuntime?.setCaptureMode(normalizedTabId, mode)) {
+      return getEmbeddedBrowserCaptureSnapshot(normalizedTabId)
+    }
+    return getEmbeddedBrowserCaptureSnapshot(normalizedTabId)
+  }
+
+  function clearEmbeddedBrowserCaptureResources(tabId: string): ResourceStateSnapshot | null {
+    const normalizedTabId = String(tabId || '').trim()
+    captureRuntime?.clearResources(normalizedTabId)
+    return getEmbeddedBrowserCaptureSnapshot(normalizedTabId)
+  }
+
+  async function inspectEmbeddedBrowserCapturedResource(
+    tabId: string,
+    resourceId: string,
+    encoding: 'base64' | 'utf8',
+  ) {
+    if (!captureRuntime) {
+      throw new Error('资源捕捉尚未初始化')
+    }
+    return captureRuntime.inspection.inspect({
+      encoding,
+      resourceId,
+      tabId,
+    })
   }
 
   async function withEmbeddedBrowserResourceScriptExecutor<Result>(
@@ -1145,42 +1229,60 @@ export function createEmbeddedBrowserMainController(
     }
   }
 
+  async function downloadEmbeddedBrowserCapturedResource(
+    tabId: string,
+    payload: EmbeddedBrowserCapturedResourceDownloadPayload,
+  ): Promise<EmbeddedBrowserDirectFileDownloadResponse> {
+    const normalizedTabId = String(tabId || '').trim()
+    const resourceId = String(payload.resourceId || '').trim()
+    if (!normalizedTabId || !resourceId || !captureRuntime) {
+      return { error: '缺少可下载的捕捉资源', ok: false }
+    }
+    try {
+      const accessResult = await captureRuntime.access.fetch({
+        purpose: 'resource-download',
+        resourceId,
+        tabId: normalizedTabId,
+      })
+      const outputPath = await resolveEmbeddedBrowserOutputPath({
+        defaultFileName: deriveEmbeddedBrowserDirectFileName(
+          accessResult.resource.url,
+          String(payload.suggestedFileName || '').trim() || 'resource',
+        ),
+        outputDirectoryPath: payload.outputDirectoryPath,
+        useSystemSaveDialog: payload.useSystemSaveDialog,
+      })
+      if (!outputPath) {
+        await accessResult.response.body?.cancel().catch(() => undefined)
+        return { cancelled: true, ok: false }
+      }
+      if (!accessResult.response.ok) {
+        await accessResult.response.body?.cancel().catch(() => undefined)
+        throw new Error(`下载失败：HTTP ${accessResult.response.status}`)
+      }
+      await writeFile(outputPath, Buffer.from(await accessResult.response.arrayBuffer()))
+      return { ok: true, outputPath }
+    } catch (error) {
+      return {
+        error: error instanceof Error ? error.message : String(error),
+        ok: false,
+      }
+    }
+  }
+
   async function mergeEmbeddedBrowserCapturedMseResources(
     tabId: string,
     payload: EmbeddedBrowserCapturedResourceMergePayload,
   ): Promise<EmbeddedBrowserCapturedResourceMergeResponse> {
     const normalizedTabId = String(tabId || '').trim()
-    const audioResourceKey = String(payload.audioResourceKey || payload.audioResource?.resourceKey || '').trim()
-    const videoResourceKey = String(payload.videoResourceKey || payload.videoResource?.resourceKey || '').trim()
-    const createPayloadMergeResource = (
-      input: EmbeddedBrowserCapturedResourceMergePayload['audioResource'],
-      fallbackStreamType: 'audio' | 'video',
-    ): EmbeddedBrowserExtractedResourceFile | null => {
-      const url = String(input?.url || '').trim()
-      if (!url) {
-        return null
-      }
-      let fileName = String(input?.fileName || '').trim()
-      if (!fileName) {
-        try {
-          fileName = decodeURIComponent(path.basename(new URL(url).pathname))
-        } catch {
-          fileName = ''
-        }
-      }
-      return {
-        fileName: fileName || `${fallbackStreamType}.m4s`,
-        mimeType: input?.mimeType,
-        requestHeaders: input?.requestHeaders,
-        resourceKey: input?.resourceKey,
-        streamType: input?.streamType || fallbackStreamType,
-        url,
-      }
-    }
+    const audioResourceId = String(payload.audioResourceId || '').trim()
+    const videoResourceId = String(payload.videoResourceId || '').trim()
+    const audioResourceKey = captureRuntime?.resolvePageResourceKey(normalizedTabId, audioResourceId) || ''
+    const videoResourceKey = captureRuntime?.resolvePageResourceKey(normalizedTabId, videoResourceId) || ''
     if (
       !normalizedTabId
-      || (!audioResourceKey && !payload.audioResource?.url)
-      || (!videoResourceKey && !payload.videoResource?.url)
+      || !audioResourceKey
+      || !videoResourceKey
     ) {
       return {
         error: '缺少要合并的音频或视频资源',
@@ -1189,19 +1291,15 @@ export function createEmbeddedBrowserMainController(
     }
 
     try {
-      let audioResource = createPayloadMergeResource(payload.audioResource, 'audio')
-      let videoResource = createPayloadMergeResource(payload.videoResource, 'video')
-      if (audioResourceKey || videoResourceKey) {
-        const extractedResources = await withEmbeddedBrowserView(
-          normalizedTabId,
-          async (view) => Promise.all([
-            audioResourceKey ? extractEmbeddedBrowserResourceFromFrames(normalizedTabId, view, audioResourceKey) : null,
-            videoResourceKey ? extractEmbeddedBrowserResourceFromFrames(normalizedTabId, view, videoResourceKey) : null,
-          ]),
-        )
-        audioResource = extractedResources?.[0] || audioResource
-        videoResource = extractedResources?.[1] || videoResource
-      }
+      const extractedResources = await withEmbeddedBrowserView(
+        normalizedTabId,
+        async (view) => Promise.all([
+          extractEmbeddedBrowserResourceFromFrames(normalizedTabId, view, audioResourceKey),
+          extractEmbeddedBrowserResourceFromFrames(normalizedTabId, view, videoResourceKey),
+        ]),
+      )
+      const audioResource = extractedResources?.[0] || null
+      const videoResource = extractedResources?.[1] || null
       if (!audioResource || !videoResource) {
         return {
           error: '当前音频或视频资源还没有整理完成，先继续播放几秒再试试',
@@ -1239,10 +1337,10 @@ export function createEmbeddedBrowserMainController(
       }
     } catch (error) {
       runtimeLogger.warn('embedded browser resource merge failed', {
-        audioResourceKey,
+        audioResourceId,
         error: error instanceof Error ? error.message : String(error),
         tabId: normalizedTabId,
-        videoResourceKey,
+        videoResourceId,
       })
       return {
         error: error instanceof Error ? error.message : String(error),
@@ -1256,7 +1354,8 @@ export function createEmbeddedBrowserMainController(
     payload: EmbeddedBrowserCapturedResourceSavePayload,
   ): Promise<EmbeddedBrowserCapturedResourceSaveResponse> {
     const normalizedTabId = String(tabId || '').trim()
-    const resourceKey = String(payload.resourceKey || '').trim()
+    const resourceId = String(payload.resourceId || '').trim()
+    const resourceKey = captureRuntime?.resolvePageResourceKey(normalizedTabId, resourceId) || ''
     if (!normalizedTabId || !resourceKey) {
       return {
         error: '缺少要保存的捕捉资源',
@@ -1306,38 +1405,13 @@ export function createEmbeddedBrowserMainController(
     } catch (error) {
       runtimeLogger.warn('embedded browser resource save failed', {
         error: error instanceof Error ? error.message : String(error),
-        resourceKey,
+        resourceId,
         tabId: normalizedTabId,
       })
       return {
         error: error instanceof Error ? error.message : String(error),
         ok: false,
       }
-    }
-  }
-
-  function createPayloadTranscodeResource(
-    input: EmbeddedBrowserCapturedResourceTranscodePayload['resource'],
-  ): EmbeddedBrowserExtractedResourceFile | null {
-    const url = String(input?.url || '').trim()
-    if (!url) {
-      return null
-    }
-    let fileName = String(input?.fileName || '').trim()
-    if (!fileName) {
-      try {
-        fileName = decodeURIComponent(path.basename(new URL(url).pathname))
-      } catch {
-        fileName = ''
-      }
-    }
-    return {
-      fileName: fileName || 'media',
-      mimeType: input?.mimeType,
-      requestHeaders: input?.requestHeaders,
-      resourceKey: input?.resourceKey,
-      streamType: input?.streamType,
-      url,
     }
   }
 
@@ -1352,9 +1426,10 @@ export function createEmbeddedBrowserMainController(
     payload: EmbeddedBrowserCapturedResourceTranscodePayload,
   ): Promise<EmbeddedBrowserCapturedResourceTranscodeResponse> {
     const normalizedTabId = String(tabId || '').trim()
-    const resourceKey = String(payload.resourceKey || payload.resource?.resourceKey || '').trim()
+    const resourceId = String(payload.resourceId || '').trim()
+    const resourceKey = captureRuntime?.resolvePageResourceKey(normalizedTabId, resourceId) || ''
     const outputFormat = normalizeEmbeddedBrowserResourceTranscodeFormat(payload.outputFormat || 'mp4')
-    if (!normalizedTabId || (!resourceKey && !payload.resource?.url)) {
+    if (!normalizedTabId || !resourceKey) {
       return {
         error: '缺少要转格式的媒体资源',
         ok: false,
@@ -1368,14 +1443,10 @@ export function createEmbeddedBrowserMainController(
     }
 
     try {
-      let resource = createPayloadTranscodeResource(payload.resource)
-      if (resourceKey) {
-        const extractedResource = await withEmbeddedBrowserView(
-          normalizedTabId,
-          async (view) => extractEmbeddedBrowserResourceFromFrames(normalizedTabId, view, resourceKey),
-        )
-        resource = extractedResource || resource
-      }
+      const resource = await withEmbeddedBrowserView(
+        normalizedTabId,
+        async (view) => extractEmbeddedBrowserResourceFromFrames(normalizedTabId, view, resourceKey),
+      )
       if (!resource) {
         return {
           error: '当前媒体资源还没有整理完成，先继续播放几秒再试试',
@@ -1414,7 +1485,7 @@ export function createEmbeddedBrowserMainController(
     } catch (error) {
       runtimeLogger.warn('embedded browser resource transcode failed', {
         error: error instanceof Error ? error.message : String(error),
-        resourceKey,
+        resourceId,
         tabId: normalizedTabId,
       })
       return {
@@ -1430,7 +1501,15 @@ export function createEmbeddedBrowserMainController(
     kind: EmbeddedBrowserManifestDownloadKind,
   ): Promise<EmbeddedBrowserHlsDownloadResponse | EmbeddedBrowserMpdDownloadResponse> {
     const normalizedTabId = String(tabId || '').trim()
-    const manifestUrl = String(payload.manifestUrl || '').trim()
+    const resourceId = String(payload.resourceId || '').trim()
+    const grant = resourceId && captureRuntime
+      ? captureRuntime.access.redeem({ purpose: 'resource-download', resourceId, tabId: normalizedTabId })
+      : null
+    const manifestUrl = String(grant?.resource.url || payload.manifestUrl || '').trim()
+    const requestHeaders = grant ? Object.fromEntries(grant.headers) : payload.headers
+    if (resourceId && !grant) {
+      return { error: '捕捉资源已过期或不属于当前页面', ok: false }
+    }
     if (!normalizedTabId || !manifestUrl) {
       return {
         error: kind === 'hls' ? '缺少要下载的 m3u8 地址' : '缺少要下载的 mpd 地址',
@@ -1483,7 +1562,7 @@ export function createEmbeddedBrowserMainController(
       const result = await downloadEmbeddedBrowserManifestResource({
         durationSeconds: payload.durationSeconds,
         ffmpegPath: payload.ffmpegPath,
-        headers: payload.headers,
+        headers: requestHeaders,
         kind,
         manifestUrl,
         onProgress: kind === 'hls'
@@ -2407,8 +2486,7 @@ export function createEmbeddedBrowserMainController(
     if (!mainWindow || mainWindow.isDestroyed()) {
       return null
     }
-    const recordProbeResource = buildEmbeddedBrowserProbeResourceRecorder(tabId)
-    return createEmbeddedBrowserManagedView({
+    const view = createEmbeddedBrowserManagedView({
       createIfMissingProbe: tryInstallEmbeddedBrowserResourceProbe,
       currentUrls: embeddedBrowserLastCommittedUrls,
       debugEnabled: options.debugEnabled,
@@ -2477,40 +2555,11 @@ export function createEmbeddedBrowserMainController(
         void handleLibraryFileDropPayload(dropTabId, payload)
       },
       onPageDragPayload: (pageDragTabId, payload) => {
-        const sourceUrl = typeof payload.sourceUrl === 'string' ? payload.sourceUrl.trim() : ''
-        const capturedResource = sourceUrl
-          ? getEmbeddedBrowserResourceCaptureSnapshot(pageDragTabId).resources
-            .find((resource) => resource.url === sourceUrl)
-          : undefined
-        recordEmbeddedBrowserPageDragSource(pageDragTabId, payload, {
-          referer: capturedResource?.referer,
-          requestHeaders: capturedResource?.requestHeaders,
-        })
+        recordEmbeddedBrowserPageDragSource(pageDragTabId, payload)
       },
       onViewDestroyed: (destroyedTabId) => {
         cancelEmbeddedBrowserLibraryFileDropRequests(destroyedTabId)
         cleanupEmbeddedBrowserDroppedFilesForTab(destroyedTabId)
-      },
-      onProbePayload: (payload) => {
-        const event = typeof payload.event === 'string' ? payload.event : ''
-        const resourceKey = typeof payload.resourceKey === 'string' ? payload.resourceKey : ''
-        if (event === 'mse-flush') {
-          void appendEmbeddedBrowserMseSpoolChunk(tabId, {
-            base64: typeof payload.base64 === 'string' ? payload.base64 : '',
-            fileName: typeof payload.fileName === 'string' ? payload.fileName : undefined,
-            mimeType: typeof payload.mimeType === 'string' ? payload.mimeType : undefined,
-            resourceKey,
-            streamType: payload.streamType === 'audio' || payload.streamType === 'video'
-              ? payload.streamType
-              : undefined,
-          })
-          return
-        }
-        if (event === 'mse-reset') {
-          void clearEmbeddedBrowserMseSpoolFiles({ resourceKey, tabId })
-          return
-        }
-        recordProbeResource(payload)
       },
       syncBounds: syncEmbeddedBrowserViewBounds,
       tabId,
@@ -2523,6 +2572,20 @@ export function createEmbeddedBrowserMainController(
       }),
       views: embeddedBrowserViews,
     })
+    const binding = captureRuntime?.registerView({
+      pageUrl: embeddedBrowserLastCommittedUrls.get(tabId) || view.webContents.getURL(),
+      tabId,
+      webContents: view.webContents,
+    })
+    if (!binding) {
+      embeddedBrowserViews.delete(tabId)
+      if (!view.webContents.isDestroyed()) {
+        view.webContents.close({ waitForBeforeUnload: false })
+      }
+      runtimeLogger.error('embedded browser capture owner registration failed', { tabId })
+      return null
+    }
+    return view
   }
 
   function activateEmbeddedBrowserTab(
@@ -2634,7 +2697,7 @@ export function createEmbeddedBrowserMainController(
     embeddedBrowserIconUrls.delete(normalizedTabId)
     embeddedBrowserIconSourceUrls.delete(normalizedTabId)
     clearEmbeddedBrowserPageDragSources(normalizedTabId)
-    disposeEmbeddedBrowserCapturedResources(normalizedTabId)
+    captureRuntime?.closeTab(normalizedTabId)
     bumpEmbeddedBrowserOpenFileRequestVersion({
       requestVersions: embeddedBrowserOpenFileRequestVersions,
       tabId: normalizedTabId,
@@ -2850,7 +2913,10 @@ export function createEmbeddedBrowserMainController(
     if (!reloadOrigin) {
       return false
     }
-    const previousCaptureState = getEmbeddedBrowserResourceCaptureSnapshot(normalizedTabId)
+    const previousCaptureSnapshot = getEmbeddedBrowserCaptureSnapshot(normalizedTabId)
+    const previousCaptureMode = previousCaptureSnapshot?.status === 'active'
+      ? previousCaptureSnapshot.captureMode
+      : 'off'
     const browserSession = currentView.webContents.session
     await browserSession.clearStorageData({
       origin: reloadOrigin,
@@ -2862,10 +2928,13 @@ export function createEmbeddedBrowserMainController(
       url: reloadUrl,
     })
     closeEmbeddedBrowserTab(targetWindow, normalizedTabId)
-    if (previousCaptureState.deepCaptureEnabled) {
-      startEmbeddedBrowserDeepResourceCapture(normalizedTabId)
-    } else if (previousCaptureState.enabled) {
-      startEmbeddedBrowserResourceCapture(normalizedTabId)
+    const nextView = activateEmbeddedBrowserTab(targetWindow, normalizedTabId, { createIfMissing: true })
+    if (!nextView) {
+      return false
+    }
+    setEmbeddedBrowserCaptureMode(normalizedTabId, previousCaptureMode)
+    if (previousCaptureMode === 'deep') {
+      await tryInstallEmbeddedBrowserResourceProbe(normalizedTabId, nextView)
     }
     await loadEmbeddedBrowserUrl(targetWindow, normalizedTabId, reloadUrl, 'navigate-exception')
     return true
@@ -2905,11 +2974,13 @@ export function createEmbeddedBrowserMainController(
     })
   }
 
-  async function handleOpenResource(tabId: string, resourceKey: string) {
+  async function handleOpenResource(tabId: string, resourceId: string) {
+    const resolvedResourceKey = captureRuntime?.resolvePageResourceKey(tabId, resourceId)
+    if (!resolvedResourceKey) return false
     return withEmbeddedBrowserView(tabId, async (view) => {
       try {
         const normalizedTabId = String(tabId || '').trim()
-        const normalizedResourceKey = String(resourceKey || '').trim()
+        const normalizedResourceKey = resolvedResourceKey
         if (normalizedResourceKey.startsWith('mse-stream:')) {
           const resource = await extractEmbeddedBrowserResourceFromFrames(normalizedTabId, view, normalizedResourceKey)
           if (resource && 'filePath' in resource && resource.filePath) {
@@ -2922,7 +2993,7 @@ export function createEmbeddedBrowserMainController(
           return await runEmbeddedBrowserResourceProbeAction(
             (script) => view.webContents.executeJavaScript(script, true),
             'openResource',
-            resourceKey,
+            resolvedResourceKey,
           )
         }
         const results = await Promise.all(frames.map(async (frame) => {
@@ -2930,7 +3001,7 @@ export function createEmbeddedBrowserMainController(
             return await runEmbeddedBrowserResourceProbeAction(
               (script) => frame.executeJavaScript(script, true),
               'openResource',
-              resourceKey,
+              resolvedResourceKey,
             )
           } catch {
             return false
@@ -2941,7 +3012,7 @@ export function createEmbeddedBrowserMainController(
         runtimeLogger.warn('embedded browser resource probe action failed', {
           action: 'openResource',
           error: error instanceof Error ? error.message : String(error),
-          resourceKey: String(resourceKey || '').trim(),
+          resourceId: String(resourceId || '').trim(),
           tabId: String(tabId || '').trim(),
           url: view.webContents.getURL() || embeddedBrowserLastCommittedUrls.get(String(tabId || '').trim()) || '',
         })
@@ -2950,11 +3021,13 @@ export function createEmbeddedBrowserMainController(
     }).then((result) => Boolean(result))
   }
 
-  async function handleExportResource(tabId: string, resourceKey: string) {
+  async function handleExportResource(tabId: string, resourceId: string) {
+    const resolvedResourceKey = captureRuntime?.resolvePageResourceKey(tabId, resourceId)
+    if (!resolvedResourceKey) return false
     return withEmbeddedBrowserView(tabId, async (view) => {
       try {
         const normalizedTabId = String(tabId || '').trim()
-        const normalizedResourceKey = String(resourceKey || '').trim()
+        const normalizedResourceKey = resolvedResourceKey
         if (normalizedResourceKey.startsWith('mse-stream:')) {
           const resource = await extractEmbeddedBrowserResourceFromFrames(normalizedTabId, view, normalizedResourceKey)
           if (resource) {
@@ -2984,7 +3057,7 @@ export function createEmbeddedBrowserMainController(
           return await runEmbeddedBrowserResourceProbeAction(
             (script) => view.webContents.executeJavaScript(script, true),
             'exportResource',
-            resourceKey,
+            resolvedResourceKey,
           )
         }
         const results = await Promise.all(frames.map(async (frame) => {
@@ -2992,7 +3065,7 @@ export function createEmbeddedBrowserMainController(
             return await runEmbeddedBrowserResourceProbeAction(
               (script) => frame.executeJavaScript(script, true),
               'exportResource',
-              resourceKey,
+              resolvedResourceKey,
             )
           } catch {
             return false
@@ -3003,7 +3076,7 @@ export function createEmbeddedBrowserMainController(
         runtimeLogger.warn('embedded browser resource probe action failed', {
           action: 'exportResource',
           error: error instanceof Error ? error.message : String(error),
-          resourceKey: String(resourceKey || '').trim(),
+          resourceId: String(resourceId || '').trim(),
           tabId: String(tabId || '').trim(),
           url: view.webContents.getURL() || embeddedBrowserLastCommittedUrls.get(String(tabId || '').trim()) || '',
         })
@@ -3012,10 +3085,12 @@ export function createEmbeddedBrowserMainController(
     }).then((result) => Boolean(result))
   }
 
-  async function handleReadResource(tabId: string, resourceKey: string) {
+  async function handleReadResource(tabId: string, resourceId: string) {
+    const resolvedResourceKey = captureRuntime?.resolvePageResourceKey(tabId, resourceId)
+    if (!resolvedResourceKey) return null
     return withEmbeddedBrowserView(tabId, async (view) => {
       try {
-        const resource = await extractEmbeddedBrowserResourceFromFrames(String(tabId || '').trim(), view, resourceKey)
+        const resource = await extractEmbeddedBrowserResourceFromFrames(String(tabId || '').trim(), view, resolvedResourceKey)
         if (!resource) {
           return null
         }
@@ -3024,7 +3099,6 @@ export function createEmbeddedBrowserMainController(
             base64: resource.base64,
             fileName: resource.fileName,
             mimeType: resource.mimeType,
-            resourceKey: resource.resourceKey || String(resourceKey || '').trim(),
             streamType: resource.streamType,
           }
         }
@@ -3036,13 +3110,12 @@ export function createEmbeddedBrowserMainController(
           base64: fileBuffer.toString('base64'),
           fileName: resource.fileName,
           mimeType: resource.mimeType,
-          resourceKey: resource.resourceKey || String(resourceKey || '').trim(),
           streamType: resource.streamType,
         }
       } catch (error) {
         runtimeLogger.warn('embedded browser resource read failed', {
           error: error instanceof Error ? error.message : String(error),
-          resourceKey: String(resourceKey || '').trim(),
+          resourceId: String(resourceId || '').trim(),
           tabId: String(tabId || '').trim(),
           url: view.webContents.getURL() || embeddedBrowserLastCommittedUrls.get(String(tabId || '').trim()) || '',
         })
@@ -3178,7 +3251,7 @@ export function createEmbeddedBrowserMainController(
 
   async function handleStartDeepResourceCapture(tabId: string) {
     const normalizedTabId = String(tabId || '').trim()
-    const snapshot = startEmbeddedBrowserDeepResourceCapture(normalizedTabId)
+    const snapshot = setEmbeddedBrowserCaptureMode(normalizedTabId, 'deep')
     const view = getEmbeddedBrowserView(normalizedTabId)
     if (view && !view.webContents.isDestroyed()) {
       if (view.webContents.getURL()) {
@@ -3278,7 +3351,8 @@ export function createEmbeddedBrowserMainController(
       activateTab: handleActivateTab,
       cleanupDownloadFile: handleCleanupDownloadFile,
       clearBrowserCache: handleClearCacheAndReload,
-      clearCapturedResources: (tabId) => clearEmbeddedBrowserCapturedResources(String(tabId || '').trim()),
+      clearCapturedResources: clearEmbeddedBrowserCaptureResources,
+      inspectResource: inspectEmbeddedBrowserCapturedResource,
       clearCatchMediaCache: (tabId) => handleCatchToolkitAction(tabId, 'clearCatchMediaCache', 'clear cache'),
       closeAll: handleCloseAll,
       closeTab: handleCloseTab,
@@ -3294,11 +3368,12 @@ export function createEmbeddedBrowserMainController(
       downloadMpdManifest: downloadEmbeddedBrowserMpdResource,
       downloadMpdPlan: downloadEmbeddedBrowserMpdPlanResource,
       downloadDirectFile: downloadEmbeddedBrowserDirectFile,
+      downloadCapturedResource: downloadEmbeddedBrowserCapturedResource,
       exportResource: handleExportResource,
       getCatchToolkitState: handleGetCatchToolkitState,
       goBack: handleGoBack,
       goForward: handleGoForward,
-      listCapturedResources: (tabId) => getEmbeddedBrowserResourceCaptureSnapshot(String(tabId || '').trim()),
+      listCapturedResources: getEmbeddedBrowserCaptureSnapshot,
       mergeMseResources: mergeEmbeddedBrowserCapturedMseResources,
       navigate: handleNavigate,
       openMappedFile: handleOpenMappedFile,
@@ -3313,9 +3388,9 @@ export function createEmbeddedBrowserMainController(
       saveResource: saveEmbeddedBrowserCapturedResourceForRenderer,
       setBounds: handleSetBounds,
       stagePageDrag: handleStagePageDrag,
-      startCapturedResources: (tabId) => startEmbeddedBrowserResourceCapture(String(tabId || '').trim()),
+      startCapturedResources: (tabId) => setEmbeddedBrowserCaptureMode(tabId, 'network'),
       startDeepResourceCapture: handleStartDeepResourceCapture,
-      stopCapturedResources: (tabId) => stopEmbeddedBrowserResourceCapture(String(tabId || '').trim()),
+      stopCapturedResources: (tabId) => setEmbeddedBrowserCaptureMode(tabId, 'off'),
       transcodeResource: transcodeEmbeddedBrowserCapturedResourceForRenderer,
       updateCatchToolkitState: handleUpdateCatchToolkitState,
       getCookies: getEmbeddedBrowserCookies,
@@ -3323,13 +3398,21 @@ export function createEmbeddedBrowserMainController(
       removeCookiesByDomain: removeEmbeddedBrowserCookiesByDomain,
       removeAllCookies: removeAllEmbeddedBrowserCookies,
       getResourceCaptureRules: async () => listEmbeddedBrowserResourceCaptureRules(),
-      updateResourceCaptureRules: async (ruleSet) => updateEmbeddedBrowserResourceCaptureRules(ruleSet),
-      resetResourceCaptureRules: async () => resetEmbeddedBrowserResourceCaptureRules(),
+      updateResourceCaptureRules: async (ruleSet) => {
+        const next = updateEmbeddedBrowserResourceCaptureRules(ruleSet)
+        captureRuntime?.updateCaptureSettings(compileOmniFlowCaptureSettings(next))
+        return next
+      },
+      resetResourceCaptureRules: async () => {
+        const next = resetEmbeddedBrowserResourceCaptureRules()
+        captureRuntime?.updateCaptureSettings(compileOmniFlowCaptureSettings(next))
+        return next
+      },
       getExternalToolSettings: async () => listEmbeddedBrowserExternalToolSettings(),
       updateExternalToolSettings: async (settings) => updateEmbeddedBrowserExternalToolSettings(settings),
       resetExternalToolSettings: async () => resetEmbeddedBrowserExternalToolSettings(),
       listEnabledExternalTools: async () => listEnabledEmbeddedBrowserExternalToolOptions(),
-      dispatchExternalTool: async (toolKey, payload) => dispatchEmbeddedBrowserExternalTool(toolKey, payload),
+      dispatchExternalTool: dispatchCapturedResourceToExternalTool,
       listPasswords: listEmbeddedBrowserPasswords,
       getDecryptedPassword: getEmbeddedBrowserDecryptedPassword,
       saveCapturedCredential: async (credentialRequestId) => {
@@ -3365,6 +3448,8 @@ export function createEmbeddedBrowserMainController(
   }
 
   function dispose() {
+    captureRuntime?.dispose()
+    captureRuntime = null
     for (const tabId of embeddedBrowserLibraryFileDropRequests.keys()) {
       cancelEmbeddedBrowserLibraryFileDropRequests(tabId)
     }

@@ -151,9 +151,9 @@ export function useEmbeddedBrowserCatchToolkit(
     setLoading(true);
     try {
       const result = await mergeEmbeddedBrowserCapturedMseResources(activeTabId, {
-        audioResourceKey: state.audioResourceKey,
+        audioResourceId: state.audioResourceKey,
         suggestedFileName: state.currentFileName ? `${state.currentFileName}.mp4` : undefined,
-        videoResourceKey: state.videoResourceKey,
+        videoResourceId: state.videoResourceKey,
       });
       await refresh({ force: true });
       return result;
@@ -174,15 +174,15 @@ export function useEmbeddedBrowserCatchToolkit(
     if (!activeTabId || !enabled) {
       return null;
     }
-    const resourceKey = state.primaryResourceKey || state.videoResourceKey || state.audioResourceKey;
-    if (!resourceKey) {
+    const resourceId = state.primaryResourceKey || state.videoResourceKey || state.audioResourceKey;
+    if (!resourceId) {
       return null;
     }
     mutationCountRef.current += 1;
     setLoading(true);
     try {
       const result = await saveEmbeddedBrowserCapturedResource(activeTabId, {
-        resourceKey,
+        resourceId,
         suggestedFileName: state.currentFileName || undefined,
       });
       await refresh({ force: true });

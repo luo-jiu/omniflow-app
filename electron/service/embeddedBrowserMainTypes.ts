@@ -39,14 +39,12 @@ export type EmbeddedBrowserBounds = {
 }
 
 export type EmbeddedBrowserCapturedResourceMergePayload = {
-  audioResource?: EmbeddedBrowserCapturedResourceMergeTrackPayload
-  audioResourceKey?: string
+  audioResourceId?: string
   ffmpegPath?: string
   outputDirectoryPath?: string
   suggestedFileName?: string
   useSystemSaveDialog?: boolean
-  videoResource?: EmbeddedBrowserCapturedResourceMergeTrackPayload
-  videoResourceKey?: string
+  videoResourceId?: string
 }
 
 export type EmbeddedBrowserCapturedResourceMergeTrackPayload = {
@@ -72,8 +70,7 @@ export type EmbeddedBrowserCapturedResourceTranscodePayload = {
   ffmpegPath?: string
   outputDirectoryPath?: string
   outputFormat?: EmbeddedBrowserCapturedResourceTranscodeFormat
-  resource?: EmbeddedBrowserCapturedResourceMergeTrackPayload
-  resourceKey?: string
+  resourceId?: string
   suggestedFileName?: string
   useSystemSaveDialog?: boolean
 }
@@ -81,7 +78,7 @@ export type EmbeddedBrowserCapturedResourceTranscodePayload = {
 export type EmbeddedBrowserCapturedResourceTranscodeResponse = EmbeddedBrowserCapturedResourceMergeResponse
 
 export type EmbeddedBrowserCapturedResourceSavePayload = {
-  resourceKey?: string
+  resourceId?: string
   suggestedFileName?: string
 }
 
@@ -98,6 +95,7 @@ export type EmbeddedBrowserHlsDownloadPayload = {
   headers?: Record<string, string>
   manifestUrl?: string
   outputDirectoryPath?: string
+  resourceId?: string
   requestId?: string
   suggestedFileName?: string
   useSystemSaveDialog?: boolean
@@ -187,6 +185,13 @@ export type EmbeddedBrowserDirectFileDownloadPayload = {
   outputDirectoryPath?: string
   suggestedFileName?: string
   url?: string
+  useSystemSaveDialog?: boolean
+}
+
+export type EmbeddedBrowserCapturedResourceDownloadPayload = {
+  outputDirectoryPath?: string
+  resourceId: string
+  suggestedFileName?: string
   useSystemSaveDialog?: boolean
 }
 

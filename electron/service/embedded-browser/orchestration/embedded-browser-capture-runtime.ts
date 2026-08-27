@@ -201,6 +201,7 @@ export class EmbeddedBrowserCaptureRuntime {
     if (!normalizedTabId || !normalizedResourceId) return null
     const binding = this.store.getCaptureBinding(normalizedTabId)
     const resource = this.store.getOwnedResource(normalizedTabId, normalizedResourceId)
+      || this.store.getOwnedResourceByResourceKey(normalizedTabId, normalizedResourceId)
     if (
       !binding
       || !resource

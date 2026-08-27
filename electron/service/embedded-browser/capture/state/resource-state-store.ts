@@ -621,6 +621,17 @@ export class ResourceStateStore {
     return cloneOwnedResource(resource)
   }
 
+  /** Transitional lookup for legacy page-toolkit keys during renderer cutover. */
+  getOwnedResourceByResourceKey(tabId: string, resourceKey: string) {
+    const state = this.getTab(tabId)
+    const normalizedResourceKey = String(resourceKey || '').trim()
+    if (!state || !normalizedResourceKey) return null
+    const resource = Array.from(state.resources.values()).find(item => (
+      item.resourceKey === normalizedResourceKey && item.expiresAt > this.now()
+    ))
+    return resource ? cloneOwnedResource(resource) : null
+  }
+
   invalidateContext(contextRef: string): ResourceStateUpsertChange[] {
     const normalizedContextRef = String(contextRef || '').trim()
     if (!normalizedContextRef) return []

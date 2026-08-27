@@ -124,15 +124,9 @@ const EmbeddedBrowserResourceCard: React.FC<EmbeddedBrowserResourceCardProps> = 
       >
         <summary>详情</summary>
         <div className="resource-url">{resource.url}</div>
-        {resource.pageUrl ? (
-          <div className="resource-page-url">来源页面：{resource.pageUrl}</div>
-        ) : null}
-        {resource.referer ? (
-          <div className="resource-request-meta">Referer：{resource.referer}</div>
-        ) : null}
-        {resource.requestHeaders && Object.keys(resource.requestHeaders).length ? (
+        {resource.context?.headerNames.length ? (
           <div className="resource-request-meta">
-            请求头：{Object.keys(resource.requestHeaders).join(', ')}
+            请求上下文：{resource.context.headerNames.join(', ')}
           </div>
         ) : null}
       </details>

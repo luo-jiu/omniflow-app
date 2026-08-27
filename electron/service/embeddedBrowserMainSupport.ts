@@ -12,10 +12,6 @@ import {
   initializeEmbeddedBrowserDownloadBridge,
   type EmbeddedBrowserDownloadPayload,
 } from './embeddedBrowserService'
-import {
-  initializeEmbeddedBrowserResourceBridge,
-  type EmbeddedBrowserCapturedResource,
-} from './embeddedBrowserResourceService'
 import type {
   EmbeddedBrowserFaviconResolvePayload,
   EmbeddedBrowserFaviconResolveResult,
@@ -29,9 +25,7 @@ type ConfigureEmbeddedBrowserSessionOptions = {
 
 type InitializeEmbeddedBrowserMainBridgesOptions = {
   emitDownload: (payload: EmbeddedBrowserDownloadPayload) => void
-  emitResource: (payload: EmbeddedBrowserCapturedResource) => void
   resolveTabIdByWebContents: (targetContents: Electron.WebContents) => string | null
-  resolveTabIdByWebContentsId: (targetWebContentsId: number) => string | null
 }
 
 function resolveEmbeddedBrowserOrigin(rawValue: string) {
@@ -148,11 +142,6 @@ export function initializeEmbeddedBrowserMainBridges(
   initializeEmbeddedBrowserDownloadBridge({
     emitDownload: options.emitDownload,
     resolveTabIdByWebContents: options.resolveTabIdByWebContents,
-  })
-  initializeEmbeddedBrowserResourceBridge({
-    browserSession: session.fromPartition(EMBEDDED_BROWSER_PARTITION),
-    emitResource: options.emitResource,
-    resolveTabIdByWebContentsId: options.resolveTabIdByWebContentsId,
   })
 }
 

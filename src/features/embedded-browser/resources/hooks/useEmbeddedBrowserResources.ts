@@ -10,56 +10,70 @@ import {
 import type {
   EmbeddedBrowserCapturedResource,
   EmbeddedBrowserResourceCaptureSnapshot,
+  EmbeddedBrowserResourceStateSnapshot,
 } from '../types';
+import { CapturedResourceContract } from '../types';
 
-const EMPTY_SNAPSHOT: EmbeddedBrowserResourceCaptureSnapshot = {
-  deepCaptureEnabled: false,
-  enabled: false,
-  resources: [],
-};
+const EMPTY_RESOURCES: EmbeddedBrowserCapturedResource[] = [];
 
-function mergeCapturedResource(
-  resources: EmbeddedBrowserCapturedResource[],
-  payload: EmbeddedBrowserCapturedResource,
-) {
-  const existingIndex = resources.findIndex((item) => item.id === payload.id);
-  if (existingIndex < 0) {
-    return [payload, ...resources].sort((left, right) => right.capturedAt - left.capturedAt);
-  }
-  const nextResources = [...resources];
-  nextResources[existingIndex] = payload;
-  return nextResources.sort((left, right) => right.capturedAt - left.capturedAt);
+function createEmptySnapshot(tabId: string): EmbeddedBrowserResourceCaptureSnapshot {
+  return {
+    captureMode: 'off',
+    incarnation: 1,
+    resources: [],
+    revision: 1,
+    status: 'active',
+    tabId,
+  };
 }
 
 export function useEmbeddedBrowserResources(activeTabId: string | null) {
-  const [snapshotsByTabId, setSnapshotsByTabId] = React.useState<Record<string, EmbeddedBrowserResourceCaptureSnapshot>>({});
+  const snapshotsRef = React.useRef<Record<string, EmbeddedBrowserResourceStateSnapshot>>({});
+  const resyncInFlightRef = React.useRef<Set<string>>(new Set());
+  const [snapshotsByTabId, setSnapshotsByTabId] = React.useState<Record<string, EmbeddedBrowserResourceStateSnapshot>>({});
   const [loading, setLoading] = React.useState(false);
 
-  const updateSnapshot = React.useCallback((tabId: string, snapshot: EmbeddedBrowserResourceCaptureSnapshot) => {
-    setSnapshotsByTabId((current) => ({
-      ...current,
+  const commitSnapshot = React.useCallback((tabId: string, snapshot: EmbeddedBrowserResourceStateSnapshot) => {
+    const next = {
+      ...snapshotsRef.current,
       [tabId]: snapshot,
-    }));
+    };
+    snapshotsRef.current = next;
+    setSnapshotsByTabId(next);
   }, []);
 
-  React.useEffect(() => {
-    const unsubscribe = subscribeEmbeddedBrowserResources((payload) => {
-      if (!payload.tabId) {
-        return;
+  const requestSnapshot = React.useCallback(async (tabId: string) => {
+    const normalizedTabId = String(tabId || '').trim();
+    if (!normalizedTabId || resyncInFlightRef.current.has(normalizedTabId)) return;
+    resyncInFlightRef.current.add(normalizedTabId);
+    try {
+      const incoming = await listEmbeddedBrowserCapturedResources(normalizedTabId);
+      if (!incoming) return;
+      const reduced = CapturedResourceContract.reduce(
+        snapshotsRef.current[normalizedTabId] || null,
+        incoming,
+      );
+      if (reduced.decision === 'applied' && reduced.state) {
+        commitSnapshot(normalizedTabId, reduced.state);
       }
-      setSnapshotsByTabId((current) => {
-        const previous = current[payload.tabId] ?? EMPTY_SNAPSHOT;
-        return {
-          ...current,
-          [payload.tabId]: {
-            ...previous,
-            resources: mergeCapturedResource(previous.resources, payload),
-          },
-        };
-      });
-    });
-    return unsubscribe;
-  }, []);
+    } finally {
+      resyncInFlightRef.current.delete(normalizedTabId);
+    }
+  }, [commitSnapshot]);
+
+  React.useEffect(() => subscribeEmbeddedBrowserResources((message) => {
+    const reducedMessage = CapturedResourceContract.reduce(
+      snapshotsRef.current[message.tabId] || null,
+      message,
+    );
+    if (reducedMessage.decision === 'applied' && reducedMessage.state) {
+      commitSnapshot(message.tabId, reducedMessage.state);
+      return;
+    }
+    if (reducedMessage.decision === 'resync') {
+      void requestSnapshot(message.tabId);
+    }
+  }), [commitSnapshot, requestSnapshot]);
 
   React.useEffect(() => {
     if (!activeTabId) {
@@ -67,13 +81,7 @@ export function useEmbeddedBrowserResources(activeTabId: string | null) {
     }
     let cancelled = false;
     setLoading(true);
-    void listEmbeddedBrowserCapturedResources(activeTabId)
-      .then((snapshot) => {
-        if (cancelled) {
-          return;
-        }
-        updateSnapshot(activeTabId, snapshot);
-      })
+    void requestSnapshot(activeTabId)
       .finally(() => {
         if (!cancelled) {
           setLoading(false);
@@ -82,32 +90,46 @@ export function useEmbeddedBrowserResources(activeTabId: string | null) {
     return () => {
       cancelled = true;
     };
-  }, [activeTabId, updateSnapshot]);
+  }, [activeTabId, requestSnapshot]);
 
   const runForActiveTab = React.useCallback(async (
-    runner: (tabId: string) => Promise<EmbeddedBrowserResourceCaptureSnapshot>,
+    runner: (tabId: string) => Promise<EmbeddedBrowserResourceStateSnapshot | null>,
   ) => {
     if (!activeTabId) {
-      return EMPTY_SNAPSHOT;
+      return null;
     }
     setLoading(true);
     try {
       const snapshot = await runner(activeTabId);
-      updateSnapshot(activeTabId, snapshot);
+      if (snapshot) {
+        const reduced = CapturedResourceContract.reduce(
+          snapshotsRef.current[activeTabId] || null,
+          snapshot,
+        );
+        if (reduced.decision === 'applied' && reduced.state) {
+          commitSnapshot(activeTabId, reduced.state);
+        } else if (reduced.decision === 'resync') {
+          await requestSnapshot(activeTabId);
+        }
+      }
       return snapshot;
     } finally {
       setLoading(false);
     }
-  }, [activeTabId, updateSnapshot]);
+  }, [activeTabId, commitSnapshot, requestSnapshot]);
 
-  const activeSnapshot = activeTabId ? (snapshotsByTabId[activeTabId] ?? EMPTY_SNAPSHOT) : EMPTY_SNAPSHOT;
+  const activeSnapshot = activeTabId
+    ? (snapshotsByTabId[activeTabId] ?? createEmptySnapshot(activeTabId))
+    : null;
+  const captureMode = activeSnapshot?.status === 'active' ? activeSnapshot.captureMode : 'off';
+  const resources = activeSnapshot?.status === 'active' ? activeSnapshot.resources : EMPTY_RESOURCES;
 
   return {
-    captureEnabled: activeSnapshot.enabled,
+    captureEnabled: captureMode !== 'off',
     clearResources: () => runForActiveTab(clearEmbeddedBrowserCapturedResources),
-    deepCaptureEnabled: activeSnapshot.deepCaptureEnabled,
+    deepCaptureEnabled: captureMode === 'deep',
     loading,
-    resources: activeSnapshot.resources,
+    resources,
     startCapture: () => runForActiveTab(startEmbeddedBrowserResourceCapture),
     startDeepCapture: () => runForActiveTab(startEmbeddedBrowserDeepResourceCapture),
     stopCapture: () => runForActiveTab(stopEmbeddedBrowserResourceCapture),

@@ -700,7 +700,7 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
       if (shouldResolveMasterVariantToLocalPlan) {
         const resolvedVariant = await resolveMasterVariantToMediaPlan({
           headers: resourceHeaders,
-          pageUrl: hlsRequest.resource.pageUrl,
+          pageUrl: undefined,
           variantManifestUrl: selectedHlsVariantUrl,
         });
         effectivePlan = resolvedVariant.plan;
@@ -1068,7 +1068,7 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
         manifestUrl: effectiveManifestUrl,
         manualKeyBase64: normalizedHlsManualKey || undefined,
         outputDirectoryPath: outputTarget.outputDirectoryPath,
-        pageUrl: hlsRequest.resource.pageUrl,
+        pageUrl: undefined,
         requestId,
         suggestedFileName: deriveHlsOutputFileName(effectiveManifestUrl),
         suggestedThreadCount: hlsCanTuneLocalDownloader ? normalizedHlsThreadCount : hlsRequest.plan.suggestedThreadCount,
@@ -1201,11 +1201,12 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
     setVerifyingHlsKey(true);
     try {
       const snapshot = await listEmbeddedBrowserCapturedResources(hlsRequest.resource.tabId);
+      const resources = snapshot?.status === 'active' ? snapshot.resources : [];
       const result = await verifyHlsResourceKey({
         manualKeyBase64: normalizedHlsManualKey || undefined,
         manifest: hlsRequest.manifest,
         manifestResource: hlsRequest.resource,
-        resources: snapshot.resources,
+        resources,
       });
       if (activeHlsKeyVerificationTokenRef.current !== verificationToken) {
         return;

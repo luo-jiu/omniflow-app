@@ -2,7 +2,7 @@
 import { ipcRenderer, contextBridge } from 'electron'
 import type { EmbeddedBrowserCaptureRuleSet } from '@/features/embedded-browser/resources/model/embedded-browser-capture-rules'
 import type {
-  EmbeddedBrowserExternalToolDispatchPayload,
+  EmbeddedBrowserExternalToolDispatchRequest,
   EmbeddedBrowserExternalToolKey,
   EmbeddedBrowserExternalToolOption,
   EmbeddedBrowserExternalToolSettings,
@@ -636,59 +636,23 @@ contextBridge.exposeInMainWorld('electronEmbeddedBrowser', {
     ipcRenderer.on('embedded-browser:hls-task', wrapped);
     return () => ipcRenderer.removeListener('embedded-browser:hls-task', wrapped);
   },
-  onResourceCaptured: (listener: (payload: {
-    capturedAt: number;
-    contentLength?: number;
-    ext?: string;
-    id: string;
-    kind: 'manifest' | 'media' | 'image' | 'subtitle' | 'document' | 'key' | 'other';
-    method?: string;
-    mimeType?: string;
-    pageUrl?: string;
-    referer?: string;
-    resourceKey?: string;
-    requestHeaders?: Record<string, string>;
-    resourceType?: string;
-    source: 'network' | 'probe';
-    statusCode?: number;
-    streamType?: 'audio' | 'video';
-    tabId: string;
-    url: string;
-  }) => void) => {
-    const wrapped = (_event: Electron.IpcRendererEvent, payload: {
-      capturedAt: number;
-      contentLength?: number;
-      ext?: string;
-      id: string;
-      kind: 'manifest' | 'media' | 'image' | 'subtitle' | 'document' | 'key' | 'other';
-      method?: string;
-      mimeType?: string;
-      pageUrl?: string;
-      referer?: string;
-      resourceKey?: string;
-      requestHeaders?: Record<string, string>;
-      resourceType?: string;
-      source: 'network' | 'probe';
-      statusCode?: number;
-      streamType?: 'audio' | 'video';
-      tabId: string;
-      url: string;
-    }) => {
+  onResourceStateChange: (listener: (payload: import('./service/embedded-browser/contracts/captured-resource').ResourceStateChange) => void) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, payload: import('./service/embedded-browser/contracts/captured-resource').ResourceStateChange) => {
       listener(payload);
     };
-    ipcRenderer.on('embedded-browser:resource', wrapped);
-    return () => ipcRenderer.removeListener('embedded-browser:resource', wrapped);
+    ipcRenderer.on('embedded-browser:resource-state-change', wrapped);
+    return () => ipcRenderer.removeListener('embedded-browser:resource-state-change', wrapped);
   },
   openTab: (tabId: string, url?: string) => ipcRenderer.invoke('embedded-browser:open-tab', tabId, url),
-  exportCapturedResource: (tabId: string, resourceKey: string) =>
-    ipcRenderer.invoke('embedded-browser:resource:export', tabId, resourceKey),
-  listCapturedResources: (tabId: string) => ipcRenderer.invoke('embedded-browser:resource:list', tabId),
-  openCapturedResource: (tabId: string, resourceKey: string) =>
-    ipcRenderer.invoke('embedded-browser:resource:open', tabId, resourceKey),
-  readCapturedResource: (tabId: string, resourceKey: string) =>
-    ipcRenderer.invoke('embedded-browser:resource:read', tabId, resourceKey),
+  exportCapturedResource: (tabId: string, resourceId: string) =>
+    ipcRenderer.invoke('embedded-browser:resource:export', tabId, resourceId),
+  listCapturedResources: (tabId: string) => ipcRenderer.invoke('embedded-browser:resource:list', tabId) as Promise<import('./service/embedded-browser/contracts/captured-resource').ResourceStateSnapshot | null>,
+  openCapturedResource: (tabId: string, resourceId: string) =>
+    ipcRenderer.invoke('embedded-browser:resource:open', tabId, resourceId),
+  readCapturedResource: (tabId: string, resourceId: string) =>
+    ipcRenderer.invoke('embedded-browser:resource:read', tabId, resourceId),
   saveCapturedResource: (tabId: string, payload: {
-    resourceKey?: string;
+    resourceId?: string;
     suggestedFileName?: string;
   }) => ipcRenderer.invoke('embedded-browser:resource:save', tabId, payload),
   previewCapturedResource: (tabId: string, payload: {
@@ -720,42 +684,18 @@ contextBridge.exposeInMainWorld('electronEmbeddedBrowser', {
   downloadCatchMedia: (tabId: string) => ipcRenderer.invoke('embedded-browser:resource:catch-toolkit:download', tabId),
   restartCatchMediaCapture: (tabId: string) => ipcRenderer.invoke('embedded-browser:resource:catch-toolkit:restart', tabId),
   mergeCapturedMseResources: (tabId: string, payload: {
-    audioResource?: {
-      fileName?: string;
-      mimeType?: string;
-      requestHeaders?: Record<string, string>;
-      resourceKey?: string;
-      streamType?: 'audio' | 'video';
-      url?: string;
-    };
-    audioResourceKey?: string;
+    audioResourceId?: string;
     ffmpegPath?: string;
     outputDirectoryPath?: string;
     suggestedFileName?: string;
     useSystemSaveDialog?: boolean;
-    videoResource?: {
-      fileName?: string;
-      mimeType?: string;
-      requestHeaders?: Record<string, string>;
-      resourceKey?: string;
-      streamType?: 'audio' | 'video';
-      url?: string;
-    };
-    videoResourceKey?: string;
+    videoResourceId?: string;
   }) => ipcRenderer.invoke('embedded-browser:resource:merge-mse', tabId, payload),
   transcodeCapturedResource: (tabId: string, payload: {
     ffmpegPath?: string;
     outputDirectoryPath?: string;
     outputFormat?: string;
-    resource?: {
-      fileName?: string;
-      mimeType?: string;
-      requestHeaders?: Record<string, string>;
-      resourceKey?: string;
-      streamType?: 'audio' | 'video';
-      url?: string;
-    };
-    resourceKey?: string;
+    resourceId?: string;
     suggestedFileName?: string;
     useSystemSaveDialog?: boolean;
   }) => ipcRenderer.invoke('embedded-browser:resource:transcode', tabId, payload),
@@ -765,6 +705,7 @@ contextBridge.exposeInMainWorld('electronEmbeddedBrowser', {
     headers?: Record<string, string>;
     manifestUrl?: string;
     outputDirectoryPath?: string;
+    resourceId?: string;
     requestId?: string;
     suggestedFileName?: string;
     useSystemSaveDialog?: boolean;
@@ -815,6 +756,7 @@ contextBridge.exposeInMainWorld('electronEmbeddedBrowser', {
     headers?: Record<string, string>;
     manifestUrl?: string;
     outputDirectoryPath?: string;
+    resourceId?: string;
     suggestedFileName?: string;
     useSystemSaveDialog?: boolean;
   }) => ipcRenderer.invoke('embedded-browser:resource:download-mpd', tabId, payload),
@@ -835,11 +777,20 @@ contextBridge.exposeInMainWorld('electronEmbeddedBrowser', {
     url?: string;
     useSystemSaveDialog?: boolean;
   }) => ipcRenderer.invoke('embedded-browser:resource:download-direct-file', tabId, payload),
+  downloadCapturedResource: (tabId: string, payload: {
+    outputDirectoryPath?: string;
+    resourceId: string;
+    suggestedFileName?: string;
+    useSystemSaveDialog?: boolean;
+  }) => ipcRenderer.invoke('embedded-browser:resource:download-captured', tabId, payload),
   reload: (tabId: string) => ipcRenderer.invoke('embedded-browser:reload', tabId),
   startDeepResourceCapture: (tabId: string) => ipcRenderer.invoke('embedded-browser:resource:start-deep-capture', tabId),
   startResourceCapture: (tabId: string) => ipcRenderer.invoke('embedded-browser:resource:start', tabId),
   stopResourceCapture: (tabId: string) => ipcRenderer.invoke('embedded-browser:resource:stop', tabId),
   clearCapturedResources: (tabId: string) => ipcRenderer.invoke('embedded-browser:resource:clear', tabId),
+  inspectCapturedResource: (tabId: string, resourceId: string, encoding: 'base64' | 'utf8') => (
+    ipcRenderer.invoke('embedded-browser:resource:inspect', tabId, resourceId, encoding)
+  ),
   setBounds: (bounds: { x: number; y: number; width: number; height: number }) =>
     ipcRenderer.invoke('embedded-browser:set-bounds', bounds),
   getCookies: (filter?: { domain?: string; name?: string; url?: string; path?: string }) =>
@@ -864,7 +815,7 @@ contextBridge.exposeInMainWorld('electronEmbeddedBrowser', {
     ipcRenderer.invoke('embedded-browser:external-tools:reset') as Promise<EmbeddedBrowserExternalToolSettings>,
   listEnabledExternalTools: () =>
     ipcRenderer.invoke('embedded-browser:external-tools:list-enabled') as Promise<EmbeddedBrowserExternalToolOption[]>,
-  dispatchExternalTool: (toolKey: EmbeddedBrowserExternalToolKey, payload: EmbeddedBrowserExternalToolDispatchPayload) =>
+  dispatchExternalTool: (toolKey: EmbeddedBrowserExternalToolKey, payload: EmbeddedBrowserExternalToolDispatchRequest) =>
     ipcRenderer.invoke('embedded-browser:external-tools:dispatch', toolKey, payload) as Promise<void>,
   listPasswords: () =>
     ipcRenderer.invoke('embedded-browser:password:list'),

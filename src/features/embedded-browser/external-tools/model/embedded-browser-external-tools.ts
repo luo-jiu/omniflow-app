@@ -32,6 +32,11 @@ export type EmbeddedBrowserExternalToolOption = {
   label: string
 }
 
+export type EmbeddedBrowserExternalToolDispatchRequest = {
+  resourceId: string
+  tabId: string
+}
+
 export type EmbeddedBrowserExternalToolDispatchPayload = {
   fileName?: string
   headers?: Record<string, string>

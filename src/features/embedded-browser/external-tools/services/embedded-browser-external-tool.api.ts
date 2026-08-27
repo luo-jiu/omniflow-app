@@ -1,5 +1,5 @@
 import type {
-  EmbeddedBrowserExternalToolDispatchPayload,
+  EmbeddedBrowserExternalToolDispatchRequest,
   EmbeddedBrowserExternalToolKey,
   EmbeddedBrowserExternalToolOption,
   EmbeddedBrowserExternalToolSettings,
@@ -45,7 +45,7 @@ export async function listEmbeddedBrowserEnabledExternalTools(): Promise<Embedde
 
 export async function dispatchEmbeddedBrowserExternalTool(
   toolKey: EmbeddedBrowserExternalToolKey,
-  payload: EmbeddedBrowserExternalToolDispatchPayload,
+  payload: EmbeddedBrowserExternalToolDispatchRequest,
 ): Promise<void> {
   assertDesktopSupport()
   return window.electronEmbeddedBrowser.dispatchExternalTool(toolKey, payload)

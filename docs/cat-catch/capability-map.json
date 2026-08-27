@@ -25,7 +25,7 @@
       "description": "MediaSource capture, bounded page buffering, main spool, reset, finalize, and merge lifecycle.",
       "dispatchBoundaryRefs": [
         "electron/service/embeddedBrowserResourceProbeRuntimeHooks.ts#embeddedBrowserResourceProbeRuntimeHooksBody",
-        "electron/service/embeddedBrowserMainController.ts#onProbePayload"
+        "electron/service/embedded-browser/capture/adapters/electron-page-probe.ts#ElectronPageProbeEventAdapter"
       ]
     },
     {
@@ -586,9 +586,9 @@
         }
       ],
       "currentImplementationRefs": [
-        "electron/service/embeddedBrowserMainController.ts#onProbePayload",
+        "electron/service/embedded-browser/capture/adapters/electron-page-probe.ts#ElectronPageProbeEventAdapter",
+        "electron/service/embedded-browser/capture/adapters/page-probe.ts#PageProbeCaptureAdapter",
         "electron/service/embeddedBrowserResourceProbeScriptTemplate.ts#EMBEDDED_BROWSER_RESOURCE_CONSOLE_PREFIX",
-        "electron/service/embeddedBrowserViewLifecycle.ts#EMBEDDED_BROWSER_RESOURCE_CONSOLE_PREFIX",
         "electron/service/embeddedBrowserViewLifecycle.ts#console-message"
       ],
       "targetRefs": [

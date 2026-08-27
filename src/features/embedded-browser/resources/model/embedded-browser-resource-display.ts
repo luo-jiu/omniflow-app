@@ -71,7 +71,7 @@ export function getResourceExtensionFilterKey(resource: EmbeddedBrowserCapturedR
 }
 
 export function isManuallyMergeableResource(resource: EmbeddedBrowserCapturedResource) {
-  return resource.kind === 'media' && Boolean(resource.resourceKey || /^https?:\/\//i.test(resource.url));
+  return resource.kind === 'media' && (resource.source === 'probe' || /^https?:\/\//i.test(resource.url));
 }
 
 export function formatMergeResourceLabel(resource: EmbeddedBrowserCapturedResource | null | undefined) {

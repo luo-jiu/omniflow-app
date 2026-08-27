@@ -9,7 +9,7 @@ export type EmbeddedBrowserExtractedResourcePayload = {
   base64: string
   fileName: string
   mimeType?: string
-  resourceKey: string
+  resourceKey?: string
   streamType?: 'audio' | 'video'
 }
 

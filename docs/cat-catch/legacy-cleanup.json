@@ -226,7 +226,7 @@
     {
       "id": "node.contract.preload-resource-event",
       "path": "electron/preload.ts",
-      "symbol": "onResourceCaptured",
+      "symbol": "onResourceStateChange",
       "capabilityId": "capture.cross-process-contract",
       "cutoverUnitId": "network-capture",
       "classification": "omniflow-integration",
@@ -355,13 +355,13 @@
     },
     {
       "id": "node.console-relay.resource-handler",
-      "path": "electron/service/embeddedBrowserViewLifecycle.ts",
-      "symbol": "EMBEDDED_BROWSER_RESOURCE_CONSOLE_PREFIX",
+      "path": "electron/service/embedded-browser/capture/adapters/page-probe.ts",
+      "symbol": "PageProbeCaptureAdapter",
       "capabilityId": "deep.secure-page-relay",
       "cutoverUnitId": "deep-search-runtime",
-      "classification": "legacy",
+      "classification": "omniflow-integration",
       "role": "adapter",
-      "cleanupAction": "remove-after-cutover"
+      "cleanupAction": "retain-or-adapt"
     },
     {
       "id": "node.mse.page-runtime",
@@ -765,23 +765,13 @@
     },
     {
       "id": "node.console-relay.probe-payload-handler",
-      "path": "electron/service/embeddedBrowserMainController.ts",
-      "symbol": "onProbePayload",
+      "path": "electron/service/embedded-browser/capture/adapters/electron-page-probe.ts",
+      "symbol": "ElectronPageProbeEventAdapter",
       "capabilityId": "deep.secure-page-relay",
       "cutoverUnitId": "deep-search-runtime",
-      "classification": "legacy",
+      "classification": "omniflow-integration",
       "role": "adapter",
-      "cleanupAction": "remove-after-cutover"
-    },
-    {
-      "id": "node.console-relay.resource-recorder",
-      "path": "electron/service/embeddedBrowserViewLifecycle.ts",
-      "symbol": "buildEmbeddedBrowserProbeResourceRecorder",
-      "capabilityId": "deep.secure-page-relay",
-      "cutoverUnitId": "deep-search-runtime",
-      "classification": "legacy",
-      "role": "adapter",
-      "cleanupAction": "remove-after-cutover"
+      "cleanupAction": "retain-or-adapt"
     },
     {
       "id": "node.mse.page-reset-emitter",

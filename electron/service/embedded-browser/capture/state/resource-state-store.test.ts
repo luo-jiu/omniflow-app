@@ -344,6 +344,8 @@ describe('state.capacity-ttl-dedupe', () => {
     expect(JSON.stringify(updated.resource)).not.toContain('mse-stream:video-1')
     expect(store.getOwnedResource(binding.tabId, updated.resource!.id)?.resourceKey)
       .toBe('mse-stream:video-1')
+    expect(store.getOwnedResourceByResourceKey(binding.tabId, 'mse-stream:video-1')?.id)
+      .toBe(updated.resource?.id)
     expect(getActiveSnapshot(store, binding.tabId).resources).toHaveLength(1)
 
     const nextNavigation = store.commitNavigation({

@@ -479,32 +479,6 @@ type EmbeddedBrowserBounds = {
   height: number;
 };
 
-type EmbeddedBrowserCapturedResource = {
-  capturedAt: number;
-  contentLength?: number;
-  ext?: string;
-  id: string;
-  kind: 'manifest' | 'media' | 'image' | 'subtitle' | 'document' | 'key' | 'other';
-  method?: string;
-  mimeType?: string;
-  pageUrl?: string;
-  referer?: string;
-  resourceKey?: string;
-  requestHeaders?: Record<string, string>;
-  resourceType?: string;
-  source: 'network' | 'probe';
-  statusCode?: number;
-  streamType?: 'audio' | 'video';
-  tabId: string;
-  url: string;
-};
-
-type EmbeddedBrowserResourceCaptureSnapshot = {
-  deepCaptureEnabled: boolean;
-  enabled: boolean;
-  resources: EmbeddedBrowserCapturedResource[];
-};
-
 type EmbeddedBrowserCapturedResourceMergeResponse = {
   cancelled?: boolean;
   error?: string;
@@ -539,14 +513,23 @@ interface Window {
   electronEmbeddedBrowser: {
     activateTab: (tabId: string | null) => Promise<void>;
     cleanupDownloadFile: (tempPath: string) => Promise<boolean>;
-    clearCapturedResources: (tabId: string) => Promise<EmbeddedBrowserResourceCaptureSnapshot>;
+    clearCapturedResources: (tabId: string) => Promise<import('./service/embedded-browser/contracts/captured-resource').ResourceStateSnapshot | null>;
+    inspectCapturedResource: (tabId: string, resourceId: string, encoding: 'base64' | 'utf8') => Promise<{
+      body: string;
+      contentType?: string;
+      encoding: 'base64' | 'utf8';
+      receivedBytes: number;
+      resource: Omit<import('./service/embedded-browser/contracts/captured-resource').CapturedResourceProjection, 'context'>;
+      status: number;
+      truncated: boolean;
+    }>;
     closeAll: () => Promise<void>;
     closeTab: (tabId: string) => Promise<void>;
     deactivate: () => Promise<void>;
-    exportCapturedResource: (tabId: string, resourceKey: string) => Promise<boolean>;
+    exportCapturedResource: (tabId: string, resourceId: string) => Promise<boolean>;
     goBack: (tabId: string) => Promise<void>;
     goForward: (tabId: string) => Promise<void>;
-    listCapturedResources: (tabId: string) => Promise<EmbeddedBrowserResourceCaptureSnapshot>;
+    listCapturedResources: (tabId: string) => Promise<import('./service/embedded-browser/contracts/captured-resource').ResourceStateSnapshot | null>;
     navigate: (tabId: string, url: string) => Promise<void>;
     onLibraryFileDropResult: (
       listener: (payload: import('@/features/file-transfer/model/file-transfer').LibraryFileBrowserDropResult) => void,
@@ -554,14 +537,14 @@ interface Window {
     stagePageDrag: (
       input: import('@/features/file-transfer/model/browser-drag-transfer').EmbeddedBrowserStagePageDragRequest,
     ) => Promise<import('@/features/file-transfer/model/browser-drag-transfer').EmbeddedBrowserStagedPageDragFile[]>;
-    openCapturedResource: (tabId: string, resourceKey: string) => Promise<boolean>;
+    openCapturedResource: (tabId: string, resourceId: string) => Promise<boolean>;
     previewCapturedResource: (tabId: string, payload: {
       mimeType?: string;
       streamType?: 'audio' | 'video';
       title?: string;
       url: string;
     }) => Promise<boolean>;
-    readCapturedResource: (tabId: string, resourceKey: string) => Promise<{
+    readCapturedResource: (tabId: string, resourceId: string) => Promise<{
       base64: string;
       fileName: string;
       mimeType?: string;
@@ -569,7 +552,7 @@ interface Window {
       streamType?: 'audio' | 'video';
     } | null>;
     saveCapturedResource: (tabId: string, payload: {
-      resourceKey?: string;
+      resourceId?: string;
       suggestedFileName?: string;
     }) => Promise<{
       cancelled?: boolean;
@@ -578,42 +561,18 @@ interface Window {
       outputPath?: string;
     }>;
     mergeCapturedMseResources: (tabId: string, payload: {
-      audioResource?: {
-        fileName?: string;
-        mimeType?: string;
-        requestHeaders?: Record<string, string>;
-        resourceKey?: string;
-        streamType?: 'audio' | 'video';
-        url?: string;
-      };
-      audioResourceKey?: string;
+      audioResourceId?: string;
       ffmpegPath?: string;
       outputDirectoryPath?: string;
       suggestedFileName?: string;
       useSystemSaveDialog?: boolean;
-      videoResource?: {
-        fileName?: string;
-        mimeType?: string;
-        requestHeaders?: Record<string, string>;
-        resourceKey?: string;
-        streamType?: 'audio' | 'video';
-        url?: string;
-      };
-      videoResourceKey?: string;
+      videoResourceId?: string;
     }) => Promise<EmbeddedBrowserCapturedResourceMergeResponse>;
     transcodeCapturedResource: (tabId: string, payload: {
       ffmpegPath?: string;
       outputDirectoryPath?: string;
       outputFormat?: string;
-      resource?: {
-        fileName?: string;
-        mimeType?: string;
-        requestHeaders?: Record<string, string>;
-        resourceKey?: string;
-        streamType?: 'audio' | 'video';
-        url?: string;
-      };
-      resourceKey?: string;
+      resourceId?: string;
       suggestedFileName?: string;
       useSystemSaveDialog?: boolean;
     }) => Promise<EmbeddedBrowserCapturedResourceMergeResponse>;
@@ -623,6 +582,7 @@ interface Window {
       headers?: Record<string, string>;
       manifestUrl?: string;
       outputDirectoryPath?: string;
+      resourceId?: string;
       requestId?: string;
       suggestedFileName?: string;
       useSystemSaveDialog?: boolean;
@@ -681,6 +641,7 @@ interface Window {
       headers?: Record<string, string>;
       manifestUrl?: string;
       outputDirectoryPath?: string;
+      resourceId?: string;
       suggestedFileName?: string;
       useSystemSaveDialog?: boolean;
     }) => Promise<EmbeddedBrowserCapturedResourceMergeResponse>;
@@ -699,6 +660,12 @@ interface Window {
       outputDirectoryPath?: string;
       suggestedFileName?: string;
       url?: string;
+      useSystemSaveDialog?: boolean;
+    }) => Promise<EmbeddedBrowserCapturedResourceMergeResponse>;
+    downloadCapturedResource: (tabId: string, payload: {
+      outputDirectoryPath?: string;
+      resourceId: string;
+      suggestedFileName?: string;
       useSystemSaveDialog?: boolean;
     }) => Promise<EmbeddedBrowserCapturedResourceMergeResponse>;
     getCatchToolkitState: (tabId: string) => Promise<EmbeddedBrowserCatchToolkitState | null>;
@@ -764,13 +731,15 @@ interface Window {
       totalFragments?: number;
       usingManualKey?: boolean;
     }) => void) => () => void;
-    onResourceCaptured: (listener: (payload: EmbeddedBrowserCapturedResource) => void) => () => void;
+    onResourceStateChange: (
+      listener: (payload: import('./service/embedded-browser/contracts/captured-resource').ResourceStateChange) => void,
+    ) => () => void;
     openTab: (tabId: string, url?: string) => Promise<void>;
     reload: (tabId: string) => Promise<void>;
     setBounds: (bounds: EmbeddedBrowserBounds) => Promise<void>;
-    startDeepResourceCapture: (tabId: string) => Promise<EmbeddedBrowserResourceCaptureSnapshot>;
-    startResourceCapture: (tabId: string) => Promise<EmbeddedBrowserResourceCaptureSnapshot>;
-    stopResourceCapture: (tabId: string) => Promise<EmbeddedBrowserResourceCaptureSnapshot>;
+    startDeepResourceCapture: (tabId: string) => Promise<import('./service/embedded-browser/contracts/captured-resource').ResourceStateSnapshot | null>;
+    startResourceCapture: (tabId: string) => Promise<import('./service/embedded-browser/contracts/captured-resource').ResourceStateSnapshot | null>;
+    stopResourceCapture: (tabId: string) => Promise<import('./service/embedded-browser/contracts/captured-resource').ResourceStateSnapshot | null>;
     getCookies: (filter?: EmbeddedBrowserCookieFilter) => Promise<EmbeddedBrowserCookie[]>;
     removeCookie: (url: string, name: string) => Promise<void>;
     removeCookiesByDomain: (domain: string) => Promise<void>;
@@ -788,7 +757,7 @@ interface Window {
     listEnabledExternalTools: () => Promise<import('@/features/embedded-browser/external-tools/model/embedded-browser-external-tools').EmbeddedBrowserExternalToolOption[]>;
     dispatchExternalTool: (
       toolKey: import('@/features/embedded-browser/external-tools/model/embedded-browser-external-tools').EmbeddedBrowserExternalToolKey,
-      payload: import('@/features/embedded-browser/external-tools/model/embedded-browser-external-tools').EmbeddedBrowserExternalToolDispatchPayload,
+      payload: import('@/features/embedded-browser/external-tools/model/embedded-browser-external-tools').EmbeddedBrowserExternalToolDispatchRequest,
     ) => Promise<void>;
     listPasswords: () => Promise<EmbeddedBrowserSavedPasswordEntry[]>;
     getDecryptedPassword: (id: string) => Promise<string>;

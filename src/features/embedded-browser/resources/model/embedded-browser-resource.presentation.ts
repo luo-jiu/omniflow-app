@@ -13,11 +13,11 @@ export type EmbeddedBrowserMergeableResourcePair = {
 }
 
 export function isPageContextManagedResource(resource: EmbeddedBrowserCapturedResource) {
-  return resource.source === 'probe' && Boolean(resource.resourceKey)
+  return resource.source === 'probe'
 }
 
 export function isMseCapturedResource(resource: EmbeddedBrowserCapturedResource) {
-  return resource.resourceType === 'mse-stream' && Boolean(resource.resourceKey)
+  return resource.resourceType === 'mse-stream' && resource.source === 'probe'
 }
 
 export function isPreviewableResource(resource: EmbeddedBrowserCapturedResource) {

@@ -6,6 +6,7 @@ import {
 import { formatResourceTitle } from '../model/embedded-browser-resource-display';
 import {
   exportEmbeddedBrowserCapturedResource,
+  downloadEmbeddedBrowserCapturedResource,
   mergeEmbeddedBrowserCapturedMseResources,
   openEmbeddedBrowserCapturedResource,
   previewEmbeddedBrowserCapturedResource,
@@ -13,7 +14,6 @@ import {
 } from './embedded-browser-resource.api';
 import {
   isHttpResource,
-  withDownloadRequestHeaders,
 } from './embedded-browser-resource-request';
 import type { EmbeddedBrowserCapturedResource } from '../types';
 
@@ -49,18 +49,7 @@ function buildResourceCurlCommand(resource: EmbeddedBrowserCapturedResource) {
   if (method && method !== 'GET') {
     lines.push(`  -X ${method}`);
   }
-  const requestHeaders = {
-    ...(resource.requestHeaders || {}),
-  };
-  if (resource.referer && !requestHeaders.referer) {
-    requestHeaders.referer = resource.referer;
-  }
-  Object.entries(requestHeaders).forEach(([headerName, headerValue]) => {
-    if (!headerValue) {
-      return;
-    }
-    lines.push(`  -H ${shellEscape(`${headerName}: ${headerValue}`)}`);
-  });
+  // Header values are intentionally unavailable in the renderer projection.
   lines.push(`  ${shellEscape(resource.url)}`);
   return lines.join(' \\\n');
 }
@@ -82,7 +71,7 @@ export async function previewResource(resource: EmbeddedBrowserCapturedResource)
   const previewed = await previewEmbeddedBrowserCapturedResource(resource.tabId, {
     mimeType: resource.mimeType,
     streamType: resource.streamType,
-    title: resource.pageUrl || resource.url,
+    title: resource.name || resource.url,
     url: resource.url,
   });
   if (!previewed) {
@@ -91,11 +80,11 @@ export async function previewResource(resource: EmbeddedBrowserCapturedResource)
 }
 
 export async function openCapturedResource(resource: EmbeddedBrowserCapturedResource) {
-  if (!resource.resourceKey) {
+  if (!isPageContextManagedResource(resource)) {
     openResourceUrl(resource.url);
     return;
   }
-  const opened = await openEmbeddedBrowserCapturedResource(resource.tabId, resource.resourceKey);
+  const opened = await openEmbeddedBrowserCapturedResource(resource.tabId, resource.id);
   if (!opened) {
     throw new Error('当前页面里的流还没有准备好，先继续播放几秒再试试');
   }
@@ -103,11 +92,11 @@ export async function openCapturedResource(resource: EmbeddedBrowserCapturedReso
 }
 
 export async function exportCapturedResource(resource: EmbeddedBrowserCapturedResource) {
-  if (!resource.resourceKey) {
+  if (!isPageContextManagedResource(resource)) {
     await copyResourceUrl(resource.url);
     return;
   }
-  const exported = await exportEmbeddedBrowserCapturedResource(resource.tabId, resource.resourceKey);
+  const exported = await exportEmbeddedBrowserCapturedResource(resource.tabId, resource.id);
   if (!exported) {
     throw new Error('当前页面里的流还没有准备好，先继续播放几秒再试试');
   }
@@ -132,7 +121,7 @@ export async function downloadSelectedResources(resources: EmbeddedBrowserCaptur
   }
 
   if (httpResources.length > 0) {
-    if (!window.electronAPI?.pickDownloadDirectory || !window.electronAPI?.downloadUrlToPath) {
+    if (!window.electronAPI?.pickDownloadDirectory) {
       throw new Error('当前环境不支持下载已选资源');
     }
     const pickResult = await window.electronAPI.pickDownloadDirectory();
@@ -140,12 +129,15 @@ export async function downloadSelectedResources(resources: EmbeddedBrowserCaptur
       return;
     }
     for (const [index, resource] of httpResources.entries()) {
-      await window.electronAPI.downloadUrlToPath(
-        resource.url,
-        pickResult.directoryPath,
-        getResourceDownloadFileName(resource, httpResources.length > 1 ? index : 0),
-        withDownloadRequestHeaders(resource),
-      );
+      const result = await downloadEmbeddedBrowserCapturedResource(resource.tabId, {
+        outputDirectoryPath: pickResult.directoryPath,
+        resourceId: resource.id,
+        suggestedFileName: getResourceDownloadFileName(resource, httpResources.length > 1 ? index : 0),
+        useSystemSaveDialog: false,
+      });
+      if (!result.ok && !result.cancelled) {
+        throw new Error(result.error || '资源下载失败');
+      }
     }
   }
 
@@ -153,30 +145,6 @@ export async function downloadSelectedResources(resources: EmbeddedBrowserCaptur
     Toast.warning(`${unsupportedResources.length} 条资源暂时不能直接下载，已跳过`);
   }
   Toast.success(`已处理 ${resources.length - unsupportedResources.length} 条资源`);
-}
-
-function getManualMergeResourceFileName(resource: EmbeddedBrowserCapturedResource) {
-  try {
-    const fileName = decodeURIComponent(new URL(resource.url).pathname.split('/').filter(Boolean).pop() || '');
-    if (fileName) {
-      return fileName;
-    }
-  } catch {
-    // Ignore invalid URLs and use a stable local fallback below.
-  }
-  const ext = resource.ext || (resource.streamType === 'audio' ? 'm4a' : 'm4s');
-  return `${resource.streamType || resource.kind}-${resource.id}.${ext}`;
-}
-
-function createManualMergeResourcePayload(resource: EmbeddedBrowserCapturedResource) {
-  return {
-    fileName: getManualMergeResourceFileName(resource),
-    mimeType: resource.mimeType,
-    requestHeaders: resource.requestHeaders,
-    resourceKey: resource.resourceKey,
-    streamType: resource.streamType,
-    url: resource.url,
-  };
 }
 
 type EmbeddedBrowserResourceOutputOptions = {
@@ -190,11 +158,9 @@ export async function mergeCapturedResources(resources: {
   video: EmbeddedBrowserCapturedResource;
 }, options?: EmbeddedBrowserResourceOutputOptions) {
   const mergeResult = await mergeEmbeddedBrowserCapturedMseResources(resources.video.tabId, {
-    audioResource: createManualMergeResourcePayload(resources.audio),
-    audioResourceKey: resources.audio.resourceKey,
+    audioResourceId: resources.audio.id,
     outputDirectoryPath: options?.outputDirectoryPath,
-    videoResource: createManualMergeResourcePayload(resources.video),
-    videoResourceKey: resources.video.resourceKey,
+    videoResourceId: resources.video.id,
     useSystemSaveDialog: options?.useSystemSaveDialog,
   });
   if (mergeResult.cancelled) {
@@ -234,8 +200,7 @@ export async function transcodeCapturedResource(
   const result = await transcodeEmbeddedBrowserCapturedResource(resource.tabId, {
     outputDirectoryPath: options?.outputDirectoryPath,
     outputFormat: normalizedFormat,
-    resource: createManualMergeResourcePayload(resource),
-    resourceKey: resource.resourceKey,
+    resourceId: resource.id,
     suggestedFileName: deriveTranscodeSuggestedFileName(getResourceDownloadFileName(resource), normalizedFormat),
     useSystemSaveDialog: options?.useSystemSaveDialog,
   });

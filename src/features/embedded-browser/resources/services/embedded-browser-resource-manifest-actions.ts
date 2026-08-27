@@ -21,6 +21,7 @@ import {
 import {
   downloadEmbeddedBrowserHlsManifest,
   downloadEmbeddedBrowserMpdManifest,
+  inspectEmbeddedBrowserCapturedResource,
   readEmbeddedBrowserCapturedResource,
 } from './embedded-browser-resource.api';
 import {
@@ -85,28 +86,24 @@ export function isMpdResource(resource: EmbeddedBrowserCapturedResource) {
 }
 
 async function readManifestResourceText(resource: EmbeddedBrowserCapturedResource) {
-  if (resource.resourceKey && isPageContextManagedResource(resource)) {
-    const extracted = await readEmbeddedBrowserCapturedResource(resource.tabId, resource.resourceKey);
+  if (isPageContextManagedResource(resource)) {
+    const extracted = await readEmbeddedBrowserCapturedResource(resource.tabId, resource.id);
     if (!extracted?.base64) {
       throw new Error('页面里的 manifest 暂时读不到，先重新深度捕获一次');
     }
     return {
       text: decodeBase64Text(extracted.base64),
-      url: resource.pageUrl || resource.url,
+      url: resource.url,
     };
   }
 
-  const headers = withResourceRefererHeader(resource);
-  const response = await window.electronAPI.fetch(resource.url, { headers });
-  if (response.status < 200 || response.status >= 400) {
-    throw new Error(`manifest 请求失败：HTTP ${response.status}`);
+  const inspected = await inspectEmbeddedBrowserCapturedResource(resource.tabId, resource.id, 'utf8');
+  if (inspected.status < 200 || inspected.status >= 400) {
+    throw new Error(`manifest 请求失败：HTTP ${inspected.status}`);
   }
-  const text = typeof response.body === 'string'
-    ? response.body
-    : JSON.stringify(response.body || '');
   return {
-    text,
-    url: resource.url,
+    text: inspected.body,
+    url: inspected.resource.url,
   };
 }
 
@@ -116,14 +113,13 @@ export async function analyzeHlsResource(resource: EmbeddedBrowserCapturedResour
     throw new Error('这条资源不像 HLS manifest');
   }
   const manifest = parseEmbeddedBrowserHlsManifest({
-    baseUrl: url || resource.pageUrl || resource.url,
+    baseUrl: url || resource.url,
     text,
   });
   const plan = createEmbeddedBrowserHlsDownloadPlan({
     headers: withResourceRefererHeader(resource),
     manifest,
     manifestUrl: resource.url,
-    pageUrl: resource.pageUrl,
   });
   const planText = JSON.stringify(plan, null, 2);
   await navigator.clipboard.writeText(planText);
@@ -143,8 +139,7 @@ export async function saveHlsResourceWithFfmpeg(resource: EmbeddedBrowserCapture
     throw new Error('当前只支持直接保存网络 m3u8，blob 或页内内存 m3u8 先用“解析 HLS”看下载计划');
   }
   const result = await downloadEmbeddedBrowserHlsManifest(resource.tabId, {
-    headers: withResourceRefererHeader(resource),
-    manifestUrl: resource.url,
+    resourceId: resource.id,
     suggestedFileName: deriveHlsDownloadFileName(resource),
   });
   if (result.cancelled) {
@@ -159,14 +154,13 @@ export async function saveHlsResourceWithFfmpeg(resource: EmbeddedBrowserCapture
 export async function analyzeMpdResource(resource: EmbeddedBrowserCapturedResource) {
   const { text, url } = await readManifestResourceText(resource);
   const manifest = parseEmbeddedBrowserMpdManifest({
-    baseUrl: url || resource.pageUrl || resource.url,
+    baseUrl: url || resource.url,
     text,
   });
   const plan = createEmbeddedBrowserMpdDownloadPlan({
     headers: withResourceRefererHeader(resource),
     manifest,
     manifestUrl: resource.url,
-    pageUrl: resource.pageUrl,
   });
   const planText = JSON.stringify(plan, null, 2);
   await navigator.clipboard.writeText(planText);
@@ -186,8 +180,7 @@ export async function saveMpdResourceWithFfmpeg(resource: EmbeddedBrowserCapture
     throw new Error('当前只支持直接保存网络 mpd，blob 或页内内存 mpd 先用“解析 MPD”看下载计划');
   }
   const result = await downloadEmbeddedBrowserMpdManifest(resource.tabId, {
-    headers: withResourceRefererHeader(resource),
-    manifestUrl: resource.url,
+    resourceId: resource.id,
     suggestedFileName: deriveMpdDownloadFileName(resource),
   });
   if (result.cancelled) {
@@ -214,8 +207,8 @@ function addHlsKeyCandidate(
 }
 
 async function readCapturedKeyCandidate(resource: EmbeddedBrowserCapturedResource) {
-  if (resource.resourceKey && isPageContextManagedResource(resource)) {
-    const extracted = await readEmbeddedBrowserCapturedResource(resource.tabId, resource.resourceKey);
+  if (isPageContextManagedResource(resource)) {
+    const extracted = await readEmbeddedBrowserCapturedResource(resource.tabId, resource.id);
     if (!extracted?.base64) {
       return null;
     }
@@ -236,11 +229,9 @@ async function readCapturedKeyCandidate(resource: EmbeddedBrowserCapturedResourc
   if (!/^https?:\/\//i.test(resource.url)) {
     return null;
   }
-  const base64 = await fetchResourceBinaryBase64(
-    resource.url,
-    withResourceRefererHeader(resource),
-    64,
-  );
+  const inspected = await inspectEmbeddedBrowserCapturedResource(resource.tabId, resource.id, 'base64');
+  if (inspected.status < 200 || inspected.status >= 400) return null;
+  const base64 = inspected.body;
   return {
     base64,
     label: resource.url,

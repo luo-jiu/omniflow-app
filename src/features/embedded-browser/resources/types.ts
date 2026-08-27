@@ -1,39 +1,14 @@
-export type EmbeddedBrowserCapturedResourceKind =
-  | 'manifest'
-  | 'media'
-  | 'image'
-  | 'subtitle'
-  | 'document'
-  | 'key'
-  | 'other';
-
-export type EmbeddedBrowserCapturedResourceSource = 'network' | 'probe';
-
-export type EmbeddedBrowserCapturedResource = {
-  capturedAt: number;
-  contentLength?: number;
-  ext?: string;
-  id: string;
-  kind: EmbeddedBrowserCapturedResourceKind;
-  method?: string;
-  mimeType?: string;
-  pageUrl?: string;
-  referer?: string;
-  resourceKey?: string;
-  requestHeaders?: Record<string, string>;
-  resourceType?: string;
-  source: EmbeddedBrowserCapturedResourceSource;
-  statusCode?: number;
-  streamType?: 'audio' | 'video';
-  tabId: string;
-  url: string;
-};
-
-export type EmbeddedBrowserResourceCaptureSnapshot = {
-  deepCaptureEnabled: boolean;
-  enabled: boolean;
-  resources: EmbeddedBrowserCapturedResource[];
-};
+export {
+  CapturedResourceContract,
+} from '../../../../electron/service/embedded-browser/contracts/captured-resource';
+export type {
+  ActiveResourceStateSnapshot as EmbeddedBrowserResourceCaptureSnapshot,
+  CapturedResourceKind as EmbeddedBrowserCapturedResourceKind,
+  CapturedResourceProjection as EmbeddedBrowserCapturedResource,
+  CapturedResourceSource as EmbeddedBrowserCapturedResourceSource,
+  ResourceStateChange as EmbeddedBrowserResourceStateChange,
+  ResourceStateSnapshot as EmbeddedBrowserResourceStateSnapshot,
+} from '../../../../electron/service/embedded-browser/contracts/captured-resource';
 
 export type EmbeddedBrowserCatchToolkitState = {
   audioResourceKey: string;

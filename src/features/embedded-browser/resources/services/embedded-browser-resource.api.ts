@@ -1,6 +1,6 @@
 import type {
-  EmbeddedBrowserCapturedResource,
-  EmbeddedBrowserResourceCaptureSnapshot,
+  EmbeddedBrowserResourceStateChange,
+  EmbeddedBrowserResourceStateSnapshot,
 } from '../types';
 
 function assertDesktopSupport() {
@@ -10,15 +10,15 @@ function assertDesktopSupport() {
 }
 
 export function subscribeEmbeddedBrowserResources(
-  listener: (payload: EmbeddedBrowserCapturedResource) => void,
+  listener: (payload: EmbeddedBrowserResourceStateChange) => void,
 ) {
   assertDesktopSupport();
-  return window.electronEmbeddedBrowser.onResourceCaptured(listener);
+  return window.electronEmbeddedBrowser.onResourceStateChange(listener);
 }
 
 export async function listEmbeddedBrowserCapturedResources(tabId: string) {
   assertDesktopSupport();
-  return window.electronEmbeddedBrowser.listCapturedResources(tabId) as Promise<EmbeddedBrowserResourceCaptureSnapshot>;
+  return window.electronEmbeddedBrowser.listCapturedResources(tabId) as Promise<EmbeddedBrowserResourceStateSnapshot | null>;
 }
 
 export function subscribeEmbeddedBrowserHlsTask(
@@ -51,22 +51,31 @@ export function subscribeEmbeddedBrowserHlsTask(
 
 export async function startEmbeddedBrowserResourceCapture(tabId: string) {
   assertDesktopSupport();
-  return window.electronEmbeddedBrowser.startResourceCapture(tabId) as Promise<EmbeddedBrowserResourceCaptureSnapshot>;
+  return window.electronEmbeddedBrowser.startResourceCapture(tabId) as Promise<EmbeddedBrowserResourceStateSnapshot | null>;
 }
 
 export async function stopEmbeddedBrowserResourceCapture(tabId: string) {
   assertDesktopSupport();
-  return window.electronEmbeddedBrowser.stopResourceCapture(tabId) as Promise<EmbeddedBrowserResourceCaptureSnapshot>;
+  return window.electronEmbeddedBrowser.stopResourceCapture(tabId) as Promise<EmbeddedBrowserResourceStateSnapshot | null>;
 }
 
 export async function startEmbeddedBrowserDeepResourceCapture(tabId: string) {
   assertDesktopSupport();
-  return window.electronEmbeddedBrowser.startDeepResourceCapture(tabId) as Promise<EmbeddedBrowserResourceCaptureSnapshot>;
+  return window.electronEmbeddedBrowser.startDeepResourceCapture(tabId) as Promise<EmbeddedBrowserResourceStateSnapshot | null>;
 }
 
 export async function clearEmbeddedBrowserCapturedResources(tabId: string) {
   assertDesktopSupport();
-  return window.electronEmbeddedBrowser.clearCapturedResources(tabId) as Promise<EmbeddedBrowserResourceCaptureSnapshot>;
+  return window.electronEmbeddedBrowser.clearCapturedResources(tabId) as Promise<EmbeddedBrowserResourceStateSnapshot | null>;
+}
+
+export async function inspectEmbeddedBrowserCapturedResource(
+  tabId: string,
+  resourceId: string,
+  encoding: 'base64' | 'utf8',
+) {
+  assertDesktopSupport();
+  return window.electronEmbeddedBrowser.inspectCapturedResource(tabId, resourceId, encoding);
 }
 
 export async function clearEmbeddedBrowserCacheAndReload(tabId: string) {
@@ -79,23 +88,22 @@ export async function resetEmbeddedBrowserPageStorageAndReload(tabId: string) {
   return window.electronEmbeddedBrowser.resetPageStorageAndReload(tabId) as Promise<boolean>;
 }
 
-export async function openEmbeddedBrowserCapturedResource(tabId: string, resourceKey: string) {
+export async function openEmbeddedBrowserCapturedResource(tabId: string, resourceId: string) {
   assertDesktopSupport();
-  return window.electronEmbeddedBrowser.openCapturedResource(tabId, resourceKey) as Promise<boolean>;
+  return window.electronEmbeddedBrowser.openCapturedResource(tabId, resourceId) as Promise<boolean>;
 }
 
-export async function exportEmbeddedBrowserCapturedResource(tabId: string, resourceKey: string) {
+export async function exportEmbeddedBrowserCapturedResource(tabId: string, resourceId: string) {
   assertDesktopSupport();
-  return window.electronEmbeddedBrowser.exportCapturedResource(tabId, resourceKey) as Promise<boolean>;
+  return window.electronEmbeddedBrowser.exportCapturedResource(tabId, resourceId) as Promise<boolean>;
 }
 
-export async function readEmbeddedBrowserCapturedResource(tabId: string, resourceKey: string) {
+export async function readEmbeddedBrowserCapturedResource(tabId: string, resourceId: string) {
   assertDesktopSupport();
-  return window.electronEmbeddedBrowser.readCapturedResource(tabId, resourceKey) as Promise<{
+  return window.electronEmbeddedBrowser.readCapturedResource(tabId, resourceId) as Promise<{
     base64: string;
     fileName: string;
     mimeType?: string;
-    resourceKey: string;
     streamType?: 'audio' | 'video';
   } | null>;
 }
@@ -103,7 +111,7 @@ export async function readEmbeddedBrowserCapturedResource(tabId: string, resourc
 export async function saveEmbeddedBrowserCapturedResource(
   tabId: string,
   payload: {
-    resourceKey?: string;
+    resourceId?: string;
     suggestedFileName?: string;
   },
 ) {
@@ -132,28 +140,12 @@ export async function previewEmbeddedBrowserCapturedResource(
 export async function mergeEmbeddedBrowserCapturedMseResources(
   tabId: string,
   payload: {
-    audioResource?: {
-      fileName?: string;
-      mimeType?: string;
-      requestHeaders?: Record<string, string>;
-      resourceKey?: string;
-      streamType?: 'audio' | 'video';
-      url?: string;
-    };
-    audioResourceKey?: string;
+    audioResourceId?: string;
     ffmpegPath?: string;
     outputDirectoryPath?: string;
     suggestedFileName?: string;
     useSystemSaveDialog?: boolean;
-    videoResource?: {
-      fileName?: string;
-      mimeType?: string;
-      requestHeaders?: Record<string, string>;
-      resourceKey?: string;
-      streamType?: 'audio' | 'video';
-      url?: string;
-    };
-    videoResourceKey?: string;
+    videoResourceId?: string;
   },
 ) {
   assertDesktopSupport();
@@ -172,15 +164,7 @@ export async function transcodeEmbeddedBrowserCapturedResource(
     ffmpegPath?: string;
     outputDirectoryPath?: string;
     outputFormat?: string;
-    resource?: {
-      fileName?: string;
-      mimeType?: string;
-      requestHeaders?: Record<string, string>;
-      resourceKey?: string;
-      streamType?: 'audio' | 'video';
-      url?: string;
-    };
-    resourceKey?: string;
+    resourceId?: string;
     suggestedFileName?: string;
     useSystemSaveDialog?: boolean;
   },
@@ -203,6 +187,7 @@ export async function downloadEmbeddedBrowserHlsManifest(
     headers?: Record<string, string>;
     manifestUrl?: string;
     outputDirectoryPath?: string;
+    resourceId?: string;
     requestId?: string;
     suggestedFileName?: string;
     useSystemSaveDialog?: boolean;
@@ -337,6 +322,24 @@ export async function downloadEmbeddedBrowserDirectFile(
   }>;
 }
 
+export async function downloadEmbeddedBrowserCapturedResource(
+  tabId: string,
+  payload: {
+    outputDirectoryPath?: string;
+    resourceId: string;
+    suggestedFileName?: string;
+    useSystemSaveDialog?: boolean;
+  },
+) {
+  assertDesktopSupport();
+  return window.electronEmbeddedBrowser.downloadCapturedResource(tabId, payload) as Promise<{
+    cancelled?: boolean;
+    error?: string;
+    ok: boolean;
+    outputPath?: string;
+  }>;
+}
+
 export async function retryEmbeddedBrowserHlsPlanFailed(
   tabId: string,
   payload: {
@@ -360,6 +363,7 @@ export async function downloadEmbeddedBrowserMpdManifest(
     headers?: Record<string, string>;
     manifestUrl?: string;
     outputDirectoryPath?: string;
+    resourceId?: string;
     suggestedFileName?: string;
     useSystemSaveDialog?: boolean;
   },

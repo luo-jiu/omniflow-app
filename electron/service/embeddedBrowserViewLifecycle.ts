@@ -10,9 +10,8 @@ import {
 } from './embeddedBrowserMainSupport'
 import { type EmbeddedBrowserStatePayload } from './embeddedBrowserMainTypes'
 import {
-  EMBEDDED_BROWSER_RESOURCE_CONSOLE_PREFIX,
-  createEmbeddedBrowserResourceProbeScript,
-} from './embeddedBrowserResourceProbe'
+  type BoundPageProbeDocument,
+} from './embedded-browser/capture/adapters/electron-page-probe'
 import {
   EMBEDDED_BROWSER_AUTOFILL_CONSOLE_PREFIX,
   EMBEDDED_BROWSER_CREDENTIAL_CONSOLE_PREFIX,
@@ -27,7 +26,6 @@ import {
   EMBEDDED_BROWSER_LIBRARY_FILE_DROP_WORLD_ID,
   createEmbeddedBrowserLibraryFileDropScript,
 } from './embeddedBrowserLibraryFileDropScript'
-import { type EmbeddedBrowserCapturedResource, recordEmbeddedBrowserProbeResource } from './embeddedBrowserResourceService'
 import {
   handleEmbeddedBrowserInputShortcut,
   isDevToolsToggleShortcut,
@@ -58,7 +56,6 @@ type CreateEmbeddedBrowserViewOptions = {
   onDocumentNavigated: (tabId: string, url: string) => void
   onLibraryFileDropPayload: (tabId: string, payload: Record<string, unknown>) => void
   onPageDragPayload: (tabId: string, payload: Record<string, unknown>) => void
-  onProbePayload: (payload: Record<string, unknown>) => void
   onViewDestroyed: (tabId: string) => void
   syncBounds: (view: WebContentsView) => void
   tabId: string
@@ -264,18 +261,6 @@ export function createEmbeddedBrowserView(
     options.onViewDestroyed(options.tabId)
   })
   view.webContents.on('console-message', (_event, level, message, line, sourceId) => {
-    if (typeof message === 'string' && message.startsWith(EMBEDDED_BROWSER_RESOURCE_CONSOLE_PREFIX)) {
-      const rawPayload = message.slice(EMBEDDED_BROWSER_RESOURCE_CONSOLE_PREFIX.length)
-      try {
-        options.onProbePayload(JSON.parse(rawPayload) as Record<string, unknown>)
-      } catch (error) {
-        runtimeLogger.warn('embedded browser resource payload parse failed', {
-          error: error instanceof Error ? error.message : String(error),
-          tabId: options.tabId,
-        })
-      }
-      return
-    }
     if (typeof message === 'string' && message.startsWith(EMBEDDED_BROWSER_CREDENTIAL_CONSOLE_PREFIX)) {
       try {
         options.onCredentialPayload(options.tabId, JSON.parse(message.slice(EMBEDDED_BROWSER_CREDENTIAL_CONSOLE_PREFIX.length)))
@@ -417,39 +402,17 @@ export function createEmbeddedBrowserView(
   return view
 }
 
-export function buildEmbeddedBrowserProbeResourceRecorder(
-  tabId: string,
-) {
-  return (payload: Record<string, unknown>) => {
-    recordEmbeddedBrowserProbeResource(tabId, {
-      capturedAt: Number(payload.capturedAt) || Date.now(),
-      contentLength: typeof payload.contentLength === 'number' ? payload.contentLength : undefined,
-      ext: typeof payload.ext === 'string' ? payload.ext : undefined,
-      kind: typeof payload.kind === 'string'
-        ? payload.kind as EmbeddedBrowserCapturedResource['kind']
-        : undefined,
-      mimeType: typeof payload.mimeType === 'string' ? payload.mimeType : undefined,
-      pageUrl: typeof payload.pageUrl === 'string' ? payload.pageUrl : undefined,
-      resourceKey: typeof payload.resourceKey === 'string' ? payload.resourceKey : undefined,
-      resourceType: typeof payload.resourceType === 'string' ? payload.resourceType : undefined,
-      source: 'probe',
-      streamType: payload.streamType === 'audio' || payload.streamType === 'video'
-        ? payload.streamType
-        : undefined,
-      url: typeof payload.url === 'string' ? payload.url : '',
-    })
-  }
-}
-
 export async function installEmbeddedBrowserResourceProbe(
   tabId: string,
   view: WebContentsView,
-  isDeepCaptureEnabled: (tabId: string) => boolean,
+  documents: {
+    current: BoundPageProbeDocument
+    next: BoundPageProbeDocument
+  } | null,
 ) {
-  if (!isDeepCaptureEnabled(tabId) || view.webContents.isDestroyed()) {
+  if (!documents || view.webContents.isDestroyed()) {
     return false
   }
-  const probeScript = createEmbeddedBrowserResourceProbeScript()
   try {
     if (!view.webContents.debugger.isAttached()) {
       view.webContents.debugger.attach('1.3')
@@ -467,7 +430,7 @@ export async function installEmbeddedBrowserResourceProbe(
     }
     await view.webContents.debugger.sendCommand('Page.enable')
     const result = await view.webContents.debugger.sendCommand('Page.addScriptToEvaluateOnNewDocument', {
-      source: probeScript,
+      source: documents.next.script,
     }) as { identifier?: string }
     if (result.identifier) {
       embeddedBrowserProbeNewDocumentScriptIds.set(view.webContents, result.identifier)
@@ -487,13 +450,13 @@ export async function installEmbeddedBrowserResourceProbe(
     if (frames.length) {
       await Promise.all(frames.map(async (frame) => {
         try {
-          await frame.executeJavaScript(probeScript, true)
+          await frame.executeJavaScript(documents.current.script, true)
         } catch {
           // Cross-origin or transient frames can disappear during injection.
         }
       }))
     } else {
-      await view.webContents.executeJavaScript(probeScript, true)
+      await view.webContents.executeJavaScript(documents.current.script, true)
     }
     return true
   } catch (error) {

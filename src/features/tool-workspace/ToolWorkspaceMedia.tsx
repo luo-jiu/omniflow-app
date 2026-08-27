@@ -30,7 +30,6 @@ import {
 } from '@/features/embedded-browser/resources/services/embedded-browser-resource-panel-actions';
 import {
   isHttpResource,
-  withDownloadRequestHeaders,
 } from '@/features/embedded-browser/resources/services/embedded-browser-resource-request';
 import {
   getDesktopDefaultDownloadDirectory,
@@ -367,14 +366,8 @@ const ToolWorkspaceMedia: React.FC<MediaProcessingToolProps> = ({
     resource: EmbeddedBrowserCapturedResource,
   ) => {
     await dispatchEmbeddedBrowserExternalTool(toolKey, {
-      fileName: formatResourceTitle(resource),
-      headers: withDownloadRequestHeaders(resource),
-      kind: resource.kind,
-      mimeType: resource.mimeType,
-      pageUrl: resource.pageUrl,
-      referer: resource.referer,
-      title: formatResourceTitle(resource),
-      url: resource.url,
+      resourceId: resource.id,
+      tabId: resource.tabId,
     });
     const option = externalToolOptions.find((item) => item.key === toolKey);
     Toast.success(`已发送到${option?.label || '外部工具'}`);

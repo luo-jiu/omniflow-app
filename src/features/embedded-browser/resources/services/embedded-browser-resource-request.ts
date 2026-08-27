@@ -20,14 +20,11 @@ export function isHttpResource(resource: EmbeddedBrowserCapturedResource) {
   return /^https?:\/\//i.test(resource.url);
 }
 
-export function withResourceRefererHeader(resource: EmbeddedBrowserCapturedResource) {
-  const headers = {
-    ...(resource.requestHeaders || {}),
-  };
-  const hasReferer = Object.keys(headers).some((key) => key.toLowerCase() === 'referer');
-  if (resource.referer && !hasReferer) {
-    headers.referer = resource.referer;
-  }
+export function withResourceRefererHeader(_resource: EmbeddedBrowserCapturedResource) {
+  // Protected request headers stay in main's NetworkContextVault. Renderer
+  // callers receive an empty projection and must use an opaque IPC action.
+  void _resource;
+  const headers: Record<string, string> = {};
   return headers;
 }
 

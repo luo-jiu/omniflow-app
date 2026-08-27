@@ -15,6 +15,7 @@ import type {
   EmbeddedBrowserMpdDownloadPayload,
   EmbeddedBrowserMpdPlanDownloadPayload,
   EmbeddedBrowserDirectFileDownloadPayload,
+  EmbeddedBrowserCapturedResourceDownloadPayload,
 } from './embeddedBrowserMainTypes'
 import type {
   EmbeddedBrowserCookie,
@@ -24,7 +25,7 @@ import type {
   EmbeddedBrowserCaptureRuleSet,
 } from '@/features/embedded-browser/resources/model/embedded-browser-capture-rules'
 import type {
-  EmbeddedBrowserExternalToolDispatchPayload,
+  EmbeddedBrowserExternalToolDispatchRequest,
   EmbeddedBrowserExternalToolKey,
   EmbeddedBrowserExternalToolOption,
   EmbeddedBrowserExternalToolSettings,
@@ -44,6 +45,11 @@ type EmbeddedBrowserMainIpcHandlers = {
   activateTab: (sender: Electron.WebContents, tabId: string | null) => void | Promise<void>
   cleanupDownloadFile: (tempPath: string) => Promise<boolean>
   clearCapturedResources: (tabId: string) => unknown
+  inspectResource: (
+    tabId: string,
+    resourceId: string,
+    encoding: 'base64' | 'utf8',
+  ) => Promise<unknown>
   clearBrowserCache: (tabId: string) => Promise<boolean>
   clearCatchMediaCache: (tabId: string) => Promise<boolean>
   closeAll: (sender: Electron.WebContents) => void | Promise<void>
@@ -89,6 +95,10 @@ type EmbeddedBrowserMainIpcHandlers = {
   downloadDirectFile: (
     tabId: string,
     payload: EmbeddedBrowserDirectFileDownloadPayload,
+  ) => Promise<unknown>
+  downloadCapturedResource: (
+    tabId: string,
+    payload: EmbeddedBrowserCapturedResourceDownloadPayload,
   ) => Promise<unknown>
   exportResource: (tabId: string, resourceKey: string) => Promise<boolean>
   getCatchToolkitState: (tabId: string) => Promise<unknown>
@@ -145,7 +155,7 @@ type EmbeddedBrowserMainIpcHandlers = {
   listEnabledExternalTools: () => Promise<EmbeddedBrowserExternalToolOption[]>
   dispatchExternalTool: (
     toolKey: EmbeddedBrowserExternalToolKey,
-    payload: EmbeddedBrowserExternalToolDispatchPayload,
+    payload: EmbeddedBrowserExternalToolDispatchRequest,
   ) => Promise<void>
   listPasswords: () => EmbeddedBrowserSavedPasswordEntry[]
   getDecryptedPassword: (id: string) => Promise<string>
@@ -191,15 +201,21 @@ export function registerEmbeddedBrowserMainIpcHandlers(handlers: EmbeddedBrowser
   ipcMain.handle('embedded-browser:resource:start', (_event, tabId: string) => handlers.startCapturedResources(tabId))
   ipcMain.handle('embedded-browser:resource:stop', (_event, tabId: string) => handlers.stopCapturedResources(tabId))
   ipcMain.handle('embedded-browser:resource:clear', (_event, tabId: string) => handlers.clearCapturedResources(tabId))
+  ipcMain.handle(
+    'embedded-browser:resource:inspect',
+    async (_event, tabId: string, resourceId: string, encoding: 'base64' | 'utf8') => (
+      handlers.inspectResource(tabId, resourceId, encoding)
+    ),
+  )
 
-  ipcMain.handle('embedded-browser:resource:open', async (_event, tabId: string, resourceKey: string) => (
-    handlers.openResource(tabId, resourceKey)
+  ipcMain.handle('embedded-browser:resource:open', async (_event, tabId: string, resourceId: string) => (
+    handlers.openResource(tabId, resourceId)
   ))
-  ipcMain.handle('embedded-browser:resource:export', async (_event, tabId: string, resourceKey: string) => (
-    handlers.exportResource(tabId, resourceKey)
+  ipcMain.handle('embedded-browser:resource:export', async (_event, tabId: string, resourceId: string) => (
+    handlers.exportResource(tabId, resourceId)
   ))
-  ipcMain.handle('embedded-browser:resource:read', async (_event, tabId: string, resourceKey: string) => (
-    handlers.readResource(tabId, resourceKey)
+  ipcMain.handle('embedded-browser:resource:read', async (_event, tabId: string, resourceId: string) => (
+    handlers.readResource(tabId, resourceId)
   ))
   ipcMain.handle(
     'embedded-browser:resource:preview',
@@ -303,6 +319,12 @@ export function registerEmbeddedBrowserMainIpcHandlers(handlers: EmbeddedBrowser
       handlers.downloadDirectFile(tabId, payload)
     ),
   )
+  ipcMain.handle(
+    'embedded-browser:resource:download-captured',
+    async (_event, tabId: string, payload: EmbeddedBrowserCapturedResourceDownloadPayload) => (
+      handlers.downloadCapturedResource(tabId, payload)
+    ),
+  )
   ipcMain.handle('embedded-browser:resource:start-deep-capture', async (_event, tabId: string) => (
     handlers.startDeepResourceCapture(tabId)
   ))
@@ -357,7 +379,7 @@ export function registerEmbeddedBrowserMainIpcHandlers(handlers: EmbeddedBrowser
   ))
   ipcMain.handle(
     'embedded-browser:external-tools:dispatch',
-    async (_event, toolKey: EmbeddedBrowserExternalToolKey, payload: EmbeddedBrowserExternalToolDispatchPayload) => (
+    async (_event, toolKey: EmbeddedBrowserExternalToolKey, payload: EmbeddedBrowserExternalToolDispatchRequest) => (
       handlers.dispatchExternalTool(toolKey, payload)
     ),
   )
