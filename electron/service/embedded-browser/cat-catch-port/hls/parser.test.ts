@@ -123,6 +123,27 @@ const mapLeadingByteRangeExpected = JSON.parse(readFileSync(`${mapLeadingByteRan
   }>
 }
 
+const numericByteRangeFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-byterange-numeric-normalization', import.meta.url))
+const numericByteRangeFixture = JSON.parse(readFileSync(`${numericByteRangeFixtureRoot}/fixture.json`, 'utf8')) as {
+  expected: string
+  input: string
+}
+const numericByteRangePlaylist = readFileSync(`${numericByteRangeFixtureRoot}/${numericByteRangeFixture.input}`, 'utf8')
+const numericByteRangeExpected = JSON.parse(readFileSync(`${numericByteRangeFixtureRoot}/${numericByteRangeFixture.expected}`, 'utf8')) as {
+  baseUrl: string
+  invalidByteRanges: string[]
+  invalidError: string
+  map: { length: number; offset: number; url: string }
+  segments: Array<{
+    length: number
+    mapLength: number
+    mapOffset: number
+    offset: number
+    sequence: number
+    url: string
+  }>
+}
+
 const mapUriFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-map-uri-rejection', import.meta.url))
 const mapUriFixture = JSON.parse(readFileSync(`${mapUriFixtureRoot}/fixture.json`, 'utf8')) as {
   expected: string
@@ -424,6 +445,58 @@ describe('Cat Catch HLS parser', () => {
         text: readFileSync(`${mapUriFixtureRoot}/${input}`, 'utf8'),
       }), input).toThrow(mapUriExpected.expectedError)
     }
+  })
+
+  it('hls.byterange-numeric-normalization', () => {
+    const manifest = parseHlsManifest({
+      baseUrl: numericByteRangeExpected.baseUrl,
+      text: numericByteRangePlaylist,
+    })
+    expect(manifest.maps[0]).toMatchObject({
+      byteRange: {
+        length: numericByteRangeExpected.map.length,
+        offset: numericByteRangeExpected.map.offset,
+      },
+      url: numericByteRangeExpected.map.url,
+    })
+    expect(manifest.segments.map(segment => ({
+      length: segment.byteRange?.length,
+      mapLength: segment.map?.byteRange?.length,
+      mapOffset: segment.map?.byteRange?.offset,
+      offset: segment.byteRange?.offset,
+      sequence: segment.sequence,
+      url: segment.url,
+    }))).toEqual(numericByteRangeExpected.segments)
+
+    const plan = createEmbeddedBrowserHlsDownloadPlan({
+      manifest,
+      manifestUrl: numericByteRangeExpected.baseUrl,
+    })
+    expect(plan.fragments.map(fragment => ({
+      length: fragment.byteRange?.length,
+      mapLength: fragment.initSegment?.byteRange?.length,
+      mapOffset: fragment.initSegment?.byteRange?.offset,
+      offset: fragment.byteRange?.offset,
+      sequence: fragment.sequence,
+      url: fragment.url,
+    }))).toEqual(numericByteRangeExpected.segments)
+
+    for (const byteRange of numericByteRangeExpected.invalidByteRanges) {
+      expect(() => parseHlsManifest({
+        baseUrl: numericByteRangeExpected.baseUrl,
+        text: numericByteRangePlaylist.replace(
+          '#EXT-X-BYTERANGE:15.9tail@100.8tail',
+          `#EXT-X-BYTERANGE:${byteRange}`,
+        ),
+      }), byteRange).toThrow(numericByteRangeExpected.invalidError)
+    }
+    expect(() => parseHlsManifest({
+      baseUrl: numericByteRangeExpected.baseUrl,
+      text: numericByteRangePlaylist.replace(
+        'BYTERANGE="20.9tail@300.8tail"',
+        'BYTERANGE="0@300"',
+      ),
+    })).toThrow(numericByteRangeExpected.invalidError)
   })
 
   it('hls.aes128-effective-iv', () => {

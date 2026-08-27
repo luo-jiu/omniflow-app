@@ -857,6 +857,20 @@
 - legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
 - validation: 固定 Cat Catch vendor executable oracle 对五个 fragment 分别输出 `00000e / 01 / 0123 / abcdef / 0000000000000000000000000000000f`；失败证据为 parser `25/26`，当前实现保留非法/奇数/大写原文。实现后 parser `26/26`、完整 HLS 集合 `82/82`、TypeScript、全仓 ESLint、fixture JSON、轻量 validator、固定上游 anchor 校验、同步校验 `16/16`、metadata `7 units / 32 capabilities / 193 anchors / 106 cleanup entries / 132 planned IDs / 86 active refs` 和本切片 diff check 通过。排除已由 `node --test` 单独执行的同步文件后，全量 Vitest 在沙箱内为 `1136 passed / 3 skipped / 16 loopback EPERM`；4 个 loopback 文件在沙箱外复跑 `20/20`，折算全部可执行测试为 `1152 passed / 3 skipped`。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
 
+## 2026-08-28: same target (HLS BYTERANGE numeric normalization)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，固定实际 vendor 为 hls.js `1.6.16`。
+- reviewedThrough / portedThrough: 均保持 `null`；本步闭合 `BaseSegment.setByteRange` 的数值解析和不可执行 range 边界，仍未完成 hls-engine cutover。
+- change groups: `behavioral`（length/offset 使用固定无 radix `parseInt`）与 `accepted-difference`（计划创建前拒绝非法 range）。
+- affected capability IDs: `hls.parser-planner` 保持 `ported-unverified`；新增 1 个 active test ID 和 1 个固定上游 anchor。
+- fixtures/tests: 新增 upstream-executable fixture `hls-byterange-numeric-normalization`；`hls.byterange-numeric-normalization` 同时覆盖 MAP/media 的尾随文本整数前缀、后续 media 省略 offset 的 range end 继承，以及零/负 length、NaN 和负 offset 拒绝。
+- accepted difference: 固定 hls.js 对 `0@400 / junk@500 / 8@junk / 8@-2 / -8@100` 分别保留 `[400,400] / [500,NaN] / [NaN,NaN] / [-2,6] / [100,92]`，Cat Catch 随后会形成空或非法 `Range`。OmniFlow 保留可执行整数前缀语义，但在 manifest facade 抛 `Invalid HLS BYTERANGE`，不允许错误退化成无 Range 的整资源下载。
+- excluded changes and reasons: 空 BYTERANGE 继续按既有未声明语义处理，以保留 MAP leading-range transfer；不新增 range URL 累计器、下载 fallback、IPC 或 renderer 状态。
+- unresolved gaps: HLS 其余 master/media parser 差分、live 未捕获 URL 过渡 DTO、加密 fMP4/video 真实输出组合、真实网站手工验证和最终 hls-engine cutover。
+- runtime changes: `parseHlsByteRange` 对显式 length/offset 改用固定 hls.js 数值规则；MAP/media 复用同一 helper，并在任一非空非法值出现时记录首个稳定 manifest error。有效 range 继续沿既有 manifest/download-plan DTO 传播，没有新增 owner。
+- legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
+- validation: 固定 Cat Catch vendor executable oracle 证明 MAP `[300,320]`、media `[100,115]`、implicit media `[115,127]` 及上述五类非法输出；失败证据为 parser `26/27` 且 MAP range 为 `undefined`。实现后 parser `27/27`、完整 HLS 集合 `83/83`、TypeScript、全仓 ESLint、fixture JSON、轻量 validator、固定上游 anchor 校验、同步校验 `16/16`、metadata `7 units / 32 capabilities / 194 anchors / 106 cleanup entries / 133 planned IDs / 87 active refs` 和本切片 diff check 通过。排除已由 `node --test` 单独执行的同步文件后，全量 Vitest 在沙箱内为 `1139 passed / 3 skipped / 16 loopback EPERM`；4 个 loopback 文件在沙箱外复跑 `20/20`，折算全部可执行测试为 `1155 passed / 3 skipped`。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
+
 ## Template
 
 ```markdown

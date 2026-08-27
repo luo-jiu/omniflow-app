@@ -293,13 +293,23 @@ export function parseHlsAttributeList(input: string): CatCatchHlsAttributeMap {
   return parseHlsAttributeListWithVariables(input)
 }
 
+/**
+ * Upstream: xifangczy/cat-catch@2cb981d7c2f4614732edccc167c4b5793d1cb138
+ * Source: lib/hls.min.js#BaseSegment.setByteRange
+ * Reason: hls.js parses range length and offset with radix-inferred parseInt,
+ * accepting valid integer prefixes that strict Number conversion would drop.
+ * Adaptation: non-positive or non-finite ranges are rejected by the manifest
+ * facade instead of becoming Cat Catch's invalid Range header or a full fetch.
+ * Fixture: hls-byterange-numeric-normalization
+ */
 export function parseHlsByteRange(input?: string): CatCatchHlsByteRange | undefined {
   const normalizedInput = String(input || '').trim()
   if (!normalizedInput) return undefined
   const [lengthText, offsetText] = normalizedInput.split('@', 2)
-  const length = parseNumber(lengthText)
-  if (!length || length <= 0) return undefined
-  const offset = parseNumber(offsetText)
+  const length = Number.parseInt(lengthText)
+  if (!Number.isFinite(length) || length <= 0) return undefined
+  const offset = offsetText === undefined ? undefined : Number.parseInt(offsetText)
+  if (offset !== undefined && (!Number.isFinite(offset) || offset < 0)) return undefined
   return { length, offset, raw: normalizedInput }
 }
 
@@ -375,8 +385,15 @@ function createHlsMap(
   const uri = String(attributes.URI || '').trim()
   if (!uri) return null
   const url = resolveHlsUrl(uri, baseUrl)
-  const byteRange = attributes.BYTERANGE
-    ? parseHlsByteRange(attributes.BYTERANGE)
+  const rawByteRange = attributes.BYTERANGE
+  const parsedByteRange = rawByteRange
+    ? parseHlsByteRange(rawByteRange)
+    : undefined
+  if (rawByteRange && !parsedByteRange) {
+    rememberVariableParsingError(variableState, 'Invalid HLS BYTERANGE')
+  }
+  const byteRange = rawByteRange
+    ? parsedByteRange
     : leadingByteRange
   return {
     byteRange: resolveByteRange(byteRange),
@@ -865,7 +882,11 @@ export function parseHlsManifest(input: {
       continue
     }
     if (line.startsWith('#EXT-X-BYTERANGE')) {
-      pendingByteRange = parseHlsByteRange(getTagValue(line))
+      const rawByteRange = getTagValue(line)
+      pendingByteRange = parseHlsByteRange(rawByteRange)
+      if (rawByteRange && !pendingByteRange) {
+        rememberVariableParsingError(variableState, 'Invalid HLS BYTERANGE')
+      }
       continue
     }
     if (line.startsWith('#EXT-X-DISCONTINUITY-SEQUENCE')) {
