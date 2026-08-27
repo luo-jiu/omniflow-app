@@ -1,0 +1,40 @@
+{
+  "baseUrl": "https://media.example/tag-boundary/live.m3u8",
+  "discontinuityCount": 1,
+  "durationSeconds": 8,
+  "hasEndList": true,
+  "isMaster": false,
+  "map": {
+    "length": 10,
+    "offset": 0,
+    "url": "https://media.example/tag-boundary/init.mp4"
+  },
+  "mediaSequence": 10,
+  "segments": [
+    {
+      "discontinuitySequence": 0,
+      "duration": 4,
+      "iv": "0x0000000000000000000000000000000a",
+      "sequence": 10,
+      "title": "first",
+      "url": "https://media.example/tag-boundary/a.m4s"
+    },
+    {
+      "discontinuitySequence": 1,
+      "duration": 0,
+      "iv": "0x0000000000000000000000000000000b",
+      "sequence": 11,
+      "title": null,
+      "url": "https://media.example/tag-boundary/shadow.m4s"
+    },
+    {
+      "discontinuitySequence": 1,
+      "duration": 4,
+      "iv": "0x0000000000000000000000000000000c",
+      "sequence": 12,
+      "title": "second",
+      "url": "https://media.example/tag-boundary/b.m4s"
+    }
+  ],
+  "targetDuration": 4
+}

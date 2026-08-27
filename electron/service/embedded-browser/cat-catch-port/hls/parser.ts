@@ -7,7 +7,7 @@
  * previous fragment, while each EXT-X-MAP range is parsed independently.
  * Adaptation: pure parser only; Electron fetching and output stay outside the port.
  * Fixtures: hls.byterange-map-key-discontinuity, hls.map-byterange-independent,
- * hls.map-leading-byterange-transfer
+ * hls.map-leading-byterange-transfer, hls-valued-tag-boundary
  */
 
 import { createHlsDefaultIv } from './decrypt'
@@ -780,7 +780,9 @@ export function parseHlsManifest(input: {
       parseHlsAttributeListWithVariables(getTagValue(line), variableState)
       continue
     }
-    if (line.startsWith('#EXT-X-STREAM-INF')) {
+    // Pinned hls.js requires a colon immediately after valued tag names. Its
+    // no-value tag regex has different prefix behavior, preserved below.
+    if (line.startsWith('#EXT-X-STREAM-INF:')) {
       pendingVariantLine = line
       continue
     }
@@ -789,7 +791,7 @@ export function parseHlsManifest(input: {
       if (rendition) renditions.push(rendition)
       continue
     }
-    if (line.startsWith('#EXT-X-MEDIA-SEQUENCE')) {
+    if (line.startsWith('#EXT-X-MEDIA-SEQUENCE:')) {
       if (mediaSequence !== 0) {
         assignMultipleMediaPlaylistTagError(variableState, 'MEDIA-SEQUENCE', line)
       } else if (segments.length > 0) {
@@ -798,7 +800,7 @@ export function parseHlsManifest(input: {
       mediaSequence = parseInteger(getTagValue(line)) || 0
       continue
     }
-    if (line.startsWith('#EXT-X-TARGETDURATION')) {
+    if (line.startsWith('#EXT-X-TARGETDURATION:')) {
       if (targetDuration !== undefined) {
         assignMultipleMediaPlaylistTagError(variableState, 'TARGETDURATION', line)
       }
@@ -818,7 +820,7 @@ export function parseHlsManifest(input: {
       }
       continue
     }
-    if (line.startsWith('#EXT-X-PLAYLIST-TYPE')) {
+    if (line.startsWith('#EXT-X-PLAYLIST-TYPE:')) {
       if (playlistType !== undefined) {
         assignMultipleMediaPlaylistTagError(variableState, 'PLAYLIST-TYPE', line)
       }
@@ -836,7 +838,7 @@ export function parseHlsManifest(input: {
       }
       continue
     }
-    if (line.startsWith('#EXT-X-KEY')) {
+    if (line.startsWith('#EXT-X-KEY:')) {
       const key = createHlsKey(line, baseUrl, variableState)
       if (!isSupportedHlsKey(key)) continue
       if (key.method === 'NONE') {
@@ -853,7 +855,7 @@ export function parseHlsManifest(input: {
       }
       continue
     }
-    if (line.startsWith('#EXT-X-MAP')) {
+    if (line.startsWith('#EXT-X-MAP:')) {
       // Pinned hls.js reuses a preceding EXT-X-BYTERANGE for the MAP only
       // while no positive EXTINF is pending. It also carries that same range
       // into the next media fragment, so pendingByteRange remains intact.
@@ -881,7 +883,7 @@ export function parseHlsManifest(input: {
       }
       continue
     }
-    if (line.startsWith('#EXT-X-BYTERANGE')) {
+    if (line.startsWith('#EXT-X-BYTERANGE:')) {
       const rawByteRange = getTagValue(line)
       pendingByteRange = parseHlsByteRange(rawByteRange)
       if (rawByteRange && !pendingByteRange) {
@@ -889,7 +891,7 @@ export function parseHlsManifest(input: {
       }
       continue
     }
-    if (line.startsWith('#EXT-X-DISCONTINUITY-SEQUENCE')) {
+    if (line.startsWith('#EXT-X-DISCONTINUITY-SEQUENCE:')) {
       if (discontinuitySequence !== 0) {
         assignMultipleMediaPlaylistTagError(variableState, 'DISCONTINUITY-SEQUENCE', line)
       } else if (segments.length > 0) {
@@ -902,7 +904,7 @@ export function parseHlsManifest(input: {
       discontinuitySequence += 1
       continue
     }
-    if (line.startsWith('#EXTINF')) {
+    if (line.startsWith('#EXTINF:')) {
       pendingSegment = parseExtinf(line)
       continue
     }

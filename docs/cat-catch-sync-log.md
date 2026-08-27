@@ -885,6 +885,20 @@
 - legacy cleanup: 删除 live-start renderer headers/pageUrl 过渡字段；未删除旧 HLS 执行链，保留到 hls-engine 原子 cutover。
 - validation: 失败证据为 live recorder `6/7`，hostile child start 错误地成功且 resolver 未执行；实现后 recorder `7/7`、定向 authority/IPC/renderer `14/14`、完整 HLS 集合 `84/84`、TypeScript、全仓 ESLint、轻量 validator、固定上游 anchor 校验、同步校验 `16/16`、metadata `7 units / 32 capabilities / 194 anchors / 106 cleanup entries / 134 planned IDs / 88 active refs` 和本切片 diff check 通过。排除已由 `node --test` 单独执行的同步文件后，全量 Vitest 在沙箱内为 `1140 passed / 3 skipped / 16 loopback EPERM`；4 个 loopback 文件在沙箱外复跑 `20/20`，折算全部可执行测试为 `1156 passed / 3 skipped`。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
 
+## 2026-08-28: same target (HLS valued tag dispatch boundary)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，固定实际 vendor 为 hls.js `1.6.16`。
+- reviewedThrough / portedThrough: 均保持 `null`；本步闭合带值 HLS 标签从词法匹配到下载对象状态的分发边界，仍未完成 hls-engine cutover。
+- change groups: `behavioral`（固定 `Xr/Qr` 冒号边界）与 `stability`（未知扩展标签不污染下载状态）。
+- affected capability IDs: `hls.parser-planner` 保持 `ported-unverified`；新增 1 个 active test ID，固定上游 anchor 不变。
+- fixtures/tests: 新增 upstream-executable fixture `hls-valued-tag-boundary`；`hls.valued-tag-boundary` 同时覆盖未知 `KEY/MAP/BYTERANGE/MEDIA-SEQUENCE/TARGETDURATION/PLAYLIST-TYPE/STREAM-INF/EXTINF` 后缀不能清空 AES key、替换 init/range、改写 sequence/target/type、生成 variant 或吞掉 media URI，并锁住 manifest 与 download plan 的 URL、effective IV、MAP range、duration 和 discontinuity。
+- accepted difference: 无。无值标签走固定 hls.js 的另一条正则，其前缀行为原样保留，没有在本步顺手规范化。
+- excluded changes and reasons: 不投影 `PROGRAM-DATE-TIME/GAP/DATERANGE/BITRATE/PRELOAD-HINT/RENDITION-REPORT` 等 Cat Catch `parseTs` 不消费的播放 metadata；不新增 IPC、renderer 状态或 parser 框架。
+- unresolved gaps: HLS 其余真正影响下载的 parser 差分、live 未捕获 URL 过渡 DTO、加密 fMP4/video 真实输出组合、真实网站手工验证和最终 hls-engine cutover。
+- runtime changes: pure parser 的 `STREAM-INF/MEDIA-SEQUENCE/TARGETDURATION/PLAYLIST-TYPE/KEY/MAP/BYTERANGE/DISCONTINUITY-SEQUENCE/EXTINF` 分支只在固定标签名后立即出现冒号时执行；未知带值扩展继续落入固定 fallback。既有 key/map/range/sequence owner 和 DTO 不变。
+- legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
+- validation: 固定 Cat Catch vendor executable oracle 输出 3 个 fragment，保持 `sn=10/11/12`、`cc=0/1/1`、同 AES key/init MAP、逐 sequence IV、target duration `4`、总时长 `8` 且无 variant；失败证据为 parser `27/28`，未知 sequence 后缀触发错误。实现后 parser `28/28`、完整 HLS 集合 `85/85`、全仓 ESLint、fixture/capability JSON、轻量 validator、固定上游校验、同步校验 `16/16`、metadata `7 units / 32 capabilities / 194 anchors / 106 cleanup entries / 135 planned IDs / 89 active refs` 和 scoped diff check 通过。全量 Vitest 在沙箱内为 `1148 passed / 3 skipped / 16 loopback EPERM / 3 Agent Shell failures`；4 个 loopback 文件在沙箱外复跑 `20/20`，折算唯一测试为 `1164 passed / 3 skipped / 3 Agent Shell failures`。TypeScript 仅被其他 Agent 在途的 `agent-media-artifact-store.ts` 与 `agent-orchestrator.test.ts` 4 个错误阻断；完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
+
 ## Template
 
 ```markdown

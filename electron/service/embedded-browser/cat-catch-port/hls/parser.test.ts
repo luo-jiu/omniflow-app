@@ -90,6 +90,30 @@ const singletonTagFixture = JSON.parse(readFileSync(`${singletonTagFixtureRoot}/
   expected: string
   inputs: string[]
 }
+const valuedTagFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-valued-tag-boundary', import.meta.url))
+const valuedTagFixture = JSON.parse(readFileSync(`${valuedTagFixtureRoot}/fixture.json`, 'utf8')) as {
+  expected: string
+  input: string
+}
+const valuedTagPlaylist = readFileSync(`${valuedTagFixtureRoot}/${valuedTagFixture.input}`, 'utf8')
+const valuedTagExpected = JSON.parse(readFileSync(`${valuedTagFixtureRoot}/${valuedTagFixture.expected}`, 'utf8')) as {
+  baseUrl: string
+  discontinuityCount: number
+  durationSeconds: number
+  hasEndList: boolean
+  isMaster: boolean
+  map: { length: number; offset: number; url: string }
+  mediaSequence: number
+  segments: Array<{
+    discontinuitySequence: number
+    duration: number
+    iv: string
+    sequence: number
+    title: string | null
+    url: string
+  }>
+  targetDuration: number
+}
 const mediaStructureExpected = JSON.parse(readFileSync(`${mediaStructureFixtureRoot}/${mediaStructureFixture.expected}`, 'utf8')) as Record<string, string>
 
 const mapByteRangeFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-map-byterange-independent', import.meta.url))
@@ -796,6 +820,67 @@ describe('Cat Catch HLS parser', () => {
       }])
       expect(manifest.isLive).toBe(input !== 'singletons.m3u8')
     }
+  })
+
+  it('hls.valued-tag-boundary', () => {
+    const manifest = parseHlsManifest({
+      baseUrl: valuedTagExpected.baseUrl,
+      text: valuedTagPlaylist,
+    })
+    expect(manifest).toMatchObject({
+      discontinuityCount: valuedTagExpected.discontinuityCount,
+      durationSeconds: valuedTagExpected.durationSeconds,
+      hasEndList: valuedTagExpected.hasEndList,
+      isMaster: valuedTagExpected.isMaster,
+      mediaSequence: valuedTagExpected.mediaSequence,
+      targetDuration: valuedTagExpected.targetDuration,
+    })
+    expect(manifest.playlistType).toBeUndefined()
+    expect(manifest.variants).toEqual([])
+    expect(manifest.maps).toHaveLength(1)
+    expect(manifest.maps[0]).toMatchObject({
+      byteRange: {
+        length: valuedTagExpected.map.length,
+        offset: valuedTagExpected.map.offset,
+      },
+      url: valuedTagExpected.map.url,
+    })
+    expect(manifest.segments.map(segment => ({
+      discontinuitySequence: segment.discontinuitySequence,
+      duration: segment.duration,
+      iv: segment.key?.iv,
+      sequence: segment.sequence,
+      title: segment.title || null,
+      url: segment.url,
+    }))).toEqual(valuedTagExpected.segments)
+    expect(manifest.segments.every(segment => segment.key?.url === 'https://media.example/tag-boundary/key.bin'))
+      .toBe(true)
+    expect(manifest.segments.every(segment => segment.map?.url === valuedTagExpected.map.url))
+      .toBe(true)
+
+    const plan = createEmbeddedBrowserHlsDownloadPlan({
+      manifest,
+      manifestUrl: valuedTagExpected.baseUrl,
+    })
+    expect(plan.fragments.map(fragment => ({
+      discontinuitySequence: fragment.discontinuitySequence,
+      duration: fragment.duration,
+      initLength: fragment.initSegment?.byteRange?.length,
+      initOffset: fragment.initSegment?.byteRange?.offset,
+      initUrl: fragment.initSegment?.url,
+      iv: fragment.key?.iv,
+      sequence: fragment.sequence,
+      url: fragment.url,
+    }))).toEqual(valuedTagExpected.segments.map(segment => ({
+      discontinuitySequence: segment.discontinuitySequence,
+      duration: segment.duration,
+      initLength: valuedTagExpected.map.length,
+      initOffset: valuedTagExpected.map.offset,
+      initUrl: valuedTagExpected.map.url,
+      iv: segment.iv,
+      sequence: segment.sequence,
+      url: segment.url,
+    })))
   })
 
   it('normalizes integer media tags like pinned hls.js', () => {
