@@ -1,0 +1,28 @@
+{
+  "baseUrl": "https://media.example/hls-map-uri/playlist.m3u8",
+  "expectedError": "EXT-X-MAP URI must be a non-empty string",
+  "upstreamFragments": {
+    "missing-uri.m3u8": [
+      {
+        "initUrl": "https://media.example/hls-map-uri/init-a.mp4",
+        "url": "https://media.example/hls-map-uri/a.m4s"
+      },
+      {
+        "initUrl": "",
+        "url": "https://media.example/hls-map-uri/b.m4s"
+      }
+    ],
+    "empty-uri.m3u8": [
+      {
+        "initUrl": "",
+        "url": "https://media.example/hls-map-uri/a.m4s"
+      }
+    ],
+    "whitespace-uri.m3u8": [
+      {
+        "initUrl": "https://media.example/hls-map-uri/playlist.m3u8",
+        "url": "https://media.example/hls-map-uri/a.m4s"
+      }
+    ]
+  }
+}

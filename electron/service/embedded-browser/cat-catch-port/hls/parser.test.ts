@@ -123,6 +123,16 @@ const mapLeadingByteRangeExpected = JSON.parse(readFileSync(`${mapLeadingByteRan
   }>
 }
 
+const mapUriFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-map-uri-rejection', import.meta.url))
+const mapUriFixture = JSON.parse(readFileSync(`${mapUriFixtureRoot}/fixture.json`, 'utf8')) as {
+  expected: string
+  inputs: string[]
+}
+const mapUriExpected = JSON.parse(readFileSync(`${mapUriFixtureRoot}/${mapUriFixture.expected}`, 'utf8')) as {
+  baseUrl: string
+  expectedError: string
+}
+
 const aesIvFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-aes128-iv-semantics', import.meta.url))
 const aesIvFixture = JSON.parse(readFileSync(`${aesIvFixtureRoot}/fixture.json`, 'utf8')) as {
   expected: string
@@ -357,6 +367,15 @@ describe('Cat Catch HLS parser', () => {
       length: 720,
       offset: 0,
     })
+  })
+
+  it('hls.map-uri-rejection', () => {
+    for (const input of mapUriFixture.inputs) {
+      expect(() => parseHlsManifest({
+        baseUrl: mapUriExpected.baseUrl,
+        text: readFileSync(`${mapUriFixtureRoot}/${input}`, 'utf8'),
+      }), input).toThrow(mapUriExpected.expectedError)
+    }
   })
 
   it('hls.aes128-effective-iv', () => {

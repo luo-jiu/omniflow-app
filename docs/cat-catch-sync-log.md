@@ -801,6 +801,20 @@
 - legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
 - validation: 固定 vendor executable oracle 对精确 fixture 输出首个 init/media range `[0,720]`、第二个 init empty range 与 media `[720,1720]`，以及省略 offset 的第三个 init/media range `[1720,2320]`；失败证据为 parser 21/22，实现后 parser 22/22、广义 HLS/inspection/projection Vitest 82/82、全仓 ESLint、TypeScript、`cat-catch:validate`、同步校验 16/16、fixture JSON 和 metadata 7 units/32 capabilities/192 anchors/106 cleanup entries/127 unique planned IDs/81 active refs 通过。全量 Vitest 为 1100 passed / 3 skipped / 16 sandbox-only loopback failures，4 个相关 loopback 文件在允许监听本机端口的环境复跑 20/20，通过后折算全部可执行测试为 1116 passed / 3 skipped；Node 专用同步 validator 被 Vitest 收集后另报告 no suite。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
 
+## 2026-08-28: same target (HLS MAP URI rejection)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动。
+- reviewedThrough / portedThrough: 均保持 `null`；本步闭合固定 hls.js 1.6.16 中缺失/空 MAP URI 到 Cat Catch 下载路径的不可执行边界，仍未完成 hls-engine cutover。
+- change groups: `behavioral`（无效 MAP 替换旧 init state）、`stability`（同步稳定拒绝）和 `security`（禁止把空 URL 解析为无关页面资源）。
+- affected capability IDs: `hls.parser-planner` 保持 `ported-unverified`；新增 1 个 active test ID。
+- fixtures/tests: 新增 upstream-executable fixture `hls-map-uri-rejection`；`hls.map-uri-rejection` 覆盖已有有效 MAP 后出现缺失 URI，以及首张 MAP 显式空/纯空白 URI，三者都不得沿用旧 MAP 或进入 download plan。
+- accepted difference: 固定 hls.js 为 missing/empty 输入创建 `url=""` 的 init segment，纯空白 URI 则解析为 playlist URL；Cat Catch `parseTs` 随后会抓取扩展页面或 manifest 内容。OmniFlow 在同步 parser 边界抛 `EXT-X-MAP URI must be a non-empty string`，保持同一“不产生有效媒体输出”的终态，同时阻止抓取无关内容。
+- excluded changes and reasons: 不给 renderer 增加无效 MAP DTO，不让 main downloader猜测空 URI，也不在本步迁移 program-date-time、daterange、gap、bitrate、preload-hint、rendition-report 或 independent-segments 等非下载投影字段。
+- unresolved gaps: HLS 其余真正影响下载的 parser 差分、真正有 previous snapshot 的 delta recording、live 未捕获 URL 过渡 DTO、加密 fMP4/video 真实输出组合、真实网站手工验证和最终 hls-engine cutover。
+- runtime changes: pure parser 在 MAP attribute substitution 后发现 URI 缺失或为空时记录稳定 parsing error 并清空当前 MAP；更早的上游 parsing error 保持优先，manifest 不会物化为计划。
+- legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
+- validation: 固定 vendor executable oracle 对已有有效 MAP 后的 missing URI 输出 init URLs `["https://media.example/init-a.mp4", ""]`，对 empty URI 输出 `initUrl=""`，纯空白 URI 输出 playlist URL；静态 Cat Catch `parseTs` 证实会对这些 URL 调用 `fetch`。失败证据为 parser 22/23，实现后 parser 23/23、广义 HLS/inspection/projection Vitest 83/83、全仓 ESLint、TypeScript、`cat-catch:validate`、同步校验 16/16、fixture JSON 和 metadata 7 units/32 capabilities/192 anchors/106 cleanup entries/128 unique planned IDs/82 active refs 通过。全量 Vitest 为 1105 passed / 3 skipped / 16 sandbox-only loopback failures，4 个 loopback 文件在允许监听本机端口的环境复跑 20/20，折算全部可执行测试为 1121 passed / 3 skipped；Node 专用同步 validator 被 Vitest 收集后另报告 no suite。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
+
 ## Template
 
 ```markdown

@@ -1,0 +1,23 @@
+{
+  "fixtureId": "hls-map-uri-rejection",
+  "capabilityIds": [
+    "hls.parser-planner"
+  ],
+  "upstreamCommit": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
+  "status": "active",
+  "oracle": "upstream-executable",
+  "sourceRefs": [
+    "lib/hls.min.js#parseLevelPlaylist EXT-X-MAP",
+    "lib/hls.min.js#setInitSegment/BaseSegment.url",
+    "js/m3u8.js#parseTs(data) EXT-X-MAP fetch"
+  ],
+  "inputs": [
+    "missing-uri.m3u8",
+    "empty-uri.m3u8",
+    "whitespace-uri.m3u8"
+  ],
+  "expected": "expected.json",
+  "testRefs": [
+    "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.map-uri-rejection"
+  ]
+}

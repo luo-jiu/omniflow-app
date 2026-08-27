@@ -351,7 +351,7 @@ function createHlsMap(
   leadingByteRange?: CatCatchHlsByteRange,
 ): CatCatchHlsMap | null {
   const attributes = parseHlsAttributeListWithVariables(getTagValue(line), variableState)
-  const uri = attributes.URI
+  const uri = String(attributes.URI || '').trim()
   if (!uri) return null
   const url = resolveHlsUrl(uri, baseUrl)
   const byteRange = attributes.BYTERANGE
@@ -765,6 +765,15 @@ export function parseHlsManifest(input: {
         currentMap = map
         declaredMaps.push(map)
         if (currentKeys) mapKeyStates.set(map, currentKeys)
+      } else {
+        // Pinned hls.js replaces the current init segment with url="" and
+        // Cat Catch later fetches that URL relative to its extension page.
+        // Reject before plan creation instead of retaining the previous MAP
+        // or fetching unrelated page content as initialization bytes.
+        variableState.playlistParsingError ||= new Error(
+          'EXT-X-MAP URI must be a non-empty string',
+        )
+        currentMap = undefined
       }
       continue
     }
