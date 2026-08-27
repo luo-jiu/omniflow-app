@@ -162,8 +162,8 @@ library detail page
 - 资源捕捉规则的持久化读取，以及网络捕捉 / probe 捕捉前的过滤判定
 - 深度捕捉启动、probe 安装和 reload
 - MSE 读取、导出、保存、合并、manifest 下载
-- HLS 本地计划下载：`plan -> local workdir -> local playlist -> ffmpeg`
-- HLS live 录制：`轮询 media playlist -> 增量补分片 -> 手动停止 -> ffmpeg 导出`
+- HLS 本地计划下载：`plan -> main-owned/embedded-session fetch -> local workdir -> local playlist -> ffmpeg`
+- HLS live 录制：`轮询 media playlist -> main-owned/embedded-session fetch 增量补分片 -> 手动停止 -> ffmpeg 导出`
 
 ## 4. 核心概念
 
@@ -345,7 +345,7 @@ tempPath
 - 由 main 侧的浏览器网络能力记录
 - 以 `embedded-browser:resource-state-change` 事件推回 renderer
 
-全面迁移中的 network chain 已由 production controller 实例化 `EmbeddedBrowserCaptureRuntime`，它组合唯一 `ElectronNetworkCaptureAdapter`、每个 view 唯一 `ElectronPageProbeEventAdapter`、`PageProbeCaptureAdapter`、Cat Catch/OmniFlow 分层 policy、main-only context vault、revisioned `ResourceStateStore`、安全跨进程合同、`EmbeddedBrowserLifecycle`、main-only resource access consumer 和 bounded inspection。lifecycle 只在 capture mode 为 deep 时签发 probe ingress；console transport 分别持有当前文档和预签的下一 navigation generation 随机 token，document-start token 只有在预期 binding 变为当前 owner 后才被提升，上一文档 token 随即失效，每条消息仍会复核 binding。普通无 key discovery 由 main 派生 stable key，MSE flush/reset 保持独立控制路径；需要操作 probe/MSE 私有 page key 时，main 只能用 opaque `tabId/resourceId` 解析，并再次校验当前 incarnation、navigation、page origin 与 WebContents owner，renderer 永远不接触该 key。产品 policy 显式补充 image/key/document/expanded-subtitle，不能覆盖 Cat Catch regex blacklist；现有持久化 extension/MIME/regex/domain 设置会编译到目标 policy，并可在不替换 `webRequest` listener 的情况下原地更新。access consumer 的 transport 必须由 production adapter 注入并绑定到捕捉 tab 的 Electron session，不能回退到主进程全局 `fetch`。资源状态事件、opaque inspection、普通资源下载、probe open/export/read 和 external-tool dispatch 已接入 production IPC/preload/renderer；已捕获 URL 的页面拖拽暂存也通过当前 tab 的 opaque `resourceId` 进入 main authority，data/blob、未捕获资源和多资源 fallback 仍使用过渡 DTO；HLS/DASH 计划下载、派生字幕 URL 和旧 catch toolkit 仍使用过渡 DTO。构造该 runtime 会占用 session `webRequest` listener，当前必须保证旧 bridge 不再同时注册同一种 `webRequest` event；逐项状态以 Cat Catch capability map 为准。
+全面迁移中的 network chain 已由 production controller 实例化 `EmbeddedBrowserCaptureRuntime`，它组合唯一 `ElectronNetworkCaptureAdapter`、每个 view 唯一 `ElectronPageProbeEventAdapter`、`PageProbeCaptureAdapter`、Cat Catch/OmniFlow 分层 policy、main-only context vault、revisioned `ResourceStateStore`、安全跨进程合同、`EmbeddedBrowserLifecycle`、main-only resource access consumer 和 bounded inspection。lifecycle 只在 capture mode 为 deep 时签发 probe ingress；console transport 分别持有当前文档和预签的下一 navigation generation 随机 token，document-start token 只有在预期 binding 变为当前 owner 后才被提升，上一文档 token 随即失效，每条消息仍会复核 binding。普通无 key discovery 由 main 派生 stable key，MSE flush/reset 保持独立控制路径；需要操作 probe/MSE 私有 page key 时，main 只能用 opaque `tabId/resourceId` 解析，并再次校验当前 incarnation、navigation、page origin 与 WebContents owner，renderer 永远不接触该 key。产品 policy 显式补充 image/key/document/expanded-subtitle，不能覆盖 Cat Catch regex blacklist；现有持久化 extension/MIME/regex/domain 设置会编译到目标 policy，并可在不替换 `webRequest` listener 的情况下原地更新。access consumer 的 transport 必须由 production adapter 注入并绑定到捕捉 tab 的 Electron session，不能回退到主进程全局 `fetch`。资源状态事件、opaque inspection、普通资源下载、probe open/export/read 和 external-tool dispatch 已接入 production IPC/preload/renderer；已捕获 URL 的页面拖拽暂存也通过当前 tab 的 opaque `resourceId` 进入 main authority，data/blob、未捕获资源和多资源 fallback 仍使用过渡 DTO；HLS/DASH 计划下载的已捕获 URL 也会由 main 按当前 tab/URL 解析 opaque resource authority 并注入本地 downloader，未捕获 URL 回退到 embedded session；计划 shape、直拉/live/track、派生字幕 URL 和旧 catch toolkit 仍使用过渡 DTO。构造该 runtime 会占用 session `webRequest` listener，当前必须保证旧 bridge 不再同时注册同一种 `webRequest` event；逐项状态以 Cat Catch capability map 为准。
 
 #### 深度捕捉
 

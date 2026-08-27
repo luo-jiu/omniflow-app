@@ -14,12 +14,14 @@ import type { EmbeddedBrowserMpdDownloadPlanRepresentation } from '@/features/em
 import {
   EmbeddedBrowserFragmentDownloader,
   type EmbeddedBrowserDownloadFragment,
+  type EmbeddedBrowserFragmentFetch,
 } from './embeddedBrowserFragmentDownloader'
 import {
   resolveEmbeddedBrowserFfmpegPath,
 } from './embeddedBrowserResourceMergeService'
 
 type EmbeddedBrowserMpdLocalDownloadTask = {
+  fetch?: EmbeddedBrowserFragmentFetch
   ffmpegPath?: string
   headers?: Record<string, string>
   outputPath: string
@@ -96,6 +98,7 @@ function buildMpdTrackFragments(
 }
 
 async function downloadMpdRepresentationToFile(input: {
+  fetch?: EmbeddedBrowserFragmentFetch
   headers?: Record<string, string>
   outputPath: string
   representation: EmbeddedBrowserMpdDownloadPlanRepresentation
@@ -108,6 +111,7 @@ async function downloadMpdRepresentationToFile(input: {
 
   await writeFile(input.outputPath, Buffer.alloc(0))
   const downloader = new EmbeddedBrowserFragmentDownloader({
+    fetch: input.fetch,
     fragments,
     headers: input.headers,
     maxRetries: 2,
@@ -290,6 +294,7 @@ export async function downloadEmbeddedBrowserMpdToOutput(
 
     if (input.selectedVideoRepresentation && videoTrackPath) {
       await downloadMpdRepresentationToFile({
+        fetch: input.fetch,
         headers: input.headers,
         outputPath: videoTrackPath,
         representation: input.selectedVideoRepresentation,
@@ -298,6 +303,7 @@ export async function downloadEmbeddedBrowserMpdToOutput(
 
     if (input.selectedAudioRepresentation && audioTrackPath) {
       await downloadMpdRepresentationToFile({
+        fetch: input.fetch,
         headers: input.headers,
         outputPath: audioTrackPath,
         representation: input.selectedAudioRepresentation,

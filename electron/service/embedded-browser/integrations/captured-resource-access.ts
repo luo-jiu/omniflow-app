@@ -29,6 +29,7 @@ export type CapturedResourceAccessGrant = {
 
 export type CapturedResourceFetchInput = CapturedResourceAccessInput & {
   maxRedirects?: number
+  range?: string
   signal?: AbortSignal
 }
 
@@ -180,11 +181,16 @@ export class CapturedResourceAccessService {
     let currentUrl = grant.resource.url
     let headers = grant.headers
     let redirectCount = 0
+    const range = String(input.range || '').trim()
 
     for (;;) {
+      const requestHeaders = Object.fromEntries(headers)
+      if (range && redirectCount === 0) {
+        requestHeaders.range = range
+      }
       const response = await this.fetchImpl(currentUrl, {
         ...(input.purpose === 'page-drag-stage' ? { credentials: 'include' as const } : {}),
-        headers: Object.fromEntries(headers),
+        headers: requestHeaders,
         redirect: grant.redirectMode,
         signal: input.signal,
       })

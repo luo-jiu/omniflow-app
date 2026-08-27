@@ -175,6 +175,23 @@ describe('network.owned-resource-consumer', () => {
     expect(pageDragHeaders.get('authorization')).toBe('Bearer source-secret')
     expect(pageDragHeaders.has('cookie')).toBe(false)
 
+    const rangeCalls: Array<{ init: RequestInit; url: string }> = []
+    const rangedAccess = new CapturedResourceAccessService({
+      fetch: async (url, init) => {
+        rangeCalls.push({ init, url })
+        return new Response('range-body', { status: 200 })
+      },
+      store: harness.store,
+      vault: harness.vault,
+    })
+    await rangedAccess.fetch({
+      purpose: 'resource-download',
+      range: 'bytes=4-8',
+      resourceId: 'resource-opaque',
+      tabId: 'tab-1',
+    })
+    expect(new Headers(rangeCalls[0]?.init.headers).get('range')).toBe('bytes=4-8')
+
     const retained = harness.store.commitNavigation({
       binding: harness.binding,
       clearResources: false,
@@ -241,6 +258,7 @@ describe('network.redirect-hop-isolation', () => {
       authorization?: string
       cookie?: string
       mediaToken?: string
+      range?: string
       server: 'source' | 'target'
     }> = []
     const targetOrigin = await listen((request, response) => {
@@ -248,6 +266,7 @@ describe('network.redirect-hop-isolation', () => {
         authorization: request.headers.authorization,
         cookie: request.headers.cookie,
         mediaToken: request.headers['x-media-token'] as string | undefined,
+        range: request.headers.range,
         server: 'target',
       })
       response.writeHead(200, { 'Content-Type': 'video/mp4' })
@@ -258,6 +277,7 @@ describe('network.redirect-hop-isolation', () => {
         authorization: request.headers.authorization,
         cookie: request.headers.cookie,
         mediaToken: request.headers['x-media-token'] as string | undefined,
+        range: request.headers.range,
         server: 'source',
       })
       response.writeHead(302, { Location: `${targetOrigin}/final.mp4` })
@@ -268,6 +288,7 @@ describe('network.redirect-hop-isolation', () => {
 
     const result = await harness.access.fetch({
       purpose: 'resource-download',
+      range: 'bytes=0-15',
       resourceId: 'resource-opaque',
       tabId: 'tab-1',
     })
@@ -280,12 +301,14 @@ describe('network.redirect-hop-isolation', () => {
         authorization: 'Bearer source-secret',
         cookie: 'session=source-secret',
         mediaToken: 'media-secret',
+        range: 'bytes=0-15',
         server: 'source',
       },
       {
         authorization: undefined,
         cookie: undefined,
         mediaToken: undefined,
+        range: undefined,
         server: 'target',
       },
     ])

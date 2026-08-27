@@ -629,6 +629,7 @@ interface Window {
       manualKeyBase64?: string;
       outputDirectoryPath?: string;
       plan: import('@/features/embedded-browser/resources/model/embedded-browser-hls-manifest').EmbeddedBrowserHlsDownloadPlan;
+      resourceId?: string;
       requestId?: string;
       suggestedFileName?: string;
       useSystemSaveDialog?: boolean;
@@ -649,6 +650,7 @@ interface Window {
       ffmpegPath?: string;
       outputDirectoryPath?: string;
       plan: import('@/features/embedded-browser/resources/model/embedded-browser-mpd-manifest').EmbeddedBrowserMpdDownloadPlan;
+      resourceId?: string;
       requestId?: string;
       selectedAudioRepresentationId?: string;
       selectedVideoRepresentationId?: string;

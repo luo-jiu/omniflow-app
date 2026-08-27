@@ -62,7 +62,13 @@ export type EmbeddedBrowserFragmentDownloaderEventMap = {
   ) => void
 }
 
+export type EmbeddedBrowserFragmentFetch = (
+  input: string,
+  init?: RequestInit,
+) => Promise<Response>
+
 type EmbeddedBrowserFragmentDownloaderOptions = {
+  fetch?: EmbeddedBrowserFragmentFetch
   fragments?: EmbeddedBrowserDownloadFragment[]
   headers?: Record<string, string>
   maxRetries?: number
@@ -184,6 +190,8 @@ export class EmbeddedBrowserFragmentDownloader {
 
   private fragmentsInternal: NormalizedEmbeddedBrowserDownloadFragment[]
 
+  private readonly fetchImpl: EmbeddedBrowserFragmentFetch
+
   private maxRetries: number
 
   private pendingQueue: EmbeddedBrowserFragmentDownloadTask[]
@@ -192,6 +200,7 @@ export class EmbeddedBrowserFragmentDownloader {
     this.events = {}
     this.thread = Math.max(1, Number(options?.thread || 6))
     this.maxRetries = Math.max(0, Number(options?.maxRetries || 2))
+    this.fetchImpl = options?.fetch || ((input, init) => fetch(input, init))
     this.headers = options?.headers
     this.allFragments = []
     this.fragmentsInternal = []
@@ -407,7 +416,7 @@ export class EmbeddedBrowserFragmentDownloader {
     this.emit('start', fragment, requestInit, attempt)
 
     try {
-      const response = await fetch(fragment.url, requestInit)
+      const response = await this.fetchImpl(fragment.url, requestInit)
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`)
       }

@@ -114,6 +114,7 @@ export type EmbeddedBrowserHlsPlanDownloadPayload = {
   manualKeyBase64?: string
   outputDirectoryPath?: string
   plan: EmbeddedBrowserHlsDownloadPlan
+  resourceId?: string
   requestId?: string
   suggestedFileName?: string
   useSystemSaveDialog?: boolean
@@ -234,6 +235,7 @@ export type EmbeddedBrowserMpdPlanDownloadPayload = {
   ffmpegPath?: string
   outputDirectoryPath?: string
   plan: EmbeddedBrowserMpdDownloadPlan
+  resourceId?: string
   requestId?: string
   selectedAudioRepresentationId?: string
   selectedVideoRepresentationId?: string

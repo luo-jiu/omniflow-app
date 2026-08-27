@@ -802,6 +802,7 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
             manualKeyBase64: normalizedHlsManualKey || undefined,
             outputDirectoryPath: taskOutputDirectoryPath,
             plan: effectivePlan,
+            resourceId: hlsRequest.resource.id,
             requestId,
             suggestedFileName: deriveHlsOutputFileName(effectiveManifestUrl),
             useSystemSaveDialog: false,

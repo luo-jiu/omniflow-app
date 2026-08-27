@@ -9,11 +9,13 @@ import {
   type EmbeddedBrowserHlsDownloadPlan,
   type EmbeddedBrowserHlsManifest,
 } from '../../src/features/embedded-browser/resources/model/embedded-browser-hls-manifest'
+import type { EmbeddedBrowserFragmentFetch } from './embeddedBrowserFragmentDownloader'
 import {
   downloadEmbeddedBrowserHlsToLocalWorkDirectory,
 } from './embeddedBrowserHlsLocalDownloaderService'
 
 type EmbeddedBrowserHlsLiveRecorderOptions = {
+  fetch?: EmbeddedBrowserFragmentFetch
   headers?: Record<string, string>
   manifestUrl: string
   manualKeyBase64?: string
@@ -71,12 +73,13 @@ function mergeUniqueByKey<T>(
 }
 
 async function fetchEmbeddedBrowserHlsLiveManifestSnapshot(input: {
+  fetch?: EmbeddedBrowserFragmentFetch
   headers?: Record<string, string>
   manifestUrl: string
   pageUrl?: string
   suggestedThreadCount?: number
 }): Promise<EmbeddedBrowserHlsLiveManifestSnapshot> {
-  const response = await fetch(input.manifestUrl, {
+  const response = await (input.fetch || ((url, init) => fetch(url, init)))(input.manifestUrl, {
     headers: input.headers,
   })
   if (!response.ok) {
@@ -128,6 +131,8 @@ export class EmbeddedBrowserHlsLiveRecorder {
 
   private readonly headers?: Record<string, string>
 
+  private readonly fetch?: EmbeddedBrowserFragmentFetch
+
   private readonly onEvent?: EmbeddedBrowserHlsLiveRecorderOptions['onEvent']
 
   private readonly pageUrl?: string
@@ -144,6 +149,7 @@ export class EmbeddedBrowserHlsLiveRecorder {
 
   constructor(options: EmbeddedBrowserHlsLiveRecorderOptions) {
     this.headers = options.headers
+    this.fetch = options.fetch
     this.manifestUrl = options.manifestUrl
     this.manualKeyBase64 = options.manualKeyBase64
     this.onEvent = options.onEvent
@@ -216,6 +222,7 @@ export class EmbeddedBrowserHlsLiveRecorder {
 
   private async pollOnce(isInitial: boolean) {
     const snapshot = await fetchEmbeddedBrowserHlsLiveManifestSnapshot({
+      fetch: this.fetch,
       headers: this.headers,
       manifestUrl: this.manifestUrl,
       pageUrl: this.pageUrl,
@@ -307,6 +314,7 @@ export class EmbeddedBrowserHlsLiveRecorder {
     const bytesOffset = this.downloadedBytes
     let lastBatchBytes = 0
     const localDownloadResult = await downloadEmbeddedBrowserHlsToLocalWorkDirectory({
+      fetch: this.fetch,
       fragmentIndexes: input.fragmentIndexes,
       manualKeyBase64: this.manualKeyBase64,
       onEvent: (event) => {

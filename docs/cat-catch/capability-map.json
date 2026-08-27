@@ -867,11 +867,14 @@
       "plannedTestIds": [
         "hls.retry-cancel-range",
         "hls.decrypt-preprocess-order",
-        "hls.failed-fragment-retry"
+        "hls.failed-fragment-retry",
+        "hls.plan-authority-fetch"
       ],
-      "testRefs": [],
+      "testRefs": [
+        "electron/service/embeddedBrowserFragmentDownloader.test.ts#hls.plan-authority-fetch"
+      ],
       "acceptedDifferences": [],
-      "notes": "No single task/cancel owner spans plan execution, retry sessions, work directories, and renderer listeners. Vendor provenance blockers: lib/third-party-libraries.md attributes m3u8-decrypt.js to the mutable hls.js master path rather than an immutable revision; the loaded StreamSaver bundle self-reports 2.0.5 while that document declares 2.0.6, has no verified immutable artifact binding, and retains remote MITM configuration."
+      "notes": "Plan execution now accepts a main-owned fetch transport: captured fragment/key/map URLs are redeemed through the current tab resource authority with bounded Range support, while unrecognized URLs retain the embedded-session fallback. No single task/cancel owner spans plan execution, retry sessions, work directories, and renderer listeners. Vendor provenance blockers: lib/third-party-libraries.md attributes m3u8-decrypt.js to the mutable hls.js master path rather than an immutable revision; the loaded StreamSaver bundle self-reports 2.0.5 while that document declares 2.0.6, has no verified immutable artifact binding, and retains remote MITM configuration."
     },
     {
       "id": "hls.live-recording",
@@ -1070,7 +1073,7 @@
       ],
       "testRefs": [],
       "acceptedDifferences": [],
-      "notes": "Known seed gap includes SegmentTimeline r=-1 and incomplete dynamic MPD semantics; main trusts the renderer-supplied plan."
+      "notes": "Known seed gap includes SegmentTimeline r=-1 and incomplete dynamic MPD semantics; plan segment/init requests now accept a main-owned fetch transport for captured URLs, while the renderer-supplied plan shape and unrecognized URL fallback remain transitional."
     },
     {
       "id": "transfer.concurrent-retry-abort-order",

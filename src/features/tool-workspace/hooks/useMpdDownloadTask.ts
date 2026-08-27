@@ -235,6 +235,7 @@ export function useMpdDownloadTask(input: UseMpdDownloadTaskInput) {
       const result = await downloadEmbeddedBrowserMpdPlan(mpdRequest.resource.tabId, {
         outputDirectoryPath: outputTarget.outputDirectoryPath,
         plan: mpdRequest.plan,
+        resourceId: mpdRequest.resource.id,
         requestId: runToken,
         selectedAudioRepresentationId: selectedAudioRepresentation?.id,
         selectedVideoRepresentationId: selectedVideoRepresentation?.id,

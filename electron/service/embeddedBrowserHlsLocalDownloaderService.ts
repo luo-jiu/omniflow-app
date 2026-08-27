@@ -5,6 +5,7 @@ import {
   EmbeddedBrowserFragmentDownloader,
   type EmbeddedBrowserDownloadByteRange,
   type EmbeddedBrowserDownloadFragment,
+  type EmbeddedBrowserFragmentFetch,
 } from './embeddedBrowserFragmentDownloader'
 
 export type EmbeddedBrowserHlsLocalDownloadKeyRef = {
@@ -38,6 +39,7 @@ export type EmbeddedBrowserHlsLocalDownloadPlan = {
 }
 
 export type EmbeddedBrowserHlsLocalDownloadRequest = {
+  fetch?: EmbeddedBrowserFragmentFetch
   fragmentIndexes?: number[]
   manualKeyBase64?: string
   maxRetries?: number
@@ -174,6 +176,7 @@ function getRequiredLocalRef<T extends ResourceRefRecord>(
 
 async function downloadStaticResource(input: {
   byteRange?: EmbeddedBrowserDownloadByteRange
+  fetch?: EmbeddedBrowserFragmentFetch
   headers?: Record<string, string>
   outputPath: string
   url: string
@@ -183,7 +186,7 @@ async function downloadStaticResource(input: {
   if (rangeHeader) {
     headers.set('Range', rangeHeader)
   }
-  const response = await fetch(input.url, {
+  const response = await (input.fetch || ((url, init) => fetch(url, init)))(input.url, {
     headers,
   })
   if (!response.ok) {
@@ -195,6 +198,7 @@ async function downloadStaticResource(input: {
 
 async function prepareStaticRefs(input: {
   directoryName: 'keys' | 'maps'
+  fetch?: EmbeddedBrowserFragmentFetch
   outputDirectoryPath: string
   refs: Array<{
     byteRange?: EmbeddedBrowserDownloadByteRange
@@ -225,6 +229,7 @@ async function prepareStaticRefs(input: {
     resourceIndex += 1
     await downloadStaticResource({
       byteRange: ref.byteRange,
+      fetch: input.fetch,
       headers: input.headers,
       outputPath: nextPaths.outputPath,
       url: ref.url,
@@ -239,6 +244,7 @@ async function prepareStaticRefs(input: {
 }
 
 async function prepareKeyRefs(input: {
+  fetch?: EmbeddedBrowserFragmentFetch
   headers?: Record<string, string>
   manualKeyBase64?: string
   outputDirectoryPath: string
@@ -280,6 +286,7 @@ async function prepareKeyRefs(input: {
       await writeFile(outputPath, manualKeyBytes)
     } else if (ref.url) {
       await downloadStaticResource({
+        fetch: input.fetch,
         headers: input.headers,
         outputPath,
         url: ref.url,
@@ -426,6 +433,7 @@ export async function downloadEmbeddedBrowserHlsToLocalWorkDirectory(
   await mkdir(segmentsDirectoryPath, { recursive: true })
 
   const keyRefs = await prepareKeyRefs({
+    fetch: request.fetch,
     headers: plan.headers,
     manualKeyBase64: request.manualKeyBase64,
     outputDirectoryPath,
@@ -437,6 +445,7 @@ export async function downloadEmbeddedBrowserHlsToLocalWorkDirectory(
 
   const mapRefs = await prepareStaticRefs({
     directoryName: 'maps',
+    fetch: request.fetch,
     headers: plan.headers,
     outputDirectoryPath,
     refs: plan.fragments.map((fragment) => ({
@@ -496,6 +505,7 @@ export async function downloadEmbeddedBrowserHlsToLocalWorkDirectory(
     : 0
 
   const downloader = new EmbeddedBrowserFragmentDownloader({
+    fetch: request.fetch,
     fragments: fragmentsToDownload,
     headers: plan.headers,
     maxRetries: request.maxRetries,

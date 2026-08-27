@@ -153,6 +153,7 @@ import {
 import {
   downloadEmbeddedBrowserHlsToLocalWorkDirectory,
 } from './embeddedBrowserHlsLocalDownloaderService'
+import type { EmbeddedBrowserFragmentFetch } from './embeddedBrowserFragmentDownloader'
 import {
   downloadEmbeddedBrowserMpdToOutput,
 } from './embeddedBrowserMpdLocalDownloaderService'
@@ -182,6 +183,7 @@ export function createEmbeddedBrowserMainController(
     manualKeyBase64?: string
     outputPath: string
     plan: EmbeddedBrowserHlsPlanDownloadPayload['plan']
+    resourceId?: string
     requestId: string
     tabId: string
     workDirectoryPath: string
@@ -717,6 +719,48 @@ export function createEmbeddedBrowserMainController(
       pageUrlPolicy: { damn: true },
       webRequest: browserSession.webRequest,
     })
+  }
+
+  function createEmbeddedBrowserCapturedResourceFetch(tabId: string, seedResourceId?: string): EmbeddedBrowserFragmentFetch {
+    const browserSession = getEmbeddedBrowserSession()
+    const normalizedSeedResourceId = String(seedResourceId || '').trim()
+    return async (input, init) => {
+      const resourceUrl = String(input || '').trim()
+      let resourceId = captureRuntime?.resolveResourceIdByUrl(tabId, resourceUrl)
+      if (!resourceId && normalizedSeedResourceId && captureRuntime) {
+        const seedGrant = captureRuntime.access.redeem({
+          purpose: 'resource-download',
+          resourceId: normalizedSeedResourceId,
+          tabId,
+        })
+        if (seedGrant?.resource.url === resourceUrl) {
+          resourceId = normalizedSeedResourceId
+        }
+      }
+      if (resourceId && captureRuntime) {
+        const range = new Headers(init?.headers).get('range') || undefined
+        const accessResult = await captureRuntime.access.fetch({
+          purpose: 'resource-download',
+          range,
+          resourceId,
+          signal: init?.signal || undefined,
+          tabId,
+        })
+        return accessResult.response
+      }
+      const fallbackHeaders = new Headers()
+      const rendererHeaders = new Headers(init?.headers)
+      for (const headerName of ['accept', 'range']) {
+        const headerValue = rendererHeaders.get(headerName)
+        if (headerValue) {
+          fallbackHeaders.set(headerName, headerValue)
+        }
+      }
+      return browserSession.fetch(input, {
+        ...init,
+        headers: fallbackHeaders,
+      })
+    }
   }
 
   function getEmbeddedBrowserTitle(view: WebContentsView) {
@@ -1743,10 +1787,25 @@ export function createEmbeddedBrowserMainController(
     payload: EmbeddedBrowserHlsPlanDownloadPayload,
   ): Promise<EmbeddedBrowserHlsPlanDownloadResponse> {
     const normalizedTabId = String(tabId || '').trim()
+    const resourceId = String(payload.resourceId || '').trim() || undefined
     await clearEmbeddedBrowserHlsRetrySessions({ tabId: normalizedTabId })
     if (!normalizedTabId || !payload.plan || !Array.isArray(payload.plan.fragments) || payload.plan.fragments.length === 0) {
       return {
         error: '缺少可下载的 HLS 计划',
+        ok: false,
+      }
+    }
+    if (
+      resourceId
+      && /^https?:\/\//i.test(String(payload.plan.manifestUrl || ''))
+      && (!captureRuntime || !captureRuntime.access.redeem({
+        purpose: 'resource-download',
+        resourceId,
+        tabId: normalizedTabId,
+      }))
+    ) {
+      return {
+        error: 'HLS 捕捉资源已过期或不属于当前页面',
         ok: false,
       }
     }
@@ -1789,6 +1848,7 @@ export function createEmbeddedBrowserMainController(
 
       workDirectoryPath = await mkdtemp(path.join(os.tmpdir(), 'omniflow-hls-download-'))
       const localDownloadResult = await downloadEmbeddedBrowserHlsToLocalWorkDirectory({
+        fetch: createEmbeddedBrowserCapturedResourceFetch(normalizedTabId, resourceId),
         onEvent: (event) => {
           if (event.failedFragments?.length) {
             latestFailedFragments = event.failedFragments
@@ -1890,6 +1950,7 @@ export function createEmbeddedBrowserMainController(
           manualKeyBase64: payload.manualKeyBase64,
           outputPath,
           plan: payload.plan,
+          resourceId,
           requestId,
           tabId: normalizedTabId,
           workDirectoryPath,
@@ -1982,6 +2043,7 @@ export function createEmbeddedBrowserMainController(
       })
 
       const recorder = new EmbeddedBrowserHlsLiveRecorder({
+        fetch: createEmbeddedBrowserCapturedResourceFetch(normalizedTabId),
         headers: payload.headers,
         manifestUrl,
         manualKeyBase64: payload.manualKeyBase64,
@@ -2241,6 +2303,7 @@ export function createEmbeddedBrowserMainController(
       })
 
       const localDownloadResult = await downloadEmbeddedBrowserHlsToLocalWorkDirectory({
+        fetch: createEmbeddedBrowserCapturedResourceFetch(normalizedTabId, session.resourceId),
         fragmentIndexes: session.failedFragments.map((value) => value - 1).filter((value) => value >= 0),
         manualKeyBase64: session.manualKeyBase64,
         onEvent: (event) => {
@@ -2384,11 +2447,26 @@ export function createEmbeddedBrowserMainController(
     payload: EmbeddedBrowserMpdPlanDownloadPayload,
   ): Promise<EmbeddedBrowserMpdPlanDownloadResponse> {
     const normalizedTabId = String(tabId || '').trim()
+    const resourceId = String(payload.resourceId || '').trim() || undefined
     const requestId = String(payload.requestId || '').trim() || undefined
     const plan = payload.plan
     if (!normalizedTabId || !plan || !Array.isArray(plan.representations) || plan.representations.length === 0) {
       return {
         error: '缺少可下载的 MPD 计划',
+        ok: false,
+      }
+    }
+    if (
+      resourceId
+      && /^https?:\/\//i.test(String(plan.manifestUrl || ''))
+      && (!captureRuntime || !captureRuntime.access.redeem({
+        purpose: 'resource-download',
+        resourceId,
+        tabId: normalizedTabId,
+      }))
+    ) {
+      return {
+        error: 'MPD 捕捉资源已过期或不属于当前页面',
         ok: false,
       }
     }
@@ -2432,6 +2510,7 @@ export function createEmbeddedBrowserMainController(
       }
 
       const result = await downloadEmbeddedBrowserMpdToOutput({
+        fetch: createEmbeddedBrowserCapturedResourceFetch(normalizedTabId, resourceId),
         ffmpegPath: payload.ffmpegPath,
         headers: plan.headers,
         outputPath,

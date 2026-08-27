@@ -287,6 +287,7 @@ export async function downloadEmbeddedBrowserHlsPlan(
     manualKeyBase64?: string;
     outputDirectoryPath?: string;
     plan: import('../model/embedded-browser-hls-manifest').EmbeddedBrowserHlsDownloadPlan;
+    resourceId?: string;
     requestId?: string;
     suggestedFileName?: string;
     useSystemSaveDialog?: boolean;
@@ -384,6 +385,7 @@ export async function downloadEmbeddedBrowserMpdPlan(
     ffmpegPath?: string;
     outputDirectoryPath?: string;
     plan: import('../model/embedded-browser-mpd-manifest').EmbeddedBrowserMpdDownloadPlan;
+    resourceId?: string;
     requestId?: string;
     selectedAudioRepresentationId?: string;
     selectedVideoRepresentationId?: string;

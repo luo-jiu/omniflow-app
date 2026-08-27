@@ -283,6 +283,20 @@
 - legacy cleanup: 无新增；legacy page-drag fallback 保留至 network-capture/output unit 收口。
 - validation: TypeScript、page-drag/resource-store/runtime 27 项定向测试通过；同步校验 16/16。未运行会覆盖其他 Agent `dist-electron/**` 的 build，也未做真实页面手工验证。
 
+## 2026-08-27: same target (HLS/DASH plan transport authority partial)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动。
+- reviewedThrough / portedThrough: 均保持 `null`；本切片只为 HLS/DASH 本地计划和 HLS live 录制注入 main-owned fetch transport，未完成 parser、直拉/live/track 的完整切换或任何 unit cutover。
+- change groups: `security-boundary`（计划 payload 增加 opaque `resourceId`，HTTP manifest authority 过期/跨 tab 时拒绝）与 `platform-adaptation`（分片、init segment、map、key 和 live manifest 优先按当前 tab/URL 走 `CapturedResourceAccessService`，未捕获 URL 保留 embedded session fallback；Range 只作为受控附加参数）。
+- affected capability IDs: `hls.segment-pipeline`、`dash.timeline-download-merge` 增加 authority transport 证据；`capture.protected-request-context` 继续为 `ported-unverified`，所有 unit 仍为 0 cutover。
+- fixtures/tests: 新增 `electron/service/embeddedBrowserFragmentDownloader.test.ts#hls.plan-authority-fetch`，覆盖注入 fetch 和 byte range；扩展 `captured-resource-access.test.ts` 覆盖 authority range header；TypeScript 通过。
+- accepted difference: 解析不到当前 tab 已捕获记录的 URL 时，继续使用 embedded browser session 传输，以保留 inline/blob 或捕捉规则未记录分片的现有行为；renderer plan 的结构和未捕获 fallback 尚未删除。
+- excluded changes and reasons: 不在本切片迁移 Cat Catch HLS parser、DASH timeline 语义、cache fallback/伪装分片、ffmpeg/task registry、direct-manifest/live/track 的完整 authority 或旧 catch toolkit。
+- unresolved gaps: HLS/DASH 计划的 production-equivalent smoke、redirect/Range 输出、全量 task/cancel/cleanup、直拉/live/track nested request authority、完整 network-capture 原子切换。
+- runtime changes: `EmbeddedBrowserFragmentDownloader`、HLS local/live 和 MPD local downloader 支持注入 fetch；main controller 按 `tabId + URL` 解析 opaque resource，使用 `resource-download` purpose 恢复 context，并让 `resourceId` 随 HLS/MPD plan IPC 传递。
+- legacy cleanup: 无；旧 direct manifest、renderer plan DTO、未捕获 session fallback 和 catch toolkit 路径继续保留。
+- validation: TypeScript、5 个相关 Vitest 文件 27/27、同步校验 16/16、目标文件 `git diff --check` 通过；未运行会覆盖其他 Agent `dist-electron/**` 的 build，也未做真实页面手工验证。
+
 ## Template
 
 ```markdown
