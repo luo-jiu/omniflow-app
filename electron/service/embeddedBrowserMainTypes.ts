@@ -139,6 +139,7 @@ export type EmbeddedBrowserHlsRecordingStartPayload = {
   manualKeyBase64?: string
   outputDirectoryPath?: string
   pageUrl?: string
+  resourceId?: string
   requestId?: string
   suggestedFileName?: string
   suggestedThreadCount?: number

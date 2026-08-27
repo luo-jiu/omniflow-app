@@ -297,6 +297,20 @@
 - legacy cleanup: 无；旧 direct manifest、renderer plan DTO、未捕获 session fallback 和 catch toolkit 路径继续保留。
 - validation: TypeScript、5 个相关 Vitest 文件 27/27、同步校验 16/16、目标文件 `git diff --check` 通过；未运行会覆盖其他 Agent `dist-electron/**` 的 build，也未做真实页面手工验证。
 
+## 2026-08-27: same target (HLS live manifest authority partial)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动。
+- reviewedThrough / portedThrough: 均保持 `null`；本切片把 HLS live start 的 manifest owner 校验和 authority-aware fetch 绑定到轮询、增量分片和本地 playlist 链，未完成 live task/cleanup 或任何 unit cutover。
+- change groups: `security-boundary`（录制 payload 传递 opaque `resourceId`，当前 tab/manifest owner 失效时拒绝）与 `platform-adaptation`（captured manifest/segment/key/map 优先由 `CapturedResourceAccessService` 恢复上下文，未捕获 URL 仍走 embedded session fallback）。
+- affected capability IDs: `hls.live-recording` 增加 authority transport 事实；`capture.protected-request-context` 继续为 `ported-unverified`，所有 unit 仍为 0 cutover。
+- fixtures/tests: 复用 `embeddedBrowserFragmentDownloader.test.ts#hls.plan-authority-fetch` 和 `captured-resource-access.test.ts#network.redirect-hop-isolation` 的传输/Range/owner 证据；未新增 live fixture，真实直播页面仍未验证。
+- accepted difference: live manifest 仍由现有 controller Map 持有，未引入统一 task registry；解析不到 captured URL 时保留 session fallback。
+- excluded changes and reasons: 不在本切片迁移 HLS live 轮询节奏、累计 playlist 语义、ffmpeg 输出、取消/崩溃清理、HLS track merge 或 direct-manifest ffmpeg 请求。
+- unresolved gaps: live task/cleanup owner、redirect/Range 输出 smoke、direct/live/track 的完整 nested request authority、完整 network-capture 原子切换。
+- runtime changes: `startHlsRecording` 增加 `resourceId` IPC 字段；main 校验 exact/seed resource grant，使用 authority URL/context 初始化 `EmbeddedBrowserHlsLiveRecorder`，并复用前一切片的 injected fetch。
+- legacy cleanup: 无；旧 live controller Map、renderer DTO 和未捕获 fallback 继续保留。
+- validation: TypeScript、定向 lint、5 个相关 Vitest 文件 27/27、同步校验 16/16、目标文件 `git diff --check` 通过；未运行会覆盖其他 Agent `dist-electron/**` 的 build，也未做真实页面手工验证。
+
 ## Template
 
 ```markdown

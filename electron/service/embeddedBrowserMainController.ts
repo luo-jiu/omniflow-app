@@ -1993,14 +1993,37 @@ export function createEmbeddedBrowserMainController(
     payload: EmbeddedBrowserHlsRecordingStartPayload,
   ): Promise<EmbeddedBrowserHlsRecordingStartResponse> {
     const normalizedTabId = String(tabId || '').trim()
-    const manifestUrl = String(payload.manifestUrl || '').trim()
+    const requestedManifestUrl = String(payload.manifestUrl || '').trim()
+    const requestedResourceId = String(payload.resourceId || '').trim() || undefined
     const requestId = String(payload.requestId || '').trim() || undefined
-    if (!normalizedTabId || !requestId || !/^https?:\/\//i.test(manifestUrl)) {
+    if (!normalizedTabId || !requestId || !/^https?:\/\//i.test(requestedManifestUrl)) {
       return {
         error: '缺少可录制的直播 manifest',
         ok: false,
       }
     }
+
+    const exactResourceId = captureRuntime?.resolveResourceIdByUrl(normalizedTabId, requestedManifestUrl)
+    const authorityResourceId = exactResourceId || requestedResourceId
+    const authorityGrant = authorityResourceId && captureRuntime
+      ? captureRuntime.access.redeem({
+          purpose: 'resource-download',
+          resourceId: authorityResourceId,
+          tabId: normalizedTabId,
+        })
+      : null
+    if (requestedResourceId && !authorityGrant && !exactResourceId) {
+      return {
+        error: 'HLS 直播捕捉资源已过期或不属于当前页面',
+        ok: false,
+      }
+    }
+    const manifestUrl = authorityGrant?.resource.url === requestedManifestUrl
+      ? authorityGrant.resource.url
+      : requestedManifestUrl
+    const manifestHeaders = authorityGrant?.resource.url === manifestUrl
+      ? Object.fromEntries(authorityGrant.headers)
+      : {}
 
     const existingSession = Array.from(embeddedBrowserHlsLiveRecordingSessions.values()).find((session) => (
       session.tabId === normalizedTabId
@@ -2043,8 +2066,8 @@ export function createEmbeddedBrowserMainController(
       })
 
       const recorder = new EmbeddedBrowserHlsLiveRecorder({
-        fetch: createEmbeddedBrowserCapturedResourceFetch(normalizedTabId),
-        headers: payload.headers,
+        fetch: createEmbeddedBrowserCapturedResourceFetch(normalizedTabId, authorityResourceId),
+        headers: manifestHeaders,
         manifestUrl,
         manualKeyBase64: payload.manualKeyBase64,
         onEvent: (event) => {

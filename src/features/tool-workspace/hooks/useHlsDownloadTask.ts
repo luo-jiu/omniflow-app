@@ -1070,6 +1070,7 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
         manualKeyBase64: normalizedHlsManualKey || undefined,
         outputDirectoryPath: outputTarget.outputDirectoryPath,
         pageUrl: undefined,
+        resourceId: hlsRequest.resource.id,
         requestId,
         suggestedFileName: deriveHlsOutputFileName(effectiveManifestUrl),
         suggestedThreadCount: hlsCanTuneLocalDownloader ? normalizedHlsThreadCount : hlsRequest.plan.suggestedThreadCount,

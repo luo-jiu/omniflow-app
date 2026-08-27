@@ -925,7 +925,7 @@
       ],
       "testRefs": [],
       "acceptedDifferences": [],
-      "notes": "Live recorders are held in a controller Map; close-tab attempts cleanup but app exit and crash recovery do not share the same cleanup owner. Vendor provenance blocker: the upstream live path depends on the same unverified StreamSaver 2.0.5/2.0.6 bundle and remote MITM configuration recorded by transfer.streaming-memory-budget."
+      "notes": "Live start now accepts an opaque resourceId and binds captured manifest/segment polling to the current tab's authority-aware fetch; unrecognized URLs still use the embedded-session fallback. Live recorders are held in a controller Map; close-tab attempts cleanup but app exit and crash recovery do not share the same cleanup owner. Vendor provenance blocker: the upstream live path depends on the same unverified StreamSaver 2.0.5/2.0.6 bundle and remote MITM configuration recorded by transfer.streaming-memory-budget."
     },
     {
       "id": "hls.cache-fallback-disguised-fragments",
