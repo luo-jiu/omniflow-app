@@ -13,7 +13,7 @@
 | reviewedThrough | 未建立 |
 | portedThrough | 未建立 |
 
-当前映射包含 7 个 cutover unit、32 项能力、192 个上游 anchor、106 个 cleanup entry 和 131 个唯一计划测试 ID。9 项能力达到 `ported-unverified`，5 项为 `porting`，其余 18 项仍为 `pending`；85 个唯一计划测试引用已落成 active pure behavior/contract、fake/real Electron integration 或 loopback redirect test，尚无已完成的 cutover unit。
+当前映射包含 7 个 cutover unit、32 项能力、193 个上游 anchor、106 个 cleanup entry 和 132 个唯一计划测试 ID。9 项能力达到 `ported-unverified`，5 项为 `porting`，其余 18 项仍为 `pending`；86 个唯一计划测试引用已落成 active pure behavior/contract、fake/real Electron integration 或 loopback redirect test，尚无已完成的 cutover unit。
 
 ## 2. 能力族
 
@@ -29,6 +29,8 @@
 
 HLS master 现已按固定 level identity 与 resolved URI 合并重复 variant；即使相同 URI 被其他 URI 隔开，parser、download plan 与工具区仍保留完整且有序去重的 AUDIO/SUBTITLES group 集合，单值字段只作为兼容首组。固定 hls.js 的 `MANIFEST_LOADED` 会保留跨 URI 声明，但 Cat Catch 生成选择项所消费的 `MANIFEST_PARSED` 只暴露首 URI；显式相同 `PATHWAY-ID` 时还会把后续 URI 的 group 合到首 URI。OmniFlow 接受数据保留差异：每个 identity/URI 继续独立可选，不增加 fallback 顺序或 failover 执行语义。
 
+HLS key 的显式 IV 现按固定 hls.js `AttrList.hexadecimalInteger` 转为字节后再投影到 manifest 和 download plan：奇数位左补零，大写输出归一为小写，无效 `parseInt` 结果沿用 `Uint8Array` 的零值强制转换；缺失或空 IV 继续按 fragment sequence（MAP 为 0）派生。
+
 ## 3. 高优先级缺口
 
 1. `enableDeepRuntimeHooks = false`。
@@ -40,7 +42,7 @@ HLS master 现已按固定 level identity 与 resolved URI 合并重复 variant�
 7. HLS master 普通 variant/I-frame/未知 codec 过滤与无 level 拒绝、AUDIO/SUBTITLES rendition 投影与 child authority、`EXT-X-SESSION-KEY` 解析但不进入 fragment key、媒体/MAP BYTERANGE offset、MAP 前置独立 range 双重绑定与缺失/空 URI 拒绝、full-segment AES media/MAP effective IV、独立 MAP/media key context、KEYFORMAT 支持/忽略/继承/多 key 选择、正数 `EXT-X-SKIP` delta 拒绝与同 key URL 下的 playlist 状态轮换、初始 discontinuity sequence、LL-HLS PART/完整分片边界、空/无效 media playlist 与重复 singleton 标签拒绝、`EXT-X-DEFINE` 变量语义及直播 child 的 main-owned parent variable 恢复、PNG/JPEG 伪装分片剔除和一次性 manifest force-cache recovery 已在 pure/integration tests 中覆盖；local-to-ffmpeg fake handoff 已验证本地 key/map/media 引用与非空输出约束，真实 ffmpeg/ffprobe integration 已验证 clear 与两类 AES-128 encrypted AAC HLS 均可交付为 MP4/AAC/正时长文件；加密 fMP4/video 真实输出组合和更完整 parser 差分仍缺失。
 8. MPD `r=-1`、多 BaseURL、动态 timeline/range 不完整。
 9. ffmpeg、HLS/DASH、直播、普通下载和 temp 没有应用级统一 task registry；HLS 的导航、tab/view 销毁、render-process loss、controller dispose 和应用退出已通过专用 host lifecycle 取消并等待 active fetch/ffmpeg 与在途 session cleanup，但非 HLS 的 4 个 ffmpeg 入口仍未纳入该 owner。
-10. 目前有 84 个唯一 active test ref；main composition、持久化捕捉设置热更新、下一文档 token 路由、main-only probe key 解析与下载、检查、probe 动作、external-tool target consumer、已捕获页面拖拽暂存、HLS direct/track 与 HLS/DASH 计划/live 分片 authority transport，以及 HLS master variant/rendition/session-key 边界、重复 variant group 合并与工具选择、media/MAP range、MAP 前置 range 转交与 URI 拒绝、full-segment AES effective/local-playlist IV、KEYFORMAT 支持与多 key 选择、delta playlist 拒绝、encrypted MAP key/order、LL-PART、空或结构无效 media 与重复 singleton 拒绝、变量替换/直播 parent authority 边界、AES-128 production output、cache fallback/static/live abort/session/active/ffmpeg/lifecycle cleanup、renderer listener/snapshot recovery、直播卸载输出清理和真实 output probe 已有专项证据，普通资源下载和 inspection 已有 production IPC 入口；页面拖拽 fallback、HLS parser 其余完整标签语义、旧 toolkit 及完整 unit cutover 仍无 production cutover 证据。
+10. 目前有 86 个唯一 active test ref；main composition、持久化捕捉设置热更新、下一文档 token 路由、main-only probe key 解析与下载、检查、probe 动作、external-tool target consumer、已捕获页面拖拽暂存、HLS direct/track 与 HLS/DASH 计划/live 分片 authority transport，以及 HLS master variant/rendition/session-key 边界、重复 variant group 合并与工具选择、media/MAP range、MAP 前置 range 转交与 URI 拒绝、full-segment AES effective/local-playlist IV、显式 IV 字节归一化、KEYFORMAT 支持与多 key 选择、delta playlist 拒绝、encrypted MAP key/order、LL-PART、空或结构无效 media 与重复 singleton 拒绝、变量替换/直播 parent authority 边界、AES-128 production output、cache fallback/static/live abort/session/active/ffmpeg/lifecycle cleanup、renderer listener/snapshot recovery、直播卸载输出清理和真实 output probe 已有专项证据，普通资源下载和 inspection 已有 production IPC 入口；页面拖拽 fallback、HLS parser 其余完整标签语义、旧 toolkit 及完整 unit cutover 仍无 production cutover 证据。
 
 ## 4. 保留、迁移与删除
 

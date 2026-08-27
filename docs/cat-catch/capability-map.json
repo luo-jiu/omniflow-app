@@ -731,7 +731,8 @@
         {
           "path": "lib/hls.min.js",
           "anchors": [
-            "1.6.16"
+            "1.6.16",
+            "hexadecimalInteger"
           ]
         },
         {
@@ -790,6 +791,7 @@
         "hls.master-variant-rendition-groups",
         "hls.master-session-key-exclusion",
         "hls.key-support-inheritance",
+        "hls.key-iv-normalization",
         "hls.delta-playlist-rejection",
         "hls.media-playlist-singleton-tag-rejection"
       ],
@@ -814,6 +816,7 @@
         "src/features/tool-workspace/hls-rendition-groups.test.ts#hls.master-variant-rendition-groups",
         "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.master-session-key-exclusion",
         "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.key-support-inheritance",
+        "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.key-iv-normalization",
         "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.delta-playlist-rejection",
         "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.media-playlist-singleton-tag-rejection"
       ],

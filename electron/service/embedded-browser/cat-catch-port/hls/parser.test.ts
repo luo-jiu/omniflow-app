@@ -276,6 +276,16 @@ const keySupportExpected = JSON.parse(readFileSync(`${keySupportFixtureRoot}/${k
   }>
 }
 
+const keyIvFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-key-iv-normalization', import.meta.url))
+const keyIvFixture = JSON.parse(readFileSync(`${keyIvFixtureRoot}/fixture.json`, 'utf8')) as {
+  expected: string
+  input: string
+}
+const keyIvExpected = JSON.parse(readFileSync(`${keyIvFixtureRoot}/${keyIvFixture.expected}`, 'utf8')) as {
+  baseUrl: string
+  segments: Array<{ iv: string; sequence: number; url: string }>
+}
+
 const variableFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-variable-substitution', import.meta.url))
 const variableFixture = JSON.parse(readFileSync(`${variableFixtureRoot}/fixture.json`, 'utf8')) as {
   expected: string
@@ -583,6 +593,28 @@ describe('Cat Catch HLS parser', () => {
       sequence: segment.sequence,
       url: segment.url,
     }))).toEqual(keySupportExpected.segments)
+  })
+
+  it('hls.key-iv-normalization', () => {
+    const manifest = parseHlsManifest({
+      baseUrl: keyIvExpected.baseUrl,
+      text: readFileSync(`${keyIvFixtureRoot}/${keyIvFixture.input}`, 'utf8'),
+    })
+    expect(manifest.segments.map(segment => ({
+      iv: segment.key?.iv,
+      sequence: segment.sequence,
+      url: segment.url,
+    }))).toEqual(keyIvExpected.segments)
+
+    const plan = createEmbeddedBrowserHlsDownloadPlan({
+      manifest,
+      manifestUrl: keyIvExpected.baseUrl,
+    })
+    expect(plan.fragments.map(fragment => ({
+      iv: fragment.key?.iv,
+      sequence: fragment.sequence,
+      url: fragment.url,
+    }))).toEqual(keyIvExpected.segments)
   })
 
   it('keeps normal master variants when every codec set is unknown', () => {

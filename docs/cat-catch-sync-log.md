@@ -843,6 +843,20 @@
 - legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
 - validation: 固定 Cat Catch vendor executable oracle 输出上述 `MANIFEST_LOADED / MANIFEST_PARSED` 两层证据；失败证据为 parser `24/25` 且 implicit 用例得到 `A/B/A` 三项。实现后 parser `25/25`，广义 HLS/authority/projection `41/41`，TypeScript、全仓 ESLint、fixture JSON、轻量 validator、固定上游 anchor 校验、同步校验 `16/16`、metadata `7 units / 32 capabilities / 192 anchors / 106 cleanup entries / 131 planned IDs / 85 active refs` 和本切片 diff check 通过。排除已由 `node --test` 单独执行的同步文件后，全量 Vitest 在 sandbox 内为 `1129 passed / 3 skipped / 16 loopback EPERM`；4 个 loopback 文件在 sandbox 外复跑 `20/20`，折算全部可执行测试为 `1145 passed / 3 skipped`。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
 
+## 2026-08-28: same target (HLS key IV byte normalization)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，固定实际 vendor 为 hls.js `1.6.16`。
+- reviewedThrough / portedThrough: 均保持 `null`；本步闭合 `EXT-X-KEY` 显式 IV 从 attribute text 到 fragment decryptdata bytes 的归一化边界，仍未完成 hls-engine cutover。
+- change groups: `behavioral`（固定 `AttrList.hexadecimalInteger` 的字节转换）与 `projection`（相同 IV 贯穿 manifest 和 download plan）。
+- affected capability IDs: `hls.parser-planner` 保持 `ported-unverified`；新增 1 个 active test ID 和 1 个固定上游 anchor。
+- fixtures/tests: 新增 upstream-executable fixture `hls-key-iv-normalization`；`hls.key-iv-normalization` 覆盖非法文本、短 hex、奇数位 hex、大写 hex 以及空 IV 的 sequence 回退，并同时断言 pure manifest 与 download plan。
+- accepted difference: 无。OmniFlow 忠实复刻去掉前两字符、奇数位左补零、逐字节 `parseInt` 以及无效结果写入 `Uint8Array` 后归零的行为；不额外拒绝短 IV 或非法字符。
+- excluded changes and reasons: 不新增 IV 长度校验、严格 hex 校验、crypto/decrypt 分支、IPC 或 renderer 状态；固定 Cat Catch vendor 本身没有这些约束。
+- unresolved gaps: HLS 其余 master/media parser 差分、live 未捕获 URL 过渡 DTO、加密 fMP4/video 真实输出组合、真实网站手工验证和最终 hls-engine cutover。
+- runtime changes: `createHlsKey` 在变量替换后把显式 IV 按固定 hls.js 字节算法序列化为小写 `0x` DTO；缺失或空 IV 仍由现有 sequence/MAP zero 分支派生。该值沿现有 plan 和 local playlist 链传播，没有新增 owner。
+- legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
+- validation: 固定 Cat Catch vendor executable oracle 对五个 fragment 分别输出 `00000e / 01 / 0123 / abcdef / 0000000000000000000000000000000f`；失败证据为 parser `25/26`，当前实现保留非法/奇数/大写原文。实现后 parser `26/26`、完整 HLS 集合 `82/82`、TypeScript、全仓 ESLint、fixture JSON、轻量 validator、固定上游 anchor 校验、同步校验 `16/16`、metadata `7 units / 32 capabilities / 193 anchors / 106 cleanup entries / 132 planned IDs / 86 active refs` 和本切片 diff check 通过。排除已由 `node --test` 单独执行的同步文件后，全量 Vitest 在沙箱内为 `1136 passed / 3 skipped / 16 loopback EPERM`；4 个 loopback 文件在沙箱外复跑 `20/20`，折算全部可执行测试为 `1152 passed / 3 skipped`。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
+
 ## Template
 
 ```markdown

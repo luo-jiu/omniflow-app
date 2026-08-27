@@ -1,0 +1,30 @@
+{
+  "baseUrl": "https://media.example/iv/playlist.m3u8",
+  "segments": [
+    {
+      "iv": "0x00000e",
+      "sequence": 11,
+      "url": "https://media.example/iv/invalid-text.ts"
+    },
+    {
+      "iv": "0x01",
+      "sequence": 12,
+      "url": "https://media.example/iv/short-hex.ts"
+    },
+    {
+      "iv": "0x0123",
+      "sequence": 13,
+      "url": "https://media.example/iv/odd-hex.ts"
+    },
+    {
+      "iv": "0xabcdef",
+      "sequence": 14,
+      "url": "https://media.example/iv/uppercase-hex.ts"
+    },
+    {
+      "iv": "0x0000000000000000000000000000000f",
+      "sequence": 15,
+      "url": "https://media.example/iv/empty-iv.ts"
+    }
+  ]
+}

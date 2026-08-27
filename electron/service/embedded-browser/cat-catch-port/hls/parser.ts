@@ -327,6 +327,25 @@ function parseExtinf(line: string): PendingSegment {
   return { duration: parseNumber(durationText) || 0, title: title || undefined }
 }
 
+/**
+ * Upstream: xifangczy/cat-catch@2cb981d7c2f4614732edccc167c4b5793d1cb138
+ * Source: lib/hls.min.js#AttrList.hexadecimalInteger and parseKey
+ * Reason: hls.js treats IV as bytes rather than preserving attribute text. It
+ * left-pads odd input and lets Uint8Array coerce invalid parseInt results to 0.
+ * Adaptation: serialize the same bytes back into the existing hexadecimal DTO.
+ * Fixture: hls-key-iv-normalization
+ */
+function normalizeHlsIvBytes(value?: string) {
+  if (!value) return undefined
+  let byteText = value.slice(2)
+  byteText = `${byteText.length & 1 ? '0' : ''}${byteText}`
+  const bytes = new Uint8Array(byteText.length / 2)
+  for (let index = 0; index < bytes.length; index += 1) {
+    bytes[index] = Number.parseInt(byteText.slice(index * 2, index * 2 + 2), 16)
+  }
+  return `0x${Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('')}`
+}
+
 function createHlsKey(
   line: string,
   baseUrl: string,
@@ -335,7 +354,7 @@ function createHlsKey(
   const attributes = parseHlsAttributeListWithVariables(getTagValue(line), variableState)
   const uri = attributes.URI
   return {
-    iv: attributes.IV,
+    iv: normalizeHlsIvBytes(attributes.IV),
     keyFormat: attributes.KEYFORMAT,
     keyFormatVersions: attributes.KEYFORMATVERSIONS,
     method: attributes.METHOD || '',
