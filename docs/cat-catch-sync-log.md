@@ -731,6 +731,20 @@
 - legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
 - validation: 固定 vendor executable oracle 与 fixture 的 18 个 fragment 在 encrypted/method/KEYFORMAT/URI/IV 上逐项一致；失败证据为新增 fixture 下 parser 16/17，实现后 parser 17/17、广义 HLS Vitest 81/81、全仓 ESLint、固定上游 validator、同步校验 16/16、fixture JSON、metadata 7 units/32 capabilities/192 anchors/106 cleanup entries/121 unique planned IDs/75 active refs 和 scoped diff check 通过。全量 Vitest 为 1081 passed / 1 skipped / 16 sandbox-only loopback failures，4 个相关 loopback 文件在允许监听本机端口的环境复跑 20/20，通过后折算全部可执行测试为 1097 passed / 1 skipped；Node 专用同步 validator 被 Vitest 收集后另报告 no suite。全局 TypeScript 只被其他 Agent 在途的 Shell preparation 与 Agent orchestrator test 类型错误阻断；完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
 
+## 2026-08-28: same target (HLS delta playlist rejection)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动。
+- reviewedThrough / portedThrough: 均保持 `null`；本步闭合固定 Cat Catch 下载路径对正数 `EXT-X-SKIP` delta playlist 的不可执行边界，仍未完成 hls-engine cutover。
+- change groups: `behavioral`（正数 skipped fragment 不生成错误计划、非法/零值继续解析、重复 SKIP 第一结构错误优先）与 `stability`（把上游 null dereference 终态映射成稳定同步错误）。
+- affected capability IDs: `hls.parser-planner` 保持 `ported-unverified`；新增 1 个 active test ID。
+- fixtures/tests: 新增 upstream-executable fixture `hls-delta-playlist-rejection`；`hls.delta-playlist-rejection` 覆盖正数 skip + 显式 fragment、只有 skipped placeholder、非法值、零值和重复正数标签。
+- accepted difference: 固定 hls.js 在外部 `LEVEL_LOADED` 时暴露 `null` placeholders，Cat Catch `parseTs` 随后读取 `fragment.url` 抛 TypeError；同步 facade 没有 evented listener 边界，因此抛出稳定的 delta playlist 错误，但保持同一黑盒终态：不创建、不执行下载计划。
+- excluded changes and reasons: 不实现 delta merge、`RECENTLY-REMOVED-DATERANGES`、SERVER-CONTROL reload directives、PROGRAM-DATE-TIME/DATERANGE 合并或前序 snapshot cache。Cat Catch 当前下载 listener 本身早于内部 merge，不能把 hls.js 播放控制器后续行为冒充成其下载能力。
+- unresolved gaps: HLS 其余 parser/key 标签差分、真正有 previous snapshot 的 delta recording 仍未作为 OmniFlow 平台增强单独设计、DRM 仅识别不下载、live 未捕获 URL 过渡 DTO、加密 fMP4/video 真实输出组合、真实网站手工验证和最终 hls-engine cutover。
+- runtime changes: pure parser 记录有限正数 `SKIPPED-SEGMENTS`，先保留已有 playlist parsing error 优先级，再在 plan materialization 前拒绝；非法/零值不改变 sequence，重复正数 tag 继续走固定多标签错误。
+- legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
+- validation: 固定 vendor executable oracle 实际输出 `startSN=4 / skippedSegments=2 / fragments=[null,null,sn6,sn7]`，静态 Cat Catch `parseTs` 证实首个 `.url` 读取；失败证据为 parser 17/18，实现后 parser 18/18、广义 HLS Vitest 82/82、定向 ESLint、fixture 检查、`cat-catch:validate`、同步校验 16/16、metadata 7 units/32 capabilities/192 anchors/106 cleanup entries/122 unique planned IDs/76 active refs 和 scoped diff check 通过。为快速收尾未重复运行全仓 Vitest、ESLint、TypeScript 或会覆盖其他 Agent `dist-electron/**` 的 build，暂无真实网站手工场景。
+
 ## Template
 
 ```markdown

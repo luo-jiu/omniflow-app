@@ -64,6 +64,20 @@ const emptyMediaFixture = JSON.parse(readFileSync(`${emptyMediaFixtureRoot}/fixt
   inputs: string[]
 }
 
+const deltaPlaylistFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-delta-playlist-rejection', import.meta.url))
+const deltaPlaylistFixture = JSON.parse(readFileSync(`${deltaPlaylistFixtureRoot}/fixture.json`, 'utf8')) as {
+  allowed: Record<string, { sequence: number; url: string }>
+  expectedError: string
+  expectedRepeatedError: string
+  inputs: {
+    invalid: string
+    positive: string
+    repeated: string
+    skipOnly: string
+    zero: string
+  }
+}
+
 const mediaStructureFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-media-playlist-structure-errors', import.meta.url))
 const mediaStructureFixture = JSON.parse(readFileSync(`${mediaStructureFixtureRoot}/fixture.json`, 'utf8')) as {
   expected: string
@@ -359,6 +373,29 @@ describe('Cat Catch HLS parser', () => {
         baseUrl: `https://media.example/${input}`,
         text,
       })).toThrow(emptyMediaFixture.expectedError)
+    }
+  })
+
+  it('hls.delta-playlist-rejection', () => {
+    for (const input of [deltaPlaylistFixture.inputs.positive, deltaPlaylistFixture.inputs.skipOnly]) {
+      expect(() => parseHlsManifest({
+        baseUrl: 'https://media.example/delta/live.m3u8',
+        text: readFileSync(`${deltaPlaylistFixtureRoot}/${input}`, 'utf8'),
+      })).toThrow(deltaPlaylistFixture.expectedError)
+    }
+    expect(() => parseHlsManifest({
+      baseUrl: 'https://media.example/delta/live.m3u8',
+      text: readFileSync(`${deltaPlaylistFixtureRoot}/${deltaPlaylistFixture.inputs.repeated}`, 'utf8'),
+    })).toThrow(deltaPlaylistFixture.expectedRepeatedError)
+    for (const input of [deltaPlaylistFixture.inputs.invalid, deltaPlaylistFixture.inputs.zero]) {
+      const manifest = parseHlsManifest({
+        baseUrl: 'https://media.example/delta/live.m3u8',
+        text: readFileSync(`${deltaPlaylistFixtureRoot}/${input}`, 'utf8'),
+      })
+      expect(manifest.segments.map(segment => ({
+        sequence: segment.sequence,
+        url: segment.url,
+      }))).toEqual([deltaPlaylistFixture.allowed[input]])
     }
   })
 

@@ -1,0 +1,35 @@
+{
+  "fixtureId": "hls-delta-playlist-rejection",
+  "capabilityIds": [
+    "hls.parser-planner"
+  ],
+  "upstreamCommit": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
+  "status": "active",
+  "oracle": "upstream-executable",
+  "sourceRefs": [
+    "lib/hls.min.js#parseLevelPlaylist EXT-X-SKIP",
+    "js/m3u8.js#parseTs(data)"
+  ],
+  "inputs": {
+    "invalid": "invalid-skip.m3u8",
+    "positive": "positive-skip.m3u8",
+    "repeated": "repeated-skip.m3u8",
+    "skipOnly": "skip-only.m3u8",
+    "zero": "zero-skip.m3u8"
+  },
+  "expectedError": "HLS delta playlist cannot enter the Cat Catch download path",
+  "expectedRepeatedError": "#EXT-X-SKIP must not appear more than once (#EXT-X-SKIP:SKIPPED-SEGMENTS=1)",
+  "allowed": {
+    "invalid-skip.m3u8": {
+      "sequence": 4,
+      "url": "https://media.example/delta/invalid.ts"
+    },
+    "zero-skip.m3u8": {
+      "sequence": 4,
+      "url": "https://media.example/delta/zero.ts"
+    }
+  },
+  "testRefs": [
+    "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.delta-playlist-rejection"
+  ]
+}

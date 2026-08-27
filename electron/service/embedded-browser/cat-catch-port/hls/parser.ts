@@ -578,6 +578,7 @@ export function parseHlsManifest(input: {
   let playlistType: string | undefined
   let hasEndList = false
   let discontinuitySequence = 0
+  let skippedSegmentCount = 0
   let currentKeys: Map<string, CatCatchHlsKey> | undefined
   let currentMap: CatCatchHlsMap | undefined
   let pendingSegment: PendingSegment | undefined
@@ -689,6 +690,17 @@ export function parseHlsManifest(input: {
       playlistType = getTagValue(line).toUpperCase() || undefined
       continue
     }
+    if (line.startsWith('#EXT-X-SKIP:')) {
+      if (skippedSegmentCount !== 0) {
+        assignMultipleMediaPlaylistTagError(variableState, 'SKIP', line)
+      }
+      const attributes = parseHlsAttributeListWithVariables(getTagValue(line), variableState)
+      const parsedSkippedSegmentCount = parseInteger(attributes['SKIPPED-SEGMENTS'])
+      if (parsedSkippedSegmentCount !== undefined) {
+        skippedSegmentCount += parsedSkippedSegmentCount
+      }
+      continue
+    }
     if (line.startsWith('#EXT-X-KEY')) {
       const key = createHlsKey(line, baseUrl, variableState)
       if (!isSupportedHlsKey(key)) continue
@@ -756,6 +768,12 @@ export function parseHlsManifest(input: {
   }
   if (variableState.playlistParsingError) {
     throw variableState.playlistParsingError
+  }
+  if (skippedSegmentCount > 0) {
+    // Pinned hls.js exposes null placeholders to Cat Catch's external
+    // LEVEL_LOADED listener before its internal delta merge. parseTs then
+    // dereferences fragment.url, so this path never yields a download plan.
+    throw new Error('HLS delta playlist cannot enter the Cat Catch download path')
   }
 
   segments.forEach((segment, index) => {
