@@ -12,11 +12,15 @@
     "lib/hls.min.js#parseLevelPlaylist(variableList)"
   ],
   "inputs": {
+    "liveMedia": "media-live.m3u8",
     "master": "master.m3u8",
     "media": "media.m3u8"
   },
   "expected": "expected.json",
   "testRefs": [
-    "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.variable-substitution"
+    "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.variable-substitution",
+    "electron/service/embedded-browser/integrations/hls-manifest-authority.test.ts#hls.live-parent-variable-authority",
+    "electron/service/embeddedBrowserHlsLiveRecorder.test.ts#hls.live-import-variable-recording",
+    "electron/service/embeddedBrowserHlsLiveRecorder.test.ts#hls.live-parent-variable-abort"
   ]
 }

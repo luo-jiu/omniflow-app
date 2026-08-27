@@ -8,6 +8,7 @@ import {
   type EmbeddedBrowserHlsDownloadFragment,
   type EmbeddedBrowserHlsDownloadPlan,
   type EmbeddedBrowserHlsManifest,
+  type EmbeddedBrowserHlsVariableList,
 } from '../../src/features/embedded-browser/resources/model/embedded-browser-hls-manifest'
 import type { EmbeddedBrowserFragmentFetch } from './embeddedBrowserFragmentDownloader'
 import {
@@ -37,6 +38,9 @@ type EmbeddedBrowserHlsLiveRecorderOptions = {
     totalFragments?: number
   }) => void
   pageUrl?: string
+  resolveParentVariableList?: (
+    signal?: AbortSignal,
+  ) => Promise<Readonly<EmbeddedBrowserHlsVariableList> | undefined>
   suggestedThreadCount?: number
   workDirectoryPath?: string
 }
@@ -50,8 +54,11 @@ type EmbeddedBrowserHlsLiveRecorderStopResult = {
 
 type EmbeddedBrowserHlsLiveManifestSnapshot = {
   manifest: EmbeddedBrowserHlsManifest
+  parentVariableList?: Readonly<EmbeddedBrowserHlsVariableList>
   plan: EmbeddedBrowserHlsDownloadPlan
 }
+
+const HLS_IMPORT_DEFINE_PATTERN = /^#EXT-X-DEFINE:\s*IMPORT\s*=/m
 
 function createLiveFragmentKey(fragment: EmbeddedBrowserHlsDownloadFragment) {
   return `${fragment.sequence}|${fragment.url}`
@@ -80,7 +87,9 @@ async function fetchEmbeddedBrowserHlsLiveManifestSnapshot(input: {
   fetch?: EmbeddedBrowserFragmentFetch
   headers?: Record<string, string>
   manifestUrl: string
+  parentVariableList?: Readonly<EmbeddedBrowserHlsVariableList>
   pageUrl?: string
+  resolveParentVariableList?: EmbeddedBrowserHlsLiveRecorderOptions['resolveParentVariableList']
   signal?: AbortSignal
   suggestedThreadCount?: number
 }): Promise<EmbeddedBrowserHlsLiveManifestSnapshot> {
@@ -103,8 +112,13 @@ async function fetchEmbeddedBrowserHlsLiveManifestSnapshot(input: {
   if (!text.includes('#EXTM3U')) {
     throw new Error('当前直播返回内容不像 HLS playlist')
   }
+  const parentVariableList = input.parentVariableList
+    || (HLS_IMPORT_DEFINE_PATTERN.test(text)
+      ? await input.resolveParentVariableList?.(input.signal)
+      : undefined)
   const manifest = parseEmbeddedBrowserHlsManifest({
     baseUrl: input.manifestUrl,
+    parentVariableList,
     text,
   })
   const plan = createEmbeddedBrowserHlsDownloadPlan({
@@ -121,6 +135,7 @@ async function fetchEmbeddedBrowserHlsLiveManifestSnapshot(input: {
   }
   return {
     manifest,
+    parentVariableList,
     plan: input.suggestedThreadCount && input.suggestedThreadCount > 0
       ? {
           ...plan,
@@ -153,11 +168,15 @@ export class EmbeddedBrowserHlsLiveRecorder {
 
   private readonly pageUrl?: string
 
+  private parentVariableList?: Readonly<EmbeddedBrowserHlsVariableList>
+
   private playlistPath = ''
 
   private pollIntervalMs = 4000
 
   private pollTimer: NodeJS.Timeout | null = null
+
+  private readonly resolveParentVariableList?: EmbeddedBrowserHlsLiveRecorderOptions['resolveParentVariableList']
 
   private readonly suggestedThreadCount?: number
 
@@ -170,6 +189,7 @@ export class EmbeddedBrowserHlsLiveRecorder {
     this.manualKeyBase64 = options.manualKeyBase64
     this.onEvent = options.onEvent
     this.pageUrl = options.pageUrl
+    this.resolveParentVariableList = options.resolveParentVariableList
     this.suggestedThreadCount = options.suggestedThreadCount
     this.workDirectoryPath = options.workDirectoryPath || ''
   }
@@ -268,10 +288,13 @@ export class EmbeddedBrowserHlsLiveRecorder {
       fetch: this.fetch,
       headers: this.headers,
       manifestUrl: this.manifestUrl,
+      parentVariableList: this.parentVariableList,
       pageUrl: this.pageUrl,
+      resolveParentVariableList: this.resolveParentVariableList,
       signal: this.abortController?.signal,
       suggestedThreadCount: this.suggestedThreadCount,
     })
+    this.parentVariableList = snapshot.parentVariableList
     this.pollIntervalMs = Math.max(1500, Math.min(10000, (snapshot.manifest.targetDuration || 4) * 1000))
 
     if (!this.cumulativePlan) {

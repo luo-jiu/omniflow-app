@@ -605,6 +605,20 @@
 - legacy cleanup: 无；旧 HLS 链继续保留到 hls-engine 原子 cutover。
 - validation: 失败证据先为 parser `2/6` 失败，实现与 review 修正后 parser 7/7、完整 HLS Vitest 54/54（clear 与 AES-128 真实 ffmpeg/ffprobe output 均实际执行）、固定上游 validator、同步校验 16/16、定向 ESLint、metadata 7 units/32 capabilities/105 planned IDs/59 active refs 和 scoped diff check 通过。全量 Vitest 为 943 passed / 1 skipped / 16 sandbox-only loopback failures，另有同步 validator 的 `node:test` 文件被 Vitest 收集后报告 no suite；全仓 lint 只被其他 Agent 正在编辑的 `agent-orchestrator.ts` 一个 `prefer-const` 阻断，全局 TypeScript 也只被该并行模块 5 个错误阻断。完整 build 不运行，避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
 
+## 2026-08-27: same target (live HLS master variable authority)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动。
+- reviewedThrough / portedThrough: 均保持 `null`；本步闭合 selected live child 的 `EXT-X-DEFINE:IMPORT` production adapter，仍未完成 hls-engine cutover。
+- change groups: `platform-adaptation`（captured master authority 到 parent variable list）与 `stability/security-boundary`（child 归属校验、renderer 不提供变量、resolver 取消传播）。
+- affected capability IDs: `hls.parser-planner` 保持 `ported-unverified`；`hls.live-recording` 保持 `porting`。
+- fixtures/tests: 扩展 `hls-variable-substitution` fixture 的 live media playlist；`hls.live-parent-variable-authority` 验证 master protected headers、变量派生、hostile child 拒绝与同资源短路；`hls.live-import-variable-recording` 验证 recorder 下载替换后的分片 URL；`hls.live-parent-variable-abort` 验证 discard 中止在途 resolver。
+- accepted difference: Cat Catch 的 hls.js loader 在内存中把 multivariant variable list 传给 level parser；OmniFlow 直播由 main 使用原始 opaque captured resource id 重新读取 master，只在 child 明确 `IMPORT` 时派生，并校验 selected child 属于该 master。renderer 不传变量值或 protected headers。
+- excluded changes and reasons: 不新增 IPC 字段、renderer task owner 或通用 manifest cache；没有 `IMPORT` 的直播 child 不额外请求 master。
+- unresolved gaps: HLS 其余 parser 标签差分、renderer listener recovery、HLS live 未捕获 URL 过渡 DTO、真实网站手工验证和最终 hls-engine cutover。
+- runtime changes: `hls-manifest-authority` 新增可取消的 parent variable resolver；live recorder 延迟调用并缓存结果，后续 manifest poll 复用同一 parent list；controller 只绑定 main-owned access、source resource id、selected URL 和既有 recorder signal。
+- legacy cleanup: 无；旧 HLS 链继续保留到 hls-engine 原子 cutover。
+- validation: 两层失败证据分别为 authority `1/3` 与 recorder `1/5` 失败；实现和 review 修正后 authority/recorder/lifecycle 20/20、完整 HLS Vitest 57/57、TypeScript、全仓 ESLint、固定上游 validator、同步校验 16/16、metadata 7 units/32 capabilities/192 anchors/106 cleanup entries/108 unique planned IDs/62 active refs 和 scoped diff check 通过。全量 Vitest 为 951 passed / 1 skipped / 17 failed：16 条为 sandbox-only loopback 监听失败，其中本切片相关 redirect isolation 在允许监听本机端口的环境复跑 3/3 通过；另 1 条为其他 Agent 正在修改的 `agent-orchestrator.test.ts` 断言失败，Node 专用同步 validator 文件被 Vitest 收集后另报告 no suite。完整 build 不运行以避免覆盖其他 Agent 的 `dist-electron/**`，暂无真实网站手工场景。
+
 ## Template
 
 ```markdown

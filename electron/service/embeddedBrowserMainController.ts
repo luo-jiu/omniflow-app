@@ -118,6 +118,7 @@ import {
 } from './embeddedBrowserExternalTools'
 import { ExternalToolDispatcher } from './embedded-browser/integrations/external-tools'
 import {
+  resolveHlsLiveParentVariableList,
   resolveHlsManifestAuthority,
   resolveHlsTrackAuthorities,
 } from './embedded-browser/integrations/hls-manifest-authority'
@@ -2084,6 +2085,7 @@ export function createEmbeddedBrowserMainController(
         usingManualKey: Boolean(payload.manualKeyBase64),
       })
 
+      const parentVariableAccess = captureRuntime?.access || null
       const recorder = new EmbeddedBrowserHlsLiveRecorder({
         fetch: createEmbeddedBrowserCapturedResourceFetch(normalizedTabId, authorityResourceId),
         headers: manifestHeaders,
@@ -2111,6 +2113,14 @@ export function createEmbeddedBrowserMainController(
           })
         },
         pageUrl: payload.pageUrl,
+        resolveParentVariableList: requestedResourceId && parentVariableAccess
+          ? signal => resolveHlsLiveParentVariableList(parentVariableAccess, {
+              selectedManifestUrl: manifestUrl,
+              signal,
+              sourceResourceId: requestedResourceId,
+              tabId: normalizedTabId,
+            })
+          : undefined,
         suggestedThreadCount: payload.suggestedThreadCount,
       })
 

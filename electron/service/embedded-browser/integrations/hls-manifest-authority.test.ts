@@ -1,4 +1,6 @@
-import { describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
+
+import { describe, expect, it, vi } from 'vitest'
 
 import {
   NETWORK_CONTEXT_PURPOSES,
@@ -7,11 +9,12 @@ import {
 import { ResourceStateStore } from '../capture/state/resource-state-store'
 import { CapturedResourceAccessService } from './captured-resource-access'
 import {
+  resolveHlsLiveParentVariableList,
   resolveHlsManifestAuthority,
   resolveHlsTrackAuthorities,
 } from './hls-manifest-authority'
 
-function createHarness() {
+function createHarness(fetchImpl: (url: string, init: RequestInit) => Promise<Response> = (url, init) => fetch(url, init)) {
   let contextId = 0
   let resourceId = 0
   const vault = new NetworkContextVault({
@@ -78,20 +81,27 @@ function createHarness() {
     requestId: 2,
     url: 'https://audio.example/track.m3u8',
   })
+  addManifest({
+    authorization: 'Bearer master-secret',
+    requestId: 3,
+    url: 'https://origin.example/master.m3u8?token=abc%2F123&cdn=edge.example',
+  })
 
   const snapshot = store.getSnapshot('tab-1')
   if (!snapshot || snapshot.status !== 'active') throw new Error('Missing active snapshot')
   const videoResourceId = snapshot.resources.find(resource => resource.url.includes('video.example'))?.id
   const audioResourceId = snapshot.resources.find(resource => resource.url.includes('audio.example'))?.id
-  if (!videoResourceId || !audioResourceId) throw new Error('Missing manifest resources')
+  const masterResourceId = snapshot.resources.find(resource => resource.url.includes('origin.example'))?.id
+  if (!videoResourceId || !audioResourceId || !masterResourceId) throw new Error('Missing manifest resources')
 
   return {
     access: new CapturedResourceAccessService({
-      fetch: (url, init) => fetch(url, init),
+      fetch: fetchImpl,
       store,
       vault,
     }),
     audioResourceId,
+    masterResourceId,
     registration,
     store,
     videoResourceId,
@@ -163,5 +173,41 @@ describe('HLS manifest authority', () => {
       tabId: 'tab-1',
       videoResourceId: harness.videoResourceId,
     })).toBeNull()
+  })
+
+  it('hls.live-parent-variable-authority', async () => {
+    const masterPlaylist = readFileSync(
+      new URL('../../../../tools/cat-catch-lab/fixtures/hls-variable-substitution/master.m3u8', import.meta.url),
+      'utf8',
+    )
+    const fetchImpl = vi.fn(async (_url: string, init: RequestInit) => {
+      const headers = new Headers(init.headers)
+      expect(headers.get('authorization')).toBe('Bearer master-secret')
+      expect(headers.get('cookie')).toBe('session=3')
+      return new Response(masterPlaylist)
+    })
+    const harness = createHarness(fetchImpl)
+    const selectedManifestUrl = 'https://edge.example/assets/abc/123/video/index.m3u8?session=media%20query'
+
+    await expect(resolveHlsLiveParentVariableList(harness.access, {
+      selectedManifestUrl,
+      sourceResourceId: harness.masterResourceId,
+      tabId: 'tab-1',
+    })).resolves.toEqual({
+      cdn: 'edge.example',
+      root: 'https://edge.example/assets/abc/123',
+      token: 'abc/123',
+    })
+    await expect(resolveHlsLiveParentVariableList(harness.access, {
+      selectedManifestUrl: 'https://attacker.example/live.m3u8',
+      sourceResourceId: harness.masterResourceId,
+      tabId: 'tab-1',
+    })).rejects.toThrow('所选直播 playlist 不属于当前 captured master')
+    await expect(resolveHlsLiveParentVariableList(harness.access, {
+      selectedManifestUrl: 'https://video.example/track.m3u8',
+      sourceResourceId: harness.videoResourceId,
+      tabId: 'tab-1',
+    })).resolves.toBeUndefined()
+    expect(fetchImpl).toHaveBeenCalledTimes(2)
   })
 })

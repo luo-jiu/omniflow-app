@@ -18,6 +18,9 @@ const LIVE_MANIFEST = [
 describe('EmbeddedBrowser HLS live recorder', () => {
   it('hls.live-terminal', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'omniflow-hls-live-terminal-test-'))
+    const resolveParentVariableList = vi.fn(async () => ({
+      root: 'https://unused.example',
+    }))
     const fetchImpl = vi.fn(async (url: string) => {
       if (url.endsWith('/live.m3u8')) {
         return new Response(LIVE_MANIFEST)
@@ -27,6 +30,7 @@ describe('EmbeddedBrowser HLS live recorder', () => {
     const recorder = new EmbeddedBrowserHlsLiveRecorder({
       fetch: fetchImpl,
       manifestUrl: 'https://media.example/live.m3u8',
+      resolveParentVariableList,
       workDirectoryPath: directory,
     })
 
@@ -44,6 +48,7 @@ describe('EmbeddedBrowser HLS live recorder', () => {
       expect(playlist).toContain('segments/00001.ts')
       expect(segment).toEqual(Buffer.from([0x47, 0x01, 0x02, 0x03]))
       expect(fetchImpl).toHaveBeenCalledTimes(2)
+      expect(resolveParentVariableList).not.toHaveBeenCalled()
     } finally {
       await recorder.discard()
       await rm(directory, { force: true, recursive: true })
@@ -178,6 +183,86 @@ describe('EmbeddedBrowser HLS live recorder', () => {
       await recorder.discard()
       await rm(directory, { force: true, recursive: true })
       vi.useRealTimers()
+    }
+  })
+
+  it('hls.live-import-variable-recording', async () => {
+    vi.useFakeTimers()
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'omniflow-hls-live-variable-test-'))
+    const liveManifest = await readFile(
+      new URL('../../tools/cat-catch-lab/fixtures/hls-variable-substitution/media-live.m3u8', import.meta.url),
+      'utf8',
+    )
+    const requestedUrls: string[] = []
+    const resolveParentVariableList = vi.fn(async () => ({
+      root: 'https://edge.example/assets/abc/123',
+    }))
+    const fetchImpl = vi.fn(async (url: string) => {
+      requestedUrls.push(url)
+      if (url.endsWith('/live.m3u8')) {
+        return new Response(liveManifest)
+      }
+      return new Response(Uint8Array.from([0x47, 0x01, 0x02, 0x03]).buffer)
+    })
+    const recorder = new EmbeddedBrowserHlsLiveRecorder({
+      fetch: fetchImpl,
+      manifestUrl: 'https://media.example/live.m3u8',
+      resolveParentVariableList,
+      workDirectoryPath: directory,
+    })
+
+    try {
+      await recorder.start()
+      await vi.advanceTimersByTimeAsync(4000)
+      await recorder.stop()
+      expect(resolveParentVariableList).toHaveBeenCalledTimes(1)
+      expect(requestedUrls).toEqual([
+        'https://media.example/live.m3u8',
+        'https://edge.example/assets/abc/123/segments/live-42.ts',
+        'https://media.example/live.m3u8',
+      ])
+    } finally {
+      await recorder.discard()
+      await rm(directory, { force: true, recursive: true })
+      vi.useRealTimers()
+    }
+  })
+
+  it('hls.live-parent-variable-abort', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'omniflow-hls-live-variable-abort-test-'))
+    const liveManifest = await readFile(
+      new URL('../../tools/cat-catch-lab/fixtures/hls-variable-substitution/media-live.m3u8', import.meta.url),
+      'utf8',
+    )
+    let markResolverStarted: (() => void) | undefined
+    const resolverStarted = new Promise<void>((resolve) => {
+      markResolverStarted = resolve
+    })
+    const resolveParentVariableList = vi.fn(async (signal?: AbortSignal) => {
+      markResolverStarted?.()
+      return new Promise<Readonly<Record<string, string>>>((_resolve, reject) => {
+        signal?.addEventListener('abort', () => {
+          reject(new DOMException('aborted', 'AbortError'))
+        }, { once: true })
+      })
+    })
+    const recorder = new EmbeddedBrowserHlsLiveRecorder({
+      fetch: async () => new Response(liveManifest),
+      manifestUrl: 'https://media.example/live.m3u8',
+      resolveParentVariableList,
+      workDirectoryPath: directory,
+    })
+    const startPromise = recorder.start()
+    const startExpectation = expect(startPromise).rejects.toMatchObject({ name: 'AbortError' })
+
+    try {
+      await resolverStarted
+      await recorder.discard()
+      await startExpectation
+      expect(resolveParentVariableList).toHaveBeenCalledTimes(1)
+    } finally {
+      await recorder.discard()
+      await rm(directory, { force: true, recursive: true })
     }
   })
 })
