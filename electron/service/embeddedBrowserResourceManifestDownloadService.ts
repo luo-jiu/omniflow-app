@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process'
+import { stat } from 'node:fs/promises'
 import path from 'node:path'
 import { resolveEmbeddedBrowserFfmpegPath } from './embeddedBrowserResourceMergeService'
 
@@ -162,6 +163,18 @@ function parseFfmpegProgressChunk(
   })
 }
 
+async function assertManifestOutputFile(outputPath: string) {
+  try {
+    const output = await stat(outputPath)
+    if (output.isFile() && output.size > 0) {
+      return
+    }
+  } catch {
+    // Normalize missing and unreadable output into the same delivery error.
+  }
+  throw new Error('ffmpeg 已退出，但没有生成可用的输出文件')
+}
+
 export async function downloadEmbeddedBrowserManifestResource(
   request: EmbeddedBrowserManifestDownloadRequest,
 ): Promise<EmbeddedBrowserManifestDownloadResult> {
@@ -216,15 +229,20 @@ export async function downloadEmbeddedBrowserManifestResource(
     child.once('error', (error) => {
       reject(error)
     })
-    child.once('exit', (code) => {
+    child.once('exit', async (code) => {
       if (code === 0) {
-        resolve({
-          commandArgs,
-          ffmpegPath,
-          outputPath: request.outputPath,
-          stderr: stderr.join(''),
-          stdout: stdout.join(''),
-        })
+        try {
+          await assertManifestOutputFile(request.outputPath)
+          resolve({
+            commandArgs,
+            ffmpegPath,
+            outputPath: request.outputPath,
+            stderr: stderr.join(''),
+            stdout: stdout.join(''),
+          })
+        } catch (error) {
+          reject(error)
+        }
         return
       }
       reject(new Error(stderr.join('').trim() || `ffmpeg 退出码异常: ${code}`))
@@ -286,15 +304,20 @@ export async function downloadEmbeddedBrowserManifestTracks(
     child.once('error', (error) => {
       reject(error)
     })
-    child.once('exit', (code) => {
+    child.once('exit', async (code) => {
       if (code === 0) {
-        resolve({
-          commandArgs,
-          ffmpegPath,
-          outputPath: request.outputPath,
-          stderr: stderr.join(''),
-          stdout: stdout.join(''),
-        })
+        try {
+          await assertManifestOutputFile(request.outputPath)
+          resolve({
+            commandArgs,
+            ffmpegPath,
+            outputPath: request.outputPath,
+            stderr: stderr.join(''),
+            stdout: stdout.join(''),
+          })
+        } catch (error) {
+          reject(error)
+        }
         return
       }
       reject(new Error(stderr.join('').trim() || `ffmpeg 退出码异常: ${code}`))

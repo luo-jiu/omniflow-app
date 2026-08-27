@@ -876,6 +876,7 @@
         "hls.cancel-aborts-local-download",
         "hls.cancel-aborts-static-refs",
         "hls.static-ref-range",
+        "hls.local-output-smoke",
         "hls.plan-authority-fetch"
       ],
       "testRefs": [
@@ -885,10 +886,11 @@
         "electron/service/embeddedBrowserHlsLocalDownloaderService.test.ts#hls.cancel-aborts-local-download",
         "electron/service/embeddedBrowserHlsLocalDownloaderService.test.ts#hls.cancel-aborts-static-refs",
         "electron/service/embeddedBrowserFragmentDownloader.test.ts#hls.failed-fragment-retry",
-        "electron/service/embeddedBrowserHlsLocalDownloaderService.test.ts#hls.static-ref-range"
+        "electron/service/embeddedBrowserHlsLocalDownloaderService.test.ts#hls.static-ref-range",
+        "electron/service/embeddedBrowserHlsOutput.test.ts#hls.local-output-smoke"
       ],
       "acceptedDifferences": [],
-      "notes": "Plan execution now accepts a main-owned fetch transport: captured fragment/key/map URLs are redeemed through the current tab resource authority with bounded Range support, while unrecognized URLs retain the embedded-session fallback. The fragment downloader now supports an ordered async processor chain, emits each processed stage, retries failed fetch or processor attempts, and exposes an aborted terminal event. HLS local execution carries one AbortSignal through key, map, and media-fragment fetches and destroys the downloader on success, failure, or cancellation, preserving the Cat Catch use() pipeline boundary for decrypt/transcode steps. No single task/cancel owner spans plan execution, retry sessions, work directories, ffmpeg, and renderer listeners. Vendor provenance blockers: lib/third-party-libraries.md attributes m3u8-decrypt.js to the mutable hls.js master path rather than an immutable revision; the loaded StreamSaver bundle self-reports 2.0.5 while that document declares 2.0.6, has no verified immutable artifact binding, and retains remote MITM configuration."
+      "notes": "Plan execution now accepts a main-owned fetch transport: captured fragment/key/map URLs are redeemed through the current tab resource authority with bounded Range support, while unrecognized URLs retain the embedded-session fallback. The fragment downloader now supports an ordered async processor chain, emits each processed stage, retries failed fetch or processor attempts, and exposes an aborted terminal event. HLS local execution carries one AbortSignal through key, map, and media-fragment fetches and destroys the downloader on success, failure, or cancellation, preserving the Cat Catch use() pipeline boundary for decrypt/transcode steps. A production-contract smoke verifies the rewritten local playlist plus key/map/media files are handed to the ffmpeg wrapper and that zero-exit without a non-empty output is rejected; real ffmpeg/ffprobe container correctness is still open. No single task/cancel owner spans plan execution, retry sessions, work directories, ffmpeg, and renderer listeners. Vendor provenance blockers: lib/third-party-libraries.md attributes m3u8-decrypt.js to the mutable hls.js master path rather than an immutable revision; the loaded StreamSaver bundle self-reports 2.0.5 while that document declares 2.0.6, has no verified immutable artifact binding, and retains remote MITM configuration."
     },
     {
       "id": "hls.live-recording",

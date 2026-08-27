@@ -465,6 +465,20 @@
 - legacy cleanup: 无；现有 controller Maps、ffmpeg/playlist 解密与旧输出链继续承担生产职责。
 - validation: 完整 HLS 集合 19/19、仓库级 lint、全局 TypeScript、`cat-catch:validate`、同步校验 16/16 和 scoped diff 检查通过。全量 Vitest 共 914 条，895 通过、1 skipped、18 失败：16 条为当前沙箱禁止 loopback `listen 127.0.0.1`，另 2 条来自并行开发中的 Agent SQLite/approval 改动，均不在 Cat Catch 路径；完整 build 因共享工作区的 `dist-electron/**` 改动不运行。
 
+## 2026-08-27: same target (HLS local-to-ffmpeg output handoff)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动。
+- reviewedThrough / portedThrough: 均保持 `null`；本步建立 local playlist 到 ffmpeg wrapper 的可执行交付证据，仍未完成 hls-engine cutover。
+- change groups: `platform-adaptation`（本地 key/map/media/playlist 到 ffmpeg 输入与目标文件交付合同）。
+- affected capability IDs: `hls.segment-pipeline` 继续为 `porting`。
+- fixtures/tests: `embeddedBrowserHlsOutput.test.ts#hls.local-output-smoke` 下载 key、map 和媒体分片，核对 rewritten playlist 与落盘字节，断言 ffmpeg `-i` 使用本地 playlist、progress 可投影且非空目标文件被交付；同文件覆盖 ffmpeg 零退出但没有输出时必须失败。
+- accepted difference: 自动化使用受控 fake child 锁定 OmniFlow process wrapper 合同，不把它描述为真实 ffmpeg 容器正确性；真实 ffmpeg/ffprobe fixture 仍是独立缺口。
+- excluded changes and reasons: 不在本步实现真实媒体转封装 fixture、ffmpeg 取消、统一 task owner、生产解密或旧输出链删除。
+- unresolved gaps: 真实 ffmpeg/ffprobe output、active plan/retry/live/ffmpeg/workdir 单一 owner、一次性 cache fallback、完整 parser 与 decrypt responsibility。
+- runtime changes: manifest/track ffmpeg wrapper 在零退出后检查目标必须为非空普通文件，否则返回明确交付错误；HLS controller 仍调用同一 wrapper。
+- legacy cleanup: 无；现有 controller orchestration 和旧输出路径继续保留。
+- validation: 完整 HLS 集合 21/21、仓库级 lint、TypeScript、`cat-catch:validate`、同步校验 16/16 和 scoped diff 检查通过；未重复运行上一切片已记录为环境/并行模块失败的全量 Vitest，完整 build 仍因共享工作区的 `dist-electron/**` 改动不运行。
+
 ## Template
 
 ```markdown

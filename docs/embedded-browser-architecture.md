@@ -129,7 +129,7 @@ library detail page
 - MPD manifest 解析后，也可以把“下载计划”送到工具区；工具区当前提供第一版 representation 选择，并在 main 侧执行 `init segment + media segments` 本地下载，再交给 `ffmpeg` 合并。
 - 工具区当前承接两条 HLS 主线：
   - 网络 manifest：继续走 `ffmpeg` 直拉。
-  - blob / 页内内存 manifest：走 Electron main 本地 downloader，先生成 local workdir 和 rewritten local playlist，再交给 `ffmpeg`。
+  - blob / 页内内存 manifest：走 Electron main 本地 downloader，先生成 local workdir 和 rewritten local playlist，再交给 `ffmpeg`；wrapper 只有在进程零退出且目标文件存在、为普通文件并且非空时才报告成功。
 - 网络 master playlist 已补第一版 variant 选择；默认保持“自动”，也可锁到具体 variant URL 后再走 `ffmpeg`。
 - 如果用户在工具区填写了手动 AES-128 key，也会切到本地 downloader 主链，由 Electron main 写本地 key 文件后重写 playlist。
 - live HLS 第一版走显式“开始录制 / 停止录制”主线；停止后才交给 `ffmpeg` 导出。切换到别的 HLS 请求或离开工具区时，会把未导出的 live session 当作放弃处理，不做隐式自动导出。recorder 的 manifest/segment 请求共用一个 `AbortController`，discard 会中止在途请求；页面导航、tab/view 销毁、render-process loss 和 controller dispose 都会触发匹配 session 的 discard 与临时目录清理。
