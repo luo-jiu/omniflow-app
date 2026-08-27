@@ -325,6 +325,20 @@
 - legacy cleanup: 无；`parseEmbeddedBrowserHlsManifest` 与 download-plan builder 在 hls-engine cutover 前继续保留为兼容入口。
 - validation: parser fixture 2/2、HLS 相关 Vitest 3/3、TypeScript、定向 lint、`cat-catch:validate` 和同步校验 16/16 通过；未运行会覆盖其他 Agent `dist-electron/**` 的 build，也未做真实页面验证。
 
+## 2026-08-27: same target (HLS discontinuity sequence)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动。
+- reviewedThrough / portedThrough: 均保持 `null`；本步补齐 parser 对 `EXT-X-DISCONTINUITY-SEQUENCE` 初始值的处理，仍未完成 hls-engine cutover。
+- change groups: `behavioral`（固定版 hls.js 的初始 discontinuity sequence 及其与增量 tag 的顺序）。
+- affected capability IDs: `hls.parser-planner` 保持 `ported-unverified`，继续指向同一 migration target。
+- fixtures/tests: 扩展 active fixture `hls-byterange-implicit-offset`，期望 sequence `3 -> 4`，parser 测试保持 2/2。
+- accepted difference: 无新增；renderer facade、download-plan projection 和旧 pipeline 仍保留。
+- excluded changes and reasons: 不在本步迁移 live playlist refresh、cache fallback、伪装分片或 task/output。
+- unresolved gaps: HLS 完整标签差分、direct/live/track nested authority、统一 task/cleanup 和 production-equivalent smoke。
+- runtime changes: `parseHlsManifest` 在普通 `DISCONTINUITY` 前处理 `DISCONTINUITY-SEQUENCE`，避免前缀匹配把初始值误算成一次增量。
+- legacy cleanup: 无。
+- validation: 失败 fixture 先复现 `1/2`，实现后 parser fixture 2/2、HLS 相关 Vitest 3/3、TypeScript、定向 lint、`cat-catch:validate` 和同步校验 16/16 通过；未运行会覆盖其他 Agent `dist-electron/**` 的 build，也未做真实页面验证。
+
 ## Template
 
 ```markdown

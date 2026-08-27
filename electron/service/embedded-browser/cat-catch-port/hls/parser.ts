@@ -2,7 +2,7 @@
  * HLS parser behavior ported from the pinned Cat Catch dependency.
  *
  * Upstream: xifangczy/cat-catch@2cb981d7c2f4614732edccc167c4b5793d1cb138
- * Source: lib/hls.min.js#Fragment.setByteRange and js/m3u8.js#parseTs
+ * Source: lib/hls.min.js#Fragment.setByteRange and parseLevelPlaylist
  * Reason: hls.js carries an omitted BYTERANGE offset forward for the same
  * resource; losing that state makes every later range start at byte zero.
  * Adaptation: pure parser only; Electron fetching and output stay outside the port.
@@ -387,6 +387,10 @@ export function parseHlsManifest(input: {
     }
     if (line.startsWith('#EXT-X-BYTERANGE')) {
       pendingByteRange = parseHlsByteRange(getTagValue(line))
+      continue
+    }
+    if (line.startsWith('#EXT-X-DISCONTINUITY-SEQUENCE')) {
+      discontinuitySequence = parseNumber(getTagValue(line)) || 0
       continue
     }
     if (line.startsWith('#EXT-X-DISCONTINUITY')) {

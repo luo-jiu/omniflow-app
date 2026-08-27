@@ -18,7 +18,7 @@
     {
       "url": "https://media.example/hls/media.mp4",
       "sequence": 7,
-      "discontinuitySequence": 0,
+      "discontinuitySequence": 3,
       "duration": 4,
       "title": null,
       "length": 10,
@@ -29,7 +29,7 @@
     {
       "url": "https://media.example/hls/media.mp4",
       "sequence": 8,
-      "discontinuitySequence": 0,
+      "discontinuitySequence": 3,
       "duration": 4,
       "title": "continued range",
       "length": 20,
@@ -40,7 +40,7 @@
     {
       "url": "https://media.example/hls/media.mp4",
       "sequence": 9,
-      "discontinuitySequence": 1,
+      "discontinuitySequence": 4,
       "duration": 4,
       "title": null,
       "length": 5,
@@ -51,7 +51,7 @@
     {
       "url": "https://media.example/hls/other.mp4",
       "sequence": 10,
-      "discontinuitySequence": 1,
+      "discontinuitySequence": 4,
       "duration": 4,
       "title": null,
       "length": 6,
