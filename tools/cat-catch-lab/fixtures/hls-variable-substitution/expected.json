@@ -1,0 +1,36 @@
+{
+  "masterBaseUrl": "https://origin.example/master.m3u8?token=abc%2F123&cdn=edge.example",
+  "masterVariables": {
+    "token": "abc/123",
+    "cdn": "edge.example",
+    "root": "https://edge.example/assets/abc/123"
+  },
+  "variantUrls": [
+    "https://edge.example/assets/abc/123/video/index.m3u8?session=media%20query",
+    "https://edge.example/assets/abc/123/iframe/index.m3u8"
+  ],
+  "rendition": {
+    "groupId": "audio-abc/123",
+    "name": "Main abc/123",
+    "url": "https://edge.example/assets/abc/123/audio/index.m3u8"
+  },
+  "mediaVariables": {
+    "root": "https://edge.example/assets/abc/123",
+    "session": "media query",
+    "hex-iv": "0000000000000000000000000000002a",
+    "range": "32@8"
+  },
+  "key": {
+    "iv": "0x0000000000000000000000000000002a",
+    "url": "https://edge.example/assets/abc/123/keys/media%20query.key"
+  },
+  "map": {
+    "length": 32,
+    "offset": 8,
+    "url": "https://edge.example/assets/abc/123/init.mp4"
+  },
+  "segment": {
+    "sequence": 42,
+    "url": "https://edge.example/assets/abc/123/segments/media%20query-42.m4s"
+  }
+}

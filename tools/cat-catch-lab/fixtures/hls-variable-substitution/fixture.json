@@ -1,0 +1,22 @@
+{
+  "fixtureId": "hls-variable-substitution",
+  "capabilityIds": [
+    "hls.parser-planner"
+  ],
+  "upstreamCommit": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
+  "status": "active",
+  "oracle": "source-derived",
+  "sourceRefs": [
+    "lib/hls.min.js#EXT-X-DEFINE",
+    "lib/hls.min.js#VARIABLE_REPLACEMENT_REGEX",
+    "lib/hls.min.js#parseLevelPlaylist(variableList)"
+  ],
+  "inputs": {
+    "master": "master.m3u8",
+    "media": "media.m3u8"
+  },
+  "expected": "expected.json",
+  "testRefs": [
+    "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.variable-substitution"
+  ]
+}

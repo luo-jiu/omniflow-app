@@ -8,6 +8,8 @@ import { parseHlsManifest } from '../../../../../electron/service/embedded-brows
 
 export type EmbeddedBrowserHlsAttributeMap = Record<string, string>
 
+export type EmbeddedBrowserHlsVariableList = Record<string, string>
+
 export type EmbeddedBrowserHlsByteRange = {
   length: number
   offset?: number
@@ -90,6 +92,7 @@ export type EmbeddedBrowserHlsManifest = {
   segmentCount: number
   segments: EmbeddedBrowserHlsSegment[]
   targetDuration?: number
+  variableList?: EmbeddedBrowserHlsVariableList
   variants: EmbeddedBrowserHlsVariant[]
 }
 
@@ -251,6 +254,7 @@ export function parseHlsByteRange(input?: string): EmbeddedBrowserHlsByteRange |
 
 export function parseEmbeddedBrowserHlsManifest(input: {
   baseUrl: string
+  parentVariableList?: Readonly<EmbeddedBrowserHlsVariableList>
   text: string
 }): EmbeddedBrowserHlsManifest {
   return parseHlsManifest(input)

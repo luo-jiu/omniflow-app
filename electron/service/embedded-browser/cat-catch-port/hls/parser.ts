@@ -11,6 +11,8 @@
 
 export type CatCatchHlsAttributeMap = Record<string, string>
 
+export type CatCatchHlsVariableList = Record<string, string>
+
 export type CatCatchHlsByteRange = {
   length: number
   offset?: number
@@ -93,6 +95,7 @@ export type CatCatchHlsManifest = {
   segmentCount: number
   segments: CatCatchHlsSegment[]
   targetDuration?: number
+  variableList?: CatCatchHlsVariableList
   variants: CatCatchHlsVariant[]
 }
 
@@ -100,6 +103,29 @@ type PendingSegment = {
   duration: number
   title?: string
 }
+
+type HlsVariableState = {
+  baseUrl: string
+  parentVariableList?: Readonly<CatCatchHlsVariableList>
+  playlistParsingError?: Error
+  variableList?: CatCatchHlsVariableList
+}
+
+/**
+ * Upstream: xifangczy/cat-catch@2cb981d7c2f4614732edccc167c4b5793d1cb138
+ * Source: lib/hls.min.js#EXT-X-DEFINE and parseLevelPlaylist(variableList)
+ * Reason: HLS variable references are ordered, single-pass substitutions; media
+ * playlists may only see master variables named by an explicit IMPORT tag.
+ * Adaptation: the synchronous facade throws hls.js's first playlist parsing error.
+ * Fixture: hls-variable-substitution
+ */
+const HLS_VARIABLE_REFERENCE_PATTERN = /\{\$([a-zA-Z0-9-_]+)\}/g
+const HLS_HEXADECIMAL_ATTRIBUTES = new Set([
+  'IV',
+  'SCTE35-CMD',
+  'SCTE35-IN',
+  'SCTE35-OUT',
+])
 
 function parseNumber(value?: string) {
   if (!value) return undefined
@@ -114,7 +140,28 @@ function parseBoolean(value?: string) {
   return undefined
 }
 
-export function parseHlsAttributeList(input: string): CatCatchHlsAttributeMap {
+function rememberVariableParsingError(state: HlsVariableState, message: string) {
+  state.playlistParsingError ||= new Error(message)
+}
+
+function substituteHlsVariables(input: string, state: HlsVariableState) {
+  return input.replace(HLS_VARIABLE_REFERENCE_PATTERN, (reference, variableName: string) => {
+    const value = state.variableList?.[variableName]
+    if (value === undefined) {
+      rememberVariableParsingError(
+        state,
+        `Missing preceding EXT-X-DEFINE tag for Variable Reference: "${variableName}"`,
+      )
+      return reference
+    }
+    return value
+  })
+}
+
+function parseHlsAttributeListWithVariables(
+  input: string,
+  variableState?: HlsVariableState,
+): CatCatchHlsAttributeMap {
   const result: CatCatchHlsAttributeMap = {}
   let key = ''
   let value = ''
@@ -130,8 +177,12 @@ export function parseHlsAttributeList(input: string): CatCatchHlsAttributeMap {
       return
     }
     let normalizedValue = value.trim()
-    if (normalizedValue.startsWith('"') && normalizedValue.endsWith('"')) {
+    const quoted = normalizedValue.startsWith('"') && normalizedValue.endsWith('"')
+    if (quoted) {
       normalizedValue = normalizedValue.slice(1, -1)
+    }
+    if (variableState && (quoted || HLS_HEXADECIMAL_ATTRIBUTES.has(normalizedKey))) {
+      normalizedValue = substituteHlsVariables(normalizedValue, variableState)
     }
     result[normalizedKey] = normalizedValue
     key = ''
@@ -158,6 +209,10 @@ export function parseHlsAttributeList(input: string): CatCatchHlsAttributeMap {
   }
   commit()
   return result
+}
+
+export function parseHlsAttributeList(input: string): CatCatchHlsAttributeMap {
+  return parseHlsAttributeListWithVariables(input)
 }
 
 export function parseHlsByteRange(input?: string): CatCatchHlsByteRange | undefined {
@@ -194,8 +249,12 @@ function parseExtinf(line: string): PendingSegment {
   return { duration: parseNumber(durationText) || 0, title: title || undefined }
 }
 
-function createHlsKey(line: string, baseUrl: string): CatCatchHlsKey {
-  const attributes = parseHlsAttributeList(getTagValue(line))
+function createHlsKey(
+  line: string,
+  baseUrl: string,
+  variableState: HlsVariableState,
+): CatCatchHlsKey {
+  const attributes = parseHlsAttributeListWithVariables(getTagValue(line), variableState)
   const uri = attributes.URI
   return {
     iv: attributes.IV,
@@ -213,8 +272,9 @@ function createHlsMap(
   line: string,
   baseUrl: string,
   rangeEnds: Map<string, number>,
+  variableState: HlsVariableState,
 ): CatCatchHlsMap | null {
-  const attributes = parseHlsAttributeList(getTagValue(line))
+  const attributes = parseHlsAttributeListWithVariables(getTagValue(line), variableState)
   const uri = attributes.URI
   if (!uri) return null
   const url = resolveHlsUrl(uri, baseUrl)
@@ -227,8 +287,17 @@ function createHlsMap(
   }
 }
 
-function createHlsVariant(line: string, uri: string, baseUrl: string): CatCatchHlsVariant {
-  const attributes = parseHlsAttributeList(getTagValue(line))
+function createHlsVariant(
+  line: string,
+  uri: string | undefined,
+  baseUrl: string,
+  variableState: HlsVariableState,
+): CatCatchHlsVariant | null {
+  const attributes = parseHlsAttributeListWithVariables(getTagValue(line), variableState)
+  const substitutedUri = uri === undefined
+    ? attributes.URI
+    : substituteHlsVariables(uri, variableState)
+  if (!substitutedUri) return null
   return {
     audioGroupId: attributes.AUDIO,
     averageBandwidth: parseNumber(attributes['AVERAGE-BANDWIDTH']),
@@ -239,13 +308,17 @@ function createHlsVariant(line: string, uri: string, baseUrl: string): CatCatchH
     rawLine: line,
     resolution: attributes.RESOLUTION,
     subtitlesGroupId: attributes.SUBTITLES,
-    uri,
-    url: resolveHlsUrl(uri, baseUrl),
+    uri: substitutedUri,
+    url: resolveHlsUrl(substitutedUri, baseUrl),
   }
 }
 
-function createHlsRendition(line: string, baseUrl: string): CatCatchHlsRendition {
-  const attributes = parseHlsAttributeList(getTagValue(line))
+function createHlsRendition(
+  line: string,
+  baseUrl: string,
+  variableState: HlsVariableState,
+): CatCatchHlsRendition {
+  const attributes = parseHlsAttributeListWithVariables(getTagValue(line), variableState)
   const uri = attributes.URI
   return {
     autoselect: parseBoolean(attributes.AUTOSELECT),
@@ -260,6 +333,50 @@ function createHlsRendition(line: string, baseUrl: string): CatCatchHlsRendition
     uri,
     url: uri ? resolveHlsUrl(uri, baseUrl) : undefined,
   }
+}
+
+function parseHlsVariableDefinition(line: string, state: HlsVariableState) {
+  const attributes = parseHlsAttributeListWithVariables(getTagValue(line), state)
+  if ('IMPORT' in attributes) {
+    const variableName = attributes.IMPORT
+    if (state.parentVariableList && variableName in state.parentVariableList) {
+      state.variableList ||= {}
+      state.variableList[variableName] = state.parentVariableList[variableName]
+      return
+    }
+    rememberVariableParsingError(
+      state,
+      `EXT-X-DEFINE IMPORT attribute not found in Multivariant Playlist: "${variableName}"`,
+    )
+    return
+  }
+
+  let variableName = attributes.NAME
+  let variableValue = attributes.VALUE
+  if ('QUERYPARAM' in attributes) {
+    variableName = attributes.QUERYPARAM
+    try {
+      const searchParams = new URL(state.baseUrl).searchParams
+      if (!searchParams.has(variableName)) {
+        throw new Error(`"${variableName}" does not match any query parameter in URI: "${state.baseUrl}"`)
+      }
+      variableValue = searchParams.get(variableName) || ''
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      rememberVariableParsingError(state, `EXT-X-DEFINE QUERYPARAM: ${message}`)
+    }
+  }
+
+  const normalizedVariableName = String(variableName)
+  state.variableList ||= {}
+  if (normalizedVariableName in state.variableList) {
+    rememberVariableParsingError(
+      state,
+      `EXT-X-DEFINE duplicate Variable Name declarations: "${normalizedVariableName}"`,
+    )
+    return
+  }
+  state.variableList[normalizedVariableName] = variableValue || ''
 }
 
 function resolveByteRange(
@@ -277,9 +394,14 @@ function resolveByteRange(
 
 export function parseHlsManifest(input: {
   baseUrl: string
+  parentVariableList?: Readonly<CatCatchHlsVariableList>
   text: string
 }): CatCatchHlsManifest {
   const baseUrl = String(input.baseUrl || '').trim()
+  const variableState: HlsVariableState = {
+    baseUrl,
+    parentVariableList: input.parentVariableList,
+  }
   const lines = String(input.text || '')
     .replace(/^\uFEFF/, '')
     .split(/\r?\n/)
@@ -315,7 +437,7 @@ export function parseHlsManifest(input: {
   }
 
   function addSegment(uri: string, part: boolean, byteRange = pendingByteRange) {
-    const normalizedUri = String(uri || '').trim()
+    const normalizedUri = substituteHlsVariables(String(uri || '').trim(), variableState)
     if (!normalizedUri) return
     const url = resolveHlsUrl(normalizedUri, baseUrl)
     const index = segments.length
@@ -338,7 +460,8 @@ export function parseHlsManifest(input: {
 
   for (const line of lines) {
     if (pendingVariantLine && !line.startsWith('#')) {
-      variants.push(createHlsVariant(pendingVariantLine, line, baseUrl))
+      const variant = createHlsVariant(pendingVariantLine, line, baseUrl, variableState)
+      if (variant) variants.push(variant)
       pendingVariantLine = undefined
       continue
     }
@@ -346,17 +469,21 @@ export function parseHlsManifest(input: {
       addSegment(line, false)
       continue
     }
+    if (line.startsWith('#EXT-X-DEFINE:')) {
+      parseHlsVariableDefinition(line, variableState)
+      continue
+    }
     if (line.startsWith('#EXT-X-STREAM-INF')) {
       pendingVariantLine = line
       continue
     }
     if (line.startsWith('#EXT-X-I-FRAME-STREAM-INF')) {
-      const attributes = parseHlsAttributeList(getTagValue(line))
-      if (attributes.URI) variants.push(createHlsVariant(line, attributes.URI, baseUrl))
+      const variant = createHlsVariant(line, undefined, baseUrl, variableState)
+      if (variant) variants.push(variant)
       continue
     }
     if (line.startsWith('#EXT-X-MEDIA:')) {
-      renditions.push(createHlsRendition(line, baseUrl))
+      renditions.push(createHlsRendition(line, baseUrl, variableState))
       continue
     }
     if (line.startsWith('#EXT-X-MEDIA-SEQUENCE')) {
@@ -372,13 +499,13 @@ export function parseHlsManifest(input: {
       continue
     }
     if (line.startsWith('#EXT-X-KEY')) {
-      const key = createHlsKey(line, baseUrl)
+      const key = createHlsKey(line, baseUrl, variableState)
       rememberKey(key)
       currentKey = key.method.toUpperCase() === 'NONE' ? undefined : key
       continue
     }
     if (line.startsWith('#EXT-X-MAP')) {
-      const map = createHlsMap(line, baseUrl, mapRangeEnds)
+      const map = createHlsMap(line, baseUrl, mapRangeEnds, variableState)
       if (map) {
         currentMap = map
         rememberMap(map)
@@ -412,6 +539,10 @@ export function parseHlsManifest(input: {
     if (line.startsWith('#EXT-X-ENDLIST')) hasEndList = true
   }
 
+  if (variableState.playlistParsingError) {
+    throw variableState.playlistParsingError
+  }
+
   const durationSeconds = segments.reduce((total, segment) => total + segment.duration, 0)
   return {
     baseUrl,
@@ -428,6 +559,7 @@ export function parseHlsManifest(input: {
     segmentCount: segments.length,
     segments,
     targetDuration,
+    variableList: variableState.variableList,
     variants,
   }
 }

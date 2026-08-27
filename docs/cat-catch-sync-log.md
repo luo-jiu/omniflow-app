@@ -591,6 +591,20 @@
 - legacy cleanup: 无；旧 HLS 链继续保留到 hls-engine 原子 cutover。
 - validation: 完整 HLS Vitest 52/52（clear 与 AES-128 真实 ffmpeg/ffprobe output 均实际执行）、定向 ESLint、`cat-catch:validate`（含固定上游源码）、同步校验 16/16、metadata 7 units/32 capabilities/104 planned IDs/58 active refs 和 scoped diff check 通过。全局 TypeScript 与全仓 lint 仍只被其他 Agent 正在修改的 `electron/service/agent/**` 阻断；本片只有条件式 integration、注释和台账变化，未重复运行紧邻上一提交已完成的全量 Vitest。完整 build 未运行，避免覆盖其他 Agent 正在修改的 `dist-electron/**`；暂无可用真实网站和手工测试场景。
 
+## 2026-08-27: same target (HLS EXT-X-DEFINE variable substitution)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动。
+- reviewedThrough / portedThrough: 均保持 `null`；本步补齐固定 hls.js 1.6.16 的变量替换切片，仍未完成 hls-engine cutover。
+- change groups: `behavioral`（定义、查询参数、导入、单次引用替换与首错误语义）与 `dependency`（Cat Catch 固定 vendor `lib/hls.min.js` 的 parser 行为）。
+- affected capability IDs: `hls.parser-planner` 保持 `ported-unverified`。
+- fixtures/tests: source-derived fixture `hls-variable-substitution` 覆盖 master `NAME/VALUE`、`QUERYPARAM`、variant/I-frame/rendition，media `IMPORT`、key/map/segment URI、quoted/hexadecimal attribute 与 URL query decode；`hls.variable-substitution` 锁定结果，附加测试锁定重复定义、缺失 query/import/reference、非 quoted 普通属性不替换和非递归单次替换。
+- accepted difference: 固定 hls.js 在 playlist 上记录第一条 `playlistParsingError`，evented loader 随后拒绝；同步 OmniFlow facade 没有 loader event 边界，因此抛出相同第一条错误。
+- excluded changes and reasons: 本步不把 renderer variable list 作为可信执行输入传给 main，也不顺带建设新的 live/task IPC；生产直播 child 需要后续从 main-owned master authority 派生 parent variable list。
+- unresolved gaps: live child `IMPORT` 的 main-owned parent variable 恢复、HLS 其余 parser 标签差分、renderer listener recovery、HLS live 过渡 DTO、真实网站手工验证和最终 hls-engine cutover。
+- runtime changes: pure parser 新增 variable list，并只在显式 `IMPORT` 时把 parent variable 引入 media playlist；renderer compatibility facade 与手动 key 的 master→media 本地计划 resolver 传递该列表。没有新增 listener、任务 owner 或 fallback。
+- legacy cleanup: 无；旧 HLS 链继续保留到 hls-engine 原子 cutover。
+- validation: 失败证据先为 parser `2/6` 失败，实现与 review 修正后 parser 7/7、完整 HLS Vitest 54/54（clear 与 AES-128 真实 ffmpeg/ffprobe output 均实际执行）、固定上游 validator、同步校验 16/16、定向 ESLint、metadata 7 units/32 capabilities/105 planned IDs/59 active refs 和 scoped diff check 通过。全量 Vitest 为 943 passed / 1 skipped / 16 sandbox-only loopback failures，另有同步 validator 的 `node:test` 文件被 Vitest 收集后报告 no suite；全仓 lint 只被其他 Agent 正在编辑的 `agent-orchestrator.ts` 一个 `prefer-const` 阻断，全局 TypeScript 也只被该并行模块 5 个错误阻断。完整 build 不运行，避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
+
 ## Template
 
 ```markdown

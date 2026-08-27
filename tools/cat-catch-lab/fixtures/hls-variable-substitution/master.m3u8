@@ -1,0 +1,9 @@
+#EXTM3U
+#EXT-X-VERSION:8
+#EXT-X-DEFINE:QUERYPARAM="token"
+#EXT-X-DEFINE:QUERYPARAM="cdn"
+#EXT-X-DEFINE:NAME="root",VALUE="https://{$cdn}/assets/{$token}"
+#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio-{$token}",NAME="Main {$token}",DEFAULT=YES,AUTOSELECT=YES,URI="{$root}/audio/index.m3u8"
+#EXT-X-STREAM-INF:BANDWIDTH=1280000,AUDIO="audio-{$token}",CODECS="avc1.4d401f,mp4a.40.2"
+{$root}/video/index.m3u8?session=media%20query
+#EXT-X-I-FRAME-STREAM-INF:BANDWIDTH=120000,URI="{$root}/iframe/index.m3u8"

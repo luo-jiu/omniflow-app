@@ -315,6 +315,7 @@ function createHlsPlanSlice(
 async function resolveMasterVariantToMediaPlan(input: {
   headers: Record<string, string>;
   pageUrl?: string;
+  parentVariableList?: Readonly<Record<string, string>>;
   variantManifestUrl: string;
 }) {
   const response = await window.electronAPI.fetch(input.variantManifestUrl, { headers: input.headers });
@@ -329,6 +330,7 @@ async function resolveMasterVariantToMediaPlan(input: {
   }
   const manifest = parseEmbeddedBrowserHlsManifest({
     baseUrl: input.variantManifestUrl,
+    parentVariableList: input.parentVariableList,
     text,
   });
   const plan = createEmbeddedBrowserHlsDownloadPlan({
@@ -705,6 +707,7 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
         const resolvedVariant = await resolveMasterVariantToMediaPlan({
           headers: resourceHeaders,
           pageUrl: undefined,
+          parentVariableList: hlsRequest.manifest.variableList,
           variantManifestUrl: selectedHlsVariantUrl,
         });
         effectivePlan = resolvedVariant.plan;

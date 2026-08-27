@@ -58,6 +58,27 @@ const llHlsExpected = JSON.parse(readFileSync(`${llHlsFixtureRoot}/${llHlsFixtur
   }>
 }
 
+const variableFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-variable-substitution', import.meta.url))
+const variableFixture = JSON.parse(readFileSync(`${variableFixtureRoot}/fixture.json`, 'utf8')) as {
+  expected: string
+  inputs: {
+    master: string
+    media: string
+  }
+}
+const variableMasterPlaylist = readFileSync(`${variableFixtureRoot}/${variableFixture.inputs.master}`, 'utf8')
+const variableMediaPlaylist = readFileSync(`${variableFixtureRoot}/${variableFixture.inputs.media}`, 'utf8')
+const variableExpected = JSON.parse(readFileSync(`${variableFixtureRoot}/${variableFixture.expected}`, 'utf8')) as {
+  key: { iv: string; url: string }
+  map: { length: number; offset: number; url: string }
+  masterBaseUrl: string
+  masterVariables: Record<string, string>
+  mediaVariables: Record<string, string>
+  rendition: { groupId: string; name: string; url: string }
+  segment: { sequence: number; url: string }
+  variantUrls: string[]
+}
+
 function parseFixture() {
   return parseHlsManifest({
     baseUrl: expected.baseUrl,
@@ -137,5 +158,84 @@ describe('Cat Catch HLS parser', () => {
       segmentCount: llHlsExpected.segmentCount,
     })
     expect(plan.fragments.every(fragment => !fragment.part)).toBe(true)
+  })
+
+  it('hls.variable-substitution', () => {
+    const master = parseHlsManifest({
+      baseUrl: variableExpected.masterBaseUrl,
+      text: variableMasterPlaylist,
+    })
+    expect(master.variableList).toEqual(variableExpected.masterVariables)
+    expect(master.variants.map(variant => variant.url)).toEqual(variableExpected.variantUrls)
+    expect(master.renditions[0]).toMatchObject(variableExpected.rendition)
+
+    const media = parseHlsManifest({
+      baseUrl: variableExpected.variantUrls[0],
+      parentVariableList: master.variableList,
+      text: variableMediaPlaylist,
+    })
+    expect(media.variableList).toEqual(variableExpected.mediaVariables)
+    expect(media.keys[0]).toMatchObject(variableExpected.key)
+    expect(media.maps[0]).toMatchObject({
+      byteRange: {
+        length: variableExpected.map.length,
+        offset: variableExpected.map.offset,
+      },
+      url: variableExpected.map.url,
+    })
+    expect(media.segments[0]).toMatchObject(variableExpected.segment)
+
+    const facadeMedia = parseEmbeddedBrowserHlsManifest({
+      baseUrl: variableExpected.variantUrls[0],
+      parentVariableList: master.variableList,
+      text: variableMediaPlaylist,
+    })
+    expect(facadeMedia.segments[0]?.url).toBe(variableExpected.segment.url)
+  })
+
+  it('preserves pinned hls.js EXT-X-DEFINE failure semantics', () => {
+    expect(() => parseHlsManifest({
+      baseUrl: 'https://example.test/media.m3u8',
+      text: '#EXTM3U\n#EXT-X-DEFINE:NAME="dup",VALUE="one"\n#EXT-X-DEFINE:NAME="dup",VALUE="two"\n#EXTINF:4,\n{$missing}/segment.ts\n',
+    })).toThrow('EXT-X-DEFINE duplicate Variable Name declarations: "dup"')
+
+    expect(() => parseHlsManifest({
+      baseUrl: 'https://example.test/media.m3u8',
+      text: '#EXTM3U\n#EXT-X-DEFINE:QUERYPARAM="missing"\n',
+    })).toThrow('EXT-X-DEFINE QUERYPARAM: "missing" does not match any query parameter in URI: "https://example.test/media.m3u8"')
+
+    expect(() => parseHlsManifest({
+      baseUrl: 'https://example.test/media.m3u8',
+      text: '#EXTM3U\n#EXT-X-DEFINE:IMPORT="root"\n',
+    })).toThrow('EXT-X-DEFINE IMPORT attribute not found in Multivariant Playlist: "root"')
+
+    expect(() => parseHlsManifest({
+      baseUrl: 'https://example.test/media.m3u8',
+      text: '#EXTM3U\n#EXTINF:4,\n{$missing}/segment.ts\n',
+    })).toThrow('Missing preceding EXT-X-DEFINE tag for Variable Reference: "missing"')
+
+    expect(() => parseHlsManifest({
+      baseUrl: 'https://example.test/media.m3u8',
+      parentVariableList: { root: 'https://cdn.example/assets' },
+      text: '#EXTM3U\n#EXTINF:4,\n{$root}/segment.ts\n',
+    })).toThrow('Missing preceding EXT-X-DEFINE tag for Variable Reference: "root"')
+  })
+
+  it('does not substitute an unquoted non-hexadecimal attribute', () => {
+    const manifest = parseHlsManifest({
+      baseUrl: 'https://example.test/master.m3u8',
+      text: '#EXTM3U\n#EXT-X-DEFINE:NAME="bandwidth",VALUE="1280000"\n#EXT-X-STREAM-INF:BANDWIDTH={$bandwidth}\nvariant.m3u8\n',
+    })
+    expect(manifest.variants[0]?.bandwidth).toBeUndefined()
+    expect(manifest.variants[0]?.rawAttributes.BANDWIDTH).toBe('{$bandwidth}')
+  })
+
+  it('substitutes each variable reference only once', () => {
+    const manifest = parseHlsManifest({
+      baseUrl: 'https://example.test/master.m3u8?literal=%7B%24root%7D',
+      text: '#EXTM3U\n#EXT-X-DEFINE:NAME="root",VALUE="real.m3u8"\n#EXT-X-DEFINE:QUERYPARAM="literal"\n#EXT-X-I-FRAME-STREAM-INF:BANDWIDTH=120000,URI="{$literal}"\n',
+    })
+    expect(manifest.variants[0]?.uri).toBe('{$root}')
+    expect(manifest.variants[0]?.url).toBe('https://example.test/%7B$root%7D')
   })
 })
