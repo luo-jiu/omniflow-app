@@ -705,6 +705,7 @@ export function createEmbeddedBrowserMainController(
       if (resourceId && captureRuntime) {
         const range = new Headers(init?.headers).get('range') || undefined
         const accessResult = await captureRuntime.access.fetch({
+          cache: init?.cache,
           purpose: 'resource-download',
           range,
           resourceId,

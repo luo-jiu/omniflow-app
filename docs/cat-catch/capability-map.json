@@ -949,16 +949,18 @@
         "hls.live-terminal",
         "hls.live-discard-abort",
         "hls.live-tab-close-exit",
+        "hls.live-manifest-force-cache-fallback",
         "hls.session-owner-tab-cleanup"
       ],
       "testRefs": [
         "electron/service/embeddedBrowserHlsLiveRecorder.test.ts#hls.live-terminal",
         "electron/service/embeddedBrowserHlsLiveRecorder.test.ts#hls.live-discard-abort",
+        "electron/service/embeddedBrowserHlsLiveRecorder.test.ts#hls.live-manifest-force-cache-fallback",
         "electron/service/embedded-browser/processing/hls-session-owner.test.ts#hls.session-owner-tab-cleanup",
         "electron/service/embedded-browser/processing/hls-session-owner.test.ts#hls.live-tab-close-exit"
       ],
       "acceptedDifferences": [],
-      "notes": "Live start accepts an opaque resourceId and binds captured manifest/segment polling to the current tab's authority-aware fetch; unrecognized URLs still use the embedded-session fallback. The recorder now owns one AbortController across manifest and segment polling, exposes discard, and has executable terminal/discard tests. Navigation, tab close, view destruction, render-process loss, controller disposal, and graceful application exit route through the production HLS host lifecycle; live export ffmpeg is registered as an active task, so cleanup aborts and awaits it before discarding the recorder and work directory. Concurrent lifecycle cleanup is tracked so shutdown cannot finish while an earlier discard/workdir cleanup is still pending. Vendor provenance blocker: the upstream live path depends on the same unverified StreamSaver 2.0.5/2.0.6 bundle and remote MITM configuration recorded by transfer.streaming-memory-budget."
+      "notes": "Live start accepts an opaque resourceId and binds captured manifest/segment polling to the current tab's authority-aware fetch; unrecognized URLs still use the embedded-session fallback. Its initial manifest request preserves Cat Catch's single force-cache recovery after an HTTP failure; later live polls and response-less network errors do not retry. The recorder owns one AbortController across manifest and segment polling, exposes discard, and has executable terminal/discard tests. Navigation, tab close, view destruction, render-process loss, controller disposal, and graceful application exit route through the production HLS host lifecycle; live export ffmpeg is registered as an active task, so cleanup aborts and awaits it before discarding the recorder and work directory. Concurrent lifecycle cleanup is tracked so shutdown cannot finish while an earlier discard/workdir cleanup is still pending. Vendor provenance blocker: the upstream live path depends on the same unverified StreamSaver 2.0.5/2.0.6 bundle and remote MITM configuration recorded by transfer.streaming-memory-budget."
     },
     {
       "id": "hls.cache-fallback-disguised-fragments",
@@ -988,21 +990,26 @@
         "electron/service/embeddedBrowserHlsLocalDownloaderService.ts#downloadEmbeddedBrowserHlsToLocalWorkDirectory"
       ],
       "targetRefs": [
+        "electron/service/embedded-browser/cat-catch-port/hls/cache-fallback.ts#fetchHlsManifestWithForceCacheFallback",
         "electron/service/embedded-browser/cat-catch-port/hls/pipeline.ts#preprocessFragment"
       ],
       "relationToUpstream": "exact",
-      "syncState": "porting",
-      "syncedThrough": null,
+      "syncState": "ported-unverified",
+      "syncedThrough": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
       "plannedTestIds": [
         "hls.cache-fallback-disguised",
-        "hls.decrypt-preprocess-order"
+        "hls.decrypt-preprocess-order",
+        "hls.manifest-force-cache-fallback",
+        "hls.live-manifest-force-cache-fallback"
       ],
       "testRefs": [
         "electron/service/embedded-browser/cat-catch-port/hls/pipeline.test.ts#hls.cache-fallback-disguised",
-        "electron/service/embedded-browser/cat-catch-port/hls/decrypt.test.ts#hls.decrypt-preprocess-order"
+        "electron/service/embedded-browser/cat-catch-port/hls/decrypt.test.ts#hls.decrypt-preprocess-order",
+        "electron/service/embedded-browser/integrations/captured-resource-inspection.test.ts#hls.manifest-force-cache-fallback",
+        "electron/service/embeddedBrowserHlsLiveRecorder.test.ts#hls.live-manifest-force-cache-fallback"
       ],
       "acceptedDifferences": [],
-      "notes": "The pure port preserves Cat Catch's conservative PNG/JPEG prefix removal with an unchanged-buffer fallback for incomplete signatures. The local HLS fragment downloader now optionally applies it after rawBuffer emission and before sequential output; current local-plan and live-recording paths enable the option. One-shot manifest cache fallback, decrypt/preprocess ordering, and production-equivalent HLS output verification remain open."
+      "notes": "The pure port preserves Cat Catch's conservative PNG/JPEG prefix removal with an unchanged-buffer fallback for incomplete signatures. The local HLS fragment downloader applies it after rawBuffer emission and before sequential output in current local-plan and live-recording paths, with decrypt/preprocess ordering covered independently. Captured HLS inspection and the initial live manifest request now make exactly one same-URL force-cache attempt after a non-success HTTP response, retain main-owned authority headers, never retry response-less network errors, and do not apply the branch to MPD or later live polls. Fake and real-binary output integrations cover the downstream handoff; website-level manual validation remains open."
     },
     {
       "id": "dash.parser-planner",

@@ -28,6 +28,7 @@ export type CapturedResourceAccessGrant = {
 }
 
 export type CapturedResourceFetchInput = CapturedResourceAccessInput & {
+  cache?: RequestCache
   maxRedirects?: number
   range?: string
   signal?: AbortSignal
@@ -190,6 +191,7 @@ export class CapturedResourceAccessService {
       }
       const response = await this.fetchImpl(currentUrl, {
         ...(input.purpose === 'page-drag-stage' ? { credentials: 'include' as const } : {}),
+        ...(input.cache ? { cache: input.cache } : {}),
         headers: requestHeaders,
         redirect: grant.redirectMode,
         signal: input.signal,

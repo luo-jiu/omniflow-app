@@ -13,6 +13,9 @@ import type { EmbeddedBrowserFragmentFetch } from './embeddedBrowserFragmentDown
 import {
   downloadEmbeddedBrowserHlsToLocalWorkDirectory,
 } from './embeddedBrowserHlsLocalDownloaderService'
+import {
+  fetchHlsManifestWithForceCacheFallback,
+} from './embedded-browser/cat-catch-port/hls/cache-fallback'
 
 type EmbeddedBrowserHlsLiveRecorderOptions = {
   fetch?: EmbeddedBrowserFragmentFetch
@@ -73,6 +76,7 @@ function mergeUniqueByKey<T>(
 }
 
 async function fetchEmbeddedBrowserHlsLiveManifestSnapshot(input: {
+  allowForceCacheFallback?: boolean
   fetch?: EmbeddedBrowserFragmentFetch
   headers?: Record<string, string>
   manifestUrl: string
@@ -80,10 +84,18 @@ async function fetchEmbeddedBrowserHlsLiveManifestSnapshot(input: {
   signal?: AbortSignal
   suggestedThreadCount?: number
 }): Promise<EmbeddedBrowserHlsLiveManifestSnapshot> {
-  const response = await (input.fetch || ((url, init) => fetch(url, init)))(input.manifestUrl, {
-    headers: input.headers,
-    signal: input.signal,
-  })
+  const fetchImpl = input.fetch || ((url: string, init?: RequestInit) => fetch(url, init))
+  const response = input.allowForceCacheFallback
+    ? await fetchHlsManifestWithForceCacheFallback({
+        fetch: fetchImpl,
+        headers: input.headers,
+        signal: input.signal,
+        url: input.manifestUrl,
+      })
+    : await fetchImpl(input.manifestUrl, {
+        headers: input.headers,
+        signal: input.signal,
+      })
   if (!response.ok) {
     throw new Error(`直播 playlist 请求失败：HTTP ${response.status}`)
   }
@@ -252,6 +264,7 @@ export class EmbeddedBrowserHlsLiveRecorder {
 
   private async pollOnce(isInitial: boolean) {
     const snapshot = await fetchEmbeddedBrowserHlsLiveManifestSnapshot({
+      allowForceCacheFallback: isInitial,
       fetch: this.fetch,
       headers: this.headers,
       manifestUrl: this.manifestUrl,

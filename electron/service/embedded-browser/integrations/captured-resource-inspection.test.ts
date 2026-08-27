@@ -14,8 +14,15 @@ import {
 function createHarness(
   fetchImpl: (input: string, init: RequestInit) => Promise<Response>,
   maxBytes = 1024,
+  resourceOverrides: {
+    ext?: string
+    kind?: 'manifest' | 'other'
+    mimeType?: string
+    name?: string
+    url?: string
+  } = {},
 ) {
-  const resourceUrl = 'https://media.example/playlist.m3u8?public=1'
+  const resourceUrl = resourceOverrides.url || 'https://media.example/playlist.m3u8?public=1'
   const vault = new NetworkContextVault({
     createContextRef: () => 'context-main-only',
   })
@@ -58,9 +65,10 @@ function createHarness(
     binding: registration.binding,
     context,
     metadata: {
-      kind: 'manifest',
-      mimeType: 'application/vnd.apple.mpegurl',
-      name: 'playlist.m3u8',
+      ext: resourceOverrides.ext,
+      kind: resourceOverrides.kind || 'manifest',
+      mimeType: resourceOverrides.mimeType || 'application/vnd.apple.mpegurl',
+      name: resourceOverrides.name || 'playlist.m3u8',
       resourceType: 'xhr',
       url: resourceUrl,
     },
@@ -127,6 +135,110 @@ describe('network.owned-resource-inspection', () => {
     expect(serializedResult).not.toContain('main-owned-manifest-token')
     expect(serializedResult).not.toContain('response-cookie-secret')
     expect(serializedResult).not.toContain('renderer-injected')
+  })
+
+  it('hls.manifest-force-cache-fallback', async () => {
+    const fetchCalls: Array<{ init: RequestInit; url: string }> = []
+    const harness = createHarness(async (url, init) => {
+      fetchCalls.push({ init, url })
+      if (fetchCalls.length === 1) {
+        return new Response('expired one-shot URL', { status: 403 })
+      }
+      return new Response('#EXTM3U\n#EXT-X-VERSION:3\n', {
+        headers: { 'content-type': 'application/vnd.apple.mpegurl' },
+        status: 200,
+      })
+    })
+
+    const result = await harness.inspection.inspect({
+      encoding: 'utf8',
+      resourceId: 'resource-opaque',
+      tabId: 'tab-1',
+    })
+
+    expect(fetchCalls).toHaveLength(2)
+    expect(fetchCalls.map(call => call.url)).toEqual([
+      harness.resourceUrl,
+      harness.resourceUrl,
+    ])
+    expect(fetchCalls[0]?.init.cache).toBeUndefined()
+    expect(fetchCalls[1]?.init.cache).toBe('force-cache')
+    expect(new Headers(fetchCalls[1]?.init.headers).get('authorization'))
+      .toBe('Bearer main-owned-secret')
+    expect(result).toMatchObject({
+      body: '#EXTM3U\n#EXT-X-VERSION:3\n',
+      status: 200,
+      truncated: false,
+    })
+  })
+
+  it('does not retry a force-cache failure or a response-less network error', async () => {
+    const httpFetch = vi.fn<(url: string, init: RequestInit) => Promise<Response>>(async () => (
+      new Response('still expired', { status: 404 })
+    ))
+    const httpHarness = createHarness(httpFetch)
+
+    await expect(httpHarness.inspection.inspect({
+      encoding: 'utf8',
+      resourceId: 'resource-opaque',
+      tabId: 'tab-1',
+    })).resolves.toMatchObject({
+      body: 'still expired',
+      status: 404,
+    })
+    expect(httpFetch).toHaveBeenCalledTimes(2)
+    expect(httpFetch.mock.calls[1]?.[1].cache).toBe('force-cache')
+
+    const networkFetch = vi.fn<(url: string, init: RequestInit) => Promise<Response>>(async () => {
+      throw new Error('network unavailable')
+    })
+    const networkHarness = createHarness(networkFetch)
+    await expect(networkHarness.inspection.inspect({
+      encoding: 'utf8',
+      resourceId: 'resource-opaque',
+      tabId: 'tab-1',
+    })).rejects.toThrow('network unavailable')
+    expect(networkFetch).toHaveBeenCalledOnce()
+
+    let fallbackNetworkAttempt = 0
+    const fallbackNetworkFetch = vi.fn<
+      (url: string, init: RequestInit) => Promise<Response>
+    >(async () => {
+      fallbackNetworkAttempt += 1
+      if (fallbackNetworkAttempt === 1) {
+        return new Response('expired before cache lookup', { status: 403 })
+      }
+      throw new Error('cache lookup unavailable')
+    })
+    const fallbackNetworkHarness = createHarness(fallbackNetworkFetch)
+    await expect(fallbackNetworkHarness.inspection.inspect({
+      encoding: 'utf8',
+      resourceId: 'resource-opaque',
+      tabId: 'tab-1',
+    })).resolves.toMatchObject({
+      body: '',
+      status: 403,
+    })
+    expect(fallbackNetworkFetch).toHaveBeenCalledTimes(2)
+
+    const mpdFetch = vi.fn<(url: string, init: RequestInit) => Promise<Response>>(async () => (
+      new Response('expired MPD', { status: 403 })
+    ))
+    const mpdHarness = createHarness(mpdFetch, 1024, {
+      ext: 'mpd',
+      mimeType: 'application/dash+xml',
+      name: 'stream.mpd',
+      url: 'https://media.example/stream.mpd',
+    })
+    await expect(mpdHarness.inspection.inspect({
+      encoding: 'utf8',
+      resourceId: 'resource-opaque',
+      tabId: 'tab-1',
+    })).resolves.toMatchObject({
+      body: 'expired MPD',
+      status: 403,
+    })
+    expect(mpdFetch).toHaveBeenCalledOnce()
   })
 
   it('cancels the response stream at the main-owned byte budget', async () => {

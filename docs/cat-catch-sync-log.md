@@ -535,6 +535,20 @@
 - legacy cleanup: 无；旧 HLS dispatch/downloader/recorder 仍保留到 cutover 证据完整。
 - validation: 定向 HLS/shutdown Vitest 37/37、仓库级 lint、TypeScript、`cat-catch:validate`、同步校验 16/16 和 scoped diff check 通过；完整 build 未运行，避免覆盖其他 Agent 正在修改的 `dist-electron/**`。
 
+## 2026-08-27: same target (one-shot HLS manifest cache fallback)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动。
+- reviewedThrough / portedThrough: 均保持 `null`；本步完成 cache/disguised-fragment 能力的代码证据，但 hls-engine unit 仍未 cutover。
+- change groups: `behavioral`（首次 HLS manifest HTTP 失败后同 URL `force-cache` 一次）与 `platform-adaptation`（opaque authority / Electron Session fetch）。
+- affected capability IDs: `hls.cache-fallback-disguised-fragments` 从 `porting` 进入 `ported-unverified`；`hls.live-recording` 保持 `porting`。
+- fixtures/tests: `hls.manifest-force-cache-fallback` 覆盖 captured inspection 的 403 -> force-cache 200、main-owned header 保留、cached failure 不循环、response-less network error 与 MPD 不回退；`hls.live-manifest-force-cache-fallback` 覆盖只有 live 初次 manifest 请求回退，分片请求不携带 cache mode。
+- accepted difference: Cat Catch 通过 content script 使用页面缓存；OmniFlow 通过 captured tab 的 Electron Session 与 main-owned authority 请求相同资源，不把 URL、headers 或 cache policy 交给 renderer。
+- excluded changes and reasons: 不拦截 ffmpeg 内部的网络直拉，也不对 MPD、分片、后续 live poll 或无响应网络异常增加重试。
+- unresolved gaps: 真实网站手工验证、直拉/track authority、完整 parser、生产 decrypt、renderer listener recovery 和非 HLS ffmpeg owner。
+- runtime changes: 新增固定语义的 HLS cache fallback port；captured-resource access 可接收 main-only cache mode；inspection 自动识别 HLS，live recorder 只在 initial poll 启用一次，fallback 失败保留原 HTTP 结果。
+- legacy cleanup: 无；旧 HLS dispatch/downloader/recorder 仍保留到 cutover 证据完整。
+- validation: 完整相关 HLS/inspection Vitest 42/42、access redirect Vitest 3/3（允许 loopback 的环境）、TypeScript、scoped ESLint、`cat-catch:validate`、同步校验 16/16、台账计数和 scoped diff check 通过。最终全仓 lint 仅被其他 Agent 正在编辑的 `agent-orchestrator.test.ts` 两个未使用参数阻断，本切片实现完成后曾通过全仓 lint；完整 build 不运行，避免覆盖其他 Agent 正在修改的 `dist-electron/**`。
+
 ## Template
 
 ```markdown

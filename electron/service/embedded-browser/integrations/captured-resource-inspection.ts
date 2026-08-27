@@ -2,6 +2,9 @@ import type {
   CapturedResourceAccessService,
   CapturedResourceFetchResult,
 } from './captured-resource-access'
+import {
+  fetchHlsManifestWithForceCacheFallback,
+} from '../cat-catch-port/hls/cache-fallback'
 
 const DEFAULT_MAX_INSPECTION_BYTES = 4 * 1024 * 1024
 
@@ -47,6 +50,19 @@ function normalizeMaximumBytes(value: unknown) {
   return Number.isFinite(normalized) && normalized > 0
     ? normalized
     : DEFAULT_MAX_INSPECTION_BYTES
+}
+
+function isHlsManifestResource(
+  resource: CapturedResourceFetchResult['resource'],
+) {
+  if (resource.kind !== 'manifest') return false
+  const extension = String(resource.ext || '').trim().toLowerCase()
+  const mimeType = String(resource.mimeType || '').trim().toLowerCase()
+  const url = String(resource.url || '').trim().toLowerCase()
+  return extension === 'm3u8'
+    || extension === 'm3u'
+    || mimeType.includes('mpegurl')
+    || /\.m3u8?(?:$|[?#])/.test(url)
 }
 
 async function readBoundedBody(response: Response, maxBytes: number) {
@@ -109,11 +125,29 @@ export class CapturedResourceInspectionService {
       throw new Error('Captured resource inspection request is invalid')
     }
 
-    const result = await this.options.access.fetch({
+    let result = await this.options.access.fetch({
       purpose: 'resource-inspection',
       resourceId,
       tabId,
     })
+    if (!result.response.ok && isHlsManifestResource(result.resource)) {
+      result = {
+        ...result,
+        response: await fetchHlsManifestWithForceCacheFallback({
+          fetch: async (_url, init) => {
+            const cached = await this.options.access.fetch({
+              cache: init?.cache,
+              purpose: 'resource-inspection',
+              resourceId,
+              tabId,
+            })
+            return cached.response
+          },
+          initialResponse: result.response,
+          url: result.resource.url,
+        }),
+      }
+    }
     const body = await readBoundedBody(result.response, this.maxBytes)
     const contentType = normalizeIdentifier(result.response.headers.get('content-type')) || undefined
     return {
