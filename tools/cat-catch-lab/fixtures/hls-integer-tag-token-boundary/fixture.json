@@ -1,0 +1,23 @@
+{
+  "fixtureId": "hls-integer-tag-token-boundary",
+  "capabilityIds": [
+    "hls.parser-planner"
+  ],
+  "upstreamCommit": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
+  "status": "active",
+  "oracle": "upstream-executable",
+  "sourceRefs": [
+    "lib/hls.min.js#parseLevelPlaylist Qr unsigned integer branch",
+    "lib/hls.min.js#LevelKey.getDecryptData"
+  ],
+  "inputs": {
+    "fallback": "signed-fallback.m3u8",
+    "missingTarget": "signed-target-only.m3u8",
+    "prefix": "numeric-prefix.m3u8",
+    "recovered": "signed-before-valid.m3u8"
+  },
+  "expected": "expected.json",
+  "testRefs": [
+    "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.integer-tag-token-boundary"
+  ]
+}

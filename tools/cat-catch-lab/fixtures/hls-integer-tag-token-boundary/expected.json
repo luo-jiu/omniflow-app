@@ -1,0 +1,31 @@
+{
+  "baseUrlRoot": "https://media.example/numeric/",
+  "missingTargetError": "Missing Target Duration",
+  "outputs": {
+    "fallback": {
+      "discontinuityCount": 1,
+      "iv": "0x00000000000000000000000000000000",
+      "mediaSequence": 0,
+      "sequence": 0,
+      "title": "fallback",
+      "url": "https://media.example/numeric/fallback.ts"
+    },
+    "prefix": {
+      "discontinuityCount": 2,
+      "iv": "0x0000000000000000000000000000000a",
+      "mediaSequence": 10,
+      "sequence": 10,
+      "title": "prefix",
+      "url": "https://media.example/numeric/prefix.ts"
+    },
+    "recovered": {
+      "discontinuityCount": 2,
+      "iv": "0x0000000000000000000000000000000a",
+      "mediaSequence": 10,
+      "sequence": 10,
+      "title": "recovered",
+      "url": "https://media.example/numeric/recovered.ts"
+    }
+  },
+  "targetDuration": 4
+}

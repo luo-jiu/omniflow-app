@@ -114,6 +114,29 @@ const valuedTagExpected = JSON.parse(readFileSync(`${valuedTagFixtureRoot}/${val
   }>
   targetDuration: number
 }
+const integerTagFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-integer-tag-token-boundary', import.meta.url))
+const integerTagFixture = JSON.parse(readFileSync(`${integerTagFixtureRoot}/fixture.json`, 'utf8')) as {
+  expected: string
+  inputs: {
+    fallback: string
+    missingTarget: string
+    prefix: string
+    recovered: string
+  }
+}
+const integerTagExpected = JSON.parse(readFileSync(`${integerTagFixtureRoot}/${integerTagFixture.expected}`, 'utf8')) as {
+  baseUrlRoot: string
+  missingTargetError: string
+  outputs: Record<'fallback' | 'prefix' | 'recovered', {
+    discontinuityCount: number
+    iv: string
+    mediaSequence: number
+    sequence: number
+    title: string
+    url: string
+  }>
+  targetDuration: number
+}
 const mediaStructureExpected = JSON.parse(readFileSync(`${mediaStructureFixtureRoot}/${mediaStructureFixture.expected}`, 'utf8')) as Record<string, string>
 
 const mapByteRangeFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-map-byterange-independent', import.meta.url))
@@ -881,6 +904,54 @@ describe('Cat Catch HLS parser', () => {
       sequence: segment.sequence,
       url: segment.url,
     })))
+  })
+
+  it('hls.integer-tag-token-boundary', () => {
+    for (const name of ['fallback', 'prefix', 'recovered'] as const) {
+      const expectedOutput = integerTagExpected.outputs[name]
+      const manifest = parseHlsManifest({
+        baseUrl: `${integerTagExpected.baseUrlRoot}${name}.m3u8`,
+        text: readFileSync(`${integerTagFixtureRoot}/${integerTagFixture.inputs[name]}`, 'utf8'),
+      })
+      expect(manifest).toMatchObject({
+        discontinuityCount: expectedOutput.discontinuityCount,
+        mediaSequence: expectedOutput.mediaSequence,
+        targetDuration: integerTagExpected.targetDuration,
+      })
+      expect(manifest.segments).toHaveLength(1)
+      expect(manifest.segments[0]).toMatchObject({
+        discontinuitySequence: expectedOutput.discontinuityCount,
+        key: {
+          iv: expectedOutput.iv,
+          url: `${integerTagExpected.baseUrlRoot}key.bin`,
+        },
+        sequence: expectedOutput.sequence,
+        title: expectedOutput.title,
+        url: expectedOutput.url,
+      })
+
+      const plan = createEmbeddedBrowserHlsDownloadPlan({
+        manifest,
+        manifestUrl: `${integerTagExpected.baseUrlRoot}${name}.m3u8`,
+      })
+      expect(plan.fragments[0]).toMatchObject({
+        discontinuitySequence: expectedOutput.discontinuityCount,
+        key: {
+          iv: expectedOutput.iv,
+          url: `${integerTagExpected.baseUrlRoot}key.bin`,
+        },
+        sequence: expectedOutput.sequence,
+        url: expectedOutput.url,
+      })
+    }
+
+    expect(() => parseHlsManifest({
+      baseUrl: `${integerTagExpected.baseUrlRoot}missing-target.m3u8`,
+      text: readFileSync(
+        `${integerTagFixtureRoot}/${integerTagFixture.inputs.missingTarget}`,
+        'utf8',
+      ),
+    })).toThrow(integerTagExpected.missingTargetError)
   })
 
   it('normalizes integer media tags like pinned hls.js', () => {

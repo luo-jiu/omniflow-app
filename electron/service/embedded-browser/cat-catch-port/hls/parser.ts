@@ -185,6 +185,13 @@ function parseInteger(value?: string) {
   return Number.isFinite(parsed) ? parsed : undefined
 }
 
+function parseHlsUnsignedIntegerTag(line: string, tag: string) {
+  const prefix = `#EXT-X-${tag}:`
+  if (!line.startsWith(prefix)) return undefined
+  const match = /^ *(\d+)/.exec(line.slice(prefix.length))
+  return match ? Number.parseInt(match[1], 10) : undefined
+}
+
 function parseBoolean(value?: string) {
   const normalizedValue = String(value || '').trim().toUpperCase()
   if (normalizedValue === 'YES') return true
@@ -690,6 +697,7 @@ export function parseHlsManifest(input: {
   let playlistVersion: number | undefined
   let playlistType: string | undefined
   let hasEndList = false
+  let initialDiscontinuitySequence = 0
   let discontinuitySequence = 0
   let serverControlSeen = false
   let partTarget = 0
@@ -791,33 +799,30 @@ export function parseHlsManifest(input: {
       if (rendition) renditions.push(rendition)
       continue
     }
-    if (line.startsWith('#EXT-X-MEDIA-SEQUENCE:')) {
+    const parsedMediaSequence = parseHlsUnsignedIntegerTag(line, 'MEDIA-SEQUENCE')
+    if (parsedMediaSequence !== undefined) {
       if (mediaSequence !== 0) {
         assignMultipleMediaPlaylistTagError(variableState, 'MEDIA-SEQUENCE', line)
       } else if (segments.length > 0) {
         assignTagMustPrecedeSegmentsError(variableState, 'MEDIA-SEQUENCE', line)
       }
-      mediaSequence = parseInteger(getTagValue(line)) || 0
+      mediaSequence = parsedMediaSequence
       continue
     }
-    if (line.startsWith('#EXT-X-TARGETDURATION:')) {
+    const parsedTargetDuration = parseHlsUnsignedIntegerTag(line, 'TARGETDURATION')
+    if (parsedTargetDuration !== undefined) {
       if (targetDuration !== undefined) {
         assignMultipleMediaPlaylistTagError(variableState, 'TARGETDURATION', line)
       }
-      const parsedTargetDuration = parseInteger(getTagValue(line))
-      targetDuration = parsedTargetDuration === undefined
-        ? undefined
-        : Math.max(parsedTargetDuration, 1)
+      targetDuration = Math.max(parsedTargetDuration, 1)
       continue
     }
-    if (line.startsWith('#EXT-X-VERSION:')) {
-      const parsedVersion = parseInteger(getTagValue(line))
-      if (parsedVersion !== undefined) {
-        if (playlistVersion !== undefined) {
-          assignMultipleMediaPlaylistTagError(variableState, 'VERSION', line)
-        }
-        playlistVersion = parsedVersion
+    const parsedVersion = parseHlsUnsignedIntegerTag(line, 'VERSION')
+    if (parsedVersion !== undefined) {
+      if (playlistVersion !== undefined) {
+        assignMultipleMediaPlaylistTagError(variableState, 'VERSION', line)
       }
+      playlistVersion = parsedVersion
       continue
     }
     if (line.startsWith('#EXT-X-PLAYLIST-TYPE:')) {
@@ -891,13 +896,17 @@ export function parseHlsManifest(input: {
       }
       continue
     }
-    if (line.startsWith('#EXT-X-DISCONTINUITY-SEQUENCE:')) {
-      if (discontinuitySequence !== 0) {
+    const parsedDiscontinuitySequence = parseHlsUnsignedIntegerTag(
+      line,
+      'DISCONTINUITY-SEQUENCE',
+    )
+    if (parsedDiscontinuitySequence !== undefined) {
+      if (initialDiscontinuitySequence !== 0) {
         assignMultipleMediaPlaylistTagError(variableState, 'DISCONTINUITY-SEQUENCE', line)
       } else if (segments.length > 0) {
         assignTagMustPrecedeSegmentsError(variableState, 'DISCONTINUITY-SEQUENCE', line)
       }
-      discontinuitySequence = parseInteger(getTagValue(line)) || 0
+      initialDiscontinuitySequence = discontinuitySequence = parsedDiscontinuitySequence
       continue
     }
     if (line.startsWith('#EXT-X-DISCONTINUITY')) {

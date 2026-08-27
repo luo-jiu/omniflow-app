@@ -899,6 +899,20 @@
 - legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
 - validation: 固定 Cat Catch vendor executable oracle 输出 3 个 fragment，保持 `sn=10/11/12`、`cc=0/1/1`、同 AES key/init MAP、逐 sequence IV、target duration `4`、总时长 `8` 且无 variant；失败证据为 parser `27/28`，未知 sequence 后缀触发错误。实现后 parser `28/28`、完整 HLS 集合 `85/85`、全仓 ESLint、fixture/capability JSON、轻量 validator、固定上游校验、同步校验 `16/16`、metadata `7 units / 32 capabilities / 194 anchors / 106 cleanup entries / 135 planned IDs / 89 active refs` 和 scoped diff check 通过。全量 Vitest 在沙箱内为 `1148 passed / 3 skipped / 16 loopback EPERM / 3 Agent Shell failures`；4 个 loopback 文件在沙箱外复跑 `20/20`，折算唯一测试为 `1164 passed / 3 skipped / 3 Agent Shell failures`。TypeScript 仅被其他 Agent 在途的 `agent-media-artifact-store.ts` 与 `agent-orchestrator.test.ts` 4 个错误阻断；完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
 
+## 2026-08-28: same target (HLS integer tag token boundary)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，固定实际 vendor 为 hls.js `1.6.16`。
+- reviewedThrough / portedThrough: 均保持 `null`；本步闭合整数媒体标签的首 token 词法边界及 initial/current discontinuity sequence 分离，仍未完成 hls-engine cutover。
+- change groups: `behavioral`（固定 `Qr` 无符号整数分支）与 `state-model`（分开维护 startCC/current cc）。
+- affected capability IDs: `hls.parser-planner` 保持 `ported-unverified`；新增 1 个 active test ID，固定上游 anchor 不变。
+- fixtures/tests: 新增 upstream-executable fixture `hls-integer-tag-token-boundary`；`hls.integer-tag-token-boundary` 覆盖正负号不进入整数分支、数字尾随文本保留整数前缀、非法 discontinuity sequence 落入无值前缀分支、后续合法 sequence 恢复，以及 signed-only target duration 拒绝，并断言 AES implicit IV 和 download plan sequence。
+- accepted difference: 无。`DISCONTINUITY-SEQUENCE:-3` 未命中整数分支后按固定无值 `DISCONTINUITY` 前缀令 current cc 加一；合法后续 sequence 仍可写入独立 startCC/current cc。
+- excluded changes and reasons: 不扩展到 BITRATE 等 Cat Catch 下载对象不消费的播放 metadata，不新增 IPC、renderer 状态或 parser 框架。
+- unresolved gaps: HLS 其余真正影响下载的 parser 差分、live 未捕获 URL 过渡 DTO、加密 fMP4/video 真实输出组合、真实网站手工验证和最终 hls-engine cutover。
+- runtime changes: pure parser 对 `MEDIA-SEQUENCE/TARGETDURATION/VERSION/DISCONTINUITY-SEQUENCE` 使用固定 `: *(\d+)` 词法边界；initial discontinuity sequence 与遍历中的 current cc 分离，sequence 继续贯穿 AES implicit IV 和 download plan。
+- legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
+- validation: 固定 Cat Catch vendor executable oracle 输出 recovered/prefix 的 `startSN=10 / startCC=2 / cc=2 / target=4`、fallback 的 `startSN=0 / startCC=0 / cc=1 / target=4`，signed-only target 报 `Missing Target Duration`；失败证据先后为 parser `28/29`（错误接受 signed sequence）和 `28/29`（startCC/current cc 未分离）。实现后 parser `29/29`、完整 HLS 集合 `86/86`、TypeScript、全仓 ESLint、fixture/capability JSON、轻量 validator、固定上游校验、同步校验 `16/16`、metadata `7 units / 32 capabilities / 194 anchors / 106 cleanup entries / 136 planned IDs / 90 active refs` 和 scoped diff check 通过。排除已由 `node --test` 单独执行的同步文件后，全量 Vitest 在沙箱内为 `1155 passed / 3 skipped / 16 loopback EPERM`；4 个 loopback 文件在沙箱外复跑 `20/20`，折算全部可执行测试为 `1171 passed / 3 skipped`。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
+
 ## Template
 
 ```markdown

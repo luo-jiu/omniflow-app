@@ -796,7 +796,8 @@
         "hls.key-iv-normalization",
         "hls.delta-playlist-rejection",
         "hls.media-playlist-singleton-tag-rejection",
-        "hls.valued-tag-boundary"
+        "hls.valued-tag-boundary",
+        "hls.integer-tag-token-boundary"
       ],
       "testRefs": [
         "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.parser-core",
@@ -823,7 +824,8 @@
         "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.key-iv-normalization",
         "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.delta-playlist-rejection",
         "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.media-playlist-singleton-tag-rejection",
-        "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.valued-tag-boundary"
+        "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.valued-tag-boundary",
+        "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.integer-tag-token-boundary"
       ],
       "acceptedDifferences": [
         "Pinned hls.js records the first variable parsing error on the playlist and its evented loader rejects that parse; the synchronous OmniFlow facade throws the same first error because it has no loader event boundary.",
