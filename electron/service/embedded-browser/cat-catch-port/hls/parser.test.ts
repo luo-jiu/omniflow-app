@@ -104,6 +104,25 @@ const mapByteRangeExpected = JSON.parse(readFileSync(`${mapByteRangeFixtureRoot}
   segmentMapOffsets: number[]
 }
 
+const mapLeadingByteRangeFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-map-leading-byterange-transfer', import.meta.url))
+const mapLeadingByteRangeFixture = JSON.parse(readFileSync(`${mapLeadingByteRangeFixtureRoot}/fixture.json`, 'utf8')) as {
+  expected: string
+  input: string
+}
+const mapLeadingByteRangePlaylist = readFileSync(`${mapLeadingByteRangeFixtureRoot}/${mapLeadingByteRangeFixture.input}`, 'utf8')
+const mapLeadingByteRangeExpected = JSON.parse(readFileSync(`${mapLeadingByteRangeFixtureRoot}/${mapLeadingByteRangeFixture.expected}`, 'utf8')) as {
+  baseUrl: string
+  maps: Array<{ length: number | null; offset: number | null; url: string }>
+  segments: Array<{
+    length: number
+    mapLength: number | null
+    mapOffset: number | null
+    offset: number
+    sequence: number
+    url: string
+  }>
+}
+
 const aesIvFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-aes128-iv-semantics', import.meta.url))
 const aesIvFixture = JSON.parse(readFileSync(`${aesIvFixtureRoot}/fixture.json`, 'utf8')) as {
   expected: string
@@ -294,6 +313,50 @@ describe('Cat Catch HLS parser', () => {
     }))).toEqual(mapByteRangeExpected.maps)
     expect(manifest.segments.map(segment => segment.map?.byteRange?.offset))
       .toEqual(mapByteRangeExpected.segmentMapOffsets)
+  })
+
+  it('hls.map-leading-byterange-transfer', () => {
+    const manifest = parseHlsManifest({
+      baseUrl: mapLeadingByteRangeExpected.baseUrl,
+      text: mapLeadingByteRangePlaylist,
+    })
+    expect(manifest.maps.map(map => ({
+      length: map.byteRange?.length || null,
+      offset: map.byteRange?.offset ?? null,
+      url: map.url,
+    }))).toEqual(mapLeadingByteRangeExpected.maps)
+    expect(manifest.segments.map(segment => ({
+      length: segment.byteRange?.length,
+      mapLength: segment.map?.byteRange?.length || null,
+      mapOffset: segment.map?.byteRange?.offset ?? null,
+      offset: segment.byteRange?.offset,
+      sequence: segment.sequence,
+      url: segment.url,
+    }))).toEqual(mapLeadingByteRangeExpected.segments)
+
+    const plan = createEmbeddedBrowserHlsDownloadPlan({
+      manifest,
+      manifestUrl: mapLeadingByteRangeExpected.baseUrl,
+    })
+    expect(plan.fragments.map(fragment => ({
+      mapLength: fragment.initSegment?.byteRange?.length || null,
+      mapOffset: fragment.initSegment?.byteRange?.offset ?? null,
+    }))).toEqual(mapLeadingByteRangeExpected.segments.map(segment => ({
+      mapLength: segment.mapLength,
+      mapOffset: segment.mapOffset,
+    })))
+
+    const emptyMapRange = parseHlsManifest({
+      baseUrl: mapLeadingByteRangeExpected.baseUrl,
+      text: mapLeadingByteRangePlaylist.replace(
+        '#EXT-X-MAP:URI="shared.mp4"',
+        '#EXT-X-MAP:URI="shared.mp4",BYTERANGE=""',
+      ),
+    })
+    expect(emptyMapRange.maps[0]?.byteRange).toMatchObject({
+      length: 720,
+      offset: 0,
+    })
   })
 
   it('hls.aes128-effective-iv', () => {

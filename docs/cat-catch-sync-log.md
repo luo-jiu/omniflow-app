@@ -787,6 +787,20 @@
 - legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
 - validation: 固定 vendor executable oracle 先输出 `MANIFEST_LOADED sessionKeys=1 / emeEnabled=false`，随后 child `LEVEL_LOADED` fragment 为 `encrypted=false / decryptdata=null`；session-key 先于对应 `EXT-X-DEFINE` 时输出 fatal `manifestParsingError`。失败证据为 parser 20/21，实现后 parser 21/21、parser/authority 25/25、广义 HLS Vitest 75/75、全仓 ESLint、TypeScript、`cat-catch:validate`、同步校验 16/16、fixture JSON、metadata 7 units/32 capabilities/192 anchors/106 cleanup entries/126 unique planned IDs/80 active refs 和 scoped diff check 通过。全量 Vitest 为 1097 passed / 1 skipped / 16 sandbox-only loopback failures，4 个相关 loopback 文件在允许监听本机端口的环境复跑 20/20，通过后折算全部可执行测试为 1113 passed / 1 skipped；Node 专用同步 validator 被 Vitest 收集后另报告 no suite。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
 
+## 2026-08-28: same target (HLS MAP leading BYTERANGE transfer)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动。
+- reviewedThrough / portedThrough: 均保持 `null`；本步闭合固定 hls.js 1.6.16 中独立 BYTERANGE 到 MAP/media 下载请求的绑定边界，仍未完成 hls-engine cutover。
+- change groups: `behavioral`（MAP init Range 与 media Range 绑定）和 `explicit-exclusion`（不投影只服务播放的其他 parser metadata）。
+- affected capability IDs: `hls.parser-planner` 保持 `ported-unverified`；新增 1 个 active test ID。
+- fixtures/tests: 新增 upstream-executable fixture `hls-map-leading-byterange-transfer`；`hls.map-leading-byterange-transfer` 覆盖正时长 `EXTINF` 前的独立 BYTERANGE 同时绑定 MAP/下一 media fragment、该 range 省略 offset 时继承 previous fragment end、空 MAP BYTERANGE 仍沿用前置 range、正时长 `EXTINF` 后的 MAP 不接收 media range，以及 download plan 继续携带相同 init segment range。
+- accepted difference: 固定 hls.js 对无有效 range 的 init segment 暴露空 `byteRange` 数组，OmniFlow 省略可选字段；Cat Catch 只在数组长度为 2 时设置 Range，OmniFlow 只在字段存在时设置 Range，最终请求相同。
+- excluded changes and reasons: 不新增 program-date-time、daterange、gap、bitrate、preload-hint、rendition-report 或 independent-segments DTO；本步只迁移会改变 Cat Catch init/media 下载 URL 或 Range 的行为。
+- unresolved gaps: HLS 其余真正影响下载的 parser 差分、真正有 previous snapshot 的 delta recording、live 未捕获 URL 过渡 DTO、加密 fMP4/video 真实输出组合、真实网站手工验证和最终 hls-engine cutover。
+- runtime changes: pure parser 在尚无正时长 `EXTINF` 且 MAP 自身没有非空 BYTERANGE 时，先按 previous fragment end 补齐待处理独立 range 的省略 offset，再复制给 MAP；同一待处理 range 仍保留给下一 media fragment。MAP 自身的非空 range 和正时长 `EXTINF` 后的 media range 继续遵循原有独立规则。
+- legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
+- validation: 固定 vendor executable oracle 对精确 fixture 输出首个 init/media range `[0,720]`、第二个 init empty range 与 media `[720,1720]`，以及省略 offset 的第三个 init/media range `[1720,2320]`；失败证据为 parser 21/22，实现后 parser 22/22、广义 HLS/inspection/projection Vitest 82/82、全仓 ESLint、TypeScript、`cat-catch:validate`、同步校验 16/16、fixture JSON 和 metadata 7 units/32 capabilities/192 anchors/106 cleanup entries/127 unique planned IDs/81 active refs 通过。全量 Vitest 为 1100 passed / 3 skipped / 16 sandbox-only loopback failures，4 个相关 loopback 文件在允许监听本机端口的环境复跑 20/20，通过后折算全部可执行测试为 1116 passed / 3 skipped；Node 专用同步 validator 被 Vitest 收集后另报告 no suite。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
+
 ## Template
 
 ```markdown

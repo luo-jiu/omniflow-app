@@ -1,0 +1,46 @@
+{
+  "baseUrl": "https://media.example/hls-map-leading/playlist.m3u8",
+  "maps": [
+    {
+      "length": 720,
+      "offset": 0,
+      "url": "https://media.example/hls-map-leading/shared.mp4"
+    },
+    {
+      "length": null,
+      "offset": null,
+      "url": "https://media.example/hls-map-leading/late-init.mp4"
+    },
+    {
+      "length": 600,
+      "offset": 1720,
+      "url": "https://media.example/hls-map-leading/rolling-init.mp4"
+    }
+  ],
+  "segments": [
+    {
+      "length": 720,
+      "mapLength": 720,
+      "mapOffset": 0,
+      "offset": 0,
+      "sequence": 0,
+      "url": "https://media.example/hls-map-leading/shared.mp4"
+    },
+    {
+      "length": 1000,
+      "mapLength": null,
+      "mapOffset": null,
+      "offset": 720,
+      "sequence": 1,
+      "url": "https://media.example/hls-map-leading/shared.mp4"
+    },
+    {
+      "length": 600,
+      "mapLength": 600,
+      "mapOffset": 1720,
+      "offset": 1720,
+      "sequence": 2,
+      "url": "https://media.example/hls-map-leading/shared.mp4"
+    }
+  ]
+}

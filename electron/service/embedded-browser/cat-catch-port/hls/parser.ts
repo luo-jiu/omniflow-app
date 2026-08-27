@@ -6,7 +6,8 @@
  * Reason: hls.js carries an omitted media BYTERANGE offset from the immediately
  * previous fragment, while each EXT-X-MAP range is parsed independently.
  * Adaptation: pure parser only; Electron fetching and output stay outside the port.
- * Fixtures: hls.byterange-map-key-discontinuity, hls.map-byterange-independent
+ * Fixtures: hls.byterange-map-key-discontinuity, hls.map-byterange-independent,
+ * hls.map-leading-byterange-transfer
  */
 
 import { createHlsDefaultIv } from './decrypt'
@@ -347,13 +348,17 @@ function createHlsMap(
   line: string,
   baseUrl: string,
   variableState: HlsVariableState,
+  leadingByteRange?: CatCatchHlsByteRange,
 ): CatCatchHlsMap | null {
   const attributes = parseHlsAttributeListWithVariables(getTagValue(line), variableState)
   const uri = attributes.URI
   if (!uri) return null
   const url = resolveHlsUrl(uri, baseUrl)
+  const byteRange = attributes.BYTERANGE
+    ? parseHlsByteRange(attributes.BYTERANGE)
+    : leadingByteRange
   return {
-    byteRange: resolveByteRange(parseHlsByteRange(attributes.BYTERANGE)),
+    byteRange: resolveByteRange(byteRange),
     rawAttributes: attributes,
     rawLine: line,
     uri,
@@ -745,10 +750,16 @@ export function parseHlsManifest(input: {
       continue
     }
     if (line.startsWith('#EXT-X-MAP')) {
+      // Pinned hls.js reuses a preceding EXT-X-BYTERANGE for the MAP only
+      // while no positive EXTINF is pending. It also carries that same range
+      // into the next media fragment, so pendingByteRange remains intact.
       const map = createHlsMap(
         line,
         baseUrl,
         variableState,
+        pendingSegment?.duration
+          ? undefined
+          : resolveByteRange(pendingByteRange, previousSegmentByteRangeEnd),
       )
       if (map) {
         currentMap = map
