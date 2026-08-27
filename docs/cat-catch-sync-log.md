@@ -997,6 +997,20 @@
 - legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
 - validation: 失败证据分别为纯测试无法加载尚不存在的 `segment-query` 模块，以及 hook 集成 `2/4` 因目标 handler 不存在而失败。实现后专项 HLS `75/75`、新增纯/hook/recorder 集合 `13/13`、TypeScript、全仓 ESLint、fixture/capability JSON、轻量 validator、固定上游校验和同步校验 `16/16` 通过；metadata 为 `7 units / 32 capabilities / 201 anchors / 106 cleanup entries / 145 planned IDs / 99 active refs`。全仓 Vitest 在沙箱内除 5 个 loopback 文件外为 `1180 passed / 3 skipped`，5 个文件在允许本机监听后 `23/23`，合计 `1198 passed / 3 skipped`。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
 
+## 2026-08-28: same target (HLS queried independent track merge)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，继续复用固定 Cat Catch `tsAddArg`、master/rendition 与 `parseTs` 行为边界。
+- reviewedThrough / portedThrough: 均保持 `null`；本步只闭合独立音轨与自定义 fragment query 的生产组合，未完成 hls-engine cutover。
+- change groups: `renderer-integration`（组合分流与三个 opaque resource ID）、`main-integration`（master/child authority 与双 local plan）、`lifecycle`（双轨联动取消、进度聚合、隔离 workdir 和清理）。
+- affected capability IDs: `hls.parser-planner` 保持 `ported-unverified`，`hls.segment-pipeline` 保持 `porting`；新增 3 个 active test ID 和 2 个 target ref，不改变上游 anchor。
+- fixtures/tests: 复用 `hls-segment-query-rewrite` 的 fragment-only 三态 expectation；`hls.segment-query-track-plan-integration` 证明 renderer 不再拉取或提交单轨 plan，只提交 master/video/audio resource ID 和 query；`hls.segment-query-track-plan-authority` 证明 main 校验两个 child 均属于 captured master、恢复 `EXT-X-DEFINE` 变量，并让 video/audio child 各自使用独立 protected context；`hls.segment-query-local-track-merge` 证明两条改写后的本地 playlist 进入既有 ffmpeg track merge。附加测试覆盖 child manifest 首次 HTTP 失败时只用同一 authority 执行一次 `force-cache` 回退，以及一轨失败时取消并等待另一轨。
+- accepted difference: Cat Catch 在扩展下载页维护音轨与 fragment 列表；OmniFlow 作为 Electron 平台替代，为 video/audio 建立隔离的本地 playlist/workdir，再交给已有可取消 ffmpeg 双轨 merge。fragment query 的保留/清除/替换以及不修改 key/MAP 的行为不变。
+- excluded changes and reasons: 独立音轨仍不与手动 AES key、自定义线程或分片范围控制混用；不把 query 传给 manifest/key/MAP/外部工具，不把 query 值写入任务日志、安全投影或同步文档。
+- unresolved gaps: HLS 其余真正影响下载的 parser 差分、加密 fMP4/video 与独立双轨的真实输出组合、真实网站手工验证和最终 hls-engine cutover。
+- runtime changes: `downloadHlsTracks` IPC 新增可选 `sourceResourceId / segmentQuery`。字段缺失保持原双 input ffmpeg 直拉；字段为字符串（包括空串）时，main 在同一个 tab/request active task 内验证 master/child、创建两条计划、并行下载到根 workdir 的 `video/audio` 子目录、汇总 bytes/fragments 后合并，最终或失败均删除根 workdir。renderer 仍要求两个 child 已在当前 active snapshot 中捕捉，main 不接受 renderer URL、header 或变量值。
+- legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
+- validation: 失败基线为 authority/local-merge helper 尚不存在，且 hook 集成因旧组合拦截使 `downloadHlsTracks` 调用数为 `0`。实现后新增三文件专项 `14/14`、完整 HLS 集合 `15 files / 101 tests`、TypeScript、全仓 ESLint、capability/fixture JSON、轻量 validator、固定上游 anchor 校验、同步校验 `16/16`、metadata `7 units / 32 capabilities / 201 anchors / 106 cleanup entries / 148 planned IDs / 102 active refs` 和 scoped diff check 通过。全仓 Vitest 在沙箱内除 5 个 loopback 文件及被 Vitest 扫入的 Node test 文件外为 `1195 passed / 3 skipped`；5 个 loopback 文件在允许本机监听后 `23/23`，其中 18 个先前 EPERM 用例转绿，合计唯一 Vitest 用例 `1213 passed / 3 skipped`；Node 同步测试单独 `16/16`。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
+
 ## Template
 
 ```markdown

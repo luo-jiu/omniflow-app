@@ -9,8 +9,10 @@ import {
 import { ResourceStateStore } from '../capture/state/resource-state-store'
 import { CapturedResourceAccessService } from './captured-resource-access'
 import {
+  resolveHlsCapturedMediaPlan,
   resolveHlsLiveParentVariableList,
   resolveHlsManifestAuthority,
+  resolveHlsTrackParentVariableList,
   resolveHlsTrackAuthorities,
 } from './hls-manifest-authority'
 
@@ -230,5 +232,107 @@ describe('HLS manifest authority', () => {
       tabId: 'tab-1',
     })).rejects.toThrow('所选直播 playlist 不属于当前 captured master')
     expect(fetchImpl).toHaveBeenCalledTimes(2)
+  })
+
+  it('hls.segment-query-track-plan-authority', async () => {
+    const masterPlaylist = [
+      '#EXTM3U',
+      '#EXT-X-DEFINE:NAME="token",VALUE="parent-token"',
+      '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",NAME="Main",URI="https://audio.example/track.m3u8"',
+      '#EXT-X-STREAM-INF:BANDWIDTH=1000000,AUDIO="audio"',
+      'https://video.example/track.m3u8',
+    ].join('\n')
+    const childPlaylist = (kind: 'audio' | 'video') => [
+      '#EXTM3U',
+      '#EXT-X-TARGETDURATION:4',
+      '#EXT-X-DEFINE:IMPORT="token"',
+      '#EXT-X-KEY:METHOD=AES-128,URI="key.bin?keep=1"',
+      '#EXT-X-MAP:URI="init.mp4?keep=1"',
+      '#EXTINF:4,',
+      `${kind}-{$token}.ts?old=1`,
+      '#EXT-X-ENDLIST',
+    ].join('\n')
+    const fetchImpl = vi.fn(async (url: string, init: RequestInit) => {
+      const headers = new Headers(init.headers)
+      if (url.includes('origin.example')) {
+        expect(headers.get('authorization')).toBe('Bearer master-secret')
+        return new Response(masterPlaylist)
+      }
+      expect(headers.get('authorization')).toBe(
+        url.includes('audio.example') ? 'Bearer audio-secret' : 'Bearer video-secret',
+      )
+      return new Response(childPlaylist(url.includes('audio.example') ? 'audio' : 'video'))
+    })
+    const harness = createHarness(fetchImpl)
+    const parentVariableList = await resolveHlsTrackParentVariableList(harness.access, {
+      audioManifestUrl: 'https://audio.example/track.m3u8',
+      sourceResourceId: harness.masterResourceId,
+      tabId: 'tab-1',
+      videoManifestUrl: 'https://video.example/track.m3u8',
+    })
+
+    await expect(Promise.all([
+      resolveHlsCapturedMediaPlan(harness.access, {
+        parentVariableList,
+        resourceId: harness.videoResourceId,
+        segmentQuery: 'token=new',
+        tabId: 'tab-1',
+      }),
+      resolveHlsCapturedMediaPlan(harness.access, {
+        parentVariableList,
+        resourceId: harness.audioResourceId,
+        segmentQuery: 'token=new',
+        tabId: 'tab-1',
+      }),
+    ])).resolves.toEqual([
+      expect.objectContaining({
+        plan: expect.objectContaining({
+          fragments: [expect.objectContaining({
+            initSegment: expect.objectContaining({ url: 'https://video.example/init.mp4?keep=1' }),
+            key: expect.objectContaining({ url: 'https://video.example/key.bin?keep=1' }),
+            url: 'https://video.example/video-parent-token.ts?token=new',
+          })],
+        }),
+      }),
+      expect.objectContaining({
+        plan: expect.objectContaining({
+          fragments: [expect.objectContaining({
+            initSegment: expect.objectContaining({ url: 'https://audio.example/init.mp4?keep=1' }),
+            key: expect.objectContaining({ url: 'https://audio.example/key.bin?keep=1' }),
+            url: 'https://audio.example/audio-parent-token.ts?token=new',
+          })],
+        }),
+      }),
+    ])
+    expect(fetchImpl).toHaveBeenCalledTimes(3)
+  })
+
+  it('retries a captured media playlist once with force-cache', async () => {
+    const playlist = [
+      '#EXTM3U',
+      '#EXT-X-TARGETDURATION:4',
+      '#EXTINF:4,',
+      'segment.ts',
+      '#EXT-X-ENDLIST',
+    ].join('\n')
+    const fetchImpl = vi.fn(async (_url: string, init: RequestInit) => {
+      expect(new Headers(init.headers).get('authorization')).toBe('Bearer video-secret')
+      return init.cache === 'force-cache'
+        ? new Response(playlist)
+        : new Response('temporary failure', { status: 503 })
+    })
+    const harness = createHarness(fetchImpl)
+
+    await expect(resolveHlsCapturedMediaPlan(harness.access, {
+      resourceId: harness.videoResourceId,
+      segmentQuery: '',
+      tabId: 'tab-1',
+    })).resolves.toEqual(expect.objectContaining({
+      plan: expect.objectContaining({
+        fragments: [expect.objectContaining({ url: 'https://video.example/segment.ts' })],
+      }),
+    }))
+    expect(fetchImpl).toHaveBeenCalledTimes(2)
+    expect(fetchImpl.mock.calls[1]?.[1].cache).toBe('force-cache')
   })
 })

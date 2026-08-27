@@ -103,6 +103,61 @@ function createStaticHlsRequest(): ToolWorkspaceMediaHlsRequest {
   }
 }
 
+function createMasterTrackHlsRequest(): ToolWorkspaceMediaHlsRequest {
+  const request = createStaticHlsRequest()
+  const manifestUrl = 'https://example.com/master.m3u8'
+  const videoManifestUrl = 'https://example.com/video.m3u8'
+  const audioManifestUrl = 'https://example.com/audio.m3u8'
+  return {
+    ...request,
+    manifest: {
+      ...request.manifest,
+      baseUrl: manifestUrl,
+      isMaster: true,
+      renditions: [{
+        groupId: 'audio-main',
+        name: 'Main audio',
+        rawAttributes: {},
+        rawLine: '#EXT-X-MEDIA',
+        type: 'AUDIO',
+        uri: audioManifestUrl,
+        url: audioManifestUrl,
+      }],
+      variants: [{
+        audioGroupId: 'audio-main',
+        audioGroupIds: ['audio-main'],
+        bandwidth: 1_000_000,
+        rawAttributes: {},
+        rawLine: '#EXT-X-STREAM-INF',
+        uri: videoManifestUrl,
+        url: videoManifestUrl,
+      }],
+    },
+    plan: {
+      ...request.plan,
+      isMaster: true,
+      manifestUrl,
+      renditions: [{
+        groupId: 'audio-main',
+        name: 'Main audio',
+        type: 'AUDIO',
+        url: audioManifestUrl,
+      }],
+      variants: [{
+        audioGroupId: 'audio-main',
+        audioGroupIds: ['audio-main'],
+        bandwidth: 1_000_000,
+        url: videoManifestUrl,
+      }],
+    },
+    resource: {
+      ...request.resource,
+      id: 'master-resource',
+      url: manifestUrl,
+    },
+  }
+}
+
 function renderHlsHook(
   hlsRequest: ToolWorkspaceMediaHlsRequest,
   overrides: Partial<Parameters<typeof useHlsDownloadTask>[0]> = {},
@@ -341,6 +396,71 @@ describe('useHlsDownloadTask task projection recovery', () => {
     })
     expect(apiMocks.downloadEmbeddedBrowserHlsManifest).not.toHaveBeenCalled()
     await vi.waitFor(() => expect(persistOutput).toHaveBeenCalledWith('/tmp/hls-query.mp4'))
+    mount.unmount()
+  })
+
+  it('hls.segment-query-track-plan-integration', async () => {
+    const request = createMasterTrackHlsRequest()
+    apiMocks.listEmbeddedBrowserCapturedResources.mockResolvedValue({
+      captureMode: 'network',
+      incarnation: 1,
+      resources: [
+        {
+          capturedAt: 2,
+          id: 'audio-resource',
+          kind: 'manifest',
+          source: 'network',
+          tabId: 'tab-1',
+          url: 'https://example.com/audio.m3u8',
+        },
+        {
+          capturedAt: 1,
+          id: 'video-resource',
+          kind: 'manifest',
+          source: 'network',
+          tabId: 'tab-1',
+          url: 'https://example.com/video.m3u8',
+        },
+      ],
+      revision: 3,
+      status: 'active',
+      tabId: 'tab-1',
+    })
+    apiMocks.downloadEmbeddedBrowserHlsTracks.mockResolvedValue({
+      ok: true,
+      outputPath: '/tmp/hls-query-tracks.mp4',
+    })
+    const persistOutput = vi.fn().mockResolvedValue(undefined)
+    const mount = renderHlsHook(request, {
+      createOutputTargetSnapshot: async () => ({
+        cleanupOutputDirectory: async () => undefined,
+        outputDirectoryPath: '/tmp/hls-query-track-output',
+        persistOutput,
+      }),
+    })
+
+    act(() => {
+      mount.current.handlers.onSetSelectedHlsVariantUrl('https://example.com/video.m3u8')
+      mount.current.handlers.onSetSelectedHlsAudioRenditionUrl('https://example.com/audio.m3u8')
+      mount.current.handlers.onSetHlsSegmentQueryEnabled(true)
+      mount.current.handlers.onSetHlsSegmentQueryDraft('token=new&expires=9')
+    })
+    act(() => {
+      mount.current.handlers.onSaveHls()
+    })
+
+    await vi.waitFor(() => {
+      expect(apiMocks.downloadEmbeddedBrowserHlsTracks).toHaveBeenCalledTimes(1)
+    })
+    expect(apiMocks.downloadEmbeddedBrowserHlsTracks.mock.calls[0]?.[1]).toEqual(expect.objectContaining({
+      audioResourceId: 'audio-resource',
+      segmentQuery: 'token=new&expires=9',
+      sourceResourceId: 'master-resource',
+      videoResourceId: 'video-resource',
+    }))
+    expect(apiMocks.downloadEmbeddedBrowserHlsPlan).not.toHaveBeenCalled()
+    expect(apiMocks.downloadEmbeddedBrowserHlsManifest).not.toHaveBeenCalled()
+    await vi.waitFor(() => expect(persistOutput).toHaveBeenCalledWith('/tmp/hls-query-tracks.mp4'))
     mount.unmount()
   })
 

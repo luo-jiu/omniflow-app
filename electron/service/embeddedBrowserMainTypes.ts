@@ -171,6 +171,8 @@ export type EmbeddedBrowserHlsTrackMergePayload = {
   ffmpegPath?: string
   outputDirectoryPath?: string
   requestId?: string
+  segmentQuery?: string
+  sourceResourceId?: string
   suggestedFileName?: string
   useSystemSaveDialog?: boolean
   videoResourceId: string

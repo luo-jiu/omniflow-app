@@ -722,11 +722,11 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
       Toast.warning('自定义 key 需要是 16 字节 AES-128，支持 hex 或 base64');
       return;
     }
-    if (selectedHlsAudioRenditionUrl && (normalizedHlsManualKey || hlsSegmentQueryEnabled || hlsUsingCustomThreadCount || hlsUsingFragmentRange)) {
-      Toast.warning('独立音轨合并当前只支持网络 manifest 主链，不和手动 key / 本地 downloader 控制混用');
+    if (selectedHlsAudioRenditionUrl && (normalizedHlsManualKey || hlsUsingCustomThreadCount || hlsUsingFragmentRange)) {
+      Toast.warning('独立音轨合并不和手动 key、线程或分片范围控制混用');
       return;
     }
-    const shouldUseLocalPlanForControls = hlsSegmentQueryEnabled
+    const shouldUseLocalPlanForControls = (!selectedHlsAudioRenditionUrl && hlsSegmentQueryEnabled)
       || (hlsCanTuneLocalDownloader && (hlsUsingCustomThreadCount || hlsUsingFragmentRange));
     let effectivePlan = applyEmbeddedBrowserHlsSegmentQuery(hlsRequest.plan, hlsSegmentQuery);
     if (hlsCanTuneLocalDownloader && (hlsUsingCustomThreadCount || hlsUsingFragmentRange)) {
@@ -744,10 +744,11 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
     const shouldResolveMasterVariantToLocalPlan = Boolean(
       hlsRequest.plan.isMaster
       && (normalizedHlsManualKey || hlsSegmentQueryEnabled)
+      && !selectedHlsAudioRenditionUrl
       && selectedHlsVariantUrl
       && /^https?:\/\//i.test(selectedHlsVariantUrl),
     );
-    if (hlsRequest.plan.isMaster && (normalizedHlsManualKey || hlsSegmentQueryEnabled) && !shouldResolveMasterVariantToLocalPlan) {
+    if (hlsRequest.plan.isMaster && (normalizedHlsManualKey || hlsSegmentQueryEnabled) && !selectedHlsAudioRenditionUrl && !shouldResolveMasterVariantToLocalPlan) {
       Toast.warning('master playlist 使用本地下载控制时，先明确选择一个具体变体');
       return;
     }
@@ -776,23 +777,27 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
         effectiveManifestUrl = resolvedVariant.plan.manifestUrl;
         effectiveVideoManifestUrl = resolvedVariant.plan.manifestUrl;
       }
-      const shouldUseDirectManifestTrackMerge = Boolean(
+      const shouldUseManifestTrackMerge = Boolean(
         selectedHlsAudioRenditionUrl
         && /^https?:\/\//i.test(effectiveVideoManifestUrl)
         && /^https?:\/\//i.test(selectedHlsAudioRenditionUrl)
         && !normalizedHlsManualKey
         && !shouldUseLocalPlanForControls
       );
+      const shouldUseLocalTrackPlan = shouldUseManifestTrackMerge && hlsSegmentQueryEnabled;
       const shouldUseDirectManifestDownload = /^https?:\/\//i.test(effectiveManifestUrl)
         && !normalizedHlsManualKey
         && !shouldUseLocalPlanForControls
-        && !shouldUseDirectManifestTrackMerge;
+        && !shouldUseManifestTrackMerge;
+      const taskMode = shouldUseDirectManifestDownload || (shouldUseManifestTrackMerge && !shouldUseLocalTrackPlan)
+        ? 'direct-manifest'
+        : 'local-plan';
       let directManifestResourceId: string | null = null;
       let directTrackResourceIds: {
         audioResourceId: string;
         videoResourceId: string;
       } | null = null;
-      if (shouldUseDirectManifestDownload || shouldUseDirectManifestTrackMerge) {
+      if (shouldUseDirectManifestDownload || shouldUseManifestTrackMerge) {
         const snapshot = await listEmbeddedBrowserCapturedResources(hlsRequest.resource.tabId);
         directManifestResourceId = shouldUseDirectManifestDownload
           ? resolveCapturedHlsManifestResourceId(
@@ -801,7 +806,7 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
             effectiveManifestUrl,
           )
           : null;
-        directTrackResourceIds = shouldUseDirectManifestTrackMerge
+        directTrackResourceIds = shouldUseManifestTrackMerge
           ? resolveCapturedHlsTrackResourceIds(snapshot, {
             audioManifestUrl: selectedHlsAudioRenditionUrl,
             tabId: hlsRequest.resource.tabId,
@@ -810,7 +815,7 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
           : null;
         if (
           (shouldUseDirectManifestDownload && !directManifestResourceId)
-          || (shouldUseDirectManifestTrackMerge && !directTrackResourceIds)
+          || (shouldUseManifestTrackMerge && !directTrackResourceIds)
         ) {
           throw new Error('所选 HLS manifest 尚未被当前页面捕捉，请先在网页中播放对应清晰度或音轨后重试');
         }
@@ -829,21 +834,21 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
         lastOutputPath: undefined,
         logs: [
           createHlsTaskLogEntry({
-            mode: shouldUseDirectManifestDownload || shouldUseDirectManifestTrackMerge ? 'direct-manifest' : 'local-plan',
+            mode: taskMode,
             stage: 'preparing',
             text: '已创建 HLS 处理任务',
           }),
           createHlsTaskLogEntry({
-            mode: shouldUseDirectManifestDownload || shouldUseDirectManifestTrackMerge ? 'direct-manifest' : 'local-plan',
+            mode: taskMode,
             stage: 'preparing',
             text: selectedHlsVariantUrl ? `已选择变体：${hlsSelectedVariantLabel || selectedHlsVariantUrl}` : '当前使用自动变体策略',
           }),
-          ...(shouldUseDirectManifestTrackMerge ? [createHlsTaskLogEntry({
-            mode: 'direct-manifest',
+          ...(shouldUseManifestTrackMerge ? [createHlsTaskLogEntry({
+            mode: taskMode,
             stage: 'preparing',
             text: `已选择独立音轨：${hlsSelectedAudioRendition?.name || hlsSelectedAudioRendition?.language || selectedHlsAudioRenditionUrl}`,
           })] : []),
-          ...(shouldUseLocalPlanForControls ? [createHlsTaskLogEntry({
+          ...(shouldUseLocalPlanForControls || shouldUseLocalTrackPlan ? [createHlsTaskLogEntry({
             mode: 'local-plan',
             stage: 'preparing',
             text: hlsSegmentQueryEnabled
@@ -851,7 +856,7 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
               : `使用下载控制：线程 ${normalizedHlsThreadCount}，分片 #${normalizedHlsRangeStart}-#${normalizedHlsRangeEnd}`,
           })] : []),
         ],
-        mode: shouldUseDirectManifestDownload || shouldUseDirectManifestTrackMerge ? 'direct-manifest' : 'local-plan',
+        mode: taskMode,
         processedSeconds: undefined,
         requestId,
         speedBps: undefined,
@@ -876,12 +881,14 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
         persistOutput: outputTarget.persistOutput,
         requestId,
       };
-      const result = shouldUseDirectManifestTrackMerge
+      const result = shouldUseManifestTrackMerge
         ? await downloadEmbeddedBrowserHlsTracks(hlsRequest.resource.tabId, {
             audioResourceId: directTrackResourceIds!.audioResourceId,
             durationSeconds: effectivePlan.durationSeconds,
             outputDirectoryPath: taskOutputDirectoryPath,
             requestId,
+            segmentQuery: hlsSegmentQuery ?? undefined,
+            sourceResourceId: hlsRequest.resource.id,
             suggestedFileName: deriveHlsOutputFileName(effectiveVideoManifestUrl),
             useSystemSaveDialog: false,
             videoResourceId: directTrackResourceIds!.videoResourceId,
