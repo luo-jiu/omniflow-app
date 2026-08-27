@@ -1,0 +1,28 @@
+{
+  "fixtureId": "hls-media-playlist-singleton-tags",
+  "capabilityIds": [
+    "hls.parser-planner"
+  ],
+  "upstreamCommit": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
+  "status": "active",
+  "oracle": "upstream-executable",
+  "sourceRefs": [
+    "lib/hls.min.js#parseLevelPlaylist VERSION/ENDLIST/SERVER-CONTROL/PART-INF",
+    "js/m3u8.js#Hls.Events.LEVEL_LOADED"
+  ],
+  "allowed": [
+    "singletons.m3u8",
+    "zero-part-target.m3u8",
+    "invalid-version.m3u8"
+  ],
+  "expected": "expected.json",
+  "inputs": [
+    "duplicate-version.m3u8",
+    "duplicate-endlist.m3u8",
+    "duplicate-server-control.m3u8",
+    "duplicate-part-inf.m3u8"
+  ],
+  "testRefs": [
+    "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.media-playlist-singleton-tag-rejection"
+  ]
+}

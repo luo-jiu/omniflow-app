@@ -83,6 +83,13 @@ const mediaStructureFixture = JSON.parse(readFileSync(`${mediaStructureFixtureRo
   expected: string
   inputs: string[]
 }
+
+const singletonTagFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-media-playlist-singleton-tags', import.meta.url))
+const singletonTagFixture = JSON.parse(readFileSync(`${singletonTagFixtureRoot}/fixture.json`, 'utf8')) as {
+  allowed: string[]
+  expected: string
+  inputs: string[]
+}
 const mediaStructureExpected = JSON.parse(readFileSync(`${mediaStructureFixtureRoot}/${mediaStructureFixture.expected}`, 'utf8')) as Record<string, string>
 
 const mapByteRangeFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-map-byterange-independent', import.meta.url))
@@ -406,6 +413,31 @@ describe('Cat Catch HLS parser', () => {
         baseUrl: `https://media.example/${input}`,
         text,
       }), input).toThrow(mediaStructureExpected[input])
+    }
+  })
+
+  it('hls.media-playlist-singleton-tag-rejection', () => {
+    const expected = JSON.parse(readFileSync(`${singletonTagFixtureRoot}/${singletonTagFixture.expected}`, 'utf8')) as Record<string, string>
+    for (const input of singletonTagFixture.inputs) {
+      expect(() => parseHlsManifest({
+        baseUrl: 'https://media.example/singletons/live.m3u8',
+        text: readFileSync(`${singletonTagFixtureRoot}/${input}`, 'utf8'),
+      })).toThrow(expected[input])
+    }
+
+    for (const input of singletonTagFixture.allowed) {
+      const manifest = parseHlsManifest({
+        baseUrl: 'https://media.example/singletons/live.m3u8',
+        text: readFileSync(`${singletonTagFixtureRoot}/${input}`, 'utf8'),
+      })
+      expect(manifest.segments.map(segment => ({
+        sequence: segment.sequence,
+        url: segment.url,
+      }))).toEqual([{
+        sequence: 0,
+        url: 'https://media.example/singletons/segment.ts',
+      }])
+      expect(manifest.isLive).toBe(input !== 'singletons.m3u8')
     }
   })
 

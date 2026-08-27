@@ -745,6 +745,20 @@
 - legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
 - validation: 固定 vendor executable oracle 实际输出 `startSN=4 / skippedSegments=2 / fragments=[null,null,sn6,sn7]`，静态 Cat Catch `parseTs` 证实首个 `.url` 读取；失败证据为 parser 17/18，实现后 parser 18/18、广义 HLS Vitest 82/82、定向 ESLint、fixture 检查、`cat-catch:validate`、同步校验 16/16、metadata 7 units/32 capabilities/192 anchors/106 cleanup entries/122 unique planned IDs/76 active refs 和 scoped diff check 通过。为快速收尾未重复运行全仓 Vitest、ESLint、TypeScript 或会覆盖其他 Agent `dist-electron/**` 的 build，暂无真实网站手工场景。
 
+## 2026-08-28: same target (HLS media singleton tag rejection)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动。
+- reviewedThrough / portedThrough: 均保持 `null`；本步闭合固定 hls.js 1.6.16 media singleton 标签阻止 Cat Catch 下载 listener 执行的结构边界，仍未完成 hls-engine cutover。
+- change groups: `behavioral`（重复 `VERSION`、`ENDLIST`、`SERVER-CONTROL` 和有效 `PART-INF` 拒绝）与 `stability`（把 evented loader 错误映射为稳定同步错误）。
+- affected capability IDs: `hls.parser-planner` 保持 `ported-unverified`；新增 1 个 active test ID。
+- fixtures/tests: 新增 upstream-executable fixture `hls-media-playlist-singleton-tags`；`hls.media-playlist-singleton-tag-rejection` 覆盖四类重复错误、四类 singleton 同时单次出现，以及 invalid VERSION 和 zero PART-TARGET 后接有效标签的接受边界。
+- accepted difference: 固定 hls.js 通过 `levelParsingError` 阻止 `LEVEL_LOADED`；同步 facade 在计划创建前抛相同 reason，不复制 loader event 状态机。只服务播放 reload 的 SERVER-CONTROL/PART-INF/VERSION 数值不扩展进下载 DTO。
+- excluded changes and reasons: 不实现 SERVER-CONTROL reload、RENDITION-REPORT、PRELOAD-HINT、PROGRAM-DATE-TIME/DATERANGE 或 LL-HLS PART 下载；它们不改变 Cat Catch `parseTs(data.details.fragments)` 的当前下载列表。
+- unresolved gaps: HLS 其余 parser 标签差分、真正有 previous snapshot 的 delta recording、DRM 仅识别不下载、live 未捕获 URL 过渡 DTO、加密 fMP4/video 真实输出组合、真实网站手工验证和最终 hls-engine cutover。
+- runtime changes: pure parser 保留 VERSION 是否已解析、ENDLIST live 状态、SERVER-CONTROL 是否出现及 truthy PART-TARGET 四个最小状态，仅用于复刻重复标签错误优先级；`PART-TARGET=0` 或非法值保持上游的非重复边界。
+- legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
+- validation: 固定 vendor executable oracle 对四类重复输入分别输出对应 `levelParsingError` reason，并对三类允许输入进入 `LEVEL_LOADED`；失败证据为 parser 18/19，实现与前缀顺序 review 后 parser 19/19、广义 HLS/inspection/projection Vitest 84/84、全仓 ESLint、`cat-catch:validate`、同步校验 16/16、fixture JSON、metadata 7 units/32 capabilities/192 anchors/106 cleanup entries/123 unique planned IDs/77 active refs 和 scoped diff check 通过。全量 Vitest 为 1089 passed / 1 skipped / 16 sandbox-only loopback failures，4 个相关 loopback 文件在允许监听本机端口的环境复跑 20/20，通过后折算全部可执行测试为 1105 passed / 1 skipped；Node 专用同步 validator 被 Vitest 收集后另报告 no suite。全局 TypeScript 只被其他 Agent 在途的 Shell preparation 与 Agent orchestrator test 类型错误阻断；完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
+
 ## Template
 
 ```markdown

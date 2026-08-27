@@ -1,0 +1,6 @@
+{
+  "duplicate-endlist.m3u8": "#EXT-X-ENDLIST must not appear more than once (#EXT-X-ENDLIST)",
+  "duplicate-part-inf.m3u8": "#EXT-X-PART-INF must not appear more than once (#EXT-X-PART-INF:PART-TARGET=2)",
+  "duplicate-server-control.m3u8": "#EXT-X-SERVER-CONTROL must not appear more than once (#EXT-X-SERVER-CONTROL:HOLD-BACK=12)",
+  "duplicate-version.m3u8": "#EXT-X-VERSION must not appear more than once (#EXT-X-VERSION:7)"
+}

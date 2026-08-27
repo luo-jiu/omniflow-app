@@ -575,9 +575,12 @@ export function parseHlsManifest(input: {
 
   let mediaSequence = 0
   let targetDuration: number | undefined
+  let playlistVersion: number | undefined
   let playlistType: string | undefined
   let hasEndList = false
   let discontinuitySequence = 0
+  let serverControlSeen = false
+  let partTarget = 0
   let skippedSegmentCount = 0
   let currentKeys: Map<string, CatCatchHlsKey> | undefined
   let currentMap: CatCatchHlsMap | undefined
@@ -683,6 +686,16 @@ export function parseHlsManifest(input: {
         : Math.max(parsedTargetDuration, 1)
       continue
     }
+    if (line.startsWith('#EXT-X-VERSION:')) {
+      const parsedVersion = parseInteger(getTagValue(line))
+      if (parsedVersion !== undefined) {
+        if (playlistVersion !== undefined) {
+          assignMultipleMediaPlaylistTagError(variableState, 'VERSION', line)
+        }
+        playlistVersion = parsedVersion
+      }
+      continue
+    }
     if (line.startsWith('#EXT-X-PLAYLIST-TYPE')) {
       if (playlistType !== undefined) {
         assignMultipleMediaPlaylistTagError(variableState, 'PLAYLIST-TYPE', line)
@@ -752,6 +765,15 @@ export function parseHlsManifest(input: {
       pendingSegment = parseExtinf(line)
       continue
     }
+    if (line.startsWith('#EXT-X-PART-INF:')) {
+      if (!getTagValue(line)) continue
+      if (partTarget) {
+        assignMultipleMediaPlaylistTagError(variableState, 'PART-INF', line)
+      }
+      const attributes = parseHlsAttributeList(getTagValue(line))
+      partTarget = Number.parseFloat(attributes['PART-TARGET'] || '')
+      continue
+    }
     if (line.startsWith('#EXT-X-PART')) {
       // Upstream: xifangczy/cat-catch@2cb981d7c2f4614732edccc167c4b5793d1cb138
       // Source: lib/hls.min.js#partList; js/m3u8.js#parseTs(data)
@@ -760,7 +782,20 @@ export function parseHlsManifest(input: {
       // Treating parts as fragments duplicates them once EXTINF is published.
       continue
     }
-    if (line.startsWith('#EXT-X-ENDLIST')) hasEndList = true
+    if (line.startsWith('#EXT-X-SERVER-CONTROL:')) {
+      if (!getTagValue(line)) continue
+      if (serverControlSeen) {
+        assignMultipleMediaPlaylistTagError(variableState, 'SERVER-CONTROL', line)
+      }
+      serverControlSeen = true
+      continue
+    }
+    if (line.startsWith('#EXT-X-ENDLIST')) {
+      if (hasEndList) {
+        assignMultipleMediaPlaylistTagError(variableState, 'ENDLIST', line)
+      }
+      hasEndList = true
+    }
   }
 
   if (hasMediaPlaylistSyntax && targetDuration === undefined) {
