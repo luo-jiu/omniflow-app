@@ -1,0 +1,196 @@
+{
+  "baseUrl": "https://media.example/keys/playlist.m3u8",
+  "keys": [
+    {
+      "keyFormat": null,
+      "method": "AES-128",
+      "url": "https://media.example/keys/identity.key"
+    },
+    {
+      "keyFormat": null,
+      "method": "SAMPLE-AES",
+      "url": "https://media.example/keys/sample.key"
+    },
+    {
+      "keyFormat": null,
+      "method": "AES-256",
+      "url": "https://media.example/keys/aes256.key"
+    },
+    {
+      "keyFormat": null,
+      "method": "AES-256-CTR",
+      "url": "https://media.example/keys/aes256-ctr.key"
+    },
+    {
+      "keyFormat": null,
+      "method": "AES-128",
+      "url": "https://media.example/keys/alternate-full.key"
+    },
+    {
+      "keyFormat": "urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed",
+      "method": "SAMPLE-AES-CTR",
+      "url": "https://media.example/keys/widevine.key"
+    },
+    {
+      "keyFormat": "com.apple.streamingkeydelivery",
+      "method": "SAMPLE-AES",
+      "url": "https://media.example/keys/fairplay.key"
+    },
+    {
+      "keyFormat": "com.microsoft.playready",
+      "method": "SAMPLE-AES-CENC",
+      "url": "https://media.example/keys/playready.key"
+    },
+    {
+      "keyFormat": "org.w3.clearkey",
+      "method": "SAMPLE-AES-CTR",
+      "url": "https://media.example/keys/clearkey.key"
+    }
+  ],
+  "segments": [
+    {
+      "encrypted": false,
+      "iv": null,
+      "keyFormat": null,
+      "method": null,
+      "sequence": 7,
+      "url": "https://media.example/keys/clear.ts"
+    },
+    {
+      "encrypted": true,
+      "iv": "0x00000000000000000000000000000008",
+      "keyFormat": null,
+      "method": "AES-128",
+      "sequence": 8,
+      "url": "https://media.example/keys/identity.ts"
+    },
+    {
+      "encrypted": true,
+      "iv": "0x00000000000000000000000000000009",
+      "keyFormat": null,
+      "method": "AES-128",
+      "sequence": 9,
+      "url": "https://media.example/keys/inherited-identity.ts"
+    },
+    {
+      "encrypted": true,
+      "iv": "0x0000000000000000000000000000000a",
+      "keyFormat": null,
+      "method": "AES-128",
+      "sequence": 10,
+      "url": "https://media.example/keys/identity-still-preferred.ts"
+    },
+    {
+      "encrypted": false,
+      "iv": null,
+      "keyFormat": null,
+      "method": null,
+      "sequence": 11,
+      "url": "https://media.example/keys/clear-again.ts"
+    },
+    {
+      "encrypted": true,
+      "iv": null,
+      "keyFormat": null,
+      "method": "SAMPLE-AES",
+      "sequence": 12,
+      "url": "https://media.example/keys/sample.ts"
+    },
+    {
+      "encrypted": true,
+      "iv": null,
+      "keyFormat": null,
+      "method": "SAMPLE-AES",
+      "sequence": 13,
+      "url": "https://media.example/keys/inherited-sample.ts"
+    },
+    {
+      "encrypted": true,
+      "iv": null,
+      "keyFormat": null,
+      "method": null,
+      "sequence": 14,
+      "url": "https://media.example/keys/missing-uri.ts"
+    },
+    {
+      "encrypted": true,
+      "iv": "0x0000000000000000000000000000000f",
+      "keyFormat": null,
+      "method": "AES-256",
+      "sequence": 15,
+      "url": "https://media.example/keys/aes256.ts"
+    },
+    {
+      "encrypted": true,
+      "iv": "0x00000000000000000000000000000010",
+      "keyFormat": null,
+      "method": "AES-256-CTR",
+      "sequence": 16,
+      "url": "https://media.example/keys/aes256-ctr.ts"
+    },
+    {
+      "encrypted": true,
+      "iv": "0x00000000000000000000000000000011",
+      "keyFormat": null,
+      "method": "AES-128",
+      "sequence": 17,
+      "url": "https://media.example/keys/alternate-full.ts"
+    },
+    {
+      "encrypted": true,
+      "iv": null,
+      "keyFormat": "urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed",
+      "method": "SAMPLE-AES-CTR",
+      "sequence": 18,
+      "url": "https://media.example/keys/widevine.m4s"
+    },
+    {
+      "encrypted": true,
+      "iv": null,
+      "keyFormat": "com.apple.streamingkeydelivery",
+      "method": "SAMPLE-AES",
+      "sequence": 19,
+      "url": "https://media.example/keys/fairplay.m4s"
+    },
+    {
+      "encrypted": true,
+      "iv": null,
+      "keyFormat": "com.microsoft.playready",
+      "method": "SAMPLE-AES-CENC",
+      "sequence": 20,
+      "url": "https://media.example/keys/playready.m4s"
+    },
+    {
+      "encrypted": true,
+      "iv": null,
+      "keyFormat": "org.w3.clearkey",
+      "method": "SAMPLE-AES-CTR",
+      "sequence": 21,
+      "url": "https://media.example/keys/clearkey.m4s"
+    },
+    {
+      "encrypted": true,
+      "iv": null,
+      "keyFormat": null,
+      "method": null,
+      "sequence": 22,
+      "url": "https://media.example/keys/drm-before-alternate.m4s"
+    },
+    {
+      "encrypted": true,
+      "iv": null,
+      "keyFormat": null,
+      "method": null,
+      "sequence": 23,
+      "url": "https://media.example/keys/multiple-drm-unselected.m4s"
+    },
+    {
+      "encrypted": true,
+      "iv": null,
+      "keyFormat": null,
+      "method": "SAMPLE-AES",
+      "sequence": 24,
+      "url": "https://media.example/keys/identity-over-multiple.m4s"
+    }
+  ]
+}

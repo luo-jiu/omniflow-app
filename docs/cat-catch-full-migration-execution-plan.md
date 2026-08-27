@@ -1,6 +1,6 @@
 # Cat Catch 全面迁移执行计划
 
-更新时间：2026-08-27
+更新时间：2026-08-28
 
 状态：生效。当前固定迁移目标为 `2cb981d7c2f4614732edccc167c4b5793d1cb138`，尚未完成初始行为审计与迁移。
 
@@ -59,7 +59,7 @@ OmniFlow 不运行 Cat Catch 浏览器扩展，而是把与产品目标相关的
 - 深度 Worker/fetch/XHR/JSON/key hooks 被 `enableDeepRuntimeHooks = false` 关闭，外围 MSE hooks 仍运行。
 - 网络捕捉使用 `onCompleted`，Cat Catch 在首字节阶段的 `onResponseStarted` 识别。
 - request context 无明确容量和 TTL，敏感 header 值还会进入 renderer DTO。
-- HLS 纯 port 已补上 master 普通 variant/I-frame/未知 codec 过滤与无 level 拒绝、媒体分片继承紧邻前序 BYTERANGE end、MAP 独立 range、AES-128 media/MAP effective IV 与独立 key context、初始 discontinuity sequence、空/无效媒体清单拒绝和 PNG/JPEG 伪装分片剔除等首批语义并有 fixture；完整 parser 差分和最终 pipeline cutover 仍待完成。
+- HLS 纯 port 已补上 master 普通 variant/I-frame/未知 codec 过滤与无 level 拒绝、媒体分片继承紧邻前序 BYTERANGE end、MAP 独立 range、full-segment AES media/MAP effective IV、独立 key context、固定 full EME build 的 KEYFORMAT 支持/忽略/继承/多 key 选择、初始 discontinuity sequence、空/无效媒体清单拒绝和 PNG/JPEG 伪装分片剔除等首批语义并有 fixture；完整 parser 差分和最终 pipeline cutover 仍待完成。
 - DASH 手写 parser 对 `r=-1`、多 BaseURL、动态 MPD 等语义不完整。
 - HLS、DASH、MSE、ffmpeg、临时文件和输出交付尚无统一 task/cleanup 合同。
 - 当前 network classifier/rules、OmniFlow 产品 policy 与持久化设置编译、page URL policy、main-only request context vault、main-owned resource state、renderer-safe cross-process contract/reducer、Electron network/probe adapter、owner lifecycle、main composition、main-only resource access consumer，以及下载、检查、页面拖拽、外部工具四类固定-purpose consumer 和 HLS/DASH 计划/live 分片 transport 的 31 个计划 ID 已落成专项纯行为/合同、fixture、fake Electron integration 或 loopback redirect test。产品 policy 显式补充 image/key/document/expanded-subtitle 且不覆盖 regex blacklist；现有 extension/MIME/regex/domain 设置会编译到目标 policy，并可在不替换 `webRequest` listener 的情况下热更新；composition 只注册一套 session network adapter 和每个 view 一套 tokenized probe adapter，并共同拥有 Store/Vault/access authority；probe console adapter 分别持有当前文档和预签的下一 navigation generation token，每条消息都复核 lifecycle binding，导航后只提升预期 token 并拒绝上一文档 token；无 key 的普通 discovery 由 main 派生稳定 key，MSE 控制消息不写 Resource Store；main 只在 opaque probe resource 仍属于当前 tab/document/WebContents 时解析其私有 page key，renderer 不接触该 key；四类 consumer 都只接受 opaque resource authority，inspection 的读取预算和输出字段由 main 固定，下载、页面拖拽和 HLS/DASH 计划/live 分片只把受权 Response 交给注入的 main sink。目标 composition 已在 production controller 实例化，资源状态、普通下载、检查、probe 动作、已捕获资源页面拖拽、external-tool 和 HLS/DASH 计划/live 分片的 IPC/preload/renderer/本地 downloader 接线已接入；HLS/DASH parser 完整语义、直拉/track、未捕获拖拽 fallback、旧 toolkit 及其余计划 ID 仍只是需求种子，尚无完整 cutover 证据。

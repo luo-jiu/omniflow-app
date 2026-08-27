@@ -717,6 +717,20 @@
 - legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
 - validation: 固定 `lib/hls.min.js@1.6.16` oracle 对混合 fixture 实际输出 1 个普通 level/1 个 audio track，对 I-frame-only fixture 输出 `manifestParsingError / no levels found in manifest`；失败证据为 parser 12/15 且 3 条预期差分失败，实现与边界测试后 parser 16/16、广义 HLS Vitest 80/80、全仓 ESLint、固定上游 validator、同步校验 16/16、metadata 7 units/32 capabilities/192 anchors/106 cleanup entries/120 unique planned IDs/74 active refs 和 scoped diff check 通过。全局 TypeScript 仅被其他 Agent 在途的 Shell/Agent preparation 与 orchestrator test 类型错误阻断；完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
 
+## 2026-08-28: same target (HLS key support and KEYFORMAT selection)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动。
+- reviewedThrough / portedThrough: 均保持 `null`；本步闭合固定 full EME hls.js 1.6.16 的 `EXT-X-KEY` 支持、忽略、继承与 decryptdata 选择边界，仍未完成 hls-engine cutover。
+- change groups: `behavioral`（支持方法/KEYFORMAT、METHOD=NONE、identity 优先、单/多 DRM 选择、同格式轮换 copy-on-write、缺失 URI）与 `dependency`（固定 hls.js `LevelKey.isSupported`、`Fragment.decryptdata` 和 EME KeySystemFormats）。
+- affected capability IDs: `hls.parser-planner` 保持 `ported-unverified`；新增 1 个 active test ID。
+- fixtures/tests: 新增 upstream-executable fixture `hls-key-support-boundary`；`hls.key-support-inheritance` 覆盖不支持与大小写无效方法不覆盖前值、identity SAMPLE-AES、任意 KEYFORMAT 的 full-segment AES、FairPlay/Widevine/PlayReady/ClearKey、缺失 URI、METHOD=NONE、不同 KEYFORMAT 共享继承、缺省/显式版本 `1` 的重复判定、同格式轮换复制、identity 优先以及多 non-identity 不臆选 decryptdata。
+- accepted difference: 固定 hls.js effective decryptdata 将 identity 写成显式 `keyFormat="identity"`；现有 OmniFlow DTO 用缺省 `keyFormat` 表达同一 identity，避免 rewritten local playlist 无意义增加显式属性。OmniFlow 只保留 DRM key 解析结果，不声称绕过 DRM 或执行浏览器 EME license workflow。
+- excluded changes and reasons: 本步不实现 DRM license/decrypt、SESSION-KEY、KEYID/PSSH 解析、KEYFORMATVERSIONS 选择、加密 fMP4/video 输出或其他 parser 标签；不进行 cutover 或删除旧链。
+- unresolved gaps: HLS 其余 parser/key 标签差分、DRM 仅识别不下载、live 未捕获 URL 过渡 DTO、加密 fMP4/video 真实输出组合、真实网站手工验证和最终 hls-engine cutover。
+- runtime changes: pure parser 以 KEYFORMAT map 保存当前 key 组；新增不同格式时共享既有组，同格式实际轮换时复制，解析结束后按 fragment/MAP 所持组选择 effective key。fragment DTO 新增 `encrypted`，从而在多个 non-identity key 尚待 key-system 选择、decryptdata 为空时仍保留上游状态。
+- legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
+- validation: 固定 vendor executable oracle 与 fixture 的 18 个 fragment 在 encrypted/method/KEYFORMAT/URI/IV 上逐项一致；失败证据为新增 fixture 下 parser 16/17，实现后 parser 17/17、广义 HLS Vitest 81/81、全仓 ESLint、固定上游 validator、同步校验 16/16、fixture JSON、metadata 7 units/32 capabilities/192 anchors/106 cleanup entries/121 unique planned IDs/75 active refs 和 scoped diff check 通过。全量 Vitest 为 1081 passed / 1 skipped / 16 sandbox-only loopback failures，4 个相关 loopback 文件在允许监听本机端口的环境复跑 20/20，通过后折算全部可执行测试为 1097 passed / 1 skipped；Node 专用同步 validator 被 Vitest 收集后另报告 no suite。全局 TypeScript 只被其他 Agent 在途的 Shell preparation 与 Agent orchestrator test 类型错误阻断；完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
+
 ## Template
 
 ```markdown

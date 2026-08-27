@@ -45,6 +45,7 @@ export type CatCatchHlsSegment = {
   byteRange?: CatCatchHlsByteRange
   discontinuitySequence: number
   duration: number
+  encrypted: boolean
   index: number
   key?: CatCatchHlsKey
   map?: CatCatchHlsMap
@@ -145,6 +146,28 @@ const HLS_KNOWN_CODEC_PREFIXES = new Set([
   'mp4v', 'mvc1', 'mvc2', 'mvc3', 'mvc4', 'resv', 'rv60', 's263',
   'svc1', 'svc2', 'vc-1', 'vp08', 'vp09',
   'stpp', 'wvtt',
+])
+
+const HLS_FULL_SEGMENT_ENCRYPTION_METHODS = new Set([
+  'AES-128',
+  'AES-256',
+  'AES-256-CTR',
+])
+
+// hls.js 1.6.16 src/utils/mediakeys-helper.ts#KeySystemFormats.
+// Cat Catch vendors the full EME build, so these KEYFORMAT values remain
+// supported even though OmniFlow does not perform browser-side DRM playback.
+const HLS_EME_KEY_FORMATS = new Set([
+  'com.apple.streamingkeydelivery',
+  'org.w3.clearkey',
+  'com.microsoft.playready',
+  'urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed',
+])
+
+const HLS_EME_ENCRYPTION_METHODS = new Set([
+  'SAMPLE-AES',
+  'SAMPLE-AES-CENC',
+  'SAMPLE-AES-CTR',
 ])
 
 function parseNumber(value?: string) {
@@ -312,7 +335,7 @@ function createHlsKey(
     iv: attributes.IV,
     keyFormat: attributes.KEYFORMAT,
     keyFormatVersions: attributes.KEYFORMATVERSIONS,
-    method: attributes.METHOD || 'NONE',
+    method: attributes.METHOD || '',
     rawAttributes: attributes,
     rawLine: line,
     uri,
@@ -323,7 +346,6 @@ function createHlsKey(
 function createHlsMap(
   line: string,
   baseUrl: string,
-  currentKey: CatCatchHlsKey | undefined,
   variableState: HlsVariableState,
 ): CatCatchHlsMap | null {
   const attributes = parseHlsAttributeListWithVariables(getTagValue(line), variableState)
@@ -332,7 +354,6 @@ function createHlsMap(
   const url = resolveHlsUrl(uri, baseUrl)
   return {
     byteRange: resolveByteRange(parseHlsByteRange(attributes.BYTERANGE)),
-    key: resolveHlsKeyForSequence(currentKey, 0),
     rawAttributes: attributes,
     rawLine: line,
     uri,
@@ -452,11 +473,27 @@ function createHlsDefaultIvHex(sequence: number) {
   )).join('')}`
 }
 
+function getHlsKeyFormat(key: CatCatchHlsKey) {
+  return key.keyFormat || 'identity'
+}
+
+function isSupportedHlsKey(key: CatCatchHlsKey) {
+  const method = key.method
+  if (HLS_FULL_SEGMENT_ENCRYPTION_METHODS.has(method) || method === 'NONE') {
+    return true
+  }
+  const keyFormat = getHlsKeyFormat(key)
+  if (keyFormat === 'identity') return method === 'SAMPLE-AES'
+  return HLS_EME_KEY_FORMATS.has(keyFormat)
+    && HLS_EME_ENCRYPTION_METHODS.has(method)
+}
+
 /**
  * Upstream: xifangczy/cat-catch@2cb981d7c2f4614732edccc167c4b5793d1cb138
  * Source: lib/hls.min.js#LevelKey.getDecryptData and createInitializationVector
- * Reason: every AES-128 media fragment without an explicit IV uses its media
- * sequence, while hls.js resolves an EXT-X-MAP init segment with sequence zero.
+ * Reason: every full-segment encrypted media fragment without an explicit IV
+ * uses its media sequence, while hls.js resolves an EXT-X-MAP init segment
+ * with sequence zero. Non-identity full-segment keys normalize to identity.
  * Adaptation: expose the effective IV as the existing hexadecimal DTO string.
  * Fixtures: hls-aes128-iv-semantics, hls-encrypted-map-key-context
  */
@@ -464,11 +501,46 @@ function resolveHlsKeyForSequence(
   key: CatCatchHlsKey | undefined,
   sequence: number,
 ) {
-  if (!key || key.method.toUpperCase() !== 'AES-128' || key.iv) return key
+  if (!key?.url) return undefined
+  if (!HLS_FULL_SEGMENT_ENCRYPTION_METHODS.has(key.method)) return key
+  const normalizedKey = getHlsKeyFormat(key) === 'identity'
+    ? key
+    : { ...key, keyFormat: undefined }
+  if (normalizedKey.iv) return normalizedKey
   return {
-    ...key,
+    ...normalizedKey,
     iv: createHlsDefaultIvHex(sequence),
   }
+}
+
+function selectHlsKeyForSequence(
+  keys: ReadonlyMap<string, CatCatchHlsKey> | undefined,
+  sequence: number,
+) {
+  if (!keys) return undefined
+  const key = keys.get('identity') || (keys.size === 1
+    ? keys.values().next().value
+    : undefined)
+  return resolveHlsKeyForSequence(key, sequence)
+}
+
+function normalizeHlsKeyFormatVersions(value?: string) {
+  return (value || '1')
+    .split('/')
+    .map(Number)
+    .filter(Number.isFinite)
+    .join('/')
+}
+
+function hlsKeysMatch(left: CatCatchHlsKey, right: CatCatchHlsKey) {
+  return left.url === right.url
+    && left.method === right.method
+    && getHlsKeyFormat(left) === getHlsKeyFormat(right)
+    && normalizeHlsKeyFormatVersions(left.keyFormatVersions)
+      === normalizeHlsKeyFormatVersions(right.keyFormatVersions)
+    && left.iv?.toLowerCase() === right.iv?.toLowerCase()
+    && left.rawAttributes.KEYID?.toLowerCase()
+      === right.rawAttributes.KEYID?.toLowerCase()
 }
 
 /**
@@ -506,7 +578,7 @@ export function parseHlsManifest(input: {
   let playlistType: string | undefined
   let hasEndList = false
   let discontinuitySequence = 0
-  let currentKey: CatCatchHlsKey | undefined
+  let currentKeys: Map<string, CatCatchHlsKey> | undefined
   let currentMap: CatCatchHlsMap | undefined
   let pendingSegment: PendingSegment | undefined
   let pendingByteRange: CatCatchHlsByteRange | undefined
@@ -515,16 +587,21 @@ export function parseHlsManifest(input: {
 
   const keys = new Map<string, CatCatchHlsKey>()
   const maps = new Map<string, CatCatchHlsMap>()
+  const declaredMaps: CatCatchHlsMap[] = []
+  const mapKeyStates = new WeakMap<CatCatchHlsMap, ReadonlyMap<string, CatCatchHlsKey>>()
   const segments: CatCatchHlsSegment[] = []
+  const segmentKeyStates: Array<ReadonlyMap<string, CatCatchHlsKey> | undefined> = []
   const variants: CatCatchHlsVariant[] = []
   const renditions: CatCatchHlsRendition[] = []
 
-  function rememberKey(key: CatCatchHlsKey) {
-    const keyId = `${key.method}:${key.url || key.uri || key.rawLine}:${key.iv || ''}`
-    keys.set(keyId, key)
+  function rememberKey(key: CatCatchHlsKey | undefined) {
+    if (!key?.url && !key?.uri) return
+    const keyId = `${key.method}:${key.url || key.uri}:${getHlsKeyFormat(key)}`
+    if (!keys.has(keyId)) keys.set(keyId, key)
   }
 
   function rememberMap(map: CatCatchHlsMap) {
+    rememberKey(map.key)
     maps.set([
       map.url,
       map.byteRange?.raw || '',
@@ -546,8 +623,8 @@ export function parseHlsManifest(input: {
       byteRange: resolvedByteRange,
       discontinuitySequence,
       duration: pendingSegment?.duration || 0,
+      encrypted: Boolean(currentKeys?.size),
       index,
-      key: resolveHlsKeyForSequence(currentKey, sequence),
       map: currentMap,
       part,
       sequence,
@@ -555,6 +632,7 @@ export function parseHlsManifest(input: {
       uri: normalizedUri,
       url,
     })
+    segmentKeyStates.push(currentKeys)
     previousSegmentByteRangeEnd = resolvedByteRange
       ? resolvedByteRange.offset + resolvedByteRange.length
       : undefined
@@ -613,15 +691,31 @@ export function parseHlsManifest(input: {
     }
     if (line.startsWith('#EXT-X-KEY')) {
       const key = createHlsKey(line, baseUrl, variableState)
-      rememberKey(key)
-      currentKey = key.method.toUpperCase() === 'NONE' ? undefined : key
+      if (!isSupportedHlsKey(key)) continue
+      if (key.method === 'NONE') {
+        currentKeys = undefined
+      } else {
+        currentKeys ||= new Map()
+        const keyFormat = getHlsKeyFormat(key)
+        const currentKey = currentKeys.get(keyFormat)
+        if (currentKey && hlsKeysMatch(currentKey, key)) continue
+        // hls.js shares different KEYFORMAT alternatives with earlier
+        // fragments, but copies the group before a same-format rotation.
+        if (currentKey) currentKeys = new Map(currentKeys)
+        currentKeys.set(keyFormat, key)
+      }
       continue
     }
     if (line.startsWith('#EXT-X-MAP')) {
-      const map = createHlsMap(line, baseUrl, currentKey, variableState)
+      const map = createHlsMap(
+        line,
+        baseUrl,
+        variableState,
+      )
       if (map) {
         currentMap = map
-        rememberMap(map)
+        declaredMaps.push(map)
+        if (currentKeys) mapKeyStates.set(map, currentKeys)
       }
       continue
     }
@@ -663,6 +757,15 @@ export function parseHlsManifest(input: {
   if (variableState.playlistParsingError) {
     throw variableState.playlistParsingError
   }
+
+  segments.forEach((segment, index) => {
+    segment.key = selectHlsKeyForSequence(segmentKeyStates[index], segment.sequence)
+    rememberKey(segment.key)
+  })
+  declaredMaps.forEach((map) => {
+    map.key = selectHlsKeyForSequence(mapKeyStates.get(map), 0)
+    rememberMap(map)
+  })
 
   /**
    * Upstream: xifangczy/cat-catch@2cb981d7c2f4614732edccc167c4b5793d1cb138

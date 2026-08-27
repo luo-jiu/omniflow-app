@@ -128,6 +128,25 @@ const masterVariantExpected = JSON.parse(readFileSync(`${masterVariantFixtureRoo
   variants: Array<{ bandwidth: number; codecs: string; url: string }>
 }
 
+const keySupportFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-key-support-boundary', import.meta.url))
+const keySupportFixture = JSON.parse(readFileSync(`${keySupportFixtureRoot}/fixture.json`, 'utf8')) as {
+  expected: string
+  input: string
+}
+const keySupportPlaylist = readFileSync(`${keySupportFixtureRoot}/${keySupportFixture.input}`, 'utf8')
+const keySupportExpected = JSON.parse(readFileSync(`${keySupportFixtureRoot}/${keySupportFixture.expected}`, 'utf8')) as {
+  baseUrl: string
+  keys: Array<{ keyFormat: string | null; method: string; url: string }>
+  segments: Array<{
+    encrypted: boolean
+    iv: string | null
+    keyFormat: string | null
+    method: string | null
+    sequence: number
+    url: string
+  }>
+}
+
 const variableFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-variable-substitution', import.meta.url))
 const variableFixture = JSON.parse(readFileSync(`${variableFixtureRoot}/fixture.json`, 'utf8')) as {
   expected: string
@@ -271,6 +290,26 @@ describe('Cat Catch HLS parser', () => {
       baseUrl: masterVariantExpected.baseUrl,
       text: readFileSync(`${masterVariantFixtureRoot}/${masterVariantFixture.inputs.iframeOnly}`, 'utf8'),
     })).toThrow(masterVariantExpected.iframeOnlyError)
+  })
+
+  it('hls.key-support-inheritance', () => {
+    const manifest = parseHlsManifest({
+      baseUrl: keySupportExpected.baseUrl,
+      text: keySupportPlaylist,
+    })
+    expect(manifest.keys.map(key => ({
+      keyFormat: key.keyFormat || null,
+      method: key.method,
+      url: key.url,
+    }))).toEqual(keySupportExpected.keys)
+    expect(manifest.segments.map(segment => ({
+      encrypted: segment.encrypted,
+      iv: segment.key?.iv || null,
+      keyFormat: segment.key?.keyFormat || null,
+      method: segment.key?.method || null,
+      sequence: segment.sequence,
+      url: segment.url,
+    }))).toEqual(keySupportExpected.segments)
   })
 
   it('keeps normal master variants when every codec set is unknown', () => {
