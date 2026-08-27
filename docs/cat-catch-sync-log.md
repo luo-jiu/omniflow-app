@@ -451,6 +451,20 @@
 - legacy cleanup: 无；现有 ffmpeg/playlist 解密路径继续承担生产职责。
 - validation: local HLS 测试 4/4 通过；待本步提交前重跑全 HLS 集合、lint、Cat Catch validator、同步校验和 diff 检查；全局 TypeScript 仍受其他 agent storage 改动阻断。
 
+## 2026-08-27: same target (HLS static/live abort propagation)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动。
+- reviewedThrough / portedThrough: 均保持 `null`；本步闭合 key/map/media 与 live manifest/segment 的取消传播，仍未完成 hls-engine cutover。
+- change groups: `behavioral`（discard/stop 主动中止在途直播请求）与 `platform-adaptation`（navigation/tab/view/crash/controller dispose 触发 retry/live 清理）。
+- affected capability IDs: `hls.segment-pipeline` 继续为 `porting`；`hls.live-recording` 从 `pending` 进入 `porting`。
+- fixtures/tests: `embeddedBrowserHlsLocalDownloaderService.test.ts#hls.cancel-aborts-static-refs` 覆盖 key 准备阶段取消；`embeddedBrowserHlsLiveRecorder.test.ts#hls.live-terminal` 覆盖直播本地 playlist/segment 终态；同文件 `#hls.live-discard-abort` 覆盖在途直播分片被 discard 中止。
+- accepted difference: Cat Catch 通过扩展 tab/Downloader stop 管理录制；OmniFlow 使用 recorder-owned AbortController，并把宿主 lifecycle 映射到 discard，不引入 renderer 状态 owner。
+- excluded changes and reasons: 不在本步实现 active plan/ffmpeg 进程取消、统一 task registry、应用退出等待全部异步清理、一次性 manifest cache fallback 或旧 downloader 删除。
+- unresolved gaps: 完整 output smoke、active plan/retry/live/ffmpeg/workdir 单一 owner、awaited app-exit cleanup、生产 lifecycle integration、一次性 cache fallback、完整 parser 和解密责任。
+- runtime changes: 静态 key/map fetch 继承 local request AbortSignal；live recorder 的 manifest 与 segment 请求共用 AbortController，stop/discard 可终止在途请求；navigation、tab/view 销毁、render-process loss 和 controller dispose 会删除匹配 session 并发起清理。
+- legacy cleanup: 无；现有 controller Maps、ffmpeg/playlist 解密与旧输出链继续承担生产职责。
+- validation: 完整 HLS 集合 19/19、仓库级 lint、全局 TypeScript、`cat-catch:validate`、同步校验 16/16 和 scoped diff 检查通过。全量 Vitest 共 914 条，895 通过、1 skipped、18 失败：16 条为当前沙箱禁止 loopback `listen 127.0.0.1`，另 2 条来自并行开发中的 Agent SQLite/approval 改动，均不在 Cat Catch 路径；完整 build 因共享工作区的 `dist-electron/**` 改动不运行。
+
 ## Template
 
 ```markdown

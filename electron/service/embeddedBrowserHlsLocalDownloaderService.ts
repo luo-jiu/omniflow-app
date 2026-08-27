@@ -86,6 +86,18 @@ type ResourceRefRecord = {
   playlistPath: string
 }
 
+function createHlsDownloadAbortError() {
+  const error = new Error('HLS download aborted')
+  error.name = 'AbortError'
+  return error
+}
+
+function throwIfHlsDownloadAborted(signal?: AbortSignal) {
+  if (signal?.aborted) {
+    throw createHlsDownloadAbortError()
+  }
+}
+
 function normalizeManualAes128KeyBase64(base64: string | undefined) {
   const normalizedBase64 = String(base64 || '').trim()
   if (!normalizedBase64) {
@@ -183,6 +195,7 @@ async function fetchStaticResourceBuffer(input: {
   byteRange?: EmbeddedBrowserDownloadByteRange
   fetch?: EmbeddedBrowserFragmentFetch
   headers?: Record<string, string>
+  signal?: AbortSignal
   url: string
 }) {
   const headers = new Headers(input.headers)
@@ -192,6 +205,7 @@ async function fetchStaticResourceBuffer(input: {
   }
   const response = await (input.fetch || ((url, init) => fetch(url, init)))(input.url, {
     headers,
+    signal: input.signal,
   })
   if (!response.ok) {
     throw new Error(`HTTP ${response.status}`)
@@ -204,6 +218,7 @@ async function downloadStaticResource(input: {
   fetch?: EmbeddedBrowserFragmentFetch
   headers?: Record<string, string>
   outputPath: string
+  signal?: AbortSignal
   url: string
 }) {
   const buffer = await fetchStaticResourceBuffer(input)
@@ -224,6 +239,7 @@ async function prepareStaticRefs(input: {
     outputPath: string
   }
   headers?: Record<string, string>
+  signal?: AbortSignal
 }) {
   const records = new Map<string, ResourceRefRecord>()
   await mkdir(path.join(input.outputDirectoryPath, input.directoryName), {
@@ -232,6 +248,7 @@ async function prepareStaticRefs(input: {
 
   let resourceIndex = 0
   for (const ref of input.refs) {
+    throwIfHlsDownloadAborted(input.signal)
     if (!ref.url) {
       continue
     }
@@ -246,6 +263,7 @@ async function prepareStaticRefs(input: {
       fetch: input.fetch,
       headers: input.headers,
       outputPath: nextPaths.outputPath,
+      signal: input.signal,
       url: ref.url,
     })
     records.set(cacheKey, {
@@ -266,6 +284,7 @@ async function prepareKeyRefs(input: {
     method?: string
     url?: string
   }>
+  signal?: AbortSignal
 }) {
   const records = new Map<string, ResourceRefRecord>()
   const keysDirectoryPath = path.join(input.outputDirectoryPath, 'keys')
@@ -278,6 +297,7 @@ async function prepareKeyRefs(input: {
 
   let resourceIndex = 0
   for (const ref of input.refs) {
+    throwIfHlsDownloadAborted(input.signal)
     const normalizedMethod = String(ref.method || '').trim().toUpperCase()
     if (!normalizedMethod || normalizedMethod === 'NONE') {
       continue
@@ -302,6 +322,7 @@ async function prepareKeyRefs(input: {
       const keyBuffer = await fetchStaticResourceBuffer({
         fetch: input.fetch,
         headers: input.headers,
+        signal: input.signal,
         url: ref.url,
       })
       if (normalizedMethod === 'AES-128' && keyBuffer.byteLength !== 16) {
@@ -430,6 +451,7 @@ async function filterExistingPlaylistFragments(input: {
 export async function downloadEmbeddedBrowserHlsToLocalWorkDirectory(
   request: EmbeddedBrowserHlsLocalDownloadRequest,
 ): Promise<EmbeddedBrowserHlsLocalDownloadResult> {
+  throwIfHlsDownloadAborted(request.signal)
   const { plan } = request
   const requestedFragmentIndexes = Array.isArray(request.fragmentIndexes)
     ? new Set(request.fragmentIndexes.filter((value) => Number.isFinite(value) && value >= 0))
@@ -458,6 +480,7 @@ export async function downloadEmbeddedBrowserHlsToLocalWorkDirectory(
       method: fragment.key?.method,
       url: fragment.key?.url,
     })),
+    signal: request.signal,
   })
 
   const mapRefs = await prepareStaticRefs({
@@ -477,6 +500,7 @@ export async function downloadEmbeddedBrowserHlsToLocalWorkDirectory(
         outputPath: path.join(outputDirectoryPath, 'maps', fileName),
       }
     },
+    signal: request.signal,
   })
 
   const fragmentPaths = plan.fragments.map((fragment, index) => {
@@ -626,14 +650,9 @@ export async function downloadEmbeddedBrowserHlsToLocalWorkDirectory(
     })
   })
 
-  const createAbortError = () => {
-    const error = new Error('HLS download aborted')
-    error.name = 'AbortError'
-    return error
-  }
   if (request.signal?.aborted) {
     downloader.destroy()
-    throw createAbortError()
+    throw createHlsDownloadAbortError()
   }
 
   let abortListener: (() => void) | undefined
@@ -643,7 +662,7 @@ export async function downloadEmbeddedBrowserHlsToLocalWorkDirectory(
         resolve()
       })
       downloader.on('aborted', () => {
-        reject(createAbortError())
+        reject(createHlsDownloadAbortError())
       })
       downloader.on('error', (message) => {
         reject(new Error(message))

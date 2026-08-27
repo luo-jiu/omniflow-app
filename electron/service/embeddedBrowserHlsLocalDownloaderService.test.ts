@@ -130,6 +130,56 @@ describe('EmbeddedBrowser HLS local downloader', () => {
     }
   })
 
+  it('hls.cancel-aborts-static-refs', async () => {
+    const controller = new AbortController()
+    let resolveKeyStarted: (() => void) | undefined
+    const keyStarted = new Promise<void>((resolve) => {
+      resolveKeyStarted = resolve
+    })
+    const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
+      if (!url.endsWith('/key.bin')) {
+        return new Response(Uint8Array.from([0x47, 0x01]).buffer)
+      }
+      resolveKeyStarted?.()
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => {
+          reject(new DOMException('aborted', 'AbortError'))
+        }, { once: true })
+      })
+    })
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'omniflow-hls-static-cancel-test-'))
+    const plan = {
+      ...createPlan(),
+      fragments: [{
+        ...createPlan().fragments[0],
+        key: {
+          method: 'AES-128',
+          url: 'https://media.example/key.bin',
+        },
+      }],
+    }
+    const downloadPromise = downloadEmbeddedBrowserHlsToLocalWorkDirectory({
+      fetch: fetchImpl,
+      plan,
+      signal: controller.signal,
+      workDirectoryPath: directory,
+    })
+
+    try {
+      await keyStarted
+      controller.abort()
+      await expect(Promise.race([
+        downloadPromise,
+        new Promise<never>((_, reject) => {
+          setTimeout(() => reject(new Error('static reference cancellation timed out')), 250)
+        }),
+      ])).rejects.toMatchObject({ name: 'AbortError' })
+      expect(fetchImpl).toHaveBeenCalledTimes(1)
+    } finally {
+      await rm(directory, { force: true, recursive: true })
+    }
+  })
+
   it('hls.static-ref-range', async () => {
     const calls: Array<{ range: string | null; url: string }> = []
     const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {

@@ -57,6 +57,7 @@ type CreateEmbeddedBrowserViewOptions = {
   onLibraryFileDropPayload: (tabId: string, payload: Record<string, unknown>) => void
   onPageDragPayload: (tabId: string, payload: Record<string, unknown>) => void
   onViewDestroyed: (tabId: string) => void
+  onViewRenderProcessGone: (tabId: string) => void
   syncBounds: (view: WebContentsView) => void
   tabId: string
   tryDispatchPendingOpenFile: (tabId: string, view: WebContentsView) => Promise<boolean>
@@ -240,6 +241,7 @@ export function createEmbeddedBrowserView(
     })
   })
   view.webContents.on('render-process-gone', (_event, details) => {
+    options.onViewRenderProcessGone(options.tabId)
     options.emitTabState(options.tabId, view, {
       details: `render-process-gone:${details.reason}`,
       state: 'error',

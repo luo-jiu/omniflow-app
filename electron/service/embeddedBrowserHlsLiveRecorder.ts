@@ -77,10 +77,12 @@ async function fetchEmbeddedBrowserHlsLiveManifestSnapshot(input: {
   headers?: Record<string, string>
   manifestUrl: string
   pageUrl?: string
+  signal?: AbortSignal
   suggestedThreadCount?: number
 }): Promise<EmbeddedBrowserHlsLiveManifestSnapshot> {
   const response = await (input.fetch || ((url, init) => fetch(url, init)))(input.manifestUrl, {
     headers: input.headers,
+    signal: input.signal,
   })
   if (!response.ok) {
     throw new Error(`直播 playlist 请求失败：HTTP ${response.status}`)
@@ -118,6 +120,8 @@ async function fetchEmbeddedBrowserHlsLiveManifestSnapshot(input: {
 
 export class EmbeddedBrowserHlsLiveRecorder {
   private activePollPromise: Promise<void> | null = null
+
+  private abortController: AbortController | null = null
 
   private cumulativePlan: EmbeddedBrowserHlsDownloadPlan | null = null
 
@@ -166,22 +170,27 @@ export class EmbeddedBrowserHlsLiveRecorder {
     if (this.isRecording) {
       throw new Error('直播录制已经在进行中')
     }
+    this.abortController = new AbortController()
     this.isRecording = true
-    this.workDirectoryPath = this.workDirectoryPath || await mkdtemp(path.join(os.tmpdir(), 'omniflow-hls-live-'))
-    await this.pollOnce(true)
-    this.scheduleNextPoll()
+    try {
+      this.workDirectoryPath = this.workDirectoryPath || await mkdtemp(path.join(os.tmpdir(), 'omniflow-hls-live-'))
+      const initialPollPromise = this.pollOnce(true)
+      this.activePollPromise = initialPollPromise
+      await initialPollPromise
+      if (this.isRecording) {
+        this.scheduleNextPoll()
+      }
+    } catch (error) {
+      this.isRecording = false
+      this.abortController = null
+      throw error
+    } finally {
+      this.activePollPromise = null
+    }
   }
 
   async stop(): Promise<EmbeddedBrowserHlsLiveRecorderStopResult> {
-    this.isRecording = false
-    if (this.pollTimer) {
-      clearTimeout(this.pollTimer)
-      this.pollTimer = null
-    }
-    if (this.activePollPromise) {
-      await this.activePollPromise.catch(() => undefined)
-      this.activePollPromise = null
-    }
+    await this.settleActiveRecording()
     if (!this.cumulativePlan || !this.playlistPath) {
       throw new Error('直播录制还没有可用的本地 playlist')
     }
@@ -193,6 +202,24 @@ export class EmbeddedBrowserHlsLiveRecorder {
     }
   }
 
+  async discard() {
+    await this.settleActiveRecording()
+  }
+
+  private async settleActiveRecording() {
+    this.isRecording = false
+    if (this.pollTimer) {
+      clearTimeout(this.pollTimer)
+      this.pollTimer = null
+    }
+    this.abortController?.abort()
+    if (this.activePollPromise) {
+      await this.activePollPromise.catch(() => undefined)
+      this.activePollPromise = null
+    }
+    this.abortController = null
+  }
+
   private scheduleNextPoll() {
     if (!this.isRecording) {
       return
@@ -200,6 +227,9 @@ export class EmbeddedBrowserHlsLiveRecorder {
     this.pollTimer = setTimeout(() => {
       this.activePollPromise = this.pollOnce(false)
         .catch((error) => {
+          if (!this.isRecording && error instanceof Error && error.name === 'AbortError') {
+            return
+          }
           this.onEvent?.({
             completedFragments: this.cumulativePlan?.fragmentCount || 0,
             durationSeconds: this.cumulativePlan?.durationSeconds,
@@ -226,6 +256,7 @@ export class EmbeddedBrowserHlsLiveRecorder {
       headers: this.headers,
       manifestUrl: this.manifestUrl,
       pageUrl: this.pageUrl,
+      signal: this.abortController?.signal,
       suggestedThreadCount: this.suggestedThreadCount,
     })
     this.pollIntervalMs = Math.max(1500, Math.min(10000, (snapshot.manifest.targetDuration || 4) * 1000))
@@ -346,6 +377,7 @@ export class EmbeddedBrowserHlsLiveRecorder {
         manifestUrl: this.cumulativePlan.manifestUrl,
         suggestedThreadCount: this.cumulativePlan.suggestedThreadCount,
       },
+      signal: this.abortController?.signal,
       workDirectoryPath: this.workDirectoryPath,
     })
     this.playlistPath = localDownloadResult.playlistPath

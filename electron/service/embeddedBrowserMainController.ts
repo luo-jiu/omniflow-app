@@ -567,16 +567,20 @@ export function createEmbeddedBrowserMainController(
   }
 
   async function clearEmbeddedBrowserHlsRetrySessions(options: {
+    all?: boolean
     requestId?: string
     tabId?: string
   }) {
     const normalizedRequestId = String(options.requestId || '').trim()
     const normalizedTabId = String(options.tabId || '').trim()
-    if (!normalizedRequestId && !normalizedTabId) {
+    if (!options.all && !normalizedRequestId && !normalizedTabId) {
       return
     }
 
     const matchedSessions = Array.from(embeddedBrowserHlsRetrySessions.entries()).filter(([requestId, session]) => {
+      if (options.all) {
+        return true
+      }
       if (normalizedRequestId && requestId === normalizedRequestId) {
         return true
       }
@@ -597,16 +601,20 @@ export function createEmbeddedBrowserMainController(
   }
 
   async function clearEmbeddedBrowserHlsLiveRecordingSessions(options: {
+    all?: boolean
     requestId?: string
     tabId?: string
   }) {
     const normalizedRequestId = String(options.requestId || '').trim()
     const normalizedTabId = String(options.tabId || '').trim()
-    if (!normalizedRequestId && !normalizedTabId) {
+    if (!options.all && !normalizedRequestId && !normalizedTabId) {
       return
     }
 
     const matchedSessions = Array.from(embeddedBrowserHlsLiveRecordingSessions.entries()).filter(([requestId, session]) => {
+      if (options.all) {
+        return true
+      }
       if (normalizedRequestId && requestId === normalizedRequestId) {
         return true
       }
@@ -623,9 +631,9 @@ export function createEmbeddedBrowserMainController(
     await Promise.all(matchedSessions.map(async ([requestId, session]) => {
       embeddedBrowserHlsLiveRecordingSessions.delete(requestId)
       try {
-        await session.recorder.stop().catch(() => undefined)
+        await session.recorder.discard().catch(() => undefined)
       } catch {
-        // ignore cleanup stop errors
+        // ignore cleanup discard errors
       }
       const workDirectoryPath = session.workDirectoryPath || session.recorder.getCurrentWorkDirectoryPath()
       if (workDirectoryPath) {
@@ -2654,6 +2662,8 @@ export function createEmbeddedBrowserMainController(
       onDocumentNavigated: (navigatedTabId) => {
         cancelEmbeddedBrowserLibraryFileDropRequests(navigatedTabId)
         cleanupEmbeddedBrowserDroppedFilesForTab(navigatedTabId)
+        void clearEmbeddedBrowserHlsRetrySessions({ tabId: navigatedTabId })
+        void clearEmbeddedBrowserHlsLiveRecordingSessions({ tabId: navigatedTabId })
       },
       onLibraryFileDropPayload: (dropTabId, payload) => {
         void handleLibraryFileDropPayload(dropTabId, payload)
@@ -2669,6 +2679,12 @@ export function createEmbeddedBrowserMainController(
       onViewDestroyed: (destroyedTabId) => {
         cancelEmbeddedBrowserLibraryFileDropRequests(destroyedTabId)
         cleanupEmbeddedBrowserDroppedFilesForTab(destroyedTabId)
+        void clearEmbeddedBrowserHlsRetrySessions({ tabId: destroyedTabId })
+        void clearEmbeddedBrowserHlsLiveRecordingSessions({ tabId: destroyedTabId })
+      },
+      onViewRenderProcessGone: (crashedTabId) => {
+        void clearEmbeddedBrowserHlsRetrySessions({ tabId: crashedTabId })
+        void clearEmbeddedBrowserHlsLiveRecordingSessions({ tabId: crashedTabId })
       },
       syncBounds: syncEmbeddedBrowserViewBounds,
       tabId,
@@ -3575,6 +3591,10 @@ export function createEmbeddedBrowserMainController(
   }
 
   function dispose() {
+    const hlsCleanupPromise = Promise.all([
+      clearEmbeddedBrowserHlsRetrySessions({ all: true }),
+      clearEmbeddedBrowserHlsLiveRecordingSessions({ all: true }),
+    ])
     captureRuntime?.dispose()
     captureRuntime = null
     for (const tabId of embeddedBrowserLibraryFileDropRequests.keys()) {
@@ -3594,6 +3614,7 @@ export function createEmbeddedBrowserMainController(
     })
     embeddedBrowserPendingOpenFiles.clear()
     embeddedBrowserAttachedOpenFiles.clear()
+    void hlsCleanupPromise.catch(() => undefined)
   }
 
   return {
