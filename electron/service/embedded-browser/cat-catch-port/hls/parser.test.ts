@@ -196,6 +196,22 @@ const masterRenditionExpected = JSON.parse(readFileSync(`${masterRenditionFixtur
   }>
 }
 
+const masterVariantGroupFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-master-variant-group-merge', import.meta.url))
+const masterVariantGroupFixture = JSON.parse(readFileSync(`${masterVariantGroupFixtureRoot}/fixture.json`, 'utf8')) as {
+  expected: string
+  input: string
+}
+const masterVariantGroupExpected = JSON.parse(readFileSync(`${masterVariantGroupFixtureRoot}/${masterVariantGroupFixture.expected}`, 'utf8')) as {
+  baseUrl: string
+  variants: Array<{
+    audioGroupId: string
+    audioGroupIds: string[]
+    subtitlesGroupId: string
+    subtitlesGroupIds: string[]
+    url: string
+  }>
+}
+
 const masterSessionKeyFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-master-session-key-boundary', import.meta.url))
 const masterSessionKeyFixture = JSON.parse(readFileSync(`${masterSessionKeyFixtureRoot}/fixture.json`, 'utf8')) as {
   expected: string
@@ -451,6 +467,33 @@ describe('Cat Catch HLS parser', () => {
       type: rendition.type,
       url: rendition.url,
     }))).toEqual(masterRenditionExpected.renditions)
+  })
+
+  it('hls.master-variant-group-merge', () => {
+    const manifest = parseHlsManifest({
+      baseUrl: masterVariantGroupExpected.baseUrl,
+      text: readFileSync(`${masterVariantGroupFixtureRoot}/${masterVariantGroupFixture.input}`, 'utf8'),
+    })
+    const projectVariant = (variant: typeof manifest.variants[number]) => ({
+      audioGroupId: variant.audioGroupId,
+      audioGroupIds: variant.audioGroupIds,
+      subtitlesGroupId: variant.subtitlesGroupId,
+      subtitlesGroupIds: variant.subtitlesGroupIds,
+      url: variant.url,
+    })
+    expect(manifest.variants.map(projectVariant)).toEqual(masterVariantGroupExpected.variants)
+
+    const plan = createEmbeddedBrowserHlsDownloadPlan({
+      manifest,
+      manifestUrl: masterVariantGroupExpected.baseUrl,
+    })
+    expect(plan.variants.map(variant => ({
+      audioGroupId: variant.audioGroupId,
+      audioGroupIds: variant.audioGroupIds,
+      subtitlesGroupId: variant.subtitlesGroupId,
+      subtitlesGroupIds: variant.subtitlesGroupIds,
+      url: variant.url,
+    }))).toEqual(masterVariantGroupExpected.variants)
   })
 
   it('hls.master-session-key-exclusion', () => {

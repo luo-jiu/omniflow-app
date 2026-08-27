@@ -52,6 +52,7 @@ export type EmbeddedBrowserHlsSegment = {
 
 export type EmbeddedBrowserHlsVariant = {
   audioGroupId?: string
+  audioGroupIds?: string[]
   averageBandwidth?: number
   bandwidth?: number
   codecs?: string
@@ -60,6 +61,7 @@ export type EmbeddedBrowserHlsVariant = {
   rawLine: string
   resolution?: string
   subtitlesGroupId?: string
+  subtitlesGroupIds?: string[]
   uri: string
   url: string
 }
@@ -170,12 +172,14 @@ export type EmbeddedBrowserHlsDownloadPlan = {
   suggestedThreadCount: number
   variants: Array<{
     audioGroupId?: string
+    audioGroupIds?: string[]
     averageBandwidth?: number
     bandwidth?: number
     codecs?: string
     frameRate?: number
     resolution?: string
     subtitlesGroupId?: string
+    subtitlesGroupIds?: string[]
     url: string
   }>
 }
@@ -349,12 +353,14 @@ export function createEmbeddedBrowserHlsDownloadPlan(input: {
     suggestedThreadCount,
     variants: manifest.variants.map((variant) => ({
       audioGroupId: variant.audioGroupId,
+      audioGroupIds: variant.audioGroupIds ? [...variant.audioGroupIds] : undefined,
       averageBandwidth: variant.averageBandwidth,
       bandwidth: variant.bandwidth,
       codecs: variant.codecs,
       frameRate: variant.frameRate,
       resolution: variant.resolution,
       subtitlesGroupId: variant.subtitlesGroupId,
+      subtitlesGroupIds: variant.subtitlesGroupIds ? [...variant.subtitlesGroupIds] : undefined,
       url: variant.url,
     })),
   }

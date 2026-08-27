@@ -20,6 +20,10 @@ import {
 import { formatResourceTitle } from '@/features/embedded-browser/resources/model/embedded-browser-resource-display';
 import { isHttpResource } from '@/features/embedded-browser/resources/services/embedded-browser-resource-request';
 
+import {
+  getHlsVariantRenditionGroupIds,
+  hlsVariantHasRenditionGroup,
+} from './hls-rendition-groups';
 import type {
   ToolWorkspaceMediaHlsRequest,
 } from './types';
@@ -403,13 +407,17 @@ const ToolWorkspaceHls: React.FC<ToolWorkspaceHlsProps> = ({
           </div>
           {hlsSelectedVariant ? (
             <ActionRow>
-              {hlsSelectedVariant.audioGroupId ? (
-                <Tag color="blue">音轨组：{hlsSelectedVariant.audioGroupId}</Tag>
+              {getHlsVariantRenditionGroupIds(hlsSelectedVariant, 'AUDIO').length ? (
+                <Tag color="blue">
+                  音轨组：{getHlsVariantRenditionGroupIds(hlsSelectedVariant, 'AUDIO').join('、')}
+                </Tag>
               ) : (
                 <Tag color="grey">当前变体未声明音轨组</Tag>
               )}
-              {hlsSelectedVariant.subtitlesGroupId ? (
-                <Tag color="purple">字幕组：{hlsSelectedVariant.subtitlesGroupId}</Tag>
+              {getHlsVariantRenditionGroupIds(hlsSelectedVariant, 'SUBTITLES').length ? (
+                <Tag color="purple">
+                  字幕组：{getHlsVariantRenditionGroupIds(hlsSelectedVariant, 'SUBTITLES').join('、')}
+                </Tag>
               ) : (
                 <Tag color="grey">当前变体未声明字幕组</Tag>
               )}
@@ -446,7 +454,7 @@ const ToolWorkspaceHls: React.FC<ToolWorkspaceHlsProps> = ({
                     key={`audio-${rendition.groupId || 'none'}-${rendition.name || index}`}
                     color={hlsSelectedAudioRendition?.url === rendition.url
                       ? 'blue'
-                      : hlsSelectedVariant?.audioGroupId && rendition.groupId === hlsSelectedVariant.audioGroupId
+                      : hlsVariantHasRenditionGroup(hlsSelectedVariant, 'AUDIO', rendition.groupId)
                         ? 'cyan'
                         : 'white'}
                   >
@@ -487,7 +495,7 @@ const ToolWorkspaceHls: React.FC<ToolWorkspaceHlsProps> = ({
                     key={`sub-${rendition.groupId || 'none'}-${rendition.name || index}`}
                     color={hlsSelectedSubtitleRendition?.url === rendition.url
                       ? 'purple'
-                      : hlsSelectedVariant?.subtitlesGroupId && rendition.groupId === hlsSelectedVariant.subtitlesGroupId
+                      : hlsVariantHasRenditionGroup(hlsSelectedVariant, 'SUBTITLES', rendition.groupId)
                         ? 'violet'
                         : 'white'}
                   >

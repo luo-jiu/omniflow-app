@@ -815,6 +815,20 @@
 - legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
 - validation: 固定 vendor executable oracle 对已有有效 MAP 后的 missing URI 输出 init URLs `["https://media.example/init-a.mp4", ""]`，对 empty URI 输出 `initUrl=""`，纯空白 URI 输出 playlist URL；静态 Cat Catch `parseTs` 证实会对这些 URL 调用 `fetch`。失败证据为 parser 22/23，实现后 parser 23/23、广义 HLS/inspection/projection Vitest 83/83、全仓 ESLint、TypeScript、`cat-catch:validate`、同步校验 16/16、fixture JSON 和 metadata 7 units/32 capabilities/192 anchors/106 cleanup entries/128 unique planned IDs/82 active refs 通过。全量 Vitest 为 1105 passed / 3 skipped / 16 sandbox-only loopback failures，4 个 loopback 文件在允许监听本机端口的环境复跑 20/20，折算全部可执行测试为 1121 passed / 3 skipped；Node 专用同步 validator 被 Vitest 收集后另报告 no suite。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
 
+## 2026-08-28: same target (HLS master variant group merge)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，固定依赖为 hls.js `1.6.16`。
+- reviewedThrough / portedThrough: 均保持 `null`；本步闭合同一 master level 的重复声明和完整 rendition group 投影，仍未完成 hls-engine cutover。
+- change groups: `behavioral`（固定 level identity、同 URI variant 合并、有序 group 去重）与 `renderer-projection`（plan 完整 group 数组、音轨/字幕过滤与高亮）。
+- affected capability IDs: `hls.parser-planner` 保持 `ported-unverified`；新增 2 个 active test ID。
+- fixtures/tests: 新增 upstream-executable fixture `hls-master-variant-group-merge`；`hls.master-variant-group-merge` 覆盖四条同 identity/同 URI 的 `EXT-X-STREAM-INF`（首条无 group）合并为一个 variant，并保留首个实际单值与完整的 `audio-en/audio-ja`、`sub-en/sub-ja` group；`hls.master-variant-rendition-groups` 覆盖工具区允许两组合关联轨道、排除未关联 `fr` 轨道，以及无 group variant 不错误收窄候选。
+- accepted difference: 固定 hls.js 还能把不同 URI 建模为显式 `PATHWAY-ID` fallback。当前 DTO/执行器没有 ordered fallback URL 语义，因此 OmniFlow 只合并同 identity 且同 resolved URI 的声明；跨 URI pathway entry 继续独立可选，不静默吞掉备用 URL。
+- excluded changes and reasons: 本步不实现 content steering、跨 URI pathway failover、轨道 codec 推断或播放 controller；不切换或删除 legacy HLS owner。
+- unresolved gaps: HLS 跨 URI pathway fallback、其余 master/media parser 差分、live 未捕获 URL 过渡 DTO、加密 fMP4/video 真实输出组合、真实网站手工验证和最终 hls-engine cutover。
+- runtime changes: pure parser 按 `PATHWAY-ID/BANDWIDTH/RESOLUTION/FRAME-RATE/CODECS/VIDEO-RANGE/HDCP-LEVEL` identity 合并同 URL variant，兼容单值 group ID 保留首组，新增数组贯穿 manifest 与 download plan；renderer 通过纯 helper 统一过滤、展示和高亮完整 group 集合，没有新增状态 owner、IPC channel 或 main authority。
+- legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
+- validation: 固定 vendor executable oracle 对 fixture 的 `MANIFEST_PARSED` 输出 1 个 level、首个实际单值 `audio-en/sub-en`、`audioGroups=[audio-en,audio-ja]`、`subtitleGroups=[sub-en,sub-ja]`；失败证据为 parser `23/24` 且收到 4 个重复 variant，renderer 新测试在 helper 未实现时无法加载。实现后 parser/renderer `26/26`，广义 HLS/authority/projection `40/40`，TypeScript、全仓 ESLint、固定上游 validator、同步校验 `16/16`、fixture JSON、metadata `7 units / 32 capabilities / 192 anchors / 106 cleanup entries / 130 planned IDs / 84 active refs` 和 scoped diff check 通过。排除其他 Agent 正在修改且当前 `17/18` 的 quota-manager 文件，以及应由 `node --test` 执行的同步文件后，全量 Vitest 为 `1115 passed / 3 skipped`；4 个 loopback 文件在 sandbox 外复跑 `20/20`。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
+
 ## Template
 
 ```markdown

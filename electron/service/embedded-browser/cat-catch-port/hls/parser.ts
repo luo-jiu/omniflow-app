@@ -59,6 +59,7 @@ export type CatCatchHlsSegment = {
 
 export type CatCatchHlsVariant = {
   audioGroupId?: string
+  audioGroupIds?: string[]
   averageBandwidth?: number
   bandwidth?: number
   codecs?: string
@@ -67,6 +68,7 @@ export type CatCatchHlsVariant = {
   rawLine: string
   resolution?: string
   subtitlesGroupId?: string
+  subtitlesGroupIds?: string[]
   uri: string
   url: string
 }
@@ -379,6 +381,7 @@ function createHlsVariant(
   if (!substitutedUri) return null
   return {
     audioGroupId: attributes.AUDIO,
+    audioGroupIds: attributes.AUDIO ? [attributes.AUDIO] : undefined,
     averageBandwidth: parseNumber(attributes['AVERAGE-BANDWIDTH']),
     bandwidth: parseNumber(attributes.BANDWIDTH),
     codecs: attributes.CODECS,
@@ -387,9 +390,67 @@ function createHlsVariant(
     rawLine: line,
     resolution: attributes.RESOLUTION,
     subtitlesGroupId: attributes.SUBTITLES,
+    subtitlesGroupIds: attributes.SUBTITLES ? [attributes.SUBTITLES] : undefined,
     uri: substitutedUri,
     url: resolveHlsUrl(substitutedUri, baseUrl),
   }
+}
+
+function getHlsVariantIdentity(variant: CatCatchHlsVariant) {
+  const attributes = variant.rawAttributes
+  return [
+    attributes['PATHWAY-ID'] || '.',
+    variant.bandwidth,
+    attributes.RESOLUTION,
+    attributes['FRAME-RATE'],
+    attributes.CODECS,
+    attributes['VIDEO-RANGE'],
+    attributes['HDCP-LEVEL'],
+  ].map(value => String(value)).join('-')
+}
+
+function appendUniqueHlsGroupIds(target: string[] | undefined, source: string[] | undefined) {
+  if (!source?.length) return target
+  const result = target || []
+  source.forEach((groupId) => {
+    if (!result.includes(groupId)) result.push(groupId)
+  })
+  return result
+}
+
+/**
+ * Upstream: xifangczy/cat-catch@2cb981d7c2f4614732edccc167c4b5793d1cb138
+ * Source: lib/hls.min.js#Level.addGroupId and LevelController.onManifestLoaded
+ * Reason: repeated EXT-X-STREAM-INF entries can describe one selectable level
+ * while attaching different AUDIO/SUBTITLES groups. Exposing each declaration
+ * as a variant duplicates the quality choice and hides valid renditions.
+ * Adaptation: only identical resolved URIs merge. The pinned Level controller
+ * also models cross-URI pathway fallbacks, which need a separate executable DTO.
+ * Fixture: hls-master-variant-group-merge
+ */
+function mergeHlsVariantGroups(variants: CatCatchHlsVariant[]) {
+  const variantsByIdentity = new Map<string, CatCatchHlsVariant>()
+  const mergedVariants: CatCatchHlsVariant[] = []
+  variants.forEach((variant) => {
+    const identity = getHlsVariantIdentity(variant)
+    const existing = variantsByIdentity.get(identity)
+    if (!existing || existing.url !== variant.url) {
+      variantsByIdentity.set(identity, variant)
+      mergedVariants.push(variant)
+      return
+    }
+    existing.audioGroupIds = appendUniqueHlsGroupIds(
+      existing.audioGroupIds,
+      variant.audioGroupIds,
+    )
+    existing.audioGroupId ||= existing.audioGroupIds?.[0]
+    existing.subtitlesGroupIds = appendUniqueHlsGroupIds(
+      existing.subtitlesGroupIds,
+      variant.subtitlesGroupIds,
+    )
+    existing.subtitlesGroupId ||= existing.subtitlesGroupIds?.[0]
+  })
+  return mergedVariants
 }
 
 function hasOnlyKnownHlsCodecs(variant: CatCatchHlsVariant) {
@@ -864,9 +925,10 @@ export function parseHlsManifest(input: {
    * Fixture: hls-master-variant-filtering
    */
   const variantsWithKnownCodecs = variants.filter(hasOnlyKnownHlsCodecs)
-  if (variantsWithKnownCodecs.length > 0 && variantsWithKnownCodecs.length < variants.length) {
-    variants.splice(0, variants.length, ...variantsWithKnownCodecs)
-  }
+  const selectableVariants = variantsWithKnownCodecs.length > 0
+    ? variantsWithKnownCodecs
+    : variants
+  variants.splice(0, variants.length, ...mergeHlsVariantGroups(selectableVariants))
   if (!variants.length && !segments.length) {
     // Upstream: xifangczy/cat-catch@2cb981d7c2f4614732edccc167c4b5793d1cb138
     // Source: lib/hls.min.js#parseMasterPlaylist/handlePlaylistLoaded

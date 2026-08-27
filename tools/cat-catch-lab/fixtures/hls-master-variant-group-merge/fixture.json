@@ -1,0 +1,21 @@
+{
+  "fixtureId": "hls-master-variant-group-merge",
+  "capabilityIds": [
+    "hls.parser-planner"
+  ],
+  "upstreamCommit": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
+  "upstreamDependency": "hls.js@1.6.16",
+  "status": "active",
+  "oracle": "upstream-executable",
+  "sourceRefs": [
+    "lib/hls.min.js#Level.addGroupId/audioGroups/subtitleGroups",
+    "lib/hls.min.js#LevelController.onManifestLoaded level identity grouping",
+    "js/m3u8.js#Hls.Events.MANIFEST_PARSED"
+  ],
+  "input": "master.m3u8",
+  "expected": "expected.json",
+  "testRefs": [
+    "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.master-variant-group-merge",
+    "src/features/tool-workspace/hls-rendition-groups.test.ts#hls.master-variant-rendition-groups"
+  ]
+}

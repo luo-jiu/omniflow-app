@@ -140,7 +140,7 @@ unit 是生产切换与删除旧实现的最小边界。可以在 unit 内逐项
 
 ## 7. 当前状态怎么判断
 
-当前固定目标为 Cat Catch `2cb981d7c2f4614732edccc167c4b5793d1cb138`。初始映射包含 7 个 unit 和 32 项 capability；`network-capture` 的 7 项目标能力均为 `ported-unverified`，`output.external-tools-dispatch` 为 `porting`，其余 24 项仍为 `pending`。目前有 28 个计划测试 ID 已落成真实 pure behavior/contract、fake Electron integration 或 loopback redirect test，尚未完成任何 unit cutover。`EmbeddedBrowserCaptureRuntime` 已把唯一 network adapter、每个 view 唯一 tokenized probe adapter、policy/vault/store、owner lifecycle、opaque access authority 和 bounded inspection 组合成 production main 链，并覆盖 navigation/tab/WebContents/crash/replacement/closeAll/app disposal；probe adapter 会预签下一 navigation generation 的 document-start token，导航后提升它并拒绝上一文档 token；现有 extension/MIME/regex/domain 设置可编译并原地热更新，下载、检查、已捕获资源页面拖拽和 external-tool consumer 也都从同一 authority 获取执行输入，probe/MSE 私有 page key 只能由 main 通过仍属于当前 document owner 的 opaque resource id 解析。资源状态、普通下载、检查、probe 动作和上述 consumer 的 IPC/preload/renderer 入口已迁移，HLS/DASH 计划下载、未捕获拖拽 fallback、旧 toolkit 及完整 unit cutover 仍待完成，因此旧链仍部分承担生产职责。
+当前固定目标为 Cat Catch `2cb981d7c2f4614732edccc167c4b5793d1cb138`。初始映射包含 7 个 unit 和 32 项 capability；逐项状态以 capability map 为准，目前有 84 个唯一计划测试引用已落成真实 pure behavior/contract、fake/real Electron integration 或 loopback redirect test，尚未完成任何 unit cutover。目标 network runtime、opaque resource authority、部分 HLS/DASH transport 与 HLS pure parser 已进入 production 或等价测试链，但未捕获 fallback、旧 toolkit、完整 parser/processing 语义及 unit 原子 cutover 仍待完成，因此旧链仍部分承担生产职责。
 
 旧代码中存在网络捕捉、MSE、HLS、DASH、下载、ffmpeg 和资料库导入入口，只能说明有 characterization 输入，不能据此宣称已经迁移。完成一项能力至少需要：
 

@@ -33,6 +33,7 @@ import {
 } from '@/features/embedded-browser/resources/model/embedded-browser-hls-resource-authority';
 import { selectNewestMatchingHlsTaskProjection } from './hls-task-projection';
 
+import { filterHlsRenditionsForVariant } from '../hls-rendition-groups';
 import type { ToolWorkspaceMediaHlsRequest } from '../types';
 
 export type HlsTaskStage = 'preparing' | 'downloading-fragments' | 'rewriting-playlist' | 'ffmpeg' | 'completed' | 'error';
@@ -448,9 +449,8 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
   }, [hlsRequest, selectedHlsVariantUrl]);
   const hlsEffectiveVariant = hlsSelectedVariant || hlsDefaultVariant;
   const hlsAudioRenditionOptions = React.useMemo<HlsRenditionOption[]>(() => (
-    hlsAudioRenditions
+    filterHlsRenditionsForVariant(hlsAudioRenditions, hlsEffectiveVariant, 'AUDIO')
       .filter((rendition) => Boolean(rendition.url))
-      .filter((rendition) => !hlsEffectiveVariant?.audioGroupId || rendition.groupId === hlsEffectiveVariant.audioGroupId)
       .map((rendition, index) => ({
         groupId: rendition.groupId,
         label: formatHlsRenditionOptionLabel(rendition, index),
@@ -458,9 +458,8 @@ export function useHlsDownloadTask(input: UseHlsDownloadTaskInput) {
       }))
   ), [hlsAudioRenditions, hlsEffectiveVariant]);
   const hlsSubtitleRenditionOptions = React.useMemo<HlsRenditionOption[]>(() => (
-    hlsSubtitleRenditions
+    filterHlsRenditionsForVariant(hlsSubtitleRenditions, hlsEffectiveVariant, 'SUBTITLES')
       .filter((rendition) => Boolean(rendition.url))
-      .filter((rendition) => !hlsEffectiveVariant?.subtitlesGroupId || rendition.groupId === hlsEffectiveVariant.subtitlesGroupId)
       .map((rendition, index) => ({
         groupId: rendition.groupId,
         label: formatHlsRenditionOptionLabel(rendition, index),
