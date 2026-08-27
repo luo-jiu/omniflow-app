@@ -1,0 +1,25 @@
+{
+  "fixtureId": "hls-media-playlist-structure-errors",
+  "capabilityIds": [
+    "hls.parser-planner"
+  ],
+  "upstreamCommit": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
+  "status": "active",
+  "oracle": "upstream-executable",
+  "sourceRefs": [
+    "lib/hls.min.js#parseLevelPlaylist",
+    "js/m3u8.js#Hls.Events.LEVEL_LOADED"
+  ],
+  "expected": "expected.json",
+  "inputs": [
+    "missing-format.m3u8",
+    "missing-target-duration.m3u8",
+    "duplicate-target-duration.m3u8",
+    "late-media-sequence.m3u8",
+    "late-discontinuity-sequence.m3u8",
+    "duplicate-playlist-type.m3u8"
+  ],
+  "testRefs": [
+    "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.media-playlist-structure-rejection"
+  ]
+}

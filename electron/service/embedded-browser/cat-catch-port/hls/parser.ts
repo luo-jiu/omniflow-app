@@ -133,6 +133,12 @@ function parseNumber(value?: string) {
   return Number.isFinite(parsed) ? parsed : undefined
 }
 
+function parseInteger(value?: string) {
+  if (!value) return undefined
+  const parsed = Number.parseInt(value, 10)
+  return Number.isFinite(parsed) ? parsed : undefined
+}
+
 function parseBoolean(value?: string) {
   const normalizedValue = String(value || '').trim().toUpperCase()
   if (normalizedValue === 'YES') return true
@@ -142,6 +148,32 @@ function parseBoolean(value?: string) {
 
 function rememberVariableParsingError(state: HlsVariableState, message: string) {
   state.playlistParsingError ||= new Error(message)
+}
+
+function assignPlaylistParsingError(state: HlsVariableState, message: string) {
+  state.playlistParsingError = new Error(message)
+}
+
+function assignMultipleMediaPlaylistTagError(
+  state: HlsVariableState,
+  tag: string,
+  line: string,
+) {
+  assignPlaylistParsingError(
+    state,
+    `#EXT-X-${tag} must not appear more than once (${line})`,
+  )
+}
+
+function assignTagMustPrecedeSegmentsError(
+  state: HlsVariableState,
+  tag: string,
+  line: string,
+) {
+  assignPlaylistParsingError(
+    state,
+    `#EXT-X-${tag} must appear before the first Media Segment (${line})`,
+  )
 }
 
 function substituteHlsVariables(input: string, state: HlsVariableState) {
@@ -392,21 +424,35 @@ function resolveByteRange(
   return resolved
 }
 
+/**
+ * Upstream: xifangczy/cat-catch@2cb981d7c2f4614732edccc167c4b5793d1cb138
+ * Source: lib/hls.min.js#parseLevelPlaylist and handlePlaylistLoaded
+ * Reason: playlist parsing errors prevent Cat Catch's LEVEL_LOADED -> parseTs
+ * path, so malformed input must not become an executable OmniFlow plan.
+ * Fixture: hls-media-playlist-structure-errors
+ */
 export function parseHlsManifest(input: {
   baseUrl: string
   parentVariableList?: Readonly<CatCatchHlsVariableList>
   text: string
 }): CatCatchHlsManifest {
   const baseUrl = String(input.baseUrl || '').trim()
+  const text = String(input.text || '').replace(/^\uFEFF/, '')
+  const hasMediaPlaylistSyntax = /^#EXT(?:INF|-X-TARGETDURATION):/m.test(text)
   const variableState: HlsVariableState = {
     baseUrl,
     parentVariableList: input.parentVariableList,
   }
-  const lines = String(input.text || '')
-    .replace(/^\uFEFF/, '')
+  const lines = text
     .split(/\r?\n/)
     .map(line => line.trim())
     .filter(Boolean)
+
+  if (lines[0] !== '#EXTM3U') {
+    throw new Error(hasMediaPlaylistSyntax
+      ? 'Missing format identifier #EXTM3U'
+      : 'no EXTM3U delimiter')
+  }
 
   let mediaSequence = 0
   let targetDuration: number | undefined
@@ -487,15 +533,29 @@ export function parseHlsManifest(input: {
       continue
     }
     if (line.startsWith('#EXT-X-MEDIA-SEQUENCE')) {
-      mediaSequence = parseNumber(getTagValue(line)) || 0
+      if (mediaSequence !== 0) {
+        assignMultipleMediaPlaylistTagError(variableState, 'MEDIA-SEQUENCE', line)
+      } else if (segments.length > 0) {
+        assignTagMustPrecedeSegmentsError(variableState, 'MEDIA-SEQUENCE', line)
+      }
+      mediaSequence = parseInteger(getTagValue(line)) || 0
       continue
     }
     if (line.startsWith('#EXT-X-TARGETDURATION')) {
-      targetDuration = parseNumber(getTagValue(line))
+      if (targetDuration !== undefined) {
+        assignMultipleMediaPlaylistTagError(variableState, 'TARGETDURATION', line)
+      }
+      const parsedTargetDuration = parseInteger(getTagValue(line))
+      targetDuration = parsedTargetDuration === undefined
+        ? undefined
+        : Math.max(parsedTargetDuration, 1)
       continue
     }
     if (line.startsWith('#EXT-X-PLAYLIST-TYPE')) {
-      playlistType = getTagValue(line) || undefined
+      if (playlistType !== undefined) {
+        assignMultipleMediaPlaylistTagError(variableState, 'PLAYLIST-TYPE', line)
+      }
+      playlistType = getTagValue(line).toUpperCase() || undefined
       continue
     }
     if (line.startsWith('#EXT-X-KEY')) {
@@ -517,7 +577,12 @@ export function parseHlsManifest(input: {
       continue
     }
     if (line.startsWith('#EXT-X-DISCONTINUITY-SEQUENCE')) {
-      discontinuitySequence = parseNumber(getTagValue(line)) || 0
+      if (discontinuitySequence !== 0) {
+        assignMultipleMediaPlaylistTagError(variableState, 'DISCONTINUITY-SEQUENCE', line)
+      } else if (segments.length > 0) {
+        assignTagMustPrecedeSegmentsError(variableState, 'DISCONTINUITY-SEQUENCE', line)
+      }
+      discontinuitySequence = parseInteger(getTagValue(line)) || 0
       continue
     }
     if (line.startsWith('#EXT-X-DISCONTINUITY')) {
@@ -539,6 +604,9 @@ export function parseHlsManifest(input: {
     if (line.startsWith('#EXT-X-ENDLIST')) hasEndList = true
   }
 
+  if (hasMediaPlaylistSyntax && targetDuration === undefined) {
+    assignPlaylistParsingError(variableState, 'Missing Target Duration')
+  }
   if (variableState.playlistParsingError) {
     throw variableState.playlistParsingError
   }

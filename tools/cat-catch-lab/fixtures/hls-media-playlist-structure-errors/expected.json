@@ -1,0 +1,8 @@
+{
+  "duplicate-playlist-type.m3u8": "#EXT-X-PLAYLIST-TYPE must not appear more than once (#EXT-X-PLAYLIST-TYPE:EVENT)",
+  "duplicate-target-duration.m3u8": "#EXT-X-TARGETDURATION must not appear more than once (#EXT-X-TARGETDURATION:5)",
+  "late-discontinuity-sequence.m3u8": "#EXT-X-DISCONTINUITY-SEQUENCE must appear before the first Media Segment (#EXT-X-DISCONTINUITY-SEQUENCE:2)",
+  "late-media-sequence.m3u8": "#EXT-X-MEDIA-SEQUENCE must appear before the first Media Segment (#EXT-X-MEDIA-SEQUENCE:10)",
+  "missing-format.m3u8": "Missing format identifier #EXTM3U",
+  "missing-target-duration.m3u8": "Missing Target Duration"
+}

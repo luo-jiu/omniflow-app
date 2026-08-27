@@ -64,6 +64,13 @@ const emptyMediaFixture = JSON.parse(readFileSync(`${emptyMediaFixtureRoot}/fixt
   inputs: string[]
 }
 
+const mediaStructureFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-media-playlist-structure-errors', import.meta.url))
+const mediaStructureFixture = JSON.parse(readFileSync(`${mediaStructureFixtureRoot}/fixture.json`, 'utf8')) as {
+  expected: string
+  inputs: string[]
+}
+const mediaStructureExpected = JSON.parse(readFileSync(`${mediaStructureFixtureRoot}/${mediaStructureFixture.expected}`, 'utf8')) as Record<string, string>
+
 const variableFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-variable-substitution', import.meta.url))
 const variableFixture = JSON.parse(readFileSync(`${variableFixtureRoot}/fixture.json`, 'utf8')) as {
   expected: string
@@ -176,6 +183,27 @@ describe('Cat Catch HLS parser', () => {
     }
   })
 
+  it('hls.media-playlist-structure-rejection', () => {
+    for (const input of mediaStructureFixture.inputs) {
+      const text = readFileSync(`${mediaStructureFixtureRoot}/${input}`, 'utf8')
+      expect(() => parseHlsManifest({
+        baseUrl: `https://media.example/${input}`,
+        text,
+      }), input).toThrow(mediaStructureExpected[input])
+    }
+  })
+
+  it('normalizes integer media tags like pinned hls.js', () => {
+    const manifest = parseHlsManifest({
+      baseUrl: 'https://media.example/normalized.m3u8',
+      text: '#EXTM3U\n#EXT-X-TARGETDURATION:0\n#EXT-X-PLAYLIST-TYPE:event\n#EXTINF:1,\nsegment.ts\n#EXT-X-ENDLIST\n',
+    })
+    expect(manifest).toMatchObject({
+      playlistType: 'EVENT',
+      targetDuration: 1,
+    })
+  })
+
   it('hls.variable-substitution', () => {
     const master = parseHlsManifest({
       baseUrl: variableExpected.masterBaseUrl,
@@ -212,28 +240,28 @@ describe('Cat Catch HLS parser', () => {
   it('preserves pinned hls.js EXT-X-DEFINE failure semantics', () => {
     expect(() => parseHlsManifest({
       baseUrl: 'https://example.test/media.m3u8',
-      text: '#EXTM3U\n#EXT-X-DEFINE:NAME="dup",VALUE="one"\n#EXT-X-DEFINE:NAME="dup",VALUE="two"\n#EXTINF:4,\n{$missing}/segment.ts\n',
+      text: '#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXT-X-DEFINE:NAME="dup",VALUE="one"\n#EXT-X-DEFINE:NAME="dup",VALUE="two"\n#EXTINF:4,\n{$missing}/segment.ts\n',
     })).toThrow('EXT-X-DEFINE duplicate Variable Name declarations: "dup"')
 
     expect(() => parseHlsManifest({
       baseUrl: 'https://example.test/media.m3u8',
-      text: '#EXTM3U\n#EXT-X-DEFINE:QUERYPARAM="missing"\n',
+      text: '#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXT-X-DEFINE:QUERYPARAM="missing"\n#EXTINF:4,\nsegment.ts\n',
     })).toThrow('EXT-X-DEFINE QUERYPARAM: "missing" does not match any query parameter in URI: "https://example.test/media.m3u8"')
 
     expect(() => parseHlsManifest({
       baseUrl: 'https://example.test/media.m3u8',
-      text: '#EXTM3U\n#EXT-X-DEFINE:IMPORT="root"\n',
+      text: '#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXT-X-DEFINE:IMPORT="root"\n#EXTINF:4,\nsegment.ts\n',
     })).toThrow('EXT-X-DEFINE IMPORT attribute not found in Multivariant Playlist: "root"')
 
     expect(() => parseHlsManifest({
       baseUrl: 'https://example.test/media.m3u8',
-      text: '#EXTM3U\n#EXTINF:4,\n{$missing}/segment.ts\n',
+      text: '#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXTINF:4,\n{$missing}/segment.ts\n',
     })).toThrow('Missing preceding EXT-X-DEFINE tag for Variable Reference: "missing"')
 
     expect(() => parseHlsManifest({
       baseUrl: 'https://example.test/media.m3u8',
       parentVariableList: { root: 'https://cdn.example/assets' },
-      text: '#EXTM3U\n#EXTINF:4,\n{$root}/segment.ts\n',
+      text: '#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXTINF:4,\n{$root}/segment.ts\n',
     })).toThrow('Missing preceding EXT-X-DEFINE tag for Variable Reference: "root"')
   })
 

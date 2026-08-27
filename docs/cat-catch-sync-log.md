@@ -647,6 +647,20 @@
 - legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
 - validation: 失败证据为 owner 11/17 通过且 6 条投影/生命周期测试失败、renderer selector 模块缺失；实现、测试环境与输出交付边界修正后新增 owner/selector/hook/IPC 定向测试 24/24、完整 HLS Vitest 73/73（clear 与 AES-128 真实 ffmpeg/ffprobe output 均实际执行）、TypeScript、全仓 ESLint、固定上游 validator、同步校验 16/16、metadata 7 units/32 capabilities/192 anchors/106 cleanup entries/112 unique planned IDs/66 active refs 和 scoped diff check 通过。全量 Vitest 为 974 passed / 1 skipped / 16 sandbox-only loopback failures，Node 专用同步 validator 文件被 Vitest 收集后另报告 no suite；完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
 
+## 2026-08-27: same target (HLS media playlist structure rejection)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动。
+- reviewedThrough / portedThrough: 均保持 `null`；本步补齐固定 hls.js 的媒体清单结构拒绝语义，仍未完成 hls-engine cutover。
+- change groups: `behavioral`（结构无效的 media playlist 不进入 Cat Catch `LEVEL_LOADED -> parseTs`）与 `verification`（固定 vendor executable oracle）。
+- affected capability IDs: `hls.parser-planner` 保持 `ported-unverified`。
+- fixtures/tests: 新增 upstream-executable fixture `hls-media-playlist-structure-errors`；`hls.media-playlist-structure-rejection` 覆盖缺少 `#EXTM3U`、缺少 `TARGETDURATION`、重复 `TARGETDURATION` / `PLAYLIST-TYPE`，以及首个 fragment 后的 `MEDIA-SEQUENCE` / `DISCONTINUITY-SEQUENCE`。正向测试同时锁定整数 `TARGETDURATION` 的最小值 1 和大写 `PLAYLIST-TYPE`。
+- accepted difference: 固定 hls.js 通过 `levelParsingError` 报告 reason 并阻止 `LEVEL_LOADED`；同步 OmniFlow facade 没有 evented loader 边界，因此在创建下载计划前直接抛出相同 reason。变量错误用例补齐合法 `TARGETDURATION`，避免被固定 hls.js 更晚的 `Missing Target Duration` 覆盖而形成假 oracle。
+- excluded changes and reasons: 不在本步迁移 `PROGRAM-DATE-TIME`、`GAP`、`DATERANGE`、`SKIP`、session key、未知 codec 过滤或其余 master/loader event；不进行 cutover 或删除旧链。
+- unresolved gaps: HLS 其余 parser 标签和 key 支持差分、live 未捕获 URL 过渡 DTO、视频+AES 真实组合、真实网站手工验证和最终 hls-engine cutover。
+- runtime changes: `parseHlsManifest` 在生成计划前复刻固定 hls.js 的格式头、目标时长、单例标签和标签顺序校验；结构错误沿用 hls.js 的后写覆盖顺序，变量替换错误继续只保留第一条。媒体整数标签改用 `parseInt` 语义，目标时长最小为 1，playlist type 归一为大写。
+- legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
+- validation: 固定 vendor 对 6 个输入均实际执行并得到对应 `levelParsingError`，失败证据为 parser 8/9；实现与 review 后 parser 10/10、完整 HLS Vitest 73/73、全仓 ESLint、固定上游 validator、同步校验 16/16、metadata 7 units/32 capabilities/192 anchors/106 cleanup entries/113 unique planned IDs/67 active refs 和 scoped diff check 通过。全局 TypeScript 被其他 Agent 在途的 PowerShell/Agent 测试类型错误阻断；全量 Vitest 为 1000 passed / 1 skipped / 27 failed，其中 16 条是 sandbox-only loopback 监听失败，另 11 条来自其他 Agent 在途的 Shell Provider / orchestrator 改动，Node 专用同步 validator 文件被 Vitest 收集后另报告 no suite。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
+
 ## Template
 
 ```markdown
