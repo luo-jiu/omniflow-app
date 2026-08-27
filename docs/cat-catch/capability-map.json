@@ -862,7 +862,8 @@
         "electron/service/embeddedBrowserMainController.ts#embeddedBrowserHlsRetrySessions"
       ],
       "targetRefs": [
-        "electron/service/embedded-browser/processing/hls-task.ts#HlsTaskExecutor"
+        "electron/service/embedded-browser/processing/hls-task.ts#HlsTaskExecutor",
+        "electron/service/embedded-browser/cat-catch-port/hls/decrypt.ts#decryptHlsAes128"
       ],
       "relationToUpstream": "platform-substitute",
       "syncState": "porting",
@@ -874,7 +875,8 @@
         "hls.plan-authority-fetch"
       ],
       "testRefs": [
-        "electron/service/embeddedBrowserFragmentDownloader.test.ts#hls.plan-authority-fetch"
+        "electron/service/embeddedBrowserFragmentDownloader.test.ts#hls.plan-authority-fetch",
+        "electron/service/embedded-browser/cat-catch-port/hls/decrypt.test.ts#hls.decrypt-preprocess-order"
       ],
       "acceptedDifferences": [],
       "notes": "Plan execution now accepts a main-owned fetch transport: captured fragment/key/map URLs are redeemed through the current tab resource authority with bounded Range support, while unrecognized URLs retain the embedded-session fallback. The fragment downloader now supports an ordered async processor chain and emits each processed stage, preserving the Cat Catch use() pipeline boundary for future decrypt/transcode steps. No single task/cancel owner spans plan execution, retry sessions, work directories, and renderer listeners. Vendor provenance blockers: lib/third-party-libraries.md attributes m3u8-decrypt.js to the mutable hls.js master path rather than an immutable revision; the loaded StreamSaver bundle self-reports 2.0.5 while that document declares 2.0.6, has no verified immutable artifact binding, and retains remote MITM configuration."
@@ -968,7 +970,8 @@
         "hls.decrypt-preprocess-order"
       ],
       "testRefs": [
-        "electron/service/embedded-browser/cat-catch-port/hls/pipeline.test.ts#hls.cache-fallback-disguised"
+        "electron/service/embedded-browser/cat-catch-port/hls/pipeline.test.ts#hls.cache-fallback-disguised",
+        "electron/service/embedded-browser/cat-catch-port/hls/decrypt.test.ts#hls.decrypt-preprocess-order"
       ],
       "acceptedDifferences": [],
       "notes": "The pure port preserves Cat Catch's conservative PNG/JPEG prefix removal with an unchanged-buffer fallback for incomplete signatures. The local HLS fragment downloader now optionally applies it after rawBuffer emission and before sequential output; current local-plan and live-recording paths enable the option. One-shot manifest cache fallback, decrypt/preprocess ordering, and production-equivalent HLS output verification remain open."

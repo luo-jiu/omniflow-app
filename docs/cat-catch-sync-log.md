@@ -381,6 +381,20 @@
 - legacy cleanup: 无；现有 downloader 仍是生产 owner，尚未切换或删除旧实现。
 - validation: 定向 Vitest 7/7、TypeScript、定向 ESLint、`cat-catch:validate` 和同步校验 16/16 通过；完整 build 仍因其他 Agent 的 `dist-electron/**` 修改未运行。
 
+## 2026-08-27: same target (HLS AES-128 primitive and ordering evidence)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动。
+- reviewedThrough / portedThrough: 均保持 `null`；本步新增纯 Web Crypto AES-128-CBC 解密原语和默认 IV 生成，仍未完成 hls-engine cutover。
+- change groups: `behavioral`（Cat Catch HLS AES-128 解密、PKCS#7 去 padding、manifest IV / sequence 默认 IV）与 `platform-adaptation`（使用标准 Web Crypto，不携带扩展页 AES bundle）。
+- affected capability IDs: `hls.segment-pipeline` 与 `hls.cache-fallback-disguised-fragments` 保持 `porting`。
+- fixtures/tests: `hls/decrypt.test.ts` 覆盖 AES-128 round-trip、sequence-derived IV、非法输入和 `hls.decrypt-preprocess-order`（图片前缀先剥除再解密）。
+- accepted difference: 原语要求完整 16-byte ciphertext block，并依赖 Web Crypto 对 PKCS#7 做严格校验；上游 bundle 对异常 padding 的行为未作为正常媒体路径保留。
+- excluded changes and reasons: 不在本步把解密接入本地 playlist/ffmpeg、实现 key cache、统一 task/cancel owner 或删除旧 downloader。
+- unresolved gaps: production HLS decrypt adapter、key 生命周期与 authority、完整 output smoke、一次性 cache fallback、统一 task/cleanup 和 page validation。
+- runtime changes: 新增 `cat-catch-port/hls/decrypt.ts`，导出 `decryptHlsAes128` 与 `createHlsDefaultIv`；处理器链已可承接该异步步骤。
+- legacy cleanup: 无；现有 ffmpeg/playlist 解密路径继续承担生产职责。
+- validation: 定向 decrypt 测试 4/4；待本步提交前重跑 HLS 全集、TypeScript、定向 ESLint、`cat-catch:validate`、同步校验和 diff 检查；完整 build 仍因其他 Agent 的 `dist-electron/**` 修改未运行。
+
 ## Template
 
 ```markdown
