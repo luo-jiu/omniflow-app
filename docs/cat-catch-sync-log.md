@@ -675,6 +675,20 @@
 - legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
 - validation: 固定 vendor executable oracle 分别得到跨 URI media `10@100 -> 10@110` 与同 URI MAP `10@100 -> 10@0`；失败证据为 parser 9/11，实现后 parser 11/11、完整 HLS Vitest 74/74；本次收尾复跑 pure HLS port 16/16、固定上游 validator、同步校验 16/16、metadata 7 units/32 capabilities/192 anchors/106 cleanup entries/114 unique planned IDs/68 active refs 和 scoped diff check 均通过。未复跑全仓 Vitest、ESLint、TypeScript 或 build；并行 Agent 的在途改动仍会影响全仓结果，且 build 会覆盖其 `dist-electron/**`，暂无真实网站手工场景。
 
+## 2026-08-27: same target (HLS AES-128 effective IV and playlist rotation)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动。
+- reviewedThrough / portedThrough: 均保持 `null`；本步闭合 AES-128 fragment effective IV 与本地 rewritten playlist 的 IV 轮换语义，仍未完成 hls-engine cutover。
+- change groups: `behavioral`（无显式 IV 时按 media sequence 派生 16-byte big-endian IV）与 `platform-adaptation`（key 资源去重和 playlist 加密状态使用不同 identity）。
+- affected capability IDs: `hls.parser-planner` 保持 `ported-unverified`；`hls.segment-pipeline` 保持 `porting`。
+- fixtures/tests: 新增 upstream-executable fixture `hls-aes128-iv-semantics`；`hls.aes128-effective-iv` 锁定 sequence 7/8 的派生 IV 和 sequence 9 的显式 IV；`hls.aes128-local-playlist-iv` 锁定同一 key URL 只下载一次 key bytes，但按三个有效 IV 重写三条 `EXT-X-KEY`；`hls.real-aes128-local-output` 扩展为显式 IV 与非零 media sequence 隐式 IV 两种真实 ffmpeg/ffprobe 输出。
+- accepted difference: Cat Catch 在 JavaScript downloader 内按 fragment decryptdata 解密；OmniFlow 继续把有效 IV 固化进 fragment DTO 和本地 playlist，并由唯一可取消 ffmpeg owner 解密/remux，不增加第二轮 JavaScript production decrypt。
+- excluded changes and reasons: 不在本步扩展 SAMPLE-AES/DRM、KEYFORMATVERSIONS、session key、delta playlist、视频加密组合、live 过渡 DTO 或其他 parser 标签；不进行 cutover 或删除旧链。
+- unresolved gaps: HLS 其余 parser/key 标签差分、live 未捕获 URL 过渡 DTO、视频+AES 真实组合、真实网站手工验证和最终 hls-engine cutover。
+- runtime changes: pure parser 为缺省 IV 的 AES-128 fragment 克隆 key DTO 并写入 sequence-derived IV；本地 downloader 继续用 method/URL/manual key identity 去重 key 文件，但用 method/local key ref/IV/KEYFORMAT identity 判断是否重发 `EXT-X-KEY`，避免相同 key URL 吞掉 IV 轮换。
+- legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
+- validation: 固定 vendor 对同一 fixture 实际输出 sequence 7/8/9 对应 `IV 07/08/2a`；失败证据为 parser/local downloader 合计 16/18 且两条预期差分失败，实现后 18/18、完整 HLS Vitest 75/75（clear、显式 IV AES-128、隐式 IV AES-128 的真实 ffmpeg/ffprobe output 均实际执行）、全仓 ESLint、固定上游 validator、同步校验 16/16、metadata 7 units/32 capabilities/192 anchors/106 cleanup entries/116 unique planned IDs/70 active refs 和 scoped diff check 通过。全局 TypeScript 仅被其他 Agent 在途的 Shell Provider / Agent prepared-action 测试类型错误阻断；全量 Vitest 为 1030 passed / 1 skipped / 22 failed，其中 16 条是 sandbox-only loopback 监听失败，另 5 条来自 Shell Provider registry、1 条来自 Agent orchestrator，Node 专用同步 validator 被 Vitest 收集后另报告 no suite。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
+
 ## Template
 
 ```markdown

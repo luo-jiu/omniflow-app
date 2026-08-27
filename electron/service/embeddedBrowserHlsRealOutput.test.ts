@@ -101,92 +101,110 @@ describe.skipIf(!ffmpegPath || !ffprobePath)('EmbeddedBrowser real HLS output', 
   })
 
   it('hls.real-aes128-local-output', async () => {
-    const directory = await mkdtemp(path.join(os.tmpdir(), 'omniflow-hls-real-aes-output-test-'))
-    const sourceDirectory = path.join(directory, 'source')
-    const workDirectory = path.join(directory, 'work')
-    const sourcePlaylistPath = path.join(sourceDirectory, 'source.m3u8')
-    const sourceKeyPath = path.join(sourceDirectory, 'source.key')
-    const keyInfoPath = path.join(sourceDirectory, 'key-info.txt')
-    const outputPath = path.join(directory, 'output.mp4')
     const keyBytes = Uint8Array.from({ length: 16 }, (_, index) => index + 1)
-    const manifestUrl = 'https://media.example/encrypted/source.m3u8'
+    const cases = [
+      {
+        expectedIv: '0x0000000000000000000000000000002a',
+        keyInfoIv: '0000000000000000000000000000002a',
+        name: 'explicit',
+        startNumber: 0,
+      },
+      {
+        expectedIv: '0x00000000000000000000000000000007',
+        name: 'implicit-sequence',
+        startNumber: 7,
+      },
+    ]
 
-    try {
-      await Promise.all([
-        mkdir(sourceDirectory, { recursive: true }),
-        mkdir(workDirectory, { recursive: true }),
-      ])
-      await writeFile(sourceKeyPath, keyBytes)
-      await writeFile(keyInfoPath, [
-        'https://media.example/encrypted/key.bin',
-        sourceKeyPath,
-        '0000000000000000000000000000002a',
-        '',
-      ].join('\n'))
+    for (const testCase of cases) {
+      const directory = await mkdtemp(path.join(os.tmpdir(), `omniflow-hls-real-aes-${testCase.name}-test-`))
+      const sourceDirectory = path.join(directory, 'source')
+      const workDirectory = path.join(directory, 'work')
+      const sourcePlaylistPath = path.join(sourceDirectory, 'source.m3u8')
+      const sourceKeyPath = path.join(sourceDirectory, 'source.key')
+      const keyInfoPath = path.join(sourceDirectory, 'key-info.txt')
+      const outputPath = path.join(directory, 'output.mp4')
+      const manifestUrl = `https://media.example/encrypted/${testCase.name}/source.m3u8`
 
-      const generateResult = spawnSync(ffmpegPath!, [
-        '-y',
-        '-v',
-        'error',
-        '-f',
-        'lavfi',
-        '-i',
-        'sine=frequency=1200:sample_rate=44100:duration=0.5',
-        '-c:a',
-        'aac',
-        '-b:a',
-        '64k',
-        '-f',
-        'hls',
-        '-hls_list_size',
-        '0',
-        '-hls_key_info_file',
-        keyInfoPath,
-        '-hls_segment_filename',
-        'segment-%03d.ts',
-        'source.m3u8',
-      ], {
-        cwd: sourceDirectory,
-        encoding: 'utf8',
-        timeout: 10_000,
-      })
-      expect(generateResult.status, generateResult.stderr).toBe(0)
+      try {
+        await Promise.all([
+          mkdir(sourceDirectory, { recursive: true }),
+          mkdir(workDirectory, { recursive: true }),
+        ])
+        await writeFile(sourceKeyPath, keyBytes)
+        await writeFile(keyInfoPath, [
+          `https://media.example/encrypted/${testCase.name}/key.bin`,
+          sourceKeyPath,
+          ...(testCase.keyInfoIv ? [testCase.keyInfoIv] : []),
+          '',
+        ].join('\n'))
 
-      const sourcePlaylist = await readFile(sourcePlaylistPath, 'utf8')
-      const manifest = parseEmbeddedBrowserHlsManifest({
-        baseUrl: manifestUrl,
-        text: sourcePlaylist,
-      })
-      const plan = createEmbeddedBrowserHlsDownloadPlan({
-        manifest,
-        manifestUrl,
-      })
-      const localResult = await downloadEmbeddedBrowserHlsToLocalWorkDirectory({
-        fetch: async (url: string) => {
-          const sourcePath = url.endsWith('/key.bin')
-            ? sourceKeyPath
-            : path.join(sourceDirectory, path.basename(new URL(url).pathname))
-          const bytes = await readFile(sourcePath)
-          return new Response(new Uint8Array(bytes).buffer)
-        },
-        plan,
-        preprocessFragments: true,
-        workDirectoryPath: workDirectory,
-      })
-      const localPlaylist = await readFile(localResult.playlistPath, 'utf8')
-      expect(localPlaylist).toContain('#EXT-X-KEY:METHOD=AES-128')
-      expect(localPlaylist).toContain('URI="keys/key-001.key"')
-      expect(localPlaylist).toContain('IV=0x0000000000000000000000000000002a')
+        const generateResult = spawnSync(ffmpegPath!, [
+          '-y',
+          '-v',
+          'error',
+          '-f',
+          'lavfi',
+          '-i',
+          'sine=frequency=1200:sample_rate=44100:duration=0.5',
+          '-c:a',
+          'aac',
+          '-b:a',
+          '64k',
+          '-f',
+          'hls',
+          '-hls_list_size',
+          '0',
+          '-hls_key_info_file',
+          keyInfoPath,
+          '-start_number',
+          String(testCase.startNumber),
+          '-hls_segment_filename',
+          'segment-%03d.ts',
+          'source.m3u8',
+        ], {
+          cwd: sourceDirectory,
+          encoding: 'utf8',
+          timeout: 10_000,
+        })
+        expect(generateResult.status, generateResult.stderr).toBe(0)
 
-      const result = await downloadEmbeddedBrowserManifestResource({
-        ffmpegPath: ffmpegPath!,
-        kind: 'hls',
-        manifestUrl: localResult.playlistPath,
-        outputPath,
-      })
-      await expectAacMp4Output(result.outputPath)
-    } finally {
-      await rm(directory, { force: true, recursive: true })
+        const sourcePlaylist = await readFile(sourcePlaylistPath, 'utf8')
+        const manifest = parseEmbeddedBrowserHlsManifest({
+          baseUrl: manifestUrl,
+          text: sourcePlaylist,
+        })
+        const plan = createEmbeddedBrowserHlsDownloadPlan({
+          manifest,
+          manifestUrl,
+        })
+        const localResult = await downloadEmbeddedBrowserHlsToLocalWorkDirectory({
+          fetch: async (url: string) => {
+            const sourcePath = url.endsWith('/key.bin')
+              ? sourceKeyPath
+              : path.join(sourceDirectory, path.basename(new URL(url).pathname))
+            const bytes = await readFile(sourcePath)
+            return new Response(new Uint8Array(bytes).buffer)
+          },
+          plan,
+          preprocessFragments: true,
+          workDirectoryPath: workDirectory,
+        })
+        const localPlaylist = await readFile(localResult.playlistPath, 'utf8')
+        expect(localPlaylist).toContain('#EXT-X-KEY:METHOD=AES-128')
+        expect(localPlaylist).toContain('URI="keys/key-001.key"')
+        expect(localPlaylist).toContain(`IV=${testCase.expectedIv}`)
+
+        const result = await downloadEmbeddedBrowserManifestResource({
+          ffmpegPath: ffmpegPath!,
+          kind: 'hls',
+          manifestUrl: localResult.playlistPath,
+          outputPath,
+        })
+        await expectAacMp4Output(result.outputPath)
+      } finally {
+        await rm(directory, { force: true, recursive: true })
+      }
     }
   })
 })

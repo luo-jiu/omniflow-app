@@ -83,6 +83,17 @@ const mapByteRangeExpected = JSON.parse(readFileSync(`${mapByteRangeFixtureRoot}
   segmentMapOffsets: number[]
 }
 
+const aesIvFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-aes128-iv-semantics', import.meta.url))
+const aesIvFixture = JSON.parse(readFileSync(`${aesIvFixtureRoot}/fixture.json`, 'utf8')) as {
+  expected: string
+  input: string
+}
+const aesIvPlaylist = readFileSync(`${aesIvFixtureRoot}/${aesIvFixture.input}`, 'utf8')
+const aesIvExpected = JSON.parse(readFileSync(`${aesIvFixtureRoot}/${aesIvFixture.expected}`, 'utf8')) as {
+  baseUrl: string
+  segments: Array<{ iv: string; keyUrl: string; sequence: number; url: string }>
+}
+
 const variableFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-variable-substitution', import.meta.url))
 const variableFixture = JSON.parse(readFileSync(`${variableFixtureRoot}/fixture.json`, 'utf8')) as {
   expected: string
@@ -168,6 +179,19 @@ describe('Cat Catch HLS parser', () => {
     }))).toEqual(mapByteRangeExpected.maps)
     expect(manifest.segments.map(segment => segment.map?.byteRange?.offset))
       .toEqual(mapByteRangeExpected.segmentMapOffsets)
+  })
+
+  it('hls.aes128-effective-iv', () => {
+    const manifest = parseHlsManifest({
+      baseUrl: aesIvExpected.baseUrl,
+      text: aesIvPlaylist,
+    })
+    expect(manifest.segments.map(segment => ({
+      iv: segment.key?.iv,
+      keyUrl: segment.key?.url,
+      sequence: segment.sequence,
+      url: segment.url,
+    }))).toEqual(aesIvExpected.segments)
   })
 
   it('hls.ll-parts-fragment-parity', () => {

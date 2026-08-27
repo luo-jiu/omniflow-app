@@ -228,4 +228,50 @@ describe('EmbeddedBrowser HLS local downloader', () => {
       await rm(directory, { force: true, recursive: true })
     }
   })
+
+  it('hls.aes128-local-playlist-iv', async () => {
+    const keyUrl = 'https://media.example/key.bin'
+    const keyBytes = Uint8Array.from({ length: 16 }, (_, index) => index + 1)
+    const fetchImpl = vi.fn(async (url: string) => (
+      new Response(url === keyUrl
+        ? keyBytes.buffer
+        : Uint8Array.from([0x47, 0x01]).buffer)
+    ))
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'omniflow-hls-key-iv-test-'))
+    const ivs = [
+      '0x00000000000000000000000000000007',
+      '0x00000000000000000000000000000008',
+      '0x0000000000000000000000000000002a',
+    ]
+    const plan = {
+      ...createPlan(),
+      fragments: ivs.map((iv, index) => ({
+        ...createPlan().fragments[0],
+        index,
+        key: {
+          iv,
+          method: 'AES-128',
+          url: keyUrl,
+        },
+        sequence: 7 + index,
+        url: `https://media.example/segment-${7 + index}.ts`,
+      })),
+    }
+
+    try {
+      const result = await downloadEmbeddedBrowserHlsToLocalWorkDirectory({
+        fetch: fetchImpl,
+        plan,
+        workDirectoryPath: directory,
+      })
+      const playlist = await readFile(result.playlistPath, 'utf8')
+      expect(playlist.split('\n').filter(line => line.startsWith('#EXT-X-KEY:'))).toEqual(
+        ivs.map(iv => `#EXT-X-KEY:METHOD=AES-128,URI="keys/key-001.key",IV=${iv}`),
+      )
+      expect(fetchImpl.mock.calls.filter(([url]) => url === keyUrl)).toHaveLength(1)
+      expect(result.keyCount).toBe(1)
+    } finally {
+      await rm(directory, { force: true, recursive: true })
+    }
+  })
 })

@@ -366,7 +366,7 @@ function buildLocalPlaylist(input: {
   ]
 
   let previousDiscontinuity = input.fragments[0]?.discontinuitySequence ?? 0
-  let previousKeyCacheKey = ''
+  let previousKeyStateKey = ''
   let previousMapCacheKey = ''
   let hadKey = false
 
@@ -376,21 +376,24 @@ function buildLocalPlaylist(input: {
       previousDiscontinuity = fragment.discontinuitySequence
     }
 
-    const nextKeyCacheKey = fragment.key
+    const nextKeyRefCacheKey = fragment.key
       ? createKeyRefCacheKey({
           manualKeyBase64: input.manualKeyBase64,
           method: fragment.key.method,
           url: fragment.key.url,
         })
       : ''
-    if (fragment.key && nextKeyCacheKey !== previousKeyCacheKey) {
-      const keyRecord = getRequiredLocalRef('key', input.keyRefs.get(nextKeyCacheKey), fragment.sequence)
+    const nextKeyStateKey = fragment.key
+      ? `${nextKeyRefCacheKey}|${fragment.key.iv || ''}|${fragment.key.keyFormat || ''}`
+      : ''
+    if (fragment.key && nextKeyStateKey !== previousKeyStateKey) {
+      const keyRecord = getRequiredLocalRef('key', input.keyRefs.get(nextKeyRefCacheKey), fragment.sequence)
       lines.push(createHlsKeyLine(fragment.key, keyRecord.playlistPath))
-      previousKeyCacheKey = nextKeyCacheKey
+      previousKeyStateKey = nextKeyStateKey
       hadKey = true
     } else if (!fragment.key && hadKey) {
       lines.push('#EXT-X-KEY:METHOD=NONE')
-      previousKeyCacheKey = ''
+      previousKeyStateKey = ''
       hadKey = false
     }
 

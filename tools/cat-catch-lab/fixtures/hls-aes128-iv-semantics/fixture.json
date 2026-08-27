@@ -1,0 +1,21 @@
+{
+  "fixtureId": "hls-aes128-iv-semantics",
+  "capabilityIds": [
+    "hls.parser-planner",
+    "hls.segment-pipeline"
+  ],
+  "upstreamCommit": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
+  "status": "active",
+  "oracle": "upstream-executable",
+  "sourceRefs": [
+    "lib/hls.min.js#createInitializationVector",
+    "lib/hls.min.js#LevelKey.getDecryptData",
+    "js/m3u8.js#parseTs(data)"
+  ],
+  "input": "playlist.m3u8",
+  "expected": "expected.json",
+  "testRefs": [
+    "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.aes128-effective-iv",
+    "electron/service/embeddedBrowserHlsLocalDownloaderService.test.ts#hls.aes128-local-playlist-iv"
+  ]
+}

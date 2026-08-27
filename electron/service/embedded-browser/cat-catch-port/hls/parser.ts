@@ -9,6 +9,8 @@
  * Fixtures: hls.byterange-map-key-discontinuity, hls.map-byterange-independent
  */
 
+import { createHlsDefaultIv } from './decrypt'
+
 export type CatCatchHlsAttributeMap = Record<string, string>
 
 export type CatCatchHlsVariableList = Record<string, string>
@@ -419,6 +421,31 @@ function resolveByteRange(
   return { ...byteRange, offset }
 }
 
+function createHlsDefaultIvHex(sequence: number) {
+  return `0x${Array.from(createHlsDefaultIv(sequence), byte => (
+    byte.toString(16).padStart(2, '0')
+  )).join('')}`
+}
+
+/**
+ * Upstream: xifangczy/cat-catch@2cb981d7c2f4614732edccc167c4b5793d1cb138
+ * Source: lib/hls.min.js#LevelKey.getDecryptData and createInitializationVector
+ * Reason: every AES-128 fragment without an explicit IV uses its own media
+ * sequence encoded as a 16-byte big-endian IV.
+ * Adaptation: expose the effective IV as the existing hexadecimal DTO string.
+ * Fixture: hls-aes128-iv-semantics
+ */
+function resolveHlsSegmentKey(
+  key: CatCatchHlsKey | undefined,
+  sequence: number,
+) {
+  if (!key || key.method.toUpperCase() !== 'AES-128' || key.iv) return key
+  return {
+    ...key,
+    iv: createHlsDefaultIvHex(sequence),
+  }
+}
+
 /**
  * Upstream: xifangczy/cat-catch@2cb981d7c2f4614732edccc167c4b5793d1cb138
  * Source: lib/hls.min.js#parseLevelPlaylist and handlePlaylistLoaded
@@ -481,16 +508,17 @@ export function parseHlsManifest(input: {
     if (!normalizedUri) return
     const url = resolveHlsUrl(normalizedUri, baseUrl)
     const index = segments.length
+    const sequence = mediaSequence + index
     const resolvedByteRange = resolveByteRange(byteRange, previousSegmentByteRangeEnd)
     segments.push({
       byteRange: resolvedByteRange,
       discontinuitySequence,
       duration: pendingSegment?.duration || 0,
       index,
-      key: currentKey,
+      key: resolveHlsSegmentKey(currentKey, sequence),
       map: currentMap,
       part,
-      sequence: mediaSequence + index,
+      sequence,
       title: pendingSegment?.title,
       uri: normalizedUri,
       url,

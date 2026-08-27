@@ -1,0 +1,23 @@
+{
+  "baseUrl": "https://media.example/encrypted/playlist.m3u8",
+  "segments": [
+    {
+      "iv": "0x00000000000000000000000000000007",
+      "keyUrl": "https://media.example/encrypted/key.bin",
+      "sequence": 7,
+      "url": "https://media.example/encrypted/segment-7.ts"
+    },
+    {
+      "iv": "0x00000000000000000000000000000008",
+      "keyUrl": "https://media.example/encrypted/key.bin",
+      "sequence": 8,
+      "url": "https://media.example/encrypted/segment-8.ts"
+    },
+    {
+      "iv": "0x0000000000000000000000000000002a",
+      "keyUrl": "https://media.example/encrypted/key.bin",
+      "sequence": 9,
+      "url": "https://media.example/encrypted/segment-9.ts"
+    }
+  ]
+}
