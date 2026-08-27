@@ -7,6 +7,9 @@
  * media-sequence-derived default IV before downstream processing.
  * Adaptation: use the standard Web Crypto AES-CBC primitive instead of
  * carrying a browser-bundled AES implementation into the Electron adapter.
+ * Production owner: local output keeps key/IV tags in its rewritten playlist
+ * and delegates decrypt + remux to the single cancellable ffmpeg process; this
+ * pure function remains the behavior reference and processor boundary.
  * Fixture: hls.decrypt-aes128
  */
 

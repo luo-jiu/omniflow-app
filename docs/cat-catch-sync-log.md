@@ -577,6 +577,20 @@
 - legacy cleanup: 无；旧 HLS 链继续保留到 hls-engine 原子 cutover。
 - validation: 完整 HLS Vitest 51/51（含真实 ffmpeg/ffprobe output）、定向 ESLint、`cat-catch:validate`（含固定上游源码）、同步校验 16/16、metadata 计数和 scoped diff check 通过。全量 Vitest 为 929 passed / 1 skipped / 20 failed：其中 16 条 sandbox-only loopback 失败在允许监听本机端口的环境复跑相关 4 文件 20/20 通过，折算后仍有并行内置 Agent 改动导致的 4 条失败；全局 TypeScript 与全仓 lint 同样只被 `electron/service/agent/**` 的在途修改阻断。完整 build 未运行，避免覆盖其他 Agent 正在修改的 `dist-electron/**`；暂无可用真实网站和手工测试场景。
 
+## 2026-08-27: same target (production AES-128 output owner)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动。
+- reviewedThrough / portedThrough: 均保持 `null`；本步闭合 production AES-128 local-output 责任证据，仍未完成 hls-engine cutover。
+- change groups: `verification`（真实加密 HLS 端到端输出）与 `platform-adaptation`（明确唯一 production decrypt owner）。
+- affected capability IDs: `hls.segment-pipeline` 保持 `porting`。
+- fixtures/tests: `embeddedBrowserHlsRealOutput.test.ts#hls.real-aes128-local-output` 运行时生成 AES-128 encrypted AAC HLS，经生产 parser/download-plan、本地 key/密文下载与 playlist 重写、可取消 ffmpeg wrapper，再由 ffprobe 断言 MP4/AAC/正时长；本机缺少 ffmpeg/ffprobe 时与既有真实输出测试一致地明确 skip。
+- accepted difference: Cat Catch 在 JavaScript downloader 内解密；OmniFlow 保留纯 Web Crypto port 作为行为参考和 processor boundary，但生产本地主链只让同一个 ffmpeg owner 按重写 playlist 的 key/IV 解密并 remux，避免双解密和第二个任务 owner。
+- excluded changes and reasons: 不把纯 `decryptHlsAes128` 强行接入 production processor chain；不在本步覆盖视频+AES、SAMPLE-AES/DRM 或非 HLS ffmpeg 入口。
+- unresolved gaps: HLS 其余 parser 标签差分、renderer listener recovery、HLS live 过渡 DTO、视频+AES 真实输出、真实网站手工验证和最终 hls-engine cutover。
+- runtime changes: 无；现有 production local downloader/ffmpeg 链直接通过真实 AES-128 输出证据，只补充责任注释和长期台账。
+- legacy cleanup: 无；旧 HLS 链继续保留到 hls-engine 原子 cutover。
+- validation: 完整 HLS Vitest 52/52（clear 与 AES-128 真实 ffmpeg/ffprobe output 均实际执行）、定向 ESLint、`cat-catch:validate`（含固定上游源码）、同步校验 16/16、metadata 7 units/32 capabilities/104 planned IDs/58 active refs 和 scoped diff check 通过。全局 TypeScript 与全仓 lint 仍只被其他 Agent 正在修改的 `electron/service/agent/**` 阻断；本片只有条件式 integration、注释和台账变化，未重复运行紧邻上一提交已完成的全量 Vitest。完整 build 未运行，避免覆盖其他 Agent 正在修改的 `dist-electron/**`；暂无可用真实网站和手工测试场景。
+
 ## Template
 
 ```markdown
