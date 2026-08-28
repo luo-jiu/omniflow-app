@@ -73,8 +73,8 @@ function parsePayload(value: string) {
 
 /**
  * Routes one WebContents' probe console transport through a document-scoped
- * token and lifecycle binding. Production registration is deferred until the
- * network-capture cutover.
+ * token and lifecycle binding. EmbeddedBrowserCaptureRuntime owns the single
+ * production registration for each embedded WebContents.
  */
 export class ElectronPageProbeEventAdapter {
   private activeRoute: ActiveDocumentRoute | null = null

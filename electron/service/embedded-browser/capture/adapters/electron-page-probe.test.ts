@@ -98,6 +98,47 @@ class FakeWebContents implements EmbeddedBrowserLifecycleWebContents, ElectronPa
   }
 }
 
+describe('Deep search secure relay', () => {
+  it('deep.relay-forgery', () => {
+    let resourceIndex = 0
+    const store = new ResourceStateStore({
+      createResourceId: () => `resource-${++resourceIndex}`,
+    })
+    const lifecycle = new EmbeddedBrowserLifecycle({
+      emitChange: () => {},
+      store,
+      vault: new NetworkContextVault(),
+    })
+    const webContents = new FakeWebContents(70, 'https://page.example/current')
+    lifecycle.registerView({ tabId: 'tab-forgery', webContents })
+    lifecycle.setCaptureMode('tab-forgery', 'deep')
+    const adapter = new ElectronPageProbeEventAdapter({
+      createDocumentToken: () => 'document_token_for_deep_relay',
+      lifecycle,
+      tabId: 'tab-forgery',
+      webContents,
+    })
+    const document = adapter.bindCurrentDocument()!
+    const validPayload = JSON.stringify({ url: 'https://cdn.example/accepted.mp4' })
+
+    webContents.emitConsole(`__OMNIFLOW_EMBEDDED_BROWSER_RESOURCE__:${validPayload}`)
+    webContents.emitConsole(`__OMNIFLOW_EMBEDDED_BROWSER_RESOURCE__:wrong_token:${validPayload}`)
+    webContents.emitConsole(`${document.consolePrefix}{malformed`)
+    webContents.emitConsole(`${document.consolePrefix}[]`)
+    expect(resourceIndex).toBe(0)
+
+    webContents.emitConsole(`${document.consolePrefix}${validPayload}`)
+    expect(resourceIndex).toBe(1)
+    expect(store.getOwnedResource('tab-forgery', 'resource-1')).toMatchObject({
+      capturedNavigationGeneration: 0,
+      url: 'https://cdn.example/accepted.mp4',
+    })
+
+    adapter.dispose()
+    lifecycle.dispose()
+  })
+})
+
 describe('network.probe-console-generation-routing', () => {
   it('routes only the current token and binding while preserving control payload separation', () => {
     let resourceIndex = 0

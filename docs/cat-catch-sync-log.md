@@ -1319,6 +1319,20 @@
 - legacy cleanup: 无；旧 probe/runtime/template 在整个 deep unit 完成前继续作为现有生产 owner，target pure port 尚无生产调用方。
 - validation: discovery 专项 `1 file / 3 passed`、应用 TypeScript `--noEmit`、全仓 ESLint、同步测试 `16/16`、metadata/固定上游 validator 和 scoped diff check 已通过；排除 Node runner 文件后全仓 Vitest 为 `192 files / 1301 passed / 3 skipped`。项目引用 `tsc -b` 仍被既有 `vite.config.ts` 的 ES lib/`replaceAll` 错误阻断；完整 build 仍避免覆盖其他 Agent 的 `dist-electron/**`，暂无真实网站手工场景。
 
+## 2026-08-28: same target (deep secure page relay evidence)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本步复核 Network 阶段已进入 production 的 page relay 是否满足 deep unit。
+- reviewedThrough / portedThrough: 均保持 `null`；`deep.secure-page-relay` 从 `pending` 进入 `ported-unverified` 并记录固定目标，整个 deep unit 仍开放。
+- change groups: `platform-substitute-evidence` 与 `documentation-correction`；不增加第二套 relay owner。
+- affected capability IDs: `deep.secure-page-relay`；metadata 为 `7 units / 32 capabilities / 208 anchors / 106 cleanup entries / 170 planned IDs / 130 active refs`，状态为 `11 verified / 4 porting / 1 ported-unverified / 16 pending`。
+- fixtures/tests: `deep.relay-forgery` 锁定 tokenless/wrong-token/malformed/non-object rejection 与合法 current binding；`deep.frame-document-start` 锁定 CDP next-document script、当前 main/subframe 注入、detached frame 容错和旧 script replacement。
+- accepted difference: Cat Catch 的 page `postMessage -> content script -> background` 在无扩展的 Electron 中替换为随机 document token + main lifecycle binding + console transport；renderer/page 不获得 tab owner、resource authority 或 main capability。
+- excluded changes and reasons: 不创建 `SecurePageRuntimeRelay` 包装类；现有 `ElectronPageProbeEventAdapter`、`PageProbeCaptureAdapter` 与 view installer 已是唯一生产 owner。也不启用 deep hooks、不修改 discovery/MSE/toolkit/UI。
+- unresolved gaps: Worker/fetch/XHR/JSON/TextDecoder hook runtime 尚未接入；完整 deep runtime production test、toolkit state、unit cutover 与 legacy cleanup 仍未完成。
+- runtime changes: 无黑盒行为变化；只修正 event adapter 的过期“尚未 production”注释，并为既有生产 relay/installer 增加 Deep 专属证据。
+- legacy cleanup: 无；installer 与 target adapters 属于 `retain-or-adapt`，旧 runtime/template/console emitter 只在完整 unit cutover 时处理。
+- validation: secure relay 专项 `2 files / 4 passed`、应用 TypeScript `--noEmit`、全仓 ESLint、同步测试 `16/16`、metadata/固定上游 validator 和 scoped diff check 已通过；排除另一个 Agent 正在修改的 Shell policy expectation 后，全仓 Vitest 为 `193 files / 1299 passed / 3 skipped`。未排除时仅有 `electron/service/agent/shell/agent-shell-preparation-service.test.ts` 的 2 个无关失败；项目引用 `tsc -b` 仍被既有 `vite.config.ts` 的 ES lib/`replaceAll` 错误阻断，完整 build 继续避免覆盖其他 Agent 的 `dist-electron/**`，暂无真实网站手工场景。
+
 ## Template
 
 ```markdown

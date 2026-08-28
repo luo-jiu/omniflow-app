@@ -603,18 +603,25 @@
         "electron/service/embeddedBrowserViewLifecycle.ts#console-message"
       ],
       "targetRefs": [
-        "electron/service/embedded-browser/capture/adapters/page-runtime-relay.ts#SecurePageRuntimeRelay"
+        "electron/service/embedded-browser/capture/adapters/electron-page-probe.ts#ElectronPageProbeEventAdapter",
+        "electron/service/embedded-browser/capture/adapters/page-probe.ts#PageProbeCaptureAdapter",
+        "electron/service/embeddedBrowserViewLifecycle.ts#installEmbeddedBrowserResourceProbe"
       ],
       "relationToUpstream": "platform-substitute",
-      "syncState": "pending",
-      "syncedThrough": null,
+      "syncState": "ported-unverified",
+      "syncedThrough": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
       "plannedTestIds": [
         "deep.relay-forgery",
         "deep.frame-document-start"
       ],
-      "testRefs": [],
-      "acceptedDifferences": [],
-      "notes": "Seed security gap: the console-prefix envelope has no nonce or capability validation, so an untrusted page can forge resource and MSE events."
+      "testRefs": [
+        "electron/service/embedded-browser/capture/adapters/electron-page-probe.test.ts#deep.relay-forgery",
+        "electron/service/embeddedBrowserViewLifecycle.test.ts#deep.frame-document-start"
+      ],
+      "acceptedDifferences": [
+        "Cat Catch relays page-world window.postMessage through a content script and extension background worker. OmniFlow has no extension world, so Electron main issues an unpredictable document token, installs the script through CDP at document start, and accepts console transport only while token, tab, WebContents, incarnation, navigation generation, page origin and deep-mode ownership remain current."
+      ],
+      "notes": "The production adapters now have explicit deep-search evidence. ElectronPageProbeEventAdapter rejects tokenless, wrong-token, malformed, stale, stopped, crashed and disposed payloads; PageProbeCaptureAdapter derives owner/resource facts in main. The view installer registers the pre-signed next-document script through Page.addScriptToEvaluateOnNewDocument and injects the current script into mainFrame plus framesInSubtree, tolerating transient frame detachment. This capability remains ported-unverified until the complete deep runtime uses the relay and the unit cuts over atomically."
     },
     {
       "id": "deep.catch-toolkit-page-settings",

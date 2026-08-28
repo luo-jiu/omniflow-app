@@ -58,6 +58,7 @@ OmniFlow 不运行 Cat Catch 浏览器扩展，而是把与产品目标相关的
 
 - 深度 Worker/fetch/XHR/JSON/key hooks 被 `enableDeepRuntimeHooks = false` 关闭，外围 MSE hooks 仍运行。
 - deep discovery 的纯 port 已按固定 `search.js` 锁定 JSON 全 enumerable width、depth 21/22 边界、cycle、宽松 16-number key、inline M3U8/MPD、data URL 与当前/未来 base URL 回放；尚未接入 document-start runtime，不能据此打开 hooks 或宣称 deep unit 完成。
+- deep page relay 已由 production 的随机 document token、tab/WebContents/incarnation/navigation/origin/deep-mode binding、CDP 新文档安装和当前 frame subtree 注入提供平台等价边界；它已有伪造与 all-frame 安装测试，但必须等完整 deep runtime 接入后才能随 unit 一起 verified。
 - 网络捕捉由 production `EmbeddedBrowserCaptureRuntime` 唯一注册 `onSendHeaders -> onResponseStarted -> terminal cleanup`，旧 `onCompleted` 识别 bridge 已删除。
 - request context 由 main-only bounded vault 持有容量、TTL、owner 和 purpose；renderer 只接收 header capability，不接收 Cookie/Authorization 值。
 - HLS 固定目标的下载相关 parser/plan、key/MAP/range、静态/直播执行、retry/cancel、预处理和真实 ffmpeg 输出范围均已由 fixture 或可执行测试覆盖，并已在唯一 dispatch boundary 切换到 target owner；`network-capture` 与 `hls-engine` 均已完成原子 cutover。
@@ -81,7 +82,7 @@ OmniFlow 不运行 Cat Catch 浏览器扩展，而是把与产品目标相关的
 - HLS、DASH、MSE、ffmpeg、临时文件和输出交付尚无统一 task/cleanup 合同。
 - network classifier/rules、OmniFlow 产品 policy 与持久化设置、page URL policy、main-only vault/store、renderer-safe contract/reducer、Electron network/probe adapter、owner lifecycle、main composition 和固定-purpose resource access 均已在 production target chain 形成唯一 owner，旧 bridge/state/classifier/header DTO 已删除。data/blob 与未捕获拖拽、DASH 直拉/track、旧 toolkit、deep/MSE runtime 和其他 unit 仍按各自边界迁移，不保留第二套 network owner。
 
-因此当前 32 项能力中有 11 项 `verified`、4 项 `porting`、17 项 `pending`；`network-capture` 与 `hls-engine` 已完成 production cutover，其余 5 个 unit 仍不能因为局部 target 测试通过就提前标记为完成。
+因此当前 32 项能力中有 11 项 `verified`、4 项 `porting`、1 项 `ported-unverified`、16 项 `pending`；`network-capture` 与 `hls-engine` 已完成 production cutover，其余 5 个 unit 仍不能因为局部 target 测试通过就提前标记为完成。
 
 ## 4. 长期事实文件
 
