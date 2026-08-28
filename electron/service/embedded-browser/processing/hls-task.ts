@@ -9,6 +9,7 @@ import {
   type EmbeddedBrowserFragmentFetch,
 } from '../../embeddedBrowserFragmentDownloader'
 import { preprocessFragment } from '../cat-catch-port/hls/pipeline'
+import type { EmbeddedBrowserHlsDownloadPlan } from '../contracts/hls'
 
 export type EmbeddedBrowserHlsLocalDownloadKeyRef = {
   iv?: string
@@ -801,9 +802,133 @@ async function downloadEmbeddedBrowserHlsToLocalWorkDirectory(
   }
 }
 
+type HlsLocalDownload = (
+  request: EmbeddedBrowserHlsLocalDownloadRequest,
+) => Promise<EmbeddedBrowserHlsLocalDownloadResult>
+
+type HlsLocalDownloadEvent = Parameters<
+  NonNullable<EmbeddedBrowserHlsLocalDownloadRequest['onEvent']>
+>[0]
+
+export type HlsTaskExecutionEvent = Omit<HlsLocalDownloadEvent, 'message' | 'stage'> & {
+  ffmpegSpeedText?: string
+  message?: string
+  outputPath?: string
+  processedSeconds?: number
+  stage: HlsLocalDownloadEvent['stage'] | 'ffmpeg'
+}
+
+export type HlsTaskOutputResult = {
+  ffmpegPath: string
+  outputPath: string
+}
+
+export type HlsTaskExecutorOptions = {
+  downloadToLocalWorkDirectory?: HlsLocalDownload
+}
+
 export class HlsTaskExecutor {
+  private readonly downloadLocal: HlsLocalDownload
+
+  constructor(options: HlsTaskExecutorOptions = {}) {
+    this.downloadLocal = options.downloadToLocalWorkDirectory
+      || downloadEmbeddedBrowserHlsToLocalWorkDirectory
+  }
+
   downloadToLocalWorkDirectory(request: EmbeddedBrowserHlsLocalDownloadRequest) {
-    return downloadEmbeddedBrowserHlsToLocalWorkDirectory(request)
+    return this.downloadLocal(request)
+  }
+
+  async executePlanToOutput(request: {
+    beforeCompleted?: () => Promise<void> | void
+    fetch?: EmbeddedBrowserFragmentFetch
+    ffmpegPath?: string
+    fragmentIndexes?: number[]
+    manualKeyBase64?: string
+    onEvent?: (event: HlsTaskExecutionEvent) => void
+    outputPath: string
+    plan: EmbeddedBrowserHlsDownloadPlan
+    runFfmpeg: (input: {
+      durationSeconds?: number
+      ffmpegPath?: string
+      manifestUrl: string
+      onProgress: (progress: {
+        processedSeconds?: number
+        speedText?: string
+      }) => void
+      outputPath: string
+      signal?: AbortSignal
+    }) => Promise<HlsTaskOutputResult>
+    signal?: AbortSignal
+    workDirectoryPath: string
+  }): Promise<HlsTaskOutputResult> {
+    const retryFragments = request.fragmentIndexes?.map(index => index + 1)
+    const totalFragments = request.plan.fragmentCount || request.plan.fragments.length
+    request.onEvent?.({
+      completedFragments: retryFragments
+        ? Math.max(0, totalFragments - retryFragments.length)
+        : undefined,
+      failedFragments: retryFragments,
+      message: retryFragments
+        ? `开始重试 ${retryFragments.length} 个失败分片`
+        : '开始准备本地 HLS 下载任务',
+      stage: retryFragments ? 'downloading-fragments' : 'preparing',
+      status: 'running',
+      totalFragments,
+    })
+
+    const localDownloadResult = await this.downloadLocal({
+      fetch: request.fetch,
+      fragmentIndexes: request.fragmentIndexes,
+      manualKeyBase64: request.manualKeyBase64,
+      onEvent: event => request.onEvent?.(event),
+      plan: {
+        fragments: request.plan.fragments,
+        headers: request.plan.headers,
+        manifestUrl: request.plan.manifestUrl,
+        suggestedThreadCount: request.plan.suggestedThreadCount,
+      },
+      preprocessFragments: true,
+      signal: request.signal,
+      workDirectoryPath: request.workDirectoryPath,
+    })
+
+    request.onEvent?.({
+      completedFragments: totalFragments,
+      message: retryFragments
+        ? '失败分片已补齐，开始交给 ffmpeg'
+        : '本地 playlist 已生成，开始交给 ffmpeg',
+      stage: 'ffmpeg',
+      status: 'running',
+      totalFragments,
+    })
+
+    const result = await request.runFfmpeg({
+      durationSeconds: request.plan.durationSeconds,
+      ffmpegPath: request.ffmpegPath,
+      manifestUrl: localDownloadResult.playlistPath,
+      onProgress: progress => request.onEvent?.({
+        completedFragments: totalFragments,
+        ffmpegSpeedText: progress.speedText,
+        processedSeconds: progress.processedSeconds,
+        stage: 'ffmpeg',
+        status: 'running',
+        totalFragments,
+      }),
+      outputPath: request.outputPath,
+      signal: request.signal,
+    })
+
+    await request.beforeCompleted?.()
+    request.onEvent?.({
+      completedFragments: totalFragments,
+      message: 'HLS 下载完成',
+      outputPath: result.outputPath,
+      stage: 'completed',
+      status: 'success',
+      totalFragments,
+    })
+    return result
   }
 }
 

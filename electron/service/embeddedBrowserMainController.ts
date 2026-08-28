@@ -159,6 +159,7 @@ import {
 } from './embeddedBrowserResourceManifestDownloadService'
 import {
   defaultHlsTaskExecutor,
+  type HlsTaskExecutionEvent,
 } from './embedded-browser/processing/hls-task'
 import type { EmbeddedBrowserFragmentFetch } from './embeddedBrowserFragmentDownloader'
 import {
@@ -305,6 +306,32 @@ export function createEmbeddedBrowserMainController(
       return
     }
     mainWindow.webContents.send('embedded-browser:hls-task', snapshot)
+  }
+
+  function createEmbeddedBrowserHlsPlanTaskEventForwarder(input: {
+    onFailedFragments: (failedFragments: number[] | undefined) => void
+    plan: EmbeddedBrowserHlsPlanDownloadPayload['plan']
+    requestId?: string
+    tabId: string
+    usingManualKey: boolean
+  }) {
+    return (event: HlsTaskExecutionEvent) => {
+      if (event.stage === 'ffmpeg' || event.stage === 'completed') {
+        input.onFailedFragments(undefined)
+      } else if (event.failedFragments?.length) {
+        input.onFailedFragments(event.failedFragments)
+      }
+      emitEmbeddedBrowserHlsTask({
+        ...event,
+        durationSeconds: input.plan.durationSeconds,
+        manifestUrl: input.plan.manifestUrl,
+        mode: 'local-plan',
+        requestId: input.requestId,
+        tabId: input.tabId,
+        totalFragments: event.totalFragments || input.plan.fragmentCount,
+        usingManualKey: input.usingManualKey,
+      })
+    }
   }
 
   function emitEmbeddedBrowserLibraryFileDropResult(payload: LibraryFileBrowserDropResult) {
@@ -1964,114 +1991,30 @@ export function createEmbeddedBrowserMainController(
         requestId,
         tabId: normalizedTabId,
       })
-
-      emitEmbeddedBrowserHlsTask({
-        manifestUrl: payload.plan.manifestUrl,
-        message: '开始准备本地 HLS 下载任务',
-        mode: 'local-plan',
-        requestId,
-        stage: 'preparing',
-        status: 'running',
-        tabId: normalizedTabId,
-        durationSeconds: payload.plan.durationSeconds,
-        totalFragments: payload.plan.fragmentCount,
-        usingManualKey: Boolean(payload.manualKeyBase64),
-      })
-
       workDirectoryPath = await mkdtemp(path.join(os.tmpdir(), 'omniflow-hls-download-'))
-      const localDownloadResult = await defaultHlsTaskExecutor.downloadToLocalWorkDirectory({
+      const result = await defaultHlsTaskExecutor.executePlanToOutput({
         fetch: createEmbeddedBrowserCapturedResourceFetch(normalizedTabId, resourceId),
-        preprocessFragments: true,
-        onEvent: (event) => {
-          if (event.failedFragments?.length) {
-            latestFailedFragments = event.failedFragments
-          }
-          emitEmbeddedBrowserHlsTask({
-            bytesReceived: event.bytesReceived,
-            bytesTotal: event.bytesTotal,
-            completedFragments: event.completedFragments,
-            durationSeconds: payload.plan.durationSeconds,
-            error: event.error,
-            etaSeconds: event.etaSeconds,
-            failedFragments: event.failedFragments,
-            manifestUrl: payload.plan.manifestUrl,
-            message: event.message,
-            mode: 'local-plan',
-            processedSeconds: undefined,
-            requestId,
-            speedBps: event.speedBps,
-            stage: event.stage,
-            status: event.status,
-            tabId: normalizedTabId,
-            totalFragments: event.totalFragments || payload.plan.fragmentCount,
-            usingManualKey: Boolean(payload.manualKeyBase64),
-          })
-        },
+        ffmpegPath: payload.ffmpegPath,
         manualKeyBase64: payload.manualKeyBase64,
-        plan: {
-          fragments: payload.plan.fragments,
-          headers: payload.plan.headers,
-          manifestUrl: payload.plan.manifestUrl,
-          suggestedThreadCount: payload.plan.suggestedThreadCount,
-        },
+        onEvent: createEmbeddedBrowserHlsPlanTaskEventForwarder({
+          onFailedFragments: failedFragments => {
+            latestFailedFragments = failedFragments
+          },
+          plan: payload.plan,
+          requestId,
+          tabId: normalizedTabId,
+          usingManualKey: Boolean(payload.manualKeyBase64),
+        }),
+        outputPath,
+        plan: payload.plan,
+        runFfmpeg: input => downloadEmbeddedBrowserManifestResource({
+          ...input,
+          kind: 'hls',
+        }),
         signal: activeTask.signal,
         workDirectoryPath,
       })
-      workDirectoryPath = localDownloadResult.workDirectoryPath
       latestFailedFragments = undefined
-
-      emitEmbeddedBrowserHlsTask({
-        completedFragments: payload.plan.fragmentCount,
-        durationSeconds: payload.plan.durationSeconds,
-        manifestUrl: payload.plan.manifestUrl,
-        message: '本地 playlist 已生成，开始交给 ffmpeg',
-        mode: 'local-plan',
-        requestId,
-        stage: 'ffmpeg',
-        status: 'running',
-        tabId: normalizedTabId,
-        totalFragments: payload.plan.fragmentCount,
-        usingManualKey: Boolean(payload.manualKeyBase64),
-      })
-
-      const result = await downloadEmbeddedBrowserManifestResource({
-        durationSeconds: payload.plan.durationSeconds,
-        ffmpegPath: payload.ffmpegPath,
-        kind: 'hls',
-        manifestUrl: localDownloadResult.playlistPath,
-        onProgress: (progress) => {
-          emitEmbeddedBrowserHlsTask({
-            completedFragments: payload.plan.fragmentCount,
-            durationSeconds: payload.plan.durationSeconds,
-            ffmpegSpeedText: progress.speedText,
-            manifestUrl: payload.plan.manifestUrl,
-            mode: 'local-plan',
-            processedSeconds: progress.processedSeconds,
-            requestId,
-            stage: 'ffmpeg',
-            status: 'running',
-            tabId: normalizedTabId,
-            totalFragments: payload.plan.fragmentCount,
-            usingManualKey: Boolean(payload.manualKeyBase64),
-          })
-        },
-        outputPath,
-        signal: activeTask.signal,
-      })
-      emitEmbeddedBrowserHlsTask({
-        completedFragments: payload.plan.fragmentCount,
-        durationSeconds: payload.plan.durationSeconds,
-        manifestUrl: payload.plan.manifestUrl,
-        message: 'HLS 下载完成',
-        mode: 'local-plan',
-        outputPath: result.outputPath,
-        requestId,
-        stage: 'completed',
-        status: 'success',
-        tabId: normalizedTabId,
-        totalFragments: payload.plan.fragmentCount,
-        usingManualKey: Boolean(payload.manualKeyBase64),
-      })
       return {
         ffmpegPath: result.ffmpegPath,
         ok: true,
@@ -2485,117 +2428,33 @@ export function createEmbeddedBrowserMainController(
         requestId,
         tabId: normalizedTabId,
       })
-      emitEmbeddedBrowserHlsTask({
-        completedFragments: Math.max(0, session.plan.fragmentCount - session.failedFragments.length),
-        durationSeconds: session.plan.durationSeconds,
-        failedFragments: session.failedFragments,
-        manifestUrl: session.plan.manifestUrl,
-        message: `开始重试 ${session.failedFragments.length} 个失败分片`,
-        mode: 'local-plan',
-        requestId,
-        stage: 'downloading-fragments',
-        status: 'running',
-        tabId: normalizedTabId,
-        totalFragments: session.plan.fragmentCount,
-        usingManualKey: Boolean(session.manualKeyBase64),
-      })
-
-      const localDownloadResult = await defaultHlsTaskExecutor.downloadToLocalWorkDirectory({
+      const result = await defaultHlsTaskExecutor.executePlanToOutput({
+        beforeCompleted: () => {
+          embeddedBrowserHlsSessionOwner.takeRetry(requestId, normalizedTabId)
+        },
         fetch: createEmbeddedBrowserCapturedResourceFetch(normalizedTabId, session.resourceId),
+        ffmpegPath: session.ffmpegPath,
         fragmentIndexes: session.failedFragments.map((value) => value - 1).filter((value) => value >= 0),
         manualKeyBase64: session.manualKeyBase64,
-        preprocessFragments: true,
-        onEvent: (event) => {
-          if (event.failedFragments?.length) {
-            latestFailedFragments = event.failedFragments
-          }
-          emitEmbeddedBrowserHlsTask({
-            bytesReceived: event.bytesReceived,
-            bytesTotal: event.bytesTotal,
-            completedFragments: event.completedFragments,
-            durationSeconds: session.plan.durationSeconds,
-            error: event.error,
-            etaSeconds: event.etaSeconds,
-            failedFragments: event.failedFragments,
-            manifestUrl: session.plan.manifestUrl,
-            message: event.message,
-            mode: 'local-plan',
-            processedSeconds: undefined,
-            requestId,
-            speedBps: event.speedBps,
-            stage: event.stage,
-            status: event.status,
-            tabId: normalizedTabId,
-            totalFragments: event.totalFragments || session.plan.fragmentCount,
-            usingManualKey: Boolean(session.manualKeyBase64),
-          })
-        },
-        plan: {
-          fragments: session.plan.fragments,
-          headers: session.plan.headers,
-          manifestUrl: session.plan.manifestUrl,
-          suggestedThreadCount: session.plan.suggestedThreadCount,
-        },
+        onEvent: createEmbeddedBrowserHlsPlanTaskEventForwarder({
+          onFailedFragments: failedFragments => {
+            latestFailedFragments = failedFragments
+          },
+          plan: session.plan,
+          requestId,
+          tabId: normalizedTabId,
+          usingManualKey: Boolean(session.manualKeyBase64),
+        }),
+        outputPath: session.outputPath,
+        plan: session.plan,
+        runFfmpeg: input => downloadEmbeddedBrowserManifestResource({
+          ...input,
+          kind: 'hls',
+        }),
         signal: activeTask.signal,
         workDirectoryPath: session.workDirectoryPath,
       })
       latestFailedFragments = undefined
-
-      emitEmbeddedBrowserHlsTask({
-        completedFragments: session.plan.fragmentCount,
-        durationSeconds: session.plan.durationSeconds,
-        manifestUrl: session.plan.manifestUrl,
-        message: '失败分片已补齐，开始交给 ffmpeg',
-        mode: 'local-plan',
-        requestId,
-        stage: 'ffmpeg',
-        status: 'running',
-        tabId: normalizedTabId,
-        totalFragments: session.plan.fragmentCount,
-        usingManualKey: Boolean(session.manualKeyBase64),
-      })
-
-      const result = await downloadEmbeddedBrowserManifestResource({
-        durationSeconds: session.plan.durationSeconds,
-        ffmpegPath: session.ffmpegPath,
-        kind: 'hls',
-        manifestUrl: localDownloadResult.playlistPath,
-        onProgress: (progress) => {
-          emitEmbeddedBrowserHlsTask({
-            completedFragments: session.plan.fragmentCount,
-            durationSeconds: session.plan.durationSeconds,
-            ffmpegSpeedText: progress.speedText,
-            manifestUrl: session.plan.manifestUrl,
-            mode: 'local-plan',
-            processedSeconds: progress.processedSeconds,
-            requestId,
-            stage: 'ffmpeg',
-            status: 'running',
-            tabId: normalizedTabId,
-            totalFragments: session.plan.fragmentCount,
-            usingManualKey: Boolean(session.manualKeyBase64),
-          })
-        },
-        outputPath: session.outputPath,
-        signal: activeTask.signal,
-      })
-
-      embeddedBrowserHlsSessionOwner.takeRetry(requestId, normalizedTabId)
-      emitEmbeddedBrowserHlsTask({
-        completedFragments: session.plan.fragmentCount,
-        durationSeconds: session.plan.durationSeconds,
-        manifestUrl: session.plan.manifestUrl,
-        message: 'HLS 下载完成',
-        mode: 'local-plan',
-        outputPath: result.outputPath,
-        requestId,
-        stage: 'completed',
-        status: 'success',
-        tabId: normalizedTabId,
-        totalFragments: session.plan.fragmentCount,
-        usingManualKey: Boolean(session.manualKeyBase64),
-      })
-
       await rm(session.workDirectoryPath, { force: true, recursive: true }).catch(() => undefined)
       return {
         ffmpegPath: result.ffmpegPath,

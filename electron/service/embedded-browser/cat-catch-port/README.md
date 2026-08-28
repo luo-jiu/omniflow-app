@@ -43,9 +43,9 @@ downloader/
 
 HLS 的 main/preload/renderer 共享 DTO 由 `../contracts/hls.ts` 唯一定义；生产调用方直接依赖 contract/port。renderer 旧 model 文件在初始 cutover 完成前只做同名 re-export，且仅由 parity test 保持 cleanup sentinel 存活，不再拥有类型、plan 算法或生产调用方。Electron main 运行时不得反向依赖 renderer model。
 
-平台侧 HLS 执行 owner 位于相邻的 `../processing/`：`HlsTaskExecutor` 负责本地 key/map/segment 与 playlist，`HlsLiveTask` 负责直播轮询和累计计划；controller、双轨合并和 output 测试直接依赖这两个 target。旧顶层 downloader/recorder 文件只做同引用兼容出口。
+平台侧 HLS 执行 owner 位于相邻的 `../processing/`：`HlsTaskExecutor` 负责本地 key/map/segment、playlist 和 local -> ffmpeg 阶段序列，首次计划与 retry 共用同一合同；`HlsLiveTask` 负责直播轮询和累计计划。controller、双轨合并和 output 测试直接依赖这两个 target；旧顶层 downloader/recorder 文件只做同引用兼容出口。
 
-逐项状态以 capability map 为准。network target 已进入 production composition，但整个 `network-capture` unit 完成前仍未原子切换旧 listener；HLS parser/plan/local/live 已有 target owner，但整个 `hls-engine` unit 仍因 controller plan task、完整差分证据和 legacy cleanup 未完成而没有 cutover。
+逐项状态以 capability map 为准。network target 已进入 production composition，但整个 `network-capture` unit 完成前仍未原子切换旧 listener；HLS parser/plan/local/live 已有 target owner，但整个 `hls-engine` unit 仍因完整差分证据、legacy-named controller adapter 和 cleanup 未完成而没有 cutover。
 
 ## 来源注释
 

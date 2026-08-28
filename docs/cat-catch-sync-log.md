@@ -1151,6 +1151,20 @@
 - legacy cleanup: `node.hls.local-downloader` 与 `node.hls.live-recorder` 继续标记 `remove-after-cutover`，但已无生产调用方；controller plan task 和 renderer façade sentinel 不变。
 - validation: target owner 首轮专项 `5 files / 24 tests`、完整 capability HLS 集合 `19 files / 118 tests`、TypeScript、全仓 ESLint、固定上游 validator、同步测试 `16/16`、metadata `7 units / 32 capabilities / 206 anchors / 106 cleanup entries / 156 planned IDs / 111 active refs` 和 scoped diff check 通过。排除由 Node runner 单独执行且已通过 `16/16` 的同步测试文件后，全仓 Vitest 为 `189 files / 1251 passed / 3 skipped`；未排除时其余测试仍全部通过，但 Vitest 按预期把该 Node 文件报告为无 suite。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
 
+## 2026-08-28: same target (HLS plan and retry execution sequence)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本步收敛既有 plan/retry 运行序列。
+- reviewedThrough / portedThrough: 均保持 `null`；hls-engine 尚未达到完整差分和原子 cleanup 条件。
+- change groups: `architecture-boundary`（task sequence owner）和 `behavior-preserving`（首次执行/retry 阶段与 session 顺序）。
+- affected capability IDs: `hls.segment-pipeline` 保持 `porting`；新增 1 个 planned ID 和 1 个 active ref，不增加上游 anchor。
+- fixtures/tests: 不新增媒体 fixture；`hls.plan-task-executor` 用注入的 local/ffmpeg fake 锁定 retry fragment index、preprocess、local playlist handoff、阶段事件和完成前 cleanup 顺序。
+- accepted difference: 无；首次与 retry 的 fetch、Range、手动 key、输出、错误和取消语义不变。
+- excluded changes and reasons: executor 不读取 capture runtime、不选择保存路径、不持有 session owner、不构造 IPC response，也不新增跨 DASH/MSE 的通用任务框架。legacy-named controller handler 继续保留到 unit 原子切换。
+- unresolved gaps: HLS parser 其余下载相关标签差分、AES-256 系列真实输出、真实网站手工验证和 hls-engine cleanup 仍待完成。
+- runtime changes: `HlsTaskExecutor.executePlanToOutput` 成为首次 plan 与 failed-fragment retry 的唯一 local -> rewritten playlist -> ffmpeg owner；controller 通过 main-owned fetch 和 ffmpeg adapter 调用它，只映射任务投影、维护 retry session 与产品错误响应。retry 成功仍先移除 session，再发送 completed。
+- legacy cleanup: `node.hls.plan-task` 继续标记 `remove-after-cutover`，但对应函数已缩为 authority/save/session/IPC adapter；local/live/renderer façade sentinel 不变。
+- validation: executor/controller 首轮专项 `5 files / 22 tests`、完整 capability HLS 集合 `19 files / 119 tests`、TypeScript、全仓 ESLint、固定上游 validator、同步测试 `16/16`、metadata `7 units / 32 capabilities / 206 anchors / 106 cleanup entries / 157 planned IDs / 112 active refs` 和 scoped diff check 通过。排除由 Node runner 单独执行的同步测试文件后，全仓 Vitest 为 `189 files / 1253 passed / 3 skipped`。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
+
 ## Template
 
 ```markdown
