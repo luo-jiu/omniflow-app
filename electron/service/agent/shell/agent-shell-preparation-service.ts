@@ -22,11 +22,14 @@ import {
   sealAgentShellPreparedActionPublicV1,
 } from './agent-shell-prepared-action';
 import type {
-  AgentShellWorkspace,
   AgentShellWorkspaceOwner,
   AgentShellWorkspacePreparationContext,
   AgentShellWorkspaceStore,
 } from './agent-shell-workspace-store';
+import {
+  AGENT_SHELL_WORKSPACE_CONTENT_SCANNER_REVISION,
+  AGENT_SHELL_WORKSPACE_PERSISTENT_RULE_IDENTITY_READY,
+} from './agent-shell-workspace-content-scanner';
 
 const AGENT_SHELL_ENVIRONMENT_BINDING_VERSION = 1 as const;
 const AGENT_SHELL_ENVIRONMENT_POLICY_REVISION = 'shell-environment-policy-v1';
@@ -49,7 +52,6 @@ export interface AgentShellPreparationRequest {
 }
 
 export interface AgentShellPreparationWorkspaceReader {
-  readonly get: AgentShellWorkspaceStore['get'];
   readonly resolvePreparationContext: AgentShellWorkspaceStore['resolvePreparationContext'];
 }
 
@@ -337,23 +339,43 @@ function buildEffectiveEnvironment(input: {
 }
 
 function assertWorkspaceBinding(
-  workspace: AgentShellWorkspace | null,
   preparedWorkspace: AgentShellWorkspacePreparationContext,
   expectedOwner: AgentShellWorkspaceOwner,
   expectedRunId: string,
-): AgentShellWorkspace {
-  if (!workspace) throw new Error('Agent Shell workspace 尚未准备');
+  expectedWorkspaceId: string,
+): AgentShellWorkspacePreparationContext {
   if (
-    workspace.runId !== expectedRunId
-    || preparedWorkspace.runId !== expectedRunId
-    || workspace.workspaceId !== preparedWorkspace.workspaceId
-    || workspace.generation !== preparedWorkspace.generation
-    || workspace.manifest.generation !== preparedWorkspace.generation
-    || !sameOwner(workspace.owner, expectedOwner)
+    preparedWorkspace.runId !== expectedRunId
+    || preparedWorkspace.workspaceId !== expectedWorkspaceId
+    || !Number.isSafeInteger(preparedWorkspace.generation)
+    || preparedWorkspace.generation < 1
+    || !sameOwner(preparedWorkspace.owner, expectedOwner)
+    || !Number.isSafeInteger(preparedWorkspace.workspaceEntryCount)
+    || preparedWorkspace.workspaceEntryCount < 5
+    || !Number.isSafeInteger(preparedWorkspace.workspaceTotalBytes)
+    || preparedWorkspace.workspaceTotalBytes < 0
+    || preparedWorkspace.workspaceContentScannerRevision
+      !== AGENT_SHELL_WORKSPACE_CONTENT_SCANNER_REVISION
   ) {
     throw new Error('Agent Shell workspace binding 已变化');
   }
-  return workspace;
+  const contentIdentity = boundedMainIdentity(
+    preparedWorkspace.workspaceContentIdentity,
+    'Agent Shell workspace content identity',
+  );
+  const metadataIdentity = boundedMainIdentity(
+    preparedWorkspace.workspaceMetadataIdentity,
+    'Agent Shell workspace metadata identity',
+  );
+  if (
+    contentIdentity !== preparedWorkspace.workspaceContentIdentity
+    || metadataIdentity !== preparedWorkspace.workspaceMetadataIdentity
+    || !/^v3:[a-f0-9]{64}$/u.test(contentIdentity)
+    || !/^v2:[a-f0-9]{64}$/u.test(metadataIdentity)
+  ) {
+    throw new Error('Agent Shell workspace binding 已变化');
+  }
+  return preparedWorkspace;
 }
 
 function createConservativeAssessment(
@@ -364,7 +386,7 @@ function createConservativeAssessment(
       ? ['unknown_syntax', 'environment_change'] as const
       : ['unknown_syntax'] as const),
     operations: Object.freeze([]),
-    persistentRuleEligible: false,
+    persistentRuleEligible: AGENT_SHELL_WORKSPACE_PERSISTENT_RULE_IDENTITY_READY,
     risk: 'destructive' as const,
     unresolved: Object.freeze(['ast-analysis-unavailable']),
   });
@@ -445,20 +467,20 @@ export function createAgentShellPreparationService(
       sessionId: context.preparationIdentity.sessionId,
     });
     let preparedWorkspace: AgentShellWorkspacePreparationContext;
-    let workspace: AgentShellWorkspace;
     try {
       preparedWorkspace = await options.workspaceStore.resolvePreparationContext(
         request.workspaceId,
         normalizedInput.cwd,
         context.preparationIdentity.runId,
         owner,
+        context.signal,
       );
       abortIfNeeded(context.signal);
-      workspace = assertWorkspaceBinding(
-        options.workspaceStore.get(request.workspaceId, owner),
+      assertWorkspaceBinding(
         preparedWorkspace,
         owner,
         context.preparationIdentity.runId,
+        request.workspaceId,
       );
     } catch {
       abortIfNeeded(context.signal);
@@ -589,8 +611,12 @@ export function createAgentShellPreparationService(
         immutableDenyRevision: AGENT_SHELL_IMMUTABLE_DENY_REVISION,
         policyRevision: AGENT_SHELL_POLICY_REVISION,
         providerSnapshotIdentity: context.runCapabilitySnapshot.shellProviderSnapshotIdentity,
-        workspaceGeneration: workspace.generation,
+        workspaceContentIdentity: preparedWorkspace.workspaceContentIdentity,
+        workspaceContentScannerRevision: preparedWorkspace.workspaceContentScannerRevision,
+        workspaceEntryCount: preparedWorkspace.workspaceEntryCount,
+        workspaceGeneration: preparedWorkspace.generation,
         workspaceMetadataIdentity: preparedWorkspace.workspaceMetadataIdentity,
+        workspaceTotalBytes: preparedWorkspace.workspaceTotalBytes,
       }),
     });
   }

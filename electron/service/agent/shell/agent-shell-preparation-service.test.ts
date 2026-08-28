@@ -19,13 +19,13 @@ import {
 } from '../agent-tool-registry';
 import { createAgentSkillRegistry } from '../skills/agent-skill-registry';
 import type { AgentShellProviderRegistrySnapshot } from './agent-shell-provider-registry';
+import { AGENT_SHELL_WORKSPACE_CONTENT_SCANNER_REVISION } from './agent-shell-workspace-content-scanner';
 import {
   createAgentShellPreparationService,
   type AgentShellPreparationHostEnvironment,
   type AgentShellPreparationWorkspaceReader,
 } from './agent-shell-preparation-service';
 import type {
-  AgentShellWorkspace,
   AgentShellWorkspaceOwner,
   AgentShellWorkspacePreparationContext,
 } from './agent-shell-workspace-store';
@@ -140,33 +140,18 @@ function runCapabilitySnapshot(provider?: ProviderFixture) {
 }
 
 interface WorkspaceFixture {
-  get: ReturnType<typeof vi.fn<AgentShellPreparationWorkspaceReader['get']>>;
   owner: AgentShellWorkspaceOwner;
   prepared: AgentShellWorkspacePreparationContext;
   resolvePreparationContext: ReturnType<
     typeof vi.fn<AgentShellPreparationWorkspaceReader['resolvePreparationContext']>
   >;
   store: AgentShellPreparationWorkspaceReader;
-  workspace: AgentShellWorkspace;
 }
 
 function workspaceFixture(platform: AgentShellSupportedPlatform = 'darwin'): WorkspaceFixture {
   const owner: AgentShellWorkspaceOwner = {
     ...OWNER_SCOPE,
     sessionId: SESSION_ID,
-  };
-  const workspace: AgentShellWorkspace = {
-    generation: 1,
-    logicalRoots: ['input', 'work', 'output', 'tmp', 'home'],
-    manifest: {
-      entries: [],
-      generation: 1,
-      provenance: [],
-      workspaceId: WORKSPACE_ID,
-    },
-    owner,
-    runId: RUN_ID,
-    workspaceId: WORKSPACE_ID,
   };
   const root = platform === 'win32'
     ? String.raw`C:\OmniFlow\agent\workspace-1`
@@ -175,14 +160,18 @@ function workspaceFixture(platform: AgentShellSupportedPlatform = 'darwin'): Wor
   const prepared: AgentShellWorkspacePreparationContext = Object.freeze({
     generation: 1,
     logicalCwd: 'work',
+    owner,
     physicalCwdPath: `${root}${separator}work`,
     physicalHomePath: `${root}${separator}home`,
     physicalTempPath: `${root}${separator}tmp`,
     runId: RUN_ID,
+    workspaceContentIdentity: `v3:${'7'.repeat(64)}`,
+    workspaceContentScannerRevision: AGENT_SHELL_WORKSPACE_CONTENT_SCANNER_REVISION,
+    workspaceEntryCount: 5,
     workspaceId: WORKSPACE_ID,
-    workspaceMetadataIdentity: `v1:${'8'.repeat(64)}`,
+    workspaceMetadataIdentity: `v2:${'8'.repeat(64)}`,
+    workspaceTotalBytes: 0,
   });
-  const get = vi.fn<AgentShellPreparationWorkspaceReader['get']>(() => workspace);
   const resolvePreparationContext = vi.fn<
     AgentShellPreparationWorkspaceReader['resolvePreparationContext']
   >(async (_workspaceId, logicalCwd) => Object.freeze({
@@ -190,12 +179,10 @@ function workspaceFixture(platform: AgentShellSupportedPlatform = 'darwin'): Wor
     logicalCwd,
   }));
   return {
-    get,
     owner,
     prepared,
     resolvePreparationContext,
-    store: { get, resolvePreparationContext },
-    workspace,
+    store: { resolvePreparationContext },
   };
 }
 
@@ -333,8 +320,12 @@ describe('Agent Shell PreparationService', () => {
     });
     expect(result.snapshotMaterial).toMatchObject({
       providerSnapshotIdentity: provider.registrySnapshot.snapshotIdentity,
+      workspaceContentIdentity: workspace.prepared.workspaceContentIdentity,
+      workspaceContentScannerRevision: AGENT_SHELL_WORKSPACE_CONTENT_SCANNER_REVISION,
+      workspaceEntryCount: 5,
       workspaceGeneration: 1,
       workspaceMetadataIdentity: workspace.prepared.workspaceMetadataIdentity,
+      workspaceTotalBytes: 0,
     });
     expect(provider.getMainBinding).toHaveBeenCalledTimes(1);
     expect(provider.createInvocation).toHaveBeenCalledWith('printf "hello\\n"');
@@ -343,6 +334,7 @@ describe('Agent Shell PreparationService', () => {
       'work',
       RUN_ID,
       workspace.owner,
+      expect.any(AbortSignal),
     );
     expect(JSON.stringify({ action, decision: result.decision }))
       .not.toContain('/managed/omniflow');
@@ -499,6 +491,7 @@ describe('Agent Shell PreparationService', () => {
       'output',
       RUN_ID,
       workspace.owner,
+      expect.any(AbortSignal),
     );
   });
 
@@ -612,26 +605,37 @@ describe('Agent Shell PreparationService', () => {
     )).rejects.toThrow('workspace binding 无法确认');
   });
 
-  it.each([
-    { field: 'generation', mutate: (workspace: AgentShellWorkspace) => { workspace.generation = 2; } },
+  it.each<{
+    field: string;
+    mutate: (prepared: AgentShellWorkspacePreparationContext) => AgentShellWorkspacePreparationContext;
+  }>([
+    { field: 'generation', mutate: prepared => ({ ...prepared, generation: 0 }) },
     {
-      field: 'manifest generation',
-      mutate: (workspace: AgentShellWorkspace) => { workspace.manifest.generation = 2; },
+      field: 'content scanner revision',
+      mutate: prepared => ({
+        ...prepared,
+        workspaceContentScannerRevision: 'stale-scanner' as typeof AGENT_SHELL_WORKSPACE_CONTENT_SCANNER_REVISION,
+      }),
+    },
+    {
+      field: 'content identity version',
+      mutate: prepared => ({
+        ...prepared,
+        workspaceContentIdentity: `v1:${'7'.repeat(64)}`,
+      }),
     },
     {
       field: 'owner',
-      mutate: (workspace: AgentShellWorkspace) => {
-        workspace.owner = { ...workspace.owner, accountScope: 'user:other' };
-      },
+      mutate: prepared => ({
+        ...prepared,
+        owner: { ...prepared.owner, accountScope: 'user:other' },
+      }),
     },
   ])('rejects $field drift between workspace resolve and seal', async ({ mutate }) => {
     const provider = providerFixture();
     const snapshot = runCapabilitySnapshot(provider);
     const workspace = workspaceFixture();
-    workspace.resolvePreparationContext.mockImplementationOnce(async () => {
-      mutate(workspace.workspace);
-      return workspace.prepared;
-    });
+    workspace.resolvePreparationContext.mockResolvedValueOnce(mutate(workspace.prepared));
     const service = createAgentShellPreparationService({ workspaceStore: workspace.store });
 
     await expect(service.prepare(prepareRequest(preparationContext(snapshot))))
@@ -659,7 +663,6 @@ describe('Agent Shell PreparationService', () => {
     await expect(service.prepare(prepareRequest(
       preparationContext(snapshot, 'darwin', duringResolve.signal),
     ))).rejects.toMatchObject({ name: 'AbortError' });
-    expect(workspace.get).not.toHaveBeenCalled();
   });
 
   it.each([
