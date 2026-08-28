@@ -181,6 +181,7 @@ function createProbeBootstrapFunctionSource() {
 }
 
 export function createProbeScriptTemplate(input: {
+  additionalBodySources?: string[]
   consolePrefix: string
   manifestHeuristicsBodySource: string
   pageActionsBodySource: string
@@ -201,6 +202,7 @@ export function createProbeScriptTemplate(input: {
     input.manifestHeuristicsBodySource,
     input.pageActionsBodySource,
     input.runtimeHooksBodySource,
+    ...(input.additionalBodySources || []).filter(source => String(source || '').trim()),
     "return 'installed';",
     '} catch (error) {',
     `try { globalThis[${JSON.stringify(EMBEDDED_BROWSER_RESOURCE_INSTALL_ERROR_KEY)}] = { message: error instanceof Error ? error.message : String(error), name: error && error.name ? String(error.name) : '', stack: error && error.stack ? String(error.stack).slice(0, 600) : '', at: Date.now() }; } catch (_) {}`,
@@ -211,11 +213,13 @@ export function createProbeScriptTemplate(input: {
 }
 
 export function createEmbeddedBrowserResourceProbeScript(input?: {
+  additionalBodySources?: string[]
   consolePrefix?: string
 }) {
   const consolePrefix = String(input?.consolePrefix || '').trim()
     || EMBEDDED_BROWSER_RESOURCE_CONSOLE_PREFIX
   return createProbeScriptTemplate({
+    additionalBodySources: input?.additionalBodySources,
     consolePrefix,
     manifestHeuristicsBodySource: restoreProbeRuntimeNames(getScriptFunctionBody(embeddedBrowserResourceProbeManifestHeuristicsBody)),
     pageActionsBodySource: restoreProbeRuntimeNames(getScriptFunctionBody(embeddedBrowserResourceProbePageActionsBody)),

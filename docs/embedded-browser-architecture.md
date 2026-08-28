@@ -389,7 +389,7 @@ tempPath
 - probe 通过 console payload / page action 输出资源和缓存工具状态
 - main 解析并汇总回 renderer
 
-当前事实：上述生命周期入口存在，但 `embeddedBrowserResourceProbeRuntimeHooks.ts` 把 `enableDeepRuntimeHooks` 写死为 `false`，Worker、fetch、XHR、JSON、key 等 hooks 没有实际启用，只有外围 MSE hooks 仍运行。因此本节只描述当前理论链路，不代表深度捕捉行为已经完成；重构状态和验收以 `docs/cat-catch-full-migration-execution-plan.md` 为准。
+当前事实：上述生命周期入口存在，target-only 完整 probe 已把 generated manifest/media 资源经现有随机 document token、`ElectronPageProbeEventAdapter` 和 `PageProbeCaptureAdapter` 写入 main `ResourceStateStore`；但 `embeddedBrowserResourceProbeRuntimeHooks.ts` 仍把 `enableDeepRuntimeHooks` 写死为 `false`，production 的 Worker、fetch、XHR、JSON、key 等新 hooks 没有实际启用，只有外围 MSE hooks 仍运行。toolkit composition、原子 cutover 和旧 deep block cleanup 完成前，这条证据不能当作生产能力；重构状态和验收以 `docs/cat-catch-full-migration-execution-plan.md` 为准。
 
 renderer 的资源列表不应该关心“这个资源是来自网络还是来自 probe 的哪一种 hook”，只关心统一的捕捉模型。
 

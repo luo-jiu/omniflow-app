@@ -1417,6 +1417,20 @@
 - legacy cleanup: 无；既有 toolkit state/storage/page-action cleanup entry 保持原分类，等待 deep unit 原子切换时删除或适配。
 - validation: 完整 deep target `5 files / 20 passed`、应用 TypeScript `--noEmit`、scoped/full ESLint、sync tests `16/16`、metadata 与固定上游 validator、排除 Node runner `tools/cat-catch-sync/validate.test.mjs` 后全仓 Vitest `198 files / 1371 passed / 3 skipped`、scoped diff check 通过。该 Node runner 已在正确的 `node --test` 下通过；完整 build 未运行，以免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
 
+## 2026-08-28: same target (complete deep probe-template ingress)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本步证明完整 target page probe 到既有 main ingress 的组合路径。
+- reviewedThrough / portedThrough: 均保持 `null`；`deep.runtime-hook-bundle`、`deep.manifest-key-discovery` 继续 `porting`，`deep.secure-page-relay` 继续 `ported-unverified`，整个 deep unit 仍开放。
+- change groups: `platform-composition`、`production-equivalent-integration`、`existing-relay-reuse` 与 `documentation-correction`；不切换 production dispatch。
+- affected capability IDs: `deep.runtime-hook-bundle`、`deep.manifest-key-discovery`、`deep.secure-page-relay`；metadata 为 `7 units / 32 capabilities / 210 anchors / 106 cleanup entries / 183 planned IDs / 148 active refs`，状态仍为 `11 verified / 5 porting / 1 ported-unverified / 15 pending`。
+- fixtures/tests: `deep.probe-template-ingress` 执行真实 target-only 完整 probe，使用预签下一文档 token，经 `ElectronPageProbeEventAdapter`、`PageProbeCaptureAdapter` 写入 `ResourceStateStore`；锁定 relative manifest 在页面 base 与晚到 CDN base 下分别物化、direct media 发现及 navigation generation owner 绑定。
+- accepted differences: 无新增差异；同一 manifest 随后续 hook 的新 base 再物化，是固定 Cat Catch document-level `joinBaseUrlTask` 的既有经验语义。
+- excluded changes and reasons: 新 `deep-search-probe.ts` 只有测试/迁移目标调用方；默认 `createEmbeddedBrowserResourceProbeScript` 不传附加 body，`enableDeepRuntimeHooks` 仍为 `false`。本步不组合 toolkit owner、不修改 MSE、console/main relay、IPC 或 renderer。
+- unresolved gaps: 把 toolkit state body 接入 target probe，准备唯一 dispatch boundary 的原子切换，验证 all-frame/toolkit round-trip/cleanup 组合并删除旧 deep block；真实网站手工回归仍受当前无测试场景限制。
+- runtime changes: probe template 允许显式附加非空 body source，以便 target-only 组合复用现有 resource/MSE bootstrap；production 默认调用不附加 body，黑盒行为不变。
+- legacy cleanup: 无；旧 disabled deep block 与 toolkit owner 保留到 unit 原子切换，不能提前删除或并行启用。
+- validation: 定向 ingress/lifecycle `3 files / 5 passed`、完整 deep target `6 files / 21 passed`、应用 TypeScript `--noEmit`、scoped/full ESLint、sync tests `16/16`、metadata 与固定上游 validator、排除 Node runner `tools/cat-catch-sync/validate.test.mjs` 后全仓 Vitest `199 files / 1372 passed / 3 skipped`、scoped diff check 通过。该 Node runner 已在正确的 `node --test` 下通过；完整 build 未运行，以免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
+
 ## Template
 
 ```markdown

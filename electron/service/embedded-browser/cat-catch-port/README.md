@@ -51,7 +51,7 @@ HLS 的 main/preload/renderer 共享 DTO 由 `../contracts/hls.ts` 唯一定义�
 
 逐项状态以 capability map 为准。`network-capture` 与 `hls-engine` 已在固定目标完成验证、dispatch 切换和 legacy symbol 清理；其余 unit 仍按同一协议推进。
 
-Deep 的 Electron page adapter 位于 `../../capture/adapters/deep-search-page.ts`：它只组合本目录的 runtime/discovery/page factory 与既有 probe resource/relay callback。当前已有 generated page/Worker composition 测试，但尚未进入 production probe template；cutover 前不能把它当成已启用能力。
+Deep 的 Electron page adapter 位于 `../../capture/adapters/deep-search-page.ts`：它只组合本目录的 runtime/discovery/page factory 与既有 probe resource/relay callback。`../../capture/adapters/deep-search-probe.ts` 提供 target-only 完整 probe 组合，已有 generated page/Worker 与 tokenized main ingress 测试；production template 尚未切换，cutover 前不能把它当成已启用能力。
 
 ## 来源注释
 

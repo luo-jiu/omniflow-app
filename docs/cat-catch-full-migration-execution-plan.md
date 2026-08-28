@@ -59,7 +59,7 @@ OmniFlow 不运行 Cat Catch 浏览器扩展，而是把与产品目标相关的
 - 深度 Worker/fetch/XHR/JSON/key hooks 被 `enableDeepRuntimeHooks = false` 关闭，外围 MSE hooks 仍运行。
 - deep discovery 的纯 port 已按固定 `search.js` 锁定 JSON 全 enumerable width、depth 21/22 边界、cycle、宽松 16-number key、inline M3U8/MPD、data URL 与当前/未来 base URL 回放；尚未接入 document-start runtime，不能据此打开 hooks 或宣称 deep unit 完成。
 - deep page relay 已由 production 的随机 document token、tab/WebContents/incarnation/navigation/origin/deep-mode binding、CDP 新文档安装和当前 frame subtree 注入提供平台等价边界；它已有伪造与 all-frame 安装测试，但必须等完整 deep runtime 接入后才能随 unit 一起 verified。
-- deep target runtime 已形成自包含 installer，覆盖幂等/恢复/重入门禁、Worker Blob CSP 异步探测与回退、bootstrap relay、fetch clone、XHR、JSON、TextDecoder 以及 slice/subarray/base64/fromCharCode/DataView/typed-array/join/escape/indexOf 经验面；生产开关仍关闭，target probe-template integration 与原子 cleanup 未完成前不得接入。
+- deep target runtime 已形成自包含 installer，覆盖幂等/恢复/重入门禁、Worker Blob CSP 异步探测与回退、bootstrap relay、fetch clone、XHR、JSON、TextDecoder 以及 slice/subarray/base64/fromCharCode/DataView/typed-array/join/escape/indexOf 经验面；target-only 完整 probe 已贯通既有 tokenized main ingress，生产开关仍关闭，toolkit composition、原子 cutover 与 cleanup 未完成前不得接入。
 - inline script 的 m3u8/mp4/flv 精确 regex、协议补全与重复候选，以及 Vimeo playlist URL gate、base path、track manifest、raw metadata 和 header-only empty master 已迁入可序列化 page-discovery factory。
 - target page adapter 已按固定 XHR/fetch/TextDecoder/root-string 分支顺序组合 runtime、document session 与 page helper，负责 DOMContentLoaded 调度、generated probe resource 物化和 nested Worker observation 回放；generated page/Worker composition 已有可执行测试，但 production template 尚未引用该 body，因此没有第二套 hooks 在运行。
 - Catch Toolkit 的八项产品偏好已收敛为可序列化 page-origin owner，固定 `"checked"`、空字符串删除、selector/regex 验证、重载恢复、新 origin 重置和 storage 被阻止时的内存降级；target owner 仍只有测试调用方，production 继续由旧 probe 唯一持有。
@@ -331,5 +331,5 @@ tools/cat-catch-lab/fixtures/<fixture-id>/
 ## 12. 当前下一步
 
 1. 运行轻量 `cat-catch:validate`，确认版本、32 项能力和 106 个 cleanup 条目自洽。
-2. 把已验证的 target page adapter 与 toolkit state body 接入完整 probe-template harness，贯通 generated resource 到现有 tokenized document ingress，再完成唯一 dispatch boundary 的原子切换与旧 deep block cleanup。
+2. 把 toolkit state body 组合进已验证的 target-only 完整 probe，随后在唯一 dispatch boundary 原子切换并删除旧 deep block；生产 hooks 在 all-frame、round-trip 与 cleanup 门禁同时通过前保持关闭。
 3. 为 MSE、DASH、transfer/output unit 补固定目标的直接行为依赖、真实 test refs 和 production-equivalent integration，不把现有 legacy 行为当 oracle。

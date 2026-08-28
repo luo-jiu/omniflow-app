@@ -511,7 +511,8 @@
         "electron/service/embedded-browser/cat-catch-port/deep-search/runtime.ts#installDeepSearchRuntime",
         "electron/service/embedded-browser/cat-catch-port/deep-search/page-discovery.ts#extractInlineScriptMediaCandidates",
         "electron/service/embedded-browser/capture/adapters/deep-search-page.ts#installDeepSearchPageAdapter",
-        "electron/service/embedded-browser/capture/adapters/deep-search-page.ts#createDeepSearchPageAdapterBodySource"
+        "electron/service/embedded-browser/capture/adapters/deep-search-page.ts#createDeepSearchPageAdapterBodySource",
+        "electron/service/embedded-browser/capture/adapters/deep-search-probe.ts#createDeepSearchTargetProbeScript"
       ],
       "relationToUpstream": "exact",
       "syncState": "porting",
@@ -530,7 +531,8 @@
         "deep.inline-script-url-scan",
         "deep.json-depth-width-cycle",
         "deep.page-adapter-composition",
-        "deep.page-worker-composition"
+        "deep.page-worker-composition",
+        "deep.probe-template-ingress"
       ],
       "testRefs": [
         "electron/service/embedded-browser/cat-catch-port/deep-search/runtime.test.ts#deep.hook-install-sentinels",
@@ -546,14 +548,15 @@
         "electron/service/embedded-browser/cat-catch-port/deep-search/page-discovery.test.ts#deep.inline-script-url-scan",
         "electron/service/embedded-browser/cat-catch-port/deep-search/discovery.test.ts#deep.json-depth-width-cycle",
         "electron/service/embedded-browser/capture/adapters/deep-search-page.test.ts#deep.page-adapter-composition",
-        "electron/service/embedded-browser/capture/adapters/deep-search-page.test.ts#deep.page-worker-composition"
+        "electron/service/embedded-browser/capture/adapters/deep-search-page.test.ts#deep.page-worker-composition",
+        "electron/service/embedded-browser/capture/adapters/deep-search-probe.test.ts#deep.probe-template-ingress"
       ],
       "acceptedDifferences": [
         "Cat Catch begins wrapping real Workers while its Blob Worker probe can still fail asynchronously. The target runtime keeps real Workers native during that short probing state, enables bootstrap injection only after the probe message succeeds, and permanently falls back after error/timeout so CSP cannot strand a page Worker on a rejected Blob URL.",
         "Cat Catch leaves probe and injected Worker Blob URLs live for the document. The target runtime tracks them, revokes the capability probe immediately, bounds injected URLs with a TTL, and exposes idempotent disposal while never terminating page-owned Workers.",
         "Cat Catch only schedules the inline-script scan from DOMContentLoaded. Electron also installs the probe into an already loaded current frame when deep mode starts, so the target adapter schedules the same scan on the next task when readyState is no longer loading; future document-start installs retain the DOMContentLoaded path."
       ],
-      "notes": "The self-contained target installer ports idempotent JSON.parse, TextDecoder manifest, XHR response, fetch clone/body, Worker bootstrap/relay and the Cat Catch slice/subarray/btoa/atob/fromCharCode/DataView/typed-array/join/escape/indexOf experience surfaces. The target page adapter now composes that serialized installer with the stateful discovery and page helper, preserves the distinct XHR/fetch/root-string branch order, schedules inline scanning, materializes generated resources and relays raw nested Worker observations back to the document session. Generated page and Worker execution are covered without adding a second secure relay. Production enableDeepRuntimeHooks remains false: target probe-template integration, toolkit evidence, atomic dispatch cutover and legacy cleanup are still open."
+      "notes": "The self-contained target installer ports idempotent JSON.parse, TextDecoder manifest, XHR response, fetch clone/body, Worker bootstrap/relay and the Cat Catch slice/subarray/btoa/atob/fromCharCode/DataView/typed-array/join/escape/indexOf experience surfaces. The target page adapter composes that serialized installer with the stateful discovery and page helper, preserves the distinct XHR/fetch/root-string branch order, schedules inline scanning, materializes generated resources and relays raw nested Worker observations back to the document session. The target-only complete probe template now executes through the existing tokenized document ingress and main ResourceStateStore without adding a second relay. Production enableDeepRuntimeHooks remains false: toolkit composition, atomic dispatch cutover and legacy cleanup are still open."
     },
     {
       "id": "deep.manifest-key-discovery",
@@ -584,7 +587,8 @@
         "electron/service/embedded-browser/cat-catch-port/deep-search/discovery.ts#discoverResources",
         "electron/service/embedded-browser/cat-catch-port/deep-search/page-discovery.ts#buildVimeoHlsManifest",
         "electron/service/embedded-browser/cat-catch-port/deep-search/page-discovery.ts#createDeepSearchPageDiscovery",
-        "electron/service/embedded-browser/capture/adapters/deep-search-page.ts#installDeepSearchPageAdapter"
+        "electron/service/embedded-browser/capture/adapters/deep-search-page.ts#installDeepSearchPageAdapter",
+        "electron/service/embedded-browser/capture/adapters/deep-search-probe.ts#createDeepSearchTargetProbeScript"
       ],
       "relationToUpstream": "exact",
       "syncState": "porting",
@@ -595,7 +599,8 @@
         "deep.cross-hook-base-replay",
         "deep.vimeo-playlist-translation",
         "deep.page-adapter-composition",
-        "deep.page-worker-composition"
+        "deep.page-worker-composition",
+        "deep.probe-template-ingress"
       ],
       "testRefs": [
         "electron/service/embedded-browser/cat-catch-port/deep-search/discovery.test.ts#deep.inline-manifest-key",
@@ -603,12 +608,13 @@
         "electron/service/embedded-browser/cat-catch-port/deep-search/discovery.test.ts#deep.cross-hook-base-replay",
         "electron/service/embedded-browser/cat-catch-port/deep-search/page-discovery.test.ts#deep.vimeo-playlist-translation",
         "electron/service/embedded-browser/capture/adapters/deep-search-page.test.ts#deep.page-adapter-composition",
-        "electron/service/embedded-browser/capture/adapters/deep-search-page.test.ts#deep.page-worker-composition"
+        "electron/service/embedded-browser/capture/adapters/deep-search-page.test.ts#deep.page-worker-composition",
+        "electron/service/embedded-browser/capture/adapters/deep-search-probe.test.ts#deep.probe-template-ingress"
       ],
       "acceptedDifferences": [
         "The pure port returns inline manifest bytes instead of creating a page-owned Blob URL. The later page adapter must create the opaque resource from those exact bytes; the executable upstream fixture compares Blob contents rather than nondeterministic Blob URL identities."
       ],
-      "notes": "The fixed search.js findMedia/toUrl path is covered by an upstream-executable fixture. The serializable discovery session preserves protocol-relative URL handling, the seven-extension allowlist, loose 16-number key coercion, all-zero/ftyp suppression, data-URL manifests, inline MPD, current base expansion and deferred replay when a later hook observation reveals a new base; discoverResources remains the one-shot facade. The serializable page helper preserves playlist gating, base path normalization, raw Vimeo metadata, per-track playlists and the header-only empty master. The target adapter now maps those outputs to governed probe resources and keeps Cat Catch's separate XHR/fetch/TextDecoder/root-string branches; production remains unchanged until the unit cutover."
+      "notes": "The fixed search.js findMedia/toUrl path is covered by an upstream-executable fixture. The serializable discovery session preserves protocol-relative URL handling, the seven-extension allowlist, loose 16-number key coercion, all-zero/ftyp suppression, data-URL manifests, inline MPD, current base expansion and deferred replay when a later hook observation reveals a new base; discoverResources remains the one-shot facade. The serializable page helper preserves playlist gating, base path normalization, raw Vimeo metadata, per-track playlists and the header-only empty master. The target adapter maps those outputs to governed probe resources and keeps Cat Catch's separate XHR/fetch/TextDecoder/root-string branches; the target-only complete probe proves generated manifest/media ingress while production remains unchanged until the unit cutover."
     },
     {
       "id": "deep.secure-page-relay",
@@ -656,16 +662,18 @@
       "syncedThrough": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
       "plannedTestIds": [
         "deep.relay-forgery",
-        "deep.frame-document-start"
+        "deep.frame-document-start",
+        "deep.probe-template-ingress"
       ],
       "testRefs": [
         "electron/service/embedded-browser/capture/adapters/electron-page-probe.test.ts#deep.relay-forgery",
-        "electron/service/embeddedBrowserViewLifecycle.test.ts#deep.frame-document-start"
+        "electron/service/embeddedBrowserViewLifecycle.test.ts#deep.frame-document-start",
+        "electron/service/embedded-browser/capture/adapters/deep-search-probe.test.ts#deep.probe-template-ingress"
       ],
       "acceptedDifferences": [
         "Cat Catch relays page-world window.postMessage through a content script and extension background worker. OmniFlow has no extension world, so Electron main issues an unpredictable document token, installs the script through CDP at document start, and accepts console transport only while token, tab, WebContents, incarnation, navigation generation, page origin and deep-mode ownership remain current."
       ],
-      "notes": "The production adapters now have explicit deep-search evidence. ElectronPageProbeEventAdapter rejects tokenless, wrong-token, malformed, stale, stopped, crashed and disposed payloads; PageProbeCaptureAdapter derives owner/resource facts in main. The view installer registers the pre-signed next-document script through Page.addScriptToEvaluateOnNewDocument and injects the current script into mainFrame plus framesInSubtree, tolerating transient frame detachment. This capability remains ported-unverified until the complete deep runtime uses the relay and the unit cuts over atomically."
+      "notes": "The production adapters now have explicit deep-search evidence. ElectronPageProbeEventAdapter rejects tokenless, wrong-token, malformed, stale, stopped, crashed and disposed payloads; PageProbeCaptureAdapter derives owner/resource facts in main. The view installer registers the pre-signed next-document script through Page.addScriptToEvaluateOnNewDocument and injects the current script into mainFrame plus framesInSubtree, tolerating transient frame detachment. A target-only complete probe now routes generated manifest/media resources through this exact ingress into the main store. This capability remains ported-unverified until production dispatch cuts over atomically."
     },
     {
       "id": "deep.catch-toolkit-page-settings",
