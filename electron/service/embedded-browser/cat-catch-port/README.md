@@ -53,6 +53,8 @@ HLS 的 main/preload/renderer 共享 DTO 由 `../contracts/hls.ts` 唯一定义�
 
 Deep 的 Electron page adapter 位于 `../../capture/adapters/deep-search-page.ts`：它只组合本目录的 runtime/discovery/page factory 与既有 probe resource/relay callback。相邻 `deep-search-toolkit.ts` 把本目录的 toolkit state 接到既有 get/update bridge，并只向保留的 MSE/page actions 同步运行投影。`deep-search-probe.ts` 提供 target-only 完整组合，已有 generated page/Worker、tokenized main ingress 和 toolkit round-trip 测试；production template 尚未切换，cutover 前不能把它当成已启用能力。
 
+相邻 `page-generated-resource.ts` 是 target Deep 的 page-origin bytes owner，负责 generated manifest/key 的 signature 去重、Blob/base64、文件名和 open/export/read；非自身 key 委托给当前 MSE handler。完整 probe 已能从 main-owned resource key 读取该 owner 的 Cat Catch 归一化 manifest bytes，不再依赖旧 `probeResources` 状态。
+
 `embeddedBrowserCatchToolkitPageBridge.ts`、`embeddedBrowserResourcePageBridge.ts` 的受控脚本生成器，以及 probe template/console prefix 属于保留的平台 adapter，不是第二套 Cat Catch 算法；其 payload/resource key 转发和缺失 handler 行为由 `embeddedBrowserPageBridge.test.ts` 锁定。
 
 ## 来源注释

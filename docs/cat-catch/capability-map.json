@@ -593,7 +593,9 @@
         "electron/service/embedded-browser/cat-catch-port/deep-search/page-discovery.ts#buildVimeoHlsManifest",
         "electron/service/embedded-browser/cat-catch-port/deep-search/page-discovery.ts#createDeepSearchPageDiscovery",
         "electron/service/embedded-browser/capture/adapters/deep-search-page.ts#installDeepSearchPageAdapter",
-        "electron/service/embedded-browser/capture/adapters/deep-search-probe.ts#createDeepSearchTargetProbeScript"
+        "electron/service/embedded-browser/capture/adapters/deep-search-probe.ts#createDeepSearchTargetProbeScript",
+        "electron/service/embedded-browser/capture/adapters/page-generated-resource.ts#installPageGeneratedResourceStore",
+        "electron/service/embedded-browser/capture/adapters/page-generated-resource.ts#createPageGeneratedResourceStoreBodySource"
       ],
       "relationToUpstream": "exact",
       "syncState": "porting",
@@ -605,7 +607,8 @@
         "deep.vimeo-playlist-translation",
         "deep.page-adapter-composition",
         "deep.page-worker-composition",
-        "deep.probe-template-ingress"
+        "deep.probe-template-ingress",
+        "deep.generated-resource-page-owner"
       ],
       "testRefs": [
         "electron/service/embedded-browser/cat-catch-port/deep-search/discovery.test.ts#deep.inline-manifest-key",
@@ -614,12 +617,13 @@
         "electron/service/embedded-browser/cat-catch-port/deep-search/page-discovery.test.ts#deep.vimeo-playlist-translation",
         "electron/service/embedded-browser/capture/adapters/deep-search-page.test.ts#deep.page-adapter-composition",
         "electron/service/embedded-browser/capture/adapters/deep-search-page.test.ts#deep.page-worker-composition",
-        "electron/service/embedded-browser/capture/adapters/deep-search-probe.test.ts#deep.probe-template-ingress"
+        "electron/service/embedded-browser/capture/adapters/deep-search-probe.test.ts#deep.probe-template-ingress",
+        "electron/service/embedded-browser/capture/adapters/page-generated-resource.test.ts#deep.generated-resource-page-owner"
       ],
       "acceptedDifferences": [
         "The pure port returns inline manifest bytes instead of creating a page-owned Blob URL. The later page adapter must create the opaque resource from those exact bytes; the executable upstream fixture compares Blob contents rather than nondeterministic Blob URL identities."
       ],
-      "notes": "The fixed search.js findMedia/toUrl path is covered by an upstream-executable fixture. The serializable discovery session preserves protocol-relative URL handling, the seven-extension allowlist, loose 16-number key coercion, all-zero/ftyp suppression, data-URL manifests, inline MPD, current base expansion and deferred replay when a later hook observation reveals a new base; discoverResources remains the one-shot facade. The serializable page helper preserves playlist gating, base path normalization, raw Vimeo metadata, per-track playlists and the header-only empty master. The target adapter maps those outputs to governed probe resources and keeps Cat Catch's separate XHR/fetch/TextDecoder/root-string branches; the target-only complete probe proves generated manifest/media ingress while production remains unchanged until the unit cutover."
+      "notes": "The fixed search.js findMedia/toUrl path is covered by an upstream-executable fixture. The serializable discovery session preserves protocol-relative URL handling, the seven-extension allowlist, loose 16-number key coercion, all-zero/ftyp suppression, data-URL manifests, inline MPD, current base expansion and deferred replay when a later hook observation reveals a new base; discoverResources remains the one-shot facade. The serializable page helper preserves playlist gating, base path normalization, raw Vimeo metadata, per-track playlists and the header-only empty master. The target adapter maps those outputs to a dedicated page generated-resource owner and keeps Cat Catch's separate XHR/fetch/TextDecoder/root-string branches. The owner fixes signature deduplication, Blob/base64 bytes, filename, open/export/read, MSE-handler delegation and disposal; the complete probe reads Cat Catch-normalized manifest bytes back through the main-owned resource key. Production remains unchanged until the unit cutover."
     },
     {
       "id": "deep.secure-page-relay",

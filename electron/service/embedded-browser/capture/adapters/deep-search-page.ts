@@ -447,7 +447,18 @@ export function createDeepSearchPageAdapterInstallerSource() {
  * Generated body for the existing probe IIFE. The body is intentionally not
  * part of the production template until deep-search-runtime cuts over.
  */
-export function createDeepSearchPageAdapterBodySource() {
+export function createDeepSearchPageAdapterBodySource(input?: {
+  usePageGeneratedResourceStore?: boolean
+}) {
+  const emitGeneratedResourceSource = input?.usePageGeneratedResourceStore
+    ? 'pageGeneratedResourceStore.emitGeneratedResource'
+    : 'emitGeneratedResource'
+  const materializeGeneratedResourceSource = input?.usePageGeneratedResourceStore
+    ? 'pageGeneratedResourceStore.materializeGeneratedResource'
+    : 'createProbeBlobResource'
+  const textToBase64Source = input?.usePageGeneratedResourceStore
+    ? 'pageGeneratedResourceStore.textToBase64'
+    : 'textToBase64'
   return [
     `const installDeepSearchPageAdapter = ${createDeepSearchPageAdapterInstallerSource()};`,
     `const createDeepSearchDiscoverySession = ${createDeepSearchDiscoverySessionSource()};`,
@@ -459,11 +470,11 @@ export function createDeepSearchPageAdapterBodySource() {
     '  createPageDiscovery: createDeepSearchPageDiscovery,',
     "  document: typeof document === 'undefined' ? undefined : document,",
     '  emitCapture: emit,',
-    '  emitGeneratedResource,',
+    `  emitGeneratedResource: ${emitGeneratedResourceSource},`,
     '  installRuntime: installDeepSearchRuntime,',
-    '  materializeGeneratedResource: createProbeBlobResource,',
+    `  materializeGeneratedResource: ${materializeGeneratedResourceSource},`,
     '  scope: globalScope,',
-    '  textToBase64,',
+    `  textToBase64: ${textToBase64Source},`,
     '  workerRelayKey,',
     '});',
   ].join('\n')

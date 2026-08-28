@@ -1459,6 +1459,20 @@
 - legacy cleanup: toolkit get/update/action 三个 page bridge、resource action/extract 两个 page bridge、通用 `createProbeScriptTemplate` 和 console prefix 共 7 项从误标 legacy/remove 修正为 `omniflow-integration/retain-or-adapt`；其余 20 项继续 remove，其中 10 项需先拆分。
 - validation: bridge/完整 probe 定向 `2 files / 4 passed`、应用 TypeScript `--noEmit`、scoped/full ESLint、sync tests `16/16`、metadata 与固定上游 validator、排除 Node runner `tools/cat-catch-sync/validate.test.mjs` 后全仓 Vitest `200 files / 1375 passed / 3 skipped`、scoped diff check 通过。该 Node runner 已在正确的 `node --test` 下通过；完整 build 未运行，以免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
 
+## 2026-08-28: same target (generated-resource page owner extraction)
+
+- observedHead / migrationTarget: 均为 `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本步只抽出 target Deep 的 generated-resource owner。
+- reviewedThrough / portedThrough: 均保持 `null`；`deep.manifest-key-discovery` 继续 `porting`，整个 Deep unit 仍开放。
+- change groups: `state-owner-extraction`、`platform-adapter-composition`、`production-equivalent-readback` 与 `documentation-correction`；不切换 production dispatch。
+- affected capability IDs: `deep.manifest-key-discovery`；metadata 为 `7 units / 32 capabilities / 210 anchors / 106 cleanup entries / 187 planned IDs / 152 active refs`，状态仍为 `11 verified / 5 porting / 1 ported-unverified / 15 pending`。
+- fixtures/tests: `deep.generated-resource-page-owner` 锁定 signature 去重、Blob/base64 bytes、文件名、open/export/read、MSE handler 委托、Unicode 编码和 dispose 恢复；`deep.probe-template-ingress` 还会通过 main-owned resource key 读回归一化 manifest bytes。
+- accepted differences: 无新增差异；page-origin Blob identity 继续保持非确定性，main 仍通过既有 opaque tab/resource authority 治理访问。
+- excluded changes and reasons: target owner 只由 `createDeepSearchTargetProbeScript` 组合；默认 production probe 仍不包含 target body，`enableDeepRuntimeHooks` 继续为 `false`。本步不修改 controller、IPC、renderer、MSE 行为或 relay owner。
+- unresolved gaps: 继续从混合 legacy core/hooks/page-actions 抽出 MSE runtime/actions 与通用 console/global API，再原子切换 production document factory 并删除过时 Deep symbols。
+- runtime changes: 无 production 黑盒变化；target probe 现在按 generated-resource store -> Deep page adapter -> toolkit adapter 组合，不再依赖旧 `probeResources`、`createProbeBlobResource` 或 `textToBase64`。
+- legacy cleanup: `probeResources` 从 split-before-remove 移到 pure-remove；Deep 边界变为 `11 retain-or-adapt / 11 pure remove / 9 split-before-remove`，全部删除仍等待 unit 原子切换。
+- validation: generated owner/page/probe `3 files / 5 passed`、完整 Deep target `7 files / 23 passed`、应用 TypeScript `--noEmit`、scoped/full ESLint、sync tests `16/16`、metadata/固定上游校验（`187 planned tests`）和全仓 Vitest `201 files / 1376 passed / 3 skipped` 均通过。完整 build 仍为避免覆盖其他 Agent 的 dirty `dist-electron/**` 而不运行，且当前没有真实网站手工场景。
+
 ## Template
 
 ```markdown

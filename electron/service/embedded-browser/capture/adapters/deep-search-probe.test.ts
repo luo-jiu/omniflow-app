@@ -169,7 +169,7 @@ function executeTargetProbe(script: string, emitConsole: (message: string) => vo
   return {
     context,
     dispose: () => runInContext(
-      'globalThis.__OMNIFLOW_DEEP_SEARCH_PAGE_ADAPTER_V1__?.dispose(); globalThis.__OMNIFLOW_DEEP_SEARCH_TOOLKIT_ADAPTER_V1__?.dispose()',
+      'globalThis.__OMNIFLOW_DEEP_SEARCH_PAGE_ADAPTER_V1__?.dispose(); globalThis.__OMNIFLOW_DEEP_SEARCH_TOOLKIT_ADAPTER_V1__?.dispose(); globalThis.__OMNIFLOW_PAGE_GENERATED_RESOURCE_STORE_V1__?.dispose()',
       context,
     ),
     inspect: (value: unknown) => runInContext(
@@ -181,7 +181,7 @@ function executeTargetProbe(script: string, emitConsole: (message: string) => vo
 }
 
 describe('Deep search target probe template', () => {
-  it('deep.probe-template-ingress', () => {
+  it('deep.probe-template-ingress', async () => {
     let resourceIndex = 0
     const store = new ResourceStateStore({
       createResourceId: () => `resource-${++resourceIndex}`,
@@ -256,6 +256,18 @@ describe('Deep search target probe template', () => {
       }),
     ]))
     expect(resourceIndex).toBe(3)
+    const manifestResource = store.getOwnedResource('tab-target-probe', 'resource-1')
+    expect(manifestResource?.resourceKey).toMatch(/^probe-resource:/)
+    const extractedManifest = runInContext(`
+      globalThis.__OMNIFLOW_EMBEDDED_BROWSER_RESOURCE_PROBE__.readResource(
+        ${JSON.stringify(manifestResource?.resourceKey)}
+      )
+    `, target.context) as Promise<{ base64?: string } | null>
+    await expect(extractedManifest).resolves.toMatchObject({
+      base64: Buffer.from(
+        '#EXTM3U\n#EXTINF:4,\nhttps://page.example/watch/segment.ts\n#EXT-X-ENDLIST\n',
+      ).toString('base64'),
+    })
     for (const resourceId of ['resource-1', 'resource-2', 'resource-3']) {
       expect(store.getOwnedResource('tab-target-probe', resourceId)).toMatchObject({
         capturedNavigationGeneration: 1,

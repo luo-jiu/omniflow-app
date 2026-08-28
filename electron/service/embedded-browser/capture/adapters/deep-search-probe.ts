@@ -1,6 +1,7 @@
 import { createEmbeddedBrowserResourceProbeScript } from '../../../embeddedBrowserResourceProbe'
 import { createDeepSearchPageAdapterBodySource } from './deep-search-page'
 import { createDeepSearchToolkitAdapterBodySource } from './deep-search-toolkit'
+import { createPageGeneratedResourceStoreBodySource } from './page-generated-resource'
 
 /**
  * Target-only probe composition used to prove the deep-search cutover before
@@ -12,7 +13,8 @@ export function createDeepSearchTargetProbeScript(input: {
 }) {
   return createEmbeddedBrowserResourceProbeScript({
     additionalBodySources: [
-      createDeepSearchPageAdapterBodySource(),
+      createPageGeneratedResourceStoreBodySource(),
+      createDeepSearchPageAdapterBodySource({ usePageGeneratedResourceStore: true }),
       createDeepSearchToolkitAdapterBodySource(),
     ],
     consolePrefix: input.consolePrefix,
