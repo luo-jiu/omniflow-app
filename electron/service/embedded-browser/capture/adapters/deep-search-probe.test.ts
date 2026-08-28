@@ -169,7 +169,7 @@ function executeTargetProbe(script: string, emitConsole: (message: string) => vo
   return {
     context,
     dispose: () => runInContext(
-      'globalThis.__OMNIFLOW_DEEP_SEARCH_PAGE_ADAPTER_V1__?.dispose()',
+      'globalThis.__OMNIFLOW_DEEP_SEARCH_PAGE_ADAPTER_V1__?.dispose(); globalThis.__OMNIFLOW_DEEP_SEARCH_TOOLKIT_ADAPTER_V1__?.dispose()',
       context,
     ),
     inspect: (value: unknown) => runInContext(
@@ -261,6 +261,69 @@ describe('Deep search target probe template', () => {
         capturedNavigationGeneration: 1,
       })
     }
+
+    target.dispose()
+    adapter.dispose()
+    lifecycle.dispose()
+  })
+
+  it('deep.toolkit-probe-round-trip', () => {
+    const store = new ResourceStateStore()
+    const lifecycle = new EmbeddedBrowserLifecycle({
+      emitChange: () => {},
+      store,
+      vault: new NetworkContextVault(),
+    })
+    const webContents = new FakeWebContents(74, 'https://page.example/start')
+    lifecycle.registerView({ tabId: 'tab-target-toolkit', webContents })
+    lifecycle.setCaptureMode('tab-target-toolkit', 'deep')
+    const documentTokens = [
+      'target_toolkit_current_token_001',
+      'target_toolkit_next_token_000002',
+    ]
+    const adapter = new ElectronPageProbeEventAdapter({
+      createDocumentToken: () => documentTokens.shift() || '',
+      lifecycle,
+      tabId: 'tab-target-toolkit',
+      webContents,
+    })
+    adapter.bindCurrentDocument()
+    const document = adapter.prepareNextDocument()!
+    webContents.navigate('https://page.example/watch/index.html')
+    const target = executeTargetProbe(
+      createDeepSearchTargetProbeScript({ consolePrefix: document.consolePrefix }),
+      message => webContents.emitConsole(message),
+    )
+
+    expect(target.result).toBe('installed')
+    const toolkitState = runInContext(`
+      globalThis.__OMNIFLOW_EMBEDDED_BROWSER_RESOURCE_PROBE__.updateCatchToolkitState({
+        autoDownloadOnComplete: true,
+        manualFileName: '  target-probe-title  ',
+        regexRule: 'episode-(\\\\d+)',
+        selectorRule: '.episode-title',
+        trimExtraMediaHeaders: true,
+      })
+    `, target.context) as Record<string, unknown>
+    expect(toolkitState).toMatchObject({
+      autoDownloadOnComplete: true,
+      currentFileName: 'target-probe-title',
+      manualFileName: '  target-probe-title  ',
+      regexRule: 'episode-(\\d+)',
+      selectorRule: '.episode-title',
+      selectorWarning: '表达式暂时没有命中可用内容',
+      trimExtraMediaHeaders: true,
+    })
+    expect(runInContext(`localStorage.getItem(
+      'OmniflowCatchToolkit:autoDownloadOnComplete'
+    )`, target.context)).toBe('checked')
+    expect(runInContext(`localStorage.getItem(
+      'OmniflowCatchToolkit:manualFileName'
+    )`, target.context)).toBe('target-probe-title')
+    expect(runInContext(`
+      globalThis.__OMNIFLOW_DEEP_SEARCH_TOOLKIT_ADAPTER_V1__.getState()
+        .trimExtraMediaHeaders
+    `, target.context)).toBe(true)
 
     target.dispose()
     adapter.dispose()

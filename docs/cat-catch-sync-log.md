@@ -1431,6 +1431,20 @@
 - legacy cleanup: 无；旧 disabled deep block 与 toolkit owner 保留到 unit 原子切换，不能提前删除或并行启用。
 - validation: 定向 ingress/lifecycle `3 files / 5 passed`、完整 deep target `6 files / 21 passed`、应用 TypeScript `--noEmit`、scoped/full ESLint、sync tests `16/16`、metadata 与固定上游 validator、排除 Node runner `tools/cat-catch-sync/validate.test.mjs` 后全仓 Vitest `199 files / 1372 passed / 3 skipped`、scoped diff check 通过。该 Node runner 已在正确的 `node --test` 下通过；完整 build 未运行，以免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
 
+## 2026-08-28: same target (toolkit owner probe round-trip)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本步把已验证的 page-origin toolkit owner 组合进 target-only 完整 probe。
+- reviewedThrough / portedThrough: 均保持 `null`；`deep.catch-toolkit-page-settings` 继续 `porting`，整个 deep unit 仍开放。
+- change groups: `state-owner-composition`、`legacy-runtime-projection`、`production-equivalent-integration` 与 `documentation-correction`；不切换 production dispatch。
+- affected capability IDs: `deep.catch-toolkit-page-settings`；metadata 为 `7 units / 32 capabilities / 210 anchors / 106 cleanup entries / 184 planned IDs / 149 active refs`，状态仍为 `11 verified / 5 porting / 1 ported-unverified / 15 pending`。
+- fixtures/tests: `deep.toolkit-probe-round-trip` 执行真实 target-only 完整 probe，经既有 `getCatchToolkitState/updateCatchToolkitState` 入口验证 target owner、`"checked"` localStorage、手动文件名运行原值/派生 trim/持久 trim、regex/selector 投影和保留 MSE/page-actions 状态读取。
+- accepted differences: 无新增平台差异；同一文档内 `manualFileName` 保留用户原始空格，而 `currentFileName` 与 localStorage trim，重载后 owner 再从持久值归一化，这是既有页面生命周期语义。
+- excluded changes and reasons: target adapter 只在 `deep-search-probe.ts` 的测试/迁移目标组合中安装；默认 production probe 不包含该 body。未修改 MSE 捕捉、controller、IPC、renderer 或 production document factory。
+- unresolved gaps: 旧 probe 的 core/hooks/page-actions 同时持有 Deep、MSE 和 resource action 职责，不能按现有 deep cleanup 条目直接整块删除；下步先拆清保留 owner 与纯 deep symbol，再准备原子 dispatch cutover。
+- runtime changes: 新 `deep-search-toolkit.ts` 让 target state 成为唯一可写偏好 owner，既有 MSE/page-actions 只消费同步投影；dispose 仅在仍持有入口时恢复原 handler，避免覆盖后装 owner。production 黑盒行为不变。
+- legacy cleanup: 无；本步明确发现跨 unit 共用文件/闭包边界，未伪造 cleanup 完成或提前改写 cleanup classification。
+- validation: toolkit/完整 probe 定向 `2 files / 4 passed`、完整 deep target `6 files / 22 passed`、应用 TypeScript `--noEmit`、scoped/full ESLint、sync tests `16/16`、metadata 与固定上游 validator、排除 Node runner `tools/cat-catch-sync/validate.test.mjs` 后全仓 Vitest `199 files / 1373 passed / 3 skipped`、scoped diff check 通过。该 Node runner 已在正确的 `node --test` 下通过；完整 build 未运行，以免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
+
 ## Template
 
 ```markdown
