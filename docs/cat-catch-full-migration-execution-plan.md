@@ -57,9 +57,9 @@ OmniFlow 不运行 Cat Catch 浏览器扩展，而是把与产品目标相关的
 现有资源捕捉实现只能作为 characterization 输入，不能作为正确性 oracle。已确认的事实包括：
 
 - 深度 Worker/fetch/XHR/JSON/key hooks 被 `enableDeepRuntimeHooks = false` 关闭，外围 MSE hooks 仍运行。
-- 网络捕捉使用 `onCompleted`，Cat Catch 在首字节阶段的 `onResponseStarted` 识别。
-- request context 无明确容量和 TTL，敏感 header 值还会进入 renderer DTO。
-- HLS 固定目标的下载相关 parser/plan、key/MAP/range、静态/直播执行、retry/cancel、预处理和真实 ffmpeg 输出范围均已由 fixture 或可执行测试覆盖，并已在唯一 dispatch boundary 切换到 target owner；`hls-engine` 是当前首个完成原子 cutover 的 unit。
+- 网络捕捉由 production `EmbeddedBrowserCaptureRuntime` 唯一注册 `onSendHeaders -> onResponseStarted -> terminal cleanup`，旧 `onCompleted` 识别 bridge 已删除。
+- request context 由 main-only bounded vault 持有容量、TTL、owner 和 purpose；renderer 只接收 header capability，不接收 Cookie/Authorization 值。
+- HLS 固定目标的下载相关 parser/plan、key/MAP/range、静态/直播执行、retry/cancel、预处理和真实 ffmpeg 输出范围均已由 fixture 或可执行测试覆盖，并已在唯一 dispatch boundary 切换到 target owner；`network-capture` 与 `hls-engine` 均已完成原子 cutover。
 - 受支持的加密 KEY 缺失、空或空白 URI 时，pure plan 保留固定 hls.js 的 `encrypted=true` 与无可执行 key ref 事实；本地 task 在任何网络请求前要求有效手动 AES-128 key，否则明确拒绝，不能把 ciphertext 当明文继续交付。
 - 固定 hls.js fast parser 的行边界语义也已迁入：`CR`、`LF` 和 `CRLF` 清单都会进入同一 media/master 解析与下载计划，纯 CR 不再被本地切行预处理误拒绝。
 - 固定 fast parser 的行首 token 优先级已迁入：标签标记前紧邻 ASCII 空格时 URI alternative 先命中，该行会成为零时长 fragment；纯 tab 缩进则跳到 tag alternative。空格前缀的 `EXTM3U` 继续按缺失格式头拒绝，不能被预处理 trim 成合法清单。
@@ -78,9 +78,9 @@ OmniFlow 不运行 Cat Catch 浏览器扩展，而是把与产品目标相关的
 - HLS 真实输出门禁已覆盖 clear/AES-128 AAC、AES-256 CBC/CTR AAC，以及加密 fMP4/H264 视频与独立 AES-128/AAC 音轨的双本地 playlist 合并；ffmpeg 的 protocol/extension 策略按 input 重复声明，避免第二轨本地 key 被默认扩展名策略拒绝。ffmpeg HLS demuxer 不识别 AES-256 METHOD，因而 AES-256 的 key/MAP/media 先按固定 hls.js Web Crypto 模式在本地工作目录解密，再以 clear playlist 进入同一 ffmpeg owner。CBC 加密 MAP 的 BYTERANGE 还会按固定 FragmentLoader 以明文 length 补齐 cipher request，并在非零 offset 前取一个 ciphertext block 重置 IV；AES-128/256 都会产出精确声明长度的 clear MAP，避免把原始 range 直接交给 ffmpeg。
 - DASH 手写 parser 对 `r=-1`、多 BaseURL、动态 MPD 等语义不完整。
 - HLS、DASH、MSE、ffmpeg、临时文件和输出交付尚无统一 task/cleanup 合同。
-- 当前 network classifier/rules、OmniFlow 产品 policy 与持久化设置编译、page URL policy、main-only request context vault、main-owned resource state、renderer-safe cross-process contract/reducer、Electron network/probe adapter、owner lifecycle、main composition、main-only resource access consumer，以及下载、检查、页面拖拽、外部工具四类固定-purpose consumer 和 HLS/DASH transport 已有专项证据。目标 composition 已在 production controller 实例化；HLS 已完成固定目标的原子 cutover，DASH 完整 parser/直拉/track、未捕获拖拽 fallback、旧 toolkit 及其他 unit 的计划 ID 仍待迁移和验证。
+- network classifier/rules、OmniFlow 产品 policy 与持久化设置、page URL policy、main-only vault/store、renderer-safe contract/reducer、Electron network/probe adapter、owner lifecycle、main composition 和固定-purpose resource access 均已在 production target chain 形成唯一 owner，旧 bridge/state/classifier/header DTO 已删除。data/blob 与未捕获拖拽、DASH 直拉/track、旧 toolkit、deep/MSE runtime 和其他 unit 仍按各自边界迁移，不保留第二套 network owner。
 
-因此当前 32 项能力中有 4 项 `verified`、7 项 `ported-unverified`、3 项 `porting`、18 项 `pending`；`hls-engine` 已完成 production cutover，其余 6 个 unit 仍不能因为局部 target 测试通过就提前标记为完成。
+因此当前 32 项能力中有 11 项 `verified`、3 项 `porting`、18 项 `pending`；`network-capture` 与 `hls-engine` 已完成 production cutover，其余 5 个 unit 仍不能因为局部 target 测试通过就提前标记为完成。
 
 ## 4. 长期事实文件
 
@@ -298,13 +298,12 @@ tools/cat-catch-lab/fixtures/<fixture-id>/
 
 ```text
 同步状态与能力映射稳定
-  -> 创建 port/fixture 最小骨架
-    -> network classifier vertical slice
-      -> deep-search runtime
-        -> MSE
-          -> HLS
-            -> DASH
-              -> transfer/output integration
+  -> network-capture（已关闭）
+    -> deep-search runtime
+      -> MSE
+        -> HLS（已关闭）
+          -> DASH
+            -> transfer/output integration
 ```
 
 优先选择能够形成“真实 fixture -> port -> adapter -> production test -> 删除旧实现”的小闭环，不先拆三千行 controller。
@@ -324,7 +323,7 @@ tools/cat-catch-lab/fixtures/<fixture-id>/
 
 ## 12. 当前下一步
 
-1. 运行轻量 `cat-catch:validate`，确认版本、32 项能力和 106 个旧位置自洽。
-2. 让 production probe 安装入口使用 lifecycle 签发的 tokenized document ingress，并把已完成的下载、检查、页面拖拽、外部工具 consumer 接到安全 IPC/preload/renderer 合同，删除这些路径对 renderer `url/headers/referer` 的信任。
-3. 上述 consumer 与 production-equivalent integration 通过后，在唯一 `MainSupport` dispatch boundary 原子切换，随同删除旧 listener、request context Map、classifier/rules 和敏感 header DTO；不得并行注册新旧 `webRequest` listener。
-4. 为其余 unit 补固定目标的直接行为依赖、真实 test refs 和 production-equivalent integration，不把现有 legacy 行为当 oracle。
+1. 运行轻量 `cat-catch:validate`，确认版本、32 项能力和 106 个 cleanup 条目自洽。
+2. 进入 `deep-search-runtime`，优先恢复当前被 `enableDeepRuntimeHooks = false` 关闭的 Worker/fetch/XHR/JSON/TextDecoder/manifest/key 经验分支，并保持 tokenized document ingress。
+3. deep unit 形成完整 fixture、production-equivalent integration 和 cleanup 后再原子切换；不得把 network 已关闭误写成 deep hooks 已完整迁移。
+4. 为 MSE、DASH、transfer/output unit 补固定目标的直接行为依赖、真实 test refs 和 production-equivalent integration，不把现有 legacy 行为当 oracle。

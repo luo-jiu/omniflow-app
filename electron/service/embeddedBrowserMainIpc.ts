@@ -24,7 +24,7 @@ import type {
 } from './embeddedBrowserCookieService'
 import type {
   EmbeddedBrowserCaptureRuleSet,
-} from '@/features/embedded-browser/resources/model/embedded-browser-capture-rules'
+} from './embedded-browser/contracts/capture-settings'
 import type {
   EmbeddedBrowserExternalToolDispatchRequest,
   EmbeddedBrowserExternalToolKey,

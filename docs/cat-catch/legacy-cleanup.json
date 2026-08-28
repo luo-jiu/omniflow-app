@@ -45,8 +45,8 @@
     },
     {
       "id": "node.resource-state.tab-capture-map",
-      "path": "electron/service/embeddedBrowserResourceStateStore.ts",
-      "symbol": "tabCaptureStates",
+      "path": "electron/service/embedded-browser/capture/state/resource-state-store.ts",
+      "symbol": "ResourceStateStore",
       "capabilityId": "capture.resource-state-contract",
       "cutoverUnitId": "network-capture",
       "classification": "omniflow-integration",
@@ -216,7 +216,7 @@
     {
       "id": "node.contract.resource-event-emitter",
       "path": "electron/service/embeddedBrowserMainController.ts",
-      "symbol": "emitEmbeddedBrowserResource",
+      "symbol": "emitEmbeddedBrowserResourceChange",
       "capabilityId": "capture.cross-process-contract",
       "cutoverUnitId": "network-capture",
       "classification": "omniflow-integration",
@@ -645,8 +645,8 @@
     },
     {
       "id": "node.contract.main-resource-types",
-      "path": "electron/service/embeddedBrowserResourceTypes.ts",
-      "symbol": "EmbeddedBrowserCapturedResource",
+      "path": "electron/service/embedded-browser/contracts/captured-resource.ts",
+      "symbol": "CapturedResourceContract",
       "capabilityId": "capture.cross-process-contract",
       "cutoverUnitId": "network-capture",
       "classification": "omniflow-integration",
@@ -856,7 +856,7 @@
     {
       "id": "node.contract.ambient-electron-env",
       "path": "electron/electron-env.d.ts",
-      "symbol": "EmbeddedBrowserCapturedResource",
+      "symbol": "onResourceStateChange",
       "capabilityId": "capture.cross-process-contract",
       "cutoverUnitId": "network-capture",
       "classification": "omniflow-integration",

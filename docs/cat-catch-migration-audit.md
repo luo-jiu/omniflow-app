@@ -13,13 +13,13 @@
 | reviewedThrough | 未建立 |
 | portedThrough | 未建立 |
 
-当前映射包含 7 个 cutover unit、32 项能力、208 个上游 anchor、106 个 cleanup entry 和 169 个唯一计划测试 ID。4 项能力达到 `verified`，7 项为 `ported-unverified`，3 项为 `porting`，其余 18 项仍为 `pending`；124 个唯一计划测试引用已落成 active pure behavior/contract、fake/real Electron integration 或 loopback redirect test。`hls-engine` 已完成固定目标下的原子 cutover，其余 6 个 unit 仍开放。
+当前映射包含 7 个 cutover unit、32 项能力、208 个上游 anchor、106 个 cleanup entry 和 170 个唯一计划测试 ID。11 项能力达到 `verified`，3 项为 `porting`，其余 18 项仍为 `pending`；125 个唯一计划测试引用已落成 active pure behavior/contract、fake/real Electron integration 或 loopback redirect test。`network-capture` 与 `hls-engine` 已完成固定目标下的原子 cutover，其余 5 个 unit 仍开放。
 
 ## 2. 能力族
 
 | 能力族 | 当前实现 | 已知结论 |
 | --- | --- | --- |
-| network capture | target runtime 已在 production controller 实例化，legacy bridge/consumer 仍并存 | Cat Catch 规则与产品 policy 分层、page policy、vault/store、当前/下一 navigation generation 的 tokenized probe routing、renderer-safe reducer、唯一 network/per-view probe composition、owner lifecycle、main-only probe key 解析、context-free stale owner 拒绝和 redirect hop 凭据隔离已有专项测试；资源状态事件、opaque inspection、普通资源下载、probe open/export/read、external-tool dispatch 已接入 production IPC/preload/renderer；已捕获 URL 的页面拖拽会绑定当前 tab 的 opaque resource authority，未捕获、data/blob 和外部拖拽仍走受限 fallback；HLS/DASH 计划下载和旧 catch toolkit 仍待迁移与验证 |
+| network capture | verified target runtime + thin Electron/IPC/settings adapters | `EmbeddedBrowserCaptureRuntime` 是 production 唯一 listener/store/vault owner；Cat Catch 规则和 page policy、OmniFlow 设置、首字节分类、redirect/terminal cleanup、tokenized probe、opaque resource authority、renderer-safe reducer 与 owner lifecycle 均有专项证据。旧 bridge/state/classifier/main DTO 已删除；data/blob、未捕获拖拽、DASH 与旧 toolkit fallback 分属其他开放 unit |
 | deep-search runtime | legacy inactive | 深度 hooks 写死关闭，外围 MSE hook 仍运行 |
 | MSE runtime | legacy owner | 有增量 spool 思路，但没有专项差分、输出和稳定性测试 |
 | HLS engine | verified target parser/plan/local/live execution + thin main adapter + main-owned direct/track authority | 固定目标的下载相关 parser/plan、key/MAP/range、manual key、AES-128/256、静态/直播、独立双轨、retry/cancel、authority、force-cache recovery、生命周期和真实 ffmpeg/ffprobe 输出均有同名证据；生产与测试直接依赖 shared contract、pure port、`HlsTaskExecutor`、`HlsLiveTask` 和 session owner，旧 renderer model、顶层 downloader/recorder re-export 及 legacy-named handler 已在同一切片删除；未捕获派生 URL 的 embedded-session fallback 是保留的平台 adapter，不是旧 HLS 算法 |
@@ -62,15 +62,15 @@ HLS 带值标签只在固定标签名后紧接冒号且冒号后至少有一个�
 ## 3. 高优先级缺口
 
 1. `enableDeepRuntimeHooks = false`。
-2. 生产网络捕捉仍为 `onCompleted`；目标 adapter 已实现首字节阶段识别，但在整个 unit 就绪前不能与旧 listener 同时注册。
-3. 生产 request context 的新 vault/store 已接入 target runtime；HLS direct/track、HLS/DASH 计划和 HLS live source/selected child 已能通过 authority 恢复或验证上下文，live-start 不再接收 renderer headers/pageUrl；DASH 直拉和 catch toolkit 仍保留过渡 DTO，尚未完成统一清理。
+2. production network capture 已切换为唯一 `onResponseStarted` target owner；真实网站手工回归仍是环境验证缺口。
+3. main-only vault/store 已完成 network unit 收口；DASH 直拉和 catch toolkit 的过渡 DTO 归其各自 unit，不能重新引入 renderer request-header 真相源。
 4. TextDecoder inline manifest hook 缺失。
 5. JSON 深度/宽度/cycle 语义未与上游对齐。
 6. Worker Blob CSP 异步失败回退不等价。
 7. HLS 固定目标的下载相关 parser/pipeline、静态/直播、authority、生命周期和真实输出范围均已完成测试验证与原子 cutover；真实网站手工回归仍是环境验证缺口，不再保留旧算法作为备用。
 8. MPD `r=-1`、多 BaseURL、动态 timeline/range 不完整。
 9. ffmpeg、HLS/DASH、直播、普通下载和 temp 没有应用级统一 task registry；HLS 的导航、tab/view 销毁、render-process loss、controller dispose 和应用退出已通过专用 host lifecycle 取消并等待 active fetch/ffmpeg 与在途 session cleanup，但非 HLS 的 4 个 ffmpeg 入口仍未纳入该 owner。
-10. 目前有 124 个唯一 active test ref；逐项名称与来源以 capability map 为准。HLS 相关证据已支撑 `hls-engine` cutover；network/deep/MSE/DASH/transfer/output 仍按各自 unit 的开放状态判断，不能用 HLS 完成度替代。
+10. 目前有 125 个唯一 active test ref；逐项名称与来源以 capability map 为准。Network/HLS 证据已支撑对应 unit cutover；deep/MSE/DASH/transfer/output 仍按各自开放状态判断。
 
 ## 4. 保留、迁移与删除
 
@@ -83,4 +83,4 @@ HLS 带值标签只在固定标签名后紧接冒号且冒号后至少有一个�
 
 ## 5. 当前下一步
 
-下一步离开已关闭的 `hls-engine`，按 unit 顺序优先收口 `network-capture` 的唯一 listener 与 legacy bridge；DASH 直拉/track、旧 catch toolkit 和非 HLS ffmpeg owner 分别留在 DASH/network/output unit 处理。HLS 后续只在真实回归发现问题或上游游标前进时增量维护。
+下一步进入 `deep-search-runtime`，先恢复并验证当前关闭的 Worker/fetch/XHR/JSON/TextDecoder/manifest/key hooks，再在完整 unit 证据齐备后原子切换。Network/HLS 后续只在真实回归发现问题或上游游标前进时增量维护。

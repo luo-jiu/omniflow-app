@@ -169,8 +169,8 @@ function toMetadata(
 
 /**
  * Electron adaptation of Cat Catch's onSendHeaders -> onResponseStarted lifecycle.
- * This adapter is intentionally not registered by the production bridge until the
- * complete network-capture cutover unit is ready.
+ * EmbeddedBrowserCaptureRuntime registers this as the single production owner
+ * for the embedded browser session's webRequest events.
  */
 export class ElectronNetworkCaptureAdapter {
   private captureSettings: CompiledOmniFlowCaptureSettings | undefined

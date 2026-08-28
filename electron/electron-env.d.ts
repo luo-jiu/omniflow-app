@@ -733,11 +733,11 @@ interface Window {
     removeCookie: (url: string, name: string) => Promise<void>;
     removeCookiesByDomain: (domain: string) => Promise<void>;
     removeAllCookies: () => Promise<void>;
-    getResourceCaptureRules: () => Promise<import('@/features/embedded-browser/resources/model/embedded-browser-capture-rules').EmbeddedBrowserCaptureRuleSet>;
+    getResourceCaptureRules: () => Promise<import('./service/embedded-browser/contracts/capture-settings').EmbeddedBrowserCaptureRuleSet>;
     updateResourceCaptureRules: (
-      ruleSet: import('@/features/embedded-browser/resources/model/embedded-browser-capture-rules').EmbeddedBrowserCaptureRuleSet,
-    ) => Promise<import('@/features/embedded-browser/resources/model/embedded-browser-capture-rules').EmbeddedBrowserCaptureRuleSet>;
-    resetResourceCaptureRules: () => Promise<import('@/features/embedded-browser/resources/model/embedded-browser-capture-rules').EmbeddedBrowserCaptureRuleSet>;
+      ruleSet: import('./service/embedded-browser/contracts/capture-settings').EmbeddedBrowserCaptureRuleSet,
+    ) => Promise<import('./service/embedded-browser/contracts/capture-settings').EmbeddedBrowserCaptureRuleSet>;
+    resetResourceCaptureRules: () => Promise<import('./service/embedded-browser/contracts/capture-settings').EmbeddedBrowserCaptureRuleSet>;
     getExternalToolSettings: () => Promise<import('@/features/embedded-browser/external-tools/model/embedded-browser-external-tools').EmbeddedBrowserExternalToolSettings>;
     updateExternalToolSettings: (
       settings: import('@/features/embedded-browser/external-tools/model/embedded-browser-external-tools').EmbeddedBrowserExternalToolSettings,

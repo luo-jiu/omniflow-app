@@ -89,7 +89,8 @@ test('binds every verified planned test to a real test ref', () => {
 
 test('rejects partial unit verification', () => {
   const documents = loadClonedDocuments()
-  const capability = documents.capabilityMap.capabilities[0]
+  const capability = documents.capabilityMap.capabilities
+    .find(item => item.cutoverUnitId === 'deep-search-runtime')
   capability.syncState = 'verified'
   capability.syncedThrough = documents.state.migrationTarget
   capability.targetRefs = ['package.json#cat-catch:validate']
@@ -104,7 +105,7 @@ test('rejects partial unit verification', () => {
 test('rejects a closed unit while removable legacy symbols remain', () => {
   const documents = loadClonedDocuments()
   for (const capability of documents.capabilityMap.capabilities) {
-    if (capability.cutoverUnitId !== 'network-capture') continue
+    if (capability.cutoverUnitId !== 'deep-search-runtime') continue
     capability.syncState = 'verified'
     capability.syncedThrough = documents.state.migrationTarget
     capability.targetRefs = ['package.json#cat-catch:validate']

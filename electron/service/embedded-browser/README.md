@@ -1,6 +1,6 @@
 # Embedded Browser Service Target Layout
 
-该目录是资源捕捉重构的目标边界。当前生产文件仍位于 `electron/service/embeddedBrowser*.ts`；在对应 cutover unit 通过前，不做纯目录搬迁，也不提前删除生产实现。
+该目录是资源捕捉重构的目标边界。已完成的 cutover unit 直接由这里的 owner 承担生产行为；其余能力仍按 unit 小步迁移，不做纯目录搬迁。
 
 ```text
 embedded-browser/
@@ -20,6 +20,6 @@ embedded-browser/
 - 仍承担 Electron、IPC、文件、UploadManager 等产品职责的代码保留或改造成 adapter。
 - 不维持长期双栈；Git 历史负责回滚。
 
-当前 `orchestration/embedded-browser-capture-runtime.ts` 是未注册的 network-capture composition root。构造它会占用 embedded browser session 的 `webRequest` listener，因此只能在旧 bridge 同片删除的原子 cutover 中接入 production；测试或后续 Agent 不得为了“先接一点”让它与旧 bridge 同时运行。
+`orchestration/embedded-browser-capture-runtime.ts` 是 production network-capture composition root，独占 embedded browser session 的 `webRequest` listener，并组合 main-owned vault/store、page probe 和 resource access。旧 bridge/state/classifier 已删除；不得注册第二套 listener 或恢复 renderer header DTO。
 
 逐项映射见 `docs/cat-catch/capability-map.json`；初始迁移期间的旧位置处置见 `docs/cat-catch/legacy-cleanup.json`。

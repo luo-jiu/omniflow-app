@@ -45,7 +45,7 @@ HLS 的 main/preload/renderer 共享 DTO 由 `../contracts/hls.ts` 唯一定义�
 
 平台侧 HLS 执行 owner 位于相邻的 `../processing/`：`HlsTaskExecutor` 负责本地 key/map/segment、playlist 和 local -> ffmpeg 阶段序列，首次计划与 retry 共用同一合同；`HlsLiveTask` 负责直播轮询和累计计划。controller、双轨合并和 output 测试直接依赖这两个 target，旧顶层 downloader/recorder 兼容出口已删除。
 
-逐项状态以 capability map 为准。network target 已进入 production composition，但整个 `network-capture` unit 完成前仍未原子切换旧 listener；`hls-engine` 已在固定目标完成验证、dispatch 切换和 legacy symbol 清理，是当前首个完成 cutover 的 unit。
+逐项状态以 capability map 为准。`network-capture` 与 `hls-engine` 已在固定目标完成验证、dispatch 切换和 legacy symbol 清理；其余 unit 仍按同一协议推进。
 
 ## 来源注释
 

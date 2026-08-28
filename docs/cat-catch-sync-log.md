@@ -1291,6 +1291,20 @@
 - legacy cleanup: `hls-engine` 的 5 个 `remove-after-cutover` symbol 已全部消失，3 个 `retain-or-adapt` session owner 仍存在；cleanup entries 暂留，让 validator 在整体迁移结束前持续断言旧 symbol 不得复活。
 - validation: HLS 集合 `19 files / 132 passed`（真实输出 `4/4`）、TypeScript、全仓 ESLint、全仓 Vitest `190 files / 1294 passed / 3 skipped`、同步测试 `16/16`、metadata/固定上游 validator 和 scoped diff check 已通过。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
 
+## 2026-08-28: same target (network capture atomic cutover)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本步关闭固定目标的 `network-capture` unit。
+- reviewedThrough / portedThrough: 仓库级游标均保持 `null`，因为其余 5 个 unit 仍开放；7 项 network capability 均改为 `verified` 且 `syncedThrough` 固定目标。
+- change groups: `production-cutover`、`legacy-cleanup`、`contract-consolidation` 与 `documentation-correction`；无新的上游行为差分。
+- affected capability IDs: `capture.network-event-lifecycle`、`capture.protected-request-context`、`capture.request-url-helpers`、`capture.rules-classification-deduplication`、`capture.resource-state-contract`、`capture.cross-process-contract`、`capture.owner-lifecycle` 全部关闭；metadata 为 `7 units / 32 capabilities / 208 anchors / 106 cleanup entries / 170 planned IDs / 125 active refs`，其中 21 项能力仍开放。
+- fixtures/tests: 新增 `network.capture-settings-persistence`，锁定旧 JSON 路径/schema 2 的规范化、升级和产品默认经验规则；network 全集 `15 files / 62 tests` 覆盖首字节、终态、vault/store、规则、page probe、跨进程 reducer、固定-purpose consumer 和 owner lifecycle。
+- accepted difference: 无新增差异；persisted domain settings 继续作为 OmniFlow resource/page host policy，Cat Catch top-level page policy 仍由 pure port 和 main-owned current page URL 单独执行。
+- excluded changes and reasons: data/blob、未捕获拖拽和 derived manifest URL 的受限 adapter 不是第二套 listener/context owner；deep hooks、MSE、DASH、transfer/output 与旧 catch toolkit 按各自 unit 推进，本步不扩大范围。
+- unresolved gaps: 真实网站手工回归受当前环境限制；Network 后续只在真实回归发现问题或上游游标前进时增量维护。
+- runtime changes: production controller 继续唯一构造 `EmbeddedBrowserCaptureRuntime`；共享 capture-settings contract 与 target settings store 接管原 JSON 行为，main/preload/renderer 使用同一 DTO；删除旧 bridge、rules/classifier、service、state store 和 main resource types 共 6 个文件。
+- legacy cleanup: `network-capture` 的 8 个 `remove-after-cutover` symbol 已全部消失，19 个 `retain-or-adapt` owner 已保留或指向 target；cleanup entries 暂留用于防复活。
+- validation: network `15 files / 62 passed`、capture settings + target chain 专项 `4 files / 8 passed`、TypeScript、全仓 ESLint、同步测试 `16/16`、metadata/固定上游 validator 和 scoped diff check 已通过；排除 Node runner 文件后全仓 Vitest 为 `191 files / 1298 passed / 3 skipped`。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
+
 ## Template
 
 ```markdown

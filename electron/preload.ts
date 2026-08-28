@@ -1,6 +1,6 @@
 // 渲染进程中的Bridge API
 import { ipcRenderer, contextBridge } from 'electron'
-import type { EmbeddedBrowserCaptureRuleSet } from '@/features/embedded-browser/resources/model/embedded-browser-capture-rules'
+import type { EmbeddedBrowserCaptureRuleSet } from './service/embedded-browser/contracts/capture-settings'
 import type {
   EmbeddedBrowserExternalToolDispatchRequest,
   EmbeddedBrowserExternalToolKey,

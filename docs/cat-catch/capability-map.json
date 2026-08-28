@@ -6,8 +6,8 @@
       "order": 1,
       "description": "Request timing, protected context, headers, rules, classification, deduplication, and resource-state handoff.",
       "dispatchBoundaryRefs": [
-        "electron/service/embeddedBrowserMainSupport.ts#initializeEmbeddedBrowserMainBridges",
-        "electron/service/embeddedBrowserResourceBridge.ts#initializeEmbeddedBrowserResourceBridge"
+        "electron/service/embeddedBrowserMainController.ts#initializeBridges",
+        "electron/service/embedded-browser/orchestration/embedded-browser-capture-runtime.ts#EmbeddedBrowserCaptureRuntime"
       ]
     },
     {
@@ -112,7 +112,7 @@
         "electron/service/embedded-browser/capture/adapters/electron-network.ts#ElectronNetworkCaptureAdapter"
       ],
       "relationToUpstream": "platform-substitute",
-      "syncState": "ported-unverified",
+      "syncState": "verified",
       "syncedThrough": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
       "plannedTestIds": [
         "network.first-byte-long-response",
@@ -123,7 +123,7 @@
         "electron/service/embedded-browser/capture/adapters/electron-network.test.ts#network.context-terminal-cleanup"
       ],
       "acceptedDifferences": [],
-      "notes": "The unregistered Electron adapter now preserves Cat Catch request-stage regex handling and response-start classification, binds each redirect hop to a fresh onSendHeaders event, cleans pending state on redirect/completion/error/dispose, rejects stale navigation owners, and converts vault invalidation into revisioned Store changes. The legacy onCompleted bridge remains the only production owner until the network-capture unit cutover."
+      "notes": "ElectronNetworkCaptureAdapter is the verified production owner registered once by EmbeddedBrowserCaptureRuntime. It preserves Cat Catch request-stage regex handling and response-start classification, binds redirect hops to fresh onSendHeaders events, cleans pending state on redirect/completion/error/dispose, rejects stale navigation owners, and converts vault invalidation into revisioned Store changes. The legacy onCompleted bridge was removed during network-capture cutover."
     },
     {
       "id": "capture.protected-request-context",
@@ -164,7 +164,7 @@
         "electron/service/embedded-browser/integrations/captured-resource-transfer-consumers.ts#CapturedResourcePageDragService"
       ],
       "relationToUpstream": "platform-substitute",
-      "syncState": "ported-unverified",
+      "syncState": "verified",
       "syncedThrough": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
       "plannedTestIds": [
         "network.sensitive-header-projection",
@@ -188,7 +188,7 @@
         "When Cat Catch regex classification rewrites a request URL, OmniFlow does not inherit credentials from the observed URL; a new main-owned context is required for the rewritten exact URL.",
         "After an HTTP redirect, OmniFlow never forwards the previous hop's protected headers, including for a same-origin target. The target needs its own main-owned captured context; page-drag staging may still use the captured tab's Electron session cookie jar for cookies scoped to the target URL."
       ],
-      "notes": "The pinned main-only vault preserves Cat Catch's protected-header selection and adds bounded pending/retained lifecycles, opaque renderer-safe projection, purpose and owner bindings, independent source/replay resource types, exact resource URL redemption, page-drag Cookie policy, and value-free invalidation events for every retained context deletion reason. The unregistered CapturedResourceAccessService now accepts only tabId, opaque resourceId, and one of four fixed purposes; it derives URL, replay type, owner generation, page origin, WebContents, and header values from Store/Vault, rejects stale owners for both context-bearing and context-free resources, forces manual redirect, and strips protected headers from every later hop. Page-drag omits the captured Cookie and requests cookie-jar credentials through a mandatory injected transport; production captured-source wiring now binds that transport to the captured tab's Electron session, while unrecognized/data/blob fallback remains in the legacy staging service. Download, inspection, captured-source page-drag, and external-tool consumers now have the target authority; inspection has a main-owned byte budget and safe result projection, and download/page-drag pass the authorized Response only to an injected main sink and never accept renderer URL/header/redirect/destination fields. Full production cutover and cleanup remain open."
+      "notes": "The verified main-only vault preserves Cat Catch's protected-header selection and adds bounded pending/retained lifecycles, opaque renderer-safe projection, purpose and owner bindings, independent source/replay resource types, exact resource URL redemption, page-drag Cookie policy, and value-free invalidation events. Production download, inspection, captured-source page drag, external tools, HLS and captured DASH transport redeem fixed-purpose opaque authority; stale and cross-tab owners fail before fetch. Redirects are manual and protected headers never cross hops. Unrecognized/data/blob page-drag and derived uncaptured HLS/DASH URLs remain explicit platform fallbacks without exposing captured header values to renderer. The legacy request-context Map and renderer header DTO were removed during cutover."
     },
     {
       "id": "capture.request-url-helpers",
@@ -238,7 +238,7 @@
         "electron/service/embedded-browser/cat-catch-port/network/request-url-helpers.ts#matchesCatCatchUrlFilter"
       ],
       "relationToUpstream": "exact",
-      "syncState": "ported-unverified",
+      "syncState": "verified",
       "syncedThrough": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
       "plannedTestIds": [
         "network.url-filtering-parity",
@@ -249,7 +249,7 @@
         "electron/service/embedded-browser/cat-catch-port/network/request-url-helpers.test.ts#network.special-page-parity"
       ],
       "acceptedDifferences": [],
-      "notes": "Pinned pure port covers full-string case-insensitive wildcard page rules, disabled-rule skipping, the default-off Douyin forced block, blacklist/whitelist inversion, and special-page protocol checks. It does not own per-tab membership and is not connected to production. The current local domain rules filter resource hosts rather than Cat Catch's top-level page/tab URL, so a later adapter must map that product difference explicitly."
+      "notes": "The verified pure port covers full-string case-insensitive wildcard page rules, disabled-rule skipping, the default-off Douyin forced block, blacklist/whitelist inversion, and special-page protocol checks. ElectronNetworkCaptureAdapter applies page URL policy to the main-owned current document before recording request context. OmniFlow persisted domain settings intentionally remain a separate product filter over resource/page host and compile through the integration policy."
     },
     {
       "id": "capture.rules-classification-deduplication",
@@ -293,25 +293,28 @@
         "electron/service/embedded-browser/cat-catch-port/network/classifier.ts#classifyResource",
         "electron/service/embedded-browser/cat-catch-port/network/classifier.ts#classifyResourceFingerprint",
         "electron/service/embedded-browser/cat-catch-port/network/rules.ts#compileCatCatchRules",
-        "electron/service/embedded-browser/capture/policy/omniflow-capture-policy.ts#classifyOmniFlowNetworkResource"
+        "electron/service/embedded-browser/capture/policy/omniflow-capture-policy.ts#classifyOmniFlowNetworkResource",
+        "electron/service/embedded-browser/integrations/capture-settings-store.ts#EmbeddedBrowserCaptureSettingsStore"
       ],
       "relationToUpstream": "semantic-equivalent",
-      "syncState": "ported-unverified",
+      "syncState": "verified",
       "syncedThrough": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
       "plannedTestIds": [
         "network.rule-ordering",
         "network.mime-extension-dedupe",
         "network.omniflow-policy-boundary",
-        "network.omniflow-settings-adaptation"
+        "network.omniflow-settings-adaptation",
+        "network.capture-settings-persistence"
       ],
       "testRefs": [
         "electron/service/embedded-browser/cat-catch-port/network/classifier.test.ts#network.rule-ordering",
         "electron/service/embedded-browser/cat-catch-port/network/classifier.test.ts#network.mime-extension-dedupe",
         "electron/service/embedded-browser/capture/policy/omniflow-capture-policy.test.ts#network.omniflow-policy-boundary",
-        "electron/service/embedded-browser/capture/policy/omniflow-capture-policy.test.ts#network.omniflow-settings-adaptation"
+        "electron/service/embedded-browser/capture/policy/omniflow-capture-policy.test.ts#network.omniflow-settings-adaptation",
+        "electron/service/embedded-browser/integrations/capture-settings-store.test.ts#network.capture-settings-persistence"
       ],
       "acceptedDifferences": [],
-      "notes": "Pinned pure port covers ordered request regex, upstream default rule states, extension/MIME/Content-Disposition/media fallback precedence, hard break semantics, size operators, wildcard MIME priority, and exact-URL dedupe/reset decisions. A separate OmniFlow capture policy now adds image, key, document, and expanded-subtitle kinds at the target adapter boundary: Cat Catch capture results remain authoritative, regex blacklist is never overridden, and non-product media rejection remains intact. The persisted OmniFlow extension, MIME, regex, domain whitelist, and domain blacklist settings compile into this target policy, and the unregistered runtime can replace the compiled settings without replacing its owned webRequest listeners. Production still uses the legacy classifier/rules until atomic cutover."
+      "notes": "The verified pure port owns ordered request regex, upstream default states, extension/MIME/Content-Disposition/media precedence, hard-break size semantics, wildcard MIME priority and exact-URL dedupe/reset decisions. The OmniFlow policy adds image, key, document and expanded-subtitle kinds without overriding a Cat Catch regex blacklist or non-product rejection. The target settings store preserves the existing schema-2 JSON path, normalization, product defaults and upgrade behavior; production hot-updates compiled settings without replacing the single webRequest listener. Legacy classifier/rules modules were removed during cutover."
     },
     {
       "id": "capture.resource-state-contract",
@@ -343,7 +346,7 @@
         }
       ],
       "currentImplementationRefs": [
-        "electron/service/embeddedBrowserResourceStateStore.ts#tabCaptureStates"
+        "electron/service/embedded-browser/capture/state/resource-state-store.ts#ResourceStateStore"
       ],
       "targetRefs": [
         "electron/service/embedded-browser/capture/state/resource-state-store.ts#ResourceStateStore",
@@ -351,7 +354,7 @@
         "electron/service/embedded-browser/orchestration/embedded-browser-capture-runtime.ts#resolvePageResourceKey"
       ],
       "relationToUpstream": "semantic-equivalent",
-      "syncState": "ported-unverified",
+      "syncState": "verified",
       "syncedThrough": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
       "plannedTestIds": [
         "state.capacity-ttl-dedupe",
@@ -370,7 +373,7 @@
         "OmniFlow stable probe resources upsert by navigation generation plus page-owned resource key. Updating an existing key keeps its opaque id even at capacity, while the same key in a later document creates a new resource instead of merging metadata across pages.",
         "Renderer-safe state exposes opaque resource ids, revision/incarnation stamps, and whitelisted metadata/header capabilities only; page resource keys, context refs and values, page origin, WebContents id, and captured navigation owner facts remain main-owned."
       ],
-      "notes": "The pinned main-only store preserves the desktop 10,000-entry overflow reset/drop behavior, exact-URL dedupe including the 500-fingerprint reset boundary, explicit navigation clear/retain, stable probe upsert, bounded TTL, newest-first snapshots, single-owner context release, and revision/incarnation tombstones. The unregistered PageProbeCaptureAdapter binds one document generation to deep-only stable-key writes, ignores page-supplied tab/timestamp authority, keeps resourceKey main-only, and emits every accepted upsert through the same revisioned change path. EmbeddedBrowserCaptureRuntime resolves an opaque probe resource id back to its page key only while the tab, incarnation, navigation generation, page origin and WebContents owner all remain current; renderer never receives that key. The target composition is not connected to the production console listener yet. NetworkContextVault invalidations already feed Store changes through the target network adapter; the legacy Map remains the only production owner until atomic cutover."
+      "notes": "The verified main-only ResourceStateStore preserves the desktop 10,000-entry overflow reset/drop behavior, exact-URL dedupe including the 500-fingerprint reset boundary, explicit navigation clear/retain, stable probe upsert, bounded TTL, newest-first snapshots, single-owner context release and revision/incarnation tombstones. Production PageProbeCaptureAdapter binds one document generation to deep-only stable-key writes and keeps resourceKey main-only. Opaque probe resource resolution rechecks tab, incarnation, navigation, origin and WebContents ownership. Vault invalidations feed the same revisioned change path. The legacy tabCaptureStates owner was removed during cutover."
     },
     {
       "id": "capture.cross-process-contract",
@@ -384,16 +387,17 @@
       ],
       "upstreamRefs": [],
       "currentImplementationRefs": [
-        "electron/electron-env.d.ts#EmbeddedBrowserCapturedResource",
+        "electron/electron-env.d.ts#onResourceStateChange",
         "electron/preload.ts#electronEmbeddedBrowser",
-        "electron/service/embeddedBrowserResourceTypes.ts#EmbeddedBrowserCapturedResource",
+        "electron/service/embedded-browser/contracts/captured-resource.ts#CapturedResourceContract",
         "src/features/embedded-browser/resources/types.ts#EmbeddedBrowserCapturedResource"
       ],
       "targetRefs": [
-        "electron/service/embedded-browser/contracts/captured-resource.ts#CapturedResourceContract"
+        "electron/service/embedded-browser/contracts/captured-resource.ts#CapturedResourceContract",
+        "electron/service/embedded-browser/contracts/capture-settings.ts#EmbeddedBrowserCaptureRuleSet"
       ],
       "relationToUpstream": "not-applicable",
-      "syncState": "ported-unverified",
+      "syncState": "verified",
       "syncedThrough": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
       "plannedTestIds": [
         "contract.resource-dto-single-source",
@@ -404,7 +408,7 @@
         "electron/service/embedded-browser/contracts/captured-resource.test.ts#contract.renderer-safe-projection"
       ],
       "acceptedDifferences": [],
-      "notes": "The target contract now owns renderer-safe resource/snapshot/change DTOs, whitelist parsing, and the revision/incarnation reducer. The new Store imports and re-exports these types for migration compatibility. Legacy preload, ambient, and renderer DTO copies remain reachable only through the production legacy chain and must be removed in the atomic network-capture cutover."
+      "notes": "The verified target contracts uniquely own renderer-safe resource/snapshot/change DTOs, whitelist parsing, revision/incarnation reduction and persisted capture-setting DTOs. Main, preload and renderer use those contracts directly or through type-only re-exports. Renderer projections contain opaque IDs, metadata and header capabilities but no page key, context ref, owner identity, URL authority inputs or protected header values. Legacy main DTO copies were removed during cutover."
     },
     {
       "id": "capture.owner-lifecycle",
@@ -428,7 +432,7 @@
         "electron/service/embedded-browser/orchestration/embedded-browser-capture-runtime.ts#EmbeddedBrowserCaptureRuntime"
       ],
       "relationToUpstream": "not-applicable",
-      "syncState": "ported-unverified",
+      "syncState": "verified",
       "syncedThrough": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
       "plannedTestIds": [
         "lifecycle.navigation-close-exit-crash",
@@ -447,7 +451,7 @@
         "electron/service/embedded-browser/orchestration/embedded-browser-capture-runtime.test.ts#network.production-equivalent-composition"
       ],
       "acceptedDifferences": [],
-      "notes": "The unregistered target lifecycle and EmbeddedBrowserCaptureRuntime compose exactly one network adapter, the context vault, resource store, safe change contract, per-view tokenized probe adapter, opaque access authority, and bounded inspection through fake Electron integration. The runtime owns tab/view registration and replacement, explicit clear/retain navigation, crash quarantine and recovery, spontaneous WebContents destruction, explicit tab/WebContents close, closeAll, maintenance, and application disposal; constructing it claims the session webRequest listener boundary, so production must not instantiate it before the atomic cutover. Probe ingress is minted only while capture mode is deep. ElectronPageProbeEventAdapter owns separate current-document and pre-signed next-navigation routes: the next document-start token is promoted only after its expected incarnation/navigation binding becomes current, while the previous token remains invalid. Every message rechecks the binding and current deep mode; malformed/base-prefix/old-token/crashed/disposed/stopped messages are ignored, only mse-flush/mse-reset reach the separate control callback, and callback errors are contained. Ordinary discovery payloads without a page key receive a main-derived stable key that remains opaque. Production controller/view lifecycle still uses the legacy recorder until protected-context consumers, IPC/preload/renderer projection, production probe installation, and atomic cutover are ready."
+      "notes": "EmbeddedBrowserCaptureRuntime is the verified production composition and owns exactly one network adapter, context vault, resource store, safe change contract, per-view tokenized probe adapter, opaque access authority and bounded inspection. It owns tab/view registration and replacement, clear/retain navigation, crash quarantine/recovery, spontaneous destruction, explicit close, closeAll, maintenance and app disposal. Probe ingress exists only in deep mode; current and pre-signed next-document tokens are generation-bound and every payload rechecks its owner. Malformed, stale, crashed, disposed and stopped payloads are ignored, MSE control remains on its separate callback, and ordinary discovery keys are main-derived and opaque. The legacy recorder/state path was removed during network-capture cutover."
     },
     {
       "id": "deep.runtime-hook-bundle",

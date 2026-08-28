@@ -105,10 +105,10 @@ import {
   stageEmbeddedBrowserPageDrag,
 } from './embeddedBrowserPageDragService'
 import {
-  listEmbeddedBrowserResourceCaptureRules,
-  resetEmbeddedBrowserResourceCaptureRules,
-  updateEmbeddedBrowserResourceCaptureRules,
-} from './embeddedBrowserResourceCaptureRules'
+  listEmbeddedBrowserCaptureSettings,
+  resetEmbeddedBrowserCaptureSettings,
+  updateEmbeddedBrowserCaptureSettings,
+} from './embedded-browser/integrations/capture-settings-store'
 import {
   dispatchEmbeddedBrowserExternalTool,
   listEmbeddedBrowserExternalToolSettings,
@@ -693,7 +693,7 @@ export function createEmbeddedBrowserMainController(
     }
     captureRuntime = new EmbeddedBrowserCaptureRuntime({
       captureSettings: compileOmniFlowCaptureSettings(
-        listEmbeddedBrowserResourceCaptureRules(),
+        listEmbeddedBrowserCaptureSettings(),
       ),
       emitChange: emitEmbeddedBrowserResourceChange,
       fetch: (url, init) => browserSession.fetch(url, init),
@@ -3576,14 +3576,14 @@ export function createEmbeddedBrowserMainController(
       removeCookie: removeEmbeddedBrowserCookie,
       removeCookiesByDomain: removeEmbeddedBrowserCookiesByDomain,
       removeAllCookies: removeAllEmbeddedBrowserCookies,
-      getResourceCaptureRules: async () => listEmbeddedBrowserResourceCaptureRules(),
+      getResourceCaptureRules: async () => listEmbeddedBrowserCaptureSettings(),
       updateResourceCaptureRules: async (ruleSet) => {
-        const next = updateEmbeddedBrowserResourceCaptureRules(ruleSet)
+        const next = updateEmbeddedBrowserCaptureSettings(ruleSet)
         captureRuntime?.updateCaptureSettings(compileOmniFlowCaptureSettings(next))
         return next
       },
       resetResourceCaptureRules: async () => {
-        const next = resetEmbeddedBrowserResourceCaptureRules()
+        const next = resetEmbeddedBrowserCaptureSettings()
         captureRuntime?.updateCaptureSettings(compileOmniFlowCaptureSettings(next))
         return next
       },
