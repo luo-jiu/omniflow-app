@@ -61,6 +61,7 @@ OmniFlow 不运行 Cat Catch 浏览器扩展，而是把与产品目标相关的
 - deep page relay 已由 production 的随机 document token、tab/WebContents/incarnation/navigation/origin/deep-mode binding、CDP 新文档安装和当前 frame subtree 注入提供平台等价边界；它已有伪造与 all-frame 安装测试，但必须等完整 deep runtime 接入后才能随 unit 一起 verified。
 - deep target runtime 已形成自包含 installer，覆盖幂等/恢复/重入门禁、Worker Blob CSP 异步探测与回退、bootstrap relay、fetch clone、XHR、JSON、TextDecoder 以及 slice/subarray/base64/fromCharCode/DataView/typed-array/join/escape/indexOf 经验面；生产开关仍关闭，page/discovery adapter composition 与原子 cleanup 未完成前不得接入。
 - inline script 的 m3u8/mp4/flv 精确 regex、协议补全与重复候选，以及 Vimeo playlist URL gate、base path、track manifest、raw metadata 和 header-only empty master 已迁入 page-discovery target；DOMContentLoaded 调度、Blob 物化与 relay 仍等 adapter composition。
+- discovery 已从一次性 helper 收敛为可序列化 document session，跨 JSON/fetch/XHR 观察保留 emitted/base/pending 状态；相对 manifest 可以在后续 hook 才出现媒体 URL 时按新 base 回放，一次性 `discoverResources` 只保留为测试和兼容 facade。
 - 网络捕捉由 production `EmbeddedBrowserCaptureRuntime` 唯一注册 `onSendHeaders -> onResponseStarted -> terminal cleanup`，旧 `onCompleted` 识别 bridge 已删除。
 - request context 由 main-only bounded vault 持有容量、TTL、owner 和 purpose；renderer 只接收 header capability，不接收 Cookie/Authorization 值。
 - HLS 固定目标的下载相关 parser/plan、key/MAP/range、静态/直播执行、retry/cancel、预处理和真实 ffmpeg 输出范围均已由 fixture 或可执行测试覆盖，并已在唯一 dispatch boundary 切换到 target owner；`network-capture` 与 `hls-engine` 均已完成原子 cutover。

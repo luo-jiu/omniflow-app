@@ -37,7 +37,7 @@ downloader/
 - `network/rules.ts`：固定上游默认规则与大小判断语义。
 - `network/classifier.ts`：纯 request/response 分类和去重决策。
 - `network/request-url-helpers.ts`：页面 URL pattern、黑白名单反转与 special-page 规则。
-- `deep-search/discovery.ts`：固定 `search.js` 的 JSON/inline manifest/key 发现与 base URL 回放语义。
+- `deep-search/discovery.ts`：固定 `search.js` 的 JSON/inline manifest/key 发现与跨 hook base URL 回放语义，提供可序列化 document session 和一次性 facade。
 - `deep-search/runtime.ts`：固定 `search.js` 的 Worker/JSON/XHR/fetch/TextDecoder 与 key/string experience hook 安装语义；当前仅作为可执行 target port，待完整 deep unit 原子接入。
 - `deep-search/page-discovery.ts`：固定 inline script URL 扫描与 Vimeo `playlist.json` 转 HLS 语义，Blob URL 交给平台 callback 物化。
 - `hls/parser.ts`：固定 hls.js/Cat Catch 的 manifest 下载相关解析语义。
