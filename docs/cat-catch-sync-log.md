@@ -1277,6 +1277,20 @@
 - legacy cleanup: 无；旧 compatibility facade 和 legacy-named controller adapter 保留到 hls-engine 原子 cutover。
 - validation: parser 专项 `1 file / 45 tests`、local downloader 专项 `1 file / 11 tests`、TypeScript、全仓 ESLint、同步测试 `16/16`、metadata `7 units / 32 capabilities / 208 anchors / 106 cleanup entries / 169 planned IDs / 124 active refs` 通过；排除 Node runner 文件后全仓 Vitest 为 `189 files / 1267 passed / 3 skipped`，其中真实 HLS 输出 `1 file / 4 tests` 通过。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
 
+## 2026-08-28: same target (HLS engine atomic cutover)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本步关闭固定目标的 `hls-engine` unit。
+- reviewedThrough / portedThrough: 仓库级游标均保持 `null`，因为其余 6 个 unit 仍开放；4 项 HLS capability 均改为 `verified` 且 `syncedThrough` 固定目标。
+- change groups: `production-cutover`、`legacy-cleanup` 与 `documentation-correction`；无新的上游行为差分。
+- affected capability IDs: `hls.parser-planner`、`hls.segment-pipeline`、`hls.live-recording`、`hls.cache-fallback-disguised-fragments` 全部关闭；metadata 仍为 `7 units / 32 capabilities / 208 anchors / 106 cleanup entries / 169 planned IDs / 124 active refs`，其中 28 项能力仍开放。
+- fixtures/tests: 不新增 fixture 或 planned ID；既有 124 个 active ref 中，HLS 的所有 planned ID 均有同名 testRef，真实 ffmpeg/ffprobe 继续覆盖 clear、AES-128、AES-256 CBC/CTR 和 encrypted fMP4 + independent audio。
+- accepted difference: 无新的黑盒差异；controller handler 只从 legacy 名称改为 target adapter 名称，IPC channel/payload、authority、task/session owner、输出和错误语义不变。
+- excluded changes and reasons: 不把 HLS 完成度外推到 network/deep/MSE/DASH/transfer/output；未捕获派生 key/MAP/media URL 的 embedded-session fetch 是明确保留的平台 adapter，不当成待删除旧算法。
+- unresolved gaps: 真实网站手工回归仍受当前环境限制；后续 HLS 只在该回归发现问题或上游游标前进时增量维护。其余 6 个 unit 继续按 capability map 推进。
+- runtime changes: 删除 renderer HLS compatibility model、顶层 local-downloader/live-recorder re-export；parser/contract/owner 测试直接引用 target；main 的 plan adapter 改名为 `handleEmbeddedBrowserHlsPlanDownload` 并继续委派 `HlsTaskExecutor`。
+- legacy cleanup: `hls-engine` 的 5 个 `remove-after-cutover` symbol 已全部消失，3 个 `retain-or-adapt` session owner 仍存在；cleanup entries 暂留，让 validator 在整体迁移结束前持续断言旧 symbol 不得复活。
+- validation: HLS 集合 `19 files / 132 passed`（真实输出 `4/4`）、TypeScript、全仓 ESLint、全仓 Vitest `190 files / 1294 passed / 3 skipped`、同步测试 `16/16`、metadata/固定上游 validator 和 scoped diff check 已通过。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
+
 ## Template
 
 ```markdown

@@ -1,12 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import type { EmbeddedBrowserHlsDownloadPlan } from '../contracts/hls'
-import {
-  EmbeddedBrowserHlsLiveRecorder,
-} from '../../embeddedBrowserHlsLiveRecorder'
-import {
-  downloadEmbeddedBrowserHlsToLocalWorkDirectory,
-} from '../../embeddedBrowserHlsLocalDownloaderService'
 import { HlsLiveTask } from './hls-live-task'
 import {
   defaultHlsTaskExecutor,
@@ -17,8 +11,8 @@ import {
 describe('HLS processing owner boundary', () => {
   it('hls.processing-owner-boundary', () => {
     expect(defaultHlsTaskExecutor).toBeInstanceOf(HlsTaskExecutor)
-    expect(downloadEmbeddedBrowserHlsToLocalWorkDirectory).toBe(downloadHlsToLocalWorkDirectory)
-    expect(EmbeddedBrowserHlsLiveRecorder).toBe(HlsLiveTask)
+    expect(downloadHlsToLocalWorkDirectory).toBeTypeOf('function')
+    expect(HlsLiveTask).toBeTypeOf('function')
   })
 
   it('hls.plan-task-executor', async () => {

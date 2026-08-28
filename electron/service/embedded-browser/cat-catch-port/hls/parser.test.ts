@@ -4,9 +4,6 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
 import {
-  parseEmbeddedBrowserHlsManifest,
-} from '../../../../../src/features/embedded-browser/resources/model/embedded-browser-hls-manifest'
-import {
   createHlsDownloadPlan as createEmbeddedBrowserHlsDownloadPlan,
 } from './plan'
 import { parseHlsManifest } from './parser'
@@ -669,11 +666,7 @@ describe('Cat Catch HLS parser', () => {
     })
     expect(manifest.segments.map(segment => segment.url)).toEqual(expected.segments.map(segment => segment.url))
 
-    const rendererFacadeManifest = parseEmbeddedBrowserHlsManifest({
-      baseUrl: expected.baseUrl,
-      text: playlist,
-    })
-    expect(rendererFacadeManifest.segments[1]?.byteRange).toMatchObject({
+    expect(manifest.segments[1]?.byteRange).toMatchObject({
       length: 20,
       offset: 210,
     })
@@ -1724,12 +1717,7 @@ describe('Cat Catch HLS parser', () => {
     })
     expect(media.segments[0]).toMatchObject(variableExpected.segment)
 
-    const facadeMedia = parseEmbeddedBrowserHlsManifest({
-      baseUrl: variableExpected.variantUrls[0],
-      parentVariableList: master.variableList,
-      text: variableMediaPlaylist,
-    })
-    expect(facadeMedia.segments[0]?.url).toBe(variableExpected.segment.url)
+    expect(media.segments[0]?.url).toBe(variableExpected.segment.url)
   })
 
   it('preserves pinned hls.js EXT-X-DEFINE failure semantics', () => {

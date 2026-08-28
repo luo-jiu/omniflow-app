@@ -1933,7 +1933,7 @@ export function createEmbeddedBrowserMainController(
     }
   }
 
-  async function downloadEmbeddedBrowserHlsPlanResource(
+  async function handleEmbeddedBrowserHlsPlanDownload(
     tabId: string,
     payload: EmbeddedBrowserHlsPlanDownloadPayload,
   ): Promise<EmbeddedBrowserHlsPlanDownloadResponse> {
@@ -3541,7 +3541,7 @@ export function createEmbeddedBrowserMainController(
       stopHlsRecording: stopEmbeddedBrowserHlsRecordingResource,
       discardHlsRecording: discardEmbeddedBrowserHlsRecordingResource,
       downloadHlsTracks: downloadEmbeddedBrowserHlsTracksResource,
-      downloadHlsPlan: downloadEmbeddedBrowserHlsPlanResource,
+      downloadHlsPlan: handleEmbeddedBrowserHlsPlanDownload,
       retryHlsPlanFailed: retryEmbeddedBrowserHlsPlanFailedFragments,
       downloadMpdManifest: downloadEmbeddedBrowserMpdResource,
       downloadMpdPlan: downloadEmbeddedBrowserMpdPlanResource,
