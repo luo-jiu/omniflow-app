@@ -512,7 +512,10 @@
         "electron/service/embedded-browser/cat-catch-port/deep-search/page-discovery.ts#extractInlineScriptMediaCandidates",
         "electron/service/embedded-browser/capture/adapters/deep-search-page.ts#installDeepSearchPageAdapter",
         "electron/service/embedded-browser/capture/adapters/deep-search-page.ts#createDeepSearchPageAdapterBodySource",
-        "electron/service/embedded-browser/capture/adapters/deep-search-probe.ts#createDeepSearchTargetProbeScript"
+        "electron/service/embedded-browser/capture/adapters/deep-search-probe.ts#createDeepSearchTargetProbeScript",
+        "electron/service/embeddedBrowserResourceProbeScriptTemplate.ts#createProbeScriptTemplate",
+        "electron/service/embeddedBrowserResourcePageBridge.ts#createEmbeddedBrowserResourceProbeActionScript",
+        "electron/service/embeddedBrowserResourcePageBridge.ts#createEmbeddedBrowserResourceExtractScript"
       ],
       "relationToUpstream": "exact",
       "syncState": "porting",
@@ -532,7 +535,8 @@
         "deep.json-depth-width-cycle",
         "deep.page-adapter-composition",
         "deep.page-worker-composition",
-        "deep.probe-template-ingress"
+        "deep.probe-template-ingress",
+        "deep.generated-resource-page-bridge-contract"
       ],
       "testRefs": [
         "electron/service/embedded-browser/cat-catch-port/deep-search/runtime.test.ts#deep.hook-install-sentinels",
@@ -549,14 +553,15 @@
         "electron/service/embedded-browser/cat-catch-port/deep-search/discovery.test.ts#deep.json-depth-width-cycle",
         "electron/service/embedded-browser/capture/adapters/deep-search-page.test.ts#deep.page-adapter-composition",
         "electron/service/embedded-browser/capture/adapters/deep-search-page.test.ts#deep.page-worker-composition",
-        "electron/service/embedded-browser/capture/adapters/deep-search-probe.test.ts#deep.probe-template-ingress"
+        "electron/service/embedded-browser/capture/adapters/deep-search-probe.test.ts#deep.probe-template-ingress",
+        "electron/service/embeddedBrowserPageBridge.test.ts#deep.generated-resource-page-bridge-contract"
       ],
       "acceptedDifferences": [
         "Cat Catch begins wrapping real Workers while its Blob Worker probe can still fail asynchronously. The target runtime keeps real Workers native during that short probing state, enables bootstrap injection only after the probe message succeeds, and permanently falls back after error/timeout so CSP cannot strand a page Worker on a rejected Blob URL.",
         "Cat Catch leaves probe and injected Worker Blob URLs live for the document. The target runtime tracks them, revokes the capability probe immediately, bounds injected URLs with a TTL, and exposes idempotent disposal while never terminating page-owned Workers.",
         "Cat Catch only schedules the inline-script scan from DOMContentLoaded. Electron also installs the probe into an already loaded current frame when deep mode starts, so the target adapter schedules the same scan on the next task when readyState is no longer loading; future document-start installs retain the DOMContentLoaded path."
       ],
-      "notes": "The self-contained target installer ports idempotent JSON.parse, TextDecoder manifest, XHR response, fetch clone/body, Worker bootstrap/relay and the Cat Catch slice/subarray/btoa/atob/fromCharCode/DataView/typed-array/join/escape/indexOf experience surfaces. The target page adapter composes that serialized installer with the stateful discovery and page helper, preserves the distinct XHR/fetch/root-string branch order, schedules inline scanning, materializes generated resources and relays raw nested Worker observations back to the document session. The target-only complete probe template now executes through the existing tokenized document ingress and main ResourceStateStore without adding a second relay. Production enableDeepRuntimeHooks remains false: toolkit composition, atomic dispatch cutover and legacy cleanup are still open."
+      "notes": "The self-contained target installer ports idempotent JSON.parse, TextDecoder manifest, XHR response, fetch clone/body, Worker bootstrap/relay and the Cat Catch slice/subarray/btoa/atob/fromCharCode/DataView/typed-array/join/escape/indexOf experience surfaces. The target page adapter composes that serialized installer with the stateful discovery and page helper, preserves the distinct XHR/fetch/root-string branch order, schedules inline scanning, materializes generated resources and relays raw nested Worker observations back to the document session. The target-only complete probe template executes through the existing tokenized document ingress and main ResourceStateStore without adding a second relay. The generic composition template and opaque resource action/extract script generators are retained OmniFlow adapters with executable contracts, not legacy deep algorithms. Production enableDeepRuntimeHooks remains false: atomic dispatch cutover and mixed core cleanup are still open."
     },
     {
       "id": "deep.manifest-key-discovery",
@@ -655,7 +660,8 @@
       "targetRefs": [
         "electron/service/embedded-browser/capture/adapters/electron-page-probe.ts#ElectronPageProbeEventAdapter",
         "electron/service/embedded-browser/capture/adapters/page-probe.ts#PageProbeCaptureAdapter",
-        "electron/service/embeddedBrowserViewLifecycle.ts#installEmbeddedBrowserResourceProbe"
+        "electron/service/embeddedBrowserViewLifecycle.ts#installEmbeddedBrowserResourceProbe",
+        "electron/service/embeddedBrowserResourceProbeScriptTemplate.ts#EMBEDDED_BROWSER_RESOURCE_CONSOLE_PREFIX"
       ],
       "relationToUpstream": "platform-substitute",
       "syncState": "ported-unverified",
@@ -704,7 +710,10 @@
         "electron/service/embedded-browser/cat-catch-port/deep-search/toolkit-state.ts#createCatchToolkitStateSource",
         "electron/service/embedded-browser/capture/adapters/deep-search-toolkit.ts#installDeepSearchToolkitAdapter",
         "electron/service/embedded-browser/capture/adapters/deep-search-toolkit.ts#createDeepSearchToolkitAdapterBodySource",
-        "electron/service/embedded-browser/capture/adapters/deep-search-probe.ts#createDeepSearchTargetProbeScript"
+        "electron/service/embedded-browser/capture/adapters/deep-search-probe.ts#createDeepSearchTargetProbeScript",
+        "electron/service/embeddedBrowserCatchToolkitPageBridge.ts#createEmbeddedBrowserCatchToolkitGetStateScript",
+        "electron/service/embeddedBrowserCatchToolkitPageBridge.ts#createEmbeddedBrowserCatchToolkitUpdateStateScript",
+        "electron/service/embeddedBrowserCatchToolkitPageBridge.ts#createEmbeddedBrowserCatchToolkitActionScript"
       ],
       "relationToUpstream": "platform-substitute",
       "syncState": "porting",
@@ -712,17 +721,19 @@
       "plannedTestIds": [
         "deep.toolkit-origin-storage",
         "deep.toolkit-reload-reset",
-        "deep.toolkit-probe-round-trip"
+        "deep.toolkit-probe-round-trip",
+        "deep.toolkit-page-bridge-contract"
       ],
       "testRefs": [
         "electron/service/embedded-browser/cat-catch-port/deep-search/toolkit-state.test.ts#deep.toolkit-origin-storage",
         "electron/service/embedded-browser/cat-catch-port/deep-search/toolkit-state.test.ts#deep.toolkit-reload-reset",
-        "electron/service/embedded-browser/capture/adapters/deep-search-probe.test.ts#deep.toolkit-probe-round-trip"
+        "electron/service/embedded-browser/capture/adapters/deep-search-probe.test.ts#deep.toolkit-probe-round-trip",
+        "electron/service/embeddedBrowserPageBridge.test.ts#deep.toolkit-page-bridge-contract"
       ],
       "acceptedDifferences": [
         "Cat Catch keeps the manual filename and extra-header trimming choices in the injected panel lifetime. OmniFlow's integrated external UI persists all eight product preferences under OmniflowCatchToolkit:* keys in the visited page's origin localStorage; capture enablement remains outside this preference owner and resets with the page runtime."
       ],
-      "notes": "The serializable target owner fixes page-origin isolation, checked/empty-string storage semantics, selector/regex validation, reload hydration, fresh-origin reset, and blocked-storage fallback. The target-only complete probe now routes the existing toolkit get/update bridge through this owner and synchronizes a read-only preference projection for retained MSE/page actions; immediate manual filename state preserves user whitespace while the derived filename and storage are trimmed. Production still uses the legacy owner until the complete deep unit cuts over atomically."
+      "notes": "The serializable target owner fixes page-origin isolation, checked/empty-string storage semantics, selector/regex validation, reload hydration, fresh-origin reset, and blocked-storage fallback. The target-only complete probe routes the existing toolkit get/update bridge through this owner and synchronizes a read-only preference projection for retained MSE/page actions; immediate manual filename state preserves user whitespace while the derived filename and storage are trimmed. The three page script generators are retained OmniFlow adapters with an executable forwarding/missing-handler contract. Production still uses the legacy owner until the complete deep unit cuts over atomically."
     },
     {
       "id": "mse.page-capture-runtime",

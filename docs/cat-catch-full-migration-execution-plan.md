@@ -331,5 +331,5 @@ tools/cat-catch-lab/fixtures/<fixture-id>/
 ## 12. 当前下一步
 
 1. 运行轻量 `cat-catch:validate`，确认版本、32 项能力和 106 个 cleanup 条目自洽。
-2. 审计并拆分旧 probe 中跨 `deep-search-runtime` 与开放 `mse-runtime` 的共享职责，先为必须保留的 MSE/resource action 建立明确 owner，再在唯一 dispatch boundary 原子切换并删除纯 deep block；生产 hooks 在 cleanup 门禁通过前保持关闭。
+2. 按已审计的 `11 retain / 10 pure remove / 10 split-before-remove` 边界，先从混合旧 probe 抽出 MSE runtime/action 与 generated-resource page store/API，再在唯一 dispatch boundary 原子切换并删除纯 deep block；生产 hooks 在 cleanup 门禁通过前保持关闭。
 3. 为 MSE、DASH、transfer/output unit 补固定目标的直接行为依赖、真实 test refs 和 production-equivalent integration，不把现有 legacy 行为当 oracle。

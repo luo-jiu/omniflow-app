@@ -139,9 +139,9 @@
       "symbol": "createEmbeddedBrowserCatchToolkitActionScript",
       "capabilityId": "deep.catch-toolkit-page-settings",
       "cutoverUnitId": "deep-search-runtime",
-      "classification": "legacy",
+      "classification": "omniflow-integration",
       "role": "adapter",
-      "cleanupAction": "remove-after-cutover"
+      "cleanupAction": "retain-or-adapt"
     },
     {
       "id": "node.page-actions.catch-clear",
@@ -179,9 +179,9 @@
       "symbol": "createEmbeddedBrowserCatchToolkitGetStateScript",
       "capabilityId": "deep.catch-toolkit-page-settings",
       "cutoverUnitId": "deep-search-runtime",
-      "classification": "legacy",
+      "classification": "omniflow-integration",
       "role": "adapter",
-      "cleanupAction": "remove-after-cutover"
+      "cleanupAction": "retain-or-adapt"
     },
     {
       "id": "node.page-actions.catch-get",
@@ -199,9 +199,9 @@
       "symbol": "createEmbeddedBrowserCatchToolkitUpdateStateScript",
       "capabilityId": "deep.catch-toolkit-page-settings",
       "cutoverUnitId": "deep-search-runtime",
-      "classification": "legacy",
+      "classification": "omniflow-integration",
       "role": "adapter",
-      "cleanupAction": "remove-after-cutover"
+      "cleanupAction": "retain-or-adapt"
     },
     {
       "id": "node.page-actions.catch-update",
@@ -709,9 +709,9 @@
       "symbol": "createProbeScriptTemplate",
       "capabilityId": "deep.runtime-hook-bundle",
       "cutoverUnitId": "deep-search-runtime",
-      "classification": "legacy",
-      "role": "helper",
-      "cleanupAction": "remove-after-cutover"
+      "classification": "omniflow-integration",
+      "role": "adapter",
+      "cleanupAction": "retain-or-adapt"
     },
     {
       "id": "node.page-runtime.hooks-body",
@@ -819,9 +819,9 @@
       "symbol": "createEmbeddedBrowserResourceProbeActionScript",
       "capabilityId": "deep.runtime-hook-bundle",
       "cutoverUnitId": "deep-search-runtime",
-      "classification": "legacy",
+      "classification": "omniflow-integration",
       "role": "adapter",
-      "cleanupAction": "remove-after-cutover"
+      "cleanupAction": "retain-or-adapt"
     },
     {
       "id": "node.page-actions.global-api",
@@ -839,9 +839,9 @@
       "symbol": "createEmbeddedBrowserResourceExtractScript",
       "capabilityId": "deep.runtime-hook-bundle",
       "cutoverUnitId": "deep-search-runtime",
-      "classification": "legacy",
+      "classification": "omniflow-integration",
       "role": "adapter",
-      "cleanupAction": "remove-after-cutover"
+      "cleanupAction": "retain-or-adapt"
     },
     {
       "id": "node.page-actions.resource-read",
@@ -989,9 +989,9 @@
       "symbol": "EMBEDDED_BROWSER_RESOURCE_CONSOLE_PREFIX",
       "capabilityId": "deep.secure-page-relay",
       "cutoverUnitId": "deep-search-runtime",
-      "classification": "legacy",
+      "classification": "omniflow-integration",
       "role": "contract",
-      "cleanupAction": "remove-after-cutover"
+      "cleanupAction": "retain-or-adapt"
     },
     {
       "id": "node.console-relay.console-listener",

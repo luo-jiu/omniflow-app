@@ -1445,6 +1445,20 @@
 - legacy cleanup: 无；本步明确发现跨 unit 共用文件/闭包边界，未伪造 cleanup 完成或提前改写 cleanup classification。
 - validation: toolkit/完整 probe 定向 `2 files / 4 passed`、完整 deep target `6 files / 22 passed`、应用 TypeScript `--noEmit`、scoped/full ESLint、sync tests `16/16`、metadata 与固定上游 validator、排除 Node runner `tools/cat-catch-sync/validate.test.mjs` 后全仓 Vitest `199 files / 1373 passed / 3 skipped`、scoped diff check 通过。该 Node runner 已在正确的 `node --test` 下通过；完整 build 未运行，以免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
 
+## 2026-08-28: same target (deep cutover cleanup boundary audit)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本步收敛 deep production cutover 的真实删除/保留边界。
+- reviewedThrough / portedThrough: 均保持 `null`；全部 deep capability 状态不变，整个 unit 仍开放。
+- change groups: `cleanup-boundary-correction`、`platform-adapter-retention`、`executable-contract` 与 `documentation-correction`；不修改 production runtime。
+- affected capability IDs: `deep.runtime-hook-bundle`、`deep.secure-page-relay`、`deep.catch-toolkit-page-settings`；metadata 为 `7 units / 32 capabilities / 210 anchors / 106 cleanup entries / 186 planned IDs / 151 active refs`，状态仍为 `11 verified / 5 porting / 1 ported-unverified / 15 pending`。
+- fixtures/tests: `deep.toolkit-page-bridge-contract` 执行三个 toolkit page script generator，锁定 get/update/action 精确转发和缺失 handler；`deep.generated-resource-page-bridge-contract` 执行 opaque resource open/export/extract 脚本，锁定引号 key、安全布尔归一、Promise payload 和缺失 handler。
+- accepted differences: 无；本步没有改变 Cat Catch 行为，只纠正 OmniFlow 平台 bridge/template/console prefix 不应随 deep 算法删除的事实。
+- excluded changes and reasons: 没有修改旧 core/hooks/page-actions、MSE capture、generated-resource store、console emitter、global probe API、production builder、controller、IPC 或 renderer；这些混合职责必须先有替代 owner，不能通过 metadata 重分类假装完成。
+- unresolved gaps: 31 个 deep cleanup 条目已固定为 `11 retain-or-adapt / 10 pure remove / 10 split-before-remove`。下一步先迁出 10 个混合 symbol 中的 MSE/runtime action 与 generated-resource store/API，再切 production dispatch 并删除剩余旧 symbol。
+- runtime changes: 无黑盒变化；新增 `embeddedBrowserPageBridge.test.ts` 只执行既有受控 script generator。
+- legacy cleanup: toolkit get/update/action 三个 page bridge、resource action/extract 两个 page bridge、通用 `createProbeScriptTemplate` 和 console prefix 共 7 项从误标 legacy/remove 修正为 `omniflow-integration/retain-or-adapt`；其余 20 项继续 remove，其中 10 项需先拆分。
+- validation: bridge/完整 probe 定向 `2 files / 4 passed`、应用 TypeScript `--noEmit`、scoped/full ESLint、sync tests `16/16`、metadata 与固定上游 validator、排除 Node runner `tools/cat-catch-sync/validate.test.mjs` 后全仓 Vitest `200 files / 1375 passed / 3 skipped`、scoped diff check 通过。该 Node runner 已在正确的 `node --test` 下通过；完整 build 未运行，以免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
+
 ## Template
 
 ```markdown
