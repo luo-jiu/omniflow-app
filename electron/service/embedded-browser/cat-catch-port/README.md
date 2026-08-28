@@ -39,7 +39,7 @@ downloader/
 - `network/request-url-helpers.ts`：页面 URL pattern、黑白名单反转与 special-page 规则。
 - `deep-search/discovery.ts`：固定 `search.js` 的 JSON/inline manifest/key 发现与跨 hook base URL 回放语义，提供可序列化 document session 和一次性 facade。
 - `deep-search/runtime.ts`：固定 `search.js` 的 Worker/JSON/XHR/fetch/TextDecoder 与 key/string experience hook 安装语义；当前仅作为可执行 target port，待完整 deep unit 原子接入。
-- `deep-search/page-discovery.ts`：固定 inline script URL 扫描与 Vimeo `playlist.json` 转 HLS 语义，Blob URL 交给平台 callback 物化。
+- `deep-search/page-discovery.ts`：固定 inline script URL 扫描与 Vimeo `playlist.json` 转 HLS 语义，提供可序列化 factory，Blob URL 交给平台 callback 物化。
 - `hls/parser.ts`：固定 hls.js/Cat Catch 的 manifest 下载相关解析语义。
 - `hls/plan.ts`：把 parser 输出投影为平台 adapter 消费的唯一 HLS 下载计划。
 - `hls/segment-query.ts`：固定 `tsAddArg` 的默认值提取和 fragment-only query 改写。
@@ -49,6 +49,8 @@ HLS 的 main/preload/renderer 共享 DTO 由 `../contracts/hls.ts` 唯一定义�
 平台侧 HLS 执行 owner 位于相邻的 `../processing/`：`HlsTaskExecutor` 负责本地 key/map/segment、playlist 和 local -> ffmpeg 阶段序列，首次计划与 retry 共用同一合同；`HlsLiveTask` 负责直播轮询和累计计划。controller、双轨合并和 output 测试直接依赖这两个 target，旧顶层 downloader/recorder 兼容出口已删除。
 
 逐项状态以 capability map 为准。`network-capture` 与 `hls-engine` 已在固定目标完成验证、dispatch 切换和 legacy symbol 清理；其余 unit 仍按同一协议推进。
+
+Deep 的 Electron page adapter 位于 `../../capture/adapters/deep-search-page.ts`：它只组合本目录的 runtime/discovery/page factory 与既有 probe resource/relay callback。当前已有 generated page/Worker composition 测试，但尚未进入 production probe template；cutover 前不能把它当成已启用能力。
 
 ## 来源注释
 

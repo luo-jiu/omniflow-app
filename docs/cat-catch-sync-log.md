@@ -1389,6 +1389,20 @@
 - legacy cleanup: 无；旧 state 继续作为 characterization，等 adapter 原子切换。
 - validation: discovery 专项 `1 file / 4 passed`、完整 deep target `3 files / 16 passed`、应用 TypeScript `--noEmit`、scoped/full ESLint、同步测试 `16/16`、metadata/固定上游 validator、全仓 Vitest `196 files / 1367 passed / 3 skipped` 和 scoped diff check 已通过。完整 build 继续避免覆盖其他 Agent 的 `dist-electron/**`，暂无真实网站手工场景。
 
+## 2026-08-28: same target (deep page and Worker adapter composition)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本步只建立 target page adapter 与 production-equivalent generated source。
+- reviewedThrough / portedThrough: 均保持 `null`；`deep.runtime-hook-bundle`、`deep.manifest-key-discovery` 继续 `porting`，整个 deep unit 仍开放。
+- change groups: `platform-adapter`、`behavior-order-preservation`、`worker-relay-composition` 与 `documentation-correction`；不切换 production dispatch。
+- affected capability IDs: `deep.runtime-hook-bundle`、`deep.manifest-key-discovery`；metadata 为 `7 units / 32 capabilities / 210 anchors / 106 cleanup entries / 182 planned IDs / 145 active refs`，状态仍为 `11 verified / 4 porting / 1 ported-unverified / 16 pending`。
+- fixtures/tests: `deep.page-adapter-composition` 执行真实 generated body，覆盖 stateful JSON discovery、inline scan、key surface、Vimeo child/master resource 物化及固定 XHR GET JSON-manifest 分支；`deep.page-worker-composition` 执行真实 generated Worker bootstrap，并把 raw observation 经 document session 和既有 page callback 回放。
+- accepted differences: Worker observation 先以 structured-clone envelope 回到 document，再由唯一 document discovery session 物化资源；这替代 Cat Catch Worker 自己持有独立 filter/base state，避免 worker-owned Blob 无法被 main 治理。既有异步 CSP probe、Blob TTL/dispose 差异继续保持；Electron 注入已加载的 current frame 时在下一 task 扫 inline script，未来 document-start 仍走 DOMContentLoaded。
+- excluded changes and reasons: target body 没有接入 `createEmbeddedBrowserResourceProbeScript`，不启用 production hooks、不新增 console/main relay、不修改 token、MSE、toolkit、renderer 或 IPC；生产仍只有旧 probe owner，且旧 deep block 仍由 `enableDeepRuntimeHooks = false` 关闭。
+- unresolved gaps: `deep.catch-toolkit-page-settings` 的 origin storage/reload-reset 证据、完整 target probe-template harness、document-start generated resource 到 tokenized main ingress、unit 原子 cutover 和旧 deep block cleanup 尚未完成。
+- runtime changes: 新 `deep-search-page.ts` 薄 adapter 保留 XHR/fetch/TextDecoder/root-string 的不同分支顺序，组合三个可序列化 target factory，调度 inline scan、Vimeo governed resource 和 nested Worker relay；`page-discovery` 只改成等价可序列化 factory，既有 facade 输出不变。
+- legacy cleanup: 无；新 adapter 只有测试调用方，旧 disabled deep block 与现有 resource/MSE/toolkit platform owner 均留到完整 unit cutover。
+- validation: deep target `4 files / 18 passed`、应用 TypeScript `--noEmit`、scoped/full ESLint、sync tests `16/16`、metadata 与固定上游 validator、排除 Node runner `tools/cat-catch-sync/validate.test.mjs` 后全仓 Vitest `197 files / 1369 passed / 3 skipped`、scoped diff check 通过。该 Node runner 已在正确的 `node --test` 下通过；完整 build 未运行，以免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
+
 ## Template
 
 ```markdown

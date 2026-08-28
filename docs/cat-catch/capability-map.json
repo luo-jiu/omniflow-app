@@ -509,7 +509,9 @@
       ],
       "targetRefs": [
         "electron/service/embedded-browser/cat-catch-port/deep-search/runtime.ts#installDeepSearchRuntime",
-        "electron/service/embedded-browser/cat-catch-port/deep-search/page-discovery.ts#extractInlineScriptMediaCandidates"
+        "electron/service/embedded-browser/cat-catch-port/deep-search/page-discovery.ts#extractInlineScriptMediaCandidates",
+        "electron/service/embedded-browser/capture/adapters/deep-search-page.ts#installDeepSearchPageAdapter",
+        "electron/service/embedded-browser/capture/adapters/deep-search-page.ts#createDeepSearchPageAdapterBodySource"
       ],
       "relationToUpstream": "exact",
       "syncState": "porting",
@@ -526,7 +528,9 @@
         "deep.key-string-surfaces",
         "deep.manifest-string-surfaces",
         "deep.inline-script-url-scan",
-        "deep.json-depth-width-cycle"
+        "deep.json-depth-width-cycle",
+        "deep.page-adapter-composition",
+        "deep.page-worker-composition"
       ],
       "testRefs": [
         "electron/service/embedded-browser/cat-catch-port/deep-search/runtime.test.ts#deep.hook-install-sentinels",
@@ -540,13 +544,16 @@
         "electron/service/embedded-browser/cat-catch-port/deep-search/runtime.test.ts#deep.key-string-surfaces",
         "electron/service/embedded-browser/cat-catch-port/deep-search/runtime.test.ts#deep.manifest-string-surfaces",
         "electron/service/embedded-browser/cat-catch-port/deep-search/page-discovery.test.ts#deep.inline-script-url-scan",
-        "electron/service/embedded-browser/cat-catch-port/deep-search/discovery.test.ts#deep.json-depth-width-cycle"
+        "electron/service/embedded-browser/cat-catch-port/deep-search/discovery.test.ts#deep.json-depth-width-cycle",
+        "electron/service/embedded-browser/capture/adapters/deep-search-page.test.ts#deep.page-adapter-composition",
+        "electron/service/embedded-browser/capture/adapters/deep-search-page.test.ts#deep.page-worker-composition"
       ],
       "acceptedDifferences": [
         "Cat Catch begins wrapping real Workers while its Blob Worker probe can still fail asynchronously. The target runtime keeps real Workers native during that short probing state, enables bootstrap injection only after the probe message succeeds, and permanently falls back after error/timeout so CSP cannot strand a page Worker on a rejected Blob URL.",
-        "Cat Catch leaves probe and injected Worker Blob URLs live for the document. The target runtime tracks them, revokes the capability probe immediately, bounds injected URLs with a TTL, and exposes idempotent disposal while never terminating page-owned Workers."
+        "Cat Catch leaves probe and injected Worker Blob URLs live for the document. The target runtime tracks them, revokes the capability probe immediately, bounds injected URLs with a TTL, and exposes idempotent disposal while never terminating page-owned Workers.",
+        "Cat Catch only schedules the inline-script scan from DOMContentLoaded. Electron also installs the probe into an already loaded current frame when deep mode starts, so the target adapter schedules the same scan on the next task when readyState is no longer loading; future document-start installs retain the DOMContentLoaded path."
       ],
-      "notes": "The self-contained target installer now ports idempotent JSON.parse, TextDecoder manifest, XHR response, fetch clone/body, Worker bootstrap/relay and the Cat Catch slice/subarray/btoa/atob/fromCharCode/DataView/typed-array/join/escape/indexOf experience surfaces. Every hook projects the native toString, inspection is reentrancy-guarded, and disposal restores only wrappers still owned by this runtime. It preserves Cat Catch's fetch clone contract and exact XHR status/method observation while making asynchronous Worker CSP failure non-destructive. Production enableDeepRuntimeHooks remains false: inline DOM/Vimeo completion, discovery/relay adapter wiring, production-equivalent composition and atomic legacy cleanup are still open."
+      "notes": "The self-contained target installer ports idempotent JSON.parse, TextDecoder manifest, XHR response, fetch clone/body, Worker bootstrap/relay and the Cat Catch slice/subarray/btoa/atob/fromCharCode/DataView/typed-array/join/escape/indexOf experience surfaces. The target page adapter now composes that serialized installer with the stateful discovery and page helper, preserves the distinct XHR/fetch/root-string branch order, schedules inline scanning, materializes generated resources and relays raw nested Worker observations back to the document session. Generated page and Worker execution are covered without adding a second secure relay. Production enableDeepRuntimeHooks remains false: target probe-template integration, toolkit evidence, atomic dispatch cutover and legacy cleanup are still open."
     },
     {
       "id": "deep.manifest-key-discovery",
@@ -575,7 +582,9 @@
       "targetRefs": [
         "electron/service/embedded-browser/cat-catch-port/deep-search/discovery.ts#createDeepSearchDiscoverySession",
         "electron/service/embedded-browser/cat-catch-port/deep-search/discovery.ts#discoverResources",
-        "electron/service/embedded-browser/cat-catch-port/deep-search/page-discovery.ts#buildVimeoHlsManifest"
+        "electron/service/embedded-browser/cat-catch-port/deep-search/page-discovery.ts#buildVimeoHlsManifest",
+        "electron/service/embedded-browser/cat-catch-port/deep-search/page-discovery.ts#createDeepSearchPageDiscovery",
+        "electron/service/embedded-browser/capture/adapters/deep-search-page.ts#installDeepSearchPageAdapter"
       ],
       "relationToUpstream": "exact",
       "syncState": "porting",
@@ -584,18 +593,22 @@
         "deep.inline-manifest-key",
         "deep.base-url-blob-signature",
         "deep.cross-hook-base-replay",
-        "deep.vimeo-playlist-translation"
+        "deep.vimeo-playlist-translation",
+        "deep.page-adapter-composition",
+        "deep.page-worker-composition"
       ],
       "testRefs": [
         "electron/service/embedded-browser/cat-catch-port/deep-search/discovery.test.ts#deep.inline-manifest-key",
         "electron/service/embedded-browser/cat-catch-port/deep-search/discovery.test.ts#deep.base-url-blob-signature",
         "electron/service/embedded-browser/cat-catch-port/deep-search/discovery.test.ts#deep.cross-hook-base-replay",
-        "electron/service/embedded-browser/cat-catch-port/deep-search/page-discovery.test.ts#deep.vimeo-playlist-translation"
+        "electron/service/embedded-browser/cat-catch-port/deep-search/page-discovery.test.ts#deep.vimeo-playlist-translation",
+        "electron/service/embedded-browser/capture/adapters/deep-search-page.test.ts#deep.page-adapter-composition",
+        "electron/service/embedded-browser/capture/adapters/deep-search-page.test.ts#deep.page-worker-composition"
       ],
       "acceptedDifferences": [
         "The pure port returns inline manifest bytes instead of creating a page-owned Blob URL. The later page adapter must create the opaque resource from those exact bytes; the executable upstream fixture compares Blob contents rather than nondeterministic Blob URL identities."
       ],
-      "notes": "The fixed search.js findMedia/toUrl path is covered by an upstream-executable fixture. The serializable discovery session preserves protocol-relative URL handling, the seven-extension allowlist, loose 16-number key coercion, all-zero/ftyp suppression, data-URL manifests, inline MPD, current base expansion and deferred replay when a later hook observation reveals a new base; discoverResources remains the one-shot facade. The Vimeo helper preserves playlist URL gating, base path normalization, raw stream metadata interpolation, per-track media playlists and even the upstream header-only empty master. It is not connected to production until the page adapter and secure relay cutover are complete."
+      "notes": "The fixed search.js findMedia/toUrl path is covered by an upstream-executable fixture. The serializable discovery session preserves protocol-relative URL handling, the seven-extension allowlist, loose 16-number key coercion, all-zero/ftyp suppression, data-URL manifests, inline MPD, current base expansion and deferred replay when a later hook observation reveals a new base; discoverResources remains the one-shot facade. The serializable page helper preserves playlist gating, base path normalization, raw Vimeo metadata, per-track playlists and the header-only empty master. The target adapter now maps those outputs to governed probe resources and keeps Cat Catch's separate XHR/fetch/TextDecoder/root-string branches; production remains unchanged until the unit cutover."
     },
     {
       "id": "deep.secure-page-relay",
