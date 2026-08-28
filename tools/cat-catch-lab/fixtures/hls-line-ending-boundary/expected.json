@@ -1,0 +1,23 @@
+{
+  "baseUrl": "https://media.example/cr/playlist.m3u8",
+  "discontinuityCount": 1,
+  "durationSeconds": 7.5,
+  "hasEndList": true,
+  "isLive": false,
+  "mediaSequence": 7,
+  "segments": [
+    {
+      "discontinuitySequence": 0,
+      "duration": 4,
+      "sequence": 7,
+      "url": "https://media.example/cr/one.ts"
+    },
+    {
+      "discontinuitySequence": 1,
+      "duration": 3.5,
+      "sequence": 8,
+      "url": "https://media.example/cr/two.ts"
+    }
+  ],
+  "targetDuration": 4
+}

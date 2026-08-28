@@ -1,0 +1,15 @@
+{
+  "lineSeparator": "\r",
+  "lines": [
+    "#EXTM3U",
+    "#EXT-X-TARGETDURATION:4",
+    "#EXT-X-MEDIA-SEQUENCE:7",
+    "#EXTINF:4,first",
+    "one.ts",
+    "#EXT-X-DISCONTINUITY",
+    "#EXTINF:3.5,second",
+    "two.ts",
+    "#EXT-X-ENDLIST",
+    ""
+  ]
+}

@@ -60,6 +60,7 @@ OmniFlow 不运行 Cat Catch 浏览器扩展，而是把与产品目标相关的
 - 网络捕捉使用 `onCompleted`，Cat Catch 在首字节阶段的 `onResponseStarted` 识别。
 - request context 无明确容量和 TTL，敏感 header 值还会进入 renderer DTO。
 - HLS 纯 port 已补上 master/media parser 双向模式隔离（media 内 master-only 标签保持 fallback，master 内 media-only 标签及游离 URI 不进入下载状态）、master 普通 variant/I-frame/未知 codec 过滤与无 level 拒绝、同 identity/同 URI 的重复 variant 合并（包括被其他 URI 隔开的重复声明）及完整 AUDIO/SUBTITLES group 集合投影、固定 `MANIFEST_PARSED` 跨 URI 丢失边界的数据保留差异、rendition 投影与 child authority、直播 child 首次请求前的 main-owned master 归属校验、`EXT-X-SESSION-KEY` 变量解析但不进入下载 key state、带值标签的精确冒号/零字符与 whitespace payload 分发、整数首 token 边界及 `EXTINF` decimal-prefix remainder 回扫、媒体分片继承紧邻前序 BYTERANGE end、MAP 独立 range、MAP 前置独立 BYTERANGE 双重绑定、BYTERANGE 的固定 `parseInt` 数值归一化与无效范围稳定拒绝、缺失/空 MAP URI 拒绝、full-segment AES media/MAP effective IV、显式 IV 的固定 hls.js 字节归一化、独立 key context、固定 full EME build 的 KEYFORMAT 支持/忽略/继承/多 key 选择、正数 `EXT-X-SKIP` delta 不进入错误下载计划、初始/当前 discontinuity sequence 双状态、空/无效媒体清单及重复 singleton 标签拒绝和 PNG/JPEG 伪装分片剔除等首批语义并有 fixture；完整 parser 差分和最终 pipeline cutover 仍待完成。
+- 固定 hls.js fast parser 的行边界语义也已迁入：`CR`、`LF` 和 `CRLF` 清单都会进入同一 media/master 解析与下载计划，纯 CR 不再被本地切行预处理误拒绝。
 - Cat Catch `tsAddArg` 已作为 post-parse 纯计划能力迁入：关闭时保留原 fragment query，开启且为空时移除 query，非空时替换 query；只修改 media fragment，不修改 key/MAP。工具区草稿是唯一 renderer owner；普通静态任务强制走本地 plan，选择独立音轨时由 main 校验 captured master 与两个 child authority 后生成两条隔离的本地 plan 再合并，直播轮询经显式 IPC 把同一设置交给 main recorder。
 - DASH 手写 parser 对 `r=-1`、多 BaseURL、动态 MPD 等语义不完整。
 - HLS、DASH、MSE、ffmpeg、临时文件和输出交付尚无统一 task/cleanup 合同。

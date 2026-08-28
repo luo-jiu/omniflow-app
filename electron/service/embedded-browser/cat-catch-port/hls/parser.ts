@@ -10,7 +10,7 @@
  * hls.map-leading-byterange-transfer, hls-valued-tag-boundary,
  * hls-extinf-token-boundary, hls-empty-valued-tag-boundary,
  * hls-whitespace-valued-tag-boundary, hls-media-parser-mode-isolation,
- * hls-master-parser-mode-isolation
+ * hls-master-parser-mode-isolation, hls-line-ending-boundary
  */
 
 import { createHlsDefaultIv } from './decrypt'
@@ -711,7 +711,8 @@ export function parseHlsManifest(input: {
     parentVariableList: input.parentVariableList,
   }
   const lines = text
-    .split(/\r?\n/)
+    // The pinned fast parser treats CR, LF, and CRLF as line boundaries.
+    .split(/\r\n|\n|\r/)
     // The pinned (.+) valued-tag branch treats trailing whitespace as payload.
     .map(line => line.trimStart())
     .filter(Boolean)

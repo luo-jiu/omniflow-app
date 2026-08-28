@@ -736,6 +736,7 @@
           "anchors": [
             "1.6.16",
             "#EXTINF:\\s*(\\d*(?:\\.\\d+)?)(?:,(.*)\\s+)?",
+            "(?!#) *(\\S[^\\r\\n]*)",
             "#EXT-X-(PROGRAM-DATE-TIME|BYTERANGE|DATERANGE|DEFINE|KEY|MAP|PART|PART-INF|PLAYLIST-TYPE|PRELOAD-HINT|RENDITION-REPORT|SERVER-CONTROL|SKIP|START):(.+)",
             "hexadecimalInteger",
             "isMediaPlaylist=function(e){return qr.test(e)}",
@@ -807,6 +808,7 @@
         "hls.valued-tag-boundary",
         "hls.integer-tag-token-boundary",
         "hls.extinf-token-boundary",
+        "hls.line-ending-boundary",
         "hls.empty-valued-tag-boundary",
         "hls.media-parser-mode-isolation",
         "hls.master-parser-mode-isolation",
@@ -844,6 +846,7 @@
         "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.valued-tag-boundary",
         "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.integer-tag-token-boundary",
         "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.extinf-token-boundary",
+        "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.line-ending-boundary",
         "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.empty-valued-tag-boundary",
         "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.media-parser-mode-isolation",
         "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.master-parser-mode-isolation",

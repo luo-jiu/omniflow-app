@@ -1,0 +1,19 @@
+{
+  "fixtureId": "hls-line-ending-boundary",
+  "capabilityIds": [
+    "hls.parser-planner"
+  ],
+  "upstreamCommit": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
+  "status": "active",
+  "oracle": "upstream-executable",
+  "sourceRefs": [
+    "lib/hls.min.js#LEVEL_PLAYLIST_REGEX_FAST",
+    "lib/hls.min.js#parseLevelPlaylist",
+    "js/m3u8.js#parseTs(data)"
+  ],
+  "input": "input.json",
+  "expected": "expected.json",
+  "testRefs": [
+    "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.line-ending-boundary"
+  ]
+}

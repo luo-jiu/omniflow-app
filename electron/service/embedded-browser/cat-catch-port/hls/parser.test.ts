@@ -229,6 +229,30 @@ const extinfTokenExpected = JSON.parse(readFileSync(`${extinfTokenFixtureRoot}/$
     url: string
   }>
 }
+const lineEndingFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-line-ending-boundary', import.meta.url))
+const lineEndingFixture = JSON.parse(readFileSync(`${lineEndingFixtureRoot}/fixture.json`, 'utf8')) as {
+  expected: string
+  input: string
+}
+const lineEndingInput = JSON.parse(readFileSync(`${lineEndingFixtureRoot}/${lineEndingFixture.input}`, 'utf8')) as {
+  lineSeparator: string
+  lines: string[]
+}
+const lineEndingExpected = JSON.parse(readFileSync(`${lineEndingFixtureRoot}/${lineEndingFixture.expected}`, 'utf8')) as {
+  baseUrl: string
+  discontinuityCount: number
+  durationSeconds: number
+  hasEndList: boolean
+  isLive: boolean
+  mediaSequence: number
+  segments: Array<{
+    discontinuitySequence: number
+    duration: number
+    sequence: number
+    url: string
+  }>
+  targetDuration: number
+}
 const mediaStructureExpected = JSON.parse(readFileSync(`${mediaStructureFixtureRoot}/${mediaStructureFixture.expected}`, 'utf8')) as Record<string, string>
 
 const mapByteRangeFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-map-byterange-independent', import.meta.url))
@@ -1313,5 +1337,39 @@ describe('Cat Catch HLS parser', () => {
     })
     expect(manifest.variants[0]?.uri).toBe('{$root}')
     expect(manifest.variants[0]?.url).toBe('https://example.test/%7B$root%7D')
+  })
+
+  it('hls.line-ending-boundary', () => {
+    const text = lineEndingInput.lines.join(lineEndingInput.lineSeparator)
+    const manifest = parseHlsManifest({
+      baseUrl: lineEndingExpected.baseUrl,
+      text,
+    })
+
+    expect(manifest).toMatchObject({
+      discontinuityCount: lineEndingExpected.discontinuityCount,
+      durationSeconds: lineEndingExpected.durationSeconds,
+      hasEndList: lineEndingExpected.hasEndList,
+      isLive: lineEndingExpected.isLive,
+      mediaSequence: lineEndingExpected.mediaSequence,
+      targetDuration: lineEndingExpected.targetDuration,
+    })
+    expect(manifest.segments.map(segment => ({
+      discontinuitySequence: segment.discontinuitySequence,
+      duration: segment.duration,
+      sequence: segment.sequence,
+      url: segment.url,
+    }))).toEqual(lineEndingExpected.segments)
+
+    const downloadPlan = createEmbeddedBrowserHlsDownloadPlan({
+      manifest,
+      manifestUrl: lineEndingExpected.baseUrl,
+    })
+    expect(downloadPlan.fragments.map(fragment => ({
+      discontinuitySequence: fragment.discontinuitySequence,
+      duration: fragment.duration,
+      sequence: fragment.sequence,
+      url: fragment.url,
+    }))).toEqual(lineEndingExpected.segments)
   })
 })

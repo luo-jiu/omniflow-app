@@ -1011,6 +1011,20 @@
 - legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
 - validation: 失败基线为 authority/local-merge helper 尚不存在，且 hook 集成因旧组合拦截使 `downloadHlsTracks` 调用数为 `0`。实现后新增三文件专项 `14/14`、完整 HLS 集合 `15 files / 101 tests`、TypeScript、全仓 ESLint、capability/fixture JSON、轻量 validator、固定上游 anchor 校验、同步校验 `16/16`、metadata `7 units / 32 capabilities / 201 anchors / 106 cleanup entries / 148 planned IDs / 102 active refs` 和 scoped diff check 通过。全仓 Vitest 在沙箱内除 5 个 loopback 文件及被 Vitest 扫入的 Node test 文件外为 `1195 passed / 3 skipped`；5 个 loopback 文件在允许本机监听后 `23/23`，其中 18 个先前 EPERM 用例转绿，合计唯一 Vitest 用例 `1213 passed / 3 skipped`；Node 同步测试单独 `16/16`。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
 
+## 2026-08-28: same target (HLS line-ending boundary)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，固定实际 vendor 为 hls.js `1.6.16`。
+- reviewedThrough / portedThrough: 均保持 `null`；本步闭合 fast parser 对 CR/LF/CRLF 的清单行边界，仍未完成 hls-engine cutover。
+- change groups: `behavioral`（固定 fast regex 的行分隔语义）与 `download-projection`（纯 CR 清单继续生成 Cat Catch `parseTs` 会消费的 fragment 列表）。
+- affected capability IDs: `hls.parser-planner` 保持 `ported-unverified`；新增 1 个 active test ID 和 1 个固定上游 anchor。
+- fixtures/tests: 新增 upstream-executable fixture `hls-line-ending-boundary`；`hls.line-ending-boundary` 使用 JSON 中的 `\r` separator 构造纯 CR 清单，并同时锁定 pure manifest 与 download plan 的 URL、duration、media sequence、discontinuity、ENDLIST/live 状态。
+- accepted difference: 无。固定 vendor 对同一输入输出 `sn=7..8 / cc=0..1 / duration=7.5 / live=false`，OmniFlow 保持相同可下载投影。
+- excluded changes and reasons: 不借此扩大到 Cat Catch `parseTs` 不消费的播放 metadata，不修改网络解码、IPC、renderer 或任务 owner。
+- unresolved gaps: HLS 其余真正影响下载的 parser 差分、加密 fMP4/video 与独立双轨的真实输出组合、真实网站手工验证和最终 hls-engine cutover。
+- runtime changes: pure parser 的切行从只接受 LF/CRLF 改为显式接受 CRLF、LF 和 CR；后续 parser 分支、DTO 和生产接线不变。
+- legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
+- validation: 固定 Cat Catch vendor executable oracle 输出两片与上述终态；失败证据为新增用例报 `Missing format identifier #EXTM3U`。实现后 parser `35/35`、完整 HLS 集合 `16 files / 105 tests`、全仓 ESLint、fixture/capability JSON、轻量 validator、固定上游 anchor 校验、同步校验 `16/16`、metadata `7 units / 32 capabilities / 202 anchors / 106 cleanup entries / 149 planned IDs / 103 active refs` 和 scoped diff check 通过。全仓 Vitest 为 `1144 passed / 3 skipped`，失败只来自其他 Agent 在途的 media artifact upload/orchestrator：3 个 suite 初始化失败和 4 个 executor 断言/超时；同步 Node tests 被 Vitest 扫入时报无 suite，但已单独 `16/16`。TypeScript 同样被该在途模块的 8 个类型错误阻断。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
+
 ## Template
 
 ```markdown
