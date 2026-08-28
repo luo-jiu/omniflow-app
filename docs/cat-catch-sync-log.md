@@ -1347,6 +1347,20 @@
 - legacy cleanup: 无；旧 runtime hook block 在 target bundle 与 adapter 完整前继续留作 characterization，不能提前删除。
 - validation: discovery + core runtime 专项 `2 files / 9 passed`、应用 TypeScript `--noEmit`、scoped/full ESLint、同步测试 `16/16`、metadata/固定上游 validator 和 scoped diff check 已通过；排除 Node runner 文件后，全部可执行 Vitest 为 `195 files / 1344 passed / 3 skipped`。完整 build 继续避免覆盖其他 Agent 的 `dist-electron/**`，暂无真实网站手工场景。
 
+## 2026-08-28: same target (deep auxiliary experience hooks)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本步继续固定 `search.js` 的 key/string 经验入口。
+- reviewedThrough / portedThrough: 均保持 `null`；`deep.runtime-hook-bundle` 仍为 `porting`，整个 deep unit 继续开放。
+- change groups: `behavioral-port` 与 `runtime-safety-adaptation`；继续扩展同一个 target installer，不创建第二套 runtime。
+- affected capability IDs: `deep.runtime-hook-bundle`；metadata 为 `7 units / 32 capabilities / 208 anchors / 106 cleanup entries / 177 planned IDs / 140 active refs`，状态仍为 `11 verified / 4 porting / 1 ported-unverified / 16 pending`。
+- fixtures/tests: `deep.key-array-surfaces`、`deep.key-dataview-typedarray`、`deep.key-string-surfaces`、`deep.manifest-string-surfaces` 锁定固定上游的 slice/subarray、DataView/typed array、btoa/atob/escape、fromCharCode/join/indexOf 分支；既有 sentinel 同时锁定 inspect 重入门禁与所有 wrapper 的条件恢复。
+- accepted differences: 延续上一切片的 Worker CSP/Blob URL lifecycle 差异；辅助 hooks 的触发条件和 native `toString` 投影保持固定上游语义，新增同步重入门禁仅阻止 runtime 自己的 discovery 回调再次触发 hook。
+- excluded changes and reasons: 本步不接 inline DOM scan、Vimeo playlist 翻译、discovery/relay adapter、generated page/Worker composition、production flag、MSE/toolkit/UI。
+- unresolved gaps: inline DOM/Vimeo、target discovery adapter、production-equivalent composition、unit cutover 和旧 deep 分支删除仍未完成。
+- runtime changes: 无黑盒行为变化；target installer 仍没有 production 调用方，旧 `enableDeepRuntimeHooks = false` 保持不变。
+- legacy cleanup: 无；旧 disabled deep block 继续作为 characterization，待 target composition 完整后原子删除。
+- validation: discovery + runtime 专项 `2 files / 13 passed`、应用 TypeScript `--noEmit`、scoped/full ESLint、同步测试 `16/16`、metadata/固定上游 validator、全仓 Vitest `195 files / 1363 passed / 3 skipped` 和 scoped diff check 已通过。完整 build 继续避免覆盖其他 Agent 的 `dist-electron/**`，暂无真实网站手工场景。
+
 ## Template
 
 ```markdown

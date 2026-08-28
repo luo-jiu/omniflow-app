@@ -519,6 +519,10 @@
         "deep.fetch-clone-observation",
         "deep.xhr-response-branches",
         "deep.text-decoder-manifest",
+        "deep.key-array-surfaces",
+        "deep.key-dataview-typedarray",
+        "deep.key-string-surfaces",
+        "deep.manifest-string-surfaces",
         "deep.json-depth-width-cycle"
       ],
       "testRefs": [
@@ -528,13 +532,17 @@
         "electron/service/embedded-browser/cat-catch-port/deep-search/runtime.test.ts#deep.fetch-clone-observation",
         "electron/service/embedded-browser/cat-catch-port/deep-search/runtime.test.ts#deep.xhr-response-branches",
         "electron/service/embedded-browser/cat-catch-port/deep-search/runtime.test.ts#deep.text-decoder-manifest",
+        "electron/service/embedded-browser/cat-catch-port/deep-search/runtime.test.ts#deep.key-array-surfaces",
+        "electron/service/embedded-browser/cat-catch-port/deep-search/runtime.test.ts#deep.key-dataview-typedarray",
+        "electron/service/embedded-browser/cat-catch-port/deep-search/runtime.test.ts#deep.key-string-surfaces",
+        "electron/service/embedded-browser/cat-catch-port/deep-search/runtime.test.ts#deep.manifest-string-surfaces",
         "electron/service/embedded-browser/cat-catch-port/deep-search/discovery.test.ts#deep.json-depth-width-cycle"
       ],
       "acceptedDifferences": [
         "Cat Catch begins wrapping real Workers while its Blob Worker probe can still fail asynchronously. The target runtime keeps real Workers native during that short probing state, enables bootstrap injection only after the probe message succeeds, and permanently falls back after error/timeout so CSP cannot strand a page Worker on a rejected Blob URL.",
         "Cat Catch leaves probe and injected Worker Blob URLs live for the document. The target runtime tracks them, revokes the capability probe immediately, bounds injected URLs with a TTL, and exposes idempotent disposal while never terminating page-owned Workers."
       ],
-      "notes": "The self-contained target installer now ports idempotent JSON.parse, TextDecoder manifest, XHR response, fetch clone/body and Worker bootstrap/relay hooks with native toString projection and conditional restoration. It preserves Cat Catch's fetch clone contract and exact XHR status/method observation while making asynchronous Worker CSP failure non-destructive. Production enableDeepRuntimeHooks remains false: the auxiliary key surfaces (slice/subarray/btoa/atob/fromCharCode/DataView/typed arrays/join/escape/indexOf), discovery adapter wiring and atomic legacy cleanup are still open."
+      "notes": "The self-contained target installer now ports idempotent JSON.parse, TextDecoder manifest, XHR response, fetch clone/body, Worker bootstrap/relay and the Cat Catch slice/subarray/btoa/atob/fromCharCode/DataView/typed-array/join/escape/indexOf experience surfaces. Every hook projects the native toString, inspection is reentrancy-guarded, and disposal restores only wrappers still owned by this runtime. It preserves Cat Catch's fetch clone contract and exact XHR status/method observation while making asynchronous Worker CSP failure non-destructive. Production enableDeepRuntimeHooks remains false: inline DOM/Vimeo completion, discovery/relay adapter wiring, production-equivalent composition and atomic legacy cleanup are still open."
     },
     {
       "id": "deep.manifest-key-discovery",

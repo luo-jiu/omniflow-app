@@ -90,18 +90,28 @@ function createScope(overrides: Record<string, unknown> = {}) {
   let blobIndex = 0
   const revokeObjectURL = vi.fn()
   const scope = {
+    Array,
     ArrayBuffer,
     Blob,
+    DataView,
+    Int8Array,
     JSON: { parse: JSON.parse },
     Request,
+    String,
     TextDecoder,
     URL: {
       createObjectURL: vi.fn(() => `blob:deep-runtime-${++blobIndex}`),
       revokeObjectURL,
     },
+    Uint16Array,
+    Uint32Array,
+    Uint8Array,
     Worker: FakeWorker,
     XMLHttpRequest: FakeXhr,
+    atob,
+    btoa,
     clearTimeout,
+    escape,
     fetch: vi.fn(),
     location: {
       href: 'https://page.example/watch',
@@ -122,9 +132,18 @@ describe('Cat Catch deep-search runtime hooks', () => {
   it('deep.hook-install-sentinels', () => {
     const { scope } = createScope()
     const originalJsonParse = scope.JSON.parse
+    const originalArraySlice = scope.Array.prototype.slice
+    const originalDataView = scope.DataView
+    const originalStringIndexOf = scope.String.prototype.indexOf
+    const originalUint8Array = scope.Uint8Array
+    const originalFromCharCodeSource = scope.String.fromCharCode.toString()
+    const originalUint8ArraySource = scope.Uint8Array.toString()
     const observations: DeepSearchRuntimeObservation[] = []
     const first = installDeepSearchRuntime({
-      inspect: (_value, observation) => observations.push(observation),
+      inspect: (_value, observation) => {
+        observations.push(observation)
+        new scope.Uint8Array(16)
+      },
       scope,
       workerBootstrapSource: '/* deep worker bootstrap */',
     })
@@ -136,6 +155,8 @@ describe('Cat Catch deep-search runtime hooks', () => {
 
     expect(second).toBe(first)
     expect(scope.JSON.parse).not.toBe(originalJsonParse)
+    expect(scope.String.fromCharCode.toString()).toBe(originalFromCharCodeSource)
+    expect(scope.Uint8Array.toString()).toBe(originalUint8ArraySource)
     scope.JSON.parse('{"media":"https://cdn.example/video.mp4"}')
     expect(observations).toEqual([
       expect.objectContaining({ source: 'json' }),
@@ -143,6 +164,11 @@ describe('Cat Catch deep-search runtime hooks', () => {
 
     first.dispose()
     expect(scope.JSON.parse).toBe(originalJsonParse)
+    expect(scope.Array.prototype.slice).toBe(originalArraySlice)
+    expect(scope.DataView).toBe(originalDataView)
+    expect(scope.String.prototype.indexOf).toBe(originalStringIndexOf)
+    expect(scope.Uint8Array).toBe(originalUint8Array)
+    expect(originalUint8Array.toString()).toBe(originalUint8ArraySource)
     const reinstalled = installDeepSearchRuntime({
       inspect: vi.fn(),
       scope,
@@ -292,6 +318,129 @@ describe('Cat Catch deep-search runtime hooks', () => {
       method: 'POST',
       pageUrl: 'https://api.example/player',
       source: 'xhr',
+    })
+    runtime.dispose()
+  })
+
+  it('deep.key-array-surfaces', () => {
+    const { scope } = createScope()
+    const inspect = vi.fn()
+    const runtime = installDeepSearchRuntime({
+      inspect,
+      scope,
+      workerBootstrapSource: '/* deep worker bootstrap */',
+    })
+    const bytes = Array.from({ length: 32 }, (_, index) => index + 1)
+
+    scope.Array.prototype.slice.call(bytes, 0, 16)
+    new scope.Uint8Array(bytes).subarray(0, 16)
+
+    expect(inspect).toHaveBeenCalledWith(bytes.slice(0, 16), {
+      pageUrl: 'https://page.example/watch',
+      source: 'key-hook',
+      surface: 'array-slice',
+    })
+    expect(inspect).toHaveBeenCalledWith(expect.any(ArrayBuffer), {
+      pageUrl: 'https://page.example/watch',
+      source: 'key-hook',
+      surface: 'typed-subarray',
+    })
+    runtime.dispose()
+  })
+
+  it('deep.key-dataview-typedarray', () => {
+    const { scope } = createScope()
+    const inspect = vi.fn()
+    const runtime = installDeepSearchRuntime({
+      inspect,
+      scope,
+      workerBootstrapSource: '/* deep worker bootstrap */',
+    })
+    const buffer = new ArrayBuffer(16)
+
+    const view = new scope.DataView(buffer)
+    view.setUint8(0, 7)
+    new scope.Uint32Array([0x01020304, 0x11121314, 0x21222324, 0x31323334])
+
+    expect(inspect).toHaveBeenCalledWith(buffer, {
+      pageUrl: 'https://page.example/watch',
+      source: 'key-hook',
+      surface: 'data-view',
+    })
+    expect(inspect).toHaveBeenCalledWith(expect.any(ArrayBuffer), {
+      pageUrl: 'https://page.example/watch',
+      source: 'key-hook',
+      surface: 'typed-array',
+    })
+    runtime.dispose()
+  })
+
+  it('deep.key-string-surfaces', () => {
+    const { scope } = createScope()
+    const inspect = vi.fn()
+    const runtime = installDeepSearchRuntime({
+      inspect,
+      scope,
+      workerBootstrapSource: '/* deep worker bootstrap */',
+    })
+    const binaryKey = scope.String.fromCharCode(...Array.from({ length: 16 }, (_, index) => index + 1))
+    const base64Key = scope.btoa(binaryKey)
+    scope.atob(base64Key)
+    scope.escape?.(base64Key)
+
+    expect(base64Key).toHaveLength(24)
+    expect(inspect).toHaveBeenCalledWith(base64Key, {
+      pageUrl: 'https://page.example/watch',
+      source: 'key-hook',
+      surface: 'btoa',
+    })
+    expect(inspect).toHaveBeenCalledWith(base64Key, {
+      pageUrl: 'https://page.example/watch',
+      source: 'key-hook',
+      surface: 'atob',
+    })
+    expect(inspect).toHaveBeenCalledWith(base64Key, {
+      pageUrl: 'https://page.example/watch',
+      source: 'key-hook',
+      surface: 'escape',
+    })
+    runtime.dispose()
+  })
+
+  it('deep.manifest-string-surfaces', () => {
+    const { scope } = createScope()
+    const inspect = vi.fn()
+    const runtime = installDeepSearchRuntime({
+      inspect,
+      scope,
+      workerBootstrapSource: '/* deep worker bootstrap */',
+    })
+    const manifest = '#EXTM3U\n#EXTINF:4,\nsegment.ts\n#EXT-X-ENDLIST'
+
+    scope.btoa(manifest)
+    scope.Array.prototype.join.call(['#EXTM3U', 'segment.ts'], '\n')
+    scope.String.prototype.indexOf.call(manifest, '#EXTM3U')
+    scope.String.fromCharCode(...Array.from(manifest, character => character.charCodeAt(0)))
+
+    expect(inspect).toHaveBeenCalledWith(manifest, {
+      pageUrl: 'https://page.example/watch',
+      source: 'string-hook',
+      surface: 'btoa',
+    })
+    expect(inspect).toHaveBeenCalledWith('#EXTM3U\nsegment.ts', {
+      pageUrl: 'https://page.example/watch',
+      source: 'string-hook',
+      surface: 'array-join',
+    })
+    expect(inspect).toHaveBeenCalledWith(manifest, {
+      pageUrl: 'https://page.example/watch',
+      source: 'string-hook',
+      surface: 'string-index-of',
+    })
+    expect(inspect).toHaveBeenCalledWith(manifest, {
+      pageUrl: 'https://page.example/watch',
+      source: 'string-hook',
+      surface: 'from-char-code',
     })
     runtime.dispose()
   })
