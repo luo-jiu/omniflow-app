@@ -1,6 +1,7 @@
 /// <reference types="vite-plugin-electron/electron-env" />
 
 declare const __OMNIFLOW_UPDATE_BASE_URL__: string
+declare const __OMNIFLOW_API_BASE_URL__: string
 
 declare namespace NodeJS {
   interface ProcessEnv {
@@ -297,6 +298,9 @@ interface Window {
     saveMediaArtifact: (
       input: import('@/shared/agent/agent.types').AgentMediaArtifactSaveRequest,
     ) => Promise<import('@/shared/agent/agent.types').AgentMediaArtifactSaveResult>;
+    uploadMediaArtifact: (
+      input: import('@/shared/agent/agent.types').AgentMediaArtifactUploadRequest,
+    ) => Promise<import('@/shared/agent/agent.types').AgentMediaArtifactUploadResult>;
     listSessions: (
       ownerScope: import('@/shared/agent/agent.types').AgentOwnerScope,
       libraryId: number,

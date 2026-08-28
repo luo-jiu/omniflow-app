@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type {
+  AgentMediaArtifactUploadResult,
   AgentMediaExtractAudioPreparedActionPublicV1,
   AgentPreparedActionPublic,
   AgentToolApprovalSnapshot,
@@ -163,6 +164,96 @@ describe('Agent orchestrator', () => {
       getSessionStore: async () => store,
       runSessionRegistry: createAIServiceRunSessionRegistry(),
     });
+  }
+
+  function createMediaArtifactFallbackFixture(
+    uploadResult: AgentMediaArtifactUploadResult,
+  ) {
+    const webContents = sender();
+    const signal = new AbortController().signal;
+    const claimRendererCapability = vi.fn(() => ({
+      beginCriticalSettlement: vi.fn(),
+      executionInput: {
+        conflictPolicy: 'auto_rename',
+        destination: 'library',
+        fallbackPolicy: 'prompt_local',
+        libraryId: 3,
+        outputFileName: 'movie-audio.m4a',
+        outputFormat: 'm4a',
+        parentId: 10,
+        preparedActionId: 'prepared-action-1',
+        snapshotHash: 'snapshot-hash-1',
+        storageProvider: 'local-minio',
+      },
+      onProgress: vi.fn(),
+      signal,
+    }));
+    const markRendererExecutionCommitted = vi.fn(() => true);
+    const withOwnedFile = vi.fn(async (
+      _artifactId: string,
+      _owner: unknown,
+      consumer: (input: {
+        artifact: Record<string, unknown>;
+        fileHandle: Record<string, unknown>;
+        verifyUnchanged: () => Promise<void>;
+      }) => Promise<unknown>,
+    ) => consumer({
+      artifact: {
+        artifactId: 'artifact-1',
+        fileName: 'movie-audio.m4a',
+        sizeBytes: 512,
+      },
+      fileHandle: {},
+      verifyUnchanged: vi.fn(async () => undefined),
+    }));
+    const saveMediaArtifactAs = vi.fn(async () => ({ canceled: true as const }));
+    const upload = vi.fn(async () => uploadResult);
+    const orchestrator = createAgentOrchestrator({
+      mediaArtifactStore: {
+        release: vi.fn(async () => true),
+        releaseOwner: vi.fn(async () => undefined),
+        releaseRun: vi.fn(async () => undefined),
+        withOwnedFile,
+      } as never,
+      mediaArtifactUploadManager: { upload } as never,
+      saveMediaArtifactAs,
+      toolBroker: {
+        claimRendererCapability,
+        markRendererExecutionCommitted,
+      } as never,
+    });
+    const uploadRequest = {
+      artifactId: 'artifact-1',
+      credentials: { token: 'token-secret', username: 'loyce' },
+      executionId: 'execution-1',
+      libraryId: 3,
+      ownerScope: OWNER_SCOPE,
+      runId: 'run-1',
+      sessionId: 'session-1',
+    };
+    const saveRequest = {
+      artifactId: 'artifact-1',
+      defaultFileName: 'movie-audio.m4a',
+      executionId: 'execution-1',
+      libraryId: 3,
+      ownerScope: OWNER_SCOPE,
+      preparedActionId: 'prepared-action-1',
+      purpose: 'upload_fallback' as const,
+      runId: 'run-1',
+      sessionId: 'session-1',
+      snapshotHash: 'snapshot-hash-1',
+    };
+    return {
+      claimRendererCapability,
+      markRendererExecutionCommitted,
+      orchestrator,
+      saveMediaArtifactAs,
+      saveRequest,
+      upload,
+      uploadRequest,
+      webContents,
+      withOwnedFile,
+    };
   }
 
   async function startPreparedAudioApproval() {
@@ -1282,25 +1373,29 @@ describe('Agent orchestrator', () => {
       return {
         artifactId: 'artifact-1',
         fileName: 'movie-audio.m4a',
-        filePath: '/tmp/agent-media/movie-audio.m4a',
         mimeType: 'audio/mp4',
         sizeBytes: 512,
       };
     });
     const mediaArtifactStore = {
-      getOwned: vi.fn(() => ({
-        artifactId: 'artifact-1',
-        directoryPath: '/tmp/agent-media',
-        fileName: 'movie-audio.m4a',
-        filePath: '/tmp/agent-media/movie-audio.m4a',
-        sizeBytes: 512,
-      })),
       release: vi.fn(async () => true),
       releaseOwner: vi.fn(async () => undefined),
       releaseRun: vi.fn(async () => undefined),
       touchExecution: vi.fn(async () => true),
     };
-    const saveMediaArtifactAs = vi.fn(async () => ({ canceled: true as const }));
+    const mediaArtifactUploadManager = {
+      upload: vi.fn(async (input: {
+        onProgress?: (uploadedBytes: number, totalBytes: number) => void;
+        onSettlementStarted?: () => void;
+      }) => {
+        input.onProgress?.(512, 512);
+        input.onSettlementStarted?.();
+        return {
+          commitState: 'committed' as const,
+          node: { ext: 'm4a', id: 32, name: 'movie-audio' },
+        };
+      }),
+    };
     const webContents = sender();
     const orchestrator = createAgentOrchestrator({
       extractMediaAudio: extractMediaAudio as never,
@@ -1310,9 +1405,9 @@ describe('Agent orchestrator', () => {
         providerType: 'openai',
       }),
       getSessionStore: async () => store,
-      mediaArtifactStore,
+      mediaArtifactStore: mediaArtifactStore as never,
+      mediaArtifactUploadManager: mediaArtifactUploadManager as never,
       runSessionRegistry: createAIServiceRunSessionRegistry(),
-      saveMediaArtifactAs,
     });
     const started = await orchestrator.start(webContents as never, {
       ...request(),
@@ -1457,39 +1552,46 @@ describe('Agent orchestrator', () => {
     }), expect.any(AbortSignal), expect.any(Function));
     await expect(orchestrator.extractMediaAudio(webContents.id, extractionRequest))
       .rejects.toThrow('已经使用');
-    if (!execution.input || typeof execution.input !== 'object') {
-      throw new Error('expected prepared media execution input');
-    }
-    const preparedInput = execution.input as Record<string, unknown>;
-    const saveRequest = {
+    const uploadRequest = {
       artifactId: artifact.artifactId,
-      defaultFileName: 'movie-audio.m4a',
+      credentials: { token: 'token-secret', username: 'loyce' },
       executionId: execution.executionId,
       libraryId: 3,
       ownerScope: OWNER_SCOPE,
-      preparedActionId: String(preparedInput.preparedActionId),
-      purpose: 'upload_fallback' as const,
       runId: started.runId,
       sessionId: started.sessionId,
-      snapshotHash: String(preparedInput.snapshotHash),
     };
-    await expect(orchestrator.saveMediaArtifact({ ...webContents, id: 88 } as never, saveRequest))
-      .rejects.toThrow('无权使用');
-    await expect(orchestrator.saveMediaArtifact(webContents as never, saveRequest))
-      .resolves.toEqual({ canceled: true });
-    await expect(orchestrator.saveMediaArtifact(webContents as never, saveRequest))
+    await expect(orchestrator.uploadMediaArtifact(
+      { ...webContents, id: 88 } as never,
+      uploadRequest,
+    )).rejects.toThrow('无权使用');
+    await expect(orchestrator.uploadMediaArtifact(webContents as never, uploadRequest))
+      .resolves.toEqual({
+        commitState: 'committed',
+        node: { ext: 'm4a', id: 32, name: 'movie-audio.m4a' },
+      });
+    await expect(orchestrator.uploadMediaArtifact(webContents as never, uploadRequest))
       .rejects.toThrow('已经使用');
-    expect(mediaArtifactStore.getOwned).toHaveBeenCalledWith('artifact-1', {
-      executionId: execution.executionId,
-      ownerScope: OWNER_SCOPE,
-      ownerWebContentsId: webContents.id,
-      runId: started.runId,
-      sessionId: started.sessionId,
-    });
-    expect(saveMediaArtifactAs).toHaveBeenCalledWith(expect.objectContaining({
-      defaultFileName: 'movie-audio.m4a',
-      sender: webContents,
+    expect(mediaArtifactUploadManager.upload).toHaveBeenCalledWith(expect.objectContaining({
+      artifactId: 'artifact-1',
+      credentials: uploadRequest.credentials,
+      expectedUserId: 7,
+      owner: {
+        executionId: execution.executionId,
+        ownerScope: OWNER_SCOPE,
+        ownerWebContentsId: webContents.id,
+        runId: started.runId,
+        sessionId: started.sessionId,
+      },
       signal: expect.any(AbortSignal),
+      target: {
+        conflictPolicy: 'auto_rename',
+        contentType: 'audio/mp4',
+        fileName: 'movie-audio.m4a',
+        libraryId: 3,
+        parentId: 10,
+        storageProvider: 'local-minio',
+      },
     }));
     await vi.waitFor(() => {
       expect(webContents.send).toHaveBeenCalledWith('agent:chat:event', expect.objectContaining({
@@ -1512,27 +1614,6 @@ describe('Agent orchestrator', () => {
       runId: started.runId,
       sessionId: started.sessionId,
     });
-    expect(orchestrator.markToolExecutionCommitted(webContents.id, {
-      executionId: execution.executionId,
-      libraryId: 3,
-      ownerScope: OWNER_SCOPE,
-      result: {
-        data: {
-          createdNodeId: 32,
-          destination: 'library',
-          format: 'm4a',
-          name: 'movie-audio.m4a',
-          parentId: 10,
-          uploadCommitState: 'committed',
-          verified: false,
-        },
-        message: '已提取并上传“movie-audio.m4a”',
-        ok: true,
-      },
-      runId: started.runId,
-      sessionId: started.sessionId,
-    })).toBe(true);
-
     await orchestrator.releaseMediaArtifact(webContents.id, {
       artifactId: artifact.artifactId,
       executionId: execution.executionId,
@@ -1578,6 +1659,71 @@ describe('Agent orchestrator', () => {
     });
     expect(JSON.stringify(webContents.send.mock.calls)).not.toContain('secret=value');
     expect(JSON.stringify(webContents.send.mock.calls)).not.toContain('/tmp/agent-media');
+  });
+
+  it('allows one fallback save only after an explicit uncommitted upload', async () => {
+    const fixture = createMediaArtifactFallbackFixture({ commitState: 'uncommitted' });
+
+    await expect(fixture.orchestrator.uploadMediaArtifact(
+      fixture.webContents as never,
+      fixture.uploadRequest,
+    )).resolves.toEqual({ commitState: 'uncommitted' });
+    await expect(fixture.orchestrator.saveMediaArtifact(
+      { ...fixture.webContents, id: 88 } as never,
+      fixture.saveRequest,
+    )).rejects.toThrow('资料库上传尚未明确进入可本机兜底状态');
+    await expect(fixture.orchestrator.saveMediaArtifact(
+      fixture.webContents as never,
+      { ...fixture.saveRequest, artifactId: 'artifact-other' },
+    )).rejects.toThrow('资料库上传尚未明确进入可本机兜底状态');
+    expect(fixture.saveMediaArtifactAs).not.toHaveBeenCalled();
+
+    await expect(fixture.orchestrator.saveMediaArtifact(
+      fixture.webContents as never,
+      fixture.saveRequest,
+    )).resolves.toEqual({ canceled: true });
+    await expect(fixture.orchestrator.saveMediaArtifact(
+      fixture.webContents as never,
+      fixture.saveRequest,
+    )).rejects.toThrow('资料库上传尚未明确进入可本机兜底状态');
+    expect(fixture.withOwnedFile).toHaveBeenCalledTimes(1);
+    expect(fixture.saveMediaArtifactAs).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects fallback save after a committed upload', async () => {
+    const fixture = createMediaArtifactFallbackFixture({
+      commitState: 'committed',
+      node: { ext: 'm4a', id: 32, name: 'movie-audio' },
+    });
+
+    await expect(fixture.orchestrator.uploadMediaArtifact(
+      fixture.webContents as never,
+      fixture.uploadRequest,
+    )).resolves.toEqual({
+      commitState: 'committed',
+      node: { ext: 'm4a', id: 32, name: 'movie-audio.m4a' },
+    });
+    await expect(fixture.orchestrator.saveMediaArtifact(
+      fixture.webContents as never,
+      fixture.saveRequest,
+    )).rejects.toThrow('资料库上传尚未明确进入可本机兜底状态');
+    expect(fixture.markRendererExecutionCommitted).toHaveBeenCalledTimes(1);
+    expect(fixture.withOwnedFile).not.toHaveBeenCalled();
+  });
+
+  it('rejects fallback save while the upload commit state is unknown', async () => {
+    const fixture = createMediaArtifactFallbackFixture({ commitState: 'commit_unknown' });
+
+    await expect(fixture.orchestrator.uploadMediaArtifact(
+      fixture.webContents as never,
+      fixture.uploadRequest,
+    )).resolves.toEqual({ commitState: 'commit_unknown' });
+    await expect(fixture.orchestrator.saveMediaArtifact(
+      fixture.webContents as never,
+      fixture.saveRequest,
+    )).rejects.toThrow('资料库上传尚未明确进入可本机兜底状态');
+    expect(fixture.markRendererExecutionCommitted).not.toHaveBeenCalled();
+    expect(fixture.withOwnedFile).not.toHaveBeenCalled();
   });
 
   it('does not automatically execute a non-read tool', async () => {

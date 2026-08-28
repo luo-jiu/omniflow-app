@@ -7,6 +7,8 @@ import type {
   AgentMediaArtifactReleaseRequest,
   AgentMediaArtifactSaveRequest,
   AgentMediaArtifactSaveResult,
+  AgentMediaArtifactUploadRequest,
+  AgentMediaArtifactUploadResult,
   AgentMediaAudioExtractionRequest,
   AgentMediaAudioExtractionResult,
   AgentMediaInspectionRequest,
@@ -27,6 +29,8 @@ import type {
   AgentToolExecutionProgressRequest,
   AgentToolPrepareCompletion,
 } from '@/shared/agent/agent.types';
+import { clearAuthSessionAndDisposeWorkspaces } from '@/service/auth-session-release';
+import { auth } from '@/utils/auth';
 
 function bridge() {
   if (!window.electronAgent) {
@@ -105,6 +109,39 @@ export function saveAgentMediaArtifact(
   input: AgentMediaArtifactSaveRequest,
 ): Promise<AgentMediaArtifactSaveResult> {
   return bridge().saveMediaArtifact(input);
+}
+
+export interface UploadAgentMediaArtifactInput {
+  artifactId: string;
+  executionId: string;
+  libraryId: number;
+  ownerScope: AgentOwnerScope;
+  runId: string;
+  sessionId: string;
+}
+
+export async function uploadAgentMediaArtifact(
+  input: UploadAgentMediaArtifactInput,
+): Promise<AgentMediaArtifactUploadResult> {
+  const token = String(auth.getToken() || '').trim();
+  const username = String(auth.getUsername() || '').trim();
+  if (!token || !username) throw new Error('登录状态已失效，请重新登录');
+  const request: AgentMediaArtifactUploadRequest = {
+    ...input,
+    credentials: { token, username },
+  };
+  try {
+    return await bridge().uploadMediaArtifact(request);
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('auth_expired')) {
+      await clearAuthSessionAndDisposeWorkspaces({
+        reason: 'agent media upload auth expired',
+        redirectToLogin: true,
+      });
+      throw new Error('登录状态已失效，请重新登录');
+    }
+    throw error;
+  }
 }
 
 export function listAgentSessions(

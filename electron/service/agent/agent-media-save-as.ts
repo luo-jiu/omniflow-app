@@ -1,8 +1,6 @@
 import crypto from 'node:crypto';
-import { createReadStream, createWriteStream } from 'node:fs';
 import { rename, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
-import { pipeline } from 'node:stream/promises';
 import { BrowserWindow, dialog, type WebContents } from 'electron';
 
 import type { AgentMediaArtifactSaveResult } from '@/shared/agent/agent.types';
@@ -10,6 +8,7 @@ import type { AgentMediaArtifact } from './agent-media-artifact-store';
 
 interface SaveAgentMediaArtifactInput {
   artifact: AgentMediaArtifact;
+  copyArtifact: (temporaryPath: string, signal: AbortSignal) => Promise<void>;
   defaultFileName: string;
   sender: WebContents;
   signal: AbortSignal;
@@ -36,6 +35,14 @@ function normalizeDefaultFileName(input: string, fallback: string): string {
   const candidate = path.basename(String(input || '').trim());
   if (!candidate || candidate === '.' || candidate === '..') return path.basename(fallback);
   return candidate.slice(0, 255);
+}
+
+function isPathInsideOrEqual(parentPath: string, candidatePath: string): boolean {
+  const relativePath = path.relative(path.resolve(parentPath), path.resolve(candidatePath));
+  return relativePath === ''
+    || (relativePath !== '..'
+      && !relativePath.startsWith(`..${path.sep}`)
+      && !path.isAbsolute(relativePath));
 }
 
 async function replaceTemporaryFile(
@@ -76,13 +83,8 @@ export async function saveAgentMediaArtifactAs(
   input: SaveAgentMediaArtifactInput,
   dependencies: SaveAgentMediaArtifactDependencies = {},
 ): Promise<AgentMediaArtifactSaveResult> {
-  const statFile = dependencies.statFile || stat;
   const removeFile = dependencies.removeFile || rm;
   throwIfAborted(input.signal);
-  const sourceStat = await statFile(input.artifact.filePath).catch(() => null);
-  if (!sourceStat?.isFile() || sourceStat.size <= 0) {
-    throw new Error('Agent 媒体临时产物不存在或已经失效');
-  }
 
   const defaultFileName = normalizeDefaultFileName(
     input.defaultFileName,
@@ -105,7 +107,7 @@ export async function saveAgentMediaArtifactAs(
   if (selection.canceled || !selection.filePath) return { canceled: true };
 
   const targetPath = path.resolve(selection.filePath);
-  if (targetPath === path.resolve(input.artifact.filePath)) {
+  if (isPathInsideOrEqual(input.artifact.directoryPath, targetPath)) {
     throw new Error('不能将 Agent 媒体产物保存到内部临时位置');
   }
   const targetDirectory = path.dirname(targetPath);
@@ -114,11 +116,7 @@ export async function saveAgentMediaArtifactAs(
     `.${path.basename(targetPath)}.omniflow-${crypto.randomUUID()}.tmp`,
   );
   try {
-    await pipeline(
-      createReadStream(input.artifact.filePath),
-      createWriteStream(temporaryPath, { flags: 'wx' }),
-      { signal: input.signal },
-    );
+    await input.copyArtifact(temporaryPath, input.signal);
     throwIfAborted(input.signal);
     await replaceTemporaryFile(temporaryPath, targetPath, dependencies);
   } finally {

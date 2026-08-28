@@ -1,4 +1,6 @@
 import crypto from 'node:crypto';
+import { createWriteStream } from 'node:fs';
+import { pipeline } from 'node:stream/promises';
 import type { WebContents } from 'electron';
 
 import type {
@@ -20,6 +22,8 @@ import type {
   AgentMediaArtifactReleaseRequest,
   AgentMediaArtifactSaveRequest,
   AgentMediaArtifactSaveResult,
+  AgentMediaArtifactUploadRequest,
+  AgentMediaArtifactUploadResult,
   AgentMediaAudioExtractionRequest,
   AgentMediaAudioExtractionResult,
   AgentMessage,
@@ -83,6 +87,11 @@ import {
 } from './agent-renderer-projection';
 import { extractAgentMediaAudio } from './agent-media-audio-extractor';
 import { agentMediaArtifactStore, type AgentMediaArtifactStore } from './agent-media-artifact-store';
+import {
+  createAgentMediaArtifactUploadManager,
+  type AgentMediaArtifactUploadManager,
+} from './agent-media-artifact-upload';
+import { createAgentMediaUploadControlPlane } from './agent-media-upload-control-plane';
 import { saveAgentMediaArtifactAs } from './agent-media-save-as';
 import { inspectAgentMediaSource } from './agent-media-inspector';
 import { buildAgentMemoryContextMessagesWithinBudget } from './agent-memory-context';
@@ -276,6 +285,13 @@ interface ActiveMediaArtifactSave {
   task: Promise<AgentMediaArtifactSaveResult>;
 }
 
+interface AgentMediaArtifactFallbackGrant {
+  artifactId: string;
+  ownerWebContentsId: number;
+  runId: string;
+  sessionId: string;
+}
+
 interface AgentOrchestratorOptions {
   approvalTimeoutMs?: number;
   contextBudget?: Partial<AgentContextBudget>;
@@ -287,7 +303,8 @@ interface AgentOrchestratorOptions {
   inspectMediaSource?: typeof inspectAgentMediaSource;
   interactionTimeoutMs?: number;
   mediaArtifactStore?: Pick<AgentMediaArtifactStore, 'release' | 'releaseOwner' | 'releaseRun'>
-    & Partial<Pick<AgentMediaArtifactStore, 'getOwned' | 'touchExecution'>>;
+    & Partial<Pick<AgentMediaArtifactStore, 'touchExecution' | 'withOwnedFile'>>;
+  mediaArtifactUploadManager?: AgentMediaArtifactUploadManager;
   resolveCapabilitySnapshot?: (
     input: AgentCapabilitySnapshotRequest,
   ) => Promise<AgentCapabilitySnapshot>;
@@ -304,6 +321,38 @@ interface AgentOrchestratorOptions {
 
 function now(): string {
   return new Date().toISOString();
+}
+
+function resolveOwnerUserId(ownerScope: AgentOwnerScope): number {
+  const match = /^user:([1-9]\d*)$/u.exec(ownerScope.accountScope);
+  const userId = Number(match?.[1]);
+  if (!Number.isSafeInteger(userId) || userId <= 0) {
+    throw new Error('Agent 缺少有效的账号环境');
+  }
+  return userId;
+}
+
+function normalizeCommittedMediaNode(
+  value: unknown,
+): Extract<AgentMediaArtifactUploadResult, { commitState: 'committed' }>['node'] {
+  const source = value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+  const id = Number(source.id);
+  const rawName = String(source.name || '').trim().slice(0, 512);
+  const rawExt = String(source.ext || '').trim().replace(/^\./u, '').slice(0, 32);
+  const ext = /^[a-z0-9][a-z0-9_-]{0,31}$/iu.test(rawExt) ? rawExt : '';
+  if (!Number.isSafeInteger(id) || id <= 0 || !rawName) {
+    throw new Error('Agent 媒体产物上传提交回执无效');
+  }
+  const fullName = ext && !rawName.toLowerCase().endsWith(`.${ext.toLowerCase()}`)
+    ? `${rawName}.${ext}`
+    : rawName;
+  return {
+    ...(ext ? { ext } : {}),
+    id,
+    name: fullName,
+  };
 }
 
 function normalizeContext(input: AgentAppContext): AgentAppContext {
@@ -688,6 +737,14 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
   const inspectMediaSource = options.inspectMediaSource || inspectAgentMediaSource;
   const extractMediaAudioSource = options.extractMediaAudio || extractAgentMediaAudio;
   const mediaArtifactStore = options.mediaArtifactStore || agentMediaArtifactStore;
+  const mediaArtifactUploadManager = options.mediaArtifactUploadManager || (
+    mediaArtifactStore.withOwnedFile
+      ? createAgentMediaArtifactUploadManager({
+          artifactStore: { withOwnedFile: mediaArtifactStore.withOwnedFile },
+          controlPlane: createAgentMediaUploadControlPlane(),
+        })
+      : null
+  );
   const saveMediaArtifactAs = options.saveMediaArtifactAs || saveAgentMediaArtifactAs;
   const resolveCapabilitySnapshot = options.resolveCapabilitySnapshot
     || createBuiltInAgentCapabilitySnapshot;
@@ -707,7 +764,16 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
   const pendingApprovals = new Map<string, PendingAgentApproval>();
   const pendingInteractions = new Map<string, PendingAgentInteraction>();
   const activeMediaArtifactSaves = new Set<ActiveMediaArtifactSave>();
+  const mediaArtifactFallbackGrants = new Map<string, AgentMediaArtifactFallbackGrant>();
   let shuttingDown = false;
+
+  function clearMediaArtifactFallbackGrants(
+    predicate: (grant: AgentMediaArtifactFallbackGrant) => boolean,
+  ): void {
+    mediaArtifactFallbackGrants.forEach((grant, executionId) => {
+      if (predicate(grant)) mediaArtifactFallbackGrants.delete(executionId);
+    });
+  }
 
   async function waitForMediaArtifactSaves(predicate: (
     save: ActiveMediaArtifactSave,
@@ -1347,6 +1413,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     ownerWebContentsId: number,
     input: AgentMediaArtifactReleaseRequest,
   ): Promise<boolean> {
+    mediaArtifactFallbackGrants.delete(String(input?.executionId || ''));
     return mediaArtifactStore.release(String(input?.artifactId || ''), {
       executionId: String(input?.executionId || ''),
       ownerScope: normalizeAgentOwnerScope(input?.ownerScope),
@@ -1393,6 +1460,19 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     ) {
       throw new Error('本机保存目标与冻结后的 Agent 动作不匹配');
     }
+    if (purpose === 'upload_fallback') {
+      const grant = mediaArtifactFallbackGrants.get(String(input.executionId || ''));
+      if (
+        !grant
+        || grant.artifactId !== String(input.artifactId || '')
+        || grant.ownerWebContentsId !== sender.id
+        || grant.runId !== String(input.runId || '')
+        || grant.sessionId !== String(input.sessionId || '')
+      ) {
+        throw new Error('资料库上传尚未明确进入可本机兜底状态');
+      }
+      mediaArtifactFallbackGrants.delete(String(input.executionId || ''));
+    }
     const owner = {
       executionId: String(input.executionId || ''),
       ownerScope: normalizeAgentOwnerScope(input.ownerScope),
@@ -1400,16 +1480,31 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       runId: String(input.runId || ''),
       sessionId: String(input.sessionId || ''),
     };
-    if (!mediaArtifactStore.getOwned) {
+    if (!mediaArtifactStore.withOwnedFile) {
       throw new Error('当前运行时不支持 Agent 本机保存');
     }
-    const artifact = mediaArtifactStore.getOwned(String(input.artifactId || ''), owner);
-    const task = saveMediaArtifactAs({
-      artifact,
-      defaultFileName: outputFileName,
-      sender,
-      signal: capability.signal,
-    });
+    const task = mediaArtifactStore.withOwnedFile(
+      String(input.artifactId || ''),
+      owner,
+      async ownedFile => saveMediaArtifactAs({
+        artifact: ownedFile.artifact,
+        copyArtifact: async (temporaryPath, signal) => {
+          await pipeline(
+            ownedFile.fileHandle.createReadStream({
+              autoClose: false,
+              end: ownedFile.artifact.sizeBytes - 1,
+              start: 0,
+            }),
+            createWriteStream(temporaryPath, { flags: 'wx' }),
+            { signal },
+          );
+          await ownedFile.verifyUnchanged();
+        },
+        defaultFileName: outputFileName,
+        sender,
+        signal: capability.signal,
+      }),
+    );
     const activeSave: ActiveMediaArtifactSave = {
       ownerWebContentsId: sender.id,
       runId: String(input.runId || ''),
@@ -1421,6 +1516,114 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     } finally {
       activeMediaArtifactSaves.delete(activeSave);
     }
+  }
+
+  async function uploadMediaArtifact(
+    sender: WebContents,
+    input: AgentMediaArtifactUploadRequest,
+  ): Promise<AgentMediaArtifactUploadResult> {
+    if (!mediaArtifactUploadManager) {
+      throw new Error('当前运行时不支持 Agent 媒体产物上传');
+    }
+    const ownerScope = normalizeAgentOwnerScope(input?.ownerScope);
+    const capability = toolBroker.claimRendererCapability(sender.id, {
+      capability: 'media.extractAudio.upload',
+      executionId: input?.executionId,
+      libraryId: Number(input?.libraryId),
+      ownerScope,
+      runId: input?.runId,
+      sessionId: input?.sessionId,
+    }, 'media.extractAudio');
+    if (!capability.executionInput || typeof capability.executionInput !== 'object') {
+      throw new Error('音频上传执行参数无效');
+    }
+    const executionInput = capability.executionInput as Record<string, unknown>;
+    const destination = String(executionInput.destination || '');
+    const outputFileName = String(executionInput.outputFileName || '').trim();
+    const outputFormat = String(executionInput.outputFormat || '').trim().toLowerCase();
+    const parentId = Number(executionInput.parentId);
+    const storageProvider = String(executionInput.storageProvider || '').trim();
+    const conflictPolicy = String(executionInput.conflictPolicy || '');
+    if (
+      destination !== 'library'
+      || Number(executionInput.libraryId) !== Number(input.libraryId)
+      || !outputFileName
+      || !Number.isSafeInteger(parentId)
+      || parentId <= 0
+      || !storageProvider
+      || conflictPolicy !== 'auto_rename'
+      || (outputFormat !== 'm4a' && outputFormat !== 'mp3' && outputFormat !== 'wav')
+    ) {
+      throw new Error('音频上传目标与冻结后的 Agent 动作不匹配');
+    }
+    const contentType = outputFormat === 'mp3'
+      ? 'audio/mpeg'
+      : outputFormat === 'wav'
+        ? 'audio/wav'
+        : 'audio/mp4';
+    mediaArtifactFallbackGrants.delete(String(input.executionId || ''));
+    const uploadResult = await mediaArtifactUploadManager.upload({
+      artifactId: input.artifactId,
+      credentials: input.credentials,
+      expectedUserId: resolveOwnerUserId(ownerScope),
+      onProgress: (uploadedBytes, totalBytes) => {
+        if (capability.signal.aborted || totalBytes <= 0) return;
+        const percent = Math.floor(65 + Math.max(0, Math.min(1, uploadedBytes / totalBytes)) * 33);
+        capability.onProgress({
+          message: `正在上传提取后的音频（${percent}%）`,
+          percent,
+        });
+      },
+      onSettlementStarted: capability.beginCriticalSettlement,
+      owner: {
+        executionId: input.executionId,
+        ownerScope,
+        ownerWebContentsId: sender.id,
+        runId: input.runId,
+        sessionId: input.sessionId,
+      },
+      signal: capability.signal,
+      target: {
+        conflictPolicy: 'auto_rename',
+        contentType,
+        fileName: outputFileName,
+        libraryId: Number(input.libraryId),
+        parentId,
+        storageProvider,
+      },
+    });
+    if (uploadResult.commitState === 'uncommitted') {
+      mediaArtifactFallbackGrants.set(input.executionId, {
+        artifactId: input.artifactId,
+        ownerWebContentsId: sender.id,
+        runId: input.runId,
+        sessionId: input.sessionId,
+      });
+      return uploadResult;
+    }
+    if (uploadResult.commitState === 'commit_unknown') return uploadResult;
+    const node = normalizeCommittedMediaNode(uploadResult.node);
+    toolBroker.markRendererExecutionCommitted(sender.id, {
+      executionId: input.executionId,
+      libraryId: Number(input.libraryId),
+      ownerScope,
+      result: {
+        data: {
+          ...(node.id ? { createdNodeId: node.id } : {}),
+          destination: 'library',
+          format: outputFormat,
+          name: node.name,
+          parentId,
+          uploadCommitState: 'committed',
+          verified: false,
+        },
+        message: `已提取并上传“${node.name}”，正在刷新目录`,
+        ok: true,
+      },
+      runId: input.runId,
+      sessionId: input.sessionId,
+    });
+    return { commitState: 'committed', node };
   }
 
   async function executeToolCall(
@@ -2617,6 +2820,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       }
     } finally {
       await waitForMediaArtifactSaves(save => save.runId === runId);
+      clearMediaArtifactFallbackGrants(grant => grant.runId === runId);
       await mediaArtifactStore.releaseRun(runId).catch(() => undefined);
       const active = activeRuns.get(sessionId);
       if (active?.runId === runId) activeRuns.delete(sessionId);
@@ -2848,6 +3052,9 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     });
     toolBroker.releaseOwner(ownerWebContentsId);
     toolPrepareBroker.releaseOwner(ownerWebContentsId);
+    clearMediaArtifactFallbackGrants(
+      grant => grant.ownerWebContentsId === ownerWebContentsId,
+    );
     void waitForMediaArtifactSaves(save => save.ownerWebContentsId === ownerWebContentsId)
       .then(() => mediaArtifactStore.releaseOwner(ownerWebContentsId))
       .catch(() => undefined);
@@ -2991,6 +3198,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     saveMediaArtifact,
     shutdown,
     submitInteraction,
+    uploadMediaArtifact,
     start,
     stop,
     updateMemory,

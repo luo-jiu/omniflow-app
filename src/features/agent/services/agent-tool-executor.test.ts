@@ -4,7 +4,6 @@ import type {
   AgentMediaArtifactSaveResult,
   AgentToolExecutionRequest,
 } from '@/shared/agent/agent.types';
-import { UploadCommitUnknownError } from '@/modules/upload-center/services/upload-direct';
 import { executeAgentRendererTool } from './agent-tool-executor';
 
 function request(): AgentToolExecutionRequest {
@@ -60,7 +59,6 @@ function extractedArtifact() {
   return {
     artifactId: 'artifact-1',
     fileName: 'movie-audio.m4a',
-    filePath: '/tmp/agent-media/movie-audio.m4a',
     mimeType: 'audio/mp4',
     sizeBytes: 100,
   };
@@ -183,15 +181,10 @@ describe('Agent renderer tool executor', () => {
     const mediaRequest = mediaExtractRequest();
     const getMediaFileLink = vi.fn(async () => 'https://storage.example/signed?secret=value');
     const extractMediaAudio = vi.fn(async () => extractedArtifact());
-    const uploadLocalFile = vi.fn(async (
-      _filePath: string,
-      _parentId: number,
-      _libraryId: number,
-      options?: { onProgress?: (uploadedBytes: number) => void },
-    ) => {
-      options?.onProgress?.(100);
-      return { ext: 'm4a', id: 32, name: 'movie-audio (1)' };
-    });
+    const uploadMediaArtifact = vi.fn(async () => ({
+      commitState: 'committed' as const,
+      node: { ext: 'm4a', id: 32, name: 'movie-audio (1)' },
+    }));
     const releaseMediaArtifact = vi.fn(async () => true);
     const reportProgress = vi.fn(async () => true);
     const onRefreshDirectory = vi.fn(async () => undefined);
@@ -214,7 +207,7 @@ describe('Agent renderer tool executor', () => {
       readPerception: vi.fn(async () => perception),
       releaseMediaArtifact,
       reportProgress,
-      uploadLocalFile: uploadLocalFile as never,
+      uploadMediaArtifact: uploadMediaArtifact as never,
     });
 
     expect(extractMediaAudio).toHaveBeenCalledWith(expect.objectContaining({
@@ -223,12 +216,14 @@ describe('Agent renderer tool executor', () => {
       sourceUrl: 'https://storage.example/signed?secret=value',
     }));
     expect(getMediaFileLink).toHaveBeenCalledWith(8, 3, 360);
-    expect(uploadLocalFile).toHaveBeenCalledWith(
-      '/tmp/agent-media/movie-audio.m4a',
-      10,
-      3,
-      expect.objectContaining({ conflictPolicy: 'auto_rename', contentType: 'audio/mp4' }),
-    );
+    expect(uploadMediaArtifact).toHaveBeenCalledWith({
+      artifactId: 'artifact-1',
+      executionId: mediaRequest.executionId,
+      libraryId: 3,
+      ownerScope: mediaRequest.ownerScope,
+      runId: mediaRequest.runId,
+      sessionId: mediaRequest.sessionId,
+    });
     expect(onRefreshDirectory).toHaveBeenCalledWith(10);
     expect(releaseMediaArtifact).toHaveBeenCalledWith(expect.objectContaining({
       artifactId: 'artifact-1',
@@ -253,30 +248,25 @@ describe('Agent renderer tool executor', () => {
     await vi.waitFor(() => expect(reportProgress).toHaveBeenCalled());
   });
 
-  it('aborts an active upload and still releases the extracted artifact', async () => {
+  it('propagates cancellation from a Main-owned upload and still releases the artifact', async () => {
     const mediaRequest = mediaExtractRequest({
       preparedActionId: 'prepared-cancel',
       snapshotHash: 'snapshot-cancel',
     });
     const controller = new AbortController();
-    const uploadAbort = vi.fn(async () => undefined);
     const releaseMediaArtifact = vi.fn(async () => true);
-    const uploadLocalFile = vi.fn((
-      _filePath: string,
-      _parentId: number,
-      _libraryId: number,
-      options?: { setAbort?: (aborter: () => Promise<void>) => void },
-    ) => new Promise<never>((_resolve, reject) => {
-      options?.setAbort?.(async () => {
-        await uploadAbort();
-        reject(new Error('upload canceled'));
-      });
+    const uploadMediaArtifact = vi.fn(() => new Promise<never>((_resolve, reject) => {
+      const rejectCancelled = () => reject(Object.assign(
+        new Error('upload canceled'),
+        { name: 'AbortError' },
+      ));
+      if (controller.signal.aborted) rejectCancelled();
+      else controller.signal.addEventListener('abort', rejectCancelled, { once: true });
     }));
     const running = executeAgentRendererTool(mediaRequest, {
       extractMediaAudio: vi.fn(async () => ({
         artifactId: 'artifact-cancel',
         fileName: 'movie-audio.m4a',
-        filePath: '/tmp/agent-media/movie-audio.m4a',
         mimeType: 'audio/mp4',
         sizeBytes: 100,
       })),
@@ -284,27 +274,27 @@ describe('Agent renderer tool executor', () => {
       releaseMediaArtifact,
       reportProgress: vi.fn(async () => true),
       signal: controller.signal,
-      uploadLocalFile: uploadLocalFile as never,
+      uploadMediaArtifact: uploadMediaArtifact as never,
     });
-    await vi.waitFor(() => expect(uploadLocalFile).toHaveBeenCalled());
+    await vi.waitFor(() => expect(uploadMediaArtifact).toHaveBeenCalled());
 
     controller.abort();
 
     await expect(running).rejects.toMatchObject({ name: 'AbortError' });
-    expect(uploadAbort).toHaveBeenCalledOnce();
     expect(releaseMediaArtifact).toHaveBeenCalledWith(expect.objectContaining({
       artifactId: 'artifact-cancel',
     }));
   });
 
-  it('does not create a local fallback after the upload committed but its main receipt failed', async () => {
+  it('does not ask Renderer to recommit a Main-owned upload', async () => {
     const saveMediaArtifact = vi.fn();
+    const onCommitted = vi.fn(async () => {
+      throw new Error('renderer commit must not be used');
+    });
     const outcome = await executeAgentRendererTool(mediaExtractRequest(), {
       extractMediaAudio: vi.fn(async () => extractedArtifact()),
       getMediaFileLink: vi.fn(async () => 'https://storage.example/source'),
-      onCommitted: vi.fn(async () => {
-        throw new Error('commit receipt transport failed');
-      }),
+      onCommitted,
       readPerception: vi.fn(async () => ({
         collectedAt: '2026-08-25T00:00:00.000Z',
         currentDirectory: { entries: [], entryCount: 0, id: 10, name: '视频' },
@@ -313,14 +303,14 @@ describe('Agent renderer tool executor', () => {
       releaseMediaArtifact: vi.fn(async () => true),
       reportProgress: vi.fn(async () => true),
       saveMediaArtifact,
-      uploadLocalFile: vi.fn(async () => ({
-        ext: 'm4a',
-        id: 32,
-        name: 'movie-audio',
+      uploadMediaArtifact: vi.fn(async () => ({
+        commitState: 'committed',
+        node: { ext: 'm4a', id: 32, name: 'movie-audio' },
       })) as never,
     });
 
     expect(saveMediaArtifact).not.toHaveBeenCalled();
+    expect(onCommitted).not.toHaveBeenCalled();
     expect(outcome).toMatchObject({
       committed: true,
       result: {
@@ -341,7 +331,7 @@ describe('Agent renderer tool executor', () => {
       parentId: undefined,
       storageProvider: undefined,
     });
-    const uploadLocalFile = vi.fn();
+    const uploadMediaArtifact = vi.fn();
     const saveMediaArtifact = vi.fn(async () => ({
       canceled: false as const,
       fileName: 'chosen-name.m4a',
@@ -353,10 +343,10 @@ describe('Agent renderer tool executor', () => {
       releaseMediaArtifact: vi.fn(async () => true),
       reportProgress: vi.fn(async () => true),
       saveMediaArtifact,
-      uploadLocalFile: uploadLocalFile as never,
+      uploadMediaArtifact: uploadMediaArtifact as never,
     });
 
-    expect(uploadLocalFile).not.toHaveBeenCalled();
+    expect(uploadMediaArtifact).not.toHaveBeenCalled();
     expect(saveMediaArtifact).toHaveBeenCalledWith(expect.objectContaining({
       preparedActionId: 'prepared-1',
       purpose: 'destination',
@@ -388,9 +378,7 @@ describe('Agent renderer tool executor', () => {
       releaseMediaArtifact: vi.fn(async () => true),
       reportProgress: vi.fn(async () => true),
       saveMediaArtifact,
-      uploadLocalFile: vi.fn(async () => {
-        throw new Error('upload init failed');
-      }) as never,
+      uploadMediaArtifact: vi.fn(async () => ({ commitState: 'uncommitted' })) as never,
     });
 
     expect(saveMediaArtifact).toHaveBeenCalledWith(expect.objectContaining({
@@ -412,6 +400,28 @@ describe('Agent renderer tool executor', () => {
     });
   });
 
+  it('does not infer uncommitted state from an IPC transport error', async () => {
+    const saveMediaArtifact = vi.fn();
+    const outcome = await executeAgentRendererTool(mediaExtractRequest(), {
+      extractMediaAudio: vi.fn(async () => extractedArtifact()),
+      getMediaFileLink: vi.fn(async () => 'https://storage.example/source'),
+      releaseMediaArtifact: vi.fn(async () => true),
+      reportProgress: vi.fn(async () => true),
+      saveMediaArtifact,
+      uploadMediaArtifact: vi.fn(async () => {
+        throw new Error('IPC response lost');
+      }) as never,
+    });
+
+    expect(saveMediaArtifact).not.toHaveBeenCalled();
+    expect(outcome).toEqual({
+      result: {
+        message: 'IPC response lost',
+        ok: false,
+      },
+    });
+  });
+
   it('does not offer fallback when the prepared policy disables it', async () => {
     const saveMediaArtifact = vi.fn();
     const outcome = await executeAgentRendererTool(mediaExtractRequest({
@@ -422,9 +432,7 @@ describe('Agent renderer tool executor', () => {
       releaseMediaArtifact: vi.fn(async () => true),
       reportProgress: vi.fn(async () => true),
       saveMediaArtifact,
-      uploadLocalFile: vi.fn(async () => {
-        throw new Error('upload init failed');
-      }) as never,
+      uploadMediaArtifact: vi.fn(async () => ({ commitState: 'uncommitted' })) as never,
     });
 
     expect(saveMediaArtifact).not.toHaveBeenCalled();
@@ -448,9 +456,7 @@ describe('Agent renderer tool executor', () => {
       releaseMediaArtifact: vi.fn(async () => true),
       reportProgress: vi.fn(async () => true),
       saveMediaArtifact,
-      uploadLocalFile: vi.fn(async () => {
-        throw new UploadCommitUnknownError('upload-1', 'operation-1', new Error('timeout'));
-      }) as never,
+      uploadMediaArtifact: vi.fn(async () => ({ commitState: 'commit_unknown' })) as never,
     });
 
     expect(saveMediaArtifact).not.toHaveBeenCalled();

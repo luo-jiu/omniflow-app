@@ -68,6 +68,11 @@ function resolveNetworkOrigins(mode: string): {
 export default defineConfig(({ mode }) => {
   const { connectSources } = resolveNetworkOrigins(mode);
   const env = loadEnv(mode, process.cwd(), '');
+  const apiBaseUrl = normalizeBaseUrl(
+    process.env.VITE_API_BASE_URL
+      || env.VITE_API_BASE_URL
+      || 'http://127.0.0.1:8850/api',
+  );
   const updateBaseUrl = normalizeBaseUrl(
     process.env.VITE_UPDATE_BASE_URL || env.VITE_UPDATE_BASE_URL || '',
   );
@@ -86,6 +91,7 @@ export default defineConfig(({ mode }) => {
         entry: 'electron/main.ts',
         vite: {
           define: {
+            __OMNIFLOW_API_BASE_URL__: JSON.stringify(apiBaseUrl),
             __OMNIFLOW_UPDATE_BASE_URL__: JSON.stringify(updateBaseUrl),
           },
           build: {

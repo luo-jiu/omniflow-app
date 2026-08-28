@@ -67,6 +67,7 @@ interface PrepareRendererExecutionInput {
 }
 
 interface PendingRendererExecution {
+  beginCriticalSettlement: () => void;
   cancel: () => void;
   claimedCapabilities: Set<string>;
   committedResult?: AgentToolResult;
@@ -93,6 +94,7 @@ export interface ClaimRendererCapabilityInput {
 }
 
 export interface ClaimedRendererCapability {
+  beginCriticalSettlement: () => void;
   executionInput: unknown;
   onProgress: (progress: AgentToolProgress) => void;
   signal: AbortSignal;
@@ -213,11 +215,14 @@ export function createAgentToolBroker(options: AgentToolBrokerOptions = {}) {
       const executionController = new AbortController();
       let settled = false;
       let committedResult: AgentToolResult | undefined;
+      let cancellationError: Error | undefined;
+      let criticalSettlement = false;
       let cancellationNotified = false;
       let timer: ReturnType<typeof setTimeout> | undefined;
       const finish = (handler: () => void) => {
         if (settled) return;
         settled = true;
+        executionController.abort();
         cleanup();
         handler();
       };
@@ -227,10 +232,16 @@ export function createAgentToolBroker(options: AgentToolBrokerOptions = {}) {
         input.onCancel(executionId);
       };
       const settleAfterCancellation = (error: Error) => {
+        if (settled || cancellationError) return;
+        cancellationError = error;
         executionController.abort();
         notifyCancellation();
         if (committedResult) {
           finish(() => resolve({ result: committedResult as AgentToolResult }));
+          return;
+        }
+        if (criticalSettlement) {
+          scheduleTimeout(RENDERER_COMMIT_SETTLE_TIMEOUT_MS, finishCriticalSettlement);
           return;
         }
         finish(() => reject(error));
@@ -239,9 +250,19 @@ export function createAgentToolBroker(options: AgentToolBrokerOptions = {}) {
       const handleTimeout = () => settleAfterCancellation(
         new Error(`工具 ${input.toolName} 执行超时`),
       );
-      const scheduleTimeout = (delayMs: number) => {
+      const finishCriticalSettlement = () => {
+        if (settled) return;
+        if (committedResult) {
+          finish(() => resolve({ result: committedResult as AgentToolResult }));
+          return;
+        }
+        finish(() => reject(cancellationError || new Error(
+          `工具 ${input.toolName} 提交状态确认超时`,
+        )));
+      };
+      const scheduleTimeout = (delayMs: number, handler = handleTimeout) => {
         if (timer) clearTimeout(timer);
-        timer = setTimeout(handleTimeout, delayMs);
+        timer = setTimeout(handler, delayMs);
         timer.unref?.();
       };
       const cleanup = () => {
@@ -250,6 +271,10 @@ export function createAgentToolBroker(options: AgentToolBrokerOptions = {}) {
         pendingExecutions.delete(executionId);
       };
       pendingExecutions.set(executionId, {
+        beginCriticalSettlement: () => {
+          if (settled) throw new Error('Agent Tool 执行请求不存在或已经失效');
+          criticalSettlement = true;
+        },
         cancel: handleAbort,
         claimedCapabilities: new Set(),
         executionInput: input.executionInput,
@@ -262,6 +287,10 @@ export function createAgentToolBroker(options: AgentToolBrokerOptions = {}) {
           committedResult = normalizeAgentToolResult(result);
           const pending = pendingExecutions.get(executionId);
           if (pending) pending.committedResult = committedResult;
+          if (cancellationError) {
+            finish(() => resolve({ result: committedResult as AgentToolResult }));
+            return;
+          }
           scheduleTimeout(RENDERER_COMMIT_SETTLE_TIMEOUT_MS);
         },
         resolve: value => finish(() => resolve(value)),
@@ -316,6 +345,7 @@ export function createAgentToolBroker(options: AgentToolBrokerOptions = {}) {
     }
     pending.claimedCapabilities.add(capability);
     return {
+      beginCriticalSettlement: pending.beginCriticalSettlement,
       executionInput: pending.executionInput,
       onProgress: pending.onProgress,
       signal: pending.signal,

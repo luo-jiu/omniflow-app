@@ -23,6 +23,13 @@
   - complete 结果不确定时抛出 `UploadCommitUnknownError` 并保留 session；禁止自动 abort 或重复上传。
   - 详见 `omniflow-app/docs/upload-direct-architecture.md` 与 `omniflow-go/docs/architecture/upload-direct-design.md`。
 
+## 与 Agent 产物上传的边界
+
+- 上传中心只管理普通本地文件路径上传，包括 `UploadManager.defaultExecutor` 和直接调用 `uploadLocalPathAndCreateNode` 的保存入口。
+- `media.extractAudio` 生成的 sealed artifact 不进入 UploadManager 队列，也不调用 `runDirectUpload`。它通过唯一的 `agent:media:artifact:upload` IPC 交给 Electron main，由 `electron/service/agent/agent-media-artifact-upload.ts` 全程持有账号复验、init、sign、最多 4 路 PUT、complete、reconcile 和 abort。
+- Renderer 只能提交 artifact ID、认证凭据和 execution / owner 身份；上传目标来自 main 冻结的 `executionInput`。artifact 物理路径、签名 URL、upload session、part 和 ETag 不得进入上传中心状态或通用 `UploadTaskInput.filePath`。
+- Agent 上传使用 `committed / uncommitted / commit_unknown` 三态以及 main-only 一次性 fallback grant；这些结算语义不并入 UploadTask 状态机，避免上传中心和 Agent Broker 出现双 owner。
+
 ## 代码规矩
 
 1. 状态机必须保持纯函数，不得直接发请求。

@@ -438,10 +438,38 @@ export interface AgentMediaAudioExtractionRequest {
 export interface AgentMediaAudioExtractionResult {
   artifactId: string;
   fileName: string;
-  filePath: string;
   mimeType: string;
   sizeBytes: number;
 }
+
+export interface AgentMediaArtifactUploadRequest {
+  artifactId: string;
+  credentials: {
+    token: string;
+    username: string;
+  };
+  executionId: string;
+  libraryId: number;
+  ownerScope: AgentOwnerScope;
+  runId: string;
+  sessionId: string;
+}
+
+export type AgentMediaArtifactUploadResult =
+  | {
+      commitState: 'committed';
+      node: {
+        ext?: string;
+        id: number;
+        name: string;
+      };
+    }
+  | {
+      commitState: 'uncommitted';
+    }
+  | {
+      commitState: 'commit_unknown';
+    };
 
 export interface AgentMediaArtifactReleaseRequest {
   artifactId: string;

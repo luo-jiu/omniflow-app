@@ -607,29 +607,6 @@ export function createAgentMediaArtifactStore(
     });
   }
 
-  function getOwned(
-    artifactId: string,
-    ownerInput: AgentMediaArtifactOwner,
-  ): AgentMediaArtifact {
-    const record = records.get(String(artifactId || '').trim());
-    if (!record) throw new Error('Agent 媒体临时产物不存在或已经失效');
-    const owner = normalizeOwner(ownerInput);
-    if (!sameOwner(record, owner)) {
-      throw new Error('当前窗口无权读取该 Agent 媒体临时产物');
-    }
-    const quotaResource = quotaManagerInstance?.getResource(record.resourceRef, record.ownerScope);
-    if (!quotaResource || quotaResource.state === 'deleting') {
-      records.delete(record.artifactId);
-      throw new Error('Agent 媒体临时产物不存在或已经失效');
-    }
-    record.createdAt = now();
-    if (quotaManagerInstance) {
-      void quotaManagerInstance.touch(record.resourceRef, ttlMs, record.ownerScope)
-        .catch(() => undefined);
-    }
-    return toArtifact(record);
-  }
-
   async function withOwnedFile<T>(
     artifactId: string,
     ownerInput: AgentMediaArtifactOwner,
@@ -762,7 +739,6 @@ export function createAgentMediaArtifactStore(
   return {
     create,
     finalize,
-    getOwned,
     release,
     releaseOwner,
     releaseRun,

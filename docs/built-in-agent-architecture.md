@@ -23,7 +23,7 @@ Agent renderer 的页面模式、组件职责、时间线投影、受控交互�
 - 受控只读 `file.list` / `file.stat` Tool Calling。
 - 受控只读 `media.inspect`：按当前感知节点取得短期链接，并通过本机 `ffprobe` 返回清洗后的容器和媒体流元数据。
 - 经过确认的 `directory.create` 写操作，以及执行后的目录树刷新和再感知。
-- 经过确认的 `media.extractAudio`：先无副作用解析源 provider、按 M4A / MP3 / WAV 分别准备资料库路由与本机兜底，再允许用户选择资料库目录或本机、修改文件名与格式并冻结精确动作；批准后提取第一条音轨，上传并刷新再感知，或通过 main 持有的系统 Save As 保存到本机。
+- 经过确认的 `media.extractAudio`：先无副作用解析源 provider、按 M4A / MP3 / WAV 分别准备资料库路由与本机兜底，再允许用户选择资料库目录或本机、修改文件名与格式并冻结精确动作；批准后提取第一条音轨，由 main 持有完整资料库上传事务并在成功后刷新再感知，或通过 main 持有的系统 Save As 保存到本机。
 - main / renderer Tool 的统一执行分发，以及只由已注册媒体 Tool 间接使用的受控本地进程基座。
 - Tool Registry 与 Orchestrator 的通用 prepare 生命周期：声明 prepare 的 Tool 必须由 main 或 renderer 单一持有；main-owned prepare 直接从 Run 冻结快照生成 public action、不可变私有 binding 和 hash，私有 binding 只经 main execution context 交给同一冻结 Tool 实现，不进入模型输入、SQLite 或 renderer IPC。当前没有生产 Tool 使用 main-owned prepare，`shell.run` 仍未注册。
 - 本机会话分页列表、搜索、新建、打开、重命名和删除。
@@ -93,8 +93,13 @@ AgentMediaArtifactStore
 AgentLocalStorageQuotaManager
   媒体产物与 Shell workspace 共享 SQLite 配额、TTL、lease 和崩溃回收
        |
-Renderer 复用现有 MinIO 直传
-  或通过 Agent 专用 Save As capability 让 main 完成本机复制
+Renderer -> 单一 agent:media:artifact:upload
+  只提交 artifactId、认证凭据和 execution / owner 身份
+       |
+Main-owned Agent media upload transaction
+  从冻结 executionInput 解析目录、Provider、文件名、格式和冲突策略
+  -> 账号复验 -> init -> 最多 4 路 PUT -> complete / reconcile
+  或通过 Agent 专用 Save As capability 从已验证 FileHandle 完成本机复制
 ```
 
 状态所有权约束：
@@ -243,6 +248,7 @@ agent:media:inspect
 agent:media:extract-audio
 agent:media:artifact:release
 agent:media:artifact:save
+agent:media:artifact:upload
 agent:session:list
 agent:session:get
 agent:session:rename
@@ -275,7 +281,7 @@ agent:chat:event
   error
 ```
 
-Skill V1 本身没有新增 IPC channel。`skill.activate` 复用既有 ToolRun、`tool-started / tool-completed` 和 Session 快照协议；Run capability snapshot 与 Registry 没有独立 preload API。阶段 B 新增的 prepare completion 与 Agent 专用 Save As 只服务既有 Tool 生命周期，不是模型可直接调用的 Tool。Main 在统一事件与 Session 返回边界生成 renderer-safe 投影，剥离完整 instructions 和 allowlist，只保留 `skillId / version / instructionsHash` 和本地状态文案；SQLite 中的规范审计事实不被反向覆盖。
+Skill V1 本身没有新增 IPC channel。`skill.activate` 复用既有 ToolRun、`tool-started / tool-completed` 和 Session 快照协议；Run capability snapshot 与 Registry 没有独立 preload API。阶段 B 新增的 prepare completion、Agent 专用 Save As 与单一 sealed artifact upload IPC 只服务既有 Tool 生命周期，不是模型可直接调用的 Tool。Main 在统一事件与 Session 返回边界生成 renderer-safe 投影，剥离完整 instructions 和 allowlist，只保留 `skillId / version / instructionsHash` 和本地状态文案；SQLite 中的规范审计事实不被反向覆盖。
 
 每个流式事件同时携带 `sessionId` 和 `runId`。`started` 与 `run-updated` 携带 SQLite 返回的完整 `AgentRunSnapshot`；Run 终态事件也携带该 Run 的规范快照。Renderer 只消费当前 Session 的事件，按持久化 `revision` 单调合并并拒绝终态回退；`updatedAt` 不参与版本比较。创建新 Session 时允许在 `start` IPC 返回前短暂缓存该 Session 的抢跑事件，恢复活跃 Session 时也只为目标 Session 暂存快照读取期间的事件。Tool 开始、进度、确认和完成事件携带对应的规范 ToolActivity 投影；renderer 同样按 ToolRun `revision` 拒绝迟到快照。完成、取消或失败事件同时携带该 Run 已持久化的规范消息、Run 与 ToolActivity 投影，renderer 用它们替换临时流式状态。累计文本只作为读取规范投影失败时的降级补齐路径。不能仅按字符长度补后缀，因为离开页面期间漏失的 delta 可能位于回答中间，也不能跨 Tool 边界重复或错序插入文本。
 
@@ -290,9 +296,11 @@ Renderer 写操作有两个不同的回执边界：后端已经确认创建节�
 - 当前自动执行仅允许 main 注册且经过校验的 `risk: 'read'` Tool；Renderer 只读 Tool 还必须显式返回 `allow` 决策并走一次性 execution request。
 - `AgentToolBroker` 是 main / renderer executor 的唯一分发入口。main Tool 收到停止或超时后先触发其 `AbortSignal`，并最多等待 6 秒让 Tool 完成回滚或返回已经提交的结果，再结束 Run；不能先宣布取消、后台仍继续副作用。Renderer 回执必须匹配窗口、owner scope、资料库、Session、Run 和一次性 execution ID。commit 前超时、取消或 owner 释放会主动通知 Renderer 中止并使请求失效；commit 后保留已提交的成功结果，在最终回执失败或 30 秒收口超时时作为 Tool 结果继续，不能再次执行写入。
 - `media.inspect` 的模型输入和 ToolRun 只保存 `nodeId`。Renderer 依据 main 生成的节点请求取得短期签名链接，再通过 `agent:media:inspect` 瞬时交给 main；Broker 对该内部能力执行一次性校验和防重放。main 随后把上游链接封装进本机 loopback 代理，ffprobe 参数只包含本机 URL；签名链接、代理 token 和 ffprobe stderr 不进入 Tool 结果、模型消息、SQLite 或日志。
-- `media.extractAudio` 只接受 main 根据当前感知节点生成的 `nodeId`。prepare 先验证源 provider；不可用时按 M4A / MP3 / WAV 分别尝试资料库路由和默认 provider，并冻结用户最终选择的目录、文件名、格式、兜底策略与物理 binding。对外确认动作固定为 `kind = 'media.extractAudio', version = 1`；Renderer 编辑后由 main 重新严格规范化，并校验 action kind 与当前 Tool 名称一致，未知或损坏分支只能取消、不能批准。输出名默认 `<源文件名>-audio.<格式>`，在确认和 staging 前限制为 240 UTF-8 bytes，冲突时自动改名。Renderer 取得 6 小时签名链接后，通过一次性 capability 交给 main；ffmpeg 只接触 6 小时有效的 loopback URL 和 main 创建的临时输出路径。Renderer 只能把返回的临时产物上传到 prepared action 指定的目录和 provider，成功后立即提交后端实际返回的节点 ID、名称和扩展名，再刷新并再感知；只有最新目录确实包含该 `createdNodeId` 才标记 `verified: true`。
-- `AgentMediaArtifactStore` 位于 main，单文件上限 2 GiB、同时最多 4 个当前进程活跃产物、无活动 TTL 1 小时。创建前先向共享 `AgentLocalStorageQuotaManager` 预留 2 GiB，稳定目录落盘后绑定 opaque resource ref，完成后按真实文件大小提交；媒体产物与 Shell workspace 共用默认 8 GiB 总额度。生成期间使用 live lease 防止 sweep，上传进度和本机保存读取会续期 TTL。配额 ledger 写入同一 Agent SQLite，重启不恢复中断的媒体任务，但仍能让 adapter 按 TTL 回收已提交残留；旧版本没有 ledger 的过期目录按 legacy residue 清理。产物同时绑定账号环境、窗口、Session、Run 和 execution ID，Run / 窗口结束时提交清理意图，应用 ready 阶段会主动 sweep。artifact ID、本地路径、签名 URL、loopback token 和 ffmpeg stderr 不进入 Tool 结果、模型消息或普通日志；SQLite 只保存 opaque resource ref 和配额事实。
-- 本机目标与明确 `uncommitted` 后的本机兜底共用 Agent 专用 Save As capability。capability 同时绑定窗口、owner、资料库、Session、Run、execution、prepared action、snapshot hash 和 artifact，领取一次即消费；用户取消也不能重放。目标绝对路径只由 main 的系统对话框返回，复制先写同目录临时文件再原子替换，Windows 已存在目标使用可恢复备份；结果只返回安全文件名。停止、超时、owner release 或窗口销毁先中止 execution，待正在进行的 Save As 收口后再释放 artifact，不能边复制边删除源文件。
+- `media.extractAudio` 只接受 main 根据当前感知节点生成的 `nodeId`。prepare 先验证源 provider；不可用时按 M4A / MP3 / WAV 分别尝试资料库路由和默认 provider，并冻结用户最终选择的目录、文件名、格式、兜底策略与物理 binding。对外确认动作固定为 `kind = 'media.extractAudio', version = 1`；Renderer 编辑后由 main 重新严格规范化，并校验 action kind 与当前 Tool 名称一致，未知或损坏分支只能取消、不能批准。输出名默认 `<源文件名>-audio.<格式>`，在确认和 staging 前限制为 240 UTF-8 bytes，冲突时自动改名。Renderer 取得 6 小时签名链接后，通过一次性 capability 交给 main；ffmpeg 只接触 6 小时有效的 loopback URL 和 main 创建的临时输出路径。提取 IPC 只把不含物理路径的 artifact metadata 返回 Renderer；Renderer 随后的资料库上传请求只提交 `artifactId`、当前认证凭据和 execution / owner 身份，不能提交目录、Provider、文件名、格式、冲突策略、签名 URL、upload session、part 或 ETag。main 从冻结 `executionInput` 重新取得并验证目标，上传成功后立即以后端实际返回的节点 ID、名称和扩展名提交 authoritative result，再由 Renderer 刷新并再感知；只有最新目录确实包含该 `createdNodeId` 才标记 `verified: true`。
+- `AgentMediaArtifactStore` 位于 main，单文件上限 2 GiB、同时最多 4 个当前进程活跃产物、无活动 TTL 1 小时。创建前先向共享 `AgentLocalStorageQuotaManager` 预留 2 GiB，稳定目录落盘后绑定 opaque resource ref，完成后以 `max(data fork 长度, st_blocks * 512)` 提交；媒体产物与 Shell workspace 共用默认 8 GiB 总额度。finalize 后不再公开“取得路径再打开”的消费 API；Save As 与资料库上传只能通过 `withOwnedFile`，由 Store 使用 `lstat + O_NOFOLLOW handle + fstat + realpath + 目录身份复验` 打开并冻结 `dev / ino / ctimeNs / size / allocated bytes`，在消费结束后复验。同一 artifact 的 finalize、句柄消费和释放在 main 内串行，消费期间另持 quota live lease，因此 release / sweep 不能边读边删。配额 ledger 写入同一 Agent SQLite，重启不恢复中断的媒体任务，但仍能让 adapter 按 TTL 回收已提交残留；升级后仍能清理旧临时根和无 ledger 的过期目录。产物同时绑定账号环境、窗口、Session、Run 和 execution ID，Run / 窗口结束时提交清理意图，应用 ready 阶段会主动 sweep。artifact ID、本地路径、签名 URL、loopback token 和 ffmpeg stderr 不进入 Tool 结果、模型消息或普通日志；SQLite 只保存 opaque resource ref 和配额事实。
+- 资料库上传是 main 全程持有的单一事务。`agent:media:artifact:upload` 领取一次性 `media.extractAudio.upload` execution capability 后，main 先用当前凭据请求规范 API 基址的账号接口，复验用户 ID 与冻结 owner 一致，再执行 init、sign、PUT、complete 和必要的 reconcile。API 基址由 Vite 在构建时固定注入 `__OMNIFLOW_API_BASE_URL__`，不能由 Renderer 为单次上传指定。每批最多 4 个 PUT；任一分片失败会中止并等待同批请求全部收口，再 best-effort abort 后端 session。main 始终从同一个 `O_NOFOLLOW` 已验证 FileHandle 的显式 offset 读取，并在 complete 前复验源身份。取得 `committed` 或 `commit_unknown` 这类禁止盲目重试的结算后，即使 owned-file 退出复验或 lease 清理失败，也只能隔离并清理本地产物，不能把结算降级成普通 IPC 异常。普通本地文件仍走 Renderer 协调的 `runDirectUpload`，两条链路不能共享物理路径或把 artifact 编码进 `filePath`。
+- 上传结果必须是显式三态：`committed` 只在 complete 或 reconcile 返回同时具有有效正整数 `node.id` 与非空 `node.name` 的 authoritative receipt 时成立；明确 4xx 或 reconcile 返回 `uncommitted` 才是 `uncommitted`；complete 已发出但响应、核对或回执不明确时是 `commit_unknown`。reconcile 使用独立的短时 signal，即使原 execution 在提交边界取消，也要尽力核对同一个 operation；此时禁止 abort、重传或生成第二份结果。Broker 的 critical settlement 只在即将调用 complete 时开启，不覆盖账号复验、init、sign 或 PUT 阶段。
+- 本机目标与资料库上传后的本机兜底都使用 Agent 专用 Save As，但兜底额外需要 main 签发的一次性 grant。只有 main 上传事务显式返回 `uncommitted` 才登记该 grant；`committed`、`commit_unknown`、Renderer 未取得结构化结果的普通 IPC 异常、错误 sender 或重放都不得由 Renderer 推断成兜底条件。grant 绑定 artifact、execution、窗口、Session 和 Run，并在首次使用、artifact release、Run 结束或 owner release 时删除。Save As capability 仍同时绑定 owner、资料库、prepared action、snapshot hash 和 artifact，领取一次即消费；用户取消也不能重放。目标绝对路径只由 main 的系统对话框返回，main 从已验证 FileHandle 的 offset 0 复制到同目录临时文件，源身份复验成功后才原子替换；Windows 已存在目标使用可恢复备份，失败时删除临时文件，结果只返回安全文件名。停止、超时、owner release 或窗口销毁先中止 execution，待正在进行的 Save As 收口后再释放 artifact，不能边复制边删除源文件。
 - ffprobe / ffmpeg 路径由 `electron/platform/mediaExecutable.ts` 解析为绝对路径，支持显式环境变量、已配置二进制的同级目录、安装包 resources 和系统 PATH。缺失时返回明确能力错误，不退回模拟结果。
 - `media.ffprobe` / `media.ffmpeg` Probe 只返回规范状态与安全 reason code，不返回路径或异常原文。当前 timeout 为 2 秒、TTL 为 30 秒；调用方取消只停止等待，共享 Probe 的超时、失效 generation 和迟到结果由 Registry 收口。Run 前 Probe 只是提前失败与诊断，`media.inspect` / `media.extractAudio` 在真正执行前仍重新解析可执行文件，承担 authoritative check。
 - `directory.create` 必须经过 main 参数校验和 `ask` 决策；模型只能提交名称，目标资料库和父目录来自安全应用上下文。
@@ -322,7 +330,7 @@ Renderer 写操作有两个不同的回执边界：后端已经确认创建节�
 - Agent 单个 provider turn 与整个 Run 的 assistant 内容硬上限均为 64,000 字符；Agent SSE 未完成事件缓存上限 128,000 字符，Tool 参数为每次调用 64,000、单轮合计 128,000 字符。通用 AI SSE 缓存上限 256,000 字符；非流式成功 JSON body 上限 2 MiB、错误 body 上限 64 KiB。达到任一上限都取消读取并失败，不继续累积内存或执行后续 Tool。
 - 输入、感知快照和字段长度在 main 侧再次清洗和截断。
 - renderer 销毁时取消该 renderer 拥有的活跃 Run。
-- Renderer execution 使用独立 `AbortController` 关联 Run。commit 前停止、终态事件、资料库 scope 切换、组件卸载或 main 发出的 `tool-execution-cancelled` 会中止上传，并通过既有直传 abort 同时终止主进程 PUT 和后端 multipart Session；commit 后不再中止已完成的写入，只等待最终回执并停止后续 Run。
+- Renderer execution 使用独立 `AbortController` 关联 Run。commit 前停止、终态事件、资料库 scope 切换、组件卸载或 main 发出的 `tool-execution-cancelled` 会中止 Renderer executor；main-owned 上传同时监听 Broker capability signal，中止全部 in-flight PUT 并在提交尚未开始时 best-effort abort 后端 session。complete 已经发出后先以独立 signal reconcile 同一个 operation，不能把取消直接解释成未提交；commit 后不再撤销已完成写入，只等待最终回执并停止后续 Run。
 - 认证会话释放时通过 `agent:owner:release` 取消主窗口拥有的全部活跃 Run。
 - Agent 不读取 AI Service API Key，也不将 Key、Cookie、签名 URL 或完整环境变量写入 SQLite。
 - `AgentLocalProcessRunner` 当前不暴露 IPC 或 Tool；只接受 Tool 代码提供的绝对可执行文件路径与参数数组，固定 `shell: false`，只传安全环境变量白名单，并限制参数、并发、stdout/stderr、执行时间和取消后的进程树生命周期。macOS / Linux 使用独立进程组，Windows 终止策略收敛到 `electron/platform/processTree.ts`。未来 `shell.run` 仍只能经 Registry、main prepare、权限、ToolRun、Broker 和平台 Provider 进入，不能把 Runner 本身改成模型或 renderer 入口。
@@ -406,6 +414,8 @@ Agent Session Store 使用 `sqlite3` 原生依赖：
 - `electron/service/agent/skills/agent-skill-catalog.test.ts`
 - `electron/service/agent/skills/agent-skill-runtime.test.ts`
 - `electron/service/agent/skills/skill-activate-tool.test.ts`
+- `electron/service/agent/agent-media-artifact-upload.test.ts`
+- `electron/service/agent/agent-media-upload-control-plane.test.ts`
 - `electron/service/agent/agent-local-process-runner.test.ts`
 - `electron/service/agent/agent-media-inspector.test.ts`
 - `electron/service/agent/agent-media-audio-extractor.test.ts`

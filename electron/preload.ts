@@ -29,6 +29,8 @@ import type {
   AgentMediaArtifactReleaseRequest,
   AgentMediaArtifactSaveRequest,
   AgentMediaArtifactSaveResult,
+  AgentMediaArtifactUploadRequest,
+  AgentMediaArtifactUploadResult,
   AgentMediaAudioExtractionRequest,
   AgentMediaAudioExtractionResult,
   AgentMediaInspectionRequest,
@@ -289,6 +291,11 @@ contextBridge.exposeInMainWorld('electronAgent', {
     input: AgentMediaArtifactSaveRequest,
   ): Promise<AgentMediaArtifactSaveResult> => (
     ipcRenderer.invoke('agent:media:artifact:save', input)
+  ),
+  uploadMediaArtifact: (
+    input: AgentMediaArtifactUploadRequest,
+  ): Promise<AgentMediaArtifactUploadResult> => (
+    ipcRenderer.invoke('agent:media:artifact:upload', input)
   ),
   listSessions: (
     ownerScope: AgentOwnerScope,

@@ -31,7 +31,6 @@ export interface AgentMediaAudioExtractionInput extends AgentMediaArtifactOwner 
 export interface AgentMediaAudioExtractionResult {
   artifactId: string;
   fileName: string;
-  filePath: string;
   mimeType: string;
   sizeBytes: number;
 }
@@ -157,7 +156,6 @@ export async function extractAgentMediaAudio(
     return {
       artifactId: finalized.artifactId,
       fileName: finalized.fileName,
-      filePath: finalized.filePath,
       mimeType: OUTPUT_MIME_TYPES[input.outputFormat],
       sizeBytes: finalized.sizeBytes,
     };

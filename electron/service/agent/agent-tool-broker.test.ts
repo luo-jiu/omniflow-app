@@ -240,6 +240,38 @@ describe('Agent tool broker', () => {
     void prepared.outcome.catch(() => undefined);
   });
 
+  it('aborts a claimed capability when the renderer completes the execution early', async () => {
+    const controller = new AbortController();
+    const broker = createAgentToolBroker({ createId: () => 'execution-early-complete' });
+    const prepared = broker.prepareRendererExecution({
+      ...prepareInput(controller.signal),
+      toolName: 'media.inspect',
+    });
+    const capability = broker.claimRendererCapability(77, {
+      capability: 'media.inspect.source',
+      executionId: 'execution-early-complete',
+      libraryId: 3,
+      ownerScope: OWNER_SCOPE,
+      runId: 'run-1',
+      sessionId: 'session-1',
+    }, 'media.inspect');
+
+    expect(capability.signal.aborted).toBe(false);
+    expect(broker.completeRendererExecution(77, {
+      executionId: 'execution-early-complete',
+      libraryId: 3,
+      ownerScope: OWNER_SCOPE,
+      result: { message: 'done', ok: true },
+      runId: 'run-1',
+      sessionId: 'session-1',
+    })).toBe(true);
+
+    expect(capability.signal.aborted).toBe(true);
+    await expect(prepared.outcome).resolves.toEqual({
+      result: { message: 'done', ok: true },
+    });
+  });
+
   it('accepts progress only from the authorized renderer execution', async () => {
     const controller = new AbortController();
     const onProgress = vi.fn();
@@ -340,6 +372,14 @@ describe('Agent tool broker', () => {
       message: '已创建文件夹“测试”',
       ok: true,
     };
+    const capability = broker.claimRendererCapability(77, {
+      capability: 'directory.create.committed-settlement',
+      executionId: 'execution-committed',
+      libraryId: 3,
+      ownerScope: OWNER_SCOPE,
+      runId: 'run-1',
+      sessionId: 'session-1',
+    }, 'directory.create');
 
     expect(broker.markRendererExecutionCommitted(77, {
       executionId: 'execution-committed',
@@ -349,9 +389,85 @@ describe('Agent tool broker', () => {
       runId: 'run-1',
       sessionId: 'session-1',
     })).toBe(true);
+    expect(capability.signal.aborted).toBe(false);
     controller.abort();
 
     await expect(prepared.outcome).resolves.toEqual({ result: committedResult });
+    expect(capability.signal.aborted).toBe(true);
     expect(onCancel).toHaveBeenCalledWith('execution-committed');
+  });
+
+  it('keeps a critical renderer settlement alive when cancellation wins before commit receipt', async () => {
+    const controller = new AbortController();
+    const broker = createAgentToolBroker({ createId: () => 'execution-critical' });
+    const prepared = broker.prepareRendererExecution({
+      ...prepareInput(controller.signal),
+      toolName: 'media.extractAudio',
+    });
+    const capability = broker.claimRendererCapability(77, {
+      capability: 'media.extractAudio.upload',
+      executionId: 'execution-critical',
+      libraryId: 3,
+      ownerScope: OWNER_SCOPE,
+      runId: 'run-1',
+      sessionId: 'session-1',
+    }, 'media.extractAudio');
+    capability.beginCriticalSettlement();
+
+    controller.abort();
+    expect(capability.signal.aborted).toBe(true);
+
+    const committedResult = {
+      data: { createdNodeId: 42, uploadCommitState: 'committed' },
+      message: '已上传媒体产物',
+      ok: true,
+    };
+    expect(broker.markRendererExecutionCommitted(77, {
+      executionId: 'execution-critical',
+      libraryId: 3,
+      ownerScope: OWNER_SCOPE,
+      result: committedResult,
+      runId: 'run-1',
+      sessionId: 'session-1',
+    })).toBe(true);
+
+    await expect(prepared.outcome).resolves.toEqual({ result: committedResult });
+  });
+
+  it('ends a cancelled critical settlement when no commit receipt arrives', async () => {
+    vi.useFakeTimers();
+    try {
+      const controller = new AbortController();
+      const broker = createAgentToolBroker({ createId: () => 'execution-critical-timeout' });
+      const prepared = broker.prepareRendererExecution({
+        ...prepareInput(controller.signal),
+        toolName: 'media.extractAudio',
+      });
+      const capability = broker.claimRendererCapability(77, {
+        capability: 'media.extractAudio.upload',
+        executionId: 'execution-critical-timeout',
+        libraryId: 3,
+        ownerScope: OWNER_SCOPE,
+        runId: 'run-1',
+        sessionId: 'session-1',
+      }, 'media.extractAudio');
+      capability.beginCriticalSettlement();
+
+      controller.abort();
+      const rejected = expect(prepared.outcome).rejects.toMatchObject({ name: 'AbortError' });
+      await vi.advanceTimersByTimeAsync(30_000);
+
+      await rejected;
+      expect(() => broker.markRendererExecutionCommitted(77, {
+        executionId: 'execution-critical-timeout',
+        libraryId: 3,
+        ownerScope: OWNER_SCOPE,
+        result: { ok: true },
+        runId: 'run-1',
+        sessionId: 'session-1',
+      })).toThrow('不存在或已经失效');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

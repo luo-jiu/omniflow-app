@@ -5,6 +5,7 @@ import type {
   AgentInteractionSubmissionRequest,
   AgentMediaArtifactReleaseRequest,
   AgentMediaArtifactSaveRequest,
+  AgentMediaArtifactUploadRequest,
   AgentMediaAudioExtractionRequest,
   AgentMediaInspectionRequest,
   AgentMemoryCursor,
@@ -111,6 +112,15 @@ export function registerAgentIpc(
       const sender = requireMainWindow(event);
       ensureOwnerCleanup(sender);
       return agentOrchestrator.saveMediaArtifact(sender, input);
+    },
+  );
+
+  ipcMain.handle(
+    'agent:media:artifact:upload',
+    (event, input: AgentMediaArtifactUploadRequest) => {
+      const sender = requireMainWindow(event);
+      ensureOwnerCleanup(sender);
+      return agentOrchestrator.uploadMediaArtifact(sender, input);
     },
   );
 

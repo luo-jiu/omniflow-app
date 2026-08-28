@@ -1,7 +1,9 @@
 # 直传 MinIO 上传链路（前端视角）
 
-更新时间：2026-08-24
+更新时间：2026-08-28
 状态：已落地（与 `omniflow-go/docs/architecture/upload-direct-design.md` 配套）
+
+本文的 `runDirectUpload` 主链路只描述普通本地路径上传。Agent 生成的 sealed artifact 不进入上传中心，也不复用 Renderer 协调的 control plane；该例外由 Electron main 以单一事务持有，见下文。
 
 ## 1. 全链路一览
 
@@ -26,6 +28,24 @@ runDirectUpload (src/modules/upload-center/services/upload-direct.ts)
 complete 一旦发出且结果不确定，不进入上述 abort 分支，保留 session 等待核对。
 ```
 
+Agent `media.extractAudio` 产物使用独立链路：
+
+```text
+Renderer
+  └─ agent:media:artifact:upload
+       只提交 artifactId、认证凭据、execution / owner 身份
+          │
+          ▼
+Electron main
+  ├─ 从冻结 executionInput 读取 library / parent / provider / fileName / format / conflictPolicy
+  ├─ 复验当前账号与冻结 owner
+  ├─ init → sign → 每批最多 4 路 PUT
+  ├─ complete → 必要时用独立 signal reconcile 同一 operation
+  └─ 返回 committed / uncommitted / commit_unknown
+```
+
+main 从 `AgentMediaArtifactStore.withOwnedFile` 提供的同一个已验证 `FileHandle` 按显式 offset 读取；complete 前复验源身份。Renderer 不取得 artifact 物理路径、签名 URL、upload session、part 或 ETag，也不能为单次请求指定上传目标。控制面 API 基址由构建期 `__OMNIFLOW_API_BASE_URL__` 固定注入。
+
 ## 2. 关键文件
 
 | 文件 | 角色 |
@@ -36,6 +56,9 @@ complete 一旦发出且结果不确定，不进入上述 abort 分支，保留 
 | `src/features/file-explorer/services/file.api.ts::uploadLocalPathAndCreateNode` | 文本编辑器另存为 / 字幕保存等独立路径，**不进 UploadManager 队列**，直接调 `runDirectUpload` |
 | `electron/ipc/http.ts::http:upload:presigned-put` | 主进程流式 PUT handler，`fs.createReadStream({start, end})` + `https.request` |
 | `electron/preload.ts::electronAPI.uploadPresignedPut / uploadAbort / onUploadProgress` | 渲染进程→主进程契约 |
+| `electron/service/agent/agent-media-artifact-upload.ts` | Agent sealed artifact 的 main-owned 事务：账号复验、init/sign/PUT/complete/reconcile/abort 与三态结算 |
+| `electron/service/agent/agent-media-upload-control-plane.ts` | Agent main 侧受限 HTTP control plane；统一请求上限、认证与响应校验 |
+| `electron/ipc/agent.ts::agent:media:artifact:upload` | Agent 产物唯一上传 IPC；不接收目标、签名 URL 或分片布局 |
 
 ## 3. 进度合并
 
@@ -64,7 +87,9 @@ complete 一旦发出且结果不确定，不进入上述 abort 分支，保留 
 - status 为 `unknown / uncommitted` 或 status 查询本身失败时，抛出带 `uploadId / clientOperationId` 的 `UploadCommitUnknownError`，并禁止自动 abort。
 - `404 / 410` 与其他明确 `4xx` 是确定失败，仍走普通清理路径。
 - 后端 committed 回执保留 7 天；重复 complete 不会创建第二个 node。旧客户端未传 operation ID 时由后端按 upload ID 生成兼容身份。
-- 这层只保证共享上传不会在提交结果不确定时破坏会话。Agent 阶段 B 仍需在 prepare/executor 上层把调用结果投影为 `uncommitted / commit_unknown / committed`，才能决定本机兜底。
+- 普通 `runDirectUpload` 仍以成功 node 或 `UploadCommitUnknownError` 表达结果；它不承担 Agent 的三态与本机兜底决策。
+- Agent main-owned 链路显式返回 `uncommitted / commit_unknown / committed`。complete 或 reconcile 只有返回有效正整数 `node.id` 与非空 `node.name` 才能判定 `committed`；complete 已发出但仍无法核对时保留 session 并返回 `commit_unknown`。`committed` 与 `commit_unknown` 一旦形成，随后本地 FileHandle 退出复验或 lease 清理异常只能触发本地产物隔离，不能把禁止盲目重试的结算降级成普通 IPC 失败。
+- Agent 只有收到 main 显式返回的 `uncommitted` 才登记一次性本机兜底 grant；`committed`、`commit_unknown`、Renderer 未取得结构化结果的普通 IPC 错误、错误 sender 和重放都不能触发 Save As。grant 绑定具体 artifact、execution、窗口、Session 和 Run。critical settlement 只在即将调用 complete 时开启，不覆盖上传数据阶段。
 
 ## 7. 嗅探 / 下载链路 0 改动不变量
 
