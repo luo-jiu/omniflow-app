@@ -65,6 +65,7 @@ const REQUIRED_AGENT_DATABASE_COLUMNS = {
     'last_touched_at',
     'expires_at',
     'last_error_code',
+    'occupancy_unknown',
   ],
   agent_memories: [
     'id',
@@ -250,6 +251,8 @@ export function createAgentPersistenceRuntimeManager(
   options: AgentPersistenceRuntimeManagerOptions,
 ) {
   let runtimePromise: Promise<AgentPersistenceRuntime> | null = null;
+  let lifecycleBarrier = Promise.resolve();
+  let lifecycleFailure: unknown = null;
 
   async function disposeStores(): Promise<void> {
     const errors: unknown[] = [];
@@ -273,16 +276,33 @@ export function createAgentPersistenceRuntimeManager(
 
   function get(): Promise<AgentPersistenceRuntime> {
     if (!runtimePromise) {
-      runtimePromise = (async () => {
-        await options.bootstrap();
-        const sessionStore = await options.getSessionStore();
-        const memoryStore = await options.getMemoryStore();
-        const shellStorage = await options.getShellStorage();
-        return { memoryStore, sessionStore, shellStorage };
-      })().catch(async (error) => {
-        runtimePromise = null;
-        await disposeStores().catch(() => undefined);
-        throw error;
+      const previousBarrier = lifecycleBarrier;
+      const generation = (async () => {
+        await previousBarrier;
+        if (lifecycleFailure) {
+          const error = new Error('Agent 持久化资源上一次关闭未完整收口');
+          Object.assign(error, { cause: lifecycleFailure });
+          throw error;
+        }
+        try {
+          await options.bootstrap();
+          const sessionStore = await options.getSessionStore();
+          const memoryStore = await options.getMemoryStore();
+          const shellStorage = await options.getShellStorage();
+          return { memoryStore, sessionStore, shellStorage };
+        } catch (error) {
+          try {
+            await disposeStores();
+          } catch (cleanupError) {
+            lifecycleFailure = cleanupError;
+          }
+          throw error;
+        }
+      })();
+      runtimePromise = generation;
+      lifecycleBarrier = generation.then(() => undefined, () => undefined);
+      void generation.catch(() => {
+        if (runtimePromise === generation) runtimePromise = null;
       });
     }
     return runtimePromise;
@@ -290,14 +310,30 @@ export function createAgentPersistenceRuntimeManager(
 
   async function dispose(): Promise<void> {
     const current = runtimePromise;
-    runtimePromise = null;
-    if (!current) return;
-    try {
-      await current;
-    } catch {
+    if (!current) {
+      await lifecycleBarrier;
+      if (lifecycleFailure) throw lifecycleFailure;
       return;
     }
-    await disposeStores();
+    if (runtimePromise === current) runtimePromise = null;
+    const previousBarrier = lifecycleBarrier;
+    const closing = (async () => {
+      await previousBarrier;
+      try {
+        await current;
+      } catch {
+        if (lifecycleFailure) throw lifecycleFailure;
+        return;
+      }
+      try {
+        await disposeStores();
+      } catch (error) {
+        lifecycleFailure = error;
+        throw error;
+      }
+    })();
+    lifecycleBarrier = closing.then(() => undefined, () => undefined);
+    await closing;
   }
 
   return { dispose, get };

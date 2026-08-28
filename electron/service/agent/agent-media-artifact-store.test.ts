@@ -1,5 +1,6 @@
 import {
   access,
+  chmod,
   readFile,
   mkdir,
   mkdtemp,
@@ -331,6 +332,42 @@ describe('Agent media artifact store', () => {
 
     await store.sweepExpired();
     await expect(access(orphan)).rejects.toThrow();
+  });
+
+  symlinkRootIt('holds shared quota admission closed until an unreadable residue root is reconciled', async () => {
+    const quotaManager = createAgentLocalStorageQuotaManager({
+      createId: (() => {
+        let sequence = 0;
+        return () => `residue-admission-${sequence++}`;
+      })(),
+    });
+    quotaManager.registerAdapter('workspace-test', { remove: async () => undefined });
+    const { root, store } = await createStore({ quotaManager });
+    await store.sweepExpired();
+    await chmod(root, 0o000);
+    try {
+      await expect(store.sweepExpired()).rejects.toThrow();
+    } finally {
+      await chmod(root, 0o700);
+    }
+
+    await expect(quotaManager.reserve(
+      OWNER.ownerScope,
+      'workspace',
+      'blocked-run',
+      0,
+      10_000,
+      'workspace-test',
+    )).rejects.toThrow('正在核对未登记的物理占用');
+    await expect(store.sweepExpired()).resolves.toBeUndefined();
+    await expect(quotaManager.reserve(
+      OWNER.ownerScope,
+      'workspace',
+      'unblocked-run',
+      0,
+      10_000,
+      'workspace-test',
+    )).resolves.toBe('residue-admission-0');
   });
 
   symlinkRootIt('does not follow a replaced current root while sweeping', async () => {

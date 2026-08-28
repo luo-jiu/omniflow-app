@@ -458,23 +458,27 @@ agent-shell-control/
 ```text
 reserve(owner, category, runId, expectedBytes, ttl, adapterId) -> reservationId
 bindResource(reservationId, resourceRef, owner)
+growReservation(reservationId | resourceRef, newExpectedBytes, owner)
 commit(reservationId, resourceRef, actualBytes, owner)
-adjust(reservationId | resourceRef, newExpectedOrActualBytes, owner)
+adjust(resourceRef, observedBytes, owner)
 touch(resourceRef, ttl, owner)
 acquireLease(resourceRef, ttl, owner) -> lease
 releaseLease(resourceRef, leaseId, owner)
 cancelReservation(reservationId, owner)
-requestRelease(resourceRef, owner)
+markDeleting(resourceRef, owner, observedBytes?: number | 'unknown')
+requestRelease(resourceRef, owner, observedBytes?: number | 'unknown')
 sweep(reason)
 ```
 
 配额规则：
 
-- `reserve` 在同一个 main 串行 owner 中原子检查全局 Agent、category、Run、单文件和低磁盘水位上限；失败时不能先写文件再补记账。并发 stage、publish、媒体产物和日志不能同时把同一份剩余额度都预留成功。
-- 已知长度的输入先按预期字节预留，写入完成后以 main `stat` 得到的真实物理字节 `commit / adjust`。未知长度流按小块增量扩展 reservation，扩展失败即停止生产者、继续必要的 pipe drain 并按对应 Tool 语义清理半文件。
+- `reserve / growReservation` 在同一个 main 串行 owner 中原子检查全局 Agent、category、Run、单文件、资源数量和低磁盘水位上限；默认最多保留 4,096 条本机资源记录，零字节预留也必须经过数量、聚合额度与磁盘水位门禁。磁盘门禁以当前文件系统可用量减去所有尚未物理兑现的 reservation headroom 和本次新增 headroom 后仍达到安全水位为准，不能让多个并发预留各自重复使用同一份空闲空间。失败时不能先写文件再补记账。
+- 已知长度的输入先按预期字节预留，写入完成后以 main 读取到的 data fork 长度与平台上报的 allocated blocks 执行 `commit / adjust`。`commit / adjust` 属于写后协调：已落盘字节已经反映在 `statfs` 可用量中，因此只校正 ledger 与聚合 policy，不把同一增量再次从磁盘可用量扣除。未知长度流必须在每个写入批次前用 `growReservation` 扩展 headroom，扩展失败即停止生产者、继续必要的 pipe drain 并按对应 Tool 语义清理半文件。generic xattr 等没有反映在 `st_blocks` 中的扩展元数据当前不属于精确计费范围；可执行 Shell 前必须由 handle-based 平台 metadata adapter 补齐身份和 allocated accounting。
 - `shell.run` 启动前按本 Run 的允许增长上限取得 workspace reservation；执行期间监控逻辑大小与实际分配字节并校正。无法取得初始 headroom 时不启动命令，不能只依赖命令结束后的目录扫描。
-- reservation、已提交 resource、owner、Run、category、真实字节、lease、TTL 和清理状态写入 main-only ledger。进程崩溃后先扫描固定托管根目录，以真实大小校正 ledger；过期 reservation 只有在确认没有 live Tool / process lease 后才能释放。
+- reservation、已提交 resource、owner、Run、category、已观测计费字节、TTL 和清理状态写入 main-only durable ledger。live lease 只属于当前 main 进程并与所有 quota mutation 串行，不跨进程恢复；`releaseLease` 只释放该进程内事实，不为未持久化字段额外重写 SQLite。进程崩溃后先扫描固定托管根目录，以 data fork 与平台 allocated blocks 校正 ledger；过期 reservation 只有在确认没有 live Tool / process lease 后才能释放。
 - Workspace / Log / Artifact Store 只注册 main-only resource adapter、绑定 opaque resource ref、报告实际用量和提交 cleanup intent。Quota Manager 独占 ledger、TTL eligibility、清理优先级和额度返还；它调用对应 adapter 的幂等 remove，只有收到物理删除成功回执后才删 ledger / 返还额度。Store 不得自行 sweep 已提交资源，Quota Manager 也不得绕过 adapter 拼物理路径。
+- 物理删除固定为两阶段：显式 release、TTL sweep 和失败重试都先持久化 `deleting` 与保守债务，成功后才能调用 adapter。已知完整快照按 `max(旧计费字节, 已观测字节)` 记账；扫描无法完成或快照已经漂移时使用 `'unknown'`，同时持久化独立 unknown 标志并至少按当时全局配额上限记账。unknown 标志不随后续 policy 上调而失效，物理删除成功前无条件关闭新增 reservation、正向扩容和新 lease。`deleting` 记录即使超过当前单资源或聚合 policy limit，重启也必须恢复并继续计入 usage；它会阻止不满足额度的新 reservation，但不能因此丢失清理索引。第一阶段持久化失败时不得调用 adapter，当前进程保留 owner 与债务明确的待协调意图，并临时拒绝新 admission；后续 sweep 会先补写同一事实再尝试删除，正常退出也必须先尝试刷入该事实，刷入失败则退出收口明确报错。该进程内 admission latch 不冒充跨崩溃事实，崩溃恢复仍由 workspace `deleting` metadata、durable quota ledger 与启动时受控根校验共同驱动。
+- 同一 resource ref 的并发 `requestRelease` 在 main 内按 owner 合并为同一个物理删除；owner 不同立即拒绝，后续调用携带更保守的已观测字节或 `'unknown'` 时必须单调合并债务。应用退出只关闭新的外部准入，关闭前已经接纳的 release、bound reservation 取消和 sweep 必须完成全部两阶段操作；任一后续 durable snapshot 都要自动融合未落盘清理意图，最后才允许关闭 SQLite。
 - reservation 创建后，在首个临时文件落盘时立即 `bindResource`。取消未落盘 reservation 可以直接释放；已经绑定半文件时，`cancelReservation` 先经 adapter 删除物理文件，失败则保留 `deleting` 占用供 sweep 重试。不能因为 Tool 已取消就在半文件仍存在时提前返还额度。
 - 清理优先级固定为：已过期终态详细日志 -> 已过期终态 workspace / artifact -> 已取消或失败的残留 -> 其他可重建缓存。不能为了腾空间直接删除 active Run、尚未发布的用户产物或 authoritative commit 所需文件；低磁盘时先停止对应生产者并生成明确终态。
 - Session 删除、owner release、注销、窗口销毁和应用退出只为各自保留策略选中的资源提交清理意图；物理删除成功后才释放真实占用。删除失败保留 `deleting` ledger 项并由启动 sweep 重试，不能提前把额度返还后形成双重占用。
@@ -861,7 +865,7 @@ src/features/agent/
 - UI 当前没有 Shell safe presenter、日志 action 和规则管理入口。通用 action preview 会截断 detail 数量与长度并 trim 文本，不能用于批准 raw command；注册前必须由完整 public action 渲染精确 command/env，明确不可见字符与任何展示截断，并把展示语义纳入冻结快照。
 - 当前 `AgentShellWorkspaceStore` 已提供 main-only 的 Run 工作区目录创建、`input / work / output / tmp / home` 逻辑路径解析、owner / Session 绑定、symlink / traversal 边界、generation、有限批次的累积 provenance manifest 和 Quota Manager cleanup adapter；SQLite persistence adapter 可在重启后恢复 workspace metadata / manifest / owner / status，并通过固定 workspace 根目录重建物理路径。启动恢复会交叉校验 ledger adapter、Run 和实际目录；缺失、非目录、symlink、已进入 `deleting` 或失去匹配 ledger 的工作区立即转入清理。当前 preparation 的 `workspaceMetadataIdentity` 只哈希已登记 manifest metadata，不代表磁盘实时字节；尚缺完整 Run workspace 的真实 content identity、Store 独占 mutation gate、执行期 Quota live lease、spawn 前重扫与短期 watcher，也尚未接入 stage / publish。
 - 当前 schema 2 已包含 workspace metadata、共享存储 ledger 和严格 prepared action 判别联合，并由统一 bootstrap 原地 reconcile / 自检；当前仍没有 Shell Rule 表、Shell ToolRun 审计字段和日志水位。
-- `AgentLocalStorageQuotaManager` 已落地为 main-only 的 owner-bound ledger 基座，支持分类 / Run / 全局 / 单资源 / 低磁盘水位检查、真实字节 commit / adjust、live lease、TTL、deleting 保留和失败后 sweep 重试；SQLite `agent_local_storage_resources` write-through adapter 可在启动时恢复 reservation / resource 状态，lease 不跨进程恢复。`agent-shell-storage-runtime` 打开同一 Agent 数据库、恢复 quota/workspace 并执行启动 sweep；`AgentMediaArtifactStore` 已通过稳定 `media-artifact` adapter 接入同一 manager，创建前预留、落盘后 bind、finalize 后按真实大小 commit，重启后不恢复媒体任务但保留 TTL 清理索引。统一 persistence runtime 和独占 Schema Coordinator 已进入应用启动与退出顺序，退出会先取消并等待活跃 Agent，再关闭文件传输和 SQLite。当前尚未接入日志 Store。默认单资源上限为 2 GiB、总量上限为 8 GiB。
+- `AgentLocalStorageQuotaManager` 已落地为 main-only 的 owner-bound ledger 基座，支持分类 / Run / 全局 / 单资源 / 4,096 条资源记录 / 低磁盘水位检查、写前 reservation headroom、真实字节 commit / adjust、进程内 live lease、TTL、独立持久化的 unknown occupancy、deleting 保留和失败后两阶段 sweep 重试；零字节 reservation 同样经过资源数、聚合额度与磁盘水位检查。生产 Shell workspace 与媒体产物统一位于 `userData` 文件系统，runtime 以该卷 `bavail * bsize` 为准，扣除未兑现 headroom 后至少留下 1 GiB；探针失败时 fail-closed。SQLite `agent_local_storage_resources` write-through adapter 可原地补齐 unknown 标志并在启动时恢复 reservation / resource 状态，lease 不跨进程恢复。`agent-shell-storage-runtime` 打开同一 Agent 数据库、恢复 quota/workspace 并执行启动 sweep；`AgentMediaArtifactStore` 已通过稳定 `media-artifact` adapter 接入同一 manager，创建前预留、落盘后 bind、finalize 后按真实大小 commit，重启后不恢复媒体任务但保留 TTL 清理索引。统一 persistence runtime 和独占 Schema Coordinator 已进入应用启动与退出顺序，退出会先取消并等待活跃 Agent，再将未协调清理意图写回 ledger，最后关闭文件传输和 SQLite；清理意图刷盘失败会明确报错。当前尚未接入日志 Store。默认单资源上限为 2 GiB、总量上限为 8 GiB。
 
 实现阶段：
 

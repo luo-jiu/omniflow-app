@@ -24,7 +24,8 @@ const SCHEMA = `
     created_at INTEGER NOT NULL,
     last_touched_at INTEGER NOT NULL,
     expires_at INTEGER NOT NULL,
-    last_error_code TEXT CHECK (last_error_code IS NULL OR last_error_code IN ('adapter_unavailable', 'live_lease', 'remove_failed'))
+    last_error_code TEXT CHECK (last_error_code IS NULL OR last_error_code IN ('adapter_unavailable', 'live_lease', 'remove_failed')),
+    occupancy_unknown INTEGER NOT NULL DEFAULT 0 CHECK (occupancy_unknown IN (0, 1))
   );
 
   CREATE INDEX IF NOT EXISTS agent_local_storage_resources_expiry_idx
@@ -48,6 +49,7 @@ interface QuotaRow {
   last_touched_at: number;
   expires_at: number;
   last_error_code: AgentLocalStorageQuotaPersistedRecord['lastErrorCode'] | null;
+  occupancy_unknown: 0 | 1;
 }
 
 function openDatabase(databasePath: string): Promise<sqlite3.Database> {
@@ -97,6 +99,7 @@ function toPersistenceRow(row: QuotaRow): AgentLocalStorageQuotaPersistedRecord 
     id: row.id,
     ...(row.last_error_code ? { lastErrorCode: row.last_error_code } : {}),
     lastTouchedAt: row.last_touched_at,
+    occupancyUnknown: row.occupancy_unknown === 1,
     ...(row.resource_ref ? { resourceRef: row.resource_ref } : {}),
     runId: row.run_id,
     state: row.state,
@@ -107,6 +110,17 @@ export async function initializeAgentLocalStorageQuotaDatabaseSchema(
   database: sqlite3.Database,
 ): Promise<void> {
   await exec(database, SCHEMA);
+  const existingColumns = new Set(
+    (await all<{ name: string }>(database, 'PRAGMA table_info(agent_local_storage_resources)'))
+      .map(column => column.name),
+  );
+  if (!existingColumns.has('occupancy_unknown')) {
+    await exec(database, `
+      ALTER TABLE agent_local_storage_resources
+      ADD COLUMN occupancy_unknown INTEGER NOT NULL DEFAULT 0
+      CHECK (occupancy_unknown IN (0, 1));
+    `);
+  }
 }
 
 export async function createSQLiteAgentLocalStorageQuotaPersistence(
@@ -128,7 +142,8 @@ export async function createSQLiteAgentLocalStorageQuotaPersistence(
           database,
           `SELECT id, backend_scope, account_scope, adapter_id, resource_ref,
              category, run_id, expected_bytes, actual_bytes, state,
-             created_at, last_touched_at, expires_at, last_error_code
+             created_at, last_touched_at, expires_at, last_error_code,
+             occupancy_unknown
            FROM agent_local_storage_resources`,
         );
         return rows.map(toPersistenceRow);
@@ -143,8 +158,9 @@ export async function createSQLiteAgentLocalStorageQuotaPersistence(
               `INSERT INTO agent_local_storage_resources (
                  id, backend_scope, account_scope, adapter_id, resource_ref,
                  category, run_id, expected_bytes, actual_bytes, state,
-                 created_at, last_touched_at, expires_at, last_error_code
-               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                 created_at, last_touched_at, expires_at, last_error_code,
+                 occupancy_unknown
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
               [
                 record.id,
                 record.backendScope,
@@ -160,6 +176,7 @@ export async function createSQLiteAgentLocalStorageQuotaPersistence(
                 record.lastTouchedAt,
                 record.expiresAt,
                 record.lastErrorCode ?? null,
+                record.occupancyUnknown ? 1 : 0,
               ],
             );
           }

@@ -19,6 +19,14 @@ const SESSION_STORE = {} as AgentSessionStore;
 const MEMORY_STORE = {} as AgentMemoryStore;
 const SHELL_STORAGE = {} as AgentShellStorageRuntime;
 
+function createDeferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
 async function withDatabase<T>(
   databasePath: string,
   operation: (database: sqlite3.Database) => Promise<T>,
@@ -248,6 +256,109 @@ describe('Agent persistence runtime manager', () => {
     expect(disposeSessionStore).toHaveBeenCalledTimes(1);
 
     await expect(manager.get()).resolves.toMatchObject({ shellStorage: SHELL_STORAGE });
+    await manager.dispose();
+  });
+
+  it('does not bootstrap a new generation until the previous runtime finishes closing', async () => {
+    const oldCloseEntered = createDeferred();
+    const oldCloseMayFinish = createDeferred();
+    const bootstrap = vi.fn(async () => undefined);
+    let shellDisposeCalls = 0;
+    const manager = createAgentPersistenceRuntimeManager({
+      bootstrap,
+      disposeMemoryStore: vi.fn(async () => undefined),
+      disposeSessionStore: vi.fn(async () => undefined),
+      disposeShellStorage: vi.fn(async () => {
+        shellDisposeCalls += 1;
+        if (shellDisposeCalls === 1) {
+          oldCloseEntered.resolve();
+          await oldCloseMayFinish.promise;
+        }
+      }),
+      getMemoryStore: async () => MEMORY_STORE,
+      getSessionStore: async () => SESSION_STORE,
+      getShellStorage: async () => SHELL_STORAGE,
+    });
+
+    await manager.get();
+    const disposingOldGeneration = manager.dispose();
+    await oldCloseEntered.promise;
+
+    const nextGeneration = manager.get();
+    let nextGenerationSettled = false;
+    void nextGeneration.finally(() => {
+      nextGenerationSettled = true;
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(bootstrap).toHaveBeenCalledTimes(1);
+    expect(nextGenerationSettled).toBe(false);
+
+    oldCloseMayFinish.resolve();
+    await disposingOldGeneration;
+    await expect(nextGeneration).resolves.toEqual({
+      memoryStore: MEMORY_STORE,
+      sessionStore: SESSION_STORE,
+      shellStorage: SHELL_STORAGE,
+    });
+    expect(bootstrap).toHaveBeenCalledTimes(2);
+
+    await manager.dispose();
+    expect(shellDisposeCalls).toBe(2);
+  });
+
+  it('shares a failing generation while initialization cleanup is still running', async () => {
+    const cleanupEntered = createDeferred();
+    const cleanupMayFinish = createDeferred();
+    const bootstrap = vi.fn(async () => undefined);
+    let shellDisposeCalls = 0;
+    let shellGetCalls = 0;
+    const manager = createAgentPersistenceRuntimeManager({
+      bootstrap,
+      disposeMemoryStore: vi.fn(async () => undefined),
+      disposeSessionStore: vi.fn(async () => undefined),
+      disposeShellStorage: vi.fn(async () => {
+        shellDisposeCalls += 1;
+        if (shellDisposeCalls === 1) {
+          cleanupEntered.resolve();
+          await cleanupMayFinish.promise;
+        }
+      }),
+      getMemoryStore: async () => MEMORY_STORE,
+      getSessionStore: async () => SESSION_STORE,
+      getShellStorage: async () => {
+        shellGetCalls += 1;
+        if (shellGetCalls === 1) throw new Error('shell schema unavailable');
+        return SHELL_STORAGE;
+      },
+    });
+
+    const failingGeneration = manager.get();
+    const firstFailure = expect(failingGeneration).rejects.toThrow('shell schema unavailable');
+    await cleanupEntered.promise;
+
+    const retryDuringCleanup = manager.get();
+    expect(retryDuringCleanup).toBe(failingGeneration);
+    const concurrentFailure = expect(retryDuringCleanup).rejects.toThrow(
+      'shell schema unavailable',
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(bootstrap).toHaveBeenCalledTimes(1);
+    expect(shellGetCalls).toBe(1);
+
+    cleanupMayFinish.resolve();
+    await Promise.all([firstFailure, concurrentFailure]);
+    expect(shellDisposeCalls).toBe(1);
+
+    await expect(manager.get()).resolves.toEqual({
+      memoryStore: MEMORY_STORE,
+      sessionStore: SESSION_STORE,
+      shellStorage: SHELL_STORAGE,
+    });
+    expect(bootstrap).toHaveBeenCalledTimes(2);
+    expect(shellGetCalls).toBe(2);
+
     await manager.dispose();
   });
 });

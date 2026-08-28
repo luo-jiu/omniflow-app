@@ -39,6 +39,7 @@ const AGENT_MEDIA_DIRECTORY_PREFIX = 'agent-media-';
 const AGENT_MEDIA_QUOTA_ADAPTER_ID = 'media-artifact';
 const AGENT_MEDIA_QUOTA_CATEGORY = 'artifact';
 const AGENT_MEDIA_RESOURCE_REF_PREFIX = `${AGENT_MEDIA_QUOTA_ADAPTER_ID}:`;
+const AGENT_MEDIA_RESIDUE_ADMISSION_BLOCK_ID = 'media-artifact-unmanaged-residue';
 const MAX_ARTIFACT_ID_LENGTH = 128;
 
 export interface AgentMediaArtifactOwner {
@@ -447,8 +448,10 @@ export function createAgentMediaArtifactStore(
     if (!sweepPromise) {
       sweepPromise = (async () => {
         const quotaManager = await resolveQuotaManager();
+        await quotaManager.setAdmissionBlock(AGENT_MEDIA_RESIDUE_ADMISSION_BLOCK_ID, true);
         await quotaManager.sweep('media-artifact-expired');
         await removeUnmanagedCrashResidue(quotaManager);
+        await quotaManager.setAdmissionBlock(AGENT_MEDIA_RESIDUE_ADMISSION_BLOCK_ID, false);
       })().finally(() => {
         sweepPromise = null;
       });
