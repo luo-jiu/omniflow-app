@@ -1554,6 +1554,55 @@ describe('Cat Catch HLS parser', () => {
     })).toThrow(integerTagExpected.missingTargetError)
   })
 
+  it('hls.no-value-tag-prefix-boundary', () => {
+    const fixtureRoot = fileURLToPath(new URL(
+      '../../../../../tools/cat-catch-lab/fixtures/hls-no-value-tag-prefix-boundary',
+      import.meta.url,
+    ))
+    const fixture = JSON.parse(readFileSync(`${fixtureRoot}/fixture.json`, 'utf8')) as {
+      expected: string
+      inputs: { duplicate: string; prefix: string }
+    }
+    const expected = JSON.parse(readFileSync(`${fixtureRoot}/${fixture.expected}`, 'utf8')) as {
+      baseUrl: string
+      duplicateError: string
+      hasEndList: boolean
+      isLive: boolean
+      segments: Array<{
+        discontinuitySequence: number
+        sequence: number
+        url: string
+      }>
+    }
+    const manifest = parseHlsManifest({
+      baseUrl: expected.baseUrl,
+      text: readFileSync(`${fixtureRoot}/${fixture.inputs.prefix}`, 'utf8'),
+    })
+    expect(manifest).toMatchObject({
+      hasEndList: expected.hasEndList,
+      isLive: expected.isLive,
+    })
+    expect(manifest.segments.map(segment => ({
+      discontinuitySequence: segment.discontinuitySequence,
+      sequence: segment.sequence,
+      url: segment.url,
+    }))).toEqual(expected.segments)
+
+    const plan = createEmbeddedBrowserHlsDownloadPlan({
+      manifest,
+      manifestUrl: expected.baseUrl,
+    })
+    expect(plan.fragments.map(fragment => ({
+      discontinuitySequence: fragment.discontinuitySequence,
+      sequence: fragment.sequence,
+      url: fragment.url,
+    }))).toEqual(expected.segments)
+    expect(() => parseHlsManifest({
+      baseUrl: expected.baseUrl,
+      text: readFileSync(`${fixtureRoot}/${fixture.inputs.duplicate}`, 'utf8'),
+    })).toThrow(expected.duplicateError)
+  })
+
   it('hls.extinf-token-boundary', () => {
     const manifest = parseHlsManifest({
       baseUrl: extinfTokenExpected.baseUrl,

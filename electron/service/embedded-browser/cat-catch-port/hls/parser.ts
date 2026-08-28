@@ -14,7 +14,7 @@
  * hls-master-pending-variant-boundary, hls-master-rendition-boolean-boundary,
  * hls-master-variant-numeric-boundary, hls-leading-whitespace-token-boundary,
  * hls-attribute-value-whitespace-boundary, hls-part-duration-fragment-boundary,
- * hls-empty-segment-uri-rejection
+ * hls-empty-segment-uri-rejection, hls-no-value-tag-prefix-boundary
  */
 
 import { createHlsDefaultIv } from './decrypt'
@@ -957,7 +957,7 @@ export function parseHlsManifest(input: {
     }
     if (line.startsWith('#EXT-X-ENDLIST')) {
       if (hasEndList) {
-        assignMultipleMediaPlaylistTagError(variableState, 'ENDLIST', line)
+        assignMultipleMediaPlaylistTagError(variableState, 'ENDLIST', '#EXT-X-ENDLIST')
       }
       hasEndList = true
     }

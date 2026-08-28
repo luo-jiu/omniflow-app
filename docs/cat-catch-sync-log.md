@@ -1249,6 +1249,20 @@
 - legacy cleanup: 无；本步扩充 target pipeline，不提前删除任何 cleanup sentinel。
 - validation: local downloader 专项 `1 file / 10 tests`、完整 HLS 集合 `20 files / 131 tests`、TypeScript、全仓 ESLint、fixture/capability JSON、固定上游 validator、同步测试 `16/16` 和 metadata `7 units / 32 capabilities / 208 anchors / 106 cleanup entries / 166 planned IDs / 121 active refs` 通过；排除 Node runner 文件后全仓 Vitest 为 `189 files / 1264 passed / 3 skipped`。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
 
+## 2026-08-28: same target (HLS no-value tag prefix boundary)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本步补齐固定 slow regex 无值标签前缀的可执行证据。
+- reviewedThrough / portedThrough: 均保持 `null`；hls-engine 仍有其余 parser/processing 差分、legacy cleanup 与真实网站验证未完成。
+- change groups: `upstream-characterization`（无终止边界的标签名匹配）与 `behavioral-correction`（singleton error reason）。
+- affected capability IDs: `hls.parser-planner` 保持 `ported-unverified`；新增 1 个 planned ID 和 1 个 active ref，不增加上游 anchor。
+- fixtures/tests: 新增 upstream-executable fixture `hls-no-value-tag-prefix-boundary`；`hls.no-value-tag-prefix-boundary` 锁定 `DISCONTINUITY-FOO` 与未命中整数分支的 `DISCONTINUITY-SEQUENCE:-3` 分别推进 cc、`ENDLIST-FOO` 结束 live，并同步断言 manifest/download plan。重复 `ENDLIST` 伪前缀必须拒绝且 reason 只包含规范 match。
+- accepted difference: 无。固定 vendor 实际输出两片 `cc=1/2`、`live=false`；重复伪前缀发出 fatal `levelParsingError`，reason 为 `#EXT-X-ENDLIST must not appear more than once (#EXT-X-ENDLIST)`。
+- excluded changes and reasons: `GAP/INDEPENDENT-SEGMENTS` 未被 Cat Catch `parseTs` 投影为下载 DTO，不新增无消费者字段；不修改 valued-tag 分支、IPC、authority、downloader 或 UI。
+- unresolved gaps: HLS 其余真正影响 URL/sequence/cc/key/MAP/range/duration/manifest executability 的差分、未捕获资源 fallback、真实网站验证、旧 façade/controller adapter 与 hls-engine 原子 cleanup 仍待完成。
+- runtime changes: 现有 `startsWith` 分支已经保持 cc/endList 行为；只把重复 ENDLIST error 的 source projection 从完整伪标签收敛为固定 regex 实际命中的 `#EXT-X-ENDLIST`。
+- legacy cleanup: 无；旧 compatibility facade 和 legacy-named controller adapter 保留到 hls-engine 原子 cutover。
+- validation: parser 专项 `1 file / 44 tests`、TypeScript、全仓 ESLint、同步测试 `16/16`、metadata `7 units / 32 capabilities / 208 anchors / 106 cleanup entries / 167 planned IDs / 122 active refs` 通过；排除 Node runner 文件后全仓 Vitest 为 `189 files / 1265 passed / 3 skipped`。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
+
 ## Template
 
 ```markdown

@@ -1,0 +1,18 @@
+{
+  "baseUrl": "https://media.example/prefix.m3u8",
+  "duplicateError": "#EXT-X-ENDLIST must not appear more than once (#EXT-X-ENDLIST)",
+  "hasEndList": true,
+  "isLive": false,
+  "segments": [
+    {
+      "discontinuitySequence": 1,
+      "sequence": 0,
+      "url": "https://media.example/one.ts"
+    },
+    {
+      "discontinuitySequence": 2,
+      "sequence": 1,
+      "url": "https://media.example/two.ts"
+    }
+  ]
+}
