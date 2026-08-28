@@ -173,6 +173,131 @@ describe('EmbeddedBrowser HLS local downloader', () => {
     }
   })
 
+  it('hls.cbc-map-byterange-decrypt', async () => {
+    const fixtureRoot = new URL('../../tools/cat-catch-lab/fixtures/hls-cbc-map-byterange-output/', import.meta.url)
+    const [cases, expected] = await Promise.all([
+      readFile(new URL('cases.json', fixtureRoot), 'utf8').then(text => JSON.parse(text) as {
+        methods: Array<{
+          cipher: 'aes-128-cbc' | 'aes-256-cbc'
+          keyByteLength: number
+          method: 'AES-128' | 'AES-256'
+        }>
+      }),
+      readFile(new URL('expected.json', fixtureRoot), 'utf8').then(text => JSON.parse(text) as {
+        clearLength: number
+        mapByteRange: { length: number; offset: number; raw: string }
+        requestRange: string
+      }),
+    ])
+
+    for (const testCase of cases.methods) {
+      const key = Uint8Array.from({ length: testCase.keyByteLength }, (_, index) => index + 1)
+      const previousCiphertextBlock = Uint8Array.from({ length: 16 }, (_, index) => 0x40 + index)
+      const clearMap = Uint8Array.from({ length: expected.clearLength }, (_, index) => 0x80 + index)
+      const cipher = createCipheriv(testCase.cipher, key, previousCiphertextBlock)
+      const encryptedMap = Buffer.concat([cipher.update(clearMap), cipher.final()])
+      const rangedObject = Buffer.alloc(expected.mapByteRange.offset + encryptedMap.byteLength)
+      rangedObject.set(previousCiphertextBlock, expected.mapByteRange.offset - 16)
+      rangedObject.set(encryptedMap, expected.mapByteRange.offset)
+      const urls = {
+        key: `https://media.example/${testCase.method}.key`,
+        map: `https://media.example/${testCase.method}.mp4`,
+        segment: `https://media.example/${testCase.method}.m4s`,
+      }
+      const manualKeyBase64 = testCase.method === 'AES-128'
+        ? Buffer.from(key).toString('base64')
+        : undefined
+      const calls: Array<{ range: string | null; url: string }> = []
+      const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
+        const range = new Headers(init?.headers).get('range')
+        calls.push({ range, url })
+        if (url === urls.key) {
+          return new Response(key.buffer)
+        }
+        if (url === urls.map) {
+          const match = /^bytes=(\d+)-(\d+)$/.exec(range || '')
+          if (!match) return new Response(null, { status: 416 })
+          return new Response(rangedObject.subarray(Number(match[1]), Number(match[2]) + 1))
+        }
+        return new Response(Uint8Array.from([0x01, 0x02, 0x03]))
+      })
+      const directory = await mkdtemp(path.join(os.tmpdir(), `omniflow-hls-${testCase.method.toLowerCase()}-map-range-test-`))
+      const plan = {
+        ...createPlan(),
+        fragments: [{
+          ...createPlan().fragments[0],
+          initSegment: {
+            byteRange: expected.mapByteRange,
+            key: {
+              iv: '0x00000000000000000000000000000001',
+              method: testCase.method,
+              url: urls.key,
+            },
+            url: urls.map,
+          },
+          url: urls.segment,
+        }],
+      }
+
+      try {
+        const result = await downloadEmbeddedBrowserHlsToLocalWorkDirectory({
+          fetch: fetchImpl,
+          manualKeyBase64,
+          plan,
+          workDirectoryPath: directory,
+        })
+        const playlist = await readFile(result.playlistPath, 'utf8')
+
+        await expect(readFile(path.join(directory, 'maps', 'map-001.mp4')))
+          .resolves.toEqual(Buffer.from(clearMap))
+        expect(calls).toEqual([
+          ...(manualKeyBase64 ? [] : [{ range: null, url: urls.key }]),
+          { range: expected.requestRange, url: urls.map },
+          { range: null, url: urls.segment },
+        ])
+        expect(playlist).toContain('#EXT-X-MAP:URI="maps/map-001.mp4"')
+        expect(playlist).not.toContain('#EXT-X-KEY')
+        expect(result).toMatchObject({ keyCount: 1, mapCount: 1 })
+      } finally {
+        await rm(directory, { force: true, recursive: true })
+      }
+    }
+  })
+
+  it('rejects a CBC encrypted MAP range that cannot include a previous cipher block', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'omniflow-hls-cbc-map-invalid-offset-test-'))
+    const plan = {
+      ...createPlan(),
+      fragments: [{
+        ...createPlan().fragments[0],
+        initSegment: {
+          byteRange: { length: 31, offset: 8, raw: '31@8' },
+          key: {
+            method: 'AES-128',
+            url: 'https://media.example/key.bin',
+          },
+          url: 'https://media.example/init.mp4',
+        },
+      }],
+    }
+    const fetchImpl = vi.fn(async (url: string) => new Response(
+      url.endsWith('/key.bin')
+        ? new Uint8Array(16).buffer
+        : new Uint8Array(64).buffer,
+    ))
+
+    try {
+      await expect(downloadEmbeddedBrowserHlsToLocalWorkDirectory({
+        fetch: fetchImpl,
+        plan,
+        workDirectoryPath: directory,
+      })).rejects.toThrow('offset must be 0 or at least 16 bytes')
+      expect(fetchImpl).toHaveBeenCalledTimes(1)
+    } finally {
+      await rm(directory, { force: true, recursive: true })
+    }
+  })
+
   it('hls.cancel-aborts-local-download', async () => {
     const controller = new AbortController()
     let resolveStarted: (() => void) | undefined

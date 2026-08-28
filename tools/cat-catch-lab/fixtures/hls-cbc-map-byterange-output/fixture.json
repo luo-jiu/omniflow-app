@@ -1,0 +1,18 @@
+{
+  "fixtureId": "hls-cbc-map-byterange-output",
+  "capabilityIds": [
+    "hls.segment-pipeline"
+  ],
+  "upstreamCommit": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
+  "status": "active",
+  "oracle": "upstream-executable",
+  "sourceRefs": [
+    "lib/hls.min.js#FragmentLoader createLoaderContext/resetIV",
+    "lib/hls.min.js#isMethodFullSegmentAesCbc"
+  ],
+  "input": "cases.json",
+  "expected": "expected.json",
+  "testRefs": [
+    "electron/service/embeddedBrowserHlsLocalDownloaderService.test.ts#hls.cbc-map-byterange-decrypt"
+  ]
+}

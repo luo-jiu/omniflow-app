@@ -1,0 +1,9 @@
+{
+  "clearLength": 31,
+  "mapByteRange": {
+    "length": 31,
+    "offset": 32,
+    "raw": "31@32"
+  },
+  "requestRange": "bytes=16-63"
+}

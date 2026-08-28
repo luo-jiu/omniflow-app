@@ -1235,6 +1235,20 @@
 - legacy cleanup: 无；本步扩充 target pipeline，不提前删除任何 cleanup sentinel。
 - validation: AES 专项 `3 files / 17 tests`、完整 HLS `19 files / 127 tests`、TypeScript、scoped 与全仓正式 ESLint、fixture/capability JSON、固定上游 validator、同步测试 `16/16` 和 metadata `7 units / 32 capabilities / 207 anchors / 106 cleanup entries / 165 planned IDs / 120 active refs` 通过；排除 Node runner 文件后全仓 Vitest 为 `189 files / 1262 passed / 3 skipped`。真实 ffmpeg 8.1/ffprobe 门禁实际运行 CBC/CTR 两种输出。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
 
+## 2026-08-28: same target (HLS CBC encrypted MAP byte range)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本步关闭固定 FragmentLoader 对 CBC 加密 ranged init segment 的经验分支。
+- reviewedThrough / portedThrough: 均保持 `null`；hls-engine 仍有其余 parser/processing 差分、legacy cleanup 与真实网站验证未完成。
+- change groups: `behavioral-correction`（cipher range/IV）与 `platform-substitute`（本地 clear MAP）。
+- affected capability IDs: `hls.segment-pipeline` 保持 `porting`；新增 1 个 planned ID、1 个 active ref 和固定 `resetIV` anchor。
+- fixtures/tests: 新增 upstream-executable fixture `hls-cbc-map-byterange-output`；`hls.cbc-map-byterange-decrypt` 用同一 ranged object 覆盖 AES-128/AES-256，断言声明 `31@32` 产生 `bytes=16-63`、前 16 bytes 重置 IV、MAP 精确恢复 31-byte clear payload，且 clear playlist 不再携带已消费的 MAP key。另有 case 稳定拒绝 `1..15` 的非零 offset。
+- accepted difference: Cat Catch 自有 MAP fetch 直接请求 parser range 且不解密 MAP，没有复用其固定 hls.js 依赖的 FragmentLoader 分支。OmniFlow 以固定依赖为行为目标：CBC 明文 length 向 block 补齐，非零 offset 前取一个 ciphertext block；只对这类 AES-128 MAP 做本地预解密，普通 AES-128 media/MAP 仍由单一 ffmpeg owner。
+- excluded changes and reasons: 不修改 parser DTO、media BYTERANGE、AES-CTR range、IPC、authority、renderer、live owner 或通用 downloader；不把这条协议分支扩建成跨格式加密框架。
+- unresolved gaps: HLS 其余真正影响 URL/sequence/cc/key/MAP/range/duration/manifest executability 的差分、未捕获资源 fallback、真实网站验证、旧 façade/controller adapter 与 hls-engine 原子 cleanup 仍待完成。
+- runtime changes: MAP 静态 ref 可按原 ref 派生实际 request range；CBC ranged MAP 在写盘前按前块 IV 与声明时 key context 使用 Web Crypto 解密并裁到明文 length。需要本地解密的 MAP cache identity 同时绑定 key/IV，media 解密、retry/cancel 与 ffmpeg owner 不变。
+- legacy cleanup: 无；本步扩充 target pipeline，不提前删除任何 cleanup sentinel。
+- validation: local downloader 专项 `1 file / 10 tests`、完整 HLS 集合 `20 files / 131 tests`、TypeScript、全仓 ESLint、fixture/capability JSON、固定上游 validator、同步测试 `16/16` 和 metadata `7 units / 32 capabilities / 208 anchors / 106 cleanup entries / 166 planned IDs / 121 active refs` 通过；排除 Node runner 文件后全仓 Vitest 为 `189 files / 1264 passed / 3 skipped`。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
+
 ## Template
 
 ```markdown

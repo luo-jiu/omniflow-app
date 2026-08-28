@@ -1,0 +1,15 @@
+{
+  "description": "CBC encrypted MAP served from a ranged object with its previous ciphertext block immediately before the declared offset",
+  "methods": [
+    {
+      "cipher": "aes-128-cbc",
+      "keyByteLength": 16,
+      "method": "AES-128"
+    },
+    {
+      "cipher": "aes-256-cbc",
+      "keyByteLength": 32,
+      "method": "AES-256"
+    }
+  ]
+}

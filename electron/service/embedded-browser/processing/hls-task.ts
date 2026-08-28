@@ -163,18 +163,51 @@ function isLocallyDecryptedHlsMethod(
   return method === 'AES-256' || method === 'AES-256-CTR'
 }
 
+function isHlsFullSegmentAesCbcMethod(
+  method?: string,
+): method is Extract<HlsFullSegmentEncryptionMethod, 'AES-128' | 'AES-256'> {
+  return method === 'AES-128' || method === 'AES-256'
+}
+
+function isLocallyDecryptedHlsMap(input: EmbeddedBrowserHlsLocalDownloadMapRef) {
+  return isLocallyDecryptedHlsMethod(input.key?.method)
+    || (Boolean(input.byteRange) && isHlsFullSegmentAesCbcMethod(input.key?.method))
+}
+
+// Pinned hls.js treats a CBC MAP range as clear length and fetches the previous cipher block as IV.
+function createHlsMapRequestByteRange(input: EmbeddedBrowserHlsLocalDownloadMapRef) {
+  const byteRange = input.byteRange
+  if (!byteRange || !isHlsFullSegmentAesCbcMethod(input.key?.method)) {
+    return byteRange
+  }
+  const clearLength = byteRange.length
+  const offset = Number(byteRange.offset || 0)
+  const paddingLength = clearLength % 16 === 0 ? 0 : 16 - (clearLength % 16)
+  const resetIv = offset !== 0
+  if (resetIv && offset < 16) {
+    throw new Error(`${input.key.method} encrypted HLS MAP byte-range offset must be 0 or at least 16 bytes`)
+  }
+  const encryptedLength = clearLength + paddingLength
+  return {
+    length: encryptedLength + (resetIv ? 16 : 0),
+    offset: offset - (resetIv ? 16 : 0),
+    raw: byteRange.raw,
+  }
+}
+
 function createMapRefCacheKey(input: EmbeddedBrowserHlsLocalDownloadMapRef) {
   const resourceKey = createResourceCacheKey({
     byteRange: input.byteRange,
     url: input.url,
   })
-  if (!isLocallyDecryptedHlsMethod(input.key?.method)) {
+  const key = input.key
+  if (!key || !isLocallyDecryptedHlsMap(input)) {
     return resourceKey
   }
   return [
     resourceKey,
-    createKeyRefCacheKey(input.key),
-    input.key.iv || '',
+    createKeyRefCacheKey(key),
+    key.iv || '',
   ].join('|')
 }
 
@@ -196,18 +229,25 @@ function parseHlsLocalDecryptIv(
 }
 
 async function decryptHlsLocalResource(input: {
+  allowAes128?: boolean
   buffer: ArrayBuffer
   key?: EmbeddedBrowserHlsLocalDownloadKeyRef
   keyRefs: Map<string, ResourceRefRecord>
+  manualKeyBase64?: string
   sequence: number
 }) {
   const method = input.key?.method
-  if (!isLocallyDecryptedHlsMethod(method) || !input.key) {
+  if ((!isLocallyDecryptedHlsMethod(method)
+    && !(input.allowAes128 && method === 'AES-128')) || !input.key) {
     return input.buffer
   }
   const keyRecord = getRequiredLocalRef(
     'key',
-    input.keyRefs.get(createKeyRefCacheKey(input.key)),
+    input.keyRefs.get(createKeyRefCacheKey({
+      manualKeyBase64: input.manualKeyBase64,
+      method: input.key.method,
+      url: input.key.url,
+    })),
     input.sequence,
   )
   if (!keyRecord.bytes) {
@@ -221,6 +261,50 @@ async function decryptHlsLocalResource(input: {
   )
 }
 
+async function decryptHlsMapResource(input: {
+  buffer: ArrayBuffer
+  keyRefs: Map<string, ResourceRefRecord>
+  manualKeyBase64?: string
+  ref: EmbeddedBrowserHlsLocalDownloadMapRef
+}) {
+  if (!isLocallyDecryptedHlsMap(input.ref) || !input.ref.key) {
+    return input.buffer
+  }
+
+  let encryptedBuffer = input.buffer
+  let effectiveKey = input.ref.key
+  const byteRange = input.ref.byteRange
+  if (byteRange && isHlsFullSegmentAesCbcMethod(effectiveKey.method)) {
+    if (Number(byteRange.offset || 0) !== 0) {
+      if (encryptedBuffer.byteLength < 16) {
+        throw new Error(`${effectiveKey.method} encrypted HLS MAP response is missing the previous ciphertext block`)
+      }
+      const resetIv = new Uint8Array(encryptedBuffer.slice(0, 16))
+      effectiveKey = {
+        ...effectiveKey,
+        iv: `0x${Buffer.from(resetIv).toString('hex')}`,
+      }
+      encryptedBuffer = encryptedBuffer.slice(16)
+    }
+  }
+
+  const decrypted = await decryptHlsLocalResource({
+    allowAes128: true,
+    buffer: encryptedBuffer,
+    key: effectiveKey,
+    keyRefs: input.keyRefs,
+    manualKeyBase64: input.manualKeyBase64,
+    sequence: 0,
+  })
+  if (!byteRange || !isHlsFullSegmentAesCbcMethod(effectiveKey.method)) {
+    return decrypted
+  }
+  if (decrypted.byteLength < byteRange.length) {
+    throw new Error(`${effectiveKey.method} decrypted HLS MAP is shorter than its declared byte range`)
+  }
+  return decrypted.slice(0, byteRange.length)
+}
+
 function clearLocallyDecryptedHlsKeys(
   fragment: EmbeddedBrowserHlsLocalDownloadFragment,
 ): EmbeddedBrowserHlsLocalDownloadFragment {
@@ -230,7 +314,7 @@ function clearLocallyDecryptedHlsKeys(
     initSegment: initSegment
       ? {
           ...initSegment,
-          key: isLocallyDecryptedHlsMethod(initSegment.key?.method)
+          key: isLocallyDecryptedHlsMap(initSegment)
             ? undefined
             : initSegment.key,
         }
@@ -350,6 +434,12 @@ async function prepareStaticRefs(input: {
     method?: string
     url?: string
   }) => string
+  requestByteRangeBuilder?: (ref: {
+    byteRange?: EmbeddedBrowserDownloadByteRange
+    key?: EmbeddedBrowserHlsLocalDownloadKeyRef
+    method?: string
+    url?: string
+  }) => EmbeddedBrowserDownloadByteRange | undefined
   headers?: Record<string, string>
   signal?: AbortSignal
 }) {
@@ -373,7 +463,9 @@ async function prepareStaticRefs(input: {
     const nextPaths = input.resourcePathBuilder(resourceIndex, ref)
     resourceIndex += 1
     await downloadStaticResource({
-      byteRange: ref.byteRange,
+      byteRange: input.requestByteRangeBuilder
+        ? input.requestByteRangeBuilder(ref)
+        : ref.byteRange,
       bufferProcessor: input.bufferProcessor
         ? buffer => input.bufferProcessor!(buffer, ref)
         : undefined,
@@ -435,6 +527,7 @@ async function prepareKeyRefs(input: {
 
     let keyBytes: Uint8Array | undefined
     if (manualKeyBytes && normalizedMethod === 'AES-128') {
+      keyBytes = new Uint8Array(manualKeyBytes)
       await writeFile(outputPath, manualKeyBytes)
     } else if (ref.url) {
       const keyBuffer = await fetchStaticResourceBuffer({
@@ -451,7 +544,7 @@ async function prepareKeyRefs(input: {
         throw new Error(`${normalizedMethod} key must be 32 bytes, received ${keyBuffer.byteLength}`)
       }
       const downloadedKeyBytes = new Uint8Array(keyBuffer)
-      if (isLocallyDecryptedHlsMethod(normalizedMethod)) {
+      if (normalizedMethod === 'AES-128' || isLocallyDecryptedHlsMethod(normalizedMethod)) {
         keyBytes = downloadedKeyBytes
       }
       await writeFile(outputPath, downloadedKeyBytes)
@@ -635,11 +728,15 @@ async function downloadEmbeddedBrowserHlsToLocalWorkDirectory(
   })
 
   const mapRefs = await prepareStaticRefs({
-    bufferProcessor: (buffer, ref) => decryptHlsLocalResource({
+    bufferProcessor: (buffer, ref) => decryptHlsMapResource({
       buffer,
-      key: ref.key,
       keyRefs,
-      sequence: 0,
+      manualKeyBase64: normalizeManualAes128KeyBase64(request.manualKeyBase64) || undefined,
+      ref: {
+        byteRange: ref.byteRange,
+        key: ref.key,
+        url: ref.url || '',
+      },
     }),
     cacheKeyBuilder: ref => createMapRefCacheKey({
       byteRange: ref.byteRange,
@@ -663,6 +760,11 @@ async function downloadEmbeddedBrowserHlsToLocalWorkDirectory(
         outputPath: path.join(outputDirectoryPath, 'maps', fileName),
       }
     },
+    requestByteRangeBuilder: ref => createHlsMapRequestByteRange({
+      byteRange: ref.byteRange,
+      key: ref.key,
+      url: ref.url || '',
+    }),
     signal: request.signal,
   })
 
