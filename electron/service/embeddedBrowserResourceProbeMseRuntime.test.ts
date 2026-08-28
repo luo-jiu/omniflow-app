@@ -4,8 +4,8 @@ import { describe, expect, it, vi } from 'vitest'
 
 import {
   EMBEDDED_BROWSER_RESOURCE_CONSOLE_PREFIX,
-  createEmbeddedBrowserResourceProbeScript,
-} from './embeddedBrowserResourceProbe'
+} from './embeddedBrowserResourceProbeScriptTemplate'
+import { createEmbeddedBrowserPageProbeDocumentScript } from './embedded-browser/capture/adapters/page-probe-document'
 
 describe('Embedded browser MSE page runtime', () => {
   it('mse.append-observability', async () => {
@@ -39,6 +39,22 @@ describe('Embedded browser MSE page runtime', () => {
       endOfStream() {}
     }
 
+    class FakeXhr {
+      response = ''
+      responseText = ''
+      responseURL = ''
+      status = 0
+
+      addEventListener() {}
+      open() {}
+      send() {}
+    }
+
+    class FakeWorker {
+      addEventListener() {}
+      terminate() {}
+    }
+
     class BrowserUrl extends URL {
       static createObjectURL() {
         return `blob:mse-runtime-${++blobSequence}`
@@ -50,7 +66,12 @@ describe('Embedded browser MSE page runtime', () => {
     const context = createContext({
       Blob,
       MediaSource: FakeMediaSource,
+      Request,
+      TextDecoder,
+      TextEncoder,
       URL: BrowserUrl,
+      Worker: FakeWorker,
+      XMLHttpRequest: FakeXhr,
       atob,
       btoa,
       clearTimeout: vi.fn(),
@@ -59,6 +80,7 @@ describe('Embedded browser MSE page runtime', () => {
         log: vi.fn(),
       },
       document: {
+        addEventListener: vi.fn(),
         createElement: vi.fn(() => {
           const anchor = {
             click: vi.fn(),
@@ -73,8 +95,11 @@ describe('Embedded browser MSE page runtime', () => {
         querySelector: vi.fn(() => null),
         querySelectorAll: vi.fn(() => []),
         readyState: 'complete',
+        removeEventListener: vi.fn(),
         title: 'MSE Fixture',
       },
+      escape,
+      fetch: vi.fn(),
       localStorage: {
         getItem: vi.fn(() => null),
         removeItem: vi.fn(),
@@ -89,8 +114,18 @@ describe('Embedded browser MSE page runtime', () => {
       setTimeout: vi.fn(() => 1),
     })
 
-    const script = createEmbeddedBrowserResourceProbeScript()
-    expect(runInContext(script, context)).toBe('installed')
+    const script = createEmbeddedBrowserPageProbeDocumentScript()
+    const installResult = runInContext(script, context)
+    expect({
+      installError: runInContext(
+        'globalThis.__OMNIFLOW_EMBEDDED_BROWSER_RESOURCE_PROBE_INSTALL_ERROR__ || null',
+        context,
+      ),
+      installResult,
+    }).toEqual({
+      installError: null,
+      installResult: 'installed',
+    })
     const installedAddSourceBuffer = runInContext(
       'MediaSource.prototype.addSourceBuffer',
       context,
@@ -157,8 +192,10 @@ describe('Embedded browser MSE page runtime', () => {
       `globalThis.__OMNIFLOW_EMBEDDED_BROWSER_RESOURCE_PROBE__.openResource(${JSON.stringify(observed.resourceKey)})`,
       context,
     )).toBe(true)
+    const mseBlobUrl = open.mock.calls[0]?.[0]
+    expect(mseBlobUrl).toMatch(/^blob:mse-runtime-/)
     expect(open).toHaveBeenCalledWith(
-      'blob:mse-runtime-1',
+      mseBlobUrl,
       '_blank',
       'noopener,noreferrer',
     )
@@ -169,7 +206,7 @@ describe('Embedded browser MSE page runtime', () => {
     expect(anchors).toHaveLength(1)
     expect(anchors[0]).toMatchObject({
       download: 'MSE Fixture-video.mp4',
-      href: 'blob:mse-runtime-1',
+      href: mseBlobUrl,
     })
     expect(anchors[0]?.click).toHaveBeenCalledOnce()
     expect(anchors[0]?.remove).toHaveBeenCalledOnce()
@@ -207,7 +244,7 @@ describe('Embedded browser MSE page runtime', () => {
       expect.objectContaining({
         contentLength: 4,
         resourceKey: observed.resourceKey,
-        url: 'blob:mse-runtime-1',
+        url: mseBlobUrl,
       }),
     ]))
   })

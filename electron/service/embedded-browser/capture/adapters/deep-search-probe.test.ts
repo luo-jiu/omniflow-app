@@ -2,7 +2,6 @@ import { createContext, runInContext } from 'node:vm'
 
 import { describe, expect, it, vi } from 'vitest'
 
-import { createEmbeddedBrowserResourceProbeScript } from '../../../embeddedBrowserResourceProbe'
 import { NetworkContextVault } from '../state/network-context-vault'
 import { ResourceStateStore } from '../state/resource-state-store'
 import {
@@ -13,7 +12,7 @@ import {
   ElectronPageProbeEventAdapter,
   type ElectronPageProbeWebContents,
 } from './electron-page-probe'
-import { createDeepSearchTargetProbeScript } from './deep-search-probe'
+import { createEmbeddedBrowserPageProbeDocumentScript } from './page-probe-document'
 
 type DidNavigateListener = (event: unknown, url: string) => void
 type RenderProcessGoneListener = (event: unknown, details: { reason?: string }) => void
@@ -208,15 +207,12 @@ describe('Deep search target probe template', () => {
     const document = adapter.prepareNextDocument()!
     expect(document.consolePrefix).not.toBe(currentDocument.consolePrefix)
     webContents.navigate('https://page.example/watch/index.html')
-    expect(createEmbeddedBrowserResourceProbeScript({
+    expect(document.script).toBe(createEmbeddedBrowserPageProbeDocumentScript({
       consolePrefix: document.consolePrefix,
-    })).not.toContain('__OMNIFLOW_DEEP_SEARCH_PAGE_ADAPTER_V1__')
-    const targetProbeScript = createDeepSearchTargetProbeScript({
-      consolePrefix: document.consolePrefix,
-    })
-    expect(targetProbeScript).toContain('__OMNIFLOW_DEEP_SEARCH_PAGE_ADAPTER_V1__')
+    }))
+    expect(document.script).toContain('__OMNIFLOW_DEEP_SEARCH_PAGE_ADAPTER_V1__')
     const target = executeTargetProbe(
-      targetProbeScript,
+      document.script,
       message => webContents.emitConsole(message),
     )
 
@@ -303,7 +299,7 @@ describe('Deep search target probe template', () => {
     const document = adapter.prepareNextDocument()!
     webContents.navigate('https://page.example/watch/index.html')
     const target = executeTargetProbe(
-      createDeepSearchTargetProbeScript({ consolePrefix: document.consolePrefix }),
+      document.script,
       message => webContents.emitConsole(message),
     )
 

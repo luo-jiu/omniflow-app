@@ -1487,6 +1487,20 @@
 - legacy cleanup: 3 个实际操作 MSE 流的 catch action 从 Deep 归回 `mse-runtime`，所有移动项继续保持 `legacy/remove-after-cutover`；Deep cleanup 现为 28 项，边界是 `11 retain-or-adapt / 12 pure remove / 5 split-before-remove`。
 - validation: production MSE characterization `1 file / 1 passed`、MSE/Deep/relay/lifecycle 定向 `11 files / 30 passed`、应用 TypeScript `--noEmit`、full ESLint、sync tests `16/16`、metadata/固定上游校验（`187 planned tests`）和全仓 Vitest `202 files / 1377 passed / 3 skipped` 均通过。完整 build 仍为避免覆盖其他 Agent 的 dirty `dist-electron/**` 而不运行，且当前没有真实网站手工场景。
 
+## 2026-08-28: same target (Deep production atomic cutover)
+
+- observedHead / migrationTarget: 均为 `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本步完成 `deep-search-runtime` 的唯一 production dispatch 切换和 legacy cleanup。
+- reviewedThrough / portedThrough: 均保持 `null`；初始全面迁移仍有 17 项 open capability，不提前推进全局游标。
+- change groups: `production-dispatch-cutover`、`platform-host-extraction`、`legacy-deletion`、`validator-fixture-generalization` 与 `documentation-correction`。
+- affected capability IDs: `deep.runtime-hook-bundle`、`deep.manifest-key-discovery`、`deep.secure-page-relay`、`deep.catch-toolkit-page-settings`；四项均到达 `verified`，metadata 变为 `15 verified / 2 porting / 15 pending`。
+- fixtures/tests: 固定 Deep pure ports、page adapter、production document ingress、tokenized relay、page bridge、lifecycle 和 MSE 组合定向集为 `12 files / 31 passed`；`deep.probe-template-ingress` 现直接执行 `ElectronPageProbeEventAdapter` 产生的 production script，不再使用 target-only factory。
+- accepted differences: 无新增差异；Worker CSP 探测/回退、Blob URL 有界清理和 already-loaded document 下一 task 扫描继续使用 capability map 中已记录的平台差异。
+- excluded changes and reasons: 不修改 MSE 行为、main spool、renderer、IPC 或资源 authority；MSE hooks 在同一 IIFE 中先安装，不让异常页面的 Deep hook 安装失败阻断现有 MSE owner。
+- unresolved gaps: 真实网站手工回归尚未执行；`mse-runtime` 仍须对照固定 `catch.js` 完成 audio/video flush-reset、页面预算、main spool 与稳定性证据。
+- runtime changes: 新 `page-probe-runtime-core.ts` 只持有 console transport、资源投影和 MSE 字节 helper，`page-probe-host-api.ts` 只提供稳定 global contract/MSE fallback，`page-probe-document.ts` 按 host -> MSE -> global API -> MSE hooks -> generated owner -> Deep runtime/toolkit 组合唯一 production document script。
+- legacy cleanup: 删除旧 builder/wrapper、disabled hooks、manifest heuristic、whole-probe Worker bootstrap、toolkit state/storage、`probeResources`、混合 core/host 与 target-only factory；28 个 Deep cleanup 条目收口为 `11 retain-or-adapt / 17 removed`，validator 继续强制检查已删 symbol 不得回归。
+- validation: production Deep/MSE 定向 `12 files / 31 passed`、应用 TypeScript `--noEmit`、full ESLint、sync tests `16/16`、metadata/固定上游校验（`17 open / 106 cleanup / 187 planned tests`）和全仓 Vitest `202 files / 1377 passed / 3 skipped` 均通过。原始 `npm test` 会让 Vitest 误收 Node-native sync test 并报 `0 suite`，因此按既有门禁将该文件用 `node --test` 单跑并从 Vitest 排除。完整 build 为避免覆盖其他 Agent 的 dirty `dist-electron/**` 而不运行，当前也没有真实网站手工场景。
+
 ## Template
 
 ```markdown

@@ -56,19 +56,19 @@ OmniFlow 不运行 Cat Catch 浏览器扩展，而是把与产品目标相关的
 
 现有资源捕捉实现只能作为 characterization 输入，不能作为正确性 oracle。已确认的事实包括：
 
-- 深度 Worker/fetch/XHR/JSON/key hooks 被 `enableDeepRuntimeHooks = false` 关闭，外围 MSE hooks 仍运行。
-- deep discovery 的纯 port 已按固定 `search.js` 锁定 JSON 全 enumerable width、depth 21/22 边界、cycle、宽松 16-number key、inline M3U8/MPD、data URL 与当前/未来 base URL 回放；尚未接入 document-start runtime，不能据此打开 hooks 或宣称 deep unit 完成。
-- deep page relay 已由 production 的随机 document token、tab/WebContents/incarnation/navigation/origin/deep-mode binding、CDP 新文档安装和当前 frame subtree 注入提供平台等价边界；它已有伪造与 all-frame 安装测试，但必须等完整 deep runtime 接入后才能随 unit 一起 verified。
-- deep target runtime 已形成自包含 installer，覆盖幂等/恢复/重入门禁、Worker Blob CSP 异步探测与回退、bootstrap relay、fetch clone、XHR、JSON、TextDecoder 以及 slice/subarray/base64/fromCharCode/DataView/typed-array/join/escape/indexOf 经验面；target-only 完整 probe 已贯通既有 tokenized main ingress 和 toolkit round-trip，生产开关仍关闭，原子 cutover 与 cleanup 未完成前不得接入。
+- `deep-search-runtime` 已在唯一 production document-start factory 原子切换到固定 `search.js` 的 target owner；旧 disabled flag、Worker bootstrap、manifest heuristic、toolkit state 和 `probeResources` 已删除。
+- deep discovery 按固定 `search.js` 锁定 JSON 全 enumerable width、depth 21/22 边界、cycle、宽松 16-number key、inline M3U8/MPD、data URL 与当前/未来 base URL 回放，现已由 production page adapter 持有 document session。
+- deep page relay 由随机 document token、tab/WebContents/incarnation/navigation/origin/deep-mode binding、CDP 新文档安装和当前 frame subtree 注入提供平台等价边界；伪造、all-frame 和 production ingress 证据已随 unit 一起 verified。
+- deep runtime 覆盖幂等/恢复/重入门禁、Worker Blob CSP 异步探测与回退、bootstrap relay、fetch clone、XHR、JSON、TextDecoder 以及 slice/subarray/base64/fromCharCode/DataView/typed-array/join/escape/indexOf 经验面，并已贯通 tokenized main ingress 和 toolkit round-trip。
 - inline script 的 m3u8/mp4/flv 精确 regex、协议补全与重复候选，以及 Vimeo playlist URL gate、base path、track manifest、raw metadata 和 header-only empty master 已迁入可序列化 page-discovery factory。
-- target page adapter 已按固定 XHR/fetch/TextDecoder/root-string 分支顺序组合 runtime、document session 与 page helper，负责 DOMContentLoaded 调度、generated probe resource 物化和 nested Worker observation 回放；generated page/Worker composition 已有可执行测试，但 production template 尚未引用该 body，因此没有第二套 hooks 在运行。
-- target generated-resource page owner 已接管 signature 去重、Blob/base64 bytes、文件名和 open/export/read，并把非自身 key 委托给保留的 MSE handler；完整 probe 能从 main-owned resource key 读回 Cat Catch 归一化 manifest bytes，旧 `probeResources` 不再是 target 依赖。
+- production page adapter 按固定 XHR/fetch/TextDecoder/root-string 分支顺序组合 runtime、document session 与 page helper，负责 DOMContentLoaded 调度、generated resource 物化和 nested Worker observation 回放；只有一套 Deep hooks。
+- generated-resource page owner 接管 signature 去重、Blob/base64 bytes、文件名和 open/export/read，并把非自身 key 委托给 MSE handler；production probe 能从 main-owned resource key 读回 Cat Catch 归一化 manifest bytes。
 - 现有 production MSE state/helpers、page actions 与 MediaSource hooks 已从混合 Deep 文件机械拆到专用 body，并继续在同一 probe IIFE 中按原顺序组合；直接 characterization 已锁定单 owner、append/endOfStream、read/open/export/drain 和 resource event。该拆分只为解除 Deep cutover 依赖，不代表 MSE 固定上游 parity 已完成。
-- Catch Toolkit 的八项产品偏好已收敛为可序列化 page-origin owner，固定 `"checked"`、空字符串删除、selector/regex 验证、重载恢复、新 origin 重置和 storage 被阻止时的内存降级；target-only probe 已让既有 get/update bridge 使用该 owner，并向保留的 MSE/page actions 同步只读运行投影，production 继续由旧 probe 唯一持有。
+- Catch Toolkit 的八项产品偏好由 production page-origin owner 持有，固定 `"checked"`、空字符串删除、selector/regex 验证、重载恢复、新 origin 重置和 storage 被阻止时的内存降级；既有 get/update bridge 使用该 owner，并只向 MSE actions 同步运行投影。
 - discovery 已从一次性 helper 收敛为可序列化 document session，跨 JSON/fetch/XHR 观察保留 emitted/base/pending 状态；相对 manifest 可以在后续 hook 才出现媒体 URL 时按新 base 回放，一次性 `discoverResources` 只保留为测试和兼容 facade。
 - 网络捕捉由 production `EmbeddedBrowserCaptureRuntime` 唯一注册 `onSendHeaders -> onResponseStarted -> terminal cleanup`，旧 `onCompleted` 识别 bridge 已删除。
 - request context 由 main-only bounded vault 持有容量、TTL、owner 和 purpose；renderer 只接收 header capability，不接收 Cookie/Authorization 值。
-- HLS 固定目标的下载相关 parser/plan、key/MAP/range、静态/直播执行、retry/cancel、预处理和真实 ffmpeg 输出范围均已由 fixture 或可执行测试覆盖，并已在唯一 dispatch boundary 切换到 target owner；`network-capture` 与 `hls-engine` 均已完成原子 cutover。
+- HLS 固定目标的下载相关 parser/plan、key/MAP/range、静态/直播执行、retry/cancel、预处理和真实 ffmpeg 输出范围均已由 fixture 或可执行测试覆盖，并已在唯一 dispatch boundary 切换到 target owner；`network-capture`、`deep-search-runtime` 与 `hls-engine` 均已完成原子 cutover。
 - 受支持的加密 KEY 缺失、空或空白 URI 时，pure plan 保留固定 hls.js 的 `encrypted=true` 与无可执行 key ref 事实；本地 task 在任何网络请求前要求有效手动 AES-128 key，否则明确拒绝，不能把 ciphertext 当明文继续交付。
 - 固定 hls.js fast parser 的行边界语义也已迁入：`CR`、`LF` 和 `CRLF` 清单都会进入同一 media/master 解析与下载计划，纯 CR 不再被本地切行预处理误拒绝。
 - 固定 fast parser 的行首 token 优先级已迁入：标签标记前紧邻 ASCII 空格时 URI alternative 先命中，该行会成为零时长 fragment；纯 tab 缩进则跳到 tag alternative。空格前缀的 `EXTM3U` 继续按缺失格式头拒绝，不能被预处理 trim 成合法清单。
@@ -87,9 +87,9 @@ OmniFlow 不运行 Cat Catch 浏览器扩展，而是把与产品目标相关的
 - HLS 真实输出门禁已覆盖 clear/AES-128 AAC、AES-256 CBC/CTR AAC，以及加密 fMP4/H264 视频与独立 AES-128/AAC 音轨的双本地 playlist 合并；ffmpeg 的 protocol/extension 策略按 input 重复声明，避免第二轨本地 key 被默认扩展名策略拒绝。ffmpeg HLS demuxer 不识别 AES-256 METHOD，因而 AES-256 的 key/MAP/media 先按固定 hls.js Web Crypto 模式在本地工作目录解密，再以 clear playlist 进入同一 ffmpeg owner。CBC 加密 MAP 的 BYTERANGE 还会按固定 FragmentLoader 以明文 length 补齐 cipher request，并在非零 offset 前取一个 ciphertext block 重置 IV；AES-128/256 都会产出精确声明长度的 clear MAP，避免把原始 range 直接交给 ffmpeg。
 - DASH 手写 parser 对 `r=-1`、多 BaseURL、动态 MPD 等语义不完整。
 - HLS、DASH、MSE、ffmpeg、临时文件和输出交付尚无统一 task/cleanup 合同。
-- network classifier/rules、OmniFlow 产品 policy 与持久化设置、page URL policy、main-only vault/store、renderer-safe contract/reducer、Electron network/probe adapter、owner lifecycle、main composition 和固定-purpose resource access 均已在 production target chain 形成唯一 owner，旧 bridge/state/classifier/header DTO 已删除。data/blob 与未捕获拖拽、DASH 直拉/track、旧 toolkit、deep/MSE runtime 和其他 unit 仍按各自边界迁移，不保留第二套 network owner。
+- network 与 Deep 均已在 production target chain 形成唯一 owner；data/blob 与未捕获拖拽、DASH 直拉/track、MSE parity 和其他 unit 仍按各自边界迁移，不保留第二套已切换算法。
 
-因此当前 32 项能力中有 11 项 `verified`、5 项 `porting`、1 项 `ported-unverified`、15 项 `pending`；`network-capture` 与 `hls-engine` 已完成 production cutover，其余 5 个 unit 仍不能因为局部 target 测试通过就提前标记为完成。
+因此当前 32 项能力中有 15 项 `verified`、2 项 `porting`、15 项 `pending`；`network-capture`、`deep-search-runtime` 与 `hls-engine` 已完成 production cutover，其余 4 个 unit 仍不能因为局部 target 测试通过就提前标记为完成。
 
 ## 4. 长期事实文件
 
@@ -333,5 +333,5 @@ tools/cat-catch-lab/fixtures/<fixture-id>/
 ## 12. 当前下一步
 
 1. 运行轻量 `cat-catch:validate`，确认版本、32 项能力和 106 个 cleanup 条目自洽。
-2. 按当前 `11 retain / 12 pure remove / 5 split-before-remove` 边界，收敛通用 console emitter、page host/global API 与 generated-resource read，再在唯一 dispatch boundary 原子切换并删除纯 deep block；生产 Deep hooks 在 cleanup 门禁通过前保持关闭。
-3. 为 MSE、DASH、transfer/output unit 补固定目标的直接行为依赖、真实 test refs 和 production-equivalent integration，不把现有 legacy 行为当 oracle。
+2. 从 `mse-runtime` 开始对照固定 `catch.js` 补 audio/video flush-reset、页面预算、main spool 与稳定性证据；不把本次 Deep cutover 中保留的 MSE 行为当成 parity。
+3. 为 DASH、transfer/output unit 补固定目标的直接行为依赖、真实 test refs 和 production-equivalent integration，不把现有 legacy 行为当 oracle。

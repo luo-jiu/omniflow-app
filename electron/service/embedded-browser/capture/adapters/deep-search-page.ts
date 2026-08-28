@@ -465,7 +465,6 @@ export function createDeepSearchPageAdapterBodySource(input?: {
     `const createDeepSearchPageDiscovery = ${createDeepSearchPageDiscoverySource()};`,
     `const installDeepSearchRuntime = ${createDeepSearchRuntimeInstallerSource()};`,
     'installDeepSearchPageAdapter({',
-    '  consumeWorkerMessage: consumeWorkerRelayMessage,',
     '  createDiscoverySession: createDeepSearchDiscoverySession,',
     '  createPageDiscovery: createDeepSearchPageDiscovery,',
     "  document: typeof document === 'undefined' ? undefined : document,",

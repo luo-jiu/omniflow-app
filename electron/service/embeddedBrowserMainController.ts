@@ -139,7 +139,7 @@ import type {
 import type { ExternalToolKey } from './embedded-browser/integrations/external-tools'
 import {
   EMBEDDED_BROWSER_RESOURCE_INSTALL_ERROR_KEY,
-} from './embeddedBrowserResourceProbe'
+} from './embeddedBrowserResourceProbeScriptTemplate'
 import {
   deriveEmbeddedBrowserMergedFileName,
   mergeEmbeddedBrowserResourceTracks,

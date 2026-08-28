@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
@@ -38,6 +38,27 @@ function completeEveryUnitForTarget(documents, testId) {
     capability.testRefs = []
     capability.acceptedDifferences = ['Explicitly outside the OmniFlow product boundary.']
   }
+}
+
+function findOpenUnitId(documents, options = {}) {
+  for (const unit of documents.capabilityMap.cutoverUnits) {
+    const capabilities = documents.capabilityMap.capabilities
+      .filter(capability => capability.cutoverUnitId === unit.id)
+    const closed = capabilities.length > 0 && capabilities
+      .every(capability => ['excluded', 'verified'].includes(capability.syncState))
+    if (closed || capabilities.length < 2) continue
+    if (!options.withPresentRemovableLegacy) return unit.id
+
+    const hasPresentRemovableLegacy = documents.legacyCleanup.entries.some((entry) => {
+      if (entry.cutoverUnitId !== unit.id || entry.cleanupAction !== 'remove-after-cutover') {
+        return false
+      }
+      const sourcePath = path.join(defaultAppRoot, entry.path)
+      return existsSync(sourcePath) && readFileSync(sourcePath, 'utf8').includes(entry.symbol)
+    })
+    if (hasPresentRemovableLegacy) return unit.id
+  }
+  throw new Error('Expected at least one matching open cutover unit')
 }
 
 test('accepts the checked-in Cat Catch sync metadata', () => {
@@ -89,8 +110,9 @@ test('binds every verified planned test to a real test ref', () => {
 
 test('rejects partial unit verification', () => {
   const documents = loadClonedDocuments()
+  const unitId = findOpenUnitId(documents)
   const capability = documents.capabilityMap.capabilities
-    .find(item => item.cutoverUnitId === 'deep-search-runtime')
+    .find(item => item.cutoverUnitId === unitId)
   capability.syncState = 'verified'
   capability.syncedThrough = documents.state.migrationTarget
   capability.targetRefs = ['package.json#cat-catch:validate']
@@ -104,8 +126,9 @@ test('rejects partial unit verification', () => {
 
 test('rejects a closed unit while removable legacy symbols remain', () => {
   const documents = loadClonedDocuments()
+  const unitId = findOpenUnitId(documents, { withPresentRemovableLegacy: true })
   for (const capability of documents.capabilityMap.capabilities) {
-    if (capability.cutoverUnitId !== 'deep-search-runtime') continue
+    if (capability.cutoverUnitId !== unitId) continue
     capability.syncState = 'verified'
     capability.syncedThrough = documents.state.migrationTarget
     capability.targetRefs = ['package.json#cat-catch:validate']

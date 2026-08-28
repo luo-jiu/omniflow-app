@@ -38,9 +38,9 @@ downloader/
 - `network/classifier.ts`：纯 request/response 分类和去重决策。
 - `network/request-url-helpers.ts`：页面 URL pattern、黑白名单反转与 special-page 规则。
 - `deep-search/discovery.ts`：固定 `search.js` 的 JSON/inline manifest/key 发现与跨 hook base URL 回放语义，提供可序列化 document session 和一次性 facade。
-- `deep-search/runtime.ts`：固定 `search.js` 的 Worker/JSON/XHR/fetch/TextDecoder 与 key/string experience hook 安装语义；当前仅作为可执行 target port，待完整 deep unit 原子接入。
+- `deep-search/runtime.ts`：固定 `search.js` 的 Worker/JSON/XHR/fetch/TextDecoder 与 key/string experience hook 安装语义；由 production document factory 通过 page adapter 唯一安装。
 - `deep-search/page-discovery.ts`：固定 inline script URL 扫描与 Vimeo `playlist.json` 转 HLS 语义，提供可序列化 factory，Blob URL 交给平台 callback 物化。
-- `deep-search/toolkit-state.ts`：固定页面 origin 内的 Catch Toolkit 偏好读取、写入、规则验证与重载语义，提供可序列化的唯一 page state owner；当前仅由 target 测试调用。
+- `deep-search/toolkit-state.ts`：固定页面 origin 内的 Catch Toolkit 偏好读取、写入、规则验证与重载语义，提供 production 使用的可序列化唯一 page state owner。
 - `hls/parser.ts`：固定 hls.js/Cat Catch 的 manifest 下载相关解析语义。
 - `hls/plan.ts`：把 parser 输出投影为平台 adapter 消费的唯一 HLS 下载计划。
 - `hls/segment-query.ts`：固定 `tsAddArg` 的默认值提取和 fragment-only query 改写。
@@ -51,11 +51,11 @@ HLS 的 main/preload/renderer 共享 DTO 由 `../contracts/hls.ts` 唯一定义�
 
 逐项状态以 capability map 为准。`network-capture` 与 `hls-engine` 已在固定目标完成验证、dispatch 切换和 legacy symbol 清理；其余 unit 仍按同一协议推进。
 
-Deep 的 Electron page adapter 位于 `../../capture/adapters/deep-search-page.ts`：它只组合本目录的 runtime/discovery/page factory 与既有 probe resource/relay callback。相邻 `deep-search-toolkit.ts` 把本目录的 toolkit state 接到既有 get/update bridge，并只向保留的 MSE/page actions 同步运行投影。`deep-search-probe.ts` 提供 target-only 完整组合，已有 generated page/Worker、tokenized main ingress 和 toolkit round-trip 测试；production template 尚未切换，cutover 前不能把它当成已启用能力。
+Deep 的 Electron page adapter 位于 `../../capture/adapters/deep-search-page.ts`：它只组合本目录的 runtime/discovery/page factory 与 page-host callback。相邻 `deep-search-toolkit.ts` 把本目录的 toolkit state 接到既有 get/update bridge，并只向 MSE actions 同步运行投影。`page-probe-document.ts` 是唯一 production document-start composition，generated page/Worker、tokenized main ingress 和 toolkit round-trip 由其集成测试锁定。
 
-相邻 `page-generated-resource.ts` 是 target Deep 的 page-origin bytes owner，负责 generated manifest/key 的 signature 去重、Blob/base64、文件名和 open/export/read；非自身 key 委托给当前 MSE handler。完整 probe 已能从 main-owned resource key 读取该 owner 的 Cat Catch 归一化 manifest bytes，不再依赖旧 `probeResources` 状态。
+相邻 `page-generated-resource.ts` 是 production Deep 的 page-origin bytes owner，负责 generated manifest/key 的 signature 去重、Blob/base64、文件名和 open/export/read；非自身 key 委托给当前 MSE handler。production probe 能从 main-owned resource key 读取该 owner 的 Cat Catch 归一化 manifest bytes，旧 `probeResources` 已删除。
 
-现有 production MSE 的 state/helpers、page actions 与 MediaSource hooks 已机械拆到 `../../capture/adapters/mse-page-runtime.ts`，page global host 位于相邻 `page-probe-runtime-host.ts`；它们仍由同一个 probe IIFE 安装，没有第二个 MSE owner。该抽离只为解除 Deep 与 MSE 的文件级纠缠，`mse-runtime` 仍须在本目录建立固定 `catch.js` 的行为 port 与差分证据后才能切换。
+现有 production MSE 的 state/helpers、page actions 与 MediaSource hooks 位于 `../../capture/adapters/mse-page-runtime.ts`，通用 transport 和 global API 分别位于 `page-probe-runtime-core.ts` 与 `page-probe-host-api.ts`；它们由同一 probe IIFE 安装，没有第二个 MSE owner。`mse-runtime` 仍须在本目录建立固定 `catch.js` 的行为 port 与差分证据后才能切换。
 
 `embeddedBrowserCatchToolkitPageBridge.ts`、`embeddedBrowserResourcePageBridge.ts` 的受控脚本生成器，以及 probe template/console prefix 属于保留的平台 adapter，不是第二套 Cat Catch 算法；其 payload/resource key 转发和缺失 handler 行为由 `embeddedBrowserPageBridge.test.ts` 锁定。
 

@@ -1,10 +1,8 @@
 import crypto from 'node:crypto'
 
-import {
-  EMBEDDED_BROWSER_RESOURCE_CONSOLE_PREFIX,
-  createEmbeddedBrowserResourceProbeScript,
-} from '../../../embeddedBrowserResourceProbe'
+import { EMBEDDED_BROWSER_RESOURCE_CONSOLE_PREFIX } from '../../../embeddedBrowserResourceProbeScriptTemplate'
 import type { ResourceWriteResult, TabCaptureBinding } from '../state/resource-state-store'
+import { createEmbeddedBrowserPageProbeDocumentScript } from './page-probe-document'
 
 type ConsoleMessageListener = (
   event: unknown,
@@ -227,7 +225,7 @@ export class ElectronPageProbeEventAdapter {
     return {
       ...input,
       consolePrefix,
-      script: createEmbeddedBrowserResourceProbeScript({ consolePrefix }),
+      script: createEmbeddedBrowserPageProbeDocumentScript({ consolePrefix }),
     }
   }
 

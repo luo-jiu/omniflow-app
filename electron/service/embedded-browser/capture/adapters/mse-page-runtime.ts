@@ -41,8 +41,6 @@ export function embeddedBrowserMsePageRuntimeCoreBody() {
   let trackedMediaObserver: MutationObserver | null = null
 
   function buildCatchToolkitState(): ProbeCatchToolkitState {
-    const selectorEvaluation = evaluateSelectorRule(catchToolkitState.selectorRule)
-    const regexEvaluation = evaluateRegexRule(catchToolkitState.regexRule)
     const capturedMediaSizeBytes = Array.from(mseStreams.values()).reduce((totalBytes, stream) => {
       return totalBytes + Math.max(0, Number(stream.totalBytes || 0))
     }, 0)
@@ -61,11 +59,11 @@ export function embeddedBrowserMsePageRuntimeCoreBody() {
     return {
       audioResourceKey: audioStream ? createMseResourceKey(audioStream.streamId) : '',
       audioSizeBytes: audioStream ? Math.max(0, Number(audioStream.totalBytes || 0)) : 0,
-      autoSeekToBufferedEnd: catchToolkitState.autoSeekToBufferedEnd,
-      autoDownloadOnComplete: catchToolkitState.autoDownloadOnComplete,
+      autoSeekToBufferedEnd: catchToolkitProjection.autoSeekToBufferedEnd,
+      autoDownloadOnComplete: catchToolkitProjection.autoDownloadOnComplete,
       capturedMediaSizeBytes,
-      clearCacheOnComplete: catchToolkitState.clearCacheOnComplete,
-      currentFileName: resolveCatchToolkitFileName(),
+      clearCacheOnComplete: catchToolkitProjection.clearCacheOnComplete,
+      currentFileName: resolveMseCaptureFileName(),
       diagnostics: {
         appendBufferCount: probeDiagnostics.appendBufferCount,
         frameUrl: currentLocationHref,
@@ -78,15 +76,15 @@ export function embeddedBrowserMsePageRuntimeCoreBody() {
         sourceBufferCount: probeDiagnostics.sourceBufferCount,
       },
       isCaptureComplete,
-      manualFileName: catchToolkitState.manualFileName,
+      manualFileName: catchToolkitProjection.manualFileName,
       primaryResourceKey: primaryStream ? createMseResourceKey(primaryStream.streamId) : '',
-      regexWarning: regexEvaluation.warning,
-      regexRule: regexEvaluation.rule,
-      restartAlwaysFromBeginning: catchToolkitState.restartAlwaysFromBeginning,
-      selectorWarning: selectorEvaluation.warning,
-      selectorRule: selectorEvaluation.rule,
+      regexWarning: catchToolkitProjection.regexWarning,
+      regexRule: catchToolkitProjection.regexRule,
+      restartAlwaysFromBeginning: catchToolkitProjection.restartAlwaysFromBeginning,
+      selectorWarning: catchToolkitProjection.selectorWarning,
+      selectorRule: catchToolkitProjection.selectorRule,
       streamCount: mseStreams.size,
-      trimExtraMediaHeaders: catchToolkitState.trimExtraMediaHeaders,
+      trimExtraMediaHeaders: catchToolkitProjection.trimExtraMediaHeaders,
       videoResourceKey: videoStream ? createMseResourceKey(videoStream.streamId) : '',
       videoSizeBytes: videoStream ? Math.max(0, Number(videoStream.totalBytes || 0)) : 0,
     }
@@ -104,7 +102,7 @@ export function embeddedBrowserMsePageRuntimeCoreBody() {
   }
 
   function normalizeBuffersForPlayback(buffers: ArrayBuffer[]) {
-    if (!catchToolkitState.trimExtraMediaHeaders) {
+    if (!catchToolkitProjection.trimExtraMediaHeaders) {
       return buffers
     }
     if (!Array.isArray(buffers) || buffers.length <= 1) {
@@ -155,7 +153,7 @@ export function embeddedBrowserMsePageRuntimeCoreBody() {
       base64: arrayBufferToBase64(combinedBuffer),
       capturedAt: Date.now(),
       event: 'mse-flush',
-      fileName: `${resolveCatchToolkitFileName()}${stream.streamType ? `-${stream.streamType}` : ''}.${guessExtensionFromMimeType(stream.mimeType, stream.streamType)}`,
+      fileName: `${resolveMseCaptureFileName()}${stream.streamType ? `-${stream.streamType}` : ''}.${guessExtensionFromMimeType(stream.mimeType, stream.streamType)}`,
       mimeType: stream.mimeType,
       pageUrl: currentLocationHref,
       resourceKey: createMseResourceKey(streamId),
@@ -211,7 +209,7 @@ export function embeddedBrowserMsePageActionsBody() {
     trackedMediaElements.add(element)
 
     element.addEventListener('progress', () => {
-      if (!catchToolkitState.autoSeekToBufferedEnd) {
+      if (!catchToolkitProjection.autoSeekToBufferedEnd) {
         return
       }
       try {
@@ -233,7 +231,7 @@ export function embeddedBrowserMsePageActionsBody() {
     })
 
     const attemptRestartFromBeginning = () => {
-      if (!catchToolkitState.restartAlwaysFromBeginning || autoRestartHandledMediaElements.has(element)) {
+      if (!catchToolkitProjection.restartAlwaysFromBeginning || autoRestartHandledMediaElements.has(element)) {
         return
       }
       try {
@@ -250,7 +248,7 @@ export function embeddedBrowserMsePageActionsBody() {
     }, { once: true })
 
     const initialRestartTimer = window.setInterval(() => {
-      if (autoRestartHandledMediaElements.has(element) || !catchToolkitState.restartAlwaysFromBeginning) {
+      if (autoRestartHandledMediaElements.has(element) || !catchToolkitProjection.restartAlwaysFromBeginning) {
         window.clearInterval(initialRestartTimer)
         return
       }
@@ -357,7 +355,7 @@ export function embeddedBrowserMsePageActionsBody() {
       return false
     }
 
-    const baseName = resolveCatchToolkitFileName()
+    const baseName = resolveMseCaptureFileName()
     downloadableStreams.forEach((stream) => {
       const playableBuffers = normalizeBuffersForPlayback(stream.buffers)
       const blob = new Blob(playableBuffers, { type: stream.mimeType })
@@ -376,7 +374,7 @@ export function embeddedBrowserMsePageActionsBody() {
       }, 1000)
     })
 
-    if (catchToolkitState.clearCacheOnComplete) {
+    if (catchToolkitProjection.clearCacheOnComplete) {
       setTimeout(() => {
         clearCatchMediaCacheInternal()
       }, 0)
@@ -463,7 +461,7 @@ export function embeddedBrowserMsePageActionsBody() {
     if (!stream) {
       return 'media.bin'
     }
-    const baseName = resolveCatchToolkitFileName()
+    const baseName = resolveMseCaptureFileName()
     const streamSuffix = stream.streamType ? `-${stream.streamType}` : ''
     const extension = guessExtensionFromMimeType(stream.mimeType, stream.streamType)
     return `${baseName}${streamSuffix}.${extension}`
@@ -483,7 +481,7 @@ export function embeddedBrowserMsePageActionsBody() {
     anchor.download = createMseExportName(streamId)
     anchor.click()
     anchor.remove()
-    if (catchToolkitState.clearCacheOnComplete) {
+    if (catchToolkitProjection.clearCacheOnComplete) {
       setTimeout(() => {
         clearCatchMediaCacheInternal()
       }, 0)
@@ -674,10 +672,10 @@ export function embeddedBrowserMsePageRuntimeHooksBody() {
           streamIds.forEach((streamId) => {
             finalizeMseStream(streamId)
           })
-          if (catchToolkitState.autoDownloadOnComplete) {
+          if (catchToolkitProjection.autoDownloadOnComplete) {
             return result
           }
-          if (catchToolkitState.clearCacheOnComplete) {
+          if (catchToolkitProjection.clearCacheOnComplete) {
             setTimeout(() => {
               clearCatchMediaCacheInternal()
             }, 0)
