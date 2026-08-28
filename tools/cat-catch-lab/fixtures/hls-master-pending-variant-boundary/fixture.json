@@ -1,0 +1,25 @@
+{
+  "fixtureId": "hls-master-pending-variant-boundary",
+  "capabilityIds": [
+    "hls.parser-planner"
+  ],
+  "upstreamCommit": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
+  "status": "active",
+  "oracle": "upstream-executable",
+  "sourceRefs": [
+    "lib/hls.min.js#MASTER_PLAYLIST_REGEX",
+    "lib/hls.min.js#parseMasterPlaylist",
+    "lib/hls.min.js#parseMasterPlaylistMedia",
+    "js/m3u8.js#MANIFEST_PARSED"
+  ],
+  "inputs": {
+    "consecutive": "consecutive-stream-inf.m3u8",
+    "interleavedMedia": "interleaved-media.m3u8",
+    "lateDefinedMedia": "late-defined-media.m3u8",
+    "swallowedDefine": "swallowed-define.m3u8"
+  },
+  "expected": "expected.json",
+  "testRefs": [
+    "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.master-pending-variant-boundary"
+  ]
+}

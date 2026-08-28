@@ -735,6 +735,7 @@
           "path": "lib/hls.min.js",
           "anchors": [
             "1.6.16",
+            "#EXT-X-STREAM-INF:([^\\r\\n]*)(?:[\\r\\n](?:#[^\\r\\n]*)?)*([^\\r\\n]+)",
             "#EXTINF:\\s*(\\d*(?:\\.\\d+)?)(?:,(.*)\\s+)?",
             "(?!#) *(\\S[^\\r\\n]*)",
             "#EXT-X-(PROGRAM-DATE-TIME|BYTERANGE|DATERANGE|DEFINE|KEY|MAP|PART|PART-INF|PLAYLIST-TYPE|PRELOAD-HINT|RENDITION-REPORT|SERVER-CONTROL|SKIP|START):(.+)",
@@ -812,6 +813,7 @@
         "hls.empty-valued-tag-boundary",
         "hls.media-parser-mode-isolation",
         "hls.master-parser-mode-isolation",
+        "hls.master-pending-variant-boundary",
         "hls.whitespace-valued-tag-boundary",
         "hls.segment-query-rewrite",
         "hls.segment-query-static-plan-integration",
@@ -850,6 +852,7 @@
         "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.empty-valued-tag-boundary",
         "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.media-parser-mode-isolation",
         "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.master-parser-mode-isolation",
+        "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.master-pending-variant-boundary",
         "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.whitespace-valued-tag-boundary",
         "electron/service/embedded-browser/cat-catch-port/hls/segment-query.test.ts#hls.segment-query-rewrite",
         "src/features/tool-workspace/hooks/useHlsDownloadTask.test.ts#hls.segment-query-static-plan-integration",

@@ -1,0 +1,4 @@
+#EXTM3U
+#EXT-X-STREAM-INF:BANDWIDTH=100000
+#EXT-X-DEFINE:NAME="child",VALUE="nested.m3u8"
+{$child}

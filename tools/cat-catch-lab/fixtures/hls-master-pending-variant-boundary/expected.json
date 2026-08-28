@@ -1,0 +1,23 @@
+{
+  "baseUrlRoot": "https://media.example/master-pending/",
+  "consecutive": {
+    "bandwidth": 100000,
+    "resolution": "320x180",
+    "url": "https://media.example/master-pending/video.m3u8"
+  },
+  "interleavedMedia": {
+    "rendition": {
+      "groupId": "aud",
+      "name": "Main",
+      "type": "AUDIO",
+      "url": "https://media.example/master-pending/audio.m3u8"
+    },
+    "variant": {
+      "audioGroupId": "aud",
+      "bandwidth": 100000,
+      "url": "https://media.example/master-pending/video.m3u8"
+    }
+  },
+  "lateDefinedMediaUrl": "https://media.example/master-pending/late-audio.m3u8",
+  "swallowedDefineError": "Missing preceding EXT-X-DEFINE tag for Variable Reference: \"child\""
+}

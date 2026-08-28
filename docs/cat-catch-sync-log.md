@@ -1025,6 +1025,20 @@
 - legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
 - validation: 固定 Cat Catch vendor executable oracle 输出两片与上述终态；失败证据为新增用例报 `Missing format identifier #EXTM3U`。实现后 parser `35/35`、完整 HLS 集合 `16 files / 105 tests`、全仓 ESLint、fixture/capability JSON、轻量 validator、固定上游 anchor 校验、同步校验 `16/16`、metadata `7 units / 32 capabilities / 202 anchors / 106 cleanup entries / 149 planned IDs / 103 active refs` 和 scoped diff check 通过。全仓 Vitest 为 `1144 passed / 3 skipped`，失败只来自其他 Agent 在途的 media artifact upload/orchestrator：3 个 suite 初始化失败和 4 个 executor 断言/超时；同步 Node tests 被 Vitest 扫入时报无 suite，但已单独 `16/16`。TypeScript 同样被该在途模块的 8 个类型错误阻断。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
 
+## 2026-08-28: same target (HLS master pending variant boundary)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，固定实际 vendor 为 hls.js `1.6.16`。
+- reviewedThrough / portedThrough: 均保持 `null`；本步闭合 master `STREAM-INF` pending regex 的跨行分支顺序，仍未完成 hls-engine cutover。
+- change groups: `behavioral`（首 variant 声明所有权与中间 comment 吞并）和 `second-pass-projection`（夹在 pending match 内的 MEDIA 仍由独立扫描投影）。
+- affected capability IDs: `hls.parser-planner` 保持 `ported-unverified`；新增 1 个 active test ID 和 1 个固定上游 anchor。
+- fixtures/tests: 新增 upstream-executable fixture `hls-master-pending-variant-boundary`；`hls.master-pending-variant-boundary` 覆盖连续 `STREAM-INF` 保留首个 bandwidth/resolution、中间 `DEFINE` 不创建变量并产生固定 missing-reference error、中间 `MEDIA` 仍产生 AUDIO rendition/group，以及 MEDIA 在第二次扫描中使用后置 `DEFINE`。
+- accepted difference: 无。固定 vendor 对连续声明只输出 `100000 / 320x180 / video.m3u8`，对中间 DEFINE 报缺失变量，同时仍输出 interleaved AUDIO track；OmniFlow 保持相同选择投影。
+- excluded changes and reasons: 不引入 content steering、session data 或 START 的 renderer DTO；这些字段不被 Cat Catch 当前下载选择与 `parseTs` 消费。
+- unresolved gaps: HLS 其余真正影响下载的 parser 差分、加密 fMP4/video 与独立双轨的真实输出组合、真实网站手工验证和最终 hls-engine cutover。
+- runtime changes: pure master parser 在已有 pending variant 时吞掉除 `EXT-X-MEDIA` 外的 `#` 行，直到首个非标签 URI 完成 variant；所有 MEDIA 延迟到首轮变量收集结束后统一投影，保留等价第二次扫描结果。现有 owner、IPC 和生产接线不变。
+- legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
+- validation: 失败证据为新增用例把连续声明错误投影成 `900000 / 1280x720`。实现后 parser `36/36`、完整 HLS 集合 `16 files / 108 tests`、全仓 ESLint、fixture/capability JSON、轻量 validator、固定上游 anchor 校验、同步校验 `16/16`、metadata `7 units / 32 capabilities / 203 anchors / 106 cleanup entries / 150 planned IDs / 104 active refs` 和 scoped diff check 通过。排除 Node 同步测试的全仓 Vitest 为 `1222 passed / 3 skipped`，唯一失败来自其他 Agent 在途的 `agent-orchestrator` 上传接口；TypeScript 同样只被该在途模块的 4 个类型错误阻断。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
+
 ## Template
 
 ```markdown

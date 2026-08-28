@@ -191,6 +191,30 @@ const masterModeExpected = JSON.parse(readFileSync(`${masterModeFixtureRoot}/${m
     url: string
   }>
 }
+const masterPendingFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-master-pending-variant-boundary', import.meta.url))
+const masterPendingFixture = JSON.parse(readFileSync(`${masterPendingFixtureRoot}/fixture.json`, 'utf8')) as {
+  expected: string
+  inputs: {
+    consecutive: string
+    interleavedMedia: string
+    lateDefinedMedia: string
+    swallowedDefine: string
+  }
+}
+const masterPendingExpected = JSON.parse(readFileSync(`${masterPendingFixtureRoot}/${masterPendingFixture.expected}`, 'utf8')) as {
+  baseUrlRoot: string
+  consecutive: {
+    bandwidth: number
+    resolution: string
+    url: string
+  }
+  interleavedMedia: {
+    rendition: { groupId: string; name: string; type: string; url: string }
+    variant: { audioGroupId: string; bandwidth: number; url: string }
+  }
+  lateDefinedMediaUrl: string
+  swallowedDefineError: string
+}
 const integerTagFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-integer-tag-token-boundary', import.meta.url))
 const integerTagFixture = JSON.parse(readFileSync(`${integerTagFixtureRoot}/fixture.json`, 'utf8')) as {
   expected: string
@@ -1172,6 +1196,39 @@ describe('Cat Catch HLS parser', () => {
         'utf8',
       ),
     })).toThrow(masterModeExpected.noLevelsError)
+  })
+
+  it('hls.master-pending-variant-boundary', () => {
+    const parseInput = (name: keyof typeof masterPendingFixture.inputs) => (
+      parseHlsManifest({
+        baseUrl: `${masterPendingExpected.baseUrlRoot}${masterPendingFixture.inputs[name]}`,
+        text: readFileSync(
+          `${masterPendingFixtureRoot}/${masterPendingFixture.inputs[name]}`,
+          'utf8',
+        ),
+      })
+    )
+
+    const consecutive = parseInput('consecutive')
+    expect(consecutive.variants).toHaveLength(1)
+    expect(consecutive.variants[0]).toMatchObject(masterPendingExpected.consecutive)
+
+    const interleavedMedia = parseInput('interleavedMedia')
+    expect(interleavedMedia.variants).toHaveLength(1)
+    expect(interleavedMedia.variants[0]).toMatchObject(
+      masterPendingExpected.interleavedMedia.variant,
+    )
+    expect(interleavedMedia.renditions).toHaveLength(1)
+    expect(interleavedMedia.renditions[0]).toMatchObject(
+      masterPendingExpected.interleavedMedia.rendition,
+    )
+
+    const lateDefinedMedia = parseInput('lateDefinedMedia')
+    expect(lateDefinedMedia.renditions[0]?.url)
+      .toBe(masterPendingExpected.lateDefinedMediaUrl)
+
+    expect(() => parseInput('swallowedDefine'))
+      .toThrow(masterPendingExpected.swallowedDefineError)
   })
 
   it('hls.integer-tag-token-boundary', () => {

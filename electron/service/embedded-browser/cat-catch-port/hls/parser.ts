@@ -10,7 +10,8 @@
  * hls.map-leading-byterange-transfer, hls-valued-tag-boundary,
  * hls-extinf-token-boundary, hls-empty-valued-tag-boundary,
  * hls-whitespace-valued-tag-boundary, hls-media-parser-mode-isolation,
- * hls-master-parser-mode-isolation, hls-line-ending-boundary
+ * hls-master-parser-mode-isolation, hls-line-ending-boundary,
+ * hls-master-pending-variant-boundary
  */
 
 import { createHlsDefaultIv } from './decrypt'
@@ -749,6 +750,7 @@ export function parseHlsManifest(input: {
   const segmentKeyStates: Array<ReadonlyMap<string, CatCatchHlsKey> | undefined> = []
   const variants: CatCatchHlsVariant[] = []
   const renditions: CatCatchHlsRendition[] = []
+  const masterMediaLines: string[] = []
 
   function rememberKey(key: CatCatchHlsKey | undefined) {
     if (!key?.url && !key?.uri) return
@@ -805,6 +807,14 @@ export function parseHlsManifest(input: {
       pendingVariantLine = undefined
       continue
     }
+    if (pendingVariantLine && line.startsWith('#')) {
+      // MASTER_PLAYLIST_REGEX consumes intervening comments as part of the
+      // pending STREAM-INF match. MEDIA is still collected by its second pass.
+      if (line.startsWith('#EXT-X-MEDIA:')) {
+        masterMediaLines.push(line)
+      }
+      continue
+    }
     if (!line.startsWith('#')) {
       if (hasMediaPlaylistSyntax) addSegment(line, false)
       continue
@@ -830,8 +840,7 @@ export function parseHlsManifest(input: {
       continue
     }
     if (!hasMediaPlaylistSyntax && line.startsWith('#EXT-X-MEDIA:')) {
-      const rendition = createHlsRendition(line, baseUrl, variableState)
-      if (rendition) renditions.push(rendition)
+      masterMediaLines.push(line)
       continue
     }
     if (!hasMediaPlaylistSyntax) continue
@@ -993,6 +1002,11 @@ export function parseHlsManifest(input: {
       hasEndList = true
     }
   }
+
+  masterMediaLines.forEach((line) => {
+    const rendition = createHlsRendition(line, baseUrl, variableState)
+    if (rendition) renditions.push(rendition)
+  })
 
   if (hasMediaPlaylistSyntax && targetDuration === undefined) {
     assignPlaylistParsingError(variableState, 'Missing Target Duration')
