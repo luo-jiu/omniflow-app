@@ -109,6 +109,7 @@ export type EmbeddedBrowserHlsDownloadFragment = {
   byteRange?: EmbeddedBrowserHlsByteRange
   discontinuitySequence: number
   duration: number
+  encrypted?: boolean
   index: number
   initSegment?: EmbeddedBrowserHlsDownloadMapRef
   key?: EmbeddedBrowserHlsDownloadKeyRef

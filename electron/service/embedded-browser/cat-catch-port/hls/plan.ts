@@ -26,6 +26,7 @@ export function createHlsDownloadPlan(input: {
     byteRange: segment.byteRange,
     discontinuitySequence: segment.discontinuitySequence,
     duration: segment.duration,
+    encrypted: segment.encrypted,
     index: segment.index,
     initSegment: segment.map ? {
       byteRange: segment.map.byteRange,
@@ -51,8 +52,9 @@ export function createHlsDownloadPlan(input: {
   const suggestedThreadCount = Math.min(6, Math.max(1, fragments.length || 1))
   const plan: EmbeddedBrowserHlsDownloadPlan = {
     durationSeconds: manifest.durationSeconds,
-    encryptedSegmentCount: fragments.filter((fragment) => (
-      fragment.key?.url || fragment.key?.method === 'AES-128'
+    encryptedSegmentCount: fragments.filter(fragment => (
+      fragment.encrypted
+      || Boolean(fragment.key && fragment.key.method !== 'NONE')
     )).length,
     fragmentCount: fragments.length,
     fragments,

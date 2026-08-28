@@ -103,6 +103,87 @@ describe('EmbeddedBrowser HLS local downloader', () => {
     }
   })
 
+  it('hls.manual-key-fallback', async () => {
+    const fixtureRoot = new URL(
+      '../../tools/cat-catch-lab/fixtures/hls-key-uri-manual-fallback/',
+      import.meta.url,
+    )
+    const fixture = await readFile(new URL('fixture.json', fixtureRoot), 'utf8')
+      .then(text => JSON.parse(text) as {
+        inputs: { clear: string; missing: string }
+        expected: string
+      })
+    const expected = await readFile(new URL(fixture.expected, fixtureRoot), 'utf8')
+      .then(text => JSON.parse(text) as {
+        baseUrlRoot: string
+        invalidManualKeyError: string
+        manualKeyBase64: string
+        missingKeyError: string
+        segmentUrl: string
+      })
+    const missingManifestUrl = `${expected.baseUrlRoot}missing.m3u8`
+    const missingPlan = createHlsDownloadPlan({
+      manifest: parseHlsManifest({
+        baseUrl: missingManifestUrl,
+        text: await readFile(new URL(fixture.inputs.missing, fixtureRoot), 'utf8'),
+      }),
+      manifestUrl: missingManifestUrl,
+    })
+    const rejectedDirectory = await mkdtemp(path.join(os.tmpdir(), 'omniflow-hls-missing-key-test-'))
+    const rejectedFetch = vi.fn(async () => new Response(Uint8Array.from([0x47]).buffer))
+
+    try {
+      await expect(downloadEmbeddedBrowserHlsToLocalWorkDirectory({
+        fetch: rejectedFetch,
+        plan: missingPlan,
+        workDirectoryPath: rejectedDirectory,
+      })).rejects.toThrow(expected.missingKeyError)
+      await expect(downloadEmbeddedBrowserHlsToLocalWorkDirectory({
+        fetch: rejectedFetch,
+        manualKeyBase64: 'AAAA',
+        plan: missingPlan,
+        workDirectoryPath: rejectedDirectory,
+      })).rejects.toThrow(expected.invalidManualKeyError)
+      expect(rejectedFetch).not.toHaveBeenCalled()
+    } finally {
+      await rm(rejectedDirectory, { force: true, recursive: true })
+    }
+
+    for (const name of ['missing', 'clear'] as const) {
+      const manifestUrl = `${expected.baseUrlRoot}${name}.m3u8`
+      const plan = name === 'missing'
+        ? missingPlan
+        : createHlsDownloadPlan({
+            manifest: parseHlsManifest({
+              baseUrl: manifestUrl,
+              text: await readFile(new URL(fixture.inputs.clear, fixtureRoot), 'utf8'),
+            }),
+            manifestUrl,
+          })
+      const directory = await mkdtemp(path.join(os.tmpdir(), `omniflow-hls-manual-key-${name}-test-`))
+      const fetchImpl = vi.fn(async () => new Response(Uint8Array.from([0x47, 0x01]).buffer))
+
+      try {
+        const result = await downloadEmbeddedBrowserHlsToLocalWorkDirectory({
+          fetch: fetchImpl,
+          manualKeyBase64: expected.manualKeyBase64,
+          plan,
+          workDirectoryPath: directory,
+        })
+        const playlist = await readFile(result.playlistPath, 'utf8')
+        const keyBytes = await readFile(path.join(directory, 'keys', 'key-001.key'))
+
+        expect(keyBytes).toEqual(Buffer.from(expected.manualKeyBase64, 'base64'))
+        expect(playlist).toContain('#EXT-X-KEY:METHOD=AES-128,URI="keys/key-001.key"')
+        expect(fetchImpl).toHaveBeenCalledTimes(1)
+        expect(fetchImpl).toHaveBeenCalledWith(expected.segmentUrl, expect.anything())
+        expect(result.keyCount).toBe(1)
+      } finally {
+        await rm(directory, { force: true, recursive: true })
+      }
+    }
+  })
+
   it('hls.aes256-local-predecrypt', async () => {
     const cbcKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1)
     const ctrKey = Uint8Array.from({ length: 32 }, (_, index) => 0x40 + index)

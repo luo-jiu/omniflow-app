@@ -31,6 +31,7 @@ export type EmbeddedBrowserHlsLocalDownloadMapRef = {
 
 export type EmbeddedBrowserHlsLocalDownloadFragment = EmbeddedBrowserDownloadFragment & {
   discontinuitySequence: number
+  encrypted?: boolean
   initSegment?: EmbeddedBrowserHlsLocalDownloadMapRef
   key?: EmbeddedBrowserHlsLocalDownloadKeyRef
   outputRelativePath?: string
@@ -116,6 +117,50 @@ function normalizeManualAes128KeyBase64(base64: string | undefined) {
     return decoded.byteLength === 16 ? decoded.toString('base64') : null
   } catch {
     return null
+  }
+}
+
+function applyManualAes128Key(
+  fragments: EmbeddedBrowserHlsLocalDownloadFragment[],
+  manualKeyBase64: string | null,
+): EmbeddedBrowserHlsLocalDownloadFragment[] {
+  if (!manualKeyBase64) return fragments
+  const hasMediaKeySignal = fragments.some(fragment => (
+    fragment.encrypted || Boolean(fragment.key)
+  ))
+  const hasAnyKeySignal = hasMediaKeySignal || fragments.some(fragment => (
+    Boolean(fragment.initSegment?.key)
+  ))
+  return fragments.map((fragment) => {
+    const shouldApply = fragment.encrypted
+      || Boolean(fragment.key)
+      || !hasAnyKeySignal
+    if (!shouldApply) return fragment
+    const key: EmbeddedBrowserHlsLocalDownloadKeyRef = {
+      iv: fragment.key?.iv,
+      method: 'AES-128',
+    }
+    return {
+      ...fragment,
+      encrypted: true,
+      key,
+    }
+  })
+}
+
+function assertExecutableHlsKeys(
+  fragments: EmbeddedBrowserHlsLocalDownloadFragment[],
+  hasManualKey: boolean,
+) {
+  if (hasManualKey) return
+  const fragment = fragments.find(item => (
+    (item.encrypted && !item.key)
+    || Boolean(item.key && item.key.method !== 'NONE' && !item.key.url)
+  ))
+  if (fragment) {
+    throw new Error(
+      `HLS fragment ${fragment.sequence} requires a key URI or manual AES-128 key`,
+    )
   }
 }
 
@@ -690,7 +735,21 @@ async function downloadEmbeddedBrowserHlsToLocalWorkDirectory(
   request: EmbeddedBrowserHlsLocalDownloadRequest,
 ): Promise<EmbeddedBrowserHlsLocalDownloadResult> {
   throwIfHlsDownloadAborted(request.signal)
-  const { plan } = request
+  const requestedManualKeyBase64 = String(request.manualKeyBase64 || '').trim()
+  const normalizedManualKeyBase64 = normalizeManualAes128KeyBase64(
+    requestedManualKeyBase64,
+  )
+  if (requestedManualKeyBase64 && !normalizedManualKeyBase64) {
+    throw new Error('Manual AES-128 key must decode to exactly 16 bytes')
+  }
+  const plan = {
+    ...request.plan,
+    fragments: applyManualAes128Key(
+      request.plan.fragments,
+      normalizedManualKeyBase64,
+    ),
+  }
+  assertExecutableHlsKeys(plan.fragments, Boolean(normalizedManualKeyBase64))
   const requestedFragmentIndexes = Array.isArray(request.fragmentIndexes)
     ? new Set(request.fragmentIndexes.filter((value) => Number.isFinite(value) && value >= 0))
     : null
@@ -712,7 +771,7 @@ async function downloadEmbeddedBrowserHlsToLocalWorkDirectory(
   const keyRefs = await prepareKeyRefs({
     fetch: request.fetch,
     headers: plan.headers,
-    manualKeyBase64: request.manualKeyBase64,
+    manualKeyBase64: normalizedManualKeyBase64 || undefined,
     outputDirectoryPath,
     refs: plan.fragments.flatMap((fragment) => ([
       {
@@ -731,7 +790,7 @@ async function downloadEmbeddedBrowserHlsToLocalWorkDirectory(
     bufferProcessor: (buffer, ref) => decryptHlsMapResource({
       buffer,
       keyRefs,
-      manualKeyBase64: normalizeManualAes128KeyBase64(request.manualKeyBase64) || undefined,
+      manualKeyBase64: normalizedManualKeyBase64 || undefined,
       ref: {
         byteRange: ref.byteRange,
         key: ref.key,
@@ -1031,7 +1090,7 @@ async function downloadEmbeddedBrowserHlsToLocalWorkDirectory(
     fragmentPaths: existingPlaylistContent.fragmentPaths,
     fragments: existingPlaylistContent.fragments.map(clearLocallyDecryptedHlsKeys),
     keyRefs,
-    manualKeyBase64: request.manualKeyBase64,
+    manualKeyBase64: normalizedManualKeyBase64 || undefined,
     mapRefs,
     resourceFragments: existingPlaylistContent.fragments,
   })

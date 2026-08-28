@@ -1,0 +1,21 @@
+{
+  "baseUrlRoot": "https://media.example/key-uri/",
+  "invalidManualKeyError": "Manual AES-128 key must decode to exactly 16 bytes",
+  "manualKeyBase64": "AAECAwQFBgcICQoLDA0ODw==",
+  "missingKeyError": "HLS fragment 0 requires a key URI or manual AES-128 key",
+  "segmentUrl": "https://media.example/key-uri/segment.ts",
+  "upstream": {
+    "empty": {
+      "decryptdataUrl": null,
+      "encrypted": true
+    },
+    "missing": {
+      "decryptdataUrl": null,
+      "encrypted": true
+    },
+    "whitespace": {
+      "decryptdataUrl": "https://media.example/key-uri/whitespace.m3u8",
+      "encrypted": true
+    }
+  }
+}

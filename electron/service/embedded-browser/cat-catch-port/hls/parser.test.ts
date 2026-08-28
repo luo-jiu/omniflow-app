@@ -1105,6 +1105,64 @@ describe('Cat Catch HLS parser', () => {
     }))).toEqual(keySupportExpected.segments)
   })
 
+  it('hls.key-uri-projection', () => {
+    const fixtureRoot = fileURLToPath(new URL(
+      '../../../../../tools/cat-catch-lab/fixtures/hls-key-uri-manual-fallback',
+      import.meta.url,
+    ))
+    const fixture = JSON.parse(readFileSync(`${fixtureRoot}/fixture.json`, 'utf8')) as {
+      expected: string
+      inputs: {
+        clear: string
+        empty: string
+        missing: string
+        whitespace: string
+      }
+    }
+    const expected = JSON.parse(readFileSync(`${fixtureRoot}/${fixture.expected}`, 'utf8')) as {
+      baseUrlRoot: string
+      segmentUrl: string
+    }
+
+    for (const name of ['empty', 'missing', 'whitespace'] as const) {
+      const manifest = parseHlsManifest({
+        baseUrl: `${expected.baseUrlRoot}${name}.m3u8`,
+        text: readFileSync(`${fixtureRoot}/${fixture.inputs[name]}`, 'utf8'),
+      })
+      expect(manifest.segments).toHaveLength(1)
+      expect(manifest.segments[0]).toMatchObject({
+        encrypted: true,
+        url: expected.segmentUrl,
+      })
+      expect(manifest.segments[0]?.key).toBeUndefined()
+
+      const plan = createEmbeddedBrowserHlsDownloadPlan({
+        manifest,
+        manifestUrl: `${expected.baseUrlRoot}${name}.m3u8`,
+      })
+      expect(plan.fragments[0]).toMatchObject({
+        encrypted: true,
+        url: expected.segmentUrl,
+      })
+      expect(plan.fragments[0]?.key).toBeUndefined()
+      expect(plan.encryptedSegmentCount).toBe(1)
+    }
+
+    const clearManifest = parseHlsManifest({
+      baseUrl: `${expected.baseUrlRoot}clear.m3u8`,
+      text: readFileSync(`${fixtureRoot}/${fixture.inputs.clear}`, 'utf8'),
+    })
+    expect(clearManifest.segments[0]).toMatchObject({
+      encrypted: false,
+      url: expected.segmentUrl,
+    })
+    expect(clearManifest.segments[0]?.key).toBeUndefined()
+    expect(createEmbeddedBrowserHlsDownloadPlan({
+      manifest: clearManifest,
+      manifestUrl: `${expected.baseUrlRoot}clear.m3u8`,
+    }).encryptedSegmentCount).toBe(0)
+  })
+
   it('hls.key-iv-normalization', () => {
     const manifest = parseHlsManifest({
       baseUrl: keyIvExpected.baseUrl,

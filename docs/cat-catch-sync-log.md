@@ -1263,6 +1263,20 @@
 - legacy cleanup: 无；旧 compatibility facade 和 legacy-named controller adapter 保留到 hls-engine 原子 cutover。
 - validation: parser 专项 `1 file / 44 tests`、TypeScript、全仓 ESLint、同步测试 `16/16`、metadata `7 units / 32 capabilities / 208 anchors / 106 cleanup entries / 167 planned IDs / 122 active refs` 通过；排除 Node runner 文件后全仓 Vitest 为 `189 files / 1265 passed / 3 skipped`。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
 
+## 2026-08-28: same target (HLS key URI and manual fallback)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本步补齐固定 hls.js keyless encrypted projection 与 Cat Catch custom key 经验分支。
+- reviewedThrough / portedThrough: 均保持 `null`；hls-engine 仍有其余 parser/processing 差分、legacy cleanup 与真实网站验证未完成。
+- change groups: `upstream-characterization`（缺失/空/空白 KEY URI）与 `behavioral-correction`（手动 AES-128 recovery 和 prefetch rejection）。
+- affected capability IDs: `hls.parser-planner` 保持 `ported-unverified`，`hls.segment-pipeline` 保持 `porting`；新增 2 个 planned ID 和 2 个 active ref，不增加上游 anchor。
+- fixtures/tests: 新增 upstream-executable fixture `hls-key-uri-manual-fallback`；`hls.key-uri-projection` 锁定固定 vendor 的 `encrypted=true/decryptdata=null` 与空白 URI 回指 playlist 行为，`hls.manual-key-fallback` 锁定无手动 key 的 fetch 前拒绝、缺 key URI 的手动恢复、完全无 key 信号时的手动恢复，以及 MAP-only key 不污染明文 media。
+- accepted difference: 固定 hls.js + Cat Catch 会把缺失/空 URI 的 ciphertext 留在 keyless fragment，或把空白 URI 的 playlist 当 key 请求；OmniFlow 保留 encrypted 事实但禁止无 key 执行。Cat Catch custom key 无条件标记全部 fragment 加密；OmniFlow 只覆盖有 media 加密信号的分片，或在整个 manifest 无任何 key 信号时覆盖全部 media，避免 encrypted MAP-only playlist 的 clear media 被错误解密。
+- excluded changes and reasons: 不修改 renderer 输入格式、IPC、key candidate 验证 UI、MAP 的声明时 key context、AES-256 或 DRM 执行策略；手动 key 仍只接受既有 16-byte AES-128 base64 合同。
+- unresolved gaps: HLS 其余真正影响 URL/sequence/cc/key/MAP/range/duration/manifest executability 的差分、真实手工站点、未捕获资源 fallback、旧 façade/controller adapter 与 hls-engine 原子 cleanup 仍待完成。
+- runtime changes: download plan 新增 renderer-safe `encrypted` 投影；local task 先验证手动 key，再按 media/key 信号生成 effective AES-128 refs，没有可执行 key 时在创建目录和发起 fetch 前失败。普通 valid key、METHOD=NONE、MAP-only key 和现有 CBC MAP path 保持不变。
+- legacy cleanup: 无；旧 compatibility facade 和 legacy-named controller adapter 保留到 hls-engine 原子 cutover。
+- validation: parser 专项 `1 file / 45 tests`、local downloader 专项 `1 file / 11 tests`、TypeScript、全仓 ESLint、同步测试 `16/16`、metadata `7 units / 32 capabilities / 208 anchors / 106 cleanup entries / 169 planned IDs / 124 active refs` 通过；排除 Node runner 文件后全仓 Vitest 为 `189 files / 1267 passed / 3 skipped`，其中真实 HLS 输出 `1 file / 4 tests` 通过。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
+
 ## Template
 
 ```markdown
