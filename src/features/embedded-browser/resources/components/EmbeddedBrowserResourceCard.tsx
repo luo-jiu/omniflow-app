@@ -6,7 +6,7 @@ import type { EmbeddedBrowserExternalToolOption } from '@/features/embedded-brow
 import type {
   EmbeddedBrowserHlsDownloadPlan,
   EmbeddedBrowserHlsManifest,
-} from '../model/embedded-browser-hls-manifest';
+} from '../../../../../electron/service/embedded-browser/contracts/hls';
 import type {
   EmbeddedBrowserMpdDownloadPlan,
   EmbeddedBrowserMpdManifest,

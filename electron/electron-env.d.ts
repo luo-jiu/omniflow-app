@@ -634,7 +634,7 @@ interface Window {
       ffmpegPath?: string;
       manualKeyBase64?: string;
       outputDirectoryPath?: string;
-      plan: import('@/features/embedded-browser/resources/model/embedded-browser-hls-manifest').EmbeddedBrowserHlsDownloadPlan;
+      plan: import('./service/embedded-browser/contracts/hls').EmbeddedBrowserHlsDownloadPlan;
       resourceId?: string;
       requestId?: string;
       suggestedFileName?: string;

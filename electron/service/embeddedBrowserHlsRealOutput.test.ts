@@ -10,9 +10,9 @@ import {
   resolveDesktopFfprobePath,
 } from '../platform/mediaExecutable'
 import {
-  createEmbeddedBrowserHlsDownloadPlan,
-  parseEmbeddedBrowserHlsManifest,
-} from '../../src/features/embedded-browser/resources/model/embedded-browser-hls-manifest'
+  parseHlsManifest,
+} from './embedded-browser/cat-catch-port/hls/parser'
+import { createHlsDownloadPlan } from './embedded-browser/cat-catch-port/hls/plan'
 import { downloadEmbeddedBrowserHlsToLocalWorkDirectory } from './embeddedBrowserHlsLocalDownloaderService'
 import { downloadEmbeddedBrowserManifestResource } from './embeddedBrowserResourceManifestDownloadService'
 import { downloadEmbeddedBrowserHlsLocalTracks } from './embedded-browser/processing/hls-local-track-merge'
@@ -189,11 +189,11 @@ describe.skipIf(!ffmpegPath || !ffprobePath)('EmbeddedBrowser real HLS output', 
         expect(generateResult.status, generateResult.stderr).toBe(0)
 
         const sourcePlaylist = await readFile(sourcePlaylistPath, 'utf8')
-        const manifest = parseEmbeddedBrowserHlsManifest({
+        const manifest = parseHlsManifest({
           baseUrl: manifestUrl,
           text: sourcePlaylist,
         })
-        const plan = createEmbeddedBrowserHlsDownloadPlan({
+        const plan = createHlsDownloadPlan({
           manifest,
           manifestUrl,
         })
@@ -356,19 +356,19 @@ describe.skipIf(!ffmpegPath || !ffprobePath)('EmbeddedBrowser real HLS output', 
       expect(generateAudioResult.status, generateAudioResult.stderr).toBe(0)
       const audioPlaylist = await readFile(audioPlaylistPath, 'utf8')
 
-      const videoManifest = parseEmbeddedBrowserHlsManifest({
+      const videoManifest = parseHlsManifest({
         baseUrl: videoManifestUrl,
         text: videoPlaylist,
       })
-      const audioManifest = parseEmbeddedBrowserHlsManifest({
+      const audioManifest = parseHlsManifest({
         baseUrl: audioManifestUrl,
         text: audioPlaylist,
       })
-      const videoPlan = createEmbeddedBrowserHlsDownloadPlan({
+      const videoPlan = createHlsDownloadPlan({
         manifest: videoManifest,
         manifestUrl: videoManifestUrl,
       })
-      const audioPlan = createEmbeddedBrowserHlsDownloadPlan({
+      const audioPlan = createHlsDownloadPlan({
         manifest: audioManifest,
         manifestUrl: audioManifestUrl,
       })

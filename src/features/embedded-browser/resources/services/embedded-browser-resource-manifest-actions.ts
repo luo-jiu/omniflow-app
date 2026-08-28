@@ -1,12 +1,16 @@
+import type {
+  EmbeddedBrowserHlsDownloadPlan,
+  EmbeddedBrowserHlsManifest,
+} from '../../../../../electron/service/embedded-browser/contracts/hls';
+import {
+  parseHlsManifest as parseEmbeddedBrowserHlsManifest,
+} from '../../../../../electron/service/embedded-browser/cat-catch-port/hls/parser';
+import {
+  createHlsDownloadPlan as createEmbeddedBrowserHlsDownloadPlan,
+} from '../../../../../electron/service/embedded-browser/cat-catch-port/hls/plan';
 import {
   isPageContextManagedResource,
 } from '../model/embedded-browser-resource.presentation';
-import {
-  createEmbeddedBrowserHlsDownloadPlan,
-  parseEmbeddedBrowserHlsManifest,
-  type EmbeddedBrowserHlsDownloadPlan,
-  type EmbeddedBrowserHlsManifest,
-} from '../model/embedded-browser-hls-manifest';
 import {
   normalizeHlsKeyCandidateValue,
   verifyEmbeddedBrowserHlsKeyCandidates,

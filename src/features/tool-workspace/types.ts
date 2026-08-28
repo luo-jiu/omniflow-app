@@ -3,7 +3,7 @@ import type { AIServiceReasoningEffort } from '@/features/ai-services/ai-service
 import type {
   EmbeddedBrowserHlsDownloadPlan,
   EmbeddedBrowserHlsManifest,
-} from '@/features/embedded-browser/resources/model/embedded-browser-hls-manifest';
+} from '../../../electron/service/embedded-browser/contracts/hls';
 import type {
   EmbeddedBrowserMpdDownloadPlan,
   EmbeddedBrowserMpdManifest,

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { EmbeddedBrowserHlsDownloadPlan } from '../../../../src/features/embedded-browser/resources/model/embedded-browser-hls-manifest'
+import type { EmbeddedBrowserHlsDownloadPlan } from '../contracts/hls'
 
 const { downloadLocalMock, mergeTracksMock } = vi.hoisted(() => ({
   downloadLocalMock: vi.fn(),

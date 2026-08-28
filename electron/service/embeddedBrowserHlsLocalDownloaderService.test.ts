@@ -4,9 +4,9 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { describe, expect, it, vi } from 'vitest'
 
 import {
-  createEmbeddedBrowserHlsDownloadPlan,
-  parseEmbeddedBrowserHlsManifest,
-} from '../../src/features/embedded-browser/resources/model/embedded-browser-hls-manifest'
+  parseHlsManifest,
+} from './embedded-browser/cat-catch-port/hls/parser'
+import { createHlsDownloadPlan } from './embedded-browser/cat-catch-port/hls/plan'
 import {
   downloadEmbeddedBrowserHlsToLocalWorkDirectory,
 } from './embeddedBrowserHlsLocalDownloaderService'
@@ -290,11 +290,11 @@ describe('EmbeddedBrowser HLS local downloader', () => {
       localKeyLines: string[]
       localMapLine: string
     }
-    const manifest = parseEmbeddedBrowserHlsManifest({
+    const manifest = parseHlsManifest({
       baseUrl: expected.baseUrl,
       text: playlist,
     })
-    const plan = createEmbeddedBrowserHlsDownloadPlan({
+    const plan = createHlsDownloadPlan({
       manifest,
       manifestUrl: expected.baseUrl,
     })

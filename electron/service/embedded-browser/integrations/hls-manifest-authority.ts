@@ -3,10 +3,8 @@ import {
   type CatCatchHlsVariableList,
 } from '../cat-catch-port/hls/parser'
 import { fetchHlsManifestWithForceCacheFallback } from '../cat-catch-port/hls/cache-fallback'
-import {
-  createEmbeddedBrowserHlsDownloadPlan,
-  type EmbeddedBrowserHlsDownloadPlan,
-} from '../../../../src/features/embedded-browser/resources/model/embedded-browser-hls-manifest'
+import { createHlsDownloadPlan } from '../cat-catch-port/hls/plan'
+import type { EmbeddedBrowserHlsDownloadPlan } from '../contracts/hls'
 import type { CapturedResourceAccessService } from './captured-resource-access'
 
 type HlsManifestAuthorityAccess = Pick<CapturedResourceAccessService, 'redeem'>
@@ -221,7 +219,7 @@ export async function resolveHlsCapturedMediaPlan(
     parentVariableList: input.parentVariableList,
     text,
   })
-  const plan = createEmbeddedBrowserHlsDownloadPlan({
+  const plan = createHlsDownloadPlan({
     manifest,
     manifestUrl: result.finalUrl,
     segmentQuery: input.segmentQuery,

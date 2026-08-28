@@ -293,7 +293,7 @@ export async function downloadEmbeddedBrowserHlsPlan(
     ffmpegPath?: string;
     manualKeyBase64?: string;
     outputDirectoryPath?: string;
-    plan: import('../model/embedded-browser-hls-manifest').EmbeddedBrowserHlsDownloadPlan;
+    plan: import('../../../../../electron/service/embedded-browser/contracts/hls').EmbeddedBrowserHlsDownloadPlan;
     resourceId?: string;
     requestId?: string;
     suggestedFileName?: string;

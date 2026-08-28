@@ -1109,6 +1109,34 @@
 - legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
 - validation: 加强后的 downloader 专项 `5/5`、完整 HLS 集合 `18 files / 118 tests`、TypeScript、全仓 ESLint、capability JSON、轻量 validator、固定上游 anchor 校验、同步测试 `16/16`、metadata `7 units / 32 capabilities / 206 anchors / 106 cleanup entries / 154 planned IDs / 109 active refs` 和 scoped diff check 通过。排除由 Node runner 单独执行的同步测试文件后，全仓 Vitest 为 `187 files / 1249 passed / 3 skipped`。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
 
+## 2026-08-28: same target (HLS shared contract and plan owner)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本步只收敛已经迁入的 HLS DTO 与计划 owner。
+- reviewedThrough / portedThrough: 均保持 `null`；hls-engine 尚未完成整体 cutover，不能因内部 owner 收敛提前推进游标。
+- change groups: `architecture-boundary`（shared contract 与 main/renderer 依赖方向）和 `behavior-preserving`（原 plan projection 原样进入 pure port）。
+- affected capability IDs: `hls.parser-planner` 保持 `ported-unverified`；新增 contract/plan target refs、1 个 planned ID 和 1 个 active ref，不改变上游 anchor。
+- fixtures/tests: 不新增 fixture；`hls.contract-plan-single-owner` 断言 renderer 兼容出口的 parser、plan 与 segment-query 函数分别和 pure owner 是同一引用。既有 parser/authority/local/live/真实 ffmpeg 与 renderer hook 测试继续锁定结构调整前后的产物等价。
+- accepted difference: 无新增；DTO 增加此前 runtime parser 已真实携带、但 renderer 重复类型漏写的 `segment.encrypted` 字段，不改变序列化对象或 IPC payload。
+- excluded changes and reasons: 不在本步修改 UI、IPC 字段、preload 暴露面、下载器调度、直播 owner 或 ffmpeg。与其他 Agent 修改重叠的 preload/electron-env 类型注解暂时继续引用 renderer compatibility export，避免把对方改动带入本提交。
+- unresolved gaps: renderer service/components 仍经薄 compatibility model 导入共享类型与 pure 函数；该文件的两个 legacy symbol 继续留到 hls-engine 原子 cutover。完整 parser 差分、AES-256 系列真实输出、旧 local/live/controller owner 删除和真实网站手工验证仍待完成。
+- runtime changes: 新增 `contracts/hls.ts` 作为共享 DTO owner，新增 `cat-catch-port/hls/plan.ts` 作为下载计划 owner；parser 类型改为共享 contract alias。Electron main 的 controller types、authority、live recorder、track merge 与 output tests 不再反向 import renderer HLS model；renderer model 缩为同名 re-export。
+- legacy cleanup: `node.hls.renderer-parser-planner` 与 `node.hls.renderer-download-plan` 仍为 `remove-after-cutover`，本步没有伪报删除；local downloader/live recorder/controller entries 不变。
+- validation: 完整 HLS `19 files / 119 tests`、TypeScript、全仓 ESLint、capability JSON、轻量 validator、固定上游 anchor 校验、同步测试 `16/16`、metadata `7 units / 32 capabilities / 206 anchors / 106 cleanup entries / 155 planned IDs / 110 active refs`、Electron service 生产源码反向依赖搜索和 scoped diff check 通过。排除由 Node runner 单独执行的同步测试文件后，全仓 Vitest 为 `188 files / 1250 passed / 3 skipped`。首次 contract test 因相对路径多退一层而加载失败，修正后专项、TypeScript、HLS 与全仓回归全部重跑通过。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
+
+## 2026-08-28: same target (HLS renderer facade detachment)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本步继续收敛本地依赖而不重新分类上游。
+- reviewedThrough / portedThrough: 均保持 `null`；hls-engine 仍未整体关闭。
+- change groups: `architecture-boundary`（renderer/preload 调用方向）和 `pre-cutover-cleanup`（让 legacy façade 无生产调用方但继续保留删除 sentinel）。
+- affected capability IDs: `hls.parser-planner` 保持 `ported-unverified`；planned IDs、active refs、target refs 和 anchors 均不变。
+- fixtures/tests: 不新增 fixture 或占位测试；既有 `hls.contract-plan-single-owner` 继续证明 compatibility exports 与 pure owner 同一引用，HLS hook/parser/main IPC/rendition 测试覆盖迁移后的生产调用路径。
+- accepted difference: 无；所有导入迁移只改变 TypeScript module owner，不改变 manifest/plan 对象、preload 字段或 IPC channel。
+- excluded changes and reasons: validator 要求未关闭 unit 的 `currentImplementationRefs` 与 `remove-after-cutover` symbol 必须继续存在，因此本步不删除 renderer model，也不修改 legacy cleanup 合同。没有新增全仓 AST/import 分析器；使用 TypeScript、ESLint 和定向源码搜索作为本步证据。
+- unresolved gaps: renderer model 只剩两个 parity test caller；待 local downloader、live recorder 和 controller task owner 一起达到 cutover 条件后，才能原子删除该文件和两个 legacy cleanup entry。完整 parser 差分、AES-256 系列真实输出与真实网站手工验证仍待完成。
+- runtime changes: preload/electron-env 的 plan type、renderer resource components/service、tool-workspace hook/types 和 library detail view 全部改为直接 import shared contract 或 pure parser/plan/segment-query；生产源码已无旧 HLS model 引用。
+- legacy cleanup: 两个 renderer legacy symbol 继续存在且仍标记 `remove-after-cutover`；没有提前移动状态或删除清单。
+- validation: 完整 HLS `19 files / 119 tests`、TypeScript、全仓 ESLint、轻量 validator、固定上游 anchor 校验、同步测试 `16/16`、metadata `7 units / 32 capabilities / 206 anchors / 106 cleanup entries / 155 planned IDs / 110 active refs`、生产引用搜索和 scoped diff check 通过；旧 model 只剩 2 个明确 parity test caller。排除由 Node runner 单独执行的同步测试文件后，全仓 Vitest 为 `188 files / 1250 passed / 3 skipped`。迁移后首轮 TypeScript/ESLint 暴露一个已无用途的 plan type import，删除后所有门禁完整重跑通过。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
+
 ## Template
 
 ```markdown

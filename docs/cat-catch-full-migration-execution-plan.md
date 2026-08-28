@@ -66,6 +66,7 @@ OmniFlow 不运行 Cat Catch 浏览器扩展，而是把与产品目标相关的
 - master rendition 的 `DEFAULT/AUTOSELECT/FORCED` 保持固定 AttrList 大小写敏感布尔语义：只有精确 `YES` 为真，小写或混合大小写不能被本地宽松归一化成默认/自动/强制音轨。
 - master variant 的 typed BANDWIDTH/AVERAGE-BANDWIDTH/FRAME-RATE 投影使用固定 AttrList 的十进制 `parseInt` / `parseFloat` 语义，保留合法数值前缀并避免 JavaScript `Number` 把 `0x` 输入解释成非上游的十六进制码率；原始 attributes 仍原样保留。
 - Cat Catch `tsAddArg` 已作为 post-parse 纯计划能力迁入：关闭时保留原 fragment query，开启且为空时移除 query，非空时替换 query；只修改 media fragment，不修改 key/MAP。工具区草稿是唯一 renderer owner；普通静态任务强制走本地 plan，选择独立音轨时由 main 校验 captured master 与两个 child authority 后生成两条隔离的本地 plan 再合并，直播轮询经显式 IPC 把同一设置交给 main recorder。
+- HLS DTO、parser 与 plan projection 已分别收敛到 shared contract、`cat-catch-port/hls/parser.ts` 与 `plan.ts`；main、preload 和 renderer 生产调用方均已脱离 renderer model。旧 model 只保留同名 re-export 与 parity test cleanup sentinel，在 hls-engine 原子 cutover 时随两个 legacy symbol 一起删除。
 - HLS 分片失败重试会保持原 URL 与 byte `Range`；取消活动 retry 时同时清空待执行队列，只产生一次 aborted 终态，且不再进入 processor、completed 或有序输出。与 Cat Catch 的递增延迟不同，当前 adapter 使用有界立即重排队。
 - HLS 真实输出门禁已覆盖 clear/AES-128 AAC、加密 fMP4/H264 视频与独立 AES-128/AAC 音轨的双本地 playlist 合并；ffmpeg 的 protocol/extension 策略按 input 重复声明，避免第二轨本地 key 被默认扩展名策略拒绝。AES-256 系列仍缺真实输出证据。
 - DASH 手写 parser 对 `r=-1`、多 BaseURL、动态 MPD 等语义不完整。

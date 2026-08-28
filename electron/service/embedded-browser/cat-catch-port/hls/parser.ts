@@ -16,100 +16,27 @@
  */
 
 import { createHlsDefaultIv } from './decrypt'
+import type {
+  EmbeddedBrowserHlsAttributeMap,
+  EmbeddedBrowserHlsByteRange,
+  EmbeddedBrowserHlsKey,
+  EmbeddedBrowserHlsManifest,
+  EmbeddedBrowserHlsMap,
+  EmbeddedBrowserHlsRendition,
+  EmbeddedBrowserHlsSegment,
+  EmbeddedBrowserHlsVariableList,
+  EmbeddedBrowserHlsVariant,
+} from '../../contracts/hls'
 
-export type CatCatchHlsAttributeMap = Record<string, string>
-
-export type CatCatchHlsVariableList = Record<string, string>
-
-export type CatCatchHlsByteRange = {
-  length: number
-  offset?: number
-  raw: string
-}
-
-export type CatCatchHlsKey = {
-  iv?: string
-  keyFormat?: string
-  keyFormatVersions?: string
-  method: string
-  rawAttributes: CatCatchHlsAttributeMap
-  rawLine: string
-  uri?: string
-  url?: string
-}
-
-export type CatCatchHlsMap = {
-  byteRange?: CatCatchHlsByteRange
-  key?: CatCatchHlsKey
-  rawAttributes: CatCatchHlsAttributeMap
-  rawLine: string
-  uri: string
-  url: string
-}
-
-export type CatCatchHlsSegment = {
-  byteRange?: CatCatchHlsByteRange
-  discontinuitySequence: number
-  duration: number
-  encrypted: boolean
-  index: number
-  key?: CatCatchHlsKey
-  map?: CatCatchHlsMap
-  part: boolean
-  sequence: number
-  title?: string
-  uri: string
-  url: string
-}
-
-export type CatCatchHlsVariant = {
-  audioGroupId?: string
-  audioGroupIds?: string[]
-  averageBandwidth?: number
-  bandwidth?: number
-  codecs?: string
-  frameRate?: number
-  rawAttributes: CatCatchHlsAttributeMap
-  rawLine: string
-  resolution?: string
-  subtitlesGroupId?: string
-  subtitlesGroupIds?: string[]
-  uri: string
-  url: string
-}
-
-export type CatCatchHlsRendition = {
-  autoselect?: boolean
-  default?: boolean
-  forced?: boolean
-  groupId?: string
-  language?: string
-  name?: string
-  rawAttributes: CatCatchHlsAttributeMap
-  rawLine: string
-  type?: string
-  uri?: string
-  url?: string
-}
-
-export type CatCatchHlsManifest = {
-  baseUrl: string
-  discontinuityCount: number
-  durationSeconds: number
-  hasEndList: boolean
-  isLive: boolean
-  isMaster: boolean
-  keys: CatCatchHlsKey[]
-  maps: CatCatchHlsMap[]
-  mediaSequence: number
-  playlistType?: string
-  renditions: CatCatchHlsRendition[]
-  segmentCount: number
-  segments: CatCatchHlsSegment[]
-  targetDuration?: number
-  variableList?: CatCatchHlsVariableList
-  variants: CatCatchHlsVariant[]
-}
+export type CatCatchHlsAttributeMap = EmbeddedBrowserHlsAttributeMap
+export type CatCatchHlsVariableList = EmbeddedBrowserHlsVariableList
+export type CatCatchHlsByteRange = EmbeddedBrowserHlsByteRange
+export type CatCatchHlsKey = EmbeddedBrowserHlsKey
+export type CatCatchHlsMap = EmbeddedBrowserHlsMap
+export type CatCatchHlsSegment = EmbeddedBrowserHlsSegment
+export type CatCatchHlsVariant = EmbeddedBrowserHlsVariant
+export type CatCatchHlsRendition = EmbeddedBrowserHlsRendition
+export type CatCatchHlsManifest = EmbeddedBrowserHlsManifest
 
 type PendingSegment = {
   duration: number

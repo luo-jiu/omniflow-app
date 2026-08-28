@@ -38,9 +38,12 @@ downloader/
 - `network/classifier.ts`：纯 request/response 分类和去重决策。
 - `network/request-url-helpers.ts`：页面 URL pattern、黑白名单反转与 special-page 规则。
 - `hls/parser.ts`：固定 hls.js/Cat Catch 的 manifest 下载相关解析语义。
+- `hls/plan.ts`：把 parser 输出投影为平台 adapter 消费的唯一 HLS 下载计划。
 - `hls/segment-query.ts`：固定 `tsAddArg` 的默认值提取和 fragment-only query 改写。
 
-这些 capability 当前为 `ported-unverified`，没有接入 Electron 生产 listener；整个 `network-capture` unit 完成前，旧实现仍是唯一生产 owner。
+HLS 的 main/preload/renderer 共享 DTO 由 `../contracts/hls.ts` 唯一定义；生产调用方直接依赖 contract/port。renderer 旧 model 文件在初始 cutover 完成前只做同名 re-export，且仅由 parity test 保持 cleanup sentinel 存活，不再拥有类型、plan 算法或生产调用方。Electron main 运行时不得反向依赖 renderer model。
+
+逐项状态以 capability map 为准。network target 已进入 production composition，但整个 `network-capture` unit 完成前仍未原子切换旧 listener；HLS parser/plan 已是生产路径的唯一算法 owner，renderer compatibility model 只做 re-export，但整个 `hls-engine` unit 仍因旧 local/live/controller owner 未删除而没有 cutover。
 
 ## 来源注释
 

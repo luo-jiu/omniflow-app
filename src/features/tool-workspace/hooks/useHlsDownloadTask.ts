@@ -2,14 +2,19 @@ import React from 'react';
 import { Toast } from '@douyinfe/semi-ui';
 
 import {
+  parseHlsManifest as parseEmbeddedBrowserHlsManifest,
+} from '../../../../electron/service/embedded-browser/cat-catch-port/hls/parser';
+import {
+  createHlsDownloadPlan as createEmbeddedBrowserHlsDownloadPlan,
+} from '../../../../electron/service/embedded-browser/cat-catch-port/hls/plan';
+import {
+  applyCatCatchHlsSegmentQueryToPlan as applyEmbeddedBrowserHlsSegmentQuery,
+  extractCatCatchHlsSegmentQueryDefault as extractEmbeddedBrowserHlsSegmentQueryDefault,
+} from '../../../../electron/service/embedded-browser/cat-catch-port/hls/segment-query';
+
+import {
   verifyHlsResourceKey,
 } from '@/features/embedded-browser/resources/services/embedded-browser-resource-panel-actions';
-import {
-  applyEmbeddedBrowserHlsSegmentQuery,
-  createEmbeddedBrowserHlsDownloadPlan,
-  extractEmbeddedBrowserHlsSegmentQueryDefault,
-  parseEmbeddedBrowserHlsManifest,
-} from '@/features/embedded-browser/resources/model/embedded-browser-hls-manifest';
 import {
   discardEmbeddedBrowserHlsRecording,
   downloadEmbeddedBrowserDirectFile,

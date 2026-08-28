@@ -3,7 +3,7 @@ import React from 'react';
 import type {
   EmbeddedBrowserHlsDownloadPlan,
   EmbeddedBrowserHlsManifest,
-} from '../model/embedded-browser-hls-manifest';
+} from '../../../../../electron/service/embedded-browser/contracts/hls';
 import {
   describeEmbeddedBrowserHlsKeyVerificationResult,
   getEmbeddedBrowserHlsKeyVerificationTone,

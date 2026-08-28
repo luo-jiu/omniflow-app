@@ -3,13 +3,13 @@ import path from 'node:path'
 import { mkdtemp } from 'node:fs/promises'
 
 import {
-  createEmbeddedBrowserHlsDownloadPlan,
-  parseEmbeddedBrowserHlsManifest,
   type EmbeddedBrowserHlsDownloadFragment,
   type EmbeddedBrowserHlsDownloadPlan,
   type EmbeddedBrowserHlsManifest,
   type EmbeddedBrowserHlsVariableList,
-} from '../../src/features/embedded-browser/resources/model/embedded-browser-hls-manifest'
+} from './embedded-browser/contracts/hls'
+import { parseHlsManifest } from './embedded-browser/cat-catch-port/hls/parser'
+import { createHlsDownloadPlan } from './embedded-browser/cat-catch-port/hls/plan'
 import type { EmbeddedBrowserFragmentFetch } from './embeddedBrowserFragmentDownloader'
 import {
   downloadEmbeddedBrowserHlsToLocalWorkDirectory,
@@ -111,12 +111,12 @@ async function fetchEmbeddedBrowserHlsLiveManifestSnapshot(input: {
   if (!text.includes('#EXTM3U')) {
     throw new Error('当前直播返回内容不像 HLS playlist')
   }
-  const manifest = parseEmbeddedBrowserHlsManifest({
+  const manifest = parseHlsManifest({
     baseUrl: input.manifestUrl,
     parentVariableList: input.parentVariableList,
     text,
   })
-  const plan = createEmbeddedBrowserHlsDownloadPlan({
+  const plan = createHlsDownloadPlan({
     headers: input.headers || {},
     manifest,
     manifestUrl: input.manifestUrl,

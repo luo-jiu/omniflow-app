@@ -1,6 +1,6 @@
 import path from 'node:path'
 
-import type { EmbeddedBrowserHlsDownloadPlan } from '../../../../src/features/embedded-browser/resources/model/embedded-browser-hls-manifest'
+import type { EmbeddedBrowserHlsDownloadPlan } from '../contracts/hls'
 import type { EmbeddedBrowserFragmentFetch } from '../../embeddedBrowserFragmentDownloader'
 import {
   downloadEmbeddedBrowserHlsToLocalWorkDirectory,

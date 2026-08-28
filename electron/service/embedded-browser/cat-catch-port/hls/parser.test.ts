@@ -4,9 +4,11 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
 import {
-  createEmbeddedBrowserHlsDownloadPlan,
   parseEmbeddedBrowserHlsManifest,
 } from '../../../../../src/features/embedded-browser/resources/model/embedded-browser-hls-manifest'
+import {
+  createHlsDownloadPlan as createEmbeddedBrowserHlsDownloadPlan,
+} from './plan'
 import { parseHlsManifest } from './parser'
 
 const fixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-byterange-implicit-offset', import.meta.url))

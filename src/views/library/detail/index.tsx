@@ -44,8 +44,10 @@ import { subscribeCredentialAutoFilled, subscribeCredentialCaptured } from "@/fe
 import EmbeddedBrowserDownloadImportModal from "@/features/embedded-browser/downloads/components/EmbeddedBrowserDownloadImportModal";
 import { useEmbeddedBrowserDownloadImport } from "@/features/embedded-browser/downloads/hooks/useEmbeddedBrowserDownloadImport";
 import EmbeddedBrowserResourcePanel from "@/features/embedded-browser/resources/components/EmbeddedBrowserResourcePanel";
-import type { EmbeddedBrowserHlsDownloadPlan } from "@/features/embedded-browser/resources/model/embedded-browser-hls-manifest";
-import type { EmbeddedBrowserHlsManifest } from "@/features/embedded-browser/resources/model/embedded-browser-hls-manifest";
+import type {
+  EmbeddedBrowserHlsDownloadPlan,
+  EmbeddedBrowserHlsManifest,
+} from "../../../../electron/service/embedded-browser/contracts/hls";
 import type { EmbeddedBrowserMpdDownloadPlan } from "@/features/embedded-browser/resources/model/embedded-browser-mpd-manifest";
 import type { EmbeddedBrowserMpdManifest } from "@/features/embedded-browser/resources/model/embedded-browser-mpd-manifest";
 import type { EmbeddedBrowserCapturedResource } from "@/features/embedded-browser/resources/types";

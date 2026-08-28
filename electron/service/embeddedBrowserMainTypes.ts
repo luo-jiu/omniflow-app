@@ -1,5 +1,5 @@
 import type { BrowserWindow } from 'electron'
-import type { EmbeddedBrowserHlsDownloadPlan } from '@/features/embedded-browser/resources/model/embedded-browser-hls-manifest'
+import type { EmbeddedBrowserHlsDownloadPlan } from './embedded-browser/contracts/hls'
 import type { EmbeddedBrowserMpdDownloadPlan } from '@/features/embedded-browser/resources/model/embedded-browser-mpd-manifest'
 
 export type EmbeddedBrowserMainControllerOptions = {
