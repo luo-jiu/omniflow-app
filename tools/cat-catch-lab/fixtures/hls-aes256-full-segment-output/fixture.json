@@ -1,0 +1,21 @@
+{
+  "fixtureId": "hls-aes256-full-segment-output",
+  "capabilityIds": [
+    "hls.segment-pipeline"
+  ],
+  "upstreamCommit": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
+  "status": "active",
+  "oracle": "upstream-executable",
+  "sourceRefs": [
+    "lib/hls.min.js#getAesModeFromFullSegmentMethod/Decrypter/AESCrypto",
+    "lib/hls.min.js#KeyLoader AES-256/AES-256-CTR",
+    "js/m3u8.js#parseTs(data) fragment projection"
+  ],
+  "input": "cases.json",
+  "expected": "expected.json",
+  "testRefs": [
+    "electron/service/embedded-browser/cat-catch-port/hls/decrypt.test.ts#hls.decrypt-aes256-full-segment",
+    "electron/service/embeddedBrowserHlsLocalDownloaderService.test.ts#hls.aes256-local-predecrypt",
+    "electron/service/embeddedBrowserHlsRealOutput.test.ts#hls.real-aes256-local-output"
+  ]
+}

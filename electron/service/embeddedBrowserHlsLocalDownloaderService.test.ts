@@ -1,3 +1,4 @@
+import { createCipheriv } from 'node:crypto'
 import os from 'node:os'
 import path from 'node:path'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
@@ -97,6 +98,76 @@ describe('EmbeddedBrowser HLS local downloader', () => {
       })).rejects.toThrow('AES-128 key must be 16 bytes')
       expect(fetchImpl).toHaveBeenCalledTimes(1)
       expect(fetchImpl).toHaveBeenCalledWith('https://media.example/key.bin', expect.anything())
+    } finally {
+      await rm(directory, { force: true, recursive: true })
+    }
+  })
+
+  it('hls.aes256-local-predecrypt', async () => {
+    const cbcKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1)
+    const ctrKey = Uint8Array.from({ length: 32 }, (_, index) => 0x40 + index)
+    const cbcIv = Uint8Array.from({ length: 16 }, (_, index) => 0x10 + index)
+    const ctrIv = Uint8Array.from({ length: 16 }, (_, index) => 0x20 + index)
+    const clearMap = Uint8Array.from({ length: 31 }, (_, index) => index + 1)
+    const clearSegment = Uint8Array.from({ length: 47 }, (_, index) => 0x80 + index)
+    const cbcCipher = createCipheriv('aes-256-cbc', cbcKey, cbcIv)
+    const encryptedMap = Buffer.concat([cbcCipher.update(clearMap), cbcCipher.final()])
+    const ctrCipher = createCipheriv('aes-256-ctr', ctrKey, ctrIv)
+    const encryptedSegment = Buffer.concat([ctrCipher.update(clearSegment), ctrCipher.final()])
+    const urls = {
+      cbcKey: 'https://media.example/map.key',
+      ctrKey: 'https://media.example/segment.key',
+      map: 'https://media.example/init.mp4',
+      segment: 'https://media.example/segment.ts',
+    }
+    const responses = new Map<string, Uint8Array>([
+      [urls.cbcKey, cbcKey],
+      [urls.ctrKey, ctrKey],
+      [urls.map, encryptedMap],
+      [urls.segment, encryptedSegment],
+    ])
+    const fetchImpl = vi.fn(async (url: string) => {
+      const bytes = responses.get(url)
+      if (!bytes) return new Response(null, { status: 404 })
+      return new Response(new Uint8Array(bytes).buffer)
+    })
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'omniflow-hls-aes256-test-'))
+    const plan = {
+      ...createPlan(),
+      fragments: [{
+        ...createPlan().fragments[0],
+        initSegment: {
+          key: {
+            iv: `0x${Buffer.from(cbcIv).toString('hex')}`,
+            method: 'AES-256',
+            url: urls.cbcKey,
+          },
+          url: urls.map,
+        },
+        key: {
+          iv: `0x${Buffer.from(ctrIv).toString('hex')}`,
+          method: 'AES-256-CTR',
+          url: urls.ctrKey,
+        },
+        url: urls.segment,
+      }],
+    }
+
+    try {
+      const result = await downloadEmbeddedBrowserHlsToLocalWorkDirectory({
+        fetch: fetchImpl,
+        plan,
+        workDirectoryPath: directory,
+      })
+      const playlist = await readFile(result.playlistPath, 'utf8')
+
+      await expect(readFile(path.join(directory, 'maps', 'map-001.mp4')))
+        .resolves.toEqual(Buffer.from(clearMap))
+      await expect(readFile(path.join(directory, 'segments', '00001.ts')))
+        .resolves.toEqual(Buffer.from(clearSegment))
+      expect(playlist).toContain('#EXT-X-MAP:URI="maps/map-001.mp4"')
+      expect(playlist).not.toContain('#EXT-X-KEY')
+      expect(fetchImpl).toHaveBeenCalledTimes(4)
     } finally {
       await rm(directory, { force: true, recursive: true })
     }

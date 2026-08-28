@@ -3,6 +3,7 @@ import { createCipheriv } from 'node:crypto'
 import os from 'node:os'
 import path from 'node:path'
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -19,6 +20,22 @@ import { downloadEmbeddedBrowserHlsLocalTracks } from './embedded-browser/proces
 
 const ffmpegPath = await resolveDesktopFfmpegPath()
 const ffprobePath = await resolveDesktopFfprobePath()
+const aes256FixtureRoot = fileURLToPath(new URL('../../tools/cat-catch-lab/fixtures/hls-aes256-full-segment-output', import.meta.url))
+const aes256Fixture = JSON.parse(await readFile(`${aes256FixtureRoot}/fixture.json`, 'utf8')) as {
+  expected: string
+  input: string
+}
+const aes256Cases = JSON.parse(await readFile(`${aes256FixtureRoot}/${aes256Fixture.input}`, 'utf8')) as {
+  cases: Array<{
+    cipher: 'aes-256-cbc' | 'aes-256-ctr'
+    ivHex: string
+    method: 'AES-256' | 'AES-256-CTR'
+  }>
+}
+const aes256Expected = JSON.parse(await readFile(`${aes256FixtureRoot}/${aes256Fixture.expected}`, 'utf8')) as {
+  clearPlaylistMethods: string[]
+  keyByteLength: number
+}
 
 async function expectMp4Output(
   outputPath: string,
@@ -213,6 +230,113 @@ describe.skipIf(!ffmpegPath || !ffprobePath)('EmbeddedBrowser real HLS output', 
         expect(localPlaylist).toContain('#EXT-X-KEY:METHOD=AES-128')
         expect(localPlaylist).toContain('URI="keys/key-001.key"')
         expect(localPlaylist).toContain(`IV=${testCase.expectedIv}`)
+
+        const result = await downloadEmbeddedBrowserManifestResource({
+          ffmpegPath: ffmpegPath!,
+          kind: 'hls',
+          manifestUrl: localResult.playlistPath,
+          outputPath,
+        })
+        await expectMp4Output(result.outputPath, [{
+          codecName: 'aac',
+          codecType: 'audio',
+        }])
+      } finally {
+        await rm(directory, { force: true, recursive: true })
+      }
+    }
+  })
+
+  it('hls.real-aes256-local-output', async () => {
+    for (const testCase of aes256Cases.cases) {
+      const directory = await mkdtemp(path.join(os.tmpdir(), `omniflow-hls-real-${testCase.method.toLowerCase()}-test-`))
+      const clearDirectory = path.join(directory, 'clear')
+      const sourceDirectory = path.join(directory, 'source')
+      const workDirectory = path.join(directory, 'work')
+      const outputPath = path.join(directory, 'output.mp4')
+      const manifestUrl = `https://media.example/${testCase.method.toLowerCase()}/source.m3u8`
+      const keyBytes = Uint8Array.from(
+        { length: aes256Expected.keyByteLength },
+        (_, index) => index + 1,
+      )
+      const ivBytes = Uint8Array.from(Buffer.from(testCase.ivHex, 'hex'))
+
+      try {
+        await Promise.all([
+          mkdir(clearDirectory, { recursive: true }),
+          mkdir(sourceDirectory, { recursive: true }),
+          mkdir(workDirectory, { recursive: true }),
+        ])
+        const clearPlaylistPath = path.join(clearDirectory, 'source.m3u8')
+        const generateResult = spawnSync(ffmpegPath!, [
+          '-y',
+          '-v',
+          'error',
+          '-f',
+          'lavfi',
+          '-i',
+          'sine=frequency=1500:sample_rate=44100:duration=0.5',
+          '-c:a',
+          'aac',
+          '-b:a',
+          '64k',
+          '-f',
+          'hls',
+          '-hls_list_size',
+          '0',
+          '-hls_segment_filename',
+          'segment-%03d.ts',
+          'source.m3u8',
+        ], {
+          cwd: clearDirectory,
+          encoding: 'utf8',
+          timeout: 10_000,
+        })
+        expect(generateResult.status, generateResult.stderr).toBe(0)
+
+        const clearPlaylist = await readFile(clearPlaylistPath, 'utf8')
+        const segmentNames = clearPlaylist
+          .split(/\r?\n/)
+          .filter(line => line && !line.startsWith('#'))
+        expect(segmentNames.length).toBeGreaterThan(0)
+        await writeFile(path.join(sourceDirectory, 'key.bin'), keyBytes)
+        await Promise.all(segmentNames.map(async (segmentName) => {
+          const cipher = createCipheriv(testCase.cipher, keyBytes, ivBytes)
+          const clearBytes = await readFile(path.join(clearDirectory, segmentName))
+          await writeFile(
+            path.join(sourceDirectory, segmentName),
+            Buffer.concat([cipher.update(clearBytes), cipher.final()]),
+          )
+        }))
+        const sourcePlaylist = clearPlaylist.replace(
+          '#EXTINF:',
+          `#EXT-X-KEY:METHOD=${testCase.method},URI="key.bin",IV=0x${testCase.ivHex}\n#EXTINF:`,
+        )
+        await writeFile(path.join(sourceDirectory, 'source.m3u8'), sourcePlaylist)
+
+        const manifest = parseHlsManifest({
+          baseUrl: manifestUrl,
+          text: sourcePlaylist,
+        })
+        const plan = createHlsDownloadPlan({ manifest, manifestUrl })
+        const localResult = await defaultHlsTaskExecutor.downloadToLocalWorkDirectory({
+          fetch: async (url: string) => {
+            const bytes = await readFile(path.join(
+              sourceDirectory,
+              path.basename(new URL(url).pathname),
+            ))
+            return new Response(new Uint8Array(bytes).buffer)
+          },
+          plan,
+          preprocessFragments: true,
+          workDirectoryPath: workDirectory,
+        })
+        const localPlaylist = await readFile(localResult.playlistPath, 'utf8')
+        expect(localResult.keyCount).toBe(1)
+        for (const method of aes256Expected.clearPlaylistMethods) {
+          expect(localPlaylist).toContain(`METHOD=${method}`)
+        }
+        expect(localPlaylist).not.toContain('METHOD=AES-256')
 
         const result = await downloadEmbeddedBrowserManifestResource({
           ffmpegPath: ffmpegPath!,

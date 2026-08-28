@@ -1,0 +1,6 @@
+{
+  "clearPlaylistMethods": [],
+  "ctrCounterLengthBits": 64,
+  "ivByteLength": 16,
+  "keyByteLength": 32
+}

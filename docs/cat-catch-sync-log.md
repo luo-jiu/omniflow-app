@@ -1221,6 +1221,20 @@
 - legacy cleanup: 无；旧 HLS compatibility facade 和 legacy-named controller adapter 继续保留到 hls-engine 原子 cutover。
 - validation: parser/authority 专项 `2 files / 50 tests`、完整 HLS 集合 `19 files / 124 tests`、TypeScript、全仓 ESLint、fixture/capability JSON、固定上游 validator、同步测试 `16/16` 和 metadata `7 units / 32 capabilities / 207 anchors / 106 cleanup entries / 162 planned IDs / 117 active refs` 通过；排除 Node runner 文件后全仓 Vitest 为 `189 files / 1259 passed / 3 skipped`。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
 
+## 2026-08-28: same target (HLS AES-256 local output)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本步关闭固定 hls.js full-segment AES-256 到本地 ffmpeg 输出的已知断点。
+- reviewedThrough / portedThrough: 均保持 `null`；hls-engine 仍有 parser 差分、legacy cleanup 与真实网站验证未完成。
+- change groups: `behavioral-correction`（AES-256 CBC/CTR 可交付输出）、`platform-substitute`（ffmpeg 前 Web Crypto）与 `output-proof`（真实 ffmpeg/ffprobe）。
+- affected capability IDs: `hls.segment-pipeline` 保持 `porting`；新增 3 个 planned ID、3 个 active ref 和 1 个 target function，不增加上游 anchor。
+- fixtures/tests: 新增 upstream-executable fixture `hls-aes256-full-segment-output`；`hls.decrypt-aes256-full-segment` 锁定 CBC/CTR mode 与 32-byte key，`hls.aes256-local-predecrypt` 同时验证加密 MAP、media、key cache identity 和 clear playlist，`hls.real-aes256-local-output` 对两种 METHOD 均生成真实 AAC HLS 密文并经生产本地下载链、ffmpeg、ffprobe 交付正时长 MP4。
+- accepted difference: 固定 full hls.js 已实现 `AES-256 -> AES-CBC`、`AES-256-CTR -> AES-CTR(length=64)`，但 Cat Catch 自有 m3u8 downloader 只实例化 AES-128-oriented JavaScript decryptor；ffmpeg 8.1 HLS demuxer也不识别这两个 METHOD，预检会把密文当明文并在首片失败。OmniFlow 在 main-owned 本地工作目录中按固定 hls.js Web Crypto 语义消费对应 key/IV，随后只从 clear playlist 移除已消费的 AES-256 key state，最终功能覆盖固定依赖而不复制其下载器断层。
+- excluded changes and reasons: AES-128 继续保留 key/IV 标签并交给既有单一 ffmpeg owner；不修改 parser DTO、IPC、renderer、authority、直播 owner或通用 fragment downloader，也不引入新的跨协议加密框架。
+- unresolved gaps: CBC encrypted MAP 使用非零 BYTERANGE 时，固定 hls.js 会按未加密长度扩展 range，并在非零 offset 前取一个 ciphertext block 重置 IV；该稀有组合尚无本地合同。其余 parser 可执行性差分、真实网站、旧 façade/controller adapter 与 hls-engine 原子 cleanup 仍待完成。
+- runtime changes: `decryptHlsFullSegment` 成为 AES-128/256 CBC 与 AES-256 CTR 的 pure Web Crypto owner；本地 task 对 AES-256 key 强制 32 bytes、IV 强制 16 bytes，在 PNG/JPEG prefix 预处理后解密 media，并在 MAP 写盘前按独立 declaration-time key context 解密。MAP cache 只在本地解密时加入 key/IV identity；最终 playlist 使用原资源身份查找文件、使用 clear key state 写标签，避免状态查找互相污染。
+- legacy cleanup: 无；本步扩充 target pipeline，不提前删除任何 cleanup sentinel。
+- validation: AES 专项 `3 files / 17 tests`、完整 HLS `19 files / 127 tests`、TypeScript、scoped 与全仓正式 ESLint、fixture/capability JSON、固定上游 validator、同步测试 `16/16` 和 metadata `7 units / 32 capabilities / 207 anchors / 106 cleanup entries / 165 planned IDs / 120 active refs` 通过；排除 Node runner 文件后全仓 Vitest 为 `189 files / 1262 passed / 3 skipped`。真实 ffmpeg 8.1/ffprobe 门禁实际运行 CBC/CTR 两种输出。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
+
 ## Template
 
 ```markdown

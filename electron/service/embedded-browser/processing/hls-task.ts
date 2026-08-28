@@ -8,6 +8,11 @@ import {
   type EmbeddedBrowserFragmentBufferProcessor,
   type EmbeddedBrowserFragmentFetch,
 } from '../../embeddedBrowserFragmentDownloader'
+import {
+  createHlsDefaultIv,
+  decryptHlsFullSegment,
+  type HlsFullSegmentEncryptionMethod,
+} from '../cat-catch-port/hls/decrypt'
 import { preprocessFragment } from '../cat-catch-port/hls/pipeline'
 import type { EmbeddedBrowserHlsDownloadPlan } from '../contracts/hls'
 
@@ -84,6 +89,7 @@ function getFragmentSourceIndex(fragment: EmbeddedBrowserDownloadFragment | Embe
 }
 
 type ResourceRefRecord = {
+  bytes?: Uint8Array
   localPath: string
   playlistPath: string
 }
@@ -149,6 +155,90 @@ function createKeyRefCacheKey(input: {
     method: normalizedMethod,
     url: input.url,
   })
+}
+
+function isLocallyDecryptedHlsMethod(
+  method?: string,
+): method is Exclude<HlsFullSegmentEncryptionMethod, 'AES-128'> {
+  return method === 'AES-256' || method === 'AES-256-CTR'
+}
+
+function createMapRefCacheKey(input: EmbeddedBrowserHlsLocalDownloadMapRef) {
+  const resourceKey = createResourceCacheKey({
+    byteRange: input.byteRange,
+    url: input.url,
+  })
+  if (!isLocallyDecryptedHlsMethod(input.key?.method)) {
+    return resourceKey
+  }
+  return [
+    resourceKey,
+    createKeyRefCacheKey(input.key),
+    input.key.iv || '',
+  ].join('|')
+}
+
+function parseHlsLocalDecryptIv(
+  key: EmbeddedBrowserHlsLocalDownloadKeyRef,
+  sequence: number,
+) {
+  if (!key.iv) {
+    return createHlsDefaultIv(sequence)
+  }
+  const match = /^0x((?:[0-9a-f]{2})+)$/i.exec(key.iv)
+  const iv = match
+    ? Uint8Array.from(match[1].match(/[0-9a-f]{2}/gi)!.map(value => Number.parseInt(value, 16)))
+    : new Uint8Array(0)
+  if (iv.byteLength !== 16) {
+    throw new Error(`${key.method} IV must be 16 bytes, received ${iv.byteLength}`)
+  }
+  return iv
+}
+
+async function decryptHlsLocalResource(input: {
+  buffer: ArrayBuffer
+  key?: EmbeddedBrowserHlsLocalDownloadKeyRef
+  keyRefs: Map<string, ResourceRefRecord>
+  sequence: number
+}) {
+  const method = input.key?.method
+  if (!isLocallyDecryptedHlsMethod(method) || !input.key) {
+    return input.buffer
+  }
+  const keyRecord = getRequiredLocalRef(
+    'key',
+    input.keyRefs.get(createKeyRefCacheKey(input.key)),
+    input.sequence,
+  )
+  if (!keyRecord.bytes) {
+    throw new Error(`HLS ${method} key bytes are unavailable`)
+  }
+  return decryptHlsFullSegment(
+    input.buffer,
+    keyRecord.bytes,
+    parseHlsLocalDecryptIv(input.key, input.sequence),
+    method,
+  )
+}
+
+function clearLocallyDecryptedHlsKeys(
+  fragment: EmbeddedBrowserHlsLocalDownloadFragment,
+): EmbeddedBrowserHlsLocalDownloadFragment {
+  const initSegment = fragment.initSegment
+  return {
+    ...fragment,
+    initSegment: initSegment
+      ? {
+          ...initSegment,
+          key: isLocallyDecryptedHlsMethod(initSegment.key?.method)
+            ? undefined
+            : initSegment.key,
+        }
+      : undefined,
+    key: isLocallyDecryptedHlsMethod(fragment.key?.method)
+      ? undefined
+      : fragment.key,
+  }
 }
 
 function inferExtensionFromUrl(input: string, fallback: string) {
@@ -217,14 +307,18 @@ async function fetchStaticResourceBuffer(input: {
 
 async function downloadStaticResource(input: {
   byteRange?: EmbeddedBrowserDownloadByteRange
+  bufferProcessor?: (buffer: ArrayBuffer) => ArrayBuffer | Promise<ArrayBuffer>
   fetch?: EmbeddedBrowserFragmentFetch
   headers?: Record<string, string>
   outputPath: string
   signal?: AbortSignal
   url: string
 }) {
-  const buffer = await fetchStaticResourceBuffer(input)
-  await writeFile(input.outputPath, new Uint8Array(buffer))
+  const sourceBuffer = await fetchStaticResourceBuffer(input)
+  const outputBuffer = input.bufferProcessor
+    ? await input.bufferProcessor(sourceBuffer)
+    : sourceBuffer
+  await writeFile(input.outputPath, new Uint8Array(outputBuffer))
 }
 
 async function prepareStaticRefs(input: {
@@ -233,13 +327,29 @@ async function prepareStaticRefs(input: {
   outputDirectoryPath: string
   refs: Array<{
     byteRange?: EmbeddedBrowserDownloadByteRange
+    key?: EmbeddedBrowserHlsLocalDownloadKeyRef
     method?: string
     url?: string
   }>
-  resourcePathBuilder: (index: number, ref: { url?: string }) => {
+  resourcePathBuilder: (index: number, ref: {
+    key?: EmbeddedBrowserHlsLocalDownloadKeyRef
+    url?: string
+  }) => {
     localPath: string
     outputPath: string
   }
+  bufferProcessor?: (buffer: ArrayBuffer, ref: {
+    byteRange?: EmbeddedBrowserDownloadByteRange
+    key?: EmbeddedBrowserHlsLocalDownloadKeyRef
+    method?: string
+    url?: string
+  }) => ArrayBuffer | Promise<ArrayBuffer>
+  cacheKeyBuilder?: (ref: {
+    byteRange?: EmbeddedBrowserDownloadByteRange
+    key?: EmbeddedBrowserHlsLocalDownloadKeyRef
+    method?: string
+    url?: string
+  }) => string
   headers?: Record<string, string>
   signal?: AbortSignal
 }) {
@@ -254,7 +364,9 @@ async function prepareStaticRefs(input: {
     if (!ref.url) {
       continue
     }
-    const cacheKey = createResourceCacheKey(ref)
+    const cacheKey = input.cacheKeyBuilder
+      ? input.cacheKeyBuilder(ref)
+      : createResourceCacheKey(ref)
     if (records.has(cacheKey)) {
       continue
     }
@@ -262,6 +374,9 @@ async function prepareStaticRefs(input: {
     resourceIndex += 1
     await downloadStaticResource({
       byteRange: ref.byteRange,
+      bufferProcessor: input.bufferProcessor
+        ? buffer => input.bufferProcessor!(buffer, ref)
+        : undefined,
       fetch: input.fetch,
       headers: input.headers,
       outputPath: nextPaths.outputPath,
@@ -318,6 +433,7 @@ async function prepareKeyRefs(input: {
     resourceIndex += 1
     const outputPath = path.join(keysDirectoryPath, fileName)
 
+    let keyBytes: Uint8Array | undefined
     if (manualKeyBytes && normalizedMethod === 'AES-128') {
       await writeFile(outputPath, manualKeyBytes)
     } else if (ref.url) {
@@ -330,12 +446,21 @@ async function prepareKeyRefs(input: {
       if (normalizedMethod === 'AES-128' && keyBuffer.byteLength !== 16) {
         throw new Error(`AES-128 key must be 16 bytes, received ${keyBuffer.byteLength}`)
       }
-      await writeFile(outputPath, new Uint8Array(keyBuffer))
+      if (isLocallyDecryptedHlsMethod(normalizedMethod)
+        && keyBuffer.byteLength !== 32) {
+        throw new Error(`${normalizedMethod} key must be 32 bytes, received ${keyBuffer.byteLength}`)
+      }
+      const downloadedKeyBytes = new Uint8Array(keyBuffer)
+      if (isLocallyDecryptedHlsMethod(normalizedMethod)) {
+        keyBytes = downloadedKeyBytes
+      }
+      await writeFile(outputPath, downloadedKeyBytes)
     } else {
       continue
     }
 
     records.set(cacheKey, {
+      bytes: keyBytes,
       localPath: path.posix.join('keys', fileName),
       playlistPath: path.posix.join('keys', fileName),
     })
@@ -350,6 +475,7 @@ function buildLocalPlaylist(input: {
   keyRefs: Map<string, ResourceRefRecord>
   manualKeyBase64?: string
   mapRefs: Map<string, ResourceRefRecord>
+  resourceFragments?: EmbeddedBrowserHlsLocalDownloadFragment[]
 }) {
   if (!input.fragments.length || !input.fragmentPaths.length) {
     throw new Error('重写本地 playlist 失败：当前没有可写入 playlist 的本地分片')
@@ -403,16 +529,14 @@ function buildLocalPlaylist(input: {
   }
 
   input.fragments.forEach((fragment, index) => {
+    const resourceFragment = input.resourceFragments?.[index] || fragment
     if (index > 0 && fragment.discontinuitySequence !== previousDiscontinuity) {
       lines.push('#EXT-X-DISCONTINUITY')
       previousDiscontinuity = fragment.discontinuitySequence
     }
 
-    const nextMapRefCacheKey = fragment.initSegment?.url
-      ? createResourceCacheKey({
-          byteRange: fragment.initSegment.byteRange,
-          url: fragment.initSegment.url,
-        })
+    const nextMapRefCacheKey = resourceFragment.initSegment?.url
+      ? createMapRefCacheKey(resourceFragment.initSegment)
       : ''
     const nextMapKeyState = getKeyIdentity(fragment.initSegment?.key).stateKey
     const nextMapStateKey = fragment.initSegment
@@ -511,12 +635,24 @@ async function downloadEmbeddedBrowserHlsToLocalWorkDirectory(
   })
 
   const mapRefs = await prepareStaticRefs({
+    bufferProcessor: (buffer, ref) => decryptHlsLocalResource({
+      buffer,
+      key: ref.key,
+      keyRefs,
+      sequence: 0,
+    }),
+    cacheKeyBuilder: ref => createMapRefCacheKey({
+      byteRange: ref.byteRange,
+      key: ref.key,
+      url: ref.url || '',
+    }),
     directoryName: 'maps',
     fetch: request.fetch,
     headers: plan.headers,
     outputDirectoryPath,
     refs: plan.fragments.map((fragment) => ({
       byteRange: fragment.initSegment?.byteRange,
+      key: fragment.initSegment?.key,
       url: fragment.initSegment?.url,
     })),
     resourcePathBuilder: (index, ref) => {
@@ -572,10 +708,24 @@ async function downloadEmbeddedBrowserHlsToLocalWorkDirectory(
     }))).reduce<number>((sum, value) => sum + value, 0)
     : 0
 
+  const bufferProcessors: EmbeddedBrowserFragmentBufferProcessor[] = []
+  if (request.preprocessFragments) {
+    bufferProcessors.push(preprocessFragment as EmbeddedBrowserFragmentBufferProcessor)
+  }
+  if (plan.fragments.some(fragment => isLocallyDecryptedHlsMethod(fragment.key?.method))) {
+    bufferProcessors.push((buffer, fragment) => {
+      const hlsFragment = fragment as EmbeddedBrowserHlsLocalDownloadFragment
+      return decryptHlsLocalResource({
+        buffer,
+        key: hlsFragment.key,
+        keyRefs,
+        sequence: hlsFragment.sequence,
+      })
+    })
+  }
+
   const downloader = new EmbeddedBrowserFragmentDownloader({
-    bufferProcessors: request.preprocessFragments
-      ? [preprocessFragment as EmbeddedBrowserFragmentBufferProcessor]
-      : undefined,
+    bufferProcessors,
     fetch: request.fetch,
     fragments: fragmentsToDownload,
     headers: plan.headers,
@@ -777,10 +927,11 @@ async function downloadEmbeddedBrowserHlsToLocalWorkDirectory(
   })
   const playlistText = buildLocalPlaylist({
     fragmentPaths: existingPlaylistContent.fragmentPaths,
-    fragments: existingPlaylistContent.fragments,
+    fragments: existingPlaylistContent.fragments.map(clearLocallyDecryptedHlsKeys),
     keyRefs,
     manualKeyBase64: request.manualKeyBase64,
     mapRefs,
+    resourceFragments: existingPlaylistContent.fragments,
   })
   const playlistPath = path.join(outputDirectoryPath, 'local-playlist.m3u8')
   await writeFile(playlistPath, playlistText, 'utf8')
