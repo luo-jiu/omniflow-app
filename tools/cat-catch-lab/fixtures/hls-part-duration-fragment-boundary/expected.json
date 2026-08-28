@@ -1,0 +1,21 @@
+{
+  "baseUrl": "https://media.example/parts/playlist.m3u8",
+  "durationSeconds": 12,
+  "segments": [
+    {
+      "duration": 3,
+      "sequence": 0,
+      "url": "https://media.example/parts/assembled-no-extinf.m4s"
+    },
+    {
+      "duration": 5,
+      "sequence": 1,
+      "url": "https://media.example/parts/assembled-after-extinf.m4s"
+    },
+    {
+      "duration": 4,
+      "sequence": 2,
+      "url": "https://media.example/parts/recovered.m4s"
+    }
+  ]
+}

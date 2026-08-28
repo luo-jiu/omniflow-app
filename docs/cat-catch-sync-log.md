@@ -1179,6 +1179,20 @@
 - legacy cleanup: 无；旧 HLS compatibility façade 和 legacy-named controller adapter 继续保留到 hls-engine 原子 cutover。
 - validation: 固定 vendor executable oracle 输出第一片 clear、后两片沿用 `active.key` 且 implicit IV 分别为 11/12；master 只输出 `Spaced flags` 一条 AUDIO rendition，其 DEFAULT/AUTOSELECT 为 false、FORCED 为 true。新增测试在修改前稳定收到 2 条 rendition 且 flag 被提升为 true，实现后 parser `40/40`、完整 HLS 集合 `19 files / 120 tests`、TypeScript、全仓 ESLint、fixture/capability JSON、固定上游 validator、同步测试 `16/16`、metadata `7 units / 32 capabilities / 207 anchors / 106 cleanup entries / 158 planned IDs / 113 active refs` 和 scoped diff check 通过。排除 Node runner 文件后，全仓 Vitest 为 `189 files / 1255 passed / 3 skipped`。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
 
+## 2026-08-28: same target (HLS PART duration fragment boundary)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本步继续补固定 hls.js LL-HLS PART 对完整 fragment 的状态影响。
+- reviewedThrough / portedThrough: 均保持 `null`；hls-engine 仍未完成其余 parser 差分和原子 cleanup。
+- change groups: `behavioral-correction`（PART duration 累计/EXTINF 覆盖）与 `executability-boundary`（非有限 duration 抑制紧随 URI）。
+- affected capability IDs: `hls.parser-planner` 保持 `ported-unverified`；新增 1 个 planned ID 和 1 个 active ref，不增加上游 anchor。
+- fixtures/tests: 新增 upstream-executable fixture `hls-part-duration-fragment-boundary`；`hls.part-duration-fragment-boundary` 锁定无 EXTINF 时两个 PART 累计为 3 秒、有效 EXTINF 覆盖后再累计为 5 秒、非有限 PART duration 抑制紧随 URI且下一条有效 EXTINF 恢复，并同时断言 manifest 与 download plan 不包含 PART URL。
+- accepted difference: 无。固定 `LevelDetails.partList` 仍不进入 Cat Catch `parseTs` 下载列表；只保留 PART 已经施加到当前 fragment 的 duration/URL/sequence 状态。
+- excluded changes and reasons: 本步不投影 `PART-INF` 播放 metadata、PART URL、PRELOAD-HINT 或 rendition report，不修改 DTO、IPC、authority、live owner、downloader 或 UI。
+- unresolved gaps: HLS 其余真正影响 URL/sequence/cc/key/MAP/range/duration/manifest executability 的 parser 差分、AES-256 系列真实输出、真实网站手工验证和 hls-engine cleanup 仍待完成。
+- runtime changes: 精确 `EXT-X-PART:` 解析固定 AttrList 并把 DURATION 累加到当前 pending segment；后续有效 EXTINF 继续覆盖该值，非有限累计沿用既有 addSegment 抑制分支。相似前缀保持 fallback，PART URL 和 partCount 行为不变。
+- legacy cleanup: 无；旧 HLS compatibility facade 和 legacy-named controller adapter 继续保留到 hls-engine 原子 cutover。
+- validation: 固定 vendor executable oracle 输出 `totalduration=12` 与 3 个 fragment，duration 依次为 `3/5/4`；修改前 pure parser 错误输出 4 个 fragment，duration 为 `0/4/4/4`。实现后 parser `41/41`、完整 HLS 集合 `19 files / 121 tests`、TypeScript、全仓 ESLint、fixture/capability JSON、固定上游 validator、同步测试 `16/16` 和 metadata `7 units / 32 capabilities / 207 anchors / 106 cleanup entries / 159 planned IDs / 114 active refs` 通过；排除 Node runner 文件后全仓 Vitest 为 `189 files / 1256 passed / 3 skipped`。首轮 TypeScript 暴露测试投影 helper 过度绑定 manifest segment 类型，收窄到实际断言字段后 parser 与 TypeScript 重跑通过。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
+
 ## Template
 
 ```markdown

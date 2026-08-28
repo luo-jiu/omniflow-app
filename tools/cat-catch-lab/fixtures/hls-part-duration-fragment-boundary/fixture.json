@@ -1,0 +1,19 @@
+{
+  "fixtureId": "hls-part-duration-fragment-boundary",
+  "capabilityIds": [
+    "hls.parser-planner"
+  ],
+  "upstreamCommit": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
+  "status": "active",
+  "oracle": "upstream-executable",
+  "sourceRefs": [
+    "lib/hls.min.js#parseLevelPlaylist EXT-X-PART frag.duration",
+    "lib/hls.min.js#LevelDetails.fragments",
+    "js/m3u8.js#parseTs(data)"
+  ],
+  "input": "playlist.m3u8",
+  "expected": "expected.json",
+  "testRefs": [
+    "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.part-duration-fragment-boundary"
+  ]
+}

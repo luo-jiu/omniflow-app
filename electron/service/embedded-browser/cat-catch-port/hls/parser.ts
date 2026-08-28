@@ -13,7 +13,7 @@
  * hls-master-parser-mode-isolation, hls-line-ending-boundary,
  * hls-master-pending-variant-boundary, hls-master-rendition-boolean-boundary,
  * hls-master-variant-numeric-boundary, hls-leading-whitespace-token-boundary,
- * hls-attribute-value-whitespace-boundary
+ * hls-attribute-value-whitespace-boundary, hls-part-duration-fragment-boundary
  */
 
 import { createHlsDefaultIv } from './decrypt'
@@ -905,12 +905,27 @@ export function parseHlsManifest(input: {
       partTarget = Number.parseFloat(attributes['PART-TARGET'] || '')
       continue
     }
-    if (line.startsWith('#EXT-X-PART')) {
+    if (line.startsWith('#EXT-X-PART:')) {
       // Upstream: xifangczy/cat-catch@2cb981d7c2f4614732edccc167c4b5793d1cb138
       // Source: lib/hls.min.js#partList; js/m3u8.js#parseTs(data)
       // Pinned hls.js keeps LL-HLS parts outside LevelDetails.fragments, while
       // Cat Catch's parseTs copies only fragments into its downloader.
-      // Treating parts as fragments duplicates them once EXTINF is published.
+      // PART still mutates the current fragment duration until a later EXTINF
+      // replaces it; non-finite duration suppresses the next URI in hls.js.
+      if (!hasHlsValuedTagPayload(line)) continue
+      const attributes = parseHlsAttributeListWithVariables(
+        getRawTagValue(line),
+        variableState,
+      )
+      const partDuration = Number.parseFloat(attributes.DURATION || '')
+      pendingSegment = {
+        duration: (pendingSegment?.duration ?? 0) + partDuration,
+        title: pendingSegment?.title,
+      }
+      continue
+    }
+    if (line.startsWith('#EXT-X-PART')) {
+      // Similar prefixes stay on the generic fallback path.
       continue
     }
     if (line.startsWith('#EXT-X-SERVER-CONTROL:')) {

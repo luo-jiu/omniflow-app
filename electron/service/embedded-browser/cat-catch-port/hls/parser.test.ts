@@ -60,6 +60,21 @@ const llHlsExpected = JSON.parse(readFileSync(`${llHlsFixtureRoot}/${llHlsFixtur
   }>
 }
 
+const partDurationFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-part-duration-fragment-boundary', import.meta.url))
+const partDurationFixture = JSON.parse(readFileSync(`${partDurationFixtureRoot}/fixture.json`, 'utf8')) as {
+  expected: string
+  input: string
+}
+const partDurationExpected = JSON.parse(readFileSync(`${partDurationFixtureRoot}/${partDurationFixture.expected}`, 'utf8')) as {
+  baseUrl: string
+  durationSeconds: number
+  segments: Array<{
+    duration: number
+    sequence: number
+    url: string
+  }>
+}
+
 const emptyMediaFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-empty-media-playlist', import.meta.url))
 const emptyMediaFixture = JSON.parse(readFileSync(`${emptyMediaFixtureRoot}/fixture.json`, 'utf8')) as {
   expectedError: string
@@ -1088,6 +1103,31 @@ describe('Cat Catch HLS parser', () => {
       segmentCount: llHlsExpected.segmentCount,
     })
     expect(plan.fragments.every(fragment => !fragment.part)).toBe(true)
+  })
+
+  it('hls.part-duration-fragment-boundary', () => {
+    const manifest = parseHlsManifest({
+      baseUrl: partDurationExpected.baseUrl,
+      text: readFileSync(`${partDurationFixtureRoot}/${partDurationFixture.input}`, 'utf8'),
+    })
+    const projectSegments = (segments: ReadonlyArray<{
+      duration: number
+      sequence: number
+      url: string
+    }>) => segments.map(segment => ({
+      duration: segment.duration,
+      sequence: segment.sequence,
+      url: segment.url,
+    }))
+    expect(manifest.durationSeconds).toBe(partDurationExpected.durationSeconds)
+    expect(projectSegments(manifest.segments)).toEqual(partDurationExpected.segments)
+
+    const plan = createEmbeddedBrowserHlsDownloadPlan({
+      manifest,
+      manifestUrl: partDurationExpected.baseUrl,
+    })
+    expect(plan.durationSeconds).toBe(partDurationExpected.durationSeconds)
+    expect(projectSegments(plan.fragments)).toEqual(partDurationExpected.segments)
   })
 
   it('hls.empty-media-rejection', () => {

@@ -1,0 +1,14 @@
+#EXTM3U
+#EXT-X-TARGETDURATION:6
+#EXT-X-PART:DURATION=1,URI="part-a.m4s"
+#EXT-X-PART:DURATION=2,URI="part-b.m4s"
+assembled-no-extinf.m4s
+#EXTINF:4,
+#EXT-X-PART:DURATION=1,URI="late-part.m4s"
+assembled-after-extinf.m4s
+#EXTINF:4,
+#EXT-X-PART:DURATION=invalid,URI="bad-part.m4s"
+suppressed.m4s
+#EXTINF:4,
+recovered.m4s
+#EXT-X-ENDLIST
