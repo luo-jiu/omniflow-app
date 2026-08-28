@@ -237,6 +237,14 @@ export function parseHlsByteRange(input?: string): CatCatchHlsByteRange | undefi
   return { length, offset, raw: normalizedInput }
 }
 
+/**
+ * Upstream: xifangczy/cat-catch@2cb981d7c2f4614732edccc167c4b5793d1cb138
+ * Source: lib/hls.min.js#url-toolkit buildAbsoluteURL; js/m3u8.js#fetch
+ * Adaptation: Cat Catch's raw url-toolkit string is canonicalized again by
+ * browser fetch. Resolve with WHATWG URL here so the plan stores that effective
+ * request URL and can exactly redeem the matching main-owned resource context.
+ * Fixture: hls-effective-url-canonicalization
+ */
 function resolveHlsUrl(uri: string, baseUrl: string) {
   const normalizedUri = String(uri || '').trim()
   if (!normalizedUri) return ''

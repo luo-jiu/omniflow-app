@@ -1207,6 +1207,20 @@
 - legacy cleanup: 无；旧 HLS compatibility facade 和 legacy-named controller adapter 继续保留到 hls-engine 原子 cutover。
 - validation: 固定 vendor executable oracle 对可物化输入输出 `totalduration=8`，第一片为 `sn=0 / duration=4 / url=""`，第二片为 `sn=1 / duration=4 / valid.ts`；Cat Catch `parseTs` 对两片均直接投影 fragment URL。非有限 PART duration 输入则只输出恢复后的 `sn=0 / duration=4 / recovered.ts`。失败测试先稳定得到 parser `41/42`，实现和分支顺序自审后 parser `42/42`、完整 HLS 集合 `19 files / 122 tests`、TypeScript、全仓 ESLint、fixture/capability JSON、固定上游 validator、同步测试 `16/16` 和 metadata `7 units / 32 capabilities / 207 anchors / 106 cleanup entries / 160 planned IDs / 115 active refs` 通过；排除 Node runner 文件后全仓 Vitest 为 `189 files / 1257 passed / 3 skipped`。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
 
+## 2026-08-28: same target (HLS effective request URL authority)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本步固定 raw parser URL 到实际网络请求 URL 的平台边界。
+- reviewedThrough / portedThrough: 均保持 `null`；hls-engine 仍未完成其余 parser 差分和原子 cleanup。
+- change groups: `upstream-characterization`（固定 url-toolkit raw URL）与 `authority-boundary`（浏览器 canonicalization 后的 current-tab resource 精确命中）。
+- affected capability IDs: `hls.parser-planner` 保持 `ported-unverified`；新增 2 个 planned ID 和 2 个 active ref，不增加上游 anchor。
+- fixtures/tests: 新增 upstream-executable fixture `hls-effective-url-canonicalization`；`hls.effective-url-canonicalization` 并列记录 literal space、encoded dot segment、反斜杠和越过 origin root traversal 的 `upstreamUrl` 与 `effectiveRequestUrl`，`hls.effective-url-authority` 证明 canonical fragment URL 能精确兑换当前 tab 已捕获 resource。
+- accepted difference: 固定 hls.js 的 url-toolkit 先生成 raw fragment URL，Cat Catch 随后把它交给浏览器 `fetch`，由 WHATWG URL 规则得到实际请求目标。OmniFlow 直接在 manifest/plan 中保存该 canonical target；中间字符串可能不同，但最终网络 URL 相同，并使 main-owned authority 能恢复已捕获的 Cookie/Authorization，而不是因 raw 字符串不相等退化到无上下文 fetch。
+- excluded changes and reasons: 不引入第二套 URL resolver、不修改 capture store 的 exact-match authority、不扩建通用源码分析器，也不修改 downloader、IPC 或 UI。固定 vendor raw URL 仅作为 fixture oracle，不进入生产 DTO。
+- unresolved gaps: HLS 其余真正影响 URL/sequence/cc/key/MAP/range/duration/manifest executability 的 parser 差分、AES-256 系列真实输出、未捕获资源 fallback、真实网站手工验证和 hls-engine cleanup 仍待完成。
+- runtime changes: 无行为代码变化；既有 native `new URL` 已等价于 Cat Catch `fetch` 最终 canonicalization，本步补充 provenance 注释、vendor oracle、parser fixture 和 main authority integration contract，防止未来为了机械匹配 url-toolkit 而破坏有效网络目标及凭据继承。
+- legacy cleanup: 无；旧 HLS compatibility facade 和 legacy-named controller adapter 继续保留到 hls-engine 原子 cutover。
+- validation: parser/authority 专项 `2 files / 50 tests`、完整 HLS 集合 `19 files / 124 tests`、TypeScript、全仓 ESLint、fixture/capability JSON、固定上游 validator、同步测试 `16/16` 和 metadata `7 units / 32 capabilities / 207 anchors / 106 cleanup entries / 162 planned IDs / 117 active refs` 通过；排除 Node runner 文件后全仓 Vitest 为 `189 files / 1259 passed / 3 skipped`。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
+
 ## Template
 
 ```markdown

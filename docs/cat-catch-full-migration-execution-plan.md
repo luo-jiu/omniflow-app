@@ -67,6 +67,7 @@ OmniFlow 不运行 Cat Catch 浏览器扩展，而是把与产品目标相关的
 - 固定 AttrList 只 trim attribute 名称并保留未加引号 value 的首尾空格；KEY method/clear、rendition type 与 boolean 不能在进入 parser 前被通用 trim 归一化，否则会改变 key 继承和轨道选择。
 - LL-HLS PART 不独立进入 Cat Catch 下载列表，但固定 parser 会先把其 duration 累加到当前 fragment；后续 EXTINF 可覆盖，非有限 PART duration 则会抑制紧随 URI。pure parser 必须保留这层 duration/URL/sequence 状态，而不是把 PART 简化为完全无影响的标签。
 - segment URI 经变量替换后为空时，固定 parser 会保留中间的空 URL fragment 并推进 duration/sequence；Cat Catch 随后把空 URL 交给下载器。OmniFlow 不得静默删片并前移后续 sequence，而是在 executable plan 形成前稳定拒绝。
+- 固定 hls.js `url-toolkit` 的 raw URL 会在 Cat Catch 浏览器 `fetch` 时再次 canonicalize；pure plan 直接保存同一有效网络目标，以便精确兑换 main-owned captured resource authority。不能为了 raw 字符串表面一致而让空格、编码 dot segment 或反斜杠 URL 丢失 Cookie/Authorization 上下文。
 - master variant 的 typed BANDWIDTH/AVERAGE-BANDWIDTH/FRAME-RATE 投影使用固定 AttrList 的十进制 `parseInt` / `parseFloat` 语义，保留合法数值前缀并避免 JavaScript `Number` 把 `0x` 输入解释成非上游的十六进制码率；原始 attributes 仍原样保留。
 - Cat Catch `tsAddArg` 已作为 post-parse 纯计划能力迁入：关闭时保留原 fragment query，开启且为空时移除 query，非空时替换 query；只修改 media fragment，不修改 key/MAP。工具区草稿是唯一 renderer owner；普通静态任务强制走本地 plan，选择独立音轨时由 main 校验 captured master 与两个 child authority 后生成两条隔离的本地 plan 再合并，直播轮询经显式 IPC 把同一设置交给 main recorder。
 - HLS DTO、parser 与 plan projection 已分别收敛到 shared contract、`cat-catch-port/hls/parser.ts` 与 `plan.ts`；main、preload 和 renderer 生产调用方均已脱离 renderer model。旧 model 只保留同名 re-export 与 parity test cleanup sentinel，在 hls-engine 原子 cutover 时随两个 legacy symbol 一起删除。

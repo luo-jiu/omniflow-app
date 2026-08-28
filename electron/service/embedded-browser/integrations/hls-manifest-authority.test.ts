@@ -335,4 +335,35 @@ describe('HLS manifest authority', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(2)
     expect(fetchImpl.mock.calls[1]?.[1].cache).toBe('force-cache')
   })
+
+  it('hls.effective-url-authority', async () => {
+    const playlist = [
+      '#EXTM3U',
+      '#EXT-X-TARGETDURATION:4',
+      '#EXTINF:4,',
+      'segment one.ts',
+      '#EXT-X-ENDLIST',
+    ].join('\n')
+    const harness = createHarness(async () => new Response(playlist))
+    const canonicalFragmentUrl = 'https://video.example/segment%20one.ts'
+    const capturedFragment = harness.store.recordNetworkResource({
+      binding: harness.registration.binding,
+      metadata: {
+        kind: 'media',
+        resourceType: 'xhr',
+        url: canonicalFragmentUrl,
+      },
+    })
+    expect(capturedFragment.decision).toBe('accepted')
+
+    const result = await resolveHlsCapturedMediaPlan(harness.access, {
+      resourceId: harness.videoResourceId,
+      tabId: 'tab-1',
+    })
+    expect(result?.plan.fragments[0]?.url).toBe(canonicalFragmentUrl)
+    expect(harness.store.getOwnedResourceByUrl(
+      'tab-1',
+      result?.plan.fragments[0]?.url || '',
+    )?.id).toBe(capturedFragment.resource?.id)
+  })
 })

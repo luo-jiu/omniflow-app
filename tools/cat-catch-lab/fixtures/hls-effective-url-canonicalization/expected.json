@@ -1,0 +1,25 @@
+{
+  "baseUrl": "https://media.example/a/b/playlist.m3u8",
+  "segments": [
+    {
+      "effectiveRequestUrl": "https://media.example/a/b/segment%20one.ts",
+      "relativeUrl": "segment one.ts",
+      "upstreamUrl": "https://media.example/a/b/segment one.ts"
+    },
+    {
+      "effectiveRequestUrl": "https://media.example/a/encoded.ts",
+      "relativeUrl": "%2e%2e/encoded.ts",
+      "upstreamUrl": "https://media.example/a/b/%2e%2e/encoded.ts"
+    },
+    {
+      "effectiveRequestUrl": "https://media.example/a/backslash.ts",
+      "relativeUrl": "..\\backslash.ts",
+      "upstreamUrl": "https://media.example/a/b/..\\backslash.ts"
+    },
+    {
+      "effectiveRequestUrl": "https://media.example/escape.ts",
+      "relativeUrl": "../../../../escape.ts",
+      "upstreamUrl": "https://media.example/../../escape.ts"
+    }
+  ]
+}

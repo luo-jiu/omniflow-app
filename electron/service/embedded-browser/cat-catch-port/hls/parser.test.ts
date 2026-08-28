@@ -402,6 +402,19 @@ const emptySegmentUriExpected = JSON.parse(readFileSync(`${emptySegmentUriFixtur
   }>
 }
 
+const effectiveUrlFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-effective-url-canonicalization', import.meta.url))
+const effectiveUrlFixture = JSON.parse(readFileSync(`${effectiveUrlFixtureRoot}/fixture.json`, 'utf8')) as {
+  expected: string
+  input: string
+}
+const effectiveUrlExpected = JSON.parse(readFileSync(`${effectiveUrlFixtureRoot}/${effectiveUrlFixture.expected}`, 'utf8')) as {
+  baseUrl: string
+  segments: Array<{
+    effectiveRequestUrl: string
+    relativeUrl: string
+  }>
+}
+
 const aesIvFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-aes128-iv-semantics', import.meta.url))
 const aesIvFixture = JSON.parse(readFileSync(`${aesIvFixtureRoot}/fixture.json`, 'utf8')) as {
   expected: string
@@ -768,6 +781,20 @@ describe('Cat Catch HLS parser', () => {
       baseUrl: emptySegmentUriExpected.baseUrl,
       text: readFileSync(`${emptySegmentUriFixtureRoot}/${emptySegmentUriFixture.inputs.rejected}`, 'utf8'),
     })).toThrow(emptySegmentUriExpected.expectedError)
+  })
+
+  it('hls.effective-url-canonicalization', () => {
+    const manifest = parseHlsManifest({
+      baseUrl: effectiveUrlExpected.baseUrl,
+      text: readFileSync(`${effectiveUrlFixtureRoot}/${effectiveUrlFixture.input}`, 'utf8'),
+    })
+    expect(manifest.segments.map(segment => ({
+      effectiveRequestUrl: segment.url,
+      relativeUrl: segment.uri,
+    }))).toEqual(effectiveUrlExpected.segments.map(segment => ({
+      effectiveRequestUrl: segment.effectiveRequestUrl,
+      relativeUrl: segment.relativeUrl,
+    })))
   })
 
   it('hls.byterange-numeric-normalization', () => {

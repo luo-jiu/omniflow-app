@@ -1,0 +1,11 @@
+#EXTM3U
+#EXT-X-TARGETDURATION:4
+#EXTINF:4,
+segment one.ts
+#EXTINF:4,
+%2e%2e/encoded.ts
+#EXTINF:4,
+..\backslash.ts
+#EXTINF:4,
+../../../../escape.ts
+#EXT-X-ENDLIST
