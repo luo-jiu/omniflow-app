@@ -1,0 +1,19 @@
+{
+  "baseUrl": "https://media.example/variant-numeric/master.m3u8",
+  "variants": [
+    {
+      "averageBandwidth": 900,
+      "bandwidth": 1000,
+      "frameRate": 29.97,
+      "resolution": "1280x720tail",
+      "url": "https://media.example/variant-numeric/prefix.m3u8"
+    },
+    {
+      "averageBandwidth": 3,
+      "bandwidth": 0,
+      "frameRate": 0.5,
+      "resolution": "640x360",
+      "url": "https://media.example/variant-numeric/radix.m3u8"
+    }
+  ]
+}

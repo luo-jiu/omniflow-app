@@ -742,6 +742,8 @@
             "hexadecimalInteger",
             "isMediaPlaylist=function(e){return qr.test(e)}",
             "t.bool=function(e){return\"YES\"===this[e]}",
+            "t.decimalInteger=function(e){var t=parseInt(this[e],10);return t>Number.MAX_SAFE_INTEGER?1/0:t}",
+            "t.optionalFloat=function(e,t){var r=this[e];return r?parseFloat(r):t}",
             "setByteRange"
           ]
         },
@@ -796,6 +798,7 @@
         "hls.aes128-effective-iv",
         "hls.encrypted-map-key-context",
         "hls.master-variant-filtering",
+        "hls.master-variant-numeric-boundary",
         "hls.master-no-levels-rejection",
         "hls.master-rendition-projection",
         "hls.master-rendition-boolean-boundary",
@@ -836,6 +839,7 @@
         "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.aes128-effective-iv",
         "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.encrypted-map-key-context",
         "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.master-variant-filtering",
+        "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.master-variant-numeric-boundary",
         "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.master-no-levels-rejection",
         "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.master-rendition-projection",
         "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.master-rendition-boolean-boundary",

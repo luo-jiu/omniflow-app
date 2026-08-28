@@ -1053,6 +1053,20 @@
 - legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
 - validation: 固定 vendor oracle 输出 Upper 三项 true、Lower/Mixed 三项 false；失败证据为本地把 Lower 三项和 Mixed DEFAULT 错误投为 true。实现后 parser `37/37`、完整 HLS 集合 `16 files / 109 tests`、TypeScript、全仓 ESLint、fixture/capability JSON、轻量 validator、固定上游 anchor 校验、同步校验 `16/16`、metadata `7 units / 32 capabilities / 204 anchors / 106 cleanup entries / 151 planned IDs / 105 active refs` 通过。排除 Node 同步测试的全仓 Vitest 为 `1236 passed / 3 skipped`，唯一失败来自其他 Agent 在途的 `agent-orchestrator` 资料库上传兜底断言。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
 
+## 2026-08-28: same target (HLS master variant numeric boundary)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，固定实际 vendor 为 hls.js `1.6.16`。
+- reviewedThrough / portedThrough: 均保持 `null`；本步闭合 master variant typed quality 字段的 AttrList 数值边界，仍未完成 hls-engine cutover。
+- change groups: `behavioral`（radix 10 decimalInteger 与 optionalFloat 前缀解析）和 `selection-projection`（质量排序与标签使用的 typed bandwidth/frame rate）。
+- affected capability IDs: `hls.parser-planner` 保持 `ported-unverified`；新增 1 个 active test ID 和 2 个固定上游 anchor。
+- fixtures/tests: 新增 upstream-executable fixture `hls-master-variant-numeric-boundary`；`hls.master-variant-numeric-boundary` 覆盖整数/浮点合法前缀、`0x` radix 边界、AVERAGE-BANDWIDTH 小数截断、FRAME-RATE 与原始 RESOLUTION 保留。
+- accepted difference: 无。固定 vendor 的 typed AttrList 结果为 `1000/900/29.97` 与 `0/3/0.5`；OmniFlow 保持相同数值投影，`rawAttributes` 仍保留原文本。
+- excluded changes and reasons: 不改变 Cat Catch 实际展示的原始 attribute 字符串，不重定义 codec、resolution、variant merge 或 renderer selection owner，也不把异常 numeric 值扩散进 IPC。
+- unresolved gaps: HLS 其余真正影响下载与选择的 parser 差分、加密 fMP4/video 与独立双轨的真实输出组合、真实网站手工验证和最终 hls-engine cutover。
+- runtime changes: pure parser 新增固定 AttrList 等价的 decimal integer/floating-point helper；BANDWIDTH、AVERAGE-BANDWIDTH、FRAME-RATE 使用 typed 结果，SKIPPED-SEGMENTS 复用同一 integer helper且既有正数拒绝边界不变。DTO、authority、IPC 和生产接线不变。
+- legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
+- validation: 失败证据为本地把前缀值丢成 undefined、把 `0x100` 读成 256、把平均码率 `3.5` 保留为 3.5。实现后 parser `38/38`、完整 HLS 集合 `16 files / 110 tests`、TypeScript、全仓 ESLint、fixture/capability JSON、轻量 validator、固定上游 anchor 校验、同步校验 `16/16`、metadata `7 units / 32 capabilities / 206 anchors / 106 cleanup entries / 152 planned IDs / 106 active refs` 通过。本步未重复全仓 Vitest；紧邻上一提交的基线为 `1236 passed / 3 skipped`，唯一失败来自其他 Agent 的 `agent-orchestrator` 资料库上传兜底断言。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
+
 ## Template
 
 ```markdown

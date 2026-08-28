@@ -63,6 +63,7 @@ OmniFlow 不运行 Cat Catch 浏览器扩展，而是把与产品目标相关的
 - 固定 hls.js fast parser 的行边界语义也已迁入：`CR`、`LF` 和 `CRLF` 清单都会进入同一 media/master 解析与下载计划，纯 CR 不再被本地切行预处理误拒绝。
 - master `STREAM-INF` 的 pending regex 顺序已迁入：URI 前的重复 variant/DEFINE 等注释行不会覆盖首声明或创建变量，而独立 media scan 会在首轮变量收集后再投影 AUDIO/SUBTITLES rendition，因此 MEDIA 也可引用出现在其后的 DEFINE。
 - master rendition 的 `DEFAULT/AUTOSELECT/FORCED` 保持固定 AttrList 大小写敏感布尔语义：只有精确 `YES` 为真，小写或混合大小写不能被本地宽松归一化成默认/自动/强制音轨。
+- master variant 的 typed BANDWIDTH/AVERAGE-BANDWIDTH/FRAME-RATE 投影使用固定 AttrList 的十进制 `parseInt` / `parseFloat` 语义，保留合法数值前缀并避免 JavaScript `Number` 把 `0x` 输入解释成非上游的十六进制码率；原始 attributes 仍原样保留。
 - Cat Catch `tsAddArg` 已作为 post-parse 纯计划能力迁入：关闭时保留原 fragment query，开启且为空时移除 query，非空时替换 query；只修改 media fragment，不修改 key/MAP。工具区草稿是唯一 renderer owner；普通静态任务强制走本地 plan，选择独立音轨时由 main 校验 captured master 与两个 child authority 后生成两条隔离的本地 plan 再合并，直播轮询经显式 IPC 把同一设置交给 main recorder。
 - DASH 手写 parser 对 `r=-1`、多 BaseURL、动态 MPD 等语义不完整。
 - HLS、DASH、MSE、ffmpeg、临时文件和输出交付尚无统一 task/cleanup 合同。

@@ -385,6 +385,21 @@ const masterVariantExpected = JSON.parse(readFileSync(`${masterVariantFixtureRoo
   renditions: Array<{ groupId: string; name: string; url: string }>
   variants: Array<{ bandwidth: number; codecs: string; url: string }>
 }
+const masterVariantNumericFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-master-variant-numeric-boundary', import.meta.url))
+const masterVariantNumericFixture = JSON.parse(readFileSync(`${masterVariantNumericFixtureRoot}/fixture.json`, 'utf8')) as {
+  expected: string
+  input: string
+}
+const masterVariantNumericExpected = JSON.parse(readFileSync(`${masterVariantNumericFixtureRoot}/${masterVariantNumericFixture.expected}`, 'utf8')) as {
+  baseUrl: string
+  variants: Array<{
+    averageBandwidth: number
+    bandwidth: number
+    frameRate: number
+    resolution: string
+    url: string
+  }>
+}
 
 const masterRenditionFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-master-rendition-projection', import.meta.url))
 const masterRenditionFixture = JSON.parse(readFileSync(`${masterRenditionFixtureRoot}/fixture.json`, 'utf8')) as {
@@ -750,6 +765,23 @@ describe('Cat Catch HLS parser', () => {
       name: rendition.name,
       url: rendition.url,
     }))).toEqual(masterVariantExpected.renditions)
+  })
+
+  it('hls.master-variant-numeric-boundary', () => {
+    const manifest = parseHlsManifest({
+      baseUrl: masterVariantNumericExpected.baseUrl,
+      text: readFileSync(
+        `${masterVariantNumericFixtureRoot}/${masterVariantNumericFixture.input}`,
+        'utf8',
+      ),
+    })
+    expect(manifest.variants.map(variant => ({
+      averageBandwidth: variant.averageBandwidth,
+      bandwidth: variant.bandwidth,
+      frameRate: variant.frameRate,
+      resolution: variant.resolution,
+      url: variant.url,
+    }))).toEqual(masterVariantNumericExpected.variants)
   })
 
   it('hls.master-no-levels-rejection', () => {

@@ -11,7 +11,8 @@
  * hls-extinf-token-boundary, hls-empty-valued-tag-boundary,
  * hls-whitespace-valued-tag-boundary, hls-media-parser-mode-isolation,
  * hls-master-parser-mode-isolation, hls-line-ending-boundary,
- * hls-master-pending-variant-boundary, hls-master-rendition-boolean-boundary
+ * hls-master-pending-variant-boundary, hls-master-rendition-boolean-boundary,
+ * hls-master-variant-numeric-boundary
  */
 
 import { createHlsDefaultIv } from './decrypt'
@@ -182,16 +183,17 @@ const HLS_EME_ENCRYPTION_METHODS = new Set([
   'SAMPLE-AES-CTR',
 ])
 
-function parseNumber(value?: string) {
+function parseHlsDecimalFloatingPoint(value?: string) {
   if (!value) return undefined
-  const parsed = Number(value)
-  return Number.isFinite(parsed) ? parsed : undefined
+  const parsed = Number.parseFloat(value)
+  return Number.isNaN(parsed) ? undefined : parsed
 }
 
-function parseInteger(value?: string) {
+function parseHlsDecimalInteger(value?: string) {
   if (!value) return undefined
   const parsed = Number.parseInt(value, 10)
-  return Number.isFinite(parsed) ? parsed : undefined
+  if (Number.isNaN(parsed)) return undefined
+  return parsed > Number.MAX_SAFE_INTEGER ? Number.POSITIVE_INFINITY : parsed
 }
 
 function parseHlsUnsignedIntegerTag(line: string, tag: string) {
@@ -451,10 +453,10 @@ function createHlsVariant(
   return {
     audioGroupId: attributes.AUDIO,
     audioGroupIds: attributes.AUDIO ? [attributes.AUDIO] : undefined,
-    averageBandwidth: parseNumber(attributes['AVERAGE-BANDWIDTH']),
-    bandwidth: parseNumber(attributes.BANDWIDTH),
+    averageBandwidth: parseHlsDecimalInteger(attributes['AVERAGE-BANDWIDTH']),
+    bandwidth: parseHlsDecimalInteger(attributes.BANDWIDTH),
     codecs: attributes.CODECS,
-    frameRate: parseNumber(attributes['FRAME-RATE']),
+    frameRate: parseHlsDecimalFloatingPoint(attributes['FRAME-RATE']),
     rawAttributes: attributes,
     rawLine: line,
     resolution: attributes.RESOLUTION,
@@ -882,7 +884,7 @@ export function parseHlsManifest(input: {
         assignMultipleMediaPlaylistTagError(variableState, 'SKIP', line)
       }
       const attributes = parseHlsAttributeListWithVariables(getTagValue(line), variableState)
-      const parsedSkippedSegmentCount = parseInteger(attributes['SKIPPED-SEGMENTS'])
+      const parsedSkippedSegmentCount = parseHlsDecimalInteger(attributes['SKIPPED-SEGMENTS'])
       if (parsedSkippedSegmentCount !== undefined) {
         skippedSegmentCount += parsedSkippedSegmentCount
       }
