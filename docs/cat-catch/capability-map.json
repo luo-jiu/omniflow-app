@@ -741,6 +741,7 @@
             "#EXT-X-(PROGRAM-DATE-TIME|BYTERANGE|DATERANGE|DEFINE|KEY|MAP|PART|PART-INF|PLAYLIST-TYPE|PRELOAD-HINT|RENDITION-REPORT|SERVER-CONTROL|SKIP|START):(.+)",
             "hexadecimalInteger",
             "isMediaPlaylist=function(e){return qr.test(e)}",
+            "t.bool=function(e){return\"YES\"===this[e]}",
             "setByteRange"
           ]
         },
@@ -797,6 +798,7 @@
         "hls.master-variant-filtering",
         "hls.master-no-levels-rejection",
         "hls.master-rendition-projection",
+        "hls.master-rendition-boolean-boundary",
         "hls.master-rendition-authority",
         "hls.master-variant-group-merge",
         "hls.master-pathway-uri-boundary",
@@ -836,6 +838,7 @@
         "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.master-variant-filtering",
         "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.master-no-levels-rejection",
         "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.master-rendition-projection",
+        "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.master-rendition-boolean-boundary",
         "electron/service/embedded-browser/integrations/hls-manifest-authority.test.ts#hls.master-rendition-authority",
         "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.master-variant-group-merge",
         "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.master-pathway-uri-boundary",

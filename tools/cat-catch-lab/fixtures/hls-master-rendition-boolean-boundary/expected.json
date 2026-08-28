@@ -1,0 +1,26 @@
+{
+  "baseUrl": "https://media.example/rendition-boolean/master.m3u8",
+  "renditions": [
+    {
+      "autoselect": true,
+      "default": true,
+      "forced": true,
+      "name": "Upper",
+      "type": "AUDIO"
+    },
+    {
+      "autoselect": false,
+      "default": false,
+      "forced": false,
+      "name": "Lower",
+      "type": "AUDIO"
+    },
+    {
+      "autoselect": false,
+      "default": false,
+      "forced": false,
+      "name": "Mixed",
+      "type": "SUBTITLES"
+    }
+  ]
+}

@@ -403,6 +403,21 @@ const masterRenditionExpected = JSON.parse(readFileSync(`${masterRenditionFixtur
     url: string
   }>
 }
+const masterRenditionBooleanFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-master-rendition-boolean-boundary', import.meta.url))
+const masterRenditionBooleanFixture = JSON.parse(readFileSync(`${masterRenditionBooleanFixtureRoot}/fixture.json`, 'utf8')) as {
+  expected: string
+  input: string
+}
+const masterRenditionBooleanExpected = JSON.parse(readFileSync(`${masterRenditionBooleanFixtureRoot}/${masterRenditionBooleanFixture.expected}`, 'utf8')) as {
+  baseUrl: string
+  renditions: Array<{
+    autoselect: boolean
+    default: boolean
+    forced: boolean
+    name: string
+    type: string
+  }>
+}
 
 const masterVariantGroupFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-master-variant-group-merge', import.meta.url))
 const masterVariantGroupFixture = JSON.parse(readFileSync(`${masterVariantGroupFixtureRoot}/fixture.json`, 'utf8')) as {
@@ -759,6 +774,23 @@ describe('Cat Catch HLS parser', () => {
       type: rendition.type,
       url: rendition.url,
     }))).toEqual(masterRenditionExpected.renditions)
+  })
+
+  it('hls.master-rendition-boolean-boundary', () => {
+    const manifest = parseHlsManifest({
+      baseUrl: masterRenditionBooleanExpected.baseUrl,
+      text: readFileSync(
+        `${masterRenditionBooleanFixtureRoot}/${masterRenditionBooleanFixture.input}`,
+        'utf8',
+      ),
+    })
+    expect(manifest.renditions.map(rendition => ({
+      autoselect: rendition.autoselect,
+      default: rendition.default,
+      forced: rendition.forced,
+      name: rendition.name,
+      type: rendition.type,
+    }))).toEqual(masterRenditionBooleanExpected.renditions)
   })
 
   it('hls.master-variant-group-merge', () => {

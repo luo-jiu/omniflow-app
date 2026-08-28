@@ -1039,6 +1039,20 @@
 - legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
 - validation: 失败证据为新增用例把连续声明错误投影成 `900000 / 1280x720`。实现后 parser `36/36`、完整 HLS 集合 `16 files / 108 tests`、全仓 ESLint、fixture/capability JSON、轻量 validator、固定上游 anchor 校验、同步校验 `16/16`、metadata `7 units / 32 capabilities / 203 anchors / 106 cleanup entries / 150 planned IDs / 104 active refs` 和 scoped diff check 通过。排除 Node 同步测试的全仓 Vitest 为 `1222 passed / 3 skipped`，唯一失败来自其他 Agent 在途的 `agent-orchestrator` 上传接口；TypeScript 同样只被该在途模块的 4 个类型错误阻断。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
 
+## 2026-08-28: same target (HLS rendition boolean boundary)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，固定实际 vendor 为 hls.js `1.6.16`。
+- reviewedThrough / portedThrough: 均保持 `null`；本步闭合 master AUDIO/SUBTITLES rendition 的布尔属性大小写边界，仍未完成 hls-engine cutover。
+- change groups: `behavioral`（固定 AttrList 枚举布尔判断）和 `selection-projection`（默认、自动选择与强制轨道标志）。
+- affected capability IDs: `hls.parser-planner` 保持 `ported-unverified`；新增 1 个 active test ID 和 1 个固定上游 anchor。
+- fixtures/tests: 新增 upstream-executable fixture `hls-master-rendition-boolean-boundary`；`hls.master-rendition-boolean-boundary` 同时覆盖精确 `YES`、小写 `yes` 和混合大小写 `YeS/No/nO` 的 DEFAULT/AUTOSELECT/FORCED 投影。
+- accepted difference: 无。固定 vendor 只把精确大写 `YES` 投影为 true，其余枚举值均为 false；OmniFlow 保持相同轨道标志。
+- excluded changes and reasons: 不借此改变 rendition TYPE、语言、名称、URI、group 或 renderer 默认选择 owner，也不扩大到 master 数值属性归一化。
+- unresolved gaps: HLS 其余真正影响下载与选择的 parser 差分、加密 fMP4/video 与独立双轨的真实输出组合、真实网站手工验证和最终 hls-engine cutover。
+- runtime changes: pure parser 的 rendition boolean helper 从大小写无关归一化改为精确 `value === "YES"`；现有 DTO、authority、IPC 和生产接线不变。
+- legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
+- validation: 固定 vendor oracle 输出 Upper 三项 true、Lower/Mixed 三项 false；失败证据为本地把 Lower 三项和 Mixed DEFAULT 错误投为 true。实现后 parser `37/37`、完整 HLS 集合 `16 files / 109 tests`、TypeScript、全仓 ESLint、fixture/capability JSON、轻量 validator、固定上游 anchor 校验、同步校验 `16/16`、metadata `7 units / 32 capabilities / 204 anchors / 106 cleanup entries / 151 planned IDs / 105 active refs` 通过。排除 Node 同步测试的全仓 Vitest 为 `1236 passed / 3 skipped`，唯一失败来自其他 Agent 在途的 `agent-orchestrator` 资料库上传兜底断言。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
+
 ## Template
 
 ```markdown

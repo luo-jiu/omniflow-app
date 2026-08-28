@@ -11,7 +11,7 @@
  * hls-extinf-token-boundary, hls-empty-valued-tag-boundary,
  * hls-whitespace-valued-tag-boundary, hls-media-parser-mode-isolation,
  * hls-master-parser-mode-isolation, hls-line-ending-boundary,
- * hls-master-pending-variant-boundary
+ * hls-master-pending-variant-boundary, hls-master-rendition-boolean-boundary
  */
 
 import { createHlsDefaultIv } from './decrypt'
@@ -202,10 +202,7 @@ function parseHlsUnsignedIntegerTag(line: string, tag: string) {
 }
 
 function parseBoolean(value?: string) {
-  const normalizedValue = String(value || '').trim().toUpperCase()
-  if (normalizedValue === 'YES') return true
-  if (normalizedValue === 'NO') return false
-  return undefined
+  return value === 'YES'
 }
 
 function rememberVariableParsingError(state: HlsVariableState, message: string) {
