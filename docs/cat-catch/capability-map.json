@@ -691,18 +691,25 @@
         "electron/service/embeddedBrowserResourceProbeRuntimeCore.ts#catchToolkitStorageKeys"
       ],
       "targetRefs": [
-        "electron/service/embedded-browser/cat-catch-port/deep-search/toolkit-state.ts#CatchToolkitState"
+        "electron/service/embedded-browser/cat-catch-port/deep-search/toolkit-state.ts#CatchToolkitState",
+        "electron/service/embedded-browser/cat-catch-port/deep-search/toolkit-state.ts#createCatchToolkitState",
+        "electron/service/embedded-browser/cat-catch-port/deep-search/toolkit-state.ts#createCatchToolkitStateSource"
       ],
       "relationToUpstream": "platform-substitute",
-      "syncState": "pending",
+      "syncState": "porting",
       "syncedThrough": null,
       "plannedTestIds": [
         "deep.toolkit-origin-storage",
         "deep.toolkit-reload-reset"
       ],
-      "testRefs": [],
-      "acceptedDifferences": [],
-      "notes": "The eight current toolkit preferences are persisted in each visited site's origin localStorage, not in an application-level owner; capture enabled state itself is memory-only."
+      "testRefs": [
+        "electron/service/embedded-browser/cat-catch-port/deep-search/toolkit-state.test.ts#deep.toolkit-origin-storage",
+        "electron/service/embedded-browser/cat-catch-port/deep-search/toolkit-state.test.ts#deep.toolkit-reload-reset"
+      ],
+      "acceptedDifferences": [
+        "Cat Catch keeps the manual filename and extra-header trimming choices in the injected panel lifetime. OmniFlow's integrated external UI persists all eight product preferences under OmniflowCatchToolkit:* keys in the visited page's origin localStorage; capture enablement remains outside this preference owner and resets with the page runtime."
+      ],
+      "notes": "The serializable target owner now fixes page-origin isolation, checked/empty-string storage semantics, selector/regex validation, reload hydration, fresh-origin reset, and blocked-storage fallback. It has no production caller yet; the legacy probe remains the only live toolkit owner until the complete deep unit cuts over atomically."
     },
     {
       "id": "mse.page-capture-runtime",

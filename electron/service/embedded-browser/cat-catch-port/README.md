@@ -40,6 +40,7 @@ downloader/
 - `deep-search/discovery.ts`：固定 `search.js` 的 JSON/inline manifest/key 发现与跨 hook base URL 回放语义，提供可序列化 document session 和一次性 facade。
 - `deep-search/runtime.ts`：固定 `search.js` 的 Worker/JSON/XHR/fetch/TextDecoder 与 key/string experience hook 安装语义；当前仅作为可执行 target port，待完整 deep unit 原子接入。
 - `deep-search/page-discovery.ts`：固定 inline script URL 扫描与 Vimeo `playlist.json` 转 HLS 语义，提供可序列化 factory，Blob URL 交给平台 callback 物化。
+- `deep-search/toolkit-state.ts`：固定页面 origin 内的 Catch Toolkit 偏好读取、写入、规则验证与重载语义，提供可序列化的唯一 page state owner；当前仅由 target 测试调用。
 - `hls/parser.ts`：固定 hls.js/Cat Catch 的 manifest 下载相关解析语义。
 - `hls/plan.ts`：把 parser 输出投影为平台 adapter 消费的唯一 HLS 下载计划。
 - `hls/segment-query.ts`：固定 `tsAddArg` 的默认值提取和 fragment-only query 改写。

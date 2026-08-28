@@ -1403,6 +1403,20 @@
 - legacy cleanup: 无；新 adapter 只有测试调用方，旧 disabled deep block 与现有 resource/MSE/toolkit platform owner 均留到完整 unit cutover。
 - validation: deep target `4 files / 18 passed`、应用 TypeScript `--noEmit`、scoped/full ESLint、sync tests `16/16`、metadata 与固定上游 validator、排除 Node runner `tools/cat-catch-sync/validate.test.mjs` 后全仓 Vitest `197 files / 1369 passed / 3 skipped`、scoped diff check 通过。该 Node runner 已在正确的 `node --test` 下通过；完整 build 未运行，以免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
 
+## 2026-08-28: same target (page-origin toolkit state)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本步固定 Catch Toolkit 页面偏好的状态与存储语义。
+- reviewedThrough / portedThrough: 均保持 `null`；`deep.catch-toolkit-page-settings` 从 `pending` 进入 `porting`，整个 deep unit 继续开放。
+- change groups: `state-owner-port`、`origin-storage-evidence`、`serialization-readiness` 与 `accepted-platform-difference`；不增加 production owner。
+- affected capability IDs: `deep.catch-toolkit-page-settings`；metadata 为 `7 units / 32 capabilities / 210 anchors / 106 cleanup entries / 182 planned IDs / 147 active refs`，状态为 `11 verified / 5 porting / 1 ported-unverified / 15 pending`。
+- fixtures/tests: `deep.toolkit-origin-storage` 锁定不同页面 origin 隔离、`"checked"`/`""` 布尔写入、空字符串删除、selector/regex 验证和 DOM 命中变化；`deep.toolkit-reload-reset` 通过真实序列化 factory 锁定同 origin 重载恢复、新 origin 重置、字符串重载归一化以及 localStorage 被策略阻止时的内存降级。
+- accepted differences: Cat Catch 的手动文件名和多余媒体头清理选项只存在于注入面板生命周期；OmniFlow 的外置集成 UI 把八项产品偏好都写入当前访问页面 origin 下的 `OmniflowCatchToolkit:*` key。捕捉是否启用不进入这个偏好 owner，仍随页面 runtime 重置。
+- excluded changes and reasons: 本步不替换 production `catchToolkitState`、不修改 controller/all-frame merge、IPC、renderer、MSE 行为、probe template、deep flag 或 relay。
+- unresolved gaps: 完整 target probe-template harness、toolkit 与 page adapter body 的组合、document-start generated resource 到 tokenized main ingress、deep unit 原子 cutover 和旧 deep block cleanup 尚未完成。
+- runtime changes: 无黑盒行为变化；`toolkit-state.ts` 只有测试调用方，旧 probe 继续是 production 唯一 toolkit owner。
+- legacy cleanup: 无；既有 toolkit state/storage/page-action cleanup entry 保持原分类，等待 deep unit 原子切换时删除或适配。
+- validation: 完整 deep target `5 files / 20 passed`、应用 TypeScript `--noEmit`、scoped/full ESLint、sync tests `16/16`、metadata 与固定上游 validator、排除 Node runner `tools/cat-catch-sync/validate.test.mjs` 后全仓 Vitest `198 files / 1371 passed / 3 skipped`、scoped diff check 通过。该 Node runner 已在正确的 `node --test` 下通过；完整 build 未运行，以免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
+
 ## Template
 
 ```markdown
