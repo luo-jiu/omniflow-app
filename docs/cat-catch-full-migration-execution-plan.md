@@ -59,6 +59,7 @@ OmniFlow 不运行 Cat Catch 浏览器扩展，而是把与产品目标相关的
 - 深度 Worker/fetch/XHR/JSON/key hooks 被 `enableDeepRuntimeHooks = false` 关闭，外围 MSE hooks 仍运行。
 - deep discovery 的纯 port 已按固定 `search.js` 锁定 JSON 全 enumerable width、depth 21/22 边界、cycle、宽松 16-number key、inline M3U8/MPD、data URL 与当前/未来 base URL 回放；尚未接入 document-start runtime，不能据此打开 hooks 或宣称 deep unit 完成。
 - deep page relay 已由 production 的随机 document token、tab/WebContents/incarnation/navigation/origin/deep-mode binding、CDP 新文档安装和当前 frame subtree 注入提供平台等价边界；它已有伪造与 all-frame 安装测试，但必须等完整 deep runtime 接入后才能随 unit 一起 verified。
+- deep core runtime 已形成自包含 target installer，覆盖幂等/恢复、Worker Blob CSP 异步探测与回退、bootstrap relay、fetch clone、XHR、JSON 和 TextDecoder；生产开关仍关闭，辅助 key hooks、discovery adapter 与原子 cleanup 未完成前不得接入。
 - 网络捕捉由 production `EmbeddedBrowserCaptureRuntime` 唯一注册 `onSendHeaders -> onResponseStarted -> terminal cleanup`，旧 `onCompleted` 识别 bridge 已删除。
 - request context 由 main-only bounded vault 持有容量、TTL、owner 和 purpose；renderer 只接收 header capability，不接收 Cookie/Authorization 值。
 - HLS 固定目标的下载相关 parser/plan、key/MAP/range、静态/直播执行、retry/cancel、预处理和真实 ffmpeg 输出范围均已由 fixture 或可执行测试覆盖，并已在唯一 dispatch boundary 切换到 target owner；`network-capture` 与 `hls-engine` 均已完成原子 cutover。

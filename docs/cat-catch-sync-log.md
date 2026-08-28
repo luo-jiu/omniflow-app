@@ -1333,6 +1333,20 @@
 - legacy cleanup: 无；installer 与 target adapters 属于 `retain-or-adapt`，旧 runtime/template/console emitter 只在完整 unit cutover 时处理。
 - validation: secure relay 专项 `2 files / 4 passed`、应用 TypeScript `--noEmit`、全仓 ESLint、同步测试 `16/16`、metadata/固定上游 validator 和 scoped diff check 已通过；排除另一个 Agent 正在修改的 Shell policy expectation 后，全仓 Vitest 为 `193 files / 1299 passed / 3 skipped`。未排除时仅有 `electron/service/agent/shell/agent-shell-preparation-service.test.ts` 的 2 个无关失败；项目引用 `tsc -b` 仍被既有 `vite.config.ts` 的 ES lib/`replaceAll` 错误阻断，完整 build 继续避免覆盖其他 Agent 的 `dist-electron/**`，暂无真实网站手工场景。
 
+## 2026-08-28: same target (deep core runtime hooks)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本步从固定 `search.js` 迁入 core hook 安装语义。
+- reviewedThrough / portedThrough: 均保持 `null`；`deep.runtime-hook-bundle` 仍为 `porting`，整个 deep unit 继续开放。
+- change groups: `behavioral-port`、`runtime-safety-adaptation` 与 `documentation-correction`；只新增 target pure port，不切换 production dispatch。
+- affected capability IDs: `deep.runtime-hook-bundle`；metadata 为 `7 units / 32 capabilities / 208 anchors / 106 cleanup entries / 173 planned IDs / 136 active refs`，状态仍为 `11 verified / 4 porting / 1 ported-unverified / 16 pending`。
+- fixtures/tests: `deep.hook-install-sentinels` 锁定幂等安装、原样恢复与自包含序列化；`deep.worker-csp-fallback`、`deep.worker-bootstrap-relay` 锁定异步 Blob CSP 回退、成功 bootstrap、relay 拦截和 URL cleanup；`deep.fetch-clone-observation`、`deep.xhr-response-branches`、`deep.text-decoder-manifest` 锁定 Cat Catch 的 core 观察面。
+- accepted differences: Blob Worker capability 处于异步 probing 时先保留原生 Worker，只有收到 probe message 才启用注入；error/timeout 后永久回退，避免 CSP 把真实 Worker 卡在失败 Blob URL。probe URL 立即回收，注入 URL 带 TTL/dispose；dispose 不终止页面拥有的真实 Worker。
+- excluded changes and reasons: 本步不迁入 slice/subarray/btoa/atob/fromCharCode/DataView/typed-array/join/escape/indexOf 等辅助 key hooks，不连接 discovery/relay、不启用 production flag，也不修改 MSE/toolkit/UI。
+- unresolved gaps: 辅助 key hooks、target discovery adapter、generated page/Worker composition、production equivalent test、unit cutover 和旧 deep 分支删除仍未完成。
+- runtime changes: 无黑盒行为变化；新 installer 没有 production 调用方，旧 `enableDeepRuntimeHooks = false` 保持不变。
+- legacy cleanup: 无；旧 runtime hook block 在 target bundle 与 adapter 完整前继续留作 characterization，不能提前删除。
+- validation: discovery + core runtime 专项 `2 files / 9 passed`、应用 TypeScript `--noEmit`、scoped/full ESLint、同步测试 `16/16`、metadata/固定上游 validator 和 scoped diff check 已通过；排除 Node runner 文件后，全部可执行 Vitest 为 `195 files / 1344 passed / 3 skipped`。完整 build 继续避免覆盖其他 Agent 的 `dist-electron/**`，暂无真实网站手工场景。
+
 ## Template
 
 ```markdown
