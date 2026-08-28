@@ -1081,6 +1081,20 @@
 - legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
 - validation: 修复前新增真实用例稳定失败于第二个 HLS input 拒绝 `.key`；实现后直接输出/参数测试 `2 files / 8 tests`、完整 HLS 集合 `16 files / 111 tests`、TypeScript、全仓 ESLint、capability JSON、轻量 validator、固定上游 anchor 校验和同步校验 `16/16` 通过，metadata 为 `7 units / 32 capabilities / 206 anchors / 106 cleanup entries / 153 planned IDs / 107 active refs`。排除需要 Node runner 的同步测试文件后，全仓 Vitest 为 `187 files / 1247 passed / 3 skipped`，同步 Node tests 单独 `16/16`；直接运行 `npm test` 的唯一失败是该 Node test 文件被 Vitest 收集后报告 no suite，并非代码断言失败。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
 
+## 2026-08-28: same target (HLS leading-whitespace token boundary)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，固定实际 vendor 为 hls.js `1.6.16`。
+- reviewedThrough / portedThrough: 均保持 `null`；本步闭合 fast parser 的行首 whitespace/URI/tag 优先级，仍未完成 hls-engine cutover。
+- change groups: `behavioral`（`LEVEL_PLAYLIST_REGEX_FAST` 的 URI alternative 抢占顺序）和 `download-projection`（零时长 fragment、media sequence 与 AES implicit IV）。
+- affected capability IDs: `hls.parser-planner` 保持 `ported-unverified`；新增 1 个 active test ID，复用已登记的固定 fast regex anchor。
+- fixtures/tests: 新增 upstream-executable fixture `hls-leading-whitespace-token-boundary`；`hls.leading-whitespace-token-boundary` 覆盖 ASCII space 前缀的 MEDIA-SEQUENCE 被当作 fragment、tab 前缀仍被当作标签，以及 space 前缀 EXTM3U 保持格式头错误。
+- accepted difference: 无。固定 vendor 对 space-tag 输入输出 `sn=0..1`、首片为 manifest fragment URL 且未加密、第二片 IV 为 sequence 1；tab-tag 只输出 `sn=10` 与 IV 10；OmniFlow 保持相同下载投影。
+- excluded changes and reasons: 不借此迁入 PROGRAM-DATE-TIME、DATERANGE、BITRATE 等 Cat Catch `parseTs` 不消费的播放 metadata，也不修改 line ending、valued-tag payload、IPC 或 renderer。
+- unresolved gaps: HLS 其余真正影响下载与选择的 parser 差分、AES-256 系列真实输出、真实网站手工验证和最终 hls-engine cutover。
+- runtime changes: pure parser 不再统一 `trimStart()` 每一行，而是保留固定 regex 的细分顺序：`#` 前紧邻 ASCII space 时该行留在 URI 路径，tab-only 等前缀则跳过后进入 tag 路径。普通 URI 仍由 URL resolver 去除外围 whitespace，后续状态 owner 不变。
+- legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
+- validation: 隔离 VM 内的固定 vendor executable oracle 产生上述三类结果；失败证据为当前 parser 把 space-tag 错读为 `mediaSequence=10 / 1 fragment / IV=10`。实现后 parser `39/39`、完整 HLS 集合 `16 files / 112 tests`、TypeScript、全仓 ESLint、fixture/capability JSON、轻量 validator、固定上游 anchor 校验、同步校验 `16/16`、metadata `7 units / 32 capabilities / 206 anchors / 106 cleanup entries / 154 planned IDs / 108 active refs` 和 scoped diff check 通过。本步未重复全仓 Vitest；同工作树紧邻提交 `1ba4337` 的基线为 `187 files / 1247 passed / 3 skipped`，同步 Node tests 单独 `16/16`。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
+
 ## Template
 
 ```markdown

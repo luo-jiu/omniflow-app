@@ -12,7 +12,7 @@
  * hls-whitespace-valued-tag-boundary, hls-media-parser-mode-isolation,
  * hls-master-parser-mode-isolation, hls-line-ending-boundary,
  * hls-master-pending-variant-boundary, hls-master-rendition-boolean-boundary,
- * hls-master-variant-numeric-boundary
+ * hls-master-variant-numeric-boundary, hls-leading-whitespace-token-boundary
  */
 
 import { createHlsDefaultIv } from './decrypt'
@@ -348,6 +348,19 @@ function getTagValue(line: string) {
 function hasHlsValuedTagPayload(line: string) {
   const colonIndex = line.indexOf(':')
   return colonIndex >= 0 && colonIndex < line.length - 1
+}
+
+/**
+ * The pinned URI alternative checks `(?!#)` before consuming ASCII spaces.
+ * A space directly before `#` therefore makes the rest of that line a URI,
+ * while other leading whitespace is skipped until the tag alternative wins.
+ */
+function normalizeHlsFastParserLine(rawLine: string) {
+  const trimmedLine = rawLine.trimStart()
+  if (!trimmedLine) return ''
+  if (!trimmedLine.startsWith('#')) return rawLine
+  const leadingWhitespace = rawLine.slice(0, rawLine.length - trimmedLine.length)
+  return leadingWhitespace.endsWith(' ') ? rawLine : trimmedLine
 }
 
 function parseExtinf(line: string, currentSegment?: PendingSegment): ParsedExtinf {
@@ -713,8 +726,9 @@ export function parseHlsManifest(input: {
   const lines = text
     // The pinned fast parser treats CR, LF, and CRLF as line boundaries.
     .split(/\r\n|\n|\r/)
-    // The pinned (.+) valued-tag branch treats trailing whitespace as payload.
-    .map(line => line.trimStart())
+    // Preserve the fast regex's ASCII-space-before-# URI precedence while
+    // normalizing leading whitespace that the global tag match skips.
+    .map(normalizeHlsFastParserLine)
     .filter(Boolean)
 
   if (lines[0] !== '#EXTM3U') {

@@ -1,0 +1,23 @@
+{
+  "fixtureId": "hls-leading-whitespace-token-boundary",
+  "capabilityIds": [
+    "hls.parser-planner"
+  ],
+  "upstreamCommit": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
+  "status": "active",
+  "oracle": "upstream-executable",
+  "sourceRefs": [
+    "lib/hls.min.js#LEVEL_PLAYLIST_REGEX_FAST",
+    "lib/hls.min.js#parseLevelPlaylist",
+    "js/m3u8.js#parseTs(data)"
+  ],
+  "inputs": {
+    "spaceDelimiter": "space-delimiter.m3u8",
+    "spaceTag": "space-tag.m3u8",
+    "tabTag": "tab-tag.m3u8"
+  },
+  "expected": "expected.json",
+  "testRefs": [
+    "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.leading-whitespace-token-boundary"
+  ]
+}

@@ -13,7 +13,7 @@
 | reviewedThrough | 未建立 |
 | portedThrough | 未建立 |
 
-当前映射包含 7 个 cutover unit、32 项能力、206 个上游 anchor、106 个 cleanup entry 和 153 个唯一计划测试 ID。9 项能力达到 `ported-unverified`，5 项为 `porting`，其余 18 项仍为 `pending`；107 个唯一计划测试引用已落成 active pure behavior/contract、fake/real Electron integration 或 loopback redirect test，尚无已完成的 cutover unit。
+当前映射包含 7 个 cutover unit、32 项能力、206 个上游 anchor、106 个 cleanup entry 和 154 个唯一计划测试 ID。9 项能力达到 `ported-unverified`，5 项为 `porting`，其余 18 项仍为 `pending`；108 个唯一计划测试引用已落成 active pure behavior/contract、fake/real Electron integration 或 loopback redirect test，尚无已完成的 cutover unit。
 
 ## 2. 能力族
 
@@ -41,6 +41,8 @@ HLS 带值标签只在固定标签名后紧接冒号且冒号后至少有一个�
 
 固定 fast parser 把 `CR`、`LF` 和 `CRLF` 都作为清单行边界。pure parser 不再只接受 LF 系列换行；纯 CR 清单同样保留 media sequence、duration、discontinuity、ENDLIST 与实际下载 URL。
 
+固定 fast parser 的 URI alternative 在检查 `(?!#)` 后才消费 ASCII 空格，因此 ` #EXT-X-MEDIA-SEQUENCE:10` 会成为 URL fragment，而不是 sequence 标签；纯 tab 前缀会被全局 regex 跳过并继续命中 tag。pure parser 保留该不直观顺序，避免预先 `trimStart()` 改变 fragment 数、sequence 和 AES implicit IV；空格前缀的 `EXTM3U` 同样保持缺失格式头错误。
+
 固定 master regex 会把 `EXT-X-STREAM-INF` 与其 URI 之间的 `#` 行吞入同一个 pending match：连续 `STREAM-INF` 保留首声明，夹在中间的 `DEFINE` 不会成为变量 owner；`EXT-X-MEDIA` 则由首轮 master/变量解析完成后的独立扫描继续投影音轨，所以它也能使用后置 `DEFINE`。pure parser 保持该分支顺序，避免异常 master 悄然改变码率、分辨率或变量来源。
 
 固定 `AttrList.bool` 对 master rendition 的 `DEFAULT/AUTOSELECT/FORCED` 使用大小写敏感的 `YES` 判断；pure parser 不再把小写或混合大小写值宽松提升为 true，避免改变音轨和字幕的选择标志。
@@ -55,10 +57,10 @@ HLS 带值标签只在固定标签名后紧接冒号且冒号后至少有一个�
 4. TextDecoder inline manifest hook 缺失。
 5. JSON 深度/宽度/cycle 语义未与上游对齐。
 6. Worker Blob CSP 异步失败回退不等价。
-7. HLS master/media parser 双向模式隔离、master 普通 variant/I-frame/未知 codec 过滤与无 level 拒绝、AUDIO/SUBTITLES rendition 投影与 child authority、直播及独立双轨 child 的 main-owned master 归属/变量恢复、`EXT-X-SESSION-KEY` 解析但不进入 fragment key、带值标签精确冒号/零字符与 whitespace payload 分发、整数首 token、`EXTINF` decimal-prefix 回扫与 CR/LF/CRLF 行边界、媒体/MAP BYTERANGE offset 与数值归一化、MAP 前置独立 range 双重绑定与缺失/空 URI 拒绝、full-segment AES media/MAP effective IV、独立 MAP/media key context、KEYFORMAT 支持/忽略/继承/多 key 选择、正数 `EXT-X-SKIP` delta 拒绝与同 key URL 下的 playlist 状态轮换、初始/当前 discontinuity sequence 双状态、LL-HLS PART/完整分片边界、空/无效 media playlist 与重复 singleton 标签拒绝、`EXT-X-DEFINE` 变量语义、`tsAddArg` fragment-only query 替换及独立双轨本地合并、PNG/JPEG 伪装分片剔除和一次性 manifest force-cache recovery 已在 pure/integration tests 中覆盖；local-to-ffmpeg fake handoff 已验证本地 key/map/media 引用与非空输出约束，真实 ffmpeg/ffprobe integration 已验证 clear、两类 AES-128 encrypted AAC HLS，以及 AES-128 加密 fMP4/H264 视频与独立 AES-128/AAC 音轨均可交付为含预期流、正时长的 MP4；AES-256 系列真实输出和更完整 parser 差分仍缺失。
+7. HLS master/media parser 双向模式隔离、master 普通 variant/I-frame/未知 codec 过滤与无 level 拒绝、AUDIO/SUBTITLES rendition 投影与 child authority、直播及独立双轨 child 的 main-owned master 归属/变量恢复、`EXT-X-SESSION-KEY` 解析但不进入 fragment key、带值标签精确冒号/零字符与 whitespace payload 分发、整数首 token、`EXTINF` decimal-prefix 回扫、CR/LF/CRLF 行边界与行首空格/Tab token 优先级、媒体/MAP BYTERANGE offset 与数值归一化、MAP 前置独立 range 双重绑定与缺失/空 URI 拒绝、full-segment AES media/MAP effective IV、独立 MAP/media key context、KEYFORMAT 支持/忽略/继承/多 key 选择、正数 `EXT-X-SKIP` delta 拒绝与同 key URL 下的 playlist 状态轮换、初始/当前 discontinuity sequence 双状态、LL-HLS PART/完整分片边界、空/无效 media playlist 与重复 singleton 标签拒绝、`EXT-X-DEFINE` 变量语义、`tsAddArg` fragment-only query 替换及独立双轨本地合并、PNG/JPEG 伪装分片剔除和一次性 manifest force-cache recovery 已在 pure/integration tests 中覆盖；local-to-ffmpeg fake handoff 已验证本地 key/map/media 引用与非空输出约束，真实 ffmpeg/ffprobe integration 已验证 clear、两类 AES-128 encrypted AAC HLS，以及 AES-128 加密 fMP4/H264 视频与独立 AES-128/AAC 音轨均可交付为含预期流、正时长的 MP4；AES-256 系列真实输出和更完整 parser 差分仍缺失。
 8. MPD `r=-1`、多 BaseURL、动态 timeline/range 不完整。
 9. ffmpeg、HLS/DASH、直播、普通下载和 temp 没有应用级统一 task registry；HLS 的导航、tab/view 销毁、render-process loss、controller dispose 和应用退出已通过专用 host lifecycle 取消并等待 active fetch/ffmpeg 与在途 session cleanup，但非 HLS 的 4 个 ffmpeg 入口仍未纳入该 owner。
-10. 目前有 107 个唯一 active test ref；main composition、持久化捕捉设置热更新、下一文档 token 路由、main-only probe key 解析与下载、检查、probe 动作、external-tool target consumer、已捕获页面拖拽暂存、HLS direct/track 与 HLS/DASH 计划/live 分片 authority transport，以及 HLS master/media 双向模式隔离、master variant/rendition/session-key/pending-regex/布尔与数值属性边界、重复 variant group 合并与工具选择、带值标签精确冒号/零字符与 whitespace payload 分发、整数标签、`EXTINF` token 与 CR/LF/CRLF 行边界、media/MAP range、BYTERANGE 数值归一化、MAP 前置 range 转交与 URI 拒绝、full-segment AES effective/local-playlist IV、显式 IV 字节归一化、KEYFORMAT 支持与多 key 选择、delta playlist 拒绝、encrypted MAP key/order、LL-PART、空或结构无效 media 与重复 singleton 标签拒绝、变量替换/直播及双轨 parent/child authority 边界、fragment-only query 替换和双轨本地计划、AES-128 production output、加密 fMP4/H264 + AES-128/AAC 独立双轨真实输出、cache fallback/static/live abort/session/active/ffmpeg/lifecycle cleanup、renderer listener/snapshot recovery、直播卸载输出清理和真实 output probe 已有专项证据，普通资源下载和 inspection 已有 production IPC 入口；页面拖拽 fallback、HLS parser 其余完整标签语义、旧 toolkit 及完整 unit cutover 仍无 production cutover 证据。
+10. 目前有 108 个唯一 active test ref；main composition、持久化捕捉设置热更新、下一文档 token 路由、main-only probe key 解析与下载、检查、probe 动作、external-tool target consumer、已捕获页面拖拽暂存、HLS direct/track 与 HLS/DASH 计划/live 分片 authority transport，以及 HLS master/media 双向模式隔离、master variant/rendition/session-key/pending-regex/布尔与数值属性边界、重复 variant group 合并与工具选择、带值标签精确冒号/零字符与 whitespace payload 分发、整数标签、`EXTINF` token、CR/LF/CRLF 行边界与行首空格/Tab token 优先级、media/MAP range、BYTERANGE 数值归一化、MAP 前置 range 转交与 URI 拒绝、full-segment AES effective/local-playlist IV、显式 IV 字节归一化、KEYFORMAT 支持与多 key 选择、delta playlist 拒绝、encrypted MAP key/order、LL-PART、空或结构无效 media 与重复 singleton 标签拒绝、变量替换/直播及双轨 parent/child authority 边界、fragment-only query 替换和双轨本地计划、AES-128 production output、加密 fMP4/H264 + AES-128/AAC 独立双轨真实输出、cache fallback/static/live abort/session/active/ffmpeg/lifecycle cleanup、renderer listener/snapshot recovery、直播卸载输出清理和真实 output probe 已有专项证据，普通资源下载和 inspection 已有 production IPC 入口；页面拖拽 fallback、HLS parser 其余完整标签语义、旧 toolkit 及完整 unit cutover 仍无 production cutover 证据。
 
 ## 4. 保留、迁移与删除
 

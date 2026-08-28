@@ -277,6 +277,32 @@ const lineEndingExpected = JSON.parse(readFileSync(`${lineEndingFixtureRoot}/${l
   }>
   targetDuration: number
 }
+const leadingWhitespaceFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-leading-whitespace-token-boundary', import.meta.url))
+const leadingWhitespaceFixture = JSON.parse(readFileSync(`${leadingWhitespaceFixtureRoot}/fixture.json`, 'utf8')) as {
+  expected: string
+  inputs: {
+    spaceDelimiter: string
+    spaceTag: string
+    tabTag: string
+  }
+}
+type LeadingWhitespaceProjection = {
+  durationSeconds: number
+  mediaSequence: number
+  segments: Array<{
+    discontinuitySequence: number
+    duration: number
+    iv: string | null
+    sequence: number
+    url: string
+  }>
+}
+const leadingWhitespaceExpected = JSON.parse(readFileSync(`${leadingWhitespaceFixtureRoot}/${leadingWhitespaceFixture.expected}`, 'utf8')) as {
+  baseUrl: string
+  spaceDelimiterError: string
+  spaceTag: LeadingWhitespaceProjection
+  tabTag: LeadingWhitespaceProjection
+}
 const mediaStructureExpected = JSON.parse(readFileSync(`${mediaStructureFixtureRoot}/${mediaStructureFixture.expected}`, 'utf8')) as Record<string, string>
 
 const mapByteRangeFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-map-byterange-independent', import.meta.url))
@@ -1492,5 +1518,38 @@ describe('Cat Catch HLS parser', () => {
       sequence: fragment.sequence,
       url: fragment.url,
     }))).toEqual(lineEndingExpected.segments)
+  })
+
+  it('hls.leading-whitespace-token-boundary', () => {
+    const project = (name: 'spaceTag' | 'tabTag') => {
+      const manifest = parseHlsManifest({
+        baseUrl: leadingWhitespaceExpected.baseUrl,
+        text: readFileSync(
+          `${leadingWhitespaceFixtureRoot}/${leadingWhitespaceFixture.inputs[name]}`,
+          'utf8',
+        ),
+      })
+      return {
+        durationSeconds: manifest.durationSeconds,
+        mediaSequence: manifest.mediaSequence,
+        segments: manifest.segments.map(segment => ({
+          discontinuitySequence: segment.discontinuitySequence,
+          duration: segment.duration,
+          iv: segment.key?.iv || null,
+          sequence: segment.sequence,
+          url: segment.url,
+        })),
+      }
+    }
+
+    expect(project('spaceTag')).toEqual(leadingWhitespaceExpected.spaceTag)
+    expect(project('tabTag')).toEqual(leadingWhitespaceExpected.tabTag)
+    expect(() => parseHlsManifest({
+      baseUrl: leadingWhitespaceExpected.baseUrl,
+      text: readFileSync(
+        `${leadingWhitespaceFixtureRoot}/${leadingWhitespaceFixture.inputs.spaceDelimiter}`,
+        'utf8',
+      ),
+    })).toThrow(leadingWhitespaceExpected.spaceDelimiterError)
   })
 })
