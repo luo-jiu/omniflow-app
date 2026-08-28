@@ -59,8 +59,24 @@ describe('EmbeddedBrowser HLS output handoff', () => {
       if (value === '-i') indexes.push(index)
       return indexes
     }, [])
+    const protocolPolicyIndexes = args.reduce<number[]>((indexes, value, index) => {
+      if (value === '-protocol_whitelist') indexes.push(index)
+      return indexes
+    }, [])
+    const extensionPolicyIndexes = args.reduce<number[]>((indexes, value, index) => {
+      if (value === '-allowed_extensions') indexes.push(index)
+      return indexes
+    }, [])
 
     expect(inputIndexes).toHaveLength(2)
+    expect(protocolPolicyIndexes).toHaveLength(2)
+    expect(extensionPolicyIndexes).toHaveLength(2)
+    expect(protocolPolicyIndexes[0]).toBeLessThan(inputIndexes[0])
+    expect(extensionPolicyIndexes[0]).toBeLessThan(inputIndexes[0])
+    expect(protocolPolicyIndexes[1]).toBeGreaterThan(inputIndexes[0])
+    expect(protocolPolicyIndexes[1]).toBeLessThan(inputIndexes[1])
+    expect(extensionPolicyIndexes[1]).toBeGreaterThan(inputIndexes[0])
+    expect(extensionPolicyIndexes[1]).toBeLessThan(inputIndexes[1])
     expect(args[inputIndexes[0] - 4]).toBe('-headers')
     expect(args[inputIndexes[0] - 3]).toContain('authorization: Bearer video-secret')
     expect(args[inputIndexes[0] - 3]).toContain('cookie: video-session=1')

@@ -53,6 +53,13 @@ const FFMPEG_MANIFEST_HEADER_BLACKLIST = new Set([
   'range',
 ])
 
+const FFMPEG_MANIFEST_INPUT_POLICY_ARGS = [
+  '-protocol_whitelist',
+  'file,http,https,tcp,tls,crypto,data',
+  '-allowed_extensions',
+  'ALL',
+] as const
+
 function sanitizeHeaderValue(input: string) {
   return String(input || '').replace(/[\r\n]+/g, ' ').trim()
 }
@@ -90,10 +97,7 @@ export function buildEmbeddedBrowserManifestDownloadArgs(request: EmbeddedBrowse
   return [
     '-y',
     '-nostats',
-    '-protocol_whitelist',
-    'file,http,https,tcp,tls,crypto,data',
-    '-allowed_extensions',
-    'ALL',
+    ...FFMPEG_MANIFEST_INPUT_POLICY_ARGS,
     ...buildFfmpegHttpHeaderArgs(request.headers),
     '-progress',
     'pipe:1',
@@ -115,15 +119,13 @@ export function buildEmbeddedBrowserManifestTrackMergeArgs(request: EmbeddedBrow
   return [
     '-y',
     '-nostats',
-    '-protocol_whitelist',
-    'file,http,https,tcp,tls,crypto,data',
-    '-allowed_extensions',
-    'ALL',
+    ...FFMPEG_MANIFEST_INPUT_POLICY_ARGS,
     ...buildFfmpegHttpHeaderArgs(request.videoHeaders),
     '-progress',
     'pipe:1',
     '-i',
     request.videoManifestUrl,
+    ...FFMPEG_MANIFEST_INPUT_POLICY_ARGS,
     ...buildFfmpegHttpHeaderArgs(request.audioHeaders),
     '-i',
     request.audioManifestUrl,

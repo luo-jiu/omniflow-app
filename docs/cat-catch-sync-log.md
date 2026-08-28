@@ -1067,6 +1067,20 @@
 - legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
 - validation: 失败证据为本地把前缀值丢成 undefined、把 `0x100` 读成 256、把平均码率 `3.5` 保留为 3.5。实现后 parser `38/38`、完整 HLS 集合 `16 files / 110 tests`、TypeScript、全仓 ESLint、fixture/capability JSON、轻量 validator、固定上游 anchor 校验、同步校验 `16/16`、metadata `7 units / 32 capabilities / 206 anchors / 106 cleanup entries / 152 planned IDs / 106 active refs` 通过。本步未重复全仓 Vitest；紧邻上一提交的基线为 `1236 passed / 3 skipped`，唯一失败来自其他 Agent 的 `agent-orchestrator` 资料库上传兜底断言。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
 
+## 2026-08-28: same target (encrypted HLS fMP4 track merge output)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，继续验证已经迁入的 AES-128/MAP/独立双轨生产组合。
+- reviewedThrough / portedThrough: 均保持 `null`；本步增加真实输出证据并修复 HLS 双 input ffmpeg 参数边界，仍未完成 hls-engine 或 output-integration cutover。
+- change groups: `production-output`（加密 fMP4/H264 视频与独立 AES-128/AAC 音轨）和 `platform-adaptation`（ffmpeg input-scoped protocol/extension policy）。
+- affected capability IDs: `hls.segment-pipeline` 保持 `porting`；`output.ffmpeg-process-owner` 保持 `pending`，因为非 HLS 的 4 个 ffmpeg 入口仍未统一；新增 1 个唯一 active test ID，不改变上游 anchor。
+- fixtures/tests: `hls.real-encrypted-fmp4-track-merge-output` 用本机 ffmpeg 生成 clear fMP4/H264 视频后手工 AES-128-CBC 加密 init/segments，同时生成独立 AES-128/AAC 音轨；两轨分别经过 pure parser、download plan、本地下载和 playlist 重写，再由生产双轨 wrapper 合并，最后由 ffprobe 断言同一 MP4 包含 H264 与 AAC 流且时长为正。`hls.track-input-header-isolation` 同时锁定两个 `-i` 各自拥有 protocol/extension policy 和 protected headers。
+- accepted difference: 无新增。Cat Catch 在扩展下载页执行解密/下载，OmniFlow 继续采用既有 Electron 平台替代：本地 playlist 保留 key/MAP 语义，由同一个可取消 ffmpeg owner 完成解密与双轨 mux。
+- excluded changes and reasons: 不借此宣称 AES-256/AES-256-CTR 已通过真实输出，不改变 parser、renderer DTO、IPC、任务 owner 或资料库交付边界。
+- unresolved gaps: HLS 其余真正影响下载与选择的 parser 差分、AES-256 系列真实输出、真实网站手工验证和最终 hls-engine cutover；非 HLS ffmpeg 入口继续留在 output-integration unit。
+- runtime changes: manifest input policy 抽成固定参数组，并在 video/audio 两个 `-i` 前分别声明；此前只在首个 input 前声明时，第二轨的本地 `.key` 会被 ffmpeg 默认 `allowed_extensions` 策略拒绝。header 仍按轨隔离，进程、取消和 partial output 清理 owner 不变。
+- legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
+- validation: 修复前新增真实用例稳定失败于第二个 HLS input 拒绝 `.key`；实现后直接输出/参数测试 `2 files / 8 tests`、完整 HLS 集合 `16 files / 111 tests`、TypeScript、全仓 ESLint、capability JSON、轻量 validator、固定上游 anchor 校验和同步校验 `16/16` 通过，metadata 为 `7 units / 32 capabilities / 206 anchors / 106 cleanup entries / 153 planned IDs / 107 active refs`。排除需要 Node runner 的同步测试文件后，全仓 Vitest 为 `187 files / 1247 passed / 3 skipped`，同步 Node tests 单独 `16/16`；直接运行 `npm test` 的唯一失败是该 Node test 文件被 Vitest 收集后报告 no suite，并非代码断言失败。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
+
 ## Template
 
 ```markdown
