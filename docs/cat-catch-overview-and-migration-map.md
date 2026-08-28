@@ -140,7 +140,7 @@ unit 是生产切换与删除旧实现的最小边界。可以在 unit 内逐项
 
 ## 7. 当前状态怎么判断
 
-当前固定目标为 Cat Catch `2cb981d7c2f4614732edccc167c4b5793d1cb138`。初始映射包含 7 个 unit 和 32 项 capability，125 个唯一计划测试引用已落成真实 pure behavior/contract、fake/real Electron integration 或 loopback redirect test。`network-capture` 的 7 项与 `hls-engine` 的 4 项 capability 已全部验证并完成原子 cutover；旧 network bridge/state/classifier/header DTO 与 HLS compatibility façade 均已删除。其余 5 个 unit 仍开放；data/blob、未捕获派生 URL 等明确平台 fallback 不代表第二套 network/HLS owner 仍在运行。
+当前固定目标为 Cat Catch `2cb981d7c2f4614732edccc167c4b5793d1cb138`。初始映射包含 7 个 unit 和 32 项 capability，128 个唯一计划测试引用已落成真实 pure behavior/contract、fake/real Electron integration 或 loopback redirect test。`network-capture` 的 7 项与 `hls-engine` 的 4 项 capability 已全部验证并完成原子 cutover；旧 network bridge/state/classifier/header DTO 与 HLS compatibility façade 均已删除。`deep-search-runtime` 已开始用 upstream-executable fixture 迁入纯 discovery，但 document-start hooks 尚未切换；其余 5 个 unit 仍开放。data/blob、未捕获派生 URL 等明确平台 fallback 不代表第二套 network/HLS owner 仍在运行。
 
 旧代码中存在网络捕捉、MSE、HLS、DASH、下载、ffmpeg 和资料库导入入口，只能说明有 characterization 输入，不能据此宣称已经迁移。完成一项能力至少需要：
 

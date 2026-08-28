@@ -1,0 +1,14 @@
+{
+  "main": {
+    "direct": "//media.example/live/master.m3u8?token=1",
+    "inline": "#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI=\"key.bin\"\n#EXTINF:4,\nsegment.ts\n#EXT-X-ENDLIST",
+    "dataManifest": "data:application/vnd.apple.mpegurl;base64,I0VYVE0zVQojRVhUSU5GOjUsCi8vZWRnZS5leGFtcGxlL2RhdGEudHMKI0VYVC1YLUVORExJU1Q=",
+    "dash": "<MPD xmlns=\"urn:mpeg:dash:schema:mpd:2011\"></MPD>",
+    "key": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 256],
+    "ignoredUnsupportedUrl": "https://media.example/file.webm"
+  },
+  "lateBase": {
+    "inline": "#EXTM3U\n#EXTINF:4,\nsegment.ts\n#EXT-X-ENDLIST",
+    "later": "https://cdn.example/audio/track.mp3"
+  }
+}

@@ -1305,6 +1305,20 @@
 - legacy cleanup: `network-capture` 的 8 个 `remove-after-cutover` symbol 已全部消失，19 个 `retain-or-adapt` owner 已保留或指向 target；cleanup entries 暂留用于防复活。
 - validation: network `15 files / 62 passed`、capture settings + target chain 专项 `4 files / 8 passed`、TypeScript、全仓 ESLint、同步测试 `16/16`、metadata/固定上游 validator 和 scoped diff check 已通过；排除 Node runner 文件后全仓 Vitest 为 `191 files / 1298 passed / 3 skipped`。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
 
+## 2026-08-28: same target (deep discovery executable baseline)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；本步开始 `deep-search-runtime`，不移动游标。
+- reviewedThrough / portedThrough: 均保持 `null`；`deep.manifest-key-discovery` 从 `pending` 进入 `porting`，整个 unit 仍开放。
+- change groups: `upstream-characterization` 与 `pure-port`；不接 production runtime。
+- affected capability IDs: `deep.manifest-key-discovery`、`deep.runtime-hook-bundle`；metadata 为 `7 units / 32 capabilities / 208 anchors / 106 cleanup entries / 170 planned IDs / 128 active refs`，状态为 `11 verified / 4 porting / 17 pending`。
+- fixtures/tests: 新增 upstream-executable fixture `deep-json-manifest-key-discovery`；`deep.inline-manifest-key`、`deep.base-url-blob-signature` 与 `deep.json-depth-width-cycle` 直接对比固定 `search.js` 的归一化 postMessage/Blob 内容。
+- accepted difference: pure port 返回 inline manifest bytes，不在纯逻辑层创建 page-owned Blob URL；后续 page adapter 必须从完全相同的 bytes 创建 opaque resource。fixture 比较 Blob 内容而不比较随机 Blob URL identity。
+- excluded changes and reasons: 不启用 `enableDeepRuntimeHooks`，不修改 document-start installer、Worker/fetch/XHR/TextDecoder、console relay、MSE、toolkit 或 renderer；先锁定经验算法，避免再次把 production 安全边界与行为迁移混成一块。
+- unresolved gaps: hook install sentinels、Worker CSP 异步失败、TextDecoder、fetch/XHR/JSON runtime、secure relay、all-frame document-start、toolkit state、production cutover 和 legacy cleanup 仍未完成。
+- runtime changes: 新增纯 `deep-search/discovery.ts`，保留上游七类 URL extension、协议相对 URL、宽松 16-number key coercion、all-zero/ftyp 排除、data URL、inline MPD/M3U8、全 enumerable width、depth 21/22、cycle 和未来 base URL 回放。
+- legacy cleanup: 无；旧 probe/runtime/template 在整个 deep unit 完成前继续作为现有生产 owner，target pure port 尚无生产调用方。
+- validation: discovery 专项 `1 file / 3 passed`、应用 TypeScript `--noEmit`、全仓 ESLint、同步测试 `16/16`、metadata/固定上游 validator 和 scoped diff check 已通过；排除 Node runner 文件后全仓 Vitest 为 `192 files / 1301 passed / 3 skipped`。项目引用 `tsc -b` 仍被既有 `vite.config.ts` 的 ES lib/`replaceAll` 错误阻断；完整 build 仍避免覆盖其他 Agent 的 `dist-electron/**`，暂无真实网站手工场景。
+
 ## Template
 
 ```markdown

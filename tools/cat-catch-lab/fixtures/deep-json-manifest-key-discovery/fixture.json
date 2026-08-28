@@ -1,0 +1,23 @@
+{
+  "fixtureId": "deep-json-manifest-key-discovery",
+  "capabilityIds": [
+    "deep.manifest-key-discovery",
+    "deep.runtime-hook-bundle"
+  ],
+  "upstreamCommit": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
+  "status": "active",
+  "oracle": "upstream-executable",
+  "sourceRefs": [
+    "catch-script/search.js#async function findMedia(data, depth = 0) {",
+    "catch-script/search.js#function toUrl(text, ext = \"m3u8\") {",
+    "catch-script/search.js#function postData(data) {"
+  ],
+  "pageUrl": "https://page.example/watch/index.html",
+  "input": "input.json",
+  "expected": "expected.json",
+  "testRefs": [
+    "electron/service/embedded-browser/cat-catch-port/deep-search/discovery.test.ts#deep.inline-manifest-key",
+    "electron/service/embedded-browser/cat-catch-port/deep-search/discovery.test.ts#deep.base-url-blob-signature",
+    "electron/service/embedded-browser/cat-catch-port/deep-search/discovery.test.ts#deep.json-depth-width-cycle"
+  ]
+}

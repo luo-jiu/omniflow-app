@@ -518,9 +518,11 @@
         "deep.text-decoder-manifest",
         "deep.json-depth-width-cycle"
       ],
-      "testRefs": [],
+      "testRefs": [
+        "electron/service/embedded-browser/cat-catch-port/deep-search/discovery.test.ts#deep.json-depth-width-cycle"
+      ],
       "acceptedDifferences": [],
-      "notes": "Known seed gap: enableDeepRuntimeHooks is hard-coded false; Worker/fetch/XHR/JSON/key hooks are inactive, TextDecoder is absent, and JSON limits differ from upstream."
+      "notes": "The pure discovery port now preserves Cat Catch's unbounded enumerable width, depth-21 string reachability, depth-22 stop, and cycle termination through the upstream depth guard instead of the legacy depth-6/width-80/WeakSet rewrite. Production enableDeepRuntimeHooks remains false; Worker/fetch/XHR/JSON/key hooks are inactive and TextDecoder is absent until the complete runtime and relay are ready."
     },
     {
       "id": "deep.manifest-key-discovery",
@@ -549,15 +551,20 @@
         "electron/service/embedded-browser/cat-catch-port/deep-search/discovery.ts#discoverResources"
       ],
       "relationToUpstream": "exact",
-      "syncState": "pending",
+      "syncState": "porting",
       "syncedThrough": null,
       "plannedTestIds": [
         "deep.inline-manifest-key",
         "deep.base-url-blob-signature"
       ],
-      "testRefs": [],
-      "acceptedDifferences": [],
-      "notes": "Current heuristics exist but no complete upstream behavior map or differential test coverage is recorded."
+      "testRefs": [
+        "electron/service/embedded-browser/cat-catch-port/deep-search/discovery.test.ts#deep.inline-manifest-key",
+        "electron/service/embedded-browser/cat-catch-port/deep-search/discovery.test.ts#deep.base-url-blob-signature"
+      ],
+      "acceptedDifferences": [
+        "The pure port returns inline manifest bytes instead of creating a page-owned Blob URL. The later page adapter must create the opaque resource from those exact bytes; the executable upstream fixture compares Blob contents rather than nondeterministic Blob URL identities."
+      ],
+      "notes": "The fixed search.js findMedia/toUrl path is now covered by an upstream-executable fixture. The pure port preserves protocol-relative URL handling, the seven-extension allowlist, loose 16-number key coercion, all-zero/ftyp suppression, data-URL manifests, inline MPD, current base expansion and deferred replay when a later resource reveals a new base. It is not connected to production until the runtime hook and secure relay cutover are complete."
     },
     {
       "id": "deep.secure-page-relay",
