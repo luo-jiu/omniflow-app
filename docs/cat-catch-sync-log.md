@@ -1193,6 +1193,20 @@
 - legacy cleanup: 无；旧 HLS compatibility facade 和 legacy-named controller adapter 继续保留到 hls-engine 原子 cutover。
 - validation: 固定 vendor executable oracle 输出 `totalduration=12` 与 3 个 fragment，duration 依次为 `3/5/4`；修改前 pure parser 错误输出 4 个 fragment，duration 为 `0/4/4/4`。实现后 parser `41/41`、完整 HLS 集合 `19 files / 121 tests`、TypeScript、全仓 ESLint、fixture/capability JSON、固定上游 validator、同步测试 `16/16` 和 metadata `7 units / 32 capabilities / 207 anchors / 106 cleanup entries / 159 planned IDs / 114 active refs` 通过；排除 Node runner 文件后全仓 Vitest 为 `189 files / 1256 passed / 3 skipped`。首轮 TypeScript 暴露测试投影 helper 过度绑定 manifest segment 类型，收窄到实际断言字段后 parser 与 TypeScript 重跑通过。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
 
+## 2026-08-28: same target (HLS empty segment URI rejection)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本步补固定变量替换与 fragment URL 物化的异常边界。
+- reviewedThrough / portedThrough: 均保持 `null`；hls-engine 仍未完成其余 parser 差分和原子 cleanup。
+- change groups: `executability-boundary`（空 segment URL）与 `state-integrity`（duration/sequence/key/MAP context 不得因静默删片前移）。
+- affected capability IDs: `hls.parser-planner` 保持 `ported-unverified`；新增 1 个 planned ID 和 1 个 active ref，不增加上游 anchor。
+- fixtures/tests: 新增 upstream-executable fixture `hls-empty-segment-uri-rejection`；`hls.empty-segment-uri-rejection` 锁定 `EXT-X-DEFINE` 空值使中间 segment URI 替换为空时必须在 manifest/plan 形成前稳定拒绝，并证明非有限 PART duration 会在变量替换前抑制该 URI、下一条有效 EXTINF 仍能恢复。
+- accepted difference: 固定 hls.js 会保留中间的 `url=""` fragment，让它占用 duration、sequence 和 key/MAP context；Cat Catch `parseTs` 随后把空 URL 投影到下载列表。OmniFlow 不执行空 URL 下载，而是报 `HLS segment URI must resolve to a non-empty string`；不得用静默删片替代拒绝。
+- excluded changes and reasons: 不修改合法变量值、未定义/重复变量错误、MAP URI 规则、普通 URL resolution、downloader、authority、IPC 或 UI；不借本步扩建通用 URL parser。
+- unresolved gaps: HLS 其余真正影响 URL/sequence/cc/key/MAP/range/duration/manifest executability 的 parser 差分、固定 url-toolkit 与 native URL 的边界、AES-256 系列真实输出、真实网站手工验证和 hls-engine cleanup 仍待完成。
+- runtime changes: `addSegment` 先按固定分支顺序抑制非有限 pending duration，再在变量替换后的 URI 为空时登记首个 playlist parsing error，随后由既有 parser error gate 拒绝整个 manifest；普通 fragment 状态与计划 DTO 不变。
+- legacy cleanup: 无；旧 HLS compatibility facade 和 legacy-named controller adapter 继续保留到 hls-engine 原子 cutover。
+- validation: 固定 vendor executable oracle 对可物化输入输出 `totalduration=8`，第一片为 `sn=0 / duration=4 / url=""`，第二片为 `sn=1 / duration=4 / valid.ts`；Cat Catch `parseTs` 对两片均直接投影 fragment URL。非有限 PART duration 输入则只输出恢复后的 `sn=0 / duration=4 / recovered.ts`。失败测试先稳定得到 parser `41/42`，实现和分支顺序自审后 parser `42/42`、完整 HLS 集合 `19 files / 122 tests`、TypeScript、全仓 ESLint、fixture/capability JSON、固定上游 validator、同步测试 `16/16` 和 metadata `7 units / 32 capabilities / 207 anchors / 106 cleanup entries / 160 planned IDs / 115 active refs` 通过；排除 Node runner 文件后全仓 Vitest 为 `189 files / 1257 passed / 3 skipped`。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
+
 ## Template
 
 ```markdown

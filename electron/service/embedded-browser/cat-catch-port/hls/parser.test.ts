@@ -384,6 +384,24 @@ const mapUriExpected = JSON.parse(readFileSync(`${mapUriFixtureRoot}/${mapUriFix
   expectedError: string
 }
 
+const emptySegmentUriFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-empty-segment-uri-rejection', import.meta.url))
+const emptySegmentUriFixture = JSON.parse(readFileSync(`${emptySegmentUriFixtureRoot}/fixture.json`, 'utf8')) as {
+  expected: string
+  inputs: {
+    rejected: string
+    suppressed: string
+  }
+}
+const emptySegmentUriExpected = JSON.parse(readFileSync(`${emptySegmentUriFixtureRoot}/${emptySegmentUriFixture.expected}`, 'utf8')) as {
+  baseUrl: string
+  expectedError: string
+  suppressedSegments: Array<{
+    duration: number
+    sequence: number
+    url: string
+  }>
+}
+
 const aesIvFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-aes128-iv-semantics', import.meta.url))
 const aesIvFixture = JSON.parse(readFileSync(`${aesIvFixtureRoot}/fixture.json`, 'utf8')) as {
   expected: string
@@ -733,6 +751,23 @@ describe('Cat Catch HLS parser', () => {
         text: readFileSync(`${mapUriFixtureRoot}/${input}`, 'utf8'),
       }), input).toThrow(mapUriExpected.expectedError)
     }
+  })
+
+  it('hls.empty-segment-uri-rejection', () => {
+    const suppressedManifest = parseHlsManifest({
+      baseUrl: emptySegmentUriExpected.baseUrl,
+      text: readFileSync(`${emptySegmentUriFixtureRoot}/${emptySegmentUriFixture.inputs.suppressed}`, 'utf8'),
+    })
+    expect(suppressedManifest.segments.map(segment => ({
+      duration: segment.duration,
+      sequence: segment.sequence,
+      url: segment.url,
+    }))).toEqual(emptySegmentUriExpected.suppressedSegments)
+
+    expect(() => parseHlsManifest({
+      baseUrl: emptySegmentUriExpected.baseUrl,
+      text: readFileSync(`${emptySegmentUriFixtureRoot}/${emptySegmentUriFixture.inputs.rejected}`, 'utf8'),
+    })).toThrow(emptySegmentUriExpected.expectedError)
   })
 
   it('hls.byterange-numeric-normalization', () => {

@@ -1,0 +1,22 @@
+{
+  "fixtureId": "hls-empty-segment-uri-rejection",
+  "capabilityIds": [
+    "hls.parser-planner"
+  ],
+  "upstreamCommit": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
+  "status": "active",
+  "oracle": "upstream-executable",
+  "sourceRefs": [
+    "lib/hls.min.js#substituteVariables/parseLevelPlaylist fragment relurl",
+    "lib/hls.min.js#BaseSegment.url",
+    "js/m3u8.js#parseTs(data) fragment url projection"
+  ],
+  "inputs": {
+    "rejected": "playlist.m3u8",
+    "suppressed": "suppressed.m3u8"
+  },
+  "expected": "expected.json",
+  "testRefs": [
+    "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.empty-segment-uri-rejection"
+  ]
+}

@@ -13,7 +13,8 @@
  * hls-master-parser-mode-isolation, hls-line-ending-boundary,
  * hls-master-pending-variant-boundary, hls-master-rendition-boolean-boundary,
  * hls-master-variant-numeric-boundary, hls-leading-whitespace-token-boundary,
- * hls-attribute-value-whitespace-boundary, hls-part-duration-fragment-boundary
+ * hls-attribute-value-whitespace-boundary, hls-part-duration-fragment-boundary,
+ * hls-empty-segment-uri-rejection
  */
 
 import { createHlsDefaultIv } from './decrypt'
@@ -697,10 +698,20 @@ export function parseHlsManifest(input: {
   }
 
   function addSegment(uri: string, part: boolean, byteRange = pendingByteRange) {
-    const normalizedUri = substituteHlsVariables(String(uri || '').trim(), variableState)
-    if (!normalizedUri) return
-    // hls.js retains this fragment until a later valid EXTINF resets duration.
+    // hls.js does not resolve or substitute a URI while the current fragment
+    // has a non-finite duration. A later valid EXTINF can still recover it.
     if (pendingSegment && !Number.isFinite(pendingSegment.duration)) return
+    const normalizedUri = substituteHlsVariables(String(uri || '').trim(), variableState)
+    if (!normalizedUri) {
+      // Pinned hls.js retains a middle fragment whose variable-substituted
+      // relurl is empty, and Cat Catch then projects url="" to its downloader.
+      // Reject that non-executable result instead of silently dropping it and
+      // shifting the sequence/key context of every following fragment.
+      variableState.playlistParsingError ||= new Error(
+        'HLS segment URI must resolve to a non-empty string',
+      )
+      return
+    }
     const url = resolveHlsUrl(normalizedUri, baseUrl)
     const index = segments.length
     const sequence = mediaSequence + index
