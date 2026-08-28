@@ -99,12 +99,26 @@ describe('EmbeddedBrowserFragmentDownloader', () => {
   })
 
   it('hls.retry-cancel-range', async () => {
-    let resolveStarted: (() => void) | undefined
-    const started = new Promise<void>((resolve) => {
-      resolveStarted = resolve
+    let attempt = 0
+    let resolveRetryStarted: (() => void) | undefined
+    const retryStarted = new Promise<void>((resolve) => {
+      resolveRetryStarted = resolve
     })
+    const bufferProcessor = vi.fn((buffer: ArrayBuffer) => buffer)
+    const processedBuffer = vi.fn()
+    const sequentialPush = vi.fn()
+    const completed = vi.fn()
+    const allCompleted = vi.fn()
+    const failed = vi.fn()
+    const aborted = vi.fn()
+    const failedAttempts: number[] = []
     const fetchImpl = vi.fn(async (_input: string, init?: RequestInit) => {
-      resolveStarted?.()
+      attempt += 1
+      expect(new Headers(init?.headers).get('range')).toBe('bytes=5-7')
+      if (attempt === 1) {
+        return new Response('temporary failure', { status: 503 })
+      }
+      resolveRetryStarted?.()
       return new Promise<Response>((_resolve, reject) => {
         init?.signal?.addEventListener('abort', () => {
           reject(new DOMException('aborted', 'AbortError'))
@@ -112,24 +126,50 @@ describe('EmbeddedBrowserFragmentDownloader', () => {
       })
     })
     const downloader = new EmbeddedBrowserFragmentDownloader({
+      bufferProcessor,
       fetch: fetchImpl,
-      fragments: [{ index: 0, url: 'https://media.example/segment.ts' }],
+      fragments: [{
+        byteRange: { length: 3, offset: 5 },
+        index: 0,
+        url: 'https://media.example/segment.ts',
+      }],
+      maxRetries: 2,
       thread: 1,
     })
-    const aborted = new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error('aborted event was not emitted')), 250)
-      downloader.on('aborted', () => {
-        clearTimeout(timeout)
-        resolve()
-      })
+    const stopped = new Promise<void>((resolve) => {
+      downloader.on('stop', () => resolve())
     })
+    downloader.on('downloadError', (_fragment, _error, failedAttempt) => {
+      failedAttempts.push(failedAttempt)
+    })
+    downloader.on('processedBuffer', processedBuffer)
+    downloader.on('sequentialPush', sequentialPush)
+    downloader.on('completed', completed)
+    downloader.on('allCompleted', allCompleted)
+    downloader.on('failed', failed)
+    downloader.on('aborted', aborted)
 
     downloader.start()
-    await started
+    await retryStarted
     downloader.stop()
-    await aborted
+    await stopped
+
+    await vi.waitFor(() => {
+      expect(fetchImpl).toHaveBeenCalledTimes(2)
+      expect(downloader.running).toBe(0)
+    })
     expect(downloader.state).toBe('aborted')
+    expect(failedAttempts).toEqual([1])
+    expect(bufferProcessor).not.toHaveBeenCalled()
+    expect(processedBuffer).not.toHaveBeenCalled()
+    expect(sequentialPush).not.toHaveBeenCalled()
+    expect(completed).not.toHaveBeenCalled()
+    expect(allCompleted).not.toHaveBeenCalled()
+    expect(failed).not.toHaveBeenCalled()
+    expect(aborted).toHaveBeenCalledTimes(1)
+
     downloader.destroy()
+    expect(aborted).toHaveBeenCalledTimes(1)
   })
 
   it('hls.failed-fragment-retry', async () => {

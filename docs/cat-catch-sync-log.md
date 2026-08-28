@@ -1095,6 +1095,20 @@
 - legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
 - validation: 隔离 VM 内的固定 vendor executable oracle 产生上述三类结果；失败证据为当前 parser 把 space-tag 错读为 `mediaSequence=10 / 1 fragment / IV=10`。实现后 parser `39/39`、完整 HLS 集合 `16 files / 112 tests`、TypeScript、全仓 ESLint、fixture/capability JSON、轻量 validator、固定上游 anchor 校验、同步校验 `16/16`、metadata `7 units / 32 capabilities / 206 anchors / 106 cleanup entries / 154 planned IDs / 108 active refs` 和 scoped diff check 通过。本步未重复全仓 Vitest；同工作树紧邻提交 `1ba4337` 的基线为 `187 files / 1247 passed / 3 skipped`，同步 Node tests 单独 `16/16`。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
 
+## 2026-08-28: same target (HLS retry cancellation and Range evidence)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，继续验证固定 Cat Catch downloader 的 range/retry/abort 组合语义。
+- reviewedThrough / portedThrough: 均保持 `null`；本步激活 `hls.segment-pipeline` 最后一个尚无等名证据的 planned test ID，但未完成 hls-engine cutover。
+- change groups: `behavioral-evidence`（每个 retry 保持同一 byte Range）和 `stability`（活动 retry 取消后队列与处理链不再推进）。
+- affected capability IDs: `hls.segment-pipeline` 保持 `porting`；新增 1 个 active test ref，不增加计划 ID 或上游 anchor。
+- fixtures/tests: 不新增 fixture；`embeddedBrowserFragmentDownloader.test.ts#hls.retry-cancel-range` 现在先让带 `bytes=5-7` 的 fragment 返回 503，再证明第二个 attempt 保持相同 Range，在该 retry 进行中取消后无第三次 fetch、processor、completed 或 allCompleted，并且只发出一次 aborted 终态。
+- accepted difference: Cat Catch 按 `500ms * retryCount` 延迟自动重试；OmniFlow 继续使用既有有界立即重排队。URL/Range、最大次数、活动请求中止、队列停止和终态语义保持等价，不引入扩展页面的 retry UI。
+- excluded changes and reasons: 不为延迟文案新增 timer/backoff，不借测试证据重写 downloader scheduler，也不扩大到跨 HLS/DASH/MSE 的通用任务中心。
+- unresolved gaps: `hls.segment-pipeline` 的保留 planned IDs 均已有等名 active refs，但 capability 仍因完整 hls-engine cutover、旧 pipeline 清理、AES-256 系列真实输出和真实网站手工验证而保持 `porting`；其余 parser 差分继续按下载消费边界推进。
+- runtime changes: 无生产代码变化；既有 downloader 已满足组合行为，本步把此前仅覆盖单次中止的同名测试改成真实 retry/range/cancel 回归合同。
+- legacy cleanup: 无；旧 HLS 执行链继续保留到 hls-engine 原子 cutover。
+- validation: 加强后的 downloader 专项 `5/5`、完整 HLS 集合 `18 files / 118 tests`、TypeScript、全仓 ESLint、capability JSON、轻量 validator、固定上游 anchor 校验、同步测试 `16/16`、metadata `7 units / 32 capabilities / 206 anchors / 106 cleanup entries / 154 planned IDs / 109 active refs` 和 scoped diff check 通过。排除由 Node runner 单独执行的同步测试文件后，全仓 Vitest 为 `187 files / 1249 passed / 3 skipped`。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
+
 ## Template
 
 ```markdown
