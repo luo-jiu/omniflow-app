@@ -2,7 +2,12 @@
  * Core logic adapted from cat-catch (https://github.com/xifangczy/cat-catch)
  * Licensed under GPL-3.0-only
  */
-import { embeddedBrowserResourceProbePageActionsBody } from './embeddedBrowserResourceProbePageActions'
+import {
+  embeddedBrowserMsePageActionsBody,
+  embeddedBrowserMsePageRuntimeCoreBody,
+  embeddedBrowserMsePageRuntimeHooksBody,
+} from './embedded-browser/capture/adapters/mse-page-runtime'
+import { embeddedBrowserPageProbeRuntimeHostBody } from './embedded-browser/capture/adapters/page-probe-runtime-host'
 import { embeddedBrowserResourceProbeManifestHeuristicsBody } from './embeddedBrowserResourceProbeManifestHeuristics'
 import { embeddedBrowserResourceProbeRuntimeCoreBody } from './embeddedBrowserResourceProbeRuntimeCore'
 import { embeddedBrowserResourceProbeRuntimeHooksBody } from './embeddedBrowserResourceProbeRuntimeHooks'
@@ -21,6 +26,7 @@ function getScriptFunctionBody(fn: (...args: never[]) => unknown) {
 }
 
 const probeRuntimeNames = [
+  'MSE_FLUSH_THRESHOLD_BYTES',
   'addBaseUrl',
   'arrayBufferToBase64',
   'attachTrackedMediaElement',
@@ -33,6 +39,7 @@ const probeRuntimeNames = [
   'classifyGeneratedResource',
   'classifyKind',
   'clearCatchMediaCacheInternal',
+  'clearMseFlushTimer',
   'cloneChunk',
   'consumeWorkerRelayMessage',
   'createMseExportName',
@@ -70,6 +77,7 @@ const probeRuntimeNames = [
   'exportMseResource',
   'exportProbeResource',
   'finalizeMseStream',
+  'flushMseStreamBuffers',
   'getBaseUrl',
   'getCurrentDocumentTitle',
   'getExtension',
@@ -131,6 +139,7 @@ const probeRuntimeNames = [
   'restartCatchMediaCaptureInternal',
   'sanitizeFileName',
   'scanInlineScriptResourceCandidates',
+  'scheduleMseStreamFlush',
   'seen',
   'subtitleExtensions',
   'subtitlePattern',
@@ -162,13 +171,19 @@ function createProbeBootstrapFunctionSource() {
     'delete globalThis[' + JSON.stringify(${JSON.stringify(EMBEDDED_BROWSER_RESOURCE_INSTALL_ERROR_KEY)}) + '];',
     'const consolePrefix = ' + JSON.stringify(String(nextConsolePrefix || '')) + ';',
     'const probeRuntimeCoreBodySource = ' + JSON.stringify(probeRuntimeCoreBodySource) + ';',
+    'const probeMseCoreBodySource = ' + JSON.stringify(probeMseCoreBodySource) + ';',
     'const probeManifestHeuristicsBodySource = ' + JSON.stringify(probeManifestHeuristicsBodySource) + ';',
+    'const probeMsePageActionsBodySource = ' + JSON.stringify(probeMsePageActionsBodySource) + ';',
     'const probePageActionsBodySource = ' + JSON.stringify(probePageActionsBodySource) + ';',
+    'const probeMseRuntimeHooksBodySource = ' + JSON.stringify(probeMseRuntimeHooksBodySource) + ';',
     'const probeRuntimeHooksBodySource = ' + JSON.stringify(probeRuntimeHooksBodySource) + ';',
     createProbeBootstrapSource.toString(),
     probeRuntimeCoreBodySource,
+    probeMseCoreBodySource,
     probeManifestHeuristicsBodySource,
+    probeMsePageActionsBodySource,
     probePageActionsBodySource,
+    probeMseRuntimeHooksBodySource,
     probeRuntimeHooksBodySource,
     "return 'installed';",
     '} catch (error) {',
@@ -184,6 +199,9 @@ export function createProbeScriptTemplate(input: {
   additionalBodySources?: string[]
   consolePrefix: string
   manifestHeuristicsBodySource: string
+  mseCoreBodySource: string
+  msePageActionsBodySource: string
+  mseRuntimeHooksBodySource: string
   pageActionsBodySource: string
   runtimeCoreBodySource: string
   runtimeHooksBodySource: string
@@ -194,13 +212,19 @@ export function createProbeScriptTemplate(input: {
     `delete globalThis[${JSON.stringify(EMBEDDED_BROWSER_RESOURCE_INSTALL_ERROR_KEY)}];`,
     `const consolePrefix = ${JSON.stringify(input.consolePrefix)};`,
     `const probeRuntimeCoreBodySource = ${JSON.stringify(input.runtimeCoreBodySource)};`,
+    `const probeMseCoreBodySource = ${JSON.stringify(input.mseCoreBodySource)};`,
     `const probeManifestHeuristicsBodySource = ${JSON.stringify(input.manifestHeuristicsBodySource)};`,
+    `const probeMsePageActionsBodySource = ${JSON.stringify(input.msePageActionsBodySource)};`,
     `const probePageActionsBodySource = ${JSON.stringify(input.pageActionsBodySource)};`,
+    `const probeMseRuntimeHooksBodySource = ${JSON.stringify(input.mseRuntimeHooksBodySource)};`,
     `const probeRuntimeHooksBodySource = ${JSON.stringify(input.runtimeHooksBodySource)};`,
     createProbeBootstrapFunctionSource(),
     input.runtimeCoreBodySource,
+    input.mseCoreBodySource,
     input.manifestHeuristicsBodySource,
+    input.msePageActionsBodySource,
     input.pageActionsBodySource,
+    input.mseRuntimeHooksBodySource,
     input.runtimeHooksBodySource,
     ...(input.additionalBodySources || []).filter(source => String(source || '').trim()),
     "return 'installed';",
@@ -222,7 +246,10 @@ export function createEmbeddedBrowserResourceProbeScript(input?: {
     additionalBodySources: input?.additionalBodySources,
     consolePrefix,
     manifestHeuristicsBodySource: restoreProbeRuntimeNames(getScriptFunctionBody(embeddedBrowserResourceProbeManifestHeuristicsBody)),
-    pageActionsBodySource: restoreProbeRuntimeNames(getScriptFunctionBody(embeddedBrowserResourceProbePageActionsBody)),
+    mseCoreBodySource: restoreProbeRuntimeNames(getScriptFunctionBody(embeddedBrowserMsePageRuntimeCoreBody)),
+    msePageActionsBodySource: restoreProbeRuntimeNames(getScriptFunctionBody(embeddedBrowserMsePageActionsBody)),
+    mseRuntimeHooksBodySource: restoreProbeRuntimeNames(getScriptFunctionBody(embeddedBrowserMsePageRuntimeHooksBody)),
+    pageActionsBodySource: restoreProbeRuntimeNames(getScriptFunctionBody(embeddedBrowserPageProbeRuntimeHostBody)),
     runtimeCoreBodySource: restoreProbeRuntimeNames(getScriptFunctionBody(embeddedBrowserResourceProbeRuntimeCoreBody)),
     runtimeHooksBodySource: restoreProbeRuntimeNames(getScriptFunctionBody(embeddedBrowserResourceProbeRuntimeHooksBody)),
   })

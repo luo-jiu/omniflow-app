@@ -55,6 +55,8 @@ Deep 的 Electron page adapter 位于 `../../capture/adapters/deep-search-page.t
 
 相邻 `page-generated-resource.ts` 是 target Deep 的 page-origin bytes owner，负责 generated manifest/key 的 signature 去重、Blob/base64、文件名和 open/export/read；非自身 key 委托给当前 MSE handler。完整 probe 已能从 main-owned resource key 读取该 owner 的 Cat Catch 归一化 manifest bytes，不再依赖旧 `probeResources` 状态。
 
+现有 production MSE 的 state/helpers、page actions 与 MediaSource hooks 已机械拆到 `../../capture/adapters/mse-page-runtime.ts`，page global host 位于相邻 `page-probe-runtime-host.ts`；它们仍由同一个 probe IIFE 安装，没有第二个 MSE owner。该抽离只为解除 Deep 与 MSE 的文件级纠缠，`mse-runtime` 仍须在本目录建立固定 `catch.js` 的行为 port 与差分证据后才能切换。
+
 `embeddedBrowserCatchToolkitPageBridge.ts`、`embeddedBrowserResourcePageBridge.ts` 的受控脚本生成器，以及 probe template/console prefix 属于保留的平台 adapter，不是第二套 Cat Catch 算法；其 payload/resource key 转发和缺失 handler 行为由 `embeddedBrowserPageBridge.test.ts` 锁定。
 
 ## 来源注释

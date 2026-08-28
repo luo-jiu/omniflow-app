@@ -2,7 +2,7 @@
  * Core logic adapted from cat-catch (https://github.com/xifangczy/cat-catch)
  * Licensed under GPL-3.0-only
  */
-/* eslint-disable @typescript-eslint/ban-ts-comment, @typescript-eslint/no-unused-vars, prefer-const, no-extra-semi */
+/* eslint-disable @typescript-eslint/ban-ts-comment, @typescript-eslint/no-unused-vars, no-extra-semi */
 // These body fragments are compiled to JavaScript, sliced, and injected into the page runtime.
 // @ts-nocheck
 export function embeddedBrowserResourceProbeRuntimeCoreBody() {
@@ -48,30 +48,6 @@ export function embeddedBrowserResourceProbeRuntimeCoreBody() {
   }
 
   const seen = new Set<string>()
-  const probeDiagnostics = {
-    appendBufferCount: 0,
-    hookErrors: 0,
-    mediaSourceAvailable: typeof globalScope.MediaSource !== 'undefined',
-    mediaSourceHooked: false,
-    sourceBufferCount: 0,
-    lastAppendAt: 0,
-    lastError: '',
-  }
-  const MSE_FLUSH_THRESHOLD_BYTES = 50 * 1024 * 1024
-  const mseStreams = new Map<string, {
-    blobUrl: string
-    bufferCount: number
-    buffers: ArrayBuffer[]
-    flushTimer: number | null
-    flushedBytes: number
-    lastReportedBufferCount: number
-    lastReportedBytes: number
-    mimeType: string
-    retainedBytes: number
-    streamId: string
-    streamType?: 'audio' | 'video'
-    totalBytes: number
-  }>()
   const probeResources = new Map<string, {
     base64: string
     blobUrl: string
@@ -81,8 +57,6 @@ export function embeddedBrowserResourceProbeRuntimeCoreBody() {
     streamType?: 'audio' | 'video'
   }>()
   const probeResourceKeysBySignature = new Map<string, string>()
-  const mediaSourceStreams = new WeakMap<MediaSource, string[]>()
-  let mseSequence = 0
   let probeResourceSequence = 0
 
   const manifestExtensions = new Set(['m3u8', 'm3u', 'mpd'])
@@ -121,7 +95,6 @@ export function embeddedBrowserResourceProbeRuntimeCoreBody() {
     trimExtraMediaHeaders: 'OmniflowCatchToolkit:trimExtraMediaHeaders',
   } as const
   let isEmittingKeyCandidate = false
-  let isCaptureComplete = false
   const catchToolkitState = {
     autoSeekToBufferedEnd: false,
     autoDownloadOnComplete: false,
@@ -132,9 +105,6 @@ export function embeddedBrowserResourceProbeRuntimeCoreBody() {
     selectorRule: '',
     trimExtraMediaHeaders: true,
   }
-  const trackedMediaElements = new WeakSet<HTMLMediaElement>()
-  const autoRestartHandledMediaElements = new WeakSet<HTMLMediaElement>()
-  let trackedMediaObserver: MutationObserver | null = null
 
   function readCatchToolkitStorageString(key: string) {
     try {
@@ -495,58 +465,6 @@ export function embeddedBrowserResourceProbeRuntimeCoreBody() {
     return safeName || 'media'
   }
 
-  function buildCatchToolkitState(): ProbeCatchToolkitState {
-    const selectorEvaluation = evaluateSelectorRule(catchToolkitState.selectorRule)
-    const regexEvaluation = evaluateRegexRule(catchToolkitState.regexRule)
-    const capturedMediaSizeBytes = Array.from(mseStreams.values()).reduce((totalBytes, stream) => {
-      return totalBytes + Math.max(0, Number(stream.totalBytes || 0))
-    }, 0)
-    const sortedStreams = Array.from(mseStreams.values())
-      .filter((stream) => stream.buffers.length > 0 || stream.totalBytes > 0)
-      .sort((left, right) => {
-        const sizeDelta = Math.max(0, Number(right.totalBytes || 0)) - Math.max(0, Number(left.totalBytes || 0))
-        if (sizeDelta !== 0) {
-          return sizeDelta
-        }
-        return String(left.streamId).localeCompare(String(right.streamId))
-      })
-    const primaryStream = sortedStreams[0]
-    const audioStream = sortedStreams.find((stream) => stream.streamType === 'audio')
-    const videoStream = sortedStreams.find((stream) => stream.streamType === 'video')
-    return {
-      audioResourceKey: audioStream ? createMseResourceKey(audioStream.streamId) : '',
-      audioSizeBytes: audioStream ? Math.max(0, Number(audioStream.totalBytes || 0)) : 0,
-      autoSeekToBufferedEnd: catchToolkitState.autoSeekToBufferedEnd,
-      autoDownloadOnComplete: catchToolkitState.autoDownloadOnComplete,
-      capturedMediaSizeBytes,
-      clearCacheOnComplete: catchToolkitState.clearCacheOnComplete,
-      currentFileName: resolveCatchToolkitFileName(),
-      diagnostics: {
-        appendBufferCount: probeDiagnostics.appendBufferCount,
-        frameUrl: currentLocationHref,
-        hookErrors: probeDiagnostics.hookErrors,
-        installedAt: globalScope.__OMNIFLOW_EMBEDDED_BROWSER_RESOURCE_PROBE__?.installedAt || Date.now(),
-        lastAppendAt: probeDiagnostics.lastAppendAt,
-        lastError: probeDiagnostics.lastError,
-        mediaSourceAvailable: probeDiagnostics.mediaSourceAvailable,
-        mediaSourceHooked: probeDiagnostics.mediaSourceHooked,
-        sourceBufferCount: probeDiagnostics.sourceBufferCount,
-      },
-      isCaptureComplete,
-      manualFileName: catchToolkitState.manualFileName,
-      primaryResourceKey: primaryStream ? createMseResourceKey(primaryStream.streamId) : '',
-      regexWarning: regexEvaluation.warning,
-      regexRule: regexEvaluation.rule,
-      restartAlwaysFromBeginning: catchToolkitState.restartAlwaysFromBeginning,
-      selectorWarning: selectorEvaluation.warning,
-      selectorRule: selectorEvaluation.rule,
-      streamCount: mseStreams.size,
-      trimExtraMediaHeaders: catchToolkitState.trimExtraMediaHeaders,
-      videoResourceKey: videoStream ? createMseResourceKey(videoStream.streamId) : '',
-      videoSizeBytes: videoStream ? Math.max(0, Number(videoStream.totalBytes || 0)) : 0,
-    }
-  }
-
   function cloneChunk(input: unknown) {
     if (input instanceof ArrayBuffer) {
       return input
@@ -886,98 +804,6 @@ export function embeddedBrowserResourceProbeRuntimeCoreBody() {
     )
   }
 
-  function isWebmHeaderChunk(chunk: ArrayBuffer) {
-    const data = getChunkBytes(chunk)
-    return (
-      data.length > 4
-      && data[0] === 0x1A
-      && data[1] === 0x45
-      && data[2] === 0xDF
-      && data[3] === 0xA3
-    )
-  }
-
-  function normalizeBuffersForPlayback(buffers: ArrayBuffer[]) {
-    if (!catchToolkitState.trimExtraMediaHeaders) {
-      return buffers
-    }
-    if (!Array.isArray(buffers) || buffers.length <= 1) {
-      return buffers
-    }
-    let lastHeaderIndex = -1
-    buffers.forEach((chunk, index) => {
-      if (isMp4HeaderChunk(chunk) || isWebmHeaderChunk(chunk)) {
-        lastHeaderIndex = index
-      }
-    })
-    if (lastHeaderIndex > 0) {
-      return buffers.slice(lastHeaderIndex)
-    }
-    return buffers
-  }
-
-  function clearMseFlushTimer(streamId: string) {
-    const stream = mseStreams.get(streamId)
-    if (!stream || stream.flushTimer == null) {
-      return
-    }
-    clearTimeout(stream.flushTimer)
-    stream.flushTimer = null
-  }
-
-  function emitMseStreamReset(streamId: string) {
-    emitProbeConsolePayload({
-      capturedAt: Date.now(),
-      event: 'mse-reset',
-      pageUrl: currentLocationHref,
-      resourceKey: createMseResourceKey(streamId),
-    })
-  }
-
-  function flushMseStreamBuffers(streamId: string) {
-    const stream = mseStreams.get(streamId)
-    if (!stream || stream.buffers.length === 0) {
-      return 0
-    }
-    clearMseFlushTimer(streamId)
-    const combinedBuffer = combineArrayBuffers(stream.buffers)
-    const flushedBytes = combinedBuffer.byteLength
-    if (!flushedBytes) {
-      return 0
-    }
-    emitProbeConsolePayload({
-      base64: arrayBufferToBase64(combinedBuffer),
-      capturedAt: Date.now(),
-      event: 'mse-flush',
-      fileName: `${resolveCatchToolkitFileName()}${stream.streamType ? `-${stream.streamType}` : ''}.${guessExtensionFromMimeType(stream.mimeType, stream.streamType)}`,
-      mimeType: stream.mimeType,
-      pageUrl: currentLocationHref,
-      resourceKey: createMseResourceKey(streamId),
-      streamType: stream.streamType,
-    })
-    stream.buffers = []
-    stream.retainedBytes = 0
-    stream.flushedBytes += flushedBytes
-    stream.lastReportedBufferCount = stream.bufferCount
-    stream.lastReportedBytes = stream.totalBytes
-    return flushedBytes
-  }
-
-  function scheduleMseStreamFlush(streamId: string) {
-    const stream = mseStreams.get(streamId)
-    if (!stream || stream.flushTimer != null) {
-      return
-    }
-    stream.flushTimer = setTimeout(() => {
-      const latestStream = mseStreams.get(streamId)
-      if (!latestStream) {
-        return
-      }
-      latestStream.flushTimer = null
-      flushMseStreamBuffers(streamId)
-    }, 0) as unknown as number
-  }
-
   function emit(payload: ProbeEmitPayload, fromRelay = false) {
     if (!payload.url) {
       return
@@ -1027,9 +853,7 @@ export function embeddedBrowserResourceProbeRuntimeCoreBody() {
     __OMNIFLOW_EMBEDDED_BROWSER_PROBE_CORE_KEEP_ALIVE__?: unknown[]
   }).__OMNIFLOW_EMBEDDED_BROWSER_PROBE_CORE_KEEP_ALIVE__ = [
     arrayBufferToBase64,
-    autoRestartHandledMediaElements,
     base64ToArrayBuffer,
-    buildCatchToolkitState,
     catchToolkitState,
     catchToolkitStorageKeys,
     classifyKind,
@@ -1040,7 +864,6 @@ export function embeddedBrowserResourceProbeRuntimeCoreBody() {
     dataUrlPattern,
     decodeDataUrlText,
     emit,
-    emitMseStreamReset,
     emitGeneratedResource,
     emitKeyCandidateFromBase64,
     emitKeyCandidateFromBuffer,
@@ -1054,13 +877,11 @@ export function embeddedBrowserResourceProbeRuntimeCoreBody() {
     imageExtensions,
     imagePattern,
     inferStreamTypeFromPath,
-    isCaptureComplete,
     isEmittingKeyCandidate,
     isLikelyBase64Key,
     isLikelyHexKey,
     isMp4HeaderChunk,
     isRepeatedExpansion,
-    isWebmHeaderChunk,
     isWorkerScope,
     keyExtensions,
     keyPattern,
@@ -1069,17 +890,12 @@ export function embeddedBrowserResourceProbeRuntimeCoreBody() {
     manifestPattern,
     mediaExtensions,
     mediaPattern,
-    mediaSourceStreams,
-    mseSequence,
-    mseStreams,
-    normalizeBuffersForPlayback,
     normalizePotentialKeyBuffer,
     openWindow,
     originalConsoleInfo,
     originalJSONParse,
     pdfPattern,
     persistCatchToolkitState,
-    probeDiagnostics,
     probeResourceKeysBySignature,
     probeResourceSequence,
     probeResources,
@@ -1093,8 +909,6 @@ export function embeddedBrowserResourceProbeRuntimeCoreBody() {
     subtitlePattern,
     textToBase64,
     toAbsoluteUrl,
-    trackedMediaElements,
-    trackedMediaObserver,
     uint16ArrayToUint8Array,
     uint32ArrayToUint8Array,
     workerRelayKey,

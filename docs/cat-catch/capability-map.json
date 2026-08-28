@@ -24,7 +24,7 @@
       "order": 3,
       "description": "MediaSource capture, bounded page buffering, main spool, reset, finalize, and merge lifecycle.",
       "dispatchBoundaryRefs": [
-        "electron/service/embeddedBrowserResourceProbeRuntimeHooks.ts#embeddedBrowserResourceProbeRuntimeHooksBody",
+        "electron/service/embedded-browser/capture/adapters/mse-page-runtime.ts#embeddedBrowserMsePageRuntimeHooksBody",
         "electron/service/embedded-browser/capture/adapters/electron-page-probe.ts#ElectronPageProbeEventAdapter"
       ]
     },
@@ -760,7 +760,9 @@
         }
       ],
       "currentImplementationRefs": [
-        "electron/service/embeddedBrowserResourceProbeRuntimeHooks.ts#originalAddSourceBuffer"
+        "electron/service/embedded-browser/capture/adapters/mse-page-runtime.ts#embeddedBrowserMsePageRuntimeCoreBody",
+        "electron/service/embedded-browser/capture/adapters/mse-page-runtime.ts#embeddedBrowserMsePageActionsBody",
+        "electron/service/embedded-browser/capture/adapters/mse-page-runtime.ts#embeddedBrowserMsePageRuntimeHooksBody"
       ],
       "targetRefs": [
         "electron/service/embedded-browser/cat-catch-port/mse/runtime.ts#installMseRuntime"
@@ -772,9 +774,11 @@
         "mse.audio-video-flush-reset",
         "mse.append-observability"
       ],
-      "testRefs": [],
+      "testRefs": [
+        "electron/service/embeddedBrowserResourceProbeMseRuntime.test.ts#mse.append-observability"
+      ],
       "acceptedDifferences": [],
-      "notes": "MSE is the only currently active runtime hook family; parity, bounded page retention, and append/endOfStream observability are unverified."
+      "notes": "MSE remains the only production-active runtime hook family. Its state/helpers, page actions and MediaSource hooks now compose as dedicated body fragments in the same probe IIFE; direct production-script characterization locks single installation, append/endOfStream observability, byte readback, open/export/drain and resource events. This mechanical owner extraction does not establish fixed-upstream parity, audio/video flush-reset behavior, or bounded page retention, so the capability remains pending."
     },
     {
       "id": "mse.main-spool-lifecycle",

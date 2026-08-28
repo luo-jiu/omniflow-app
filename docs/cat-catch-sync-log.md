@@ -1473,6 +1473,20 @@
 - legacy cleanup: `probeResources` 从 split-before-remove 移到 pure-remove；Deep 边界变为 `11 retain-or-adapt / 11 pure remove / 9 split-before-remove`，全部删除仍等待 unit 原子切换。
 - validation: generated owner/page/probe `3 files / 5 passed`、完整 Deep target `7 files / 23 passed`、应用 TypeScript `--noEmit`、scoped/full ESLint、sync tests `16/16`、metadata/固定上游校验（`187 planned tests`）和全仓 Vitest `201 files / 1376 passed / 3 skipped` 均通过。完整 build 仍为避免覆盖其他 Agent 的 dirty `dist-electron/**` 而不运行，且当前没有真实网站手工场景。
 
+## 2026-08-28: same target (production MSE owner extraction)
+
+- observedHead / migrationTarget: 均为 `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本步解除 production MSE 与 legacy Deep 文件的职责纠缠。
+- reviewedThrough / portedThrough: 均保持 `null`；Deep capability 状态不变，`mse.page-capture-runtime` 也继续 `pending`，不把机械抽离当成固定上游 parity。
+- change groups: `production-owner-extraction`、`behavior-characterization`、`cleanup-boundary-correction` 与 `documentation-correction`；不切换 Deep production dispatch。
+- affected capability IDs: `deep.runtime-hook-bundle`、`deep.catch-toolkit-page-settings`、`mse.page-capture-runtime`；metadata 为 `7 units / 32 capabilities / 210 anchors / 106 cleanup entries / 187 planned IDs / 153 active refs`，状态仍为 `11 verified / 5 porting / 1 ported-unverified / 15 pending`。
+- fixtures/tests: `mse.append-observability` 真实执行 production probe，锁定单次安装、重复安装不重复包 hook、addSourceBuffer/appendBuffer/endOfStream、诊断与资源事件，以及 read/open/export/drain 的 key/bytes 行为；MSE + Deep + relay/lifecycle 定向集为 `11 files / 30 passed`。
+- accepted differences: 无新增差异；本步只保持 OmniFlow 现有 MSE 行为，尚未把 50MB page flush、header trimming、catch actions 或 completion 语义声明为 Cat Catch 等价。
+- excluded changes and reasons: 不创建新的 MSE framework，不修改 main spool、IPC、renderer、资源 authority 或 target Deep runtime；production 仍由一个 probe IIFE 和一个 MediaSource hook owner 执行。
+- unresolved gaps: Deep 仍需收敛混合 core、page host body、console emitter、global API 与 generated-resource read，再原子切换 document factory；MSE 仍需对照固定 `catch.js` 完成 audio/video flush-reset、页面预算和 parity 证据。
+- runtime changes: 现有 MSE state/helpers、page actions 与 hooks 迁到 `capture/adapters/mse-page-runtime.ts`，worker/resource/global host 迁到 `page-probe-runtime-host.ts`；模板按 core -> MSE core -> manifest -> MSE actions -> page host -> MSE hooks -> Deep hooks 在同一 IIFE 组合，旧 510 行混合 PageActions 文件删除，黑盒行为不变。
+- legacy cleanup: 3 个实际操作 MSE 流的 catch action 从 Deep 归回 `mse-runtime`，所有移动项继续保持 `legacy/remove-after-cutover`；Deep cleanup 现为 28 项，边界是 `11 retain-or-adapt / 12 pure remove / 5 split-before-remove`。
+- validation: production MSE characterization `1 file / 1 passed`、MSE/Deep/relay/lifecycle 定向 `11 files / 30 passed`、应用 TypeScript `--noEmit`、full ESLint、sync tests `16/16`、metadata/固定上游校验（`187 planned tests`）和全仓 Vitest `202 files / 1377 passed / 3 skipped` 均通过。完整 build 仍为避免覆盖其他 Agent 的 dirty `dist-electron/**` 而不运行，且当前没有真实网站手工场景。
+
 ## Template
 
 ```markdown
