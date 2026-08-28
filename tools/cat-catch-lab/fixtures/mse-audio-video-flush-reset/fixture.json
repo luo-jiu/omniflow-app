@@ -1,0 +1,20 @@
+{
+  "fixtureId": "mse-audio-video-flush-reset",
+  "capabilityIds": [
+    "mse.page-capture-runtime"
+  ],
+  "upstreamCommit": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
+  "status": "active",
+  "oracle": "upstream-source-derived",
+  "sourceRefs": [
+    "catch-script/catch.js#window.MediaSource.prototype.addSourceBuffer = new Proxy(",
+    "catch-script/catch.js#this.catchMedia[index].bufferList.push(argumentsList[0]);",
+    "catch-script/catch.js#clearCache()"
+  ],
+  "input": "input.json",
+  "expected": "expected.json",
+  "testRefs": [
+    "electron/service/embedded-browser/cat-catch-port/mse/runtime.test.ts#mse.audio-video-flush-reset",
+    "electron/service/embedded-browser/cat-catch-port/mse/runtime.test.ts#mse.append-observability"
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "flushThresholdBytes": 8,
+  "streams": [
+    {
+      "id": "audio-1",
+      "mimeType": "audio/mp4; codecs=\"mp4a.40.2\"",
+      "chunks": [
+        [1, 2],
+        [10, 11, 12]
+      ]
+    },
+    {
+      "id": "video-1",
+      "mimeType": "video/mp4; codecs=\"avc1.640028\"",
+      "chunks": [
+        [3, 4, 5],
+        [20, 21, 22, 23]
+      ]
+    }
+  ],
+  "appendOrder": [
+    ["audio-1", 0],
+    ["video-1", 0],
+    ["audio-1", 1],
+    ["video-1", 1]
+  ]
+}

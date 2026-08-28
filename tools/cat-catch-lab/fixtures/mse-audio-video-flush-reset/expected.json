@@ -1,0 +1,46 @@
+{
+  "flushes": [
+    {
+      "streamId": "audio-1",
+      "streamType": "audio",
+      "byteLength": 5,
+      "bytes": [1, 2, 10, 11, 12]
+    },
+    {
+      "streamId": "video-1",
+      "streamType": "video",
+      "byteLength": 3,
+      "bytes": [3, 4, 5]
+    }
+  ],
+  "afterFlush": {
+    "retainedBytes": 4,
+    "streamCount": 2
+  },
+  "afterIncompleteClear": {
+    "retainedBytes": 5,
+    "resetStreamIds": ["audio-1", "video-1"],
+    "streams": [
+      {
+        "streamId": "audio-1",
+        "bufferCount": 1,
+        "retainedBytes": 2,
+        "totalBytes": 2
+      },
+      {
+        "streamId": "video-1",
+        "bufferCount": 1,
+        "retainedBytes": 3,
+        "totalBytes": 3
+      }
+    ]
+  },
+  "afterCompleteClear": {
+    "retainedBytes": 0,
+    "streamCount": 0
+  },
+  "nativeAppendCounts": {
+    "audio-1": 2,
+    "video-1": 2
+  }
+}

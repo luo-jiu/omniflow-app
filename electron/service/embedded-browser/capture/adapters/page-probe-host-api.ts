@@ -2,7 +2,7 @@
  * Stable page-global contract for capture actions.
  *
  * Capability owners wrap these methods for their own resource IDs. The base
- * implementation delegates only to the current MSE owner.
+ * implementation delegates only to the target MSE page adapter.
  */
 /* eslint-disable @typescript-eslint/ban-ts-comment */
 // This body fragment is compiled to JavaScript, sliced, and injected into the page runtime.
@@ -10,41 +10,41 @@
 export function embeddedBrowserPageProbeHostApiBody() {
   globalScope.__OMNIFLOW_EMBEDDED_BROWSER_RESOURCE_PROBE__ = {
     clearCatchMediaCache() {
-      return clearCatchMediaCacheInternal()
+      return msePageAdapter.clear()
     },
     downloadCatchMedia() {
-      return downloadCatchMediaInternal()
+      return msePageAdapter.download()
     },
     drainResource(resourceKey: string) {
       const normalizedResourceKey = String(resourceKey || '')
       return normalizedResourceKey.startsWith('mse-stream:')
-        ? drainMseResource(normalizedResourceKey)
+        ? msePageAdapter.drainResource(normalizedResourceKey)
         : null
     },
     exportResource(resourceKey: string) {
       const normalizedResourceKey = String(resourceKey || '')
       return normalizedResourceKey.startsWith('mse-stream:')
-        ? exportMseResource(normalizedResourceKey)
+        ? msePageAdapter.exportResource(normalizedResourceKey)
         : false
     },
     getCatchToolkitState() {
-      return buildCatchToolkitState()
+      return msePageAdapter.getState()
     },
     installedAt: Date.now(),
     openResource(resourceKey: string) {
       const normalizedResourceKey = String(resourceKey || '')
       return normalizedResourceKey.startsWith('mse-stream:')
-        ? openMseResource(normalizedResourceKey)
+        ? msePageAdapter.openResource(normalizedResourceKey)
         : false
     },
     readResource(resourceKey: string) {
       const normalizedResourceKey = String(resourceKey || '')
       return normalizedResourceKey.startsWith('mse-stream:')
-        ? readMseResource(normalizedResourceKey)
+        ? msePageAdapter.readResource(normalizedResourceKey)
         : Promise.resolve(null)
     },
     restartCatchMediaCapture() {
-      return restartCatchMediaCaptureInternal()
+      return msePageAdapter.restart()
     },
     seen,
     updateCatchToolkitState(payload: Partial<ProbeCatchToolkitState>) {
@@ -60,7 +60,7 @@ export function embeddedBrowserPageProbeHostApiBody() {
       for (const key of ['manualFileName', 'regexRule', 'selectorRule'] as const) {
         if (typeof payload[key] === 'string') catchToolkitProjection[key] = payload[key]
       }
-      return buildCatchToolkitState()
+      return msePageAdapter.getState()
     },
   }
 }

@@ -39,8 +39,8 @@ export type InstallDeepSearchToolkitAdapterInput = {
 }
 
 /**
- * Makes the target toolkit state the preference owner while the existing MSE
- * actions consume a synchronized runtime projection during the atomic cutover.
+ * Makes the target toolkit state the preference owner while the target MSE
+ * page adapter consumes a synchronized runtime projection.
  */
 export function installDeepSearchToolkitAdapter(
   input: InstallDeepSearchToolkitAdapterInput,
@@ -104,9 +104,9 @@ export function createDeepSearchToolkitAdapterBodySource() {
     `const createCatchToolkitState = ${createCatchToolkitStateSource()};`,
     `const installDeepSearchToolkitAdapter = (${installDeepSearchToolkitAdapter.toString()});`,
     'installDeepSearchToolkitAdapter({',
-    '  afterUpdate: () => { if (!isWorkerScope) ensureTrackedMediaObserver(); },',
+    '  afterUpdate: () => { if (!isWorkerScope) msePageAdapter.ensureTrackedMediaObserver(); },',
     '  createState: createCatchToolkitState,',
-    '  getHostState: buildCatchToolkitState,',
+    '  getHostState: msePageAdapter.getState,',
     '  hostProbe: globalScope.__OMNIFLOW_EMBEDDED_BROWSER_RESOURCE_PROBE__,',
     '  scope: globalScope,',
     "  selectorScope: typeof document === 'undefined' ? undefined : document,",

@@ -3,7 +3,7 @@
  *
  * Cat Catch algorithms live in their capability ports. This body only owns
  * the document transport, resource projection, and byte helpers consumed by
- * the current MSE platform adapter.
+ * capability page adapters.
  */
 /* eslint-disable @typescript-eslint/ban-ts-comment */
 // This body fragment is compiled to JavaScript, sliced, and injected into the page runtime.
@@ -27,9 +27,6 @@ export function embeddedBrowserPageProbeRuntimeCoreBody() {
     ? globalScope.location.hostname
     : 'resource'
   const workerRelayKey = '__OMNIFLOW_EMBEDDED_BROWSER_RESOURCE_RELAY__'
-  const openWindow = typeof globalScope.open === 'function'
-    ? globalScope.open.bind(globalScope)
-    : null
   const originalConsoleInfo = typeof console.info === 'function'
     ? console.info.bind(console)
     : console.log.bind(console)
@@ -194,14 +191,6 @@ export function embeddedBrowserPageProbeRuntimeCoreBody() {
     return 'mp4'
   }
 
-  function cloneChunk(input: unknown) {
-    if (input instanceof ArrayBuffer) return input.slice(0)
-    if (ArrayBuffer.isView(input)) {
-      return input.buffer.slice(input.byteOffset, input.byteOffset + input.byteLength)
-    }
-    return null
-  }
-
   function getChunkBytes(input: ArrayBuffer | ArrayBufferView) {
     if (input instanceof ArrayBuffer) return new Uint8Array(input)
     return new Uint8Array(input.buffer, input.byteOffset, input.byteLength)
@@ -228,17 +217,6 @@ export function embeddedBrowserPageProbeRuntimeCoreBody() {
       offset += bytes.byteLength
     }
     return combined.buffer
-  }
-
-  function isMp4HeaderChunk(chunk: ArrayBuffer) {
-    const data = getChunkBytes(chunk)
-    return (
-      data.length > 8
-      && data[4] === 0x66
-      && data[5] === 0x74
-      && data[6] === 0x79
-      && data[7] === 0x70
-    )
   }
 
   function emitProbeConsolePayload(payload: Record<string, unknown>) {
@@ -279,7 +257,6 @@ export function embeddedBrowserPageProbeRuntimeCoreBody() {
     arrayBufferToBase64,
     catchToolkitProjection,
     classifyKind,
-    cloneChunk,
     combineArrayBuffers,
     currentLocationHref,
     emit,
@@ -287,9 +264,7 @@ export function embeddedBrowserPageProbeRuntimeCoreBody() {
     getChunkBytes,
     globalScope,
     guessExtensionFromMimeType,
-    isMp4HeaderChunk,
     isWorkerScope,
-    openWindow,
     resolveMseCaptureFileName,
     seen,
     workerRelayKey,

@@ -5,11 +5,7 @@ import {
 } from '../../../embeddedBrowserResourceProbeScriptTemplate'
 import { createDeepSearchPageAdapterBodySource } from './deep-search-page'
 import { createDeepSearchToolkitAdapterBodySource } from './deep-search-toolkit'
-import {
-  embeddedBrowserMsePageActionsBody,
-  embeddedBrowserMsePageRuntimeCoreBody,
-  embeddedBrowserMsePageRuntimeHooksBody,
-} from './mse-page-runtime'
+import { createMsePageAdapterBodySource } from './mse-page'
 import { createPageGeneratedResourceStoreBodySource } from './page-generated-resource'
 import { embeddedBrowserPageProbeHostApiBody } from './page-probe-host-api'
 import { embeddedBrowserPageProbeRuntimeCoreBody } from './page-probe-runtime-core'
@@ -17,9 +13,9 @@ import { embeddedBrowserPageProbeRuntimeCoreBody } from './page-probe-runtime-co
 /**
  * Unique production document-start composition for page capture.
  *
- * Body order is part of the contract: shared host -> MSE owner -> global API
- * -> active MSE hooks -> generated-resource owner -> target Deep owners. MSE
- * stays usable if an unusual page prevents a Deep experience hook install.
+ * Body order is part of the contract: shared host -> global API -> target MSE
+ * owner -> generated-resource owner -> target Deep owners. MSE stays usable if
+ * an unusual page prevents a Deep experience hook install.
  */
 export function createEmbeddedBrowserPageProbeDocumentScript(input?: {
   consolePrefix?: string
@@ -29,10 +25,8 @@ export function createEmbeddedBrowserPageProbeDocumentScript(input?: {
   return createProbeScriptTemplate({
     bodySources: [
       createProbeBodySource(embeddedBrowserPageProbeRuntimeCoreBody),
-      createProbeBodySource(embeddedBrowserMsePageRuntimeCoreBody),
-      createProbeBodySource(embeddedBrowserMsePageActionsBody),
       createProbeBodySource(embeddedBrowserPageProbeHostApiBody),
-      createProbeBodySource(embeddedBrowserMsePageRuntimeHooksBody),
+      createMsePageAdapterBodySource(),
       createPageGeneratedResourceStoreBodySource(),
       createDeepSearchPageAdapterBodySource({ usePageGeneratedResourceStore: true }),
       createDeepSearchToolkitAdapterBodySource(),
