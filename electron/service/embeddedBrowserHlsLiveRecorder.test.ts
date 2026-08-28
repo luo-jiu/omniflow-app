@@ -3,7 +3,9 @@ import path from 'node:path'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { describe, expect, it, vi } from 'vitest'
 
-import { EmbeddedBrowserHlsLiveRecorder } from './embeddedBrowserHlsLiveRecorder'
+import {
+  HlsLiveTask as EmbeddedBrowserHlsLiveRecorder,
+} from './embedded-browser/processing/hls-live-task'
 
 const LIVE_MANIFEST = [
   '#EXTM3U',

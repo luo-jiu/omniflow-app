@@ -158,15 +158,15 @@ import {
   type EmbeddedBrowserManifestDownloadKind,
 } from './embeddedBrowserResourceManifestDownloadService'
 import {
-  downloadEmbeddedBrowserHlsToLocalWorkDirectory,
-} from './embeddedBrowserHlsLocalDownloaderService'
+  defaultHlsTaskExecutor,
+} from './embedded-browser/processing/hls-task'
 import type { EmbeddedBrowserFragmentFetch } from './embeddedBrowserFragmentDownloader'
 import {
   downloadEmbeddedBrowserMpdToOutput,
 } from './embeddedBrowserMpdLocalDownloaderService'
 import {
-  EmbeddedBrowserHlsLiveRecorder,
-} from './embeddedBrowserHlsLiveRecorder'
+  HlsLiveTask,
+} from './embedded-browser/processing/hls-live-task'
 import {
   createEmbeddedBrowserHlsHostLifecycle,
   EmbeddedBrowserHlsSessionOwner,
@@ -207,7 +207,7 @@ export function createEmbeddedBrowserMainController(
     ffmpegPath?: string
     manifestUrl: string
     outputPath: string
-    recorder: EmbeddedBrowserHlsLiveRecorder
+    recorder: HlsLiveTask
     requestId: string
     tabId: string
     workDirectoryPath?: string
@@ -1979,7 +1979,7 @@ export function createEmbeddedBrowserMainController(
       })
 
       workDirectoryPath = await mkdtemp(path.join(os.tmpdir(), 'omniflow-hls-download-'))
-      const localDownloadResult = await downloadEmbeddedBrowserHlsToLocalWorkDirectory({
+      const localDownloadResult = await defaultHlsTaskExecutor.downloadToLocalWorkDirectory({
         fetch: createEmbeddedBrowserCapturedResourceFetch(normalizedTabId, resourceId),
         preprocessFragments: true,
         onEvent: (event) => {
@@ -2208,7 +2208,7 @@ export function createEmbeddedBrowserMainController(
       })
 
       const parentVariableAccess = captureRuntime?.access || null
-      const recorder = new EmbeddedBrowserHlsLiveRecorder({
+      const recorder = new HlsLiveTask({
         fetch: createEmbeddedBrowserCapturedResourceFetch(normalizedTabId, authorityResourceId),
         headers: manifestHeaders,
         manifestUrl,
@@ -2318,7 +2318,7 @@ export function createEmbeddedBrowserMainController(
       }
     }
 
-    let stopResult: Awaited<ReturnType<EmbeddedBrowserHlsLiveRecorder['stop']>> | null = null
+    let stopResult: Awaited<ReturnType<HlsLiveTask['stop']>> | null = null
     let activeTask: {
       complete: () => void
       signal: AbortSignal
@@ -2500,7 +2500,7 @@ export function createEmbeddedBrowserMainController(
         usingManualKey: Boolean(session.manualKeyBase64),
       })
 
-      const localDownloadResult = await downloadEmbeddedBrowserHlsToLocalWorkDirectory({
+      const localDownloadResult = await defaultHlsTaskExecutor.downloadToLocalWorkDirectory({
         fetch: createEmbeddedBrowserCapturedResourceFetch(normalizedTabId, session.resourceId),
         fragmentIndexes: session.failedFragments.map((value) => value - 1).filter((value) => value >= 0),
         manualKeyBase64: session.manualKeyBase64,

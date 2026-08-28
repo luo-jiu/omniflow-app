@@ -6,8 +6,10 @@ const { downloadLocalMock, mergeTracksMock } = vi.hoisted(() => ({
   mergeTracksMock: vi.fn(),
 }))
 
-vi.mock('../../embeddedBrowserHlsLocalDownloaderService', () => ({
-  downloadEmbeddedBrowserHlsToLocalWorkDirectory: downloadLocalMock,
+vi.mock('./hls-task', () => ({
+  defaultHlsTaskExecutor: {
+    downloadToLocalWorkDirectory: downloadLocalMock,
+  },
 }))
 
 vi.mock('../../embeddedBrowserResourceManifestDownloadService', () => ({

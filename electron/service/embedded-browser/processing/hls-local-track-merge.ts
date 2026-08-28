@@ -3,9 +3,9 @@ import path from 'node:path'
 import type { EmbeddedBrowserHlsDownloadPlan } from '../contracts/hls'
 import type { EmbeddedBrowserFragmentFetch } from '../../embeddedBrowserFragmentDownloader'
 import {
-  downloadEmbeddedBrowserHlsToLocalWorkDirectory,
+  defaultHlsTaskExecutor,
   type EmbeddedBrowserHlsLocalDownloadRequest,
-} from '../../embeddedBrowserHlsLocalDownloaderService'
+} from './hls-task'
 import {
   downloadEmbeddedBrowserManifestTracks,
   type EmbeddedBrowserManifestDownloadResult,
@@ -87,7 +87,7 @@ export async function downloadEmbeddedBrowserHlsLocalTracks(input: {
   input.signal?.addEventListener('abort', abortDownloads, { once: true })
   if (input.signal?.aborted) abortDownloads()
   const downloads = [
-    downloadEmbeddedBrowserHlsToLocalWorkDirectory({
+    defaultHlsTaskExecutor.downloadToLocalWorkDirectory({
       fetch: input.video.fetch,
       onEvent: forwardTrackEvent('video'),
       plan: input.video.plan,
@@ -95,7 +95,7 @@ export async function downloadEmbeddedBrowserHlsLocalTracks(input: {
       signal: downloadAbortController.signal,
       workDirectoryPath: path.join(input.workDirectoryPath, 'video'),
     }),
-    downloadEmbeddedBrowserHlsToLocalWorkDirectory({
+    defaultHlsTaskExecutor.downloadToLocalWorkDirectory({
       fetch: input.audio.fetch,
       onEvent: forwardTrackEvent('audio'),
       plan: input.audio.plan,

@@ -17,7 +17,7 @@ vi.mock('../platform/processTree', () => ({
   terminateDesktopProcessTree: terminateProcessTreeMock,
 }))
 
-import { downloadEmbeddedBrowserHlsToLocalWorkDirectory } from './embeddedBrowserHlsLocalDownloaderService'
+import { defaultHlsTaskExecutor } from './embedded-browser/processing/hls-task'
 import {
   buildEmbeddedBrowserManifestTrackMergeArgs,
   downloadEmbeddedBrowserManifestResource,
@@ -117,7 +117,7 @@ describe('EmbeddedBrowser HLS output handoff', () => {
     })
 
     try {
-      const localResult = await downloadEmbeddedBrowserHlsToLocalWorkDirectory({
+      const localResult = await defaultHlsTaskExecutor.downloadToLocalWorkDirectory({
         fetch: fetchImpl,
         plan: {
           fragments: [{

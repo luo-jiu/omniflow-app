@@ -8,8 +8,12 @@ import {
 } from './embedded-browser/cat-catch-port/hls/parser'
 import { createHlsDownloadPlan } from './embedded-browser/cat-catch-port/hls/plan'
 import {
-  downloadEmbeddedBrowserHlsToLocalWorkDirectory,
-} from './embeddedBrowserHlsLocalDownloaderService'
+  defaultHlsTaskExecutor,
+} from './embedded-browser/processing/hls-task'
+
+const downloadEmbeddedBrowserHlsToLocalWorkDirectory = (
+  ...args: Parameters<typeof defaultHlsTaskExecutor.downloadToLocalWorkDirectory>
+) => defaultHlsTaskExecutor.downloadToLocalWorkDirectory(...args)
 
 function createPlan() {
   return {

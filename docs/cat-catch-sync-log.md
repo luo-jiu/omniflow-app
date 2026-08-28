@@ -1137,6 +1137,20 @@
 - legacy cleanup: 两个 renderer legacy symbol 继续存在且仍标记 `remove-after-cutover`；没有提前移动状态或删除清单。
 - validation: 完整 HLS `19 files / 119 tests`、TypeScript、全仓 ESLint、轻量 validator、固定上游 anchor 校验、同步测试 `16/16`、metadata `7 units / 32 capabilities / 206 anchors / 106 cleanup entries / 155 planned IDs / 110 active refs`、生产引用搜索和 scoped diff check 通过；旧 model 只剩 2 个明确 parity test caller。排除由 Node runner 单独执行的同步测试文件后，全仓 Vitest 为 `188 files / 1250 passed / 3 skipped`。迁移后首轮 TypeScript/ESLint 暴露一个已无用途的 plan type import，删除后所有门禁完整重跑通过。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
 
+## 2026-08-28: same target (HLS local and live processing owners)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本步只把已有且已验证的执行逻辑放入既定 target owner。
+- reviewedThrough / portedThrough: 均保持 `null`；hls-engine 仍有 controller plan task、parser 差分和原子 cleanup 未完成。
+- change groups: `architecture-boundary`（local/live production owner）和 `pre-cutover-cleanup`（旧入口缩为同引用 façade）。
+- affected capability IDs: `hls.segment-pipeline` 与 `hls.live-recording` 保持 `porting`；新增 1 个 planned ID 和 1 个 active ref，不增加上游 anchor。
+- fixtures/tests: 不新增媒体 fixture；`hls.processing-owner-boundary` 证明默认 executor 是 `HlsTaskExecutor` 实例，并且两个旧入口分别与 target function/class 保持同一引用。原 local/live/track/output 测试改为直接运行 target owner。
+- accepted difference: 无；移动不改变 key/map/segment fetch、Range、重试、playlist、直播轮询、取消、事件或 ffmpeg 行为。
+- excluded changes and reasons: controller 继续拥有 authority、保存路径、IPC response、任务事件和 ffmpeg 产品编排；本步不顺手制造通用 task framework，也不删除 validator 仍要求存在的 legacy symbol。
+- unresolved gaps: `downloadEmbeddedBrowserHlsPlanResource` 的执行编排仍在 controller；完整 parser 差分、AES-256 系列真实输出、真实网站手工验证和 hls-engine 原子 cutover 仍待完成。
+- runtime changes: 本地 key/map/segment 下载与 playlist 重写迁入 `processing/hls-task.ts#HlsTaskExecutor`，直播 poll/cumulative plan 迁入 `processing/hls-live-task.ts#HlsLiveTask`；controller、local track merge、live task 与 output tests 均直接依赖 target。旧顶层 downloader/recorder 文件只保留同函数/同 class re-export。
+- legacy cleanup: `node.hls.local-downloader` 与 `node.hls.live-recorder` 继续标记 `remove-after-cutover`，但已无生产调用方；controller plan task 和 renderer façade sentinel 不变。
+- validation: target owner 首轮专项 `5 files / 24 tests`、完整 capability HLS 集合 `19 files / 118 tests`、TypeScript、全仓 ESLint、固定上游 validator、同步测试 `16/16`、metadata `7 units / 32 capabilities / 206 anchors / 106 cleanup entries / 156 planned IDs / 111 active refs` 和 scoped diff check 通过。排除由 Node runner 单独执行且已通过 `16/16` 的同步测试文件后，全仓 Vitest 为 `189 files / 1251 passed / 3 skipped`；未排除时其余测试仍全部通过，但 Vitest 按预期把该 Node 文件报告为无 suite。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
+
 ## Template
 
 ```markdown

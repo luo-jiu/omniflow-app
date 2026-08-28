@@ -13,7 +13,7 @@ import {
   parseHlsManifest,
 } from './embedded-browser/cat-catch-port/hls/parser'
 import { createHlsDownloadPlan } from './embedded-browser/cat-catch-port/hls/plan'
-import { downloadEmbeddedBrowserHlsToLocalWorkDirectory } from './embeddedBrowserHlsLocalDownloaderService'
+import { defaultHlsTaskExecutor } from './embedded-browser/processing/hls-task'
 import { downloadEmbeddedBrowserManifestResource } from './embeddedBrowserResourceManifestDownloadService'
 import { downloadEmbeddedBrowserHlsLocalTracks } from './embedded-browser/processing/hls-local-track-merge'
 
@@ -197,7 +197,7 @@ describe.skipIf(!ffmpegPath || !ffprobePath)('EmbeddedBrowser real HLS output', 
           manifest,
           manifestUrl,
         })
-        const localResult = await downloadEmbeddedBrowserHlsToLocalWorkDirectory({
+        const localResult = await defaultHlsTaskExecutor.downloadToLocalWorkDirectory({
           fetch: async (url: string) => {
             const sourcePath = url.endsWith('/key.bin')
               ? sourceKeyPath
