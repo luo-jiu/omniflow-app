@@ -1,0 +1,39 @@
+{
+  "baseUrlRoot": "https://media.example/attr/",
+  "renditions": [
+    {
+      "autoselect": false,
+      "default": false,
+      "forced": true,
+      "name": "Spaced flags",
+      "type": "AUDIO",
+      "url": "https://media.example/attr/audio.m3u8"
+    }
+  ],
+  "segments": [
+    {
+      "encrypted": false,
+      "iv": null,
+      "keyUrl": null,
+      "method": null,
+      "sequence": 10,
+      "url": "https://media.example/attr/clear.ts"
+    },
+    {
+      "encrypted": true,
+      "iv": "0x0000000000000000000000000000000b",
+      "keyUrl": "https://media.example/attr/active.key",
+      "method": "AES-128",
+      "sequence": 11,
+      "url": "https://media.example/attr/encrypted.ts"
+    },
+    {
+      "encrypted": true,
+      "iv": "0x0000000000000000000000000000000c",
+      "keyUrl": "https://media.example/attr/active.key",
+      "method": "AES-128",
+      "sequence": 12,
+      "url": "https://media.example/attr/inherited.ts"
+    }
+  ]
+}

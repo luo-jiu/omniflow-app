@@ -12,7 +12,8 @@
  * hls-whitespace-valued-tag-boundary, hls-media-parser-mode-isolation,
  * hls-master-parser-mode-isolation, hls-line-ending-boundary,
  * hls-master-pending-variant-boundary, hls-master-rendition-boolean-boundary,
- * hls-master-variant-numeric-boundary, hls-leading-whitespace-token-boundary
+ * hls-master-variant-numeric-boundary, hls-leading-whitespace-token-boundary,
+ * hls-attribute-value-whitespace-boundary
  */
 
 import { createHlsDefaultIv } from './decrypt'
@@ -64,6 +65,16 @@ type HlsVariableState = {
  * Fixture: hls-variable-substitution
  */
 const HLS_VARIABLE_REFERENCE_PATTERN = /\{\$([a-zA-Z0-9-_]+)\}/g
+
+/**
+ * Upstream: xifangczy/cat-catch@2cb981d7c2f4614732edccc167c4b5793d1cb138
+ * Source: lib/hls.min.js#AttrList.parseAttrList
+ * Reason: only attribute names are trimmed; unquoted value whitespace changes
+ * exact key-method support, key inheritance, and rendition selection flags.
+ * Adaptation: none.
+ * Fixture: hls-attribute-value-whitespace-boundary
+ */
+const HLS_ATTRIBUTE_LIST_PATTERN = /(.+?)=(".*?"|.*?)(?:,|$)/g
 const HLS_HEXADECIMAL_ATTRIBUTES = new Set([
   'IV',
   'SCTE35-CMD',
@@ -183,21 +194,13 @@ function parseHlsAttributeListWithVariables(
   variableState?: HlsVariableState,
 ): CatCatchHlsAttributeMap {
   const result: CatCatchHlsAttributeMap = {}
-  let key = ''
-  let value = ''
-  let readingKey = true
-  let inQuotes = false
-
-  function commit() {
-    const normalizedKey = key.trim()
-    if (!normalizedKey) {
-      key = ''
-      value = ''
-      readingKey = true
-      return
-    }
-    let normalizedValue = value.trim()
-    const quoted = normalizedValue.startsWith('"') && normalizedValue.endsWith('"')
+  HLS_ATTRIBUTE_LIST_PATTERN.lastIndex = 0
+  let match: RegExpExecArray | null
+  while ((match = HLS_ATTRIBUTE_LIST_PATTERN.exec(String(input || ''))) !== null) {
+    const normalizedKey = match[1].trim()
+    let normalizedValue = match[2]
+    const quoted = normalizedValue.startsWith('"')
+      && normalizedValue.endsWith('"')
     if (quoted) {
       normalizedValue = normalizedValue.slice(1, -1)
     }
@@ -205,29 +208,7 @@ function parseHlsAttributeListWithVariables(
       normalizedValue = substituteHlsVariables(normalizedValue, variableState)
     }
     result[normalizedKey] = normalizedValue
-    key = ''
-    value = ''
-    readingKey = true
   }
-
-  for (const char of String(input || '')) {
-    if (readingKey) {
-      if (char === '=') readingKey = false
-      else key += char
-      continue
-    }
-    if (char === '"') {
-      inQuotes = !inQuotes
-      value += char
-      continue
-    }
-    if (char === ',' && !inQuotes) {
-      commit()
-      continue
-    }
-    value += char
-  }
-  commit()
   return result
 }
 
@@ -269,6 +250,11 @@ function resolveHlsUrl(uri: string, baseUrl: string) {
 function getTagValue(line: string) {
   const colonIndex = line.indexOf(':')
   return colonIndex >= 0 ? line.slice(colonIndex + 1).trim() : ''
+}
+
+function getRawTagValue(line: string) {
+  const colonIndex = line.indexOf(':')
+  return colonIndex >= 0 ? line.slice(colonIndex + 1) : ''
 }
 
 // The pinned media-playlist slow regex uses (.+) for valued tag payloads.
@@ -336,7 +322,7 @@ function createHlsKey(
   baseUrl: string,
   variableState: HlsVariableState,
 ): CatCatchHlsKey {
-  const attributes = parseHlsAttributeListWithVariables(getTagValue(line), variableState)
+  const attributes = parseHlsAttributeListWithVariables(getRawTagValue(line), variableState)
   const uri = attributes.URI
   return {
     iv: normalizeHlsIvBytes(attributes.IV),
@@ -356,7 +342,7 @@ function createHlsMap(
   variableState: HlsVariableState,
   leadingByteRange?: CatCatchHlsByteRange,
 ): CatCatchHlsMap | null {
-  const attributes = parseHlsAttributeListWithVariables(getTagValue(line), variableState)
+  const attributes = parseHlsAttributeListWithVariables(getRawTagValue(line), variableState)
   const uri = String(attributes.URI || '').trim()
   if (!uri) return null
   const url = resolveHlsUrl(uri, baseUrl)
@@ -385,7 +371,7 @@ function createHlsVariant(
   baseUrl: string,
   variableState: HlsVariableState,
 ): CatCatchHlsVariant | null {
-  const attributes = parseHlsAttributeListWithVariables(getTagValue(line), variableState)
+  const attributes = parseHlsAttributeListWithVariables(getRawTagValue(line), variableState)
   const substitutedUri = uri === undefined
     ? attributes.URI
     : substituteHlsVariables(uri, variableState)
@@ -481,7 +467,7 @@ function createHlsRendition(
   baseUrl: string,
   variableState: HlsVariableState,
 ): CatCatchHlsRendition | null {
-  const attributes = parseHlsAttributeListWithVariables(getTagValue(line), variableState)
+  const attributes = parseHlsAttributeListWithVariables(getRawTagValue(line), variableState)
   const type = attributes.TYPE
   if (type !== 'AUDIO' && type !== 'SUBTITLES') return null
   const uri = attributes.URI
@@ -502,7 +488,7 @@ function createHlsRendition(
 }
 
 function parseHlsVariableDefinition(line: string, state: HlsVariableState) {
-  const attributes = parseHlsAttributeListWithVariables(getTagValue(line), state)
+  const attributes = parseHlsAttributeListWithVariables(getRawTagValue(line), state)
   if ('IMPORT' in attributes) {
     const variableName = attributes.IMPORT
     if (state.parentVariableList && variableName in state.parentVariableList) {
@@ -770,7 +756,7 @@ export function parseHlsManifest(input: {
       // Cat Catch leaves emeEnabled=false and never consumes sessionKeys in its
       // download handlers. Parse attributes for ordered variable errors only;
       // SESSION-KEY must not enter the fragment key state.
-      parseHlsAttributeListWithVariables(getTagValue(line), variableState)
+      parseHlsAttributeListWithVariables(getRawTagValue(line), variableState)
       continue
     }
     // Pinned hls.js requires a colon immediately after valued tag names. Its
@@ -824,7 +810,7 @@ export function parseHlsManifest(input: {
       if (skippedSegmentCount !== 0) {
         assignMultipleMediaPlaylistTagError(variableState, 'SKIP', line)
       }
-      const attributes = parseHlsAttributeListWithVariables(getTagValue(line), variableState)
+      const attributes = parseHlsAttributeListWithVariables(getRawTagValue(line), variableState)
       const parsedSkippedSegmentCount = parseHlsDecimalInteger(attributes['SKIPPED-SEGMENTS'])
       if (parsedSkippedSegmentCount !== undefined) {
         skippedSegmentCount += parsedSkippedSegmentCount
@@ -915,7 +901,7 @@ export function parseHlsManifest(input: {
       if (partTarget) {
         assignMultipleMediaPlaylistTagError(variableState, 'PART-INF', line)
       }
-      const attributes = parseHlsAttributeList(getTagValue(line))
+      const attributes = parseHlsAttributeList(getRawTagValue(line))
       partTarget = Number.parseFloat(attributes['PART-TARGET'] || '')
       continue
     }

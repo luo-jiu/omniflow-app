@@ -1165,6 +1165,20 @@
 - legacy cleanup: `node.hls.plan-task` 继续标记 `remove-after-cutover`，但对应函数已缩为 authority/save/session/IPC adapter；local/live/renderer façade sentinel 不变。
 - validation: executor/controller 首轮专项 `5 files / 22 tests`、完整 capability HLS 集合 `19 files / 119 tests`、TypeScript、全仓 ESLint、固定上游 validator、同步测试 `16/16`、metadata `7 units / 32 capabilities / 206 anchors / 106 cleanup entries / 157 planned IDs / 112 active refs` 和 scoped diff check 通过。排除由 Node runner 单独执行的同步测试文件后，全仓 Vitest 为 `189 files / 1253 passed / 3 skipped`。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
 
+## 2026-08-28: same target (HLS attribute value whitespace boundary)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本步继续补固定 hls.js AttrList 的下载相关词法语义。
+- reviewedThrough / portedThrough: 均保持 `null`；hls-engine 仍未完成其余 parser 差分和原子 cleanup。
+- change groups: `behavioral-correction`（key method/clear 继承）和 `selection-parity`（rendition type/boolean）。
+- affected capability IDs: `hls.parser-planner` 保持 `ported-unverified`；新增 1 个 fixed upstream anchor、1 个 planned ID 和 1 个 active ref。
+- fixtures/tests: `hls-attribute-value-whitespace-boundary` 同时锁定 media 的无效 `AES-128 `、有效 AES-128 与无效 `NONE ` 继承，以及 master 的 `DEFAULT=YES `、`AUTOSELECT= YES` 和 `TYPE=AUDIO ` 选择边界；manifest 与 download plan 都断言有效 key/IV。
+- accepted difference: 无。pure parser 直接使用固定 `AttrList.parseAttrList` 正则并把 raw tag payload 交给它，只 trim attribute 名称，保留未加引号 value 的首尾空格。
+- excluded changes and reasons: 本步不迁移 `PROGRAM-DATE-TIME/DATERANGE/GAP/BITRATE/START` 等未被 Cat Catch `parseTs` 消费的展示或播放字段，也不修改 DTO、IPC、authority、downloader 或 UI。
+- unresolved gaps: HLS 其余真正影响 URL/sequence/cc/key/MAP/range/duration/可执行性的 parser 差分、AES-256 系列真实输出、真实网站手工验证和 hls-engine cleanup 仍待完成。
+- runtime changes: 删除本地宽松 attribute scanner，改用固定上游 AttrList regex；所有 AttrList 调用改收原始 tag payload。空格污染的 key method 不再错误替换或清除当前 key，非精确 rendition flag/type 不再被本地 trim 提升。
+- legacy cleanup: 无；旧 HLS compatibility façade 和 legacy-named controller adapter 继续保留到 hls-engine 原子 cutover。
+- validation: 固定 vendor executable oracle 输出第一片 clear、后两片沿用 `active.key` 且 implicit IV 分别为 11/12；master 只输出 `Spaced flags` 一条 AUDIO rendition，其 DEFAULT/AUTOSELECT 为 false、FORCED 为 true。新增测试在修改前稳定收到 2 条 rendition 且 flag 被提升为 true，实现后 parser `40/40`、完整 HLS 集合 `19 files / 120 tests`、TypeScript、全仓 ESLint、fixture/capability JSON、固定上游 validator、同步测试 `16/16`、metadata `7 units / 32 capabilities / 207 anchors / 106 cleanup entries / 158 planned IDs / 113 active refs` 和 scoped diff check 通过。排除 Node runner 文件后，全仓 Vitest 为 `189 files / 1255 passed / 3 skipped`。完整 build 不运行以避免覆盖其他 Agent 正在修改的 `dist-electron/**`，暂无真实网站手工场景。
+
 ## Template
 
 ```markdown

@@ -64,6 +64,7 @@ OmniFlow 不运行 Cat Catch 浏览器扩展，而是把与产品目标相关的
 - 固定 fast parser 的行首 token 优先级已迁入：标签标记前紧邻 ASCII 空格时 URI alternative 先命中，该行会成为零时长 fragment；纯 tab 缩进则跳到 tag alternative。空格前缀的 `EXTM3U` 继续按缺失格式头拒绝，不能被预处理 trim 成合法清单。
 - master `STREAM-INF` 的 pending regex 顺序已迁入：URI 前的重复 variant/DEFINE 等注释行不会覆盖首声明或创建变量，而独立 media scan 会在首轮变量收集后再投影 AUDIO/SUBTITLES rendition，因此 MEDIA 也可引用出现在其后的 DEFINE。
 - master rendition 的 `DEFAULT/AUTOSELECT/FORCED` 保持固定 AttrList 大小写敏感布尔语义：只有精确 `YES` 为真，小写或混合大小写不能被本地宽松归一化成默认/自动/强制音轨。
+- 固定 AttrList 只 trim attribute 名称并保留未加引号 value 的首尾空格；KEY method/clear、rendition type 与 boolean 不能在进入 parser 前被通用 trim 归一化，否则会改变 key 继承和轨道选择。
 - master variant 的 typed BANDWIDTH/AVERAGE-BANDWIDTH/FRAME-RATE 投影使用固定 AttrList 的十进制 `parseInt` / `parseFloat` 语义，保留合法数值前缀并避免 JavaScript `Number` 把 `0x` 输入解释成非上游的十六进制码率；原始 attributes 仍原样保留。
 - Cat Catch `tsAddArg` 已作为 post-parse 纯计划能力迁入：关闭时保留原 fragment query，开启且为空时移除 query，非空时替换 query；只修改 media fragment，不修改 key/MAP。工具区草稿是唯一 renderer owner；普通静态任务强制走本地 plan，选择独立音轨时由 main 校验 captured master 与两个 child authority 后生成两条隔离的本地 plan 再合并，直播轮询经显式 IPC 把同一设置交给 main recorder。
 - HLS DTO、parser 与 plan projection 已分别收敛到 shared contract、`cat-catch-port/hls/parser.ts` 与 `plan.ts`；main、preload 和 renderer 生产调用方均已脱离 renderer model。旧 model 只保留同名 re-export 与 parity test cleanup sentinel，在 hls-engine 原子 cutover 时随两个 legacy symbol 一起删除。

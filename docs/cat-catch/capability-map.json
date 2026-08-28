@@ -735,6 +735,7 @@
           "path": "lib/hls.min.js",
           "anchors": [
             "1.6.16",
+            "(.+?)=(\".*?\"|.*?)(?:,|$)",
             "#EXT-X-STREAM-INF:([^\\r\\n]*)(?:[\\r\\n](?:#[^\\r\\n]*)?)*([^\\r\\n]+)",
             "#EXTINF:\\s*(\\d*(?:\\.\\d+)?)(?:,(.*)\\s+)?",
             "(?!#) *(\\S[^\\r\\n]*)",
@@ -804,6 +805,7 @@
         "hls.master-no-levels-rejection",
         "hls.master-rendition-projection",
         "hls.master-rendition-boolean-boundary",
+        "hls.attribute-value-whitespace-boundary",
         "hls.master-rendition-authority",
         "hls.master-variant-group-merge",
         "hls.master-pathway-uri-boundary",
@@ -847,6 +849,7 @@
         "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.master-no-levels-rejection",
         "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.master-rendition-projection",
         "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.master-rendition-boolean-boundary",
+        "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.attribute-value-whitespace-boundary",
         "electron/service/embedded-browser/integrations/hls-manifest-authority.test.ts#hls.master-rendition-authority",
         "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.master-variant-group-merge",
         "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.master-pathway-uri-boundary",

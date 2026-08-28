@@ -1,0 +1,13 @@
+#EXTM3U
+#EXT-X-TARGETDURATION:4
+#EXT-X-MEDIA-SEQUENCE:10
+#EXT-X-KEY:METHOD=AES-128 ,URI="ignored-trailing.key"
+#EXTINF:4,
+clear.ts
+#EXT-X-KEY:METHOD=AES-128,URI="active.key"
+#EXTINF:4,
+encrypted.ts
+#EXT-X-KEY:METHOD=NONE ,URI="ignored-clear.key"
+#EXTINF:4,
+inherited.ts
+#EXT-X-ENDLIST

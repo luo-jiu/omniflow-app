@@ -462,6 +462,34 @@ const masterRenditionBooleanExpected = JSON.parse(readFileSync(`${masterRenditio
   }>
 }
 
+const attributeWhitespaceFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-attribute-value-whitespace-boundary', import.meta.url))
+const attributeWhitespaceFixture = JSON.parse(readFileSync(`${attributeWhitespaceFixtureRoot}/fixture.json`, 'utf8')) as {
+  expected: string
+  inputs: {
+    master: string
+    media: string
+  }
+}
+const attributeWhitespaceExpected = JSON.parse(readFileSync(`${attributeWhitespaceFixtureRoot}/${attributeWhitespaceFixture.expected}`, 'utf8')) as {
+  baseUrlRoot: string
+  renditions: Array<{
+    autoselect: boolean
+    default: boolean
+    forced: boolean
+    name: string
+    type: string
+    url: string
+  }>
+  segments: Array<{
+    encrypted: boolean
+    iv: string | null
+    keyUrl: string | null
+    method: string | null
+    sequence: number
+    url: string
+  }>
+}
+
 const masterVariantGroupFixtureRoot = fileURLToPath(new URL('../../../../../tools/cat-catch-lab/fixtures/hls-master-variant-group-merge', import.meta.url))
 const masterVariantGroupFixture = JSON.parse(readFileSync(`${masterVariantGroupFixtureRoot}/fixture.json`, 'utf8')) as {
   expected: string
@@ -851,6 +879,59 @@ describe('Cat Catch HLS parser', () => {
       name: rendition.name,
       type: rendition.type,
     }))).toEqual(masterRenditionBooleanExpected.renditions)
+  })
+
+  it('hls.attribute-value-whitespace-boundary', () => {
+    const master = parseHlsManifest({
+      baseUrl: `${attributeWhitespaceExpected.baseUrlRoot}master.m3u8`,
+      text: readFileSync(
+        `${attributeWhitespaceFixtureRoot}/${attributeWhitespaceFixture.inputs.master}`,
+        'utf8',
+      ),
+    })
+    expect(master.renditions.map(rendition => ({
+      autoselect: rendition.autoselect,
+      default: rendition.default,
+      forced: rendition.forced,
+      name: rendition.name,
+      type: rendition.type,
+      url: rendition.url,
+    }))).toEqual(attributeWhitespaceExpected.renditions)
+
+    const media = parseHlsManifest({
+      baseUrl: `${attributeWhitespaceExpected.baseUrlRoot}media.m3u8`,
+      text: readFileSync(
+        `${attributeWhitespaceFixtureRoot}/${attributeWhitespaceFixture.inputs.media}`,
+        'utf8',
+      ),
+    })
+    const projectSegments = (segments: typeof media.segments) => segments.map(segment => ({
+      encrypted: segment.encrypted,
+      iv: segment.key?.iv || null,
+      keyUrl: segment.key?.url || null,
+      method: segment.key?.method || null,
+      sequence: segment.sequence,
+      url: segment.url,
+    }))
+    expect(projectSegments(media.segments)).toEqual(attributeWhitespaceExpected.segments)
+
+    const plan = createEmbeddedBrowserHlsDownloadPlan({
+      manifest: media,
+      manifestUrl: `${attributeWhitespaceExpected.baseUrlRoot}media.m3u8`,
+    })
+    expect(plan.fragments.map(fragment => ({
+      iv: fragment.key?.iv || null,
+      keyUrl: fragment.key?.url || null,
+      method: fragment.key?.method || null,
+      sequence: fragment.sequence,
+      url: fragment.url,
+    }))).toEqual(attributeWhitespaceExpected.segments.map(segment => ({
+      iv: segment.iv,
+      keyUrl: segment.keyUrl,
+      method: segment.method,
+      sequence: segment.sequence,
+      url: segment.url,
+    })))
   })
 
   it('hls.master-variant-group-merge', () => {

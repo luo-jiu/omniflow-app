@@ -1,0 +1,24 @@
+{
+  "fixtureId": "hls-attribute-value-whitespace-boundary",
+  "capabilityIds": [
+    "hls.parser-planner"
+  ],
+  "upstreamCommit": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
+  "status": "active",
+  "oracle": "upstream-executable",
+  "sourceRefs": [
+    "lib/hls.min.js#AttrList.parseAttrList",
+    "lib/hls.min.js#LevelKey.isSupported",
+    "lib/hls.min.js#AttrList.bool",
+    "js/m3u8.js#parseTs(data)",
+    "js/m3u8.js#Hls.Events.MANIFEST_PARSED audioTracks"
+  ],
+  "inputs": {
+    "master": "master.m3u8",
+    "media": "media.m3u8"
+  },
+  "expected": "expected.json",
+  "testRefs": [
+    "electron/service/embedded-browser/cat-catch-port/hls/parser.test.ts#hls.attribute-value-whitespace-boundary"
+  ]
+}
