@@ -1361,6 +1361,20 @@
 - legacy cleanup: 无；旧 disabled deep block 继续作为 characterization，待 target composition 完整后原子删除。
 - validation: discovery + runtime 专项 `2 files / 13 passed`、应用 TypeScript `--noEmit`、scoped/full ESLint、同步测试 `16/16`、metadata/固定上游 validator、全仓 Vitest `195 files / 1363 passed / 3 skipped` 和 scoped diff check 已通过。完整 build 继续避免覆盖其他 Agent 的 `dist-electron/**`，暂无真实网站手工场景。
 
+## 2026-08-28: same target (deep inline and Vimeo discovery)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本步补齐固定 `search.js` 的 DOM inline scan 与 Vimeo translator anchor。
+- reviewedThrough / portedThrough: 均保持 `null`；`deep.runtime-hook-bundle`、`deep.manifest-key-discovery` 保持 `porting`，整个 deep unit 继续开放。
+- change groups: `behavioral-port`、`platform-adapter-boundary` 与 `documentation-correction`；只加入纯 page-discovery helper。
+- affected capability IDs: `deep.runtime-hook-bundle`、`deep.manifest-key-discovery`；metadata 为 `7 units / 32 capabilities / 210 anchors / 106 cleanup entries / 179 planned IDs / 142 active refs`，状态仍为 `11 verified / 4 porting / 1 ported-unverified / 16 pending`。
+- fixtures/tests: `deep.inline-script-url-scan` 锁定上游仅 m3u8/mp4/flv、协议补全、relative-as-host 和重复候选；`deep.vimeo-playlist-translation` 锁定 playlist gate、base URL 归一化、init/segment、video/audio master 行与 header-only empty master。
+- accepted differences: 上游直接在 page 创建 child/master Blob URL；target helper 通过 `materializeManifest(text)` callback 物化 child URL并返回 master 文本，后续 adapter 再生成 main 可治理的 opaque resource。
+- excluded changes and reasons: 本步不接 DOMContentLoaded 调度、page Blob/resource store、discovery-to-relay composition、production flag、MSE/toolkit/UI。
+- unresolved gaps: target page adapter、generated page/Worker composition、production-equivalent test、unit cutover 和旧 deep 分支删除仍未完成。
+- runtime changes: 无黑盒行为变化；新增 helper 没有 production 调用方。
+- legacy cleanup: 无；旧 inline/Vimeo 代码继续作为 characterization，待 target adapter 接入时原子删除。
+- validation: page-discovery 专项 `1 file / 2 passed`、完整 deep target `3 files / 15 passed`、应用 TypeScript `--noEmit`、scoped/full ESLint、同步测试 `16/16`、metadata/固定上游 validator、全仓 Vitest `196 files / 1366 passed / 3 skipped` 和 scoped diff check 已通过。完整 build 继续避免覆盖其他 Agent 的 `dist-electron/**`，暂无真实网站手工场景。
+
 ## Template
 
 ```markdown

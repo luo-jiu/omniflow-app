@@ -39,6 +39,7 @@ downloader/
 - `network/request-url-helpers.ts`：页面 URL pattern、黑白名单反转与 special-page 规则。
 - `deep-search/discovery.ts`：固定 `search.js` 的 JSON/inline manifest/key 发现与 base URL 回放语义。
 - `deep-search/runtime.ts`：固定 `search.js` 的 Worker/JSON/XHR/fetch/TextDecoder 与 key/string experience hook 安装语义；当前仅作为可执行 target port，待完整 deep unit 原子接入。
+- `deep-search/page-discovery.ts`：固定 inline script URL 扫描与 Vimeo `playlist.json` 转 HLS 语义，Blob URL 交给平台 callback 物化。
 - `hls/parser.ts`：固定 hls.js/Cat Catch 的 manifest 下载相关解析语义。
 - `hls/plan.ts`：把 parser 输出投影为平台 adapter 消费的唯一 HLS 下载计划。
 - `hls/segment-query.ts`：固定 `tsAddArg` 的默认值提取和 fragment-only query 改写。

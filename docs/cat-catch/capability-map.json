@@ -470,7 +470,8 @@
             "TextDecoder.prototype.decode = function (v, options) {",
             "XMLHttpRequest.prototype.open = function (method) {",
             "fetch = async function (input, init) {",
-            "self.Worker = function (scriptURL, options) {"
+            "self.Worker = function (scriptURL, options) {",
+            "document.addEventListener(\"DOMContentLoaded\", async function () {"
           ]
         },
         {
@@ -507,7 +508,8 @@
         "electron/service/embeddedBrowserResourceProbeRuntimeHooks.ts#embeddedBrowserResourceProbeRuntimeHooksBody"
       ],
       "targetRefs": [
-        "electron/service/embedded-browser/cat-catch-port/deep-search/runtime.ts#installDeepSearchRuntime"
+        "electron/service/embedded-browser/cat-catch-port/deep-search/runtime.ts#installDeepSearchRuntime",
+        "electron/service/embedded-browser/cat-catch-port/deep-search/page-discovery.ts#extractInlineScriptMediaCandidates"
       ],
       "relationToUpstream": "exact",
       "syncState": "porting",
@@ -523,6 +525,7 @@
         "deep.key-dataview-typedarray",
         "deep.key-string-surfaces",
         "deep.manifest-string-surfaces",
+        "deep.inline-script-url-scan",
         "deep.json-depth-width-cycle"
       ],
       "testRefs": [
@@ -536,6 +539,7 @@
         "electron/service/embedded-browser/cat-catch-port/deep-search/runtime.test.ts#deep.key-dataview-typedarray",
         "electron/service/embedded-browser/cat-catch-port/deep-search/runtime.test.ts#deep.key-string-surfaces",
         "electron/service/embedded-browser/cat-catch-port/deep-search/runtime.test.ts#deep.manifest-string-surfaces",
+        "electron/service/embedded-browser/cat-catch-port/deep-search/page-discovery.test.ts#deep.inline-script-url-scan",
         "electron/service/embedded-browser/cat-catch-port/deep-search/discovery.test.ts#deep.json-depth-width-cycle"
       ],
       "acceptedDifferences": [
@@ -558,7 +562,8 @@
           "path": "catch-script/search.js",
           "anchors": [
             "async function findMedia(data, depth = 0) {",
-            "function toUrl(text, ext = \"m3u8\") {"
+            "function toUrl(text, ext = \"m3u8\") {",
+            "async function vimeo(originalUrl, json) {"
           ]
         }
       ],
@@ -568,23 +573,26 @@
         "electron/service/embeddedBrowserResourceProbeRuntimeCore.ts#probeResources"
       ],
       "targetRefs": [
-        "electron/service/embedded-browser/cat-catch-port/deep-search/discovery.ts#discoverResources"
+        "electron/service/embedded-browser/cat-catch-port/deep-search/discovery.ts#discoverResources",
+        "electron/service/embedded-browser/cat-catch-port/deep-search/page-discovery.ts#buildVimeoHlsManifest"
       ],
       "relationToUpstream": "exact",
       "syncState": "porting",
       "syncedThrough": null,
       "plannedTestIds": [
         "deep.inline-manifest-key",
-        "deep.base-url-blob-signature"
+        "deep.base-url-blob-signature",
+        "deep.vimeo-playlist-translation"
       ],
       "testRefs": [
         "electron/service/embedded-browser/cat-catch-port/deep-search/discovery.test.ts#deep.inline-manifest-key",
-        "electron/service/embedded-browser/cat-catch-port/deep-search/discovery.test.ts#deep.base-url-blob-signature"
+        "electron/service/embedded-browser/cat-catch-port/deep-search/discovery.test.ts#deep.base-url-blob-signature",
+        "electron/service/embedded-browser/cat-catch-port/deep-search/page-discovery.test.ts#deep.vimeo-playlist-translation"
       ],
       "acceptedDifferences": [
         "The pure port returns inline manifest bytes instead of creating a page-owned Blob URL. The later page adapter must create the opaque resource from those exact bytes; the executable upstream fixture compares Blob contents rather than nondeterministic Blob URL identities."
       ],
-      "notes": "The fixed search.js findMedia/toUrl path is now covered by an upstream-executable fixture. The pure port preserves protocol-relative URL handling, the seven-extension allowlist, loose 16-number key coercion, all-zero/ftyp suppression, data-URL manifests, inline MPD, current base expansion and deferred replay when a later resource reveals a new base. It is not connected to production until the runtime hook and secure relay cutover are complete."
+      "notes": "The fixed search.js findMedia/toUrl path is covered by an upstream-executable fixture. The pure port preserves protocol-relative URL handling, the seven-extension allowlist, loose 16-number key coercion, all-zero/ftyp suppression, data-URL manifests, inline MPD, current base expansion and deferred replay when a later resource reveals a new base. The Vimeo helper now preserves playlist URL gating, base path normalization, raw stream metadata interpolation, per-track media playlists and even the upstream header-only empty master. It is not connected to production until the runtime hook, page adapter and secure relay cutover are complete."
     },
     {
       "id": "deep.secure-page-relay",
