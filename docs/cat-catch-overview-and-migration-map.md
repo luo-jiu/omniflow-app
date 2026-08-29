@@ -1,6 +1,6 @@
 # Cat Catch 总览与迁移地图
 
-更新时间：2026-08-28
+更新时间：2026-08-29
 
 适用范围：帮助不熟悉 Cat Catch、媒体格式和 OmniFlow 内置浏览器捕捉链路的开发者建立全局视角。
 
@@ -140,7 +140,7 @@ unit 是生产切换与删除旧实现的最小边界。可以在 unit 内逐项
 
 ## 7. 当前状态怎么判断
 
-当前固定目标为 Cat Catch `2cb981d7c2f4614732edccc167c4b5793d1cb138`。初始映射包含 7 个 unit 和 32 项 capability，175 个唯一计划测试引用已落成真实 pure behavior/contract、fake/real Electron integration 或 loopback redirect test。`network-capture`、`deep-search-runtime` 与 `hls-engine` 已全部验证并完成原子 cutover；Deep 的 production document factory 现在直接组合 stateful discovery、experience hooks、inline/Vimeo page helper、page-origin toolkit state、generated-resource owner 和 tokenized main ingress。旧 disabled hooks、manifest heuristic、Worker bootstrap、toolkit state、`probeResources` 及混合 host 已删除；11 个平台适配保留，17 个 `remove-after-cutover` 条目作为删除门禁继续由 validator 检查。MSE 已形成 page/spool 唯一 owner 但固定上游 parity 仍开放；DASH parser、`DashTaskExecutor` 和 output adapter 已建立纯处理基座并接入现有 MPD 分析与生产 dispatch，Period/AdaptationSet/Representation SegmentTemplate、SegmentList、SegmentBase 继承、SegmentBase SIDX expansion、SegmentList timeline、range validation 和静态最后一片 duration 修正已加入，复杂嵌套 SIDX、多 Period 合并、动态 availability 和真实媒体输出仍开放。其余 unit 仍开放；data/blob、未捕获派生 URL 等明确平台 fallback 不代表第二套已切换 owner 仍在运行。
+当前固定目标为 Cat Catch `2cb981d7c2f4614732edccc167c4b5793d1cb138`。初始映射包含 7 个 unit 和 32 项 capability，176 个唯一计划测试引用已落成真实 pure behavior/contract、fake/real Electron integration 或 loopback redirect test。`network-capture`、`deep-search-runtime` 与 `hls-engine` 已全部验证并完成原子 cutover；Deep 的 production document factory 现在直接组合 stateful discovery、experience hooks、inline/Vimeo page helper、page-origin toolkit state、generated-resource owner 和 tokenized main ingress。旧 disabled hooks、manifest heuristic、Worker bootstrap、toolkit state、`probeResources` 及混合 host 已删除；11 个平台适配保留，17 个 `remove-after-cutover` 条目作为删除门禁继续由 validator 检查。MSE 已形成 page/spool 唯一 owner 但固定上游 parity 仍开放；DASH parser、`DashTaskExecutor` 和 output adapter 已建立纯处理基座并接入现有 MPD 分析与生产 dispatch，Period/AdaptationSet/Representation SegmentTemplate、SegmentList、SegmentBase 继承、SegmentBase SIDX expansion、SegmentList timeline、静态最后一片 duration 修正和同身份静态多 Period 串接已加入；复杂嵌套 SIDX、动态 availability、不完整或初始化冲突的多 Period 集合和真实媒体输出仍开放。其余 unit 仍开放；data/blob、未捕获派生 URL 等明确平台 fallback 不代表第二套已切换 owner 仍在运行。
 
 旧代码中存在网络捕捉、MSE、HLS、DASH、下载、ffmpeg 和资料库导入入口，只能说明有 characterization 输入，不能据此宣称已经迁移。完成一项能力至少需要：
 

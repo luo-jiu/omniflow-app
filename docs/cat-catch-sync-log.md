@@ -1668,6 +1668,20 @@
 - legacy cleanup: 无新增删除；现有 target task/output adapter 继续作为唯一 production owner。
 - validation: DASH parser/task/output/renderer `5 files / 18 passed`、TypeScript、scoped ESLint、metadata validator、sync tests `16/16` 和 scoped diff check 通过；完整 build 与真实页面验证不执行。
 
+## 2026-08-29: same target (DASH constrained multi-Period merge)
+
+- observedHead / migrationTarget: 均为 `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本步补固定 `mpd-parser@1.4.0` 对同身份静态多 Period 的串接语义。
+- reviewedThrough / portedThrough: 均保持 `null`；`dash.parser-planner` 与 `dash.timeline-download-merge` 继续 `porting`，`dash-engine` unit 仍开放。
+- change groups: `multi-period-merge`、`initialization-compatibility-boundary` 与 `fixture-contract`。
+- affected capability IDs: `dash.parser-planner`；metadata 为 `7 units / 32 capabilities / 210 anchors / 99 cleanup entries / 197 planned IDs / 176 active refs`。
+- fixtures/tests: `dash.multi-period-merge` 覆盖相同 content type/id/language/BaseURL、可复用 init segment 的两个静态 Period，验证分片串接、URL 顺序和 index 重排；已有多身份 Period fixture 继续验证 `multi-period-not-expanded` 拒绝。DASH parser 定向为 `1 file / 10 passed`。
+- accepted differences: 纯 parser 只在所有 Period 都提供同一轨道身份且 initialization range/URL 兼容时合并；跨 BaseURL、缺失 Period 轨道、同一 Period 重复身份、SegmentBase 或初始化冲突继续明确拒绝，不模拟多个 init segment 的播放器切换语义。
+- excluded changes and reasons: 未修改 dynamic availability、复杂嵌套 SIDX、SegmentBase 递归、renderer UI、HLS、MSE、transfer 或 output；没有真实 MPD/ffprobe 场景，未宣称 DASH unit 已关闭。
+- unresolved gaps: dynamic `r=-1` availability、复杂嵌套 SIDX、多轨道跨 Period 的播放器级 init/discontinuity 语义、真实 MPD/ffprobe 输出和 unit 关闭条件仍待完成。
+- runtime changes: `parseDashManifest` 先按 Period 解析，再以 content type/id/language/首 BaseURL 形成轨道身份；兼容组的 segments 以 manifest 顺序串接并重排 `index`，冲突路径保留 `multi-period-not-expanded` 或 `multi-period-initialization-conflict`。
+- legacy cleanup: 无新增删除；现有 target parser/task/output adapter 继续作为唯一 production owner。
+- validation: DASH parser 定向 `10/10`，全量 Vitest（排除 Node 专用同步 runner）`212 files / 1409 passed / 3 skipped`，全量 `npm run lint`、应用 TypeScript `--noEmit`、metadata validator 和同步 runner `16/16` 均通过；完整 build 与真实页面验证未执行，build 仍避免触碰其他 agent 的 dirty `dist-electron/**`。
+
 ## Template
 
 ```markdown

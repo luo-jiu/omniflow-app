@@ -359,6 +359,75 @@ describe('DASH parser', () => {
     expect(multiPeriodManifest.unsupportedReasons).toContain('multi-period-not-expanded')
   })
 
+  it('dash.multi-period-merge', () => {
+    const root = node('MPD', { mediaPresentationDuration: 'PT4S' }, [
+      node('Period', { duration: 'PT2S' }, [node('AdaptationSet', { contentType: 'video' }, [
+        node('Representation', { id: 'main-video' }, [
+          node('SegmentTemplate', {
+            initialization: 'init.mp4',
+            media: 'segment-$Time$.m4s',
+            timescale: '1',
+          }, [node('SegmentTimeline', {}, [node('S', { d: '1', r: '1', t: '0' })])]),
+        ]),
+      ])]),
+      node('Period', { duration: 'PT2S' }, [node('AdaptationSet', { contentType: 'video' }, [
+        node('Representation', { id: 'main-video' }, [
+          node('SegmentTemplate', {
+            initialization: 'init.mp4',
+            media: 'segment-$Time$.m4s',
+            timescale: '1',
+          }, [node('SegmentTimeline', {}, [node('S', { d: '1', r: '1', t: '2' })])]),
+        ]),
+      ])]),
+    ])
+    const manifest = parseDashManifest({
+      baseUrl: 'https://cdn.example/media/manifest.mpd',
+      root,
+      text: '',
+    })
+    expect(manifest.unsupportedReasons).not.toContain('multi-period-not-expanded')
+    expect(manifest.representations).toHaveLength(1)
+    expect(manifest.representations[0]).toMatchObject({
+      id: 'main-video',
+      initializationUrl: 'https://cdn.example/media/init.mp4',
+      segmentCount: 4,
+    })
+    expect(manifest.representations[0].segments.map(segment => segment.url)).toEqual([
+      'https://cdn.example/media/segment-0.m4s',
+      'https://cdn.example/media/segment-1.m4s',
+      'https://cdn.example/media/segment-2.m4s',
+      'https://cdn.example/media/segment-3.m4s',
+    ])
+    expect(manifest.representations[0].segments.map(segment => segment.index)).toEqual([0, 1, 2, 3])
+
+    const conflictingInitRoot = node('MPD', {}, [
+      node('Period', { duration: 'PT1S' }, [node('AdaptationSet', { contentType: 'video' }, [
+        node('Representation', { id: 'conflicting-init' }, [
+          node('SegmentTemplate', { initialization: 'init-a.mp4', duration: '1', media: 'a-$Number$.m4s' }),
+        ]),
+      ])]),
+      node('Period', { duration: 'PT1S' }, [node('AdaptationSet', { contentType: 'video' }, [
+        node('Representation', { id: 'conflicting-init' }, [
+          node('SegmentTemplate', { initialization: 'init-b.mp4', duration: '1', media: 'b-$Number$.m4s' }),
+        ]),
+      ])]),
+    ])
+    const conflictingInitManifest = parseDashManifest({
+      baseUrl: 'https://cdn.example/media/manifest.mpd',
+      root: conflictingInitRoot,
+      text: '',
+    })
+    expect(conflictingInitManifest.unsupportedReasons).toEqual(expect.arrayContaining([
+      'multi-period-not-expanded',
+      'multi-period-initialization-conflict',
+    ]))
+    expect(conflictingInitManifest.representations).toHaveLength(2)
+    expect(conflictingInitManifest.representations.map(item => item.initializationUrl)).toEqual([
+      'https://cdn.example/media/init-a.mp4',
+      'https://cdn.example/media/init-b.mp4',
+    ])
+  })
+
   it('dash.segment-list-boundary', () => {
     const root = node('MPD', {}, [
       node('Period', {}, [node('AdaptationSet', { contentType: 'video' }, [

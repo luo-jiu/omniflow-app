@@ -709,6 +709,105 @@ function parseRepresentation(input: {
   } satisfies DashRepresentation
 }
 
+type PeriodRepresentation = {
+  periodIndex: number
+  representation: DashRepresentation
+}
+
+function sameByteRange(left?: DashByteRange, right?: DashByteRange) {
+  if (!left || !right) return !left && !right
+  return left.offset === right.offset && left.length === right.length
+}
+
+function sameInitialization(left: DashRepresentation, right: DashRepresentation) {
+  return left.initializationUrl === right.initializationUrl
+    && sameByteRange(left.initializationRange, right.initializationRange)
+}
+
+/**
+ * Cat Catch's MPD parser groups the same representation identity across
+ * Periods before exposing a playable playlist. Keep that behavior only when
+ * the whole period set is present and the init segment can be reused; an
+ * incomplete or incompatible set remains an explicit plan rejection.
+ */
+function mergePeriodRepresentations(
+  items: PeriodRepresentation[],
+  periodCount: number,
+  reasons: string[],
+) {
+  const groups = new Map<string, {
+    periodIndexes: Set<number>
+    representation: DashRepresentation
+  }>()
+  const unmergedRepresentations: DashRepresentation[] = []
+  let unmergeable = false
+
+  for (const item of items) {
+    const representation = item.representation
+    const key = [
+      representation.contentType,
+      representation.id,
+      representation.language || '',
+      representation.baseUrls[0] || '',
+    ].join('|')
+    const existing = groups.get(key)
+    if (!existing) {
+      groups.set(key, {
+        periodIndexes: new Set([item.periodIndex]),
+        representation: { ...representation, segments: [...representation.segments] },
+      })
+      continue
+    }
+
+    if (existing.periodIndexes.has(item.periodIndex)) {
+      unmergeable = true
+      addReason(existing.representation.unsupportedReasons, 'multi-period-not-expanded')
+      addReason(representation.unsupportedReasons, 'multi-period-not-expanded')
+      unmergedRepresentations.push(representation)
+      continue
+    }
+    existing.periodIndexes.add(item.periodIndex)
+    if (existing.representation.segmentBase || representation.segmentBase) {
+      unmergeable = true
+      addReason(existing.representation.unsupportedReasons, 'multi-period-not-expanded')
+      addReason(representation.unsupportedReasons, 'multi-period-not-expanded')
+      unmergedRepresentations.push(representation)
+      continue
+    }
+    if (!sameInitialization(existing.representation, representation)) {
+      addReason(existing.representation.unsupportedReasons, 'multi-period-initialization-conflict')
+      addReason(representation.unsupportedReasons, 'multi-period-initialization-conflict')
+      unmergeable = true
+      unmergedRepresentations.push(representation)
+      continue
+    }
+    const indexOffset = existing.representation.segments.length
+    existing.representation.segments.push(...representation.segments.map((segment, index) => ({
+      ...segment,
+      index: indexOffset + index,
+    })))
+    existing.representation.segmentCount = existing.representation.segments.length
+    representation.unsupportedReasons.forEach(reason => {
+      addReason(existing.representation.unsupportedReasons, reason)
+    })
+  }
+
+  if (periodCount > 1) {
+    for (const group of groups.values()) {
+      if (group.periodIndexes.size !== periodCount) {
+        unmergeable = true
+        break
+      }
+    }
+  }
+  if (unmergeable) addReason(reasons, 'multi-period-not-expanded')
+
+  return [
+    ...[...groups.values()].map(group => group.representation),
+    ...unmergedRepresentations,
+  ]
+}
+
 export function parseDashManifest(input: {
   baseUrl: string
   parseXml?: DashXmlParser
@@ -723,12 +822,9 @@ export function parseDashManifest(input: {
   const baseUrls = resolveBaseUrls([String(input.baseUrl || '')], root)
   const protections = collectContentProtections(root)
   const unsupportedReasons: string[] = []
-  const representations: DashRepresentation[] = []
+  const periodRepresentations: PeriodRepresentation[] = []
   const periods = children(root, 'Period')
   if (!periods.length) throw new Error('MPD manifest 没有 Period')
-  if (periods.length > 1) {
-    addReason(unsupportedReasons, 'multi-period-not-expanded')
-  }
 
   periods.forEach((period, periodIndex) => {
     const periodBaseUrls = resolveBaseUrls(baseUrls, period)
@@ -744,16 +840,24 @@ export function parseDashManifest(input: {
           adaptationSet,
           baseUrls: representationBaseUrls,
           durationSeconds: periodDurationSeconds,
-          index: representations.length + representationIndex + periodIndex,
+          index: periodRepresentations.length + representationIndex + periodIndex,
           periodSegmentBase,
           periodSegmentList,
           periodSegmentTemplate,
           representation,
         })
         parsed.unsupportedReasons.forEach(reason => addReason(unsupportedReasons, reason))
-        representations.push(parsed)
+        periodRepresentations.push({ periodIndex, representation: parsed })
       })
     })
+  })
+  const representations = mergePeriodRepresentations(
+    periodRepresentations,
+    periods.length,
+    unsupportedReasons,
+  )
+  representations.forEach(representation => {
+    representation.unsupportedReasons.forEach(reason => addReason(unsupportedReasons, reason))
   })
 
   return {
