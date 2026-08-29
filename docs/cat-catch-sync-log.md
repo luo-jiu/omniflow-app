@@ -1752,6 +1752,19 @@
 - legacy cleanup: 无新增删除；现有 target parser/task/output adapter 继续作为唯一 production owner。
 - validation: DASH parser `14/14`、TypeScript、全量 ESLint、metadata validator、全量 Vitest（排除 Node 专用同步 runner）`212 files / 1414 passed / 3 skipped` 和同步 runner `16/16` 均通过；完整 build 与真实页面验证未执行。
 
+## 2026-08-29: same target (DASH dynamic snapshot owner)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动。
+- reviewedThrough / portedThrough: 均保持 `null`；本切片只推进 DASH 动态任务的可验证纯逻辑，不宣称 unit 完成。
+- change groups: `behavioral`（按 representation/number/time/url/range 去重、只交付新分片、minimumUpdatePeriod 轮询窗口）与 `platform-adaptation`（注入式 snapshot loader、scheduler、AbortSignal、停止/丢弃生命周期）。
+- affected capability IDs: `dash.timeline-download-merge` 保持 `porting`。
+- fixtures/tests: `dash-live-task.test.ts#dash.dynamic-refresh-dedupe`、`#dash.dynamic-refresh-cancel`，覆盖首 snapshot、重叠刷新、增量回调、1.5–10 秒轮询夹逼和取消。
+- excluded changes and reasons: 未接入新的 IPC/preload；main 当前没有安全的 XML DOM parser，本轮不把 renderer DOM 或不受信任页面脚本塞进 task，也不宣称真实 MPD/live output parity。
+- unresolved gaps: 需要 main-owned captured-resource fetch + XML AST adapter，把真实 dynamic MPD 解析成 `DashTaskPlan`；随后才可把 delta 交给 `DashTaskExecutor`/统一 output owner，并补导航、tab close、ffmpeg/output cleanup integration。
+- runtime changes: `DashLiveTask` 新增 main-side lifecycle/refresh/dedupe owner；`DashTaskPlan` 透传 `minimumUpdatePeriodSeconds`；现有静态/有限 snapshot MPD dispatch 行为不变。
+- legacy cleanup: 无；DASH unit 仍未 cutover，旧实现不能删除。
+- validation: DASH 定向 Vitest 8/8、TypeScript、Cat Catch 相关 ESLint 通过；未运行完整 build，未做真实页面和真实 MPD/ffprobe 验证。
+
 ## Template
 
 ```markdown

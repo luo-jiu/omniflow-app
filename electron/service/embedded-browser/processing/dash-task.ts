@@ -34,6 +34,7 @@ export type DashTaskPlan = {
   headers?: Record<string, string>
   isDynamic?: boolean
   manifestUrl: string
+  minimumUpdatePeriodSeconds?: number
   representations: DashRepresentation[]
   unsupportedReasons?: string[]
 }

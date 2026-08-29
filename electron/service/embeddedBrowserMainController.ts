@@ -208,6 +208,7 @@ function toDashTaskPlan(
     headers: plan.headers,
     isDynamic: Boolean(plan.isDynamic),
     manifestUrl: plan.manifestUrl,
+    minimumUpdatePeriodSeconds: plan.minimumUpdatePeriodSeconds,
     representations: plan.representations.map((representation): DashRepresentation => ({
       bandwidth: representation.bandwidth,
       baseUrls: representation.baseUrls?.length

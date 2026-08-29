@@ -884,6 +884,16 @@
       "cleanupAction": "retain-or-adapt"
     },
     {
+      "id": "node.dash.live-task",
+      "path": "electron/service/embedded-browser/processing/dash-live-task.ts",
+      "symbol": "DashLiveTask",
+      "capabilityId": "dash.timeline-download-merge",
+      "cutoverUnitId": "dash-engine",
+      "classification": "omniflow-integration",
+      "role": "task-owner",
+      "cleanupAction": "retain-or-adapt"
+    },
+    {
       "id": "node.transfer.http-ipc",
       "path": "electron/ipc/http.ts",
       "symbol": "registerHttpIpc",
