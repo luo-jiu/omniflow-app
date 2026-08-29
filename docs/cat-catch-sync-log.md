@@ -2047,3 +2047,17 @@
 - runtime changes: `transcodeEmbeddedBrowserResource` 拒绝空 output path；ffmpeg 零退出后要求目标为非空文件；transcode 失败或产物无效时清理目标文件并重新抛出原始错误；merge/transcode 共用输出检查 helper。
 - legacy cleanup: 无新增删除；旧 Cat Catch 页面实现继续保留至 MSE/output unit parity 和真实回归完成。
 - validation: resource merge/transcode 定向 `2 files / 5 passed`、TypeScript `--noEmit`、scoped ESLint、metadata validator（`7 units / 32 capabilities / 17 open / 100 cleanup / 226 planned`）均通过；同步 runner、全量 lint/test/build 与真实页面验证仍未执行。
+
+## 2026-08-29: same target (shared ffmpeg process executor)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本切片把已验证的 ffmpeg 终态契约提升为共享 main-side process executor。
+- reviewedThrough / portedThrough: 均保持 `null`；`output.ffmpeg-process-owner` 进入 `porting`，`mse-runtime` unit 仍开放。
+- change groups: `main-authority-wiring`、`stability`、`large-media-output` 与 `documentation-correction`。
+- affected capability IDs: `output.ffmpeg-process-owner`；metadata 当前为 `7 units / 32 capabilities / 100 cleanup entries / 226 planned IDs / 206 active refs`，状态为 `15 verified / 6 porting / 1 ported-unverified / 10 pending`。
+- runtime changes: 新增 `electron/service/embedded-browser/processing/ffmpeg-executor.ts#FfmpegTaskExecutor`，统一 ffmpeg spawn、stdout/stderr 收集、`-progress` 解析、AbortSignal 终止、process-tree graceful/force cleanup、失败 partial output 清理及零退出后的非空输出校验；HLS manifest/track、DASH local-file merge、MSE merge 与 captured-resource transcode 改由该 executor 执行。
+- fixtures/tests: 复用既有 HLS cancel/cleanup、DASH local-file output、MSE merge/transcode failure/success-contract 与真实 fragmented-MP4/HLS/DASH output 证据；本阶段不新增行为 fixture，重点验证入口迁移不改变既有结果。
+- accepted differences: 共享 executor 只收口 ffmpeg 进程与输出终态，不改变各协议 parser、authority、workdir 或 renderer 语义；HLS 仍由 session owner 归属任务，DASH/MSE/普通资源尚未共享应用级 task registry。
+- excluded changes and reasons: 未迁移媒体工具 `processMediaToolFile`、ffmpeg 可执行探测、应用退出 registry、staged output lease、资料库导入、renderer UI 或 `dist-electron/**`；这些边界需要独立生命周期与产品交付决策。
+- unresolved gaps: 仍需为所有 ffmpeg 入口建立统一 task registry/cancel protocol/app-exit cleanup，并补跨入口长任务、生产等价大媒体、真实页面提取和资料库导入证据。
+- legacy cleanup: 删除 HLS manifest/track 与 resource merge/transcode 中重复的 child-process runner、progress parser 和 output checker；未删除仍在生产使用的媒体工具或其他 legacy output paths。
+- validation: 定向 HLS/MSE/DASH/output output `4 files / 12 passed`、TypeScript `--noEmit` 与 scoped ESLint 已通过；提交前将重跑 metadata validator、sync runner、完整相关链和非 `dist-electron/**` diff check。完整 build、全仓 lint/test 与真实页面验证仍未执行。

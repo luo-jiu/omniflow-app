@@ -2040,7 +2040,7 @@
         "electron/service/embedded-browser/processing/ffmpeg-executor.ts#FfmpegTaskExecutor"
       ],
       "relationToUpstream": "not-applicable",
-      "syncState": "pending",
+      "syncState": "porting",
       "syncedThrough": null,
       "plannedTestIds": [
         "output.ffmpeg-process-cleanup",

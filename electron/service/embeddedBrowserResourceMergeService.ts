@@ -1,9 +1,10 @@
 import { spawn } from 'node:child_process'
 import { constants as fsConstants } from 'node:fs'
-import { access, mkdtemp, rm, stat, writeFile } from 'node:fs/promises'
+import { access, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { Buffer } from 'node:buffer'
+import { defaultFfmpegTaskExecutor } from './embedded-browser/processing/ffmpeg-executor'
 
 export type EmbeddedBrowserExtractedResourceFile = {
   base64?: string
@@ -260,14 +261,6 @@ async function prepareResourceMergeInput(
   }
 }
 
-async function assertEmbeddedBrowserFfmpegOutput(outputPath: string) {
-  const output = await stat(outputPath).catch(() => null)
-  if (output?.isFile() && output.size > 0) {
-    return
-  }
-  throw new Error('ffmpeg 已退出，但没有生成可用的输出文件')
-}
-
 export async function mergeEmbeddedBrowserResourceTracks(
   request: EmbeddedBrowserResourceMergeRequest,
 ): Promise<EmbeddedBrowserResourceMergeResult> {
@@ -280,7 +273,6 @@ export async function mergeEmbeddedBrowserResourceTracks(
   }
 
   const tempDir = await createEmbeddedBrowserResourceMergeTempDir()
-  let ffmpegStarted = false
   try {
     const [audio, video] = await Promise.all([
       prepareResourceMergeInput(tempDir, request.audio),
@@ -291,46 +283,12 @@ export async function mergeEmbeddedBrowserResourceTracks(
       outputPath: request.outputPath,
       video,
     })
-
-    ffmpegStarted = true
-    const result = await new Promise<EmbeddedBrowserResourceMergeResult>((resolve, reject) => {
-      const stdout: string[] = []
-      const stderr: string[] = []
-      const child = spawn(ffmpegPath, commandArgs, {
-        stdio: ['ignore', 'pipe', 'pipe'],
-      })
-
-      child.stdout.on('data', (chunk) => {
-        stdout.push(String(chunk))
-      })
-      child.stderr.on('data', (chunk) => {
-        stderr.push(String(chunk))
-      })
-      child.once('error', (error) => {
-        reject(error)
-      })
-      child.once('exit', (code) => {
-        if (code === 0) {
-          resolve({
-            commandArgs,
-            ffmpegPath,
-            outputPath: request.outputPath,
-            stderr: stderr.join(''),
-            stdout: stdout.join(''),
-          })
-          return
-        }
-        reject(new Error(stderr.join('').trim() || `ffmpeg 退出码异常: ${code}`))
-      })
+    const result = await defaultFfmpegTaskExecutor.execute({
+      commandArgs,
+      ffmpegPath,
+      outputPath: request.outputPath,
     })
-
-    await assertEmbeddedBrowserFfmpegOutput(request.outputPath)
     return result
-  } catch (error) {
-    if (ffmpegStarted) {
-      await rm(request.outputPath, { force: true }).catch(() => undefined)
-    }
-    throw error
   } finally {
     await cleanupEmbeddedBrowserResourceMergeTempDir(tempDir).catch(() => undefined)
   }
@@ -348,7 +306,6 @@ export async function transcodeEmbeddedBrowserResource(
   }
 
   const tempDir = await createEmbeddedBrowserResourceMergeTempDir()
-  let ffmpegStarted = false
   try {
     const input = await prepareResourceMergeInput(tempDir, request.resource)
     const commandArgs = buildEmbeddedBrowserResourceTranscodeArgs({
@@ -356,46 +313,12 @@ export async function transcodeEmbeddedBrowserResource(
       outputFormat: request.outputFormat,
       outputPath: request.outputPath,
     })
-
-    ffmpegStarted = true
-    const result = await new Promise<EmbeddedBrowserResourceMergeResult>((resolve, reject) => {
-      const stdout: string[] = []
-      const stderr: string[] = []
-      const child = spawn(ffmpegPath, commandArgs, {
-        stdio: ['ignore', 'pipe', 'pipe'],
-      })
-
-      child.stdout.on('data', (chunk) => {
-        stdout.push(String(chunk))
-      })
-      child.stderr.on('data', (chunk) => {
-        stderr.push(String(chunk))
-      })
-      child.once('error', (error) => {
-        reject(error)
-      })
-      child.once('exit', (code) => {
-        if (code === 0) {
-          resolve({
-            commandArgs,
-            ffmpegPath,
-            outputPath: request.outputPath,
-            stderr: stderr.join(''),
-            stdout: stdout.join(''),
-          })
-          return
-        }
-        reject(new Error(stderr.join('').trim() || `ffmpeg 退出码异常: ${code}`))
-      })
+    const result = await defaultFfmpegTaskExecutor.execute({
+      commandArgs,
+      ffmpegPath,
+      outputPath: request.outputPath,
     })
-
-    await assertEmbeddedBrowserFfmpegOutput(request.outputPath)
     return result
-  } catch (error) {
-    if (ffmpegStarted) {
-      await rm(request.outputPath, { force: true }).catch(() => undefined)
-    }
-    throw error
   } finally {
     await cleanupEmbeddedBrowserResourceMergeTempDir(tempDir).catch(() => undefined)
   }
