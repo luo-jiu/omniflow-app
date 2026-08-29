@@ -3,7 +3,7 @@
  *
  * Upstream: xifangczy/cat-catch@2cb981d7c2f4614732edccc167c4b5793d1cb138
  * Source: js/mpd.js#parseMPD and lib/mpd-parser.min.js#parse
- * Reason: MPD playback plans inherit BaseURL/SegmentTemplate values across
+ * Reason: MPD playback plans inherit BaseURL/segment info values across
  * MPD, Period, AdaptationSet and Representation, while the page exposes
  * concrete audio/video segment lists and DRM evidence.
  * Adaptation: the pure port receives a platform-neutral XML AST. DOMParser
@@ -36,6 +36,12 @@ export type DashSegment = {
   url: string
 }
 
+export type DashSegmentBase = {
+  indexRange: DashByteRange
+  presentationTimeOffset?: number
+  timescale?: number
+}
+
 export type DashContentProtection = {
   encryptionType: 'Widevine' | 'Microsoft PlayReady' | 'Apple FairPlay' | 'Unknown'
   pssh?: string
@@ -54,6 +60,7 @@ export type DashRepresentation = {
   initializationUrl?: string
   language?: string
   mimeType?: string
+  segmentBase?: DashSegmentBase
   segmentCount: number
   segments: DashSegment[]
   unsupportedReasons: string[]
@@ -533,9 +540,6 @@ function parseSegmentBase(input: {
   if (hasInvalidIndexRange) {
     addReason(input.reasons, 'segment-base-index-range-invalid')
   }
-  if (indexRange) {
-    addReason(input.reasons, 'segment-base-sidx-not-expanded')
-  }
   const initializationUrl = attribute(initialization, 'sourceURL')
     ? resolveUrl(attribute(initialization, 'sourceURL') || '', input.baseUrl)
     : undefined
@@ -551,8 +555,16 @@ function parseSegmentBase(input: {
   return {
     initializationRange,
     initializationUrl,
+    segmentBase: indexRange
+      ? {
+          indexRange,
+          presentationTimeOffset: numberAttribute(input.element, 'presentationTimeOffset'),
+          timescale: numberAttribute(input.element, 'timescale'),
+        }
+      : undefined,
     // A SegmentBase without an index range is a single media file. Preserve
-    // that useful case; SIDX and byte-range splitting stay explicit rejects.
+    // that useful case; indexed media is expanded by the main task after its
+    // SIDX range is fetched through the captured-resource authority.
     segments: hasInvalidIndexRange || hasInvalidInitializationRange || indexRange || initializationRange
       ? [] as DashSegment[]
       : [{ index: 0, url: input.baseUrl } satisfies DashSegment],
@@ -688,6 +700,7 @@ function parseRepresentation(input: {
       || baseResult.initializationUrl,
     language: pickAttribute([input.representation, input.adaptationSet], 'lang'),
     mimeType: pickAttribute([input.representation, input.adaptationSet], 'mimeType'),
+    segmentBase: baseResult.segmentBase,
     segmentCount: segments.length,
     segments,
     unsupportedReasons: reasons,

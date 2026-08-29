@@ -12,6 +12,7 @@ import {
   type DashByteRange,
   type DashContentProtection,
   type DashManifest,
+  type DashSegmentBase,
   type DashXmlElement,
 } from '../../../../../electron/service/embedded-browser/cat-catch-port/dash/parser'
 
@@ -38,6 +39,7 @@ export type EmbeddedBrowserMpdRepresentation = {
   initializationUrl?: string
   language?: string
   mimeType?: string
+  segmentBase?: DashSegmentBase
   segmentCount: number
   segments: EmbeddedBrowserMpdSegment[]
   unsupportedReasons?: string[]
@@ -68,6 +70,7 @@ export type EmbeddedBrowserMpdDownloadPlanRepresentation = {
   initializationUrl?: string
   language?: string
   mimeType?: string
+  segmentBase?: DashSegmentBase
   segmentCount: number
   segments: EmbeddedBrowserMpdSegment[]
   unsupportedReasons?: string[]
@@ -125,6 +128,7 @@ function mapManifest(parsed: DashManifest, fallbackBaseUrl: string): EmbeddedBro
       initializationUrl: representation.initializationUrl,
       language: representation.language,
       mimeType: representation.mimeType,
+      segmentBase: representation.segmentBase,
       segmentCount: representation.segmentCount,
       segments: representation.segments,
       unsupportedReasons: representation.unsupportedReasons,
@@ -180,6 +184,7 @@ export function createEmbeddedBrowserMpdDownloadPlan(input: {
       initializationUrl: representation.initializationUrl,
       language: representation.language,
       mimeType: representation.mimeType,
+      segmentBase: representation.segmentBase,
       segmentCount: representation.segmentCount,
       segments: representation.segments,
       unsupportedReasons: representation.unsupportedReasons,

@@ -222,6 +222,7 @@ function toDashTaskPlan(
       initializationUrl: representation.initializationUrl,
       language: representation.language,
       mimeType: representation.mimeType,
+      segmentBase: representation.segmentBase,
       segmentCount: representation.segmentCount,
       segments: representation.segments,
       unsupportedReasons: representation.unsupportedReasons || [],

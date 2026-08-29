@@ -31,6 +31,26 @@ function plan(representations: DashRepresentation[], overrides: Partial<DashTask
   }
 }
 
+function createSidxBytes() {
+  const bytes = new Uint8Array(56)
+  const view = new DataView(bytes.buffer)
+  view.setUint32(0, bytes.byteLength, false)
+  bytes.set([0x73, 0x69, 0x64, 0x78], 4)
+  view.setUint32(12, 1, false)
+  view.setUint32(16, 1000, false)
+  view.setUint32(20, 0, false)
+  view.setUint32(24, 0, false)
+  view.setUint16(28, 0, false)
+  view.setUint16(30, 2, false)
+  view.setUint32(32, 0x00000004, false)
+  view.setUint32(36, 1000, false)
+  view.setUint32(40, 0x90000000, false)
+  view.setUint32(44, 0x00000005, false)
+  view.setUint32(48, 2000, false)
+  view.setUint32(52, 0x90000000, false)
+  return bytes
+}
+
 describe('DASH task executor', () => {
   it('dash.download-merge-cancel', async () => {
     const workDirectoryPath = await mkdtemp(path.join(os.tmpdir(), 'omniflow-dash-test-'))
@@ -108,6 +128,48 @@ describe('DASH task executor', () => {
         selectedVideoRepresentation: unresolved,
       })
       await expect(executor.run()).rejects.toThrow('轨道暂不可下载')
+    } finally {
+      await rm(workDirectoryPath, { force: true, recursive: true })
+    }
+  })
+
+  it('dash.segment-base-sidx-task-fetch', async () => {
+    const workDirectoryPath = await mkdtemp(path.join(os.tmpdir(), 'omniflow-dash-sidx-test-'))
+    try {
+      const sidx = createSidxBytes()
+      const video = representation({
+        baseUrls: ['https://cdn.example/video.mp4'],
+        id: 'sidx-video',
+        segmentBase: {
+          indexRange: { length: sidx.byteLength, offset: 0, raw: '0-55' },
+        },
+        segmentCount: 0,
+        segments: [],
+      })
+      const calls: Array<{ range: string | undefined; url: string }> = []
+      const outputPath = path.join(workDirectoryPath, 'output.mp4')
+      const executor = new DashTaskExecutor({
+        fetch: async (url, init) => {
+          const range = new Headers(init?.headers).get('Range') || undefined
+          calls.push({ range, url })
+          if (range === 'bytes=0-55') return new Response(sidx)
+          return new Response(new Uint8Array([range === 'bytes=56-59' ? 2 : 3]))
+        },
+        mergeTracks: async ({ outputPath: targetPath, video: track }) => {
+          await writeFile(targetPath, track ? await readFile(track.path) : Buffer.alloc(0))
+          return { outputPath: targetPath }
+        },
+        outputPath,
+        plan: plan([video]),
+        selectedVideoRepresentation: video,
+      })
+      await executor.run()
+      expect(await readFile(outputPath)).toEqual(Buffer.from([2, 3]))
+      expect(calls).toEqual([
+        { range: 'bytes=0-55', url: 'https://cdn.example/video.mp4' },
+        { range: 'bytes=56-59', url: 'https://cdn.example/video.mp4' },
+        { range: 'bytes=60-64', url: 'https://cdn.example/video.mp4' },
+      ])
     } finally {
       await rm(workDirectoryPath, { force: true, recursive: true })
     }

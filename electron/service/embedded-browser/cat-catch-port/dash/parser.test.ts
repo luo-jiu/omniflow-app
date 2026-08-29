@@ -299,7 +299,12 @@ describe('DASH parser', () => {
       root: sidxRoot,
       text: '',
     })
-    expect(sidxManifest.unsupportedReasons).toContain('segment-base-sidx-not-expanded')
+    expect(sidxManifest.unsupportedReasons).toEqual([])
+    expect(sidxManifest.representations[0].segmentBase).toEqual({
+      indexRange: { length: 100, offset: 0, raw: '0-99' },
+      presentationTimeOffset: undefined,
+      timescale: undefined,
+    })
     expect(sidxManifest.representations[0].segments).toEqual([])
 
     const invalidInitializationRangeRoot = node('MPD', {}, [

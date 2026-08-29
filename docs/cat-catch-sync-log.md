@@ -1654,6 +1654,20 @@
 - legacy cleanup: 无新增删除；现有 target task/output adapter 继续作为唯一 production owner。
 - validation: DASH parser/task/output/renderer `4 files / 15 passed`、TypeScript、scoped ESLint、metadata validator、sync tests `16/16` 和 scoped diff check 通过；完整 build 与真实页面验证不执行。
 
+## 2026-08-29: same target (DASH SegmentBase SIDX expansion)
+
+- observedHead / migrationTarget: 均为 `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本步补固定 `mpd-parser@1.4.0` 的 SegmentBase SIDX reference 到 byte-range 分片投影。
+- reviewedThrough / portedThrough: 均保持 `null`；`dash.parser-planner` 与 `dash.timeline-download-merge` 继续 `porting`，`dash-engine` unit 仍开放。
+- change groups: `segment-base-sidx-expansion`、`sidx-range-fetch`、`fixture-contract`。
+- affected capability IDs: `dash.parser-planner`、`dash.timeline-download-merge`；metadata 为 `7 units / 32 capabilities / 210 anchors / 99 cleanup entries / 196 planned IDs / 175 active refs`。
+- fixtures/tests: `dash.segment-base-sidx-expansion` 覆盖 version 0/1 SIDX、firstOffset、reference duration/size、presentationTimeOffset 和 nested-only reject；`dash.segment-base-sidx-task-fetch` 覆盖 main task 通过 range fetch 取得 SIDX、生成有序媒体 Range 并写出顺序字节；DASH parser/task/output/renderer `5 files / 18 passed`。
+- accepted differences: parser 只在纯层保留 index range 元数据，二进制 SIDX 由 main task 在 captured-resource authority 内拉取；nested reference 会被跳过，nested-only SIDX 稳定拒绝，不扩展递归 SIDX 链。
+- excluded changes and reasons: 未修改动态 MPD、复杂嵌套 SIDX 递归、多 Period 合并、renderer UI、HLS、MSE、transfer 或 output；未宣称 DASH unit 已关闭，也未宣称已有真实 MPD/ffprobe parity。
+- unresolved gaps: 动态 availability、复杂嵌套 SIDX、多 Period 合并、完整 `mpd-parser` 差分和真实 MPD/ffprobe 输出仍待完成。
+- runtime changes: `SegmentBase` valid `indexRange` 现在进入 plan；`DashTaskExecutor` 在分片 downloader 前用同一 headers/signal/captured fetch 拉取 index range，`parseDashSidx` 将 ISO BMFF references 转为带绝对 byte range 的 `DashSegment`。
+- legacy cleanup: 无新增删除；现有 target task/output adapter 继续作为唯一 production owner。
+- validation: DASH parser/task/output/renderer `5 files / 18 passed`、TypeScript、scoped ESLint、metadata validator、sync tests `16/16` 和 scoped diff check 通过；完整 build 与真实页面验证不执行。
+
 ## Template
 
 ```markdown

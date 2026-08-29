@@ -21,6 +21,7 @@ import type {
   DashRepresentation,
   DashSegment,
 } from '../cat-catch-port/dash/parser'
+import { parseDashSidx } from '../cat-catch-port/dash/sidx'
 import {
   EmbeddedBrowserFragmentDownloader,
   type EmbeddedBrowserDownloadFragment,
@@ -119,6 +120,59 @@ function createFragments(representation: DashRepresentation): EmbeddedBrowserDow
   return fragments
 }
 
+async function expandSegmentBaseRepresentation(
+  representation: DashRepresentation,
+  options: {
+    fetch?: EmbeddedBrowserFragmentFetch
+    headers?: Record<string, string>
+    signal: AbortSignal
+  },
+) {
+  const segmentBase = representation.segmentBase
+  if (!segmentBase) return representation
+  const range = segmentBase.indexRange
+  const rangeEnd = range.offset + range.length - 1
+  if (!Number.isSafeInteger(rangeEnd) || rangeEnd < range.offset) {
+    throw new Error(`DASH Representation ${representation.id} 的 SIDX range 无效`)
+  }
+  const headers = new Headers(options.headers)
+  headers.set('Range', `bytes=${range.offset}-${rangeEnd}`)
+  const fetchImpl = options.fetch || ((input: string, init?: RequestInit) => fetch(input, init))
+  const response = await fetchImpl(representation.baseUrls[0] || '', {
+    headers,
+    signal: options.signal,
+  })
+  if (response.status >= 400) {
+    throw new Error(`DASH Representation ${representation.id} 的 SIDX 请求失败：HTTP ${response.status}`)
+  }
+  const responseBytes = new Uint8Array(await response.arrayBuffer())
+  const contentRangeStart = Number.parseInt(
+    /^bytes\s+(\d+)-/i.exec(response.headers.get('content-range') || '')?.[1] || '',
+    10,
+  )
+  let indexBytes = responseBytes
+  if (responseBytes.byteLength > range.length) {
+    const sourceOffset = Number.isFinite(contentRangeStart) && contentRangeStart === range.offset
+      ? 0
+      : range.offset
+    if (sourceOffset + range.length > responseBytes.byteLength) {
+      throw new Error(`DASH Representation ${representation.id} 的 SIDX 响应长度不足`)
+    }
+    indexBytes = responseBytes.slice(sourceOffset, sourceOffset + range.length)
+  }
+  const segments = parseDashSidx({
+    baseUrl: representation.baseUrls[0] || '',
+    bytes: indexBytes,
+    indexRange: range,
+    presentationTimeOffset: segmentBase.presentationTimeOffset,
+  })
+  return {
+    ...representation,
+    segmentCount: segments.length,
+    segments,
+  }
+}
+
 async function downloadRepresentation(
   representation: DashRepresentation,
   outputPath: string,
@@ -130,7 +184,8 @@ async function downloadRepresentation(
     threadCount: number
   },
 ) {
-  const fragments = createFragments(representation)
+  const resolvedRepresentation = await expandSegmentBaseRepresentation(representation, options)
+  const fragments = createFragments(resolvedRepresentation)
   throwIfAborted(options.signal)
   await writeFile(outputPath, Buffer.alloc(0))
   const downloader = new EmbeddedBrowserFragmentDownloader({

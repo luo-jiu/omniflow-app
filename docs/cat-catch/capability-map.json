@@ -1376,7 +1376,8 @@
         "src/features/embedded-browser/resources/model/embedded-browser-mpd-manifest.ts#parseEmbeddedBrowserMpdManifest"
       ],
       "targetRefs": [
-        "electron/service/embedded-browser/cat-catch-port/dash/parser.ts#parseDashManifest"
+        "electron/service/embedded-browser/cat-catch-port/dash/parser.ts#parseDashManifest",
+        "electron/service/embedded-browser/cat-catch-port/dash/sidx.ts#parseDashSidx"
       ],
       "relationToUpstream": "semantic-equivalent",
       "syncState": "porting",
@@ -1386,6 +1387,7 @@
         "dash.segment-template-final-duration",
         "dash.period-template-inheritance",
         "dash.period-segment-info-inheritance",
+        "dash.segment-base-sidx-expansion",
         "dash.base-url-timeline-ranges",
         "dash.segment-base-and-period-boundary",
         "dash.segment-list-boundary",
@@ -1396,6 +1398,7 @@
         "electron/service/embedded-browser/cat-catch-port/dash/parser.test.ts#dash.segment-template-final-duration",
         "electron/service/embedded-browser/cat-catch-port/dash/parser.test.ts#dash.period-template-inheritance",
         "electron/service/embedded-browser/cat-catch-port/dash/parser.test.ts#dash.period-segment-info-inheritance",
+        "electron/service/embedded-browser/cat-catch-port/dash/sidx.test.ts#dash.segment-base-sidx-expansion",
         "electron/service/embedded-browser/cat-catch-port/dash/parser.test.ts#dash.base-url-timeline-ranges",
         "electron/service/embedded-browser/cat-catch-port/dash/parser.test.ts#dash.segment-base-and-period-boundary",
         "electron/service/embedded-browser/cat-catch-port/dash/parser.test.ts#dash.segment-list-boundary",
@@ -1403,7 +1406,7 @@
         "src/features/embedded-browser/resources/model/embedded-browser-mpd-manifest.test.ts#dash.renderer-dom-adapter"
       ],
       "acceptedDifferences": [],
-      "notes": "The pure target parser now covers inherited BaseURL alternatives and Period/AdaptationSet/Representation SegmentTemplate, SegmentList and SegmentBase values, SegmentList timeline expansion, static final-segment duration correction, finite SegmentTimeline r=-1, validated SegmentList ranges, single-file SegmentBase and DRM evidence through a platform-neutral XML AST. Invalid or structurally ambiguous SegmentList inputs are explicit unsupported reasons; SegmentBase SIDX, init-range splitting, multi-Period merging and unbounded dynamic repeats remain explicit unsupported reasons; the bundled mpd-parser/jQuery vendor-version discrepancy and production parser adapter are still open."
+      "notes": "The pure target parser now covers inherited BaseURL alternatives and Period/AdaptationSet/Representation SegmentTemplate, SegmentList and SegmentBase values, static SegmentBase SIDX expansion metadata, SegmentList timeline expansion, static final-segment duration correction, finite SegmentTimeline r=-1, validated SegmentList ranges, single-file SegmentBase and DRM evidence through a platform-neutral XML AST. Invalid or structurally ambiguous SegmentList inputs and malformed SIDX responses are explicit rejects; init-range splitting, multi-Period merging and unbounded dynamic repeats remain explicit unsupported reasons; the bundled mpd-parser/jQuery vendor-version discrepancy, real MPD/ffprobe output evidence and complex cross-level array semantics are still open."
     },
     {
       "id": "dash.timeline-download-merge",
@@ -1432,25 +1435,28 @@
         "electron/service/embedded-browser/processing/dash-output.ts#mergeDashTaskTracksToOutput"
       ],
       "targetRefs": [
-        "electron/service/embedded-browser/processing/dash-task.ts#DashTaskExecutor"
+        "electron/service/embedded-browser/processing/dash-task.ts#DashTaskExecutor",
+        "electron/service/embedded-browser/cat-catch-port/dash/sidx.ts#parseDashSidx"
       ],
       "relationToUpstream": "platform-substitute",
       "syncState": "porting",
       "syncedThrough": null,
       "plannedTestIds": [
         "dash.negative-repeat",
+        "dash.segment-base-sidx-task-fetch",
         "dash.download-merge-cancel",
         "dash.dynamic-drm-rejection"
       ],
       "testRefs": [
         "electron/service/embedded-browser/processing/dash-task.test.ts#dash.negative-repeat",
+        "electron/service/embedded-browser/processing/dash-task.test.ts#dash.segment-base-sidx-task-fetch",
         "electron/service/embedded-browser/processing/dash-task.test.ts#dash.download-merge-cancel",
         "electron/service/embedded-browser/processing/dash-task.test.ts#dash.dynamic-drm-rejection",
         "electron/service/embedded-browser/processing/dash-output.test.ts#merges independent local video and audio tracks through the shared runner",
         "electron/service/embedded-browser/processing/dash-output.test.ts#keeps single-track output on the same cancellable runner"
       ],
       "acceptedDifferences": [],
-      "notes": "DashTaskExecutor now owns bounded plan preflight, range-aware parallel fragment transfer, ordered file writes, external cancellation and temp cleanup. The production MPD plan dispatch converts the renderer DTO into the main-side plan, redeems captured-resource authority for fragments and routes local single- or dual-track output through the shared cancellable ffmpeg runner. Dynamic MPD, DRM, parser unsupported reasons, SegmentBase SIDX and real media output evidence remain open."
+      "notes": "DashTaskExecutor now owns bounded plan preflight, range-aware parallel fragment transfer, SIDX index-range fetch and expansion, ordered file writes, external cancellation and temp cleanup. The production MPD plan dispatch converts the renderer DTO into the main-side plan, redeems captured-resource authority for fragments and routes local single- or dual-track output through the shared cancellable ffmpeg runner. Dynamic MPD, DRM, parser unsupported reasons, complex nested SIDX chains and real media output evidence remain open."
     },
     {
       "id": "transfer.concurrent-retry-abort-order",
