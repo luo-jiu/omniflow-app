@@ -334,4 +334,4 @@ tools/cat-catch-lab/fixtures/<fixture-id>/
 
 1. 运行轻量 `cat-catch:validate`，确认版本、32 项能力和 99 个 cleanup 条目自洽。
 2. 继续收口 `mse-runtime`：补固定 `catch.js` 差分、生产等价大媒体与真实下载导入证据；不把 target runtime 的纯测试、staging contract 或 page extraction 当成完整 parity。
-3. 继续 `dash-engine` parser-planner：同身份静态多 Period 串接已加入并由 fixture 锁定；下一步补固定 `mpd-parser` 的 dynamic availability、复杂 SIDX 边界，再为下载/合并补 production-equivalent integration；当前 dispatch 已切换到 target task/output owner，不把现有 legacy 行为当 oracle。
+3. 继续 `dash-engine` parser-planner：同身份静态多 Period 串接和 availability-bounded `r=-1` 已加入并由 fixture 锁定；下一步补 dynamic task/availability 端到端、复杂 SIDX 边界，再为下载/合并补 production-equivalent integration；当前 dispatch 已切换到 target task/output owner，不把现有 legacy 行为当 oracle。

@@ -155,6 +155,16 @@ function parseIsoDurationSeconds(value?: string) {
     + Number(seconds || 0)
 }
 
+function parseIsoDateSeconds(value?: string) {
+  const normalizedValue = String(value || '').trim()
+  if (!normalizedValue) return undefined
+  const dateValue = /(?:Z|[+-]\d\d:?\d\d)$/i.test(normalizedValue)
+    ? normalizedValue
+    : `${normalizedValue}Z`
+  const parsed = Date.parse(dateValue)
+  return Number.isFinite(parsed) ? parsed / 1000 : undefined
+}
+
 function parseByteRange(value?: string) {
   const normalizedValue = String(value || '').trim()
   if (!normalizedValue) return undefined
@@ -246,9 +256,14 @@ function findNextExplicitTime(items: DashXmlElement[], index: number) {
 type DashSegmentTiming = Pick<DashSegment, 'duration' | 'number' | 'time'>
 
 function expandSegmentTimelineTimings(input: {
+  availabilityStartTimeSeconds?: number
+  dynamic?: boolean
   durationSeconds?: number
+  minimumUpdatePeriodSeconds?: number
+  nowMs?: number
   number: number
   periodPresentationTimeOffset: number
+  periodStartSeconds?: number
   timeline: DashXmlElement
   timescale: number
   reasons: string[]
@@ -273,20 +288,34 @@ function expandSegmentTimelineTimings(input: {
     }
 
     let repeatCount = repeat
+    let expandedSegmentCount: number | undefined
     if (repeat === -1) {
       const nextExplicitTime = findNextExplicitTime(items, itemIndex)
       const periodEnd = input.durationSeconds === undefined
         ? undefined
         : input.durationSeconds * input.timescale + input.periodPresentationTimeOffset
       const endTime = nextExplicitTime ?? periodEnd
-      if (endTime === undefined) {
+      if (endTime === undefined && input.dynamic
+        && input.minimumUpdatePeriodSeconds !== undefined
+        && input.minimumUpdatePeriodSeconds > 0
+        && input.availabilityStartTimeSeconds !== undefined) {
+        const nowSeconds = Number(input.nowMs ?? Date.now()) / 1000
+        const availabilityEnd = nowSeconds
+          + input.minimumUpdatePeriodSeconds
+          - (input.availabilityStartTimeSeconds + (input.periodStartSeconds || 0))
+        const availableSegmentCount = Math.ceil(
+          (availabilityEnd * input.timescale - currentTime) / duration,
+        )
+        expandedSegmentCount = Math.max(0, availableSegmentCount)
+      } else if (endTime === undefined) {
         addReason(input.reasons, 'segment-timeline-negative-repeat-unbounded')
         break
+      } else {
+        repeatCount = Math.max(0, Math.ceil((endTime - currentTime) / duration) - 1)
       }
-      repeatCount = Math.max(0, Math.ceil((endTime - currentTime) / duration) - 1)
     }
 
-    const segmentCount = repeatCount + 1
+    const segmentCount = expandedSegmentCount ?? (repeatCount + 1)
     for (let repeatIndex = 0; repeatIndex < segmentCount; repeatIndex += 1) {
       if (timings.length >= MAX_EXPANDED_SEGMENTS) {
         addReason(input.reasons, 'segment-expansion-limit')
@@ -305,11 +334,16 @@ function expandSegmentTimelineTimings(input: {
 }
 
 function expandSegmentTimeline(input: {
+  availabilityStartTimeSeconds?: number
   baseUrl: string
+  dynamic?: boolean
   durationSeconds?: number
   media: string
+  minimumUpdatePeriodSeconds?: number
   number: number
+  nowMs?: number
   periodPresentationTimeOffset: number
+  periodStartSeconds?: number
   representationId: string
   timeline: DashXmlElement
   timescale: number
@@ -329,10 +363,15 @@ function expandSegmentTimeline(input: {
 }
 
 function expandSegmentTemplate(input: {
+  availabilityStartTimeSeconds?: number
   baseUrl: string
+  dynamic?: boolean
   durationSeconds?: number
   element?: DashXmlElement
+  minimumUpdatePeriodSeconds?: number
+  nowMs?: number
   representationId: string
+  periodStartSeconds?: number
   bandwidth?: number
   reasons: string[]
 }) {
@@ -373,14 +412,19 @@ function expandSegmentTemplate(input: {
       initializationRange,
       initializationUrl,
       segments: expandSegmentTimeline({
+        availabilityStartTimeSeconds: input.availabilityStartTimeSeconds,
         bandwidth: input.bandwidth,
         baseUrl: input.baseUrl,
+        dynamic: input.dynamic,
         durationSeconds: input.durationSeconds,
         media,
+        minimumUpdatePeriodSeconds: input.minimumUpdatePeriodSeconds,
         number: Number.isFinite(startNumber) ? startNumber : 1,
+        nowMs: input.nowMs,
         periodPresentationTimeOffset: Number.isFinite(presentationTimeOffset)
           ? presentationTimeOffset
           : 0,
+        periodStartSeconds: input.periodStartSeconds,
         representationId: input.representationId,
         reasons: input.reasons,
         timeline,
@@ -583,13 +627,18 @@ function inferContentType(
 }
 
 function parseRepresentation(input: {
+  availabilityStartTimeSeconds?: number
   adaptationSet: DashXmlElement
   baseUrls: string[]
+  dynamic?: boolean
   durationSeconds?: number
   index: number
+  minimumUpdatePeriodSeconds?: number
+  nowMs?: number
   periodSegmentBase?: DashXmlElement
   periodSegmentList?: DashXmlElement
   periodSegmentTemplate?: DashXmlElement
+  periodStartSeconds?: number
   representation: DashXmlElement
 }) {
   const representationId = attribute(input.representation, 'id') || String(input.index + 1)
@@ -614,10 +663,15 @@ function parseRepresentation(input: {
       }
     : undefined
   const templateResult = expandSegmentTemplate({
+    availabilityStartTimeSeconds: input.availabilityStartTimeSeconds,
     bandwidth: numberAttribute(input.representation, 'bandwidth'),
     baseUrl: input.baseUrls[0] || '',
+    dynamic: input.dynamic,
     durationSeconds: input.durationSeconds,
     element: effectiveTemplate,
+    minimumUpdatePeriodSeconds: input.minimumUpdatePeriodSeconds,
+    nowMs: input.nowMs,
+    periodStartSeconds: input.periodStartSeconds,
     representationId,
     reasons,
   })
@@ -810,6 +864,7 @@ function mergePeriodRepresentations(
 
 export function parseDashManifest(input: {
   baseUrl: string
+  nowMs?: number
   parseXml?: DashXmlParser
   root?: DashXmlElement
   text: string
@@ -819,6 +874,9 @@ export function parseDashManifest(input: {
     throw new Error('这条资源不像 MPD manifest')
   }
   const durationSeconds = parseIsoDurationSeconds(attribute(root, 'mediaPresentationDuration'))
+  const dynamic = String(attribute(root, 'type') || 'static').toLowerCase() === 'dynamic'
+  const minimumUpdatePeriodSeconds = parseIsoDurationSeconds(attribute(root, 'minimumUpdatePeriod'))
+  const availabilityStartTimeSeconds = parseIsoDateSeconds(attribute(root, 'availabilityStartTime'))
   const baseUrls = resolveBaseUrls([String(input.baseUrl || '')], root)
   const protections = collectContentProtections(root)
   const unsupportedReasons: string[] = []
@@ -826,9 +884,20 @@ export function parseDashManifest(input: {
   const periods = children(root, 'Period')
   if (!periods.length) throw new Error('MPD manifest 没有 Period')
 
+  let previousPeriodStartSeconds = 0
+  let previousPeriodDurationSeconds: number | undefined
   periods.forEach((period, periodIndex) => {
     const periodBaseUrls = resolveBaseUrls(baseUrls, period)
     const periodDurationSeconds = parseIsoDurationSeconds(attribute(period, 'duration')) ?? durationSeconds
+    const explicitPeriodStartSeconds = parseIsoDurationSeconds(attribute(period, 'start'))
+    const periodStartSeconds = explicitPeriodStartSeconds
+      ?? (periodIndex === 0
+        ? 0
+        : previousPeriodDurationSeconds === undefined
+          ? undefined
+          : previousPeriodStartSeconds + previousPeriodDurationSeconds)
+    if (periodStartSeconds !== undefined) previousPeriodStartSeconds = periodStartSeconds
+    previousPeriodDurationSeconds = periodDurationSeconds
     const periodSegmentBase = firstChild(period, 'SegmentBase')
     const periodSegmentList = firstChild(period, 'SegmentList')
     const periodSegmentTemplate = firstChild(period, 'SegmentTemplate')
@@ -837,13 +906,18 @@ export function parseDashManifest(input: {
       children(adaptationSet, 'Representation').forEach((representation, representationIndex) => {
         const representationBaseUrls = resolveBaseUrls(adaptationBaseUrls, representation)
         const parsed = parseRepresentation({
+          availabilityStartTimeSeconds,
           adaptationSet,
           baseUrls: representationBaseUrls,
+          dynamic,
           durationSeconds: periodDurationSeconds,
           index: periodRepresentations.length + representationIndex + periodIndex,
+          minimumUpdatePeriodSeconds,
+          nowMs: input.nowMs,
           periodSegmentBase,
           periodSegmentList,
           periodSegmentTemplate,
+          periodStartSeconds,
           representation,
         })
         parsed.unsupportedReasons.forEach(reason => addReason(unsupportedReasons, reason))
@@ -864,8 +938,8 @@ export function parseDashManifest(input: {
     baseUrls,
     durationSeconds,
     hasDrm: protections.length > 0,
-    isDynamic: String(attribute(root, 'type') || 'static').toLowerCase() === 'dynamic',
-    minimumUpdatePeriodSeconds: parseIsoDurationSeconds(attribute(root, 'minimumUpdatePeriod')),
+    isDynamic: dynamic,
+    minimumUpdatePeriodSeconds,
     protections,
     representations,
     unsupportedReasons,

@@ -1392,7 +1392,8 @@
         "dash.segment-base-and-period-boundary",
         "dash.segment-list-boundary",
         "dash.segment-list-timeline",
-        "dash.multi-period-merge"
+        "dash.multi-period-merge",
+        "dash.dynamic-negative-repeat-availability"
       ],
       "testRefs": [
         "electron/service/embedded-browser/cat-catch-port/dash/parser.test.ts#dash.parser-core",
@@ -1405,12 +1406,13 @@
         "electron/service/embedded-browser/cat-catch-port/dash/parser.test.ts#dash.segment-list-boundary",
         "electron/service/embedded-browser/cat-catch-port/dash/parser.test.ts#dash.segment-list-timeline",
         "electron/service/embedded-browser/cat-catch-port/dash/parser.test.ts#dash.multi-period-merge",
+        "electron/service/embedded-browser/cat-catch-port/dash/parser.test.ts#dash.dynamic-negative-repeat-availability",
         "src/features/embedded-browser/resources/model/embedded-browser-mpd-manifest.test.ts#dash.renderer-dom-adapter"
       ],
       "acceptedDifferences": [
         "OmniFlow only concatenates static Periods when every Period has the same content type/id/language/primary BaseURL identity and a reusable initialization URL/range; incomplete identities, SegmentBase tracks and init conflicts remain explicit unsupported plans instead of silently switching initialization at a discontinuity."
       ],
-      "notes": "The pure target parser now covers inherited BaseURL alternatives and Period/AdaptationSet/Representation SegmentTemplate, SegmentList and SegmentBase values, static SegmentBase SIDX expansion metadata, SegmentList timeline expansion, static final-segment duration correction, finite SegmentTimeline r=-1, validated SegmentList ranges, same-identity static multi-Period concatenation, single-file SegmentBase and DRM evidence through a platform-neutral XML AST. Incomplete or incompatible multi-Period sets, invalid or structurally ambiguous SegmentList inputs and malformed SIDX responses are explicit rejects; init-range splitting, dynamic availability and unbounded dynamic repeats remain open; the bundled mpd-parser/jQuery vendor-version discrepancy, real MPD/ffprobe output evidence and complex cross-level array semantics are still open."
+      "notes": "The pure target parser now covers inherited BaseURL alternatives and Period/AdaptationSet/Representation SegmentTemplate, SegmentList and SegmentBase values, static SegmentBase SIDX expansion metadata, SegmentList timeline expansion, static final-segment duration correction, finite and availability-bounded dynamic SegmentTimeline r=-1, validated SegmentList ranges, same-identity static multi-Period concatenation, single-file SegmentBase and DRM evidence through a platform-neutral XML AST. Incomplete or incompatible multi-Period sets, invalid or structurally ambiguous SegmentList inputs and malformed SIDX responses are explicit rejects; dynamic task execution, init-range splitting and unbounded dynamic repeats without availability evidence remain open; the bundled mpd-parser/jQuery vendor-version discrepancy, real MPD/ffprobe output evidence and complex cross-level array semantics are still open."
     },
     {
       "id": "dash.timeline-download-merge",

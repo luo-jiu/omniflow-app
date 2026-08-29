@@ -263,6 +263,46 @@ describe('DASH parser', () => {
     expect(manifest.representations[0].segments).toEqual([])
   })
 
+  it('dash.dynamic-negative-repeat-availability', () => {
+    const nowMs = Date.parse('2026-08-29T12:00:10Z')
+    const root = node('MPD', {
+      availabilityStartTime: '2026-08-29T12:00:00Z',
+      minimumUpdatePeriod: 'PT2S',
+      type: 'dynamic',
+    }, [
+      node('Period', {}, [node('AdaptationSet', { contentType: 'video' }, [
+        node('Representation', { id: 'live-video' }, [
+          node('SegmentTemplate', { duration: '2', media: 'segment-$Number$.m4s' }, [
+            node('SegmentTimeline', {}, [node('S', { d: '2', r: '-1' })]),
+          ]),
+        ]),
+      ])]),
+    ])
+    const manifest = parseDashManifest({
+      baseUrl: 'https://cdn.example/live/manifest.mpd',
+      nowMs,
+      root,
+      text: '',
+    })
+    expect(manifest.unsupportedReasons).toEqual([])
+    expect(manifest.representations[0].segments.map(segment => segment.number)).toEqual([1, 2, 3, 4, 5, 6])
+    expect(manifest.representations[0].segments.map(segment => segment.url)).toEqual([
+      'https://cdn.example/live/segment-1.m4s',
+      'https://cdn.example/live/segment-2.m4s',
+      'https://cdn.example/live/segment-3.m4s',
+      'https://cdn.example/live/segment-4.m4s',
+      'https://cdn.example/live/segment-5.m4s',
+      'https://cdn.example/live/segment-6.m4s',
+    ])
+    const notYetAvailable = parseDashManifest({
+      baseUrl: 'https://cdn.example/live/manifest.mpd',
+      nowMs: Date.parse('2026-08-29T11:59:57Z'),
+      root,
+      text: '',
+    })
+    expect(notYetAvailable.representations[0].segments).toEqual([])
+  })
+
   it('dash.segment-base-and-period-boundary', () => {
     const singleFileRoot = node('MPD', {}, [
       node('Period', {}, [
