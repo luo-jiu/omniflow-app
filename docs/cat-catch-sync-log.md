@@ -2187,3 +2187,17 @@
 - runtime changes: `downloadEmbeddedBrowserHlsTracksResource` 的 direct-manifest 与 local-plan 分支均在处理完成后 claim 并发布，处理或 ffmpeg 失败时最终目标保持原状，现有 workdir finally 清理继续生效。
 - legacy cleanup: 无新增删除；保留最终 `outputPath` 和双轨 header/authority 合同，未引入第二套 HLS 算法或长期 fallback。
 - validation: 独立轨/HLS output 定向 `6 files / 37 passed`、TypeScript `--noEmit`、scoped ESLint 和非 `dist-electron/**` diff check 通过；完整 build、全仓 lint/test、真实页面与真实下载仍未执行。
+
+## 2026-08-29: same target (HLS live stop-export staged output wiring)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本切片把 HLS 直播停止后的 ffmpeg 导出接入 staged output lease。
+- reviewedThrough / portedThrough: 均保持 `null`；`hls.live-recording` 与 `hls.segment-pipeline` 继续 `verified`，`output.staged-output-lease` 继续 `porting`，output-integration unit 仍开放。
+- change groups: `main-authority-wiring`、`output-ownership`、`live-terminal` 与 `partial-output-cleanup`。
+- affected capability IDs: `output.staged-output-lease`、`hls.live-recording`；metadata 仍为 `7 units / 32 capabilities / 102 cleanup entries / 229 planned IDs / 226 active refs`，状态为 `15 verified / 11 porting / 1 ported-unverified / 5 pending`。
+- fixtures/tests: 停止导出仍使用 HLS live recorder 生成的冻结 playlist/workdir，但 ffmpeg 输出先写 lease path；直播 recorder、真实输出、session owner、lease/publisher 定向集合 `7 files / 42 passed`。
+- accepted differences: active live recorder 仍由 HLS session owner 管理，renderer 继续收到最终 `outputPath`；staged output 只包住 stop-export 交付，不把直播轮询或 workdir 恢复伪装成可跨卸载恢复。
+- excluded changes and reasons: 未接入 HLS active live workdir 的 crash quarantine、DASH plan/live、MSE、local-save、UploadManager、renderer UI、`dist-electron/**` 或 upstream 游标；这些入口仍需各自 delivery owner 和终态证据。
+- unresolved gaps: HLS/DASH/MSE 其他 output、统一协议任务 registry、lease crash quarantine/预算、application delivery terminal、真实页面和长时间大媒体仍待补齐。
+- runtime changes: `stopEmbeddedBrowserHlsRecordingResource` 在 ffmpeg 成功后才 claim 并发布；非零退出、取消或没有有效产物时最终目标保持原状，原有 stop/discard/session cleanup 语义不变。
+- legacy cleanup: 无新增删除；保留 HLS live recorder/session owner 和最终 `outputPath` 合同，未引入第二套 HLS 算法或长期 fallback。
+- validation: 直播/lease/output 定向 `7 files / 42 passed`、TypeScript `--noEmit`、scoped ESLint 和非 `dist-electron/**` diff check 通过；完整 build、全仓 lint/test、真实页面与真实下载仍未执行。

@@ -2646,6 +2646,7 @@ export function createEmbeddedBrowserMainController(
         requestId,
         tabId: normalizedTabId,
       })
+      const activeSignal = activeTask.signal
       emitEmbeddedBrowserHlsTask({
         manifestUrl: session.manifestUrl,
         message: '正在停止直播录制并整理本地 playlist',
@@ -2671,28 +2672,40 @@ export function createEmbeddedBrowserMainController(
         totalFragments: completedRecording.totalFragments,
       })
 
-      const result = await downloadEmbeddedBrowserManifestResource({
-        durationSeconds: completedRecording.durationSeconds,
-        ffmpegPath: session.ffmpegPath,
-        kind: 'hls',
-        manifestUrl: completedRecording.playlistPath,
-        onProgress: (progress) => {
-          emitEmbeddedBrowserHlsTask({
-            completedFragments: completedRecording.totalFragments,
+      let ffmpegPath = ''
+      const published = await publishStagedOutput({
+        fileName: path.basename(session.outputPath),
+        mimeType: 'video/mp4',
+        ownerTaskId: `hls-live-output-${randomUUID()}`,
+        purpose: 'hls-live-recording',
+        store: getEmbeddedBrowserStagedOutputLeaseStore(),
+        targetPath: session.outputPath,
+        write: async (stagedPath) => {
+          const result = await downloadEmbeddedBrowserManifestResource({
             durationSeconds: completedRecording.durationSeconds,
-            ffmpegSpeedText: progress.speedText,
-            manifestUrl: session.manifestUrl,
-            mode: 'local-plan',
-            processedSeconds: progress.processedSeconds,
-            requestId,
-            stage: 'ffmpeg',
-            status: 'running',
-            tabId: normalizedTabId,
-            totalFragments: completedRecording.totalFragments,
+            ffmpegPath: session.ffmpegPath,
+            kind: 'hls',
+            manifestUrl: completedRecording.playlistPath,
+            onProgress: (progress) => {
+              emitEmbeddedBrowserHlsTask({
+                completedFragments: completedRecording.totalFragments,
+                durationSeconds: completedRecording.durationSeconds,
+                ffmpegSpeedText: progress.speedText,
+                manifestUrl: session.manifestUrl,
+                mode: 'local-plan',
+                processedSeconds: progress.processedSeconds,
+                requestId,
+                stage: 'ffmpeg',
+                status: 'running',
+                tabId: normalizedTabId,
+                totalFragments: completedRecording.totalFragments,
+              })
+            },
+            outputPath: stagedPath,
+            signal: activeSignal,
           })
+          ffmpegPath = result.ffmpegPath
         },
-        outputPath: session.outputPath,
-        signal: activeTask.signal,
       })
       emitEmbeddedBrowserHlsTask({
         completedFragments: completedRecording.totalFragments,
@@ -2700,7 +2713,7 @@ export function createEmbeddedBrowserMainController(
         manifestUrl: session.manifestUrl,
         message: '直播录制文件已完成',
         mode: 'local-plan',
-        outputPath: result.outputPath,
+        outputPath: published.outputPath,
         requestId,
         stage: 'completed',
         status: 'success',
@@ -2710,9 +2723,9 @@ export function createEmbeddedBrowserMainController(
       embeddedBrowserHlsSessionOwner.takeLive(requestId, normalizedTabId)
       await rm(completedRecording.workDirectoryPath, { force: true, recursive: true }).catch(() => undefined)
       return {
-        ffmpegPath: result.ffmpegPath,
+        ffmpegPath,
         ok: true,
-        outputPath: result.outputPath,
+        outputPath: published.outputPath,
       }
     } catch (error) {
       const wasAborted = activeTask?.signal.aborted
