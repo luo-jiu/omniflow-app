@@ -49,7 +49,13 @@ export type DashTaskMergeInput = {
   video?: DashTaskTrackFile
 }
 
+export type DashTaskMergeResult = {
+  ffmpegPath?: string
+  outputPath: string
+}
+
 export type DashTaskResult = {
+  ffmpegPath?: string
   outputPath: string
   workDirectoryPath: string
 }
@@ -66,7 +72,7 @@ export type DashTaskExecutorOptions = {
   fetch?: EmbeddedBrowserFragmentFetch
   headers?: Record<string, string>
   maxRetries?: number
-  mergeTracks: (input: DashTaskMergeInput) => Promise<{ outputPath: string }>
+  mergeTracks: (input: DashTaskMergeInput) => Promise<DashTaskMergeResult>
   onEvent?: (event: DashTaskEvent) => void
   outputPath: string
   plan: DashTaskPlan
@@ -297,7 +303,11 @@ export class DashTaskExecutor {
       })
       throwIfAborted(runController.signal)
       onEvent?.({ message: 'DASH 输出已完成', stage: 'completed', status: 'success' })
-      return { outputPath: result.outputPath, workDirectoryPath }
+      return {
+        ffmpegPath: result.ffmpegPath,
+        outputPath: result.outputPath,
+        workDirectoryPath,
+      }
     } catch (error) {
       onEvent?.({
         message: error instanceof Error ? error.message : String(error),

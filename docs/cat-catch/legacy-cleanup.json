@@ -404,16 +404,6 @@
       "cleanupAction": "remove-after-cutover"
     },
     {
-      "id": "node.dash.local-downloader",
-      "path": "electron/service/embeddedBrowserMpdLocalDownloaderService.ts",
-      "symbol": "downloadEmbeddedBrowserMpdToOutput",
-      "capabilityId": "dash.timeline-download-merge",
-      "cutoverUnitId": "dash-engine",
-      "classification": "legacy",
-      "role": "production-owner",
-      "cleanupAction": "remove-after-cutover"
-    },
-    {
       "id": "node.ffmpeg.manifest-executor",
       "path": "electron/service/embeddedBrowserResourceManifestDownloadService.ts",
       "symbol": "downloadEmbeddedBrowserManifestResource",
@@ -457,16 +447,6 @@
       "id": "node.ffmpeg.resource-transcode-executor",
       "path": "electron/service/embeddedBrowserResourceMergeService.ts",
       "symbol": "transcodeEmbeddedBrowserResource",
-      "capabilityId": "output.ffmpeg-process-owner",
-      "cutoverUnitId": "output-integration",
-      "classification": "legacy",
-      "role": "task-owner",
-      "cleanupAction": "remove-after-cutover"
-    },
-    {
-      "id": "node.ffmpeg.dash-track-merge-executor",
-      "path": "electron/service/embeddedBrowserMpdLocalDownloaderService.ts",
-      "symbol": "mergeMpdTrackFilesToOutput",
       "capabilityId": "output.ffmpeg-process-owner",
       "cutoverUnitId": "output-integration",
       "classification": "legacy",
@@ -879,9 +859,29 @@
       "symbol": "downloadEmbeddedBrowserMpdPlanResource",
       "capabilityId": "dash.timeline-download-merge",
       "cutoverUnitId": "dash-engine",
-      "classification": "legacy",
+      "classification": "omniflow-integration",
+      "role": "orchestration-owner",
+      "cleanupAction": "retain-or-adapt"
+    },
+    {
+      "id": "node.dash.task-executor",
+      "path": "electron/service/embedded-browser/processing/dash-task.ts",
+      "symbol": "DashTaskExecutor",
+      "capabilityId": "dash.timeline-download-merge",
+      "cutoverUnitId": "dash-engine",
+      "classification": "omniflow-integration",
       "role": "task-owner",
-      "cleanupAction": "remove-after-cutover"
+      "cleanupAction": "retain-or-adapt"
+    },
+    {
+      "id": "node.dash.output-adapter",
+      "path": "electron/service/embedded-browser/processing/dash-output.ts",
+      "symbol": "mergeDashTaskTracksToOutput",
+      "capabilityId": "dash.timeline-download-merge",
+      "cutoverUnitId": "dash-engine",
+      "classification": "omniflow-integration",
+      "role": "output-adapter",
+      "cleanupAction": "retain-or-adapt"
     },
     {
       "id": "node.transfer.http-ipc",

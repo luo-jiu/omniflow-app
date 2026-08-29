@@ -8,7 +8,8 @@
  * concrete audio/video segment lists and DRM evidence.
  * Adaptation: the pure port receives a platform-neutral XML AST. DOMParser
  * setup stays in the renderer/main adapter and is not part of this module.
- * Fixtures: dash.parser-core, dash.base-url-timeline-ranges
+ * Fixtures: dash.parser-core, dash.base-url-timeline-ranges,
+ * dash.segment-base-and-period-boundary
  */
 
 export type DashXmlElement = {
@@ -454,14 +455,29 @@ function parseSegmentBase(input: {
     }
   }
   const initialization = firstChild(input.element, 'Initialization')
-  const indexRange = parseByteRange(attribute(input.element, 'indexRange'))
-  if (indexRange) addReason(input.reasons, 'segment-base-sidx-not-expanded')
+  const rawIndexRange = attribute(input.element, 'indexRange')
+  const indexRange = parseByteRange(rawIndexRange)
+  if (rawIndexRange && !indexRange) {
+    addReason(input.reasons, 'segment-base-index-range-invalid')
+  }
+  if (indexRange) {
+    addReason(input.reasons, 'segment-base-sidx-not-expanded')
+  }
+  const initializationUrl = attribute(initialization, 'sourceURL')
+    ? resolveUrl(attribute(initialization, 'sourceURL') || '', input.baseUrl)
+    : undefined
+  const initializationRange = parseByteRange(attribute(initialization, 'range'))
+  if (initializationRange && !indexRange) {
+    addReason(input.reasons, 'segment-base-initialization-range-requires-split')
+  }
   return {
-    initializationRange: parseByteRange(attribute(initialization, 'range')),
-    initializationUrl: attribute(initialization, 'sourceURL')
-      ? resolveUrl(attribute(initialization, 'sourceURL') || '', input.baseUrl)
-      : undefined,
-    segments: [] as DashSegment[],
+    initializationRange,
+    initializationUrl,
+    // A SegmentBase without an index range is a single media file. Preserve
+    // that useful case; SIDX and byte-range splitting stay explicit rejects.
+    segments: indexRange || initializationRange
+      ? [] as DashSegment[]
+      : [{ index: 0, url: input.baseUrl } satisfies DashSegment],
   }
 }
 
@@ -575,6 +591,9 @@ export function parseDashManifest(input: {
   const representations: DashRepresentation[] = []
   const periods = children(root, 'Period')
   if (!periods.length) throw new Error('MPD manifest 没有 Period')
+  if (periods.length > 1) {
+    addReason(unsupportedReasons, 'multi-period-not-expanded')
+  }
 
   periods.forEach((period, periodIndex) => {
     const periodBaseUrls = resolveBaseUrls(baseUrls, period)

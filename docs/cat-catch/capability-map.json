@@ -1383,15 +1383,17 @@
       "syncedThrough": null,
       "plannedTestIds": [
         "dash.parser-core",
-        "dash.base-url-timeline-ranges"
+        "dash.base-url-timeline-ranges",
+        "dash.segment-base-and-period-boundary"
       ],
       "testRefs": [
         "electron/service/embedded-browser/cat-catch-port/dash/parser.test.ts#dash.parser-core",
         "electron/service/embedded-browser/cat-catch-port/dash/parser.test.ts#dash.base-url-timeline-ranges",
+        "electron/service/embedded-browser/cat-catch-port/dash/parser.test.ts#dash.segment-base-and-period-boundary",
         "src/features/embedded-browser/resources/model/embedded-browser-mpd-manifest.test.ts#dash.renderer-dom-adapter"
       ],
       "acceptedDifferences": [],
-      "notes": "The pure target parser now covers inherited BaseURL alternatives, SegmentTemplate token expansion, finite SegmentTimeline r=-1, SegmentList ranges and DRM evidence through a platform-neutral XML AST. Unbounded dynamic repeats and SegmentBase SIDX remain explicit unsupported reasons; the bundled mpd-parser/jQuery vendor-version discrepancy and production parser adapter are still open."
+      "notes": "The pure target parser now covers inherited BaseURL alternatives, SegmentTemplate token expansion, finite SegmentTimeline r=-1, SegmentList ranges, single-file SegmentBase and DRM evidence through a platform-neutral XML AST. SegmentBase SIDX, init-range splitting, multi-Period merging and unbounded dynamic repeats remain explicit unsupported reasons; the bundled mpd-parser/jQuery vendor-version discrepancy and production parser adapter are still open."
     },
     {
       "id": "dash.timeline-download-merge",
@@ -1416,7 +1418,8 @@
       ],
       "currentImplementationRefs": [
         "electron/service/embeddedBrowserMainController.ts#downloadEmbeddedBrowserMpdPlanResource",
-        "electron/service/embeddedBrowserMpdLocalDownloaderService.ts#downloadEmbeddedBrowserMpdToOutput"
+        "electron/service/embedded-browser/processing/dash-task.ts#DashTaskExecutor",
+        "electron/service/embedded-browser/processing/dash-output.ts#mergeDashTaskTracksToOutput"
       ],
       "targetRefs": [
         "electron/service/embedded-browser/processing/dash-task.ts#DashTaskExecutor"
@@ -1432,10 +1435,12 @@
       "testRefs": [
         "electron/service/embedded-browser/processing/dash-task.test.ts#dash.negative-repeat",
         "electron/service/embedded-browser/processing/dash-task.test.ts#dash.download-merge-cancel",
-        "electron/service/embedded-browser/processing/dash-task.test.ts#dash.dynamic-drm-rejection"
+        "electron/service/embedded-browser/processing/dash-task.test.ts#dash.dynamic-drm-rejection",
+        "electron/service/embedded-browser/processing/dash-output.test.ts#merges independent local video and audio tracks through the shared runner",
+        "electron/service/embedded-browser/processing/dash-output.test.ts#keeps single-track output on the same cancellable runner"
       ],
       "acceptedDifferences": [],
-      "notes": "DashTaskExecutor now owns bounded plan preflight, range-aware parallel fragment transfer, ordered file writes, external cancellation, temp cleanup and injected merge delivery. Dynamic MPD, DRM and parser unsupported reasons are rejected before fetch; production controller dispatch still calls the legacy MPD downloader until task/output authority and ffmpeg cancellation are integrated."
+      "notes": "DashTaskExecutor now owns bounded plan preflight, range-aware parallel fragment transfer, ordered file writes, external cancellation and temp cleanup. The production MPD plan dispatch converts the renderer DTO into the main-side plan, redeems captured-resource authority for fragments and routes local single- or dual-track output through the shared cancellable ffmpeg runner. Dynamic MPD, DRM, parser unsupported reasons, SegmentBase SIDX and real media output evidence remain open."
     },
     {
       "id": "transfer.concurrent-retry-abort-order",
@@ -1940,7 +1945,6 @@
       ],
       "upstreamRefs": [],
       "currentImplementationRefs": [
-        "electron/service/embeddedBrowserMpdLocalDownloaderService.ts#mergeMpdTrackFilesToOutput",
         "electron/service/embeddedBrowserResourceManifestDownloadService.ts#downloadEmbeddedBrowserManifestResource",
         "electron/service/embeddedBrowserResourceManifestDownloadService.ts#downloadEmbeddedBrowserManifestTracks",
         "electron/service/embeddedBrowserResourceMergeService.ts#canExecuteCommand",

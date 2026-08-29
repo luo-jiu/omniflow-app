@@ -1556,6 +1556,34 @@
 - legacy cleanup: 无；旧 MPD parser 已由 target model adapter 替换，但旧 MPD downloader 在 `dash-engine` 原子切换前保留。
 - validation: DASH task/parser/renderer `3 files / 7 passed`、应用 TypeScript `--noEmit`、定向 ESLint、metadata validator、sync tests `16/16` 和 scoped diff check 均通过；完整 build 与真实页面验证不执行。
 
+## 2026-08-29: same target (DASH production dispatch cutover)
+
+- observedHead / migrationTarget: 均为 `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本步将 MPD 计划下载的 production owner 切到 target task。
+- reviewedThrough / portedThrough: 均保持 `null`；`dash.parser-planner` 与 `dash.timeline-download-merge` 继续 `porting`，`dash-engine` unit 仍开放。
+- change groups: `main-authority-wiring`、`shared-ffmpeg-output-adapter`、`atomic-legacy-removal` 与 `documentation-correction`。
+- affected capability IDs: `dash.timeline-download-merge`、`output.ffmpeg-process-owner`；metadata 为 `7 units / 32 capabilities / 210 anchors / 99 cleanup entries / 188 planned IDs / 167 active refs`。
+- fixtures/tests: 新增 `dash-output.test.ts`，验证单轨与双轨本地文件均经现有可取消 ffmpeg runner；DASH task/parser/renderer/output 定向为 `4 files / 9 passed`，另有 authority 集成回归 `7 passed`。
+- accepted differences: renderer MPD DTO 在 main 侧归一为 `DashTaskPlan`；分片通过 `CapturedResourceAccessService` 的 opaque resource authority 获取，输出复用 manifest ffmpeg runner 的 process terminal、cancel 和 partial-output cleanup 语义。单轨和双轨均保留现有文件扩展名与用户工作流。
+- excluded changes and reasons: 未修改 renderer UI、HLS、MSE、transfer、Agent Shell 或 `dist-electron/**`；没有真实 MPD 网站、动态直播和大媒体 ffprobe 场景，未宣称 DASH unit 已关闭。
+- unresolved gaps: SegmentBase/SIDX、多 Period 合并、dynamic availability、真实 MPD/ffprobe 输出和应用级统一 task registry 仍待完成；旧 MPD downloader 已无 production 引用并在本步删除。
+- runtime changes: `downloadEmbeddedBrowserMpdPlanResource` 通过 `DashTaskExecutor` 执行，绑定 tab/request 生命周期；新增 `dash-output.ts` 将本地轨道接入共享可取消 ffmpeg runner；删除 `embeddedBrowserMpdLocalDownloaderService.ts` 及对应 cleanup entries。
+- legacy cleanup: 删除旧 MPD local downloader 和旧 DASH track merge executor 条目；保留 main controller orchestration、DASH task 与 output adapter 为 `omniflow-integration`，等待 unit 完成后继续审计。
+- validation: `npm run cat-catch:validate`、DASH 定向测试、scoped ESLint、应用 TypeScript `--noEmit` 与 scoped diff check 通过；完整 build 与真实页面验证不执行。
+
+## 2026-08-29: same target (DASH SegmentBase and multi-Period boundary)
+
+- observedHead / migrationTarget: 均为 `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本步补 parser 的单文件与不可安全展开边界。
+- reviewedThrough / portedThrough: 均保持 `null`；`dash.parser-planner` 与 `dash.timeline-download-merge` 继续 `porting`，`dash-engine` unit 仍开放。
+- change groups: `segment-base-single-file`、`sidx-rejection`、`multi-period-rejection` 与 `fixture-contract`。
+- affected capability IDs: `dash.parser-planner`、`dash.timeline-download-merge`；metadata 为 `7 units / 32 capabilities / 210 anchors / 99 cleanup entries / 189 planned IDs / 168 active refs`。
+- fixtures/tests: `dash.segment-base-and-period-boundary` 覆盖无 SIDX/无 init range 的单文件 SegmentBase、SIDX indexRange、init range 需要拆分和多 Period；parser/task/output 定向为 `4 files / 10 passed`。
+- accepted differences: SegmentBase 的 SIDX 二进制索引尚未移植，不能安全生成媒体分片时保留明确 unsupported reason；多 Period 暂不猜测跨 Period init/discontinuity 合并，统一在计划层拒绝，避免产出静默不完整文件。
+- excluded changes and reasons: 未修改 DASH task/output dispatch、renderer UI、HLS、MSE、transfer、Agent Shell 或 `dist-electron/**`；未宣称 SIDX、多 Period 或真实媒体输出已完成。
+- unresolved gaps: SIDX 读取与引用展开、跨 Period 合并、dynamic availability 和真实 MPD/ffprobe 输出仍待完成。
+- runtime changes: `parseSegmentBase` 现在物化可安全处理的 single-file SegmentBase；对 invalid indexRange、SIDX 和需要 init range split 的情况记录不同 unsupported reason；`parseDashManifest` 对多 Period 记录 `multi-period-not-expanded`。
+- legacy cleanup: 无新增删除；现有 target task/output adapter 继续作为唯一 production owner。
+- validation: DASH parser/task/output 定向测试、TypeScript、scoped ESLint、metadata validator、sync tests `16/16` 和 scoped diff check 通过；完整 build 与真实页面验证不执行。
+
 ## Template
 
 ```markdown

@@ -168,8 +168,11 @@ import {
 } from './embedded-browser/processing/hls-task'
 import type { EmbeddedBrowserFragmentFetch } from './embeddedBrowserFragmentDownloader'
 import {
-  downloadEmbeddedBrowserMpdToOutput,
-} from './embeddedBrowserMpdLocalDownloaderService'
+  DashTaskExecutor,
+  type DashTaskPlan,
+} from './embedded-browser/processing/dash-task'
+import type { DashRepresentation } from './embedded-browser/cat-catch-port/dash/parser'
+import { mergeDashTaskTracksToOutput } from './embedded-browser/processing/dash-output'
 import {
   HlsLiveTask,
 } from './embedded-browser/processing/hls-live-task'
@@ -195,6 +198,38 @@ import {
   handleEmbeddedBrowserInputShortcut,
   toggleEmbeddedBrowserDevTools,
 } from './embeddedBrowserInputShortcuts'
+
+function toDashTaskPlan(
+  plan: EmbeddedBrowserMpdPlanDownloadPayload['plan'],
+): DashTaskPlan {
+  return {
+    durationSeconds: plan.durationSeconds,
+    hasDrm: Boolean(plan.hasDrm),
+    headers: plan.headers,
+    isDynamic: Boolean(plan.isDynamic),
+    manifestUrl: plan.manifestUrl,
+    representations: plan.representations.map((representation): DashRepresentation => ({
+      bandwidth: representation.bandwidth,
+      baseUrls: representation.baseUrls?.length
+        ? representation.baseUrls
+        : [plan.manifestUrl],
+      codecs: representation.codecs,
+      contentType: representation.contentType,
+      frameRate: representation.frameRate,
+      height: representation.height,
+      id: representation.id,
+      initializationRange: representation.initializationRange,
+      initializationUrl: representation.initializationUrl,
+      language: representation.language,
+      mimeType: representation.mimeType,
+      segmentCount: representation.segmentCount,
+      segments: representation.segments,
+      unsupportedReasons: representation.unsupportedReasons || [],
+      width: representation.width,
+    })),
+    unsupportedReasons: plan.unsupportedReasons || [],
+  }
+}
 
 export function createEmbeddedBrowserMainController(
   options: EmbeddedBrowserMainControllerOptions,
@@ -2635,18 +2670,30 @@ export function createEmbeddedBrowserMainController(
         ok: false,
       }
     }
-    if (plan.hasDrm) {
+    const taskPlan = toDashTaskPlan(plan)
+    if (taskPlan.hasDrm) {
       return {
-        error: '当前 MPD 检测到 DRM，第一版下载器暂不支持',
+        error: '当前 DASH 检测到 DRM，暂不支持下载',
         ok: false,
       }
     }
-
+    if (taskPlan.isDynamic) {
+      return {
+        error: '当前 DASH 是动态 MPD，暂不支持有限文件下载',
+        ok: false,
+      }
+    }
+    if (taskPlan.unsupportedReasons?.length) {
+      return {
+        error: `当前 DASH 计划暂不可下载：${taskPlan.unsupportedReasons[0]}`,
+        ok: false,
+      }
+    }
     const selectedVideoRepresentation = String(payload.selectedVideoRepresentationId || '').trim()
-      ? plan.representations.find((item) => item.id === String(payload.selectedVideoRepresentationId || '').trim())
+      ? taskPlan.representations.find((item) => item.id === String(payload.selectedVideoRepresentationId || '').trim())
       : undefined
     const selectedAudioRepresentation = String(payload.selectedAudioRepresentationId || '').trim()
-      ? plan.representations.find((item) => item.id === String(payload.selectedAudioRepresentationId || '').trim())
+      ? taskPlan.representations.find((item) => item.id === String(payload.selectedAudioRepresentationId || '').trim())
       : undefined
 
     if (!selectedVideoRepresentation && !selectedAudioRepresentation) {
@@ -2656,6 +2703,10 @@ export function createEmbeddedBrowserMainController(
       }
     }
 
+    let activeTask: {
+      complete: () => void
+      signal: AbortSignal
+    } | undefined
     try {
       const defaultFileName = String(payload.suggestedFileName || '').trim()
         || deriveEmbeddedBrowserManifestOutputFileName(plan.manifestUrl, 'mpd')
@@ -2674,14 +2725,24 @@ export function createEmbeddedBrowserMainController(
         }
       }
 
-      const result = await downloadEmbeddedBrowserMpdToOutput({
+      activeTask = embeddedBrowserHlsSessionOwner.beginActiveTask({
+        requestId,
+        tabId: normalizedTabId,
+      })
+      const executor = new DashTaskExecutor({
         fetch: createEmbeddedBrowserCapturedResourceFetch(normalizedTabId, resourceId),
-        ffmpegPath: payload.ffmpegPath,
-        headers: plan.headers,
+        mergeTracks: input => mergeDashTaskTracksToOutput({
+          ...input,
+          durationSeconds: taskPlan.durationSeconds,
+          ffmpegPath: payload.ffmpegPath,
+        }),
         outputPath,
+        plan: taskPlan,
         selectedAudioRepresentation,
         selectedVideoRepresentation,
+        signal: activeTask.signal,
       })
+      const result = await executor.run()
       return {
         ffmpegPath: result.ffmpegPath,
         ok: true,
@@ -2694,10 +2755,18 @@ export function createEmbeddedBrowserMainController(
         requestId,
         tabId: normalizedTabId,
       })
+      if (activeTask?.signal.aborted || (error instanceof Error && error.name === 'AbortError')) {
+        return {
+          cancelled: true,
+          ok: false,
+        }
+      }
       return {
         error: error instanceof Error ? error.message : String(error),
         ok: false,
       }
+    } finally {
+      activeTask?.complete()
     }
   }
 

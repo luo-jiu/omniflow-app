@@ -141,4 +141,63 @@ describe('DASH parser', () => {
     expect(manifest.unsupportedReasons).toContain('segment-timeline-negative-repeat-unbounded')
     expect(manifest.representations[0].segments).toEqual([])
   })
+
+  it('dash.segment-base-and-period-boundary', () => {
+    const singleFileRoot = node('MPD', {}, [
+      node('Period', {}, [
+        node('AdaptationSet', { contentType: 'video', mimeType: 'video/mp4' }, [
+          node('Representation', { id: 'single-file' }, [
+            node('BaseURL', {}, [], 'video.mp4'),
+            node('SegmentBase'),
+          ]),
+        ]),
+      ]),
+    ])
+    const singleFileManifest = parseDashManifest({
+      baseUrl: 'https://cdn.example/media/manifest.mpd',
+      root: singleFileRoot,
+      text: '',
+    })
+    expect(singleFileManifest.representations[0].segments).toEqual([{
+      index: 0,
+      url: 'https://cdn.example/media/video.mp4',
+    }])
+    expect(singleFileManifest.unsupportedReasons).toEqual([])
+
+    const sidxRoot = node('MPD', {}, [
+      node('Period', {}, [
+        node('AdaptationSet', { contentType: 'video' }, [
+          node('Representation', { id: 'sidx' }, [
+            node('SegmentBase', { indexRange: '0-99' }),
+          ]),
+        ]),
+      ]),
+    ])
+    const sidxManifest = parseDashManifest({
+      baseUrl: 'https://cdn.example/media.mp4',
+      root: sidxRoot,
+      text: '',
+    })
+    expect(sidxManifest.unsupportedReasons).toContain('segment-base-sidx-not-expanded')
+    expect(sidxManifest.representations[0].segments).toEqual([])
+
+    const multiPeriodRoot = node('MPD', {}, [
+      node('Period', {}, [node('AdaptationSet', { contentType: 'video' }, [
+        node('Representation', { id: 'first' }, [node('SegmentList', {}, [
+          node('SegmentURL', { media: 'first.m4s' }),
+        ])]),
+      ])]),
+      node('Period', {}, [node('AdaptationSet', { contentType: 'video' }, [
+        node('Representation', { id: 'second' }, [node('SegmentList', {}, [
+          node('SegmentURL', { media: 'second.m4s' }),
+        ])]),
+      ])]),
+    ])
+    const multiPeriodManifest = parseDashManifest({
+      baseUrl: 'https://cdn.example/media/manifest.mpd',
+      root: multiPeriodRoot,
+      text: '',
+    })
+    expect(multiPeriodManifest.unsupportedReasons).toContain('multi-period-not-expanded')
+  })
 })
