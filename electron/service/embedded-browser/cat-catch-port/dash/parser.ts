@@ -457,7 +457,8 @@ function parseSegmentBase(input: {
   const initialization = firstChild(input.element, 'Initialization')
   const rawIndexRange = attribute(input.element, 'indexRange')
   const indexRange = parseByteRange(rawIndexRange)
-  if (rawIndexRange && !indexRange) {
+  const hasInvalidIndexRange = Boolean(rawIndexRange && !indexRange)
+  if (hasInvalidIndexRange) {
     addReason(input.reasons, 'segment-base-index-range-invalid')
   }
   if (indexRange) {
@@ -466,7 +467,12 @@ function parseSegmentBase(input: {
   const initializationUrl = attribute(initialization, 'sourceURL')
     ? resolveUrl(attribute(initialization, 'sourceURL') || '', input.baseUrl)
     : undefined
-  const initializationRange = parseByteRange(attribute(initialization, 'range'))
+  const rawInitializationRange = attribute(initialization, 'range')
+  const initializationRange = parseByteRange(rawInitializationRange)
+  const hasInvalidInitializationRange = Boolean(rawInitializationRange && !initializationRange)
+  if (hasInvalidInitializationRange) {
+    addReason(input.reasons, 'segment-base-initialization-range-invalid')
+  }
   if (initializationRange && !indexRange) {
     addReason(input.reasons, 'segment-base-initialization-range-requires-split')
   }
@@ -475,7 +481,7 @@ function parseSegmentBase(input: {
     initializationUrl,
     // A SegmentBase without an index range is a single media file. Preserve
     // that useful case; SIDX and byte-range splitting stay explicit rejects.
-    segments: indexRange || initializationRange
+    segments: hasInvalidIndexRange || hasInvalidInitializationRange || indexRange || initializationRange
       ? [] as DashSegment[]
       : [{ index: 0, url: input.baseUrl } satisfies DashSegment],
   }

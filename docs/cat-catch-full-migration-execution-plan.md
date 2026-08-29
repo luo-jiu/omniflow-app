@@ -2,7 +2,7 @@
 
 更新时间：2026-08-29
 
-状态：生效。当前固定迁移目标为 `2cb981d7c2f4614732edccc167c4b5793d1cb138`，尚未完成初始行为审计与迁移。
+状态：生效。当前固定迁移目标为 `2cb981d7c2f4614732edccc167c4b5793d1cb138`，初始行为审计已建立并持续按 capability 收口，尚未完成全部目标范围。
 
 适用范围：OmniFlow 内置浏览器的资源发现、页面深搜、MSE 捕捉、HLS/DASH 解析与下载、请求上下文、任务生命周期、文件处理以及资料库输出集成。
 
@@ -332,6 +332,6 @@ tools/cat-catch-lab/fixtures/<fixture-id>/
 
 ## 12. 当前下一步
 
-1. 运行轻量 `cat-catch:validate`，确认版本、32 项能力和 106 个 cleanup 条目自洽。
+1. 运行轻量 `cat-catch:validate`，确认版本、32 项能力和 99 个 cleanup 条目自洽。
 2. 继续收口 `mse-runtime`：补固定 `catch.js` 差分、生产等价大媒体与真实下载导入证据；不把 target runtime 的纯测试、staging contract 或 page extraction 当成完整 parity。
-3. 继续 `dash-engine` parser-planner：补固定 `mpd-parser` 差分和 dynamic/SegmentBase 边界，再为下载/合并补 production-equivalent integration；不把现有 legacy 行为当 oracle。
+3. 继续 `dash-engine` parser-planner：补固定 `mpd-parser` 差分和 dynamic/SegmentBase 边界，再为下载/合并补 production-equivalent integration；当前 dispatch 已切换到 target task/output owner，不把现有 legacy 行为当 oracle。

@@ -181,6 +181,38 @@ describe('DASH parser', () => {
     expect(sidxManifest.unsupportedReasons).toContain('segment-base-sidx-not-expanded')
     expect(sidxManifest.representations[0].segments).toEqual([])
 
+    const invalidInitializationRangeRoot = node('MPD', {}, [
+      node('Period', {}, [node('AdaptationSet', { contentType: 'video' }, [
+        node('Representation', { id: 'invalid-init-range' }, [
+          node('SegmentBase', {}, [node('Initialization', { range: '40-39' })]),
+        ]),
+      ])]),
+    ])
+    const invalidInitializationRangeManifest = parseDashManifest({
+      baseUrl: 'https://cdn.example/media.mp4',
+      root: invalidInitializationRangeRoot,
+      text: '',
+    })
+    expect(invalidInitializationRangeManifest.unsupportedReasons)
+      .toContain('segment-base-initialization-range-invalid')
+    expect(invalidInitializationRangeManifest.representations[0].segments).toEqual([])
+
+    const invalidIndexRangeRoot = node('MPD', {}, [
+      node('Period', {}, [node('AdaptationSet', { contentType: 'video' }, [
+        node('Representation', { id: 'invalid-index-range' }, [
+          node('SegmentBase', { indexRange: '90-89' }),
+        ]),
+      ])]),
+    ])
+    const invalidIndexRangeManifest = parseDashManifest({
+      baseUrl: 'https://cdn.example/media.mp4',
+      root: invalidIndexRangeRoot,
+      text: '',
+    })
+    expect(invalidIndexRangeManifest.unsupportedReasons)
+      .toContain('segment-base-index-range-invalid')
+    expect(invalidIndexRangeManifest.representations[0].segments).toEqual([])
+
     const multiPeriodRoot = node('MPD', {}, [
       node('Period', {}, [node('AdaptationSet', { contentType: 'video' }, [
         node('Representation', { id: 'first' }, [node('SegmentList', {}, [
