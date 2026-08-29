@@ -243,6 +243,40 @@ describe('DASH task executor', () => {
         'bytes=100-102',
         'bytes=103-104',
       ]))
+
+      const deepBoxes = Array.from({ length: 10 }, (_item, index) => createSidxBox([{
+        duration: 1000,
+        size: index < 9 ? 44 : 1,
+        type: index < 9 ? 1 : 0,
+      }]))
+      const deepRanges = new Map<string, Uint8Array>()
+      let deepOffset = 0
+      deepBoxes.forEach(box => {
+        deepRanges.set(`bytes=${deepOffset}-${deepOffset + box.byteLength - 1}`, box)
+        deepOffset += box.byteLength
+      })
+      deepRanges.set(`bytes=${deepOffset}-${deepOffset}`, new Uint8Array([1]))
+      const depthLimitedVideo = representation({
+        baseUrls: ['https://cdn.example/deep-sidx-video.mp4'],
+        id: 'deep-sidx-video',
+        segmentBase: {
+          indexRange: { length: deepBoxes[0]!.byteLength, offset: 0, raw: '0-43' },
+        },
+        segmentCount: 0,
+        segments: [],
+      })
+      await expect(new DashTaskExecutor({
+        fetch: async (_url, init) => {
+          const range = new Headers(init?.headers).get('Range') || ''
+          const bytes = deepRanges.get(range)
+          if (!bytes) throw new Error(`unexpected deep range ${range}`)
+          return new Response(bytes)
+        },
+        mergeTracks: async ({ outputPath: targetPath }) => ({ outputPath: targetPath }),
+        outputPath: path.join(workDirectoryPath, 'depth-limited.mp4'),
+        plan: plan([depthLimitedVideo]),
+        selectedVideoRepresentation: depthLimitedVideo,
+      }).run()).rejects.toThrow('嵌套层级超过限制')
     } finally {
       await rm(workDirectoryPath, { force: true, recursive: true })
     }

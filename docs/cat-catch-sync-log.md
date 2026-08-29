@@ -1879,6 +1879,20 @@
 - legacy cleanup: 无；DASH unit 尚未 cutover，旧实现和 `legacy-cleanup.json` 继续保留。
 - validation: parser/DASH 定向、TypeScript、scoped ESLint、metadata validator、sync runner 需在本切片提交前重跑；完整 build 仍因共享 `dist-electron/**` dirty 生成物暂不执行。
 
+## 2026-08-29: same target (DASH SIDX recursion guard)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本切片为嵌套 SIDX 增加深度上限回归证据。
+- reviewedThrough / portedThrough: 均保持 `null`；`dash.parser-planner` 与 `dash.timeline-download-merge` 继续 `porting`，`dash-engine` unit 仍开放。
+- change groups: `stability`（bounded recursion rejection）。
+- affected capability IDs: `dash.timeline-download-merge`；metadata 保持 `7 units / 32 capabilities / 210 anchors / 100 cleanup entries / 213 planned IDs / 192 active refs`。
+- fixtures/tests: 扩展 `electron/service/embedded-browser/processing/dash-task.test.ts#dash.segment-base-nested-sidx-task-fetch`，构造 9 条嵌套引用链，验证在固定 8 层上限处抛出“嵌套层级超过限制”，不进入媒体下载或 merge。
+- accepted differences: 深度上限是明确的资源保护策略；合法但超过 8 层的极端层级仍拒绝，后续若有真实样本再单独评估上限，而不是取消边界。
+- excluded changes and reasons: 未改生产输出协议、MPD parser、live polling、authority、renderer UI、HLS、资料库交付或旧实现清理。
+- unresolved gaps: 真实网站复杂 SIDX、多 Period/初始化冲突、renderer workflow 和 `dash-engine` 原子关闭仍待完成。
+- runtime changes: 无新增生产代码；仅补充现有递归 owner 的超限回归断言。
+- legacy cleanup: 无；DASH unit 尚未 cutover，旧实现和 `legacy-cleanup.json` 继续保留。
+- validation: 嵌套 SIDX 定向 `1/1`、TypeScript、scoped ESLint、metadata validator、sync runner 在前一切片已通过；本切片测试断言重跑通过，完整 build 仍因共享 `dist-electron/**` dirty 生成物暂不执行。
+
 ```markdown
 ## YYYY-MM-DD: <from> -> <to>
 
