@@ -39,7 +39,8 @@ export function useEmbeddedBrowserDownloadImport(
   );
   const [importingDownloadId, setImportingDownloadId] = React.useState<string | null>(null);
   const [savingDownloadId, setSavingDownloadId] = React.useState<string | null>(null);
-  const activeDownload = queue[0] ?? null;
+  const activeItem = queue[0] ?? null;
+  const activeDownload = activeItem?.download ?? null;
 
   React.useEffect(() => {
     return capturedOutputWorkflowCoordinator.subscribeEvents((payload) => {
@@ -50,87 +51,94 @@ export function useEmbeddedBrowserDownloadImport(
   }, []);
 
   const closeActiveDownload = React.useCallback(async (options?: { discardFile?: boolean }) => {
-    const current = activeDownload;
-    if (current) {
-      capturedOutputWorkflowCoordinator.dismiss(current.downloadId);
-    }
-    if (!current?.tempPath || !options?.discardFile) {
+    const current = activeItem;
+    const dismissed = current
+      ? capturedOutputWorkflowCoordinator.dismiss(current.download.downloadId)
+      : false;
+    if (!dismissed || !current.download.tempPath || !options?.discardFile) {
       return;
     }
-    await cleanupEmbeddedBrowserDownloadedFile(current.tempPath).catch(() => undefined);
-  }, [activeDownload]);
+    await cleanupEmbeddedBrowserDownloadedFile(current.download.tempPath).catch(() => undefined);
+  }, [activeItem]);
 
   const importActiveDownload = React.useCallback(async (targetFolder: LibraryFolderEntry) => {
-    const current = activeDownload;
-    if (!current?.tempPath) {
+    const current = activeItem;
+    if (!current?.download.tempPath) {
       await closeActiveDownload();
       return;
     }
 
-    setImportingDownloadId(current.downloadId);
-    capturedOutputWorkflowCoordinator.dismiss(current.downloadId);
-
-    const file = toUploadFile(current);
-    const batch = uploadManager.createBatch([{
-      file,
-      libraryId,
-      parentId: targetFolder.id,
-      relativePath: current.fileName,
-    }]);
-
-    batch.done
-      .then(async (results) => {
-        const success = results.some((item) => item.taskStatus === UPLOAD_TASK_STATUS.SUCCESS);
-        if (success) {
-          await cleanupEmbeddedBrowserDownloadedFile(current.tempPath).catch(() => undefined);
-          try {
-            await options?.onImportSuccess?.({
-              download: current,
-              targetFolder,
-            });
-          } catch (error) {
-            runtimeLogger.warn('浏览器下载导入后刷新目录失败', error);
-          }
-          Toast.success(`已导入到 ${targetFolder.name}`);
-          return;
-        }
-        Toast.error(`导入失败：${current.fileName}`);
-      })
-      .catch(() => {
-        Toast.error(`导入失败：${current.fileName}`);
-      })
-      .finally(() => {
-        setImportingDownloadId((prev) => (prev === current.downloadId ? null : prev));
-      });
-  }, [activeDownload, closeActiveDownload, libraryId, options]);
-
-  const saveActiveDownloadToDesktop = React.useCallback(async () => {
-    const current = activeDownload;
-    if (!current?.tempPath) {
-      await closeActiveDownload();
-      return;
-    }
-
-    setSavingDownloadId(current.downloadId);
+    setImportingDownloadId(current.download.downloadId);
     try {
-      const result = await saveEmbeddedBrowserDownloadToDesktop(current.tempPath, current.fileName);
-      if (result.canceled) {
+      const success = await capturedOutputWorkflowCoordinator.runDelivery(
+        current.download.downloadId,
+        'importing',
+        async () => {
+          const file = toUploadFile(current.download);
+          const batch = uploadManager.createBatch([{
+            file,
+            libraryId,
+            parentId: targetFolder.id,
+            relativePath: current.download.fileName,
+          }]);
+          const results = await batch.done;
+          return results.some((item) => item.taskStatus === UPLOAD_TASK_STATUS.SUCCESS);
+        },
+      );
+      if (!success) {
+        Toast.error(`导入失败：${current.download.fileName}`);
         return;
       }
-      await cleanupEmbeddedBrowserDownloadedFile(current.tempPath).catch(() => undefined);
-      capturedOutputWorkflowCoordinator.dismiss(current.downloadId);
-      Toast.success('已保存到本地');
-    } catch (error: any) {
-      Toast.error(error?.message || `保存失败：${current.fileName}`);
+      try {
+        await options?.onImportSuccess?.({
+          download: current.download,
+          targetFolder,
+        });
+      } catch (error) {
+        runtimeLogger.warn('浏览器下载导入后刷新目录失败', error);
+      }
+      Toast.success(`已导入到 ${targetFolder.name}`);
+    } catch {
+      Toast.error(`导入失败：${current.download.fileName}`);
     } finally {
-      setSavingDownloadId((prev) => (prev === current.downloadId ? null : prev));
+      setImportingDownloadId((prev) => (prev === current.download.downloadId ? null : prev));
     }
-  }, [activeDownload, closeActiveDownload]);
+  }, [activeItem, closeActiveDownload, libraryId, options]);
+
+  const saveActiveDownloadToDesktop = React.useCallback(async () => {
+    const current = activeItem;
+    if (!current?.download.tempPath) {
+      await closeActiveDownload();
+      return;
+    }
+
+    setSavingDownloadId(current.download.downloadId);
+    try {
+      const success = await capturedOutputWorkflowCoordinator.runDelivery(
+        current.download.downloadId,
+        'saving',
+        async () => {
+          const result = await saveEmbeddedBrowserDownloadToDesktop(
+            current.download.tempPath as string,
+            current.download.fileName,
+          );
+          return !result.canceled;
+        },
+      );
+      if (success) {
+        Toast.success('已保存到本地');
+      }
+    } catch (error: any) {
+      Toast.error(error?.message || `保存失败：${current.download.fileName}`);
+    } finally {
+      setSavingDownloadId((prev) => (prev === current.download.downloadId ? null : prev));
+    }
+  }, [activeItem, closeActiveDownload]);
 
   return {
     activeDownload,
-    importLoading: importingDownloadId === activeDownload?.downloadId,
-    savingLoading: savingDownloadId === activeDownload?.downloadId,
+    importLoading: activeItem?.status === 'importing' || importingDownloadId === activeDownload?.downloadId,
+    savingLoading: activeItem?.status === 'saving' || savingDownloadId === activeDownload?.downloadId,
     importActiveDownload,
     saveActiveDownloadToDesktop,
     closeActiveDownload,

@@ -7,6 +7,13 @@ import type { EmbeddedBrowserDownloadEvent } from '../downloads/types';
 type DownloadListener = (payload: EmbeddedBrowserDownloadEvent) => void;
 type SnapshotListener = () => void;
 
+export type CapturedOutputWorkflowStatus = 'importing' | 'pending' | 'saving';
+
+export type CapturedOutputWorkflowItem = {
+  download: EmbeddedBrowserDownloadEvent;
+  status: CapturedOutputWorkflowStatus;
+};
+
 export interface CapturedOutputWorkflowCoordinatorOptions {
   cleanupDownload?: (tempPath?: string) => Promise<boolean>;
   subscribeDownloads?: (listener: DownloadListener) => () => void;
@@ -26,7 +33,7 @@ export class CapturedOutputWorkflowCoordinator {
 
   private readonly subscribeDownloads: (listener: DownloadListener) => () => void;
 
-  private downloads: EmbeddedBrowserDownloadEvent[] = [];
+  private downloads: CapturedOutputWorkflowItem[] = [];
 
   private sourceUnsubscribe: (() => void) | null = null;
 
@@ -59,13 +66,43 @@ export class CapturedOutputWorkflowCoordinator {
     if (!normalizedId) {
       return false;
     }
-    const nextDownloads = this.downloads.filter((download) => download.downloadId !== normalizedId);
+    const current = this.downloads.find((item) => item.download.downloadId === normalizedId);
+    if (!current || current.status !== 'pending') {
+      return false;
+    }
+    const nextDownloads = this.downloads.filter((item) => item.download.downloadId !== normalizedId);
     if (nextDownloads.length === this.downloads.length) {
       return false;
     }
     this.downloads = nextDownloads;
     this.notifySnapshotListeners();
     return true;
+  }
+
+  async runDelivery(
+    downloadId: string,
+    status: Exclude<CapturedOutputWorkflowStatus, 'pending'>,
+    deliver: () => Promise<boolean>,
+  ) {
+    const normalizedId = String(downloadId || '').trim();
+    const current = this.downloads.find((item) => item.download.downloadId === normalizedId);
+    if (!current || current.status !== 'pending') {
+      return false;
+    }
+    this.updateStatus(normalizedId, status);
+    try {
+      const completed = await deliver();
+      if (!completed) {
+        this.updateStatus(normalizedId, 'pending');
+        return false;
+      }
+      await this.cleanupDownload(current.download.tempPath).catch(() => false);
+      this.removeCompletedDelivery(normalizedId);
+      return true;
+    } catch (error) {
+      this.updateStatus(normalizedId, 'pending');
+      throw error;
+    }
   }
 
   resetForTests() {
@@ -91,10 +128,10 @@ export class CapturedOutputWorkflowCoordinator {
     });
 
     if (payload.state === 'completed') {
-      if (!payload.downloadId || this.downloads.some((download) => download.downloadId === payload.downloadId)) {
+      if (!payload.downloadId || this.downloads.some((item) => item.download.downloadId === payload.downloadId)) {
         return;
       }
-      this.downloads = [...this.downloads, payload];
+      this.downloads = [...this.downloads, { download: payload, status: 'pending' }];
       this.notifySnapshotListeners();
       return;
     }
@@ -108,6 +145,20 @@ export class CapturedOutputWorkflowCoordinator {
     this.listeners.forEach((listener) => {
       listener();
     });
+  }
+
+  private removeCompletedDelivery(downloadId: string) {
+    this.downloads = this.downloads.filter((item) => item.download.downloadId !== downloadId);
+    this.notifySnapshotListeners();
+  }
+
+  private updateStatus(downloadId: string, status: CapturedOutputWorkflowStatus) {
+    this.downloads = this.downloads.map((item) => (
+      item.download.downloadId === downloadId
+        ? { ...item, status }
+        : item
+    ));
+    this.notifySnapshotListeners();
   }
 }
 

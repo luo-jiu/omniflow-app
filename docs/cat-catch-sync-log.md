@@ -2305,11 +2305,11 @@
 - observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本切片只收口 completed browser output 在 renderer listener 卸载/重挂载期间的队列归属。
 - reviewedThrough / portedThrough: 均保持 `null`；`output.application-workflow-coordinator` 进入 `porting`，`output.library-delivery-handoff`、`output.processing-staged-terminal` 与 MSE 完整交付仍开放。
 - change groups: `renderer-lifecycle`、`application-queue-owner`、`download-failure-cleanup` 与 `documentation-correction`。
-- affected capability IDs: `output.application-workflow-coordinator`；metadata 为 `7 units / 32 capabilities / 104 cleanup entries / 229 planned IDs / 238 active refs`，新增 2 个 active test refs，状态为 `15 verified / 12 porting / 1 ported-unverified / 4 pending`。
-- fixtures/tests: 新增 `captured-output-workflow-coordinator.test.ts#retains completed outputs when the workspace listener unmounts` 与 `#deduplicates completion events and cleans failed outputs without a mounted view`；覆盖单一 native download subscription、完成事件去重、无 listener 时继续保留完成文件、重挂载恢复和失败/取消文件清理。
-- accepted differences: coordinator 只持有 completed file queue 和 native event subscription，不持有 library target、UploadManager task 或 in-flight processing；用户重新挂载后仍需按当前库选择目标目录，现有导入/保存动作和清理 API 不变。
+- affected capability IDs: `output.application-workflow-coordinator`；metadata 为 `7 units / 32 capabilities / 104 cleanup entries / 229 planned IDs / 240 active refs`，新增 4 个 active test refs，状态为 `15 verified / 12 porting / 1 ported-unverified / 4 pending`。
+- fixtures/tests: 新增 `captured-output-workflow-coordinator.test.ts` 的 4 个测试，覆盖单一 native download subscription、完成事件去重、无 listener 时继续保留完成文件、重挂载恢复、importing/saving 状态跨重挂载保持，以及失败/取消交付回到 pending 并保留文件。
+- accepted differences: coordinator 持有 completed file queue、`pending/importing/saving` 状态和 native event subscription，但不改 UploadManager 状态机；用户重新挂载后仍需按当前库选择目标目录，现有导入/保存 API 和清理语义不变。
 - excluded changes and reasons: 未接入 UploadManager handoff、processing terminal、staged-output lease recovery、跨入口取消、crash quarantine、renderer UI、`dist-electron/**` 或 upstream 游标；这些需要独立的应用交付状态机和持久化边界。
-- unresolved gaps: 导入开始后的任务状态无法跨卸载恢复，应用重启不会恢复未消费事件，MSE 自动 output 仍依赖完成事件到达 renderer，真实页面和长时间大媒体仍待验证。
-- runtime changes: 新增 `src/features/embedded-browser/workflows/captured-output-workflow-coordinator.ts#CapturedOutputWorkflowCoordinator`；`useEmbeddedBrowserDownloadImport` 改用 `useSyncExternalStore` 读取应用级队列，失败/取消事件由 coordinator 在无挂载页面时清理 owned temp file。
+- unresolved gaps: 应用重启不会恢复未消费事件，MSE 自动 output 仍依赖完成事件到达 renderer，library target 尚未冻结到交付记录，staged lease/crash quarantine、真实页面和长时间大媒体仍待验证。
+- runtime changes: 新增 `src/features/embedded-browser/workflows/captured-output-workflow-coordinator.ts#CapturedOutputWorkflowCoordinator`；`useEmbeddedBrowserDownloadImport` 改用 `useSyncExternalStore` 读取应用级队列，并通过 coordinator 运行导入/保存交付，只有成功终态才清理 owned temp file。
 - legacy cleanup: 无新增删除；现有 download/import bridge、UploadManager 和 modal 保留，待完整 output-integration cutover 后再收口。
-- validation: coordinator 定向 Vitest `1 file / 2 passed`、downloads 目录无测试、TypeScript `--noEmit` 和 scoped diff check 通过；全仓 lint/test、完整 build、真实页面和真实下载导入沿用前序记录的未执行状态。
+- validation: coordinator 定向 Vitest `1 file / 4 passed`、MSE/merge 定向 `3 files / 14 passed`、TypeScript `--noEmit`、定向 ESLint 和 scoped diff check 通过；全仓 lint 仍沿用本轮已通过结果，完整 build、真实页面和真实下载导入未执行。

@@ -33,10 +33,10 @@ describe('CapturedOutputWorkflowCoordinator', () => {
 
     const remountedListener = vi.fn();
     const removeRemountedListener = coordinator.subscribe(remountedListener);
-    expect(coordinator.getSnapshot().map((item) => item.downloadId)).toEqual(['first', 'second']);
+    expect(coordinator.getSnapshot().map((item) => item.download.downloadId)).toEqual(['first', 'second']);
     expect(remountedListener).toHaveBeenCalled();
     expect(coordinator.dismiss('first')).toBe(true);
-    expect(coordinator.getSnapshot().map((item) => item.downloadId)).toEqual(['second']);
+    expect(coordinator.getSnapshot().map((item) => item.download.downloadId)).toEqual(['second']);
     removeRemountedListener();
   });
 
@@ -61,5 +61,59 @@ describe('CapturedOutputWorkflowCoordinator', () => {
     expect(coordinator.getSnapshot()).toHaveLength(1);
     expect(cleanupDownload).toHaveBeenCalledWith(completed.tempPath);
     unsubscribe();
+  });
+
+  it('keeps an upload delivery visible across remounts until the batch settles', async () => {
+    let emit: ((payload: EmbeddedBrowserDownloadEvent) => void) | undefined;
+    let resolveDelivery: ((completed: boolean) => void) | undefined;
+    const coordinator = new CapturedOutputWorkflowCoordinator({
+      subscribeDownloads: (listener) => {
+        emit = listener;
+        return vi.fn();
+      },
+    });
+    const removeListener = coordinator.subscribe(vi.fn());
+    const delivery = new Promise<boolean>((resolve) => {
+      resolveDelivery = resolve;
+    });
+    emit?.(completedDownload('upload'));
+
+    const running = coordinator.runDelivery('upload', 'importing', () => delivery);
+    expect(coordinator.getSnapshot()[0]?.status).toBe('importing');
+    const remounted = vi.fn();
+    const removeRemounted = coordinator.subscribe(remounted);
+    expect(coordinator.getSnapshot()[0]?.status).toBe('importing');
+
+    resolveDelivery?.(true);
+    await expect(running).resolves.toBe(true);
+    expect(coordinator.getSnapshot()).toEqual([]);
+    expect(remounted).toHaveBeenCalled();
+    removeRemounted();
+    removeListener();
+  });
+
+  it('returns a cancelled or failed delivery to pending without deleting its file', async () => {
+    let emit: ((payload: EmbeddedBrowserDownloadEvent) => void) | undefined;
+    const cleanupDownload = vi.fn(async () => true);
+    const coordinator = new CapturedOutputWorkflowCoordinator({
+      cleanupDownload,
+      subscribeDownloads: (listener) => {
+        emit = listener;
+        return vi.fn();
+      },
+    });
+    const removeListener = coordinator.subscribe(vi.fn());
+    emit?.(completedDownload('retry'));
+
+    await expect(coordinator.runDelivery('retry', 'saving', async () => false)).resolves.toBe(false);
+    expect(coordinator.getSnapshot()[0]?.status).toBe('pending');
+    expect(cleanupDownload).not.toHaveBeenCalled();
+
+    await expect(coordinator.runDelivery('retry', 'importing', async () => {
+      throw new Error('upload failed');
+    })).rejects.toThrow('upload failed');
+    expect(coordinator.getSnapshot()[0]?.status).toBe('pending');
+    expect(cleanupDownload).not.toHaveBeenCalled();
+    removeListener();
   });
 });

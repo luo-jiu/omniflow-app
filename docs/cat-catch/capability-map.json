@@ -1895,10 +1895,12 @@
       ],
       "testRefs": [
         "src/features/embedded-browser/workflows/captured-output-workflow-coordinator.test.ts#retains completed outputs when the workspace listener unmounts",
-        "src/features/embedded-browser/workflows/captured-output-workflow-coordinator.test.ts#deduplicates completion events and cleans failed outputs without a mounted view"
+        "src/features/embedded-browser/workflows/captured-output-workflow-coordinator.test.ts#deduplicates completion events and cleans failed outputs without a mounted view",
+        "src/features/embedded-browser/workflows/captured-output-workflow-coordinator.test.ts#keeps an upload delivery visible across remounts until the batch settles",
+        "src/features/embedded-browser/workflows/captured-output-workflow-coordinator.test.ts#returns a cancelled or failed delivery to pending without deleting its file"
       ],
       "acceptedDifferences": [],
-      "notes": "`CapturedOutputWorkflowCoordinator` now owns the application-scoped completed browser-download queue and one native download subscription. A library-detail listener can unmount and remount without losing completed MSE/native outputs, duplicate completion events are ignored, and failed/cancelled files are cleaned even when no workspace is mounted. The coordinator intentionally stops at the completed-file handoff: frozen library targets, UploadManager task association, in-flight recovery, staged lease recovery and crash quarantine remain open."
+      "notes": "`CapturedOutputWorkflowCoordinator` now owns the application-scoped browser-download queue and one native download subscription. A library-detail listener can unmount and remount without losing completed MSE/native outputs, duplicate completion events are ignored, and failed/cancelled files are cleaned even when no workspace is mounted. Delivery status remains `pending/importing/saving` until the existing UploadManager batch or local-save operation reaches a terminal result; failed/cancelled delivery returns to pending without deleting the file, while success performs the single cleanup and removes the item. Frozen library targets, staged lease recovery and crash quarantine remain open."
     },
     {
       "id": "output.library-delivery-handoff",
