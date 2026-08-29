@@ -1383,6 +1383,7 @@
       "syncedThrough": null,
       "plannedTestIds": [
         "dash.parser-core",
+        "dash.segment-template-final-duration",
         "dash.base-url-timeline-ranges",
         "dash.segment-base-and-period-boundary",
         "dash.segment-list-boundary",
@@ -1390,6 +1391,7 @@
       ],
       "testRefs": [
         "electron/service/embedded-browser/cat-catch-port/dash/parser.test.ts#dash.parser-core",
+        "electron/service/embedded-browser/cat-catch-port/dash/parser.test.ts#dash.segment-template-final-duration",
         "electron/service/embedded-browser/cat-catch-port/dash/parser.test.ts#dash.base-url-timeline-ranges",
         "electron/service/embedded-browser/cat-catch-port/dash/parser.test.ts#dash.segment-base-and-period-boundary",
         "electron/service/embedded-browser/cat-catch-port/dash/parser.test.ts#dash.segment-list-boundary",
@@ -1397,7 +1399,7 @@
         "src/features/embedded-browser/resources/model/embedded-browser-mpd-manifest.test.ts#dash.renderer-dom-adapter"
       ],
       "acceptedDifferences": [],
-      "notes": "The pure target parser now covers inherited BaseURL alternatives, SegmentTemplate and SegmentList timeline expansion, finite SegmentTimeline r=-1, validated SegmentList ranges, single-file SegmentBase and DRM evidence through a platform-neutral XML AST. Invalid or structurally ambiguous SegmentList inputs are explicit unsupported reasons; SegmentBase SIDX, init-range splitting, multi-Period merging and unbounded dynamic repeats remain explicit unsupported reasons; the bundled mpd-parser/jQuery vendor-version discrepancy and production parser adapter are still open."
+      "notes": "The pure target parser now covers inherited BaseURL alternatives, SegmentTemplate and SegmentList timeline expansion, static final-segment duration correction, finite SegmentTimeline r=-1, validated SegmentList ranges, single-file SegmentBase and DRM evidence through a platform-neutral XML AST. Invalid or structurally ambiguous SegmentList inputs are explicit unsupported reasons; SegmentBase SIDX, init-range splitting, multi-Period merging and unbounded dynamic repeats remain explicit unsupported reasons; the bundled mpd-parser/jQuery vendor-version discrepancy and production parser adapter are still open."
     },
     {
       "id": "dash.timeline-download-merge",

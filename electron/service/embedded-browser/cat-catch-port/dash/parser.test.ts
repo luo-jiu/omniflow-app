@@ -69,6 +69,48 @@ describe('DASH parser', () => {
     ])
   })
 
+  it('dash.segment-template-final-duration', () => {
+    const root = node('MPD', { mediaPresentationDuration: 'PT10S' }, [
+      node('Period', {}, [node('AdaptationSet', { contentType: 'video' }, [
+        node('SegmentTemplate', { duration: '3', media: 'segment-$Number$.m4s' }),
+        node('Representation', { id: 'three-second-segments' }),
+      ])]),
+    ])
+    const manifest = parseDashManifest({
+      baseUrl: 'https://cdn.example/media/manifest.mpd',
+      root,
+      text: '',
+    })
+    expect(manifest.representations[0].segments.map(segment => segment.duration)).toEqual([
+      3, 3, 3, 1,
+    ])
+
+    const listRoot = node('MPD', { mediaPresentationDuration: 'PT10S' }, [
+      node('Period', {}, [node('AdaptationSet', { contentType: 'video' }, [
+        node('Representation', { id: 'three-second-list' }, [
+          node('SegmentList', { duration: '3' }, [
+            node('SegmentURL', { media: 'list-1.m4s' }),
+            node('SegmentURL', { media: 'list-2.m4s' }),
+            node('SegmentURL', { media: 'list-3.m4s' }),
+            node('SegmentURL', { media: 'list-4.m4s' }),
+            node('SegmentURL', { media: 'extra.m4s' }),
+          ]),
+        ]),
+      ])]),
+    ])
+    const listManifest = parseDashManifest({
+      baseUrl: 'https://cdn.example/media/manifest.mpd',
+      root: listRoot,
+      text: '',
+    })
+    expect(listManifest.representations[0].segments.map(segment => segment.duration)).toEqual([
+      3, 3, 3, 1,
+    ])
+    expect(listManifest.representations[0].segments.map(segment => segment.url)).not.toContain(
+      'https://cdn.example/media/extra.m4s',
+    )
+  })
+
   it('dash.base-url-timeline-ranges', () => {
     const root = node('MPD', { type: 'dynamic' }, [
       node('BaseURL', {}, [], 'https://cdn-a.example/media/'),

@@ -409,8 +409,14 @@ function expandSegmentTemplate(input: {
     initializationUrl,
     segments: Array.from({ length: count }, (_item, index) => {
       const number = (Number.isFinite(startNumber) ? startNumber : 1) + index
+      const durationForSegment = input.durationSeconds === undefined
+        ? segmentDuration
+        : Math.max(0, Math.min(
+            segmentDuration,
+            input.durationSeconds - index * segmentDuration,
+          ))
       return {
-        duration: segmentDuration,
+        duration: durationForSegment,
         index,
         number,
         url: resolveUrl(replaceTemplateTokens(media, {
@@ -463,6 +469,18 @@ function parseSegmentList(input: {
   if (rawDuration === undefined && !timeline) {
     addReason(input.reasons, 'segment-time-unspecified')
   }
+  const segmentUrls = children(input.element, 'SegmentURL')
+  const segmentDuration = duration !== undefined && timescale !== undefined && timescale > 0
+    ? duration / timescale
+    : undefined
+  const expectedSegmentCount = timelineTimings
+    ? timelineTimings.length
+    : segmentDuration !== undefined && input.durationSeconds !== undefined
+      ? Math.max(0, Math.ceil(input.durationSeconds / segmentDuration))
+      : undefined
+  const mappedSegmentUrls = expectedSegmentCount === undefined
+    ? segmentUrls
+    : segmentUrls.slice(0, expectedSegmentCount)
   const initialization = firstChild(input.element, 'Initialization')
   const initializationUrl = attribute(initialization, 'sourceURL')
     ? resolveUrl(attribute(initialization, 'sourceURL') || '', input.baseUrl)
@@ -472,12 +490,11 @@ function parseSegmentList(input: {
   if (rawInitializationRange && !initializationRange) {
     addReason(input.reasons, 'segment-list-initialization-range-invalid')
   }
-  const segmentUrls = children(input.element, 'SegmentURL')
   if (!segmentUrls.length) addReason(input.reasons, 'segment-list-empty')
   return {
     initializationRange,
     initializationUrl,
-    segments: segmentUrls.map((segment, index) => {
+    segments: mappedSegmentUrls.map((segment, index) => {
       const rawMedia = attribute(segment, 'media')
       const rawMediaRange = attribute(segment, 'mediaRange')
       const byteRange = parseByteRange(rawMediaRange)
@@ -490,7 +507,14 @@ function parseSegmentList(input: {
       return {
         byteRange,
         duration: timelineTimings?.[index]?.duration
-          ?? (duration && timescale && timescale > 0 ? duration / timescale : undefined),
+          ?? (segmentDuration !== undefined
+            ? input.durationSeconds === undefined
+              ? segmentDuration
+              : Math.max(0, Math.min(
+                  segmentDuration,
+                  input.durationSeconds - index * segmentDuration,
+                ))
+            : undefined),
         index,
         number: timelineTimings?.[index]?.number,
         time: timelineTimings?.[index]?.time,

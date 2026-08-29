@@ -1612,6 +1612,20 @@
 - legacy cleanup: 无新增删除；现有 target task/output adapter 继续作为唯一 production owner。
 - validation: DASH parser/task/output/renderer `4 files / 12 passed`、TypeScript、scoped ESLint、metadata validator、sync tests `16/16` 和 scoped diff check 通过；完整 build 与真实页面验证不执行。
 
+## 2026-08-29: same target (DASH static duration semantics)
+
+- observedHead / migrationTarget: 均为 `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本步补固定 `mpd-parser` 对静态 duration 模式最后一片的剩余时长修正。
+- reviewedThrough / portedThrough: 均保持 `null`；`dash.parser-planner` 与 `dash.timeline-download-merge` 继续 `porting`，`dash-engine` unit 仍开放。
+- change groups: `static-final-duration`、`segment-list-duration-parity` 与 `fixture-contract`。
+- affected capability IDs: `dash.parser-planner`；metadata 为 `7 units / 32 capabilities / 210 anchors / 99 cleanup entries / 192 planned IDs / 171 active refs`。
+- fixtures/tests: `dash.segment-template-final-duration` 锁定 10 秒 MPD 以 3 秒 nominal duration 展开为 `3/3/3/1`；SegmentList duration-only 路径复用同一剩余时长规则；DASH parser/task/output/renderer `4 files / 13 passed`。
+- accepted differences: duration-only plans remain bounded by the declared SegmentURL/template count; no extra URL is invented when the source advertises fewer segments than the computed static range.
+- excluded changes and reasons: 未修改 SegmentBase SIDX、dynamic availability、多 Period 合并、renderer UI、HLS、MSE、transfer 或 output；未宣称 DASH unit 已关闭。
+- unresolved gaps: SegmentBase SIDX、多 Period 合并、dynamic availability、完整 `mpd-parser` 差分和真实 MPD/ffprobe 输出仍待完成。
+- runtime changes: SegmentTemplate 与 SegmentList 的 static duration mode 现在按 MPD/Period 剩余时长裁剪最后一片，避免输出时长被 nominal duration 向上取整。
+- legacy cleanup: 无新增删除；现有 target task/output adapter 继续作为唯一 production owner。
+- validation: DASH parser/task/output/renderer `4 files / 13 passed`、TypeScript、scoped ESLint、metadata validator、sync tests `16/16` 和 scoped diff check 通过；完整 build 与真实页面验证不执行。
+
 ## Template
 
 ```markdown
