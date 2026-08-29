@@ -1951,3 +1951,17 @@
 - runtime changes: `mse-page.ts` 以 `runtime.getSnapshot().totalBytes` 判定周期阈值，保持跨轨道全局累计并在 flush 后的 resource projection 完成后发送 `mse-save`。
 - legacy cleanup: 无新增删除；旧 Cat Catch 页面实现继续保留至 MSE parity 和真实回归完成。
 - validation: MSE/Cat Catch 定向 `10 files / 21 passed`、TypeScript `--noEmit`、scoped ESLint、`npm run cat-catch:validate`、同步校验 `16/16` 与非 `dist-electron/**` 的 `git diff --check` 均通过；完整 build、全仓 lint/test 与真实页面验证仍受共享 dirty `dist-electron/**` 和当前无测试场景限制。
+
+## 2026-08-29: same target (MSE completion and clear boundary)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本切片补齐固定 `catch.js` 的完成开关与空轨道清理边界。
+- reviewedThrough / portedThrough: 均保持 `null`；`mse.page-capture-runtime` 继续 `porting`，`mse.main-spool-lifecycle` 继续 `ported-unverified`，`mse-runtime` unit 仍开放。
+- change groups: `upstream-diff`、`completion-gate`、`cache-clear` 与 `fixture-contract`。
+- affected capability IDs: `mse.page-capture-runtime`；metadata 当前为 `7 units / 32 capabilities / 210 anchors / 100 cleanup entries / 218 planned IDs / 197 active refs`，状态为 `15 verified / 5 porting / 1 ported-unverified / 11 pending`。
+- fixtures/tests: `electron/service/embedded-browser/cat-catch-port/mse/runtime.test.ts#mse.completion-respects-capture-gate` 验证关闭捕获时 `endOfStream` 不产生完成事件，重新开启后才完成；`#mse.complete-clear-without-streams` 验证已完成但没有轨道时 `clear()` 仍重置完成状态；MSE runtime 定向 `1 file / 4 passed`。
+- accepted differences: OmniFlow 的 `isCaptureEnabled` 是可选平台开关，与 append 观察保持一致；native `addSourceBuffer` / `endOfStream` 异常继续只传播一次，不复制 Cat Catch catch 分支中可能重复调用失败 native 方法的副作用。
+- excluded changes and reasons: 未修改 MSE spool、周期输出、HLS/DASH、transfer、renderer UI、真实网站或 `dist-electron/**`；真实页面异常状态和大媒体压力仍需环境验证。
+- unresolved gaps: 固定上游 MSE 头部裁剪、长时间大媒体、双轨输出失败恢复、真实下载导入和 MSE unit 原子关闭仍待完成。
+- runtime changes: `mse/runtime.ts` 在 `endOfStream` 后仅于捕获开关开启时设置 `isComplete` 并发出完成事件；`clear()` 在无轨道但已完成时继续执行上游的完成清理分支。
+- legacy cleanup: 无新增删除；旧 Cat Catch 页面实现继续保留至 MSE parity 和真实回归完成。
+- validation: MSE 关联集合 `7 files / 17 passed`、TypeScript `--noEmit`、scoped ESLint、`npm run cat-catch:validate`（`7 units / 32 capabilities / 17 open / 100 cleanup / 218 planned`）、同步 runner `16/16` 和非 `dist-electron/**` 的 `git diff --check` 均通过；完整 build、全仓 lint/test 与真实页面验证仍因共享 dirty 生成物和当前无测试场景不执行。

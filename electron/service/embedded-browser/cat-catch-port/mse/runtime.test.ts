@@ -162,4 +162,53 @@ describe('Cat Catch MSE runtime', () => {
     expect(FakeMediaSource.prototype.addSourceBuffer).toBe(nativeAddSourceBuffer)
     expect(FakeMediaSource.prototype.endOfStream).toBe(nativeEndOfStream)
   })
+
+  it('mse.completion-respects-capture-gate', () => {
+    let captureEnabled = false
+    const onComplete = vi.fn()
+    const runtime = installMseRuntime({
+      createStreamId: () => 'gated-video',
+      isCaptureEnabled: () => captureEnabled,
+      onComplete,
+      scope: {
+        ArrayBuffer,
+        MediaSource: FakeMediaSource,
+        Uint8Array,
+      },
+    })
+    const mediaSource = new FakeMediaSource()
+    const sourceBuffer = mediaSource.addSourceBuffer('video/mp4')
+    sourceBuffer.appendBuffer(new Uint8Array([1, 2, 3]).buffer)
+
+    mediaSource.endOfStream()
+    expect(runtime.getSnapshot().isComplete).toBe(false)
+    expect(onComplete).not.toHaveBeenCalled()
+
+    captureEnabled = true
+    mediaSource.endOfStream()
+    expect(runtime.getSnapshot().isComplete).toBe(true)
+    expect(onComplete).toHaveBeenCalledWith({ streamIds: ['gated-video'] })
+    runtime.dispose()
+  })
+
+  it('mse.complete-clear-without-streams', () => {
+    const runtime = installMseRuntime({
+      scope: {
+        ArrayBuffer,
+        MediaSource: FakeMediaSource,
+        Uint8Array,
+      },
+    })
+    const mediaSource = new FakeMediaSource()
+
+    mediaSource.endOfStream()
+    expect(runtime.getSnapshot().isComplete).toBe(true)
+    expect(runtime.clear()).toBe(true)
+    expect(runtime.getSnapshot()).toMatchObject({
+      isComplete: false,
+      retainedBytes: 0,
+      streamCount: 0,
+    })
+    runtime.dispose()
+  })
 })

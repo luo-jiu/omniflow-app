@@ -223,7 +223,7 @@ export function installMseRuntime(input: InstallMseRuntimeInput): MseRuntime {
     return event
   }
   const clear = () => {
-    if (streams.size === 0) return false
+    if (streams.size === 0 && !isComplete) return false
     for (const stream of streams.values()) {
       try {
         input.onReset?.({
@@ -338,6 +338,7 @@ export function installMseRuntime(input: InstallMseRuntimeInput): MseRuntime {
       apply(target, thisArg, argumentsList) {
         const result = Reflect.apply(target, thisArg, argumentsList)
         try {
+          if (input.isCaptureEnabled && !input.isCaptureEnabled()) return result
           isComplete = true
           const streamIds = (mediaSourceStreams.get(thisArg as MseMediaSource) || [])
             .filter(streamId => streams.has(streamId))
