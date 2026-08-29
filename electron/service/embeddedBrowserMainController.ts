@@ -367,7 +367,9 @@ export function createEmbeddedBrowserMainController(
       embeddedBrowserStagedOutputLeaseStore = new StagedOutputLeaseStore({
         rootPath: path.join(app.getPath('userData'), 'embedded-browser-output-leases'),
       })
-      void embeddedBrowserStagedOutputLeaseStore.reapExpired().catch((error) => {
+      void embeddedBrowserStagedOutputLeaseStore.quarantineOrphaned().then(() => (
+        embeddedBrowserStagedOutputLeaseStore?.reapExpired()
+      )).catch((error) => {
         runtimeLogger.warn('embedded browser staged output lease reap failed', {
           error: error instanceof Error ? error.message : String(error),
         })

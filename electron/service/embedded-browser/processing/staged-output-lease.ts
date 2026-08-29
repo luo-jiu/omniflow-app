@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { mkdir, rm } from 'node:fs/promises'
+import { mkdir, readdir, rm } from 'node:fs/promises'
 import path from 'node:path'
 
 export type StagedOutputLeaseState = 'staged' | 'claimed'
@@ -178,6 +178,24 @@ export class StagedOutputLeaseStore {
       .filter(record => record.expiresAt <= this.now())
     await Promise.all(expired.map(record => this.release(record.leaseId, record.claimId)))
     return expired.length
+  }
+
+  /** Removes lease directories left by a previous process before any new lease is created. */
+  async quarantineOrphaned() {
+    if (this.leases.size > 0) {
+      throw new Error('不能在活动 lease 存在时执行 staged output crash quarantine')
+    }
+    const entries = await readdir(this.rootPath, { withFileTypes: true }).catch((error: unknown) => {
+      if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
+        return []
+      }
+      throw error
+    })
+    const orphaned = entries.filter(entry => entry.isDirectory() && entry.name.startsWith('output-lease-'))
+    await Promise.all(orphaned.map(entry => (
+      rm(path.join(this.rootPath, entry.name), { force: true, recursive: true })
+    )))
+    return orphaned.length
   }
 
   getSnapshot() {

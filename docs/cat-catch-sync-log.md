@@ -2327,3 +2327,17 @@
 - runtime changes: `emitEmbeddedBrowserDownload` 返回 sink availability；`emitMseDownloadCompleted` 将 `false` 视为交付失败并抛错，外层 `stageMseDownloadResource` 负责删除 staged file。
 - legacy cleanup: 无新增删除；download/import bridge、UploadManager 和 MSE page/spool owner 保留至 output-integration 完整切换。
 - validation: MSE output 定向 `6 passed`、coordinator 定向 `4 passed`、TypeScript `--noEmit`、定向 ESLint 和 scoped diff check 通过；完整 build、真实页面和真实下载导入未执行。
+
+## 2026-08-29: same target (staged output lease crash quarantine)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本切片补齐 staged output lease 在应用重启后的孤儿目录清理。
+- reviewedThrough / portedThrough: 均保持 `null`；`output.staged-output-lease` 继续 `porting`，output-integration unit 仍开放。
+- change groups: `crash-quarantine`、`startup-cleanup`、`owner-safety` 与 `documentation-correction`。
+- affected capability IDs: `output.staged-output-lease`；metadata 为 `7 units / 32 capabilities / 104 cleanup entries / 229 planned IDs / 242 active refs`，状态为 `15 verified / 12 porting / 1 ported-unverified / 4 pending`。
+- fixtures/tests: `staged-output-lease.test.ts` 新增孤儿 `output-lease-*` 目录清理和活动 lease 拒绝 quarantine 测试；lease/publisher 定向 `2 files / 7 passed`。
+- accepted differences: 启动 quarantine 只删除上次进程留下的 `output-lease-*` 目录，不触碰未知 root entry；活动进程中的 lease 必须通过原有 release/reap 处理，不能调用 quarantine。
+- excluded changes and reasons: 未接入 MSE 自动导入跨重启恢复、UploadManager handoff、应用级 ack、其他 temp root、renderer UI、`dist-electron/**` 或 upstream 游标；这些仍需独立持久化 delivery protocol。
+- unresolved gaps: lease metadata 未持久化为可恢复任务，MSE/download staging 仍依赖各自 TTL，跨入口取消、预算 accounting、真实页面和长时间大媒体仍待验证。
+- runtime changes: `StagedOutputLeaseStore.quarantineOrphaned` 在 controller 首次创建 lease store 时运行，完成后继续 `reapExpired`；只匹配 `output-lease-` 目录并保护未知条目。
+- legacy cleanup: 无新增删除；staged publisher、MSE 自动 download/import 和 UploadManager 仍保留至 output-integration 完整切换。
+- validation: lease/publisher 定向 `7 passed`、TypeScript `--noEmit`、定向 ESLint、metadata validator、sync test 和 scoped diff check 通过；完整 build、真实页面和真实下载导入未执行。
