@@ -38,6 +38,14 @@ describe('MSE main relay authorization', () => {
       resourceKey: base.resourceKey,
     })
     expect(authorizeMseControlPayload({
+      payload: { event: 'mse-complete', resourceKey: base.resourceKey },
+      resolveResourceKey,
+      tabId: base.tabId,
+    })).toMatchObject({
+      event: 'mse-complete',
+      resourceKey: base.resourceKey,
+    })
+    expect(authorizeMseControlPayload({
       payload: base,
       resolveResourceKey,
       tabId: base.tabId,

@@ -757,6 +757,24 @@ export function createEmbeddedBrowserMainController(
           })
           return
         }
+        if (controlPayload.event === 'mse-complete') {
+          void withEmbeddedBrowserView(tabId, async (view) => {
+            const downloaded = await downloadEmbeddedBrowserMseResourcesToDownloads(tabId, view)
+            if (!downloaded) {
+              runtimeLogger.warn('embedded browser MSE automatic download produced no output', {
+                tabId,
+                resourceKey: controlPayload.resourceKey,
+              })
+            }
+          }).catch((error) => {
+            runtimeLogger.warn('embedded browser MSE automatic download failed', {
+              error: error instanceof Error ? error.message : String(error),
+              resourceKey: controlPayload.resourceKey,
+              tabId,
+            })
+          })
+          return
+        }
         if (controlPayload.event === 'mse-reset') {
           void clearEmbeddedBrowserMseSpoolFiles({
             resourceKey: controlPayload.resourceKey,

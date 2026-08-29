@@ -1909,3 +1909,17 @@
 - legacy cleanup:
 - validation:
 ```
+
+## 2026-08-29: same target (MSE flushed automatic completion handoff)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本切片补齐 Cat Catch `autoDown` 在 page flush 后的 main-owned 自动输出边界。
+- reviewedThrough / portedThrough: 均保持 `null`；`mse.page-capture-runtime` 继续 `porting`，`mse.main-spool-lifecycle` 继续 `ported-unverified`，`mse-runtime` unit 仍开放。
+- change groups: `completion-handoff`、`relay-authorization`、`production-single-owner` 与 `fixture-contract`。
+- affected capability IDs: `mse.page-capture-runtime`、`mse.main-spool-lifecycle`；metadata 当前为 `7 units / 32 capabilities / 210 anchors / 100 cleanup entries / 214 planned IDs / 193 active refs`，状态为 `15 verified / 5 porting / 1 ported-unverified / 11 pending`。
+- fixtures/tests: 新增 `electron/service/embedded-browser/capture/adapters/mse-page.test.ts#mse.auto-download-after-flush`，用可注入的小阈值复现 page flush，验证完成时发出一次带 `mse-stream:*` resource key 的 `mse-complete` 且不再排队页面 500ms 下载；`mse-main-relay.test.ts#mse.relay-forgery` 验证完成事件与 flush/reset 一样必须通过当前 tab ownership；MSE 定向集合为 `7 files / 13 passed`。
+- accepted differences: 无 flush 的小媒体仍由页面 Blob action 延迟下载；发生 flush 后自动完成由 main 复用现有 spool 提取、双轨合并/逐轨回退和 completed download event，不把已刷出的媒体重新拉回页面内存。
+- excluded changes and reasons: 未修改 Cat Catch 的 1GB UI preference、DASH/HLS、transfer、renderer UI、统一 task registry、真实网站或 `dist-electron/**`；1GB 长时间压力和真实下载导入仍需环境验证。
+- unresolved gaps: 固定 `catch.js` 的完整 MSE 差分、真实大媒体长时间 flush、真实页面双轨输出、ffmpeg preference/task registry 与 renderer 导入回归仍待补齐，不能关闭 MSE unit。
+- runtime changes: `mse-page.ts` 在 auto-download completion 发现任一轨道已 flush 时发出一次 `mse-complete`；`electron-page-probe.ts` 和 `mse-main-relay.ts` 将事件纳入 token/resource ownership 边界；main controller 收到后调用现有 `downloadEmbeddedBrowserMseResourcesToDownloads`，避免 page/main 双重输出。
+- legacy cleanup: 无新增删除；旧 Cat Catch 页面实现继续保留至 MSE unit 完成 parity 和真实回归。
+- validation: MSE 定向 `7 files / 13 passed`、应用 TypeScript `--noEmit`、scoped ESLint、`npm run cat-catch:validate`（`7 units / 32 capabilities / 17 open / 100 cleanup / 214 planned`）通过；完整 build 与真实页面验证仍不执行，以免覆盖其他 agent 的 dirty `dist-electron/**`。

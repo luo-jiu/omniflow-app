@@ -181,7 +181,20 @@ export function installMsePageAdapter(input: InstallMsePageAdapterInput): MsePag
       if (input.preferences.autoDownloadOnComplete) {
         if (!autoDownloadScheduled) {
           autoDownloadScheduled = true
-          input.scope.setTimeout(() => adapter.download(), 500)
+          const hasFlushedStream = streamIds.some((streamId) => (
+            Boolean(runtime.getSnapshot().streams.find(stream => stream.streamId === streamId)?.flushedBytes)
+          ))
+          if (hasFlushedStream) {
+            const resourceKey = streamIds[0] ? createResourceKey(streamIds[0]) : ''
+            if (resourceKey) {
+              input.emitControl({
+                event: 'mse-complete',
+                resourceKey,
+              })
+            }
+          } else {
+            input.scope.setTimeout(() => adapter.download(), 500)
+          }
         }
       } else if (input.preferences.clearCacheOnComplete) {
         input.scope.setTimeout(() => adapter.clear(), 0)

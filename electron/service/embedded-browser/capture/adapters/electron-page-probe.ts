@@ -46,7 +46,7 @@ type ActiveDocumentRoute = BoundPageProbeDocument & {
   navigationGeneration: number
 }
 
-const supportedControlEvents = new Set(['mse-flush', 'mse-reset'])
+const supportedControlEvents = new Set(['mse-complete', 'mse-flush', 'mse-reset'])
 
 function normalizeTabId(value: unknown) {
   const tabId = String(value ?? '').trim()

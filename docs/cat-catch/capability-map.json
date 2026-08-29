@@ -770,12 +770,14 @@
       "syncedThrough": null,
       "plannedTestIds": [
         "mse.audio-video-flush-reset",
-        "mse.append-observability"
+        "mse.append-observability",
+        "mse.auto-download-after-flush"
       ],
       "testRefs": [
         "electron/service/embedded-browser/cat-catch-port/mse/runtime.test.ts#mse.audio-video-flush-reset",
         "electron/service/embedded-browser/cat-catch-port/mse/runtime.test.ts#mse.append-observability",
-        "electron/service/embeddedBrowserResourceProbeMseRuntime.test.ts#mse.append-observability"
+        "electron/service/embeddedBrowserResourceProbeMseRuntime.test.ts#mse.append-observability",
+        "electron/service/embedded-browser/capture/adapters/mse-page.test.ts#mse.auto-download-after-flush"
       ],
       "acceptedDifferences": [],
       "notes": "The production page adapter now installs the fixed target MSE runtime and keeps DOM actions, filename/Blob handling, and the page-origin toolkit projection at the platform boundary. Pure runtime tests cover append/endOfStream, per-track flush/reset, retention limits, and drain semantics; production probe characterization covers installation, read/open/export/drain and resource events. Fixed-upstream parity and production-equivalent large-media/auto-download behavior remain open, so this capability stays porting."

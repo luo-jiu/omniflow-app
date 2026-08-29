@@ -13,7 +13,7 @@
 | reviewedThrough | 未建立 |
 | portedThrough | 未建立 |
 
-当前映射包含 7 个 cutover unit、32 项能力、210 个上游 anchor、100 个 cleanup entry 和 213 个唯一计划测试 ID。15 项能力达到 `verified`，5 项为 `porting`，1 项为 `ported-unverified`，其余 11 项仍为 `pending`；192 个唯一计划测试引用已落成 active pure behavior/contract、fake/real Electron integration 或 loopback redirect test。`network-capture`、`deep-search-runtime` 与 `hls-engine` 已完成固定目标下的原子 cutover；DASH 的 renderer parser facade、main task、live task、main XML adapter、增量追加 helper、独立 session owner、strict manifest authority 和 output adapter 已接入目标代码，静态双轨、dynamic refresh/append 与有限深度嵌套 SIDX 的真实/任务级证据已有，live start/stop/discard 也已接生产 main/preload IPC（当前没有 renderer UI），并且轮询终止错误会清理 live session/workdir；`dash.parser-planner` 与 `dash.timeline-download-merge` 仍保持 `porting`，其余 3 个 unit 仍开放。
+当前映射包含 7 个 cutover unit、32 项能力、210 个上游 anchor、100 个 cleanup entry 和 214 个唯一计划测试 ID。15 项能力达到 `verified`，5 项为 `porting`，1 项为 `ported-unverified`，其余 11 项仍为 `pending`；193 个唯一计划测试引用已落成 active pure behavior/contract、fake/real Electron integration 或 loopback redirect test。`network-capture`、`deep-search-runtime` 与 `hls-engine` 已完成固定目标下的原子 cutover；DASH 的 renderer parser facade、main task、live task、main XML adapter、增量追加 helper、独立 session owner、strict manifest authority 和 output adapter 已接入目标代码，静态双轨、dynamic refresh/append 与有限深度嵌套 SIDX 的真实/任务级证据已有，live start/stop/discard 也已接生产 main/preload IPC（当前没有 renderer UI），并且轮询终止错误会清理 live session/workdir；`dash.parser-planner` 与 `dash.timeline-download-merge` 仍保持 `porting`，其余 3 个 unit 仍开放。
 
 ## 2. 能力族
 

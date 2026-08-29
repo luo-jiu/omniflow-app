@@ -198,13 +198,18 @@ describe('network.probe-console-generation-routing', () => {
       resourceKey: 'mse:1',
     }])
     webContents.emitConsole(`${first.consolePrefix}${JSON.stringify({
+      event: 'mse-complete',
+      resourceKey: 'mse:1',
+    })}`)
+    expect(controlPayloads).toHaveLength(2)
+    webContents.emitConsole(`${first.consolePrefix}${JSON.stringify({
       event: 'unknown-control',
     })}`)
     webContents.emitConsole(`${first.consolePrefix}${JSON.stringify({
       event: 'mse-reset',
       resourceKey: 'mse:throw',
     })}`)
-    expect(controlPayloads).toHaveLength(2)
+    expect(controlPayloads).toHaveLength(3)
     expect(errors).toHaveLength(1)
 
     const nextDocument = adapter.prepareNextDocument()!
@@ -220,7 +225,7 @@ describe('network.probe-console-generation-routing', () => {
       resourceKey: 'mse:1',
     })}`)
     expect(resourceIndex).toBe(1)
-    expect(controlPayloads).toHaveLength(2)
+    expect(controlPayloads).toHaveLength(3)
 
     const second = adapter.bindCurrentDocument()!
     expect(second).toEqual(nextDocument)
@@ -240,7 +245,7 @@ describe('network.probe-console-generation-routing', () => {
     webContents.emitConsole(`${second.consolePrefix}${JSON.stringify({
       url: 'https://cdn.example/stopped.mp4',
     })}`)
-    expect(controlPayloads).toHaveLength(2)
+    expect(controlPayloads).toHaveLength(3)
     expect(resourceIndex).toBe(2)
     expect(adapter.bindCurrentDocument()).toBeNull()
     expect(adapter.prepareNextDocument()).toBeNull()
