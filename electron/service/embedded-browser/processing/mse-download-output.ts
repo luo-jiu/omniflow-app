@@ -19,7 +19,7 @@ type CreateMseDownloadStagingPathOptions = {
 }
 
 type EmitMseDownloadCompletedOptions = {
-  emitDownload: (payload: EmbeddedBrowserDownloadPayload) => void
+  emitDownload: (payload: EmbeddedBrowserDownloadPayload) => boolean | void
   fileName: string
   filePath: string
   mimeType?: string
@@ -119,6 +119,9 @@ export async function emitMseDownloadCompleted(
     totalBytes,
     url,
   }
-  options.emitDownload(payload)
+  const delivered = options.emitDownload(payload)
+  if (delivered === false) {
+    throw new Error('embedded browser download event could not be delivered')
+  }
   return payload
 }

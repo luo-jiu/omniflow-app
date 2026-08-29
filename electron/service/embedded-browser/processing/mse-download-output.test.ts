@@ -24,7 +24,9 @@ describe('MSE download output', () => {
       await writeFile(filePath, Buffer.from([1, 2, 3]))
 
       const payload = await emitMseDownloadCompleted({
-        emitDownload: (event) => events.push(event),
+        emitDownload: (event) => {
+          events.push(event)
+        },
         fileName: 'episode:01.mp4',
         filePath,
         mimeType: 'video/mp4',
@@ -91,6 +93,23 @@ describe('MSE download output', () => {
         },
       })).rejects.toThrow('renderer unavailable')
       await expect(readFile(filePath)).rejects.toMatchObject({ code: 'ENOENT' })
+    } finally {
+      await rm(stagingRootPath, { force: true, recursive: true })
+    }
+  })
+
+  it('treats an unavailable renderer event sink as a delivery failure', async () => {
+    const stagingRootPath = await mkdtemp(path.join(os.tmpdir(), 'omniflow-mse-output-'))
+    const filePath = path.join(stagingRootPath, 'undelivered.mp4')
+    try {
+      await writeFile(filePath, 'partial')
+      await expect(emitMseDownloadCompleted({
+        emitDownload: () => false,
+        fileName: 'undelivered.mp4',
+        filePath,
+        resourceKey: 'mse-stream:undelivered',
+        tabId: 'tab-undelivered',
+      })).rejects.toThrow('could not be delivered')
     } finally {
       await rm(stagingRootPath, { force: true, recursive: true })
     }

@@ -2313,3 +2313,17 @@
 - runtime changes: 新增 `src/features/embedded-browser/workflows/captured-output-workflow-coordinator.ts#CapturedOutputWorkflowCoordinator`；`useEmbeddedBrowserDownloadImport` 改用 `useSyncExternalStore` 读取应用级队列，并通过 coordinator 运行导入/保存交付，只有成功终态才清理 owned temp file。
 - legacy cleanup: 无新增删除；现有 download/import bridge、UploadManager 和 modal 保留，待完整 output-integration cutover 后再收口。
 - validation: coordinator 定向 Vitest `1 file / 4 passed`、MSE/merge 定向 `3 files / 14 passed`、TypeScript `--noEmit`、定向 ESLint 和 scoped diff check 通过；全仓 lint 仍沿用本轮已通过结果，完整 build、真实页面和真实下载导入未执行。
+
+## 2026-08-29: same target (MSE completion sink failure quarantine)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本切片补齐 MSE completed event 在 renderer window 不可用时的失败终态。
+- reviewedThrough / portedThrough: 均保持 `null`；`mse.main-spool-lifecycle`、`processing.main-task-registry` 与 `output.application-workflow-coordinator` 继续 `porting`，MSE/output integration unit 仍开放。
+- change groups: `event-delivery-boundary`、`owned-file-cleanup` 与 `documentation-correction`。
+- affected capability IDs: `mse.main-spool-lifecycle`、`output.application-workflow-coordinator`；metadata active refs 不变为 240。
+- fixtures/tests: `mse-download-output.test.ts` 新增 unavailable renderer sink 断言；MSE output/coordinator 定向 `2 files / 10 passed`。
+- accepted differences: `webContents.send` 本身仍是同步 IPC 投影，当前只判定 main window 存在且未销毁；renderer/import 是否真正消费由后续 application delivery terminal 负责。
+- excluded changes and reasons: 未接入跨进程 ack、UploadManager handoff、应用重启恢复、lease crash quarantine、renderer UI、`dist-electron/**` 或 upstream 游标；这些需要独立持久化交付协议。
+- unresolved gaps: 已发送但尚未被 renderer 消费的 completed 文件仍需 coordinator/terminal 继续接管，应用重启不会恢复事件，真实页面和长时间大媒体仍待验证。
+- runtime changes: `emitEmbeddedBrowserDownload` 返回 sink availability；`emitMseDownloadCompleted` 将 `false` 视为交付失败并抛错，外层 `stageMseDownloadResource` 负责删除 staged file。
+- legacy cleanup: 无新增删除；download/import bridge、UploadManager 和 MSE page/spool owner 保留至 output-integration 完整切换。
+- validation: MSE output 定向 `6 passed`、coordinator 定向 `4 passed`、TypeScript `--noEmit`、定向 ESLint 和 scoped diff check 通过；完整 build、真实页面和真实下载导入未执行。

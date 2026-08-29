@@ -423,9 +423,10 @@ export function createEmbeddedBrowserMainController(
   function emitEmbeddedBrowserDownload(payload: EmbeddedBrowserDownloadPayload) {
     const mainWindow = options.getMainWindow()
     if (!mainWindow || mainWindow.isDestroyed()) {
-      return
+      return false
     }
     mainWindow.webContents.send('embedded-browser:download', payload)
+    return true
   }
 
   function emitEmbeddedBrowserResourceChange(payload: ResourceStateChange) {
