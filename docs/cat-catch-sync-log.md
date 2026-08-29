@@ -1837,6 +1837,20 @@
 - legacy cleanup: 无；DASH unit 尚未 cutover，旧实现和 `legacy-cleanup.json` 继续保留。
 - validation: DASH/output 定向 `12/12`、真实 FFmpeg/FFprobe test 通过；此前全仓 lint、排除 Node runner 的 Vitest `217 files / 1434 passed / 3 skipped`、TypeScript、metadata validator、sync runner `16/16` 均通过；完整 build、真实网站/动态 MPD 未执行。
 
+## 2026-08-29: same target (DASH dynamic refresh real output evidence)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本切片补 DASH dynamic MPD 两轮刷新、增量追加和最终双轨输出证据。
+- reviewedThrough / portedThrough: 均保持 `null`；`dash.parser-planner` 与 `dash.timeline-download-merge` 继续 `porting`，`dash-engine` unit 仍开放。
+- change groups: `live-output-integration`（dynamic snapshot -> append -> merge）与 `fixture-contract`（真实生成 fMP4）。
+- affected capability IDs: `dash.timeline-download-merge`；metadata 为 `7 units / 32 capabilities / 210 anchors / 100 cleanup entries / 212 planned IDs / 191 active refs`。
+- fixtures/tests: `electron/service/embeddedBrowserDashRealOutput.test.ts#dash.real-dynamic-refresh-append-output` 生成 3 秒 H.264/AAC DASH fMP4，将同一 MPD 投影为首轮两片和第二轮完整窗口；两份 snapshot 均经 `DashLiveTask`，新增分片通过 `appendDashRepresentationSegments` 写入 main 临时轨道，停止后由 `mergeDashTaskTracksToOutput` 合并并用 FFprobe 检查 MP4、正时长、H.264 video 和 AAC audio；该文件 `2/2` 通过。
+- accepted differences: 测试使用本地生成媒体与 injected asset fetch，dynamic MPD 的刷新由受控 snapshot 队列模拟，不宣称真实网站时钟、authority 或长时间 live 稳定性；缺失 ffmpeg/ffprobe 时测试显式 skip。
+- excluded changes and reasons: 未改 DASH parser、SIDX、authority、renderer UI、通用 task registry、HLS 或资料库交付；复杂嵌套 SIDX 与多 Period 边界继续单独追踪。
+- unresolved gaps: 复杂嵌套 SIDX、不完整或初始化冲突的多 Period、真实网站 live、renderer workflow 和 `dash-engine` 原子关闭仍待完成。
+- runtime changes: 无生产运行时代码变更；仅新增真实 dynamic refresh/append/output 测试与能力地图引用。
+- legacy cleanup: 无；DASH unit 尚未 cutover，旧实现和 `legacy-cleanup.json` 继续保留。
+- validation: `embeddedBrowserDashRealOutput.test.ts` `2/2` 通过；本切片后需重跑 TypeScript、scoped/full lint、metadata validator、sync runner 与相关 DASH 集合，完整 build 仍因共享 `dist-electron/**` dirty 生成物暂不执行。
+
 ```markdown
 ## YYYY-MM-DD: <from> -> <to>
 
