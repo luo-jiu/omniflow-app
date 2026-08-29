@@ -219,6 +219,21 @@ const EmbeddedBrowserCatchToolkitCard: React.FC<EmbeddedBrowserCatchToolkitCardP
       <label className="resource-toolkit-toggle">
         <input
           type="checkbox"
+          checked={state.saveEveryGigabyte}
+          disabled={disabled || loading}
+          onChange={(event) => {
+            void onUpdateState({
+              saveEveryGigabyte: event.target.checked,
+            }).catch((error: any) => {
+              Toast.error(error?.message || '更新每 GB 自动保存设置失败');
+            });
+          }}
+        />
+        <span>每累计 1 GB 自动保存并清理缓存</span>
+      </label>
+      <label className="resource-toolkit-toggle">
+        <input
+          type="checkbox"
           checked={state.trimExtraMediaHeaders}
           disabled={disabled || loading}
           onChange={(event) => {

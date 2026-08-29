@@ -24,6 +24,7 @@ export type EmbeddedBrowserCatchToolkitStatePayload = {
   regexWarning: string
   regexRule: string
   restartAlwaysFromBeginning: boolean
+  saveEveryGigabyte: boolean
   selectorWarning: string
   selectorRule: string
   streamCount: number

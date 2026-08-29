@@ -13,6 +13,7 @@ export type CatchToolkitPreferences = {
   manualFileName: string
   regexRule: string
   restartAlwaysFromBeginning: boolean
+  saveEveryGigabyte: boolean
   selectorRule: string
   trimExtraMediaHeaders: boolean
 }
@@ -54,6 +55,7 @@ export function createCatchToolkitState(
     manualFileName: 'OmniflowCatchToolkit:manualFileName',
     regexRule: 'OmniflowCatchToolkit:regexRule',
     restartAlwaysFromBeginning: 'OmniflowCatchToolkit:restartAlwaysFromBeginning',
+    saveEveryGigabyte: 'OmniflowCatchToolkit:saveEveryGigabyte',
     selectorRule: 'OmniflowCatchToolkit:selectorRule',
     trimExtraMediaHeaders: 'OmniflowCatchToolkit:trimExtraMediaHeaders',
   }
@@ -64,6 +66,7 @@ export function createCatchToolkitState(
     manualFileName: '',
     regexRule: '',
     restartAlwaysFromBeginning: false,
+    saveEveryGigabyte: false,
     selectorRule: '',
     trimExtraMediaHeaders: true,
   })
@@ -150,6 +153,10 @@ export function createCatchToolkitState(
       storageKeys.restartAlwaysFromBeginning,
       defaults.restartAlwaysFromBeginning,
     ),
+    saveEveryGigabyte: readChecked(
+      storageKeys.saveEveryGigabyte,
+      defaults.saveEveryGigabyte,
+    ),
     selectorRule: evaluateSelectorRule(readString(storageKeys.selectorRule)).rule,
     trimExtraMediaHeaders: readChecked(
       storageKeys.trimExtraMediaHeaders,
@@ -164,6 +171,7 @@ export function createCatchToolkitState(
     writeString(storageKeys.manualFileName, preferences.manualFileName)
     writeString(storageKeys.regexRule, preferences.regexRule)
     writeChecked(storageKeys.restartAlwaysFromBeginning, preferences.restartAlwaysFromBeginning)
+    writeChecked(storageKeys.saveEveryGigabyte, preferences.saveEveryGigabyte)
     writeString(storageKeys.selectorRule, preferences.selectorRule)
     writeChecked(storageKeys.trimExtraMediaHeaders, preferences.trimExtraMediaHeaders)
   }
@@ -196,6 +204,9 @@ export function createCatchToolkitState(
     }
     if (typeof payload.restartAlwaysFromBeginning === 'boolean') {
       preferences.restartAlwaysFromBeginning = payload.restartAlwaysFromBeginning
+    }
+    if (typeof payload.saveEveryGigabyte === 'boolean') {
+      preferences.saveEveryGigabyte = payload.saveEveryGigabyte
     }
     if (typeof payload.selectorRule === 'string') {
       preferences.selectorRule = evaluateSelectorRule(payload.selectorRule).rule

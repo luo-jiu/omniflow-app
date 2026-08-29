@@ -771,16 +771,18 @@
       "plannedTestIds": [
         "mse.audio-video-flush-reset",
         "mse.append-observability",
-        "mse.auto-download-after-flush"
+        "mse.auto-download-after-flush",
+        "mse.periodic-large-output"
       ],
       "testRefs": [
         "electron/service/embedded-browser/cat-catch-port/mse/runtime.test.ts#mse.audio-video-flush-reset",
         "electron/service/embedded-browser/cat-catch-port/mse/runtime.test.ts#mse.append-observability",
         "electron/service/embeddedBrowserResourceProbeMseRuntime.test.ts#mse.append-observability",
-        "electron/service/embedded-browser/capture/adapters/mse-page.test.ts#mse.auto-download-after-flush"
+        "electron/service/embedded-browser/capture/adapters/mse-page.test.ts#mse.auto-download-after-flush",
+        "electron/service/embedded-browser/capture/adapters/mse-page.test.ts#mse.periodic-large-output"
       ],
       "acceptedDifferences": [],
-      "notes": "The production page adapter now installs the fixed target MSE runtime and keeps DOM actions, filename/Blob handling, and the page-origin toolkit projection at the platform boundary. Pure runtime tests cover append/endOfStream, per-track flush/reset, retention limits, and drain semantics; production probe characterization covers installation, read/open/export/drain and resource events. Fixed-upstream parity and production-equivalent large-media/auto-download behavior remain open, so this capability stays porting."
+      "notes": "The production page adapter now installs the fixed target MSE runtime and keeps DOM actions, filename/Blob handling, and the page-origin toolkit projection at the platform boundary. Pure runtime tests cover append/endOfStream, per-track flush/reset, retention limits, and drain semantics; production probe characterization covers installation, read/open/export/drain and resource events. When enabled, the page emits a serialized periodic-save control after a flush crosses each configured 1 GiB boundary; main handles it through the same merged/per-track output path and clears the page/spool cache after success. Fixed-upstream parity, production-equivalent large-media/auto-download behavior and real-site smoke remain open, so this capability stays porting."
     },
     {
       "id": "mse.main-spool-lifecycle",
@@ -819,7 +821,7 @@
         "electron/service/embedded-browser/processing/mse-download-output.test.ts#mse.auto-download-output"
       ],
       "acceptedDifferences": [],
-      "notes": "MseSpoolStore is the main-owned spool authority. It serializes per-track writes, reserves bytes before asynchronous append, enforces per-chunk/per-track/global budgets, reaps TTL entries, sweeps stale temp directories at session setup, and clears on reset, navigation, render-process loss, tab close, and controller dispose. Relay authorization binds flush/reset payloads to the current tab's opaque MSE resource key. Automatic output now stages merged or per-track files through the existing browser download completion/import contract, so renderer auto-save cannot duplicate the main action; production large-media and real-site smoke remain open."
+      "notes": "MseSpoolStore is the main-owned spool authority. It serializes per-track writes, reserves bytes before asynchronous append, enforces per-chunk/per-track/global budgets, reaps TTL entries, sweeps stale temp directories at session setup, and clears on reset, navigation, render-process loss, tab close, and controller dispose. Relay authorization binds flush/reset/periodic-save payloads to the current tab's opaque MSE resource key, and the controller serializes those controls per tab so a periodic save observes completed flush writes. Automatic output stages merged or per-track files through the existing browser download completion/import contract and clears page/spool cache only after periodic output succeeds; production large-media and real-site smoke remain open."
     },
     {
       "id": "hls.parser-planner",

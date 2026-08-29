@@ -14,6 +14,7 @@ type MsePageToolkitPreferences = {
   regexRule: string
   regexWarning: string
   restartAlwaysFromBeginning: boolean
+  saveEveryGigabyte: boolean
   selectorRule: string
   selectorWarning: string
   trimExtraMediaHeaders: boolean
@@ -57,6 +58,7 @@ export type InstallMsePageAdapterInput = {
   emitControl: (payload: Record<string, unknown>) => void
   guessExtension: (mimeType: string, streamType?: 'audio' | 'video') => string
   hostProbe: MsePageHostProbe
+  largeOutputThresholdBytes?: number
   installRuntime: (input: InstallMseRuntimeInput) => MseRuntime
   preferences: MsePageToolkitPreferences
   resolveFileName: () => string
@@ -67,6 +69,10 @@ export type InstallMsePageAdapterInput = {
 export function installMsePageAdapter(input: InstallMsePageAdapterInput): MsePageAdapter {
   const adapterSentinel = '__OMNIFLOW_CAT_CATCH_MSE_PAGE_ADAPTER_V1__'
   const flushThresholdBytes = 8 * 1024 * 1024
+  const largeOutputThresholdBytes = Number.isFinite(Number(input.largeOutputThresholdBytes))
+    && Number(input.largeOutputThresholdBytes) > 0
+    ? Math.floor(Number(input.largeOutputThresholdBytes))
+    : 1024 * 1024 * 1024
   const scopeRecord = input.scope as unknown as Record<string, unknown>
   const current = scopeRecord[adapterSentinel] as MsePageAdapter | undefined
   if (current && !current.isDisposed()) return current
@@ -80,6 +86,7 @@ export function installMsePageAdapter(input: InstallMsePageAdapterInput): MsePag
   let lastAppendBufferCount = 0
   let lastError = ''
   let autoDownloadScheduled = false
+  let lastLargeOutputThreshold = 0
   let observer: MutationObserver | null = null
 
   const createResourceKey = (streamId: string) => `mse-stream:${streamId}`
@@ -171,6 +178,18 @@ export function installMsePageAdapter(input: InstallMsePageAdapterInput): MsePag
     return true
   }
 
+  const maybeEmitLargeOutputSave = (stream: MseStreamSnapshot) => {
+    if (!input.preferences.saveEveryGigabyte || stream.flushedBytes <= 0) return
+    const reachedThreshold = Math.floor(stream.totalBytes / largeOutputThresholdBytes)
+    if (reachedThreshold <= lastLargeOutputThreshold) return
+    lastLargeOutputThreshold = reachedThreshold
+    input.emitControl({
+      event: 'mse-save',
+      resourceKey: createResourceKey(stream.streamId),
+      streamType: stream.streamType,
+    })
+  }
+
   const runtime: MseRuntime = input.installRuntime({
     flushThresholdBytes,
     onComplete: ({ streamIds }) => {
@@ -219,6 +238,7 @@ export function installMsePageAdapter(input: InstallMsePageAdapterInput): MsePag
         lastAppendAt = Date.now()
       }
       reportStream(stream)
+      maybeEmitLargeOutputSave(stream)
     },
     scope: {
       ArrayBuffer: input.scope.ArrayBuffer,
@@ -263,6 +283,7 @@ export function installMsePageAdapter(input: InstallMsePageAdapterInput): MsePag
       regexWarning: input.preferences.regexWarning,
       regexRule: input.preferences.regexRule,
       restartAlwaysFromBeginning: input.preferences.restartAlwaysFromBeginning,
+      saveEveryGigabyte: input.preferences.saveEveryGigabyte,
       selectorWarning: input.preferences.selectorWarning,
       selectorRule: input.preferences.selectorRule,
       streamCount: snapshot.streamCount,
@@ -337,6 +358,7 @@ export function installMsePageAdapter(input: InstallMsePageAdapterInput): MsePag
   }
   const clear = () => {
     autoDownloadScheduled = false
+    lastLargeOutputThreshold = 0
     for (const streamId of blobUrls.keys()) revokeBlobUrl(streamId)
     return runtime.clear()
   }

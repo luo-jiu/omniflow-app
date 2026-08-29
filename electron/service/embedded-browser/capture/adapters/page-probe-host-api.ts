@@ -53,6 +53,7 @@ export function embeddedBrowserPageProbeHostApiBody() {
         'autoSeekToBufferedEnd',
         'clearCacheOnComplete',
         'restartAlwaysFromBeginning',
+        'saveEveryGigabyte',
         'trimExtraMediaHeaders',
       ] as const) {
         if (typeof payload[key] === 'boolean') catchToolkitProjection[key] = payload[key]

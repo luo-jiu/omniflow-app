@@ -1923,3 +1923,17 @@
 - runtime changes: `mse-page.ts` 在 auto-download completion 发现任一轨道已 flush 时发出一次 `mse-complete`；`electron-page-probe.ts` 和 `mse-main-relay.ts` 将事件纳入 token/resource ownership 边界；main controller 收到后调用现有 `downloadEmbeddedBrowserMseResourcesToDownloads`，避免 page/main 双重输出。
 - legacy cleanup: 无新增删除；旧 Cat Catch 页面实现继续保留至 MSE unit 完成 parity 和真实回归。
 - validation: MSE 定向 `7 files / 13 passed`、应用 TypeScript `--noEmit`、scoped ESLint、`npm run cat-catch:validate`（`7 units / 32 capabilities / 17 open / 100 cleanup / 214 planned`）通过；完整 build 与真实页面验证仍不执行，以免覆盖其他 agent 的 dirty `dist-electron/**`。
+
+## 2026-08-29: same target (MSE periodic large-output save)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本切片补齐 Cat Catch `save1GB` 的产品化周期保存链路。
+- reviewedThrough / portedThrough: 均保持 `null`；`mse.page-capture-runtime` 继续 `porting`，`mse.main-spool-lifecycle` 继续 `ported-unverified`，`mse-runtime` unit 仍开放。
+- change groups: `page-origin-preference`、`periodic-output`、`serialized-relay` 与 `fixture-contract`。
+- affected capability IDs: `mse.page-capture-runtime`、`mse.main-spool-lifecycle`；metadata 当前为 `7 units / 32 capabilities / 210 anchors / 100 cleanup entries / 215 planned IDs / 194 active refs`，状态为 `15 verified / 5 porting / 1 ported-unverified / 11 pending`。
+- fixtures/tests: 新增 `electron/service/embedded-browser/capture/adapters/mse-page.test.ts#mse.periodic-large-output`，用可注入的小阈值验证每个累计阈值只触发一次、清理后可重新计数；relay 与 page-probe 测试覆盖 `mse-save` 的 payload 授权和路由；同步更新 toolkit origin-storage 与 deep probe round-trip。
+- accepted differences: 产品设置名为 `saveEveryGigabyte`，默认关闭并持久化在当前页面 origin；实际阈值仍为 1 GiB。周期保存复用 main 合并/逐轨输出和现有完成事件，不在 renderer 复制媒体数据。
+- excluded changes and reasons: 未修改 HLS/DASH、transfer、统一 task registry、真实网站/真实大媒体或 `dist-electron/**`；MSE 固定上游 parity、真实导入和长时间压力验证仍开放。
+- unresolved gaps: 需要真实页面验证 flush 与保存时序、真实双轨 ffmpeg 输出及失败后重试/清理；MSE unit 不能因 synthetic threshold test 关闭。
+- runtime changes: page-origin state 增加 `OmniflowCatchToolkit:saveEveryGigabyte`，MSE 在 flush 后按累计总字节跨越阈值发出 `mse-save`；main controller 以 tab 为粒度串行处理 flush/save/reset，成功周期输出后清 page cache 和 MSE spool。
+- legacy cleanup: 无新增删除；旧 Cat Catch 页面实现继续保留至 MSE parity 和真实回归完成。
+- validation: 本切片修改完成后重跑 MSE 定向 Vitest、TypeScript、scoped ESLint、metadata validator、sync runner 与 `git diff --check`；完整 build 与真实页面验证仍受共享 dirty `dist-electron/**` 和当前无测试场景限制。

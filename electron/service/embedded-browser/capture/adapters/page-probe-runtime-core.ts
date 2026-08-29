@@ -61,6 +61,7 @@ export function embeddedBrowserPageProbeRuntimeCoreBody() {
     regexRule: '',
     regexWarning: '',
     restartAlwaysFromBeginning: false,
+    saveEveryGigabyte: false,
     selectorRule: '',
     selectorWarning: '',
     trimExtraMediaHeaders: true,

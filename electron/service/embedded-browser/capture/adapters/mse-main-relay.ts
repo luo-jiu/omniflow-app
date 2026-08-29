@@ -1,6 +1,6 @@
 export type AuthorizedMseControlPayload = {
   base64?: string
-  event: 'mse-complete' | 'mse-flush' | 'mse-reset'
+  event: 'mse-complete' | 'mse-flush' | 'mse-reset' | 'mse-save'
   fileName?: string
   mimeType?: string
   resourceKey: string
@@ -28,7 +28,7 @@ export function authorizeMseControlPayload(
   input: AuthorizeMseControlPayloadInput,
 ): AuthorizedMseControlPayload | null {
   const event = input.payload.event
-  if (event !== 'mse-complete' && event !== 'mse-flush' && event !== 'mse-reset') return null
+  if (event !== 'mse-complete' && event !== 'mse-flush' && event !== 'mse-reset' && event !== 'mse-save') return null
   const tabId = normalizeString(input.tabId)
   const resourceKey = normalizeString(input.payload.resourceKey)
   if (
@@ -40,7 +40,7 @@ export function authorizeMseControlPayload(
   const streamType = input.payload.streamType === 'audio' || input.payload.streamType === 'video'
     ? input.payload.streamType
     : undefined
-  if (event === 'mse-complete' || event === 'mse-reset') {
+  if (event === 'mse-complete' || event === 'mse-reset' || event === 'mse-save') {
     return { event, resourceKey, streamType }
   }
 

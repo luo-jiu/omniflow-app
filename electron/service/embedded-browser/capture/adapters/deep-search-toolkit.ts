@@ -119,6 +119,7 @@ export function createDeepSearchToolkitAdapterBodySource() {
     '    catchToolkitProjection.regexRule = state.regexRule;',
     '    catchToolkitProjection.regexWarning = state.regexWarning;',
     '    catchToolkitProjection.restartAlwaysFromBeginning = state.restartAlwaysFromBeginning;',
+    '    catchToolkitProjection.saveEveryGigabyte = state.saveEveryGigabyte;',
     '    catchToolkitProjection.selectorRule = state.selectorRule;',
     '    catchToolkitProjection.selectorWarning = state.selectorWarning;',
     '    catchToolkitProjection.trimExtraMediaHeaders = state.trimExtraMediaHeaders;',

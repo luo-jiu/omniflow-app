@@ -316,11 +316,29 @@ export function createEmbeddedBrowserMainController(
     embeddedBrowserDashSessionOwner,
   )
   const embeddedBrowserMseSpoolStore = new MseSpoolStore()
+  const embeddedBrowserMseControlQueues = new Map<string, Promise<void>>()
   let activeEmbeddedBrowserTabId: string | null = null
   let selectedEmbeddedBrowserTabId: string | null = null
   let embeddedBrowserPendingBounds: EmbeddedBrowserBounds | null = null
   let embeddedBrowserSessionConfigured = false
   let captureRuntime: EmbeddedBrowserCaptureRuntime | null = null
+
+  function enqueueEmbeddedBrowserMseControl(
+    tabId: string,
+    task: () => Promise<void>,
+  ) {
+    const previous = embeddedBrowserMseControlQueues.get(tabId) || Promise.resolve()
+    const next = previous
+      .catch(() => undefined)
+      .then(task)
+    embeddedBrowserMseControlQueues.set(tabId, next)
+    void next.finally(() => {
+      if (embeddedBrowserMseControlQueues.get(tabId) === next) {
+        embeddedBrowserMseControlQueues.delete(tabId)
+      }
+    }).catch(() => undefined)
+    return next
+  }
 
   async function dispatchCapturedResourceToExternalTool(
     toolKey: ExternalToolKey,
@@ -748,24 +766,28 @@ export function createEmbeddedBrowserMainController(
           return
         }
         if (controlPayload.event === 'mse-flush') {
-          void appendEmbeddedBrowserMseSpoolChunk(tabId, {
-            base64: controlPayload.base64 || '',
-            fileName: controlPayload.fileName,
-            mimeType: controlPayload.mimeType,
-            resourceKey: controlPayload.resourceKey,
-            streamType: controlPayload.streamType,
+          void enqueueEmbeddedBrowserMseControl(tabId, async () => {
+            await appendEmbeddedBrowserMseSpoolChunk(tabId, {
+              base64: controlPayload.base64 || '',
+              fileName: controlPayload.fileName,
+              mimeType: controlPayload.mimeType,
+              resourceKey: controlPayload.resourceKey,
+              streamType: controlPayload.streamType,
+            })
           })
           return
         }
         if (controlPayload.event === 'mse-complete') {
-          void withEmbeddedBrowserView(tabId, async (view) => {
-            const downloaded = await downloadEmbeddedBrowserMseResourcesToDownloads(tabId, view)
-            if (!downloaded) {
-              runtimeLogger.warn('embedded browser MSE automatic download produced no output', {
-                tabId,
-                resourceKey: controlPayload.resourceKey,
-              })
-            }
+          void enqueueEmbeddedBrowserMseControl(tabId, async () => {
+            await withEmbeddedBrowserView(tabId, async (view) => {
+              const downloaded = await downloadEmbeddedBrowserMseResourcesToDownloads(tabId, view)
+              if (!downloaded) {
+                runtimeLogger.warn('embedded browser MSE automatic download produced no output', {
+                  tabId,
+                  resourceKey: controlPayload.resourceKey,
+                })
+              }
+            })
           }).catch((error) => {
             runtimeLogger.warn('embedded browser MSE automatic download failed', {
               error: error instanceof Error ? error.message : String(error),
@@ -775,10 +797,34 @@ export function createEmbeddedBrowserMainController(
           })
           return
         }
+        if (controlPayload.event === 'mse-save') {
+          void enqueueEmbeddedBrowserMseControl(tabId, async () => {
+            await withEmbeddedBrowserView(tabId, async (view) => {
+              const downloaded = await downloadEmbeddedBrowserMseResourcesToDownloads(tabId, view, {
+                clearAfterDownload: true,
+              })
+              if (!downloaded) {
+                runtimeLogger.warn('embedded browser MSE periodic save produced no output', {
+                  tabId,
+                  resourceKey: controlPayload.resourceKey,
+                })
+              }
+            })
+          }).catch((error) => {
+            runtimeLogger.warn('embedded browser MSE periodic save failed', {
+              error: error instanceof Error ? error.message : String(error),
+              resourceKey: controlPayload.resourceKey,
+              tabId,
+            })
+          })
+          return
+        }
         if (controlPayload.event === 'mse-reset') {
-          void clearEmbeddedBrowserMseSpoolFiles({
-            resourceKey: controlPayload.resourceKey,
-            tabId,
+          void enqueueEmbeddedBrowserMseControl(tabId, async () => {
+            await clearEmbeddedBrowserMseSpoolFiles({
+              resourceKey: controlPayload.resourceKey,
+              tabId,
+            })
           })
         }
       },
@@ -948,7 +994,9 @@ export function createEmbeddedBrowserMainController(
   function clearEmbeddedBrowserCaptureResources(tabId: string): ResourceStateSnapshot | null {
     const normalizedTabId = String(tabId || '').trim()
     captureRuntime?.clearResources(normalizedTabId)
-    void clearEmbeddedBrowserMseSpoolFiles({ tabId: normalizedTabId })
+    void enqueueEmbeddedBrowserMseControl(normalizedTabId, async () => {
+      await clearEmbeddedBrowserMseSpoolFiles({ tabId: normalizedTabId })
+    })
     return getEmbeddedBrowserCaptureSnapshot(normalizedTabId)
   }
 
@@ -1055,6 +1103,7 @@ export function createEmbeddedBrowserMainController(
       regexWarning: states.map((state) => state.regexWarning).find(Boolean) || '',
       regexRule: firstState.regexRule,
       restartAlwaysFromBeginning: firstState.restartAlwaysFromBeginning,
+      saveEveryGigabyte: firstState.saveEveryGigabyte,
       selectorWarning: states.map((state) => state.selectorWarning).find(Boolean) || '',
       selectorRule: firstState.selectorRule,
       streamCount: states.reduce((totalCount, state) => totalCount + Math.max(0, Number(state.streamCount || 0)), 0),
@@ -1117,6 +1166,7 @@ export function createEmbeddedBrowserMainController(
       regexWarning: '',
       regexRule: '',
       restartAlwaysFromBeginning: false,
+      saveEveryGigabyte: false,
       selectorWarning: '',
       selectorRule: '',
       streamCount: 0,
@@ -1199,6 +1249,7 @@ export function createEmbeddedBrowserMainController(
   async function downloadEmbeddedBrowserMseResourcesToDownloads(
     tabId: string,
     view: WebContentsView,
+    options: { clearAfterDownload?: boolean } = {},
   ) {
     const snapshot = captureRuntime?.getSnapshot(tabId)
     if (!snapshot || snapshot.status !== 'active') {
@@ -1312,7 +1363,7 @@ export function createEmbeddedBrowserMainController(
       }
     }
 
-    if (downloaded && toolkitState?.clearCacheOnComplete) {
+    if (downloaded && (options.clearAfterDownload || toolkitState?.clearCacheOnComplete)) {
       await handleCatchToolkitAction(tabId, 'clearCatchMediaCache', 'clear after MSE download')
       await clearEmbeddedBrowserMseSpoolFiles({ tabId })
     }
@@ -3180,7 +3231,9 @@ export function createEmbeddedBrowserMainController(
       onDocumentNavigated: (navigatedTabId) => {
         cancelEmbeddedBrowserLibraryFileDropRequests(navigatedTabId)
         cleanupEmbeddedBrowserDroppedFilesForTab(navigatedTabId)
-        void clearEmbeddedBrowserMseSpoolFiles({ tabId: navigatedTabId })
+        void enqueueEmbeddedBrowserMseControl(navigatedTabId, async () => {
+          await clearEmbeddedBrowserMseSpoolFiles({ tabId: navigatedTabId })
+        })
         void embeddedBrowserHlsHostLifecycle.onDocumentNavigated(navigatedTabId)
         void embeddedBrowserDashHostLifecycle.onDocumentNavigated(navigatedTabId)
       },
@@ -3198,12 +3251,16 @@ export function createEmbeddedBrowserMainController(
       onViewDestroyed: (destroyedTabId) => {
         cancelEmbeddedBrowserLibraryFileDropRequests(destroyedTabId)
         cleanupEmbeddedBrowserDroppedFilesForTab(destroyedTabId)
-        void clearEmbeddedBrowserMseSpoolFiles({ tabId: destroyedTabId })
+        void enqueueEmbeddedBrowserMseControl(destroyedTabId, async () => {
+          await clearEmbeddedBrowserMseSpoolFiles({ tabId: destroyedTabId })
+        })
         void embeddedBrowserHlsHostLifecycle.onViewDestroyed(destroyedTabId)
         void embeddedBrowserDashHostLifecycle.onViewDestroyed(destroyedTabId)
       },
       onViewRenderProcessGone: (crashedTabId) => {
-        void clearEmbeddedBrowserMseSpoolFiles({ tabId: crashedTabId })
+        void enqueueEmbeddedBrowserMseControl(crashedTabId, async () => {
+          await clearEmbeddedBrowserMseSpoolFiles({ tabId: crashedTabId })
+        })
         void embeddedBrowserHlsHostLifecycle.onViewRenderProcessGone(crashedTabId)
         void embeddedBrowserDashHostLifecycle.onViewRenderProcessGone(crashedTabId)
       },
@@ -3354,7 +3411,9 @@ export function createEmbeddedBrowserMainController(
       pendingOpenFiles: embeddedBrowserPendingOpenFiles,
       tabId: normalizedTabId,
     })
-    await clearEmbeddedBrowserMseSpoolFiles({ tabId: normalizedTabId })
+    await enqueueEmbeddedBrowserMseControl(normalizedTabId, async () => {
+      await clearEmbeddedBrowserMseSpoolFiles({ tabId: normalizedTabId })
+    })
     if (view) {
       if (targetWindow.contentView.children.includes(view)) {
         targetWindow.contentView.removeChildView(view)
@@ -4128,6 +4187,8 @@ export function createEmbeddedBrowserMainController(
     const dashCleanupPromise = embeddedBrowserDashHostLifecycle.dispose()
     captureRuntime?.dispose()
     captureRuntime = null
+    await Promise.allSettled(Array.from(embeddedBrowserMseControlQueues.values()))
+    embeddedBrowserMseControlQueues.clear()
     await embeddedBrowserMseSpoolStore.dispose()
     for (const tabId of embeddedBrowserLibraryFileDropRequests.keys()) {
       cancelEmbeddedBrowserLibraryFileDropRequests(tabId)

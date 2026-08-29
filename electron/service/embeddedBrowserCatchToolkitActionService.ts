@@ -42,6 +42,7 @@ function normalizeCatchToolkitStatePayload(
     || typeof payload.regexWarning !== 'string'
     || typeof payload.regexRule !== 'string'
     || typeof payload.restartAlwaysFromBeginning !== 'boolean'
+    || typeof payload.saveEveryGigabyte !== 'boolean'
     || typeof payload.selectorWarning !== 'string'
     || typeof payload.selectorRule !== 'string'
     || typeof payload.streamCount !== 'number'
@@ -78,6 +79,7 @@ function normalizeCatchToolkitStatePayload(
     regexWarning: payload.regexWarning,
     regexRule: payload.regexRule,
     restartAlwaysFromBeginning: payload.restartAlwaysFromBeginning,
+    saveEveryGigabyte: payload.saveEveryGigabyte,
     selectorWarning: payload.selectorWarning,
     selectorRule: payload.selectorRule,
     streamCount: payload.streamCount,

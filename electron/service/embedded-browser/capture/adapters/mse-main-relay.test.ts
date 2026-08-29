@@ -46,6 +46,15 @@ describe('MSE main relay authorization', () => {
       resourceKey: base.resourceKey,
     })
     expect(authorizeMseControlPayload({
+      payload: { event: 'mse-save', resourceKey: base.resourceKey, streamType: 'video' },
+      resolveResourceKey,
+      tabId: base.tabId,
+    })).toMatchObject({
+      event: 'mse-save',
+      resourceKey: base.resourceKey,
+      streamType: 'video',
+    })
+    expect(authorizeMseControlPayload({
       payload: base,
       resolveResourceKey,
       tabId: base.tabId,

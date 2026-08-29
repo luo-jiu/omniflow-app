@@ -310,6 +310,7 @@ describe('Deep search target probe template', () => {
         manualFileName: '  target-probe-title  ',
         regexRule: 'episode-(\\\\d+)',
         selectorRule: '.episode-title',
+        saveEveryGigabyte: true,
         trimExtraMediaHeaders: true,
       })
     `, target.context) as Record<string, unknown>
@@ -320,10 +321,14 @@ describe('Deep search target probe template', () => {
       regexRule: 'episode-(\\d+)',
       selectorRule: '.episode-title',
       selectorWarning: '表达式暂时没有命中可用内容',
+      saveEveryGigabyte: true,
       trimExtraMediaHeaders: true,
     })
     expect(runInContext(`localStorage.getItem(
       'OmniflowCatchToolkit:autoDownloadOnComplete'
+    )`, target.context)).toBe('checked')
+    expect(runInContext(`localStorage.getItem(
+      'OmniflowCatchToolkit:saveEveryGigabyte'
     )`, target.context)).toBe('checked')
     expect(runInContext(`localStorage.getItem(
       'OmniflowCatchToolkit:manualFileName'

@@ -37,6 +37,7 @@ const EMPTY_TOOLKIT_STATE: EmbeddedBrowserCatchToolkitState = {
   regexWarning: '',
   regexRule: '',
   restartAlwaysFromBeginning: false,
+  saveEveryGigabyte: false,
   selectorWarning: '',
   selectorRule: '',
   streamCount: 0,

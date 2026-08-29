@@ -46,6 +46,7 @@ describe('Cat Catch page-origin toolkit state', () => {
       regexRule: '',
       regexWarning: '',
       restartAlwaysFromBeginning: false,
+      saveEveryGigabyte: false,
       selectorRule: '',
       selectorWarning: '',
       trimExtraMediaHeaders: false,
@@ -57,6 +58,7 @@ describe('Cat Catch page-origin toolkit state', () => {
       manualFileName: '  episode-7  ',
       regexRule: 'Episode (\\d+)',
       restartAlwaysFromBeginning: true,
+      saveEveryGigabyte: true,
       selectorRule: '#title',
       trimExtraMediaHeaders: true,
     })
@@ -68,10 +70,12 @@ describe('Cat Catch page-origin toolkit state', () => {
       [key('manualFileName'), 'episode-7'],
       [key('regexRule'), 'Episode (\\d+)'],
       [key('restartAlwaysFromBeginning'), 'checked'],
+      [key('saveEveryGigabyte'), 'checked'],
       [key('selectorRule'), '#title'],
       [key('trimExtraMediaHeaders'), 'checked'],
     ]))
     expect(stateB.getState().autoDownloadOnComplete).toBe(false)
+    expect(stateB.getState().saveEveryGigabyte).toBe(false)
     expect(originB.values.size).toBe(0)
 
     selectorText = ''

@@ -36,6 +36,7 @@ export type EmbeddedBrowserCatchToolkitState = {
   regexWarning: string;
   regexRule: string;
   restartAlwaysFromBeginning: boolean;
+  saveEveryGigabyte: boolean;
   selectorWarning: string;
   selectorRule: string;
   streamCount: number;
