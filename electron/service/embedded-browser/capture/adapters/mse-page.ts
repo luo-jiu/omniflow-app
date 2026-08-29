@@ -178,9 +178,9 @@ export function installMsePageAdapter(input: InstallMsePageAdapterInput): MsePag
     return true
   }
 
-  const maybeEmitLargeOutputSave = (stream: MseStreamSnapshot) => {
+  function maybeEmitLargeOutputSave(stream: MseStreamSnapshot) {
     if (!input.preferences.saveEveryGigabyte || stream.flushedBytes <= 0) return
-    const reachedThreshold = Math.floor(stream.totalBytes / largeOutputThresholdBytes)
+    const reachedThreshold = Math.floor(runtime.getSnapshot().totalBytes / largeOutputThresholdBytes)
     if (reachedThreshold <= lastLargeOutputThreshold) return
     lastLargeOutputThreshold = reachedThreshold
     input.emitControl({

@@ -1937,3 +1937,17 @@
 - runtime changes: page-origin state 增加 `OmniflowCatchToolkit:saveEveryGigabyte`，MSE 在 flush 后按累计总字节跨越阈值发出 `mse-save`；main controller 以 tab 为粒度串行处理 flush/save/reset，成功周期输出后清 page cache 和 MSE spool。
 - legacy cleanup: 无新增删除；旧 Cat Catch 页面实现继续保留至 MSE parity 和真实回归完成。
 - validation: 本切片修改完成后重跑 MSE 定向 Vitest、TypeScript、scoped ESLint、metadata validator、sync runner 与 `git diff --check`；完整 build 与真实页面验证仍受共享 dirty `dist-electron/**` 和当前无测试场景限制。
+
+## 2026-08-29: same target (MSE global media-size threshold)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本切片修正 Cat Catch `mediaSize` 的全局音视频累计语义。
+- reviewedThrough / portedThrough: 均保持 `null`；`mse.page-capture-runtime` 继续 `porting`，`mse.main-spool-lifecycle` 继续 `ported-unverified`，`mse-runtime` unit 仍开放。
+- change groups: `upstream-diff`、`periodic-output` 与 `fixture-contract`。
+- affected capability IDs: `mse.page-capture-runtime`；metadata 当前为 `7 units / 32 capabilities / 210 anchors / 100 cleanup entries / 216 planned IDs / 195 active refs`，状态为 `15 verified / 5 porting / 1 ported-unverified / 11 pending`。
+- fixtures/tests: 新增 `electron/service/embedded-browser/capture/adapters/mse-page.test.ts#mse.periodic-large-output-uses-total-bytes`，用 video/audio 各自低于阈值但合计跨阈值的 fixture 锁定只触发一次周期保存。
+- accepted differences: 继续使用产品化的 flush 后保存和成功后清理，不复刻上游在 append 代理内先下载再清理的页面时序；阈值判定严格复刻上游 `mediaSize` 的全局累计含义。
+- excluded changes and reasons: 未修改 HLS/DASH、transfer、统一 task registry、真实网站/真实大媒体或 `dist-electron/**`；MSE 固定上游其他异常路径、真实导入和长时间压力验证仍开放。
+- unresolved gaps: 仍需真实双轨页面确认累计阈值、spool 时序、ffmpeg 输出和失败后重试；MSE unit 不能因 synthetic threshold test 关闭。
+- runtime changes: `mse-page.ts` 以 `runtime.getSnapshot().totalBytes` 判定周期阈值，保持跨轨道全局累计并在 flush 后的 resource projection 完成后发送 `mse-save`。
+- legacy cleanup: 无新增删除；旧 Cat Catch 页面实现继续保留至 MSE parity 和真实回归完成。
+- validation: 本切片后需重跑 MSE 定向 Vitest、TypeScript、scoped ESLint、metadata validator、sync runner 与 `git diff --check`；完整 build 与真实页面验证仍受共享 dirty `dist-electron/**` 和当前无测试场景限制。

@@ -772,14 +772,16 @@
         "mse.audio-video-flush-reset",
         "mse.append-observability",
         "mse.auto-download-after-flush",
-        "mse.periodic-large-output"
+        "mse.periodic-large-output",
+        "mse.periodic-large-output-uses-total-bytes"
       ],
       "testRefs": [
         "electron/service/embedded-browser/cat-catch-port/mse/runtime.test.ts#mse.audio-video-flush-reset",
         "electron/service/embedded-browser/cat-catch-port/mse/runtime.test.ts#mse.append-observability",
         "electron/service/embeddedBrowserResourceProbeMseRuntime.test.ts#mse.append-observability",
         "electron/service/embedded-browser/capture/adapters/mse-page.test.ts#mse.auto-download-after-flush",
-        "electron/service/embedded-browser/capture/adapters/mse-page.test.ts#mse.periodic-large-output"
+        "electron/service/embedded-browser/capture/adapters/mse-page.test.ts#mse.periodic-large-output",
+        "electron/service/embedded-browser/capture/adapters/mse-page.test.ts#mse.periodic-large-output-uses-total-bytes"
       ],
       "acceptedDifferences": [],
       "notes": "The production page adapter now installs the fixed target MSE runtime and keeps DOM actions, filename/Blob handling, and the page-origin toolkit projection at the platform boundary. Pure runtime tests cover append/endOfStream, per-track flush/reset, retention limits, and drain semantics; production probe characterization covers installation, read/open/export/drain and resource events. When enabled, the page emits a serialized periodic-save control after a flush crosses each configured 1 GiB boundary; main handles it through the same merged/per-track output path and clears the page/spool cache after success. Fixed-upstream parity, production-equivalent large-media/auto-download behavior and real-site smoke remain open, so this capability stays porting."
