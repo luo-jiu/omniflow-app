@@ -1993,3 +1993,17 @@
 - runtime changes: `mse-page.ts` 在启用 `trimExtraMediaHeaders` 且当前 flush 含 MP4/WebM 头部时标记 `trimBeforeHeader`；relay 仅接受严格布尔值；main controller 在 per-tab 串行队列中先清理对应 resource spool 再追加 payload。
 - legacy cleanup: 无新增删除；旧 Cat Catch 页面实现继续保留至 MSE parity 和真实回归完成。
 - validation: 本切片 MSE 关联集合 `7 files / 20 passed`、TypeScript `--noEmit`、scoped ESLint、metadata validator（`7 units / 32 capabilities / 17 open / 100 cleanup / 220 planned`）、同步 runner `16/16` 和非 `dist-electron/**` diff check 均通过；完整 build、全仓 lint/test 与真实页面验证仍因共享 dirty 生成物和当前无测试场景不执行。
+
+## 2026-08-29: same target (MSE real binary output)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本切片为 MSE main output 增加条件式真实 ffmpeg/ffprobe 双轨证据。
+- reviewedThrough / portedThrough: 均保持 `null`；`mse.page-capture-runtime` 继续 `porting`，`mse.main-spool-lifecycle` 继续 `ported-unverified`，`mse-runtime` unit 仍开放。
+- change groups: `large-media-output` 与 `fixture-contract`。
+- affected capability IDs: `mse.main-spool-lifecycle`；metadata 当前为 `7 units / 32 capabilities / 210 anchors / 100 cleanup entries / 221 planned IDs / 201 active refs`，状态为 `15 verified / 5 porting / 1 ported-unverified / 11 pending`。
+- fixtures/tests: `electron/service/embeddedBrowserMseRealOutput.test.ts#mse.real-ffmpeg-ffprobe-output` 用本机 ffmpeg 生成独立 fragmented MP4 视频/音频轨道，经生产 `mergeEmbeddedBrowserResourceTracks` 合并，并用 ffprobe 验证 MP4 容器、正时长、H.264 video 与 AAC audio；MSE 关联集合为 `8 files / 21 passed`（ffmpeg/ffprobe 不可用时按条件 skip）。
+- accepted differences: 测试使用可重复的 lavfi 小媒体作为生产输出链 fixture，不宣称真实网站、长时间大媒体或页面 extraction/import parity。
+- excluded changes and reasons: 未修改 MSE page runtime、header trim、spool budget、relay、HLS/DASH、transfer、renderer UI 或 `dist-electron/**`；真实页面和大媒体压力仍需环境验证。
+- unresolved gaps: 固定上游 MSE 头部识别的完整异常样本、长时间大媒体、双轨合并失败恢复、真实页面下载导入和 MSE unit 原子关闭仍待完成。
+- runtime changes: 无生产 runtime 变化；新增条件式真实二进制 output fixture。
+- legacy cleanup: 无新增删除；旧 Cat Catch 页面实现继续保留至 MSE parity 和真实回归完成。
+- validation: 本切片真实 MSE output `1 passed`、完整 MSE 集合 `8 files / 21 passed`、TypeScript `--noEmit`、scoped ESLint、metadata validator（`7 units / 32 capabilities / 17 open / 100 cleanup / 221 planned`）、同步 runner `16/16` 和非 `dist-electron/**` diff check 均通过；完整 build、全仓 lint/test 与真实页面验证仍因共享 dirty 生成物和当前无测试场景不执行。
