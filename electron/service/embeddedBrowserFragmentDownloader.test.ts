@@ -203,4 +203,40 @@ describe('EmbeddedBrowserFragmentDownloader', () => {
     expect(downloader.success).toBe(1)
     downloader.destroy()
   })
+
+  it('stops active requests when its external AbortSignal is cancelled', async () => {
+    const controller = new AbortController()
+    let resolveStarted: (() => void) | undefined
+    const started = new Promise<void>((resolve) => {
+      resolveStarted = resolve
+    })
+    const fetchImpl = vi.fn(async (_input: string, init?: RequestInit) => {
+      resolveStarted?.()
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => {
+          reject(new DOMException('aborted', 'AbortError'))
+        }, { once: true })
+      })
+    })
+    const downloader = new EmbeddedBrowserFragmentDownloader({
+      fetch: fetchImpl,
+      fragments: [{ index: 0, url: 'https://media.example/segment.ts' }],
+      signal: controller.signal,
+      thread: 1,
+    })
+    const aborted = new Promise<void>((resolve) => {
+      downloader.on('aborted', () => resolve())
+    })
+
+    downloader.start()
+    await started
+    controller.abort()
+    await aborted
+    await vi.waitFor(() => {
+      expect(downloader.running).toBe(0)
+    })
+    expect(downloader.state).toBe('aborted')
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+    downloader.destroy()
+  })
 })

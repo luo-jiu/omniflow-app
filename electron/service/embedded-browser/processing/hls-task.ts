@@ -891,6 +891,7 @@ async function downloadEmbeddedBrowserHlsToLocalWorkDirectory(
     fragments: fragmentsToDownload,
     headers: plan.headers,
     maxRetries: request.maxRetries,
+    signal: request.signal,
     thread: plan.suggestedThreadCount || 6,
   })
 
@@ -993,7 +994,6 @@ async function downloadEmbeddedBrowserHlsToLocalWorkDirectory(
     throw createHlsDownloadAbortError()
   }
 
-  let abortListener: (() => void) | undefined
   try {
     await new Promise<void>((resolve, reject) => {
       downloader.on('allCompleted', () => {
@@ -1012,20 +1012,9 @@ async function downloadEmbeddedBrowserHlsToLocalWorkDirectory(
           : 0
         reject(downloadError || new Error(`下载分片失败：#${fragmentIndex + 1}`))
       })
-      abortListener = () => {
-        downloader.stop()
-      }
-      request.signal?.addEventListener('abort', abortListener, { once: true })
-      if (request.signal?.aborted) {
-        downloader.stop()
-        return
-      }
       downloader.start()
     })
   } finally {
-    if (abortListener) {
-      request.signal?.removeEventListener('abort', abortListener)
-    }
     downloader.destroy()
   }
 

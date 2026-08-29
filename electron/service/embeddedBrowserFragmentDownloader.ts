@@ -85,6 +85,7 @@ type EmbeddedBrowserFragmentDownloaderOptions = {
   fragments?: EmbeddedBrowserDownloadFragment[]
   headers?: Record<string, string>
   maxRetries?: number
+  signal?: AbortSignal
   thread?: number
 }
 
@@ -209,6 +210,10 @@ export class EmbeddedBrowserFragmentDownloader {
 
   private readonly bufferProcessors: EmbeddedBrowserFragmentBufferProcessor[]
 
+  private readonly signal?: AbortSignal
+
+  private externalAbortListener?: () => void
+
   private maxRetries: number
 
   private pendingQueue: EmbeddedBrowserFragmentDownloadTask[]
@@ -222,6 +227,7 @@ export class EmbeddedBrowserFragmentDownloader {
     this.bufferProcessors = (options?.bufferProcessors
       || (this.bufferProcessor ? [this.bufferProcessor] : []))
       .filter((processor): processor is EmbeddedBrowserFragmentBufferProcessor => typeof processor === 'function')
+    this.signal = options?.signal
     this.headers = options?.headers
     this.allFragments = []
     this.fragmentsInternal = []
@@ -303,6 +309,7 @@ export class EmbeddedBrowserFragmentDownloader {
     this.controller.forEach((controller) => {
       controller?.abort()
     })
+    this.detachExternalAbortListener()
     this.pendingQueue = []
     this.state = 'aborted'
     if (shouldEmitAborted) {
@@ -312,6 +319,7 @@ export class EmbeddedBrowserFragmentDownloader {
 
   destroy() {
     this.stop()
+    this.detachExternalAbortListener()
     this.events = {}
     this.allFragments = []
     this.fragmentsInternal = []
@@ -361,6 +369,14 @@ export class EmbeddedBrowserFragmentDownloader {
       attempt: 1,
       fragment,
     }))
+    if (this.signal) {
+      this.externalAbortListener = () => this.stop()
+      if (this.signal.aborted) {
+        this.stop()
+        return
+      }
+      this.signal.addEventListener('abort', this.externalAbortListener, { once: true })
+    }
     const workerCount = Math.min(this.thread, this.pendingQueue.length)
     for (let index = 0; index < workerCount; index += 1) {
       void this.scheduleNext()
@@ -403,6 +419,14 @@ export class EmbeddedBrowserFragmentDownloader {
     this.pushIndex = 0
     this.controller = Array.from({ length: this.fragmentsInternal.length }, () => null)
     this.running = 0
+  }
+
+  private detachExternalAbortListener() {
+    if (!this.externalAbortListener) {
+      return
+    }
+    this.signal?.removeEventListener('abort', this.externalAbortListener)
+    this.externalAbortListener = undefined
   }
 
   private async scheduleNext() {
@@ -504,6 +528,7 @@ export class EmbeddedBrowserFragmentDownloader {
     }
     if (this.success === this.fragmentsInternal.length) {
       this.state = 'done'
+      this.detachExternalAbortListener()
       this.emit('allCompleted', this.buffer, this.fragmentsInternal)
       return
     }

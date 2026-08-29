@@ -2117,3 +2117,17 @@
 - runtime changes: 新增 `processing/native-download-session.ts#NativeDownloadSession`；`embeddedBrowserService.ts` 的每个 `will-download` 以 `native-download` 登记到 `ProcessingTaskRegistry`，按 tab/view/process/app 取消，失败/取消清理 staging。
 - legacy cleanup: 无新增删除；旧 `will-download` bridge 保留为唯一 native 入口，直到 downloader fallback 和 normal-download handoff 完成。
 - validation: native session/streaming/registry 定向 `3 files / 8 passed`、TypeScript `--noEmit`、scoped ESLint 已通过；metadata validator、同步 runner 和非 `dist-electron/**` diff check 将在提交前重跑，完整 build/全仓 lint/test 与真实浏览器下载仍未执行。
+
+## 2026-08-29: same target (fragment transfer abort owner)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本切片把 HLS/DASH 分片 downloader 的外部取消收口到 downloader owner。
+- reviewedThrough / portedThrough: 均保持 `null`；`transfer.concurrent-retry-abort-order` 继续 `porting`，`transfer.range-terminal-race` 和任务 registry 归属仍未完成。
+- change groups: `task-lifecycle`、`concurrent-transfer`、`retry-cancel`。
+- affected capability IDs: `transfer.concurrent-retry-abort-order`；metadata 当前为 `7 units / 32 capabilities / 101 cleanup entries / 229 planned IDs`，状态为 `15 verified / 9 porting / 1 ported-unverified / 7 pending`。
+- fixtures/tests: 新增 `electron/service/embeddedBrowserFragmentDownloader.test.ts#stops active requests when its external AbortSignal is cancelled`；HLS/DASH 相关集合复跑 `4 files / 25 passed`，验证并发请求 abort 后只保留 aborted 终态。
+- accepted differences: 继续使用 OmniFlow 有界立即 retry，不复制 Cat Catch 递增延迟；保留 Electron/Fetch AbortSignal 作为平台等价取消信号。
+- excluded changes and reasons: 未实现 range terminal race、fragment task registry registration、downloader page fallback、StreamSaver provenance、renderer UI、`dist-electron/**` 或 upstream 游标。
+- unresolved gaps: 分片任务的 registry/settled owner、写入链终态与 range race、跨入口用户取消、真实大媒体压力仍待补齐。
+- runtime changes: `EmbeddedBrowserFragmentDownloader` 新增可选外部 signal，由 downloader 在 `start/stop/destroy/allCompleted` 管理 listener；HLS/DASH 删除重复的外层 abort listener 并把 signal 交给 downloader。
+- legacy cleanup: 无新增删除；现有 fragment downloader 仍是 HLS/DASH 的唯一分片 owner，旧页面 downloader 未切换。
+- validation: fragment/HLS/DASH 定向 `4 files / 25 passed`、TypeScript `--noEmit`、scoped ESLint 已通过；metadata validator、同步 runner 和非 `dist-electron/**` diff check 将在提交前重跑，完整 build/全仓 lint/test 与真实页面仍未执行。

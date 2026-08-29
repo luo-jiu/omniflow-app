@@ -277,20 +277,12 @@ async function downloadRepresentation(
     fragments,
     headers: options.headers,
     maxRetries: options.maxRetries,
+    signal: options.signal,
     thread: options.threadCount,
   })
   let writeChain = Promise.resolve()
   let settled = false
-  let rejectRun: ((error: Error) => void) | null = null
-  const abort = () => {
-    const error = createDashAbortError()
-    downloader.stop()
-    rejectRun?.(error)
-  }
-  const onAborted = () => abort()
-
   const run = new Promise<void>((resolve, reject) => {
-    rejectRun = reject
     const fail = (error: Error) => {
       if (settled) return
       settled = true
@@ -320,18 +312,12 @@ async function downloadRepresentation(
         resolve()
       }).catch(error => fail(error instanceof Error ? error : new Error(String(error))))
     })
-    options.signal.addEventListener('abort', onAborted, { once: true })
-    if (options.signal.aborted) {
-      abort()
-      return
-    }
     downloader.start()
   })
 
   try {
     await run
   } finally {
-    options.signal.removeEventListener('abort', onAborted)
     downloader.destroy()
   }
 }
@@ -362,21 +348,13 @@ export async function appendDashRepresentationSegments(
     fragments: selectedFragments,
     headers: options.headers,
     maxRetries: Math.max(0, Number(options.maxRetries ?? 2)),
+    signal: options.signal,
     thread: Math.max(1, Number(options.threadCount || 8)),
   })
   let writeChain = Promise.resolve()
   let bytesReceived = 0
   let settled = false
-  let rejectRun: ((error: Error) => void) | null = null
-  const abort = () => {
-    const error = createDashAbortError()
-    downloader.stop()
-    rejectRun?.(error)
-  }
-  const onAborted = () => abort()
-
   const run = new Promise<void>((resolve, reject) => {
-    rejectRun = reject
     const fail = (error: Error) => {
       if (settled) return
       settled = true
@@ -407,11 +385,6 @@ export async function appendDashRepresentationSegments(
         resolve()
       }).catch(error => fail(error instanceof Error ? error : new Error(String(error))))
     })
-    options.signal.addEventListener('abort', onAborted, { once: true })
-    if (options.signal.aborted) {
-      abort()
-      return
-    }
     downloader.start()
   })
 
@@ -419,7 +392,6 @@ export async function appendDashRepresentationSegments(
     await run
     return { bytesReceived, fragments: selectedFragments.length }
   } finally {
-    options.signal.removeEventListener('abort', onAborted)
     downloader.destroy()
   }
 }

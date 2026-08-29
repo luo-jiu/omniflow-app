@@ -1577,15 +1577,17 @@
         "electron/service/embedded-browser/cat-catch-port/processing/transfer-engine.ts#TransferEngine"
       ],
       "relationToUpstream": "exact",
-      "syncState": "pending",
+      "syncState": "porting",
       "syncedThrough": null,
       "plannedTestIds": [
         "transfer.concurrent-retry-abort-order",
         "transfer.range-terminal-race"
       ],
-      "testRefs": [],
+      "testRefs": [
+        "electron/service/embeddedBrowserFragmentDownloader.test.ts#stops active requests when its external AbortSignal is cancelled"
+      ],
       "acceptedDifferences": [],
-      "notes": "Local AbortControllers exist inside the downloader, but the orchestration layer does not retain a uniform cancel handle or terminal task record. Vendor provenance blockers: the bundled jQuery banner reports 4.0.0 while lib/third-party-libraries.md declares 3.7.1; the loaded StreamSaver bundle has the unresolved provenance recorded by transfer.streaming-memory-budget."
+      "notes": "`EmbeddedBrowserFragmentDownloader` now accepts one external AbortSignal and owns the listener for all concurrent fragment requests; HLS and DASH adapters no longer duplicate signal listeners. Retry keeps each fragment's URL/range, and cancellation clears queued work before the single aborted terminal. Ordered output/range terminal race and a uniform task registry entry remain open. Vendor provenance blockers: the bundled jQuery banner reports 4.0.0 while lib/third-party-libraries.md declares 3.7.1; the loaded StreamSaver bundle has the unresolved provenance recorded by transfer.streaming-memory-budget."
     },
     {
       "id": "transfer.downloader-session-lifecycle",
