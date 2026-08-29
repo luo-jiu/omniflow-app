@@ -2050,7 +2050,8 @@
         "output.transcode-failure-cleans-partial-output",
         "output.transcode-success-requires-output",
         "output.media-tool-success-requires-output",
-        "output.media-tool-failure-cleans-partial-output"
+        "output.media-tool-failure-cleans-partial-output",
+        "output.ffmpeg-dispose-cancel"
       ],
       "testRefs": [
         "electron/service/embeddedBrowserHlsOutput.test.ts#output.ffmpeg-process-cleanup",
@@ -2060,7 +2061,8 @@
         "electron/service/embeddedBrowserResourceMerge.test.ts#output.transcode-failure-cleans-partial-output",
         "electron/service/embeddedBrowserResourceMerge.test.ts#output.transcode-success-requires-output",
         "electron/service/mediaToolFfmpegService.test.ts#returns success only after a non-empty output exists",
-        "electron/service/mediaToolFfmpegService.test.ts#returns failure and removes partial output on ffmpeg failure"
+        "electron/service/mediaToolFfmpegService.test.ts#returns failure and removes partial output on ffmpeg failure",
+        "electron/service/embedded-browser/processing/ffmpeg-executor.test.ts#dispose aborts and waits for active tasks before returning"
       ],
       "acceptedDifferences": [],
       "notes": "Manifest download and manifest track merge now share a cancel-aware process runner: HLS calls register its AbortSignal with the tab/request owner, termination uses the cross-platform process-tree adapter, and aborted/non-zero tasks remove partial output. Every manifest input receives its own protocol whitelist and allowed-extension policy before its input declaration, so a second encrypted track can resolve its local key instead of inheriting ffmpeg's default extension rejection. Conditional real-binary integrations verify the manifest runner produces a probeable MP4/AAC output from generated local HLS and merges AES-128 encrypted fMP4/H264 video with an independent AES-128/AAC track into one probeable MP4. Resource merge/transcode, DASH local-file merge and the media-tool operations now use the same executor and output contract; executable probing remains a separate short-lived process, and no application-wide task/app-exit registry exists yet."

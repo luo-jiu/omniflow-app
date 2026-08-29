@@ -77,7 +77,52 @@ function terminateFfmpegProcess(child: ChildProcess, force: boolean) {
 }
 
 export class FfmpegTaskExecutor {
+  private readonly activeTasks = new Set<{
+    abortController: AbortController
+    settled: Promise<void>
+  }>()
+
+  private disposed = false
+
   async execute(input: FfmpegTaskRequest): Promise<FfmpegTaskResult> {
+    if (this.disposed) {
+      throw new Error('ffmpeg task executor 已释放')
+    }
+
+    const abortController = new AbortController()
+    const forwardAbort = () => abortController.abort()
+    if (input.signal?.aborted) {
+      abortController.abort()
+    } else {
+      input.signal?.addEventListener('abort', forwardAbort, { once: true })
+    }
+
+    const run = this.executeTask({
+      ...input,
+      signal: abortController.signal,
+    })
+    const settled = run.then(() => undefined, () => undefined)
+    const activeTask = { abortController, settled }
+    this.activeTasks.add(activeTask)
+    try {
+      return await run
+    } finally {
+      input.signal?.removeEventListener('abort', forwardAbort)
+      this.activeTasks.delete(activeTask)
+    }
+  }
+
+  async dispose() {
+    if (this.disposed) {
+      return
+    }
+    this.disposed = true
+    const tasks = [...this.activeTasks]
+    tasks.forEach(task => task.abortController.abort())
+    await Promise.all(tasks.map(task => task.settled))
+  }
+
+  private async executeTask(input: FfmpegTaskRequest): Promise<FfmpegTaskResult> {
     if (!String(input.outputPath || '').trim()) {
       throw new Error('输出路径不能为空')
     }
