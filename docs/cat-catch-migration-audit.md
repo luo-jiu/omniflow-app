@@ -13,7 +13,7 @@
 | reviewedThrough | 未建立 |
 | portedThrough | 未建立 |
 
-当前映射包含 7 个 cutover unit、32 项能力、211 个上游 anchor、102 个 cleanup entry 和 229 个唯一计划测试 ID。15 项能力达到 `verified`，11 项为 `porting`，1 项为 `ported-unverified`，其余 5 项仍为 `pending`；226 个唯一计划测试引用已落成 active pure behavior/contract、fake/real Electron integration 或 loopback redirect test。`network-capture`、`deep-search-runtime` 与 `hls-engine` 已完成固定目标下的原子 cutover；DASH 的 renderer parser facade、main task、live task、main XML adapter、增量追加 helper、独立 session owner、strict manifest authority 和 output adapter 已接入目标代码，静态双轨、dynamic refresh/append 与有限深度嵌套 SIDX 的真实/任务级证据已有，live start/stop/discard 也已接生产 main/preload IPC（当前没有 renderer UI），并且轮询终止错误会清理 live session/workdir；native `will-download` 现由 `NativeDownloadSession` 负责 staging、进度、终态和 registry 取消，分片 downloader 也由单一外部 signal 收口并发取消；普通直链、已捕获资源、HLS/MPD 直拉、HLS 计划下载、DASH 静态计划和 DASH 直播停止导出已进一步通过 `StagedOutputLeaseStore` 和 `publishStagedOutput` 完成处理期隔离、单次 claim 与最终发布，但 HLS/DASH 直播的 active recorder workdir、DASH 持续输出恢复、MSE、local-save、UploadManager handoff、crash quarantine 和 Cat Catch fallback 仍未接入；`dash.parser-planner` 与 `dash.timeline-download-merge` 仍保持 `porting`，其余 3 个 unit 仍开放。
+当前映射包含 7 个 cutover unit、32 项能力、211 个上游 anchor、103 个 cleanup entry 和 229 个唯一计划测试 ID。15 项能力达到 `verified`，11 项为 `porting`，1 项为 `ported-unverified`，其余 5 项仍为 `pending`；226 个唯一计划测试引用已落成 active pure behavior/contract、fake/real Electron integration 或 loopback redirect test。`network-capture`、`deep-search-runtime` 与 `hls-engine` 已完成固定目标下的原子 cutover；DASH 的 renderer parser facade、main task、live task、main XML adapter、增量追加 helper、独立 session owner、strict manifest authority 和 output adapter 已接入目标代码，静态双轨、dynamic refresh/append 与有限深度嵌套 SIDX 的真实/任务级证据已有，live start/stop/discard 也已接生产 main/preload IPC（当前没有 renderer UI），并且轮询终止错误会清理 live session/workdir；native `will-download` 现由 `NativeDownloadSession` 负责 staging、进度、终态和 registry 取消，分片 downloader 也由单一外部 signal 收口并发取消；普通直链、已捕获资源、HLS/MPD 直拉、HLS 计划下载、DASH 静态计划和 DASH 直播停止导出已进一步通过 `StagedOutputLeaseStore` 和 `publishStagedOutput` 完成处理期隔离、单次 claim 与最终发布，但 HLS/DASH 直播的 active recorder workdir、DASH 持续输出恢复、MSE、local-save、UploadManager handoff、crash quarantine 和 Cat Catch fallback 仍未接入；`dash.parser-planner` 与 `dash.timeline-download-merge` 仍保持 `porting`，其余 3 个 unit 仍开放。
 
 ## 2. 能力族
 
@@ -30,6 +30,8 @@
 本轮补充：DASH 静态计划也已经通过 `publishStagedOutput` 完成 lease 内下载/合并和单次最终发布；其 active task 由 `EmbeddedBrowserDashLiveSessionOwner` 负责取消。DASH live recorder 的 workdir、停止导出和更广泛的 registry / 资料库交付仍未切换，因此 `dash.timeline-download-merge` 与 output integration 继续保持 `porting`。
 
 本轮继续：DASH live 停止后的冻结轨道合并也通过同一 lease 完成，成功发布后才结束 live session 并清理 workdir；直播轮询期间的 active recorder workdir、持续输出恢复和更广泛的 registry / 资料库交付仍未切换。
+
+本轮再补充：已捕获资源转码现在也先写入 owner-scoped lease，ffmpeg 成功后才发布到用户目标；转码格式和 renderer 最终 `outputPath` 不变，但跨入口取消、crash quarantine 与资料库交付仍是开放边界。
 
 HLS master 现已按固定 level identity 与 resolved URI 合并重复 variant；即使相同 URI 被其他 URI 隔开，parser、download plan 与工具区仍保留完整且有序去重的 AUDIO/SUBTITLES group 集合，单值字段只作为兼容首组。固定 hls.js 的 `MANIFEST_LOADED` 会保留跨 URI 声明，但 Cat Catch 生成选择项所消费的 `MANIFEST_PARSED` 只暴露首 URI；显式相同 `PATHWAY-ID` 时还会把后续 URI 的 group 合到首 URI。OmniFlow 接受数据保留差异：每个 identity/URI 继续独立可选，不增加 fallback 顺序或 failover 执行语义。
 

@@ -1847,16 +1847,28 @@ export function createEmbeddedBrowserMainController(
         }
       }
 
-      const result = await transcodeEmbeddedBrowserResource({
-        ffmpegPath: payload.ffmpegPath,
-        outputFormat,
-        outputPath,
-        resource,
+      let ffmpegPath: string | undefined
+      const published = await publishStagedOutput({
+        fileName: path.basename(outputPath),
+        mimeType: `${resource.streamType === 'video' ? 'video' : 'audio'}/${outputFormat}`,
+        ownerTaskId: `captured-resource-transcode-${randomUUID()}`,
+        purpose: 'captured-resource-transcode',
+        store: getEmbeddedBrowserStagedOutputLeaseStore(),
+        targetPath: outputPath,
+        write: async (stagedPath) => {
+          const result = await transcodeEmbeddedBrowserResource({
+            ffmpegPath: payload.ffmpegPath,
+            outputFormat,
+            outputPath: stagedPath,
+            resource,
+          })
+          ffmpegPath = result.ffmpegPath
+        },
       })
       return {
-        ffmpegPath: result.ffmpegPath,
+        ffmpegPath,
         ok: true,
-        outputPath: result.outputPath,
+        outputPath: published.outputPath,
       }
     } catch (error) {
       runtimeLogger.warn('embedded browser resource transcode failed', {

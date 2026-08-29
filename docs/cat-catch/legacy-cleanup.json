@@ -1014,6 +1014,16 @@
       "cleanupAction": "retain-or-adapt"
     },
     {
+      "id": "node.output.captured-resource-transcode-dispatch",
+      "path": "electron/service/embeddedBrowserMainController.ts",
+      "symbol": "transcodeEmbeddedBrowserCapturedResourceForRenderer",
+      "capabilityId": "output.staged-output-lease",
+      "cutoverUnitId": "output-integration",
+      "classification": "omniflow-integration",
+      "role": "output-owner",
+      "cleanupAction": "retain-or-adapt"
+    },
+    {
       "id": "node.delivery.controller-extracted-save",
       "path": "electron/service/embeddedBrowserMainController.ts",
       "symbol": "saveEmbeddedBrowserExtractedResourceFile",

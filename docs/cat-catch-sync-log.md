@@ -2229,3 +2229,17 @@
 - runtime changes: `stopEmbeddedBrowserDashRecordingResource` 现在在 lease path 上执行 `mergeDashTaskTracksToOutput`，成功后单次 claim、发布并结束 live session；ffmpeg 失败或取消时释放 lease，已有最终目标不被覆盖。
 - legacy cleanup: 无新增删除；保留 DASH live recorder/session owner 和最终 `outputPath` 合同，未引入第二套 DASH 算法或长期 fallback。
 - validation: DASH/lease/output 定向 `5 files / 11 passed`、TypeScript `--noEmit`、scoped ESLint、metadata validator 和非 `dist-electron/**` diff check 通过；完整 build、全仓 lint/test、真实页面与真实下载仍沿用上一条记录的结果。
+
+## 2026-08-29: same target (captured-resource transcode staged output wiring)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本切片把已捕获资源转码的最终输出接入 staged output lease。
+- reviewedThrough / portedThrough: 均保持 `null`；`output.staged-output-lease` 继续 `porting`，output-integration unit 仍开放。
+- change groups: `main-authority-wiring`、`output-ownership`、`format-preservation` 与 `partial-output-cleanup`。
+- affected capability IDs: `output.staged-output-lease`；metadata 更新为 `7 units / 32 capabilities / 103 cleanup entries / 229 planned IDs / 226 active refs`，状态为 `15 verified / 11 porting / 1 ported-unverified / 5 pending`。
+- fixtures/tests: 复用现有 captured-resource merge/transcode、ffmpeg executor 和 staged publisher 合同测试；本切片新增 production transcode wiring，未虚增 capability test ref。
+- accepted differences: 输出格式、保存对话框、renderer 最终 `outputPath` 和资源内容读取方式保持不变；lease id、claim token 和暂存路径不出 main。
+- excluded changes and reasons: 未接入 tab-scoped cancellation、MSE page/spool 自动导入、UploadManager handoff、crash quarantine、renderer UI、`dist-electron/**` 或 upstream 游标；这些需要独立 owner/终态协议。
+- unresolved gaps: captured-resource transcode 的跨入口取消、统一任务 registry 归属、crash quarantine/预算、application delivery terminal、真实页面和大媒体仍待补齐。
+- runtime changes: `transcodeEmbeddedBrowserCapturedResourceForRenderer` 现在在 lease path 上运行 `transcodeEmbeddedBrowserResource`，ffmpeg 成功后单次 claim 并发布；失败或取消时释放 lease，不覆盖已有目标。
+- legacy cleanup: 无新增删除；保留现有 transcode service、ffmpeg 参数合同和最终 `outputPath`，未引入第二套转码算法或长期 fallback。
+- validation: 转码/merge/ffmpeg/lease 定向集合、TypeScript `--noEmit`、scoped ESLint、metadata validator 和非 `dist-electron/**` diff check 通过；完整 build、全仓 lint/test、真实页面与真实下载沿用前序记录。

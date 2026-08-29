@@ -1838,6 +1838,7 @@
       "currentImplementationRefs": [
         "electron/service/embedded-browser/processing/staged-output-publisher.ts#publishStagedOutput",
         "electron/service/embeddedBrowserMainController.ts#downloadEmbeddedBrowserMpdPlanResource",
+        "electron/service/embeddedBrowserMainController.ts#transcodeEmbeddedBrowserCapturedResourceForRenderer",
         "electron/service/embeddedBrowserMainController.ts#outputPath: result.outputPath",
         "electron/service/embeddedBrowserResourceFileSaveService.ts#saveEmbeddedBrowserExtractedResourceFile"
       ],
@@ -1860,7 +1861,7 @@
         "electron/service/embedded-browser/processing/staged-output-publisher.test.ts#releases the lease and keeps the previous target when processing fails"
       ],
       "acceptedDifferences": [],
-      "notes": "`StagedOutputLeaseStore` now provides a main-only opaque lease base with owner-scoped paths, one delivery claim, TTL touch/reap, and release cleanup; snapshots intentionally omit the real path. `staged-output-publisher.ts#publishStagedOutput` now owns the ordinary direct-file, captured-resource, HLS/MPD direct-manifest, HLS local-plan, HLS independent-track merge, HLS live stop-export, DASH static plan, and DASH live stop-export handoffs: processing writes only to the lease path, then a single claim publishes to the user target while preserving the existing final `outputPath` response. DASH static plan cancellation and live stop/export cancellation are owned by `EmbeddedBrowserDashLiveSessionOwner`; active DASH live recorder workdirs and continuous-output recovery remain separate. MSE and local-save/UploadManager delivery still use their domain owners; crash quarantine, budget accounting, renderer-safe lease IPC, and the application delivery terminal remain open."
+      "notes": "`StagedOutputLeaseStore` now provides a main-only opaque lease base with owner-scoped paths, one delivery claim, TTL touch/reap, and release cleanup; snapshots intentionally omit the real path. `staged-output-publisher.ts#publishStagedOutput` now owns the ordinary direct-file, captured-resource, HLS/MPD direct-manifest, HLS local-plan, HLS independent-track merge, HLS live stop-export, DASH static plan, DASH live stop-export, and captured-resource transcode handoffs: processing writes only to the lease path, then a single claim publishes to the user target while preserving the existing final `outputPath` response. DASH static plan cancellation and live stop/export cancellation are owned by `EmbeddedBrowserDashLiveSessionOwner`; active DASH live recorder workdirs and continuous-output recovery remain separate. MSE and local-save/UploadManager delivery still use their domain owners; cross-entry cancellation, crash quarantine, budget accounting, renderer-safe lease IPC, and the application delivery terminal remain open."
     },
     {
       "id": "output.application-workflow-coordinator",
