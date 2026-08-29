@@ -575,6 +575,8 @@ function parseRepresentation(input: {
   baseUrls: string[]
   durationSeconds?: number
   index: number
+  periodSegmentBase?: DashXmlElement
+  periodSegmentList?: DashXmlElement
   periodSegmentTemplate?: DashXmlElement
   representation: DashXmlElement
 }) {
@@ -609,7 +611,23 @@ function parseRepresentation(input: {
   })
   const representationList = firstChild(input.representation, 'SegmentList')
   const adaptationList = firstChild(input.adaptationSet, 'SegmentList')
-  const listElement = representationList || adaptationList
+  const periodList = input.periodSegmentList
+  const listElement = representationList || adaptationList || periodList
+  const effectiveList = listElement
+    ? {
+        ...listElement,
+        attributes: {
+          ...(periodList?.attributes || {}),
+          ...(adaptationList?.attributes || {}),
+          ...(representationList?.attributes || {}),
+        },
+        children: representationList?.children?.length
+          ? representationList.children
+          : adaptationList?.children?.length
+            ? adaptationList.children
+            : periodList?.children,
+      }
+    : undefined
   const listResult = templateResult.segments.length > 0 || effectiveTemplate
     ? {
         initializationRange: undefined,
@@ -619,18 +637,35 @@ function parseRepresentation(input: {
     : parseSegmentList({
         baseUrl: input.baseUrls[0] || '',
         durationSeconds: input.durationSeconds,
-        element: listElement,
+        element: effectiveList,
         reasons,
       })
-  const segmentBase = firstChild(input.representation, 'SegmentBase')
-    || firstChild(input.adaptationSet, 'SegmentBase')
+  const representationBase = firstChild(input.representation, 'SegmentBase')
+  const adaptationBase = firstChild(input.adaptationSet, 'SegmentBase')
+  const periodBase = input.periodSegmentBase
+  const segmentBase = representationBase || adaptationBase || periodBase
+  const effectiveBase = segmentBase
+    ? {
+        ...segmentBase,
+        attributes: {
+          ...(periodBase?.attributes || {}),
+          ...(adaptationBase?.attributes || {}),
+          ...(representationBase?.attributes || {}),
+        },
+        children: representationBase?.children?.length
+          ? representationBase.children
+          : adaptationBase?.children?.length
+            ? adaptationBase.children
+            : periodBase?.children,
+      }
+    : undefined
   const baseResult = templateResult.segments.length || listResult.segments.length || effectiveTemplate || listElement
     ? {
         initializationRange: undefined,
         initializationUrl: undefined,
         segments: [] as DashSegment[],
       }
-    : parseSegmentBase({ baseUrl: input.baseUrls[0] || '', element: segmentBase, reasons })
+    : parseSegmentBase({ baseUrl: input.baseUrls[0] || '', element: effectiveBase, reasons })
   const segments = templateResult.segments.length > 0
     ? templateResult.segments
     : listResult.segments.length > 0
@@ -685,6 +720,8 @@ export function parseDashManifest(input: {
   periods.forEach((period, periodIndex) => {
     const periodBaseUrls = resolveBaseUrls(baseUrls, period)
     const periodDurationSeconds = parseIsoDurationSeconds(attribute(period, 'duration')) ?? durationSeconds
+    const periodSegmentBase = firstChild(period, 'SegmentBase')
+    const periodSegmentList = firstChild(period, 'SegmentList')
     const periodSegmentTemplate = firstChild(period, 'SegmentTemplate')
     children(period, 'AdaptationSet').forEach((adaptationSet) => {
       const adaptationBaseUrls = resolveBaseUrls(periodBaseUrls, adaptationSet)
@@ -695,6 +732,8 @@ export function parseDashManifest(input: {
           baseUrls: representationBaseUrls,
           durationSeconds: periodDurationSeconds,
           index: representations.length + representationIndex + periodIndex,
+          periodSegmentBase,
+          periodSegmentList,
           periodSegmentTemplate,
           representation,
         })

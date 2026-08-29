@@ -144,6 +144,52 @@ describe('DASH parser', () => {
     ])
   })
 
+  it('dash.period-segment-info-inheritance', () => {
+    const listRoot = node('MPD', {}, [
+      node('Period', { duration: 'PT5S' }, [
+        node('SegmentList', { duration: '2' }, [
+          node('SegmentURL', { media: 'period-list-1.m4s' }),
+          node('SegmentURL', { media: 'period-list-2.m4s' }),
+          node('SegmentURL', { media: 'period-list-3.m4s' }),
+        ]),
+        node('AdaptationSet', { contentType: 'video' }, [
+          node('Representation', { id: 'period-list-video' }),
+        ]),
+      ]),
+    ])
+    const listManifest = parseDashManifest({
+      baseUrl: 'https://cdn.example/media/manifest.mpd',
+      root: listRoot,
+      text: '',
+    })
+    expect(listManifest.representations[0].segments.map(segment => segment.url)).toEqual([
+      'https://cdn.example/media/period-list-1.m4s',
+      'https://cdn.example/media/period-list-2.m4s',
+      'https://cdn.example/media/period-list-3.m4s',
+    ])
+    expect(listManifest.representations[0].segments.map(segment => segment.duration)).toEqual([
+      2, 2, 1,
+    ])
+
+    const baseRoot = node('MPD', {}, [
+      node('Period', {}, [
+        node('SegmentBase'),
+        node('AdaptationSet', { contentType: 'video' }, [
+          node('Representation', { id: 'period-base-video' }),
+        ]),
+      ]),
+    ])
+    const baseManifest = parseDashManifest({
+      baseUrl: 'https://cdn.example/media/period-base.mp4',
+      root: baseRoot,
+      text: '',
+    })
+    expect(baseManifest.representations[0].segments).toEqual([{
+      index: 0,
+      url: 'https://cdn.example/media/period-base.mp4',
+    }])
+  })
+
   it('dash.base-url-timeline-ranges', () => {
     const root = node('MPD', { type: 'dynamic' }, [
       node('BaseURL', {}, [], 'https://cdn-a.example/media/'),

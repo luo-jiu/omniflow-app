@@ -44,7 +44,7 @@ downloader/
 - `hls/parser.ts`：固定 hls.js/Cat Catch 的 manifest 下载相关解析语义。
 - `hls/plan.ts`：把 parser 输出投影为平台 adapter 消费的唯一 HLS 下载计划。
 - `hls/segment-query.ts`：固定 `tsAddArg` 的默认值提取和 fragment-only query 改写。
-- `dash/parser.ts`：固定 MPD 的继承 BaseURL、SegmentTemplate/SegmentTimeline、SegmentList range 与 DRM 投影语义；XML DOM 由平台 adapter 注入。
+- `dash/parser.ts`：固定 MPD 的继承 BaseURL、Period/AdaptationSet/Representation segment info、SegmentTemplate/SegmentTimeline、SegmentList range 与 DRM 投影语义；XML DOM 由平台 adapter 注入。
 
 HLS 的 main/preload/renderer 共享 DTO 由 `../contracts/hls.ts` 唯一定义；生产调用方和测试直接依赖 contract/port。旧 renderer model 已随 `hls-engine` cutover 删除，Electron main 运行时不得反向依赖 renderer model。
 
