@@ -2034,3 +2034,16 @@
 - runtime changes: `mergeEmbeddedBrowserResourceTracks` 拒绝空 output path；ffmpeg 零退出后要求目标为非空文件；merge 失败或产物无效时清理目标文件并重新抛出原始错误。
 - legacy cleanup: 无新增删除；旧 Cat Catch 页面实现继续保留至 MSE parity 和真实回归完成。
 - validation: MSE 关联定向 `8 files / 21 passed`、真实 MSE output `1 passed`、TypeScript `--noEmit`、scoped ESLint、metadata validator（`7 units / 32 capabilities / 17 open / 100 cleanup / 224 planned`）和非 `dist-electron/**` 的 `git diff --check` 均通过；同步 runner、全量 lint/test/build 与真实页面验证仍未执行。
+## 2026-08-29: same target (ffmpeg transcode output failure contract)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本切片把相同输出终态契约扩展到资源 transcode。
+- reviewedThrough / portedThrough: 均保持 `null`；`output.ffmpeg-process-owner` 继续 `pending`，`mse-runtime` unit 仍开放。
+- change groups: `large-media-output`、`stability` 与 `fixture-contract`。
+- affected capability IDs: `output.ffmpeg-process-owner`；metadata 当前为 `7 units / 32 capabilities / 210 anchors / 100 cleanup entries / 226 planned IDs / 206 active refs`，状态为 `15 verified / 5 porting / 1 ported-unverified / 11 pending`。
+- fixtures/tests: 新增 `electron/service/embeddedBrowserResourceMerge.test.ts#output.transcode-failure-cleans-partial-output` 与 `#output.transcode-success-requires-output`；fake ffmpeg child 覆盖 transcode 非零退出删除 partial output，以及零退出但没有非空 output 时拒绝。merge 的两条 MSE output 边界测试与真实 fragmented-MP4 ffmpeg/ffprobe output 继续通过。
+- accepted differences: 无新增；resource transcode 仍使用现有 file-backed/page extraction 输入和 ffmpeg 参数生成器，只补齐输出终态验证与失败清理。
+- excluded changes and reasons: 未修改 HLS/DASH task、transfer registry、renderer UI、`dist-electron/**` 或固定上游游标；全局 ffmpeg task/app-exit owner、取消协议和真实跨入口输出仍待迁移。
+- unresolved gaps: 资源 transcode 尚未纳入统一 ffmpeg process owner；媒体工具 `processMediaToolFile` 与 MPD track merge 仍有独立 child-process 生命周期，生产大媒体、真实页面提取与资料库导入仍需验证。
+- runtime changes: `transcodeEmbeddedBrowserResource` 拒绝空 output path；ffmpeg 零退出后要求目标为非空文件；transcode 失败或产物无效时清理目标文件并重新抛出原始错误；merge/transcode 共用输出检查 helper。
+- legacy cleanup: 无新增删除；旧 Cat Catch 页面实现继续保留至 MSE/output unit parity 和真实回归完成。
+- validation: resource merge/transcode 定向 `2 files / 5 passed`、TypeScript `--noEmit`、scoped ESLint、metadata validator（`7 units / 32 capabilities / 17 open / 100 cleanup / 226 planned`）均通过；同步 runner、全量 lint/test/build 与真实页面验证仍未执行。

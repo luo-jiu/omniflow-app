@@ -2045,16 +2045,20 @@
       "plannedTestIds": [
         "output.ffmpeg-process-cleanup",
         "output.ffmpeg-cancel-exit",
-        "hls.real-encrypted-fmp4-track-merge-output"
+        "hls.real-encrypted-fmp4-track-merge-output",
+        "output.transcode-failure-cleans-partial-output",
+        "output.transcode-success-requires-output"
       ],
       "testRefs": [
         "electron/service/embeddedBrowserHlsOutput.test.ts#output.ffmpeg-process-cleanup",
         "electron/service/embeddedBrowserHlsOutput.test.ts#output.ffmpeg-cancel-exit",
         "electron/service/embeddedBrowserHlsRealOutput.test.ts#hls.real-ffmpeg-ffprobe-output",
-        "electron/service/embeddedBrowserHlsRealOutput.test.ts#hls.real-encrypted-fmp4-track-merge-output"
+        "electron/service/embeddedBrowserHlsRealOutput.test.ts#hls.real-encrypted-fmp4-track-merge-output",
+        "electron/service/embeddedBrowserResourceMerge.test.ts#output.transcode-failure-cleans-partial-output",
+        "electron/service/embeddedBrowserResourceMerge.test.ts#output.transcode-success-requires-output"
       ],
       "acceptedDifferences": [],
-      "notes": "Manifest download and manifest track merge now share a cancel-aware process runner: HLS calls register its AbortSignal with the tab/request owner, termination uses the cross-platform process-tree adapter, and aborted/non-zero tasks remove partial output. Every manifest input receives its own protocol whitelist and allowed-extension policy before its input declaration, so a second encrypted track can resolve its local key instead of inheriting ffmpeg's default extension rejection. Conditional real-binary integrations verify the manifest runner produces a probeable MP4/AAC output from generated local HLS and merges AES-128 encrypted fMP4/H264 video with an independent AES-128/AAC track into one probeable MP4. Executable probing, resource merge, resource transcode, and MPD track merge remain separate child-process sites, so no application-wide ffmpeg task/app-exit owner exists yet."
+      "notes": "Manifest download and manifest track merge now share a cancel-aware process runner: HLS calls register its AbortSignal with the tab/request owner, termination uses the cross-platform process-tree adapter, and aborted/non-zero tasks remove partial output. Every manifest input receives its own protocol whitelist and allowed-extension policy before its input declaration, so a second encrypted track can resolve its local key instead of inheriting ffmpeg's default extension rejection. Conditional real-binary integrations verify the manifest runner produces a probeable MP4/AAC output from generated local HLS and merges AES-128 encrypted fMP4/H264 video with an independent AES-128/AAC track into one probeable MP4. Executable probing, resource merge, resource transcode, and MPD track merge remain separate child-process sites; merge and transcode now require a non-empty output after zero-exit ffmpeg and remove partial output on failure, but no application-wide ffmpeg task/app-exit owner exists yet."
     },
     {
       "id": "output.external-tools-dispatch",

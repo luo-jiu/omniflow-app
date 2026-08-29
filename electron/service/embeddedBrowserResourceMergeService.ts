@@ -260,6 +260,14 @@ async function prepareResourceMergeInput(
   }
 }
 
+async function assertEmbeddedBrowserFfmpegOutput(outputPath: string) {
+  const output = await stat(outputPath).catch(() => null)
+  if (output?.isFile() && output.size > 0) {
+    return
+  }
+  throw new Error('ffmpeg 已退出，但没有生成可用的输出文件')
+}
+
 export async function mergeEmbeddedBrowserResourceTracks(
   request: EmbeddedBrowserResourceMergeRequest,
 ): Promise<EmbeddedBrowserResourceMergeResult> {
@@ -316,10 +324,7 @@ export async function mergeEmbeddedBrowserResourceTracks(
       })
     })
 
-    const output = await stat(request.outputPath).catch(() => null)
-    if (!output || !output.isFile() || output.size <= 0) {
-      throw new Error('ffmpeg 已退出，但没有生成可用的输出文件')
-    }
+    await assertEmbeddedBrowserFfmpegOutput(request.outputPath)
     return result
   } catch (error) {
     if (ffmpegStarted) {
@@ -334,12 +339,16 @@ export async function mergeEmbeddedBrowserResourceTracks(
 export async function transcodeEmbeddedBrowserResource(
   request: EmbeddedBrowserResourceTranscodeRequest,
 ): Promise<EmbeddedBrowserResourceMergeResult> {
+  if (!String(request.outputPath || '').trim()) {
+    throw new Error('输出路径不能为空')
+  }
   const ffmpegPath = await resolveEmbeddedBrowserFfmpegPath(request.ffmpegPath)
   if (!ffmpegPath) {
     throw new Error('未找到可用的 ffmpeg，可在系统环境变量里配置，或确认 /opt/homebrew/bin/ffmpeg 可执行')
   }
 
   const tempDir = await createEmbeddedBrowserResourceMergeTempDir()
+  let ffmpegStarted = false
   try {
     const input = await prepareResourceMergeInput(tempDir, request.resource)
     const commandArgs = buildEmbeddedBrowserResourceTranscodeArgs({
@@ -348,6 +357,7 @@ export async function transcodeEmbeddedBrowserResource(
       outputPath: request.outputPath,
     })
 
+    ffmpegStarted = true
     const result = await new Promise<EmbeddedBrowserResourceMergeResult>((resolve, reject) => {
       const stdout: string[] = []
       const stderr: string[] = []
@@ -379,7 +389,13 @@ export async function transcodeEmbeddedBrowserResource(
       })
     })
 
+    await assertEmbeddedBrowserFfmpegOutput(request.outputPath)
     return result
+  } catch (error) {
+    if (ffmpegStarted) {
+      await rm(request.outputPath, { force: true }).catch(() => undefined)
+    }
+    throw error
   } finally {
     await cleanupEmbeddedBrowserResourceMergeTempDir(tempDir).catch(() => undefined)
   }
