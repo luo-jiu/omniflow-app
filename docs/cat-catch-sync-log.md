@@ -2159,3 +2159,17 @@
 - runtime changes: 新增 `processing/staged-output-publisher.ts#publishStagedOutput`；普通直链/已捕获下载先在 `StagedOutputLeaseStore` owner-scoped path 上流式写入，完成后单次 claim 并发布到目标路径，`ProcessingTaskRegistry` task id 作为 lease owner。
 - legacy cleanup: 无新增删除；旧 response/outputPath 合同保留，直链/捕获下载仍在 output unit 完成前保留兼容路径。
 - validation: publisher、lease、streaming transfer、main IPC 定向 `4 files / 10 passed`，TypeScript `--noEmit` 与 scoped ESLint 通过；本阶段提交前将重跑 metadata validator、sync runner、相关 Cat Catch 链和非 `dist-electron/**` diff check；完整 build、全仓 lint/test、真实页面与真实下载仍未执行。
+
+## 2026-08-29: same target (HLS plan staged output wiring)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本切片把 HLS 本地计划下载和失败分片 retry 接入 staged output lease。
+- reviewedThrough / portedThrough: 均保持 `null`；`hls.segment-pipeline` 继续 `verified`，`output.staged-output-lease` 继续 `porting`，output-integration unit 仍开放。
+- change groups: `main-authority-wiring`、`output-ownership`、`retry-recovery` 与 `partial-output-cleanup`。
+- affected capability IDs: `output.staged-output-lease`、`hls.segment-pipeline`；metadata 仍为 `7 units / 32 capabilities / 102 cleanup entries / 229 planned IDs / 226 active refs`，状态为 `15 verified / 11 porting / 1 ported-unverified / 5 pending`。
+- fixtures/tests: HLS plan/retry 共用 `publishStagedOutput`，处理阶段只写 lease path；失败分片释放本次 lease 但保留 retry session、workdir 和最终目标路径，成功发布后才移除 retry session/workdir。HLS/lease/publisher 关联集合 `6 files / 41 passed`。
+- accepted differences: renderer 继续收到原有最终 `outputPath`；每次 retry 创建新的短生命周期 lease，不把暂存路径或 claim token 放入 session、IPC 或任务投影。
+- excluded changes and reasons: 未接入 HLS live、DASH plan/live、MSE、local-save、UploadManager、crash quarantine、renderer UI、`dist-electron/**` 或 upstream 游标；这些入口仍需各自 delivery owner 和终态证据。
+- unresolved gaps: HLS/DASH/MSE 其他 output、统一协议任务 registry、lease crash quarantine/预算、application delivery terminal、真实页面和长时间大媒体仍待补齐。
+- runtime changes: `handleEmbeddedBrowserHlsPlanDownload` 和 `retryEmbeddedBrowserHlsPlanFailedFragments` 均通过 `publishStagedOutput` 写入 main-only lease；移除了 retry executor 的提前 `takeRetry`，改为发布成功后再转移终态所有权。
+- legacy cleanup: 无新增删除；保留最终 `outputPath` 合同和 HLS session owner，未引入第二套 HLS 算法或长期 fallback。
+- validation: HLS/lease/publisher 定向 `6 files / 41 passed`、TypeScript `--noEmit`、metadata validator 和非 `dist-electron/**` diff check 通过；完整 build、全仓 lint/test、真实页面与真实下载仍未执行。

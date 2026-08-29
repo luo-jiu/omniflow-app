@@ -2336,34 +2336,47 @@ export function createEmbeddedBrowserMainController(
         requestId,
         tabId: normalizedTabId,
       })
+      const activeSignal = activeTask.signal
       workDirectoryPath = await mkdtemp(path.join(os.tmpdir(), 'omniflow-hls-download-'))
-      const result = await defaultHlsTaskExecutor.executePlanToOutput({
-        fetch: createEmbeddedBrowserCapturedResourceFetch(normalizedTabId, resourceId),
-        ffmpegPath: payload.ffmpegPath,
-        manualKeyBase64: payload.manualKeyBase64,
-        onEvent: createEmbeddedBrowserHlsPlanTaskEventForwarder({
-          onFailedFragments: failedFragments => {
-            latestFailedFragments = failedFragments
-          },
-          plan: payload.plan,
-          requestId,
-          tabId: normalizedTabId,
-          usingManualKey: Boolean(payload.manualKeyBase64),
-        }),
-        outputPath,
-        plan: payload.plan,
-        runFfmpeg: input => downloadEmbeddedBrowserManifestResource({
-          ...input,
-          kind: 'hls',
-        }),
-        signal: activeTask.signal,
-        workDirectoryPath,
+      let ffmpegPath = ''
+      const published = await publishStagedOutput({
+        fileName: path.basename(outputPath),
+        mimeType: 'video/mp4',
+        ownerTaskId: `hls-plan-output-${randomUUID()}`,
+        purpose: 'hls-plan-download',
+        store: getEmbeddedBrowserStagedOutputLeaseStore(),
+        targetPath: outputPath,
+        write: async (stagedPath) => {
+          const result = await defaultHlsTaskExecutor.executePlanToOutput({
+            fetch: createEmbeddedBrowserCapturedResourceFetch(normalizedTabId, resourceId),
+            ffmpegPath: payload.ffmpegPath,
+            manualKeyBase64: payload.manualKeyBase64,
+            onEvent: createEmbeddedBrowserHlsPlanTaskEventForwarder({
+              onFailedFragments: failedFragments => {
+                latestFailedFragments = failedFragments
+              },
+              plan: payload.plan,
+              requestId,
+              tabId: normalizedTabId,
+              usingManualKey: Boolean(payload.manualKeyBase64),
+            }),
+            outputPath: stagedPath,
+            plan: payload.plan,
+            runFfmpeg: input => downloadEmbeddedBrowserManifestResource({
+              ...input,
+              kind: 'hls',
+            }),
+            signal: activeSignal,
+            workDirectoryPath,
+          })
+          ffmpegPath = result.ffmpegPath
+        },
       })
       latestFailedFragments = undefined
       return {
-        ffmpegPath: result.ffmpegPath,
+        ffmpegPath,
         ok: true,
-        outputPath: result.outputPath,
+        outputPath: published.outputPath,
       }
     } catch (error) {
       const wasAborted = activeTask?.signal.aborted
@@ -2773,38 +2786,49 @@ export function createEmbeddedBrowserMainController(
         requestId,
         tabId: normalizedTabId,
       })
-      const result = await defaultHlsTaskExecutor.executePlanToOutput({
-        beforeCompleted: () => {
-          embeddedBrowserHlsSessionOwner.takeRetry(requestId, normalizedTabId)
+      const activeSignal = activeTask.signal
+      let ffmpegPath = ''
+      const published = await publishStagedOutput({
+        fileName: path.basename(session.outputPath),
+        mimeType: 'video/mp4',
+        ownerTaskId: `hls-plan-retry-output-${randomUUID()}`,
+        purpose: 'hls-plan-retry',
+        store: getEmbeddedBrowserStagedOutputLeaseStore(),
+        targetPath: session.outputPath,
+        write: async (stagedPath) => {
+          const result = await defaultHlsTaskExecutor.executePlanToOutput({
+            fetch: createEmbeddedBrowserCapturedResourceFetch(normalizedTabId, session.resourceId),
+            ffmpegPath: session.ffmpegPath,
+            fragmentIndexes: session.failedFragments.map((value) => value - 1).filter((value) => value >= 0),
+            manualKeyBase64: session.manualKeyBase64,
+            onEvent: createEmbeddedBrowserHlsPlanTaskEventForwarder({
+              onFailedFragments: failedFragments => {
+                latestFailedFragments = failedFragments
+              },
+              plan: session.plan,
+              requestId,
+              tabId: normalizedTabId,
+              usingManualKey: Boolean(session.manualKeyBase64),
+            }),
+            outputPath: stagedPath,
+            plan: session.plan,
+            runFfmpeg: input => downloadEmbeddedBrowserManifestResource({
+              ...input,
+              kind: 'hls',
+            }),
+            signal: activeSignal,
+            workDirectoryPath: session.workDirectoryPath,
+          })
+          ffmpegPath = result.ffmpegPath
         },
-        fetch: createEmbeddedBrowserCapturedResourceFetch(normalizedTabId, session.resourceId),
-        ffmpegPath: session.ffmpegPath,
-        fragmentIndexes: session.failedFragments.map((value) => value - 1).filter((value) => value >= 0),
-        manualKeyBase64: session.manualKeyBase64,
-        onEvent: createEmbeddedBrowserHlsPlanTaskEventForwarder({
-          onFailedFragments: failedFragments => {
-            latestFailedFragments = failedFragments
-          },
-          plan: session.plan,
-          requestId,
-          tabId: normalizedTabId,
-          usingManualKey: Boolean(session.manualKeyBase64),
-        }),
-        outputPath: session.outputPath,
-        plan: session.plan,
-        runFfmpeg: input => downloadEmbeddedBrowserManifestResource({
-          ...input,
-          kind: 'hls',
-        }),
-        signal: activeTask.signal,
-        workDirectoryPath: session.workDirectoryPath,
       })
       latestFailedFragments = undefined
+      embeddedBrowserHlsSessionOwner.takeRetry(requestId, normalizedTabId)
       await rm(session.workDirectoryPath, { force: true, recursive: true }).catch(() => undefined)
       return {
-        ffmpegPath: result.ffmpegPath,
+        ffmpegPath,
         ok: true,
-        outputPath: result.outputPath,
+        outputPath: published.outputPath,
       }
     } catch (error) {
       const wasAborted = activeTask?.signal.aborted
