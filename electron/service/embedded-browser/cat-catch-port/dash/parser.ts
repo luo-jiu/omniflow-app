@@ -386,6 +386,13 @@ function expandSegmentTemplate(input: {
   const attrs = input.element.attributes || {}
   const timescale = Number(attrs.timescale || 1)
   const startNumber = Number(attrs.startNumber || 1)
+  const rawEndNumber = attrs.endNumber
+  const endNumber = rawEndNumber === undefined
+    ? undefined
+    : Number.parseInt(rawEndNumber, 10)
+  const validEndNumber = typeof endNumber === 'number' && Number.isFinite(endNumber)
+    ? endNumber
+    : undefined
   const presentationTimeOffset = Number(attrs.presentationTimeOffset || 0)
   const media = String(attrs.media || '')
   const initialization = String(attrs.initialization || '')
@@ -458,15 +465,18 @@ function expandSegmentTemplate(input: {
     const availableEnd = Math.min(
       Math.ceil((elapsedSeconds + (input.minimumUpdatePeriodSeconds || 0)) * timescale / duration),
       Math.floor(elapsedSeconds * timescale / duration),
+      ...(validEndNumber === undefined ? [] : [validEndNumber]),
     )
     startIndex = Math.max(0, availableStart)
     count = Math.max(0, availableEnd - startIndex)
   } else {
-    if (input.durationSeconds === undefined) {
+    if (input.durationSeconds === undefined && validEndNumber === undefined) {
       addReason(input.reasons, 'segment-template-duration-unbounded')
       return { initializationRange, initializationUrl, segments: [] as DashSegment[] }
     }
-    count = Math.ceil(input.durationSeconds / segmentDuration)
+    count = validEndNumber === undefined
+      ? Math.ceil((input.durationSeconds ?? 0) / segmentDuration)
+      : Math.max(0, validEndNumber)
   }
   count = Math.min(MAX_EXPANDED_SEGMENTS, count)
   if (count >= MAX_EXPANDED_SEGMENTS) addReason(input.reasons, 'segment-expansion-limit')
@@ -478,6 +488,8 @@ function expandSegmentTemplate(input: {
       const number = (Number.isFinite(startNumber) ? startNumber : 1) + segmentIndex
       const durationForSegment = input.dynamic
         ? segmentDuration
+        : input.durationSeconds === undefined
+          ? segmentDuration
         : Math.max(0, Math.min(
           segmentDuration,
           (input.durationSeconds || 0) - index * segmentDuration,

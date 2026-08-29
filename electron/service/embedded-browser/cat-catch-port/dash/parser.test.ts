@@ -345,6 +345,81 @@ describe('DASH parser', () => {
     ])
   })
 
+  it('dash.segment-template-end-number', () => {
+    const staticRoot = node('MPD', { mediaPresentationDuration: 'PT10S' }, [
+      node('Period', {}, [node('AdaptationSet', { contentType: 'video' }, [
+        node('SegmentTemplate', {
+          duration: '3',
+          endNumber: '2',
+          media: 'static-$Number$.m4s',
+        }),
+        node('Representation', { id: 'static-end-number' }),
+      ])]),
+    ])
+    const staticManifest = parseDashManifest({
+      baseUrl: 'https://cdn.example/live/manifest.mpd',
+      root: staticRoot,
+      text: '',
+    })
+    expect(staticManifest.representations[0].segments.map(segment => segment.number)).toEqual([1, 2])
+
+    const boundedWithoutDurationManifest = parseDashManifest({
+      baseUrl: 'https://cdn.example/live/manifest.mpd',
+      root: node('MPD', {}, [
+        node('Period', {}, [node('AdaptationSet', { contentType: 'video' }, [
+          node('SegmentTemplate', {
+            duration: '3',
+            endNumber: '2',
+            media: 'bounded-$Number$.m4s',
+          }),
+          node('Representation', { id: 'bounded-without-duration' }),
+        ])]),
+      ]),
+      text: '',
+    })
+    expect(boundedWithoutDurationManifest.representations[0].segments.map(segment => segment.duration))
+      .toEqual([3, 3])
+
+    const dynamicRoot = node('MPD', {
+      availabilityStartTime: '2026-08-29T12:00:00Z',
+      minimumUpdatePeriod: 'PT2S',
+      type: 'dynamic',
+    }, [
+      node('Period', {}, [node('AdaptationSet', { contentType: 'video' }, [
+        node('SegmentTemplate', {
+          duration: '2',
+          endNumber: '4',
+          media: 'dynamic-$Number$.m4s',
+          startNumber: '1',
+        }),
+        node('Representation', { id: 'dynamic-end-number' }),
+      ])]),
+    ])
+    const dynamicManifest = parseDashManifest({
+      baseUrl: 'https://cdn.example/live/manifest.mpd',
+      nowMs: Date.parse('2026-08-29T12:00:10Z'),
+      root: dynamicRoot,
+      text: '',
+    })
+    expect(dynamicManifest.representations[0].segments.map(segment => segment.number)).toEqual([1, 2, 3, 4])
+
+    const emptyManifest = parseDashManifest({
+      baseUrl: 'https://cdn.example/live/manifest.mpd',
+      root: node('MPD', { mediaPresentationDuration: 'PT10S' }, [
+        node('Period', {}, [node('AdaptationSet', { contentType: 'video' }, [
+          node('SegmentTemplate', {
+            duration: '2',
+            endNumber: '-1',
+            media: 'empty-$Number$.m4s',
+          }),
+          node('Representation', { id: 'empty-end-number' }),
+        ])]),
+      ]),
+      text: '',
+    })
+    expect(emptyManifest.representations[0].segments).toEqual([])
+  })
+
   it('dash.segment-base-and-period-boundary', () => {
     const singleFileRoot = node('MPD', {}, [
       node('Period', {}, [

@@ -1724,6 +1724,20 @@
 - legacy cleanup: 无新增删除；现有 target parser/task/output adapter 继续作为唯一 production owner。
 - validation: DASH parser/SIDX/task `3 files / 19 passed`、全量 Vitest（排除 Node 专用同步 runner）`212 files / 1412 passed / 3 skipped`、全量 `npm run lint`、应用 TypeScript `--noEmit`、metadata validator 和同步 runner `16/16` 均通过；直接运行 `npm test` 仍会错误收集 Node 专用 `tools/cat-catch-sync/validate.test.mjs` 并报告 `No test suite found`，按既有门禁排除该文件后通过；完整 build 与真实页面验证未执行，build 仍避免触碰其他 agent 的 dirty `dist-electron/**`。
 
+## 2026-08-29: same target (DASH SegmentTemplate endNumber)
+
+- observedHead / migrationTarget: 均为 `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本步补固定 `mpd-parser@1.4.0` 对 SegmentTemplate `endNumber` 的静态和动态展开边界。
+- reviewedThrough / portedThrough: 均保持 `null`；`dash.parser-planner` 与 `dash.timeline-download-merge` 继续 `porting`，`dash-engine` unit 仍开放。
+- change groups: `segment-template-end-number`、`duration-boundary` 与 `fixture-contract`。
+- affected capability IDs: `dash.parser-planner`；metadata 为 `7 units / 32 capabilities / 210 anchors / 99 cleanup entries / 201 planned IDs / 180 active refs`。
+- fixtures/tests: `dash.segment-template-end-number` 覆盖 static duration-only 的 `endNumber` 截断、无 MPD/Period 总时长时仍按 nominal duration 展开、dynamic duration-only availability window 的 `endNumber` 上界以及负值产生空计划的边界；DASH parser 定向为 `1 file / 13 passed`。
+- accepted differences: 遵循固定上游的数组索引语义，`endNumber` 作为 exclusive 展开结束索引而不是按 `startNumber` 换算的绝对数量；非法负值稳定得到空计划，不抛出数组长度异常。
+- excluded changes and reasons: 未修改 SegmentTimeline `endNumber` 交互、dynamic task/live refresh、UTC timing/client offset、复杂嵌套 SIDX、renderer UI、HLS、MSE、transfer 或 output；没有真实 MPD/ffprobe 场景，未宣称 DASH unit 已关闭。
+- unresolved gaps: dynamic refresh/live、UTC timing/client offset、其他 availability 属性、复杂嵌套 SIDX、多轨道跨 Period init/discontinuity 语义、真实 MPD/ffprobe 输出和 unit 关闭条件仍待完成。
+- runtime changes: `expandSegmentTemplate` 以固定上游 `parseInt` 读取 `endNumber`，在 static duration-only 和 dynamic availability window 中裁剪展开范围；无效/负值不会进入负长度 `Array.from`。
+- legacy cleanup: 无新增删除；现有 target parser/task/output adapter 继续作为唯一 production owner。
+- validation: DASH parser `13/13`、TypeScript、全量 ESLint、metadata validator、同步 runner `16/16` 和 scoped diff check 通过；完整 Vitest 仍按既有规则排除 Node 专用同步 runner，完整 build 与真实页面验证未执行，build 仍避免触碰其他 agent 的 dirty `dist-electron/**`。
+
 ## Template
 
 ```markdown
