@@ -1777,7 +1777,7 @@
         "electron/service/embedded-browser/processing/task-registry.test.ts#rejects new tasks after dispose and remains idempotent"
       ],
       "acceptedDifferences": [],
-      "notes": "`ProcessingTaskRegistry` now owns generic main-side task registration, filtered cancellation, settled-task waiting and idempotent app-exit disposal. The shared ffmpeg executor registers every active process here, while protocol-specific HLS/DASH/MSE session owners still retain their domain snapshots and workdir cleanup. Renderer-unmount recovery and broader transfer-task registration remain open."
+      "notes": "`ProcessingTaskRegistry` now owns generic main-side task registration, filtered cancellation, settled-task waiting and idempotent app-exit disposal. The shared ffmpeg executor and the legacy external-command adapter register active processes here, while protocol-specific HLS/DASH/MSE session owners still retain their domain snapshots and workdir cleanup. Renderer-unmount recovery and broader transfer-task registration remain open."
     },
     {
       "id": "output.processing-staged-terminal",
@@ -2123,10 +2123,12 @@
         "output.m3u8dl-protocol-encoding"
       ],
       "testRefs": [
-        "electron/service/embedded-browser/integrations/external-tools.test.ts#output.external-tool-auth-boundary"
+        "electron/service/embedded-browser/integrations/external-tools.test.ts#output.external-tool-auth-boundary",
+        "electron/service/embeddedBrowserExternalTools.test.ts#keeps launched commands registered until their process exits",
+        "electron/service/embeddedBrowserExternalTools.test.ts#lets app shutdown cancel and await an external command"
       ],
       "acceptedDifferences": [],
-      "notes": "Pinned upstream Base64-encodes m3u8dl custom-protocol payloads when configured. The unregistered ExternalToolDispatcher now accepts only tabId, opaque resourceId, and toolKey, redeems URL/metadata/protected headers from the main-owned Store/Vault, and rejects invalid, cross-tab, or stale requests before execution. Production IPC/preload/renderer still call the legacy generic protocol/command/aria2 dispatcher with renderer-supplied URL/header payloads; process terminal behavior, m3u8dl Base64 protocol encoding, production wiring, and legacy cleanup remain open. Options import/export is a separate peripheral Base64 consumer and remains outside this initial runtime mapping."
+      "notes": "Pinned upstream Base64-encodes m3u8dl custom-protocol payloads when configured. The production ExternalToolDispatcher accepts only tabId, opaque resourceId, and toolKey, redeems URL/metadata/protected headers from the main-owned Store/Vault, and rejects invalid, cross-tab, or stale requests before execution. The legacy executor now keeps spawned local commands registered until their real process exit, supports graceful-then-force tree termination during app shutdown, and preserves the fast dispatch return behavior. m3u8dl Base64 protocol encoding, broader production wiring coverage, and legacy cleanup remain open. Options import/export is a separate peripheral Base64 consumer and remains outside this initial runtime mapping."
     }
   ]
 }

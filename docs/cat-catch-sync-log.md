@@ -2061,3 +2061,17 @@
 - unresolved gaps: 仍需把 HLS/DASH/MSE 协议任务、普通下载和外部工具登记到 registry，并补跨入口用户 cancel protocol、staged output lease、生产等价大媒体、真实页面提取和资料库导入证据。
 - legacy cleanup: 删除 HLS manifest/track、resource merge/transcode 与 media-tool 中重复的 child-process runner、progress parser 和 output checker；未删除仍在生产使用的其他 legacy output paths。
 - validation: executor 生命周期定向 `1 file / 1 passed`，registry 定向 `1 file / 2 passed`，媒体工具定向 `1 file / 2 passed`，HLS/MSE/DASH/output 定向 `10 files / 30 passed`、TypeScript `--noEmit` 与 scoped ESLint 已通过；提交前将重跑 metadata validator、sync runner、完整相关链和非 `dist-electron/**` diff check。完整 build、全仓 lint/test 与真实页面验证仍未执行。
+
+## 2026-08-29: same target (external command process lifecycle)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本切片把外部命令的真实进程生命周期接入既有 main-side task registry。
+- reviewedThrough / portedThrough: 均保持 `null`；`output.external-tools-dispatch` 与 `processing.main-task-registry` 继续 `porting`，`output-integration` unit 仍开放。
+- change groups: `main-authority-wiring`、`process-lifecycle`、`app-shutdown` 与 `fixture-contract`。
+- affected capability IDs: `output.external-tools-dispatch`、`processing.main-task-registry`；metadata 当前为 `7 units / 32 capabilities / 101 cleanup entries / 229 planned IDs / 213 active refs`，状态为 `15 verified / 6 porting / 1 ported-unverified / 10 pending`。
+- fixtures/tests: 新增 `electron/service/embeddedBrowserExternalTools.test.ts`，覆盖快速 dispatch 返回后命令仍登记至真实 `exit`、应用 shutdown 取消并等待外部命令；外部工具 authority 测试继续覆盖 opaque resource/cross-tab/stale owner 边界。
+- accepted differences: 保留旧 API 的快速返回行为；registry 只追踪本地命令真实进程，不把 aria2 RPC 或 URL protocol 的外部服务生命周期伪装成本地任务。
+- excluded changes and reasons: 未实现 Cat Catch `m3u8dl` Base64 protocol encoding，未改变 HLS/DASH/MSE、普通下载、renderer UI、`dist-electron/**` 或 upstream 游标；这些边界仍需独立证据和产品决策。
+- unresolved gaps: 外部工具 dispatcher 的完整 production IPC/renderer 覆盖、跨入口用户取消协议、staged output lease、普通下载登记、真实外部工具回归与 legacy dispatcher 删除仍待完成。
+- runtime changes: `dispatchToCommand` 登记 `external-command` task；800ms launch acknowledgement 只清理计时器，保留 process listeners 到 `exit/error`；registry cancel 先 graceful tree termination，1.5 秒后 force termination，并在 settled 后释放登记。
+- legacy cleanup: 无新增删除；`node.integration.external-tools` 仍保留至 opaque dispatcher 完整切换和 output unit cutover。
+- validation: 外部工具与 task registry 定向 `2 files / 4 passed`、TypeScript `--noEmit`、scoped ESLint 已通过；metadata validator、sync runner、完整相关链、完整 build/全仓 lint/test 和真实页面/外部工具验证仍待提交前执行或在可用场景下补齐。

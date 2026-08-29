@@ -7,6 +7,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { app, shell } from 'electron'
 
 import { runtimeLogger } from '../runtimeLogger'
+import { terminateDesktopProcessTree } from '../platform/processTree'
+import { defaultProcessingTaskRegistry } from './embedded-browser/processing/task-registry'
 import type {
   EmbeddedBrowserExternalToolDispatchPayload,
   EmbeddedBrowserExternalToolKey,
@@ -267,14 +269,64 @@ async function dispatchToCommand(
 
     let settled = false
     let timer: NodeJS.Timeout | null = null
+    let forceTimer: NodeJS.Timeout | null = null
+    let cancelRequested = false
+    let settleProcess: (() => void) | undefined
+    const processSettled = new Promise<void>((resolveProcess) => {
+      settleProcess = () => {
+        if (forceTimer) {
+          clearTimeout(forceTimer)
+          forceTimer = null
+        }
+        resolveProcess()
+      }
+    })
+    let registration: ReturnType<typeof defaultProcessingTaskRegistry.register>
+    try {
+      registration = defaultProcessingTaskRegistry.register({
+        cancel: () => {
+          if (cancelRequested) return
+          cancelRequested = true
+          terminateDesktopProcessTree(child, {
+            environment: process.env,
+            force: false,
+          })
+          forceTimer = setTimeout(() => {
+            terminateDesktopProcessTree(child, {
+              environment: process.env,
+              force: true,
+            })
+          }, 1_500)
+          forceTimer.unref?.()
+        },
+        kind: 'external-command',
+        settled: processSettled,
+      })
+    } catch (error) {
+      terminateDesktopProcessTree(child, {
+        environment: process.env,
+        force: true,
+      })
+      reject(error)
+      return
+    }
+    void processSettled.then(() => registration.release())
 
-    const cleanup = () => {
-      child.removeAllListeners('error')
-      child.removeAllListeners('exit')
+    const cleanupProcessListeners = () => {
+      child.removeListener('error', handleError)
+      child.removeListener('exit', handleExit)
+    }
+
+    const cleanupLaunchTimer = () => {
       if (timer) {
         clearTimeout(timer)
         timer = null
       }
+    }
+
+    const cleanup = () => {
+      cleanupProcessListeners()
+      cleanupLaunchTimer()
     }
 
     const resolveLaunch = () => {
@@ -282,7 +334,7 @@ async function dispatchToCommand(
         return
       }
       settled = true
-      cleanup()
+      cleanupLaunchTimer()
       resolve()
     }
 
@@ -299,11 +351,15 @@ async function dispatchToCommand(
       reject(error)
     }
 
-    child.once('error', (error) => {
+    const handleError = (error: Error) => {
+      settleProcess?.()
+      cleanupProcessListeners()
       rejectLaunch(error instanceof Error ? error : new Error(String(error)))
-    })
+    }
 
-    child.once('exit', (code, signal) => {
+    const handleExit = (code: number | null, signal: NodeJS.Signals | null) => {
+      settleProcess?.()
+      cleanupProcessListeners()
       if (settled) {
         return
       }
@@ -316,7 +372,10 @@ async function dispatchToCommand(
         return
       }
       resolveLaunch()
-    })
+    }
+
+    child.once('error', handleError)
+    child.once('exit', handleExit)
 
     child.unref()
     timer = setTimeout(() => {
