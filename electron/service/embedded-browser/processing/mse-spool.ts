@@ -56,7 +56,13 @@ function buildSpoolKey(tabId: string, resourceKey: string) {
 }
 
 function sanitizeFileName(value: string) {
-  const safeName = String(value || '').replace(/[\\/:*?"<>|\u0000-\u001f]+/g, '_').trim()
+  const unsafeCharacters = new Set(['\\', '/', ':', '*', '?', '"', '<', '>', '|'])
+  let safeName = ''
+  for (const character of String(value || '')) {
+    const code = character.charCodeAt(0)
+    safeName += unsafeCharacters.has(character) || code < 0x20 ? '_' : character
+  }
+  safeName = safeName.trim()
   return safeName || 'media.bin'
 }
 
@@ -236,8 +242,7 @@ export class MseSpoolStore {
 
   private async enqueueClear(key: string) {
     const previousQueue = this.queues.get(key) || Promise.resolve(null)
-    let operation: Promise<MseSpoolFile | null>
-    operation = previousQueue
+    const operation: Promise<MseSpoolFile | null> = previousQueue
       .catch(() => null)
       .then(async () => {
         const entry = this.entries.get(key)

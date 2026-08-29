@@ -24,7 +24,7 @@
       "order": 3,
       "description": "MediaSource capture, bounded page buffering, main spool, reset, finalize, and merge lifecycle.",
       "dispatchBoundaryRefs": [
-        "electron/service/embedded-browser/capture/adapters/mse-page-runtime.ts#embeddedBrowserMsePageRuntimeHooksBody",
+        "electron/service/embedded-browser/capture/adapters/mse-page.ts#installMsePageAdapter",
         "electron/service/embedded-browser/capture/adapters/electron-page-probe.ts#ElectronPageProbeEventAdapter"
       ]
     },
@@ -760,25 +760,25 @@
         }
       ],
       "currentImplementationRefs": [
-        "electron/service/embedded-browser/capture/adapters/mse-page-runtime.ts#embeddedBrowserMsePageRuntimeCoreBody",
-        "electron/service/embedded-browser/capture/adapters/mse-page-runtime.ts#embeddedBrowserMsePageActionsBody",
-        "electron/service/embedded-browser/capture/adapters/mse-page-runtime.ts#embeddedBrowserMsePageRuntimeHooksBody"
+        "electron/service/embedded-browser/capture/adapters/mse-page.ts#installMsePageAdapter"
       ],
       "targetRefs": [
         "electron/service/embedded-browser/cat-catch-port/mse/runtime.ts#installMseRuntime"
       ],
       "relationToUpstream": "semantic-equivalent",
-      "syncState": "pending",
+      "syncState": "porting",
       "syncedThrough": null,
       "plannedTestIds": [
         "mse.audio-video-flush-reset",
         "mse.append-observability"
       ],
       "testRefs": [
+        "electron/service/embedded-browser/cat-catch-port/mse/runtime.test.ts#mse.audio-video-flush-reset",
+        "electron/service/embedded-browser/cat-catch-port/mse/runtime.test.ts#mse.append-observability",
         "electron/service/embeddedBrowserResourceProbeMseRuntime.test.ts#mse.append-observability"
       ],
       "acceptedDifferences": [],
-      "notes": "MSE state/helpers, page actions and MediaSource hooks compose as dedicated body fragments in the production probe IIFE beside the now-active target Deep runtime. Direct production-script characterization locks single installation, append/endOfStream observability, byte readback, open/export/drain and resource events. This owner extraction does not establish fixed-upstream MSE parity, audio/video flush-reset behavior, or bounded page retention, so the capability remains pending."
+      "notes": "The production page adapter now installs the fixed target MSE runtime and keeps DOM actions, filename/Blob handling, and the page-origin toolkit projection at the platform boundary. Pure runtime tests cover append/endOfStream, per-track flush/reset, retention limits, and drain semantics; production probe characterization covers installation, read/open/export/drain and resource events. Fixed-upstream parity and production-equivalent large-media/auto-download behavior remain open, so this capability stays porting."
     },
     {
       "id": "mse.main-spool-lifecycle",
@@ -794,22 +794,30 @@
       ],
       "upstreamRefs": [],
       "currentImplementationRefs": [
-        "electron/service/embeddedBrowserMainController.ts#embeddedBrowserMseSpoolFiles"
+        "electron/service/embedded-browser/processing/mse-spool.ts#MseSpoolStore",
+        "electron/service/embeddedBrowserMainController.ts#clearEmbeddedBrowserMseSpoolFiles",
+        "electron/service/embeddedBrowserMainController.ts#appendEmbeddedBrowserMseSpoolChunk"
       ],
       "targetRefs": [
         "electron/service/embedded-browser/processing/mse-spool.ts#MseSpoolStore"
       ],
       "relationToUpstream": "not-applicable",
-      "syncState": "pending",
-      "syncedThrough": null,
+      "syncState": "ported-unverified",
+      "syncedThrough": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
       "plannedTestIds": [
         "mse.lifecycle-cleanup",
         "mse.relay-forgery",
-        "mse.spool-budget-recovery"
+        "mse.spool-budget-recovery",
+        "mse.auto-download-output"
       ],
-      "testRefs": [],
+      "testRefs": [
+        "electron/service/embedded-browser/processing/mse-spool.test.ts#mse.lifecycle-cleanup",
+        "electron/service/embedded-browser/capture/adapters/mse-main-relay.test.ts#mse.relay-forgery",
+        "electron/service/embedded-browser/processing/mse-spool.test.ts#mse.spool-budget-recovery",
+        "electron/service/embedded-browser/processing/mse-download-output.test.ts#mse.auto-download-output"
+      ],
       "acceptedDifferences": [],
-      "notes": "Spool files and write queues are controller Maps with no global budget, reaper, quarantine, crash recovery, or app-exit cleanup."
+      "notes": "MseSpoolStore is the main-owned spool authority. It serializes per-track writes, reserves bytes before asynchronous append, enforces per-chunk/per-track/global budgets, reaps TTL entries, sweeps stale temp directories at session setup, and clears on reset, navigation, render-process loss, tab close, and controller dispose. Relay authorization binds flush/reset payloads to the current tab's opaque MSE resource key. Automatic output now stages merged or per-track files through the existing browser download completion/import contract, so renderer auto-save cannot duplicate the main action; production large-media and real-site smoke remain open."
     },
     {
       "id": "hls.parser-planner",

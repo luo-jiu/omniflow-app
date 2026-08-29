@@ -1,6 +1,6 @@
 # Embedded Browser 架构说明
 
-更新时间：2026-08-28
+更新时间：2026-08-29
 
 适用范围：`omniflow-app` 内置浏览器的 renderer UI、preload bridge、Electron main controller、资源捕捉、下载导入与缓存捕捉工具链。
 
@@ -148,7 +148,7 @@ library detail page
 - 固定 `M3U8Parser.isMediaPlaylist` 只要发现 `EXTINF` 或 `EXT-X-TARGETDURATION` 就选择 media parser；此后混入的 `EXT-X-STREAM-INF` / `EXT-X-MEDIA` 只走 level fallback，不能生成 variant/rendition 或吞掉下一条媒体 URI。pure parser 同样在模式判定后隔离 master-only 分支，Cat Catch `parseTs` 实际会消费的零时长 URI 仍保留 sequence、MAP、key 和 implicit IV。
 - 同一模式选择的反向边界也必须保留：未命中 media syntax 的 master 只解析 `DEFINE`、`SESSION-KEY`、`STREAM-INF`、`MEDIA` 及其 variant URI；混入的 `KEY/MAP/BYTERANGE` 等 media-only 标签和未绑定 variant 的游离 URI 不能进入 fragment、key、MAP 或 range 状态。没有普通 level 的 master 继续报 `no levels found in manifest`，不能把游离 URI 降级为零时长下载项。
 - 固定版 hls.js 也会在 media playlist 缺少 `#EXTM3U` 或 `TARGETDURATION`、重复 `TARGETDURATION` / `PLAYLIST-TYPE` / `VERSION` / `ENDLIST` / `SERVER-CONTROL` / 有效 `PART-INF`，以及在首个 fragment 后声明 `MEDIA-SEQUENCE` / `DISCONTINUITY-SEQUENCE` 时发出 `levelParsingError`，同样不会进入 `parseTs`。`PART-INF` 复刻其 truthy `partTarget` 经验边界：前值为 `0` 或非法值时，随后有效标签仍被接受。同步 parser 在计划创建前抛出相同 reason；同步 facade 没有复制 hls.js 的 evented loader 状态机，也不把仅用于播放 reload 的 SERVER-CONTROL 状态扩展进下载 DTO。
-- 固定版 hls.js 的带值标签正则要求标签名后立即出现冒号。pure parser 对 `STREAM-INF/MEDIA-SEQUENCE/TARGETDURATION/PLAYLIST-TYPE/KEY/MAP/BYTERANGE/DISCONTINUITY-SEQUENCE/EXTINF` 保持同一分发边界；带相似前缀的未知扩展标签不能改变 variant、sequence、key、MAP 或 range。无值标签使用另一条上游正则，其前缀行为不在这里顺手规范化。
+- 固定版 hls.js 的带值标签正则要求标签名后立即出现冒号。pure parser 对 `STREAM-INF/MEDIA-SEQUENCE/TARGETDURATION/PLAYLIST-TYPE/KEY/MAP/BYTERANGE/DISCONTINUITY-SEQUENCE/EXTINF` 保持同一分发边界；带相似前缀的未知扩展标签不能改变 variant、sequence、key、MAP 或 range。无值标签使用另一条未要求名称终止的上游正则：`DISCONTINUITY-FOO` 仍增加 cc，`ENDLIST-FOO` 仍结束 live；重复伪前缀的 singleton error 只记录正则实际命中的规范标签名。manifest 与 download plan 必须保留这层前缀行为。
 - 固定 media-playlist slow regex 的带值分支还要求冒号后至少有一个字符。裸 `MAP:` / `BYTERANGE:` / `PLAYLIST-TYPE:` 只进入 fallback，不能清除既有 init/range/type；裸 `DEFINE:` 也不能创建名为 `undefined` 的变量。该字符可以只是 whitespace，因此 parser 必须保留行尾再决定分支：空格 payload 会进入 MAP/range/DEFINE/PART-INF/SERVER-CONTROL/PLAYLIST-TYPE 语义，不能被预先 `trim()` 成裸标签；属性值仍由各自 AttrList 规则归一化。由此产生的空 MAP 和非法 Range 继续执行既有稳定拒绝，避免 Cat Catch 原路径抓取扩展页/manifest init bytes 或构造不可执行 `Range`；其余变量替换和重复 singleton 错误顺序与固定上游一致。
 - `MEDIA-SEQUENCE/TARGETDURATION/VERSION/DISCONTINUITY-SEQUENCE` 的固定整数分支只匹配冒号后可选普通空格及数字首 token；`+/-` 开头的值不会因 JavaScript `parseInt` 能解析就进入该分支，数字后的文本仍保留整数前缀语义。未命中整数分支的 `DISCONTINUITY-SEQUENCE` 会被固定无值正则的 `DISCONTINUITY` 前缀接住，所以 pure parser 分开维护 initial discontinuity sequence 与 current cc，合法后续 sequence 可以覆盖此前 fallback increment。
 - `EXTINF` 使用固定 fast regex 的无符号 decimal-prefix 行为，不能用宽松 `Number/parseFloat` 代替。合法 `.5` 保留为半秒；signed、指数、十六进制或数字尾随文本的 remainder 会被固定 URI 分支回扫成额外分片，随后真实 URI 再形成零时长分片。超长纯十进制产生非有限 duration 后，URI 保持不物化且空 duration 不重置该状态，直到有效 duration 才恢复。Cat Catch `parseTs` 会下载实际物化项，因此 manifest 和 plan 必须同时保留其 URL、sequence、implicit IV 与总时长影响。
@@ -169,7 +169,7 @@ library detail page
 - 工具区也可直接发起 HLS key 验证；候选会合并 manifest key URL、当前 tab 已捕获 key 资源和工具区手动输入 key。
 - 当前 `master playlist + 手动 key` 已要求先明确选择具体 variant，再回到现有本地主链。
 - main 侧会给每次 HLS 执行阶段事件分配单调 `revision`，先写入有界安全投影再回推 renderer；工具区先订阅实时事件，再通过只读 IPC 获取当前 tab 的 snapshot，只接受当前 manifest、variant 或 rendition 且 revision 更新的投影。snapshot 是 main 任务真相的恢复视图，不是 renderer 的第二份任务 owner。
-- MSE 深度捕捉当前已补第一版增量写盘：page runtime 在 `appendBuffer` 累积超过阈值后，会通过 probe console payload 把 chunk flush 给 main，main 落到 temp spool file；后续 `save / merge / transcode` 优先读取 file-backed 资源，而不是再次整段 base64 提取。
+- MSE 深度捕捉当前已补第一版增量写盘：`cat-catch-port/mse/runtime.ts` 在 `appendBuffer` 累积超过阈值后由 `capture/adapters/mse-page.ts` 通过 tokenized probe relay 把 chunk flush 给 main，`processing/mse-spool.ts#MseSpoolStore` 以 per-track queue、单轨/总量预算和 TTL 落到 temp spool file；后续 `save / merge / transcode` 以及 MSE 下载动作优先逐轨读取 file-backed 资源，而不是再次整段 base64 提取。自动下载会在 main 侧优先合并音视频，随后写入现有 embedded-browser download staging root 并发布完成事件，沿用 renderer 的导入队列和清理合同；页面导航、view/process 销毁、tab close 和 controller dispose 会清理 spool。大媒体、真实页面和真实下载导入仍待验证。
 
 这些 hook 应继续通过 `services/*.api.ts` 调 preload bridge，不要直接在 hook 或组件里散落原始 bridge 调用。
 
@@ -389,7 +389,7 @@ tempPath
 - probe 通过 console payload / page action 输出资源和缓存工具状态
 - main 解析并汇总回 renderer
 
-当前事实：Deep 已通过唯一 production document factory 原子切换到固定 Cat Catch target。generated manifest/media 资源经随机 document token、`ElectronPageProbeEventAdapter` 和 `PageProbeCaptureAdapter` 写入 main `ResourceStateStore`，toolkit get/update 由 page-origin owner 持有并只向独立 MSE actions 同步运行投影。旧 disabled hooks、manifest heuristic、Worker bootstrap、toolkit state/storage、`probeResources` 和混合 core/host 已删除；MSE 仍由自己的 page owner 先安装，其固定上游 parity 仍是开放 unit。重构状态和验收以 `docs/cat-catch-full-migration-execution-plan.md` 为准。
+当前事实：Deep 已通过唯一 production document factory 原子切换到固定 Cat Catch target。generated manifest/media 资源经随机 document token、`ElectronPageProbeEventAdapter` 和 `PageProbeCaptureAdapter` 写入 main `ResourceStateStore`，toolkit get/update 由 page-origin owner 持有并只向独立 MSE actions 同步运行投影。MSE page/runtime/spool 也已形成唯一 production chain；自动完成动作已收敛到 main staging + download completion/import contract，renderer 不再重复弹出保存流程。固定上游 parity、生产等价大媒体、真实页面和真实下载导入仍是开放的 `mse-runtime` unit。重构状态和验收以 `docs/cat-catch-full-migration-execution-plan.md` 为准。
 
 renderer 的资源列表不应该关心“这个资源是来自网络还是来自 probe 的哪一种 hook”，只关心统一的捕捉模型。
 

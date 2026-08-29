@@ -23,12 +23,12 @@ const EMBEDDED_BROWSER_DOWNLOAD_DIRNAME = 'embedded-browser-downloads'
 let embeddedBrowserSessionInstance: Session | null = null
 let embeddedBrowserDownloadBridgeInitialized = false
 
-function getEmbeddedBrowserDownloadRoot() {
+export function getEmbeddedBrowserDownloadStagingRoot() {
   return path.join(app.getPath('userData'), EMBEDDED_BROWSER_DOWNLOAD_DIRNAME)
 }
 
 function ensureEmbeddedBrowserDownloadRoot() {
-  const root = getEmbeddedBrowserDownloadRoot()
+  const root = getEmbeddedBrowserDownloadStagingRoot()
   if (!existsSync(root)) {
     mkdirSync(root, { recursive: true })
   }
@@ -78,7 +78,7 @@ export async function cleanupEmbeddedBrowserDownloadFile(tempPath?: string): Pro
     return false
   }
 
-  const downloadRoot = path.resolve(getEmbeddedBrowserDownloadRoot())
+  const downloadRoot = path.resolve(getEmbeddedBrowserDownloadStagingRoot())
   if (normalizedPath !== downloadRoot && !normalizedPath.startsWith(`${downloadRoot}${path.sep}`)) {
     return false
   }

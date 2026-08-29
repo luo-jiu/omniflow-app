@@ -124,16 +124,6 @@
       "cleanupAction": "remove-after-cutover"
     },
     {
-      "id": "node.page-actions.mse-drain",
-      "path": "electron/service/embedded-browser/capture/adapters/mse-page-runtime.ts",
-      "symbol": "embeddedBrowserMsePageActionsBody",
-      "capabilityId": "mse.page-capture-runtime",
-      "cutoverUnitId": "mse-runtime",
-      "classification": "legacy",
-      "role": "adapter",
-      "cleanupAction": "remove-after-cutover"
-    },
-    {
       "id": "node.page-actions.catch-action-script",
       "path": "electron/service/embeddedBrowserCatchToolkitPageBridge.ts",
       "symbol": "createEmbeddedBrowserCatchToolkitActionScript",
@@ -142,36 +132,6 @@
       "classification": "omniflow-integration",
       "role": "adapter",
       "cleanupAction": "retain-or-adapt"
-    },
-    {
-      "id": "node.page-actions.catch-clear",
-      "path": "electron/service/embedded-browser/capture/adapters/mse-page-runtime.ts",
-      "symbol": "clearCatchMediaCacheInternal",
-      "capabilityId": "mse.page-capture-runtime",
-      "cutoverUnitId": "mse-runtime",
-      "classification": "legacy",
-      "role": "adapter",
-      "cleanupAction": "remove-after-cutover"
-    },
-    {
-      "id": "node.page-actions.catch-download",
-      "path": "electron/service/embedded-browser/capture/adapters/mse-page-runtime.ts",
-      "symbol": "downloadCatchMediaInternal",
-      "capabilityId": "mse.page-capture-runtime",
-      "cutoverUnitId": "mse-runtime",
-      "classification": "legacy",
-      "role": "adapter",
-      "cleanupAction": "remove-after-cutover"
-    },
-    {
-      "id": "node.page-actions.catch-restart",
-      "path": "electron/service/embedded-browser/capture/adapters/mse-page-runtime.ts",
-      "symbol": "restartCatchMediaCaptureInternal",
-      "capabilityId": "mse.page-capture-runtime",
-      "cutoverUnitId": "mse-runtime",
-      "classification": "legacy",
-      "role": "adapter",
-      "cleanupAction": "remove-after-cutover"
     },
     {
       "id": "node.page-actions.catch-get-script",
@@ -364,33 +324,23 @@
       "cleanupAction": "retain-or-adapt"
     },
     {
-      "id": "node.mse.page-runtime",
-      "path": "electron/service/embedded-browser/capture/adapters/mse-page-runtime.ts",
-      "symbol": "embeddedBrowserMsePageRuntimeHooksBody",
-      "capabilityId": "mse.page-capture-runtime",
-      "cutoverUnitId": "mse-runtime",
-      "classification": "legacy",
-      "role": "production-owner",
-      "cleanupAction": "remove-after-cutover"
-    },
-    {
-      "id": "node.mse.page-buffer-normalizer",
-      "path": "electron/service/embedded-browser/capture/adapters/mse-page-runtime.ts",
-      "symbol": "embeddedBrowserMsePageRuntimeCoreBody",
-      "capabilityId": "mse.page-capture-runtime",
-      "cutoverUnitId": "mse-runtime",
-      "classification": "legacy",
-      "role": "helper",
-      "cleanupAction": "remove-after-cutover"
-    },
-    {
       "id": "node.mse.main-spool",
-      "path": "electron/service/embeddedBrowserMainController.ts",
-      "symbol": "embeddedBrowserMseSpoolFiles",
+      "path": "electron/service/embedded-browser/processing/mse-spool.ts",
+      "symbol": "MseSpoolStore",
       "capabilityId": "mse.main-spool-lifecycle",
       "cutoverUnitId": "mse-runtime",
       "classification": "omniflow-integration",
       "role": "output-owner",
+      "cleanupAction": "retain-or-adapt"
+    },
+    {
+      "id": "node.mse.page-adapter",
+      "path": "electron/service/embedded-browser/capture/adapters/mse-page.ts",
+      "symbol": "installMsePageAdapter",
+      "capabilityId": "mse.page-capture-runtime",
+      "cutoverUnitId": "mse-runtime",
+      "classification": "omniflow-integration",
+      "role": "production-owner",
       "cleanupAction": "retain-or-adapt"
     },
     {
@@ -772,26 +722,6 @@
       "classification": "omniflow-integration",
       "role": "adapter",
       "cleanupAction": "retain-or-adapt"
-    },
-    {
-      "id": "node.mse.page-reset-emitter",
-      "path": "electron/service/embedded-browser/capture/adapters/mse-page-runtime.ts",
-      "symbol": "emitMseStreamReset",
-      "capabilityId": "mse.page-capture-runtime",
-      "cutoverUnitId": "mse-runtime",
-      "classification": "legacy",
-      "role": "production-owner",
-      "cleanupAction": "remove-after-cutover"
-    },
-    {
-      "id": "node.mse.page-flush-emitter",
-      "path": "electron/service/embedded-browser/capture/adapters/mse-page-runtime.ts",
-      "symbol": "flushMseStreamBuffers",
-      "capabilityId": "mse.page-capture-runtime",
-      "cutoverUnitId": "mse-runtime",
-      "classification": "legacy",
-      "role": "production-owner",
-      "cleanupAction": "remove-after-cutover"
     },
     {
       "id": "node.mse.main-spool-clear",

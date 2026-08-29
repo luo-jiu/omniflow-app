@@ -79,6 +79,7 @@ export function installMsePageAdapter(input: InstallMsePageAdapterInput): MsePag
   let lastAppendAt = 0
   let lastAppendBufferCount = 0
   let lastError = ''
+  let autoDownloadScheduled = false
   let observer: MutationObserver | null = null
 
   const createResourceKey = (streamId: string) => `mse-stream:${streamId}`
@@ -170,8 +171,7 @@ export function installMsePageAdapter(input: InstallMsePageAdapterInput): MsePag
     return true
   }
 
-  let runtime: MseRuntime
-  runtime = input.installRuntime({
+  const runtime: MseRuntime = input.installRuntime({
     flushThresholdBytes,
     onComplete: ({ streamIds }) => {
       for (const streamId of streamIds) {
@@ -179,7 +179,10 @@ export function installMsePageAdapter(input: InstallMsePageAdapterInput): MsePag
         if (stream) reportStream(stream, true)
       }
       if (input.preferences.autoDownloadOnComplete) {
-        input.scope.setTimeout(() => adapter.download(), 500)
+        if (!autoDownloadScheduled) {
+          autoDownloadScheduled = true
+          input.scope.setTimeout(() => adapter.download(), 500)
+        }
       } else if (input.preferences.clearCacheOnComplete) {
         input.scope.setTimeout(() => adapter.clear(), 0)
       }
@@ -320,6 +323,7 @@ export function installMsePageAdapter(input: InstallMsePageAdapterInput): MsePag
     return true
   }
   const clear = () => {
+    autoDownloadScheduled = false
     for (const streamId of blobUrls.keys()) revokeBlobUrl(streamId)
     return runtime.clear()
   }
@@ -402,6 +406,7 @@ export function installMsePageAdapter(input: InstallMsePageAdapterInput): MsePag
     dispose() {
       if (disposed) return
       disposed = true
+      autoDownloadScheduled = false
       observer?.disconnect()
       observer = null
       for (const streamId of blobUrls.keys()) revokeBlobUrl(streamId)

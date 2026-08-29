@@ -51,7 +51,6 @@ export function useEmbeddedBrowserCatchToolkit(
 ) {
   const [loading, setLoading] = React.useState(false);
   const [state, setState] = React.useState<EmbeddedBrowserCatchToolkitState>(EMPTY_TOOLKIT_STATE);
-  const autoExportKeyRef = React.useRef('');
   const mutationCountRef = React.useRef(0);
 
   const refresh = React.useCallback(async (options?: { force?: boolean }) => {
@@ -216,55 +215,6 @@ export function useEmbeddedBrowserCatchToolkit(
       setLoading(false);
     }
   }, [activeTabId, enabled, refresh]);
-
-  React.useEffect(() => {
-    if (!activeTabId || !enabled || !state.autoDownloadOnComplete || !state.isCaptureComplete) {
-      return;
-    }
-    if (state.capturedMediaSizeBytes <= 0) {
-      return;
-    }
-    const autoExportKey = [
-      activeTabId,
-      state.capturedMediaSizeBytes,
-      state.audioResourceKey,
-      state.videoResourceKey,
-      state.primaryResourceKey,
-    ].join(':');
-    if (autoExportKeyRef.current === autoExportKey) {
-      return;
-    }
-    autoExportKeyRef.current = autoExportKey;
-    const runAutoExport = async () => {
-      let exportSucceeded = false;
-      if (state.videoResourceKey && state.audioResourceKey) {
-        const result = await mergeCapturedMedia();
-        exportSucceeded = Boolean(result?.ok);
-      } else {
-        const result = await saveCapturedMedia();
-        exportSucceeded = Boolean(result?.ok);
-      }
-      if (exportSucceeded && state.clearCacheOnComplete) {
-        await clearCache();
-      }
-    };
-    void runAutoExport().catch(() => {
-      autoExportKeyRef.current = '';
-    });
-  }, [
-    activeTabId,
-    clearCache,
-    enabled,
-    mergeCapturedMedia,
-    saveCapturedMedia,
-    state.audioResourceKey,
-    state.autoDownloadOnComplete,
-    state.capturedMediaSizeBytes,
-    state.clearCacheOnComplete,
-    state.isCaptureComplete,
-    state.primaryResourceKey,
-    state.videoResourceKey,
-  ]);
 
   return {
     clearCache,

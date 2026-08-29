@@ -46,7 +46,8 @@ class FakeSourceBuffer {
 class FakeMediaSource {
   readonly sourceBuffers: FakeSourceBuffer[] = []
 
-  addSourceBuffer(_mimeType?: string) {
+  addSourceBuffer(mimeType?: string) {
+    void mimeType
     const sourceBuffer = new FakeSourceBuffer()
     this.sourceBuffers.push(sourceBuffer)
     return sourceBuffer

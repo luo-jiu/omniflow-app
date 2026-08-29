@@ -17,6 +17,10 @@ describe('Embedded browser MSE page runtime', () => {
     }> = []
     const consoleMessages: string[] = []
     const open = vi.fn()
+    const setTimeoutSpy = vi.fn((...args: unknown[]) => {
+      void args
+      return 1
+    })
     let blobSequence = 0
 
     class FakeSourceBuffer {
@@ -101,7 +105,9 @@ describe('Embedded browser MSE page runtime', () => {
       escape,
       fetch: vi.fn(),
       localStorage: {
-        getItem: vi.fn(() => null),
+        getItem: vi.fn((key: string) => (
+          key === 'OmniflowCatchToolkit:autoDownloadOnComplete' ? 'checked' : null
+        )),
         removeItem: vi.fn(),
         setItem: vi.fn(),
       },
@@ -111,7 +117,7 @@ describe('Embedded browser MSE page runtime', () => {
         protocol: 'https:',
       },
       open,
-      setTimeout: vi.fn(() => 1),
+      setTimeout: setTimeoutSpy,
     })
 
     const script = createEmbeddedBrowserPageProbeDocumentScript()
@@ -184,10 +190,12 @@ describe('Embedded browser MSE page runtime', () => {
     })
 
     runInContext('globalThis.__MSE_FIXTURE_MEDIA_SOURCE__.endOfStream()', context)
+    runInContext('globalThis.__MSE_FIXTURE_MEDIA_SOURCE__.endOfStream()', context)
     expect(runInContext(
       'globalThis.__OMNIFLOW_EMBEDDED_BROWSER_RESOURCE_PROBE__.getCatchToolkitState().isCaptureComplete',
       context,
     )).toBe(true)
+    expect(setTimeoutSpy.mock.calls.filter((call) => call[1] === 500)).toHaveLength(1)
     expect(runInContext(
       `globalThis.__OMNIFLOW_EMBEDDED_BROWSER_RESOURCE_PROBE__.openResource(${JSON.stringify(observed.resourceKey)})`,
       context,

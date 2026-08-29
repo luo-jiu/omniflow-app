@@ -1,6 +1,6 @@
 # Cat Catch 全面迁移执行计划
 
-更新时间：2026-08-28
+更新时间：2026-08-29
 
 状态：生效。当前固定迁移目标为 `2cb981d7c2f4614732edccc167c4b5793d1cb138`，尚未完成初始行为审计与迁移。
 
@@ -63,7 +63,7 @@ OmniFlow 不运行 Cat Catch 浏览器扩展，而是把与产品目标相关的
 - inline script 的 m3u8/mp4/flv 精确 regex、协议补全与重复候选，以及 Vimeo playlist URL gate、base path、track manifest、raw metadata 和 header-only empty master 已迁入可序列化 page-discovery factory。
 - production page adapter 按固定 XHR/fetch/TextDecoder/root-string 分支顺序组合 runtime、document session 与 page helper，负责 DOMContentLoaded 调度、generated resource 物化和 nested Worker observation 回放；只有一套 Deep hooks。
 - generated-resource page owner 接管 signature 去重、Blob/base64 bytes、文件名和 open/export/read，并把非自身 key 委托给 MSE handler；production probe 能从 main-owned resource key 读回 Cat Catch 归一化 manifest bytes。
-- 现有 production MSE state/helpers、page actions 与 MediaSource hooks 已从混合 Deep 文件机械拆到专用 body，并继续在同一 probe IIFE 中按原顺序组合；直接 characterization 已锁定单 owner、append/endOfStream、read/open/export/drain 和 resource event。该拆分只为解除 Deep cutover 依赖，不代表 MSE 固定上游 parity 已完成。
+- production MSE 已切到 `cat-catch-port/mse/runtime.ts` + `capture/adapters/mse-page.ts` 的唯一 page owner；runtime 持有 MediaSource/SourceBuffer 观察、per-track retention、flush/reset 和 drain，adapter 负责页面动作、文件名/Blob 与 probe relay。`processing/mse-spool.ts#MseSpoolStore` 持有 main 临时文件、预算、TTL 和导航/tab/process 生命周期清理；已 flush 的轨道在 main 下载路径中逐轨读取。自动完成动作在 main 侧优先合并音视频，再通过 embedded-browser staging root 发布标准下载完成事件，renderer 不再执行第二次自动保存。纯 runtime、spool lifecycle、relay authorization、synthetic output contract 和 production probe characterization 已有证据，但固定上游 parity、生产等价大媒体和真实页面导入仍未完成。
 - Catch Toolkit 的八项产品偏好由 production page-origin owner 持有，固定 `"checked"`、空字符串删除、selector/regex 验证、重载恢复、新 origin 重置和 storage 被阻止时的内存降级；既有 get/update bridge 使用该 owner，并只向 MSE actions 同步运行投影。
 - discovery 已从一次性 helper 收敛为可序列化 document session，跨 JSON/fetch/XHR 观察保留 emitted/base/pending 状态；相对 manifest 可以在后续 hook 才出现媒体 URL 时按新 base 回放，一次性 `discoverResources` 只保留为测试和兼容 facade。
 - 网络捕捉由 production `EmbeddedBrowserCaptureRuntime` 唯一注册 `onSendHeaders -> onResponseStarted -> terminal cleanup`，旧 `onCompleted` 识别 bridge 已删除。
@@ -86,10 +86,10 @@ OmniFlow 不运行 Cat Catch 浏览器扩展，而是把与产品目标相关的
 - HLS 分片失败重试会保持原 URL 与 byte `Range`；取消活动 retry 时同时清空待执行队列，只产生一次 aborted 终态，且不再进入 processor、completed 或有序输出。与 Cat Catch 的递增延迟不同，当前 adapter 使用有界立即重排队。
 - HLS 真实输出门禁已覆盖 clear/AES-128 AAC、AES-256 CBC/CTR AAC，以及加密 fMP4/H264 视频与独立 AES-128/AAC 音轨的双本地 playlist 合并；ffmpeg 的 protocol/extension 策略按 input 重复声明，避免第二轨本地 key 被默认扩展名策略拒绝。ffmpeg HLS demuxer 不识别 AES-256 METHOD，因而 AES-256 的 key/MAP/media 先按固定 hls.js Web Crypto 模式在本地工作目录解密，再以 clear playlist 进入同一 ffmpeg owner。CBC 加密 MAP 的 BYTERANGE 还会按固定 FragmentLoader 以明文 length 补齐 cipher request，并在非零 offset 前取一个 ciphertext block 重置 IV；AES-128/256 都会产出精确声明长度的 clear MAP，避免把原始 range 直接交给 ffmpeg。
 - DASH 手写 parser 对 `r=-1`、多 BaseURL、动态 MPD 等语义不完整。
-- HLS、DASH、MSE、ffmpeg、临时文件和输出交付尚无统一 task/cleanup 合同。
-- network 与 Deep 均已在 production target chain 形成唯一 owner；data/blob 与未捕获拖拽、DASH 直拉/track、MSE parity 和其他 unit 仍按各自边界迁移，不保留第二套已切换算法。
+- HLS、DASH、MSE、ffmpeg、临时文件和输出交付尚无统一 task/cleanup 合同；MSE spool 已有独立 bounded owner，但还未纳入统一 task registry。
+- network、Deep 和 MSE page/spool chain 已在 production target chain 形成唯一 owner；data/blob 与未捕获拖拽、DASH 直拉/track、MSE parity 和其他 unit 仍按各自边界迁移，不保留第二套已切换算法。
 
-因此当前 32 项能力中有 15 项 `verified`、2 项 `porting`、15 项 `pending`；`network-capture`、`deep-search-runtime` 与 `hls-engine` 已完成 production cutover，其余 4 个 unit 仍不能因为局部 target 测试通过就提前标记为完成。
+因此当前 32 项能力中有 15 项 `verified`、3 项 `porting`、1 项 `ported-unverified`、13 项 `pending`；`network-capture`、`deep-search-runtime` 与 `hls-engine` 已完成 production cutover，MSE 仍不能因为局部 target 测试通过就提前关闭，其余 unit 也仍开放。
 
 ## 4. 长期事实文件
 
@@ -333,5 +333,5 @@ tools/cat-catch-lab/fixtures/<fixture-id>/
 ## 12. 当前下一步
 
 1. 运行轻量 `cat-catch:validate`，确认版本、32 项能力和 106 个 cleanup 条目自洽。
-2. 从 `mse-runtime` 开始对照固定 `catch.js` 补 audio/video flush-reset、页面预算、main spool 与稳定性证据；不把本次 Deep cutover 中保留的 MSE 行为当成 parity。
+2. 继续收口 `mse-runtime`：补固定 `catch.js` 差分、生产等价大媒体与真实下载导入证据；不把 target runtime 的纯测试、staging contract 或 page extraction 当成完整 parity。
 3. 为 DASH、transfer/output unit 补固定目标的直接行为依赖、真实 test refs 和 production-equivalent integration，不把现有 legacy 行为当 oracle。

@@ -1501,6 +1501,33 @@
 - legacy cleanup: 删除旧 builder/wrapper、disabled hooks、manifest heuristic、whole-probe Worker bootstrap、toolkit state/storage、`probeResources`、混合 core/host 与 target-only factory；28 个 Deep cleanup 条目收口为 `11 retain-or-adapt / 17 removed`，validator 继续强制检查已删 symbol 不得回归。
 - validation: production Deep/MSE 定向 `12 files / 31 passed`、应用 TypeScript `--noEmit`、full ESLint、sync tests `16/16`、metadata/固定上游校验（`17 open / 106 cleanup / 187 planned tests`）和全仓 Vitest `202 files / 1377 passed / 3 skipped` 均通过。原始 `npm test` 会让 Vitest 误收 Node-native sync test 并报 `0 suite`，因此按既有门禁将该文件用 `node --test` 单跑并从 Vitest 排除。完整 build 为避免覆盖其他 Agent 的 dirty `dist-electron/**` 而不运行，当前也没有真实网站手工场景。
 
+## 2026-08-29: same target (MSE spool owner and flushed-download boundary)
+
+- observedHead / migrationTarget: 均为 `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本步继续收口 MSE 的 main owner 与下载边界。
+- reviewedThrough / portedThrough: 均保持 `null`；`mse.page-capture-runtime` 进入 `porting`，`mse.main-spool-lifecycle` 进入 `ported-unverified`，MSE unit 仍开放。
+- change groups: `main-spool-owner`、`flushed-resource-download`、`relay-authorization`、`cleanup-metadata-correction` 与 `documentation-correction`。
+- affected capability IDs: `mse.page-capture-runtime`、`mse.main-spool-lifecycle`；metadata 为 `7 units / 32 capabilities / 210 anchors / 99 cleanup entries / 187 planned IDs / 158 active refs`，状态为 `15 verified / 3 porting / 1 ported-unverified / 13 pending`。
+- fixtures/tests: MSE pure runtime `mse.audio-video-flush-reset` / `mse.append-observability`、production probe characterization、`mse.lifecycle-cleanup`、`mse.spool-budget-recovery` 和 `mse.relay-forgery`；专项为 `4 files / 6 passed`，定向 ESLint 通过，metadata validator 通过。
+- accepted differences: MSE page adapter 保留页面 Blob/open/export 作为无 flush 的 platform action；轨道发生 page flush 后，显式 download action 由 main 按当前 tab 的 opaque MSE resource keys 逐轨提取并写入系统 Downloads，避免只导出尾部内存数据。该直接下载路径尚未接入 browser download import queue。
+- excluded changes and reasons: 未修改 DASH、HLS、transfer、renderer UI 或其他 agent 的 Agent Shell / dist-electron 改动；真实网站和完整 build 仍不可执行。
+- unresolved gaps: 固定上游 `catch.js` 的完整差分、生产等价大媒体输出、自动下载重复/清理语义以及统一 task registry 仍待补齐；需要真实页面确认 MediaSource 双轨和长时间 flush。
+- runtime changes: `MseSpoolStore` 接管 per-track append queue、预算、TTL、stale sweep 和所有 navigation/view/process/tab/controller 清理；relay 额外校验当前 tab 对 `mse-stream:*` resource key 的 ownership；main 下载路径优先读取 spool 并合并 page 尾部。
+- legacy cleanup: 删除对已不存在 `mse-page-runtime.ts` 和旧 spool Map 的失真引用，cleanup 现在只保留现存 page adapter、spool store、clear/append facade 与仍需保留的 page bridge。
+- validation: `npm run cat-catch:validate` 通过（`7 units / 32 capabilities / 17 open / 99 cleanup / 187 planned`）；MSE 定向 `4 files / 6 passed`；scoped ESLint 与 scoped diff check 通过。全仓 `tsc` 仍受其他 agent 的 `agent-shell-execution-lease.ts` 语法错误影响，未运行完整 build，也未做真实网站手工回归。
+
+## 2026-08-29: same target (MSE automatic output handoff)
+
+- observedHead / migrationTarget: 均为 `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本步继续收口 MSE 输出边界。
+- reviewedThrough / portedThrough: 均保持 `null`；`mse.page-capture-runtime` 继续 `porting`，`mse.main-spool-lifecycle` 继续 `ported-unverified`。
+- change groups: `download-output-adapter`、`production-single-owner`、`documentation-correction`；不切换其他 unit。
+- affected capability IDs: `mse.page-capture-runtime`、`mse.main-spool-lifecycle`；metadata 为 `7 units / 32 capabilities / 210 anchors / 99 cleanup entries / 188 planned IDs / 159 active refs`。
+- fixtures/tests: 新增 `mse.auto-download-output`，锁定 staging 文件名净化、完成事件 payload、字节统计和现有下载清理根目录；production MSE probe 额外锁定同一捕捉周期重复 `endOfStream` 只安排一次自动动作；MSE 定向为 `5 files / 9 passed`。
+- accepted differences: 自动完成动作在 main 侧优先合并首个 audio/video 轨道，ffmpeg 不可用时回退为逐轨输出；输出进入现有 embedded-browser staging root 并发布 completed download event，renderer 不再重复执行保存/合并 dialog。该平台交付差异不改变 Cat Catch page runtime 的捕捉和 reset 经验语义。
+- excluded changes and reasons: 未修改 DASH、HLS、transfer、renderer UI、Agent Shell 或 `dist-electron/**`；没有真实网站和真实下载导入场景，未宣称 production parity。
+- unresolved gaps: 固定 `catch.js` 的完整 MSE 差分、真实大媒体长时间 flush、真实页面双轨输出和 renderer 导入回归仍待补齐；`ffmpeg` preference 与统一 output task registry 归后续 output unit。
+- runtime changes: `mse-download-output.ts` 将主进程生成的 merged/per-track 文件桥接为标准下载完成事件；renderer `useEmbeddedBrowserCatchToolkit` 删除重复 auto-export effect，页面 adapter 对同一 capture cycle 的 auto-download 做一次性调度。
+- validation: MSE 定向 `5 files / 9 passed`、scoped ESLint、scoped diff check 与 metadata validator（`7 units / 32 capabilities / 17 open / 99 cleanup / 188 planned`）均通过；全仓 TypeScript 仍受其他 agent 的 `agent-shell-execution-lease.ts` 语法错误影响，完整 build 与真实页面验证继续不执行。
+
 ## Template
 
 ```markdown

@@ -1,6 +1,6 @@
 # Cat Catch 当前迁移摘要
 
-更新时间：2026-08-28
+更新时间：2026-08-29
 
 状态：初始迁移尚未完成。本文只总结已确认事实，逐项状态以 `docs/cat-catch/capability-map.json` 为准。
 
@@ -13,7 +13,7 @@
 | reviewedThrough | 未建立 |
 | portedThrough | 未建立 |
 
-当前映射包含 7 个 cutover unit、32 项能力、210 个上游 anchor、106 个 cleanup entry 和 187 个唯一计划测试 ID。15 项能力达到 `verified`，2 项为 `porting`，其余 15 项仍为 `pending`；153 个唯一计划测试引用已落成 active pure behavior/contract、fake/real Electron integration 或 loopback redirect test。`network-capture`、`deep-search-runtime` 与 `hls-engine` 已完成固定目标下的原子 cutover，其余 4 个 unit 仍开放。
+当前映射包含 7 个 cutover unit、32 项能力、210 个上游 anchor、99 个 cleanup entry 和 188 个唯一计划测试 ID。15 项能力达到 `verified`，3 项为 `porting`，1 项为 `ported-unverified`，其余 13 项仍为 `pending`；159 个唯一计划测试引用已落成 active pure behavior/contract、fake/real Electron integration 或 loopback redirect test。`network-capture`、`deep-search-runtime` 与 `hls-engine` 已完成固定目标下的原子 cutover，其余 4 个 unit 仍开放。
 
 ## 2. 能力族
 
@@ -21,7 +21,7 @@
 | --- | --- | --- |
 | network capture | verified target runtime + thin Electron/IPC/settings adapters | `EmbeddedBrowserCaptureRuntime` 是 production 唯一 listener/store/vault owner；Cat Catch 规则和 page policy、OmniFlow 设置、首字节分类、redirect/terminal cleanup、tokenized probe、opaque resource authority、renderer-safe reducer 与 owner lifecycle 均有专项证据。旧 bridge/state/classifier/main DTO 已删除；data/blob、未捕获拖拽与 DASH 分属其他开放 unit |
 | deep-search runtime | verified production target + thin page/main adapters | 固定 `findMedia/toUrl` 的 width/depth/cycle、宽松 key、inline M3U8/MPD、data URL 和跨 hook base URL 回放已有 fixture；production installer 覆盖 Worker CSP 回退、bootstrap relay、fetch clone、XHR、JSON、TextDecoder 与 Cat Catch key/string 经验面。page-origin toolkit owner、generated-resource owner、tokenized document ingress、main store 与 bytes readback 已在唯一 document factory 贯通。旧 disabled hooks、manifest heuristic、Worker bootstrap、toolkit state/storage、`probeResources`、混合 core/host 和 compatibility wrapper 已同批删除 |
-| MSE runtime | extracted production page owner, parity pending | 现有 state/helpers、page actions 与 MediaSource hooks 作为独立 owner 与 target Deep 组合在同一 IIFE，production characterization 锁定单次安装、append/endOfStream、read/open/export/drain 和 resource event；固定上游 parity、双轨 flush/reset、页面内存边界与稳定性仍未验证，不能据此升级能力状态 |
+| MSE runtime | target page owner + main spool port, production parity pending | `mse/runtime.ts` 持有 MediaSource/SourceBuffer 观察、per-track retention、flush/reset 和 drain；`mse-page.ts` 只负责页面动作与平台转接；`MseSpoolStore` 持有 main 临时文件、预算、TTL 和生命周期清理；页面已 flush 的轨道由 main 下载路径逐轨读取；自动完成动作在 main 侧优先合并音视频并通过现有 download completion/import contract 交付，renderer 不再重复保存。固定上游 parity、生产等价大媒体和真实下载导入仍未验证，不能关闭 unit |
 | HLS engine | verified target parser/plan/local/live execution + thin main adapter + main-owned direct/track authority | 固定目标的下载相关 parser/plan、key/MAP/range、manual key、AES-128/256、静态/直播、独立双轨、retry/cancel、authority、force-cache recovery、生命周期和真实 ffmpeg/ffprobe 输出均有同名证据；生产与测试直接依赖 shared contract、pure port、`HlsTaskExecutor`、`HlsLiveTask` 和 session owner，旧 renderer model、顶层 downloader/recorder re-export 及 legacy-named handler 已在同一切片删除；未捕获派生 URL 的 embedded-session fallback 是保留的平台 adapter，不是旧 HLS 算法 |
 | DASH engine | legacy owner + partial authority transport | 计划下载的已捕获 init/media 分片已优先走当前 tab authority；手写 parser 对负 repeat、多 BaseURL、动态 MPD 等语义仍不完整 |
 | transfer engine | multiple owners | 并发/重试代码可复用评估，但没有统一 task/cancel/cleanup owner |
@@ -66,7 +66,7 @@ HLS 带值标签只在固定标签名后紧接冒号且冒号后至少有一个�
 3. HLS 固定目标的下载相关 parser/pipeline、静态/直播、authority、生命周期和真实输出范围均已完成测试验证与原子 cutover，不再保留旧算法作为备用。
 4. MPD `r=-1`、多 BaseURL、动态 timeline/range 不完整。
 5. ffmpeg、HLS/DASH、直播、普通下载和 temp 没有应用级统一 task registry；HLS 的 host lifecycle 已收口，但非 HLS 的 4 个 ffmpeg 入口仍未纳入该 owner。
-6. 目前有 153 个唯一 active test ref；逐项名称与来源以 capability map 为准。Network/Deep/HLS 证据已支撑对应 unit cutover；MSE/DASH/transfer/output 仍按各自开放状态判断。
+6. 目前有 159 个唯一 active test ref；逐项名称与来源以 capability map 为准。Network/Deep/HLS 证据已支撑对应 unit cutover；MSE 的纯 runtime、spool 生命周期、relay 合同和 synthetic output contract 已有证据，但 production 大媒体与真实下载导入仍未完成；DASH/transfer/output 仍按各自开放状态判断。
 
 ### 3.1 Deep 原子切换边界
 
@@ -90,4 +90,4 @@ HLS 带值标签只在固定标签名后紧接冒号且冒号后至少有一个�
 
 ## 5. 当前下一步
 
-下一步进入 `mse-runtime`：对照固定 `catch.js` 补 audio/video flush-reset、页面内存预算、main spool 与稳定性证据，不能拿本次保留的现有 MSE 行为代替 parity。Network/Deep/HLS 后续只在真实回归发现问题或上游游标前进时增量维护。
+下一步继续收口 `mse-runtime`：补固定 `catch.js` 的差分证据、main 合并/逐轨下载的生产等价输出与真实下载导入语义，再关闭该 unit。Network/Deep/HLS 后续只在真实回归发现问题或上游游标前进时增量维护。
