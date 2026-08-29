@@ -13,12 +13,42 @@ export type EmbeddedBrowserDownloadPayload = NativeDownloadSessionPayload
 
 export const EMBEDDED_BROWSER_PARTITION = 'persist:omniflow-embedded-browser'
 const EMBEDDED_BROWSER_DOWNLOAD_DIRNAME = 'embedded-browser-downloads'
+const EMBEDDED_BROWSER_DOWNLOAD_STALE_AFTER_MS = 24 * 60 * 60 * 1000
 
 let embeddedBrowserSessionInstance: Session | null = null
 let embeddedBrowserDownloadBridgeInitialized = false
 
 export function getEmbeddedBrowserDownloadStagingRoot() {
   return path.join(app.getPath('userData'), EMBEDDED_BROWSER_DOWNLOAD_DIRNAME)
+}
+
+export async function cleanupStaleEmbeddedBrowserDownloadFiles(options: {
+  now?: number
+  rootPath?: string
+  staleAfterMs?: number
+} = {}) {
+  const configuredRootPath = String(options.rootPath || '').trim()
+  const rootPath = path.resolve(configuredRootPath || getEmbeddedBrowserDownloadStagingRoot())
+  const staleAfterMs = Number(options.staleAfterMs)
+  const cutoff = (Number.isFinite(Number(options.now)) ? Number(options.now) : Date.now())
+    - (Number.isFinite(staleAfterMs) && staleAfterMs > 0
+      ? staleAfterMs
+      : EMBEDDED_BROWSER_DOWNLOAD_STALE_AFTER_MS)
+  const entries = await fs.readdir(rootPath, { withFileTypes: true }).catch(() => [])
+  let cleaned = 0
+  await Promise.all(entries.map(async (entry) => {
+    if (!entry.isFile() && !entry.isSymbolicLink()) {
+      return
+    }
+    const filePath = path.join(rootPath, entry.name)
+    const metadata = await fs.stat(filePath).catch(() => null)
+    if (!metadata || metadata.mtimeMs > cutoff) {
+      return
+    }
+    await fs.rm(filePath, { force: true })
+    cleaned += 1
+  }))
+  return cleaned
 }
 
 function ensureEmbeddedBrowserDownloadRoot() {

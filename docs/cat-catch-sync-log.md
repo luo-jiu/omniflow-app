@@ -2271,3 +2271,17 @@
 - runtime changes: `saveEmbeddedBrowserCapturedResourceForRenderer` 与 `handleExportResource` 的 MSE 手动保存现在登记 tab-scoped processing task，在 lease path 写入 extracted resource，成功后单次 claim 并发布到用户目标；写入失败或任务取消时释放 lease，不覆盖已有目标。
 - legacy cleanup: 无新增删除；`embeddedBrowserResourceFileSaveService.ts` 仍保留给 MSE 自动 staging 等旧交付链，待 output-integration unit 完成后再处理。
 - validation: TypeScript `--noEmit`、全仓 lint、非 `dist-electron/**` diff check 已通过；publisher/lease 定向测试待本轮提交前重跑，完整 build、全仓 test、真实页面与真实下载仍未执行。
+
+## 2026-08-29: same target (download staging stale-file quarantine)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本切片补齐 embedded browser download staging root 的启动时 stale-file 回收。
+- reviewedThrough / portedThrough: 均保持 `null`；`output.local-save-delivery`、`output.staged-output-lease` 与 MSE 自动交付仍未关闭，output-integration unit 仍开放。
+- change groups: `crash-quarantine`、`temp-file-lifecycle` 与 `startup-cleanup`。
+- affected capability IDs: `output.local-save-delivery`；metadata 保持 `7 units / 32 capabilities / 104 cleanup entries / 229 planned IDs / 226 active refs`，状态为 `15 verified / 11 porting / 1 ported-unverified / 5 pending`。
+- fixtures/tests: 新增 `electron/service/embeddedBrowserService.test.ts`，覆盖超过 24 小时文件回收、fresh 文件保留、意外目录保留和 staging root 缺失；MSE download output/native session 关联测试 `3 files / 8 passed`。
+- accepted differences: 只清理已知 download staging root 下超过 24 小时的文件或符号链接，不递归删除目录；当前 renderer/import 事件和用户主动 cleanup 契约保持不变。
+- excluded changes and reasons: 未处理 staged-output lease root 的重启 quarantine、MSE 自动任务 registry、UploadManager handoff、renderer UI、`dist-electron/**` 或 upstream 游标；这些需要持久化任务和 delivery terminal 设计。
+- unresolved gaps: 自动输出文件在应用关闭前的任务归属、renderer 未监听时的即时清理、lease crash quarantine、真实长时媒体仍待补齐。
+- runtime changes: `cleanupStaleEmbeddedBrowserDownloadFiles` 在浏览器 session 初始化时按 24 小时 TTL 回收旧 download staging 文件，避免 MSE 自动完成和 native 下载遗留无限增长。
+- legacy cleanup: 无新增删除；`embeddedBrowserService.ts` 继续作为 Electron native download adapter，旧 download/import bridge 保留至 output-integration 完整切换。
+- validation: download staging/MSE/native 定向 `3 files / 8 passed`、TypeScript `--noEmit`、全仓 lint、metadata validator、sync test 和非 `dist-electron/**` diff check 通过；完整 build、全仓 test、真实页面和真实大媒体仍未执行。

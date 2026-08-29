@@ -103,6 +103,7 @@ import {
 } from './embeddedBrowserResourcePageBridge'
 import {
   cleanupEmbeddedBrowserDownloadFile,
+  cleanupStaleEmbeddedBrowserDownloadFiles,
   getEmbeddedBrowserSession,
   getEmbeddedBrowserDownloadStagingRoot,
   type EmbeddedBrowserDownloadPayload,
@@ -777,6 +778,11 @@ export function createEmbeddedBrowserMainController(
     }
     embeddedBrowserSessionConfigured = true
     void cleanupStaleEmbeddedBrowserOpenFiles().catch(() => undefined)
+    void cleanupStaleEmbeddedBrowserDownloadFiles().catch((error) => {
+      runtimeLogger.warn('embedded browser download staging cleanup failed', {
+        error: error instanceof Error ? error.message : String(error),
+      })
+    })
     void embeddedBrowserMseSpoolStore.sweepStale().catch(() => undefined)
     configureEmbeddedBrowserSession({
       decisionCache: embeddedBrowserFileSystemOriginDecisions,
