@@ -1710,6 +1710,20 @@
 - legacy cleanup: 无新增删除；现有 target parser/task/output adapter 继续作为唯一 production owner。
 - validation: DASH parser 定向 `12/12`，DASH parser/task/output/renderer 定向 `5 files / 21 passed`，全量 Vitest（排除 Node 专用同步 runner）`212 files / 1411 passed / 3 skipped`，全量 `npm run lint`、应用 TypeScript `--noEmit`、metadata validator 和同步 runner `16/16` 均通过；完整 build 与真实页面验证未执行，build 仍避免触碰其他 agent 的 dirty `dist-electron/**`。
 
+## 2026-08-29: same target (DASH finite dynamic snapshot execution)
+
+- observedHead / migrationTarget: 均为 `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本步把已有 availability-bounded / duration-only dynamic 计划从“全部拒绝”收口为有限当前窗口 snapshot 下载。
+- reviewedThrough / portedThrough: 均保持 `null`；`dash.parser-planner` 与 `dash.timeline-download-merge` 继续 `porting`，`dash-engine` unit 仍开放。
+- change groups: `dynamic-snapshot-download`、`finite-window-preflight` 与 `fixture-contract`。
+- affected capability IDs: `dash.timeline-download-merge`；metadata 为 `7 units / 32 capabilities / 210 anchors / 99 cleanup entries / 200 planned IDs / 179 active refs`。
+- fixtures/tests: `dash.dynamic-snapshot-download` 验证 dynamic 计划中的有限当前窗口按 manifest 顺序下载并合并输出；空 dynamic window 保持明确拒绝。DASH parser/SIDX/task 定向为 `3 files / 19 passed`。
+- accepted differences: 这是一次有限 snapshot 执行，不负责重新抓取 MPD 或持续刷新；无分片 dynamic window、DRM、parser unsupported reason、复杂嵌套 SIDX 和不兼容多 Period 仍稳定拒绝。
+- excluded changes and reasons: 未修改 dynamic manifest refresh/live task、复杂嵌套 SIDX、SegmentBase 递归、renderer UI、HLS、MSE、transfer 或 output；没有真实直播 MPD/ffprobe 场景，未宣称 DASH unit 已关闭。
+- unresolved gaps: dynamic refresh/live、UTC timing/client offset、`endNumber`/其他 availability 属性、复杂嵌套 SIDX、多轨道跨 Period init/discontinuity 语义、真实 MPD/ffprobe 输出和 unit 关闭条件仍待完成。
+- runtime changes: `DashTaskExecutor` 对 dynamic 计划继续复用 range-aware downloader、顺序写入、取消和 output adapter；仅在选中轨道拥有有限 segments 时允许执行，controller 不再提前按 `isDynamic` 拒绝。
+- legacy cleanup: 无新增删除；现有 target parser/task/output adapter 继续作为唯一 production owner。
+- validation: DASH parser/SIDX/task `3 files / 19 passed`、全量 Vitest（排除 Node 专用同步 runner）`212 files / 1412 passed / 3 skipped`、全量 `npm run lint`、应用 TypeScript `--noEmit`、metadata validator 和同步 runner `16/16` 均通过；直接运行 `npm test` 仍会错误收集 Node 专用 `tools/cat-catch-sync/validate.test.mjs` 并报告 `No test suite found`，按既有门禁排除该文件后通过；完整 build 与真实页面验证未执行，build 仍避免触碰其他 agent 的 dirty `dist-electron/**`。
+
 ## Template
 
 ```markdown

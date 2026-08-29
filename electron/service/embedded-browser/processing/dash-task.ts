@@ -266,6 +266,9 @@ function validateSelectedRepresentation(
   if (planRepresentation.unsupportedReasons.length) {
     throw new Error(`DASH ${expectedType} 轨道暂不可下载：${planRepresentation.unsupportedReasons[0]}`)
   }
+  if (plan.isDynamic && planRepresentation.segments.length === 0) {
+    throw new Error(`动态 DASH ${expectedType} 轨道当前窗口没有可下载分片`)
+  }
 }
 
 export class DashTaskExecutor {
@@ -298,7 +301,6 @@ export class DashTaskExecutor {
       throw new Error('至少需要选择一条 DASH 轨道')
     }
     if (plan.hasDrm) throw new Error('当前 DASH 检测到 DRM，暂不支持下载')
-    if (plan.isDynamic) throw new Error('当前 DASH 是动态 MPD，暂不支持有限文件下载')
     if (plan.unsupportedReasons?.length) {
       throw new Error(`当前 DASH 计划暂不可下载：${plan.unsupportedReasons[0]}`)
     }

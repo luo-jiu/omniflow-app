@@ -2678,12 +2678,6 @@ export function createEmbeddedBrowserMainController(
         ok: false,
       }
     }
-    if (taskPlan.isDynamic) {
-      return {
-        error: '当前 DASH 是动态 MPD，暂不支持有限文件下载',
-        ok: false,
-      }
-    }
     if (taskPlan.unsupportedReasons?.length) {
       return {
         error: `当前 DASH 计划暂不可下载：${taskPlan.unsupportedReasons[0]}`,

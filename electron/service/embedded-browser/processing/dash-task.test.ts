@@ -183,15 +183,55 @@ describe('DASH task executor', () => {
       await expect(new DashTaskExecutor({
         mergeTracks,
         outputPath: path.join(workDirectoryPath, 'dynamic.mp4'),
-        plan: plan([video], { isDynamic: true }),
-        selectedVideoRepresentation: video,
-      }).run()).rejects.toThrow('动态 MPD')
+        plan: plan([representation({ segments: [], segmentCount: 0 })], { isDynamic: true }),
+        selectedVideoRepresentation: representation({ segments: [], segmentCount: 0 }),
+      }).run()).rejects.toThrow('当前窗口没有可下载分片')
       await expect(new DashTaskExecutor({
         mergeTracks,
         outputPath: path.join(workDirectoryPath, 'drm.mp4'),
         plan: plan([video], { hasDrm: true }),
         selectedVideoRepresentation: video,
       }).run()).rejects.toThrow('DRM')
+    } finally {
+      await rm(workDirectoryPath, { force: true, recursive: true })
+    }
+  })
+
+  it('dash.dynamic-snapshot-download', async () => {
+    const workDirectoryPath = await mkdtemp(path.join(os.tmpdir(), 'omniflow-dash-dynamic-test-'))
+    try {
+      const video = representation({
+        id: 'dynamic-video',
+        segments: [
+          { duration: 2, index: 0, number: 17, time: 32, url: 'https://cdn.example/live-17.m4s' },
+          { duration: 2, index: 1, number: 18, time: 34, url: 'https://cdn.example/live-18.m4s' },
+        ],
+        segmentCount: 2,
+      })
+      const outputPath = path.join(workDirectoryPath, 'dynamic.mp4')
+      const calls: string[] = []
+      const executor = new DashTaskExecutor({
+        fetch: async (url) => {
+          calls.push(url)
+          return new Response(new Uint8Array([url.endsWith('17.m4s') ? 7 : 8]))
+        },
+        mergeTracks: async ({ outputPath: targetPath, video: track }) => {
+          await writeFile(targetPath, track ? await readFile(track.path) : Buffer.alloc(0))
+          return { outputPath: targetPath }
+        },
+        outputPath,
+        plan: plan([video], { isDynamic: true }),
+        selectedVideoRepresentation: video,
+      })
+
+      const result = await executor.run()
+
+      expect(result.outputPath).toBe(outputPath)
+      expect(await readFile(outputPath)).toEqual(Buffer.from([7, 8]))
+      expect([...calls].sort()).toEqual([
+        'https://cdn.example/live-17.m4s',
+        'https://cdn.example/live-18.m4s',
+      ].sort())
     } finally {
       await rm(workDirectoryPath, { force: true, recursive: true })
     }
