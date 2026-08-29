@@ -1,5 +1,6 @@
 import os from 'node:os'
 import path from 'node:path'
+import { randomUUID } from 'node:crypto'
 import { access, mkdir, mkdtemp, readFile, rm, stat } from 'node:fs/promises'
 import { app, BrowserWindow, dialog, shell, WebContentsView, type WebFrameMain } from 'electron'
 import { runtimeLogger } from '../runtimeLogger'
@@ -1924,6 +1925,8 @@ export function createEmbeddedBrowserMainController(
         }
       }
 
+      const outputOwnerTaskId = `manifest-output-${randomUUID()}`
+
       if (kind === 'hls') {
         emitEmbeddedBrowserHlsTask({
           durationSeconds: payload.durationSeconds,
@@ -1947,30 +1950,48 @@ export function createEmbeddedBrowserMainController(
         })
       }
 
-      const executeManifestDownload = (signal?: AbortSignal) => downloadEmbeddedBrowserManifestResource({
-        durationSeconds: payload.durationSeconds,
-        ffmpegPath: payload.ffmpegPath,
-        headers: requestHeaders,
-        kind,
-        manifestUrl,
-        onProgress: kind === 'hls'
-          ? (progress) => {
-              emitEmbeddedBrowserHlsTask({
-                durationSeconds: payload.durationSeconds,
-                ffmpegSpeedText: progress.speedText,
-                manifestUrl,
-                mode: 'direct-manifest',
-                processedSeconds: progress.processedSeconds,
-                requestId,
-                stage: 'ffmpeg',
-                status: 'running',
-                tabId: normalizedTabId,
-              })
-            }
-          : undefined,
-        outputPath,
-        signal,
-      })
+      const executeManifestDownload = async (signal?: AbortSignal) => {
+        let ffmpegPath = ''
+        const published = await publishStagedOutput({
+          fileName: path.basename(outputPath),
+          mimeType: kind === 'hls' ? 'video/mp4' : undefined,
+          ownerTaskId: outputOwnerTaskId,
+          purpose: kind === 'hls' ? 'hls-manifest-download' : 'mpd-manifest-download',
+          store: getEmbeddedBrowserStagedOutputLeaseStore(),
+          targetPath: outputPath,
+          write: async (stagedPath) => {
+            const result = await downloadEmbeddedBrowserManifestResource({
+              durationSeconds: payload.durationSeconds,
+              ffmpegPath: payload.ffmpegPath,
+              headers: requestHeaders,
+              kind,
+              manifestUrl,
+              onProgress: kind === 'hls'
+                ? (progress) => {
+                    emitEmbeddedBrowserHlsTask({
+                      durationSeconds: payload.durationSeconds,
+                      ffmpegSpeedText: progress.speedText,
+                      manifestUrl,
+                      mode: 'direct-manifest',
+                      processedSeconds: progress.processedSeconds,
+                      requestId,
+                      stage: 'ffmpeg',
+                      status: 'running',
+                      tabId: normalizedTabId,
+                    })
+                  }
+                : undefined,
+              outputPath: stagedPath,
+              signal,
+            })
+            ffmpegPath = result.ffmpegPath
+          },
+        })
+        return {
+          ffmpegPath,
+          outputPath: published.outputPath,
+        }
+      }
       const result = kind === 'hls'
         ? await embeddedBrowserHlsSessionOwner.runActiveTask({
             requestId,

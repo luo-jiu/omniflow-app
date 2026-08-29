@@ -1858,7 +1858,7 @@
         "electron/service/embedded-browser/processing/staged-output-publisher.test.ts#releases the lease and keeps the previous target when processing fails"
       ],
       "acceptedDifferences": [],
-      "notes": "`StagedOutputLeaseStore` now provides a main-only opaque lease base with owner-scoped paths, one delivery claim, TTL touch/reap, and release cleanup; snapshots intentionally omit the real path. `staged-output-publisher.ts#publishStagedOutput` now owns the ordinary direct-file and captured-resource download handoff: processing writes only to the lease path, then a single claim publishes to the user target while preserving the existing final `outputPath` response. HLS/DASH/MSE and local-save/UploadManager delivery still return raw paths; crash quarantine, budget accounting, renderer-safe lease IPC, and the application delivery terminal remain open."
+      "notes": "`StagedOutputLeaseStore` now provides a main-only opaque lease base with owner-scoped paths, one delivery claim, TTL touch/reap, and release cleanup; snapshots intentionally omit the real path. `staged-output-publisher.ts#publishStagedOutput` now owns the ordinary direct-file, captured-resource, and HLS/MPD direct-manifest download handoffs: processing writes only to the lease path, then a single claim publishes to the user target while preserving the existing final `outputPath` response. HLS/DASH plan/live/MSE and local-save/UploadManager delivery still return raw paths; crash quarantine, budget accounting, renderer-safe lease IPC, and the application delivery terminal remain open."
     },
     {
       "id": "output.application-workflow-coordinator",
