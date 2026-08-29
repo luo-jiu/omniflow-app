@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events'
 import { rm } from 'node:fs/promises'
+import { shell } from 'electron'
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { spawnMock, terminateProcessTreeMock, userDataPath } = vi.hoisted(() => ({
@@ -53,7 +54,7 @@ describe('external tool command lifecycle', () => {
     await updateEmbeddedBrowserExternalToolSettings({
       aria2: { downloadDir: '', enabled: false, label: 'aria2', rpcUrl: '', secret: '' },
       command: { enabled: true, label: 'command', template: 'tool {url}', workingDirectory: '' },
-      protocol: { enabled: false, label: 'protocol', urlTemplate: 'm3u8dl:{url}' },
+      protocol: { enabled: false, encodePayload: false, label: 'protocol', urlTemplate: 'm3u8dl:{url}' },
     })
 
     const dispatch = dispatchEmbeddedBrowserExternalTool('command', {
@@ -86,7 +87,7 @@ describe('external tool command lifecycle', () => {
     await updateEmbeddedBrowserExternalToolSettings({
       aria2: { downloadDir: '', enabled: false, label: 'aria2', rpcUrl: '', secret: '' },
       command: { enabled: true, label: 'command', template: 'tool {url}', workingDirectory: '' },
-      protocol: { enabled: false, label: 'protocol', urlTemplate: 'm3u8dl:{url}' },
+      protocol: { enabled: false, encodePayload: false, label: 'protocol', urlTemplate: 'm3u8dl:{url}' },
     })
 
     const dispatch = dispatchEmbeddedBrowserExternalTool('command', {
@@ -101,6 +102,31 @@ describe('external tool command lifecycle', () => {
     expect(terminateProcessTreeMock).toHaveBeenCalledWith(child, expect.objectContaining({
       force: false,
     }))
+  })
+
+  it('encodes the complete custom protocol payload as UTF-8 Base64', async () => {
+    const openExternalMock = vi.mocked(shell.openExternal)
+    openExternalMock.mockReset()
+    await updateEmbeddedBrowserExternalToolSettings({
+      aria2: { downloadDir: '', enabled: false, label: 'aria2', rpcUrl: '', secret: '' },
+      command: { enabled: false, label: 'command', template: 'tool {url}', workingDirectory: '' },
+      protocol: {
+        enabled: true,
+        encodePayload: true,
+        label: 'protocol',
+        urlTemplate: 'm3u8dl:{url}',
+      },
+    })
+
+    await dispatchEmbeddedBrowserExternalTool('protocol', {
+      title: '示例',
+      url: 'https://media.example/视频.m3u8?token=abc',
+    })
+
+    const payload = 'https://media.example/视频.m3u8?token=abc'
+    expect(openExternalMock).toHaveBeenCalledWith(
+      `m3u8dl:${Buffer.from(payload, 'utf8').toString('base64')}`,
+    )
   })
 
   afterAll(async () => {

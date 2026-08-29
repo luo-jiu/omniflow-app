@@ -53,6 +53,7 @@ function normalizeSettings(
     },
     protocol: {
       enabled: Boolean(input?.protocol?.enabled),
+      encodePayload: Boolean(input?.protocol?.encodePayload),
       label: sanitizeLabel(input?.protocol?.label || '', defaults.protocol.label),
       urlTemplate: String(input?.protocol?.urlTemplate || defaults.protocol.urlTemplate).trim(),
     },
@@ -243,7 +244,11 @@ async function dispatchToProtocol(
   if (!targetUrl) {
     throw new Error('URL 协议模板展开后为空')
   }
-  await shell.openExternal(targetUrl)
+  const separatorIndex = targetUrl.indexOf(':')
+  const protocolUrl = settings.protocol.encodePayload && separatorIndex > 0
+    ? `${targetUrl.slice(0, separatorIndex + 1)}${Buffer.from(targetUrl.slice(separatorIndex + 1), 'utf8').toString('base64')}`
+    : targetUrl
+  await shell.openExternal(protocolUrl)
 }
 
 async function dispatchToCommand(

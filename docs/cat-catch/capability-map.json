@@ -2125,10 +2125,11 @@
       "testRefs": [
         "electron/service/embedded-browser/integrations/external-tools.test.ts#output.external-tool-auth-boundary",
         "electron/service/embeddedBrowserExternalTools.test.ts#keeps launched commands registered until their process exits",
-        "electron/service/embeddedBrowserExternalTools.test.ts#lets app shutdown cancel and await an external command"
+        "electron/service/embeddedBrowserExternalTools.test.ts#lets app shutdown cancel and await an external command",
+        "electron/service/embeddedBrowserExternalTools.test.ts#encodes the complete custom protocol payload as UTF-8 Base64"
       ],
       "acceptedDifferences": [],
-      "notes": "Pinned upstream Base64-encodes m3u8dl custom-protocol payloads when configured. The production ExternalToolDispatcher accepts only tabId, opaque resourceId, and toolKey, redeems URL/metadata/protected headers from the main-owned Store/Vault, and rejects invalid, cross-tab, or stale requests before execution. The legacy executor now keeps spawned local commands registered until their real process exit, supports graceful-then-force tree termination during app shutdown, and preserves the fast dispatch return behavior. m3u8dl Base64 protocol encoding, broader production wiring coverage, and legacy cleanup remain open. Options import/export is a separate peripheral Base64 consumer and remains outside this initial runtime mapping."
+      "notes": "Pinned upstream Base64-encodes m3u8dl custom-protocol payloads when configured. The production ExternalToolDispatcher accepts only tabId, opaque resourceId, and toolKey, redeems URL/metadata/protected headers from the main-owned Store/Vault, and rejects invalid, cross-tab, or stale requests before execution. The protocol adapter now exposes an opt-in `encodePayload` setting that Base64-encodes the complete template payload after its scheme delimiter, preserving the default plain custom-protocol behavior. The legacy executor keeps spawned local commands registered until their real process exit, supports graceful-then-force tree termination during app shutdown, and preserves the fast dispatch return behavior. Broader production wiring coverage and legacy cleanup remain open. Options import/export is a separate peripheral Base64 consumer and remains outside this initial runtime mapping."
     }
   ]
 }

@@ -17,6 +17,7 @@ export type EmbeddedBrowserExternalToolCommandSettings = {
 
 export type EmbeddedBrowserExternalToolProtocolSettings = {
   enabled: boolean
+  encodePayload: boolean
   label: string
   urlTemplate: string
 }
@@ -65,6 +66,7 @@ export function createDefaultEmbeddedBrowserExternalToolSettings(): EmbeddedBrow
     },
     protocol: {
       enabled: false,
+      encodePayload: false,
       label: 'm3u8dl URL 协议',
       urlTemplate: 'm3u8dl:{url}',
     },

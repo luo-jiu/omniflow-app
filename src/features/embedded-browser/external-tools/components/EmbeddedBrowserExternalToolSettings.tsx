@@ -380,6 +380,24 @@ export default function EmbeddedBrowserExternalToolSettings({
                   }}
                 />
               </div>
+              <div className="external-tool-field">
+                <div className="external-tool-label">Base64 编码载荷</div>
+                <Switch
+                  checked={draftSettings.protocol.encodePayload}
+                  onChange={(checked) => {
+                    updateDraft((current) => ({
+                      ...current,
+                      protocol: {
+                        ...current.protocol,
+                        encodePayload: checked,
+                      },
+                    }))
+                  }}
+                />
+                <div className="external-tool-hint">
+                  对协议模板冒号后的完整载荷做 UTF-8 Base64 编码，兼容猫抓的 m3u8dl 协议模式。
+                </div>
+              </div>
             </div>
             <div className="external-tool-field">
               <div className="external-tool-label">协议模板</div>

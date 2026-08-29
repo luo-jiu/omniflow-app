@@ -2075,3 +2075,17 @@
 - runtime changes: `dispatchToCommand` 登记 `external-command` task；800ms launch acknowledgement 只清理计时器，保留 process listeners 到 `exit/error`；registry cancel 先 graceful tree termination，1.5 秒后 force termination，并在 settled 后释放登记。
 - legacy cleanup: 无新增删除；`node.integration.external-tools` 仍保留至 opaque dispatcher 完整切换和 output unit cutover。
 - validation: 外部工具与 task registry 定向 `2 files / 4 passed`、TypeScript `--noEmit`、scoped ESLint 已通过；metadata validator、sync runner、完整相关链、完整 build/全仓 lint/test 和真实页面/外部工具验证仍待提交前执行或在可用场景下补齐。
+
+## 2026-08-29: same target (m3u8dl protocol payload encoding)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本切片补齐 Cat Catch `G.m3u8dl == 1` 的 UTF-8 Base64 自定义协议载荷语义。
+- reviewedThrough / portedThrough: 均保持 `null`；`output.external-tools-dispatch` 与 `processing.main-task-registry` 继续 `porting`，`output-integration` unit 仍开放。
+- change groups: `upstream-parity`、`settings-contract` 与 `fixture-contract`。
+- affected capability IDs: `output.external-tools-dispatch`；metadata 当前为 `7 units / 32 capabilities / 101 cleanup entries / 229 planned IDs / 214 active refs`，状态为 `15 verified / 6 porting / 1 ported-unverified / 10 pending`。
+- fixtures/tests: `electron/service/embeddedBrowserExternalTools.test.ts#encodes the complete custom protocol payload as UTF-8 Base64` 覆盖含中文的完整协议载荷；默认明文路径仍由现有外部工具行为覆盖。
+- accepted differences: OmniFlow 将编码作为通用 URL protocol 设置的 opt-in `encodePayload` 开关，并对模板 scheme 后的完整载荷编码；默认关闭以保持现有自定义协议兼容。Cat Catch 的独立 CIL/RE 模式选择和参数编辑 UI 不在本切片扩展。
+- excluded changes and reasons: 未改变 aria2/本地命令执行、HLS/DASH/MSE、普通下载、renderer 资源 authority、`dist-electron/**` 或 upstream 游标；真实注册协议客户端和长载荷浏览器限制仍需环境验证。
+- unresolved gaps: 外部工具 dispatcher 的完整 production IPC/renderer 覆盖、跨入口用户取消协议、staged output lease、普通下载登记、真实外部工具回归与 legacy dispatcher 删除仍待完成。
+- runtime changes: `EmbeddedBrowserExternalToolProtocolSettings` 新增默认关闭的 `encodePayload`；main 在 `shell.openExternal` 前对第一个 scheme 分隔符后的完整 payload 使用 UTF-8 Base64 编码，保留 scheme 本身。
+- legacy cleanup: 无新增删除；`node.integration.external-tools` 仍保留至 opaque dispatcher 完整切换和 output unit cutover。
+- validation: 外部工具定向 `1 file / 3 passed`、TypeScript `--noEmit`、scoped ESLint 已通过；提交前重跑 metadata validator、sync runner 和非 `dist-electron/**` diff check，完整 build/全仓 lint/test 与真实页面/协议客户端验证仍未执行。

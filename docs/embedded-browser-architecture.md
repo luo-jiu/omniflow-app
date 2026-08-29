@@ -123,7 +123,7 @@ library detail page
 
 - 资源面板可以把“已选资源”送到工具区的资源捕获处理模式；内部资源库文件处理走单独的“媒体文件处理”工具，不复用 embedded browser 资源快照。
 - 浏览器设置页里的“捕获规则”也归资源域负责；renderer 只管理规则草稿和保存动作，真正的过滤判定仍在 main。
-- 浏览器设置页里的“外部工具”也归资源域负责；renderer 只管理 aria2 / 命令模板 / URL 协议的配置草稿，真正的执行仍在 main。
+- 浏览器设置页里的“外部工具”也归资源域负责；renderer 只管理 aria2 / 命令模板 / URL 协议的配置草稿，真正的执行仍在 main。URL 协议可选择对模板冒号后的完整载荷做 UTF-8 Base64 编码，以兼容 Cat Catch 的 `m3u8dl` 协议模式，默认保持明文。
 - 外部工具当前有两处入口：资源卡可直接转发原始资源；工具区执行面板也可把当前 HLS / MPD / 直接资源上下文发送给已启用工具，但暂不扩展成新的“结果出口”模式。
 - HLS manifest 解析后，可以把“下载计划”送到工具区。
 - MPD manifest 解析后，也可以把“下载计划”送到工具区；工具区当前提供第一版 representation 选择，并在 main 侧执行 `init segment + media segments` 本地下载，再交给 `ffmpeg` 合并。
@@ -166,7 +166,7 @@ library detail page
 - HLS parser 已按固定 hls.js 1.6.16 支持 `EXT-X-DEFINE` 的 `NAME/VALUE`、playlist URL `QUERYPARAM`、master 到 media 的显式 `IMPORT`，并在 URI line、quoted-string 与 hexadecimal attribute 中做单次替换；重复定义、缺失 query/import/reference 只保留并抛出第一条等价 parsing error。工具区显式解析 master child 时会传递 master variable list；live recorder 在首次 child 请求前通过原始 opaque resource id 从 main-owned captured master 校验 selected child 归属，并缓存变量列表供后续轮询，media parser 仍只消费显式 `IMPORT`。parent resolver 与 manifest/segment 请求共用 recorder AbortSignal；live-start IPC 不接受 renderer headers、pageUrl 或变量值，无法兑换 source authority 时直接拒绝。
 - 如果用户在工具区填写了手动 AES-128 key，也会切到本地 downloader 主链，由 Electron main 写本地 key 文件后重写 playlist。生产解密只由随后同一个可取消 ffmpeg 进程负责，不再叠加一轮 JavaScript decrypt；条件式真实二进制测试已生成 AES-128 encrypted HLS，并经本地 downloader、生产 wrapper 和 ffprobe 验证为 MP4/AAC/正时长输出。
 - ffmpeg 对 HLS manifest 的 protocol whitelist 与 `allowed_extensions=ALL` 是 input-scoped 选项；双轨合并必须在 video/audio 两个 `-i` 前分别声明，不能假设第一轨策略会传播到第二轨。参数合同和真实加密双轨输出测试共同保护该边界。
-- `processing/task-registry.ts#ProcessingTaskRegistry` 是 main-side 活动任务登记与退出等待 owner；`processing/ffmpeg-executor.ts#FfmpegTaskExecutor` 通过它登记每个 ffmpeg 进程。HLS manifest/track、DASH local-file merge、MSE merge、captured-resource transcode 和 media-tool operation 均通过共享 executor 执行，统一处理 `-progress` 输出、AbortSignal、跨平台 process-tree 终止、失败 partial output 清理及零退出后的非空文件校验。应用退出时 `main.ts` 调用 registry `dispose()` 等待并终止活动进程；协议任务、普通下载、外部工具、跨入口用户取消和 staged output lease 仍待接入。
+- `processing/task-registry.ts#ProcessingTaskRegistry` 是 main-side 活动任务登记与退出等待 owner；`processing/ffmpeg-executor.ts#FfmpegTaskExecutor` 通过它登记每个 ffmpeg 进程，外部命令也在真实进程退出前保持登记。HLS manifest/track、DASH local-file merge、MSE merge、captured-resource transcode 和 media-tool operation 均通过共享 executor 执行，统一处理 `-progress` 输出、AbortSignal、跨平台 process-tree 终止、失败 partial output 清理及零退出后的非空文件校验。应用退出时 `main.ts` 调用 registry `dispose()` 等待并终止活动进程；协议任务、普通下载、跨入口用户取消和 staged output lease 仍待接入。
 - live HLS 第一版走显式“开始录制 / 停止录制”主线；停止后才交给 `ffmpeg` 导出。切换到另一条 HLS 请求或卸载工具组件时，会把未导出的 live session 当作放弃处理，并清理该任务冻结的 renderer 输出目录；在 staged output lease 与 application workflow coordinator 落地前，不把只有 main 任务投影、却无法恢复资料库交付目标的直播伪装成可跨卸载恢复。recorder 的 manifest/segment 请求共用一个 `AbortController`，discard 会中止在途请求；`EmbeddedBrowserHlsSessionOwner` 按 tab/request 归属 active direct/track/plan/retry/live-export 任务、retry/live 会话和最多 32 条最新安全任务投影。生产 controller 把页面导航、tab close、view 销毁、render-process loss 和 controller dispose 都收敛到唯一 HLS host lifecycle：先取消并等待匹配的 active fetch/ffmpeg，再清理任务投影、discard recorder、删除 workdir；close/close-all IPC 和应用 graceful shutdown 都会等待该清理完成，已经被先前生命周期事件取走的 session cleanup 也会纳入 dispose 等待。manifest/track ffmpeg runner 在取消或非零退出后删除 partial output。
 - 工具区也可直接发起 HLS key 验证；候选会合并 manifest key URL、当前 tab 已捕获 key 资源和工具区手动输入 key。
 - 当前 `master playlist + 手动 key` 已要求先明确选择具体 variant，再回到现有本地主链。
