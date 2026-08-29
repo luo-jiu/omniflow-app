@@ -345,6 +345,55 @@ describe('DASH parser', () => {
     ])
   })
 
+  it('dash.dynamic-client-offset', () => {
+    const root = node('MPD', {
+      availabilityStartTime: '2026-08-29T12:00:00Z',
+      minimumUpdatePeriod: 'PT2S',
+      type: 'dynamic',
+    }, [
+      node('Period', {}, [node('AdaptationSet', { contentType: 'video' }, [
+        node('SegmentTemplate', {
+          duration: '2',
+          media: 'segment-$Number$.m4s',
+        }, [
+          node('SegmentTimeline', {}, [node('S', { d: '2', r: '-1' })]),
+        ]),
+        node('Representation', { id: 'offset-live' }),
+      ])]),
+    ])
+    const manifest = parseDashManifest({
+      baseUrl: 'https://cdn.example/live/manifest.mpd',
+      clientOffsetMs: 4000,
+      nowMs: Date.parse('2026-08-29T12:00:06Z'),
+      root,
+      text: '',
+    })
+    expect(manifest.representations[0].segments.map(segment => segment.number)).toEqual([1, 2, 3, 4, 5, 6])
+
+    const durationRoot = node('MPD', {
+      availabilityStartTime: '2026-08-29T12:00:00Z',
+      minimumUpdatePeriod: 'PT2S',
+      timeShiftBufferDepth: 'PT4S',
+      type: 'dynamic',
+    }, [
+      node('Period', {}, [node('AdaptationSet', { contentType: 'video' }, [
+        node('SegmentTemplate', {
+          duration: '2',
+          media: 'duration-$Number$.m4s',
+        }),
+        node('Representation', { id: 'offset-duration-live' }),
+      ])]),
+    ])
+    const durationManifest = parseDashManifest({
+      baseUrl: 'https://cdn.example/live/manifest.mpd',
+      clientOffsetMs: 4000,
+      nowMs: Date.parse('2026-08-29T12:00:06Z'),
+      root: durationRoot,
+      text: '',
+    })
+    expect(durationManifest.representations[0].segments.map(segment => segment.number)).toEqual([4, 5])
+  })
+
   it('dash.segment-template-end-number', () => {
     const staticRoot = node('MPD', { mediaPresentationDuration: 'PT10S' }, [
       node('Period', {}, [node('AdaptationSet', { contentType: 'video' }, [

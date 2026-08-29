@@ -1738,6 +1738,20 @@
 - legacy cleanup: 无新增删除；现有 target parser/task/output adapter 继续作为唯一 production owner。
 - validation: DASH parser `13/13`、TypeScript、全量 ESLint、metadata validator、同步 runner `16/16` 和 scoped diff check 通过；完整 Vitest 仍按既有规则排除 Node 专用同步 runner，完整 build 与真实页面验证未执行，build 仍避免触碰其他 agent 的 dirty `dist-electron/**`。
 
+## 2026-08-29: same target (DASH dynamic client clock offset)
+
+- observedHead / migrationTarget: 均为 `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本步补固定 `mpd-parser@1.4.0` 对 `NOW + clientOffset` 参与 dynamic window 计算的语义。
+- reviewedThrough / portedThrough: 均保持 `null`；`dash.parser-planner` 与 `dash.timeline-download-merge` 继续 `porting`，`dash-engine` unit 仍开放。
+- change groups: `dynamic-client-clock`、`availability-window` 与 `fixture-contract`。
+- affected capability IDs: `dash.parser-planner`；metadata 为 `7 units / 32 capabilities / 210 anchors / 99 cleanup entries / 202 planned IDs / 181 active refs`。
+- fixtures/tests: `dash.dynamic-client-offset` 注入固定 `nowMs` 与 `clientOffsetMs`，分别覆盖 dynamic `SegmentTimeline r=-1` 和 duration-only 窗口的有效分片边界；DASH parser 定向为 `1 file / 14 passed`。
+- accepted differences: `clientOffsetMs` 是调用方提供的毫秒级确定性校时输入，不在 pure parser 内发起 `UTCTiming` 网络请求；无效偏移按零处理，持续 live refresh 仍由 task 层负责。
+- excluded changes and reasons: 未修改 UTC timing HTTP/DIRECT 协商、dynamic task/live refresh、SegmentTimeline `endNumber` 交互、复杂嵌套 SIDX、renderer UI、HLS、MSE、transfer 或 output；没有真实 MPD/ffprobe 场景，未宣称 DASH unit 已关闭。
+- unresolved gaps: dynamic refresh/live、UTC timing/client offset 的生产接线、其他 availability 属性、复杂嵌套 SIDX、多轨道跨 Period init/discontinuity 语义、真实 MPD/ffprobe 输出和 unit 关闭条件仍待完成。
+- runtime changes: 新增共享 `resolveNowSeconds`，将有限 `clientOffsetMs` 与 `nowMs` 合并后用于 dynamic `r=-1` 和 duration-only availability 计算；静态计划和无偏移调用保持原行为。
+- legacy cleanup: 无新增删除；现有 target parser/task/output adapter 继续作为唯一 production owner。
+- validation: DASH parser `14/14`、TypeScript、全量 ESLint、metadata validator、全量 Vitest（排除 Node 专用同步 runner）`212 files / 1414 passed / 3 skipped` 和同步 runner `16/16` 均通过；完整 build 与真实页面验证未执行。
+
 ## Template
 
 ```markdown

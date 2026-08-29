@@ -255,8 +255,17 @@ function findNextExplicitTime(items: DashXmlElement[], index: number) {
 
 type DashSegmentTiming = Pick<DashSegment, 'duration' | 'number' | 'time'>
 
+function resolveNowSeconds(nowMs?: number, clientOffsetMs?: number) {
+  const rawNowMs = Number(nowMs ?? Date.now())
+  const safeNowMs = Number.isFinite(rawNowMs) ? rawNowMs : Date.now()
+  const rawClientOffsetMs = Number(clientOffsetMs || 0)
+  const safeClientOffsetMs = Number.isFinite(rawClientOffsetMs) ? rawClientOffsetMs : 0
+  return (safeNowMs + safeClientOffsetMs) / 1000
+}
+
 function expandSegmentTimelineTimings(input: {
   availabilityStartTimeSeconds?: number
+  clientOffsetMs?: number
   dynamic?: boolean
   durationSeconds?: number
   minimumUpdatePeriodSeconds?: number
@@ -299,7 +308,7 @@ function expandSegmentTimelineTimings(input: {
         && input.minimumUpdatePeriodSeconds !== undefined
         && input.minimumUpdatePeriodSeconds > 0
         && input.availabilityStartTimeSeconds !== undefined) {
-        const nowSeconds = Number(input.nowMs ?? Date.now()) / 1000
+        const nowSeconds = resolveNowSeconds(input.nowMs, input.clientOffsetMs)
         const availabilityEnd = nowSeconds
           + input.minimumUpdatePeriodSeconds
           - (input.availabilityStartTimeSeconds + (input.periodStartSeconds || 0))
@@ -336,6 +345,7 @@ function expandSegmentTimelineTimings(input: {
 function expandSegmentTimeline(input: {
   availabilityStartTimeSeconds?: number
   baseUrl: string
+  clientOffsetMs?: number
   dynamic?: boolean
   durationSeconds?: number
   media: string
@@ -365,6 +375,7 @@ function expandSegmentTimeline(input: {
 function expandSegmentTemplate(input: {
   availabilityStartTimeSeconds?: number
   baseUrl: string
+  clientOffsetMs?: number
   dynamic?: boolean
   durationSeconds?: number
   element?: DashXmlElement
@@ -423,6 +434,7 @@ function expandSegmentTemplate(input: {
         availabilityStartTimeSeconds: input.availabilityStartTimeSeconds,
         bandwidth: input.bandwidth,
         baseUrl: input.baseUrl,
+        clientOffsetMs: input.clientOffsetMs,
         dynamic: input.dynamic,
         durationSeconds: input.durationSeconds,
         media,
@@ -454,8 +466,7 @@ function expandSegmentTemplate(input: {
       addReason(input.reasons, 'segment-template-duration-unbounded')
       return { initializationRange, initializationUrl, segments: [] as DashSegment[] }
     }
-    const nowMs = Number(input.nowMs ?? Date.now())
-    const nowSeconds = Number.isFinite(nowMs) ? nowMs / 1000 : Date.now() / 1000
+    const nowSeconds = resolveNowSeconds(input.nowMs, input.clientOffsetMs)
     const periodStartSeconds = input.periodStartSeconds || 0
     const elapsedSeconds = nowSeconds
       - (input.availabilityStartTimeSeconds + periodStartSeconds)
@@ -670,6 +681,7 @@ function parseRepresentation(input: {
   availabilityStartTimeSeconds?: number
   adaptationSet: DashXmlElement
   baseUrls: string[]
+  clientOffsetMs?: number
   dynamic?: boolean
   durationSeconds?: number
   index: number
@@ -707,6 +719,7 @@ function parseRepresentation(input: {
     availabilityStartTimeSeconds: input.availabilityStartTimeSeconds,
     bandwidth: numberAttribute(input.representation, 'bandwidth'),
     baseUrl: input.baseUrls[0] || '',
+    clientOffsetMs: input.clientOffsetMs,
     dynamic: input.dynamic,
     durationSeconds: input.durationSeconds,
     element: effectiveTemplate,
@@ -906,6 +919,7 @@ function mergePeriodRepresentations(
 
 export function parseDashManifest(input: {
   baseUrl: string
+  clientOffsetMs?: number
   nowMs?: number
   parseXml?: DashXmlParser
   root?: DashXmlElement
@@ -952,6 +966,7 @@ export function parseDashManifest(input: {
           availabilityStartTimeSeconds,
           adaptationSet,
           baseUrls: representationBaseUrls,
+          clientOffsetMs: input.clientOffsetMs,
           dynamic,
           durationSeconds: periodDurationSeconds,
           index: periodRepresentations.length + representationIndex + periodIndex,
