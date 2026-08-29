@@ -13,7 +13,7 @@
 | reviewedThrough | 未建立 |
 | portedThrough | 未建立 |
 
-当前映射包含 7 个 cutover unit、32 项能力、210 个上游 anchor、99 个 cleanup entry 和 188 个唯一计划测试 ID。15 项能力达到 `verified`，4 项为 `porting`，1 项为 `ported-unverified`，其余 12 项仍为 `pending`；161 个唯一计划测试引用已落成 active pure behavior/contract、fake/real Electron integration 或 loopback redirect test。`network-capture`、`deep-search-runtime` 与 `hls-engine` 已完成固定目标下的原子 cutover，`dash.parser-planner` 已建立纯 parser 基座但尚未生产切换，其余 3 个 unit 仍开放。
+当前映射包含 7 个 cutover unit、32 项能力、210 个上游 anchor、99 个 cleanup entry 和 188 个唯一计划测试 ID。15 项能力达到 `verified`，4 项为 `porting`，1 项为 `ported-unverified`，其余 12 项仍为 `pending`；162 个唯一计划测试引用已落成 active pure behavior/contract、fake/real Electron integration 或 loopback redirect test。`network-capture`、`deep-search-runtime` 与 `hls-engine` 已完成固定目标下的原子 cutover，`dash.parser-planner` 已建立纯 parser 基座但尚未生产切换，其余 3 个 unit 仍开放。
 
 ## 2. 能力族
 
@@ -66,7 +66,7 @@ HLS 带值标签只在固定标签名后紧接冒号且冒号后至少有一个�
 3. HLS 固定目标的下载相关 parser/pipeline、静态/直播、authority、生命周期和真实输出范围均已完成测试验证与原子 cutover，不再保留旧算法作为备用。
 4. MPD `r=-1`、多 BaseURL、动态 timeline/range 不完整。
 5. ffmpeg、HLS/DASH、直播、普通下载和 temp 没有应用级统一 task registry；HLS 的 host lifecycle 已收口，但非 HLS 的 4 个 ffmpeg 入口仍未纳入该 owner。
-6. 目前有 161 个唯一 active test ref；逐项名称与来源以 capability map 为准。Network/Deep/HLS 证据已支撑对应 unit cutover；MSE 的纯 runtime、spool 生命周期、relay 合同和 synthetic output contract 已有证据，但 production 大媒体与真实下载导入仍未完成；DASH 仅 parser-planner 进入 porting，transfer/output 仍按各自开放状态判断。
+6. 目前有 162 个唯一 active test ref；逐项名称与来源以 capability map 为准。Network/Deep/HLS 证据已支撑对应 unit cutover；MSE 的纯 runtime、spool 生命周期、relay 合同和 synthetic output contract 已有证据，但 production 大媒体与真实下载导入仍未完成；DASH 仅 parser-planner 进入 porting，transfer/output 仍按各自开放状态判断。
 
 ### 3.1 Deep 原子切换边界
 
