@@ -1422,16 +1422,20 @@
         "electron/service/embedded-browser/processing/dash-task.ts#DashTaskExecutor"
       ],
       "relationToUpstream": "platform-substitute",
-      "syncState": "pending",
+      "syncState": "porting",
       "syncedThrough": null,
       "plannedTestIds": [
         "dash.negative-repeat",
         "dash.download-merge-cancel",
         "dash.dynamic-drm-rejection"
       ],
-      "testRefs": [],
+      "testRefs": [
+        "electron/service/embedded-browser/processing/dash-task.test.ts#dash.negative-repeat",
+        "electron/service/embedded-browser/processing/dash-task.test.ts#dash.download-merge-cancel",
+        "electron/service/embedded-browser/processing/dash-task.test.ts#dash.dynamic-drm-rejection"
+      ],
       "acceptedDifferences": [],
-      "notes": "Known seed gap includes SegmentTimeline r=-1 and incomplete dynamic MPD semantics; plan segment/init requests now accept a main-owned fetch transport for captured URLs, while the renderer-supplied plan shape and unrecognized URL fallback remain transitional."
+      "notes": "DashTaskExecutor now owns bounded plan preflight, range-aware parallel fragment transfer, ordered file writes, external cancellation, temp cleanup and injected merge delivery. Dynamic MPD, DRM and parser unsupported reasons are rejected before fetch; production controller dispatch still calls the legacy MPD downloader until task/output authority and ffmpeg cancellation are integrated."
     },
     {
       "id": "transfer.concurrent-retry-abort-order",

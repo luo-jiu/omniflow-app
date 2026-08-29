@@ -1542,6 +1542,20 @@
 - legacy cleanup: 无；旧 renderer parser 和 MPD downloader 在 `dash-engine` 原子切换前继续保留。
 - validation: DASH parser/renderer adapter `2 files / 4 passed`、应用 TypeScript `--noEmit`、定向 ESLint、metadata validator、sync tests `16/16` 和 scoped diff check 均通过；完整 build 与真实页面验证不执行。
 
+## 2026-08-29: same target (DASH timeline download task foundation)
+
+- observedHead / migrationTarget: 均为 `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本步建立 DASH processing task，不切 production dispatch。
+- reviewedThrough / portedThrough: 均保持 `null`；`dash.parser-planner` 与 `dash.timeline-download-merge` 继续 `porting`，`dash-engine` unit 仍开放。
+- change groups: `main-processing-owner`、`range-aware-transfer`、`cancellation-cleanup` 与 `documentation-correction`。
+- affected capability IDs: `dash.timeline-download-merge`；metadata 为 `7 units / 32 capabilities / 210 anchors / 99 cleanup entries / 188 planned IDs / 165 active refs`，状态为 `15 verified / 5 porting / 1 ported-unverified / 11 pending`。
+- fixtures/tests: `dash.negative-repeat` 锁定 parser unsupported reason 在 fetch 前拒绝；`dash.download-merge-cancel` 覆盖 init/media range、并发下载后的顺序写入、注入 merge 和外部 cancel/partial output 清理；`dash.dynamic-drm-rejection` 锁定 dynamic/DRM 不触发 fetch；DASH task/parser/renderer 定向为 `3 files / 7 passed`。
+- accepted differences: `DashTaskExecutor` 复用现有 fragment downloader 的并发/重试实现，merge 通过 callback 交给既有 ffmpeg adapter；动态 MPD 和 SegmentBase SIDX 在没有完整上游差分前显式拒绝，不猜测成静态文件。
+- excluded changes and reasons: 未修改 main MPD IPC、旧 downloader、ffmpeg process owner、renderer UI 或其他 unit；没有真实 MPD、动态直播和大媒体输出场景，未宣称 production parity。
+- unresolved gaps: fixed `mpd-parser` 差分、SegmentBase/SIDX、多 Period 合并、main captured authority 接线、ffmpeg cancel/terminal、唯一 dispatch boundary 和旧 downloader cleanup 仍待完成。
+- runtime changes: 新增 `processing/dash-task.ts#DashTaskExecutor`，收口 plan preflight、range、ordered writes、task abort、temp cleanup 和 output callback；旧 `embeddedBrowserMpdLocalDownloaderService` 继续唯一 production execution owner。
+- legacy cleanup: 无；旧 MPD parser 已由 target model adapter 替换，但旧 MPD downloader 在 `dash-engine` 原子切换前保留。
+- validation: DASH task/parser/renderer `3 files / 7 passed`、应用 TypeScript `--noEmit`、定向 ESLint、metadata validator、sync tests `16/16` 和 scoped diff check 均通过；完整 build 与真实页面验证不执行。
+
 ## Template
 
 ```markdown
