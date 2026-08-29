@@ -20,7 +20,7 @@ import {
 } from './service/agent/agent-persistence-runtime'
 import { clearFileTransferRuntime, initializeFileTransferRuntime } from './service/fileTransferRuntime'
 import { createAppUpdateService } from './service/appUpdateService'
-import { defaultFfmpegTaskExecutor } from './service/embedded-browser/processing/ffmpeg-executor'
+import { defaultProcessingTaskRegistry } from './service/embedded-browser/processing/task-registry'
 import { IMAGE_PREVIEW_PROTOCOL, registerImagePreviewProtocol } from './ipc/imagePreview'
 import {
   applyMainWindowPlatformBehavior,
@@ -391,7 +391,7 @@ const appGracefulShutdown = createAppGracefulShutdown({
   cleanup: async () => {
     appUpdateService.dispose()
     await embeddedBrowserMainController.dispose()
-    await defaultFfmpegTaskExecutor.dispose()
+    await defaultProcessingTaskRegistry.dispose()
     if (mainWindow && !mainWindow.isDestroyed()) {
       saveWindowState(mainWindow)
     }

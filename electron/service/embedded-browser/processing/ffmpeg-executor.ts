@@ -1,6 +1,10 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { rm, stat } from 'node:fs/promises'
 import { terminateDesktopProcessTree } from '../../../platform/processTree'
+import {
+  defaultProcessingTaskRegistry,
+  type ProcessingTaskRegistration,
+} from './task-registry'
 
 export type FfmpegTaskProgress = {
   processedSeconds?: number
@@ -77,18 +81,7 @@ function terminateFfmpegProcess(child: ChildProcess, force: boolean) {
 }
 
 export class FfmpegTaskExecutor {
-  private readonly activeTasks = new Set<{
-    abortController: AbortController
-    settled: Promise<void>
-  }>()
-
-  private disposed = false
-
   async execute(input: FfmpegTaskRequest): Promise<FfmpegTaskResult> {
-    if (this.disposed) {
-      throw new Error('ffmpeg task executor 已释放')
-    }
-
     const abortController = new AbortController()
     const forwardAbort = () => abortController.abort()
     if (input.signal?.aborted) {
@@ -102,24 +95,29 @@ export class FfmpegTaskExecutor {
       signal: abortController.signal,
     })
     const settled = run.then(() => undefined, () => undefined)
-    const activeTask = { abortController, settled }
-    this.activeTasks.add(activeTask)
+    let registration: ProcessingTaskRegistration
+    try {
+      registration = defaultProcessingTaskRegistry.register({
+        cancel: () => abortController.abort(),
+        kind: 'ffmpeg',
+        settled,
+      })
+    } catch (error) {
+      abortController.abort()
+      await settled
+      input.signal?.removeEventListener('abort', forwardAbort)
+      throw error
+    }
     try {
       return await run
     } finally {
       input.signal?.removeEventListener('abort', forwardAbort)
-      this.activeTasks.delete(activeTask)
+      registration.release()
     }
   }
 
   async dispose() {
-    if (this.disposed) {
-      return
-    }
-    this.disposed = true
-    const tasks = [...this.activeTasks]
-    tasks.forEach(task => task.abortController.abort())
-    await Promise.all(tasks.map(task => task.settled))
+    await defaultProcessingTaskRegistry.cancel({ kind: 'ffmpeg' })
   }
 
   private async executeTask(input: FfmpegTaskRequest): Promise<FfmpegTaskResult> {

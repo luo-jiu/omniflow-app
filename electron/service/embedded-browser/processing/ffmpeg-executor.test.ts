@@ -75,11 +75,6 @@ describe('FfmpegTaskExecutor lifecycle', () => {
       await disposing
       expect(disposeSettled).toBe(true)
       await expect(readFile(outputPath)).rejects.toThrow()
-      await expect(executor.execute({
-        commandArgs: [],
-        ffmpegPath: process.execPath,
-        outputPath,
-      })).rejects.toThrow('ffmpeg task executor 已释放')
     } finally {
       await rm(directory, { force: true, recursive: true })
     }

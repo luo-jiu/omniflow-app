@@ -13,7 +13,7 @@
 | reviewedThrough | 未建立 |
 | portedThrough | 未建立 |
 
-当前映射包含 7 个 cutover unit、32 项能力、210 个上游 anchor、101 个 cleanup entry 和 229 个唯一计划测试 ID。15 项能力达到 `verified`，6 项为 `porting`，1 项为 `ported-unverified`，其余 10 项仍为 `pending`；209 个唯一计划测试引用已落成 active pure behavior/contract、fake/real Electron integration 或 loopback redirect test。`network-capture`、`deep-search-runtime` 与 `hls-engine` 已完成固定目标下的原子 cutover；DASH 的 renderer parser facade、main task、live task、main XML adapter、增量追加 helper、独立 session owner、strict manifest authority 和 output adapter 已接入目标代码，静态双轨、dynamic refresh/append 与有限深度嵌套 SIDX 的真实/任务级证据已有，live start/stop/discard 也已接生产 main/preload IPC（当前没有 renderer UI），并且轮询终止错误会清理 live session/workdir；`dash.parser-planner` 与 `dash.timeline-download-merge` 仍保持 `porting`，其余 3 个 unit 仍开放。
+当前映射包含 7 个 cutover unit、32 项能力、210 个上游 anchor、101 个 cleanup entry 和 229 个唯一计划测试 ID。15 项能力达到 `verified`，6 项为 `porting`，1 项为 `ported-unverified`，其余 10 项仍为 `pending`；211 个唯一计划测试引用已落成 active pure behavior/contract、fake/real Electron integration 或 loopback redirect test。`network-capture`、`deep-search-runtime` 与 `hls-engine` 已完成固定目标下的原子 cutover；DASH 的 renderer parser facade、main task、live task、main XML adapter、增量追加 helper、独立 session owner、strict manifest authority 和 output adapter 已接入目标代码，静态双轨、dynamic refresh/append 与有限深度嵌套 SIDX 的真实/任务级证据已有，live start/stop/discard 也已接生产 main/preload IPC（当前没有 renderer UI），并且轮询终止错误会清理 live session/workdir；`dash.parser-planner` 与 `dash.timeline-download-merge` 仍保持 `porting`，其余 3 个 unit 仍开放。
 
 ## 2. 能力族
 
@@ -65,7 +65,7 @@ HLS 带值标签只在固定标签名后紧接冒号且冒号后至少有一个�
 2. main-only vault/store 已完成 network unit 收口；DASH 直拉和 MSE/toolkit 投影归其各自 unit，不能重新引入 renderer request-header 真相源。
 3. HLS 固定目标的下载相关 parser/pipeline、静态/直播、authority、生命周期和真实输出范围均已完成测试验证与原子 cutover，不再保留旧算法作为备用。
 4. MPD 动态任务下载和真实 output 仍不完整；具备 availability 证据的动态 `r=-1` 与 duration-only 窗口已进入 target parser 的有限展开，同身份静态多 Period 已进入串接，但无 availability 证据的动态窗口、不完整/初始化冲突集合、复杂嵌套 SIDX、真实 MPD/ffprobe parity 仍未达到 unit 关闭条件。
-5. ffmpeg、HLS/DASH、直播、普通下载和 temp 没有应用级统一 task registry；HLS 的 host lifecycle 已收口，但非 HLS 的 4 个 ffmpeg 入口仍未纳入该 owner。
+5. `ProcessingTaskRegistry` 已建立并由共享 ffmpeg executor 使用，应用退出会等待并终止已登记进程；HLS/DASH/MSE 的协议任务、普通下载、外部工具和 temp 仍未全部登记，跨入口用户取消与 renderer-unmount recovery 仍开放。
 6. 目前有 206 个唯一 active test ref；逐项名称与来源以 capability map 为准。Network/Deep/HLS 证据已支撑对应 unit cutover；MSE 的纯 runtime、spool 生命周期、relay 合同、synthetic output contract、条件式真实 FFmpeg/FFprobe 双轨合并、merge/transcode 失败 partial output 清理、零退出非空 output 校验、周期保存阈值、完成/清理边界、稀疏缓冲自动跳转以及 flush/drain 两条路径的头部裁剪证据已有，并明确覆盖跨音视频轨道的全局累计字节；production 大媒体、完整提取/导入与真实网站验证仍未完成；DASH parser-planner 与 timeline-download-merge 已接入生产目标但继续 `porting`，transfer/output 仍按各自开放状态判断。
 
 ### 3.1 Deep 原子切换边界

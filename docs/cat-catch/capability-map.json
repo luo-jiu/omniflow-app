@@ -1772,9 +1772,12 @@
         "task.registry-recovery-cancel",
         "task.renderer-unmount-recovery"
       ],
-      "testRefs": [],
+      "testRefs": [
+        "electron/service/embedded-browser/processing/task-registry.test.ts#cancels matching tasks and waits for their settled promises",
+        "electron/service/embedded-browser/processing/task-registry.test.ts#rejects new tasks after dispose and remains idempotent"
+      ],
       "acceptedDifferences": [],
-      "notes": "There is no application-wide task registry, so this capability has no single legacy owner. Task truth is split across protocol-specific controller Maps, child operations, component refs, hooks, and promises; those existing owners remain attributed to their protocol or application-workflow capabilities."
+      "notes": "`ProcessingTaskRegistry` now owns generic main-side task registration, filtered cancellation, settled-task waiting and idempotent app-exit disposal. The shared ffmpeg executor registers every active process here, while protocol-specific HLS/DASH/MSE session owners still retain their domain snapshots and workdir cleanup. Renderer-unmount recovery and broader transfer-task registration remain open."
     },
     {
       "id": "output.processing-staged-terminal",
