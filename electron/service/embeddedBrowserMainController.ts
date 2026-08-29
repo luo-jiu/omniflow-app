@@ -1222,6 +1222,13 @@ export function createEmbeddedBrowserMainController(
       }
     }
 
+    if (drained?.trimBeforeHeader) {
+      await clearEmbeddedBrowserMseSpoolFiles({
+        resourceKey,
+        tabId,
+      })
+    }
+
     if (drained?.base64) {
       await appendEmbeddedBrowserMseSpoolChunk(tabId, {
         base64: drained.base64,

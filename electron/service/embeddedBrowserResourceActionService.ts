@@ -96,5 +96,6 @@ export async function drainEmbeddedBrowserMseResourceFromPage(
     streamType: payload.streamType === 'audio' || payload.streamType === 'video'
       ? payload.streamType
       : undefined,
+    trimBeforeHeader: payload.trimBeforeHeader === true,
   } satisfies EmbeddedBrowserDrainedMseResourcePayload
 }

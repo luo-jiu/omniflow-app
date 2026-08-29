@@ -2007,3 +2007,17 @@
 - runtime changes: 无生产 runtime 变化；新增条件式真实二进制 output fixture。
 - legacy cleanup: 无新增删除；旧 Cat Catch 页面实现继续保留至 MSE parity 和真实回归完成。
 - validation: 本切片真实 MSE output `1 passed`、完整 MSE 集合 `8 files / 21 passed`、TypeScript `--noEmit`、scoped ESLint、metadata validator（`7 units / 32 capabilities / 17 open / 100 cleanup / 221 planned`）、同步 runner `16/16` 和非 `dist-electron/**` diff check 均通过；完整 build、全仓 lint/test 与真实页面验证仍因共享 dirty 生成物和当前无测试场景不执行。
+
+## 2026-08-29: same target (MSE drain header trimming)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本切片补齐固定 `catch.js` 头部裁剪在最终 page drain 进入 main spool 时的语义。
+- reviewedThrough / portedThrough: 均保持 `null`；`mse.page-capture-runtime` 继续 `porting`，`mse.main-spool-lifecycle` 继续 `ported-unverified`，`mse-runtime` unit 仍开放。
+- change groups: `upstream-diff`、`large-media-output`、`relay-contract` 与 `fixture-contract`。
+- affected capability IDs: `mse.page-capture-runtime`、`mse.main-spool-lifecycle`；metadata 当前为 `7 units / 32 capabilities / 210 anchors / 100 cleanup entries / 222 planned IDs / 202 active refs`，状态为 `15 verified / 5 porting / 1 ported-unverified / 11 pending`。
+- fixtures/tests: `electron/service/embedded-browser/capture/adapters/mse-page.test.ts#mse.drain-header-trim` 验证 WebM 初始化头在最终 drain 中被标记；MSE 关联集合为 `8 files / 22 passed`。
+- accepted differences: Cat Catch 在 page 内存的完整 `catchMedia` 列表上裁剪；OmniFlow 通过 page drain 返回严格布尔标记，让 main 在追加未 flush 尾部前清理对应 spool，避免把 GB 级文件重新读入页面内存，输出语义保持一致。
+- excluded changes and reasons: 未修改 MSE runtime 的 append/endOfStream、周期阈值、HLS/DASH、transfer、renderer UI、真实网站或 `dist-electron/**`；真实页面多次初始化头、长时间压力和最终 ffmpeg 导入仍需环境验证。
+- unresolved gaps: 固定上游 MSE 头部识别的完整异常样本、长时间大媒体、双轨输出失败恢复、真实下载导入和 MSE unit 原子关闭仍待完成。
+- runtime changes: `mse-page.ts` 和 page-drain bridge 返回 `trimBeforeHeader`；main 的 drain extraction 在有旧 spool 时先清理对应 resource，再追加 page 尾部。
+- legacy cleanup: 无新增删除；旧 Cat Catch 页面实现继续保留至 MSE parity 和真实回归完成。
+- validation: 本切片 page/drain 定向 `2 files / 7 passed`、TypeScript `--noEmit`、scoped ESLint 均通过；完整 MSE 集合、metadata validator、同步 runner 和非 `dist-electron/**` diff check 将在提交前重跑，完整 build、全仓 lint/test 与真实页面验证仍因共享 dirty 生成物和当前无测试场景不执行。

@@ -778,7 +778,8 @@
         "mse.completion-respects-capture-gate",
         "mse.complete-clear-without-streams",
         "mse.auto-buffer-seek-uses-first-range",
-        "mse.cross-flush-header-trim"
+        "mse.cross-flush-header-trim",
+        "mse.drain-header-trim"
       ],
       "testRefs": [
         "electron/service/embedded-browser/cat-catch-port/mse/runtime.test.ts#mse.audio-video-flush-reset",
@@ -791,12 +792,13 @@
         "electron/service/embedded-browser/cat-catch-port/mse/runtime.test.ts#mse.complete-clear-without-streams",
         "electron/service/embedded-browser/capture/adapters/mse-page.test.ts#mse.auto-buffer-seek-uses-first-range",
         "electron/service/embedded-browser/capture/adapters/mse-page.test.ts#mse.cross-flush-header-trim",
-        "electron/service/embedded-browser/processing/mse-spool.test.ts#mse.header-trim-replaces-earlier-flush"
+        "electron/service/embedded-browser/processing/mse-spool.test.ts#mse.header-trim-replaces-earlier-flush",
+        "electron/service/embedded-browser/capture/adapters/mse-page.test.ts#mse.drain-header-trim"
       ],
       "acceptedDifferences": [
         "OmniFlow emits an authorized trimBeforeHeader marker so the main-owned spool can discard earlier flushed bytes before appending a later initialization header without reading the entire large file back into page memory; Cat Catch performs this decision over its in-memory catchMedia list."
       ],
-      "notes": "The production page adapter now installs the fixed target MSE runtime and keeps DOM actions, filename/Blob handling, and the page-origin toolkit projection at the platform boundary. Pure runtime tests cover append/endOfStream, the optional capture gate, per-track flush/reset, retention limits, completion clearing with and without streams, first-range auto-buffer seeking, cross-flush header replacement, and drain semantics; production probe characterization covers installation, read/open/export/drain and resource events. Auto-seek intentionally uses the first buffered range, matching fixed Cat Catch behavior for sparse media ranges. When enabled, the page emits a serialized periodic-save control after a flush crosses each configured 1 GiB boundary; main handles it through the same merged/per-track output path and clears the page/spool cache after success. Native playback exceptions continue to propagate once; OmniFlow does not copy Cat Catch's catch-block retry that can invoke a failed native method a second time. Fixed-upstream parity, production-equivalent large-media/auto-download behavior and real-site smoke remain open, so this capability stays porting."
+      "notes": "The production page adapter now installs the fixed target MSE runtime and keeps DOM actions, filename/Blob handling, and the page-origin toolkit projection at the platform boundary. Pure runtime tests cover append/endOfStream, the optional capture gate, per-track flush/reset, retention limits, completion clearing with and without streams, first-range auto-buffer seeking, cross-flush header replacement, drain header replacement, and drain semantics; production probe characterization covers installation, read/open/export/drain and resource events. Auto-seek intentionally uses the first buffered range, matching fixed Cat Catch behavior for sparse media ranges. When enabled, the page emits a serialized periodic-save control after a flush crosses each configured 1 GiB boundary; main handles it through the same merged/per-track output path and clears the page/spool cache after success. Native playback exceptions continue to propagate once; OmniFlow does not copy Cat Catch's catch-block retry that can invoke a failed native method a second time. Fixed-upstream parity, production-equivalent large-media/auto-download behavior and real-site smoke remain open, so this capability stays porting."
     },
     {
       "id": "mse.main-spool-lifecycle",

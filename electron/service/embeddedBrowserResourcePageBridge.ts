@@ -19,6 +19,7 @@ export type EmbeddedBrowserDrainedMseResourcePayload = {
   mimeType?: string
   resourceKey: string
   streamType?: 'audio' | 'video'
+  trimBeforeHeader?: boolean
 }
 
 export function createEmbeddedBrowserResourceProbeActionScript(

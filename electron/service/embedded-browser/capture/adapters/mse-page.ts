@@ -335,6 +335,8 @@ export function installMsePageAdapter(input: InstallMsePageAdapterInput): MsePag
       mimeType: drained.mimeType,
       resourceKey,
       streamType: drained.streamType,
+      trimBeforeHeader: input.preferences.trimExtraMediaHeaders
+        && drained.chunks.some(isHeaderChunk),
     }
   }
   const exportResource = (resourceKey: string) => {

@@ -180,6 +180,69 @@ describe('MSE page adapter', () => {
     adapter.dispose()
   })
 
+  it('mse.drain-header-trim', () => {
+    const adapter = installMsePageAdapter({
+      arrayBufferToBase64: (buffer) => Buffer.from(buffer).toString('base64'),
+      combineArrayBuffers: (buffers) => {
+        const combined = new Uint8Array(buffers.reduce((total, buffer) => total + buffer.byteLength, 0))
+        let offset = 0
+        for (const buffer of buffers) {
+          const bytes = new Uint8Array(buffer)
+          combined.set(bytes, offset)
+          offset += bytes.byteLength
+        }
+        return combined.buffer
+      },
+      emitCapture: vi.fn(),
+      emitControl: vi.fn(),
+      guessExtension: () => 'webm',
+      hostProbe: {},
+      installRuntime: (runtimeInput) => installMseRuntime({
+        ...runtimeInput,
+        createStreamId: () => 'webm-drain',
+        flushThresholdBytes: 16,
+      }),
+      preferences: {
+        autoDownloadOnComplete: false,
+        autoSeekToBufferedEnd: false,
+        clearCacheOnComplete: false,
+        manualFileName: '',
+        regexRule: '',
+        regexWarning: '',
+        restartAlwaysFromBeginning: false,
+        saveEveryGigabyte: false,
+        selectorRule: '',
+        selectorWarning: '',
+        trimExtraMediaHeaders: true,
+      },
+      resolveFileName: () => 'fixture',
+      scope: {
+        ArrayBuffer,
+        Blob,
+        MediaSource: FakeMediaSource,
+        URL: {
+          createObjectURL: () => 'blob:fixture',
+          revokeObjectURL: vi.fn(),
+        },
+        Uint8Array,
+        location: { href: 'https://page.example/watch' },
+        setTimeout: vi.fn(),
+      } as unknown as InstallMsePageAdapterInput['scope'],
+    })
+
+    const mediaSource = new FakeMediaSource()
+    const sourceBuffer = mediaSource.addSourceBuffer('video/webm')
+    sourceBuffer.appendBuffer(new Uint8Array([1, 2, 3, 4]).buffer)
+    adapter.runtime.flush()
+    sourceBuffer.appendBuffer(new Uint8Array([0x1A, 0x45, 0xDF, 0xA3, 5]).buffer)
+
+    expect(adapter.drainResource('mse-stream:webm-drain')).toMatchObject({
+      base64: Buffer.from([0x1A, 0x45, 0xDF, 0xA3, 5]).toString('base64'),
+      trimBeforeHeader: true,
+    })
+    adapter.dispose()
+  })
+
   it('mse.auto-buffer-seek-uses-first-range', () => {
     const mediaElement = new FakeMediaElement()
     const adapter = installMsePageAdapter({
