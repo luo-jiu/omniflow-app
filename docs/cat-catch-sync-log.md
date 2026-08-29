@@ -2201,3 +2201,17 @@
 - runtime changes: `stopEmbeddedBrowserHlsRecordingResource` 在 ffmpeg 成功后才 claim 并发布；非零退出、取消或没有有效产物时最终目标保持原状，原有 stop/discard/session cleanup 语义不变。
 - legacy cleanup: 无新增删除；保留 HLS live recorder/session owner 和最终 `outputPath` 合同，未引入第二套 HLS 算法或长期 fallback。
 - validation: 直播/lease/output 定向 `7 files / 42 passed`、TypeScript `--noEmit`、scoped ESLint 和非 `dist-electron/**` diff check 通过；完整 build、全仓 lint/test、真实页面与真实下载仍未执行。
+
+## 2026-08-29: same target (DASH static-plan staged output wiring)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本切片把 DASH 静态计划的轨道下载和 ffmpeg 合并接入 staged output lease。
+- reviewedThrough / portedThrough: 均保持 `null`；`dash.parser-planner` 与 `dash.timeline-download-merge` 继续 `porting`，`output.staged-output-lease` 继续 `porting`，dash-engine/output-integration unit 仍开放。
+- change groups: `main-authority-wiring`、`output-ownership`、`cancel-owner-correction` 与 `partial-output-cleanup`。
+- affected capability IDs: `dash.timeline-download-merge`、`output.staged-output-lease`；metadata 仍为 `7 units / 32 capabilities / 102 cleanup entries / 229 planned IDs / 226 active refs`，状态为 `15 verified / 11 porting / 1 ported-unverified / 5 pending`。
+- fixtures/tests: DASH executor/output/lease 现有集合继续覆盖 SIDX、dynamic snapshot、取消、真实 ffmpeg/ffprobe 与 lease 发布合同；本切片新增生产 dispatch wiring，未虚增 capability test ref。
+- accepted differences: renderer 继续收到原有最终 `outputPath`；DASH 计划的 staged path、lease id 和 claim token 只在 main publisher 内部存在。静态计划 active task 改由 `EmbeddedBrowserDashLiveSessionOwner` 负责，DASH live recorder 的 workdir/stop-export 仍独立。
+- excluded changes and reasons: 未接入 DASH live output、MSE、local-save、UploadManager、crash quarantine、renderer UI、`dist-electron/**` 或 upstream 游标；这些入口仍需各自 delivery owner 和终态证据。
+- unresolved gaps: DASH live stop/export、DASH 计划更广泛 registry 归属、DASH/MSE 其他 output、统一协议任务 registry、lease crash quarantine/预算、application delivery terminal、真实页面和长时间大媒体仍待补齐。
+- runtime changes: `downloadEmbeddedBrowserMpdPlanResource` 现在在 lease path 上执行 `DashTaskExecutor`，成功后单次 claim 并发布到最终目标；处理、ffmpeg 失败或取消时释放 lease，不覆盖已有目标。活动任务不再误挂 HLS session owner。
+- legacy cleanup: 无新增删除；保留最终 `outputPath` 和 DASH authority/plan 合同，未引入第二套 DASH 算法或长期 fallback。
+- validation: DASH 相关定向集合 `8 files / 24 passed`、TypeScript `--noEmit`、全仓 `npm run lint`、Cat Catch metadata validator、`npm run cat-catch:test-sync` `16/16`、文档 JSON 解析和非 `dist-electron/**` diff check 通过；全仓 `npm test` 为 `229 files passed / 1471 tests passed / 3 skipped`，仅被 Vitest 二次收集 `tools/cat-catch-sync/validate.test.mjs` 报告空测试套件而退出 1，该文件的独立 Node 测试已通过；未运行 build（工作树中有其他 agent 的 `dist-electron/**` 修改），真实页面与真实下载仍未执行。

@@ -3246,28 +3246,40 @@ export function createEmbeddedBrowserMainController(
         }
       }
 
-      activeTask = embeddedBrowserHlsSessionOwner.beginActiveTask({
+      activeTask = embeddedBrowserDashSessionOwner.beginActiveTask({
         requestId,
         tabId: normalizedTabId,
       })
-      const executor = new DashTaskExecutor({
-        fetch: createEmbeddedBrowserCapturedResourceFetch(normalizedTabId, resourceId),
-        mergeTracks: input => mergeDashTaskTracksToOutput({
-          ...input,
-          durationSeconds: taskPlan.durationSeconds,
-          ffmpegPath: payload.ffmpegPath,
-        }),
-        outputPath,
-        plan: taskPlan,
-        selectedAudioRepresentation,
-        selectedVideoRepresentation,
-        signal: activeTask.signal,
+      const activeSignal = activeTask.signal
+      let ffmpegPath: string | undefined
+      const published = await publishStagedOutput({
+        fileName: path.basename(outputPath),
+        mimeType: 'video/mp4',
+        ownerTaskId: `dash-plan-output-${randomUUID()}`,
+        purpose: 'mpd-plan-download',
+        store: getEmbeddedBrowserStagedOutputLeaseStore(),
+        targetPath: outputPath,
+        write: async (stagedPath) => {
+          const result = await new DashTaskExecutor({
+            fetch: createEmbeddedBrowserCapturedResourceFetch(normalizedTabId, resourceId),
+            mergeTracks: input => mergeDashTaskTracksToOutput({
+              ...input,
+              durationSeconds: taskPlan.durationSeconds,
+              ffmpegPath: payload.ffmpegPath,
+            }),
+            outputPath: stagedPath,
+            plan: taskPlan,
+            selectedAudioRepresentation,
+            selectedVideoRepresentation,
+            signal: activeSignal,
+          }).run()
+          ffmpegPath = result.ffmpegPath
+        },
       })
-      const result = await executor.run()
       return {
-        ffmpegPath: result.ffmpegPath,
+        ffmpegPath,
         ok: true,
-        outputPath: result.outputPath,
+        outputPath: published.outputPath,
       }
     } catch (error) {
       runtimeLogger.warn('embedded browser mpd plan download failed', {

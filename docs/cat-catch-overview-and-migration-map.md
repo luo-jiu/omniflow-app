@@ -144,6 +144,8 @@ unit 是生产切换与删除旧实现的最小边界。可以在 unit 内逐项
 
 截至 2026-08-29，capability map 的最新统计为 226 个 active 测试引用、229 个计划测试 ID、102 个 cleanup entry；普通直链、已捕获资源、HLS/MPD 直拉、HLS 计划下载、独立轨合并和 HLS 直播停止导出已接入 staged output lease，但不改变其他 output 能力仍在迁移中的结论。
 
+本轮继续收口 DASH 输出：静态 MPD 计划的分片下载和单/双轨 ffmpeg 合并现在只写入 main-only lease，成功后才发布到最终 `outputPath`；DASH active task 由 DASH session owner 负责取消。DASH live recorder 的工作目录和停止导出仍是独立生命周期，不能据此宣称 DASH unit 或 output integration 已完成。
+
 旧代码中存在网络捕捉、MSE、HLS、DASH、下载、ffmpeg 和资料库导入入口，只能说明有 characterization 输入，不能据此宣称已经迁移。完成一项能力至少需要：
 
 1. 固定上游来源和行为依赖。

@@ -1474,7 +1474,8 @@
         "electron/service/embeddedBrowserMainController.ts#downloadEmbeddedBrowserMpdPlanResource",
         "electron/service/embedded-browser/processing/dash-task.ts#DashTaskExecutor",
         "electron/service/embedded-browser/processing/dash-output.ts#mergeDashTaskTracksToOutput",
-        "electron/service/embedded-browser/processing/dash-live-task.ts#DashLiveTask"
+        "electron/service/embedded-browser/processing/dash-live-task.ts#DashLiveTask",
+        "electron/service/embedded-browser/processing/staged-output-publisher.ts#publishStagedOutput"
       ],
       "targetRefs": [
         "electron/service/embedded-browser/processing/dash-task.ts#DashTaskExecutor",
@@ -1525,7 +1526,7 @@
         "electron/service/embedded-browser/processing/dash-output.test.ts#keeps single-track output on the same cancellable runner"
       ],
       "acceptedDifferences": [],
-      "notes": "DashTaskExecutor now owns bounded plan preflight, range-aware parallel fragment transfer, SIDX index-range fetch and expansion, ordered file writes, external cancellation and temp cleanup. A dynamic plan with a finite current segment window is accepted as a snapshot and uses the same transfer/merge path; empty dynamic windows remain an explicit reject. DashLiveTask now owns injected-snapshot polling, minimumUpdatePeriod clamping, per-representation segment-key dedupe, new-segment delta delivery and abort/stop lifecycle. The main-side dash-live-adapter supplies bounded, DTD/entity-free XML snapshots through an injected fetch and maps the result to DashTaskPlan; appendDashRepresentationSegments writes only new init/media bytes to main-owned track files. EmbeddedBrowserDashLiveSessionOwner keeps live sessions, revisioned task snapshots and tab/view/app cleanup; start/stop/discard are exposed through a separate main/preload IPC contract without renderer UI. The production MPD plan dispatch converts the renderer DTO into the main-side plan, redeems captured-resource authority for fragments and routes local single- or dual-track output through the shared cancellable ffmpeg runner. Generated static and dynamic-refresh fMP4 tracks now have real FFmpeg/FFprobe evidence; SegmentBase supports nested SIDX fetches up to a fixed depth and rejects deeper chains explicitly."
+      "notes": "DashTaskExecutor now owns bounded plan preflight, range-aware parallel fragment transfer, SIDX index-range fetch and expansion, ordered file writes, external cancellation and temp cleanup. A dynamic plan with a finite current segment window is accepted as a snapshot and uses the same transfer/merge path; empty dynamic windows remain an explicit reject. DashLiveTask now owns injected-snapshot polling, minimumUpdatePeriod clamping, per-representation segment-key dedupe, new-segment delta delivery and abort/stop lifecycle. The main-side dash-live-adapter supplies bounded, DTD/entity-free XML snapshots through an injected fetch and maps the result to DashTaskPlan; appendDashRepresentationSegments writes only new init/media bytes to main-owned track files. EmbeddedBrowserDashLiveSessionOwner keeps live sessions, revisioned task snapshots and tab/view/app cleanup; start/stop/discard are exposed through a separate main/preload IPC contract without renderer UI. The production MPD plan dispatch converts the renderer DTO into the main-side plan, redeems captured-resource authority for fragments, runs the DASH active task under the DASH session owner, and publishes local single- or dual-track output through the main-only staged output lease before exposing the existing final outputPath. Generated static and dynamic-refresh fMP4 tracks now have real FFmpeg/FFprobe evidence; SegmentBase supports nested SIDX fetches up to a fixed depth and rejects deeper chains explicitly. DASH live recorder workdirs and stop exports remain independently owned until their output handoff is migrated."
     },
     {
       "id": "transfer.concurrent-retry-abort-order",
@@ -1836,6 +1837,7 @@
       "upstreamRefs": [],
       "currentImplementationRefs": [
         "electron/service/embedded-browser/processing/staged-output-publisher.ts#publishStagedOutput",
+        "electron/service/embeddedBrowserMainController.ts#downloadEmbeddedBrowserMpdPlanResource",
         "electron/service/embeddedBrowserMainController.ts#outputPath: result.outputPath",
         "electron/service/embeddedBrowserResourceFileSaveService.ts#saveEmbeddedBrowserExtractedResourceFile"
       ],
@@ -1858,7 +1860,7 @@
         "electron/service/embedded-browser/processing/staged-output-publisher.test.ts#releases the lease and keeps the previous target when processing fails"
       ],
       "acceptedDifferences": [],
-      "notes": "`StagedOutputLeaseStore` now provides a main-only opaque lease base with owner-scoped paths, one delivery claim, TTL touch/reap, and release cleanup; snapshots intentionally omit the real path. `staged-output-publisher.ts#publishStagedOutput` now owns the ordinary direct-file, captured-resource, HLS/MPD direct-manifest, HLS local-plan, HLS independent-track merge, and HLS live stop-export handoffs: processing writes only to the lease path, then a single claim publishes to the user target while preserving the existing final `outputPath` response. The active HLS live recorder workdir, DASH plan/live, MSE and local-save/UploadManager delivery still use their domain owners; crash quarantine, budget accounting, renderer-safe lease IPC, and the application delivery terminal remain open."
+      "notes": "`StagedOutputLeaseStore` now provides a main-only opaque lease base with owner-scoped paths, one delivery claim, TTL touch/reap, and release cleanup; snapshots intentionally omit the real path. `staged-output-publisher.ts#publishStagedOutput` now owns the ordinary direct-file, captured-resource, HLS/MPD direct-manifest, HLS local-plan, HLS independent-track merge, HLS live stop-export, and DASH static plan handoffs: processing writes only to the lease path, then a single claim publishes to the user target while preserving the existing final `outputPath` response. DASH static plan cancellation is owned by `EmbeddedBrowserDashLiveSessionOwner`, while active DASH live recorder workdirs and stop exports remain separate. MSE and local-save/UploadManager delivery still use their domain owners; crash quarantine, budget accounting, renderer-safe lease IPC, and the application delivery terminal remain open."
     },
     {
       "id": "output.application-workflow-coordinator",
