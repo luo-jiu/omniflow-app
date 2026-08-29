@@ -246,20 +246,18 @@ function findNextExplicitTime(items: DashXmlElement[], index: number) {
   return undefined
 }
 
-function expandSegmentTimeline(input: {
-  baseUrl: string
+type DashSegmentTiming = Pick<DashSegment, 'duration' | 'number' | 'time'>
+
+function expandSegmentTimelineTimings(input: {
   durationSeconds?: number
-  media: string
   number: number
   periodPresentationTimeOffset: number
-  representationId: string
   timeline: DashXmlElement
   timescale: number
-  bandwidth?: number
   reasons: string[]
 }) {
   const items = children(input.timeline, 'S')
-  const segments: DashSegment[] = []
+  const timings: DashSegmentTiming[] = []
   let currentNumber = input.number
   let currentTime = 0
 
@@ -293,28 +291,44 @@ function expandSegmentTimeline(input: {
 
     const segmentCount = repeatCount + 1
     for (let repeatIndex = 0; repeatIndex < segmentCount; repeatIndex += 1) {
-      if (segments.length >= MAX_EXPANDED_SEGMENTS) {
+      if (timings.length >= MAX_EXPANDED_SEGMENTS) {
         addReason(input.reasons, 'segment-expansion-limit')
-        return segments
+        return timings
       }
-      const mediaUrl = replaceTemplateTokens(input.media, {
-        bandwidth: input.bandwidth,
-        number: currentNumber,
-        representationId: input.representationId,
-        time: currentTime,
-      })
-      segments.push({
+      timings.push({
         duration: duration / input.timescale,
-        index: segments.length,
         number: currentNumber,
         time: currentTime,
-        url: resolveUrl(mediaUrl, input.baseUrl),
       })
       currentNumber += 1
       currentTime += duration
     }
   }
-  return segments
+  return timings
+}
+
+function expandSegmentTimeline(input: {
+  baseUrl: string
+  durationSeconds?: number
+  media: string
+  number: number
+  periodPresentationTimeOffset: number
+  representationId: string
+  timeline: DashXmlElement
+  timescale: number
+  bandwidth?: number
+  reasons: string[]
+}) {
+  return expandSegmentTimelineTimings(input).map((timing, index) => ({
+    ...timing,
+    index,
+    url: resolveUrl(replaceTemplateTokens(input.media, {
+      bandwidth: input.bandwidth,
+      number: timing.number,
+      representationId: input.representationId,
+      time: timing.time,
+    }), input.baseUrl),
+  } satisfies DashSegment))
 }
 
 function expandSegmentTemplate(input: {
@@ -411,6 +425,7 @@ function expandSegmentTemplate(input: {
 
 function parseSegmentList(input: {
   baseUrl: string
+  durationSeconds?: number
   element?: DashXmlElement
   reasons: string[]
 }) {
@@ -430,6 +445,23 @@ function parseSegmentList(input: {
   }
   if (rawTimescale !== undefined && (timescale === undefined || timescale <= 0)) {
     addReason(input.reasons, 'segment-list-timescale-invalid')
+  }
+  const timeline = firstChild(input.element, 'SegmentTimeline')
+  if (rawDuration !== undefined && timeline) {
+    addReason(input.reasons, 'segment-list-duration-and-timeline-conflict')
+  }
+  const timelineTimings = timeline && timescale && timescale > 0 && rawDuration === undefined
+    ? expandSegmentTimelineTimings({
+        durationSeconds: input.durationSeconds,
+        number: numberAttribute(input.element, 'startNumber') || 1,
+        periodPresentationTimeOffset: numberAttribute(input.element, 'presentationTimeOffset') || 0,
+        reasons: input.reasons,
+        timeline,
+        timescale,
+      })
+    : undefined
+  if (rawDuration === undefined && !timeline) {
+    addReason(input.reasons, 'segment-time-unspecified')
   }
   const initialization = firstChild(input.element, 'Initialization')
   const initializationUrl = attribute(initialization, 'sourceURL')
@@ -457,8 +489,11 @@ function parseSegmentList(input: {
       }
       return {
         byteRange,
-        duration: duration && timescale && timescale > 0 ? duration / timescale : undefined,
+        duration: timelineTimings?.[index]?.duration
+          ?? (duration && timescale && timescale > 0 ? duration / timescale : undefined),
         index,
+        number: timelineTimings?.[index]?.number,
+        time: timelineTimings?.[index]?.time,
         url: resolveUrl(rawMedia || '', input.baseUrl),
       } satisfies DashSegment
     }),
@@ -561,6 +596,7 @@ function parseRepresentation(input: {
       }
     : parseSegmentList({
         baseUrl: input.baseUrls[0] || '',
+        durationSeconds: input.durationSeconds,
         element: listElement,
         reasons,
       })

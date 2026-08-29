@@ -1385,17 +1385,19 @@
         "dash.parser-core",
         "dash.base-url-timeline-ranges",
         "dash.segment-base-and-period-boundary",
-        "dash.segment-list-boundary"
+        "dash.segment-list-boundary",
+        "dash.segment-list-timeline"
       ],
       "testRefs": [
         "electron/service/embedded-browser/cat-catch-port/dash/parser.test.ts#dash.parser-core",
         "electron/service/embedded-browser/cat-catch-port/dash/parser.test.ts#dash.base-url-timeline-ranges",
         "electron/service/embedded-browser/cat-catch-port/dash/parser.test.ts#dash.segment-base-and-period-boundary",
         "electron/service/embedded-browser/cat-catch-port/dash/parser.test.ts#dash.segment-list-boundary",
+        "electron/service/embedded-browser/cat-catch-port/dash/parser.test.ts#dash.segment-list-timeline",
         "src/features/embedded-browser/resources/model/embedded-browser-mpd-manifest.test.ts#dash.renderer-dom-adapter"
       ],
       "acceptedDifferences": [],
-      "notes": "The pure target parser now covers inherited BaseURL alternatives, SegmentTemplate token expansion, finite SegmentTimeline r=-1, validated SegmentList ranges, single-file SegmentBase and DRM evidence through a platform-neutral XML AST. Invalid SegmentList inputs are explicit unsupported reasons; SegmentBase SIDX, init-range splitting, multi-Period merging and unbounded dynamic repeats remain explicit unsupported reasons; the bundled mpd-parser/jQuery vendor-version discrepancy and production parser adapter are still open."
+      "notes": "The pure target parser now covers inherited BaseURL alternatives, SegmentTemplate and SegmentList timeline expansion, finite SegmentTimeline r=-1, validated SegmentList ranges, single-file SegmentBase and DRM evidence through a platform-neutral XML AST. Invalid or structurally ambiguous SegmentList inputs are explicit unsupported reasons; SegmentBase SIDX, init-range splitting, multi-Period merging and unbounded dynamic repeats remain explicit unsupported reasons; the bundled mpd-parser/jQuery vendor-version discrepancy and production parser adapter are still open."
     },
     {
       "id": "dash.timeline-download-merge",

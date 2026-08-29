@@ -1598,6 +1598,20 @@
 - legacy cleanup: 无新增删除；现有 target task/output adapter 继续作为唯一 production owner。
 - validation: DASH parser/task/output/renderer `4 files / 11 passed`、TypeScript、scoped ESLint、metadata validator、sync tests `16/16` 和 scoped diff check 通过；完整 build 与真实页面验证不执行。
 
+## 2026-08-29: same target (DASH SegmentList timeline semantics)
+
+- observedHead / migrationTarget: 均为 `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本步补固定 `mpd-parser` 的 SegmentList/SegmentTimeline 时序投影。
+- reviewedThrough / portedThrough: 均保持 `null`；`dash.parser-planner` 与 `dash.timeline-download-merge` 继续 `porting`，`dash-engine` unit 仍开放。
+- change groups: `segment-list-timeline`、`segment-time-conflict` 与 `fixture-contract`。
+- affected capability IDs: `dash.parser-planner`；metadata 为 `7 units / 32 capabilities / 210 anchors / 99 cleanup entries / 191 planned IDs / 170 active refs`。
+- fixtures/tests: `dash.segment-list-timeline` 覆盖 timeline 的显式 `t`、`r` 展开、`startNumber`、每片 duration/time/number 投影，以及同时声明 `duration` 或缺失时基的拒绝 reason；DASH parser/task/output/renderer `4 files / 12 passed`。
+- accepted differences: SegmentList 的显式 URL 仍按 URL 数量投影，timeline 多出的时序项不生成额外网络请求；坏结构保留诊断投影但在 task preflight 前拒绝。
+- excluded changes and reasons: 未修改 SegmentBase SIDX、dynamic availability、多 Period 合并、renderer UI、HLS、MSE、transfer 或 output；未宣称 DASH unit 已关闭。
+- unresolved gaps: SegmentBase SIDX、多 Period 合并、dynamic availability、完整 `mpd-parser` 差分和真实 MPD/ffprobe 输出仍待完成。
+- runtime changes: 新增共享 `expandSegmentTimelineTimings`，SegmentTemplate 与 SegmentList 均使用同一 `S` 展开语义；SegmentList 现在识别 timeline 与 duration 冲突及缺失时基。
+- legacy cleanup: 无新增删除；现有 target task/output adapter 继续作为唯一 production owner。
+- validation: DASH parser/task/output/renderer `4 files / 12 passed`、TypeScript、scoped ESLint、metadata validator、sync tests `16/16` 和 scoped diff check 通过；完整 build 与真实页面验证不执行。
+
 ## Template
 
 ```markdown

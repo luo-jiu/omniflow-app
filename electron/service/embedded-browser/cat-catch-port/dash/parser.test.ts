@@ -266,4 +266,65 @@ describe('DASH parser', () => {
       url: '',
     }])
   })
+
+  it('dash.segment-list-timeline', () => {
+    const timelineRoot = node('MPD', {}, [
+      node('Period', { duration: 'PT13S' }, [node('AdaptationSet', { contentType: 'video' }, [
+        node('Representation', { id: 'timeline-list' }, [
+          node('SegmentList', { startNumber: '10', timescale: '1' }, [
+            node('SegmentTimeline', {}, [
+              node('S', { d: '2', r: '1', t: '4' }),
+              node('S', { d: '3', t: '10' }),
+            ]),
+            node('SegmentURL', { media: 'one.m4s' }),
+            node('SegmentURL', { media: 'two.m4s' }),
+            node('SegmentURL', { media: 'three.m4s' }),
+          ]),
+        ]),
+      ])]),
+    ])
+    const timelineManifest = parseDashManifest({
+      baseUrl: 'https://cdn.example/media/manifest.mpd',
+      root: timelineRoot,
+      text: '',
+    })
+    expect(timelineManifest.unsupportedReasons).toEqual([])
+    expect(timelineManifest.representations[0].segments).toEqual([
+      { duration: 2, index: 0, number: 10, time: 4, url: 'https://cdn.example/media/one.m4s' },
+      { duration: 2, index: 1, number: 11, time: 6, url: 'https://cdn.example/media/two.m4s' },
+      { duration: 3, index: 2, number: 12, time: 10, url: 'https://cdn.example/media/three.m4s' },
+    ])
+
+    const conflictRoot = node('MPD', {}, [
+      node('Period', {}, [node('AdaptationSet', { contentType: 'video' }, [
+        node('Representation', { id: 'timeline-conflict' }, [
+          node('SegmentList', { duration: '2' }, [
+            node('SegmentTimeline', {}, [node('S', { d: '2' })]),
+            node('SegmentURL', { media: 'conflict.m4s' }),
+          ]),
+        ]),
+      ])]),
+    ])
+    const conflictManifest = parseDashManifest({
+      baseUrl: 'https://cdn.example/media/manifest.mpd',
+      root: conflictRoot,
+      text: '',
+    })
+    expect(conflictManifest.unsupportedReasons)
+      .toContain('segment-list-duration-and-timeline-conflict')
+
+    const missingTimingRoot = node('MPD', {}, [
+      node('Period', {}, [node('AdaptationSet', { contentType: 'video' }, [
+        node('Representation', { id: 'missing-timing' }, [
+          node('SegmentList', {}, [node('SegmentURL', { media: 'missing-timing.m4s' })]),
+        ]),
+      ])]),
+    ])
+    const missingTimingManifest = parseDashManifest({
+      baseUrl: 'https://cdn.example/media/manifest.mpd',
+      root: missingTimingRoot,
+      text: '',
+    })
+    expect(missingTimingManifest.unsupportedReasons).toContain('segment-time-unspecified')
+  })
 })
