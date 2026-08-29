@@ -92,4 +92,33 @@ describe('MSE spool store', () => {
     })
     await store.dispose()
   })
+
+  it('mse.header-trim-replaces-earlier-flush', async () => {
+    const temporaryRootPath = await createTemporaryRoot()
+    const store = new MseSpoolStore({ temporaryRootPath })
+    const first = await store.append({
+      chunk: new Uint8Array([1, 2, 3, 4]),
+      fileName: 'video.mp4',
+      mimeType: 'video/mp4',
+      resourceKey: 'mse-stream:video',
+      streamType: 'video',
+      tabId: 'tab-header',
+    })
+    await store.clear({ resourceKey: first.resourceKey, tabId: first.tabId })
+
+    const replacement = await store.append({
+      chunk: new Uint8Array([0, 0, 0, 0, 0x66, 0x74, 0x79, 0x70, 5]),
+      fileName: 'video.mp4',
+      mimeType: 'video/mp4',
+      resourceKey: 'mse-stream:video',
+      streamType: 'video',
+      tabId: 'tab-header',
+    })
+
+    await expect(readFile(replacement.filePath)).resolves.toEqual(
+      Buffer.from([0, 0, 0, 0, 0x66, 0x74, 0x79, 0x70, 5]),
+    )
+    await expect(access(first.filePath)).rejects.toThrow()
+    await store.dispose()
+  })
 })

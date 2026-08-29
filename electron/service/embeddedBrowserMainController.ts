@@ -767,6 +767,12 @@ export function createEmbeddedBrowserMainController(
         }
         if (controlPayload.event === 'mse-flush') {
           void enqueueEmbeddedBrowserMseControl(tabId, async () => {
+            if (controlPayload.trimBeforeHeader) {
+              await clearEmbeddedBrowserMseSpoolFiles({
+                resourceKey: controlPayload.resourceKey,
+                tabId,
+              })
+            }
             await appendEmbeddedBrowserMseSpoolChunk(tabId, {
               base64: controlPayload.base64 || '',
               fileName: controlPayload.fileName,

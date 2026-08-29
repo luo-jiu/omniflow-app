@@ -1979,3 +1979,17 @@
 - runtime changes: `mse-page.ts` 的 auto-seek progress handler 改用 `element.buffered.end(0)`，保持页面 adapter 其余生命周期和 listener owner 不变。
 - legacy cleanup: 无新增删除；旧 Cat Catch 页面实现继续保留至 MSE parity 和真实回归完成。
 - validation: MSE 关联集合 `7 files / 18 passed`、TypeScript `--noEmit`、scoped ESLint、metadata validator（`7 units / 32 capabilities / 17 open / 100 cleanup / 219 planned`）、同步 runner `16/16` 和非 `dist-electron/**` diff check 均通过；完整 build、全仓 lint/test 与真实页面验证仍因共享 dirty 生成物和当前无测试场景不执行。
+
+## 2026-08-29: same target (MSE cross-flush header trimming)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本切片补齐固定 `catch.js` 最后初始化头部裁剪在 main-owned spool 上的跨 flush 语义。
+- reviewedThrough / portedThrough: 均保持 `null`；`mse.page-capture-runtime` 继续 `porting`，`mse.main-spool-lifecycle` 继续 `ported-unverified`，`mse-runtime` unit 仍开放。
+- change groups: `upstream-diff`、`large-media-output`、`relay-contract` 与 `fixture-contract`。
+- affected capability IDs: `mse.page-capture-runtime`、`mse.main-spool-lifecycle`；metadata 当前为 `7 units / 32 capabilities / 210 anchors / 100 cleanup entries / 220 planned IDs / 200 active refs`，状态为 `15 verified / 5 porting / 1 ported-unverified / 11 pending`。
+- fixtures/tests: `electron/service/embedded-browser/capture/adapters/mse-page.test.ts#mse.cross-flush-header-trim` 验证后续 flush 含初始化头部时发出 `trimBeforeHeader`；`electron/service/embedded-browser/capture/adapters/mse-main-relay.test.ts#mse.relay-forgery` 验证该标记只能作为已授权 flush 字段通过；`electron/service/embedded-browser/processing/mse-spool.test.ts#mse.header-trim-replaces-earlier-flush` 验证清理旧轨道后只保留新 flush 字节；MSE 关联集合为 `7 files / 20 passed`。
+- accepted differences: Cat Catch 在 page 内存的完整 `catchMedia` 列表上裁剪；OmniFlow 通过受授权的 `trimBeforeHeader` 控制字段让 main 队列先删除对应 spool，再追加当前 flush，避免把 GB 级文件重新读入页面内存，输出语义保持一致。
+- excluded changes and reasons: 未修改 MSE runtime 的 append/endOfStream、周期阈值、HLS/DASH、transfer、renderer UI、真实网站或 `dist-electron/**`；真实页面多次初始化头、长时间压力和最终 ffmpeg 导入仍需环境验证。
+- unresolved gaps: 固定上游 MSE 头部识别的完整异常样本、长时间大媒体、双轨输出失败恢复、真实下载导入和 MSE unit 原子关闭仍待完成。
+- runtime changes: `mse-page.ts` 在启用 `trimExtraMediaHeaders` 且当前 flush 含 MP4/WebM 头部时标记 `trimBeforeHeader`；relay 仅接受严格布尔值；main controller 在 per-tab 串行队列中先清理对应 resource spool 再追加 payload。
+- legacy cleanup: 无新增删除；旧 Cat Catch 页面实现继续保留至 MSE parity 和真实回归完成。
+- validation: 本切片 MSE 关联集合 `7 files / 20 passed`、TypeScript `--noEmit`、scoped ESLint、metadata validator（`7 units / 32 capabilities / 17 open / 100 cleanup / 220 planned`）、同步 runner `16/16` 和非 `dist-electron/**` diff check 均通过；完整 build、全仓 lint/test 与真实页面验证仍因共享 dirty 生成物和当前无测试场景不执行。

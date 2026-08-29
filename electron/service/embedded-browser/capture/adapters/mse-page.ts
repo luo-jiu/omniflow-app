@@ -166,6 +166,8 @@ export function installMsePageAdapter(input: InstallMsePageAdapterInput): MsePag
   const flushToMain = (event: MseFlushEvent) => {
     const combined = input.combineArrayBuffers(normalizeBuffers(event.chunks))
     if (combined.byteLength === 0) return false
+    const trimBeforeHeader = input.preferences.trimExtraMediaHeaders
+      && event.chunks.some(isHeaderChunk)
     input.emitControl({
       base64: input.arrayBufferToBase64(combined),
       capturedAt: Date.now(),
@@ -174,6 +176,7 @@ export function installMsePageAdapter(input: InstallMsePageAdapterInput): MsePag
       mimeType: event.mimeType,
       resourceKey: createResourceKey(event.streamId),
       streamType: event.streamType,
+      trimBeforeHeader,
     })
     return true
   }

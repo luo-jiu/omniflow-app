@@ -5,6 +5,7 @@ export type AuthorizedMseControlPayload = {
   mimeType?: string
   resourceKey: string
   streamType?: 'audio' | 'video'
+  trimBeforeHeader?: boolean
 }
 
 type AuthorizeMseControlPayloadInput = {
@@ -62,5 +63,6 @@ export function authorizeMseControlPayload(
       : undefined,
     resourceKey,
     streamType,
+    trimBeforeHeader: input.payload.trimBeforeHeader === true,
   }
 }

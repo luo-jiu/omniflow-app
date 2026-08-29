@@ -118,6 +118,68 @@ describe('MSE page adapter', () => {
     adapter.dispose()
   })
 
+  it('mse.cross-flush-header-trim', () => {
+    const controls: Array<Record<string, unknown>> = []
+    const adapter = installMsePageAdapter({
+      arrayBufferToBase64: (buffer) => Buffer.from(buffer).toString('base64'),
+      combineArrayBuffers: (buffers) => {
+        const combined = new Uint8Array(buffers.reduce((total, buffer) => total + buffer.byteLength, 0))
+        let offset = 0
+        for (const buffer of buffers) {
+          const bytes = new Uint8Array(buffer)
+          combined.set(bytes, offset)
+          offset += bytes.byteLength
+        }
+        return combined.buffer
+      },
+      emitCapture: vi.fn(),
+      emitControl: (payload) => controls.push(payload),
+      guessExtension: () => 'mp4',
+      hostProbe: {},
+      installRuntime: (runtimeInput) => installMseRuntime({
+        ...runtimeInput,
+        flushThresholdBytes: 4,
+      }),
+      preferences: {
+        autoDownloadOnComplete: false,
+        autoSeekToBufferedEnd: false,
+        clearCacheOnComplete: false,
+        manualFileName: '',
+        regexRule: '',
+        regexWarning: '',
+        restartAlwaysFromBeginning: false,
+        saveEveryGigabyte: false,
+        selectorRule: '',
+        selectorWarning: '',
+        trimExtraMediaHeaders: true,
+      },
+      resolveFileName: () => 'fixture',
+      scope: {
+        ArrayBuffer,
+        Blob,
+        MediaSource: FakeMediaSource,
+        URL: {
+          createObjectURL: () => 'blob:fixture',
+          revokeObjectURL: vi.fn(),
+        },
+        Uint8Array,
+        location: { href: 'https://page.example/watch' },
+        setTimeout: vi.fn(),
+      } as unknown as InstallMsePageAdapterInput['scope'],
+    })
+
+    const mediaSource = new FakeMediaSource()
+    const sourceBuffer = mediaSource.addSourceBuffer('video/mp4')
+    sourceBuffer.appendBuffer(new Uint8Array([1, 2, 3, 4]).buffer)
+    sourceBuffer.appendBuffer(new Uint8Array([0, 0, 0, 0, 0x66, 0x74, 0x79, 0x70, 5]).buffer)
+
+    const flushes = controls.filter(control => control.event === 'mse-flush')
+    expect(flushes).toHaveLength(2)
+    expect(flushes[0]).toMatchObject({ trimBeforeHeader: false })
+    expect(flushes[1]).toMatchObject({ trimBeforeHeader: true })
+    adapter.dispose()
+  })
+
   it('mse.auto-buffer-seek-uses-first-range', () => {
     const mediaElement = new FakeMediaElement()
     const adapter = installMsePageAdapter({

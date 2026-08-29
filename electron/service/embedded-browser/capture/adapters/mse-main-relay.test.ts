@@ -12,6 +12,7 @@ describe('MSE main relay authorization', () => {
       event: 'mse-flush',
       resourceKey: 'mse-stream:owned',
       tabId: 'tab-current',
+      trimBeforeHeader: true,
     }
 
     expect(authorizeMseControlPayload({
@@ -62,6 +63,7 @@ describe('MSE main relay authorization', () => {
       base64: base.base64,
       event: base.event,
       resourceKey: base.resourceKey,
+      trimBeforeHeader: true,
     })
   })
 })
