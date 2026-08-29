@@ -2173,3 +2173,17 @@
 - runtime changes: `handleEmbeddedBrowserHlsPlanDownload` 和 `retryEmbeddedBrowserHlsPlanFailedFragments` 均通过 `publishStagedOutput` 写入 main-only lease；移除了 retry executor 的提前 `takeRetry`，改为发布成功后再转移终态所有权。
 - legacy cleanup: 无新增删除；保留最终 `outputPath` 合同和 HLS session owner，未引入第二套 HLS 算法或长期 fallback。
 - validation: HLS/lease/publisher 定向 `6 files / 41 passed`、TypeScript `--noEmit`、metadata validator 和非 `dist-electron/**` diff check 通过；完整 build、全仓 lint/test、真实页面与真实下载仍未执行。
+
+## 2026-08-29: same target (HLS independent-track staged output wiring)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本切片把 HLS 独立视频/音轨合并接入 staged output lease。
+- reviewedThrough / portedThrough: 均保持 `null`；`hls.segment-pipeline` 继续 `verified`，`output.staged-output-lease` 继续 `porting`，output-integration unit 仍开放。
+- change groups: `main-authority-wiring`、`output-ownership`、`partial-output-cleanup` 与 `dual-track-contract`。
+- affected capability IDs: `output.staged-output-lease`、`hls.segment-pipeline`；metadata 仍为 `7 units / 32 capabilities / 102 cleanup entries / 229 planned IDs / 226 active refs`，状态为 `15 verified / 11 porting / 1 ported-unverified / 5 pending`。
+- fixtures/tests: 独立轨 direct-manifest 与 local-plan 两条路径均通过 `publishStagedOutput` 写入 lease path；双轨 authority/header 隔离、共享取消、真实 ffmpeg/ffprobe 输出继续由现有集合覆盖，定向集合 `6 files / 37 passed`。
+- accepted differences: renderer 继续收到原有最终 `outputPath`；双轨 local workdir 仍由 HLS session owner 管理，暂存路径和 claim token 只在 main publisher 内部存在。
+- excluded changes and reasons: 未接入 HLS live、DASH plan/live、MSE、local-save、UploadManager、crash quarantine、renderer UI、`dist-electron/**` 或 upstream 游标；这些入口仍需各自 delivery owner 和终态证据。
+- unresolved gaps: HLS/DASH/MSE 其他 output、统一协议任务 registry、lease crash quarantine/预算、application delivery terminal、真实页面和长时间大媒体仍待补齐。
+- runtime changes: `downloadEmbeddedBrowserHlsTracksResource` 的 direct-manifest 与 local-plan 分支均在处理完成后 claim 并发布，处理或 ffmpeg 失败时最终目标保持原状，现有 workdir finally 清理继续生效。
+- legacy cleanup: 无新增删除；保留最终 `outputPath` 和双轨 header/authority 合同，未引入第二套 HLS 算法或长期 fallback。
+- validation: 独立轨/HLS output 定向 `6 files / 37 passed`、TypeScript `--noEmit`、scoped ESLint 和非 `dist-electron/**` diff check 通过；完整 build、全仓 lint/test、真实页面与真实下载仍未执行。

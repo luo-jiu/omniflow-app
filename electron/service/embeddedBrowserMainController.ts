@@ -2117,116 +2117,133 @@ export function createEmbeddedBrowserMainController(
         requestId,
         tabId: normalizedTabId,
       }, async (signal) => {
-        if (!useLocalTrackPlan) {
-          return downloadEmbeddedBrowserManifestTracks({
-            audioHeaders: authorities.audio.headers,
-            audioManifestUrl,
-            durationSeconds: payload.durationSeconds,
-            ffmpegPath: payload.ffmpegPath,
-            onProgress: payload.durationSeconds
-              ? (progress) => {
-                emitEmbeddedBrowserHlsTask({
-                  durationSeconds: payload.durationSeconds,
-                  ffmpegSpeedText: progress.speedText,
-                  manifestUrl: videoManifestUrl,
-                  message: '正在通过 ffmpeg 合并视频和音轨',
-                  mode: 'direct-manifest',
-                  processedSeconds: progress.processedSeconds,
-                  requestId,
-                  stage: 'ffmpeg',
-                  status: 'running',
+        let ffmpegPath = ''
+        const published = await publishStagedOutput({
+          fileName: path.basename(resolvedOutputPath),
+          mimeType: 'video/mp4',
+          ownerTaskId: `hls-track-output-${randomUUID()}`,
+          purpose: useLocalTrackPlan ? 'hls-track-plan-merge' : 'hls-track-manifest-merge',
+          store: getEmbeddedBrowserStagedOutputLeaseStore(),
+          targetPath: resolvedOutputPath,
+          write: async (stagedPath) => {
+            let result: Awaited<ReturnType<typeof downloadEmbeddedBrowserManifestTracks>>
+            if (!useLocalTrackPlan) {
+              result = await downloadEmbeddedBrowserManifestTracks({
+                audioHeaders: authorities.audio.headers,
+                audioManifestUrl,
+                durationSeconds: payload.durationSeconds,
+                ffmpegPath: payload.ffmpegPath,
+                onProgress: payload.durationSeconds
+                  ? (progress) => {
+                    emitEmbeddedBrowserHlsTask({
+                      durationSeconds: payload.durationSeconds,
+                      ffmpegSpeedText: progress.speedText,
+                      manifestUrl: videoManifestUrl,
+                      message: '正在通过 ffmpeg 合并视频和音轨',
+                      mode: 'direct-manifest',
+                      processedSeconds: progress.processedSeconds,
+                      requestId,
+                      stage: 'ffmpeg',
+                      status: 'running',
+                      tabId: normalizedTabId,
+                    })
+                  }
+                  : undefined,
+                outputPath: stagedPath,
+                signal,
+                videoHeaders: authorities.video.headers,
+                videoManifestUrl,
+              })
+            } else {
+              const parentVariableList = await resolveHlsTrackParentVariableList(
+                captureRuntime?.access || null,
+                {
+                  audioManifestUrl,
+                  signal,
+                  sourceResourceId: payload.sourceResourceId,
                   tabId: normalizedTabId,
-                })
+                  videoManifestUrl,
+                },
+              )
+              const [video, audio] = await Promise.all([
+                resolveHlsCapturedMediaPlan(captureRuntime?.access || null, {
+                  parentVariableList,
+                  resourceId: authorities.video.resourceId,
+                  segmentQuery: payload.segmentQuery,
+                  signal,
+                  tabId: normalizedTabId,
+                }),
+                resolveHlsCapturedMediaPlan(captureRuntime?.access || null, {
+                  parentVariableList,
+                  resourceId: authorities.audio.resourceId,
+                  segmentQuery: payload.segmentQuery,
+                  signal,
+                  tabId: normalizedTabId,
+                }),
+              ])
+              if (!video || !audio) {
+                throw new Error('视频或音轨 manifest 捕捉资源已过期')
               }
-              : undefined,
-            outputPath: resolvedOutputPath,
-            signal,
-            videoHeaders: authorities.video.headers,
-            videoManifestUrl,
-          })
-        }
-
-        const parentVariableList = await resolveHlsTrackParentVariableList(
-          captureRuntime?.access || null,
-          {
-            audioManifestUrl,
-            signal,
-            sourceResourceId: payload.sourceResourceId,
-            tabId: normalizedTabId,
-            videoManifestUrl,
+              taskDurationSeconds = Math.max(video.plan.durationSeconds, audio.plan.durationSeconds)
+              totalFragments = video.plan.fragmentCount + audio.plan.fragmentCount
+              localWorkDirectoryPath = await mkdtemp(path.join(os.tmpdir(), 'omniflow-hls-track-'))
+              result = await downloadEmbeddedBrowserHlsLocalTracks({
+                audio: {
+                  fetch: createEmbeddedBrowserCapturedResourceFetch(normalizedTabId, audio.authority.resourceId),
+                  plan: audio.plan,
+                },
+                ffmpegPath: payload.ffmpegPath,
+                onEvent: (event) => {
+                  emitEmbeddedBrowserHlsTask({
+                    bytesReceived: event.bytesReceived,
+                    bytesTotal: event.bytesTotal,
+                    completedFragments: event.completedFragments,
+                    durationSeconds: taskDurationSeconds,
+                    error: event.error,
+                    etaSeconds: event.etaSeconds,
+                    manifestUrl: videoManifestUrl,
+                    message: event.message,
+                    mode: 'local-plan',
+                    requestId,
+                    speedBps: event.speedBps,
+                    stage: event.stage,
+                    status: event.status,
+                    tabId: normalizedTabId,
+                    totalFragments: event.totalFragments || totalFragments,
+                  })
+                },
+                onProgress: (progress) => {
+                  emitEmbeddedBrowserHlsTask({
+                    completedFragments: totalFragments,
+                    durationSeconds: taskDurationSeconds,
+                    ffmpegSpeedText: progress.speedText,
+                    manifestUrl: videoManifestUrl,
+                    message: '正在通过 ffmpeg 合并本地视频和音轨',
+                    mode: 'local-plan',
+                    processedSeconds: progress.processedSeconds,
+                    requestId,
+                    stage: 'ffmpeg',
+                    status: 'running',
+                    tabId: normalizedTabId,
+                    totalFragments,
+                  })
+                },
+                outputPath: stagedPath,
+                signal,
+                video: {
+                  fetch: createEmbeddedBrowserCapturedResourceFetch(normalizedTabId, video.authority.resourceId),
+                  plan: video.plan,
+                },
+                workDirectoryPath: localWorkDirectoryPath,
+              })
+            }
+            ffmpegPath = result.ffmpegPath
           },
-        )
-        const [video, audio] = await Promise.all([
-          resolveHlsCapturedMediaPlan(captureRuntime?.access || null, {
-            parentVariableList,
-            resourceId: authorities.video.resourceId,
-            segmentQuery: payload.segmentQuery,
-            signal,
-            tabId: normalizedTabId,
-          }),
-          resolveHlsCapturedMediaPlan(captureRuntime?.access || null, {
-            parentVariableList,
-            resourceId: authorities.audio.resourceId,
-            segmentQuery: payload.segmentQuery,
-            signal,
-            tabId: normalizedTabId,
-          }),
-        ])
-        if (!video || !audio) {
-          throw new Error('视频或音轨 manifest 捕捉资源已过期')
-        }
-        taskDurationSeconds = Math.max(video.plan.durationSeconds, audio.plan.durationSeconds)
-        totalFragments = video.plan.fragmentCount + audio.plan.fragmentCount
-        localWorkDirectoryPath = await mkdtemp(path.join(os.tmpdir(), 'omniflow-hls-track-'))
-        return downloadEmbeddedBrowserHlsLocalTracks({
-          audio: {
-            fetch: createEmbeddedBrowserCapturedResourceFetch(normalizedTabId, audio.authority.resourceId),
-            plan: audio.plan,
-          },
-          ffmpegPath: payload.ffmpegPath,
-          onEvent: (event) => {
-            emitEmbeddedBrowserHlsTask({
-              bytesReceived: event.bytesReceived,
-              bytesTotal: event.bytesTotal,
-              completedFragments: event.completedFragments,
-              durationSeconds: taskDurationSeconds,
-              error: event.error,
-              etaSeconds: event.etaSeconds,
-              manifestUrl: videoManifestUrl,
-              message: event.message,
-              mode: 'local-plan',
-              requestId,
-              speedBps: event.speedBps,
-              stage: event.stage,
-              status: event.status,
-              tabId: normalizedTabId,
-              totalFragments: event.totalFragments || totalFragments,
-            })
-          },
-          onProgress: (progress) => {
-            emitEmbeddedBrowserHlsTask({
-              completedFragments: totalFragments,
-              durationSeconds: taskDurationSeconds,
-              ffmpegSpeedText: progress.speedText,
-              manifestUrl: videoManifestUrl,
-              message: '正在通过 ffmpeg 合并本地视频和音轨',
-              mode: 'local-plan',
-              processedSeconds: progress.processedSeconds,
-              requestId,
-              stage: 'ffmpeg',
-              status: 'running',
-              tabId: normalizedTabId,
-              totalFragments,
-            })
-          },
-          outputPath: resolvedOutputPath,
-          signal,
-          video: {
-            fetch: createEmbeddedBrowserCapturedResourceFetch(normalizedTabId, video.authority.resourceId),
-            plan: video.plan,
-          },
-          workDirectoryPath: localWorkDirectoryPath,
         })
+        return {
+          ffmpegPath,
+          outputPath: published.outputPath,
+        }
       })
 
       emitEmbeddedBrowserHlsTask({
