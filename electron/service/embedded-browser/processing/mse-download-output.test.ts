@@ -2,11 +2,13 @@ import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promise
 import os from 'node:os'
 import path from 'node:path'
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import {
   createMseDownloadStagingPath,
   emitMseDownloadCompleted,
+  stageMseDownloadResource,
+  type MseDownloadOutputResource,
 } from './mse-download-output'
 
 describe('MSE download output', () => {
@@ -66,6 +68,55 @@ describe('MSE download output', () => {
       })
       expect(path.dirname(filePath)).toBe(stagingRootPath)
       await expect(access(stagingRootPath)).resolves.toBeUndefined()
+    } finally {
+      await rm(stagingRootPath, { force: true, recursive: true })
+    }
+  })
+
+  it('cleans a staged file when the completion event fails', async () => {
+    const stagingRootPath = await mkdtemp(path.join(os.tmpdir(), 'omniflow-mse-output-'))
+    const filePath = path.join(stagingRootPath, 'failed.mp4')
+    try {
+      await expect(stageMseDownloadResource({
+        emitCompleted: async () => {
+          throw new Error('renderer unavailable')
+        },
+        filePath,
+        resource: {
+          fileName: 'failed.mp4',
+          resourceKey: 'mse-stream:failed',
+        },
+        writeResourceToFile: async (_resource, targetPath) => {
+          await writeFile(targetPath, 'partial')
+        },
+      })).rejects.toThrow('renderer unavailable')
+      await expect(readFile(filePath)).rejects.toMatchObject({ code: 'ENOENT' })
+    } finally {
+      await rm(stagingRootPath, { force: true, recursive: true })
+    }
+  })
+
+  it('does not write or retain output after cancellation', async () => {
+    const stagingRootPath = await mkdtemp(path.join(os.tmpdir(), 'omniflow-mse-output-'))
+    const filePath = path.join(stagingRootPath, 'cancelled.mp4')
+    const controller = new AbortController()
+    controller.abort()
+    const writeResourceToFile = vi.fn(async (_resource: MseDownloadOutputResource, targetPath: string) => {
+      await writeFile(targetPath, 'unexpected')
+    })
+    try {
+      await expect(stageMseDownloadResource({
+        emitCompleted: vi.fn(),
+        filePath,
+        resource: {
+          fileName: 'cancelled.mp4',
+          resourceKey: 'mse-stream:cancelled',
+        },
+        signal: controller.signal,
+        writeResourceToFile,
+      })).rejects.toMatchObject({ name: 'AbortError' })
+      expect(writeResourceToFile).not.toHaveBeenCalled()
+      await expect(readFile(filePath)).rejects.toMatchObject({ code: 'ENOENT' })
     } finally {
       await rm(stagingRootPath, { force: true, recursive: true })
     }

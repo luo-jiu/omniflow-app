@@ -2285,3 +2285,31 @@
 - runtime changes: `cleanupStaleEmbeddedBrowserDownloadFiles` 在浏览器 session 初始化时按 24 小时 TTL 回收旧 download staging 文件，避免 MSE 自动完成和 native 下载遗留无限增长。
 - legacy cleanup: 无新增删除；`embeddedBrowserService.ts` 继续作为 Electron native download adapter，旧 download/import bridge 保留至 output-integration 完整切换。
 - validation: download staging/MSE/native 定向 `3 files / 8 passed`、TypeScript `--noEmit`、全仓 lint、metadata validator、sync test 和非 `dist-electron/**` diff check 通过；完整 build、全仓 test、真实页面和真实大媒体仍未执行。
+
+## 2026-08-29: same target (MSE automatic output task lifecycle)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本切片把 MSE 自动完成、周期保存和工具触发的下载动作登记到统一 `mse-download` task，并收口取消与 staging 失败清理。
+- reviewedThrough / portedThrough: 均保持 `null`；`mse-runtime`、`processing.main-task-registry`、`output.local-save-delivery` 与 `output.staged-output-lease` 仍为 `porting/pending`，mse/output-integration unit 仍开放。
+- change groups: `task-lifecycle`、`abort-propagation`、`partial-output-cleanup` 与 `mse-delivery-boundary`。
+- affected capability IDs: `mse.main-spool-lifecycle`、`processing.main-task-registry`；metadata 保持 `7 units / 32 capabilities / 104 cleanup entries / 229 planned IDs / 226 active refs`，状态为 `15 verified / 11 porting / 1 ported-unverified / 5 pending`。
+- fixtures/tests: 新增 `stageMseDownloadResource` 的完成事件失败清理和取消测试，以及资源合并的 pre-abort 测试；MSE/merge/ffmpeg/task-registry 定向 `5 files / 19 passed`。
+- accepted differences: MSE 自动 output 继续通过原有 download completion/import 事件交付，不改 renderer queue 或 UploadManager 语义；AbortSignal 只作为 main-side task 和 ffmpeg 取消合同，不向页面暴露内部 task id。
+- excluded changes and reasons: 未接入 renderer-unmount recovery、自动导入 delivery terminal、UploadManager handoff、lease publisher、crash quarantine、预算 accounting、renderer UI、`dist-electron/**` 或 upstream 游标；这些需要 application workflow owner。
+- unresolved gaps: extractJavaScript 阶段无法逐字节中断、已成功发出的 completed 文件无法由取消回收、应用重启后的 download event 恢复、真实大媒体和真实页面仍待验证。
+- runtime changes: `runEmbeddedBrowserMseDownloadTask` 为自动/周期/工具下载登记 tab-scoped `mse-download`；`mergeEmbeddedBrowserResourceTracks` 和 transcode service 支持可选 signal；`stageMseDownloadResource` 在写入、取消或 completed 事件失败时清理 owned staging file。
+- legacy cleanup: 无新增删除；MSE page/spool、download/import bridge 和 `embeddedBrowserResourceFileSaveService.ts` 继续保留至 MSE/output integration 完整切换。
+- validation: MSE/merge/ffmpeg/task-registry 定向 `5 files / 19 passed`、TypeScript `--noEmit`、全仓 lint 已通过；metadata validator、sync test 和非 `dist-electron/**` diff check 待本轮提交前重跑，完整 build、全仓 test、真实页面和真实大媒体仍未执行。
+
+## 2026-08-29: same target (captured output workflow remount recovery)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本切片只收口 completed browser output 在 renderer listener 卸载/重挂载期间的队列归属。
+- reviewedThrough / portedThrough: 均保持 `null`；`output.application-workflow-coordinator` 进入 `porting`，`output.library-delivery-handoff`、`output.processing-staged-terminal` 与 MSE 完整交付仍开放。
+- change groups: `renderer-lifecycle`、`application-queue-owner`、`download-failure-cleanup` 与 `documentation-correction`。
+- affected capability IDs: `output.application-workflow-coordinator`；metadata 为 `7 units / 32 capabilities / 104 cleanup entries / 229 planned IDs / 238 active refs`，新增 2 个 active test refs，状态为 `15 verified / 12 porting / 1 ported-unverified / 4 pending`。
+- fixtures/tests: 新增 `captured-output-workflow-coordinator.test.ts#retains completed outputs when the workspace listener unmounts` 与 `#deduplicates completion events and cleans failed outputs without a mounted view`；覆盖单一 native download subscription、完成事件去重、无 listener 时继续保留完成文件、重挂载恢复和失败/取消文件清理。
+- accepted differences: coordinator 只持有 completed file queue 和 native event subscription，不持有 library target、UploadManager task 或 in-flight processing；用户重新挂载后仍需按当前库选择目标目录，现有导入/保存动作和清理 API 不变。
+- excluded changes and reasons: 未接入 UploadManager handoff、processing terminal、staged-output lease recovery、跨入口取消、crash quarantine、renderer UI、`dist-electron/**` 或 upstream 游标；这些需要独立的应用交付状态机和持久化边界。
+- unresolved gaps: 导入开始后的任务状态无法跨卸载恢复，应用重启不会恢复未消费事件，MSE 自动 output 仍依赖完成事件到达 renderer，真实页面和长时间大媒体仍待验证。
+- runtime changes: 新增 `src/features/embedded-browser/workflows/captured-output-workflow-coordinator.ts#CapturedOutputWorkflowCoordinator`；`useEmbeddedBrowserDownloadImport` 改用 `useSyncExternalStore` 读取应用级队列，失败/取消事件由 coordinator 在无挂载页面时清理 owned temp file。
+- legacy cleanup: 无新增删除；现有 download/import bridge、UploadManager 和 modal 保留，待完整 output-integration cutover 后再收口。
+- validation: coordinator 定向 Vitest `1 file / 2 passed`、downloads 目录无测试、TypeScript `--noEmit` 和 scoped diff check 通过；全仓 lint/test、完整 build、真实页面和真实下载导入沿用前序记录的未执行状态。

@@ -153,6 +153,7 @@ import {
 import {
   createMseDownloadStagingPath,
   emitMseDownloadCompleted,
+  stageMseDownloadResource,
 } from './embedded-browser/processing/mse-download-output'
 import {
   deriveEmbeddedBrowserMergedFileName,
@@ -265,6 +266,7 @@ function createEmbeddedBrowserAbortError() {
 async function runRegisteredEmbeddedBrowserTransfer<Result>(
   tabId: string,
   operation: (signal: AbortSignal, taskId: string) => Promise<Result>,
+  kind = 'streaming-transfer',
 ) {
   const controller = new AbortController()
   let settleTask: (() => void) | undefined
@@ -273,7 +275,7 @@ async function runRegisteredEmbeddedBrowserTransfer<Result>(
   })
   const registration = defaultProcessingTaskRegistry.register({
     cancel: () => controller.abort(),
-    kind: 'streaming-transfer',
+    kind,
     settled,
     tabId,
   })
@@ -842,7 +844,7 @@ export function createEmbeddedBrowserMainController(
         if (controlPayload.event === 'mse-complete') {
           void enqueueEmbeddedBrowserMseControl(tabId, async () => {
             await withEmbeddedBrowserView(tabId, async (view) => {
-              const downloaded = await downloadEmbeddedBrowserMseResourcesToDownloads(tabId, view)
+              const downloaded = await runEmbeddedBrowserMseDownloadTask(tabId, view)
               if (!downloaded) {
                 runtimeLogger.warn('embedded browser MSE automatic download produced no output', {
                   tabId,
@@ -862,7 +864,7 @@ export function createEmbeddedBrowserMainController(
         if (controlPayload.event === 'mse-save') {
           void enqueueEmbeddedBrowserMseControl(tabId, async () => {
             await withEmbeddedBrowserView(tabId, async (view) => {
-              const downloaded = await downloadEmbeddedBrowserMseResourcesToDownloads(tabId, view, {
+              const downloaded = await runEmbeddedBrowserMseDownloadTask(tabId, view, {
                 clearAfterDownload: true,
               })
               if (!downloaded) {
@@ -1318,8 +1320,14 @@ export function createEmbeddedBrowserMainController(
   async function downloadEmbeddedBrowserMseResourcesToDownloads(
     tabId: string,
     view: WebContentsView,
-    options: { clearAfterDownload?: boolean } = {},
+    options: { clearAfterDownload?: boolean; signal?: AbortSignal } = {},
   ) {
+    const throwIfAborted = () => {
+      if (options.signal?.aborted) {
+        throw createEmbeddedBrowserAbortError()
+      }
+    }
+    throwIfAborted()
     const snapshot = captureRuntime?.getSnapshot(tabId)
     if (!snapshot || snapshot.status !== 'active') {
       return false
@@ -1337,7 +1345,9 @@ export function createEmbeddedBrowserMainController(
     const extractedResources: EmbeddedBrowserExtractedResourceFile[] = []
     for (const resourceKey of resourceKeys) {
       try {
+        throwIfAborted()
         const resource = await extractEmbeddedBrowserMseResourceFromFrames(tabId, view, resourceKey)
+        throwIfAborted()
         if (!resource) {
           continue
         }
@@ -1362,23 +1372,30 @@ export function createEmbeddedBrowserMainController(
       outputFileName = resource.fileName,
       outputPath?: string,
     ) => {
+      throwIfAborted()
       const targetPath = outputPath || await createMseDownloadStagingPath({
         fileName: outputFileName,
         stagingRootPath,
       })
-      if (!outputPath) {
-        await saveEmbeddedBrowserExtractedResourceFile(resource, targetPath)
-      }
-      await emitMseDownloadCompleted({
-        emitDownload: emitEmbeddedBrowserDownload,
-        fileName: outputFileName,
+      await stageMseDownloadResource({
+        emitCompleted: () => emitMseDownloadCompleted({
+          emitDownload: emitEmbeddedBrowserDownload,
+          fileName: outputFileName,
+          filePath: targetPath,
+          mimeType: resource.mimeType,
+          pageUrl,
+          resourceKey: resource.resourceKey || 'mse-stream:captured',
+          streamType: resource.streamType,
+          tabId,
+          url: resource.url,
+        }),
         filePath: targetPath,
-        mimeType: resource.mimeType,
-        pageUrl,
-        resourceKey: resource.resourceKey || 'mse-stream:captured',
-        streamType: resource.streamType,
-        tabId,
-        url: resource.url,
+        resource,
+        signal: options.signal,
+        writeResource: !outputPath,
+        writeResourceToFile: async (resourceToWrite, stagedPath) => {
+          await saveEmbeddedBrowserExtractedResourceFile(resourceToWrite, stagedPath)
+        },
       })
     }
 
@@ -1395,9 +1412,11 @@ export function createEmbeddedBrowserMainController(
         stagingRootPath,
       })
       try {
+        throwIfAborted()
         await mergeEmbeddedBrowserResourceTracks({
           audio: audioResource,
           outputPath: mergedOutputPath,
+          signal: options.signal,
           video: videoResource,
         })
         await stageResource({
@@ -1420,6 +1439,7 @@ export function createEmbeddedBrowserMainController(
     if (!downloaded) {
       for (const resource of extractedResources) {
         try {
+          throwIfAborted()
           await stageResource(resource, deriveEmbeddedBrowserExtractedResourceOutputFileName(resource.fileName))
           downloaded = true
         } catch (error) {
@@ -1432,11 +1452,27 @@ export function createEmbeddedBrowserMainController(
       }
     }
 
+    throwIfAborted()
     if (downloaded && (options.clearAfterDownload || toolkitState?.clearCacheOnComplete)) {
       await handleCatchToolkitAction(tabId, 'clearCatchMediaCache', 'clear after MSE download')
       await clearEmbeddedBrowserMseSpoolFiles({ tabId })
     }
     return downloaded
+  }
+
+  async function runEmbeddedBrowserMseDownloadTask(
+    tabId: string,
+    view: WebContentsView,
+    options: { clearAfterDownload?: boolean } = {},
+  ) {
+    return runRegisteredEmbeddedBrowserTransfer(
+      tabId,
+      (signal) => downloadEmbeddedBrowserMseResourcesToDownloads(tabId, view, {
+        ...options,
+        signal,
+      }),
+      'mse-download',
+    )
   }
 
   async function extractEmbeddedBrowserResourceFromFrames(
@@ -4181,7 +4217,7 @@ export function createEmbeddedBrowserMainController(
     return withEmbeddedBrowserView(tabId, async (view) => {
       try {
         if (action === 'downloadCatchMedia') {
-          const downloadedFromMain = await downloadEmbeddedBrowserMseResourcesToDownloads(tabId, view)
+          const downloadedFromMain = await runEmbeddedBrowserMseDownloadTask(tabId, view)
           if (downloadedFromMain) {
             return true
           }

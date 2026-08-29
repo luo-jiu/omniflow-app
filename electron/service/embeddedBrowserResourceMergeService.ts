@@ -21,6 +21,7 @@ export type EmbeddedBrowserResourceMergeRequest = {
   audio: EmbeddedBrowserExtractedResourceFile
   ffmpegPath?: string
   outputPath: string
+  signal?: AbortSignal
   video: EmbeddedBrowserExtractedResourceFile
 }
 
@@ -39,6 +40,7 @@ export type EmbeddedBrowserResourceTranscodeRequest = {
   outputFormat: EmbeddedBrowserResourceTranscodeFormat
   outputPath: string
   resource: EmbeddedBrowserExtractedResourceFile
+  signal?: AbortSignal
 }
 
 const COMMON_FFMPEG_PATHS = [
@@ -67,6 +69,13 @@ export function normalizeEmbeddedBrowserResourceTranscodeFormat(input: string) {
 function sanitizeFileName(input: string) {
   const normalized = String(input || '').trim().replace(/[\\/:*?"<>|]+/g, '_')
   return normalized || 'media'
+}
+
+function throwIfEmbeddedBrowserResourceOperationAborted(signal?: AbortSignal) {
+  if (!signal?.aborted) return
+  const error = new Error('embedded browser resource operation aborted')
+  error.name = 'AbortError'
+  throw error
 }
 
 async function canExecuteFile(candidatePath: string) {
@@ -264,6 +273,7 @@ async function prepareResourceMergeInput(
 export async function mergeEmbeddedBrowserResourceTracks(
   request: EmbeddedBrowserResourceMergeRequest,
 ): Promise<EmbeddedBrowserResourceMergeResult> {
+  throwIfEmbeddedBrowserResourceOperationAborted(request.signal)
   if (!String(request.outputPath || '').trim()) {
     throw new Error('输出路径不能为空')
   }
@@ -278,6 +288,7 @@ export async function mergeEmbeddedBrowserResourceTracks(
       prepareResourceMergeInput(tempDir, request.audio),
       prepareResourceMergeInput(tempDir, request.video),
     ])
+    throwIfEmbeddedBrowserResourceOperationAborted(request.signal)
     const commandArgs = buildEmbeddedBrowserResourceMergeArgs({
       audio,
       outputPath: request.outputPath,
@@ -287,6 +298,7 @@ export async function mergeEmbeddedBrowserResourceTracks(
       commandArgs,
       ffmpegPath,
       outputPath: request.outputPath,
+      signal: request.signal,
     })
     return result
   } finally {
@@ -297,6 +309,7 @@ export async function mergeEmbeddedBrowserResourceTracks(
 export async function transcodeEmbeddedBrowserResource(
   request: EmbeddedBrowserResourceTranscodeRequest,
 ): Promise<EmbeddedBrowserResourceMergeResult> {
+  throwIfEmbeddedBrowserResourceOperationAborted(request.signal)
   if (!String(request.outputPath || '').trim()) {
     throw new Error('输出路径不能为空')
   }
@@ -317,6 +330,7 @@ export async function transcodeEmbeddedBrowserResource(
       commandArgs,
       ffmpegPath,
       outputPath: request.outputPath,
+      signal: request.signal,
     })
     return result
   } finally {

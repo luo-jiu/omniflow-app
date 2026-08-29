@@ -6,9 +6,9 @@ import { UPLOAD_TASK_STATUS } from '@/modules/upload-center/model/upload-task.ty
 import {
   cleanupEmbeddedBrowserDownloadedFile,
   saveEmbeddedBrowserDownloadToDesktop,
-  subscribeEmbeddedBrowserDownloads,
 } from '../services/embedded-browser-download.api';
 import type { EmbeddedBrowserDownloadEvent, LibraryFolderEntry } from '../types';
+import { capturedOutputWorkflowCoordinator } from '../../workflows/captured-output-workflow-coordinator';
 
 type FileWithPath = File & { path: string };
 
@@ -32,41 +32,28 @@ export function useEmbeddedBrowserDownloadImport(
   libraryId: number,
   options?: UseEmbeddedBrowserDownloadImportOptions,
 ) {
-  const [queue, setQueue] = React.useState<EmbeddedBrowserDownloadEvent[]>([]);
+  const queue = React.useSyncExternalStore(
+    capturedOutputWorkflowCoordinator.subscribe,
+    capturedOutputWorkflowCoordinator.getSnapshot,
+    capturedOutputWorkflowCoordinator.getSnapshot,
+  );
   const [importingDownloadId, setImportingDownloadId] = React.useState<string | null>(null);
   const [savingDownloadId, setSavingDownloadId] = React.useState<string | null>(null);
   const activeDownload = queue[0] ?? null;
 
   React.useEffect(() => {
-    return subscribeEmbeddedBrowserDownloads((payload) => {
-      if (payload.state === 'started') {
-        return;
+    return capturedOutputWorkflowCoordinator.subscribeEvents((payload) => {
+      if (payload.state === 'cancelled' || payload.state === 'failed') {
+        Toast.error(payload.error || `下载失败：${payload.fileName}`);
       }
-
-      if (payload.state === 'progress') {
-        return;
-      }
-
-      if (payload.state === 'completed') {
-        setQueue((prev) => {
-          if (prev.some((item) => item.downloadId === payload.downloadId)) {
-            return prev;
-          }
-          return [...prev, payload];
-        });
-        return;
-      }
-
-      if (payload.tempPath) {
-        void cleanupEmbeddedBrowserDownloadedFile(payload.tempPath).catch(() => undefined);
-      }
-      Toast.error(payload.error || `下载失败：${payload.fileName}`);
     });
   }, []);
 
   const closeActiveDownload = React.useCallback(async (options?: { discardFile?: boolean }) => {
     const current = activeDownload;
-    setQueue((prev) => prev.slice(1));
+    if (current) {
+      capturedOutputWorkflowCoordinator.dismiss(current.downloadId);
+    }
     if (!current?.tempPath || !options?.discardFile) {
       return;
     }
@@ -81,7 +68,7 @@ export function useEmbeddedBrowserDownloadImport(
     }
 
     setImportingDownloadId(current.downloadId);
-    setQueue((prev) => prev.slice(1));
+    capturedOutputWorkflowCoordinator.dismiss(current.downloadId);
 
     const file = toUploadFile(current);
     const batch = uploadManager.createBatch([{
@@ -131,7 +118,7 @@ export function useEmbeddedBrowserDownloadImport(
         return;
       }
       await cleanupEmbeddedBrowserDownloadedFile(current.tempPath).catch(() => undefined);
-      setQueue((prev) => prev.filter((item) => item.downloadId !== current.downloadId));
+      capturedOutputWorkflowCoordinator.dismiss(current.downloadId);
       Toast.success('已保存到本地');
     } catch (error: any) {
       Toast.error(error?.message || `保存失败：${current.fileName}`);

@@ -798,7 +798,7 @@
       "acceptedDifferences": [
         "OmniFlow emits an authorized trimBeforeHeader marker so the main-owned spool can discard earlier flushed bytes before appending a later initialization header without reading the entire large file back into page memory; Cat Catch performs this decision over its in-memory catchMedia list."
       ],
-      "notes": "The production page adapter now installs the fixed target MSE runtime and keeps DOM actions, filename/Blob handling, and the page-origin toolkit projection at the platform boundary. Pure runtime tests cover append/endOfStream, the optional capture gate, per-track flush/reset, retention limits, completion clearing with and without streams, first-range auto-buffer seeking, cross-flush header replacement, drain header replacement, and drain semantics; production probe characterization covers installation, read/open/export/drain and resource events. Auto-seek intentionally uses the first buffered range, matching fixed Cat Catch behavior for sparse media ranges. When enabled, the page emits a serialized periodic-save control after a flush crosses each configured 1 GiB boundary; main handles it through the same merged/per-track output path and clears the page/spool cache after success. Browser initialization now removes download staging files older than 24 hours, while renderer/import delivery remains unchanged. Native playback exceptions continue to propagate once; OmniFlow does not copy Cat Catch's catch-block retry that can invoke a failed native method a second time. Fixed-upstream parity, production-equivalent large-media/auto-download behavior and real-site smoke remain open, so this capability stays porting."
+      "notes": "The production page adapter now installs the fixed target MSE runtime and keeps DOM actions, filename/Blob handling, and the page-origin toolkit projection at the platform boundary. Pure runtime tests cover append/endOfStream, the optional capture gate, per-track flush/reset, retention limits, completion clearing with and without streams, first-range auto-buffer seeking, cross-flush header replacement, drain header replacement, and drain semantics; production probe characterization covers installation, read/open/export/drain and resource events. Auto-seek intentionally uses the first buffered range, matching fixed Cat Catch behavior for sparse media ranges. When enabled, the page emits a serialized periodic-save control after a flush crosses each configured 1 GiB boundary; main now runs automatic, periodic, and toolkit-triggered MSE output as a tab-scoped `mse-download` task with a shared AbortSignal and clears the page/spool cache after successful periodic output. Browser initialization now removes download staging files older than 24 hours, while renderer/import delivery remains unchanged. Native playback exceptions continue to propagate once; OmniFlow does not copy Cat Catch's catch-block retry that can invoke a failed native method a second time. Fixed-upstream parity, production-equivalent large-media/auto-download behavior, complete event terminal semantics and real-site smoke remain open, so this capability stays porting."
     },
     {
       "id": "mse.main-spool-lifecycle",
@@ -843,7 +843,7 @@
         "electron/service/embeddedBrowserResourceMerge.test.ts#mse.merge-success-requires-output"
       ],
       "acceptedDifferences": [],
-      "notes": "MseSpoolStore is the main-owned spool authority. It serializes per-track writes, reserves bytes before asynchronous append, enforces per-chunk/per-track/global budgets, reaps TTL entries, sweeps stale temp directories at session setup, and clears on reset, navigation, render-process loss, tab close, and controller dispose. Relay authorization binds flush/reset/periodic-save payloads to the current tab's opaque MSE resource key, and the controller serializes those controls per tab so a periodic save observes completed flush writes. Automatic output stages merged or per-track files through the existing browser download completion/import contract and clears page/spool cache only after periodic output succeeds. Merge output now requires a non-empty file after zero-exit ffmpeg and removes partial output on merge failure. A conditional real-binary fixture verifies independent fragmented MP4 video/audio tracks merge into a probeable H.264/AAC MP4; production large-media, full extraction/import and real-site smoke remain open."
+      "notes": "MseSpoolStore is the main-owned spool authority. It serializes per-track writes, reserves bytes before asynchronous append, enforces per-chunk/per-track/global budgets, reaps TTL entries, sweeps stale temp directories at session setup, and clears on reset, navigation, render-process loss, tab close, and controller dispose. Relay authorization binds flush/reset/periodic-save payloads to the current tab's opaque MSE resource key, and the controller serializes those controls per tab so a periodic save observes completed flush writes. Automatic, periodic, and toolkit-triggered output now register a tab-scoped `mse-download` task; merge receives its AbortSignal, while `stageMseDownloadResource` removes an owned staging file if writing, cancellation, or completion-event delivery fails. Automatic output still stages merged or per-track files through the existing browser download completion/import contract and clears page/spool cache only after periodic output succeeds. Merge output now requires a non-empty file after zero-exit ffmpeg and removes partial output on merge failure. A conditional real-binary fixture verifies independent fragmented MP4 video/audio tracks merge into a probeable H.264/AAC MP4; production large-media, full extraction/import, event terminal recovery and real-site smoke remain open."
     },
     {
       "id": "hls.parser-planner",
@@ -1788,7 +1788,7 @@
         "electron/service/embedded-browser/processing/task-registry.test.ts#rejects new tasks after dispose and remains idempotent"
       ],
       "acceptedDifferences": [],
-      "notes": "`ProcessingTaskRegistry` now owns generic main-side task registration, filtered cancellation, settled-task waiting and idempotent app-exit disposal. The shared ffmpeg executor, legacy external-command adapter, native browser download sessions, and streaming direct/captured-resource transfers register active work here, while protocol-specific HLS/DASH/MSE session owners still retain their domain snapshots and workdir cleanup. Renderer-unmount recovery and broader transfer-task registration remain open."
+      "notes": "`ProcessingTaskRegistry` now owns generic main-side task registration, filtered cancellation, settled-task waiting and idempotent app-exit disposal. The shared ffmpeg executor, legacy external-command adapter, native browser download sessions, streaming direct/captured-resource transfers, and automatic/periodic/toolkit MSE output register active work here, while protocol-specific HLS/DASH/MSE session owners still retain their domain snapshots and workdir cleanup. Renderer-unmount recovery and broader transfer-task registration remain open."
     },
     {
       "id": "output.processing-staged-terminal",
@@ -1862,7 +1862,7 @@
         "electron/service/embedded-browser/processing/staged-output-publisher.test.ts#releases the lease and keeps the previous target when processing fails"
       ],
       "acceptedDifferences": [],
-      "notes": "`StagedOutputLeaseStore` now provides a main-only opaque lease base with owner-scoped paths, one delivery claim, TTL touch/reap, and release cleanup; snapshots intentionally omit the real path. `staged-output-publisher.ts#publishStagedOutput` now owns the ordinary direct-file, captured-resource, HLS/MPD direct-manifest, HLS local-plan, HLS independent-track merge, HLS live stop-export, DASH static plan, DASH live stop-export, captured-resource transcode, and manual MSE resource merge handoffs: processing writes only to the lease path, then a single claim publishes to the user target while preserving the existing final `outputPath` response. DASH static plan cancellation and live stop/export cancellation are owned by `EmbeddedBrowserDashLiveSessionOwner`; active DASH live recorder workdirs and continuous-output recovery remain separate. MSE automatic download/import and local-save/UploadManager delivery still use their domain owners; cross-entry cancellation, crash quarantine, budget accounting, renderer-safe lease IPC, and the application delivery terminal remain open."
+      "notes": "`StagedOutputLeaseStore` now provides a main-only opaque lease base with owner-scoped paths, one delivery claim, TTL touch/reap, and release cleanup; snapshots intentionally omit the real path. `staged-output-publisher.ts#publishStagedOutput` now owns the ordinary direct-file, captured-resource, HLS/MPD direct-manifest, HLS local-plan, HLS independent-track merge, HLS live stop-export, DASH static plan, DASH live stop-export, captured-resource transcode, and manual MSE resource merge handoffs: processing writes only to the lease path, then a single claim publishes to the user target while preserving the existing final `outputPath` response. DASH static plan cancellation and live stop/export cancellation are owned by `EmbeddedBrowserDashLiveSessionOwner`; active DASH live recorder workdirs and continuous-output recovery remain separate. MSE automatic output now has a tab-scoped `mse-download` task, shared abort signal, and staging failure cleanup through `stageMseDownloadResource`; its renderer/import terminal and local-save/UploadManager delivery still use their domain owners. Cross-entry cancellation, crash quarantine, budget accounting, renderer-safe lease IPC, and the application delivery terminal remain open."
     },
     {
       "id": "output.application-workflow-coordinator",
@@ -1886,16 +1886,19 @@
         "src/features/embedded-browser/workflows/captured-output-workflow-coordinator.ts#CapturedOutputWorkflowCoordinator"
       ],
       "relationToUpstream": "not-applicable",
-      "syncState": "pending",
+      "syncState": "porting",
       "syncedThrough": null,
       "plannedTestIds": [
         "output.workflow-remount",
         "output.workflow-derived-terminal",
         "output.single-delivery-no-partial"
       ],
-      "testRefs": [],
+      "testRefs": [
+        "src/features/embedded-browser/workflows/captured-output-workflow-coordinator.test.ts#retains completed outputs when the workspace listener unmounts",
+        "src/features/embedded-browser/workflows/captured-output-workflow-coordinator.test.ts#deduplicates completion events and cleans failed outputs without a mounted view"
+      ],
       "acceptedDifferences": [],
-      "notes": "HLS now recovers a bounded main-owned task projection after renderer listener remount, but processing and delivery are still not a single application-scoped workflow. In particular, the frozen library target and UploadManager handoff remain feature-scoped, so live recording must discard on tool unmount until this coordinator and staged-output lease exist."
+      "notes": "`CapturedOutputWorkflowCoordinator` now owns the application-scoped completed browser-download queue and one native download subscription. A library-detail listener can unmount and remount without losing completed MSE/native outputs, duplicate completion events are ignored, and failed/cancelled files are cleaned even when no workspace is mounted. The coordinator intentionally stops at the completed-file handoff: frozen library targets, UploadManager task association, in-flight recovery, staged lease recovery and crash quarantine remain open."
     },
     {
       "id": "output.library-delivery-handoff",

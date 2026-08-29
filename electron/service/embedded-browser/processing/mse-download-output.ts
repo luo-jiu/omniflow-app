@@ -1,4 +1,4 @@
-import { mkdir, stat } from 'node:fs/promises'
+import { mkdir, rm, stat } from 'node:fs/promises'
 import path from 'node:path'
 
 import type { EmbeddedBrowserDownloadPayload } from '../../embeddedBrowserService'
@@ -8,7 +8,7 @@ export type MseDownloadOutputResource = {
   fileName: string
   filePath?: string
   mimeType?: string
-  resourceKey: string
+  resourceKey?: string
   streamType?: 'audio' | 'video'
   url?: string
 }
@@ -30,6 +30,15 @@ type EmitMseDownloadCompletedOptions = {
   url?: string
 }
 
+export type StageMseDownloadResourceOptions = {
+  emitCompleted: () => Promise<unknown>
+  filePath: string
+  resource: MseDownloadOutputResource
+  signal?: AbortSignal
+  writeResource?: boolean
+  writeResourceToFile: (resource: MseDownloadOutputResource, filePath: string) => Promise<void>
+}
+
 function sanitizeFileName(value: string) {
   const normalized = String(value || '')
     .replace(/[\\/:*?"<>|]+/g, '_')
@@ -39,6 +48,41 @@ function sanitizeFileName(value: string) {
 
 function buildStagedFileName(fileName: string) {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${sanitizeFileName(fileName)}`
+}
+
+function createMseDownloadAbortError() {
+  const error = new Error('MSE download output aborted')
+  error.name = 'AbortError'
+  return error
+}
+
+function throwIfMseDownloadAborted(signal?: AbortSignal) {
+  if (signal?.aborted) {
+    throw createMseDownloadAbortError()
+  }
+}
+
+/** Writes one owned download output and removes it if delivery cannot reach a terminal event. */
+export async function stageMseDownloadResource(
+  options: StageMseDownloadResourceOptions,
+) {
+  const rawFilePath = String(options.filePath || '').trim()
+  const filePath = path.resolve(rawFilePath)
+  if (!rawFilePath || filePath === path.parse(filePath).root) {
+    throw new Error('缺少 MSE 下载文件')
+  }
+  try {
+    throwIfMseDownloadAborted(options.signal)
+    if (options.writeResource !== false) {
+      await options.writeResourceToFile(options.resource, filePath)
+    }
+    throwIfMseDownloadAborted(options.signal)
+    await options.emitCompleted()
+    return filePath
+  } catch (error) {
+    await rm(filePath, { force: true }).catch(() => undefined)
+    throw error
+  }
 }
 
 export async function createMseDownloadStagingPath(
