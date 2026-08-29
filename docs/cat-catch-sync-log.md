@@ -2145,3 +2145,17 @@
 - runtime changes: 新增 `processing/staged-output-lease.ts#StagedOutputLeaseStore`，提供 owner-scoped path、`claim`/`touch`/`release`/`reapExpired`；真实路径只通过 main-side `resolvePath` 获取。
 - legacy cleanup: 无新增删除；当前 raw outputPath/tempPath 流程继续保留，直到 production lease adapter 与 delivery 终态完成。
 - validation: staged lease 定向 `1 file / 3 passed`、TypeScript `--noEmit`、scoped ESLint 已通过；metadata validator、同步 runner 和非 `dist-electron/**` diff check 将在提交前重跑，完整 build/全仓 lint/test 与真实页面仍未执行。
+
+## 2026-08-29: same target (staged output publisher partial wiring)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本切片把普通直链与已捕获资源下载接入 staged output lease。
+- reviewedThrough / portedThrough: 均保持 `null`；`output.staged-output-lease` 进入 `porting`，`output.processing-staged-terminal` 仍为 `porting`，output-integration unit 仍开放。
+- change groups: `main-authority-wiring`、`output-ownership`、`partial-output-cleanup` 与 `fixture-contract`。
+- affected capability IDs: `output.staged-output-lease`；metadata 当前为 `7 units / 32 capabilities / 102 cleanup entries / 229 planned IDs / 226 active refs`，状态为 `15 verified / 11 porting / 1 ported-unverified / 5 pending`。
+- fixtures/tests: 新增 `electron/service/embedded-browser/processing/staged-output-publisher.test.ts#publishes a claimed lease without exposing the staging path` 与 `#releases the lease and keeps the previous target when processing fails`；lease、publisher、streaming transfer、main IPC 集合定向 `4 files / 10 passed`。
+- accepted differences: 为保持既有 renderer/feature 合同，成功响应仍返回最终用户 `outputPath`；lease path 和 claim token 只在 main 内部使用。跨设备目标通过 sibling publish 临时目录复制后再 rename，处理失败不覆盖既有目标。
+- excluded changes and reasons: 未接入 HLS/DASH/MSE/ffmpeg output、native download、local-save、UploadManager、renderer-safe lease IPC、crash quarantine、预算 accounting、Cat Catch downloader fallback、renderer UI、`dist-electron/**` 或 upstream 游标。
+- unresolved gaps: 处理终态与资料库交付终态仍未合并；其余 output 入口仍可能持有 raw outputPath，应用重启后的 lease 目录残留尚无 quarantine/持久化索引，跨入口取消和真实大文件压力仍待补齐。
+- runtime changes: 新增 `processing/staged-output-publisher.ts#publishStagedOutput`；普通直链/已捕获下载先在 `StagedOutputLeaseStore` owner-scoped path 上流式写入，完成后单次 claim 并发布到目标路径，`ProcessingTaskRegistry` task id 作为 lease owner。
+- legacy cleanup: 无新增删除；旧 response/outputPath 合同保留，直链/捕获下载仍在 output unit 完成前保留兼容路径。
+- validation: publisher、lease、streaming transfer、main IPC 定向 `4 files / 10 passed`，TypeScript `--noEmit` 与 scoped ESLint 通过；本阶段提交前将重跑 metadata validator、sync runner、相关 Cat Catch 链和非 `dist-electron/**` diff check；完整 build、全仓 lint/test、真实页面与真实下载仍未执行。

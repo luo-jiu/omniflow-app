@@ -1004,6 +1004,16 @@
       "cleanupAction": "remove-after-cutover"
     },
     {
+      "id": "node.output.staged-output-publisher",
+      "path": "electron/service/embedded-browser/processing/staged-output-publisher.ts",
+      "symbol": "publishStagedOutput",
+      "capabilityId": "output.staged-output-lease",
+      "cutoverUnitId": "output-integration",
+      "classification": "omniflow-integration",
+      "role": "adapter",
+      "cleanupAction": "retain-or-adapt"
+    },
+    {
       "id": "node.delivery.controller-extracted-save",
       "path": "electron/service/embeddedBrowserMainController.ts",
       "symbol": "saveEmbeddedBrowserExtractedResourceFile",

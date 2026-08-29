@@ -200,6 +200,8 @@ import {
 import { MseSpoolStore } from './embedded-browser/processing/mse-spool'
 import { defaultProcessingTaskRegistry } from './embedded-browser/processing/task-registry'
 import { StreamingTransfer } from './embedded-browser/processing/streaming-transfer'
+import { StagedOutputLeaseStore } from './embedded-browser/processing/staged-output-lease'
+import { publishStagedOutput } from './embedded-browser/processing/staged-output-publisher'
 import {
   downloadEmbeddedBrowserHlsLocalTracks,
 } from './embedded-browser/processing/hls-local-track-merge'
@@ -254,7 +256,7 @@ function toDashTaskPlan(
 
 async function runRegisteredEmbeddedBrowserTransfer<Result>(
   tabId: string,
-  operation: (signal: AbortSignal) => Promise<Result>,
+  operation: (signal: AbortSignal, taskId: string) => Promise<Result>,
 ) {
   const controller = new AbortController()
   let settleTask: (() => void) | undefined
@@ -268,7 +270,7 @@ async function runRegisteredEmbeddedBrowserTransfer<Result>(
     tabId,
   })
   try {
-    return await operation(controller.signal)
+    return await operation(controller.signal, registration.id)
   } finally {
     settleTask?.()
     registration.release()
@@ -342,12 +344,27 @@ export function createEmbeddedBrowserMainController(
   )
   const embeddedBrowserMseSpoolStore = new MseSpoolStore()
   const embeddedBrowserStreamingTransfer = new StreamingTransfer()
+  let embeddedBrowserStagedOutputLeaseStore: StagedOutputLeaseStore | null = null
   const embeddedBrowserMseControlQueues = new Map<string, Promise<void>>()
   let activeEmbeddedBrowserTabId: string | null = null
   let selectedEmbeddedBrowserTabId: string | null = null
   let embeddedBrowserPendingBounds: EmbeddedBrowserBounds | null = null
   let embeddedBrowserSessionConfigured = false
   let captureRuntime: EmbeddedBrowserCaptureRuntime | null = null
+
+  function getEmbeddedBrowserStagedOutputLeaseStore() {
+    if (!embeddedBrowserStagedOutputLeaseStore) {
+      embeddedBrowserStagedOutputLeaseStore = new StagedOutputLeaseStore({
+        rootPath: path.join(app.getPath('userData'), 'embedded-browser-output-leases'),
+      })
+      void embeddedBrowserStagedOutputLeaseStore.reapExpired().catch((error) => {
+        runtimeLogger.warn('embedded browser staged output lease reap failed', {
+          error: error instanceof Error ? error.message : String(error),
+        })
+      })
+    }
+    return embeddedBrowserStagedOutputLeaseStore
+  }
 
   function enqueueEmbeddedBrowserMseControl(
     tabId: string,
@@ -1545,12 +1562,21 @@ export function createEmbeddedBrowserMainController(
           ok: false,
         }
       }
-      return await runRegisteredEmbeddedBrowserTransfer(_tabId, async (signal) => {
-        const response = await fetch(resourceUrl, {
-          headers: payload.headers,
-          signal,
+      return await runRegisteredEmbeddedBrowserTransfer(_tabId, async (signal, taskId) => {
+        const result = await publishStagedOutput({
+          fileName: path.basename(outputPath),
+          ownerTaskId: taskId,
+          purpose: 'direct-file-download',
+          store: getEmbeddedBrowserStagedOutputLeaseStore(),
+          targetPath: outputPath,
+          write: async (stagedPath) => {
+            const response = await fetch(resourceUrl, {
+              headers: payload.headers,
+              signal,
+            })
+            await embeddedBrowserStreamingTransfer.writeResponse(response, stagedPath, { signal })
+          },
         })
-        const result = await embeddedBrowserStreamingTransfer.writeResponse(response, outputPath, { signal })
         return {
           ok: true,
           outputPath: result.outputPath,
@@ -1575,7 +1601,7 @@ export function createEmbeddedBrowserMainController(
       return { error: '缺少可下载的捕捉资源', ok: false }
     }
     try {
-      return await runRegisteredEmbeddedBrowserTransfer(normalizedTabId, async (signal) => {
+      return await runRegisteredEmbeddedBrowserTransfer(normalizedTabId, async (signal, taskId) => {
         const accessResult = await runtime.access.fetch({
           purpose: 'resource-download',
           resourceId,
@@ -1594,11 +1620,21 @@ export function createEmbeddedBrowserMainController(
           await accessResult.response.body?.cancel().catch(() => undefined)
           return { cancelled: true, ok: false }
         }
-        const result = await embeddedBrowserStreamingTransfer.writeResponse(
-          accessResult.response,
-          outputPath,
-          { signal },
-        )
+        const result = await publishStagedOutput({
+          fileName: path.basename(outputPath),
+          mimeType: accessResult.resource.mimeType,
+          ownerTaskId: taskId,
+          purpose: 'captured-resource-download',
+          store: getEmbeddedBrowserStagedOutputLeaseStore(),
+          targetPath: outputPath,
+          write: async (stagedPath) => {
+            await embeddedBrowserStreamingTransfer.writeResponse(
+              accessResult.response,
+              stagedPath,
+              { signal },
+            )
+          },
+        })
         return { ok: true, outputPath: result.outputPath }
       })
     } catch (error) {
