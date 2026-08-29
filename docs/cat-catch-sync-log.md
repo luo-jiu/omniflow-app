@@ -2243,3 +2243,17 @@
 - runtime changes: `transcodeEmbeddedBrowserCapturedResourceForRenderer` 现在在 lease path 上运行 `transcodeEmbeddedBrowserResource`，ffmpeg 成功后单次 claim 并发布；失败或取消时释放 lease，不覆盖已有目标。
 - legacy cleanup: 无新增删除；保留现有 transcode service、ffmpeg 参数合同和最终 `outputPath`，未引入第二套转码算法或长期 fallback。
 - validation: 转码/merge/ffmpeg/lease 定向集合、TypeScript `--noEmit`、scoped ESLint、metadata validator 和非 `dist-electron/**` diff check 通过；完整 build、全仓 lint/test、真实页面与真实下载沿用前序记录。
+
+## 2026-08-29: same target (manual MSE merge staged output wiring)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本切片把手动 MSE 音视频合并的最终输出接入 staged output lease。
+- reviewedThrough / portedThrough: 均保持 `null`；`mse-runtime` 与 `output.staged-output-lease` 继续 `porting`，mse/output-integration unit 仍开放。
+- change groups: `main-authority-wiring`、`output-ownership`、`mse-delivery-boundary` 与 `partial-output-cleanup`。
+- affected capability IDs: `output.staged-output-lease`；metadata 更新为 `7 units / 32 capabilities / 104 cleanup entries / 229 planned IDs / 226 active refs`，状态为 `15 verified / 11 porting / 1 ported-unverified / 5 pending`。
+- fixtures/tests: 复用现有 MSE/merge/ffmpeg/lease 合同测试；本切片新增手动 merge production wiring，未虚增 capability test ref。
+- accepted differences: 手动 merge 的输出格式、保存对话框、renderer 最终 `outputPath` 和资源读取方式保持不变；自动完成/周期保存仍走 download staging root + download/import 事件，不改其现有交付协议。
+- excluded changes and reasons: 未接入 MSE 自动下载/import、page/spool 取消、UploadManager handoff、crash quarantine、renderer UI、`dist-electron/**` 或 upstream 游标；自动交付链需要独立终态和预算 owner。
+- unresolved gaps: MSE 自动保存与手动 merge 的统一任务 registry、跨入口取消、crash quarantine/预算、application delivery terminal、生产大媒体和真实页面导入仍待补齐。
+- runtime changes: `mergeEmbeddedBrowserCapturedMseResources` 现在在 lease path 上执行 `mergeEmbeddedBrowserResourceTracks`，成功后单次 claim 并发布；ffmpeg 失败或取消时释放 lease，不覆盖已有目标。
+- legacy cleanup: 新增 `node.output.mse-merge-dispatch` retain-or-adapt 条目；保留 MSE page/spool 和最终 `outputPath` 合同，未引入第二套合并算法或长期 fallback。
+- validation: MSE/merge/ffmpeg/lease 定向集合、TypeScript `--noEmit`、scoped ESLint、metadata validator 和非 `dist-electron/**` diff check 通过；完整 build、全仓 lint/test、真实页面与真实下载沿用前序记录。

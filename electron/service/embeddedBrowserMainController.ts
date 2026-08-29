@@ -1700,16 +1700,28 @@ export function createEmbeddedBrowserMainController(
         }
       }
 
-      const mergeResult = await mergeEmbeddedBrowserResourceTracks({
-        audio: audioResource,
-        ffmpegPath: payload.ffmpegPath,
-        outputPath,
-        video: videoResource,
+      let ffmpegPath: string | undefined
+      const published = await publishStagedOutput({
+        fileName: path.basename(outputPath),
+        mimeType: 'video/mp4',
+        ownerTaskId: `mse-resource-merge-${randomUUID()}`,
+        purpose: 'mse-resource-merge',
+        store: getEmbeddedBrowserStagedOutputLeaseStore(),
+        targetPath: outputPath,
+        write: async (stagedPath) => {
+          const mergeResult = await mergeEmbeddedBrowserResourceTracks({
+            audio: audioResource,
+            ffmpegPath: payload.ffmpegPath,
+            outputPath: stagedPath,
+            video: videoResource,
+          })
+          ffmpegPath = mergeResult.ffmpegPath
+        },
       })
       return {
-        ffmpegPath: mergeResult.ffmpegPath,
+        ffmpegPath,
         ok: true,
-        outputPath: mergeResult.outputPath,
+        outputPath: published.outputPath,
       }
     } catch (error) {
       runtimeLogger.warn('embedded browser resource merge failed', {

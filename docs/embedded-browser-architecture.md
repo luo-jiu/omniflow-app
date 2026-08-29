@@ -131,6 +131,7 @@ library detail page
 - DASH 静态计划的 `DashTaskExecutor` 输出由 `publishStagedOutput` 写入 main-only owner-scoped lease，轨道下载和 ffmpeg 合并成功后才 claim 并发布到用户目标；失败或取消会释放 lease，不覆盖已有目标文件。该路径保留 renderer 原有最终 `outputPath` 响应，DASH live recorder 的工作目录和 stop/export 仍由 live session owner 单独管理。
 - DASH live 停止后的冻结轨道合并也经过同一 `publishStagedOutput` lease，只有 ffmpeg 成功并完成 claim 后才结束 live session、删除 recorder workdir；轮询期间的 active recorder workdir 和持续输出恢复仍由 live session owner 单独管理。
 - 已捕获资源转码也通过 `publishStagedOutput` 先写 lease，再发布到用户目标；输出格式、保存对话框和 renderer 最终 `outputPath` 契约保持不变。该入口仍未绑定 tab-scoped cancellation、crash quarantine 或 UploadManager handoff。
+- MSE 手动音视频合并也通过 `publishStagedOutput` 保护最终用户目标；MSE 自动完成/周期保存仍写入 embedded-browser download staging root 并发布 download/import 事件，两者交付语义保持分离。
 - 工具区当前承接两条 HLS 主线：
   - 网络 manifest：默认继续走 `ffmpeg` 直拉，但 direct 只接受 renderer 从当前 active resource snapshot 找到的精确 opaque `resourceId`；独立音视频轨分别提交 `videoResourceId / audioResourceId`，main 独立兑换两个 URL 和 protected header 集，再把 header 分别绑定到对应 ffmpeg 输入。若同时启用 fragment query，renderer 另提交 captured master 的 opaque `sourceResourceId`，main 校验两个 child 均属于该 master、恢复 `EXT-X-DEFINE` 变量，并为 video/audio 生成两条本地 plan 后合并。所选 variant/rendition 尚未被当前页面捕捉时会在启动保存/ffmpeg 前明确拒绝，不把父 manifest 的权限复用于任意子 URL。
   - blob / 页内内存 manifest：走 Electron main 本地 downloader，先生成 local workdir 和 rewritten local playlist，再交给 `ffmpeg`；wrapper 只有在进程零退出且目标文件存在、为普通文件并且非空时才报告成功。自动化在本机存在 ffmpeg/ffprobe 时生成极小 clear/AES-128 AAC HLS，以及 AES-128 加密 fMP4/H264 视频与独立 AES-128/AAC 音轨，验证单轨输出和双轨合并均得到带预期流、正时长的 MP4；二进制缺失的平台明确 skip 该 integration。
