@@ -945,7 +945,6 @@ export function parseDashManifest(input: {
   let previousPeriodDurationSeconds: number | undefined
   periods.forEach((period, periodIndex) => {
     const periodBaseUrls = resolveBaseUrls(baseUrls, period)
-    const periodDurationSeconds = parseIsoDurationSeconds(attribute(period, 'duration')) ?? durationSeconds
     const explicitPeriodStartSeconds = parseIsoDurationSeconds(attribute(period, 'start'))
     const periodStartSeconds = explicitPeriodStartSeconds
       ?? (periodIndex === 0
@@ -953,6 +952,17 @@ export function parseDashManifest(input: {
         : previousPeriodDurationSeconds === undefined
           ? undefined
           : previousPeriodStartSeconds + previousPeriodDurationSeconds)
+    const nextExplicitPeriodStartSeconds = periods
+      .slice(periodIndex + 1)
+      .map(nextPeriod => parseIsoDurationSeconds(attribute(nextPeriod, 'start')))
+      .find(nextStart => nextStart !== undefined)
+    const declaredPeriodDurationSeconds = parseIsoDurationSeconds(attribute(period, 'duration'))
+    const periodDurationSeconds = declaredPeriodDurationSeconds
+      ?? (periodStartSeconds !== undefined && nextExplicitPeriodStartSeconds !== undefined
+        ? Math.max(0, nextExplicitPeriodStartSeconds - periodStartSeconds)
+        : periodIndex === periods.length - 1 && periodStartSeconds !== undefined && durationSeconds !== undefined
+          ? Math.max(0, durationSeconds - periodStartSeconds)
+          : durationSeconds)
     if (periodStartSeconds !== undefined) previousPeriodStartSeconds = periodStartSeconds
     previousPeriodDurationSeconds = periodDurationSeconds
     const periodSegmentBase = firstChild(period, 'SegmentBase')

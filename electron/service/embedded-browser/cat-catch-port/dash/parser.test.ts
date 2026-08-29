@@ -632,6 +632,30 @@ describe('DASH parser', () => {
       'https://cdn.example/media/init-a.mp4',
       'https://cdn.example/media/init-b.mp4',
     ])
+
+    const inferredDurationRoot = node('MPD', { mediaPresentationDuration: 'PT6S' }, [
+      node('Period', { start: 'PT0S' }, [node('AdaptationSet', { contentType: 'video' }, [
+        node('Representation', { id: 'inferred-duration' }, [node('SegmentTemplate', {
+          duration: '1',
+          initialization: 'init.mp4',
+          media: 'segment-$Number$.m4s',
+        })]),
+      ])]),
+      node('Period', { start: 'PT2S' }, [node('AdaptationSet', { contentType: 'video' }, [
+        node('Representation', { id: 'inferred-duration' }, [node('SegmentTemplate', {
+          duration: '1',
+          initialization: 'init.mp4',
+          media: 'segment-$Number$.m4s',
+        })]),
+      ])]),
+    ])
+    const inferredDurationManifest = parseDashManifest({
+      baseUrl: 'https://cdn.example/media/manifest.mpd',
+      root: inferredDurationRoot,
+      text: '',
+    })
+    expect(inferredDurationManifest.unsupportedReasons).not.toContain('multi-period-not-expanded')
+    expect(inferredDurationManifest.representations[0]?.segmentCount).toBe(6)
   })
 
   it('dash.segment-list-boundary', () => {

@@ -1865,6 +1865,20 @@
 - legacy cleanup: 无；DASH unit 尚未 cutover，旧实现和 `legacy-cleanup.json` 继续保留。
 - validation: SIDX/parser/task 定向测试、TypeScript、scoped ESLint、metadata validator、sync runner 需在本切片提交前重跑；完整 build 仍因共享 `dist-electron/**` dirty 生成物暂不执行。
 
+## 2026-08-29: same target (DASH implicit Period duration)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本切片修正静态多 Period 缺省 `duration` 的推导。
+- reviewedThrough / portedThrough: 均保持 `null`；`dash.parser-planner` 与 `dash.timeline-download-merge` 继续 `porting`，`dash-engine` unit 仍开放。
+- change groups: `parser-planner`（Period timing inference）。
+- affected capability IDs: `dash.parser-planner`；metadata 保持 `7 units / 32 capabilities / 210 anchors / 100 cleanup entries / 213 planned IDs / 192 active refs`。
+- fixtures/tests: 扩展 `electron/service/embedded-browser/cat-catch-port/dash/parser.test.ts#dash.multi-period-merge`，根 MPD 只有总时长、两个 Period 只有 `start` 时，第一段时长取下一个显式 start 的差值，最后一段取 MPD 总时长减当前 start，并验证同身份轨道合并为 6 片；parser 定向 `14/14` 通过。
+- accepted differences: 明确声明的 Period `duration` 优先；缺省时只在 start/总时长可推导的范围内补齐，无法可靠推导的集合仍保持现有 multi-period rejection 语义。
+- excluded changes and reasons: 未改 SIDX、live polling、authority、renderer UI、HLS、资料库交付或旧实现清理。
+- unresolved gaps: 复杂/交错 Period 身份、跨层 SegmentInfo 数组语义、真实网站 live、renderer workflow 和 `dash-engine` 原子关闭仍待完成。
+- runtime changes: `parseDashManifest` 在计算每个 Period 计划前检查后续显式 start，并为末 Period 使用 MPD 总时长作为边界，避免把根总时长重复套用到每个 Period。
+- legacy cleanup: 无；DASH unit 尚未 cutover，旧实现和 `legacy-cleanup.json` 继续保留。
+- validation: parser/DASH 定向、TypeScript、scoped ESLint、metadata validator、sync runner 需在本切片提交前重跑；完整 build 仍因共享 `dist-electron/**` dirty 生成物暂不执行。
+
 ```markdown
 ## YYYY-MM-DD: <from> -> <to>
 
